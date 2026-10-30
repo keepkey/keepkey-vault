@@ -20,6 +20,7 @@ import { erc20Preview } from '../src/shared/erc20Preview'
 import { knownSpenderName } from '../src/shared/evm-known-spenders'
 import { recognizedSpender, recognizedTypedDataSpender } from '../src/bun/evm-signing-preview'
 import { decodeEIP712 } from '../src/bun/eip712-decoder'
+import { decodeMultiSend } from '../src/shared/safe-tx'
 import type { SigningRequestInfo } from '../src/shared/types'
 import cowPermit from './fixtures/spenders/usdc-permit-cow-vaultrelayer.json'
 import oneInchPermit2 from './fixtures/spenders/permit2-1inch-v6-unlimited.json'
@@ -203,5 +204,62 @@ describe('Desktop spender list', () => {
     expect(knownSpenderName(1, '0x9008D19f58AAbD9eD0D60971565AA8510560ab41')).toBeUndefined()
     const src = readFileSync(join(import.meta.dir, '../src/mainview/components/SwapDialog.tsx'), 'utf8')
     expect(src).not.toMatch(/9008d19f58aabd9ed0d60971565aa8510560ab41[^\n]*Vault Relayer/i)
+  })
+})
+
+// The two bounded USDC approvals the 2026-10-30 emulator legs A4/A4b sent
+// (emulator-legs-20261030/approvals): real MultiSend inner calls from Base
+// Safe transactions. Both read red "Unknown or unusual" before these
+// spenders were listed.
+describe('Base Safe batches: approvals to Aave V3 Pool and Uniswap SwapRouter02', () => {
+  const innerApprove = (file: string, spender: string) => {
+    const td = JSON.parse(readFileSync(join(import.meta.dir, `fixtures/safe/${file}.json`), 'utf8')).typedData
+    const calls = decodeMultiSend(td.message.data)!
+    const c = calls.find((x) => x.data.startsWith('0x095ea7b3') && x.data.slice(34, 74) === spender.slice(2))!
+    return { from: td.message.to, to: c.to, value: '0x0', chainId: td.domain.chainId, data: c.data }
+  }
+  const cases = [
+    ['base-multisend-usdc-aave', '0xa238dd80c259a72e81d7e4664a9801593f98d1c5', 'Aave V3 Pool', '19.989092'],
+    ['base-multisend-141-uniswap', '0x2626664c2603336e57b271c5c0b26f421741e481', 'Uniswap SwapRouter02', '5'],
+  ] as const
+  for (const [file, spender, name, amount] of cases) {
+    test(`${name}: named, bounded, "check before you sign"`, async () => {
+      const body = innerApprove(file, spender)
+      expect(body.chainId).toBe(8453)
+      const s = await preview(body)
+      expect(s.recognizedSpender).toBe(name)
+      const r = assessSigningRisk(s)!
+      expect(r.level).toBe('medium')
+      expect(r.tier).not.toBe('red')
+      expect(r.reasons[0].text).toBe(`Lets ${name} (${spender}) spend up to ${amount} USDC, now and later, without asking you again.`)
+    })
+  }
+
+  test('control: the same approve to an address Desktop does not list still reads red', async () => {
+    const body = innerApprove('base-multisend-usdc-aave', '0xa238dd80c259a72e81d7e4664a9801593f98d1c5')
+    const s = await preview(body, withSpender(body.data, STRANGER))
+    expect(s.recognizedSpender).toBeUndefined()
+    const r = assessSigningRisk(s)!
+    expect(r.level).toBe('high')
+    expect(r.tier).toBe('red')
+    expect(assessSigningRisk(await preview(body, withAmount(withSpender(body.data, STRANGER), MAX)))!.level).toBe('critical')
+  })
+
+  test('each deployment only on the chains its list names', () => {
+    for (const chainId of [1, 10, 137, 42161]) expect(knownSpenderName(chainId, '0x68b3465833fb72A70ecDF485E0e4C7bD8665Fc45')).toBe('Uniswap SwapRouter02')
+    expect(knownSpenderName(8453, '0x68b3465833fb72A70ecDF485E0e4C7bD8665Fc45')).toBeUndefined()
+    expect(knownSpenderName(1, '0x2626664c2603336E57B271c5C0b26F421741e481')).toBeUndefined()
+    expect(knownSpenderName(100, '0x68b3465833fb72A70ecDF485E0e4C7bD8665Fc45')).toBeUndefined()
+    for (const chainId of [10, 137, 42161, 43114]) expect(knownSpenderName(chainId, '0x794a61358D6845594F94dc1DB02A252b5b4814aD')).toBe('Aave V3 Pool')
+    expect(knownSpenderName(1, '0x87870Bca3F3fD6335C3F4ce8392D69350B4fA4E2')).toBe('Aave V3 Pool')
+    expect(knownSpenderName(1, '0x794a61358D6845594F94dc1DB02A252b5b4814aD')).toBeUndefined()
+    expect(knownSpenderName(8453, '0x87870Bca3F3fD6335C3F4ce8392D69350B4fA4E2')).toBeUndefined()
+  })
+
+  test('a plain USDC transfer straight to the Aave V3 Pool is still flagged as lost', async () => {
+    const body = innerApprove('base-multisend-usdc-aave', '0xa238dd80c259a72e81d7e4664a9801593f98d1c5')
+    const s = await preview(body, `0xa9059cbb${body.data.slice(10)}`)
+    expect(s.recognizedRecipient).toBe('Aave V3 Pool')
+    expect(assessSigningRisk(s)!.reasons.map((x) => x.text).join('\n')).toContain('Sends the tokens straight to Aave V3 Pool')
   })
 })

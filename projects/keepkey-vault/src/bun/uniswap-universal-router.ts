@@ -2,6 +2,7 @@ import { utils as ethersUtils } from 'ethers'
 
 import type { EffectFinding } from '../shared/transaction-effects'
 import { legacyUniswapReportFindings } from './uniswap-legacy-router'
+import type { UrSummary } from './uniswap-ur'
 
 const EXECUTE = new ethersUtils.Interface([
   'function execute(bytes commands, bytes[] inputs, uint256 deadline)',
@@ -532,6 +533,46 @@ export function decodeUniversalRouter(data: string, dialect: 'current' | 'v1' = 
     commands,
     complete: commands.every(command => command.decoded && !command.decodeError
       && ((command.id !== 0x21 && command.id !== 0x10 && command.id !== 0x14) || command.decoded.complete === true)),
+  }
+}
+
+/**
+ * A one-pool Uniswap v4 swap in the plan Uniswap's own SDK builds
+ * (SWAP_EXACT_IN_SINGLE or SWAP_EXACT_OUT_SINGLE, then SETTLE_ALL and
+ * TAKE_ALL, as the only command), read the way the device's UrSummary reads a
+ * swap. Only on UR 2.1.1 and 2.1.2, whose V4Router reads the minHopPriceX36
+ * layout this decoder uses. TAKE_ALL pays msg.sender, so the output goes to
+ * the signer. Host advice for the card: the device does not decode this plan
+ * (urPrecheck refuses it). Anything else returns null.
+ */
+export function v4SingleSwapSummary(chainId: number | undefined, router: string, data: string, value: bigint): UrSummary | null {
+  const version = officialUniversalRouterVersion(chainId, router)
+  if (version !== 'V2.1.1' && version !== 'V2.1.2') return null
+  let decoded: UniversalRouterDecode | undefined
+  try { decoded = decodeUniversalRouter(data) } catch { return null }
+  if (!decoded?.complete || decoded.signedExecution || decoded.commands.length !== 1) return null
+  const [command] = decoded.commands
+  if (command.id !== 0x10 || command.allowRevert) return null
+  const actions = (command.decoded as { actions: V4Action[] }).actions
+  if (actions.length !== 3 || ![0x06, 0x08].includes(actions[0].id) || actions[1].id !== 0x0c || actions[2].id !== 0x0f) return null
+  const [swap, settle, take] = actions.map((a) => a.decoded as any)
+  const exactIn = actions[0].id === 0x06
+  const tokenIn: string = swap.zeroForOne ? swap.poolKey.currency0 : swap.poolKey.currency1
+  const tokenOut: string = swap.zeroForOne ? swap.poolKey.currency1 : swap.poolKey.currency0
+  if (settle.currency !== tokenIn || take.currency !== tokenOut) return null
+  const cap = BigInt(settle.maxAmount), floor = BigInt(take.minAmount)
+  // Exact in: amountIn 0 is v4's "open delta", not an amount; SETTLE_ALL
+  // reverts over its cap. Exact out: the lower of the two caps binds.
+  const amountIn = exactIn ? BigInt(swap.amountIn) : [BigInt(swap.amountInMaximum), cap].reduce((a, b) => (a < b ? a : b))
+  const amountOut = exactIn ? [BigInt(swap.amountOutMinimum), floor].reduce((a, b) => (a > b ? a : b)) : BigInt(swap.amountOut)
+  if (amountIn === 0n || amountOut === 0n || (exactIn && cap < amountIn)) return null
+  const inIsEth = /^0x0{40}$/.test(tokenIn), outIsEth = /^0x0{40}$/.test(tokenOut)
+  // Native ETH in is settled from msg.value; an ERC-20 swap sends no coin.
+  if (inIsEth ? !(exactIn && value === amountIn) : value !== 0n) return null
+  return {
+    exactIn, inIsEth, outIsEth, tokenIn, tokenOut, amountIn, amountOut,
+    recipientIsSender: true, recipient: '0x0000000000000000000000000000000000000001',
+    hooks: /^0x0{40}$/.test(swap.poolKey.hooks) ? [] : [swap.poolKey.hooks],
   }
 }
 
