@@ -186,7 +186,8 @@ export function buildTypedDataReport(info: SigningRequestInfo): ClearSignReport 
   const d = info.typedDataDecoded
   if (!d) return undefined
   // The risk module's own reading, so the card and the verdict cannot disagree.
-  const shows = typedDataRecognition(info) === 'shows'
+  // 'unchecked': the device shows it all; only a payee was not checked here.
+  const shows = ['shows', 'unchecked'].includes(typedDataRecognition(info))
   const known = d.isKnownType && d.protocolIdentityVerified !== false
   const digest = d.hashes?.messageHash
     ? ethersUtils.keccak256(ethersUtils.concat(['0x1901', d.hashes.domainHash, d.hashes.messageHash])) : undefined
