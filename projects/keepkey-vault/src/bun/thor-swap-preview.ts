@@ -1,4 +1,5 @@
 import type { CalldataDecodedField } from '../shared/types'
+import { REVIEWED_EVM_TOKENS } from '../shared/reviewed-evm-tokens'
 
 const field = (name: string, value: string, type = 'string'): CalldataDecodedField => ({ name, value, type, format: 'raw' })
 const fixed = (raw: bigint, decimals: number): string => {
@@ -13,6 +14,30 @@ const thorLimit = (raw: string): bigint | null => {
   const exponent = Number(match[2] || '0')
   if (match[1].length + exponent > 20) return null
   return BigInt(match[1]) * 10n ** BigInt(exponent)
+}
+
+/** Input tokens named only at these exact contracts: Ethereum USDC and USDT,
+ *  and the reviewed Base and Arbitrum deployments. */
+const INPUT_TOKENS: Record<string, { symbol: string; decimals: number }> = {
+  '1:0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48': { symbol: 'USDC', decimals: 6 },
+  '1:0xdac17f958d2ee523a2206206994597c13d831ec7': { symbol: 'USDT', decimals: 6 },
+  ...REVIEWED_EVM_TOKENS,
+}
+const INPUT_CHAIN_NAMES: Record<number, string> = { 1: 'Ethereum', 8453: 'Base', 42161: 'Arbitrum' }
+
+/** Single-asset short codes the network expands in a memo (THORChain
+ *  common/asset.go ShortCode, thornode 55ac22c7; Mayachain common/asset.go
+ *  ShortCode, mayanode de97de72). The two networks use different codes. */
+const SHORT_CODES: Record<'THORChain' | 'Mayachain', Record<string, string>> = {
+  THORChain: {
+    r: 'THOR.RUNE', b: 'BTC.BTC', e: 'ETH.ETH', g: 'GAIA.ATOM', d: 'DOGE.DOGE', l: 'LTC.LTC', c: 'BCH.BCH',
+    a: 'AVAX.AVAX', s: 'BSC.BNB', f: 'BASE.ETH', tr: 'TRON.TRX', x: 'XRP.XRP', o: 'SOL.SOL', ta: 'TAO.TAO',
+    z: 'ZEC.ZEC', m: 'XMR.XMR', p: 'POL.POL', u: 'SUI.SUI', do: 'DOT.DOT', ad: 'ADA.ADA',
+  },
+  Mayachain: {
+    a: 'ARB.ETH', b: 'BTC.BTC', d: 'DASH.DASH', e: 'ETH.ETH', k: 'KUJI.KUJI', c: 'MAYA.CACAO',
+    r: 'THOR.RUNE', x: 'XRD.XRD', z: 'ZEC.ZEC',
+  },
 }
 
 /** Decode only canonical THORChain router ABI. A partial selector match must
@@ -43,24 +68,20 @@ export function thorDepositFields(data: string, chainId?: number, protocol: 'THO
   if (memo.includes('\0')) return null
 
   const native = /^0x0{40}$/i.test(asset)
-  const ethereumInputTokens: Record<string, string> = {
-    '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48': 'USDC',
-    '0xdac17f958d2ee523a2206206994597c13d831ec7': 'USDT',
-  }
-  const inputToken = !native && chainId === 1 ? ethereumInputTokens[asset.toLowerCase()] : undefined
+  const inputToken = !native && chainId && INPUT_CHAIN_NAMES[chainId] ? INPUT_TOKENS[`${chainId}:${asset.toLowerCase()}`] : undefined
   const inputUnit = native ? (chainId === 43114 ? 'AVAX' : chainId === 8453 ? 'ETH on Base' : chainId === 1 ? 'ETH'
     : chainId === 56 ? 'BNB' : chainId === 42161 ? 'ETH on Arbitrum' : 'native coin')
-    : inputToken ?? 'raw token units'
+    : inputToken?.symbol ?? 'raw token units'
   const amountText = native && (chainId === 1 || chainId === 43114 || chainId === 8453 || chainId === 56 || chainId === 42161)
     ? `${fixed(amount, 18)} ${inputUnit}` : inputToken
-      ? `${fixed(amount, 6)} ${inputToken}` : `${amount} ${inputUnit}`
+      ? `${fixed(amount, inputToken.decimals)} ${inputToken.symbol}` : `${amount} ${inputUnit}`
   const fields = [
     field('Protocol', `${protocol} Router`),
     field('Vault', vault, 'address'),
     field('Input asset', native ? inputUnit : asset, native ? 'string' : 'address'),
     field('Input amount', amountText),
   ]
-  if (inputToken) fields.push(field('Input token', `Verified Ethereum ${inputToken} contract`))
+  if (inputToken) fields.push(field('Input token', `Verified ${INPUT_CHAIN_NAMES[chainId!]} ${inputToken.symbol} contract`))
   else if (!native) fields.push(field('Input token warning', `UNVERIFIED input token contract ${asset}`))
   let expired = false
   if (words === 5) {
@@ -72,6 +93,7 @@ export function thorDepositFields(data: string, chainId?: number, protocol: 'THO
 
   const parts = memo.split(':')
   if (parts.length >= 3 && parts.length <= 6 && ['=', 's', 'SWAP'].includes(parts[0])) {
+    if (protocol !== 'Unverified') parts[1] = SHORT_CODES[protocol][parts[1]] ?? parts[1]
     const assetMatch = /^([A-Z0-9]+)\.([A-Z0-9]{1,12})(?:-.+)?$/.exec(parts[1])
     if (assetMatch) {
       const output = assetMatch[2]
@@ -85,10 +107,15 @@ export function thorDepositFields(data: string, chainId?: number, protocol: 'THO
         'BASE.USDC': '0x833589fcD6eDb6E08f4c7C32D4f71b54bdA02913',
       }
       const expectedContract = pinnedStablecoins[`${outputChain}.${output}`]?.toLowerCase()
+      // A ticker with no contract is the network's own pool asset: it matches
+      // the deepest pool with that ticker (THORChain docs, memo-length-reduction
+      // "Asset Abbreviations"), so it is not a token the memo can fake.
+      const suffix = /-(.+)$/.exec(parts[1])?.[1]
       const tokenWarning = outputContract
         ? expectedContract && outputContract.toLowerCase() === expectedContract
           ? null : `UNVERIFIED ${output} token contract ${outputContract}`
-        : expectedContract ? `UNVERIFIED ${output} token contract (none in memo)` : null
+        : expectedContract && suffix && !expectedContract.endsWith(suffix.toLowerCase())
+          ? `UNVERIFIED ${output} token contract (memo names -${suffix})` : null
       const destination = parts[2] || 'self'
       const rawLimit = parts[3] ?? ''
       const streamMatch = /^(.*)\/(\d{1,5})\/(\d{1,5})$/.exec(rawLimit)
