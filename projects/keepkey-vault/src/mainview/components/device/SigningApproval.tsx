@@ -1122,13 +1122,16 @@ export function SigningApproval({ request, phase, onApprove, onReject, onCancel 
 		!hasCalldata && !request.typedDataDecoded && !request.ethMessageDecoded && !request.solanaMessageDecoded && !isSolanaRequest
 	const blindSigningConsentRequired = !!request.requiresBlindSigningConsent
 	const solanaPlainText = isSolanaSignMessage && request.solanaMessageDecoded?.plainText === true
-	const advancedModeRequired =
+	// A request this firmware refuses outright: AdvancedMode would not help,
+	// so it is never offered, and Approve stays off (the risk bar says why).
+	const firmwareCannotSign = !!request.firmwareCannotSign
+	const advancedModeRequired = !firmwareCannotSign && (
 		(isSolanaSignMessage && !solanaPlainText)
 		|| !!request.requiresAdvancedMode
-		|| (fwSupportsBlindSignGate && !!request.needsBlindSigning && !blindSigningConsentRequired)
+		|| (fwSupportsBlindSignGate && !!request.needsBlindSigning && !blindSigningConsentRequired))
 	const advancedModeBlocked = advancedModeRequired && !advancedModeEnabled
 	const blindSigningConsentBlocked = blindSigningConsentRequired && !blindSigningConsentGranted
-	const approveDisabled = enablingPolicy || advancedModeBlocked || blindSigningConsentBlocked
+	const approveDisabled = enablingPolicy || firmwareCannotSign || advancedModeBlocked || blindSigningConsentBlocked
 
 	const [showAdvancedConfirm, setShowAdvancedConfirm] = useState(false)
 
@@ -1424,7 +1427,7 @@ export function SigningApproval({ request, phase, onApprove, onReject, onCancel 
 						<Text fontSize="2xs" color="var(--rose)">{request.tronDecoded.warning}</Text>
 					</VStack>
 				)}
-				{request.method === '/tron/sign-transaction' && !request.tronDecoded && (
+				{request.method === '/tron/sign-transaction' && !request.tronDecoded && !request.tronCallShown && (
 					<Box w="100%" bg="rgba(239,68,68,0.15)" border="1px solid rgba(239,68,68,0.6)" borderRadius="lg" px="3" py="2">
 						<Text fontSize="xs" fontWeight="700" color="var(--rose)">TRON transaction cannot be verified from signed bytes</Text>
 						<Text fontSize="2xs" color="kk.textSecondary">Amount and destination in the request are untrusted. The device requires Advanced Mode for unsupported TRON payloads.</Text>
@@ -1567,6 +1570,8 @@ export function SigningApproval({ request, phase, onApprove, onReject, onCancel 
 					>
 						{enablingPolicy
 							? t("signing.advancedModeConfirmOnDevice", "Confirm on your KeepKey, then re-enter your PIN")
+							: firmwareCannotSign
+							? t("signing.firmwareCannotSign", "This KeepKey firmware cannot sign this")
 							: advancedModeBlocked
 							? t("signing.turnOnAdvancedMode", "Turn on Advanced Mode")
 							: blindSigningConsentBlocked

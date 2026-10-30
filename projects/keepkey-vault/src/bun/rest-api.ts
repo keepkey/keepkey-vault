@@ -8,18 +8,20 @@ import { WIPE_BUSY_MESSAGE, WIPE_REPLUG_PENDING_MESSAGE } from './device-wipe'
 import { DEVICE_LOCKED_MESSAGE, restRequest } from './device-gate'
 import { WalletCacheSession, WalletSessionChangedError, WalletSessionMap } from './wallet-session-cache'
 import type { SigningRequestInfo, ApiLogEntry, EIP712DecodedInfo } from '../shared/types'
-import { tronCallPreview, tronPreview } from './tron-preview'
+import { applyTronSigningPreview } from './tron-preview'
 import { deviceErrorMessage } from '../shared/device-error'
 import type { ClearSignEvent } from '../shared/types'
 import { createHash } from 'crypto'
 import { decodeEIP712 } from './eip712-decoder'
 import { addSeaportCreatorFee } from './seaport-creator-fee'
-import { evmPriorityFee, normalizeEvmChainId, recognizedTypedDataSpender, typedDataNativelyReviewed } from './evm-signing-preview'
+import { attachErc7730TypedDefinition, evmPriorityFee, evmQuantity, normalizeEvmChainId, recognizedTypedDataSpender, applyTypedDataSigningGate } from './evm-signing-preview'
 import { buildEvmReportForTx, buildTypedDataReport, evmSigningVerdict, prepareEvmTxSigningInfo, withoutErc7730Description } from './evm-presign-report'
 import { describeErc7730Call } from './erc7730-describe'
 import { signWithErc7730Fallback } from './erc7730-resolver'
+import { signTypedDataWithFeatures } from './typed-data-sign'
 import { CHAINS, isChainSupported, hiveRolePath, evmChainLabel } from '../shared/chains'
 import { getEvmSimulationEndpoint } from './evm-simulation-config'
+import { getEvmGasPrice } from './evm-rpc'
 import { addContractFacts } from './contract-facts'
 import { versionCompare } from '../shared/firmware-versions'
 import { isBitcoinOnlyVariant, DEFAULT_AUTO_LOCK_MS } from '../shared/flags'
@@ -1726,17 +1728,13 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
                 signingInfo.typedDataDecoded = decodeEIP712(preview.typedData, preview.address)
                 await addSeaportCreatorFee(signingInfo)
                 signingInfo.recognizedSpender = recognizedTypedDataSpender(signingInfo.typedDataDecoded, signingInfo.chainId)
-                // hdwallet streams every document; the device reviews x402 and
-                // (7.16+) a canonical Permit2 PermitSingle natively. Anything
-                // else ends up hash-signed, which needs AdvancedMode.
-                const native = signingInfo.typedDataDecoded.operationName === 'x402 EIP-3009 Payment'
-                  || typedDataNativelyReviewed(preview.typedData, engine.getDeviceState().firmwareVersion)
-                if (!native) {
-                  signingInfo.needsBlindSigning = true
-                  signingInfo.requiresAdvancedMode = true
-                } else {
-                  signingInfo.needsBlindSigning = false
-                }
+                // Same gate as WalletConnect eth_signTypedData_v4.
+                applyTypedDataSigningGate(signingInfo, preview.typedData, engine.getDeviceState().firmwareVersion)
+                // 7.17+: the ClearSign service's definition for this document,
+                // fetched and checked now so the card and report describe it;
+                // the sign handler sends exactly this one.
+                const { firmwareVersion, capabilities } = engine.getDeviceState()
+                await attachErc7730TypedDefinition(signingInfo, preview.typedData, firmwareVersion, capabilities, preview.address)
               }
             } else if (path === '/eth/sign') {
               // EIP-191 personal_sign: body is { address, addressNList, message }.
@@ -1749,19 +1747,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             } else if (path === '/tron/sign-transaction') {
               // Only raw_tx is signed. The optional to_address/amount side
               // channel is untrusted, even if it looks like a useful preview.
-              signingInfo.chain = 'tron'
-              signingInfo.tronDecoded = tronPreview(preview.raw_tx) ?? undefined
-              if (signingInfo.tronDecoded) {
-                signingInfo.from = signingInfo.tronDecoded.owner
-                signingInfo.to = signingInfo.tronDecoded.to
-                signingInfo.value = signingInfo.tronDecoded.amount
-              } else {
-                signingInfo.needsBlindSigning = true
-                signingInfo.requiresAdvancedMode = true
-                // The device shows this as raw data; say what it does here.
-                signingInfo.tronCall = tronCallPreview(preview.raw_tx) ?? undefined
-                if (signingInfo.tronCall) signingInfo.from = signingInfo.tronCall.owner
-              }
+              applyTronSigningPreview(signingInfo, preview.raw_tx, signingInfo.firmwareVersion)
             } else if (path === '/solana/sign-message') {
               const raw = typeof preview.message === 'string' ? preview.message : ''
               const messageEncoding = /^[0-9a-fA-F]+$/.test(raw) ? 'hex' : 'base64'
@@ -2009,6 +1995,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
               if (signingInfo.erc7730Description && account !== signingInfo.from) {
                 const described = describeErc7730Call(signingInfo.erc7730!.definitions[0].envelope, {
                   chainId: signingInfo.chainId as number, to: preview.to, data: preview.data, value: preview.value,
+                  firmwareVersion: engine.getDeviceState().firmwareVersion,
                 })
                 if (described) signingInfo.erc7730Description = described
                 else delete signingInfo.erc7730Description
@@ -2110,6 +2097,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
                     typedData: probeCheckBody.typedData,
                     chainId: Number(signingInfo.chainId || 1),
                     hostDecoded: Boolean(signingInfo.typedDataDecoded),
+                    ...(report?.descriptor.source === 'erc7730' ? { source: 'erc7730' as const } : {}),
                   })
               : path === '/solana/sign-transaction' && typeof probeCheckBody?.raw_tx === 'string'
                 ? (() => {
@@ -2781,13 +2769,13 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             value: body.value || '0x0',
             data: body.data || '0x',
             nonce: body.nonce || '0x0',
-            gasLimit: body.gas || body.gasLimit || '0x5208',
+            gasLimit: evmQuantity(body.gas || body.gasLimit || '0x5208'),
             chainId,
           }
 
           // EIP-1559 fields
           if (body.maxFeePerGas || body.max_fee_per_gas) {
-            msg.maxFeePerGas = body.maxFeePerGas || body.max_fee_per_gas
+            msg.maxFeePerGas = evmQuantity(body.maxFeePerGas || body.max_fee_per_gas)
             // Canonical RLP requires a zero priority fee to be the EMPTY string, not
             // a 0x00 byte. hdwallet does not strip the EIP-1559 fee fields, so a
             // literal '0x0' reaches the device as [0x00], which the firmware hashes
@@ -2795,8 +2783,17 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             // unbroadcastable (see keepkey-firmware eip1559-zero-priority fix). Send
             // empty for a zero/absent priority fee.
             msg.maxPriorityFeePerGas = evmPriorityFee(body.maxPriorityFeePerGas || body.max_priority_fee_per_gas)
+          } else if (body.gasPrice || body.gas_price) {
+            msg.gasPrice = evmQuantity(body.gasPrice || body.gas_price)
           } else {
-            msg.gasPrice = body.gasPrice || body.gas_price || '0x0'
+            // No fee: dapps leave it to the wallet. Pioneer's gas price for this
+            // chain, or fail; never sign a made-up or zero fee.
+            let wei: bigint | undefined
+            try { wei = await getEvmGasPrice(`eip155:${chainId}`) } catch (e: any) {
+              console.warn(`[REST] gas price lookup failed for chain ${chainId}:`, e?.message || e)
+            }
+            if (!wei || wei <= 0n) throw new HttpError(502, `The request has no fee and the gas price for chain ${chainId} is unavailable. Nothing was signed; try again.`)
+            msg.gasPrice = `0x${wei.toString(16)}`
           }
 
           // A caller's ERC-7730 catalog is never sent: it may be runtime tier,
@@ -2823,7 +2820,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             const erc7730 = activeSigningInfo?.erc7730
             if (!certified && !erc7730 && supportsCertifiedClearSign(firmwareVersion)) {
               try {
-                certified = await resolveEvmSchema(msg.chainId, msg.to, msg.data, true, firmwareVersion)
+                certified = await resolveEvmSchema(msg.chainId, msg.to, msg.data, true, firmwareVersion, msg.value)
               } catch (error: any) {
                 // A reviewed certified call must not lose authentication when
                 // its service or artifact is unavailable.
@@ -3072,10 +3069,27 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           }
 
           try {
-            const params = await withPermit2SpenderName({ addressNList, typedData: body.typedData }, engine.getDeviceState().firmwareVersion)
+            const named = await withPermit2SpenderName({ addressNList, typedData: body.typedData }, engine.getDeviceState().firmwareVersion)
+            // Exactly the definition the card was built on (the signing gate),
+            // never one fetched after approval; never beside a Permit2 name.
+            const erc7730 = named.txMetadata ? undefined : activeSigningInfo?.erc7730
+            const params = erc7730 ? { ...named, erc7730 } : named
             const typedChainId = normalizeEvmChainId(body.typedData?.domain?.chainId)
             const chain = typedChainId ? evmChainLabel(typedChainId)?.name ?? `EVM chain ${typedChainId}` : 'Ethereum'
-            const result = await emuWrap(() => wallet.ethSignTypedData(params), { operation: 'ethSignTypedData', chain })
+            let signedParams: any = params
+            const result = await emuWrap(
+              () => signWithErc7730Fallback(params, (p: any) => { signedParams = p; return signTypedDataWithFeatures(wallet, p) }, () => {
+                // The device refused the definition: it streams the document
+                // instead (7.15+ shows every value). Report and record that.
+                if (activeSigningInfo) {
+                  const { erc7730: _refused, erc7730Description: _shown, ...plain } = activeSigningInfo
+                  activeSigningInfo = { ...plain, clearSignReport: buildTypedDataReport(plain) }
+                }
+                if (activeClearSignObservationId) refuseClearSignObservationDefinition(activeClearSignObservationId, activeSigningInfo?.clearSignReport?.protectionLevel)
+              }, '[REST] ethSignTypedData'),
+              { operation: 'ethSignTypedData', chain },
+            )
+            if (activeClearSignObservationId && signedParams.erc7730) authenticateClearSignObservation(activeClearSignObservationId, 'erc7730')
             if (activeClearSignObservationId) finalizeClearSignObservation(activeClearSignObservationId, 'signed')
             return json(result)
           } catch (err: any) {

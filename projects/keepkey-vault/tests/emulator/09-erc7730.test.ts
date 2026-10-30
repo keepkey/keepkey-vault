@@ -30,7 +30,7 @@
  * it for this process only (the product default stays production). Each case
  * is also signed blind with AdvancedMode on, and the two signatures must match.
  * Typed data is not run: Desktop never attaches a typed-data definition on 7.16
- * (ERC7730_TYPED_DATA_SUPPORTED).
+ * (supportsErc7730TypedData; 7.17 typed data is 11-erc7730-typed-717).
  */
 import { dlopen, FFIType, ptr } from 'bun:ffi'
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs'
@@ -477,7 +477,7 @@ type DesktopModules = {
   prepare: typeof import('../../src/bun/evm-presign-report').prepareEvmTxSigningInfo
   resolver: typeof import('../../src/bun/erc7730-resolver')
   skipReason: typeof import('../../src/shared/erc7730-support').erc7730CalldataSkipReason
-  typedDataSupported: boolean
+  typedDataSupported: (firmwareVersion: string, capabilities: number[]) => boolean
 }
 let desktopMods: DesktopModules | null = null
 let firmwareVersion = ''
@@ -549,7 +549,7 @@ describe.skipIf(!fixture || MODE !== 'desktop')('ERC-7730 replay through Desktop
       prepare: (await import('../../src/bun/evm-presign-report')).prepareEvmTxSigningInfo,
       resolver: await import('../../src/bun/erc7730-resolver'),
       skipReason: support.erc7730CalldataSkipReason,
-      typedDataSupported: support.ERC7730_TYPED_DATA_SUPPORTED,
+      typedDataSupported: support.supportsErc7730TypedData,
     }
     desktopMods.resolver.forgetRefusedErc7730Definitions()
     await boot()
@@ -573,8 +573,8 @@ describe.skipIf(!fixture || MODE !== 'desktop')('ERC-7730 replay through Desktop
   })
 
   test('typed data: Desktop attaches no definition on 7.16', () => {
-    expect(desktopMods?.typedDataSupported).toBe(false)
-    if (eip712Cases.length) console.log(`  ${eip712Cases.length} EIP-712 cases not run: ERC7730_TYPED_DATA_SUPPORTED is off`)
+    expect(desktopMods?.typedDataSupported(firmwareVersion, capabilities)).toBe(false)
+    if (eip712Cases.length) console.log(`  ${eip712Cases.length} EIP-712 cases not run: typed-data definitions start at 7.17.0`)
   })
 
   for (const fx of calldataCases) {

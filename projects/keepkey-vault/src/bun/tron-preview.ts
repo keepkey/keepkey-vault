@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
 import protobuf from 'protobufjs/light'
 import bs58 from 'bs58'
-import type { TronCallPreview, TronTxPreview } from '../shared/types'
+import type { SigningRequestInfo, TronCallPreview, TronTxPreview } from '../shared/types'
 import { versionCompare } from '../shared/firmware-versions'
 
 type Value = { wire: number; bytes?: Buffer; number?: bigint }
@@ -100,21 +100,110 @@ const TRON_FIRMWARE_TOKENS = new Set([
   'TXDk8mbtRbXeYuMNS83CfKPaYYT8XWv9Hz', // USDD 2.0
   'TNUC9Qb1rRpS5CbWLmNMxXBjyFoydXjWFR', // WTRX
 ])
-/** First firmware that parses TRON raw_data. 7.14.x blind-signs every TronSignTx. */
-const TRON_PARSER_MIN_FW = '7.16.0'
+/** First firmware that parses TRON raw_data (tron_parseRawTx, in every 7.15
+ *  build). 7.14.x blind-signs every TronSignTx behind AdvancedMode. */
+const TRON_PARSER_MIN_FW = '7.15.0'
+/** From 7.16 a TRC-20 outside the table is "TRON Blind Sign" behind
+ *  AdvancedMode. The 7.15 builds disagree (release/7.15 shows every TRC-20
+ *  transfer, 7.15-b6 gates it like 7.16), so 7.15 does not force AdvancedMode. */
+const TRON_TOKEN_TABLE_MIN_FW = '7.16.0'
+/** First firmware that also shows a TRC-20 approve of a table token, TRX
+ *  staking (FreezeBalanceV2 / UnfreezeBalanceV2) and SR votes (tron.c). */
+const TRON_STAKE_VOTE_MIN_FW = '7.17.0'
+const INT64_MAX = (1n << 63n) - 1n
+/** Firmware TRON_MAX_VOTES. */
+const TRON_MAX_VOTES = 30
 
-/** The device shows this transaction from its own parse: a plain TRX transfer,
- *  or a TRC-20 transfer of a token in its table. Anything else (another
- *  contract, a TRC-20 outside the table, older firmware, an unknown version)
- *  is "TRON Blind Sign" behind AdvancedMode. */
+/** 7.17 tron_parseContract for an approve, a stake, an unstake or a vote:
+ *  true only for what it reads in full. Anything else is TRON_TX_UNVERIFIED. */
+function tronApproveStakeVoteParsed(hex: string): boolean {
+  try {
+    if (!/^(?:0x)?(?:[0-9a-fA-F]{2})+$/.test(hex)) return false
+    const top = fields(Buffer.from(hex.replace(/^0x/i, ''), 'hex'), { 1: 2, 3: 0, 4: 2, 8: 0, 10: 2, 11: 2, 14: 0, 18: 0 })
+    const contract = fields(bytes(top, 11), { 1: 0, 2: 2 })
+    const kind = Number(number(contract, 1))
+    const any = fields(bytes(contract, 2), { 1: 2, 2: 2 })
+    const url = bytes(any, 1).toString('utf8')
+    const payload = bytes(any, 2)
+    if (kind === 31 && url.endsWith('/protocol.TriggerSmartContract')) {
+      const t = fields(payload, { 1: 2, 2: 2, 3: 0, 4: 2 })
+      address(bytes(t, 1))
+      const call = bytes(t, 4)
+      return (t.get(3)?.number ?? 0n) === 0n && call.length === 68 && call.subarray(0, 4).toString('hex') === '095ea7b3' &&
+        call.subarray(4, 15).every(v => v === 0) && [0, 0x41].includes(call[15]) &&
+        TRON_FIRMWARE_TOKENS.has(address(bytes(t, 2)))
+    }
+    if ((kind === 54 && url.endsWith('/protocol.FreezeBalanceV2Contract')) ||
+        (kind === 55 && url.endsWith('/protocol.UnfreezeBalanceV2Contract'))) {
+      const f = fields(payload, { 1: 2, 2: 0, 3: 0 })
+      address(bytes(f, 1))
+      const amount = number(f, 2)
+      return amount > 0n && amount <= INT64_MAX && (f.get(3)?.number ?? 0n) <= 2n
+    }
+    if (kind === 4 && url.endsWith('/protocol.VoteWitnessContract')) {
+      // votes is repeated, so it is read here rather than by fields().
+      const reader = new protobuf.Reader(new Uint8Array(payload))
+      let owner = false, votes = 0
+      while (reader.pos < reader.len) {
+        const tag = reader.uint32()
+        if (tag === 10 && !owner) {
+          address(Buffer.from(reader.bytes()))
+          owner = true
+        } else if (tag === 18 && votes < TRON_MAX_VOTES) {
+          const v = fields(Buffer.from(reader.bytes()), { 1: 2, 2: 0 })
+          address(bytes(v, 1))
+          const count = number(v, 2)
+          if (count === 0n || count > INT64_MAX) return false
+          votes++
+        } else return false
+      }
+      return owner && votes > 0
+    }
+    return false
+  } catch { return false }
+}
+
+/** The device shows this transaction from its own parse without AdvancedMode:
+ *  a plain TRX transfer, or a TRC-20 transfer of a token in its table (any
+ *  TRC-20 on 7.15, see above); from 7.17.0 also a TRC-20 approve of a table
+ *  token, a FreezeBalanceV2 / UnfreezeBalanceV2 and a VoteWitness. Anything
+ *  else (another contract, a TRC-20 outside the 7.16 table, a multisig
+ *  Permission_id, 7.14, an unknown version) needs AdvancedMode. */
 export function tronShownNatively(rawTx: unknown, firmwareVersion: string | undefined): boolean {
-  if (!firmwareVersion || versionCompare(firmwareVersion.replace(/^v/, ''), TRON_PARSER_MIN_FW) < 0) return false
+  const fw = firmwareVersion?.replace(/^v/, '')
+  if (!fw || versionCompare(fw, TRON_PARSER_MIN_FW) < 0) return false
   const hex = rawTx instanceof Uint8Array ? Buffer.from(rawTx).toString('hex') : rawTx
   if (typeof hex !== 'string') return false
   try {
     const { kind, tokenContract } = decodeTronTransfer(hex)
     return kind === 'TRX transfer' || TRON_FIRMWARE_TOKENS.has(tokenContract!)
-  } catch { return false }
+      || versionCompare(fw, TRON_TOKEN_TABLE_MIN_FW) < 0
+  } catch {
+    return versionCompare(fw, TRON_STAKE_VOTE_MIN_FW) >= 0 && tronApproveStakeVoteParsed(hex)
+  }
+}
+
+/** The REST /tron/sign-transaction approval card: what this computer reads
+ *  from the signed raw_data bytes, and the AdvancedMode gate from what this
+ *  firmware reads (tronShownNatively). A transfer decoded here is not always
+ *  one the device shows: 7.14 blind-signs every TRON transaction. */
+export function applyTronSigningPreview(info: SigningRequestInfo, rawTx: unknown, firmwareVersion: string | undefined): void {
+  info.chain = 'tron'
+  info.tronDecoded = tronPreview(rawTx) ?? undefined
+  if (info.tronDecoded) {
+    info.from = info.tronDecoded.owner
+    info.to = info.tronDecoded.to
+    info.value = info.tronDecoded.amount
+  } else {
+    // Say what it does here. 7.17+ shows an approve of a table token,
+    // staking and votes itself; anything else is raw data on the device.
+    info.tronCall = tronCallPreview(rawTx) ?? undefined
+    if (info.tronCall) info.from = info.tronCall.owner
+  }
+  const shown = tronShownNatively(rawTx, firmwareVersion)
+  info.tronCallShown = !!info.tronCall && shown
+  info.needsBlindSigning = !shown
+  info.requiresAdvancedMode = !shown
 }
 
 /** Fail closed like firmware tron_parseRawTx. Only a single plain TRX or

@@ -13,7 +13,7 @@ import bs58 from 'bs58'
 import { buildSolanaDecodedInfo } from '../src/bun/solana-clearsign'
 import { JUPITER_V6, decodeJupiterSwap } from '../src/bun/solana-jupiter'
 import { parseSolanaMessage, parseSolanaTx, solanaMessageSlice } from '../src/bun/solana-tx'
-import { tronCallPreview, tronPreview } from '../src/bun/tron-preview'
+import { tronCallPreview, tronPreview, tronShownNatively } from '../src/bun/tron-preview'
 import { WalletConnectManager } from '../src/bun/walletconnect'
 import { assessSigningRisk } from '../src/shared/clearsign-risk'
 import type { SigningRequestInfo, SolanaTxDecodedInfo } from '../src/shared/types'
@@ -184,6 +184,64 @@ describe('Jupiter swaps (v0, lookup tables) read on this computer', () => {
   })
 })
 
+// The Jupiter route above starts with System AdvanceNonceAccount (a durable
+// nonce, emulator leg S4 2026-10-30). Its authority is the signing account,
+// so it is a normal request: it read red "a System Program action KeepKey
+// does not recognize" before this instruction was decoded.
+describe('durable nonce (System AdvanceNonceAccount)', () => {
+  const NONCE = 'BRuqUm4Ed5HpaAqfmBWD26x9J1FgKLVD6QCn1iexmEiM'
+  const withAuthority = (decoded: SolanaTxDecodedInfo, authority: string): SolanaTxDecodedInfo => ({
+    ...decoded,
+    instructions: decoded.instructions.map((i, n) => n !== 0 ? i
+      : { ...i, accounts: i.accounts.map((a) => a.label === 'nonceAuthority' ? { ...a, pubkey: authority } : a) }),
+  })
+
+  test('controlled by the signing account: decoded and calm, the swap sets the tone', async () => {
+    const { fx, decoded } = await solana('jupiter-route.json')
+    const user = fx.accountKeys[0]
+    const ix = decoded.instructions[0]
+    expect([ix.status, ix.programName, ix.instructionName]).toEqual(['known', 'System Program', 'advanceNonceAccount'])
+    expect(ix.accounts.map((a) => [a.label, a.pubkey])).toEqual([
+      ['nonceAccount', NONCE], ['recentBlockhashesSysvar', 'SysvarRecentB1ockHashes11111111111111111111'], ['nonceAuthority', user],
+    ])
+    const r = assessSigningRisk(solanaRequest(decoded, user))!
+    const t = text(r)
+    expect(t).toContain(`low: Uses durable nonce account ${NONCE.slice(0, 4)}…${NONCE.slice(-4)}, which your own account controls: this transaction does not expire until it is sent or you advance that nonce.`)
+    expect(t).not.toContain('does not recognize')
+    expect(r.tier).toBe('yellow')
+    expect(r.level).toBe('medium')
+  })
+
+  test('CONTROL: controlled by another account, or unchecked, keeps the warning', async () => {
+    const { fx, decoded } = await solana('jupiter-route.json')
+    const user = fx.accountKeys[0]
+    const other = fx.accountKeys[1]
+    const r = assessSigningRisk(solanaRequest(withAuthority(decoded, other), user))!
+    expect(r.tier).toBe('red')
+    expect(text(r)).toContain(`high: Uses durable nonce account ${NONCE}, controlled by ${other}, which is NOT the account signing this (${user}).`)
+    // No signing account to compare with (no from, no swap naming one).
+    const nonceOnly = { ...decoded, instructions: decoded.instructions.slice(0, 1) }
+    const unknown = assessSigningRisk({ ...solanaRequest(nonceOnly, user), from: undefined } as SigningRequestInfo)!
+    expect(text(unknown)).toContain('this computer could not check who can cancel it')
+    expect(unknown.tier).toBe('red')
+  })
+
+  // The browser extension's preview (/solana/decode-transaction) passes no
+  // `from`. The swap's userTransferAuthority comes from the same bytes as the
+  // nonce authority, so it cannot vouch that the user controls the nonce.
+  test('CONTROL: no signing account, and the swap names the nonce authority as its user', async () => {
+    const { fx, decoded } = await solana('jupiter-route.json')
+    const other = fx.accountKeys[1]
+    const forged = withAuthority(decoded, other)
+    forged.instructions = forged.instructions.map((i) => i.programId !== 'JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4' ? i
+      : { ...i, accounts: i.accounts.map((a) => a.label === 'userTransferAuthority' ? { ...a, pubkey: other } : a) })
+    expect(forged.instructions.some((i) => i.accounts.some((a) => a.label === 'userTransferAuthority' && a.pubkey === other))).toBe(true)
+    const r = assessSigningRisk({ ...solanaRequest(forged, other), from: undefined } as SigningRequestInfo)!
+    expect(text(r)).not.toContain('which your own account controls')
+    expect(text(r)).toContain(`high: Uses durable nonce account ${NONCE}. This transaction does not expire, and this computer could not check who can cancel it.`)
+  })
+})
+
 describe('WalletConnect reads the same accounts as REST', () => {
   test('a Jupiter v0 swap over WalletConnect resolves its lookup tables and reads yellow', async () => {
     const fx = await load('jupiter-route-v2.json') as SolanaFixture & { rawTx: string; slot: number }
@@ -330,6 +388,53 @@ describe('TRON calls the firmware shows only as raw data', () => {
     const other = assess(hex.replace('cef95229', 'cef95228'))
     expect(other.tier).toBe('red')
     expect(text(other)).toContain('Calls the SunSwap Smart Router (TJ4NNy8xZEqsowCBhLvZ45LCqPdGjkET5j)')
+  })
+})
+
+describe('TRON calls 7.17 shows itself: approve of a table token, staking, votes', () => {
+  // As REST builds the card (rest-api /tron/sign-transaction).
+  const tron = async (name: string, firmwareVersion: string) => {
+    const fx = await load('tron-real-transactions.json')
+    const hex = fx.transactions[name].raw_data_hex as string
+    const tronCall = tronCallPreview(hex) ?? undefined
+    const req = {
+      id: 't', method: '/tron/sign-transaction', appName: 'test', firmwareVersion, tronCall,
+      tronCallShown: !!tronCall && tronShownNatively(hex, firmwareVersion),
+    } as SigningRequestInfo
+    return { req, risk: assessSigningRisk(req)! }
+  }
+
+  test('staking and votes: shown on the device, calm, no "not on this firmware" line', async () => {
+    for (const name of ['freeze-balance-v2', 'unfreeze-balance-v2', 'vote-witness']) {
+      const { req, risk } = await tron(name, '7.17.0')
+      expect([name, req.tronCallShown]).toEqual([name, true])
+      expect([name, risk.tier]).toEqual([name, 'green'])
+      expect(text(risk)).not.toContain('cannot show')
+      expect(text(risk)).toContain('low: Your KeepKey shows this from the signed transaction; check it there.')
+      // 7.16.0: the same bytes are raw data behind AdvancedMode.
+      const old = await tron(name, '7.16.0')
+      expect(old.req.tronCallShown).toBe(false)
+      expect(text(old.risk)).toContain('cannot show TRON staking and voting on the device yet')
+    }
+  })
+
+  test('a USDT approve keeps its spender verdict; only the firmware line changes', async () => {
+    const scam = await tron('approve-usdt-unlimited-unknown-spender', '7.17.0')
+    expect(scam.req.tronCallShown).toBe(true)
+    expect(scam.risk.level).toBe('critical') // not normal, whatever the device shows
+    expect(text(scam.risk)).toContain('Sites that steal USDT ask for exactly this approval')
+    expect(text(scam.risk)).not.toContain('cannot show TRC-20 approvals')
+    const sunswap = await tron('approve-usdt-unlimited-sunswap-permit2', '7.17.0')
+    expect(sunswap.risk.level).toBe('medium')
+    expect(text(sunswap.risk)).toContain('Standard SunSwap setup')
+  })
+
+  test('withdraw, delegation and SunSwap stay raw data on 7.17', async () => {
+    for (const name of ['withdraw-expire-unfreeze', 'delegate-resource', 'sunswap-smart-router-swap']) {
+      const { req, risk } = await tron(name, '7.17.0')
+      expect([name, req.tronCallShown]).toEqual([name, false])
+      expect(text(risk)).toContain('on the device yet')
+    }
   })
 })
 

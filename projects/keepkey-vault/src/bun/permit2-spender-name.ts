@@ -1,7 +1,6 @@
-import { CERTIFIED_METADATA_KEY_ID, findEvmNameRecord, findReviewedUniversalRouter, isCertifiedEvmMetadata, reviewedSwapTokens, UR_SELECTORS } from './evm-certified-schema'
-import { findCertifiedUniswapSwap } from './evm-schema-registry'
+import { findEvmNameRecord, findReviewedUniversalRouter, reviewedSwapTokens, UR_SELECTORS } from './evm-certified-schema'
+import { findCertifiedEvmName, findCertifiedUniswapSwap } from './evm-schema-registry'
 import { supportsCertifiedClearSign } from './solana-certified-policy'
-import { DEFAULT_CLEARSIGN_SERVICE_URL } from './solana-certified-registry'
 
 const PERMIT2 = '0x000000000022d473030f116ddee9f6b43ac78ba3'
 
@@ -64,32 +63,7 @@ export async function permit2SpenderNameMetadata(
   if (routerEntry) return routerEntry
   const record = findEvmNameRecord(target.chainId, target.spender)
   if (!record) return undefined
-  const base = String(process.env.CLEARSIGN_SERVICE_URL || DEFAULT_CLEARSIGN_SERVICE_URL).trim().replace(/\/+$/, '')
-  try {
-    const response = await fetch(`${base}/v1/evm/name`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ chainId: record.chainId, address: record.address }),
-      signal: AbortSignal.timeout(3_000),
-    })
-    const result: any = await response.json()
-    const metadata = { signedPayload: result?.signedPayload, keyId: result?.keyId }
-    if (
-      !response.ok ||
-      result?.classification !== 'VERIFIED' ||
-      result?.chainId !== record.chainId ||
-      String(result?.address || '').toLowerCase() !== record.address ||
-      result?.keyId !== CERTIFIED_METADATA_KEY_ID ||
-      !isCertifiedEvmMetadata(metadata)
-    ) {
-      console.warn(`[permit2] no certified name for ${record.address} on chain ${record.chainId}: ${result?.error || response.status}`)
-      return undefined
-    }
-    return metadata
-  } catch (error: any) {
-    console.warn(`[permit2] ClearSign name lookup failed: ${error?.message || error}`)
-    return undefined
-  }
+  return findCertifiedEvmName(record, '[permit2]')
 }
 
 /** Typed-data sign params with the spender's certified name, when there is one. */

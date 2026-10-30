@@ -24,7 +24,7 @@
  */
 import { utils } from 'ethers'
 import type { CalldataDecodedField, CalldataDecodedInfo } from '../shared/types'
-import { ACROSS_NAMED_TOKENS, REVIEWED_EVM_TOKENS } from '../shared/reviewed-evm-tokens'
+import { ACROSS_NAMED_TOKENS, REVIEWED_EVM_TOKENS, REVIEWED_SWAP_TOKENS } from '../shared/reviewed-evm-tokens'
 
 /** WETH: symbol() "WETH" and decimals() 18 on chain, checked 2026-10-29. */
 const CHAINS: Record<number, { name: string; weth: string }> = {
@@ -131,7 +131,8 @@ function units(raw: bigint, decimals: number): string {
 function tokenInfo(chainId: number, token: string): { symbol: string; decimals: number } | undefined {
   if (token === NATIVE || token === ZERO) return { symbol: 'ETH', decimals: 18 }
   if (token === CHAINS[chainId].weth) return { symbol: 'WETH', decimals: 18 }
-  return REVIEWED_EVM_TOKENS[`${chainId}:${token}`] ?? ACROSS_NAMED_TOKENS[`${chainId}:${token}`]
+  const key = `${chainId}:${token}`
+  return REVIEWED_EVM_TOKENS[key] ?? REVIEWED_SWAP_TOKENS[key] ?? ACROSS_NAMED_TOKENS[key]
 }
 
 interface Amount { token: string; raw: bigint }
@@ -158,6 +159,13 @@ function genuineSettler(chainId: number, address: string): number | null {
   }
   settlerCache.set(key, found)
   return found
+}
+
+/** '0x Settler' when `address` is a genuine taker Settler on a chain listed
+ *  above (the spender of a 0x Swap API permit2 quote), else undefined. */
+export function zeroExSettlerName(chainId: number, address: string): string | undefined {
+  if (!CHAINS[chainId] || !/^0x[0-9a-fA-F]{40}$/.test(address)) return undefined
+  return genuineSettler(chainId, address.toLowerCase()) === null ? undefined : '0x Settler'
 }
 
 /** AllowanceHolder.exec args (no selector) into Settler.execute. `value` is

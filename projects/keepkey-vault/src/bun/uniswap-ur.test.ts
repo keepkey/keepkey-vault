@@ -14,7 +14,7 @@ import {
   UNIVERSAL_ROUTER_PROVENANCE,
 } from './evm-certified-schema'
 import { REVIEWED_SWAP_TOKENS } from '../shared/reviewed-evm-tokens'
-import { urDecode, urPrecheck, urSummarize, type UrPlan, type UrStep } from './uniswap-ur'
+import { UR_RULES_716, UR_RULES_717, urDecode, urPrecheck, urSummarize, type UrPlan, type UrStep } from './uniswap-ur'
 import production from '../../__tests__/fixtures/clearsign-production-catalog-batch1.json'
 import { ALPHA_ROOT_PUBLIC_KEY } from '../../scripts/clearsign-alpha-rehearsal'
 
@@ -321,5 +321,87 @@ describe('batch 5: added swap tokens and routers, real public calls', () => {
     }
     expect(bodies).toHaveLength(918)
     expect(sha256(Buffer.from(bodies.sort().join('\n')))).toBe('8c089336065ef49da35fecff730d38a285a0412841384b702ef1c999a1b5c38a')
+  })
+})
+
+/**
+ * Firmware 7.17 review rules the real calls never trip, pinned by plan
+ * mutants as the firmware's own tests do (uniswap_ur.cpp
+ * ExactOutputTransferFeeIsReviewed, PortionFeeToThePayerIsRefused). Calls:
+ * other wallets' public calls from 7.17's model set (rw), and the Base sample.
+ */
+describe('Uniswap UR 7.17: the TRANSFER fee and the payer rules', () => {
+  const fx = JSON.parse(Buffer.from(Bun.gunzipSync(new Uint8Array(readFileSync(new URL('../../__tests__/fixtures/uniswap/ur-firmware-parity-717.json.gz', import.meta.url))))).toString())
+  const calls = Object.entries(fx.calls as Record<string, [string, string, string]>)
+    .map(([key, [r, v, cd]]) => ({ key, router: `0x${r}`, value: BigInt(`0x${v}`), plan: urDecode(Uint8Array.from(Buffer.from(cd, 'hex')), `0x${r}`, UR_RULES_717) }))
+    .filter((c) => c.plan)
+  const review = (p: UrPlan, c: { router: string; value: bigint }, rules = UR_RULES_717) => urSummarize(p, c.router, c.value, rules)
+  const withStep = (p: UrPlan, k: number, edit: Partial<UrStep>): UrPlan => ({ ...p, steps: p.steps.map((st, i) => (i === k ? { ...st, ...edit } : st)) })
+  const MSG_SENDER = `0x${'0'.repeat(39)}1`, ADDRESS_THIS = `0x${'0'.repeat(39)}2`
+  const feeCalls = calls.filter((c) => review(c.plan!, c)?.fee?.amount !== undefined)
+
+  it('a TRANSFER fee is reviewed as an amount on 7.17 and refused by 7.16', () => {
+    expect(feeCalls.length).toBeGreaterThan(1)
+    for (const c of feeCalls) {
+      const s = review(c.plan!, c)!
+      const t = c.plan!.steps.findIndex((x) => x.kind === 'TRANSFER')
+      expect(s.fee).toEqual({ bips: 0, amount: c.plan!.steps[t].amount, recipient: c.plan!.steps[t].recipient })
+      expect(review(c.plan!, c, UR_RULES_716)).toBeNull()
+    }
+  })
+
+  it('refuses a TRANSFER that is not the app fee before the delivering SWEEP', () => {
+    for (const c of feeCalls) {
+      const p = c.plan!
+      const t = p.steps.findIndex((x) => x.kind === 'TRANSFER')
+      const sweep = p.steps.findIndex((x, i) => i > t && x.kind === 'SWEEP' && x.tokenIn === p.steps[t].tokenIn)
+      expect(sweep).toBeGreaterThan(t)
+      const other = p.steps.find((x) => x.kind.includes('SWAP') && x.tokenIn !== p.steps[t].tokenIn)!.tokenIn
+      const mutants: [string, UrPlan][] = [
+        ['to the payer', withStep(p, t, { recipient: MSG_SENDER })],
+        ['to the router (placeholder)', withStep(p, t, { recipient: ADDRESS_THIS })],
+        ['to the router (address)', withStep(p, t, { recipient: c.router.toLowerCase() })],
+        ['of another token', withStep(p, t, { tokenIn: other })],
+        ['of nothing', withStep(p, t, { amount: 0n })],
+        ["of the router's balance", withStep(p, t, { amount: 1n << 255n })],
+        // TRANSFER after the SWEEP that delivers the token.
+        ['after the SWEEP', { ...p, steps: p.steps.map((x, i) => (i === t ? p.steps[sweep] : i === sweep ? p.steps[t] : x)) }],
+        ['with no SWEEP after it', { ...p, steps: p.steps.filter((_, i) => i !== sweep) }],
+        ['twice', { ...p, steps: [...p.steps.slice(0, t + 1), p.steps[t], ...p.steps.slice(t + 1)] }],
+      ]
+      for (const [name, m] of mutants) expect([c.key, name, review(m, c)]).toEqual([c.key, name, null])
+    }
+  })
+
+  it('refuses a PAY_PORTION or TAKE_PORTION fee to the payer on 7.17 only', () => {
+    let portion = 0
+    for (const c of calls) {
+      const s716 = review(c.plan!, c, UR_RULES_716)
+      const k = c.plan!.steps.findIndex((x) => x.kind === 'PAY_PORTION' || x.kind === 'V4_TAKE_PORTION')
+      if (!s716?.fee || k < 0) continue
+      portion++
+      const m = withStep(c.plan!, k, { recipient: MSG_SENDER })
+      expect(review(m, c)).toBeNull()
+      expect(review(m, c, UR_RULES_716)).not.toBeNull() // 7.16 shows 0x..01
+    }
+    expect(portion).toBeGreaterThan(10)
+  })
+
+  it('refuses a swap that leaves the delivered token in the router after its last SWEEP', () => {
+    let held = 0
+    for (const c of calls) {
+      const p = c.plan!
+      const last = p.steps.length - 1
+      const s = review(p, c)
+      const sweep = p.steps[last]
+      // A swap into the router, then the SWEEP of that token as the last step.
+      const swap = p.steps.findIndex((x) => x.kind.includes('SWAP') && x.recipient === ADDRESS_THIS && x.tokenOut === sweep.tokenIn)
+      if (!s || s.fee || sweep.kind !== 'SWEEP' || swap < 0) continue
+      held++
+      const early = { ...p, steps: [...p.steps.slice(0, swap), sweep, ...p.steps.slice(swap, last)] }
+      expect([c.key, review(early, c)]).toEqual([c.key, null])
+      expect([c.key, review(early, c, UR_RULES_716)]).toEqual([c.key, null]) // in v7.16.0 too
+    }
+    expect(held).toBeGreaterThan(10)
   })
 })

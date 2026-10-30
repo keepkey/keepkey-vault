@@ -261,6 +261,37 @@ export function applySolanaSigningGates(
   )
   info.requiresAdvancedMode = solanaFirmwareRequiresAdvancedMode(rawTxBase64, firmwareVersion, metadata)
   if (info.requiresBlindSigningConsent || info.requiresAdvancedMode) info.needsBlindSigning = true
+  const newest = solanaFirmwareCannotSign(rawTxBase64, firmwareVersion)
+  if (newest) {
+    info.firmwareCannotSign = true
+    info.firmwareUpdateClearSigns = newest === 'clear-signs'
+  }
+}
+
+/** The newest release predictFirmwareReview mirrors. */
+const NEWEST_MIRRORED_FW = '7.16.0'
+
+/**
+ * When every build of the connected firmware refuses this transaction as
+ * malformed (AdvancedMode does not help) while the newest release can sign it,
+ * what that release does: 'clear-signs' it, or reviews it as 'opaque' (raw
+ * data behind AdvancedMode), so an update alone does not get it shown.
+ * 7.14 cannot parse a v0 message that reaches a lookup table or has more than
+ * eight instructions. A transaction every release refuses is not a firmware
+ * gap, so it is not reported here.
+ */
+export function solanaFirmwareCannotSign(rawTxBase64: string | undefined, firmwareVersion: string | undefined): 'clear-signs' | 'opaque' | undefined {
+  if (!rawTxBase64 || !firmwareVersion) return undefined
+  try {
+    const full = new Uint8Array(Buffer.from(rawTxBase64, 'base64'))
+    const message = parseSolanaMessage(solanaMessageSlice(full, parseSolanaTx(full)))
+    const review = (fw: string) => predictFirmwareReview(message, (version) => versionCompare(fw, version) >= 0)
+    if (review(firmwareVersion) !== 'malformed') return undefined
+    const newest = review(NEWEST_MIRRORED_FW)
+    return newest === 'malformed' ? undefined : newest ?? 'clear-signs'
+  } catch {
+    return undefined
+  }
 }
 
 /**

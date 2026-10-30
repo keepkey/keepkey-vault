@@ -5,22 +5,24 @@
  * production ClearSign service's own responses (erc7730-describe.fixtures.json)
  * and the TEST-root replay fixture the resolver tests use.
  */
-import { afterEach, describe, expect, test } from 'bun:test'
+import { afterEach, describe, expect, spyOn, test } from 'bun:test'
 import type { SigningRequestInfo } from '../shared/types'
 import { assessSigningRisk } from '../shared/clearsign-risk'
 import { buildClearSignReport } from '../shared/clearsign-report'
-import { describeErc7730Call } from './erc7730-describe'
+import * as ceremony from './clearsign-alpha-ceremony'
+import { describeErc7730Call, describeErc7730TypedData } from './erc7730-describe'
 import { evmSigningVerdict, prepareEvmTxSigningInfo, withoutErc7730Description } from './evm-presign-report'
 import { forgetRefusedErc7730Definitions } from './erc7730-resolver'
 import served from './erc7730-describe.fixtures.json'
 import testRoot from './erc7730-resolver.fixtures.json'
+import cow from './erc7730-describe-cow.fixtures.json'
 
 const ME = '0x909Ef6B32DfDc12CA86aA710b54c991af3C5F82E'
 const USDC = '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48'
 const word = (v: string) => v.toLowerCase().replace(/^0x/, '').padStart(64, '0')
 // SDK suite fw-716/40: supply(USDC, 1, onBehalfOf = the signer, referral 0).
 const SUPPLY = `0x617ba037${word(USDC)}${word('0x1')}${word(ME)}${word('0x0')}`
-const aave = { chainId: 1, to: served.aaveSupply1.contractAddress, data: SUPPLY, value: '0x0', from: ME }
+const aave = { chainId: 1, to: served.aaveSupply1.contractAddress, data: SUPPLY, value: '0x0', from: ME, firmwareVersion: '7.16.0' }
 const UNAVAILABLE = { status: 'unavailable', transactionFingerprint: 'f', assetChanges: [], authorityChanges: [], warnings: [],
   unknowns: [{ code: 'SIMULATION_UNAVAILABLE', message: "Couldn't simulate this transaction.", severity: 'danger' }] } as any
 
@@ -44,7 +46,7 @@ describe('describeErc7730Call: the lines the KeepKey shows', () => {
   test('Aave V3 supply on Base: the device\'s unknown token, this computer\'s reading, another recipient', () => {
     const other = '0x1111111111111111111111111111111111111111'
     const data = `0x617ba037${word('0x833589fcd6edb6e08f4c7c32d4f71b54bda02913')}${word('0xf4240')}${word(other)}${word('0x0')}`
-    const d = describeErc7730Call(served.aaveSupply8453.envelope, { chainId: 8453, to: served.aaveSupply8453.contractAddress, data, from: ME })
+    const d = describeErc7730Call(served.aaveSupply8453.envelope, { chainId: 8453, to: served.aaveSupply8453.contractAddress, data, from: ME, firmwareVersion: '7.16.0' })
     expect(d?.signedBy).toBe('KeepKey ClearSign')
     expect(d?.fields).toEqual([
       // 7.16 has no Base tokens: the device line, then this computer's own reading.
@@ -53,7 +55,7 @@ describe('describeErc7730Call: the lines the KeepKey shows', () => {
     ])
     expect(d?.explorerUrl).toBe('https://basescan.org/address/0xA238Dd80C259a72e81d7e4664a9801593F98d1c5')
     // Signed for Base: no description for the same bytes on another chain.
-    expect(describeErc7730Call(served.aaveSupply8453.envelope, { chainId: 1, to: served.aaveSupply8453.contractAddress, data, from: ME })).toBeUndefined()
+    expect(describeErc7730Call(served.aaveSupply8453.envelope, { chainId: 1, to: served.aaveSupply8453.contractAddress, data, from: ME, firmwareVersion: '7.16.0' })).toBeUndefined()
   })
 
   test('the device\'s own markers: threshold message, signer label, and this wallet only for the matched signer', () => {
@@ -71,7 +73,7 @@ describe('describeErc7730Call: the lines the KeepKey shows', () => {
 
   test('Lido submit: the interpolated intent and the coin sent with the call (@.value)', () => {
     const d = describeErc7730Call(served.lidoSubmit1.envelope, {
-      chainId: 1, to: served.lidoSubmit1.contractAddress, data: `0xa1903eab${word('0x0')}`, value: '0x2386f26fc10000', from: ME,
+      chainId: 1, to: served.lidoSubmit1.contractAddress, data: `0xa1903eab${word('0x0')}`, value: '0x2386f26fc10000', from: ME, firmwareVersion: '7.16.0',
     })
     expect(d).toMatchObject({ signedBy: 'KeepKey ClearSign', intent: 'Stake ETH', summary: 'Stake 0.01 ETH', fields: [{ label: 'Amount', value: '0.01 ETH' }] })
     expect(d?.protocol).toMatchObject({ name: 'Lido', url: 'https://lido.fi' })
@@ -80,7 +82,7 @@ describe('describeErc7730Call: the lines the KeepKey shows', () => {
   test('described only when the certificate and the catalog signature check out', () => {
     // A TEST-root envelope: never described.
     const { tx, definition } = testRoot.plain
-    expect(describeErc7730Call(definition.envelope, { ...tx, from: ME })).toBeUndefined()
+    expect(describeErc7730Call(definition.envelope, { ...tx, from: ME, firmwareVersion: '7.16.0' })).toBeUndefined()
     // One flipped bit in the signature, or in the program (another Merkle leaf).
     const env = served.aaveSupply1.envelope
     const flip = (at: number) => `${env.slice(0, at)}${(parseInt(env[at], 16) ^ 1).toString(16)}${env.slice(at + 1)}`
@@ -91,6 +93,43 @@ describe('describeErc7730Call: the lines the KeepKey shows', () => {
 
   test('calldata the ABI does not fit: no description rather than a guess', () => {
     expect(describeErc7730Call(served.aaveSupply1.envelope, { ...aave, data: SUPPLY.slice(0, 74) })).toBeUndefined()
+  })
+})
+
+describe('token and coin names follow the connected firmware version', () => {
+  // Real CoW orders; their batch-6 envelopes are TEST-signed, so only here the
+  // TEST root stands in for the production root (restored after each test).
+  const realInspect = ceremony.inspectAlphaCertificate
+  const SIGNED_AT = 1793318400 // 2026-10-30
+  const card = (name: string, firmwareVersion: string) => {
+    const spy = spyOn(ceremony, 'inspectAlphaCertificate').mockImplementation((c: string) => realInspect(c, SIGNED_AT, cow.testRootPubkey))
+    try {
+      const { typedData } = cow.orders.find((o) => o.name === name)!
+      const envelope = (cow.envelopes as Record<string, string>)[String(typedData.domain.chainId)]
+      return describeErc7730TypedData(envelope, typedData, firmwareVersion)!.fields
+    } finally { spy.mockRestore() }
+  }
+
+  test('WETH: named on 7.16, an unknown token on 7.17 (its table no longer has it), as each device shows it', () => {
+    expect(card('GPv2 1 0x9f85b1a56c1c', '7.16.0').slice(0, 2)).toEqual([
+      { label: 'Sell up to', value: '5.001759563392312596 WETH' },
+      { label: 'Receive at least', value: '11101.213961 USDT' },
+    ])
+    expect(card('GPv2 1 0x9f85b1a56c1c', '7.17.0').slice(0, 2)).toEqual([
+      { label: 'Sell up to', value: '5001759563392312596\nunknown token\n0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2', note: 'This computer reads it as 5.001759563392312596 WETH.' },
+      { label: 'Receive at least', value: '11101.213961 USDT' },
+    ])
+  })
+
+  test('Polygon coin: MATIC on 7.16, POL on 7.17', () => {
+    const alias = (fw: string) => card('GPv2 137 0x65f2ecc3bb52', fw).find((f) => f.label === 'Receive at least')!.value
+    expect(alias('7.16.0')).toBe('Signer native alias:\n0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE\n11.719118964126220107 MATIC')
+    expect(alias('7.17.0')).toBe('Signer native alias:\n0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE\n11.719118964126220107 POL')
+  })
+
+  test('the TEST root is never trusted outside that stand-in', () => {
+    const { typedData } = cow.orders[0]
+    expect(describeErc7730TypedData((cow.envelopes as Record<string, string>)[String(typedData.domain.chainId)], typedData, '7.17.0')).toBeUndefined()
   })
 })
 

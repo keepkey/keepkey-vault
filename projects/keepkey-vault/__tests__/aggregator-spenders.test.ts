@@ -20,9 +20,11 @@ import { erc20Preview } from '../src/shared/erc20Preview'
 import { knownSpenderName } from '../src/shared/evm-known-spenders'
 import { recognizedSpender, recognizedTypedDataSpender } from '../src/bun/evm-signing-preview'
 import { decodeEIP712 } from '../src/bun/eip712-decoder'
+import { decodeMultiSend } from '../src/shared/safe-tx'
 import type { SigningRequestInfo } from '../src/shared/types'
 import cowPermit from './fixtures/spenders/usdc-permit-cow-vaultrelayer.json'
 import oneInchPermit2 from './fixtures/spenders/permit2-1inch-v6-unlimited.json'
+import zeroExQuote from '../src/bun/erc7730-typed-data.fixtures.json'
 
 const REQUESTS = join(import.meta.dir, '../../../docs/clearsign-case-studies/swapspro-20261029/requests')
 const swapsPro = (name: string) => JSON.parse(readFileSync(join(REQUESTS, `${name}.json`), 'utf8'))
@@ -180,6 +182,57 @@ describe('Relay Receiver is not a spender', () => {
   })
 })
 
+// The real 0x Swap API v2 permit2 quote on Base (0x-examples README, the
+// fixture of the 2026-10-30 emulator leg "Generic EIP-712"): a one-time
+// Permit2 PermitTransferFrom of 0.0001 WETH to 0x Settler deployment 9. It read
+// red "Unknown or unusual" with the amount in raw units.
+describe('0x Swap API permit2 quote', () => {
+  const quote = zeroExQuote.typedData
+  const typed = (doc: any, fw = '7.16.0') => {
+    const chainId = Number(doc.domain.chainId)
+    const typedDataDecoded = decodeEIP712(doc)
+    return {
+      id: 't', method: '/eth/sign-typed-data', appName: '0x', chain: 'eth', chainId, firmwareVersion: fw,
+      typedDataDecoded, recognizedSpender: recognizedTypedDataSpender(typedDataDecoded, chainId),
+    } as SigningRequestInfo
+  }
+  const with_ = (message: Record<string, unknown>) => ({ ...quote, message: { ...quote.message, ...message } })
+
+  test('the fixture is the document 0x hashed', () => {
+    const { EIP712Domain: _, ...types } = quote.types
+    expect(ethers.utils._TypedDataEncoder.hash(quote.domain, types, quote.message)).toBe(zeroExQuote.zeroXPermit2Hash)
+  })
+
+  test('names the Settler and the WETH amount, and reads "check before you sign"', () => {
+    const s = typed(quote)
+    expect(s.recognizedSpender).toBe('0x Settler')
+    const r = assessSigningRisk(s)!
+    expect(r.level).toBe('medium')
+    expect(r.tier).not.toBe('red')
+    expect(r.reasons[0].text).toBe('Lets 0x Settler (0x6a57a0579e91a5b7ce9c2d08b93e1a9b995f974f) take up to 0.0001 WETH, once. This signature alone is enough; no transaction from you is needed.')
+  })
+
+  test('on 7.14.2, which cannot show it, the card is known (yellow) and still says the device cannot show it', () => {
+    const r = assessSigningRisk(typed(quote, '7.14.2'))!
+    expect(r.level).toBe('medium')
+    expect(r.tier).toBe('yellow')
+    expect(r.reasons.map((x) => x.text).join('\n')).toContain('KeepKey firmware 7.14.2 cannot show this Permit2 Signature Transfer on the device yet')
+  })
+
+  test('controls: a spender that is not a genuine Settler, and an unlimited one-time transfer, still read red', () => {
+    const stranger = typed(with_({ spender: STRANGER }))
+    expect(stranger.recognizedSpender).toBeUndefined()
+    expect(assessSigningRisk(stranger)!.level).toBe('high')
+    // The Settler of another chain is not this chain's Settler.
+    expect(typed({ ...quote, domain: { ...quote.domain, chainId: 1 } }).recognizedSpender).toBeUndefined()
+    // A Settler is never a spender for an allowance (0x: never approve Settler).
+    expect(recognizedSpender(8453, quote.message.spender)).toBeUndefined()
+    const all = typed(with_({ permitted: { ...quote.message.permitted, amount: MAX.toString() } }))
+    expect(all.recognizedSpender).toBe('0x Settler')
+    expect(assessSigningRisk(all)!.level).toBe('high')
+  })
+})
+
 describe('Desktop spender list', () => {
   test('names each requested spender on Ethereum and Base', () => {
     const both: [string, string][] = [
@@ -203,5 +256,62 @@ describe('Desktop spender list', () => {
     expect(knownSpenderName(1, '0x9008D19f58AAbD9eD0D60971565AA8510560ab41')).toBeUndefined()
     const src = readFileSync(join(import.meta.dir, '../src/mainview/components/SwapDialog.tsx'), 'utf8')
     expect(src).not.toMatch(/9008d19f58aabd9ed0d60971565aa8510560ab41[^\n]*Vault Relayer/i)
+  })
+})
+
+// The two bounded USDC approvals the 2026-10-30 emulator legs A4/A4b sent
+// (emulator-legs-20261030/approvals): real MultiSend inner calls from Base
+// Safe transactions. Both read red "Unknown or unusual" before these
+// spenders were listed.
+describe('Base Safe batches: approvals to Aave V3 Pool and Uniswap SwapRouter02', () => {
+  const innerApprove = (file: string, spender: string) => {
+    const td = JSON.parse(readFileSync(join(import.meta.dir, `fixtures/safe/${file}.json`), 'utf8')).typedData
+    const calls = decodeMultiSend(td.message.data)!
+    const c = calls.find((x) => x.data.startsWith('0x095ea7b3') && x.data.slice(34, 74) === spender.slice(2))!
+    return { from: td.message.to, to: c.to, value: '0x0', chainId: td.domain.chainId, data: c.data }
+  }
+  const cases = [
+    ['base-multisend-usdc-aave', '0xa238dd80c259a72e81d7e4664a9801593f98d1c5', 'Aave V3 Pool', '19.989092'],
+    ['base-multisend-141-uniswap', '0x2626664c2603336e57b271c5c0b26f421741e481', 'Uniswap SwapRouter02', '5'],
+  ] as const
+  for (const [file, spender, name, amount] of cases) {
+    test(`${name}: named, bounded, "check before you sign"`, async () => {
+      const body = innerApprove(file, spender)
+      expect(body.chainId).toBe(8453)
+      const s = await preview(body)
+      expect(s.recognizedSpender).toBe(name)
+      const r = assessSigningRisk(s)!
+      expect(r.level).toBe('medium')
+      expect(r.tier).not.toBe('red')
+      expect(r.reasons[0].text).toBe(`Lets ${name} (${spender}) spend up to ${amount} USDC, now and later, without asking you again.`)
+    })
+  }
+
+  test('control: the same approve to an address Desktop does not list still reads red', async () => {
+    const body = innerApprove('base-multisend-usdc-aave', '0xa238dd80c259a72e81d7e4664a9801593f98d1c5')
+    const s = await preview(body, withSpender(body.data, STRANGER))
+    expect(s.recognizedSpender).toBeUndefined()
+    const r = assessSigningRisk(s)!
+    expect(r.level).toBe('high')
+    expect(r.tier).toBe('red')
+    expect(assessSigningRisk(await preview(body, withAmount(withSpender(body.data, STRANGER), MAX)))!.level).toBe('critical')
+  })
+
+  test('each deployment only on the chains its list names', () => {
+    for (const chainId of [1, 10, 137, 42161]) expect(knownSpenderName(chainId, '0x68b3465833fb72A70ecDF485E0e4C7bD8665Fc45')).toBe('Uniswap SwapRouter02')
+    expect(knownSpenderName(8453, '0x68b3465833fb72A70ecDF485E0e4C7bD8665Fc45')).toBeUndefined()
+    expect(knownSpenderName(1, '0x2626664c2603336E57B271c5C0b26F421741e481')).toBeUndefined()
+    expect(knownSpenderName(100, '0x68b3465833fb72A70ecDF485E0e4C7bD8665Fc45')).toBeUndefined()
+    for (const chainId of [10, 137, 42161, 43114]) expect(knownSpenderName(chainId, '0x794a61358D6845594F94dc1DB02A252b5b4814aD')).toBe('Aave V3 Pool')
+    expect(knownSpenderName(1, '0x87870Bca3F3fD6335C3F4ce8392D69350B4fA4E2')).toBe('Aave V3 Pool')
+    expect(knownSpenderName(1, '0x794a61358D6845594F94dc1DB02A252b5b4814aD')).toBeUndefined()
+    expect(knownSpenderName(8453, '0x87870Bca3F3fD6335C3F4ce8392D69350B4fA4E2')).toBeUndefined()
+  })
+
+  test('a plain USDC transfer straight to the Aave V3 Pool is still flagged as lost', async () => {
+    const body = innerApprove('base-multisend-usdc-aave', '0xa238dd80c259a72e81d7e4664a9801593f98d1c5')
+    const s = await preview(body, `0xa9059cbb${body.data.slice(10)}`)
+    expect(s.recognizedRecipient).toBe('Aave V3 Pool')
+    expect(assessSigningRisk(s)!.reasons.map((x) => x.text).join('\n')).toContain('Sends the tokens straight to Aave V3 Pool')
   })
 })

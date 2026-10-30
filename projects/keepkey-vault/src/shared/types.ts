@@ -1029,7 +1029,8 @@ export interface EIP712DecodedInfo {
    *  payment in one currency at a fixed price. Who each payment goes to.
    *  `decimals` is set only when this computer can name the currency; `nft`
    *  only when a single NFT is offered. 'creator-fee' is set after the
-   *  collection's own ERC-2981 royaltyInfo named that payee and amount. */
+   *  collection's own ERC-2981 royaltyInfo named that payee and amount.
+   *  `creatorFeeUnchecked`: royaltyInfo could not be asked at all. */
   seaportListing?: {
     offerer: string
     items: string[]
@@ -1039,6 +1040,7 @@ export interface EIP712DecodedInfo {
     nft?: { token: string; id: string }
     payments: Array<{ recipient: string; amount: string; raw: string; role: 'offerer' | 'opensea-fee' | 'creator-fee' | 'other' }>
     endTime: string
+    creatorFeeUnchecked?: boolean
   }
 }
 
@@ -1149,6 +1151,9 @@ export interface SigningRequestInfo {
   /** A TRON call the firmware does not decode (TRC-20 approve, staking,
    *  votes, a SunSwap router call), read on this computer as advice only. */
   tronCall?: TronCallPreview
+  /** The device shows tronCall from its own parse (7.17+: an approve of a
+   *  table token, staking, votes), so no AdvancedMode. */
+  tronCallShown?: boolean
   /**
    * Populated when a Solana transaction was received but clear-sign decoding
    * failed (malformed wire layout, unsupported message version, RPC outage,
@@ -1185,6 +1190,13 @@ export interface SigningRequestInfo {
    *  the SafeTx makes (safeTxCalls order), the same preview a call from an
    *  account gets. Advice: the KeepKey shows SafeTx.data as raw hex. */
   safeCalls?: SafeCallPreview[]
+  /** Approval card only, a SafeMessage whose message is a 32-byte hash: the
+   *  original from Safe's Transaction Service, kept only when it hashes to
+   *  that value (bun/safe-message-preimage). Advice: the KeepKey shows the hash. */
+  safeMessageOriginal?:
+    | { status: 'text'; text: string }
+    | { status: 'typed'; decoded: EIP712DecodedInfo; recognizedSpender?: string }
+    | { status: 'not-found' | 'mismatch' | 'failed' }
   /** Approval card only, from this computer's own records: earlier
    *  transactions this account sent or signed to this contract on this
    *  chain (a lower bound; `since` in ms). */
@@ -1216,6 +1228,13 @@ export interface SigningRequestInfo {
   erc7730Description?: Erc7730Description
   /** true when the UI must enable AdvancedMode before allowing approval */
   requiresAdvancedMode?: boolean
+  /** true when the connected firmware refuses this request whether
+   *  AdvancedMode is on or off. The card says so, never offers AdvancedMode
+   *  and keeps Approve disabled. */
+  firmwareCannotSign?: boolean
+  /** With firmwareCannotSign: true when the newest firmware Desktop mirrors
+   *  clear-signs it, so the card may say a firmware update fixes it. */
+  firmwareUpdateClearSigns?: boolean
   /** true when this request needs a separate, explicit one-shot opaque-signing
    * consent in the Vault UI. External callers cannot set the device flag. */
   requiresBlindSigningConsent?: boolean

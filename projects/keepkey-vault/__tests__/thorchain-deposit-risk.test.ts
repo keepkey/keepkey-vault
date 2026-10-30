@@ -119,8 +119,8 @@ describe('router deposits KeepKey Desktop signed', () => {
     expect(vaultLine(s).level).toBe('medium')
     expect(vaultLine(s).text).toContain('which THORChain is retiring')
     expect(texts(s)).not.toContain('can be lost')
-    // (This deposit swaps a Base token Desktop does not pin, a high line of its own.)
-    expect(assessSigningRisk(s)!.level).toBe('high')
+    // Its input is canonical Base USDC, which Desktop names: nothing else is high.
+    expect(assessSigningRisk(s)!.level).toBe('medium')
     // A month later no source lists it at all: critical.
     const gone = await card(RETIRED_LATER, now('THORChain'))
     expect(vaultLine(gone).level).toBe('critical')
@@ -291,6 +291,94 @@ describe('third-party router deposits on BSC and Arbitrum', () => {
     expect(s.calldataDecoded?.dappName).toBe('Mayachain')
     expect(s.thorVault).toEqual({ status: 'current', protocol: 'Mayachain', chain: 'ARB', sources: 2 })
     expect(texts(s)).toContain('The swap pays out to 0x97dc38c3f83481a1F9D72Ba6Cd4Bae4c96BA7994 on ETH, one of your own addresses.')
+  })
+})
+
+// Normal swaps that read red before (emulator legs 2026-10-30, thor group):
+// canonical Base USDC in, a THORChain short code ('e' = ETH.ETH), and a
+// ticker with no contract (the network's own pool asset).
+describe('normal memos and input tokens are decoded, not flagged', () => {
+  const field = (s: SigningRequestInfo, name: string) => s.calldataDecoded?.fields.find((f) => f.name === name)?.value
+  const FAKE = 'may be a fake'
+
+  test('canonical Base USDC in is named, not "a token KeepKey does not recognize"', async () => {
+    const s = await card(RETIRED_LATER, all(RETIRED_LATER.vaults))
+    expect(field(s, 'Input amount')).toBe('3100.967501 USDC')
+    expect(field(s, 'Input token')).toBe('Verified Base USDC contract')
+    expect(texts(s)).not.toContain(FAKE)
+    expect(assessSigningRisk(s)!.tier).toBe('green')
+    // CONTROL: the same deposit paying in a token Desktop does not pin.
+    const other = RETIRED_LATER.data.replace('833589fcd6edb6e08f4c7c32d4f71b54bda02913', '1111111111111111111111111111111111111111')
+    expect(other).not.toBe(RETIRED_LATER.data)
+    const u = await card(RETIRED_LATER, all(RETIRED_LATER.vaults), undefined, other)
+    expect(field(u, 'Input token warning')).toBe('UNVERIFIED input token contract 0x1111111111111111111111111111111111111111')
+    expect(texts(u)).toContain(FAKE)
+    expect(assessSigningRisk(u)!.tier).toBe('red')
+  })
+
+  test("a THORChain short code ('=:e:') decodes as ETH.ETH and its payout is checked", async () => {
+    expect(memoOf(BSC.data)).toStartWith('=:e:0x12C44CFC630E3d03f160Cdc893AC4167D541a3e6/')
+    const s = await card(BSC, all(BSC.vaults))
+    expect(field(s, 'Output asset')).toBe('ETH.ETH')
+    expect(field(s, 'Action')).toStartWith('Swap 0.1 BNB for at least 0.02933463 ETH on ETH via THORChain')
+    expect(texts(s)).not.toContain('does not decode')
+    expect(texts(s)).toContain('The swap pays out to 0x12C44CFC630E3d03f160Cdc893AC4167D541a3e6 on ETH, one of your own addresses.')
+    // CONTROL: the same short-code memo paying someone else is red.
+    const stranger = '0x2222222222222222222222222222222222222222'
+    const m = await card(BSC, all(BSC.vaults), () => false, withMemo(BSC.data, memoOf(BSC.data).replace(/0x12C44CFC630E3d03f160Cdc893AC4167D541a3e6/g, stranger)))
+    const payout = assessSigningRisk(m)!.reasons.find((r) => r.text.startsWith(`The swap pays out to ${stranger}, which is NOT the account signing this`))
+    expect(payout?.level).toBe('high')
+    // Maya's codes are its own: 'a' is ARB.ETH there, AVAX.AVAX on THORChain.
+    const maya = await card(MAYA_ARB, all(MAYA_ARB.vaults), undefined, withMemo(MAYA_ARB.data, memoOf(MAYA_ARB.data).replace('=:ETH.USDC:', '=:e:')))
+    expect(field(maya, 'Output asset')).toBe('ETH.ETH')
+    const arb = await card(MAYA_ARB, all(MAYA_ARB.vaults), undefined, withMemo(MAYA_ARB.data, memoOf(MAYA_ARB.data).replace('=:ETH.USDC:', '=:a:')))
+    expect(field(arb, 'Output asset')).toBe('ARB.ETH')
+    // A code neither network defines stays undecoded.
+    const unknown = await card(BSC, all(BSC.vaults), undefined, withMemo(BSC.data, memoOf(BSC.data).replace('=:e:', '=:qq:')))
+    expect(texts(unknown)).toContain('an action this computer does not decode')
+  })
+
+  test("Maya's two-letter codes ('=:ec:' = ETH.USDC) decode, and the payout is checked", async () => {
+    const ec = await card(MAYA_ARB, all(MAYA_ARB.vaults), undefined, withMemo(MAYA_ARB.data, memoOf(MAYA_ARB.data).replace('=:ETH.USDC:', '=:ec:')))
+    expect(memoOf(ec.data as string)).toStartWith('=:ec:')
+    expect(field(ec, 'Output asset')).toBe('ETH.USDC-0XA0B86991C6218B36C1D19D4A2E9EB0CE3606EB48')
+    expect(field(ec, 'Token warning')).toBeUndefined()
+    expect(texts(ec)).not.toContain('does not decode')
+    expect(texts(ec)).not.toContain(FAKE)
+    expect(assessSigningRisk(ec)!.tier).toBe('green')
+    // A code the network maps to a token Desktop does not pin names its contract itself.
+    const ep = await card(MAYA_ARB, all(MAYA_ARB.vaults), undefined, withMemo(MAYA_ARB.data, memoOf(MAYA_ARB.data).replace('=:ETH.USDC:', '=:ep:')))
+    expect(field(ep, 'Output asset')).toBe('ETH.PEPE-0X6982508145454CE325DDBE47A25D4EC3D2311933')
+    expect(field(ep, 'Token warning')).toBeUndefined()
+    // 'tr' is THOR.RUNE on Maya, TRON.TRX on THORChain; 'zz' is ZEC.ZEC on Maya only.
+    const tr = await card(MAYA_ARB, all(MAYA_ARB.vaults), undefined, withMemo(MAYA_ARB.data, memoOf(MAYA_ARB.data).replace('=:ETH.USDC:', '=:tr:')))
+    expect(field(tr, 'Output asset')).toBe('THOR.RUNE')
+    const zz = await card(MAYA_ARB, all(MAYA_ARB.vaults), undefined, withMemo(MAYA_ARB.data, memoOf(MAYA_ARB.data).replace('=:ETH.USDC:', '=:zz:')))
+    expect(field(zz, 'Output asset')).toBe('ZEC.ZEC')
+    // CONTROL: THORChain does not define 'ec', so there it stays undecoded.
+    const thor = await card(BSC, all(BSC.vaults), undefined, withMemo(BSC.data, memoOf(BSC.data).replace('=:e:', '=:ec:')))
+    expect(texts(thor)).toContain('an action this computer does not decode')
+  })
+
+  test('a ticker with no contract (ETH.USDC) is the pool asset, not a fake token', async () => {
+    expect(memoOf(MAYA_ARB.data)).toStartWith('=:ETH.USDC:')
+    const s = await card(MAYA_ARB, all(MAYA_ARB.vaults))
+    expect(field(s, 'Token warning')).toBeUndefined()
+    expect(texts(s)).not.toContain(FAKE)
+    expect(assessSigningRisk(s)!.tier).toBe('green')
+    // CONTROL: the same memo naming another USDC contract, in full or by a suffix it does not end with.
+    for (const [asset, warning] of [
+      ['ETH.USDC-0x1111111111111111111111111111111111111111', 'UNVERIFIED USDC token contract 0x1111111111111111111111111111111111111111'],
+      ['ETH.USDC-dead', 'UNVERIFIED USDC token contract (memo names -dead)'],
+    ]) {
+      const m = await card(MAYA_ARB, all(MAYA_ARB.vaults), undefined, withMemo(MAYA_ARB.data, memoOf(MAYA_ARB.data).replace('ETH.USDC', asset)))
+      expect(field(m, 'Token warning')).toBe(warning)
+      expect(texts(m)).toContain(FAKE)
+      expect(assessSigningRisk(m)!.tier).toBe('red')
+    }
+    // The real contract's own suffix is fine.
+    const ok = await card(MAYA_ARB, all(MAYA_ARB.vaults), undefined, withMemo(MAYA_ARB.data, memoOf(MAYA_ARB.data).replace('ETH.USDC', 'ETH.USDC-eb48')))
+    expect(field(ok, 'Token warning')).toBeUndefined()
   })
 })
 

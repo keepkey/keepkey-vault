@@ -1,20 +1,31 @@
-import { describe, expect, it } from 'bun:test'
+import { afterAll, beforeAll, describe, expect, it } from 'bun:test'
 import {
-  CAPABILITY_ERC7730_RUNTIME_REVIEW, ERC7730_TRANSPORT_SUPPORTED, ERC7730_TYPED_DATA_SUPPORTED,
-  erc7730CalldataSkipReason, supportsErc7730Transport, withoutCallerErc7730,
+  CAPABILITY_ERC7730_RUNTIME_REVIEW, ERC7730_TRANSPORT_SUPPORTED,
+  erc7730CalldataSkipReason, supportsErc7730Transport, supportsErc7730TypedData, withoutCallerErc7730,
 } from './erc7730-support'
 import { configureProductionRootTrust } from './certified-evm-envelope'
 import { evmCallRequiresAdvancedMode } from '../bun/evm-signing-policy'
 import fixtures from '../bun/erc7730-resolver.fixtures.json'
+import { ERC7730_FIXTURE_ROOT_PUBLIC_KEY, trustTestRoot } from '../../__tests__/support/clearsign-test-root'
 
 const contract = '0x1111111111111111111111111111111111111111'
 const call = '0xdeadbeef' + '00'.repeat(32)
 const CAPS = [1, CAPABILITY_ERC7730_RUNTIME_REVIEW]
 
 describe('the ERC-7730 gate', () => {
-  it('calldata is on; typed data stays off on 7.16', () => {
+  it('calldata is on; typed data stays off on 7.16 and is on from 7.17.0', () => {
     expect(ERC7730_TRANSPORT_SUPPORTED).toBe(true)
-    expect(ERC7730_TYPED_DATA_SUPPORTED).toBe(false)
+    expect(supportsErc7730TypedData('7.16.0', CAPS)).toBe(false)
+    expect(supportsErc7730TypedData('7.16.9', CAPS)).toBe(false)
+    expect(supportsErc7730TypedData('7.17.0', CAPS)).toBe(true)
+    expect(supportsErc7730TypedData('7.18.2', CAPS)).toBe(true)
+    // Same capability and root rules as calldata.
+    expect(supportsErc7730TypedData('7.17.0', [1, 5, 13])).toBe(false)
+    expect(supportsErc7730TypedData(undefined, CAPS)).toBe(false)
+    try {
+      configureProductionRootTrust(() => false)
+      expect(supportsErc7730TypedData('7.17.0', CAPS)).toBe(false)
+    } finally { configureProductionRootTrust(() => true) }
   })
 
   it('needs firmware 7.16.0+ AND CAPABILITY_ERC7730_RUNTIME_REVIEW', () => {
@@ -60,6 +71,10 @@ describe('a caller-supplied catalog', () => {
 describe('a checked ERC-7730 definition and the AdvancedMode gate', () => {
   const { tx, definition } = fixtures.plain
   const catalog = { primaryDefinitionId: definition.definitionId, definitions: [{ ...definition, kind: 1 as const }] }
+  // The replay fixtures are signed under their TEST root.
+  let restoreRoot = () => {}
+  beforeAll(() => { restoreRoot = trustTestRoot(ERC7730_FIXTURE_ROOT_PUBLIC_KEY) })
+  afterAll(() => restoreRoot())
 
   it('lifts the gate only for the call it describes, on a device that takes it', () => {
     expect(evmCallRequiresAdvancedMode(tx.to, tx.data, tx.chainId, false, undefined, undefined, '7.16.0', tx.value, CAPS)).toBe(true)

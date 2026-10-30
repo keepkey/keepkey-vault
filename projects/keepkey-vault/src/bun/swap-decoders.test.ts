@@ -74,6 +74,22 @@ describe('0x AllowanceHolder.exec into Settler.execute (G06)', () => {
     expectCalmSwap(r, '0x Settler')
   })
 
+  test('real USDC → DAI swap: DAI is a reviewed swap token, no fake-token warning', async () => {
+    const t = tx('0x-usdc-to-dai')
+    const r = await review(t)
+    expect(r.field('Action')).toBe('Swap 1000 USDC for at least 997.000015952 DAI')
+    expect(r.field('Output asset')).toBe('DAI')
+    expect(r.field('Token warning')).toBeUndefined()
+    expect(r.text).not.toContain('does not recognize')
+    expectCalmSwap(r, '0x Settler')
+    // Control: the same request buying a token on no reviewed list still warns.
+    const dai = '6b175474e89094c44da98b954eedeac495271d0f'
+    const fake = await review({ ...t, data: t.data.split(dai).join('2'.repeat(40)) })
+    expect(fake.field('Token warning')).toBe(`Token 0x${'2'.repeat(40)} is not on KeepKey's reviewed list`)
+    expect(fake.risk.level).toBe('high')
+    expect(fake.text).toContain('Swaps a token KeepKey does not recognize. It may be a fake.')
+  })
+
   test('Base: genuine Settler for chain 8453; this real swap pays someone else, so red', async () => {
     const r = await review(tx('base-0x-cbeth-to-usdc-other-recipient'))
     expect(r.field('Action')).toBe('Swap 0.618 cbETH for at least 1600.029946 USDC')
@@ -87,6 +103,33 @@ describe('0x AllowanceHolder.exec into Settler.execute (G06)', () => {
     expect(r.field('Output destination')).toBe(OTHER)
     expect(r.risk.tier).toBe('red')
     expect(r.text).toContain(`The swap output goes to ${OTHER}, which is NOT the account signing this`)
+  })
+
+  // alpha-717 CONTROL '0x Settler recipient changed' (round 2): the swaps.pro
+  // capture with Settler's recipient word replaced. On 7.17 a ClearSign
+  // ERC-7730 definition is attached and the device shows "NOT this wallet";
+  // the card must say so too, not stay green.
+  test('recipient changed under an attached ERC-7730 definition: still red', async () => {
+    const t = tx('swapspro-0x-eth-to-usdc')
+    const inner = 2 + 2 * (4 + 32 * 5 + 32)
+    expect(t.data.slice(inner, inner + 8)).toBe('1fff991f')
+    const control = { ...t, data: `${t.data.slice(0, inner + 8)}${OTHER.slice(2).padStart(64, '0')}${t.data.slice(inner + 72)}` }
+    for (const [request, red] of [[t, false], [control, true]] as const) {
+      const r = await review(request, '7.17.0')
+      r.info.erc7730 = { primaryDefinitionId: `0x${'68'.repeat(32)}`, definitions: [] }
+      r.info.erc7730Description = { signedBy: 'KeepKey ClearSign TEST', intent: 'Swap with 0x', fields: [] }
+      r.info.needsBlindSigning = false
+      const risk = assessSigningRisk(r.info)!
+      const text = risk.reasons.map((x) => x.text).join('\n')
+      expect(text).toContain('Swap with 0x: your KeepKey shows it from a KeepKey ClearSign description.')
+      if (red) {
+        expect(risk.tier).toBe('red')
+        expect(text).toContain(`The swap output goes to ${OTHER}, which is NOT the account signing this`)
+      } else {
+        expect(risk.tier).toBe('green')
+        expect(text).not.toContain('NOT the account signing this')
+      }
+    }
   })
 
   test('fails closed: a Settler 0x did not deploy, an unpinned AllowanceHolder, a value mismatch', () => {

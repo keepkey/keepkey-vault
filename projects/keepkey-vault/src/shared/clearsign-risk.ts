@@ -18,6 +18,8 @@ import { acrossDepositView, decodeAcrossDepositV3, findReviewedAcrossSpokePool, 
 import { RELAY_DEPOSITORY, decodeRelayDeposit, isZeroAddress, type RelayDeposit } from './relayDeposit'
 import { ACROSS_NAMED_TOKENS, REVIEWED_EVM_TOKENS } from './reviewed-evm-tokens'
 import type {
+  EIP712DecodedField,
+  EIP712DecodedInfo,
   SafeCallPreview,
   SigningRequestInfo,
   SimulatedHoldings,
@@ -34,7 +36,7 @@ import { nftMarketplaceOperator } from './nft-marketplaces'
 import { cosmosDepositPreview } from './cosmosDepositPreview'
 import { SOLANA_TOKEN_IDENTITIES } from './solana-token-identities'
 import { lookalikeOf } from './address-lookalike'
-import { decodeMultiSend, safeContract } from './safe-tx'
+import { decodeMultiSend, deviceWarnsSafeDelegatecall, eip55, safeContract } from './safe-tx'
 
 export type RiskLevel = 'low' | 'medium' | 'high' | 'critical'
 export interface RiskReason { level: RiskLevel; text: string }
@@ -52,14 +54,20 @@ const TIER_HEADLINE: Record<SigningTier, string> = {
   red: 'Unknown or unusual: only sign if you trust this site',
 }
 const USED_BEFORE_HEADLINE = 'Used before, but your KeepKey cannot show this call'
+const UNCHECKED_HEADLINE = 'Shown on your KeepKey, but this computer could not check one payee'
 const U64_MAX = (1n << 64n) - 1n
 
 /** A protocol Desktop knows and decodes in full, on firmware that cannot show
  *  it yet. Owner rule: known is normal, so say "not on this firmware yet",
  *  not "signing blind". The device still needs AdvancedMode for raw data. */
-function notOnThisFirmware(what: string, fw?: string): string {
-  return `${fw ? `KeepKey firmware ${fw}` : 'This KeepKey firmware'} cannot show ${what} on the device yet, so the device shows raw data and needs Advanced Mode to sign. Later firmware may add it. Check the details here.`
+function notOnThisFirmware(what: string, req: SigningRequestInfo): string {
+  // A request this firmware refuses outright gets one reason for that
+  // (assessSigningRisk); AdvancedMode would not help, so it is not mentioned.
+  if (req.firmwareCannotSign) return 'Check the details here.'
+  return `${firmwareName(req)} cannot show ${what} on the device yet, so the device shows raw data and needs Advanced Mode to sign. Later firmware may add it. Check the details here.`
 }
+
+const firmwareName = (req: SigningRequestInfo) => req.firmwareVersion ? `KeepKey firmware ${req.firmwareVersion}` : 'This KeepKey firmware'
 
 export const shortAddr = (a: string) => (a.length > 12 ? `${a.slice(0, 4)}…${a.slice(-4)}` : a)
 
@@ -187,9 +195,10 @@ function jupiterOutput(ix: SolanaTxDecodedInstruction): string | undefined {
 }
 
 /** Plain sentence for an instruction KeepKey fully understands, or null.
- *  `from` is the signing account; `swapOutputs` the accounts a Jupiter swap
- *  in this transaction pays out to. */
-function describeKnown(ix: SolanaTxDecodedInstruction, tokenAccounts: TokenAccounts, from?: string, swapOutputs = new Set<string>()): RiskReason | null {
+ *  `from` is the signing account, or the user a Jupiter route names when the
+ *  request has none; `signer` only the request's own signing account.
+ *  `swapOutputs` the accounts a Jupiter swap in this transaction pays out to. */
+function describeKnown(ix: SolanaTxDecodedInstruction, tokenAccounts: TokenAccounts, from?: string, swapOutputs = new Set<string>(), signer?: string): RiskReason | null {
   const name = ix.instructionName
   if (ix.programName === 'System Program' && name === 'transfer') {
     const to = acct(ix, 'destination')
@@ -201,6 +210,19 @@ function describeKnown(ix: SolanaTxDecodedInstruction, tokenAccounts: TokenAccou
       return { level: 'low', text: `Moves ${sol} into your own wrapped-SOL account ${shortAddr(to)}.` }
     }
     return { level: 'low', text: `Sends ${sol}${to ? ` to ${shortAddr(to)}` : ''}.` }
+  }
+  // A durable-nonce transaction does not expire: it stays valid until it is
+  // sent or its nonce is advanced, which only the nonce authority can do.
+  // Checked against the signer only: a route's user is named by the same
+  // bytes that name the nonce authority.
+  if (ix.programName === 'System Program' && name === 'advanceNonceAccount') {
+    const nonce = acct(ix, 'nonceAccount') ?? 'a nonce account', authority = acct(ix, 'nonceAuthority')
+    if (signer && authority === signer) {
+      return { level: 'low', text: `Uses durable nonce account ${shortAddr(nonce)}, which your own account controls: this transaction does not expire until it is sent or you advance that nonce.` }
+    }
+    return { level: 'high', text: signer && authority
+      ? `Uses durable nonce account ${nonce}, controlled by ${authority}, which is NOT the account signing this (${signer}). This transaction does not expire, and only that account can cancel it.`
+      : `Uses durable nonce account ${nonce}. This transaction does not expire, and this computer could not check who can cancel it.` }
   }
   if (ix.programName === 'Stake Program' && name === 'delegateStake') {
     const stake = acct(ix, 'stakeAccount'), vote = acct(ix, 'voteAccount')
@@ -274,7 +296,7 @@ function jupiterSwap(ix: SolanaTxDecodedInstruction, d: SolanaTxDecodedInfo, req
   if (outHeld && outLabel && outHeld.mint !== outLabel) add('high', `This swap says it pays out token ${outLabel}, but the account that receives it holds token ${outHeld.mint}.`)
   const pct = (bps: bigint) => `${Number(bps) / 100}%`
   const venues = arg(ix, 'route') ? `, routed through ${arg(ix, 'route')}` : ''
-  const fw = notOnThisFirmware('Jupiter swaps', req.firmwareVersion)
+  const fw = notOnThisFirmware('Jupiter swaps', req)
   if (quotedOut !== undefined) {
     const min = slip >= 10_000n ? 0n : quotedOut * (10_000n - slip) / 10_000n
     const amountIn = a('inAmount')
@@ -347,15 +369,16 @@ function certifiedBlobShown(req: SigningRequestInfo): boolean {
   return certifiedEnvelopeShown(base64PayloadBytes(d.signedInsightBlob), d.insightKeyId, req.firmwareVersion, req)
 }
 
-/** What the verdict tier rests on: the device shows it, this computer knows the
+/** What the verdict tier rests on: the device shows it, the device shows it
+ *  but this computer could not check a payee in it, this computer knows the
  *  protocol and decodes it in full, this account has used the contract before,
  *  or none of these. */
-type Recognition = 'shows' | 'known' | 'used' | 'unknown'
+type Recognition = 'shows' | 'unchecked' | 'known' | 'used' | 'unknown'
 
 /** `notShown` says the device cannot show a protocol yet; a call inside a
  *  SafeTx passes its own (the card says that once for the whole SafeTx). */
 function evmTx(req: SigningRequestInfo, add: (l: RiskLevel, t: string) => void,
-  notShown = (what: string) => notOnThisFirmware(what, req.firmwareVersion)): Recognition {
+  notShown = (what: string) => notOnThisFirmware(what, req)): Recognition {
   const to = (req.to ?? '').toLowerCase()
   const chainId = evmChainId(req.chainId)
   const rawData = typeof req.data === 'string' && req.data !== '' ? req.data : '0x'
@@ -392,7 +415,8 @@ function evmTx(req: SigningRequestInfo, add: (l: RiskLevel, t: string) => void,
   const fields = req.calldataDecoded?.fields ?? []
   const field = (n: string) => fields.find((f) => f.name === n)?.value
   // Set only for a reviewed Universal Router whose calldata decodes the way
-  // the device decodes it (evm-signing-preview uniswapSwapFields).
+  // the device decodes it, or as a one-pool v4 plan the device does not show
+  // (evm-signing-preview uniswapSwapFields).
   const urSwap = field('Protocol') === 'Uniswap Universal Router' && field('Action')?.startsWith('Swap ')
     ? field('Action')!.replace(/^Swap /, 'Swaps ') : undefined
   const relay = decodeRelayDeposit(to, data, chainId)
@@ -431,7 +455,7 @@ function evmTx(req: SigningRequestInfo, add: (l: RiskLevel, t: string) => void,
     // set up: named, and not danger. Any other operator stays below.
     if (!req.deviceClearSigns) recognition = 'known'
     const market = nftMarketplaceOperator(chainId, addrWord(0)!)!
-    add(spendPermissionLevel(market, true, true), `Standard marketplace setup: lets ${market} (${addrWord(0)}) move ALL of your NFTs in collection ${to} when a listing you sign sells. You can revoke this later.${req.deviceClearSigns ? '' : ` ${notOnThisFirmware('NFT approvals', req.firmwareVersion)}`}`)
+    add(spendPermissionLevel(market, true, true), `Standard marketplace setup: lets ${market} (${addrWord(0)}) move ALL of your NFTs in collection ${to} when a listing you sign sells. You can revoke this later.${req.deviceClearSigns ? '' : ` ${notOnThisFirmware('NFT approvals', req)}`}`)
   } else if (sel === '0xa22cb465' && addrWord(0) && num(1) !== null) {
     add(num(1) === 0n ? 'low' : 'critical', num(1) === 0n
       ? `Removes ${addrWord(0)}'s access to your NFTs in collection ${to}.`
@@ -456,6 +480,8 @@ function evmTx(req: SigningRequestInfo, add: (l: RiskLevel, t: string) => void,
     const what = d ? `${d.summary ?? d.intent}${d.protocol ? ` on ${d.protocol.name}` : ''}` : `This call to ${to}`
     // Calm when this computer read the same description; gold only when it could not.
     add(d ? 'low' : 'medium', `${what}: your KeepKey shows it from a KeepKey ClearSign description.`)
+    // A swap Desktop also decoded: output or leftovers going to anyone else is not normal.
+    if (swapCall) swapDestinations(req, field, add)
   } else if (urSwap && req.calldataDecoded?.signedInsightBlob) {
     recognition = 'known'
     // Every command decoded, and a signed description attached that the device
@@ -479,7 +505,7 @@ function evmTx(req: SigningRequestInfo, add: (l: RiskLevel, t: string) => void,
     add(req.deviceClearSigns && thorSwap ? 'low' : 'medium', req.deviceClearSigns
       ? `${what}. Your KeepKey shows this deposit on its screen; check it there.`
       : `${what}. ${notShown('this deposit')}`)
-    thorVault(req.thorVault, thorProtocol, field('Vault') ?? '', String(req.to ?? ''), add)
+    thorVault(req.thorVault, thorProtocol, field('Vault') ?? '', String(req.to ?? ''), req.firmwareVersion, add)
   } else if (urSwap && !req.deviceClearSigns) {
     recognition = 'known'
     add('medium', `${urSwap} through the Uniswap Universal Router, a contract KeepKey has reviewed. ${notShown('this swap')}`)
@@ -520,6 +546,15 @@ function evmTx(req: SigningRequestInfo, add: (l: RiskLevel, t: string) => void,
     // Uniswap's own interface fee is 0.15-0.25%; above 1% it is not a fee.
     if (fee && Number(fee[1]) * 100 + Number(fee[2]) > 100) add('high', `${fee[1]}.${fee[2]}% of the swap output goes to ${fee[3]}, not to you.`)
     else if (fee) add('low', `Fee: ${fee[1]}.${fee[2]}% of the swap output goes to ${fee[3]}.`)
+    // 7.17: an exact-output swap's fee is a fixed amount of the output token.
+    const paid = /^(\d+(?:\.\d+)?) (\S+) to (0x[0-9a-f]{40})$/.exec(field('Fee') ?? '')
+    const out = /^(\d+(?:\.\d+)?) (\S+)$/.exec(field('Minimum output') ?? '')
+    if (paid) {
+      const share = out && out[2] === paid[2] ? Number(paid[1]) / (Number(paid[1]) + Number(out[1])) : undefined
+      const pct = share === undefined ? '' : ` (${(share * 100).toFixed(2)}%)`
+      if (share === undefined || share > 0.01) add('high', `${paid[1]} ${paid[2]}${pct} of the swap output goes to ${paid[3]}, not to you.`)
+      else add('low', `Fee: ${paid[1]} ${paid[2]}${pct} of the swap output goes to ${paid[3]}.`)
+    }
   }
   if (thorSwap) {
     thorDestination(req, field('Output destination'), field('Output chain'), from, add)
@@ -535,11 +570,18 @@ function thorDepositProtocol(req: SigningRequestInfo): 'THORChain' | 'Mayachain'
 }
 
 /** The vault a router deposit pays, against the network's active vaults
- *  (bun/thor-vaults.ts). Advice: the device labels every vault UNVERIFIED. */
-function thorVault(c: ThorVaultCheck | undefined, protocol: string, vault: string, router: string, add: (l: RiskLevel, t: string) => void) {
+ *  (bun/thor-vaults.ts). Advice: the device cannot check a vault. 7.16 labels
+ *  every vault UNVERIFIED; 7.14 shows "Using Asgard vault", which is no check. */
+function thorVault(c: ThorVaultCheck | undefined, protocol: string, vault: string, router: string, fw: string | undefined, add: (l: RiskLevel, t: string) => void) {
   const name = protocol === 'Mayachain' ? 'Maya' : protocol
   if (c?.status === 'current') {
-    add('low', `Pays vault ${vault}, one of ${name}'s active ${c.chain} vaults in all ${c.sources} ${name} sources this computer asked. Your KeepKey cannot check vaults itself, so it labels this one UNVERIFIED.`)
+    // The 7.15 builds disagree (release/7.15 "Using Asgard vault", 7.15-b6
+    // "Pays UNVERIFIED vault"), so 7.15 names no screen.
+    const label = fw && versionCompare(fw, '7.15.0') < 0
+      ? `its "Using Asgard vault" screen shows the address but is not a check`
+      : fw && versionCompare(fw, '7.16.0') >= 0 ? 'it labels this one UNVERIFIED'
+      : 'its screen shows the address but is not a check'
+    add('low', `Pays vault ${vault}, one of ${name}'s active ${c.chain} vaults in all ${c.sources} ${name} sources this computer asked. Your KeepKey cannot check vaults itself, so ${label}.`)
   } else if (c?.status === 'retiring') {
     add('medium', `Pays vault ${vault}, which ${name} is retiring: every ${name} source this computer asked lists it as retiring on ${c.chain}. ${name} still accepts deposits to it while it moves funds to the new vaults; a fresh quote would use an active vault. Your KeepKey cannot check vaults itself.`)
   } else if (c?.status === 'not-current') {
@@ -660,7 +702,7 @@ function relayDeposit(d: RelayDeposit, req: SigningRequestInfo, decodedSent: str
  *  device shows raw data. A normal swap back to the signer is calm; output or
  *  leftovers going to anyone else is not normal. */
 function decodedSwap(req: SigningRequestInfo, field: (n: string) => string | undefined, add: (l: RiskLevel, t: string) => void,
-  notShown = (what: string) => notOnThisFirmware(what, req.firmwareVersion)) {
+  notShown = (what: string) => notOnThisFirmware(what, req)) {
   const from = (req.from ?? '').toLowerCase()
   const protocol = field('Protocol') ?? 'this protocol'
   const dest = field('Output destination') ?? ''
@@ -668,13 +710,21 @@ function decodedSwap(req: SigningRequestInfo, field: (n: string) => string | und
   add('medium', `Swap through ${protocol} (contract ${req.to}): pays ${field('Input amount')} for at least ${field('Minimum output')}, sent to ${dest === from ? 'your account' : dest}. ${shown
     ? 'Your KeepKey shows this call from a KeepKey-certified description and refuses it if that description is not genuine. Check the amounts there.'
     : notShown(`${protocol} swaps`)}`)
-  if (from && dest !== from) add('high', `The swap output goes to ${dest}, which is NOT the account signing this (${from}).`)
-  const refund = field('Leftover refund to')
-  if (from && refund && /^0x[0-9a-f]{40}$/.test(refund) && refund !== from) add('high', `Leftover coins are refunded to ${refund}, which is NOT the account signing this (${from}).`)
+  swapDestinations(req, field, add)
   const fee = field('Relay fee')
   if (fee) add('low', `Relay fee: ${fee}.`)
   const validTo = field('Valid until')
   if (validTo) add('low', `This places a CoW order: the ETH waits in CoW's EthFlow contract until a solver fills it, by ${validTo}. If nobody fills it, the ETH can be refunded to the account that placed the order after that time.`)
+}
+
+/** A decoded swap (bun/swap-decoders) whose output or leftovers go to anyone
+ *  but the signing account. */
+function swapDestinations(req: SigningRequestInfo, field: (n: string) => string | undefined, add: (l: RiskLevel, t: string) => void) {
+  const from = (req.from ?? '').toLowerCase()
+  const dest = field('Output destination') ?? ''
+  if (from && dest !== from) add('high', `The swap output goes to ${dest}, which is NOT the account signing this (${from}).`)
+  const refund = field('Leftover refund to')
+  if (from && refund && /^0x[0-9a-f]{40}$/.test(refund) && refund !== from) add('high', `Leftover coins are refunded to ${refund}, which is NOT the account signing this (${from}).`)
 }
 
 /** A depositV3 to a pinned Across SpokePool. Decoded here only: the device
@@ -708,15 +758,19 @@ function acrossDeposit(d: AcrossDepositV3, req: SigningRequestInfo, add: (l: Ris
   if (d.message !== '0x') add('high', `Also passes ${(d.message.length - 2) / 2} bytes of instructions that run at the recipient on ${v.destination}. This computer cannot read them.`)
 }
 
+const readableText = (text: string) => /^[\x20-\x7e\t\n\r\u00a0-\uffff]+$/.test(text) && !/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(text)
+
 /** The bytes as text, when they are printable UTF-8 (a sign-in message), else undefined. */
 function printableUtf8(hex: string): string | undefined {
   if (!/^0x([0-9a-fA-F]{2})+$/.test(hex)) return undefined
   try {
     const bytes = new Uint8Array(hex.slice(2).match(/../g)!.map((b) => parseInt(b, 16)))
     const text = new TextDecoder('utf-8', { fatal: true }).decode(bytes)
-    return /^[\x20-\x7e\t\n\r\u00a0-\uffff]+$/.test(text) && !/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(text) ? text : undefined
+    return readableText(text) ? text : undefined
   } catch { return undefined }
 }
+
+const quoted = (text: string, max = 200) => `"${text.length > max ? text.slice(0, max) + '…' : text}"`
 
 /** A message the Safe signs as its own (EIP-1271), from a SafeMessage or an
  *  on-chain SignMessageLib call. Readable text (a sign-in) is normal; a hash
@@ -724,11 +778,45 @@ function printableUtf8(hex: string): string | undefined {
 function safeSignsMessage(safe: string, hex: string, add: (l: RiskLevel, t: string) => void): boolean {
   const text = printableUtf8(hex)
   if (text) {
-    add('medium', `Your Safe (${safe}) signs this text as its own, so apps that check the Safe's signature accept it: "${text.length > 200 ? text.slice(0, 200) + '…' : text}"`)
+    add('medium', `Your Safe (${safe}) signs this text as its own, so apps that check the Safe's signature accept it: ${quoted(text)}`)
     return false
   }
   add('high', `Approves a message for your whole Safe (${safe}). Apps use this to make the Safe sign permits and orders, and this computer cannot read what it approves.`)
   return true
+}
+
+/** A SafeMessage. Safe{Wallet} sends only a hash of the original (hashMessage
+ *  of the text, or a typed document's EIP-712 hash); the gate attaches the
+ *  original from Safe's Transaction Service only when it hashes to it.
+ *  `hostRead` = described here, while the device shows only the hash. */
+function safeMessage(req: SigningRequestInfo, d: EIP712DecodedInfo, add: (l: RiskLevel, t: string) => void): TypedDoc {
+  const safe = d.domain.verifyingContract || 'unknown Safe'
+  const o = req.safeMessageOriginal
+  const checked = "This computer read it from Safe's Transaction Service and checked that it matches what your KeepKey signs."
+  // A hex string is a code standing for something else, not words. The text
+  // is shown in full (to 1000 characters): the device shows only its hash.
+  if (o?.status === 'text' && readableText(o.text) && !/^0x[0-9a-fA-F]*$/.test(o.text)) {
+    add('medium', `Your Safe (${safe}) signs this text as its own, so apps that check the Safe's signature accept it: ${quoted(o.text, 1000)}. ${checked}`)
+    return { knownCalm: true, unverified: false, opaque: false, hostRead: true }
+  }
+  if (o?.status === 'typed') {
+    add('medium', `Your Safe (${safe}) signs this ${o.decoded.operationName} as its own, so apps that check the Safe's signature accept it. ${checked}`)
+    let described = 0
+    // The Safe is the account that signs the document inside; a SafeMessage
+    // inside it is read only from its own bytes.
+    const inner = describeTypedDoc({ ...req, from: safe, typedDataDecoded: o.decoded, recognizedSpender: o.recognizedSpender, safeMessageOriginal: undefined }, o.decoded,
+      (l, t) => { described++; add(l, t) }, true)
+    if (!described) add('high', `This computer has no description of ${o.decoded.operationName}, so it cannot say what it lets an app do.`)
+    return { knownCalm: inner.knownCalm && !inner.unverified, unverified: false, opaque: inner.opaque || !described, hostRead: true }
+  }
+  const opaque = safeSignsMessage(safe, String(d.fields.find((x) => x.label === 'Message')?.raw ?? ''), add)
+  if (opaque && o) {
+    add('medium', o.status === 'text' ? `The original in Safe's Transaction Service is not readable text${/^0x[0-9a-fA-F]*$/.test(o.text) ? `: ${quoted(o.text)}` : ''}.`
+      : o.status === 'not-found' ? "Safe's Transaction Service has no copy of the original yet. If you are the first owner to sign, Safe{Wallet} shares it only after your signature, so this computer could not read it."
+      : o.status === 'mismatch' ? "Safe's Transaction Service holds a message under this ID that does not match what you are signing, so this computer ignored it."
+      : "This computer could not reach Safe's Transaction Service to read the original.")
+  }
+  return { knownCalm: false, unverified: false, opaque, hostRead: false }
 }
 
 // ── Safe transactions ────────────────────────────────────────────────
@@ -766,6 +854,10 @@ interface SafeCtx {
   known: { address: string; name: string }[]
   req: SigningRequestInfo
   add: (l: RiskLevel, t: string) => void
+  /** Set when a delegatecall to a pinned Safe contract is not Safe{Wallet}'s
+   *  standard use of it: an unpinned target or handler argument, or a
+   *  delegatecall inside a batch. */
+  offStandard?: boolean
 }
 
 /** What this computer calls an address, if anything: never a verification. */
@@ -921,6 +1013,7 @@ function safeDelegateCall(ctx: SafeCtx, to: string, data: string): Recognition |
       const prefix = `Call ${i + 1} of ${calls.length}: `
       if (c.operation === 1) {
         ctx.add('high', delegatecallLine(c.to, prefix))
+        ctx.offStandard = true
         decoded = false
       } else if (!safeCall(ctx, c.to, c.value, c.data, prefix, ctx.req.safeCalls?.[i])) decoded = false
     })
@@ -944,14 +1037,16 @@ function safeDelegateCall(ctx: SafeCtx, to: string, data: string): Recognition |
     const target = `0x${word(0).slice(24)}`
     const singleton = safeContract(ctx.chainId, target)
     if (singleton?.kind !== 'singleton-l2') {
+      ctx.offStandard = true
       ctx.add('critical', `Switches the code your Safe runs to ${target}, which is not a standard SafeL2 contract. That code would control everything your Safe holds.`)
       return 'known'
     }
     ctx.add('medium', `Switches your Safe to the standard SafeL2 ${singleton.version} contract, through Safe's own ${pinned.name}.`)
     if (sel === '0xd9a20812') {
       const handler = /^0{24}/.test(word(1)) ? `0x${word(1).slice(24)}` : ''
+      const known = Boolean(handler) && safeContract(ctx.chainId, handler)?.kind === 'fallback-handler'
+      if (!known) ctx.offStandard = true
       if (!handler) return 'unknown'
-      const known = safeContract(ctx.chainId, handler)?.kind === 'fallback-handler'
       ctx.add(known ? 'low' : 'medium', known ? `Also sets Safe's standard fallback handler (${handler}).` : `Also sets ${handler} as your Safe's fallback handler. It answers the signature checks (EIP-1271) apps use to accept your Safe's signatures.`)
     }
     return 'known'
@@ -961,14 +1056,14 @@ function safeDelegateCall(ctx: SafeCtx, to: string, data: string): Recognition |
 
 /** A SafeTx, decoded here. 'shows' = the device shows all of it (a coin send,
  *  a rejection); 'known' = decoded here, the device shows the data as hex. */
-function safeTx(req: SigningRequestInfo, d: NonNullable<SigningRequestInfo['typedDataDecoded']>, add: (l: RiskLevel, t: string) => void): Recognition {
+function safeTx(req: SigningRequestInfo, d: NonNullable<SigningRequestInfo['typedDataDecoded']>, add: (l: RiskLevel, t: string) => void, signerSafe = false): Recognition {
   const f = (label: string) => String(d.fields.find((x) => x.label === label)?.raw ?? '')
   const safe = (d.domain.verifyingContract ?? '').toLowerCase()
   const from = (req.from ?? '').toLowerCase()
   const ctx: SafeCtx = {
     chainId: evmChainId(d.domain.chainId ?? req.chainId), safe, req, add,
     known: [
-      ...(from ? [{ address: from, name: 'this KeepKey account' }] : []),
+      ...(from ? [{ address: from, name: signerSafe ? 'your Safe that signs this message' : 'this KeepKey account' }] : []),
       ...(safe ? [{ address: safe, name: 'your Safe' }] : []),
       ...(req.knownAddresses ?? []).map((k) => ({
         address: k.address.toLowerCase(), name: k.own ? 'your KeepKey account' : k.name ? `your contact ${k.name}` : 'a saved contact',
@@ -985,7 +1080,17 @@ function safeTx(req: SigningRequestInfo, d: NonNullable<SigningRequestInfo['type
   }
   if (f('Operation') === '1') {
     const helper = safeDelegateCall(ctx, to, data)
-    if (helper) return helper
+    if (helper) {
+      // The firmware warns about every delegatecall it cannot check, Safe's own
+      // included. It reads the chain from the domain alone (0 when it has none).
+      const pinned = safeContract(ctx.chainId, to)!
+      if (deviceWarnsSafeDelegatecall(req.firmwareVersion, Number(d.domain.chainId ?? 0), to, data)) {
+        const screen = `Your KeepKey will show "Delegatecall: SafeTx gives ${eip55(to)} your Safe's full authority. Not checked."`
+        if (ctx.offStandard) add('high', `${screen} Take it seriously here: this is not how Safe{Wallet} uses Safe's ${pinned.name}. Read the other lines on this card before you approve.`)
+        else add('low', `${screen} That is expected here: it says so for any delegatecall it cannot check itself, and ${eip55(to)} is Safe's own ${pinned.name} ${pinned.version} contract at its standard address, which Safe{Wallet} uses this way.`)
+      }
+      return helper
+    }
     add('high', delegatecallLine(to))
     return 'unknown'
   }
@@ -998,25 +1103,51 @@ function safeTx(req: SigningRequestInfo, d: NonNullable<SigningRequestInfo['type
   return data === '0x' ? 'shows' : decoded ? 'known' : 'unknown'
 }
 
-function evmTypedData(req: SigningRequestInfo, add: (l: RiskLevel, t: string) => void): Recognition {
-  const d = req.typedDataDecoded
-  if (!d) {
-    add('high', 'This computer could not read this signature request, and your KeepKey shows only a code (hash) for it. You would be signing blind.')
-    return 'unknown'
+/**
+ * What a SafeTx gas refund pays (Safe handlePayment, v1.3.0+): only when
+ * gasPrice > 0, (gas used + baseGas) × gasPrice, where the inner call gets
+ * safeTxGas, so gasPrice × (safeTxGas + baseGas) plus the call's overhead; in
+ * gasToken, or in the native coin (then at no more than the executor's own gas
+ * price) when gasToken is zero; to refundReceiver, or tx.origin when zero.
+ */
+function safeGasRefund(d: EIP712DecodedInfo, f: (label: string) => EIP712DecodedField | undefined): string {
+  const raw = (label: string) => String(f(label)?.raw ?? '0')
+  const num = (label: string) => { try { return BigInt(raw(label) || '0') } catch { return 0n } }
+  const zero = (label: string) => /^(0x)?0*$/.test(raw(label))
+  const receiver = zero('Refund Receiver') ? 'the account that executes it (tx.origin)' : raw('Refund Receiver')
+  const gasToken = raw('Gas Token').toLowerCase()
+  const gasPrice = num('Gas Price')
+  if (gasPrice === 0n) {
+    return `Names a gas refund (token ${zero('Gas Token') ? 'the native coin' : gasToken}, receiver ${receiver}) with a gas price of 0, so executing it pays no refund. Normal Safe transactions leave all three at zero.`
   }
+  const total = gasPrice * (num('Safe Tx Gas') + num('Base Gas'))
+  const chainId = d.domain.chainId
+  const token = EVM_TOKENS[`${chainId}:${gasToken}`]
+  const amount = zero('Gas Token') ? evmNativeValue(total.toString(), chainId) ?? `${total} wei`
+    : token ? `${units(total.toString(), token.decimals)} ${token.symbol}` : `${total} base units of token ${gasToken}`
+  return `Pays a gas refund out of your Safe when it is executed: up to ${amount} (gas price ${gasPrice} × (safeTxGas ${num('Safe Tx Gas')} + baseGas ${num('Base Gas')}), plus Safe's own call overhead${zero('Gas Token') ? ", at no more than the executor's own gas price" : ''}), to ${receiver}. Normal Safe transactions leave the refund at zero.`
+}
+
+/** What a typed document asks for, from this computer's describers; nothing
+ *  here says what the device shows of it. */
+interface TypedDoc { knownCalm: boolean; unverified: boolean; opaque: boolean; safeRecognition?: Recognition; hostRead?: boolean }
+
+/** `signerSafe`: the document is signed by this Safe (as req.from) through a
+ *  SafeMessage, not by the KeepKey account itself. */
+function describeTypedDoc(req: SigningRequestInfo, d: EIP712DecodedInfo, add: (l: RiskLevel, t: string) => void, signerSafe = false): TypedDoc {
   const f = (label: string) => d.fields.find((x) => x.label === label)
-  if (d.operationName === 'x402 EIP-3009 Payment') {
-    add('medium', `Authorizes a payment of ${f('Value')?.value ?? 'an amount'} to ${f('Pay To')?.raw ?? 'another account'}. Anyone holding this signature can collect it until ${f('Valid Before')?.value ?? 'it expires'}.`)
-    return !!req.firmwareVersion && versionCompare(req.firmwareVersion, '7.15.0') >= 0 ? 'shows' : 'unknown'
-  }
   const contract = d.domain.verifyingContract?.toLowerCase()
   // A known document whose spend line stays at "check before you sign":
   // firmware that cannot show it still leaves it known, not unknown.
   let knownCalm = false
+  // A payee this computer could not check: never green, even when shown.
+  let unverified = false
   // The meaning sits in bytes the device shows only as raw hex.
   let opaque = false
   // A SafeTx whose data this computer decoded ('known'): the device shows it as hex.
   let safeRecognition: Recognition | undefined
+  // A SafeMessage whose original this computer read: the device shows its hash.
+  let hostRead = false
   const delegate = f('Agent Address')?.raw ?? f('Delegate')?.raw ?? f('Session Key')?.raw
   if (/ApproveAgent$/.test(d.primaryType) || delegate) {
     // Owner rule: handing over signing power is never a normal request.
@@ -1024,11 +1155,18 @@ function evmTypedData(req: SigningRequestInfo, add: (l: RiskLevel, t: string) =>
       && /^0x(ff){32}$/i.test(String(f('Authority')?.raw ?? ''))
     add(unlimited ? 'critical' : 'high', `Gives ${delegate || 'another account'} the power to act for your account. It can then sign without your KeepKey.${unlimited ? ' There are no limits on what it can do.' : ''}`)
   } else if (d.primaryType === 'SafeTx') {
-    safeRecognition = safeTx(req, d, add)
+    safeRecognition = safeTx(req, d, add, signerSafe)
     opaque = safeRecognition === 'unknown'
+    // Safe pays gasPrice × gas in gasToken to refundReceiver when this executes.
+    // Safe{Wallet} leaves all three at zero, so a set refund is a hidden payout.
+    const set = (label: string) => !/^(0x)?0*$/.test(String(f(label)?.raw ?? '0'))
+    if (set('Gas Price') || set('Gas Token') || set('Refund Receiver')) add('high', safeGasRefund(d, f))
   } else if (d.primaryType === 'SafeMessage') {
     // EIP-1271: the Safe treats this as its own signature.
-    opaque = safeSignsMessage(d.domain.verifyingContract || 'unknown Safe', String(f('Message')?.raw ?? ''), add)
+    const m = safeMessage(req, d, add)
+    knownCalm = m.knownCalm
+    opaque = m.opaque
+    hostRead = !!m.hostRead
   } else if (/^Permit/.test(d.primaryType) || contract === PERMIT2) {
     const raw = f('Value')?.raw ?? f('Amount')?.raw ?? d.fields.find((x) => /Amount$/.test(x.label))?.raw
     // Every amount counts: a batch can hide an unlimited entry behind a small first one.
@@ -1054,7 +1192,9 @@ function evmTypedData(req: SigningRequestInfo, add: (l: RiskLevel, t: string) =>
       const unlimited = amounts.filter((a) => a.unlimited)
       const symbols = [...new Set(unlimited.map((a) => a.symbol))]
       const named = unlimited.length > 0 && symbols.every(Boolean)
-      const howMuch = all ? `ALL of your ${named ? symbols.join(' and ') : 'tokens'}`
+      // One unnamed token (a PermitSingle) is that token, not every token you hold.
+      const howMuch = all ? (named ? `ALL of your ${symbols.join(' and ')}`
+        : amounts.length <= 1 && token ? `ALL of token ${f('Token')!.raw}` : 'ALL of your tokens')
         : amounts.length ? `up to ${amounts.map((a) => a.text).join(' and ')}`
         : raw !== undefined ? `up to ${raw} of your tokens` : 'some of your tokens'
       // A UniswapX order to the reactor the decoder verified, paying out only
@@ -1067,15 +1207,16 @@ function evmTypedData(req: SigningRequestInfo, add: (l: RiskLevel, t: string) =>
       const known = identified ? req.recognizedSpender ?? (ownSwap ? 'UniswapX' : undefined) : undefined
       const who = f('Spender')?.raw ? (known ? `${known} (${f('Spender')!.raw})` : f('Spender')!.raw) : 'another account'
       const unbounded = all || amounts.length === 0 || amounts.some((a) => a.raw === undefined || a.raw >= BOUND_LIMIT)
-      // A Permit2 permit to a reviewed router is what Uniswap asks for on every
-      // swap, usually for the maximum with an expiry. Only a certified name
-      // record earns this: a name from Desktop's own spender list is advice,
-      // and most of those contracts never take a Permit2 allowance.
-      const routerPermit = contract === PERMIT2 && !!known && known === req.recognizedSpender && known !== 'Uniswap Permit2'
-        && !knownSpenderName(chainId, spender)
-      const level = spendPermissionLevel(known, unbounded, routerPermit)
       // A signature transfer (Permit*TransferFrom) is spent once, not an allowance.
       const once = /TransferFrom$/.test(d.primaryType)
+      // A Permit2 allowance to a reviewed router is what Uniswap asks for on
+      // every swap, usually for the maximum with an expiry. Only a certified
+      // name record earns this: a name from Desktop's own spender list is
+      // advice, and most of those contracts never take a Permit2 allowance.
+      // A one-time transfer for everything is not that flow.
+      const routerPermit = contract === PERMIT2 && !once && !!known && known === req.recognizedSpender && known !== 'Uniswap Permit2'
+        && !knownSpenderName(chainId, spender)
+      const level = spendPermissionLevel(known, unbounded, routerPermit)
       add(level, once
         ? `Lets ${who} take ${howMuch}, once. This signature alone is enough; no transaction from you is needed.`
         : `Lets ${who} spend ${howMuch}, now and later. This signature alone is enough; no transaction from you is needed.`)
@@ -1107,13 +1248,24 @@ function evmTypedData(req: SigningRequestInfo, add: (l: RiskLevel, t: string) =>
     // listing takes the NFT for nothing. Unnamed currency: worth unknown.
     const named = listing?.decimals !== undefined
     const dust = named && proceeds < 10n ** BigInt(Math.max(listing!.decimals! - 6, 0))
+    // royaltyInfo could not be asked here (no RPC that serves eth_call, or no
+    // answer in time): one other payee may be the creator fee, if it takes no
+    // more than a creator fee can. OpenSea caps creator earnings at 10% of the
+    // price (support.opensea.io/en/articles/8867026). Inside that bound it is
+    // not danger, but this computer did not check the payee, so the card is
+    // yellow at most. More than that, or a second unknown payee, stays red.
+    const uncheckedSum = others.reduce((sum, p) => sum + BigInt(p.raw), 0n)
+    const unchecked = listing?.creatorFeeUnchecked && new Set(others.map((p) => p.recipient.toLowerCase())).size === 1
+      && uncheckedSum * 10n <= BigInt(listing.totalRaw) && uncheckedSum < proceeds ? others : []
     // A normal listing: the signer sells its own NFTs, is paid a real amount in
     // a currency this computer names, and every other payee is a marketplace
     // fee address it knows or the collection's own creator fee.
-    if (listing && seller && own.length > 0 && others.length === 0 && named && !dust) {
+    if (listing && seller && own.length > 0 && others.length === unchecked.length && named && !dust) {
       const fees = listing.payments.filter((p) => p.role === 'opensea-fee')
       const creator = listing.payments.filter((p) => p.role === 'creator-fee')
       add('medium', `Seaport listing: sells ${listing.items.join(', ')} for ${listing.total}. You receive ${own.map((p) => p.amount).join(' + ')}${fees.length ? `, and ${fees.map((p) => p.amount).join(' + ')} goes to OpenSea's fee address` : ''}${creator.length ? `, and ${creator.map((p) => p.amount).join(' + ')} goes to the creator fee address the collection names on chain (${creator[0].recipient})` : ''}. Anyone can buy at this price until ${listing.endTime}; nothing moves until a buyer pays it.`)
+      unverified = unchecked.length > 0
+      if (unverified) add('medium', `Also pays ${unchecked.map((p) => p.amount).join(' + ')} to ${unchecked[0].recipient}. This computer could not ask the collection for its creator fee (ERC-2981 royaltyInfo), so it could not check that this is the creator fee address.`)
       knownCalm = true
     } else {
       add('critical', 'This is a marketplace order. Anyone holding this signature can take the listed items at the price in the order.')
@@ -1123,24 +1275,33 @@ function evmTypedData(req: SigningRequestInfo, add: (l: RiskLevel, t: string) =>
       for (const p of others) add('critical', `Pays ${p.amount} to ${p.recipient}, which is neither the seller nor a marketplace fee address this computer knows.`)
     }
   }
-  if (d.primaryType === 'SafeTx') {
-    // Safe pays gasPrice × gas in gasToken to refundReceiver when this executes.
-    // Safe{Wallet} leaves all three at zero, so a set refund is a hidden payout.
-    const set = (label: string) => !/^(0x)?0*$/.test(String(f(label)?.raw ?? '0'))
-    if (set('Gas Price') || set('Gas Token') || set('Refund Receiver')) {
-      add('high', `Pays a gas refund out of your Safe when it is executed, to ${set('Refund Receiver') ? f('Refund Receiver')!.raw : 'whoever executes it'}. Normal Safe transactions leave the refund at zero.`)
-    }
+  return { knownCalm, unverified, opaque, safeRecognition, hostRead }
+}
+
+function evmTypedData(req: SigningRequestInfo, add: (l: RiskLevel, t: string) => void): Recognition {
+  const d = req.typedDataDecoded
+  if (!d) {
+    add('high', 'This computer could not read this signature request, and your KeepKey shows only a code (hash) for it. You would be signing blind.')
+    return 'unknown'
   }
+  const f = (label: string) => d.fields.find((x) => x.label === label)
+  if (d.operationName === 'x402 EIP-3009 Payment') {
+    add('medium', `Authorizes a payment of ${f('Value')?.value ?? 'an amount'} to ${f('Pay To')?.raw ?? 'another account'}. Anyone holding this signature can collect it until ${f('Valid Before')?.value ?? 'it expires'}.`)
+    return !!req.firmwareVersion && versionCompare(req.firmwareVersion, '7.15.0') >= 0 ? 'shows' : 'unknown'
+  }
+  const { knownCalm, unverified, opaque, safeRecognition, hostRead } = describeTypedDoc(req, d, add)
   const structured = !!req.firmwareVersion && versionCompare(req.firmwareVersion, '7.15.0') >= 0
   if (structured) {
     add('low', 'Your KeepKey will request and display the structured fields that it hashes for this signature.')
     if (safeRecognition === 'known') add('low', "Your KeepKey may show this Safe transaction's call data only as raw hex. The description of it here is from this computer, not from your KeepKey.")
+    if (hostRead) add('low', 'Your KeepKey shows this message only as its hash. The description of it here is from this computer, not from your KeepKey.')
   } else if (knownCalm) {
-    add('medium', notOnThisFirmware(`this ${d.operationName}`, req.firmwareVersion))
+    // Before 7.15 the device shows a typed signature only as two hash codes.
+    add('medium', `${firmwareName(req)} cannot show this ${d.operationName} on the device yet: it shows only the signature's hash codes and needs Advanced Mode to sign. Later firmware shows it. Check the details here.`)
   } else {
     add('high', 'Your KeepKey can only show a code (hash) for this signature, not what it says. You would be signing blind.')
   }
-  return opaque ? 'unknown' : structured ? (safeRecognition === 'known' ? 'known' : 'shows') : knownCalm ? 'known' : 'unknown'
+  return opaque ? 'unknown' : structured ? (safeRecognition === 'known' || hostRead ? 'known' : unverified ? 'unchecked' : 'shows') : knownCalm ? 'known' : 'unknown'
 }
 
 /** What the typed-data verdict rests on, for the ClearSign report: 'shows'
@@ -1176,18 +1337,33 @@ function evmMessage(req: SigningRequestInfo, add: (l: RiskLevel, t: string) => v
   return 'unknown'
 }
 
-/** TRON: the firmware shows a plain TRX or TRC-20 transfer (tronDecoded);
- *  everything else it shows as raw data, so this reads it (tronCall). */
+/** TRON: the firmware shows a plain TRX or TRC-20 transfer (tronDecoded),
+ *  and from 7.17 an approve of a table token, staking and votes
+ *  (tronCallShown); everything else it shows as raw data, so this reads it
+ *  (tronCall). */
 function tronTx(req: SigningRequestInfo, add: (l: RiskLevel, t: string) => void): Recognition {
   const t = req.tronDecoded
   if (t) {
     const unverified = t.kind === 'TRC-20 transfer' && !/ USDT$/.test(t.amount)
-    add(unverified ? 'medium' : 'low', `Sends ${t.amount} to ${t.to}.${unverified ? ` This computer does not recognize token ${t.tokenContract}.` : ''} Your KeepKey shows this transfer; check it there.`)
+    // Only the REST gate's firmware check says the device shows it (7.15+,
+    // TRX or a token in its table); 7.14 blind-signs every transfer. From 7.16
+    // a TRC-20 outside its table is "TRON Blind Sign" behind AdvancedMode, and
+    // then the device shows the contract, base units and recipient.
+    const shown = req.requiresAdvancedMode === false
+    const fieldsAfterWarning = !shown && t.kind === 'TRC-20 transfer'
+      && !!req.firmwareVersion && versionCompare(req.firmwareVersion, '7.16.0') >= 0
+    add(unverified || !shown ? 'medium' : 'low', `Sends ${t.amount} to ${t.to}.${unverified ? ` This computer does not recognize token ${t.tokenContract}.` : ''} ${shown
+      ? 'Your KeepKey shows this transfer; check it there.'
+      : fieldsAfterWarning
+        ? `${firmwareName(req)} does not know this token: it warns "TRON Blind Sign" and needs Advanced Mode, then shows the token contract, the amount in base units and the recipient. Check those on your KeepKey.`
+        : `${firmwareName(req)} cannot show this transfer on the device: it signs it blind, without the amount or recipient, and needs Advanced Mode. Check them here.`}`)
     if (t.minimumOutput === 'NO MINIMUM IN SIGNED MEMO') add('high', 'Sets no minimum, so this swap can pay you back almost nothing.')
-    return 'shows'
+    return shown ? 'shows' : 'known'
   }
   const c = req.tronCall
-  const fw = (what: string) => add('medium', notOnThisFirmware(what, req.firmwareVersion))
+  const fw = (what: string) => req.tronCallShown
+    ? add('low', 'Your KeepKey shows this from the signed transaction; check it there.')
+    : add('medium', notOnThisFirmware(what, req))
   if (!c) {
     add('high', 'KeepKey cannot read this transaction at all. You would be signing blind.')
     return 'unknown'
@@ -1209,7 +1385,7 @@ function tronTx(req: SigningRequestInfo, add: (l: RiskLevel, t: string) => void)
         if (level === 'critical') add('critical', `${c.spender} is not a contract KeepKey knows. Sites that steal ${token} ask for exactly this approval; whoever controls that address can take your ${token} at any time.`)
       }
       fw('TRC-20 approvals')
-      return 'known'
+      return req.tronCallShown ? 'shows' : 'known'
     }
     case 'Stake TRX':
       add('low', `Stakes ${c.amount} for ${c.resource}. The TRX stays locked until you unstake it and the network's waiting period ends.`)
@@ -1249,7 +1425,7 @@ function tronTx(req: SigningRequestInfo, add: (l: RiskLevel, t: string) => void)
       return 'unknown'
   }
   fw('TRON staking and voting')
-  return 'known'
+  return req.tronCallShown ? 'shows' : 'known'
 }
 
 /** Cosmos Hub amino: hdwallet builds each of these message types on the
@@ -1347,7 +1523,7 @@ export function assessSigningRisk(req: SigningRequestInfo): RiskAssessment | nul
         jupiterSwap(ix, d, req, add)
         if (ix.note) add('medium', `This Jupiter step has bytes this computer cannot account for (${ix.note}), so it is not decoded in full.`)
       } else if (ix.status === 'known') {
-        const r = describeKnown(ix, d.tokenAccounts, me, swapOutputs)
+        const r = describeKnown(ix, d.tokenAccounts, me, swapOutputs, req.from)
         if (r) reasons.push(r)
         // Token-2022 lets a token's issuer add a transfer fee or a hook that
         // runs on every transfer; nothing here reads those settings.
@@ -1394,12 +1570,12 @@ export function assessSigningRisk(req: SigningRequestInfo): RiskAssessment | nul
       && d.instructions.every((i) => (i.status === 'known' && !i.note) || SOLANA_MEMO_PROGRAMS.has(i.programId))
     // Only a firmware check that ran says the device shows it: a caller that
     // never asked (no firmware version) leaves requiresAdvancedMode unset.
-    const firmwareShows = d.instructions.every(solanaFirmwareShows) && req.requiresAdvancedMode === false
+    const firmwareShows = d.instructions.every(solanaFirmwareShows) && req.requiresAdvancedMode === false && !req.firmwareCannotSign
     recognition = req.deviceClearSigns || (decoded && firmwareShows) ? 'shows'
       : decoded ? 'known' : 'unknown'
     // Decoded here but not on the device: say so even when the steps above
     // read calm, so a named send is not taken for a device-shown one.
-    if (recognition === 'known' && !reasons.some((r) => r.text.includes('raw data'))) {
+    if (recognition === 'known' && !req.firmwareCannotSign && !reasons.some((r) => r.text.includes('raw data'))) {
       add('low', 'This computer decodes every step of this transaction. Your KeepKey shows it as raw data.')
     } else if (reasons.length === 0 && recognition === 'shows') {
       add('low', 'Your KeepKey shows every step of this transaction.')
@@ -1462,6 +1638,13 @@ export function assessSigningRisk(req: SigningRequestInfo): RiskAssessment | nul
   } else {
     return null
   }
+  // The device refuses it whatever AdvancedMode is set to: promise an update
+  // only where the newest firmware clear-signs it.
+  if (req.firmwareCannotSign) {
+    add('medium', `${firmwareName(req)} cannot sign this: your KeepKey will refuse it. ${req.firmwareUpdateClearSigns
+      ? 'Updating your KeepKey firmware fixes this.'
+      : 'Newer firmware does not show it on the device either.'}`)
+  }
 
   // Last, and deliberately at 'low': a simulation is an estimate this computer
   // made, so it may add an answer but never change the verdict above. The level
@@ -1474,5 +1657,9 @@ export function assessSigningRisk(req: SigningRequestInfo): RiskAssessment | nul
   reasons.sort((a, b) => ORDER.indexOf(b.level) - ORDER.indexOf(a.level))
   const tier: SigningTier = ORDER.indexOf(level) >= ORDER.indexOf('high') || recognition === 'unknown' ? 'red'
     : recognition === 'shows' ? 'green' : 'yellow'
-  return { level, tier, headline: tier === 'yellow' && recognition === 'used' ? USED_BEFORE_HEADLINE : TIER_HEADLINE[tier], reasons }
+  const headline = req.firmwareCannotSign
+    ? `${firmwareName(req)} cannot sign this${req.firmwareUpdateClearSigns ? '. Update your firmware' : ''}`
+    : tier !== 'yellow' ? TIER_HEADLINE[tier]
+    : recognition === 'used' ? USED_BEFORE_HEADLINE : recognition === 'unchecked' ? UNCHECKED_HEADLINE : TIER_HEADLINE[tier]
+  return { level, tier, headline, reasons }
 }
