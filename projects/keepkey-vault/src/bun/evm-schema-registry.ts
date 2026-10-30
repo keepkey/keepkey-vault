@@ -26,8 +26,11 @@ import {
   ERC20_APPROVE,
   evmEntryId,
   findCertifiedEvmSchemaSpec,
+  findEvmNameRecord,
+  type EvmNameRecord,
   selectingToken,
   findReviewedUniversalRouter,
+  certifiedEvmEnvelopeVerifies,
   isCertifiedEvmMetadata,
   reviewedSwapTokens,
   UR_METHOD,
@@ -37,6 +40,9 @@ import {
 import { buildTokenSchema, firmwareTokenSymbol, tokenCallShape } from './evm-token-schema'
 import { findPromotedEvmArtifact } from './clearsign-artifact-resolver'
 import { runtimeEvmSighash } from './uniswap-runtime-envelope'
+import { firmwareClearSigns } from './calldata-decoder'
+import { supportsCertifiedClearSign } from './solana-certified-policy'
+import { versionCompare } from '../shared/firmware-versions'
 
 export { isCertifiedEvmMetadata }
 
@@ -218,6 +224,11 @@ async function fetchCertifiedEvmSchema(
   ) {
     fail('ClearSign verification service response does not match the requested schema')
   }
+  // The device would refuse it: never attached, so the card never shows it as clear-signed.
+  if (!certifiedEvmEnvelopeVerifies(result.signedPayload)) {
+    console.warn(`[clearsign] certified ${spec.method} for chain ${chainId} ${to} does not verify to the trusted ClearSign root; not attached`)
+    return undefined
+  }
   return {
     method: spec.method,
     keyId: CERTIFIED_METADATA_KEY_ID,
@@ -283,11 +294,81 @@ export async function findCertifiedUniswapSwap(
   ) {
     throw new Error('ClearSign verification service response does not match the requested swap entry')
   }
+  if (!certifiedEvmEnvelopeVerifies(result.signedPayload)) {
+    console.warn(`[clearsign] certified swap entry for chain ${chainId} ${reviewed.address} does not verify to the trusted ClearSign root; not attached`)
+    return undefined
+  }
   return {
     method: UR_METHOD,
     keyId: CERTIFIED_METADATA_KEY_ID,
     signedPayload: result.signedPayload,
   }
+}
+
+/**
+ * The certified 0x06 name record for an address in CERTIFIED_EVM_NAMES, from
+ * the ClearSign service. Only that address and chain leave the host.
+ * Undefined on any failure: a name is optional and never blocks signing.
+ */
+export async function findCertifiedEvmName(
+  record: EvmNameRecord,
+  tag = '[clearsign]',
+): Promise<Pick<SignedEvmSchema, 'keyId' | 'signedPayload'> | undefined> {
+  try {
+    const response = await fetch(`${serviceBase()}/v1/evm/name`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ chainId: record.chainId, address: record.address }),
+      signal: AbortSignal.timeout(3_000),
+    })
+    const result: any = await response.json()
+    const metadata = { signedPayload: result?.signedPayload, keyId: result?.keyId }
+    if (
+      !response.ok ||
+      result?.classification !== 'VERIFIED' ||
+      result?.chainId !== record.chainId ||
+      String(result?.address || '').toLowerCase() !== record.address ||
+      result?.keyId !== CERTIFIED_METADATA_KEY_ID ||
+      !isCertifiedEvmMetadata(metadata) ||
+      !certifiedEvmEnvelopeVerifies(metadata.signedPayload)
+    ) {
+      console.warn(`${tag} no certified name for ${record.address} on chain ${record.chainId}: ${result?.error || response.status}`)
+      return undefined
+    }
+    return metadata
+  } catch (error: any) {
+    console.warn(`${tag} ClearSign name lookup failed: ${error?.message || error}`)
+    return undefined
+  }
+}
+
+/** The first firmware that shows a certified 0x06 name beside the spender of
+ *  an approve it decodes natively (keepkey-firmware #1020). 7.16 ignores a
+ *  name record in SignTx. */
+export const APPROVE_SPENDER_NAME_MIN_FW = '7.17.0'
+
+/**
+ * The spender's certified name record for an ERC-20 approve the firmware
+ * shows natively (token in its own table, no value), on 7.17.0 or later.
+ * The native screens already show the token and amount, so the name replaces
+ * the generic token schema in the one metadata slot, as a contact label does
+ * for a native send. Any other call, or no name, returns undefined.
+ */
+export async function findNativeApproveSpenderName(
+  chainId: number | undefined,
+  to: string | undefined,
+  data: string | undefined,
+  firmwareVersion: string | undefined,
+  value?: unknown,
+): Promise<SignedEvmSchema | undefined> {
+  if (!firmwareVersion || versionCompare(firmwareVersion, APPROVE_SPENDER_NAME_MIN_FW) < 0) return undefined
+  if (!supportsCertifiedClearSign(firmwareVersion)) return undefined
+  const spender = approveSpender(data)
+  if (!spender || !firmwareClearSigns(to, data, chainId, firmwareVersion, value)) return undefined
+  const record = findEvmNameRecord(chainId, spender)
+  const name = record && await findCertifiedEvmName(record, '[approve]')
+  if (!record || !name) return undefined
+  return { method: `approve (spender: ${record.name})`, ...name, source: 'certified-service' }
 }
 
 export async function resolveEvmSchema(
@@ -298,6 +379,8 @@ export async function resolveEvmSchema(
   /** The device's firmware: an entry whose certified body it refuses (0x04
    *  before 7.17.0; unknown firmware counts as refusing) is never returned. */
   firmwareVersion?: string,
+  /** The transaction's value: an approve that carries one is not native. */
+  value?: unknown,
 ): Promise<SignedEvmSchema | undefined> {
   // Older firmware may not handle EthereumTxMetadata at all. The caller's
   // ordinary Advanced Mode policy gate still applies.
@@ -306,6 +389,8 @@ export async function resolveEvmSchema(
     entry && !certifiedBodyRefused(entry.signedPayload, firmwareVersion) ? entry : undefined
   const promoted = findPromotedEvmArtifact(chainId, to, data)
   if (promoted) return shown({ ...promoted, keyId: CERTIFIED_METADATA_KEY_ID, source: 'promoted-local' })
+  const named = await findNativeApproveSpenderName(chainId, to, data, firmwareVersion, value)
+  if (named) return named
   return shown(await findCertifiedEvmSchema(chainId, to, data))
 }
 

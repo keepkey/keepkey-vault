@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
 import protobuf from 'protobufjs/light'
 import bs58 from 'bs58'
-import type { TronCallPreview, TronTxPreview } from '../shared/types'
+import type { SigningRequestInfo, TronCallPreview, TronTxPreview } from '../shared/types'
 import { versionCompare } from '../shared/firmware-versions'
 
 type Value = { wire: number; bytes?: Buffer; number?: bigint }
@@ -100,8 +100,13 @@ const TRON_FIRMWARE_TOKENS = new Set([
   'TXDk8mbtRbXeYuMNS83CfKPaYYT8XWv9Hz', // USDD 2.0
   'TNUC9Qb1rRpS5CbWLmNMxXBjyFoydXjWFR', // WTRX
 ])
-/** First firmware that parses TRON raw_data. 7.14.x blind-signs every TronSignTx. */
-const TRON_PARSER_MIN_FW = '7.16.0'
+/** First firmware that parses TRON raw_data (tron_parseRawTx, in every 7.15
+ *  build). 7.14.x blind-signs every TronSignTx behind AdvancedMode. */
+const TRON_PARSER_MIN_FW = '7.15.0'
+/** From 7.16 a TRC-20 outside the table is "TRON Blind Sign" behind
+ *  AdvancedMode. The 7.15 builds disagree (release/7.15 shows every TRC-20
+ *  transfer, 7.15-b6 gates it like 7.16), so 7.15 does not force AdvancedMode. */
+const TRON_TOKEN_TABLE_MIN_FW = '7.16.0'
 /** First firmware that also shows a TRC-20 approve of a table token, TRX
  *  staking (FreezeBalanceV2 / UnfreezeBalanceV2) and SR votes (tron.c). */
 const TRON_STAKE_VOTE_MIN_FW = '7.17.0'
@@ -158,12 +163,12 @@ function tronApproveStakeVoteParsed(hex: string): boolean {
   } catch { return false }
 }
 
-/** The device shows this transaction from its own parse: a plain TRX transfer,
- *  or a TRC-20 transfer of a token in its table; from 7.17.0 also a TRC-20
- *  approve of a table token, a FreezeBalanceV2 / UnfreezeBalanceV2 and a
- *  VoteWitness. Anything else (another contract, a token outside the table, a
- *  multisig Permission_id, older firmware, an unknown version) is "TRON Blind
- *  Sign" behind AdvancedMode. */
+/** The device shows this transaction from its own parse without AdvancedMode:
+ *  a plain TRX transfer, or a TRC-20 transfer of a token in its table (any
+ *  TRC-20 on 7.15, see above); from 7.17.0 also a TRC-20 approve of a table
+ *  token, a FreezeBalanceV2 / UnfreezeBalanceV2 and a VoteWitness. Anything
+ *  else (another contract, a TRC-20 outside the 7.16 table, a multisig
+ *  Permission_id, 7.14, an unknown version) needs AdvancedMode. */
 export function tronShownNatively(rawTx: unknown, firmwareVersion: string | undefined): boolean {
   const fw = firmwareVersion?.replace(/^v/, '')
   if (!fw || versionCompare(fw, TRON_PARSER_MIN_FW) < 0) return false
@@ -172,9 +177,33 @@ export function tronShownNatively(rawTx: unknown, firmwareVersion: string | unde
   try {
     const { kind, tokenContract } = decodeTronTransfer(hex)
     return kind === 'TRX transfer' || TRON_FIRMWARE_TOKENS.has(tokenContract!)
+      || versionCompare(fw, TRON_TOKEN_TABLE_MIN_FW) < 0
   } catch {
     return versionCompare(fw, TRON_STAKE_VOTE_MIN_FW) >= 0 && tronApproveStakeVoteParsed(hex)
   }
+}
+
+/** The REST /tron/sign-transaction approval card: what this computer reads
+ *  from the signed raw_data bytes, and the AdvancedMode gate from what this
+ *  firmware reads (tronShownNatively). A transfer decoded here is not always
+ *  one the device shows: 7.14 blind-signs every TRON transaction. */
+export function applyTronSigningPreview(info: SigningRequestInfo, rawTx: unknown, firmwareVersion: string | undefined): void {
+  info.chain = 'tron'
+  info.tronDecoded = tronPreview(rawTx) ?? undefined
+  if (info.tronDecoded) {
+    info.from = info.tronDecoded.owner
+    info.to = info.tronDecoded.to
+    info.value = info.tronDecoded.amount
+  } else {
+    // Say what it does here. 7.17+ shows an approve of a table token,
+    // staking and votes itself; anything else is raw data on the device.
+    info.tronCall = tronCallPreview(rawTx) ?? undefined
+    if (info.tronCall) info.from = info.tronCall.owner
+  }
+  const shown = tronShownNatively(rawTx, firmwareVersion)
+  info.tronCallShown = !!info.tronCall && shown
+  info.needsBlindSigning = !shown
+  info.requiresAdvancedMode = !shown
 }
 
 /** Fail closed like firmware tron_parseRawTx. Only a single plain TRX or

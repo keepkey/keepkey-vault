@@ -3,8 +3,8 @@
  * this computer from the exact envelope Desktop sends: the intent and every
  * field's label and value, formatted the way 7.16 formats them
  * (erc7730_field.c, erc7730_format.c; lines split as on the device), only
- * when this computer checked the envelope's signature up to KeepKey's
- * production root.
+ * when this computer checked the envelope's signature up to the root the
+ * device trusts (KeepKey's production root; an emulator's TEST root in QA).
  *
  * Display only. Whether a definition is attached, and how the call is gated,
  * never depends on anything here; an envelope this cannot read gets no
@@ -16,7 +16,7 @@
 import { createHash } from 'node:crypto'
 import { utils as ethersUtils } from 'ethers'
 import { secp256k1 } from '@noble/curves/secp256k1'
-import { inspectAlphaCertificate } from './clearsign-alpha-ceremony'
+import { deviceClearSignRoot, inspectAlphaCertificate } from './clearsign-alpha-ceremony'
 import { REVIEWED_EVM_TOKENS } from '../shared/reviewed-evm-tokens'
 import firmwareTokens from './firmware-token-table-716.json'
 import { evmTokenIdentity } from '../shared/evm-contract-identity'
@@ -81,12 +81,14 @@ const DEVICE_TOKENS: Record<string, Array<string | number>> = {
 }
 
 /** The certificate alias, when the envelope's catalog signature verifies the
- *  way 7.16 verifies it (clearsign_root_verify_erc7730_catalog): a production
- *  root certificate for this chain, and the delegate's signature over the
- *  Merkle root the program and its proof lead to. */
+ *  way 7.16 verifies it (clearsign_root_verify_erc7730_catalog): a certificate
+ *  from the root the device trusts, for this chain, and the delegate's
+ *  signature over the Merkle root the program and its proof lead to. */
 function catalogSigner(program: Uint8Array, proof: Uint8Array[], cert: Uint8Array, sig: Uint8Array, chainId: bigint): string | undefined {
+  const root = deviceClearSignRoot()
+  if (!root) return undefined
   try {
-    const c = inspectAlphaCertificate(hex(cert).slice(2))
+    const c = inspectAlphaCertificate(hex(cert).slice(2), undefined, root)
     if (BigInt(c.chainId) !== chainId) return undefined
     let node = sha256(Uint8Array.of(0), program)
     for (const sibling of proof) {
@@ -99,11 +101,36 @@ function catalogSigner(program: Uint8Array, proof: Uint8Array[], cert: Uint8Arra
   }
 }
 
+/** A K773 envelope's parts: program, Merkle proof, certificate, signature. */
+function envelopeParts(envelope: Uint8Array) {
+  const program = envelope.subarray(10, 10 + u32(envelope, 6))
+  let at = 10 + program.length
+  const proof = Array.from({ length: envelope[at] }, (_, i) => envelope.subarray(at + 1 + 32 * i, at + 33 + 32 * i))
+  at += 1 + 32 * proof.length
+  const cert = envelope.subarray(at + 2, at + 2 + u16(envelope, at))
+  const sig = envelope.subarray(at + 2 + cert.length, at + 66 + cert.length)
+  return { program, proof, cert, sig, chainId: BigInt(hex(program.subarray(10, 18))) }
+}
+
+/**
+ * Who signed a K773 envelope (the certificate alias), or undefined when its
+ * catalog signature does not check out to the root the device trusts. The
+ * resolver attaches no definition this computer cannot verify.
+ */
+export function erc7730EnvelopeSigner(envelope: Uint8Array): string | undefined {
+  try {
+    const { program, proof, cert, sig, chainId } = envelopeParts(envelope)
+    return catalogSigner(program, proof, cert, sig, chainId)
+  } catch {
+    return undefined
+  }
+}
+
 interface Leaf { kind: number; value: bigint | string | boolean }
 
 /**
  * The description of `call` from a K773 envelope (hex), or undefined when its
- * signature does not check out to the production root, or the envelope or the
+ * signature does not check out to the device's root, or the envelope or the
  * calldata cannot be read the way the device reads them. `from` is the signing
  * address only when this computer has matched it to the signing key; without
  * it, @.from cannot be shown and no address reads "(this wallet)".
@@ -112,15 +139,43 @@ export function describeErc7730Call(
   envelopeHex: string,
   call: { chainId: number; to: string; data: string; value?: unknown; from?: string },
 ): Erc7730Description | undefined {
+  return describeProgram(envelopeHex, call)
+}
+
+/**
+ * The description of an EIP-712 document from a typed-data (kind 2) envelope,
+ * the way 7.17 shows it: each definition field once, in its format. The
+ * values no field shows are shown raw by the device after the fields (the
+ * card lists every value in its own typed-data section). `from` as for calls.
+ * Typed data has one container, @.to: the domain's verifyingContract.
+ */
+export function describeErc7730TypedData(envelopeHex: string, typedData: any, from?: string): Erc7730Description | undefined {
+  try {
+    const contract = String(typedData?.domain?.verifyingContract ?? '')
+    if (!/^0x[0-9a-fA-F]{40}$/.test(contract)) return undefined
+    const types = typedData.types ?? {}
+    // The message in the program's node order: struct members in declared order.
+    const tuple = (type: string, value: any): any => {
+      const array = /^(.*)\[(\d*)\]$/.exec(type)
+      if (array) return (value as any[]).map((v) => tuple(array[1], v))
+      return Array.isArray(types[type]) ? types[type].map((m: { name: string; type: string }) => tuple(m.type, value[m.name])) : value
+    }
+    return describeProgram(envelopeHex, {
+      chainId: Number(typedData.domain.chainId), to: contract, from,
+      typed: tuple(String(typedData.primaryType), typedData.message),
+    })
+  } catch {
+    return undefined
+  }
+}
+
+function describeProgram(
+  envelopeHex: string,
+  call: { chainId: number; to: string; from?: string } & ({ data: string; value?: unknown; typed?: undefined } | { typed: any[]; data?: undefined; value?: undefined }),
+): Erc7730Description | undefined {
   try {
     const envelope = Uint8Array.from(Buffer.from(envelopeHex.replace(/^0x/i, ''), 'hex'))
-    const program = envelope.subarray(10, 10 + u32(envelope, 6))
-    let at = 10 + program.length
-    const proof = Array.from({ length: envelope[at] }, (_, i) => envelope.subarray(at + 1 + 32 * i, at + 33 + 32 * i))
-    at += 1 + 32 * proof.length
-    const cert = envelope.subarray(at + 2, at + 2 + u16(envelope, at))
-    const sig = envelope.subarray(at + 2 + cert.length, at + 66 + cert.length)
-    const chainId = BigInt(hex(program.subarray(10, 18)))
+    const { program, proof, cert, sig, chainId } = envelopeParts(envelope)
     const signedBy = catalogSigner(program, proof, cert, sig, chainId)
     if (!signedBy || chainId !== BigInt(call.chainId)) return undefined
 
@@ -168,7 +223,7 @@ export function describeErc7730Call(
           : kind === 9 ? `${type(first)}[${length === ABSENT ? '' : length}]` : '?')
     }
     const root = nodes[0]
-    const args = ethersUtils.defaultAbiCoder.decode(
+    const args = call.typed ?? ethersUtils.defaultAbiCoder.decode(
       Array.from({ length: root.count }, (_, k) => type(root.first + k)), `0x${call.data.slice(10)}`)
 
     const leaf = (kind: number, v: any): Leaf => ({
@@ -188,6 +243,10 @@ export function describeErc7730Call(
       const path = paths[i]
       if (path.source === 3) return [literal(path.index)]
       if (path.source === 2) {
+        if (call.typed) {
+          if (path.index !== 2) throw new Error('typed data has only @.to')
+          return [{ kind: 3, value: call.to.toLowerCase() }]
+        }
         const value = String(call.value ?? '')
         if (path.index === 3) return [{ kind: 1, value: BigInt(value === '' || value === '0x' ? 0 : value) }]
         if (path.index === 1 && !call.from) throw new Error('signer not matched')
@@ -290,7 +349,7 @@ export function describeErc7730Call(
 
     const to = call.to.toLowerCase()
     const protocol = PROTOCOLS[`${call.chainId}:${to}`]
-    const about = protocol?.about[call.data.slice(0, 10).toLowerCase()]
+    const about = call.data === undefined ? undefined : protocol?.about[call.data.slice(0, 10).toLowerCase()]
     const explorer = CHAINS.find((c) => c.chainFamily === 'evm' && c.chainId === String(call.chainId))?.explorerAddressUrl
     return {
       signedBy,

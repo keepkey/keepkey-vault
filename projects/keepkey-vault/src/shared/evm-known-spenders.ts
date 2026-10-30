@@ -1,5 +1,5 @@
 /**
- * Swap and bridge contracts that real dapps ask users to approve, named by
+ * Swap, bridge and lending contracts that real dapps ask users to approve, named by
  * KeepKey Desktop. This is Desktop advice only: the device never receives
  * these names (they are not certified name records, see
  * evm-certified-schema.ts CERTIFIED_EVM_NAMES), so a name here changes only
@@ -7,7 +7,7 @@
  *
  * Each address is copied from the protocol's own deployments list (URL beside
  * it, pinned to a commit where there is one) and was checked on chain
- * 2026-10-29 with eth_getCode via public RPC (publicnode.com for 1, 10, 56,
+ * 2026-10-29 (SwapRouter02 and Aave V3 Pool: 2026-10-30) with eth_getCode via public RPC (publicnode.com for 1, 10, 56,
  * 100, 137, 42161, 43114; mainnet.base.org; rpc.monad.xyz): code present on
  * every chain listed. A chain is listed only where the protocol's list names
  * it. Robinhood Chain (4663) is left out: no public RPC answered the check.
@@ -55,6 +55,20 @@ const KNOWN_SPENDERS: KnownSpender[] = [
   // Relay's solver can call it, so an allowance to it is not a normal request.
   { name: 'Relay Approval Proxy', address: '0x5567954cd026cebfe486062cb75848e0f1c12e58', chains: [1, 10, 56, 100, 137, 143, 8453, 42161, 43114] },
   { name: 'Relay Approval Proxy', address: '0xccc88a9d1b4ed6b0eaba998850414b24f1c315be', chains: [1, 10, 56, 100, 137, 143, 8453, 42161, 43114] },
+  // https://github.com/Uniswap/docs/tree/1c7597d73be0e9a3a4e44aa75b8fb212b40ea136/content/protocols/v3/deployments
+  // v3-<chain>-deployments.mdx SwapRouter02 (no Gnosis deployment listed).
+  { name: 'Uniswap SwapRouter02', address: '0x68b3465833fb72a70ecdf485e0e4c7bd8665fc45', chains: [1, 10, 137, 42161] },
+  { name: 'Uniswap SwapRouter02', address: '0x2626664c2603336e57b271c5c0b26f421741e481', chains: [8453] },
+  { name: 'Uniswap SwapRouter02', address: '0xb971ef87ede563556b2ed4b1c0b0019111dd85d2', chains: [56] },
+  { name: 'Uniswap SwapRouter02', address: '0xbb00ff08d01d300023c629e8ffffcb65a5a578ce', chains: [43114] },
+  { name: 'Uniswap SwapRouter02', address: '0xfe31f71c1b106eac32f1a19239c9a9a72ddfb900', chains: [143] },
+  // https://github.com/aave-dao/aave-address-book/tree/8259b4e02597dedcea2da13ebf80eaacf86f938e/src/ts
+  // AaveV3<Chain>.ts POOL (the address supply and repay pull tokens from).
+  { name: 'Aave V3 Pool', address: '0x87870bca3f3fd6335c3f4ce8392d69350b4fa4e2', chains: [1] },
+  { name: 'Aave V3 Pool', address: '0x794a61358d6845594f94dc1db02a252b5b4814ad', chains: [10, 137, 42161, 43114] },
+  { name: 'Aave V3 Pool', address: '0xa238dd80c259a72e81d7e4664a9801593f98d1c5', chains: [8453] },
+  { name: 'Aave V3 Pool', address: '0x6807dc923806fe8fd134338eabca509979a7e0cb', chains: [56] },
+  { name: 'Aave V3 Pool', address: '0xb50201558b00496a145fe76f7424749556e326d8', chains: [100] },
   // Across SpokePools: the pinned, on-chain-checked list in acrossDeposit.ts
   // (re-checked 2026-10-29 with eth_getCode on 1, 10, 56, 137, 8453, 42161, 43114).
   ...REVIEWED_ACROSS_SPOKE_POOLS.map((p) => ({ name: 'Across SpokePool', address: p.address, chains: [p.chainId] })),

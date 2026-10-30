@@ -10,7 +10,7 @@
 import { describe, expect, test } from 'bun:test'
 import { utils as ethersUtils } from 'ethers'
 import { assessSigningRisk } from '../src/shared/clearsign-risk'
-import { decodeMultiSend, safeContract } from '../src/shared/safe-tx'
+import { decodeMultiSend, deviceWarnsSafeDelegatecall, safeContract } from '../src/shared/safe-tx'
 import { decodeEIP712 } from '../src/bun/eip712-decoder'
 import { attachSafeCallPreviews } from '../src/bun/evm-signing-preview'
 import type { SigningRequestInfo } from '../src/shared/types'
@@ -31,6 +31,9 @@ import ethSignMessageLib from './fixtures/safe/eth-sign-message-lib.json'
 import ethFallbackHandler from './fixtures/safe/eth-multisend-fallback-handler.json'
 import ethNativeSend from './fixtures/safe/eth-native-send.json'
 import corpus from './fixtures/safe/pyk-eip712-corpus-safetx.json'
+// Real Safe{Wallet} proposals that refund the executor (G24), from Safe's transaction service.
+import refundNativeSend from './fixtures/safe/refund-eth-txorigin-native-send.json'
+import refundUsdcTransfer from './fixtures/safe/refund-eth-txorigin-usdc-transfer.json'
 
 interface Fixture { safeTxHash: string; signer: string; typedData: any }
 const REAL: Record<string, Fixture> = {
@@ -52,16 +55,16 @@ const SERVICE = (async (url: any) => {
   return hit ? Response.json(hit) : Response.json({ classification: 'OPAQUE', code: 'NOT_IN_SIGNED_CATALOG' }, { status: 422 })
 }) as unknown as typeof fetch
 /** The approval card's request for a SafeTx, the way REST and WalletConnect build it. */
-async function request(typedData: any, opts: { from?: string; known?: Known; firmwareVersion?: string } = {}) {
+async function request(typedData: any, opts: { from?: string; known?: Known; firmwareVersion?: string; chainId?: number } = {}) {
   const info: SigningRequestInfo = {
-    id: 't', method: '/eth/sign-typed-data', appName: 'Safe{Wallet}', chain: 'eth', chainId: Number(typedData.domain.chainId),
+    id: 't', method: '/eth/sign-typed-data', appName: 'Safe{Wallet}', chain: 'eth', chainId: opts.chainId ?? Number(typedData.domain.chainId),
     from: opts.from, firmwareVersion: opts.firmwareVersion ?? '7.16.0', typedDataDecoded: decodeEIP712(typedData), knownAddresses: opts.known,
   }
   await attachSafeCallPreviews(info, SERVICE)
   return info
 }
 const review = async (typedData: any, opts: Parameters<typeof request>[1] = {}) => assessSigningRisk(await request(typedData, opts))!
-const real = (fx: Fixture, opts: { known?: Known; firmwareVersion?: string } = {}) => review(fx.typedData, { from: fx.signer, ...opts })
+const real = (fx: Fixture, opts: { known?: Known; firmwareVersion?: string; chainId?: number } = {}) => review(fx.typedData, { from: fx.signer, ...opts })
 const text = (r: { reasons: { text: string }[] }) => r.reasons.map((x) => x.text).join('\n')
 const levelOf = (r: { reasons: { level: string; text: string }[] }, part: string) => r.reasons.find((x) => x.text.includes(part))?.level
 /** The same document with message fields replaced (a mutant of a real request). */
@@ -111,9 +114,16 @@ describe('a call inside a SafeTx is decoded here (G10)', () => {
     expect(text(poisoned)).toContain(`looks like your contact Payroll (${recipient.toLowerCase()}) but is a different address`)
   })
   test('an unlimited approve to a spender KeepKey has not reviewed stays danger', async () => {
-    const r = await review(doc('safe-SafeTx-approve-unlimited'))
+    // The corpus document approves Uniswap SwapRouter02, which Desktop names:
+    // unlimited to a named spender is high, not danger.
+    const named = await review(doc('safe-SafeTx-approve-unlimited'))
+    expect(named.level).toBe('high')
+    expect(text(named)).toContain('Lets Uniswap SwapRouter02 (0x68b3465833fb72a70ecdf485e0e4c7bd8665fc45) spend ALL of your USDC')
+    const td = doc('safe-SafeTx-approve-unlimited')
+    const stranger = '0x9999999999999999999999999999999999999999'
+    const r = await review(mutate(td, { data: td.message.data.toLowerCase().replace('68b3465833fb72a70ecdf485e0e4c7bd8665fc45', stranger.slice(2)) }))
     expect(r.level).toBe('critical')
-    expect(text(r)).toContain('Lets 0x68b3465833fb72a70ecdf485e0e4c7bd8665fc45 spend ALL of your USDC')
+    expect(text(r)).toContain(`Lets ${stranger} spend ALL of your USDC`)
   })
   test('an approve the Safe gives canonical Permit2 names Permit2 (preview path)', async () => {
     const data = `0x095ea7b3${word('0x000000000022D473030F116dDEE9F6B43aC78BA3')}${'f'.repeat(64)}`
@@ -214,7 +224,7 @@ describe('MultiSend batches through pinned Safe contracts (G11, G18)', () => {
     expect(r.tier).toBe('yellow')
     expect(text(r)).toContain("Runs 2 calls in one batch through Safe's standard MultiSendCallOnly 1.4.1 contract.")
     expect(text(r)).toContain('Call 1 of 2: Adds 0x661ce40abd415953a5667cbe4756838cd92b19c4 as an owner of your Safe, and the Safe then needs 1 owner signature.')
-    expect(text(r)).not.toContain('delegatecall')
+    expect(text(r)).not.toContain('Runs code from')
   })
   test('the same batch to an address that is not pinned keeps the delegatecall line', async () => {
     const notPinned = await review(mutate(baseAddOwners, { to: twinOf(baseAddOwners.typedData.message.to) }), { from: baseAddOwners.signer })
@@ -373,5 +383,168 @@ describe('pinned Safe contracts', () => {
     }
     expect(safeContract(11155111, '0x9641d764fc13c8B624c04430C7356C1C7C8102e2')).toBeUndefined()
     expect(safeContract(8453, '0x8D29bE29923b68abfDD21e541b9374737B49cdAD')).toBeUndefined()
+  })
+})
+
+/** The device's own words, from the 7.16.0 emulator legs of 2026-10-30
+ *  (safe/results/7.16.0/<leg>.json, the "Delegatecall" screen of each). */
+const DEVICE_SAID: [string, Fixture, string][] = [
+  ['base-multisend-add-owners', baseAddOwners, "SafeTx gives 0x9641d764fc13c8B624c04430C7356C1C7C8102e2 your Safe's full authority. Not checked."],
+  ['base-multisend-usdc-aave', baseUsdcAave, "SafeTx gives 0x9641d764fc13c8B624c04430C7356C1C7C8102e2 your Safe's full authority. Not checked."],
+  ['base-multisend-141-uniswap', baseMultiSend141, "SafeTx gives 0x38869bf66a61cF6bDB996A6aE40D5853Fd43B526 your Safe's full authority. Not checked."],
+  ['base-multisend-permit2-swap', basePermit2Swap, "SafeTx gives 0x9641d764fc13c8B624c04430C7356C1C7C8102e2 your Safe's full authority. Not checked."],
+  ['eth-sign-message-lib', ethSignMessageLib, "SafeTx gives 0xA65387F16B013cf2Af4605Ad8aA5ec25a2cbA3a2 your Safe's full authority. Not checked."],
+]
+const deviceLine = (r: { reasons: { level: string; text: string }[] }) => r.reasons.find((x) => x.text.startsWith('Your KeepKey will show "Delegatecall'))
+
+describe("the device's Delegatecall screen for Safe's own contracts is on the card", () => {
+  test('7.16.0: each real request the emulator warned about names the screen, calmly', async () => {
+    for (const [leg, fx, said] of DEVICE_SAID) {
+      const r = await real(fx)
+      const line = deviceLine(r)
+      expect(`${leg} ${line?.level}`).toBe(`${leg} low`)
+      expect(line!.text).toContain(`"Delegatecall: ${said}"`)
+      expect(line!.text).toContain("That is expected here")
+      expect(line!.text).toMatch(/Safe's own (MultiSend|MultiSendCallOnly|SignMessageLib) 1\.[345]\.[01] contract at its standard address/)
+    }
+  })
+  test('the add-owners batch stays calm yellow with the line', async () => {
+    const r = await real(baseAddOwners)
+    expect(r.tier).toBe('yellow')
+    expect(r.level).toBe('medium')
+  })
+  test('7.16.0 on Ethereum: a clean MultiSend batch gets no screen, so no line (the emulator showed none)', async () => {
+    for (const id of ['safe-SafeTx-multisend-4900', 'safe-SafeTx-multisend-approve-unlimited']) {
+      expect(deviceLine(await review(doc(id)))).toBeUndefined()
+    }
+    expect(deviceLine(await real(ethFallbackHandler))).toBeUndefined()
+  })
+  test('7.14.2 signs a hash and shows no such screen', async () => {
+    for (const [, fx] of DEVICE_SAID) expect(deviceLine(await real(fx, { firmwareVersion: '7.14.2' }))).toBeUndefined()
+  })
+  test('7.17: Base batches no longer get the screen; SignMessageLib still does', async () => {
+    for (const fx of [baseAddOwners, baseUsdcAave, baseMultiSend141, basePermit2Swap]) {
+      expect(deviceLine(await real(fx, { firmwareVersion: '7.17.0' }))).toBeUndefined()
+    }
+    expect(deviceLine(await real(ethSignMessageLib, { firmwareVersion: '7.17.0' }))?.level).toBe('low')
+  })
+  test('an inner delegatecall in an Ethereum batch makes 7.16 warn about the SafeTx too', async () => {
+    const data = baseAddOwners.typedData.message.data.replace(/^(0x8d80ff0a[0-9a-f]{128})00/i, '$101')
+    const to = '0x9641d764fc13c8B624c04430C7356C1C7C8102e2'
+    expect(deviceWarnsSafeDelegatecall('7.16.0', 1, to, baseAddOwners.typedData.message.data)).toBe(false)
+    expect(deviceWarnsSafeDelegatecall('7.16.0', 1, to, data)).toBe(true)
+    expect(deviceWarnsSafeDelegatecall('7.17.0', 8453, to, data)).toBe(true)
+  })
+  test('7.17 upgrades: calm screen only with a pinned SafeL2 argument', async () => {
+    const toL2 = '0xfF83F6335d8930cBad1c0D439A841f01888D9f69'
+    expect(deviceWarnsSafeDelegatecall('7.17.0', 8453, '0x526643F69b81B008F46d95CD5ced5eC0edFFDaC6', '0x68cb3d94')).toBe(false)
+    expect(deviceWarnsSafeDelegatecall('7.16.0', 8453, '0x526643F69b81B008F46d95CD5ced5eC0edFFDaC6', '0x68cb3d94')).toBe(true)
+    expect(deviceWarnsSafeDelegatecall('7.17.0', 8453, toL2, `0xef2624ae${word('0x29fcB43b46531BcA003ddC8FCB67FFE91900C762')}`)).toBe(false)
+    expect(deviceWarnsSafeDelegatecall('7.17.0', 8453, toL2, `0xef2624ae${word('0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913')}`)).toBe(true)
+  })
+  test('control: a delegatecall to anything not pinned gets no calm line, and stays red', async () => {
+    const r = await review(mutate(baseAddOwners, { to: twinOf(baseAddOwners.typedData.message.to) }), { from: baseAddOwners.signer })
+    expect(deviceLine(r)).toBeUndefined()
+    expect(r.tier).toBe('red')
+    expect(levelOf(r, 'inside your Safe (delegatecall)')).toBe('high')
+  })
+})
+
+/** Requests that keep one of Safe's own contracts in `to` but are not how
+ *  Safe{Wallet} uses it, or that the device reads differently (PR #583 review).
+ *  Mutants of real requests, each also run on the 7.16.0 and 7.14.2 emulators
+ *  (emulator-legs-20261030/fixes/safe-card-review). */
+describe("the device's Delegatecall screen when the request is not Safe's standard use", () => {
+  const TO_L2_MIGRATION = '0xfF83F6335d8930cBad1c0D439A841f01888D9f69'
+  const SAFE_L2_141 = '0x29fcB43b46531BcA003ddC8FCB67FFE91900C762'
+  const CFH_141 = '0xfd0732dc9E303f09fCEf3a7388Ad10A83459Ec99'
+  const ROGUE = '0x1111111111111111111111111111111111111111'
+  const toL2 = (data: string) => mutate(baseAddOwners, { to: TO_L2_MIGRATION, operation: 1, data })
+  const run = (td: any, firmwareVersion: string) => review(td, { from: baseAddOwners.signer, firmwareVersion })
+  const said = `"Delegatecall: SafeTx gives ${TO_L2_MIGRATION} your Safe's full authority. Not checked."`
+
+  test('migrateToL2 to a contract that is not SafeL2: the warning is real, never "expected"', async () => {
+    for (const fw of ['7.16.0', '7.17.0']) {
+      const r = await run(toL2(`0xef2624ae${word(ROGUE)}`), fw)
+      expect(r.tier).toBe('red')
+      expect(levelOf(r, 'which is not a standard SafeL2 contract')).toBe('critical')
+      expect(`${fw} ${deviceLine(r)?.level}`).toBe(`${fw} high`)
+      expect(deviceLine(r)!.text).toContain(said)
+      expect(deviceLine(r)!.text).toContain('Take it seriously here')
+      expect(text(r)).not.toContain('That is expected here')
+    }
+  })
+  test('migrateFromV111 with a fallback handler that is not pinned: red, the warning is real', async () => {
+    for (const fw of ['7.16.0', '7.17.0']) {
+      const r = await run(toL2(`0xd9a20812${word(SAFE_L2_141)}${word(ROGUE)}`), fw)
+      expect(`${fw} ${r.tier}`).toBe(`${fw} red`)
+      expect(levelOf(r, `Also sets ${ROGUE} as your Safe's fallback handler`)).toBe('medium')
+      expect(`${fw} ${deviceLine(r)?.level}`).toBe(`${fw} high`)
+      expect(text(r)).not.toContain('That is expected here')
+    }
+  })
+  test('the same two calls with pinned arguments stay calm: 7.16 warns ("expected"), 7.17 shows its own upgrade screen', async () => {
+    for (const data of [`0xef2624ae${word(SAFE_L2_141)}`, `0xd9a20812${word(SAFE_L2_141)}${word(CFH_141)}`]) {
+      const r16 = await run(toL2(data), '7.16.0')
+      expect(r16.tier).toBe('yellow')
+      expect(deviceLine(r16)?.level).toBe('low')
+      expect(deviceLine(r16)!.text).toContain(`${said} That is expected here`)
+      expect(deviceLine(await run(toL2(data), '7.17.0'))).toBeUndefined()
+    }
+  })
+  test('an inner delegatecall in a batch: the warning is real, never "expected"', async () => {
+    const data = baseAddOwners.typedData.message.data.replace(/^(0x8d80ff0a[0-9a-f]{128})00/i, '$101')
+    const r = await run(mutate(baseAddOwners, { data }), '7.16.0')
+    expect(levelOf(r, 'Call 1 of 2: Runs code from')).toBe('high')
+    expect(deviceLine(r)?.level).toBe('high')
+    expect(text(r)).not.toContain('That is expected here')
+  })
+  test('a Safe before 1.3.0 (no chainId in its domain): the device pins nothing and warns about a clean MultiSend batch', async () => {
+    const MULTISEND_111 = '0x8D29bE29923b68abfDD21e541b9374737B49cdAD'
+    const td = mutate(ethFallbackHandler, { to: MULTISEND_111 })
+    const old = { ...td, types: { ...td.types, EIP712Domain: [{ name: 'verifyingContract', type: 'address' }] }, domain: { verifyingContract: td.domain.verifyingContract } }
+    for (const fw of ['7.16.0', '7.17.0']) {
+      const line = deviceLine(await review(old, { from: ethFallbackHandler.signer, firmwareVersion: fw, chainId: 1 }))
+      expect(`${fw} ${line?.level}`).toBe(`${fw} low`)
+      expect(line!.text).toContain(`"Delegatecall: SafeTx gives ${MULTISEND_111} your Safe's full authority. Not checked."`)
+    }
+    // control: the same batch with chainId 1 in its domain gets no screen on 7.16 (the emulator showed none)
+    expect(deviceLine(await review(td, { from: ethFallbackHandler.signer, firmwareVersion: '7.16.0' }))).toBeUndefined()
+    expect(deviceWarnsSafeDelegatecall('7.16.0', 0, MULTISEND_111, td.message.data)).toBe(true)
+    expect(deviceWarnsSafeDelegatecall('7.16.0', 1, MULTISEND_111, td.message.data)).toBe(false)
+  })
+})
+
+describe('a Safe gas refund states what it can pay and to whom (G24)', () => {
+  const refundLine = (r: { reasons: { level: string; text: string }[] }) => r.reasons.find((x) => /gas refund/.test(x.text))
+
+  test('the real refunds hash to the safeTxHash Safe recorded', () => {
+    for (const fx of [refundNativeSend, refundUsdcTransfer]) {
+      const { EIP712Domain: _d, ...types } = fx.typedData.types as any
+      expect(ethersUtils._TypedDataEncoder.hash(fx.typedData.domain, types, fx.typedData.message)).toBe(fx.safeTxHash)
+    }
+  })
+
+  test('native refund to tx.origin: the maximum in ETH and the receiver; the tone is unchanged', async () => {
+    // 3522492647 × (108606 + 68982) wei; on chain the executor was paid 0.000003934351902039 ETH.
+    const usdc = refundLine(await review(refundUsdcTransfer.typedData))!
+    expect(usdc.level).toBe('high')
+    expect(usdc.text).toBe('Pays a gas refund out of your Safe when it is executed: up to 0.000625552424195436 ETH'
+      + " (gas price 3522492647 × (safeTxGas 108606 + baseGas 68982), plus Safe's own call overhead, at no more than the executor's own gas price),"
+      + ' to the account that executes it (tx.origin). Normal Safe transactions leave the refund at zero.')
+    const send = refundLine(await review(refundNativeSend.typedData))!
+    expect(send.level).toBe('high')
+    expect(send.text).toContain('up to 0.000496368528859358 ETH (gas price 3522492647 × (safeTxGas 78492 + baseGas 62422)')
+  })
+
+  test('an explicit receiver and an ERC-20 gas token (mutants of the real refund)', async () => {
+    const receiver = '0x1111111111111111111111111111111111111111'
+    const usdc = '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48'
+    const line = refundLine(await review(mutate(refundUsdcTransfer, { gasToken: usdc, gasPrice: '2', refundReceiver: receiver })))!
+    expect(line.level).toBe('high')
+    expect(line.text).toContain("up to 0.355176 USDC (gas price 2 × (safeTxGas 108606 + baseGas 68982), plus Safe's own call overhead), to 0x1111111111111111111111111111111111111111.")
+    // A receiver with a gas price of 0 pays nothing (Safe pays only when gasPrice > 0).
+    const none = refundLine(await review(mutate(refundUsdcTransfer, { gasPrice: '0', refundReceiver: receiver })))!
+    expect(none.text).toContain('with a gas price of 0, so executing it pays no refund')
   })
 })

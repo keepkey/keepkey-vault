@@ -1,7 +1,13 @@
-import { describe, it, expect } from 'bun:test'
+import { afterAll, beforeAll, describe, it, expect } from 'bun:test'
 import { findCertifiedEvmSchema, resolveEvmSchema } from './evm-schema-registry'
 import { buildTokenSchema } from './evm-token-schema'
 import { buildEvmSchemaBody, evmEntryId, findCertifiedEvmSchemaSpec } from './evm-certified-schema'
+import { testCertifiedEnvelope, trustTestRoot } from '../../__tests__/support/clearsign-test-root'
+
+// Certified envelopes here are signed under a TEST root, trusted for this file.
+let restoreRoot = () => {}
+beforeAll(() => { restoreRoot = trustTestRoot() })
+afterAll(() => restoreRoot())
 
 describe('findCertifiedEvmSchema', () => {
   it('leaves the live USDT approval to the device when its reviewed artifact is unavailable', async () => {
@@ -25,9 +31,7 @@ describe('findCertifiedEvmSchema', () => {
     const tokenIdentity = { chainId: 42161, contract, symbol: 'USDC', decimals: 6,
       source: 'pioneer-discovery', sourceSha256: 'a'.repeat(64) }
     const spec = buildTokenSchema(42161, contract, '0xa9059cbb', 68, tokenIdentity)
-    const certificate = Buffer.alloc(139, 0x11)
-    certificate.writeUInt32BE(42161, 2)
-    const signedPayload = `0x03${certificate.toString('hex')}${buildEvmSchemaBody(spec).toString('hex')}${'22'.repeat(65)}`
+    const signedPayload = testCertifiedEnvelope(buildEvmSchemaBody(spec).toString('hex'))
     const response = { classification: 'VERIFIED', keyId: 128, signedPayload,
       chainId: 42161, contract, selector: '0xa9059cbb', method: spec.method, expectedCalldataLength: 68, tokenIdentity }
     let sent: any
@@ -59,9 +63,7 @@ describe('findCertifiedEvmSchema', () => {
     const { calls } = require('../../__tests__/fixtures/clearsign-longtail/observed-calls.json')
     const { chainId, to, data } = calls.find((c: any) => c.name.startsWith('OpolisPay'))
     const spec = findCertifiedEvmSchemaSpec(chainId, to, data)!
-    const certificate = Buffer.alloc(139, 0x11)
-    certificate.writeUInt32BE(1, 2)
-    const signedPayload = `0x03${certificate.toString('hex')}${buildEvmSchemaBody(spec).toString('hex')}${'22'.repeat(65)}`
+    const signedPayload = testCertifiedEnvelope(buildEvmSchemaBody(spec).toString('hex'))
     let sent: any
     try {
       globalThis.fetch = (async (_url: any, init: any) => {

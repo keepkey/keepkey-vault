@@ -6,17 +6,20 @@
  * Runtime/provider metadata is annotation only and never relaxes the verdict.
  */
 import type { CalldataDecodedField, SafeCallPreview, SigningRequestInfo } from '../shared/types'
-import { decodeCalldata, firmwareClearSigns, formatDeadline } from './calldata-decoder'
+import { decodeCalldata, firmwareClearSigns, formatDeadline, thor714Refuses } from './calldata-decoder'
 import { findCertifiedEvmSchema, findCertifiedUniswapSwap } from './evm-schema-registry'
-import { findEvmNameRecord, findReviewedUniversalRouter, reviewedSwapToken } from './evm-certified-schema'
+import { describeCertifiedEvmCall, findEvmNameRecord, findReviewedUniversalRouter, reviewedSwapToken } from './evm-certified-schema'
 import { evmContractIdentity } from '../shared/evm-contract-identity'
 import { knownSpenderName } from '../shared/evm-known-spenders'
 import { urPrecheck } from './uniswap-ur'
+import { v4SingleSwapSummary } from './uniswap-universal-router'
 import { supportsCertifiedClearSign } from './solana-certified-policy'
 import { certifiedBodyRefused, certifiedEnvelopeShown, metadataPayloadBytes } from '../shared/certified-evm-envelope'
-import { fetchErc7730CalldataDefinition, resolveErc7730ForCall } from './erc7730-resolver'
-import { describeErc7730Call } from './erc7730-describe'
+import { fetchErc7730CalldataDefinition, resolveErc7730ForCall, resolveErc7730ForTypedData } from './erc7730-resolver'
+import { describeErc7730Call, describeErc7730TypedData } from './erc7730-describe'
 import { safeTxCalls } from '../shared/safe-tx'
+import { zeroExSettlerName } from './swap-decoders'
+import { versionCompare } from '../shared/firmware-versions'
 
 /** A chain id as dapps send it (number, "8453", "0x2105") → positive integer, else undefined. */
 export function normalizeEvmChainId(raw: unknown): number | undefined {
@@ -33,6 +36,14 @@ export function normalizeEvmChainId(raw: unknown): number | undefined {
 export function evmPriorityFee(prio: unknown): string {
   const raw = prio == null ? '' : String(prio)
   return (!raw || /^0x0*$/.test(raw)) ? '0x' : raw
+}
+
+/** An RLP integer for hdwallet, which sends gasPrice, gasLimit and
+ *  maxFeePerGas bytes as given. Firmware before 7.16 hashes them unstripped, so a
+ *  leading 0x00 byte ('0x0', '0x00ff') signs a pre-image that recovers to
+ *  another address. Minimal hex; zero is '0x'. Non-hex passes through. */
+export function evmQuantity(value: string | undefined): string | undefined {
+  return value && /^0x[0-9a-fA-F]*$/.test(value) ? `0x${value.slice(2).replace(/^0+/, '')}` : value
 }
 
 /**
@@ -63,11 +74,16 @@ export async function attachCertifiedEvmSchema(
     console.log(`${tag} EVM clear-sign: certified "${schema.method}" is a dynamic schema this firmware (${firmwareVersion}) refuses — not attached`)
     return false
   }
+  // The card names what the device shows: a call the local decoder could not
+  // read is described from the certified schema itself.
+  const decoded = signingInfo.calldataDecoded
   signingInfo.calldataDecoded = {
-    ...(signingInfo.calldataDecoded ?? {
-      dappName: 'Unknown', contractName: to, method: schema.method,
-      selector: data.slice(0, 10).toLowerCase(), fields: [], source: 'none',
-    }),
+    ...((decoded?.source !== 'none' ? decoded : undefined)
+      ?? describeCertifiedEvmCall(schema.signedPayload, { to, data, value: signingInfo.value, chainId })
+      ?? decoded ?? {
+        dappName: 'Unknown', contractName: to, method: schema.method,
+        selector: data.slice(0, 10).toLowerCase(), fields: [], source: 'none',
+      }),
     // Same encoding as a Pioneer blob: base64, decoded to bytes by the sign handler.
     signedInsightBlob: Buffer.from(schema.signedPayload.replace(/^0x/i, ''), 'hex').toString('base64'),
     insightKeyId: schema.keyId,
@@ -106,6 +122,29 @@ export async function attachErc7730Definition(
   return true
 }
 
+/**
+ * Attach the KeepKey ClearSign service's typed-data definition for this
+ * document (7.17+), before approval, so the card and report describe what the
+ * device will show; the sign handler sends exactly signingInfo.erc7730. `from`
+ * only when it is the signing key. Returns true when one was attached.
+ */
+export async function attachErc7730TypedDefinition(
+  signingInfo: SigningRequestInfo,
+  typedData: unknown,
+  firmwareVersion: string | undefined,
+  capabilities: readonly number[] | undefined,
+  from?: string,
+  tag = '[REST]',
+): Promise<boolean> {
+  const catalog = await resolveErc7730ForTypedData({ typedData, firmwareVersion, capabilities })
+  if (!catalog) return false
+  signingInfo.erc7730 = catalog
+  const description = describeErc7730TypedData(catalog.definitions[0].envelope, typedData, from)
+  if (description) signingInfo.erc7730Description = description
+  console.log(`${tag} EIP-712 clear-sign: ERC-7730 definition ${catalog.primaryDefinitionId.slice(0, 18)}… attached`)
+  return true
+}
+
 /** msg.value as the request carries it (hex, decimal, number); undefined if unreadable. */
 function txValue(raw: unknown): bigint | undefined {
   if (raw == null || raw === '') return 0n
@@ -117,8 +156,10 @@ function txValue(raw: unknown): bigint | undefined {
 
 /**
  * The swap a reviewed Universal Router call makes, as card rows: the same
- * decode and token-flow review the device runs (urPrecheck), so a call it
- * would not decode gets no rows, and a call it reviews gets the facts its
+ * decode and token-flow review the device runs (urPrecheck), or else the
+ * one-pool v4 plan Desktop reads but the device does not (v4SingleSwapSummary;
+ * the card then says the device cannot show it). Any other call gets no rows;
+ * a call the device reviews gets the facts its
  * screens state (signed_metadata_build_ur_review): what is paid, the minimum
  * received, the recipient, the fee, the Permit2 allowance and every V4 pool
  * hook. Token names come only from reviewedSwapToken by chain:address; any
@@ -131,9 +172,9 @@ export function uniswapSwapFields(
 ): CalldataDecodedField[] {
   const v = txValue(value)
   if (!chainId || v === undefined || !findReviewedUniversalRouter(chainId, router)) return []
-  const plan = urPrecheck(router, data, v, firmwareVersion)
-  if (!plan) return []
-  const s = plan.summary
+  // A one-pool v4 plan the device does not decode: Desktop still reads it.
+  const s = urPrecheck(router, data, v, firmwareVersion)?.summary ?? v4SingleSwapSummary(chainId, router, data, v)
+  if (!s) return []
   const unknown: string[] = []
   const amount = (raw: bigint, token: string, isEth: boolean, unlimitedAt?: bigint) => {
     const t = isEth ? { symbol: 'ETH', decimals: 18 } : reviewedSwapToken(chainId, token)
@@ -234,7 +275,16 @@ export function recognizedSpender(chainId: number | undefined, address: string |
 /** The reviewed spender of a decoded permit, for both REST and WalletConnect. */
 export function recognizedTypedDataSpender(decoded: SigningRequestInfo['typedDataDecoded'], chainId: number | undefined): string | undefined {
   const spender = decoded?.fields.find((x) => x.label === 'Spender')?.raw
-  return recognizedSpender(chainId, typeof spender === 'string' ? spender : undefined)
+  const address = typeof spender === 'string' ? spender : undefined
+  // A 0x Swap API permit2 quote: a one-time Permit2 signature transfer to a
+  // genuine taker Settler. Only here: 0x says never to approve a Settler.
+  const signedChain = Number(decoded?.domain.chainId)
+  if (decoded?.primaryType === 'PermitTransferFrom' && address
+    && evmContractIdentity(signedChain, decoded.domain.verifyingContract ?? '') === 'Uniswap Permit2') {
+    const settler = zeroExSettlerName(signedChain, address)
+    if (settler) return settler
+  }
+  return recognizedSpender(chainId, address)
 }
 
 /**
@@ -276,6 +326,9 @@ export async function attachSafeCallPreviews(info: SigningRequestInfo, fetchImpl
     }
   }))
 }
+
+/** The newest release firmwareClearSigns mirrors. */
+const NEWEST_MIRRORED_FW = '7.16.0'
 
 export async function applyEvmTxPreview(
   signingInfo: SigningRequestInfo,
@@ -335,6 +388,12 @@ export async function applyEvmTxPreview(
     // the calldata — a contract we can decode (Uniswap/1inch) but the firmware
     // can't still blind-signs (PR #261/#303).
     signingInfo.needsBlindSigning = true
+    // 7.14 cancels this deposit whatever AdvancedMode is set to: say so, never
+    // offer AdvancedMode. An update fixes it only where 7.16 pins the router.
+    if (thor714Refuses(to, data, chainId, firmwareVersion)) {
+      signingInfo.firmwareCannotSign = true
+      signingInfo.firmwareUpdateClearSigns = firmwareClearSigns(to, data, chainId, NEWEST_MIRRORED_FW)
+    }
   }
   console.log(`${tag} needsBlindSigning=${signingInfo.needsBlindSigning} (firmwareClearSigns=${signingInfo.deviceClearSigns}, decoder source=${signingInfo.calldataDecoded?.source})`)
 }
@@ -361,4 +420,19 @@ export function typedDataNativelyReviewed(typedData: any, firmwareVersion: strin
     [['name', 'string'], ['chainId', 'uint256'], ['verifyingContract', 'address']])) return false
   return sameFields(types.PermitSingle, [['details', 'PermitDetails'], ['spender', 'address'], ['sigDeadline', 'uint256']]) &&
     sameFields(types.PermitDetails, [['token', 'address'], ['amount', 'uint160'], ['expiration', 'uint48'], ['nonce', 'uint48']])
+}
+
+/**
+ * The AdvancedMode gate for a typed-data request, for REST and WalletConnect
+ * alike. The device reviews x402 and (7.16+) a canonical Permit2 PermitSingle
+ * natively, and from 7.15 it drives the structured EIP-712 stream for every
+ * document. Anything else (older or unknown firmware) is hash-signed, which
+ * the device refuses unless AdvancedMode is on.
+ */
+export function applyTypedDataSigningGate(signingInfo: SigningRequestInfo, typedData: any, firmwareVersion: string | undefined): void {
+  const shown = signingInfo.typedDataDecoded?.operationName === 'x402 EIP-3009 Payment'
+    || typedDataNativelyReviewed(typedData, firmwareVersion)
+    || (!!firmwareVersion && versionCompare(firmwareVersion, '7.15.0') >= 0)
+  signingInfo.needsBlindSigning = !shown
+  signingInfo.requiresAdvancedMode = !shown
 }

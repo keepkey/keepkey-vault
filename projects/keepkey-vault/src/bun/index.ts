@@ -298,7 +298,8 @@ import { prioritizeExtraContracts, type PortfolioExtraContract } from "./portfol
 import { buildSolanaSchema, inspectSolanaSchema } from "./clearsign-studio"
 import { resolvePromotedEvmArtifact, resolvePromotedSolanaArtifact } from "./clearsign-artifact-resolver"
 import { resolveEvmSchema } from "./evm-schema-registry"
-import { resolveErc7730ForCall, signWithErc7730Fallback } from "./erc7730-resolver"
+import { resolveErc7730ForCall, signWithErc7730Fallback, withErc7730TypedData } from "./erc7730-resolver"
+import { signTypedDataWithFeatures } from "./typed-data-sign"
 import { requestClearSignReview } from "./clearsign-review"
 import { trustRuntimeSigner, type RuntimeEvmSigner } from "./evm-runtime-metadata"
 import { addClearSignProvider, listClearSignProviders, removeClearSignProvider, resolveProviderTxMetadata, seedClearSignProviderFromEnv } from "./clearsign-providers"
@@ -950,7 +951,10 @@ setClearSignAuditGate(() => engine.isEmulator && !offlineMode && !engine.isPassp
 // device always trusts the production root.
 const emulatorTestRoot = emulatorClearSignTestRoot(process.env, DEFAULT_CLEARSIGN_SERVICE_URL)
 if (emulatorTestRoot) console.warn(`[clearsign] KK_CLEARSIGN_TEST_ROOT=${emulatorTestRoot}: an emulator library that reads it gets certified descriptions (TEST root)`)
-configureProductionRootTrust(() => !engine.isEmulator || (!!emulatorTestRoot && emulatorReadsClearSignTestRoot()))
+configureProductionRootTrust(
+	() => !engine.isEmulator || (!!emulatorTestRoot && emulatorReadsClearSignTestRoot()),
+	() => engine.isEmulator ? emulatorTestRoot : undefined,
+)
 // A hidden wallet's Zcash view key is never written to disk.
 setFvkDiskAllowed(() => !engine.isPassphraseWallet)
 
@@ -1397,7 +1401,7 @@ function getOrCreateWcManager(): WalletConnectManager {
 		getAdvancedModeEnabled: () => getAdvancedModeEnabled() === true,
 		loadClearsignSigner: async (signer) => { if (!engine.wallet) throw new Error('Device disconnected'); await loadProviderSigner(signer) },
 		ethSignMessage: (params) => { if (isBitcoinOnlyVariant(engine.getDeviceState().firmwareVariant)) throw new Error('WalletConnect is not available on bitcoin-only firmware'); if (!engine.wallet) throw new Error('Device disconnected'); return engine.wallet.ethSignMessage(params) },
-		ethSignTypedData: async (params) => { if (isBitcoinOnlyVariant(engine.getDeviceState().firmwareVariant)) throw new Error('WalletConnect is not available on bitcoin-only firmware'); if (!engine.wallet) throw new Error('Device disconnected'); return engine.wallet.ethSignTypedData(await withPermit2SpenderName(withoutCallerErc7730(params, '[WC] ethSignTypedData'), engine.getDeviceState().firmwareVersion)) },
+		ethSignTypedData: async (params, erc7730) => { if (isBitcoinOnlyVariant(engine.getDeviceState().firmwareVariant)) throw new Error('WalletConnect is not available on bitcoin-only firmware'); if (!engine.wallet) throw new Error('Device disconnected'); const named = await withPermit2SpenderName(withoutCallerErc7730(params, '[WC] ethSignTypedData'), engine.getDeviceState().firmwareVersion); return signTypedDataWithFeatures(engine.wallet, erc7730 && !named.txMetadata ? { ...named, erc7730 } : named) },
 		getCosmosAccountInfo: async (caipChain) => {
 			if (isBitcoinOnlyVariant(engine.getDeviceState().firmwareVariant)) return null
 			if (!engine.wallet) return null
@@ -4072,6 +4076,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						resolvedSchema = await resolveEvmSchema(
 							Number((params as any)?.chainId), (params as any)?.to, (params as any)?.data,
 							supportsCertifiedClearSign(engine.getDeviceState().firmwareVersion), engine.getDeviceState().firmwareVersion,
+							(params as any)?.value,
 						)
 					} catch (error: any) {
 						console.warn(`[ethSignTx] ClearSign schema lookup unavailable: ${error?.message || error}`)
@@ -4241,22 +4246,28 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			},
 			ethSignTypedData: async (rawParams) => {
 				if (!engine.wallet) throw new Error('No device connected')
-				// Typed-data ERC-7730 stays off on 7.16 (ERC7730_TYPED_DATA_SUPPORTED):
-				// no definition is ever sent with a document.
-				const params = await withPermit2SpenderName(withoutCallerErc7730(rawParams, 'ethSignTypedData'), engine.getDeviceState().firmwareVersion)
+				// A caller's catalog is always dropped. Desktop attaches its own
+				// typed-data definition only on 7.17+ (supportsErc7730TypedData).
+				const { firmwareVersion, capabilities } = engine.getDeviceState()
+				const params = await withErc7730TypedData(
+					await withPermit2SpenderName(withoutCallerErc7730(rawParams, 'ethSignTypedData'), firmwareVersion),
+					{ firmwareVersion, capabilities },
+				)
 				let observationId: string | undefined
+				let signedParams: any = params
+				const signTyped = () => signWithErc7730Fallback(params, (p: any) => { signedParams = p; return signTypedDataWithFeatures(engine.wallet!, p) }, () => {
+					if (observationId) refuseClearSignObservationDefinition(observationId)
+				}, '[ethSignTypedData]')
 				if (!engine.isPassphraseWallet) {
-					const draft = observeEvmTypedData({ typedData: (params as any)?.typedData, hostDecoded: true })
+					const draft = observeEvmTypedData({ typedData: (params as any)?.typedData, hostDecoded: true, ...(params.erc7730 ? { source: 'erc7730' as const } : {}) })
 					observationId = insertClearSignObservation(draft, { deviceId: engine.getDeviceState().deviceId, source: 'vault-rpc' }).id
 					void auditUnknownClearSignShape(draft, { evm: getEvmSimulationEndpoint(Number(draft.shape.chainId || 1)) })
 				}
 				try {
 					const result = engine.isEmulator
-						? await emuSigningOp(
-							() => engine.wallet!.ethSignTypedData(params),
-							{ operation: 'ethSignTypedData', chain: 'Ethereum' },
-						)
-						: await engine.wallet.ethSignTypedData(params)
+						? await emuSigningOp(signTyped, { operation: 'ethSignTypedData', chain: 'Ethereum' })
+						: await signTyped()
+					if (observationId && signedParams.erc7730) authenticateClearSignObservation(observationId, 'erc7730')
 					if (observationId) finalizeClearSignObservation(observationId, 'signed')
 					return result
 				} catch (cause: any) {

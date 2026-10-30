@@ -1029,7 +1029,8 @@ export interface EIP712DecodedInfo {
    *  payment in one currency at a fixed price. Who each payment goes to.
    *  `decimals` is set only when this computer can name the currency; `nft`
    *  only when a single NFT is offered. 'creator-fee' is set after the
-   *  collection's own ERC-2981 royaltyInfo named that payee and amount. */
+   *  collection's own ERC-2981 royaltyInfo named that payee and amount.
+   *  `creatorFeeUnchecked`: royaltyInfo could not be asked at all. */
   seaportListing?: {
     offerer: string
     items: string[]
@@ -1039,6 +1040,7 @@ export interface EIP712DecodedInfo {
     nft?: { token: string; id: string }
     payments: Array<{ recipient: string; amount: string; raw: string; role: 'offerer' | 'opensea-fee' | 'creator-fee' | 'other' }>
     endTime: string
+    creatorFeeUnchecked?: boolean
   }
 }
 
@@ -1219,6 +1221,13 @@ export interface SigningRequestInfo {
   erc7730Description?: Erc7730Description
   /** true when the UI must enable AdvancedMode before allowing approval */
   requiresAdvancedMode?: boolean
+  /** true when the connected firmware refuses this request whether
+   *  AdvancedMode is on or off. The card says so, never offers AdvancedMode
+   *  and keeps Approve disabled. */
+  firmwareCannotSign?: boolean
+  /** With firmwareCannotSign: true when the newest firmware Desktop mirrors
+   *  clear-signs it, so the card may say a firmware update fixes it. */
+  firmwareUpdateClearSigns?: boolean
   /** true when this request needs a separate, explicit one-shot opaque-signing
    * consent in the Vault UI. External callers cannot set the device flag. */
   requiresBlindSigningConsent?: boolean

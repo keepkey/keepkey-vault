@@ -42,7 +42,8 @@ test('only the pinned USDT contract receives six-decimal token labeling', () => 
 // tron.c tron_parseContract). The vectors are the firmware's own real mainnet
 // transactions (keepkey-firmware 296aa1e2c unittests/firmware/tron_vectors.json).
 import { createHash } from 'node:crypto'
-import { tronShownNatively } from './tron-preview'
+import { applyTronSigningPreview, tronShownNatively } from './tron-preview'
+import type { SigningRequestInfo } from '../shared/types'
 import firmwareVectors from '../../__tests__/fixtures/clearsign-chains/tron-717-firmware-vectors.json'
 
 const vector = (name: string) => firmwareVectors.vectors.find((v) => v.name === name)!.raw_data_hex
@@ -74,6 +75,19 @@ test('7.17.0 shows a table-token approve, staking and votes; 7.16.0 and unknown 
   for (const name of BLIND_ON_717) expect([name, tronShownNatively(vector(name), '7.17.0')]).toEqual([name, false])
   // Bytes work as well as hex.
   expect(tronShownNatively(Uint8Array.from(Buffer.from(vector('vote_3'), 'hex')), '7.17.0')).toBe(true)
+})
+
+test('REST card: 7.17.0 drops AdvancedMode for those, 7.16.0 keeps it', () => {
+  const card = (name: string, fw: string) => {
+    const info = { id: 't', method: '/tron/sign-transaction', chain: '', needsBlindSigning: true } as unknown as SigningRequestInfo
+    applyTronSigningPreview(info, vector(name), fw)
+    return [name, !!info.tronCall, info.tronCallShown, info.requiresAdvancedMode, info.needsBlindSigning]
+  }
+  for (const name of SHOWN_ON_717) {
+    expect(card(name, '7.17.0')).toEqual([name, true, true, false, false])
+    expect(card(name, '7.16.0')).toEqual([name, true, false, true, true])
+  }
+  for (const name of BLIND_ON_717) expect(card(name, '7.17.0').slice(2)).toEqual([false, true, true])
 })
 
 test('7.17 boundaries fail closed the way tron.c does', () => {
