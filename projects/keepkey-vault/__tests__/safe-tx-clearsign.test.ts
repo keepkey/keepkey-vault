@@ -10,7 +10,7 @@
 import { describe, expect, test } from 'bun:test'
 import { utils as ethersUtils } from 'ethers'
 import { assessSigningRisk } from '../src/shared/clearsign-risk'
-import { decodeMultiSend, safeContract } from '../src/shared/safe-tx'
+import { decodeMultiSend, deviceWarnsSafeDelegatecall, safeContract } from '../src/shared/safe-tx'
 import { decodeEIP712 } from '../src/bun/eip712-decoder'
 import { attachSafeCallPreviews } from '../src/bun/evm-signing-preview'
 import type { SigningRequestInfo } from '../src/shared/types'
@@ -214,7 +214,7 @@ describe('MultiSend batches through pinned Safe contracts (G11, G18)', () => {
     expect(r.tier).toBe('yellow')
     expect(text(r)).toContain("Runs 2 calls in one batch through Safe's standard MultiSendCallOnly 1.4.1 contract.")
     expect(text(r)).toContain('Call 1 of 2: Adds 0x661ce40abd415953a5667cbe4756838cd92b19c4 as an owner of your Safe, and the Safe then needs 1 owner signature.')
-    expect(text(r)).not.toContain('delegatecall')
+    expect(text(r)).not.toContain('Runs code from')
   })
   test('the same batch to an address that is not pinned keeps the delegatecall line', async () => {
     const notPinned = await review(mutate(baseAddOwners, { to: twinOf(baseAddOwners.typedData.message.to) }), { from: baseAddOwners.signer })
@@ -373,5 +373,69 @@ describe('pinned Safe contracts', () => {
     }
     expect(safeContract(11155111, '0x9641d764fc13c8B624c04430C7356C1C7C8102e2')).toBeUndefined()
     expect(safeContract(8453, '0x8D29bE29923b68abfDD21e541b9374737B49cdAD')).toBeUndefined()
+  })
+})
+
+/** The device's own words, from the 7.16.0 emulator legs of 2026-10-30
+ *  (safe/results/7.16.0/<leg>.json, the "Delegatecall" screen of each). */
+const DEVICE_SAID: [string, Fixture, string][] = [
+  ['base-multisend-add-owners', baseAddOwners, "SafeTx gives 0x9641d764fc13c8B624c04430C7356C1C7C8102e2 your Safe's full authority. Not checked."],
+  ['base-multisend-usdc-aave', baseUsdcAave, "SafeTx gives 0x9641d764fc13c8B624c04430C7356C1C7C8102e2 your Safe's full authority. Not checked."],
+  ['base-multisend-141-uniswap', baseMultiSend141, "SafeTx gives 0x38869bf66a61cF6bDB996A6aE40D5853Fd43B526 your Safe's full authority. Not checked."],
+  ['base-multisend-permit2-swap', basePermit2Swap, "SafeTx gives 0x9641d764fc13c8B624c04430C7356C1C7C8102e2 your Safe's full authority. Not checked."],
+  ['eth-sign-message-lib', ethSignMessageLib, "SafeTx gives 0xA65387F16B013cf2Af4605Ad8aA5ec25a2cbA3a2 your Safe's full authority. Not checked."],
+]
+const deviceLine = (r: { reasons: { level: string; text: string }[] }) => r.reasons.find((x) => x.text.startsWith('Your KeepKey will show "Delegatecall'))
+
+describe("the device's Delegatecall screen for Safe's own contracts is on the card", () => {
+  test('7.16.0: each real request the emulator warned about names the screen, calmly', async () => {
+    for (const [leg, fx, said] of DEVICE_SAID) {
+      const r = await real(fx)
+      const line = deviceLine(r)
+      expect(`${leg} ${line?.level}`).toBe(`${leg} low`)
+      expect(line!.text.toLowerCase()).toContain(`"delegatecall: ${said.toLowerCase()}"`)
+      expect(line!.text).toContain("That is expected here")
+      expect(line!.text).toMatch(/Safe's own (MultiSend|MultiSendCallOnly|SignMessageLib) 1\.[345]\.[01] contract at its standard address/)
+    }
+  })
+  test('the add-owners batch stays calm yellow with the line', async () => {
+    const r = await real(baseAddOwners)
+    expect(r.tier).toBe('yellow')
+    expect(r.level).toBe('medium')
+  })
+  test('7.16.0 on Ethereum: a clean MultiSend batch gets no screen, so no line (the emulator showed none)', async () => {
+    for (const id of ['safe-SafeTx-multisend-4900', 'safe-SafeTx-multisend-approve-unlimited']) {
+      expect(deviceLine(await review(doc(id)))).toBeUndefined()
+    }
+    expect(deviceLine(await real(ethFallbackHandler))).toBeUndefined()
+  })
+  test('7.14.2 signs a hash and shows no such screen', async () => {
+    for (const [, fx] of DEVICE_SAID) expect(deviceLine(await real(fx, { firmwareVersion: '7.14.2' }))).toBeUndefined()
+  })
+  test('7.17: Base batches no longer get the screen; SignMessageLib still does', async () => {
+    for (const fx of [baseAddOwners, baseUsdcAave, baseMultiSend141, basePermit2Swap]) {
+      expect(deviceLine(await real(fx, { firmwareVersion: '7.17.0' }))).toBeUndefined()
+    }
+    expect(deviceLine(await real(ethSignMessageLib, { firmwareVersion: '7.17.0' }))?.level).toBe('low')
+  })
+  test('an inner delegatecall in an Ethereum batch makes 7.16 warn about the SafeTx too', async () => {
+    const data = baseAddOwners.typedData.message.data.replace(/^(0x8d80ff0a[0-9a-f]{128})00/i, '$101')
+    const to = '0x9641d764fc13c8B624c04430C7356C1C7C8102e2'
+    expect(deviceWarnsSafeDelegatecall('7.16.0', 1, to, baseAddOwners.typedData.message.data)).toBe(false)
+    expect(deviceWarnsSafeDelegatecall('7.16.0', 1, to, data)).toBe(true)
+    expect(deviceWarnsSafeDelegatecall('7.17.0', 8453, to, data)).toBe(true)
+  })
+  test('7.17 upgrades: calm screen only with a pinned SafeL2 argument', async () => {
+    const toL2 = '0xfF83F6335d8930cBad1c0D439A841f01888D9f69'
+    expect(deviceWarnsSafeDelegatecall('7.17.0', 8453, '0x526643F69b81B008F46d95CD5ced5eC0edFFDaC6', '0x68cb3d94')).toBe(false)
+    expect(deviceWarnsSafeDelegatecall('7.16.0', 8453, '0x526643F69b81B008F46d95CD5ced5eC0edFFDaC6', '0x68cb3d94')).toBe(true)
+    expect(deviceWarnsSafeDelegatecall('7.17.0', 8453, toL2, `0xef2624ae${word('0x29fcB43b46531BcA003ddC8FCB67FFE91900C762')}`)).toBe(false)
+    expect(deviceWarnsSafeDelegatecall('7.17.0', 8453, toL2, `0xef2624ae${word('0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913')}`)).toBe(true)
+  })
+  test('control: a delegatecall to anything not pinned gets no calm line, and stays red', async () => {
+    const r = await review(mutate(baseAddOwners, { to: twinOf(baseAddOwners.typedData.message.to) }), { from: baseAddOwners.signer })
+    expect(deviceLine(r)).toBeUndefined()
+    expect(r.tier).toBe('red')
+    expect(levelOf(r, 'inside your Safe (delegatecall)')).toBe('high')
   })
 })

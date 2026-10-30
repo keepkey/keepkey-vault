@@ -34,7 +34,7 @@ import { nftMarketplaceOperator } from './nft-marketplaces'
 import { cosmosDepositPreview } from './cosmosDepositPreview'
 import { SOLANA_TOKEN_IDENTITIES } from './solana-token-identities'
 import { lookalikeOf } from './address-lookalike'
-import { decodeMultiSend, safeContract } from './safe-tx'
+import { decodeMultiSend, deviceWarnsSafeDelegatecall, safeContract } from './safe-tx'
 
 export type RiskLevel = 'low' | 'medium' | 'high' | 'critical'
 export interface RiskReason { level: RiskLevel; text: string }
@@ -985,7 +985,14 @@ function safeTx(req: SigningRequestInfo, d: NonNullable<SigningRequestInfo['type
   }
   if (f('Operation') === '1') {
     const helper = safeDelegateCall(ctx, to, data)
-    if (helper) return helper
+    if (helper) {
+      // The firmware warns about every delegatecall it cannot check, Safe's own included.
+      const pinned = safeContract(ctx.chainId, to)!
+      if (deviceWarnsSafeDelegatecall(req.firmwareVersion, ctx.chainId, to, data)) {
+        add('low', `Your KeepKey will show "Delegatecall: SafeTx gives ${to} your Safe's full authority. Not checked." That is expected here: it says so for any delegatecall it cannot check itself, and ${to} is Safe's own ${pinned.name} ${pinned.version} contract at its standard address, which Safe{Wallet} uses this way.`)
+      }
+      return helper
+    }
     add('high', delegatecallLine(to))
     return 'unknown'
   }
