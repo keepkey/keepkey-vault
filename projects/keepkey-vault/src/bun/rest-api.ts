@@ -18,6 +18,7 @@ import { attachErc7730TypedDefinition, evmPriorityFee, evmQuantity, normalizeEvm
 import { buildEvmReportForTx, buildTypedDataReport, evmSigningVerdict, prepareEvmTxSigningInfo, withoutErc7730Description } from './evm-presign-report'
 import { describeErc7730Call } from './erc7730-describe'
 import { signWithErc7730Fallback } from './erc7730-resolver'
+import { signTypedDataWithFeatures } from './typed-data-sign'
 import { CHAINS, isChainSupported, hiveRolePath, evmChainLabel } from '../shared/chains'
 import { getEvmSimulationEndpoint } from './evm-simulation-config'
 import { getEvmGasPrice } from './evm-rpc'
@@ -3076,7 +3077,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             const chain = typedChainId ? evmChainLabel(typedChainId)?.name ?? `EVM chain ${typedChainId}` : 'Ethereum'
             let signedParams: any = params
             const result = await emuWrap(
-              () => signWithErc7730Fallback(params, (p: any) => { signedParams = p; return wallet.ethSignTypedData(p) }, () => {
+              () => signWithErc7730Fallback(params, (p: any) => { signedParams = p; return signTypedDataWithFeatures(wallet, p) }, () => {
                 // The device refused the definition: it streams the document
                 // instead (7.15+ shows every value). Report and record that.
                 if (activeSigningInfo) {

@@ -1029,7 +1029,8 @@ export interface EIP712DecodedInfo {
    *  payment in one currency at a fixed price. Who each payment goes to.
    *  `decimals` is set only when this computer can name the currency; `nft`
    *  only when a single NFT is offered. 'creator-fee' is set after the
-   *  collection's own ERC-2981 royaltyInfo named that payee and amount. */
+   *  collection's own ERC-2981 royaltyInfo named that payee and amount.
+   *  `creatorFeeUnchecked`: royaltyInfo could not be asked at all. */
   seaportListing?: {
     offerer: string
     items: string[]
@@ -1039,6 +1040,7 @@ export interface EIP712DecodedInfo {
     nft?: { token: string; id: string }
     payments: Array<{ recipient: string; amount: string; raw: string; role: 'offerer' | 'opensea-fee' | 'creator-fee' | 'other' }>
     endTime: string
+    creatorFeeUnchecked?: boolean
   }
 }
 
