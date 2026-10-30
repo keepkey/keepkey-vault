@@ -1797,7 +1797,7 @@ async function buildRelaySwapTx(
   const selector = String(relay.data || '').slice(0, 10).toLowerCase()
   const calldataLength = String(relay.data || '').replace(/^0x/i, '').length / 2
   console.info(`${TAG} ClearSign lookup (${previewMode ? 'preview' : 'execute'}): chain=${chainId} selector=${selector} bytes=${calldataLength} certifiedSupported=${certifiedMetadataSupported}`)
-  const evmSchema = await resolveEvmSchema(chainId, relay.to, relay.data, certifiedMetadataSupported, runtimeGate.firmwareVersion)
+  const evmSchema = await resolveEvmSchema(chainId, relay.to, relay.data, certifiedMetadataSupported, runtimeGate.firmwareVersion, unsignedTx.value)
   if (evmSchema) {
     unsignedTx.txMetadata = { signedPayload: evmSchema.signedPayload, keyId: evmSchema.keyId }
     console.info(`${TAG} clear-sign schema attached: ${evmSchema.method} (keyId=${evmSchema.keyId}, source=${evmSchema.source || 'local-test'})`)
@@ -1823,7 +1823,7 @@ async function buildRelaySwapTx(
   // AdvancedMode. A failed lookup leaves the device's ordinary policy.
   if (pendingApproveTx) {
     try {
-      const approveSchema = await resolveEvmSchema(chainId, pendingApproveTx.to, pendingApproveTx.data, certifiedMetadataSupported, runtimeGate.firmwareVersion)
+      const approveSchema = await resolveEvmSchema(chainId, pendingApproveTx.to, pendingApproveTx.data, certifiedMetadataSupported, runtimeGate.firmwareVersion, pendingApproveTx.value)
       if (approveSchema) {
         pendingApproveTx.txMetadata = { signedPayload: approveSchema.signedPayload, keyId: approveSchema.keyId }
         console.info(`${TAG} clear-sign schema attached to approve: ${approveSchema.method} (keyId=${approveSchema.keyId}, source=${approveSchema.source || 'local-test'})`)
@@ -2167,7 +2167,7 @@ async function buildEvmSwapTx(
       // token has none and the device keeps its ordinary policy (blind review,
       // AdvancedMode), which the in-app card reports from the same verdict.
       try {
-        const approveSchema = await resolveEvmSchema(chainId, approveTx.to, approveTx.data, certifiedMetadataSupported, firmwareVersion)
+        const approveSchema = await resolveEvmSchema(chainId, approveTx.to, approveTx.data, certifiedMetadataSupported, firmwareVersion, approveTx.value)
         if (approveSchema) {
           approveTx.txMetadata = { signedPayload: approveSchema.signedPayload, keyId: approveSchema.keyId }
           swapLog(`${TAG} clear-sign schema attached to approve: ${approveSchema.method} (keyId=${approveSchema.keyId}, source=${approveSchema.source || 'local-test'})`)

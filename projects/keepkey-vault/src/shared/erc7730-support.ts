@@ -14,17 +14,23 @@ import { deviceTrustsProductionRoot } from './certified-evm-envelope'
 /** Calldata definitions: on, behind the firmware and capability gate below. */
 export const ERC7730_TRANSPORT_SUPPORTED: boolean = true
 
+/** The first firmware with the ERC-7730 v2 interpreter. */
+export const ERC7730_MIN_FW = '7.16.0'
+
 /**
  * Typed-data (EIP-712) definitions: OFF on 7.16 (owner, 2026-10-16). Measured
  * on stock 7.16.0, every field pass re-shows every message leaf (4.2x the
- * screens), and a preload turns off the native Permit2 review. Desktop never
- * attaches a definition to typed data in this build. Revisit with a firmware
- * that shows each leaf once.
+ * screens). 7.17 shows each value once (firmware #1025), so typed data gets a
+ * definition from 7.17.0 on. A PermitSingle never gets one: a preload turns
+ * off the native Permit2 review.
+ *
+ * Gated on the version alone (owner rule: versions, not flags). Firmware alpha
+ * has reported 7.17.0 since 2026-09-21, but show-once (520ec4ed5) reached alpha
+ * only on 2026-10-30 (296aa1e2c). A 7.17.0 alpha built before that re-shows
+ * every value on each field pass. Those are unreleased test builds and are not
+ * supported: reflash current alpha. Every released 7.17.0 carries #1025.
  */
-export const ERC7730_TYPED_DATA_SUPPORTED: boolean = false
-
-/** The first firmware with the ERC-7730 v2 interpreter. */
-export const ERC7730_MIN_FW = '7.16.0'
+export const ERC7730_TYPED_DATA_MIN_FW = '7.17.0'
 
 /**
  * The first firmware that follows an embedded call to that call's own
@@ -53,6 +59,12 @@ export function supportsErc7730Transport(firmwareVersion: string | undefined, ca
 /** This firmware takes definitions with embedded calls and formatter flags. */
 export function supportsErc7730EmbeddedCalls(firmwareVersion: string | undefined): boolean {
   return !!firmwareVersion && versionCompare(firmwareVersion, ERC7730_EMBEDDED_MIN_FW) >= 0
+}
+
+/** Desktop may send this device an ERC-7730 typed-data definition. */
+export function supportsErc7730TypedData(firmwareVersion: string | undefined, capabilities: readonly number[] | undefined): boolean {
+  return supportsErc7730Transport(firmwareVersion, capabilities)
+    && versionCompare(firmwareVersion!, ERC7730_TYPED_DATA_MIN_FW) >= 0
 }
 
 /**

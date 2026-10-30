@@ -11,13 +11,13 @@ import { buildApprovedNamespaces, getSdkError } from '@walletconnect/utils'
 import { formatJsonRpcResult, formatJsonRpcError } from '@walletconnect/jsonrpc-utils'
 import type { SessionTypes, SignClientTypes } from '@walletconnect/types'
 import bs58 from 'bs58'
-import type { ClearSignObservationDraft, ClearSignObservationOutcome, SigningRequestInfo, WcSessionInfo } from '../shared/types'
+import type { ClearSignObservationDraft, ClearSignObservationOutcome, Erc7730Catalog, SigningRequestInfo, WcSessionInfo } from '../shared/types'
 import { evmAddressPath } from './evm-addresses'
 import { verifyEvmSigner } from './evm-rpc'
 import { assertEvmFeeCapCoversBaseFee } from '../shared/evmFeePreview'
-import { applyEvmTxPreview, attachErc7730Definition, evmPriorityFee, recognizedTypedDataSpender } from './evm-signing-preview'
+import { applyEvmTxPreview, attachErc7730Definition, attachErc7730TypedDefinition, evmPriorityFee, recognizedTypedDataSpender } from './evm-signing-preview'
 import { signWithErc7730Fallback } from './erc7730-resolver'
-import { evmSigningVerdict, withoutErc7730Description } from './evm-presign-report'
+import { buildTypedDataReport, evmSigningVerdict, withoutErc7730Description } from './evm-presign-report'
 import { buildSolanaMessageDecodedInfo } from './solana-message-preview'
 import { ethMessagePreview } from './eth-message-preview'
 import { buildSolanaDecodedInfo } from './solana-clearsign'
@@ -182,8 +182,9 @@ export interface WcCallbacks {
   loadClearsignSigner: (signer: RuntimeEvmSigner) => Promise<void>
   /** Sign a message via the KeepKey device. */
   ethSignMessage: (params: any) => Promise<any>
-  /** Sign typed data (EIP-712) via the KeepKey device. */
-  ethSignTypedData: (params: any) => Promise<any>
+  /** Sign typed data (EIP-712) via the KeepKey device, with the ERC-7730
+   *  definition the approval card was built on, if any. */
+  ethSignTypedData: (params: any, erc7730?: Erc7730Catalog) => Promise<any>
   /** Get the cosmos account info for a given CAIP chain id. Null if not ready. */
   getCosmosAccountInfo: (caipChain: string) => Promise<{ address: string; pubkeyBase64: string; addressNList: number[] } | null>
   /** Sign an amino-format Cosmos StdSignDoc via the device. Returns base64 signature. */
@@ -972,9 +973,16 @@ export class WalletConnectManager {
       typedDataDecoded: decodeEIP712(typedData, from),
     }
     signingInfo.recognizedSpender = recognizedTypedDataSpender(signingInfo.typedDataDecoded, signingInfo.chainId)
+    // 7.17+: the ClearSign service's definition, checked before approval so
+    // the card describes it; exactly this one is sent.
+    if (await attachErc7730TypedDefinition(signingInfo, typedData, this.callbacks.getFirmwareVersion(),
+      this.callbacks.getDeviceCapabilities?.(), from, '[WC]')) {
+      signingInfo.clearSignReport = buildTypedDataReport(signingInfo)
+    }
 
     const observationId = this.callbacks.recordClearSignObservation(observeEvmTypedData({
       typedData, chainId: signingInfo.chainId, hostDecoded: true,
+      ...(signingInfo.erc7730 ? { source: 'erc7730' as const } : {}),
     }))
     const approvalStartedAt = Date.now()
     let approved: boolean
@@ -989,10 +997,15 @@ export class WalletConnectManager {
     }
 
     try {
-      const result = await this.callbacks.ethSignTypedData({
-        addressNList,
-        typedData,
-      })
+      let sentErc7730: Erc7730Catalog | undefined
+      const result = await signWithErc7730Fallback(
+        { addressNList, typedData, ...(signingInfo.erc7730 ? { erc7730: signingInfo.erc7730 } : {}) },
+        ({ erc7730, ...params }: any) => { sentErc7730 = erc7730; return this.callbacks.ethSignTypedData(params, erc7730) },
+        // Refused: the device streams the document instead (7.15+ shows every value).
+        () => { if (observationId) this.callbacks.refuseClearSignObservationDefinition?.(observationId) },
+        '[WC]',
+      )
+      if (observationId && sentErc7730) this.callbacks.authenticateClearSignObservation(observationId, 'erc7730')
       if (observationId) this.callbacks.finalizeClearSignObservation(observationId, 'signed')
       return result?.signature ?? result
     } catch (error: any) {
@@ -1043,7 +1056,7 @@ export class WalletConnectManager {
     try {
       clearSignSchema = await resolveEvmSchema(
         effectiveChainId, tx.to, tx.data,
-        supportsCertifiedClearSign(this.callbacks.getFirmwareVersion()), this.callbacks.getFirmwareVersion(),
+        supportsCertifiedClearSign(this.callbacks.getFirmwareVersion()), this.callbacks.getFirmwareVersion(), tx.value,
       )
     } catch (error: any) {
       this.callbacks.log(`[WC] ClearSign schema lookup unavailable: ${error?.message || error}`)

@@ -142,9 +142,12 @@ interface Level {
   chainId: number
   /** The definition's contract (@.to). */
   to: string
+  /** The calldata; '' for typed data. */
   data: string
   /** @.value */
   value: bigint
+  /** Typed data (depth 0 only): the message in the program's node order, read in place of calldata. */
+  typed?: any[]
   /** @.from: the signer at depth 0 (undefined when not matched), else whose authority the call runs with. */
   from?: string
   /** The device's signing address, for "(this wallet)"; undefined when not matched. */
@@ -219,6 +222,8 @@ function readLevel(envelopeHex: string, call: Level, walk: Walk): { signedBy: st
     formatters.push({ kind: ft[p], flags: ft[p + 1], args })
     p += 3 + 4 * ft[p + 2]
   }
+  // Calldata definitions only (erc7730_catalog.c): the device refuses a typed-data definition with either.
+  if (call.typed && formatters.some((f) => f.kind === 13 || f.flags & FLAG_TX_VALUE)) throw new Error('a calldata-only formatter in typed data')
   const dt = section[7]
   const display = Array.from({ length: u16(dt, 0) }, (_, i) => ({ op: dt[2 + 8 * i], a: u16(dt, 4 + 8 * i), b: u16(dt, 6 + 8 * i) }))
 
@@ -230,7 +235,7 @@ function readLevel(envelopeHex: string, call: Level, walk: Walk): { signedBy: st
         : kind === 9 ? `${type(first)}[${length === ABSENT ? '' : length}]` : '?')
   }
   const root = nodes[0]
-  const args = ethersUtils.defaultAbiCoder.decode(
+  const args = call.typed ?? ethersUtils.defaultAbiCoder.decode(
     Array.from({ length: root.count }, (_, k) => type(root.first + k)), `0x${call.data.slice(10)}`)
 
   const leaf = (kind: number, v: any): Leaf => ({
@@ -250,6 +255,10 @@ function readLevel(envelopeHex: string, call: Level, walk: Walk): { signedBy: st
     const path = paths[i]
     if (path.source === 3) return [literal(path.index)]
     if (path.source === 2) {
+      if (call.typed) {
+        if (path.index !== 2) throw new Error('typed data has only @.to')
+        return [{ kind: 3, value: call.to.toLowerCase() }]
+      }
       if (path.index === 3) return [{ kind: 1, value: call.value }]
       if (path.index === 1 && !call.from) throw new Error('signer not matched')
       return [{ kind: 3, value: String(path.index === 1 ? call.from : call.to).toLowerCase() }]
@@ -474,24 +483,55 @@ export function describeErc7730Call(
   rootPublicKey: string = PRODUCTION_ROOT_PUBLIC_KEY,
 ): Erc7730Description | undefined {
   try {
-    const { signedBy, intent, parts, fields } = readLevel(envelopeHex, {
+    return describeLevel(envelopeHex, {
       chainId: call.chainId, to: call.to, data: call.data, value: toBigint(call.value), from: call.from, signer: call.from, depth: 0,
     }, { root: rootPublicKey, inner: innerLookup(call.chainId, inner) })
-
-    const to = call.to.toLowerCase()
-    const protocol = PROTOCOLS[`${call.chainId}:${to}`]
-    const about = protocol?.about[call.data.slice(0, 10).toLowerCase()]
-    const explorer = CHAINS.find((c) => c.chainFamily === 'evm' && c.chainId === String(call.chainId))?.explorerAddressUrl
-    return {
-      signedBy,
-      intent,
-      ...(parts.length ? { summary: parts.join(' ') } : {}),
-      fields,
-      ...(protocol ? { protocol: { name: protocol.name, url: protocol.url, ...(about ? { about } : {}) } } : {}),
-      ...(explorer?.startsWith('https://') ? { explorerUrl: explorer.replace('{{address}}', ethersUtils.getAddress(to)) } : {}),
-    }
   } catch {
     return undefined
+  }
+}
+
+/**
+ * The description of an EIP-712 document from a typed-data (kind 2) envelope,
+ * the way 7.17 shows it: each definition field once, in its format. The
+ * values no field shows are shown raw by the device after the fields (the
+ * card lists every value in its own typed-data section). `from` as for calls.
+ * Typed data has one container, @.to: the domain's verifyingContract.
+ */
+export function describeErc7730TypedData(envelopeHex: string, typedData: any, from?: string): Erc7730Description | undefined {
+  try {
+    const contract = String(typedData?.domain?.verifyingContract ?? '')
+    if (!/^0x[0-9a-fA-F]{40}$/.test(contract)) return undefined
+    const types = typedData.types ?? {}
+    // The message in the program's node order: struct members in declared order.
+    const tuple = (type: string, value: any): any => {
+      const array = /^(.*)\[(\d*)\]$/.exec(type)
+      if (array) return (value as any[]).map((v) => tuple(array[1], v))
+      return Array.isArray(types[type]) ? types[type].map((m: { name: string; type: string }) => tuple(m.type, value[m.name])) : value
+    }
+    return describeLevel(envelopeHex, {
+      chainId: Number(typedData.domain.chainId), to: contract, data: '', value: 0n, from, signer: from, depth: 0,
+      typed: tuple(String(typedData.primaryType), typedData.message),
+    }, { root: PRODUCTION_ROOT_PUBLIC_KEY, inner: () => undefined })
+  } catch {
+    return undefined
+  }
+}
+
+/** A depth-0 level's description, with its protocol and explorer link. Throws when it cannot say. */
+function describeLevel(envelopeHex: string, call: Level, walk: Walk): Erc7730Description {
+  const { signedBy, intent, parts, fields } = readLevel(envelopeHex, call, walk)
+  const to = call.to.toLowerCase()
+  const protocol = PROTOCOLS[`${call.chainId}:${to}`]
+  const about = call.typed ? undefined : protocol?.about[call.data.slice(0, 10).toLowerCase()]
+  const explorer = CHAINS.find((c) => c.chainFamily === 'evm' && c.chainId === String(call.chainId))?.explorerAddressUrl
+  return {
+    signedBy,
+    intent,
+    ...(parts.length ? { summary: parts.join(' ') } : {}),
+    fields,
+    ...(protocol ? { protocol: { name: protocol.name, url: protocol.url, ...(about ? { about } : {}) } } : {}),
+    ...(explorer?.startsWith('https://') ? { explorerUrl: explorer.replace('{{address}}', ethersUtils.getAddress(to)) } : {}),
   }
 }
 

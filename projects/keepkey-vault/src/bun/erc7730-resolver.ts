@@ -1,6 +1,7 @@
 /**
- * ERC-7730 calldata definitions from the KeepKey ClearSign service, checked
- * here before one reaches the device.
+ * ERC-7730 calldata definitions (7.16+) and typed-data definitions (7.17+)
+ * from the KeepKey ClearSign service, checked here before one reaches the
+ * device.
  *
  * The service signs ERC-7730 v2 programs (C773) into K773 envelopes. Firmware
  * 7.16 verifies the envelope itself; Desktop's checks decide only whether to
@@ -23,7 +24,8 @@
 import { createHash } from 'node:crypto'
 import { DEFAULT_CLEARSIGN_SERVICE_URL } from './solana-certified-registry'
 import { firmwareClearSigns } from './calldata-decoder'
-import { erc7730CalldataSkipReason, supportsErc7730EmbeddedCalls, supportsErc7730Transport } from '../shared/erc7730-support'
+import { utils as ethersUtils } from 'ethers'
+import { erc7730CalldataSkipReason, supportsErc7730EmbeddedCalls, supportsErc7730Transport, supportsErc7730TypedData } from '../shared/erc7730-support'
 import { deviceErrorMessage } from '../shared/device-error'
 import { planErc7730EmbeddedCalls } from './erc7730-describe'
 import type { Erc7730Catalog } from '../shared/types'
@@ -33,6 +35,7 @@ const TAG = '[erc7730]'
 const ENVELOPE_MAX_HEX = 35_000
 const PROGRAM_HEADER_SIZE = 179
 const KIND_CALLDATA = 1
+const KIND_EIP712 = 2
 /** C773 program sections (python-keepkey keepkeylib/erc7730_compiler.py). */
 const SECTION_FORMATTERS = 6
 const SECTION_RESOURCES = 9
@@ -365,6 +368,128 @@ function primaryHasEmbeddedCall(catalog: Partial<Erc7730Catalog> | undefined): b
   const primary = catalog?.definitions?.find((d) => String(d?.definitionId ?? '').replace(/^0x/i, '').toLowerCase() === primaryId)
   const envelope = typeof primary?.envelope === 'string' ? primary.envelope.replace(/^0x/i, '') : ''
   return !!envelope && readErc7730Envelope(Uint8Array.from(Buffer.from(envelope, 'hex')))?.embeddedCall === true
+}
+
+/** keccak256(encodeType(primaryType)) per EIP-712: the primary type, then
+ *  every struct it uses, sorted by name. Undefined when a type is missing. */
+export function eip712TypeHash(types: Record<string, Array<{ name: string; type: string }>>, primaryType: string): string | undefined {
+  const used = new Set<string>()
+  const visit = (name: string): boolean => {
+    if (used.has(name)) return true
+    const members = types?.[name]
+    if (!Array.isArray(members)) return false
+    used.add(name)
+    return members.every((m) => {
+      const base = String(m?.type ?? '').replace(/(\[\d*\])+$/, '')
+      return !Object.prototype.hasOwnProperty.call(types, base) || visit(base)
+    })
+  }
+  if (!visit(primaryType)) return undefined
+  const encode = (name: string) => `${name}(${types[name].map((m) => `${m.type} ${m.name}`).join(',')})`
+  const rest = [...used].filter((n) => n !== primaryType).sort()
+  return ethersUtils.keccak256(ethersUtils.toUtf8Bytes([primaryType, ...rest].map(encode).join('')))
+}
+
+/** What the service is asked for: the domain's chain and verifying contract,
+ *  and the primary type's typeHash. A reason when typed data gets none. */
+export function erc7730TypedDataKey(typedData: any): { chainId: number; contract: string; typeHash: string } | { reason: string } {
+  const primaryType = typedData?.primaryType
+  if (typeof primaryType !== 'string' || !primaryType) return { reason: 'no primary type' }
+  if (primaryType === 'EIP712Domain') return { reason: 'domain-only signature' }
+  // A preload turns off the native Permit2 review (owner, 2026-10-16).
+  if (primaryType === 'PermitSingle') return { reason: 'PermitSingle keeps the native Permit2 review' }
+  const chainId = Number(typedData?.domain?.chainId)
+  if (!Number.isSafeInteger(chainId) || chainId <= 0) return { reason: 'domain has no chain' }
+  const contract = String(typedData?.domain?.verifyingContract ?? '')
+  if (!/^0x[0-9a-fA-F]{40}$/.test(contract)) return { reason: 'domain has no verifying contract' }
+  const typeHash = eip712TypeHash(typedData?.types, primaryType)
+  if (!typeHash) return { reason: 'types do not resolve' }
+  return { chainId, contract: contract.toLowerCase(), typeHash }
+}
+
+/** A typed-data definition for exactly this chain, contract and typeHash, or the reason it is not one. */
+export function checkErc7730TypedDataDefinition(
+  definition: { definitionId?: unknown; envelope?: unknown; kind?: unknown; chainId?: unknown; contractAddress?: unknown; selectorOrTypeHash?: unknown },
+  key: { chainId: number; contract: string; typeHash: string },
+): { entry: Erc7730Catalog['definitions'][number] } | { reason: string } {
+  const envelopeHex = typeof definition.envelope === 'string' ? definition.envelope.replace(/^0x/i, '').toLowerCase() : ''
+  const id = typeof definition.definitionId === 'string' ? definition.definitionId.replace(/^0x/i, '').toLowerCase() : ''
+  if (!HEX_BYTES.test(envelopeHex) || envelopeHex.length > ENVELOPE_MAX_HEX) return { reason: 'envelope is not bounded hex' }
+  if (!/^[0-9a-f]{64}$/.test(id)) return { reason: 'definition id is not 32 bytes' }
+  const envelope = Uint8Array.from(Buffer.from(envelopeHex, 'hex'))
+  if (createHash('sha256').update(envelope).digest('hex') !== id) return { reason: 'definition id is not sha256(envelope)' }
+  const header = readErc7730Envelope(envelope)
+  if (!header) return { reason: 'not a K773 envelope' }
+  const typeHash = key.typeHash.toLowerCase()
+  if (header.kind !== KIND_EIP712) return { reason: `envelope kind ${header.kind} is not EIP-712` }
+  if (header.chainId !== BigInt(key.chainId)) return { reason: `envelope chain ${header.chainId} is not ${key.chainId}` }
+  if (header.contract !== key.contract) return { reason: `envelope contract ${header.contract} is not ${key.contract}` }
+  if (header.selectorOrTypeHash !== typeHash) return { reason: `envelope typeHash ${header.selectorOrTypeHash.slice(0, 10)} is not ${typeHash.slice(0, 10)}` }
+  if (header.embeddedCall !== false) {
+    return { reason: header.embeddedCall ? 'program has an embedded call' : 'program sections cannot be read' }
+  }
+  const claimedKind = definition.kind
+  if (claimedKind !== undefined && claimedKind !== KIND_EIP712 && claimedKind !== 'eip712') return { reason: 'service kind is not eip712' }
+  if (definition.chainId !== undefined && Number(definition.chainId) !== key.chainId) return { reason: 'service chain differs' }
+  if (definition.contractAddress !== undefined && String(definition.contractAddress).toLowerCase() !== key.contract) return { reason: 'service contract differs' }
+  if (definition.selectorOrTypeHash !== undefined && String(definition.selectorOrTypeHash).toLowerCase().replace(/^(0x)?/, '0x') !== typeHash) {
+    return { reason: 'service typeHash differs' }
+  }
+  return {
+    entry: {
+      definitionId: `0x${id}`, envelope: `0x${envelopeHex}`, kind: KIND_EIP712,
+      chainId: key.chainId, contractAddress: key.contract, selectorOrTypeHash: typeHash,
+    },
+  }
+}
+
+/**
+ * The ERC-7730 definition to send with this typed data, or undefined. Only on
+ * firmware 7.17.0+ (shows each value once), only when nothing else rides with
+ * the document (a Permit2 name record), and only one the KeepKey ClearSign
+ * service has and this computer checked. Never throws.
+ */
+export async function resolveErc7730ForTypedData(
+  request: { typedData: unknown; firmwareVersion: string | undefined; capabilities: readonly number[] | undefined; txMetadata?: unknown },
+  fetchImpl: typeof fetch = fetch,
+): Promise<Erc7730Catalog | undefined> {
+  if (!supportsErc7730TypedData(request.firmwareVersion, request.capabilities)) return undefined
+  if (request.txMetadata) return undefined
+  const key = erc7730TypedDataKey(request.typedData)
+  if ('reason' in key) return undefined
+  const where = `chain ${key.chainId} ${key.contract} ${key.typeHash.slice(0, 10)}`
+  const url = `${serviceBase()}/v1/erc7730/definition?kind=eip712&chainId=${key.chainId}&contract=${key.contract}&typeHash=${key.typeHash}`
+  let body: any
+  try {
+    const response = await fetchImpl(url, { signal: AbortSignal.timeout(3_000) })
+    if (response.status === 404 || response.status === 422) return undefined
+    if (!response.ok) {
+      console.warn(`${TAG} ${where}: typed-data definition lookup returned HTTP ${response.status}; none attached`)
+      return undefined
+    }
+    body = await response.json()
+  } catch (error: any) {
+    console.warn(`${TAG} ${where}: typed-data definition lookup failed (${error?.message || error}); none attached`)
+    return undefined
+  }
+  const checked = checkErc7730TypedDataDefinition(body && typeof body === 'object' ? body : {}, key)
+  if ('reason' in checked) {
+    console.warn(`${TAG} ${where}: typed-data definition not attached (${checked.reason})`)
+    return undefined
+  }
+  if (refusedDefinitionIds.has(checked.entry.definitionId)) return undefined
+  console.info(`${TAG} ${where}: typed-data definition ${checked.entry.definitionId.slice(0, 18)}… checked`)
+  return { primaryDefinitionId: checked.entry.definitionId, definitions: [checked.entry] }
+}
+
+/** Typed-data sign params with the service's definition attached, when the device takes one. */
+export async function withErc7730TypedData<T extends { typedData: any; txMetadata?: unknown }>(
+  params: T,
+  device: { firmwareVersion: string | undefined; capabilities: readonly number[] | undefined },
+  fetchImpl: typeof fetch = fetch,
+): Promise<T & { erc7730?: Erc7730Catalog }> {
+  const erc7730 = await resolveErc7730ForTypedData({ ...device, typedData: params.typedData, txMetadata: params.txMetadata }, fetchImpl)
+  return erc7730 ? { ...params, erc7730 } : params
 }
 
 /** Refusals of the definition, not of the transaction (7.16/7.17

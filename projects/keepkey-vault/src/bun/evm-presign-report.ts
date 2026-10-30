@@ -48,7 +48,7 @@ export async function prepareEvmTxSigningInfo(
           maxPriorityFeePerGas: preview.maxPriorityFeePerGas || preview.max_priority_fee_per_gas || '0x0',
         }),
       }
-      const found = await resolveEvmSchema(chainIdNum, preview.to, preview.data, true, signingInfo.firmwareVersion)
+      const found = await resolveEvmSchema(chainIdNum, preview.to, preview.data, true, signingInfo.firmwareVersion, preview.value)
         ?? await resolveCertifiedEvmTransaction(txForCertification)
       // The swap gate's rule (evmCallRequiresAdvancedMode): relax only for an
       // envelope this firmware shows for this exact call. A body it refuses
@@ -178,7 +178,8 @@ export function withoutErc7730Description(info: SigningRequestInfo): SigningRequ
  * way a transaction does. Nothing is simulated: a signature moves nothing by
  * itself. P4 when the firmware shows what the document means (7.15+ shows the
  * fields it hashes, but a Safe call's data or a SafeMessage hash only as raw
- * hex), P2 when a descriptor this computer reviewed read it in full, else P1.
+ * hex) or shows it from an attached ClearSign definition (7.17+), P2 when a
+ * descriptor this computer reviewed read it in full, else P1.
  * The fingerprint is the EIP-712 digest the device signs.
  */
 export function buildTypedDataReport(info: SigningRequestInfo): ClearSignReport | undefined {
@@ -194,6 +195,19 @@ export function buildTypedDataReport(info: SigningRequestInfo): ClearSignReport 
     stateReference: { endpoint: 'none' }, status: 'unavailable',
     assetChanges: [], authorityChanges: [], invokedCode: [], warnings: [], unknowns: [],
     completeness: { accountCoverage: 'unknown', innerExecution: 'unknown', tokenCoverage: 'unknown' },
+  }
+  // A ClearSign service definition the gate fetched and checked for this
+  // document (7.17+): the device verifies it and shows the document from it.
+  if (info.erc7730) {
+    const described = info.erc7730Description
+    return buildClearSignReport({
+      requestedLevel: 'P4',
+      descriptor: {
+        source: 'erc7730', authenticated: true, format: 'ERC7730',
+        ...(described ? { label: described.intent, signer: described.signedBy } : known ? { label: d.operationName } : {}),
+      },
+      simulation,
+    })
   }
   return buildClearSignReport({
     requestedLevel: shows ? 'P4' : known ? 'P2' : 'P1',
