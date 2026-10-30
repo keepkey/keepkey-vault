@@ -1067,15 +1067,16 @@ function evmTypedData(req: SigningRequestInfo, add: (l: RiskLevel, t: string) =>
       const known = identified ? req.recognizedSpender ?? (ownSwap ? 'UniswapX' : undefined) : undefined
       const who = f('Spender')?.raw ? (known ? `${known} (${f('Spender')!.raw})` : f('Spender')!.raw) : 'another account'
       const unbounded = all || amounts.length === 0 || amounts.some((a) => a.raw === undefined || a.raw >= BOUND_LIMIT)
-      // A Permit2 permit to a reviewed router is what Uniswap asks for on every
-      // swap, usually for the maximum with an expiry. Only a certified name
-      // record earns this: a name from Desktop's own spender list is advice,
-      // and most of those contracts never take a Permit2 allowance.
-      const routerPermit = contract === PERMIT2 && !!known && known === req.recognizedSpender && known !== 'Uniswap Permit2'
-        && !knownSpenderName(chainId, spender)
-      const level = spendPermissionLevel(known, unbounded, routerPermit)
       // A signature transfer (Permit*TransferFrom) is spent once, not an allowance.
       const once = /TransferFrom$/.test(d.primaryType)
+      // A Permit2 allowance to a reviewed router is what Uniswap asks for on
+      // every swap, usually for the maximum with an expiry. Only a certified
+      // name record earns this: a name from Desktop's own spender list is
+      // advice, and most of those contracts never take a Permit2 allowance.
+      // A one-time transfer for everything is not that flow.
+      const routerPermit = contract === PERMIT2 && !once && !!known && known === req.recognizedSpender && known !== 'Uniswap Permit2'
+        && !knownSpenderName(chainId, spender)
+      const level = spendPermissionLevel(known, unbounded, routerPermit)
       add(level, once
         ? `Lets ${who} take ${howMuch}, once. This signature alone is enough; no transaction from you is needed.`
         : `Lets ${who} spend ${howMuch}, now and later. This signature alone is enough; no transaction from you is needed.`)
