@@ -216,6 +216,92 @@ describe('Seaport 1.6 listing with a creator fee (OpenSea, mainnet)', () => {
     const req = await looked(typedData, async () => { throw new Error('execution reverted') })
     expect(assessSigningRisk(req)!.level).toBe('critical')
   })
+
+  // What Desktop met on the 2026-10-30 emulator leg: the default endpoint is
+  // Pioneer, which serves no eth_call, so royaltyInfo could not be asked.
+  const PIONEER_NO_ETH_CALL = async () => { throw new Error('Pioneer does not expose eth_call (server has no EvmReadRpc)') }
+
+  test('royaltyInfo could not be asked: not danger, and the card says the payee was not checked', async () => {
+    const req = await looked(typedData, PIONEER_NO_ETH_CALL)
+    expect(req.typedDataDecoded?.seaportListing?.creatorFeeUnchecked).toBe(true)
+    expect(req.typedDataDecoded?.seaportListing?.payments.map((p) => p.role)).toEqual(['offerer', 'opensea-fee', 'other'])
+    const risk = assessSigningRisk(req)!
+    expect(risk.level).toBe('medium')
+    // Not green: this computer did not check who that payee is.
+    expect(risk.tier).toBe('yellow')
+    expect(risk.headline).toBe('Shown on your KeepKey, but this computer could not check one payee')
+    expect(texts(req)).toContain('You receive 0.01974 ETH, and 0.00021 ETH goes to OpenSea\'s fee address.')
+    expect(texts(req)).toContain(`Also pays 0.00105 ETH to ${CREATOR}. This computer could not ask the collection for its creator fee (ERC-2981 royaltyInfo), so it could not check that this is the creator fee address.`)
+    expect(texts(req)).not.toContain('creator fee address the collection names on chain')
+    expect(texts(req)).not.toContain('which is neither the seller nor a marketplace fee address')
+  })
+
+  test('CONTROL: royaltyInfo not asked, and the listing is not otherwise normal: still red', async () => {
+    // Two different unknown payees: at most one can be the creator fee.
+    const two = clone(typedData)
+    two.message.consideration.push({ ...two.message.consideration[2], recipient: OTHER })
+    two.message.totalOriginalConsiderationItems = String(two.message.consideration.length)
+    const twoReq = await looked(two, PIONEER_NO_ETH_CALL)
+    expect(twoReq.typedDataDecoded?.seaportListing?.creatorFeeUnchecked).toBe(true)
+    expect(twoReq.typedDataDecoded?.seaportListing?.payments.filter((p) => p.role === 'other').length).toBe(2)
+    expect(assessSigningRisk(twoReq)!.level).toBe('critical')
+    // The seller is paid dust and the unknown payee takes the rest.
+    const dust = clone(typedData)
+    const [own, , creator] = dust.message.consideration
+    creator.startAmount = creator.endAmount = (BigInt(creator.startAmount) + BigInt(own.startAmount) - 1n).toString()
+    own.startAmount = own.endAmount = '1'
+    const dustReq = await looked(dust, PIONEER_NO_ETH_CALL)
+    expect(dustReq.typedDataDecoded?.seaportListing?.creatorFeeUnchecked).toBe(true)
+    expect(assessSigningRisk(dustReq)!.level).toBe('critical')
+    // The unknown payee takes as much as the seller gets: not a fee, stays high.
+    const half = clone(typedData)
+    const [own2, , creator2] = half.message.consideration
+    const total = BigInt(own2.startAmount) + BigInt(creator2.startAmount)
+    own2.startAmount = own2.endAmount = (total / 2n).toString()
+    creator2.startAmount = creator2.endAmount = (total - total / 2n).toString()
+    const halfReq = await looked(half, PIONEER_NO_ETH_CALL)
+    expect(halfReq.typedDataDecoded?.seaportListing?.creatorFeeUnchecked).toBe(true)
+    expect(assessSigningRisk(halfReq)!.level).toBe('critical')
+    expect(assessSigningRisk(halfReq)!.tier).toBe('red')
+  })
+
+  // The unchecked payee takes `pct`% of the price, out of what the seller gets.
+  const split = (pct: bigint) => {
+    const td = clone(typedData)
+    const [own, , creator] = td.message.consideration
+    const total = td.message.consideration.reduce((sum: bigint, c: any) => sum + BigInt(c.startAmount), 0n)
+    const take = total * pct / 100n
+    own.startAmount = own.endAmount = (BigInt(own.startAmount) + BigInt(creator.startAmount) - take).toString()
+    creator.startAmount = creator.endAmount = take.toString()
+    return td
+  }
+
+  test('royaltyInfo not asked, on 7.14.2: yellow, not red', async () => {
+    const req = typedRequest(typedData, address, '7.14.2')
+    await addSeaportCreatorFee(req, PIONEER_NO_ETH_CALL)
+    const risk = assessSigningRisk(req)!
+    expect(risk.level).toBe('medium')
+    expect(risk.tier).toBe('yellow')
+    expect(risk.headline).toBe('Known, but your KeepKey cannot show it yet')
+  })
+
+  test('royaltyInfo not asked: up to 10% of the price, the most OpenSea lets a creator set, reads as an unchecked fee', async () => {
+    const req = await looked(split(10n), PIONEER_NO_ETH_CALL)
+    const risk = assessSigningRisk(req)!
+    expect(risk.level).toBe('medium')
+    expect(risk.tier).toBe('yellow')
+    expect(texts(req)).toContain('This computer could not ask the collection for its creator fee')
+  })
+
+  test('mutant: royaltyInfo not asked, and the unchecked payee takes more than a creator fee can', async () => {
+    for (const pct of [11n, 30n, 45n, 49n]) {
+      const req = await looked(split(pct), PIONEER_NO_ETH_CALL)
+      expect(req.typedDataDecoded?.seaportListing?.creatorFeeUnchecked).toBe(true)
+      const risk = assessSigningRisk(req)!
+      expect([pct, risk.level, risk.tier]).toEqual([pct, 'critical', 'red'])
+      expect(texts(req)).toContain(`to ${CREATOR}, which is neither the seller nor a marketplace fee address`)
+    }
+  })
 })
 
 describe('setApprovalForAll to a marketplace operator', () => {

@@ -23,6 +23,59 @@
         }
       }
     },
+    "11111111111111111111111111111111": {
+      "name": "System Program",
+      "category": "core",
+      "website": "https://docs.solana.com/developing/runtime-facilities/programs#system-program",
+      "description": "Core Solana runtime program: account creation, lamport transfers, allocation. The pioneer-discovery 10.3.2 entry plus AdvanceNonceAccount (4), the first instruction of every durable-nonce transaction; firmware decodes it too.",
+      "discriminator": {
+        "encoding": "u32-le",
+        "offset": 0,
+        "length": 4
+      },
+      "instructions": {
+        "00000000": {
+          "name": "createAccount",
+          "accounts": ["funder", "new_account"],
+          "args": [
+            { "name": "lamports", "type": "u64" },
+            { "name": "space", "type": "u64" },
+            { "name": "owner", "type": "pubkey" }
+          ]
+        },
+        "02000000": {
+          "name": "transfer",
+          "accounts": ["source", "destination"],
+          "args": [
+            { "name": "lamports", "type": "u64" }
+          ]
+        },
+        "03000000": {
+          "name": "createAccountWithSeed",
+          "accounts": ["funder", "new_account", "base"],
+          "args": [
+            { "name": "base", "type": "pubkey" },
+            { "name": "seed", "type": "string" },
+            { "name": "lamports", "type": "u64" },
+            { "name": "space", "type": "u64" },
+            { "name": "owner", "type": "pubkey" }
+          ]
+        },
+        "04000000": {
+          "name": "advanceNonceAccount",
+          "description": "Use a durable nonce: the transaction stays valid until it is sent or the nonce is advanced.",
+          "accounts": ["nonceAccount", "recentBlockhashesSysvar", "nonceAuthority"],
+          "args": []
+        },
+        "08000000": {
+          "name": "allocate",
+          "accounts": ["new_account"],
+          "args": [
+            { "name": "space", "type": "u64" }
+          ]
+        }
+      }
+    },
     "Stake11111111111111111111111111111111111111": {
       "name": "Stake Program",
       "category": "staking",

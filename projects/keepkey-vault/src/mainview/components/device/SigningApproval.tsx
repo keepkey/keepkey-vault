@@ -1122,13 +1122,16 @@ export function SigningApproval({ request, phase, onApprove, onReject, onCancel 
 		!hasCalldata && !request.typedDataDecoded && !request.ethMessageDecoded && !request.solanaMessageDecoded && !isSolanaRequest
 	const blindSigningConsentRequired = !!request.requiresBlindSigningConsent
 	const solanaPlainText = isSolanaSignMessage && request.solanaMessageDecoded?.plainText === true
-	const advancedModeRequired =
+	// A request this firmware refuses outright: AdvancedMode would not help,
+	// so it is never offered, and Approve stays off (the risk bar says why).
+	const firmwareCannotSign = !!request.firmwareCannotSign
+	const advancedModeRequired = !firmwareCannotSign && (
 		(isSolanaSignMessage && !solanaPlainText)
 		|| !!request.requiresAdvancedMode
-		|| (fwSupportsBlindSignGate && !!request.needsBlindSigning && !blindSigningConsentRequired)
+		|| (fwSupportsBlindSignGate && !!request.needsBlindSigning && !blindSigningConsentRequired))
 	const advancedModeBlocked = advancedModeRequired && !advancedModeEnabled
 	const blindSigningConsentBlocked = blindSigningConsentRequired && !blindSigningConsentGranted
-	const approveDisabled = enablingPolicy || advancedModeBlocked || blindSigningConsentBlocked
+	const approveDisabled = enablingPolicy || firmwareCannotSign || advancedModeBlocked || blindSigningConsentBlocked
 
 	const [showAdvancedConfirm, setShowAdvancedConfirm] = useState(false)
 
@@ -1567,6 +1570,8 @@ export function SigningApproval({ request, phase, onApprove, onReject, onCancel 
 					>
 						{enablingPolicy
 							? t("signing.advancedModeConfirmOnDevice", "Confirm on your KeepKey, then re-enter your PIN")
+							: firmwareCannotSign
+							? t("signing.firmwareCannotSign", "This KeepKey firmware cannot sign this")
 							: advancedModeBlocked
 							? t("signing.turnOnAdvancedMode", "Turn on Advanced Mode")
 							: blindSigningConsentBlocked
