@@ -194,7 +194,10 @@ describe('SafeMessage original from the Transaction Service', () => {
     const refund = wrapped(safeTxOfB({ baseGas: '500000', gasPrice: '1000000000000', refundReceiver: '0x2222222222222222222222222222222222222222' }))
     const { info, risk } = await card(refund, served(refund))
     expect(info.safeMessageOriginal?.status).toBe('typed')
-    expect(text(risk)).toContain('Pays a gas refund out of your Safe when it is executed, to 0x2222222222222222222222222222222222222222')
+    // The same refund line, with its amount, that an outer SafeTx gets (G24).
+    expect(text(risk)).toContain('Pays a gas refund out of your Safe when it is executed: up to 0.5 ETH'
+      + " (gas price 1000000000000 × (safeTxGas 0 + baseGas 500000), plus Safe's own call overhead, at no more than the executor's own gas price),"
+      + ' to 0x2222222222222222222222222222222222222222. Normal Safe transactions leave the refund at zero.')
     expect(risk.tier).toBe('red')
 
     // Control: the same rejection with no refund is normal.

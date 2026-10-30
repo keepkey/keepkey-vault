@@ -18,6 +18,7 @@ import { acrossDepositView, decodeAcrossDepositV3, findReviewedAcrossSpokePool, 
 import { RELAY_DEPOSITORY, decodeRelayDeposit, isZeroAddress, type RelayDeposit } from './relayDeposit'
 import { ACROSS_NAMED_TOKENS, REVIEWED_EVM_TOKENS } from './reviewed-evm-tokens'
 import type {
+  EIP712DecodedField,
   EIP712DecodedInfo,
   SafeCallPreview,
   SigningRequestInfo,
@@ -1093,6 +1094,31 @@ function safeTx(req: SigningRequestInfo, d: NonNullable<SigningRequestInfo['type
   return data === '0x' ? 'shows' : decoded ? 'known' : 'unknown'
 }
 
+/**
+ * What a SafeTx gas refund pays (Safe handlePayment, v1.3.0+): only when
+ * gasPrice > 0, (gas used + baseGas) × gasPrice, where the inner call gets
+ * safeTxGas, so gasPrice × (safeTxGas + baseGas) plus the call's overhead; in
+ * gasToken, or in the native coin (then at no more than the executor's own gas
+ * price) when gasToken is zero; to refundReceiver, or tx.origin when zero.
+ */
+function safeGasRefund(d: EIP712DecodedInfo, f: (label: string) => EIP712DecodedField | undefined): string {
+  const raw = (label: string) => String(f(label)?.raw ?? '0')
+  const num = (label: string) => { try { return BigInt(raw(label) || '0') } catch { return 0n } }
+  const zero = (label: string) => /^(0x)?0*$/.test(raw(label))
+  const receiver = zero('Refund Receiver') ? 'the account that executes it (tx.origin)' : raw('Refund Receiver')
+  const gasToken = raw('Gas Token').toLowerCase()
+  const gasPrice = num('Gas Price')
+  if (gasPrice === 0n) {
+    return `Names a gas refund (token ${zero('Gas Token') ? 'the native coin' : gasToken}, receiver ${receiver}) with a gas price of 0, so executing it pays no refund. Normal Safe transactions leave all three at zero.`
+  }
+  const total = gasPrice * (num('Safe Tx Gas') + num('Base Gas'))
+  const chainId = d.domain.chainId
+  const token = EVM_TOKENS[`${chainId}:${gasToken}`]
+  const amount = zero('Gas Token') ? evmNativeValue(total.toString(), chainId) ?? `${total} wei`
+    : token ? `${units(total.toString(), token.decimals)} ${token.symbol}` : `${total} base units of token ${gasToken}`
+  return `Pays a gas refund out of your Safe when it is executed: up to ${amount} (gas price ${gasPrice} × (safeTxGas ${num('Safe Tx Gas')} + baseGas ${num('Base Gas')}), plus Safe's own call overhead${zero('Gas Token') ? ", at no more than the executor's own gas price" : ''}), to ${receiver}. Normal Safe transactions leave the refund at zero.`
+}
+
 /** What a typed document asks for, from this computer's describers; nothing
  *  here says what the device shows of it. */
 interface TypedDoc { knownCalm: boolean; unverified: boolean; opaque: boolean; safeRecognition?: Recognition; hostRead?: boolean }
@@ -1125,9 +1151,7 @@ function describeTypedDoc(req: SigningRequestInfo, d: EIP712DecodedInfo, add: (l
     // Safe pays gasPrice × gas in gasToken to refundReceiver when this executes.
     // Safe{Wallet} leaves all three at zero, so a set refund is a hidden payout.
     const set = (label: string) => !/^(0x)?0*$/.test(String(f(label)?.raw ?? '0'))
-    if (set('Gas Price') || set('Gas Token') || set('Refund Receiver')) {
-      add('high', `Pays a gas refund out of your Safe when it is executed, to ${set('Refund Receiver') ? f('Refund Receiver')!.raw : 'whoever executes it'}. Normal Safe transactions leave the refund at zero.`)
-    }
+    if (set('Gas Price') || set('Gas Token') || set('Refund Receiver')) add('high', safeGasRefund(d, f))
   } else if (d.primaryType === 'SafeMessage') {
     // EIP-1271: the Safe treats this as its own signature.
     const m = safeMessage(req, d, add)
