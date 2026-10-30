@@ -52,6 +52,7 @@ const TIER_HEADLINE: Record<SigningTier, string> = {
   red: 'Unknown or unusual: only sign if you trust this site',
 }
 const USED_BEFORE_HEADLINE = 'Used before, but your KeepKey cannot show this call'
+const UNCHECKED_HEADLINE = 'Shown on your KeepKey, but this computer could not check one payee'
 const U64_MAX = (1n << 64n) - 1n
 
 /** A protocol Desktop knows and decodes in full, on firmware that cannot show
@@ -366,10 +367,11 @@ function certifiedBlobShown(req: SigningRequestInfo): boolean {
   return certifiedEnvelopeShown(base64PayloadBytes(d.signedInsightBlob), d.insightKeyId, req.firmwareVersion, req)
 }
 
-/** What the verdict tier rests on: the device shows it, this computer knows the
+/** What the verdict tier rests on: the device shows it, the device shows it
+ *  but this computer could not check a payee in it, this computer knows the
  *  protocol and decodes it in full, this account has used the contract before,
  *  or none of these. */
-type Recognition = 'shows' | 'known' | 'used' | 'unknown'
+type Recognition = 'shows' | 'unchecked' | 'known' | 'used' | 'unknown'
 
 /** `notShown` says the device cannot show a protocol yet; a call inside a
  *  SafeTx passes its own (the card says that once for the whole SafeTx). */
@@ -1057,6 +1059,8 @@ function evmTypedData(req: SigningRequestInfo, add: (l: RiskLevel, t: string) =>
   // A known document whose spend line stays at "check before you sign":
   // firmware that cannot show it still leaves it known, not unknown.
   let knownCalm = false
+  // A payee this computer could not check: never green, even when shown.
+  let unverified = false
   // The meaning sits in bytes the device shows only as raw hex.
   let opaque = false
   // A SafeTx whose data this computer decoded ('known'): the device shows it as hex.
@@ -1154,13 +1158,24 @@ function evmTypedData(req: SigningRequestInfo, add: (l: RiskLevel, t: string) =>
     // listing takes the NFT for nothing. Unnamed currency: worth unknown.
     const named = listing?.decimals !== undefined
     const dust = named && proceeds < 10n ** BigInt(Math.max(listing!.decimals! - 6, 0))
+    // royaltyInfo could not be asked here (no RPC that serves eth_call, or no
+    // answer in time): one other payee may be the creator fee, if it takes no
+    // more than a creator fee can. OpenSea caps creator earnings at 10% of the
+    // price (support.opensea.io/en/articles/8867026). Inside that bound it is
+    // not danger, but this computer did not check the payee, so the card is
+    // yellow at most. More than that, or a second unknown payee, stays red.
+    const uncheckedSum = others.reduce((sum, p) => sum + BigInt(p.raw), 0n)
+    const unchecked = listing?.creatorFeeUnchecked && new Set(others.map((p) => p.recipient.toLowerCase())).size === 1
+      && uncheckedSum * 10n <= BigInt(listing.totalRaw) && uncheckedSum < proceeds ? others : []
     // A normal listing: the signer sells its own NFTs, is paid a real amount in
     // a currency this computer names, and every other payee is a marketplace
     // fee address it knows or the collection's own creator fee.
-    if (listing && seller && own.length > 0 && others.length === 0 && named && !dust) {
+    if (listing && seller && own.length > 0 && others.length === unchecked.length && named && !dust) {
       const fees = listing.payments.filter((p) => p.role === 'opensea-fee')
       const creator = listing.payments.filter((p) => p.role === 'creator-fee')
       add('medium', `Seaport listing: sells ${listing.items.join(', ')} for ${listing.total}. You receive ${own.map((p) => p.amount).join(' + ')}${fees.length ? `, and ${fees.map((p) => p.amount).join(' + ')} goes to OpenSea's fee address` : ''}${creator.length ? `, and ${creator.map((p) => p.amount).join(' + ')} goes to the creator fee address the collection names on chain (${creator[0].recipient})` : ''}. Anyone can buy at this price until ${listing.endTime}; nothing moves until a buyer pays it.`)
+      unverified = unchecked.length > 0
+      if (unverified) add('medium', `Also pays ${unchecked.map((p) => p.amount).join(' + ')} to ${unchecked[0].recipient}. This computer could not ask the collection for its creator fee (ERC-2981 royaltyInfo), so it could not check that this is the creator fee address.`)
       knownCalm = true
     } else {
       add('critical', 'This is a marketplace order. Anyone holding this signature can take the listed items at the price in the order.')
@@ -1188,7 +1203,7 @@ function evmTypedData(req: SigningRequestInfo, add: (l: RiskLevel, t: string) =>
   } else {
     add('high', 'Your KeepKey can only show a code (hash) for this signature, not what it says. You would be signing blind.')
   }
-  return opaque ? 'unknown' : structured ? (safeRecognition === 'known' ? 'known' : 'shows') : knownCalm ? 'known' : 'unknown'
+  return opaque ? 'unknown' : structured ? (safeRecognition === 'known' ? 'known' : unverified ? 'unchecked' : 'shows') : knownCalm ? 'known' : 'unknown'
 }
 
 /** What the typed-data verdict rests on, for the ClearSign report: 'shows'
@@ -1542,6 +1557,7 @@ export function assessSigningRisk(req: SigningRequestInfo): RiskAssessment | nul
     : recognition === 'shows' ? 'green' : 'yellow'
   const headline = req.firmwareCannotSign
     ? `${firmwareName(req)} cannot sign this${req.firmwareUpdateClearSigns ? '. Update your firmware' : ''}`
-    : tier === 'yellow' && recognition === 'used' ? USED_BEFORE_HEADLINE : TIER_HEADLINE[tier]
+    : tier !== 'yellow' ? TIER_HEADLINE[tier]
+    : recognition === 'used' ? USED_BEFORE_HEADLINE : recognition === 'unchecked' ? UNCHECKED_HEADLINE : TIER_HEADLINE[tier]
   return { level, tier, headline, reasons }
 }
