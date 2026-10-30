@@ -105,6 +105,33 @@ describe('0x AllowanceHolder.exec into Settler.execute (G06)', () => {
     expect(r.text).toContain(`The swap output goes to ${OTHER}, which is NOT the account signing this`)
   })
 
+  // alpha-717 CONTROL '0x Settler recipient changed' (round 2): the swaps.pro
+  // capture with Settler's recipient word replaced. On 7.17 a ClearSign
+  // ERC-7730 definition is attached and the device shows "NOT this wallet";
+  // the card must say so too, not stay green.
+  test('recipient changed under an attached ERC-7730 definition: still red', async () => {
+    const t = tx('swapspro-0x-eth-to-usdc')
+    const inner = 2 + 2 * (4 + 32 * 5 + 32)
+    expect(t.data.slice(inner, inner + 8)).toBe('1fff991f')
+    const control = { ...t, data: `${t.data.slice(0, inner + 8)}${OTHER.slice(2).padStart(64, '0')}${t.data.slice(inner + 72)}` }
+    for (const [request, red] of [[t, false], [control, true]] as const) {
+      const r = await review(request, '7.17.0')
+      r.info.erc7730 = { primaryDefinitionId: `0x${'68'.repeat(32)}`, definitions: [] }
+      r.info.erc7730Description = { signedBy: 'KeepKey ClearSign TEST', intent: 'Swap with 0x', fields: [] }
+      r.info.needsBlindSigning = false
+      const risk = assessSigningRisk(r.info)!
+      const text = risk.reasons.map((x) => x.text).join('\n')
+      expect(text).toContain('Swap with 0x: your KeepKey shows it from a KeepKey ClearSign description.')
+      if (red) {
+        expect(risk.tier).toBe('red')
+        expect(text).toContain(`The swap output goes to ${OTHER}, which is NOT the account signing this`)
+      } else {
+        expect(risk.tier).toBe('green')
+        expect(text).not.toContain('NOT the account signing this')
+      }
+    }
+  })
+
   test('fails closed: a Settler 0x did not deploy, an unpinned AllowanceHolder, a value mismatch', () => {
     const t = tx('swapspro-0x-eth-to-usdc')
     const settler = '0cef320d0c5793ade37964e2661a033771e53cd5'

@@ -8,7 +8,7 @@
 import type { CalldataDecodedField, SafeCallPreview, SigningRequestInfo } from '../shared/types'
 import { decodeCalldata, firmwareClearSigns, formatDeadline, thor714Refuses } from './calldata-decoder'
 import { findCertifiedEvmSchema, findCertifiedUniswapSwap } from './evm-schema-registry'
-import { findEvmNameRecord, findReviewedUniversalRouter, reviewedSwapToken } from './evm-certified-schema'
+import { describeCertifiedEvmCall, findEvmNameRecord, findReviewedUniversalRouter, reviewedSwapToken } from './evm-certified-schema'
 import { evmContractIdentity } from '../shared/evm-contract-identity'
 import { knownSpenderName } from '../shared/evm-known-spenders'
 import { urPrecheck } from './uniswap-ur'
@@ -74,11 +74,16 @@ export async function attachCertifiedEvmSchema(
     console.log(`${tag} EVM clear-sign: certified "${schema.method}" is a dynamic schema this firmware (${firmwareVersion}) refuses — not attached`)
     return false
   }
+  // The card names what the device shows: a call the local decoder could not
+  // read is described from the certified schema itself.
+  const decoded = signingInfo.calldataDecoded
   signingInfo.calldataDecoded = {
-    ...(signingInfo.calldataDecoded ?? {
-      dappName: 'Unknown', contractName: to, method: schema.method,
-      selector: data.slice(0, 10).toLowerCase(), fields: [], source: 'none',
-    }),
+    ...((decoded?.source !== 'none' ? decoded : undefined)
+      ?? describeCertifiedEvmCall(schema.signedPayload, { to, data, value: signingInfo.value, chainId })
+      ?? decoded ?? {
+        dappName: 'Unknown', contractName: to, method: schema.method,
+        selector: data.slice(0, 10).toLowerCase(), fields: [], source: 'none',
+      }),
     // Same encoding as a Pioneer blob: base64, decoded to bytes by the sign handler.
     signedInsightBlob: Buffer.from(schema.signedPayload.replace(/^0x/i, ''), 'hex').toString('base64'),
     insightKeyId: schema.keyId,

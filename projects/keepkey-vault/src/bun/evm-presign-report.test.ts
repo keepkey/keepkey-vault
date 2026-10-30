@@ -5,7 +5,7 @@
  * Network is cut (fetch throws): simulation is honestly "unavailable", and the
  * certified lookups fail closed, as they do offline in the app.
  */
-import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from 'bun:test'
 import type { SigningRequestInfo } from '../shared/types'
 import { assessSigningRisk } from '../shared/clearsign-risk'
 import { buildEvmPresignReport, evmSigningVerdict, prepareEvmTxSigningInfo } from './evm-presign-report'
@@ -15,7 +15,13 @@ import { resolvePromotedEvmArtifact } from './clearsign-artifact-resolver'
 import { ClearSignReportResponse } from './schemas'
 import { buildClearSignReport, clearSignReportNeedsAttention, namedProviderLine, runtimeProviderLine, swapReportNeedsAttention } from '../shared/clearsign-report'
 
+import { testCertifiedEnvelope, trustTestRoot } from '../../__tests__/support/clearsign-test-root'
+
 const swap = require('../../__tests__/fixtures/uniswap/base-ur-usdc-to-eth-swap.json')
+// Certified envelopes here are signed under a TEST root, trusted for this file.
+let restoreRoot = () => {}
+beforeAll(() => { restoreRoot = trustTestRoot() })
+afterAll(() => restoreRoot())
 const SIGNER = '0x909ef6b32dfdc12ca86aa710b54c991af3c5f82e'
 const ACROSS = {
   chainId: 8453, from: SIGNER, to: '0x09aea4b2242abc8bb4bb78d537a67a245a7bec64', value: '0x189e6105b7a8de7',
@@ -188,8 +194,8 @@ const APPROVE = {
   data: `0x095ea7b3${RELAY.slice(2).padStart(64, '0')}${'2d4760d'.padStart(64, '0')}`,
 }
 
-/** The ClearSign service for reviewed shapes: the real catalog body inside a
- * stand-in certificate and signature (the device, not Vault, checks those). */
+/** The ClearSign service for reviewed shapes: the real catalog body, signed
+ * under the TEST root (Desktop attaches only an envelope that verifies). */
 function catalogService(sent: any[]) {
   const { findCertifiedEvmSchemaByShape, buildEvmSchemaBody, evmEntryId } = require('./evm-certified-schema')
   return (async (url: any, init: any) => {
@@ -198,12 +204,10 @@ function catalogService(sent: any[]) {
     sent.push(body)
     const spec = findCertifiedEvmSchemaByShape(body.chainId, body.contract, body.selector, body.calldataLength, body.spender, body.token)
     if (!spec) return Response.json({ classification: 'OPAQUE' }, { status: 422 })
-    const certificate = Buffer.alloc(139, 0x11)
-    certificate.writeUInt32BE(spec.chainId, 2)
     return Response.json({
       classification: 'VERIFIED', keyId: 0x80, entry: evmEntryId(spec), method: spec.method,
       chainId: spec.chainId, contract: spec.contract, selector: spec.selector, expectedCalldataLength: spec.expectedCalldataLength,
-      signedPayload: `0x03${certificate.toString('hex')}${buildEvmSchemaBody(spec).toString('hex')}${'22'.repeat(65)}`,
+      signedPayload: testCertifiedEnvelope(buildEvmSchemaBody(spec).toString('hex')),
     })
   }) as unknown as typeof fetch
 }

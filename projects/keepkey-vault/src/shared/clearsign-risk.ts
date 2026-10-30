@@ -18,6 +18,8 @@ import { acrossDepositView, decodeAcrossDepositV3, findReviewedAcrossSpokePool, 
 import { RELAY_DEPOSITORY, decodeRelayDeposit, isZeroAddress, type RelayDeposit } from './relayDeposit'
 import { ACROSS_NAMED_TOKENS, REVIEWED_EVM_TOKENS } from './reviewed-evm-tokens'
 import type {
+  EIP712DecodedField,
+  EIP712DecodedInfo,
   SafeCallPreview,
   SigningRequestInfo,
   SimulatedHoldings,
@@ -478,6 +480,8 @@ function evmTx(req: SigningRequestInfo, add: (l: RiskLevel, t: string) => void,
     const what = d ? `${d.summary ?? d.intent}${d.protocol ? ` on ${d.protocol.name}` : ''}` : `This call to ${to}`
     // Calm when this computer read the same description; gold only when it could not.
     add(d ? 'low' : 'medium', `${what}: your KeepKey shows it from a KeepKey ClearSign description.`)
+    // A swap Desktop also decoded: output or leftovers going to anyone else is not normal.
+    if (swapCall) swapDestinations(req, field, add)
   } else if (urSwap && req.calldataDecoded?.signedInsightBlob) {
     recognition = 'known'
     // Every command decoded, and a signed description attached that the device
@@ -697,13 +701,21 @@ function decodedSwap(req: SigningRequestInfo, field: (n: string) => string | und
   add('medium', `Swap through ${protocol} (contract ${req.to}): pays ${field('Input amount')} for at least ${field('Minimum output')}, sent to ${dest === from ? 'your account' : dest}. ${shown
     ? 'Your KeepKey shows this call from a KeepKey-certified description and refuses it if that description is not genuine. Check the amounts there.'
     : notShown(`${protocol} swaps`)}`)
-  if (from && dest !== from) add('high', `The swap output goes to ${dest}, which is NOT the account signing this (${from}).`)
-  const refund = field('Leftover refund to')
-  if (from && refund && /^0x[0-9a-f]{40}$/.test(refund) && refund !== from) add('high', `Leftover coins are refunded to ${refund}, which is NOT the account signing this (${from}).`)
+  swapDestinations(req, field, add)
   const fee = field('Relay fee')
   if (fee) add('low', `Relay fee: ${fee}.`)
   const validTo = field('Valid until')
   if (validTo) add('low', `This places a CoW order: the ETH waits in CoW's EthFlow contract until a solver fills it, by ${validTo}. If nobody fills it, the ETH can be refunded to the account that placed the order after that time.`)
+}
+
+/** A decoded swap (bun/swap-decoders) whose output or leftovers go to anyone
+ *  but the signing account. */
+function swapDestinations(req: SigningRequestInfo, field: (n: string) => string | undefined, add: (l: RiskLevel, t: string) => void) {
+  const from = (req.from ?? '').toLowerCase()
+  const dest = field('Output destination') ?? ''
+  if (from && dest !== from) add('high', `The swap output goes to ${dest}, which is NOT the account signing this (${from}).`)
+  const refund = field('Leftover refund to')
+  if (from && refund && /^0x[0-9a-f]{40}$/.test(refund) && refund !== from) add('high', `Leftover coins are refunded to ${refund}, which is NOT the account signing this (${from}).`)
 }
 
 /** A depositV3 to a pinned Across SpokePool. Decoded here only: the device
@@ -1044,6 +1056,31 @@ function safeTx(req: SigningRequestInfo, d: NonNullable<SigningRequestInfo['type
   return data === '0x' ? 'shows' : decoded ? 'known' : 'unknown'
 }
 
+/**
+ * What a SafeTx gas refund pays (Safe handlePayment, v1.3.0+): only when
+ * gasPrice > 0, (gas used + baseGas) × gasPrice, where the inner call gets
+ * safeTxGas, so gasPrice × (safeTxGas + baseGas) plus the call's overhead; in
+ * gasToken, or in the native coin (then at no more than the executor's own gas
+ * price) when gasToken is zero; to refundReceiver, or tx.origin when zero.
+ */
+function safeGasRefund(d: EIP712DecodedInfo, f: (label: string) => EIP712DecodedField | undefined): string {
+  const raw = (label: string) => String(f(label)?.raw ?? '0')
+  const num = (label: string) => { try { return BigInt(raw(label) || '0') } catch { return 0n } }
+  const zero = (label: string) => /^(0x)?0*$/.test(raw(label))
+  const receiver = zero('Refund Receiver') ? 'the account that executes it (tx.origin)' : raw('Refund Receiver')
+  const gasToken = raw('Gas Token').toLowerCase()
+  const gasPrice = num('Gas Price')
+  if (gasPrice === 0n) {
+    return `Names a gas refund (token ${zero('Gas Token') ? 'the native coin' : gasToken}, receiver ${receiver}) with a gas price of 0, so executing it pays no refund. Normal Safe transactions leave all three at zero.`
+  }
+  const total = gasPrice * (num('Safe Tx Gas') + num('Base Gas'))
+  const chainId = d.domain.chainId
+  const token = EVM_TOKENS[`${chainId}:${gasToken}`]
+  const amount = zero('Gas Token') ? evmNativeValue(total.toString(), chainId) ?? `${total} wei`
+    : token ? `${units(total.toString(), token.decimals)} ${token.symbol}` : `${total} base units of token ${gasToken}`
+  return `Pays a gas refund out of your Safe when it is executed: up to ${amount} (gas price ${gasPrice} × (safeTxGas ${num('Safe Tx Gas')} + baseGas ${num('Base Gas')}), plus Safe's own call overhead${zero('Gas Token') ? ", at no more than the executor's own gas price" : ''}), to ${receiver}. Normal Safe transactions leave the refund at zero.`
+}
+
 function evmTypedData(req: SigningRequestInfo, add: (l: RiskLevel, t: string) => void): Recognition {
   const d = req.typedDataDecoded
   if (!d) {
@@ -1189,9 +1226,7 @@ function evmTypedData(req: SigningRequestInfo, add: (l: RiskLevel, t: string) =>
     // Safe pays gasPrice × gas in gasToken to refundReceiver when this executes.
     // Safe{Wallet} leaves all three at zero, so a set refund is a hidden payout.
     const set = (label: string) => !/^(0x)?0*$/.test(String(f(label)?.raw ?? '0'))
-    if (set('Gas Price') || set('Gas Token') || set('Refund Receiver')) {
-      add('high', `Pays a gas refund out of your Safe when it is executed, to ${set('Refund Receiver') ? f('Refund Receiver')!.raw : 'whoever executes it'}. Normal Safe transactions leave the refund at zero.`)
-    }
+    if (set('Gas Price') || set('Gas Token') || set('Refund Receiver')) add('high', safeGasRefund(d, f))
   }
   const structured = !!req.firmwareVersion && versionCompare(req.firmwareVersion, '7.15.0') >= 0
   if (structured) {
