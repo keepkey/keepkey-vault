@@ -12,6 +12,7 @@ import { findEvmNameRecord, findReviewedUniversalRouter, reviewedSwapToken } fro
 import { evmContractIdentity } from '../shared/evm-contract-identity'
 import { knownSpenderName } from '../shared/evm-known-spenders'
 import { urPrecheck } from './uniswap-ur'
+import { v4SingleSwapSummary } from './uniswap-universal-router'
 import { supportsCertifiedClearSign } from './solana-certified-policy'
 import { certifiedBodyRefused, certifiedEnvelopeShown, metadataPayloadBytes } from '../shared/certified-evm-envelope'
 import { fetchErc7730CalldataDefinition, resolveErc7730ForCall, resolveErc7730ForTypedData } from './erc7730-resolver'
@@ -140,8 +141,10 @@ function txValue(raw: unknown): bigint | undefined {
 
 /**
  * The swap a reviewed Universal Router call makes, as card rows: the same
- * decode and token-flow review the device runs (urPrecheck), so a call it
- * would not decode gets no rows, and a call it reviews gets the facts its
+ * decode and token-flow review the device runs (urPrecheck), or else the
+ * one-pool v4 plan Desktop reads but the device does not (v4SingleSwapSummary;
+ * the card then says the device cannot show it). Any other call gets no rows;
+ * a call the device reviews gets the facts its
  * screens state (signed_metadata_build_ur_review): what is paid, the minimum
  * received, the recipient, the fee, the Permit2 allowance and every V4 pool
  * hook. Token names come only from reviewedSwapToken by chain:address; any
@@ -153,9 +156,9 @@ export function uniswapSwapFields(
 ): CalldataDecodedField[] {
   const v = txValue(value)
   if (!chainId || v === undefined || !findReviewedUniversalRouter(chainId, router)) return []
-  const plan = urPrecheck(router, data, v)
-  if (!plan) return []
-  const s = plan.summary
+  // A one-pool v4 plan the device does not decode: Desktop still reads it.
+  const s = urPrecheck(router, data, v)?.summary ?? v4SingleSwapSummary(chainId, router, data, v)
+  if (!s) return []
   const unknown: string[] = []
   const amount = (raw: bigint, token: string, isEth: boolean, unlimitedAt?: bigint) => {
     const t = isEth ? { symbol: 'ETH', decimals: 18 } : reviewedSwapToken(chainId, token)
