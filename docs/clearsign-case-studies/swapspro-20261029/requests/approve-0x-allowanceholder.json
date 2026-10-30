@@ -1,0 +1,29 @@
+{
+ "site": "https://www.swaps.pro",
+ "sell": "eth-usdc",
+ "buy": "eth-eth",
+ "amount": "25000",
+ "route": "^0x",
+ "review": "ROUTE | 0x | SLIPPAGE | 1.0% | 3 ROUTES COMPARED | show | PRICE IMPACT | -1.76% | RECIPIENT | 0x9858Ef…aEda94 | APPROVAL | Required · 1 extra tx | First-time USDC swap: you'll approve the router (one tx), then sign the swap. | Confirm swap | FEATURED | BOAR — offline AI, on Base | An open-source AI companion that keeps working with no signal. $BOAR is now featured below the swap card. | Get $BOAR | PORTFOLIO | $1,587,539",
+ "method": "ETH_SENDTRANSACTION",
+ "body": {
+  "from": "0x9858EfFD232B4033E47d90003D41EC34EcaEda94",
+  "addressNList": [
+   2147483692,
+   2147483708,
+   2147483648,
+   0,
+   0
+  ],
+  "data": "0x095ea7b30000000000000000000000000000000000001ff3684f28c67538d4d072c2273400000000000000000000000000000000000000000000000000000005d21dba00",
+  "nonce": "0x7",
+  "gasLimit": "0x11940",
+  "gas": "0x11940",
+  "value": "0x0",
+  "to": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+  "chainId": "0x1",
+  "maxFeePerGas": "0xd52bef138",
+  "maxPriorityFeePerGas": "0x3b9aca00"
+ },
+ "capturedAt": "2026-10-29T21:52:57.652Z"
+}

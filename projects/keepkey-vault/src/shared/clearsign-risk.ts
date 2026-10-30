@@ -27,6 +27,7 @@ import type {
 import { versionCompare } from './firmware-versions'
 import { base64PayloadBytes, certifiedEnvelopeShown, evmSignedChainId as evmChainId } from './certified-evm-envelope'
 import { typedDataSpendAmounts } from './typedDataRows'
+import { knownSpenderName } from './evm-known-spenders'
 import { SOLANA_TOKEN_IDENTITIES } from './solana-token-identities'
 
 export type RiskLevel = 'low' | 'medium' | 'high' | 'critical'
@@ -649,8 +650,11 @@ function evmTypedData(req: SigningRequestInfo, add: (l: RiskLevel, t: string) =>
       const who = f('Spender')?.raw ? (known ? `${known} (${f('Spender')!.raw})` : f('Spender')!.raw) : 'another account'
       const unbounded = all || amounts.length === 0 || amounts.some((a) => a.raw === undefined || a.raw >= BOUND_LIMIT)
       // A Permit2 permit to a reviewed router is what Uniswap asks for on every
-      // swap, usually for the maximum with an expiry.
+      // swap, usually for the maximum with an expiry. Only a certified name
+      // record earns this: a name from Desktop's own spender list is advice,
+      // and most of those contracts never take a Permit2 allowance.
       const routerPermit = contract === PERMIT2 && !!known && known === req.recognizedSpender && known !== 'Uniswap Permit2'
+        && !knownSpenderName(chainId, spender)
       const level = spendPermissionLevel(known, unbounded, routerPermit)
       // A signature transfer (Permit*TransferFrom) is spent once, not an allowance.
       const once = /TransferFrom$/.test(d.primaryType)
