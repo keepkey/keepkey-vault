@@ -1107,13 +1107,19 @@ function evmTypedData(req: SigningRequestInfo, add: (l: RiskLevel, t: string) =>
     // listing takes the NFT for nothing. Unnamed currency: worth unknown.
     const named = listing?.decimals !== undefined
     const dust = named && proceeds < 10n ** BigInt(Math.max(listing!.decimals! - 6, 0))
+    // royaltyInfo could not be asked here (no RPC that serves eth_call, or no
+    // answer in time): one other payee may be the creator fee. That alone is
+    // not danger; the card says it was not checked. A "fee" of at least what
+    // the seller receives is not a fee, so that stays loud.
+    const unchecked = listing?.creatorFeeUnchecked && new Set(others.map((p) => p.recipient.toLowerCase())).size === 1 ? others : []
     // A normal listing: the signer sells its own NFTs, is paid a real amount in
     // a currency this computer names, and every other payee is a marketplace
     // fee address it knows or the collection's own creator fee.
-    if (listing && seller && own.length > 0 && others.length === 0 && named && !dust) {
+    if (listing && seller && own.length > 0 && others.length === unchecked.length && named && !dust) {
       const fees = listing.payments.filter((p) => p.role === 'opensea-fee')
       const creator = listing.payments.filter((p) => p.role === 'creator-fee')
       add('medium', `Seaport listing: sells ${listing.items.join(', ')} for ${listing.total}. You receive ${own.map((p) => p.amount).join(' + ')}${fees.length ? `, and ${fees.map((p) => p.amount).join(' + ')} goes to OpenSea's fee address` : ''}${creator.length ? `, and ${creator.map((p) => p.amount).join(' + ')} goes to the creator fee address the collection names on chain (${creator[0].recipient})` : ''}. Anyone can buy at this price until ${listing.endTime}; nothing moves until a buyer pays it.`)
+      if (unchecked.length) add(unchecked.reduce((sum, p) => sum + BigInt(p.raw), 0n) < proceeds ? 'medium' : 'high', `Also pays ${unchecked.map((p) => p.amount).join(' + ')} to ${unchecked[0].recipient}. This computer could not ask the collection for its creator fee (ERC-2981 royaltyInfo), so it could not check that this is the creator fee address.`)
       knownCalm = true
     } else {
       add('critical', 'This is a marketplace order. Anyone holding this signature can take the listed items at the price in the order.')
