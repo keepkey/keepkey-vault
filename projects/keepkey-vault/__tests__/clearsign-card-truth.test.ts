@@ -143,11 +143,11 @@ describe('a certified long-tail call reads as the device shows it', () => {
 describe('emulator TEST-root QA: the ERC-7730 description uses the root the device trusts', () => {
   test('R001 is described under the trusted TEST root, and not under the production root', () => {
     const { tx, definition } = real.legs.R001
-    const d = describeErc7730Call(definition.envelope, { ...tx, from: tx.from })
+    const d = describeErc7730Call(definition.envelope, { ...tx, from: tx.from, firmwareVersion: FW })
     expect(d?.intent).toBeTruthy()
     restoreRoot()
     try {
-      expect(describeErc7730Call(definition.envelope, { ...tx, from: tx.from })).toBeUndefined()
+      expect(describeErc7730Call(definition.envelope, { ...tx, from: tx.from, firmwareVersion: FW })).toBeUndefined()
     } finally { restoreRoot = trustTestRoot(real.testRootPublicKey) }
   })
 })

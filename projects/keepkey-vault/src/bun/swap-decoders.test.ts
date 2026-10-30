@@ -74,6 +74,22 @@ describe('0x AllowanceHolder.exec into Settler.execute (G06)', () => {
     expectCalmSwap(r, '0x Settler')
   })
 
+  test('real USDC → DAI swap: DAI is a reviewed swap token, no fake-token warning', async () => {
+    const t = tx('0x-usdc-to-dai')
+    const r = await review(t)
+    expect(r.field('Action')).toBe('Swap 1000 USDC for at least 997.000015952 DAI')
+    expect(r.field('Output asset')).toBe('DAI')
+    expect(r.field('Token warning')).toBeUndefined()
+    expect(r.text).not.toContain('does not recognize')
+    expectCalmSwap(r, '0x Settler')
+    // Control: the same request buying a token on no reviewed list still warns.
+    const dai = '6b175474e89094c44da98b954eedeac495271d0f'
+    const fake = await review({ ...t, data: t.data.split(dai).join('2'.repeat(40)) })
+    expect(fake.field('Token warning')).toBe(`Token 0x${'2'.repeat(40)} is not on KeepKey's reviewed list`)
+    expect(fake.risk.level).toBe('high')
+    expect(fake.text).toContain('Swaps a token KeepKey does not recognize. It may be a fake.')
+  })
+
   test('Base: genuine Settler for chain 8453; this real swap pays someone else, so red', async () => {
     const r = await review(tx('base-0x-cbeth-to-usdc-other-recipient'))
     expect(r.field('Action')).toBe('Swap 0.618 cbETH for at least 1600.029946 USDC')
