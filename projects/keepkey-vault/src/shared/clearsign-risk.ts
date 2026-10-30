@@ -202,6 +202,17 @@ function describeKnown(ix: SolanaTxDecodedInstruction, tokenAccounts: TokenAccou
     }
     return { level: 'low', text: `Sends ${sol}${to ? ` to ${shortAddr(to)}` : ''}.` }
   }
+  // A durable-nonce transaction does not expire: it stays valid until it is
+  // sent or its nonce is advanced, which only the nonce authority can do.
+  if (ix.programName === 'System Program' && name === 'advanceNonceAccount') {
+    const nonce = acct(ix, 'nonceAccount') ?? 'a nonce account', authority = acct(ix, 'nonceAuthority')
+    if (from && authority === from) {
+      return { level: 'low', text: `Uses durable nonce account ${shortAddr(nonce)}, which your own account controls: this transaction does not expire until it is sent or you advance that nonce.` }
+    }
+    return { level: 'high', text: from && authority
+      ? `Uses durable nonce account ${nonce}, controlled by ${authority}, which is NOT the account signing this (${from}). This transaction does not expire, and only that account can cancel it.`
+      : `Uses durable nonce account ${nonce}. This transaction does not expire, and this computer could not check who can cancel it.` }
+  }
   if (ix.programName === 'Stake Program' && name === 'delegateStake') {
     const stake = acct(ix, 'stakeAccount'), vote = acct(ix, 'voteAccount')
     return { level: 'low', text: `Delegates ${stake ? `stake account ${shortAddr(stake)}` : 'a stake account'} to ${vote ? `validator vote account ${shortAddr(vote)}` : 'a validator'}.` }
