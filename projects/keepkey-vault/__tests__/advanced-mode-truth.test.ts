@@ -14,6 +14,7 @@
  *    Permit2 token, and the certified schema 7.16 shows for a native approve.
  */
 import { afterEach, describe, expect, test } from 'bun:test'
+import { readFileSync } from 'node:fs'
 import type { SigningRequestInfo } from '../src/shared/types'
 import { assessSigningRisk } from '../src/shared/clearsign-risk'
 import { decodeEIP712 } from '../src/bun/eip712-decoder'
@@ -29,6 +30,7 @@ import cowPermit from './fixtures/spenders/usdc-permit-cow-vaultrelayer.json'
 import oneInchPermit2 from './fixtures/spenders/permit2-1inch-v6-unlimited.json'
 import usdcSchema from './fixtures/approve-spender-name/schema-usdc-approve-chain1.json'
 import swapsProApprove from '../../../docs/clearsign-case-studies/swapspro-20261029/requests/approve-cow-vaultrelayer.json'
+import solanaVerdicts from './fixtures/solana/advanced-mode-firmware-verdicts.json'
 
 const originalFetch = globalThis.fetch
 afterEach(() => { globalThis.fetch = originalFetch })
@@ -118,12 +120,36 @@ describe('a TRON transfer is green only where the firmware parses it (nonevm T0/
     expect(info.requiresAdvancedMode).toBe(true)
     expect(risk.tier).not.toBe('green')
   })
+
+  // T2 on 7.16.0 with AdvancedMode on: "TRON Blind Sign | Sign 211-byte TRON
+  // transaction?", then "Token contract TEkx…", then "Send 1169566735 base
+  // units to THLy…?". 7.14.2 shows neither amount nor recipient.
+  test('T2 outside the table: 7.16 shows contract, base units and recipient after the warning; 7.14 shows neither', () => {
+    const now = text(card(real.tronTrc20OutsideTable.rawDataHex, '7.16.0').risk)
+    expect(now).toContain('KeepKey firmware 7.16.0 does not know this token: it warns "TRON Blind Sign" and needs Advanced Mode, then shows the token contract, the amount in base units and the recipient. Check those on your KeepKey.')
+    expect(now).not.toContain('without the amount or recipient')
+    const old = text(card(real.tronTrc20OutsideTable.rawDataHex, '7.14.2').risk)
+    expect(old).toContain('KeepKey firmware 7.14.2 cannot show this transfer on the device: it signs it blind, without the amount or recipient')
+    expect(old).not.toContain('TRON Blind Sign')
+  })
+
+  // Every 7.15 build parses TRON (tron_parseRawTx): TRX and table tokens are
+  // shown. A TRC-20 outside the table differs by build (release/7.15 shows it,
+  // 7.15-b6 gates it), so 7.15 does not force AdvancedMode for it either.
+  test('7.15.0: TRX, USDT and an outside-table TRC-20 never require AdvancedMode', () => {
+    for (const hex of [real.tronTrxTransfer.rawDataHex, real.tronUsdtTransfer.rawDataHex, real.tronTrc20OutsideTable.rawDataHex]) {
+      const { info, risk } = card(hex, '7.15.0')
+      expect(info.requiresAdvancedMode).toBe(false)
+      expect(info.needsBlindSigning).toBe(false)
+      expect(text(risk)).toContain('Your KeepKey shows this transfer')
+    }
+  })
 })
 
 // ── Requests 7.14.2 refuses outright ─────────────────────────────────
 
 describe('a request the firmware refuses outright never asks for AdvancedMode', () => {
-  test('Solana v0 with lookup tables (S3 jupiter-route-v2): 7.14.2 cannot sign it, an update fixes it', async () => {
+  test('Solana v0 with lookup tables (S3 jupiter-route-v2): 7.14.2 cannot sign it, 7.16 only as raw data', async () => {
     const fx = await Bun.file(`${import.meta.dir}/fixtures/clearsign-chains/jupiter-route-v2.json`).json()
     const decoded = await buildSolanaDecodedInfo(fx.rawTx, async (keys: string[]) => keys.map((k) => {
       const a = fx.accounts[k]
@@ -137,12 +163,57 @@ describe('a request the firmware refuses outright never asks for AdvancedMode', 
     const old = at('7.14.2')
     expect(old.info.firmwareCannotSign).toBe(true)
     expect(old.info.requiresAdvancedMode).toBe(false)
-    expect(text(old.risk)).toContain('KeepKey firmware 7.14.2 cannot sign this: your KeepKey will refuse it. Updating your KeepKey firmware fixes this.')
+    // 7.16 reviews it only as raw data: an update alone does not get it shown.
+    expect(old.info.firmwareUpdateClearSigns).toBe(false)
+    expect(text(old.risk)).toContain('KeepKey firmware 7.14.2 cannot sign this: your KeepKey will refuse it. Newer firmware does not show it on the device either.')
+    expect(text(old.risk)).not.toContain('Updating')
+    expect(old.risk.headline).toBe('KeepKey firmware 7.14.2 cannot sign this')
     expect(text(old.risk)).toContain('through Jupiter')
     expect(text(old.risk)).not.toContain('Advanced Mode')
     expect(text(old.risk)).not.toContain('raw data')
     // 7.16 reviews it (opaque, behind AdvancedMode): not a firmware gap.
     expect(at('7.16.0').info.firmwareCannotSign).toBeUndefined()
+  })
+
+  // advanced-mode-firmware-verdicts.json: each case run through the real
+  // firmware builds' Solana review (7.14.2 e519dc13c, 7.16.0 4f94a63b6).
+  const solanaCase = async (name: string, fw: string) => {
+    const c = solanaVerdicts.cases.find((x: any) => x.name === name)!
+    const decoded = await buildSolanaDecodedInfo(c.rawTx, async (keys: string[]) => keys.map(() => null))
+    const info = { id: 's', method: '/solana/sign-transaction', appName: 'leg', firmwareVersion: fw, solanaDecoded: decoded } as SigningRequestInfo
+    applySolanaSigningGates(info, c.rawTx, fw)
+    return { info, risk: assessSigningRisk(info)!, verdicts: c.verdicts as Record<string, string> }
+  }
+
+  test('v0 with nine SOL transfers: 7.14.2 refuses it, so the card is never green; 7.16 shows it', async () => {
+    const old = await solanaCase('v0, nine SOL transfers', '7.14.2')
+    expect(old.verdicts.e519dc13ced6adbd77cc5ceb6207f3cc04e57492).toBe('MALFORMED')
+    expect(old.verdicts['4f94a63b6632be48379c95465b3a9f4ae6e561bb']).toBe('VERIFIED')
+    expect(old.info.firmwareCannotSign).toBe(true)
+    expect(old.info.firmwareUpdateClearSigns).toBe(true)
+    expect(old.risk.tier).not.toBe('green')
+    expect(old.risk.headline).toBe('KeepKey firmware 7.14.2 cannot sign this. Update your firmware')
+    expect(text(old.risk)).toContain('KeepKey firmware 7.14.2 cannot sign this: your KeepKey will refuse it. Updating your KeepKey firmware fixes this.')
+    expect(text(old.risk)).not.toContain('shows every step')
+    const now = await solanaCase('v0, nine SOL transfers', '7.16.0')
+    expect(now.info.firmwareCannotSign).toBeUndefined()
+    expect(now.risk.tier).toBe('green')
+    expect(now.risk.headline).toBe('Shown on your KeepKey')
+  })
+
+  test('v0 transfer to a lookup-table account: 7.14.2 refuses it, 7.16 reviews it as raw data, so no update promise', async () => {
+    const old = await solanaCase('v0 transfer to a lookup-table account', '7.14.2')
+    expect(old.verdicts['4f94a63b6632be48379c95465b3a9f4ae6e561bb']).toBe('OPAQUE')
+    expect(old.info.firmwareCannotSign).toBe(true)
+    expect(old.info.firmwareUpdateClearSigns).toBe(false)
+    expect(old.risk.tier).not.toBe('green')
+    expect(old.risk.headline).toBe('KeepKey firmware 7.14.2 cannot sign this')
+    expect(text(old.risk)).not.toContain('Updating')
+  })
+
+  test('the card keeps Approve off for a request the firmware refuses', () => {
+    const card = readFileSync(new URL('../src/mainview/components/device/SigningApproval.tsx', import.meta.url), 'utf8')
+    expect(card.split('\n').find((l) => l.includes('const approveDisabled ='))).toContain('firmwareCannotSign')
   })
 
   const deposit = (name: string) => deposits.deposits.find((d: any) => d.name.startsWith(name))!
@@ -157,13 +228,29 @@ describe('a request the firmware refuses outright never asks for AdvancedMode', 
     test(`THOR/Maya deposit 7.14.2 cancels (${name}): no AdvancedMode, an update fixes it`, async () => {
       const old = await evmCard(deposit(name), '7.14.2')
       expect(old.info.firmwareCannotSign).toBe(true)
-      expect(text(old.risk)).toContain('KeepKey firmware 7.14.2 cannot sign this: your KeepKey will refuse it.')
+      expect(old.info.firmwareUpdateClearSigns).toBe(true)
+      expect(text(old.risk)).toContain('KeepKey firmware 7.14.2 cannot sign this: your KeepKey will refuse it. Updating your KeepKey firmware fixes this.')
       expect(text(old.risk)).not.toContain('Advanced Mode')
+      expect(old.risk.headline).toBe('KeepKey firmware 7.14.2 cannot sign this. Update your firmware')
       const now = await evmCard(deposit(name), '7.16.0')
       expect(now.info.firmwareCannotSign).toBeUndefined()
       expect(now.info.needsBlindSigning).toBe(false)
     })
   }
+
+  // The same Maya deposit from a stale quote to the legacy Maya router
+  // (0xd89dce57…): 7.14.2 cancels it like the leg, but 7.16 pins only Maya v4
+  // and Arbitrum, so an update would not get it clear-signed.
+  test('Maya deposit to the legacy router: 7.14.2 refuses it, no update promise', async () => {
+    const legacy = { ...deposit('Maya: ETH -> MAYA.CACAO'), to: '0xd89dce570de35a6f42d3bca7dba50a6d89bfc2a2' }
+    const old = await evmCard(legacy, '7.14.2')
+    expect(old.info.firmwareCannotSign).toBe(true)
+    expect(old.info.firmwareUpdateClearSigns).toBe(false)
+    expect(text(old.risk)).not.toContain('Updating')
+    expect(text(old.risk)).not.toContain('Advanced Mode')
+    expect(old.risk.headline).toBe('KeepKey firmware 7.14.2 cannot sign this')
+    expect((await evmCard(legacy, '7.16.0')).info.deviceClearSigns).toBe(false)
+  })
 
   test('a deposit 7.14.2 signs is not marked (ETH -> ETH.USDT)', async () => {
     const { info } = await evmCard(deposit('ETH -> ETH.USDT'), '7.14.2')
@@ -175,7 +262,7 @@ describe('a request the firmware refuses outright never asks for AdvancedMode', 
 // ── Device wording ───────────────────────────────────────────────────
 
 describe('card text matches the device screens', () => {
-  test('THOR vault: 7.14 shows "Using Asgard vault", 7.15+ labels it UNVERIFIED', async () => {
+  test('THOR vault: 7.14 shows "Using Asgard vault", 7.16 labels it UNVERIFIED, 7.15 names no screen', async () => {
     const d = deposits.deposits.find((x: any) => x.name.startsWith('ETH -> ETH.USDT'))!
     const at = async (fw: string) => {
       offline()
@@ -188,6 +275,12 @@ describe('card text matches the device screens', () => {
     expect(old).toContain('its "Using Asgard vault" screen shows the address but is not a check')
     expect(old).not.toContain('UNVERIFIED')
     expect(await at('7.16.0')).toContain('it labels this one UNVERIFIED')
+    // The 7.15 builds disagree (release/7.15 "Using Asgard vault", 7.15-b6
+    // "Pays UNVERIFIED vault"): name no screen.
+    const mid = await at('7.15.0')
+    expect(mid).toContain('so its screen shows the address but is not a check')
+    expect(mid).not.toContain('UNVERIFIED')
+    expect(mid).not.toContain('Asgard')
   })
 
   test('typed data before 7.15: the device shows only hashes, not raw data (approvals A6)', () => {

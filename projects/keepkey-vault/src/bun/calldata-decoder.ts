@@ -490,7 +490,7 @@ function thor714Confirms(data: string, chainId: number | undefined, selector: st
 /** A deposit to a router Desktop knows that 7.14.x refuses outright: the
  *  device takes every deposit selector (thor_isThorchainTx), and when
  *  thor_confirmThorTx refuses the memo it cancels, AdvancedMode or not.
- *  7.15+ pins the router and signs it. */
+ *  7.15+ signs it only for a router it pins (not the legacy Maya router). */
 export function thor714Refuses(to: string | undefined, data: string | undefined, chainId: number | undefined, firmwareVersion: string | undefined): boolean {
   if (!to || !data || data.length < 10 || (data.length - 2) / 2 > FIRMWARE_INITIAL_CHUNK_BYTES) return false
   const selector = data.slice(0, 10).toLowerCase()

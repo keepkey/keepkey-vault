@@ -296,6 +296,9 @@ export async function attachSafeCallPreviews(info: SigningRequestInfo, fetchImpl
   }))
 }
 
+/** The newest release firmwareClearSigns mirrors. */
+const NEWEST_MIRRORED_FW = '7.16.0'
+
 export async function applyEvmTxPreview(
   signingInfo: SigningRequestInfo,
   to: string | undefined,
@@ -354,8 +357,12 @@ export async function applyEvmTxPreview(
     // the calldata — a contract we can decode (Uniswap/1inch) but the firmware
     // can't still blind-signs (PR #261/#303).
     signingInfo.needsBlindSigning = true
-    // 7.14 cancels this deposit whatever AdvancedMode is set to: say so, never offer AdvancedMode.
-    if (thor714Refuses(to, data, chainId, firmwareVersion)) signingInfo.firmwareCannotSign = true
+    // 7.14 cancels this deposit whatever AdvancedMode is set to: say so, never
+    // offer AdvancedMode. An update fixes it only where 7.16 pins the router.
+    if (thor714Refuses(to, data, chainId, firmwareVersion)) {
+      signingInfo.firmwareCannotSign = true
+      signingInfo.firmwareUpdateClearSigns = firmwareClearSigns(to, data, chainId, NEWEST_MIRRORED_FW)
+    }
   }
   console.log(`${tag} needsBlindSigning=${signingInfo.needsBlindSigning} (firmwareClearSigns=${signingInfo.deviceClearSigns}, decoder source=${signingInfo.calldataDecoded?.source})`)
 }
