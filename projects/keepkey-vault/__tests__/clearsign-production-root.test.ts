@@ -9,7 +9,7 @@ import { describe, expect, test } from 'bun:test'
 import signed from './fixtures/clearsign-production-catalog-batch1.json'
 import alphaArbitrum from '../../../docs/clearsign-case-studies/uniswap-usdt/arbitrum-certificate.json'
 import { ALPHA_ROOT_PUBLIC_KEY } from '../scripts/clearsign-alpha-rehearsal'
-import { delegateFingerprint, inspectAlphaCertificate } from '../src/bun/clearsign-alpha-ceremony'
+import { delegateFingerprint, deviceClearSignRoot, inspectAlphaCertificate, PRODUCTION_ROOT_PUBLIC_KEY } from '../src/bun/clearsign-alpha-ceremony'
 import { CERTIFIED_EVM_CATALOG, expectedEvmScreens, expectedUniswapScreens } from '../src/bun/evm-certified-schema'
 import { configureClearSignArtifactSnapshots, resolvePromotedEvmArtifact, resolvePromotedSolanaArtifact } from '../src/bun/clearsign-artifact-resolver'
 import { clearSignIdentityHash } from '../src/bun/clearsign-promotion'
@@ -120,7 +120,7 @@ describe('the bundled emulator compiles in only the alpha root', () => {
     // Desktop registers the emulator as not trusting the production root,
     // unless it was launched with a ClearSign TEST root its library reads.
     const index = readFileSync(new URL('../src/bun/index.ts', import.meta.url), 'utf8')
-    expect(index).toContain('configureProductionRootTrust(() => !engine.isEmulator || (!!emulatorTestRoot && emulatorReadsClearSignTestRoot()))')
+    expect(index).toContain('configureProductionRootTrust(\n\t() => !engine.isEmulator || (!!emulatorTestRoot && emulatorReadsClearSignTestRoot()),\n\t() => engine.isEmulator ? emulatorTestRoot : undefined,\n)')
     expect(index).toContain('const emulatorTestRoot = emulatorClearSignTestRoot(process.env, DEFAULT_CLEARSIGN_SERVICE_URL)')
     const emulator = readFileSync(new URL('../src/bun/emulator.ts', import.meta.url), 'utf8')
     expect(emulator).toContain('readsTestRoot = libraryReadsClearSignTestRoot(dylibPath)')
@@ -146,6 +146,20 @@ describe('the bundled emulator compiles in only the alpha root', () => {
   test('the test root replaces the compiled-in root: only with a ClearSign service other than production', () => {
     expect(emulatorClearSignTestRoot({ KK_CLEARSIGN_TEST_ROOT: KEY }, PRODUCTION)).toBeUndefined()
     for (const service of ['', ' ', PRODUCTION, `${PRODUCTION}/`]) expect(root(KEY, service)).toBeUndefined()
+  })
+
+  test('descriptions are checked against the root the device trusts: the TEST root only on a trusted emulator', () => {
+    try {
+      expect(deviceClearSignRoot()).toBe(PRODUCTION_ROOT_PUBLIC_KEY)
+      // A real device: index.ts names no test root, so production even if one was set.
+      configureProductionRootTrust(() => true, () => undefined)
+      expect(deviceClearSignRoot()).toBe(PRODUCTION_ROOT_PUBLIC_KEY)
+      configureProductionRootTrust(() => true, () => KEY)
+      expect(deviceClearSignRoot()).toBe(KEY)
+      // An emulator whose library does not read the test root trusts neither.
+      configureProductionRootTrust(() => false, () => KEY)
+      expect(deviceClearSignRoot()).toBeUndefined()
+    } finally { configureProductionRootTrust(() => true) }
   })
 
   test('a library that does not read KK_CLEARSIGN_TEST_ROOT is not a test-root emulator', () => {

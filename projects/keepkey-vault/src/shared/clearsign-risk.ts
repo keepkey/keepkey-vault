@@ -479,6 +479,8 @@ function evmTx(req: SigningRequestInfo, add: (l: RiskLevel, t: string) => void,
     const what = d ? `${d.summary ?? d.intent}${d.protocol ? ` on ${d.protocol.name}` : ''}` : `This call to ${to}`
     // Calm when this computer read the same description; gold only when it could not.
     add(d ? 'low' : 'medium', `${what}: your KeepKey shows it from a KeepKey ClearSign description.`)
+    // A swap Desktop also decoded: output or leftovers going to anyone else is not normal.
+    if (swapCall) swapDestinations(req, field, add)
   } else if (urSwap && req.calldataDecoded?.signedInsightBlob) {
     recognition = 'known'
     // Every command decoded, and a signed description attached that the device
@@ -698,13 +700,21 @@ function decodedSwap(req: SigningRequestInfo, field: (n: string) => string | und
   add('medium', `Swap through ${protocol} (contract ${req.to}): pays ${field('Input amount')} for at least ${field('Minimum output')}, sent to ${dest === from ? 'your account' : dest}. ${shown
     ? 'Your KeepKey shows this call from a KeepKey-certified description and refuses it if that description is not genuine. Check the amounts there.'
     : notShown(`${protocol} swaps`)}`)
-  if (from && dest !== from) add('high', `The swap output goes to ${dest}, which is NOT the account signing this (${from}).`)
-  const refund = field('Leftover refund to')
-  if (from && refund && /^0x[0-9a-f]{40}$/.test(refund) && refund !== from) add('high', `Leftover coins are refunded to ${refund}, which is NOT the account signing this (${from}).`)
+  swapDestinations(req, field, add)
   const fee = field('Relay fee')
   if (fee) add('low', `Relay fee: ${fee}.`)
   const validTo = field('Valid until')
   if (validTo) add('low', `This places a CoW order: the ETH waits in CoW's EthFlow contract until a solver fills it, by ${validTo}. If nobody fills it, the ETH can be refunded to the account that placed the order after that time.`)
+}
+
+/** A decoded swap (bun/swap-decoders) whose output or leftovers go to anyone
+ *  but the signing account. */
+function swapDestinations(req: SigningRequestInfo, field: (n: string) => string | undefined, add: (l: RiskLevel, t: string) => void) {
+  const from = (req.from ?? '').toLowerCase()
+  const dest = field('Output destination') ?? ''
+  if (from && dest !== from) add('high', `The swap output goes to ${dest}, which is NOT the account signing this (${from}).`)
+  const refund = field('Leftover refund to')
+  if (from && refund && /^0x[0-9a-f]{40}$/.test(refund) && refund !== from) add('high', `Leftover coins are refunded to ${refund}, which is NOT the account signing this (${from}).`)
 }
 
 /** A depositV3 to a pinned Across SpokePool. Decoded here only: the device

@@ -1,11 +1,16 @@
-import { afterEach, describe, expect, it } from 'bun:test'
+import { afterAll, afterEach, beforeAll, describe, expect, it } from 'bun:test'
 
 import worker from '../clearsign-worker/src/index'
 import { buildEvmDecoderBody, buildEvmNameBody, findEvmNameRecord, findReviewedUniversalRouter, reviewedSwapTokens } from '../src/bun/evm-certified-schema'
 import { permit2Spender, permit2SpenderNameMetadata } from '../src/bun/permit2-spender-name'
+import { testCertifiedEnvelope, trustTestRoot } from './support/clearsign-test-root'
 
 const originalFetch = globalThis.fetch
 afterEach(() => { globalThis.fetch = originalFetch })
+// Certified envelopes here are signed under a TEST root, trusted for this file.
+let restoreRoot = () => {}
+beforeAll(() => { restoreRoot = trustTestRoot() })
+afterAll(() => restoreRoot())
 
 // Uniswap's request from the owner's Vault log (2026-04-10).
 const UNISWAP = {
@@ -55,9 +60,7 @@ function service(sent: Array<{ path: string; body: any }>, swap: 'verified' | 'o
     const path = new URL(String(url)).pathname
     const body = JSON.parse(init.body)
     sent.push({ path, body })
-    const certificate = Buffer.alloc(139, 0x11)
-    certificate.writeUInt32BE(body.chainId, 2)
-    const envelope = (b: Buffer) => `0x03${certificate.toString('hex')}${b.toString('hex')}${'22'.repeat(65)}`
+    const envelope = (b: Buffer) => testCertifiedEnvelope(b.toString('hex'))
     if (path === '/v1/evm/swap') {
       const router = findReviewedUniversalRouter(body.chainId, body.contract)
       const tokens = reviewedSwapTokens(body.chainId, body.tokens)

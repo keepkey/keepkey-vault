@@ -3,8 +3,8 @@
  * this computer from the exact envelope Desktop sends: the intent and every
  * field's label and value, formatted the way 7.16 formats them
  * (erc7730_field.c, erc7730_format.c; lines split as on the device), only
- * when this computer checked the envelope's signature up to KeepKey's
- * production root.
+ * when this computer checked the envelope's signature up to the root the
+ * device trusts (KeepKey's production root; an emulator's TEST root in QA).
  *
  * Display only. Whether a definition is attached, and how the call is gated,
  * never depends on anything here; an envelope this cannot read gets no
@@ -16,7 +16,7 @@
 import { createHash } from 'node:crypto'
 import { utils as ethersUtils } from 'ethers'
 import { secp256k1 } from '@noble/curves/secp256k1'
-import { inspectAlphaCertificate } from './clearsign-alpha-ceremony'
+import { deviceClearSignRoot, inspectAlphaCertificate } from './clearsign-alpha-ceremony'
 import { REVIEWED_EVM_TOKENS } from '../shared/reviewed-evm-tokens'
 import firmwareTokens from './firmware-token-table-716.json'
 import { evmTokenIdentity } from '../shared/evm-contract-identity'
@@ -81,12 +81,14 @@ const DEVICE_TOKENS: Record<string, Array<string | number>> = {
 }
 
 /** The certificate alias, when the envelope's catalog signature verifies the
- *  way 7.16 verifies it (clearsign_root_verify_erc7730_catalog): a production
- *  root certificate for this chain, and the delegate's signature over the
- *  Merkle root the program and its proof lead to. */
+ *  way 7.16 verifies it (clearsign_root_verify_erc7730_catalog): a certificate
+ *  from the root the device trusts, for this chain, and the delegate's
+ *  signature over the Merkle root the program and its proof lead to. */
 function catalogSigner(program: Uint8Array, proof: Uint8Array[], cert: Uint8Array, sig: Uint8Array, chainId: bigint): string | undefined {
+  const root = deviceClearSignRoot()
+  if (!root) return undefined
   try {
-    const c = inspectAlphaCertificate(hex(cert).slice(2))
+    const c = inspectAlphaCertificate(hex(cert).slice(2), undefined, root)
     if (BigInt(c.chainId) !== chainId) return undefined
     let node = sha256(Uint8Array.of(0), program)
     for (const sibling of proof) {
@@ -99,11 +101,36 @@ function catalogSigner(program: Uint8Array, proof: Uint8Array[], cert: Uint8Arra
   }
 }
 
+/** A K773 envelope's parts: program, Merkle proof, certificate, signature. */
+function envelopeParts(envelope: Uint8Array) {
+  const program = envelope.subarray(10, 10 + u32(envelope, 6))
+  let at = 10 + program.length
+  const proof = Array.from({ length: envelope[at] }, (_, i) => envelope.subarray(at + 1 + 32 * i, at + 33 + 32 * i))
+  at += 1 + 32 * proof.length
+  const cert = envelope.subarray(at + 2, at + 2 + u16(envelope, at))
+  const sig = envelope.subarray(at + 2 + cert.length, at + 66 + cert.length)
+  return { program, proof, cert, sig, chainId: BigInt(hex(program.subarray(10, 18))) }
+}
+
+/**
+ * Who signed a K773 envelope (the certificate alias), or undefined when its
+ * catalog signature does not check out to the root the device trusts. The
+ * resolver attaches no definition this computer cannot verify.
+ */
+export function erc7730EnvelopeSigner(envelope: Uint8Array): string | undefined {
+  try {
+    const { program, proof, cert, sig, chainId } = envelopeParts(envelope)
+    return catalogSigner(program, proof, cert, sig, chainId)
+  } catch {
+    return undefined
+  }
+}
+
 interface Leaf { kind: number; value: bigint | string | boolean }
 
 /**
  * The description of `call` from a K773 envelope (hex), or undefined when its
- * signature does not check out to the production root, or the envelope or the
+ * signature does not check out to the device's root, or the envelope or the
  * calldata cannot be read the way the device reads them. `from` is the signing
  * address only when this computer has matched it to the signing key; without
  * it, @.from cannot be shown and no address reads "(this wallet)".
@@ -148,13 +175,7 @@ function describeProgram(
 ): Erc7730Description | undefined {
   try {
     const envelope = Uint8Array.from(Buffer.from(envelopeHex.replace(/^0x/i, ''), 'hex'))
-    const program = envelope.subarray(10, 10 + u32(envelope, 6))
-    let at = 10 + program.length
-    const proof = Array.from({ length: envelope[at] }, (_, i) => envelope.subarray(at + 1 + 32 * i, at + 33 + 32 * i))
-    at += 1 + 32 * proof.length
-    const cert = envelope.subarray(at + 2, at + 2 + u16(envelope, at))
-    const sig = envelope.subarray(at + 2 + cert.length, at + 66 + cert.length)
-    const chainId = BigInt(hex(program.subarray(10, 18)))
+    const { program, proof, cert, sig, chainId } = envelopeParts(envelope)
     const signedBy = catalogSigner(program, proof, cert, sig, chainId)
     if (!signedBy || chainId !== BigInt(call.chainId)) return undefined
 
