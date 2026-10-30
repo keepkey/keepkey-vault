@@ -2,7 +2,6 @@ import { createHash } from 'node:crypto'
 import protobuf from 'protobufjs/light'
 import bs58 from 'bs58'
 import type { TronCallPreview, TronTxPreview } from '../shared/types'
-import type { TronTxPreview } from '../shared/types'
 import { versionCompare } from '../shared/firmware-versions'
 
 type Value = { wire: number; bytes?: Buffer; number?: bigint }
