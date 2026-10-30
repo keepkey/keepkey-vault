@@ -111,9 +111,16 @@ describe('a call inside a SafeTx is decoded here (G10)', () => {
     expect(text(poisoned)).toContain(`looks like your contact Payroll (${recipient.toLowerCase()}) but is a different address`)
   })
   test('an unlimited approve to a spender KeepKey has not reviewed stays danger', async () => {
-    const r = await review(doc('safe-SafeTx-approve-unlimited'))
+    // The corpus document approves Uniswap SwapRouter02, which Desktop names:
+    // unlimited to a named spender is high, not danger.
+    const named = await review(doc('safe-SafeTx-approve-unlimited'))
+    expect(named.level).toBe('high')
+    expect(text(named)).toContain('Lets Uniswap SwapRouter02 (0x68b3465833fb72a70ecdf485e0e4c7bd8665fc45) spend ALL of your USDC')
+    const td = doc('safe-SafeTx-approve-unlimited')
+    const stranger = '0x9999999999999999999999999999999999999999'
+    const r = await review(mutate(td, { data: td.message.data.toLowerCase().replace('68b3465833fb72a70ecdf485e0e4c7bd8665fc45', stranger.slice(2)) }))
     expect(r.level).toBe('critical')
-    expect(text(r)).toContain('Lets 0x68b3465833fb72a70ecdf485e0e4c7bd8665fc45 spend ALL of your USDC')
+    expect(text(r)).toContain(`Lets ${stranger} spend ALL of your USDC`)
   })
   test('an approve the Safe gives canonical Permit2 names Permit2 (preview path)', async () => {
     const data = `0x095ea7b3${word('0x000000000022D473030F116dDEE9F6B43aC78BA3')}${'f'.repeat(64)}`
