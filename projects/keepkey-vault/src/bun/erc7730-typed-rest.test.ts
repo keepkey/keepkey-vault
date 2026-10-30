@@ -67,7 +67,7 @@ async function restSignTyped(firmwareVersion: string, opts: { typedData?: any; r
     onApiLog: () => {}, onPairRequest: () => {}, getVersion: () => 'test',
     onSigningRequest: async (info: any) => { cards.push({ ...info, lookupsBefore: lookups.length }); opts.onApprove?.(); return { approved: true } as any },
     onSigningDismissed: () => {},
-  } as any)
+  } as any, '127.0.0.1')
   try {
     const res = await originalFetch(`http://127.0.0.1:${server.port}/eth/sign-typed-data`, {
       method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer test' },

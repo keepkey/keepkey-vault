@@ -16,7 +16,7 @@ async function sign(enabled:boolean,disableAtApproval=false,multisig=true){
  const wallet={btcSignTx:async()=>{signatures++;return{signatures:['3006020101020101'],serializedTx:'01000000'}}}
  const engine:any=Object.assign(new EventEmitter(),{isEmulator:false,isPassphraseWallet:false,wallet,getDeviceState:()=>({state:'ready',firmwareVersion:'7.16.0'}),getCachedFeaturesSnapshot:()=>undefined})
  const auth:any={requireAuth:()=>({name:'test',url:'https://test.example'}),extractBearerToken:()=> 'test',validate:()=>true,getAccount:()=>undefined}
- const server=startRestApi(engine,auth,0,{onApiLog:()=>{},onPairRequest:()=>{},getVersion:()=> 'test',onSigningRequest:async()=>{approvals++;if(disableAtApproval)db.setSetting('btc_multisig_enabled','0');return{approved:true}},onSigningDismissed:()=>{}} as any)
+ const server=startRestApi(engine,auth,0,{onApiLog:()=>{},onPairRequest:()=>{},getVersion:()=> 'test',onSigningRequest:async()=>{approvals++;if(disableAtApproval)db.setSetting('btc_multisig_enabled','0');return{approved:true}},onSigningDismissed:()=>{}} as any, '127.0.0.1')
  try{
   const response=await fetch(`http://127.0.0.1:${server.port}/utxo/sign-transaction`,{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer test'},body:JSON.stringify({coin:'Bitcoin',inputs:[{scriptType:'p2wpkh',amount:'1000',...(multisig?{multisig:{m:2,pubkeys:[]}}:{})}],outputs:[{address:'bc1qtest',amount:'900'}]})})
   return{status:response.status,body:await response.json(),approvals,signatures}

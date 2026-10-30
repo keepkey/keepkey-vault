@@ -248,7 +248,7 @@ describe('WalletConnect reads the same accounts as REST', () => {
     // A local JSON-RPC server answering getMultipleAccounts from the captured
     // account data; anything else (the simulation) gets an RPC error.
     const server = Bun.serve({
-      port: 0,
+      port: 0, hostname: '127.0.0.1',
       async fetch(req) {
         const body = await req.json() as { id: number; method: string; params: [string[]] }
         if (body.method !== 'getMultipleAccounts') return Response.json({ jsonrpc: '2.0', id: body.id, error: { code: -32601, message: 'not served here' } })
