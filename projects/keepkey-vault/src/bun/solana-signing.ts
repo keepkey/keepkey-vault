@@ -1,6 +1,7 @@
 import bs58 from 'bs58'
 import {
   parseSolanaMessage,
+  type ParsedSolanaMessage,
   parseSolanaTx,
   solanaMessageSlice,
   SolanaTxParseError,
@@ -8,6 +9,12 @@ import {
 import { prepareSolanaX402DeviceMetadata } from './solana-x402'
 import { findPromotedSolanaArtifact } from './clearsign-artifact-resolver'
 import { supportsCertifiedClearSign } from './solana-certified-policy'
+import type { AltAccountFetcher } from './solana-alt'
+import {
+  resolveCanonicalLutAccounts,
+  SOL_MAX_HOST_LUT_ACCOUNTS,
+  supportsHostLutAccounts,
+} from './solana-lut-resolver'
 
 export type SolanaDeviceSigner = (params: any) => Promise<any>
 export type SolanaAddressDeriver = (addressNList: number[]) => Promise<string>
@@ -17,6 +24,11 @@ export type SolanaAddressDeriver = (addressNList: number[]) => Promise<string>
  * firmware message and splice the returned signature into the original wire
  * transaction. The device receives the exact legacy/v0 message bytes, while
  * metadata and one-shot opaque-signing consent are forwarded unchanged.
+ *
+ * With `altFetcher` and firmware 7.17.0+, a v0 message's lookup-table
+ * accounts are resolved here and sent as `lutAccounts`, so the device can
+ * decode the instructions (each resolved key marked as not verified by
+ * KeepKey). It stays a blind sign on the device either way.
  */
 export async function signSolanaWireTransaction(
   unsignedTx: any,
@@ -24,6 +36,7 @@ export async function signSolanaWireTransaction(
   deriveSignerAddress: SolanaAddressDeriver,
   logPrefix = 'signTx:solana',
   getFirmwareVersion?: () => string | undefined,
+  altFetcher?: AltAccountFetcher,
 ): Promise<any> {
   const fullTx = Buffer.from(
     typeof unsignedTx.rawTx === 'string'
@@ -89,11 +102,15 @@ export async function signSolanaWireTransaction(
   const x402Metadata = effectiveUnsignedTx.x402
     ? prepareSolanaX402DeviceMetadata(message, effectiveUnsignedTx.x402, signerPublicKey)
     : undefined
-  const deviceParams = {
+  const deviceParams: any = {
     ...effectiveUnsignedTx,
     ...(x402Metadata || {}),
     rawTx: Buffer.from(messageBytes).toString('base64'),
   }
+  // Only Desktop's own resolution reaches the device, never a caller's list.
+  delete deviceParams.lutAccounts
+  const lutAccounts = await hostLutAccounts(message, deviceParams, altFetcher, getFirmwareVersion?.(), logPrefix)
+  if (lutAccounts) deviceParams.lutAccounts = lutAccounts
   console.debug(
     `[${logPrefix}] routing ${parsed.isVersioned ? 'v0' : 'legacy'} transaction ` +
     `through SolanaSignTx (${messageBytes.length}B message)`,
@@ -120,5 +137,34 @@ export async function signSolanaWireTransaction(
     signature: sigBytes,
     serializedTx: rawBytes.toString('base64'),
     ...(promoted ? { clearSignPromotionBundleHash: promoted.bundleHash } : {}),
+  }
+}
+
+/**
+ * The host-resolved lookup accounts for firmware 7.17.0+, or undefined to
+ * send the message as before. Never next to a LUT proof, schema or
+ * certificate (the device refuses that mix). A resolution that fails, or
+ * that the device would refuse, is dropped: the device then shows the
+ * message as it did before 7.17.
+ */
+async function hostLutAccounts(
+  message: ParsedSolanaMessage,
+  deviceParams: any,
+  altFetcher: AltAccountFetcher | undefined,
+  firmwareVersion: string | undefined,
+  logPrefix: string,
+): Promise<Buffer[] | undefined> {
+  if (!altFetcher || message.altEntries.length === 0) return undefined
+  if (!supportsHostLutAccounts(firmwareVersion)) return undefined
+  if (deviceParams.lutProof || deviceParams.schema || deviceParams.certificate) return undefined
+  try {
+    const { accounts } = await resolveCanonicalLutAccounts(message, altFetcher, SOL_MAX_HOST_LUT_ACCOUNTS)
+    if (message.staticAccounts.length + accounts.length > SOL_MAX_HOST_LUT_ACCOUNTS) return undefined
+    const statics = new Set(message.staticAccounts.map((k) => Buffer.from(k).toString('hex')))
+    if (accounts.some((k) => statics.has(k.toString('hex')))) return undefined
+    return accounts
+  } catch (err: any) {
+    console.warn(`[${logPrefix}] lookup accounts not sent to the device: ${err?.message || err}`)
+    return undefined
   }
 }
