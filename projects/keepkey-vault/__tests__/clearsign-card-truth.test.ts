@@ -6,7 +6,7 @@
  */
 import { afterAll, afterEach, beforeAll, describe, expect, test } from 'bun:test'
 import type { SigningRequestInfo } from '../src/shared/types'
-import { prepareEvmTxSigningInfo } from '../src/bun/evm-presign-report'
+import { evmSigningVerdict, prepareEvmTxSigningInfo } from '../src/bun/evm-presign-report'
 import { evmCallRequiresAdvancedMode } from '../src/bun/evm-signing-policy'
 import { forgetRefusedErc7730Definitions } from '../src/bun/erc7730-resolver'
 import { describeErc7730Call } from '../src/bun/erc7730-describe'
@@ -149,5 +149,61 @@ describe('emulator TEST-root QA: the ERC-7730 description uses the root the devi
     try {
       expect(describeErc7730Call(definition.envelope, { ...tx, from: tx.from, firmwareVersion: FW })).toBeUndefined()
     } finally { restoreRoot = trustTestRoot(real.testRootPublicKey) }
+  })
+})
+
+describe('WalletConnect eth_sendTransaction reports the call the way REST does', () => {
+  // The emulator legs (emulator-legs-20261030/wc-legs) signed these on 7.16.0 with the
+  // device showing every field, while the WalletConnect report read P1 "blind review".
+  const unavailable = { status: 'unavailable', transactionFingerprint: 'f', assetChanges: [], authorityChanges: [], warnings: [], unknowns: [] } as any
+  const restVerdict = async (leg: Leg) => evmSigningVerdict((await card(leg)).info, {}, unavailable, false)
+
+  /** The card WalletConnect shows for this transaction (declined, so nothing is signed). */
+  async function wcCard({ tx }: Leg): Promise<SigningRequestInfo> {
+    const { WalletConnectManager } = await import('../src/bun/walletconnect')
+    const cards: SigningRequestInfo[] = []
+    const manager: any = new WalletConnectManager({
+      getEvmAddressInfo: () => ({ address: tx.from, addressIndex: 0 }),
+      getFirmwareVersion: () => FW,
+      getDeviceCapabilities: () => CAPS,
+      getAdvancedModeEnabled: () => false,
+      getEvmSimulationEndpoint: () => 'http://127.0.0.1:9/',
+      recordClearSignObservation: () => undefined,
+      authenticateClearSignObservation: () => {},
+      finalizeClearSignObservation: () => {},
+      requestSigningApproval: async (info: SigningRequestInfo) => { cards.push(info); return false },
+      ethSignTx: async () => { throw new Error('nothing is signed in this test') },
+      dismissSigning: () => {},
+      log: () => {},
+    } as any)
+    await expect(manager.signTransaction({
+      ...tx, chainId: `0x${tx.chainId.toString(16)}`, nonce: '0x0', gas: '0x7a120', maxFeePerGas: '0x6fc23ac00', maxPriorityFeePerGas: '0x3b9aca00',
+    }, [0x8000002c, 0x8000003c, 0x80000000, 0, 0], 'test-dapp', tx.chainId, false)).rejects.toThrow('User rejected signing')
+    expect(cards.length).toBe(1)
+    return cards[0]
+  }
+
+  test('a certified call (L01 OpolisPay): P4 from the certified description; a changed signature is not', async () => {
+    const leg = real.legs.L01
+    serve({ schema: leg.service })
+    const wc = (await wcCard(leg)).clearSignReport!
+    expect(wc.protectionLevel).toBe('P4')
+    expect(wc.descriptor).toMatchObject({ source: 'certified', authenticated: true, format: 'EVM_METADATA', label: 'payPayroll' })
+    expect(wc.descriptor).toMatchObject((await restVerdict(leg)).descriptor)
+
+    serve({ schema: { ...leg.service, signedPayload: tamperKind1(leg.service.signedPayload, 'sig') } })
+    const bad = (await wcCard(leg)).clearSignReport!
+    expect(bad.protectionLevel).not.toBe('P4')
+    expect(bad.descriptor.authenticated).toBe(false)
+  })
+
+  test('a call the firmware shows natively (1 USDT transfer): P4, as on REST', async () => {
+    const leg: Leg = { tx: { chainId: 1, from: real.legs.L01.tx.from, to: '0xdac17f958d2ee523a2206206994597c13d831ec7', value: '0x0',
+      data: `0xa9059cbb${'5'.repeat(40).padStart(64, '0')}${(1_000_000).toString(16).padStart(64, '0')}` } }
+    serve({})
+    const wc = (await wcCard(leg)).clearSignReport!
+    expect(wc.protectionLevel).toBe('P4')
+    expect(wc.descriptor).toMatchObject({ source: 'native', authenticated: true, format: 'FIRMWARE_NATIVE' })
+    expect(wc.descriptor).toMatchObject((await restVerdict(leg)).descriptor)
   })
 })
