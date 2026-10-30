@@ -181,32 +181,6 @@ describe('Relay Receiver is not a spender', () => {
   })
 })
 
-describe('Desktop spender list', () => {
-  test('names each requested spender on Ethereum and Base', () => {
-    const both: [string, string][] = [
-      ['0xC92E8bdf79f0507f65a392b0ab4667716BFE0110', 'CoW Protocol Vault Relayer'],
-      ['0x0000000000001fF3684f28c67538d4D072C22734', '0x AllowanceHolder'],
-      ['0xDef1C0ded9bec7F1a1670819833240f027b25EfF', '0x Exchange Proxy'],
-      ['0x1231DEB6f5749EF6cE6943a275A1D3E7486F4EaE', 'LI.FI Diamond'],
-      ['0x111111125421cA6dc452d289314280a0f8842A65', '1inch Aggregation Router v6'],
-      ['0x6A000F20005980200259B80c5102003040001068', 'ParaSwap Augustus v6.2'],
-      ['0x6131B5fae19EA4f9D964eAc0408E4408b66337b5', 'KyberSwap Meta Aggregation Router v2'],
-      ['0x5567954cd026cebfe486062cb75848e0f1c12e58', 'Relay Approval Proxy'],
-      ['0xccc88a9d1b4ed6b0eaba998850414b24f1c315be', 'Relay Approval Proxy'],
-    ]
-    for (const chainId of [1, 8453]) for (const [a, name] of both) expect(knownSpenderName(chainId, a)).toBe(name)
-    expect(knownSpenderName(8453, '0x19cEeAd7105607Cd444F5ad10dd51356436095a1')).toBe('Odos Router v2')
-    expect(knownSpenderName(8453, '0x09aea4b2242abc8bb4bb78d537a67a245a7bec64')).toBe('Across SpokePool')
-    expect(knownSpenderName(1, '0x5c7bcd6e7de5423a257d81b442095a1a6ced35c5')).toBe('Across SpokePool')
-  })
-
-  test('GPv2Settlement is not a spender, and SwapDialog no longer calls it the Vault Relayer', () => {
-    expect(knownSpenderName(1, '0x9008D19f58AAbD9eD0D60971565AA8510560ab41')).toBeUndefined()
-    const src = readFileSync(join(import.meta.dir, '../src/mainview/components/SwapDialog.tsx'), 'utf8')
-    expect(src).not.toMatch(/9008d19f58aabd9ed0d60971565aa8510560ab41[^\n]*Vault Relayer/i)
-  })
-})
-
 // The real 0x Swap API v2 permit2 quote on Base (0x-examples README, the
 // fixture of the 2026-10-30 emulator leg "Generic EIP-712"): a one-time
 // Permit2 PermitTransferFrom of 0.0001 WETH to 0x Settler deployment 9. It read
@@ -255,5 +229,31 @@ describe('0x Swap API permit2 quote', () => {
     const all = typed(with_({ permitted: { ...quote.message.permitted, amount: MAX.toString() } }))
     expect(all.recognizedSpender).toBe('0x Settler')
     expect(assessSigningRisk(all)!.level).toBe('high')
+  })
+})
+
+describe('Desktop spender list', () => {
+  test('names each requested spender on Ethereum and Base', () => {
+    const both: [string, string][] = [
+      ['0xC92E8bdf79f0507f65a392b0ab4667716BFE0110', 'CoW Protocol Vault Relayer'],
+      ['0x0000000000001fF3684f28c67538d4D072C22734', '0x AllowanceHolder'],
+      ['0xDef1C0ded9bec7F1a1670819833240f027b25EfF', '0x Exchange Proxy'],
+      ['0x1231DEB6f5749EF6cE6943a275A1D3E7486F4EaE', 'LI.FI Diamond'],
+      ['0x111111125421cA6dc452d289314280a0f8842A65', '1inch Aggregation Router v6'],
+      ['0x6A000F20005980200259B80c5102003040001068', 'ParaSwap Augustus v6.2'],
+      ['0x6131B5fae19EA4f9D964eAc0408E4408b66337b5', 'KyberSwap Meta Aggregation Router v2'],
+      ['0x5567954cd026cebfe486062cb75848e0f1c12e58', 'Relay Approval Proxy'],
+      ['0xccc88a9d1b4ed6b0eaba998850414b24f1c315be', 'Relay Approval Proxy'],
+    ]
+    for (const chainId of [1, 8453]) for (const [a, name] of both) expect(knownSpenderName(chainId, a)).toBe(name)
+    expect(knownSpenderName(8453, '0x19cEeAd7105607Cd444F5ad10dd51356436095a1')).toBe('Odos Router v2')
+    expect(knownSpenderName(8453, '0x09aea4b2242abc8bb4bb78d537a67a245a7bec64')).toBe('Across SpokePool')
+    expect(knownSpenderName(1, '0x5c7bcd6e7de5423a257d81b442095a1a6ced35c5')).toBe('Across SpokePool')
+  })
+
+  test('GPv2Settlement is not a spender, and SwapDialog no longer calls it the Vault Relayer', () => {
+    expect(knownSpenderName(1, '0x9008D19f58AAbD9eD0D60971565AA8510560ab41')).toBeUndefined()
+    const src = readFileSync(join(import.meta.dir, '../src/mainview/components/SwapDialog.tsx'), 'utf8')
+    expect(src).not.toMatch(/9008d19f58aabd9ed0d60971565aa8510560ab41[^\n]*Vault Relayer/i)
   })
 })

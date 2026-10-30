@@ -12,12 +12,12 @@ import { findEvmNameRecord, findReviewedUniversalRouter, reviewedSwapToken } fro
 import { evmContractIdentity } from '../shared/evm-contract-identity'
 import { knownSpenderName } from '../shared/evm-known-spenders'
 import { urPrecheck } from './uniswap-ur'
-import { zeroExSettlerName } from './swap-decoders'
 import { supportsCertifiedClearSign } from './solana-certified-policy'
 import { certifiedBodyRefused, certifiedEnvelopeShown, metadataPayloadBytes } from '../shared/certified-evm-envelope'
 import { fetchErc7730CalldataDefinition, resolveErc7730ForCall, resolveErc7730ForTypedData } from './erc7730-resolver'
 import { describeErc7730Call, describeErc7730TypedData } from './erc7730-describe'
 import { safeTxCalls } from '../shared/safe-tx'
+import { zeroExSettlerName } from './swap-decoders'
 
 /** A chain id as dapps send it (number, "8453", "0x2105") → positive integer, else undefined. */
 export function normalizeEvmChainId(raw: unknown): number | undefined {
