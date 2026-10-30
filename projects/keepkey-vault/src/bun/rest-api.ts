@@ -14,12 +14,13 @@ import type { ClearSignEvent } from '../shared/types'
 import { createHash } from 'crypto'
 import { decodeEIP712 } from './eip712-decoder'
 import { addSeaportCreatorFee } from './seaport-creator-fee'
-import { attachErc7730TypedDefinition, evmPriorityFee, normalizeEvmChainId, recognizedTypedDataSpender, typedDataNativelyReviewed } from './evm-signing-preview'
+import { attachErc7730TypedDefinition, evmPriorityFee, evmQuantity, normalizeEvmChainId, recognizedTypedDataSpender, typedDataNativelyReviewed } from './evm-signing-preview'
 import { buildEvmReportForTx, buildTypedDataReport, evmSigningVerdict, prepareEvmTxSigningInfo, withoutErc7730Description } from './evm-presign-report'
 import { describeErc7730Call } from './erc7730-describe'
 import { signWithErc7730Fallback } from './erc7730-resolver'
 import { CHAINS, isChainSupported, hiveRolePath, evmChainLabel } from '../shared/chains'
 import { getEvmSimulationEndpoint } from './evm-simulation-config'
+import { getEvmGasPrice } from './evm-rpc'
 import { addContractFacts } from './contract-facts'
 import { versionCompare } from '../shared/firmware-versions'
 import { isBitcoinOnlyVariant, DEFAULT_AUTO_LOCK_MS } from '../shared/flags'
@@ -2787,13 +2788,13 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             value: body.value || '0x0',
             data: body.data || '0x',
             nonce: body.nonce || '0x0',
-            gasLimit: body.gas || body.gasLimit || '0x5208',
+            gasLimit: evmQuantity(body.gas || body.gasLimit || '0x5208'),
             chainId,
           }
 
           // EIP-1559 fields
           if (body.maxFeePerGas || body.max_fee_per_gas) {
-            msg.maxFeePerGas = body.maxFeePerGas || body.max_fee_per_gas
+            msg.maxFeePerGas = evmQuantity(body.maxFeePerGas || body.max_fee_per_gas)
             // Canonical RLP requires a zero priority fee to be the EMPTY string, not
             // a 0x00 byte. hdwallet does not strip the EIP-1559 fee fields, so a
             // literal '0x0' reaches the device as [0x00], which the firmware hashes
@@ -2801,8 +2802,17 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             // unbroadcastable (see keepkey-firmware eip1559-zero-priority fix). Send
             // empty for a zero/absent priority fee.
             msg.maxPriorityFeePerGas = evmPriorityFee(body.maxPriorityFeePerGas || body.max_priority_fee_per_gas)
+          } else if (body.gasPrice || body.gas_price) {
+            msg.gasPrice = evmQuantity(body.gasPrice || body.gas_price)
           } else {
-            msg.gasPrice = body.gasPrice || body.gas_price || '0x0'
+            // No fee: dapps leave it to the wallet. Pioneer's gas price for this
+            // chain, or fail; never sign a made-up or zero fee.
+            let wei: bigint | undefined
+            try { wei = await getEvmGasPrice(`eip155:${chainId}`) } catch (e: any) {
+              console.warn(`[REST] gas price lookup failed for chain ${chainId}:`, e?.message || e)
+            }
+            if (!wei || wei <= 0n) throw new HttpError(502, `The request has no fee and the gas price for chain ${chainId} is unavailable. Nothing was signed; try again.`)
+            msg.gasPrice = `0x${wei.toString(16)}`
           }
 
           // A caller's ERC-7730 catalog is never sent: it may be runtime tier,
