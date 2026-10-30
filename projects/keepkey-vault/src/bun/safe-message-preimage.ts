@@ -57,11 +57,15 @@ export async function attachSafeMessagePreimage(info: SigningRequestInfo, fetchI
       info.safeMessageOriginal = utils.hashMessage(original).toLowerCase() === signed ? { status: 'text', text: original } : { status: 'mismatch' }
       return
     }
-    const doc = original as { domain?: any; types?: Record<string, any>; message?: any } | null
+    const doc = original as { domain?: any; types?: Record<string, any>; primaryType?: string; message?: any } | null
     let hash: string | undefined
     try {
       const { EIP712Domain: _domain, ...types } = doc?.types ?? {}
-      hash = utils._TypedDataEncoder.hash(doc?.domain ?? {}, types, doc?.message ?? {}).toLowerCase()
+      // The hash takes the root type from `types` and ignores primaryType; the
+      // description reads the message as primaryType. They must be the same type.
+      if (utils._TypedDataEncoder.from(types).primaryType === doc?.primaryType) {
+        hash = utils._TypedDataEncoder.hash(doc?.domain ?? {}, types, doc?.message ?? {}).toLowerCase()
+      }
     } catch { /* not a typed document */ }
     if (hash !== signed) { info.safeMessageOriginal = { status: 'mismatch' }; return }
     const decoded = decodeEIP712(doc, d.domain.verifyingContract)

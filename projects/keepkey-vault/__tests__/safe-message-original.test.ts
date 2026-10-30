@@ -9,6 +9,7 @@
  * hashes to the signed value.
  */
 import { describe, expect, test } from 'bun:test'
+import { utils } from 'ethers'
 import { assessSigningRisk } from '../src/shared/clearsign-risk'
 import { decodeEIP712 } from '../src/bun/eip712-decoder'
 import { attachSafeMessagePreimage } from '../src/bun/safe-message-preimage'
@@ -162,5 +163,81 @@ describe('SafeMessage original from the Transaction Service', () => {
     await attachSafeMessagePreimage(info, service({}, asked))
     expect(info.safeMessageOriginal).toBeUndefined()
     expect(asked.some((u) => u.includes('/messages/'))).toBe(false)
+  })
+
+  // Nested Safes: Safe A owns Safe B, so B's SafeTx is approved by A signing
+  // its EIP-712 hash as a SafeMessage. The doc is what the Transaction Service
+  // stores for that message; the request is what Safe{Wallet} sends A's owner.
+  const SAFE_A = siweOdos.typedData.domain.verifyingContract
+  const SAFE_B = '0xb0b0000000000000000000000000000000000b0b'
+  const SAFE_TX_TYPES = { SafeTx: [
+    { name: 'to', type: 'address' }, { name: 'value', type: 'uint256' }, { name: 'data', type: 'bytes' },
+    { name: 'operation', type: 'uint8' }, { name: 'safeTxGas', type: 'uint256' }, { name: 'baseGas', type: 'uint256' },
+    { name: 'gasPrice', type: 'uint256' }, { name: 'gasToken', type: 'address' }, { name: 'refundReceiver', type: 'address' },
+    { name: 'nonce', type: 'uint256' },
+  ] }
+  const ZERO = '0x0000000000000000000000000000000000000000'
+  const safeTxOfB = (o: Record<string, string>) => ({
+    domain: { chainId: 1, verifyingContract: SAFE_B }, types: SAFE_TX_TYPES, primaryType: 'SafeTx',
+    message: { to: SAFE_B, value: '0', data: '0x', operation: '0', safeTxGas: '0', baseGas: '0', gasPrice: '0', gasToken: ZERO, refundReceiver: ZERO, nonce: '5', ...o },
+  })
+  /** SafeMessage { message: hash(doc) } for SAFE_A, and its service record. */
+  function wrapped(doc: { domain: any; types: Record<string, any>; primaryType: string; message: any }): Fixture {
+    const hash = utils._TypedDataEncoder.hash(doc.domain, doc.types, doc.message)
+    const typedData = { ...siweOdos.typedData, message: { message: hash } }
+    const h = decodeEIP712(typedData, OWNER).hashes!
+    const id = utils.keccak256(utils.concat(['0x1901', h.domainHash, h.messageHash!]))
+    return { _source: [`https://api.safe.global/tx-service/eth/api/v1/messages/${id}/`], typedData, record: { message: doc } } as unknown as Fixture
+  }
+
+  test("a Safe's SafeTx wrapped in a SafeMessage still flags a gas refund payout", async () => {
+    const refund = wrapped(safeTxOfB({ baseGas: '500000', gasPrice: '1000000000000', refundReceiver: '0x2222222222222222222222222222222222222222' }))
+    const { info, risk } = await card(refund, served(refund))
+    expect(info.safeMessageOriginal?.status).toBe('typed')
+    expect(text(risk)).toContain('Pays a gas refund out of your Safe when it is executed, to 0x2222222222222222222222222222222222222222')
+    expect(risk.tier).toBe('red')
+
+    // Control: the same rejection with no refund is normal.
+    const plain = wrapped(safeTxOfB({}))
+    const ok = await card(plain, served(plain))
+    expect(text(ok.risk)).toContain('Rejects pending transaction #5')
+    expect(text(ok.risk)).not.toContain('gas refund')
+    expect(ok.risk.tier).toBe('yellow')
+  })
+
+  test("the outer Safe is named as the Safe that signs, not as this KeepKey account", async () => {
+    const pay = wrapped(safeTxOfB({ to: SAFE_A, value: '1000000000000000000' }))
+    const { risk } = await card(pay, served(pay))
+    const t = text(risk)
+    expect(t).not.toContain('this KeepKey account')
+    expect(t).toContain('your Safe that signs this message')
+  })
+
+  test('a stored document whose primaryType is not the type it hashes is ignored', async () => {
+    // Permit2: the hash infers PermitSingle as the root, whatever primaryType says.
+    const USDC = '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48'
+    const SPENDER = '0x2222222222222222222222222222222222222222'
+    const types = {
+      PermitSingle: [{ name: 'details', type: 'PermitDetails' }, { name: 'spender', type: 'address' }, { name: 'sigDeadline', type: 'uint256' }],
+      PermitDetails: [{ name: 'token', type: 'address' }, { name: 'amount', type: 'uint160' }, { name: 'expiration', type: 'uint48' }, { name: 'nonce', type: 'uint48' }],
+    }
+    const message = {
+      details: { token: USDC, amount: (2n ** 160n - 1n).toString(), expiration: '1900000000', nonce: '0' },
+      spender: SPENDER, sigDeadline: '1900000000',
+      // Not hashed: no field of PermitSingle has these names.
+      token: USDC, amount: '1000000',
+    }
+    const domain = { name: 'Permit2', chainId: 1, verifyingContract: '0x000000000022D473030F116dDEE9F6B43aC78BA3' }
+    const mislabelled = wrapped({ domain, types, primaryType: 'PermitDetails', message })
+    const { info, risk } = await card(mislabelled, served(mislabelled))
+    expect(info.safeMessageOriginal).toEqual({ status: 'mismatch' })
+    expect(text(risk)).not.toContain('1000000')
+    expect(risk.tier).toBe('red')
+
+    // Control: the same record with the type it hashes is read as signed.
+    const labelled = wrapped({ domain, types, primaryType: 'PermitSingle', message })
+    const ok = await card(labelled, served(labelled))
+    expect(ok.info.safeMessageOriginal?.status).toBe('typed')
+    expect(text(ok.risk)).toContain(`Lets ${SPENDER} spend ALL of your USDC`)
   })
 })

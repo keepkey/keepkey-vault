@@ -785,7 +785,7 @@ function safeMessage(req: SigningRequestInfo, d: EIP712DecodedInfo, add: (l: Ris
     // The Safe is the account that signs the document inside; a SafeMessage
     // inside it is read only from its own bytes.
     const inner = describeTypedDoc({ ...req, from: safe, typedDataDecoded: o.decoded, recognizedSpender: o.recognizedSpender, safeMessageOriginal: undefined }, o.decoded,
-      (l, t) => { described++; add(l, t) })
+      (l, t) => { described++; add(l, t) }, true)
     if (!described) add('high', `This computer has no description of ${o.decoded.operationName}, so it cannot say what it lets an app do.`)
     return { knownCalm: inner.knownCalm && !inner.unverified, unverified: false, opaque: inner.opaque || !described, hostRead: true }
   }
@@ -1036,14 +1036,14 @@ function safeDelegateCall(ctx: SafeCtx, to: string, data: string): Recognition |
 
 /** A SafeTx, decoded here. 'shows' = the device shows all of it (a coin send,
  *  a rejection); 'known' = decoded here, the device shows the data as hex. */
-function safeTx(req: SigningRequestInfo, d: NonNullable<SigningRequestInfo['typedDataDecoded']>, add: (l: RiskLevel, t: string) => void): Recognition {
+function safeTx(req: SigningRequestInfo, d: NonNullable<SigningRequestInfo['typedDataDecoded']>, add: (l: RiskLevel, t: string) => void, signerSafe = false): Recognition {
   const f = (label: string) => String(d.fields.find((x) => x.label === label)?.raw ?? '')
   const safe = (d.domain.verifyingContract ?? '').toLowerCase()
   const from = (req.from ?? '').toLowerCase()
   const ctx: SafeCtx = {
     chainId: evmChainId(d.domain.chainId ?? req.chainId), safe, req, add,
     known: [
-      ...(from ? [{ address: from, name: 'this KeepKey account' }] : []),
+      ...(from ? [{ address: from, name: signerSafe ? 'your Safe that signs this message' : 'this KeepKey account' }] : []),
       ...(safe ? [{ address: safe, name: 'your Safe' }] : []),
       ...(req.knownAddresses ?? []).map((k) => ({
         address: k.address.toLowerCase(), name: k.own ? 'your KeepKey account' : k.name ? `your contact ${k.name}` : 'a saved contact',
@@ -1087,7 +1087,9 @@ function safeTx(req: SigningRequestInfo, d: NonNullable<SigningRequestInfo['type
  *  here says what the device shows of it. */
 interface TypedDoc { knownCalm: boolean; unverified: boolean; opaque: boolean; safeRecognition?: Recognition; hostRead?: boolean }
 
-function describeTypedDoc(req: SigningRequestInfo, d: EIP712DecodedInfo, add: (l: RiskLevel, t: string) => void): TypedDoc {
+/** `signerSafe`: the document is signed by this Safe (as req.from) through a
+ *  SafeMessage, not by the KeepKey account itself. */
+function describeTypedDoc(req: SigningRequestInfo, d: EIP712DecodedInfo, add: (l: RiskLevel, t: string) => void, signerSafe = false): TypedDoc {
   const f = (label: string) => d.fields.find((x) => x.label === label)
   const contract = d.domain.verifyingContract?.toLowerCase()
   // A known document whose spend line stays at "check before you sign":
@@ -1108,8 +1110,14 @@ function describeTypedDoc(req: SigningRequestInfo, d: EIP712DecodedInfo, add: (l
       && /^0x(ff){32}$/i.test(String(f('Authority')?.raw ?? ''))
     add(unlimited ? 'critical' : 'high', `Gives ${delegate || 'another account'} the power to act for your account. It can then sign without your KeepKey.${unlimited ? ' There are no limits on what it can do.' : ''}`)
   } else if (d.primaryType === 'SafeTx') {
-    safeRecognition = safeTx(req, d, add)
+    safeRecognition = safeTx(req, d, add, signerSafe)
     opaque = safeRecognition === 'unknown'
+    // Safe pays gasPrice × gas in gasToken to refundReceiver when this executes.
+    // Safe{Wallet} leaves all three at zero, so a set refund is a hidden payout.
+    const set = (label: string) => !/^(0x)?0*$/.test(String(f(label)?.raw ?? '0'))
+    if (set('Gas Price') || set('Gas Token') || set('Refund Receiver')) {
+      add('high', `Pays a gas refund out of your Safe when it is executed, to ${set('Refund Receiver') ? f('Refund Receiver')!.raw : 'whoever executes it'}. Normal Safe transactions leave the refund at zero.`)
+    }
   } else if (d.primaryType === 'SafeMessage') {
     // EIP-1271: the Safe treats this as its own signature.
     const m = safeMessage(req, d, add)
@@ -1239,14 +1247,6 @@ function evmTypedData(req: SigningRequestInfo, add: (l: RiskLevel, t: string) =>
     return !!req.firmwareVersion && versionCompare(req.firmwareVersion, '7.15.0') >= 0 ? 'shows' : 'unknown'
   }
   const { knownCalm, unverified, opaque, safeRecognition, hostRead } = describeTypedDoc(req, d, add)
-  if (d.primaryType === 'SafeTx') {
-    // Safe pays gasPrice × gas in gasToken to refundReceiver when this executes.
-    // Safe{Wallet} leaves all three at zero, so a set refund is a hidden payout.
-    const set = (label: string) => !/^(0x)?0*$/.test(String(f(label)?.raw ?? '0'))
-    if (set('Gas Price') || set('Gas Token') || set('Refund Receiver')) {
-      add('high', `Pays a gas refund out of your Safe when it is executed, to ${set('Refund Receiver') ? f('Refund Receiver')!.raw : 'whoever executes it'}. Normal Safe transactions leave the refund at zero.`)
-    }
-  }
   const structured = !!req.firmwareVersion && versionCompare(req.firmwareVersion, '7.15.0') >= 0
   if (structured) {
     add('low', 'Your KeepKey will request and display the structured fields that it hashes for this signature.')
