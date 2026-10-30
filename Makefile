@@ -23,7 +23,7 @@ include .env
 export ELECTROBUN_DEVELOPER_ID ELECTROBUN_TEAMID ELECTROBUN_APPLEID ELECTROBUN_APPLEIDPASS
 endif
 
-.PHONY: release-sums clearsign-worker-test sync-asset-data clearsign-worker-rehearsal-guard clearsign-worker-rehearsal-deploy install dev dev-hmr build build-stable build-canary build-signed patch-arm64-release-tar prune-bundle dmg clean help vault sign-check notary-check verify verify-entitlements publish release upload-dmg upload-all-dmgs sign-release sign-release-intel verify-arch audit-macos-bundle submodules modules-install modules-build device-protocol-build modules-clean audit build-zcash-cli build-zcash-cli-debug build-zcash-cli-intel test test-unit test-rest test-sign-gating test-zcash-cli test-emu test-emu-erc7730 test-emu-erc7730-typed build-intel build-signed-intel build-electrobun-x64-core build-electrobun-arm64-core prepare-electrobun-arm64-core publish-electrobun-x64-core build-electrobun-linux-x64-core preflight build-emulator build-emulator-windows build-emulator-macos-release build-emulator-release clean-emulator test-emu-python
+.PHONY: release-sums firmware-token-table-717 clearsign-worker-test sync-asset-data clearsign-worker-rehearsal-guard clearsign-worker-rehearsal-deploy install dev dev-hmr build build-stable build-canary build-signed patch-arm64-release-tar prune-bundle dmg clean help vault sign-check notary-check verify verify-entitlements publish release upload-dmg upload-all-dmgs sign-release sign-release-intel verify-arch audit-macos-bundle submodules modules-install modules-build device-protocol-build modules-clean audit build-zcash-cli build-zcash-cli-debug build-zcash-cli-intel test test-unit test-rest test-sign-gating test-zcash-cli test-emu test-emu-erc7730 test-emu-erc7730-typed build-intel build-signed-intel build-electrobun-x64-core build-electrobun-arm64-core prepare-electrobun-arm64-core publish-electrobun-x64-core build-electrobun-linux-x64-core preflight build-emulator build-emulator-windows build-emulator-macos-release build-emulator-release clean-emulator test-emu-python
 
 # --- Submodules (auto-init on fresh worktrees/clones) ---
 
@@ -374,6 +374,18 @@ dmg: verify-arch
 	codesign --verify --verbose=2 "$$DMG_OUT"; \
 	spctl --assess --type open --context context:primary-signature --verbose=4 "$$DMG_OUT"; \
 	echo "DMG ready: $$DMG_OUT"
+
+# 7.17's token table (src/bun/firmware-token-table-717.json), generated the way
+# fork alpha's lib/firmware/CMakeLists.txt builds it. FW_SRC = a keepkey-firmware
+# checkout at the alpha commit, deps/python-keepkey initialised.
+firmware-token-table-717:
+	@test -n "$(FW_SRC)" || { echo "usage: make firmware-token-table-717 FW_SRC=<keepkey-firmware checkout at fork/alpha>"; exit 1; }
+	@d=$$(mktemp -d) && E=$(FW_SRC)/deps/python-keepkey/keepkeylib/eth && \
+	python3 $$E/ethereum_tokens.py $$d/ethereum_tokens.def --profile priority-only && \
+	python3 $$E/uniswap_tokens.py $$d/uniswap_tokens.def --profile priority-only && \
+	python3 $(FW_SRC)/scripts/dedupe-token-def.py $$d/ethereum_tokens.def $$d/uniswap_tokens.def && \
+	cd $(PROJECT_DIR) && FIRMWARE_COMMIT="$$(git -C $(FW_SRC) log -1 --format='%H tree %T')" bun scripts/gen-firmware-token-table.ts $$d firmware-token-table-717.json && \
+	rm -rf $$d
 
 # --- ClearSign Worker ---
 

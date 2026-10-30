@@ -110,7 +110,7 @@ export async function attachErc7730Definition(
   signingInfo.erc7730 = catalog
   signingInfo.needsBlindSigning = false
   const description = describeErc7730Call(catalog.definitions[0].envelope, {
-    chainId: signingInfo.chainId as number, to: to!, data: data!, value: signingInfo.value, from: signingInfo.from,
+    chainId: signingInfo.chainId as number, to: to!, data: data!, value: signingInfo.value, from: signingInfo.from, firmwareVersion,
   })
   if (description) signingInfo.erc7730Description = description
   console.log(`${tag} EVM clear-sign: ERC-7730 definition ${catalog.primaryDefinitionId.slice(0, 18)}… attached (chain ${signingInfo.chainId}, to ${to})`)
@@ -134,7 +134,7 @@ export async function attachErc7730TypedDefinition(
   const catalog = await resolveErc7730ForTypedData({ typedData, firmwareVersion, capabilities })
   if (!catalog) return false
   signingInfo.erc7730 = catalog
-  const description = describeErc7730TypedData(catalog.definitions[0].envelope, typedData, from)
+  const description = describeErc7730TypedData(catalog.definitions[0].envelope, typedData, firmwareVersion, from)
   if (description) signingInfo.erc7730Description = description
   console.log(`${tag} EIP-712 clear-sign: ERC-7730 definition ${catalog.primaryDefinitionId.slice(0, 18)}… attached`)
   return true
@@ -312,7 +312,7 @@ export async function attachSafeCallPreviews(info: SigningRequestInfo, fetchImpl
       calldataDecoded,
       recognizedSpender: selector === '0x095ea7b3' || selector === '0x39509351' ? recognizedSpender(chainId, arg0) : undefined,
       recognizedRecipient: selector === '0xa9059cbb' ? recognizedSpender(chainId, arg0) : undefined,
-      erc7730Description: catalog && describeErc7730Call(catalog.definitions[0].envelope, { chainId, to: c.to, data: c.data, value: callValue, from: safe }),
+      erc7730Description: catalog && describeErc7730Call(catalog.definitions[0].envelope, { chainId, to: c.to, data: c.data, value: callValue, from: safe, firmwareVersion: info.firmwareVersion }),
     }
   }))
 }
