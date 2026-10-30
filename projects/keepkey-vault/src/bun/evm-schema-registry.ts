@@ -26,7 +26,7 @@ import {
   ERC20_APPROVE,
   evmEntryId,
   findCertifiedEvmSchemaSpec,
-  relayDepositToken,
+  selectingToken,
   findReviewedUniversalRouter,
   isCertifiedEvmMetadata,
   reviewedSwapTokens,
@@ -124,10 +124,10 @@ async function fetchCertifiedEvmSchema(
     .trim()
     .replace(/\/+$/, '')
 
-  // Only an approve's spender, or a Relay depositErc20's token, leaves the
+  // Only an approve's spender, or a per-token entry's token, leaves the
   // host (each selects the entry).
   const spender = approveSpender(data)
-  const token = spec ? relayDepositToken(selector, calldata) : undefined
+  const token = spec ? selectingToken(selector, calldata) : undefined
   let response: Response
   try {
     response = await fetch(`${base}/v1/evm/schema`, {
