@@ -13,14 +13,19 @@
  *    the outer screens (owner, 2026-10-16: skip embedded calls), and a flag
  *    fails the program. When the bytes cannot say, no definition.
  * On 7.17+ an embedded call's definition (and a second level's) is fetched
- * from the same service when the device asks for it, with the same checks.
- * A 404 or 422 means no definition; nothing here throws.
+ * from the same service, with the same checks, before the definition is
+ * attached: the device will ask for each one, and the card describes the
+ * call from them. When one is missing, or the calldata shows the device would
+ * refuse (a Safe DELEGATECALL, a value that does not match), nothing is
+ * attached, so the user sees the normal review once, not after the device's
+ * own screens. A 404 or 422 means no definition; nothing here throws.
  */
 import { createHash } from 'node:crypto'
 import { DEFAULT_CLEARSIGN_SERVICE_URL } from './solana-certified-registry'
 import { firmwareClearSigns } from './calldata-decoder'
 import { erc7730CalldataSkipReason, supportsErc7730EmbeddedCalls, supportsErc7730Transport } from '../shared/erc7730-support'
 import { deviceErrorMessage } from '../shared/device-error'
+import { planErc7730EmbeddedCalls } from './erc7730-describe'
 import type { Erc7730Catalog } from '../shared/types'
 
 const TAG = '[erc7730]'
@@ -39,8 +44,12 @@ const MAX_FORMATTER_ARGUMENTS = 23
 const FORMATTER_EMBEDDED_CALL = 13
 
 /** Definitions a device refused this session: never sent again, so a retry
- *  (a swap after the AdvancedMode opt-in) does not repeat the refused review. */
+ *  (a swap after the AdvancedMode opt-in) does not repeat the refused review.
+ *  A refusal of one transaction's inner call, or of its value, is about that
+ *  transaction only: keyed by definition id and calldata (refusalKey). */
 const refusedDefinitionIds = new Set<string>()
+const refusalKey = (definitionId: string, data?: unknown) =>
+  data === undefined ? definitionId : `${definitionId}:${createHash('sha256').update(String(data).toLowerCase().replace(/^0x/, '')).digest('hex')}`
 
 /** Forget this session's refusals (unit tests start clean). */
 export function forgetRefusedErc7730Definitions(): void {
@@ -234,10 +243,11 @@ async function fetchDefinitionBody(chainId: number, contract: string, selector: 
  * GET the service's definition for (chain, contract, selector). Undefined for
  * 404/422 (none), for any check that fails, and for any network or format
  * error; it never throws. `firmwareVersion` 7.17+ also takes a definition with
- * embedded calls or formatter flags.
+ * embedded calls or formatter flags, with the inner definitions the device
+ * will ask for (`value` is the call's), or none when the device would refuse it.
  */
 export async function fetchErc7730CalldataDefinition(
-  chainId: number, to: string, data: string, fetchImpl: typeof fetch = fetch, firmwareVersion?: string,
+  chainId: number, to: string, data: string, fetchImpl: typeof fetch = fetch, firmwareVersion?: string, value?: unknown,
 ): Promise<Erc7730Catalog | undefined> {
   const skip = erc7730CalldataSkipReason(data)
   if (skip) return undefined
@@ -256,12 +266,47 @@ export async function fetchErc7730CalldataDefinition(
     console.warn(`${TAG} chain ${chainId} ${contract} ${selector}: definition not attached (${checked.reason})`)
     return undefined
   }
-  if (refusedDefinitionIds.has(checked.entry.definitionId)) {
+  const id = checked.entry.definitionId
+  if (refusedDefinitionIds.has(id) || refusedDefinitionIds.has(refusalKey(id, data))) {
     console.info(`${TAG} chain ${chainId} ${contract} ${selector}: definition was refused by the device this session; not attached`)
     return undefined
   }
-  console.info(`${TAG} chain ${chainId} ${contract} ${selector}: definition ${checked.entry.definitionId.slice(0, 18)}… checked`)
-  return { primaryDefinitionId: checked.entry.definitionId, definitions: [checked.entry] }
+  const header = readErc7730Envelope(Uint8Array.from(Buffer.from(checked.entry.envelope.slice(2), 'hex')))
+  const inner = header?.embeddedCall || header?.formatterFlags
+    ? await innerDefinitionsFor(checked.entry.envelope, { chainId, to: contract, data, value }, fetchImpl)
+    : []
+  if (typeof inner === 'string') {
+    console.info(`${TAG} chain ${chainId} ${contract} ${selector}: definition not attached (${inner})`)
+    return undefined
+  }
+  console.info(`${TAG} chain ${chainId} ${contract} ${selector}: definition ${id.slice(0, 18)}… checked${inner.length ? `, with ${inner.length} inner` : ''}`)
+  return { primaryDefinitionId: id, definitions: [checked.entry, ...inner] }
+}
+
+/**
+ * The inner definitions the device will ask for while it signs this call with
+ * this definition (7.17, two levels deep), fetched and checked like any other;
+ * or why it would refuse the call with it: an inner call with no definition,
+ * or a refusal the calldata already shows.
+ */
+async function innerDefinitionsFor(
+  envelope: string, call: { chainId: number; to: string; data: string; value?: unknown }, fetchImpl: typeof fetch,
+): Promise<Erc7730Catalog['definitions'] | string> {
+  const found: Erc7730Catalog['definitions'] = []
+  // Each round reads one level further down: the calls, then theirs.
+  for (let round = 0; round <= 2; round++) {
+    const plan = planErc7730EmbeddedCalls(envelope, call, found)
+    if (plan.refused) return `the device would refuse it: ${plan.refused}`
+    if (!plan.missing.length) return found
+    const keys = new Set(plan.missing.map((m) => `${m.contractAddress}:${m.selector}`))
+    for (const key of keys) {
+      const [contractAddress, selector] = key.split(':')
+      const entry = await resolveErc7730InnerDefinition(call.chainId, contractAddress, selector, fetchImpl)
+      if (!entry) return `no definition for its inner call ${contractAddress} ${selector}`
+      found.push(entry)
+    }
+  }
+  return 'inner calls nest deeper than the device follows'
 }
 
 /**
@@ -287,7 +332,7 @@ export async function resolveErc7730ForCall(
   if (call.txMetadata) return undefined
   if (!call.chainId || !call.to || typeof call.data !== 'string') return undefined
   if (firmwareClearSigns(call.to, call.data, call.chainId, call.firmwareVersion, call.value)) return undefined
-  return fetchErc7730CalldataDefinition(call.chainId, call.to, call.data, fetchImpl, call.firmwareVersion)
+  return fetchErc7730CalldataDefinition(call.chainId, call.to, call.data, fetchImpl, call.firmwareVersion, call.value)
 }
 
 /**
@@ -326,6 +371,9 @@ function primaryHasEmbeddedCall(catalog: Partial<Erc7730Catalog> | undefined): b
  *  fsm_msg_ethereum.h, and hdwallet's own check that the device used the
  *  preload). 7.17 names an inner DELEGATECALL and refuses to describe it. */
 const DEFINITION_REFUSAL = /ERC-7730|Value too long to clear-sign|Inner call cannot be clear-signed|DELEGATECALL cannot be clear-signed/i
+/** Refusals of one transaction (its inner call, or its value), not of the
+ *  definition: the next call to the same contract may still clear-sign. */
+const CALL_REFUSAL = /Inner call cannot be clear-signed|DELEGATECALL cannot be clear-signed|ERC-7730 inner definition does not match|ERC-7730 value does not match the call|recursion depth exceeds host limit/i
 
 /** The device (or hdwallet) refused the attached definition. A cancel is the user's answer, never a refusal. */
 export function isErc7730Refusal(error: unknown): boolean {
@@ -361,7 +409,10 @@ export async function signWithErc7730Fallback<M extends object, R>(
     console.warn(`${tag} the device refused the ERC-7730 definition (${reason}); signing without it on the normal path`)
     const { erc7730: refused, ...plain } = msg as any
     const id = String(refused?.primaryDefinitionId ?? '').toLowerCase()
-    if (id) refusedDefinitionIds.add(id.startsWith('0x') ? id : `0x${id}`)
+    if (id) {
+      const definitionId = id.startsWith('0x') ? id : `0x${id}`
+      refusedDefinitionIds.add(CALL_REFUSAL.test(reason) ? refusalKey(definitionId, (plain as { data?: unknown }).data) : definitionId)
+    }
     await beforeFallback?.(plain as M, reason)
     return sign(plain as M)
   }

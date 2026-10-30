@@ -2009,7 +2009,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
               if (signingInfo.erc7730Description && account !== signingInfo.from) {
                 const described = describeErc7730Call(signingInfo.erc7730!.definitions[0].envelope, {
                   chainId: signingInfo.chainId as number, to: preview.to, data: preview.data, value: preview.value,
-                })
+                }, signingInfo.erc7730!.definitions)
                 if (described) signingInfo.erc7730Description = described
                 else delete signingInfo.erc7730Description
               }

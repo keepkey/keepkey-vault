@@ -477,7 +477,7 @@ function Erc7730Section({ d }: { d: Erc7730Description }) {
 			{d.summary && d.summary !== d.intent && <Text fontSize="xs" color="kk.textPrimary" whiteSpace="pre-line">{d.summary}</Text>}
 			{d.protocol?.about && <Text fontSize="xs" color="kk.textSecondary">{d.protocol.about}</Text>}
 			{d.fields.map((f, i) => (
-				<Flex key={i} gap="3" w="100%" align="flex-start">
+				<Flex key={i} gap="3" w="100%" align="flex-start" pl={f.depth ? `${f.depth * 12}px` : undefined}>
 					<Text fontSize="2xs" color="kk.textMuted" flexShrink={0} minW="60px" pt="0.5">{f.label}</Text>
 					<Box flex="1">
 						{/* One device line per line, as the KeepKey shows it. */}

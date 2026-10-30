@@ -1954,8 +1954,10 @@ export interface Erc7730Description {
   /** The interpolated intent ("Stake 0.01 ETH"), when the definition has one. */
   summary?: string
   /** Values as the device shows them, one device line per "\n"; `note` is
-   *  this computer's own reading of a token the device does not know. */
-  fields: Array<{ label: string; value: string; note?: string }>
+   *  this computer's own reading of a token the device does not know.
+   *  `depth`: 1 or 2 inside an embedded call (7.17), whose "Inner action"
+   *  field gives its intent. */
+  fields: Array<{ label: string; value: string; note?: string; depth?: number }>
   protocol?: { name: string; url: string; about?: string }
   explorerUrl?: string
 }

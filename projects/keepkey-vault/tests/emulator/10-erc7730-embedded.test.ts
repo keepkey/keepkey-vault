@@ -11,8 +11,11 @@
  *      /v1/erc7730/definition) and the sign step (signWithErc7730Fallback, which
  *      answers the device's inner-definition requests from the same service),
  *      with AdvancedMode off.
- * The two signatures must match. A local HTTP server stands in for the
- * ClearSign worker and serves the fixture's TEST-root definitions.
+ * The two signatures must match, and every line of Desktop's card for the
+ * call (describeErc7730Call over the definitions Desktop attached, read with
+ * the fixture's test root) must appear, in order, on the device's screens.
+ * A local HTTP server stands in for the ClearSign worker and serves the
+ * fixture's TEST-root definitions.
  *
  * Talks to a kkemu binary over UDP only (no USB, no dylib): start it yourself
  * from a fresh run directory, with the fixture's test root, on a private port:
@@ -207,6 +210,7 @@ let advancedMode: boolean | undefined
 let mods: {
   prepare: typeof import('../../src/bun/evm-presign-report').prepareEvmTxSigningInfo
   resolver: typeof import('../../src/bun/erc7730-resolver')
+  describe: typeof import('../../src/bun/erc7730-describe').describeErc7730Call
 }
 
 async function setAdvancedMode(on: boolean) {
@@ -244,7 +248,25 @@ async function desktopSign(tx: FxTx) {
     (m: any) => wallet.ethSignTx(m),
     async (_plain, reason) => { fellBack = reason; await setAdvancedMode(true) },
   ))
-  return { result, attached: !!info.erc7730, needsBlindSigning: info.needsBlindSigning === true, fellBack }
+  // The card a production-signed definition gets, read here with the fixture's test root.
+  const card = info.erc7730 && mods.describe(info.erc7730.definitions[0].envelope,
+    { chainId: tx.chain_id, to: tx.to, data: tx.data, value: tx.value, from: address }, info.erc7730.definitions, fixture!.testRootPubkey)
+  return { result, attached: !!info.erc7730, needsBlindSigning: info.needsBlindSigning === true, fellBack, card }
+}
+
+/** Card lines missing from the device's screens, read in order (pages joined, wrapping ignored). */
+function cardNotOnDevice(card: { intent: string; fields: Array<{ label: string; value: string }> }, screens: Screen[]): string[] {
+  const squash = (t: string) => t.replace(/\s+/g, '')
+  const stream = squash(screens.map((s) => s.body).join(''))
+  const missing: string[] = []
+  let at = 0
+  const pieces = [card.intent, ...card.fields.flatMap((f) => f.label === 'Inner action' ? [f.value] : [`${f.label}:`, ...f.value.split('\n')])]
+  for (const piece of pieces) {
+    const i = stream.indexOf(squash(piece), at)
+    if (i < 0) missing.push(piece)
+    else at = i + squash(piece).length
+  }
+  return missing
 }
 
 const shown = (screens: Screen[]) => screens.map((s) => `${s.title} | ${s.body}`.replace(/\n/g, ' / '))
@@ -256,11 +278,11 @@ afterAll(async () => {
 })
 
 // What Desktop must do with each transaction on 7.17 (AdvancedMode off).
-const EXPECT: Record<string, { outcome: 'clear-signed' | 'fell-back'; innerDepths?: number[]; screen?: RegExp }> = {
+const EXPECT: Record<string, { outcome: 'clear-signed' | 'not-attached'; innerDepths?: number[]; screen?: RegExp }> = {
   safe_create: { outcome: 'clear-signed', innerDepths: [1], screen: /Setup Safe/ },
-  // setup()'s module DELEGATECALLs: 7.17 names it and refuses the definition;
-  // Desktop signs again on the normal path, as 7.16 would without one.
-  safe_create_l2_setup: { outcome: 'fell-back', innerDepths: [1], screen: /DELEGATECALL/ },
+  // setup()'s module DELEGATECALLs, which 7.17 refuses to clear-sign. Desktop
+  // sees it in the calldata and attaches nothing: the normal review, once.
+  safe_create_l2_setup: { outcome: 'not-attached', screen: /Ethereum Data Hash/ },
   safe_exec_transfer: { outcome: 'clear-signed', innerDepths: [1], screen: /NOT this wallet/ },
   safe_exec_native: { outcome: 'clear-signed' },
   safe_exec_self: { outcome: 'clear-signed', innerDepths: [1], screen: /Add signer/ },
@@ -279,6 +301,7 @@ describe.skipIf(!fixture)('ERC-7730 embedded calls through Desktop on a 7.17 emu
     mods = {
       prepare: (await import('../../src/bun/evm-presign-report')).prepareEvmTxSigningInfo,
       resolver: await import('../../src/bun/erc7730-resolver'),
+      describe: (await import('../../src/bun/erc7730-describe')).describeErc7730Call,
     }
     delegate = new UdpDelegate()
     const keyring = new core.Keyring()
@@ -314,13 +337,19 @@ describe.skipIf(!fixture)('ERC-7730 embedded calls through Desktop on a 7.17 emu
       expect(r.ok).toBe(true)
       expect(r.signature).toBe(blind.signature!)
       expect(r.signer).toBe(address)
-      expect(d.attached).toBe(true)
-      expect(d.needsBlindSigning).toBe(false)
+      expect(d.fellBack).toBeUndefined()
       if (want.outcome === 'clear-signed') {
-        expect(d.fellBack).toBeUndefined()
+        expect(d.attached).toBe(true)
+        expect(d.needsBlindSigning).toBe(false)
         expect(r.rec.screens.some((s) => /Verified by KeepKey/.test(`${s.title} ${s.body}`))).toBe(true)
+        // The card says what the device shows, line for line.
+        expect(d.card).toBeDefined()
+        for (const f of d.card!.fields) console.log(`    card: ${'  '.repeat(f.depth ?? 0)}${f.label} | ${f.value.replace(/\n/g, ' / ')}`)
+        expect(cardNotOnDevice(d.card!, r.rec.screens)).toEqual([])
       } else {
-        expect(d.fellBack).toBeDefined()
+        expect(d.attached).toBe(false)
+        expect(d.needsBlindSigning).toBe(true)
+        expect(r.rec.definitionRequests).toEqual([])
       }
       expect(depths).toEqual(want.innerDepths ?? [])
       if (want.screen) expect(shown(r.rec.screens).some((s) => want.screen!.test(s))).toBe(true)
