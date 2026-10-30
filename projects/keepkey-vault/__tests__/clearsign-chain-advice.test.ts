@@ -225,6 +225,21 @@ describe('durable nonce (System AdvanceNonceAccount)', () => {
     expect(text(unknown)).toContain('this computer could not check who can cancel it')
     expect(unknown.tier).toBe('red')
   })
+
+  // The browser extension's preview (/solana/decode-transaction) passes no
+  // `from`. The swap's userTransferAuthority comes from the same bytes as the
+  // nonce authority, so it cannot vouch that the user controls the nonce.
+  test('CONTROL: no signing account, and the swap names the nonce authority as its user', async () => {
+    const { fx, decoded } = await solana('jupiter-route.json')
+    const other = fx.accountKeys[1]
+    const forged = withAuthority(decoded, other)
+    forged.instructions = forged.instructions.map((i) => i.programId !== 'JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4' ? i
+      : { ...i, accounts: i.accounts.map((a) => a.label === 'userTransferAuthority' ? { ...a, pubkey: other } : a) })
+    expect(forged.instructions.some((i) => i.accounts.some((a) => a.label === 'userTransferAuthority' && a.pubkey === other))).toBe(true)
+    const r = assessSigningRisk({ ...solanaRequest(forged, other), from: undefined } as SigningRequestInfo)!
+    expect(text(r)).not.toContain('which your own account controls')
+    expect(text(r)).toContain(`high: Uses durable nonce account ${NONCE}. This transaction does not expire, and this computer could not check who can cancel it.`)
+  })
 })
 
 describe('WalletConnect reads the same accounts as REST', () => {

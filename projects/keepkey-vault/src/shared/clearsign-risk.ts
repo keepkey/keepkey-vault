@@ -187,9 +187,10 @@ function jupiterOutput(ix: SolanaTxDecodedInstruction): string | undefined {
 }
 
 /** Plain sentence for an instruction KeepKey fully understands, or null.
- *  `from` is the signing account; `swapOutputs` the accounts a Jupiter swap
- *  in this transaction pays out to. */
-function describeKnown(ix: SolanaTxDecodedInstruction, tokenAccounts: TokenAccounts, from?: string, swapOutputs = new Set<string>()): RiskReason | null {
+ *  `from` is the signing account, or the user a Jupiter route names when the
+ *  request has none; `signer` only the request's own signing account.
+ *  `swapOutputs` the accounts a Jupiter swap in this transaction pays out to. */
+function describeKnown(ix: SolanaTxDecodedInstruction, tokenAccounts: TokenAccounts, from?: string, swapOutputs = new Set<string>(), signer?: string): RiskReason | null {
   const name = ix.instructionName
   if (ix.programName === 'System Program' && name === 'transfer') {
     const to = acct(ix, 'destination')
@@ -204,13 +205,15 @@ function describeKnown(ix: SolanaTxDecodedInstruction, tokenAccounts: TokenAccou
   }
   // A durable-nonce transaction does not expire: it stays valid until it is
   // sent or its nonce is advanced, which only the nonce authority can do.
+  // Checked against the signer only: a route's user is named by the same
+  // bytes that name the nonce authority.
   if (ix.programName === 'System Program' && name === 'advanceNonceAccount') {
     const nonce = acct(ix, 'nonceAccount') ?? 'a nonce account', authority = acct(ix, 'nonceAuthority')
-    if (from && authority === from) {
+    if (signer && authority === signer) {
       return { level: 'low', text: `Uses durable nonce account ${shortAddr(nonce)}, which your own account controls: this transaction does not expire until it is sent or you advance that nonce.` }
     }
-    return { level: 'high', text: from && authority
-      ? `Uses durable nonce account ${nonce}, controlled by ${authority}, which is NOT the account signing this (${from}). This transaction does not expire, and only that account can cancel it.`
+    return { level: 'high', text: signer && authority
+      ? `Uses durable nonce account ${nonce}, controlled by ${authority}, which is NOT the account signing this (${signer}). This transaction does not expire, and only that account can cancel it.`
       : `Uses durable nonce account ${nonce}. This transaction does not expire, and this computer could not check who can cancel it.` }
   }
   if (ix.programName === 'Stake Program' && name === 'delegateStake') {
@@ -1358,7 +1361,7 @@ export function assessSigningRisk(req: SigningRequestInfo): RiskAssessment | nul
         jupiterSwap(ix, d, req, add)
         if (ix.note) add('medium', `This Jupiter step has bytes this computer cannot account for (${ix.note}), so it is not decoded in full.`)
       } else if (ix.status === 'known') {
-        const r = describeKnown(ix, d.tokenAccounts, me, swapOutputs)
+        const r = describeKnown(ix, d.tokenAccounts, me, swapOutputs, req.from)
         if (r) reasons.push(r)
         // Token-2022 lets a token's issuer add a transfer fee or a hook that
         // runs on every transfer; nothing here reads those settings.
