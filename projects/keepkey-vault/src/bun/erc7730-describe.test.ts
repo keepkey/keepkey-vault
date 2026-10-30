@@ -110,21 +110,20 @@ describe('token and coin names follow the connected firmware version', () => {
     } finally { spy.mockRestore() }
   }
 
-  test('WETH: named on 7.16, an unknown token on 7.17 (its table no longer has it), as each device shows it', () => {
-    expect(card('GPv2 1 0x9f85b1a56c1c', '7.16.0').slice(0, 2)).toEqual([
-      { label: 'Sell up to', value: '5.001759563392312596 WETH' },
-      { label: 'Receive at least', value: '11101.213961 USDT' },
-    ])
-    expect(card('GPv2 1 0x9f85b1a56c1c', '7.17.0').slice(0, 2)).toEqual([
-      { label: 'Sell up to', value: '5001759563392312596\nunknown token\n0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2', note: 'This computer reads it as 5.001759563392312596 WETH.' },
-      { label: 'Receive at least', value: '11101.213961 USDT' },
-    ])
+  test('WETH: named on 7.16 and on 7.17, as each device shows it (alpha #1031 restored it)', () => {
+    for (const fw of ['7.16.0', '7.17.0']) {
+      expect(card('GPv2 1 0x9f85b1a56c1c', fw).slice(0, 2)).toEqual([
+        { label: 'Sell up to', value: '5.001759563392312596 WETH' },
+        { label: 'Receive at least', value: '11101.213961 USDT' },
+      ])
+    }
   })
 
   test('Polygon coin: MATIC on 7.16, POL on 7.17', () => {
     const alias = (fw: string) => card('GPv2 137 0x65f2ecc3bb52', fw).find((f) => f.label === 'Receive at least')!.value
     expect(alias('7.16.0')).toBe('Signer native alias:\n0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE\n11.719118964126220107 MATIC')
-    expect(alias('7.17.0')).toBe('Signer native alias:\n0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE\n11.719118964126220107 POL')
+    // 7.17 shows the 0xEeee..EEeE stand-in as the coin itself (erc7730_field.c is_native_placeholder).
+    expect(alias('7.17.0')).toBe('11.719118964126220107 POL')
   })
 
   test('the TEST root is never trusted outside that stand-in', () => {
