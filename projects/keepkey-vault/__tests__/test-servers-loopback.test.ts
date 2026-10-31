@@ -9,19 +9,20 @@
 import { afterAll, describe, expect, mock, test } from 'bun:test'
 import { EventEmitter } from 'node:events'
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { networkInterfaces, tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 mock.module('@keepkey/hdwallet-keepkey-nodehid', () => ({ HIDKeepKeyAdapter: class {} }))
 const dir = mkdtempSync(join(tmpdir(), 'vault-test-servers-loopback-'))
 mock.module('electrobun/bun', () => ({ Utils: { paths: { userData: dir } } }))
-const { startRestApi } = await import('../src/bun/rest-api')
+const { startRestApi, restApiLoopbackHosts } = await import('../src/bun/rest-api')
 
 afterAll(() => rmSync(dir, { recursive: true, force: true }))
 
 const LOOPBACK = '127.0.0.1'
 
-function restServer(port: number) {
+/** `app` starts it the way Desktop does: no hostname. */
+function restServer(port: number, app = false) {
   const engine: any = Object.assign(new EventEmitter(), {
     isEmulator: false, isPassphraseWallet: false, currentSeedEthAddress: null, wallet: {},
     getDeviceState: () => ({ state: 'disconnected' }), getCachedFeaturesSnapshot: () => undefined,
@@ -30,7 +31,7 @@ function restServer(port: number) {
   return startRestApi(engine, auth, port, {
     onApiLog: () => {}, onPairRequest: () => {}, getVersion: () => 'test',
     onSigningRequest: async () => ({ approved: false }) as any, onSigningDismissed: () => {},
-  } as any, LOOPBACK)
+  } as any, ...(app ? [] : [LOOPBACK]))
 }
 
 /** The text of the call starting at `at`, through its closing parenthesis. */
@@ -47,7 +48,7 @@ describe('test servers listen where the tests call them', () => {
   test('the REST API binds the address it is given', async () => {
     const server = restServer(0)
     try {
-      expect(server.hostname).toBe(LOOPBACK)
+      expect(server.hostnames).toEqual([LOOPBACK])
       const res = await fetch(`http://${LOOPBACK}:${server.port}/api/v1/health/fast`)
       expect(await res.json()).toMatchObject({ status: 'ok' })
     } finally { server.stop(true) }
@@ -81,5 +82,83 @@ describe('test servers listen where the tests call them', () => {
     }
     expect(calls).toBeGreaterThan(0) // the scan is not empty
     expect(unbound).toEqual([])
+  })
+})
+
+/** Another process holding `host`:`port` (0 = any free port), the way a local
+ *  program would squat on Desktop's port. Resolves null if it could not bind. */
+async function otherProcessHolds(host: string, port = 0) {
+  const script = `try { const s = Bun.serve({ hostname: ${JSON.stringify(host)}, port: ${port}, fetch: () => new Response('impostor') }); console.log(s.port) } catch { console.log('refused'); process.exit(0) }; setInterval(() => {}, 1000)`
+  const child = Bun.spawn([process.execPath, '-e', script], { stdout: 'pipe', stderr: 'ignore' })
+  const reader = child.stdout.getReader()
+  let out = ''
+  while (!out.includes('\n')) {
+    const { value, done } = await reader.read()
+    if (done) break
+    out += new TextDecoder().decode(value)
+  }
+  reader.releaseLock()
+  const line = out.trim()
+  if (!/^\d+$/.test(line)) { child.kill(); return null }
+  return { port: Number(line), stop: () => child.kill() }
+}
+
+async function answers(url: string): Promise<string | null> {
+  try { return await (await fetch(url, { signal: AbortSignal.timeout(3000) })).text() } catch { return null }
+}
+
+const hasIpv6Loopback = restApiLoopbackHosts().includes('::1')
+const lanAddress = Object.values(networkInterfaces()).flat()
+  .find(a => a && !a.internal && a.family === 'IPv4')?.address
+
+describe('Desktop REST API listens on loopback only', () => {
+  test('binds 127.0.0.1 and ::1 (where the host has it), never the wildcard', () => {
+    const server = restServer(0, true)
+    try {
+      expect(server.hostnames).toEqual(hasIpv6Loopback ? ['127.0.0.1', '::1'] : ['127.0.0.1'])
+    } finally { server.stop(true) }
+  })
+
+  test('a port another process holds on 127.0.0.1 makes it refuse to start', async () => {
+    const other = await otherProcessHolds('127.0.0.1')
+    expect(other).not.toBeNull()
+    try {
+      expect(() => restServer(other!.port, true)).toThrow(/already in use by another program/)
+      expect(await answers(`http://127.0.0.1:${other!.port}/`)).toBe('impostor')
+      if (hasIpv6Loopback) expect(await answers(`http://[::1]:${other!.port}/api/v1/health/fast`)).toBeNull()
+    } finally { other!.stop() }
+  })
+
+  test.skipIf(!hasIpv6Loopback)('a port another process holds on ::1 makes it refuse to start, and it lets 127.0.0.1 go', async () => {
+    const other = await otherProcessHolds('::1')
+    expect(other).not.toBeNull()
+    try {
+      expect(() => restServer(other!.port, true)).toThrow(/already in use by another program/)
+      expect(await answers(`http://[::1]:${other!.port}/`)).toBe('impostor')
+      expect(await answers(`http://127.0.0.1:${other!.port}/api/v1/health/fast`)).toBeNull()
+    } finally { other!.stop() }
+  })
+
+  test('localhost, 127.0.0.1 and ::1 all reach it, and no other process can take them after it starts', async () => {
+    const server = restServer(0, true)
+    try {
+      const urls = ['localhost', '127.0.0.1', ...(hasIpv6Loopback ? ['[::1]'] : [])]
+      for (const host of urls) {
+        const body = await answers(`http://${host}:${server.port}/api/v1/health/fast`)
+        expect(body && JSON.parse(body)).toMatchObject({ status: 'ok' })
+      }
+      for (const host of server.hostnames) {
+        const squatter = await otherProcessHolds(host, server.port)
+        squatter?.stop()
+        expect(squatter).toBeNull()
+      }
+    } finally { server.stop(true) }
+  })
+
+  test.skipIf(!lanAddress)('a LAN address does not reach it', async () => {
+    const server = restServer(0, true)
+    try {
+      expect(await answers(`http://${lanAddress}:${server.port}/api/v1/health/fast`)).toBeNull()
+    } finally { server.stop(true) }
   })
 })

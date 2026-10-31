@@ -12,6 +12,7 @@ import { applyTronSigningPreview } from './tron-preview'
 import { deviceErrorMessage } from '../shared/device-error'
 import type { ClearSignEvent } from '../shared/types'
 import { createHash } from 'crypto'
+import { networkInterfaces } from 'os'
 import { decodeEIP712 } from './eip712-decoder'
 import { addSeaportCreatorFee } from './seaport-creator-fee'
 import { attachErc7730TypedDefinition, evmPriorityFee, evmQuantity, normalizeEvmChainId, recognizedTypedDataSpender, applyTypedDataSigningGate } from './evm-signing-preview'
@@ -1136,10 +1137,27 @@ const ROUTE_TO_CHAIN: Record<string, string> = {
   solana: 'SOL', tron: 'TRX', ton: 'TON', hive: 'HIVE',
 }
 
-/** `hostname` unset keeps Bun's default bind (the app). Tests pass '127.0.0.1':
- *  a port-0 server on the wildcard can share its port with another process's
- *  127.0.0.1 listener on macOS, which then answers the test's requests. */
-export function startRestApi(engine: EngineController, auth: AuthStore, port = 1646, callbacks?: RestApiCallbacks, hostname?: string) {
+/** The addresses the app's REST API listens on: loopback only, both families.
+ *  Clients call http://localhost:1646, which macOS resolves to ::1 first, so a
+ *  ::1 left free could be taken by another program that then answers them. A
+ *  host without IPv6 loopback has no ::1 to bind or to be called on. */
+export function restApiLoopbackHosts(): string[] {
+  const hasIpv6Loopback = Object.values(networkInterfaces()).some(list => list?.some(a => a.internal && a.address === '::1'))
+  return hasIpv6Loopback ? ['127.0.0.1', '::1'] : ['127.0.0.1']
+}
+
+export interface RestApiServer {
+  port: number
+  hostnames: string[]
+  stop(closeActiveConnections?: boolean): void
+}
+
+/** `hostname` unset is the app: every loopback address, never the wildcard. On
+ *  the wildcard, macOS lets another program bind 127.0.0.1:1646 or [::1]:1646
+ *  too (before or after us) and that program answers the requests clients send
+ *  there. Throws if any address is already held: Desktop never shares its port.
+ *  Tests pass '127.0.0.1'. */
+export function startRestApi(engine: EngineController, auth: AuthStore, port = 1646, callbacks?: RestApiCallbacks, hostname?: string): RestApiServer {
   // Split-flow shielded sends: the sidecar's /broadcast reply carries no reliable
   // txid ("" when a node already had the tx), so the activity row takes the
   // authoritative one from the matching /finalize. The sidecar holds a single
@@ -1191,9 +1209,9 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
   }
 
   const ZCASH_SEND_ROUTES = new Set(['/api/zcash/shielded/send', '/api/zcash/shielded/shield', '/api/zcash/shielded/deshield'])
-  const server = Bun.serve({
-    port,
-    ...(hostname ? { hostname } : {}),
+  const listen = (host: string, onPort: number) => Bun.serve({
+    port: onPort,
+    hostname: host,
     maxRequestBodySize: 1024 * 1024, // 1 MB max (addresses/signing payloads are small)
     // Keep Bun's default idle timeout for the server as a whole (so idle/
     // unauthenticated connections still get reaped) — but lift it per-request
@@ -5247,6 +5265,21 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
     },
   })
 
-  console.log(`[REST] API server listening on http://localhost:${port}`)
-  return server
+  const servers: ReturnType<typeof listen>[] = []
+  for (const host of hostname ? [hostname] : restApiLoopbackHosts()) {
+    try {
+      // A port-0 first listener picks the port; the others share it.
+      servers.push(listen(host, servers[0]?.port ?? port))
+    } catch (err) {
+      for (const s of servers) s.stop(true)
+      throw new Error(`REST API port ${servers[0]?.port ?? port} on ${host} is already in use by another program`, { cause: err })
+    }
+  }
+  const hostnames = servers.map(s => s.hostname ?? '')
+  console.log(`[REST] API server listening on ${hostnames.join(', ')} port ${servers[0].port}`)
+  return {
+    port: servers[0].port ?? port,
+    hostnames,
+    stop: (closeActiveConnections?: boolean) => { for (const s of servers) s.stop(closeActiveConnections) },
+  }
 }

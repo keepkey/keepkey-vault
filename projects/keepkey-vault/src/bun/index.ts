@@ -2054,7 +2054,20 @@ async function applyRestApiState() {
 			restServer = startRestApi(engine, auth, REST_API_PORT, restCallbacks)
 			console.log(`[Vault] REST API started on port ${REST_API_PORT}`)
 		} catch (err) {
+			// Fail closed: another program holds 127.0.0.1 or ::1 on our port and
+			// would answer the extension and apps in Desktop's place.
 			console.error(`[Vault] FATAL: failed to bind REST API on port ${REST_API_PORT}:`, err)
+			try {
+				await Utils.showMessageBox({
+					type: 'error',
+					title: 'KeepKey Desktop',
+					message: `KeepKey Desktop can't start: port ${REST_API_PORT} is in use`,
+					detail: `Another program on this computer is using port ${REST_API_PORT}. The KeepKey browser extension and apps talk to KeepKey Desktop on that port, so Desktop will not share it. Quit the other program, or the other copy of KeepKey Desktop, then open KeepKey Desktop again.`,
+					buttons: ['Quit'],
+				})
+			} catch (dialogErr) {
+				console.error('[Vault] Could not show the port-in-use dialog:', dialogErr)
+			}
 			process.exit(1)
 		}
 	} else if (!restApiEnabled && restServer) {
