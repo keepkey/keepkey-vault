@@ -15,6 +15,7 @@ import { describe, expect, test } from 'bun:test'
 import { decodeEIP712 } from '../src/bun/eip712-decoder'
 import { buildTypedDataReport } from '../src/bun/evm-presign-report'
 import { addSeaportCreatorFee } from '../src/bun/seaport-creator-fee'
+import { addSeaportItemContracts } from '../src/bun/seaport-item-contracts'
 import { assessSigningRisk } from '../src/shared/clearsign-risk'
 import { typedDataRows } from '../src/shared/typedDataRows'
 import type { SigningRequestInfo } from '../src/shared/types'
@@ -350,5 +351,123 @@ describe('ClearSign report for typed data', () => {
     const report = buildTypedDataReport(req)!
     expect(report.protectionLevel).toBe('P1')
     expect(report.headline).not.toBe('KeepKey ClearSign ready')
+  })
+})
+
+// What each Seaport item's token contract says it is, asked before approval
+// (ERC-165 supportsInterface, ERC-20 decimals). Seaport moves an item by its
+// type whatever the contract is: an ERC-721 item naming an ERC-20 moves "ID"
+// units of it (review r1 on firmware PR #1035: USDe on mainnet, USDC on Base,
+// below the device's 2^64 ID warning), and an ERC-20 item naming an NFT
+// collection moves the NFT whose ID is the amount.
+describe('Seaport item contracts (supportsInterface, decimals)', () => {
+  const { address, typedData } = seaport.body
+  const NFT = typedData.message.offer[0].token
+  const USDE = '0x4c9EDD5852cd905f086C759E8383e09bff1E68B3'
+  const BASE_USDC = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913'
+  const EOA = '0x2222222222222222222222222222222222222222'
+  const SUPPORTS_721 = '0x01ffc9a780ac58cd00000000000000000000000000000000000000000000000000000000'
+  const SUPPORTS_1155 = '0x01ffc9a7d9b67a2600000000000000000000000000000000000000000000000000000000'
+  const DECIMALS = '0x313ce567'
+  const word = (n: number) => '0x' + n.toString(16).padStart(64, '0')
+  // Each contract's answers, as the chain gives them: an NFT collection says
+  // ERC-721 and has no decimals(); an ERC-20 has no supportsInterface (revert)
+  // and answers decimals(); an address with no code answers "0x".
+  const contracts: Record<string, Record<string, string | Error>> = {
+    [NFT.toLowerCase()]: { [SUPPORTS_721]: word(1), [SUPPORTS_1155]: word(0), [DECIMALS]: new Error('execution reverted') },
+    [USDE.toLowerCase()]: { [SUPPORTS_721]: new Error('execution reverted'), [SUPPORTS_1155]: new Error('execution reverted'), [DECIMALS]: word(18) },
+    [BASE_USDC.toLowerCase()]: { [SUPPORTS_721]: new Error('execution reverted'), [SUPPORTS_1155]: new Error('execution reverted'), [DECIMALS]: word(6) },
+    [EOA.toLowerCase()]: { [SUPPORTS_721]: '0x', [SUPPORTS_1155]: '0x', [DECIMALS]: '0x' },
+  }
+  const calls: string[] = []
+  const chain = async (_chainId: number, to: string, data: string) => {
+    calls.push(`${to.toLowerCase()} ${data}`)
+    const answer = contracts[to.toLowerCase()]?.[data]
+    if (answer === undefined) throw new Error(`unexpected call ${to} ${data}`)
+    if (answer instanceof Error) throw answer
+    return answer
+  }
+  const asked = async (td: any, call = chain) => {
+    const req = typedRequest(td, address, '7.17.0')
+    await addSeaportItemContracts(req, call)
+    return req
+  }
+  const withOffer = (item: any, chainId = 1) => {
+    const td = clone(typedData)
+    td.domain.chainId = chainId
+    td.message.offer = [{ ...td.message.offer[0], ...item }]
+    return td
+  }
+
+  test('a normal listing: its NFT says ERC-721, the card stays calm', async () => {
+    calls.length = 0
+    const req = await asked(typedData)
+    expect(calls.sort()).toEqual([DECIMALS, SUPPORTS_1155, SUPPORTS_721].map((d) => `${NFT.toLowerCase()} ${d}`).sort())
+    expect(req.typedDataDecoded?.seaportItems?.[0]).toMatchObject({ side: 'offer', itemType: 2, erc721: true, erc1155: false })
+    const risk = assessSigningRisk(req)!
+    expect(risk.tier).toBe('green')
+    expect(texts(req)).not.toContain('answers like an ERC-20')
+    expect(texts(req)).not.toContain('could not ask the contracts')
+  })
+
+  test('review r1: an ERC-721 item naming USDe (10,000 USDe as ID 10^22) is red', async () => {
+    const req = await asked(withOffer({ token: USDE, identifierOrCriteria: '10000000000000000000000' }))
+    expect(assessSigningRisk(req)!.tier).toBe('red')
+    expect(texts(req)).toContain(`Offer 1 is an ERC-721 NFT item, but ${USDE} answers like an ERC-20 token (decimals 18): Seaport would move the NFT ID as that many token units.`)
+    // Never also read as a normal listing.
+    expect(texts(req)).not.toContain('Seaport listing: sells')
+    expect(texts(req)).toContain('This is a marketplace order.')
+  })
+
+  test('review r1: an ERC-721 item naming USDC on Base (ID 10^10, under 2^64) is red', async () => {
+    const req = await asked(withOffer({ token: BASE_USDC, identifierOrCriteria: '10000000000' }, 8453))
+    expect(assessSigningRisk(req)!.tier).toBe('red')
+    expect(texts(req)).toContain(`Offer 1 is an ERC-721 NFT item, but ${BASE_USDC} answers like an ERC-20 token (decimals 6)`)
+  })
+
+  test('an NFT item naming an address with no contract is red', async () => {
+    const req = await asked(withOffer({ token: EOA }))
+    expect(assessSigningRisk(req)!.tier).toBe('red')
+    expect(texts(req)).toContain(`Offer 1 is an ERC-721 NFT item, but ${EOA} does not say it is an ERC-721 contract.`)
+  })
+
+  test('an ERC-1155 item naming an ERC-721 collection is red', async () => {
+    const req = await asked(withOffer({ itemType: 3, amount: undefined }))
+    expect(assessSigningRisk(req)!.tier).toBe('red')
+    expect(texts(req)).toContain(`Offer 1 is an ERC-1155 NFT item, but ${NFT} does not say it is an ERC-1155 contract.`)
+  })
+
+  test('an ERC-20 item naming an NFT collection is red (moves the NFT whose ID is the amount)', async () => {
+    const req = await asked(withOffer({ itemType: 1, identifierOrCriteria: '0', startAmount: '5318', endAmount: '5318' }))
+    expect(assessSigningRisk(req)!.level).toBe('critical')
+    expect(texts(req)).toContain(`Offer 1 is an ERC-20 token item, but ${NFT} is an NFT collection: Seaport would move the NFT whose ID is the amount.`)
+  })
+
+  test('the contracts could not be asked: the card says so and invents nothing', async () => {
+    const req = await asked(typedData, async () => { throw new Error('Pioneer does not expose eth_call (server has no EvmReadRpc)') })
+    expect(req.typedDataDecoded?.seaportItems?.[0]).toMatchObject({ unchecked: true })
+    expect(req.typedDataDecoded?.seaportItems?.[0].erc721).toBeUndefined()
+    expect(texts(req)).toContain('This computer could not ask the contracts in this order whether they are NFTs or tokens, so it could not check them.')
+    // The same attack, unasked: no red line for it either way (only what is known).
+    const attack = await asked(withOffer({ token: USDE }), async () => { throw new Error('timeout') })
+    expect(texts(attack)).not.toContain('answers like an ERC-20')
+  })
+
+  test('CONTROL: not asked at all (no read made), nothing is said about the contracts', () => {
+    const req = typedRequest(withOffer({ token: USDE }), address, '7.17.0')
+    expect(texts(req)).not.toContain('could not ask the contracts')
+    expect(texts(req)).not.toContain('answers like an ERC-20')
+  })
+
+  test('a Seaport BulkOrder is red, with a plain reason', () => {
+    const td = clone(typedData)
+    td.types.BulkOrder = [{ name: 'tree', type: 'OrderComponents[2]' }]
+    td.primaryType = 'BulkOrder'
+    td.message = { tree: [typedData.message, typedData.message] }
+    const req = typedRequest(td, address, '7.17.0')
+    expect(assessSigningRisk(req)!.tier).toBe('red')
+    expect(texts(req)).toContain('This is a Seaport bulk order: one signature for a whole tree of orders. Your KeepKey does not check who is paid in a bulk order')
+    // CONTROL: the plain order has no such line.
+    expect(texts(typedRequest(typedData, address, '7.17.0'))).not.toContain('bulk order')
   })
 })

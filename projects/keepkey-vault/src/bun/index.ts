@@ -1559,6 +1559,7 @@ function getOrCreateWcManager(): WalletConnectManager {
 			// Typed data gets a report level once the firmware version is known.
 			if (info.method === '/eth/sign-typed-data' && !info.clearSignReport) {
 				await (await import('./seaport-creator-fee')).addSeaportCreatorFee(info)
+				await (await import('./seaport-item-contracts')).addSeaportItemContracts(info)
 				info.clearSignReport = (await import('./evm-presign-report')).buildTypedDataReport(info)
 			}
 			try { rpc.send['signing-request'](info) } catch { /* webview not ready */ }

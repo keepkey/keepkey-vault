@@ -1132,6 +1132,37 @@ function safeGasRefund(d: EIP712DecodedInfo, f: (label: string) => EIP712Decoded
  *  here says what the device shows of it. */
 interface TypedDoc { knownCalm: boolean; unverified: boolean; opaque: boolean; safeRecognition?: Recognition; hostRead?: boolean }
 
+/** What each Seaport item's token contract said it is (seaport-item-contracts.ts).
+ *  Seaport moves an item by its type, whatever the contract is: an ERC-721
+ *  item naming an ERC-20 moves "ID" units of it with transferFrom, and an
+ *  ERC-20 item naming an NFT collection moves the NFT whose ID is the amount.
+ *  Red when an item's type and its contract disagree; true then. */
+function seaportItemContracts(d: EIP712DecodedInfo, add: (l: RiskLevel, t: string) => void): boolean {
+  let red = false
+  let unchecked = false
+  for (const item of d.seaportItems ?? []) {
+    if (item.itemType < 1 || item.itemType > 5) continue
+    if (item.unchecked) { unchecked = true; continue }
+    if (item.erc721 === undefined || item.erc1155 === undefined) continue // not asked
+    const name = `${item.side === 'offer' ? 'Offer' : 'Payment'} ${item.index + 1}`
+    if (item.itemType === 1) {
+      if (!item.erc721 && !item.erc1155) continue
+      red = true
+      add('critical', `${name} is an ERC-20 token item, but ${item.token} is an NFT collection: Seaport would move the NFT whose ID is the amount.`)
+      continue
+    }
+    const erc721 = item.itemType === 2 || item.itemType === 4
+    if (erc721 ? item.erc721 : item.erc1155) continue
+    red = true
+    const standard = erc721 ? 'ERC-721' : 'ERC-1155'
+    add('critical', item.decimals !== undefined
+      ? `${name} is an ${standard} NFT item, but ${item.token} answers like an ERC-20 token (decimals ${item.decimals})${erc721 ? ': Seaport would move the NFT ID as that many token units' : ''}.`
+      : `${name} is an ${standard} NFT item, but ${item.token} does not say it is an ${standard} contract.`)
+  }
+  if (unchecked) add('medium', 'This computer could not ask the contracts in this order whether they are NFTs or tokens, so it could not check them.')
+  return red
+}
+
 /** `signerSafe`: the document is signed by this Safe (as req.from) through a
  *  SafeMessage, not by the KeepKey account itself. */
 function describeTypedDoc(req: SigningRequestInfo, d: EIP712DecodedInfo, add: (l: RiskLevel, t: string) => void, signerSafe = false): TypedDoc {
@@ -1238,6 +1269,8 @@ function describeTypedDoc(req: SigningRequestInfo, d: EIP712DecodedInfo, add: (l
     if (!/^(0x)?0*$/.test(String(f('Fee')?.raw ?? '0'))) add('low', `Fee: ${f('Fee')!.value}, taken from what you sell.`)
     knownCalm = own
   } else if (/^(OrderComponents|BulkOrder)$/.test(d.primaryType)) {
+    if (d.primaryType === 'BulkOrder') add('critical', 'This is a Seaport bulk order: one signature for a whole tree of orders. Your KeepKey does not check who is paid in a bulk order, and this computer cannot read the orders inside it, so a phishing site can use one to hide an order that gives your NFTs or tokens away.')
+    const contractRed = d.isKnownType && seaportItemContracts(d, add)
     const listing = d.isKnownType ? d.seaportListing : undefined
     const from = req.from?.toLowerCase()
     const others = listing?.payments.filter((p) => p.role === 'other') ?? []
@@ -1260,7 +1293,7 @@ function describeTypedDoc(req: SigningRequestInfo, d: EIP712DecodedInfo, add: (l
     // A normal listing: the signer sells its own NFTs, is paid a real amount in
     // a currency this computer names, and every other payee is a marketplace
     // fee address it knows or the collection's own creator fee.
-    if (listing && seller && own.length > 0 && others.length === unchecked.length && named && !dust) {
+    if (listing && seller && own.length > 0 && others.length === unchecked.length && named && !dust && !contractRed) {
       const fees = listing.payments.filter((p) => p.role === 'opensea-fee')
       const creator = listing.payments.filter((p) => p.role === 'creator-fee')
       add('medium', `Seaport listing: sells ${listing.items.join(', ')} for ${listing.total}. You receive ${own.map((p) => p.amount).join(' + ')}${fees.length ? `, and ${fees.map((p) => p.amount).join(' + ')} goes to OpenSea's fee address` : ''}${creator.length ? `, and ${creator.map((p) => p.amount).join(' + ')} goes to the creator fee address the collection names on chain (${creator[0].recipient})` : ''}. Anyone can buy at this price until ${listing.endTime}; nothing moves until a buyer pays it.`)

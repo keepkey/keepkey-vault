@@ -1042,6 +1042,21 @@ export interface EIP712DecodedInfo {
     endTime: string
     creatorFeeUnchecked?: boolean
   }
+  /** Every item of a decoded Seaport 1.6 order, offer then consideration, and
+   *  what its token contract says it is, asked before approval
+   *  (seaport-item-contracts.ts): ERC-165 supportsInterface for ERC-721 and
+   *  ERC-1155, and ERC-20 decimals(). The facts are unset until asked;
+   *  `unchecked` when the contract could not be asked. */
+  seaportItems?: Array<{
+    side: 'offer' | 'consideration'
+    index: number
+    itemType: number
+    token: string
+    erc721?: boolean
+    erc1155?: boolean
+    decimals?: number
+    unchecked?: boolean
+  }>
 }
 
 /**
