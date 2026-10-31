@@ -1,0 +1,76 @@
+{
+ "_source": "Pioneer GetTokenDecimals (GET https://api.keepkey.info/api/v1/evm/token/decimals/{networkId}/{contractAddress}), live answers 2026-10-31. api.keepkey.info has no EvmReadRpc (its swagger lists none), so this is the only contract read Desktop has there by default. pioneer-client 11.1.1 (swagger-client) throws on a non-2xx answer with .status and .response.body.",
+ "answers": [
+  {
+   "label": "stETH",
+   "networkId": "eip155:1",
+   "contractAddress": "0xae7ab96520de3a18e5e111b5eaab095312d7fe84",
+   "status": 200,
+   "body": {
+    "decimals": 18
+   }
+  },
+  {
+   "label": "USDe",
+   "networkId": "eip155:1",
+   "contractAddress": "0x4c9edd5852cd905f086c759e8383e09bff1e68b3",
+   "status": 200,
+   "body": {
+    "decimals": 18
+   }
+  },
+  {
+   "label": "USDC on Base",
+   "networkId": "eip155:8453",
+   "contractAddress": "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+   "status": 200,
+   "body": {
+    "decimals": 6
+   }
+  },
+  {
+   "label": "GUSD",
+   "networkId": "eip155:1",
+   "contractAddress": "0x056fd409e1d7a124bd7017459dfea2f387b6d5cd",
+   "status": 200,
+   "body": {
+    "decimals": 2
+   }
+  },
+  {
+   "label": "the listed NFT (seaport-opensea-listing-mainnet.json)",
+   "networkId": "eip155:1",
+   "contractAddress": "0x387c41b0b2f1128de44db1bcf8baad085f26392c",
+   "status": 404,
+   "body": {
+    "success": false,
+    "message": "Contract 0x387c41b0b2f1128de44db1bcf8baad085f26392c not found on network eip155:1. The token may not be deployed on this chain.",
+    "code": "CONTRACT_NOT_FOUND",
+    "networkId": "eip155:1",
+    "contractAddress": "0x387c41b0b2f1128de44db1bcf8baad085f26392c"
+   }
+  },
+  {
+   "label": "BAYC",
+   "networkId": "eip155:1",
+   "contractAddress": "0xbc4ca0eda7647a8ab7c2061c2e118a18a936f13d",
+   "status": 404,
+   "body": {
+    "success": false,
+    "message": "Contract 0xbc4ca0eda7647a8ab7c2061c2e118a18a936f13d not found on network eip155:1. The token may not be deployed on this chain.",
+    "code": "CONTRACT_NOT_FOUND",
+    "networkId": "eip155:1",
+    "contractAddress": "0xbc4ca0eda7647a8ab7c2061c2e118a18a936f13d"
+   }
+  },
+  {
+   "label": "Decentraland LAND",
+   "networkId": "eip155:1",
+   "contractAddress": "0xf87e31492faf9a91b02ee0deaad50d51d56d5d4d",
+   "status": 200,
+   "body": {
+    "decimals": 0
+   }
+  }
+ ]
+}

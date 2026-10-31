@@ -15,6 +15,7 @@ import { createHash } from 'crypto'
 import { networkInterfaces } from 'os'
 import { decodeEIP712 } from './eip712-decoder'
 import { addSeaportCreatorFee } from './seaport-creator-fee'
+import { addSeaportItemContracts } from './seaport-item-contracts'
 import { attachErc7730TypedDefinition, evmPriorityFee, evmQuantity, normalizeEvmChainId, recognizedTypedDataSpender, applyTypedDataSigningGate } from './evm-signing-preview'
 import { buildEvmReportForTx, buildTypedDataReport, evmSigningVerdict, prepareEvmTxSigningInfo, withoutErc7730Description } from './evm-presign-report'
 import { describeErc7730Call } from './erc7730-describe'
@@ -1749,6 +1750,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
               if (preview.typedData) {
                 signingInfo.typedDataDecoded = decodeEIP712(preview.typedData, preview.address)
                 await addSeaportCreatorFee(signingInfo)
+                await addSeaportItemContracts(signingInfo)
                 signingInfo.recognizedSpender = recognizedTypedDataSpender(signingInfo.typedDataDecoded, signingInfo.chainId)
                 // Same gate as WalletConnect eth_signTypedData_v4.
                 applyTypedDataSigningGate(signingInfo, preview.typedData, engine.getDeviceState().firmwareVersion)

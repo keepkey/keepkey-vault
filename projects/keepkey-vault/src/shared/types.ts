@@ -1042,6 +1042,29 @@ export interface EIP712DecodedInfo {
     endTime: string
     creatorFeeUnchecked?: boolean
   }
+  /** Every item of a decoded Seaport 1.6 order, offer then consideration, and
+   *  what its token contract says it is, asked before approval
+   *  (seaport-item-contracts.ts): ERC-165 supportsInterface for ERC-721 and
+   *  ERC-1155, and ERC-20 decimals(). The facts are unset until asked;
+   *  `unchecked` when the contract could not be asked. */
+  seaportItems?: Array<{
+    side: 'offer' | 'consideration'
+    index: number
+    itemType: number
+    token: string
+    erc721?: boolean
+    erc1155?: boolean
+    decimals?: number
+    /** Only ERC-20 decimals() could be asked (Pioneer's GetTokenDecimals):
+     *  erc721/erc1155 are unknown; `decimals` unset = no decimals() answer. */
+    decimalsOnly?: boolean
+    unchecked?: boolean
+  }>
+  /** The last screen a 7.17 KeepKey with capability 30 shows for this order
+   *  when the KeepKey-certified Seaport definition is attached
+   *  (seaport-settlement.ts, the firmware's rules): WARNING and its lines,
+   *  or "Order summary" (warning false). Unset when not predicted. */
+  seaportDeviceScreen?: { warning: boolean; lines: string[] }
 }
 
 /**
