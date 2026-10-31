@@ -228,6 +228,7 @@ process.on('unhandledRejection', (reason) => {
 import { EngineController, withTimeout } from "./engine-controller"
 import { runUsbDiagnostic as runUsbDiagnosticProbe } from "./windows-usb-probe"
 import { startRestApi, clearFeaturesCache, setUiActive, uiHeartbeat, type RestApiCallbacks } from "./rest-api"
+import { portAnswersLikeDesktop, startRestApiOrReport } from "./rest-api-startup"
 import { signSolanaWireTransaction } from "./solana-signing"
 import { AuthStore } from "./auth"
 import { ensurePioneerQueryKeyRegistered, getPioneer, getPioneerApiBase, resetPioneer, setPioneerOffline, DEFAULT_API_BASE, getQueryKey as getPioneerQueryKey } from "./pioneer"
@@ -2031,31 +2032,21 @@ const restCallbacks: RestApiCallbacks = {
 	},
 }
 
-/** Check if a port is already in use by trying to connect to it */
-async function isPortInUse(port: number): Promise<boolean> {
-	try {
-		const resp = await fetch(`http://localhost:${port}/api/v1/health/fast`, { signal: AbortSignal.timeout(2000) })
-		return resp.ok
-	} catch {
-		return false
-	}
-}
-
 /** Start or stop the REST API server based on the persisted setting */
-async function applyRestApiState() {
+async function applyRestApiState(when: 'startup' | 'settings') {
 	if (restApiEnabled && !restServer) {
-		// Check if another instance is already bound to the port
-		const inUse = await isPortInUse(REST_API_PORT)
-		if (inUse) {
-			console.error(`[Vault] FATAL: port ${REST_API_PORT} is already in use by another Vault instance. Exiting.`)
-			process.exit(1)
-		}
-		try {
-			restServer = startRestApi(engine, auth, REST_API_PORT, restCallbacks)
+		restServer = await startRestApiOrReport(REST_API_PORT, when, {
+			start: () => startRestApi(engine, auth, REST_API_PORT, restCallbacks),
+			answersLikeDesktop: () => portAnswersLikeDesktop(REST_API_PORT),
+			showError: (dialog) => Utils.showMessageBox({ type: 'error', title: 'KeepKey Desktop', ...dialog }),
+			exit: (code) => process.exit(code),
+		})
+		if (restServer) {
 			console.log(`[Vault] REST API started on port ${REST_API_PORT}`)
-		} catch (err) {
-			console.error(`[Vault] FATAL: failed to bind REST API on port ${REST_API_PORT}:`, err)
-			process.exit(1)
+		} else {
+			// Settings only (startup has quit): the port is taken, so the REST API stays off.
+			restApiEnabled = false
+			setSetting('rest_api_enabled', '0')
 		}
 	} else if (!restApiEnabled && restServer) {
 		restServer.stop()
@@ -7693,7 +7684,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			setRestApiEnabled: async (params) => {
 				restApiEnabled = params.enabled
 				setSetting('rest_api_enabled', params.enabled ? '1' : '0')
-				await applyRestApiState()
+				await applyRestApiState('settings')
 				return getAppSettings()
 			},
 			setPioneerApiBase: async (params) => {
@@ -10815,7 +10806,7 @@ perf('window created, starting deferred init')
 deferredInit()
 auth.reloadPairings()
 loadSettings()
-await applyRestApiState()
+await applyRestApiState('startup')
 if (!restApiEnabled) console.log('[Vault] REST API disabled by user setting')
 perf('REST API applied, starting engine')
 engine.setAlphaFirmware(alphaFirmware)
