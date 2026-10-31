@@ -9,7 +9,39 @@ permissions:
   contents: read
 
 jobs:
+  # Desktop releases consume the immutable artifact recorded in the manifest.
+  # Rebuilding from Vault's firmware source pin is a separate certification
+  # operation; that pin may use a different ClearSign root than the artifact.
+  verify-release:
+    if: github.event_name == 'push'
+    runs-on: macos-15
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Read certified artifact identity
+        id: source
+        run: |
+          node --input-type=module <<'JS' >> "$GITHUB_OUTPUT"
+          import { readFileSync } from 'node:fs';
+          const { source } = JSON.parse(readFileSync('projects/keepkey-vault/emulator-bundle/manifest.json', 'utf8'));
+          console.log(`run-id=${source.runId}`);
+          console.log(`artifact-name=${source.artifactName}`);
+          JS
+      - uses: actions/download-artifact@v4
+        with:
+          name: ${{ steps.source.outputs.artifact-name }}
+          path: .certified-emulator-release
+          github-token: ${{ github.token }}
+          repository: keepkey/keepkey-vault
+          run-id: ${{ steps.source.outputs.run-id }}
+      - name: Verify certified release libraries
+        run: scripts/stage-certified-emulator.sh .certified-emulator-release
+
   build:
+    if: github.event_name == 'workflow_dispatch'
     runs-on: macos-15
     timeout-minutes: 60
     steps:
