@@ -1298,6 +1298,9 @@ function describeTypedDoc(req: SigningRequestInfo, d: EIP712DecodedInfo, add: (l
     // is never calmer than a device WARNING.
     const screen = d.isKnownType && req.erc7730 && d.primaryType === 'OrderComponents' ? d.seaportDeviceScreen : undefined
     if (screen?.warning) add('high', `Your KeepKey will show WARNING: ${screen.lines.join(' ')}`)
+    // The prediction follows the firmware's chain-1 lists only: say so
+    // elsewhere rather than say nothing.
+    if (d.isKnownType && d.primaryType === 'OrderComponents' && Number(d.domain.chainId) !== 1) add('low', `This computer does not predict your KeepKey's last screen for this order ("Order summary" or WARNING) on chain ${d.domain.chainId}: it predicts it only on Ethereum (chain 1).`)
     const listing = d.isKnownType ? d.seaportListing : undefined
     const from = req.from?.toLowerCase()
     const others = listing?.payments.filter((p) => p.role === 'other') ?? []

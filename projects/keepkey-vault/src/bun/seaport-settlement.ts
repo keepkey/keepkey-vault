@@ -37,8 +37,12 @@ const TABLE = (firmwareTokens717 as unknown as { symbols: Record<string, [string
 /** erc7730_settle.c wrapped_native[]. */
 const WRAPPED_NATIVE = new Set(['1:0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2'])
 /** erc7730_settle.c hashed_id_collections[]: ENS, Unstoppable Domains (UNS,
- *  CNS), Decentraland LAND and Names, Sorare, Rarible's shared ERC-721. */
-const HASHED_ID = new Set([
+ *  CNS), Decentraland LAND and Names, Sorare, Rarible's shared ERC-721; since
+ *  review r4, the eight ERC-721s with the most chain-1 Seaport 1.6 listings
+ *  moving IDs of 2^64 or more over blocks 26263701-26313700, each read on
+ *  chain. Other such collections (one deployment per collection: Feral File,
+ *  more Zer0 Name Service, Kolectiv, Grados, Wilder Land, ...) still warn. */
+export const HASHED_ID = new Set([
   '1:0x57f1887a8bf19b14fc0df6fd9b2acc9af147ea85',
   '1:0x049aba7510f45ba5b64ea9e658e342f904db358d',
   '1:0xd1e5b0ff1287aa9f9a268759062e4ab08b9dacbe',
@@ -46,6 +50,14 @@ const HASHED_ID = new Set([
   '1:0x2a187453064356c898cae034eaed119e1663acb8',
   '1:0x629a673a8242c2ac4b7b8c5d8735fbeac21a6205',
   '1:0xf6793da657495ffeff9ee6350824910abc21356c',
+  '1:0x20262e3433306a4ff250a64d20a8e0f09b2c7f68', // ENS Commemorative
+  '1:0x0bfa9aff76fd91756f837ab47e11bd99e04c15bd', // Unetwork Operator Software License
+  '1:0x572e33ffa523865791ab1c26b42a86ac244df784', // Gucci
+  '1:0x51bd5948cf84a1041d2720f56ded5e173396fc95', // Zer0 Name Service
+  '1:0x05f81f870cbca79e9171f22886b58b5597a603aa', // Zer0 Name Service
+  '1:0x741512954cb6f8e5d3cd9321c07462b05b7cc8d5', // OKX AI NFT
+  '1:0xc2e9678a71e50e5aed036e00e9c5caeb1ac5987d', // Zero Name Service
+  '1:0xc9154424b823b10579895ccbe442d41b9abd96ed', // Rarible
 ])
 /** erc7730_settle.c never_nft[]: ERC-20s the table does not list. */
 const NEVER_NFT: Record<string, string> = {
@@ -135,7 +147,9 @@ export function seaportDeviceScreen(typedData: any, signer: string | undefined):
     if (k <= ERC20) readable = native === (k === NATIVE) && token !== EEEE
     const item: Item = { kind: k, token, id: k <= ERC20 ? 0n : id, amount: start < end ? start : end }
     const max = start > end ? start : end
-    if (readable && k === ERC721 && id >= 1n << 64n && !coinTicker(token) && !HASHED_ID.has(`${chainId}:${token}`)) largeNftId = true
+    // The firmware's table answers 0xEeee as ETH on chain 1 (EthTestToken), so
+    // the 2^64 line skips it there, as it skips any coin: its own line says it.
+    if (readable && k === ERC721 && id >= 1n << 64n && token !== EEEE && !coinTicker(token) && !HASHED_ID.has(`${chainId}:${token}`)) largeNftId = true
     if (to !== undefined) {
       if (to.toLowerCase() === me) {
         receivedAny = true
