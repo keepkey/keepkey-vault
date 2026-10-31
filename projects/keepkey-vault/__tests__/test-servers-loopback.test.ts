@@ -258,9 +258,14 @@ describe('Desktop never loses its REST port silently', () => {
     const older = await otherProcessHolds(null, 0, 'health')
     expect(older).not.toBeNull()
     try {
-      // The bind alone does not catch it: macOS lets loopback be bound beside the wildcard.
-      const bindOnly = restServer(older!.port, true)
-      bindOnly.stop(true)
+      // macOS allows loopback beside a wildcard listener; Linux refuses it.
+      // Both must still detect the older Desktop before attempting the bind.
+      if (process.platform === 'darwin') {
+        const bindOnly = restServer(older!.port, true)
+        bindOnly.stop(true)
+      } else {
+        expect(() => restServer(older!.port, true)).toThrow()
+      }
       const r = await startAsDesktop(older!.port, 'startup')
       expect(r.server).toBeNull()
       expect(r.binds).toBe(0)
