@@ -1498,6 +1498,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
   }, [open, resumeSwap])
 
   // ── Derived values ────────────────────────────────────────────────
+  const isZcashSource = fromAsset?.chainId === 'zcash' && !fromAsset.contractAddress
   /* The entry fromBalance will actually READ, so confidence is judged against
    * the same object the amount comes from. Judging only `balances` while
    * fromBalance fell through to the `balance` prop meant a degraded prop
@@ -4441,11 +4442,27 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                     disabled={busy}
                   />
 
+                  {isZcashSource && (
+                    <Box mt="3" p="3" bg="rgba(233,196,106,0.06)" border="1px solid" borderColor="rgba(233,196,106,0.18)" borderRadius="lg" role="note">
+                      <Text fontSize="xs" fontWeight="600" color="kk.gold">
+                        {t("zcashTransparentOnlyTitle")}
+                      </Text>
+                      <Text fontSize="xs" color="kk.textSecondary" mt="1" lineHeight="1.5">
+                        {t("zcashUnshieldBeforeSwap")}
+                      </Text>
+                      {!fromBalanceUnverified && fromBalance !== null && Number(fromBalance) === 0 && (
+                        <Text fontSize="xs" color="kk.textSecondary" mt="1" lineHeight="1.5">
+                          {t("zcashZeroTransparentBalance")}
+                        </Text>
+                      )}
+                    </Box>
+                  )}
+
                   {fromAsset && (
                     <Box mt="3" p="2.5" bg="rgba(0,0,0,0.2)" borderRadius="lg" border="1px solid" borderColor="rgba(255,255,255,0.06)">
                       <Flex justify="space-between" align="center" mb="2">
                         <VStack gap="0" align="flex-start">
-                          <Text fontSize="9px" color="kk.textMuted" fontWeight="600" textTransform="uppercase" letterSpacing="0.05em">{t("available")}</Text>
+                          <Text fontSize="9px" color="kk.textMuted" fontWeight="600" textTransform="uppercase" letterSpacing="0.05em">{isZcashSource ? t("zcashTransparentAvailable") : t("available")}</Text>
                           <Text fontSize="xs" fontFamily="mono" color="kk.textSecondary" fontWeight="600">
                             {fromBalance ? `${formatBalance(fromBalance)} ${fromAsset.symbol}` : '\u2014'}
                           </Text>
