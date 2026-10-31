@@ -1140,11 +1140,25 @@ interface TypedDoc { knownCalm: boolean; unverified: boolean; opaque: boolean; s
 function seaportItemContracts(d: EIP712DecodedInfo, add: (l: RiskLevel, t: string) => void): boolean {
   let red = false
   let unchecked = false
+  let decimalsOnly = false
   for (const item of d.seaportItems ?? []) {
     if (item.itemType < 1 || item.itemType > 5) continue
+    const name = `${item.side === 'offer' ? 'Offer' : 'Payment'} ${item.index + 1}`
+    if (!item.unchecked && item.decimalsOnly) {
+      // Only ERC-20 decimals() was asked (Pioneer): a token answers it, an NFT
+      // collection does not, or answers 0. It cannot tell an ERC-20 item
+      // naming an NFT collection, so that is not checked.
+      decimalsOnly = true
+      const token = item.decimals !== undefined && item.decimals > 0
+      if (item.itemType === 1) { if (!token) unchecked = true; continue }
+      if (!token) continue
+      red = true
+      const erc721 = item.itemType === 2 || item.itemType === 4
+      add('critical', `${name} is an ${erc721 ? 'ERC-721' : 'ERC-1155'} NFT item, but ${item.token} answers like an ERC-20 token (decimals ${item.decimals})${erc721 ? ': Seaport would move the NFT ID as that many token units' : ''}.`)
+      continue
+    }
     // Not asked (no read was made) is not checked either: say so.
     if (item.unchecked || item.erc721 === undefined || item.erc1155 === undefined) { unchecked = true; continue }
-    const name = `${item.side === 'offer' ? 'Offer' : 'Payment'} ${item.index + 1}`
     if (item.itemType === 1) {
       if (!item.erc721 && !item.erc1155) continue
       red = true
@@ -1167,6 +1181,7 @@ function seaportItemContracts(d: EIP712DecodedInfo, add: (l: RiskLevel, t: strin
       : `${name} is an ${standard} NFT item, but ${item.token} does not say it is an ${standard} contract.`)
   }
   if (unchecked) add('medium', 'This computer could not ask the contracts in this order whether they are NFTs or tokens, so it could not check them.')
+  else if (decimalsOnly) add('low', 'This computer asked the contracts in this order only for ERC-20 decimals(), not which NFT standard they follow.')
   return red
 }
 
@@ -1278,6 +1293,11 @@ function describeTypedDoc(req: SigningRequestInfo, d: EIP712DecodedInfo, add: (l
   } else if (/^(OrderComponents|BulkOrder)$/.test(d.primaryType)) {
     if (d.primaryType === 'BulkOrder') add('critical', 'This is a Seaport bulk order: one signature for a whole tree of orders. Your KeepKey does not check who is paid in a bulk order, and this computer cannot read the orders inside it, so a phishing site can use one to hide an order that gives your NFTs or tokens away.')
     const contractRed = d.isKnownType && seaportItemContracts(d, add)
+    // With the KeepKey-certified definition attached, the device ends with
+    // its own verdict (seaport-settlement.ts, the firmware's rules): the card
+    // is never calmer than a device WARNING.
+    const screen = d.isKnownType && req.erc7730 && d.primaryType === 'OrderComponents' ? d.seaportDeviceScreen : undefined
+    if (screen?.warning) add('high', `Your KeepKey will show WARNING: ${screen.lines.join(' ')}`)
     const listing = d.isKnownType ? d.seaportListing : undefined
     const from = req.from?.toLowerCase()
     const others = listing?.payments.filter((p) => p.role === 'other') ?? []

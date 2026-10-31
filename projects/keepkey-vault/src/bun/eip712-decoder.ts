@@ -11,6 +11,7 @@ import { evmChainLabel } from '../shared/chains'
 import { evmTokenIdentity } from '../shared/evm-contract-identity'
 import { amountWithDecimals } from '../shared/erc20Preview'
 import { OPENSEA_CONDUIT_KEY, OPENSEA_FEE_RECIPIENT, SEAPORT_1_6, SEAPORT_1_6_CHAINS } from '../shared/nft-marketplaces'
+import { seaportDeviceScreen } from './seaport-settlement'
 
 // ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -686,6 +687,7 @@ export function decodeEIP712(typedData: any, signer?: string): EIP712DecodedInfo
     if (desc.match(typedData)) {
       const listing = desc.seaportListing?.(typedData)
       const items = desc.seaportItems?.(typedData)
+      const deviceScreen = items ? seaportDeviceScreen(typedData, signer) : undefined
       return {
         operationName: desc.operationName,
         domain: {
@@ -701,6 +703,7 @@ export function decodeEIP712(typedData: any, signer?: string): EIP712DecodedInfo
         hashes,
         ...(listing ? { seaportListing: listing } : {}),
         ...(items ? { seaportItems: items } : {}),
+        ...(deviceScreen ? { seaportDeviceScreen: deviceScreen } : {}),
       }
     }
   }

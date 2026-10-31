@@ -1055,8 +1055,16 @@ export interface EIP712DecodedInfo {
     erc721?: boolean
     erc1155?: boolean
     decimals?: number
+    /** Only ERC-20 decimals() could be asked (Pioneer's GetTokenDecimals):
+     *  erc721/erc1155 are unknown; `decimals` unset = no decimals() answer. */
+    decimalsOnly?: boolean
     unchecked?: boolean
   }>
+  /** The last screen a 7.17 KeepKey with capability 30 shows for this order
+   *  when the KeepKey-certified Seaport definition is attached
+   *  (seaport-settlement.ts, the firmware's rules): WARNING and its lines,
+   *  or "Order summary" (warning false). Unset when not predicted. */
+  seaportDeviceScreen?: { warning: boolean; lines: string[] }
 }
 
 /**

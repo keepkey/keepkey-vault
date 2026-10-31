@@ -15,7 +15,7 @@ import { describe, expect, test } from 'bun:test'
 import { decodeEIP712 } from '../src/bun/eip712-decoder'
 import { buildTypedDataReport } from '../src/bun/evm-presign-report'
 import { addSeaportCreatorFee } from '../src/bun/seaport-creator-fee'
-import { addSeaportItemContracts } from '../src/bun/seaport-item-contracts'
+import { addSeaportItemContracts, pioneerDecimals } from '../src/bun/seaport-item-contracts'
 import { assessSigningRisk } from '../src/shared/clearsign-risk'
 import { typedDataRows } from '../src/shared/typedDataRows'
 import type { SigningRequestInfo } from '../src/shared/types'
@@ -24,6 +24,7 @@ import seaport from './fixtures/typed-data/seaport-opensea-listing-mainnet.json'
 import creatorFee from './fixtures/typed-data/seaport-opensea-listing-creator-fee-mainnet.json'
 import safeMultiSend from './fixtures/typed-data/safetx-multisend-mainnet.json'
 import nftApproval from './fixtures/nft/setapprovalforall-opensea-conduit-pudgy.json'
+import pioneerAnswers from './fixtures/pioneer/token-decimals-20261031.json'
 
 const clone = <T>(v: T): T => JSON.parse(JSON.stringify(v))
 const OTHER = '0x1111111111111111111111111111111111111111'
@@ -387,9 +388,11 @@ describe('Seaport item contracts (supportsInterface, decimals)', () => {
     if (answer instanceof Error) throw answer
     return answer
   }
-  const asked = async (td: any, call = chain) => {
+  // No decimals fallback unless a test passes one.
+  const noFallback = async () => { throw new Error('no fallback in this test') }
+  const asked = async (td: any, call = chain, decimals: (c: number, t: string) => Promise<number | null> = noFallback) => {
     const req = typedRequest(td, address, '7.17.0')
-    await addSeaportItemContracts(req, call)
+    await addSeaportItemContracts(req, call, decimals)
     return req
   }
   const withOffer = (item: any, chainId = 1) => {
@@ -480,6 +483,72 @@ describe('Seaport item contracts (supportsInterface, decimals)', () => {
     const req = await asked(withOffer({ token: KITTIES, identifierOrCriteria: '1' }))
     expect(assessSigningRisk(req)!.tier).toBe('red')
     expect(texts(req)).toContain(`Offer 1 is an ERC-721 NFT item, but ${KITTIES} does not say it is an ERC-721 contract.`)
+  })
+
+  // Review r3 (M1): production Pioneer (api.keepkey.info) has no EvmReadRpc,
+  // so supportsInterface throws there and every item read "unchecked" on the
+  // default path. Pioneer's GetTokenDecimals works live: an NFT item whose
+  // contract answers decimals() > 0 is red. Real answers
+  // (fixtures/pioneer/token-decimals-20261031.json), replayed in
+  // pioneer-client's shape (a non-2xx answer throws with .status and
+  // .response.body).
+  const noEvmReadRpc = async () => { throw new Error('PIONEER_UNSUPPORTED eth_call (server has no EvmReadRpc)') }
+  const livePioneer = {
+    GetTokenDecimals: async ({ networkId, contractAddress }: { networkId: string; contractAddress: string }) => {
+      const answer = pioneerAnswers.answers.find((a) => a.networkId === networkId && a.contractAddress === contractAddress)
+      if (!answer) throw new Error(`no recorded answer for ${networkId} ${contractAddress}`)
+      if (answer.status === 200) return { data: answer.body }
+      throw Object.assign(new Error('Not Found'), { status: answer.status, statusCode: answer.status, response: { body: answer.body } })
+    },
+  }
+  const production = pioneerDecimals(livePioneer)
+
+  test('review r3: on production Pioneer a normal listing is checked by decimals and stays green', async () => {
+    const req = await asked(typedData, noEvmReadRpc, production)
+    expect(req.typedDataDecoded?.seaportItems?.[0]).toMatchObject({ itemType: 2, decimalsOnly: true })
+    expect(req.typedDataDecoded?.seaportItems?.[0].decimals).toBeUndefined()
+    expect(assessSigningRisk(req)!.tier).toBe('green')
+    expect(texts(req)).not.toContain('could not ask the contracts')
+    expect(texts(req)).toContain('This computer asked the contracts in this order only for ERC-20 decimals(), not which NFT standard they follow.')
+  })
+
+  test('review r3: on production Pioneer an ERC-721 item naming USDe or stETH is red', async () => {
+    for (const [token, decimals] of [[USDE, 18], ['0xae7ab96520DE3A18E5e111B5EaAb095312D7fE84', 18]] as const) {
+      const req = await asked(withOffer({ token, identifierOrCriteria: '10000000000000000000' }), noEvmReadRpc, production)
+      expect(assessSigningRisk(req)!.tier).toBe('red')
+      expect(texts(req)).toContain(`Offer 1 is an ERC-721 NFT item, but ${token} answers like an ERC-20 token (decimals ${decimals}): Seaport would move the NFT ID as that many token units.`)
+      expect(texts(req)).not.toContain('Seaport listing: sells')
+    }
+    // ERC-1155, and USDC on Base (ID 10^10, under the device's 2^64).
+    const erc1155 = await asked(withOffer({ itemType: 3, token: USDE }), noEvmReadRpc, production)
+    expect(texts(erc1155)).toContain(`Offer 1 is an ERC-1155 NFT item, but ${USDE} answers like an ERC-20 token (decimals 18).`)
+    const base = await asked(withOffer({ token: BASE_USDC, identifierOrCriteria: '10000000000' }, 8453), noEvmReadRpc, production)
+    expect(texts(base)).toContain(`Offer 1 is an ERC-721 NFT item, but ${BASE_USDC} answers like an ERC-20 token (decimals 6)`)
+  })
+
+  test('review r3: CONTROLS on production Pioneer: decimals 0 (Decentraland LAND) and none (BAYC) are not tokens', async () => {
+    for (const token of ['0xF87E31492Faf9A91B02Ee0dEAAd50d51d56D5d4d', '0xBC4CA0EdA7647A8aB7C2061c2E118A18a936f13D']) {
+      const req = await asked(withOffer({ token }), noEvmReadRpc, production)
+      expect(texts(req)).not.toContain('answers like an ERC-20')
+      expect(texts(req)).not.toContain('could not ask the contracts')
+    }
+  })
+
+  test('review r3: decimals alone cannot clear an ERC-20 item: one naming BAYC is not checked, and says so', async () => {
+    const req = await asked(withOffer({ itemType: 1, token: '0xBC4CA0EdA7647A8aB7C2061c2E118A18a936f13D', identifierOrCriteria: '0', startAmount: '5318', endAmount: '5318' }), noEvmReadRpc, production)
+    expect(texts(req)).toContain('This computer could not ask the contracts in this order whether they are NFTs or tokens, so it could not check them.')
+    expect(texts(req)).not.toContain('is an NFT collection')
+  })
+
+  test('review r3: neither read works (Pioneer errors too): could not be checked, nothing invented', async () => {
+    const down = pioneerDecimals({ GetTokenDecimals: async () => { throw Object.assign(new Error('Internal Server Error'), { status: 500, response: { body: { success: false } } }) } })
+    const req = await asked(withOffer({ token: USDE }), noEvmReadRpc, down)
+    expect(req.typedDataDecoded?.seaportItems?.[0]).toMatchObject({ unchecked: true })
+    expect(texts(req)).toContain('This computer could not ask the contracts in this order whether they are NFTs or tokens, so it could not check them.')
+    expect(texts(req)).not.toContain('answers like an ERC-20')
+    // A 404 that is not Pioneer's CONTRACT_NOT_FOUND is no answer either.
+    const lost = pioneerDecimals({ GetTokenDecimals: async () => { throw Object.assign(new Error('Not Found'), { status: 404, response: { body: 'no route' } }) } })
+    expect((await asked(withOffer({ token: USDE }), noEvmReadRpc, lost)).typedDataDecoded?.seaportItems?.[0]).toMatchObject({ unchecked: true })
   })
 
   test('a Seaport BulkOrder is red, with a plain reason', () => {
