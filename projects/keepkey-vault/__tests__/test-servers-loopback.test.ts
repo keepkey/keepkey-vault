@@ -16,6 +16,7 @@ mock.module('@keepkey/hdwallet-keepkey-nodehid', () => ({ HIDKeepKeyAdapter: cla
 const dir = mkdtempSync(join(tmpdir(), 'vault-test-servers-loopback-'))
 mock.module('electrobun/bun', () => ({ Utils: { paths: { userData: dir } } }))
 const { startRestApi, restApiLoopbackHosts } = await import('../src/bun/rest-api')
+const { portAnswersLikeDesktop, startRestApiOrReport } = await import('../src/bun/rest-api-startup')
 
 afterAll(() => rmSync(dir, { recursive: true, force: true }))
 
@@ -86,9 +87,16 @@ describe('test servers listen where the tests call them', () => {
 })
 
 /** Another process holding `host`:`port` (0 = any free port), the way a local
- *  program would squat on Desktop's port. Resolves null if it could not bind. */
-async function otherProcessHolds(host: string, port = 0) {
-  const script = `try { const s = Bun.serve({ hostname: ${JSON.stringify(host)}, port: ${port}, fetch: () => new Response('impostor') }); console.log(s.port) } catch { console.log('refused'); process.exit(0) }; setInterval(() => {}, 1000)`
+ *  program would squat on Desktop's port. `host` null is the wildcard. It
+ *  answers every request with 'impostor', with Desktop's health reply
+ *  ('health'), or accepts connections and never answers ('silent').
+ *  Resolves null if it could not bind. */
+async function otherProcessHolds(host: string | null, port = 0, reply: 'impostor' | 'health' | 'silent' = 'impostor') {
+  const at = `${host === null ? '' : `hostname: ${JSON.stringify(host)}, `}port: ${port}`
+  const listen = reply === 'silent'
+    ? `Bun.listen({ ${at}, socket: { data() {} } })`
+    : `Bun.serve({ ${at}, fetch: () => ${reply === 'health' ? `Response.json({ status: 'ok', uptime: 1 })` : `new Response('impostor')`} })`
+  const script = `try { const s = ${listen}; console.log(s.port) } catch { console.log('refused'); process.exit(0) }; setInterval(() => {}, 1000)`
   const child = Bun.spawn([process.execPath, '-e', script], { stdout: 'pipe', stderr: 'ignore' })
   const reader = child.stdout.getReader()
   let out = ''
@@ -160,5 +168,133 @@ describe('Desktop REST API listens on loopback only', () => {
     try {
       expect(await answers(`http://${lanAddress}:${server.port}/api/v1/health/fast`)).toBeNull()
     } finally { server.stop(true) }
+  })
+})
+
+/** Desktop's REST start (src/bun/index.ts applyRestApiState), with the dialog
+ *  and the process exit recorded instead of shown and taken. */
+async function startAsDesktop(port: number, when: 'startup' | 'settings') {
+  const shown: { message: string; detail: string; buttons: string[] }[] = []
+  const exits: number[] = []
+  let binds = 0
+  const server = await startRestApiOrReport(port, when, {
+    start: () => { binds++; return restServer(port, true) },
+    answersLikeDesktop: () => portAnswersLikeDesktop(port),
+    showError: async dialog => { shown.push(dialog) },
+    exit: code => { exits.push(code) },
+  })
+  return { server, shown, exits, binds }
+}
+
+const PRETENDING = /If KeepKey Desktop is already open, use that window\. If it is not, another program is pretending to be KeepKey Desktop/
+const ANOTHER_PROGRAM = /^Another program on this computer is using port \d+\./
+
+describe('Desktop never loses its REST port silently', () => {
+  test('a free port starts the REST API with no dialog', async () => {
+    const r = await startAsDesktop(0, 'startup')
+    try {
+      expect(r.server).not.toBeNull()
+      expect(r.shown).toEqual([])
+      expect(r.exits).toEqual([])
+    } finally { r.server?.stop(true) }
+  })
+
+  test('startup: a squatter answering Desktop\'s health route gets a dialog, then Desktop quits', async () => {
+    const other = await otherProcessHolds('127.0.0.1', 0, 'health')
+    expect(other).not.toBeNull()
+    try {
+      const r = await startAsDesktop(other!.port, 'startup')
+      expect(r.server).toBeNull()
+      expect(r.binds).toBe(0)
+      expect(r.shown).toHaveLength(1)
+      expect(r.shown[0].message).toBe(`KeepKey Desktop can't start: port ${other!.port} is in use`)
+      expect(r.shown[0].detail).toMatch(PRETENDING)
+      expect(r.shown[0].buttons).toEqual(['Quit'])
+      expect(r.exits).toEqual([1])
+    } finally { other!.stop() }
+  })
+
+  test('startup: a squatter answering 200 to anything else gets the another-program dialog, then Desktop quits', async () => {
+    const other = await otherProcessHolds('127.0.0.1')
+    expect(other).not.toBeNull()
+    try {
+      const r = await startAsDesktop(other!.port, 'startup')
+      expect(r.server).toBeNull()
+      expect(r.binds).toBe(1)
+      expect(r.shown).toHaveLength(1)
+      expect(r.shown[0].detail).toMatch(ANOTHER_PROGRAM)
+      expect(r.exits).toEqual([1])
+      expect(await answers(`http://127.0.0.1:${other!.port}/`)).toBe('impostor')
+    } finally { other!.stop() }
+  })
+
+  test('startup: a squatter that never answers gets the another-program dialog, then Desktop quits', async () => {
+    const other = await otherProcessHolds('127.0.0.1', 0, 'silent')
+    expect(other).not.toBeNull()
+    try {
+      const r = await startAsDesktop(other!.port, 'startup')
+      expect(r.server).toBeNull()
+      expect(r.binds).toBe(1)
+      expect(r.shown).toHaveLength(1)
+      expect(r.shown[0].detail).toMatch(ANOTHER_PROGRAM)
+      expect(r.exits).toEqual([1])
+    } finally { other!.stop() }
+  })
+
+  test('startup: a second Desktop quits with a dialog and leaves the first one serving', async () => {
+    const first = restServer(0, true)
+    try {
+      const r = await startAsDesktop(first.port, 'startup')
+      expect(r.server).toBeNull()
+      expect(r.shown).toHaveLength(1)
+      expect(r.shown[0].detail).toMatch(PRETENDING)
+      expect(r.exits).toEqual([1])
+      const body = await answers(`http://127.0.0.1:${first.port}/api/v1/health/fast`)
+      expect(body && JSON.parse(body)).toMatchObject({ status: 'ok' })
+    } finally { first.stop(true) }
+  })
+
+  test('startup: a second Desktop also quits when the first is an older one on the wildcard', async () => {
+    const older = await otherProcessHolds(null, 0, 'health')
+    expect(older).not.toBeNull()
+    try {
+      // The bind alone does not catch it: macOS lets loopback be bound beside the wildcard.
+      const bindOnly = restServer(older!.port, true)
+      bindOnly.stop(true)
+      const r = await startAsDesktop(older!.port, 'startup')
+      expect(r.server).toBeNull()
+      expect(r.binds).toBe(0)
+      expect(r.shown).toHaveLength(1)
+      expect(r.exits).toEqual([1])
+    } finally { older!.stop() }
+  })
+
+  test('Settings: turning the REST API on beside a squatter shows the error, keeps Desktop running, and leaves REST off', async () => {
+    for (const reply of ['health', 'impostor'] as const) {
+      const other = await otherProcessHolds('127.0.0.1', 0, reply)
+      expect(other).not.toBeNull()
+      try {
+        const r = await startAsDesktop(other!.port, 'settings')
+        expect(r.server).toBeNull()
+        expect(r.shown).toHaveLength(1)
+        expect(r.shown[0].message).toBe(`The REST API could not be turned on: port ${other!.port} is in use`)
+        expect(r.shown[0].detail).toMatch(reply === 'health' ? PRETENDING : ANOTHER_PROGRAM)
+        expect(r.shown[0].detail).toEndWith('The REST API stays off.')
+        expect(r.shown[0].buttons).toEqual(['OK'])
+        expect(r.exits).toEqual([])
+      } finally { other!.stop() }
+    }
+  })
+
+  test('the app starts and toggles the REST API through startRestApiOrReport', () => {
+    const src = readFileSync(join(import.meta.dir, '../src/bun/index.ts'), 'utf8')
+    const at = src.indexOf('async function applyRestApiState(')
+    const body = src.slice(at, src.indexOf('\n}\n', at))
+    expect(body).toContain('startRestApiOrReport(REST_API_PORT, when,')
+    expect(body).not.toContain('process.exit(1)')
+    expect(body).toContain("setSetting('rest_api_enabled', '0')")
+    expect(src).not.toContain('isPortInUse')
+    expect([...src.matchAll(/applyRestApiState\(([^)]*)\)/g)].map(m => m[1]).sort())
+      .toEqual(["'settings'", "'startup'", "when: 'startup' | 'settings'"])
   })
 })
