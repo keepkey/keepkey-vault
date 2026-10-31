@@ -1557,8 +1557,8 @@ function getOrCreateWcManager(): WalletConnectManager {
 			await attachSafeCallPreviews(info)
 			await attachSafeMessagePreimage(info)
 			// Typed data gets a report level once the firmware version is known.
+			// The order's contract facts were read in walletconnect.ts signTypedData.
 			if (info.method === '/eth/sign-typed-data' && !info.clearSignReport) {
-				await (await import('./seaport-creator-fee')).addSeaportCreatorFee(info)
 				info.clearSignReport = (await import('./evm-presign-report')).buildTypedDataReport(info)
 			}
 			try { rpc.send['signing-request'](info) } catch { /* webview not ready */ }

@@ -11,6 +11,7 @@ import { evmChainLabel } from '../shared/chains'
 import { evmTokenIdentity } from '../shared/evm-contract-identity'
 import { amountWithDecimals } from '../shared/erc20Preview'
 import { OPENSEA_CONDUIT_KEY, OPENSEA_FEE_RECIPIENT, SEAPORT_1_6, SEAPORT_1_6_CHAINS } from '../shared/nft-marketplaces'
+import { seaportDeviceScreen } from './seaport-settlement'
 
 // ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -73,6 +74,7 @@ interface KnownDescriptor {
   extract: (message: any, typedData: any, signer?: string) => EIP712DecodedField[]
   protocolIdentity?: (typedData: any, message: any) => boolean
   seaportListing?: (typedData: any) => EIP712DecodedInfo['seaportListing']
+  seaportItems?: (typedData: any) => EIP712DecodedInfo['seaportItems']
 }
 
 function exactFields(typedData: any, typeName: string, expected: Array<[string, string]>): boolean {
@@ -299,6 +301,15 @@ function seaportOrderFields(msg: any, td: any): EIP712DecodedField[] {
     { label: 'Salt', value: formatValue(msg.salt, 'raw'), format: 'raw', raw: String(msg.salt) },
     { label: 'Counter', value: formatValue(msg.counter, 'raw'), format: 'raw', raw: String(msg.counter) },
   ]
+}
+
+/** Every item of the order, for seaport-item-contracts.ts to ask its token
+ *  contract what it is. */
+function seaportItems(td: any): EIP712DecodedInfo['seaportItems'] {
+  const msg = td.message || {}
+  const side = (name: 'offer' | 'consideration') => (Array.isArray(msg[name]) ? msg[name] : [])
+    .map((item: any, index: number) => ({ side: name, index, itemType: Number(item?.itemType), token: String(item?.token ?? '') }))
+  return [...side('offer'), ...side('consideration')]
 }
 
 /** The order as a listing: only specific NFTs offered, and every payment in
@@ -598,13 +609,15 @@ const KNOWN_DESCRIPTORS: KnownDescriptor[] = [
   },
   // Seaport 1.6 OrderComponents, only at the pinned Seaport deployment. A
   // BulkOrder (a tree of orders: OpenSea's several-items-at-once listing) is
-  // not matched and still reads critical. Firmware 7.16 refuses it; older
-  // firmware signs its hash. No real BulkOrder document is public to test with.
+  // not matched and reads critical, with its own line (clearsign-risk.ts): no
+  // KeepKey checks who is paid in it. No real BulkOrder document is public to
+  // test with.
   {
     match: isSeaportOrder,
     operationName: 'Seaport 1.6 Order',
     extract: seaportOrderFields,
     seaportListing,
+    seaportItems,
   },
 ]
 
@@ -673,6 +686,8 @@ export function decodeEIP712(typedData: any, signer?: string): EIP712DecodedInfo
   for (const desc of KNOWN_DESCRIPTORS) {
     if (desc.match(typedData)) {
       const listing = desc.seaportListing?.(typedData)
+      const items = desc.seaportItems?.(typedData)
+      const deviceScreen = items ? seaportDeviceScreen(typedData, signer) : undefined
       return {
         operationName: desc.operationName,
         domain: {
@@ -687,6 +702,8 @@ export function decodeEIP712(typedData: any, signer?: string): EIP712DecodedInfo
         protocolIdentityVerified: desc.protocolIdentity ? desc.protocolIdentity(typedData, message) : true,
         hashes,
         ...(listing ? { seaportListing: listing } : {}),
+        ...(items ? { seaportItems: items } : {}),
+        ...(deviceScreen ? { seaportDeviceScreen: deviceScreen } : {}),
       }
     }
   }

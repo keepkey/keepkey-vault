@@ -18,6 +18,8 @@ import { assertEvmFeeCapCoversBaseFee } from '../shared/evmFeePreview'
 import { applyEvmTxPreview, attachErc7730Definition, attachErc7730TypedDefinition, applyTypedDataSigningGate, evmPriorityFee, recognizedTypedDataSpender } from './evm-signing-preview'
 import { signWithErc7730Fallback } from './erc7730-resolver'
 import { buildTypedDataReport, evmSigningVerdict, withoutErc7730Description } from './evm-presign-report'
+import { addSeaportCreatorFee } from './seaport-creator-fee'
+import { addSeaportItemContracts } from './seaport-item-contracts'
 import { buildSolanaMessageDecodedInfo } from './solana-message-preview'
 import { ethMessagePreview } from './eth-message-preview'
 import { buildSolanaDecodedInfo } from './solana-clearsign'
@@ -975,6 +977,10 @@ export class WalletConnectManager {
     signingInfo.recognizedSpender = recognizedTypedDataSpender(signingInfo.typedDataDecoded, signingInfo.chainId)
     // Same AdvancedMode gate as REST /eth/sign-typed-data.
     applyTypedDataSigningGate(signingInfo, typedData, this.callbacks.getFirmwareVersion())
+    // What the order's contracts say they are, read before any report is built,
+    // with a definition attached or not (same as REST).
+    await addSeaportCreatorFee(signingInfo)
+    await addSeaportItemContracts(signingInfo)
     // 7.17+: the ClearSign service's definition, checked before approval so
     // the card describes it; exactly this one is sent.
     if (await attachErc7730TypedDefinition(signingInfo, typedData, this.callbacks.getFirmwareVersion(),
