@@ -1142,8 +1142,8 @@ function seaportItemContracts(d: EIP712DecodedInfo, add: (l: RiskLevel, t: strin
   let unchecked = false
   for (const item of d.seaportItems ?? []) {
     if (item.itemType < 1 || item.itemType > 5) continue
-    if (item.unchecked) { unchecked = true; continue }
-    if (item.erc721 === undefined || item.erc1155 === undefined) continue // not asked
+    // Not asked (no read was made) is not checked either: say so.
+    if (item.unchecked || item.erc721 === undefined || item.erc1155 === undefined) { unchecked = true; continue }
     const name = `${item.side === 'offer' ? 'Offer' : 'Payment'} ${item.index + 1}`
     if (item.itemType === 1) {
       if (!item.erc721 && !item.erc1155) continue
@@ -1152,9 +1152,16 @@ function seaportItemContracts(d: EIP712DecodedInfo, add: (l: RiskLevel, t: strin
       continue
     }
     const erc721 = item.itemType === 2 || item.itemType === 4
+    const standard = erc721 ? 'ERC-721' : 'ERC-1155'
+    if (erc721 && item.erc721 && item.decimals !== undefined && item.decimals > 0) {
+      // A hybrid (ERC-404): its transferFrom moves token units when the ID is
+      // not one of its NFTs.
+      red = true
+      add('critical', `${name} is an ERC-721 NFT item, but ${item.token} also answers like an ERC-20 token (decimals ${item.decimals}): Seaport could move the NFT ID as that many token units.`)
+      continue
+    }
     if (erc721 ? item.erc721 : item.erc1155) continue
     red = true
-    const standard = erc721 ? 'ERC-721' : 'ERC-1155'
     add('critical', item.decimals !== undefined
       ? `${name} is an ${standard} NFT item, but ${item.token} answers like an ERC-20 token (decimals ${item.decimals})${erc721 ? ': Seaport would move the NFT ID as that many token units' : ''}.`
       : `${name} is an ${standard} NFT item, but ${item.token} does not say it is an ${standard} contract.`)

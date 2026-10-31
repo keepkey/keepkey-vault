@@ -453,10 +453,33 @@ describe('Seaport item contracts (supportsInterface, decimals)', () => {
     expect(texts(attack)).not.toContain('answers like an ERC-20')
   })
 
-  test('CONTROL: not asked at all (no read made), nothing is said about the contracts', () => {
+  test('review r2: not asked at all (no read made) is not checked either, and the card says so', () => {
     const req = typedRequest(withOffer({ token: USDE }), address, '7.17.0')
-    expect(texts(req)).not.toContain('could not ask the contracts')
+    expect(texts(req)).toContain('This computer could not ask the contracts in this order whether they are NFTs or tokens, so it could not check them.')
+    // Nothing is invented about the contract.
     expect(texts(req)).not.toContain('answers like an ERC-20')
+  })
+
+  test('review r2: an ERC-721 item naming a hybrid (ERC-404: ERC-721 and decimals 18) is red', async () => {
+    const HYBRID = '0x9E9FbDE7C7a83c43913BddC8779158F1368F0413' // Pandora (ERC-404) on mainnet
+    contracts[HYBRID.toLowerCase()] = { [SUPPORTS_721]: word(1), [SUPPORTS_1155]: word(0), [DECIMALS]: word(18) }
+    const req = await asked(withOffer({ token: HYBRID, identifierOrCriteria: '1000000000000000000' }))
+    expect(assessSigningRisk(req)!.tier).toBe('red')
+    expect(texts(req)).toContain(`Offer 1 is an ERC-721 NFT item, but ${HYBRID} also answers like an ERC-20 token (decimals 18): Seaport could move the NFT ID as that many token units.`)
+    expect(texts(req)).not.toContain('Seaport listing: sells')
+    // CONTROL: an NFT contract with decimals() 0 (some answer it) is not a token.
+    contracts[HYBRID.toLowerCase()][DECIMALS] = word(0)
+    const zero = await asked(withOffer({ token: HYBRID, identifierOrCriteria: '7' }))
+    expect(texts(zero)).not.toContain('also answers like an ERC-20')
+  })
+
+  test('LIMIT: a contract older than final ERC-721 (CryptoKitties says only its draft 0x9a20483d) reads red', async () => {
+    // A stated limit: the line is true (it does not say ERC-721), and red is the safe side.
+    const KITTIES = '0x06012c8cf97BEaD5deAe237070F9587f8E7A266d'
+    contracts[KITTIES.toLowerCase()] = { [SUPPORTS_721]: word(0), [SUPPORTS_1155]: word(0), [DECIMALS]: new Error('execution reverted') }
+    const req = await asked(withOffer({ token: KITTIES, identifierOrCriteria: '1' }))
+    expect(assessSigningRisk(req)!.tier).toBe('red')
+    expect(texts(req)).toContain(`Offer 1 is an ERC-721 NFT item, but ${KITTIES} does not say it is an ERC-721 contract.`)
   })
 
   test('a Seaport BulkOrder is red, with a plain reason', () => {
