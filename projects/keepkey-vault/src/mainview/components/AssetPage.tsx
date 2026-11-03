@@ -42,6 +42,7 @@ import { WatchOnlyExportDialog } from "./WatchOnlyExportDialog"
 import { CreatePsbtPanel } from "./CreatePsbtPanel"
 import { detectSpamToken, categorizeTokens, type SpamResult } from "../../shared/spamFilter"
 import { createLatestReceiveRequest, selectedReceiveScriptType } from "../../shared/receive-request"
+import { reconcileSelectedToken, type SelectedTokenState } from "../../shared/selected-token-balance"
 
 type AssetView = "receive" | "send" | "privacy" | "psbt"
 
@@ -115,7 +116,12 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 		}
 		setViewRaw(v)
 	}
-	const [selectedToken, setSelectedToken] = useState<TokenBalance | null>(initialToken ?? null)
+	const [selectedTokenState, setSelectedTokenState] = useState<SelectedTokenState | null>(() => initialToken ? {
+		token: initialToken, chainId: chain.id,
+		// EVM dashboard tokens may aggregate owners. Bind their amounts only
+		// after the selected address's own cache has answered.
+		ownerAddress: chain.chainFamily === 'evm' ? undefined : balance?.address,
+	} : null)
 	const [copiedCaip, setCopiedCaip] = useState<string | null>(null)
 	const [address, setAddress] = useState<string | null>(balance?.address || null)
 	const [loading, setLoading] = useState(false)
@@ -209,7 +215,7 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 		? evmAddresses.addresses.find(a => a.addressIndex === evmAddresses.selectedIndex)
 		: undefined
 	const selectedEvmChainBalance = selectedEvmAddress?.chainBalances?.[chain.id]
-	const activeBalance: ChainBalance | undefined = isEvm && selectedEvmAddress && selectedEvmChainBalance
+	const activeBalance: ChainBalance | undefined = isEvm && !watchOnly && selectedEvmAddress && selectedEvmChainBalance
 		? {
 			chainId: chain.id,
 			symbol: chain.symbol,
@@ -219,8 +225,28 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 			address: selectedEvmAddress.address,
 			tokens: selectedEvmChainBalance.tokens,
 			defiPositions: selectedEvmChainBalance.defiPositions,
+			syncState: selectedEvmChainBalance.syncState,
+			updatedAt: selectedEvmChainBalance.updatedAt,
+			confirmedAssetCaips: selectedEvmChainBalance.confirmedAssetCaips,
 		}
 		: balance
+	const selectedTokenOwner = isEvm && !watchOnly ? selectedEvmAddress?.address : activeBalance?.address || address
+	// The aggregate balance prop can contain tokens summed across EVM owners.
+	// It must never fill an absent selected-owner cache or prove token absence.
+	const selectedTokenBalanceSource = isEvm && !watchOnly && !selectedEvmChainBalance ? undefined : activeBalance
+	const tokenReconciliation = reconcileSelectedToken(selectedTokenState, {
+		chainId: chain.id, chainCaip: chain.caip, ownerAddress: selectedTokenOwner,
+	}, selectedTokenBalanceSource)
+	const selectedToken = tokenReconciliation.selection?.token ?? null
+	const selectedTokenUnverified = tokenReconciliation.unverified
+	const setSelectedToken = (token: TokenBalance | null) => setSelectedTokenState(token ? {
+		token, chainId: chain.id, ownerAddress: selectedTokenOwner || undefined,
+	} : null)
+	useEffect(() => {
+		// Retain the newest owner-scoped amount for a later failed refresh; the
+		// synchronously reconciled value above also prevents a stale render.
+		setSelectedTokenState(tokenReconciliation.selection)
+	}, [selectedTokenState, chain.id, chain.caip, selectedTokenOwner, selectedTokenBalanceSource])
 
 	// Multi-address total: show when >1 EVM address has funds on this chain
 	const evmAddressesWithChainBalance = isEvm
@@ -1052,13 +1078,14 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 					{selectedToken ? (
 						<Flex direction="column" align="flex-end" gap="1" flexShrink={0} display={{ base: "none", sm: "flex" }}>
 							<Text fontFamily="mono" fontSize={{ base: "16px", md: "20px" }} fontWeight="500" color="var(--text-0)" letterSpacing="0.01em" lineHeight="1.2">
-								{formatBalance(selectedToken.balance)}
+								{selectedTokenUnverified ? '—' : formatBalance(selectedToken.balance)}
 								<Box as="span" color="var(--text-3)" ml="1.5" fontSize={{ base: "13px", md: "15px" }}>{selectedToken.symbol}</Box>
 							</Text>
-							{selectedToken.balanceUsd > 0 && (
+							{selectedTokenUnverified && <Text fontSize="11px" color="var(--gold)" title={`Last known: ${formatBalance(selectedToken.balance)} ${selectedToken.symbol}`}>Balance unverified</Text>}
+							{!selectedTokenUnverified && selectedToken.balanceUsd > 0 && (
 								<Text fontSize="12px" fontFamily="mono" color="var(--text-2)">≈ {fmtCompact(selectedToken.balanceUsd)}</Text>
 							)}
-							{selectedToken.priceUsd > 0 && (
+							{!selectedTokenUnverified && selectedToken.priceUsd > 0 && (
 								<Text fontSize="10px" fontFamily="mono" color="var(--text-3)">
 									${selectedToken.priceUsd.toLocaleString('en-US', { maximumFractionDigits: 6 })} / {selectedToken.symbol}
 								</Text>
@@ -1165,10 +1192,11 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 				{selectedToken ? (
 					<Flex display={{ base: "flex", sm: "none" }} align="baseline" justify="space-between" mb="4" gap="3">
 						<Text fontFamily="mono" fontSize="18px" fontWeight="500" color="var(--text-0)" letterSpacing="0.01em">
-							{formatBalance(selectedToken.balance)}
+							{selectedTokenUnverified ? '—' : formatBalance(selectedToken.balance)}
 							<Box as="span" color="var(--text-3)" ml="1.5" fontSize="13px">{selectedToken.symbol}</Box>
 						</Text>
-						{selectedToken.balanceUsd > 0 && (
+						{selectedTokenUnverified && <Text fontSize="11px" color="var(--gold)" title={`Last known: ${formatBalance(selectedToken.balance)} ${selectedToken.symbol}`}>Balance unverified</Text>}
+						{!selectedTokenUnverified && selectedToken.balanceUsd > 0 && (
 							<Text fontSize="13px" fontFamily="mono" color="var(--text-2)">≈ {fmtCompact(selectedToken.balanceUsd)}</Text>
 						)}
 					</Flex>
@@ -1358,6 +1386,7 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 								nativeBalanceUsd: btcSelected.xpubData.balanceUsd,
 							} : activeBalance}
 							token={selectedToken}
+							tokenBalanceUnverified={selectedTokenUnverified}
 							onClearToken={() => setSelectedToken(null)}
 							xpubOverride={isBtc ? btcSelected?.xpubData?.xpub : undefined}
 							scriptTypeOverride={isBtc ? btcSelected?.scriptType : undefined}

@@ -1,7 +1,8 @@
 import { withTimeout } from './engine-controller'
 import { getPioneer } from './pioneer'
 import { apiLogScanTxidExists, insertApiLog, updateApiLogTxMeta } from './db'
-import { supportedBtcScriptTypes, btcAccountPath, isChainSupported, type ChainDef } from '../shared/chains'
+import { btcTaprootSupported, isChainSupported, type ChainDef } from '../shared/chains'
+import { utxoAccountScriptPaths } from './chain-scan'
 import { utxoDiscoveryKey } from './btc-backend/types'
 import { getBtcBackend } from './btc-backend'
 import type { ActivityType, RecentActivity } from '../shared/types'
@@ -141,20 +142,17 @@ function unwrapHistoryTransactions(resp: any): any[] {
   return histories.flatMap((h: any) => Array.isArray(h?.transactions) ? h.transactions : [])
 }
 
-async function deriveHistoryQueries(wallet: any, chain: ChainDef, accountIndex: number): Promise<HistoryQuery[]> {
+export async function deriveHistoryQueries(wallet: any, chain: ChainDef, accountIndex: number): Promise<HistoryQuery[]> {
   if (chain.chainFamily === 'utxo') {
-    const btcScriptTypes = chain.id === 'bitcoin' ? await supportedBtcScriptTypes(wallet) : []
-    const paths = chain.id === 'bitcoin'
-      ? btcScriptTypes.map(st => ({
-        addressNList: btcAccountPath(st.purpose, accountIndex),
-        scriptType: st.scriptType,
-        label: `account-${accountIndex}-${st.scriptType}`,
-      }))
-      : [{
-        addressNList: chain.defaultPath.slice(0, 3),
-        scriptType: chain.scriptType || 'p2pkh',
-        label: `account-${accountIndex}-${chain.scriptType || 'p2pkh'}`,
-      }]
+    // History must cover the same accounts as balances and sending. Litecoin
+    // includes legacy, wrapped/native SegWit and the historical m/44' native
+    // branch; watching only its default m/84' account misses confirmations.
+    const includeBitcoinTaproot = chain.id === 'bitcoin' && await btcTaprootSupported(wallet)
+    const paths = utxoAccountScriptPaths(chain, accountIndex, includeBitcoinTaproot).map(entry => ({
+      addressNList: entry.path,
+      scriptType: entry.scriptType,
+      label: `account-${accountIndex}-${entry.scriptType}-m${entry.path[0] - 0x80000000}`,
+    }))
 
     const results = await wallet.getPublicKeys(paths.map(p => ({
       addressNList: p.addressNList,

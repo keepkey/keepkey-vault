@@ -9,6 +9,7 @@
 import { EventEmitter } from 'events'
 import { getSetting, setSetting } from './db'
 import { evmAddressPath } from '../shared/chains'
+import { shouldApplyOwnerBalanceSnapshot } from '../shared/evm-owner-balance'
 import type { EvmTrackedAddress, EvmAddressSet, EvmAddressChainBalance } from '../shared/types'
 
 // Moved to shared/chains.ts (pure, test-importable) — re-exported so existing
@@ -176,6 +177,7 @@ export class EvmAddressManager extends EventEmitter {
     const lower = address.toLowerCase()
     for (const a of this.addresses) {
       if (a.address.toLowerCase() === lower) {
+        if (!shouldApplyOwnerBalanceSnapshot(a.chainBalances?.[chainId], balance)) return
         a.chainBalances = {
           ...(a.chainBalances || {}),
           [chainId]: balance,

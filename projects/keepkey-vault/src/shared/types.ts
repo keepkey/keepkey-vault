@@ -870,6 +870,10 @@ export interface EvmAddressChainBalance {
   nativeBalanceUsd: number
   tokens?: TokenBalance[]
   defiPositions?: DefiPosition[]
+  /** Confidence belongs to this owner and chain, never an aggregate portfolio. */
+  syncState?: 'confirmed' | 'stale' | 'degraded'
+  updatedAt?: number
+  confirmedAssetCaips?: string[]
 }
 
 export interface EvmTrackedAddress {

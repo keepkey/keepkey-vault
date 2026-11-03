@@ -427,6 +427,10 @@ test-unit:
 	cd $(PROJECT_DIR) && bun test __tests__/swap-fees.test.ts __tests__/swap-server-capabilities.test.ts __tests__/swap-registration.test.ts __tests__/near-intents-status.test.ts
 	cd $(PROJECT_DIR) && bun test __tests__/near-deposit-build.test.ts
 	cd $(PROJECT_DIR) && bun test __tests__/receive-request.test.ts
+	cd $(PROJECT_DIR) && bun test __tests__/post-tx-balance.test.ts
+	cd $(PROJECT_DIR) && bun test __tests__/portfolio-owner-confidence.test.ts
+	cd $(PROJECT_DIR) && bun test __tests__/activity-history-accounts.test.ts
+	cd $(PROJECT_DIR) && bun test __tests__/selected-token-balance.test.ts __tests__/evm-owner-balance.test.ts
 	cd modules/hdwallet && bun test packages/hdwallet-keepkey/src/multisig.test.ts
 	$(MAKE) clearsign-worker-test
 	cd $(PROJECT_DIR) && bun src/bun/btc-backend/core.test.ts
