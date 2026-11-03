@@ -17,6 +17,7 @@ import { useFiat } from "../lib/fiat-context"
 import { ReceiveView } from "./ReceiveView"
 import { HiveAccountPanel } from "./HiveAccountPanel"
 import { SendForm } from "./SendForm"
+import { ZcashBalanceSummary, type ZcashPrivacyAction } from './ZcashBalanceSummary'
 
 // Lazy-load optional feature components — defers module evaluation to avoid
 // bundler TDZ issues when these heavy modules are statically imported.
@@ -172,6 +173,7 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 	// Feature flags: zcash privacy
 	const [swappableChainIds, setSwappableChainIds] = useState<Set<string>>(new Set())
 	const [zcashPrivacyEnabled, setZcashPrivacyEnabled] = useState(false)
+	const [zcashPrivacyAction, setZcashPrivacyAction] = useState<ZcashPrivacyAction>('send')
 	const [btcMultisigEnabled,setBtcMultisigEnabled]=useState(false)
 	const settingsLoaded = useRef(false)
 	const refreshFeatureFlags = useCallback(() => {
@@ -552,16 +554,16 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 	const hiddenCount = spamTokens.length + zeroValueTokens.length
 	const tokenTotalUsd = useMemo(() => cleanTokens.reduce((sum, t) => sum + (t.balanceUsd || 0), 0), [cleanTokens])
 	const spamTotalUsd = useMemo(() => spamTokens.reduce((sum, t) => sum + (t.balanceUsd || 0), 0), [spamTokens])
-	const cleanBalanceUsd = (activeBalance?.balanceUsd || 0) - spamTotalUsd
+	const cleanBalanceUsd = chain.id === 'zcash' ? activeBalance?.nativeBalanceUsd ?? 0 : (activeBalance?.balanceUsd || 0) - spamTotalUsd
 	// zZEC is the chain's own coin in the shielded pool, and the USD above
 	// already counts it. Fold it into the header amount too, as the Dashboard
 	// does, so "0 ZEC" never sits next to a nonzero USD total.
 	const shieldedAmount = tokens.reduce((sum, t) => t.type === 'shielded' ? sum + parseFloat(t.balance || '0') : sum, 0)
 	const pendingAmount = tokens.reduce((sum, t) => t.type === 'shielded' ? sum + parseFloat(t.pendingBalance || '0') : sum, 0)
-	const headerBalance = activeBalance && shieldedAmount + pendingAmount > 0
+	const headerBalance = chain.id !== 'zcash' && activeBalance && shieldedAmount + pendingAmount > 0
 		? String(parseFloat(activeBalance.balance || '0') + shieldedAmount + pendingAmount)
 		: activeBalance?.balance ?? '0'
-	const headerBalanceTitle = shieldedAmount + pendingAmount > 0
+	const headerBalanceTitle = chain.id === 'zcash' ? t('zcashTransparentOnly') : shieldedAmount + pendingAmount > 0
 		? `${shieldedAmount} shielded + ${activeBalance?.balance ?? '0'} transparent${pendingAmount > 0 ? ` + ${pendingAmount} pending` : ''} ${chain.symbol}`
 		: `${headerBalance} ${chain.symbol}`
 
@@ -998,6 +1000,10 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 													{t("cached", { defaultValue: "Cached" })}{activeBalance.updatedAt ? ` · ${new Date(activeBalance.updatedAt).toLocaleString([], { dateStyle: "medium", timeStyle: "short" })}` : ""}
 												</Text>
 											</Flex>
+										) : chain.id === 'zcash' ? (
+											<Text fontSize="10px" fontFamily="mono" color="var(--text-2)" title={t('zcashSeparateSync')}>
+												{lastSyncedAt ? t('zcashTransparentUpdated') : t('zcashTransparentOnly')}
+											</Text>
 										) : activeBalance ? (
 											<Flex align="center" gap="1" color="var(--teal)" className="v3-glass-chip" px="2" py="0.5"
 												title={lastSyncedAt ? `Last updated ${lastSyncedAt.toLocaleString()}` : undefined}>
@@ -1312,6 +1318,12 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 				{/* Account selector now lives inline with the action pills above
 				    (per the design study). Original duplicate block removed. */}
 
+				{isZcash && !selectedToken && view !== 'privacy' && <ZcashBalanceSummary
+					transparent={activeBalance?.balance} enabled={zcashPrivacyEnabled} supported={!!zcashShieldedSupported}
+					watchOnly={watchOnly} refreshNonce={refreshNonce}
+					onNavigate={action => { setZcashPrivacyAction(action); setSelectedToken(null); setView('privacy') }}
+				/>}
+
 				{/* Content */}
 				<Box className="v3-glass-card" borderRadius="var(--r-lg)" p={{ base: "4", md: "6" }} minH="280px">
 					{isShieldedToken && zcashPrivacyEnabled ? (
@@ -1348,7 +1360,8 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 						)
 					) : view === "privacy" && isZcash && zcashPrivacyEnabled ? (
 						<Suspense fallback={<Spinner size="sm" color="kk.gold" />}>
-							<ZcashPrivacyTab />
+							<ZcashPrivacyTab initialPage={zcashPrivacyAction === 'unshield' ? 'shield' : zcashPrivacyAction}
+								initialSection={zcashPrivacyAction === 'shield' || zcashPrivacyAction === 'unshield' ? zcashPrivacyAction : undefined} />
 						</Suspense>
 					) : isHive ? (
 						<HiveAccountPanel activeKey={address} color={chain.color} loading={loading} deriveError={deriveError} onRetryDerive={deriveAddress} refreshNonce={refreshNonce} />

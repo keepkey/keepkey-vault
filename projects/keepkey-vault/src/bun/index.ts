@@ -16,6 +16,7 @@
 // negligible for our log volume (~10–100 lines/sec at peak boot).
 import { withPermit2SpenderName } from './permit2-spender-name'
 import { portfolioBalanceSyncState } from '../shared/balance-display-state'
+import { sendZcashByRoute, zcashPrivateSendRoute } from '../shared/zcash-privacy'
 import * as fs from "fs"
 import * as os from "os"
 import * as path from "path"
@@ -2539,6 +2540,7 @@ function maybeStartBackgroundWalletVerification(): void {
 			const result = await scanOrchardNotes()
 			if (result?.synced_to != null) updateSyncedTo(result.synced_to)
 			zcashVerifiedThisSession = true
+			notifyZcashScanComplete(result)
 			console.log(`[zcash] Device-verified + scan caught up: synced_to=${result?.synced_to ?? '?'}, new_notes=${result?.notes_found ?? 0}`)
 		} catch (e: any) {
 			console.warn('[zcash] Background device-verify/scan failed (non-fatal):', e?.message || e)
@@ -2579,17 +2581,16 @@ async function texRecovery(action: 'complete' | 'shieldBack', index: number): Pr
  * completed — and each one nudges the frontend to re-pull the zcash row.
  * Then every 90 s while value is in flight (a block can take minutes).
  * ponytail: timer schedule; switch to block-header push if it proves too coarse. */
+function notifyZcashScanComplete(result: { synced_to?: number | null; notes_found?: number } | null | undefined): void {
+	try { rpc.send['zcash-rescan-complete']({ syncedTo: result?.synced_to ?? null, notesFound: result?.notes_found ?? 0 }) } catch { /* webview not ready */ }
+}
+
 async function rescanZcashAndNotify(): Promise<void> {
 	try {
 		if (!zcashPrivacyEnabled || !hasFvkLoaded() || isZcashSendInFlight()) return
 		const result = await scanOrchardNotes()
 		if (result?.synced_to != null) updateSyncedTo(result.synced_to)
-		try {
-			rpc.send['zcash-rescan-complete']({
-				syncedTo: result?.synced_to ?? null,
-				notesFound: result?.notes_found ?? 0,
-			})
-		} catch { /* webview not ready */ }
+		notifyZcashScanComplete(result)
 	} catch (e: any) {
 		console.warn('[zcash] post-tx rescan failed (non-fatal):', e?.message || e)
 	}
@@ -7228,6 +7229,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				// A successful scan validates the wallet against the chain — even an
 				// incremental one from synced_to brings the unspent set up to truth.
 				zcashVerifiedThisSession = true
+				notifyZcashScanComplete(result)
 				return result
 			},
 			zcashShieldedBalance: async () => {
@@ -7248,6 +7250,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				if (!engine.wallet) throw new Error('No device connected')
 				const account = (params as any)?.account ?? 0
 				if (account !== 0) throw new Error('Only account 0 is supported; multi-account shielded sends are not implemented')
+				const sendRoute = zcashPrivateSendRoute(params.recipient, params.memo)
 				await ensureFvkLoaded(engine.wallet, 0)
 				// FAIL-CLOSED: prove the FVK we're about to spend from belongs to the
 				// CONNECTED device before building anything. On mismatch this purges
@@ -7274,25 +7277,26 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				}
 				// ZIP-320: a tex1 recipient only accepts transparent funds, so it is
 				// paid in two transactions via a one-time transparent address.
-				const { isTexAddress } = await import("./txbuilder/zcash-tex")
-				const isTex = isTexAddress(params.recipient)
-				if (isTex && params.memo?.trim()) throw new Error('TEX addresses are transparent and cannot receive a memo')
-				if (!isTex) await anchorExpectedShielded()
-				const result = isTex
-					? await (await import("./txbuilder/zcash-tex-send")).sendTex(engine.wallet as any, {
+				if (sendRoute !== 'tex') await anchorExpectedShielded()
+				const result = await sendZcashByRoute<{ txid: string; txids?: string[]; unsentZat?: number; unsentReason?: string }>(params.recipient, params.memo, {
+					tex: async () => (await import("./txbuilder/zcash-tex-send")).sendTex(engine.wallet as any, {
 						recipient: params.recipient,
 						amount: params.amount,
 						account,
-					}, { signWrap, onProgress })
-					: await sendShielded(engine.wallet as any, {
+					}, { signWrap, onProgress }),
+					unshield: async () => (await import("./txbuilder/zcash-deshield")).deshieldZec(engine.wallet as any, {
+						recipient: params.recipient.trim(), amount: params.amount, account,
+					}, { signWrap, onProgress, onBroadcast: tx => expectShieldedDelta(-(tx.value + (tx.fee ?? 0))) }),
+					shielded: () => sendShielded(engine.wallet as any, {
 						recipient: params.recipient,
 						amount: params.amount,
 						memo: params.memo,
-					}, { signWrap, onProgress, onBroadcast: tx => expectShieldedDelta(-(tx.pay + tx.fee)) })
+					}, { signWrap, onProgress, onBroadcast: tx => expectShieldedDelta(-(tx.pay + tx.fee)) }),
+				})
 				try { rpc.send['send-progress']({ step: 'complete', detail: result.txid }) } catch { /* webview not ready */ }
 				// A split send that stopped part-way still moved money: record what was sent.
 				const unsentZat = (result as { unsentZat?: number }).unsentZat ?? 0
-				logZcashShieldedActivity('broadcast', result.txid, params.amount - unsentZat, params.recipient, sessionEpoch)
+				logZcashShieldedActivity(sendRoute === 'unshield' ? 'unshield' : 'broadcast', result.txid, params.amount - unsentZat, params.recipient, sessionEpoch)
 				schedulePostZcashTxRescans()
 				return result
 			},
