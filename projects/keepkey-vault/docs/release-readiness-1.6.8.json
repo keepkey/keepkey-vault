@@ -1,9 +1,9 @@
 {
   "version": "1.6.8",
-  "status": "candidate_prepared_not_published",
-  "recordedAt": "2026-11-03T20:07:42.306239+00:00",
+  "status": "gateway_deployed_local_candidate_verified_not_published",
+  "recordedAt": "2026-11-03T21:21:24.608613+00:00",
   "branch": "prepare/1.6.8-candidate",
-  "candidateCodeRevision": "8d686d805db2a363fa05a64fba794415d1e59314",
+  "candidateCodeRevision": "471fa5169ed21d99361b0e5065f677206caba6c0",
   "baseReleaseRevision": "1368fadbb17516553c720ea535fe249c6b3f37d7",
   "auditSourceRevision": "661fc89653b04f150001f4458879dc78f5fb4db9",
   "auditIntegratedRevision": "2e162f0f8",
@@ -25,15 +25,21 @@
       "command": "make test-unit",
       "status": "passed",
       "bunSuitesPassed": [
-        2181,
+        2186,
         4,
-        42,
+        45,
         1,
+        21,
+        6,
+        4,
         8,
         53
       ],
       "scriptSuites": "passed",
-      "log": "/private/tmp/vault-native-swap-release-tests.log"
+      "log": "/private/tmp/vault-ltc-account-release-tests.log",
+      "totalTestsPassed": 2328,
+      "scriptChecksPassed": 17,
+      "codeRevision": "471fa5169ed21d99361b0e5065f677206caba6c0"
     },
     "auditFocusedTests": {
       "status": "passed",
@@ -46,11 +52,12 @@
     "preflight": {
       "command": "make preflight",
       "status": "passed",
-      "log": "/private/tmp/vault-native-swap-preflight.log"
+      "log": "/private/tmp/vault-ltc-account-preflight.log",
+      "codeRevision": "471fa5169ed21d99361b0e5065f677206caba6c0"
     },
     "typecheck": {
       "status": "within_existing_baseline",
-      "diagnostics": 823,
+      "diagnostics": 814,
       "baseline": 1033,
       "clean": false
     },
@@ -60,7 +67,8 @@
       "platform": "macOS arm64 development",
       "signed": false,
       "notarized": false,
-      "log": "/private/tmp/vault-native-swap-build.log"
+      "log": "/private/tmp/vault-ltc-account-build.log",
+      "codeRevision": "471fa5169ed21d99361b0e5065f677206caba6c0"
     },
     "certifiedEmulator": {
       "status": "verified",
@@ -100,16 +108,10 @@
       "customerBalanceReconciled": false
     },
     "platformCi": {
-      "status": "passed",
-      "revision": "bcbcb89ca0d1092ec22c3c28d56e16ab80e87353",
-      "run": "https://github.com/keepkey/keepkey-vault/actions/runs/41682359196",
-      "jobs": [
-        "Linux core",
-        "Linux x64 build",
-        "macOS build",
-        "Intel macOS packaged-app smoke"
-      ],
-      "note": "Previous candidate CI passed. The new quote-error parsing code requires the next candidate CI run."
+      "status": "in_progress",
+      "revision": "471fa5169ed21d99361b0e5065f677206caba6c0",
+      "run": "https://github.com/keepkey/keepkey-vault/actions/runs/41719279071",
+      "note": "Local build, full release unit suite and preflight pass; platform packaging remains a separate release gate."
     },
     "quoteErrorParsing": {
       "status": "passed",
@@ -122,29 +124,52 @@
       ]
     },
     "providerParity": {
-      "status": "failed",
-      "evidence": "projects/keepkey-vault/docs/provider-parity-audit-20261103/audit.json",
-      "standardCases": 9,
-      "legacyQuoteResponses": 9,
-      "gatewayQuoteResponses": 5,
-      "currentClientLegacySdk400Confirmed": true,
-      "signed": false,
-      "broadcast": false
+      "status": "passed",
+      "baselineEvidence": "projects/keepkey-vault/docs/provider-parity-audit-20261103/audit.json",
+      "resolutionEvidence": "projects/keepkey-vault/docs/provider-parity-audit-20261103/resolution.json",
+      "gatewayQuoteCasesPassed": 13,
+      "parityRegressions": 0,
+      "sdkCasesPassed": 4,
+      "directNearParserCasesPassed": 2,
+      "agentSigned": false,
+      "agentBroadcast": false
     },
     "providerFeeDisclosure": {
-      "status": "incomplete",
-      "note": "Native Uniswap review exposed the outbound-zero / affiliate-rate mismatch and missing provider slippage measurement. Candidate contains a display correction, but cross-provider fee denomination and recipient-policy parity remain release blockers.",
-      "evidence": "projects/keepkey-vault/docs/provider-parity-audit-20261103/audit.json"
+      "status": "passed",
+      "evidence": "projects/keepkey-vault/docs/provider-parity-audit-20261103/post-deploy-near-parser.json",
+      "note": "Fee amounts preserve assets and explicit units; exact amounts and recipients available in details. Live direct NEAR split matches legacy effective quoted fees. Affiliate ledger credits were not audited."
+    },
+    "nativeSwapVerification": {
+      "status": "passed",
+      "evidence": "projects/keepkey-vault/docs/provider-parity-audit-20261103/native-verification.json",
+      "note": "Native 7.16 direct ETH to LTC quote/review inspected; observed user-approved swap payout independently confirmed and actual received amount persisted. Agent did not initiate signing."
+    },
+    "quoteStatusLabels": {
+      "status": "passed_focused_tests_and_native_build",
+      "testsPassed": 11,
+      "note": "Quote available/No quote labels replace protocol-wide uptime implications for quote-scoped observations.",
+      "codeRevision": "16741a89da227b77e1767f84658146410a83ecca"
+    },
+    "litecoinBalances": {
+      "status": "passed",
+      "evidence": "projects/keepkey-vault/docs/provider-parity-audit-20261103/ltc-native-verification.json",
+      "gatewayScriptFamiliesVerified": 3,
+      "fundedAccountComparison": "matches_legacy_api",
+      "nativeManualRefresh": "passed",
+      "receiveLabelAndPathConsistency": "passed"
     }
   },
   "gatewayDependency": {
     "url": "https://oracles.cc",
-    "deployedRevision": "298ff3508a7a044cf8baaf7bfbe03b338c619070",
+    "deployedRevision": "a1f079b1861bdceaa5d7e404858c29e1e935b8a3",
     "defaultApiBaseChanged": false,
     "quoteAndCertificateEvidence": "projects/keepkey-vault/docs/relay-clearsign-audit-20261102/reviewed-swaps-live.json",
     "nativeProtocolPrecisionEvidence": "projects/keepkey-vault/docs/relay-clearsign-audit-20261102/eth-ltc-protocol-precision-live.json",
-    "ethToLtcAvailabilityAtInspection": "unavailable_thorchain_eth_trading_halted_no_fallback_route",
-    "tradingHaltMessageEvidence": "projects/keepkey-vault/docs/relay-clearsign-audit-20261102/swap-halt-message-live.json"
+    "ethToLtcAvailabilityAtInspection": "live_direct_near_and_thorchain_quotes_available",
+    "tradingHaltMessageEvidence": "projects/keepkey-vault/docs/relay-clearsign-audit-20261102/swap-halt-message-live.json",
+    "deploymentVerified": true,
+    "liveProviderGateCasesPassed": 5,
+    "liveLtcScriptFamiliesPassed": 3
   },
   "existingDraft": {
     "tag": "v1.6.8",
@@ -153,21 +178,6 @@
     "assetsReplaced": false
   },
   "remainingReleaseGates": [
-    {
-      "gate": "Provider fee denomination and recipient-policy parity",
-      "status": "blocked",
-      "evidence": "projects/keepkey-vault/docs/provider-parity-audit-20261103/audit.json"
-    },
-    {
-      "gate": "Legacy Pioneer quote compatibility with the current 7.16 client",
-      "status": "blocked",
-      "evidence": "projects/keepkey-vault/docs/provider-parity-audit-20261103/sdk-comparison.json"
-    },
-    {
-      "gate": "Gateway direct-provider routing and tracking parity",
-      "status": "blocked",
-      "evidence": "projects/keepkey-vault/docs/provider-parity-audit-20261103/audit.json"
-    },
     {
       "gate": "Platform CI on final candidate",
       "status": "pending"
@@ -203,13 +213,44 @@
     {
       "gate": "Public release promotion",
       "status": "not_requested"
+    },
+    {
+      "gate": "Graceful macOS USB shutdown and restart recovery",
+      "status": "observed_issue_followup",
+      "note": "One restart left the transport unresponsive. A firmware-mode USB connection reset recovered it without wallet protocol commands. Pioneer Core ownership was not established."
     }
   ],
   "runningApp": {
     "version": "1.6.8",
-    "backendPidAtInspection": 1393,
+    "backendPidAtInspection": 14800,
     "deviceConnectedAtInspection": true,
     "candidateRestartPerformed": true,
-    "note": "Candidate 8d686d805 was rebuilt and restarted during native UI testing. ETH/LTC routing remains unavailable on the selected gateway because provider parity is incomplete. Quote and preview tests did not sign or send funds."
+    "note": "Final Litecoin candidate is running and connected. Native Refresh and all three LTC picker balances were verified after gateway deployment. Direct NEAR user-approved funded swap and actual payout were independently confirmed earlier. Agent did not initiate signing.",
+    "codeRevision": "471fa5169ed21d99361b0e5065f677206caba6c0"
+  },
+  "resolvedProviderGates": [
+    {
+      "gate": "Provider fee denomination and recipient-policy parity",
+      "status": "passed",
+      "evidence": "projects/keepkey-vault/docs/provider-parity-audit-20261103/audit.json",
+      "resolutionEvidence": "projects/keepkey-vault/docs/provider-parity-audit-20261103/resolution.json"
+    },
+    {
+      "gate": "Legacy Pioneer quote compatibility with the current 7.16 client",
+      "status": "passed",
+      "evidence": "projects/keepkey-vault/docs/provider-parity-audit-20261103/sdk-comparison.json",
+      "resolutionEvidence": "projects/keepkey-vault/docs/provider-parity-audit-20261103/resolution.json"
+    },
+    {
+      "gate": "Gateway direct-provider routing and tracking parity",
+      "status": "passed",
+      "evidence": "projects/keepkey-vault/docs/provider-parity-audit-20261103/audit.json",
+      "resolutionEvidence": "projects/keepkey-vault/docs/provider-parity-audit-20261103/resolution.json"
+    }
+  ],
+  "realtimePaymentScope": {
+    "status": "separately_scoped",
+    "document": "https://github.com/BitHighlander/keepkey-gateway/blob/master/docs/REALTIME-PARITY.md",
+    "note": "Transport acceptance is verified; full durable Watchtower/payment-event parity is not claimed."
   }
 }

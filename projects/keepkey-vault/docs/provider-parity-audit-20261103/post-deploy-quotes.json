@@ -1,0 +1,4147 @@
+{
+  "startedAt": "2026-11-03T20:33:34.641Z",
+  "publicFixturesOnly": true,
+  "signed": false,
+  "broadcast": false,
+  "limitations": [
+    "Quote responses and instruction shapes do not prove a funded swap or device signing succeeds.",
+    "Local source revisions and deployed API versions are recorded separately."
+  ],
+  "servers": {
+    "https://api.keepkey.info": [
+      {
+        "path": "/health",
+        "httpStatus": 200,
+        "service": "pioneer-server-v3",
+        "version": "1.4.5",
+        "status": "degraded"
+      },
+      {
+        "path": "/swap/health",
+        "httpStatus": 200,
+        "integrations": [
+          {
+            "key": "thorchain",
+            "label": "THORChain",
+            "status": "degraded",
+            "haltedPools": [
+              "AVAX.SOL-0XFE6B19286885A4F7F55ADAD09C3CD1F906D2478F",
+              "eip155:56/slip44:60",
+              "BSC.BTCB-0X7130D2A12B9BCBFAE4F2634D864A1EE1CE3EAD9C",
+              "BSC.BUSD-0XE9E7CEA3DEDCA5984780BAFC599BD69ADD087D56",
+              "BSC.ETH-0X2170ED0880AC9A755FD29B2688956BD959F933F8",
+              "BSC.TWT-0X4B0F1812E5DF2A09796481FF14017E6005508003",
+              "BSC.USDC-0X8AC76A51CC950D9822D68B83FE1AD97B32CD580D",
+              "BSC.USDT-0X55D398326F99059FF775485246999027B3197955",
+              "ETH.DPI-0X1494CA1F11D487C2BBE4543E90080AEBA4BA3C2B",
+              "ETH.FOX-0XC770EEFAD204B5180DF6A14EE197D99D808EE52D",
+              "ETH.LINK-0X514910771AF9CA656AF840DFF83E8264ECF986CA",
+              "ETH.SNX-0XC011A73EE8576FB46F5E1C5751CA3B9FE0AF2A6F",
+              "ETH.VTHOR-0X815C23ECA83261B6EC689B60CC4A58B54BC24D8D",
+              "ETH.YFI-0X0BC529C00C6401AEF6D220BE8C6EA1667F6AD93E",
+              "cosmos:cosmoshub-4/slip44:118",
+              "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp/slip44:501"
+            ],
+            "detail": "16 pools halted or suspended"
+          },
+          {
+            "key": "mayachain",
+            "label": "Mayachain",
+            "status": "ok"
+          },
+          {
+            "key": "shapeshift",
+            "label": "ShapeShift",
+            "status": "ok"
+          },
+          {
+            "key": "relay",
+            "label": "Relay",
+            "status": "ok"
+          }
+        ]
+      },
+      {
+        "path": "/swappers/supported-chains",
+        "httpStatus": 200,
+        "supportedChains": {
+          "thorchain": [
+            "bip122:000000000019d6689c085ae165831e93",
+            "bip122:12a765e31ffd4059bada1e25190f6e98",
+            "bip122:000000000000000000651ef99cb9fcbe",
+            "bip122:00000000001a91e3dace36e2be3bf030",
+            "bip122:000007d91d1254d60e2dd1ae58038307",
+            "eip155:1",
+            "eip155:43114",
+            "eip155:56",
+            "eip155:8453",
+            "eip155:42161",
+            "eip155:10",
+            "cosmos:thorchain-mainnet-v1",
+            "cosmos:cosmoshub-4",
+            "tron:0x2b6653dc",
+            "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"
+          ],
+          "mayachain": [
+            "bip122:000000000019d6689c085ae165831e93",
+            "eip155:1",
+            "eip155:42161",
+            "cosmos:mayachain-mainnet-v1",
+            "cosmos:thorchain-mainnet-v1",
+            "cosmos:kaiyo-1",
+            "bip122:000007d91d1254d60e2dd1ae58038307",
+            "bip122:00040fe8ec8471911baa1db1266ea15d"
+          ],
+          "relay": [
+            "eip155:1",
+            "eip155:10",
+            "eip155:56",
+            "eip155:100",
+            "eip155:137",
+            "eip155:143",
+            "eip155:146",
+            "eip155:169",
+            "eip155:324",
+            "eip155:5000",
+            "eip155:8453",
+            "eip155:34443",
+            "eip155:42161",
+            "eip155:42220",
+            "eip155:43114",
+            "eip155:59144",
+            "eip155:80094",
+            "eip155:81457",
+            "eip155:534352"
+          ],
+          "zeroex": [
+            "eip155:1",
+            "eip155:10",
+            "eip155:56",
+            "eip155:137",
+            "eip155:8453",
+            "eip155:42161",
+            "eip155:43114"
+          ],
+          "chainflip": [
+            "bip122:000000000019d6689c085ae165831e93",
+            "eip155:1",
+            "eip155:42161",
+            "polkadot:91b171bb158e2d3848fa23a9f1c25182",
+            "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"
+          ],
+          "shapeshift": [
+            "eip155:1",
+            "eip155:10",
+            "eip155:56",
+            "eip155:100",
+            "eip155:137",
+            "eip155:143",
+            "eip155:146",
+            "eip155:169",
+            "eip155:324",
+            "eip155:5000",
+            "eip155:8453",
+            "eip155:34443",
+            "eip155:42161",
+            "eip155:42220",
+            "eip155:43114",
+            "eip155:59144",
+            "eip155:80094",
+            "eip155:81457",
+            "eip155:534352",
+            "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"
+          ]
+        }
+      },
+      {
+        "path": "/swap/available-assets",
+        "httpStatus": 200,
+        "keys": [
+          "assets",
+          "total",
+          "version",
+          "enabled"
+        ],
+        "assetCount": 24,
+        "integrationKeys": []
+      }
+    ],
+    "https://oracles.cc": [
+      {
+        "path": "/health",
+        "httpStatus": 200,
+        "service": "keepkey-gateway",
+        "revision": "102fe9588ee8e31a47cc9618ba4a60721347055a",
+        "status": "ok"
+      },
+      {
+        "path": "/swap/health",
+        "httpStatus": 200,
+        "integrations": [
+          {
+            "key": "nearIntents",
+            "label": "NEAR Intents",
+            "status": "ok",
+            "detail": "Last demand-driven quote check succeeded. Availability depends on the pair and amount.",
+            "checkedAt": 1793738016957,
+            "checkScope": "quote"
+          },
+          {
+            "key": "thorchain",
+            "label": "THORChain",
+            "status": "ok",
+            "detail": "Last demand-driven quote check succeeded. Availability depends on the pair and amount.",
+            "checkedAt": 1793738016251,
+            "checkScope": "quote"
+          },
+          {
+            "key": "mayachain",
+            "label": "Mayachain",
+            "status": "unknown",
+            "detail": "Checked on quote demand; no background polling"
+          },
+          {
+            "key": "relay",
+            "label": "Relay",
+            "status": "ok",
+            "detail": "Last demand-driven quote check succeeded. Availability depends on the pair and amount.",
+            "checkedAt": 1793737947618,
+            "checkScope": "quote"
+          },
+          {
+            "key": "uniswap",
+            "label": "Uniswap",
+            "status": "unknown",
+            "detail": "Direct Ethereum ETH to USDT/USDC; checked on quote demand"
+          },
+          {
+            "key": "zeroex",
+            "label": "0x",
+            "status": "unknown",
+            "detail": "API-key and app-fee route checked on quote demand"
+          },
+          {
+            "key": "shapeshift",
+            "label": "ShapeShift",
+            "status": "unknown",
+            "detail": "Partner-attributed fallback (including moving swappers such as Chainflip/NEAR); checked only on quote demand"
+          },
+          {
+            "key": "chainflip",
+            "label": "Chainflip",
+            "status": "gated",
+            "detail": "Available through ShapeShift; a direct KeepKey broker is not configured"
+          },
+          {
+            "key": "swapkit",
+            "label": "SwapKit",
+            "status": "gated",
+            "detail": "API-key fallback remains unavailable unless each quote proves nonzero affiliate attribution"
+          }
+        ]
+      },
+      {
+        "path": "/swappers/supported-chains",
+        "httpStatus": 200,
+        "supportedChains": {
+          "thorchain": [
+            "bip122:000000000019d6689c085ae165831e93",
+            "bip122:12a765e31ffd4059bada1e25190f6e98",
+            "bip122:000000000000000000651ef99cb9fcbe",
+            "bip122:00000000001a91e3dace36e2be3bf030",
+            "bip122:000007d91d1254d60e2dd1ae58038307",
+            "eip155:1",
+            "eip155:43114",
+            "eip155:56",
+            "eip155:8453",
+            "eip155:42161",
+            "eip155:10",
+            "cosmos:thorchain-mainnet-v1",
+            "cosmos:cosmoshub-4",
+            "tron:0x2b6653dc",
+            "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"
+          ],
+          "mayachain": [
+            "bip122:000000000019d6689c085ae165831e93",
+            "eip155:1",
+            "eip155:42161",
+            "cosmos:mayachain-mainnet-v1",
+            "cosmos:thorchain-mainnet-v1",
+            "cosmos:kaiyo-1",
+            "bip122:000007d91d1254d60e2dd1ae58038307",
+            "bip122:00040fe8ec8471911baa1db1266ea15d"
+          ],
+          "relay": [
+            "eip155:1",
+            "eip155:10",
+            "eip155:56",
+            "eip155:100",
+            "eip155:137",
+            "eip155:143",
+            "eip155:999",
+            "eip155:146",
+            "eip155:4663",
+            "eip155:169",
+            "eip155:324",
+            "eip155:5000",
+            "eip155:8453",
+            "eip155:34443",
+            "eip155:42161",
+            "eip155:42220",
+            "eip155:43114",
+            "eip155:59144",
+            "eip155:80094",
+            "eip155:81457",
+            "eip155:534352",
+            "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"
+          ],
+          "zeroex": [
+            "eip155:1",
+            "eip155:10",
+            "eip155:56",
+            "eip155:137",
+            "eip155:8453",
+            "eip155:42161",
+            "eip155:43114"
+          ],
+          "chainflip": [
+            "bip122:000000000019d6689c085ae165831e93",
+            "eip155:1",
+            "eip155:42161",
+            "polkadot:91b171bb158e2d3848fa23a9f1c25182",
+            "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"
+          ],
+          "shapeshift": [
+            "eip155:1",
+            "eip155:10",
+            "eip155:56",
+            "eip155:100",
+            "eip155:137",
+            "eip155:143",
+            "eip155:999",
+            "eip155:146",
+            "eip155:4663",
+            "eip155:169",
+            "eip155:324",
+            "eip155:5000",
+            "eip155:8453",
+            "eip155:34443",
+            "eip155:42161",
+            "eip155:42220",
+            "eip155:43114",
+            "eip155:59144",
+            "eip155:80094",
+            "eip155:81457",
+            "eip155:534352",
+            "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"
+          ],
+          "nearIntents": [
+            "eip155:1",
+            "eip155:42161",
+            "eip155:8453",
+            "eip155:10",
+            "eip155:43114",
+            "eip155:56",
+            "eip155:137",
+            "eip155:100",
+            "bip122:000000000019d6689c085ae165831e93",
+            "bip122:12a765e31ffd4059bada1e25190f6e98",
+            "bip122:00040fe8ec8471911baa1db1266ea15d",
+            "bip122:000007d91d1254d60e2dd1ae58038307",
+            "bip122:00000000001a91e3dace36e2be3bf030",
+            "bip122:000000000000000000651ef99cb9fcbe",
+            "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp",
+            "tron:0x2b6653dc",
+            "ripple:4109c6f2045fc7eff4cde8f9905d19c2"
+          ]
+        }
+      },
+      {
+        "path": "/swap/available-assets",
+        "httpStatus": 200,
+        "keys": [
+          "assets",
+          "total",
+          "version",
+          "enabled"
+        ],
+        "assetCount": 25,
+        "integrationKeys": []
+      }
+    ]
+  },
+  "cases": [
+    {
+      "name": "ETH to LTC",
+      "sellAsset": "eip155:1/slip44:60",
+      "buyAsset": "bip122:12a765e31ffd4059bada1e25190f6e98/slip44:2",
+      "sellAmount": "0.021319",
+      "checkedAt": "2026-11-03T20:33:39.176Z",
+      "results": [
+        {
+          "origin": "https://api.keepkey.info",
+          "httpStatus": 200,
+          "elapsedMs": 1913,
+          "quotes": [
+            {
+              "integration": "thorchain",
+              "swapper": "thorchain",
+              "amountOut": "0.88765361",
+              "amountOutMin": "0.86102400",
+              "expiry": 1793738911,
+              "quoteMode": "TC_SUPPORTED_TO_TC_SUPPORTED",
+              "fees": {
+                "asset": "LTC.LTC",
+                "affiliate": "268484",
+                "outbound": "460761",
+                "liquidity": "179280",
+                "total": "908525",
+                "slippage_bps": 19,
+                "total_bps": 100
+              },
+              "sourceTransactionShapes": [
+                {
+                  "type": "EVM",
+                  "chain": "eip155:1",
+                  "hasMemo": true,
+                  "hasDestination": true,
+                  "hasSerializedTransaction": false,
+                  "decimalAmount": "0.021319"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "origin": "https://oracles.cc",
+          "httpStatus": 200,
+          "elapsedMs": 1678,
+          "quotes": [
+            {
+              "integration": "nearIntents",
+              "swapper": "NEAR Intents",
+              "amountOut": "0.89176362",
+              "amountOutMin": "0.86501071",
+              "expiry": 1793739818,
+              "quoteMode": "NEAR_INTENTS",
+              "fees": {
+                "total_bps": 35,
+                "affiliate": "0",
+                "outbound": "0",
+                "items": [
+                  {
+                    "kind": "affiliate",
+                    "assetCaip": "eip155:1/slip44:60",
+                    "symbol": "ETH",
+                    "decimals": 18,
+                    "amountBaseUnits": "31978500000000",
+                    "bps": 15,
+                    "recipient": "caa0106da86351f909f1dfa28e7bfa65665554dc512ab2eedd431b040daa3a1f",
+                    "label": "KeepKey app fee"
+                  },
+                  {
+                    "kind": "protocol",
+                    "assetCaip": "eip155:1/slip44:60",
+                    "symbol": "ETH",
+                    "decimals": 18,
+                    "amountBaseUnits": "42638000000000",
+                    "bps": 20,
+                    "recipient": "5880ad2b362620fadf759cbceb1cd5737ce8c6ed7fb8e9942881e6731f9247dd",
+                    "label": "1Click platform fee"
+                  },
+                  {
+                    "kind": "network",
+                    "assetCaip": "bip122:12a765e31ffd4059bada1e25190f6e98/slip44:2",
+                    "symbol": "LTC",
+                    "decimals": 8,
+                    "amountBaseUnits": "500",
+                    "label": "Destination withdrawal (included in output)"
+                  }
+                ]
+              },
+              "feeBreakdown": {
+                "requestedAppBps": 30,
+                "effectiveAppFees": [
+                  {
+                    "recipient": "caa0106da86351f909f1dfa28e7bfa65665554dc512ab2eedd431b040daa3a1f",
+                    "fee": 15,
+                    "limitOrderId": null
+                  },
+                  {
+                    "recipient": "5880ad2b362620fadf759cbceb1cd5737ce8c6ed7fb8e9942881e6731f9247dd",
+                    "fee": 20,
+                    "limitOrderId": null
+                  }
+                ],
+                "items": [
+                  {
+                    "kind": "affiliate",
+                    "assetCaip": "eip155:1/slip44:60",
+                    "symbol": "ETH",
+                    "decimals": 18,
+                    "amountBaseUnits": "31978500000000",
+                    "bps": 15,
+                    "recipient": "caa0106da86351f909f1dfa28e7bfa65665554dc512ab2eedd431b040daa3a1f",
+                    "label": "KeepKey app fee"
+                  },
+                  {
+                    "kind": "protocol",
+                    "assetCaip": "eip155:1/slip44:60",
+                    "symbol": "ETH",
+                    "decimals": 18,
+                    "amountBaseUnits": "42638000000000",
+                    "bps": 20,
+                    "recipient": "5880ad2b362620fadf759cbceb1cd5737ce8c6ed7fb8e9942881e6731f9247dd",
+                    "label": "1Click platform fee"
+                  },
+                  {
+                    "kind": "network",
+                    "assetCaip": "bip122:12a765e31ffd4059bada1e25190f6e98/slip44:2",
+                    "symbol": "LTC",
+                    "decimals": 8,
+                    "amountBaseUnits": "500",
+                    "label": "Destination withdrawal (included in output)"
+                  }
+                ],
+                "refund": {
+                  "assetCaip": "eip155:1/slip44:60",
+                  "symbol": "ETH",
+                  "decimals": 18,
+                  "amountBaseUnits": "35000000000000",
+                  "label": "Refund cost if returned"
+                }
+              },
+              "nearAppFees": [
+                {
+                  "recipient": "caa0106da86351f909f1dfa28e7bfa65665554dc512ab2eedd431b040daa3a1f",
+                  "fee": 15,
+                  "limitOrderId": null
+                },
+                {
+                  "recipient": "5880ad2b362620fadf759cbceb1cd5737ce8c6ed7fb8e9942881e6731f9247dd",
+                  "fee": 20,
+                  "limitOrderId": null
+                }
+              ],
+              "sourceTransactionShapes": [
+                {
+                  "type": "EVM",
+                  "chain": "eip155:1",
+                  "chainId": 1,
+                  "hasMemo": false,
+                  "hasDestination": true,
+                  "dataBytes": 0,
+                  "hasSerializedTransaction": false,
+                  "nativeValueBaseUnits": "21319000000000000",
+                  "decimalAmount": "0.021319"
+                }
+              ]
+            },
+            {
+              "integration": "thorchain",
+              "swapper": "thorchain",
+              "amountOut": "0.88757514",
+              "amountOutMin": "0.86094788",
+              "expiry": 1793738904,
+              "quoteMode": "THORCHAIN_DIRECT",
+              "fees": {
+                "asset": "LTC.LTC",
+                "affiliate": "268460",
+                "outbound": "460714",
+                "liquidity": "179264",
+                "total": "908438",
+                "slippage_bps": 19,
+                "total_bps": 100
+              },
+              "sourceTransactionShapes": [
+                {
+                  "type": "EVM",
+                  "chain": "eip155:1",
+                  "hasMemo": true,
+                  "hasDestination": true,
+                  "hasSerializedTransaction": false,
+                  "decimalAmount": "0.021319"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "ETH to LTC native precision",
+      "sellAsset": "eip155:1/slip44:60",
+      "buyAsset": "bip122:12a765e31ffd4059bada1e25190f6e98/slip44:2",
+      "sellAmount": "0.012345678912345678",
+      "checkedAt": "2026-11-03T20:33:40.556Z",
+      "results": [
+        {
+          "origin": "https://api.keepkey.info",
+          "httpStatus": 200,
+          "elapsedMs": 947,
+          "quotes": [
+            {
+              "integration": "thorchain",
+              "swapper": "thorchain",
+              "amountOut": "0.51211483",
+              "amountOutMin": "0.49675138",
+              "expiry": 1793738911,
+              "quoteMode": "TC_SUPPORTED_TO_TC_SUPPORTED",
+              "fees": {
+                "asset": "LTC.LTC",
+                "affiliate": "155483",
+                "outbound": "460794",
+                "liquidity": "103818",
+                "total": "720095",
+                "slippage_bps": 19,
+                "total_bps": 137
+              },
+              "sourceTransactionShapes": [
+                {
+                  "type": "EVM",
+                  "chain": "eip155:1",
+                  "hasMemo": true,
+                  "hasDestination": true,
+                  "hasSerializedTransaction": false,
+                  "decimalAmount": "0.012345678912345678"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "origin": "https://oracles.cc",
+          "httpStatus": 200,
+          "elapsedMs": 1379,
+          "quotes": [
+            {
+              "integration": "nearIntents",
+              "swapper": "NEAR Intents",
+              "amountOut": "0.516762",
+              "amountOutMin": "0.50125914",
+              "expiry": 1793739820,
+              "quoteMode": "NEAR_INTENTS",
+              "fees": {
+                "total_bps": 35,
+                "affiliate": "0",
+                "outbound": "0",
+                "items": [
+                  {
+                    "kind": "affiliate",
+                    "assetCaip": "eip155:1/slip44:60",
+                    "symbol": "ETH",
+                    "decimals": 18,
+                    "amountBaseUnits": "18518518368518",
+                    "bps": 15,
+                    "recipient": "caa0106da86351f909f1dfa28e7bfa65665554dc512ab2eedd431b040daa3a1f",
+                    "label": "KeepKey app fee"
+                  },
+                  {
+                    "kind": "protocol",
+                    "assetCaip": "eip155:1/slip44:60",
+                    "symbol": "ETH",
+                    "decimals": 18,
+                    "amountBaseUnits": "24691357824691",
+                    "bps": 20,
+                    "recipient": "5880ad2b362620fadf759cbceb1cd5737ce8c6ed7fb8e9942881e6731f9247dd",
+                    "label": "1Click platform fee"
+                  },
+                  {
+                    "kind": "network",
+                    "assetCaip": "bip122:12a765e31ffd4059bada1e25190f6e98/slip44:2",
+                    "symbol": "LTC",
+                    "decimals": 8,
+                    "amountBaseUnits": "500",
+                    "label": "Destination withdrawal (included in output)"
+                  }
+                ]
+              },
+              "feeBreakdown": {
+                "requestedAppBps": 30,
+                "effectiveAppFees": [
+                  {
+                    "recipient": "caa0106da86351f909f1dfa28e7bfa65665554dc512ab2eedd431b040daa3a1f",
+                    "fee": 15,
+                    "limitOrderId": null
+                  },
+                  {
+                    "recipient": "5880ad2b362620fadf759cbceb1cd5737ce8c6ed7fb8e9942881e6731f9247dd",
+                    "fee": 20,
+                    "limitOrderId": null
+                  }
+                ],
+                "items": [
+                  {
+                    "kind": "affiliate",
+                    "assetCaip": "eip155:1/slip44:60",
+                    "symbol": "ETH",
+                    "decimals": 18,
+                    "amountBaseUnits": "18518518368518",
+                    "bps": 15,
+                    "recipient": "caa0106da86351f909f1dfa28e7bfa65665554dc512ab2eedd431b040daa3a1f",
+                    "label": "KeepKey app fee"
+                  },
+                  {
+                    "kind": "protocol",
+                    "assetCaip": "eip155:1/slip44:60",
+                    "symbol": "ETH",
+                    "decimals": 18,
+                    "amountBaseUnits": "24691357824691",
+                    "bps": 20,
+                    "recipient": "5880ad2b362620fadf759cbceb1cd5737ce8c6ed7fb8e9942881e6731f9247dd",
+                    "label": "1Click platform fee"
+                  },
+                  {
+                    "kind": "network",
+                    "assetCaip": "bip122:12a765e31ffd4059bada1e25190f6e98/slip44:2",
+                    "symbol": "LTC",
+                    "decimals": 8,
+                    "amountBaseUnits": "500",
+                    "label": "Destination withdrawal (included in output)"
+                  }
+                ],
+                "refund": {
+                  "assetCaip": "eip155:1/slip44:60",
+                  "symbol": "ETH",
+                  "decimals": 18,
+                  "amountBaseUnits": "35000000000000",
+                  "label": "Refund cost if returned"
+                }
+              },
+              "nearAppFees": [
+                {
+                  "recipient": "caa0106da86351f909f1dfa28e7bfa65665554dc512ab2eedd431b040daa3a1f",
+                  "fee": 15,
+                  "limitOrderId": null
+                },
+                {
+                  "recipient": "5880ad2b362620fadf759cbceb1cd5737ce8c6ed7fb8e9942881e6731f9247dd",
+                  "fee": 20,
+                  "limitOrderId": null
+                }
+              ],
+              "sourceTransactionShapes": [
+                {
+                  "type": "EVM",
+                  "chain": "eip155:1",
+                  "chainId": 1,
+                  "hasMemo": false,
+                  "hasDestination": true,
+                  "dataBytes": 0,
+                  "hasSerializedTransaction": false,
+                  "nativeValueBaseUnits": "12345678912345678",
+                  "decimalAmount": "0.012345678912345678"
+                }
+              ]
+            },
+            {
+              "integration": "thorchain",
+              "swapper": "thorchain",
+              "amountOut": "0.51211441",
+              "amountOutMin": "0.49675097",
+              "expiry": 1793738911,
+              "quoteMode": "THORCHAIN_DIRECT",
+              "fees": {
+                "asset": "LTC.LTC",
+                "affiliate": "155483",
+                "outbound": "460794",
+                "liquidity": "103818",
+                "total": "720095",
+                "slippage_bps": 19,
+                "total_bps": 137
+              },
+              "sourceTransactionShapes": [
+                {
+                  "type": "EVM",
+                  "chain": "eip155:1",
+                  "hasMemo": true,
+                  "hasDestination": true,
+                  "hasSerializedTransaction": false,
+                  "decimalAmount": "0.012345678912345678"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "LTC to ETH",
+      "sellAsset": "bip122:12a765e31ffd4059bada1e25190f6e98/slip44:2",
+      "buyAsset": "eip155:1/slip44:60",
+      "sellAmount": "1",
+      "checkedAt": "2026-11-03T20:33:41.972Z",
+      "results": [
+        {
+          "origin": "https://api.keepkey.info",
+          "httpStatus": 200,
+          "elapsedMs": 1349,
+          "quotes": [
+            {
+              "integration": "thorchain",
+              "swapper": "thorchain",
+              "amountOut": "0.02354092",
+              "amountOutMin": "0.02283469",
+              "expiry": 1793738911,
+              "quoteMode": "TC_SUPPORTED_TO_TC_SUPPORTED",
+              "fees": {
+                "asset": "ETH.ETH",
+                "affiliate": "7116",
+                "outbound": "10955",
+                "liquidity": "4751",
+                "total": "22822",
+                "slippage_bps": 19,
+                "total_bps": 95
+              },
+              "sourceTransactionShapes": [
+                {
+                  "type": "transfer",
+                  "chain": "bip122:12a765e31ffd4059bada1e25190f6e98",
+                  "hasMemo": true,
+                  "hasDestination": true,
+                  "hasSerializedTransaction": false,
+                  "decimalAmount": "1"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "origin": "https://oracles.cc",
+          "httpStatus": 200,
+          "elapsedMs": 1416,
+          "quotes": [
+            {
+              "integration": "nearIntents",
+              "swapper": "NEAR Intents",
+              "amountOut": "0.023546592835606911",
+              "amountOutMin": "0.022840195050538703",
+              "expiry": 1793739821,
+              "quoteMode": "NEAR_INTENTS",
+              "fees": {
+                "total_bps": 35,
+                "affiliate": "0",
+                "outbound": "0",
+                "items": [
+                  {
+                    "kind": "affiliate",
+                    "assetCaip": "bip122:12a765e31ffd4059bada1e25190f6e98/slip44:2",
+                    "symbol": "LTC",
+                    "decimals": 8,
+                    "amountBaseUnits": "150000",
+                    "bps": 15,
+                    "recipient": "caa0106da86351f909f1dfa28e7bfa65665554dc512ab2eedd431b040daa3a1f",
+                    "label": "KeepKey app fee"
+                  },
+                  {
+                    "kind": "protocol",
+                    "assetCaip": "bip122:12a765e31ffd4059bada1e25190f6e98/slip44:2",
+                    "symbol": "LTC",
+                    "decimals": 8,
+                    "amountBaseUnits": "200000",
+                    "bps": 20,
+                    "recipient": "5880ad2b362620fadf759cbceb1cd5737ce8c6ed7fb8e9942881e6731f9247dd",
+                    "label": "1Click platform fee"
+                  },
+                  {
+                    "kind": "network",
+                    "assetCaip": "eip155:1/slip44:60",
+                    "symbol": "ETH",
+                    "decimals": 18,
+                    "amountBaseUnits": "35000000000000",
+                    "label": "Destination withdrawal (included in output)"
+                  }
+                ]
+              },
+              "feeBreakdown": {
+                "requestedAppBps": 30,
+                "effectiveAppFees": [
+                  {
+                    "recipient": "caa0106da86351f909f1dfa28e7bfa65665554dc512ab2eedd431b040daa3a1f",
+                    "fee": 15,
+                    "limitOrderId": null
+                  },
+                  {
+                    "recipient": "5880ad2b362620fadf759cbceb1cd5737ce8c6ed7fb8e9942881e6731f9247dd",
+                    "fee": 20,
+                    "limitOrderId": null
+                  }
+                ],
+                "items": [
+                  {
+                    "kind": "affiliate",
+                    "assetCaip": "bip122:12a765e31ffd4059bada1e25190f6e98/slip44:2",
+                    "symbol": "LTC",
+                    "decimals": 8,
+                    "amountBaseUnits": "150000",
+                    "bps": 15,
+                    "recipient": "caa0106da86351f909f1dfa28e7bfa65665554dc512ab2eedd431b040daa3a1f",
+                    "label": "KeepKey app fee"
+                  },
+                  {
+                    "kind": "protocol",
+                    "assetCaip": "bip122:12a765e31ffd4059bada1e25190f6e98/slip44:2",
+                    "symbol": "LTC",
+                    "decimals": 8,
+                    "amountBaseUnits": "200000",
+                    "bps": 20,
+                    "recipient": "5880ad2b362620fadf759cbceb1cd5737ce8c6ed7fb8e9942881e6731f9247dd",
+                    "label": "1Click platform fee"
+                  },
+                  {
+                    "kind": "network",
+                    "assetCaip": "eip155:1/slip44:60",
+                    "symbol": "ETH",
+                    "decimals": 18,
+                    "amountBaseUnits": "35000000000000",
+                    "label": "Destination withdrawal (included in output)"
+                  }
+                ],
+                "refund": {
+                  "assetCaip": "bip122:12a765e31ffd4059bada1e25190f6e98/slip44:2",
+                  "symbol": "LTC",
+                  "decimals": 8,
+                  "amountBaseUnits": "500",
+                  "label": "Refund cost if returned"
+                }
+              },
+              "nearAppFees": [
+                {
+                  "recipient": "caa0106da86351f909f1dfa28e7bfa65665554dc512ab2eedd431b040daa3a1f",
+                  "fee": 15,
+                  "limitOrderId": null
+                },
+                {
+                  "recipient": "5880ad2b362620fadf759cbceb1cd5737ce8c6ed7fb8e9942881e6731f9247dd",
+                  "fee": 20,
+                  "limitOrderId": null
+                }
+              ],
+              "sourceTransactionShapes": [
+                {
+                  "type": "transfer",
+                  "chain": "bip122:12a765e31ffd4059bada1e25190f6e98",
+                  "hasMemo": false,
+                  "hasDestination": true,
+                  "hasSerializedTransaction": false,
+                  "decimalAmount": "1"
+                }
+              ]
+            },
+            {
+              "integration": "thorchain",
+              "swapper": "thorchain",
+              "amountOut": "0.02354092",
+              "amountOutMin": "0.02283469",
+              "expiry": 1793738911,
+              "quoteMode": "THORCHAIN_DIRECT",
+              "fees": {
+                "asset": "ETH.ETH",
+                "affiliate": "7116",
+                "outbound": "10955",
+                "liquidity": "4751",
+                "total": "22822",
+                "slippage_bps": 19,
+                "total_bps": 95
+              },
+              "sourceTransactionShapes": [
+                {
+                  "type": "transfer",
+                  "chain": "bip122:12a765e31ffd4059bada1e25190f6e98",
+                  "hasMemo": true,
+                  "hasDestination": true,
+                  "hasSerializedTransaction": false,
+                  "decimalAmount": "1"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "BTC to ETH",
+      "sellAsset": "bip122:000000000019d6689c085ae165831e93/slip44:0",
+      "buyAsset": "eip155:1/slip44:60",
+      "sellAmount": "0.001",
+      "checkedAt": "2026-11-03T20:33:43.427Z",
+      "results": [
+        {
+          "origin": "https://api.keepkey.info",
+          "httpStatus": 200,
+          "elapsedMs": 977,
+          "quotes": [
+            {
+              "integration": "thorchain",
+              "swapper": "thorchain",
+              "amountOut": "0.03394319",
+              "amountOutMin": "0.03292489",
+              "expiry": 1793738911,
+              "quoteMode": "TC_SUPPORTED_TO_TC_SUPPORTED",
+              "fees": {
+                "asset": "ETH.ETH",
+                "affiliate": "10247",
+                "outbound": "10955",
+                "liquidity": "6841",
+                "total": "28043",
+                "slippage_bps": 19,
+                "total_bps": 81
+              },
+              "sourceTransactionShapes": [
+                {
+                  "type": "transfer",
+                  "chain": "bip122:000000000019d6689c085ae165831e93",
+                  "hasMemo": true,
+                  "hasDestination": true,
+                  "hasSerializedTransaction": false,
+                  "decimalAmount": "0.001"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "origin": "https://oracles.cc",
+          "httpStatus": 200,
+          "elapsedMs": 1454,
+          "quotes": [
+            {
+              "integration": "thorchain",
+              "swapper": "thorchain",
+              "amountOut": "0.03394319",
+              "amountOutMin": "0.03292489",
+              "expiry": 1793738911,
+              "quoteMode": "THORCHAIN_DIRECT",
+              "fees": {
+                "asset": "ETH.ETH",
+                "affiliate": "10247",
+                "outbound": "10955",
+                "liquidity": "6841",
+                "total": "28043",
+                "slippage_bps": 19,
+                "total_bps": 81
+              },
+              "sourceTransactionShapes": [
+                {
+                  "type": "transfer",
+                  "chain": "bip122:000000000019d6689c085ae165831e93",
+                  "hasMemo": true,
+                  "hasDestination": true,
+                  "hasSerializedTransaction": false,
+                  "decimalAmount": "0.001"
+                }
+              ]
+            },
+            {
+              "integration": "nearIntents",
+              "swapper": "NEAR Intents",
+              "amountOut": "0.033854364220051334",
+              "amountOutMin": "0.032838733293449793",
+              "expiry": 1793739822,
+              "quoteMode": "NEAR_INTENTS",
+              "fees": {
+                "total_bps": 35,
+                "affiliate": "0",
+                "outbound": "0",
+                "items": [
+                  {
+                    "kind": "affiliate",
+                    "assetCaip": "bip122:000000000019d6689c085ae165831e93/slip44:0",
+                    "symbol": "BTC",
+                    "decimals": 8,
+                    "amountBaseUnits": "150",
+                    "bps": 15,
+                    "recipient": "caa0106da86351f909f1dfa28e7bfa65665554dc512ab2eedd431b040daa3a1f",
+                    "label": "KeepKey app fee"
+                  },
+                  {
+                    "kind": "protocol",
+                    "assetCaip": "bip122:000000000019d6689c085ae165831e93/slip44:0",
+                    "symbol": "BTC",
+                    "decimals": 8,
+                    "amountBaseUnits": "200",
+                    "bps": 20,
+                    "recipient": "5880ad2b362620fadf759cbceb1cd5737ce8c6ed7fb8e9942881e6731f9247dd",
+                    "label": "1Click platform fee"
+                  },
+                  {
+                    "kind": "network",
+                    "assetCaip": "eip155:1/slip44:60",
+                    "symbol": "ETH",
+                    "decimals": 18,
+                    "amountBaseUnits": "35000000000000",
+                    "label": "Destination withdrawal (included in output)"
+                  }
+                ]
+              },
+              "feeBreakdown": {
+                "requestedAppBps": 30,
+                "effectiveAppFees": [
+                  {
+                    "recipient": "caa0106da86351f909f1dfa28e7bfa65665554dc512ab2eedd431b040daa3a1f",
+                    "fee": 15,
+                    "limitOrderId": null
+                  },
+                  {
+                    "recipient": "5880ad2b362620fadf759cbceb1cd5737ce8c6ed7fb8e9942881e6731f9247dd",
+                    "fee": 20,
+                    "limitOrderId": null
+                  }
+                ],
+                "items": [
+                  {
+                    "kind": "affiliate",
+                    "assetCaip": "bip122:000000000019d6689c085ae165831e93/slip44:0",
+                    "symbol": "BTC",
+                    "decimals": 8,
+                    "amountBaseUnits": "150",
+                    "bps": 15,
+                    "recipient": "caa0106da86351f909f1dfa28e7bfa65665554dc512ab2eedd431b040daa3a1f",
+                    "label": "KeepKey app fee"
+                  },
+                  {
+                    "kind": "protocol",
+                    "assetCaip": "bip122:000000000019d6689c085ae165831e93/slip44:0",
+                    "symbol": "BTC",
+                    "decimals": 8,
+                    "amountBaseUnits": "200",
+                    "bps": 20,
+                    "recipient": "5880ad2b362620fadf759cbceb1cd5737ce8c6ed7fb8e9942881e6731f9247dd",
+                    "label": "1Click platform fee"
+                  },
+                  {
+                    "kind": "network",
+                    "assetCaip": "eip155:1/slip44:60",
+                    "symbol": "ETH",
+                    "decimals": 18,
+                    "amountBaseUnits": "35000000000000",
+                    "label": "Destination withdrawal (included in output)"
+                  }
+                ],
+                "refund": {
+                  "assetCaip": "bip122:000000000019d6689c085ae165831e93/slip44:0",
+                  "symbol": "BTC",
+                  "decimals": 8,
+                  "amountBaseUnits": "1900",
+                  "label": "Refund cost if returned"
+                }
+              },
+              "nearAppFees": [
+                {
+                  "recipient": "caa0106da86351f909f1dfa28e7bfa65665554dc512ab2eedd431b040daa3a1f",
+                  "fee": 15,
+                  "limitOrderId": null
+                },
+                {
+                  "recipient": "5880ad2b362620fadf759cbceb1cd5737ce8c6ed7fb8e9942881e6731f9247dd",
+                  "fee": 20,
+                  "limitOrderId": null
+                }
+              ],
+              "sourceTransactionShapes": [
+                {
+                  "type": "transfer",
+                  "chain": "bip122:000000000019d6689c085ae165831e93",
+                  "hasMemo": false,
+                  "hasDestination": true,
+                  "hasSerializedTransaction": false,
+                  "decimalAmount": "0.001"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "ETH to BTC",
+      "sellAsset": "eip155:1/slip44:60",
+      "buyAsset": "bip122:000000000019d6689c085ae165831e93/slip44:0",
+      "sellAmount": "0.021319",
+      "checkedAt": "2026-11-03T20:33:44.896Z",
+      "results": [
+        {
+          "origin": "https://api.keepkey.info",
+          "httpStatus": 200,
+          "elapsedMs": 1468,
+          "quotes": [
+            {
+              "integration": "thorchain",
+              "swapper": "thorchain",
+              "amountOut": "0.00060881",
+              "amountOutMin": "0.00059054",
+              "expiry": 1793738917,
+              "quoteMode": "TC_SUPPORTED_TO_TC_SUPPORTED",
+              "fees": {
+                "asset": "BTC.BTC",
+                "affiliate": "186",
+                "outbound": "1041",
+                "liquidity": "124",
+                "total": "1351",
+                "slippage_bps": 19,
+                "total_bps": 212
+              },
+              "sourceTransactionShapes": [
+                {
+                  "type": "EVM",
+                  "chain": "eip155:1",
+                  "hasMemo": true,
+                  "hasDestination": true,
+                  "hasSerializedTransaction": false,
+                  "decimalAmount": "0.021319"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "origin": "https://oracles.cc",
+          "httpStatus": 200,
+          "elapsedMs": 1405,
+          "quotes": [
+            {
+              "integration": "relay",
+              "swapper": "Relay",
+              "amountOut": "0.00061837",
+              "amountOutMin": "0.00059982",
+              "quoteMode": "RELAY_DIRECT",
+              "fees": {
+                "gas": {
+                  "currency": {
+                    "chainId": 1,
+                    "address": "0x0000000000000000000000000000000000000000",
+                    "symbol": "ETH",
+                    "name": "Ether",
+                    "decimals": 18,
+                    "metadata": {
+                      "logoURI": "https://assets.relay.link/icons/1/light.png",
+                      "verified": true
+                    }
+                  },
+                  "amount": "5065000275173",
+                  "amountFormatted": "0.000005065000275173",
+                  "amountUsd": "0.011559",
+                  "minimumAmount": "5065000275173"
+                },
+                "relayer": {
+                  "currency": {
+                    "chainId": 1,
+                    "address": "0x0000000000000000000000000000000000000000",
+                    "symbol": "ETH",
+                    "name": "Ether",
+                    "decimals": 18,
+                    "metadata": {
+                      "logoURI": "https://assets.relay.link/icons/1/light.png",
+                      "verified": true
+                    }
+                  },
+                  "amount": "159398164752846",
+                  "amountFormatted": "0.000159398164752846",
+                  "amountUsd": "0.363752",
+                  "minimumAmount": "159398164752846"
+                },
+                "relayerGas": {
+                  "currency": {
+                    "chainId": 1,
+                    "address": "0x0000000000000000000000000000000000000000",
+                    "symbol": "ETH",
+                    "name": "Ether",
+                    "decimals": 18,
+                    "metadata": {
+                      "logoURI": "https://assets.relay.link/icons/1/light.png",
+                      "verified": true
+                    }
+                  },
+                  "amount": "127303698387348",
+                  "amountFormatted": "0.000127303698387348",
+                  "amountUsd": "0.290512",
+                  "minimumAmount": "127303698387348"
+                },
+                "relayerService": {
+                  "currency": {
+                    "chainId": 1,
+                    "address": "0x0000000000000000000000000000000000000000",
+                    "symbol": "ETH",
+                    "name": "Ether",
+                    "decimals": 18,
+                    "metadata": {
+                      "logoURI": "https://assets.relay.link/icons/1/light.png",
+                      "verified": true
+                    }
+                  },
+                  "amount": "32094466365498",
+                  "amountFormatted": "0.000032094466365498",
+                  "amountUsd": "0.073241",
+                  "minimumAmount": "32094466365498"
+                },
+                "app": {
+                  "currency": {
+                    "chainId": 1,
+                    "address": "0x0000000000000000000000000000000000000000",
+                    "symbol": "ETH",
+                    "name": "Ether",
+                    "decimals": 18,
+                    "metadata": {
+                      "logoURI": "https://assets.relay.link/icons/1/light.png",
+                      "verified": true
+                    }
+                  },
+                  "amount": "63957000000000",
+                  "amountFormatted": "0.000063957",
+                  "amountUsd": "0.145952",
+                  "minimumAmount": "63957000000000"
+                },
+                "subsidized": {
+                  "currency": {
+                    "chainId": 1,
+                    "address": "0x0000000000000000000000000000000000000000",
+                    "symbol": "ETH",
+                    "name": "Ether",
+                    "decimals": 18,
+                    "metadata": {
+                      "logoURI": "https://assets.relay.link/icons/1/light.png",
+                      "verified": true
+                    }
+                  },
+                  "amount": "0",
+                  "amountFormatted": "0.0",
+                  "amountUsd": "0",
+                  "minimumAmount": "0"
+                },
+                "total_bps": 30,
+                "outbound": "0",
+                "affiliate": "0",
+                "items": [
+                  {
+                    "kind": "affiliate",
+                    "label": "Relay partner fees",
+                    "assetCaip": "eip155:1/slip44:60",
+                    "symbol": "ETH",
+                    "decimals": 18,
+                    "amountBaseUnits": "63957000000000",
+                    "amount": "0.000063957",
+                    "bps": 30
+                  },
+                  {
+                    "kind": "network",
+                    "label": "Source network estimate",
+                    "assetCaip": "eip155:1/slip44:60",
+                    "symbol": "ETH",
+                    "decimals": 18,
+                    "amountBaseUnits": "5065000275173",
+                    "amount": "0.000005065000275173"
+                  },
+                  {
+                    "kind": "provider",
+                    "label": "Relay service fee",
+                    "assetCaip": "eip155:1/slip44:60",
+                    "symbol": "ETH",
+                    "decimals": 18,
+                    "amountBaseUnits": "159398164752846",
+                    "amount": "0.000159398164752846"
+                  }
+                ]
+              },
+              "feeBreakdown": {
+                "integrator": {
+                  "bps": 30,
+                  "recipients": [
+                    {
+                      "recipient": "0x87Ab2637bc4231604ad708c5e8aAC92A260c7704",
+                      "bps": 15
+                    },
+                    {
+                      "recipient": "0x21c9a94AF76B59b171b32fD125A4edF0e9A2Ad3e",
+                      "bps": 15
+                    }
+                  ]
+                },
+                "sourceNetwork": {
+                  "amountBaseUnits": "5065000275173",
+                  "asset": "eip155:1/slip44:60"
+                },
+                "priceImpactPercent": 1.38
+              },
+              "sourceTransactionShapes": [
+                {
+                  "type": "EVM",
+                  "chain": "eip155:1",
+                  "chainId": 1,
+                  "hasMemo": false,
+                  "hasDestination": true,
+                  "dataBytes": 68,
+                  "hasSerializedTransaction": false,
+                  "nativeValueBaseUnits": "21319000000000000",
+                  "decimalAmount": "0.021319"
+                }
+              ]
+            },
+            {
+              "integration": "thorchain",
+              "swapper": "thorchain",
+              "amountOut": "0.00060881",
+              "amountOutMin": "0.00059054",
+              "expiry": 1793738917,
+              "quoteMode": "THORCHAIN_DIRECT",
+              "fees": {
+                "asset": "BTC.BTC",
+                "affiliate": "186",
+                "outbound": "1041",
+                "liquidity": "124",
+                "total": "1351",
+                "slippage_bps": 19,
+                "total_bps": 212
+              },
+              "sourceTransactionShapes": [
+                {
+                  "type": "EVM",
+                  "chain": "eip155:1",
+                  "hasMemo": true,
+                  "hasDestination": true,
+                  "hasSerializedTransaction": false,
+                  "decimalAmount": "0.021319"
+                }
+              ]
+            },
+            {
+              "integration": "nearIntents",
+              "swapper": "NEAR Intents",
+              "amountOut": "0.00060484",
+              "amountOutMin": "0.00058669",
+              "expiry": 1793739824,
+              "quoteMode": "NEAR_INTENTS",
+              "fees": {
+                "total_bps": 35,
+                "affiliate": "0",
+                "outbound": "0",
+                "items": [
+                  {
+                    "kind": "affiliate",
+                    "assetCaip": "eip155:1/slip44:60",
+                    "symbol": "ETH",
+                    "decimals": 18,
+                    "amountBaseUnits": "31978500000000",
+                    "bps": 15,
+                    "recipient": "caa0106da86351f909f1dfa28e7bfa65665554dc512ab2eedd431b040daa3a1f",
+                    "label": "KeepKey app fee"
+                  },
+                  {
+                    "kind": "protocol",
+                    "assetCaip": "eip155:1/slip44:60",
+                    "symbol": "ETH",
+                    "decimals": 18,
+                    "amountBaseUnits": "42638000000000",
+                    "bps": 20,
+                    "recipient": "5880ad2b362620fadf759cbceb1cd5737ce8c6ed7fb8e9942881e6731f9247dd",
+                    "label": "1Click platform fee"
+                  },
+                  {
+                    "kind": "network",
+                    "assetCaip": "bip122:000000000019d6689c085ae165831e93/slip44:0",
+                    "symbol": "BTC",
+                    "decimals": 8,
+                    "amountBaseUnits": "1900",
+                    "label": "Destination withdrawal (included in output)"
+                  }
+                ]
+              },
+              "feeBreakdown": {
+                "requestedAppBps": 30,
+                "effectiveAppFees": [
+                  {
+                    "recipient": "caa0106da86351f909f1dfa28e7bfa65665554dc512ab2eedd431b040daa3a1f",
+                    "fee": 15,
+                    "limitOrderId": null
+                  },
+                  {
+                    "recipient": "5880ad2b362620fadf759cbceb1cd5737ce8c6ed7fb8e9942881e6731f9247dd",
+                    "fee": 20,
+                    "limitOrderId": null
+                  }
+                ],
+                "items": [
+                  {
+                    "kind": "affiliate",
+                    "assetCaip": "eip155:1/slip44:60",
+                    "symbol": "ETH",
+                    "decimals": 18,
+                    "amountBaseUnits": "31978500000000",
+                    "bps": 15,
+                    "recipient": "caa0106da86351f909f1dfa28e7bfa65665554dc512ab2eedd431b040daa3a1f",
+                    "label": "KeepKey app fee"
+                  },
+                  {
+                    "kind": "protocol",
+                    "assetCaip": "eip155:1/slip44:60",
+                    "symbol": "ETH",
+                    "decimals": 18,
+                    "amountBaseUnits": "42638000000000",
+                    "bps": 20,
+                    "recipient": "5880ad2b362620fadf759cbceb1cd5737ce8c6ed7fb8e9942881e6731f9247dd",
+                    "label": "1Click platform fee"
+                  },
+                  {
+                    "kind": "network",
+                    "assetCaip": "bip122:000000000019d6689c085ae165831e93/slip44:0",
+                    "symbol": "BTC",
+                    "decimals": 8,
+                    "amountBaseUnits": "1900",
+                    "label": "Destination withdrawal (included in output)"
+                  }
+                ],
+                "refund": {
+                  "assetCaip": "eip155:1/slip44:60",
+                  "symbol": "ETH",
+                  "decimals": 18,
+                  "amountBaseUnits": "35000000000000",
+                  "label": "Refund cost if returned"
+                }
+              },
+              "nearAppFees": [
+                {
+                  "recipient": "caa0106da86351f909f1dfa28e7bfa65665554dc512ab2eedd431b040daa3a1f",
+                  "fee": 15,
+                  "limitOrderId": null
+                },
+                {
+                  "recipient": "5880ad2b362620fadf759cbceb1cd5737ce8c6ed7fb8e9942881e6731f9247dd",
+                  "fee": 20,
+                  "limitOrderId": null
+                }
+              ],
+              "sourceTransactionShapes": [
+                {
+                  "type": "EVM",
+                  "chain": "eip155:1",
+                  "chainId": 1,
+                  "hasMemo": false,
+                  "hasDestination": true,
+                  "dataBytes": 0,
+                  "hasSerializedTransaction": false,
+                  "nativeValueBaseUnits": "21319000000000000",
+                  "decimalAmount": "0.021319"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "ETH to USDT",
+      "sellAsset": "eip155:1/slip44:60",
+      "buyAsset": "eip155:1/erc20:0xdac17f958d2ee523a2206206994597c13d831ec7",
+      "sellAmount": "0.013118195",
+      "checkedAt": "2026-11-03T20:33:46.396Z",
+      "results": [
+        {
+          "origin": "https://api.keepkey.info",
+          "httpStatus": 200,
+          "elapsedMs": 1001,
+          "quotes": [
+            {
+              "integration": "thorchain",
+              "swapper": "thorchain",
+              "amountOut": "29.54288280",
+              "amountOutMin": "28.65659631",
+              "expiry": 1793738917,
+              "quoteMode": "TC_SUPPORTED_TO_TC_SUPPORTED",
+              "fees": {
+                "asset": "ETH.USDT-0XDAC17F958D2EE523A2206206994597C13D831EC7",
+                "affiliate": "8964820",
+                "outbound": "25020200",
+                "liquidity": "5985700",
+                "total": "39970720",
+                "slippage_bps": 19,
+                "total_bps": 131
+              },
+              "sourceTransactionShapes": [
+                {
+                  "type": "EVM",
+                  "chain": "eip155:1",
+                  "hasMemo": true,
+                  "hasDestination": true,
+                  "hasSerializedTransaction": false,
+                  "decimalAmount": "0.013118195"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "origin": "https://oracles.cc",
+          "httpStatus": 200,
+          "elapsedMs": 1499,
+          "quotes": [
+            {
+              "integration": "uniswap",
+              "swapper": "Uniswap",
+              "amountOut": "29.876728",
+              "amountOutMin": "28.980426",
+              "expiry": 1793738205,
+              "quoteMode": "UNISWAP_DIRECT",
+              "fees": {
+                "total_bps": 30,
+                "outbound": "0",
+                "affiliate": "0.089899"
+              },
+              "feeBreakdown": {
+                "integrator": {
+                  "bps": 30,
+                  "recipient": "0x87ab2637bc4231604ad708c5e8aac92a260c7704"
+                }
+              },
+              "sourceTransactionShapes": [
+                {
+                  "type": "EVM",
+                  "chain": "eip155:1",
+                  "chainId": 1,
+                  "hasMemo": false,
+                  "hasDestination": true,
+                  "dataBytes": 964,
+                  "hasSerializedTransaction": false,
+                  "nativeValueBaseUnits": "13118195000000000",
+                  "decimalAmount": "0.013118195"
+                }
+              ]
+            },
+            {
+              "integration": "relay",
+              "swapper": "Relay",
+              "amountOut": "29.869059",
+              "amountOutMin": "28.972987",
+              "quoteMode": "RELAY_DIRECT",
+              "fees": {
+                "gas": {
+                  "currency": {
+                    "chainId": 1,
+                    "address": "0x0000000000000000000000000000000000000000",
+                    "symbol": "ETH",
+                    "name": "Ether",
+                    "decimals": 18,
+                    "metadata": {
+                      "logoURI": "https://assets.relay.link/icons/1/light.png",
+                      "verified": true
+                    }
+                  },
+                  "amount": "74197229751673",
+                  "amountFormatted": "0.000074197229751673",
+                  "amountUsd": "0.169321",
+                  "minimumAmount": "74197229751673"
+                },
+                "relayer": {
+                  "currency": {
+                    "chainId": 1,
+                    "address": "0x0000000000000000000000000000000000000000",
+                    "symbol": "ETH",
+                    "name": "Ether",
+                    "decimals": 18,
+                    "metadata": {
+                      "logoURI": "https://assets.relay.link/icons/1/light.png",
+                      "verified": true
+                    }
+                  },
+                  "amount": "7870061428990",
+                  "amountFormatted": "0.00000787006142899",
+                  "amountUsd": "0.017960",
+                  "minimumAmount": "7870061428990"
+                },
+                "relayerGas": {
+                  "currency": {
+                    "chainId": 1,
+                    "address": "0x0000000000000000000000000000000000000000",
+                    "symbol": "ETH",
+                    "name": "Ether",
+                    "decimals": 18,
+                    "metadata": {
+                      "logoURI": "https://assets.relay.link/icons/1/light.png",
+                      "verified": true
+                    }
+                  },
+                  "amount": "0",
+                  "amountFormatted": "0.0",
+                  "amountUsd": "0",
+                  "minimumAmount": "0"
+                },
+                "relayerService": {
+                  "currency": {
+                    "chainId": 1,
+                    "address": "0x0000000000000000000000000000000000000000",
+                    "symbol": "ETH",
+                    "name": "Ether",
+                    "decimals": 18,
+                    "metadata": {
+                      "logoURI": "https://assets.relay.link/icons/1/light.png",
+                      "verified": true
+                    }
+                  },
+                  "amount": "7870061428990",
+                  "amountFormatted": "0.00000787006142899",
+                  "amountUsd": "0.017960",
+                  "minimumAmount": "7870061428990"
+                },
+                "app": {
+                  "currency": {
+                    "chainId": 1,
+                    "address": "0x0000000000000000000000000000000000000000",
+                    "symbol": "ETH",
+                    "name": "Ether",
+                    "decimals": 18,
+                    "metadata": {
+                      "logoURI": "https://assets.relay.link/icons/1/light.png",
+                      "verified": true
+                    }
+                  },
+                  "amount": "39354585000000",
+                  "amountFormatted": "0.000039354585",
+                  "amountUsd": "0.089809",
+                  "minimumAmount": "39354585000000"
+                },
+                "total_bps": 30,
+                "outbound": "0",
+                "affiliate": "0",
+                "items": [
+                  {
+                    "kind": "affiliate",
+                    "label": "Relay partner fees",
+                    "assetCaip": "eip155:1/slip44:60",
+                    "symbol": "ETH",
+                    "decimals": 18,
+                    "amountBaseUnits": "39354585000000",
+                    "amount": "0.000039354585",
+                    "bps": 30
+                  },
+                  {
+                    "kind": "network",
+                    "label": "Source network estimate",
+                    "assetCaip": "eip155:1/slip44:60",
+                    "symbol": "ETH",
+                    "decimals": 18,
+                    "amountBaseUnits": "74197229751673",
+                    "amount": "0.000074197229751673"
+                  },
+                  {
+                    "kind": "provider",
+                    "label": "Relay service fee",
+                    "assetCaip": "eip155:1/slip44:60",
+                    "symbol": "ETH",
+                    "decimals": 18,
+                    "amountBaseUnits": "7870061428990",
+                    "amount": "0.00000787006142899"
+                  }
+                ]
+              },
+              "feeBreakdown": {
+                "integrator": {
+                  "bps": 30,
+                  "recipients": [
+                    {
+                      "recipient": "0x87Ab2637bc4231604ad708c5e8aAC92A260c7704",
+                      "bps": 15
+                    },
+                    {
+                      "recipient": "0x21c9a94AF76B59b171b32fD125A4edF0e9A2Ad3e",
+                      "bps": 15
+                    }
+                  ]
+                },
+                "sourceNetwork": {
+                  "amountBaseUnits": "74197229751673",
+                  "asset": "eip155:1/slip44:60"
+                },
+                "priceImpactPercent": 0.34
+              },
+              "sourceTransactionShapes": [
+                {
+                  "type": "EVM",
+                  "chain": "eip155:1",
+                  "chainId": 1,
+                  "hasMemo": false,
+                  "hasDestination": true,
+                  "dataBytes": 5028,
+                  "hasSerializedTransaction": false,
+                  "nativeValueBaseUnits": "13118195000000000",
+                  "decimalAmount": "0.013118195"
+                }
+              ]
+            },
+            {
+              "integration": "zeroex",
+              "swapper": "0x",
+              "amountOut": "29.841129",
+              "amountOutMin": "28.945895",
+              "quoteMode": "ZEROX_DIRECT",
+              "fees": {
+                "integratorFee": {
+                  "amount": "89928",
+                  "token": "0xdac17f958d2ee523a2206206994597c13d831ec7",
+                  "type": "volume"
+                },
+                "integratorFees": [
+                  {
+                    "amount": "89928",
+                    "token": "0xdac17f958d2ee523a2206206994597c13d831ec7",
+                    "type": "volume"
+                  }
+                ],
+                "zeroExFee": {
+                  "amount": "44964",
+                  "token": "0xdac17f958d2ee523a2206206994597c13d831ec7",
+                  "type": "volume"
+                },
+                "gasFee": null,
+                "total_bps": 46,
+                "affiliate": "89928",
+                "outbound": "0"
+              },
+              "sourceTransactionShapes": [
+                {
+                  "type": "EVM",
+                  "chain": "eip155:1",
+                  "chainId": 1,
+                  "hasMemo": false,
+                  "hasDestination": true,
+                  "dataBytes": 2276,
+                  "hasSerializedTransaction": false,
+                  "nativeValueBaseUnits": "13118195000000000",
+                  "decimalAmount": "0.013118195"
+                }
+              ]
+            },
+            {
+              "integration": "nearIntents",
+              "swapper": "NEAR Intents",
+              "amountOut": "29.557304",
+              "amountOutMin": "28.670584",
+              "expiry": 1793739825,
+              "quoteMode": "NEAR_INTENTS",
+              "fees": {
+                "total_bps": 35,
+                "affiliate": "0",
+                "outbound": "0",
+                "items": [
+                  {
+                    "kind": "affiliate",
+                    "assetCaip": "eip155:1/slip44:60",
+                    "symbol": "ETH",
+                    "decimals": 18,
+                    "amountBaseUnits": "19677292500000",
+                    "bps": 15,
+                    "recipient": "caa0106da86351f909f1dfa28e7bfa65665554dc512ab2eedd431b040daa3a1f",
+                    "label": "KeepKey app fee"
+                  },
+                  {
+                    "kind": "protocol",
+                    "assetCaip": "eip155:1/slip44:60",
+                    "symbol": "ETH",
+                    "decimals": 18,
+                    "amountBaseUnits": "26236390000000",
+                    "bps": 20,
+                    "recipient": "5880ad2b362620fadf759cbceb1cd5737ce8c6ed7fb8e9942881e6731f9247dd",
+                    "label": "1Click platform fee"
+                  },
+                  {
+                    "kind": "network",
+                    "assetCaip": "eip155:1/erc20:0xdac17f958d2ee523a2206206994597c13d831ec7",
+                    "symbol": "USDT",
+                    "decimals": 6,
+                    "amountBaseUnits": "300000",
+                    "label": "Destination withdrawal (included in output)"
+                  }
+                ]
+              },
+              "feeBreakdown": {
+                "requestedAppBps": 30,
+                "effectiveAppFees": [
+                  {
+                    "recipient": "caa0106da86351f909f1dfa28e7bfa65665554dc512ab2eedd431b040daa3a1f",
+                    "fee": 15,
+                    "limitOrderId": null
+                  },
+                  {
+                    "recipient": "5880ad2b362620fadf759cbceb1cd5737ce8c6ed7fb8e9942881e6731f9247dd",
+                    "fee": 20,
+                    "limitOrderId": null
+                  }
+                ],
+                "items": [
+                  {
+                    "kind": "affiliate",
+                    "assetCaip": "eip155:1/slip44:60",
+                    "symbol": "ETH",
+                    "decimals": 18,
+                    "amountBaseUnits": "19677292500000",
+                    "bps": 15,
+                    "recipient": "caa0106da86351f909f1dfa28e7bfa65665554dc512ab2eedd431b040daa3a1f",
+                    "label": "KeepKey app fee"
+                  },
+                  {
+                    "kind": "protocol",
+                    "assetCaip": "eip155:1/slip44:60",
+                    "symbol": "ETH",
+                    "decimals": 18,
+                    "amountBaseUnits": "26236390000000",
+                    "bps": 20,
+                    "recipient": "5880ad2b362620fadf759cbceb1cd5737ce8c6ed7fb8e9942881e6731f9247dd",
+                    "label": "1Click platform fee"
+                  },
+                  {
+                    "kind": "network",
+                    "assetCaip": "eip155:1/erc20:0xdac17f958d2ee523a2206206994597c13d831ec7",
+                    "symbol": "USDT",
+                    "decimals": 6,
+                    "amountBaseUnits": "300000",
+                    "label": "Destination withdrawal (included in output)"
+                  }
+                ],
+                "refund": {
+                  "assetCaip": "eip155:1/slip44:60",
+                  "symbol": "ETH",
+                  "decimals": 18,
+                  "amountBaseUnits": "35000000000000",
+                  "label": "Refund cost if returned"
+                }
+              },
+              "nearAppFees": [
+                {
+                  "recipient": "caa0106da86351f909f1dfa28e7bfa65665554dc512ab2eedd431b040daa3a1f",
+                  "fee": 15,
+                  "limitOrderId": null
+                },
+                {
+                  "recipient": "5880ad2b362620fadf759cbceb1cd5737ce8c6ed7fb8e9942881e6731f9247dd",
+                  "fee": 20,
+                  "limitOrderId": null
+                }
+              ],
+              "sourceTransactionShapes": [
+                {
+                  "type": "EVM",
+                  "chain": "eip155:1",
+                  "chainId": 1,
+                  "hasMemo": false,
+                  "hasDestination": true,
+                  "dataBytes": 0,
+                  "hasSerializedTransaction": false,
+                  "nativeValueBaseUnits": "13118195000000000",
+                  "decimalAmount": "0.013118195"
+                }
+              ]
+            },
+            {
+              "integration": "thorchain",
+              "swapper": "thorchain",
+              "amountOut": "29.54286087",
+              "amountOutMin": "28.65657504",
+              "expiry": 1793738917,
+              "quoteMode": "THORCHAIN_DIRECT",
+              "fees": {
+                "asset": "ETH.USDT-0XDAC17F958D2EE523A2206206994597C13D831EC7",
+                "affiliate": "8964813",
+                "outbound": "25020200",
+                "liquidity": "5985700",
+                "total": "39970713",
+                "slippage_bps": 19,
+                "total_bps": 131
+              },
+              "sourceTransactionShapes": [
+                {
+                  "type": "EVM",
+                  "chain": "eip155:1",
+                  "hasMemo": true,
+                  "hasDestination": true,
+                  "hasSerializedTransaction": false,
+                  "decimalAmount": "0.013118195"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "ETH to Base USDC",
+      "sellAsset": "eip155:1/slip44:60",
+      "buyAsset": "eip155:8453/erc20:0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+      "sellAmount": "0.013118195",
+      "checkedAt": "2026-11-03T20:33:47.835Z",
+      "results": [
+        {
+          "origin": "https://api.keepkey.info",
+          "httpStatus": 200,
+          "elapsedMs": 913,
+          "quotes": [
+            {
+              "integration": "thorchain",
+              "swapper": "thorchain",
+              "amountOut": "29.53188549",
+              "amountOutMin": "28.64592892",
+              "expiry": 1793738917,
+              "quoteMode": "TC_SUPPORTED_TO_TC_SUPPORTED",
+              "fees": {
+                "asset": "BASE.USDC-0X833589FCD6EDB6E08F4C7C32D4F71B54BDA02913",
+                "affiliate": "8961451",
+                "outbound": "25000200",
+                "liquidity": "5987000",
+                "total": "39948651",
+                "slippage_bps": 20,
+                "total_bps": 131
+              },
+              "sourceTransactionShapes": [
+                {
+                  "type": "EVM",
+                  "chain": "eip155:1",
+                  "hasMemo": true,
+                  "hasDestination": true,
+                  "hasSerializedTransaction": false,
+                  "decimalAmount": "0.013118195"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "origin": "https://oracles.cc",
+          "httpStatus": 200,
+          "elapsedMs": 1438,
+          "quotes": [
+            {
+              "integration": "nearIntents",
+              "swapper": "NEAR Intents",
+              "amountOut": "29.823377",
+              "amountOutMin": "28.928675",
+              "expiry": 1793739827,
+              "quoteMode": "NEAR_INTENTS",
+              "fees": {
+                "total_bps": 35,
+                "affiliate": "0",
+                "outbound": "0",
+                "items": [
+                  {
+                    "kind": "affiliate",
+                    "assetCaip": "eip155:1/slip44:60",
+                    "symbol": "ETH",
+                    "decimals": 18,
+                    "amountBaseUnits": "19677292500000",
+                    "bps": 15,
+                    "recipient": "caa0106da86351f909f1dfa28e7bfa65665554dc512ab2eedd431b040daa3a1f",
+                    "label": "KeepKey app fee"
+                  },
+                  {
+                    "kind": "protocol",
+                    "assetCaip": "eip155:1/slip44:60",
+                    "symbol": "ETH",
+                    "decimals": 18,
+                    "amountBaseUnits": "26236390000000",
+                    "bps": 20,
+                    "recipient": "5880ad2b362620fadf759cbceb1cd5737ce8c6ed7fb8e9942881e6731f9247dd",
+                    "label": "1Click platform fee"
+                  },
+                  {
+                    "kind": "network",
+                    "assetCaip": "eip155:8453/erc20:0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+                    "symbol": "USDC",
+                    "decimals": 6,
+                    "amountBaseUnits": "2400",
+                    "label": "Destination withdrawal (included in output)"
+                  }
+                ]
+              },
+              "feeBreakdown": {
+                "requestedAppBps": 30,
+                "effectiveAppFees": [
+                  {
+                    "recipient": "caa0106da86351f909f1dfa28e7bfa65665554dc512ab2eedd431b040daa3a1f",
+                    "fee": 15,
+                    "limitOrderId": null
+                  },
+                  {
+                    "recipient": "5880ad2b362620fadf759cbceb1cd5737ce8c6ed7fb8e9942881e6731f9247dd",
+                    "fee": 20,
+                    "limitOrderId": null
+                  }
+                ],
+                "items": [
+                  {
+                    "kind": "affiliate",
+                    "assetCaip": "eip155:1/slip44:60",
+                    "symbol": "ETH",
+                    "decimals": 18,
+                    "amountBaseUnits": "19677292500000",
+                    "bps": 15,
+                    "recipient": "caa0106da86351f909f1dfa28e7bfa65665554dc512ab2eedd431b040daa3a1f",
+                    "label": "KeepKey app fee"
+                  },
+                  {
+                    "kind": "protocol",
+                    "assetCaip": "eip155:1/slip44:60",
+                    "symbol": "ETH",
+                    "decimals": 18,
+                    "amountBaseUnits": "26236390000000",
+                    "bps": 20,
+                    "recipient": "5880ad2b362620fadf759cbceb1cd5737ce8c6ed7fb8e9942881e6731f9247dd",
+                    "label": "1Click platform fee"
+                  },
+                  {
+                    "kind": "network",
+                    "assetCaip": "eip155:8453/erc20:0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+                    "symbol": "USDC",
+                    "decimals": 6,
+                    "amountBaseUnits": "2400",
+                    "label": "Destination withdrawal (included in output)"
+                  }
+                ],
+                "refund": {
+                  "assetCaip": "eip155:1/slip44:60",
+                  "symbol": "ETH",
+                  "decimals": 18,
+                  "amountBaseUnits": "35000000000000",
+                  "label": "Refund cost if returned"
+                }
+              },
+              "nearAppFees": [
+                {
+                  "recipient": "caa0106da86351f909f1dfa28e7bfa65665554dc512ab2eedd431b040daa3a1f",
+                  "fee": 15,
+                  "limitOrderId": null
+                },
+                {
+                  "recipient": "5880ad2b362620fadf759cbceb1cd5737ce8c6ed7fb8e9942881e6731f9247dd",
+                  "fee": 20,
+                  "limitOrderId": null
+                }
+              ],
+              "sourceTransactionShapes": [
+                {
+                  "type": "EVM",
+                  "chain": "eip155:1",
+                  "chainId": 1,
+                  "hasMemo": false,
+                  "hasDestination": true,
+                  "dataBytes": 0,
+                  "hasSerializedTransaction": false,
+                  "nativeValueBaseUnits": "13118195000000000",
+                  "decimalAmount": "0.013118195"
+                }
+              ]
+            },
+            {
+              "integration": "relay",
+              "swapper": "Relay",
+              "amountOut": "29.766266",
+              "amountOutMin": "28.873279",
+              "quoteMode": "RELAY_DIRECT",
+              "fees": {
+                "gas": {
+                  "currency": {
+                    "chainId": 1,
+                    "address": "0x0000000000000000000000000000000000000000",
+                    "symbol": "ETH",
+                    "name": "Ether",
+                    "decimals": 18,
+                    "metadata": {
+                      "logoURI": "https://assets.relay.link/icons/1/light.png",
+                      "verified": true
+                    }
+                  },
+                  "amount": "5062522972437",
+                  "amountFormatted": "0.000005062522972437",
+                  "amountUsd": "0.011553",
+                  "minimumAmount": "5062522972437"
+                },
+                "relayer": {
+                  "currency": {
+                    "chainId": 1,
+                    "address": "0x0000000000000000000000000000000000000000",
+                    "symbol": "ETH",
+                    "name": "Ether",
+                    "decimals": 18,
+                    "metadata": {
+                      "logoURI": "https://assets.relay.link/icons/1/light.png",
+                      "verified": true
+                    }
+                  },
+                  "amount": "23597698931622",
+                  "amountFormatted": "0.000023597698931622",
+                  "amountUsd": "0.053851",
+                  "minimumAmount": "23597698931622"
+                },
+                "relayerGas": {
+                  "currency": {
+                    "chainId": 1,
+                    "address": "0x0000000000000000000000000000000000000000",
+                    "symbol": "ETH",
+                    "name": "Ether",
+                    "decimals": 18,
+                    "metadata": {
+                      "logoURI": "https://assets.relay.link/icons/1/light.png",
+                      "verified": true
+                    }
+                  },
+                  "amount": "413077205707",
+                  "amountFormatted": "0.000000413077205707",
+                  "amountUsd": "0.000943",
+                  "minimumAmount": "413077205707"
+                },
+                "relayerService": {
+                  "currency": {
+                    "chainId": 1,
+                    "address": "0x0000000000000000000000000000000000000000",
+                    "symbol": "ETH",
+                    "name": "Ether",
+                    "decimals": 18,
+                    "metadata": {
+                      "logoURI": "https://assets.relay.link/icons/1/light.png",
+                      "verified": true
+                    }
+                  },
+                  "amount": "23184621725915",
+                  "amountFormatted": "0.000023184621725915",
+                  "amountUsd": "0.052908",
+                  "minimumAmount": "23184621725915"
+                },
+                "app": {
+                  "currency": {
+                    "chainId": 1,
+                    "address": "0x0000000000000000000000000000000000000000",
+                    "symbol": "ETH",
+                    "name": "Ether",
+                    "decimals": 18,
+                    "metadata": {
+                      "logoURI": "https://assets.relay.link/icons/1/light.png",
+                      "verified": true
+                    }
+                  },
+                  "amount": "39354585000000",
+                  "amountFormatted": "0.000039354585",
+                  "amountUsd": "0.089809",
+                  "minimumAmount": "39354585000000"
+                },
+                "subsidized": {
+                  "currency": {
+                    "chainId": 1,
+                    "address": "0x0000000000000000000000000000000000000000",
+                    "symbol": "ETH",
+                    "name": "Ether",
+                    "decimals": 18,
+                    "metadata": {
+                      "logoURI": "https://assets.relay.link/icons/1/light.png",
+                      "verified": true
+                    }
+                  },
+                  "amount": "0",
+                  "amountFormatted": "0.0",
+                  "amountUsd": "0",
+                  "minimumAmount": "0"
+                },
+                "total_bps": 30,
+                "outbound": "0",
+                "affiliate": "0",
+                "items": [
+                  {
+                    "kind": "affiliate",
+                    "label": "Relay partner fees",
+                    "assetCaip": "eip155:1/slip44:60",
+                    "symbol": "ETH",
+                    "decimals": 18,
+                    "amountBaseUnits": "39354585000000",
+                    "amount": "0.000039354585",
+                    "bps": 30
+                  },
+                  {
+                    "kind": "network",
+                    "label": "Source network estimate",
+                    "assetCaip": "eip155:1/slip44:60",
+                    "symbol": "ETH",
+                    "decimals": 18,
+                    "amountBaseUnits": "5062522972437",
+                    "amount": "0.000005062522972437"
+                  },
+                  {
+                    "kind": "provider",
+                    "label": "Relay service fee",
+                    "assetCaip": "eip155:1/slip44:60",
+                    "symbol": "ETH",
+                    "decimals": 18,
+                    "amountBaseUnits": "23597698931622",
+                    "amount": "0.000023597698931622"
+                  }
+                ]
+              },
+              "feeBreakdown": {
+                "integrator": {
+                  "bps": 30,
+                  "recipients": [
+                    {
+                      "recipient": "0x87Ab2637bc4231604ad708c5e8aAC92A260c7704",
+                      "bps": 15
+                    },
+                    {
+                      "recipient": "0x21c9a94AF76B59b171b32fD125A4edF0e9A2Ad3e",
+                      "bps": 15
+                    }
+                  ]
+                },
+                "sourceNetwork": {
+                  "amountBaseUnits": "5062522972437",
+                  "asset": "eip155:1/slip44:60"
+                },
+                "priceImpactPercent": 0.59
+              },
+              "sourceTransactionShapes": [
+                {
+                  "type": "EVM",
+                  "chain": "eip155:1",
+                  "chainId": 1,
+                  "hasMemo": false,
+                  "hasDestination": true,
+                  "dataBytes": 68,
+                  "hasSerializedTransaction": false,
+                  "nativeValueBaseUnits": "13118195000000000",
+                  "decimalAmount": "0.013118195"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "SOL to ETH",
+      "sellAsset": "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp/slip44:501",
+      "buyAsset": "eip155:1/slip44:60",
+      "sellAmount": "0.25",
+      "checkedAt": "2026-11-03T20:33:49.515Z",
+      "results": [
+        {
+          "origin": "https://api.keepkey.info",
+          "httpStatus": 200,
+          "elapsedMs": 1140,
+          "quotes": [
+            {
+              "integration": "relay",
+              "swapper": "relay",
+              "amountOut": 0.010098193443976023,
+              "amountOutMin": 0.009795247640656741,
+              "quoteMode": "RELAY_BRIDGE",
+              "fees": {
+                "gas": {
+                  "currency": {
+                    "chainId": 792703809,
+                    "address": "11111111111111111111111111111111",
+                    "symbol": "SOL",
+                    "name": "Solana",
+                    "decimals": 9,
+                    "metadata": {
+                      "logoURI": "https://upload.wikimedia.org/wikipedia/en/b/b9/Solana_logo.png",
+                      "verified": true
+                    }
+                  },
+                  "amount": "10000",
+                  "amountFormatted": "0.00001",
+                  "amountUsd": "0.000932",
+                  "minimumAmount": "10000"
+                },
+                "relayer": {
+                  "currency": {
+                    "chainId": 792703809,
+                    "address": "11111111111111111111111111111111",
+                    "symbol": "SOL",
+                    "name": "Solana",
+                    "decimals": 9,
+                    "metadata": {
+                      "logoURI": "https://upload.wikimedia.org/wikipedia/en/b/b9/Solana_logo.png",
+                      "verified": true
+                    }
+                  },
+                  "amount": "1104043",
+                  "amountFormatted": "0.001104043",
+                  "amountUsd": "0.102898",
+                  "minimumAmount": "1104043"
+                },
+                "relayerGas": {
+                  "currency": {
+                    "chainId": 792703809,
+                    "address": "11111111111111111111111111111111",
+                    "symbol": "SOL",
+                    "name": "Solana",
+                    "decimals": 9,
+                    "metadata": {
+                      "logoURI": "https://upload.wikimedia.org/wikipedia/en/b/b9/Solana_logo.png",
+                      "verified": true
+                    }
+                  },
+                  "amount": "366116",
+                  "amountFormatted": "0.000366116",
+                  "amountUsd": "0.034122",
+                  "minimumAmount": "366116"
+                },
+                "relayerService": {
+                  "currency": {
+                    "chainId": 792703809,
+                    "address": "11111111111111111111111111111111",
+                    "symbol": "SOL",
+                    "name": "Solana",
+                    "decimals": 9,
+                    "metadata": {
+                      "logoURI": "https://upload.wikimedia.org/wikipedia/en/b/b9/Solana_logo.png",
+                      "verified": true
+                    }
+                  },
+                  "amount": "737927",
+                  "amountFormatted": "0.000737927",
+                  "amountUsd": "0.068775",
+                  "minimumAmount": "737927"
+                },
+                "app": {
+                  "currency": {
+                    "chainId": 792703809,
+                    "address": "11111111111111111111111111111111",
+                    "symbol": "SOL",
+                    "name": "Solana",
+                    "decimals": 9,
+                    "metadata": {
+                      "logoURI": "https://upload.wikimedia.org/wikipedia/en/b/b9/Solana_logo.png",
+                      "verified": true
+                    }
+                  },
+                  "amount": "750000",
+                  "amountFormatted": "0.00075",
+                  "amountUsd": "0.069901",
+                  "minimumAmount": "750000"
+                },
+                "subsidized": {
+                  "currency": {
+                    "chainId": 792703809,
+                    "address": "11111111111111111111111111111111",
+                    "symbol": "SOL",
+                    "name": "Solana",
+                    "decimals": 9,
+                    "metadata": {
+                      "logoURI": "https://upload.wikimedia.org/wikipedia/en/b/b9/Solana_logo.png",
+                      "verified": true
+                    }
+                  },
+                  "amount": "0",
+                  "amountFormatted": "0.0",
+                  "amountUsd": "0",
+                  "minimumAmount": "0"
+                }
+              },
+              "sourceTransactionShapes": [
+                {
+                  "type": "SOLANA",
+                  "chain": "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp",
+                  "hasMemo": false,
+                  "hasDestination": true,
+                  "hasSerializedTransaction": true
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "origin": "https://oracles.cc",
+          "httpStatus": 200,
+          "elapsedMs": 1679,
+          "quotes": [
+            {
+              "integration": "nearIntents",
+              "swapper": "NEAR Intents",
+              "amountOut": "0.01013764889125454",
+              "amountOutMin": "0.009833519424516903",
+              "expiry": 1793739828,
+              "quoteMode": "NEAR_INTENTS",
+              "fees": {
+                "total_bps": 35,
+                "affiliate": "0",
+                "outbound": "0",
+                "items": [
+                  {
+                    "kind": "affiliate",
+                    "assetCaip": "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp/slip44:501",
+                    "symbol": "SOL",
+                    "decimals": 9,
+                    "amountBaseUnits": "375000",
+                    "bps": 15,
+                    "recipient": "caa0106da86351f909f1dfa28e7bfa65665554dc512ab2eedd431b040daa3a1f",
+                    "label": "KeepKey app fee"
+                  },
+                  {
+                    "kind": "protocol",
+                    "assetCaip": "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp/slip44:501",
+                    "symbol": "SOL",
+                    "decimals": 9,
+                    "amountBaseUnits": "500000",
+                    "bps": 20,
+                    "recipient": "5880ad2b362620fadf759cbceb1cd5737ce8c6ed7fb8e9942881e6731f9247dd",
+                    "label": "1Click platform fee"
+                  },
+                  {
+                    "kind": "network",
+                    "assetCaip": "eip155:1/slip44:60",
+                    "symbol": "ETH",
+                    "decimals": 18,
+                    "amountBaseUnits": "35000000000000",
+                    "label": "Destination withdrawal (included in output)"
+                  }
+                ]
+              },
+              "feeBreakdown": {
+                "requestedAppBps": 30,
+                "effectiveAppFees": [
+                  {
+                    "recipient": "caa0106da86351f909f1dfa28e7bfa65665554dc512ab2eedd431b040daa3a1f",
+                    "fee": 15,
+                    "limitOrderId": null
+                  },
+                  {
+                    "recipient": "5880ad2b362620fadf759cbceb1cd5737ce8c6ed7fb8e9942881e6731f9247dd",
+                    "fee": 20,
+                    "limitOrderId": null
+                  }
+                ],
+                "items": [
+                  {
+                    "kind": "affiliate",
+                    "assetCaip": "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp/slip44:501",
+                    "symbol": "SOL",
+                    "decimals": 9,
+                    "amountBaseUnits": "375000",
+                    "bps": 15,
+                    "recipient": "caa0106da86351f909f1dfa28e7bfa65665554dc512ab2eedd431b040daa3a1f",
+                    "label": "KeepKey app fee"
+                  },
+                  {
+                    "kind": "protocol",
+                    "assetCaip": "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp/slip44:501",
+                    "symbol": "SOL",
+                    "decimals": 9,
+                    "amountBaseUnits": "500000",
+                    "bps": 20,
+                    "recipient": "5880ad2b362620fadf759cbceb1cd5737ce8c6ed7fb8e9942881e6731f9247dd",
+                    "label": "1Click platform fee"
+                  },
+                  {
+                    "kind": "network",
+                    "assetCaip": "eip155:1/slip44:60",
+                    "symbol": "ETH",
+                    "decimals": 18,
+                    "amountBaseUnits": "35000000000000",
+                    "label": "Destination withdrawal (included in output)"
+                  }
+                ],
+                "refund": {
+                  "assetCaip": "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp/slip44:501",
+                  "symbol": "SOL",
+                  "decimals": 9,
+                  "amountBaseUnits": "107136",
+                  "label": "Refund cost if returned"
+                }
+              },
+              "nearAppFees": [
+                {
+                  "recipient": "caa0106da86351f909f1dfa28e7bfa65665554dc512ab2eedd431b040daa3a1f",
+                  "fee": 15,
+                  "limitOrderId": null
+                },
+                {
+                  "recipient": "5880ad2b362620fadf759cbceb1cd5737ce8c6ed7fb8e9942881e6731f9247dd",
+                  "fee": 20,
+                  "limitOrderId": null
+                }
+              ],
+              "sourceTransactionShapes": [
+                {
+                  "type": "SOLANA",
+                  "chain": "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp",
+                  "hasMemo": false,
+                  "hasDestination": true,
+                  "hasSerializedTransaction": false,
+                  "decimalAmount": "0.25"
+                }
+              ]
+            },
+            {
+              "integration": "relay",
+              "swapper": "Relay",
+              "amountOut": "0.010098193443976023",
+              "amountOutMin": "0.009795247640656743",
+              "quoteMode": "RELAY_DIRECT",
+              "fees": {
+                "gas": {
+                  "currency": {
+                    "chainId": 792703809,
+                    "address": "11111111111111111111111111111111",
+                    "symbol": "SOL",
+                    "name": "Solana",
+                    "decimals": 9,
+                    "metadata": {
+                      "logoURI": "https://upload.wikimedia.org/wikipedia/en/b/b9/Solana_logo.png",
+                      "verified": true
+                    }
+                  },
+                  "amount": "10000",
+                  "amountFormatted": "0.00001",
+                  "amountUsd": "0.000932",
+                  "minimumAmount": "10000"
+                },
+                "relayer": {
+                  "currency": {
+                    "chainId": 792703809,
+                    "address": "11111111111111111111111111111111",
+                    "symbol": "SOL",
+                    "name": "Solana",
+                    "decimals": 9,
+                    "metadata": {
+                      "logoURI": "https://upload.wikimedia.org/wikipedia/en/b/b9/Solana_logo.png",
+                      "verified": true
+                    }
+                  },
+                  "amount": "1104043",
+                  "amountFormatted": "0.001104043",
+                  "amountUsd": "0.102898",
+                  "minimumAmount": "1104043"
+                },
+                "relayerGas": {
+                  "currency": {
+                    "chainId": 792703809,
+                    "address": "11111111111111111111111111111111",
+                    "symbol": "SOL",
+                    "name": "Solana",
+                    "decimals": 9,
+                    "metadata": {
+                      "logoURI": "https://upload.wikimedia.org/wikipedia/en/b/b9/Solana_logo.png",
+                      "verified": true
+                    }
+                  },
+                  "amount": "366116",
+                  "amountFormatted": "0.000366116",
+                  "amountUsd": "0.034122",
+                  "minimumAmount": "366116"
+                },
+                "relayerService": {
+                  "currency": {
+                    "chainId": 792703809,
+                    "address": "11111111111111111111111111111111",
+                    "symbol": "SOL",
+                    "name": "Solana",
+                    "decimals": 9,
+                    "metadata": {
+                      "logoURI": "https://upload.wikimedia.org/wikipedia/en/b/b9/Solana_logo.png",
+                      "verified": true
+                    }
+                  },
+                  "amount": "737927",
+                  "amountFormatted": "0.000737927",
+                  "amountUsd": "0.068775",
+                  "minimumAmount": "737927"
+                },
+                "app": {
+                  "currency": {
+                    "chainId": 792703809,
+                    "address": "11111111111111111111111111111111",
+                    "symbol": "SOL",
+                    "name": "Solana",
+                    "decimals": 9,
+                    "metadata": {
+                      "logoURI": "https://upload.wikimedia.org/wikipedia/en/b/b9/Solana_logo.png",
+                      "verified": true
+                    }
+                  },
+                  "amount": "750000",
+                  "amountFormatted": "0.00075",
+                  "amountUsd": "0.069901",
+                  "minimumAmount": "750000"
+                },
+                "subsidized": {
+                  "currency": {
+                    "chainId": 792703809,
+                    "address": "11111111111111111111111111111111",
+                    "symbol": "SOL",
+                    "name": "Solana",
+                    "decimals": 9,
+                    "metadata": {
+                      "logoURI": "https://upload.wikimedia.org/wikipedia/en/b/b9/Solana_logo.png",
+                      "verified": true
+                    }
+                  },
+                  "amount": "0",
+                  "amountFormatted": "0.0",
+                  "amountUsd": "0",
+                  "minimumAmount": "0"
+                },
+                "total_bps": 30,
+                "outbound": "0",
+                "affiliate": "0",
+                "items": [
+                  {
+                    "kind": "affiliate",
+                    "label": "Relay partner fees",
+                    "assetCaip": "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp/slip44:501",
+                    "symbol": "SOL",
+                    "decimals": 9,
+                    "amountBaseUnits": "750000",
+                    "amount": "0.00075",
+                    "bps": 30
+                  },
+                  {
+                    "kind": "network",
+                    "label": "Source network estimate",
+                    "assetCaip": "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp/slip44:501",
+                    "symbol": "SOL",
+                    "decimals": 9,
+                    "amountBaseUnits": "10000",
+                    "amount": "0.00001"
+                  },
+                  {
+                    "kind": "provider",
+                    "label": "Relay service fee",
+                    "assetCaip": "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp/slip44:501",
+                    "symbol": "SOL",
+                    "decimals": 9,
+                    "amountBaseUnits": "1104043",
+                    "amount": "0.001104043"
+                  }
+                ]
+              },
+              "feeBreakdown": {
+                "integrator": {
+                  "bps": 30,
+                  "recipients": [
+                    {
+                      "recipient": "0x87Ab2637bc4231604ad708c5e8aAC92A260c7704",
+                      "bps": 15
+                    },
+                    {
+                      "recipient": "0x21c9a94AF76B59b171b32fD125A4edF0e9A2Ad3e",
+                      "bps": 15
+                    }
+                  ]
+                },
+                "sourceNetwork": {
+                  "amountBaseUnits": "10000",
+                  "asset": "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp/slip44:501"
+                },
+                "priceImpactPercent": 1.1
+              },
+              "sourceTransactionShapes": [
+                {
+                  "type": "SOLANA",
+                  "chain": "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp",
+                  "hasMemo": false,
+                  "hasDestination": true,
+                  "hasSerializedTransaction": true,
+                  "decimalAmount": "0.25"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "ZEC to ETH",
+      "sellAsset": "bip122:00040fe8ec8471911baa1db1266ea15d/slip44:133",
+      "buyAsset": "eip155:1/slip44:60",
+      "sellAmount": "0.042103",
+      "checkedAt": "2026-11-03T20:33:51.201Z",
+      "results": [
+        {
+          "origin": "https://api.keepkey.info",
+          "httpStatus": 200,
+          "elapsedMs": 1006,
+          "quotes": [
+            {
+              "integration": "nearIntents",
+              "swapper": "NEAR Intents",
+              "amountOut": 0.022142441536877656,
+              "amountOutMin": 0.021478168290771326,
+              "quoteMode": "NEAR_INTENTS",
+              "nearAppFees": [
+                {
+                  "recipient": "caa0106da86351f909f1dfa28e7bfa65665554dc512ab2eedd431b040daa3a1f",
+                  "fee": 15,
+                  "limitOrderId": null
+                },
+                {
+                  "recipient": "5880ad2b362620fadf759cbceb1cd5737ce8c6ed7fb8e9942881e6731f9247dd",
+                  "fee": 20,
+                  "limitOrderId": null
+                }
+              ],
+              "sourceTransactionShapes": [
+                {
+                  "type": "transfer",
+                  "chain": "bip122:00040fe8ec8471911baa1db1266ea15d",
+                  "hasMemo": false,
+                  "hasDestination": true,
+                  "hasSerializedTransaction": false,
+                  "decimalAmount": "0.042103"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "origin": "https://oracles.cc",
+          "httpStatus": 200,
+          "elapsedMs": 1684,
+          "quotes": [
+            {
+              "integration": "nearIntents",
+              "swapper": "NEAR Intents",
+              "amountOut": "0.022144831659808627",
+              "amountOutMin": "0.021480486710014368",
+              "expiry": 1793739830,
+              "quoteMode": "NEAR_INTENTS",
+              "fees": {
+                "total_bps": 35,
+                "affiliate": "0",
+                "outbound": "0",
+                "items": [
+                  {
+                    "kind": "affiliate",
+                    "assetCaip": "bip122:00040fe8ec8471911baa1db1266ea15d/slip44:133",
+                    "symbol": "ZEC",
+                    "decimals": 8,
+                    "amountBaseUnits": "6315",
+                    "bps": 15,
+                    "recipient": "caa0106da86351f909f1dfa28e7bfa65665554dc512ab2eedd431b040daa3a1f",
+                    "label": "KeepKey app fee"
+                  },
+                  {
+                    "kind": "protocol",
+                    "assetCaip": "bip122:00040fe8ec8471911baa1db1266ea15d/slip44:133",
+                    "symbol": "ZEC",
+                    "decimals": 8,
+                    "amountBaseUnits": "8420",
+                    "bps": 20,
+                    "recipient": "5880ad2b362620fadf759cbceb1cd5737ce8c6ed7fb8e9942881e6731f9247dd",
+                    "label": "1Click platform fee"
+                  },
+                  {
+                    "kind": "network",
+                    "assetCaip": "eip155:1/slip44:60",
+                    "symbol": "ETH",
+                    "decimals": 18,
+                    "amountBaseUnits": "35000000000000",
+                    "label": "Destination withdrawal (included in output)"
+                  }
+                ]
+              },
+              "feeBreakdown": {
+                "requestedAppBps": 30,
+                "effectiveAppFees": [
+                  {
+                    "recipient": "caa0106da86351f909f1dfa28e7bfa65665554dc512ab2eedd431b040daa3a1f",
+                    "fee": 15,
+                    "limitOrderId": null
+                  },
+                  {
+                    "recipient": "5880ad2b362620fadf759cbceb1cd5737ce8c6ed7fb8e9942881e6731f9247dd",
+                    "fee": 20,
+                    "limitOrderId": null
+                  }
+                ],
+                "items": [
+                  {
+                    "kind": "affiliate",
+                    "assetCaip": "bip122:00040fe8ec8471911baa1db1266ea15d/slip44:133",
+                    "symbol": "ZEC",
+                    "decimals": 8,
+                    "amountBaseUnits": "6315",
+                    "bps": 15,
+                    "recipient": "caa0106da86351f909f1dfa28e7bfa65665554dc512ab2eedd431b040daa3a1f",
+                    "label": "KeepKey app fee"
+                  },
+                  {
+                    "kind": "protocol",
+                    "assetCaip": "bip122:00040fe8ec8471911baa1db1266ea15d/slip44:133",
+                    "symbol": "ZEC",
+                    "decimals": 8,
+                    "amountBaseUnits": "8420",
+                    "bps": 20,
+                    "recipient": "5880ad2b362620fadf759cbceb1cd5737ce8c6ed7fb8e9942881e6731f9247dd",
+                    "label": "1Click platform fee"
+                  },
+                  {
+                    "kind": "network",
+                    "assetCaip": "eip155:1/slip44:60",
+                    "symbol": "ETH",
+                    "decimals": 18,
+                    "amountBaseUnits": "35000000000000",
+                    "label": "Destination withdrawal (included in output)"
+                  }
+                ],
+                "refund": {
+                  "assetCaip": "bip122:00040fe8ec8471911baa1db1266ea15d/slip44:133",
+                  "symbol": "ZEC",
+                  "decimals": 8,
+                  "amountBaseUnits": "32000",
+                  "label": "Refund cost if returned"
+                }
+              },
+              "nearAppFees": [
+                {
+                  "recipient": "caa0106da86351f909f1dfa28e7bfa65665554dc512ab2eedd431b040daa3a1f",
+                  "fee": 15,
+                  "limitOrderId": null
+                },
+                {
+                  "recipient": "5880ad2b362620fadf759cbceb1cd5737ce8c6ed7fb8e9942881e6731f9247dd",
+                  "fee": 20,
+                  "limitOrderId": null
+                }
+              ],
+              "sourceTransactionShapes": [
+                {
+                  "type": "transfer",
+                  "chain": "bip122:00040fe8ec8471911baa1db1266ea15d",
+                  "hasMemo": false,
+                  "hasDestination": true,
+                  "hasSerializedTransaction": false,
+                  "decimalAmount": "0.042103"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "BTC to LTC memoless",
+      "sellAsset": "bip122:000000000019d6689c085ae165831e93/slip44:0",
+      "buyAsset": "bip122:12a765e31ffd4059bada1e25190f6e98/slip44:2",
+      "sellAmount": "0.001",
+      "memoless": true,
+      "checkedAt": "2026-11-03T20:33:52.664Z",
+      "results": [
+        {
+          "origin": "https://api.keepkey.info",
+          "httpStatus": 200,
+          "elapsedMs": 828,
+          "quotes": [
+            {
+              "integration": "nearIntents",
+              "swapper": "NEAR Intents",
+              "amountOut": 1.42337393,
+              "amountOutMin": 1.3806727120999998,
+              "quoteMode": "NEAR_INTENTS",
+              "nearAppFees": [
+                {
+                  "recipient": "caa0106da86351f909f1dfa28e7bfa65665554dc512ab2eedd431b040daa3a1f",
+                  "fee": 15,
+                  "limitOrderId": null
+                },
+                {
+                  "recipient": "5880ad2b362620fadf759cbceb1cd5737ce8c6ed7fb8e9942881e6731f9247dd",
+                  "fee": 20,
+                  "limitOrderId": null
+                }
+              ],
+              "sourceTransactionShapes": [
+                {
+                  "type": "transfer",
+                  "chain": "bip122:000000000019d6689c085ae165831e93",
+                  "hasMemo": false,
+                  "hasDestination": true,
+                  "hasSerializedTransaction": false,
+                  "decimalAmount": "0.001"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "origin": "https://oracles.cc",
+          "httpStatus": 200,
+          "elapsedMs": 1463,
+          "quotes": [
+            {
+              "integration": "nearIntents",
+              "swapper": "NEAR Intents",
+              "amountOut": "1.42337393",
+              "amountOutMin": "1.38067271",
+              "expiry": 1793739832,
+              "quoteMode": "NEAR_INTENTS",
+              "fees": {
+                "total_bps": 35,
+                "affiliate": "0",
+                "outbound": "0",
+                "items": [
+                  {
+                    "kind": "affiliate",
+                    "assetCaip": "bip122:000000000019d6689c085ae165831e93/slip44:0",
+                    "symbol": "BTC",
+                    "decimals": 8,
+                    "amountBaseUnits": "150",
+                    "bps": 15,
+                    "recipient": "caa0106da86351f909f1dfa28e7bfa65665554dc512ab2eedd431b040daa3a1f",
+                    "label": "KeepKey app fee"
+                  },
+                  {
+                    "kind": "protocol",
+                    "assetCaip": "bip122:000000000019d6689c085ae165831e93/slip44:0",
+                    "symbol": "BTC",
+                    "decimals": 8,
+                    "amountBaseUnits": "200",
+                    "bps": 20,
+                    "recipient": "5880ad2b362620fadf759cbceb1cd5737ce8c6ed7fb8e9942881e6731f9247dd",
+                    "label": "1Click platform fee"
+                  },
+                  {
+                    "kind": "network",
+                    "assetCaip": "bip122:12a765e31ffd4059bada1e25190f6e98/slip44:2",
+                    "symbol": "LTC",
+                    "decimals": 8,
+                    "amountBaseUnits": "500",
+                    "label": "Destination withdrawal (included in output)"
+                  }
+                ]
+              },
+              "feeBreakdown": {
+                "requestedAppBps": 30,
+                "effectiveAppFees": [
+                  {
+                    "recipient": "caa0106da86351f909f1dfa28e7bfa65665554dc512ab2eedd431b040daa3a1f",
+                    "fee": 15,
+                    "limitOrderId": null
+                  },
+                  {
+                    "recipient": "5880ad2b362620fadf759cbceb1cd5737ce8c6ed7fb8e9942881e6731f9247dd",
+                    "fee": 20,
+                    "limitOrderId": null
+                  }
+                ],
+                "items": [
+                  {
+                    "kind": "affiliate",
+                    "assetCaip": "bip122:000000000019d6689c085ae165831e93/slip44:0",
+                    "symbol": "BTC",
+                    "decimals": 8,
+                    "amountBaseUnits": "150",
+                    "bps": 15,
+                    "recipient": "caa0106da86351f909f1dfa28e7bfa65665554dc512ab2eedd431b040daa3a1f",
+                    "label": "KeepKey app fee"
+                  },
+                  {
+                    "kind": "protocol",
+                    "assetCaip": "bip122:000000000019d6689c085ae165831e93/slip44:0",
+                    "symbol": "BTC",
+                    "decimals": 8,
+                    "amountBaseUnits": "200",
+                    "bps": 20,
+                    "recipient": "5880ad2b362620fadf759cbceb1cd5737ce8c6ed7fb8e9942881e6731f9247dd",
+                    "label": "1Click platform fee"
+                  },
+                  {
+                    "kind": "network",
+                    "assetCaip": "bip122:12a765e31ffd4059bada1e25190f6e98/slip44:2",
+                    "symbol": "LTC",
+                    "decimals": 8,
+                    "amountBaseUnits": "500",
+                    "label": "Destination withdrawal (included in output)"
+                  }
+                ],
+                "refund": {
+                  "assetCaip": "bip122:000000000019d6689c085ae165831e93/slip44:0",
+                  "symbol": "BTC",
+                  "decimals": 8,
+                  "amountBaseUnits": "1900",
+                  "label": "Refund cost if returned"
+                }
+              },
+              "nearAppFees": [
+                {
+                  "recipient": "caa0106da86351f909f1dfa28e7bfa65665554dc512ab2eedd431b040daa3a1f",
+                  "fee": 15,
+                  "limitOrderId": null
+                },
+                {
+                  "recipient": "5880ad2b362620fadf759cbceb1cd5737ce8c6ed7fb8e9942881e6731f9247dd",
+                  "fee": 20,
+                  "limitOrderId": null
+                }
+              ],
+              "sourceTransactionShapes": [
+                {
+                  "type": "transfer",
+                  "chain": "bip122:000000000019d6689c085ae165831e93",
+                  "hasMemo": false,
+                  "hasDestination": true,
+                  "hasSerializedTransaction": false,
+                  "decimalAmount": "0.001"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "ETH to Base USDC solver deposit",
+      "sellAsset": "eip155:1/slip44:60",
+      "buyAsset": "eip155:8453/erc20:0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+      "sellAmount": "0.013118195",
+      "relayExecutionMode": "solver-deposit",
+      "checkedAt": "2026-11-03T20:33:54.125Z",
+      "results": [
+        {
+          "origin": "https://api.keepkey.info",
+          "httpStatus": 400,
+          "elapsedMs": 221,
+          "error": "Something went wrong"
+        },
+        {
+          "origin": "https://oracles.cc",
+          "httpStatus": 200,
+          "elapsedMs": 1460,
+          "quotes": [
+            {
+              "integration": "nearIntents",
+              "swapper": "NEAR Intents",
+              "amountOut": "29.823377",
+              "amountOutMin": "28.928675",
+              "expiry": 1793739833,
+              "quoteMode": "NEAR_INTENTS",
+              "fees": {
+                "total_bps": 35,
+                "affiliate": "0",
+                "outbound": "0",
+                "items": [
+                  {
+                    "kind": "affiliate",
+                    "assetCaip": "eip155:1/slip44:60",
+                    "symbol": "ETH",
+                    "decimals": 18,
+                    "amountBaseUnits": "19677292500000",
+                    "bps": 15,
+                    "recipient": "caa0106da86351f909f1dfa28e7bfa65665554dc512ab2eedd431b040daa3a1f",
+                    "label": "KeepKey app fee"
+                  },
+                  {
+                    "kind": "protocol",
+                    "assetCaip": "eip155:1/slip44:60",
+                    "symbol": "ETH",
+                    "decimals": 18,
+                    "amountBaseUnits": "26236390000000",
+                    "bps": 20,
+                    "recipient": "5880ad2b362620fadf759cbceb1cd5737ce8c6ed7fb8e9942881e6731f9247dd",
+                    "label": "1Click platform fee"
+                  },
+                  {
+                    "kind": "network",
+                    "assetCaip": "eip155:8453/erc20:0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+                    "symbol": "USDC",
+                    "decimals": 6,
+                    "amountBaseUnits": "2400",
+                    "label": "Destination withdrawal (included in output)"
+                  }
+                ]
+              },
+              "feeBreakdown": {
+                "requestedAppBps": 30,
+                "effectiveAppFees": [
+                  {
+                    "recipient": "caa0106da86351f909f1dfa28e7bfa65665554dc512ab2eedd431b040daa3a1f",
+                    "fee": 15,
+                    "limitOrderId": null
+                  },
+                  {
+                    "recipient": "5880ad2b362620fadf759cbceb1cd5737ce8c6ed7fb8e9942881e6731f9247dd",
+                    "fee": 20,
+                    "limitOrderId": null
+                  }
+                ],
+                "items": [
+                  {
+                    "kind": "affiliate",
+                    "assetCaip": "eip155:1/slip44:60",
+                    "symbol": "ETH",
+                    "decimals": 18,
+                    "amountBaseUnits": "19677292500000",
+                    "bps": 15,
+                    "recipient": "caa0106da86351f909f1dfa28e7bfa65665554dc512ab2eedd431b040daa3a1f",
+                    "label": "KeepKey app fee"
+                  },
+                  {
+                    "kind": "protocol",
+                    "assetCaip": "eip155:1/slip44:60",
+                    "symbol": "ETH",
+                    "decimals": 18,
+                    "amountBaseUnits": "26236390000000",
+                    "bps": 20,
+                    "recipient": "5880ad2b362620fadf759cbceb1cd5737ce8c6ed7fb8e9942881e6731f9247dd",
+                    "label": "1Click platform fee"
+                  },
+                  {
+                    "kind": "network",
+                    "assetCaip": "eip155:8453/erc20:0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+                    "symbol": "USDC",
+                    "decimals": 6,
+                    "amountBaseUnits": "2400",
+                    "label": "Destination withdrawal (included in output)"
+                  }
+                ],
+                "refund": {
+                  "assetCaip": "eip155:1/slip44:60",
+                  "symbol": "ETH",
+                  "decimals": 18,
+                  "amountBaseUnits": "35000000000000",
+                  "label": "Refund cost if returned"
+                }
+              },
+              "nearAppFees": [
+                {
+                  "recipient": "caa0106da86351f909f1dfa28e7bfa65665554dc512ab2eedd431b040daa3a1f",
+                  "fee": 15,
+                  "limitOrderId": null
+                },
+                {
+                  "recipient": "5880ad2b362620fadf759cbceb1cd5737ce8c6ed7fb8e9942881e6731f9247dd",
+                  "fee": 20,
+                  "limitOrderId": null
+                }
+              ],
+              "sourceTransactionShapes": [
+                {
+                  "type": "EVM",
+                  "chain": "eip155:1",
+                  "chainId": 1,
+                  "hasMemo": false,
+                  "hasDestination": true,
+                  "dataBytes": 0,
+                  "hasSerializedTransaction": false,
+                  "nativeValueBaseUnits": "13118195000000000",
+                  "decimalAmount": "0.013118195"
+                }
+              ]
+            },
+            {
+              "integration": "relay",
+              "swapper": "Relay",
+              "amountOut": "29.761487",
+              "amountOutMin": "28.868642",
+              "quoteMode": "RELAY_DIRECT",
+              "fees": {
+                "gas": {
+                  "currency": {
+                    "chainId": 1,
+                    "address": "0x0000000000000000000000000000000000000000",
+                    "symbol": "ETH",
+                    "name": "Ether",
+                    "decimals": 18,
+                    "metadata": {
+                      "logoURI": "https://assets.relay.link/icons/1/light.png",
+                      "verified": true
+                    }
+                  },
+                  "amount": "5065000275173",
+                  "amountFormatted": "0.000005065000275173",
+                  "amountUsd": "0.011559",
+                  "minimumAmount": "5065000275173"
+                },
+                "relayer": {
+                  "currency": {
+                    "chainId": 1,
+                    "address": "0x0000000000000000000000000000000000000000",
+                    "symbol": "ETH",
+                    "name": "Ether",
+                    "decimals": 18,
+                    "metadata": {
+                      "logoURI": "https://assets.relay.link/icons/1/light.png",
+                      "verified": true
+                    }
+                  },
+                  "amount": "23597260945072",
+                  "amountFormatted": "0.000023597260945072",
+                  "amountUsd": "0.053854",
+                  "minimumAmount": "23597260945072"
+                },
+                "relayerGas": {
+                  "currency": {
+                    "chainId": 1,
+                    "address": "0x0000000000000000000000000000000000000000",
+                    "symbol": "ETH",
+                    "name": "Ether",
+                    "decimals": 18,
+                    "metadata": {
+                      "logoURI": "https://assets.relay.link/icons/1/light.png",
+                      "verified": true
+                    }
+                  },
+                  "amount": "413077205707",
+                  "amountFormatted": "0.000000413077205707",
+                  "amountUsd": "0.000943",
+                  "minimumAmount": "413077205707"
+                },
+                "relayerService": {
+                  "currency": {
+                    "chainId": 1,
+                    "address": "0x0000000000000000000000000000000000000000",
+                    "symbol": "ETH",
+                    "name": "Ether",
+                    "decimals": 18,
+                    "metadata": {
+                      "logoURI": "https://assets.relay.link/icons/1/light.png",
+                      "verified": true
+                    }
+                  },
+                  "amount": "23184183739365",
+                  "amountFormatted": "0.000023184183739365",
+                  "amountUsd": "0.052911",
+                  "minimumAmount": "23184183739365"
+                },
+                "app": {
+                  "currency": {
+                    "chainId": 1,
+                    "address": "0x0000000000000000000000000000000000000000",
+                    "symbol": "ETH",
+                    "name": "Ether",
+                    "decimals": 18,
+                    "metadata": {
+                      "logoURI": "https://assets.relay.link/icons/1/light.png",
+                      "verified": true
+                    }
+                  },
+                  "amount": "39354585000000",
+                  "amountFormatted": "0.000039354585",
+                  "amountUsd": "0.089815",
+                  "minimumAmount": "39354585000000"
+                },
+                "subsidized": {
+                  "currency": {
+                    "chainId": 1,
+                    "address": "0x0000000000000000000000000000000000000000",
+                    "symbol": "ETH",
+                    "name": "Ether",
+                    "decimals": 18,
+                    "metadata": {
+                      "logoURI": "https://assets.relay.link/icons/1/light.png",
+                      "verified": true
+                    }
+                  },
+                  "amount": "0",
+                  "amountFormatted": "0.0",
+                  "amountUsd": "0",
+                  "minimumAmount": "0"
+                },
+                "total_bps": 30,
+                "outbound": "0",
+                "affiliate": "0",
+                "items": [
+                  {
+                    "kind": "affiliate",
+                    "label": "Relay partner fees",
+                    "assetCaip": "eip155:1/slip44:60",
+                    "symbol": "ETH",
+                    "decimals": 18,
+                    "amountBaseUnits": "39354585000000",
+                    "amount": "0.000039354585",
+                    "bps": 30
+                  },
+                  {
+                    "kind": "network",
+                    "label": "Source network estimate",
+                    "assetCaip": "eip155:1/slip44:60",
+                    "symbol": "ETH",
+                    "decimals": 18,
+                    "amountBaseUnits": "5065000275173",
+                    "amount": "0.000005065000275173"
+                  },
+                  {
+                    "kind": "provider",
+                    "label": "Relay service fee",
+                    "assetCaip": "eip155:1/slip44:60",
+                    "symbol": "ETH",
+                    "decimals": 18,
+                    "amountBaseUnits": "23597260945072",
+                    "amount": "0.000023597260945072"
+                  }
+                ]
+              },
+              "feeBreakdown": {
+                "integrator": {
+                  "bps": 30,
+                  "recipients": [
+                    {
+                      "recipient": "0x87Ab2637bc4231604ad708c5e8aAC92A260c7704",
+                      "bps": 15
+                    },
+                    {
+                      "recipient": "0x21c9a94AF76B59b171b32fD125A4edF0e9A2Ad3e",
+                      "bps": 15
+                    }
+                  ]
+                },
+                "sourceNetwork": {
+                  "amountBaseUnits": "5065000275173",
+                  "asset": "eip155:1/slip44:60"
+                },
+                "priceImpactPercent": 0.62
+              },
+              "sourceTransactionShapes": [
+                {
+                  "type": "EVM",
+                  "chain": "eip155:1",
+                  "chainId": 1,
+                  "hasMemo": false,
+                  "hasDestination": true,
+                  "dataBytes": 68,
+                  "hasSerializedTransaction": false,
+                  "nativeValueBaseUnits": "13118195000000000",
+                  "decimalAmount": "0.013118195"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "ETH to USDT solver deposit",
+      "sellAsset": "eip155:1/slip44:60",
+      "buyAsset": "eip155:1/erc20:0xdac17f958d2ee523a2206206994597c13d831ec7",
+      "sellAmount": "0.013118195",
+      "relayExecutionMode": "solver-deposit",
+      "checkedAt": "2026-11-03T20:33:56.100Z",
+      "results": [
+        {
+          "origin": "https://api.keepkey.info",
+          "httpStatus": 400,
+          "elapsedMs": 214,
+          "error": "Something went wrong"
+        },
+        {
+          "origin": "https://oracles.cc",
+          "httpStatus": 200,
+          "elapsedMs": 1974,
+          "quotes": [
+            {
+              "integration": "uniswap",
+              "swapper": "Uniswap",
+              "amountOut": "29.876728",
+              "amountOutMin": "28.980426",
+              "expiry": 1793738215,
+              "quoteMode": "UNISWAP_DIRECT",
+              "fees": {
+                "total_bps": 30,
+                "outbound": "0",
+                "affiliate": "0.089899"
+              },
+              "feeBreakdown": {
+                "integrator": {
+                  "bps": 30,
+                  "recipient": "0x87ab2637bc4231604ad708c5e8aac92a260c7704"
+                }
+              },
+              "sourceTransactionShapes": [
+                {
+                  "type": "EVM",
+                  "chain": "eip155:1",
+                  "chainId": 1,
+                  "hasMemo": false,
+                  "hasDestination": true,
+                  "dataBytes": 964,
+                  "hasSerializedTransaction": false,
+                  "nativeValueBaseUnits": "13118195000000000",
+                  "decimalAmount": "0.013118195"
+                }
+              ]
+            },
+            {
+              "integration": "zeroex",
+              "swapper": "0x",
+              "amountOut": "29.844126",
+              "amountOutMin": "28.948802",
+              "quoteMode": "ZEROX_DIRECT",
+              "fees": {
+                "integratorFee": {
+                  "amount": "89935",
+                  "token": "0xdac17f958d2ee523a2206206994597c13d831ec7",
+                  "type": "volume"
+                },
+                "integratorFees": [
+                  {
+                    "amount": "89935",
+                    "token": "0xdac17f958d2ee523a2206206994597c13d831ec7",
+                    "type": "volume"
+                  }
+                ],
+                "zeroExFee": {
+                  "amount": "44967",
+                  "token": "0xdac17f958d2ee523a2206206994597c13d831ec7",
+                  "type": "volume"
+                },
+                "gasFee": null,
+                "total_bps": 46,
+                "affiliate": "89935",
+                "outbound": "0"
+              },
+              "sourceTransactionShapes": [
+                {
+                  "type": "EVM",
+                  "chain": "eip155:1",
+                  "chainId": 1,
+                  "hasMemo": false,
+                  "hasDestination": true,
+                  "dataBytes": 2788,
+                  "hasSerializedTransaction": false,
+                  "nativeValueBaseUnits": "13118195000000000",
+                  "decimalAmount": "0.013118195"
+                }
+              ]
+            },
+            {
+              "integration": "relay",
+              "swapper": "Relay",
+              "amountOut": "29.765469",
+              "amountOutMin": "28.872505",
+              "quoteMode": "RELAY_DIRECT",
+              "fees": {
+                "gas": {
+                  "currency": {
+                    "chainId": 1,
+                    "address": "0x0000000000000000000000000000000000000000",
+                    "symbol": "ETH",
+                    "name": "Ether",
+                    "decimals": 18,
+                    "metadata": {
+                      "logoURI": "https://assets.relay.link/icons/1/light.png",
+                      "verified": true
+                    }
+                  },
+                  "amount": "5065000275173",
+                  "amountFormatted": "0.000005065000275173",
+                  "amountUsd": "0.011559",
+                  "minimumAmount": "5065000275173"
+                },
+                "relayer": {
+                  "currency": {
+                    "chainId": 1,
+                    "address": "0x0000000000000000000000000000000000000000",
+                    "symbol": "ETH",
+                    "name": "Ether",
+                    "decimals": 18,
+                    "metadata": {
+                      "logoURI": "https://assets.relay.link/icons/1/light.png",
+                      "verified": true
+                    }
+                  },
+                  "amount": "32267703525476",
+                  "amountFormatted": "0.000032267703525476",
+                  "amountUsd": "0.073641",
+                  "minimumAmount": "32267703525476"
+                },
+                "relayerGas": {
+                  "currency": {
+                    "chainId": 1,
+                    "address": "0x0000000000000000000000000000000000000000",
+                    "symbol": "ETH",
+                    "name": "Ether",
+                    "decimals": 18,
+                    "metadata": {
+                      "logoURI": "https://assets.relay.link/icons/1/light.png",
+                      "verified": true
+                    }
+                  },
+                  "amount": "9084207200343",
+                  "amountFormatted": "0.000009084207200343",
+                  "amountUsd": "0.020732",
+                  "minimumAmount": "9084207200343"
+                },
+                "relayerService": {
+                  "currency": {
+                    "chainId": 1,
+                    "address": "0x0000000000000000000000000000000000000000",
+                    "symbol": "ETH",
+                    "name": "Ether",
+                    "decimals": 18,
+                    "metadata": {
+                      "logoURI": "https://assets.relay.link/icons/1/light.png",
+                      "verified": true
+                    }
+                  },
+                  "amount": "23183496325133",
+                  "amountFormatted": "0.000023183496325133",
+                  "amountUsd": "0.052909",
+                  "minimumAmount": "23183496325133"
+                },
+                "app": {
+                  "currency": {
+                    "chainId": 1,
+                    "address": "0x0000000000000000000000000000000000000000",
+                    "symbol": "ETH",
+                    "name": "Ether",
+                    "decimals": 18,
+                    "metadata": {
+                      "logoURI": "https://assets.relay.link/icons/1/light.png",
+                      "verified": true
+                    }
+                  },
+                  "amount": "39354585000000",
+                  "amountFormatted": "0.000039354585",
+                  "amountUsd": "0.089815",
+                  "minimumAmount": "39354585000000"
+                },
+                "subsidized": {
+                  "currency": {
+                    "chainId": 1,
+                    "address": "0x0000000000000000000000000000000000000000",
+                    "symbol": "ETH",
+                    "name": "Ether",
+                    "decimals": 18,
+                    "metadata": {
+                      "logoURI": "https://assets.relay.link/icons/1/light.png",
+                      "verified": true
+                    }
+                  },
+                  "amount": "0",
+                  "amountFormatted": "0.0",
+                  "amountUsd": "0",
+                  "minimumAmount": "0"
+                },
+                "total_bps": 30,
+                "outbound": "0",
+                "affiliate": "0",
+                "items": [
+                  {
+                    "kind": "affiliate",
+                    "label": "Relay partner fees",
+                    "assetCaip": "eip155:1/slip44:60",
+                    "symbol": "ETH",
+                    "decimals": 18,
+                    "amountBaseUnits": "39354585000000",
+                    "amount": "0.000039354585",
+                    "bps": 30
+                  },
+                  {
+                    "kind": "network",
+                    "label": "Source network estimate",
+                    "assetCaip": "eip155:1/slip44:60",
+                    "symbol": "ETH",
+                    "decimals": 18,
+                    "amountBaseUnits": "5065000275173",
+                    "amount": "0.000005065000275173"
+                  },
+                  {
+                    "kind": "provider",
+                    "label": "Relay service fee",
+                    "assetCaip": "eip155:1/slip44:60",
+                    "symbol": "ETH",
+                    "decimals": 18,
+                    "amountBaseUnits": "32267703525476",
+                    "amount": "0.000032267703525476"
+                  }
+                ]
+              },
+              "feeBreakdown": {
+                "integrator": {
+                  "bps": 30,
+                  "recipients": [
+                    {
+                      "recipient": "0x87Ab2637bc4231604ad708c5e8aAC92A260c7704",
+                      "bps": 15
+                    },
+                    {
+                      "recipient": "0x21c9a94AF76B59b171b32fD125A4edF0e9A2Ad3e",
+                      "bps": 15
+                    }
+                  ]
+                },
+                "sourceNetwork": {
+                  "amountBaseUnits": "5065000275173",
+                  "asset": "eip155:1/slip44:60"
+                },
+                "priceImpactPercent": 0.69
+              },
+              "sourceTransactionShapes": [
+                {
+                  "type": "EVM",
+                  "chain": "eip155:1",
+                  "chainId": 1,
+                  "hasMemo": false,
+                  "hasDestination": true,
+                  "dataBytes": 68,
+                  "hasSerializedTransaction": false,
+                  "nativeValueBaseUnits": "13118195000000000",
+                  "decimalAmount": "0.013118195"
+                }
+              ]
+            },
+            {
+              "integration": "thorchain",
+              "swapper": "thorchain",
+              "amountOut": "29.5664341",
+              "amountOutMin": "28.67944107",
+              "expiry": 1793738923,
+              "quoteMode": "THORCHAIN_DIRECT",
+              "fees": {
+                "asset": "ETH.USDT-0XDAC17F958D2EE523A2206206994597C13D831EC7",
+                "affiliate": "8971890",
+                "outbound": "25014800",
+                "liquidity": "5990400",
+                "total": "39977090",
+                "slippage_bps": 19,
+                "total_bps": 131
+              },
+              "sourceTransactionShapes": [
+                {
+                  "type": "EVM",
+                  "chain": "eip155:1",
+                  "hasMemo": true,
+                  "hasDestination": true,
+                  "hasSerializedTransaction": false,
+                  "decimalAmount": "0.013118195"
+                }
+              ]
+            },
+            {
+              "integration": "nearIntents",
+              "swapper": "NEAR Intents",
+              "amountOut": "29.56436",
+              "amountOutMin": "28.677429",
+              "expiry": 1793739835,
+              "quoteMode": "NEAR_INTENTS",
+              "fees": {
+                "total_bps": 35,
+                "affiliate": "0",
+                "outbound": "0",
+                "items": [
+                  {
+                    "kind": "affiliate",
+                    "assetCaip": "eip155:1/slip44:60",
+                    "symbol": "ETH",
+                    "decimals": 18,
+                    "amountBaseUnits": "19677292500000",
+                    "bps": 15,
+                    "recipient": "caa0106da86351f909f1dfa28e7bfa65665554dc512ab2eedd431b040daa3a1f",
+                    "label": "KeepKey app fee"
+                  },
+                  {
+                    "kind": "protocol",
+                    "assetCaip": "eip155:1/slip44:60",
+                    "symbol": "ETH",
+                    "decimals": 18,
+                    "amountBaseUnits": "26236390000000",
+                    "bps": 20,
+                    "recipient": "5880ad2b362620fadf759cbceb1cd5737ce8c6ed7fb8e9942881e6731f9247dd",
+                    "label": "1Click platform fee"
+                  },
+                  {
+                    "kind": "network",
+                    "assetCaip": "eip155:1/erc20:0xdac17f958d2ee523a2206206994597c13d831ec7",
+                    "symbol": "USDT",
+                    "decimals": 6,
+                    "amountBaseUnits": "300000",
+                    "label": "Destination withdrawal (included in output)"
+                  }
+                ]
+              },
+              "feeBreakdown": {
+                "requestedAppBps": 30,
+                "effectiveAppFees": [
+                  {
+                    "recipient": "caa0106da86351f909f1dfa28e7bfa65665554dc512ab2eedd431b040daa3a1f",
+                    "fee": 15,
+                    "limitOrderId": null
+                  },
+                  {
+                    "recipient": "5880ad2b362620fadf759cbceb1cd5737ce8c6ed7fb8e9942881e6731f9247dd",
+                    "fee": 20,
+                    "limitOrderId": null
+                  }
+                ],
+                "items": [
+                  {
+                    "kind": "affiliate",
+                    "assetCaip": "eip155:1/slip44:60",
+                    "symbol": "ETH",
+                    "decimals": 18,
+                    "amountBaseUnits": "19677292500000",
+                    "bps": 15,
+                    "recipient": "caa0106da86351f909f1dfa28e7bfa65665554dc512ab2eedd431b040daa3a1f",
+                    "label": "KeepKey app fee"
+                  },
+                  {
+                    "kind": "protocol",
+                    "assetCaip": "eip155:1/slip44:60",
+                    "symbol": "ETH",
+                    "decimals": 18,
+                    "amountBaseUnits": "26236390000000",
+                    "bps": 20,
+                    "recipient": "5880ad2b362620fadf759cbceb1cd5737ce8c6ed7fb8e9942881e6731f9247dd",
+                    "label": "1Click platform fee"
+                  },
+                  {
+                    "kind": "network",
+                    "assetCaip": "eip155:1/erc20:0xdac17f958d2ee523a2206206994597c13d831ec7",
+                    "symbol": "USDT",
+                    "decimals": 6,
+                    "amountBaseUnits": "300000",
+                    "label": "Destination withdrawal (included in output)"
+                  }
+                ],
+                "refund": {
+                  "assetCaip": "eip155:1/slip44:60",
+                  "symbol": "ETH",
+                  "decimals": 18,
+                  "amountBaseUnits": "35000000000000",
+                  "label": "Refund cost if returned"
+                }
+              },
+              "nearAppFees": [
+                {
+                  "recipient": "caa0106da86351f909f1dfa28e7bfa65665554dc512ab2eedd431b040daa3a1f",
+                  "fee": 15,
+                  "limitOrderId": null
+                },
+                {
+                  "recipient": "5880ad2b362620fadf759cbceb1cd5737ce8c6ed7fb8e9942881e6731f9247dd",
+                  "fee": 20,
+                  "limitOrderId": null
+                }
+              ],
+              "sourceTransactionShapes": [
+                {
+                  "type": "EVM",
+                  "chain": "eip155:1",
+                  "chainId": 1,
+                  "hasMemo": false,
+                  "hasDestination": true,
+                  "dataBytes": 0,
+                  "hasSerializedTransaction": false,
+                  "nativeValueBaseUnits": "13118195000000000",
+                  "decimalAmount": "0.013118195"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "ETH to SOL solver deposit",
+      "sellAsset": "eip155:1/slip44:60",
+      "buyAsset": "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp/slip44:501",
+      "sellAmount": "0.013118195",
+      "relayExecutionMode": "solver-deposit",
+      "checkedAt": "2026-11-03T20:33:57.521Z",
+      "results": [
+        {
+          "origin": "https://api.keepkey.info",
+          "httpStatus": 400,
+          "elapsedMs": 211,
+          "error": "Something went wrong"
+        },
+        {
+          "origin": "https://oracles.cc",
+          "httpStatus": 200,
+          "elapsedMs": 1420,
+          "quotes": [
+            {
+              "integration": "nearIntents",
+              "swapper": "NEAR Intents",
+              "amountOut": "0.319692328",
+              "amountOutMin": "0.310101558",
+              "expiry": 1793739836,
+              "quoteMode": "NEAR_INTENTS",
+              "fees": {
+                "total_bps": 35,
+                "affiliate": "0",
+                "outbound": "0",
+                "items": [
+                  {
+                    "kind": "affiliate",
+                    "assetCaip": "eip155:1/slip44:60",
+                    "symbol": "ETH",
+                    "decimals": 18,
+                    "amountBaseUnits": "19677292500000",
+                    "bps": 15,
+                    "recipient": "caa0106da86351f909f1dfa28e7bfa65665554dc512ab2eedd431b040daa3a1f",
+                    "label": "KeepKey app fee"
+                  },
+                  {
+                    "kind": "protocol",
+                    "assetCaip": "eip155:1/slip44:60",
+                    "symbol": "ETH",
+                    "decimals": 18,
+                    "amountBaseUnits": "26236390000000",
+                    "bps": 20,
+                    "recipient": "5880ad2b362620fadf759cbceb1cd5737ce8c6ed7fb8e9942881e6731f9247dd",
+                    "label": "1Click platform fee"
+                  },
+                  {
+                    "kind": "network",
+                    "assetCaip": "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp/slip44:501",
+                    "symbol": "SOL",
+                    "decimals": 9,
+                    "amountBaseUnits": "107136",
+                    "label": "Destination withdrawal (included in output)"
+                  }
+                ]
+              },
+              "feeBreakdown": {
+                "requestedAppBps": 30,
+                "effectiveAppFees": [
+                  {
+                    "recipient": "caa0106da86351f909f1dfa28e7bfa65665554dc512ab2eedd431b040daa3a1f",
+                    "fee": 15,
+                    "limitOrderId": null
+                  },
+                  {
+                    "recipient": "5880ad2b362620fadf759cbceb1cd5737ce8c6ed7fb8e9942881e6731f9247dd",
+                    "fee": 20,
+                    "limitOrderId": null
+                  }
+                ],
+                "items": [
+                  {
+                    "kind": "affiliate",
+                    "assetCaip": "eip155:1/slip44:60",
+                    "symbol": "ETH",
+                    "decimals": 18,
+                    "amountBaseUnits": "19677292500000",
+                    "bps": 15,
+                    "recipient": "caa0106da86351f909f1dfa28e7bfa65665554dc512ab2eedd431b040daa3a1f",
+                    "label": "KeepKey app fee"
+                  },
+                  {
+                    "kind": "protocol",
+                    "assetCaip": "eip155:1/slip44:60",
+                    "symbol": "ETH",
+                    "decimals": 18,
+                    "amountBaseUnits": "26236390000000",
+                    "bps": 20,
+                    "recipient": "5880ad2b362620fadf759cbceb1cd5737ce8c6ed7fb8e9942881e6731f9247dd",
+                    "label": "1Click platform fee"
+                  },
+                  {
+                    "kind": "network",
+                    "assetCaip": "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp/slip44:501",
+                    "symbol": "SOL",
+                    "decimals": 9,
+                    "amountBaseUnits": "107136",
+                    "label": "Destination withdrawal (included in output)"
+                  }
+                ],
+                "refund": {
+                  "assetCaip": "eip155:1/slip44:60",
+                  "symbol": "ETH",
+                  "decimals": 18,
+                  "amountBaseUnits": "35000000000000",
+                  "label": "Refund cost if returned"
+                }
+              },
+              "nearAppFees": [
+                {
+                  "recipient": "caa0106da86351f909f1dfa28e7bfa65665554dc512ab2eedd431b040daa3a1f",
+                  "fee": 15,
+                  "limitOrderId": null
+                },
+                {
+                  "recipient": "5880ad2b362620fadf759cbceb1cd5737ce8c6ed7fb8e9942881e6731f9247dd",
+                  "fee": 20,
+                  "limitOrderId": null
+                }
+              ],
+              "sourceTransactionShapes": [
+                {
+                  "type": "EVM",
+                  "chain": "eip155:1",
+                  "chainId": 1,
+                  "hasMemo": false,
+                  "hasDestination": true,
+                  "dataBytes": 0,
+                  "hasSerializedTransaction": false,
+                  "nativeValueBaseUnits": "13118195000000000",
+                  "decimalAmount": "0.013118195"
+                }
+              ]
+            },
+            {
+              "integration": "relay",
+              "swapper": "Relay",
+              "amountOut": "0.318420488",
+              "amountOutMin": "0.308867873",
+              "quoteMode": "RELAY_DIRECT",
+              "fees": {
+                "gas": {
+                  "currency": {
+                    "chainId": 1,
+                    "address": "0x0000000000000000000000000000000000000000",
+                    "symbol": "ETH",
+                    "name": "Ether",
+                    "decimals": 18,
+                    "metadata": {
+                      "logoURI": "https://assets.relay.link/icons/1/light.png",
+                      "verified": true
+                    }
+                  },
+                  "amount": "5065000275173",
+                  "amountFormatted": "0.000005065000275173",
+                  "amountUsd": "0.011559",
+                  "minimumAmount": "5065000275173"
+                },
+                "relayer": {
+                  "currency": {
+                    "chainId": 1,
+                    "address": "0x0000000000000000000000000000000000000000",
+                    "symbol": "ETH",
+                    "name": "Ether",
+                    "decimals": 18,
+                    "metadata": {
+                      "logoURI": "https://assets.relay.link/icons/1/light.png",
+                      "verified": true
+                    }
+                  },
+                  "amount": "27168907832757",
+                  "amountFormatted": "0.000027168907832757",
+                  "amountUsd": "0.062005",
+                  "minimumAmount": "27168907832757"
+                },
+                "relayerGas": {
+                  "currency": {
+                    "chainId": 1,
+                    "address": "0x0000000000000000000000000000000000000000",
+                    "symbol": "ETH",
+                    "name": "Ether",
+                    "decimals": 18,
+                    "metadata": {
+                      "logoURI": "https://assets.relay.link/icons/1/light.png",
+                      "verified": true
+                    }
+                  },
+                  "amount": "77244822036",
+                  "amountFormatted": "0.000000077244822036",
+                  "amountUsd": "0.000176",
+                  "minimumAmount": "77244822036"
+                },
+                "relayerService": {
+                  "currency": {
+                    "chainId": 1,
+                    "address": "0x0000000000000000000000000000000000000000",
+                    "symbol": "ETH",
+                    "name": "Ether",
+                    "decimals": 18,
+                    "metadata": {
+                      "logoURI": "https://assets.relay.link/icons/1/light.png",
+                      "verified": true
+                    }
+                  },
+                  "amount": "27091663010721",
+                  "amountFormatted": "0.000027091663010721",
+                  "amountUsd": "0.061828",
+                  "minimumAmount": "27091663010721"
+                },
+                "app": {
+                  "currency": {
+                    "chainId": 1,
+                    "address": "0x0000000000000000000000000000000000000000",
+                    "symbol": "ETH",
+                    "name": "Ether",
+                    "decimals": 18,
+                    "metadata": {
+                      "logoURI": "https://assets.relay.link/icons/1/light.png",
+                      "verified": true
+                    }
+                  },
+                  "amount": "39354585000000",
+                  "amountFormatted": "0.000039354585",
+                  "amountUsd": "0.089815",
+                  "minimumAmount": "39354585000000"
+                },
+                "subsidized": {
+                  "currency": {
+                    "chainId": 1,
+                    "address": "0x0000000000000000000000000000000000000000",
+                    "symbol": "ETH",
+                    "name": "Ether",
+                    "decimals": 18,
+                    "metadata": {
+                      "logoURI": "https://assets.relay.link/icons/1/light.png",
+                      "verified": true
+                    }
+                  },
+                  "amount": "0",
+                  "amountFormatted": "0.0",
+                  "amountUsd": "0",
+                  "minimumAmount": "0"
+                },
+                "total_bps": 30,
+                "outbound": "0",
+                "affiliate": "0",
+                "items": [
+                  {
+                    "kind": "affiliate",
+                    "label": "Relay partner fees",
+                    "assetCaip": "eip155:1/slip44:60",
+                    "symbol": "ETH",
+                    "decimals": 18,
+                    "amountBaseUnits": "39354585000000",
+                    "amount": "0.000039354585",
+                    "bps": 30
+                  },
+                  {
+                    "kind": "network",
+                    "label": "Source network estimate",
+                    "assetCaip": "eip155:1/slip44:60",
+                    "symbol": "ETH",
+                    "decimals": 18,
+                    "amountBaseUnits": "5065000275173",
+                    "amount": "0.000005065000275173"
+                  },
+                  {
+                    "kind": "provider",
+                    "label": "Relay service fee",
+                    "assetCaip": "eip155:1/slip44:60",
+                    "symbol": "ETH",
+                    "decimals": 18,
+                    "amountBaseUnits": "27168907832757",
+                    "amount": "0.000027168907832757"
+                  }
+                ]
+              },
+              "feeBreakdown": {
+                "integrator": {
+                  "bps": 30,
+                  "recipients": [
+                    {
+                      "recipient": "0x87Ab2637bc4231604ad708c5e8aAC92A260c7704",
+                      "bps": 15
+                    },
+                    {
+                      "recipient": "0x21c9a94AF76B59b171b32fD125A4edF0e9A2Ad3e",
+                      "bps": 15
+                    }
+                  ]
+                },
+                "sourceNetwork": {
+                  "amountBaseUnits": "5065000275173",
+                  "asset": "eip155:1/slip44:60"
+                },
+                "priceImpactPercent": 0.87
+              },
+              "sourceTransactionShapes": [
+                {
+                  "type": "EVM",
+                  "chain": "eip155:1",
+                  "chainId": 1,
+                  "hasMemo": false,
+                  "hasDestination": true,
+                  "dataBytes": 68,
+                  "hasSerializedTransaction": false,
+                  "nativeValueBaseUnits": "13118195000000000",
+                  "decimalAmount": "0.013118195"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "completedAt": "2026-11-03T20:33:57.522Z",
+  "parityRegressions": []
+}

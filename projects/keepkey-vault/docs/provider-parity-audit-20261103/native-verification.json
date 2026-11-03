@@ -1,0 +1,35 @@
+{
+  "checkedAt": "2026-11-03T20:45:07.889Z",
+  "platform": "macOS arm64 development",
+  "deviceFirmware": "7.16.0",
+  "vaultCodeRevision": "e02055c8663a40211cfa542d03903acc3e4553d2",
+  "gatewayRevision": "102fe9588ee8e31a47cc9618ba4a60721347055a",
+  "nativeAXInspection": true,
+  "quoteAndReview": {
+    "pair": "ETH to LTC",
+    "provider": "Direct NEAR Intents",
+    "sourcePrecision": 18,
+    "payloadReady": true,
+    "confirmEnabled": true,
+    "fees": {
+      "keepkeyBps": 15,
+      "platformBps": 20,
+      "sourceCurrency": "ETH",
+      "withdrawalCurrency": "LTC",
+      "withdrawalIncludedInOutput": true
+    },
+    "blindSigningPromptObserved": false
+  },
+  "observedFundedSwap": {
+    "agentInitiatedSigning": false,
+    "sourceReceiptSucceeded": true,
+    "sourceGasUsed": 21000,
+    "providerStatus": "SUCCESS",
+    "payoutConfirmed": true,
+    "payoutMatchesSavedWallet": true,
+    "actualReceivedOutputMeetsMinimum": true,
+    "vaultHistoryStatus": "completed",
+    "vaultHistoryUsesActualOutput": true
+  },
+  "privacy": "Wallet addresses, transaction identifiers and quantities remain in the local verification record and are omitted from this public fixture."
+}
