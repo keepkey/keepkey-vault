@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next"
 export interface IncomingTx {
   /** Human chain name (e.g. "Base"), resolved from the event networkId. */
   chainName?: string
+  activityOnly?: boolean
 }
 
 interface Props {
@@ -20,7 +21,9 @@ export function IncomingTxToast({ tx, onDismiss }: Props) {
 
   if (!tx) return null
 
-  const subtitle = tx.chainName
+  const subtitle = tx.activityOnly
+    ? (tx.chainName ? t("incomingTx.activityOnChain", { chain: tx.chainName, defaultValue: `${tx.chainName} · balance refreshed` }) : t("incomingTx.activityRefreshed", { defaultValue: "Balance refreshed" }))
+    : tx.chainName
     ? t("incomingTx.onChain", { chain: tx.chainName, defaultValue: `${tx.chainName} · refreshing balance` })
     : t("incomingTx.refreshing", { defaultValue: "Refreshing balance" })
 
@@ -46,12 +49,11 @@ export function IncomingTxToast({ tx, onDismiss }: Props) {
         backdropFilter="blur(12px)"
       >
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--teal)" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
-          <line x1="12" y1="5" x2="12" y2="19" />
-          <polyline points="19 12 12 19 5 12" />
+          {tx.activityOnly ? <polyline points="2 12 6 12 9 5 15 19 18 12 22 12" /> : <><line x1="12" y1="5" x2="12" y2="19" /><polyline points="19 12 12 19 5 12" /></>}
         </svg>
         <Box flex="1" minW="0">
           <Text fontSize="12px" color="var(--text-0)" fontWeight="500" lineHeight="1.3" truncate letterSpacing="-0.005em">
-            {t("incomingTx.title", { defaultValue: "Incoming payment" })}
+            {tx.activityOnly ? t("incomingTx.activityTitle", { defaultValue: "Wallet activity" }) : t("incomingTx.title", { defaultValue: "Incoming payment" })}
           </Text>
           <Text fontSize="11px" color="var(--text-3)" lineHeight="1.3" truncate>
             {subtitle}

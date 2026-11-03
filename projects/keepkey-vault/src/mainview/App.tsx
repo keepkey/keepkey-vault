@@ -594,15 +594,16 @@ function App() {
 		return () => window.removeEventListener("keepkey-settings-changed", load)
 	}, [])
 	useEffect(() => {
-		return onRpcMessage("tx-push-received", (payload: { chain?: string; networkId?: string; type?: "incoming" | "outgoing" | "confirmed" }) => {
+		return onRpcMessage("tx-push-received", (payload: { chain?: string; networkId?: string; type?: "incoming" | "outgoing" | "confirmed" | "activity"; balanceRefreshHandled?: boolean }) => {
 			const def = findChainByNetwork(payload.networkId, payload.chain, [...CHAINS, ...customChainDefs])
 			// Resync the affected chain regardless of direction — both inbound and
 			// outbound txs change the balance. Backend pushes 'balance-updated' back.
-			if (def) rpcRequest("getBalance", { chainId: def.id, forceRefresh: true }, 90000)
+			if (def && !payload.balanceRefreshHandled) rpcRequest("getBalance", { chainId: def.id, forceRefresh: true }, 90000)
 				.catch(error => console.warn(`[tx-push] ${def.id} balance refresh failed:`, error instanceof Error ? error.message : error))
 			// Toast only for genuine inbound payments. New object identity on every
 			// event → resets the auto-dismiss timer below.
 			if (payload.type === "incoming") setIncomingTx({ chainName: def?.coin })
+			else if (payload.type === "activity") setIncomingTx({ chainName: def?.coin, activityOnly: true })
 		})
 	}, [customChainDefs])
 	// Auto-dismiss after 6s. Armed here (not in the toast) so it fires even while

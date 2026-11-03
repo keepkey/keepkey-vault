@@ -2513,6 +2513,8 @@ export interface RecentActivity {
   confirmations?: number     // current confirmation count (0 = unconfirmed/mempool)
   blockHeight?: number       // block the tx was mined in (0 = unconfirmed)
   fee?: string               // tx fee (human-readable)
+  /** Fresh provider history explicitly identifies a plain native receipt. */
+  nativeReceiveVerified?: boolean
 }
 
 // RPC types — derived from the single source of truth in rpc-schema.ts

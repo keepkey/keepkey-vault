@@ -79,17 +79,19 @@ export function createPostTxBalanceRefresh(deps: Deps) {
     if (job.attempt >= POST_TX_BALANCE_DELAYS_MS.length) { cancel(job); return }
     schedule(job, POST_TX_BALANCE_DELAYS_MS[job.attempt])
   }
-  function request(chainId: string, txid?: string) {
+  function request(chainId: string, txid?: string, attempt = 0) {
     const scope = deps.getScope()
     if (!scope) return
     const previous = jobs.get(chainId)
     if (previous) cancel(previous)
-    const job: Job = { chainId, txid, scope, attempt: 0 }
+    const job: Job = { chainId, txid, scope, attempt }
     jobs.set(chainId, job)
-    schedule(job, POST_TX_BALANCE_DELAYS_MS[0])
+    schedule(job, POST_TX_BALANCE_DELAYS_MS[attempt])
   }
   return {
     request,
+    /** A push handler already performed its first forced read. */
+    retry(chainId: string, txid?: string) { request(chainId, txid, 1) },
     activity(entry: ApiLogEntry, chains: ChainDef[]): boolean {
       const scope = deps.getScope()
       if (!scope || (entry.sessionEpoch !== undefined && entry.sessionEpoch !== scope.epoch)

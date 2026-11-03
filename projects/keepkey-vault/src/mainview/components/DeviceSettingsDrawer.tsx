@@ -386,12 +386,14 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 	}, [])
 
 	const [togglingOffline, setTogglingOffline] = useState(false)
+	const [offlineError, setOfflineError] = useState<string | null>(null)
 	const toggleOffline = useCallback(async (enabled: boolean) => {
 		setTogglingOffline(true)
+		setOfflineError(null)
 		try {
-			const result = await rpcRequest<AppSettings>("setOfflineMode", { enabled }, 10000)
+			const result = await rpcRequest<AppSettings>("setOfflineMode", { enabled }, 20000)
 			setAppSettings(result)
-		} catch (e: any) { console.error("setOfflineMode:", e) }
+		} catch (e: any) { setOfflineError(e?.message || "Could not enable offline mode. Try again.") }
 		setTogglingOffline(false)
 	}, [])
 
@@ -1776,6 +1778,7 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 									disabled={togglingOffline}
 								/>
 							</Flex>
+							{offlineError && <Text role="alert" fontSize="xs" color="kk.error" mt="2">{offlineError}</Text>}
 
 							<Box>
                                 <Flex justify="space-between" align="center" gap="3">

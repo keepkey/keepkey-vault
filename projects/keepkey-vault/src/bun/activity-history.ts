@@ -136,10 +136,23 @@ function normalizeMeta(tx: any, activityType = normalizeActivityType(tx)) {
   }
 }
 
-function unwrapHistoryTransactions(resp: any): any[] {
-  const data = resp?.data || resp
-  const histories = data?.histories || data?.data?.histories || []
-  return histories.flatMap((h: any) => Array.isArray(h?.transactions) ? h.transactions : [])
+export function unwrapHistoryTransactions(resp: any, expectedQueries = 1): any[] {
+  const outer = resp?.data || resp
+  const data = Array.isArray(outer?.histories) ? outer : outer?.data
+  const histories = data?.histories
+  const degraded = (value: any) => value?.success === false || value?.meta?.degraded || value?.meta?.failures?.length || value?.meta?.staleChains?.length
+  if (!Array.isArray(histories) || histories.length !== expectedQueries || degraded(outer) || degraded(data)
+    || histories.some((history: any) => !Array.isArray(history?.transactions) || history.error || history.fresh === false || history.isStale === true || history.loading === true)) throw new Error('History response is incomplete or stale')
+  return histories.flatMap((history: any) => history.transactions)
+}
+
+export function verifiedNativeReceive(tx: any, nativeCaip: string): boolean {
+  return /^(received|receive|incoming|credit|deposit)$/i.test(String(tx?.direction || ''))
+    && String(tx?.type).toLowerCase() === 'transfer' && String(tx?.status).toLowerCase() !== 'failed' && tx?.caip === nativeCaip
+    // Older UTXO history labels can infer received without ownership and use
+    // total transaction outputs as value. Require an explicit owned-credit proof.
+    && (!nativeCaip.startsWith('bip122:') || (tx?.valueSemantics === 'wallet_credit' && tx?.ownershipVerified === true))
+    && Number.isFinite(Number(tx?.value)) && Number(tx.value) > 0
 }
 
 export async function deriveHistoryQueries(wallet: any, chain: ChainDef, accountIndex: number): Promise<HistoryQuery[]> {
@@ -341,6 +354,7 @@ export async function rebuildActivityHistory(params: {
           const route = `history/${chain.id}`
           const meta = {
             ...normalizeMeta(tx, activityType),
+            nativeReceiveVerified: verifiedNativeReceive(tx, chain.caip),
             chainId: chain.id,
             chainSymbol: chain.symbol,
             networkId: chain.networkId,
@@ -357,6 +371,7 @@ export async function rebuildActivityHistory(params: {
               chain: chain.symbol,
               chainId: chain.id,
               type: activityType,
+              nativeReceiveVerified: meta.nativeReceiveVerified,
               source: 'scan',
               status: 'broadcast',
               createdAt: timestamp,

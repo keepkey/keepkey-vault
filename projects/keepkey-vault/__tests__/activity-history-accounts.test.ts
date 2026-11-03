@@ -10,7 +10,7 @@ mock.module('../src/bun/pioneer', () => ({ getPioneer: async () => ({ GetTransac
   requests.push({ body, options })
   return { data: { histories: [{ transactions: body.queries[0].pubkey === 'p2sh-p2wpkh:49:0' ? [{ txid: 'wrapped-send', confirmations: 1, direction: 'outgoing', value: '0.1', timestamp: 1700000000 }] : [] }] } }
 } }) }))
-const { deriveHistoryQueries, rebuildActivityHistory, clearHistoryQueryCache } = await import('../src/bun/activity-history')
+const { deriveHistoryQueries, rebuildActivityHistory, clearHistoryQueryCache, verifiedNativeReceive, unwrapHistoryTransactions } = await import('../src/bun/activity-history')
 const ltc = CHAINS.find(chain => chain.id === 'litecoin')!
 const bitcoin = CHAINS.find(chain => chain.id === 'bitcoin')!
 const wallet = { getPublicKeys: async (paths: any[]) => paths.map(path => ({ xpub: `${path.scriptType}:${path.addressNList[0] - 0x80000000}:${path.addressNList[2] - 0x80000000}` })) }
@@ -46,4 +46,20 @@ test('Bitcoin Taproot history remains gated by actual device support', async () 
   expect(supported).toHaveLength(4)
   expect(supported[3]).toMatchObject({ scriptType: 'p2tr', path: "m/86'/0'/0'", pubkey: 'tr(p2tr:86:0)' })
   expect(await deriveHistoryQueries({ ...wallet, btcSupportsScriptType: async () => { throw new Error('Unsupported') } }, bitcoin, 0)).toHaveLength(3)
+})
+test('only explicit plain native receipts are safe for an incoming payment notification', () => {
+  const tx = { caip: ltc.caip, direction: 'received', type: 'transfer', value: '0.1', status: 'confirmed', ownershipVerified: true, valueSemantics: 'wallet_credit' }
+  expect(verifiedNativeReceive(tx, ltc.caip)).toBe(true)
+  for (const change of [{ direction: 'self' }, { direction: undefined }, { direction: 'sent' }, { type: 'token_transfer' }, { caip: 'eip155:1/slip44:60' }, { value: '0' }, { status: 'failed' }, { ownershipVerified: undefined }, { valueSemantics: undefined }]) {
+    expect(verifiedNativeReceive({ ...tx, ...change }, ltc.caip)).toBe(false)
+  }
+})
+test('partial, stale and malformed history cannot count as a fresh payment scan', () => {
+  expect(unwrapHistoryTransactions({ data: { histories: [{ transactions: [] }] } })).toEqual([])
+  for (const data of [{}, { success: false, histories: [] }, { meta: { degraded: true }, histories: [] },
+    { histories: [{}] }, { histories: [] }, { histories: [{ transactions: [] }, { transactions: [] }] },
+    { data: { histories: [{ transactions: [] }], meta: { degraded: true } } },
+    { histories: [{ error: 'upstream failed' }] }, { histories: [{ fresh: false }] }, { histories: [{ isStale: true }] }]) {
+    expect(() => unwrapHistoryTransactions({ data })).toThrow('incomplete or stale')
+  }
 })

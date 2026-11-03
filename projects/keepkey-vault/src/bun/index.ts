@@ -242,12 +242,16 @@ import { createUiWatchdog } from "./ui-watchdog"
 import { fetchDefiPositions } from "./zerion"
 import { loadSupportedChains } from "../shared/swap-support-matrix"
 import { PioneerSocket } from "./pioneer-socket"
-import { startEventStream, stopEventStream, type AddressEntry } from "./event-stream"
+import { createActiveWalletWatch, refreshWatchedChain, type OwnedWatch } from "./active-wallet-watch"
+import { createDurableWalletMonitor, type DurableMonitorSession } from "./durable-wallet-monitor"
+import { createWalletMonitorRegistry } from "./wallet-monitor-registry"
+import { startEventStream, stopEventStream, type AddressEntry, type StreamEvent } from "./event-stream"
+import { pioneerSupportsDurableWalletMonitoring } from "../shared/pioneer-event-capabilities"
 import { rebuildActivityHistory, clearHistoryQueryCache } from "./activity-history"
 import { watchOnlyPortfolioKeys, watchOnlyNativeBalances, watchOnlyNodeBalances, portfolioNativeMatch, trackedUtxoScriptPaths } from './watch-only-portfolio'
 import { cachedHistoryQueries, watchOnlyWalletScope, watchOnlyBitcoinScope } from './watch-only-history'
 import { createTxWatch, MAX_WATCH_MS, UNSEEN_GIVE_UP_MS } from "./tx-watch"
-import { activityBalanceTarget, createPostTxBalanceRefresh, type BalanceRefreshScope } from "./post-tx-balance"
+import { activityBalanceTarget, createPostTxBalanceRefresh, sameBalanceRefreshScope, type BalanceRefreshScope } from "./post-tx-balance"
 import { getRequiredConfs } from "../shared/confirmations"
 import { addSessionActivity, getSessionActivity, clearSessionActivity } from "./session-activity"
 import { buildTx, broadcastTx, canonicalizeTronTokenCaip } from "./txbuilder"
@@ -942,7 +946,10 @@ function browseChains(query: string, page: number, pageSize: number): { chains: 
 /** Fire-and-forget: cache a derived address for watch-only mode.
  *  PRIVACY: Never persist addresses from a passphrase wallet — doing so
  *  leaks the existence and contents of the hidden wallet to disk. */
-function cacheAddress(chainId: string, path: string, address: string) {
+function cacheAddress(chainId: string, path: string, address: string, scope = currentBalanceRefreshScope()) {
+	if (!scope || !sameBalanceRefreshScope(scope, currentBalanceRefreshScope())) return
+	const chain = getAllChains().find(c => c.id === chainId)
+	if (chain) activeWalletWatches.add([{ chainId, caip: chain.caip, networkId: chain.networkId, address, path }], scope)
 	if (engine.isPassphraseWallet) return
 	try {
 		const deviceId = engine.getDeviceState().deviceId || 'unknown'
@@ -2431,6 +2438,8 @@ async function getChainBalance(params: { chainId: string; forceRefresh?: boolean
 		}
 	}
 
+	publishWalletWatchPubkeys(pubkeys, currentBalanceRefreshScope())
+
 	// Single portfolio call with all pubkeys for this chain
 	const isBtc = chain.id === 'bitcoin'
 	const isEvm = chain.chainFamily === 'evm'
@@ -2828,6 +2837,205 @@ const postTxBalances = createPostTxBalanceRefresh({
 	onError: (chainId, error) => console.warn(`[post-tx-balance] ${chainId}:`, error instanceof Error ? error.message : error),
 })
 
+function isWalletWatchChainEnabled(chainId: string): boolean {
+	const chain = getAllChains().find(c => c.id === chainId)
+	const state = engine.getDeviceState()
+	return !!chain && !chain.hidden && chain.chainFamily !== 'zcash-shielded'
+		&& networkOn(chainId) && isChainSupported(chain, state.firmwareVersion)
+		&& (!isBitcoinOnlyVariant(state.firmwareVariant) || chainId === 'bitcoin')
+		&& (!(chainId === 'zcash') || zcashPrivacyEnabled) && (chainId !== 'hive' || hiveEnabled)
+		&& !(chainId === 'bitcoin' && getBtcBackend().kind !== 'pioneer')
+}
+
+function durableMonitorSession(scope = currentBalanceRefreshScope()): DurableMonitorSession | undefined {
+	if (!scope || engine.isPassphraseWallet) return undefined
+	return { scope, walletScope: `vault:${createHash('sha256').update(scope.walletId).digest('hex')}`,
+		base: getPioneerApiBase(), queryKey: getPioneerQueryKey() }
+}
+let walletMonitorRevoking = false
+const forgottenMonitorEpochs = new Map<string, number>()
+const walletMonitorRegistry = createWalletMonitorRegistry({
+	read: () => getSetting('wallet_monitor_owners') || undefined,
+	write: json => { setSetting('wallet_monitor_owners', json) },
+})
+function walletMonitoringAllowed(): boolean {
+	const deviceId = engine.getDeviceState().deviceId
+	return !walletMonitorRevoking && (!deviceId || forgottenMonitorEpochs.get(deviceId) !== activitySessionEpoch)
+}
+const durableWalletMonitor = createDurableWalletMonitor({
+	isCurrent: session => walletMonitoringAllowed() && !engine.isPassphraseWallet && !offlineMode && sameBalanceRefreshScope(session.scope, currentBalanceRefreshScope())
+		&& session.base === getPioneerApiBase() && session.queryKey === getPioneerQueryKey(),
+	readCursor: context => getSetting(`wallet_watch_replay_${createHash('sha256').update(context).digest('hex')}`) || undefined,
+	writeCursor: (context, cursor) => { setSetting(`wallet_watch_replay_${createHash('sha256').update(context).digest('hex')}`, cursor) },
+	deliver: event => activeWalletWatches.event(event as any),
+	flush: () => activeWalletWatches.flush(),
+	onRegistered: count => console.log(`[wallet-monitor] Background monitoring ${count ? 'registered' : 'disabled'} (${count} watches)`),
+	onError: error => console.warn('[wallet-monitor] Monitoring request failed:', error instanceof Error ? error.message : error),
+})
+
+let resolvingWatchLease: { controller: AbortController; addresses: AddressEntry[]; scope: BalanceRefreshScope;
+	onEvent?: (event: StreamEvent) => void; onStatus?: (status: any) => void } | undefined
+function stopOwnedWalletStream(): void {
+	resolvingWatchLease?.controller.abort()
+	resolvingWatchLease = undefined
+	stopEventStream()
+}
+function resolveOwnedWalletLease(addresses: AddressEntry[], scope: BalanceRefreshScope): void {
+	stopOwnedWalletStream()
+	const lease = { controller: new AbortController(), addresses, scope } as NonNullable<typeof resolvingWatchLease>
+	resolvingWatchLease = lease
+	const session = durableMonitorSession(scope)
+	const current = () => resolvingWatchLease === lease && !lease.controller.signal.aborted && walletMonitoringAllowed() && !offlineMode
+		&& sameBalanceRefreshScope(scope, currentBalanceRefreshScope()) && (!session || (session.base === getPioneerApiBase() && session.queryKey === getPioneerQueryKey()))
+	void (async () => {
+		for (let attempt = 0; current(); attempt++) {
+			try {
+				const pioneer = await getPioneer()
+				if (!current()) return
+				let durableAuthorized = false, retry = false
+				if (session && pioneerSupportsDurableWalletMonitoring(pioneer)) {
+					try {
+						walletMonitorRegistry.remember({ deviceId: scope.deviceId, walletScope: session.walletScope, base: session.base, queryKey: session.queryKey })
+						durableWalletMonitor.replace(session, addresses)
+						durableAuthorized = true
+					} catch (error) { retry = true; console.warn('[wallet-monitor] Ownership could not be saved:', error instanceof Error ? error.message : error) }
+				} else durableWalletMonitor.stop()
+				if (lease.onEvent) startEventStream(addresses, lease.onEvent, lease.onStatus, { walletScope: durableAuthorized ? session?.walletScope : undefined })
+				if (!retry) return
+			} catch (error) { if (current()) console.warn('[wallet-watch] Waiting for server capabilities:', error instanceof Error ? error.message : error) }
+			if (!current()) return
+			await new Promise<void>(resolve => {
+				const done = () => { clearTimeout(timer); lease.controller.signal.removeEventListener('abort', done); resolve() }
+				const timer = setTimeout(done, [2_000, 10_000, 30_000, 60_000][Math.min(attempt, 3)])
+				lease.controller.signal.addEventListener('abort', done, { once: true })
+			})
+		}
+	})()
+}
+
+const activeWalletWatches = createActiveWalletWatch({
+	getScope: currentBalanceRefreshScope,
+	canWatch: () => walletMonitoringAllowed() && !offlineMode && engine.getDeviceState().state === 'ready',
+	isChainEnabled: isWalletWatchChainEnabled,
+	start: (_addresses, onEvent, onStatus) => {
+		if (resolvingWatchLease) { resolvingWatchLease.onEvent = onEvent; resolvingWatchLease.onStatus = onStatus }
+	},
+	onLease: resolveOwnedWalletLease,
+	onConnected: () => { void durableWalletMonitor.replay() },
+	onProcessed: async (eventIds, scope) => {
+		if (sameBalanceRefreshScope(scope, currentBalanceRefreshScope())) await durableWalletMonitor.acknowledge(eventIds)
+	},
+	stop: stopOwnedWalletStream,
+	refresh: (hint, isCurrent) => refreshWatchedChain(hint, {
+		readBalance: getChainBalance,
+		scanHistory: (chainId, current) => scanOneChain(chainId, true, current),
+		follow: (chainId, txid) => txWatch.watch(chainId, txid),
+		retry: (chainId, txid) => postTxBalances.retry(chainId, txid),
+		onReceive: (chainId, txid) => {
+			if (txidRecentlyPushed(txid)) return
+			const chain = getAllChains().find(chain => chain.id === chainId)
+			if (chain) try { rpc.send['tx-push-received']({ chain: chain.caip, networkId: chain.networkId, txid, type: 'incoming', balanceRefreshHandled: true }) } catch { /* renderer optional */ }
+		},
+		onActivity: (chainId, txid) => {
+			if (txidRecentlyPushed(txid)) return
+			const chain = getAllChains().find(chain => chain.id === chainId)
+			if (chain) try { rpc.send['tx-push-received']({ chain: chain.caip, networkId: chain.networkId, txid, type: 'activity', balanceRefreshHandled: true }) } catch { /* renderer optional */ }
+		},
+	}, isCurrent),
+	onStatus: status => { try { rpc.send['stream-status'](status) } catch { /* renderer optional */ } },
+	onError: error => console.warn('[wallet-watch] Refresh failed:', error instanceof Error ? error.message : error),
+	onOverflow: omitted => console.warn(`[wallet-watch] ${omitted} entries exceed the active lease limit`),
+})
+
+function publishWalletWatchPubkeys(pubkeys: Array<{ caip: string; pubkey: string; chainId?: string; networkId?: string; path?: string; scriptType?: string }>, scope = currentBalanceRefreshScope()) {
+	if (!walletMonitoringAllowed() || !scope || !sameBalanceRefreshScope(scope, currentBalanceRefreshScope())) return
+	const entries: OwnedWatch[] = []
+	for (const pubkey of pubkeys) {
+		const chain = pubkey.chainId ? getAllChains().find(c => c.id === pubkey.chainId) : findChainByNetwork(pubkey.networkId, pubkey.caip, getAllChains())
+		if (!chain) continue
+		entries.push({ chainId: chain.id, networkId: chain.networkId, caip: chain.caip, address: pubkey.pubkey,
+			account: /^(?:tr\(|xpub|ypub|zpub|tpub|upub|vpub|Ltub|Mtub|dgub|drkp)/.test(pubkey.pubkey), path: pubkey.path, scriptType: pubkey.scriptType })
+	}
+	activeWalletWatches.add(entries, scope)
+}
+
+let watchBootstrapScope: BalanceRefreshScope | null = null
+let watchBootstrapGeneration = 0
+function stopActiveWalletWatches() {
+	watchBootstrapGeneration++
+	watchBootstrapScope = null
+	activeWalletWatches.stop()
+	durableWalletMonitor.stop()
+}
+
+/** Explicit privacy actions revoke durable ownership before deleting local
+ * metadata. Normal close/disconnect never calls this function. */
+async function revokeKnownWalletMonitoring(deviceId?: string): Promise<void> {
+	if (walletMonitorRevoking) throw new Error('Wallet monitoring is already being disabled. Try again shortly.')
+	const owners = walletMonitorRegistry.list(deviceId)
+	walletMonitorRevoking = true
+	stopActiveWalletWatches()
+	try {
+		for (const owner of owners) {
+			await durableWalletMonitor.revoke(owner)
+			walletMonitorRegistry.remove(owner)
+		}
+	} catch {
+		walletMonitorRevoking = false
+		bootstrapActiveWalletWatches()
+		throw new Error('Could not disable background wallet monitoring. Your wallet was not forgotten and offline mode was not enabled. Check your connection and try again.')
+	}
+	walletMonitorRevoking = false
+}
+
+/** Rebuild active subscriptions after unlock/reconnect without depending on
+ * the dashboard requesting a portfolio. Hidden inventories stay in RAM. */
+function bootstrapActiveWalletWatches(): void {
+	const scope = currentBalanceRefreshScope()
+	if (!walletMonitoringAllowed() || !scope || offlineMode || engine.getDeviceState().state !== 'ready') return
+	if (sameBalanceRefreshScope(scope, watchBootstrapScope)) { activeWalletWatches.resume(); return }
+	watchBootstrapScope = scope
+	const gen = ++watchBootstrapGeneration
+	const isCurrent = () => gen === watchBootstrapGeneration && !offlineMode && engine.getDeviceState().state === 'ready' && sameBalanceRefreshScope(scope, currentBalanceRefreshScope())
+	activeWalletWatches.add([], scope)
+	const finishInventory = activeWalletWatches.beginBatch()
+	void (async () => {
+		const wallet = scope.wallet as any
+		const chains = getAllChains().filter(chain => isWalletWatchChainEnabled(chain.id))
+		const saved = !engine.isPassphraseWallet && getSetting(`seed_eth_${scope.deviceId}`)?.toLowerCase() === engine.currentSeedEthAddress?.toLowerCase()
+			? getCachedPubkeys(scope.deviceId) : []
+		publishWalletWatchPubkeys(saved.map(row => ({ caip: chains.find(c => c.id === row.chainId)?.caip || '', chainId: row.chainId, pubkey: row.xpub || row.address, path: row.path, scriptType: row.scriptType })).filter(row => row.pubkey), scope)
+		const paths = chains.filter(chain => chain.chainFamily === 'utxo' && chain.id !== 'bitcoin').flatMap(chain =>
+			trackedUtxoScriptPaths(chain, saved, chain.id === 'digibyte' && supportsDgbTaproot(process.env.FEATURE_TAPROOT_DGB === 'true', engine.getDeviceState().firmwareVersion)).map(path => ({ chain, ...path })))
+		if (paths.length && isCurrent()) {
+			const keys = await wallet.getPublicKeys(paths.map(path => ({ addressNList: path.path, coin: path.chain.coin, scriptType: path.scriptType, curve: 'secp256k1' })))
+			if (!isCurrent()) return
+			publishWalletWatchPubkeys(paths.flatMap((path, index) => keys?.[index]?.xpub ? [{ caip: path.chain.caip, chainId: path.chain.id, pubkey: keys[index].xpub, path: pathToBip32(path.path), scriptType: path.scriptType }] : []), scope)
+		}
+		const btc = chains.find(chain => chain.id === 'bitcoin')
+		if (btc && isCurrent()) {
+			await btcAccounts.initialize(wallet)
+			if (!isCurrent()) return
+			publishWalletWatchPubkeys(btcAccounts.getAllPubkeyEntries(btc.caip).map(entry => ({ ...entry, chainId: 'bitcoin' })), scope)
+		}
+		const evm = chains.filter(chain => chain.chainFamily === 'evm')
+		if (evm.length && isCurrent()) {
+			await evmAddresses.initialize(wallet)
+			if (!isCurrent()) return
+			publishWalletWatchPubkeys(evmAddresses.getAllPubkeyEntries(evm), scope)
+		}
+		for (const chain of chains.filter(chain => chain.chainFamily !== 'utxo' && chain.chainFamily !== 'evm')) {
+			if (!isCurrent()) return
+			if (activeWalletWatches.entries(chain.id).length) continue
+			try {
+				const address = await deriveChainAddress(wallet, chain)
+				if (!isCurrent()) return
+				if (address) publishWalletWatchPubkeys([{ caip: chain.caip, chainId: chain.id, pubkey: address }], scope)
+			} catch (error) { if (isCurrent()) console.warn(`[wallet-watch] ${chain.id} derivation failed:`, error instanceof Error ? error.message : error) }
+		}
+	})().catch(error => { if (isCurrent()) console.warn('[wallet-watch] Subscription inventory failed:', error instanceof Error ? error.message : error) }).finally(finishInventory)
+}
+
 /** Stamped in a wallet session that has since ended (unplug, passphrase switch,
 *  seed change): attributing it to the current scope would put one wallet's tx
 *  in another's history — on disk or in the hidden RAM store. */
@@ -2837,7 +3045,7 @@ function entryIsStale(entry: ApiLogEntry): boolean {
 
 /** Rescan ONE chain's history. Standard wallets upsert api_log; hidden sessions
 *  fetch live and keep rows in RAM only (zero disk trace). */
-async function scanOneChain(chainId: string, forceRefresh = false) {
+async function scanOneChain(chainId: string, forceRefresh = false, ownerIsCurrent: () => boolean = () => true) {
 	if (!engine.wallet) throw new Error('No device connected')
 	// Only a settled session scans: while a PIN/passphrase prompt is up, a derive
 	// queues behind it and can come back from a DIFFERENT (hidden) wallet.
@@ -2851,11 +3059,13 @@ async function scanOneChain(chainId: string, forceRefresh = false) {
 	const scope = dbScope || (hidden ? { deviceId, walletId: `${deviceId}:hidden-session` } : null)
 	if (!scope) throw new Error('Wallet scope is not ready. Unlock the device and wait for seed identity.')
 	// Re-checked after the device derive and before every cache set / DB write.
-	const isCurrent = () => epoch === activitySessionEpoch
+	const isCurrent = () => ownerIsCurrent() && epoch === activitySessionEpoch
 		&& engine.getDeviceState().state === 'ready'
 		&& engine.isPassphraseWallet === hidden
 		&& getWalletDbScope()?.walletId === dbScope?.walletId
+	const watches = activeWalletWatches.entries(chainId)
 	const result = await rebuildActivityHistory({
+		cachedQueries: watches.length ? { [chainId]: watches.map(watch => ({ caip: watch.caip, pubkey: watch.address, label: watch.path || 'active-wallet', path: watch.path, scriptType: watch.scriptType })) } : undefined,
 		wallet: engine.wallet,
 		scope,
 		chains: getAllChains().filter(c => (c.id !== 'hive' || hiveEnabled) && networkOn(c.id)),
@@ -2865,6 +3075,7 @@ async function scanOneChain(chainId: string, forceRefresh = false) {
 	})
 	if (!isCurrent()) return { rows: [], added: 0, txs: 0, updated: 0 }
 	const chainResult = result.chains.find(c => c.chainId === chainId)
+	if (!chainResult) throw new Error('Wallet history scan did not include the requested chain')
 	if (chainResult?.error) throw new Error(chainResult.error)
 	const rows = result.rows || []
 	const added = hidden ? addSessionActivity(rows) : (chainResult?.inserted || 0)
@@ -4223,12 +4434,23 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			},
 			getPublicKeys: async (params) => {
 				if (!engine.wallet) throw new Error('No device connected')
-				return await engine.wallet.getPublicKeys(params.paths)
+				const scope = currentBalanceRefreshScope()
+				const result = await engine.wallet.getPublicKeys(params.paths)
+				if (scope && sameBalanceRefreshScope(scope, currentBalanceRefreshScope())) {
+					publishWalletWatchPubkeys(params.paths.flatMap((path: any, index: number) => {
+						if (path.addressNList?.length !== 3) return []
+						const chain = getAllChains().find(chain => chain.coin === path.coin && chain.chainFamily === 'utxo')
+						const xpub = result?.[index]?.xpub
+						return chain && xpub ? [{ caip: chain.caip, chainId: chain.id, pubkey: xpub, path: pathToBip32(path.addressNList), scriptType: path.scriptType }] : []
+					}), scope)
+				}
+				return result
 			},
 
 			// ── Address derivation ────────────────────────────────────
 			btcGetAddress: async (params) => {
 				if (!engine.wallet) throw new Error('No device connected')
+				const watchScope = currentBalanceRefreshScope()
 				// btcGetAddress is shared by every UTXO chain (Litecoin, Dash, Dogecoin, …),
 				// so resolve the cache key from params.coin instead of hardcoding bitcoin —
 				// otherwise an altcoin address overwrites bitcoin's cache and never persists
@@ -4238,83 +4460,92 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					? await emuSigningOp(() => engine.wallet!.btcGetAddress(params), { operation: 'btcGetAddress', chain: params.coin || 'Bitcoin' })
 					: await engine.wallet.btcGetAddress(params)
 				const addr = typeof result === 'string' ? result : result?.address
-				if (addr) cacheAddress(chainId, JSON.stringify(params.addressNList || []), addr)
+				if (addr) cacheAddress(chainId, JSON.stringify(params.addressNList || []), addr, watchScope)
 				return result
 			},
 			ethGetAddress: async (params) => {
 				if (!engine.wallet) throw new Error('No device connected')
+				const watchScope = currentBalanceRefreshScope()
 				const result = (engine.isEmulator && params.showDisplay)
 					? await emuSigningOp(() => engine.wallet!.ethGetAddress(params), { operation: 'ethGetAddress', chain: 'Ethereum' })
 					: await engine.wallet.ethGetAddress(params)
 				const addr = typeof result === 'string' ? result : result?.address
-				if (addr) cacheAddress('ethereum', JSON.stringify(params.addressNList || []), addr)
+				if (addr) cacheAddress('ethereum', JSON.stringify(params.addressNList || []), addr, watchScope)
 				return result
 			},
 			cosmosGetAddress: async (params) => {
 				if (!engine.wallet) throw new Error('No device connected')
+				const watchScope = currentBalanceRefreshScope()
 				const result = (engine.isEmulator && params.showDisplay)
 					? await emuSigningOp(() => engine.wallet!.cosmosGetAddress(params), { operation: 'cosmosGetAddress', chain: 'Cosmos' })
 					: await engine.wallet.cosmosGetAddress(params)
 				const addr = typeof result === 'string' ? result : result?.address
-				if (addr) cacheAddress('cosmos', JSON.stringify(params.addressNList || []), addr)
+				if (addr) cacheAddress('cosmos', JSON.stringify(params.addressNList || []), addr, watchScope)
 				return result
 			},
 			thorchainGetAddress: async (params) => {
 				if (!engine.wallet) throw new Error('No device connected')
+				const watchScope = currentBalanceRefreshScope()
 				const result = (engine.isEmulator && params.showDisplay)
 					? await emuSigningOp(() => engine.wallet!.thorchainGetAddress(params), { operation: 'thorchainGetAddress', chain: 'THORChain' })
 					: await engine.wallet.thorchainGetAddress(params)
 				const addr = typeof result === 'string' ? result : result?.address
-				if (addr) cacheAddress('thorchain', JSON.stringify(params.addressNList || []), addr)
+				if (addr) cacheAddress('thorchain', JSON.stringify(params.addressNList || []), addr, watchScope)
 				return result
 			},
 			mayachainGetAddress: async (params) => {
 				if (!engine.wallet) throw new Error('No device connected')
+				const watchScope = currentBalanceRefreshScope()
 				const result = (engine.isEmulator && params.showDisplay)
 					? await emuSigningOp(() => engine.wallet!.mayachainGetAddress(params), { operation: 'mayachainGetAddress', chain: 'Maya' })
 					: await engine.wallet.mayachainGetAddress(params)
 				const addr = typeof result === 'string' ? result : result?.address
-				if (addr) cacheAddress('mayachain', JSON.stringify(params.addressNList || []), addr)
+				if (addr) cacheAddress('mayachain', JSON.stringify(params.addressNList || []), addr, watchScope)
 				return result
 			},
 			osmosisGetAddress: async (params) => {
 				if (!engine.wallet) throw new Error('No device connected')
+				const watchScope = currentBalanceRefreshScope()
 				const result = (engine.isEmulator && params.showDisplay)
 					? await emuSigningOp(() => engine.wallet!.osmosisGetAddress(params), { operation: 'osmosisGetAddress', chain: 'Osmosis' })
 					: await engine.wallet.osmosisGetAddress(params)
 				const addr = typeof result === 'string' ? result : result?.address
-				if (addr) cacheAddress('osmosis', JSON.stringify(params.addressNList || []), addr)
+				if (addr) cacheAddress('osmosis', JSON.stringify(params.addressNList || []), addr, watchScope)
 				return result
 			},
 			xrpGetAddress: async (params) => {
 				if (!engine.wallet) throw new Error('No device connected')
+				const watchScope = currentBalanceRefreshScope()
 				const result = (engine.isEmulator && params.showDisplay)
 					? await emuSigningOp(() => engine.wallet!.rippleGetAddress(params), { operation: 'xrpGetAddress', chain: 'XRP' })
 					: await engine.wallet.rippleGetAddress(params)
 				const addr = typeof result === 'string' ? result : result?.address
-				if (addr) cacheAddress('ripple', JSON.stringify(params.addressNList || []), addr)
+				if (addr) cacheAddress('ripple', JSON.stringify(params.addressNList || []), addr, watchScope)
 				return result
 			},
 			solanaGetAddress: async (params) => {
 				if (!engine.wallet) throw new Error('No device connected')
+				const watchScope = currentBalanceRefreshScope()
 				const result = (engine.isEmulator && params.showDisplay)
 					? await emuSigningOp(() => engine.wallet!.solanaGetAddress(params), { operation: 'solanaGetAddress', chain: 'Solana' })
 					: await engine.wallet.solanaGetAddress(params)
 				const addr = typeof result === 'string' ? result : result?.address
-				if (addr) cacheAddress('solana', JSON.stringify(params.addressNList || []), addr)
+				if (addr) cacheAddress('solana', JSON.stringify(params.addressNList || []), addr, watchScope)
 				return result
 			},
 			tronGetAddress: async (params) => {
 				if (!engine.wallet) throw new Error('No device connected')
+				const watchScope = currentBalanceRefreshScope()
 				const result = (engine.isEmulator && params.showDisplay)
 					? await emuSigningOp(() => engine.wallet!.tronGetAddress(params), { operation: 'tronGetAddress', chain: 'Tron' })
 					: await engine.wallet.tronGetAddress(params)
 				const addr = typeof result === 'string' ? result : result?.address
-				if (addr) cacheAddress('tron', JSON.stringify(params.addressNList || []), addr)
+				if (addr) cacheAddress('tron', JSON.stringify(params.addressNList || []), addr, watchScope)
 				return result
 			},
 			tonGetAddress: async (params) => {
 				if (!engine.wallet) throw new Error('No device connected')
+				const watchScope = currentBalanceRefreshScope()
 				// Default to non-bounceable (UQ) — bounceable (EQ) bounces funds if wallet is uninitialized
 				const bounceable = params.bounceable ?? false
 				const addrParams = { ...params, bounceable }
@@ -4322,7 +4553,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					? await emuSigningOp(() => engine.wallet!.tonGetAddress(addrParams), { operation: 'tonGetAddress', chain: 'TON' })
 					: await engine.wallet.tonGetAddress(addrParams)
 				const addr = typeof result === 'string' ? result : result?.address
-				if (addr) cacheAddress('ton', JSON.stringify(params.addressNList || []), addr)
+				if (addr) cacheAddress('ton', JSON.stringify(params.addressNList || []), addr, watchScope)
 				return result
 			},
 
@@ -6234,6 +6465,8 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					// Auto-discover EVM addresses with funds (background, non-blocking)
 					if (evmChains.length > 0 && wallet) {
 						evmAddresses.autoDiscover(wallet, pioneer, evmChains).then(({ discovered }) => {
+							if (inventoryEpoch !== activitySessionEpoch || inventoryWallet !== engine.wallet) return
+							if (discovered.length) publishWalletWatchPubkeys(evmAddresses.getAllPubkeyEntries(evmChains), currentBalanceRefreshScope())
 							if (discovered.length > 0) {
 								console.log(`[getBalances] Auto-discovered EVM addresses at indices: ${discovered.join(', ')}`)
 								try { rpc.send['evm-addresses-update'](evmAddresses.toAddressSet()) } catch {}
@@ -6320,57 +6553,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					}
 				}
 
-				// ── Start SSE event stream for real-time tx notifications ──
-				// Build one watch list for every provider-backed chain. UTXO entries are
-				// xpubs (including script-type discovery keys for BTC); the self-contained
-				// gateway watches them only for the lifetime of this SSE connection.
-				const streamAddresses: AddressEntry[] = []
-				for (const a of evmAddresses.toAddressSet().addresses) {
-					if (a.address && a.networkId) streamAddresses.push({ address: a.address, networkId: a.networkId })
-				}
-				for (const p of pubkeys) {
-					if (p.networkId && p.pubkey) streamAddresses.push({ address: p.pubkey, networkId: p.networkId })
-				}
-				if (streamAddresses.length > 0) {
-					startEventStream(
-						streamAddresses,
-						(event) => {
-							if (event.type === 'tx:incoming') {
-								// event.data.type is the real direction ('incoming' | 'outgoing').
-								// Forward it verbatim — frontend resyncs either way (both change the
-								// balance) but only shows the "Incoming payment" toast for 'incoming'.
-								// Mark the txid so the Pioneer-socket leg doesn't re-forward it.
-								if (txidRecentlyPushed(event.data.txid)) return
-								followPushedTx(event.data.networkId, event.data.caip, event.data.txid)
-								console.log(`[event-stream] ${event.data.type} tx ${event.data.txid} → ${event.data.address} (${event.data.networkId})`)
-								try { rpc.send['tx-push-received']({
-									chain: event.data.caip,
-									networkId: event.data.networkId,
-									address: event.data.address,
-									txid: event.data.txid,
-									type: event.data.type,
-								}) } catch { /* webview not ready */ }
-							}
-							if (event.type === 'tx:confirmed') {
-								console.log(`[event-stream] Confirmed tx ${event.data.txid} (${event.data.confirmations} confs)`)
-								followPushedTx(event.data.networkId, undefined, event.data.txid)
-								// Debounce per network: the stream re-fires tx:confirmed on every
-								// confirmation update, and each forward costs a forced getBalance.
-								const confKey = `confirmed:${event.data.networkId}`
-								const pending = pioneerEventDebounce.get(confKey)
-								if (pending) clearTimeout(pending.timer)
-								const payload = { networkId: event.data.networkId, txid: event.data.txid, type: 'confirmed' as const }
-								pioneerEventDebounce.set(confKey, { payload, timer: setTimeout(() => {
-									pioneerEventDebounce.delete(confKey)
-									try { rpc.send['tx-push-received'](payload) } catch { /* webview not ready */ }
-								}, 2000) })
-							}
-						},
-						(status) => {
-							try { rpc.send['stream-status'](status) } catch { /* webview not ready */ }
-						},
-					)
-				}
+				if (inventoryEpoch === activitySessionEpoch && inventoryWallet === engine.wallet) publishWalletWatchPubkeys(pubkeys, currentBalanceRefreshScope())
 
 				return results
 			},
@@ -6913,7 +7096,11 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			},
 			addBtcAccount: async () => {
 				if (!engine.wallet) throw new Error('No device connected')
-				return await btcAccounts.addAccount(engine.wallet as any)
+				const scope = currentBalanceRefreshScope()
+				const result = await btcAccounts.addAccount(engine.wallet as any)
+				const btc = getAllChains().find(chain => chain.id === 'bitcoin')
+				if (btc && scope) publishWalletWatchPubkeys(btcAccounts.getAllPubkeyEntries(btc.caip).map(entry => ({ ...entry, chainId: 'bitcoin' })), scope)
+				return result
 			},
 			// Persist a non-BTC UTXO account's xpubs to the device-scoped pubkey
 			// cache so the audit "track" action makes those funds show + spend from
@@ -6921,6 +7108,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			// !isPassphraseWallet) — Bitcoin itself stays on the in-memory manager.
 			addUtxoAccount: async (params) => {
 				if (!engine.wallet) throw new Error('No device connected')
+				const watchScope = currentBalanceRefreshScope()
 				const chain = getAllChains().find(c => c.id === params.chainId)
 				if (!chain) throw new Error(`Unknown chain: ${params.chainId}`)
 				if (chain.chainFamily !== 'utxo' || chain.id === 'bitcoin') throw new Error(`${params.chainId} is not a non-BTC UTXO chain`)
@@ -6933,6 +7121,8 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				const pks = await (engine.wallet as any).getPublicKeys(
 					sps.map(sp => ({ addressNList: sp.path, coin: chain.coin, scriptType: sp.scriptType, curve: 'secp256k1' })),
 				)
+				if (!watchScope || !sameBalanceRefreshScope(watchScope, currentBalanceRefreshScope())) throw new Error('Wallet changed while adding account')
+				publishWalletWatchPubkeys(sps.flatMap((path, index) => pks?.[index]?.xpub ? [{ caip: chain.caip, chainId: chain.id, pubkey: pks[index].xpub, path: pathToBip32(path.path), scriptType: path.scriptType }] : []), watchScope)
 				let saved = 0
 				for (let i = 0; i < sps.length; i++) {
 					const xpub = (pks?.[i] as any)?.xpub
@@ -6985,7 +7175,10 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			},
 			addEvmAddressIndex: async (params) => {
 				if (!engine.wallet) throw new Error('No device connected')
-				return await evmAddresses.addIndex(engine.wallet as any, params.index)
+				const scope = currentBalanceRefreshScope()
+				const result = await evmAddresses.addIndex(engine.wallet as any, params.index)
+				if (scope) publishWalletWatchPubkeys(evmAddresses.getAllPubkeyEntries(getAllChains().filter(chain => chain.chainFamily === 'evm')), scope)
+				return result
 			},
 			removeEvmAddressIndex: async (params) => {
 				return evmAddresses.removeIndex(params.index)
@@ -7773,6 +7966,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			},
 			setOfflineMode: async (params) => {
 				if (typeof params.enabled !== 'boolean') throw new Error('Offline mode requires an enabled boolean')
+				if (params.enabled) await revokeKnownWalletMonitoring()
 				setSetting('offline_mode', params.enabled ? '1' : '0')
 				if (getSetting('offline_mode') !== (params.enabled ? '1' : '0')) throw new Error('Could not save offline mode. Try again.')
 				offlineMode = params.enabled
@@ -7784,9 +7978,10 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					pioneerSocket?.stop()
 					pioneerSocket = null
 					clearPioneerEventDebounce()
-					stopEventStream()
+					stopActiveWalletWatches()
 				} else {
 					startPioneerSocketIfAllowed()
+					bootstrapActiveWalletWatches()
 					loadSupportedChains(getPioneerApiBase()).catch(() => { /* static fallback handles it */ })
 					initSwapTrackerIfAllowed().catch((e) => console.warn('[swap-tracker] Reconnect init failed:', e.message || e))
 				}
@@ -9184,7 +9379,10 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			},
 			forgetDevice: async (params) => {
 				const { deleteDeviceSnapshot } = await import('./db')
+				await revokeKnownWalletMonitoring(params.deviceId)
+				forgottenMonitorEpochs.set(params.deviceId, activitySessionEpoch)
 				deleteDeviceSnapshot(params.deviceId)
+				if (engine.getDeviceState().deviceId !== params.deviceId) bootstrapActiveWalletWatches()
 			},
 
 			// ── Sweep (non-standard BTC path recovery) ──────────────
@@ -9768,6 +9966,10 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				// + xpub cache + report rows on disk keyed by an emulator
 				// deviceId that no longer maps to anything.
 				const meta = getAllEmulatorWalletMeta().find(m => m.name === params.name)
+				if (meta?.deviceId) {
+					await revokeKnownWalletMonitoring(meta.deviceId)
+					forgottenMonitorEpochs.set(meta.deviceId, activitySessionEpoch)
+				}
 
 				// If deleting the active wallet, stop it first so shutdown
 				// doesn't re-save the flash we're about to delete
@@ -9782,6 +9984,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				deleteMnemonic(params.name)
 				deleteEmulatorWalletMeta(params.name)
 				if (meta?.deviceId) deleteDeviceSnapshot(meta.deviceId)
+				if (meta?.deviceId && engine.getDeviceState().deviceId !== meta.deviceId) bootstrapActiveWalletWatches()
 				return getEmulatorStatus()
 			},
 			emulatorListWallets: async () => {
@@ -10330,40 +10533,14 @@ sendFatal = (source, err) => {
 let pendingDeepLinkUri: string | null = null
 
 function onPioneerSocketEvent(event: string, data: unknown): void {
-	// ONLY 'transaction:incoming'. Balance-update events echo Vault's own queries
-	// and would create a self-sustaining refresh loop.
 	if (event !== 'transaction:incoming' || offlineMode) return
-	let d: any = data
-	if (typeof d === 'string') {
-		try { d = JSON.parse(d) } catch { return }
-	}
-	const address = d?.address ?? d?.pubkey ?? undefined
-	const txid = d?.txid ?? d?.tx?.txid ?? undefined
-	if (txidRecentlyPushed(txid)) return
-	const rawType = d?.type
-	const type = rawType === 'incoming' || rawType === 'outgoing' ? rawType
-		: rawType === 'confirmation_update' ? 'confirmed' as const
-		: undefined
-	const allChains = [...CHAINS, ...customChainDefs]
-	let chain: string | undefined
-	for (const cand of [d?.caip, d?.networkId, d?.chain]) {
-		if (typeof cand !== 'string' || !cand) continue
-		if (cand.includes('/')) { chain = cand; break }
-		const def = allChains.find(c => c.networkId === cand || c.id === cand)
-		if (def) { chain = def.caip; break }
-	}
+	let hint: any = data
+	if (typeof hint === 'string') { try { hint = JSON.parse(hint) } catch { return } }
+	const chain = findChainByNetwork(hint?.networkId, hint?.caip, getAllChains())
+		|| getAllChains().find(chain => chain.id === hint?.chain)
 	if (!chain) return
-	const networkId = chain.split('/')[0]
-	const pending = pioneerEventDebounce.get(networkId)
-	if (pending) clearTimeout(pending.timer)
-	const mergedType = pending?.payload.type === 'incoming' ? 'incoming' : type
-	const payload = { chain, address, txid, type: mergedType }
-	pioneerEventDebounce.set(networkId, { payload, timer: setTimeout(() => {
-		pioneerEventDebounce.delete(networkId)
-		if (offlineMode) return
-		console.log(`[PioneerSocket] push event '${event}' chain=${chain} type=${mergedType} → forwarding`)
-		try { rpc.send['tx-push-received'](payload) } catch { /* webview not ready */ }
-	}, 2000) })
+	const confirmation = hint?.type === 'confirmation_update' || hint?.type === 'confirmed'
+	activeWalletWatches.event({ type: confirmation ? 'tx:confirmed' : 'tx:incoming', data: { ...hint, address: hint?.address || hint?.pubkey, networkId: chain.networkId, txid: hint?.txid || hint?.tx?.txid } } as any)
 }
 
 function startPioneerSocketIfAllowed(): void {
@@ -10371,7 +10548,10 @@ function startPioneerSocketIfAllowed(): void {
 	pioneerSocket = new PioneerSocket({
 		queryKey: getPioneerQueryKey(),
 		onEvent: onPioneerSocketEvent,
-		onConnect: () => console.log('[PioneerSocket] connected to Pioneer'),
+		onConnect: () => {
+			console.log('[PioneerSocket] connected to Pioneer')
+			activeWalletWatches.event({ type: 'sync:required', data: { refreshHint: true, reason: 'upstream_reconnected' } })
+		},
 		onDisconnect: () => console.log('[PioneerSocket] disconnected from Pioneer'),
 	})
 	pioneerSocket.start()
@@ -10483,13 +10663,13 @@ engine.on('state-change', (state) => {
 			console.log(`[settings] Hive auto-${has715 ? 'enabled' : 'disabled'} — firmware ${fw || 'unknown'}`)
 		}
 	}
-	if (state.state === 'ready') startPioneerSocketIfAllowed()
+	if (state.state === 'ready') { startPioneerSocketIfAllowed(); bootstrapActiveWalletWatches() }
 	const btcBackendForHistory = getBtcBackend()
-	const btcOnlyHistoryUnavailable = isBitcoinOnlyVariant(state.firmwareVariant)
-		&& btcBackendForHistory.kind !== 'pioneer' && !btcBackendForHistory.capabilities.history
-	if (state.state === 'ready' && !engine.isPassphraseWallet && !offlineMode && !btcOnlyHistoryUnavailable) {
-		// Fire-and-forget background history scan on every ready transition (startup + reconnect).
-		// 3s delay lets wallet address derivation settle before hitting Pioneer.
+	const localHistoryChains = getAllChains().filter(chain => chain.id === 'bitcoin' && networkOn(chain.id)
+		&& btcBackendForHistory.kind !== 'pioneer' && btcBackendForHistory.capabilities.history)
+	if (state.state === 'ready' && !engine.isPassphraseWallet && !offlineMode && localHistoryChains.length) {
+		// Pioneer chains catch up through the bounded wallet-watch coordinator.
+		// A self-host Bitcoin backend keeps its independent history scan.
 		activityScanRunning = true
 		setTimeout(() => {
 			if (offlineMode) { activityScanRunning = false; return }
@@ -10499,7 +10679,7 @@ engine.on('state-change', (state) => {
 			rebuildActivityHistory({
 				wallet: engine.wallet,
 				scope,
-				chains: bitcoinOnlyChainList(getAllChains(), bitcoinOnly).filter(c => (c.id !== 'hive' || hiveEnabled) && networkOn(c.id)),
+				chains: localHistoryChains,
 				firmwareVersion: engine.getDeviceState().firmwareVersion,
 				// A PIN/passphrase prompt mid-scan must not let another wallet's
 				// history land on disk under this walletId.
@@ -10536,6 +10716,8 @@ engine.on('state-change', (state) => {
 		// Watched txs + cached history addresses belong to the session that is ending.
 		txWatch.clear()
 		postTxBalances.clear()
+		stopActiveWalletWatches()
+		pioneerSocket?.stop(); pioneerSocket = null
 		clearHistoryQueryCache()
 		activitySessionEpoch++
 		// PRIVACY: hidden-session activity must not outlive its session — drop the
@@ -10570,6 +10752,7 @@ engine.on('state-change', (state) => {
 engine.on('wallet-scope-ready', ({ deviceId, seedAddress }) => {
 	console.log(`[Vault] Wallet scope ready on ${deviceId}: ${seedAddress?.slice(0, 10)}...`)
 	flushPendingScopedApiLogs()
+	bootstrapActiveWalletWatches()
 })
 // Seed changed — different mnemonic loaded on the same hardware.
 // Reset in-memory address managers so they re-derive from the new seed.
@@ -10580,6 +10763,7 @@ engine.on('seed-changed', ({ deviceId, oldAddress, newAddress }) => {
 	clearSessionActivity()
 	txWatch.clear()
 	postTxBalances.clear()
+	stopActiveWalletWatches()
 	clearHistoryQueryCache()
 	// Rows queued while scope was null can only be for the seed now on the device
 	// (disconnect/needs_passphrase already emptied the queue) — carry them over.
@@ -11076,6 +11260,7 @@ function cleanupAndQuit() {
 	// in-flight request during the 5s force-exit window can't leak state.
 	try { setUiActive(false, null) } catch {}
 	postTxBalances.clear()
+	stopActiveWalletWatches()
 	engine.stop()
 	restServer?.stop()
 	Utils.quit()
