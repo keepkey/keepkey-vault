@@ -41,6 +41,7 @@ import { PSBT_PASTE_EVENT } from "./PsbtSignDialog"
 import { WatchOnlyExportDialog } from "./WatchOnlyExportDialog"
 import { CreatePsbtPanel } from "./CreatePsbtPanel"
 import { detectSpamToken, categorizeTokens, type SpamResult } from "../../shared/spamFilter"
+import { createLatestReceiveRequest, selectedReceiveScriptType } from "../../shared/receive-request"
 
 type AssetView = "receive" | "send" | "privacy" | "psbt"
 
@@ -256,7 +257,6 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 
 	// Effective path and scriptType — BTC overrides from multi-account selector
 	const effectivePath = (isBtc && btcSelected) ? btcSelected.fullPath : currentPath
-	const effectiveScriptType = (isBtc && btcSelected) ? btcSelected.scriptType : chain.scriptType
 
 	// TON: bounceable toggle (default: non-bounceable / UQ for safe receiving)
 	const isTon = chain.chainFamily === 'ton'
@@ -267,6 +267,9 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 	// Bitcoin, standard purpose per type: 44 legacy / 49 wrapped / 84 native).
 	const utxoScripts = chain.id === 'litecoin' ? LTC_SCRIPT_TYPES : null
 	const [utxoScriptType, setUtxoScriptType] = useState(chain.scriptType || 'p2pkh')
+	const effectiveScriptType = selectedReceiveScriptType(chain.scriptType, isBtc ? btcSelected?.scriptType : undefined, utxoScripts ? utxoScriptType : undefined)
+	const addressRequests = useMemo(() => createLatestReceiveRequest(), [])
+	useEffect(() => () => addressRequests.invalidate(), [addressRequests, chain.id, watchOnly])
 
 	const deriveAddress = useCallback(async (path?: number[], overrideBounceable?: boolean, overrideScriptType?: string) => {
 		const usePath = path || effectivePath
@@ -274,35 +277,34 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 		// Watch-only: no device to derive from — show the cached address only.
 		// Re-deriving a different path requires the device, so isn't possible offline.
 		if (watchOnly) {
+			addressRequests.invalidate()
 			setAddress(balance?.address || null)
 			setDeriveError(balance?.address ? null : 'Address unavailable offline')
 			setLoading(false)
 			return
 		}
-		setLoading(true)
-		setDeriveError(null)
-		try {
+		await addressRequests.run(async () => {
 			const params: any = {
 				addressNList: usePath,
 				showDisplay: false,
 				coin: chain.chainFamily === 'evm' ? 'Ethereum' : chain.coin,
 			}
-			const st = overrideScriptType
-				|| ((isBtc && btcSelected) ? btcSelected.scriptType
-					: utxoScripts ? utxoScriptType
-					: chain.scriptType)
+			const st = overrideScriptType || effectiveScriptType
 			if (st) params.scriptType = st
 			if (isTon) params.bounceable = overrideBounceable ?? tonBounceable
 			const result = await rpcRequest(chain.rpcMethod, params, 60000)
-			const addr = typeof result === "string" ? result : result?.address || String(result)
-			setAddress(addr)
-		} catch (e: any) {
-			console.error(`${chain.coin} address:`, e)
-			setDeriveError(e.message || 'Address derivation failed')
-			setAddress(null)
-		}
-		setLoading(false)
-	}, [chain, effectivePath, isBtc, btcSelected, isTon, tonBounceable, watchOnly, balance?.address, utxoScripts, utxoScriptType])
+			return typeof result === "string" ? result : result?.address || String(result)
+		}, {
+			pending: () => { setLoading(true); setDeriveError(null); setAddress(null) },
+			resolved: setAddress,
+			rejected: (e: any) => {
+				console.error(`${chain.coin} address:`, e)
+				setDeriveError(e.message || 'Address derivation failed')
+				setAddress(null)
+			},
+			settled: () => setLoading(false),
+		})
+	}, [chain, effectivePath, effectiveScriptType, isTon, tonBounceable, watchOnly, balance?.address, addressRequests])
 
 	// Re-derive address when BTC xpub selection or change/index changes
 	// Cancellation guard prevents stale responses from overwriting current address (Finding 5)
@@ -499,19 +501,23 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 	// Fetch the account xpub for non-BTC UTXO chains (Litecoin, DASH, DOGE, BCH)
 	// — encoding follows the selected script type (xpub/Ltub vs Mtub vs zpub).
 	const [utxoXpub, setUtxoXpub] = useState<string | null>(null)
+	const xpubRequests = useMemo(() => createLatestReceiveRequest(), [])
 	useEffect(() => {
 		if (!isAltUtxo) return
-		rpcRequest<Array<{ xpub: string }>>('getPublicKeys', {
+		void xpubRequests.run(() => rpcRequest<Array<{ xpub: string }>>('getPublicKeys', {
 			paths: [{
 				addressNList: utxoPath(utxoAccount).slice(0, 3),
 				coin: chain.coin,
 				scriptType: utxoScripts ? utxoScriptType : chain.scriptType,
 				curve: 'secp256k1',
 			}],
-		}, 30000)
-			.then(result => { if (result?.[0]?.xpub) setUtxoXpub(result[0].xpub) })
-			.catch(e => console.warn(`[AssetPage] ${chain.coin} xpub fetch failed:`, e))
-	}, [isAltUtxo, chain.coin, chain.scriptType, utxoPath, utxoAccount, utxoScripts, utxoScriptType])
+		}, 30000), {
+			pending: () => setUtxoXpub(null),
+			resolved: result => setUtxoXpub(result?.[0]?.xpub || null),
+			rejected: e => console.warn(`[AssetPage] ${chain.coin} xpub fetch failed:`, e),
+		})
+		return () => xpubRequests.invalidate()
+	}, [isAltUtxo, chain.coin, chain.scriptType, utxoPath, utxoAccount, utxoScripts, utxoScriptType, xpubRequests])
 
 	// ── Token spam filter ──────────────────────────────────────────────
 	const tokens = useMemo(() => activeBalance?.tokens || [], [activeBalance?.tokens])
