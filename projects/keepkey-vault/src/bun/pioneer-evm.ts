@@ -132,6 +132,9 @@ export async function pioneerEvmRpc(pioneer: any, networkId: string, method: str
     case 'eth_getCode':
     case 'eth_blockNumber':
     case 'eth_simulateV1':
+    case 'eth_estimateGas':
+    case 'eth_feeHistory':
+    case 'debug_traceCall':
       return readRpc(pioneer, networkId, method, params)
     default:
       throw new Error(`${PIONEER_UNSUPPORTED} ${method}; no direct-node fallback is allowed`)

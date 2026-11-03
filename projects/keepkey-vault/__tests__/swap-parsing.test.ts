@@ -464,6 +464,75 @@ describe('parseQuoteResponse', () => {
 
   // ── Deposit-channel protocols (Chainflip, NEAR Intents EVM side) ───
 
+  // Shape of the failed BTC→ETH quote captured from the backend log. Chainflip
+  // registers the destination when opening the channel; the Bitcoin transfer
+  // has no OP_RETURN memo and must not be treated as a prebuilt EVM transaction.
+  const chainflipBtcQuote = {
+    data: [{
+      integration: 'shapeshift',
+      quote: {
+        swapper: 'Chainflip',
+        buyAmount: '3.993470534033437561',
+        amountOutMin: '3.873666418012434434',
+        inbound_address: 'bc1pgshqpgqesasxaqas8tt82aj7enlnmllxff8064zpefjyhkmzyz6s67lvsg',
+        txs: [{
+          type: 'transfer',
+          chain: 'bip122:000000000019d6689c085ae165831e93',
+          txParams: {
+            to: 'bc1pgshqpgqesasxaqas8tt82aj7enlnmllxff8064zpefjyhkmzyz6s67lvsg',
+            recipientAddress: 'bc1pgshqpgqesasxaqas8tt82aj7enlnmllxff8064zpefjyhkmzyz6s67lvsg',
+            vaultAddress: 'bc1pgshqpgqesasxaqas8tt82aj7enlnmllxff8064zpefjyhkmzyz6s67lvsg',
+            value: '11670258',
+            amount: '0.11670258',
+            memo: '',
+          },
+        }],
+      },
+    }],
+  }
+  const chainflipBtcParams = {
+    fromCaip: 'bip122:000000000019d6689c085ae165831e93/slip44:0',
+    toCaip: 'eip155:1/slip44:60',
+    slippageBps: 300,
+  }
+
+  test('Chainflip BTC→ETH: accepts the memo-less Bitcoin channel deposit', () => {
+    const result = parseQuoteResponse(chainflipBtcQuote, chainflipBtcParams)
+    expect(result.swapper).toBe('Chainflip')
+    expect(result.inboundAddress).toBe(chainflipBtcQuote.data[0].quote.inbound_address)
+    expect(result.expectedOutput).toBe('3.993470534033437561')
+    expect(result.minimumOutput).toBe('3.87366642')
+    expect(result.memo).toBe('')
+    expect(result.relayTx).toBeUndefined()
+  })
+
+  test('Chainflip BTC→ETH competes with memo-based routes on quoted output', () => {
+    const result = parseQuoteResponse({
+      data: [...FIXTURE_BTC_TO_ETH_QUOTE.data, ...chainflipBtcQuote.data],
+    }, chainflipBtcParams)
+    expect(result.swapper).toBe('Chainflip')
+    expect(result.expectedOutput).toBe('3.993470534033437561')
+  })
+
+  test('Chainflip BTC→ETH still rejects an EVM deposit address', () => {
+    const quote = structuredClone(chainflipBtcQuote)
+    quote.data[0].quote.inbound_address = '0x1234567890123456789012345678901234567890'
+    expect(() => parseQuoteResponse(quote, chainflipBtcParams)).toThrow(/valid deposit address for this chain/)
+  })
+
+  test('Chainflip BTC→ETH still requires a deposit address', () => {
+    const quote = { data: [{ integration: 'shapeshift', quote: { swapper: 'Chainflip', buyAmount: '1' } }] }
+    expect(() => parseQuoteResponse(quote, chainflipBtcParams)).toThrow(/missing inbound address/)
+  })
+
+  test('unknown and memo-based providers cannot use memo-less Bitcoin deposits', () => {
+    for (const swapper of ['Unknown Provider', 'Thorchain', 'Relay']) {
+      const quote = structuredClone(chainflipBtcQuote)
+      quote.data[0].quote.swapper = swapper
+      expect(() => parseQuoteResponse(quote, chainflipBtcParams)).toThrow(/No supported routes/)
+    }
+  })
+
   test('Chainflip ETH→BTC: data="0x" creates deposit-channel relayTx (not rejected)', () => {
     // The real Pioneer response for ETH→BTC when THORChain is offline: Chainflip
     // via ShapeShift. Chainflip uses a deposit-channel model — the BTC destination

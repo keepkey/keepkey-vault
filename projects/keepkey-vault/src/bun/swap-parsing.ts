@@ -322,9 +322,9 @@ function parseSingleQuote(
   // by the pre-existing cross-chain guard.
   const fromIsUtxo = params.fromCaip.startsWith('bip122:')
   const fromIsSolana = params.fromCaip.startsWith('solana:')
-  // Deposit-channel only applies when source is EVM. For UTXO sources (BTC→ETH via
-  // NEAR Intents), the txParams.to is a Bitcoin address and we use the inboundAddress
-  // path instead (isMemolessTransfer below).
+  // Prebuilt deposit-channel transactions use this path for EVM sources. For
+  // Bitcoin sources (Chainflip / NEAR Intents), txParams.to is a Bitcoin address
+  // and the normal UTXO builder uses inboundAddress (isMemolessTransfer below).
   const DEPOSIT_CHANNEL_SWAPPERS = new Set(['Chainflip', 'NEAR Intents'])
   const isDepositChannel = !hasRealCalldata && !fromIsUtxo && !!txParams.to && DEPOSIT_CHANNEL_SWAPPERS.has(swapper ?? '')
   // Solana prebuilt tx: Relay SOL→EVM bridge ships serializedTx (base64 wire tx) instead
@@ -432,11 +432,14 @@ function parseSingleQuote(
     console.error(`${TAG}   full best: ${JSON.stringify(best, null, 2).slice(0, 2000)}`)
     throw new Error('Quote response missing inbound address')
   }
-  // For memo-less UTXO/Solana swaps (NEAR Intents BTC/SOL/SPL→EVM): the deposit
-  // address IS the only instruction — no memo or calldata needed. Source-chain
-  // guards preserve the EVM→BTC/SOL case: EVM with no calldata has no way to
-  // encode the destination, so it remains rejected unless it is a deposit channel.
-  const isMemolessTransfer = (fromIsUtxo || fromIsSolana) && !!inboundAddress && swapper === 'NEAR Intents'
+  // Chainflip and NEAR Intents register the destination when opening a Bitcoin
+  // deposit channel, so the inbound address is the only transfer instruction.
+  // Keep this limited to known deposit-channel providers; THORChain still needs
+  // its routing memo. Solana retains its existing NEAR Intents transfer path.
+  const isMemolessTransfer = !!inboundAddress && (
+    (fromIsUtxo && DEPOSIT_CHANNEL_SWAPPERS.has(swapper ?? ''))
+    || (fromIsSolana && swapper === 'NEAR Intents')
+  )
   if (!memo && !hasPrebuiltTx && !isNativeDeposit && !isMemolessTransfer) {
     console.error(`${TAG} MISSING memo + no prebuilt tx — dumping response structure:`)
     console.error(`${TAG}   integration: ${integration}, swapper: ${swapper ?? 'none'}`)

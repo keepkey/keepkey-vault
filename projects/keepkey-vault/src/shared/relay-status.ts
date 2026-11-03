@@ -94,9 +94,11 @@ export function oneClickOutboundTxid(status: OneClickStatus): string | undefined
 
 // ─────────────────────────────────────────────────────────────────────────────
 
-export function relayOutboundTxid(status: RelayExecutionStatus, fallbackTxid: string): string | undefined {
+export function relayOutboundTxid(status: RelayExecutionStatus, fallbackTxid: string, solverDeposit = false): string | undefined {
   const explicit = status.txHashes?.find(Boolean)
   if (explicit) return explicit
+  // Solver execution emits a separate payout even on the source chain.
+  if (solverDeposit) return undefined
   const sameChain = status.originChainId !== undefined
     && status.originChainId !== null
     && status.destinationChainId !== undefined

@@ -1,0 +1,201 @@
+{
+  "status": "AUDIT_COMPLETE_COVERAGE_INCOMPLETE",
+  "checkedAt": "2026-11-02T16:49:37.226900+00:00",
+  "scope": [
+    "Current Vault source and production trust gate",
+    "Production ClearSign status/catalog and 28 live read-only probes",
+    "Production worker-b5 batches matched to live catalog fingerprints",
+    "Firmware source for 7.16/7.17 schema and embedded-call support",
+    "Verified Relay v3.2 and TychoRouterV3 ABI/source for the reported failed swap"
+  ],
+  "findings": [
+    {
+      "id": "R1",
+      "priority": "P1",
+      "title": "The router used by the failed ETH-to-USDT swap has no signed coverage",
+      "evidence": [
+        "Live /v1/evm/schema rejects chain 1, Router v3.2 0x0729e2a4716d9f7dd17858d5d504426d228697f7, selector 0xcd6e13f7, 2180 bytes.",
+        "The ERC-7730 endpoint also rejects the outer multicall, both cleanup functions and the Tycho sequentialSwap.",
+        "All four production ERC-7730 batch fingerprints match the inspected worker-b5 source; those batches contain no Relay router/depository or Tycho V3 leaves for these addresses."
+      ],
+      "impact": "Existing Relay depository descriptions cannot describe this multicall; AdvancedMode remains required.",
+      "remedy": "Review and issue four compatible definitions, including every nested call. A root/outer label alone cannot provide full transaction review."
+    },
+    {
+      "id": "R2",
+      "priority": "P1",
+      "title": "Signing new entries alone cannot support the exact incident on current firmware",
+      "evidence": [
+        "The outer calldata is 2180 bytes: canonical ABI 2148 plus a 32-byte suffix.",
+        "The Tycho inner calldata is 627 bytes: canonical ABI 612 plus 15 suffix bytes.",
+        "Vault erc7730-describe.ts rejects inner arguments not divisible by 32.",
+        "Firmware erc7730_workflow_inner_fetchable requires (inner_length - 4) % 32 == 0.",
+        "Firmware erc7730_workflow_restore_and_start_calldata explicitly allows trailing bytes only for outer calls.",
+        "Firmware 7.16 does not follow embedded-call definitions; Vault gates them at 7.17.0."
+      ],
+      "impact": "Even an authentic signed outer/inner catalog would not make this exact transaction reviewable on 7.16 or current 7.17.",
+      "remedy": "For a 7.17 implementation, add signed-policy-controlled inner suffix support in both host and firmware, preserving hashing/bounds checks and all suffix bytes; validate exact incident and adversarial mutations. Alternatively implement a bounded dedicated decoder. No upgrade to device firmware was performed."
+    },
+    {
+      "id": "R3",
+      "priority": "P1",
+      "title": "Production catalog publication currently suppresses embedded-call definitions",
+      "evidence": [
+        "worker-b5/worker/shared/erc7730-catalog.ts indexErc7730Catalog skips every program with an embedded-call formatter.",
+        "Its reason says Vault never attaches embedded calls, which is stale for the current 7.17 host."
+      ],
+      "impact": "Issuing the outer Relay multicall definition would still leave it unserved under the current publication policy.",
+      "remedy": "Update and test publication for compatible clients/firmware while retaining the 7.16 rejection in Vault. Do not globally bypass embedded-call checks."
+    },
+    {
+      "id": "R4",
+      "priority": "P2",
+      "title": "Fixed depository coverage is partial despite broader host recognition",
+      "evidence": [
+        "The production catalog has native deposit entries on Ethereum, Base and Arbitrum only.",
+        "Native deposit probes on Optimism, BSC, Polygon and Avalanche all return 422.",
+        "ERC20 deposit coverage consists of six Base tokens and five Arbitrum tokens. Ethereum USDT deposit returns 422."
+      ],
+      "impact": "A Relay deposit can be understood by the host yet still lack a signed device description.",
+      "remedy": "New fixed-schema offline catalog entries can close these gaps after chain-specific contract verification and matching Vault schema support. This is separate from the ETH-to-USDT multicall."
+    },
+    {
+      "id": "R5",
+      "priority": "P2",
+      "title": "Solana lookup-table Relay deposits are not supported by the static service",
+      "evidence": [
+        "Bundled native-deposit fixture without an ALT returns VERIFIED.",
+        "The ALT fixture returns LOOKUP_TABLES_UNSUPPORTED.",
+        "The static worker serves no transaction-bound lookup-table attestation."
+      ],
+      "impact": "A signed Relay instruction schema alone does not resolve lookup-table accounts.",
+      "remedy": "Resolve the attestation/transport design under the existing offline-signing policy; do not describe arbitrary lookup tables with an instruction label."
+    },
+    {
+      "id": "R6",
+      "priority": "P2",
+      "title": "Depository ClearSign cannot attest destination-chain swap promises",
+      "evidence": [
+        "depositNative encodes depositor and order id plus native value.",
+        "depositErc20 encodes depositor, source token, source amount and order id.",
+        "Destination chain, final destination address and minimum output are off-chain order terms.",
+        "Solana token-deposit schema labels a raw u64 Amount and Vault, not a certified token symbol/decimal identity."
+      ],
+      "impact": "A verified source deposit is not proof of destination delivery or a certified minimum receive amount.",
+      "remedy": "Keep those limits explicit in the approval card and reports. Review Solana token identity/unit coverage separately."
+    },
+    {
+      "id": "R7",
+      "priority": "P2",
+      "title": "Relay v3.2 migration is newer than the existing deposit coverage model",
+      "evidence": [
+        "Relay documentation announces the v3.2 Router/ApprovalProxy switch on October 26, 2026.",
+        "The v3.2 Cancun router is exactly the address in the failed swap.",
+        "The older v3 and new v3.2 pairs both remain live during transition."
+      ],
+      "impact": "Coverage must distinguish depository, router versions and approval proxies; the provider name Relay is not a sufficient signing-policy key.",
+      "remedy": "Track reviewed chain+contract+selector+encoding variants, including approval-proxy transactions and each selected swap provider."
+    }
+  ],
+  "coverage": {
+    "evmSignedEntriesVerified": 14,
+    "evmNativeDeposits": [
+      1,
+      8453,
+      42161
+    ],
+    "evmTokenDeposits": {
+      "8453": 6,
+      "42161": 5
+    },
+    "solanaInstructionEntries": 2,
+    "solanaNativeNoAltLive": "VERIFIED",
+    "solanaAltLive": "LOOKUP_TABLES_UNSUPPORTED",
+    "dynamicRouterAndInnerDefinitions": "NOT_IN_SIGNED_CATALOG"
+  },
+  "incidentShape": {
+    "selector": "0xcd6e13f7",
+    "outerBytes": 2180,
+    "outerCanonicalBytes": 2148,
+    "outerSuffixBytes": 32,
+    "calls": [
+      {
+        "targetRole": "Relay v3.2 self-call",
+        "selector": "0xa6bd8c96",
+        "method": "cleanupNative",
+        "bytes": 196,
+        "allowFailure": false
+      },
+      {
+        "targetRole": "TychoRouterV3",
+        "selector": "0x3c226834",
+        "method": "sequentialSwap",
+        "bytes": 627,
+        "canonicalBytes": 612,
+        "suffixBytes": 15,
+        "allowFailure": false
+      },
+      {
+        "targetRole": "Relay v3.2 self-call",
+        "selector": "0x9bb43718",
+        "method": "cleanupErc20s",
+        "bytes": 420,
+        "allowFailure": false
+      }
+    ],
+    "privateWalletValuesOmitted": true
+  },
+  "catalogWork": {
+    "artifact": "catalog-candidates.json",
+    "entries": 4,
+    "unsigned": true,
+    "staticCompilerCapabilityChecks": "all four passed; this does not validate runtime calldata or actual device screens",
+    "readiness": "BLOCKED_ON_HOST_FIRMWARE_PUBLICATION_AND_SCREEN_REVIEW",
+    "signingPerformed": false,
+    "reproduction": "python3 projects/keepkey-vault/docs/relay-clearsign-audit-20261102/check_candidates.py"
+  },
+  "validation": {
+    "vaultTests": {
+      "pass": 150,
+      "fail": 0,
+      "files": 8
+    },
+    "testHarnessFix": "erc7730-support.test.ts now installs/restores its TEST root per test; earlier cases reset the root before a beforeAll-based fixture ran. No production trust checks were relaxed.",
+    "firmwareNativeTests": "Not run: existing firmware-unit is Linux x86-64 ELF and this host is macOS arm64. Source review and the current compiler capability validator were used; no hardware/emulator screen validation performed.",
+    "workerTests": {
+      "pass": 75,
+      "fail": 0,
+      "files": 3,
+      "source": "/Users/highlander/keepkey-toolchain/worker-b5/worker"
+    }
+  },
+  "references": {
+    "relayMigration": "https://docs.relay.link/references/api/api_resources/contract-addresses",
+    "depositorySemantics": "https://docs.relay.link/references/protocol/contracts/evm-depository",
+    "liveCoverage": "live-coverage.json",
+    "sourceIdentity": "verified-contracts.json",
+    "productionWorkerSource": "/Users/highlander/keepkey-toolchain/worker-b5"
+  },
+  "changesMade": [
+    "Reproducible read-only audit script",
+    "Unsigned catalog descriptor/program candidates and audit evidence",
+    "Test-only root fixture isolation fix"
+  ],
+  "productionChanges": false,
+  "noFundsSignedOrBroadcast": true,
+  "firmware716Alternative": {
+    "name": "Relay solver-executed swap with reviewed source deposit",
+    "quoteOptions": {
+      "forceSolverExecution": true,
+      "explicitDeposit": true
+    },
+    "probe": "solver-deposit-716-verification.json",
+    "status": "LIVE_QUOTE_CERTIFICATE_AND_HOST_GATE_VERIFIED",
+    "implementationStatus": "Probe only; not enabled in the in-app quote adapter",
+    "limits": [
+      "Source deposit is device-reviewed; destination swap terms remain a Relay order promise.",
+      "Price and delivery properties differ from the self-executed atomic swap.",
+      "Hardware screens and end-to-end payout remain to be validated."
+    ]
+  }
+}

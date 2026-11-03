@@ -18,6 +18,10 @@ import { resolveErc7730ForCall, signWithErc7730Fallback } from './erc7730-resolv
 import { trustRuntimeSigner, type RuntimeEvmSigner } from './evm-runtime-metadata'
 import { nameRuntimeProvider, resolveProviderTxMetadata } from './clearsign-providers'
 import { evmCallRequiresAdvancedMode } from './evm-signing-policy'
+import { selectSwapRoute, isRelaySolverDeposit } from './swap-route-selection'
+import { resolveSwapEvmSchema } from './swap-evm-review'
+import { assertPrebuiltSwapExecution } from './swap-preflight'
+import { bufferedSwapGasLimit } from '../shared/swap-gas'
 import { certifiedSolanaProofApplies, findCertifiedSolanaProof } from './solana-certified-registry'
 import { hasCompleteCertifiedSolanaEnvelope, supportsCertifiedClearSign } from './solana-certified-policy'
 import { getPioneer } from './pioneer'
@@ -300,7 +304,9 @@ export async function getSwapAssets(): Promise<SwapAsset[]> {
 // ── Quote fetching via Pioneer ──────────────────────────────────────
 
 /** Fetch a swap quote from Pioneer (aggregated across DEXes) */
-export async function getSwapQuote(params: SwapQuoteParams): Promise<SwapQuote> {
+export async function getSwapQuote(params: SwapQuoteParams, device: {
+  firmwareVersion?: string; capabilities?: readonly number[]
+} = {}): Promise<SwapQuote> {
   if (!params.amount || parseFloat(params.amount) <= 0) {
     throw new Error('Amount must be greater than 0')
   }
@@ -346,6 +352,8 @@ export async function getSwapQuote(params: SwapQuoteParams): Promise<SwapQuote> 
       recipientAddress,
       senderAddress,
       slippage,
+      ...(sellCaip.startsWith('eip155:') && supportsCertifiedClearSign(device.firmwareVersion)
+        ? { relayExecutionMode: 'solver-deposit' } : {}),
     })
   } catch (e: any) {
     // Pioneer-client (swagger-client) throws Error with message="Internal
@@ -376,7 +384,34 @@ export async function getSwapQuote(params: SwapQuoteParams): Promise<SwapQuote> 
 
   // Pass the validated/clamped slippageBps so parseQuoteResponse's fallback
   // calc lines up with what was actually requested upstream.
-  const result = parseQuoteResponse(quoteResp, { ...params, slippageBps })
+  let result = parseQuoteResponse(quoteResp, { ...params, slippageBps })
+  if (sellCaip.startsWith('eip155:') && device.firmwareVersion) {
+    const entries = Array.isArray(qDebug) ? qDebug : [qDebug]
+    const candidates = entries.flatMap(entry => {
+      try { return [parseQuoteResponse(entry, { ...params, slippageBps })] }
+      catch { return [] } // original parser above preserves an all-routes failure
+    })
+    result = await selectSwapRoute(candidates, async candidate => {
+      const tx = candidate.relayTx
+      if (!tx) return false // memo routes use their existing build/review flow
+      const chainId = Number(sellCaip.split('/')[0].split(':')[1])
+      if (tx.chainId != null && tx.chainId !== chainId) return false
+      // Ignore upstream review claims. Resolve the same certificate/definition
+      // and policy used by transaction preview and the final signer.
+      const schema = await resolveSwapEvmSchema(chainId, tx.to, tx.data,
+        supportsCertifiedClearSign(device.firmwareVersion), device.firmwareVersion, tx.value)
+      const metadata = schema ? { signedPayload: schema.signedPayload, keyId: schema.keyId } : undefined
+      const erc7730 = metadata ? undefined : await resolveErc7730ForCall({
+        chainId, to: tx.to, data: tx.data, value: tx.value,
+        firmwareVersion: device.firmwareVersion, capabilities: device.capabilities,
+      })
+      const reviewable = !evmCallRequiresAdvancedMode(tx.to, tx.data, chainId, false,
+        metadata, erc7730, device.firmwareVersion, tx.value, device.capabilities)
+      return reviewable && (isRelaySolverDeposit(candidate) || tx.data.length <= 2 || tx.data.startsWith('0xa9059cbb'))
+        ? 'source-deposit' as const : reviewable
+    })
+  }
+  if (isRelaySolverDeposit(result)) result.executionMode = 'relay-solver-deposit'
   // Surface the underlying protocol when the integration is an aggregator
   // (e.g. ShapeShift → Relay/Thorchain/0x). Falls back to integration name.
   const route = result.swapper && result.swapper.toLowerCase() !== (result.integration || '').toLowerCase()
@@ -1079,7 +1114,19 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
   // in the device's pinned allowlist). A 7.16 root-certified envelope is the
   // one alternative to AdvancedMode; runtime/self-service metadata is
   // annotation-only and remains gated.
-  if (fromChain.chainFamily === 'evm') assertEvmSignable(unsignedTx)
+  if (fromChain.chainFamily === 'evm') {
+    // Quotes are not execution proofs. Validate the final gas/value/calldata
+    // after approvals, before prompting the device, even in Advanced Mode.
+    if (params.relayTx && String(unsignedTx.data || '').length >= 10) {
+      await assertPrebuiltSwapExecution(getEvmRpcSource(fromChain), {
+        chainId: Number(unsignedTx.chainId), from: fromAddress!, to: unsignedTx.to,
+        data: unsignedTx.data, value: unsignedTx.value, gas: unsignedTx.gasLimit,
+        gasPrice: unsignedTx.gasPrice, maxFeePerGas: unsignedTx.maxFeePerGas,
+        maxPriorityFeePerGas: unsignedTx.maxPriorityFeePerGas,
+      })
+    }
+    assertEvmSignable(unsignedTx)
+  }
 
   // 4. Sign on device (user confirms tx details on hardware wallet)
   console.info(`${TAG} policy passed; signing ${fromChain.chainFamily} via ${fromChain.signMethod} (advancedMode=${ctx.isAdvancedModeEnabled?.() ?? 'unknown'}, metadataKey=${unsignedTx?.txMetadata?.keyId ?? 'none'})`)
@@ -1225,6 +1272,8 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
     expectedOutput: params.expectedOutput,
     ...(approvalTxid ? { approvalTxid } : {}),
     ...(fromAmountBaseUnits ? { fromAmountBaseUnits } : {}),
+    fromAddress,
+    toAddress,
   }
 }
 
@@ -1520,7 +1569,7 @@ async function buildRelaySwapTx(
     bsc: '150000',
     ethereum: '150000',
   }
-  const gasLimit = relay.gasLimit || RELAY_GAS_LIMIT_FALLBACK[fromChain.id] || '150000'
+  const gasLimit = bufferedSwapGasLimit(relay.gasLimit || RELAY_GAS_LIMIT_FALLBACK[fromChain.id] || '150000', relay.data)
   console.log(`${TAG} relay gasLimit: provided=${relay.gasLimit} resolved=${gasLimit} chain=${fromChain.id}`)
   const fallbackGwei = MIN_GAS_GWEI[fromChain.id] ?? 10
   const fallbackGasPrice = BigInt(Math.round(fallbackGwei * 1e9))
@@ -1724,7 +1773,7 @@ async function buildRelaySwapTx(
               tokenContract,
             }
             swapLog(`${TAG} Relay tx balance check: current=${currentBalance}, required=${amountBaseUnits}, sufficient=${balSufficient}`)
-            if (!balSufficient && !_previewMode) {
+            if (!balSufficient && !previewMode) {
               throw new Error(`Insufficient ${tokenContract} balance: have ${currentBalance.toString()} units, need ${amountBaseUnits.toString()} units. The swap would revert on-chain — refusing to sign.`)
             }
           }
@@ -1797,7 +1846,7 @@ async function buildRelaySwapTx(
   const selector = String(relay.data || '').slice(0, 10).toLowerCase()
   const calldataLength = String(relay.data || '').replace(/^0x/i, '').length / 2
   console.info(`${TAG} ClearSign lookup (${previewMode ? 'preview' : 'execute'}): chain=${chainId} selector=${selector} bytes=${calldataLength} certifiedSupported=${certifiedMetadataSupported}`)
-  const evmSchema = await resolveEvmSchema(chainId, relay.to, relay.data, certifiedMetadataSupported, runtimeGate.firmwareVersion, unsignedTx.value)
+  const evmSchema = await resolveSwapEvmSchema(chainId, relay.to, relay.data, certifiedMetadataSupported, runtimeGate.firmwareVersion, unsignedTx.value)
   if (evmSchema) {
     unsignedTx.txMetadata = { signedPayload: evmSchema.signedPayload, keyId: evmSchema.keyId }
     console.info(`${TAG} clear-sign schema attached: ${evmSchema.method} (keyId=${evmSchema.keyId}, source=${evmSchema.source || 'local-test'})`)

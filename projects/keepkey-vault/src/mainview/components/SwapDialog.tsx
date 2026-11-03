@@ -27,6 +27,7 @@ import { providerTrackerUrl } from "../lib/trackers"
 import { ProviderBadge, ProverChip, resolveProvider } from "./ProviderBadge"
 import { getSwapperAnimation } from "../lib/swapper-animations"
 import { assessSwapRisk } from "../../shared/swap-risk"
+import { swapHealthSummary, swapProviderPresentation } from "../../shared/swap-health"
 import { knownSpenderName } from "../../shared/evm-known-spenders"
 import { isSwapFullySettled, payoutReachesMinimum } from "../../shared/swap-settlement"
 import { SwapRiskReview } from "./SwapRiskReview"
@@ -2696,26 +2697,8 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                 status determines the colour). Click to open the detail
                 dialog with per-provider rows. */}
             {swapHealth && (() => {
-              const worst = (() => {
-                const s = swapHealth.integrations.map(i => i.status)
-                if (s.some(x => x === 'offline')) return 'offline'
-                if (s.some(x => x === 'degraded')) return 'degraded'
-                if (s.some(x => x === 'ok')) return 'ok'
-                return 'unknown'
-              })()
-              const color =
-                worst === 'ok'       ? '#22c55e' :
-                worst === 'degraded' ? '#f59e0b' :
-                worst === 'offline'  ? '#ef4444' : '#6b7280'
-              const okCount  = swapHealth.integrations.filter(i => i.status === 'ok').length
-              const total    = swapHealth.integrations.length
-              const activeBars = worst === 'ok' ? 4 : worst === 'degraded' ? 3 : worst === 'offline' ? 1 : 2
+              const { color, bars: activeBars, label } = swapHealthSummary(swapHealth)
               const heights   = [4, 7, 10, 13]
-              const label =
-                worst === 'ok'       ? `All providers operational (${okCount}/${total})` :
-                worst === 'degraded' ? `Some providers degraded (${okCount}/${total} ok)` :
-                worst === 'offline'  ? `Provider(s) offline (${okCount}/${total} ok)` :
-                'Fetching provider status…'
               return (
                 <Box
                   as="button"
@@ -2743,7 +2726,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                         h={`${h}px`}
                         borderRadius="1px"
                         bg={active ? color : 'rgba(255,255,255,0.10)'}
-                        style={active && worst === 'ok' ? { boxShadow: `0 0 4px ${color}66` } : undefined}
+                        style={active && activeBars === 4 ? { boxShadow: `0 0 4px ${color}66` } : undefined}
                       />
                     )
                   })}
@@ -4031,6 +4014,11 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
               })()}
 
               {/* Key quote numbers — always visible, condensed */}
+              {quote.executionMode === 'relay-solver-deposit' && (
+                <Text fontSize="11px" color="kk.textSecondary" role="note">
+                  {t('relayDepositReview', 'Relay executes the swap after your deposit; destination terms are shown in this app.')}
+                </Text>
+              )}
               <Box w="full" bg="rgba(255,255,255,0.02)" border="1px solid" borderColor="kk.border" borderRadius="lg" px="3" py="2">
                 <VStack gap="1" align="stretch">
                   <ReviewRow label={t("rate")}>
@@ -4443,19 +4431,9 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                   />
 
                   {isZcashSource && (
-                    <Box mt="3" p="3" bg="rgba(233,196,106,0.06)" border="1px solid" borderColor="rgba(233,196,106,0.18)" borderRadius="lg" role="note">
-                      <Text fontSize="xs" fontWeight="600" color="kk.gold">
-                        {t("zcashTransparentOnlyTitle")}
-                      </Text>
-                      <Text fontSize="xs" color="kk.textSecondary" mt="1" lineHeight="1.5">
-                        {t("zcashUnshieldBeforeSwap")}
-                      </Text>
-                      {!fromBalanceUnverified && fromBalance !== null && Number(fromBalance) === 0 && (
-                        <Text fontSize="xs" color="kk.textSecondary" mt="1" lineHeight="1.5">
-                          {t("zcashZeroTransparentBalance")}
-                        </Text>
-                      )}
-                    </Box>
+                    <Text mt="2" fontSize="11px" color="kk.gold" role="note" title={t("zcashUnshieldBeforeSwap")}>
+                      {t("zcashTransparentOnlyTitle")}
+                    </Text>
                   )}
 
                   {fromAsset && (
@@ -5207,19 +5185,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
             <VStack gap="0" align="stretch" px="4" py="3">
               {swapHealth?.integrations.map(intg => {
                 const info = resolveProvider(intg.key)
-                const dotColor =
-                  intg.status === 'ok'       ? '#22c55e' :
-                  intg.status === 'degraded' ? '#f59e0b' :
-                  intg.status === 'offline'  ? '#ef4444' : '#6b7280'
-                const statusLabel =
-                  intg.status === 'ok'       ? 'Operational' :
-                  intg.status === 'degraded' ? 'Degraded' :
-                  intg.status === 'offline'  ? 'Offline' : 'Unknown'
-                const statusDesc =
-                  intg.status === 'ok'       ? 'All pools available. Quotes and swaps should work normally.' :
-                  intg.status === 'degraded' ? (intg.detail || 'Some trading pairs are unavailable. Swaps on other pairs may still work.') :
-                  intg.status === 'offline'  ? 'Pioneer cannot reach this provider. Quotes requiring this route will fail.' :
-                  'Status could not be determined.'
+                const { color: dotColor, label: statusLabel, description: statusDesc } = swapProviderPresentation(intg)
                 return (
                   <Box key={intg.key} py="3" borderBottom="1px solid" borderColor="kk.border"
                     _last={{ borderBottom: 'none' }}>
@@ -5269,7 +5235,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
             {/* Footer */}
             <Flex px="5" py="2.5" borderTop="1px solid" borderColor="kk.border" align="center" justify="space-between">
               <Text fontSize="10px" color="kk.textMuted">
-                {swapHealth ? `Updated ${new Date(swapHealth.fetchedAt).toLocaleTimeString()}` : 'Fetching…'}
+                {swapHealth?.error ? 'Status feed unavailable' : swapHealth ? `Updated ${new Date(swapHealth.fetchedAt).toLocaleTimeString()}` : 'Fetching…'}
               </Text>
               <Text fontSize="10px" color="kk.textMuted">via Pioneer</Text>
             </Flex>
@@ -5309,6 +5275,11 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                       style={{ background: 'none', border: 'none' }}>×</Box>
                   </Flex>
                   <VStack gap="0" align="stretch" px="4" py="3">
+                    {quote.executionMode === 'relay-solver-deposit' && (
+                      <Text fontSize="11px" color="kk.textSecondary" mb="2" role="note">
+                        {t('relayDepositReview', 'Relay executes the swap after your deposit; destination terms are shown in this app.')}
+                      </Text>
+                    )}
                     <ReviewRow label={t("rate")}>
                       1 {fromAsset.symbol} = {formatBalance((parseFloat(quote.expectedOutput) / parseFloat(sendAmount || '1')).toString())} {toAsset.symbol}
                     </ReviewRow>

@@ -77,6 +77,8 @@ export function classifyDefiPosition(raw: any): DefiPosition | null {
     name,
     symbol,
     network,
+    networkId: typeof raw.networkId === 'string' ? raw.networkId : undefined,
+    appTokenAddress: typeof raw.appTokenAddress === 'string' ? raw.appTokenAddress : undefined,
     type: tokenType ? String(tokenType) : 'contract-position',
     metaType: metaType ? String(metaType) : null,
     balance,

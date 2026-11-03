@@ -701,6 +701,8 @@ export interface DefiPosition {
   // === Server-side (canonical) ===
   protocol: string | null   // Zapper appId slug ("lido", "morpheus", "aave-v3") or null
   displayName?: string      // Pretty protocol name from the server ("Lido", "Morpheus")
+  pubkey?: string           // Wallet that owns this position
+  appTokenAddress?: string  // Protocol token contract, when supplied by the server
   network: string           // Zapper network display ("Ethereum") or legacy slug ("ethereum")
   networkId?: string        // CAIP-2 chain ("eip155:1") — used to attribute the position to a chain
   balanceUsd: number        // USD value Zapper attributes to the protocol for this pubkey
@@ -2051,6 +2053,8 @@ export interface SwapQuote {
    *  Undefined for non-aggregator integrations (use `integration` directly). */
   swapper?: string
   relayTx?: RelayTxParams    // pre-built tx for relay/bridge integrations (skips memo+router flow)
+  /** Inferred from the source transaction, not a provider's review claim. */
+  executionMode?: 'relay-solver-deposit'
   minAmountIn?: string       // minimum sell amount for this route (human-readable, in sell asset units)
   /** Actual send amount after UTXO fee deduction (NEAR Intents MAX only).
    *  When set, the tracker must record this instead of the original params.amount. */
@@ -2127,7 +2131,7 @@ export interface RuntimeProviderNamed {
   keyId: number
 }
 
-export type SwapProviderStatus = 'ok' | 'degraded' | 'offline' | 'unknown'
+export type SwapProviderStatus = 'ok' | 'degraded' | 'offline' | 'unknown' | 'gated' | 'disabled'
 
 export interface SwapIntegrationHealth {
   key: string               // 'thorchain' | 'mayachain' | 'shapeshift' | 'relay' | 'chainflip'
@@ -2140,6 +2144,8 @@ export interface SwapIntegrationHealth {
 export interface SwapHealth {
   fetchedAt: number
   integrations: SwapIntegrationHealth[]
+  /** Status-feed failure does not establish an outage at every swap provider. */
+  error?: string
 }
 
 /** Result of executeSwap RPC */
@@ -2153,6 +2159,16 @@ export interface SwapResult {
   /** Sell amount as an integer base-units string (e.g. "61280000" for 61.28 USDC).
    *  Populated when the build step knows the token decimals (relay ERC-20 path). */
   fromAmountBaseUnits?: string
+  fromAddress?: string
+  toAddress?: string
+}
+
+/** Exact execution context retained for receipt matching and retry/resume. */
+export interface SwapTrackingContext {
+  fromAddress: string
+  toAddress: string
+  fromAmountBaseUnits?: string
+  relaySolverDeposit?: boolean
 }
 
 // ── Swap tracking types ───────────────────────────────────────────────
@@ -2160,6 +2176,7 @@ export interface SwapResult {
 export type SwapTrackingStatus = 'signing' | 'pending' | 'confirming' | 'output_detected' | 'output_confirming' | 'output_confirmed' | 'completed' | 'failed' | 'refunded'
 
 export interface PendingSwap {
+  trackingContext?: SwapTrackingContext
   deviceId?: string      // active hardware device id when the swap was submitted
   walletId?: string      // device+seed scope when the swap was submitted
   txid: string
@@ -2282,6 +2299,7 @@ export interface SwapStatusUpdate {
 
 /** Persisted swap history record (SQLite) — tracks the full lifecycle */
 export interface SwapHistoryRecord {
+  trackingContext?: SwapTrackingContext
   id: string                     // unique row id (UUID)
   deviceId?: string              // active hardware device id when the swap was submitted
   walletId?: string              // device+seed scope when the swap was submitted

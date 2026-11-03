@@ -389,6 +389,12 @@ interface ServerDefiPosition {
 	pubkey: string
 	protocol: string
 	displayName: string
+	label?: string
+	type?: string
+	metaType?: string | null
+	appTokenAddress?: string
+	balance?: string | number
+	symbol?: string
 	network: string
 	networkId: string
 	balanceUsd: number
@@ -599,7 +605,13 @@ function mapServerDefiPosition(sp: ServerDefiPosition): DefiPosition {
 	return {
 		protocol: sp.protocol || null,
 		displayName: sp.displayName,
-		name: sp.displayName || sp.protocol || 'DeFi Position',
+		name: sp.label || sp.displayName || sp.protocol || 'DeFi Position',
+		pubkey: sp.pubkey,
+		type: sp.type,
+		metaType: sp.metaType,
+		appTokenAddress: sp.appTokenAddress,
+		balance: sp.balance != null ? String(sp.balance) : undefined,
+		symbol: sp.symbol,
 		network: sp.network,
 		networkId: sp.networkId,
 		balanceUsd: Number(sp.balanceUsd) || 0,
@@ -2669,7 +2681,9 @@ async function headlessSwapQuote(params: SwapQuoteParams): Promise<SwapQuote> {
 		throw new Error(`Could not resolve destination address for ${params.toCaip} — device may be locked or disconnected`)
 	}
 
-	let quote = await getSwapQuote(params)
+	// Device context comes from the engine, never from GUI/REST caller claims.
+	const quoteDevice = engine.getDeviceState()
+	let quote = await getSwapQuote(params, quoteDevice)
 
 	// NEAR Intents sendMax fix for all bip122 chains: the first quote commits
 	// NEAR Intents to receiving `params.amount` (full balance), but the UTXO tx
@@ -2734,7 +2748,7 @@ async function headlessSwapQuote(params: SwapQuoteParams): Promise<SwapQuote> {
 				if (est && est.feeSat > 0 && est.netSat > 0 && (est.netSat / 10 ** fromChain.decimals) < Number(params.amount)) {
 					const netAmount = (est.netSat / 1e8).toFixed(8)
 					console.log(`[swap] NEAR Intents sendMax: re-quoting ${fromChain.symbol} with net ${netAmount} (fee=${est.feeSat} sat)`)
-					quote = { ...await getSwapQuote({ ...params, amount: netAmount, isMax: false }), netFromAmount: netAmount }
+					quote = { ...await getSwapQuote({ ...params, amount: netAmount, isMax: false }, quoteDevice), netFromAmount: netAmount }
 				}
 			}
 		} catch (e: any) {
@@ -8349,24 +8363,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			getSwapHealth: async () => {
 				requireOnline('swap health')
 				const base = await (await import('./pioneer')).getPioneerApiBase()
-				try {
-					const resp = await fetch(`${base}/api/v1/swap/health`, { signal: AbortSignal.timeout(8000) })
-					if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
-					const data = await resp.json() as any
-					return data as import('../shared/types').SwapHealth
-				} catch (e: any) {
-					// Pioneer unreachable — return offline for all known integrations
-					console.warn('[swap] getSwapHealth failed:', e?.message)
-					return {
-						fetchedAt: Date.now(),
-						integrations: [
-							{ key: 'thorchain',  label: 'THORChain', status: 'offline' as const },
-							{ key: 'mayachain',  label: 'Mayachain', status: 'offline' as const },
-							{ key: 'shapeshift', label: 'ShapeShift', status: 'offline' as const },
-							{ key: 'relay',      label: 'Relay',     status: 'offline' as const },
-						],
-					}
-				}
+				return (await import('./swap-health')).fetchSwapHealth(base)
 			},
 
 			/** Look up an unknown EVM token by contract address.

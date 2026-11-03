@@ -29,6 +29,7 @@ import { recordSwap } from './ledger'
 import { assetData as discoveryAssetData } from '@pioneer-platform/pioneer-discovery'
 import { VAULT_CHAIN_TO_THOR } from '../shared/swap-discovery'
 import { extractRelayRequestId } from '../shared/relay-utils'
+import { isRelaySolverDeposit } from './swap-route-selection'
 import { classifySwapOutcome, type MidgardActionsResponse } from './swap/classify'
 import { selectOutboundTxid } from '../shared/swap-tracker-guards'
 import { baseUnitsToDecimalString } from '../shared/max-send'
@@ -210,6 +211,7 @@ function rehydrateActiveSwaps(deviceId?: string, walletId?: string): void {
           estimatedTime: r.estimatedTimeSeconds,
           slippageBps: r.slippageBps,
           relayRequestId: r.relayRequestId,
+          trackingContext: r.trackingContext,
           providerQuoteId: r.providerQuoteId,
           nearTxHash: r.nearTxHash,
           inboundBlockNumber: r.inboundBlockNumber,
@@ -299,6 +301,11 @@ export function trackSwap(
   // prebuilt calldata. Extract once at sign-time so the resume path / tracker
   // link doesn't need a round-trip to api.relay.link for new swaps.
   const relayRequestId = extractRelayRequestId(params.relayTx?.data)
+  const trackingContext = result.fromAddress && result.toAddress ? {
+    fromAddress: result.fromAddress, toAddress: result.toAddress,
+    fromAmountBaseUnits: result.fromAmountBaseUnits || (params.fromCaip.startsWith('eip155:') && params.fromCaip.includes('/slip44:') ? params.relayTx?.value : undefined),
+    relaySolverDeposit: isRelaySolverDeposit({ relayTx: params.relayTx } as SwapQuote),
+  } : undefined
 
   const swap: PendingSwap = {
     deviceId,
@@ -329,6 +336,7 @@ export function trackSwap(
     providerQuoteId: quote.providerQuoteId,
     nearIntentsDepositAddress: quote.nearIntentsDepositAddress,
     fromAmountBaseUnits: result.fromAmountBaseUnits,
+    trackingContext,
   }
 
   pendingSwaps.set(result.txid, swap)
@@ -367,6 +375,7 @@ export function trackSwap(
     approvalTxid: result.approvalTxid,
     relayRequestId,
     providerQuoteId: quote.providerQuoteId,
+    trackingContext,
   }
   // PRIVACY: Skip DB write for passphrase wallets — swap still tracked in-memory for UI.
   if (opts?.skipPersist) {
@@ -469,8 +478,8 @@ async function registerWithPioneer(swap: PendingSwap): Promise<void> {
       caip: sellCaip,
       symbol: swap.fromSymbol,
       amount: swap.fromAmount,
-      amountBaseUnits: swap.fromAmountBaseUnits || swap.fromAmount,
-      address: sellAddress,
+      amountBaseUnits: swap.trackingContext?.fromAmountBaseUnits || swap.fromAmountBaseUnits || swap.fromAmount,
+      address: integration === 'uniswap' ? swap.trackingContext?.fromAddress || '' : sellAddress,
       networkId: sellNetworkId,
     },
     buyAsset: {
@@ -478,9 +487,9 @@ async function registerWithPioneer(swap: PendingSwap): Promise<void> {
       symbol: swap.toSymbol,
       amount: swap.expectedOutput,
       amountBaseUnits: swap.expectedOutput,
-      address: buyCaip.startsWith('eip155:') && swap.walletId?.includes(':')
+      address: swap.trackingContext?.toAddress || (buyCaip.startsWith('eip155:') && swap.walletId?.includes(':')
         ? swap.walletId.slice(swap.walletId.indexOf(':') + 1)
-        : '',
+        : ''),
       networkId: buyNetworkId,
     },
     quote: {
@@ -504,7 +513,8 @@ async function registerWithPioneer(swap: PendingSwap): Promise<void> {
   // back to a confirmation-only watcher that never reaches a terminal status
   // for Relay's off-chain settlement model.
   if (swap.relayRequestId) {
-    body.relayData = { requestId: swap.relayRequestId }
+    body.relayData = { requestId: swap.relayRequestId,
+      ...(swap.trackingContext?.relaySolverDeposit ? { executionMode: 'solver-deposit' } : {}) }
   }
   if (swap.swapper === 'NEAR Intents' && sellAddress) {
     body.nearIntentsData = { depositAddress: sellAddress }
@@ -776,6 +786,7 @@ function readSwapFromDb(txid: string, deviceId?: string, walletId?: string): Pen
     slippageBps: r.slippageBps,
     error: r.error,
     relayRequestId: r.relayRequestId,
+    trackingContext: r.trackingContext,
     // Carry the classifier output across resumes so the UI's explorer link
     // and refund reason render correctly without waiting for the next poll.
     // Implies `midgardClassified=true` if either is set, locking Pioneer's
@@ -1295,12 +1306,13 @@ async function fetchRelayExecutionStatus(swap: PendingSwap): Promise<RelayExecut
 
 function applyRelayExecutionStatus(swap: PendingSwap, relayStatus: RelayExecutionStatus | null): boolean {
   if (!relayStatus) return false
-  const nextStatus = mapRelayExecutionStatus(relayStatus.status)
+  let nextStatus = mapRelayExecutionStatus(relayStatus.status)
   if (!nextStatus) return false
 
+  const outboundTxid = relayOutboundTxid(relayStatus, swap.txid, swap.trackingContext?.relaySolverDeposit)
+  if (nextStatus === 'completed' && swap.trackingContext?.relaySolverDeposit && !outboundTxid) nextStatus = 'output_confirming'
   const now = Date.now()
   const final = isTerminalSwapStatus(nextStatus)
-  const outboundTxid = relayOutboundTxid(relayStatus, swap.txid)
   const relayDetails = relayStatus.details || undefined
   const statusChanged = nextStatus !== swap.status
   const nextConfirmations = nextStatus !== 'pending'
