@@ -2454,7 +2454,7 @@ async function getChainBalance(params: { chainId: string; forceRefresh?: boolean
 	} catch { /* cache lookup failed, non-fatal */ }
 
 	// Reset this chain's per-address balances before single-chain refresh.
-	if (isEvm) evmAddresses.resetBalances(chain.id)
+	if (isEvm) evmAddresses.resetBalances(chain.id, balanceReadStartedAt)
 
 	try {
 		const extraContracts = getCustomTokens()
@@ -5407,7 +5407,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				stampManagers(liveSeedIdentity)
 
 				// Reset EVM balances before aggregation
-				evmAddresses.resetBalances()
+				evmAddresses.resetBalances(undefined, loadT0)
 
 				// Add N addresses × M EVM chains to pubkeys
 				const evmPubkeyEntries = evmAddresses.getAllPubkeyEntries(evmChains)
