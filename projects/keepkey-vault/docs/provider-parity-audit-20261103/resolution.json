@@ -1,12 +1,12 @@
 {
-  "recordedAt": "2026-11-03T21:21:24.608613+00:00",
+  "recordedAt": "2026-11-03T23:14:16.587154+00:00",
   "status": "provider_coverage_restored_verified_live",
   "baselineAudit": "audit.json",
   "gateway": {
-    "revision": "a1f079b1861bdceaa5d7e404858c29e1e935b8a3",
-    "pullRequest": "https://github.com/BitHighlander/keepkey-gateway/pull/8",
-    "deployment": "https://github.com/BitHighlander/keepkey-gateway/actions/runs/41719240331",
-    "unitTestsPassed": 203,
+    "revision": "bff70f2a83e2db01a7acb8f06d2dd714974ceaf3",
+    "pullRequest": "https://github.com/BitHighlander/keepkey-gateway/pull/11",
+    "deployment": "https://github.com/BitHighlander/keepkey-gateway/actions/runs/41736560137",
+    "unitTestsPassed": 252,
     "optionalDatabaseTestsSkipped": 2,
     "typecheck": "passed",
     "liveDeploymentCasesPassed": 5,
@@ -15,13 +15,13 @@
   "vault": {
     "providerCodeRevision": "e02055c8663a40211cfa542d03903acc3e4553d2",
     "statusLabelCodeRevision": "16741a89da227b77e1767f84658146410a83ecca",
-    "releaseUnitTestsPassed": 2328,
+    "releaseUnitTestsPassed": 2403,
     "scriptChecksPassed": 17,
     "preflight": "passed",
-    "typeDiagnostics": 814,
+    "typeDiagnostics": 812,
     "typeBaseline": 1033,
     "quoteStatusFocusedTestsPassed": 11,
-    "currentCodeRevision": "471fa5169ed21d99361b0e5065f677206caba6c0",
+    "currentCodeRevision": "f0866499886ae2839ba9a05295dce00f182a536b",
     "nativeBuild": "passed"
   },
   "live": {
@@ -94,7 +94,11 @@
     "post-deploy-quotes.json",
     "post-deploy-sdk.json",
     "post-deploy-near-parser.json",
-    "native-verification.json"
+    "native-verification.json",
+    "ltc-native-verification.json",
+    "postsend-forced-history.json",
+    "postsend-live-readonly-replay.json",
+    "live-payments.json"
   ],
   "limits": [
     "Provider availability depends on asset pair, amount, liquidity and live protocol halt flags.",
@@ -130,9 +134,26 @@
     "walletData": "Funding quantities, addresses, account keys and transaction IDs are retained only in local private verification records."
   },
   "notificationScope": {
-    "status": "documented_not_watchtower_parity",
+    "status": "implemented_and_verified_live",
     "document": "https://github.com/BitHighlander/keepkey-gateway/blob/master/docs/REALTIME-PARITY.md",
-    "verified": "WebSocket authentication and active SSE watch acceptance",
-    "remaining": "Socket authentication alone creates no watch; active-watch polling has no durable replay or exact payment-receipt metadata."
+    "evidence": "live-payments.json",
+    "verified": [
+      "actual upstream WebSocket subscription",
+      "new public Litecoin activity delivered after connection",
+      "server queue without a connected client",
+      "scoped replay and acknowledgments",
+      "acknowledgment before queue insertion",
+      "native automatic registration and Litecoin balance reconciliation"
+    ],
+    "limits": "Seven-day queued hint retention and bounded latest-provider-page history; hidden wallets are active-only and generic hints do not establish native payment amounts."
+  },
+  "postSendBalanceRefresh": {
+    "status": "implemented_and_verified",
+    "codeRevision": "6deceadc42c8d094e93530b80098fd8549a76802",
+    "evidence": [
+      "postsend-forced-history.json",
+      "postsend-live-readonly-replay.json",
+      "live-payments.json"
+    ]
   }
 }

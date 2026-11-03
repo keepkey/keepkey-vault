@@ -1,9 +1,9 @@
 {
   "version": "1.6.8",
   "status": "gateway_deployed_local_candidate_verified_not_published",
-  "recordedAt": "2026-11-03T21:21:24.608613+00:00",
+  "recordedAt": "2026-11-03T23:14:16.587154+00:00",
   "branch": "prepare/1.6.8-candidate",
-  "candidateCodeRevision": "471fa5169ed21d99361b0e5065f677206caba6c0",
+  "candidateCodeRevision": "f0866499886ae2839ba9a05295dce00f182a536b",
   "baseReleaseRevision": "1368fadbb17516553c720ea535fe249c6b3f37d7",
   "auditSourceRevision": "661fc89653b04f150001f4458879dc78f5fb4db9",
   "auditIntegratedRevision": "2e162f0f8",
@@ -18,7 +18,11 @@
     "Direct Shield/Unshield/Scan navigation",
     "Shielded pending value and scan failure visibility",
     "Correct transparent recipient dispatch from private-balance Send",
-    "Readable nested gateway quote errors and protocol halt explanations"
+    "Readable nested gateway quote errors and protocol halt explanations",
+    "Automatic forced balance reconciliation after send and confirmation",
+    "Active wallet activity pushes and reconnect catchup",
+    "Background standard-wallet monitoring and seven-day acknowledged replay",
+    "Explicit Offline/Forget/Delete monitoring revocation"
   ],
   "checks": {
     "releaseUnitCommand": {
@@ -32,14 +36,19 @@
         21,
         6,
         4,
+        6,
+        49,
+        3,
+        5,
+        12,
         8,
         53
       ],
       "scriptSuites": "passed",
-      "log": "/private/tmp/vault-ltc-account-release-tests.log",
-      "totalTestsPassed": 2328,
+      "log": "/private/tmp/vault-live-release-tests.log",
+      "totalTestsPassed": 2403,
       "scriptChecksPassed": 17,
-      "codeRevision": "471fa5169ed21d99361b0e5065f677206caba6c0"
+      "codeRevision": "f0866499886ae2839ba9a05295dce00f182a536b"
     },
     "auditFocusedTests": {
       "status": "passed",
@@ -52,12 +61,12 @@
     "preflight": {
       "command": "make preflight",
       "status": "passed",
-      "log": "/private/tmp/vault-ltc-account-preflight.log",
-      "codeRevision": "471fa5169ed21d99361b0e5065f677206caba6c0"
+      "log": "/private/tmp/vault-live-preflight.log",
+      "codeRevision": "f0866499886ae2839ba9a05295dce00f182a536b"
     },
     "typecheck": {
       "status": "within_existing_baseline",
-      "diagnostics": 814,
+      "diagnostics": 812,
       "baseline": 1033,
       "clean": false
     },
@@ -67,8 +76,8 @@
       "platform": "macOS arm64 development",
       "signed": false,
       "notarized": false,
-      "log": "/private/tmp/vault-ltc-account-build.log",
-      "codeRevision": "471fa5169ed21d99361b0e5065f677206caba6c0"
+      "log": "/private/tmp/vault-live-native-build.log",
+      "codeRevision": "f0866499886ae2839ba9a05295dce00f182a536b"
     },
     "certifiedEmulator": {
       "status": "verified",
@@ -108,10 +117,9 @@
       "customerBalanceReconciled": false
     },
     "platformCi": {
-      "status": "in_progress",
-      "revision": "471fa5169ed21d99361b0e5065f677206caba6c0",
-      "run": "https://github.com/keepkey/keepkey-vault/actions/runs/41719279071",
-      "note": "Local build, full release unit suite and preflight pass; platform packaging remains a separate release gate."
+      "status": "pending_on_final_candidate_push",
+      "revision": "f0866499886ae2839ba9a05295dce00f182a536b",
+      "note": "Full local release checks and the macOS arm64 development build pass. Final platform packaging remains a release gate."
     },
     "quoteErrorParsing": {
       "status": "passed",
@@ -157,11 +165,28 @@
       "fundedAccountComparison": "matches_legacy_api",
       "nativeManualRefresh": "passed",
       "receiveLabelAndPathConsistency": "passed"
+    },
+    "automaticBalanceRefresh": {
+      "status": "passed",
+      "evidence": "projects/keepkey-vault/docs/provider-parity-audit-20261103/live-payments.json",
+      "nativeCacheMatchesBothApis": true,
+      "manualRefreshPressed": false,
+      "automaticWatchRegistrationCount": 38
+    },
+    "livePayments": {
+      "status": "passed",
+      "evidence": "projects/keepkey-vault/docs/provider-parity-audit-20261103/live-payments.json",
+      "closedClientQueue": true,
+      "currentRevisionEarlyAcknowledgement": true,
+      "actualUpstreamWebsocket": true,
+      "nativeRegistrationAndAutomaticBalanceRefresh": true,
+      "agentSigned": false,
+      "agentBroadcast": false
     }
   },
   "gatewayDependency": {
     "url": "https://oracles.cc",
-    "deployedRevision": "a1f079b1861bdceaa5d7e404858c29e1e935b8a3",
+    "deployedRevision": "bff70f2a83e2db01a7acb8f06d2dd714974ceaf3",
     "defaultApiBaseChanged": false,
     "quoteAndCertificateEvidence": "projects/keepkey-vault/docs/relay-clearsign-audit-20261102/reviewed-swaps-live.json",
     "nativeProtocolPrecisionEvidence": "projects/keepkey-vault/docs/relay-clearsign-audit-20261102/eth-ltc-protocol-precision-live.json",
@@ -169,7 +194,8 @@
     "tradingHaltMessageEvidence": "projects/keepkey-vault/docs/relay-clearsign-audit-20261102/swap-halt-message-live.json",
     "deploymentVerified": true,
     "liveProviderGateCasesPassed": 5,
-    "liveLtcScriptFamiliesPassed": 3
+    "liveLtcScriptFamiliesPassed": 3,
+    "deployment": "https://github.com/BitHighlander/keepkey-gateway/actions/runs/41736560137"
   },
   "existingDraft": {
     "tag": "v1.6.8",
@@ -222,11 +248,11 @@
   ],
   "runningApp": {
     "version": "1.6.8",
-    "backendPidAtInspection": 14800,
+    "backendPidAtInspection": 41219,
     "deviceConnectedAtInspection": true,
     "candidateRestartPerformed": true,
-    "note": "Final Litecoin candidate is running and connected. Native Refresh and all three LTC picker balances were verified after gateway deployment. Direct NEAR user-approved funded swap and actual payout were independently confirmed earlier. Agent did not initiate signing.",
-    "codeRevision": "471fa5169ed21d99361b0e5065f677206caba6c0"
+    "note": "Final live-payment candidate is running and connected on firmware 7.16. Thirty-eight standard wallet watches registered automatically; the automatically updated Litecoin cache and dashboard match the latest API balances. No manual Refresh or signing was initiated by the agent. The known USB connection recovery step was used at restart.",
+    "codeRevision": "f0866499886ae2839ba9a05295dce00f182a536b"
   },
   "resolvedProviderGates": [
     {
@@ -249,8 +275,9 @@
     }
   ],
   "realtimePaymentScope": {
-    "status": "separately_scoped",
+    "status": "implemented_deployed_and_verified",
     "document": "https://github.com/BitHighlander/keepkey-gateway/blob/master/docs/REALTIME-PARITY.md",
-    "note": "Transport acceptance is verified; full durable Watchtower/payment-event parity is not claimed."
+    "evidence": "projects/keepkey-vault/docs/provider-parity-audit-20261103/live-payments.json",
+    "note": "Standard-wallet closed-client monitoring, bounded history catchup, seven-day queue replay and explicit acknowledgments are verified. Hidden wallets remain active-only. Provider-page limits and exact receipt metadata limits are documented."
   }
 }
