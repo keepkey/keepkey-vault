@@ -38,6 +38,7 @@ import {
   assertSwapMemoFitsSource,
   parseQuoteResponse,
   parseAssetsResponse,
+  parseSwapQuoteError,
   isNativeDepositCaip,
 } from './swap-parsing'
 
@@ -361,16 +362,9 @@ export async function getSwapQuote(params: SwapQuoteParams, device: {
     // than min swap amount (recommended_min_amount_in: …)") is in
     // e.response.body.message. Surface the inner message so the RPC layer +
     // frontend can render something useful instead of "Internal Server Error".
-    const inner = e?.response?.body?.message || e?.responseError?.message || e?.response?.text
-    if (inner && typeof inner === 'string') {
-      // The text body comes through as a JSON string on some swagger versions;
-      // try to unwrap once if it looks like JSON.
-      let unwrapped = inner
-      try {
-        const parsed = JSON.parse(inner)
-        if (parsed?.message) unwrapped = parsed.message
-      } catch { /* not JSON, use as-is */ }
-      const err = new Error(unwrapped)
+    const inner = parseSwapQuoteError(e)
+    if (inner) {
+      const err = new Error(inner)
       ;(err as any).cause = e
       throw err
     }

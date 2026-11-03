@@ -11,11 +11,36 @@ import {
   assertSwapMemoFitsSource,
   parseQuoteResponse,
   parseAssetsResponse,
+  parseSwapQuoteError,
   nearIntentsDepositFindings,
   nearIntentsSaysUnknownAddress,
   swapDepositAddressFromTx,
   swapDepositFindings,
 } from '../src/bun/swap-parsing'
+
+describe('quote error response parsing', () => {
+  const message = 'THORChain has paused trading for this route. No alternative swap route is currently available.'
+  const body = { error: { code: 'swap_error', message } }
+
+  test('unwraps gateway errors from structured and JSON response bodies', () => {
+    expect(parseSwapQuoteError({ response: { body } })).toBe(message)
+    expect(parseSwapQuoteError({ response: { body: JSON.stringify(body) } })).toBe(message)
+    expect(parseSwapQuoteError({ response: { text: JSON.stringify(body) } })).toBe(message)
+  })
+
+  test('retains Pioneer top-level messages and plain text diagnostics', () => {
+    expect(parseSwapQuoteError({ response: { body: { message: 'amount less than min swap amount' } } })).toBe('amount less than min swap amount')
+    expect(parseSwapQuoteError({ responseError: { message: 'Quote request timed out' } })).toBe('Quote request timed out')
+    expect(parseSwapQuoteError({ response: { text: 'upstream unavailable' } })).toBe('upstream unavailable')
+  })
+
+  test('falls through empty or malformed bodies without hiding a later diagnostic', () => {
+    expect(parseSwapQuoteError({ response: { body: {}, text: JSON.stringify(body) } })).toBe(message)
+    expect(parseSwapQuoteError({ response: { body: { message: { unexpected: true } }, text: 'HTTP 502' } })).toBe('HTTP 502')
+    expect(parseSwapQuoteError({ response: { body: { error: { code: 'swap_error' } } } })).toBeNull()
+    expect(parseSwapQuoteError(null)).toBeNull()
+  })
+})
 
 // ── Fixtures: Real Pioneer SDK response shapes ──────────────────────
 

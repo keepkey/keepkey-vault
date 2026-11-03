@@ -12,6 +12,21 @@ import { COIN_MAP_LONG } from '@pioneer-platform/pioneer-coins'
 
 const TAG = '[swap]'
 
+/** Swagger versions expose quote error bodies as either objects or JSON text. */
+export function parseSwapQuoteError(error: any): string | null {
+  for (const candidate of [error?.response?.body, error?.responseError, error?.response?.text]) {
+    let body = candidate
+    if (typeof body === 'string') {
+      if (!body.trim()) continue
+      try { body = JSON.parse(body) } catch { return body }
+    }
+    const message = body?.error?.message || body?.message
+    if (typeof message === 'string' && message.trim()) return message
+    if (typeof body === 'string' && body.trim()) return body
+  }
+  return null
+}
+
 /** THORChain accepts up to 250 bytes globally, but UTXO deposits encode the
  * memo in a single OP_RETURN output and the KeepKey signer supports 80 bytes.
  * Keep this source-aware so an otherwise valid quote cannot survive preview
