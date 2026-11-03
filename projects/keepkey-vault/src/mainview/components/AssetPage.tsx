@@ -17,6 +17,7 @@ import { useFiat } from "../lib/fiat-context"
 import { ReceiveView } from "./ReceiveView"
 import { HiveAccountPanel } from "./HiveAccountPanel"
 import { SendForm } from "./SendForm"
+import { ZcashBalanceSummary, type ZcashPrivacyAction } from './ZcashBalanceSummary'
 
 // Lazy-load optional feature components — defers module evaluation to avoid
 // bundler TDZ issues when these heavy modules are statically imported.
@@ -40,6 +41,8 @@ import { PSBT_PASTE_EVENT } from "./PsbtSignDialog"
 import { WatchOnlyExportDialog } from "./WatchOnlyExportDialog"
 import { CreatePsbtPanel } from "./CreatePsbtPanel"
 import { detectSpamToken, categorizeTokens, type SpamResult } from "../../shared/spamFilter"
+import { createLatestReceiveRequest, selectedReceiveScriptType } from "../../shared/receive-request"
+import { reconcileSelectedToken, type SelectedTokenState } from "../../shared/selected-token-balance"
 
 type AssetView = "receive" | "send" | "privacy" | "psbt"
 
@@ -113,7 +116,12 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 		}
 		setViewRaw(v)
 	}
-	const [selectedToken, setSelectedToken] = useState<TokenBalance | null>(initialToken ?? null)
+	const [selectedTokenState, setSelectedTokenState] = useState<SelectedTokenState | null>(() => initialToken ? {
+		token: initialToken, chainId: chain.id,
+		// EVM dashboard tokens may aggregate owners. Bind their amounts only
+		// after the selected address's own cache has answered.
+		ownerAddress: chain.chainFamily === 'evm' ? undefined : balance?.address,
+	} : null)
 	const [copiedCaip, setCopiedCaip] = useState<string | null>(null)
 	const [address, setAddress] = useState<string | null>(balance?.address || null)
 	const [loading, setLoading] = useState(false)
@@ -172,6 +180,7 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 	// Feature flags: zcash privacy
 	const [swappableChainIds, setSwappableChainIds] = useState<Set<string>>(new Set())
 	const [zcashPrivacyEnabled, setZcashPrivacyEnabled] = useState(false)
+	const [zcashPrivacyAction, setZcashPrivacyAction] = useState<ZcashPrivacyAction>('send')
 	const [btcMultisigEnabled,setBtcMultisigEnabled]=useState(false)
 	const settingsLoaded = useRef(false)
 	const refreshFeatureFlags = useCallback(() => {
@@ -206,7 +215,7 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 		? evmAddresses.addresses.find(a => a.addressIndex === evmAddresses.selectedIndex)
 		: undefined
 	const selectedEvmChainBalance = selectedEvmAddress?.chainBalances?.[chain.id]
-	const activeBalance: ChainBalance | undefined = isEvm && selectedEvmAddress && selectedEvmChainBalance
+	const activeBalance: ChainBalance | undefined = isEvm && !watchOnly && selectedEvmAddress && selectedEvmChainBalance
 		? {
 			chainId: chain.id,
 			symbol: chain.symbol,
@@ -216,8 +225,28 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 			address: selectedEvmAddress.address,
 			tokens: selectedEvmChainBalance.tokens,
 			defiPositions: selectedEvmChainBalance.defiPositions,
+			syncState: selectedEvmChainBalance.syncState,
+			updatedAt: selectedEvmChainBalance.updatedAt,
+			confirmedAssetCaips: selectedEvmChainBalance.confirmedAssetCaips,
 		}
 		: balance
+	const selectedTokenOwner = isEvm && !watchOnly ? selectedEvmAddress?.address : activeBalance?.address || address
+	// The aggregate balance prop can contain tokens summed across EVM owners.
+	// It must never fill an absent selected-owner cache or prove token absence.
+	const selectedTokenBalanceSource = isEvm && !watchOnly && !selectedEvmChainBalance ? undefined : activeBalance
+	const tokenReconciliation = reconcileSelectedToken(selectedTokenState, {
+		chainId: chain.id, chainCaip: chain.caip, ownerAddress: selectedTokenOwner,
+	}, selectedTokenBalanceSource)
+	const selectedToken = tokenReconciliation.selection?.token ?? null
+	const selectedTokenUnverified = tokenReconciliation.unverified
+	const setSelectedToken = (token: TokenBalance | null) => setSelectedTokenState(token ? {
+		token, chainId: chain.id, ownerAddress: selectedTokenOwner || undefined,
+	} : null)
+	useEffect(() => {
+		// Retain the newest owner-scoped amount for a later failed refresh; the
+		// synchronously reconciled value above also prevents a stale render.
+		setSelectedTokenState(tokenReconciliation.selection)
+	}, [selectedTokenState, chain.id, chain.caip, selectedTokenOwner, selectedTokenBalanceSource])
 
 	// Multi-address total: show when >1 EVM address has funds on this chain
 	const evmAddressesWithChainBalance = isEvm
@@ -254,7 +283,6 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 
 	// Effective path and scriptType — BTC overrides from multi-account selector
 	const effectivePath = (isBtc && btcSelected) ? btcSelected.fullPath : currentPath
-	const effectiveScriptType = (isBtc && btcSelected) ? btcSelected.scriptType : chain.scriptType
 
 	// TON: bounceable toggle (default: non-bounceable / UQ for safe receiving)
 	const isTon = chain.chainFamily === 'ton'
@@ -265,6 +293,9 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 	// Bitcoin, standard purpose per type: 44 legacy / 49 wrapped / 84 native).
 	const utxoScripts = chain.id === 'litecoin' ? LTC_SCRIPT_TYPES : null
 	const [utxoScriptType, setUtxoScriptType] = useState(chain.scriptType || 'p2pkh')
+	const effectiveScriptType = selectedReceiveScriptType(chain.scriptType, isBtc ? btcSelected?.scriptType : undefined, utxoScripts ? utxoScriptType : undefined)
+	const addressRequests = useMemo(() => createLatestReceiveRequest(), [])
+	useEffect(() => () => addressRequests.invalidate(), [addressRequests, chain.id, watchOnly])
 
 	const deriveAddress = useCallback(async (path?: number[], overrideBounceable?: boolean, overrideScriptType?: string) => {
 		const usePath = path || effectivePath
@@ -272,35 +303,34 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 		// Watch-only: no device to derive from — show the cached address only.
 		// Re-deriving a different path requires the device, so isn't possible offline.
 		if (watchOnly) {
+			addressRequests.invalidate()
 			setAddress(balance?.address || null)
 			setDeriveError(balance?.address ? null : 'Address unavailable offline')
 			setLoading(false)
 			return
 		}
-		setLoading(true)
-		setDeriveError(null)
-		try {
+		await addressRequests.run(async () => {
 			const params: any = {
 				addressNList: usePath,
 				showDisplay: false,
 				coin: chain.chainFamily === 'evm' ? 'Ethereum' : chain.coin,
 			}
-			const st = overrideScriptType
-				|| ((isBtc && btcSelected) ? btcSelected.scriptType
-					: utxoScripts ? utxoScriptType
-					: chain.scriptType)
+			const st = overrideScriptType || effectiveScriptType
 			if (st) params.scriptType = st
 			if (isTon) params.bounceable = overrideBounceable ?? tonBounceable
 			const result = await rpcRequest(chain.rpcMethod, params, 60000)
-			const addr = typeof result === "string" ? result : result?.address || String(result)
-			setAddress(addr)
-		} catch (e: any) {
-			console.error(`${chain.coin} address:`, e)
-			setDeriveError(e.message || 'Address derivation failed')
-			setAddress(null)
-		}
-		setLoading(false)
-	}, [chain, effectivePath, isBtc, btcSelected, isTon, tonBounceable, watchOnly, balance?.address, utxoScripts, utxoScriptType])
+			return typeof result === "string" ? result : result?.address || String(result)
+		}, {
+			pending: () => { setLoading(true); setDeriveError(null); setAddress(null) },
+			resolved: setAddress,
+			rejected: (e: any) => {
+				console.error(`${chain.coin} address:`, e)
+				setDeriveError(e.message || 'Address derivation failed')
+				setAddress(null)
+			},
+			settled: () => setLoading(false),
+		})
+	}, [chain, effectivePath, effectiveScriptType, isTon, tonBounceable, watchOnly, balance?.address, addressRequests])
 
 	// Re-derive address when BTC xpub selection or change/index changes
 	// Cancellation guard prevents stale responses from overwriting current address (Finding 5)
@@ -497,19 +527,23 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 	// Fetch the account xpub for non-BTC UTXO chains (Litecoin, DASH, DOGE, BCH)
 	// — encoding follows the selected script type (xpub/Ltub vs Mtub vs zpub).
 	const [utxoXpub, setUtxoXpub] = useState<string | null>(null)
+	const xpubRequests = useMemo(() => createLatestReceiveRequest(), [])
 	useEffect(() => {
 		if (!isAltUtxo) return
-		rpcRequest<Array<{ xpub: string }>>('getPublicKeys', {
+		void xpubRequests.run(() => rpcRequest<Array<{ xpub: string }>>('getPublicKeys', {
 			paths: [{
 				addressNList: utxoPath(utxoAccount).slice(0, 3),
 				coin: chain.coin,
 				scriptType: utxoScripts ? utxoScriptType : chain.scriptType,
 				curve: 'secp256k1',
 			}],
-		}, 30000)
-			.then(result => { if (result?.[0]?.xpub) setUtxoXpub(result[0].xpub) })
-			.catch(e => console.warn(`[AssetPage] ${chain.coin} xpub fetch failed:`, e))
-	}, [isAltUtxo, chain.coin, chain.scriptType, utxoPath, utxoAccount, utxoScripts, utxoScriptType])
+		}, 30000), {
+			pending: () => setUtxoXpub(null),
+			resolved: result => setUtxoXpub(result?.[0]?.xpub || null),
+			rejected: e => console.warn(`[AssetPage] ${chain.coin} xpub fetch failed:`, e),
+		})
+		return () => xpubRequests.invalidate()
+	}, [isAltUtxo, chain.coin, chain.scriptType, utxoPath, utxoAccount, utxoScripts, utxoScriptType, xpubRequests])
 
 	// ── Token spam filter ──────────────────────────────────────────────
 	const tokens = useMemo(() => activeBalance?.tokens || [], [activeBalance?.tokens])
@@ -552,16 +586,16 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 	const hiddenCount = spamTokens.length + zeroValueTokens.length
 	const tokenTotalUsd = useMemo(() => cleanTokens.reduce((sum, t) => sum + (t.balanceUsd || 0), 0), [cleanTokens])
 	const spamTotalUsd = useMemo(() => spamTokens.reduce((sum, t) => sum + (t.balanceUsd || 0), 0), [spamTokens])
-	const cleanBalanceUsd = (activeBalance?.balanceUsd || 0) - spamTotalUsd
+	const cleanBalanceUsd = chain.id === 'zcash' ? activeBalance?.nativeBalanceUsd ?? 0 : (activeBalance?.balanceUsd || 0) - spamTotalUsd
 	// zZEC is the chain's own coin in the shielded pool, and the USD above
 	// already counts it. Fold it into the header amount too, as the Dashboard
 	// does, so "0 ZEC" never sits next to a nonzero USD total.
 	const shieldedAmount = tokens.reduce((sum, t) => t.type === 'shielded' ? sum + parseFloat(t.balance || '0') : sum, 0)
 	const pendingAmount = tokens.reduce((sum, t) => t.type === 'shielded' ? sum + parseFloat(t.pendingBalance || '0') : sum, 0)
-	const headerBalance = activeBalance && shieldedAmount + pendingAmount > 0
+	const headerBalance = chain.id !== 'zcash' && activeBalance && shieldedAmount + pendingAmount > 0
 		? String(parseFloat(activeBalance.balance || '0') + shieldedAmount + pendingAmount)
 		: activeBalance?.balance ?? '0'
-	const headerBalanceTitle = shieldedAmount + pendingAmount > 0
+	const headerBalanceTitle = chain.id === 'zcash' ? t('zcashTransparentOnly') : shieldedAmount + pendingAmount > 0
 		? `${shieldedAmount} shielded + ${activeBalance?.balance ?? '0'} transparent${pendingAmount > 0 ? ` + ${pendingAmount} pending` : ''} ${chain.symbol}`
 		: `${headerBalance} ${chain.symbol}`
 
@@ -998,6 +1032,10 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 													{t("cached", { defaultValue: "Cached" })}{activeBalance.updatedAt ? ` · ${new Date(activeBalance.updatedAt).toLocaleString([], { dateStyle: "medium", timeStyle: "short" })}` : ""}
 												</Text>
 											</Flex>
+										) : chain.id === 'zcash' ? (
+											<Text fontSize="10px" fontFamily="mono" color="var(--text-2)" title={t('zcashSeparateSync')}>
+												{lastSyncedAt ? t('zcashTransparentUpdated') : t('zcashTransparentOnly')}
+											</Text>
 										) : activeBalance ? (
 											<Flex align="center" gap="1" color="var(--teal)" className="v3-glass-chip" px="2" py="0.5"
 												title={lastSyncedAt ? `Last updated ${lastSyncedAt.toLocaleString()}` : undefined}>
@@ -1040,13 +1078,14 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 					{selectedToken ? (
 						<Flex direction="column" align="flex-end" gap="1" flexShrink={0} display={{ base: "none", sm: "flex" }}>
 							<Text fontFamily="mono" fontSize={{ base: "16px", md: "20px" }} fontWeight="500" color="var(--text-0)" letterSpacing="0.01em" lineHeight="1.2">
-								{formatBalance(selectedToken.balance)}
+								{selectedTokenUnverified ? '—' : formatBalance(selectedToken.balance)}
 								<Box as="span" color="var(--text-3)" ml="1.5" fontSize={{ base: "13px", md: "15px" }}>{selectedToken.symbol}</Box>
 							</Text>
-							{selectedToken.balanceUsd > 0 && (
+							{selectedTokenUnverified && <Text fontSize="11px" color="var(--gold)" title={`Last known: ${formatBalance(selectedToken.balance)} ${selectedToken.symbol}`}>Balance unverified</Text>}
+							{!selectedTokenUnverified && selectedToken.balanceUsd > 0 && (
 								<Text fontSize="12px" fontFamily="mono" color="var(--text-2)">≈ {fmtCompact(selectedToken.balanceUsd)}</Text>
 							)}
-							{selectedToken.priceUsd > 0 && (
+							{!selectedTokenUnverified && selectedToken.priceUsd > 0 && (
 								<Text fontSize="10px" fontFamily="mono" color="var(--text-3)">
 									${selectedToken.priceUsd.toLocaleString('en-US', { maximumFractionDigits: 6 })} / {selectedToken.symbol}
 								</Text>
@@ -1153,10 +1192,11 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 				{selectedToken ? (
 					<Flex display={{ base: "flex", sm: "none" }} align="baseline" justify="space-between" mb="4" gap="3">
 						<Text fontFamily="mono" fontSize="18px" fontWeight="500" color="var(--text-0)" letterSpacing="0.01em">
-							{formatBalance(selectedToken.balance)}
+							{selectedTokenUnverified ? '—' : formatBalance(selectedToken.balance)}
 							<Box as="span" color="var(--text-3)" ml="1.5" fontSize="13px">{selectedToken.symbol}</Box>
 						</Text>
-						{selectedToken.balanceUsd > 0 && (
+						{selectedTokenUnverified && <Text fontSize="11px" color="var(--gold)" title={`Last known: ${formatBalance(selectedToken.balance)} ${selectedToken.symbol}`}>Balance unverified</Text>}
+						{!selectedTokenUnverified && selectedToken.balanceUsd > 0 && (
 							<Text fontSize="13px" fontFamily="mono" color="var(--text-2)">≈ {fmtCompact(selectedToken.balanceUsd)}</Text>
 						)}
 					</Flex>
@@ -1312,6 +1352,12 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 				{/* Account selector now lives inline with the action pills above
 				    (per the design study). Original duplicate block removed. */}
 
+				{isZcash && !selectedToken && view !== 'privacy' && <ZcashBalanceSummary
+					transparent={activeBalance?.balance} enabled={zcashPrivacyEnabled} supported={!!zcashShieldedSupported}
+					watchOnly={watchOnly} refreshNonce={refreshNonce}
+					onNavigate={action => { setZcashPrivacyAction(action); setSelectedToken(null); setView('privacy') }}
+				/>}
+
 				{/* Content */}
 				<Box className="v3-glass-card" borderRadius="var(--r-lg)" p={{ base: "4", md: "6" }} minH="280px">
 					{isShieldedToken && zcashPrivacyEnabled ? (
@@ -1340,6 +1386,7 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 								nativeBalanceUsd: btcSelected.xpubData.balanceUsd,
 							} : activeBalance}
 							token={selectedToken}
+							tokenBalanceUnverified={selectedTokenUnverified}
 							onClearToken={() => setSelectedToken(null)}
 							xpubOverride={isBtc ? btcSelected?.xpubData?.xpub : undefined}
 							scriptTypeOverride={isBtc ? btcSelected?.scriptType : undefined}
@@ -1348,7 +1395,8 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 						)
 					) : view === "privacy" && isZcash && zcashPrivacyEnabled ? (
 						<Suspense fallback={<Spinner size="sm" color="kk.gold" />}>
-							<ZcashPrivacyTab />
+							<ZcashPrivacyTab initialPage={zcashPrivacyAction === 'unshield' ? 'shield' : zcashPrivacyAction}
+								initialSection={zcashPrivacyAction === 'shield' || zcashPrivacyAction === 'unshield' ? zcashPrivacyAction : undefined} />
 						</Suspense>
 					) : isHive ? (
 						<HiveAccountPanel activeKey={address} color={chain.color} loading={loading} deriveError={deriveError} onRetryDerive={deriveAddress} refreshNonce={refreshNonce} />

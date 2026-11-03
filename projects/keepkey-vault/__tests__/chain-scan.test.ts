@@ -11,6 +11,7 @@ import {
   explorerAddressUrl, pathToBip32, parseBip32Path, chainSupportsDeepScan, chainSupportsLevelScan,
 } from '../src/bun/chain-scan'
 import { EVM_KNOWN_SCHEMES } from '../src/shared/evm-paths'
+import { auditTrackLevel } from '../src/shared/audit-recovery'
 import type { ChainDef } from '../src/shared/chains'
 
 // Minimal ChainDef fixtures (only the fields the helpers read).
@@ -21,6 +22,52 @@ const TON = { id: 'ton', symbol: 'TON', coin: 'Ton', chainFamily: 'ton', rpcMeth
 const BTC = { id: 'bitcoin', symbol: 'BTC', coin: 'Bitcoin', chainFamily: 'utxo', rpcMethod: 'btcGetAddress', networkId: 'bip122:x', defaultPath: [0x80000054, 0x80000000, 0x80000000, 0, 0], scriptType: 'p2wpkh' } as ChainDef
 const ZEC_SHIELDED = { id: 'zcash-shielded', symbol: 'ZEC', coin: 'Zcash', chainFamily: 'zcash-shielded', rpcMethod: 'zcashGetOrchardFvk', networkId: 'x', defaultPath: [] } as ChainDef
 const HIVE = { id: 'hive', symbol: 'HIVE', coin: 'Hive', chainFamily: 'hive', rpcMethod: 'hiveGetPublicKey', networkId: 'x', defaultPath: [0x8000002C, 0x800004FB, 0x80000000, 0, 0] } as ChainDef
+
+describe('Litecoin address-level Audit recovery', () => {
+  const chain = { chainId: 'litecoin', family: 'utxo' as const }
+  const H = 0x80000000
+  const cases = [
+    { path: "m/84'/2'/0'/0/0", scriptType: 'p2wpkh' },
+    { path: "m/44'/2'/0'/0/1", scriptType: 'p2pkh' },
+    { path: "m/44'/2'/0'/0/4", scriptType: 'p2pkh' },
+  ]
+
+  test('all reported paths belong to trackable account 0, not custom unsupported accounts', () => {
+    for (const c of cases) {
+      const find = { addressNList: parseBip32Path(c.path)!, scriptType: c.scriptType }
+      const level = auditTrackLevel(chain, find, false)
+      expect(level).toBe(0)
+      // The same account operation used by Track includes this exact branch.
+      expect(utxoAccountScriptPaths({ ...BTC, id: 'litecoin', defaultPath: [H + 84, H + 2, H, 0, 0] }, level!))
+        .toContainEqual({ scriptType: c.scriptType, path: find.addressNList.slice(0, 3) })
+    }
+  })
+
+  test('the hardened account, not the receive/change index, is tracked', () => {
+    expect(auditTrackLevel(chain, { addressNList: [H + 49, H + 2, H + 3, 1, 42], scriptType: 'p2sh-p2wpkh' }, false)).toBe(3)
+    expect(auditTrackLevel(chain, { addressNList: [H + 44, H + 2, H + 1, 0, 4], scriptType: 'p2wpkh' }, false)).toBe(1)
+  })
+
+  test('never persists a passphrase wallet through the standard-wallet cache', () => {
+    for (const c of cases) expect(auditTrackLevel(chain, { addressNList: parseBip32Path(c.path)!, scriptType: c.scriptType }, true)).toBeNull()
+    expect(auditTrackLevel(chain, { level: 0 }, true)).toBeNull()
+  })
+
+  test('unsupported path/script combinations retain the support handoff', () => {
+    for (const path of [[H + 44, H, H, 0, 4], [H + 44, H + 2, 0, 0, 4], [H + 44, H + 2, H, 2, 4], [H + 44, H + 2, H, 0, H], [H + 44, H + 2, H, 0, 4, 0], [H + 44, H + 2, H, 0, NaN]]) {
+      expect(auditTrackLevel(chain, { addressNList: path, scriptType: 'p2pkh' }, false)).toBeNull()
+    }
+    expect(auditTrackLevel(chain, { addressNList: [H + 84, H + 2, H, 0, 4], scriptType: 'p2pkh' }, false)).toBeNull()
+    expect(auditTrackLevel(chain, { addressNList: [H + 84, H + 2, H, 0, 4] }, false)).toBeNull()
+  })
+
+  test('existing account scans retain their tracking behavior', () => {
+    expect(auditTrackLevel(chain, { level: 2 }, false)).toBe(2)
+    expect(auditTrackLevel({ chainId: 'bitcoin', family: 'utxo' }, { level: 2 }, true)).toBe(2)
+    expect(auditTrackLevel({ chainId: 'ethereum', family: 'evm' }, { level: 2 }, true)).toBe(2)
+    expect(auditTrackLevel({ chainId: 'cosmos', family: 'cosmos' }, { level: 2 }, false)).toBeNull()
+  })
+})
 
 describe('chainLevelPath — family-aware', () => {
   test('EVM uses evmAddressPath — the shared EVM key at index [2] (matches addEvmAddressIndex)', () => {

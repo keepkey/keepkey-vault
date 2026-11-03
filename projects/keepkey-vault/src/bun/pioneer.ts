@@ -7,6 +7,8 @@
 import Pioneer from '@pioneer-platform/pioneer-client'
 import { getSetting, setSetting } from './db'
 import { instrumentPortfolio } from './perf-telemetry'
+import { registerSwapServerCapabilities } from '../shared/swap-server-capabilities'
+import { registerPioneerEventCapabilities } from '../shared/pioneer-event-capabilities'
 
 export const DEFAULT_API_BASE = 'https://api.keepkey.info'
 
@@ -130,6 +132,8 @@ export async function getPioneer(): Promise<any> {
       const client = new Pioneer(specUrl, { queryKey: qk, timeout: 60000, overrideHost })
       pioneerInstance = await client.init()
       if (!pioneerInstance) throw new Error('Pioneer client init returned null')
+      registerSwapServerCapabilities(pioneerInstance, client.client?.spec)
+      registerPioneerEventCapabilities(pioneerInstance, client.client?.spec)
       if (offline) {
         pioneerInstance = null
         throw new Error('OFFLINE: Pioneer initialization was cancelled by offline mode')

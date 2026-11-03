@@ -57,13 +57,15 @@ interface SendFormProps {
 	address: string | null
 	balance?: ChainBalance
 	token?: TokenBalance | null
+	/** Confidence in the selected owner's token; independent of native gas. */
+	tokenBalanceUnverified?: boolean
 	onClearToken?: () => void
 	xpubOverride?: string         // BTC multi-account: use this xpub for buildTx
 	scriptTypeOverride?: string   // BTC multi-account: use this scriptType for buildTx
 	evmAddressIndex?: number      // EVM multi-address: derivation index for buildTx
 }
 
-export function SendForm({ chain, address, balance, token, onClearToken, xpubOverride, scriptTypeOverride, evmAddressIndex }: SendFormProps) {
+export function SendForm({ chain, address, balance, token, tokenBalanceUnverified, onClearToken, xpubOverride, scriptTypeOverride, evmAddressIndex }: SendFormProps) {
 	const { t } = useTranslation("send")
 	const { fmt, fmtCompact } = useFiat()
 	const [recipient, setRecipient] = useState("")
@@ -137,7 +139,8 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 	// than "you have none" — the second is a claim we cannot back. Token sends
 	// pass their caip so a token the backend proved directly over RPC keeps its
 	// real figure even while its parent chain is degraded.
-	const activeAssetUnverified = isBalanceUnverified(balance, isTokenSend ? token?.caip : chain.caip)
+	const activeAssetUnverified = isTokenSend && tokenBalanceUnverified !== undefined
+		? tokenBalanceUnverified : isBalanceUnverified(balance, isTokenSend ? token?.caip : chain.caip)
 	// Confidence in the chain's NATIVE balance — a separate question, because
 	// the gas warning below is about the coin that pays the fee, not the asset
 	// being sent. A directly-confirmed token cleared the shared flag and let the

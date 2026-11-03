@@ -1,0 +1,283 @@
+{
+  "version": "1.6.8",
+  "status": "gateway_deployed_local_candidate_verified_not_published",
+  "recordedAt": "2026-11-03T23:14:16.587154+00:00",
+  "branch": "prepare/1.6.8-candidate",
+  "candidateCodeRevision": "f0866499886ae2839ba9a05295dce00f182a536b",
+  "baseReleaseRevision": "1368fadbb17516553c720ea535fe249c6b3f37d7",
+  "auditSourceRevision": "661fc89653b04f150001f4458879dc78f5fb4db9",
+  "auditIntegratedRevision": "2e162f0f8",
+  "scope": [
+    "Litecoin Audit account recovery",
+    "Audit support handoff scrolling",
+    "Swap review and execution safeguards",
+    "Swap provider status handling",
+    "DeFi position detail dialogs and links",
+    "Compact transparent ZEC notice",
+    "Separate Zcash transparent and shielded balance panels",
+    "Direct Shield/Unshield/Scan navigation",
+    "Shielded pending value and scan failure visibility",
+    "Correct transparent recipient dispatch from private-balance Send",
+    "Readable nested gateway quote errors and protocol halt explanations",
+    "Automatic forced balance reconciliation after send and confirmation",
+    "Active wallet activity pushes and reconnect catchup",
+    "Background standard-wallet monitoring and seven-day acknowledged replay",
+    "Explicit Offline/Forget/Delete monitoring revocation"
+  ],
+  "checks": {
+    "releaseUnitCommand": {
+      "command": "make test-unit",
+      "status": "passed",
+      "bunSuitesPassed": [
+        2186,
+        4,
+        45,
+        1,
+        21,
+        6,
+        4,
+        6,
+        49,
+        3,
+        5,
+        12,
+        8,
+        53
+      ],
+      "scriptSuites": "passed",
+      "log": "/private/tmp/vault-live-release-tests.log",
+      "totalTestsPassed": 2403,
+      "scriptChecksPassed": 17,
+      "codeRevision": "f0866499886ae2839ba9a05295dce00f182a536b"
+    },
+    "auditFocusedTests": {
+      "status": "passed",
+      "tests": 58,
+      "files": [
+        "__tests__/chain-scan.test.ts",
+        "__tests__/audit-coverage.test.ts"
+      ]
+    },
+    "preflight": {
+      "command": "make preflight",
+      "status": "passed",
+      "log": "/private/tmp/vault-live-preflight.log",
+      "codeRevision": "f0866499886ae2839ba9a05295dce00f182a536b"
+    },
+    "typecheck": {
+      "status": "within_existing_baseline",
+      "diagnostics": 812,
+      "baseline": 1033,
+      "clean": false
+    },
+    "nativeBuild": {
+      "command": "bun run build",
+      "status": "passed",
+      "platform": "macOS arm64 development",
+      "signed": false,
+      "notarized": false,
+      "log": "/private/tmp/vault-live-native-build.log",
+      "codeRevision": "f0866499886ae2839ba9a05295dce00f182a536b"
+    },
+    "certifiedEmulator": {
+      "status": "verified",
+      "version": "7.17.0",
+      "macosSha256": "d89374e4ec62ad43c42d485b566b3c6c2f8026e42cf4ac21d543518d46ab5c54",
+      "windowsSha256": "1bb6e7ebd5cc0a44aab52fa508f22f034d1d00a39f008356139dc857ad453b74"
+    },
+    "gitDiffCheck": "passed",
+    "zcashPrivacy": {
+      "tests": "passed",
+      "focusedTestCount": 15,
+      "regressionTestCount": 7,
+      "browserFixture": {
+        "rpc": "mocked",
+        "deviceUsed": false,
+        "signed": false,
+        "broadcast": false,
+        "cases": [
+          {
+            "case": "unknown",
+            "passed": true,
+            "screenshot": "/private/tmp/vault-zcash-unknown.png"
+          },
+          {
+            "case": "failed",
+            "passed": true,
+            "screenshot": "/private/tmp/vault-zcash-failed.png"
+          },
+          {
+            "case": "click-unshield",
+            "passed": true,
+            "screenshot": "/private/tmp/vault-zcash-click-unshield.png"
+          }
+        ]
+      },
+      "realFundsUsed": false,
+      "customerBalanceReconciled": false
+    },
+    "platformCi": {
+      "status": "pending_on_final_candidate_push",
+      "revision": "f0866499886ae2839ba9a05295dce00f182a536b",
+      "note": "Full local release checks and the macOS arm64 development build pass. Final platform packaging remains a release gate."
+    },
+    "quoteErrorParsing": {
+      "status": "passed",
+      "focusedTests": 79,
+      "newRegressionTests": 3,
+      "cases": [
+        "Gateway nested error.message in objects and JSON text",
+        "Pioneer top-level messages and plain text",
+        "Empty and malformed bodies fall through to the available diagnostic"
+      ]
+    },
+    "providerParity": {
+      "status": "passed",
+      "baselineEvidence": "projects/keepkey-vault/docs/provider-parity-audit-20261103/audit.json",
+      "resolutionEvidence": "projects/keepkey-vault/docs/provider-parity-audit-20261103/resolution.json",
+      "gatewayQuoteCasesPassed": 13,
+      "parityRegressions": 0,
+      "sdkCasesPassed": 4,
+      "directNearParserCasesPassed": 2,
+      "agentSigned": false,
+      "agentBroadcast": false
+    },
+    "providerFeeDisclosure": {
+      "status": "passed",
+      "evidence": "projects/keepkey-vault/docs/provider-parity-audit-20261103/post-deploy-near-parser.json",
+      "note": "Fee amounts preserve assets and explicit units; exact amounts and recipients available in details. Live direct NEAR split matches legacy effective quoted fees. Affiliate ledger credits were not audited."
+    },
+    "nativeSwapVerification": {
+      "status": "passed",
+      "evidence": "projects/keepkey-vault/docs/provider-parity-audit-20261103/native-verification.json",
+      "note": "Native 7.16 direct ETH to LTC quote/review inspected; observed user-approved swap payout independently confirmed and actual received amount persisted. Agent did not initiate signing."
+    },
+    "quoteStatusLabels": {
+      "status": "passed_focused_tests_and_native_build",
+      "testsPassed": 11,
+      "note": "Quote available/No quote labels replace protocol-wide uptime implications for quote-scoped observations.",
+      "codeRevision": "16741a89da227b77e1767f84658146410a83ecca"
+    },
+    "litecoinBalances": {
+      "status": "passed",
+      "evidence": "projects/keepkey-vault/docs/provider-parity-audit-20261103/ltc-native-verification.json",
+      "gatewayScriptFamiliesVerified": 3,
+      "fundedAccountComparison": "matches_legacy_api",
+      "nativeManualRefresh": "passed",
+      "receiveLabelAndPathConsistency": "passed"
+    },
+    "automaticBalanceRefresh": {
+      "status": "passed",
+      "evidence": "projects/keepkey-vault/docs/provider-parity-audit-20261103/live-payments.json",
+      "nativeCacheMatchesBothApis": true,
+      "manualRefreshPressed": false,
+      "automaticWatchRegistrationCount": 38
+    },
+    "livePayments": {
+      "status": "passed",
+      "evidence": "projects/keepkey-vault/docs/provider-parity-audit-20261103/live-payments.json",
+      "closedClientQueue": true,
+      "currentRevisionEarlyAcknowledgement": true,
+      "actualUpstreamWebsocket": true,
+      "nativeRegistrationAndAutomaticBalanceRefresh": true,
+      "agentSigned": false,
+      "agentBroadcast": false
+    }
+  },
+  "gatewayDependency": {
+    "url": "https://oracles.cc",
+    "deployedRevision": "bff70f2a83e2db01a7acb8f06d2dd714974ceaf3",
+    "defaultApiBaseChanged": false,
+    "quoteAndCertificateEvidence": "projects/keepkey-vault/docs/relay-clearsign-audit-20261102/reviewed-swaps-live.json",
+    "nativeProtocolPrecisionEvidence": "projects/keepkey-vault/docs/relay-clearsign-audit-20261102/eth-ltc-protocol-precision-live.json",
+    "ethToLtcAvailabilityAtInspection": "live_direct_near_and_thorchain_quotes_available",
+    "tradingHaltMessageEvidence": "projects/keepkey-vault/docs/relay-clearsign-audit-20261102/swap-halt-message-live.json",
+    "deploymentVerified": true,
+    "liveProviderGateCasesPassed": 5,
+    "liveLtcScriptFamiliesPassed": 3,
+    "deployment": "https://github.com/BitHighlander/keepkey-gateway/actions/runs/41736560137"
+  },
+  "existingDraft": {
+    "tag": "v1.6.8",
+    "sourceRevision": "1368fadbb17516553c720ea535fe249c6b3f37d7",
+    "assetsMatchCandidate": false,
+    "assetsReplaced": false
+  },
+  "remainingReleaseGates": [
+    {
+      "gate": "Platform CI on final candidate",
+      "status": "pending"
+    },
+    {
+      "gate": "Audit support handoff viewport and Track account click-through",
+      "status": "manual_check_pending"
+    },
+    {
+      "gate": "Zcash shield/unshield and ordinary transparent payout with a physical device",
+      "status": "hardware_check_pending"
+    },
+    {
+      "gate": "Firmware 7.16 swap review with blind signing disabled",
+      "status": "hardware_check_pending"
+    },
+    {
+      "gate": "macOS ARM64 and Intel packaged backend plus KeepKey connection",
+      "status": "hardware_check_pending"
+    },
+    {
+      "gate": "macOS signing, notarization, architecture audit and checksums for candidate",
+      "status": "pending"
+    },
+    {
+      "gate": "Windows production packaging on Windows host",
+      "status": "pending"
+    },
+    {
+      "gate": "Replace old draft assets with candidate artifacts after verification",
+      "status": "pending"
+    },
+    {
+      "gate": "Public release promotion",
+      "status": "not_requested"
+    },
+    {
+      "gate": "Graceful macOS USB shutdown and restart recovery",
+      "status": "observed_issue_followup",
+      "note": "One restart left the transport unresponsive. A firmware-mode USB connection reset recovered it without wallet protocol commands. Pioneer Core ownership was not established."
+    }
+  ],
+  "runningApp": {
+    "version": "1.6.8",
+    "backendPidAtInspection": 41219,
+    "deviceConnectedAtInspection": true,
+    "candidateRestartPerformed": true,
+    "note": "Final live-payment candidate is running and connected on firmware 7.16. Thirty-eight standard wallet watches registered automatically; the automatically updated Litecoin cache and dashboard match the latest API balances. No manual Refresh or signing was initiated by the agent. The known USB connection recovery step was used at restart.",
+    "codeRevision": "f0866499886ae2839ba9a05295dce00f182a536b"
+  },
+  "resolvedProviderGates": [
+    {
+      "gate": "Provider fee denomination and recipient-policy parity",
+      "status": "passed",
+      "evidence": "projects/keepkey-vault/docs/provider-parity-audit-20261103/audit.json",
+      "resolutionEvidence": "projects/keepkey-vault/docs/provider-parity-audit-20261103/resolution.json"
+    },
+    {
+      "gate": "Legacy Pioneer quote compatibility with the current 7.16 client",
+      "status": "passed",
+      "evidence": "projects/keepkey-vault/docs/provider-parity-audit-20261103/sdk-comparison.json",
+      "resolutionEvidence": "projects/keepkey-vault/docs/provider-parity-audit-20261103/resolution.json"
+    },
+    {
+      "gate": "Gateway direct-provider routing and tracking parity",
+      "status": "passed",
+      "evidence": "projects/keepkey-vault/docs/provider-parity-audit-20261103/audit.json",
+      "resolutionEvidence": "projects/keepkey-vault/docs/provider-parity-audit-20261103/resolution.json"
+    }
+  ],
+  "realtimePaymentScope": {
+    "status": "implemented_deployed_and_verified",
+    "document": "https://github.com/BitHighlander/keepkey-gateway/blob/master/docs/REALTIME-PARITY.md",
+    "evidence": "projects/keepkey-vault/docs/provider-parity-audit-20261103/live-payments.json",
+    "note": "Standard-wallet closed-client monitoring, bounded history catchup, seven-day queue replay and explicit acknowledgments are verified. Hidden wallets remain active-only. Provider-page limits and exact receipt metadata limits are documented."
+  }
+}

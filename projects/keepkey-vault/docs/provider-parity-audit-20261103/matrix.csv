@@ -1,0 +1,13 @@
+case,legacy_http,legacy_routes,gateway_http,gateway_routes,legacy_has_memo,gateway_has_memo
+ETH to LTC,200,nearIntents:NEAR Intents,503,,False,False
+ETH to LTC native precision,200,nearIntents:NEAR Intents,503,,False,False
+LTC to ETH,200,nearIntents:NEAR Intents,503,,False,False
+BTC to ETH,200,nearIntents:NEAR Intents,200,shapeshift:NEAR Intents,False,False
+ETH to BTC,200,nearIntents:NEAR Intents,200,shapeshift:NEAR Intents,False,False
+ETH to USDT,200,relay:relay,200,"relay:Relay, uniswap:Uniswap, zeroex:0x",False,False
+ETH to Base USDC,200,relay:relay,200,relay:Relay,False,False
+SOL to ETH,200,relay:relay,503,,False,False
+ZEC to ETH,200,nearIntents:NEAR Intents,200,shapeshift:NEAR Intents,False,False
+BTC to LTC memoless,200,nearIntents:NEAR Intents,200,thorchain:thorchain,False,True
+ETH to Base USDC solver deposit,400,,200,relay:Relay,False,False
+ETH to USDT solver deposit,400,,200,"uniswap:Uniswap, zeroex:0x, relay:Relay",False,False

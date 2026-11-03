@@ -1,0 +1,16 @@
+{
+  "checkedAt": "2026-11-02T17:19:55.110Z",
+  "pair": "ETH to USDT on Ethereum",
+  "amountEth": "0.01",
+  "quoteHttpStatus": 200,
+  "to": "0x4cd00e387622c35bddb9b4c962c136462338bc31",
+  "selector": "0x49290c1c",
+  "calldataBytes": 68,
+  "schemaHttpStatus": 200,
+  "classification": "VERIFIED",
+  "signatureValid": true,
+  "hostGateForFirmware716RequiresAdvancedMode": false,
+  "deviceSigningPerformed": false,
+  "broadcastPerformed": false,
+  "limitation": "Authenticates the source deposit, not off-chain destination swap terms. Hardware screens have not been exercised for this fresh quote."
+}

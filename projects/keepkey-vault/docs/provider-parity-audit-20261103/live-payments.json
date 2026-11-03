@@ -1,0 +1,211 @@
+{
+  "recordedAt": "2026-11-03T23:14:16.587154+00:00",
+  "status": "gateway_deployed_and_native_client_verified",
+  "gatewayDeployment": {
+    "origin": "https://oracles.cc",
+    "pullRequest": "https://github.com/BitHighlander/keepkey-gateway/pull/11",
+    "reviewedHeadSha": "90457efcde06b1421a66030b64bf5ff294fd80b5",
+    "mergeSha": "bff70f2a83e2db01a7acb8f06d2dd714974ceaf3",
+    "runtimeSha": "bff70f2a83e2db01a7acb8f06d2dd714974ceaf3",
+    "runtimeRevisionVerified": true,
+    "ci": {
+      "url": "https://github.com/BitHighlander/keepkey-gateway/actions/runs/41736560137",
+      "conclusion": "success",
+      "completedAt": "2026-11-03T23:09:02Z",
+      "tests": {
+        "passed": 252,
+        "optionalCacheTestsSkipped": 2,
+        "failed": 0,
+        "assertions": 1049
+      },
+      "typecheck": "passed",
+      "healthGate": "passed",
+      "providerGate": {
+        "passed": 5,
+        "failed": 0
+      },
+      "litecoinScriptGate": {
+        "passed": 3,
+        "failed": 0
+      },
+      "gitGuardian": "passed"
+    },
+    "backgroundMonitoring": {
+      "schedulerSecretConfigured": true,
+      "secretEvidence": "Root provisioned the secret before PR10; no secret value read or retained in verification artifacts",
+      "alarmBindingDeployed": true,
+      "alarmBinding": "RealtimeWatchdog",
+      "closedConnectionQueueVerifiedOnThisRevision": true,
+      "exactIdAckBeforeQueueVerified": true,
+      "confirmationQueuedAfterEarlyAckMs": 7802,
+      "separateConfirmationPhaseDelivered": true,
+      "unacknowledgedReplayAndAcknowledgementSuppressionVerified": true,
+      "proof": "live-payments.json#currentEarlyAcknowledgementProof",
+      "temporaryWatchDisabled": true
+    },
+    "upstreamWebsocket": {
+      "actualSubscribeAddressesAcknowledgementVerified": true,
+      "evidenceEvent": "sync:required",
+      "evidenceReason": "upstream_reconnected",
+      "verifiedAt": "2026-11-03T23:10:19.865Z",
+      "proof": "live-payments.json#currentUpstreamWebsocketProof",
+      "durableWatchCreated": false
+    },
+    "verificationScope": {
+      "publicFixturesOnly": true,
+      "fixtureKind": "Public Litecoin mining recipients; coinbase outputs require maturity",
+      "signed": false,
+      "funded": false,
+      "broadcast": false,
+      "internalTickInvoked": false,
+      "privateWalletIdentifiersLogged": false,
+      "newPostConnectionPaymentProofOnPreviousRevision": "live-payments.json#postConnectionPublicPaymentProof",
+      "previousProofRevision": "2398eac6ff1cac31a3e264e3007c1b6c103ec622"
+    }
+  },
+  "postConnectionPublicPaymentProof": {
+    "origin": "https://oracles.cc",
+    "startedAt": "2026-11-03T22:45:06.465Z",
+    "signed": false,
+    "broadcast": false,
+    "publicFixturesOnly": true,
+    "fixtureKind": "public mining recipients; coinbase outputs require maturity",
+    "checks": {
+      "durableRegistration": true,
+      "closedClientQueue": true,
+      "unacknowledgedReplay": true,
+      "acknowledgementSuppressesReplay": true,
+      "walletScopeIsolation": true,
+      "livePostConnectionPaymentPush": true,
+      "cleanupDisabled": true
+    },
+    "liveEvents": [
+      {
+        "txid": "c3702ea9c3fa05694f7530fd5a02139cc8f1cfe0865e07b1f24f545b93b453a4",
+        "eventName": "tx:incoming",
+        "reason": "history",
+        "confirmed": true,
+        "blockHeight": 3206912,
+        "blockTime": 1793745921,
+        "matchingOutputVerified": true
+      }
+    ],
+    "closedClientEventCount": 8,
+    "closedClientVerifiedEvent": {
+      "txid": "74935f1db5eda743c7a8151ab5bffb3240187d6a1e1a62ddb26cef2bbd67d364",
+      "eventName": "tx:incoming",
+      "reason": "durable-monitor",
+      "confirmed": true,
+      "blockHeight": 3206909,
+      "blockTime": 1793745501,
+      "matchingOutputVerified": true
+    },
+    "sseStartingBlockHeight": 3206911,
+    "success": true,
+    "finishedAt": "2026-11-03T22:45:51.856Z"
+  },
+  "currentEarlyAcknowledgementProof": {
+    "origin": "https://oracles.cc",
+    "expectedRevision": "bff70f2a83e2db01a7acb8f06d2dd714974ceaf3",
+    "startedAt": "2026-11-03T23:09:52.132Z",
+    "publicFixturesOnly": true,
+    "signed": false,
+    "broadcast": false,
+    "funded": false,
+    "internalTickInvoked": false,
+    "eventStreamOpened": false,
+    "fixtureKind": "public mining-recipient output, subject to coinbase maturity",
+    "checks": {
+      "earlyAcknowledgementSuppressed": true,
+      "separateConfirmationDelivered": true,
+      "backgroundQueueWithoutConnection": true,
+      "unacknowledgedConfirmationReplays": true,
+      "confirmationAcknowledgementSuppressesReplay": true
+    },
+    "attempts": [
+      {
+        "initialTargetAbsent": true,
+        "earlyAckAccepted": true,
+        "earlyAckCompletedAt": 1793747395897,
+        "backgroundConfirmationCreatedAt": 1793747403699,
+        "confirmationCreatedAfterAckResponse": true
+      }
+    ],
+    "runtimeRevision": "bff70f2a83e2db01a7acb8f06d2dd714974ceaf3",
+    "independentFixtureVerified": true,
+    "fixtureBlockHeight": 3206909,
+    "success": true,
+    "cleanupDisabled": true,
+    "finishedAt": "2026-11-03T23:10:08.455Z"
+  },
+  "currentUpstreamWebsocketProof": {
+    "checkedAt": "2026-11-03T23:10:17.858Z",
+    "origin": "https://oracles.cc",
+    "publicFixturesOnly": true,
+    "signed": false,
+    "broadcast": false,
+    "durableRegistrationCreated": false,
+    "events": [
+      {
+        "event": "connected",
+        "watching": 1
+      },
+      {
+        "event": "sync:required",
+        "reason": "subscribe",
+        "refreshHint": true,
+        "networkCount": 1
+      },
+      {
+        "event": "sync:required",
+        "reason": "upstream_reconnected",
+        "refreshHint": true,
+        "networkCount": 1
+      }
+    ],
+    "upstreamAcknowledged": true,
+    "finishedAt": "2026-11-03T23:10:19.865Z"
+  },
+  "nativeClientVerification": {
+    "checkedAt": "2026-11-03T23:12:41.071Z",
+    "codeRevision": "f0866499886ae2839ba9a05295dce00f182a536b",
+    "backendPid": 41219,
+    "version": "1.6.8",
+    "ready": true,
+    "connected": true,
+    "apiHealthy": true,
+    "legacyAndGatewayLtcTotalsMatch": true,
+    "nativeLtcCacheMatchesGateway": true,
+    "nativeLtcCacheUpdatedAt": "2026-11-03T23:12:26.413Z",
+    "durableStandardOwnershipSaved": true,
+    "automaticRegistrationLogVerified": true,
+    "automaticWatchCount": 38,
+    "manualRefreshPressed": false,
+    "dashboardBalanceMatchedRoundedApi": true,
+    "noAgentSigning": true,
+    "noAgentBroadcast": true,
+    "walletIdentifiersAndQuantitiesOmitted": true
+  },
+  "scope": {
+    "standardWallets": "Server monitoring survives normal Vault quit and replays unacknowledged activity after reconnect.",
+    "hiddenWallets": "Active connection only; no durable registration, ownership record or saved replay cursor.",
+    "privacyActions": "Offline revokes all known standard registrations; Forget/Delete revokes matching device registrations before local deletion. Failed remote revocation remains visible and keeps ownership for retry.",
+    "legacyServers": "Durable monitoring uses advertised API capability; legacy active event support remains available.",
+    "retention": "Seven days of queued activity hints and exact-ID acknowledgments.",
+    "historyCoverage": "Latest provider history page; this is not unlimited historical recovery.",
+    "eventMeaning": "Hints cause fresh scoped balance/history reads. Generic activity never invents a native payment amount or direction."
+  },
+  "validation": {
+    "vaultUnitTestsPassed": 2403,
+    "scriptChecksPassed": 17,
+    "gatewayTestsPassed": 252,
+    "gatewayOptionalCacheTestsSkipped": 2,
+    "vaultPreflight": "passed",
+    "vaultTypeDiagnostics": 812,
+    "vaultTypeBaseline": 1033,
+    "gatewayTypecheck": "passed",
+    "macosArm64DevelopmentBuild": "passed",
+    "signed": false,
+    "notarized": false
+  }
+}

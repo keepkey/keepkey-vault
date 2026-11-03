@@ -701,6 +701,8 @@ export interface DefiPosition {
   // === Server-side (canonical) ===
   protocol: string | null   // Zapper appId slug ("lido", "morpheus", "aave-v3") or null
   displayName?: string      // Pretty protocol name from the server ("Lido", "Morpheus")
+  pubkey?: string           // Wallet that owns this position
+  appTokenAddress?: string  // Protocol token contract, when supplied by the server
   network: string           // Zapper network display ("Ethereum") or legacy slug ("ethereum")
   networkId?: string        // CAIP-2 chain ("eip155:1") — used to attribute the position to a chain
   balanceUsd: number        // USD value Zapper attributes to the protocol for this pubkey
@@ -868,6 +870,10 @@ export interface EvmAddressChainBalance {
   nativeBalanceUsd: number
   tokens?: TokenBalance[]
   defiPositions?: DefiPosition[]
+  /** Confidence belongs to this owner and chain, never an aggregate portfolio. */
+  syncState?: 'confirmed' | 'stale' | 'degraded'
+  updatedAt?: number
+  confirmedAssetCaips?: string[]
 }
 
 export interface EvmTrackedAddress {
@@ -2026,6 +2032,22 @@ export interface Erc7730Catalog {
   }>
 }
 
+/** An individual quoted cost. Amounts are human-readable in this item's asset;
+ * base units and decimals remain available for inspection. A rate-only item
+ * has no amount rather than a fabricated zero or destination denomination. */
+export interface SwapQuoteFeeItem {
+  kind: 'affiliate' | 'network' | 'protocol' | 'provider'
+  label?: string
+  assetCaip?: string
+  symbol?: string
+  decimals?: number
+  amount?: string
+  amountBaseUnits?: string
+  bps?: number
+  recipient?: string
+  estimated?: boolean
+}
+
 /** Quote response from Pioneer (aggregated across DEXes) */
 export interface SwapQuote {
   expectedOutput: string     // human-readable amount out
@@ -2040,10 +2062,16 @@ export interface SwapQuote {
     affiliate: string        // affiliate fee (human-readable)
     outbound: string         // outbound gas fee
     totalBps: number         // total fee in basis points
+    /** Only set when the provider actually reported a rate. */
+    reportedTotalBps?: number
+    /** Costs retain their own currency and units; never add unlike assets. */
+    items?: SwapQuoteFeeItem[]
   }
   estimatedTime: number      // seconds
   warning?: string           // streaming swap note, dust threshold, etc.
-  slippageBps: number        // actual slippage in bps
+  slippageBps: number        // warning value; falls back to user tolerance if unreported
+  /** Provider-reported slippage only; absent when the provider did not supply it. */
+  quotedSlippageBps?: number
   integration?: string       // DEX source: "thorchain", "shapeshift", "chainflip", "relay", etc.
   /** Underlying protocol when `integration` is an aggregator. ShapeShift's swapper
    *  routes through Relay / THORChain / 0x / Uniswap / Curve / etc.; this names
@@ -2051,6 +2079,8 @@ export interface SwapQuote {
    *  Undefined for non-aggregator integrations (use `integration` directly). */
   swapper?: string
   relayTx?: RelayTxParams    // pre-built tx for relay/bridge integrations (skips memo+router flow)
+  /** Inferred from the source transaction, not a provider's review claim. */
+  executionMode?: 'relay-solver-deposit'
   minAmountIn?: string       // minimum sell amount for this route (human-readable, in sell asset units)
   /** Actual send amount after UTXO fee deduction (NEAR Intents MAX only).
    *  When set, the tracker must record this instead of the original params.amount. */
@@ -2063,6 +2093,10 @@ export interface SwapQuote {
    *  1Click (= the sender's source-chain address). Verified pre-sign by swap.ts to
    *  ensure a failed swap refunds to the user's own wallet. */
   nearIntentsRefundTo?: string
+  /** 1Click asset identifiers and exact quote terms retained for settlement. */
+  nearIntentsTracking?: NearIntentsTrackingData
+  /** Optional aggregator quote identifier used by legacy tracking. */
+  providerQuoteId?: string
 }
 
 /** Parameters for getSwapQuote RPC.
@@ -2127,7 +2161,7 @@ export interface RuntimeProviderNamed {
   keyId: number
 }
 
-export type SwapProviderStatus = 'ok' | 'degraded' | 'offline' | 'unknown'
+export type SwapProviderStatus = 'ok' | 'degraded' | 'offline' | 'unknown' | 'gated' | 'disabled'
 
 export interface SwapIntegrationHealth {
   key: string               // 'thorchain' | 'mayachain' | 'shapeshift' | 'relay' | 'chainflip'
@@ -2135,11 +2169,16 @@ export interface SwapIntegrationHealth {
   status: SwapProviderStatus
   haltedPools?: string[]    // CAIP-19s of suspended/staged pools
   detail?: string           // one-line reason, e.g. "2 pools halted or suspended"
+  /** Demand-tested route availability, rather than protocol-wide uptime. */
+  checkScope?: 'quote'
+  checkedAt?: number
 }
 
 export interface SwapHealth {
   fetchedAt: number
   integrations: SwapIntegrationHealth[]
+  /** Status-feed failure does not establish an outage at every swap provider. */
+  error?: string
 }
 
 /** Result of executeSwap RPC */
@@ -2153,6 +2192,28 @@ export interface SwapResult {
   /** Sell amount as an integer base-units string (e.g. "61280000" for 61.28 USDC).
    *  Populated when the build step knows the token decimals (relay ERC-20 path). */
   fromAmountBaseUnits?: string
+  fromAddress?: string
+  toAddress?: string
+}
+
+/** Exact execution context retained for receipt matching and retry/resume. */
+export interface SwapTrackingContext {
+  fromAddress: string
+  toAddress: string
+  fromAmountBaseUnits?: string
+  relaySolverDeposit?: boolean
+  nearIntents?: NearIntentsTrackingData
+}
+
+export interface NearIntentsTrackingData {
+  depositAddress?: string
+  refundTo?: string
+  recipient?: string
+  originAsset?: string
+  destinationAsset?: string
+  sourceDecimals?: number
+  destinationDecimals?: number
+  minimumAmountOut?: string
 }
 
 // ── Swap tracking types ───────────────────────────────────────────────
@@ -2160,6 +2221,8 @@ export interface SwapResult {
 export type SwapTrackingStatus = 'signing' | 'pending' | 'confirming' | 'output_detected' | 'output_confirming' | 'output_confirmed' | 'completed' | 'failed' | 'refunded'
 
 export interface PendingSwap {
+  trackingContext?: SwapTrackingContext
+  providerQuoteId?: string
   deviceId?: string      // active hardware device id when the swap was submitted
   walletId?: string      // device+seed scope when the swap was submitted
   txid: string
@@ -2210,7 +2273,7 @@ export interface PendingSwap {
    *  Drives the "View on NEAR" tracker button (nearblocks.io). */
   nearTxHash?: string
   /** NEAR Intents 1Click deposit address (from quote.meta.depositAddress).
-   *  Used by registerWithPioneer as sellAsset.address and nearIntentsData.depositAddress. */
+   *  Used by registerWithPioneer as nearIntentsData.depositAddress. */
   nearIntentsDepositAddress?: string
   /** Sell amount as an integer base-units string. Populated for relay ERC-20 swaps. */
   fromAmountBaseUnits?: string
@@ -2282,6 +2345,8 @@ export interface SwapStatusUpdate {
 
 /** Persisted swap history record (SQLite) — tracks the full lifecycle */
 export interface SwapHistoryRecord {
+  trackingContext?: SwapTrackingContext
+  providerQuoteId?: string
   id: string                     // unique row id (UUID)
   deviceId?: string              // active hardware device id when the swap was submitted
   walletId?: string              // device+seed scope when the swap was submitted
@@ -2448,6 +2513,8 @@ export interface RecentActivity {
   confirmations?: number     // current confirmation count (0 = unconfirmed/mempool)
   blockHeight?: number       // block the tx was mined in (0 = unconfirmed)
   fee?: string               // tx fee (human-readable)
+  /** Fresh provider history explicitly identifies a plain native receipt. */
+  nativeReceiveVerified?: boolean
 }
 
 // RPC types — derived from the single source of truth in rpc-schema.ts

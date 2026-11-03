@@ -1,0 +1,260 @@
+{
+  "status": "UNSIGNED_DRAFT_NOT_FOR_ISSUANCE",
+  "chainId": 1,
+  "purpose": "Concrete descriptor candidates for review; no production trust material is generated.",
+  "blockers": [
+    "Exact incident has 15 trailing bytes in the Tycho inner call; current host and firmware refuse inner suffixes.",
+    "Production service must serve supported embedded definitions for firmware 7.17 without attaching them to 7.16.",
+    "Every descriptor needs actual device-screen and adversarial mutation review before offline issuance.",
+    "Token cleanup currently lists parallel arrays and raw amounts; review pairing/readability before signing."
+  ],
+  "entries": [
+    {
+      "id": "relay-v3.2-multicall",
+      "contract": "0x0729e2a4716d9f7dd17858d5d504426d228697f7",
+      "signature": "multicall((address target,bool allowFailure,uint256 value,bytes callData)[] calls,address refundTo,address nftRecipient,bytes metadata)",
+      "trailingData": true,
+      "intent": "Review Relay calls",
+      "descriptor": {
+        "display": {
+          "formats": {
+            "multicall((address target,bool allowFailure,uint256 value,bytes callData)[] calls,address refundTo,address nftRecipient,bytes metadata)": {
+              "intent": "Review Relay calls",
+              "fields": [
+                {
+                  "path": "@.value",
+                  "label": "Native amount sent",
+                  "format": "amount"
+                },
+                {
+                  "path": "refundTo",
+                  "label": "Native refund (zero=caller)",
+                  "format": "addressName"
+                },
+                {
+                  "path": "nftRecipient",
+                  "label": "NFT recipient (zero=unset)",
+                  "format": "addressName"
+                },
+                {
+                  "path": "calls.[]",
+                  "label": "Call",
+                  "fields": [
+                    {
+                      "path": "allowFailure",
+                      "label": "Failure allowed",
+                      "format": "raw"
+                    },
+                    {
+                      "path": "callData",
+                      "label": "Action",
+                      "format": "calldata",
+                      "params": {
+                        "calleePath": "target",
+                        "amountPath": "value",
+                        "spenderPath": "@.to"
+                      }
+                    }
+                  ]
+                },
+                {
+                  "path": "metadata",
+                  "label": "Order metadata",
+                  "format": "raw"
+                }
+              ]
+            }
+          }
+        }
+      },
+      "compilation": {
+        "status": "compiled-with-current-compiler",
+        "bytes": 768,
+        "sha256": "bb6fba6eccaac384697e32d9a9b72270d8f810ced8ec454a3e18f096f67d4d0a",
+        "staticCapabilityRefusal": null
+      }
+    },
+    {
+      "id": "relay-v3.2-cleanup-native",
+      "contract": "0x0729e2a4716d9f7dd17858d5d504426d228697f7",
+      "signature": "cleanupNative(uint256 amount,address recipient,bytes metadata)",
+      "trailingData": false,
+      "intent": "Send Relay-held native coin",
+      "descriptor": {
+        "display": {
+          "formats": {
+            "cleanupNative(uint256 amount,address recipient,bytes metadata)": {
+              "intent": "Send Relay-held native coin",
+              "fields": [
+                {
+                  "path": "amount",
+                  "label": "Native amount (0=all)",
+                  "format": "amount"
+                },
+                {
+                  "path": "recipient",
+                  "label": "Recipient (zero=caller)",
+                  "format": "addressName"
+                },
+                {
+                  "path": "metadata",
+                  "label": "Order metadata",
+                  "format": "raw"
+                }
+              ]
+            }
+          }
+        }
+      },
+      "compilation": {
+        "status": "compiled-with-current-compiler",
+        "bytes": 496,
+        "sha256": "57432f10e1431339cb277feabe80745845992b065c3200332b2a2b0852a00f99",
+        "staticCapabilityRefusal": null
+      }
+    },
+    {
+      "id": "relay-v3.2-cleanup-erc20",
+      "contract": "0x0729e2a4716d9f7dd17858d5d504426d228697f7",
+      "signature": "cleanupErc20s(address[] tokens,address[] recipients,uint256[] amounts,bytes metadata)",
+      "trailingData": false,
+      "intent": "Send Relay-held tokens",
+      "descriptor": {
+        "display": {
+          "formats": {
+            "cleanupErc20s(address[] tokens,address[] recipients,uint256[] amounts,bytes metadata)": {
+              "intent": "Send Relay-held tokens",
+              "fields": [
+                {
+                  "path": "tokens.[]",
+                  "label": "Tokens",
+                  "format": "addressName"
+                },
+                {
+                  "path": "recipients.[]",
+                  "label": "Recipients",
+                  "format": "addressName"
+                },
+                {
+                  "path": "amounts.[]",
+                  "label": "Raw amounts (0=all)",
+                  "format": "raw"
+                },
+                {
+                  "path": "metadata",
+                  "label": "Order metadata",
+                  "format": "raw"
+                }
+              ]
+            }
+          }
+        }
+      },
+      "compilation": {
+        "status": "compiled-with-current-compiler",
+        "bytes": 595,
+        "sha256": "4062b5f21a1453fb482feb86ee2f8dc88fef5aa579db1c4f5cdf80ec3b94e149",
+        "staticCapabilityRefusal": null
+      }
+    },
+    {
+      "id": "tycho-v3-sequential-swap",
+      "contract": "0x1644d2477f809cc2c71bccfd6dc9497e3f83210d",
+      "signature": "sequentialSwap(uint256 amountIn,address tokenIn,address tokenOut,uint256 expectedAmountOut,uint256 minAmountOut,address receiver,(uint32 clientFeeBps,address clientFeeReceiver,uint256 maxClientContribution,uint256 deadline,bytes clientSignature) clientFeeParams,bytes swaps)",
+      "trailingData": true,
+      "intent": "Swap through Tycho",
+      "descriptor": {
+        "display": {
+          "formats": {
+            "sequentialSwap(uint256 amountIn,address tokenIn,address tokenOut,uint256 expectedAmountOut,uint256 minAmountOut,address receiver,(uint32 clientFeeBps,address clientFeeReceiver,uint256 maxClientContribution,uint256 deadline,bytes clientSignature) clientFeeParams,bytes swaps)": {
+              "intent": "Swap through Tycho",
+              "fields": [
+                {
+                  "path": "amountIn",
+                  "label": "Input amount",
+                  "format": "tokenAmount",
+                  "params": {
+                    "tokenPath": "tokenIn",
+                    "nativeCurrencyAddress": [
+                      "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+                    ]
+                  }
+                },
+                {
+                  "path": "tokenOut",
+                  "label": "Output token",
+                  "format": "addressName"
+                },
+                {
+                  "path": "expectedAmountOut",
+                  "label": "Quoted output",
+                  "format": "tokenAmount",
+                  "params": {
+                    "tokenPath": "tokenOut"
+                  }
+                },
+                {
+                  "path": "minAmountOut",
+                  "label": "Minimum output",
+                  "format": "tokenAmount",
+                  "params": {
+                    "tokenPath": "tokenOut"
+                  }
+                },
+                {
+                  "path": "receiver",
+                  "label": "Immediate recipient",
+                  "format": "addressName"
+                },
+                {
+                  "path": "clientFeeParams.clientFeeBps",
+                  "label": "Client fee bps",
+                  "format": "raw"
+                },
+                {
+                  "path": "clientFeeParams.clientFeeReceiver",
+                  "label": "Client fee recipient",
+                  "format": "addressName"
+                },
+                {
+                  "path": "clientFeeParams.maxClientContribution",
+                  "label": "Max client contribution",
+                  "format": "tokenAmount",
+                  "params": {
+                    "tokenPath": "tokenOut"
+                  }
+                },
+                {
+                  "path": "clientFeeParams.deadline",
+                  "label": "Client signature deadline",
+                  "format": "raw"
+                },
+                {
+                  "path": "clientFeeParams.clientSignature",
+                  "label": "Client signature",
+                  "format": "raw"
+                },
+                {
+                  "path": "swaps",
+                  "label": "Encoded swap route",
+                  "format": "raw"
+                },
+                {
+                  "path": "@.value",
+                  "label": "Native value forwarded",
+                  "format": "amount"
+                }
+              ]
+            }
+          }
+        }
+      },
+      "compilation": {
+        "status": "compiled-with-current-compiler",
+        "bytes": 1047,
+        "sha256": "fda8f9351bd2099c561b16185ce791314fb39735358989a3387ed2f8290bdd5c",
+        "staticCapabilityRefusal": null
+      }
+    }
+  ]
+}
