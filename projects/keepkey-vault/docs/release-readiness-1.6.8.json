@@ -1,0 +1,121 @@
+{
+  "version": "1.6.8",
+  "status": "candidate_prepared_not_published",
+  "recordedAt": "2026-11-03T03:10:01.623976+00:00",
+  "branch": "prepare/1.6.8-candidate",
+  "candidateCodeRevision": "1a6dbe03e59b67a71052ea31d140933fca2d2cc9",
+  "baseReleaseRevision": "1368fadbb17516553c720ea535fe249c6b3f37d7",
+  "auditSourceRevision": "661fc89653b04f150001f4458879dc78f5fb4db9",
+  "auditIntegratedRevision": "2e162f0f8",
+  "scope": [
+    "Litecoin Audit account recovery",
+    "Audit support handoff scrolling",
+    "Swap review and execution safeguards",
+    "Swap provider status handling",
+    "DeFi position detail dialogs and links",
+    "Compact transparent ZEC notice"
+  ],
+  "checks": {
+    "releaseUnitCommand": {
+      "command": "make test-unit",
+      "status": "passed",
+      "bunSuitesPassed": [
+        2176,
+        4,
+        35,
+        1,
+        8,
+        53
+      ],
+      "scriptSuites": "passed",
+      "log": "/private/tmp/vault-1.6.8-release-unit.log"
+    },
+    "auditFocusedTests": {
+      "status": "passed",
+      "tests": 58,
+      "files": [
+        "__tests__/chain-scan.test.ts",
+        "__tests__/audit-coverage.test.ts"
+      ]
+    },
+    "preflight": {
+      "command": "make preflight",
+      "status": "passed",
+      "log": "/private/tmp/vault-1.6.8-preflight.log"
+    },
+    "typecheck": {
+      "status": "within_existing_baseline",
+      "diagnostics": 823,
+      "baseline": 1033,
+      "clean": false
+    },
+    "nativeBuild": {
+      "command": "bun run build",
+      "status": "passed",
+      "platform": "macOS arm64 development",
+      "signed": false,
+      "notarized": false,
+      "log": "/private/tmp/vault-1.6.8-candidate-build.log"
+    },
+    "certifiedEmulator": {
+      "status": "verified",
+      "version": "7.17.0",
+      "macosSha256": "d89374e4ec62ad43c42d485b566b3c6c2f8026e42cf4ac21d543518d46ab5c54",
+      "windowsSha256": "1bb6e7ebd5cc0a44aab52fa508f22f034d1d00a39f008356139dc857ad453b74"
+    },
+    "gitDiffCheck": "passed"
+  },
+  "gatewayDependency": {
+    "url": "https://oracles.cc",
+    "deployedRevision": "87c715a23009df0bb6628a8de8a52accdb3cfc88",
+    "defaultApiBaseChanged": false,
+    "quoteAndCertificateEvidence": "projects/keepkey-vault/docs/relay-clearsign-audit-20261102/reviewed-swaps-live.json"
+  },
+  "existingDraft": {
+    "tag": "v1.6.8",
+    "sourceRevision": "1368fadbb17516553c720ea535fe249c6b3f37d7",
+    "assetsMatchCandidate": false,
+    "assetsReplaced": false
+  },
+  "remainingReleaseGates": [
+    {
+      "gate": "Platform CI on final candidate",
+      "status": "pending"
+    },
+    {
+      "gate": "Audit support handoff viewport and Track account click-through",
+      "status": "manual_check_pending"
+    },
+    {
+      "gate": "Firmware 7.16 swap review with blind signing disabled",
+      "status": "hardware_check_pending"
+    },
+    {
+      "gate": "macOS ARM64 and Intel packaged backend plus KeepKey connection",
+      "status": "hardware_check_pending"
+    },
+    {
+      "gate": "macOS signing, notarization, architecture audit and checksums for candidate",
+      "status": "pending"
+    },
+    {
+      "gate": "Windows production packaging on Windows host",
+      "status": "pending"
+    },
+    {
+      "gate": "Replace old draft assets with candidate artifacts after verification",
+      "status": "pending"
+    },
+    {
+      "gate": "Public release promotion",
+      "status": "not_requested"
+    }
+  ],
+  "runningApp": {
+    "version": "1.6.8",
+    "backendPidAtInspection": 82200,
+    "deviceConnectedAtInspection": true,
+    "candidateRestartPerformed": false,
+    "note": "Existing wallet session left running; candidate build is on disk."
+  }
+}
