@@ -2165,6 +2165,9 @@ export interface SwapIntegrationHealth {
   status: SwapProviderStatus
   haltedPools?: string[]    // CAIP-19s of suspended/staged pools
   detail?: string           // one-line reason, e.g. "2 pools halted or suspended"
+  /** Demand-tested route availability, rather than protocol-wide uptime. */
+  checkScope?: 'quote'
+  checkedAt?: number
 }
 
 export interface SwapHealth {

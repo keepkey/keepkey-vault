@@ -27,7 +27,7 @@ import { providerTrackerUrl } from "../lib/trackers"
 import { ProviderBadge, ProverChip, resolveProvider } from "./ProviderBadge"
 import { getSwapperAnimation } from "../lib/swapper-animations"
 import { assessSwapRisk } from "../../shared/swap-risk"
-import { swapHealthSummary, swapProviderPresentation } from "../../shared/swap-health"
+import { swapHealthSummary, swapProviderPresentation, swapHealthQuoteExplanation } from "../../shared/swap-health"
 import { knownSpenderName } from "../../shared/evm-known-spenders"
 import { isSwapFullySettled, payoutReachesMinimum } from "../../shared/swap-settlement"
 import { SwapRiskReview } from "./SwapRiskReview"
@@ -5187,6 +5187,12 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
               </HStack>
             </Flex>
 
+            {swapHealth && swapHealthQuoteExplanation(swapHealth) && (
+              <Box px="5" pt="3">
+                <Text fontSize="11px" color="kk.textMuted" lineHeight="1.5">{swapHealthQuoteExplanation(swapHealth)}</Text>
+              </Box>
+            )}
+
             {/* Integration rows */}
             <VStack gap="0" align="stretch" px="4" py="3">
               {swapHealth?.integrations.map(intg => {
@@ -5212,6 +5218,9 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                       </HStack>
                     </Flex>
                     <Text fontSize="11px" color="kk.textMuted" lineHeight="1.5">{statusDesc}</Text>
+                    {intg.checkScope === 'quote' && Number.isFinite(intg.checkedAt) && (
+                      <Text fontSize="10px" color="kk.textMuted" mt="1">Last quote check {new Date(intg.checkedAt!).toLocaleTimeString()}</Text>
+                    )}
                     {intg.haltedPools && intg.haltedPools.length > 0 && (
                       <Box mt="2" p="2" bg="rgba(245,158,11,0.08)" borderRadius="8px"
                         border="1px solid rgba(245,158,11,0.2)">
