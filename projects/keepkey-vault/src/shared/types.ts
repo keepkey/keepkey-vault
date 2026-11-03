@@ -2028,6 +2028,22 @@ export interface Erc7730Catalog {
   }>
 }
 
+/** An individual quoted cost. Amounts are human-readable in this item's asset;
+ * base units and decimals remain available for inspection. A rate-only item
+ * has no amount rather than a fabricated zero or destination denomination. */
+export interface SwapQuoteFeeItem {
+  kind: 'affiliate' | 'network' | 'protocol' | 'provider'
+  label?: string
+  assetCaip?: string
+  symbol?: string
+  decimals?: number
+  amount?: string
+  amountBaseUnits?: string
+  bps?: number
+  recipient?: string
+  estimated?: boolean
+}
+
 /** Quote response from Pioneer (aggregated across DEXes) */
 export interface SwapQuote {
   expectedOutput: string     // human-readable amount out
@@ -2042,6 +2058,10 @@ export interface SwapQuote {
     affiliate: string        // affiliate fee (human-readable)
     outbound: string         // outbound gas fee
     totalBps: number         // total fee in basis points
+    /** Only set when the provider actually reported a rate. */
+    reportedTotalBps?: number
+    /** Costs retain their own currency and units; never add unlike assets. */
+    items?: SwapQuoteFeeItem[]
   }
   estimatedTime: number      // seconds
   warning?: string           // streaming swap note, dust threshold, etc.
@@ -2069,6 +2089,10 @@ export interface SwapQuote {
    *  1Click (= the sender's source-chain address). Verified pre-sign by swap.ts to
    *  ensure a failed swap refunds to the user's own wallet. */
   nearIntentsRefundTo?: string
+  /** 1Click asset identifiers and exact quote terms retained for settlement. */
+  nearIntentsTracking?: NearIntentsTrackingData
+  /** Optional aggregator quote identifier used by legacy tracking. */
+  providerQuoteId?: string
 }
 
 /** Parameters for getSwapQuote RPC.
@@ -2171,6 +2195,18 @@ export interface SwapTrackingContext {
   toAddress: string
   fromAmountBaseUnits?: string
   relaySolverDeposit?: boolean
+  nearIntents?: NearIntentsTrackingData
+}
+
+export interface NearIntentsTrackingData {
+  depositAddress?: string
+  refundTo?: string
+  recipient?: string
+  originAsset?: string
+  destinationAsset?: string
+  sourceDecimals?: number
+  destinationDecimals?: number
+  minimumAmountOut?: string
 }
 
 // ── Swap tracking types ───────────────────────────────────────────────
@@ -2179,6 +2215,7 @@ export type SwapTrackingStatus = 'signing' | 'pending' | 'confirming' | 'output_
 
 export interface PendingSwap {
   trackingContext?: SwapTrackingContext
+  providerQuoteId?: string
   deviceId?: string      // active hardware device id when the swap was submitted
   walletId?: string      // device+seed scope when the swap was submitted
   txid: string
@@ -2229,7 +2266,7 @@ export interface PendingSwap {
    *  Drives the "View on NEAR" tracker button (nearblocks.io). */
   nearTxHash?: string
   /** NEAR Intents 1Click deposit address (from quote.meta.depositAddress).
-   *  Used by registerWithPioneer as sellAsset.address and nearIntentsData.depositAddress. */
+   *  Used by registerWithPioneer as nearIntentsData.depositAddress. */
   nearIntentsDepositAddress?: string
   /** Sell amount as an integer base-units string. Populated for relay ERC-20 swaps. */
   fromAmountBaseUnits?: string
@@ -2302,6 +2339,7 @@ export interface SwapStatusUpdate {
 /** Persisted swap history record (SQLite) — tracks the full lifecycle */
 export interface SwapHistoryRecord {
   trackingContext?: SwapTrackingContext
+  providerQuoteId?: string
   id: string                     // unique row id (UUID)
   deviceId?: string              // active hardware device id when the swap was submitted
   walletId?: string              // device+seed scope when the swap was submitted

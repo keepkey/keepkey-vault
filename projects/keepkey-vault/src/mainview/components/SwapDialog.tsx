@@ -264,18 +264,6 @@ function formatNativeUnits(value: bigint | null, decimals: unknown, symbol: stri
   return `${formatUnitsBigInt(value, decimals, maxFraction)} ${symbol}`
 }
 
-function formatQuoteAssetAmount(raw: string | number | undefined, asset: SwapAsset, referenceAmount?: string): string {
-  const value = raw == null ? '0' : String(raw)
-  const precision = normalizeDecimals(asset.decimals) ?? 0
-  if (!/^\d+$/.test(value) || precision <= 0) return formatBalance(value)
-  const reference = referenceAmount ? parseFloat(referenceAmount) : 0
-  const asNumber = Number(value)
-  const looksLikeBaseUnits =
-    value.length > Math.min(4, precision) ||
-    (Number.isFinite(asNumber) && reference > 0 && asNumber > reference * 10)
-  return looksLikeBaseUnits ? formatUnitsBigInt(BigInt(value), precision, 8) : formatBalance(value)
-}
-
 function formatGwei(value: bigint | null): string {
   if (value === null) return '-'
   return `${formatUnitsBigInt(value, 9, 4)} gwei`
@@ -321,6 +309,26 @@ function ReviewRow({ label, children, accent = false }: { label: ReactNode; chil
       </Text>
     </Flex>
   )
+}
+
+function QuoteFeeRows({ fees }: { fees: SwapQuote['fees'] }) {
+  const { t } = useTranslation('swap')
+  return <>
+    <ReviewRow label={t('quotedFeeRate', 'Quoted fee rate')}>
+      {fees.reportedTotalBps != null ? `${(fees.reportedTotalBps / 100).toFixed(2)}%` : t('notProvided', 'Not provided')}
+    </ReviewRow>
+    {(fees.items || []).map((fee, index) => <ReviewRow key={`${fee.kind}:${fee.recipient || fee.assetCaip || ''}:${index}`} label={
+      <span title={fee.recipient ? `Fee recipient: ${fee.recipient}` : fee.assetCaip}>
+        {fee.label || (fee.kind === 'affiliate' ? t('affiliateFee', 'Affiliate fee') : fee.kind === 'network' ? t('networkFee', 'Network fee') : t('providerFee', 'Provider fee'))}
+        {fee.recipient ? ` · ${ellipsizeMiddle(fee.recipient, 6, 4)}` : ''}
+      </span>
+    }>
+      {fee.amount != null ? <span title={`${fee.amount} ${fee.symbol || ''}${fee.amountBaseUnits ? ` (${fee.amountBaseUnits} base units)` : ''}`}>
+        {fee.estimated ? '~' : ''}{formatBalance(fee.amount)} {fee.symbol}
+        {fee.bps != null ? ` (${(fee.bps / 100).toFixed(2)}%)` : ''}
+      </span> : fee.bps != null ? `${(fee.bps / 100).toFixed(2)}%` : t('notProvided', 'Not provided')}
+    </ReviewRow>)}
+  </>
 }
 
 function EvmTxSummaryCard({
@@ -4030,19 +4038,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                   <ReviewRow label={t("minimumAfterFeesSlippage", "Minimum receive after fees/slippage")} accent>
                     {formatBalance(quote.minimumOutput)} {toAsset.symbol}{hasToPrice && !toPriceIsDerived ? ` (${fmtCompact(parseFloat(quote.minimumOutput) * toPriceUsd)})` : ''}
                   </ReviewRow>
-                  <ReviewRow label={t("quotedFeeRate", "Quoted fee rate")}>
-                    {(quote.fees.totalBps / 100).toFixed(2)}%
-                  </ReviewRow>
-                  {Number(quote.fees.affiliate) > 0 && (
-                    <ReviewRow label={t("affiliateFee", "Affiliate fee")}>
-                      {formatQuoteAssetAmount(quote.fees.affiliate, toAsset, quote.expectedOutput)} {toAsset.symbol}
-                    </ReviewRow>
-                  )}
-                  {Number(quote.fees.outbound) > 0 && (
-                    <ReviewRow label={t("outboundFee", "Outbound fee")}>
-                      {formatQuoteAssetAmount(quote.fees.outbound, toAsset, quote.expectedOutput)} {toAsset.symbol}
-                    </ReviewRow>
-                  )}
+                  <QuoteFeeRows fees={quote.fees} />
                   <ReviewRow label={t("slippageTolerance", "Slippage tolerance")}>
                     {(slippageBps / 100).toFixed(2)}% max
                   </ReviewRow>
@@ -5300,9 +5296,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                     <ReviewRow label={t("minimumAfterFeesSlippage", "Min. receive")} accent>
                       {formatBalance(quote.minimumOutput)} {toAsset.symbol}
                     </ReviewRow>
-                    <ReviewRow label={t("quotedFeeRate", "Quoted fee rate")}>
-                      {(quote.fees.totalBps / 100).toFixed(2)}%
-                    </ReviewRow>
+                    <QuoteFeeRows fees={quote.fees} />
                     <ReviewRow label={t("slippageTolerance", "Slippage")}>
                       {(slippageBps / 100).toFixed(2)}% max
                     </ReviewRow>

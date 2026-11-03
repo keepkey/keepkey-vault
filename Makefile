@@ -424,6 +424,8 @@ test-unit:
 	cd $(PROJECT_DIR) && bun test src/bun/btc-psbt/multisig-feature-rest.test.ts
 	cd $(PROJECT_DIR) && bun test __tests__/defi-position-details.test.ts __tests__/swap-health.test.ts __tests__/swap-preflight.test.ts __tests__/swap-route-selection.test.ts __tests__/pioneer-evm.test.ts __tests__/relay-status.test.ts __tests__/zcash-privacy.test.ts
 	cd $(PROJECT_DIR) && bun test __tests__/swap-tracking-context.test.ts
+	cd $(PROJECT_DIR) && bun test __tests__/swap-fees.test.ts __tests__/swap-server-capabilities.test.ts __tests__/swap-registration.test.ts __tests__/near-intents-status.test.ts
+	cd $(PROJECT_DIR) && bun test __tests__/near-deposit-build.test.ts
 	cd modules/hdwallet && bun test packages/hdwallet-keepkey/src/multisig.test.ts
 	$(MAKE) clearsign-worker-test
 	cd $(PROJECT_DIR) && bun src/bun/btc-backend/core.test.ts

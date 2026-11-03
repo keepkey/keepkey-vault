@@ -326,7 +326,8 @@ describe('parseQuoteResponse', () => {
       txs: [{ type: 'EVM', txParams: { to: '0x3fc91a3afd70395cd496c647d5a6cc9d4b2b7fad', data: '0x3593564c1234', value: '13118195000000000', chainId: 1 } }],
     } }] }
     const result = parseQuoteResponse(response, { fromCaip: 'eip155:1/slip44:60', toCaip: 'eip155:1/erc20:0xdac17f958d2ee523a2206206994597c13d831ec7', slippageBps: 300 })
-    expect(result.fees).toEqual({ totalBps: 30, affiliate: '0.090062', outbound: '0' })
+    expect(result.fees).toMatchObject({ totalBps: 30, affiliate: '0.090062', outbound: '0', reportedTotalBps: 30 })
+    expect(result.fees.items).toEqual([expect.objectContaining({ kind: 'affiliate', assetCaip: 'eip155:1/erc20:0xdac17f958d2ee523a2206206994597c13d831ec7', symbol: 'USDT', amount: '0.090062' })])
     expect(result.quotedSlippageBps).toBeUndefined()
     expect(result.requestedSlippageBps).toBe(300)
     expect(result.slippageBps).toBe(300)
@@ -550,7 +551,7 @@ describe('parseQuoteResponse', () => {
     expect(result.swapper).toBe('Chainflip')
     expect(result.inboundAddress).toBe(chainflipBtcQuote.data[0].quote.inbound_address)
     expect(result.expectedOutput).toBe('3.993470534033437561')
-    expect(result.minimumOutput).toBe('3.87366642')
+    expect(result.minimumOutput).toBe('3.873666418012434434')
     expect(result.memo).toBe('')
     expect(result.relayTx).toBeUndefined()
   })
@@ -627,6 +628,17 @@ describe('parseQuoteResponse', () => {
     expect(result.swapper).toBe('NEAR Intents')
     expect(result.relayTx?.to).toBe('0xnear_deposit')
     expect(result.relayTx?.isDepositChannel).toBe(true)
+  })
+
+  test('direct NEAR quote retains exact settlement terms and source refund wallet', () => {
+    const meta = { depositAddress: '0xdeposit', refundTo: '0xsender', recipient: '0xrecipient', originAsset: 'nep141:eth', destinationAsset: 'nep141:arb', sourceDecimals: 18, destinationDecimals: 18 }
+    const result = parseQuoteResponse({ data: [{ integration: 'nearIntents', quote: {
+      swapper: 'NEAR Intents', buyAmount: '0.123456789123456789', amountOutMin: '0.120000000000000001', meta,
+      txs: [{ txParams: { data: '0x', to: '0xdeposit', value: '10000000000000000' } }],
+    } }] }, { fromCaip: 'eip155:1/slip44:60', toCaip: 'eip155:42161/slip44:60', slippageBps: 300 })
+    expect(result.minimumOutput).toBe('0.120000000000000001')
+    expect(result.nearIntentsRefundTo).toBe('0xsender')
+    expect(result.nearIntentsTracking).toEqual({ ...meta, minimumAmountOut: '0.120000000000000001' })
   })
 
   test('Relay with data="0x" is NOT a deposit channel — no relayTx created', () => {

@@ -15,7 +15,8 @@ test('retains the actual sender, custom recipient, base units and solver mode ac
     fromAsset: 'ETH.ETH', toAsset: 'ETH.USDT', fromSymbol: 'ETH', toSymbol: 'USDT', fromChainId: 'ethereum', toChainId: 'ethereum',
     fromAmount: '0.01', quotedOutput: '25', minimumOutput: '24', slippageBps: 100, feeBps: 30, feeOutbound: '0',
     integration: 'relay', memo: '', inboundAddress: '0xdeposit', status: 'pending', createdAt: 1, updatedAt: 1, estimatedTimeSeconds: 4,
-    trackingContext: { fromAddress: '0xsender', toAddress: '0xcustom-recipient', fromAmountBaseUnits: '10000000000000000', relaySolverDeposit: true },
+    trackingContext: { fromAddress: '0xsender', toAddress: '0xcustom-recipient', fromAmountBaseUnits: '10000000000000000', relaySolverDeposit: true,
+      nearIntents: { depositAddress: '0xdeposit', originAsset: 'nep141:eth', destinationAsset: 'nep141:usdt', sourceDecimals: 18, destinationDecimals: 6, minimumAmountOut: '24.000001' } },
   }
   db.insertSwapHistory(record)
   expect(db.getSwapHistoryByTxid(record.txid, undefined, record.walletId)?.trackingContext).toEqual(record.trackingContext)

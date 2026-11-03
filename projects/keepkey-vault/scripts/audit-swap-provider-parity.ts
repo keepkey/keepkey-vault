@@ -20,7 +20,7 @@ const addresses: Record<string, string> = {
   [eth]: '0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045',
   [btc]: segwit('bc'), [ltc]: segwit('ltc'),
   [zec]: base58.encode(Buffer.concat([zecPayload, sha256(sha256(zecPayload)).subarray(0, 4)])),
-  [sol]: '11111111111111111111111111111111',
+  [sol]: '4vJ9JU1bJJE96FWSJKvHsmmFADCg4gpZQff4P3bkLKi',
 }
 const fixtures: Array<{ name: string; sellAsset: string; buyAsset: string; sellAmount: string; memoless?: boolean; relayExecutionMode?: 'solver-deposit' }> = [
   { name: 'ETH to LTC', sellAsset: eth, buyAsset: ltc, sellAmount: '0.021319' },
@@ -35,6 +35,7 @@ const fixtures: Array<{ name: string; sellAsset: string; buyAsset: string; sellA
   { name: 'BTC to LTC memoless', sellAsset: btc, buyAsset: ltc, sellAmount: '0.001', memoless: true },
   { name: 'ETH to Base USDC solver deposit', sellAsset: eth, buyAsset: 'eip155:8453/erc20:0x833589fcd6edb6e08f4c7c32d4f71b54bda02913', sellAmount: '0.013118195', relayExecutionMode: 'solver-deposit' },
   { name: 'ETH to USDT solver deposit', sellAsset: eth, buyAsset: 'eip155:1/erc20:0xdac17f958d2ee523a2206206994597c13d831ec7', sellAmount: '0.013118195', relayExecutionMode: 'solver-deposit' },
+  { name: 'ETH to SOL solver deposit', sellAsset: eth, buyAsset: sol, sellAmount: '0.013118195', relayExecutionMode: 'solver-deposit' },
 ]
 const origins = ['https://api.keepkey.info', 'https://oracles.cc']
 const keys = new Map<string, string>()
@@ -116,6 +117,7 @@ report.parityRegressions = report.cases.flatMap((testCase: any) => {
   const [legacy, gateway] = testCase.results
   const failures: string[] = []
   if (legacy.httpStatus === 200 && legacy.quotes?.length && !(gateway.httpStatus === 200 && gateway.quotes?.length)) failures.push('legacy_quote_lost')
+  if (process.argv.includes('--require-quotes') && !(gateway.httpStatus === 200 && gateway.quotes?.length)) failures.push('gateway_fixture_unavailable')
   if (testCase.memoless && gateway.quotes?.some((q: any) => q.sourceTransactionShapes.some((tx: any) => tx.hasMemo))) failures.push('memoless_request_ignored')
   return failures.map(reason => ({ case: testCase.name, reason }))
 })

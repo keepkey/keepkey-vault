@@ -34,6 +34,8 @@ import { classifySwapOutcome, type MidgardActionsResponse } from './swap/classif
 import { selectOutboundTxid } from '../shared/swap-tracker-guards'
 import { baseUnitsToDecimalString } from '../shared/max-send'
 import { payoutBelowMinimum } from '../shared/swap-settlement'
+import { buildPioneerSwapRegistration } from '../shared/swap-registration'
+import { classifyNearIntentsStatus } from '../shared/near-intents-status'
 
 /** Resolve display data from a CAIP-19. CAIP is the only identifier the swap
  *  layer accepts; symbols / asset names / display names are derived here for
@@ -194,6 +196,7 @@ function rehydrateActiveSwaps(deviceId?: string, walletId?: string): void {
           toCaip: r.toCaip,
           fromAmount: r.fromAmount,
           expectedOutput: r.quotedOutput,
+          minimumOutput: r.minimumOutput,
           receivedOutput: r.receivedOutput,
           memo: r.memo,
           inboundAddress: r.inboundAddress,
@@ -305,6 +308,7 @@ export function trackSwap(
     fromAddress: result.fromAddress, toAddress: result.toAddress,
     fromAmountBaseUnits: result.fromAmountBaseUnits || (params.fromCaip.startsWith('eip155:') && params.fromCaip.includes('/slip44:') ? params.relayTx?.value : undefined),
     relaySolverDeposit: isRelaySolverDeposit({ relayTx: params.relayTx } as SwapQuote),
+    nearIntents: quote.nearIntentsTracking,
   } : undefined
 
   const swap: PendingSwap = {
@@ -321,6 +325,7 @@ export function trackSwap(
     toCaip: params.toCaip,
     fromAmount: params.amount,
     expectedOutput: params.expectedOutput,
+    minimumOutput: quote.minimumOutput,
     memo: params.memo,
     inboundAddress: params.inboundAddress,
     router: params.router,
@@ -437,88 +442,9 @@ export function dismissSwap(txid: string): void {
 
 // ── Pioneer REST registration ───────────────────────────────────────
 
-// Pioneer's CreatePendingSwap validator only accepts these integration values
-// (see pioneer-server's swagger). Vault internally uses the module-level names
-// returned by /api/v1/quote (e.g. "shapeshiftSwap"), so map to the validator
-// enum here. Unknown values fall through unchanged — Pioneer will 400 and the
-// log will show the mismatch so we can extend this map.
-const PIONEER_INTEGRATION_ALIAS: Record<string, string> = {
-  shapeshiftSwap: 'shapeshift',
-  nearIntents: 'shapeshift',
-}
-
 async function registerWithPioneer(swap: PendingSwap): Promise<void> {
   const pioneer = await getPioneer()
-
-  // CAIP comes straight from the swap record — no asset-string round-trip
-  // needed. PendingSwap.fromCaip is populated by trackSwap() from the picker's
-  // selection and is the canonical identifier Pioneer's tracker keys on.
-  const sellCaip = swap.fromCaip
-  const buyCaip = swap.toCaip
-  if (!sellCaip || !buyCaip) {
-    throw new Error(`registerWithPioneer: missing CAIP (from=${sellCaip}, to=${buyCaip}) for ${swap.txid}`)
-  }
-
-  const integration = PIONEER_INTEGRATION_ALIAS[swap.integration] || swap.integration
-
-  // CAIP-2 is the first segment of the CAIP-19 ("eip155:8453" from "eip155:8453/erc20:0x...").
-  // Using it directly avoids the legacy chain-id string bug (networkId: "base" → monitor falls
-  // back to Ethereum mainnet RPC and never finds the Base tx).
-  const sellNetworkId = sellCaip.split('/')[0]
-  const buyNetworkId  = buyCaip.split('/')[0]
-
-  // For NEAR Intents ERC-20, the address that actually receives the funds is the 1Click
-  // depositAddress — NOT the token contract stored in inboundAddress.
-  const sellAddress = swap.nearIntentsDepositAddress || swap.inboundAddress || ''
-
-  const body: Record<string, any> = {
-    txHash: swap.txid,
-    addresses: [],
-    sellAsset: {
-      caip: sellCaip,
-      symbol: swap.fromSymbol,
-      amount: swap.fromAmount,
-      amountBaseUnits: swap.trackingContext?.fromAmountBaseUnits || swap.fromAmountBaseUnits || swap.fromAmount,
-      address: integration === 'uniswap' ? swap.trackingContext?.fromAddress || '' : sellAddress,
-      networkId: sellNetworkId,
-    },
-    buyAsset: {
-      caip: buyCaip,
-      symbol: swap.toSymbol,
-      amount: swap.expectedOutput,
-      amountBaseUnits: swap.expectedOutput,
-      address: swap.trackingContext?.toAddress || (buyCaip.startsWith('eip155:') && swap.walletId?.includes(':')
-        ? swap.walletId.slice(swap.walletId.indexOf(':') + 1)
-        : ''),
-      networkId: buyNetworkId,
-    },
-    quote: {
-      id: swap.txid,
-      ...(swap.providerQuoteId ? {
-        quoteId: swap.providerQuoteId,
-        raw: { source: 'shapeshift', quoteId: swap.providerQuoteId },
-      } : {}),
-      integration,
-      expectedAmountOut: swap.expectedOutput,
-      minimumAmountOut: swap.expectedOutput,
-      slippage: (swap.slippageBps ?? 100) / 100,
-      fees: { affiliate: '0', protocol: '0', network: '0' },
-      memo: swap.memo,
-    },
-    integration,
-    swapper: swap.swapper,
-  }
-  // Forward the Relay request id when we have one. Pioneer's swap-monitor
-  // (checkRelaySwap) keys on relayData.requestId; without it Pioneer falls
-  // back to a confirmation-only watcher that never reaches a terminal status
-  // for Relay's off-chain settlement model.
-  if (swap.relayRequestId) {
-    body.relayData = { requestId: swap.relayRequestId,
-      ...(swap.trackingContext?.relaySolverDeposit ? { executionMode: 'solver-deposit' } : {}) }
-  }
-  if (swap.swapper === 'NEAR Intents' && sellAddress) {
-    body.nearIntentsData = { depositAddress: sellAddress }
-  }
+  const body = buildPioneerSwapRegistration(swap)
   swapLog(`${TAG} CreatePendingSwap request:`, JSON.stringify({ txHash: body.txHash, sellCaip: body.sellAsset.caip, buyCaip: body.buyAsset.caip, integration: body.integration, swapper: body.swapper }))
 
   let resp: any
@@ -547,7 +473,11 @@ async function registerWithPioneer(swap: PendingSwap): Promise<void> {
  * ping-pong on every refresh and burn through Pioneer rate limits. */
 function applyRemoteSwapData(swap: PendingSwap, remoteSwap: any): void {
   // Pioneer's mapped status only takes effect when Midgard hasn't ruled yet.
-  const pioneerStatus = mapPioneerStatus(remoteSwap.status)
+  const mappedPioneerStatus = mapPioneerStatus(remoteSwap.status)
+  // NEAR terminal state and actual output require the bound 1Click proof below.
+  // Legacy Pioneer rows can report a deposit receipt or quote as completion.
+  const pioneerStatus = isNearIntentsSwap(swap) && isTerminalSwapStatus(mappedPioneerStatus)
+    ? swap.status : mappedPioneerStatus
   const needsSettlementVerification = !isNearIntentsSwap(swap)
     && /thor|maya/i.test(`${swap.integration} ${swap.swapper || ''} ${remoteSwap.details?.protocol?.protocol || ''}`)
   const ignoreNonFinalPioneer = isTerminalSwapStatus(swap.status) && !isTerminalSwapStatus(pioneerStatus)
@@ -598,7 +528,7 @@ function applyRemoteSwapData(swap: PendingSwap, remoteSwap: any): void {
   // is not overwritten with 'thorchain' in the DB and UI.
   const pioneerMisidentifiedAsThorchain = isNearIntentsSwap(swap)
     && (remoteSwap.details?.protocol?.protocol || '').toLowerCase() === 'thorchain'
-  const detectedSwapper: string | undefined = (isNativeVaultRoute || pioneerMisidentifiedAsThorchain)
+  const detectedSwapper: string | undefined = (isNativeVaultRoute || isNearIntentsSwap(swap) || pioneerMisidentifiedAsThorchain)
     ? undefined
     : (remoteSwap.details?.protocol?.protocol || remoteSwap.swapper || undefined)
   const errorMsg = remoteSwap.error?.userMessage || remoteSwap.error?.message
@@ -609,7 +539,7 @@ function applyRemoteSwapData(swap: PendingSwap, remoteSwap: any): void {
   // buyAsset.amount can be the original quote (confirmed by the 5c3b317f incident).
   // THOR/Maya received amounts must come from the sum of settlement payouts.
   const usesMidgard = needsSettlementVerification
-  const receivedOutput: string | undefined = (!usesMidgard && !swap.midgardClassified && !nextTrackingMetadataPending && remoteSwap.buyAsset?.amount && parseFloat(remoteSwap.buyAsset.amount) > 0)
+  const receivedOutput: string | undefined = (!isNearIntentsSwap(swap) && !usesMidgard && !swap.midgardClassified && !nextTrackingMetadataPending && remoteSwap.buyAsset?.amount && parseFloat(remoteSwap.buyAsset.amount) > 0)
     ? remoteSwap.buyAsset.amount
     : undefined
 
@@ -776,6 +706,7 @@ function readSwapFromDb(txid: string, deviceId?: string, walletId?: string): Pen
     fromCaip: r.fromCaip, toCaip: r.toCaip,
     fromAmount: r.fromAmount,
     expectedOutput: r.quotedOutput,
+    minimumOutput: r.minimumOutput,
     receivedOutput: r.receivedOutput,
     memo: r.memo, inboundAddress: r.inboundAddress, router: r.router,
     integration: r.integration, swapper: r.swapper,
@@ -923,65 +854,45 @@ export async function refreshSwap(txid: string, deviceId?: string, walletId?: st
       )
       if (resp.ok) {
         const data = await resp.json() as any
-        const oneClickStatus: string = data?.status || ''
-        const nearHash: string | undefined = data?.swapDetails?.nearTxHashes?.[0] ?? data?.nearTxHashes?.[0]
-        const outboundHash: string | undefined = data?.swapDetails?.destinationChainTxHashes?.[0]?.hash
-        swapLog(`${TAG} NEAR Intents: 1Click status=${oneClickStatus} for ${txid.slice(0, 10)}...`)
-
-        if (oneClickStatus === 'SUCCESS') {
-          swap.status = 'completed'
-          swap.outboundTxid = outboundHash || swap.outboundTxid
+        const settlement = classifyNearIntentsStatus(swap, data)
+        const previousStatus = swap.status
+        swap.status = settlement.status
+        if (settlement.nearTxHash) swap.nearTxHash = settlement.nearTxHash
+        if (settlement.outboundTxid) {
+          swap.outboundTxid = settlement.outboundTxid
           swap.outboundChainId = swap.toChainId
-          if (nearHash) swap.nearTxHash = nearHash
-          swap.updatedAt = Date.now()
-          if (!noPersistSwaps.has(swap.txid)) {
-            updateSwapHistoryStatus(swap.txid, 'completed', {
-              outboundTxid: outboundHash,
-              outboundChainId: swap.toChainId,
-              nearTxHash: nearHash,
-              completedAt: Date.now(),
-            })
-          }
-          pushUpdate(swap)
-          if (swap.deviceId) {
+          swap.outboundConfirmations = 1
+          swap.outboundRequiredConfirmations = 1
+        }
+        if (settlement.receivedOutput) swap.receivedOutput = settlement.receivedOutput
+        if (settlement.refundTxid) {
+          swap.outboundTxid = settlement.refundTxid
+          swap.outboundChainId = swap.fromChainId
+        }
+        if (settlement.refundReason) swap.refundReason = settlement.refundReason
+        if (settlement.error) swap.error = settlement.error
+        swap.updatedAt = Date.now()
+        const terminal = isTerminalSwapStatus(swap.status)
+        if (terminal) { swap.completedAt = Date.now(); swap.trackingMetadataPending = false }
+        if (!noPersistSwaps.has(swap.txid)) updateSwapHistoryStatus(swap.txid, swap.status, {
+          deviceId: swap.deviceId, walletId: swap.walletId,
+          outboundTxid: swap.outboundTxid, outboundChainId: swap.outboundChainId,
+          receivedOutput: settlement.receivedOutput, nearTxHash: settlement.nearTxHash,
+          refundReason: settlement.refundReason, error: settlement.error,
+          completedAt: terminal ? swap.completedAt : undefined,
+        })
+        if (previousStatus !== swap.status || settlement.nearTxHash || terminal) pushUpdate(swap)
+        if (terminal) {
+          if (swap.status === 'completed' && swap.deviceId) {
             try {
-              recordSwap({
-                deviceId: swap.deviceId,
-                txid: swap.txid,
-                fromAsset: swap.fromSymbol,
-                fromChainId: swap.fromChainId,
-                fromAmount: parseFloat(swap.fromAmount) || 0,
-                toAsset: swap.toSymbol,
-                toChainId: swap.toChainId,
-                toAmount: parseFloat(swap.receivedOutput || swap.expectedOutput) || 0,
-              })
+              recordSwap({ deviceId: swap.deviceId, txid: swap.txid, fromAsset: swap.fromSymbol,
+                fromChainId: swap.fromChainId, fromAmount: parseFloat(swap.fromAmount) || 0,
+                toAsset: swap.toSymbol, toChainId: swap.toChainId, toAmount: parseFloat(settlement.receivedOutput!) })
             } catch { /* non-fatal */ }
           }
           pushComplete(swap)
-          swapLog(`${TAG} NEAR Intents: completed via 1Click for ${txid.slice(0, 10)}... outbound=${outboundHash?.slice(0, 12)}...`)
+          swapLog(`${TAG} NEAR Intents: bound ${swap.status} via 1Click for ${txid.slice(0, 10)}...`)
           return swap
-        } else if (oneClickStatus === 'REFUNDED') {
-          const refundReason = data?.swapDetails?.refundReason || 'REFUNDED'
-          swap.status = 'refunded'
-          swap.refundReason = refundReason
-          if (nearHash) swap.nearTxHash = nearHash
-          swap.updatedAt = Date.now()
-          if (!noPersistSwaps.has(swap.txid)) {
-            updateSwapHistoryStatus(swap.txid, 'refunded', {
-              nearTxHash: nearHash,
-              refundReason,
-              completedAt: Date.now(),
-            })
-          }
-          pushUpdate(swap)
-          pushComplete(swap)
-          swapLog(`${TAG} NEAR Intents: refunded via 1Click for ${txid.slice(0, 10)}... reason=${refundReason}`)
-          return swap
-        } else if (nearHash && !swap.nearTxHash) {
-          swap.nearTxHash = nearHash
-          pushUpdate(swap)
-          if (!noPersistSwaps.has(swap.txid)) updateSwapHistoryStatus(swap.txid, swap.status, { nearTxHash: nearHash })
-          swapLog(`${TAG} NEAR Intents: nearTxHash backfilled for ${txid.slice(0, 10)}... → ${nearHash.slice(0, 12)}...`)
         }
       }
     } catch { /* best-effort */ }
@@ -1243,12 +1154,12 @@ export async function debugSwapLookup(txid: string, deviceId?: string, walletId?
 // swap. The /requests/v2?hash=... endpoint matches against the inbound tx
 // hash directly — no sender lookup or quote-shape parsing needed.
 
-/** NEAR Intents maps to integration='shapeshift' in PIONEER_INTEGRATION_ALIAS
+/** NEAR Intents registers under the legacy shapeshift integration enum
  *  but is NOT routed through Relay. Identify it by swapper so we can skip
  *  Relay-specific code paths that don't apply. */
 function isNearIntentsSwap(swap: PendingSwap): boolean {
   const swapper = (swap.swapper || '').toLowerCase().replace(/\s/g, '')
-  return swapper === 'nearintents' || swapper.startsWith('near')
+  return swap.integration === 'nearIntents' || swapper === 'nearintents' || swapper.startsWith('near')
 }
 
 function shouldBackfillRelayRequestId(swap: PendingSwap): boolean {

@@ -9,6 +9,8 @@ import { thorMemoMinimum } from '../shared/swap-risk'
 import { parseCaip } from '../shared/swap-discovery'
 import type { SwapAsset, SwapQuote, RelayTxParams } from '../shared/types'
 import { COIN_MAP_LONG } from '@pioneer-platform/pioneer-coins'
+import { parseSwapFeeDisclosure } from './swap-fees'
+import { isPlainSwapDeposit } from '../shared/swap-deposit-routing'
 
 const TAG = '[swap]'
 
@@ -336,12 +338,11 @@ function parseSingleQuote(
   // are rejected by buildRelaySwapTx's ERC-20 guard if applicable, and warned
   // by the pre-existing cross-chain guard.
   const fromIsUtxo = params.fromCaip.startsWith('bip122:')
-  const fromIsSolana = params.fromCaip.startsWith('solana:')
   // Prebuilt deposit-channel transactions use this path for EVM sources. For
   // Bitcoin sources (Chainflip / NEAR Intents), txParams.to is a Bitcoin address
   // and the normal UTXO builder uses inboundAddress (isMemolessTransfer below).
   const DEPOSIT_CHANNEL_SWAPPERS = new Set(['Chainflip', 'NEAR Intents'])
-  const isDepositChannel = !hasRealCalldata && !fromIsUtxo && !!txParams.to && DEPOSIT_CHANNEL_SWAPPERS.has(swapper ?? '')
+  const isDepositChannel = !hasRealCalldata && params.fromCaip.startsWith('eip155:') && !!txParams.to && DEPOSIT_CHANNEL_SWAPPERS.has(swapper ?? '')
   // Solana prebuilt tx: Relay SOL→EVM bridge ships serializedTx (base64 wire tx) instead
   // of EVM calldata. No `data` or `to` field — detected by serializedTx presence.
   const hasSolanaPrebuiltTx = !!txParams.serializedTx && params.fromCaip.startsWith('solana:')
@@ -447,14 +448,7 @@ function parseSingleQuote(
     console.error(`${TAG}   full best: ${JSON.stringify(best, null, 2).slice(0, 2000)}`)
     throw new Error('Quote response missing inbound address')
   }
-  // Chainflip and NEAR Intents register the destination when opening a Bitcoin
-  // deposit channel, so the inbound address is the only transfer instruction.
-  // Keep this limited to known deposit-channel providers; THORChain still needs
-  // its routing memo. Solana retains its existing NEAR Intents transfer path.
-  const isMemolessTransfer = !!inboundAddress && (
-    (fromIsUtxo && DEPOSIT_CHANNEL_SWAPPERS.has(swapper ?? ''))
-    || (fromIsSolana && swapper === 'NEAR Intents')
-  )
+  const isMemolessTransfer = isPlainSwapDeposit({ fromCaip: params.fromCaip, inboundAddress, memo, swapper, integration })
   if (!memo && !hasPrebuiltTx && !isNativeDeposit && !isMemolessTransfer) {
     console.error(`${TAG} MISSING memo + no prebuilt tx — dumping response structure:`)
     console.error(`${TAG}   integration: ${integration}, swapper: ${swapper ?? 'none'}`)
@@ -474,6 +468,7 @@ function parseSingleQuote(
   let totalBps = fees.total_bps || fees.totalBps || 0
   let outboundFee = fees.outbound || fees.outboundFee || '0'
   let affiliateFee = fees.affiliate || fees.affiliateFee || '0'
+  const feeDisclosure = parseSwapFeeDisclosure(raw, quote, { ...params, integration, swapper })
   const reportedSlippage = fees.slippage_bps ?? fees.slippageBps
   const quotedSlippageBps = reportedSlippage != null && reportedSlippage !== ''
     && Number.isFinite(Number(reportedSlippage)) && Number(reportedSlippage) >= 0
@@ -491,7 +486,12 @@ function parseSingleQuote(
   const estimatedTime = raw.total_swap_seconds || quote.totalSwapSeconds
     || quote.estimatedTime || raw.inbound_confirmation_seconds || 600
 
-  const minOutStr = minOut > 0 ? minOut.toFixed(8).replace(/\.?0+$/, '') : '0'
+  // A quoted floor is an exact settlement term, including for 18-decimal
+  // destinations. Rounding it to eight places can increase the promised floor.
+  const exactQuoteMinimum = quote.amountOutMin != null && /^\d+(?:\.\d+)?$/.test(String(quote.amountOutMin))
+    ? String(quote.amountOutMin) : undefined
+  const minOutStr = memoMinimum === undefined && exactQuoteMinimum !== undefined
+    ? exactQuoteMinimum : minOut > 0 ? minOut.toFixed(8).replace(/\.?0+$/, '') : '0'
 
   // Minimum sell amount — solvers/protocols may refuse amounts below this floor
   // Check multiple field names across the response layers (Pioneer schema varies by swapper)
@@ -522,8 +522,19 @@ function parseSingleQuote(
   // includes it in txParams.senderAddress. Extracting it here lets swap.ts verify
   // the refund destination before the user signs (Layer 1 of the refund-safety check).
   const nearIntentsRefundTo = swapper === 'NEAR Intents'
-    ? (txParams.senderAddress as string | undefined) || undefined
+    ? (txParams.senderAddress as string | undefined) || quote.meta?.refundTo || undefined
     : undefined
+
+  const nearIntentsTracking = swapper === 'NEAR Intents' ? {
+    depositAddress: nearIntentsDepositAddress,
+    refundTo: nearIntentsRefundTo,
+    recipient: quote.meta?.recipient,
+    originAsset: quote.meta?.originAsset,
+    destinationAsset: quote.meta?.destinationAsset,
+    sourceDecimals: quote.meta?.sourceDecimals,
+    destinationDecimals: quote.meta?.destinationDecimals,
+    minimumAmountOut: minOutStr,
+  } : undefined
 
   return {
     expectedOutput: expectedOutputStr,
@@ -538,6 +549,7 @@ function parseSingleQuote(
       affiliate: String(affiliateFee),
       outbound: String(outboundFee),
       totalBps: Number(totalBps),
+      ...feeDisclosure,
     },
     estimatedTime: Number(estimatedTime),
     warning: raw.warning || quote.warning || undefined,
@@ -551,6 +563,7 @@ function parseSingleQuote(
     minAmountIn,
     nearIntentsDepositAddress,
     nearIntentsRefundTo,
+    nearIntentsTracking,
   }
 }
 

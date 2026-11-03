@@ -25,6 +25,8 @@ import { bufferedSwapGasLimit } from '../shared/swap-gas'
 import { certifiedSolanaProofApplies, findCertifiedSolanaProof } from './solana-certified-registry'
 import { hasCompleteCertifiedSolanaEnvelope, supportsCertifiedClearSign } from './solana-certified-policy'
 import { getPioneer } from './pioneer'
+import { pioneerSupportsRelaySolverDeposit } from '../shared/swap-server-capabilities'
+import { isPlainSwapDeposit } from '../shared/swap-deposit-routing'
 import { encodeDepositWithExpiry, encodeApprove, parseUnits, toHex, readPioneerBalance } from './txbuilder/evm'
 import { getEvmGasPrice, getEvmFeeData, getEvmNonce, getEvmBalance, getErc20Allowance, getErc20Balance, getErc20Decimals, broadcastEvmTx, EvmSignerVerificationError, waitForTxReceipt, estimateGas, isPioneerEvmSource } from './evm-rpc'
 import * as txb from './txbuilder'
@@ -353,7 +355,7 @@ export async function getSwapQuote(params: SwapQuoteParams, device: {
       recipientAddress,
       senderAddress,
       slippage,
-      ...(sellCaip.startsWith('eip155:') && supportsCertifiedClearSign(device.firmwareVersion)
+      ...(sellCaip.startsWith('eip155:') && supportsCertifiedClearSign(device.firmwareVersion) && pioneerSupportsRelaySolverDeposit(pioneer)
         ? { relayExecutionMode: 'solver-deposit' } : {}),
     })
   } catch (e: any) {
@@ -724,9 +726,7 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
   const hasPrebuiltTx = !!params.relayTx
   // Native THORChain/Maya deposits (RUNE, CACAO) use MsgDeposit — no inbound vault needed
   const isNativeDeposit = isNativeDepositCaip(params.fromCaip)
-  const fromIsUtxo = params.fromCaip.startsWith('bip122:')
-  const fromIsSolana = params.fromCaip.startsWith('solana:')
-  const isMemolessTransfer = (fromIsUtxo || fromIsSolana) && !!params.inboundAddress && !params.memo
+  const isMemolessTransfer = isPlainSwapDeposit(params)
   if (!params.inboundAddress && !isNativeDeposit && !hasPrebuiltTx) throw new Error('Missing inbound vault address from quote')
   if (!params.memo && !hasPrebuiltTx && !isMemolessTransfer) throw new Error('Missing swap memo from quote')
   assertSwapMemoFitsSource(params.memo, params.fromCaip)
@@ -766,7 +766,7 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
         caip: fromAssetMeta?.caip ?? params.fromCaip, tokenDecimals: fromAssetMeta?.decimals ?? params.tokenDecimals,
       })
       unsignedTx = buildResult.unsignedTx
-    } else {
+    } else if (fromChain.chainFamily === 'evm') {
       const certifiedSupported = supportsCertifiedClearSign(ctx.getFirmwareVersion?.())
       // Certified and RAM-signer metadata are complementary. On 7.16+, try the
       // certified catalog first, then the ClearSign provider the user added
@@ -825,6 +825,8 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
           swapLog(`${TAG} Relay-path approve broadcast (Pioneer): ${approvalTxid}`)
         }
       }
+    } else {
+      throw new Error(`Unsupported prebuilt swap transaction for ${fromChain.coin}`)
     }
 
   // ── EVM chains: MUST use router contract depositWithExpiry() ──
@@ -1371,9 +1373,7 @@ export async function previewSwapBuild(
 
   const hasPrebuiltTx = !!params.relayTx
   const isNativeDeposit = isNativeDepositCaip(params.fromCaip)
-  const fromIsUtxoPreview = params.fromCaip.startsWith('bip122:')
-  const fromIsSolanaPreview = params.fromCaip.startsWith('solana:')
-  const isMemolessTransfer = (fromIsUtxoPreview || fromIsSolanaPreview) && !!params.inboundAddress && !params.memo
+  const isMemolessTransfer = isPlainSwapDeposit(params)
   if (!params.inboundAddress && !isNativeDeposit && !hasPrebuiltTx) throw new Error('Missing inbound vault address from quote')
   if (!params.memo && !hasPrebuiltTx && !isMemolessTransfer) throw new Error('Missing swap memo from quote')
   assertSwapMemoFitsSource(params.memo, params.fromCaip)
@@ -1397,6 +1397,7 @@ export async function previewSwapBuild(
       })
       return { unsignedTx: buildResult.unsignedTx }
     }
+    if (fromChain.chainFamily !== 'evm') throw new Error(`Unsupported prebuilt swap transaction for ${fromChain.coin}`)
     const certifiedSupported = supportsCertifiedClearSign(ctx.getFirmwareVersion?.())
     const runtimeGate = { firmwareVersion: ctx.getFirmwareVersion?.(), advancedMode: ctx.isAdvancedModeEnabled?.() === true, capabilities: ctx.getDeviceCapabilities?.() }
     const result = await buildRelaySwapTx(params, fromChain, fromAddress, getEvmRpcSource, isErc20Source, /* previewMode */ true, certifiedSupported, runtimeGate)
