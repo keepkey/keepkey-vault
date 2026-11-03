@@ -474,7 +474,10 @@ function parseSingleQuote(
   let totalBps = fees.total_bps || fees.totalBps || 0
   let outboundFee = fees.outbound || fees.outboundFee || '0'
   let affiliateFee = fees.affiliate || fees.affiliateFee || '0'
-  const actualSlippageBps = fees.slippage_bps ?? fees.slippageBps ?? (params.slippageBps ?? 100)
+  const reportedSlippage = fees.slippage_bps ?? fees.slippageBps
+  const quotedSlippageBps = reportedSlippage != null && reportedSlippage !== ''
+    && Number.isFinite(Number(reportedSlippage)) && Number(reportedSlippage) >= 0
+    ? Number(reportedSlippage) : undefined
 
   // Minimum output — Pioneer provides amountOutMin, fallback to slippage calc.
   const expectedNum = parseFloat(expectedOutputStr)
@@ -538,7 +541,10 @@ function parseSingleQuote(
     },
     estimatedTime: Number(estimatedTime),
     warning: raw.warning || quote.warning || undefined,
-    slippageBps: Number(actualSlippageBps),
+    // Preserve the conservative value used by existing warning guards, while
+    // keeping a missing provider measurement distinct for the review display.
+    slippageBps: quotedSlippageBps ?? (params.slippageBps ?? 100),
+    quotedSlippageBps,
     integration,
     swapper,
     relayTx,

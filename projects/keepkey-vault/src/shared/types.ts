@@ -2045,7 +2045,9 @@ export interface SwapQuote {
   }
   estimatedTime: number      // seconds
   warning?: string           // streaming swap note, dust threshold, etc.
-  slippageBps: number        // actual slippage in bps
+  slippageBps: number        // warning value; falls back to user tolerance if unreported
+  /** Provider-reported slippage only; absent when the provider did not supply it. */
+  quotedSlippageBps?: number
   integration?: string       // DEX source: "thorchain", "shapeshift", "chainflip", "relay", etc.
   /** Underlying protocol when `integration` is an aggregator. ShapeShift's swapper
    *  routes through Relay / THORChain / 0x / Uniswap / Curve / etc.; this names

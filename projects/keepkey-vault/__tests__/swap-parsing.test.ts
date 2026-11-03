@@ -316,6 +316,30 @@ describe('parseQuoteResponse', () => {
   test('BASE → ETH: extracts slippageBps from raw.fees', () => {
     const result = parseQuoteResponse(FIXTURE_BASE_TO_ETH_QUOTE, baseParams)
     expect(result.slippageBps).toBe(42)
+    expect(result.quotedSlippageBps).toBe(42)
+  })
+
+  test('direct Uniswap retains the affiliate fee and does not present user tolerance as measured slippage', () => {
+    const response = { data: [{ integration: 'uniswap', quote: {
+      source: 'uniswap', swapper: 'Uniswap', amountOut: '29.9306', amountOutMin: '29.0326',
+      raw: { fees: { total_bps: 30, affiliate: '0.090062', outbound: '0' } },
+      txs: [{ type: 'EVM', txParams: { to: '0x3fc91a3afd70395cd496c647d5a6cc9d4b2b7fad', data: '0x3593564c1234', value: '13118195000000000', chainId: 1 } }],
+    } }] }
+    const result = parseQuoteResponse(response, { fromCaip: 'eip155:1/slip44:60', toCaip: 'eip155:1/erc20:0xdac17f958d2ee523a2206206994597c13d831ec7', slippageBps: 300 })
+    expect(result.fees).toEqual({ totalBps: 30, affiliate: '0.090062', outbound: '0' })
+    expect(result.quotedSlippageBps).toBeUndefined()
+    expect(result.requestedSlippageBps).toBe(300)
+    expect(result.slippageBps).toBe(300)
+  })
+
+  test('reported zero slippage is distinct from absent or malformed measurements', () => {
+    for (const [reported, expected] of [[0, 0], ['0', 0], [undefined, undefined], ['', undefined], ['bad', undefined], [-1, undefined]] as const) {
+      const fixture = structuredClone(FIXTURE_BASE_TO_ETH_QUOTE)
+      ;(fixture.data.data[0].quote.raw.fees as any).slippage_bps = reported
+      const result = parseQuoteResponse(fixture, baseParams)
+      expect(result.quotedSlippageBps).toBe(expected)
+      expect(result.slippageBps).toBe(expected ?? baseParams.slippageBps)
+    }
   })
 
   test('BASE → ETH: extracts warning from raw', () => {

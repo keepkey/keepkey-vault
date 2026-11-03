@@ -4030,14 +4030,24 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                   <ReviewRow label={t("minimumAfterFeesSlippage", "Minimum receive after fees/slippage")} accent>
                     {formatBalance(quote.minimumOutput)} {toAsset.symbol}{hasToPrice && !toPriceIsDerived ? ` (${fmtCompact(parseFloat(quote.minimumOutput) * toPriceUsd)})` : ''}
                   </ReviewRow>
-                  <ReviewRow label={t("protocolFee", "Protocol fee")}>
-                    {formatQuoteAssetAmount(quote.fees.outbound, toAsset, quote.expectedOutput)} {toAsset.symbol} ({(quote.fees.totalBps / 100).toFixed(2)}%)
+                  <ReviewRow label={t("quotedFeeRate", "Quoted fee rate")}>
+                    {(quote.fees.totalBps / 100).toFixed(2)}%
                   </ReviewRow>
+                  {Number(quote.fees.affiliate) > 0 && (
+                    <ReviewRow label={t("affiliateFee", "Affiliate fee")}>
+                      {formatQuoteAssetAmount(quote.fees.affiliate, toAsset, quote.expectedOutput)} {toAsset.symbol}
+                    </ReviewRow>
+                  )}
+                  {Number(quote.fees.outbound) > 0 && (
+                    <ReviewRow label={t("outboundFee", "Outbound fee")}>
+                      {formatQuoteAssetAmount(quote.fees.outbound, toAsset, quote.expectedOutput)} {toAsset.symbol}
+                    </ReviewRow>
+                  )}
                   <ReviewRow label={t("slippageTolerance", "Slippage tolerance")}>
                     {(slippageBps / 100).toFixed(2)}% max
                   </ReviewRow>
                   <ReviewRow label={t("quoteSlippage", "Quote slippage")}>
-                    {(quote.slippageBps / 100).toFixed(2)}%
+                    {quote.quotedSlippageBps != null ? `${(quote.quotedSlippageBps / 100).toFixed(2)}%` : t("notProvided", "Not provided")}
                   </ReviewRow>
                   <ReviewRow label={t("estimatedTime")}>
                     {formatTime(quote.estimatedTime)}
@@ -5117,7 +5127,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                 />
               ) : null /* don't claim a provider before we have a quote */}
             </Box>
-            <Box
+            {/^shapeshift(?:swap)?$/i.test(quote?.integration || '') && <Box
               as="a"
               href="https://api.shapeshift.com/docs#description/introduction"
               onClick={(e: React.MouseEvent) => { e.preventDefault(); rpcRequest("openUrl", { url: "https://api.shapeshift.com/docs#description/introduction" }).catch(() => {}) }}
@@ -5133,7 +5143,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
               <Text fontSize="9px" color="kk.textMuted" letterSpacing="0.04em">
                 Powered by ShapeShift API
               </Text>
-            </Box>
+            </Box>}
           </Flex>
         )}
       </Box>
@@ -5290,7 +5300,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                     <ReviewRow label={t("minimumAfterFeesSlippage", "Min. receive")} accent>
                       {formatBalance(quote.minimumOutput)} {toAsset.symbol}
                     </ReviewRow>
-                    <ReviewRow label={t("protocolFee", "Protocol fee")}>
+                    <ReviewRow label={t("quotedFeeRate", "Quoted fee rate")}>
                       {(quote.fees.totalBps / 100).toFixed(2)}%
                     </ReviewRow>
                     <ReviewRow label={t("slippageTolerance", "Slippage")}>
