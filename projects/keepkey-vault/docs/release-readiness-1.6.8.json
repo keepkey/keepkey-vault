@@ -1,9 +1,9 @@
 {
   "version": "1.6.8",
   "status": "candidate_prepared_not_published",
-  "recordedAt": "2026-11-03T03:10:01.623976+00:00",
+  "recordedAt": "2026-11-03T17:12:56.738177+00:00",
   "branch": "prepare/1.6.8-candidate",
-  "candidateCodeRevision": "1a6dbe03e59b67a71052ea31d140933fca2d2cc9",
+  "candidateCodeRevision": "1e56342a77dab90cb0677de507c3749cb84daa62",
   "baseReleaseRevision": "1368fadbb17516553c720ea535fe249c6b3f37d7",
   "auditSourceRevision": "661fc89653b04f150001f4458879dc78f5fb4db9",
   "auditIntegratedRevision": "2e162f0f8",
@@ -13,7 +13,11 @@
     "Swap review and execution safeguards",
     "Swap provider status handling",
     "DeFi position detail dialogs and links",
-    "Compact transparent ZEC notice"
+    "Compact transparent ZEC notice",
+    "Separate Zcash transparent and shielded balance panels",
+    "Direct Shield/Unshield/Scan navigation",
+    "Shielded pending value and scan failure visibility",
+    "Correct transparent recipient dispatch from private-balance Send"
   ],
   "checks": {
     "releaseUnitCommand": {
@@ -22,13 +26,13 @@
       "bunSuitesPassed": [
         2176,
         4,
-        35,
+        42,
         1,
         8,
         53
       ],
       "scriptSuites": "passed",
-      "log": "/private/tmp/vault-1.6.8-release-unit.log"
+      "log": "/private/tmp/vault-zcash-clarity-release-tests.log"
     },
     "auditFocusedTests": {
       "status": "passed",
@@ -41,7 +45,7 @@
     "preflight": {
       "command": "make preflight",
       "status": "passed",
-      "log": "/private/tmp/vault-1.6.8-preflight.log"
+      "log": "/private/tmp/vault-zcash-clarity-preflight.log"
     },
     "typecheck": {
       "status": "within_existing_baseline",
@@ -55,7 +59,7 @@
       "platform": "macOS arm64 development",
       "signed": false,
       "notarized": false,
-      "log": "/private/tmp/vault-1.6.8-candidate-build.log"
+      "log": "/private/tmp/vault-zcash-clarity-native-build.log"
     },
     "certifiedEmulator": {
       "status": "verified",
@@ -63,7 +67,37 @@
       "macosSha256": "d89374e4ec62ad43c42d485b566b3c6c2f8026e42cf4ac21d543518d46ab5c54",
       "windowsSha256": "1bb6e7ebd5cc0a44aab52fa508f22f034d1d00a39f008356139dc857ad453b74"
     },
-    "gitDiffCheck": "passed"
+    "gitDiffCheck": "passed",
+    "zcashPrivacy": {
+      "tests": "passed",
+      "focusedTestCount": 15,
+      "regressionTestCount": 7,
+      "browserFixture": {
+        "rpc": "mocked",
+        "deviceUsed": false,
+        "signed": false,
+        "broadcast": false,
+        "cases": [
+          {
+            "case": "unknown",
+            "passed": true,
+            "screenshot": "/private/tmp/vault-zcash-unknown.png"
+          },
+          {
+            "case": "failed",
+            "passed": true,
+            "screenshot": "/private/tmp/vault-zcash-failed.png"
+          },
+          {
+            "case": "click-unshield",
+            "passed": true,
+            "screenshot": "/private/tmp/vault-zcash-click-unshield.png"
+          }
+        ]
+      },
+      "realFundsUsed": false,
+      "customerBalanceReconciled": false
+    }
   },
   "gatewayDependency": {
     "url": "https://oracles.cc",
@@ -85,6 +119,10 @@
     {
       "gate": "Audit support handoff viewport and Track account click-through",
       "status": "manual_check_pending"
+    },
+    {
+      "gate": "Zcash shield/unshield and ordinary transparent payout with a physical device",
+      "status": "hardware_check_pending"
     },
     {
       "gate": "Firmware 7.16 swap review with blind signing disabled",
