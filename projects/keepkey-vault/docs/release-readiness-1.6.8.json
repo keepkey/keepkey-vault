@@ -1,9 +1,9 @@
 {
   "version": "1.6.8",
   "status": "candidate_prepared_not_published",
-  "recordedAt": "2026-11-03T18:37:37.070Z",
+  "recordedAt": "2026-11-03T20:07:42.306239+00:00",
   "branch": "prepare/1.6.8-candidate",
-  "candidateCodeRevision": "80a3d6932a3595bdc29eb50f803d13c87ad5797e",
+  "candidateCodeRevision": "8d686d805db2a363fa05a64fba794415d1e59314",
   "baseReleaseRevision": "1368fadbb17516553c720ea535fe249c6b3f37d7",
   "auditSourceRevision": "661fc89653b04f150001f4458879dc78f5fb4db9",
   "auditIntegratedRevision": "2e162f0f8",
@@ -25,7 +25,7 @@
       "command": "make test-unit",
       "status": "passed",
       "bunSuitesPassed": [
-        2179,
+        2181,
         4,
         42,
         1,
@@ -33,7 +33,7 @@
         53
       ],
       "scriptSuites": "passed",
-      "log": "/private/tmp/vault-quote-error-release-tests.log"
+      "log": "/private/tmp/vault-native-swap-release-tests.log"
     },
     "auditFocusedTests": {
       "status": "passed",
@@ -46,7 +46,7 @@
     "preflight": {
       "command": "make preflight",
       "status": "passed",
-      "log": "/private/tmp/vault-quote-error-preflight.log"
+      "log": "/private/tmp/vault-native-swap-preflight.log"
     },
     "typecheck": {
       "status": "within_existing_baseline",
@@ -60,7 +60,7 @@
       "platform": "macOS arm64 development",
       "signed": false,
       "notarized": false,
-      "log": "/private/tmp/vault-quote-error-native-build.log"
+      "log": "/private/tmp/vault-native-swap-build.log"
     },
     "certifiedEmulator": {
       "status": "verified",
@@ -113,13 +113,28 @@
     },
     "quoteErrorParsing": {
       "status": "passed",
-      "focusedTests": 77,
+      "focusedTests": 79,
       "newRegressionTests": 3,
       "cases": [
         "Gateway nested error.message in objects and JSON text",
         "Pioneer top-level messages and plain text",
         "Empty and malformed bodies fall through to the available diagnostic"
       ]
+    },
+    "providerParity": {
+      "status": "failed",
+      "evidence": "projects/keepkey-vault/docs/provider-parity-audit-20261103/audit.json",
+      "standardCases": 9,
+      "legacyQuoteResponses": 9,
+      "gatewayQuoteResponses": 5,
+      "currentClientLegacySdk400Confirmed": true,
+      "signed": false,
+      "broadcast": false
+    },
+    "providerFeeDisclosure": {
+      "status": "incomplete",
+      "note": "Native Uniswap review exposed the outbound-zero / affiliate-rate mismatch and missing provider slippage measurement. Candidate contains a display correction, but cross-provider fee denomination and recipient-policy parity remain release blockers.",
+      "evidence": "projects/keepkey-vault/docs/provider-parity-audit-20261103/audit.json"
     }
   },
   "gatewayDependency": {
@@ -138,6 +153,21 @@
     "assetsReplaced": false
   },
   "remainingReleaseGates": [
+    {
+      "gate": "Provider fee denomination and recipient-policy parity",
+      "status": "blocked",
+      "evidence": "projects/keepkey-vault/docs/provider-parity-audit-20261103/audit.json"
+    },
+    {
+      "gate": "Legacy Pioneer quote compatibility with the current 7.16 client",
+      "status": "blocked",
+      "evidence": "projects/keepkey-vault/docs/provider-parity-audit-20261103/sdk-comparison.json"
+    },
+    {
+      "gate": "Gateway direct-provider routing and tracking parity",
+      "status": "blocked",
+      "evidence": "projects/keepkey-vault/docs/provider-parity-audit-20261103/audit.json"
+    },
     {
       "gate": "Platform CI on final candidate",
       "status": "pending"
@@ -177,8 +207,9 @@
   ],
   "runningApp": {
     "version": "1.6.8",
+    "backendPidAtInspection": 1393,
     "deviceConnectedAtInspection": true,
-    "candidateRestartPerformed": false,
-    "note": "Existing local wallet session remains open. Candidate containing nested quote-error parsing is built on disk and takes effect on the next app restart. Gateway halt-message changes apply to new quote requests without an app restart."
+    "candidateRestartPerformed": true,
+    "note": "Candidate 8d686d805 was rebuilt and restarted during native UI testing. ETH/LTC routing remains unavailable on the selected gateway because provider parity is incomplete. Quote and preview tests did not sign or send funds."
   }
 }
