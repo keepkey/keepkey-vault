@@ -1,9 +1,9 @@
 {
   "version": "1.6.8",
   "status": "candidate_prepared_not_published",
-  "recordedAt": "2026-11-03T18:21:44.848Z",
+  "recordedAt": "2026-11-03T18:37:37.070Z",
   "branch": "prepare/1.6.8-candidate",
-  "candidateCodeRevision": "1e56342a77dab90cb0677de507c3749cb84daa62",
+  "candidateCodeRevision": "80a3d6932a3595bdc29eb50f803d13c87ad5797e",
   "baseReleaseRevision": "1368fadbb17516553c720ea535fe249c6b3f37d7",
   "auditSourceRevision": "661fc89653b04f150001f4458879dc78f5fb4db9",
   "auditIntegratedRevision": "2e162f0f8",
@@ -17,14 +17,15 @@
     "Separate Zcash transparent and shielded balance panels",
     "Direct Shield/Unshield/Scan navigation",
     "Shielded pending value and scan failure visibility",
-    "Correct transparent recipient dispatch from private-balance Send"
+    "Correct transparent recipient dispatch from private-balance Send",
+    "Readable nested gateway quote errors and protocol halt explanations"
   ],
   "checks": {
     "releaseUnitCommand": {
       "command": "make test-unit",
       "status": "passed",
       "bunSuitesPassed": [
-        2176,
+        2179,
         4,
         42,
         1,
@@ -32,7 +33,7 @@
         53
       ],
       "scriptSuites": "passed",
-      "log": "/private/tmp/vault-zcash-clarity-release-tests.log"
+      "log": "/private/tmp/vault-quote-error-release-tests.log"
     },
     "auditFocusedTests": {
       "status": "passed",
@@ -45,7 +46,7 @@
     "preflight": {
       "command": "make preflight",
       "status": "passed",
-      "log": "/private/tmp/vault-zcash-clarity-preflight.log"
+      "log": "/private/tmp/vault-quote-error-preflight.log"
     },
     "typecheck": {
       "status": "within_existing_baseline",
@@ -59,7 +60,7 @@
       "platform": "macOS arm64 development",
       "signed": false,
       "notarized": false,
-      "log": "/private/tmp/vault-zcash-clarity-native-build.log"
+      "log": "/private/tmp/vault-quote-error-native-build.log"
     },
     "certifiedEmulator": {
       "status": "verified",
@@ -108,16 +109,27 @@
         "macOS build",
         "Intel macOS packaged-app smoke"
       ],
-      "note": "Application source is unchanged since this run; subsequent candidate edits record release evidence only."
+      "note": "Previous candidate CI passed. The new quote-error parsing code requires the next candidate CI run."
+    },
+    "quoteErrorParsing": {
+      "status": "passed",
+      "focusedTests": 77,
+      "newRegressionTests": 3,
+      "cases": [
+        "Gateway nested error.message in objects and JSON text",
+        "Pioneer top-level messages and plain text",
+        "Empty and malformed bodies fall through to the available diagnostic"
+      ]
     }
   },
   "gatewayDependency": {
     "url": "https://oracles.cc",
-    "deployedRevision": "238d986a6b7efc949439a88351454fb2e78b0e49",
+    "deployedRevision": "298ff3508a7a044cf8baaf7bfbe03b338c619070",
     "defaultApiBaseChanged": false,
     "quoteAndCertificateEvidence": "projects/keepkey-vault/docs/relay-clearsign-audit-20261102/reviewed-swaps-live.json",
     "nativeProtocolPrecisionEvidence": "projects/keepkey-vault/docs/relay-clearsign-audit-20261102/eth-ltc-protocol-precision-live.json",
-    "ethToLtcAvailabilityAtInspection": "unavailable_thorchain_eth_trading_halted_no_fallback_route"
+    "ethToLtcAvailabilityAtInspection": "unavailable_thorchain_eth_trading_halted_no_fallback_route",
+    "tradingHaltMessageEvidence": "projects/keepkey-vault/docs/relay-clearsign-audit-20261102/swap-halt-message-live.json"
   },
   "existingDraft": {
     "tag": "v1.6.8",
@@ -166,7 +178,7 @@
   "runningApp": {
     "version": "1.6.8",
     "deviceConnectedAtInspection": true,
-    "candidateRestartPerformed": true,
-    "note": "Latest local candidate was launched for Litecoin testing. Public health reported ready and healthy with a connected device; gateway precision fix needs no further app restart."
+    "candidateRestartPerformed": false,
+    "note": "Existing local wallet session remains open. Candidate containing nested quote-error parsing is built on disk and takes effect on the next app restart. Gateway halt-message changes apply to new quote requests without an app restart."
   }
 }
