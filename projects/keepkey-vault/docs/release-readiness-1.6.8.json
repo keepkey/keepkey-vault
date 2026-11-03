@@ -1,7 +1,7 @@
 {
   "version": "1.6.8",
   "status": "candidate_prepared_not_published",
-  "recordedAt": "2026-11-03T17:12:56.738177+00:00",
+  "recordedAt": "2026-11-03T18:21:44.848Z",
   "branch": "prepare/1.6.8-candidate",
   "candidateCodeRevision": "1e56342a77dab90cb0677de507c3749cb84daa62",
   "baseReleaseRevision": "1368fadbb17516553c720ea535fe249c6b3f37d7",
@@ -97,13 +97,27 @@
       },
       "realFundsUsed": false,
       "customerBalanceReconciled": false
+    },
+    "platformCi": {
+      "status": "passed",
+      "revision": "bcbcb89ca0d1092ec22c3c28d56e16ab80e87353",
+      "run": "https://github.com/keepkey/keepkey-vault/actions/runs/41682359196",
+      "jobs": [
+        "Linux core",
+        "Linux x64 build",
+        "macOS build",
+        "Intel macOS packaged-app smoke"
+      ],
+      "note": "Application source is unchanged since this run; subsequent candidate edits record release evidence only."
     }
   },
   "gatewayDependency": {
     "url": "https://oracles.cc",
-    "deployedRevision": "87c715a23009df0bb6628a8de8a52accdb3cfc88",
+    "deployedRevision": "238d986a6b7efc949439a88351454fb2e78b0e49",
     "defaultApiBaseChanged": false,
-    "quoteAndCertificateEvidence": "projects/keepkey-vault/docs/relay-clearsign-audit-20261102/reviewed-swaps-live.json"
+    "quoteAndCertificateEvidence": "projects/keepkey-vault/docs/relay-clearsign-audit-20261102/reviewed-swaps-live.json",
+    "nativeProtocolPrecisionEvidence": "projects/keepkey-vault/docs/relay-clearsign-audit-20261102/eth-ltc-protocol-precision-live.json",
+    "ethToLtcAvailabilityAtInspection": "unavailable_thorchain_eth_trading_halted_no_fallback_route"
   },
   "existingDraft": {
     "tag": "v1.6.8",
@@ -151,9 +165,8 @@
   ],
   "runningApp": {
     "version": "1.6.8",
-    "backendPidAtInspection": 82200,
     "deviceConnectedAtInspection": true,
-    "candidateRestartPerformed": false,
-    "note": "Existing wallet session left running; candidate build is on disk."
+    "candidateRestartPerformed": true,
+    "note": "Latest local candidate was launched for Litecoin testing. Public health reported ready and healthy with a connected device; gateway precision fix needs no further app restart."
   }
 }
