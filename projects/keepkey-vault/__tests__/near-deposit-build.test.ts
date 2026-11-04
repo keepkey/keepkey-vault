@@ -46,7 +46,22 @@ for (const source of sources) test(`NEAR ${source.kind} plain deposit reaches it
   }
   builds.length = 0
   const grid = fakeTronGrid()
-  if (source.chain === 'tron') globalThis.fetch = grid.handler
+  let statusReads = 0
+  globalThis.fetch = (async (input: any, init?: RequestInit) => {
+    const url = new URL(typeof input === 'string' ? input : input.url)
+    if (url.origin === 'https://1click.chaindefuser.com' && url.pathname === '/v0/status') {
+      expect(url.searchParams.get('depositAddress')).toBe(source.deposit)
+      statusReads++
+      return Response.json({ status: 'PENDING_DEPOSIT', quoteResponse: {
+        quoteRequest: { refundTo: params.fromAddressOverride, refundType: 'ORIGIN_CHAIN',
+          recipient: params.toAddressOverride, recipientType: 'DESTINATION_CHAIN', depositType: 'ORIGIN_CHAIN',
+          deadline: new Date(Date.now() + 3_600_000).toISOString() },
+        quote: { depositAddress: source.deposit },
+      } })
+    }
+    if (source.chain === 'tron') return grid.handler(input, init)
+    throw new Error(`unexpected fixture fetch: ${url.pathname}`)
+  }) as typeof fetch
   const preview = await previewSwapBuild(params, ctx)
   if (source.kind === 'xrp') {
     expect(preview.unsignedTx.payment).toMatchObject({ amount: source.base, destination: source.deposit })
@@ -61,6 +76,7 @@ for (const source of sources) test(`NEAR ${source.kind} plain deposit reaches it
     expect(preview.unsignedTx.rawTx).toContain('fixture-')
   }
   await expect(executeSwap(params, ctx)).rejects.toThrow('TEST_STOP_BEFORE_DEVICE')
+  expect(statusReads).toBe(1)
   expect(signingBoundary).toBe(true)
   if (source.chain === 'tron') expect(grid.requests[source.kind === 'trc20' ? 'triggersmartcontract' : 'createtransaction']).toHaveLength(2)
   else expect(builds).toHaveLength(2)

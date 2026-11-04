@@ -22,6 +22,7 @@ import { evmCallRequiresAdvancedMode } from './evm-signing-policy'
 import { selectSwapRoute, isRelaySolverDeposit } from './swap-route-selection'
 import { resolveSwapEvmSchema } from './swap-evm-review'
 import { assertPrebuiltSwapExecution } from './swap-preflight'
+import { assertNearIntentsPlainDeposit } from './near-intents-deposit'
 import { bufferedSwapGasLimit } from '../shared/swap-gas'
 import { certifiedSolanaProofApplies, findCertifiedSolanaProof } from './solana-certified-registry'
 import { hasCompleteCertifiedSolanaEnvelope, supportsCertifiedClearSign } from './solana-certified-policy'
@@ -43,7 +44,6 @@ import {
   parseAssetsResponse,
   parseSwapQuoteError,
   isNativeDepositCaip,
-  nearIntentsDepositFindings,
 } from './swap-parsing'
 
 const TAG = '[swap]'
@@ -454,7 +454,7 @@ export async function getSwapQuote(params: SwapQuoteParams, device: {
   //   B) EVM→* deposit-channel: relay.value >> requested amount means the provider
   //      returned its minimum (not the user's amount). Detect and throw early so the
   //      user sees "too small" at quote time instead of "insufficient balance" at build.
-  if (result.swapper === 'NEAR Intents') {
+  if (result.swapper === 'NEAR Intents' || result.integration === 'nearIntents') {
     if (isNearIntentsPlainDepositSource(params.fromCaip)) {
       // ── Refund-address safety validation (two independent layers) ──────────────
       // A confirmed fund loss occurred when 1Click was given keepkey.near as the
@@ -507,60 +507,10 @@ export async function getSwapQuote(params: SwapQuoteParams, device: {
       // 1Click (different fund-loss path) — also blocked. A non-empty depositMemo
       // means the deposit needs a memo/destination tag, which a plain transfer
       // never sends (an XRP deposit without its tag is not credited) — blocked.
-      if (depositAddr) {
-        try {
-          const oneClickResp = await fetch(
-            `https://1click.chaindefuser.com/v0/status?depositAddress=${encodeURIComponent(depositAddr)}`,
-            { signal: AbortSignal.timeout(8000) },
-          )
-          if (!oneClickResp.ok) {
-            throw new Error(
-              `NEAR Intents: 1Click returned ${oneClickResp.status} for deposit address — ` +
-              `cannot verify refund address. Do not proceed.`
-            )
-          }
-          const oneClickData = await oneClickResp.json() as any
-          const oneClickRefundTo = (oneClickData?.quoteResponse?.quoteRequest?.refundTo as string | undefined)?.trim()
-          if (!oneClickRefundTo) {
-            throw new Error(
-              'NEAR Intents: 1Click response missing quoteRequest.refundTo — cannot verify refund safety.'
-            )
-          }
-          if (stripBchPrefix(oneClickRefundTo) !== senderAddrNorm) {
-            throw new Error(
-              `NEAR Intents 1Click refundTo mismatch — 1Click has "${oneClickData?.quoteResponse?.quoteRequest?.refundTo}" ` +
-              `but your wallet address is "${params.fromAddress}". ` +
-              `Do not proceed: a refund would not return to your wallet.`
-            )
-          }
-          const depositMemo = oneClickData?.quoteResponse?.quote?.depositMemo
-          if (depositMemo != null && String(depositMemo).trim() !== '') {
-            throw new Error(
-              'NEAR Intents: this deposit requires a memo/destination tag, which KeepKey Desktop ' +
-              'does not send with a plain deposit. Do not proceed: the deposit would not be credited.'
-            )
-          }
-          if (oneClickData?.quoteResponse?.quoteRequest?.depositType !== 'ORIGIN_CHAIN') {
-            throw new Error('NEAR Intents: 1Click deposit is not on the source chain. Get a new quote.')
-          }
-          // Apply the same deposit/recipient/refund review rules before a quote
-          // can reach execution. Matching refundTo text alone is insufficient:
-          // refundType may still keep funds inside Intents instead of returning
-          // them on chain. Missing records must not count as a verified deposit.
-          const verification = nearIntentsDepositFindings(oneClickData, {
-            depositAddress: depositAddr, from: senderAddrNorm, recipient: recipientAddr,
-          })
-          const unsafe = verification.findings.find(finding => finding.severity === 'danger')
-          if (unsafe) throw new Error(`NEAR Intents: ${unsafe.message}`)
-          if (verification.limitations.length > 0) {
-            throw new Error('NEAR Intents: cannot confirm deposit details with 1Click. Get a new quote.')
-          }
-          swapLog(`${TAG} NEAR Intents Layer 2 OK: 1Click deposit, recipient and on-chain refund verified, no depositMemo`)
-        } catch (e: any) {
-          if (e.message.startsWith('NEAR Intents')) throw e
-          throw new Error(`NEAR Intents: failed to verify refund address with 1Click API: ${e.message}`)
-        }
-      }
+      await assertNearIntentsPlainDeposit({
+        depositAddress: depositAddr, from: senderAddrNorm, recipient: recipientAddr,
+      })
+      swapLog(`${TAG} NEAR Intents Layer 2 OK: 1Click deposit, recipient and on-chain refund verified, no depositMemo`)
       // ─────────────────────────────────────────────────────────────────────────
     }
 
@@ -744,6 +694,24 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
     toAddress = typeof toAddrResult === 'string' ? toAddrResult : toAddrResult?.address
   }
   if (!toAddress) throw new Error('Could not derive destination address')
+
+  // REST/RPC execution can be called without first fetching a quote, and a
+  // registered channel can expire or receive a deposit after quote time.
+  // Check the actual source chain as well as the caller's CAIP so a mismatched
+  // chain ID cannot move a plain transfer around this boundary.
+  if ((params.swapper === 'NEAR Intents' || params.integration === 'nearIntents')
+    && isNearIntentsPlainDepositSource(fromChain.caip)) {
+    if (params.fromCaip.split('/')[0] !== fromChain.networkId
+      || params.toCaip.split('/')[0] !== toChain.networkId) {
+      throw new Error('NEAR Intents: swap assets do not match the execution chains. Get a new quote.')
+    }
+    if (params.relayTx || params.memo) {
+      throw new Error('NEAR Intents: this source requires a plain deposit without a prebuilt transaction or memo. Get a new quote.')
+    }
+    await assertNearIntentsPlainDeposit({
+      depositAddress: params.inboundAddress, from: fromAddress, recipient: toAddress,
+    })
+  }
 
   // SAFETY: Reject memos containing extended pubkeys — these are never valid destinations
   // and indicate the quote was fetched with an unresolved xpub address.
