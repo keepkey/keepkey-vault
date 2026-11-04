@@ -856,6 +856,10 @@ export async function refreshSwap(txid: string, deviceId?: string, walletId?: st
       )
       if (resp.ok) {
         const data = await resp.json() as any
+        // A newer poll may have settled this same live object while the
+        // request was in flight. Do not repeat its completion event/ledger
+        // write using an older response with no received amount.
+        if (isTerminalSwapStatus(swap.status)) return swap
         const settlement = classifyNearIntentsStatus(swap, data)
         const previousStatus = swap.status
         // Another poll may have completed while this request was in flight.

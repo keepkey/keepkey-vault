@@ -2,13 +2,14 @@ import { afterEach, expect, mock, test } from 'bun:test'
 const fetchBefore = globalThis.fetch
 afterEach(() => { globalThis.fetch = fetchBefore })
 const records = new Map<string, any>()
+const ledgerRecords: any[] = []
 mock.module('../src/bun/db', () => ({
   insertSwapHistory: () => {}, getSwapHistory: () => [],
   getSwapHistoryByTxid: (txid: string) => records.get(txid),
   updateSwapHistoryStatus: (txid: string, status: string) => { records.get(txid).status = status },
   setSwapRelayRequestId: () => {},
 }))
-mock.module('../src/bun/ledger', () => ({ recordSwap: () => {} }))
+mock.module('../src/bun/ledger', () => ({ recordSwap: (record: any) => ledgerRecords.push(record) }))
 mock.module('../src/bun/engine-controller', () => ({ withTimeout: async (operation: Promise<any>) => operation }))
 mock.module('../src/bun/pioneer', () => ({ getPioneer: async () => ({
   GetPendingSwap: async () => ({ data: { status: 'pending', confirmations: 0 } }),
@@ -19,7 +20,7 @@ const from = '0x1111111111111111111111111111111111111111'
 const deposit = '0x2222222222222222222222222222222222222222'
 const recipient = 'rRecipientFixture'
 function fixture(txid: string) {
-  const row = { txid, status: 'pending', fromCaip: 'eip155:1/slip44:60',
+  const row = { txid, deviceId: 'fixture-device', status: 'pending', fromCaip: 'eip155:1/slip44:60',
     toCaip: 'ripple:4109c6f2045fc7eff4cde8f9905d19c2/slip44:144',
     fromAmount: '0.003', quotedOutput: '5', minimumOutput: '4.9', fromChainId: 'ethereum', toChainId: 'ripple',
     integration: 'nearIntents', swapper: 'NEAR Intents', inboundAddress: deposit,
@@ -55,4 +56,6 @@ test('an older overlapping poll cannot overwrite a verified completed payout', a
   completeOld!(Response.json(status('PROCESSING')))
   expect((await oldPoll)?.status).toBe('completed')
   expect(records.get(txid).status).toBe('completed')
+  expect(ledgerRecords.filter(record => record.txid === txid)).toHaveLength(1)
+  expect(ledgerRecords.find(record => record.txid === txid).toAmount).toBe(5)
 })
