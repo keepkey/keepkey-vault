@@ -427,6 +427,9 @@ test-unit:
 	cd $(PROJECT_DIR) && bun test __tests__/swap-tracking-context.test.ts
 	cd $(PROJECT_DIR) && bun test __tests__/swap-progress-polling.test.ts
 	cd $(PROJECT_DIR) && bun test __tests__/swap-ui-control.test.ts
+	cd $(PROJECT_DIR) && bun test __tests__/swap-api-assets.test.ts __tests__/swap-quote-lease.test.ts
+	cd $(PROJECT_DIR) && bun test __tests__/swap-rest-approval.test.ts
+	cd $(PROJECT_DIR) && bun test src/bun/txbuilder/xrp.test.ts
 	cd $(PROJECT_DIR) && bun test __tests__/swap-fees.test.ts __tests__/swap-server-capabilities.test.ts __tests__/swap-registration.test.ts __tests__/near-intents-status.test.ts
 	cd $(PROJECT_DIR) && bun test __tests__/near-deposit-build.test.ts
 	cd $(PROJECT_DIR) && bun test __tests__/near-refund-safety.test.ts

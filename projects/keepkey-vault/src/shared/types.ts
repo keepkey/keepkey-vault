@@ -2050,6 +2050,11 @@ export interface SwapQuoteFeeItem {
 
 /** Quote response from Pioneer (aggregated across DEXes) */
 export interface SwapQuote {
+  /** Vault-issued, single-execution identity; never a provider's quote ID. */
+  quoteId?: string
+  quoteCreatedAt?: number
+  quoteExpiresAt?: number
+  risk?: import('./swap-risk').SwapRisk
   expectedOutput: string     // human-readable amount out
   minimumOutput: string      // after slippage
   minimumOutputSource?: 'memo' | 'quote' | 'estimate'
@@ -2082,7 +2087,7 @@ export interface SwapQuote {
   /** Inferred from the source transaction, not a provider's review claim. */
   executionMode?: 'relay-solver-deposit'
   minAmountIn?: string       // minimum sell amount for this route (human-readable, in sell asset units)
-  /** Actual send amount after UTXO fee deduction (NEAR Intents MAX only).
+  /** Actual send amount after MAX fee/reserve deduction (UTXO or XRP).
    *  When set, the tracker must record this instead of the original params.amount. */
   netFromAmount?: string
   /** NEAR Intents 1Click deposit address — the address funds are actually sent to.
@@ -2107,6 +2112,7 @@ export interface SwapQuote {
  *  THORChain-style asset names are display concerns — derived from CAIP
  *  by the tracker, not passed as parameters. */
 export interface SwapQuoteParams {
+  fromEvmAddressIndex?: number
   fromCaip: string         // CAIP-19 of the sell asset
   toCaip: string           // CAIP-19 of the buy asset
   amount: string           // human-readable amount
@@ -2121,6 +2127,8 @@ export interface SwapQuoteParams {
  *  resolves symbol/name/asset-string for display from the CAIP via
  *  pioneer-discovery. Caller never specifies a token via symbol. */
 export interface ExecuteSwapParams {
+  quoteId?: string
+  riskAcknowledged?: boolean
   fromChainId: string             // our chain id (resolves to ChainDef for signing)
   toChainId: string               // our chain id
   fromCaip: string                // CAIP-19 — primary identifier
@@ -2474,8 +2482,8 @@ export interface SwapUiState {
  *  can drive every UI button up to the device prompt, then the user must
  *  confirm on hardware. */
 export type SwapUiCommand =
-  | { kind: 'open'; fromAsset?: string; toAsset?: string; amount?: string; slippageBps?: number; useCustomAddress?: boolean; customToAddress?: string }
-  | { kind: 'set'; fromAsset?: string; toAsset?: string; amount?: string; slippageBps?: number; inputMode?: 'crypto' | 'fiat'; isMax?: boolean; useCustomAddress?: boolean; customToAddress?: string }
+  | { kind: 'open'; fromAsset?: string; toAsset?: string; fromAssetDefinition?: SwapAsset; toAssetDefinition?: SwapAsset; amount?: string; slippageBps?: number; useCustomAddress?: boolean; customToAddress?: string }
+  | { kind: 'set'; fromAsset?: string; toAsset?: string; fromAssetDefinition?: SwapAsset; toAssetDefinition?: SwapAsset; amount?: string; slippageBps?: number; inputMode?: 'crypto' | 'fiat'; isMax?: boolean; useCustomAddress?: boolean; customToAddress?: string }
   | { kind: 'requote' }
   | { kind: 'advance' }   // input → review (UI navigation only)
   | { kind: 'confirm' }   // click "Confirm Swap" → kicks off executeSwap

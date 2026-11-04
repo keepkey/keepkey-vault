@@ -432,7 +432,7 @@ function parseSingleQuote(
   }
 
   // Expiry for depositWithExpiry
-  const expiry = raw.expiry || quote.expiry || 0
+  const expiry = raw.expiry || quote.expiry || undefined
 
   // Native THORChain/Maya swaps (RUNE, CACAO, and bank tokens TCY/RUJI/secured
   // assets) use MsgDeposit — no inbound vault needed.
@@ -544,7 +544,7 @@ function parseSingleQuote(
     inboundAddress: inboundAddress || '',
     router,
     memo,
-    expiry: Number(expiry),
+    expiry: expiry == null ? undefined : Number(expiry),
     fees: {
       affiliate: String(affiliateFee),
       outbound: String(outboundFee),

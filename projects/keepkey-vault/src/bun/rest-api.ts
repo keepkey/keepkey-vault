@@ -152,6 +152,7 @@ export interface RestApiCallbacks {
   /** Firmware-filtered swap asset list — mirrors the RPC getSwapAssets so REST
    *  clients never see assets the connected device's firmware can't sign. */
   getDeviceSwapAssets?: () => Promise<import('../shared/types').SwapAsset[]>
+  resolveSwapAsset?: (key: string) => Promise<import('../shared/types').SwapAsset | null>
   /** Push a swap-cmd to the WebView (used by /api/v2/swap/{open,set,requote,close}) */
   sendSwapCmd?: (cmd: import('../shared/types').SwapUiCommand) => void
   /** Headless swap quote (BEX swap epic) — same engine as the dialog, no GUI.
@@ -160,6 +161,9 @@ export interface RestApiCallbacks {
   /** Headless swap execute — signs on the device, broadcasts, registers tracking.
    *  Used by POST /api/v2/swap/execute. Device still gates the signature. */
   executeSwapHeadless?: (params: import('../shared/types').ExecuteSwapParams) => Promise<import('../shared/types').SwapResult>
+  /** Validate saved quote terms before opening the REST approval card. The
+   * executor revalidates after human approval and before each signature. */
+  validateSwapExecutionHeadless?: (params: import('../shared/types').ExecuteSwapParams) => import('../shared/types').ExecuteSwapParams
   /** Fail-closed pre-send preflight for the headless Zcash send/shield/deshield
    *  paths. Mirrors the RPC flow: prove the cached Orchard FVK belongs to the
    *  CONNECTED device (purges stale sidecar state + re-derives on mismatch) and
@@ -1727,6 +1731,14 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             return json({ error: `Missing signing payload — expected one of: ${requiredAny.join(', ')}` }, 400)
           }
 
+          let validatedSwapPreview: import('../shared/types').ExecuteSwapParams | undefined
+          if (path === '/api/v2/swap/execute') {
+            const swapBody = await parseRequest(req.clone(), S.SwapExecuteHeadlessRequest)
+            if (!callbacks.validateSwapExecutionHeadless) return json({ error: 'Swap quote validation unavailable' }, 503)
+            try { validatedSwapPreview = callbacks.validateSwapExecutionHeadless(swapBody as any) }
+            catch (error: any) { return json({ error: 'Swap quote rejected', details: error.message }, 409) }
+          }
+
           const { appName } = resolveAppInfo()
           const id = crypto.randomUUID()
           const signingInfo: SigningRequestInfo = { id, method: path, appName }
@@ -1738,7 +1750,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           // Try to extract useful details from the body without consuming it
           // (we'll parse body again in the handler below — Bun caches it)
           try {
-            const preview = await req.clone().json() as any
+            const preview = validatedSwapPreview ?? await req.clone().json() as any
             signingInfo.chain = path.split('/')[1] // e.g. "eth", "cosmos"
             signingInfo.rawRequestBody = preview    // full payload for UI transparency
 
@@ -1982,12 +1994,18 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
               // the device can only render "send X to <addr>". Surface the swap
               // terms (in/out asset, amount, expected output, router, memo) in
               // the approval overlay so the user consents to the actual swap,
-              // not just an opaque transfer. Flagged blind: the memo is not
-              // human-verifiable on-device.
+              // not just an opaque transfer. Contract/memo routes retain their
+              // conservative blind-sign prediction until the tx is built.
               signingInfo.chain = (preview.fromChainId || preview.fromCaip || '').toString().split('/')[0]
               signingInfo.to = preview.router || preview.inboundAddress
               signingInfo.value = `${preview.amount} (${preview.fromCaip})`
-              signingInfo.needsBlindSigning = true
+              const nativeEvmDeposit = /^eip155:\d+\/slip44:60$/.test(preview.fromCaip)
+                && preview.relayTx?.isDepositChannel === true && preview.relayTx.data === '0x'
+                && !preview.relayTx.serializedTx
+              // An empty-data native deposit has no contract calldata to
+              // blind-sign. Cross-chain intent remains explicit in this card;
+              // actual signing still enforces transaction-specific policy.
+              signingInfo.needsBlindSigning = nativeEvmDeposit ? undefined : true
               const swapper = preview.swapper || preview.integration || 'swap'
               signingInfo.data =
                 `Swap via ${swapper}\n` +

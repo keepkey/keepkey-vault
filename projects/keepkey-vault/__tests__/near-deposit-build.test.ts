@@ -20,6 +20,18 @@ mock.module('../src/bun/pioneer', () => ({ getPioneer: async () => pioneer, getP
 mock.module('electrobun/bun', () => ({ Utils: { paths: { userData: '/private/tmp/vault-near-build-test' } } }))
 const { previewSwapBuild, executeSwap } = await import('../src/bun/swap')
 
+test('an expired EVM router deadline is refused instead of silently extended', async () => {
+  let signs = 0
+  const ctx: any = { wallet: {}, getAllChains: () => CHAINS, getEvmRpcSource: () => { throw new Error('No network request expected') },
+    pushSubStage: () => {}, wrapSign: async () => { signs++; throw new Error('No device request expected') } }
+  const params: ExecuteSwapParams = { fromChainId: 'ethereum', toChainId: 'ripple', fromCaip: 'eip155:1/slip44:60',
+    toCaip: CHAINS.find(c => c.id === 'ripple')!.caip, amount: '0.003', memo: '=:XRP.XRP:rRecipient',
+    inboundAddress: '0xVault', router: '0xRouter', expectedOutput: '6', expiry: Math.floor(Date.now() / 1000) - 1,
+    fromAddressOverride: '0xSender', toAddressOverride: 'rRecipient' }
+  await expect(executeSwap(params, ctx)).rejects.toThrow(/expired/)
+  expect(signs).toBe(0)
+})
+
 const sources = [
   { chain: 'solana', caip: CHAINS.find(chain => chain.id === 'solana')!.caip, amount: '0.25', kind: 'sol', base: '250000000', deposit: 'ALUVVWPJb2XY1AXzh3mxAnGVGxgwbLvYZKufs5hk1kzK' },
   { chain: 'solana', caip: 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp/token:Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB', amount: '12.345678', decimals: 6, kind: 'spl', base: '12345678', deposit: 'ALUVVWPJb2XY1AXzh3mxAnGVGxgwbLvYZKufs5hk1kzK' },

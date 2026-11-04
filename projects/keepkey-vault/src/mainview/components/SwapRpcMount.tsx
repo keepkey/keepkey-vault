@@ -13,6 +13,18 @@ import type { SwapUiCommand } from "../../shared/types"
 
 const SwapDialog = lazy(() => import("./SwapDialog").then(m => ({ default: m.SwapDialog })))
 
+// This effect belongs inside Suspense's primary tree. It cannot commit while
+// the lazy dialog is still loading, so its command listener exists when the
+// seed is delivered (a parent effect outside Suspense ran during fallback).
+function SeededSwapDialog({ seed, onClose }: { seed: SwapUiCommand | null; onClose: () => void }) {
+  useEffect(() => {
+    if (seed?.kind !== 'open') return
+    const { kind: _kind, ...fields } = seed
+    dispatchLocalRpcMessage('swap-cmd', { kind: 'set', ...fields } as SwapUiCommand)
+  }, [seed])
+  return <SwapDialog open onClose={onClose} />
+}
+
 export function SwapRpcMount() {
   const [open, setOpen] = useState(false)
   const [pendingSeed, setPendingSeed] = useState<SwapUiCommand | null>(null)
@@ -25,22 +37,11 @@ export function SwapRpcMount() {
     })
   }, [])
 
-  // After the dialog mounts (child useEffects run before this parent
-  // useEffect), re-emit the open seed as a 'set' command so the dialog's
-  // listener — registered during its own mount effect — applies the fields.
-  useEffect(() => {
-    if (!open || !pendingSeed || pendingSeed.kind !== 'open') return
-    const { kind: _kind, ...rest } = pendingSeed
-    void _kind
-    dispatchLocalRpcMessage('swap-cmd', { kind: 'set', ...rest } as SwapUiCommand)
-    setPendingSeed(null)
-  }, [open, pendingSeed])
-
   if (!open) return null
 
   return (
     <Suspense fallback={null}>
-      <SwapDialog open={open} onClose={() => setOpen(false)} />
+      <SeededSwapDialog seed={pendingSeed} onClose={() => setOpen(false)} />
     </Suspense>
   )
 }
