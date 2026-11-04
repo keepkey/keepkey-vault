@@ -1,0 +1,14 @@
+{
+  "recordedAt": "2026-11-03T21:21:24.608613+00:00",
+  "vaultCodeRevision": "471fa5169ed21d99361b0e5065f677206caba6c0",
+  "gatewayRevision": "a1f079b1861bdceaa5d7e404858c29e1e935b8a3",
+  "manualRefresh": "passed_in_running_native_app",
+  "accountBalanceParity": "all_three_script_families_match_old_api",
+  "receiveMetadata": "native BIP84/p2wpkh and wrapped BIP49/p2sh-p2wpkh match selected account",
+  "fundingOutputs": "both confirmed and matched to saved BIP44 and BIP49 paths",
+  "deviceConnected": true,
+  "sourceUnits": "signed pending changes included; each account retains exact base units",
+  "walletIdentifiersAndQuantitiesOmitted": true,
+  "agentSigned": false,
+  "agentBroadcast": false
+}

@@ -177,7 +177,7 @@ export function AuditKnownPaths({ chainId, defaultAddress, onFound, onOpenUrl }:
         {err && <Text fontSize="xs" color="var(--rose)">{err}</Text>}
       </Flex>
       <Text fontSize="11px" color="var(--text-3)" mt="2">{isLtc
-        ? 'Funds on any of these Litecoin branches ARE tracked — they show in your portfolio and are spendable.'
+        ? 'Standard Litecoin branches belong to accounts the portfolio can track. If a found balance is missing there, use “track account” on the finding above or send the Audit report to support.'
         : 'Funds on a non-standard path can’t be tracked in-app — use “Still missing?” to send them to support.'}</Text>
     </Box>
   )

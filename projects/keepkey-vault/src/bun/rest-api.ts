@@ -10,6 +10,7 @@ import { WalletCacheSession, WalletSessionChangedError, WalletSessionMap } from 
 import type { SigningRequestInfo, ApiLogEntry, EIP712DecodedInfo } from '../shared/types'
 import { applyTronSigningPreview } from './tron-preview'
 import { deviceErrorMessage } from '../shared/device-error'
+import { DEFAULT_PIONEER_API_BASE } from '../shared/pioneer-server'
 import type { ClearSignEvent } from '../shared/types'
 import { createHash } from 'crypto'
 import { networkInterfaces } from 'os'
@@ -4006,7 +4007,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
         // ── PIONEER URL MANAGEMENT ────────────────────────────────────
         if (path === '/api/pioneer/status' && method === 'GET') {
           const base = callbacks.getPioneerApiBase?.() ?? 'unknown'
-          return json({ url: base, is_default: base === 'https://api.keepkey.info' || base === 'unknown' })
+          return json({ url: base, is_default: base === DEFAULT_PIONEER_API_BASE })
         }
 
         if (path === '/api/pioneer/url' && method === 'POST') {
@@ -4016,7 +4017,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           if (url && !/^https?:\/\//i.test(url)) return json({ error: 'URL must start with http:// or https://' }, 400)
           await callbacks.setPioneerApiBase?.(url)
           const newBase = callbacks.getPioneerApiBase?.() ?? 'unknown'
-          return json({ url: newBase, is_default: !url })
+          return json({ url: newBase, is_default: newBase === DEFAULT_PIONEER_API_BASE })
         }
 
         // token visibility overrides. Useful for diagnosing balance/spam issues

@@ -1,0 +1,65 @@
+{
+  "checkedAt": "2026-11-02T18:07:25.044Z",
+  "origin": "https://oracles.cc",
+  "firmware": "7.16.0",
+  "deviceSigningPerformed": false,
+  "broadcastPerformed": false,
+  "probes": [
+    {
+      "pair": "ETH → USDT",
+      "routes": [
+        {
+          "integration": "uniswap",
+          "swapper": "Uniswap",
+          "expectedOutput": "22.574606",
+          "minimumOutput": "22.348859",
+          "hostReviewScope": "swap",
+          "to": "0x3fc91a3afd70395cd496c647d5a6cc9d4b2b7fad",
+          "selector": "0x3593564c",
+          "calldataBytes": 964,
+          "feesBps": 30
+        },
+        {
+          "integration": "zeroex",
+          "swapper": "0x",
+          "expectedOutput": "22.55487",
+          "minimumOutput": "22.329321",
+          "hostReviewScope": "not-verified-by-this-probe",
+          "to": "0x0000000000001ff3684f28c67538d4d072c22734",
+          "selector": "0x2213bc0b",
+          "calldataBytes": 2276,
+          "feesBps": 46
+        },
+        {
+          "integration": "relay",
+          "swapper": "Relay",
+          "expectedOutput": "22.383571",
+          "minimumOutput": "22.159736",
+          "hostReviewScope": "source-deposit",
+          "to": "0x4cd00e387622c35bddb9b4c962c136462338bc31",
+          "selector": "0x49290c1c",
+          "calldataBytes": 68,
+          "feesBps": 30
+        }
+      ],
+      "selected": "uniswap"
+    },
+    {
+      "pair": "ETH → Base USDC",
+      "routes": [
+        {
+          "integration": "relay",
+          "swapper": "Relay",
+          "expectedOutput": "22.475619",
+          "minimumOutput": "22.250863",
+          "hostReviewScope": "source-deposit",
+          "to": "0x4cd00e387622c35bddb9b4c962c136462338bc31",
+          "selector": "0x49290c1c",
+          "calldataBytes": 68,
+          "feesBps": 30
+        }
+      ],
+      "selected": "relay"
+    }
+  ]
+}

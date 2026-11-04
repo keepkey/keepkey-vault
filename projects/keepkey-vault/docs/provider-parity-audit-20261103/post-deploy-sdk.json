@@ -1,0 +1,47 @@
+{
+  "checkedAt": "2026-11-03T20:33:43.549Z",
+  "sdk": "Vault installed @pioneer-platform/pioneer-client",
+  "fixtureOnly": true,
+  "signed": false,
+  "broadcast": false,
+  "observations": [
+    {
+      "origin": "https://api.keepkey.info",
+      "withMode": false,
+      "extensionSent": false,
+      "success": true,
+      "providers": [
+        "thorchain"
+      ]
+    },
+    {
+      "origin": "https://api.keepkey.info",
+      "withMode": true,
+      "extensionSent": false,
+      "success": true,
+      "providers": [
+        "thorchain"
+      ]
+    },
+    {
+      "origin": "https://oracles.cc",
+      "withMode": false,
+      "extensionSent": false,
+      "success": true,
+      "providers": [
+        "nearIntents",
+        "relay"
+      ]
+    },
+    {
+      "origin": "https://oracles.cc",
+      "withMode": true,
+      "extensionSent": true,
+      "success": true,
+      "providers": [
+        "nearIntents",
+        "relay"
+      ]
+    }
+  ]
+}

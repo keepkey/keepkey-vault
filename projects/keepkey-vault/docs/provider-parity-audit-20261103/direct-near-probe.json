@@ -1,0 +1,191 @@
+{
+  "checkedAt": "2026-11-03T19:39:12.335Z",
+  "pair": "ETH to LTC",
+  "amount": "0.021319",
+  "fixtureOnly": true,
+  "dry": true,
+  "signed": false,
+  "broadcast": false,
+  "near": [
+    {
+      "provider": "NEAR Intents direct",
+      "withKeepKeyFee": true,
+      "httpStatus": 201,
+      "quote": {
+        "amountIn": "21319000000000000",
+        "amountInFormatted": "0.021319",
+        "amountInUsd": "48.742482460000",
+        "minAmountIn": "21319000000000000",
+        "amountOut": "89548376",
+        "amountOutFormatted": "0.89548376",
+        "amountOutUsd": "48.490445604000",
+        "minAmountOut": "86861924",
+        "timeEstimate": 187,
+        "refundFee": "35000000000000",
+        "withdrawFee": "500"
+      },
+      "quoteRequest": {
+        "dry": true,
+        "depositMode": "SIMPLE",
+        "swapType": "EXACT_INPUT",
+        "slippageTolerance": 300,
+        "originAsset": "nep141:eth.omft.near",
+        "depositType": "ORIGIN_CHAIN",
+        "destinationAsset": "nep141:ltc.omft.near",
+        "amount": "21319000000000000",
+        "refundTo": "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045",
+        "refundType": "ORIGIN_CHAIN",
+        "recipient": "ltc1qw508d6qejxtdg4y5r3zarvary0c5xw7kgmn4n9",
+        "recipientType": "DESTINATION_CHAIN",
+        "deadline": "2026-11-03T20:09:09.878Z",
+        "confidentiality": "public",
+        "referral": "keepkey",
+        "quoteWaitingTimeMs": 0,
+        "appFees": [
+          {
+            "recipient": "caa0106da86351f909f1dfa28e7bfa65665554dc512ab2eedd431b040daa3a1f",
+            "fee": 15
+          },
+          {
+            "recipient": "5880ad2b362620fadf759cbceb1cd5737ce8c6ed7fb8e9942881e6731f9247dd",
+            "fee": 20
+          }
+        ],
+        "insured": false
+      }
+    },
+    {
+      "provider": "NEAR Intents direct",
+      "withKeepKeyFee": false,
+      "httpStatus": 201,
+      "quote": {
+        "amountIn": "21319000000000000",
+        "amountInFormatted": "0.021319",
+        "amountInUsd": "48.742482460000",
+        "minAmountIn": "21319000000000000",
+        "amountOut": "89654684",
+        "amountOutFormatted": "0.89654684",
+        "amountOutUsd": "48.548011386000",
+        "minAmountOut": "86965043",
+        "timeEstimate": 187,
+        "refundFee": "35000000000000",
+        "withdrawFee": "500"
+      },
+      "quoteRequest": {
+        "dry": true,
+        "depositMode": "SIMPLE",
+        "swapType": "EXACT_INPUT",
+        "slippageTolerance": 300,
+        "originAsset": "nep141:eth.omft.near",
+        "depositType": "ORIGIN_CHAIN",
+        "destinationAsset": "nep141:ltc.omft.near",
+        "amount": "21319000000000000",
+        "refundTo": "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045",
+        "refundType": "ORIGIN_CHAIN",
+        "recipient": "ltc1qw508d6qejxtdg4y5r3zarvary0c5xw7kgmn4n9",
+        "recipientType": "DESTINATION_CHAIN",
+        "deadline": "2026-11-03T20:09:09.878Z",
+        "confidentiality": "public",
+        "referral": "keepkey",
+        "quoteWaitingTimeMs": 0,
+        "insured": false,
+        "appFees": [
+          {
+            "recipient": "5880ad2b362620fadf759cbceb1cd5737ce8c6ed7fb8e9942881e6731f9247dd",
+            "fee": 20
+          }
+        ]
+      }
+    }
+  ],
+  "shapeShift": {
+    "httpStatus": 200,
+    "keys": [
+      "rates",
+      "timestamp",
+      "expiresAt"
+    ],
+    "rates": [
+      {
+        "swapperName": "Bebop",
+        "buyAmountCryptoBaseUnit": "0",
+        "error": {
+          "code": "UnsupportedChain",
+          "message": "unsupported chainId"
+        }
+      },
+      {
+        "swapperName": "BOB Gateway",
+        "buyAmountCryptoBaseUnit": "0",
+        "error": {
+          "code": "UnsupportedChain",
+          "message": "[BobGateway] unsupported buy chain: bip122:12a765e31ffd4059bada1e25190f6e98"
+        }
+      },
+      {
+        "swapperName": "ButterSwap",
+        "buyAmountCryptoBaseUnit": "0",
+        "error": {
+          "code": "UnsupportedChain",
+          "message": "[getButterRoute] Unsupported chainId"
+        }
+      },
+      {
+        "swapperName": "Chainflip",
+        "buyAmountCryptoBaseUnit": "0",
+        "error": {
+          "code": "UnsupportedChain",
+          "message": "unsupported chainId"
+        }
+      },
+      {
+        "swapperName": "MAYAChain",
+        "buyAmountCryptoBaseUnit": "0",
+        "error": {
+          "code": "UnsupportedChain",
+          "message": "[MayachainSwapper: assertValidTrade] - unsupported buy chain"
+        }
+      },
+      {
+        "swapperName": "NEAR Intents",
+        "buyAmountCryptoBaseUnit": "0",
+        "error": {
+          "code": "UnsupportedTradePair",
+          "message": "Asset LTC on Litecoin is not supported by NEAR Intents"
+        }
+      },
+      {
+        "swapperName": "Portals",
+        "buyAmountCryptoBaseUnit": "0",
+        "error": {
+          "code": "UnsupportedChain",
+          "message": "unsupported chainId"
+        }
+      },
+      {
+        "swapperName": "Relay",
+        "buyAmountCryptoBaseUnit": "0",
+        "error": {
+          "code": "UnsupportedTradePair",
+          "message": "asset 'Litecoin' on chainId 'bip122:12a765e31ffd4059bada1e25190f6e98' not supported"
+        }
+      },
+      {
+        "swapperName": "THORChain",
+        "buyAmountCryptoBaseUnit": "0",
+        "error": {
+          "code": "TradingHalted",
+          "message": "[getQuote]: Trading is halted, cannot process swap"
+        }
+      },
+      {
+        "swapperName": "0x",
+        "buyAmountCryptoBaseUnit": "0",
+        "error": {
+          "code": "UnsupportedChain",
+          "message": "unsupported chainId"
+        }
+      }
+    ]
+  }
+}

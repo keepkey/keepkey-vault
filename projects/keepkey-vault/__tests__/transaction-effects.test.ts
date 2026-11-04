@@ -239,6 +239,36 @@ describe('Vault ClearSign effect reports', () => {
     expect(report.stateReference.blockOrSlot).toBe('0x99')
   })
 
+  test('simulation RPC quantities never contain hdwallet leading zero bytes', async () => {
+    let checked = false
+    globalThis.fetch = (async (_url: string, init: RequestInit) => {
+      const request = JSON.parse(String(init.body))
+      if (request.method === 'eth_blockNumber') return Response.json({ result: '0x20' })
+      if (request.method === 'eth_getCode') return Response.json({ result: '0x6000' })
+      if (request.method !== 'eth_call') return Response.json({ error: { message: 'method not supported' } })
+      expect(request.params[0]).toMatchObject({ value: '0x0', gas: '0x70d60', nonce: '0x2a0', maxFeePerGas: '0x871a12a' })
+      checked = true
+      return Response.json({ result: '0x' })
+    }) as any
+    const report = await simulateEvmEffects({
+      chainId: 1, from: wallet, to: other, data: '0xcd6e13f7',
+      value: '0x00', gas: '0x070d60', nonce: '0x02a0', maxFeePerGas: '0x0871a12a',
+    }, 'http://rpc')
+    expect(checked).toBe(true)
+    expect(report.status).toBe('incomplete')
+  })
+
+  test('an out-of-gas execution answer is a failed simulation, not unavailable data', async () => {
+    globalThis.fetch = (async (_url: string, init: RequestInit) => {
+      const request = JSON.parse(String(init.body))
+      if (request.method === 'eth_blockNumber') return Response.json({ result: '0x20' })
+      return Response.json({ error: { message: request.method === 'eth_call' ? 'out of gas' : 'method not supported' } })
+    }) as any
+    const report = await simulateEvmEffects({ chainId: 1, from: wallet, to: other, data: '0xcd6e13f7' }, 'http://rpc')
+    expect(report.status).toBe('revert')
+    expect(report.warnings).toContainEqual(expect.objectContaining({ code: 'SIMULATION_REVERTED', message: expect.stringContaining('out of gas') }))
+  })
+
   test('Solana adapter requests inner execution and returns one report', async () => {
     const signature = Buffer.alloc(64)
     const ownerBytes = Buffer.alloc(32, 0x11)

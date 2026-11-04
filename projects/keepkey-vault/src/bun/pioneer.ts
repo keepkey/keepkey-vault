@@ -2,13 +2,16 @@
  * Pioneer API client singleton.
  *
  * Uses @pioneer-platform/pioneer-client against a configurable base URL.
- * Priority: DB setting > PIONEER_API_BASE env var > https://api.keepkey.info
+ * Uses the in-app server selection, or https://api.keepkey.info by default.
  */
 import Pioneer from '@pioneer-platform/pioneer-client'
 import { getSetting, setSetting } from './db'
 import { instrumentPortfolio } from './perf-telemetry'
+import { registerSwapServerCapabilities } from '../shared/swap-server-capabilities'
+import { registerPioneerEventCapabilities } from '../shared/pioneer-event-capabilities'
+import { DEFAULT_PIONEER_API_BASE, resolvePioneerApiBase } from '../shared/pioneer-server'
 
-export const DEFAULT_API_BASE = 'https://api.keepkey.info'
+export const DEFAULT_API_BASE = DEFAULT_PIONEER_API_BASE
 
 function getOrCreateQueryKey(): string {
   const saved = getSetting('pioneer_query_key')
@@ -29,8 +32,10 @@ const MIN_RETRY_DELAY = 5000 // 5s minimum between init retries
 let pioneerInstance: any = null
 let initPromise: Promise<any> | null = null
 let lastInitAttempt = 0
+let configurationGeneration = 0
 let registeredIdentity: string | null = null
 let registrationPromise: Promise<boolean> | null = null
+let registrationIdentity: string | null = null
 let offline = false
 
 export function setPioneerOffline(value: boolean): void {
@@ -39,18 +44,18 @@ export function setPioneerOffline(value: boolean): void {
 
 /** Resolve the Pioneer API base URL (no trailing slash). */
 export function getPioneerApiBase(): string {
-  const dbVal = getSetting('pioneer_api_base')
-  if (dbVal) return dbVal.replace(/\/+$/, '')
-  if (process.env.PIONEER_API_BASE) return process.env.PIONEER_API_BASE.replace(/\/+$/, '')
-  return DEFAULT_API_BASE
+  return resolvePioneerApiBase(getSetting('pioneer_api_base'))
 }
 
 /** Force re-initialization on next getPioneer() call. */
 export function resetPioneer(): void {
+  configurationGeneration++
   pioneerInstance = null
   initPromise = null
+  lastInitAttempt = 0
   registeredIdentity = null
   registrationPromise = null
+  registrationIdentity = null
 }
 
 /** Register the stable Vault query key before any authenticated route is used.
@@ -60,20 +65,24 @@ export async function ensurePioneerQueryKeyRegistered(): Promise<boolean> {
   const base = getPioneerApiBase()
   const qk = getQueryKey()
   const identity = `${base}\n${qk}`
+  const generation = configurationGeneration
+  const isCurrent = () => generation === configurationGeneration && base === getPioneerApiBase() && qk === getQueryKey()
   if (registeredIdentity === identity) return true
-  if (registrationPromise) return registrationPromise
+  if (registrationPromise && registrationIdentity === identity) return registrationPromise
 
   const username = qk.startsWith('vault:')
     ? qk.slice(0, 32)
     : `vk-${qk.slice(-20)}`.slice(0, 32)
-  registrationPromise = (async () => {
+  const attempt: Promise<boolean> = Promise.resolve().then(async () => {
     try {
+      if (!isCurrent()) return false
       const response = await fetch(`${base}/api/v1/user/register`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username, queryKey: qk }),
         signal: AbortSignal.timeout(10_000),
       })
+      if (!isCurrent()) return false
       if (!response.ok && response.status !== 409) {
         console.warn('[Pioneer] queryKey registration warning:', response.status, await response.text().catch(() => ''))
         return false
@@ -82,13 +91,18 @@ export async function ensurePioneerQueryKeyRegistered(): Promise<boolean> {
       console.log('[Pioneer] queryKey registered for authenticated routes')
       return true
     } catch (error: any) {
-      console.warn('[Pioneer] queryKey registration failed:', error?.message || error)
+      if (isCurrent()) console.warn('[Pioneer] queryKey registration failed:', error?.message || error)
       return false
     } finally {
-      registrationPromise = null
+      if (registrationPromise === attempt) {
+        registrationPromise = null
+        registrationIdentity = null
+      }
     }
-  })()
-  return registrationPromise
+  })
+  registrationIdentity = identity
+  registrationPromise = attempt
+  return attempt
 }
 
 export async function getPioneer(): Promise<any> {
@@ -98,62 +112,74 @@ export async function getPioneer(): Promise<any> {
   // Deduplicate concurrent init calls
   if (initPromise) return initPromise
 
-  // Enforce minimum delay between retries
-  const now = Date.now()
-  const timeSinceLast = now - lastInitAttempt
-  if (lastInitAttempt > 0 && timeSinceLast < MIN_RETRY_DELAY) {
-    await new Promise(r => setTimeout(r, MIN_RETRY_DELAY - timeSinceLast))
+  const generation = configurationGeneration
+  const base = getPioneerApiBase()
+  const qk = getQueryKey()
+  const isCurrent = () => !offline && generation === configurationGeneration && base === getPioneerApiBase() && qk === getQueryKey()
+  const assertCurrent = () => {
+    if (offline) throw new Error('OFFLINE: Pioneer initialization was cancelled by offline mode')
+    if (!isCurrent()) {
+      throw new Error('Pioneer server changed; retry the request')
+    }
   }
-  if (offline) throw new Error('OFFLINE: Pioneer is disabled in offline (airplane) mode')
-
-  lastInitAttempt = Date.now()
-
-  initPromise = (async () => {
+  const attempt: Promise<any> = Promise.resolve().then(async () => {
     try {
-      const base = getPioneerApiBase()
+      // Keep retries bounded, but bind the wait to this configuration too.
+      const timeSinceLast = Date.now() - lastInitAttempt
+      if (lastInitAttempt > 0 && timeSinceLast < MIN_RETRY_DELAY) {
+        await new Promise(r => setTimeout(r, MIN_RETRY_DELAY - timeSinceLast))
+      }
+      assertCurrent()
+      lastInitAttempt = Date.now()
       const specUrl = `${base}/spec/swagger.json`
       console.log('[Pioneer] Initializing client against', specUrl)
 
-      // When pointing at a non-default server, pass overrideHost so the
-      // client rewrites swagger-resolved URLs to match.  The pioneer-client
-      // requestInterceptor automatically forces http: for localhost/127.0.0.1,
-      // which fixes the https://localhost mismatch from the server's swagger spec.
-      let overrideHost: string | undefined
-      if (base !== DEFAULT_API_BASE) {
-        try {
-          const u = new URL(base)
-          overrideHost = u.host // e.g. "localhost:9001"
-        } catch { /* malformed URL — let Pioneer fail naturally */ }
-      }
+      // Bind Swagger-resolved requests to the selected server, including the
+      // official default. The SDK also handles HTTP for local test servers.
+      const overrideHost = new URL(base).host
 
-      const qk = getQueryKey()
       const client = new Pioneer(specUrl, { queryKey: qk, timeout: 60000, overrideHost })
-      pioneerInstance = await client.init()
-      if (!pioneerInstance) throw new Error('Pioneer client init returned null')
-      if (offline) {
-        pioneerInstance = null
-        throw new Error('OFFLINE: Pioneer initialization was cancelled by offline mode')
-      }
+      const initialized = await client.init()
+      assertCurrent()
+      if (!initialized) throw new Error('Pioneer client init returned null')
+      registerSwapServerCapabilities(initialized, client.client?.spec)
+      registerPioneerEventCapabilities(initialized, client.client?.spec)
       // Honesty guard: block BTC→Pioneer calls whenever a self-host node is enabled.
       const { installPioneerGuard } = await import('./pioneer-guard')
-      installPioneerGuard(pioneerInstance)
-      console.log('[Pioneer] Client initialized successfully')
-
-      // Stopwatch every portfolio load and report vault-vs-API timings
-      // (see src/bun/perf-telemetry.ts). Best-effort, never blocks a load.
-      instrumentPortfolio(pioneerInstance, { apiBase: base, queryKey: qk })
+      assertCurrent()
+      installPioneerGuard(initialized)
 
       // Complete registration before handing the client to authenticated SDK,
       // Zerion, Hive, telemetry, or realtime callers. Failure remains non-fatal
       // for public legacy providers, but a successful response can no longer race.
       await ensurePioneerQueryKeyRegistered()
+      assertCurrent()
 
-      return pioneerInstance
+      // Publish only after initialization and registration both settled for
+      // this server. A reset must never resurrect an obsolete client.
+      instrumentPortfolio(initialized, { apiBase: base, queryKey: qk, isCurrent })
+      // Delayed consumers may retain this object after Settings switches. Bind
+      // every operation in place, preserving capability metadata on the object.
+      for (const name of Object.getOwnPropertyNames(initialized)) {
+        const descriptor = Object.getOwnPropertyDescriptor(initialized, name)
+        if (typeof descriptor?.value !== 'function') continue
+        const operation = descriptor.value
+        Object.defineProperty(initialized, name, { ...descriptor, value: async function (this: any, ...args: any[]) {
+          assertCurrent()
+          const result = await operation.apply(this, args)
+          assertCurrent()
+          return result
+        } })
+      }
+      pioneerInstance = initialized
+      console.log('[Pioneer] Client initialized successfully')
+      return initialized
     } catch (err) {
-      initPromise = null
+      if (initPromise === attempt) initPromise = null
       throw err
     }
-  })()
+  })
+  initPromise = attempt
 
-  return initPromise
+  return attempt
 }

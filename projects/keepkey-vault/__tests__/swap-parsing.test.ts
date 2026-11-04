@@ -11,11 +11,36 @@ import {
   assertSwapMemoFitsSource,
   parseQuoteResponse,
   parseAssetsResponse,
+  parseSwapQuoteError,
   nearIntentsDepositFindings,
   nearIntentsSaysUnknownAddress,
   swapDepositAddressFromTx,
   swapDepositFindings,
 } from '../src/bun/swap-parsing'
+
+describe('quote error response parsing', () => {
+  const message = 'THORChain has paused trading for this route. No alternative swap route is currently available.'
+  const body = { error: { code: 'swap_error', message } }
+
+  test('unwraps gateway errors from structured and JSON response bodies', () => {
+    expect(parseSwapQuoteError({ response: { body } })).toBe(message)
+    expect(parseSwapQuoteError({ response: { body: JSON.stringify(body) } })).toBe(message)
+    expect(parseSwapQuoteError({ response: { text: JSON.stringify(body) } })).toBe(message)
+  })
+
+  test('retains Pioneer top-level messages and plain text diagnostics', () => {
+    expect(parseSwapQuoteError({ response: { body: { message: 'amount less than min swap amount' } } })).toBe('amount less than min swap amount')
+    expect(parseSwapQuoteError({ responseError: { message: 'Quote request timed out' } })).toBe('Quote request timed out')
+    expect(parseSwapQuoteError({ response: { text: 'upstream unavailable' } })).toBe('upstream unavailable')
+  })
+
+  test('falls through empty or malformed bodies without hiding a later diagnostic', () => {
+    expect(parseSwapQuoteError({ response: { body: {}, text: JSON.stringify(body) } })).toBe(message)
+    expect(parseSwapQuoteError({ response: { body: { message: { unexpected: true } }, text: 'HTTP 502' } })).toBe('HTTP 502')
+    expect(parseSwapQuoteError({ response: { body: { error: { code: 'swap_error' } } } })).toBeNull()
+    expect(parseSwapQuoteError(null)).toBeNull()
+  })
+})
 
 // ── Fixtures: Real Pioneer SDK response shapes ──────────────────────
 
@@ -291,6 +316,31 @@ describe('parseQuoteResponse', () => {
   test('BASE → ETH: extracts slippageBps from raw.fees', () => {
     const result = parseQuoteResponse(FIXTURE_BASE_TO_ETH_QUOTE, baseParams)
     expect(result.slippageBps).toBe(42)
+    expect(result.quotedSlippageBps).toBe(42)
+  })
+
+  test('direct Uniswap retains the affiliate fee and does not present user tolerance as measured slippage', () => {
+    const response = { data: [{ integration: 'uniswap', quote: {
+      source: 'uniswap', swapper: 'Uniswap', amountOut: '29.9306', amountOutMin: '29.0326',
+      raw: { fees: { total_bps: 30, affiliate: '0.090062', outbound: '0' } },
+      txs: [{ type: 'EVM', txParams: { to: '0x3fc91a3afd70395cd496c647d5a6cc9d4b2b7fad', data: '0x3593564c1234', value: '13118195000000000', chainId: 1 } }],
+    } }] }
+    const result = parseQuoteResponse(response, { fromCaip: 'eip155:1/slip44:60', toCaip: 'eip155:1/erc20:0xdac17f958d2ee523a2206206994597c13d831ec7', slippageBps: 300 })
+    expect(result.fees).toMatchObject({ totalBps: 30, affiliate: '0.090062', outbound: '0', reportedTotalBps: 30 })
+    expect(result.fees.items).toEqual([expect.objectContaining({ kind: 'affiliate', assetCaip: 'eip155:1/erc20:0xdac17f958d2ee523a2206206994597c13d831ec7', symbol: 'USDT', amount: '0.090062' })])
+    expect(result.quotedSlippageBps).toBeUndefined()
+    expect(result.requestedSlippageBps).toBe(300)
+    expect(result.slippageBps).toBe(300)
+  })
+
+  test('reported zero slippage is distinct from absent or malformed measurements', () => {
+    for (const [reported, expected] of [[0, 0], ['0', 0], [undefined, undefined], ['', undefined], ['bad', undefined], [-1, undefined]] as const) {
+      const fixture = structuredClone(FIXTURE_BASE_TO_ETH_QUOTE)
+      ;(fixture.data.data[0].quote.raw.fees as any).slippage_bps = reported
+      const result = parseQuoteResponse(fixture, baseParams)
+      expect(result.quotedSlippageBps).toBe(expected)
+      expect(result.slippageBps).toBe(expected ?? baseParams.slippageBps)
+    }
   })
 
   test('BASE → ETH: extracts warning from raw', () => {
@@ -464,6 +514,75 @@ describe('parseQuoteResponse', () => {
 
   // ── Deposit-channel protocols (Chainflip, NEAR Intents EVM side) ───
 
+  // Shape of the failed BTC→ETH quote captured from the backend log. Chainflip
+  // registers the destination when opening the channel; the Bitcoin transfer
+  // has no OP_RETURN memo and must not be treated as a prebuilt EVM transaction.
+  const chainflipBtcQuote = {
+    data: [{
+      integration: 'shapeshift',
+      quote: {
+        swapper: 'Chainflip',
+        buyAmount: '3.993470534033437561',
+        amountOutMin: '3.873666418012434434',
+        inbound_address: 'bc1pgshqpgqesasxaqas8tt82aj7enlnmllxff8064zpefjyhkmzyz6s67lvsg',
+        txs: [{
+          type: 'transfer',
+          chain: 'bip122:000000000019d6689c085ae165831e93',
+          txParams: {
+            to: 'bc1pgshqpgqesasxaqas8tt82aj7enlnmllxff8064zpefjyhkmzyz6s67lvsg',
+            recipientAddress: 'bc1pgshqpgqesasxaqas8tt82aj7enlnmllxff8064zpefjyhkmzyz6s67lvsg',
+            vaultAddress: 'bc1pgshqpgqesasxaqas8tt82aj7enlnmllxff8064zpefjyhkmzyz6s67lvsg',
+            value: '11670258',
+            amount: '0.11670258',
+            memo: '',
+          },
+        }],
+      },
+    }],
+  }
+  const chainflipBtcParams = {
+    fromCaip: 'bip122:000000000019d6689c085ae165831e93/slip44:0',
+    toCaip: 'eip155:1/slip44:60',
+    slippageBps: 300,
+  }
+
+  test('Chainflip BTC→ETH: accepts the memo-less Bitcoin channel deposit', () => {
+    const result = parseQuoteResponse(chainflipBtcQuote, chainflipBtcParams)
+    expect(result.swapper).toBe('Chainflip')
+    expect(result.inboundAddress).toBe(chainflipBtcQuote.data[0].quote.inbound_address)
+    expect(result.expectedOutput).toBe('3.993470534033437561')
+    expect(result.minimumOutput).toBe('3.873666418012434434')
+    expect(result.memo).toBe('')
+    expect(result.relayTx).toBeUndefined()
+  })
+
+  test('Chainflip BTC→ETH competes with memo-based routes on quoted output', () => {
+    const result = parseQuoteResponse({
+      data: [...FIXTURE_BTC_TO_ETH_QUOTE.data, ...chainflipBtcQuote.data],
+    }, chainflipBtcParams)
+    expect(result.swapper).toBe('Chainflip')
+    expect(result.expectedOutput).toBe('3.993470534033437561')
+  })
+
+  test('Chainflip BTC→ETH still rejects an EVM deposit address', () => {
+    const quote = structuredClone(chainflipBtcQuote)
+    quote.data[0].quote.inbound_address = '0x1234567890123456789012345678901234567890'
+    expect(() => parseQuoteResponse(quote, chainflipBtcParams)).toThrow(/valid deposit address for this chain/)
+  })
+
+  test('Chainflip BTC→ETH still requires a deposit address', () => {
+    const quote = { data: [{ integration: 'shapeshift', quote: { swapper: 'Chainflip', buyAmount: '1' } }] }
+    expect(() => parseQuoteResponse(quote, chainflipBtcParams)).toThrow(/missing inbound address/)
+  })
+
+  test('unknown and memo-based providers cannot use memo-less Bitcoin deposits', () => {
+    for (const swapper of ['Unknown Provider', 'Thorchain', 'Relay']) {
+      const quote = structuredClone(chainflipBtcQuote)
+      quote.data[0].quote.swapper = swapper
+      expect(() => parseQuoteResponse(quote, chainflipBtcParams)).toThrow(/No supported routes/)
+    }
+  })
+
   test('Chainflip ETH→BTC: data="0x" creates deposit-channel relayTx (not rejected)', () => {
     // The real Pioneer response for ETH→BTC when THORChain is offline: Chainflip
     // via ShapeShift. Chainflip uses a deposit-channel model — the BTC destination
@@ -509,6 +628,17 @@ describe('parseQuoteResponse', () => {
     expect(result.swapper).toBe('NEAR Intents')
     expect(result.relayTx?.to).toBe('0xnear_deposit')
     expect(result.relayTx?.isDepositChannel).toBe(true)
+  })
+
+  test('direct NEAR quote retains exact settlement terms and source refund wallet', () => {
+    const meta = { depositAddress: '0xdeposit', refundTo: '0xsender', recipient: '0xrecipient', originAsset: 'nep141:eth', destinationAsset: 'nep141:arb', sourceDecimals: 18, destinationDecimals: 18 }
+    const result = parseQuoteResponse({ data: [{ integration: 'nearIntents', quote: {
+      swapper: 'NEAR Intents', buyAmount: '0.123456789123456789', amountOutMin: '0.120000000000000001', meta,
+      txs: [{ txParams: { data: '0x', to: '0xdeposit', value: '10000000000000000' } }],
+    } }] }, { fromCaip: 'eip155:1/slip44:60', toCaip: 'eip155:42161/slip44:60', slippageBps: 300 })
+    expect(result.minimumOutput).toBe('0.120000000000000001')
+    expect(result.nearIntentsRefundTo).toBe('0xsender')
+    expect(result.nearIntentsTracking).toEqual({ ...meta, minimumAmountOut: '0.120000000000000001' })
   })
 
   test('Relay with data="0x" is NOT a deposit channel — no relayTx created', () => {

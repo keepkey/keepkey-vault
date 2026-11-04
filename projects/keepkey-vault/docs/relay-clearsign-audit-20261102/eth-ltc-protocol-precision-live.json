@@ -1,0 +1,95 @@
+{
+  "issue": "ETH to LTC: valid native amount rejected against protocol quote precision",
+  "fixPullRequest": "https://github.com/BitHighlander/keepkey-gateway/pull/5",
+  "fixRevision": "fd67c850b1c3f9e77bace0b2f6fe7342bd7dbd49",
+  "deployedRevision": "238d986a6b7efc949439a88351454fb2e78b0e49",
+  "deployment": "https://github.com/BitHighlander/keepkey-gateway/actions/runs/41692155166",
+  "conversion": "Validate native asset precision; floor only protocol quote base units; preserve the exact native deposit amount.",
+  "regressionChecks": {
+    "passed": 156,
+    "skipped": 2,
+    "workerTypecheck": "passed",
+    "containerTypecheck": "passed"
+  },
+  "liveQuoteProbe": {
+    "checkedAt": "2026-11-03T18:21:44.848Z",
+    "revision": "238d986a6b7efc949439a88351454fb2e78b0e49",
+    "pair": "ETH to LTC",
+    "fixtureOnly": true,
+    "signed": false,
+    "broadcast": false,
+    "observations": [
+      {
+        "amount": "0.032654987123456789",
+        "httpStatus": 503,
+        "error": {
+          "code": "swap_error",
+          "message": "Swap unavailable: thorchain quote hosts failed: https://gateway.liquify.com/chain/thorchain_api returned 400: failed to simulate swap: failed to simulate handler: trading is halted, can't process swap: invalid request | ShapeShift returned no fallback route | SwapKit returned no fee-attributed executable route"
+        }
+      },
+      {
+        "amount": "0.03265498",
+        "httpStatus": 503,
+        "error": {
+          "code": "swap_error",
+          "message": "Swap unavailable: thorchain quote hosts failed: https://gateway.liquify.com/chain/thorchain_api returned 400: failed to simulate swap: failed to simulate handler: trading is halted, can't process swap: invalid request | ShapeShift returned no fallback route | SwapKit returned no fee-attributed executable route"
+        }
+      }
+    ]
+  },
+  "upstreamHaltProbe": {
+    "checkedAt": "2026-11-03T18:20:20.403Z",
+    "observations": [
+      {
+        "host": "https://rest.cosmos.directory/thorchain",
+        "haltFlags": {
+          "HALTTRADING": 0,
+          "HALTETHTRADING": 28518406,
+          "HALTLTCTRADING": 0,
+          "HALTSIGNINGETH": 28518406,
+          "HALTSIGNINGLTC": 0
+        },
+        "chains": [
+          {
+            "chain": "ETH",
+            "halted": true,
+            "global_trading_paused": false,
+            "chain_trading_paused": true
+          },
+          {
+            "chain": "LTC",
+            "halted": false,
+            "global_trading_paused": false,
+            "chain_trading_paused": false
+          }
+        ]
+      },
+      {
+        "host": "https://gateway.liquify.com/chain/thorchain_api",
+        "haltFlags": {
+          "HALTTRADING": 0,
+          "HALTETHTRADING": 28518406,
+          "HALTLTCTRADING": 0,
+          "HALTSIGNINGETH": 28518406,
+          "HALTSIGNINGLTC": 0
+        },
+        "chains": [
+          {
+            "chain": "ETH",
+            "halted": true,
+            "global_trading_paused": false,
+            "chain_trading_paused": true
+          },
+          {
+            "chain": "LTC",
+            "halted": false,
+            "global_trading_paused": false,
+            "chain_trading_paused": false
+          }
+        ]
+      }
+    ]
+  },
+  "result": "Precision regression fixed in production. ETH to LTC remains unavailable because THORChain ETH trading is halted and neither fallback returned an executable route.",
+  "realFundsUsed": false
+}

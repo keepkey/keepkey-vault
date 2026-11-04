@@ -28,6 +28,7 @@ import { AuditBtcDeep } from "./AuditBtcDeep"
 import { AuditInspector } from "./AuditInspector"
 import { DocsLink } from "./DocsLink"
 import { DOCS_LINKS, watch } from "../../shared/docs-links"
+import { auditTrackLevel } from "../../shared/audit-recovery"
 import type { ChainDef } from "../../shared/chains"
 import type { AuditReport, AuditPortfolioSnapshot, AuditMode, AuditChainFinding, AuditDerivedAddress } from "../../shared/types"
 
@@ -395,6 +396,8 @@ export function AuditDialog({ onClose, snapshot, isHidden, chainCatalog, chainAd
         ? `Tracking for this session.`
         : chain.chainId === 'bitcoin'
           ? `Tracking for now — re-run the audit after you reconnect to bring it back.`
+          : chain.chainId === 'litecoin'
+            ? `Account tracked. Check the portfolio balance; if it is still missing, send the Audit report to support.`
           : `Added — it’ll show in your portfolio from now on.`
       patchLadder(chain.chainId, { recovering: false, recovered })
       onRecovered?.()
@@ -528,13 +531,15 @@ export function AuditDialog({ onClose, snapshot, isHidden, chainCatalog, chainAd
   const AddrRow = ({ chain, a, gold }: { chain: AuditChainFinding; a: AuditDerivedAddress; gold?: boolean }) => {
     // UTXO altcoins persist via the device-scoped pubkey cache, which deliberately
     // never holds hidden-wallet xpubs — so they're only trackable on the standard wallet.
-    const canTrack = (chain.chainId === 'bitcoin' || chain.family === 'evm' || (chain.family === 'utxo' && !isHidden)) && a.level != null
+    const trackAccount = auditTrackLevel(chain, a, isHidden)
+    const canTrack = trackAccount != null
+    const displayLevel = a.level ?? trackAccount
     const fundedNoTrack = a.hasBalance && !canTrack
     const hasXpubs = !!a.xpubs?.length
     return (
       <Box bg={gold ? 'var(--ink-1)' : 'var(--ink-3)'} border="1px solid" borderColor={gold ? 'rgba(233,196,106,0.22)' : 'var(--line)'} borderRadius="12px" px="3.5" py="3">
         <Flex justify="space-between" align="center" gap="3">
-          <Text fontSize="sm" color="var(--text-0)" whiteSpace="nowrap">{a.level != null ? (chain.family === 'evm' ? `Address #${a.level}` : `Account #${a.level}`) : 'Custom path'}</Text>
+          <Text fontSize="sm" color="var(--text-0)" whiteSpace="nowrap">{displayLevel != null ? (chain.family === 'evm' ? `Address #${displayLevel}` : `Account #${displayLevel}`) : 'Custom path'}</Text>
           {a.balanceError
             ? <Text fontSize="sm" fontWeight="600" color="var(--rose)" whiteSpace="nowrap">couldn’t verify</Text>
             : <Text fontSize="sm" fontWeight="700" whiteSpace="nowrap" color={parseFloat(a.native) > 0 ? 'var(--gold)' : 'var(--text-2)'}>{fmtAmt(a.native)} {a.symbol}</Text>}
@@ -545,7 +550,7 @@ export function AuditDialog({ onClose, snapshot, isHidden, chainCatalog, chainAd
             : <Text flex="1" minW="0" fontSize="11px" color="var(--text-3)" truncate title={`${a.pathStr} · ${a.address}`}>{a.pathStr} · {a.address}</Text>}
           <HStack gap="3" flexShrink={0}>
             {a.explorerUrl && <Box as="button" fontSize="11px" color="var(--teal)" onClick={() => openUrl(a.explorerUrl!)}>explorer ↗</Box>}
-            {a.hasBalance && canTrack && <Box as="button" fontSize="11px" color="var(--gold)" fontWeight="700" onClick={() => trackLevel(chain, a.level!)}>track</Box>}
+            {a.hasBalance && canTrack && <Box as="button" fontSize="11px" color="var(--gold)" fontWeight="700" onClick={() => trackLevel(chain, trackAccount!)}>{a.level == null ? 'track account' : 'track'}</Box>}
           </HStack>
         </Flex>
         {hasXpubs && <XpubRows xpubs={a.xpubs!} gold={gold} />}
@@ -553,7 +558,7 @@ export function AuditDialog({ onClose, snapshot, isHidden, chainCatalog, chainAd
             paths) can't be spent from the Send page — sweep them to the
             standard receive address right here. sweepable === false marks a
             standard-scheme row (the sweep destination) — never offer those. */}
-        {a.hasBalance && chain.family === 'utxo' && !!a.addressNList?.length && a.sweepable !== false && (
+        {a.hasBalance && !canTrack && chain.family === 'utxo' && !!a.addressNList?.length && a.sweepable !== false && (
           <AuditSweepButton chainId={chain.chainId} addressNList={a.addressNList} scriptType={a.scriptType} address={a.address} onOpenUrl={openUrl} />
         )}
         {a.tokens && a.tokens.length > 0 && (
@@ -569,7 +574,7 @@ export function AuditDialog({ onClose, snapshot, isHidden, chainCatalog, chainAd
             ))}
           </VStack>
         )}
-        {fundedNoTrack && <Text fontSize="11px" color="var(--gold)" mt="1.5">Funds here, but KeepKey can’t track this path in-app. <Box as="button" textDecoration="underline" onClick={() => patchLadder(chain.chainId, { showHandoff: true })}>Send to support →</Box></Text>}
+        {fundedNoTrack && <Text fontSize="11px" color="var(--gold)" mt="1.5">Funds here, but KeepKey can’t track this path in-app. <Box as="button" textDecoration="underline" onClick={() => { patchLadder(chain.chainId, { showHandoff: true }); scrollDown() }}>Send to support →</Box></Text>}
       </Box>
     )
   }

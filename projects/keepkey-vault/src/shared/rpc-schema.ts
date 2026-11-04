@@ -1,5 +1,6 @@
 import type { MultisigPolicyPreview,MultisigCosignerExport,BtcPsbtSigned } from "./multisig-policy"
 import type { ElectrobunRPCSchema } from 'electrobun/bun'
+import type { ZcashShieldedBalance } from './zcash-privacy'
 import type { ClearSignReport } from './clearsign-report'
 import type { TxDetailLine } from './tx-clearsign'
 import type { ClearSignCentralAssetAuditHistory, ClearSignCentralAssetReview, ClearSignCentralAssetReviewResult, ClearSignCentralContractAudit, ClearSignCentralContractReview, ClearSignCentralStatus, ClearSignProtectionCaseStudy, RuntimeProviderNamed } from './types'
@@ -236,7 +237,7 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       zcashShieldedScan: { params: { startHeight?: number; fullRescan?: boolean; quick?: boolean }; response: { balance: number; notes_found: number; synced_to: number } }
       // max_send / max_deshield: the most one payment can move, across as many
       // transactions as the 16-action device limit requires.
-      zcashShieldedBalance: { params: void; response: { confirmed: number; pending: number; in_flight?: number; synced_to?: number | null; notes_total?: number; notes_unspent?: number; keepkey_release_block?: number; max_send?: number; max_deshield?: number } }
+      zcashShieldedBalance: { params: void; response: ZcashShieldedBalance & { notes_total?: number; keepkey_release_block?: number } }
       // A payment that needs more notes than one transaction can spend is sent
       // as several; `txids` lists them all, `txid` is the last. A tex1
       // recipient (ZIP-320) is paid via a one-time transparent address.
@@ -626,7 +627,8 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
        *  Frontend resyncs the affected chain (matched by networkId) regardless of
        *  direction, and shows a toast only for inbound payments (type === 'incoming').
        *  `chain` is CAIP-19, `networkId` is CAIP-2 — networkId is the reliable key. */
-      'tx-push-received': { chain?: string; networkId?: string; address?: string; txid?: string; type?: 'incoming' | 'outgoing' | 'confirmed' }
+      'tx-push-received': { chain?: string; networkId?: string; address?: string; txid?: string; type?: 'incoming' | 'outgoing' | 'confirmed' | 'activity'; balanceRefreshHandled?: boolean }
+      'pioneer-server-changed': AppSettings
       /** SSE event-stream connection status. 'connected' = watching addresses; 'disconnected' = no stream. */
       'stream-status': { connected: boolean; watching: number; sessionId?: string }
       'token-visibility-changed': { caip: string; status: 'visible' | 'hidden' | null }

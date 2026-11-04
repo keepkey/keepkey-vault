@@ -16,6 +16,9 @@ import { AddressIdenticon } from "./AddressIdenticon"
 import { ZCASH_V2_CSS } from "./zcash-v2-styles"
 import { CHAINS } from "../../shared/chains"
 import type { AddressBookEntry, ZcashTexPayment, ZcashTxBatch } from "../../shared/types"
+import { zcashShieldedAmounts, zcashScanStatus, type ZcashShieldedBalance, type ZcashPrivacyPage } from '../../shared/zcash-privacy'
+import { DocsLink } from './DocsLink'
+import { watch } from '../../shared/docs-links'
 
 // No client timeout for Zcash sends. Each batch is a Halo 2 proof plus device
 // signing, so a split send can run well past 10 minutes; a timeout here showed
@@ -76,7 +79,7 @@ const KEEPKEY_RELEASE_BLOCK = 3282941
 
 type SidecarStatus = "checking" | "ready" | "not_running" | "initializing"
 type ScanState = "idle" | "scanning" | "done"
-type Page = "send" | "shield" | "receive" | "scan" | "history"
+type Page = ZcashPrivacyPage
 
 /** Zcash device signing: messages streamed so far (zcash-device-progress). */
 interface DeviceProgress { done: number; total: number; phase: "confirm" | "output" | "input" | "action" }
@@ -147,7 +150,7 @@ const ICO_HISTORY = (
 
 const NAV_TABS: Array<{ id: Page; label: string; icon: ReactNode; color: string }> = [
 	{ id: "send",     label: "Send",     icon: ICO_SEND,     color: "#d97757" /* copper */ },
-	{ id: "shield",   label: "Shield",   icon: ICO_SHIELD,   color: "#6ee787" /* green */ },
+	{ id: "shield",   label: "Shield / Unshield",   icon: ICO_SHIELD,   color: "#6ee787" /* green */ },
 	{ id: "receive",  label: "Receive",  icon: ICO_RECEIVE,  color: "#7aa6f0" /* blue */ },
 	{ id: "scan",     label: "Sync",     icon: ICO_SYNC,     color: "#b794f4" /* violet */ },
 	{ id: "history",  label: "History",  icon: ICO_HISTORY,  color: "#56d4d4" /* teal */ },
@@ -167,27 +170,26 @@ function ensureStylesInjected() {
 	document.head.appendChild(style)
 }
 
-export function ZcashPrivacyTab({ initialPage }: { initialPage?: Page } = {}) {
+export function ZcashPrivacyTab({ initialPage, initialSection }: { initialPage?: Page; initialSection?: 'shield' | 'unshield' } = {}) {
 	const { t } = useTranslation(["asset", "addressbook", "common"])
 	const { locale: fiatLocale } = useFiat()
 
 	useEffect(() => { ensureStylesInjected() }, [])
 
 	const [page, setPage] = useState<Page>(initialPage ?? "send")
+	useEffect(() => { if (initialPage) setPage(initialPage) }, [initialPage])
+	const shieldFormRef = useRef<HTMLDivElement>(null)
+	const unshieldFormRef = useRef<HTMLDivElement>(null)
 
 	const [status, setStatus] = useState<SidecarStatus>("checking")
 	const [starting, setStarting] = useState(false)
 	const [startError, setStartError] = useState<string | null>(null)
 	const [orchardAddress, setOrchardAddress] = useState<string | null>(null)
-	const [balance, setBalance] = useState<{
-		confirmed: number; pending: number; in_flight?: number
-		notes_unspent?: number; spendable_confirmed?: number
-		spendable_notes_count?: number; min_confirmations?: number
-		max_send?: number; max_deshield?: number
-	} | null>(null)
+	const [balance, setBalance] = useState<ZcashShieldedBalance | null>(null)
+	const balanceAmounts = zcashShieldedAmounts(balance)
 	// The user's ZEC that is not spendable yet: maturing notes plus value in
 	// flight (a shield not scanned yet, change from a send not mined yet).
-	const onTheWay = balance ? balance.pending + (balance.in_flight ?? 0) : 0
+	const onTheWay = balanceAmounts?.pending ?? 0
 	const [syncedTo, setSyncedTo] = useState<number | null>(null)
 	const [scanState, setScanState] = useState<ScanState>("idle")
 	const [scanResult, setScanResult] = useState<string | null>(null)
@@ -402,27 +404,25 @@ export function ZcashPrivacyTab({ initialPage }: { initialPage?: Page } = {}) {
 		}
 	}, [sendStep, shieldStep, deshieldStep])
 
-	const [needsScan, setNeedsScan] = useState(false)
+	const [needsScan, setNeedsScan] = useState(true)
 	const [scanInFlight, setScanInFlight] = useState(false)
+	const [scanError, setScanError] = useState<string | null>(null)
+	useEffect(() => {
+		if (status !== 'ready' || page !== 'shield' || !initialSection) return
+		const frame = requestAnimationFrame(() => (initialSection === 'shield' ? shieldFormRef : unshieldFormRef).current?.scrollIntoView({ behavior: 'smooth', block: 'center' }))
+		return () => cancelAnimationFrame(frame)
+	}, [status, page, initialSection])
 
 	const refreshBalance = useCallback(async () => {
 		try {
-			const bal = await rpcRequest<{
-				confirmed: number; pending: number; synced_to?: number | null
-				notes_unspent?: number; spendable_confirmed?: number
-				spendable_notes_count?: number; min_confirmations?: number
-			}>("zcashShieldedBalance", undefined, 10000)
-			setBalance({
-				confirmed: bal.confirmed, pending: bal.pending,
-				notes_unspent: bal.notes_unspent,
-				spendable_confirmed: bal.spendable_confirmed,
-				spendable_notes_count: bal.spendable_notes_count,
-				min_confirmations: bal.min_confirmations,
-			})
-			if (bal.synced_to != null) { setSyncedTo(bal.synced_to); setNeedsScan(false) }
+			const bal = await rpcRequest<ZcashShieldedBalance>("zcashShieldedBalance", undefined, 10000)
+			setBalance(bal) // Retain in-flight value and sidecar batch-aware Max values.
+			if (bal.synced_to != null) setSyncedTo(bal.synced_to)
 			else setNeedsScan(true)
-		} catch {
+		} catch (error: any) {
 			setBalance(null)
+			setNeedsScan(true)
+			setScanError(error?.message || 'Shielded balance unavailable. Scan again to check it.')
 		}
 	}, [])
 
@@ -443,11 +443,11 @@ export function ZcashPrivacyTab({ initialPage }: { initialPage?: Page } = {}) {
 			try {
 				const r = await rpcRequest<{
 					ready: boolean; fvk_loaded: boolean; address: string | null
-					synced_to?: number | null; verified?: boolean
+					synced_to?: number | null; verified?: boolean; synced?: boolean
 				}>("zcashShieldedStatus", undefined, 5000)
 				if (cancelled) return
 				if (!r.ready) { setStatus("not_running"); return }
-				if (r.synced_to != null) { setSyncedTo(r.synced_to); setNeedsScan(false) }
+				if (r.synced_to != null) { setSyncedTo(r.synced_to); setNeedsScan(!r.synced) }
 				else setNeedsScan(true)
 				if (r.fvk_loaded && r.address) {
 					setOrchardAddress(r.address); setStatus("ready")
@@ -455,13 +455,15 @@ export function ZcashPrivacyTab({ initialPage }: { initialPage?: Page } = {}) {
 						refreshBalance(); loadTransactions()
 						// One light catch-up each time the tab opens (no polling): a note
 						// may have matured or arrived since the last scan.
+						setScanInFlight(true); setNeedsScan(true)
 						rpcRequest<{ synced_to?: number }>("zcashShieldedScan", { quick: true }, 120000)
 							.then(res => {
 								if (cancelled) return
-								if (res?.synced_to != null) setSyncedTo(res.synced_to)
+								if (res?.synced_to != null) { setSyncedTo(res.synced_to); setNeedsScan(false); setScanError(null) }
 								refreshBalance(); loadTransactions()
 							})
-							.catch((e: any) => console.warn("[ZcashPrivacyTab] open-time sync failed:", e?.message || e))
+							.catch((e: any) => { if (!cancelled) { setNeedsScan(true); setScanError(e?.message || 'Shielded scan failed. Try Sync now.') } })
+							.finally(() => { if (!cancelled) setScanInFlight(false) })
 					} else {
 						setBalance(null); setTransactions([])
 					}
@@ -482,6 +484,10 @@ export function ZcashPrivacyTab({ initialPage }: { initialPage?: Page } = {}) {
 		})()
 		return () => { cancelled = true }
 	}, [refreshBalance, loadTransactions])
+	useEffect(() => onRpcMessage('zcash-rescan-complete', (event: { syncedTo: number | null }) => {
+		if (event.syncedTo != null) { setSyncedTo(event.syncedTo); setNeedsScan(false); setScanError(null) }
+		refreshBalance(); loadTransactions()
+	}), [refreshBalance, loadTransactions])
 
 	// First time the user lands on the Shield page, prefill the Unshield "To"
 	// field with their own t-addr. Most users unshield back to themselves; the
@@ -586,7 +592,7 @@ export function ZcashPrivacyTab({ initialPage }: { initialPage?: Page } = {}) {
 	const [advancedScanOpen, setAdvancedScanOpen] = useState(false)
 
 	const handleScan = useCallback(async (startHeight?: number, fullRescan?: boolean, quick?: boolean) => {
-		setScanState("scanning"); setScanResult(null)
+		setScanState("scanning"); setScanResult(null); setNeedsScan(true); setScanError(null)
 		try {
 			const params: { startHeight?: number; fullRescan?: boolean; quick?: boolean } = {}
 			if (startHeight != null) params.startHeight = startHeight
@@ -607,8 +613,9 @@ export function ZcashPrivacyTab({ initialPage }: { initialPage?: Page } = {}) {
 			setScanResult(msg); setScanState("done")
 			refreshBalance(); loadTransactions()
 		} catch (e: any) {
-			setScanResult(e.message || "Scan failed"); setScanState("idle")
+			setScanResult(e.message || "Scan failed"); setScanState("idle"); setNeedsScan(true); setScanError(e.message || 'Scan failed')
 		}
+		setScanInFlight(false)
 	}, [refreshBalance, loadTransactions, fiatLocale])
 
 	const handleBackfillMemos = useCallback(async () => {
@@ -882,7 +889,11 @@ export function ZcashPrivacyTab({ initialPage }: { initialPage?: Page } = {}) {
 		)
 	}
 
-	const synced = !needsScan && !scanInFlight && syncedTo != null
+	const syncPresentation = zcashScanStatus({ height: syncedTo, balanceKnown: !!balanceAmounts, scanRequired: needsScan, scanning: scanInFlight || scanState === 'scanning', error: scanError })
+	const synced = syncPresentation === 'last-scanned'
+	const publicRecipient = zcashAddrKind(recipient) === 'transparent'
+	const transparentRecipient = recipient.trim().startsWith('t1') || recipient.trim().startsWith('t3')
+	const sendMaxZatoshis = transparentRecipient ? deshieldMaxZatoshis : spendableMaxZatoshis
 
 	return (
 		<div className="zcash-v2">
@@ -894,12 +905,12 @@ export function ZcashPrivacyTab({ initialPage }: { initialPage?: Page } = {}) {
 					</svg>
 				</div>
 				<div className="main">
-					<div className="lbl">Shielded balance</div>
+					<div className="lbl">{synced ? 'Shielded ZEC · available to send' : balanceAmounts ? 'Shielded ZEC · last known balance' : 'Shielded ZEC · scan needed'}</div>
 					<div className="amount">
 						{/* confirmed = total across all unspent notes; pending = immature
 						  slice (<10 confs, e.g. change from a fresh unshield). Show the
 						  mature number big so it matches what's actually spendable. */}
-						{balance ? formatZec(Math.max(0, balance.confirmed - balance.pending)) : "—"}
+						{balanceAmounts ? formatZec(balanceAmounts.available) : "—"}
 						<span className="ticker">ZEC</span>
 						{onTheWay > 0 && (
 							<span className="pending">+ {formatZec(onTheWay)} pending</span>
@@ -913,14 +924,14 @@ export function ZcashPrivacyTab({ initialPage }: { initialPage?: Page } = {}) {
 					) : (
 						<div className="sub">
 							{syncedTo
-								? `Synced to block #${syncedTo.toLocaleString(fiatLocale)}`
+								? `Last scanned: block #${syncedTo.toLocaleString(fiatLocale)}${needsScan ? ' · Scan needed' : ''}`
 								: "Not synced yet"}
 						</div>
 					)}
 				</div>
 				<div className="status-pill">
-					<span className={`led ${scanInFlight ? "amber" : ""}`} />
-					{scanInFlight || scanState === "scanning" ? "Syncing" : synced ? "Synced" : "Idle"}
+					<span className={`led ${!synced ? "amber" : ""}`} />
+					{scanInFlight || scanState === "scanning" ? "Scanning" : scanError ? "Scan failed" : synced ? "Last scan complete" : "Scan needed"}
 					<button
 						className="ghost-btn refresh-compact"
 						onClick={() => handleScan(undefined, undefined, true)}
@@ -929,6 +940,12 @@ export function ZcashPrivacyTab({ initialPage }: { initialPage?: Page } = {}) {
 					>↻</button>
 				</div>
 			</div>
+			<p style={{ fontSize: 12, color: 'var(--zk-fg-dim)', margin: '0 0 12px' }}>
+				Transparent ZEC and shielded ZEC are separate balances. Refreshing transparent ZEC does not scan private payments.
+			</p>
+			{scanError && <div className="result-box err" role="alert" style={{ marginBottom: 12 }}>
+				<div className="result-msg">{scanError} <button className="ghost-btn" onClick={() => setPage('scan')}>Open shielded sync →</button></div>
+			</div>}
 
 			{/* page nav */}
 			<nav className="page-nav">
@@ -947,8 +964,11 @@ export function ZcashPrivacyTab({ initialPage }: { initialPage?: Page } = {}) {
 			{page === "send" && (
 				<section>
 					<div className="page-head">
-						<h2>Send ZEC privately</h2>
-						<p>Your KeepKey signs the transaction. Recipients and amounts stay encrypted on-chain.</p>
+						<h2>{publicRecipient ? 'Unshield to a transparent recipient' : 'Send from shielded balance'}</h2>
+						<p>{publicRecipient
+							? 'The recipient address and amount will be public. You can pay this address directly from your shielded balance.'
+							: 'Send privately to a u1 address, or unshield directly to a public t1/t3 address.'}</p>
+						{recipient.trim().startsWith('tex1') && <p>TEX recipients require two transactions: unshield to a one-time address, then send to the recipient.</p>}
 					</div>
 
 					<div className="form-page with-aside">
@@ -1029,8 +1049,8 @@ export function ZcashPrivacyTab({ initialPage }: { initialPage?: Page } = {}) {
 										<span className="suffix">{amountUnit === "usd" ? "USD" : "ZEC"}</span>
 										<button
 											className="max"
-											onClick={() => setZecAmount(formatZec(spendableMaxZatoshis))}
-											disabled={spendableMaxZatoshis === 0}
+											onClick={() => setZecAmount(formatZec(sendMaxZatoshis))}
+											disabled={sendMaxZatoshis === 0}
 										>Max</button>
 									</div>
 									{zecPrice > 0 && (
@@ -1045,15 +1065,16 @@ export function ZcashPrivacyTab({ initialPage }: { initialPage?: Page } = {}) {
 										<span className="lbl">Memo</span>
 										<input
 											type="text"
-											placeholder="Optional, encrypted to recipient"
+											placeholder={publicRecipient ? 'Not available for transparent recipients' : 'Optional, encrypted to recipient'}
 											value={memo}
 											onChange={e => setMemo(e.target.value)}
 										/>
 										<span className="suffix">{new TextEncoder().encode(memo).length}/512</span>
 									</div>
+									{publicRecipient && memo.trim() && <div className="field-err">Remove the memo: transparent recipients cannot receive encrypted memos.</div>}
 								</div>
 
-								<TxFlowStatus step={sendStep} scanProgress={scanProgress} batch={sendBatch} awaitingButton={awaitingButton} deviceProgress={deviceProgress} kind="send" intent="shielded send" />
+								<TxFlowStatus step={sendStep} scanProgress={scanProgress} batch={sendBatch} awaitingButton={awaitingButton} deviceProgress={deviceProgress} kind="send" intent={publicRecipient ? 'unshield to a public recipient' : 'shielded send'} />
 								{texPending.length > 0 && (
 									<div className="tex-pending">
 										<div className="tex-pending-title">Unfinished TEX payments</div>
@@ -1088,7 +1109,7 @@ export function ZcashPrivacyTab({ initialPage }: { initialPage?: Page } = {}) {
 										<button
 											className="submit"
 											onClick={handleSend}
-											disabled={!recipient || !amount || (recipientValidation != null && !recipientValidation.valid)}
+											disabled={!recipient || !amount || (publicRecipient && !!memo.trim()) || (recipientValidation != null && !recipientValidation.valid)}
 										>Send</button>
 									</div>
 								)}
@@ -1102,13 +1123,13 @@ export function ZcashPrivacyTab({ initialPage }: { initialPage?: Page } = {}) {
 							<div className="aside-card">
 								<h5>Summary</h5>
 								<div className="kv"><span>Amount</span><span className="v">{amount || "—"} ZEC</span></div>
-								<div className="kv"><span>Network fee</span><span className="v">~{formatZec(5000 * Math.max(2, Math.max(1, balance?.spendable_notes_count ?? 1)))} ZEC</span></div>
-								<div className="kv"><span>Privacy</span><span className="v gold">Maximum</span></div>
+								<div className="kv"><span>Network fee</span><span className="v">{recipient.trim().startsWith('tex1') ? 'Two transactions' : `~${formatZec(5000 * (Math.max(2, Math.max(1, balance?.spendable_notes_count ?? 1)) + (transparentRecipient ? 1 : 0)))} ZEC`}</span></div>
+								<div className="kv"><span>Recipient</span><span className="v gold">{publicRecipient ? 'Public address and amount' : 'Shielded'}</span></div>
 							</div>
 							<div className="aside-card">
-								<h5>Available to send</h5>
+								<h5>{synced ? 'Available to send' : 'Last known available balance'}</h5>
 								<p style={{ fontFamily: "var(--zk-font-mono)", fontSize: 14, color: "var(--zk-fg)" }}>
-									{formatZec(spendableMaxZatoshis)} ZEC
+									{balanceAmounts ? formatZec(sendMaxZatoshis) : '—'} ZEC
 								</p>
 								<p style={{ marginTop: 4 }}>After network fee. Notes need {balance?.min_confirmations ?? 10} confirmations.</p>
 							</div>
@@ -1158,12 +1179,13 @@ export function ZcashPrivacyTab({ initialPage }: { initialPage?: Page } = {}) {
 				<section>
 					<div className="page-head">
 						<h2>Shield &amp; Unshield</h2>
-						<p>Shielded ZEC hides amounts and recipients. Transparent ZEC is publicly visible like Bitcoin.</p>
+						<p>Shield moves your transparent ZEC into the private balance. Unshield pays a transparent address—your own or someone else’s.</p>
+						<DocsLink href={watch('zec-04-shield-sync')} label="Watch: shield, unshield and sync" />
 					</div>
 					{balance && onTheWay > 0 && <MaturingBanner zat={onTheWay} confirmations={balance.min_confirmations ?? 10} />}
 
 					<div className="form-page">
-						<div className="card">
+						<div className="card" ref={shieldFormRef}>
 							<div className="card-head">
 								<div className="title" style={{ color: "var(--zk-gold)" }}>Shield → private</div>
 								<span className="meta">From your t-addr</span>
@@ -1225,7 +1247,7 @@ export function ZcashPrivacyTab({ initialPage }: { initialPage?: Page } = {}) {
 							</div>
 						</div>
 
-						<div className="card">
+						<div className="card" ref={unshieldFormRef}>
 							<div className="card-head">
 								<div className="title" style={{ color: "var(--zk-copper)" }}>Unshield → public</div>
 								<span className="meta">Visible on chain</span>
@@ -1774,7 +1796,7 @@ function MaturingBanner({ zat, confirmations }: { zat: number; confirmations: nu
 			<span className="maturing-icon">⏳</span>
 			<div>
 				<strong>{formatZec(zat)} ZEC is on its way into your shielded balance</strong>
-				<span>Spendable after {confirmations} confirmations, about {Math.ceil(confirmations * 75 / 60)} minutes. It is safe; nothing to do.</span>
+				<span>Waiting for confirmation or a shielded scan. Notes need {confirmations} confirmations to become spendable. Use Sync to check for updates.</span>
 			</div>
 		</div>
 	)

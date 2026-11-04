@@ -1,0 +1,830 @@
+{
+  "scope": "Live public-fixture comparison. No funds signed or broadcast. Ephemeral API client credentials excluded.",
+  "swapFixCommit": "68292afa1ccede57743b6c2595016c932e05d7d3",
+  "swapFixPR": "https://github.com/BitHighlander/keepkey-gateway/pull/1",
+  "fixture": {
+    "senderAndRecipient": "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045",
+    "sellAsset": "eip155:1/slip44:60",
+    "buyAsset": "eip155:1/erc20:0xdac17f958d2ee523a2206206994597c13d831ec7",
+    "sellAmount": "0.01"
+  },
+  "before": [
+    {
+      "origin": "https://oracles.cc",
+      "checkedAt": "2026-11-01T23:30:51.303Z",
+      "observations": {
+        "healthBefore": {
+          "httpStatus": 200,
+          "providers": [
+            {
+              "key": "thorchain",
+              "label": "THORChain",
+              "status": "unknown",
+              "detail": "Checked on quote demand; no background polling"
+            },
+            {
+              "key": "mayachain",
+              "label": "Mayachain",
+              "status": "unknown",
+              "detail": "Checked on quote demand; no background polling"
+            },
+            {
+              "key": "relay",
+              "label": "Relay",
+              "status": "unknown",
+              "detail": "Checked on quote demand; no background polling"
+            },
+            {
+              "key": "zeroex",
+              "label": "0x",
+              "status": "unknown",
+              "detail": "API-key and app-fee route checked on quote demand"
+            },
+            {
+              "key": "shapeshift",
+              "label": "ShapeShift",
+              "status": "unknown",
+              "detail": "Partner-attributed fallback (including moving swappers such as Chainflip/NEAR); checked only on quote demand"
+            },
+            {
+              "key": "swapkit",
+              "label": "SwapKit",
+              "status": "gated",
+              "detail": "API-key fallback remains unavailable unless each quote proves nonzero affiliate attribution"
+            }
+          ]
+        },
+        "paddedCall": {
+          "httpStatus": 422,
+          "body": {
+            "error": {
+              "code": "evm_error",
+              "message": "EVM JSON-RPC error -32602: invalid argument 0: json: cannot unmarshal hex number with leading zero digits into Go value of type hexutil.Uint64"
+            }
+          },
+          "error": null
+        },
+        "estimateGas": {
+          "httpStatus": 400,
+          "body": {
+            "error": {
+              "code": "evm_error",
+              "message": "Method not allowed: eth_estimateGas"
+            }
+          },
+          "error": null
+        },
+        "feeHistory": {
+          "httpStatus": 400,
+          "body": {
+            "error": {
+              "code": "evm_error",
+              "message": "Method not allowed: eth_feeHistory"
+            }
+          },
+          "error": null
+        },
+        "simulateV1": {
+          "httpStatus": 502,
+          "body": {
+            "error": {
+              "code": "evm_error",
+              "message": "EVM node request failed (405)"
+            }
+          },
+          "error": null
+        },
+        "ethUsdtQuote": {
+          "httpStatus": 200,
+          "routes": [
+            {
+              "integration": "relay",
+              "swapper": "Relay",
+              "gasLimit": "538632",
+              "normalizedFeeBps": 30,
+              "normalizedOutboundFee": "53018109553176",
+              "executionCheck": null,
+              "routeDiagnostics": null,
+              "feeBreakdown": null
+            },
+            {
+              "integration": "zeroex",
+              "swapper": "0x",
+              "gasLimit": "441808",
+              "normalizedFeeBps": 46,
+              "normalizedOutboundFee": "0",
+              "executionCheck": null,
+              "routeDiagnostics": null,
+              "feeBreakdown": null
+            }
+          ]
+        },
+        "healthAfter": {
+          "httpStatus": 200,
+          "providers": [
+            {
+              "key": "thorchain",
+              "label": "THORChain",
+              "status": "unknown",
+              "detail": "Checked on quote demand; no background polling"
+            },
+            {
+              "key": "mayachain",
+              "label": "Mayachain",
+              "status": "unknown",
+              "detail": "Checked on quote demand; no background polling"
+            },
+            {
+              "key": "relay",
+              "label": "Relay",
+              "status": "unknown",
+              "detail": "Checked on quote demand; no background polling"
+            },
+            {
+              "key": "zeroex",
+              "label": "0x",
+              "status": "unknown",
+              "detail": "API-key and app-fee route checked on quote demand"
+            },
+            {
+              "key": "shapeshift",
+              "label": "ShapeShift",
+              "status": "unknown",
+              "detail": "Partner-attributed fallback (including moving swappers such as Chainflip/NEAR); checked only on quote demand"
+            },
+            {
+              "key": "swapkit",
+              "label": "SwapKit",
+              "status": "gated",
+              "detail": "API-key fallback remains unavailable unless each quote proves nonzero affiliate attribution"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "origin": "https://api.keepkey.info",
+      "checkedAt": "2026-11-01T23:30:50.323Z",
+      "observations": {
+        "healthBefore": {
+          "httpStatus": 200,
+          "providers": [
+            {
+              "key": "thorchain",
+              "label": "THORChain",
+              "status": "degraded",
+              "haltedPools": [
+                "AVAX.SOL-0XFE6B19286885A4F7F55ADAD09C3CD1F906D2478F",
+                "bip122:000000000000000000651ef99cb9fcbe/slip44:145",
+                "eip155:56/slip44:60",
+                "BSC.BTCB-0X7130D2A12B9BCBFAE4F2634D864A1EE1CE3EAD9C",
+                "BSC.BUSD-0XE9E7CEA3DEDCA5984780BAFC599BD69ADD087D56",
+                "BSC.ETH-0X2170ED0880AC9A755FD29B2688956BD959F933F8",
+                "BSC.TWT-0X4B0F1812E5DF2A09796481FF14017E6005508003",
+                "BSC.USDC-0X8AC76A51CC950D9822D68B83FE1AD97B32CD580D",
+                "BSC.USDT-0X55D398326F99059FF775485246999027B3197955",
+                "bip122:000000000019d6689c085ae165831e93/slip44:0",
+                "bip122:00000000001a91e3dace36e2be3bf030/slip44:3",
+                "ETH.AAVE-0X7FC66500C84A76AD7E9C93437BFC5AC33E2DDAE9",
+                "ETH.DAI-0X6B175474E89094C44DA98B954EEDEAC495271D0F",
+                "ETH.DPI-0X1494CA1F11D487C2BBE4543E90080AEBA4BA3C2B",
+                "eip155:1/slip44:60",
+                "ETH.FOX-0XC770EEFAD204B5180DF6A14EE197D99D808EE52D",
+                "ETH.GUSD-0X056FD409E1D7A124BD7017459DFEA2F387B6D5CD",
+                "ETH.LINK-0X514910771AF9CA656AF840DFF83E8264ECF986CA",
+                "ETH.LUSD-0X5F98805A4E8BE255A32880FDEC7F6728C6568BA0",
+                "ETH.SNX-0XC011A73EE8576FB46F5E1C5751CA3B9FE0AF2A6F",
+                "ETH.TGT-0X108A850856DB3F85D0269A2693D896B394C80325",
+                "ETH.THOR-0XA5F2211B9B8170F694421F2046281775E8468044",
+                "ETH.USDC-0XA0B86991C6218B36C1D19D4A2E9EB0CE3606EB48",
+                "ETH.USDP-0X8E870D67F660D95D5BE530380D0EC0BD388289E1",
+                "eip155:1/erc20:0xdac17f958d2ee523a2206206994597c13d831ec7",
+                "ETH.VTHOR-0X815C23ECA83261B6EC689B60CC4A58B54BC24D8D",
+                "ETH.WBTC-0X2260FAC5E5542A773AA44FBCFEDF7C193BC2C599",
+                "ETH.XRUNE-0X69FA0FEE221AD11012BAB0FDB45D444D3D2CE71C",
+                "ETH.YFI-0X0BC529C00C6401AEF6D220BE8C6EA1667F6AD93E",
+                "cosmos:cosmoshub-4/slip44:118",
+                "bip122:12a765e31ffd4059bada1e25190f6e98/slip44:2",
+                "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp/slip44:501",
+                "tron:0x2b6653dc/slip44:195",
+                "tron:0x2b6653dc/token:TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t",
+                "bip122:00040fe8ec8471911baa1db1266ea15d/slip44:133"
+              ],
+              "detail": "35 pools halted or suspended"
+            },
+            {
+              "key": "mayachain",
+              "label": "Mayachain",
+              "status": "ok"
+            },
+            {
+              "key": "shapeshift",
+              "label": "ShapeShift",
+              "status": "ok"
+            },
+            {
+              "key": "relay",
+              "label": "Relay",
+              "status": "ok"
+            }
+          ]
+        },
+        "paddedCall": {
+          "httpStatus": null,
+          "body": {},
+          "error": "Failed to parse JSON"
+        },
+        "estimateGas": {
+          "httpStatus": null,
+          "body": {},
+          "error": "Failed to parse JSON"
+        },
+        "feeHistory": {
+          "httpStatus": null,
+          "body": {},
+          "error": "Failed to parse JSON"
+        },
+        "simulateV1": {
+          "httpStatus": null,
+          "body": {},
+          "error": "Failed to parse JSON"
+        },
+        "ethUsdtQuote": {
+          "httpStatus": 200,
+          "routes": [
+            {
+              "integration": "relay",
+              "swapper": "relay",
+              "gasLimit": "491475",
+              "normalizedFeeBps": null,
+              "normalizedOutboundFee": null,
+              "executionCheck": null,
+              "routeDiagnostics": null,
+              "feeBreakdown": null
+            }
+          ]
+        },
+        "healthAfter": {
+          "httpStatus": 200,
+          "providers": [
+            {
+              "key": "thorchain",
+              "label": "THORChain",
+              "status": "degraded",
+              "haltedPools": [
+                "AVAX.SOL-0XFE6B19286885A4F7F55ADAD09C3CD1F906D2478F",
+                "bip122:000000000000000000651ef99cb9fcbe/slip44:145",
+                "eip155:56/slip44:60",
+                "BSC.BTCB-0X7130D2A12B9BCBFAE4F2634D864A1EE1CE3EAD9C",
+                "BSC.BUSD-0XE9E7CEA3DEDCA5984780BAFC599BD69ADD087D56",
+                "BSC.ETH-0X2170ED0880AC9A755FD29B2688956BD959F933F8",
+                "BSC.TWT-0X4B0F1812E5DF2A09796481FF14017E6005508003",
+                "BSC.USDC-0X8AC76A51CC950D9822D68B83FE1AD97B32CD580D",
+                "BSC.USDT-0X55D398326F99059FF775485246999027B3197955",
+                "bip122:000000000019d6689c085ae165831e93/slip44:0",
+                "bip122:00000000001a91e3dace36e2be3bf030/slip44:3",
+                "ETH.AAVE-0X7FC66500C84A76AD7E9C93437BFC5AC33E2DDAE9",
+                "ETH.DAI-0X6B175474E89094C44DA98B954EEDEAC495271D0F",
+                "ETH.DPI-0X1494CA1F11D487C2BBE4543E90080AEBA4BA3C2B",
+                "eip155:1/slip44:60",
+                "ETH.FOX-0XC770EEFAD204B5180DF6A14EE197D99D808EE52D",
+                "ETH.GUSD-0X056FD409E1D7A124BD7017459DFEA2F387B6D5CD",
+                "ETH.LINK-0X514910771AF9CA656AF840DFF83E8264ECF986CA",
+                "ETH.LUSD-0X5F98805A4E8BE255A32880FDEC7F6728C6568BA0",
+                "ETH.SNX-0XC011A73EE8576FB46F5E1C5751CA3B9FE0AF2A6F",
+                "ETH.TGT-0X108A850856DB3F85D0269A2693D896B394C80325",
+                "ETH.THOR-0XA5F2211B9B8170F694421F2046281775E8468044",
+                "ETH.USDC-0XA0B86991C6218B36C1D19D4A2E9EB0CE3606EB48",
+                "ETH.USDP-0X8E870D67F660D95D5BE530380D0EC0BD388289E1",
+                "eip155:1/erc20:0xdac17f958d2ee523a2206206994597c13d831ec7",
+                "ETH.VTHOR-0X815C23ECA83261B6EC689B60CC4A58B54BC24D8D",
+                "ETH.WBTC-0X2260FAC5E5542A773AA44FBCFEDF7C193BC2C599",
+                "ETH.XRUNE-0X69FA0FEE221AD11012BAB0FDB45D444D3D2CE71C",
+                "ETH.YFI-0X0BC529C00C6401AEF6D220BE8C6EA1667F6AD93E",
+                "cosmos:cosmoshub-4/slip44:118",
+                "bip122:12a765e31ffd4059bada1e25190f6e98/slip44:2",
+                "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp/slip44:501",
+                "tron:0x2b6653dc/slip44:195",
+                "tron:0x2b6653dc/token:TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t",
+                "bip122:00040fe8ec8471911baa1db1266ea15d/slip44:133"
+              ],
+              "detail": "35 pools halted or suspended"
+            },
+            {
+              "key": "mayachain",
+              "label": "Mayachain",
+              "status": "ok"
+            },
+            {
+              "key": "shapeshift",
+              "label": "ShapeShift",
+              "status": "ok"
+            },
+            {
+              "key": "relay",
+              "label": "Relay",
+              "status": "ok"
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "after": [
+    {
+      "origin": "https://oracles.cc",
+      "checkedAt": "2026-11-01T23:45:02.905Z",
+      "observations": {
+        "healthBefore": {
+          "httpStatus": 200,
+          "providers": [
+            {
+              "key": "thorchain",
+              "label": "THORChain",
+              "status": "unknown",
+              "detail": "Checked on quote demand; no background polling"
+            },
+            {
+              "key": "mayachain",
+              "label": "Mayachain",
+              "status": "unknown",
+              "detail": "Checked on quote demand; no background polling"
+            },
+            {
+              "key": "relay",
+              "label": "Relay",
+              "status": "unknown",
+              "detail": "Checked on quote demand; no background polling"
+            },
+            {
+              "key": "zeroex",
+              "label": "0x",
+              "status": "unknown",
+              "detail": "API-key and app-fee route checked on quote demand"
+            },
+            {
+              "key": "shapeshift",
+              "label": "ShapeShift",
+              "status": "unknown",
+              "detail": "Partner-attributed fallback (including moving swappers such as Chainflip/NEAR); checked only on quote demand"
+            },
+            {
+              "key": "chainflip",
+              "label": "Chainflip",
+              "status": "gated",
+              "detail": "Available through ShapeShift; a direct KeepKey broker is not configured"
+            },
+            {
+              "key": "swapkit",
+              "label": "SwapKit",
+              "status": "gated",
+              "detail": "API-key fallback remains unavailable unless each quote proves nonzero affiliate attribution"
+            }
+          ]
+        },
+        "paddedCall": {
+          "httpStatus": 200,
+          "body": {
+            "success": true,
+            "data": "0x0000000000000000000000000000000000000000000000000000000000000006"
+          },
+          "error": null
+        },
+        "estimateGas": {
+          "httpStatus": 200,
+          "body": {
+            "success": true,
+            "data": "0x5208"
+          },
+          "error": null
+        },
+        "feeHistory": {
+          "httpStatus": 200,
+          "body": {
+            "success": true,
+            "data": {
+              "oldestBlock": "0x191a956",
+              "reward": [
+                [
+                  "0x989680"
+                ],
+                [
+                  "0x989680"
+                ],
+                [
+                  "0x3b9aca00"
+                ],
+                [
+                  "0xa8323"
+                ]
+              ],
+              "baseFeePerGas": [
+                "0x26c1f8d",
+                "0x26cf836",
+                "0x28c13e1",
+                "0x248949d",
+                "0x29193ad"
+              ],
+              "gasUsedRatio": [
+                0.5054591666666667,
+                0.7003839666666667,
+                0.08595645,
+                0.99947845
+              ],
+              "baseFeePerBlobGas": [
+                "0x216c17",
+                "0x224eff",
+                "0x22f4be",
+                "0x237b97",
+                "0x239d9f"
+              ],
+              "blobGasUsedRatio": [
+                0.3333333333333333,
+                0.23809523809523808,
+                0.19047619047619047,
+                0.047619047619047616
+              ]
+            }
+          },
+          "error": null
+        },
+        "simulateV1": {
+          "httpStatus": 422,
+          "body": {
+            "error": {
+              "code": "evm_error",
+              "message": "EVM node does not support eth_simulateV1 (HTTP 405)"
+            }
+          },
+          "error": null
+        },
+        "ethUsdtQuote": {
+          "httpStatus": 200,
+          "routes": [
+            {
+              "integration": "relay",
+              "swapper": "Relay",
+              "gasLimit": "446986",
+              "normalizedFeeBps": 30,
+              "normalizedOutboundFee": "0",
+              "executionCheck": {
+                "status": "estimated",
+                "checkedAt": 1793576702181,
+                "gasEstimate": "343836",
+                "quotedGasLimit": "446986"
+              },
+              "routeDiagnostics": {
+                "selectedTier": 0,
+                "fallback": false,
+                "attempts": [
+                  {
+                    "provider": "relay",
+                    "status": "ok",
+                    "checkedAt": 1793576702181
+                  },
+                  {
+                    "provider": "mayachain",
+                    "status": "unavailable",
+                    "reason": "mayachain: failed to simulate swap: trading is halted, can't process swap",
+                    "checkedAt": 1793576702195
+                  },
+                  {
+                    "provider": "zeroex",
+                    "status": "ok",
+                    "checkedAt": 1793576702341
+                  },
+                  {
+                    "provider": "thorchain",
+                    "status": "unavailable",
+                    "reason": "thorchain quote hosts failed: https://gateway.liquify.com/chain/thorchain_api returned 400: failed to simulate swap: failed to simulate handler: trading is halted, can't process swap: invalid request",
+                    "checkedAt": 1793576702450
+                  }
+                ]
+              },
+              "feeBreakdown": {
+                "integrator": {
+                  "bps": 30,
+                  "recipient": "0x87Ab2637bc4231604ad708c5e8aAC92A260c7704"
+                },
+                "sourceNetwork": {
+                  "amountBaseUnits": "27339345321332",
+                  "asset": "eip155:1/slip44:60"
+                },
+                "priceImpactPercent": 0.3
+              }
+            },
+            {
+              "integration": "zeroex",
+              "swapper": "0x",
+              "gasLimit": "379303",
+              "normalizedFeeBps": 46,
+              "normalizedOutboundFee": "0",
+              "executionCheck": {
+                "status": "estimated",
+                "checkedAt": 1793576702340,
+                "gasEstimate": "270390",
+                "quotedGasLimit": "379303"
+              },
+              "routeDiagnostics": {
+                "selectedTier": 0,
+                "fallback": false,
+                "attempts": [
+                  {
+                    "provider": "relay",
+                    "status": "ok",
+                    "checkedAt": 1793576702181
+                  },
+                  {
+                    "provider": "mayachain",
+                    "status": "unavailable",
+                    "reason": "mayachain: failed to simulate swap: trading is halted, can't process swap",
+                    "checkedAt": 1793576702195
+                  },
+                  {
+                    "provider": "zeroex",
+                    "status": "ok",
+                    "checkedAt": 1793576702341
+                  },
+                  {
+                    "provider": "thorchain",
+                    "status": "unavailable",
+                    "reason": "thorchain quote hosts failed: https://gateway.liquify.com/chain/thorchain_api returned 400: failed to simulate swap: failed to simulate handler: trading is halted, can't process swap: invalid request",
+                    "checkedAt": 1793576702450
+                  }
+                ]
+              },
+              "feeBreakdown": null
+            }
+          ]
+        },
+        "healthAfter": {
+          "httpStatus": 200,
+          "providers": [
+            {
+              "key": "thorchain",
+              "label": "THORChain",
+              "status": "degraded",
+              "detail": "Last quote request was unavailable for its pair and amount. Request a quote for current availability and route-specific details.",
+              "checkedAt": 1793576702450,
+              "checkScope": "quote"
+            },
+            {
+              "key": "mayachain",
+              "label": "Mayachain",
+              "status": "degraded",
+              "detail": "Last quote request was unavailable for its pair and amount. Request a quote for current availability and route-specific details.",
+              "checkedAt": 1793576702195,
+              "checkScope": "quote"
+            },
+            {
+              "key": "relay",
+              "label": "Relay",
+              "status": "ok",
+              "detail": "Last demand-driven quote check succeeded. Availability depends on the pair and amount.",
+              "checkedAt": 1793576702181,
+              "checkScope": "quote"
+            },
+            {
+              "key": "zeroex",
+              "label": "0x",
+              "status": "ok",
+              "detail": "Last demand-driven quote check succeeded. Availability depends on the pair and amount.",
+              "checkedAt": 1793576702341,
+              "checkScope": "quote"
+            },
+            {
+              "key": "shapeshift",
+              "label": "ShapeShift",
+              "status": "unknown",
+              "detail": "Partner-attributed fallback (including moving swappers such as Chainflip/NEAR); checked only on quote demand"
+            },
+            {
+              "key": "chainflip",
+              "label": "Chainflip",
+              "status": "gated",
+              "detail": "Available through ShapeShift; a direct KeepKey broker is not configured"
+            },
+            {
+              "key": "swapkit",
+              "label": "SwapKit",
+              "status": "gated",
+              "detail": "API-key fallback remains unavailable unless each quote proves nonzero affiliate attribution"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "origin": "https://api.keepkey.info",
+      "checkedAt": "2026-11-01T23:45:00.280Z",
+      "observations": {
+        "healthBefore": {
+          "httpStatus": 200,
+          "providers": [
+            {
+              "key": "thorchain",
+              "label": "THORChain",
+              "status": "degraded",
+              "haltedPools": [
+                "AVAX.SOL-0XFE6B19286885A4F7F55ADAD09C3CD1F906D2478F",
+                "bip122:000000000000000000651ef99cb9fcbe/slip44:145",
+                "eip155:56/slip44:60",
+                "BSC.BTCB-0X7130D2A12B9BCBFAE4F2634D864A1EE1CE3EAD9C",
+                "BSC.BUSD-0XE9E7CEA3DEDCA5984780BAFC599BD69ADD087D56",
+                "BSC.ETH-0X2170ED0880AC9A755FD29B2688956BD959F933F8",
+                "BSC.TWT-0X4B0F1812E5DF2A09796481FF14017E6005508003",
+                "BSC.USDC-0X8AC76A51CC950D9822D68B83FE1AD97B32CD580D",
+                "BSC.USDT-0X55D398326F99059FF775485246999027B3197955",
+                "bip122:000000000019d6689c085ae165831e93/slip44:0",
+                "bip122:00000000001a91e3dace36e2be3bf030/slip44:3",
+                "ETH.AAVE-0X7FC66500C84A76AD7E9C93437BFC5AC33E2DDAE9",
+                "ETH.DAI-0X6B175474E89094C44DA98B954EEDEAC495271D0F",
+                "ETH.DPI-0X1494CA1F11D487C2BBE4543E90080AEBA4BA3C2B",
+                "eip155:1/slip44:60",
+                "ETH.FOX-0XC770EEFAD204B5180DF6A14EE197D99D808EE52D",
+                "ETH.GUSD-0X056FD409E1D7A124BD7017459DFEA2F387B6D5CD",
+                "ETH.LINK-0X514910771AF9CA656AF840DFF83E8264ECF986CA",
+                "ETH.LUSD-0X5F98805A4E8BE255A32880FDEC7F6728C6568BA0",
+                "ETH.SNX-0XC011A73EE8576FB46F5E1C5751CA3B9FE0AF2A6F",
+                "ETH.TGT-0X108A850856DB3F85D0269A2693D896B394C80325",
+                "ETH.THOR-0XA5F2211B9B8170F694421F2046281775E8468044",
+                "ETH.USDC-0XA0B86991C6218B36C1D19D4A2E9EB0CE3606EB48",
+                "ETH.USDP-0X8E870D67F660D95D5BE530380D0EC0BD388289E1",
+                "eip155:1/erc20:0xdac17f958d2ee523a2206206994597c13d831ec7",
+                "ETH.VTHOR-0X815C23ECA83261B6EC689B60CC4A58B54BC24D8D",
+                "ETH.WBTC-0X2260FAC5E5542A773AA44FBCFEDF7C193BC2C599",
+                "ETH.XRUNE-0X69FA0FEE221AD11012BAB0FDB45D444D3D2CE71C",
+                "ETH.YFI-0X0BC529C00C6401AEF6D220BE8C6EA1667F6AD93E",
+                "cosmos:cosmoshub-4/slip44:118",
+                "bip122:12a765e31ffd4059bada1e25190f6e98/slip44:2",
+                "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp/slip44:501",
+                "tron:0x2b6653dc/slip44:195",
+                "tron:0x2b6653dc/token:TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t",
+                "bip122:00040fe8ec8471911baa1db1266ea15d/slip44:133"
+              ],
+              "detail": "35 pools halted or suspended"
+            },
+            {
+              "key": "mayachain",
+              "label": "Mayachain",
+              "status": "ok"
+            },
+            {
+              "key": "shapeshift",
+              "label": "ShapeShift",
+              "status": "ok"
+            },
+            {
+              "key": "relay",
+              "label": "Relay",
+              "status": "ok"
+            }
+          ]
+        },
+        "paddedCall": {
+          "httpStatus": 404,
+          "body": {
+            "nonJson": true
+          },
+          "error": null
+        },
+        "estimateGas": {
+          "httpStatus": 404,
+          "body": {
+            "nonJson": true
+          },
+          "error": null
+        },
+        "feeHistory": {
+          "httpStatus": 404,
+          "body": {
+            "nonJson": true
+          },
+          "error": null
+        },
+        "simulateV1": {
+          "httpStatus": 404,
+          "body": {
+            "nonJson": true
+          },
+          "error": null
+        },
+        "ethUsdtQuote": {
+          "httpStatus": 200,
+          "routes": [
+            {
+              "integration": "relay",
+              "swapper": "relay",
+              "gasLimit": "450323",
+              "normalizedFeeBps": null,
+              "normalizedOutboundFee": null,
+              "executionCheck": null,
+              "routeDiagnostics": null,
+              "feeBreakdown": null
+            }
+          ]
+        },
+        "healthAfter": {
+          "httpStatus": 200,
+          "providers": [
+            {
+              "key": "thorchain",
+              "label": "THORChain",
+              "status": "degraded",
+              "haltedPools": [
+                "AVAX.SOL-0XFE6B19286885A4F7F55ADAD09C3CD1F906D2478F",
+                "bip122:000000000000000000651ef99cb9fcbe/slip44:145",
+                "eip155:56/slip44:60",
+                "BSC.BTCB-0X7130D2A12B9BCBFAE4F2634D864A1EE1CE3EAD9C",
+                "BSC.BUSD-0XE9E7CEA3DEDCA5984780BAFC599BD69ADD087D56",
+                "BSC.ETH-0X2170ED0880AC9A755FD29B2688956BD959F933F8",
+                "BSC.TWT-0X4B0F1812E5DF2A09796481FF14017E6005508003",
+                "BSC.USDC-0X8AC76A51CC950D9822D68B83FE1AD97B32CD580D",
+                "BSC.USDT-0X55D398326F99059FF775485246999027B3197955",
+                "bip122:000000000019d6689c085ae165831e93/slip44:0",
+                "bip122:00000000001a91e3dace36e2be3bf030/slip44:3",
+                "ETH.AAVE-0X7FC66500C84A76AD7E9C93437BFC5AC33E2DDAE9",
+                "ETH.DAI-0X6B175474E89094C44DA98B954EEDEAC495271D0F",
+                "ETH.DPI-0X1494CA1F11D487C2BBE4543E90080AEBA4BA3C2B",
+                "eip155:1/slip44:60",
+                "ETH.FOX-0XC770EEFAD204B5180DF6A14EE197D99D808EE52D",
+                "ETH.GUSD-0X056FD409E1D7A124BD7017459DFEA2F387B6D5CD",
+                "ETH.LINK-0X514910771AF9CA656AF840DFF83E8264ECF986CA",
+                "ETH.LUSD-0X5F98805A4E8BE255A32880FDEC7F6728C6568BA0",
+                "ETH.SNX-0XC011A73EE8576FB46F5E1C5751CA3B9FE0AF2A6F",
+                "ETH.TGT-0X108A850856DB3F85D0269A2693D896B394C80325",
+                "ETH.THOR-0XA5F2211B9B8170F694421F2046281775E8468044",
+                "ETH.USDC-0XA0B86991C6218B36C1D19D4A2E9EB0CE3606EB48",
+                "ETH.USDP-0X8E870D67F660D95D5BE530380D0EC0BD388289E1",
+                "eip155:1/erc20:0xdac17f958d2ee523a2206206994597c13d831ec7",
+                "ETH.VTHOR-0X815C23ECA83261B6EC689B60CC4A58B54BC24D8D",
+                "ETH.WBTC-0X2260FAC5E5542A773AA44FBCFEDF7C193BC2C599",
+                "ETH.XRUNE-0X69FA0FEE221AD11012BAB0FDB45D444D3D2CE71C",
+                "ETH.YFI-0X0BC529C00C6401AEF6D220BE8C6EA1667F6AD93E",
+                "cosmos:cosmoshub-4/slip44:118",
+                "bip122:12a765e31ffd4059bada1e25190f6e98/slip44:2",
+                "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp/slip44:501",
+                "tron:0x2b6653dc/slip44:195",
+                "tron:0x2b6653dc/token:TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t",
+                "bip122:00040fe8ec8471911baa1db1266ea15d/slip44:133"
+              ],
+              "detail": "35 pools halted or suspended"
+            },
+            {
+              "key": "mayachain",
+              "label": "Mayachain",
+              "status": "ok"
+            },
+            {
+              "key": "shapeshift",
+              "label": "ShapeShift",
+              "status": "ok"
+            },
+            {
+              "key": "relay",
+              "label": "Relay",
+              "status": "ok"
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "tests": {
+    "gatewayPass": 143,
+    "gatewaySkipped": 2,
+    "gatewaySkipReason": "Dedicated PostgreSQL integration database not configured",
+    "gatewayTypecheck": "passed",
+    "vaultFocusedPass": 115,
+    "vaultBuild": "passed"
+  },
+  "remainingLimits": [
+    "Chainflip quote routing remains through ShapeShift by user choice. No direct KeepKey broker configured.",
+    "eth_simulateV1 remains unsupported by the configured Ethereum node, now explicitly reported as unsupported (422).",
+    "Firmware ClearSign coverage for the Relay router requires separate work. Device signing restrictions were not weakened.",
+    "Provider health observations are scoped to recent quote demand, expire in five minutes, and reset on container restart."
+  ],
+  "deployment": {
+    "revision": "a993d2e77b43bba8beb98913bb9d33e6154bd28d",
+    "workflow": "https://github.com/BitHighlander/keepkey-gateway/actions/runs/41364208535",
+    "exactRevisionHealthCheck": "passed",
+    "independentHealthCheck": "passed",
+    "database": "ok"
+  },
+  "chainflipLiveTrackerCheck": {
+    "persistence": "local memory only",
+    "providerRead": "passed",
+    "status": "completed",
+    "requiredConfirmations": 2,
+    "actualBrokerBps": [
+      5,
+      40
+    ],
+    "actualFeeTypes": [
+      "NETWORK",
+      "BROKER",
+      "INGRESS",
+      "EGRESS"
+    ]
+  }
+}

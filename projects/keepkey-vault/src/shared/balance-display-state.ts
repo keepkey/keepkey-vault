@@ -26,6 +26,22 @@ export function portfolioBalanceSyncState(meta?: {
   return 'confirmed'
 }
 
+/** A chain total cannot attest to one account's missing token. Require a
+ * matching native owner row and a complete, fresh response for that owner. */
+export function ownerPortfolioConfidence(entries: any[], owner: string, nativeCaip: string, meta?: Parameters<typeof portfolioBalanceSyncState>[0], now = Date.now()) {
+  const network = nativeCaip.split('/')[0].toLowerCase()
+  const rows = entries.filter(entry => String(entry?.caip || '').split('/')[0].toLowerCase() === network
+    && String(entry?.pubkey || entry?.address || '').toLowerCase() === owner.toLowerCase())
+  const native = rows.find(entry => String(entry.caip).toLowerCase() === nativeCaip.toLowerCase())
+  const valid = (entry: any) => entry?.balance != null && String(entry.balance).trim() !== ''
+    && Number.isFinite(Number(entry.balance)) && Number(entry.balance) >= 0
+  let syncState = portfolioBalanceSyncState(meta)
+  if (!native || !valid(native) || rows.some(entry => entry.degraded === true || entry.verified === false || !valid(entry))) syncState = 'degraded'
+  else if (syncState !== 'degraded' && rows.some(entry => entry.isStale === true || entry.syncState === 'stale')) syncState = 'stale'
+  return { syncState, updatedAt: now,
+    confirmedAssetCaips: syncState === 'confirmed' ? [...new Set(rows.map(entry => String(entry.caip)))] : [] }
+}
+
 export interface BalanceDisplayInput {
   /** Is there an entry for this chain in the balances map at all? */
   hasEntry: boolean

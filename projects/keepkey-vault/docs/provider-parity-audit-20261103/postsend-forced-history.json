@@ -1,0 +1,46 @@
+{
+  "origin": "https://oracles.cc",
+  "expectedRevision": "b8d20f8dc259c7c17bc7b0a0e15c8bd2dd0da80e",
+  "checkedAt": "2026-11-03T21:33:37.644Z",
+  "walletKeysReadOnly": true,
+  "privateWalletIdentifiersOmitted": true,
+  "signed": false,
+  "broadcast": false,
+  "checks": [
+    {
+      "accountPrefix": "Ltub",
+      "pathPrefixes": [
+        "m/44'/2'/0'"
+      ],
+      "queries": 1,
+      "httpStatus": 200,
+      "historyRows": 1,
+      "targetPresent": true,
+      "confirmed": true,
+      "positiveConfirmations": true,
+      "positiveBlockHeight": true,
+      "allRowsFresh": true,
+      "success": true,
+      "invalidBooleanRejected": true
+    },
+    {
+      "accountPrefix": "Mtub",
+      "pathPrefixes": [
+        "m/49'/2'/0'"
+      ],
+      "queries": 1,
+      "httpStatus": 200,
+      "historyRows": 1,
+      "targetPresent": true,
+      "confirmed": true,
+      "positiveConfirmations": true,
+      "positiveBlockHeight": true,
+      "allRowsFresh": true,
+      "success": true,
+      "invalidBooleanRejected": true
+    }
+  ],
+  "actualRevision": "b8d20f8dc259c7c17bc7b0a0e15c8bd2dd0da80e",
+  "booleanRefreshAdvertised": true,
+  "success": true
+}

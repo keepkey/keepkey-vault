@@ -1,0 +1,293 @@
+[
+  {
+    "chainId": 1,
+    "address": "0x0729e2a4716d9f7dd17858d5d504426d228697f7",
+    "sourcifyMatch": "match",
+    "runtimeMatch": "match",
+    "verifiedAt": "2026-10-16T07:24:44Z",
+    "compilationTarget": {
+      "src/RelayRouter.sol": "RelayRouter"
+    },
+    "compiler": {
+      "version": "0.8.28+commit.7893614a"
+    },
+    "sourceUrl": "https://sourcify.dev/server/v2/contract/1/0x0729e2a4716d9f7dd17858d5d504426d228697f7?fields=abi,metadata,sources",
+    "responseSha256": "32bbefddc4bc194bb77a99f794686029a4f102ce618d257e0529f79fdcaa18b3",
+    "sourcesSha256": {
+      "src/RelayRouter.sol": "5782ae3365d3efe54e642511ff3a742b062dae05812874520c1cf341b289ed5f",
+      "lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol": "6f2faae462e286e24e091d7718575179644dc60e79936ef0c92e2d1ab3ca3cee",
+      "lib/openzeppelin-contracts/contracts/token/ERC721/IERC721.sol": "8239cba58986af2deb65af8092d5abcd4ffe60a38dee00cb2e8c6465f945c2d0",
+      "lib/openzeppelin-contracts/contracts/token/ERC1155/IERC1155.sol": "eed90b2884d4acacda32332198e84f991a88c86056b175a35cdb0a90a971907b",
+      "lib/solady/src/utils/SafeTransferLib.sol": "86b07c78f78c36117da64449bd89d7ad419026ca4af4749f1f1b7d2173603bcc",
+      "src/common/Multicall3.sol": "1e94bc7d757267e5bac565a8f43253073e3710b9a86b50d5806cf64562ddbf87",
+      "src/common/ReentrancyGuardMsgSender.sol": "6084a7f749b50382c5d20067d56d4cedab50e4a69207e92b37e478d694737d44",
+      "lib/openzeppelin-contracts/contracts/utils/introspection/IERC165.sol": "07ae1ac964ab74dedada999e2dfc642031a6495469cffc0bf715daa4f1e4f904"
+    },
+    "relevantAbi": [
+      {
+        "name": "cleanupErc20s",
+        "type": "function",
+        "inputs": [
+          {
+            "name": "tokens",
+            "type": "address[]",
+            "internalType": "address[]"
+          },
+          {
+            "name": "recipients",
+            "type": "address[]",
+            "internalType": "address[]"
+          },
+          {
+            "name": "amounts",
+            "type": "uint256[]",
+            "internalType": "uint256[]"
+          },
+          {
+            "name": "metadata",
+            "type": "bytes",
+            "internalType": "bytes"
+          }
+        ],
+        "outputs": [],
+        "stateMutability": "nonpayable"
+      },
+      {
+        "name": "cleanupNative",
+        "type": "function",
+        "inputs": [
+          {
+            "name": "amount",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "recipient",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "metadata",
+            "type": "bytes",
+            "internalType": "bytes"
+          }
+        ],
+        "outputs": [],
+        "stateMutability": "nonpayable"
+      },
+      {
+        "name": "multicall",
+        "type": "function",
+        "inputs": [
+          {
+            "name": "calls",
+            "type": "tuple[]",
+            "components": [
+              {
+                "name": "target",
+                "type": "address",
+                "internalType": "address"
+              },
+              {
+                "name": "allowFailure",
+                "type": "bool",
+                "internalType": "bool"
+              },
+              {
+                "name": "value",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "callData",
+                "type": "bytes",
+                "internalType": "bytes"
+              }
+            ],
+            "internalType": "struct Call3Value[]"
+          },
+          {
+            "name": "refundTo",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "nftRecipient",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "metadata",
+            "type": "bytes",
+            "internalType": "bytes"
+          }
+        ],
+        "outputs": [
+          {
+            "name": "returnData",
+            "type": "tuple[]",
+            "components": [
+              {
+                "name": "success",
+                "type": "bool",
+                "internalType": "bool"
+              },
+              {
+                "name": "returnData",
+                "type": "bytes",
+                "internalType": "bytes"
+              }
+            ],
+            "internalType": "struct Result[]"
+          }
+        ],
+        "stateMutability": "payable"
+      }
+    ]
+  },
+  {
+    "chainId": 1,
+    "address": "0x1644d2477f809cc2c71bccfd6dc9497e3f83210d",
+    "sourcifyMatch": "exact_match",
+    "runtimeMatch": "exact_match",
+    "verifiedAt": "2026-09-29T15:34:39Z",
+    "compilationTarget": {
+      "src/TychoRouterV3.sol": "TychoRouterV3"
+    },
+    "compiler": {
+      "version": "0.8.33+commit.64118f21"
+    },
+    "sourceUrl": "https://sourcify.dev/server/v2/contract/1/0x1644d2477f809cc2c71bccfd6dc9497e3f83210d?fields=abi,metadata,sources",
+    "responseSha256": "b3aa1fc993022922cb665eeb07bce9b9cc3abec0c1c262a8c4477f72dec77cba",
+    "sourcesSha256": {
+      "@interfaces/ICallback.sol": "51885ae574a2cb5d945b72ede8b98acc6f915e62f9d66afdd467a2a2826cc8cb",
+      "@interfaces/IExecutor.sol": "1298c5951716b99aaf6ad82104c638769c592216673c4e430a7e357c06bc3bb8",
+      "@interfaces/IFeeCalculator.sol": "72bb8c3501b0acf8e18e1042b4a424940400799075121b492fe0b2043d0763da",
+      "@openzeppelin/contracts/access/AccessControl.sol": "30e506102a9625a7aefc2dec594dd4abb00b4fafc5b47d6378a61b3c25e21d0e",
+      "@openzeppelin/contracts/access/IAccessControl.sol": "140304b7e99d517c57a13f391dfd3b550ca633a507f7b2af130f391b6cd89cc5",
+      "@openzeppelin/contracts/interfaces/IERC1271.sol": "2d17bba201aa2f9c55e317315b872272a60361848dfceb6b1e77081265c79a27",
+      "@openzeppelin/contracts/interfaces/IERC1363.sol": "9c3a75a925a6dac9e88b03cddc58d42fe3131b0aaaad84408521f3f7af2f991b",
+      "@openzeppelin/contracts/interfaces/IERC165.sol": "dfb3f56fa928a7c6cae41a7ce2c86b9210fa18d33fa26389099d66a0fa790368",
+      "@openzeppelin/contracts/interfaces/IERC20.sol": "0158e2d3e0e28bedd99eec13dcf1a8aa3a70a5b7e4bb2ad709609c95fcc740d1",
+      "@openzeppelin/contracts/interfaces/IERC5267.sol": "f89772d2d4fafcbef8b73bb10ee9a3373edec2eedb2f1b302320915b351dc3d1",
+      "@openzeppelin/contracts/interfaces/IERC6909.sol": "92e08355231442117efbbe59d0e6021fa20cf01696b80bf64a9811869fd0271d",
+      "@openzeppelin/contracts/interfaces/IERC7913.sol": "f66aad4249885b0f11369bfa825dded60aa4baa0d76d9becdac9daa48c350350",
+      "@openzeppelin/contracts/token/ERC20/IERC20.sol": "01b6f5c4fa45fd38822b286ecef6daf983d27306dd6362496fa71b3e4600b72c",
+      "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol": "c2394cb2a327f234711da34884947f4aa0f6dd2791d1d6303a0c7acfaf81bca3",
+      "@openzeppelin/contracts/token/ERC6909/ERC6909.sol": "4fcbf3da03f0b84c7a99df1308ce93745e92ab6dd11c0dfddcd1a1f5a7b5b63c",
+      "@openzeppelin/contracts/utils/Address.sol": "73e54e15285455f0e01e136c3663732641537614723ae5dbd820eb3cb036b1fd",
+      "@openzeppelin/contracts/utils/Bytes.sol": "68596086defc2c85b0351f46851d2121287c71d2bc09d7c5c57a5d746f6fa742",
+      "@openzeppelin/contracts/utils/Context.sol": "847fda5460fee70f56f4200f59b82ae622bb03c79c77e67af010e31b7e2cc5b6",
+      "@openzeppelin/contracts/utils/cryptography/ECDSA.sol": "21dfba9eb8ca6cd6ca6e60e7d23b78707426508767910bafa5384528675458b6",
+      "@openzeppelin/contracts/utils/cryptography/EIP712.sol": "2845caaaf70757b6cce612ae4ffbec2c382cb3d1cb9765c98fa649c0f5f1c794",
+      "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol": "324fb178759305c5ad8b77d3662df4714654d9d36aef96244f37922b7f595d2a",
+      "@openzeppelin/contracts/utils/cryptography/SignatureChecker.sol": "6812b9172766cce55232ad99b5e03feb171cccf826691dd29808a6c4ea538a75",
+      "@openzeppelin/contracts/utils/Errors.sol": "0704b9d6c032cca8512a3bc3f30f49f86f1f03102d2896a3d23e794b82efea66",
+      "@openzeppelin/contracts/utils/introspection/ERC165.sol": "61a2b12c96857aaa35f48aeda67a4281637a42494c0b3795be0ae976aa7b3793",
+      "@openzeppelin/contracts/utils/introspection/IERC165.sol": "9055c2994b37dea1a41b7b7926dcb510f05dbe2540b0aafc5fbee9558fffd0ca",
+      "@openzeppelin/contracts/utils/LowLevelCall.sol": "c9cc8a0ba894f94b04a2d6651e5143a6859690a093c4dedb910892197886daca",
+      "@openzeppelin/contracts/utils/math/Math.sol": "e8363755da38f60d1e86d8b218cd737b3348274aeedddb1547eef11c0c2025c3",
+      "@openzeppelin/contracts/utils/math/SafeCast.sol": "8237edaa6011b04387b021399601355f641202bef4efe1d6a9bc934d2bb2da56",
+      "@openzeppelin/contracts/utils/math/SignedMath.sol": "1ed50b1056af886752f0fb48a0165d381e69bb4a4b18b893b066dc144a7e08d7",
+      "@openzeppelin/contracts/utils/Panic.sol": "270fc8401c1a13fae6a7a4a2dd6e381b95d658896701e51f0d3e2688acab3dec",
+      "@openzeppelin/contracts/utils/Pausable.sol": "2c26130748f06552c65ca74d89eaf78c9324a3cbac3ba6fdbadaa8beba0cb0b4",
+      "@openzeppelin/contracts/utils/ReentrancyGuard.sol": "94e409e8f6e3184236651a6cc2b1a6a3ea0f0a25eb85b71e524ad5791bb2fbc8",
+      "@openzeppelin/contracts/utils/ShortStrings.sol": "1cfa08d3c551e9ec0b9cd249b09987f04e7e90f352e1a5e3b0d6a3bc426b3de7",
+      "@openzeppelin/contracts/utils/StorageSlot.sol": "75704538dcb223239280c6726d9a31cf769a7816718517c997fc7d63bdb70778",
+      "@openzeppelin/contracts/utils/Strings.sol": "3de05dcb48f4e622fbe6af2ec9a157c11e536bd87e9ef0134c3ca83031620a52",
+      "@permit2/src/interfaces/IAllowanceTransfer.sol": "a31c712c5cc8d171818a4225c09011f9ba86b2d5edf6045ac812bab93b6bbb87",
+      "@permit2/src/interfaces/IEIP712.sol": "e386407da496dbe874c10a81801c55744fb2922a51389a51c79001422e81e0cd",
+      "lib/bytes/LibPrefixLengthEncodedByteArray.sol": "0c0ecb4b21ceebcc4788f3479446292aa8bef4cf9974716c33f07b0231e30bf9",
+      "lib/FeeStructs.sol": "d07388181644a806c848a47efb44916d11897e27d716ce7e587d49f974a7485c",
+      "lib/LibSwap.sol": "1e73e8767206cc747024a40ea81cbc44d16ecba2d4601fd736a03a5623b006ed",
+      "lib/NativeETH.sol": "97ecc2e685621bc2008bb2ae6e861e60a838c73e90cf4985711f9d6d4c866a93",
+      "src/Dispatcher.sol": "0ef196f1274f9b0a759db46e2c7e8a7c174c25de0f68f697b485e7c2cc9c971d",
+      "src/TransferManager.sol": "e72c21502ea79d051045c7ea18d8f1281ea3128535f14630ecfd6a6520bdf0e0",
+      "src/TychoRouterV3.sol": "2c468ee4b13c8c792a85107f78401f3b2795e3620fd9f366052ffe1a8770f43e",
+      "src/Vault.sol": "e47133b184180ea92ac9ce9f8b003e2e30beeef00d3455d91336fd1a89cce485"
+    },
+    "relevantAbi": [
+      {
+        "name": "sequentialSwap",
+        "type": "function",
+        "inputs": [
+          {
+            "name": "amountIn",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "tokenIn",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "tokenOut",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "expectedAmountOut",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "minAmountOut",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "receiver",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "clientFeeParams",
+            "type": "tuple",
+            "components": [
+              {
+                "name": "clientFeeBps",
+                "type": "uint32",
+                "internalType": "uint32"
+              },
+              {
+                "name": "clientFeeReceiver",
+                "type": "address",
+                "internalType": "address"
+              },
+              {
+                "name": "maxClientContribution",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "deadline",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "clientSignature",
+                "type": "bytes",
+                "internalType": "bytes"
+              }
+            ],
+            "internalType": "struct ClientFeeParams"
+          },
+          {
+            "name": "swaps",
+            "type": "bytes",
+            "internalType": "bytes"
+          }
+        ],
+        "outputs": [
+          {
+            "name": "",
+            "type": "uint256",
+            "internalType": "uint256"
+          }
+        ],
+        "stateMutability": "payable"
+      }
+    ]
+  }
+]

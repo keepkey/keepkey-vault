@@ -1,0 +1,159 @@
+{
+  "recordedAt": "2026-11-03T23:14:16.587154+00:00",
+  "status": "provider_coverage_restored_verified_live",
+  "baselineAudit": "audit.json",
+  "gateway": {
+    "revision": "bff70f2a83e2db01a7acb8f06d2dd714974ceaf3",
+    "pullRequest": "https://github.com/BitHighlander/keepkey-gateway/pull/11",
+    "deployment": "https://github.com/BitHighlander/keepkey-gateway/actions/runs/41736560137",
+    "unitTestsPassed": 252,
+    "optionalDatabaseTestsSkipped": 2,
+    "typecheck": "passed",
+    "liveDeploymentCasesPassed": 5,
+    "liveLtcScriptFamiliesPassed": 3
+  },
+  "vault": {
+    "providerCodeRevision": "e02055c8663a40211cfa542d03903acc3e4553d2",
+    "statusLabelCodeRevision": "16741a89da227b77e1767f84658146410a83ecca",
+    "releaseUnitTestsPassed": 2403,
+    "scriptChecksPassed": 17,
+    "preflight": "passed",
+    "typeDiagnostics": 812,
+    "typeBaseline": 1033,
+    "quoteStatusFocusedTestsPassed": 11,
+    "currentCodeRevision": "f0866499886ae2839ba9a05295dce00f182a536b",
+    "nativeBuild": "passed"
+  },
+  "live": {
+    "gatewayQuoteCasesPassed": 13,
+    "parityRegressions": 0,
+    "sdkCasesPassed": 4,
+    "directNearParserCasesPassed": 2,
+    "agentSigned": false,
+    "agentBroadcast": false,
+    "observedUserApprovedFundedSwap": "independently confirmed native ETH deposit and LTC payout; actual receipt persisted in Vault history"
+  },
+  "findings": [
+    {
+      "id": "ROUTE-001",
+      "disposition": "resolved",
+      "resolution": "Direct 1Click adapter restored with source precision, origin refunds, live token registry and independently bound PENDING_DEPOSIT terms."
+    },
+    {
+      "id": "ROUTE-002",
+      "disposition": "resolved",
+      "resolution": "Relay EVM/Solana directions restored; live unsigned SOL to ETH and ETH to SOL checks passed. BTC remains destination only and individual routes can be disabled by Relay."
+    },
+    {
+      "id": "API-001",
+      "disposition": "resolved",
+      "resolution": "Installed SDK negotiates relayExecutionMode from resolved server OpenAPI. Four live old/new-server cases pass."
+    },
+    {
+      "id": "CONTRACT-001",
+      "disposition": "resolved",
+      "resolution": "Memoless requests filter memo adapters and reject memo-bearing responses. Live BTC to LTC memoless quote passes."
+    },
+    {
+      "id": "TRACK-001",
+      "disposition": "resolved",
+      "resolution": "Gateway and Vault bind source intent, exact amounts, customer addresses, source hash and actual payout. Independently confirmed real ETH to LTC payout and completed Vault history observed; agent did not initiate signing."
+    },
+    {
+      "id": "FEES-001",
+      "disposition": "resolved",
+      "resolution": "Direct NEAR effective quoted appFees match legacy recipients/rates (15 bps KeepKey plus 20 bps 1Click observed). ShapeShift fallback retained. Affiliate account ledger credits are not independently audited."
+    },
+    {
+      "id": "FEES-002",
+      "disposition": "resolved",
+      "resolution": "Legacy Relay 15/15 recipient defaults and environment overrides restored."
+    },
+    {
+      "id": "FEES-003",
+      "disposition": "resolved",
+      "resolution": "Typed fees retain their currency and explicit units. Legacy providers use known unit contracts; rates without an authoritative fee denomination do not invent monetary amounts."
+    },
+    {
+      "id": "CATALOG-001",
+      "disposition": "resolved",
+      "resolution": "NEAR live token registry and on-demand trusted ERC20/SPL metadata replace fixed-token eligibility; cache is bounded and source precision verified."
+    },
+    {
+      "id": "VALIDATE-001",
+      "disposition": "resolved",
+      "resolution": "Chain-specific address/checksum validation restored before provider calls."
+    },
+    {
+      "id": "POLICY-001",
+      "disposition": "documented_intentional_difference",
+      "resolution": "Intentional selection difference documented: compare direct tier, then attributed aggregator fallbacks; Vault ranks device-review-compatible routes. Existing route-selection fixtures retained."
+    }
+  ],
+  "artifacts": [
+    "post-deploy-quotes.json",
+    "post-deploy-sdk.json",
+    "post-deploy-near-parser.json",
+    "native-verification.json",
+    "ltc-native-verification.json",
+    "postsend-forced-history.json",
+    "postsend-live-readonly-replay.json",
+    "live-payments.json"
+  ],
+  "limits": [
+    "Provider availability depends on asset pair, amount, liquidity and live protocol halt flags.",
+    "Coverage and policy compatibility are verified; provider-selection behavior intentionally differs from the legacy first-success router.",
+    "Affiliate settlement-account ledger credits were not independently audited.",
+    "Public Vault release packaging and remaining device/platform release gates are tracked separately."
+  ],
+  "balanceFollowup": {
+    "status": "resolved_and_verified_live",
+    "cause": "Mtub was rewritten to Bitcoin ypub, causing Litecoin Blockbook to derive the wrong address class and return a false zero. Pending UTXO changes were also ignored and advertised forceRefresh did not bypass the cache. Receive script labels and overlapping derivation responses could disagree with the selected account.",
+    "fixes": [
+      "Preserve Litecoin Mtub; validate script/address/path families in live deployment checks",
+      "Include signed pending UTXO balance changes with exact base-unit arithmetic",
+      "Honor forced refresh and report upstream failure instead of accepting stale verified zeros",
+      "Keep selected script, derivation path, address metadata and extended-key classification consistent; suppress stale asynchronous derivations"
+    ],
+    "verification": {
+      "legacyAndGatewayAccountBalancesMatch": true,
+      "families": [
+        "Legacy BIP44",
+        "Wrapped SegWit BIP49",
+        "Native SegWit BIP84"
+      ],
+      "actualFundingTransactionOutputsMatchedToSavedPaths": true,
+      "suppliedFundingTransactionsTypes": [
+        "Legacy BIP44",
+        "Wrapped SegWit BIP49"
+      ],
+      "nativeRefreshButtonPressed": true,
+      "nativePickerBalancesMatchAPI": true,
+      "nativeAndWrappedPathsAndLabelsChecked": true
+    },
+    "walletData": "Funding quantities, addresses, account keys and transaction IDs are retained only in local private verification records."
+  },
+  "notificationScope": {
+    "status": "implemented_and_verified_live",
+    "document": "https://github.com/BitHighlander/keepkey-gateway/blob/master/docs/REALTIME-PARITY.md",
+    "evidence": "live-payments.json",
+    "verified": [
+      "actual upstream WebSocket subscription",
+      "new public Litecoin activity delivered after connection",
+      "server queue without a connected client",
+      "scoped replay and acknowledgments",
+      "acknowledgment before queue insertion",
+      "native automatic registration and Litecoin balance reconciliation"
+    ],
+    "limits": "Seven-day queued hint retention and bounded latest-provider-page history; hidden wallets are active-only and generic hints do not establish native payment amounts."
+  },
+  "postSendBalanceRefresh": {
+    "status": "implemented_and_verified",
+    "codeRevision": "6deceadc42c8d094e93530b80098fd8549a76802",
+    "evidence": [
+      "postsend-forced-history.json",
+      "postsend-live-readonly-replay.json",
+      "live-payments.json"
+    ]
+  }
+}
