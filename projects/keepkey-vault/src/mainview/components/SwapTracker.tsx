@@ -11,6 +11,7 @@ import { Z } from "../lib/z-index"
 import { SwapHistoryDialog } from "./SwapHistoryDialog"
 import { SwapDialog } from "./SwapDialog"
 import type { PendingSwap, SwapStatusUpdate } from "../../shared/types"
+import { advanceSwapStatus } from "../../shared/relay-status"
 
 const TRACKER_CSS = `
   @keyframes kkTrackerPulse {
@@ -61,7 +62,7 @@ export function SwapTracker() {
         const updated = [...prev]
         updated[idx] = {
           ...updated[idx],
-          status: update.status,
+          status: advanceSwapStatus(updated[idx].status, update.status),
           updatedAt: Date.now(),
           ...(update.confirmations !== undefined ? { confirmations: update.confirmations } : {}),
           ...(update.outboundConfirmations !== undefined ? { outboundConfirmations: update.outboundConfirmations } : {}),

@@ -42,7 +42,9 @@ import { DocsLink } from "./DocsLink"
 import { DOCS_LINKS, watch } from "../../shared/docs-links"
 import { networkDisplayName, ellipsizeCaip, parseCaip } from "../../shared/swap-discovery"
 import { isSymbolSquatter } from "../../shared/symbolSquatter"
-import { shouldRetryCompletedSwapMetadata } from "../../shared/swap-tracker-guards"
+import { retainSwapProgress, shouldRetryCompletedSwapMetadata } from "../../shared/swap-tracker-guards"
+import { advanceSwapStatus } from "../../shared/relay-status"
+import { blocksSwapUiCommand } from "../../shared/swap-ui-control"
 import {
   DEFAULT_SLIPPAGE_BPS,
   MAX_SLIPPAGE_BPS,
@@ -990,7 +992,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
   // and is the only place createdAt (the broadcast anchor) is available.
   const applyInboundSnap = useCallback((snap: any) => {
     if (!snap) return
-    if (snap.status) setLiveStatus(snap.status)
+    if (snap.status) setLiveStatus(previous => advanceSwapStatus(previous, snap.status))
     if (snap.payouts) setLivePayouts(snap.payouts)
     if (snap.receivedOutput) setLiveReceivedOutput(snap.receivedOutput)
     if (snap.inboundBlockNumber != null && snap.inboundBlockNumber > 0) setLiveInboundBlockNumber(snap.inboundBlockNumber)
@@ -1010,7 +1012,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
 
     const unsub1 = onRpcMessage('swap-update', (update: SwapStatusUpdate) => {
       if (update.txid !== txid) return
-      setLiveStatus(update.status)
+      setLiveStatus(previous => advanceSwapStatus(previous, update.status))
       if (update.payouts) setLivePayouts(update.payouts)
       if (update.receivedOutput) setLiveReceivedOutput(update.receivedOutput)
       if (update.confirmations !== undefined) setLiveConfirmations(update.confirmations)
@@ -1036,7 +1038,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
       if (swap.txid !== txid) return
       if (swap.payouts) setLivePayouts(swap.payouts)
       if (swap.receivedOutput) setLiveReceivedOutput(swap.receivedOutput)
-      setLiveStatus(swap.status || 'completed')
+      setLiveStatus(previous => advanceSwapStatus(previous, swap.status || 'completed'))
     })
 
     return () => { unsub1(); unsub2() }
@@ -1074,7 +1076,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
         applyInboundSnap(snap)
       } catch { /* swap-update push will retry on next tick */ }
       if (cancelled) return
-      const s = snap?.status || liveStatusRef.current
+      const s = advanceSwapStatus(liveStatusRef.current, snap?.status || liveStatusRef.current)
       if (shouldRetryCompletedSwapMetadata(s, snap?.trackingMetadataPending, completedMetadataPolls)) {
         completedMetadataPolls += 1
         timer = setTimeout(tick, 10_000)
@@ -1213,7 +1215,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
   // Step 1: Protocol (confirming with enough confs) — THORChain processing
   // Step 2: Output (output_detected/output_confirming) — outbound tx
   // Step 3: Done (completed)
-  const swapStep = useMemo(() => {
+  const observedSwapStep = useMemo(() => {
     if (isSwapComplete) return 3
     if (liveStatus === 'completed' && requiresSettlementEvidence) return 2
     if (liveStatus === 'output_detected' || liveStatus === 'output_confirming' || liveStatus === 'output_confirmed') return 2
@@ -1227,6 +1229,11 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
     if (liveConfirmations > 0 && liveStatus !== 'failed' && liveStatus !== 'refunded') return 1
     return 0 // pending
   }, [liveStatus, liveConfirmations, isSwapComplete, requiresSettlementEvidence])
+  const [progress, setProgress] = useState({ txid: null as string | null, step: 0 })
+  const swapStep = retainSwapProgress(progress, txid, observedSwapStep).step
+  useEffect(() => {
+    setProgress(previous => retainSwapProgress(previous, txid, observedSwapStep))
+  }, [txid, observedSwapStep])
 
   // ── Load cached balances ──────────────────────────────────────────
   // Cache-first; when the cache is null/empty (hidden wallets always — the
@@ -2510,7 +2517,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
       phase: phase as SwapUiState['phase'],
       fromAsset: fromAsset?.asset ?? null,
       toAsset: toAsset?.asset ?? null,
-      amount,
+      amount: sentAmount !== null && (busy || phase === 'submitted') ? sentAmount : amount,
       fiatAmount,
       inputMode,
       isMax,
@@ -2535,7 +2542,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
     if (serialized === lastPublishedRef.current) return
     lastPublishedRef.current = serialized
     rpcFire('publishSwapUiState', snapshot)
-  }, [open, phase, fromAsset?.asset, toAsset?.asset, amount, fiatAmount, inputMode, isMax, slippageBps, fromAddress, toAddress, useCustomAddress, customToAddress, quote, previewBuild, error, txid, liveStatus, liveConfirmations, liveOutboundConfirmations, liveOutboundRequired, liveOutboundTxid, liveRelayRequestId, liveRefundReason])
+  }, [open, phase, busy, sentAmount, fromAsset?.asset, toAsset?.asset, amount, fiatAmount, inputMode, isMax, slippageBps, fromAddress, toAddress, useCustomAddress, customToAddress, quote, previewBuild, error, txid, liveStatus, liveConfirmations, liveOutboundConfirmations, liveOutboundRequired, liveOutboundTxid, liveRelayRequestId, liveRefundReason])
 
   // Reset the cached snapshot to 'closed' when the dialog unmounts so a stale
   // open state doesn't outlive the user closing the dialog.
@@ -2572,6 +2579,9 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
   useEffect(() => {
     if (!open) return
     const apply = (cmd: SwapUiCommand) => {
+      // Recheck in the mounted dialog as well: signing may begin between the
+      // REST snapshot check and delivery of this command to the renderer.
+      if (blocksSwapUiCommand(phase, cmd.kind)) return
       if (cmd.kind === 'close') { onClose(); return }
       if (cmd.kind === 'requote') { setRequoteTick(t => t + 1); return }
       if (cmd.kind === 'advance') {
@@ -3336,7 +3346,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                     position="absolute" top="0" left="0" h="6px" borderRadius="full"
                     bg={isSwapComplete ? 'linear-gradient(90deg, var(--teal-2), var(--teal))' : undefined}
                     boxShadow="0 0 8px rgba(139,227,196,0.4)"
-                    w={isSwapComplete ? '100%' : swapStep === 2 ? '83%' : swapStep === 1 ? '50%' : '17%'}
+                    w={swapStep >= 3 ? '100%' : swapStep >= 2 ? '83%' : swapStep >= 1 ? '50%' : '17%'}
                     transition="width 0.6s ease-in-out"
                     overflow="hidden"
                     style={!isSwapComplete ? {

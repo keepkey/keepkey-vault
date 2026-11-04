@@ -51,11 +51,18 @@ export function isTerminalSwapStatus(status: SwapTrackingStatus): boolean {
   return status === 'completed' || status === 'failed' || status === 'refunded'
 }
 
+/** Provider polls and push messages can arrive out of order. Preserve reached
+ * stages, while accepting explicit terminal outcomes from the caller's
+ * authoritative classifier (including failure/refund corrections). */
+export function advanceSwapStatus(current: SwapTrackingStatus, incoming: SwapTrackingStatus): SwapTrackingStatus {
+  if (isTerminalSwapStatus(incoming)) return incoming
+  if (isTerminalSwapStatus(current)) return current
+  return STATUS_RANK[incoming] > STATUS_RANK[current] ? incoming : current
+}
+
 export function shouldApplyRelayStatus(currentStatus: SwapTrackingStatus, relayStatus: SwapTrackingStatus, hasMetadataUpdate = false): boolean {
   if (relayStatus === currentStatus) return hasMetadataUpdate
-  if (isTerminalSwapStatus(relayStatus)) return true
-  if (isTerminalSwapStatus(currentStatus)) return false
-  return STATUS_RANK[relayStatus] > STATUS_RANK[currentStatus]
+  return advanceSwapStatus(currentStatus, relayStatus) !== currentStatus
 }
 
 // ── 1Click / NEAR Intents ─────────────────────────────────────────────────────

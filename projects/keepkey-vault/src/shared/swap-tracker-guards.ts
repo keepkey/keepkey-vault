@@ -4,6 +4,15 @@ export interface OutboundTxSelection {
   placeholderOnly: boolean
 }
 
+export interface SwapProgress { txid: string | null; step: number }
+
+/** A temporarily missing confirmation/status must not erase a visited stage.
+ * Scope the retained stage to one transaction so a new swap starts at zero. */
+export function retainSwapProgress(previous: SwapProgress, txid: string | null, step: number): SwapProgress {
+  const next = previous.txid === txid ? Math.max(previous.step, step) : step
+  return previous.txid === txid && previous.step === next ? previous : { txid, step: next }
+}
+
 /** Providers use empty / zeroed strings while an outbound transaction is not
  * known yet. Normalize case and whitespace so every sentinel shape is rejected. */
 export function isPlaceholderOutboundTxHash(value: unknown): boolean {
