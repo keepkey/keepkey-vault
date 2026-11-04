@@ -18,7 +18,13 @@ const pioneer = {
 }
 mock.module('../src/bun/pioneer', () => ({ getPioneer: async () => pioneer, getPioneerApiBase: () => 'https://fixture.invalid', getQueryKey: () => 'fixture' }))
 mock.module('electrobun/bun', () => ({ Utils: { paths: { userData: '/private/tmp/vault-near-refund-test' } } }))
-const { getSwapQuote } = await import('../src/bun/swap')
+mock.module('../src/bun/txbuilder', () => ({
+  normalizeBchAddress: (address: string) => address,
+  // A sentinel makes reaching the builder visible without ever constructing,
+  // signing or broadcasting a real transaction in these execution-path tests.
+  buildTx: async () => { throw new Error('fixture builder reached') },
+}))
+const { getSwapQuote, executeSwap } = await import('../src/bun/swap')
 
 const DEPOSIT = 'near-deposit-fixture'
 const caip = (id: string) => CHAINS.find(chain => chain.id === id)!.caip
@@ -158,5 +164,72 @@ for (const source of sources.filter(source => source.sender !== source.sender.to
   test(`NEAR ${source.name}: base58 refund addresses are compared case-sensitively`, async () => {
     oneClick(200, intent(source.sender.toLowerCase()))
     await expect(quote(source)).rejects.toThrow('1Click refundTo mismatch')
+  })
+}
+
+const executionSources = sources.filter(source => ['XRP', 'TRX', 'USDT-TRON'].includes(source.name))
+function execute(source: typeof sources[number], overrides: Record<string, unknown> = {}) {
+  return executeSwap({
+    fromChainId: source.name === 'XRP' ? 'ripple' : 'tron', toChainId: 'ethereum',
+    fromCaip: source.caip, toCaip: 'eip155:1/slip44:60', amount: '10',
+    memo: '', inboundAddress: DEPOSIT, expectedOutput: '0.01',
+    fromAddressOverride: source.sender, toAddressOverride: RECIPIENT,
+    integration: 'nearIntents', swapper: 'NEAR Intents', ...overrides,
+  } as any, {
+    wallet: {}, getAllChains: () => CHAINS, getEvmRpcSource: () => undefined,
+    getBtcXpub: () => undefined, getAllBtcXpubs: () => [],
+    wrapSign: (sign: any) => sign(), pushSubStage: () => {},
+  } as any)
+}
+
+for (const source of executionSources) {
+  test(`NEAR ${source.name} execution: verifies a registered deposit before building`, async () => {
+    const calls = oneClick(200, intent(source.sender))
+    await expect(execute(source)).rejects.toThrow('fixture builder reached')
+    expect(calls).toEqual([`https://1click.chaindefuser.com/v0/status?depositAddress=${DEPOSIT}`])
+  })
+  test(`NEAR ${source.name} execution: a wrong refund wallet stops before building`, async () => {
+    oneClick(200, intent('keepkey.near'))
+    await expect(execute(source)).rejects.toThrow(/refund.*mismatch|not your address/)
+  })
+  test(`NEAR ${source.name} execution: a required deposit memo stops before building`, async () => {
+    oneClick(200, intent(source.sender, '123456'))
+    await expect(execute(source)).rejects.toThrow(/requires a memo\/destination tag/)
+  })
+  test(`NEAR ${source.name} execution: an unknown deposit stops before building`, async () => {
+    oneClick(404, {})
+    await expect(execute(source)).rejects.toThrow(/1Click returned 404/)
+  })
+  test(`NEAR ${source.name} execution: a provider timeout stops before building`, async () => {
+    globalThis.fetch = (async () => { throw new Error('fixture timeout') }) as typeof fetch
+    await expect(execute(source)).rejects.toThrow(/failed to verify refund address.*fixture timeout/)
+  })
+  test(`NEAR ${source.name} execution: malformed provider JSON stops before building`, async () => {
+    globalThis.fetch = (async () => new Response('{not JSON', { status: 200 })) as typeof fetch
+    await expect(execute(source)).rejects.toThrow(/failed to verify refund address/)
+  })
+  test(`NEAR ${source.name} execution: a memo or prebuilt transaction cannot replace the plain deposit`, async () => {
+    const calls = oneClick(200, intent(source.sender))
+    for (const override of [{ memo: 'unreviewed-memo' }, { relayTx: { to: 'different-deposit', data: '0x' } }]) {
+      await expect(execute(source, override)).rejects.toThrow(/requires a plain deposit/)
+    }
+    expect(calls).toEqual([])
+  })
+  test(`NEAR ${source.name} execution: assets cannot name chains different from the signer`, async () => {
+    const calls = oneClick(200, intent(source.sender))
+    for (const override of [{ fromCaip: 'eip155:1/slip44:60' }, { toCaip: caip('solana') }]) {
+      await expect(execute(source, override)).rejects.toThrow(/assets do not match the execution chains/)
+    }
+    expect(calls).toEqual([])
+  })
+  test(`NEAR ${source.name} execution: integration identity still enforces safety without a swapper label`, async () => {
+    oneClick(200, intent('keepkey.near'))
+    await expect(execute(source, { swapper: undefined })).rejects.toThrow(/refund.*mismatch|not your address/)
+  })
+  for (const record of unsafeRecords) test(`NEAR ${source.name} execution: ${record.name} stops before building`, async () => {
+    const reply = intent(source.sender)
+    record.mutate(reply)
+    oneClick(200, reply)
+    await expect(execute(source)).rejects.toThrow(record.message)
   })
 }
