@@ -6,6 +6,7 @@
  */
 import { Database } from 'bun:sqlite'
 import { migratePublicKeyCache } from './public-key-cache-migration'
+import { DEFAULT_PIONEER_API_BASE, resolvePioneerApiBase } from '../shared/pioneer-server'
 import { Utils } from 'electrobun/bun'
 import { join, dirname } from 'node:path'
 import { mkdirSync, unlinkSync, existsSync, readFileSync, writeFileSync } from 'node:fs'
@@ -297,9 +298,21 @@ export function initDb() {
     if (!serverCount || serverCount.c === 0) {
       db.run(
         'INSERT INTO pioneer_servers (url, label, is_default, created_at) VALUES (?, ?, 1, ?)',
-        ['https://api.keepkey.info', 'KeepKey Official', Date.now()]
+        [DEFAULT_PIONEER_API_BASE, 'KeepKey Official', Date.now()]
       )
     }
+
+    // Older builds could save a selected URL without adding it to the picker.
+    // Preserve that selection and make it visible as a normal saved option.
+    const selectedPioneer = resolvePioneerApiBase(getSetting('pioneer_api_base'))
+    try {
+      const selectedUrl = new URL(selectedPioneer)
+      if (selectedUrl.protocol === 'http:' || selectedUrl.protocol === 'https:') {
+        db.run('INSERT OR IGNORE INTO pioneer_servers (url, label, is_default, created_at) VALUES (?, ?, ?, ?)',
+          [selectedPioneer, selectedPioneer === DEFAULT_PIONEER_API_BASE ? 'KeepKey Official' : selectedUrl.host,
+            selectedPioneer === DEFAULT_PIONEER_API_BASE ? 1 : 0, Date.now()])
+      }
+    } catch { /* Invalid legacy selections remain visible in the actual URL. */ }
 
     // User-added ClearSign description providers (third-party, per-session trust).
     ensureClearSignProviderTable(db)

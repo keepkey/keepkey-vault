@@ -429,6 +429,9 @@ test-unit:
 	cd $(PROJECT_DIR) && bun test __tests__/receive-request.test.ts
 	cd $(PROJECT_DIR) && bun test __tests__/post-tx-balance.test.ts
 	cd $(PROJECT_DIR) && bun test __tests__/active-wallet-watch.test.ts __tests__/durable-wallet-monitor.test.ts __tests__/wallet-monitor-registry.test.ts __tests__/pioneer-event-capabilities.test.ts __tests__/event-stream-client.test.ts __tests__/pioneer-socket-client.test.ts
+	cd $(PROJECT_DIR) && bun test __tests__/pioneer-server.test.ts __tests__/pioneer-server-switch.test.ts
+	cd $(PROJECT_DIR) && bun test __tests__/pioneer-client-transition-isolated.test.ts
+	cd $(PROJECT_DIR) && bun test __tests__/perf-telemetry-context.test.ts
 	cd $(PROJECT_DIR) && bun test __tests__/portfolio-owner-confidence.test.ts
 	cd $(PROJECT_DIR) && bun test __tests__/activity-history-accounts.test.ts
 	cd $(PROJECT_DIR) && bun test __tests__/selected-token-balance.test.ts __tests__/evm-owner-balance.test.ts

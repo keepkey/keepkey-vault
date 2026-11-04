@@ -8,8 +8,8 @@
  *
  *   GET {base}/api/v1/zapper/portfolio/{address}
  *
- * `base` resolves the same way as every other Pioneer call (DB setting >
- * PIONEER_API_BASE env > https://api.keepkey.info), so pointing the app at a
+ * `base` resolves the same way as every other Pioneer call (in-app server
+ * selection, otherwise https://api.keepkey.info), so pointing the app at a
  * local server moves DeFi lookups with it.
  *
  * An item is a DeFi position when ANY of these are present:

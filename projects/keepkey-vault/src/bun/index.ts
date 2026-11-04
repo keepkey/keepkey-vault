@@ -245,6 +245,7 @@ import { PioneerSocket } from "./pioneer-socket"
 import { createActiveWalletWatch, refreshWatchedChain, type OwnedWatch } from "./active-wallet-watch"
 import { createDurableWalletMonitor, type DurableMonitorSession } from "./durable-wallet-monitor"
 import { createWalletMonitorRegistry } from "./wallet-monitor-registry"
+import { createPioneerServerSwitch } from "./pioneer-server-switch"
 import { startEventStream, stopEventStream, type AddressEntry, type StreamEvent } from "./event-stream"
 import { pioneerSupportsDurableWalletMonitoring } from "../shared/pioneer-event-capabilities"
 import { rebuildActivityHistory, clearHistoryQueryCache } from "./activity-history"
@@ -795,6 +796,7 @@ const UPDATE_PAGE = 'https://keepkey.com/update'
 // Cached version from pre-release GitHub check (Updater.updateInfo() doesn't have it)
 let pendingUpdateVersion: string | null = null
 let pioneerSocket: PioneerSocket | null = null
+let pioneerServerSwitching = false
 // Debounce Pioneer push events per CAIP-2 network — rapid-fire tx events /
 // per-confirmation re-fires coalesce into one refresh. Pending payload is kept
 // so a replacement can merge (an 'incoming' must survive a confirmation update
@@ -1613,8 +1615,7 @@ function getOrCreateWcManager(): WalletConnectManager {
 function getAppSettings() {
 	const servers = getPioneerServers()
 	const activeBase = getPioneerApiBase()
-	// If the active URL matches a server in the list, use it; otherwise fall back to the first server
-	const activePioneerServer = servers.find(s => s.url === activeBase)?.url || servers[0]?.url || activeBase
+	const activePioneerServer = activeBase
 	return {
 		restApiEnabled,
 		pioneerApiBase: activeBase,
@@ -2042,14 +2043,7 @@ const restCallbacks: RestApiCallbacks = {
 	getPioneer: () => getPioneer(),
 	getPioneerApiBase: () => getPioneerApiBase(),
 	setPioneerApiBase: async (url: string) => {
-		const { url: trimmed } = { url: url.trim() }
-		setSetting('pioneer_api_base', trimmed)
-		resetPioneer()
-		chainCatalog = []
-		catalogLoadedAt = 0
-		const { clearSwapCache } = await import('./swap')
-		clearSwapCache()
-		console.log('[rest-api] Pioneer URL set to:', trimmed || '(default)')
+		await setConfiguredPioneerServer(url)
 	},
 }
 
@@ -2259,6 +2253,7 @@ async function getChainBalance(params: { chainId: string; forceRefresh?: boolean
 	const generation = (chainBalanceReadGenerations.get(params.chainId) || 0) + 1
 	chainBalanceReadGenerations.set(params.chainId, generation)
 	isCurrent = () => ownerIsCurrent() && requestEpoch === activitySessionEpoch
+		&& !pioneerServerSwitching
 		&& requestWallet === engine.wallet && requestDevice === engine.getDeviceState().deviceId
 		&& chainBalanceReadGenerations.get(params.chainId) === generation
 	const assertCurrent = () => { if (!isCurrent()) throw new Error('Balance refresh cancelled: wallet changed or a newer refresh started') }
@@ -2860,7 +2855,7 @@ const walletMonitorRegistry = createWalletMonitorRegistry({
 })
 function walletMonitoringAllowed(): boolean {
 	const deviceId = engine.getDeviceState().deviceId
-	return !walletMonitorRevoking && (!deviceId || forgottenMonitorEpochs.get(deviceId) !== activitySessionEpoch)
+	return !pioneerServerSwitching && !walletMonitorRevoking && (!deviceId || forgottenMonitorEpochs.get(deviceId) !== activitySessionEpoch)
 }
 const durableWalletMonitor = createDurableWalletMonitor({
 	isCurrent: session => walletMonitoringAllowed() && !engine.isPassphraseWallet && !offlineMode && sameBalanceRefreshScope(session.scope, currentBalanceRefreshScope())
@@ -2986,6 +2981,53 @@ async function revokeKnownWalletMonitoring(deviceId?: string): Promise<void> {
 		throw new Error('Could not disable background wallet monitoring. Your wallet was not forgotten and offline mode was not enabled. Check your connection and try again.')
 	}
 	walletMonitorRevoking = false
+}
+
+const changePioneerServer = createPioneerServerSwitch({
+	defaultBase: DEFAULT_API_BASE,
+	getBase: getPioneerApiBase,
+	save: url => {
+		setSetting('pioneer_api_base', url)
+		if (url && !getPioneerServers().some(server => server.url === url)) addPioneerServerDb(url, new URL(url).host)
+	},
+	begin: () => {
+		pioneerServerSwitching = true
+		const previousEpoch = activitySessionEpoch
+		activitySessionEpoch++
+		for (const [deviceId, epoch] of forgottenMonitorEpochs) if (epoch === previousEpoch) forgottenMonitorEpochs.set(deviceId, activitySessionEpoch)
+		postTxBalances.clear()
+		txWatch.clear()
+		pioneerSocket?.stop()
+		pioneerSocket = null
+		clearPioneerEventDebounce()
+		stopActiveWalletWatches()
+	},
+	retire: async () => {
+		try { await revokeKnownWalletMonitoring() }
+		catch { throw new Error('Could not stop monitoring on the previous server. The active server has not changed. Try again.') }
+	},
+	reset: async () => {
+		resetPioneer()
+		clearHistoryQueryCache()
+		chainCatalog = []
+		catalogLoadedAt = 0
+		const { clearSwapCache } = await import('./swap')
+		clearSwapCache()
+	},
+	end: () => {
+		pioneerServerSwitching = false
+		startPioneerSocketIfAllowed()
+		bootstrapActiveWalletWatches()
+		const scope = getWalletDbScope()
+		if (scope) rearmPendingWatches(scope.walletId)
+		if (!offlineMode) loadSupportedChains(getPioneerApiBase()).catch(() => {})
+	},
+})
+async function setConfiguredPioneerServer(url: string): Promise<void> {
+	requireOnline('Pioneer server configuration')
+	await changePioneerServer(url)
+	try { rpc.send['pioneer-server-changed'](getAppSettings()) } catch { /* renderer optional */ }
+	console.log('[settings] Active Pioneer server:', getPioneerApiBase())
 }
 
 /** Rebuild active subscriptions after unlock/reconnect without depending on
@@ -5487,6 +5529,12 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			// ── Pioneer integration (batch portfolio API) ────────────────
 			getBalances: async ({ forceRefresh = false, swapDestCaips = [] }: { forceRefresh?: boolean; swapDestCaips?: string[] } = {}) => {
 				if (!engine.wallet) throw new Error('No device connected')
+				const requestServer = getPioneerApiBase()
+				const requestEpoch = activitySessionEpoch
+				const assertServerCurrent = () => {
+					if (pioneerServerSwitching || requestServer !== getPioneerApiBase() || requestEpoch !== activitySessionEpoch) throw new Error('API server changed during balance refresh')
+				}
+				assertServerCurrent()
 				if (offlineMode) {
 					if (engine.isPassphraseWallet) return []
 					const deviceId = engine.getDeviceState().deviceId
@@ -5515,6 +5563,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					try { rpc.send['pioneer-error']({ message: pioneerMsg, url: getPioneerApiBase() }) } catch { /* webview not ready */ }
 				}
 
+				assertServerCurrent()
 				const wallet = engine.wallet as any
 
 				// Seed-staleness boundary (shared by all manager consumers): verify
@@ -5832,6 +5881,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					const pubkeyChunks = chunkArray(pubkeysForPioneer, PIONEER_PORTFOLIO_CHUNK_SIZE)
 					const chunkResults = pubkeyChunks.length === 0 ? [] : await withTimeout(
 						mapWithConcurrency(pubkeyChunks, PIONEER_PORTFOLIO_MAX_CONCURRENCY, async (chunk, i) => {
+							assertServerCurrent()
 							// Opt the dashboard refresh into the server's Zerion DeFi merge. The
 							// gateway serves its PostgreSQL-backed demand cache; misses degrade to
 							// [] without blocking balances. Pre-v1.4
@@ -5847,6 +5897,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 										`GetPortfolioBalances chunk ${i + 1}/${pubkeyChunks.length}`
 									)
 								} catch (err: any) {
+									assertServerCurrent()
 									if (!extraContracts.length || !isExtraContractsSchemaError(err)) throw err
 									console.warn('[getBalances] Pioneer rejected extraContracts; retrying portfolio chunk without custom tokens')
 									resp = await withTimeout(
@@ -5875,6 +5926,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 								// attribute the failure and salvage native balances, not custom tokens.
 								const singles = await Promise.all(chunk.map(async (p: any) => {
 									try {
+										assertServerCurrent()
 										const resp = await withTimeout(
 											pioneer.GetPortfolioBalances({ pubkeys: [{ caip: p.caip, pubkey: p.pubkey }], includeDefi: true }, { forceRefresh }),
 											PIONEER_PORTFOLIO_CHUNK_TIMEOUT_MS,
@@ -5900,6 +5952,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						PIONEER_PORTFOLIO_TOTAL_TIMEOUT_MS,
 						'GetPortfolioBalances chunks'
 					)
+					assertServerCurrent()
 					const failedChunkCount = chunkResults.filter(r => r.error).length
 					let hadChunkFailures = false
 					// effectivePubkeys: pubkeys whose chunk succeeded — chains from failed chunks show 0
@@ -6116,6 +6169,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						console.log(`[getBalances] DeFi: ${allDefiPositions.length} positions across ${defiByChain.size} chain(s)${droppedDefi ? ` (${droppedDefi} dropped: unknown networkId)` : ''}`)
 					}
 
+					assertServerCurrent()
 					console.log(`[getBalances] GetPortfolioBalances response: ${allEntries.length} entries`)
 					// Log TRON-specific entries for debugging
 					const tronEntries = allEntries.filter((d: any) => d.caip?.includes('tron') || d.networkId?.includes('tron'))
@@ -6407,6 +6461,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 							const zcashCaip = 'bip122:00040fe8ec8471911baa1db1266ea15d/slip44:133'
 							const zcashNative = pureNatives.find((d: any) => d.caip === zcashCaip)
 							const shieldedTok = await fetchShieldedZecToken(parseFloat(zcashNative?.priceUsd ?? '0'))
+							assertServerCurrent()
 							if (shieldedTok) {
 								zcashEntry.tokens = [...(zcashEntry.tokens || []), shieldedTok]
 								zcashEntry.balanceUsd = (zcashEntry.balanceUsd || 0) + shieldedTok.balanceUsd
@@ -6537,6 +6592,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						}
 					} catch { /* webview not ready */ }
 				} catch (e: any) {
+					assertServerCurrent()
 					const message = getPioneerPortfolioErrorMessage(e)
 					console.warn('[getBalances] Portfolio API failed:', message)
 					try { rpc.send['pioneer-error']({ message, url: getPioneerApiBase() }) } catch { /* webview not ready */ }
@@ -6553,6 +6609,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					}
 				}
 
+				assertServerCurrent()
 				if (inventoryEpoch === activitySessionEpoch && inventoryWallet === engine.wallet) publishWalletWatchPubkeys(pubkeys, currentBalanceRefreshScope())
 
 				return results
@@ -7936,22 +7993,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				return getAppSettings()
 			},
 			setPioneerApiBase: async (params) => {
-				requireOnline('Pioneer server configuration')
-				const url = (params.url || '').trim()
-				if (url && !/^https?:\/\//i.test(url)) {
-					throw new Error('URL must start with http:// or https://')
-				}
-				setSetting('pioneer_api_base', url) // empty string = reset to default
-				resetPioneer()
-				chainCatalog = []
-				catalogLoadedAt = 0
-				// Flush swap asset cache too — without this, the 5-minute TTL
-				// keeps the previous server's asset list (e.g. missing TRON.USDT)
-				// sticky after the user repoints to a server that lists more.
-				const { clearSwapCache } = await import('./swap')
-				clearSwapCache()
-				loadSupportedChains(getPioneerApiBase()).catch(() => {})
-				console.log('[settings] Pioneer API base set to:', url || '(default)')
+				await setConfiguredPioneerServer(params.url || '')
 				return getAppSettings()
 			},
 			setFiatCurrency: async (params) => {
@@ -8187,18 +8229,13 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			removePioneerServer: async (params) => {
 				const url = (params.url || '').trim()
 				if (!url) throw new Error('URL is required')
-				removePioneerServerDb(url)
 				// If the removed server was the active one, reset to default
 				const currentBase = getPioneerApiBase()
 				if (currentBase === url) {
-					setSetting('pioneer_api_base', '')
-					resetPioneer()
-					chainCatalog = []
-					catalogLoadedAt = 0
-					const { clearSwapCache } = await import('./swap')
-					clearSwapCache()
+					await setConfiguredPioneerServer('')
 					console.log('[settings] Active server removed, reset to default')
 				}
+				removePioneerServerDb(url)
 				console.log('[settings] Pioneer server removed:', url)
 				return getAppSettings()
 			},
@@ -8217,23 +8254,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				} catch (e: any) {
 					throw new Error(`Health check failed for ${healthUrl}: ${e.message}`)
 				}
-				// If switching to the built-in hardcoded default, clear the override so
-				// getPioneerApiBase() falls back naturally. Otherwise store the URL.
-				// NOTE: do NOT use the DB isDefault flag here — that flag is user-managed
-				// (e.g. the user may have marked a custom server as "default") and would
-				// cause the wrong URL to be silently cleared.
-				if (url === DEFAULT_API_BASE) {
-					setSetting('pioneer_api_base', '')
-				} else {
-					setSetting('pioneer_api_base', url)
-				}
-				resetPioneer()
-				chainCatalog = []
-				catalogLoadedAt = 0
-				const { clearSwapCache } = await import('./swap')
-				clearSwapCache()
-				loadSupportedChains(getPioneerApiBase()).catch(() => {})
-				console.log('[settings] Active Pioneer server set to:', url)
+				await setConfiguredPioneerServer(url)
 				return getAppSettings()
 			},
 
@@ -10544,7 +10565,7 @@ function onPioneerSocketEvent(event: string, data: unknown): void {
 }
 
 function startPioneerSocketIfAllowed(): void {
-	if (offlineMode || pioneerSocket || engine.getDeviceState().state !== 'ready') return
+	if (pioneerServerSwitching || offlineMode || pioneerSocket || engine.getDeviceState().state !== 'ready') return
 	pioneerSocket = new PioneerSocket({
 		queryKey: getPioneerQueryKey(),
 		onEvent: onPioneerSocketEvent,
