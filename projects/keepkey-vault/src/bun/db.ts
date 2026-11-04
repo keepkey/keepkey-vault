@@ -6,6 +6,7 @@
  */
 import { Database } from 'bun:sqlite'
 import { migratePublicKeyCache } from './public-key-cache-migration'
+import { DEFAULT_PIONEER_API_BASE, resolvePioneerApiBase } from '../shared/pioneer-server'
 import { Utils } from 'electrobun/bun'
 import { join, dirname } from 'node:path'
 import { mkdirSync, unlinkSync, existsSync, readFileSync, writeFileSync } from 'node:fs'
@@ -297,9 +298,21 @@ export function initDb() {
     if (!serverCount || serverCount.c === 0) {
       db.run(
         'INSERT INTO pioneer_servers (url, label, is_default, created_at) VALUES (?, ?, 1, ?)',
-        ['https://api.keepkey.info', 'KeepKey Official', Date.now()]
+        [DEFAULT_PIONEER_API_BASE, 'KeepKey Official', Date.now()]
       )
     }
+
+    // Older builds could save a selected URL without adding it to the picker.
+    // Preserve that selection and make it visible as a normal saved option.
+    const selectedPioneer = resolvePioneerApiBase(getSetting('pioneer_api_base'))
+    try {
+      const selectedUrl = new URL(selectedPioneer)
+      if (selectedUrl.protocol === 'http:' || selectedUrl.protocol === 'https:') {
+        db.run('INSERT OR IGNORE INTO pioneer_servers (url, label, is_default, created_at) VALUES (?, ?, ?, ?)',
+          [selectedPioneer, selectedPioneer === DEFAULT_PIONEER_API_BASE ? 'KeepKey Official' : selectedUrl.host,
+            selectedPioneer === DEFAULT_PIONEER_API_BASE ? 1 : 0, Date.now()])
+      }
+    } catch { /* Invalid legacy selections remain visible in the actual URL. */ }
 
     // User-added ClearSign description providers (third-party, per-session trust).
     ensureClearSignProviderTable(db)
@@ -343,6 +356,7 @@ export function initDb() {
     // Filled at trackSwap time via on-chain calldata, or lazily backfilled
     // by refreshSwap via api.relay.link for legacy rows.
     try { db.exec(`ALTER TABLE swap_history ADD COLUMN relay_request_id TEXT`) } catch { /* already exists */ }
+    try { db.exec(`ALTER TABLE swap_history ADD COLUMN tracking_context TEXT`) } catch { /* already exists */ }
     // Outbound chain truth from Maya midgard classifier — refunds outbound on
     // source chain, not destination. Without this column, history+activity
     // panels still resolve explorer URLs against toChainId and a refunded
@@ -2559,8 +2573,8 @@ export function insertSwapHistory(record: SwapHistoryRecord) {
          from_caip, to_caip, from_amount, quoted_output, minimum_output, received_output, slippage_bps, fee_bps,
          fee_outbound, integration, swapper, memo, inbound_address, router, status, outbound_txid,
          error, created_at, updated_at, completed_at, estimated_time_secs, actual_time_secs, approval_txid,
-         relay_request_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         relay_request_id, tracking_context)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         record.id, record.deviceId || null, record.walletId || null, record.txid, record.fromAsset, record.toAsset,
         record.fromSymbol, record.toSymbol, record.fromChainId, record.toChainId,
@@ -2574,6 +2588,7 @@ export function insertSwapHistory(record: SwapHistoryRecord) {
         record.completedAt || null, record.estimatedTimeSeconds,
         record.actualTimeSeconds || null, record.approvalTxid || null,
         record.relayRequestId || null,
+        record.trackingContext ? JSON.stringify(record.trackingContext) : null,
       ]
     )
   } catch (e: any) {
@@ -2801,6 +2816,7 @@ function mapSwapRow(r: any): SwapHistoryRecord {
     actualTimeSeconds: r.actual_time_secs || undefined,
     approvalTxid: r.approval_txid || undefined,
     relayRequestId: r.relay_request_id || undefined,
+    trackingContext: r.tracking_context ? JSON.parse(r.tracking_context) : undefined,
     outboundChainId: r.outbound_chain_id || undefined,
     refundReason: r.refund_reason || undefined,
     nearTxHash: r.near_tx_hash || undefined,

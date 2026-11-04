@@ -52,4 +52,9 @@ describe('Relay status mapping', () => {
       txHashes: ['0xoutput'],
     }, '0xfallback')).toBe('0xoutput')
   })
+  test('a solver deposit never stands in for its same-chain payout', () => {
+    const status = { status: 'success', originChainId: 1, destinationChainId: 1, inTxHashes: ['0xdeposit'], txHashes: [] }
+    expect(relayOutboundTxid(status, '0xdeposit', true)).toBeUndefined()
+    expect(relayOutboundTxid({ ...status, txHashes: ['0xpayout'] }, '0xdeposit', true)).toBe('0xpayout')
+  })
 })

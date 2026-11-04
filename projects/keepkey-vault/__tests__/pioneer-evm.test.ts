@@ -29,3 +29,13 @@ describe('Pioneer EVM adapter', () => {
     }, 'latest'])).rejects.toThrow('Invalid EVM call data')
   })
 })
+
+ test('gateway gas and bounded diagnostics use the Pioneer node pool', async () => {
+   const sent: any[] = []
+   const pioneer = { EvmReadRpc: async (body: any) => { sent.push(body); return { data: { success: true, data: '0x5208' } } } }
+   for (const method of ['eth_estimateGas', 'eth_feeHistory', 'debug_traceCall']) {
+     expect(await pioneerEvmRpc(pioneer, 'eip155:1', method, [])).toBe('0x5208')
+   }
+   expect(sent.map(body => body.method)).toEqual(['eth_estimateGas', 'eth_feeHistory', 'debug_traceCall'])
+   await expect(pioneerEvmRpc({}, 'eip155:1', 'eth_estimateGas', [{}])).rejects.toThrow('server has no EvmReadRpc')
+ })

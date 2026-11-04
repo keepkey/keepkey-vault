@@ -1,0 +1,739 @@
+{
+  "checkedAt": "2026-11-02T16:46:18.533Z",
+  "service": "https://keepkey-clearsign.bithighlander.workers.dev",
+  "safety": "Read-only lookups with public entries and bundled unsigned fixtures. No review jobs queued, keys accessed, transactions signed, or funds broadcast.",
+  "productionRoot": "027c1fde75db6c36393e095e0dc5ab9a5bcf1ae9eb92b5d36e212a2bf7f8a6e321",
+  "build": {
+    "sourceRevision": null,
+    "version": {
+      "id": "2ac061a6-b01d-4d6f-9a50-8ef5eb72cd6a",
+      "tag": "",
+      "timestamp": "2026-10-31T16:17:25.648776Z"
+    }
+  },
+  "erc7730": {
+    "servedCalldataLeaves": 3171,
+    "unservedLeaves": 319,
+    "catalogFingerprints": [
+      "19fc59de5f6e8aeb9c4fe5e88e6d69a2d5232d18a19ac67025e18a20335d9a1d",
+      "a19d266cb3cc871859cff71271d765ebf58517aa28b0794a0226fc778ee6a6a9",
+      "b2658ee661b8783e750eb793ac11bdaee4f2ec1cd8028ed6cc4baa95db63ba08",
+      "e339a7a670ff6caa4dba75d581ef32bdaeac8cfb497863a2d4b02a3a0b0b7b31"
+    ],
+    "endpoint": "https://keepkey-clearsign.bithighlander.workers.dev/v1/erc7730/definition"
+  },
+  "relayCatalogEntries": [
+    {
+      "id": "eip155:1:0x4cd00e387622c35bddb9b4c962c136462338bc31:0x49290c1c",
+      "family": "evm",
+      "chainId": 1,
+      "certified": true,
+      "kind": "schema",
+      "method": "bridgeDeposit",
+      "contract": "0x4cd00e387622c35bddb9b4c962c136462338bc31",
+      "selector": "0x49290c1c",
+      "calldataLength": 68,
+      "fieldsShownByKeepKey": [
+        "depositor",
+        "orderId"
+      ],
+      "pinned": []
+    },
+    {
+      "id": "eip155:8453:0x4cd00e387622c35bddb9b4c962c136462338bc31:0x49290c1c",
+      "family": "evm",
+      "chainId": 8453,
+      "certified": true,
+      "kind": "intent",
+      "method": "depositNative",
+      "contract": "0x4cd00e387622c35bddb9b4c962c136462338bc31",
+      "selector": "0x49290c1c",
+      "calldataLength": 68,
+      "title": "Relay",
+      "intent": "Bridge {v} through Relay for {0}; delivery is by Relay",
+      "fieldsShownByKeepKey": [
+        "depositor",
+        "orderId"
+      ],
+      "pinned": []
+    },
+    {
+      "id": "eip155:42161:0x4cd00e387622c35bddb9b4c962c136462338bc31:0x49290c1c",
+      "family": "evm",
+      "chainId": 42161,
+      "certified": true,
+      "kind": "intent",
+      "method": "depositNative",
+      "contract": "0x4cd00e387622c35bddb9b4c962c136462338bc31",
+      "selector": "0x49290c1c",
+      "calldataLength": 68,
+      "title": "Relay",
+      "intent": "Bridge {v} through Relay for {0}; delivery is by Relay",
+      "fieldsShownByKeepKey": [
+        "depositor",
+        "orderId"
+      ],
+      "pinned": []
+    },
+    {
+      "id": "eip155:8453:0x4cd00e387622c35bddb9b4c962c136462338bc31:0xe8017952:0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+      "family": "evm",
+      "chainId": 8453,
+      "certified": true,
+      "kind": "intent",
+      "method": "depositErc20",
+      "contract": "0x4cd00e387622c35bddb9b4c962c136462338bc31",
+      "selector": "0xe8017952",
+      "calldataLength": 132,
+      "title": "Relay",
+      "intent": "Bridge {2} through Relay for {0}; delivery is by Relay",
+      "fieldsShownByKeepKey": [
+        "depositor",
+        "token",
+        "amount",
+        "orderId"
+      ],
+      "pinned": [
+        "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913"
+      ]
+    },
+    {
+      "id": "eip155:8453:0x4cd00e387622c35bddb9b4c962c136462338bc31:0xe8017952:0xd9aaec86b65d86f6a7b5b1b0c42ffa531710b6ca",
+      "family": "evm",
+      "chainId": 8453,
+      "certified": true,
+      "kind": "intent",
+      "method": "depositErc20",
+      "contract": "0x4cd00e387622c35bddb9b4c962c136462338bc31",
+      "selector": "0xe8017952",
+      "calldataLength": 132,
+      "title": "Relay",
+      "intent": "Bridge {2} through Relay for {0}; delivery is by Relay",
+      "fieldsShownByKeepKey": [
+        "depositor",
+        "token",
+        "amount",
+        "orderId"
+      ],
+      "pinned": [
+        "0xd9aaec86b65d86f6a7b5b1b0c42ffa531710b6ca"
+      ]
+    },
+    {
+      "id": "eip155:8453:0x4cd00e387622c35bddb9b4c962c136462338bc31:0xe8017952:0x4200000000000000000000000000000000000006",
+      "family": "evm",
+      "chainId": 8453,
+      "certified": true,
+      "kind": "intent",
+      "method": "depositErc20",
+      "contract": "0x4cd00e387622c35bddb9b4c962c136462338bc31",
+      "selector": "0xe8017952",
+      "calldataLength": 132,
+      "title": "Relay",
+      "intent": "Bridge {2} through Relay for {0}; delivery is by Relay",
+      "fieldsShownByKeepKey": [
+        "depositor",
+        "token",
+        "amount",
+        "orderId"
+      ],
+      "pinned": [
+        "0x4200000000000000000000000000000000000006"
+      ]
+    },
+    {
+      "id": "eip155:8453:0x4cd00e387622c35bddb9b4c962c136462338bc31:0xe8017952:0x50c5725949a6f0c72e6c4a641f24049a917db0cb",
+      "family": "evm",
+      "chainId": 8453,
+      "certified": true,
+      "kind": "intent",
+      "method": "depositErc20",
+      "contract": "0x4cd00e387622c35bddb9b4c962c136462338bc31",
+      "selector": "0xe8017952",
+      "calldataLength": 132,
+      "title": "Relay",
+      "intent": "Bridge {2} through Relay for {0}; delivery is by Relay",
+      "fieldsShownByKeepKey": [
+        "depositor",
+        "token",
+        "amount",
+        "orderId"
+      ],
+      "pinned": [
+        "0x50c5725949a6f0c72e6c4a641f24049a917db0cb"
+      ]
+    },
+    {
+      "id": "eip155:8453:0x4cd00e387622c35bddb9b4c962c136462338bc31:0xe8017952:0xcbb7c0000ab88b473b1f5afd9ef808440eed33bf",
+      "family": "evm",
+      "chainId": 8453,
+      "certified": true,
+      "kind": "intent",
+      "method": "depositErc20",
+      "contract": "0x4cd00e387622c35bddb9b4c962c136462338bc31",
+      "selector": "0xe8017952",
+      "calldataLength": 132,
+      "title": "Relay",
+      "intent": "Bridge {2} through Relay for {0}; delivery is by Relay",
+      "fieldsShownByKeepKey": [
+        "depositor",
+        "token",
+        "amount",
+        "orderId"
+      ],
+      "pinned": [
+        "0xcbb7c0000ab88b473b1f5afd9ef808440eed33bf"
+      ]
+    },
+    {
+      "id": "eip155:8453:0x4cd00e387622c35bddb9b4c962c136462338bc31:0xe8017952:0x2ae3f1ec7f1f5012cfeab0185bfc7aa3cf0dec22",
+      "family": "evm",
+      "chainId": 8453,
+      "certified": true,
+      "kind": "intent",
+      "method": "depositErc20",
+      "contract": "0x4cd00e387622c35bddb9b4c962c136462338bc31",
+      "selector": "0xe8017952",
+      "calldataLength": 132,
+      "title": "Relay",
+      "intent": "Bridge {2} through Relay for {0}; delivery is by Relay",
+      "fieldsShownByKeepKey": [
+        "depositor",
+        "token",
+        "amount",
+        "orderId"
+      ],
+      "pinned": [
+        "0x2ae3f1ec7f1f5012cfeab0185bfc7aa3cf0dec22"
+      ]
+    },
+    {
+      "id": "eip155:42161:0x4cd00e387622c35bddb9b4c962c136462338bc31:0xe8017952:0xaf88d065e77c8cc2239327c5edb3a432268e5831",
+      "family": "evm",
+      "chainId": 42161,
+      "certified": true,
+      "kind": "intent",
+      "method": "depositErc20",
+      "contract": "0x4cd00e387622c35bddb9b4c962c136462338bc31",
+      "selector": "0xe8017952",
+      "calldataLength": 132,
+      "title": "Relay",
+      "intent": "Bridge {2} through Relay for {0}; delivery is by Relay",
+      "fieldsShownByKeepKey": [
+        "depositor",
+        "token",
+        "amount",
+        "orderId"
+      ],
+      "pinned": [
+        "0xaf88d065e77c8cc2239327c5edb3a432268e5831"
+      ]
+    },
+    {
+      "id": "eip155:42161:0x4cd00e387622c35bddb9b4c962c136462338bc31:0xe8017952:0xfd086bc7cd5c481dcc9c85ebe478a1c0b69fcbb9",
+      "family": "evm",
+      "chainId": 42161,
+      "certified": true,
+      "kind": "intent",
+      "method": "depositErc20",
+      "contract": "0x4cd00e387622c35bddb9b4c962c136462338bc31",
+      "selector": "0xe8017952",
+      "calldataLength": 132,
+      "title": "Relay",
+      "intent": "Bridge {2} through Relay for {0}; delivery is by Relay",
+      "fieldsShownByKeepKey": [
+        "depositor",
+        "token",
+        "amount",
+        "orderId"
+      ],
+      "pinned": [
+        "0xfd086bc7cd5c481dcc9c85ebe478a1c0b69fcbb9"
+      ]
+    },
+    {
+      "id": "eip155:42161:0x4cd00e387622c35bddb9b4c962c136462338bc31:0xe8017952:0x82af49447d8a07e3bd95bd0d56f35241523fbab1",
+      "family": "evm",
+      "chainId": 42161,
+      "certified": true,
+      "kind": "intent",
+      "method": "depositErc20",
+      "contract": "0x4cd00e387622c35bddb9b4c962c136462338bc31",
+      "selector": "0xe8017952",
+      "calldataLength": 132,
+      "title": "Relay",
+      "intent": "Bridge {2} through Relay for {0}; delivery is by Relay",
+      "fieldsShownByKeepKey": [
+        "depositor",
+        "token",
+        "amount",
+        "orderId"
+      ],
+      "pinned": [
+        "0x82af49447d8a07e3bd95bd0d56f35241523fbab1"
+      ]
+    },
+    {
+      "id": "eip155:42161:0x4cd00e387622c35bddb9b4c962c136462338bc31:0xe8017952:0xda10009cbd5d07dd0cecc66161fc93d7c9000da1",
+      "family": "evm",
+      "chainId": 42161,
+      "certified": true,
+      "kind": "intent",
+      "method": "depositErc20",
+      "contract": "0x4cd00e387622c35bddb9b4c962c136462338bc31",
+      "selector": "0xe8017952",
+      "calldataLength": 132,
+      "title": "Relay",
+      "intent": "Bridge {2} through Relay for {0}; delivery is by Relay",
+      "fieldsShownByKeepKey": [
+        "depositor",
+        "token",
+        "amount",
+        "orderId"
+      ],
+      "pinned": [
+        "0xda10009cbd5d07dd0cecc66161fc93d7c9000da1"
+      ]
+    },
+    {
+      "id": "eip155:42161:0x4cd00e387622c35bddb9b4c962c136462338bc31:0xe8017952:0x2f2a2543b76a4166549f7aab2e75bef0aefc5b0f",
+      "family": "evm",
+      "chainId": 42161,
+      "certified": true,
+      "kind": "intent",
+      "method": "depositErc20",
+      "contract": "0x4cd00e387622c35bddb9b4c962c136462338bc31",
+      "selector": "0xe8017952",
+      "calldataLength": 132,
+      "title": "Relay",
+      "intent": "Bridge {2} through Relay for {0}; delivery is by Relay",
+      "fieldsShownByKeepKey": [
+        "depositor",
+        "token",
+        "amount",
+        "orderId"
+      ],
+      "pinned": [
+        "0x2f2a2543b76a4166549f7aab2e75bef0aefc5b0f"
+      ]
+    },
+    {
+      "id": "solana:relayDepositNative",
+      "family": "solana",
+      "network": "Solana",
+      "protocol": "Relay",
+      "maintainedBy": "Relay",
+      "action": "Deposit funds for a cross-chain swap",
+      "method": "depositNative",
+      "program": "99vQwtBwYtrqqD9YSXbdum3KBdxPAVxYTaQ3cfnJSrN2",
+      "discriminator": "0d9e0ddf5fd51c06",
+      "instructionLength": 48,
+      "fieldsShownByKeepKey": [
+        "Amount",
+        "Order",
+        "Vault"
+      ],
+      "certified": true,
+      "provenance": {
+        "protocol": "https://docs.relay.link/references/protocol/how-it-works",
+        "security": "https://docs.relay.link/references/protocol/security"
+      }
+    },
+    {
+      "id": "solana:relayDepositToken",
+      "family": "solana",
+      "network": "Solana",
+      "protocol": "Relay",
+      "maintainedBy": "Relay",
+      "action": "Deposit funds for a cross-chain swap",
+      "method": "depositToken",
+      "program": "99vQwtBwYtrqqD9YSXbdum3KBdxPAVxYTaQ3cfnJSrN2",
+      "discriminator": "0b9c60da27a3b413",
+      "instructionLength": 48,
+      "fieldsShownByKeepKey": [
+        "Amount",
+        "Order",
+        "Vault"
+      ],
+      "certified": true,
+      "provenance": {
+        "protocol": "https://docs.relay.link/references/protocol/how-it-works",
+        "security": "https://docs.relay.link/references/protocol/security"
+      }
+    }
+  ],
+  "probes": [
+    {
+      "name": "eip155:1:0x4cd00e387622c35bddb9b4c962c136462338bc31:0x49290c1c",
+      "request": {
+        "chainId": 1,
+        "contract": "0x4cd00e387622c35bddb9b4c962c136462338bc31",
+        "selector": "0x49290c1c",
+        "calldataLength": 68
+      },
+      "httpStatus": 200,
+      "classification": "VERIFIED",
+      "signed": true,
+      "verifiesToPinnedProductionRoot": true,
+      "matchesVaultBody": true,
+      "envelopeSha256": "042331127848bf7d72d513e284c842645a0a9ba6f6ce79b13e489593b08fd0dc"
+    },
+    {
+      "name": "eip155:8453:0x4cd00e387622c35bddb9b4c962c136462338bc31:0x49290c1c",
+      "request": {
+        "chainId": 8453,
+        "contract": "0x4cd00e387622c35bddb9b4c962c136462338bc31",
+        "selector": "0x49290c1c",
+        "calldataLength": 68
+      },
+      "httpStatus": 200,
+      "classification": "VERIFIED",
+      "signed": true,
+      "verifiesToPinnedProductionRoot": true,
+      "matchesVaultBody": true,
+      "envelopeSha256": "53582d7406793a4270c82f5af0f6a588f25dc5d43f707c815c2e3235950b107e"
+    },
+    {
+      "name": "eip155:42161:0x4cd00e387622c35bddb9b4c962c136462338bc31:0x49290c1c",
+      "request": {
+        "chainId": 42161,
+        "contract": "0x4cd00e387622c35bddb9b4c962c136462338bc31",
+        "selector": "0x49290c1c",
+        "calldataLength": 68
+      },
+      "httpStatus": 200,
+      "classification": "VERIFIED",
+      "signed": true,
+      "verifiesToPinnedProductionRoot": true,
+      "matchesVaultBody": true,
+      "envelopeSha256": "3bd5857bf7bbdf255f815cb5a5d95d8a5c0b41765729c2816b6be65afeec5627"
+    },
+    {
+      "name": "eip155:8453:0x4cd00e387622c35bddb9b4c962c136462338bc31:0xe8017952:0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+      "request": {
+        "chainId": 8453,
+        "contract": "0x4cd00e387622c35bddb9b4c962c136462338bc31",
+        "selector": "0xe8017952",
+        "calldataLength": 132,
+        "token": "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913"
+      },
+      "httpStatus": 200,
+      "classification": "VERIFIED",
+      "signed": true,
+      "verifiesToPinnedProductionRoot": true,
+      "matchesVaultBody": true,
+      "envelopeSha256": "18eaf3315375490d0276a84399baa22de4590971fd6c4f193be10c8714945597"
+    },
+    {
+      "name": "eip155:8453:0x4cd00e387622c35bddb9b4c962c136462338bc31:0xe8017952:0xd9aaec86b65d86f6a7b5b1b0c42ffa531710b6ca",
+      "request": {
+        "chainId": 8453,
+        "contract": "0x4cd00e387622c35bddb9b4c962c136462338bc31",
+        "selector": "0xe8017952",
+        "calldataLength": 132,
+        "token": "0xd9aaec86b65d86f6a7b5b1b0c42ffa531710b6ca"
+      },
+      "httpStatus": 200,
+      "classification": "VERIFIED",
+      "signed": true,
+      "verifiesToPinnedProductionRoot": true,
+      "matchesVaultBody": true,
+      "envelopeSha256": "a485d5ab38728ce0222eeedd3d0e9d432a7a4b5c96e8890170f246bb12a7bfbc"
+    },
+    {
+      "name": "eip155:8453:0x4cd00e387622c35bddb9b4c962c136462338bc31:0xe8017952:0x4200000000000000000000000000000000000006",
+      "request": {
+        "chainId": 8453,
+        "contract": "0x4cd00e387622c35bddb9b4c962c136462338bc31",
+        "selector": "0xe8017952",
+        "calldataLength": 132,
+        "token": "0x4200000000000000000000000000000000000006"
+      },
+      "httpStatus": 200,
+      "classification": "VERIFIED",
+      "signed": true,
+      "verifiesToPinnedProductionRoot": true,
+      "matchesVaultBody": true,
+      "envelopeSha256": "51199359d786e98cfaf38e0acfc9d5b74ccc87066f3ac66a27f54aaba2e9e301"
+    },
+    {
+      "name": "eip155:8453:0x4cd00e387622c35bddb9b4c962c136462338bc31:0xe8017952:0x50c5725949a6f0c72e6c4a641f24049a917db0cb",
+      "request": {
+        "chainId": 8453,
+        "contract": "0x4cd00e387622c35bddb9b4c962c136462338bc31",
+        "selector": "0xe8017952",
+        "calldataLength": 132,
+        "token": "0x50c5725949a6f0c72e6c4a641f24049a917db0cb"
+      },
+      "httpStatus": 200,
+      "classification": "VERIFIED",
+      "signed": true,
+      "verifiesToPinnedProductionRoot": true,
+      "matchesVaultBody": true,
+      "envelopeSha256": "548839967115051d4dc7786f4f0a3f7e17ceb89340162087c3d1bf691d562de3"
+    },
+    {
+      "name": "eip155:8453:0x4cd00e387622c35bddb9b4c962c136462338bc31:0xe8017952:0xcbb7c0000ab88b473b1f5afd9ef808440eed33bf",
+      "request": {
+        "chainId": 8453,
+        "contract": "0x4cd00e387622c35bddb9b4c962c136462338bc31",
+        "selector": "0xe8017952",
+        "calldataLength": 132,
+        "token": "0xcbb7c0000ab88b473b1f5afd9ef808440eed33bf"
+      },
+      "httpStatus": 200,
+      "classification": "VERIFIED",
+      "signed": true,
+      "verifiesToPinnedProductionRoot": true,
+      "matchesVaultBody": true,
+      "envelopeSha256": "e5c752d7da9741b33106832303160a031c736cc099d37382774f097861d3bf0b"
+    },
+    {
+      "name": "eip155:8453:0x4cd00e387622c35bddb9b4c962c136462338bc31:0xe8017952:0x2ae3f1ec7f1f5012cfeab0185bfc7aa3cf0dec22",
+      "request": {
+        "chainId": 8453,
+        "contract": "0x4cd00e387622c35bddb9b4c962c136462338bc31",
+        "selector": "0xe8017952",
+        "calldataLength": 132,
+        "token": "0x2ae3f1ec7f1f5012cfeab0185bfc7aa3cf0dec22"
+      },
+      "httpStatus": 200,
+      "classification": "VERIFIED",
+      "signed": true,
+      "verifiesToPinnedProductionRoot": true,
+      "matchesVaultBody": true,
+      "envelopeSha256": "e927e56264eb44f9762139d69ae640239330e3d4b062bcd046b24c59849bd3f5"
+    },
+    {
+      "name": "eip155:42161:0x4cd00e387622c35bddb9b4c962c136462338bc31:0xe8017952:0xaf88d065e77c8cc2239327c5edb3a432268e5831",
+      "request": {
+        "chainId": 42161,
+        "contract": "0x4cd00e387622c35bddb9b4c962c136462338bc31",
+        "selector": "0xe8017952",
+        "calldataLength": 132,
+        "token": "0xaf88d065e77c8cc2239327c5edb3a432268e5831"
+      },
+      "httpStatus": 200,
+      "classification": "VERIFIED",
+      "signed": true,
+      "verifiesToPinnedProductionRoot": true,
+      "matchesVaultBody": true,
+      "envelopeSha256": "7fff0803c47c90e2040d2f061bf17a2fc1cf56ff8a429ae7c77a058452aeb579"
+    },
+    {
+      "name": "eip155:42161:0x4cd00e387622c35bddb9b4c962c136462338bc31:0xe8017952:0xfd086bc7cd5c481dcc9c85ebe478a1c0b69fcbb9",
+      "request": {
+        "chainId": 42161,
+        "contract": "0x4cd00e387622c35bddb9b4c962c136462338bc31",
+        "selector": "0xe8017952",
+        "calldataLength": 132,
+        "token": "0xfd086bc7cd5c481dcc9c85ebe478a1c0b69fcbb9"
+      },
+      "httpStatus": 200,
+      "classification": "VERIFIED",
+      "signed": true,
+      "verifiesToPinnedProductionRoot": true,
+      "matchesVaultBody": true,
+      "envelopeSha256": "1c9865eb5b5960a7fe33c21cdd68e4e0ec7e51792f3d60a5508a862d99ed9ac3"
+    },
+    {
+      "name": "eip155:42161:0x4cd00e387622c35bddb9b4c962c136462338bc31:0xe8017952:0x82af49447d8a07e3bd95bd0d56f35241523fbab1",
+      "request": {
+        "chainId": 42161,
+        "contract": "0x4cd00e387622c35bddb9b4c962c136462338bc31",
+        "selector": "0xe8017952",
+        "calldataLength": 132,
+        "token": "0x82af49447d8a07e3bd95bd0d56f35241523fbab1"
+      },
+      "httpStatus": 200,
+      "classification": "VERIFIED",
+      "signed": true,
+      "verifiesToPinnedProductionRoot": true,
+      "matchesVaultBody": true,
+      "envelopeSha256": "146beb904481d3d1b17069893c418f9ad977c81e87586d40a0a3006516eff03d"
+    },
+    {
+      "name": "eip155:42161:0x4cd00e387622c35bddb9b4c962c136462338bc31:0xe8017952:0xda10009cbd5d07dd0cecc66161fc93d7c9000da1",
+      "request": {
+        "chainId": 42161,
+        "contract": "0x4cd00e387622c35bddb9b4c962c136462338bc31",
+        "selector": "0xe8017952",
+        "calldataLength": 132,
+        "token": "0xda10009cbd5d07dd0cecc66161fc93d7c9000da1"
+      },
+      "httpStatus": 200,
+      "classification": "VERIFIED",
+      "signed": true,
+      "verifiesToPinnedProductionRoot": true,
+      "matchesVaultBody": true,
+      "envelopeSha256": "77acc0daa482add89fa0c3bfdda1afbbe08e186d48f994f77a31eaca086b4ff6"
+    },
+    {
+      "name": "eip155:42161:0x4cd00e387622c35bddb9b4c962c136462338bc31:0xe8017952:0x2f2a2543b76a4166549f7aab2e75bef0aefc5b0f",
+      "request": {
+        "chainId": 42161,
+        "contract": "0x4cd00e387622c35bddb9b4c962c136462338bc31",
+        "selector": "0xe8017952",
+        "calldataLength": 132,
+        "token": "0x2f2a2543b76a4166549f7aab2e75bef0aefc5b0f"
+      },
+      "httpStatus": 200,
+      "classification": "VERIFIED",
+      "signed": true,
+      "verifiesToPinnedProductionRoot": true,
+      "matchesVaultBody": true,
+      "envelopeSha256": "d67ee18143fe0c98c1497d73154ca0158680a258b9807b9b262aed9d71e9f5be"
+    },
+    {
+      "name": "native-deposit-chain-10",
+      "request": {
+        "chainId": 10,
+        "contract": "0x4cd00e387622c35bddb9b4c962c136462338bc31",
+        "selector": "0x49290c1c",
+        "calldataLength": 68
+      },
+      "httpStatus": 422,
+      "classification": "OPAQUE",
+      "code": "NOT_IN_SIGNED_CATALOG",
+      "signed": false
+    },
+    {
+      "name": "native-deposit-chain-56",
+      "request": {
+        "chainId": 56,
+        "contract": "0x4cd00e387622c35bddb9b4c962c136462338bc31",
+        "selector": "0x49290c1c",
+        "calldataLength": 68
+      },
+      "httpStatus": 422,
+      "classification": "OPAQUE",
+      "code": "NOT_IN_SIGNED_CATALOG",
+      "signed": false
+    },
+    {
+      "name": "native-deposit-chain-137",
+      "request": {
+        "chainId": 137,
+        "contract": "0x4cd00e387622c35bddb9b4c962c136462338bc31",
+        "selector": "0x49290c1c",
+        "calldataLength": 68
+      },
+      "httpStatus": 422,
+      "classification": "OPAQUE",
+      "code": "NOT_IN_SIGNED_CATALOG",
+      "signed": false
+    },
+    {
+      "name": "native-deposit-chain-43114",
+      "request": {
+        "chainId": 43114,
+        "contract": "0x4cd00e387622c35bddb9b4c962c136462338bc31",
+        "selector": "0x49290c1c",
+        "calldataLength": 68
+      },
+      "httpStatus": 422,
+      "classification": "OPAQUE",
+      "code": "NOT_IN_SIGNED_CATALOG",
+      "signed": false
+    },
+    {
+      "name": "ethereum-usdt-deposit",
+      "request": {
+        "chainId": 1,
+        "contract": "0x4cd00e387622c35bddb9b4c962c136462338bc31",
+        "selector": "0xe8017952",
+        "calldataLength": 132,
+        "token": "0xdac17f958d2ee523a2206206994597c13d831ec7"
+      },
+      "httpStatus": 422,
+      "classification": "OPAQUE",
+      "code": "NOT_IN_SIGNED_CATALOG",
+      "signed": false
+    },
+    {
+      "name": "relay-v3.2-multicall",
+      "request": {
+        "chainId": 1,
+        "contract": "0x0729e2a4716d9f7dd17858d5d504426d228697f7",
+        "selector": "0xcd6e13f7",
+        "calldataLength": 2180
+      },
+      "httpStatus": 422,
+      "classification": "OPAQUE",
+      "code": "NOT_IN_SIGNED_CATALOG",
+      "signed": false
+    },
+    {
+      "name": "wrong-deposit-length",
+      "request": {
+        "chainId": 8453,
+        "contract": "0x4cd00e387622c35bddb9b4c962c136462338bc31",
+        "selector": "0x49290c1c",
+        "calldataLength": 100
+      },
+      "httpStatus": 422,
+      "classification": "OPAQUE",
+      "code": "NOT_IN_SIGNED_CATALOG",
+      "signed": false
+    },
+    {
+      "name": "wrong-deposit-contract",
+      "request": {
+        "chainId": 8453,
+        "contract": "0x0729e2a4716d9f7dd17858d5d504426d228697f7",
+        "selector": "0x49290c1c",
+        "calldataLength": 68
+      },
+      "httpStatus": 422,
+      "classification": "OPAQUE",
+      "code": "NOT_IN_SIGNED_CATALOG",
+      "signed": false
+    },
+    {
+      "name": "relay-v3.2-multicall-erc7730",
+      "contract": "0x0729e2a4716d9f7dd17858d5d504426d228697f7",
+      "selector": "0xcd6e13f7",
+      "httpStatus": 422,
+      "classification": "OPAQUE",
+      "code": "NOT_IN_SIGNED_CATALOG"
+    },
+    {
+      "name": "relay-cleanup-native-erc7730",
+      "contract": "0x0729e2a4716d9f7dd17858d5d504426d228697f7",
+      "selector": "0xa6bd8c96",
+      "httpStatus": 422,
+      "classification": "OPAQUE",
+      "code": "NOT_IN_SIGNED_CATALOG"
+    },
+    {
+      "name": "relay-cleanup-erc20-erc7730",
+      "contract": "0x0729e2a4716d9f7dd17858d5d504426d228697f7",
+      "selector": "0x9bb43718",
+      "httpStatus": 422,
+      "classification": "OPAQUE",
+      "code": "NOT_IN_SIGNED_CATALOG"
+    },
+    {
+      "name": "tycho-sequential-swap-erc7730",
+      "contract": "0x1644d2477f809cc2c71bccfd6dc9497e3f83210d",
+      "selector": "0x3c226834",
+      "httpStatus": 422,
+      "classification": "OPAQUE",
+      "code": "NOT_IN_SIGNED_CATALOG"
+    },
+    {
+      "name": "relay-deposit-native-no-alt",
+      "fixture": "relay-deposit-native-no-alt.json",
+      "httpStatus": 200,
+      "classification": "VERIFIED"
+    },
+    {
+      "name": "relay-deposit-native-alt",
+      "fixture": "relay-deposit-native-alt.json",
+      "httpStatus": 422,
+      "classification": "OPAQUE",
+      "code": "LOOKUP_TABLES_UNSUPPORTED"
+    }
+  ],
+  "signatureFailures": []
+}

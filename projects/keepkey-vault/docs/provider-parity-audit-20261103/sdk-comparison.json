@@ -1,0 +1,41 @@
+{
+  "checkedAt": "2026-11-03T19:53:33.872Z",
+  "sdk": "Vault installed @pioneer-platform/pioneer-client",
+  "fixtureOnly": true,
+  "signed": false,
+  "broadcast": false,
+  "observations": [
+    {
+      "origin": "https://api.keepkey.info",
+      "withMode": false,
+      "success": true,
+      "providers": [
+        "relay"
+      ]
+    },
+    {
+      "origin": "https://api.keepkey.info",
+      "withMode": true,
+      "success": false,
+      "status": 400,
+      "message": "Bad Request",
+      "responseMessage": "Something went wrong"
+    },
+    {
+      "origin": "https://oracles.cc",
+      "withMode": false,
+      "success": true,
+      "providers": [
+        "relay"
+      ]
+    },
+    {
+      "origin": "https://oracles.cc",
+      "withMode": true,
+      "success": true,
+      "providers": [
+        "relay"
+      ]
+    }
+  ]
+}

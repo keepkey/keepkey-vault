@@ -269,11 +269,22 @@ export function simulationUnavailableMessage(callMessage: string, simulationErro
   return `${SIMULATION_UNAVAILABLE_MESSAGE} ${callMessage}`.slice(0, 300)
 }
 
-export async function simulateEvmEffects(tx: EvmSimulationTx, endpoint: string): Promise<EffectReport> {
-  const fingerprint = evmTxFingerprint(tx)
+/** JSON-RPC quantities have no leading zeroes (hdwallet byte strings may). */
+export function evmSimulationCall(tx: EvmSimulationTx): Record<string, unknown> {
   const call = { ...tx, input: tx.input || tx.data || '0x' } as Record<string, unknown>
   delete call.chainId
   delete call.data
+  for (const field of QUANTITY_FIELDS) {
+    const value = call[field]
+    if (value === undefined || value === null || value === '') delete call[field]
+    else call[field] = quantity(value)
+  }
+  return call
+}
+
+export async function simulateEvmEffects(tx: EvmSimulationTx, endpoint: string): Promise<EffectReport> {
+  const fingerprint = evmTxFingerprint(tx)
+  const call = evmSimulationCall(tx)
   let blockReference: string | undefined
   try { blockReference = await evmRpc(endpoint, 'eth_blockNumber', []) } catch { /* provider head remains explicit unknown */ }
   const blockTag = blockReference || 'latest'
@@ -313,7 +324,7 @@ export async function simulateEvmEffects(tx: EvmSimulationTx, endpoint: string):
     return bindRuntimeCode(normalizeEvmSimulation(tx, endpoint, blockReference, { status: '0x1' }), endpoint, blockTag)
   } catch (callError: any) {
     const message = callError?.message || String(callError)
-    if (/revert/i.test(message)) return normalizeEvmSimulation(tx, endpoint, blockReference, {
+    if (/revert|out of gas|intrinsic gas too low/i.test(message)) return normalizeEvmSimulation(tx, endpoint, blockReference, {
       status: '0x0', error: { message },
     })
     return {

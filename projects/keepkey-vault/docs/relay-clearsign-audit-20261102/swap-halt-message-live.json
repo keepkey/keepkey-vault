@@ -1,0 +1,92 @@
+{
+  "fixPullRequest": "https://github.com/BitHighlander/keepkey-gateway/pull/6",
+  "deployment": "https://github.com/BitHighlander/keepkey-gateway/actions/runs/41694416441",
+  "gatewayRegressionChecks": {
+    "passed": 158,
+    "skipped": 2,
+    "workerTypecheck": "passed",
+    "containerTypecheck": "passed"
+  },
+  "vaultCodeRevision": "80a3d6932a3595bdc29eb50f803d13c87ad5797e",
+  "vaultFocusedTests": 77,
+  "liveQuoteProbe": {
+    "checkedAt": "2026-11-03T18:37:37.070Z",
+    "revision": "298ff3508a7a044cf8baaf7bfbe03b338c619070",
+    "pair": "ETH to LTC",
+    "fixtureOnly": true,
+    "signed": false,
+    "broadcast": false,
+    "observations": [
+      {
+        "amount": "0.032654987123456789",
+        "httpStatus": 503,
+        "error": {
+          "code": "swap_error",
+          "message": "THORChain has paused trading for this route. No alternative swap route is currently available. Choose another pair or try again after trading resumes.",
+          "details": {
+            "reason": "trading_halted",
+            "providers": [
+              "thorchain"
+            ],
+            "attempts": [
+              {
+                "provider": "thorchain",
+                "status": "unavailable",
+                "reason": "thorchain quote hosts failed: https://gateway.liquify.com/chain/thorchain_api returned 400: failed to simulate swap: failed to simulate handler: trading is halted, can't process swap: invalid request",
+                "checkedAt": 1793731053210
+              },
+              {
+                "provider": "shapeshift",
+                "status": "unavailable",
+                "reason": "ShapeShift returned no fallback route",
+                "checkedAt": 1793731054064
+              },
+              {
+                "provider": "swapkit",
+                "status": "unavailable",
+                "reason": "SwapKit returned no fee-attributed executable route",
+                "checkedAt": 1793731054659
+              }
+            ]
+          }
+        }
+      },
+      {
+        "amount": "0.03265498",
+        "httpStatus": 503,
+        "error": {
+          "code": "swap_error",
+          "message": "THORChain has paused trading for this route. No alternative swap route is currently available. Choose another pair or try again after trading resumes.",
+          "details": {
+            "reason": "trading_halted",
+            "providers": [
+              "thorchain"
+            ],
+            "attempts": [
+              {
+                "provider": "thorchain",
+                "status": "unavailable",
+                "reason": "thorchain quote hosts failed: https://gateway.liquify.com/chain/thorchain_api returned 400: failed to simulate swap: failed to simulate handler: trading is halted, can't process swap: invalid request",
+                "checkedAt": 1793731055364
+              },
+              {
+                "provider": "shapeshift",
+                "status": "unavailable",
+                "reason": "ShapeShift returned no fallback route",
+                "checkedAt": 1793731055973
+              },
+              {
+                "provider": "swapkit",
+                "status": "unavailable",
+                "reason": "SwapKit returned no fee-attributed executable route",
+                "checkedAt": 1793731056478
+              }
+            ]
+          }
+        }
+      }
+    ]
+  },
+  "result": "Production returns a readable trading-halted message after every fallback fails. ETH to LTC remains unavailable. Native quote precision is accepted; original provider failures remain in structured diagnostics.",
+  "realFundsUsed": false
+}

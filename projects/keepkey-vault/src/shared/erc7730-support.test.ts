@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, it } from 'bun:test'
+import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
 import {
   CAPABILITY_ERC7730_RUNTIME_REVIEW, ERC7730_TRANSPORT_SUPPORTED,
   erc7730CalldataSkipReason, supportsErc7730Transport, supportsErc7730TypedData, withoutCallerErc7730,
@@ -73,8 +73,8 @@ describe('a checked ERC-7730 definition and the AdvancedMode gate', () => {
   const catalog = { primaryDefinitionId: definition.definitionId, definitions: [{ ...definition, kind: 1 as const }] }
   // The replay fixtures are signed under their TEST root.
   let restoreRoot = () => {}
-  beforeAll(() => { restoreRoot = trustTestRoot(ERC7730_FIXTURE_ROOT_PUBLIC_KEY) })
-  afterAll(() => restoreRoot())
+  beforeEach(() => { restoreRoot = trustTestRoot(ERC7730_FIXTURE_ROOT_PUBLIC_KEY) })
+  afterEach(() => restoreRoot())
 
   it('lifts the gate only for the call it describes, on a device that takes it', () => {
     expect(evmCallRequiresAdvancedMode(tx.to, tx.data, tx.chainId, false, undefined, undefined, '7.16.0', tx.value, CAPS)).toBe(true)

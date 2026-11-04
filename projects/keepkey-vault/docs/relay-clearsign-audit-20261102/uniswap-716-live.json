@@ -1,0 +1,42 @@
+[
+  {
+    "checkedAt": "2026-11-02T17:34:28.651Z",
+    "buyAsset": "eip155:1/erc20:0xdac17f958d2ee523a2206206994597c13d831ec7",
+    "amountEth": "0.01",
+    "expectedOutput": "22.478029",
+    "minimumOutput": "22.253248",
+    "to": "0x3fc91a3afd70395cd496c647d5a6cc9d4b2b7fad",
+    "selector": "0x3593564c",
+    "calldataBytes": 964,
+    "gasLimit": "250000",
+    "executionCheck": {
+      "status": "estimated",
+      "checkedAt": 1793640868461,
+      "gasEstimate": "195033",
+      "quotedGasLimit": "250000"
+    },
+    "hostGateRequiresAdvancedMode": false,
+    "deviceSigningPerformed": false,
+    "broadcastPerformed": false
+  },
+  {
+    "checkedAt": "2026-11-02T17:34:30.204Z",
+    "buyAsset": "eip155:1/erc20:0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+    "amountEth": "0.01",
+    "expectedOutput": "22.447202",
+    "minimumOutput": "22.22273",
+    "to": "0x3fc91a3afd70395cd496c647d5a6cc9d4b2b7fad",
+    "selector": "0x3593564c",
+    "calldataBytes": 964,
+    "gasLimit": "250000",
+    "executionCheck": {
+      "status": "estimated",
+      "checkedAt": 1793640870131,
+      "gasEstimate": "210949",
+      "quotedGasLimit": "250000"
+    },
+    "hostGateRequiresAdvancedMode": false,
+    "deviceSigningPerformed": false,
+    "broadcastPerformed": false
+  }
+]

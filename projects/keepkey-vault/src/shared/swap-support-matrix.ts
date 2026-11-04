@@ -356,19 +356,24 @@ export const PROVIDER_LABEL: Record<SwapProvider, string> = {
 type DynamicChains = Record<SwapProvider, Set<string>>
 let dynamicChains: DynamicChains | null = null
 let dynamicChainsBase = ''
+let dynamicChainsGeneration = 0
 
 /** Fetch provider chain coverage from Pioneer and cache for the session.
  *  Re-fetches if pioneerBase changed (e.g. user switches Pioneer host in settings).
  *  Falls back silently to the static sets if Pioneer is unreachable. */
 export async function loadSupportedChains(pioneerBase: string): Promise<void> {
   if (dynamicChains && pioneerBase === dynamicChainsBase) return
+  const generation = ++dynamicChainsGeneration
+  dynamicChainsBase = pioneerBase
   dynamicChains = null
+  const isCurrent = () => generation === dynamicChainsGeneration && pioneerBase === dynamicChainsBase
   try {
     const res = await fetch(`${pioneerBase}/api/v1/swappers/supported-chains`, {
       signal: AbortSignal.timeout(5000),
     })
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
     const data = await res.json() as Record<string, string[]>
+    if (!isCurrent()) return
     dynamicChains = {
       thorchain:  new Set(data.thorchain  || []),
       mayachain:  new Set(data.mayachain  || []),
@@ -377,16 +382,18 @@ export async function loadSupportedChains(pioneerBase: string): Promise<void> {
       chainflip:  new Set(data.chainflip  || []),
       shapeshift: new Set(data.shapeshift || []),
     }
-    dynamicChainsBase = pioneerBase
     console.log('[swap-matrix] Dynamic chain coverage loaded from Pioneer')
   } catch (e: any) {
+    if (!isCurrent()) return
     console.warn('[swap-matrix] Pioneer unreachable — using static fallback:', e.message)
   }
 }
 
 /** Exposed for tests only. */
-export function _resetDynamicChains(): void { dynamicChains = null; dynamicChainsBase = '' }
+export function _resetDynamicChains(): void { dynamicChainsGeneration++; dynamicChains = null; dynamicChainsBase = '' }
 export function _setDynamicChains(chains: Record<SwapProvider, string[]>): void {
+  dynamicChainsGeneration++
+  dynamicChainsBase = ''
   dynamicChains = Object.fromEntries(
     Object.entries(chains).map(([k, v]) => [k, new Set(v as string[])])
   ) as DynamicChains

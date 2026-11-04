@@ -217,8 +217,8 @@ function getScriptTypeFromXpub(xpub: string): string | undefined {
   // DOGE (dgub), BCH, DASH (drkp) — all legacy p2pkh
   if (xpub.startsWith('dgub') || xpub.startsWith('drkp')) return 'p2pkh'
   // LTC
-  if (xpub.startsWith('Mtub')) return 'p2wpkh'
-  if (xpub.startsWith('Ltub')) return 'p2sh-p2wpkh'
+  if (xpub.startsWith('Mtub')) return 'p2sh-p2wpkh'
+  if (xpub.startsWith('Ltub')) return 'p2pkh'
   return undefined // unknown prefix — let caller fall back
 }
 
