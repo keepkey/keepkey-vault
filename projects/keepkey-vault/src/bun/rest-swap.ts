@@ -25,6 +25,7 @@ import type { RestApiCallbacks } from './rest-api'
 import { parseRequest } from './validate'
 import * as S from './schemas'
 import type { SwapUiCommand } from '../shared/types'
+import { blocksSwapUiCommand } from '../shared/swap-ui-control'
 
 const TAG = '[rest-swap]'
 
@@ -44,6 +45,11 @@ export async function handleSwapRoute(
   if (!path.startsWith('/api/v2/swap/') && path !== '/api/v2/swap') return null
 
   try {
+    const command = path.slice('/api/v2/swap/'.length)
+    if (method === 'POST' && blocksSwapUiCommand(callbacks?.getSwapUiState?.().state.phase, command)) {
+      auth.requireAuth(req)
+      return json({ error: 'Swap inputs are locked while signing or showing a submitted transaction. Close the receipt before opening another swap.' }, 409)
+    }
     if (path === '/api/v2/swap/state' && method === 'GET') {
       auth.requireAuth(req)
       if (!callbacks?.getSwapUiState) return json({ error: 'Swap UI mirror not wired' }, 503)
