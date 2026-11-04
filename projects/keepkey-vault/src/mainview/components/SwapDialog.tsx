@@ -1650,6 +1650,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
   }, [isMax, amount, nativeFeeReservedMaxAmount, tokenPrecisionReservedMaxAmount, fromBalance])
 
   const sendIsMax = isMax && nativeFeeReservedMaxAmount === null && tokenPrecisionReservedMaxAmount === null
+  const quotedSendAmount = quote?.netFromAmount ?? sendAmount
 
   /* When the native balance is too small to even cover gas, MAX is
    * unusable — flag it so the UI can show "insufficient for gas" instead
@@ -1730,7 +1731,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
   // (e.g., user has dust/zero native balance but tokens on the chain)
   const toPriceUsd = useMemo(() => {
     // When isMax, amount is "" — use fromBalance instead (same as quote request logic)
-    const effectiveAmount = sendAmount
+    const effectiveAmount = quotedSendAmount
     swapLog(`[SWAP-PRICE] toPriceUsd: balanceBased=$${toPriceUsdFromBalance} fromPriceUsd=$${fromPriceUsd} quote.expectedOutput=${quote?.expectedOutput} effectiveAmount=${effectiveAmount} isMax=${isMax}`)
     if (toPriceUsdFromBalance > 0) return toPriceUsdFromBalance
     // Fallback: derive from FROM price and quote ratio
@@ -1745,7 +1746,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
     }
     swapLog('[SWAP-PRICE] toPriceUsd: returning 0 (no price source)')
     return 0
-  }, [toPriceUsdFromBalance, fromPriceUsd, quote?.expectedOutput, sendAmount, isMax])
+  }, [toPriceUsdFromBalance, fromPriceUsd, quote?.expectedOutput, quotedSendAmount, isMax])
 
   const hasFromPrice = fromPriceUsd > 0
   const hasToPrice = toPriceUsd > 0
@@ -1855,10 +1856,10 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
   // the user with a bare native number and no idea what it was worth.
   const amountUsdPreview = useMemo(() => {
     if (!hasFromPrice) return null
-    const n = parseFloat(sendAmount)
+    const n = parseFloat(quotedSendAmount)
     if (isNaN(n) || n <= 0) return null
     return n * fromPriceUsd
-  }, [sendAmount, hasFromPrice, fromPriceUsd])
+  }, [quotedSendAmount, hasFromPrice, fromPriceUsd])
 
   const amountNum = parseFloat(amount)
   const balanceNum = fromBalance ? parseFloat(fromBalance) : 0
@@ -2052,16 +2053,16 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
       toChainId: toAsset.chainId,
       fromCaip: fromAsset.caip!,
       toCaip: toAsset.caip!,
-      amount: sendAmount,
+      amount: quote.netFromAmount ?? sendAmount,
       memo: quote.memo,
       inboundAddress: quote.inboundAddress,
       router: quote.router,
       expiry: quote.expiry,
       expectedOutput: quote.expectedOutput,
-      isMax: sendIsMax, feeLevel: 5,
+      isMax: quote.netFromAmount ? false : sendIsMax, feeLevel: 5,
       fromAddressOverride: fromAddress,
       toAddressOverride: toAddress,
-      fromEvmAddressIndex: fromAsset.chainFamily === 'evm' ? evmAddresses.selectedIndex : undefined,
+      fromEvmAddressIndex: fromAsset.chainFamily === 'evm' ? effectiveEvmIndex : undefined,
       integration: quote.integration,
       swapper: quote.swapper,
       relayTx: quote.relayTx,
@@ -2071,10 +2072,10 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
     }).then((res) => { if (!cancelled) { setPreviewBuild(res); setPreviewLoading(false) } })
       .catch((e: any) => { if (!cancelled) { setPreviewError(e?.message || 'Preview failed'); setPreviewLoading(false) } })
     return () => { cancelled = true }
-  }, [phase, quote, fromAsset, toAsset, sendAmount, sendIsMax, fromBalance, fromAddress, toAddress])
+  }, [phase, quote, fromAsset, toAsset, sendAmount, sendIsMax, fromBalance, fromAddress, toAddress, effectiveEvmIndex])
 
-  const swapRisk = assessSwapRisk({
-    inputAmount: parseFloat(sendAmount), expectedAmount: Number(quote?.expectedOutput),
+  const swapRisk = quote?.risk ?? assessSwapRisk({
+    inputAmount: Number(quote?.netFromAmount ?? sendAmount), expectedAmount: Number(quote?.expectedOutput),
     minimumAmount: Number(quote?.minimumOutput), fromPriceUsd, toPriceUsd: toPriceUsdFromBalance,
     sameAssetUnits: !!(fromAsset?.caip?.endsWith('/slip44:60') && toAsset?.caip?.endsWith('/slip44:60')
       && fromAsset.chainFamily === 'evm' && toAsset.chainFamily === 'evm'
@@ -2155,6 +2156,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
           toAddress,
           slippageBps,
           isMax: sendIsMax,
+          fromEvmAddressIndex: fromAsset!.chainFamily === 'evm' ? effectiveEvmIndex : undefined,
         }, 60000)
         if (version !== quoteVersionRef.current) return
         setQuote(result)
@@ -2197,7 +2199,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
     return () => {
       if (quoteTimerRef.current) clearTimeout(quoteTimerRef.current)
     }
-  }, [fromAsset?.caip, toAsset?.caip, sendAmount, sendIsMax, fromAddress, toAddress, exceedsBalance, fromBalance, slippageBps, requoteTick, destAddressError, toAddressIsXpub])
+  }, [fromAsset?.caip, toAsset?.caip, sendAmount, sendIsMax, fromAddress, toAddress, exceedsBalance, fromBalance, slippageBps, requoteTick, destAddressError, toAddressIsXpub, effectiveEvmIndex])
 
   // ── Flip ──────────────────────────────────────────────────────────
   const handleFlip = useCallback(() => {
@@ -2249,7 +2251,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
     // between when the user first saw the quote and when they actually confirm.
     let liveQuote: SwapQuote = quote
     const age = Date.now() - (quoteFetchedAt || 0)
-    if (age > swapRisk.quoteMaxAgeMs) {
+    if (age > swapRisk.quoteMaxAgeMs || (quote.quoteExpiresAt != null && Date.now() >= quote.quoteExpiresAt)) {
       setRefreshingQuote(true)
       try {
         const refreshed = await rpcRequest<SwapQuote>('getSwapQuote', {
@@ -2258,6 +2260,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
           amount: sendAmount,
           fromAddress, toAddress, slippageBps,
           isMax: sendIsMax,
+          fromEvmAddressIndex: fromAsset.chainFamily === 'evm' ? effectiveEvmIndex : undefined,
         }, 60000)
         // Block on >1% output drop — quote degraded, user should re-review
         const oldOut = parseFloat(quote.expectedOutput || '0')
@@ -2289,7 +2292,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
     setError(null)
 
     // Freeze the sent amount so balance changes don't affect the display
-    setSentAmount(sendAmount)
+    setSentAmount(liveQuote.netFromAmount ?? sendAmount)
 
     // Capture before-balances
     const fromBal = fromBalance || '0'
@@ -2308,6 +2311,8 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
 
     try {
       const result = await rpcRequest<{ txid: string; approvalTxid?: string }>('executeSwap', {
+        quoteId: liveQuote.quoteId,
+        riskAcknowledged,
         fromChainId: fromAsset.chainId,
         toChainId: toAsset.chainId,
         fromCaip: fromAsset.caip!,
@@ -2357,6 +2362,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
       if (raw.includes(SOLANA_BLIND_SIGNING_REQUIRED)) {
         setBlindSignError(null)
         setBlindSignCause('host')
+        setQuoteFetchedAt(0)
         // The backend appends a host-side outflow check (what this transaction
         // actually moves out of the wallet, per an independent RPC simulation).
         // Absent or unparseable → the panel just omits the figures.
@@ -2374,6 +2380,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
       if (/AdvancedMode/i.test(raw)) {
         setBlindSignError(null)
         setBlindSignCause('device')
+        setQuoteFetchedAt(0)
         setOutflowCheck(null)
         setPhase('blind-signing-required')
         return
@@ -2407,8 +2414,11 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
       }
       setError(friendly)
       setPhase('review')
+      // Any device attempt may have signed even when its response was lost.
+      // Require a fresh quote and review before another execute request.
+      setQuoteFetchedAt(0)
     }
-  }, [quote, quoteFetchedAt, fromAsset, toAsset, sendAmount, sendIsMax, fromBalance, fromAddress, toAddress, slippageBps, balances, phase, previewLoading, previewError, previewBuild, useCustomAddress, riskLocked, swapRisk.blocked, swapRisk.quoteMaxAgeMs])
+  }, [quote, quoteFetchedAt, fromAsset, toAsset, sendAmount, sendIsMax, fromBalance, fromAddress, toAddress, slippageBps, balances, phase, previewLoading, previewError, previewBuild, useCustomAddress, riskLocked, riskAcknowledged, swapRisk.blocked, swapRisk.quoteMaxAgeMs, effectiveEvmIndex])
 
   // ── Reset ─────────────────────────────────────────────────────────
   const reset = useCallback(() => {
@@ -2458,6 +2468,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
       console.warn('[SwapDialog] cancelDeviceSigning failed:', e?.message || e)
     }
     setPhase('review')
+    setQuoteFetchedAt(0)
     setError(t('swapCancelled', 'Swap cancelled — confirm again or change inputs'))
   }, [phase, t])
 
@@ -2502,7 +2513,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
   }, [t])
 
   const busy = phase === 'approving' || phase === 'signing' || phase === 'broadcasting'
-  const displayAmount = sentAmount ?? sendAmount
+  const displayAmount = sentAmount ?? quotedSendAmount
 
   // Must be above early return to satisfy Rules of Hooks
   const swappableChainIds = useMemo(() => new Set(assets.map(a => a.chainId)), [assets])
@@ -2606,12 +2617,12 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
       // Both 'open' and 'set' carry the same partial-update fields below.
       const fields = cmd
       if ('fromAsset' in fields && fields.fromAsset !== undefined) {
-        const a = findAssetByKey(fields.fromAsset)
+        const a = fields.fromAssetDefinition || findAssetByKey(fields.fromAsset)
         if (a) { setFromAsset(a); setMaxReserveMode('safe') }
         else pendingFromAssetKeyRef.current = fields.fromAsset
       }
       if ('toAsset' in fields && fields.toAsset !== undefined) {
-        const a = findAssetByKey(fields.toAsset)
+        const a = fields.toAssetDefinition || findAssetByKey(fields.toAsset)
         if (a) setToAsset(a)
         else pendingToAssetKeyRef.current = fields.toAsset
       }
@@ -4300,7 +4311,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                   so msg.value EVM fees and spread are captured. */}
               {(() => {
                 const dust = computeDustWarning({
-                  inAmount: parseFloat(sendAmount) || 0,
+                  inAmount: parseFloat(quotedSendAmount) || 0,
                   outAmount: parseFloat(quote.expectedOutput || '0') || 0,
                   fromPriceUsd,
                   toPriceUsd: toPriceIsDerived ? 0 : toPriceUsd,
@@ -4581,7 +4592,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                             <Text position="absolute" left="8px" top="50%" transform="translateY(-50%)" fontSize="xs" fontWeight="600" color="kk.textSecondary" pointerEvents="none" zIndex={1}>$</Text>
                           )}
                           <Input
-                            value={isMax ? (sendAmount ? formatBalance(sendAmount) : 'MAX') : (inputMode === 'crypto' ? amount : fiatAmount)}
+                            value={isMax ? (quotedSendAmount ? formatBalance(quotedSendAmount) : 'MAX') : (inputMode === 'crypto' ? amount : fiatAmount)}
                             onChange={(e) => { if (isMax) { setIsMax(false); setMaxReserveMode('safe') } inputMode === 'crypto' ? handleCryptoChange(e.target.value) : handleFiatChange(e.target.value) }}
                             placeholder={inputMode === 'fiat' ? '0.00' : t("amountPlaceholder")}
                             bg="rgba(0,0,0,0.4)" border="1px solid"
@@ -5306,7 +5317,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                       </Text>
                     )}
                     <ReviewRow label={t("rate")}>
-                      1 {fromAsset.symbol} = {formatBalance((parseFloat(quote.expectedOutput) / parseFloat(sendAmount || '1')).toString())} {toAsset.symbol}
+                      1 {fromAsset.symbol} = {formatBalance((parseFloat(quote.expectedOutput) / parseFloat(quotedSendAmount || '1')).toString())} {toAsset.symbol}
                     </ReviewRow>
                     <ReviewRow label={t("expectedAfterFees", "Expected")}>
                       {formatBalance(quote.expectedOutput)} {toAsset.symbol}

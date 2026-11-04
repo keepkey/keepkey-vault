@@ -1991,9 +1991,10 @@ async function buildEvmSwapTx(
     : fromChain.defaultPath
 
   // Use expiry from quote if available, otherwise 1 hour from now
-  const expiry = params.expiry && params.expiry > Math.floor(Date.now() / 1000)
-    ? params.expiry
-    : Math.floor(Date.now() / 1000) + 3600
+  if (params.expiry != null && (!Number.isSafeInteger(params.expiry) || params.expiry <= Math.floor(Date.now() / 1000))) {
+    throw new Error('Swap quote has expired or has an invalid deadline. Get a new quote.')
+  }
+  const expiry = params.expiry ?? Math.floor(Date.now() / 1000) + 3600
   const chainId = parseInt(fromChain.chainId || '1', 10)
   const rpcUrl = getEvmRpcSource(fromChain)
 

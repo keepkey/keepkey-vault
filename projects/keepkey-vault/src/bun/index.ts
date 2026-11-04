@@ -21,6 +21,8 @@ import * as fs from "fs"
 import * as os from "os"
 import * as path from "path"
 import { createHash, randomUUID } from "crypto"
+import { createSwapQuoteLeases } from './swap-quote-lease'
+import { assessSwapRisk } from '../shared/swap-risk'
 
 /**
  * hdwallet returns signature/pubkey fields as `Uint8Array | string`
@@ -1948,6 +1950,19 @@ async function deviceSwapAssets() {
 	})
 }
 
+async function resolveDeviceSwapAsset(key: string) {
+	const { resolveSwapAsset } = await import('./swap-asset-resolver')
+	return resolveSwapAsset(key, { assets: await deviceSwapAssets(), chains: getAllChains(),
+		firmwareVersion: engine.getDeviceState().firmwareVersion,
+		tokenDecimals: async (networkId, contractAddress) => {
+			const pioneer = await getPioneer()
+			const response = await pioneer.GetTokenDecimals({ networkId, contractAddress })
+			const raw = response?.data?.decimals ?? response?.data
+			return typeof raw === 'number' ? raw : undefined
+		},
+	})
+}
+
 // Callbacks bridge REST → RPC UI
 const restCallbacks: RestApiCallbacks = {
 	onApiLog: (entry: ApiLogEntry) => {
@@ -2018,6 +2033,14 @@ const restCallbacks: RestApiCallbacks = {
 	emuSigningOp: (fn, details) => emuSigningOp(fn, details),
 	getSwapUiState: () => getSwapUiState(),
 	getDeviceSwapAssets: () => deviceSwapAssets(),
+	resolveSwapAsset: resolveDeviceSwapAsset,
+	validateSwapExecutionHeadless: (params) => {
+		requireOnline('swap execution')
+		if (!engine.wallet) throw new Error('No device connected')
+		const lease = swapQuoteLeases.claim(params, activitySessionEpoch)
+		lease.finish(false)
+		return lease.params
+	},
 	sendSwapCmd: (cmd) => {
 		try { rpc.send['swap-cmd'](cmd) } catch { /* webview not ready */ }
 	},
@@ -2072,10 +2095,10 @@ async function applyRestApiState(when: 'startup' | 'settings') {
 
 // REST API started in deferredInit() after DB is ready
 
-// ── Swap quote cache (last 10 quotes for tracker data) ───────────────
+// ── Wallet-session quote authorization and tracker data ──────────────
 import type { SwapQuote, SwapQuoteParams, ExecuteSwapParams, SwapResult, SwapSubStage } from '../shared/types'
 import { isThorchainBankToken, thorchainBankTokenFirmwareOK, THORCHAIN_BANK_TOKEN_MIN_FW } from '../shared/swap-support-matrix'
-const swapQuoteCache = new Map<string, SwapQuote>()
+const swapQuoteLeases = createSwapQuoteLeases()
 
 // ── Emulator confirm helper ──────────────────────────────────────────
 // Setup-op confirm (wipe / loadDevice / applySettings): the firmware shows
@@ -3442,6 +3465,15 @@ function schedulePostZcashTxRescans(): void {
 // The device still gates every signature in both paths.
 async function headlessSwapQuote(params: SwapQuoteParams): Promise<SwapQuote> {
 	requireOnline('swap quote')
+	const sessionEpoch = activitySessionEpoch
+	const wallet = engine.wallet
+	if (!wallet) throw new Error('No device connected')
+	params = { ...params, feeLevel: params.feeLevel ?? 5 }
+	const [fromAsset, toAsset] = await Promise.all([resolveDeviceSwapAsset(params.fromCaip), resolveDeviceSwapAsset(params.toCaip)])
+	if (!fromAsset?.caip || !toAsset?.caip) throw new Error('Unknown or unsupported swap asset')
+	if (params.amount.length > 200 || !/^\d+(?:\.\d+)?$/.test(params.amount) || !Number.isFinite(Number(params.amount)) || Number(params.amount) <= 0
+		|| (!params.isMax && (params.amount.split('.')[1] || '').replace(/0+$/, '').length > fromAsset.decimals)) throw new Error('Invalid source amount or token precision')
+	params = { ...params, fromCaip: fromAsset.caip, toCaip: toAsset.caip }
 	const { getSwapQuote } = await import('./swap')
 
 	// Firmware gate (see buildTx): selling a THORChain/Maya bank token (TCY,
@@ -3508,7 +3540,14 @@ async function headlessSwapQuote(params: SwapQuoteParams): Promise<SwapQuote> {
 
 	// Device context comes from the engine, never from GUI/REST caller claims.
 	const quoteDevice = engine.getDeviceState()
-	let quote = await getSwapQuote(params, quoteDevice)
+	let quoteParams = params
+	if (params.isMax && fromAsset.chainId === 'ripple' && !fromAsset.contractAddress) {
+		const { getXrpMaxAmount } = await import('./txbuilder/xrp')
+		const amount = await getXrpMaxAmount(await getPioneer(), params.fromAddress)
+		quoteParams = { ...params, amount, isMax: false }
+	}
+	let quote = await getSwapQuote(quoteParams, quoteDevice)
+	if (quoteParams !== params) quote = { ...quote, netFromAmount: quoteParams.amount }
 
 	// NEAR Intents sendMax fix for all bip122 chains: the first quote commits
 	// NEAR Intents to receiving `params.amount` (full balance), but the UTXO tx
@@ -3516,6 +3555,7 @@ async function headlessSwapQuote(params: SwapQuoteParams): Promise<SwapQuote> {
 	// shortfall. Fix: re-quote with the actual net delivery amount.
 	if (
 		quote.swapper === 'NEAR Intents'
+		&& params.isMax
 		&& params.fromCaip.startsWith('bip122:')
 		&& engine.wallet
 	) {
@@ -3570,33 +3610,36 @@ async function headlessSwapQuote(params: SwapQuoteParams): Promise<SwapQuote> {
 						? { allXpubs: estXpubs }
 						: { xpub: estXpub, accountPath: estAccountPath }),
 				})
-				if (est && est.feeSat > 0 && est.netSat > 0 && (est.netSat / 10 ** fromChain.decimals) < Number(params.amount)) {
+				if (!est || est.feeSat <= 0 || est.netSat <= 0) throw new Error('Cannot verify the MAX deposit amount')
+				if ((est.netSat / 10 ** fromChain.decimals) < Number(params.amount)) {
 					const netAmount = (est.netSat / 1e8).toFixed(8)
 					console.log(`[swap] NEAR Intents sendMax: re-quoting ${fromChain.symbol} with net ${netAmount} (fee=${est.feeSat} sat)`)
 					quote = { ...await getSwapQuote({ ...params, amount: netAmount, isMax: false }, quoteDevice), netFromAmount: netAmount }
 				}
-			}
+			} else throw new Error('Cannot estimate MAX without source account public keys')
 		} catch (e: any) {
-			console.warn(`[swap] NEAR Intents fee estimation failed, using original quote: ${e.message}`)
+			throw new Error(`Cannot safely quote NEAR Intents MAX: ${e.message}`)
 		}
 	}
 
-	// Cache quote so executeSwap can pass real data to the tracker
-	const cacheKey = `${params.fromCaip}-${params.toCaip}-${params.amount}-${params.slippageBps || 300}-${params.fromAddress}-${params.toAddress}`
-	swapQuoteCache.delete(cacheKey) // delete+set for LRU ordering
-	swapQuoteCache.set(cacheKey, quote)
-	// Keep cache small (last 10 quotes)
-	if (swapQuoteCache.size > 10) {
-		const oldest = swapQuoteCache.keys().next().value
-		if (oldest) swapQuoteCache.delete(oldest)
-	}
-	return quote
+	const { marketPriceUsd } = await import('../shared/market-price')
+	const pioneer = await getPioneer()
+	const prices = await Promise.allSettled([params.fromCaip, params.toCaip].map(caip =>
+		withTimeout(pioneer.GetMarketInfo([caip]), PIONEER_TIMEOUT_MS, 'GetMarketInfo(swap risk)')))
+	const price = (index: number) => prices[index].status === 'fulfilled' ? marketPriceUsd((prices[index] as PromiseFulfilledResult<any>).value) : 0
+	const risk = assessSwapRisk({ inputAmount: Number(quote.netFromAmount ?? params.amount), expectedAmount: Number(quote.expectedOutput),
+		minimumAmount: Number(quote.minimumOutput), fromPriceUsd: price(0), toPriceUsd: price(1),
+		sameAssetUnits: fromAsset.chainFamily === 'evm' && toAsset.chainFamily === 'evm'
+			&& params.fromCaip.endsWith('/slip44:60') && params.toCaip.endsWith('/slip44:60') })
+	if (sessionEpoch !== activitySessionEpoch || engine.wallet !== wallet) throw new Error('Wallet or API session changed during quote. Try again.')
+	return swapQuoteLeases.issue(params, quote, fromAsset, toAsset, sessionEpoch, risk)
 }
 
 async function headlessExecuteSwap(params: ExecuteSwapParams, pushSubStage: (stage: SwapSubStage) => void): Promise<SwapResult> {
 	const sessionEpoch = activitySessionEpoch // the wallet session this swap belongs to
 	requireOnline('swap execution')
 	if (!engine.wallet) throw new Error('No device connected')
+	const wallet = engine.wallet
 
 	// Firmware gate ENFORCED at execute time, not just quote time: /api/v2/swap/
 	// execute (rest-swap.ts) calls this directly, so a stale or crafted execute
@@ -3632,35 +3675,15 @@ async function headlessExecuteSwap(params: ExecuteSwapParams, pushSubStage: (sta
 			}
 		}, { getDeviceId: () => getWalletDbScope()?.deviceId, getWalletId: () => getWalletDbScope()?.walletId })
 	}
-	// Look up cached quote BEFORE executing so we can use netFromAmount to
-	// override the send amount for NEAR Intents bip122 sendMax swaps.
-	let cachedQuote: SwapQuote | undefined
-	for (const [key, val] of swapQuoteCache) {
-		// Key format: fromCaip-toCaip-amount-slippageBps-fromAddress-toAddress
-		const keyPrefix = `${params.fromCaip}-${params.toCaip}-${params.amount}-`
-		if (key.startsWith(keyPrefix) && val.inboundAddress === params.inboundAddress) {
-			cachedQuote = val
-			break
-		}
-	}
-	if (!cachedQuote) console.warn('[index] No cached quote for swap tracker — using fallback data')
-
-	// For NEAR Intents bip122 sendMax: the re-quote stored netFromAmount
-	// (balance - estimated fee). Use it with isMax=false so buildTx's
-	// coinSelectSplit outputs exactly that amount instead of (balance - actualFee),
-	// which may diverge from estimatedFee and cause INCOMPLETE_DEPOSIT.
-	let execParams = params
-	if (
-		cachedQuote?.netFromAmount
-		&& params.fromCaip.startsWith('bip122:')
-		&& (params.swapper === 'NEAR Intents' || params.integration === 'nearIntents')
-	) {
-		execParams = { ...params, amount: cachedQuote.netFromAmount, isMax: false }
-		console.log(`[swap] NEAR Intents sendMax: net amount ${cachedQuote.netFromAmount} (was ${params.amount}), isMax→false`)
-	}
+	if (sessionEpoch !== activitySessionEpoch || engine.wallet !== wallet) throw new Error('Wallet or API session changed. Get a new quote.')
+	const lease = swapQuoteLeases.claim(params, sessionEpoch)
+	const cachedQuote = lease.quote
+	const execParams = lease.params
+	const beforeSign = () => lease.beforeSign(engine.wallet === wallet ? activitySessionEpoch : -1)
+	let executionSucceeded = false
 
 	const result = await executeSwap(execParams, {
-		wallet: engine.wallet,
+		wallet,
 		getAllChains,
 		getEvmRpcSource,
 		getBtcXpub: () => {
@@ -3674,9 +3697,10 @@ async function headlessExecuteSwap(params: ExecuteSwapParams, pushSubStage: (sta
 			if (btcAccounts.isInitialized) return btcAccounts.getSpendableXpubs()
 			return []
 		},
-		wrapSign: engine.isEmulator
-			? (fn, details) => emuSigningOp(fn, details)
-			: (fn) => fn(),
+		wrapSign: (fn, details) => {
+			beforeSign()
+			return engine.isEmulator ? emuSigningOp(fn, details) : fn()
+		},
 		pushSubStage,
 		isAdvancedModeEnabled: getAdvancedModeEnabled,
 		getFirmwareVersion: () => engine.getDeviceState().firmwareVersion,
@@ -3688,16 +3712,16 @@ async function headlessExecuteSwap(params: ExecuteSwapParams, pushSubStage: (sta
 			deviceId: () => engine.getDeviceState().deviceId,
 			evmEndpoint: getEvmSimulationEndpoint,
 			solanaEndpoint: () => getSetting('solana_rpc_endpoint') || 'https://api.mainnet-beta.solana.com',
-		}, input, sign),
+		}, input, () => { beforeSign(); return sign() }),
 		onClearSignEvent: (event) => recordClearSignEvent({
 			kind: 'transaction',
 			source: 'vault-rpc',
 			...event,
 		}),
-	}).catch((error: any) => {
+	}).then(result => { executionSucceeded = true; return result }).catch((error: any) => {
 		console.error(`[swap] execute failed (${params.fromChainId}): ${deviceErrorMessage(error)}`)
 		throw error
-	})
+	}).finally(() => lease.finish(executionSucceeded))
 	const scope = getWalletDbScope()
 	// Session ended while signing/broadcasting (unplug, passphrase switch): the
 	// swap belongs to the wallet that was open — never track it under this one.
