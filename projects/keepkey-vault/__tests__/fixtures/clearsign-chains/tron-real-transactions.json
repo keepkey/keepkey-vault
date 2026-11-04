@@ -1,0 +1,219 @@
+{
+ "_source": "TRON mainnet transactions fetched with POST https://api.trongrid.io/wallet/gettransactionbyid (visible=true) on 2026-10-29. raw_data_hex is the exact protobuf the device signs; raw_data is TronGrid's own JSON view of it, kept for cross-checking. Explorer: https://tronscan.org/#/transaction/<txID>.",
+ "transactions": {
+  "approve-usdt-unlimited-unknown-spender": {
+   "txID": "50cd537523e03d60aeab63ddd65afa56a64c59f298d21045285e1fb7f6257a48",
+   "raw_data_hex": "0a02dd9f22086e9ccab9984b83f140a0968fd198345aae01081f12a9010a31747970652e676f6f676c65617069732e636f6d2f70726f746f636f6c2e54726967676572536d617274436f6e747261637412740a1541c55f49a9637e999b96f754c05e57a94681ac7cf3121541a614f803b6fd780986a42c78ec9c7f77e6ded13c2244095ea7b3000000000000000000000000bf83f07d73fe4cebb189c866cdbc02b02d7b494cffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff70b6eaafcf9834900180a3c347",
+   "raw_data": {
+    "ref_block_bytes": "dd9f",
+    "ref_block_hash": "6e9ccab9984b83f1",
+    "expiration": 1793318964000,
+    "contract": [
+     {
+      "parameter": {
+       "value": {
+        "owner_address": "TTxpGZK2b1yUxdPfBLHrgfMJ31PDA8pPrC",
+        "contract_address": "TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t",
+        "data": "095ea7b3000000000000000000000000bf83f07d73fe4cebb189c866cdbc02b02d7b494cffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+       },
+       "type_url": "type.googleapis.com/protocol.TriggerSmartContract"
+      },
+      "type": "TriggerSmartContract"
+     }
+    ],
+    "timestamp": 1793315304758,
+    "fee_limit": 150000000
+   }
+  },
+  "approve-usdt-unlimited-sunswap-permit2": {
+   "txID": "54a900f782b0a2b8068c751519a9ed471f07a9d99ba3e469989d9f5e7a67cd9e",
+   "raw_data_hex": "0a02dd632208de8fa0ad7012e06d4080bba8cf98345aae01081f12a9010a31747970652e676f6f676c65617069732e636f6d2f70726f746f636f6c2e54726967676572536d617274436f6e747261637412740a1541c27e07d225f98edef00156e4794093bb6d73bb84121541a614f803b6fd780986a42c78ec9c7f77e6ded13c2244095ea7b3000000000000000000000000be365314f2e77fd1257d60c346bb32dbda369403ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff70c4fda4cf9834900180a3c347",
+   "raw_data": {
+    "ref_block_bytes": "dd63",
+    "ref_block_hash": "de8fa0ad7012e06d",
+    "expiration": 1793315184000,
+    "contract": [
+     {
+      "parameter": {
+       "value": {
+        "owner_address": "TThb52i2yJQarB1tMCFZvf8CmrQdfua33Z",
+        "contract_address": "TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t",
+        "data": "095ea7b3000000000000000000000000be365314f2e77fd1257d60c346bb32dbda369403ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+       },
+       "type_url": "type.googleapis.com/protocol.TriggerSmartContract"
+      },
+      "type": "TriggerSmartContract"
+     }
+    ],
+    "timestamp": 1793315126980,
+    "fee_limit": 150000000
+   }
+  },
+  "approve-usdt-bounded-unknown-spender": {
+   "txID": "f454a5c971fc669cc6e8790db1ab7390cec8230330cc23be22b572d1e3d9896c",
+   "raw_data_hex": "0a02ddca220861d27fd256bd85f540b8d0c9e098345aae01081f12a9010a31747970652e676f6f676c65617069732e636f6d2f70726f746f636f6c2e54726967676572536d617274436f6e747261637412740a154136dc816734de2f5f465cc6fff4e58798d024dfa0121541a614f803b6fd780986a42c78ec9c7f77e6ded13c2244095ea7b300000000000000000000004158b8a2f4c954a0c54c8e392feee612ec2dbe15850000000000000000000000000000000000000000000000000000000309d7328070b8aeb4cf98349001eca5e104",
+   "raw_data": {
+    "ref_block_bytes": "ddca",
+    "ref_block_hash": "61d27fd256bd85f5",
+    "expiration": 1793351379000,
+    "contract": [
+     {
+      "parameter": {
+       "value": {
+        "owner_address": "TEyHeQaH92QCx3QTkeR6hMSpKKSANwK8Jq",
+        "contract_address": "TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t",
+        "data": "095ea7b300000000000000000000004158b8a2f4c954a0c54c8e392feee612ec2dbe15850000000000000000000000000000000000000000000000000000000309d73280"
+       },
+       "type_url": "type.googleapis.com/protocol.TriggerSmartContract"
+      },
+      "type": "TriggerSmartContract"
+     }
+    ],
+    "timestamp": 1793315379000,
+    "fee_limit": 9982700
+   }
+  },
+  "sunswap-smart-router-swap": {
+   "txID": "9e92447642da49ba3612cbff2daa90da2ccdf9b4269871e7d1e98467c83f147f",
+   "raw_data_hex": "0a02dddc22089eda44b9da575b2840f9dcbecf98345af005081f12eb050a31747970652e676f6f676c65617069732e636f6d2f70726f746f636f6c2e54726967676572536d617274436f6e747261637412b5050a1541feee0400969ba3be9522e1870496a2b5aa351ff912154158baea0b354f7b333b3b1563c849e979ae4e2002228405cef952290000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000000016000000000000000000000000000000000000000000000000000000000000001e00000000000000000000000000000000000000000000000000000000000000220000000000000000000000000000000000000000025f45ab8752088000000000000000000000000000000000000000000000000000000000000000004bf6745b5000000000000000000000000feee0400969ba3be9522e1870496a2b5aa351ff9000000000000000000000000000000000000000000000000000000006ae3d6880000000000000000000000000000000000000000000000000000000000000002000000000000000000000000ca0303e8b9a738121777116dcea419fe524f271a000000000000000000000000a614f803b6fd780986a42c78ec9c7f77e6ded13c000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000002763300000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000001f40000000000000000000000000000000000000000000000000000000000000000709988bbcf983490018088debe01",
+   "raw_data": {
+    "ref_block_bytes": "dddc",
+    "ref_block_hash": "9eda44b9da575b28",
+    "expiration": 1793315548793,
+    "contract": [
+     {
+      "parameter": {
+       "value": {
+        "owner_address": "TZD9mQABhN985fXwYGCf9zVF4kUhvEwALE",
+        "contract_address": "TJ4NNy8xZEqsowCBhLvZ45LCqPdGjkET5j",
+        "data": "cef952290000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000000016000000000000000000000000000000000000000000000000000000000000001e00000000000000000000000000000000000000000000000000000000000000220000000000000000000000000000000000000000025f45ab8752088000000000000000000000000000000000000000000000000000000000000000004bf6745b5000000000000000000000000feee0400969ba3be9522e1870496a2b5aa351ff9000000000000000000000000000000000000000000000000000000006ae3d6880000000000000000000000000000000000000000000000000000000000000002000000000000000000000000ca0303e8b9a738121777116dcea419fe524f271a000000000000000000000000a614f803b6fd780986a42c78ec9c7f77e6ded13c000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000002763300000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000001f40000000000000000000000000000000000000000000000000000000000000000"
+       },
+       "type_url": "type.googleapis.com/protocol.TriggerSmartContract"
+      },
+      "type": "TriggerSmartContract"
+     }
+    ],
+    "timestamp": 1793315488793,
+    "fee_limit": 400000000
+   }
+  },
+  "freeze-balance-v2": {
+   "txID": "6152bb87ec620e4877b03b5101d72d0c5f8b4625578bef738c37d2f2e4268365",
+   "raw_data_hex": "0a02dd092208fb1e00ab16f4bd3940e0d794cf98345a5a083612560a34747970652e676f6f676c65617069732e636f6d2f70726f746f636f6c2e467265657a6542616c616e63655632436f6e7472616374121e0a15412f31ab22016ea91f20e751a44f79aa3f5eaba20e10d2c7a103180170808391cf9834",
+   "raw_data": {
+    "ref_block_bytes": "dd09",
+    "ref_block_hash": "fb1e00ab16f4bd39",
+    "expiration": 1793314860000,
+    "contract": [
+     {
+      "parameter": {
+       "value": {
+        "owner_address": "TEGkG6sYwVcu8Bf3Qnn1jke7NLAr4FEyna",
+        "frozen_balance": 6841298,
+        "resource": "ENERGY"
+       },
+       "type_url": "type.googleapis.com/protocol.FreezeBalanceV2Contract"
+      },
+      "type": "FreezeBalanceV2Contract"
+     }
+    ],
+    "timestamp": 1793314800000
+   }
+  },
+  "unfreeze-balance-v2": {
+   "txID": "348d9ab871c30a4ff5a6c36fb199300491399a2803f4dc8ef41edf04bc56c421",
+   "raw_data_hex": "0a02dce922089da1477d26a0fba040e0e98ecf98345a5c083712580a36747970652e676f6f676c65617069732e636f6d2f70726f746f636f6c2e556e667265657a6542616c616e63655632436f6e7472616374121e0a15418cfd3cb30f19d90b0be6c635edf73316d3a8b37b1080ade20418017080958bcf9834",
+   "raw_data": {
+    "ref_block_bytes": "dce9",
+    "ref_block_hash": "9da1477d26a0fba0",
+    "expiration": 1793314764000,
+    "contract": [
+     {
+      "parameter": {
+       "value": {
+        "owner_address": "TNpgy8xG3VrsCtLrNGNS16pKsRB2Bjumtc",
+        "unfreeze_balance": 10000000,
+        "resource": "ENERGY"
+       },
+       "type_url": "type.googleapis.com/protocol.UnfreezeBalanceV2Contract"
+      },
+      "type": "UnfreezeBalanceV2Contract"
+     }
+    ],
+    "timestamp": 1793314704000
+   }
+  },
+  "vote-witness": {
+   "txID": "031f14c4f111e6d2e69ddebe87d02b7b7760aeb08e01c297a723f9626fdb5110",
+   "raw_data_hex": "0a02dcf62208e4b2d3030cda4f6d40a8c094cf98345a6c080412680a30747970652e676f6f676c65617069732e636f6d2f70726f746f636f6c2e566f74655769746e657373436f6e747261637412340a15416c899772226f802e6e46425876cff018ceec576f121b0a154162398d516b555ac64af24416e05c199c0182304810e7b32270da8591cf9834",
+   "raw_data": {
+    "ref_block_bytes": "dcf6",
+    "ref_block_hash": "e4b2d3030cda4f6d",
+    "expiration": 1793314857000,
+    "contract": [
+     {
+      "parameter": {
+       "value": {
+        "owner_address": "TKs6ooo823NLGHuw8yq7oMkMWhay4oH19J",
+        "votes": [
+         {
+          "vote_address": "TJvaAeFb8Lykt9RQcVyyTFN2iDvGMuyD4M",
+          "vote_count": 563687
+         }
+        ]
+       },
+       "type_url": "type.googleapis.com/protocol.VoteWitnessContract"
+      },
+      "type": "VoteWitnessContract"
+     }
+    ],
+    "timestamp": 1793314800346
+   }
+  },
+  "withdraw-expire-unfreeze": {
+   "txID": "7c36b6001a3d1f871d57561ca83ea97d63ac966e9785dc3754bf36be9ae91719",
+   "raw_data_hex": "0a02dd38220872f0928d265b8aba40c8f2aee098345a5a083812560a3b747970652e676f6f676c65617069732e636f6d2f70726f746f636f6c2e5769746864726177457870697265556e667265657a65436f6e747261637412170a154142751eca05c8c3a5e1cfe8f09579fd9c4472105970c8d099cf9834",
+   "raw_data": {
+    "ref_block_bytes": "dd38",
+    "ref_block_hash": "72f0928d265b8aba",
+    "expiration": 1793350941000,
+    "contract": [
+     {
+      "parameter": {
+       "value": {
+        "owner_address": "TG2buNvfTbRJYbmjRs32yqNGeM2k5HYmEw"
+       },
+       "type_url": "type.googleapis.com/protocol.WithdrawExpireUnfreezeContract"
+      },
+      "type": "WithdrawExpireUnfreezeContract"
+     }
+    ],
+    "timestamp": 1793314941000
+   }
+  },
+  "delegate-resource": {
+   "txID": "1698a895b29d2df281e17374dbf8929074e100c8b24f1c545c75f1afd64c807f",
+   "raw_data_hex": "0a02ddd32208297ee6156f240bd04080fcbccf98345a730839126f0a35747970652e676f6f676c65617069732e636f6d2f70726f746f636f6c2e44656c65676174655265736f75726365436f6e747261637412360a1541652cb78dd905b98011b5aa7d822c6e4240c8c9c71001188098fba71c221541270cb27b824270a7667282e6bfeab32596a4bb3670a0beb9cf9834",
+   "raw_data": {
+    "ref_block_bytes": "ddd3",
+    "ref_block_hash": "297ee6156f240bd0",
+    "expiration": 1793315520000,
+    "contract": [
+     {
+      "parameter": {
+       "value": {
+        "owner_address": "TKCApRfYqPdWNWKfCknfprUrZV9gji7CER",
+        "resource": "ENERGY",
+        "balance": 7600000000,
+        "receiver_address": "TDXgZksAAuxBkNVJSVCU78x3oDse9DjBmN"
+       },
+       "type_url": "type.googleapis.com/protocol.DelegateResourceContract"
+      },
+      "type": "DelegateResourceContract"
+     }
+    ],
+    "timestamp": 1793315462944
+   }
+  }
+ }
+}

@@ -1,0 +1,26 @@
+{
+  "checkedAt": "2026-11-03T21:39:09.652Z",
+  "mode": "read_only_replay_of_saved_successful_broadcast",
+  "actualGateway": true,
+  "actualPostTxScheduler": true,
+  "rendererAndSigningUsed": false,
+  "signed": false,
+  "broadcast": false,
+  "walletIdentifiersOmitted": true,
+  "observations": [
+    {
+      "httpStatus": 200,
+      "chainId": "litecoin",
+      "forceRefresh": true,
+      "accountResponses": 4,
+      "scopedResultAccepted": true
+    },
+    {
+      "httpStatus": 200,
+      "chainId": "litecoin",
+      "forceRefresh": true,
+      "accountResponses": 4,
+      "scopedResultAccepted": true
+    }
+  ]
+}

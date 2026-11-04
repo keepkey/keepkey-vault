@@ -16,6 +16,7 @@ import { parseSolanaTx, solanaMessageSlice } from '../src/bun/solana-tx'
 import { assessSigningRisk } from '../src/shared/clearsign-risk'
 import type { SigningRequestInfo } from '../src/shared/types'
 import joinFixture from './fixtures/solana/soltoshidice-blackjack-join.json'
+import siweOdos from './fixtures/safe/messages/siwe-odos.json'
 import swap from './fixtures/uniswap/base-ur-usdc-to-eth-swap.json'
 import { applyEvmTxPreview, recognizedTypedDataSpender } from '../src/bun/evm-signing-preview'
 import { decodeEIP712 } from '../src/bun/eip712-decoder'
@@ -180,7 +181,7 @@ describe('assessSigningRisk — rules', () => {
   })
 
   test('chains without rules get no bar yet', () => {
-    expect(assessSigningRisk({ method: '/cosmos/sign-amino' } as SigningRequestInfo)).toBeNull()
+    expect(assessSigningRisk({ method: '/ton/sign-transaction' } as SigningRequestInfo)).toBeNull()
   })
 })
 
@@ -522,7 +523,12 @@ describe('EVM verdict regressions', () => {
       const other = await preview(1, ROUTER, deposit(`=:ETH.ETH:${STRANGER}:30000000`), fw)
       expect(assessSigningRisk(other)!.tier).toBe('red')
       expect(texts(other)).toContain(`The swap pays out to ${STRANGER}, which is NOT the account signing this (${SIGNER}).`)
-      expect(assessSigningRisk(await preview(1, ROUTER, deposit(`=:ETH.ETH:${SIGNER}:30000000`), fw))!.tier).toBe('green')
+      // To the signer: green once this computer matched the vault to a current
+      // inbound address, yellow while it is unchecked (thorchain-deposit-risk.test.ts).
+      const own = await preview(1, ROUTER, deposit(`=:ETH.ETH:${SIGNER}:30000000`), fw)
+      expect(assessSigningRisk(own)!.tier).toBe('yellow')
+      own.thorVault = { status: 'current', protocol: 'THORChain', inboundChain: 'ETH', sources: 2 }
+      expect(assessSigningRisk(own)!.tier).toBe('green')
     }
   })
 
@@ -577,7 +583,7 @@ describe('message verdicts', () => {
   })!
 
   // messages:0
-  test('a SafeTx carrying a call is red: the device shows the call only as hex', () => {
+  test('a SafeTx carrying a call this computer cannot read is red; a known token transfer is not', () => {
     const safeTx = (msg: any) => ({
       primaryType: 'SafeTx',
       domain: { chainId: 1, verifyingContract: '0x1234567890123456789012345678901234567890' },
@@ -593,14 +599,44 @@ describe('message verdicts', () => {
       message: { value: '0', safeTxGas: 0, baseGas: 0, gasPrice: 0, gasToken: '0x' + '0'.repeat(40), refundReceiver: '0x' + '0'.repeat(40), nonce: 3, ...msg },
     })
     const transfer = '0xa9059cbb' + EVIL.slice(2).padStart(64, '0') + (10n ** 12n).toString(16).padStart(64, '0')
+    // Decoded here (advice); the device still shows the data as hex.
     const call = typed(safeTx({ to: USDC, data: transfer, operation: 0 }))
-    expect(call.tier).toBe('red')
-    expect(text(call)).toContain('Your KeepKey shows that data only as raw hex')
+    expect(call.tier).toBe('yellow')
+    expect(text(call)).toContain(`Sends 1,000,000 USDC to ${EVIL}.`)
+    const unread = typed(safeTx({ to: EVIL, data: '0x12345678', operation: 0 }))
+    expect(unread.tier).toBe('red')
+    expect(text(unread)).toContain('Your KeepKey shows that data only as raw hex')
     const delegatecall = typed(safeTx({ to: EVIL, data: '0x12345678', operation: 1 }))
     expect(delegatecall.tier).toBe('red')
     expect(text(delegatecall)).toContain('(delegatecall)')
     // A plain ETH send from the Safe carries no data: the device shows every field.
     expect(typed(safeTx({ to: EVIL, value: '1000000000000000000', data: '0x', operation: 0 })).tier).toBe('green')
+
+    // A refund set on that same send pays someone out of the Safe on execution.
+    const refund = typed(safeTx({ to: EVIL, value: '1000000000000000000', data: '0x', operation: 0, gasPrice: '1000000000', refundReceiver: EVIL }))
+    expect(refund.tier).toBe('red')
+    expect(text(refund)).toContain('Pays a gas refund out of your Safe when it is executed: up to 0 ETH (gas price 1000000000 × (safeTxGas 0 + baseGas 0)')
+    expect(text(refund)).toContain(`), to ${EVIL}.`)
+    expect(text(typed(safeTx({ to: EVIL, data: '0x', operation: 0, gasToken: USDC })))).toContain('receiver the account that executes it (tx.origin)) with a gas price of 0, so executing it pays no refund')
+  })
+
+  test('a SafeMessage approval for the whole Safe is red: the device shows only its hash', () => {
+    // A real Safe{Wallet} SIWE request (fixtures/safe/messages/siwe-odos.json):
+    // SafeMessage.message is hashMessage(text), never the text itself.
+    const safe = siweOdos.typedData.domain.verifyingContract
+    const request = (safeMessageOriginal?: SigningRequestInfo['safeMessageOriginal']) => assessSigningRisk({
+      id: 't', method: '/eth/sign-typed-data', appName: 'dapp', chain: 'eth', from: USER, chainId: 1, firmwareVersion: '7.16.0',
+      typedDataDecoded: decodeEIP712(siweOdos.typedData), safeMessageOriginal,
+    })!
+    const msg = request()
+    expect(msg.tier).toBe('red')
+    expect(text(msg)).toContain(`Approves a message for your whole Safe (${safe})`)
+    // With the original the gate verified (safe-message-original.test.ts), a
+    // readable sign-in is a normal Safe{Wallet} flow: named, quoted, not red.
+    const signIn = request({ status: 'text', text: siweOdos.record.message })
+    expect(signIn.tier).not.toBe('red')
+    expect(text(signIn)).toContain('signs this text as its own')
+    expect(text(signIn)).toContain('app.odos.xyz wants you to sign in')
   })
 
   // messages:1
@@ -660,6 +696,7 @@ describe('message verdicts', () => {
     let seen: SigningRequestInfo | undefined
     const wc = new WalletConnectManager({
       getEvmAddressInfo: () => ({ address: USER }),
+      recordClearSignObservation: () => undefined,
       requestSigningApproval: async (info: SigningRequestInfo) => { seen = info; return false },
     } as any)
     await expect((wc as any).signMessage(hex(siwe), [], 'Uniswap', 1)).rejects.toThrow('User rejected signing')

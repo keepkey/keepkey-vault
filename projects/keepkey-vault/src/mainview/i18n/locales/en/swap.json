@@ -8,6 +8,10 @@
 	"amountPlaceholder": "0.0",
 	"max": "MAX",
 	"available": "Available",
+	"zcashTransparentAvailable": "Available transparent ZEC",
+	"zcashTransparentOnlyTitle": "Swaps use transparent ZEC only.",
+	"zcashUnshieldBeforeSwap": "Shielded ZEC cannot be swapped directly. To use it, open Zcash → Privacy → Shield and use Unshield to send funds to your own transparent address, then return here once confirmed.",
+	"zcashZeroTransparentBalance": "0 ZEC here means no transparent ZEC is available to swap. Your shielded balance is separate; unshield the amount you want to swap first.",
 	"getQuote": "Get Quote",
 	"gettingQuote": "Getting quote...",
 	"noQuote": "No quote available",
@@ -213,5 +217,6 @@
 	"youReceived": "You received",
 	"exceedsSafeMax": "Leave ~{{reserve}} {{symbol}} for network fees — reduce the amount or tap MAX.",
 	"sent": "Sent",
-	"gas": "Gas"
+	"gas": "Gas",
+  "relayDepositReview": "Relay executes the swap after your deposit; destination terms are shown in this app."
 }

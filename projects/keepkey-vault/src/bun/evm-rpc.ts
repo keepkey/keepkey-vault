@@ -184,13 +184,12 @@ export async function estimateGas(
   tx: { to: string; from: string; data: string; value?: string },
   fallbackGas: bigint,
 ): Promise<bigint> {
-  // No gas-estimation endpoint in Pioneer's current API. Use the caller's
-  // explicit gas limit until one is available; never bypass its node pool.
-  if (isPioneerEvmSource(rpcUrl)) return fallbackGas
+  // Updated gateways expose estimation through EvmReadRpc. Older servers
+  // retain the caller's fallback when the method is unavailable.
   try {
     const result = await ethRpc(rpcUrl, 'eth_estimateGas', [tx])
     const estimated = BigInt(result || '0x0')
-    return estimated > 0n ? estimated * 120n / 100n : fallbackGas // 20% buffer
+    return estimated > 0n ? (estimated * 120n + 99n) / 100n : fallbackGas // 20% buffer
   } catch {
     return fallbackGas
   }

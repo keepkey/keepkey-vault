@@ -17,6 +17,7 @@ import { RngAuditPanel } from "./RngAuditPanel"
 import { DocsLink } from "./DocsLink"
 import { DOCS_LINKS, watch } from "../../shared/docs-links"
 import { BROWSER_AGENT_PROMPT, BROWSER_EXTENSION_URL, BROWSER_AGENT_DOCS_URL } from "../../shared/browser-agent-prompt"
+import { isActivePioneerServer } from "../../shared/pioneer-server"
 
 interface DevicePolicy {
 	policyName?: string
@@ -238,6 +239,10 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 
 	// Keep window-focus indicator live — bun pushes this whenever alwaysOnTop changes
 	useEffect(() => onRpcMessage('window-focus-changed', (state) => setWindowFocusState(state)), [])
+	useEffect(() => onRpcMessage('pioneer-server-changed', settings => {
+		setAppSettings(settings)
+		window.dispatchEvent(new Event('keepkey-settings-changed'))
+	}), [])
 
 	useEffect(() => { setLabel(deviceState.label || "") }, [deviceState.label])
 	useEffect(() => {
@@ -386,12 +391,14 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 	}, [])
 
 	const [togglingOffline, setTogglingOffline] = useState(false)
+	const [offlineError, setOfflineError] = useState<string | null>(null)
 	const toggleOffline = useCallback(async (enabled: boolean) => {
 		setTogglingOffline(true)
+		setOfflineError(null)
 		try {
-			const result = await rpcRequest<AppSettings>("setOfflineMode", { enabled }, 10000)
+			const result = await rpcRequest<AppSettings>("setOfflineMode", { enabled }, 20000)
 			setAppSettings(result)
-		} catch (e: any) { console.error("setOfflineMode:", e) }
+		} catch (e: any) { setOfflineError(e?.message || "Could not enable offline mode. Try again.") }
 		setTogglingOffline(false)
 	}, [])
 
@@ -708,7 +715,7 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 		setSwitchingServer(url)
 		setServerMsg({ text: "Verifying server...", ok: true })
 		try {
-			const result = await rpcRequest<AppSettings>("setActivePioneerServer", { url }, 15000)
+			const result = await rpcRequest<AppSettings>("setActivePioneerServer", { url }, 60000)
 			setAppSettings(result)
 			setServerMsg(null)
 		} catch (e: any) {
@@ -1776,6 +1783,7 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 									disabled={togglingOffline}
 								/>
 							</Flex>
+							{offlineError && <Text role="alert" fontSize="xs" color="kk.error" mt="2">{offlineError}</Text>}
 
 							<Box>
                                 <Flex justify="space-between" align="center" gap="3">
@@ -1867,12 +1875,16 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 								<Text fontSize="sm" color="kk.textSecondary" mt="0.5">
 									Manage which Pioneer API server the vault connects to.
 								</Text>
+								<Text fontSize="xs" color="kk.textSecondary" mt="3">Active server</Text>
+								<Text fontSize="sm" color="kk.textPrimary" fontFamily="mono" overflowWrap="anywhere">
+									{appSettings.pioneerApiBase || 'Loading…'}
+								</Text>
 							</Box>
 
 							{/* Server list */}
 							<VStack gap="2" align="stretch">
 								{(appSettings.pioneerServers || []).map(server => {
-									const isActive = server.url === appSettings.activePioneerServer
+									const isActive = isActivePioneerServer(appSettings.pioneerApiBase, server.url)
 									return (
 										<Flex
 											key={server.url}

@@ -121,7 +121,7 @@ console.log(`[audit-deps] Found ${deps.length} packages, ${totalFiles} files, ${
 // 1. deps.runtime.json
 const manifest = {
   generated: new Date().toISOString(),
-  source: 'build/_ext_modules',
+  source: relative(projectRoot, extModules),
   summary: {
     packages: deps.length,
     files: totalFiles,

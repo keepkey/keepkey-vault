@@ -22,7 +22,7 @@ const fp8 = (pub: string) => createHash('sha256').update(Uint8Array.from(Buffer.
 function startProvider(publicKeyHex: string, alias = 'Acme Labs') {
   const hits: string[] = []
   const server = Bun.serve({
-    port: 0,
+    port: 0, hostname: '127.0.0.1',
     async fetch(req) {
       const path = new URL(req.url).pathname
       hits.push(`${req.method} ${path}`)
@@ -158,7 +158,7 @@ describe('resolveProviderTxMetadata (shared by REST, RPC, swaps and WalletConnec
   test('a provider redirect is no description: nothing reaches another host', async () => {
     const other = startProvider(ACME); servers.push(other.server)
     const redirecting = (paths: string[]) => {
-      const server = Bun.serve({ port: 0, fetch(req) {
+      const server = Bun.serve({ port: 0, hostname: '127.0.0.1', fetch(req) {
         const path = new URL(req.url).pathname
         if (paths.includes(path)) return new Response(null, { status: 307, headers: { location: `${other.url}${path}` } })
         if (path === '/signer') return Response.json({ keyId: 2, alias: 'Acme Labs', publicKeyHex: ACME, fingerprint: fp8(ACME) })

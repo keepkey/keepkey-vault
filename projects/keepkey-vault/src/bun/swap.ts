@@ -18,9 +18,15 @@ import { resolveErc7730ForCall, signWithErc7730Fallback } from './erc7730-resolv
 import { trustRuntimeSigner, type RuntimeEvmSigner } from './evm-runtime-metadata'
 import { nameRuntimeProvider, resolveProviderTxMetadata } from './clearsign-providers'
 import { evmCallRequiresAdvancedMode } from './evm-signing-policy'
+import { selectSwapRoute, isRelaySolverDeposit } from './swap-route-selection'
+import { resolveSwapEvmSchema } from './swap-evm-review'
+import { assertPrebuiltSwapExecution } from './swap-preflight'
+import { bufferedSwapGasLimit } from '../shared/swap-gas'
 import { certifiedSolanaProofApplies, findCertifiedSolanaProof } from './solana-certified-registry'
 import { hasCompleteCertifiedSolanaEnvelope, supportsCertifiedClearSign } from './solana-certified-policy'
 import { getPioneer } from './pioneer'
+import { pioneerSupportsRelaySolverDeposit } from '../shared/swap-server-capabilities'
+import { isPlainSwapDeposit } from '../shared/swap-deposit-routing'
 import { encodeDepositWithExpiry, encodeApprove, parseUnits, toHex, readPioneerBalance } from './txbuilder/evm'
 import { getEvmGasPrice, getEvmFeeData, getEvmNonce, getEvmBalance, getErc20Allowance, getErc20Balance, getErc20Decimals, broadcastEvmTx, EvmSignerVerificationError, waitForTxReceipt, estimateGas, isPioneerEvmSource } from './evm-rpc'
 import * as txb from './txbuilder'
@@ -34,6 +40,7 @@ import {
   assertSwapMemoFitsSource,
   parseQuoteResponse,
   parseAssetsResponse,
+  parseSwapQuoteError,
   isNativeDepositCaip,
 } from './swap-parsing'
 
@@ -300,7 +307,9 @@ export async function getSwapAssets(): Promise<SwapAsset[]> {
 // ── Quote fetching via Pioneer ──────────────────────────────────────
 
 /** Fetch a swap quote from Pioneer (aggregated across DEXes) */
-export async function getSwapQuote(params: SwapQuoteParams): Promise<SwapQuote> {
+export async function getSwapQuote(params: SwapQuoteParams, device: {
+  firmwareVersion?: string; capabilities?: readonly number[]
+} = {}): Promise<SwapQuote> {
   if (!params.amount || parseFloat(params.amount) <= 0) {
     throw new Error('Amount must be greater than 0')
   }
@@ -346,6 +355,8 @@ export async function getSwapQuote(params: SwapQuoteParams): Promise<SwapQuote> 
       recipientAddress,
       senderAddress,
       slippage,
+      ...(sellCaip.startsWith('eip155:') && supportsCertifiedClearSign(device.firmwareVersion) && pioneerSupportsRelaySolverDeposit(pioneer)
+        ? { relayExecutionMode: 'solver-deposit' } : {}),
     })
   } catch (e: any) {
     // Pioneer-client (swagger-client) throws Error with message="Internal
@@ -353,16 +364,9 @@ export async function getSwapQuote(params: SwapQuoteParams): Promise<SwapQuote> 
     // than min swap amount (recommended_min_amount_in: …)") is in
     // e.response.body.message. Surface the inner message so the RPC layer +
     // frontend can render something useful instead of "Internal Server Error".
-    const inner = e?.response?.body?.message || e?.responseError?.message || e?.response?.text
-    if (inner && typeof inner === 'string') {
-      // The text body comes through as a JSON string on some swagger versions;
-      // try to unwrap once if it looks like JSON.
-      let unwrapped = inner
-      try {
-        const parsed = JSON.parse(inner)
-        if (parsed?.message) unwrapped = parsed.message
-      } catch { /* not JSON, use as-is */ }
-      const err = new Error(unwrapped)
+    const inner = parseSwapQuoteError(e)
+    if (inner) {
+      const err = new Error(inner)
       ;(err as any).cause = e
       throw err
     }
@@ -376,7 +380,34 @@ export async function getSwapQuote(params: SwapQuoteParams): Promise<SwapQuote> 
 
   // Pass the validated/clamped slippageBps so parseQuoteResponse's fallback
   // calc lines up with what was actually requested upstream.
-  const result = parseQuoteResponse(quoteResp, { ...params, slippageBps })
+  let result = parseQuoteResponse(quoteResp, { ...params, slippageBps })
+  if (sellCaip.startsWith('eip155:') && device.firmwareVersion) {
+    const entries = Array.isArray(qDebug) ? qDebug : [qDebug]
+    const candidates = entries.flatMap(entry => {
+      try { return [parseQuoteResponse(entry, { ...params, slippageBps })] }
+      catch { return [] } // original parser above preserves an all-routes failure
+    })
+    result = await selectSwapRoute(candidates, async candidate => {
+      const tx = candidate.relayTx
+      if (!tx) return false // memo routes use their existing build/review flow
+      const chainId = Number(sellCaip.split('/')[0].split(':')[1])
+      if (tx.chainId != null && tx.chainId !== chainId) return false
+      // Ignore upstream review claims. Resolve the same certificate/definition
+      // and policy used by transaction preview and the final signer.
+      const schema = await resolveSwapEvmSchema(chainId, tx.to, tx.data,
+        supportsCertifiedClearSign(device.firmwareVersion), device.firmwareVersion, tx.value)
+      const metadata = schema ? { signedPayload: schema.signedPayload, keyId: schema.keyId } : undefined
+      const erc7730 = metadata ? undefined : await resolveErc7730ForCall({
+        chainId, to: tx.to, data: tx.data, value: tx.value,
+        firmwareVersion: device.firmwareVersion, capabilities: device.capabilities,
+      })
+      const reviewable = !evmCallRequiresAdvancedMode(tx.to, tx.data, chainId, false,
+        metadata, erc7730, device.firmwareVersion, tx.value, device.capabilities)
+      return reviewable && (isRelaySolverDeposit(candidate) || tx.data.length <= 2 || tx.data.startsWith('0xa9059cbb'))
+        ? 'source-deposit' as const : reviewable
+    })
+  }
+  if (isRelaySolverDeposit(result)) result.executionMode = 'relay-solver-deposit'
   // Surface the underlying protocol when the integration is an aggregator
   // (e.g. ShapeShift → Relay/Thorchain/0x). Falls back to integration name.
   const route = result.swapper && result.swapper.toLowerCase() !== (result.integration || '').toLowerCase()
@@ -695,9 +726,7 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
   const hasPrebuiltTx = !!params.relayTx
   // Native THORChain/Maya deposits (RUNE, CACAO) use MsgDeposit — no inbound vault needed
   const isNativeDeposit = isNativeDepositCaip(params.fromCaip)
-  const fromIsUtxo = params.fromCaip.startsWith('bip122:')
-  const fromIsSolana = params.fromCaip.startsWith('solana:')
-  const isMemolessTransfer = (fromIsUtxo || fromIsSolana) && !!params.inboundAddress && !params.memo
+  const isMemolessTransfer = isPlainSwapDeposit(params)
   if (!params.inboundAddress && !isNativeDeposit && !hasPrebuiltTx) throw new Error('Missing inbound vault address from quote')
   if (!params.memo && !hasPrebuiltTx && !isMemolessTransfer) throw new Error('Missing swap memo from quote')
   assertSwapMemoFitsSource(params.memo, params.fromCaip)
@@ -737,7 +766,7 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
         caip: fromAssetMeta?.caip ?? params.fromCaip, tokenDecimals: fromAssetMeta?.decimals ?? params.tokenDecimals,
       })
       unsignedTx = buildResult.unsignedTx
-    } else {
+    } else if (fromChain.chainFamily === 'evm') {
       const certifiedSupported = supportsCertifiedClearSign(ctx.getFirmwareVersion?.())
       // Certified and RAM-signer metadata are complementary. On 7.16+, try the
       // certified catalog first, then the ClearSign provider the user added
@@ -796,6 +825,8 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
           swapLog(`${TAG} Relay-path approve broadcast (Pioneer): ${approvalTxid}`)
         }
       }
+    } else {
+      throw new Error(`Unsupported prebuilt swap transaction for ${fromChain.coin}`)
     }
 
   // ── EVM chains: MUST use router contract depositWithExpiry() ──
@@ -1079,7 +1110,19 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
   // in the device's pinned allowlist). A 7.16 root-certified envelope is the
   // one alternative to AdvancedMode; runtime/self-service metadata is
   // annotation-only and remains gated.
-  if (fromChain.chainFamily === 'evm') assertEvmSignable(unsignedTx)
+  if (fromChain.chainFamily === 'evm') {
+    // Quotes are not execution proofs. Validate the final gas/value/calldata
+    // after approvals, before prompting the device, even in Advanced Mode.
+    if (params.relayTx && String(unsignedTx.data || '').length >= 10) {
+      await assertPrebuiltSwapExecution(getEvmRpcSource(fromChain), {
+        chainId: Number(unsignedTx.chainId), from: fromAddress!, to: unsignedTx.to,
+        data: unsignedTx.data, value: unsignedTx.value, gas: unsignedTx.gasLimit,
+        gasPrice: unsignedTx.gasPrice, maxFeePerGas: unsignedTx.maxFeePerGas,
+        maxPriorityFeePerGas: unsignedTx.maxPriorityFeePerGas,
+      })
+    }
+    assertEvmSignable(unsignedTx)
+  }
 
   // 4. Sign on device (user confirms tx details on hardware wallet)
   console.info(`${TAG} policy passed; signing ${fromChain.chainFamily} via ${fromChain.signMethod} (advancedMode=${ctx.isAdvancedModeEnabled?.() ?? 'unknown'}, metadataKey=${unsignedTx?.txMetadata?.keyId ?? 'none'})`)
@@ -1225,6 +1268,8 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
     expectedOutput: params.expectedOutput,
     ...(approvalTxid ? { approvalTxid } : {}),
     ...(fromAmountBaseUnits ? { fromAmountBaseUnits } : {}),
+    fromAddress,
+    toAddress,
   }
 }
 
@@ -1328,9 +1373,7 @@ export async function previewSwapBuild(
 
   const hasPrebuiltTx = !!params.relayTx
   const isNativeDeposit = isNativeDepositCaip(params.fromCaip)
-  const fromIsUtxoPreview = params.fromCaip.startsWith('bip122:')
-  const fromIsSolanaPreview = params.fromCaip.startsWith('solana:')
-  const isMemolessTransfer = (fromIsUtxoPreview || fromIsSolanaPreview) && !!params.inboundAddress && !params.memo
+  const isMemolessTransfer = isPlainSwapDeposit(params)
   if (!params.inboundAddress && !isNativeDeposit && !hasPrebuiltTx) throw new Error('Missing inbound vault address from quote')
   if (!params.memo && !hasPrebuiltTx && !isMemolessTransfer) throw new Error('Missing swap memo from quote')
   assertSwapMemoFitsSource(params.memo, params.fromCaip)
@@ -1354,6 +1397,7 @@ export async function previewSwapBuild(
       })
       return { unsignedTx: buildResult.unsignedTx }
     }
+    if (fromChain.chainFamily !== 'evm') throw new Error(`Unsupported prebuilt swap transaction for ${fromChain.coin}`)
     const certifiedSupported = supportsCertifiedClearSign(ctx.getFirmwareVersion?.())
     const runtimeGate = { firmwareVersion: ctx.getFirmwareVersion?.(), advancedMode: ctx.isAdvancedModeEnabled?.() === true, capabilities: ctx.getDeviceCapabilities?.() }
     const result = await buildRelaySwapTx(params, fromChain, fromAddress, getEvmRpcSource, isErc20Source, /* previewMode */ true, certifiedSupported, runtimeGate)
@@ -1520,7 +1564,7 @@ async function buildRelaySwapTx(
     bsc: '150000',
     ethereum: '150000',
   }
-  const gasLimit = relay.gasLimit || RELAY_GAS_LIMIT_FALLBACK[fromChain.id] || '150000'
+  const gasLimit = bufferedSwapGasLimit(relay.gasLimit || RELAY_GAS_LIMIT_FALLBACK[fromChain.id] || '150000', relay.data)
   console.log(`${TAG} relay gasLimit: provided=${relay.gasLimit} resolved=${gasLimit} chain=${fromChain.id}`)
   const fallbackGwei = MIN_GAS_GWEI[fromChain.id] ?? 10
   const fallbackGasPrice = BigInt(Math.round(fallbackGwei * 1e9))
@@ -1724,7 +1768,7 @@ async function buildRelaySwapTx(
               tokenContract,
             }
             swapLog(`${TAG} Relay tx balance check: current=${currentBalance}, required=${amountBaseUnits}, sufficient=${balSufficient}`)
-            if (!balSufficient && !_previewMode) {
+            if (!balSufficient && !previewMode) {
               throw new Error(`Insufficient ${tokenContract} balance: have ${currentBalance.toString()} units, need ${amountBaseUnits.toString()} units. The swap would revert on-chain — refusing to sign.`)
             }
           }
@@ -1797,7 +1841,7 @@ async function buildRelaySwapTx(
   const selector = String(relay.data || '').slice(0, 10).toLowerCase()
   const calldataLength = String(relay.data || '').replace(/^0x/i, '').length / 2
   console.info(`${TAG} ClearSign lookup (${previewMode ? 'preview' : 'execute'}): chain=${chainId} selector=${selector} bytes=${calldataLength} certifiedSupported=${certifiedMetadataSupported}`)
-  const evmSchema = await resolveEvmSchema(chainId, relay.to, relay.data, certifiedMetadataSupported, runtimeGate.firmwareVersion)
+  const evmSchema = await resolveSwapEvmSchema(chainId, relay.to, relay.data, certifiedMetadataSupported, runtimeGate.firmwareVersion, unsignedTx.value)
   if (evmSchema) {
     unsignedTx.txMetadata = { signedPayload: evmSchema.signedPayload, keyId: evmSchema.keyId }
     console.info(`${TAG} clear-sign schema attached: ${evmSchema.method} (keyId=${evmSchema.keyId}, source=${evmSchema.source || 'local-test'})`)
@@ -1823,7 +1867,7 @@ async function buildRelaySwapTx(
   // AdvancedMode. A failed lookup leaves the device's ordinary policy.
   if (pendingApproveTx) {
     try {
-      const approveSchema = await resolveEvmSchema(chainId, pendingApproveTx.to, pendingApproveTx.data, certifiedMetadataSupported, runtimeGate.firmwareVersion)
+      const approveSchema = await resolveEvmSchema(chainId, pendingApproveTx.to, pendingApproveTx.data, certifiedMetadataSupported, runtimeGate.firmwareVersion, pendingApproveTx.value)
       if (approveSchema) {
         pendingApproveTx.txMetadata = { signedPayload: approveSchema.signedPayload, keyId: approveSchema.keyId }
         console.info(`${TAG} clear-sign schema attached to approve: ${approveSchema.method} (keyId=${approveSchema.keyId}, source=${approveSchema.source || 'local-test'})`)
@@ -2167,7 +2211,7 @@ async function buildEvmSwapTx(
       // token has none and the device keeps its ordinary policy (blind review,
       // AdvancedMode), which the in-app card reports from the same verdict.
       try {
-        const approveSchema = await resolveEvmSchema(chainId, approveTx.to, approveTx.data, certifiedMetadataSupported, firmwareVersion)
+        const approveSchema = await resolveEvmSchema(chainId, approveTx.to, approveTx.data, certifiedMetadataSupported, firmwareVersion, approveTx.value)
         if (approveSchema) {
           approveTx.txMetadata = { signedPayload: approveSchema.signedPayload, keyId: approveSchema.keyId }
           swapLog(`${TAG} clear-sign schema attached to approve: ${approveSchema.method} (keyId=${approveSchema.keyId}, source=${approveSchema.source || 'local-test'})`)

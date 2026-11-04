@@ -13,6 +13,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { utils } from 'ethers'
 import fixtures from './erc7730-resolver.fixtures.json'
+import { ERC7730_FIXTURE_ROOT_PUBLIC_KEY, trustTestRoot } from '../../__tests__/support/clearsign-test-root'
 
 // engine-controller's USB adapter is not loadable outside the app bundle; the
 // REST server only needs the engine object this test passes in.
@@ -38,6 +39,10 @@ beforeAll(() => {
   db.setSetting('evm_simulation_rpc_urls', JSON.stringify({ [String(tx.chainId)]: 'http://127.0.0.1:9/' }))
 })
 afterAll(() => { db.closeDb(); rmSync(dir, { recursive: true, force: true }) })
+// The replay fixtures are signed under their TEST root: trusted for this file.
+let restoreRoot = () => {}
+beforeAll(() => { restoreRoot = trustTestRoot(ERC7730_FIXTURE_ROOT_PUBLIC_KEY) })
+afterAll(() => restoreRoot())
 beforeEach(() => {
   forgetRefusedErc7730Definitions()
   globalThis.fetch = (async (url: any, init?: any) => {
@@ -86,7 +91,7 @@ async function restSign(opts: { advancedMode?: boolean; declineSecondCard?: bool
       return { approved: !(opts.declineSecondCard && cards.length === 2) } as any
     },
     onSigningDismissed: () => {},
-  } as any)
+  } as any, '127.0.0.1')
   try {
     const post = (path: string, body: unknown) => originalFetch(`http://127.0.0.1:${server.port}${path}`, {
       method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer test' }, body: JSON.stringify(body),

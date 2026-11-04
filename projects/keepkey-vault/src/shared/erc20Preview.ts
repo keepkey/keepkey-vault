@@ -9,7 +9,9 @@ export function amountWithDecimals(raw: bigint, decimals: number): string {
   return fraction ? `${whole}.${fraction}` : whole
 }
 
-export function erc20Preview(to?: string, chainId?: number, data?: string): {
+/** `recognizedName`: the request's recognizedSpender, so the Spender row names
+ * the same contract the risk bar does. */
+export function erc20Preview(to?: string, chainId?: number, data?: string, recognizedName?: string): {
   summary: string
   amount: string
   rawAmount: string
@@ -36,6 +38,6 @@ export function erc20Preview(to?: string, chainId?: number, data?: string): {
     : `Send ${amount} to ${address}`
   return { summary, amount, rawAmount, tokenAddress: to,
     tokenIdentity: token?.symbol, counterpartyAddress: address,
-    counterpartyIdentity: evmContractIdentity(chainId, address),
+    counterpartyIdentity: recognizedName ?? evmContractIdentity(chainId, address),
     counterpartyLabel: selector === '0x095ea7b3' ? 'Spender' : 'Recipient' }
 }

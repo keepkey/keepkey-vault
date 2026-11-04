@@ -13,6 +13,8 @@ import { buildTonTransfer, assembleTonSignedBoc, getTonSeqno, getTonWalletState,
 import { buildHiveTransfer, broadcastHiveTx } from './hive'
 import { SOLANA_LAMPORTS_PER_SIGNATURE, solanaTransferLamportsForAmount } from './solana'
 import { signSolanaWireTransaction } from '../solana-signing'
+import { createRpcAltFetcher, DEFAULT_SOLANA_RPC_ENDPOINT } from '../solana-alt'
+import { getSetting } from '../db'
 import { getBtcBackend } from '../btc-backend'
 import { canonicalTronAddress, decodeTronTransfer } from '../tron-preview'
 import { getPioneerApiBase } from '../pioneer'
@@ -739,6 +741,7 @@ export async function signTx(
         },
         'signTx:solana',
         () => firmwareVersion,
+        createRpcAltFetcher(getSetting('solana_rpc_endpoint') || DEFAULT_SOLANA_RPC_ENDPOINT),
       )
     }
     case 'tron': {

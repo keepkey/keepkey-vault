@@ -6,17 +6,27 @@
 import { versionCompare } from './firmware-versions'
 
 let productionRootTrusted: () => boolean = () => true
+let emulatorTestRoot: () => string | undefined = () => undefined
 
 /** The connected device trusts the production ClearSign root. The emulator
  *  library compiles in only the alpha root and refuses every certificate
  *  Desktop attaches, so it counts as having no certified support (the device
- *  shows its normal review). index.ts registers this once. */
-export function configureProductionRootTrust(trusted: () => boolean): void {
+ *  shows its normal review). An emulator started with a ClearSign TEST root
+ *  (QA only) is trusted when `trusted` says so, and `testRoot` names that
+ *  root; it is undefined for a real device. index.ts registers this once. */
+export function configureProductionRootTrust(trusted: () => boolean, testRoot: () => string | undefined = () => undefined): void {
   productionRootTrusted = trusted
+  emulatorTestRoot = testRoot
 }
 
 export function deviceTrustsProductionRoot(): boolean {
   return productionRootTrusted()
+}
+
+/** The emulator's ClearSign TEST root, only while the device is trusted for
+ *  certified descriptions; undefined for a real device. */
+export function deviceClearSignTestRoot(): string | undefined {
+  return productionRootTrusted() ? emulatorTestRoot() : undefined
 }
 
 /** The delegate key id of a KeepKey-certified envelope (METADATA_KEYID_DELEGATE). */

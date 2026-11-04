@@ -73,14 +73,16 @@ describe('ClearSign Worker public surface', () => {
     expect(response.status).toBe(200)
     // 72 + Relay depositNative on Base/Arbitrum + 11 Relay depositErc20 (one per reviewed token).
     // The Arbitrum USDT approve pair is reviewed-token again: batch 2 superseded batch 1's entry.
-    expect(body.entries).toHaveLength(85)
-    expect(body.entries.filter((entry: any) => entry.family === 'evm')).toHaveLength(58)
+    // + 5 Uniswap routers reviewed for batch 5 (one swap entry each).
+    // + Venice claimAndStake and initiateUnstake (OpolisPay entries are per-token, not listed).
+    expect(body.entries).toHaveLength(92)
+    expect(body.entries.filter((entry: any) => entry.family === 'evm')).toHaveLength(65)
     expect(body.entries.filter((entry: any) => entry.family === 'evm' && entry.protocol === 'Relay')).toHaveLength(14)
-    expect(body.entries.filter((entry: any) => entry.protocol === 'Uniswap')).toHaveLength(9)
+    expect(body.entries.filter((entry: any) => entry.protocol === 'Uniswap')).toHaveLength(14)
     expect(body.entries.filter((entry: any) => entry.protocol === 'ERC-20')).toHaveLength(33)
     expect(body.entries.filter((entry: any) => entry.family === 'solana')).toHaveLength(27)
     for (const entry of body.entries) {
-      expect(['Relay', 'Portals', 'Across', 'Pump', 'SoltoshiDICE', 'ERC-20', 'Uniswap']).toContain(entry.protocol)
+      expect(['Relay', 'Portals', 'Across', 'Pump', 'SoltoshiDICE', 'ERC-20', 'Uniswap', 'Venice']).toContain(entry.protocol)
       expect(entry.provenance.protocol).toMatch(/^https:\/\//)
     }
     const join = body.entries.find((entry: any) => entry.id === 'solana:soltoshidiceBlackjackJoin')
@@ -143,7 +145,10 @@ describe('ClearSign Worker public surface', () => {
     const signed02 = evm.filter((e: any) => e.protocol !== 'Portals' && e.protocol !== 'Across' && !e.title)
     expect(signed02.map((e: any) => e.method).sort()).toEqual(['bridgeDeposit'])
     for (const entry of signed02) expect([entry.screens, entry.screensNote]).toEqual([[], undefined])
-    for (const entry of evm.filter((e: any) => e.protocol !== 'Portals' && e.protocol !== 'Across' && e.title)) expect(entry.screens.length).toBeGreaterThan(3)
+    // Summary, Contract, provenance, plus at least one screen per argument (claimAndStake has none).
+    for (const entry of evm.filter((e: any) => e.protocol !== 'Portals' && e.protocol !== 'Across' && e.title)) {
+      expect(entry.screens.length).toBeGreaterThan(entry.method === 'claimAndStake' ? 2 : 3)
+    }
   })
 
   it('EXPECTED-SCREENS.md states every Base USDC screen the catalog publishes', async () => {

@@ -1,10 +1,11 @@
-import { describe, expect, it } from 'bun:test'
+import { afterAll, beforeAll, describe, expect, it } from 'bun:test'
 import { createHash } from 'node:crypto'
 import { Wallet } from 'ethers'
 
 import { buildEvmSchemaBody, CERTIFIED_METADATA_KEY_ID } from './evm-certified-schema'
 import { deploymentMismatch, findContractRating, verifyContractRating, verifyPublishedReview } from './clearsign-review'
 import { findCertifiedEvmSchema } from './evm-schema-registry'
+import { testCertifiedEnvelope, trustTestRoot } from '../../__tests__/support/clearsign-test-root'
 
 // The MDM case study: Mordiem CapitalManager.deposit(address asset, uint256 amount) on Base.
 const MANAGER = '0x6b6c05ee7f49d00e63e74a9426d74ef9614f6a0f'
@@ -145,7 +146,11 @@ describe('verifyContractRating (app-only opinion)', () => {
 })
 
 describe('findCertifiedEvmSchema definition lookup', () => {
-  const envelope = (body: Buffer) => `0x03${'00'.repeat(2)}${(8453).toString(16).padStart(8, '0')}${'00'.repeat(133)}${body.toString('hex')}${'11'.repeat(65)}`
+  // Signed under a TEST root, trusted for these tests.
+  const envelope = (body: Buffer) => testCertifiedEnvelope(body.toString('hex'))
+  let restoreRoot = () => {}
+  beforeAll(() => { restoreRoot = trustTestRoot() })
+  afterAll(() => restoreRoot())
   const serve = (json: any, status = 200) => (async () => new Response(JSON.stringify(json), { status })) as unknown as typeof fetch
   const verified = (review: any, body = buildEvmSchemaBody(SCHEMA as any)) => ({ success: true, classification: 'VERIFIED',
     signedPayload: envelope(body), keyId: CERTIFIED_METADATA_KEY_ID, method: SCHEMA.method, chainId: 8453,

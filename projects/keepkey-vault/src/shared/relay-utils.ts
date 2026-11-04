@@ -13,6 +13,7 @@
 // "request id" that's actually somebody's address argument.
 const KNOWN_RELAY_SELECTORS = new Set([
   '0x49290c1c', // depositNative(address recipient, bytes32 orderId)
+  '0xe8017952', // depositErc20(address depositor, address token, uint256 amount, bytes32 orderId)
 ])
 
 /**
@@ -30,7 +31,11 @@ export function extractRelayRequestId(calldata: string | undefined | null): stri
   if ((data.length - 10) % 64 !== 0) return undefined
   const selector = data.slice(0, 10).toLowerCase()
   if (!KNOWN_RELAY_SELECTORS.has(selector)) return undefined
+  if (!/^0x[0-9a-f]+$/i.test(data)) return undefined
+  if (selector === '0x49290c1c' && data.length !== 138) return undefined
+  if (selector === '0xe8017952' && data.length !== 266) return undefined
   // Last 32 bytes (= 64 hex) are the request id.
   const id = data.slice(-64).toLowerCase()
+  if (/^0+$/.test(id)) return undefined
   return `0x${id}`
 }

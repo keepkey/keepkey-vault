@@ -23,7 +23,7 @@ include .env
 export ELECTROBUN_DEVELOPER_ID ELECTROBUN_TEAMID ELECTROBUN_APPLEID ELECTROBUN_APPLEIDPASS
 endif
 
-.PHONY: clearsign-worker-test sync-asset-data clearsign-worker-rehearsal-guard clearsign-worker-rehearsal-deploy install dev dev-hmr build build-stable build-canary build-signed patch-arm64-release-tar prune-bundle dmg clean help vault sign-check notary-check verify verify-entitlements publish release upload-dmg upload-all-dmgs sign-release sign-release-intel verify-arch audit-macos-bundle submodules modules-install modules-build device-protocol-build modules-clean audit build-zcash-cli build-zcash-cli-debug build-zcash-cli-intel test test-unit test-rest test-sign-gating test-zcash-cli test-emu test-emu-erc7730 build-intel build-signed-intel build-electrobun-x64-core build-electrobun-arm64-core prepare-electrobun-arm64-core publish-electrobun-x64-core build-electrobun-linux-x64-core preflight build-emulator build-emulator-windows build-emulator-macos-release build-emulator-release clean-emulator test-emu-python
+.PHONY: release-sums firmware-token-table-717 clearsign-worker-test sync-asset-data clearsign-worker-rehearsal-guard clearsign-worker-rehearsal-deploy install dev dev-hmr build build-stable build-canary build-signed patch-arm64-release-tar prune-bundle dmg clean help vault sign-check notary-check verify verify-entitlements publish release upload-dmg upload-all-dmgs sign-release sign-release-intel verify-arch audit-macos-bundle submodules modules-install modules-build device-protocol-build modules-clean audit build-zcash-cli build-zcash-cli-debug build-zcash-cli-intel test test-unit test-rest test-sign-gating test-zcash-cli test-emu test-emu-erc7730 test-emu-erc7730-717 test-emu-solana-lut test-emu-erc7730-typed build-intel build-signed-intel build-electrobun-x64-core build-electrobun-arm64-core prepare-electrobun-arm64-core publish-electrobun-x64-core build-electrobun-linux-x64-core preflight build-emulator build-emulator-windows build-emulator-macos-release build-emulator-release clean-emulator test-emu-python
 
 # --- Submodules (auto-init on fresh worktrees/clones) ---
 
@@ -375,6 +375,25 @@ dmg: verify-arch
 	spctl --assess --type open --context context:primary-signature --verbose=4 "$$DMG_OUT"; \
 	echo "DMG ready: $$DMG_OUT"
 
+# 7.17's token table (src/bun/firmware-token-table-717.json), generated the way
+# fork alpha's lib/firmware/CMakeLists.txt builds it. FW_SRC = a keepkey-firmware
+# checkout at the alpha commit, deps/python-keepkey initialised at its gitlink
+# (the lists come from python-keepkey, so both commits go into _firmware).
+# The Uniswap list has no profile, as in alpha since 2c79f0e51 (fw #1031).
+firmware-token-table-717:
+	@test -n "$(FW_SRC)" || { echo "usage: make firmware-token-table-717 FW_SRC=<keepkey-firmware checkout at fork/alpha>"; exit 1; }
+	@FW=$(abspath $(FW_SRC)) && \
+	FW_HEAD=$$(git -C $$FW log -1 --format='%H tree %T') && \
+	PYK=$$(git -C $$FW submodule status deps/python-keepkey) && \
+	case "$$PYK" in " "*) ;; *) echo "deps/python-keepkey is not at $$FW's gitlink: $$PYK"; exit 1;; esac && \
+	PYK_HEAD=$$(git -C $$FW/deps/python-keepkey rev-parse HEAD) && \
+	d=$$(mktemp -d) && E=$$FW/deps/python-keepkey/keepkeylib/eth && \
+	python3 $$E/ethereum_tokens.py $$d/ethereum_tokens.def --profile priority-only && \
+	python3 $$E/uniswap_tokens.py $$d/uniswap_tokens.def && \
+	python3 $$FW/scripts/dedupe-token-def.py $$d/ethereum_tokens.def $$d/uniswap_tokens.def && \
+	cd $(PROJECT_DIR) && FIRMWARE_COMMIT="$$FW_HEAD python-keepkey $$PYK_HEAD" bun scripts/gen-firmware-token-table.ts $$d firmware-token-table-717.json && \
+	rm -rf $$d
+
 # --- ClearSign Worker ---
 
 clearsign-worker-test:
@@ -401,8 +420,22 @@ clearsign-worker-rehearsal-deploy: clearsign-worker-rehearsal-guard test-unit
 test: test-zcash-cli test-unit
 
 test-unit:
-	cd $(PROJECT_DIR) && bun test __tests__/evm-signer-verify.test.ts __tests__/evm-balance-fetch.test.ts __tests__/swap-parsing.test.ts __tests__/engine-state-machine.test.ts __tests__/device-switch.test.ts __tests__/wizard-messaging.test.ts __tests__/update-safety.test.ts __tests__/solana-tx.test.ts __tests__/solana-message-parser.test.ts __tests__/solana-instruction-decoder.test.ts __tests__/solana-alt.test.ts __tests__/solana-spl-decimals.test.ts __tests__/ton-build.test.ts __tests__/tron-memo-inject.test.ts __tests__/audit-coverage.test.ts __tests__/chain-scan.test.ts __tests__/pairing-pubkeys.test.ts __tests__/watch-only-portfolio.test.ts __tests__/watch-only-history.test.ts __tests__/balance-display-state.test.ts __tests__/balance-reconciliation.test.ts __tests__/failed-fetch-not-zero.test.ts __tests__/advanced-mode-routing.test.ts __tests__/solana-advanced-mode.test.ts __tests__/clearsign-provider-key.test.ts __tests__/firmware-clearsign-gate.test.ts __tests__/clearsign-risk.test.ts __tests__/taproot-host.test.ts __tests__/device-protocol-install.test.ts __tests__/solana-hdwallet-contract.test.ts __tests__/recovery-ownership.test.ts __tests__/evm-x402.test.ts __tests__/eip712-permit2.test.ts __tests__/solana-x402.test.ts __tests__/patch-electrobun.test.ts __tests__/tx-watch.test.ts __tests__/signed-tx-registry.test.ts src/bun/emulator-library.test.ts src/bun/mcp.test.ts src/bun/rng-audit.test.ts src/shared/zcash-maturity.test.ts src/shared/zcash-pending.test.ts src/bun/zcash-capability.test.ts src/bun/zcash-sidecar-path.test.ts src/bun/txbuilder/utxo-zcash.test.ts src/bun/txbuilder/zcash-shielded.test.ts src/bun/txbuilder/zcash-batching.test.ts src/bun/txbuilder/zcash-tex.test.ts src/bun/txbuilder/utxo-taproot.test.ts src/bun/txbuilder/hive-ops.test.ts src/bun/clearsign-studio.test.ts src/bun/solana-outflow.test.ts src/bun/solana-certified-schema.test.ts __tests__/solana-certified-match.test.ts src/bun/solana-certified-registry.test.ts __tests__/solana-certified-routing.test.ts __tests__/solana-decode-risk.test.ts __tests__/solana-certified-copy.test.ts __tests__/solana-simulated-outflow.test.ts __tests__/evm-max-send.test.ts __tests__/tron-max-send.test.ts __tests__/tron-token-send-gates.test.ts src/bun/tron-preview.test.ts __tests__/arbitrum-broadcast.test.ts src/bun/wallet-session-cache.test.ts __tests__/pin-unlock-timeout.test.ts __tests__/device-wipe.test.ts __tests__/network-load.test.ts __tests__/firmware-authenticity-verdict.test.ts __tests__/app-phase.test.ts __tests__/flash-wipe.test.ts __tests__/firmware-install.test.ts __tests__/webusb-recovery.test.ts src/bun/evm-certified-schema.test.ts src/bun/evm-certified-registry.test.ts src/bun/evm-runtime-metadata.test.ts src/bun/load-signer-schema.test.ts src/bun/clearsign-providers.test.ts src/bun/evm-schema-registry.test.ts __tests__/clearsign-production-catalog.test.ts __tests__/permit2-spender-name.test.ts src/bun/evm-signing-preview.test.ts src/bun/contract-facts.test.ts src/bun/evm-presign-report.test.ts __tests__/transaction-effects.test.ts src/bun/uniswap-ur.test.ts __tests__/uniswap-ur-firmware-parity.test.ts src/bun/thor-swap-preview.test.ts src/shared/evmFeePreview.test.ts src/shared/acrossDeposit.test.ts src/bun/clearsign-review.test.ts src/shared/erc7730-support.test.ts src/bun/erc7730-resolver.test.ts src/bun/erc7730-signing.test.ts src/bun/erc7730-describe.test.ts src/bun/erc7730-rest.test.ts src/bun/pubkeys-batch-setup.test.ts src/bun/bitcoin-only-boundary.test.ts __tests__/preflight-ci-status.test.ts src/bun/firmware-signature.test.ts __tests__/addressbook-clearsign.test.ts src/bun/ui-watchdog.test.ts __tests__/linux-apprun.test.ts src/bun/device-refusal.test.ts src/shared/cosmosTxPreview.test.ts src/shared/typedDataRows.test.ts src/shared/emulatorWallets.test.ts __tests__/asset-catalog-sync.test.ts __tests__/swap-settlement.test.ts __tests__/clearsign-production-root.test.ts __tests__/clearsign-artifact-import.test.ts src/bun/clearsign-alpha-ceremony.test.ts src/bun/solana-certified-lut.test.ts src/bun/clearsign-studio-evm.test.ts src/bun/features-format.test.ts src/bun/signed-tx-review.test.ts src/bun/btc-psbt/psbt.test.ts src/bun/btc-psbt/codec.test.ts src/shared/psbt-sniff.test.ts src/bun/btc-master-fingerprint.test.ts src/bun/btc-psbt/watch-only-build.test.ts src/bun/btc-backend/watch-only-node.test.ts src/bun/btc-psbt/watch-only-import.test.ts src/shared/bitcoin-qr.test.ts src/bun/btc-psbt/multisig-relay.test.ts src/bun/btc-psbt/multisig-cosign.test.ts src/bun/btc-psbt/multisig-device.test.ts src/bun/btc-psbt/multisig-feature.test.ts
+	cd $(PROJECT_DIR) && bun test __tests__/evm-signer-verify.test.ts __tests__/evm-balance-fetch.test.ts __tests__/swap-parsing.test.ts __tests__/engine-state-machine.test.ts __tests__/device-switch.test.ts __tests__/wizard-messaging.test.ts __tests__/update-safety.test.ts __tests__/solana-tx.test.ts __tests__/solana-message-parser.test.ts __tests__/solana-instruction-decoder.test.ts __tests__/solana-alt.test.ts __tests__/solana-spl-decimals.test.ts __tests__/ton-build.test.ts __tests__/tron-memo-inject.test.ts __tests__/audit-coverage.test.ts __tests__/chain-scan.test.ts __tests__/pairing-pubkeys.test.ts __tests__/watch-only-portfolio.test.ts __tests__/watch-only-history.test.ts __tests__/balance-display-state.test.ts __tests__/balance-reconciliation.test.ts __tests__/failed-fetch-not-zero.test.ts __tests__/advanced-mode-routing.test.ts __tests__/solana-advanced-mode.test.ts __tests__/clearsign-provider-key.test.ts __tests__/firmware-clearsign-gate.test.ts __tests__/clearsign-risk.test.ts __tests__/taproot-host.test.ts __tests__/device-protocol-install.test.ts __tests__/solana-hdwallet-contract.test.ts __tests__/solana-host-lut.test.ts __tests__/recovery-ownership.test.ts __tests__/evm-x402.test.ts __tests__/eip712-permit2.test.ts __tests__/solana-x402.test.ts __tests__/patch-electrobun.test.ts __tests__/tx-watch.test.ts __tests__/signed-tx-registry.test.ts src/bun/emulator-library.test.ts src/bun/mcp.test.ts src/bun/rng-audit.test.ts src/shared/zcash-maturity.test.ts src/shared/zcash-pending.test.ts src/bun/zcash-capability.test.ts src/bun/zcash-sidecar-path.test.ts src/bun/txbuilder/utxo-zcash.test.ts src/bun/txbuilder/zcash-shielded.test.ts src/bun/txbuilder/zcash-batching.test.ts src/bun/txbuilder/zcash-tex.test.ts src/bun/txbuilder/utxo-taproot.test.ts src/bun/txbuilder/hive-ops.test.ts src/bun/clearsign-studio.test.ts src/bun/solana-outflow.test.ts src/bun/solana-certified-schema.test.ts __tests__/solana-certified-match.test.ts src/bun/solana-certified-registry.test.ts __tests__/solana-certified-routing.test.ts __tests__/solana-decode-risk.test.ts __tests__/solana-certified-copy.test.ts __tests__/solana-simulated-outflow.test.ts __tests__/evm-max-send.test.ts __tests__/tron-max-send.test.ts __tests__/tron-token-send-gates.test.ts src/bun/tron-preview.test.ts __tests__/arbitrum-broadcast.test.ts src/bun/wallet-session-cache.test.ts __tests__/pin-unlock-timeout.test.ts __tests__/device-wipe.test.ts __tests__/network-load.test.ts __tests__/firmware-authenticity-verdict.test.ts __tests__/app-phase.test.ts __tests__/flash-wipe.test.ts __tests__/firmware-install.test.ts __tests__/webusb-recovery.test.ts src/bun/evm-certified-schema.test.ts src/bun/evm-certified-registry.test.ts src/bun/evm-runtime-metadata.test.ts src/bun/load-signer-schema.test.ts src/bun/clearsign-providers.test.ts src/bun/evm-schema-registry.test.ts __tests__/clearsign-production-catalog.test.ts __tests__/permit2-spender-name.test.ts __tests__/approve-spender-name.test.ts __tests__/aggregator-spenders.test.ts src/bun/evm-signing-preview.test.ts src/bun/contract-facts.test.ts src/bun/evm-presign-report.test.ts __tests__/transaction-effects.test.ts src/bun/uniswap-ur.test.ts __tests__/uniswap-ur-firmware-parity.test.ts src/bun/thor-swap-preview.test.ts src/shared/evmFeePreview.test.ts src/shared/acrossDeposit.test.ts src/bun/clearsign-review.test.ts src/shared/erc7730-support.test.ts src/bun/erc7730-resolver.test.ts src/bun/erc7730-signing.test.ts src/bun/erc7730-describe.test.ts src/bun/erc7730-rest.test.ts src/bun/pubkeys-batch-setup.test.ts src/bun/bitcoin-only-boundary.test.ts __tests__/preflight-ci-status.test.ts src/bun/firmware-signature.test.ts __tests__/addressbook-clearsign.test.ts src/bun/ui-watchdog.test.ts __tests__/linux-apprun.test.ts src/bun/device-refusal.test.ts src/shared/cosmosTxPreview.test.ts src/shared/typedDataRows.test.ts src/shared/emulatorWallets.test.ts __tests__/asset-catalog-sync.test.ts __tests__/swap-settlement.test.ts __tests__/clearsign-production-root.test.ts __tests__/clearsign-artifact-import.test.ts src/bun/clearsign-alpha-ceremony.test.ts src/bun/solana-certified-lut.test.ts src/bun/clearsign-studio-evm.test.ts src/bun/features-format.test.ts src/bun/signed-tx-review.test.ts src/bun/btc-psbt/psbt.test.ts src/bun/btc-psbt/codec.test.ts src/shared/psbt-sniff.test.ts src/bun/btc-master-fingerprint.test.ts src/bun/btc-psbt/watch-only-build.test.ts src/bun/btc-backend/watch-only-node.test.ts src/bun/btc-psbt/watch-only-import.test.ts src/shared/bitcoin-qr.test.ts src/bun/btc-psbt/multisig-relay.test.ts src/bun/btc-psbt/multisig-cosign.test.ts src/bun/btc-psbt/multisig-device.test.ts src/bun/btc-psbt/multisig-feature.test.ts __tests__/clearsign-chain-advice.test.ts __tests__/clearsign-observation-coverage.test.ts __tests__/thorchain-deposit-risk.test.ts src/bun/swap-decoders.test.ts __tests__/clearsign-typed-descriptors.test.ts __tests__/seaport-wc-item-contracts.test.ts __tests__/seaport-device-screen.test.ts __tests__/safe-tx-clearsign.test.ts __tests__/advanced-mode-truth.test.ts src/shared/address-lookalike.test.ts src/bun/erc7730-typed-data.test.ts src/bun/erc7730-typed-rest.test.ts src/bun/typed-data-sign.test.ts src/bun/rest-eth-fee.test.ts __tests__/clearsign-card-truth.test.ts __tests__/safe-message-original.test.ts src/bun/erc7730-embedded.test.ts __tests__/test-servers-loopback.test.ts
 	cd $(PROJECT_DIR) && bun test src/bun/btc-psbt/multisig-feature-rest.test.ts
+	cd $(PROJECT_DIR) && bun test __tests__/defi-position-details.test.ts __tests__/swap-health.test.ts __tests__/swap-preflight.test.ts __tests__/swap-route-selection.test.ts __tests__/pioneer-evm.test.ts __tests__/relay-status.test.ts __tests__/zcash-privacy.test.ts
+	cd $(PROJECT_DIR) && bun test __tests__/swap-tracking-context.test.ts
+	cd $(PROJECT_DIR) && bun test __tests__/swap-fees.test.ts __tests__/swap-server-capabilities.test.ts __tests__/swap-registration.test.ts __tests__/near-intents-status.test.ts
+	cd $(PROJECT_DIR) && bun test __tests__/near-deposit-build.test.ts
+	cd $(PROJECT_DIR) && bun test __tests__/receive-request.test.ts
+	cd $(PROJECT_DIR) && bun test __tests__/post-tx-balance.test.ts
+	cd $(PROJECT_DIR) && bun test __tests__/active-wallet-watch.test.ts __tests__/durable-wallet-monitor.test.ts __tests__/wallet-monitor-registry.test.ts __tests__/pioneer-event-capabilities.test.ts __tests__/event-stream-client.test.ts __tests__/pioneer-socket-client.test.ts
+	cd $(PROJECT_DIR) && bun test __tests__/pioneer-server.test.ts __tests__/pioneer-server-switch.test.ts
+	cd $(PROJECT_DIR) && bun test __tests__/pioneer-client-transition-isolated.test.ts
+	cd $(PROJECT_DIR) && bun test __tests__/perf-telemetry-context.test.ts
+	cd $(PROJECT_DIR) && bun test __tests__/swap-support-matrix.test.ts __tests__/swap-support-matrix-transition.test.ts
+	cd $(PROJECT_DIR) && bun test __tests__/portfolio-owner-confidence.test.ts
+	cd $(PROJECT_DIR) && bun test __tests__/activity-history-accounts.test.ts
+	cd $(PROJECT_DIR) && bun test __tests__/selected-token-balance.test.ts __tests__/evm-owner-balance.test.ts
 	cd modules/hdwallet && bun test packages/hdwallet-keepkey/src/multisig.test.ts
 	$(MAKE) clearsign-worker-test
 	cd $(PROJECT_DIR) && bun src/bun/btc-backend/core.test.ts
@@ -463,6 +496,33 @@ test-emu-erc7730:
 	KK_ERC7730_LIMIT="$(ERC7730_LIMIT)" KK_ERC7730_FILTER="$(ERC7730_FILTER)" KK_ERC7730_SHARD="$(or $(ERC7730_SHARD),0/1)" KK_ERC7730_REPORT="$(ERC7730_REPORT)" \
 	KK_ERC7730_MODE="$(ERC7730_MODE)" \
 	bun test --timeout 300000 tests/emulator/09-erc7730.test.ts
+
+# ERC-7730 embedded calls on a 7.17 emulator (tests/emulator/10-erc7730-embedded.test.ts):
+# Desktop's own path against a kkemu you started over UDP with the fixture's
+# test root (KEEPKEY_UDP_PORT=<port> KK_CLEARSIGN_TEST_ROOT=<testRootPubkey> kkemu).
+#   make test-emu-erc7730-717 ERC7730_717_PORT=21744 ERC7730_717_FIXTURE=/path/fixture.json
+test-emu-erc7730-717:
+	@test -n "$(ERC7730_717_PORT)" && test -f "$(ERC7730_717_FIXTURE)" || (echo "ERROR: set ERC7730_717_PORT and ERC7730_717_FIXTURE"; exit 1)
+	cd $(PROJECT_DIR) && KK_EMU_UDP_PORT="$(ERC7730_717_PORT)" KK_ERC7730_717_FIXTURE="$(ERC7730_717_FIXTURE)" \
+	bun test --timeout 300000 tests/emulator/10-erc7730-embedded.test.ts
+
+# Typed-data ERC-7730 on a 7.17 kkemu over UDP only, never USB
+# (tests/emulator/11-erc7730-typed-717.test.ts). Start kkemu from an empty
+# directory first: KEEPKEY_UDP_PORT=<port> KK_CLEARSIGN_TEST_ROOT=<fixture's test root> kkemu
+#   make test-emu-erc7730-typed KK_EMU_UDP_PORT=13744 ERC7730_TYPED_FIXTURE=<signed-catalog-4-TEST.json>
+ERC7730_TYPED_FIXTURE ?= $(HOME)/keepkey-audit-rigs/issuer/batch4/emu-dryrun/signed-catalog-4-TEST.json
+test-emu-erc7730-typed:
+	@test -n "$(KK_EMU_UDP_PORT)" || (echo "ERROR: set KK_EMU_UDP_PORT to the kkemu main UDP port"; exit 1)
+	@test -f "$(ERC7730_TYPED_FIXTURE)" || (echo "ERROR: ERC-7730 fixture not found: $(ERC7730_TYPED_FIXTURE)"; exit 1)
+	cd $(PROJECT_DIR) && KK_FORCE_UDP=1 KK_EMU_UDP_PORT="$(KK_EMU_UDP_PORT)" KK_ERC7730_TYPED_FIXTURE="$(ERC7730_TYPED_FIXTURE)" \
+	bun test --timeout 300000 tests/emulator/11-erc7730-typed-717.test.ts
+
+# Desktop's Solana lookup accounts (7.17+) against a FRESH kkemu on a UDP port,
+# never USB: KEEPKEY_UDP_PORT=31720 kkemu, then
+#   make test-emu-solana-lut KK_EMU_UDP_PORT=31720
+test-emu-solana-lut:
+	@test -n "$(KK_EMU_UDP_PORT)" || (echo "ERROR: set KK_EMU_UDP_PORT to a running kkemu's main UDP port"; exit 1)
+	cd $(PROJECT_DIR) && KK_FORCE_UDP=1 KK_EMU_UDP_PORT=$(KK_EMU_UDP_PORT) bun test --timeout 300000 tests/emulator/10-solana-host-lut.test.ts
 
 # --- Emulator (developer feature) ---
 # Build the native emulator from the firmware submodule on the current
@@ -675,7 +735,7 @@ release: sign-check build-signed
 	fi; \
 	gh release create v$(VERSION) \
 		--repo $(GITHUB_REPO) \
-		--title "KeepKey Vault v$(VERSION)" \
+		--title "KeepKey Desktop v$(VERSION)" \
 		--draft \
 		--generate-notes \
 		$(PROJECT_DIR)/artifacts/$(DMG_NAME) \
@@ -792,6 +852,13 @@ sign-release-intel: notary-check
 	@echo ""
 	@echo "=== Intel release v$(VERSION) signed and uploaded ==="
 	@rm -rf $(PROJECT_DIR)/artifacts/ci-x64
+	@# CI's SHA256SUMS.txt still lists the unsigned x64 bundle: regenerate it.
+	@$(MAKE) release-sums
+
+# Regenerate SHA256SUMS.txt + SHA256SUMS-macos.txt from the release's own bytes,
+# verified against GitHub's digests. Re-run after the Windows installer lands.
+release-sums:
+	@scripts/release-sums.sh v$(VERSION) $(GITHUB_REPO)
 
 # Internal: sign a single tar.zst, produce a signed tar.zst (auto-update) and DMG
 # Args: _SRC_TAR (path to tar.zst), _DMG_ARCH (arm64 or x86_64)
@@ -942,6 +1009,10 @@ help:
 	@echo "  make clean-emulator        - Remove the installed dylib + binary"
 
 # --- Pre-release Validation ---
+# These repos run no CI on the pinned commits. Accepted 2026-10-28 (1.6.7):
+# Vault's own CI builds both, and its Intel smoke test boots the packaged app.
+PREFLIGHT_NO_CI_OK := modules/proto-tx-builder modules/electrobun
+
 preflight: submodules
 	@echo "╔══════════════════════════════════════════╗"
 	@echo "║   PRE-RELEASE VALIDATION                 ║"
@@ -961,11 +1032,12 @@ preflight: submodules
 	else echo "   ❌ certified emulator artifacts missing or invalid — run scripts/stage-certified-emulator.sh <artifact-dir>"; fail=1; fi; \
 	echo ""; \
 	echo "3. CANONICAL BRANCHES"; \
-	for pair in "modules/hdwallet|origin/master" "modules/proto-tx-builder|origin/main" "modules/device-protocol|origin/master" "modules/electrobun|origin/keepkey/launcher-env-lifetime"; do \
-		mod="$${pair%%|*}"; ref="$${pair##*|}"; \
-		behind=$$(cd "$$mod" && git rev-list --count HEAD.."$$ref" 2>/dev/null || echo "?"); \
-		if [ "$$behind" = "0" ]; then echo "   ✅ $$mod"; \
-		else echo "   ⚠️  $$mod: $$behind behind $$ref"; fi; \
+	for spec in "modules/hdwallet|https://github.com/keepkey/hdwallet|master" "modules/proto-tx-builder|https://github.com/BitHighlander/proto-tx-builder|main" "modules/device-protocol|https://github.com/keepkey/device-protocol|master" "modules/electrobun|https://github.com/BitHighlander/electrobun|keepkey/launcher-env-uaf-fix"; do \
+		mod=$$(echo "$$spec" | cut -d'|' -f1); url=$$(echo "$$spec" | cut -d'|' -f2); br=$$(echo "$$spec" | cut -d'|' -f3); \
+		tip=$$(git -C "$$mod" fetch -q "$$url" "$$br" 2>/dev/null && git -C "$$mod" rev-parse FETCH_HEAD); \
+		behind=$$( [ -n "$$tip" ] && git -C "$$mod" rev-list --count HEAD.."$$tip" || echo "?"); \
+		if [ "$$behind" = "0" ]; then echo "   ✅ $$mod (on $$br)"; \
+		else echo "   ⚠️  $$mod: $$behind behind $$url $$br"; fi; \
 	done; \
 	echo ""; \
 	echo "4. CI STATUS (checks pinned commit, falls back to fork repo for cross-fork PRs)"; \
@@ -982,7 +1054,8 @@ preflight: submodules
 		if [ -z "$$checks" ]; then echo "   ❌ $$mod: CI unavailable"; fail=1; \
 		else \
 			set -- $$checks; total=$$1; unready=$$2; listed=$$3; \
-			if [ "$$total" = "0" ]; then echo "   ❌ $$mod: no CI evidence"; fail=1; \
+			if [ "$$total" = "0" ] && echo " $(PREFLIGHT_NO_CI_OK) " | grep -q " $$mod "; then echo "   ⚠️  $$mod: no CI on the pin (accepted, see PREFLIGHT_NO_CI_OK)"; \
+			elif [ "$$total" = "0" ]; then echo "   ❌ $$mod: no CI evidence"; fail=1; \
 			elif [ "$$total" != "$$listed" ]; then echo "   ❌ $$mod: incomplete CI evidence ($$listed/$$total checks)"; fail=1; \
 			elif [ "$$unready" = "0" ]; then echo "   ✅ $$mod: $$total/$$total green"; \
 			else echo "   ❌ $$mod: $$unready/$$total checks failed or incomplete"; fail=1; fi; \

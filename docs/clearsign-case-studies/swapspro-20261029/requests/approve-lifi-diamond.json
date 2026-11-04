@@ -1,0 +1,29 @@
+{
+ "site": "https://www.swaps.pro",
+ "sell": "eth-usdc",
+ "buy": "eth-eth",
+ "amount": "25000",
+ "route": "^LI.FI",
+ "review": "ROUTE | LI.FI · best price | SLIPPAGE | 0.5% | Nordstern Finance | network ≈ $333.57 | 3 ROUTES COMPARED | show | PRICE IMPACT | -1.84% | RECIPIENT | 0x9858Ef…aEda94 | APPROVAL | Required · 1 extra tx | First-time USDC swap: you'll approve the router (one tx), then sign the swap. | Confirm swap | FEATURED | BOAR — offline AI, on Base | An open-source AI companion that keeps working with no signal. $BOAR is now featured ",
+ "method": "ETH_SENDTRANSACTION",
+ "body": {
+  "from": "0x9858EfFD232B4033E47d90003D41EC34EcaEda94",
+  "addressNList": [
+   2147483692,
+   2147483708,
+   2147483648,
+   0,
+   0
+  ],
+  "data": "0x095ea7b30000000000000000000000001231deb6f5749ef6ce6943a275a1d3e7486f4eae00000000000000000000000000000000000000000000000000000005d21dba00",
+  "nonce": "0x7",
+  "gasLimit": "0x11940",
+  "gas": "0x11940",
+  "value": "0x0",
+  "to": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+  "chainId": "0x1",
+  "maxFeePerGas": "0x108400c756",
+  "maxPriorityFeePerGas": "0x3b9aca00"
+ },
+ "capturedAt": "2026-10-29T21:51:45.624Z"
+}

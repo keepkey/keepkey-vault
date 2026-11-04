@@ -4,7 +4,7 @@
  * normal path. The ClearSign service is stubbed (fetch); the definition is a
  * real registry program signed under a TEST root.
  */
-import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from 'bun:test'
 import type { SigningRequestInfo } from '../shared/types'
 import { assessSigningRisk } from '../shared/clearsign-risk'
 import { buildClearSignReport } from '../shared/clearsign-report'
@@ -13,6 +13,11 @@ import { attachErc7730Definition } from './evm-signing-preview'
 import { evmCallRequiresAdvancedMode } from './evm-signing-policy'
 import { forgetRefusedErc7730Definitions } from './erc7730-resolver'
 import fixtures from './erc7730-resolver.fixtures.json'
+import { ERC7730_FIXTURE_ROOT_PUBLIC_KEY, trustTestRoot } from '../../__tests__/support/clearsign-test-root'
+// The replay fixtures are signed under their TEST root: trusted for this file.
+let restoreRoot = () => {}
+beforeAll(() => { restoreRoot = trustTestRoot(ERC7730_FIXTURE_ROOT_PUBLIC_KEY) })
+afterAll(() => restoreRoot())
 
 const { tx, definition } = fixtures.plain
 const FROM = '0x1111111111111111111111111111111111111111'

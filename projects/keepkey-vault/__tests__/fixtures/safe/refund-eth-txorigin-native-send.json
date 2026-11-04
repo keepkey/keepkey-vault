@@ -1,0 +1,119 @@
+{
+ "id": "refund-eth-txorigin-native-send",
+ "kind": "refund in ETH to tx.origin (gasToken 0, refundReceiver 0) on a 0.05 ETH send to an owner",
+ "chain": "eth",
+ "chainId": 1,
+ "source": {
+  "record": "https://api.safe.global/tx-service/eth/api/v1/multisig-transactions/0x3afa675296032a5d768eac46f32aa49c9243c2db723c05eb3f1419f3257ee393/",
+  "safe": "https://api.safe.global/tx-service/eth/api/v1/safes/0x751725ced1580d936fA12F6201a76fa02Fcba5fD/",
+  "executedTx": "0x9500f2d455f3c16e03586e1932dcb3f34bf23717a9b61ab3c082cc8eda9286d2",
+  "fetched": "2026-10-30"
+ },
+ "safe": "0x751725ced1580d936fA12F6201a76fa02Fcba5fD",
+ "safeVersion": "1.3.0",
+ "threshold": 2,
+ "owners": [
+  "0x6F34B2A9C686c8cA2240773f9b1fc564AdC122C2",
+  "0xa77dCD60E1A16bA6CA07E5574536691c820b4B0D",
+  "0xf44B95991CaDD73ed769454A03b3820997f00873"
+ ],
+ "refund": {
+  "gasPrice": "3522492647",
+  "gasToken": "0x0000000000000000000000000000000000000000",
+  "refundReceiver": "0x0000000000000000000000000000000000000000",
+  "baseGas": "62422",
+  "executor": "0x05466fc96BA8DBB4B0f3f360AdfDD7C14E828a5F",
+  "paymentOnChain": "254028079731052"
+ },
+ "dataDecoded": null,
+ "origin": "{}",
+ "typedData": {
+  "domain": {
+   "chainId": 1,
+   "verifyingContract": "0x751725ced1580d936fA12F6201a76fa02Fcba5fD"
+  },
+  "types": {
+   "EIP712Domain": [
+    {
+     "name": "chainId",
+     "type": "uint256"
+    },
+    {
+     "name": "verifyingContract",
+     "type": "address"
+    }
+   ],
+   "SafeTx": [
+    {
+     "name": "to",
+     "type": "address"
+    },
+    {
+     "name": "value",
+     "type": "uint256"
+    },
+    {
+     "name": "data",
+     "type": "bytes"
+    },
+    {
+     "name": "operation",
+     "type": "uint8"
+    },
+    {
+     "name": "safeTxGas",
+     "type": "uint256"
+    },
+    {
+     "name": "baseGas",
+     "type": "uint256"
+    },
+    {
+     "name": "gasPrice",
+     "type": "uint256"
+    },
+    {
+     "name": "gasToken",
+     "type": "address"
+    },
+    {
+     "name": "refundReceiver",
+     "type": "address"
+    },
+    {
+     "name": "nonce",
+     "type": "uint256"
+    }
+   ]
+  },
+  "primaryType": "SafeTx",
+  "message": {
+   "to": "0xf44B95991CaDD73ed769454A03b3820997f00873",
+   "value": "50000000000000000",
+   "data": "0x",
+   "operation": 0,
+   "safeTxGas": "78492",
+   "baseGas": "62422",
+   "gasPrice": "3522492647",
+   "gasToken": "0x0000000000000000000000000000000000000000",
+   "refundReceiver": "0x0000000000000000000000000000000000000000",
+   "nonce": "279"
+  }
+ },
+ "safeTxHash": "0x3afa675296032a5d768eac46f32aa49c9243c2db723c05eb3f1419f3257ee393",
+ "ownerSignatureCheck": [
+  {
+   "owner": "0xf44B95991CaDD73ed769454A03b3820997f00873",
+   "signatureType": "EOA",
+   "recovered": "0xf44B95991CaDD73ed769454A03b3820997f00873",
+   "ok": true
+  },
+  {
+   "owner": "0x6F34B2A9C686c8cA2240773f9b1fc564AdC122C2",
+   "signatureType": "EOA",
+   "recovered": "0x6F34B2A9C686c8cA2240773f9b1fc564AdC122C2",
+   "ok": true
+  }
+ ],
+ "note": "typedData is exactly what a Safe owner wallet receives (eth_signTypedData_v4); owner signatures recover over safeTxHash."
+}

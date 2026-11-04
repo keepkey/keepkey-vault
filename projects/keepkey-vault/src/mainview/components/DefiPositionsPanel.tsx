@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useState } from "react"
-import { Box, Flex, Text, VStack, HStack, Image, Button, Spinner } from "@chakra-ui/react"
-import { FaEye, FaEyeSlash } from "react-icons/fa"
+import { Box, Flex, Text, VStack, HStack, Image, Button, Spinner, chakra } from "@chakra-ui/react"
+import { FaChevronRight, FaEye, FaEyeSlash } from "react-icons/fa"
 import { useTranslation } from "react-i18next"
 import { rpcRequest } from "../lib/rpc"
 import { useFiat } from "../lib/fiat-context"
 import { formatBalance } from "../lib/formatting"
+import { defiPositionName } from "../lib/defi-position"
+import { DefiPositionDialog } from "./DefiPositionDialog"
 import type { DefiPosition } from "../../shared/types"
 
 interface DefiPositionsPanelProps {
@@ -38,6 +40,9 @@ export function DefiPositionsPanel({ address, color, positions: positionsFromPro
 	const [loading, setLoading] = useState(false)
 	const [loaded, setLoaded] = useState(false)
 	const [showHidden, setShowHidden] = useState(false)
+	const [selectedPosition, setSelectedPosition] = useState<DefiPosition | null>(null)
+
+	useEffect(() => { setSelectedPosition(null) }, [address])
 
 	const positions = positionsFromProps ?? fetchedPositions
 
@@ -72,8 +77,16 @@ export function DefiPositionsPanel({ address, color, positions: positionsFromPro
 	if (loaded && !loading && positions.length === 0) return null
 
 	const renderRow = (pos: DefiPosition, key: string) => (
-		<Box
+		<chakra.button
 			key={key}
+			type="button"
+			onClick={(event) => { event.stopPropagation(); setSelectedPosition(pos) }}
+			aria-label={t("defiViewDetails", { name: defiPositionName(pos) })}
+			aria-haspopup="dialog"
+			textAlign="left"
+			cursor="pointer"
+			_hover={{ bg: "rgba(255,255,255,0.04)" }}
+			_focusVisible={{ outline: "2px solid", outlineColor: "kk.gold", outlineOffset: "2px" }}
 			className="v3-glass-row"
 			w="100%"
 			py="2"
@@ -93,7 +106,7 @@ export function DefiPositionsPanel({ address, color, positions: positionsFromPro
 					<Box minW="0">
 						<HStack gap="1.5">
 							<Text fontSize="sm" fontWeight="600" color="white" lineHeight="1.2" truncate>
-								{pos.name}
+								{defiPositionName(pos)}
 							</Text>
 							{pos.metaType && (
 								<Text fontSize="9px" bg="rgba(96,165,250,0.15)" color="#60a5fa" px="1" py="0.5" borderRadius="sm" lineHeight="1" textTransform="capitalize">
@@ -170,12 +183,14 @@ export function DefiPositionsPanel({ address, color, positions: positionsFromPro
 						)
 					})()}
 				</Box>
+				<Box as={FaChevronRight} color="kk.textMuted" fontSize="10px" ml="3" flexShrink={0} aria-hidden="true" />
 			</Flex>
-		</Box>
+		</chakra.button>
 	)
 
 	return (
 		<Box>
+			{selectedPosition && <DefiPositionDialog position={selectedPosition} address={address} onClose={() => setSelectedPosition(null)} />}
 			<Flex align="center" justify="space-between" mb="3" px="1">
 				<Text fontSize="11px" fontWeight="500" color="var(--text-3)" textTransform="uppercase" letterSpacing="0.18em">
 					{t("defiPositions")}{live.length > 0 && ` · ${live.length}`}

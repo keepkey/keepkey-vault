@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'bun:test'
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'bun:test'
 import { createHash } from 'node:crypto'
 import {
   checkErc7730CalldataDefinition, erc7730CatalogDescribesCall, fetchErc7730CalldataDefinition, forgetRefusedErc7730Definitions, isErc7730Refusal,
@@ -8,6 +8,11 @@ import { firmwareClearSigns } from './calldata-decoder'
 // Two registry fixtures signed under a TEST root (public data, no keys): the
 // sAVAX submit() program, and Safe createProxyWithNonce, which has an embedded call.
 import fixtures from './erc7730-resolver.fixtures.json'
+import { ERC7730_FIXTURE_ROOT_PUBLIC_KEY, trustTestRoot } from '../../__tests__/support/clearsign-test-root'
+// The replay fixtures are signed under their TEST root: trusted for this file.
+let restoreRoot = () => {}
+beforeAll(() => { restoreRoot = trustTestRoot(ERC7730_FIXTURE_ROOT_PUBLIC_KEY) })
+afterAll(() => restoreRoot())
 
 const plain = fixtures.plain
 const embedded = fixtures.embedded

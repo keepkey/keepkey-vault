@@ -87,7 +87,11 @@ export function buildRecord(opts: {
 
 // --- buffer + flush ---
 
-let cfg: { apiBase: string; queryKey: string } | null = null
+type PerfContext = { apiBase: string; queryKey: string; isCurrent?: () => boolean }
+let cfg: PerfContext | null = null
+function contextIsCurrent(context: PerfContext): boolean {
+  try { return context.isCurrent?.() !== false } catch { return false }
+}
 const buffer: PerfRecord[] = []
 let flushTimer: ReturnType<typeof setInterval> | null = null
 let offline = false
@@ -122,16 +126,17 @@ export function recentPerfRecords(n = 20): PerfRecord[] {
 let flushInFlight = false
 
 export async function flush(): Promise<void> {
-  if (offline || !cfg || buffer.length === 0 || flushInFlight) return
+  if (offline || !cfg || !contextIsCurrent(cfg) || buffer.length === 0 || flushInFlight) return
+  const context = cfg
   flushInFlight = true
   const records = buffer.slice() // clear only on success — a failed flush retries next cycle
   try {
-    const res = await fetch(`${cfg.apiBase}/api/v1/telemetry/vault`, {
+    const res = await fetch(`${context.apiBase}/api/v1/telemetry/vault`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: cfg.queryKey },
+      headers: { 'Content-Type': 'application/json', Authorization: context.queryKey },
       body: JSON.stringify({ records }),
     })
-    if (res.ok) buffer.splice(0, records.length)
+    if (res.ok && cfg === context && contextIsCurrent(context)) buffer.splice(0, records.length)
     // Non-2xx (e.g. server without the endpoint yet): keep buffer, cap drops oldest.
   } catch {
     // Best-effort: never surface telemetry failures.
@@ -144,7 +149,8 @@ export async function flush(): Promise<void> {
  * Wrap GetPortfolioBalances on the (singleton) pioneer client so every call
  * site is instrumented in one place. Called from getPioneer() after init.
  */
-export function instrumentPortfolio(client: any, options: { apiBase: string; queryKey: string }): void {
+export function instrumentPortfolio(client: any, options: PerfContext): void {
+  if (cfg && (cfg.apiBase !== options.apiBase || cfg.queryKey !== options.queryKey || !contextIsCurrent(cfg))) buffer.length = 0
   cfg = options
   startFlushTimer()
   if (typeof client?.GetPortfolioBalances !== 'function' || client.__perfInstrumented) return
@@ -156,10 +162,10 @@ export function instrumentPortfolio(client: any, options: { apiBase: string; que
       // clientTotalMs here is request→response in the bun process (no render
       // hook available server-side of the webview) — acceptable v1 per handoff.
       const rawData = resp?.data?.data || resp?.data || {}
-      pushRecord(buildRecord({ clientTotalMs: Date.now() - t0, meta: rawData.meta }))
+      if (contextIsCurrent(options)) pushRecord(buildRecord({ clientTotalMs: Date.now() - t0, meta: rawData.meta }))
       return resp
     } catch (err: any) {
-      pushRecord(buildRecord({ clientTotalMs: Date.now() - t0, errored: true, errorMessage: err?.message }))
+      if (contextIsCurrent(options)) pushRecord(buildRecord({ clientTotalMs: Date.now() - t0, errored: true, errorMessage: err?.message }))
       throw err
     }
   }

@@ -101,3 +101,29 @@ describe('Taproot transaction building', () => {
 		expect(change.addressNList[0]).toBe(0x80000000 + 84)
 	})
 })
+
+describe('Litecoin extended-key script types', () => {
+	const litecoin = { ...BITCOIN, id: 'litecoin', coin: 'Litecoin', symbol: 'LTC', networkId: 'bip122:12a765e31ffd4059bada1e25190f6e98' }
+	for (const [prefix, scriptType, purpose] of [['Ltub', 'p2pkh', 44], ['Mtub', 'p2sh-p2wpkh', 49], ['zpub', 'p2wpkh', 84]] as const) {
+		it(`${prefix} preserves ${scriptType} inputs and change without a caller override`, async () => {
+			const tx = await buildUtxoTx(pioneerWith([{ ...taprootUtxo(), path: `m/${purpose}'/2'/0'/0/0` }]), litecoin, {
+				to: TO, amount: '0.001', xpub: `${prefix}-public-key-fixture`,
+			})
+			expect(tx.inputs[0].scriptType).toBe(scriptType)
+			expect(tx.inputs[0].addressNList.slice(0, 3)).toEqual([0x80000000 + purpose, 0x80000002, 0x80000000])
+			const change = tx.outputs.find((output: any) => output.isChange)
+			expect(change.scriptType).toBe(scriptType)
+			expect(change.addressNList.slice(0, 3)).toEqual([0x80000000 + purpose, 0x80000002, 0x80000000])
+		})
+	}
+	it('preserves explicit historical account paths and script overrides above prefix inference', async () => {
+		const accountPath = [0x8000002c, 0x80000002, 0x80000003]
+		const tx = await buildUtxoTx(pioneerWith([{ ...taprootUtxo(), path: "m/44'/2'/0'/0/0" }]), litecoin, {
+			to: TO, amount: '0.001', xpub: 'zpub-historical-public-fixture', accountPath, scriptTypeOverride: 'p2wpkh',
+		})
+		const change = tx.outputs.find((output: any) => output.isChange)
+		expect(change.scriptType).toBe('p2wpkh')
+		expect(change.addressNList.slice(0, 3)).toEqual(accountPath)
+		expect(tx.inputs[0].addressNList.slice(0, 3)).toEqual(accountPath)
+	})
+})

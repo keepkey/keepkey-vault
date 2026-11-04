@@ -1,11 +1,20 @@
 import { createHash } from 'node:crypto'
 import { utils as ethersUtils } from 'ethers'
+import { deviceClearSignTestRoot, deviceTrustsProductionRoot } from '../shared/certified-evm-envelope'
 
 export const ALPHA_ROOT_PATH = [0x8000002c, 0x8000003c, 0x80000000, 0, 0]
 /** The one ClearSign root Desktop trusts: the production root compiled into
  *  released 7.16 firmware. The alpha root lives in
  *  scripts/clearsign-alpha-rehearsal.ts and is never shipped. */
 export const PRODUCTION_ROOT_PUBLIC_KEY = '027c1fde75db6c36393e095e0dc5ab9a5bcf1ae9eb92b5d36e212a2bf7f8a6e321'
+
+/** The root the connected device checks certified descriptions against: the
+ *  production root, an emulator's TEST root (QA, index.ts), or undefined when
+ *  the device trusts neither (the stock emulator's alpha root). */
+export function deviceClearSignRoot(): string | undefined {
+  if (!deviceTrustsProductionRoot()) return undefined
+  return deviceClearSignTestRoot() ?? PRODUCTION_ROOT_PUBLIC_KEY
+}
 export const CLEARSIGN_DOMAIN_SEPARATOR = '8839401f8d0112b4348770ddace152e96fc5e5081aefeed6b5d8bef0d6ecdf66'
 export const CLEARSIGN_MIN_EXPIRY = 1787270400
 

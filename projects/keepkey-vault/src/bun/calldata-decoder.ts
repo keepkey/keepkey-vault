@@ -15,10 +15,12 @@ import type { CalldataDecodedInfo, CalldataDecodedField } from '../shared/types'
 import { thorDepositFields } from './thor-swap-preview'
 import { acrossDepositView, decodeAcrossDepositV3 } from '../shared/acrossDeposit'
 import { RELAY_DEPOSITORY, decodeRelayDeposit, isZeroAddress } from '../shared/relayDeposit'
+import { decodeSwapCall } from './swap-decoders'
 import { evmNativeValue } from '../shared/evmFeePreview'
 import { REVIEWED_EVM_TOKENS } from './evm-certified-schema'
 import firmwareTokenTable from './firmware-token-table.json'
 import firmwareTokenTable716 from './firmware-token-table-716.json'
+import firmwareTokenTable717 from './firmware-token-table-717.json'
 import { versionCompare } from '../shared/firmware-versions'
 
 // ── Helpers ──────────────────────────────────────────────────────────────
@@ -486,10 +488,24 @@ function thor714Confirms(data: string, chainId: number | undefined, selector: st
   const native = /^0{64}$/.test(data.slice(10 + 64, 10 + 128))
   return native || BigInt(`0x${data.slice(10 + 128, 10 + 192)}`) < 10n ** 28n
 }
-// Display-only: THORChain's Base router decodes for the overlay on every
-// firmware; whether it is native is decided by the tables above.
+/** A deposit to a router Desktop knows that 7.14.x refuses outright: the
+ *  device takes every deposit selector (thor_isThorchainTx), and when
+ *  thor_confirmThorTx refuses the memo it cancels, AdvancedMode or not.
+ *  7.15+ signs it only for a router it pins (not the legacy Maya router). */
+export function thor714Refuses(to: string | undefined, data: string | undefined, chainId: number | undefined, firmwareVersion: string | undefined): boolean {
+  if (!to || !data || data.length < 10 || (data.length - 2) / 2 > FIRMWARE_INITIAL_CHUNK_BYTES) return false
+  const selector = data.slice(0, 10).toLowerCase()
+  return firmwareVersion?.split('.').slice(0, 2).join('.') === THOR_UNPINNED_LINE && THOR_MAYA_DEPOSIT.has(selector)
+    && knownDepositRouter(to.toLowerCase(), chainId) && !thor714Confirms(data, chainId, selector)
+}
+
+// Display-only: THORChain's Base and BSC routers decode for the overlay on
+// every firmware; whether it is native is decided by the tables above. Each is
+// the router thornode publishes for that chain (GET /thorchain/inbound_addresses)
+// and has code on chain (eth_getCode, 2026-10-29).
 const THOR_ROUTER_DECODE_BY_CHAIN: Record<number, string> = {
   ...THOR_ROUTER_BY_CHAIN,
+  56: ADDR.THOR_ROUTER_BSC,
   8453: ADDR.THOR_ROUTER_AVAX,
 }
 
@@ -519,17 +535,21 @@ const FIRMWARE_TOKENS: ReadonlySet<string> = new Set((firmwareTokenTable as { to
  *  a subset of the above. Everything else is AdvancedMode or a certified schema. */
 const FIRMWARE_TOKENS_716: ReadonlySet<string> = new Set((firmwareTokenTable716 as { tokens: string[] }).tokens)
 const PRIORITY_ONLY_TOKENS_MIN_FW = '7.16.0'
+/** 7.17 (fork alpha 7d6743275) builds both lists with `--profile priority-only`:
+ *  50 mainnet entries, a subset of the 7.16 table (no WETH, WBTC, UNI, ...). */
+const FIRMWARE_TOKENS_717: ReadonlySet<string> = new Set((firmwareTokenTable717 as { tokens: string[] }).tokens)
+const PRIORITY_ONLY_BOTH_LISTS_MIN_FW = '7.17.0'
 
 /** Firmware ethereum_contractHandled only claims calldata that fits the first
  *  1024-byte chunk (data_total == data_initial_chunk.size). */
 const FIRMWARE_INITIAL_CHUNK_BYTES = 1024
 
 /** True iff (chainId, token) is in this firmware's built-in token table.
- *  Unknown version = the smaller 7.16 table: over-warning is recoverable,
+ *  Unknown version = the smallest (7.17) table: over-warning is recoverable,
  *  predicting a clear-sign the device refuses is a dead "Blocked". */
 export function firmwareKnowsToken(chainId: number | undefined, token: string | undefined, firmwareVersion?: string): boolean {
-  const table = firmwareVersion && versionCompare(firmwareVersion, PRIORITY_ONLY_TOKENS_MIN_FW) < 0
-    ? FIRMWARE_TOKENS : FIRMWARE_TOKENS_716
+  const table = !firmwareVersion || versionCompare(firmwareVersion, PRIORITY_ONLY_BOTH_LISTS_MIN_FW) >= 0 ? FIRMWARE_TOKENS_717
+    : versionCompare(firmwareVersion, PRIORITY_ONLY_TOKENS_MIN_FW) >= 0 ? FIRMWARE_TOKENS_716 : FIRMWARE_TOKENS
   return chainId != null && !!token && table.has(`${chainId}:${token.toLowerCase()}`)
 }
 
@@ -637,7 +657,8 @@ export async function decodeCalldata(
   if (THOR_MAYA_DEPOSIT.has(selector)) {
     const dest = contractAddress.toLowerCase()
     const thor = _chainId != null && THOR_ROUTER_DECODE_BY_CHAIN[_chainId] === dest
-    const maya = _chainId === 1 && (dest === ADDR.MAYA_ROUTER || dest === ADDR.MAYA_ROUTER_V4)
+    const maya = (_chainId === 1 && (dest === ADDR.MAYA_ROUTER || dest === ADDR.MAYA_ROUTER_V4))
+      || (_chainId === 42161 && dest === ADDR.MAYA_ROUTER_ARB) // mayanode's ARB router (GET /mayachain/inbound_addresses)
     const protocol = thor ? 'THORChain' : maya ? 'Mayachain' : null
     const fields = protocol ? thorDepositFields(data, _chainId, protocol) : null
     if (fields) return {
@@ -698,6 +719,11 @@ export async function decodeCalldata(
       selector, functionType: 'bridge', fields, source: 'local',
     }
   }
+
+  // 0x Settler, CoW EthFlow and Relay Router swaps (swap-decoders): pinned
+  // contracts only, every step decoded, else null. Display only, like Relay above.
+  const swap = decodeSwapCall(contractAddress, data, _chainId, value)
+  if (swap) return swap
 
   // Tier 1: Local decoders (offline, instant)
   for (const decoder of LOCAL_DECODERS) {

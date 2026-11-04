@@ -1,0 +1,95 @@
+{
+ "_source": "Solana mainnet transaction 3x3hHN9yDgUWrFNSVe3gX82W3rFLXkgeVWBfDui8GgrRQYRWbxFPQ3DZmEGkK4upk4NPVipUK9vLDFfm43NUZhxd: getTransaction (base64 + json) and getMultipleAccounts from https://solana-rpc.publicnode.com, captured 2026-10-29 at slot 463060930. Explorer: https://solscan.io/tx/3x3hHN9yDgUWrFNSVe3gX82W3rFLXkgeVWBfDui8GgrRQYRWbxFPQ3DZmEGkK4upk4NPVipUK9vLDFfm43NUZhxd. accounts = the lookup tables and the token accounts (>=165 B, token-program owned) among the transaction's keys, as they were at capture time; null = account no longer exists.",
+ "signature": "3x3hHN9yDgUWrFNSVe3gX82W3rFLXkgeVWBfDui8GgrRQYRWbxFPQ3DZmEGkK4upk4NPVipUK9vLDFfm43NUZhxd",
+ "slot": 463060442,
+ "blockTime": 1793315313,
+ "rawTx": "AZOBBE7htL05sRxyJdYklnFiqZ9FQHIfzLVHxlCxmbyqIpKEUCKhQfuiIndOgJTKnXmdv0MvSvjDV/9AcrW4QgqAAQAFCGLpi4+gacswdgLEtHKPmTEx9jrkLn+XKrlpdlFVzq2VUt23iVOHc8GlZi04/MfCeuvTMK3ARsiYruPFsULxL7OBjlcDwYYOM7N7daLXOqOcTyk8YztEBFQ9kOhsJhr5KAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAF5JIO2yKKoe3Rx2BT5WR+TlchAqc49n01bp9OkuKdJ5yCwpq7FxBaiiN4qOvj2GT8n6SsgdEgQValSX/0IIrRIyXJY9OJInxuz0QKRSODYMLWhOZ2v8QhASOe9jb6fhZBt324e51j94YQl285GzN2rYa/E2DuQ0n/r35KNihi/xtjOSxKW4fXYXypqZVamcKcoXBgaB2nAfXDTfXdRzXBwIGBgACBQQDBwEBBwQBBAIACgzAO0cDAAAAAAYA",
+ "loadedAddresses": {
+  "readonly": [],
+  "writable": []
+ },
+ "preTokenBalances": [
+  {
+   "accountIndex": 1,
+   "mint": "2b1kV6DkPAnxd5ixfnxCpjxmKwqjjaYmCZfHsFu24GXo",
+   "owner": "7f7WAmfh3gfhAs9PqoLyBtT8XZaw84XsoQSrqo2FZ3Fa",
+   "programId": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+   "uiTokenAmount": {
+    "amount": "666780000",
+    "decimals": 6,
+    "uiAmount": 666.78,
+    "uiAmountString": "666.78"
+   }
+  }
+ ],
+ "postTokenBalances": [
+  {
+   "accountIndex": 1,
+   "mint": "2b1kV6DkPAnxd5ixfnxCpjxmKwqjjaYmCZfHsFu24GXo",
+   "owner": "7f7WAmfh3gfhAs9PqoLyBtT8XZaw84XsoQSrqo2FZ3Fa",
+   "programId": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+   "uiTokenAmount": {
+    "amount": "611780000",
+    "decimals": 6,
+    "uiAmount": 611.78,
+    "uiAmountString": "611.78"
+   }
+  },
+  {
+   "accountIndex": 2,
+   "mint": "2b1kV6DkPAnxd5ixfnxCpjxmKwqjjaYmCZfHsFu24GXo",
+   "owner": "8gBF34G1d61hNQpHk2ogXkyxKKv27xDiNKXANqT7Jn67",
+   "programId": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+   "uiTokenAmount": {
+    "amount": "55000000",
+    "decimals": 6,
+    "uiAmount": 55,
+    "uiAmountString": "55"
+   }
+  }
+ ],
+ "preBalances": [
+  20895243284,
+  2192400,
+  0,
+  1,
+  2078412093,
+  0,
+  3388612899,
+  70228638
+ ],
+ "postBalances": [
+  20893638084,
+  2192400,
+  1600200,
+  1,
+  2078412093,
+  0,
+  3388612899,
+  70228638
+ ],
+ "accountKeys": [
+  "7f7WAmfh3gfhAs9PqoLyBtT8XZaw84XsoQSrqo2FZ3Fa",
+  "6aUX6FP18XZNQqVTQ8VBfPSWuYVdSf39RWJEk2UrXevW",
+  "9ijUnqDKSagjVqU5ZMKMAwt3guQEwoDX5jiH5e9h95ew",
+  "11111111111111111111111111111111",
+  "2b1kV6DkPAnxd5ixfnxCpjxmKwqjjaYmCZfHsFu24GXo",
+  "8gBF34G1d61hNQpHk2ogXkyxKKv27xDiNKXANqT7Jn67",
+  "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL",
+  "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"
+ ],
+ "accounts": {
+  "6aUX6FP18XZNQqVTQ8VBfPSWuYVdSf39RWJEk2UrXevW": {
+   "owner": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+   "data": "F5JIO2yKKoe3Rx2BT5WR+TlchAqc49n01bp9OkuKdJ5i6YuPoGnLMHYCxLRyj5kxMfY65C5/lyq5aXZRVc6tlaDB4RsAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgcAAAACAAgAAAAAAAAAAAAPAAEAAA=="
+  },
+  "9ijUnqDKSagjVqU5ZMKMAwt3guQEwoDX5jiH5e9h95ew": {
+   "owner": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+   "data": "F5JIO2yKKoe3Rx2BT5WR+TlchAqc49n01bp9OkuKdJ5yCwpq7FxBaiiN4qOvj2GT8n6SsgdEgQValSX/0IIrRMA7RwMAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgcAAAACAAgAAAAAAAAAAAAPAAEAAA=="
+  },
+  "2b1kV6DkPAnxd5ixfnxCpjxmKwqjjaYmCZfHsFu24GXo": {
+   "owner": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+   "data": "AQAAAJPkMU4Y+uEbsZMeeiiX9ljfNXCarVZ7fbwaCVSmePpUuiORwsFpAgAGAQEAAAAXhTJh72q4Uypn8FOGWq0xKT/PB88SCrW5oVcGVI3AKwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQMAIAAXhTJh72q4Uypn8FOGWq0xKT/PB88SCrW5oVcGVI3AKwwAIAAXhTJh72q4Uypn8FOGWq0xKT/PB88SCrW5oVcGVI3AKwEAbAAXhTJh72q4Uypn8FOGWq0xKT/PB88SCrW5oVcGVI3AKxeFMmHvarhTKmfwU4ZarTEpP88HzxIKtbmhVwZUjcArAAAAAAAAAABdAgAAAAAAAAAAAAAAAAAAAABdAgAAAAAAAAAAAAAAAAAAAAAEAEEAF4UyYe9quFMqZ/BThlqtMSk/zwfPEgq1uaFXBlSNwCsAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQAIEAF4UyYe9quFMqZ/BThlqtMSk/zwfPEgq1uaFXBlSNwCscN+ZDO3ME3YJzeuQNm4vzxJ9bDmxJqNUzKLPlBpAcVwEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADgBAABeFMmHvarhTKmfwU4ZarTEpP88HzxIKtbmhVwZUjcArAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAASAEAAF4UyYe9quFMqZ/BThlqtMSk/zwfPEgq1uaFXBlSNwCsXkkg7bIoqh7dHHYFPlZH5OVyECpzj2fTVun06S4p0nhMArgAXhTJh72q4Uypn8FOGWq0xKT/PB88SCrW5oVcGVI3AKxeSSDtsiiqHt0cdgU+Vkfk5XIQKnOPZ9NW6fTpLinSeCgAAAFBheVBhbCBVU0QFAAAAUFlVU0RPAAAAaHR0cHM6Ly90b2tlbi1tZXRhZGF0YS5wYXhvcy5jb20vcHl1c2RfbWV0YWRhdGEvcHJvZC9zb2xhbmEvcHl1c2RfbWV0YWRhdGEuanNvbgAAAAA="
+  }
+ }
+}

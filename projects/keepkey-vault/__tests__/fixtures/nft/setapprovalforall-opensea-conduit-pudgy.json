@@ -1,0 +1,21 @@
+{
+ "_source": {
+  "chain": "Ethereum mainnet",
+  "transaction": "0x67df2480afbcdee7fe792c6f6f7887f7e6aaff8000f0f09d8cd21558a04b7d7d",
+  "explorer": "https://etherscan.io/tx/0x67df2480afbcdee7fe792c6f6f7887f7e6aaff8000f0f09d8cd21558a04b7d7d",
+  "block": 26301258,
+  "rpc": "https://ethereum-rpc.publicnode.com",
+  "method": "eth_getTransactionByHash of an ApprovalForAll(owner, OpenSea conduit, true) log on Pudgy Penguins (0xBd3531dA5CF5857e7CfAA92426877b022e612cf8)",
+  "fetched": "2026-10-29"
+ },
+ "method": "ETH_SENDTRANSACTION",
+ "body": {
+  "from": "0x7daedbadb0d5378727b82ed0bf14b36e12755647",
+  "to": "0xbd3531da5cf5857e7cfaa92426877b022e612cf8",
+  "value": "0x0",
+  "data": "0xa22cb4650000000000000000000000001e0049783f008a0085193e00003d00cd54003c710000000000000000000000000000000000000000000000000000000000000001",
+  "nonce": "0x3d",
+  "gas": "0xf07c",
+  "chainId": "0x1"
+ }
+}

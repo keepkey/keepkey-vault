@@ -15,4 +15,4 @@
 [submodule "modules/electrobun"]
 	path = modules/electrobun
 	url = https://github.com/BitHighlander/electrobun.git
-	branch = keepkey/launcher-env-lifetime
+	branch = keepkey/launcher-env-uaf-fix

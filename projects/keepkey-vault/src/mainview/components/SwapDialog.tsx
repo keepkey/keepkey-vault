@@ -27,6 +27,8 @@ import { providerTrackerUrl } from "../lib/trackers"
 import { ProviderBadge, ProverChip, resolveProvider } from "./ProviderBadge"
 import { getSwapperAnimation } from "../lib/swapper-animations"
 import { assessSwapRisk } from "../../shared/swap-risk"
+import { swapHealthSummary, swapProviderPresentation, swapHealthQuoteExplanation } from "../../shared/swap-health"
+import { knownSpenderName } from "../../shared/evm-known-spenders"
 import { isSwapFullySettled, payoutReachesMinimum } from "../../shared/swap-settlement"
 import { SwapRiskReview } from "./SwapRiskReview"
 import { computeDustWarning, shouldWarnHighSlippage, computeEffectiveSlippageBps, isSmallSwapQuoteWarning } from "../../shared/swap-warnings"
@@ -204,15 +206,18 @@ function protocolLabel(swapper: string | undefined | null): string | null {
   return swapper
 }
 
-// Friendly hint for a known spender contract address. Independent of the
-// protocol — many ShapeShift routes (ButterSwap, Relay, Hop, etc.) use the
-// same Relay aggregator router as their executor. Returns null for unknowns.
-function spenderHint(addr: string | undefined): string | null {
+// Friendly hint for a known spender contract address: Desktop's per-chain
+// spender list first (the same names the signing card uses), then a few
+// protocol-independent hints — many ShapeShift routes (ButterSwap, Relay, Hop,
+// etc.) use the same Relay aggregator router as their executor. Returns null
+// for unknowns.
+function spenderHint(chainId: unknown, addr: string | undefined): string | null {
   if (!addr) return null
+  const known = knownSpenderName(Number(chainId) || undefined, addr)
+  if (known) return known
   const a = addr.toLowerCase()
   if (a === '0xee0319cf0bca5d09333f9f6277743e8de31bd69a') return 'Relay aggregator router'
   if (a === '0xdef1c0ded9bec7f1a1670819833240f027b25eff') return '0x ExchangeProxy'
-  if (a === '0x9008d19f58aabd9ed0d60971565aa8510560ab41') return 'CoW Vault Relayer'
   return null
 }
 
@@ -257,18 +262,6 @@ function formatUnitsBigInt(value: bigint, decimals: unknown, maxFraction = 8): s
 function formatNativeUnits(value: bigint | null, decimals: unknown, symbol: string, maxFraction = 8): string {
   if (value === null) return '-'
   return `${formatUnitsBigInt(value, decimals, maxFraction)} ${symbol}`
-}
-
-function formatQuoteAssetAmount(raw: string | number | undefined, asset: SwapAsset, referenceAmount?: string): string {
-  const value = raw == null ? '0' : String(raw)
-  const precision = normalizeDecimals(asset.decimals) ?? 0
-  if (!/^\d+$/.test(value) || precision <= 0) return formatBalance(value)
-  const reference = referenceAmount ? parseFloat(referenceAmount) : 0
-  const asNumber = Number(value)
-  const looksLikeBaseUnits =
-    value.length > Math.min(4, precision) ||
-    (Number.isFinite(asNumber) && reference > 0 && asNumber > reference * 10)
-  return looksLikeBaseUnits ? formatUnitsBigInt(BigInt(value), precision, 8) : formatBalance(value)
 }
 
 function formatGwei(value: bigint | null): string {
@@ -318,6 +311,26 @@ function ReviewRow({ label, children, accent = false }: { label: ReactNode; chil
   )
 }
 
+function QuoteFeeRows({ fees }: { fees: SwapQuote['fees'] }) {
+  const { t } = useTranslation('swap')
+  return <>
+    <ReviewRow label={t('quotedFeeRate', 'Quoted fee rate')}>
+      {fees.reportedTotalBps != null ? `${(fees.reportedTotalBps / 100).toFixed(2)}%` : t('notProvided', 'Not provided')}
+    </ReviewRow>
+    {(fees.items || []).map((fee, index) => <ReviewRow key={`${fee.kind}:${fee.recipient || fee.assetCaip || ''}:${index}`} label={
+      <span title={fee.recipient ? `Fee recipient: ${fee.recipient}` : fee.assetCaip}>
+        {fee.label || (fee.kind === 'affiliate' ? t('affiliateFee', 'Affiliate fee') : fee.kind === 'network' ? t('networkFee', 'Network fee') : t('providerFee', 'Provider fee'))}
+        {fee.recipient ? ` · ${ellipsizeMiddle(fee.recipient, 6, 4)}` : ''}
+      </span>
+    }>
+      {fee.amount != null ? <span title={`${fee.amount} ${fee.symbol || ''}${fee.amountBaseUnits ? ` (${fee.amountBaseUnits} base units)` : ''}`}>
+        {fee.estimated ? '~' : ''}{formatBalance(fee.amount)} {fee.symbol}
+        {fee.bps != null ? ` (${(fee.bps / 100).toFixed(2)}%)` : ''}
+      </span> : fee.bps != null ? `${(fee.bps / 100).toFixed(2)}%` : t('notProvided', 'Not provided')}
+    </ReviewRow>)}
+  </>
+}
+
 function EvmTxSummaryCard({
   title,
   tx,
@@ -343,7 +356,7 @@ function EvmTxSummaryCard({
   const value = toBigIntValue(tx?.value)
   const selector = evmSelector(tx?.data)
   const approve = isApproval ? parseApproveCalldata(tx?.data) : null
-  const spenderName = spenderHint(approve?.spender)
+  const spenderName = spenderHint(tx?.chainId, approve?.spender)
 
   return (
     <Box bg="rgba(0,0,0,0.20)" border="1px solid" borderColor="kk.border" borderRadius="lg" px="3" py="2">
@@ -1494,6 +1507,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
   }, [open, resumeSwap])
 
   // ── Derived values ────────────────────────────────────────────────
+  const isZcashSource = fromAsset?.chainId === 'zcash' && !fromAsset.contractAddress
   /* The entry fromBalance will actually READ, so confidence is judged against
    * the same object the amount comes from. Judging only `balances` while
    * fromBalance fell through to the `balance` prop meant a degraded prop
@@ -2691,26 +2705,8 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                 status determines the colour). Click to open the detail
                 dialog with per-provider rows. */}
             {swapHealth && (() => {
-              const worst = (() => {
-                const s = swapHealth.integrations.map(i => i.status)
-                if (s.some(x => x === 'offline')) return 'offline'
-                if (s.some(x => x === 'degraded')) return 'degraded'
-                if (s.some(x => x === 'ok')) return 'ok'
-                return 'unknown'
-              })()
-              const color =
-                worst === 'ok'       ? '#22c55e' :
-                worst === 'degraded' ? '#f59e0b' :
-                worst === 'offline'  ? '#ef4444' : '#6b7280'
-              const okCount  = swapHealth.integrations.filter(i => i.status === 'ok').length
-              const total    = swapHealth.integrations.length
-              const activeBars = worst === 'ok' ? 4 : worst === 'degraded' ? 3 : worst === 'offline' ? 1 : 2
+              const { color, bars: activeBars, label } = swapHealthSummary(swapHealth)
               const heights   = [4, 7, 10, 13]
-              const label =
-                worst === 'ok'       ? `All providers operational (${okCount}/${total})` :
-                worst === 'degraded' ? `Some providers degraded (${okCount}/${total} ok)` :
-                worst === 'offline'  ? `Provider(s) offline (${okCount}/${total} ok)` :
-                'Fetching provider status…'
               return (
                 <Box
                   as="button"
@@ -2738,7 +2734,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                         h={`${h}px`}
                         borderRadius="1px"
                         bg={active ? color : 'rgba(255,255,255,0.10)'}
-                        style={active && worst === 'ok' ? { boxShadow: `0 0 4px ${color}66` } : undefined}
+                        style={active && activeBars === 4 ? { boxShadow: `0 0 4px ${color}66` } : undefined}
                       />
                     )
                   })}
@@ -4026,6 +4022,11 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
               })()}
 
               {/* Key quote numbers — always visible, condensed */}
+              {quote.executionMode === 'relay-solver-deposit' && (
+                <Text fontSize="11px" color="kk.textSecondary" role="note">
+                  {t('relayDepositReview', 'Relay executes the swap after your deposit; destination terms are shown in this app.')}
+                </Text>
+              )}
               <Box w="full" bg="rgba(255,255,255,0.02)" border="1px solid" borderColor="kk.border" borderRadius="lg" px="3" py="2">
                 <VStack gap="1" align="stretch">
                   <ReviewRow label={t("rate")}>
@@ -4037,14 +4038,12 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                   <ReviewRow label={t("minimumAfterFeesSlippage", "Minimum receive after fees/slippage")} accent>
                     {formatBalance(quote.minimumOutput)} {toAsset.symbol}{hasToPrice && !toPriceIsDerived ? ` (${fmtCompact(parseFloat(quote.minimumOutput) * toPriceUsd)})` : ''}
                   </ReviewRow>
-                  <ReviewRow label={t("protocolFee", "Protocol fee")}>
-                    {formatQuoteAssetAmount(quote.fees.outbound, toAsset, quote.expectedOutput)} {toAsset.symbol} ({(quote.fees.totalBps / 100).toFixed(2)}%)
-                  </ReviewRow>
+                  <QuoteFeeRows fees={quote.fees} />
                   <ReviewRow label={t("slippageTolerance", "Slippage tolerance")}>
                     {(slippageBps / 100).toFixed(2)}% max
                   </ReviewRow>
                   <ReviewRow label={t("quoteSlippage", "Quote slippage")}>
-                    {(quote.slippageBps / 100).toFixed(2)}%
+                    {quote.quotedSlippageBps != null ? `${(quote.quotedSlippageBps / 100).toFixed(2)}%` : t("notProvided", "Not provided")}
                   </ReviewRow>
                   <ReviewRow label={t("estimatedTime")}>
                     {formatTime(quote.estimatedTime)}
@@ -4437,11 +4436,17 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                     disabled={busy}
                   />
 
+                  {isZcashSource && (
+                    <Text mt="2" fontSize="11px" color="kk.gold" role="note" title={t("zcashUnshieldBeforeSwap")}>
+                      {t("zcashTransparentOnlyTitle")}
+                    </Text>
+                  )}
+
                   {fromAsset && (
                     <Box mt="3" p="2.5" bg="rgba(0,0,0,0.2)" borderRadius="lg" border="1px solid" borderColor="rgba(255,255,255,0.06)">
                       <Flex justify="space-between" align="center" mb="2">
                         <VStack gap="0" align="flex-start">
-                          <Text fontSize="9px" color="kk.textMuted" fontWeight="600" textTransform="uppercase" letterSpacing="0.05em">{t("available")}</Text>
+                          <Text fontSize="9px" color="kk.textMuted" fontWeight="600" textTransform="uppercase" letterSpacing="0.05em">{isZcashSource ? t("zcashTransparentAvailable") : t("available")}</Text>
                           <Text fontSize="xs" fontFamily="mono" color="kk.textSecondary" fontWeight="600">
                             {fromBalance ? `${formatBalance(fromBalance)} ${fromAsset.symbol}` : '\u2014'}
                           </Text>
@@ -5118,7 +5123,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                 />
               ) : null /* don't claim a provider before we have a quote */}
             </Box>
-            <Box
+            {/^shapeshift(?:swap)?$/i.test(quote?.integration || '') && <Box
               as="a"
               href="https://api.shapeshift.com/docs#description/introduction"
               onClick={(e: React.MouseEvent) => { e.preventDefault(); rpcRequest("openUrl", { url: "https://api.shapeshift.com/docs#description/introduction" }).catch(() => {}) }}
@@ -5134,7 +5139,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
               <Text fontSize="9px" color="kk.textMuted" letterSpacing="0.04em">
                 Powered by ShapeShift API
               </Text>
-            </Box>
+            </Box>}
           </Flex>
         )}
       </Box>
@@ -5182,23 +5187,17 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
               </HStack>
             </Flex>
 
+            {swapHealth && swapHealthQuoteExplanation(swapHealth) && (
+              <Box px="5" pt="3">
+                <Text fontSize="11px" color="kk.textMuted" lineHeight="1.5">{swapHealthQuoteExplanation(swapHealth)}</Text>
+              </Box>
+            )}
+
             {/* Integration rows */}
             <VStack gap="0" align="stretch" px="4" py="3">
               {swapHealth?.integrations.map(intg => {
                 const info = resolveProvider(intg.key)
-                const dotColor =
-                  intg.status === 'ok'       ? '#22c55e' :
-                  intg.status === 'degraded' ? '#f59e0b' :
-                  intg.status === 'offline'  ? '#ef4444' : '#6b7280'
-                const statusLabel =
-                  intg.status === 'ok'       ? 'Operational' :
-                  intg.status === 'degraded' ? 'Degraded' :
-                  intg.status === 'offline'  ? 'Offline' : 'Unknown'
-                const statusDesc =
-                  intg.status === 'ok'       ? 'All pools available. Quotes and swaps should work normally.' :
-                  intg.status === 'degraded' ? (intg.detail || 'Some trading pairs are unavailable. Swaps on other pairs may still work.') :
-                  intg.status === 'offline'  ? 'Pioneer cannot reach this provider. Quotes requiring this route will fail.' :
-                  'Status could not be determined.'
+                const { color: dotColor, label: statusLabel, description: statusDesc } = swapProviderPresentation(intg)
                 return (
                   <Box key={intg.key} py="3" borderBottom="1px solid" borderColor="kk.border"
                     _last={{ borderBottom: 'none' }}>
@@ -5219,6 +5218,9 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                       </HStack>
                     </Flex>
                     <Text fontSize="11px" color="kk.textMuted" lineHeight="1.5">{statusDesc}</Text>
+                    {intg.checkScope === 'quote' && Number.isFinite(intg.checkedAt) && (
+                      <Text fontSize="10px" color="kk.textMuted" mt="1">Last quote check {new Date(intg.checkedAt!).toLocaleTimeString()}</Text>
+                    )}
                     {intg.haltedPools && intg.haltedPools.length > 0 && (
                       <Box mt="2" p="2" bg="rgba(245,158,11,0.08)" borderRadius="8px"
                         border="1px solid rgba(245,158,11,0.2)">
@@ -5248,7 +5250,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
             {/* Footer */}
             <Flex px="5" py="2.5" borderTop="1px solid" borderColor="kk.border" align="center" justify="space-between">
               <Text fontSize="10px" color="kk.textMuted">
-                {swapHealth ? `Updated ${new Date(swapHealth.fetchedAt).toLocaleTimeString()}` : 'Fetching…'}
+                {swapHealth?.error ? 'Status feed unavailable' : swapHealth ? `Updated ${new Date(swapHealth.fetchedAt).toLocaleTimeString()}` : 'Fetching…'}
               </Text>
               <Text fontSize="10px" color="kk.textMuted">via Pioneer</Text>
             </Flex>
@@ -5288,6 +5290,11 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                       style={{ background: 'none', border: 'none' }}>×</Box>
                   </Flex>
                   <VStack gap="0" align="stretch" px="4" py="3">
+                    {quote.executionMode === 'relay-solver-deposit' && (
+                      <Text fontSize="11px" color="kk.textSecondary" mb="2" role="note">
+                        {t('relayDepositReview', 'Relay executes the swap after your deposit; destination terms are shown in this app.')}
+                      </Text>
+                    )}
                     <ReviewRow label={t("rate")}>
                       1 {fromAsset.symbol} = {formatBalance((parseFloat(quote.expectedOutput) / parseFloat(sendAmount || '1')).toString())} {toAsset.symbol}
                     </ReviewRow>
@@ -5298,9 +5305,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                     <ReviewRow label={t("minimumAfterFeesSlippage", "Min. receive")} accent>
                       {formatBalance(quote.minimumOutput)} {toAsset.symbol}
                     </ReviewRow>
-                    <ReviewRow label={t("protocolFee", "Protocol fee")}>
-                      {(quote.fees.totalBps / 100).toFixed(2)}%
-                    </ReviewRow>
+                    <QuoteFeeRows fees={quote.fees} />
                     <ReviewRow label={t("slippageTolerance", "Slippage")}>
                       {(slippageBps / 100).toFixed(2)}% max
                     </ReviewRow>

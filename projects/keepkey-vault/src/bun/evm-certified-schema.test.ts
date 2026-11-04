@@ -312,3 +312,70 @@ describe('Relay depositErc20 (one entry per reviewed token)', () => {
     }
   })
 })
+
+describe('long-tail calls from real hardware traffic (OpolisPay, Venice)', () => {
+  const calls = require('../../__tests__/fixtures/clearsign-longtail/observed-calls.json').calls as Array<{ name: string; chainId: number; to: string; data: string }>
+  const { validateEvmIntent, expectedEvmScreens, evmEntryId, opolisPayrollEntries } = require('./evm-certified-schema')
+  const call = (name: string) => calls.find((c) => c.name.startsWith(name))!
+  const word = (data: string, i: number) => BigInt(`0x${data.slice(10 + 64 * i, 74 + 64 * i)}`)
+
+  it('every observed call gets a v0x05 entry that accounts for its calldata exactly', () => {
+    for (const c of calls) {
+      const spec = findCertifiedEvmSchemaSpec(c.chainId, c.to, c.data)
+      expect(spec).toBeDefined()
+      expect(spec!.expectedCalldataLength).toBe((c.data.length - 2) / 2)
+      expect(() => validateEvmIntent(spec!, spec!.intent!)).not.toThrow()
+      const body = buildEvmSchemaBody(spec!)
+      expect(body[0]).toBe(0x05)
+      expect(body.subarray(1, 5).readUInt32BE()).toBe(c.chainId)
+      expect(body.subarray(5, 25).toString('hex')).toBe(c.to.slice(2))
+      expect(body.subarray(25, 29).toString('hex')).toBe(c.data.slice(2, 10))
+    }
+  })
+
+  it('payPayroll is selected and pinned by its token word and states the USDT amount', () => {
+    const c = call('OpolisPay')
+    const spec = findCertifiedEvmSchemaSpec(c.chainId, c.to, c.data)!
+    expect(evmEntryId(spec)).toBe(`eip155:1:${c.to}:0x02d5f05f:0xdac17f958d2ee523a2206206994597c13d831ec7`)
+    expect(spec.args[1]).toMatchObject({ format: 5, symbol: 'USDT', decimals: 6, role: 3 })
+    expect(spec.args[2]).toMatchObject({ name: 'payrollId', format: 3 })
+    expect(word(c.data, 1)).toBe(2_987_500_000n) // 2987.5 USDT
+    expect(word(c.data, 2)).toBe(60_274n)
+    const screens = expectedEvmScreens(spec, 'KeepKey ClearSign', 'fp')!
+    expect(screens[0]).toMatchObject({ title: 'Opolis Payroll', body: 'Pay 25 USDT to the Opolis payroll contract' })
+    expect(screens.map((s) => s.title)).toEqual(['Opolis Payroll', 'Limits', 'Contract', 'token', 'payrollId', 'KeepKey ClearSign'])
+    expect(opolisPayrollEntries().map((s: any) => s.args[1].symbol)).toEqual(['USDC', 'DAI', 'USDT'])
+  })
+
+  it('payPayroll: other tokens, lengths, dirty words and contracts get no entry', () => {
+    const c = call('OpolisPay')
+    const dai = c.data.replace('dac17f958d2ee523a2206206994597c13d831ec7', '6b175474e89094c44da98b954eedeac495271d0f')
+    const usdc = c.data.replace('dac17f958d2ee523a2206206994597c13d831ec7', 'a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48')
+    const weth = c.data.replace('dac17f958d2ee523a2206206994597c13d831ec7', 'c02aaa39b223fe8d0a0e5c4f27ead9083c756cc2')
+    expect(findCertifiedEvmSchemaSpec(1, c.to, usdc)?.args[1]).toMatchObject({ symbol: 'USDC', decimals: 6 })
+    expect(findCertifiedEvmSchemaSpec(1, c.to, dai)?.args[1]).toMatchObject({ symbol: 'DAI', decimals: 18 })
+    expect(findCertifiedEvmSchemaSpec(1, c.to, weth)).toBeUndefined() // not on the OpolisPay whitelist
+    expect(findCertifiedEvmSchemaSpec(1, c.to, `${c.data}${'00'.repeat(32)}`)).toBeUndefined()
+    expect(findCertifiedEvmSchemaSpec(1, c.to, c.data.slice(0, -64))).toBeUndefined()
+    expect(findCertifiedEvmSchemaSpec(1, c.to, `${c.data.slice(0, 10)}ff${c.data.slice(12)}`)).toBeUndefined()
+    expect(findCertifiedEvmSchemaSpec(1, '0x1111111111111111111111111111111111111111', c.data)).toBeUndefined()
+    expect(findCertifiedEvmSchemaSpec(8453, c.to, c.data)).toBeUndefined()
+    expect(findCertifiedEvmSchemaByShape(1, c.to, '0x02d5f05f', 100)).toBeUndefined()
+  })
+
+  it('Venice claimAndStake has no arguments; initiateUnstake states the sVVV it burns', () => {
+    const claim = call('Venice claimAndStake')
+    const unstake = call('Venice initiateUnstake')
+    const c = findCertifiedEvmSchemaSpec(claim.chainId, claim.to, claim.data)!
+    expect(c.args).toEqual([])
+    expect(expectedEvmScreens(c, 'KeepKey ClearSign', 'fp')![0])
+      .toEqual({ title: 'Venice Staking', body: 'Claim your pending VVV staking rewards and stake them' })
+    const u = findCertifiedEvmSchemaSpec(unstake.chainId, unstake.to, unstake.data)!
+    expect(u.args).toEqual([{ name: 'amount', format: 5, symbol: 'sVVV', decimals: 18, role: 3 }])
+    expect(word(unstake.data, 0)).toBe(210_294_203_596_150_805_794n) // 210.294... sVVV
+    // Exact length: a word more or less is not this entry.
+    expect(findCertifiedEvmSchemaSpec(8453, unstake.to, `${unstake.data}${'00'.repeat(32)}`)).toBeUndefined()
+    expect(findCertifiedEvmSchemaSpec(8453, claim.to, `${claim.data}${'00'.repeat(32)}`)).toBeUndefined()
+    expect(findCertifiedEvmSchemaSpec(1, unstake.to, unstake.data)).toBeUndefined()
+  })
+})

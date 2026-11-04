@@ -1,0 +1,57 @@
+{
+ "_source": "Real native THORChain/Maya MsgDeposit swaps signed by KeepKey Desktop",
+ "deposits": [
+  {
+   "_source": "https://gateway.liquify.com/chain/thorchain_api/thorchain/tx/9DDBC200...6BF7 (KeepKey Desktop RUNE -> ETH swap); signDoc rebuilt from the observed coins, memo and signer",
+   "method": "/thorchain/sign-amino-deposit",
+   "body": {
+    "signerAddress": "thor19qud0fs2lhcwr5a2l9l7uceym0cyvktf4s78c2",
+    "signDoc": {
+     "chain_id": "thorchain-1",
+     "memo": "=:ETH.ETH:0x909Ef6B32DfDc12CA86aA710b54c991af3C5F82E:2234918:keep:30",
+     "msgs": [
+      {
+       "type": "thorchain/MsgDeposit",
+       "value": {
+        "coins": [
+         {
+          "asset": "THOR.RUNE",
+          "amount": "11144055584"
+         }
+        ],
+        "memo": "=:ETH.ETH:0x909Ef6B32DfDc12CA86aA710b54c991af3C5F82E:2234918:keep:30",
+        "signer": "thor19qud0fs2lhcwr5a2l9l7uceym0cyvktf4s78c2"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "_source": "https://mayanode.mayachain.info/cosmos/tx/v1beta1/txs/5EE331E3...45E5 (KeepKey Desktop CACAO -> ETH swap); signDoc rebuilt from the signed message",
+   "method": "/mayachain/sign-amino-deposit",
+   "body": {
+    "signerAddress": "maya13d4tzmehhmt4r8w9s4n0g0lw7h3ggpyv95f55k",
+    "signDoc": {
+     "chain_id": "mayachain-mainnet-v1",
+     "memo": "=:ETH.ETH:0x9f5f2e605863dc1D9CCB98BC104E10fD551d8eE9::keep:30",
+     "msgs": [
+      {
+       "type": "mayachain/MsgDeposit",
+       "value": {
+        "coins": [
+         {
+          "asset": "MAYA.CACAO",
+          "amount": "7224007864600"
+         }
+        ],
+        "memo": "=:ETH.ETH:0x9f5f2e605863dc1D9CCB98BC104E10fD551d8eE9::keep:30",
+        "signer": "maya13d4tzmehhmt4r8w9s4n0g0lw7h3ggpyv95f55k"
+       }
+      }
+     ]
+    }
+   }
+  }
+ ]
+}

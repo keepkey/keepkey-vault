@@ -14,6 +14,7 @@ import { describe, test, expect } from 'bun:test'
 import { thor714MemoConfirms, firmwareClearSigns, firmwareKnowsToken } from '../src/bun/calldata-decoder'
 import firmwareTokenTable from '../src/bun/firmware-token-table.json'
 import firmwareTokenTable716 from '../src/bun/firmware-token-table-716.json'
+import firmwareTokenTable717 from '../src/bun/firmware-token-table-717.json'
 
 const ZX = '0xdef1c0ded9bec7f1a1670819833240f027b25eff'
 const UNIV2 = '0x7a250d5630b4cf539739df2c5dacb4c659f2488d'
@@ -223,6 +224,13 @@ describe('firmwareClearSigns mirrors the rc3 native clear-sign allowlist', () =>
     }
   })
 
+  test('7.17 token table is pinned: alpha names every token 7.16.0 named (fw #1031)', () => {
+    // Generated from fork alpha c7ef3e5ef (make firmware-token-table-717): the Uniswap list
+    // lost its priority-only profile in 2c79f0e51, so 7.17 is back to 7.16.0's 153 entries.
+    expect(new Set(firmwareTokenTable717.tokens)).toEqual(new Set(firmwareTokenTable716.tokens))
+    expect(firmwareTokenTable717.tokens.length).toBe(153)
+  })
+
   test('ERC-20 prediction follows the firmware line: 7.16.0 ships the smaller table', () => {
     const LEO = '0x2af5d2ad76741191d15dfe7bf6ac92d4bd912ca3'  // in 7.15, not 7.16
     const OP = '0x4200000000000000000000000000000000000042'   // Optimism, in 7.15, not 7.16
@@ -231,20 +239,41 @@ describe('firmwareClearSigns mirrors the rc3 native clear-sign allowlist', () =>
       expect(firmwareClearSigns(LEO, erc20Approve, 1, fw)).toBe(true)
       expect(firmwareClearSigns(OP, erc20Transfer, 10, fw)).toBe(true)
     }
-    for (const fw of ['7.16.0', '7.16.1', '7.17.0']) {
+    for (const fw of ['7.16.0', '7.16.1']) {
       expect(firmwareClearSigns(LEO, erc20Transfer, 1, fw)).toBe(false)
       expect(firmwareClearSigns(LEO, erc20Approve, 1, fw)).toBe(false)
       expect(firmwareClearSigns(OP, erc20Transfer, 10, fw)).toBe(false)
     }
-    // Stablecoins are in both.
-    for (const fw of ['7.15.0', '7.16.0', undefined]) {
+    // Stablecoins are in all three.
+    for (const fw of ['7.15.0', '7.16.0', '7.17.0', undefined]) {
       expect(firmwareClearSigns(USDT_ETH, erc20Transfer, 1, fw)).toBe(true)
       expect(firmwareClearSigns(USDC_ETH, erc20Approve, 1, fw)).toBe(true)
     }
-    // Unknown version: the smaller (7.16) table.
+    // Unknown version: the smallest (7.17) table.
     expect(firmwareKnowsToken(1, LEO)).toBe(false)
     expect(firmwareClearSigns(LEO, erc20Transfer, 1, undefined)).toBe(false)
     expect(firmwareClearSigns(OP, erc20Transfer, 10, '')).toBe(false)
+  })
+
+  test('a WETH approve is native on 7.16 and on 7.17 (alpha restored the 7.16 tokens)', () => {
+    // Real request: pyk-eip712-corpus-safetx.json#safe-SafeTx-multisend-approve-unlimited call 1
+    // (mainnet 0x171f0863…af06), approve(CoW Vault Relayer, max) on WETH. Alpha 831f67f50 showed
+    // "Unknown token contract"; c7ef3e5ef (fw #1031) names WETH again, as 7.16.0 does.
+    const WETH = '0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2'
+    const UNI = '0x1f9840a85d5af5bf1d1762f925bdaddc4201f984'
+    const wethApprove = '0x095ea7b3' + w('c92e8bdf79f0507f65a392b0ab4667716bfe0110') + 'f'.repeat(64)
+    // Real request: pyk-eip712-corpus-safetx.json#safe-SafeTx-approve-unlimited, approve(SwapRouter02, max) on USDC.
+    const usdcApprove = '0x095ea7b3' + w('68b3465833fb72a70ecdf485e0e4c7bd8665fc45') + 'f'.repeat(64)
+    for (const fw of ['7.16.0', '7.16.1', '7.17.0', '7.17.1', '7.18.0', undefined]) {
+      expect(firmwareClearSigns(WETH, wethApprove, 1, fw)).toBe(true)
+      expect(firmwareClearSigns(UNI, erc20Transfer, 1, fw)).toBe(true)
+      expect(firmwareClearSigns(UNIV2, univ2Add.replace(w(USDC_ETH), w(UNI)), 1, fw)).toBe(true)
+      expect(firmwareClearSigns(USDC_ETH, usdcApprove, 1, fw)).toBe(true)
+    }
+    for (const fw of ['7.17.0', undefined]) expect(firmwareClearSigns(ZX, zxSell, 1, fw)).toBe(true)
+    // A token in neither table stays blind on every line.
+    const NOT_LISTED = '0x' + '12'.repeat(20)
+    for (const fw of ['7.16.0', '7.17.0']) expect(firmwareClearSigns(NOT_LISTED, wethApprove, 1, fw)).toBe(false)
   })
 
   test('non-standard-length transfer selector → blind (not the 68-byte path)', () => {

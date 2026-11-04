@@ -1,0 +1,309 @@
+{
+  "recordedAt": "2026-11-03T20:07:42.306239+00:00",
+  "status": "audit_complete_gateway_not_at_provider_parity",
+  "conclusion": "NEAR should remain a direct integration as in Pioneer. The migration omitted that provider and narrowed Relay coverage; genuine THORChain ETH halts were incorrectly treated as the full explanation for lost routes.",
+  "scope": "Swap provider registration, eligibility, live quotes, client contract compatibility, fee attribution, refund configuration, status tracking and validation. No wallet credentials or private addresses used in live API fixtures.",
+  "systems": {
+    "legacy": {
+      "origin": "https://api.keepkey.info",
+      "deployedVersion": "1.4.5",
+      "auditedSourceRevision": "f17c5f27e7892bcb8a75010a31ec5f6200c5286c",
+      "auditedSourceServiceVersion": "1.4.4",
+      "exactDeployedSourceRevisionVerified": false
+    },
+    "gateway": {
+      "origin": "https://oracles.cc",
+      "deployedRevision": "298ff3508a7a044cf8baaf7bfbe03b338c619070",
+      "repository": "https://github.com/BitHighlander/keepkey-gateway"
+    },
+    "vault": {
+      "branch": "prepare/1.6.8-candidate",
+      "codeRevision": "8d686d805db2a363fa05a64fba794415d1e59314",
+      "version": "1.6.8",
+      "physicalDeviceFirmwareDuringNativePreview": "7.16.0"
+    }
+  },
+  "liveSummary": {
+    "standardCases": 9,
+    "legacyQuoteResponses": 9,
+    "gatewayQuoteResponses": 5,
+    "lostQuoteScenarios": [
+      "ETH to LTC",
+      "ETH to LTC native precision",
+      "LTC to ETH",
+      "SOL to ETH"
+    ],
+    "extraContractCases": 3,
+    "sdkContractObservations": 4,
+    "memolessViolationConfirmed": true,
+    "currentClientLegacySdk400Confirmed": true,
+    "signed": false,
+    "broadcast": false
+  },
+  "retrospective": {
+    "observedCause": "The initial gateway provider list omitted direct NEAR and constrained Relay to EVM. Later precision and error-message fixes addressed symptoms without running the full legacy routing baseline.",
+    "introducedInGatewayRevision": "7f738b7",
+    "gatewayOnlyClientOptionIntroducedInVaultRevision": "1a6dbe03e5",
+    "verificationGap": "Existing gateway live swap-parity runner checks ETH to USDT and EVM RPC behavior. It does not cover the missing direct NEAR routes, Relay Solana, memoless semantics, or the gateway-only option against the legacy server.",
+    "writtenContractAlreadyRequired": "docs/VAULT-PIONEER-CONTRACT.md requires sanitized golden fixtures for every enabled swapper and representative pair. Passing unit tests and health checks did not satisfy that provider-level requirement.",
+    "inference": "The static supported-chains map omitted NEAR and Solana Relay even on the old server, so deriving migration scope from that map can miss working runtime integrations. This is an explanation supported by the code, not a claim about the original author's intent.",
+    "releaseDecision": "Do not approve gateway swap-provider replacement parity or the current candidate's legacy 7.16 quote compatibility until the P0 cases pass. Candidate remains unpublished."
+  },
+  "providers": [
+    {
+      "provider": "THORChain",
+      "legacy": "direct",
+      "gateway": "direct",
+      "assessment": "Present; current ETH trading halt is real, but is not proof that other protocols lack a route."
+    },
+    {
+      "provider": "Maya",
+      "legacy": "direct",
+      "gateway": "direct",
+      "assessment": "Present; live pool/asset mapping and units still need broader golden coverage."
+    },
+    {
+      "provider": "Relay",
+      "legacy": "direct, EVM and Solana",
+      "gateway": "direct, EVM only",
+      "assessment": "Confirmed Solana coverage loss; solver-deposit mode is a new gateway-specific option."
+    },
+    {
+      "provider": "NEAR Intents",
+      "legacy": "direct",
+      "gateway": "aggregator-only",
+      "assessment": "Confirmed missing direct provider and missing server-side 1Click status refresher."
+    },
+    {
+      "provider": "ShapeShift",
+      "legacy": "aggregator after direct NEAR",
+      "gateway": "fallback after direct tier, before SwapKit",
+      "assessment": "Retained but has become the sole practical NEAR path for several working pairs."
+    },
+    {
+      "provider": "Chainflip",
+      "legacy": "through ShapeShift",
+      "gateway": "through ShapeShift",
+      "assessment": "Not a lost direct integration. Direct broker remains unconfigured; fallback retained as requested."
+    },
+    {
+      "provider": "0x",
+      "legacy": "listed in static metadata; no direct registration in audited router",
+      "gateway": "direct with configured key",
+      "assessment": "Added capability, not evidence of complete legacy provider parity."
+    },
+    {
+      "provider": "Uniswap",
+      "legacy": "through existing routes/aggregators",
+      "gateway": "direct ETH to Ethereum USDT/USDC",
+      "assessment": "Added reviewed atomic route; native Vault quote and unsigned payload preview succeeded on firmware 7.16."
+    },
+    {
+      "provider": "SwapKit",
+      "legacy": "module exists but default router registration is commented out",
+      "gateway": "keyed fallback requiring fee-attributed executable route",
+      "assessment": "New fallback, not a replacement for omitted legacy direct providers."
+    },
+    {
+      "provider": "Rujira",
+      "legacy": "feature-flagged, not registered by default",
+      "gateway": "absent",
+      "assessment": "Track as explicitly deferred experimental scope, not a confirmed stable-production loss."
+    }
+  ],
+  "findings": [
+    {
+      "id": "ROUTE-001",
+      "severity": "P0",
+      "title": "Direct NEAR Intents was omitted from the gateway",
+      "verification": "live_and_source",
+      "evidence": "Legacy returned nearIntents quotes for ETH/LTC, LTC/ETH, BTC/ETH, ETH/BTC and ZEC/ETH. Gateway has no direct NEAR adapter. Direct 1Click dry ETH/LTC quotes succeeded while ShapeShift reported LTC unsupported by NEAR.",
+      "impact": "ETH to LTC, 18-decimal ETH to LTC, and LTC to ETH work on the legacy API and return 503 on the gateway. THORChain ETH trading is halted, but that does not mean NEAR is unavailable.",
+      "requiredAction": "Port the existing direct NEAR integration with its supported assets, exact native units, customer-origin refunds, destination validation, configured app fees, deposit verification and tracking. Do not substitute aggregator coverage for direct integration parity.",
+      "sources": [
+        "/Users/highlander/WebstormProjects/keepkey-stack/projects/pioneer-discovery-fix/modules/pioneer/pioneer-router/src/index.ts:56",
+        "/Users/highlander/WebstormProjects/keepkey-stack/projects/pioneer-discovery-fix/modules/intergrations/near-intents/src/index.ts:285",
+        "/Users/highlander/WebstormProjects/keepkey-stack/projects/keepkey-gateway/container/src/swap.ts:964"
+      ],
+      "status": "open"
+    },
+    {
+      "id": "ROUTE-002",
+      "severity": "P0",
+      "title": "Relay coverage was narrowed to EVM-to-EVM",
+      "verification": "live_and_source",
+      "evidence": "Legacy SOL to ETH returns a Relay SOLANA serialized transaction. Gateway returns 503. Its Relay adapter requires EVM chain numbers for both source and destination.",
+      "impact": "A working source-chain family is lost even though the static Relay chain count grew from 19 to 21.",
+      "requiredAction": "Port existing Relay Solana source/destination support and transaction construction, with explicit device-review policy and refreshed blockhashes. Verify both directions using real API fixtures and native Vault previews.",
+      "sources": [
+        "/Users/highlander/WebstormProjects/keepkey-stack/projects/pioneer-discovery-fix/modules/intergrations/relay/src/index.ts:23",
+        "/Users/highlander/WebstormProjects/keepkey-stack/projects/pioneer-discovery-fix/modules/intergrations/relay/src/index.ts:488",
+        "/Users/highlander/WebstormProjects/keepkey-stack/projects/keepkey-gateway/container/src/swap.ts:188"
+      ],
+      "status": "open"
+    },
+    {
+      "id": "API-001",
+      "severity": "P0",
+      "title": "Current Vault sends a gateway-only option to the legacy API",
+      "verification": "live_and_source",
+      "evidence": "Through the installed Pioneer SDK, ETH to Base USDC succeeds on both APIs without relayExecutionMode. Adding solver-deposit produces HTTP 400 on api.keepkey.info and succeeds on oracles.cc. Vault adds this field based on EVM source plus firmware capability, without checking the selected server.",
+      "impact": "The 7.16 candidate is not backward compatible with the default legacy server. Switching APIs alone is not a safe containment fix.",
+      "requiredAction": "Negotiate server support from the advertised quote schema/capabilities before sending relayExecutionMode. Keep actual transaction/device review independent. Add both server contracts to client release validation.",
+      "sources": [
+        "/Users/highlander/WebstormProjects/keepkey-stack/projects/keepkey-vault-v11/projects/keepkey-vault/src/bun/swap.ts:349",
+        "/Users/highlander/WebstormProjects/keepkey-stack/projects/keepkey-vault-v11/projects/keepkey-vault/node_modules/@pioneer-platform/pioneer-client/lib/index.js:176"
+      ],
+      "status": "open"
+    },
+    {
+      "id": "CONTRACT-001",
+      "severity": "P1",
+      "title": "Gateway accepts but ignores the memoless request contract",
+      "verification": "live_and_source",
+      "evidence": "BTC to LTC with memoless=true returns direct NEAR without a memo on the legacy API. Gateway returns THORChain with a memo. memoless exists in the new request interface but is not used to filter adapters.",
+      "impact": "HTTP 200 hides a request-contract regression; a successful quote is not sufficient parity evidence.",
+      "requiredAction": "Enforce memoless eligibility and assert the returned transaction does not require a routing memo. Keep empty memo handling restricted to supported deposit-channel protocols.",
+      "sources": [
+        "/Users/highlander/WebstormProjects/keepkey-stack/projects/pioneer-discovery-fix/modules/pioneer/pioneer-router/src/index.ts:405",
+        "/Users/highlander/WebstormProjects/keepkey-stack/projects/keepkey-gateway/container/src/swap.ts:17",
+        "/Users/highlander/WebstormProjects/keepkey-stack/projects/keepkey-gateway/container/src/swap.ts:885"
+      ],
+      "status": "open"
+    },
+    {
+      "id": "TRACK-001",
+      "severity": "P1",
+      "title": "Gateway stores NEAR metadata but has no NEAR status refresher",
+      "verification": "live_and_source",
+      "evidence": "Legacy pending-swaps controller polls 1Click and distinguishes processing, incomplete deposits, success, refunds and failure. New PendingSwapService accepts nearIntentsData, but its refresh chain only calls Midgard, Relay, Chainflip and Uniswap.",
+      "impact": "A quote adapter alone would leave server-side NEAR swap lifecycle parity incomplete. Existing Vault-side 1Click polling partially masks this gap.",
+      "requiredAction": "Port demand-driven NEAR tracking and test pending/incomplete/refund/payout states, deposit identity, destination and output amount. Do not declare completion from a quote or a source receipt alone.",
+      "sources": [
+        "/Users/highlander/WebstormProjects/keepkey-stack/projects/pioneer-discovery-fix/services/pioneer-server/src/controllers/pending-swaps.controller.ts:2492",
+        "/Users/highlander/WebstormProjects/keepkey-stack/projects/keepkey-gateway/container/src/pending-swaps.ts:52",
+        "/Users/highlander/WebstormProjects/keepkey-stack/projects/keepkey-vault-v11/projects/keepkey-vault/src/bun/swap-tracker.ts:913"
+      ],
+      "status": "open"
+    },
+    {
+      "id": "FEES-001",
+      "severity": "P1",
+      "title": "NEAR fee path and intermediary changed",
+      "verification": "live_and_source",
+      "evidence": "Legacy direct NEAR quote echoes 15 bps to the KeepKey implicit account and 20 bps to 1Click. Gateway NEAR-via-ShapeShift quotes report 30 partner bps plus 10 ShapeShift bps. These are reported components, not a verified comparison of all-in costs.",
+      "impact": "Migration introduced intermediary dependence and changed fee attribution for an existing direct provider. Protocol and network costs must not be conflated with affiliate components.",
+      "requiredAction": "Preserve direct NEAR configuration. Compare actual echoed appFees and recipient accounts; disclose every fee in its own asset and units. Verify fee ledger and payout behavior before funded release QA.",
+      "sources": [
+        "/Users/highlander/WebstormProjects/keepkey-stack/projects/pioneer-discovery-fix/modules/intergrations/near-intents/src/index.ts:338",
+        "/Users/highlander/WebstormProjects/keepkey-stack/projects/keepkey-gateway/container/src/swap.ts:646"
+      ],
+      "status": "open"
+    },
+    {
+      "id": "FEES-002",
+      "severity": "P1",
+      "title": "Relay fee-recipient defaults differ between source implementations",
+      "verification": "source_defaults_with_partial_live_confirmation",
+      "evidence": "Audited legacy source splits the default 30 bps between two recipients, 15/15. Gateway hardcodes all 30 bps to one recipient. Deployed legacy quotes confirm the aggregate app fee but do not expose its recipient split.",
+      "impact": "Economic-policy parity is unproven. This source difference is not proof of production account allocation because legacy deployment environment and exact revision were not inspected.",
+      "requiredAction": "Verify intended current recipient policy, then centralize and test configured recipients/splits without increasing the total fee. Record deployed configuration separately from source defaults.",
+      "sources": [
+        "/Users/highlander/WebstormProjects/keepkey-stack/projects/pioneer-discovery-fix/modules/intergrations/relay/src/index.ts:375",
+        "/Users/highlander/WebstormProjects/keepkey-stack/projects/keepkey-gateway/container/src/swap.ts:147"
+      ],
+      "status": "open"
+    },
+    {
+      "id": "FEES-003",
+      "severity": "P1",
+      "title": "Fee denomination is not preserved uniformly",
+      "verification": "source_and_native_review",
+      "evidence": "Gateway Relay normalization copies fees.app.amount in source-native base units into normalized affiliate, while the new generic affiliate amount UI assumes destination-asset units. The native Uniswap review also exposed an older outbound-zero versus affiliate-rate display mismatch.",
+      "impact": "Cross-chain fee amounts can be mislabeled or scaled incorrectly. Quoted fee rate is not an all-in execution-cost percentage.",
+      "requiredAction": "Introduce explicit fee asset, decimals and base/human unit semantics for every provider before displaying generic affiliate amounts. Keep source gas, output withdrawal costs, affiliate amounts and quoted rates separate.",
+      "sources": [
+        "/Users/highlander/WebstormProjects/keepkey-stack/projects/keepkey-gateway/container/src/swap.ts:251",
+        "/Users/highlander/WebstormProjects/keepkey-stack/projects/keepkey-vault-v11/projects/keepkey-vault/src/mainview/components/SwapDialog.tsx:4033"
+      ],
+      "status": "open"
+    },
+    {
+      "id": "CATALOG-001",
+      "severity": "P1",
+      "title": "Pinned metadata replaced runtime integration asset eligibility",
+      "verification": "source_and_live_catalog_metadata",
+      "evidence": "Legacy router promotes chain support for Relay, ShapeShift and NEAR long-tail assets, and NEAR loads the live token map. Gateway Relay, 0x and ShapeShift require findAsset in its pinned catalog. Neither static supported-chains response advertises the active legacy direct NEAR integration.",
+      "impact": "Matching the published static provider map does not establish runtime parity. Tokens or chains can disappear before a quote is attempted.",
+      "requiredAction": "Drive coverage from the actual provider registry and token metadata. Keep the pinned offline catalog as a fallback; obtain trusted decimals and validate source transaction units for long-tail quotes.",
+      "sources": [
+        "/Users/highlander/WebstormProjects/keepkey-stack/projects/pioneer-discovery-fix/modules/pioneer/pioneer-router/src/index.ts:413",
+        "/Users/highlander/WebstormProjects/keepkey-stack/projects/pioneer-discovery-fix/modules/intergrations/near-intents/src/index.ts:122",
+        "/Users/highlander/WebstormProjects/keepkey-stack/projects/keepkey-gateway/container/src/catalog.ts:75",
+        "/Users/highlander/WebstormProjects/keepkey-stack/projects/keepkey-gateway/container/src/swap.ts:188"
+      ],
+      "status": "open"
+    },
+    {
+      "id": "VALIDATE-001",
+      "severity": "P1",
+      "title": "Chain-specific input-address validation was not ported",
+      "verification": "source",
+      "evidence": "Legacy quote controller validates sender and recipient against their respective networks before allocating a route. New request validation rejects forbidden delimiters but has no equivalent chain-specific validator.",
+      "impact": "Gateway depends on inconsistent upstream validation for malformed or wrong-network destinations.",
+      "requiredAction": "Port explicit chain-aware validation before provider calls, with valid legacy address formats and public negative fixtures.",
+      "sources": [
+        "/Users/highlander/WebstormProjects/keepkey-stack/projects/pioneer-discovery-fix/services/pioneer-server/src/controllers/quote.controller.ts:153",
+        "/Users/highlander/WebstormProjects/keepkey-stack/projects/keepkey-gateway/container/src/swap.ts:949"
+      ],
+      "status": "open"
+    },
+    {
+      "id": "POLICY-001",
+      "severity": "P2",
+      "title": "Provider selection semantics changed",
+      "verification": "source",
+      "evidence": "Legacy returns the first successful provider in priority order: THORChain, Relay, NEAR, ShapeShift, Maya, gated Rujira. Gateway compares direct tier results, then only requests ShapeShift or SwapKit if the earlier tier has no result. Vault then applies device-review ranking.",
+      "impact": "An aggregator never competes once any direct tier quote succeeds. Provider preference, price and device review are separate policies and must be explicit.",
+      "requiredAction": "Document intended selection and fallback policy; use golden provider/device fixtures to verify deliberate differences rather than calling them parity.",
+      "sources": [
+        "/Users/highlander/WebstormProjects/keepkey-stack/projects/pioneer-discovery-fix/modules/pioneer/pioneer-router/src/index.ts:411",
+        "/Users/highlander/WebstormProjects/keepkey-stack/projects/keepkey-gateway/container/src/swap.ts:898"
+      ],
+      "status": "open"
+    }
+  ],
+  "remediationOrder": [
+    "Fix client/server capability negotiation for relayExecutionMode.",
+    "Port existing direct NEAR quoting plus refund/deposit validation, fee semantics and server-side tracking.",
+    "Restore Relay Solana coverage with device-review safeguards and current serialization.",
+    "Enforce memoless and chain-address contracts; restore asset eligibility with trusted decimal metadata.",
+    "Verify fee recipients/splits and normalize every fee asset/unit.",
+    "Gate provider replacement on the full live fixture matrix, exact SDK requests and native Vault quote/preview flows."
+  ],
+  "acceptance": {
+    "quotes": "All nine original standard fixtures must retain a valid legacy-capability route; NEAR routes should be direct without a ShapeShift dependency. Current protocol halts remain respected.",
+    "contracts": "Memoless responses contain no required routing memo. The current SDK works with both servers; solver mode is sent only when advertised.",
+    "fees": "Provider-echoed recipients, basis points, amounts and denomination match intended configuration; source gas is never displayed as destination token units.",
+    "tracking": "NEAR processing, incomplete deposit, payout, refund and failure states map correctly and retain deposit/payout identity.",
+    "native": "Drive Vault on firmware 7.16 through unavailable routes and successful quotes plus unsigned preview. Actual funded execution and device signing remain separate required QA."
+  },
+  "artifacts": {
+    "quotes": "quote-comparison.json",
+    "contracts": "contract-comparison.json",
+    "sdk": "sdk-comparison.json",
+    "directNear": "direct-near-probe.json",
+    "matrix": "matrix.csv"
+  },
+  "reproduction": {
+    "providerComparison": "bun scripts/audit-swap-provider-parity.ts /private/tmp/provider-parity.json --check-parity",
+    "sdkCompatibility": "bun scripts/audit-swap-sdk-contract.ts /private/tmp/sdk-contract.json --check-current-client",
+    "fixturePolicy": "Isolated test clients and public addresses only; quotes may allocate unused deposit addresses, but no signatures, deposits or broadcasts occur."
+  },
+  "limits": [
+    "Quote HTTP success and instruction shape do not prove funded execution, device approval or payout.",
+    "Legacy source package version differs from the deployed service; source-only findings and unverified deployment configuration are labeled.",
+    "No production credentials, private wallet data, database mutations beyond isolated fixture client registration, or funds were used.",
+    "The audit did not deploy new provider logic."
+  ]
+}

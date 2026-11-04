@@ -2,6 +2,7 @@ import type { SigningRequestInfo } from '../shared/types'
 import { getCachedBalances, getPriorEvmCalls } from './db'
 import { getTokenMetadata } from './evm-rpc'
 import { getEvmSimulationEndpoint } from './evm-simulation-config'
+import { addThorDepositFacts } from './thor-vaults'
 
 /** A self-reported name as plain text: no quotes, control, bidi or zero-width
  *  characters, so it cannot pose as a Desktop sentence. */
@@ -14,6 +15,8 @@ export const plain = (s: unknown) => String(s ?? '').replace(/["'`\u2018\u2019\u
  *  Never throws. `deviceId` is left out for a passphrase wallet, like the
  *  balance cache. */
 export async function addContractFacts(info: SigningRequestInfo, deviceId: string | undefined, account: string | undefined): Promise<void> {
+  // A THORChain/Maya deposit the device shows still pays a vault it cannot check.
+  await addThorDepositFacts(info, deviceId)
   const chainId = Number(info.chainId)
   const to = String(info.to || '').toLowerCase()
   if (info.method !== '/eth/sign-transaction' || !info.needsBlindSigning || !Number.isSafeInteger(chainId) || chainId <= 0 || !/^0x[0-9a-f]{40}$/.test(to)) return

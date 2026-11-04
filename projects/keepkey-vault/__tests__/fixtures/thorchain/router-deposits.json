@@ -1,0 +1,3077 @@
+{
+ "_source": "Real THORChain/Maya router deposits (on-chain; seven signed by KeepKey Desktop, two by third-party apps) and the Asgard vaults each network published the block before it observed them. Vault entries are trimmed to the fields Desktop reads (status, EVM addresses, routers).",
+ "deposits": [
+  {
+   "_source": "https://ethereum-rpc.publicnode.com eth_getTransactionByHash 0x9735f29a893735a90272372e926330efe553c81843acc090edf12d6397fd82a2 (KeepKey Desktop swap, ~/keepkey-audit-rigs/issuer/realworld/swap-txs.json); THORChain observed it at height 28229669; vaults from https://gateway.liquify.com/chain/thorchain_api/thorchain/vaults/asgard?height=28229668, the block before",
+   "name": "ETH -> ETH.USDT, own EVM destination",
+   "protocol": "THORChain",
+   "txid": "0x9735f29a893735a90272372e926330efe553c81843acc090edf12d6397fd82a2",
+   "chainId": 1,
+   "from": "0x27de622cc44c55b53caf299ecedccdab29ac98a8",
+   "to": "0xd37bbe5744d730a1d98d8dc97c42f0ca46ad7146",
+   "value": "0x1134e7496e20c800",
+   "data": "0x44bc937b0000000000000000000000006b4068070d95d87b321909bb21c8979fba2b887600000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001134e7496e20c80000000000000000000000000000000000000000000000000000000000000000a0000000000000000000000000000000000000000000000000000000006ace8ba500000000000000000000000000000000000000000000000000000000000000753d3a4554482e555344542d3058444143313746393538443245453532334132323036323036393934353937433133443833314543373a3078323764653632326363343463353562353363614632393965436564636364414232396143393841383a3239393633333733343133323a6b6565703a33300000000000000000000000",
+   "vaultsHeight": 28229668,
+   "vaults": [
+    {
+     "status": "RetiringVault",
+     "addresses": [
+      {
+       "chain": "AVAX",
+       "address": "0x587c7c3ba9e47b1afd9da9a79c127ade753ac53a"
+      },
+      {
+       "chain": "BASE",
+       "address": "0x587c7c3ba9e47b1afd9da9a79c127ade753ac53a"
+      },
+      {
+       "chain": "BSC",
+       "address": "0x587c7c3ba9e47b1afd9da9a79c127ade753ac53a"
+      },
+      {
+       "chain": "ETH",
+       "address": "0x587c7c3ba9e47b1afd9da9a79c127ade753ac53a"
+      }
+     ],
+     "routers": [
+      {
+       "chain": "AVAX",
+       "router": "0x00dc6100103BC402d490aEE3F9a5560cBd91f1d4"
+      },
+      {
+       "chain": "BASE",
+       "router": "0x00dc6100103BC402d490aEE3F9a5560cBd91f1d4"
+      },
+      {
+       "chain": "BSC",
+       "router": "0xb30ec53f98ff5947ede720d32ac2da7e52a5f56b"
+      },
+      {
+       "chain": "ETH",
+       "router": "0xD37BbE5744D730a1d98d8DC97c42F0Ca46aD7146"
+      }
+     ]
+    },
+    {
+     "status": "RetiringVault",
+     "addresses": [
+      {
+       "chain": "AVAX",
+       "address": "0x1caaf10debe9e005080672d9f46fa7a3005e271e"
+      },
+      {
+       "chain": "BASE",
+       "address": "0x1caaf10debe9e005080672d9f46fa7a3005e271e"
+      },
+      {
+       "chain": "BSC",
+       "address": "0x1caaf10debe9e005080672d9f46fa7a3005e271e"
+      },
+      {
+       "chain": "ETH",
+       "address": "0x1caaf10debe9e005080672d9f46fa7a3005e271e"
+      }
+     ],
+     "routers": [
+      {
+       "chain": "AVAX",
+       "router": "0x00dc6100103BC402d490aEE3F9a5560cBd91f1d4"
+      },
+      {
+       "chain": "BASE",
+       "router": "0x00dc6100103BC402d490aEE3F9a5560cBd91f1d4"
+      },
+      {
+       "chain": "BSC",
+       "router": "0xb30ec53f98ff5947ede720d32ac2da7e52a5f56b"
+      },
+      {
+       "chain": "ETH",
+       "router": "0xD37BbE5744D730a1d98d8DC97c42F0Ca46aD7146"
+      }
+     ]
+    },
+    {
+     "status": "RetiringVault",
+     "addresses": [
+      {
+       "chain": "AVAX",
+       "address": "0x9ca9dde177ce3d2dfaf2cf5d6b1e8b8ffad8f723"
+      },
+      {
+       "chain": "BASE",
+       "address": "0x9ca9dde177ce3d2dfaf2cf5d6b1e8b8ffad8f723"
+      },
+      {
+       "chain": "BSC",
+       "address": "0x9ca9dde177ce3d2dfaf2cf5d6b1e8b8ffad8f723"
+      },
+      {
+       "chain": "ETH",
+       "address": "0x9ca9dde177ce3d2dfaf2cf5d6b1e8b8ffad8f723"
+      }
+     ],
+     "routers": [
+      {
+       "chain": "AVAX",
+       "router": "0x00dc6100103BC402d490aEE3F9a5560cBd91f1d4"
+      },
+      {
+       "chain": "BASE",
+       "router": "0x00dc6100103BC402d490aEE3F9a5560cBd91f1d4"
+      },
+      {
+       "chain": "BSC",
+       "router": "0xb30ec53f98ff5947ede720d32ac2da7e52a5f56b"
+      },
+      {
+       "chain": "ETH",
+       "router": "0xD37BbE5744D730a1d98d8DC97c42F0Ca46aD7146"
+      }
+     ]
+    },
+    {
+     "status": "RetiringVault",
+     "addresses": [
+      {
+       "chain": "AVAX",
+       "address": "0xfe1295ab2adcb37c372694e1b2a3485e9e3b31d8"
+      },
+      {
+       "chain": "BASE",
+       "address": "0xfe1295ab2adcb37c372694e1b2a3485e9e3b31d8"
+      },
+      {
+       "chain": "BSC",
+       "address": "0xfe1295ab2adcb37c372694e1b2a3485e9e3b31d8"
+      },
+      {
+       "chain": "ETH",
+       "address": "0xfe1295ab2adcb37c372694e1b2a3485e9e3b31d8"
+      }
+     ],
+     "routers": [
+      {
+       "chain": "AVAX",
+       "router": "0x00dc6100103BC402d490aEE3F9a5560cBd91f1d4"
+      },
+      {
+       "chain": "BASE",
+       "router": "0x00dc6100103BC402d490aEE3F9a5560cBd91f1d4"
+      },
+      {
+       "chain": "BSC",
+       "router": "0xb30ec53f98ff5947ede720d32ac2da7e52a5f56b"
+      },
+      {
+       "chain": "ETH",
+       "router": "0xD37BbE5744D730a1d98d8DC97c42F0Ca46aD7146"
+      }
+     ]
+    },
+    {
+     "status": "RetiringVault",
+     "addresses": [
+      {
+       "chain": "AVAX",
+       "address": "0xec67bbd617e9c57df58522690c33aa0cb5129341"
+      },
+      {
+       "chain": "BASE",
+       "address": "0xec67bbd617e9c57df58522690c33aa0cb5129341"
+      },
+      {
+       "chain": "BSC",
+       "address": "0xec67bbd617e9c57df58522690c33aa0cb5129341"
+      },
+      {
+       "chain": "ETH",
+       "address": "0xec67bbd617e9c57df58522690c33aa0cb5129341"
+      }
+     ],
+     "routers": [
+      {
+       "chain": "AVAX",
+       "router": "0x00dc6100103BC402d490aEE3F9a5560cBd91f1d4"
+      },
+      {
+       "chain": "BASE",
+       "router": "0x00dc6100103BC402d490aEE3F9a5560cBd91f1d4"
+      },
+      {
+       "chain": "BSC",
+       "router": "0xb30ec53f98ff5947ede720d32ac2da7e52a5f56b"
+      },
+      {
+       "chain": "ETH",
+       "router": "0xD37BbE5744D730a1d98d8DC97c42F0Ca46aD7146"
+      }
+     ]
+    },
+    {
+     "status": "RetiringVault",
+     "addresses": [
+      {
+       "chain": "AVAX",
+       "address": "0xec826107668fb0b2f6741d90c1d6a558fad3a7d0"
+      },
+      {
+       "chain": "BASE",
+       "address": "0xec826107668fb0b2f6741d90c1d6a558fad3a7d0"
+      },
+      {
+       "chain": "BSC",
+       "address": "0xec826107668fb0b2f6741d90c1d6a558fad3a7d0"
+      },
+      {
+       "chain": "ETH",
+       "address": "0xec826107668fb0b2f6741d90c1d6a558fad3a7d0"
+      }
+     ],
+     "routers": [
+      {
+       "chain": "AVAX",
+       "router": "0x00dc6100103BC402d490aEE3F9a5560cBd91f1d4"
+      },
+      {
+       "chain": "BASE",
+       "router": "0x00dc6100103BC402d490aEE3F9a5560cBd91f1d4"
+      },
+      {
+       "chain": "BSC",
+       "router": "0xb30ec53f98ff5947ede720d32ac2da7e52a5f56b"
+      },
+      {
+       "chain": "ETH",
+       "router": "0xD37BbE5744D730a1d98d8DC97c42F0Ca46aD7146"
+      }
+     ]
+    },
+    {
+     "status": "ActiveVault",
+     "addresses": [
+      {
+       "chain": "AVAX",
+       "address": "0x718f6c9df785bc4e323086de024ca822efbe8ab9"
+      },
+      {
+       "chain": "BASE",
+       "address": "0x718f6c9df785bc4e323086de024ca822efbe8ab9"
+      },
+      {
+       "chain": "BSC",
+       "address": "0x718f6c9df785bc4e323086de024ca822efbe8ab9"
+      },
+      {
+       "chain": "ETH",
+       "address": "0x718f6c9df785bc4e323086de024ca822efbe8ab9"
+      }
+     ],
+     "routers": [
+      {
+       "chain": "AVAX",
+       "router": "0x00dc6100103BC402d490aEE3F9a5560cBd91f1d4"
+      },
+      {
+       "chain": "BASE",
+       "router": "0x00dc6100103BC402d490aEE3F9a5560cBd91f1d4"
+      },
+      {
+       "chain": "BSC",
+       "router": "0xb30ec53f98ff5947ede720d32ac2da7e52a5f56b"
+      },
+      {
+       "chain": "ETH",
+       "router": "0xD37BbE5744D730a1d98d8DC97c42F0Ca46aD7146"
+      }
+     ]
+    },
+    {
+     "status": "ActiveVault",
+     "addresses": [
+      {
+       "chain": "AVAX",
+       "address": "0x6b4068070d95d87b321909bb21c8979fba2b8876"
+      },
+      {
+       "chain": "BASE",
+       "address": "0x6b4068070d95d87b321909bb21c8979fba2b8876"
+      },
+      {
+       "chain": "BSC",
+       "address": "0x6b4068070d95d87b321909bb21c8979fba2b8876"
+      },
+      {
+       "chain": "ETH",
+       "address": "0x6b4068070d95d87b321909bb21c8979fba2b8876"
+      }
+     ],
+     "routers": [
+      {
+       "chain": "AVAX",
+       "router": "0x00dc6100103BC402d490aEE3F9a5560cBd91f1d4"
+      },
+      {
+       "chain": "BASE",
+       "router": "0x00dc6100103BC402d490aEE3F9a5560cBd91f1d4"
+      },
+      {
+       "chain": "BSC",
+       "router": "0xb30ec53f98ff5947ede720d32ac2da7e52a5f56b"
+      },
+      {
+       "chain": "ETH",
+       "router": "0xD37BbE5744D730a1d98d8DC97c42F0Ca46aD7146"
+      }
+     ]
+    },
+    {
+     "status": "ActiveVault",
+     "addresses": [
+      {
+       "chain": "AVAX",
+       "address": "0x4d39d5c55cfeb48f44d680fcac20493635dafdee"
+      },
+      {
+       "chain": "BASE",
+       "address": "0x4d39d5c55cfeb48f44d680fcac20493635dafdee"
+      },
+      {
+       "chain": "BSC",
+       "address": "0x4d39d5c55cfeb48f44d680fcac20493635dafdee"
+      },
+      {
+       "chain": "ETH",
+       "address": "0x4d39d5c55cfeb48f44d680fcac20493635dafdee"
+      }
+     ],
+     "routers": [
+      {
+       "chain": "AVAX",
+       "router": "0x00dc6100103BC402d490aEE3F9a5560cBd91f1d4"
+      },
+      {
+       "chain": "BASE",
+       "router": "0x00dc6100103BC402d490aEE3F9a5560cBd91f1d4"
+      },
+      {
+       "chain": "BSC",
+       "router": "0xb30ec53f98ff5947ede720d32ac2da7e52a5f56b"
+      },
+      {
+       "chain": "ETH",
+       "router": "0xD37BbE5744D730a1d98d8DC97c42F0Ca46aD7146"
+      }
+     ]
+    },
+    {
+     "status": "ActiveVault",
+     "addresses": [
+      {
+       "chain": "AVAX",
+       "address": "0x46f3fb8c14006268d153b18000495c8ee858e94b"
+      },
+      {
+       "chain": "BASE",
+       "address": "0x46f3fb8c14006268d153b18000495c8ee858e94b"
+      },
+      {
+       "chain": "BSC",
+       "address": "0x46f3fb8c14006268d153b18000495c8ee858e94b"
+      },
+      {
+       "chain": "ETH",
+       "address": "0x46f3fb8c14006268d153b18000495c8ee858e94b"
+      }
+     ],
+     "routers": [
+      {
+       "chain": "AVAX",
+       "router": "0x00dc6100103BC402d490aEE3F9a5560cBd91f1d4"
+      },
+      {
+       "chain": "BASE",
+       "router": "0x00dc6100103BC402d490aEE3F9a5560cBd91f1d4"
+      },
+      {
+       "chain": "BSC",
+       "router": "0xb30ec53f98ff5947ede720d32ac2da7e52a5f56b"
+      },
+      {
+       "chain": "ETH",
+       "router": "0xD37BbE5744D730a1d98d8DC97c42F0Ca46aD7146"
+      }
+     ]
+    },
+    {
+     "status": "ActiveVault",
+     "addresses": [
+      {
+       "chain": "AVAX",
+       "address": "0x51649cf810ea9f1f61165044b7149070c67f79c8"
+      },
+      {
+       "chain": "BASE",
+       "address": "0x51649cf810ea9f1f61165044b7149070c67f79c8"
+      },
+      {
+       "chain": "BSC",
+       "address": "0x51649cf810ea9f1f61165044b7149070c67f79c8"
+      },
+      {
+       "chain": "ETH",
+       "address": "0x51649cf810ea9f1f61165044b7149070c67f79c8"
+      }
+     ],
+     "routers": [
+      {
+       "chain": "AVAX",
+       "router": "0x00dc6100103BC402d490aEE3F9a5560cBd91f1d4"
+      },
+      {
+       "chain": "BASE",
+       "router": "0x00dc6100103BC402d490aEE3F9a5560cBd91f1d4"
+      },
+      {
+       "chain": "BSC",
+       "router": "0xb30ec53f98ff5947ede720d32ac2da7e52a5f56b"
+      },
+      {
+       "chain": "ETH",
+       "router": "0xD37BbE5744D730a1d98d8DC97c42F0Ca46aD7146"
+      }
+     ]
+    },
+    {
+     "status": "ActiveVault",
+     "addresses": [
+      {
+       "chain": "AVAX",
+       "address": "0x0d15b57a5ba0a31a4774c03ddfacf79b289db9ce"
+      },
+      {
+       "chain": "BASE",
+       "address": "0x0d15b57a5ba0a31a4774c03ddfacf79b289db9ce"
+      },
+      {
+       "chain": "BSC",
+       "address": "0x0d15b57a5ba0a31a4774c03ddfacf79b289db9ce"
+      },
+      {
+       "chain": "ETH",
+       "address": "0x0d15b57a5ba0a31a4774c03ddfacf79b289db9ce"
+      }
+     ],
+     "routers": [
+      {
+       "chain": "AVAX",
+       "router": "0x00dc6100103BC402d490aEE3F9a5560cBd91f1d4"
+      },
+      {
+       "chain": "BASE",
+       "router": "0x00dc6100103BC402d490aEE3F9a5560cBd91f1d4"
+      },
+      {
+       "chain": "BSC",
+       "router": "0xb30ec53f98ff5947ede720d32ac2da7e52a5f56b"
+      },
+      {
+       "chain": "ETH",
+       "router": "0xD37BbE5744D730a1d98d8DC97c42F0Ca46aD7146"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "_source": "https://mainnet.base.org eth_getTransactionByHash 0xca9565c660ea60bb46da4940004dfa5560b4014db429d8b5d0baf6a1425a4200 (KeepKey Desktop swap, ~/keepkey-audit-rigs/issuer/realworld/swap-txs.json); THORChain observed it at height 28272309; vaults from https://gateway.liquify.com/chain/thorchain_api/thorchain/vaults/asgard?height=28272308, the block before",
+   "name": "Base ETH -> ETH.ETH, own EVM destination",
+   "protocol": "THORChain",
+   "txid": "0xca9565c660ea60bb46da4940004dfa5560b4014db429d8b5d0baf6a1425a4200",
+   "chainId": 8453,
+   "from": "0x909ef6b32dfdc12ca86aa710b54c991af3c5f82e",
+   "to": "0x00dc6100103bc402d490aee3f9a5560cbd91f1d4",
+   "value": "0x9351a72b0b1000",
+   "data": "0x44bc937b000000000000000000000000718f6c9df785bc4e323086de024ca822efbe8ab90000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000009351a72b0b100000000000000000000000000000000000000000000000000000000000000000a0000000000000000000000000000000000000000000000000000000006ad2951700000000000000000000000000000000000000000000000000000000000000443d3a4554482e4554483a3078393039456636423332446644633132434138366141373130623534633939316166334335463832453a333938393934313a6b6565703a333000000000000000000000000000000000000000000000000000000000",
+   "vaultsHeight": 28272308,
+   "vaults": [
+    {
+     "status": "ActiveVault",
+     "addresses": [
+      {
+       "chain": "AVAX",
+       "address": "0x718f6c9df785bc4e323086de024ca822efbe8ab9"
+      },
+      {
+       "chain": "BASE",
+       "address": "0x718f6c9df785bc4e323086de024ca822efbe8ab9"
+      },
+      {
+       "chain": "BSC",
+       "address": "0x718f6c9df785bc4e323086de024ca822efbe8ab9"
+      },
+      {
+       "chain": "ETH",
+       "address": "0x718f6c9df785bc4e323086de024ca822efbe8ab9"
+      }
+     ],
+     "routers": [
+      {
+       "chain": "AVAX",
+       "router": "0x00dc6100103BC402d490aEE3F9a5560cBd91f1d4"
+      },
+      {
+       "chain": "BASE",
+       "router": "0x00dc6100103BC402d490aEE3F9a5560cBd91f1d4"
+      },
+      {
+       "chain": "BSC",
+       "router": "0xb30ec53f98ff5947ede720d32ac2da7e52a5f56b"
+      },
+      {
+       "chain": "ETH",
+       "router": "0xD37BbE5744D730a1d98d8DC97c42F0Ca46aD7146"
+      }
+     ]
+    },
+    {
+     "status": "ActiveVault",
+     "addresses": [
+      {
+       "chain": "AVAX",
+       "address": "0x6b4068070d95d87b321909bb21c8979fba2b8876"
+      },
+      {
+       "chain": "BASE",
+       "address": "0x6b4068070d95d87b321909bb21c8979fba2b8876"
+      },
+      {
+       "chain": "BSC",
+       "address": "0x6b4068070d95d87b321909bb21c8979fba2b8876"
+      },
+      {
+       "chain": "ETH",
+       "address": "0x6b4068070d95d87b321909bb21c8979fba2b8876"
+      }
+     ],
+     "routers": [
+      {
+       "chain": "AVAX",
+       "router": "0x00dc6100103BC402d490aEE3F9a5560cBd91f1d4"
+      },
+      {
+       "chain": "BASE",
+       "router": "0x00dc6100103BC402d490aEE3F9a5560cBd91f1d4"
+      },
+      {
+       "chain": "BSC",
+       "router": "0xb30ec53f98ff5947ede720d32ac2da7e52a5f56b"
+      },
+      {
+       "chain": "ETH",
+       "router": "0xD37BbE5744D730a1d98d8DC97c42F0Ca46aD7146"
+      }
+     ]
+    },
+    {
+     "status": "ActiveVault",
+     "addresses": [
+      {
+       "chain": "AVAX",
+       "address": "0x4d39d5c55cfeb48f44d680fcac20493635dafdee"
+      },
+      {
+       "chain": "BASE",
+       "address": "0x4d39d5c55cfeb48f44d680fcac20493635dafdee"
+      },
+      {
+       "chain": "BSC",
+       "address": "0x4d39d5c55cfeb48f44d680fcac20493635dafdee"
+      },
+      {
+       "chain": "ETH",
+       "address": "0x4d39d5c55cfeb48f44d680fcac20493635dafdee"
+      }
+     ],
+     "routers": [
+      {
+       "chain": "AVAX",
+       "router": "0x00dc6100103BC402d490aEE3F9a5560cBd91f1d4"
+      },
+      {
+       "chain": "BASE",
+       "router": "0x00dc6100103BC402d490aEE3F9a5560cBd91f1d4"
+      },
+      {
+       "chain": "BSC",
+       "router": "0xb30ec53f98ff5947ede720d32ac2da7e52a5f56b"
+      },
+      {
+       "chain": "ETH",
+       "router": "0xD37BbE5744D730a1d98d8DC97c42F0Ca46aD7146"
+      }
+     ]
+    },
+    {
+     "status": "ActiveVault",
+     "addresses": [
+      {
+       "chain": "AVAX",
+       "address": "0x46f3fb8c14006268d153b18000495c8ee858e94b"
+      },
+      {
+       "chain": "BASE",
+       "address": "0x46f3fb8c14006268d153b18000495c8ee858e94b"
+      },
+      {
+       "chain": "BSC",
+       "address": "0x46f3fb8c14006268d153b18000495c8ee858e94b"
+      },
+      {
+       "chain": "ETH",
+       "address": "0x46f3fb8c14006268d153b18000495c8ee858e94b"
+      }
+     ],
+     "routers": [
+      {
+       "chain": "AVAX",
+       "router": "0x00dc6100103BC402d490aEE3F9a5560cBd91f1d4"
+      },
+      {
+       "chain": "BASE",
+       "router": "0x00dc6100103BC402d490aEE3F9a5560cBd91f1d4"
+      },
+      {
+       "chain": "BSC",
+       "router": "0xb30ec53f98ff5947ede720d32ac2da7e52a5f56b"
+      },
+      {
+       "chain": "ETH",
+       "router": "0xD37BbE5744D730a1d98d8DC97c42F0Ca46aD7146"
+      }
+     ]
+    },
+    {
+     "status": "ActiveVault",
+     "addresses": [
+      {
+       "chain": "AVAX",
+       "address": "0x51649cf810ea9f1f61165044b7149070c67f79c8"
+      },
+      {
+       "chain": "BASE",
+       "address": "0x51649cf810ea9f1f61165044b7149070c67f79c8"
+      },
+      {
+       "chain": "BSC",
+       "address": "0x51649cf810ea9f1f61165044b7149070c67f79c8"
+      },
+      {
+       "chain": "ETH",
+       "address": "0x51649cf810ea9f1f61165044b7149070c67f79c8"
+      }
+     ],
+     "routers": [
+      {
+       "chain": "AVAX",
+       "router": "0x00dc6100103BC402d490aEE3F9a5560cBd91f1d4"
+      },
+      {
+       "chain": "BASE",
+       "router": "0x00dc6100103BC402d490aEE3F9a5560cBd91f1d4"
+      },
+      {
+       "chain": "BSC",
+       "router": "0xb30ec53f98ff5947ede720d32ac2da7e52a5f56b"
+      },
+      {
+       "chain": "ETH",
+       "router": "0xD37BbE5744D730a1d98d8DC97c42F0Ca46aD7146"
+      }
+     ]
+    },
+    {
+     "status": "ActiveVault",
+     "addresses": [
+      {
+       "chain": "AVAX",
+       "address": "0x0d15b57a5ba0a31a4774c03ddfacf79b289db9ce"
+      },
+      {
+       "chain": "BASE",
+       "address": "0x0d15b57a5ba0a31a4774c03ddfacf79b289db9ce"
+      },
+      {
+       "chain": "BSC",
+       "address": "0x0d15b57a5ba0a31a4774c03ddfacf79b289db9ce"
+      },
+      {
+       "chain": "ETH",
+       "address": "0x0d15b57a5ba0a31a4774c03ddfacf79b289db9ce"
+      }
+     ],
+     "routers": [
+      {
+       "chain": "AVAX",
+       "router": "0x00dc6100103BC402d490aEE3F9a5560cBd91f1d4"
+      },
+      {
+       "chain": "BASE",
+       "router": "0x00dc6100103BC402d490aEE3F9a5560cBd91f1d4"
+      },
+      {
+       "chain": "BSC",
+       "router": "0xb30ec53f98ff5947ede720d32ac2da7e52a5f56b"
+      },
+      {
+       "chain": "ETH",
+       "router": "0xD37BbE5744D730a1d98d8DC97c42F0Ca46aD7146"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "_source": "https://api.avax.network/ext/bc/C/rpc eth_getTransactionByHash 0x85524fd84c3a903a975546e4865cc1145ce5035752b65f3ee83a32a18f73e555 (KeepKey Desktop swap, ~/keepkey-audit-rigs/issuer/realworld/swap-txs.json); THORChain observed it at height 27032501; vaults from https://gateway.liquify.com/chain/thorchain_api/thorchain/vaults/asgard?height=27032500, the block before (captured earlier on 2026-10-29; the gateway later answered HTTP 500 for that height)",
+   "name": "Avalanche AVAX -> ETH.ETH, own EVM destination",
+   "protocol": "THORChain",
+   "txid": "0x85524fd84c3a903a975546e4865cc1145ce5035752b65f3ee83a32a18f73e555",
+   "chainId": 43114,
+   "from": "0x141d9959cae3853b035000490c03991eb70fc4ac",
+   "to": "0x00dc6100103bc402d490aee3f9a5560cbd91f1d4",
+   "value": "0x1e200fc0890c4760",
+   "data": "0x44bc937b00000000000000000000000003545a905ff162b46bea4b9388a14554702f339300000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001e200fc0890c476000000000000000000000000000000000000000000000000000000000000000a0000000000000000000000000000000000000000000000000000000006a59253200000000000000000000000000000000000000000000000000000000000000433d3a4554482e4554483a3078313431443939353963416533383533623033353030303439304330333939316542373046633461433a3731383838333a6b6565703a33300000000000000000000000000000000000000000000000000000000000",
+   "vaultsHeight": 27032500,
+   "vaults": [
+    {
+     "status": "ActiveVault",
+     "addresses": [
+      {
+       "chain": "AVAX",
+       "address": "0x64fb273b328cde17b15d3fff2731b4096ff0a132"
+      },
+      {
+       "chain": "BASE",
+       "address": "0x64fb273b328cde17b15d3fff2731b4096ff0a132"
+      },
+      {
+       "chain": "BSC",
+       "address": "0x64fb273b328cde17b15d3fff2731b4096ff0a132"
+      },
+      {
+       "chain": "ETH",
+       "address": "0x64fb273b328cde17b15d3fff2731b4096ff0a132"
+      }
+     ],
+     "routers": [
+      {
+       "chain": "AVAX",
+       "router": "0x00dc6100103BC402d490aEE3F9a5560cBd91f1d4"
+      },
+      {
+       "chain": "BASE",
+       "router": "0x00dc6100103BC402d490aEE3F9a5560cBd91f1d4"
+      },
+      {
+       "chain": "BSC",
+       "router": "0xb30ec53f98ff5947ede720d32ac2da7e52a5f56b"
+      },
+      {
+       "chain": "ETH",
+       "router": "0xD37BbE5744D730a1d98d8DC97c42F0Ca46aD7146"
+      }
+     ]
+    },
+    {
+     "status": "ActiveVault",
+     "addresses": [
+      {
+       "chain": "AVAX",
+       "address": "0xe3536ba9559966c357f551ceccccf38b533aa171"
+      },
+      {
+       "chain": "BASE",
+       "address": "0xe3536ba9559966c357f551ceccccf38b533aa171"
+      },
+      {
+       "chain": "BSC",
+       "address": "0xe3536ba9559966c357f551ceccccf38b533aa171"
+      },
+      {
+       "chain": "ETH",
+       "address": "0xe3536ba9559966c357f551ceccccf38b533aa171"
+      }
+     ],
+     "routers": [
+      {
+       "chain": "AVAX",
+       "router": "0x00dc6100103BC402d490aEE3F9a5560cBd91f1d4"
+      },
+      {
+       "chain": "BASE",
+       "router": "0x00dc6100103BC402d490aEE3F9a5560cBd91f1d4"
+      },
+      {
+       "chain": "BSC",
+       "router": "0xb30ec53f98ff5947ede720d32ac2da7e52a5f56b"
+      },
+      {
+       "chain": "ETH",
+       "router": "0xD37BbE5744D730a1d98d8DC97c42F0Ca46aD7146"
+      }
+     ]
+    },
+    {
+     "status": "ActiveVault",
+     "addresses": [
+      {
+       "chain": "AVAX",
+       "address": "0x15a18266c5331ac3a7f6bc5cdf25bcc55561b4fa"
+      },
+      {
+       "chain": "BASE",
+       "address": "0x15a18266c5331ac3a7f6bc5cdf25bcc55561b4fa"
+      },
+      {
+       "chain": "BSC",
+       "address": "0x15a18266c5331ac3a7f6bc5cdf25bcc55561b4fa"
+      },
+      {
+       "chain": "ETH",
+       "address": "0x15a18266c5331ac3a7f6bc5cdf25bcc55561b4fa"
+      }
+     ],
+     "routers": [
+      {
+       "chain": "AVAX",
+       "router": "0x00dc6100103BC402d490aEE3F9a5560cBd91f1d4"
+      },
+      {
+       "chain": "BASE",
+       "router": "0x00dc6100103BC402d490aEE3F9a5560cBd91f1d4"
+      },
+      {
+       "chain": "BSC",
+       "router": "0xb30ec53f98ff5947ede720d32ac2da7e52a5f56b"
+      },
+      {
+       "chain": "ETH",
+       "router": "0xD37BbE5744D730a1d98d8DC97c42F0Ca46aD7146"
+      }
+     ]
+    },
+    {
+     "status": "ActiveVault",
+     "addresses": [
+      {
+       "chain": "AVAX",
+       "address": "0xed23d1bf7ac2ce8b4c09a090e252ea6ee5145e6e"
+      },
+      {
+       "chain": "BASE",
+       "address": "0xed23d1bf7ac2ce8b4c09a090e252ea6ee5145e6e"
+      },
+      {
+       "chain": "BSC",
+       "address": "0xed23d1bf7ac2ce8b4c09a090e252ea6ee5145e6e"
+      },
+      {
+       "chain": "ETH",
+       "address": "0xed23d1bf7ac2ce8b4c09a090e252ea6ee5145e6e"
+      }
+     ],
+     "routers": [
+      {
+       "chain": "AVAX",
+       "router": "0x00dc6100103BC402d490aEE3F9a5560cBd91f1d4"
+      },
+      {
+       "chain": "BASE",
+       "router": "0x00dc6100103BC402d490aEE3F9a5560cBd91f1d4"
+      },
+      {
+       "chain": "BSC",
+       "router": "0xb30ec53f98ff5947ede720d32ac2da7e52a5f56b"
+      },
+      {
+       "chain": "ETH",
+       "router": "0xD37BbE5744D730a1d98d8DC97c42F0Ca46aD7146"
+      }
+     ]
+    },
+    {
+     "status": "ActiveVault",
+     "addresses": [
+      {
+       "chain": "AVAX",
+       "address": "0x03545a905ff162b46bea4b9388a14554702f3393"
+      },
+      {
+       "chain": "BASE",
+       "address": "0x03545a905ff162b46bea4b9388a14554702f3393"
+      },
+      {
+       "chain": "BSC",
+       "address": "0x03545a905ff162b46bea4b9388a14554702f3393"
+      },
+      {
+       "chain": "ETH",
+       "address": "0x03545a905ff162b46bea4b9388a14554702f3393"
+      }
+     ],
+     "routers": [
+      {
+       "chain": "AVAX",
+       "router": "0x00dc6100103BC402d490aEE3F9a5560cBd91f1d4"
+      },
+      {
+       "chain": "BASE",
+       "router": "0x00dc6100103BC402d490aEE3F9a5560cBd91f1d4"
+      },
+      {
+       "chain": "BSC",
+       "router": "0xb30ec53f98ff5947ede720d32ac2da7e52a5f56b"
+      },
+      {
+       "chain": "ETH",
+       "router": "0xD37BbE5744D730a1d98d8DC97c42F0Ca46aD7146"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "_source": "https://ethereum-rpc.publicnode.com eth_getTransactionByHash 0xffe642e76215d69f3a1519f49049124f471828cf28cb28ada18177d602c346f5 (KeepKey Desktop swap, ~/keepkey-audit-rigs/issuer/realworld/swap-txs.json); THORChain observed it at height 27045441; vaults from https://gateway.liquify.com/chain/thorchain_api/thorchain/vaults/asgard?height=27045440, the block before (captured earlier on 2026-10-29; the gateway later answered HTTP 500 for that height)",
+   "name": "ETH -> BTC.BTC, Bitcoin destination",
+   "protocol": "THORChain",
+   "txid": "0xffe642e76215d69f3a1519f49049124f471828cf28cb28ada18177d602c346f5",
+   "chainId": 1,
+   "from": "0x141d9959cae3853b035000490c03991eb70fc4ac",
+   "to": "0xd37bbe5744d730a1d98d8dc97c42f0ca46ad7146",
+   "value": "0x9acae705fa800",
+   "data": "0x44bc937b000000000000000000000000ed23d1bf7ac2ce8b4c09a090e252ea6ee5145e6e00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000009acae705fa80000000000000000000000000000000000000000000000000000000000000000a0000000000000000000000000000000000000000000000000000000006a5a5a4b00000000000000000000000000000000000000000000000000000000000000413d3a4254432e4254433a6263317138773279707167783339677563786379707176326d3930777a397276686d6d72636e70646a733a363037343a6b6565703a333000000000000000000000000000000000000000000000000000000000000000",
+   "vaultsHeight": 27045440,
+   "vaults": [
+    {
+     "status": "ActiveVault",
+     "addresses": [
+      {
+       "chain": "AVAX",
+       "address": "0x64fb273b328cde17b15d3fff2731b4096ff0a132"
+      },
+      {
+       "chain": "BASE",
+       "address": "0x64fb273b328cde17b15d3fff2731b4096ff0a132"
+      },
+      {
+       "chain": "BSC",
+       "address": "0x64fb273b328cde17b15d3fff2731b4096ff0a132"
+      },
+      {
+       "chain": "ETH",
+       "address": "0x64fb273b328cde17b15d3fff2731b4096ff0a132"
+      }
+     ],
+     "routers": [
+      {
+       "chain": "AVAX",
+       "router": "0x00dc6100103BC402d490aEE3F9a5560cBd91f1d4"
+      },
+      {
+       "chain": "BASE",
+       "router": "0x00dc6100103BC402d490aEE3F9a5560cBd91f1d4"
+      },
+      {
+       "chain": "BSC",
+       "router": "0xb30ec53f98ff5947ede720d32ac2da7e52a5f56b"
+      },
+      {
+       "chain": "ETH",
+       "router": "0xD37BbE5744D730a1d98d8DC97c42F0Ca46aD7146"
+      }
+     ]
+    },
+    {
+     "status": "ActiveVault",
+     "addresses": [
+      {
+       "chain": "AVAX",
+       "address": "0xe3536ba9559966c357f551ceccccf38b533aa171"
+      },
+      {
+       "chain": "BASE",
+       "address": "0xe3536ba9559966c357f551ceccccf38b533aa171"
+      },
+      {
+       "chain": "BSC",
+       "address": "0xe3536ba9559966c357f551ceccccf38b533aa171"
+      },
+      {
+       "chain": "ETH",
+       "address": "0xe3536ba9559966c357f551ceccccf38b533aa171"
+      }
+     ],
+     "routers": [
+      {
+       "chain": "AVAX",
+       "router": "0x00dc6100103BC402d490aEE3F9a5560cBd91f1d4"
+      },
+      {
+       "chain": "BASE",
+       "router": "0x00dc6100103BC402d490aEE3F9a5560cBd91f1d4"
+      },
+      {
+       "chain": "BSC",
+       "router": "0xb30ec53f98ff5947ede720d32ac2da7e52a5f56b"
+      },
+      {
+       "chain": "ETH",
+       "router": "0xD37BbE5744D730a1d98d8DC97c42F0Ca46aD7146"
+      }
+     ]
+    },
+    {
+     "status": "ActiveVault",
+     "addresses": [
+      {
+       "chain": "AVAX",
+       "address": "0x15a18266c5331ac3a7f6bc5cdf25bcc55561b4fa"
+      },
+      {
+       "chain": "BASE",
+       "address": "0x15a18266c5331ac3a7f6bc5cdf25bcc55561b4fa"
+      },
+      {
+       "chain": "BSC",
+       "address": "0x15a18266c5331ac3a7f6bc5cdf25bcc55561b4fa"
+      },
+      {
+       "chain": "ETH",
+       "address": "0x15a18266c5331ac3a7f6bc5cdf25bcc55561b4fa"
+      }
+     ],
+     "routers": [
+      {
+       "chain": "AVAX",
+       "router": "0x00dc6100103BC402d490aEE3F9a5560cBd91f1d4"
+      },
+      {
+       "chain": "BASE",
+       "router": "0x00dc6100103BC402d490aEE3F9a5560cBd91f1d4"
+      },
+      {
+       "chain": "BSC",
+       "router": "0xb30ec53f98ff5947ede720d32ac2da7e52a5f56b"
+      },
+      {
+       "chain": "ETH",
+       "router": "0xD37BbE5744D730a1d98d8DC97c42F0Ca46aD7146"
+      }
+     ]
+    },
+    {
+     "status": "ActiveVault",
+     "addresses": [
+      {
+       "chain": "AVAX",
+       "address": "0xed23d1bf7ac2ce8b4c09a090e252ea6ee5145e6e"
+      },
+      {
+       "chain": "BASE",
+       "address": "0xed23d1bf7ac2ce8b4c09a090e252ea6ee5145e6e"
+      },
+      {
+       "chain": "BSC",
+       "address": "0xed23d1bf7ac2ce8b4c09a090e252ea6ee5145e6e"
+      },
+      {
+       "chain": "ETH",
+       "address": "0xed23d1bf7ac2ce8b4c09a090e252ea6ee5145e6e"
+      }
+     ],
+     "routers": [
+      {
+       "chain": "AVAX",
+       "router": "0x00dc6100103BC402d490aEE3F9a5560cBd91f1d4"
+      },
+      {
+       "chain": "BASE",
+       "router": "0x00dc6100103BC402d490aEE3F9a5560cBd91f1d4"
+      },
+      {
+       "chain": "BSC",
+       "router": "0xb30ec53f98ff5947ede720d32ac2da7e52a5f56b"
+      },
+      {
+       "chain": "ETH",
+       "router": "0xD37BbE5744D730a1d98d8DC97c42F0Ca46aD7146"
+      }
+     ]
+    },
+    {
+     "status": "ActiveVault",
+     "addresses": [
+      {
+       "chain": "AVAX",
+       "address": "0x03545a905ff162b46bea4b9388a14554702f3393"
+      },
+      {
+       "chain": "BASE",
+       "address": "0x03545a905ff162b46bea4b9388a14554702f3393"
+      },
+      {
+       "chain": "BSC",
+       "address": "0x03545a905ff162b46bea4b9388a14554702f3393"
+      },
+      {
+       "chain": "ETH",
+       "address": "0x03545a905ff162b46bea4b9388a14554702f3393"
+      }
+     ],
+     "routers": [
+      {
+       "chain": "AVAX",
+       "router": "0x00dc6100103BC402d490aEE3F9a5560cBd91f1d4"
+      },
+      {
+       "chain": "BASE",
+       "router": "0x00dc6100103BC402d490aEE3F9a5560cBd91f1d4"
+      },
+      {
+       "chain": "BSC",
+       "router": "0xb30ec53f98ff5947ede720d32ac2da7e52a5f56b"
+      },
+      {
+       "chain": "ETH",
+       "router": "0xD37BbE5744D730a1d98d8DC97c42F0Ca46aD7146"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "_source": "https://ethereum-rpc.publicnode.com eth_getTransactionByHash 0xfae8dc1d12a692e8ed1febb397f25f4f00aa8d69d84b17d73c29970fbf47b8a4 (KeepKey Desktop swap, ~/keepkey-audit-rigs/issuer/realworld/swap-txs.json); THORChain observed it at height 27141897; vaults from https://gateway.liquify.com/chain/thorchain_api/thorchain/vaults/asgard?height=27141896, the block before (captured earlier on 2026-10-29; the gateway later answered HTTP 500 for that height)",
+   "name": "ETH -> THOR.RUNE, THORChain destination",
+   "protocol": "THORChain",
+   "txid": "0xfae8dc1d12a692e8ed1febb397f25f4f00aa8d69d84b17d73c29970fbf47b8a4",
+   "chainId": 1,
+   "from": "0x9f5f2e605863dc1d9ccb98bc104e10fd551d8ee9",
+   "to": "0xd37bbe5744d730a1d98d8dc97c42f0ca46ad7146",
+   "value": "0xa02e52eea9b402",
+   "data": "0x44bc937b00000000000000000000000003545a905ff162b46bea4b9388a14554702f3393000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000a02e52eea9b40200000000000000000000000000000000000000000000000000000000000000a0000000000000000000000000000000000000000000000000000000006a639642000000000000000000000000000000000000000000000000000000000000004b3d3a54484f522e52554e453a74686f7231336434747a6d6568686d74347238773973346e3067306c773768336767707976397268637a783a31393237393231343339303a6b6565703a3330000000000000000000000000000000000000000000",
+   "vaultsHeight": 27141896,
+   "vaults": [
+    {
+     "status": "ActiveVault",
+     "addresses": [
+      {
+       "chain": "AVAX",
+       "address": "0x64fb273b328cde17b15d3fff2731b4096ff0a132"
+      },
+      {
+       "chain": "BASE",
+       "address": "0x64fb273b328cde17b15d3fff2731b4096ff0a132"
+      },
+      {
+       "chain": "BSC",
+       "address": "0x64fb273b328cde17b15d3fff2731b4096ff0a132"
+      },
+      {
+       "chain": "ETH",
+       "address": "0x64fb273b328cde17b15d3fff2731b4096ff0a132"
+      }
+     ],
+     "routers": [
+      {
+       "chain": "AVAX",
+       "router": "0x00dc6100103BC402d490aEE3F9a5560cBd91f1d4"
+      },
+      {
+       "chain": "BASE",
+       "router": "0x00dc6100103BC402d490aEE3F9a5560cBd91f1d4"
+      },
+      {
+       "chain": "BSC",
+       "router": "0xb30ec53f98ff5947ede720d32ac2da7e52a5f56b"
+      },
+      {
+       "chain": "ETH",
+       "router": "0xD37BbE5744D730a1d98d8DC97c42F0Ca46aD7146"
+      }
+     ]
+    },
+    {
+     "status": "ActiveVault",
+     "addresses": [
+      {
+       "chain": "AVAX",
+       "address": "0xe3536ba9559966c357f551ceccccf38b533aa171"
+      },
+      {
+       "chain": "BASE",
+       "address": "0xe3536ba9559966c357f551ceccccf38b533aa171"
+      },
+      {
+       "chain": "BSC",
+       "address": "0xe3536ba9559966c357f551ceccccf38b533aa171"
+      },
+      {
+       "chain": "ETH",
+       "address": "0xe3536ba9559966c357f551ceccccf38b533aa171"
+      }
+     ],
+     "routers": [
+      {
+       "chain": "AVAX",
+       "router": "0x00dc6100103BC402d490aEE3F9a5560cBd91f1d4"
+      },
+      {
+       "chain": "BASE",
+       "router": "0x00dc6100103BC402d490aEE3F9a5560cBd91f1d4"
+      },
+      {
+       "chain": "BSC",
+       "router": "0xb30ec53f98ff5947ede720d32ac2da7e52a5f56b"
+      },
+      {
+       "chain": "ETH",
+       "router": "0xD37BbE5744D730a1d98d8DC97c42F0Ca46aD7146"
+      }
+     ]
+    },
+    {
+     "status": "ActiveVault",
+     "addresses": [
+      {
+       "chain": "AVAX",
+       "address": "0x15a18266c5331ac3a7f6bc5cdf25bcc55561b4fa"
+      },
+      {
+       "chain": "BASE",
+       "address": "0x15a18266c5331ac3a7f6bc5cdf25bcc55561b4fa"
+      },
+      {
+       "chain": "BSC",
+       "address": "0x15a18266c5331ac3a7f6bc5cdf25bcc55561b4fa"
+      },
+      {
+       "chain": "ETH",
+       "address": "0x15a18266c5331ac3a7f6bc5cdf25bcc55561b4fa"
+      }
+     ],
+     "routers": [
+      {
+       "chain": "AVAX",
+       "router": "0x00dc6100103BC402d490aEE3F9a5560cBd91f1d4"
+      },
+      {
+       "chain": "BASE",
+       "router": "0x00dc6100103BC402d490aEE3F9a5560cBd91f1d4"
+      },
+      {
+       "chain": "BSC",
+       "router": "0xb30ec53f98ff5947ede720d32ac2da7e52a5f56b"
+      },
+      {
+       "chain": "ETH",
+       "router": "0xD37BbE5744D730a1d98d8DC97c42F0Ca46aD7146"
+      }
+     ]
+    },
+    {
+     "status": "ActiveVault",
+     "addresses": [
+      {
+       "chain": "AVAX",
+       "address": "0xed23d1bf7ac2ce8b4c09a090e252ea6ee5145e6e"
+      },
+      {
+       "chain": "BASE",
+       "address": "0xed23d1bf7ac2ce8b4c09a090e252ea6ee5145e6e"
+      },
+      {
+       "chain": "BSC",
+       "address": "0xed23d1bf7ac2ce8b4c09a090e252ea6ee5145e6e"
+      },
+      {
+       "chain": "ETH",
+       "address": "0xed23d1bf7ac2ce8b4c09a090e252ea6ee5145e6e"
+      }
+     ],
+     "routers": [
+      {
+       "chain": "AVAX",
+       "router": "0x00dc6100103BC402d490aEE3F9a5560cBd91f1d4"
+      },
+      {
+       "chain": "BASE",
+       "router": "0x00dc6100103BC402d490aEE3F9a5560cBd91f1d4"
+      },
+      {
+       "chain": "BSC",
+       "router": "0xb30ec53f98ff5947ede720d32ac2da7e52a5f56b"
+      },
+      {
+       "chain": "ETH",
+       "router": "0xD37BbE5744D730a1d98d8DC97c42F0Ca46aD7146"
+      }
+     ]
+    },
+    {
+     "status": "ActiveVault",
+     "addresses": [
+      {
+       "chain": "AVAX",
+       "address": "0x03545a905ff162b46bea4b9388a14554702f3393"
+      },
+      {
+       "chain": "BASE",
+       "address": "0x03545a905ff162b46bea4b9388a14554702f3393"
+      },
+      {
+       "chain": "BSC",
+       "address": "0x03545a905ff162b46bea4b9388a14554702f3393"
+      },
+      {
+       "chain": "ETH",
+       "address": "0x03545a905ff162b46bea4b9388a14554702f3393"
+      }
+     ],
+     "routers": [
+      {
+       "chain": "AVAX",
+       "router": "0x00dc6100103BC402d490aEE3F9a5560cBd91f1d4"
+      },
+      {
+       "chain": "BASE",
+       "router": "0x00dc6100103BC402d490aEE3F9a5560cBd91f1d4"
+      },
+      {
+       "chain": "BSC",
+       "router": "0xb30ec53f98ff5947ede720d32ac2da7e52a5f56b"
+      },
+      {
+       "chain": "ETH",
+       "router": "0xD37BbE5744D730a1d98d8DC97c42F0Ca46aD7146"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "_source": "https://ethereum-rpc.publicnode.com eth_getTransactionByHash 0x28eb32ce031e092041a35591310ce61eb77a25bae74d567dcbf56c2eddbbaf43 (KeepKey Desktop swap, ~/keepkey-audit-rigs/issuer/realworld/swap-txs.json); Mayachain observed it at height 17441472; vaults from https://mayanode.mayachain.info/mayachain/vaults/asgard?height=17441471, the block before",
+   "name": "Maya: ETH -> MAYA.CACAO, Maya destination",
+   "protocol": "Mayachain",
+   "txid": "0x28eb32ce031e092041a35591310ce61eb77a25bae74d567dcbf56c2eddbbaf43",
+   "chainId": 1,
+   "from": "0x9f5f2e605863dc1d9ccb98bc104e10fd551d8ee9",
+   "to": "0xe3985e6b61b814f7cdb188766562ba71b446b46d",
+   "value": "0xa948c234281bfe",
+   "data": "0x44bc937b0000000000000000000000006a16f961e24e6e90bd9f950f768dc42a7f305664000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000a948c234281bfe00000000000000000000000000000000000000000000000000000000000000a0000000000000000000000000000000000000000000000000000000006a554c3f00000000000000000000000000000000000000000000000000000000000000413d3a4d4159412e434143414f3a6d61796131336434747a6d6568686d74347238773973346e3067306c77376833676770797639356635356b3a3a6b6565703a333000000000000000000000000000000000000000000000000000000000000000",
+   "vaultsHeight": 17441471,
+   "vaults": [
+    {
+     "status": "ActiveVault",
+     "addresses": [
+      {
+       "chain": "ARB",
+       "address": "0x6a16f961e24e6e90bd9f950f768dc42a7f305664"
+      },
+      {
+       "chain": "ETH",
+       "address": "0x6a16f961e24e6e90bd9f950f768dc42a7f305664"
+      }
+     ],
+     "routers": [
+      {
+       "chain": "ARB",
+       "router": "0x700E97ef07219440487840Dc472E7120A7FF11F4"
+      },
+      {
+       "chain": "ETH",
+       "router": "0xe3985E6b61b814F7Cdb188766562ba71b446B46d"
+      },
+      {
+       "chain": "XRD",
+       "router": "component_rdx1cp7hrk7k0pjavnpt5h6dsel096kzlj96r8ukw2ywqgdc5tlvpvn0as"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "_source": "https://mainnet.base.org eth_getTransactionByHash 0x46bda2197f5bd519447ac638bc324d5af4e1ffd0e2088acf2df9968822c8a768 (KeepKey Desktop swap, ~/keepkey-audit-rigs/issuer/realworld/swap-txs.json); THORChain observed it at height 28181756; vaults from https://gateway.liquify.com/chain/thorchain_api/thorchain/vaults/asgard?height=28181755, the block before",
+   "name": "Base ETH -> ETH.USDT, vault 0x587c (Desktop swap status: failed)",
+   "protocol": "THORChain",
+   "txid": "0x46bda2197f5bd519447ac638bc324d5af4e1ffd0e2088acf2df9968822c8a768",
+   "chainId": 8453,
+   "from": "0x27de622cc44c55b53caf299ecedccdab29ac98a8",
+   "to": "0x00dc6100103bc402d490aee3f9a5560cbd91f1d4",
+   "value": "0x0",
+   "data": "0x44bc937b000000000000000000000000587c7c3ba9e47b1afd9da9a79c127ade753ac53a000000000000000000000000833589fcd6edb6e08f4c7c32d4f71b54bda0291300000000000000000000000000000000000000000000000000000000b8d5024d00000000000000000000000000000000000000000000000000000000000000a0000000000000000000000000000000000000000000000000000000006aca0b0500000000000000000000000000000000000000000000000000000000000000753d3a4554482e555344542d3058444143313746393538443245453532334132323036323036393934353937433133443833314543373a3078323764653632326363343463353562353363614632393965436564636364414232396143393841383a3330303538323535323533343a6b6565703a33300000000000000000000000",
+   "vaultsHeight": 28181755,
+   "vaults": [
+    {
+     "status": "ActiveVault",
+     "addresses": [
+      {
+       "chain": "AVAX",
+       "address": "0x587c7c3ba9e47b1afd9da9a79c127ade753ac53a"
+      },
+      {
+       "chain": "BASE",
+       "address": "0x587c7c3ba9e47b1afd9da9a79c127ade753ac53a"
+      },
+      {
+       "chain": "BSC",
+       "address": "0x587c7c3ba9e47b1afd9da9a79c127ade753ac53a"
+      },
+      {
+       "chain": "ETH",
+       "address": "0x587c7c3ba9e47b1afd9da9a79c127ade753ac53a"
+      }
+     ],
+     "routers": [
+      {
+       "chain": "AVAX",
+       "router": "0x00dc6100103BC402d490aEE3F9a5560cBd91f1d4"
+      },
+      {
+       "chain": "BASE",
+       "router": "0x00dc6100103BC402d490aEE3F9a5560cBd91f1d4"
+      },
+      {
+       "chain": "BSC",
+       "router": "0xb30ec53f98ff5947ede720d32ac2da7e52a5f56b"
+      },
+      {
+       "chain": "ETH",
+       "router": "0xD37BbE5744D730a1d98d8DC97c42F0Ca46aD7146"
+      }
+     ]
+    },
+    {
+     "status": "ActiveVault",
+     "addresses": [
+      {
+       "chain": "AVAX",
+       "address": "0x1caaf10debe9e005080672d9f46fa7a3005e271e"
+      },
+      {
+       "chain": "BASE",
+       "address": "0x1caaf10debe9e005080672d9f46fa7a3005e271e"
+      },
+      {
+       "chain": "BSC",
+       "address": "0x1caaf10debe9e005080672d9f46fa7a3005e271e"
+      },
+      {
+       "chain": "ETH",
+       "address": "0x1caaf10debe9e005080672d9f46fa7a3005e271e"
+      }
+     ],
+     "routers": [
+      {
+       "chain": "AVAX",
+       "router": "0x00dc6100103BC402d490aEE3F9a5560cBd91f1d4"
+      },
+      {
+       "chain": "BASE",
+       "router": "0x00dc6100103BC402d490aEE3F9a5560cBd91f1d4"
+      },
+      {
+       "chain": "BSC",
+       "router": "0xb30ec53f98ff5947ede720d32ac2da7e52a5f56b"
+      },
+      {
+       "chain": "ETH",
+       "router": "0xD37BbE5744D730a1d98d8DC97c42F0Ca46aD7146"
+      }
+     ]
+    },
+    {
+     "status": "ActiveVault",
+     "addresses": [
+      {
+       "chain": "AVAX",
+       "address": "0x9ca9dde177ce3d2dfaf2cf5d6b1e8b8ffad8f723"
+      },
+      {
+       "chain": "BASE",
+       "address": "0x9ca9dde177ce3d2dfaf2cf5d6b1e8b8ffad8f723"
+      },
+      {
+       "chain": "BSC",
+       "address": "0x9ca9dde177ce3d2dfaf2cf5d6b1e8b8ffad8f723"
+      },
+      {
+       "chain": "ETH",
+       "address": "0x9ca9dde177ce3d2dfaf2cf5d6b1e8b8ffad8f723"
+      }
+     ],
+     "routers": [
+      {
+       "chain": "AVAX",
+       "router": "0x00dc6100103BC402d490aEE3F9a5560cBd91f1d4"
+      },
+      {
+       "chain": "BASE",
+       "router": "0x00dc6100103BC402d490aEE3F9a5560cBd91f1d4"
+      },
+      {
+       "chain": "BSC",
+       "router": "0xb30ec53f98ff5947ede720d32ac2da7e52a5f56b"
+      },
+      {
+       "chain": "ETH",
+       "router": "0xD37BbE5744D730a1d98d8DC97c42F0Ca46aD7146"
+      }
+     ]
+    },
+    {
+     "status": "ActiveVault",
+     "addresses": [
+      {
+       "chain": "AVAX",
+       "address": "0xfe1295ab2adcb37c372694e1b2a3485e9e3b31d8"
+      },
+      {
+       "chain": "BASE",
+       "address": "0xfe1295ab2adcb37c372694e1b2a3485e9e3b31d8"
+      },
+      {
+       "chain": "BSC",
+       "address": "0xfe1295ab2adcb37c372694e1b2a3485e9e3b31d8"
+      },
+      {
+       "chain": "ETH",
+       "address": "0xfe1295ab2adcb37c372694e1b2a3485e9e3b31d8"
+      }
+     ],
+     "routers": [
+      {
+       "chain": "AVAX",
+       "router": "0x00dc6100103BC402d490aEE3F9a5560cBd91f1d4"
+      },
+      {
+       "chain": "BASE",
+       "router": "0x00dc6100103BC402d490aEE3F9a5560cBd91f1d4"
+      },
+      {
+       "chain": "BSC",
+       "router": "0xb30ec53f98ff5947ede720d32ac2da7e52a5f56b"
+      },
+      {
+       "chain": "ETH",
+       "router": "0xD37BbE5744D730a1d98d8DC97c42F0Ca46aD7146"
+      }
+     ]
+    },
+    {
+     "status": "ActiveVault",
+     "addresses": [
+      {
+       "chain": "AVAX",
+       "address": "0xec67bbd617e9c57df58522690c33aa0cb5129341"
+      },
+      {
+       "chain": "BASE",
+       "address": "0xec67bbd617e9c57df58522690c33aa0cb5129341"
+      },
+      {
+       "chain": "BSC",
+       "address": "0xec67bbd617e9c57df58522690c33aa0cb5129341"
+      },
+      {
+       "chain": "ETH",
+       "address": "0xec67bbd617e9c57df58522690c33aa0cb5129341"
+      }
+     ],
+     "routers": [
+      {
+       "chain": "AVAX",
+       "router": "0x00dc6100103BC402d490aEE3F9a5560cBd91f1d4"
+      },
+      {
+       "chain": "BASE",
+       "router": "0x00dc6100103BC402d490aEE3F9a5560cBd91f1d4"
+      },
+      {
+       "chain": "BSC",
+       "router": "0xb30ec53f98ff5947ede720d32ac2da7e52a5f56b"
+      },
+      {
+       "chain": "ETH",
+       "router": "0xD37BbE5744D730a1d98d8DC97c42F0Ca46aD7146"
+      }
+     ]
+    },
+    {
+     "status": "ActiveVault",
+     "addresses": [
+      {
+       "chain": "AVAX",
+       "address": "0xec826107668fb0b2f6741d90c1d6a558fad3a7d0"
+      },
+      {
+       "chain": "BASE",
+       "address": "0xec826107668fb0b2f6741d90c1d6a558fad3a7d0"
+      },
+      {
+       "chain": "BSC",
+       "address": "0xec826107668fb0b2f6741d90c1d6a558fad3a7d0"
+      },
+      {
+       "chain": "ETH",
+       "address": "0xec826107668fb0b2f6741d90c1d6a558fad3a7d0"
+      }
+     ],
+     "routers": [
+      {
+       "chain": "AVAX",
+       "router": "0x00dc6100103BC402d490aEE3F9a5560cBd91f1d4"
+      },
+      {
+       "chain": "BASE",
+       "router": "0x00dc6100103BC402d490aEE3F9a5560cBd91f1d4"
+      },
+      {
+       "chain": "BSC",
+       "router": "0xb30ec53f98ff5947ede720d32ac2da7e52a5f56b"
+      },
+      {
+       "chain": "ETH",
+       "router": "0xD37BbE5744D730a1d98d8DC97c42F0Ca46aD7146"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "_source": "https://bsc-rpc.publicnode.com eth_getTransactionByHash 0xe4f72dfaf6816db967d39a0622b287f1a9dbd3095b7a9cdf82b233fa5b2cd0ad (found via Midgard /v2/actions); THORChain observed it at height 28453520; vaults from https://gateway.liquify.com/chain/thorchain_api/thorchain/vaults/asgard?height=28453519, the block before",
+   "name": "BSC BNB -> ETH.ETH (third-party app, Midgard)",
+   "protocol": "THORChain",
+   "txid": "0xe4f72dfaf6816db967d39a0622b287f1a9dbd3095b7a9cdf82b233fa5b2cd0ad",
+   "chainId": 56,
+   "from": "0x12c44cfc630e3d03f160cdc893ac4167d541a3e6",
+   "to": "0xb30ec53f98ff5947ede720d32ac2da7e52a5f56b",
+   "value": "0x16345785d8a0000",
+   "data": "0x44bc937b00000000000000000000000051649cf810ea9f1f61165044b7149070c67f79c80000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000016345785d8a000000000000000000000000000000000000000000000000000000000000000000a0000000000000000000000000000000000000000000000000000000006ae3e36800000000000000000000000000000000000000000000000000000000000000723d3a653a3078313243343443464336333045336430336631363043646338393341433431363744353431613365362f3078313243343443464336333045336430336631363043646338393341433431363744353431613365363a323933333436332f312f303a2d5f2f74616e3a372f3134340000000000000000000000000000",
+   "vaultsHeight": 28453519,
+   "vaults": [
+    {
+     "status": "ActiveVault",
+     "addresses": [
+      {
+       "chain": "AVAX",
+       "address": "0x718f6c9df785bc4e323086de024ca822efbe8ab9"
+      },
+      {
+       "chain": "BASE",
+       "address": "0x718f6c9df785bc4e323086de024ca822efbe8ab9"
+      },
+      {
+       "chain": "BSC",
+       "address": "0x718f6c9df785bc4e323086de024ca822efbe8ab9"
+      },
+      {
+       "chain": "ETH",
+       "address": "0x718f6c9df785bc4e323086de024ca822efbe8ab9"
+      }
+     ],
+     "routers": [
+      {
+       "chain": "AVAX",
+       "router": "0x00dc6100103BC402d490aEE3F9a5560cBd91f1d4"
+      },
+      {
+       "chain": "BASE",
+       "router": "0x00dc6100103BC402d490aEE3F9a5560cBd91f1d4"
+      },
+      {
+       "chain": "BSC",
+       "router": "0xb30ec53f98ff5947ede720d32ac2da7e52a5f56b"
+      },
+      {
+       "chain": "ETH",
+       "router": "0xD37BbE5744D730a1d98d8DC97c42F0Ca46aD7146"
+      }
+     ]
+    },
+    {
+     "status": "ActiveVault",
+     "addresses": [
+      {
+       "chain": "AVAX",
+       "address": "0x6b4068070d95d87b321909bb21c8979fba2b8876"
+      },
+      {
+       "chain": "BASE",
+       "address": "0x6b4068070d95d87b321909bb21c8979fba2b8876"
+      },
+      {
+       "chain": "BSC",
+       "address": "0x6b4068070d95d87b321909bb21c8979fba2b8876"
+      },
+      {
+       "chain": "ETH",
+       "address": "0x6b4068070d95d87b321909bb21c8979fba2b8876"
+      }
+     ],
+     "routers": [
+      {
+       "chain": "AVAX",
+       "router": "0x00dc6100103BC402d490aEE3F9a5560cBd91f1d4"
+      },
+      {
+       "chain": "BASE",
+       "router": "0x00dc6100103BC402d490aEE3F9a5560cBd91f1d4"
+      },
+      {
+       "chain": "BSC",
+       "router": "0xb30ec53f98ff5947ede720d32ac2da7e52a5f56b"
+      },
+      {
+       "chain": "ETH",
+       "router": "0xD37BbE5744D730a1d98d8DC97c42F0Ca46aD7146"
+      }
+     ]
+    },
+    {
+     "status": "ActiveVault",
+     "addresses": [
+      {
+       "chain": "AVAX",
+       "address": "0x4d39d5c55cfeb48f44d680fcac20493635dafdee"
+      },
+      {
+       "chain": "BASE",
+       "address": "0x4d39d5c55cfeb48f44d680fcac20493635dafdee"
+      },
+      {
+       "chain": "BSC",
+       "address": "0x4d39d5c55cfeb48f44d680fcac20493635dafdee"
+      },
+      {
+       "chain": "ETH",
+       "address": "0x4d39d5c55cfeb48f44d680fcac20493635dafdee"
+      }
+     ],
+     "routers": [
+      {
+       "chain": "AVAX",
+       "router": "0x00dc6100103BC402d490aEE3F9a5560cBd91f1d4"
+      },
+      {
+       "chain": "BASE",
+       "router": "0x00dc6100103BC402d490aEE3F9a5560cBd91f1d4"
+      },
+      {
+       "chain": "BSC",
+       "router": "0xb30ec53f98ff5947ede720d32ac2da7e52a5f56b"
+      },
+      {
+       "chain": "ETH",
+       "router": "0xD37BbE5744D730a1d98d8DC97c42F0Ca46aD7146"
+      }
+     ]
+    },
+    {
+     "status": "ActiveVault",
+     "addresses": [
+      {
+       "chain": "AVAX",
+       "address": "0x46f3fb8c14006268d153b18000495c8ee858e94b"
+      },
+      {
+       "chain": "BASE",
+       "address": "0x46f3fb8c14006268d153b18000495c8ee858e94b"
+      },
+      {
+       "chain": "BSC",
+       "address": "0x46f3fb8c14006268d153b18000495c8ee858e94b"
+      },
+      {
+       "chain": "ETH",
+       "address": "0x46f3fb8c14006268d153b18000495c8ee858e94b"
+      }
+     ],
+     "routers": [
+      {
+       "chain": "AVAX",
+       "router": "0x00dc6100103BC402d490aEE3F9a5560cBd91f1d4"
+      },
+      {
+       "chain": "BASE",
+       "router": "0x00dc6100103BC402d490aEE3F9a5560cBd91f1d4"
+      },
+      {
+       "chain": "BSC",
+       "router": "0xb30ec53f98ff5947ede720d32ac2da7e52a5f56b"
+      },
+      {
+       "chain": "ETH",
+       "router": "0xD37BbE5744D730a1d98d8DC97c42F0Ca46aD7146"
+      }
+     ]
+    },
+    {
+     "status": "ActiveVault",
+     "addresses": [
+      {
+       "chain": "AVAX",
+       "address": "0x51649cf810ea9f1f61165044b7149070c67f79c8"
+      },
+      {
+       "chain": "BASE",
+       "address": "0x51649cf810ea9f1f61165044b7149070c67f79c8"
+      },
+      {
+       "chain": "BSC",
+       "address": "0x51649cf810ea9f1f61165044b7149070c67f79c8"
+      },
+      {
+       "chain": "ETH",
+       "address": "0x51649cf810ea9f1f61165044b7149070c67f79c8"
+      }
+     ],
+     "routers": [
+      {
+       "chain": "AVAX",
+       "router": "0x00dc6100103BC402d490aEE3F9a5560cBd91f1d4"
+      },
+      {
+       "chain": "BASE",
+       "router": "0x00dc6100103BC402d490aEE3F9a5560cBd91f1d4"
+      },
+      {
+       "chain": "BSC",
+       "router": "0xb30ec53f98ff5947ede720d32ac2da7e52a5f56b"
+      },
+      {
+       "chain": "ETH",
+       "router": "0xD37BbE5744D730a1d98d8DC97c42F0Ca46aD7146"
+      }
+     ]
+    },
+    {
+     "status": "ActiveVault",
+     "addresses": [
+      {
+       "chain": "AVAX",
+       "address": "0x0d15b57a5ba0a31a4774c03ddfacf79b289db9ce"
+      },
+      {
+       "chain": "BASE",
+       "address": "0x0d15b57a5ba0a31a4774c03ddfacf79b289db9ce"
+      },
+      {
+       "chain": "BSC",
+       "address": "0x0d15b57a5ba0a31a4774c03ddfacf79b289db9ce"
+      },
+      {
+       "chain": "ETH",
+       "address": "0x0d15b57a5ba0a31a4774c03ddfacf79b289db9ce"
+      }
+     ],
+     "routers": [
+      {
+       "chain": "AVAX",
+       "router": "0x00dc6100103BC402d490aEE3F9a5560cBd91f1d4"
+      },
+      {
+       "chain": "BASE",
+       "router": "0x00dc6100103BC402d490aEE3F9a5560cBd91f1d4"
+      },
+      {
+       "chain": "BSC",
+       "router": "0xb30ec53f98ff5947ede720d32ac2da7e52a5f56b"
+      },
+      {
+       "chain": "ETH",
+       "router": "0xD37BbE5744D730a1d98d8DC97c42F0Ca46aD7146"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "_source": "https://arb1.arbitrum.io/rpc eth_getTransactionByHash 0x0162006715db6cccaa52f639e9c1646e254a06e4477a336968f67fa58110751f (found via Midgard /v2/actions); Mayachain observed it at height 19048244; vaults from https://mayanode.mayachain.info/mayachain/vaults/asgard?height=19048243, the block before",
+   "name": "Maya: Arbitrum ETH -> ETH.USDC (third-party app, Midgard)",
+   "protocol": "Mayachain",
+   "txid": "0x0162006715db6cccaa52f639e9c1646e254a06e4477a336968f67fa58110751f",
+   "chainId": 42161,
+   "from": "0x97dc38c3f83481a1f9d72ba6cd4bae4c96ba7994",
+   "to": "0x700e97ef07219440487840dc472e7120a7ff11f4",
+   "value": "0x163b71ee1f3400",
+   "data": "0x44bc937b000000000000000000000000e2fc6a2d1b903494a3bd0a6acb72d46c878b413f000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000163b71ee1f340000000000000000000000000000000000000000000000000000000000000000a0000000000000000000000000000000000000000000000000000000006ae3da7a00000000000000000000000000000000000000000000000000000000000000793d3a4554482e555344433a3078393764633338633366383334383161314639443732426136436434426165346339364241373939342f3078393764633338633366383334383161314639443732426136436434426165346339364241373939343a313333313134363530302f312f303a5f2f74313a302f373000000000000000",
+   "vaultsHeight": 19048243,
+   "vaults": [
+    {
+     "status": "ActiveVault",
+     "addresses": [
+      {
+       "chain": "ARB",
+       "address": "0x40b20444a4a28f134b0932848f7abefb6ca093d9"
+      },
+      {
+       "chain": "ETH",
+       "address": "0x40b20444a4a28f134b0932848f7abefb6ca093d9"
+      }
+     ],
+     "routers": [
+      {
+       "chain": "ARB",
+       "router": "0x700E97ef07219440487840Dc472E7120A7FF11F4"
+      },
+      {
+       "chain": "ETH",
+       "router": "0xe3985E6b61b814F7Cdb188766562ba71b446B46d"
+      }
+     ]
+    },
+    {
+     "status": "ActiveVault",
+     "addresses": [
+      {
+       "chain": "ARB",
+       "address": "0xe2fc6a2d1b903494a3bd0a6acb72d46c878b413f"
+      },
+      {
+       "chain": "ETH",
+       "address": "0xe2fc6a2d1b903494a3bd0a6acb72d46c878b413f"
+      }
+     ],
+     "routers": [
+      {
+       "chain": "ARB",
+       "router": "0x700E97ef07219440487840Dc472E7120A7FF11F4"
+      },
+      {
+       "chain": "ETH",
+       "router": "0xe3985E6b61b814F7Cdb188766562ba71b446B46d"
+      }
+     ]
+    },
+    {
+     "status": "ActiveVault",
+     "addresses": [
+      {
+       "chain": "ARB",
+       "address": "0x490d14c5d8210514e1516c8dfeefcd419defb8d4"
+      },
+      {
+       "chain": "ETH",
+       "address": "0x490d14c5d8210514e1516c8dfeefcd419defb8d4"
+      }
+     ],
+     "routers": [
+      {
+       "chain": "ARB",
+       "router": "0x700E97ef07219440487840Dc472E7120A7FF11F4"
+      },
+      {
+       "chain": "ETH",
+       "router": "0xe3985E6b61b814F7Cdb188766562ba71b446B46d"
+      }
+     ]
+    }
+   ]
+  }
+ ],
+ "vaultsDuringChurn": {
+  "_source": "https://gateway.liquify.com/chain/thorchain_api/thorchain/vaults/asgard?height=28203872: the block after the churn at 28203871, when the six previous vaults were RetiringVault",
+  "height": 28203872,
+  "vaults": [
+   {
+    "status": "RetiringVault",
+    "addresses": [
+     {
+      "chain": "AVAX",
+      "address": "0x587c7c3ba9e47b1afd9da9a79c127ade753ac53a"
+     },
+     {
+      "chain": "BASE",
+      "address": "0x587c7c3ba9e47b1afd9da9a79c127ade753ac53a"
+     },
+     {
+      "chain": "BSC",
+      "address": "0x587c7c3ba9e47b1afd9da9a79c127ade753ac53a"
+     },
+     {
+      "chain": "ETH",
+      "address": "0x587c7c3ba9e47b1afd9da9a79c127ade753ac53a"
+     }
+    ],
+    "routers": [
+     {
+      "chain": "AVAX",
+      "router": "0x00dc6100103BC402d490aEE3F9a5560cBd91f1d4"
+     },
+     {
+      "chain": "BASE",
+      "router": "0x00dc6100103BC402d490aEE3F9a5560cBd91f1d4"
+     },
+     {
+      "chain": "BSC",
+      "router": "0xb30ec53f98ff5947ede720d32ac2da7e52a5f56b"
+     },
+     {
+      "chain": "ETH",
+      "router": "0xD37BbE5744D730a1d98d8DC97c42F0Ca46aD7146"
+     }
+    ]
+   },
+   {
+    "status": "RetiringVault",
+    "addresses": [
+     {
+      "chain": "AVAX",
+      "address": "0x1caaf10debe9e005080672d9f46fa7a3005e271e"
+     },
+     {
+      "chain": "BASE",
+      "address": "0x1caaf10debe9e005080672d9f46fa7a3005e271e"
+     },
+     {
+      "chain": "BSC",
+      "address": "0x1caaf10debe9e005080672d9f46fa7a3005e271e"
+     },
+     {
+      "chain": "ETH",
+      "address": "0x1caaf10debe9e005080672d9f46fa7a3005e271e"
+     }
+    ],
+    "routers": [
+     {
+      "chain": "AVAX",
+      "router": "0x00dc6100103BC402d490aEE3F9a5560cBd91f1d4"
+     },
+     {
+      "chain": "BASE",
+      "router": "0x00dc6100103BC402d490aEE3F9a5560cBd91f1d4"
+     },
+     {
+      "chain": "BSC",
+      "router": "0xb30ec53f98ff5947ede720d32ac2da7e52a5f56b"
+     },
+     {
+      "chain": "ETH",
+      "router": "0xD37BbE5744D730a1d98d8DC97c42F0Ca46aD7146"
+     }
+    ]
+   },
+   {
+    "status": "RetiringVault",
+    "addresses": [
+     {
+      "chain": "AVAX",
+      "address": "0x9ca9dde177ce3d2dfaf2cf5d6b1e8b8ffad8f723"
+     },
+     {
+      "chain": "BASE",
+      "address": "0x9ca9dde177ce3d2dfaf2cf5d6b1e8b8ffad8f723"
+     },
+     {
+      "chain": "BSC",
+      "address": "0x9ca9dde177ce3d2dfaf2cf5d6b1e8b8ffad8f723"
+     },
+     {
+      "chain": "ETH",
+      "address": "0x9ca9dde177ce3d2dfaf2cf5d6b1e8b8ffad8f723"
+     }
+    ],
+    "routers": [
+     {
+      "chain": "AVAX",
+      "router": "0x00dc6100103BC402d490aEE3F9a5560cBd91f1d4"
+     },
+     {
+      "chain": "BASE",
+      "router": "0x00dc6100103BC402d490aEE3F9a5560cBd91f1d4"
+     },
+     {
+      "chain": "BSC",
+      "router": "0xb30ec53f98ff5947ede720d32ac2da7e52a5f56b"
+     },
+     {
+      "chain": "ETH",
+      "router": "0xD37BbE5744D730a1d98d8DC97c42F0Ca46aD7146"
+     }
+    ]
+   },
+   {
+    "status": "RetiringVault",
+    "addresses": [
+     {
+      "chain": "AVAX",
+      "address": "0xfe1295ab2adcb37c372694e1b2a3485e9e3b31d8"
+     },
+     {
+      "chain": "BASE",
+      "address": "0xfe1295ab2adcb37c372694e1b2a3485e9e3b31d8"
+     },
+     {
+      "chain": "BSC",
+      "address": "0xfe1295ab2adcb37c372694e1b2a3485e9e3b31d8"
+     },
+     {
+      "chain": "ETH",
+      "address": "0xfe1295ab2adcb37c372694e1b2a3485e9e3b31d8"
+     }
+    ],
+    "routers": [
+     {
+      "chain": "AVAX",
+      "router": "0x00dc6100103BC402d490aEE3F9a5560cBd91f1d4"
+     },
+     {
+      "chain": "BASE",
+      "router": "0x00dc6100103BC402d490aEE3F9a5560cBd91f1d4"
+     },
+     {
+      "chain": "BSC",
+      "router": "0xb30ec53f98ff5947ede720d32ac2da7e52a5f56b"
+     },
+     {
+      "chain": "ETH",
+      "router": "0xD37BbE5744D730a1d98d8DC97c42F0Ca46aD7146"
+     }
+    ]
+   },
+   {
+    "status": "RetiringVault",
+    "addresses": [
+     {
+      "chain": "AVAX",
+      "address": "0xec67bbd617e9c57df58522690c33aa0cb5129341"
+     },
+     {
+      "chain": "BASE",
+      "address": "0xec67bbd617e9c57df58522690c33aa0cb5129341"
+     },
+     {
+      "chain": "BSC",
+      "address": "0xec67bbd617e9c57df58522690c33aa0cb5129341"
+     },
+     {
+      "chain": "ETH",
+      "address": "0xec67bbd617e9c57df58522690c33aa0cb5129341"
+     }
+    ],
+    "routers": [
+     {
+      "chain": "AVAX",
+      "router": "0x00dc6100103BC402d490aEE3F9a5560cBd91f1d4"
+     },
+     {
+      "chain": "BASE",
+      "router": "0x00dc6100103BC402d490aEE3F9a5560cBd91f1d4"
+     },
+     {
+      "chain": "BSC",
+      "router": "0xb30ec53f98ff5947ede720d32ac2da7e52a5f56b"
+     },
+     {
+      "chain": "ETH",
+      "router": "0xD37BbE5744D730a1d98d8DC97c42F0Ca46aD7146"
+     }
+    ]
+   },
+   {
+    "status": "RetiringVault",
+    "addresses": [
+     {
+      "chain": "AVAX",
+      "address": "0xec826107668fb0b2f6741d90c1d6a558fad3a7d0"
+     },
+     {
+      "chain": "BASE",
+      "address": "0xec826107668fb0b2f6741d90c1d6a558fad3a7d0"
+     },
+     {
+      "chain": "BSC",
+      "address": "0xec826107668fb0b2f6741d90c1d6a558fad3a7d0"
+     },
+     {
+      "chain": "ETH",
+      "address": "0xec826107668fb0b2f6741d90c1d6a558fad3a7d0"
+     }
+    ],
+    "routers": [
+     {
+      "chain": "AVAX",
+      "router": "0x00dc6100103BC402d490aEE3F9a5560cBd91f1d4"
+     },
+     {
+      "chain": "BASE",
+      "router": "0x00dc6100103BC402d490aEE3F9a5560cBd91f1d4"
+     },
+     {
+      "chain": "BSC",
+      "router": "0xb30ec53f98ff5947ede720d32ac2da7e52a5f56b"
+     },
+     {
+      "chain": "ETH",
+      "router": "0xD37BbE5744D730a1d98d8DC97c42F0Ca46aD7146"
+     }
+    ]
+   },
+   {
+    "status": "ActiveVault",
+    "addresses": [
+     {
+      "chain": "AVAX",
+      "address": "0x718f6c9df785bc4e323086de024ca822efbe8ab9"
+     },
+     {
+      "chain": "BASE",
+      "address": "0x718f6c9df785bc4e323086de024ca822efbe8ab9"
+     },
+     {
+      "chain": "BSC",
+      "address": "0x718f6c9df785bc4e323086de024ca822efbe8ab9"
+     },
+     {
+      "chain": "ETH",
+      "address": "0x718f6c9df785bc4e323086de024ca822efbe8ab9"
+     }
+    ],
+    "routers": [
+     {
+      "chain": "AVAX",
+      "router": "0x00dc6100103BC402d490aEE3F9a5560cBd91f1d4"
+     },
+     {
+      "chain": "BASE",
+      "router": "0x00dc6100103BC402d490aEE3F9a5560cBd91f1d4"
+     },
+     {
+      "chain": "BSC",
+      "router": "0xb30ec53f98ff5947ede720d32ac2da7e52a5f56b"
+     },
+     {
+      "chain": "ETH",
+      "router": "0xD37BbE5744D730a1d98d8DC97c42F0Ca46aD7146"
+     }
+    ]
+   },
+   {
+    "status": "ActiveVault",
+    "addresses": [
+     {
+      "chain": "AVAX",
+      "address": "0x6b4068070d95d87b321909bb21c8979fba2b8876"
+     },
+     {
+      "chain": "BASE",
+      "address": "0x6b4068070d95d87b321909bb21c8979fba2b8876"
+     },
+     {
+      "chain": "BSC",
+      "address": "0x6b4068070d95d87b321909bb21c8979fba2b8876"
+     },
+     {
+      "chain": "ETH",
+      "address": "0x6b4068070d95d87b321909bb21c8979fba2b8876"
+     }
+    ],
+    "routers": [
+     {
+      "chain": "AVAX",
+      "router": "0x00dc6100103BC402d490aEE3F9a5560cBd91f1d4"
+     },
+     {
+      "chain": "BASE",
+      "router": "0x00dc6100103BC402d490aEE3F9a5560cBd91f1d4"
+     },
+     {
+      "chain": "BSC",
+      "router": "0xb30ec53f98ff5947ede720d32ac2da7e52a5f56b"
+     },
+     {
+      "chain": "ETH",
+      "router": "0xD37BbE5744D730a1d98d8DC97c42F0Ca46aD7146"
+     }
+    ]
+   },
+   {
+    "status": "ActiveVault",
+    "addresses": [
+     {
+      "chain": "AVAX",
+      "address": "0x4d39d5c55cfeb48f44d680fcac20493635dafdee"
+     },
+     {
+      "chain": "BASE",
+      "address": "0x4d39d5c55cfeb48f44d680fcac20493635dafdee"
+     },
+     {
+      "chain": "BSC",
+      "address": "0x4d39d5c55cfeb48f44d680fcac20493635dafdee"
+     },
+     {
+      "chain": "ETH",
+      "address": "0x4d39d5c55cfeb48f44d680fcac20493635dafdee"
+     }
+    ],
+    "routers": [
+     {
+      "chain": "AVAX",
+      "router": "0x00dc6100103BC402d490aEE3F9a5560cBd91f1d4"
+     },
+     {
+      "chain": "BASE",
+      "router": "0x00dc6100103BC402d490aEE3F9a5560cBd91f1d4"
+     },
+     {
+      "chain": "BSC",
+      "router": "0xb30ec53f98ff5947ede720d32ac2da7e52a5f56b"
+     },
+     {
+      "chain": "ETH",
+      "router": "0xD37BbE5744D730a1d98d8DC97c42F0Ca46aD7146"
+     }
+    ]
+   },
+   {
+    "status": "ActiveVault",
+    "addresses": [
+     {
+      "chain": "AVAX",
+      "address": "0x46f3fb8c14006268d153b18000495c8ee858e94b"
+     },
+     {
+      "chain": "BASE",
+      "address": "0x46f3fb8c14006268d153b18000495c8ee858e94b"
+     },
+     {
+      "chain": "BSC",
+      "address": "0x46f3fb8c14006268d153b18000495c8ee858e94b"
+     },
+     {
+      "chain": "ETH",
+      "address": "0x46f3fb8c14006268d153b18000495c8ee858e94b"
+     }
+    ],
+    "routers": [
+     {
+      "chain": "AVAX",
+      "router": "0x00dc6100103BC402d490aEE3F9a5560cBd91f1d4"
+     },
+     {
+      "chain": "BASE",
+      "router": "0x00dc6100103BC402d490aEE3F9a5560cBd91f1d4"
+     },
+     {
+      "chain": "BSC",
+      "router": "0xb30ec53f98ff5947ede720d32ac2da7e52a5f56b"
+     },
+     {
+      "chain": "ETH",
+      "router": "0xD37BbE5744D730a1d98d8DC97c42F0Ca46aD7146"
+     }
+    ]
+   },
+   {
+    "status": "ActiveVault",
+    "addresses": [
+     {
+      "chain": "AVAX",
+      "address": "0x51649cf810ea9f1f61165044b7149070c67f79c8"
+     },
+     {
+      "chain": "BASE",
+      "address": "0x51649cf810ea9f1f61165044b7149070c67f79c8"
+     },
+     {
+      "chain": "BSC",
+      "address": "0x51649cf810ea9f1f61165044b7149070c67f79c8"
+     },
+     {
+      "chain": "ETH",
+      "address": "0x51649cf810ea9f1f61165044b7149070c67f79c8"
+     }
+    ],
+    "routers": [
+     {
+      "chain": "AVAX",
+      "router": "0x00dc6100103BC402d490aEE3F9a5560cBd91f1d4"
+     },
+     {
+      "chain": "BASE",
+      "router": "0x00dc6100103BC402d490aEE3F9a5560cBd91f1d4"
+     },
+     {
+      "chain": "BSC",
+      "router": "0xb30ec53f98ff5947ede720d32ac2da7e52a5f56b"
+     },
+     {
+      "chain": "ETH",
+      "router": "0xD37BbE5744D730a1d98d8DC97c42F0Ca46aD7146"
+     }
+    ]
+   },
+   {
+    "status": "ActiveVault",
+    "addresses": [
+     {
+      "chain": "AVAX",
+      "address": "0x0d15b57a5ba0a31a4774c03ddfacf79b289db9ce"
+     },
+     {
+      "chain": "BASE",
+      "address": "0x0d15b57a5ba0a31a4774c03ddfacf79b289db9ce"
+     },
+     {
+      "chain": "BSC",
+      "address": "0x0d15b57a5ba0a31a4774c03ddfacf79b289db9ce"
+     },
+     {
+      "chain": "ETH",
+      "address": "0x0d15b57a5ba0a31a4774c03ddfacf79b289db9ce"
+     }
+    ],
+    "routers": [
+     {
+      "chain": "AVAX",
+      "router": "0x00dc6100103BC402d490aEE3F9a5560cBd91f1d4"
+     },
+     {
+      "chain": "BASE",
+      "router": "0x00dc6100103BC402d490aEE3F9a5560cBd91f1d4"
+     },
+     {
+      "chain": "BSC",
+      "router": "0xb30ec53f98ff5947ede720d32ac2da7e52a5f56b"
+     },
+     {
+      "chain": "ETH",
+      "router": "0xD37BbE5744D730a1d98d8DC97c42F0Ca46aD7146"
+     }
+    ]
+   }
+  ]
+ },
+ "vaultsNow": {
+  "_source": "GET <source>/{thorchain,mayachain}/vaults/asgard from both sources Desktop asks, captured 2026-10-29",
+  "THORChain": {
+   "https://gateway.liquify.com/chain/thorchain_api/thorchain/vaults/asgard": [
+    {
+     "status": "ActiveVault",
+     "addresses": [
+      {
+       "chain": "AVAX",
+       "address": "0x718f6c9df785bc4e323086de024ca822efbe8ab9"
+      },
+      {
+       "chain": "BASE",
+       "address": "0x718f6c9df785bc4e323086de024ca822efbe8ab9"
+      },
+      {
+       "chain": "BSC",
+       "address": "0x718f6c9df785bc4e323086de024ca822efbe8ab9"
+      },
+      {
+       "chain": "ETH",
+       "address": "0x718f6c9df785bc4e323086de024ca822efbe8ab9"
+      }
+     ],
+     "routers": [
+      {
+       "chain": "AVAX",
+       "router": "0x00dc6100103BC402d490aEE3F9a5560cBd91f1d4"
+      },
+      {
+       "chain": "BASE",
+       "router": "0x00dc6100103BC402d490aEE3F9a5560cBd91f1d4"
+      },
+      {
+       "chain": "BSC",
+       "router": "0xb30ec53f98ff5947ede720d32ac2da7e52a5f56b"
+      },
+      {
+       "chain": "ETH",
+       "router": "0xD37BbE5744D730a1d98d8DC97c42F0Ca46aD7146"
+      }
+     ]
+    },
+    {
+     "status": "ActiveVault",
+     "addresses": [
+      {
+       "chain": "AVAX",
+       "address": "0x6b4068070d95d87b321909bb21c8979fba2b8876"
+      },
+      {
+       "chain": "BASE",
+       "address": "0x6b4068070d95d87b321909bb21c8979fba2b8876"
+      },
+      {
+       "chain": "BSC",
+       "address": "0x6b4068070d95d87b321909bb21c8979fba2b8876"
+      },
+      {
+       "chain": "ETH",
+       "address": "0x6b4068070d95d87b321909bb21c8979fba2b8876"
+      }
+     ],
+     "routers": [
+      {
+       "chain": "AVAX",
+       "router": "0x00dc6100103BC402d490aEE3F9a5560cBd91f1d4"
+      },
+      {
+       "chain": "BASE",
+       "router": "0x00dc6100103BC402d490aEE3F9a5560cBd91f1d4"
+      },
+      {
+       "chain": "BSC",
+       "router": "0xb30ec53f98ff5947ede720d32ac2da7e52a5f56b"
+      },
+      {
+       "chain": "ETH",
+       "router": "0xD37BbE5744D730a1d98d8DC97c42F0Ca46aD7146"
+      }
+     ]
+    },
+    {
+     "status": "ActiveVault",
+     "addresses": [
+      {
+       "chain": "AVAX",
+       "address": "0x4d39d5c55cfeb48f44d680fcac20493635dafdee"
+      },
+      {
+       "chain": "BASE",
+       "address": "0x4d39d5c55cfeb48f44d680fcac20493635dafdee"
+      },
+      {
+       "chain": "BSC",
+       "address": "0x4d39d5c55cfeb48f44d680fcac20493635dafdee"
+      },
+      {
+       "chain": "ETH",
+       "address": "0x4d39d5c55cfeb48f44d680fcac20493635dafdee"
+      }
+     ],
+     "routers": [
+      {
+       "chain": "AVAX",
+       "router": "0x00dc6100103BC402d490aEE3F9a5560cBd91f1d4"
+      },
+      {
+       "chain": "BASE",
+       "router": "0x00dc6100103BC402d490aEE3F9a5560cBd91f1d4"
+      },
+      {
+       "chain": "BSC",
+       "router": "0xb30ec53f98ff5947ede720d32ac2da7e52a5f56b"
+      },
+      {
+       "chain": "ETH",
+       "router": "0xD37BbE5744D730a1d98d8DC97c42F0Ca46aD7146"
+      }
+     ]
+    },
+    {
+     "status": "ActiveVault",
+     "addresses": [
+      {
+       "chain": "AVAX",
+       "address": "0x46f3fb8c14006268d153b18000495c8ee858e94b"
+      },
+      {
+       "chain": "BASE",
+       "address": "0x46f3fb8c14006268d153b18000495c8ee858e94b"
+      },
+      {
+       "chain": "BSC",
+       "address": "0x46f3fb8c14006268d153b18000495c8ee858e94b"
+      },
+      {
+       "chain": "ETH",
+       "address": "0x46f3fb8c14006268d153b18000495c8ee858e94b"
+      }
+     ],
+     "routers": [
+      {
+       "chain": "AVAX",
+       "router": "0x00dc6100103BC402d490aEE3F9a5560cBd91f1d4"
+      },
+      {
+       "chain": "BASE",
+       "router": "0x00dc6100103BC402d490aEE3F9a5560cBd91f1d4"
+      },
+      {
+       "chain": "BSC",
+       "router": "0xb30ec53f98ff5947ede720d32ac2da7e52a5f56b"
+      },
+      {
+       "chain": "ETH",
+       "router": "0xD37BbE5744D730a1d98d8DC97c42F0Ca46aD7146"
+      }
+     ]
+    },
+    {
+     "status": "ActiveVault",
+     "addresses": [
+      {
+       "chain": "AVAX",
+       "address": "0x51649cf810ea9f1f61165044b7149070c67f79c8"
+      },
+      {
+       "chain": "BASE",
+       "address": "0x51649cf810ea9f1f61165044b7149070c67f79c8"
+      },
+      {
+       "chain": "BSC",
+       "address": "0x51649cf810ea9f1f61165044b7149070c67f79c8"
+      },
+      {
+       "chain": "ETH",
+       "address": "0x51649cf810ea9f1f61165044b7149070c67f79c8"
+      }
+     ],
+     "routers": [
+      {
+       "chain": "AVAX",
+       "router": "0x00dc6100103BC402d490aEE3F9a5560cBd91f1d4"
+      },
+      {
+       "chain": "BASE",
+       "router": "0x00dc6100103BC402d490aEE3F9a5560cBd91f1d4"
+      },
+      {
+       "chain": "BSC",
+       "router": "0xb30ec53f98ff5947ede720d32ac2da7e52a5f56b"
+      },
+      {
+       "chain": "ETH",
+       "router": "0xD37BbE5744D730a1d98d8DC97c42F0Ca46aD7146"
+      }
+     ]
+    },
+    {
+     "status": "ActiveVault",
+     "addresses": [
+      {
+       "chain": "AVAX",
+       "address": "0x0d15b57a5ba0a31a4774c03ddfacf79b289db9ce"
+      },
+      {
+       "chain": "BASE",
+       "address": "0x0d15b57a5ba0a31a4774c03ddfacf79b289db9ce"
+      },
+      {
+       "chain": "BSC",
+       "address": "0x0d15b57a5ba0a31a4774c03ddfacf79b289db9ce"
+      },
+      {
+       "chain": "ETH",
+       "address": "0x0d15b57a5ba0a31a4774c03ddfacf79b289db9ce"
+      }
+     ],
+     "routers": [
+      {
+       "chain": "AVAX",
+       "router": "0x00dc6100103BC402d490aEE3F9a5560cBd91f1d4"
+      },
+      {
+       "chain": "BASE",
+       "router": "0x00dc6100103BC402d490aEE3F9a5560cBd91f1d4"
+      },
+      {
+       "chain": "BSC",
+       "router": "0xb30ec53f98ff5947ede720d32ac2da7e52a5f56b"
+      },
+      {
+       "chain": "ETH",
+       "router": "0xD37BbE5744D730a1d98d8DC97c42F0Ca46aD7146"
+      }
+     ]
+    }
+   ],
+   "https://api-thorchain.rorcual.xyz/thorchain/vaults/asgard": [
+    {
+     "status": "ActiveVault",
+     "addresses": [
+      {
+       "chain": "AVAX",
+       "address": "0x718f6c9df785bc4e323086de024ca822efbe8ab9"
+      },
+      {
+       "chain": "BASE",
+       "address": "0x718f6c9df785bc4e323086de024ca822efbe8ab9"
+      },
+      {
+       "chain": "BSC",
+       "address": "0x718f6c9df785bc4e323086de024ca822efbe8ab9"
+      },
+      {
+       "chain": "ETH",
+       "address": "0x718f6c9df785bc4e323086de024ca822efbe8ab9"
+      }
+     ],
+     "routers": [
+      {
+       "chain": "AVAX",
+       "router": "0x00dc6100103BC402d490aEE3F9a5560cBd91f1d4"
+      },
+      {
+       "chain": "BASE",
+       "router": "0x00dc6100103BC402d490aEE3F9a5560cBd91f1d4"
+      },
+      {
+       "chain": "BSC",
+       "router": "0xb30ec53f98ff5947ede720d32ac2da7e52a5f56b"
+      },
+      {
+       "chain": "ETH",
+       "router": "0xD37BbE5744D730a1d98d8DC97c42F0Ca46aD7146"
+      }
+     ]
+    },
+    {
+     "status": "ActiveVault",
+     "addresses": [
+      {
+       "chain": "AVAX",
+       "address": "0x6b4068070d95d87b321909bb21c8979fba2b8876"
+      },
+      {
+       "chain": "BASE",
+       "address": "0x6b4068070d95d87b321909bb21c8979fba2b8876"
+      },
+      {
+       "chain": "BSC",
+       "address": "0x6b4068070d95d87b321909bb21c8979fba2b8876"
+      },
+      {
+       "chain": "ETH",
+       "address": "0x6b4068070d95d87b321909bb21c8979fba2b8876"
+      }
+     ],
+     "routers": [
+      {
+       "chain": "AVAX",
+       "router": "0x00dc6100103BC402d490aEE3F9a5560cBd91f1d4"
+      },
+      {
+       "chain": "BASE",
+       "router": "0x00dc6100103BC402d490aEE3F9a5560cBd91f1d4"
+      },
+      {
+       "chain": "BSC",
+       "router": "0xb30ec53f98ff5947ede720d32ac2da7e52a5f56b"
+      },
+      {
+       "chain": "ETH",
+       "router": "0xD37BbE5744D730a1d98d8DC97c42F0Ca46aD7146"
+      }
+     ]
+    },
+    {
+     "status": "ActiveVault",
+     "addresses": [
+      {
+       "chain": "AVAX",
+       "address": "0x4d39d5c55cfeb48f44d680fcac20493635dafdee"
+      },
+      {
+       "chain": "BASE",
+       "address": "0x4d39d5c55cfeb48f44d680fcac20493635dafdee"
+      },
+      {
+       "chain": "BSC",
+       "address": "0x4d39d5c55cfeb48f44d680fcac20493635dafdee"
+      },
+      {
+       "chain": "ETH",
+       "address": "0x4d39d5c55cfeb48f44d680fcac20493635dafdee"
+      }
+     ],
+     "routers": [
+      {
+       "chain": "AVAX",
+       "router": "0x00dc6100103BC402d490aEE3F9a5560cBd91f1d4"
+      },
+      {
+       "chain": "BASE",
+       "router": "0x00dc6100103BC402d490aEE3F9a5560cBd91f1d4"
+      },
+      {
+       "chain": "BSC",
+       "router": "0xb30ec53f98ff5947ede720d32ac2da7e52a5f56b"
+      },
+      {
+       "chain": "ETH",
+       "router": "0xD37BbE5744D730a1d98d8DC97c42F0Ca46aD7146"
+      }
+     ]
+    },
+    {
+     "status": "ActiveVault",
+     "addresses": [
+      {
+       "chain": "AVAX",
+       "address": "0x46f3fb8c14006268d153b18000495c8ee858e94b"
+      },
+      {
+       "chain": "BASE",
+       "address": "0x46f3fb8c14006268d153b18000495c8ee858e94b"
+      },
+      {
+       "chain": "BSC",
+       "address": "0x46f3fb8c14006268d153b18000495c8ee858e94b"
+      },
+      {
+       "chain": "ETH",
+       "address": "0x46f3fb8c14006268d153b18000495c8ee858e94b"
+      }
+     ],
+     "routers": [
+      {
+       "chain": "AVAX",
+       "router": "0x00dc6100103BC402d490aEE3F9a5560cBd91f1d4"
+      },
+      {
+       "chain": "BASE",
+       "router": "0x00dc6100103BC402d490aEE3F9a5560cBd91f1d4"
+      },
+      {
+       "chain": "BSC",
+       "router": "0xb30ec53f98ff5947ede720d32ac2da7e52a5f56b"
+      },
+      {
+       "chain": "ETH",
+       "router": "0xD37BbE5744D730a1d98d8DC97c42F0Ca46aD7146"
+      }
+     ]
+    },
+    {
+     "status": "ActiveVault",
+     "addresses": [
+      {
+       "chain": "AVAX",
+       "address": "0x51649cf810ea9f1f61165044b7149070c67f79c8"
+      },
+      {
+       "chain": "BASE",
+       "address": "0x51649cf810ea9f1f61165044b7149070c67f79c8"
+      },
+      {
+       "chain": "BSC",
+       "address": "0x51649cf810ea9f1f61165044b7149070c67f79c8"
+      },
+      {
+       "chain": "ETH",
+       "address": "0x51649cf810ea9f1f61165044b7149070c67f79c8"
+      }
+     ],
+     "routers": [
+      {
+       "chain": "AVAX",
+       "router": "0x00dc6100103BC402d490aEE3F9a5560cBd91f1d4"
+      },
+      {
+       "chain": "BASE",
+       "router": "0x00dc6100103BC402d490aEE3F9a5560cBd91f1d4"
+      },
+      {
+       "chain": "BSC",
+       "router": "0xb30ec53f98ff5947ede720d32ac2da7e52a5f56b"
+      },
+      {
+       "chain": "ETH",
+       "router": "0xD37BbE5744D730a1d98d8DC97c42F0Ca46aD7146"
+      }
+     ]
+    },
+    {
+     "status": "ActiveVault",
+     "addresses": [
+      {
+       "chain": "AVAX",
+       "address": "0x0d15b57a5ba0a31a4774c03ddfacf79b289db9ce"
+      },
+      {
+       "chain": "BASE",
+       "address": "0x0d15b57a5ba0a31a4774c03ddfacf79b289db9ce"
+      },
+      {
+       "chain": "BSC",
+       "address": "0x0d15b57a5ba0a31a4774c03ddfacf79b289db9ce"
+      },
+      {
+       "chain": "ETH",
+       "address": "0x0d15b57a5ba0a31a4774c03ddfacf79b289db9ce"
+      }
+     ],
+     "routers": [
+      {
+       "chain": "AVAX",
+       "router": "0x00dc6100103BC402d490aEE3F9a5560cBd91f1d4"
+      },
+      {
+       "chain": "BASE",
+       "router": "0x00dc6100103BC402d490aEE3F9a5560cBd91f1d4"
+      },
+      {
+       "chain": "BSC",
+       "router": "0xb30ec53f98ff5947ede720d32ac2da7e52a5f56b"
+      },
+      {
+       "chain": "ETH",
+       "router": "0xD37BbE5744D730a1d98d8DC97c42F0Ca46aD7146"
+      }
+     ]
+    }
+   ]
+  },
+  "Mayachain": {
+   "https://mayanode.mayachain.info/mayachain/vaults/asgard": [
+    {
+     "status": "ActiveVault",
+     "addresses": [
+      {
+       "chain": "ARB",
+       "address": "0x40b20444a4a28f134b0932848f7abefb6ca093d9"
+      },
+      {
+       "chain": "ETH",
+       "address": "0x40b20444a4a28f134b0932848f7abefb6ca093d9"
+      }
+     ],
+     "routers": [
+      {
+       "chain": "ARB",
+       "router": "0x700E97ef07219440487840Dc472E7120A7FF11F4"
+      },
+      {
+       "chain": "ETH",
+       "router": "0xe3985E6b61b814F7Cdb188766562ba71b446B46d"
+      }
+     ]
+    },
+    {
+     "status": "ActiveVault",
+     "addresses": [
+      {
+       "chain": "ARB",
+       "address": "0xe2fc6a2d1b903494a3bd0a6acb72d46c878b413f"
+      },
+      {
+       "chain": "ETH",
+       "address": "0xe2fc6a2d1b903494a3bd0a6acb72d46c878b413f"
+      }
+     ],
+     "routers": [
+      {
+       "chain": "ARB",
+       "router": "0x700E97ef07219440487840Dc472E7120A7FF11F4"
+      },
+      {
+       "chain": "ETH",
+       "router": "0xe3985E6b61b814F7Cdb188766562ba71b446B46d"
+      }
+     ]
+    },
+    {
+     "status": "ActiveVault",
+     "addresses": [
+      {
+       "chain": "ARB",
+       "address": "0x490d14c5d8210514e1516c8dfeefcd419defb8d4"
+      },
+      {
+       "chain": "ETH",
+       "address": "0x490d14c5d8210514e1516c8dfeefcd419defb8d4"
+      }
+     ],
+     "routers": [
+      {
+       "chain": "ARB",
+       "router": "0x700E97ef07219440487840Dc472E7120A7FF11F4"
+      },
+      {
+       "chain": "ETH",
+       "router": "0xe3985E6b61b814F7Cdb188766562ba71b446B46d"
+      }
+     ]
+    }
+   ],
+   "https://api-maya.liquify.com/mayachain/vaults/asgard": [
+    {
+     "status": "ActiveVault",
+     "addresses": [
+      {
+       "chain": "ARB",
+       "address": "0x40b20444a4a28f134b0932848f7abefb6ca093d9"
+      },
+      {
+       "chain": "ETH",
+       "address": "0x40b20444a4a28f134b0932848f7abefb6ca093d9"
+      }
+     ],
+     "routers": [
+      {
+       "chain": "ARB",
+       "router": "0x700E97ef07219440487840Dc472E7120A7FF11F4"
+      },
+      {
+       "chain": "ETH",
+       "router": "0xe3985E6b61b814F7Cdb188766562ba71b446B46d"
+      }
+     ]
+    },
+    {
+     "status": "ActiveVault",
+     "addresses": [
+      {
+       "chain": "ARB",
+       "address": "0xe2fc6a2d1b903494a3bd0a6acb72d46c878b413f"
+      },
+      {
+       "chain": "ETH",
+       "address": "0xe2fc6a2d1b903494a3bd0a6acb72d46c878b413f"
+      }
+     ],
+     "routers": [
+      {
+       "chain": "ARB",
+       "router": "0x700E97ef07219440487840Dc472E7120A7FF11F4"
+      },
+      {
+       "chain": "ETH",
+       "router": "0xe3985E6b61b814F7Cdb188766562ba71b446B46d"
+      }
+     ]
+    },
+    {
+     "status": "ActiveVault",
+     "addresses": [
+      {
+       "chain": "ARB",
+       "address": "0x490d14c5d8210514e1516c8dfeefcd419defb8d4"
+      },
+      {
+       "chain": "ETH",
+       "address": "0x490d14c5d8210514e1516c8dfeefcd419defb8d4"
+      }
+     ],
+     "routers": [
+      {
+       "chain": "ARB",
+       "router": "0x700E97ef07219440487840Dc472E7120A7FF11F4"
+      },
+      {
+       "chain": "ETH",
+       "router": "0xe3985E6b61b814F7Cdb188766562ba71b446B46d"
+      }
+     ]
+    }
+   ]
+  }
+ }
+}

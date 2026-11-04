@@ -36,4 +36,16 @@ describe('pinned hdwallet certified Solana contract', () => {
 		expect(keepkeySolana).toContain('fields.push(encodeLengthDelimited(4, signature))')
 		expect(keepkeySolana).toContain('fields.push(encodeVarintField(5, info.signerKeyId))')
 	})
+
+	test('forwards host-resolved lookup accounts (7.17) in field 5 with no LUT signature', async () => {
+		// Desktop sends lutAccounts to 7.17+; a pin without them would drop the
+		// list and the device would show the swap undecoded.
+		const [coreSolana, keepkeySolana] = await Promise.all([
+			Bun.file(new URL('../../../modules/hdwallet/packages/hdwallet-core/src/solana.ts', import.meta.url)).text(),
+			Bun.file(new URL('../../../modules/hdwallet/packages/hdwallet-keepkey/src/solana.ts', import.meta.url)).text(),
+		])
+		expect(coreSolana).toMatch(/lutAccounts\?: Array<Uint8Array \| string>/)
+		expect(keepkeySolana).toContain('if (msg.lutAccounts)')
+		expect(keepkeySolana).toMatch(/for \(const account of msg\.lutAccounts\) \{\s*extraFields\.push\(encodeLengthDelimited\(5, toSolanaPubkey\(account, "lut account"\)\)\)/)
+	})
 })

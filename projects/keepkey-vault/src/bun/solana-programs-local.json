@@ -23,6 +23,59 @@
         }
       }
     },
+    "11111111111111111111111111111111": {
+      "name": "System Program",
+      "category": "core",
+      "website": "https://docs.solana.com/developing/runtime-facilities/programs#system-program",
+      "description": "Core Solana runtime program: account creation, lamport transfers, allocation. The pioneer-discovery 10.3.2 entry plus AdvanceNonceAccount (4), the first instruction of every durable-nonce transaction; firmware decodes it too.",
+      "discriminator": {
+        "encoding": "u32-le",
+        "offset": 0,
+        "length": 4
+      },
+      "instructions": {
+        "00000000": {
+          "name": "createAccount",
+          "accounts": ["funder", "new_account"],
+          "args": [
+            { "name": "lamports", "type": "u64" },
+            { "name": "space", "type": "u64" },
+            { "name": "owner", "type": "pubkey" }
+          ]
+        },
+        "02000000": {
+          "name": "transfer",
+          "accounts": ["source", "destination"],
+          "args": [
+            { "name": "lamports", "type": "u64" }
+          ]
+        },
+        "03000000": {
+          "name": "createAccountWithSeed",
+          "accounts": ["funder", "new_account", "base"],
+          "args": [
+            { "name": "base", "type": "pubkey" },
+            { "name": "seed", "type": "string" },
+            { "name": "lamports", "type": "u64" },
+            { "name": "space", "type": "u64" },
+            { "name": "owner", "type": "pubkey" }
+          ]
+        },
+        "04000000": {
+          "name": "advanceNonceAccount",
+          "description": "Use a durable nonce: the transaction stays valid until it is sent or the nonce is advanced.",
+          "accounts": ["nonceAccount", "recentBlockhashesSysvar", "nonceAuthority"],
+          "args": []
+        },
+        "08000000": {
+          "name": "allocate",
+          "accounts": ["new_account"],
+          "args": [
+            { "name": "space", "type": "u64" }
+          ]
+        }
+      }
+    },
     "Stake11111111111111111111111111111111111111": {
       "name": "Stake Program",
       "category": "staking",
@@ -46,6 +99,23 @@
           "accounts": ["stakeAccount", "clockSysvar", "stakeAuthority"],
           "args": []
         }
+      }
+    },
+    "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA": {
+      "name": "SPL Token",
+      "category": "token",
+      "website": "https://spl.solana.com/token",
+      "description": "The SPL Token program (legacy). Same as pioneer-discovery plus SyncNative (0x11), which wraps the SOL already sent to a wrapped-SOL account; firmware decodes it (lib/firmware/solana.c SOL_TOKEN_SYNC_NATIVE_IX) and Jupiter SOL swaps send it.",
+      "discriminator": { "encoding": "u8", "offset": 0, "length": 1 },
+      "instructions": {
+        "03": { "name": "transfer", "accounts": ["source", "destination", "authority"], "args": [{ "name": "amount", "type": "u64" }] },
+        "04": { "name": "approve", "accounts": ["source", "delegate", "owner"], "args": [{ "name": "amount", "type": "u64" }] },
+        "07": { "name": "mintTo", "accounts": ["mint", "destination", "authority"], "args": [{ "name": "amount", "type": "u64" }] },
+        "08": { "name": "burn", "accounts": ["account", "mint", "authority"], "args": [{ "name": "amount", "type": "u64" }] },
+        "09": { "name": "closeAccount", "accounts": ["account", "destination", "owner"], "args": [] },
+        "0c": { "name": "transferChecked", "accounts": ["source", "mint", "destination", "authority"], "args": [{ "name": "amount", "type": "u64" }, { "name": "decimals", "type": "u8" }] },
+        "0d": { "name": "approveChecked", "accounts": ["source", "mint", "delegate", "owner"], "args": [{ "name": "amount", "type": "u64" }, { "name": "decimals", "type": "u8" }] },
+        "11": { "name": "syncNative", "accounts": ["account"], "args": [] }
       }
     },
     "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL": {

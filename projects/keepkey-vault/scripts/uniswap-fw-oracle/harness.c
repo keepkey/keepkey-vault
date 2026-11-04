@@ -3,7 +3,9 @@
  * filter: one call per input line, "router value calldata" in hex; one output
  * line per call, in the format of the firmware's uniswap_ur_expected.txt
  * without its key: "D 0", or "D 1 n {step}*n H nh hook* S 0|S 1 {review}".
- * Built and run by gen-fixture.sh only.
+ * Built and run by gen-fixture.sh only. UR_DECODE_ROUTER: ur_decode takes the
+ * router (7.17); UR_FEE_AMOUNT: the review has fee_amount (7.17), printed
+ * after fee_bips as the Python model does.
  */
 #include <inttypes.h>
 #include <stdio.h>
@@ -41,7 +43,11 @@ int main(void) {
     const size_t n = c ? unhex(c, cd, sizeof cd) : 0;
     UrPlan plan;
     UrSummary s;
+#ifdef UR_DECODE_ROUTER
+    if (!ur_decode(cd, n, router, &plan)) {
+#else
     if (!ur_decode(cd, n, &plan)) {
+#endif
       printf("D 0\n");
       continue;
     }
@@ -73,6 +79,9 @@ int main(void) {
     hex(s.permit_amount, 32);
     printf(" %" PRIu64 " %d %u", s.permit_expiration, s.has_fee,
            (unsigned)s.fee_bips);
+#ifdef UR_FEE_AMOUNT
+    hex(s.fee_amount, 32);
+#endif
     hex(s.fee_recipient, 20);
     /* Not in the Python model's line: the hooks the review shows. */
     printf(" R %u", (unsigned)s.n_hooks);

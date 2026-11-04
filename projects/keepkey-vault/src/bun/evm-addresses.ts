@@ -9,6 +9,7 @@
 import { EventEmitter } from 'events'
 import { getSetting, setSetting } from './db'
 import { evmAddressPath } from '../shared/chains'
+import { OwnerBalanceWatermarks, resetOwnerChainBalances } from '../shared/evm-owner-balance'
 import type { EvmTrackedAddress, EvmAddressSet, EvmAddressChainBalance } from '../shared/types'
 
 // Moved to shared/chains.ts (pure, test-importable) — re-exported so existing
@@ -23,6 +24,7 @@ const SETTINGS_VERSION = 2
 
 export class EvmAddressManager extends EventEmitter {
   private addresses: EvmTrackedAddress[] = []
+  private readonly balanceWatermarks = new OwnerBalanceWatermarks()
   private selectedIndex: number = 0
   private initPromise: Promise<EvmAddressSet> | null = null
 
@@ -47,6 +49,7 @@ export class EvmAddressManager extends EventEmitter {
 
   private async _doInitialize(wallet: any): Promise<EvmAddressSet> {
     this.addresses = []
+    this.balanceWatermarks.clear()
 
     // Load persisted indices (default to [0]).
     // PRIVACY: When canPersist gate returns false (passphrase wallet), ignore
@@ -176,6 +179,7 @@ export class EvmAddressManager extends EventEmitter {
     const lower = address.toLowerCase()
     for (const a of this.addresses) {
       if (a.address.toLowerCase() === lower) {
+        if (!this.balanceWatermarks.accept(address, chainId, balance)) return
         a.chainBalances = {
           ...(a.chainBalances || {}),
           [chainId]: balance,
@@ -187,15 +191,11 @@ export class EvmAddressManager extends EventEmitter {
   }
 
   /** Reset all address balances to 0 (call before portfolio refresh). */
-  resetBalances(chainId?: string): void {
+  resetBalances(chainId?: string, readStartedAt?: number): void {
     for (const a of this.addresses) {
-      if (chainId) {
-        if (a.chainBalances) delete a.chainBalances[chainId]
-        this.recalculateBalanceUsd(a)
-      } else {
-        a.balanceUsd = 0
-        a.chainBalances = {}
-      }
+      this.balanceWatermarks.beginRead(a.address, chainId, readStartedAt)
+      a.chainBalances = resetOwnerChainBalances(a.chainBalances, chainId, readStartedAt)
+      this.recalculateBalanceUsd(a)
     }
   }
 
@@ -268,6 +268,7 @@ export class EvmAddressManager extends EventEmitter {
   /** Reset session state on disconnect. Persisted indices are NOT cleared. */
   reset(): void {
     this.addresses = []
+    this.balanceWatermarks.clear()
     this.selectedIndex = 0
     this.initPromise = null
     this.discoveryDone = false

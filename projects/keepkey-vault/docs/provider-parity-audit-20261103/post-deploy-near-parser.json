@@ -1,0 +1,109 @@
+{
+  "checkedAt": "2026-11-03T20:33:38.428Z",
+  "origin": "https://oracles.cc",
+  "actualVaultSDK": true,
+  "actualVaultParser": true,
+  "publicFixturesOnly": true,
+  "signed": false,
+  "broadcast": false,
+  "observations": [
+    {
+      "pair": "ETH to LTC",
+      "success": true,
+      "swapper": "NEAR Intents",
+      "expectedOutput": "0.51660774",
+      "minimumOutput": "0.5011095",
+      "minimumOutputSource": "quote",
+      "sourceValueBaseUnits": "12345678912345678",
+      "fees": {
+        "affiliate": "0",
+        "outbound": "0",
+        "totalBps": 35,
+        "items": [
+          {
+            "kind": "affiliate",
+            "label": "KeepKey app fee",
+            "assetCaip": "eip155:1/slip44:60",
+            "symbol": "ETH",
+            "decimals": 18,
+            "amount": "0.000018518518368518",
+            "amountBaseUnits": "18518518368518",
+            "bps": 15,
+            "recipient": "caa0106da86351f909f1dfa28e7bfa65665554dc512ab2eedd431b040daa3a1f"
+          },
+          {
+            "kind": "protocol",
+            "label": "1Click platform fee",
+            "assetCaip": "eip155:1/slip44:60",
+            "symbol": "ETH",
+            "decimals": 18,
+            "amount": "0.000024691357824691",
+            "amountBaseUnits": "24691357824691",
+            "bps": 20,
+            "recipient": "5880ad2b362620fadf759cbceb1cd5737ce8c6ed7fb8e9942881e6731f9247dd"
+          },
+          {
+            "kind": "network",
+            "label": "Destination withdrawal (included in output)",
+            "assetCaip": "bip122:12a765e31ffd4059bada1e25190f6e98/slip44:2",
+            "symbol": "LTC",
+            "decimals": 8,
+            "amount": "0.000005",
+            "amountBaseUnits": "500"
+          }
+        ],
+        "reportedTotalBps": 35
+      },
+      "refundWalletMatches": true,
+      "depositChannel": true
+    },
+    {
+      "pair": "LTC to ETH",
+      "success": true,
+      "swapper": "NEAR Intents",
+      "expectedOutput": "0.023546592835606911",
+      "minimumOutput": "0.022840195050538703",
+      "minimumOutputSource": "quote",
+      "fees": {
+        "affiliate": "0",
+        "outbound": "0",
+        "totalBps": 35,
+        "items": [
+          {
+            "kind": "affiliate",
+            "label": "KeepKey app fee",
+            "assetCaip": "bip122:12a765e31ffd4059bada1e25190f6e98/slip44:2",
+            "symbol": "LTC",
+            "decimals": 8,
+            "amount": "0.0015",
+            "amountBaseUnits": "150000",
+            "bps": 15,
+            "recipient": "caa0106da86351f909f1dfa28e7bfa65665554dc512ab2eedd431b040daa3a1f"
+          },
+          {
+            "kind": "protocol",
+            "label": "1Click platform fee",
+            "assetCaip": "bip122:12a765e31ffd4059bada1e25190f6e98/slip44:2",
+            "symbol": "LTC",
+            "decimals": 8,
+            "amount": "0.002",
+            "amountBaseUnits": "200000",
+            "bps": 20,
+            "recipient": "5880ad2b362620fadf759cbceb1cd5737ce8c6ed7fb8e9942881e6731f9247dd"
+          },
+          {
+            "kind": "network",
+            "label": "Destination withdrawal (included in output)",
+            "assetCaip": "eip155:1/slip44:60",
+            "symbol": "ETH",
+            "decimals": 18,
+            "amount": "0.000035",
+            "amountBaseUnits": "35000000000000"
+          }
+        ],
+        "reportedTotalBps": 35
+      },
+      "refundWalletMatches": true
+    }
+  ]
+}

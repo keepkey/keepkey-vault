@@ -1,7 +1,8 @@
 import { createHash } from 'node:crypto'
 import protobuf from 'protobufjs/light'
 import bs58 from 'bs58'
-import type { TronTxPreview } from '../shared/types'
+import type { SigningRequestInfo, TronCallPreview, TronTxPreview } from '../shared/types'
+import { versionCompare } from '../shared/firmware-versions'
 
 type Value = { wire: number; bytes?: Buffer; number?: bigint }
 function fields(bytes: Buffer, allowed: Record<number, number>): Map<number, Value> {
@@ -91,6 +92,120 @@ export function decodeTronTransfer(rawHex: string): TronTransfer {
   throw Error(`Unsupported TRON contract type ${kind}`)
 }
 
+/** Firmware v7.16.0 scripts/tron_tokens.json, the table fsm_msgTronSignTx
+ *  clear-signs TRC-20 transfers for. Deployed on mainnet (TronGrid
+ *  wallet/getcontract, 2026-10-29). */
+const TRON_FIRMWARE_TOKENS = new Set([
+  'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t', // USDT
+  'TXDk8mbtRbXeYuMNS83CfKPaYYT8XWv9Hz', // USDD 2.0
+  'TNUC9Qb1rRpS5CbWLmNMxXBjyFoydXjWFR', // WTRX
+])
+/** First firmware that parses TRON raw_data (tron_parseRawTx, in every 7.15
+ *  build). 7.14.x blind-signs every TronSignTx behind AdvancedMode. */
+const TRON_PARSER_MIN_FW = '7.15.0'
+/** From 7.16 a TRC-20 outside the table is "TRON Blind Sign" behind
+ *  AdvancedMode. The 7.15 builds disagree (release/7.15 shows every TRC-20
+ *  transfer, 7.15-b6 gates it like 7.16), so 7.15 does not force AdvancedMode. */
+const TRON_TOKEN_TABLE_MIN_FW = '7.16.0'
+/** First firmware that also shows a TRC-20 approve of a table token, TRX
+ *  staking (FreezeBalanceV2 / UnfreezeBalanceV2) and SR votes (tron.c). */
+const TRON_STAKE_VOTE_MIN_FW = '7.17.0'
+const INT64_MAX = (1n << 63n) - 1n
+/** Firmware TRON_MAX_VOTES. */
+const TRON_MAX_VOTES = 30
+
+/** 7.17 tron_parseContract for an approve, a stake, an unstake or a vote:
+ *  true only for what it reads in full. Anything else is TRON_TX_UNVERIFIED. */
+function tronApproveStakeVoteParsed(hex: string): boolean {
+  try {
+    if (!/^(?:0x)?(?:[0-9a-fA-F]{2})+$/.test(hex)) return false
+    const top = fields(Buffer.from(hex.replace(/^0x/i, ''), 'hex'), { 1: 2, 3: 0, 4: 2, 8: 0, 10: 2, 11: 2, 14: 0, 18: 0 })
+    const contract = fields(bytes(top, 11), { 1: 0, 2: 2 })
+    const kind = Number(number(contract, 1))
+    const any = fields(bytes(contract, 2), { 1: 2, 2: 2 })
+    const url = bytes(any, 1).toString('utf8')
+    const payload = bytes(any, 2)
+    if (kind === 31 && url.endsWith('/protocol.TriggerSmartContract')) {
+      const t = fields(payload, { 1: 2, 2: 2, 3: 0, 4: 2 })
+      address(bytes(t, 1))
+      const call = bytes(t, 4)
+      return (t.get(3)?.number ?? 0n) === 0n && call.length === 68 && call.subarray(0, 4).toString('hex') === '095ea7b3' &&
+        call.subarray(4, 15).every(v => v === 0) && [0, 0x41].includes(call[15]) &&
+        TRON_FIRMWARE_TOKENS.has(address(bytes(t, 2)))
+    }
+    if ((kind === 54 && url.endsWith('/protocol.FreezeBalanceV2Contract')) ||
+        (kind === 55 && url.endsWith('/protocol.UnfreezeBalanceV2Contract'))) {
+      const f = fields(payload, { 1: 2, 2: 0, 3: 0 })
+      address(bytes(f, 1))
+      const amount = number(f, 2)
+      return amount > 0n && amount <= INT64_MAX && (f.get(3)?.number ?? 0n) <= 2n
+    }
+    if (kind === 4 && url.endsWith('/protocol.VoteWitnessContract')) {
+      // votes is repeated, so it is read here rather than by fields().
+      const reader = new protobuf.Reader(new Uint8Array(payload))
+      let owner = false, votes = 0
+      while (reader.pos < reader.len) {
+        const tag = reader.uint32()
+        if (tag === 10 && !owner) {
+          address(Buffer.from(reader.bytes()))
+          owner = true
+        } else if (tag === 18 && votes < TRON_MAX_VOTES) {
+          const v = fields(Buffer.from(reader.bytes()), { 1: 2, 2: 0 })
+          address(bytes(v, 1))
+          const count = number(v, 2)
+          if (count === 0n || count > INT64_MAX) return false
+          votes++
+        } else return false
+      }
+      return owner && votes > 0
+    }
+    return false
+  } catch { return false }
+}
+
+/** The device shows this transaction from its own parse without AdvancedMode:
+ *  a plain TRX transfer, or a TRC-20 transfer of a token in its table (any
+ *  TRC-20 on 7.15, see above); from 7.17.0 also a TRC-20 approve of a table
+ *  token, a FreezeBalanceV2 / UnfreezeBalanceV2 and a VoteWitness. Anything
+ *  else (another contract, a TRC-20 outside the 7.16 table, a multisig
+ *  Permission_id, 7.14, an unknown version) needs AdvancedMode. */
+export function tronShownNatively(rawTx: unknown, firmwareVersion: string | undefined): boolean {
+  const fw = firmwareVersion?.replace(/^v/, '')
+  if (!fw || versionCompare(fw, TRON_PARSER_MIN_FW) < 0) return false
+  const hex = rawTx instanceof Uint8Array ? Buffer.from(rawTx).toString('hex') : rawTx
+  if (typeof hex !== 'string') return false
+  try {
+    const { kind, tokenContract } = decodeTronTransfer(hex)
+    return kind === 'TRX transfer' || TRON_FIRMWARE_TOKENS.has(tokenContract!)
+      || versionCompare(fw, TRON_TOKEN_TABLE_MIN_FW) < 0
+  } catch {
+    return versionCompare(fw, TRON_STAKE_VOTE_MIN_FW) >= 0 && tronApproveStakeVoteParsed(hex)
+  }
+}
+
+/** The REST /tron/sign-transaction approval card: what this computer reads
+ *  from the signed raw_data bytes, and the AdvancedMode gate from what this
+ *  firmware reads (tronShownNatively). A transfer decoded here is not always
+ *  one the device shows: 7.14 blind-signs every TRON transaction. */
+export function applyTronSigningPreview(info: SigningRequestInfo, rawTx: unknown, firmwareVersion: string | undefined): void {
+  info.chain = 'tron'
+  info.tronDecoded = tronPreview(rawTx) ?? undefined
+  if (info.tronDecoded) {
+    info.from = info.tronDecoded.owner
+    info.to = info.tronDecoded.to
+    info.value = info.tronDecoded.amount
+  } else {
+    // Say what it does here. 7.17+ shows an approve of a table token,
+    // staking and votes itself; anything else is raw data on the device.
+    info.tronCall = tronCallPreview(rawTx) ?? undefined
+    if (info.tronCall) info.from = info.tronCall.owner
+  }
+  const shown = tronShownNatively(rawTx, firmwareVersion)
+  info.tronCallShown = !!info.tronCall && shown
+  info.needsBlindSigning = !shown
+  info.requiresAdvancedMode = !shown
+}
+
 /** Fail closed like firmware tron_parseRawTx. Only a single plain TRX or
  * TRC-20 transfer earns a human summary; all displayed values come from the
  * exact protobuf raw_data bytes signed by the device. */
@@ -118,5 +233,149 @@ export function tronPreview(rawHex: unknown): TronTxPreview | null {
       if (parts[5] && /^\d+$/.test(parts[5])) preview.affiliateFee = `${(Number(parts[5]) / 100).toFixed(2)}%`
     }
     return preview
+  } catch { return null }
+}
+
+// TRON contracts this computer names. Each: SUN.io's own announcement and a
+// /wallet/getcontract on api.trongrid.io (2026-10-29) returning bytecode and
+// the contract name shown here.
+const TRON_CONTRACT_NAMES: Record<string, string> = {
+  // https://sunio.zendesk.com/hc/en-us/articles/54899665032601 (Permit2 + Universal Router)
+  TTJxU3P8rHycAyFY4kVtGNfmnMH4ezcuM9: 'SunSwap Permit2',
+  TSJEtPuqHpvSaVnSwvCsngaeBxrGUzp95Q: 'SunSwap Universal Router',
+  // https://sunio.zendesk.com/hc/en-us/articles/37839082907545 (SmartExchangeRouter)
+  TJ4NNy8xZEqsowCBhLvZ45LCqPdGjkET5j: 'SunSwap Smart Router',
+}
+const USDT_TRC20 = 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t'
+const RESOURCES = ['bandwidth', 'energy', 'TRON Power']
+/** uint96 max: at or above it an allowance is not a bound (as clearsign-risk). */
+const BOUND_LIMIT = (1n << 96n) - 1n
+
+/** A 32-byte ABI address word: 11 zero bytes, then 0x00 or 0x41 (tooling
+ * puts the TRON prefix there; the TVM reads the low 160 bits), then 20 bytes. */
+function addressWord(word: Buffer): string {
+  if (word.length !== 32 || word.subarray(0, 11).some(v => v !== 0) || ![0, 0x41].includes(word[11])) throw Error('Not an address word')
+  return address(Buffer.from(`41${word.subarray(12).toString('hex')}`, 'hex'))
+}
+
+/** A TRC-20 amount, named only for USDT; address(0) is TRX in a SunSwap path. */
+function tronTokenAmount(units: bigint, token: string | null): string {
+  if (token === null) return `${human(units, 6)} TRX`
+  return token === USDT_TRC20 ? `${human(units, 6)} USDT` : `${units} base units of token ${token}`
+}
+
+/** SmartExchangeRouter swapExactInput(address[] path, string[] poolVersion,
+ * uint256[] versionLen, uint24[] fees, SwapData data), selector cef95229, with
+ * SwapData = (amountIn, amountOutMin, to, deadline) inline after the four
+ * array offsets. Layout per SUN.io's router source,
+ * https://github.com/sun-protocol/smart-exchange-router/blob/main/contracts/SmartExchangeRouter.sol
+ * (path[0] is spent, the last path token goes to `to`; address(0) is TRX).
+ * null for anything else or anything that does not read in full. */
+function sunSwapExactInput(call: Buffer) {
+  try {
+    if (call.length < 4 + 8 * 32 || call.subarray(0, 4).toString('hex') !== 'cef95229') return null
+    const uint = (at: number) => {
+      if (at + 32 > call.length) throw Error('Call data too short')
+      return BigInt(`0x${call.subarray(at, at + 32).toString('hex')}`)
+    }
+    const token = (at: number) => (uint(at) === 0n ? null : addressWord(call.subarray(at, at + 32)))
+    const pathOffset = uint(4)
+    if (pathOffset > BigInt(call.length)) return null
+    const pathAt = 4 + Number(pathOffset)
+    const n = uint(pathAt)
+    if (n < 2n || n > 16n) return null
+    const tokenIn = token(pathAt + 32), tokenOut = token(pathAt + 32 * Number(n))
+    const amountIn = uint(4 + 4 * 32), amountOutMin = uint(4 + 5 * 32)
+    return {
+      amountIn: tronTokenAmount(amountIn, tokenIn), amountOutMin: tronTokenAmount(amountOutMin, tokenOut),
+      noMinimum: amountOutMin === 0n, to: addressWord(call.subarray(4 + 6 * 32, 4 + 7 * 32)),
+      trxIn: tokenIn === null ? amountIn : undefined,
+    }
+  } catch { return null }
+}
+
+/** What a TRON transaction the firmware shows only as raw data does, read
+ * from the exact raw_data bytes. Advice for the approval card, never a gate:
+ * null for anything it does not parse in full (one contract, no unknown
+ * fields), and REST keeps the AdvancedMode requirement either way. */
+export function tronCallPreview(rawHex: unknown): TronCallPreview | null {
+  if (typeof rawHex !== 'string' || !/^(?:0x)?(?:[0-9a-fA-F]{2})+$/.test(rawHex)) return null
+  try {
+    const raw = Buffer.from(rawHex.replace(/^0x/i, ''), 'hex')
+    const top = fields(raw, { 1: 2, 3: 0, 4: 2, 8: 0, 10: 2, 11: 2, 14: 0, 18: 0 })
+    const contract = fields(bytes(top, 11), { 1: 0, 2: 2 })
+    const kind = Number(number(contract, 1))
+    const any = fields(bytes(contract, 2), { 1: 2, 2: 2 })
+    const url = bytes(any, 1).toString('utf8')
+    const payload = bytes(any, 2)
+    const is = (name: string) => url === `type.googleapis.com/protocol.${name}`
+    const trx = (sun: bigint) => `${human(sun, 6)} TRX`
+    const resource = (f: Map<number, Value>) => RESOURCES[Number(f.get(2)?.number ?? 0n)] ?? 'an unknown resource'
+    if (kind === 31 && is('TriggerSmartContract')) {
+      const t = fields(payload, { 1: 2, 2: 2, 3: 0, 4: 2 })
+      const owner = address(bytes(t, 1)), target = address(bytes(t, 2))
+      const call = t.get(4)?.bytes ?? Buffer.alloc(0)
+      const callValue = t.get(3)?.number ?? 0n
+      if (callValue === 0n && call.length === 68 && call.subarray(0, 4).toString('hex') === '095ea7b3') {
+        const spender = addressWord(call.subarray(4, 36))
+        const units = BigInt(`0x${call.subarray(36).toString('hex')}`)
+        const usdt = target === USDT_TRC20
+        return {
+          kind: 'TRC-20 approve', owner, token: target, tokenSymbol: usdt ? 'USDT' : undefined,
+          spender, spenderName: TRON_CONTRACT_NAMES[spender],
+          amount: usdt ? `${human(units, 6)} USDT` : `${units} base units of token ${target}`,
+          unlimited: units >= BOUND_LIMIT, revoke: units === 0n,
+        }
+      }
+      const swap = TRON_CONTRACT_NAMES[target] === 'SunSwap Smart Router' ? sunSwapExactInput(call) : null
+      if (swap) {
+        const { trxIn, ...rest } = swap
+        // TRX in is paid as the call value; anything else sent along is extra.
+        return { kind: 'SunSwap swap', owner, contract: target, contractName: TRON_CONTRACT_NAMES[target], ...rest,
+          callValue: callValue > 0n && callValue !== trxIn ? trx(callValue) : undefined }
+      }
+      return { kind: 'Contract call', owner, contract: target, contractName: TRON_CONTRACT_NAMES[target],
+        callValue: callValue > 0n ? trx(callValue) : undefined }
+    }
+    if (kind === 54 && is('FreezeBalanceV2Contract')) {
+      const f = fields(payload, { 1: 2, 2: 0, 3: 0 })
+      return { kind: 'Stake TRX', owner: address(bytes(f, 1)), amount: trx(number(f, 2)), resource: RESOURCES[Number(f.get(3)?.number ?? 0n)] ?? 'an unknown resource' }
+    }
+    if (kind === 55 && is('UnfreezeBalanceV2Contract')) {
+      const f = fields(payload, { 1: 2, 2: 0, 3: 0 })
+      return { kind: 'Unstake TRX', owner: address(bytes(f, 1)), amount: trx(number(f, 2)), resource: RESOURCES[Number(f.get(3)?.number ?? 0n)] ?? 'an unknown resource' }
+    }
+    if (kind === 56 && is('WithdrawExpireUnfreezeContract')) {
+      return { kind: 'Withdraw unstaked TRX', owner: address(bytes(fields(payload, { 1: 2 }), 1)) }
+    }
+    if (kind === 13 && is('WithdrawBalanceContract')) {
+      return { kind: 'Claim voting rewards', owner: address(bytes(fields(payload, { 1: 2 }), 1)) }
+    }
+    if (kind === 57 && is('DelegateResourceContract')) {
+      const f = fields(payload, { 1: 2, 2: 0, 3: 0, 4: 2, 5: 0, 6: 0 })
+      return { kind: 'Delegate resources', owner: address(bytes(f, 1)), resource: resource(f), amount: trx(number(f, 3)),
+        receiver: address(bytes(f, 4)), locked: (f.get(5)?.number ?? 0n) !== 0n }
+    }
+    if (kind === 58 && is('UnDelegateResourceContract')) {
+      const f = fields(payload, { 1: 2, 2: 0, 3: 0, 4: 2 })
+      return { kind: 'Reclaim delegated resources', owner: address(bytes(f, 1)), resource: resource(f), amount: trx(number(f, 3)), receiver: address(bytes(f, 4)) }
+    }
+    if (kind === 4 && is('VoteWitnessContract')) {
+      // votes is a repeated field, so it is read here rather than by fields().
+      const reader = new protobuf.Reader(new Uint8Array(payload))
+      let owner: string | undefined
+      const votes: { witness: string; count: string }[] = []
+      while (reader.pos < reader.len) {
+        const tag = reader.uint32()
+        if (tag === 10 && !owner) owner = address(Buffer.from(reader.bytes()))
+        else if (tag === 18) {
+          const v = fields(Buffer.from(reader.bytes()), { 1: 2, 2: 0 })
+          votes.push({ witness: address(bytes(v, 1)), count: number(v, 2).toString() })
+        } else throw Error('Unsupported VoteWitness field')
+      }
+      if (!owner || votes.length === 0) return null
+      return { kind: 'Vote', owner, votes }
+    }
+    return null
   } catch { return null }
 }

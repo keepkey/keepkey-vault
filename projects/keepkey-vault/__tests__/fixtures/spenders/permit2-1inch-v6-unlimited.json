@@ -1,0 +1,36 @@
+{
+ "_source": "Ethereum mainnet tx 0x974510cb010fc7cd661e2444c28587b639806e17935d6ba254c4947cbea8817d (block 26299614; Permit2 Permit event + eth_getTransactionByHash via ethereum-rpc.publicnode.com, 2026-10-29). A 1inch swap whose calldata carries this PermitSingle and its EIP-2098 compact signature; the signature recovers the owner 0x8fd7aa0ff1b2ceafcc31eb2c721141fb4d662b70. Amount is uint160 max (unlimited) of token 0x8de5d497…8d0f, which KeepKey does not review.",
+ "typedData": {
+  "types": {
+   "EIP712Domain": [
+    { "name": "name", "type": "string" },
+    { "name": "chainId", "type": "uint256" },
+    { "name": "verifyingContract", "type": "address" }
+   ],
+   "PermitSingle": [
+    { "name": "details", "type": "PermitDetails" },
+    { "name": "spender", "type": "address" },
+    { "name": "sigDeadline", "type": "uint256" }
+   ],
+   "PermitDetails": [
+    { "name": "token", "type": "address" },
+    { "name": "amount", "type": "uint160" },
+    { "name": "expiration", "type": "uint48" },
+    { "name": "nonce", "type": "uint48" }
+   ]
+  },
+  "primaryType": "PermitSingle",
+  "domain": { "name": "Permit2", "chainId": 1, "verifyingContract": "0x000000000022D473030F116dDEE9F6B43aC78BA3" },
+  "message": {
+   "details": {
+    "token": "0x8de5d49725550f7b318b2fa0f1b1f118e98e8d0f",
+    "amount": "1461501637330902918203684832716283019655932542975",
+    "expiration": "1793293320",
+    "nonce": "0"
+   },
+   "spender": "0x111111125421ca6dc452d289314280a0f8842a65",
+   "sigDeadline": "1793293320"
+  }
+ },
+ "signature": "0x9dc2808de3e714089a9362b4754a462981fb85637cf0b00d8944d489be96732e88add84ca3e89e1aff829b8f0ec1d8cc0da70fe40192e1cb9abe9fd750114d7e"
+}

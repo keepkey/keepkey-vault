@@ -22,6 +22,11 @@
  *     python3 $E/uniswap_tokens.py  <dir>/uniswap_tokens.def
  *     bun scripts/gen-firmware-token-table.ts <dir> firmware-token-table-716.json
  *
+ *   7.17 (fork alpha, 7d6743275): firmware-token-table-717.json. Both lists
+ *   use `--profile priority-only` and scripts/dedupe-token-def.py drops the
+ *   rows both carry. Regenerate from the alpha source:
+ *     make firmware-token-table-717 FW_SRC=<keepkey-firmware checkout>
+ *
  * The firmware natively renders an ERC-20 transfer/approve only for a
  * (chain_id, address) in this table (tokenByChainAddress); every other token
  * is gated on AdvancedMode. Vault's prediction (firmwareClearSigns) must use
@@ -48,7 +53,9 @@ for (const file of ['uniswap_tokens.def', 'ethereum_tokens.def']) {
 const tokens = Object.keys(symbols)
 const out = {
   _source: 'firmware tokenByChainAddress table (uniswap_tokens.def + ethereum_tokens.def)',
-  _regenerate: `bun scripts/gen-firmware-token-table.ts <fw build>/include/keepkey/firmware${process.argv[3] ? ` ${outName}` : ''}`,
+  _regenerate: outName === 'firmware-token-table-717.json' ? 'make firmware-token-table-717 FW_SRC=<keepkey-firmware checkout>'
+    : `bun scripts/gen-firmware-token-table.ts <fw build>/include/keepkey/firmware${process.argv[3] ? ` ${outName}` : ''}`,
+  ...(process.env.FIRMWARE_COMMIT ? { _firmware: process.env.FIRMWARE_COMMIT } : {}),
   tokens: [...tokens].sort(),
   /** What the device names each token: ticker and decimals. */
   symbols,

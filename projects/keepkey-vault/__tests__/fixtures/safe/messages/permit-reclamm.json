@@ -1,0 +1,119 @@
+{
+ "_source": [
+  "https://api.safe.global/tx-service/eth/api/v1/messages/0x7269e1b093a9c667701ff820619adec7a805f26afe35bc326a45de028c5eccff/",
+  "Safe 0x616dE58c011F8736fa20c7Ae5352F7f6FB9F0669 (eth, Safe 1.3.0): opaque: EIP-2612 Permit hashed into a SafeMessage (unlimited deadline). typedData is what Safe{Wallet} sends an owner (message = hashTypedData(original)); record is the Transaction Service's GET response, fetched 2026-10-30."
+ ],
+ "typedData": {
+  "domain": {
+   "chainId": 1,
+   "verifyingContract": "0x616dE58c011F8736fa20c7Ae5352F7f6FB9F0669"
+  },
+  "types": {
+   "EIP712Domain": [
+    {
+     "name": "chainId",
+     "type": "uint256"
+    },
+    {
+     "name": "verifyingContract",
+     "type": "address"
+    }
+   ],
+   "SafeMessage": [
+    {
+     "name": "message",
+     "type": "bytes"
+    }
+   ]
+  },
+  "primaryType": "SafeMessage",
+  "message": {
+   "message": "0x678d10341e2c688086588ad369d6d74d5dc7ad5695a1849479032caf93f4d857"
+  }
+ },
+ "record": {
+  "created": "2025-11-03T09:05:51.254071Z",
+  "modified": "2025-11-03T09:08:59.837912Z",
+  "safe": "0x616dE58c011F8736fa20c7Ae5352F7f6FB9F0669",
+  "messageHash": "0x7269e1b093a9c667701ff820619adec7a805f26afe35bc326a45de028c5eccff",
+  "message": {
+   "types": {
+    "Permit": [
+     {
+      "name": "owner",
+      "type": "address"
+     },
+     {
+      "name": "spender",
+      "type": "address"
+     },
+     {
+      "name": "value",
+      "type": "uint256"
+     },
+     {
+      "name": "nonce",
+      "type": "uint256"
+     },
+     {
+      "name": "deadline",
+      "type": "uint256"
+     }
+    ],
+    "EIP712Domain": [
+     {
+      "name": "name",
+      "type": "string"
+     },
+     {
+      "name": "version",
+      "type": "string"
+     },
+     {
+      "name": "chainId",
+      "type": "uint256"
+     },
+     {
+      "name": "verifyingContract",
+      "type": "address"
+     }
+    ]
+   },
+   "domain": {
+    "name": "ReClamm COW/WETH",
+    "chainId": 1,
+    "version": "1",
+    "verifyingContract": "0xd321300ef77067d4a868f117d37706eb81368e98"
+   },
+   "message": {
+    "nonce": "0",
+    "owner": "0x616de58c011f8736fa20c7ae5352f7f6fb9f0669",
+    "value": "17469636102790029071360",
+    "spender": "0xae563e3f8219521950555f5962419c8919758ea2",
+    "deadline": "115792089237316195423570985008687907853269984665640564039457584007913129639935"
+   },
+   "primaryType": "Permit"
+  },
+  "proposedBy": "0x927CBc6A90080068cF839d27000E13355870c825",
+  "safeAppId": null,
+  "confirmations": [
+   {
+    "created": "2025-11-03T09:05:51.261969Z",
+    "modified": "2025-11-03T09:05:51.261969Z",
+    "owner": "0x927CBc6A90080068cF839d27000E13355870c825",
+    "signature": "0xf8fc1237eb97cf50cb36373e235981fcad8c5758818abe7ae0e66657da71d5777672b82b9cb936ce5e58644cd2456dd76714510c5549ccf7d1d622ab47aa2e8e1c",
+    "signatureType": "EOA"
+   },
+   {
+    "created": "2025-11-03T09:07:46.888265Z",
+    "modified": "2025-11-03T09:07:46.888265Z",
+    "owner": "0xf10Fe968d1856131FC6835ed7d7126eaF8b5a6b6",
+    "signature": "0x1244dd851be2b16bbf44cb198338df9faf41f16ada282a8dcbed357fe5457b4871686ed057cb15d73d5ccc5668d96b4a58f6ebf54cb1d318d7bcd84cf720812a1b",
+    "signatureType": "EOA"
+   }
+  ],
+  "preparedSignature": "0xf8fc1237eb97cf50cb36373e235981fcad8c5758818abe7ae0e66657da71d5777672b82b9cb936ce5e58644cd2456dd76714510c5549ccf7d1d622ab47aa2e8e1c1244dd851be2b16bbf44cb198338df9faf41f16ada282a8dcbed357fe5457b4871686ed057cb15d73d5ccc5668d96b4a58f6ebf54cb1d318d7bcd84cf720812a1b",
+  "preparedSignatureEip1271": "0x000000000000000000000000616de58c011f8736fa20c7ae5352f7f6fb9f06690000000000000000000000000000000000000000000000000000000000000041000000000000000000000000000000000000000000000000000000000000000082f8fc1237eb97cf50cb36373e235981fcad8c5758818abe7ae0e66657da71d5777672b82b9cb936ce5e58644cd2456dd76714510c5549ccf7d1d622ab47aa2e8e1c1244dd851be2b16bbf44cb198338df9faf41f16ada282a8dcbed357fe5457b4871686ed057cb15d73d5ccc5668d96b4a58f6ebf54cb1d318d7bcd84cf720812a1b",
+  "origin": "{}"
+ }
+}

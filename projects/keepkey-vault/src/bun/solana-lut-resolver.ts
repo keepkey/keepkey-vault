@@ -2,6 +2,7 @@ import bs58 from 'bs58'
 
 import type { ParsedSolanaMessage } from './solana-tx'
 import { SolanaAltResolveError, resolveAlts, type AltAccountFetcher } from './solana-alt'
+import { versionCompare } from '../shared/firmware-versions'
 
 /**
  * Canonical LUT account resolution for the certified Solana ClearSign path.
@@ -19,6 +20,21 @@ import { SolanaAltResolveError, resolveAlts, type AltAccountFetcher } from './so
  */
 
 export const SOL_MAX_LUT_ACCOUNTS = 8
+
+/**
+ * Firmware 7.17.0+ also accepts the host's own resolution with no signature
+ * (SolanaSignTx.lut_account alone): it decodes the instructions, marks every
+ * resolved key "from lookup table, not verified by KeepKey", and keeps the
+ * blind-sign gate. Up to 64 accounts, static plus resolved.
+ */
+export const HOST_LUT_ACCOUNTS_MIN_FW = '7.17.0'
+export const SOL_MAX_HOST_LUT_ACCOUNTS = 64
+
+/** Unknown firmware counts as unsupported. Before 7.17 the device ignores a
+ * short unsigned list and cannot decode one over 8 keys. */
+export function supportsHostLutAccounts(firmwareVersion?: string): boolean {
+  return !!firmwareVersion && versionCompare(firmwareVersion, HOST_LUT_ACCOUNTS_MIN_FW) >= 0
+}
 
 export class SolanaLutCanonicalizationError extends Error {
   constructor(message: string) {
@@ -44,6 +60,7 @@ export interface CanonicalLutResolution {
 export async function resolveCanonicalLutAccounts(
   message: ParsedSolanaMessage,
   fetcher: AltAccountFetcher,
+  maxAccounts = SOL_MAX_LUT_ACCOUNTS,
 ): Promise<CanonicalLutResolution> {
   if (message.altEntries.length === 0) {
     throw new SolanaLutCanonicalizationError('message has no address table lookups to resolve')
@@ -90,9 +107,9 @@ export async function resolveCanonicalLutAccounts(
   if (accounts.length === 0) {
     throw new SolanaLutCanonicalizationError('address table lookups resolved to zero accounts')
   }
-  if (accounts.length > SOL_MAX_LUT_ACCOUNTS) {
+  if (accounts.length > maxAccounts) {
     throw new SolanaLutCanonicalizationError(
-      `resolved ${accounts.length} lookup accounts, exceeding firmware's ${SOL_MAX_LUT_ACCOUNTS}-account cap`,
+      `resolved ${accounts.length} lookup accounts, exceeding firmware's ${maxAccounts}-account cap`,
     )
   }
   return { accounts, writableCount: writable.length, readonlyCount: readonly.length }

@@ -21,10 +21,10 @@ never authorizes changing the firmware gitlink. See
 
 | Module | Repo | Expected Branch | Purpose |
 |--------|------|-----------------|---------|
-| **hdwallet** | `BitHighlander/hdwallet` | `codex/certified-metadata-qa` | HD wallet core + KeepKey adapter with certified signing metadata |
+| **hdwallet** | `keepkey/hdwallet` | `master` | HD wallet core + KeepKey adapter with certified signing metadata |
 | **proto-tx-builder** | `BitHighlander/proto-tx-builder` | `main` | Cosmos/Thorchain/Maya TX builder (`@keepkey/proto-tx-builder`) |
 | **device-protocol** | `keepkey/device-protocol` | `master` | Canonical protocol; hdwallet gets it from npm as `@bithighlander/device-protocol` |
-| **electrobun** | `BitHighlander/electrobun` | `keepkey/launcher-env-lifetime` | Desktop framework runtime with the Intel launcher lifetime fix |
+| **electrobun** | `BitHighlander/electrobun` | `keepkey/launcher-env-uaf-fix` | Desktop framework (v1.18.1 + KeepKey launcher fixes). macOS launchers come from prebuilt cores, see below |
 
 Ignored for Vault releases:
 
@@ -93,24 +93,28 @@ done
 
 | Repo | Workflows | Notes |
 |------|-----------|-------|
-| BitHighlander/hdwallet | CI (build matrix) | Must pass when present; the Vault contract suite is also blocking |
-| BitHighlander/proto-tx-builder | Build & Test | Must pass |
+| keepkey/hdwallet | CI (build matrix) | Must pass; the Vault contract suite is also blocking |
+| BitHighlander/proto-tx-builder | none on the pin | Accepted (`PREFLIGHT_NO_CI_OK` in the Makefile). Vault CI builds it |
 | keepkey/device-protocol | Protocol CI | Must pass; the exact pinned commit must be published |
-| BitHighlander/electrobun | Vault Intel-core build and packaged-app smoke | Both must pass for the exact pin |
+| BitHighlander/electrobun | none on the pin | Accepted (`PREFLIGHT_NO_CI_OK`). Vault CI's Intel smoke test boots the packaged app |
 
 ## Per-Module Rules
 
-### hdwallet (`codex/certified-metadata-qa`)
+### hdwallet (`keepkey/hdwallet` `master`)
 
-- Must be on the release branch HEAD or a tagged release in `BitHighlander/hdwallet`
-- The `master` branch must have the lodash/rxjs removal commit (`179c5668`)
+- Pin to `keepkey/hdwallet` `master`, not the BitHighlander fork
+- Must have the lodash/rxjs removal commit (`179c5668`)
 - The exact pin must pass the Vault host/submodule contract suite
-- Verify: `cd modules/hdwallet && git branch -r --contains HEAD | grep origin/codex/certified-metadata-qa`
+- Verify: `cd modules/hdwallet && git merge-base --is-ancestor HEAD origin/master`
 
-### proto-tx-builder (`main`)
+### proto-tx-builder (`BitHighlander/proto-tx-builder` `main`)
 
 - Must be on `main` HEAD
-- Single-branch repo, straightforward
+- Stay on the fork. `keepkey/proto-tx-builder` calls `createFeegrantAminoConverters`,
+  which the `@cosmjs/stargate` 0.28.13 shipped in the app does not export (it is
+  misspelled "Freegrant"); the fork's `f12f8c3` falls back. Upstream passes unit
+  tests but breaks every Cosmos/THORChain/Maya/Osmosis signature in the packaged
+  app. Moving upstream needs that fallback upstream first.
 - Verify: `cd modules/proto-tx-builder && git log --oneline origin/main -1`
 
 ### device-protocol (`master`)
@@ -140,10 +144,17 @@ done
 - Firmware changes and emulator artifact production happen in their own
   workflow, outside the Vault release procedure.
 
-### electrobun (`keepkey/launcher-env-lifetime`)
+### electrobun (`BitHighlander/electrobun` `keepkey/launcher-env-uaf-fix`)
 
-- Pin to `BitHighlander/electrobun` `keepkey/launcher-env-lifetime`
-- Verify: `cd modules/electrobun && git log --oneline origin/keepkey/launcher-env-lifetime -1`
+- Pin to `keepkey/launcher-env-uaf-fix` (v1.18.1 + 4 launcher fixes). In a local
+  clone `origin` may be upstream blackboardsh; the fork is a separate remote.
+- macOS launchers do NOT come from this pin: arm64 uses the certified core in
+  `emulator-bundle/manifest.json`, Intel uses `electrobun-x64-core-v7`
+  (`X64_CORE_TAG` in build.yml). The pin builds Linux and Windows.
+- Before publishing a new Intel core (`make publish-electrobun-x64-core`), merge
+  `af641fab` ("avoid Intel macOS path join crash", on `launcher-env-lifetime`)
+  into the pinned branch: without it Zig 0.13 miscompiles the launcher for x86_64.
+- Upstream is now v2 (launcher rewritten); moving there is a migration, not a re-pin.
 
 ## CRITICAL: Check for Upstream Fixes Before Release
 
@@ -158,10 +169,10 @@ behind upstream:**
 ```bash
 echo "=== Commits behind canonical branches ==="
 for pair in \
-  "modules/hdwallet|codex/certified-metadata-qa" \
+  "modules/hdwallet|master" \
   "modules/proto-tx-builder|main" \
   "modules/device-protocol|master" \
-  "modules/electrobun|keepkey/launcher-env-lifetime"; do
+  "modules/electrobun|keepkey/launcher-env-uaf-fix"; do
   mod=${pair%%|*}
   branch=${pair##*|}
   (cd "$mod" && git fetch origin "$branch" 2>/dev/null)
@@ -233,14 +244,17 @@ After release is published:
 - Feature-branch submodule updates go to `develop` only
 - If a hotfix requires a submodule change, document it in the release notes
 
-## Current State (2026-05-13)
+## Current State (2026-10-28, v1.6.7)
 
 | Module | Pinned To | Branch | Status |
 |--------|-----------|--------|--------|
-| hdwallet | `e36639e3` | `codex/certified-metadata-qa` | Vault 1.5.5 release pin |
-| proto-tx-builder | `f12f8c39` | `main` | Current vault pin |
-| device-protocol | `bee6cdd6` | `master` | Vault 1.5.5 published v7.18.0 pin; generated `lib/` still must be present on the build machine |
-| electrobun | `1bffabcf` | `keepkey/launcher-env-lifetime` | Vault 1.5.5 release pin |
+| hdwallet | `b9dadcfd` | keepkey `master` | head of master, CI 5/5 |
+| proto-tx-builder | `f12f8c39` | BitHighlander `main` | fork kept (see above), no CI |
+| device-protocol | `bd340910` | keepkey `master` | head of master, CI 10/10; npm `@bithighlander/device-protocol@7.20.0` byte-identical except name/version |
+| electrobun | `7a9bc757` | BitHighlander `keepkey/launcher-env-uaf-fix` | no CI; Intel core v7 separate |
+
+`make preflight` runs every check in this document; it must end with
+"ALL GATES PASSED".
 
 `modules/keepkey-firmware` is intentionally omitted. Its pin is not inventory
 for a Vault release and must not be changed by this SOP.

@@ -222,7 +222,11 @@ export interface ClearSignEvent {
 export type ClearSignProtectionLevel = 'P0' | 'P1' | 'P2' | 'P3' | 'P4' | 'P5'
 export type ClearSignDefinitionSource = 'none' | 'native' | 'runtime' | 'certified' | 'erc7730'
 export type ClearSignObservationOutcome = 'pending' | 'signed' | 'rejected' | 'timed-out' | 'policy-blocked' | 'failed'
-export type ClearSignObservationKind = 'evm-call' | 'evm-typed-data' | 'solana-transaction'
+/** 'message' and 'transaction' are every other signing request (messages on any
+ *  chain, non-EVM/Solana transactions): counted for coverage, never audited. */
+export type ClearSignObservationKind = 'evm-call' | 'evm-typed-data' | 'solana-transaction' | 'message' | 'transaction'
+export type ClearSignObservationChain = 'Ethereum' | 'Solana' | 'UTXO' | 'Zcash' | 'Cosmos' | 'Osmosis' | 'THORChain'
+  | 'Mayachain' | 'XRP' | 'Tron' | 'TON' | 'Hive'
 export type ClearSignSimulationStatus = 'not-requested' | 'success' | 'revert' | 'incomplete' | 'unavailable'
 export type ClearSignDefinitionResolution = 'not-checked' | 'selected' | 'invalid-request' | 'no-artifact' | 'shape-mismatch'
   | 'revoked' | 'expired' | 'identity-unavailable' | 'identity-stale' | 'identity-changed' | 'identity-mismatch' | 'unsupported-alt'
@@ -232,7 +236,7 @@ export type ClearSignExposureClass = 'not-evaluated' | 'none-observed' | 'bounde
 
 /** Local, privacy-safe denominator for ClearSign coverage metrics. */
 export interface ClearSignObservationDraft {
-  chain: 'Ethereum' | 'Solana'
+  chain: ClearSignObservationChain
   requestKind: ClearSignObservationKind
   shapeKey: string
   /** Public contract/program shape only. Never raw arguments or user accounts. */
@@ -298,7 +302,7 @@ export interface ClearSignCoverageSummary {
     successfulRequests: number
     successPercent: number
   }
-  byChain: Record<ClearSignObservation['chain'], ClearSignCoverageSlice>
+  byChain: Record<'Ethereum' | 'Solana', ClearSignCoverageSlice> & Partial<Record<ClearSignObservation['chain'], ClearSignCoverageSlice>>
   bySource: Record<ClearSignEventSource, ClearSignCoverageSlice>
   rolling: {
     last24Hours: ClearSignCoverageSlice
@@ -399,7 +403,8 @@ export type ClearSignMutationKind = 'truncation' | 'selector-or-discriminator' |
 export interface ClearSignPromotionBundle {
   version: 1
   shapeKey: string
-  chain: ClearSignObservation['chain']
+  /** Only contract/program shapes are audited and promoted. */
+  chain: 'Ethereum' | 'Solana'
   candidate: NonNullable<ClearSignAuditEvidence['candidates']>[number]
   identityHash: string
   createdAt: number
@@ -696,6 +701,8 @@ export interface DefiPosition {
   // === Server-side (canonical) ===
   protocol: string | null   // Zapper appId slug ("lido", "morpheus", "aave-v3") or null
   displayName?: string      // Pretty protocol name from the server ("Lido", "Morpheus")
+  pubkey?: string           // Wallet that owns this position
+  appTokenAddress?: string  // Protocol token contract, when supplied by the server
   network: string           // Zapper network display ("Ethereum") or legacy slug ("ethereum")
   networkId?: string        // CAIP-2 chain ("eip155:1") — used to attribute the position to a chain
   balanceUsd: number        // USD value Zapper attributes to the protocol for this pubkey
@@ -863,6 +870,10 @@ export interface EvmAddressChainBalance {
   nativeBalanceUsd: number
   tokens?: TokenBalance[]
   defiPositions?: DefiPosition[]
+  /** Confidence belongs to this owner and chain, never an aggregate portfolio. */
+  syncState?: 'confirmed' | 'stale' | 'degraded'
+  updatedAt?: number
+  confirmedAssetCaips?: string[]
 }
 
 export interface EvmTrackedAddress {
@@ -1020,6 +1031,46 @@ export interface EIP712DecodedInfo {
   protocolIdentityVerified?: boolean
   /** Full host-computed digests for comparison with legacy device screens. */
   hashes?: { domainHash: string; messageHash?: string }
+  /** A Seaport 1.6 order shaped like a listing: only NFTs offered, every
+   *  payment in one currency at a fixed price. Who each payment goes to.
+   *  `decimals` is set only when this computer can name the currency; `nft`
+   *  only when a single NFT is offered. 'creator-fee' is set after the
+   *  collection's own ERC-2981 royaltyInfo named that payee and amount.
+   *  `creatorFeeUnchecked`: royaltyInfo could not be asked at all. */
+  seaportListing?: {
+    offerer: string
+    items: string[]
+    total: string
+    totalRaw: string
+    decimals?: number
+    nft?: { token: string; id: string }
+    payments: Array<{ recipient: string; amount: string; raw: string; role: 'offerer' | 'opensea-fee' | 'creator-fee' | 'other' }>
+    endTime: string
+    creatorFeeUnchecked?: boolean
+  }
+  /** Every item of a decoded Seaport 1.6 order, offer then consideration, and
+   *  what its token contract says it is, asked before approval
+   *  (seaport-item-contracts.ts): ERC-165 supportsInterface for ERC-721 and
+   *  ERC-1155, and ERC-20 decimals(). The facts are unset until asked;
+   *  `unchecked` when the contract could not be asked. */
+  seaportItems?: Array<{
+    side: 'offer' | 'consideration'
+    index: number
+    itemType: number
+    token: string
+    erc721?: boolean
+    erc1155?: boolean
+    decimals?: number
+    /** Only ERC-20 decimals() could be asked (Pioneer's GetTokenDecimals):
+     *  erc721/erc1155 are unknown; `decimals` unset = no decimals() answer. */
+    decimalsOnly?: boolean
+    unchecked?: boolean
+  }>
+  /** The last screen a 7.17 KeepKey with capability 30 shows for this order
+   *  when the KeepKey-certified Seaport definition is attached
+   *  (seaport-settlement.ts, the firmware's rules): WARNING and its lines,
+   *  or "Order summary" (warning false). Unset when not predicted. */
+  seaportDeviceScreen?: { warning: boolean; lines: string[] }
 }
 
 /**
@@ -1126,6 +1177,12 @@ export interface SigningRequestInfo {
   simulatedOutflow?: SimulatedHoldings
   /** Parsed only from the exact TRON raw_data protobuf bytes being signed. */
   tronDecoded?: TronTxPreview
+  /** A TRON call the firmware does not decode (TRC-20 approve, staking,
+   *  votes, a SunSwap router call), read on this computer as advice only. */
+  tronCall?: TronCallPreview
+  /** The device shows tronCall from its own parse (7.17+: an approve of a
+   *  table token, staking, votes), so no AdvancedMode. */
+  tronCallShown?: boolean
   /**
    * Populated when a Solana transaction was received but clear-sign decoding
    * failed (malformed wire layout, unsupported message version, RPC outage,
@@ -1154,6 +1211,21 @@ export interface SigningRequestInfo {
   /** The same, for the recipient of a plain ERC-20 transfer: a reviewed
    *  contract (such as a Universal Router) that does not credit a transfer. */
   recognizedRecipient?: string
+  /** Approval card only, Safe requests: this wallet's own accounts and saved
+   *  contacts on the request's chain, from this computer's address book. The
+   *  risk bar names them and flags look-alikes; it is never a verification. */
+  knownAddresses?: { address: string; name: string; own: boolean }[]
+  /** Approval card only, Safe requests: this computer's preview of each call
+   *  the SafeTx makes (safeTxCalls order), the same preview a call from an
+   *  account gets. Advice: the KeepKey shows SafeTx.data as raw hex. */
+  safeCalls?: SafeCallPreview[]
+  /** Approval card only, a SafeMessage whose message is a 32-byte hash: the
+   *  original from Safe's Transaction Service, kept only when it hashes to
+   *  that value (bun/safe-message-preimage). Advice: the KeepKey shows the hash. */
+  safeMessageOriginal?:
+    | { status: 'text'; text: string }
+    | { status: 'typed'; decoded: EIP712DecodedInfo; recognizedSpender?: string }
+    | { status: 'not-found' | 'mismatch' | 'failed' }
   /** Approval card only, from this computer's own records: earlier
    *  transactions this account sent or signed to this contract on this
    *  chain (a lower bound; `since` in ms). */
@@ -1161,6 +1233,13 @@ export interface SigningRequestInfo {
   /** Approval card only: the name and symbol the contract reports for
    *  itself. Any contract can claim any name, so it is never trust. */
   contractName?: { name: string; symbol: string }
+  /** Approval card only: a THORChain/Maya router deposit's vault, checked on
+   *  this computer against the network's active vaults (bun/thor-vaults.ts).
+   *  The device can only label the vault UNVERIFIED. */
+  thorVault?: ThorVaultCheck
+  /** Approval card only: a THORChain/Maya swap memo pays out to one of this
+   *  wallet's own addresses (true) or not (false). Absent = cannot tell. */
+  memoDestinationOwn?: boolean
   /** Certified metadata resolved before user approval. The signing handler
    *  reuses this exact envelope so approval and device review cannot drift. */
   certifiedEvmSchema?: {
@@ -1178,6 +1257,13 @@ export interface SigningRequestInfo {
   erc7730Description?: Erc7730Description
   /** true when the UI must enable AdvancedMode before allowing approval */
   requiresAdvancedMode?: boolean
+  /** true when the connected firmware refuses this request whether
+   *  AdvancedMode is on or off. The card says so, never offers AdvancedMode
+   *  and keeps Approve disabled. */
+  firmwareCannotSign?: boolean
+  /** With firmwareCannotSign: true when the newest firmware Desktop mirrors
+   *  clear-signs it, so the card may say a firmware update fixes it. */
+  firmwareUpdateClearSigns?: boolean
   /** true when this request needs a separate, explicit one-shot opaque-signing
    * consent in the Vault UI. External callers cannot set the device flag. */
   requiresBlindSigningConsent?: boolean
@@ -1190,6 +1276,37 @@ export interface SigningRequestInfo {
   /** Vault-side prediction + authenticated-description boundary for this exact request. */
   clearSignReport?: import('./clearsign-report').ClearSignReport
 }
+
+/** current: every source lists this vault as an active Asgard vault that uses
+ *  this router on the chain. retiring: every source lists it as a retiring
+ *  vault for this router (it still accepts deposits during the migration).
+ *  not-current: they agree it is neither. unchecked: a source did not answer,
+ *  the sources disagree, or no vault list covers the chain. */
+export interface ThorVaultCheck {
+  status: 'current' | 'retiring' | 'not-current' | 'unchecked'
+  protocol: 'THORChain' | 'Mayachain'
+  /** The network's name for the chain (ETH, BASE, ARB, ...). */
+  chain?: string
+  /** The router the active vault uses, when the deposit calls another. */
+  currentRouter?: string
+  /** How many sources were asked. */
+  sources: number
+  reason?: string
+}
+
+/** What a TRON transaction the device shows as raw data does, read from the
+ *  exact raw_data bytes it signs (bun/tron-preview.ts tronCallPreview). */
+export type TronCallPreview =
+  | { kind: 'TRC-20 approve'; owner: string; token: string; tokenSymbol?: string; spender: string; spenderName?: string; amount: string; unlimited: boolean; revoke: boolean }
+  | { kind: 'Stake TRX'; owner: string; amount: string; resource: string }
+  | { kind: 'Unstake TRX'; owner: string; amount: string; resource: string }
+  | { kind: 'Withdraw unstaked TRX'; owner: string }
+  | { kind: 'Claim voting rewards'; owner: string }
+  | { kind: 'Vote'; owner: string; votes: { witness: string; count: string }[] }
+  | { kind: 'Delegate resources'; owner: string; amount: string; resource: string; receiver: string; locked: boolean }
+  | { kind: 'Reclaim delegated resources'; owner: string; amount: string; resource: string; receiver: string }
+  | { kind: 'SunSwap swap'; owner: string; contract: string; contractName: string; amountIn: string; amountOutMin: string; noMinimum: boolean; to: string; callValue?: string }
+  | { kind: 'Contract call'; owner: string; contract: string; contractName?: string; callValue?: string }
 
 export interface TronTxPreview {
   kind: 'TRX transfer' | 'TRC-20 transfer'
@@ -1256,6 +1373,11 @@ export interface SolanaTxDecodedInfo {
    *  string): the per-signature base fee plus the priority fee its own
    *  ComputeBudget instructions ask for. Read from the signed bytes. */
   maxNetworkFeeLamports?: string
+  /** Token accounts this transaction names, by address: the mint they hold
+   *  and the wallet that owns them. Read from an ATA create in the same
+   *  transaction (the ATA program refuses a wrong address) or from the chain
+   *  (token-program-owned accounts only). Advice: missing = not checked. */
+  tokenAccounts?: Record<string, { mint: string; owner: string }>
 }
 
 // ── Certified Solana description ─────────────────────────────────────────
@@ -1880,10 +2002,21 @@ export interface Erc7730Description {
   /** The interpolated intent ("Stake 0.01 ETH"), when the definition has one. */
   summary?: string
   /** Values as the device shows them, one device line per "\n"; `note` is
-   *  this computer's own reading of a token the device does not know. */
-  fields: Array<{ label: string; value: string; note?: string }>
+   *  this computer's own reading of a token the device does not know.
+   *  `depth`: 1 or 2 inside an embedded call (7.17), whose "Inner action"
+   *  field gives its intent. */
+  fields: Array<{ label: string; value: string; note?: string; depth?: number }>
   protocol?: { name: string; url: string; about?: string }
   explorerUrl?: string
+}
+
+/** One call a SafeTx makes, previewed the way a call from an account is
+ *  (bun/evm-signing-preview attachSafeCallPreviews). Approval card only. */
+export interface SafeCallPreview {
+  calldataDecoded?: CalldataDecodedInfo
+  recognizedSpender?: string
+  recognizedRecipient?: string
+  erc7730Description?: Erc7730Description
 }
 
 /** Signed ERC-7730 v2 definitions in the shape hdwallet's transport sends. */
@@ -1897,6 +2030,22 @@ export interface Erc7730Catalog {
     contractAddress?: string
     selectorOrTypeHash?: string
   }>
+}
+
+/** An individual quoted cost. Amounts are human-readable in this item's asset;
+ * base units and decimals remain available for inspection. A rate-only item
+ * has no amount rather than a fabricated zero or destination denomination. */
+export interface SwapQuoteFeeItem {
+  kind: 'affiliate' | 'network' | 'protocol' | 'provider'
+  label?: string
+  assetCaip?: string
+  symbol?: string
+  decimals?: number
+  amount?: string
+  amountBaseUnits?: string
+  bps?: number
+  recipient?: string
+  estimated?: boolean
 }
 
 /** Quote response from Pioneer (aggregated across DEXes) */
@@ -1913,10 +2062,16 @@ export interface SwapQuote {
     affiliate: string        // affiliate fee (human-readable)
     outbound: string         // outbound gas fee
     totalBps: number         // total fee in basis points
+    /** Only set when the provider actually reported a rate. */
+    reportedTotalBps?: number
+    /** Costs retain their own currency and units; never add unlike assets. */
+    items?: SwapQuoteFeeItem[]
   }
   estimatedTime: number      // seconds
   warning?: string           // streaming swap note, dust threshold, etc.
-  slippageBps: number        // actual slippage in bps
+  slippageBps: number        // warning value; falls back to user tolerance if unreported
+  /** Provider-reported slippage only; absent when the provider did not supply it. */
+  quotedSlippageBps?: number
   integration?: string       // DEX source: "thorchain", "shapeshift", "chainflip", "relay", etc.
   /** Underlying protocol when `integration` is an aggregator. ShapeShift's swapper
    *  routes through Relay / THORChain / 0x / Uniswap / Curve / etc.; this names
@@ -1924,6 +2079,8 @@ export interface SwapQuote {
    *  Undefined for non-aggregator integrations (use `integration` directly). */
   swapper?: string
   relayTx?: RelayTxParams    // pre-built tx for relay/bridge integrations (skips memo+router flow)
+  /** Inferred from the source transaction, not a provider's review claim. */
+  executionMode?: 'relay-solver-deposit'
   minAmountIn?: string       // minimum sell amount for this route (human-readable, in sell asset units)
   /** Actual send amount after UTXO fee deduction (NEAR Intents MAX only).
    *  When set, the tracker must record this instead of the original params.amount. */
@@ -1936,6 +2093,10 @@ export interface SwapQuote {
    *  1Click (= the sender's source-chain address). Verified pre-sign by swap.ts to
    *  ensure a failed swap refunds to the user's own wallet. */
   nearIntentsRefundTo?: string
+  /** 1Click asset identifiers and exact quote terms retained for settlement. */
+  nearIntentsTracking?: NearIntentsTrackingData
+  /** Optional aggregator quote identifier used by legacy tracking. */
+  providerQuoteId?: string
 }
 
 /** Parameters for getSwapQuote RPC.
@@ -2000,7 +2161,7 @@ export interface RuntimeProviderNamed {
   keyId: number
 }
 
-export type SwapProviderStatus = 'ok' | 'degraded' | 'offline' | 'unknown'
+export type SwapProviderStatus = 'ok' | 'degraded' | 'offline' | 'unknown' | 'gated' | 'disabled'
 
 export interface SwapIntegrationHealth {
   key: string               // 'thorchain' | 'mayachain' | 'shapeshift' | 'relay' | 'chainflip'
@@ -2008,11 +2169,16 @@ export interface SwapIntegrationHealth {
   status: SwapProviderStatus
   haltedPools?: string[]    // CAIP-19s of suspended/staged pools
   detail?: string           // one-line reason, e.g. "2 pools halted or suspended"
+  /** Demand-tested route availability, rather than protocol-wide uptime. */
+  checkScope?: 'quote'
+  checkedAt?: number
 }
 
 export interface SwapHealth {
   fetchedAt: number
   integrations: SwapIntegrationHealth[]
+  /** Status-feed failure does not establish an outage at every swap provider. */
+  error?: string
 }
 
 /** Result of executeSwap RPC */
@@ -2026,6 +2192,28 @@ export interface SwapResult {
   /** Sell amount as an integer base-units string (e.g. "61280000" for 61.28 USDC).
    *  Populated when the build step knows the token decimals (relay ERC-20 path). */
   fromAmountBaseUnits?: string
+  fromAddress?: string
+  toAddress?: string
+}
+
+/** Exact execution context retained for receipt matching and retry/resume. */
+export interface SwapTrackingContext {
+  fromAddress: string
+  toAddress: string
+  fromAmountBaseUnits?: string
+  relaySolverDeposit?: boolean
+  nearIntents?: NearIntentsTrackingData
+}
+
+export interface NearIntentsTrackingData {
+  depositAddress?: string
+  refundTo?: string
+  recipient?: string
+  originAsset?: string
+  destinationAsset?: string
+  sourceDecimals?: number
+  destinationDecimals?: number
+  minimumAmountOut?: string
 }
 
 // ── Swap tracking types ───────────────────────────────────────────────
@@ -2033,6 +2221,8 @@ export interface SwapResult {
 export type SwapTrackingStatus = 'signing' | 'pending' | 'confirming' | 'output_detected' | 'output_confirming' | 'output_confirmed' | 'completed' | 'failed' | 'refunded'
 
 export interface PendingSwap {
+  trackingContext?: SwapTrackingContext
+  providerQuoteId?: string
   deviceId?: string      // active hardware device id when the swap was submitted
   walletId?: string      // device+seed scope when the swap was submitted
   txid: string
@@ -2083,7 +2273,7 @@ export interface PendingSwap {
    *  Drives the "View on NEAR" tracker button (nearblocks.io). */
   nearTxHash?: string
   /** NEAR Intents 1Click deposit address (from quote.meta.depositAddress).
-   *  Used by registerWithPioneer as sellAsset.address and nearIntentsData.depositAddress. */
+   *  Used by registerWithPioneer as nearIntentsData.depositAddress. */
   nearIntentsDepositAddress?: string
   /** Sell amount as an integer base-units string. Populated for relay ERC-20 swaps. */
   fromAmountBaseUnits?: string
@@ -2155,6 +2345,8 @@ export interface SwapStatusUpdate {
 
 /** Persisted swap history record (SQLite) — tracks the full lifecycle */
 export interface SwapHistoryRecord {
+  trackingContext?: SwapTrackingContext
+  providerQuoteId?: string
   id: string                     // unique row id (UUID)
   deviceId?: string              // active hardware device id when the swap was submitted
   walletId?: string              // device+seed scope when the swap was submitted
@@ -2321,6 +2513,8 @@ export interface RecentActivity {
   confirmations?: number     // current confirmation count (0 = unconfirmed/mempool)
   blockHeight?: number       // block the tx was mined in (0 = unconfirmed)
   fee?: string               // tx fee (human-readable)
+  /** Fresh provider history explicitly identifies a plain native receipt. */
+  nativeReceiveVerified?: boolean
 }
 
 // RPC types — derived from the single source of truth in rpc-schema.ts

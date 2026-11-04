@@ -7,16 +7,19 @@
 import type { ClearSignProtectionLevel, SigningRequestInfo } from '../shared/types'
 import type { EffectFinding, EffectReport } from '../shared/transaction-effects'
 import { buildClearSignReport, type ClearSignDescriptorEvidence, type ClearSignReport, type ContractRating } from '../shared/clearsign-report'
-import { CERTIFIED_METADATA_KEY_ID } from './evm-certified-schema'
+import { CERTIFIED_METADATA_KEY_ID, describeCertifiedEvmCall } from './evm-certified-schema'
 import { certifiedBodyRefused, certifiedEnvelopeShown, metadataPayloadBytes } from '../shared/certified-evm-envelope'
-import { assessSigningRisk, type RiskLevel } from '../shared/clearsign-risk'
+import { assessSigningRisk, typedDataRecognition, type RiskLevel } from '../shared/clearsign-risk'
 import { applyEvmTxPreview, attachErc7730Definition } from './evm-signing-preview'
+import { firmwareClearSigns } from './calldata-decoder'
 import { measureLiveDeployment, resolveCertifiedEvmTransaction, resolveEvmSchema } from './evm-schema-registry'
 import { supportsCertifiedClearSign } from './solana-certified-policy'
 import { resolvePromotedEvmArtifact, type ClearSignArtifactResolution } from './clearsign-artifact-resolver'
 import { simulateEvmEffects } from './evm-effects'
 import { uniswapReportFindingsWithState } from './uniswap-report'
 import { findContractRating } from './clearsign-review'
+import { addThorDepositFacts } from './thor-vaults'
+import { utils as ethersUtils } from 'ethers'
 
 /**
  * The Desktop's pre-approval EVM preview: local decode + firmware gates
@@ -33,7 +36,11 @@ export async function prepareEvmTxSigningInfo(
     signingInfo, preview.to, preview.data, signingInfo.chainId as number | undefined,
     firmwareVersion, preview.txMetadata,
   )
-  if (signingInfo.needsBlindSigning && preview.data && preview.data.length >= 10 && preview.to
+  // A call the firmware decodes natively still gets the certified schema the
+  // sign handler would send (resolveEvmSchema), so the card names what the
+  // device shows instead of its native review.
+  const native = signingInfo.deviceClearSigns === true && !signingInfo.needsBlindSigning
+  if ((signingInfo.needsBlindSigning || native) && preview.data && preview.data.length >= 10 && preview.to
     && !preview.txMetadata?.signedPayload && supportsCertifiedClearSign(signingInfo.firmwareVersion)) {
     const chainIdNum = Number(signingInfo.chainId)
     try {
@@ -46,8 +53,8 @@ export async function prepareEvmTxSigningInfo(
           maxPriorityFeePerGas: preview.maxPriorityFeePerGas || preview.max_priority_fee_per_gas || '0x0',
         }),
       }
-      const found = await resolveEvmSchema(chainIdNum, preview.to, preview.data, true, signingInfo.firmwareVersion)
-        ?? await resolveCertifiedEvmTransaction(txForCertification)
+      const found = await resolveEvmSchema(chainIdNum, preview.to, preview.data, true, signingInfo.firmwareVersion, preview.value)
+        ?? (native ? undefined : await resolveCertifiedEvmTransaction(txForCertification))
       // The swap gate's rule (evmCallRequiresAdvancedMode): relax only for an
       // envelope this firmware shows for this exact call. A body it refuses
       // (0x04 on 7.16.0) is dropped, so the device shows its normal review.
@@ -60,10 +67,16 @@ export async function prepareEvmTxSigningInfo(
         signingInfo.certifiedEvmSchema = certified
         signingInfo.deviceClearSigns = true
         signingInfo.needsBlindSigning = false
+        // A call the local decoder could not read: the card reads it from the certified schema.
+        if (!signingInfo.calldataDecoded || signingInfo.calldataDecoded.source === 'none') {
+          const described = describeCertifiedEvmCall(certified.signedPayload,
+            { to: preview.to, data: preview.data, value: preview.value, chainId: chainIdNum })
+          if (described) signingInfo.calldataDecoded = described
+        }
         console.log(`[REST] Approval preview authenticated by certified schema ${certified.method} (source=${certified.source || 'service'})`)
       }
     } catch (error: any) {
-      console.warn(`[REST] Certified approval preview unavailable, staying blind: ${error?.message || error}`)
+      console.warn(`[REST] Certified approval preview unavailable, staying ${native ? 'native' : 'blind'}: ${error?.message || error}`)
     }
   }
   // Last: a ClearSign service ERC-7730 definition, only when nothing above
@@ -90,6 +103,8 @@ export function reviewedEvmDecodeLabel(info: SigningRequestInfo): string | undef
   if (field('Protocol') === 'Uniswap Universal Router' && field('Action')?.startsWith('Swap ')) return 'Uniswap Universal Router swap'
   if (d.dappName === 'Across' && d.functionType === 'bridge') return 'Across bridge deposit'
   if (d.dappName === 'Relay' && d.functionType === 'bridge') return 'Relay deposit'
+  // swap-decoders: a pinned 0x Settler / CoW EthFlow / Relay Router call, every step read.
+  if (d.functionType === 'swap' && field('Protocol')) return `${field('Protocol')} swap`
   // calldata-decoder names THORChain/Maya only for a pinned router on this chain.
   if ((d.dappName === 'THORChain' || d.dappName === 'Mayachain') && field('Action')) return `${d.dappName} deposit`
   return undefined
@@ -169,6 +184,56 @@ export function withoutErc7730Description(info: SigningRequestInfo): SigningRequ
   return next
 }
 
+/**
+ * The ClearSign report for an EIP-712 request, so typed data gets a level the
+ * way a transaction does. Nothing is simulated: a signature moves nothing by
+ * itself. P4 when the firmware shows what the document means (7.15+ shows the
+ * fields it hashes, but a Safe call's data or a SafeMessage hash only as raw
+ * hex) or shows it from an attached ClearSign definition (7.17+), P2 when a
+ * descriptor this computer reviewed read it in full, else P1.
+ * The fingerprint is the EIP-712 digest the device signs.
+ */
+export function buildTypedDataReport(info: SigningRequestInfo): ClearSignReport | undefined {
+  const d = info.typedDataDecoded
+  if (!d) return undefined
+  // The risk module's own reading, so the card and the verdict cannot disagree.
+  // 'unchecked': the device shows it all; only a payee was not checked here.
+  const shows = ['shows', 'unchecked'].includes(typedDataRecognition(info))
+  const known = d.isKnownType && d.protocolIdentityVerified !== false
+  const digest = d.hashes?.messageHash
+    ? ethersUtils.keccak256(ethersUtils.concat(['0x1901', d.hashes.domainHash, d.hashes.messageHash])) : undefined
+  const simulation: EffectReport = {
+    version: 1, chain: 'Ethereum', transactionFingerprint: digest ?? 'eip712:no-digest',
+    stateReference: { endpoint: 'none' }, status: 'unavailable',
+    assetChanges: [], authorityChanges: [], invokedCode: [], warnings: [], unknowns: [],
+    completeness: { accountCoverage: 'unknown', innerExecution: 'unknown', tokenCoverage: 'unknown' },
+  }
+  // A ClearSign service definition the gate fetched and checked for this
+  // document (7.17+): the device verifies it and shows the document from it.
+  if (info.erc7730) {
+    const described = info.erc7730Description
+    return buildClearSignReport({
+      requestedLevel: 'P4',
+      descriptor: {
+        source: 'erc7730', authenticated: true, format: 'ERC7730',
+        ...(described ? { label: described.intent, signer: described.signedBy } : known ? { label: d.operationName } : {}),
+      },
+      simulation,
+    })
+  }
+  return buildClearSignReport({
+    requestedLevel: shows ? 'P4' : known ? 'P2' : 'P1',
+    descriptor: {
+      source: shows ? 'native' : 'none',
+      authenticated: shows,
+      ...(shows ? { format: 'FIRMWARE_NATIVE' as const } : {}),
+      ...(known ? { label: d.operationName } : {}),
+      ...(known && !shows ? { resolution: 'reviewed-decoder' as const } : {}),
+    },
+    simulation,
+  })
+}
+
 /** Pre-sign level from host evidence only; P4 is never reachable here. */
 export function hostEvidenceLevel(
   simulation: EffectReport, universalRouterComplete: boolean, info: SigningRequestInfo,
@@ -209,8 +274,8 @@ export function buildEvmPresignReport(input: {
   // A plain transfer, or a call the firmware decodes itself (an ERC-20 transfer
   // of a token in its table), has no descriptor to wait for: the device shows
   // it whoever asks.
-  const firmwareNative = info.deviceClearSigns === true && !info.certifiedEvmSchema
-    && info.calldataDecoded?.insightKeyId !== CERTIFIED_METADATA_KEY_ID
+  // (Its own decode: a certified schema found for such a call does not change that.)
+  const firmwareNative = firmwareClearSigns(info.to, info.data, info.chainId as number | undefined, info.firmwareVersion, info.value)
   const verdict = input.signerVerdict || isPlainEvmTransfer(info) || firmwareNative ? evmSigningVerdict(info, {}, simulation, ur.complete) : undefined
   const report = buildClearSignReport({
     // A supplied descriptor becomes P4 only after the device verifies it
@@ -283,6 +348,9 @@ export async function buildEvmReportForTx(input: {
   endpoint: string
   signerVerdict?: boolean
   measure?: typeof measureLiveDeployment
+  /** In-app only: the device whose address book a THORChain/Maya memo's payout
+   *  is checked against. Left out for an external caller and a passphrase wallet. */
+  deviceId?: string
 }): Promise<{ report: ClearSignReport; signingInfo: SigningRequestInfo; simulation: EffectReport; artifactResolution: ReturnType<typeof resolvePromotedEvmArtifact> }> {
   const { tx, firmwareVersion, endpoint } = input
   const data = tx.data || '0x'
@@ -300,6 +368,8 @@ export async function buildEvmReportForTx(input: {
   // The request as a dapp would send it: no caller metadata, so the shared
   // preview resolves certified envelopes itself, as the signing path does.
   await prepareEvmTxSigningInfo(signingInfo, { ...tx, data }, firmwareVersion, input.capabilities)
+  // The vault a THORChain/Maya router deposit pays, checked as the signing overlay checks it.
+  await addThorDepositFacts(signingInfo, input.deviceId)
   const report = buildEvmPresignReport({
     signingInfo,
     deviceConnected: Boolean(firmwareVersion),
