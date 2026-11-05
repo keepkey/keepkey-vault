@@ -1,7 +1,8 @@
 import type { PairResponse } from './types'
 
 const DEFAULT_TIMEOUT_MS = 30_000
-const SIGNING_TIMEOUT_MS = 600_000
+// Vault review (15 min) + device confirmation (15 min) + response overhead.
+const SIGNING_TIMEOUT_MS = 31 * 60_000
 
 export class VaultClient {
   private baseUrl: string
@@ -51,6 +52,13 @@ export class VaultClient {
     return AbortSignal.timeout(ms ?? this.timeoutMs)
   }
 
+  /** Raw SDK callers need the same review/device budget as typed sign helpers. */
+  private postTimeout(path: string, override?: number): number {
+    if (override !== undefined) return override
+    const route = path.split(/[?#]/, 1)[0]
+    return /^\/[^/]+\/sign[^/]*(?:\/|$)/.test(route) ? this.signingTimeoutMs : this.timeoutMs
+  }
+
   /** GET request */
   async get<T = any>(path: string, timeoutMs?: number): Promise<T> {
     const resp = await fetch(`${this.baseUrl}${path}`, {
@@ -76,11 +84,12 @@ export class VaultClient {
 
   /** POST request */
   async post<T = any>(path: string, body?: any, timeoutMs?: number): Promise<T> {
+    const requestTimeout = this.postTimeout(path, timeoutMs)
     const resp = await fetch(`${this.baseUrl}${path}`, {
       method: 'POST',
       headers: this.headers(),
       body: body !== undefined ? JSON.stringify(body) : undefined,
-      signal: this.signal(timeoutMs),
+      signal: this.signal(requestTimeout),
     })
     if (resp.status === 401 && this.apiKey) {
       const rePaired = await this.tryRePair()
@@ -89,7 +98,7 @@ export class VaultClient {
           method: 'POST',
           headers: this.headers(),
           body: body !== undefined ? JSON.stringify(body) : undefined,
-          signal: this.signal(timeoutMs),
+          signal: this.signal(requestTimeout),
         })
         if (!retry.ok) throw new SdkError(retry.status, await retry.text())
         return retry.json() as Promise<T>
@@ -101,11 +110,12 @@ export class VaultClient {
 
   /** POST request returning raw bytes (for example hardware RNG output). */
   async postBytes(path: string, body?: any, timeoutMs?: number): Promise<Uint8Array> {
+    const requestTimeout = this.postTimeout(path, timeoutMs)
     const request = () => fetch(`${this.baseUrl}${path}`, {
       method: 'POST',
       headers: this.headers(),
       body: body !== undefined ? JSON.stringify(body) : undefined,
-      signal: this.signal(timeoutMs),
+      signal: this.signal(requestTimeout),
     })
 
     let resp = await request()

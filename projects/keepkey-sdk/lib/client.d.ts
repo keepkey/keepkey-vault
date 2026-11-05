@@ -17,6 +17,8 @@ export declare class VaultClient {
     private headers;
     /** Create an AbortSignal with timeout */
     private signal;
+    /** Raw SDK callers need the same review/device budget as typed sign helpers. */
+    private postTimeout;
     /** GET request */
     get<T = any>(path: string, timeoutMs?: number): Promise<T>;
     /** POST request */
