@@ -29,7 +29,6 @@ function detectInitialLang(): string {
 }
 
 const savedLang = detectInitialLang()
-const localeModules = import.meta.glob(['./locales/*/*.json', '!./locales/en/*.json'])
 
 function updateLanguageMetadata(lng: string) {
 	const language = supportedLanguage(lng) || 'en'
@@ -49,9 +48,14 @@ i18n
 		resourcesToBackend((language: string, namespace: string) => {
 			// English is bundled synchronously above – skip dynamic import
 			if (language === "en") return undefined
-			const load = localeModules[`./locales/${language}/${namespace}.json`]
-			if (!load) return {}
-			return load()
+			// ponytail: template import, not import.meta.glob — Bun (unit tests) has no glob.
+			return import(`./locales/${language}/${namespace}.json`).catch((err: unknown) => {
+				// Vite throws "Unknown variable dynamic import" for a file the locale lacks;
+				// fall back to English for that namespace, rethrow anything else.
+				const msg = err instanceof Error ? err.message : String(err)
+				if (msg.includes("Unknown variable dynamic import")) return { default: {} }
+				throw err
+			})
 		}),
 	)
 	.init({

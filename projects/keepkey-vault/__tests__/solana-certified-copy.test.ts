@@ -238,7 +238,7 @@ describe('the vouch in the approval overlay', () => {
   test('says what the signature covers, and shows who asked', () => {
     expect(vouch).toContain('KeepKey ClearSign recognises this program')
     expect(vouch).toContain("That signature covers the program's address, the name of this instruction")
-    expect(vouch).toContain('Asked for by {appName}')
+    expect(vouch).toContain('{uiText("Asked for by")}{" "}{appName}')
   })
 
   test('says in as many words that it is not a check of the site or the destination', () => {
