@@ -581,6 +581,7 @@ export interface ClearSignProtectionCaseStudy {
 }
 
 export interface FirmwareProgress {
+  stage?: import('./firmware-progress').FirmwareProgressStage
   percent: number
   message: string
   /** Present when the update failed. UI should show retry UX; the app itself stays alive. */
@@ -908,6 +909,8 @@ export interface BroadcastResult {
 export type AddressBookKind = 'own' | 'external'
 
 export interface AddressBookEntry {
+  /** A chain-bound registered vault, projected from its verified account/policy. */
+  vault?: import('./vault-identity').VaultIdentity
   id: string
   walletId: string
   deviceId: string
@@ -1510,6 +1513,7 @@ export interface ClearSignProviderInput {
 
 // Application-level settings (persisted in SQLite)
 export interface AppSettings {
+  appLanguage?: string          // shared with native menus and dialogs
   restApiEnabled: boolean        // controls entire REST API server on/off
   pioneerApiBase: string         // current Pioneer API base URL
   pioneerServers: PioneerServer[] // all configured Pioneer servers
@@ -1594,6 +1598,8 @@ export interface RegisteredDevice {
   /** Watch-only import (no device); verified once a KeepKey returned the same account xpub */
   imported?: boolean
   verified?: boolean
+  /** Display-only cosigner links, matched against cached public addresses/xpubs. */
+  vaultIds?: string[]
 }
 
 // ── BIP-85 types ────────────────────────────────────────────────────────

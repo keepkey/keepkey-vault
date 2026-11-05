@@ -1,0 +1,214 @@
+.vault-source-selector {
+  display: flex;
+  align-items: end;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 8px 0 12px;
+  font-size: 11px;
+  color: var(--text-2);
+}
+.vault-source-selector label {
+  flex: 1;
+  min-width: 180px;
+}
+.vault-source-selector select,
+.vault-asset-toolbar select,
+.vault-asset-provider input {
+  display: block;
+  background: var(--ink-1);
+  border: 1px solid var(--line-2);
+  border-radius: 8px;
+  padding: 10px;
+  color: var(--text-0);
+  font: inherit;
+  max-width: 100%;
+  width: 100%;
+  margin-top: 6px;
+}
+.vault-source-selector button,
+.vault-asset-page > header > button,
+.vault-asset-toolbar button,
+.vault-asset-error > button,
+.vault-asset-provider > button,
+.vault-asset-receive > button,
+.vault-asset-send > button {
+  background: var(--ink-2);
+  border: 1px solid var(--line-2);
+  border-radius: 8px;
+  padding: 10px 13px;
+  color: var(--gold);
+  font-size: 11px;
+  cursor: pointer;
+}
+.vault-asset-page button:disabled,
+.vault-source-selector button:disabled {
+  opacity: 0.5;
+  cursor: wait;
+}
+.vault-asset-page button[aria-pressed="true"] {
+  border-color: var(--gold);
+  background: rgba(233, 196, 106, 0.1);
+}
+.vault-asset-page {
+  width: min(880px, 100%);
+  padding: 25px;
+  margin: 0 auto;
+  color: var(--text-0);
+  font-family: var(--font-sans, monospace);
+}
+.vault-asset-page > header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 15px;
+}
+.vault-asset-hero {
+  padding: 25px 0;
+}
+.vault-asset-caption {
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  color: var(--text-3);
+}
+.vault-asset-hero h1 {
+  font-size: 25px;
+  margin: 10px 0;
+  letter-spacing: -0.5px;
+}
+.vault-asset-page code {
+  font-size: 11px;
+  overflow-wrap: anywhere;
+  line-height: 1.8;
+}
+.vault-asset-balance {
+  font-size: 30px;
+  margin-top: 22px;
+  overflow-wrap: anywhere;
+}
+.vault-asset-balance span {
+  font-size: 16px;
+  color: var(--text-2);
+}
+.vault-asset-page p {
+  font-size: 11px;
+  line-height: 1.8;
+  color: var(--text-2);
+  margin: 12px 0;
+}
+.vault-asset-toolbar {
+  display: flex;
+  align-items: end;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 14px 0 22px;
+  font-size: 11px;
+}
+.vault-asset-toolbar > div {
+  display: flex;
+  gap: 5px;
+}
+.vault-asset-toolbar label {
+  flex: 1;
+  min-width: 130px;
+}
+.vault-asset-notice {
+  color: var(--gold) !important;
+}
+.vault-asset-error {
+  border: 1px solid rgba(224, 140, 123, 0.3);
+  background: rgba(224, 140, 123, 0.06);
+  padding: 14px;
+  border-radius: 10px;
+  color: var(--rose);
+  font-size: 12px;
+  line-height: 1.8;
+}
+.vault-asset-error button {
+  display: block;
+  margin-top: 12px;
+}
+.vault-asset-provider,
+.vault-asset-receive,
+.vault-asset-send {
+  border: 1px solid var(--line-2);
+  background: var(--ink-1);
+  border-radius: 14px;
+  padding: 24px;
+  margin-top: 18px;
+  font-size: 11px;
+}
+.vault-asset-provider button {
+  margin-top: 12px;
+}
+.vault-asset-receive {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 12px;
+}
+.vault-asset-receive h2,
+.vault-asset-send h2 {
+  font-size: 19px;
+  font-weight: 500;
+}
+.vault-asset-qr {
+  background: white;
+  padding: 10px;
+  border-radius: 10px;
+  width: 210px;
+  max-width: 100%;
+}
+.vault-asset-qr svg {
+  width: 100%;
+  height: auto;
+}
+.vault-asset-identity {
+  border-top: 1px solid var(--line);
+  padding-top: 18px;
+  margin-top: 24px;
+}
+.vault-asset-identity summary {
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--text-2);
+  margin-bottom: 20px;
+}
+.vault-asset-page button:focus-visible,
+.vault-asset-page select:focus-visible,
+.vault-source-selector select:focus-visible {
+  outline: 2px solid var(--gold);
+  outline-offset: 3px;
+}
+.safe-view.safe-embedded {
+  padding: 0;
+  width: 100%;
+}
+.safe-embedded > .safe-header,
+.safe-embedded .safe-sidebar {
+  display: none;
+}
+.safe-embedded .safe-workspace {
+  grid-template-columns: minmax(0, 1fr);
+}
+.safe-embedded-owner {
+  margin: 14px 0;
+  font-size: 10px;
+  color: var(--text-2);
+}
+@media (max-width: 650px) {
+  .vault-asset-page {
+    padding: 20px 14px;
+  }
+  .vault-asset-provider,
+  .vault-asset-receive,
+  .vault-asset-send {
+    padding: 20px 14px;
+  }
+  .vault-source-selector {
+    align-items: stretch;
+  }
+  .vault-source-selector label {
+    flex-basis: 100%;
+  }
+}

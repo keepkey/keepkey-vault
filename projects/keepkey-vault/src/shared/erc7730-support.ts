@@ -43,6 +43,8 @@ export const ERC7730_EMBEDDED_MIN_FW = '7.17.0'
 /** Features.capabilities value (messages.proto). It sits in the 7.15 block of
  *  the firmware's list, so it does not identify 7.16 alone. */
 export const CAPABILITY_ERC7730_RUNTIME_REVIEW = 4
+/** Distinguishes Safe inner review from earlier 7.17 builds. */
+export const CAPABILITY_SAFE_TYPED_CALLS = 28
 
 /** 7.16 refuses these with a preloaded definition ("ERC-7730 approval not supported"). */
 export const ERC7730_REFUSED_SELECTORS: ReadonlySet<string> = new Set(['0x095ea7b3', '0x39509351'])

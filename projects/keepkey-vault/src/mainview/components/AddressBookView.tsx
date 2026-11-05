@@ -1,3 +1,5 @@
+import { getNumberLocale } from "../lib/number-locale"
+import { useUiTranslation } from "../i18n/ui"
 import { useState, useMemo, useCallback, useEffect } from "react"
 import type { ReactNode } from "react"
 import { Box, Flex, Text, Input, Button } from "@chakra-ui/react"
@@ -16,12 +18,14 @@ import { DOCS_LINKS } from "../../shared/docs-links"
 import { Z } from "../lib/z-index"
 import { evmChainLabel } from "../../shared/chains"
 import type { AddressBookEntry, AddressBookTx, AppSettings } from "../../shared/types"
+import { VaultIdentityBadge, VaultIdentityDetails } from './VaultIdentityBadge'
 
 const chainById = new Map(CHAINS.map(c => [c.id, c]))
 const chainByNetwork = new Map(CHAINS.map(c => [c.networkId, c]))
 
 const shortDevice = (id?: string) => (id && id.length > 12 ? `${id.slice(0, 6)}…${id.slice(-4)}` : (id || "Wallet"))
 const EXTERNAL_TAB = "__external__"
+const VAULT_TAB = '__vaults__'
 
 interface DisplayEntry extends AddressBookEntry {
   /** All underlying entry ids this row represents (own EVM collapses the same
@@ -37,6 +41,8 @@ interface DisplayEntry extends AddressBookEntry {
  *  switch tabs. Device-seeded identicons (R3), copy-to-clipboard, manual add, and
  *  a per-address outbound-history drilldown (R7). */
 export function AddressBookView() {
+  const uiText = useUiTranslation()
+
   const { t } = useTranslation("addressbook")
   const { entries: allEntries, loading, seeding, saveLabel, remove } = useAddressBook()
   const deviceState = useDeviceState()
@@ -148,24 +154,27 @@ export function AddressBookView() {
   }, [display])
 
   // Most recently sent-to first (Send page), then most recently saved.
-  const externalRows = useMemo(() => display.filter(e => e.kind === "external")
+  const vaultRows = useMemo(() => display.filter(e => !!e.vault), [display])
+  const externalRows = useMemo(() => display.filter(e => e.kind === "external" && !e.vault)
     .sort((a, b) => (b.lastUsedAt || 0) - (a.lastUsedAt || 0) || (b.savedAt || 0) - (a.savedAt || 0) || b.updatedAt - a.updatedAt), [display])
 
   const tabs = useMemo(() => {
     // Saved recipients first: always shown, and the tab the Address Book opens on.
     const list: Array<{ id: string; label: string; connected?: boolean; external?: boolean }> =
       [{ id: EXTERNAL_TAB, label: t("contacts", { defaultValue: "Saved recipients" }), external: true }]
+    list.push({ id: VAULT_TAB, label: `Vaults (${vaultRows.length})` })
     list.push(...deviceTabs.map(g => ({ id: g.deviceId, label: g.label, connected: g.deviceId === connectedDeviceId })))
     return list
-  }, [deviceTabs, connectedDeviceId, t])
+  }, [deviceTabs, connectedDeviceId, t, vaultRows.length])
 
   // Resolve the active tab: explicit selection if still valid, else Saved recipients.
   const effectiveTab = (activeTab && tabs.some(tb => tb.id === activeTab)) ? activeTab : EXTERNAL_TAB
 
   const tabRows = useMemo<DisplayEntry[]>(() => {
     if (effectiveTab === EXTERNAL_TAB) return externalRows
+    if (effectiveTab === VAULT_TAB) return vaultRows
     return deviceTabs.find(g => g.deviceId === effectiveTab)?.rows || []
-  }, [effectiveTab, deviceTabs, externalRows])
+  }, [effectiveTab, deviceTabs, externalRows, vaultRows])
 
   // Global network filter — built from EVERY entry (all tabs) and kept across tab switches.
   const allChainsPresent = useMemo(() => {
@@ -199,11 +208,11 @@ export function AddressBookView() {
         {/* Unreleased-firmware feature: absent, not teased, below 7.16. */}
         {clearSignSupported && <Button size="sm" variant="outline" borderColor={clearSignEnabled ? "var(--teal)" : "var(--line)"} color={clearSignEnabled ? "var(--teal)" : "var(--text-2)"}
                 borderRadius="10px" px="3" h="34px" onClick={toggleClearSign}>
-          {clearSignEnabled ? "ClearSign on" : "Enable ClearSign"}
+          {clearSignEnabled ? uiText("ClearSign on") : uiText("Enable ClearSign")}
         </Button>}
         {clearSignEnabled && clearSignSupported && <Button size="sm" variant="outline" borderColor="var(--teal)" color="var(--teal)" borderRadius="10px" px="3" h="34px"
                 onClick={reviewCertify} disabled={certifying || !clearSignSupported || certifyUnsupported}
-                title={certifyUnsupported ? "This firmware build cannot certify contacts" : undefined}>{certifying ? "Review on device…" : "Certify contacts"}</Button>}
+                title={certifyUnsupported ? "This firmware build cannot certify contacts" : undefined}>{certifying ? uiText("Review on device…") : uiText("Certify contacts")}</Button>}
         <Button size="sm" variant="outline" borderColor="var(--gold)" color="var(--gold)" borderRadius="10px" px="3" h="34px"
                 _hover={{ bg: "rgba(233,196,106,0.10)" }} onClick={() => setAddOpen(true)} flexShrink={0} title={t("addAddressHint", { defaultValue: "Add an address to your Address Book" })}>
           <Flex align="center" gap="1.5">
@@ -222,13 +231,12 @@ export function AddressBookView() {
               <Flex w="32px" h="32px" borderRadius="full" bg="rgba(72,187,170,0.15)" align="center" justify="center" flexShrink={0}>
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--teal)" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
               </Flex>
-              <Text fontSize="md" fontWeight="700" color="var(--text-0)">
-                Certify <Text as="span" color="var(--teal)">{certifyPreview.length}</Text> contact{certifyPreview.length === 1 ? "" : "s"}?
+              <Text fontSize="md" fontWeight="700" color="var(--text-0)">{uiText("Certify")}{" "}<Text as="span" color="var(--teal)">{certifyPreview.length}</Text>{" "}{uiText("contact")}{certifyPreview.length === 1 ? "" : "s"}?
               </Text>
             </Flex>
-            <Text fontSize="xs" color="var(--text-2)" mb="3" pl="42px">
-              Your KeepKey signs this list. Sends to these addresses on these networks then show the name on your KeepKey.
-            </Text>
+            <Text fontSize="xs" color="var(--text-2)" mb="3" pl="42px">{uiText("Your KeepKey signs this list. Sends to these addresses on these networks then show the name on your KeepKey.")}</Text>
+            <Text fontSize="10px" color="var(--text-2)" mb="3">{uiText("Vault certificates cover only the displayed destination label, address and network. Cosigners, thresholds and token support are separate account metadata. Bitcoin vault destinations are not supported by this EVM certificate flow.")}</Text>
+            {certifyPreview.length > 16 && <Text fontSize="11px" color="var(--gold)" mb="3">{uiText("Choose at most 16 destinations by removing entries from this review.")}</Text>}
             <Flex direction="column" gap="2">
               {certifyPreview.map((c) => {
                 const chain = CHAINS.find(ch => caipToNetworkId(ch.caip) === c.network)
@@ -247,7 +255,7 @@ export function AddressBookView() {
                       </Flex>
                       <Text fontSize="xs" color="var(--text-1)" fontFamily="mono" wordBreak="break-all">{c.address}</Text>
                     </Box>
-                    <Box as="button" aria-label={`Leave ${c.label} out`} title="Leave out of this certification" flexShrink={0}
+                    <Box as="button" aria-label={`Leave ${c.label} out`} title={uiText("Leave out of this certification")} flexShrink={0}
                          w="26px" h="26px" borderRadius="full" color="var(--text-2)" _hover={{ color: "var(--rose)", bg: "rgba(224,140,123,0.12)" }}
                          onClick={() => setCertifyPreview(prev => {
                            const next = (prev || []).filter(p => `${p.network}:${p.address}` !== key)
@@ -260,10 +268,8 @@ export function AddressBookView() {
               })}
             </Flex>
             <Flex justify="flex-end" gap="2" mt="4">
-              <Button size="sm" variant="outline" borderColor="var(--line)" color="var(--text-1)" onClick={() => setCertifyPreview(null)}>Cancel</Button>
-              <Button size="sm" bg="var(--teal)" color="black" fontWeight="700" _hover={{ opacity: 0.9 }} onClick={() => certify(certifyPreview)}>
-                Certify {certifyPreview.length} on KeepKey
-              </Button>
+              <Button size="sm" variant="outline" borderColor="var(--line)" color="var(--text-1)" onClick={() => setCertifyPreview(null)}>{uiText("Cancel")}</Button>
+              <Button size="sm" bg="var(--teal)" color="black" fontWeight="700" disabled={certifyPreview.length > 16} _hover={{ opacity: 0.9 }} onClick={() => certify(certifyPreview)}>{uiText("Certify")}{" "}{certifyPreview.length}{" "}{uiText("on KeepKey")}</Button>
             </Flex>
           </Box>
         </Box>
@@ -277,7 +283,7 @@ export function AddressBookView() {
           <Pill active={chainFilter === "all"} onClick={() => setChainFilter("all")}>{t("allNetworks", { defaultValue: "All networks" })}</Pill>
           {allChainsPresent.map(c => (
             <Pill key={c.id} active={chainFilter === c.id} onClick={() => setChainFilter(c.id)}>
-              <AssetIcon caip={c.caip} size={14} alt={c.symbol} /> {c.symbol}
+              <AssetIcon caip={c.caip} size={14} alt={c.symbol} /> {c.coin}
             </Pill>
           ))}
         </Flex>
@@ -369,9 +375,12 @@ function Row({ entry, connected, onSave, onRemove }: {
   onSave: (ids: string[], label: string) => Promise<void> | void
   onRemove: (ids: string[]) => Promise<void> | void
 }) {
+  const uiText = useUiTranslation()
+
   const { t } = useTranslation("addressbook")
   const chain = chainById.get(entry.chainId)
   const isOwn = entry.kind === "own"
+  const isVault = !!entry.vault
   // Own avatars are seeded by device (so a device's addresses share one identicon);
   // external contacts are seeded by their address.
   const seed = isOwn ? (entry.deviceId || entry.address) : entry.address
@@ -409,7 +418,8 @@ function Row({ entry, connected, onSave, onRemove }: {
             <Text fontSize="13px" fontWeight="600" color="var(--text-0)" truncate>
               {entry.label || t("unlabeled", { defaultValue: "Unlabeled" })}
             </Text>
-            {!isOwn && (
+            {isVault && <VaultIdentityBadge vault={entry.vault!} />}
+            {!isOwn && !isVault && (
               <Flex align="center" gap="0.5" px="1" py="0.5" borderRadius="sm" bg="rgba(224,140,123,0.12)" border="1px solid rgba(224,140,123,0.30)" flexShrink={0}>
                 <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="var(--rose)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" /><line x1="12" y1="9" x2="12" y2="13" /><line x1="12" y1="17" x2="12.01" y2="17" />
@@ -429,20 +439,22 @@ function Row({ entry, connected, onSave, onRemove }: {
           <Text fontSize="11px" fontFamily="mono" color="var(--text-2)" wordBreak="break-all" lineHeight="1.4">
             {entry.address}
           </Text>
+          {isVault && <Text fontSize="10px" fontFamily="mono" color="var(--text-2)" wordBreak="break-all">{uiText("Vault ·")}{" "}{entry.networkId} · {entry.vault!.threshold}{" "}{uiText("of")}{" "}{entry.vault!.cosigners.length}{" "}{uiText("cosigners")}{!entry.vault!.receiveEnabled ? ` · ${entry.vault!.fundingBlockedReason || 'Not deployed'} · do not fund` : ''}</Text>}
           {!isOwn && entry.savedAt && (
             <Text fontSize="10px" color="var(--text-3)">
-              {t("addedOn", { defaultValue: "Added {{date}}", date: new Date(entry.savedAt).toLocaleDateString() })}
+              {t("addedOn", { defaultValue: "Added {{date}}", date: new Date(entry.savedAt).toLocaleDateString(getNumberLocale()) })}
             </Text>
           )}
         </Flex>
         <CopyButton value={entry.address} label={t("copyAddress", { defaultValue: "Copy address" })} />
-        {chain && <AssetIcon caip={chain.caip} size={30} alt={chain.symbol} />}
+        {chain && !isVault && <AssetIcon caip={chain.caip} size={30} alt={chain.symbol} />}
       </Flex>
 
       {expanded && (
         <Box px="3" pb="3" pt="1" borderTop="1px solid var(--line)">
+          {entry.vault && <Box my="3"><VaultIdentityDetails vault={entry.vault} /><Text fontSize="10px" color="var(--gold)" mt="3">{uiText("Send to the vault address above. Cosigner addresses identify its owners.")}</Text></Box>}
           <Flex gap="2" mb="2" mt="2">
-            {editing ? (
+            {isVault ? <Text fontSize="10px" color="var(--text-2)">{uiText("Managed from its vault account or Bitcoin policy.")}</Text> : editing ? (
               <>
                 <Input value={draft} onChange={(e) => setDraft(e.target.value)} size="xs" flex="1"
                        bg="var(--ink-0)" border="1px solid var(--line)" color="var(--text-0)" maxLength={100}
@@ -480,7 +492,7 @@ function Row({ entry, connected, onSave, onRemove }: {
                 const url = txChain ? getExplorerTxUrl(txChain.id, tx.txid) : null
                 return (
                   <Flex key={tx.id} align="center" justify="space-between" gap="2" fontSize="11px">
-                    <Text color="var(--text-2)" fontFamily="mono">{new Date(tx.broadcastAt).toLocaleDateString()}</Text>
+                    <Text color="var(--text-2)" fontFamily="mono">{new Date(tx.broadcastAt).toLocaleDateString(getNumberLocale())}</Text>
                     <Text color="var(--text-1)" fontFamily="mono" truncate flex="1" textAlign="right">
                       {tx.amount ? `${tx.amount} ${tx.symbol || ""}` : (tx.symbol || "")}
                     </Text>

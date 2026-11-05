@@ -2298,6 +2298,9 @@ export function deleteDeviceSnapshot(deviceId: string) {
     db.run('DELETE FROM swap_history WHERE device_id = ?', [deviceId])
     db.run('DELETE FROM addressbook WHERE device_id = ?', [deviceId])
     db.run('DELETE FROM addressbook_tx WHERE device_id = ?', [deviceId])
+    if (db.query("SELECT name FROM sqlite_master WHERE type='table' AND name='vault_addressbook'").get()) db.run('DELETE FROM vault_addressbook WHERE device_id = ?', [deviceId])
+    const safeSettingsPrefix = `safe_multisig_v1:${deviceId}:`
+    db.run('DELETE FROM settings WHERE substr(key,1,?) = ?', [safeSettingsPrefix.length, safeSettingsPrefix])
     db.run('DELETE FROM signed_tx_review WHERE device_id = ?', [deviceId])
     // Ledger rows are keyed by device id or by a wallet id that starts with it ("<id>:...").
     const owned = `(device_id = ?1 OR substr(device_id, 1, length(?1) + 1) = ?1 || ':')`

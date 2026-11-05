@@ -1353,10 +1353,14 @@ function evmTypedData(req: SigningRequestInfo, add: (l: RiskLevel, t: string) =>
     return !!req.firmwareVersion && versionCompare(req.firmwareVersion, '7.15.0') >= 0 ? 'shows' : 'unknown'
   }
   const { knownCalm, unverified, opaque, safeRecognition, hostRead } = describeTypedDoc(req, d, add)
+  const safeClearSign = d.primaryType === 'SafeTx' && !!req.erc7730 &&
+    !!req.erc7730Description && !!req.firmwareVersion &&
+    versionCompare(req.firmwareVersion, '7.17.0') >= 0
   const structured = !!req.firmwareVersion && versionCompare(req.firmwareVersion, '7.15.0') >= 0
   if (structured) {
     add('low', 'Your KeepKey will request and display the structured fields that it hashes for this signature.')
-    if (safeRecognition === 'known') add('low', "Your KeepKey may show this Safe transaction's call data only as raw hex. The description of it here is from this computer, not from your KeepKey.")
+    if (safeClearSign) add('low', 'Your KeepKey will verify signed ClearSign definitions and show the Safe transaction’s inner calls. Check their amounts and recipients on the device.')
+    else if (safeRecognition === 'known') add('low', "Your KeepKey may show this Safe transaction's call data only as raw hex. The description of it here is from this computer, not from your KeepKey.")
     if (hostRead) add('low', 'Your KeepKey shows this message only as its hash. The description of it here is from this computer, not from your KeepKey.')
   } else if (knownCalm) {
     // Before 7.15 the device shows a typed signature only as two hash codes.
@@ -1364,7 +1368,7 @@ function evmTypedData(req: SigningRequestInfo, add: (l: RiskLevel, t: string) =>
   } else {
     add('high', 'Your KeepKey can only show a code (hash) for this signature, not what it says. You would be signing blind.')
   }
-  return opaque ? 'unknown' : structured ? (safeRecognition === 'known' || hostRead ? 'known' : unverified ? 'unchecked' : 'shows') : knownCalm ? 'known' : 'unknown'
+  return opaque ? 'unknown' : structured ? ((safeRecognition === 'known' && !safeClearSign) || hostRead ? 'known' : unverified ? 'unchecked' : 'shows') : knownCalm ? 'known' : 'unknown'
 }
 
 /** What the typed-data verdict rests on, for the ClearSign report: 'shows'

@@ -1,3 +1,4 @@
+import { useUiTranslation } from "../i18n/ui"
 import { useState, useEffect, useMemo } from "react"
 import type { ReactNode } from "react"
 import { Box, Flex, Text, Input } from "@chakra-ui/react"
@@ -6,12 +7,14 @@ import { rpcRequest } from "../lib/rpc"
 import { Z } from "../lib/z-index"
 import { AddressIdenticon } from "./AddressIdenticon"
 import type { AddressBookEntry } from "../../shared/types"
+import { VaultIdentityBadge } from './VaultIdentityBadge'
 
 interface Props {
   /** CAIP-2 of the current send; only entries on this network are shown (R5). */
   networkId: string
   /** Used to drop own-wallet UTXO rows, which store an xpub (not a send target). */
   chainFamily: string
+  assetCaip?: string
   /** Optional extra filter applied after the network/family filter. Used by the
    *  Zcash tab to gate which address type (private vs transparent) is selectable
    *  in a given context. */
@@ -25,7 +28,9 @@ interface Props {
 /** Send-screen recipient picker (R5). Lists address-book entries matching the
  *  current send's network and fills the recipient on select. Overlay styled like
  *  the app's other dialogs — closes on backdrop click. */
-export function AddressBookPicker({ networkId, chainFamily, entryFilter, renderTag, onSelect, onClose }: Props) {
+export function AddressBookPicker({ networkId, chainFamily, assetCaip, entryFilter, renderTag, onSelect, onClose }: Props) {
+  const uiText = useUiTranslation()
+
   const { t } = useTranslation("addressbook")
   const [entries, setEntries] = useState<AddressBookEntry[]>([])
   const [search, setSearch] = useState("")
@@ -43,6 +48,8 @@ export function AddressBookPicker({ networkId, chainFamily, entryFilter, renderT
   const matches = useMemo(() => {
     const q = search.trim().toLowerCase()
     return entries
+      .filter(e => e.networkId === networkId)
+      .filter(e => !e.vault || e.vault.receiveEnabled && !!assetCaip && e.vault.supportedAssets.some(a => a.caip.toLowerCase() === assetCaip.toLowerCase()))
       // UTXO own rows store an xpub (not a sendable address) — hide those. ZEC
       // own rows arrive with a derived t-addr (backend listAddressBook), so
       // anything that isn't an extended key is a real send target.
@@ -51,7 +58,7 @@ export function AddressBookPicker({ networkId, chainFamily, entryFilter, renderT
       .filter(e => !q || e.label?.toLowerCase().includes(q) || e.address.toLowerCase().includes(q))
       // External contacts first: they are who you pay; own wallets follow.
       .sort((a, b) => Number(b.kind === "external") - Number(a.kind === "external"))
-  }, [entries, chainFamily, entryFilter, search])
+  }, [entries, networkId, assetCaip, chainFamily, entryFilter, search])
 
   return (
     <Box position="fixed" inset="0" zIndex={Z.dialog} display="flex" alignItems="center" justifyContent="center"
@@ -83,7 +90,7 @@ export function AddressBookPicker({ networkId, chainFamily, entryFilter, renderT
               <Flex direction="column" minW="0" flex="1">
                 <Flex align="center" gap="1.5">
                   <Text fontSize="13px" color="var(--text-0)" truncate>{e.label || t("unlabeled", { defaultValue: "Unlabeled" })}</Text>
-                  {e.kind === "own" ? (
+                  {e.vault ? <VaultIdentityBadge vault={e.vault} /> : e.kind === "own" ? (
                     <Text fontSize="9px" color="var(--teal)" bg="rgba(139,227,196,0.10)" px="1" borderRadius="sm" flexShrink={0}>
                       {e.deviceLabel || t("ownWallet", { defaultValue: "My wallet" })}
                     </Text>
@@ -102,6 +109,7 @@ export function AddressBookPicker({ networkId, chainFamily, entryFilter, renderT
                 <Text fontSize="11px" fontFamily="mono" color="var(--text-2)" truncate>
                   {e.address.slice(0, 10)}…{e.address.slice(-6)}
                 </Text>
+                {e.vault && <Text fontSize="9px" color="var(--text-2)" wordBreak="break-all">{e.networkId} · {e.vault.threshold}{" "}{uiText("of")}{" "}{e.vault.cosigners.length}</Text>}
               </Flex>
             </Flex>
           ))}

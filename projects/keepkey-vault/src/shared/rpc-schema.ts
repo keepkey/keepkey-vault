@@ -1,5 +1,9 @@
 import type { MultisigPolicyPreview,MultisigCosignerExport,BtcPsbtSigned } from "./multisig-policy"
 import type { ElectrobunRPCSchema } from 'electrobun/bun'
+import type { SafeAccount, SafeContext, SafeCreateParams, SafeProposal, SafeTransfer, SafeTxReview, VaultAddParams, VaultAddReview } from './safe-multisig'
+import type { VaultIdentity } from './vault-identity'
+import type { VaultPortfolio } from './vault-portfolio'
+import type { VaultAssetRequest, VaultAssetAccount } from './vault-asset-account'
 import type { ZcashShieldedBalance } from './zcash-privacy'
 import type { ClearSignReport } from './clearsign-report'
 import type { TxDetailLine } from './tx-clearsign'
@@ -115,7 +119,7 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       // ── Transaction signing ───────────────────────────────────────
       btcSignTx: { params: any; response: any }
       /** PSBT to sign: base64 of the dropped file or pasted text. No network; works offline. */
-      btcPsbtAnalyze: { params: { data: string; name?: string }; response: BtcPsbtReview }
+      btcPsbtAnalyze: { params: { data: string; name?: string; expectedVaultPolicyId?: string }; response: BtcPsbtReview }
       /** Signs only the PSBT bun holds for this review id, in the wallet session it was checked in. */
       btcPsbtSign: { params: { id: string }; response: BtcPsbtSigned }
       btcPsbtShowFile: { params: void; response: void }
@@ -209,6 +213,27 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       getUtxoAccounts: { params: { chainId: string }; response: { accounts: number[] } }
 
       // ── EVM multi-address ──────────────────────────────────────────────
+      safeList: { params: void; response: SafeContext }
+      listVaults: { params: void; response: VaultIdentity[] }
+      listSavedVaults: { params: void; response: VaultIdentity[] }
+      getVaultPortfolios: { params: { refresh?: boolean } | void; response: VaultPortfolio[] }
+      setVaultTotalInclusion: { params: { vaultId: string; include: boolean }; response: { success: true } }
+      vaultAccountGet: { params: VaultAssetRequest; response: VaultAssetAccount }
+      safeOpenVaultAccount: { params: VaultAssetRequest; response: VaultAssetAccount }
+      vaultAddPreview: { params: VaultAddParams; response: VaultAddReview }
+      vaultAddConfirm: { params: { reviewId: string }; response: VaultIdentity }
+      checkVaultDestination: { params: { networkId: string; address: string; assetCaip: string }; response: { allowed: boolean } }
+      safePrepareCreate: { params: SafeCreateParams; response: SafeTxReview }
+      safeSaveSetup: { params: { reviewId: string }; response: SafeAccount }
+      safeInspect: { params: { address: string; name: string }; response: SafeAccount }
+      safeImport: { params: { address: string; name: string; expectedOwners: string[]; expectedThreshold: number }; response: SafeAccount }
+      safeRefresh: { params: { address: string }; response: SafeAccount }
+      safePropose: { params: { safe: string } & SafeTransfer; response: SafeProposal }
+      safeImportProposal: { params: { json: string; expectedSafe?: string; expectedAsset?: 'ETH' | 'USDC' }; response: SafeProposal }
+      safeSigningData: { params: { hash: string }; response: { addressNList: number[]; typedData: any } }
+      safeAddSignature: { params: { hash: string; signature: string }; response: SafeProposal }
+      safePrepareExecute: { params: { hash: string }; response: SafeTxReview }
+      safeBroadcast: { params: { reviewId: string; signedTx: string }; response: { txid: string; safe: SafeAccount } }
       getEvmAddresses: { params: void; response: EvmAddressSet }
       addEvmAddressIndex: { params: { index?: number }; response: EvmAddressSet }
       removeEvmAddressIndex: { params: { index: number }; response: EvmAddressSet }
@@ -299,6 +324,7 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       setPioneerApiBase: { params: { url: string }; response: AppSettings }
       setFiatCurrency: { params: { currency: string }; response: AppSettings }
       setNumberLocale: { params: { locale: string }; response: AppSettings }
+      setAppLanguage: { params: { language: string }; response: AppSettings }
       setBtcMultisigEnabled: { params: { enabled: boolean }; response: AppSettings }
       setWalletConnectEnabled: { params: { enabled: boolean }; response: AppSettings }
       setOfflineMode: { params: { enabled: boolean }; response: AppSettings }
@@ -635,6 +661,7 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       // Address Book mutated (own-sync inserted rows, or a send created/updated a
       // recipient) — frontend re-fetches the list.
       'addressbook-changed': Record<string, never>
+      'vaults-changed': Record<string, never>
       'sweep-progress': { scanId: string; current: number; total: number; phase: string; foundCount: number; foundSats: number }
       'shield-progress': { step: string; detail?: string; batch?: ZcashTxBatch }
       'deshield-progress': { step: string; detail?: string; batch?: ZcashTxBatch }

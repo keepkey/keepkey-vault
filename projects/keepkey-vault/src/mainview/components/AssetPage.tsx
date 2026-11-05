@@ -1,3 +1,5 @@
+import { getNumberLocale } from "../lib/number-locale"
+import { useUiTranslation } from "../i18n/ui"
 import { MULTISIG_POLICY_EVENT } from "../../shared/multisig-policy"
 import { BITCOIN_QR_SCAN_EVENT } from "./BitcoinQrImport"
 import React, { lazy, Suspense, useState, useEffect, useCallback, useMemo, useRef } from "react"
@@ -43,6 +45,10 @@ import { CreatePsbtPanel } from "./CreatePsbtPanel"
 import { detectSpamToken, categorizeTokens, type SpamResult } from "../../shared/spamFilter"
 import { createLatestReceiveRequest, selectedReceiveScriptType } from "../../shared/receive-request"
 import { reconcileSelectedToken, type SelectedTokenState } from "../../shared/selected-token-balance"
+import { BASE_NETWORK, BITCOIN_NETWORK, type VaultIdentity } from '../../shared/vault-identity'
+import { VaultAccountSelector } from './VaultAccountSelector'
+import { VaultAssetAccount } from './VaultAssetAccount'
+import { VaultAssetPage } from './VaultAssetPage'
 
 type AssetView = "receive" | "send" | "privacy" | "psbt"
 
@@ -74,6 +80,7 @@ class SwapErrorBoundary extends React.Component<{ children: React.ReactNode }, {
 }
 
 interface AssetPageProps {
+	vault?: VaultIdentity
 	chain: ChainDef
 	balance?: ChainBalance
 	onBack: () => void
@@ -98,7 +105,14 @@ interface AssetPageProps {
 	hideBack?: boolean
 }
 
-export function AssetPage({ chain, balance, onBack, firmwareVersion, initialAction, initialToken, onViewActivity, watchOnly, watchOnlyDeviceId, isHiddenWallet, hideBack }: AssetPageProps) {
+export function AssetPage(props: AssetPageProps) {
+	if (props.vault) return <VaultAssetPage {...props} vault={props.vault} />
+	return <PersonalAssetPage {...props} />
+}
+
+function PersonalAssetPage({ chain, balance, onBack, firmwareVersion, initialAction, initialToken, onViewActivity, watchOnly, watchOnlyDeviceId, isHiddenWallet, hideBack }: AssetPageProps) {
+  const uiText = useUiTranslation()
+
 	const { t } = useTranslation("asset")
 	const { fmtCompact, symbol: fiatSymbol } = useFiat()
 	// Watch-only mode never lands on a signing view, regardless of the
@@ -127,6 +141,11 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 	const [loading, setLoading] = useState(false)
 	const [deriveError, setDeriveError] = useState<string | null>(null)
 	const [currentPath, setCurrentPath] = useState<number[]>(chain.defaultPath)
+	const [vaultChoices, setVaultChoices] = useState<VaultIdentity[]>([])
+	const [vaultChoiceError, setVaultChoiceError] = useState('')
+	const [vaultSelection, setVaultSelection] = useState<{ vault: VaultIdentity; assetCaip: string }>()
+	const [vaultBusy, setVaultBusy] = useState(false)
+	const hasVaultAccounts = chain.networkId === BASE_NETWORK || chain.networkId === BITCOIN_NETWORK
 
 	// BTC multi-account support
 	const isBtc = chain.id === 'bitcoin'
@@ -239,6 +258,7 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 	}, selectedTokenBalanceSource)
 	const selectedToken = tokenReconciliation.selection?.token ?? null
 	const selectedTokenUnverified = tokenReconciliation.unverified
+	const vaultAssetCaip = vaultSelection?.assetCaip || selectedToken?.caip || chain.caip
 	const setSelectedToken = (token: TokenBalance | null) => setSelectedTokenState(token ? {
 		token, chainId: chain.id, ownerAddress: selectedTokenOwner || undefined,
 	} : null)
@@ -247,6 +267,14 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 		// synchronously reconciled value above also prevents a stale render.
 		setSelectedTokenState(tokenReconciliation.selection)
 	}, [selectedTokenState, chain.id, chain.caip, selectedTokenOwner, selectedTokenBalanceSource])
+	useEffect(() => {
+		if (!hasVaultAccounts) return
+		let live = true
+		const load = () => { void rpcRequest<VaultIdentity[]>('listSavedVaults', undefined, 10000).then(v => { if (live) { setVaultChoices(v); setVaultChoiceError('') } }).catch(e => { if (live) setVaultChoiceError(e.message) }) }
+		load()
+		const off = onRpcMessage('vaults-changed', load)
+		return () => { live = false; off() }
+	}, [chain.networkId, hasVaultAccounts])
 
 	// Multi-address total: show when >1 EVM address has funds on this chain
 	const evmAddressesWithChainBalance = isEvm
@@ -893,6 +921,69 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 		)
 	}
 
+	const chooseVaultAccount = (vault?: VaultIdentity) => {
+		if (vault) {
+			if (vault.networkId !== chain.networkId || !vault.receiveEnabled ||
+				!vaultAssetCaip.startsWith(`${chain.networkId}/`) ||
+				!vault.supportedAssets.some(asset => asset.caip.toLowerCase() === vaultAssetCaip.toLowerCase())) return
+			setVaultSelection({ vault, assetCaip: vaultAssetCaip })
+			if (view !== 'send' && view !== 'receive') setView('receive')
+		} else {
+			if (vaultSelection) {
+				if (vaultSelection.assetCaip === chain.caip) setSelectedToken(null)
+				else {
+					const metadata = vaultSelection.vault.supportedAssets.find(a=>a.caip.toLowerCase()===vaultSelection.assetCaip.toLowerCase())
+					const ownToken = activeBalance?.tokens?.find(a=>a.caip.toLowerCase()===vaultSelection.assetCaip.toLowerCase())
+					if (metadata) setSelectedToken(ownToken || { symbol: metadata.symbol, name: metadata.symbol, caip: metadata.caip, contractAddress: metadata.contract, decimals: metadata.decimals, balance: '0', balanceUsd: 0, priceUsd: 0, type: 'token' })
+				}
+			}
+			setVaultSelection(undefined)
+		}
+	}
+	const bitcoinAccountControls = !watchOnly && isBtc && (
+							btcAccounts.accounts.length > 0 ? (
+								<BtcXpubSelector
+									btcAccounts={btcAccounts}
+									onSelectXpub={selectXpub}
+									onAddAccount={addAccount}
+									addingAccount={btcLoading}
+								/>
+							) : btcLoading ? (
+								<Flex align="center" gap="2" minH="38px" color="var(--text-2)">
+									<Spinner size="xs" color="var(--gold)" />
+									<Text fontSize="12px">{uiText("Loading Bitcoin account types…")}</Text>
+								</Flex>
+							) : (
+								<Flex
+									align={{ base: "stretch", sm: "center" }}
+									direction={{ base: "column", sm: "row" }}
+									gap="2"
+									p="2.5"
+									border="1px solid rgba(245,101,101,0.35)"
+									borderRadius="10px"
+									bg="rgba(245,101,101,0.06)"
+								>
+									<Box flex="1" minW="0">
+										<Text fontSize="12px" fontWeight="600" color="red.300">{uiText("Bitcoin account types unavailable")}</Text>
+										<Text fontSize="10px" color="var(--text-2)" title={btcAccountsError || undefined} truncate>
+											{btcAccountsError || uiText("Vault did not receive the required Bitcoin xpubs.")}
+										</Text>
+									</Box>
+									<Button size="xs" variant="outline" color="red.200" borderColor="rgba(245,101,101,0.45)" onClick={() => void refreshBtcAccounts()}>{uiText("Retry")}</Button>
+								</Flex>
+							)
+						)
+	const vaultAccountSelector = hasVaultAccounts ? <VaultAccountSelector
+		vaults={vaultChoices} networkId={chain.networkId} assetCaip={vaultAssetCaip}
+		selected={vaultSelection?.vault} onSelect={chooseVaultAccount} disabled={vaultBusy}
+		personalAccounts={!watchOnly && isEvm ? evmAddresses.addresses : undefined}
+		selectedIndex={evmAddresses.selectedIndex} onSelectIndex={evmSelectIndex}
+		onAddIndex={!watchOnly && isEvm ? () => void evmAddIndex() : undefined} adding={evmLoading}
+		walletLabel={watchOnly ? uiText("Saved wallet") : isBtc ? `${uiText("Account #")}${btcAccounts.selectedXpub?.accountIndex ?? 0} · ${btcScriptTypeConfig(selectedBtcScriptType || 'p2wpkh')?.label || ''}` : undefined}
+		walletAddress={isEvm && !watchOnly ? selectedEvmAddress?.address : address || undefined}
+		walletControls={bitcoinAccountControls}
+	/> : null
+	if (vaultSelection) return <VaultAssetAccount key={`${vaultSelection.vault.id}:${vaultSelection.assetCaip}`} vault={vaultSelection.vault} assetCaip={vaultSelection.assetCaip} networkId={chain.networkId} action={view==='send'?'send':'receive'} watchOnly={watchOnly} selector={vaultAccountSelector} onAction={setView} onAsset={assetCaip=>setVaultSelection(old=>old?{...old,assetCaip}:old)} onBack={hideBack?()=>chooseVaultAccount():onBack} onBusy={setVaultBusy}/>
 	return (
 		<Flex flex="1" direction="column" align="center" px={{ base: "3", md: "6" }} py={{ base: "5", md: "8" }} className="v3-page-enter">
 			<Box w="100%" maxW={{ base: "100%", sm: "640px", md: "880px" }}>
@@ -924,7 +1015,7 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 							transition="all 0.18s"
 							flexShrink={0}
 							className="electrobun-webkit-app-region-no-drag v3-glass-pill"
-							aria-label="Back"
+							aria-label={uiText("Back")}
 						>
 							<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
 								<path d="M19 12H5M12 19l-7-7 7-7"/>
@@ -951,7 +1042,7 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 									<Flex align="center" gap="2" mt="0.5" flexWrap="wrap">
 										<Flex align="center" gap="1">
 											<Image src={getAssetIcon(chain.caip)} w="11px" h="11px" borderRadius="full" />
-											<Text fontSize="10px" color="var(--text-3)">on {chain.coin}</Text>
+											<Text fontSize="10px" color="var(--text-3)">{uiText("on")}{" "}{chain.coin}</Text>
 										</Flex>
 										{selectedToken.contractAddress && (
 											<Flex
@@ -980,7 +1071,7 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 												color="var(--text-3)"
 												_hover={{ color: "var(--teal)" }}
 												cursor="pointer"
-												title="View contract on explorer"
+												title={uiText("View contract on explorer")}
 												onClick={() => rpcRequest("openUrl", { url: chain.explorerAddressUrl!.replace('{{address}}', selectedToken.contractAddress!) }).catch(() => {})}
 											>
 												<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -1026,10 +1117,10 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 										) : watchOnly && activeBalance?.syncState === "stale" ? (
 											// Watch-only cache: never "Synced". Say it is cached and how old it is.
 											<Flex align="center" gap="1" color="var(--gold)" className="v3-glass-chip" px="2" py="0.5"
-												title={activeBalance.updatedAt ? `Cached ${new Date(activeBalance.updatedAt).toLocaleString()}` : undefined}>
+												title={activeBalance.updatedAt ? `Cached ${new Date(activeBalance.updatedAt).toLocaleString(getNumberLocale())}` : undefined}>
 												<Box w="6px" h="6px" borderRadius="full" bg="var(--gold)" />
 												<Text fontSize="10px" fontFamily="mono" fontWeight="500" letterSpacing="0.02em">
-													{t("cached", { defaultValue: "Cached" })}{activeBalance.updatedAt ? ` · ${new Date(activeBalance.updatedAt).toLocaleString([], { dateStyle: "medium", timeStyle: "short" })}` : ""}
+													{t("cached", { defaultValue: "Cached" })}{activeBalance.updatedAt ? ` · ${new Date(activeBalance.updatedAt).toLocaleString(getNumberLocale(), { dateStyle: "medium", timeStyle: "short" })}` : ""}
 												</Text>
 											</Flex>
 										) : chain.id === 'zcash' ? (
@@ -1038,10 +1129,10 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 											</Text>
 										) : activeBalance ? (
 											<Flex align="center" gap="1" color="var(--teal)" className="v3-glass-chip" px="2" py="0.5"
-												title={lastSyncedAt ? `Last updated ${lastSyncedAt.toLocaleString()}` : undefined}>
+												title={lastSyncedAt ? `Last updated ${lastSyncedAt.toLocaleString(getNumberLocale())}` : undefined}>
 												<Box as={FaCheck} fontSize="9px" />
 												<Text fontSize="10px" fontFamily="mono" fontWeight="500" letterSpacing="0.02em">
-													{t("synced")}{lastSyncedAt ? ` · ${lastSyncedAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : ''}
+													{t("synced")}{lastSyncedAt ? ` · ${lastSyncedAt.toLocaleTimeString(getNumberLocale(), { hour: '2-digit', minute: '2-digit' })}` : ''}
 												</Text>
 											</Flex>
 										) : (
@@ -1061,7 +1152,7 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 												color="var(--text-3)"
 												_hover={{ color: "var(--teal)" }}
 												cursor="pointer"
-												title="View address on explorer"
+												title={uiText("View address on explorer")}
 												onClick={() => rpcRequest("openUrl", { url: chain.explorerAddressUrl!.replace('{{address}}', address) }).catch(() => {})}
 											>
 												<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -1081,13 +1172,13 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 								{selectedTokenUnverified ? '—' : formatBalance(selectedToken.balance)}
 								<Box as="span" color="var(--text-3)" ml="1.5" fontSize={{ base: "13px", md: "15px" }}>{selectedToken.symbol}</Box>
 							</Text>
-							{selectedTokenUnverified && <Text fontSize="11px" color="var(--gold)" title={`Last known: ${formatBalance(selectedToken.balance)} ${selectedToken.symbol}`}>Balance unverified</Text>}
+							{selectedTokenUnverified && <Text fontSize="11px" color="var(--gold)" title={`Last known: ${formatBalance(selectedToken.balance)} ${selectedToken.symbol}`}>{uiText("Balance unverified")}</Text>}
 							{!selectedTokenUnverified && selectedToken.balanceUsd > 0 && (
 								<Text fontSize="12px" fontFamily="mono" color="var(--text-2)">≈ {fmtCompact(selectedToken.balanceUsd)}</Text>
 							)}
 							{!selectedTokenUnverified && selectedToken.priceUsd > 0 && (
 								<Text fontSize="10px" fontFamily="mono" color="var(--text-3)">
-									${selectedToken.priceUsd.toLocaleString('en-US', { maximumFractionDigits: 6 })} / {selectedToken.symbol}
+									${selectedToken.priceUsd.toLocaleString(getNumberLocale(), { maximumFractionDigits: 6 })} / {selectedToken.symbol}
 								</Text>
 							)}
 						</Flex>
@@ -1149,8 +1240,7 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 									    >1 address on this chain. */}
 									{showEvmMultiTotal && (
 										<Text fontSize="10px" fontFamily="mono" color="var(--text-3)" mt="0.5" letterSpacing="0.02em">
-											∞ {evmTotalChainBalance.toFixed(4)} {chain.symbol} total · {evmAddressesWithChainBalance.length} addrs
-										</Text>
+											∞ {evmTotalChainBalance.toFixed(4)} {chain.symbol}{" "}{uiText("total ·")}{" "}{evmAddressesWithChainBalance.length}{" "}{uiText("addrs")}</Text>
 									)}
 								</>
 							)}
@@ -1195,7 +1285,7 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 							{selectedTokenUnverified ? '—' : formatBalance(selectedToken.balance)}
 							<Box as="span" color="var(--text-3)" ml="1.5" fontSize="13px">{selectedToken.symbol}</Box>
 						</Text>
-						{selectedTokenUnverified && <Text fontSize="11px" color="var(--gold)" title={`Last known: ${formatBalance(selectedToken.balance)} ${selectedToken.symbol}`}>Balance unverified</Text>}
+						{selectedTokenUnverified && <Text fontSize="11px" color="var(--gold)" title={`Last known: ${formatBalance(selectedToken.balance)} ${selectedToken.symbol}`}>{uiText("Balance unverified")}</Text>}
 						{!selectedTokenUnverified && selectedToken.balanceUsd > 0 && (
 							<Text fontSize="13px" fontFamily="mono" color="var(--text-2)">≈ {fmtCompact(selectedToken.balanceUsd)}</Text>
 						)}
@@ -1215,8 +1305,7 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 							<Flex display={{ base: "flex", sm: "none" }} align="center" gap="1" mb="3">
 								<Text fontSize="9px" color="kk.gold" lineHeight="1">⬡⬡</Text>
 								<Text fontSize="9px" fontFamily="mono" color="kk.textMuted">
-									{evmTotalChainBalance.toFixed(4)} {chain.symbol} total · {evmAddressesWithChainBalance.length} addrs
-								</Text>
+									{evmTotalChainBalance.toFixed(4)} {chain.symbol}{" "}{uiText("total ·")}{" "}{evmAddressesWithChainBalance.length}{" "}{uiText("addrs")}</Text>
 							</Flex>
 						)}
 					</>
@@ -1236,46 +1325,14 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 					    one address; empty <Box flex /> keeps the pills centered when
 					    there isn't. */}
 					<Box minW={{ base: "0", md: "200px" }} flex={{ base: "0 0 100%", md: "1" }}>
+						{vaultAccountSelector}
+						{vaultChoiceError && <Text fontSize="11px" color="var(--rose)" role="alert">{uiText("Vault accounts unavailable:")}{" "}{vaultChoiceError}</Text>}
 						{/* Account selectors call device/backend account RPCs and mix live
 						    wallet account state with the cached receive address — hidden
 						    in watch-only. */}
-						{!watchOnly && isBtc && (
-							btcAccounts.accounts.length > 0 ? (
-								<BtcXpubSelector
-									btcAccounts={btcAccounts}
-									onSelectXpub={selectXpub}
-									onAddAccount={addAccount}
-									addingAccount={btcLoading}
-								/>
-							) : btcLoading ? (
-								<Flex align="center" gap="2" minH="38px" color="var(--text-2)">
-									<Spinner size="xs" color="var(--gold)" />
-									<Text fontSize="12px">Loading Bitcoin account types…</Text>
-								</Flex>
-							) : (
-								<Flex
-									align={{ base: "stretch", sm: "center" }}
-									direction={{ base: "column", sm: "row" }}
-									gap="2"
-									p="2.5"
-									border="1px solid rgba(245,101,101,0.35)"
-									borderRadius="10px"
-									bg="rgba(245,101,101,0.06)"
-								>
-									<Box flex="1" minW="0">
-										<Text fontSize="12px" fontWeight="600" color="red.300">Bitcoin account types unavailable</Text>
-										<Text fontSize="10px" color="var(--text-2)" title={btcAccountsError || undefined} truncate>
-											{btcAccountsError || "Vault did not receive the required Bitcoin xpubs."}
-										</Text>
-									</Box>
-									<Button size="xs" variant="outline" color="red.200" borderColor="rgba(245,101,101,0.45)" onClick={() => void refreshBtcAccounts()}>
-										Retry
-									</Button>
-								</Flex>
-							)
-						)}
+						{!hasVaultAccounts && bitcoinAccountControls}
 						{watchOnly && isAltUtxo && activeBalance?.breakdown?.length ? (
-							<Box aria-label="Saved account balances">
+							<Box aria-label={uiText("Saved account balances")}>
 								{activeBalance.breakdown.map(row => (
 									<Flex key={`${row.path}:${row.scriptType}`} gap="3" justify="space-between" fontSize="12px">
 										<Text color="var(--text-2)">{row.scriptType} · {row.path}</Text>
@@ -1298,7 +1355,7 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 								breakdown={activeBalance?.breakdown}
 							/>
 						)}
-						{!watchOnly && isEvm && evmAddresses.addresses.length >= 1 && (
+						{!hasVaultAccounts && !watchOnly && isEvm && evmAddresses.addresses.length >= 1 && (
 							<EvmAddressSelector
 								evmAddresses={evmAddresses}
 								onSelectIndex={evmSelectIndex}
@@ -1373,7 +1430,7 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 						isBtc && !btcSelected?.xpubData ? (
 							<Flex align="center" justify="center" minH="200px">
 								<Spinner size="sm" color="kk.gold" mr="2" />
-								<Text color="kk.textMuted" fontSize="sm">Loading BTC accounts...</Text>
+								<Text color="kk.textMuted" fontSize="sm">{uiText("Loading BTC accounts...")}</Text>
 							</Flex>
 						) : (
 						<SendForm
@@ -1421,6 +1478,7 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 						{!(woUnverified && !woAck) && <ReceiveView
 							chain={chain}
 							address={address}
+							assetCaip={selectedToken?.caip || chain.caip}
 							loading={loading || btcAddressDiscoveryLoading}
 							error={deriveError}
 							currentPath={isBtc && btcSelected && !watchOnly ? btcSelected.fullPath : currentPath}
@@ -1482,7 +1540,7 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 							<HStack gap="2">
 								<Box as={FaTag} fontSize="11px" color="var(--text-3)" />
 								<Text fontSize="12px" fontWeight="500" color="var(--text-2)">
-									{chain.id === 'thorchain' ? 'THORName' : 'MAYAName'}
+									{chain.id === 'thorchain' ? uiText("THORName") : uiText("MAYAName")}
 								</Text>
 							</HStack>
 							<Box as={showNameReg ? FaChevronUp : FaChevronDown} fontSize="10px" color="var(--text-3)" />
@@ -1606,8 +1664,7 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 				{/* Activity preview */}
 				<Box mt="6">
 					<Flex align="center" justify="space-between" mb="3" px="1">
-						<Text fontSize="11px" fontWeight="500" color="var(--text-3)" textTransform="uppercase" letterSpacing="0.18em">
-							Recent Activity{previewActivities.length > 0 && ` · ${previewActivities.length}`}
+						<Text fontSize="11px" fontWeight="500" color="var(--text-3)" textTransform="uppercase" letterSpacing="0.18em">{uiText("Recent Activity")}{previewActivities.length > 0 && ` · ${previewActivities.length}`}
 						</Text>
 						<Flex align="center" gap="3">
 						{isBtc && !watchOnly && !isHiddenWallet && (
@@ -1616,21 +1673,17 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 								cursor="pointer" _hover={{ opacity: 0.75 }} transition="opacity 0.15s"
 								onClick={() => setShowReports(true)}
 								className="electrobun-webkit-app-region-no-drag"
-							>
-								Reports
-							</Box>
+							>{uiText("Reports")}</Box>
 						)}
-						{isBtc && <Button size="xs" variant="ghost" color="var(--gold)" onClick={() => window.dispatchEvent(new Event(BITCOIN_QR_SCAN_EVENT))}>Scan Bitcoin QR</Button>}
-						{isBtc && btcMultisigEnabled && <Button size="xs" variant="ghost" color="var(--gold)" onClick={()=>window.dispatchEvent(new Event(MULTISIG_POLICY_EVENT))}>Multisig co-signing</Button>}
+						{isBtc && <Button size="xs" variant="ghost" color="var(--gold)" onClick={() => window.dispatchEvent(new Event(BITCOIN_QR_SCAN_EVENT))}>{uiText("Scan Bitcoin QR")}</Button>}
+						{isBtc && btcMultisigEnabled && <Button size="xs" variant="ghost" color="var(--gold)" onClick={()=>window.dispatchEvent(new Event(MULTISIG_POLICY_EVENT))}>{uiText("Multisig co-signing")}</Button>}
 						{isBtc && !watchOnly && (
 							<Box
 								as="button" fontSize="11px" color="var(--gold)" fontWeight="500"
 								cursor="pointer" _hover={{ opacity: 0.75 }} transition="opacity 0.15s"
 								onClick={() => window.dispatchEvent(new Event(PSBT_PASTE_EVENT))}
 								className="electrobun-webkit-app-region-no-drag"
-							>
-								Sign PSBT
-							</Box>
+							>{uiText("Sign PSBT")}</Box>
 						)}
 						{isBtc && !watchOnly && btcAccounts.accounts.length > 0 && (
 							<Box
@@ -1638,9 +1691,7 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 								cursor="pointer" _hover={{ opacity: 0.75 }} transition="opacity 0.15s"
 								onClick={() => setShowWatchOnlyExport(true)}
 								className="electrobun-webkit-app-region-no-drag"
-							>
-								Watch-only export
-							</Box>
+							>{uiText("Watch-only export")}</Box>
 						)}
 						{onViewActivity && (
 							<Box
@@ -1656,9 +1707,7 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 								transition="opacity 0.15s"
 								onClick={() => onViewActivity(chain.id)}
 								className="electrobun-webkit-app-region-no-drag"
-							>
-								View all
-								<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+							>{uiText("View all")}<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
 									<path d="M5 12h14M12 5l7 7-7 7"/>
 								</svg>
 							</Box>
@@ -1676,11 +1725,11 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 							{activityScanning ? (
 								<Flex align="center" gap="2">
 									<Spinner size="xs" color="var(--teal)" />
-									<Text fontSize="12px" color="var(--text-3)">Syncing recent activity…</Text>
+									<Text fontSize="12px" color="var(--text-3)">{uiText("Syncing recent activity…")}</Text>
 								</Flex>
 							) : (
 								<>
-									<Text fontSize="12px" color="var(--text-3)">No indexed activity yet</Text>
+									<Text fontSize="12px" color="var(--text-3)">{uiText("No indexed activity yet")}</Text>
 									{onViewActivity && (
 										<Box
 											as="button"
@@ -1688,9 +1737,7 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 											cursor="pointer" _hover={{ opacity: 0.75 }} transition="opacity 0.15s"
 											onClick={() => onViewActivity(chain.id)}
 											className="electrobun-webkit-app-region-no-drag"
-										>
-											Scan history →
-										</Box>
+										>{uiText("Scan history →")}</Box>
 									)}
 								</>
 							)}
@@ -1758,7 +1805,7 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 					_active={{ transform: "scale(0.95)" }}
 					onClick={() => setShowSweep(true)}
 					zIndex={10}
-					title="Sweep Scanner — find BTC on non-standard paths & higher accounts"
+					title={uiText("Sweep Scanner — find BTC on non-standard paths & higher accounts")}
 				>
 					<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--teal)" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
 						<path d="M3 21h4l-1-3-3 3z" />

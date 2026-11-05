@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { rpcRequest, onRpcMessage } from '../lib/rpc'
 import type { EvmAddressSet } from '../../shared/types'
 
@@ -7,20 +7,29 @@ const EMPTY: EvmAddressSet = { addresses: [], selectedIndex: 0, totalBalanceUsd:
 export function useEvmAddresses() {
   const [evmAddresses, setEvmAddresses] = useState<EvmAddressSet>(EMPTY)
   const [loading, setLoading] = useState(false)
+  const revision = useRef(0)
 
   // Listen for push updates from backend
   useEffect(() => {
     const unsub = onRpcMessage('evm-addresses-update', (set: EvmAddressSet) => {
+      revision.current++
       setEvmAddresses(set)
     })
-    return unsub
+    const purge = onRpcMessage('wallet-data-purged', () => {
+      revision.current++
+      setEvmAddresses(EMPTY)
+    })
+    return () => { unsub(); purge() }
   }, [])
 
   // Fetch current state on mount
   useEffect(() => {
+    let active = true
+    const requested = revision.current
     rpcRequest<EvmAddressSet>('getEvmAddresses')
-      .then(setEvmAddresses)
+      .then(set => { if (active && revision.current === requested) setEvmAddresses(set) })
       .catch(() => {}) // Device may not be connected yet
+    return () => { active = false }
   }, [])
 
   const addIndex = useCallback(async (index?: number) => {

@@ -1,3 +1,4 @@
+import { useUiTranslation } from "../i18n/ui"
 import { useState, useEffect, useCallback, useRef } from "react"
 import { useFiat } from "../lib/fiat-context"
 import { Box, Flex, Text, VStack, Button, Input, IconButton } from "@chakra-ui/react"
@@ -66,6 +67,8 @@ function Section({ title, color, defaultOpen = true, docsHref, videoHref, childr
 	videoHref?: string
 	children: React.ReactNode
 }) {
+  const uiText = useUiTranslation()
+
 	const [open, setOpen] = useState(defaultOpen)
 	return (
 		<Box bg="kk.cardBg" border="1px solid" borderColor={color === "kk.error" ? "kk.error" : "kk.border"} borderRadius="xl" overflow="hidden">
@@ -83,7 +86,7 @@ function Section({ title, color, defaultOpen = true, docsHref, videoHref, childr
 				{(docsHref || videoHref) && (
 					<Flex align="center" gap="3" ml="3">
 						{docsHref && <DocsLink href={docsHref} />}
-						{videoHref && <DocsLink href={videoHref} label="Watch video" />}
+						{videoHref && <DocsLink href={videoHref} label={uiText("Watch video")} />}
 					</Flex>
 				)}
 				<Flex
@@ -175,6 +178,8 @@ function VerificationBadge({ verified, t }: { verified?: boolean; t: (key: strin
 // ── Main Component ──────────────────────────────────────────────────
 
 export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpdate, onDownloadUpdate, onApplyUpdate, updatePhase, updateVersion, appVersion, onOpenAuditLog, onOpenPairedApps, onOpenMobilePairing, onChooseNetworks, onRestApiChanged, onNodeConnected, onWordCountChange }: DeviceSettingsDrawerProps) {
+  const uiText = useUiTranslation()
+
 	const { t } = useTranslation("settings")
 	const [features, setFeatures] = useState<DeviceFeatures | null>(null)
 	const [featuresError, setFeaturesError] = useState(false)
@@ -423,7 +428,7 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 			const result = await rpcRequest<{ flashName: string }>("emulatorActivateBuild", { id }, 30000)
 			await reloadEmuBuilds()
 			await reloadEmuWallets()
-			setEmuInstallMsg(`Build ${id.slice(0, 12)} running with isolated flash ${result.flashName}.`)
+			setEmuInstallMsg(`Build ${id.slice(0, 12)} running with saved wallet ${result.flashName}.`)
 		} catch (err: any) { setEmuInstallMsg(err?.message || "Build switch failed") }
 		setInstallingEmu(false)
 	}
@@ -451,7 +456,7 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 			try { await rpcRequest("emulatorPair", undefined, 10000) } catch { /* may already be paired */ }
 			await rpcRequest("emulatorActivateBuild", { id: installed.buildId }, 30000)
 			await reloadEmuBuilds()
-			setEmuInstallMsg(`Build ${installed.buildId.slice(0, 12)} installed with its own flash.`)
+			setEmuInstallMsg(`Build ${installed.buildId.slice(0, 12)} installed. Your selected wallet is retained.`)
 		} catch (err: any) {
 			setEmuInstallMsg(err?.message || "Install failed")
 		}
@@ -890,16 +895,16 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 
 					{/* ── Emulator ────────────────────────────────────── */}
 					{deviceState.isEmulator && (
-						<Section title="Emulator" defaultOpen={true}>
+						<Section title={uiText("Emulator")} defaultOpen={true}>
 							<VStack gap="2" align="stretch">
 								<Box bg="rgba(255,152,0,0.08)" border="1px solid" borderColor="rgba(255,152,0,0.3)" borderRadius="md" px="3" py="2">
-									<Text fontSize="xs" color="orange.300" fontWeight="600">For Development Purposes Only</Text>
+									<Text fontSize="xs" color="orange.300" fontWeight="600">{uiText("For Development Purposes Only")}</Text>
 								</Box>
-								<InfoRow label="Mode" value="In-Process (dylib FFI)" />
-								<InfoRow label="Transport" value="Ring Buffer" />
-								<InfoRow label="Firmware" value={deviceState.firmwareVersion || "—"} />
-								<InfoRow label="Flash" value={activeEmuWalletName} />
-								<InfoRow label="Seed ID" value={deviceState.deviceId?.includes(":") ? deviceState.deviceId.split(":")[1] : "—"} />
+								<InfoRow label={uiText("Mode")} value="In-Process (dylib FFI)" />
+								<InfoRow label={uiText("Transport")} value="Ring Buffer" />
+								<InfoRow label={uiText("Firmware")} value={deviceState.firmwareVersion || "—"} />
+								<InfoRow label={uiText("Flash")} value={activeEmuWalletName} />
+								<InfoRow label={uiText("Seed ID")} value={deviceState.deviceId?.includes(":") ? deviceState.deviceId.split(":")[1] : "—"} />
 							</VStack>
 
 							<Flex gap="3" mt="4" wrap="wrap">
@@ -916,7 +921,7 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 									}}
 									disabled={wiping || emuBusy}
 								>
-									{wiping ? "Wiping..." : "Wipe Emulator"}
+									{wiping ? uiText("Wiping...") : uiText("Wipe Emulator")}
 								</Button>
 								<Button
 									size="sm" variant="outline" borderColor="kk.border" color="kk.textSecondary" px="4" py="2"
@@ -930,9 +935,7 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 										}
 									}}
 									disabled={emuBusy}
-								>
-									Stop Emulator
-								</Button>
+								>{uiText("Stop Emulator")}</Button>
 								<Button
 									size="sm" variant="outline" borderColor="kk.border" color="kk.textSecondary" px="4" py="2"
 									_hover={{ borderColor: "kk.error", color: "kk.error" }}
@@ -948,23 +951,21 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 										}
 									}}
 									disabled={emuBusy}
-								>
-									Delete Flash
-								</Button>
+								>{uiText("Delete Flash")}</Button>
 								<Button
 									size="sm" variant="outline" borderColor="kk.border" color="kk.textSecondary" px="4" py="2"
 									_hover={{ borderColor: "kk.gold", color: "kk.gold" }}
 									onClick={() => emuFileRef.current?.click()}
 									disabled={installingEmu || emuBusy}
 								>
-									{installingEmu ? "Installing…" : "Change Version…"}
+									{installingEmu ? uiText("Installing…") : uiText("Change Version…")}
 								</Button>
 								{emuBuilds.length > 0 && (
-									<Box as="select" aria-label="Emulator build" value={selectedEmuBuild || ""}
+									<Box as="select" aria-label={uiText("Emulator build")} value={selectedEmuBuild || ""}
 										disabled={installingEmu || emuBusy}
 										onChange={(e: React.ChangeEvent<HTMLSelectElement>) => activateEmuBuild(e.target.value)}
 										fontSize="xs" color="kk.textPrimary" bg="kk.bgSecondary" border="1px solid" borderColor="kk.border" borderRadius="md" p="2">
-										{emuBuilds.map(build => <option key={build.id} value={build.id}>{build.version ? `v${build.version}` : 'Unverified build'} · {build.id.slice(0, 12)}</option>)}
+										{emuBuilds.map(build => <option key={build.id} value={build.id}>{build.version ? `v${build.version}` : uiText("Unverified build")} · {build.id.slice(0, 12)}</option>)}
 									</Box>
 								)}
 								{emuInstallMsg && <Text fontSize="xs" color="kk.textSecondary">{emuInstallMsg}</Text>}
@@ -973,7 +974,7 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 							{/* ── Wallet (seed) switcher — pick a different saved seed ── */}
 							{emuWallets.length > 0 && (
 								<Flex align="center" gap="2" mt="3" wrap="wrap">
-									<Text fontSize="xs" color="kk.textMuted">Wallet:</Text>
+									<Text fontSize="xs" color="kk.textMuted">{uiText("Wallet:")}</Text>
 									<Box
 										as="select"
 										value={activeEmuWalletName}
@@ -992,14 +993,12 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 							{/* ── Seed tools — adjust or reveal the active wallet's seed ── */}
 							<Box mt="3">
 								<Box as="button" fontSize="xs" color="kk.textMuted" cursor="pointer" _hover={{ color: "kk.textSecondary" }} onClick={() => setShowSeedTools(!showSeedTools)}>
-									{showSeedTools ? "- Hide seed tools" : "+ Seed tools (generate / import / reveal)"}
+									{showSeedTools ? uiText("- Hide seed tools") : uiText("+ Seed tools (generate / import / reveal)")}
 								</Box>
 								{showSeedTools && (
 									<VStack align="stretch" gap="3" mt="2" p="3" bg="rgba(255,255,255,0.03)" borderRadius="md">
 										<Box bg="rgba(229,62,62,0.08)" border="1px solid" borderColor="rgba(229,62,62,0.3)" borderRadius="md" px="3" py="2">
-											<Text fontSize="xs" color="red.300" fontWeight="600">
-												Emulator-only. These actions wipe the active flash and never touch real hardware.
-											</Text>
+											<Text fontSize="xs" color="red.300" fontWeight="600">{uiText("Emulator-only. These actions wipe the active flash and never touch real hardware.")}</Text>
 										</Box>
 
 										{/* Generate a new random seed */}
@@ -1017,7 +1016,7 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 												))}
 											</Flex>
 											<Button size="xs" variant="outline" onClick={generateNewSeed} disabled={emuBusy}>
-												{creatingNewSeed ? "Generating…" : "New Seed"}
+												{creatingNewSeed ? uiText("Generating…") : uiText("New Seed")}
 											</Button>
 										</Flex>
 
@@ -1027,19 +1026,19 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 												as="textarea"
 												value={importMnemonic}
 												onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setImportMnemonic(e.target.value)}
-												placeholder="Paste a 12/18/24-word mnemonic to load onto the active wallet"
+												placeholder={uiText("Paste a 12/18/24-word mnemonic to load onto the active wallet")}
 												w="100%" rows={2} p={2} bg="var(--ink-1)" color="white" borderWidth="1px" borderColor="gray.700"
 												borderRadius="md" fontSize="xs" fontFamily="mono" resize="none"
 											/>
 											<Button size="xs" variant="outline" alignSelf="flex-start" onClick={importCustomSeed} disabled={emuBusy || !importMnemonic.trim()}>
-												{importingSeed ? "Importing…" : "Import Seed"}
+												{importingSeed ? uiText("Importing…") : uiText("Import Seed")}
 											</Button>
 										</VStack>
 
 										{/* Reveal the active seed for backup */}
 										<VStack align="stretch" gap="1">
 											<Button size="xs" variant="outline" alignSelf="flex-start" onClick={revealSeed} disabled={revealingSeed}>
-												{revealingSeed ? "Reading…" : revealedSeed ? "Hide Seed" : "Reveal Seed (Backup)"}
+												{revealingSeed ? uiText("Reading…") : revealedSeed ? uiText("Hide Seed") : uiText("Reveal Seed (Backup)")}
 											</Button>
 											{revealedSeed && (
 												<Box bg="var(--ink-1)" borderWidth="1px" borderColor="kk.gold" borderRadius="md" p={2}>
@@ -1217,8 +1216,7 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 								    silently misreports what the device is actually using. */}
 								{!AUTO_LOCK_CHOICES.some(c => c.ms === (features?.autoLockDelayMs ?? DEFAULT_AUTO_LOCK_MS)) && (
 									<option value={String(features?.autoLockDelayMs)}>
-										{Math.round((features?.autoLockDelayMs ?? 0) / 60000)} min
-									</option>
+										{Math.round((features?.autoLockDelayMs ?? 0) / 60000)}{" "}{uiText("min")}</option>
 								)}
 								{AUTO_LOCK_CHOICES.map(c => (
 									<option key={c.ms} value={String(c.ms)}>{c.labelKey}</option>
@@ -1333,10 +1331,8 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 									</svg>
 								</Flex>
 								<Box>
-									<Text fontSize="md" color="kk.textPrimary" fontWeight="500">Private Mode</Text>
-									<Text fontSize="sm" color="kk.textSecondary" mt="0.5">
-										Hide portfolio totals and balances from the screen
-									</Text>
+									<Text fontSize="md" color="kk.textPrimary" fontWeight="500">{uiText("Private Mode")}</Text>
+									<Text fontSize="sm" color="kk.textSecondary" mt="0.5">{uiText("Hide portfolio totals and balances from the screen")}</Text>
 								</Box>
 							</Flex>
 							<Toggle
@@ -1383,10 +1379,10 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 								<Box px="3" py="3" borderRadius="12px" bg="rgba(233,196,106,0.06)" border="1px solid rgba(233,196,106,0.18)">
 									<Flex align="center" justify="space-between" gap="3">
 										<Box>
-											<Text fontSize="sm" color="kk.textPrimary" fontWeight="600">ClearSign Studio</Text>
-											<Text fontSize="xs" color="kk.textSecondary" mt="0.5">Attest schemas, load a RAM-only signer, and export test evidence.</Text>
+											<Text fontSize="sm" color="kk.textPrimary" fontWeight="600">{uiText("ClearSign Studio")}</Text>
+											<Text fontSize="xs" color="kk.textSecondary" mt="0.5">{uiText("Attest schemas, load a RAM-only signer, and export test evidence.")}</Text>
 										</Box>
-										<Button size="sm" variant="outline" borderColor="rgba(233,196,106,0.45)" color="kk.gold" onClick={() => setClearSignStudioOpen(true)}>Open Studio</Button>
+										<Button size="sm" variant="outline" borderColor="rgba(233,196,106,0.45)" color="kk.gold" onClick={() => setClearSignStudioOpen(true)}>{uiText("Open Studio")}</Button>
 									</Flex>
 								</Box>
 							)}
@@ -1397,10 +1393,10 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 								<Box px="3" py="3" borderRadius="12px" bg="rgba(233,196,106,0.06)" border="1px solid rgba(233,196,106,0.18)">
 									<Flex align="center" justify="space-between" gap="3">
 										<Box>
-											<Text fontSize="sm" color="kk.textPrimary" fontWeight="600">RNG health test</Text>
-											<Text fontSize="xs" color="kk.textSecondary" mt="0.5">Pull 64 KB from the device RNG and check it for stuck, repeated, or biased output.</Text>
+											<Text fontSize="sm" color="kk.textPrimary" fontWeight="600">{uiText("RNG health test")}</Text>
+											<Text fontSize="xs" color="kk.textSecondary" mt="0.5">{uiText("Pull 64 KB from the device RNG and check it for stuck, repeated, or biased output.")}</Text>
 										</Box>
-										<Button size="sm" variant="outline" borderColor="rgba(233,196,106,0.45)" color="kk.gold" onClick={() => setRngAuditOpen(true)}>Run test</Button>
+										<Button size="sm" variant="outline" borderColor="rgba(233,196,106,0.45)" color="kk.gold" onClick={() => setRngAuditOpen(true)}>{uiText("Run test")}</Button>
 									</Flex>
 								</Box>
 							)}
@@ -1605,13 +1601,13 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 											</svg>
 										</Flex>
 										<Box>
-											<Text fontSize="md" color="kk.textPrimary" fontWeight="500">Always on Top</Text>
+											<Text fontSize="md" color="kk.textPrimary" fontWeight="500">{uiText("Always on Top")}</Text>
 											<Text fontSize="sm" color="kk.textSecondary" mt="0.5">
 												{windowFocusState === null
-													? "Loading..."
+													? uiText("Loading...")
 													: windowFocusState.alwaysOnTop
 														? `Active — ${windowFocusState.refs} request${windowFocusState.refs === 1 ? "" : "s"} holding focus`
-														: "Inactive — window behaves normally"
+														: uiText("Inactive — window behaves normally")
 												}
 											</Text>
 										</Box>
@@ -1621,9 +1617,7 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 										onChange={toggleWindowAlwaysOnTop}
 									/>
 								</Flex>
-								<Text fontSize="xs" color="kk.textMuted" mt="1.5" ml="44px">
-									Vault raises itself to the front when a signing or pairing request arrives.
-								</Text>
+								<Text fontSize="xs" color="kk.textMuted" mt="1.5" ml="44px">{uiText("Vault raises itself to the front when a signing or pairing request arrives.")}</Text>
 							</Box>
 
 							{/* Pre-release updates toggle */}
@@ -1698,11 +1692,9 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 					</Section>
 
 					{/* ── Browser use — needs the REST API, so only shown once it is on ── */}
-					{appSettings.restApiEnabled && <Section title="Browser use" defaultOpen={false}>
+					{appSettings.restApiEnabled && <Section title={uiText("Browser use")} defaultOpen={false}>
 						<Box>
-							<Text fontSize="sm" color="kk.textSecondary">
-								Use your existing Chrome profile with an agent. Install and pair the extension, enable its Agent Mode, then paste this prompt into your local agent. The prompt contains no credentials.
-							</Text>
+							<Text fontSize="sm" color="kk.textSecondary">{uiText("Use your existing Chrome profile with an agent. Install and pair the extension, enable its Agent Mode, then paste this prompt into your local agent. The prompt contains no credentials.")}</Text>
 							<Flex gap="2" mt="3" flexWrap="wrap">
 								<Button size="sm" variant="outline" borderColor="rgba(233,196,106,0.45)" color="kk.gold" onClick={async () => {
 									try {
@@ -1711,9 +1703,9 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 									} catch {
 										setBrowserPromptStatus("Clipboard unavailable. Open the browser-use guide and copy the prompt there.")
 									}
-								}}>Copy browser-use prompt</Button>
-								<Button size="sm" variant="ghost" color="kk.textSecondary" onClick={() => rpcRequest("openUrl", { url: BROWSER_EXTENSION_URL }).catch(() => setBrowserPromptStatus("Could not open Chrome Web Store. Use the install link in the guide."))}>Install Chrome extension</Button>
-								<Button size="sm" variant="ghost" color="kk.textSecondary" onClick={() => rpcRequest("openUrl", { url: BROWSER_AGENT_DOCS_URL }).catch(() => setBrowserPromptStatus("Open docs.keepkey.com/docs/bex/mcp in your browser."))}>Browser-use guide</Button>
+								}}>{uiText("Copy browser-use prompt")}</Button>
+								<Button size="sm" variant="ghost" color="kk.textSecondary" onClick={() => rpcRequest("openUrl", { url: BROWSER_EXTENSION_URL }).catch(() => setBrowserPromptStatus("Could not open Chrome Web Store. Use the install link in the guide."))}>{uiText("Install Chrome extension")}</Button>
+								<Button size="sm" variant="ghost" color="kk.textSecondary" onClick={() => rpcRequest("openUrl", { url: BROWSER_AGENT_DOCS_URL }).catch(() => setBrowserPromptStatus("Open docs.keepkey.com/docs/bex/mcp in your browser."))}>{uiText("Browser-use guide")}</Button>
 							</Flex>
 							{browserPromptStatus && <Text role="status" fontSize="sm" color="kk.textSecondary" mt="2">{browserPromptStatus}</Text>}
 						</Box>
@@ -1721,35 +1713,35 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 
 					{/* ── Bitcoin node (self-host) — btc-only devices ─── */}
 					{isBitcoinOnlyVariant(deviceState.firmwareVariant) && (
-						<Section title="Bitcoin node" defaultOpen={true} videoHref={watch('btc-node-desktop-core')}>
+						<Section title={uiText("Bitcoin node")} defaultOpen={true} videoHref={watch('btc-node-desktop-core')}>
 							<SelfHostNodePanel settings={appSettings} onChange={setAppSettings} onConnected={onNodeConnected} />
 						</Section>
 					)}
 
 					{!isBitcoinOnlyVariant(deviceState.firmwareVariant) && onChooseNetworks && (
-						<Section title="Networks" defaultOpen={false} docsHref={DOCS_LINKS.performance}>
+						<Section title={uiText("Networks")} defaultOpen={false} docsHref={DOCS_LINKS.performance}>
 							<Flex align="center" justify="space-between" gap="3">
 								<Text fontSize="sm" color="kk.textSecondary">
 									{appSettings.disabledNetworks.length === 0
-										? "Every network is on."
+										? uiText("Every network is on.")
 										: `${appSettings.disabledNetworks.length} turned off for a faster dashboard.`}
 								</Text>
-								<Button size="sm" variant="outline" borderColor="kk.border" color="kk.textPrimary" onClick={onChooseNetworks}>Choose networks</Button>
+								<Button size="sm" variant="outline" borderColor="kk.border" color="kk.textPrimary" onClick={onChooseNetworks}>{uiText("Choose networks")}</Button>
 							</Flex>
 						</Section>
 					)}
 
 					{!isBitcoinOnlyVariant(deviceState.firmwareVariant) && isPolicyEnabled("AdvancedMode") && (
-						<Section title="ClearSign simulation" defaultOpen={false}>
+						<Section title={uiText("ClearSign simulation")} defaultOpen={false}>
 							<VStack gap="3" align="stretch">
-								<Text fontSize="sm" color="kk.textSecondary">Use an explicit JSON-RPC provider for pre-sign execution, logs, and call traces. Vault verifies the chain ID before saving. Providers can observe transaction data.</Text>
+								<Text fontSize="sm" color="kk.textSecondary">{uiText("Use an explicit JSON-RPC provider for pre-sign execution, logs, and call traces. Vault verifies the chain ID before saving. Providers can observe transaction data.")}</Text>
 								<Flex gap="2">
-									<Input value={simulationChainId} onChange={(e) => setSimulationChainId(e.target.value.replace(/\D/g, ''))} placeholder="Chain ID" w="110px" />
+									<Input value={simulationChainId} onChange={(e) => setSimulationChainId(e.target.value.replace(/\D/g, ''))} placeholder={uiText("Chain ID")} w="110px" />
 									<Input value={simulationRpcUrl} onChange={(e) => setSimulationRpcUrl(e.target.value)} placeholder="https://your-rpc.example" fontFamily="mono" />
-									<Button onClick={saveSimulationRpc} loading={savingSimulationRpc} disabled={!simulationChainId}>{simulationRpcUrl.trim() ? 'Verify & save' : 'Remove'}</Button>
+									<Button onClick={saveSimulationRpc} loading={savingSimulationRpc} disabled={!simulationChainId}>{simulationRpcUrl.trim() ? uiText("Verify & save") : uiText("Remove")}</Button>
 								</Flex>
 								{simulationRpcMessage && <Text fontSize="xs" color={simulationRpcMessage.ok ? 'green.300' : 'kk.error'}>{simulationRpcMessage.text}</Text>}
-								<Text fontSize="xs" color="kk.textMuted">Without a configured endpoint, Vault keeps the Pioneer fallback and explicitly marks unavailable or incomplete simulation evidence.</Text>
+								<Text fontSize="xs" color="kk.textMuted">{uiText("Without a configured endpoint, Vault keeps the Pioneer fallback and explicitly marks unavailable or incomplete simulation evidence.")}</Text>
 							</VStack>
 						</Section>
 					)}
@@ -1787,8 +1779,8 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 
 							<Box>
                                 <Flex justify="space-between" align="center" gap="3">
-                                    <Box><Text fontSize="md" color="kk.textPrimary" fontWeight="500">Bitcoin multisig co-signing</Text>
-                                    <Text fontSize="sm" color="kk.textSecondary" mt="0.5">Experimental. Verify a public wallet policy and add KeepKey’s signature to Sparrow or Electrum PSBTs. Off by default. Completed transactions can still be broadcast with this off.</Text></Box>
+                                    <Box><Text fontSize="md" color="kk.textPrimary" fontWeight="500">{uiText("Bitcoin multisig co-signing")}</Text>
+                                    <Text fontSize="sm" color="kk.textSecondary" mt="0.5">{uiText("Experimental. Verify a public wallet policy and add KeepKey’s signature to Sparrow or Electrum PSBTs. Off by default. Completed transactions can still be broadcast with this off.")}</Text></Box>
                                     <Toggle checked={appSettings.btcMultisigEnabled===true} onChange={toggleMultisig} disabled={togglingMultisig}/>
                                 </Flex>
                                 {multisigError && <Text role="alert" fontSize="xs" color="kk.error" mt="2">{multisigError}</Text>}
@@ -1837,10 +1829,8 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 												</svg>
 											</Flex>
 											<Box>
-												<Text fontSize="md" color="kk.textPrimary" fontWeight="500">Emulator</Text>
-												<Text fontSize="sm" color="kk.textSecondary" mt="0.5">
-													Run a KeepKey firmware emulator locally for development and testing.
-												</Text>
+												<Text fontSize="md" color="kk.textPrimary" fontWeight="500">{uiText("Emulator")}</Text>
+												<Text fontSize="sm" color="kk.textSecondary" mt="0.5">{uiText("Run a KeepKey firmware emulator locally for development and testing.")}</Text>
 											</Box>
 										</Flex>
 										<Toggle
@@ -1857,9 +1847,7 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 												cursor="pointer"
 												textDecoration="underline"
 												onClick={() => rpcRequest('openUrl', { url: "https://keepkey.com/emulator" }).catch((e: any) => console.warn('[openUrl]', e?.message))}
-											>
-												Get the emulator at keepkey.com/emulator
-											</Text>
+											>{uiText("Get the emulator at keepkey.com/emulator")}</Text>
 										</Flex>
 									)}
 								</VStack>
@@ -1868,16 +1856,14 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 					</Section>
 
 					{/* ── API Services ────────────────────────────────── */}
-					<Section title="API Services" defaultOpen={false} docsHref={DOCS_LINKS.settingsApi} videoHref={watch('course-11-app-connections')}>
+					<Section title={uiText("API Services")} defaultOpen={false} docsHref={DOCS_LINKS.settingsApi} videoHref={watch('course-11-app-connections')}>
 						<VStack gap="4" align="stretch">
 							<Box>
-								<Text fontSize="md" color="kk.textPrimary" fontWeight="500">Pioneer API Servers</Text>
-								<Text fontSize="sm" color="kk.textSecondary" mt="0.5">
-									Manage which Pioneer API server the vault connects to.
-								</Text>
-								<Text fontSize="xs" color="kk.textSecondary" mt="3">Active server</Text>
+								<Text fontSize="md" color="kk.textPrimary" fontWeight="500">{uiText("Pioneer API Servers")}</Text>
+								<Text fontSize="sm" color="kk.textSecondary" mt="0.5">{uiText("Manage which Pioneer API server the vault connects to.")}</Text>
+								<Text fontSize="xs" color="kk.textSecondary" mt="3">{uiText("Active server")}</Text>
 								<Text fontSize="sm" color="kk.textPrimary" fontFamily="mono" overflowWrap="anywhere">
-									{appSettings.pioneerApiBase || 'Loading…'}
+									{appSettings.pioneerApiBase || uiText("Loading…")}
 								</Text>
 							</Box>
 
@@ -1948,12 +1934,12 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 
 							{/* Add new server */}
 							<Box borderTop="1px solid" borderColor="kk.border" pt="3">
-								<Text fontSize="sm" color="kk.textSecondary" mb="2">Add Server</Text>
+								<Text fontSize="sm" color="kk.textSecondary" mb="2">{uiText("Add Server")}</Text>
 								<VStack gap="2" align="stretch">
 									<Input
 										value={newServerLabel}
 										onChange={(e) => setNewServerLabel(e.target.value)}
-										placeholder="My Server"
+										placeholder={uiText("My Server")}
 										bg="kk.bg"
 										border="1px solid"
 										borderColor="kk.border"
@@ -1985,7 +1971,7 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 											onClick={addServer}
 											disabled={addingServer || !newServerUrl.trim() || !newServerLabel.trim()}
 										>
-											{addingServer ? "..." : "Add"}
+											{addingServer ? "..." : uiText("Add")}
 										</Button>
 									</Flex>
 								</VStack>

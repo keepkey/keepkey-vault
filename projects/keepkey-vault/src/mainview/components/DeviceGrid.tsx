@@ -1,3 +1,5 @@
+import { getNumberLocale } from "../lib/number-locale"
+import { useUiTranslation } from "../i18n/ui"
 import { BITCOIN_QR_SCAN_EVENT } from "./BitcoinQrImport"
 /**
  * DeviceGrid — wallet selector shown on the splash screen.
@@ -15,13 +17,21 @@ import { rpcRequest, onRpcMessage } from "../lib/rpc"
 import type { RegisteredDevice, EmulatorStatus, EmulatorWalletInfo } from "../../shared/types"
 import { emulatorWalletDetail } from "../../shared/emulatorWallets"
 import { EmulatorWalletChooser } from "./EmulatorWalletChooser"
+import { WalletTile as DeviceCard, WalletTileCta as CardCta } from "./WalletTile"
+import { useSavedVaults, VaultTile, VaultLinkChips } from "./VaultCards"
+import type { VaultIdentity } from "../../shared/vault-identity"
+import { useVaultPortfolios } from "../hooks/useVaultPortfolios"
+import { includedVaultTotal } from "../../shared/vault-portfolio"
+import { AddVaultDialog } from "./AddVaultDialog"
 import { WATCH_ONLY_IMPORT_EVENT } from "./WatchOnlyImportDialog"
 
 interface DeviceGridProps {
 	onViewPortfolio: (deviceId: string, label: string) => void
+	onOpenVault: (vault: VaultIdentity) => void
 	onReady?: () => void
 	/** When false, no emulator UI is fetched or rendered (feature flag, default off). */
 	emulatorEnabled?: boolean
+	bitcoinOnly?: boolean
 }
 
 const REVEAL_DELAY_MS = 2500
@@ -29,7 +39,13 @@ const SUPPORT_URL = 'https://support.keepkey.com'
 
 let hasRevealedOnce = false // module-level: skip delay after first reveal (e.g. returning from X)
 
-export function DeviceGrid({ onViewPortfolio, onReady, emulatorEnabled = false }: DeviceGridProps) {
+export function DeviceGrid({ onViewPortfolio, onOpenVault, onReady, emulatorEnabled = false, bitcoinOnly = false }: DeviceGridProps) {
+  const uiText = useUiTranslation()
+
+	const { vaults, error: vaultError, reload: reloadVaults } = useSavedVaults(bitcoinOnly)
+	const [addingVault, setAddingVault] = useState(false)
+	const { portfolios, setIncluded } = useVaultPortfolios({ bitcoinOnly })
+	const openVaultById = (id: string) => { const vault = vaults.find(v => v.id === id); if (vault) onOpenVault(vault) }
 	const [devices, setDevices] = useState<RegisteredDevice[]>([])
 	const [emuWallets, setEmuWallets] = useState<EmulatorWalletInfo[]>([])
 	const [emuStatus, setEmuStatus] = useState<EmulatorStatus | null>(null)
@@ -76,6 +92,8 @@ export function DeviceGrid({ onViewPortfolio, onReady, emulatorEnabled = false }
 		})
 		return unsub
 	}, [refresh, emulatorEnabled])
+
+	useEffect(() => onRpcMessage("vaults-changed", () => { void refresh() }), [refresh])
 
 	useEffect(() => {
 		if (!emulatorEnabled) {
@@ -137,11 +155,13 @@ export function DeviceGrid({ onViewPortfolio, onReady, emulatorEnabled = false }
 	// ── Helpers ──────────────────────────────────────────────────────
 
 	function formatUsd(n: number): string {
-		return n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+		return n.toLocaleString(getNumberLocale(), { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 	}
 
+	const { totalUsd: vaultTotalUsd, partial: vaultTotalPartial } = includedVaultTotal(portfolios)
 	const grandTotal = devices.reduce((sum, d) => sum + (d.totalUsd || 0), 0)
 		+ emuWallets.reduce((sum, w) => sum + (w.totalUsd || 0), 0)
+		+ vaultTotalUsd
 
 	function timeAgo(ts: number): string {
 		const diff = Date.now() - ts
@@ -155,7 +175,7 @@ export function DeviceGrid({ onViewPortfolio, onReady, emulatorEnabled = false }
 	}
 
 	const emuRunning = emuStatus?.state === "running"
-	const hasContent = devices.length > 0 || emuWallets.length > 0
+	const hasContent = devices.length > 0 || emuWallets.length > 0 || vaults.length > 0
 
 	useEffect(() => {
 		// Always notify parent once revealed — even when empty — so SplashScreen
@@ -181,7 +201,7 @@ export function DeviceGrid({ onViewPortfolio, onReady, emulatorEnabled = false }
 					textTransform="uppercase"
 					fontFamily="mono"
 				>
-					{hasContent ? 'Workspace' : 'Welcome'}
+					{hasContent ? uiText("Workspace") : uiText("Welcome")}
 				</Text>
 				<Text
 					fontSize="28px"
@@ -190,19 +210,19 @@ export function DeviceGrid({ onViewPortfolio, onReady, emulatorEnabled = false }
 					letterSpacing="-0.01em"
 					lineHeight="1.1"
 				>
-					{hasContent ? 'Choose a wallet' : 'Connect your KeepKey'}
+					{hasContent ? uiText("Choose a wallet") : uiText("Connect your KeepKey")}
 				</Text>
 				<Text fontSize="13px" color="var(--text-2)" textAlign="center" maxW="460px" mt="1" letterSpacing="-0.005em">
 					{hasContent
-						? 'Plug in your KeepKey to sign live, or open a saved wallet in view-only mode.'
-						: 'Plug in your device with the supplied USB cable to start a session. View-only wallets will appear here once you’ve paired a device.'}
+						? uiText("Plug in your KeepKey to sign live, or open a saved wallet in view-only mode.")
+						: uiText("Plug in your device with the supplied USB cable to start a session. View-only wallets will appear here once you’ve paired a device.")}
 				</Text>
 			</Flex>
 
 			{/* Error banner */}
-			{error && (
+			{(error || vaultError) && (
 				<Box mb="3" px="3" py="2" bg="rgba(224,140,123,0.12)" border="1px solid" borderColor="rgba(224,140,123,0.32)" borderRadius="lg">
-					<Text fontSize="11px" color="var(--rose)" wordBreak="break-all">{error}</Text>
+					<Text fontSize="11px" color="var(--rose)" wordBreak="break-all">{error || vaultError}</Text>
 				</Box>
 			)}
 
@@ -233,12 +253,8 @@ export function DeviceGrid({ onViewPortfolio, onReady, emulatorEnabled = false }
 								</svg>
 							</Box>
 							<Box flex="1" minW="0">
-								<Text fontSize="13px" fontWeight="600" color="var(--text-0)" mb="1">
-									Connect a KeepKey to begin
-								</Text>
-								<Text fontSize="12px" color="var(--text-2)" lineHeight="1.5">
-									Once paired, your wallet keys never leave the device. Vault talks to the device over the cable — no servers in between.
-								</Text>
+								<Text fontSize="13px" fontWeight="600" color="var(--text-0)" mb="1">{uiText("Connect a KeepKey to begin")}</Text>
+								<Text fontSize="12px" color="var(--text-2)" lineHeight="1.5">{uiText("Once paired, your wallet keys never leave the device. Vault talks to the device over the cable — no servers in between.")}</Text>
 							</Box>
 						</Flex>
 					</Box>
@@ -251,27 +267,28 @@ export function DeviceGrid({ onViewPortfolio, onReady, emulatorEnabled = false }
 					{/* Physical device cards (watch-only when not the active live session) */}
 					{devices.map((d) => (
 						<DeviceCard key={d.deviceId}>
+							<div className="wallet-tile-identity" data-wallet-id={d.deviceId}>
 							{/* Top row: badge + forget */}
 							<Flex justify="space-between" align="center" mb="2">
 								<WatchOnlyBadge />
 								{confirmForget === d.deviceId ? (
 									<Flex gap="1" align="center">
-										<Text fontSize="10px" color="var(--rose)">Forget?</Text>
+										<Text fontSize="10px" color="var(--rose)">{uiText("Forget?")}</Text>
 										<SmallCircleBtn color="var(--rose)" label="Y" onClick={() => handleForgetDevice(d.deviceId)} loading={loading === d.deviceId} />
 										<SmallCircleBtn color="var(--text-3)" label="N" onClick={() => setConfirmForget(null)} />
 									</Flex>
 								) : (
-									<SmallCircleBtn color="var(--text-3)" label="&times;" onClick={() => setConfirmForget(d.deviceId)} />
+									<SmallCircleBtn color="var(--text-3)" label={uiText("&times;")} onClick={() => setConfirmForget(d.deviceId)} />
 								)}
 							</Flex>
 
 							{/* Identity */}
 							<Flex align="center" gap="2.5" mb="2.5">
-								<Image src={kkIcon} alt="KeepKey" w="36px" h="36px" borderRadius="10px"
+								<Image src={kkIcon} alt={uiText("KeepKey")} w="36px" h="36px" borderRadius="10px"
 									border="1px solid var(--ink-4)" flexShrink={0} bg="var(--ink-2)" />
 								<Box flex="1" minW="0">
 									<Text fontSize="14px" fontWeight="500" color="var(--text-0)" truncate lineHeight="1.2">
-										{d.label || "KeepKey"}
+										{d.label || uiText("KeepKey")}
 									</Text>
 									<Text fontSize="10px" color="var(--text-3)" fontFamily="mono" letterSpacing="0.02em">
 										{d.imported ? (d.verified ? "verified on a KeepKey" : "not verified on a KeepKey") : `fw ${d.firmwareVer}`} · {timeAgo(d.updatedAt)}
@@ -282,21 +299,23 @@ export function DeviceGrid({ onViewPortfolio, onReady, emulatorEnabled = false }
 							{/* Balance */}
 							{d.totalUsd != null && d.totalUsd > 0 && (
 								<Box mb="2.5">
-									<Text fontSize="10px" color="var(--text-3)" letterSpacing="0.06em" textTransform="uppercase" fontFamily="mono">
-										Cached balance
-									</Text>
+									<Text fontSize="10px" color="var(--text-3)" letterSpacing="0.06em" textTransform="uppercase" fontFamily="mono">{uiText("Cached balance")}</Text>
 									<Text fontSize="17px" fontWeight="500" color={showValues ? "var(--text-0)" : "var(--text-3)"} lineHeight="1.1">
 										{showValues ? `$${formatUsd(d.totalUsd)}` : '$ ••••'}
 									</Text>
 								</Box>
 							)}
 
+							</div>
+							<VaultLinkChips vaults={vaults.filter(v => d.vaultIds?.includes(v.id))} onOpen={openVaultById} />
 							{/* Action */}
-							<CardCta onClick={() => onViewPortfolio(d.deviceId, d.label || 'KeepKey')}>
-								Open view-only
-							</CardCta>
+							<CardCta onClick={() => onViewPortfolio(d.deviceId, d.label || 'KeepKey')}>{uiText("Open view-only")}</CardCta>
 						</DeviceCard>
 					))}
+
+					{vaults.map(vault => <VaultTile key={vault.id} vault={vault} devices={devices.filter(d => d.vaultIds?.includes(vault.id))}
+						portfolio={portfolios.find(p => p.identity.id === vault.id)} showValues={showValues}
+						onToggleTotal={include => setIncluded(vault.id, include)} onOpen={() => onOpenVault(vault)} />)}
 
 					{/* One emulator card. It never starts a seed by itself: every start
 					    goes through the picker, where the seed is chosen by name. */}
@@ -309,7 +328,7 @@ export function DeviceGrid({ onViewPortfolio, onReady, emulatorEnabled = false }
 									<EmulatorIcon active={!!running} />
 									<Box flex="1" minW="0">
 										<Text fontSize="14px" fontWeight="500" fontFamily={running ? "mono" : undefined} color={running ? "var(--teal)" : "var(--text-0)"} truncate lineHeight="1.2">
-											{running ? running.name : "KeepKey Emulator"}
+											{running ? running.name : uiText("KeepKey Emulator")}
 										</Text>
 										<Text fontSize="10px" color="var(--text-3)" lineHeight="1.35">
 											{running ? emulatorWalletDetail(running) : `${emuWallets.length} saved seed${emuWallets.length === 1 ? "" : "s"}`}
@@ -321,11 +340,11 @@ export function DeviceGrid({ onViewPortfolio, onReady, emulatorEnabled = false }
 								</Flex>
 								{running && (
 									<Box mb="1.5">
-										<CardCta tone="rose" onClick={handleStopEmu} loading={loading === "emu:__stop"}>Stop emulator</CardCta>
+										<CardCta tone="rose" onClick={handleStopEmu} loading={loading === "emu:__stop"}>{uiText("Stop emulator")}</CardCta>
 									</Box>
 								)}
 								<CardCta tone="teal" onClick={() => { setError(null); setPickingSeed(true) }}>
-									{running ? "Switch seed…" : "Start emulator…"}
+									{running ? uiText("Switch seed…") : uiText("Start emulator…")}
 								</CardCta>
 							</DeviceCard>
 						)
@@ -344,27 +363,31 @@ export function DeviceGrid({ onViewPortfolio, onReady, emulatorEnabled = false }
 				/>
 			)}
 
-			{/* Watch-only import for a machine that never saw the KeepKey */}
+			{addingVault && <AddVaultDialog bitcoinOnly={bitcoinOnly} onClose={() => setAddingVault(false)} onAdded={vault => {
+                setAddingVault(false)
+                reloadVaults()
+                void refresh()
+                onOpenVault(vault)
+            }} />}
+
+            {/* Watch-only import for a machine that never saw the KeepKey */}
 			<Flex justify="center" mt="4" gap="2" wrap="wrap">
+				<Button size="sm" variant="outline" color="var(--gold)" onClick={() => setAddingVault(true)}>{uiText("＋ Add vault")}</Button>
 				<Box
 					as="button"
 					onClick={() => window.dispatchEvent(new Event(WATCH_ONLY_IMPORT_EVENT))}
 					px="3" py="1.5" borderRadius="10px" fontSize="11px" fontWeight="600" letterSpacing="0.04em"
 					color="var(--gold)" bg="rgba(233,196,106,0.10)" border="1px solid rgba(233,196,106,0.30)"
 					cursor="pointer" _hover={{ bg: "rgba(233,196,106,0.20)" }}
-				>
-					Import watch-only (Electrum file or xpub)
-				</Box>
-				<Button size="sm" variant="outline" color="var(--gold)" onClick={() => window.dispatchEvent(new Event(BITCOIN_QR_SCAN_EVENT))}>Scan Bitcoin QR</Button>
+				>{uiText("Import watch-only (Electrum file or xpub)")}</Box>
+				<Button size="sm" variant="outline" color="var(--gold)" onClick={() => window.dispatchEvent(new Event(BITCOIN_QR_SCAN_EVENT))}>{uiText("Scan Bitcoin QR")}</Button>
 			</Flex>
 
 			{/* Grand total + eyeball toggle */}
-			{grandTotal > 0 && (
+			{(grandTotal > 0 || vaultTotalPartial || portfolios.length > 0) && (
 				<Flex justify="center" align="center" gap="2" mt="5">
-					<Text fontSize="11px" color="var(--text-3)" letterSpacing="0.04em">
-						Total across all wallets:&nbsp;
-						<Text as="span" fontWeight="600" color={showValues ? "var(--text-1)" : "var(--text-3)"} fontFamily="mono">
-							{showValues ? `$${formatUsd(grandTotal)}` : '$ ••••'}
+					<Text fontSize="11px" color="var(--text-3)" letterSpacing="0.04em">{uiText("Wallets and included vaults:")}<Text as="span" fontWeight="600" color={showValues ? "var(--text-1)" : "var(--text-3)"} fontFamily="mono">
+							{showValues ? `${vaultTotalPartial ? '≥ ' : ''}$${formatUsd(grandTotal)}` : '$ ••••'}
 						</Text>
 					</Text>
 					<Box as="button" cursor="pointer" opacity={0.55} _hover={{ opacity: 1 }} transition="opacity 0.15s"
@@ -400,9 +423,7 @@ export function DeviceGrid({ onViewPortfolio, onReady, emulatorEnabled = false }
 					letterSpacing="0.04em"
 					bg="transparent"
 					_hover={{ color: "var(--gold)" }}
-				>
-					Trouble connecting? Visit support
-				</Text>
+				>{uiText("Trouble connecting? Visit support")}</Text>
 			</Flex>
 
 			<style>{`
@@ -417,44 +438,22 @@ export function DeviceGrid({ onViewPortfolio, onReady, emulatorEnabled = false }
 
 // ── Reusable sub-components ─────────────────────────────────────────────
 
-function DeviceCard({ children, active }: { children: React.ReactNode; active?: boolean }) {
-	return (
-		<Flex
-			direction="column"
-			w="220px"
-			minH="180px"
-			bg="rgba(16,16,21,0.85)"
-			border="1px solid"
-			borderColor={active ? "rgba(139,227,196,0.45)" : "var(--ink-3)"}
-			borderRadius="16px"
-			px="3.5" py="3"
-			backdropFilter="blur(8px)"
-			boxShadow={active ? "0 0 0 1px rgba(139,227,196,0.22), 0 8px 24px -8px rgba(139,227,196,0.18)" : "0 1px 0 rgba(255,255,255,0.02)"}
-			transition="all 0.2s"
-			_hover={{
-				borderColor: active ? "rgba(139,227,196,0.6)" : "rgba(233,196,106,0.45)",
-				transform: "translateY(-1px)",
-				boxShadow: active ? "0 0 0 1px rgba(139,227,196,0.32), 0 12px 28px -10px rgba(139,227,196,0.22)" : "0 8px 24px -10px rgba(233,196,106,0.18)",
-			}}
-		>
-			{children}
-		</Flex>
-	)
-}
 
 function WatchOnlyBadge() {
+  const uiText = useUiTranslation()
+
 	return (
 		<Flex align="center" gap="1" px="1.5" py="0.5"
 			bg="rgba(139,227,196,0.10)" border="1px solid rgba(139,227,196,0.25)" borderRadius="999px">
 			<Box w="5px" h="5px" borderRadius="full" bg="var(--teal)" />
-			<Text fontSize="9px" color="var(--teal)" fontWeight="600" letterSpacing="0.06em" textTransform="uppercase" fontFamily="mono">
-				view-only
-			</Text>
+			<Text fontSize="9px" color="var(--teal)" fontWeight="600" letterSpacing="0.06em" textTransform="uppercase" fontFamily="mono">{uiText("view-only")}</Text>
 		</Flex>
 	)
 }
 
 function EmuBadge({ active }: { active: boolean }) {
+  const uiText = useUiTranslation()
+
 	return (
 		<Flex align="center" gap="1" px="1.5" py="0.5"
 			bg={active ? "rgba(139,227,196,0.12)" : "rgba(233,196,106,0.10)"}
@@ -466,7 +465,7 @@ function EmuBadge({ active }: { active: boolean }) {
 				style={active ? { animation: 'fadeIn 1.5s ease-in-out infinite alternate' } : undefined}
 			/>
 			<Text fontSize="9px" color={active ? "var(--teal)" : "var(--gold)"} fontWeight="600" letterSpacing="0.06em" textTransform="uppercase" fontFamily="mono">
-				{active ? 'running' : 'emulator'}
+				{active ? uiText("running") : uiText("emulator")}
 			</Text>
 		</Flex>
 	)
@@ -485,40 +484,6 @@ function SmallCircleBtn({ color, label, onClick, loading }: { color: string; lab
 	)
 }
 
-function CardCta({
-	children,
-	onClick,
-	loading,
-	tone = 'gold',
-}: {
-	children: React.ReactNode
-	onClick: () => void
-	loading?: boolean
-	tone?: 'gold' | 'teal' | 'rose'
-}) {
-	const accent = tone === 'teal' ? 'var(--teal)' : tone === 'rose' ? 'var(--rose)' : 'var(--gold)'
-	const accentSoft = tone === 'teal' ? 'rgba(139,227,196,0.10)' : tone === 'rose' ? 'rgba(224,140,123,0.10)' : 'rgba(233,196,106,0.10)'
-	const accentBorder = tone === 'teal' ? 'rgba(139,227,196,0.30)' : tone === 'rose' ? 'rgba(224,140,123,0.30)' : 'rgba(233,196,106,0.30)'
-	const accentHover = tone === 'teal' ? 'rgba(139,227,196,0.20)' : tone === 'rose' ? 'rgba(224,140,123,0.20)' : 'rgba(233,196,106,0.20)'
-	return (
-		<Box
-			as="button"
-			w="100%"
-			px="3" py="1.5"
-			borderRadius="10px"
-			fontSize="11px" fontWeight="600"
-			letterSpacing="0.04em"
-			color={accent} bg={accentSoft}
-			border="1px solid" borderColor={accentBorder}
-			cursor={loading ? "wait" : "pointer"} opacity={loading ? 0.5 : 1}
-			_hover={{ bg: accentHover }}
-			mt="auto"
-			onClick={onClick}
-		>
-			{children}
-		</Box>
-	)
-}
 
 function EmulatorIcon({ active }: { active: boolean }) {
 	const c = active ? "var(--teal)" : "var(--gold)"

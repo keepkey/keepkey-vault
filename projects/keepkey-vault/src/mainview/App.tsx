@@ -1,3 +1,4 @@
+import { useUiTranslation } from "./i18n/ui"
 import { useState, useEffect, useCallback, useRef } from "react"
 import { resolveAppPhase, showWatchOnly } from "../shared/app-phase"
 import { Box, Flex, Text, Button } from "@chakra-ui/react"
@@ -15,6 +16,7 @@ import { WalletConnectPanel } from "./components/WalletConnectPanel"
 import { FirmwareDropZone } from "./components/FirmwareDropZone"
 import { BitcoinQrImport } from "./components/BitcoinQrImport"
 import { MultisigPolicyDialog } from "./components/MultisigPolicyDialog"
+import { SafeMultisigView } from "./components/SafeMultisigView"
 import { PsbtSignDialog } from "./components/PsbtSignDialog"
 import { BroadcastSignedDialog } from "./components/BroadcastSignedDialog"
 import { WatchOnlyImportDialog } from "./components/WatchOnlyImportDialog"
@@ -28,6 +30,8 @@ import { NodeConnectedDialog } from "./components/NodeConnectedDialog"
 import { BitcoinOnlyOnboardingDialog } from "./components/BitcoinOnlyOnboardingDialog"
 import { NetworkPickerDialog } from "./components/NetworkPickerDialog"
 import { DeviceGrid } from "./components/DeviceGrid"
+import type { VaultIdentity } from "../shared/vault-identity"
+import { VaultIdentityDialog } from "./components/VaultCards"
 import { EmulatorWalletChooser } from "./components/EmulatorWalletChooser"
 import { DeviceClaimedDialog } from "./components/DeviceClaimedDialog"
 import { LinuxUdevWarning } from "./components/LinuxUdevWarning"
@@ -61,7 +65,15 @@ type SigningPhase = "approve" | "sending-payload" | "device-confirm"
 const SIGNING_PAYLOAD_MIN_MS = 15000
 
 function App() {
-	const { t } = useTranslation()
+  const uiText = useUiTranslation()
+
+	const { t, i18n } = useTranslation()
+	useEffect(() => {
+		const syncLanguage = (language: string) => { void rpcRequest('setAppLanguage', { language }).catch(() => {}) }
+		syncLanguage(i18n.resolvedLanguage || i18n.language || 'en')
+		i18n.on('languageChanged', syncLanguage)
+		return () => { i18n.off('languageChanged', syncLanguage) }
+	}, [i18n])
 	const deviceState = useDeviceState()
 	const update = useUpdateState()
 	const [wizardComplete, setWizardComplete] = useState(false)
@@ -99,6 +111,9 @@ function App() {
 	const [btcSplashHold, setBtcSplashHold] = useState(false)
 	const [settingsOpen, setSettingsOpen] = useState(false)
 	const [activeTab, setActiveTab] = useState<NavTab>("vault")
+	const [viewingVault, setViewingVault] = useState<VaultIdentity | null>(null)
+	const [vaultDetailsOpen, setVaultDetailsOpen] = useState(false)
+	useEffect(() => onRpcMessage('wallet-data-purged', () => { setViewingVault(null); setVaultDetailsOpen(false) }), [])
 	const [paletteOpen, setPaletteOpen] = useState(false)
 	const paletteBalances = useLatestBalances()
 	const [updateDismissed, setUpdateDismissed] = useState(false)
@@ -169,6 +184,13 @@ function App() {
 	// A KeepKey connected while watching that does not hold the watched wallet ("other"), or could not be asked ("unchecked").
 	const [watchOnlyOtherDevice, setWatchOnlyOtherDevice] = useState<"other" | "unchecked" | null>(null)
 	const [watchOnlyScope, setWatchOnlyScope] = useState<{ deviceId?: string; bitcoinOnly: boolean }>({ bitcoinOnly: true })
+	const handleOpenVault = useCallback((vault: VaultIdentity) => {
+		setWatchOnlyMode(false)
+		setVaultDetailsOpen(false)
+		// Leave a device's cached-view restrictions before loading a separate
+		// account scope. In particular a watched BTC wallet must not hide Base.
+		void rpcRequest('watchOnlySetView', { active: false }).catch(() => {}).then(() => setViewingVault(vault))
+	}, [])
 
 
 	// Fetch app version + REST API state on mount
@@ -313,23 +335,29 @@ function App() {
 
 	const handlePinSubmit = useCallback(async (pin: string) => {
 		setPinFailed(false)
-		try { await rpcRequest("sendPin", { pin }) } catch (e) { console.error("sendPin:", e) }
+		// Clear the submitted matrix before sending. Firmware can ask for the
+		// next matrix while sendPin is pending; its event must stay visible.
 		setPinRequestType(null)
 		// Temporarily suppress auto-show to prevent flicker while device verifies.
 		// Reset after 5s so the overlay re-appears if PIN was wrong or device still locked.
 		setPinDismissed(true)
 		if (pinDismissTimer.current) clearTimeout(pinDismissTimer.current)
 		pinDismissTimer.current = setTimeout(() => setPinDismissed(false), 5000)
+		try { await rpcRequest("sendPin", { pin }) } catch (e) { console.error("sendPin:", e) }
 	}, [])
 
 	const handlePinCancel = useCallback(() => {
 		setPinRequestType(null)
 		setPinDismissed(true)
 		setPinFailed(false)
+		// Release the firmware's matrix wait as well as dismissing the overlay.
+		if (deviceState.isEmulator) {
+			void rpcRequest("cancelDeviceSigning", undefined, 0).catch((e) => console.error("cancel PIN:", e))
+		}
 		// Allow re-show after 10s even on cancel — device still expects PIN
 		if (pinDismissTimer.current) clearTimeout(pinDismissTimer.current)
 		pinDismissTimer.current = setTimeout(() => setPinDismissed(false), 10000)
-	}, [])
+	}, [deviceState.isEmulator])
 
 	const handlePinWipe = useCallback(async () => {
 		// Errors propagate to PinEntry, which shows them and keeps the overlay open.
@@ -681,9 +709,9 @@ function App() {
 		}
 	}, [deviceState.state, deviceState.updatePhase, deviceState.wipePending, pinRequestType, pinDismissed])
 
-	// Clear overlays on ready or disconnect
+	// A failed/disconnected transport cannot own a live device prompt.
 	useEffect(() => {
-		if (deviceState.state === "ready" || deviceState.state === "disconnected") {
+		if (deviceState.state === "ready" || deviceState.state === "disconnected" || deviceState.state === "error") {
 			setPinRequestType(null)
 			setCharRequest(null)
 			setPassphraseRequested(false)
@@ -962,6 +990,27 @@ function App() {
 
 	const incomingTxToast = <IncomingTxToast tx={incomingTx} onDismiss={dismissIncomingTx} />
 
+	// Vault scope is independent of any owner's device portfolio. All balances
+	// and actions below remain bound to the vault's exact network and account.
+	if (viewingVault && !setupInProgress) {
+		const exitVault = () => { setViewingVault(null); setVaultDetailsOpen(false) }
+		return <>{resizeHandles}{updateBanner}{firmwareDropZone}{pinOverlay}{passphraseOverlay}{charOverlay}{signingOverlay}{pairingOverlay}
+			<Flex direction="column" h="100vh" color="kk.textPrimary">
+				<TopNav label={viewingVault.name} connected={deviceState.state === 'ready'}
+					firmwareVersion={deviceState.firmwareVersion} firmwareVerified={deviceState.firmwareVerified}
+					isEmulator={deviceState.isEmulator} onStopEmulator={() => { rpcRequest('emulatorStop').catch(() => {}) }}
+					onSettingsToggle={() => setVaultDetailsOpen(true)} activeTab="vault" onTabChange={() => {}}
+					vaultView onExitToDeviceSelect={exitVault} watchOnly={deviceState.state !== 'ready'}
+					isBitcoinOnly={viewingVault.type === 'bitcoin-multisig'} />
+				<Flex flex="1" direction="column" overflow="auto" pt={NAV_CONTENT_OFFSET} pb="4">
+					<Dashboard vault={viewingVault} watchOnly={deviceState.state !== 'ready'}
+							firmwareVersion={deviceState.firmwareVersion} onLoaded={() => {}} onOpenVault={handleOpenVault} />
+				</Flex>
+			</Flex>
+			{vaultDetailsOpen && <VaultIdentityDialog vault={viewingVault} onClose={() => setVaultDetailsOpen(false)} />}
+		</>
+	}
+
 	// Watch-only mode: render dashboard with cached data (read-only) — never over setup
 	if (showWatchOnly(watchOnlyMode, phase)) {
 		return (
@@ -992,7 +1041,7 @@ function App() {
 									: t("watchOnlyDeviceUnchecked", { ns: "nav", defaultValue: "Could not check whether the connected KeepKey holds {{label}}. Still showing it as watch-only.", label: watchOnlyLabel || "this wallet" })}
 							</Text>
 						)}
-						<Dashboard watchOnly watchOnlyDeviceId={watchOnlyDeviceId} firmwareVariant={watchOnlyBitcoinOnly ? 'KeepKeyBTC' : undefined} onLoaded={() => {}} />
+						<Dashboard watchOnly watchOnlyDeviceId={watchOnlyDeviceId} firmwareVariant={watchOnlyBitcoinOnly ? 'KeepKeyBTC' : undefined} onLoaded={() => {}} onOpenVault={handleOpenVault} />
 					</Flex>
 				</Flex>
 				<DeviceSettingsDrawer
@@ -1091,9 +1140,11 @@ function App() {
 						/* Unified device grid — registered devices + emulator wallets */
 						<>
 							<DeviceGrid
+								onOpenVault={handleOpenVault}
 								onViewPortfolio={(id, label) => { setWatchOnlyDeviceId(id); setWatchOnlyLabel(label); setWatchOnlyMode(true) }}
 								onReady={() => setGridReady(true)}
 								emulatorEnabled={emulatorEnabled}
+								bitcoinOnly={splashBitcoinOnly}
 							/>
 							{/* Windows: a connected KeepKey can be invisible to the app if WinUSB
 							    didn't bind. Offer a read-only diagnostic when nothing is detected. */}
@@ -1123,7 +1174,7 @@ function App() {
 						px="5"
 						_hover={{ bg: "rgba(168,85,247,0.28)" }}
 					>
-						{startingEmulator ? "Starting Emulator…" : "Use Emulator"}
+						{startingEmulator ? uiText("Starting Emulator…") : uiText("Use Emulator")}
 					</Button>
 				</Box>}
 			</>
@@ -1207,10 +1258,11 @@ function App() {
 					    time (always for passphrase wallets, which keep no cache). Only
 					    the refresh button fetches. */}
 					<Flex flex="1" direction="column" display={activeTab === "vault" ? "flex" : "none"}>
-						<Dashboard onLoaded={handlePortfolioLoaded} onOpenSettings={() => setSettingsOpen(true)} firmwareVersion={deviceState.firmwareVersion} firmwareVariant={deviceState.firmwareVariant} forceRefresh={wizardComplete} onForceRefreshConsumed={() => setWizardComplete(false)} isHiddenWallet={deviceState.isHiddenWallet} knownEmpty={freshWallet} />
+						<Dashboard onLoaded={handlePortfolioLoaded} onOpenVault={handleOpenVault} onOpenSettings={() => setSettingsOpen(true)} firmwareVersion={deviceState.firmwareVersion} firmwareVariant={deviceState.firmwareVariant} forceRefresh={wizardComplete} onForceRefreshConsumed={() => setWizardComplete(false)} isHiddenWallet={deviceState.isHiddenWallet} knownEmpty={freshWallet} />
 					</Flex>
 					{activeTab === "explore" && <AppStore onOpenApp={handleOpenApp} onOpenKeepKey={handleOpenKeepKey} />}
 					{activeTab === "addresses" && <AddressBookView />}
+					{activeTab === "multisig" && !splashBitcoinOnly && <SafeMultisigView key={`${deviceState.deviceId}:${deviceState.isHiddenWallet}`} />}
 				</Flex>
 			</Flex>
 			<DeviceSettingsDrawer
@@ -1299,7 +1351,7 @@ function App() {
 						overflow="hidden"
 						role="dialog"
 						aria-modal="true"
-						aria-label="WalletConnect Not Supported"
+						aria-label={uiText("WalletConnect Not Supported")}
 					>
 						<Box px="6" pt="5" pb="4">
 							<Flex align="center" gap="2" mb="3">
@@ -1308,13 +1360,9 @@ function App() {
 									<path d="M4 7c4.5-4.5 11.5-4.5 16 0" />
 									<circle cx="12" cy="15" r="1.5" fill="#3B99FC" />
 								</svg>
-								<Text fontSize="md" fontWeight="600" color="kk.textPrimary">
-									WalletConnect
-								</Text>
+								<Text fontSize="md" fontWeight="600" color="kk.textPrimary">{uiText("WalletConnect")}</Text>
 							</Flex>
-							<Text fontSize="sm" color="kk.textSecondary" lineHeight="1.6" mb="3">
-								WalletConnect is not supported in KeepKey Vault. Please use the KeepKey Browser Extension instead.
-							</Text>
+							<Text fontSize="sm" color="kk.textSecondary" lineHeight="1.6" mb="3">{uiText("WalletConnect is not supported in KeepKey Vault. Please use the KeepKey Browser Extension instead.")}</Text>
 							<Box
 								as="a"
 								href="#"

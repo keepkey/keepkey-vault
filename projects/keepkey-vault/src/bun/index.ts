@@ -203,6 +203,9 @@ try {
 }
 
 import Electrobun, { BrowserView, BrowserWindow, Updater, Utils, ApplicationMenu } from "electrobun/bun"
+import { backendText } from './i18n'
+import { supportedLanguage } from '../mainview/i18n/languages'
+import { validNumberLocale } from '../shared/locale'
 import pkg from "../../package.json"
 
 // ── Global error handlers (MUST be first — prevents silent crashes) ──
@@ -323,7 +326,15 @@ import { createRpcAltFetcher } from "./solana-alt"
 import { createProviderKeySession } from "./clearsign-provider-session"
 import { buildProviderBundle, buildStudioEvmSchema, parseProviderBundle, providerBundleFileName, uniqueFilePath } from "./clearsign-studio-evm"
 import { getTokenMetadata, broadcastEvmTx, verifyEvmSigner } from "./evm-rpc"
-import { evmSourceForChain } from "./pioneer-evm"
+import { evmSourceForChain, pioneerEvmRpc } from "./pioneer-evm"
+import { SafeMultisigService, inspectBaseSafe } from './safe-multisig'
+import { VaultImportService } from './vault-import'
+import { VaultPortfolioService } from './vault-portfolio'
+import { requireVaultAsset, assertVaultControlSnapshot, type VaultAssetRequest, type VaultAssetAccount } from '../shared/vault-asset-account'
+import { linkedVaultIds } from '../shared/vault-wallet-links'
+import { utils as evmUtils } from 'ethers'
+import { VaultAddressBook, certifiableAddressBookEntries } from './vault-addressbook'
+import { assertVaultDestination, safeVaultIdentity, bitcoinVaultIdentity, type VaultIdentity } from '../shared/vault-identity'
 import { deviceErrorMessage } from "../shared/device-error"
 import type { BtcBroadcastReview, BtcPsbtReview, BtcWatchOnlyAccounts, BtcWatchOnlyImport, BtcWatchOnlyPsbt, BtcWatchOnlyReceive, ChainBalance, TokenBalance, CustomToken, SigningRequestInfo, ApiLogEntry, PioneerChainInfo, EvmAddressSet, Bip85SeedMeta, StakingPosition, SwapAsset, AuditToken, DefiPosition, RecentActivity, ClearSignEvent, ClearSignSolanaSchemaArtifact } from "../shared/types"
 import type { VaultRPCSchema } from "../shared/rpc-schema"
@@ -1016,7 +1027,11 @@ const multisigRegistry = new MultisigRegistry(getSetting, setSetting, () => ({
 	epoch: activitySessionEpoch,
 }))
 const savedMultisigPolicies = () => multisigRegistry.read()
-const saveMultisigPolicies = (records: SavedMultisigPolicy[]) => multisigRegistry.write(records)
+const saveMultisigPolicies = (records: SavedMultisigPolicy[]) => {
+	multisigRegistry.write(records)
+	if (!engine.isPassphraseWallet) syncBitcoinVaultBook()
+	notifyVaultsChanged()
+}
 function multisigPreview(policy: MultisigPolicy, record: SavedMultisigPolicy): MultisigPolicyPreview {
 	return {
 		id: policy.id,
@@ -1623,8 +1638,9 @@ function getAppSettings() {
 		pioneerApiBase: activeBase,
 		pioneerServers: servers,
 		activePioneerServer,
-		fiatCurrency: getSetting('fiat_currency') || 'USD',
-		numberLocale: getSetting('number_locale') || 'en-US',
+		appLanguage: supportedLanguage(getSetting('app_language')) || 'en',
+		fiatCurrency: 'USD',
+		numberLocale: validNumberLocale(getSetting('number_locale')),
 		walletConnectEnabled,
 		btcMultisigEnabled:multisigFeature.enabled,
 		zcashPrivacyEnabled,
@@ -3833,6 +3849,184 @@ const vaultRpcObservation: VaultRpcObservationContext = {
 const observedRpcSign = (method: VaultRpcSigner, params: unknown, sign: () => Promise<any>): Promise<any> =>
 	observeVaultRpcSignature(vaultRpcObservation, method, params, sign)
 
+function safeSessionKey() {
+	return `${activitySessionEpoch}:${engine.getDeviceState().deviceId || ''}:${engine.currentSeedEthAddress?.toLowerCase() || ''}:${engine.isPassphraseWallet}`
+}
+let vaultBookStore: VaultAddressBook | undefined
+let vaultBookDatabase: ReturnType<typeof getDb>
+let sessionVaults: { key: string; vaults: VaultIdentity[] } | undefined
+function vaultBook() {
+	const database = getDb()
+	if (!database) throw new Error('Address book database is unavailable')
+	if (vaultBookDatabase !== database) { vaultBookStore = undefined; vaultBookDatabase = database }
+	return vaultBookStore ||= new VaultAddressBook(database)
+}
+function notifyVaultsChanged() {
+	try { (rpc.send as any)['vaults-changed']({}) } catch { /* webview not ready */ }
+	try { (rpc.send as any)['addressbook-changed']({}) } catch { /* webview not ready */ }
+}
+function syncBitcoinVaultBook() {
+	const vaults = savedMultisigPolicies().map(r => bitcoinVaultIdentity(multisigPreview(parseMultisigPolicy(r.descriptor), r)))
+	if (!engine.isPassphraseWallet && vaultBook().sync({ walletId: 'btc-multisig-policies', deviceId: '' }, 'bitcoin-multisig', vaults)) invalidateAddressBookCertification()
+	return vaults
+}
+function registeredVaults() {
+	const all = [...(engine.isPassphraseWallet && sessionVaults?.key === safeSessionKey() ? sessionVaults.vaults : []), ...vaultBook().list().map(e => e.vault!)]
+	return all.filter((v, i) => all.findIndex(other => other.id === v.id) === i)
+}
+function vaultAddressEntries(networkId?: string) {
+	const rows = vaultBook().list(networkId)
+	if (engine.isPassphraseWallet && sessionVaults?.key === safeSessionKey()) {
+		for (const v of sessionVaults.vaults) if (!networkId || v.networkId === networkId) {
+			rows.unshift({ id: `session-vault:${v.id}`, walletId: 'session', deviceId: engine.getDeviceState().deviceId || '', kind: 'external',
+				networkId: v.networkId, chainId: v.chainId, address: v.address, label: v.name, vault: v, savedAt: Date.now(), createdAt: Date.now(), updatedAt: Date.now() })
+		}
+	}
+	return rows.filter((e, i) => rows.findIndex(other => other.vault?.id === e.vault?.id) === i)
+}
+function assertKnownVaultDestination(network: string, address: string, caip: string) {
+	assertVaultDestination(registeredVaults(), network, address, caip)
+}
+async function verifyKnownVaultDestination(network: string, address: string, caip: string) {
+	const epoch = activitySessionEpoch
+	assertKnownVaultDestination(network, address, caip)
+	const safes = registeredVaults().filter(v => v.type === 'safe' && v.networkId === network && v.address.toLowerCase() === address.trim().toLowerCase())
+	// Funding a public Safe does not require an owner session or USB calls.
+	// Keep the same pinned-code and fixed-block control checks as vault import.
+	for (const safe of safes) {
+		const account = await inspectBaseSafe(readConfiguredSafeRpc, safe.address, safe.name)
+		if (epoch !== activitySessionEpoch) throw new Error('Wallet changed while checking the vault destination. Retry verification.')
+		assertVaultControlSnapshot(safe, account)
+	}
+	assertKnownVaultDestination(network, address, caip)
+}
+async function verifyKnownEvmVaultTransfer(params: any) {
+	const destination = evmRecipient(params)
+	const data = String(params?.data || '0x')
+	if (destination && (/^(0x)?$/.test(data) || /^0xa9059cbb[0-9a-f]{128}$/i.test(data))) {
+		const network = `eip155:${destination.chainId}`
+		const caip = /^(0x)?$/.test(data) ? `${network}/slip44:60` : `${network}/erc20:${String(params.to).toLowerCase()}`
+		await verifyKnownVaultDestination(network, destination.address, caip)
+	}
+}
+function vaultCertificationEntries() {
+	return certifiableAddressBookEntries(vaultBook().list(), getAddressBookList({ kind: 'external', savedOnly: true }))
+}
+async function listRegisteredVaults() {
+	const epoch = activitySessionEpoch
+	const bitcoin = syncBitcoinVaultBook()
+	let safes: VaultIdentity[] = []
+	if (!isBitcoinOnlyVariant(engine.getDeviceState().firmwareVariant) && !watchOnlyViewBtcOnly && engine.wallet && engine.getDeviceState().state === 'ready') {
+		const context = await safeMultisig.list()
+		safes = context.accounts.map(a => safeVaultIdentity(a, context.sessionOnly))
+		const scope = getWalletDbScope()
+		if (!context.sessionOnly && scope && vaultBook().sync(scope, 'safe', safes)) invalidateAddressBookCertification()
+	}
+	if (epoch !== activitySessionEpoch) throw new Error('Wallet changed while loading vaults')
+	const saved = engine.isPassphraseWallet && sessionVaults?.key === safeSessionKey() ? sessionVaults.vaults : vaultBook().list().map(e => e.vault!)
+	const all = [...safes, ...bitcoin, ...saved].filter(v => !isBitcoinOnlyVariant(engine.getDeviceState().firmwareVariant) && !watchOnlyViewBtcOnly || v.type === 'bitcoin-multisig')
+	const vaults = all.filter((v, i) => all.findIndex(other => other.id === v.id) === i)
+	sessionVaults = { key: safeSessionKey(), vaults }
+	return vaults
+}
+async function readConfiguredSafeRpc(method: string, params: any[]) {
+	requireOnline('Safe multisig')
+	const endpoint = getEvmSimulationEndpoint(8453)
+	if (endpoint.startsWith('eip155:')) return pioneerEvmRpc(await getPioneer(), endpoint, method, params)
+	const response = await fetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }), signal: AbortSignal.timeout(30_000) })
+	if (!response.ok) throw new Error(`Base RPC returned HTTP ${response.status}`)
+	const body: any = await response.json()
+	if (body.error || !Object.prototype.hasOwnProperty.call(body, 'result')) throw new Error(body.error?.message || 'Invalid Base RPC response')
+	return body.result
+}
+async function readVaultAssetAccount(request: VaultAssetRequest): Promise<VaultAssetAccount> {
+	const epoch = activitySessionEpoch
+	if ((isBitcoinOnlyVariant(engine.getDeviceState().firmwareVariant) || watchOnlyViewBtcOnly) && request.networkId !== 'bip122:000000000019d6689c085ae165831e93') throw new Error('This vault network is unavailable on Bitcoin-only firmware')
+	const identity = requireVaultAsset(registeredVaults(), request)
+	if (identity.type === 'bitcoin-multisig') {
+		const record = savedMultisigPolicies().find(r => parseMultisigPolicy(r.descriptor).id === identity.policyId)
+		if (!record) throw new Error('Re-import and verify this Bitcoin vault policy first')
+		const verified = bitcoinVaultIdentity(multisigPreview(parseMultisigPolicy(record.descriptor), record))
+		if (verified.address !== identity.address || verified.threshold !== identity.threshold) throw new Error('Bitcoin vault policy differs from the selected account')
+		requireVaultAsset([verified], request)
+		return { identity: verified, assetCaip: request.assetCaip }
+	}
+	const account = await inspectBaseSafe(readConfiguredSafeRpc, identity.address, identity.name)
+	if (epoch !== activitySessionEpoch) throw new Error('Wallet changed. Select the vault account again.')
+	assertVaultControlSnapshot(identity, account)
+	account.reviewedAt = identity.reviewedAt
+	const verified = requireVaultAsset([safeVaultIdentity(account, identity.sessionOnly)], request)
+	return { identity: verified, assetCaip: request.assetCaip, safe: account }
+}
+const vaultPortfolios = new VaultPortfolioService({
+	scope: () => ({ key: safeSessionKey(), hidden: engine.isPassphraseWallet }),
+	list: () => {
+		if (!engine.isPassphraseWallet) syncBitcoinVaultBook()
+		const bitcoinOnly = isBitcoinOnlyVariant(engine.getDeviceState().firmwareVariant) || watchOnlyViewBtcOnly
+		return vaultAddressEntries().map(e => e.vault!).filter(v => !bitcoinOnly || v.type === 'bitcoin-multisig')
+	},
+	readSafe: vault => inspectBaseSafe(readConfiguredSafeRpc, vault.address, vault.name),
+	price: async caip => {
+		requireOnline('vault asset prices')
+		const pioneer = await getPioneer()
+		return marketPriceUsd(await withTimeout(pioneer.GetMarketInfo([caip]), 10_000, 'GetMarketInfo(vault)'))
+	},
+	readExcluded: () => getSetting('vault_totals_excluded'),
+	writeExcluded: ids => setSetting('vault_totals_excluded', JSON.stringify(ids)),
+})
+const safeMultisig = new SafeMultisigService({
+	currentKey: safeSessionKey,
+	session: async () => {
+		const device = engine.getDeviceState()
+		if (!engine.wallet || device.state !== 'ready') throw new Error('Connect and unlock your KeepKey first')
+		if (isBitcoinOnlyVariant(device.firmwareVariant) || watchOnlyViewBtcOnly) throw new Error('Safe requires multi-chain firmware')
+		const epoch = activitySessionEpoch
+		const wallet = engine.wallet
+		const { truth } = await ensureManagersForSeed('safeMultisig')
+		if (!truth || epoch !== activitySessionEpoch || wallet !== engine.wallet || device.deviceId !== engine.getDeviceState().deviceId) throw new Error('Wallet changed. Reopen Multisig.')
+		const scope = getWalletDbScope()
+		if (!scope) throw new Error('Wallet identity is unavailable')
+		return { key: safeSessionKey(), scope: `safe_multisig_v1:${scope.walletId}`, owner: truth,
+			sessionOnly: engine.isPassphraseWallet, nestedClearSign: !!engine.getDeviceState().capabilities?.includes(28) }
+	},
+	read: getSetting,
+	write: setSetting,
+	assertDestination: verifyKnownVaultDestination,
+	changed: (session, accounts) => {
+		const vaults = accounts.map(a => safeVaultIdentity(a, session.sessionOnly))
+		if (session.sessionOnly) sessionVaults = { key: session.key, vaults: [...(sessionVaults?.key === session.key ? sessionVaults.vaults.filter(v => v.type !== 'safe') : []), ...vaults] }
+		else {
+			const scope = getWalletDbScope()
+			if (scope && vaultBook().sync(scope, 'safe', vaults)) invalidateAddressBookCertification()
+		}
+		notifyVaultsChanged()
+	},
+	rpc: readConfiguredSafeRpc,
+})
+
+const vaultImporter = new VaultImportService({
+	context: () => ({ key: safeSessionKey(), hidden: engine.isPassphraseWallet }),
+	inspect: async params => {
+		const rpcRead = async (method: string, values: any[]) => {
+			requireOnline('Verify vault')
+			if (!['eth_chainId', 'eth_blockNumber', 'eth_getCode', 'eth_call', 'eth_getBalance'].includes(method)) throw new Error('Vault verification only permits read-only RPC methods')
+			const response = await fetch(params.rpcUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params: values }), signal: AbortSignal.timeout(20_000) })
+			if (!response.ok) throw new Error(`Verification RPC returned HTTP ${response.status}`)
+			const body: any = await response.json()
+			if (body.error || !Object.prototype.hasOwnProperty.call(body, 'result')) throw new Error(body.error?.message || 'Invalid verification RPC response')
+			return body.result
+		}
+		return inspectBaseSafe(rpcRead, params.address, params.name)
+	},
+	save: (vault, context) => {
+		if (context.hidden) sessionVaults = { key: context.key, vaults: [...(sessionVaults?.key === context.key ? sessionVaults.vaults.filter(v => v.id !== vault.id) : []), vault] }
+		else if (vaultBook().sync({ walletId: `vault-directory:${vault.id}`, deviceId: '' }, 'safe', [vault])) invalidateAddressBookCertification()
+		notifyVaultsChanged()
+	},
+})
+
 const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 	maxRequestTime: 1_800_000, // 30 minutes — generous for device-interactive ops, but not infinite
 	handlers: {
@@ -4702,8 +4896,10 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				if (typeof params?.data !== 'string' || params.data.length > 1_398_104) throw new Error('PSBT is larger than 1 MB, refusing')
 				const bytes = new Uint8Array(Buffer.from(params.data, 'base64'))
 				const signed = alreadySigned(bytes)
+				if (params.expectedVaultPolicyId && signed) throw new Error('Use an unsigned or co-signable PSBT for the selected vault policy')
 				if (signed) return { kind: 'signed', txid: signed.txid, txHex: signed.txHex, fee: signed.fee === null ? null : signed.fee.toString() }
 				const multisig=isMultisigPsbt(bytes)
+				if (params.expectedVaultPolicyId && !multisig) throw new Error('This PSBT does not spend from the selected multisig vault')
 				const assertFeature=multisig?multisigFeature.capture():()=>{}
 				if (!engine.wallet || engine.getDeviceState().state !== 'ready') {
 					throw new Error('This PSBT is not signed yet, and only a KeepKey can sign it. Connect and unlock your KeepKey and drop it again (offline mode works too), or sign it in Electrum with your KeepKey.')
@@ -4714,7 +4910,8 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				const epoch = activitySessionEpoch
 				let analysis:PsbtAnalysis|MultisigAnalysis
 				if(multisig){
-					const candidates=savedMultisigPolicies().map(record=>({record,policy:parseMultisigPolicy(record.descriptor)})).filter(({policy})=>matchesMultisigPolicy(bytes,policy))
+					const candidates=savedMultisigPolicies().map(record=>({record,policy:parseMultisigPolicy(record.descriptor)})).filter(({policy})=>matchesMultisigPolicy(bytes,policy) && (!params.expectedVaultPolicyId || policy.id===params.expectedVaultPolicyId))
+					if(params.expectedVaultPolicyId && !candidates.length)throw new Error('This PSBT does not match the selected vault policy')
 					if(!candidates.length)return {kind:'policy-required',message:'Import and verify this multisig wallet policy on KeepKey before co-signing. Use the coordinator’s descriptor or public Electrum multisig wallet file.'}
 					const fingerprint=await readMultisigFingerprint(wallet as any)
 					const found=candidates.find(({record})=>record.fingerprint===fingerprint)
@@ -4945,6 +5142,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			},
 			ethSignTx: async (params) => {
 				if (!engine.wallet) throw new Error('No device connected')
+				await verifyKnownEvmVaultTransfer(params)
 				params = withoutCallerErc7730(params, 'ethSignTx')
 				const promotedResolution = resolvePromotedEvmArtifact(
 					Number((params as any)?.chainId), (params as any)?.to, (params as any)?.data,
@@ -6647,6 +6845,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				requireOnline('build transaction')
 				const chain = getAllChains().find(c => c.id === params.chainId)
 				if (!chain) throw new Error(`Unknown chain: ${params.chainId}`)
+				await verifyKnownVaultDestination(chain.networkId, params.to, params.caip || chain.caip)
 
 				// Firmware gate (fund safety): a THORChain/Maya bank-token send is a
 				// MsgSend whose `denom` field is only honored from 7.15.0. On older
@@ -6868,6 +7067,14 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				if (!params.signedTx) throw new Error('Missing signedTx payload')
 				const chain = getAllChains().find(c => c.id === params.chainId)
 				if (!chain) throw new Error(`Unknown chain: ${params.chainId}`)
+				if (chain.chainFamily === 'evm') {
+					const serialized = params.signedTx?.serializedTx || params.signedTx?.serialized || (typeof params.signedTx === 'string' ? params.signedTx : undefined)
+					if (!serialized || typeof serialized !== 'string') throw new Error('Missing serialized EVM transaction')
+					const parsed = evmUtils.parseTransaction(serialized.startsWith('0x') ? serialized : `0x${serialized}`)
+					if (parsed.chainId !== Number(chain.chainId)) throw new Error('Signed transaction chain does not match the selected network')
+					await verifyKnownEvmVaultTransfer(parsed)
+					if (sessionEpoch !== activitySessionEpoch) throw new Error('Wallet changed before broadcast. Review the transfer again.')
+				}
 
 				let result: { txid: string }
 
@@ -7245,6 +7452,48 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			},
 
 			// ── EVM multi-address ────────────────────────────────────
+			listVaults: () => listRegisteredVaults(),
+			getVaultPortfolios: params => vaultPortfolios.get(!!params?.refresh),
+			setVaultTotalInclusion: params => {
+				vaultPortfolios.setInclusion(params.vaultId, params.include)
+				notifyVaultsChanged()
+				return { success: true as const }
+			},
+			vaultAccountGet: params => readVaultAssetAccount(params),
+			safeOpenVaultAccount: async params => {
+				const epoch = activitySessionEpoch
+				const verified = await readVaultAssetAccount(params)
+				if (!verified.safe || epoch !== activitySessionEpoch) throw new Error('Select a verified Safe account for this wallet session')
+				await safeMultisig.importAccount({ address: verified.safe.address, name: verified.safe.name, expectedOwners: verified.safe.owners, expectedThreshold: verified.safe.threshold })
+				if (epoch !== activitySessionEpoch) throw new Error('Wallet changed. Select and verify the vault account again.')
+				return verified
+			},
+			vaultAddPreview: params => vaultImporter.preview(params),
+			vaultAddConfirm: params => vaultImporter.confirm(params),
+			listSavedVaults: async () => {
+				if (!engine.isPassphraseWallet) syncBitcoinVaultBook()
+				const bitcoinOnly = isBitcoinOnlyVariant(engine.getDeviceState().firmwareVariant) || watchOnlyViewBtcOnly
+				return vaultAddressEntries().map(e => e.vault!).filter(v => !bitcoinOnly || v.type === 'bitcoin-multisig')
+			},
+			checkVaultDestination: async (params) => { await verifyKnownVaultDestination(params.networkId, params.address, params.assetCaip); return { allowed: true } },
+			safeList: async () => {
+				const context = await safeMultisig.list()
+				const endpoint = getEvmSimulationEndpoint(8453)
+				const pioneerSource = endpoint.startsWith('eip155:')
+				const ready = !pioneerSource || await getPioneer().then(p => typeof p.EvmReadRpc === 'function').catch(() => false)
+				return { ...context, rpcReady: ready, rpcSource: pioneerSource ? 'Pioneer' : new URL(endpoint).host }
+			},
+			safePrepareCreate: (params) => safeMultisig.prepareCreate(params),
+			safeSaveSetup: (params) => safeMultisig.saveSetup(params),
+			safeImport: (params) => safeMultisig.importAccount(params),
+			safeInspect: (params) => safeMultisig.inspectAccount(params),
+			safeRefresh: (params) => safeMultisig.refresh(params),
+			safePropose: (params) => safeMultisig.propose(params),
+			safeImportProposal: (params) => safeMultisig.importProposal(params),
+			safeSigningData: (params) => safeMultisig.signingData(params),
+			safeAddSignature: (params) => safeMultisig.addSignature(params),
+			safePrepareExecute: (params) => safeMultisig.prepareExecute(params),
+			safeBroadcast: (params) => safeMultisig.broadcast(params),
 			getEvmAddresses: async () => {
 				if (!engine.wallet) throw new Error('No device connected')
 				const { truth } = await ensureManagersForSeed('getEvmAddresses')
@@ -8021,13 +8270,20 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				return getAppSettings()
 			},
 			setFiatCurrency: async (params) => {
-				setSetting('fiat_currency', params.currency || 'USD')
+				setSetting('fiat_currency', 'USD')
 				console.log('[settings] Fiat currency set to:', params.currency)
 				return getAppSettings()
 			},
 			setNumberLocale: async (params) => {
-				setSetting('number_locale', params.locale || 'en-US')
+				setSetting('number_locale', validNumberLocale(params.locale))
 				console.log('[settings] Number locale set to:', params.locale)
+				return getAppSettings()
+			},
+			setAppLanguage: async (params) => {
+				const language = supportedLanguage(params.language)
+				if (!language) throw new Error('Unsupported application language')
+				setSetting('app_language', language)
+				updateApplicationMenu()
 				return getAppSettings()
 			},
 			setOfflineMode: async (params) => {
@@ -8303,7 +8559,8 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				// Instant recipient detection (R5) — wallet-agnostic, read-only.
 				const chain = getAllChains().find(c => c.networkId === params.networkId)
 				if (!chain) return null
-				return matchAddressBook(params.networkId, params.address, chain.chainFamily)
+				const vault = vaultAddressEntries(params.networkId).find(e => chain.chainFamily === 'evm' ? e.address.toLowerCase() === params.address.toLowerCase() : e.address === params.address)
+				return vault || matchAddressBook(params.networkId, params.address, chain.chainFamily)
 			},
 			listAddressBook: async (params) => {
 				// The Address Book is wallet-agnostic public data (own = watch-only public
@@ -8327,7 +8584,10 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					}
 				}
 				const external = getAddressBookList({ kind: 'external', networkId, search, savedOnly: true, chainId: bitcoinOnly ? 'bitcoin' : undefined })
-				return [...own, ...external].map(e => ({ ...e, deviceLabel: labels[e.deviceId] || e.deviceLabel }))
+				await listRegisteredVaults()
+				const vaults = vaultAddressEntries(networkId).filter(e => (!bitcoinOnly || e.chainId === 'bitcoin') && (!search || `${e.label} ${e.address}`.toLowerCase().includes(search.toLowerCase())))
+				const vaultIds = new Set(vaults.map(e => `${e.networkId}:${e.address.toLowerCase()}`))
+				return [...own, ...external.filter(e => !vaultIds.has(`${e.networkId}:${e.address.toLowerCase()}`)), ...vaults].map(e => ({ ...e, deviceLabel: labels[e.deviceId] || e.deviceLabel }))
 			},
 			addAddressBook: async (params) => {
 				// Wallet-agnostic: contacts can be saved from any session (incl. hidden).
@@ -8367,7 +8627,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				)
 			},
 			previewAddressBookCertification: async () =>
-				contactsFromEntries(getAddressBookList({ kind: 'external', savedOnly: true }))
+				contactsFromEntries(vaultCertificationEntries(), false)
 					.map(c => ({ label: c.label, network: c.network, address: `0x${c.destination}` })),
 			certifyAddressBook: async (params) => {
 				if (!addressBookClearsignEnabled) throw new Error('Address Book ClearSign is not enabled')
@@ -8377,8 +8637,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				// The review dialog can drop contacts; it can never add one.
 				const only = (params as any)?.only as { network: string; address: string }[] | undefined
 				const keep = only && new Set(only.map(o => `${o.network}|${String(o.address).toLowerCase().replace(/^0x/, '')}`))
-				const contacts = contactsFromEntries(getAddressBookList({ kind: 'external', savedOnly: true }))
-					.filter(c => !keep || keep.has(`${c.network}|${c.destination}`))
+				const contacts = contactsFromEntries(vaultCertificationEntries().filter(e => !keep || keep.has(`${e.networkId}|${e.address.toLowerCase().replace(/^0x/, '')}`)))
 				if (!contacts.length) throw new Error('Add at least one labeled EVM contact before certifying')
 				const revision = Math.max(0, Number(getSetting('addressbook_clearsign_revision') || '0')) + 1
 				if (addressBookCertifyUnsupported()) throw new Error(ADDRESS_BOOK_CERTIFY_UNSUPPORTED)
@@ -9420,13 +9679,19 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			// ── Registered devices (device history) ─────────────────
 			getRegisteredDevices: async () => {
 				const { getAllDeviceSnapshots } = await import('./db')
-				return getAllDeviceSnapshots()
+				const bitcoinOnly = isBitcoinOnlyVariant(engine.getDeviceState().firmwareVariant) || watchOnlyViewBtcOnly
+				const vaults = vaultAddressEntries().map(e => e.vault!).filter(v => !bitcoinOnly || v.type === 'bitcoin-multisig')
+				return getAllDeviceSnapshots().map(device => ({ ...device, vaultIds: linkedVaultIds(vaults,
+					getCachedPubkeys(device.deviceId).map(key => ({ ...key, family: key.chainId === 'bitcoin' ? 'bitcoin' as const : CHAINS.some(c => c.id === key.chainId && c.chainFamily === 'evm') ? 'evm' as const : 'other' as const }))) }))
 			},
 			forgetDevice: async (params) => {
 				const { deleteDeviceSnapshot } = await import('./db')
 				await revokeKnownWalletMonitoring(params.deviceId)
 				forgottenMonitorEpochs.set(params.deviceId, activitySessionEpoch)
 				deleteDeviceSnapshot(params.deviceId)
+				if (engine.getDeviceState().deviceId === params.deviceId) { safeMultisig.clear(); sessionVaults = undefined }
+				invalidateAddressBookCertification()
+				notifyVaultsChanged()
 				if (engine.getDeviceState().deviceId !== params.deviceId) bootstrapActiveWalletWatches()
 			},
 
@@ -9866,17 +10131,18 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			},
 			emulatorInit: async (params) => {
 				if (!emulatorEnabled) throw new Error('Emulator is disabled')
-				const { initEmulator } = await import('./emulator')
-				const { selectedEmulatorBuild, emulatorBuildFlashName } = await import('./emulator-library')
+				const { initEmulator, getActiveFlashName } = await import('./emulator')
+				const { selectedEmulatorBuild, resolveEmulatorWalletName, selectEmulatorWallet } = await import('./emulator-library')
 				const selected = selectedEmulatorBuild()
-				if (selected && params?.flashName && params.flashName !== emulatorBuildFlashName(selected)) throw new Error('This build has its own flash; switch builds to use another wallet')
-				const status = initEmulator(selected ? emulatorBuildFlashName(selected) : (params?.flashName || 'default'))
+				const flashName = resolveEmulatorWalletName({ explicit: params?.flashName, buildId: selected })
+				const status = initEmulator(flashName)
 				if (status.state !== 'running') throw new Error(status.error || 'Emulator failed to start')
 				// Open the emulator device window
 				const { openEmulatorWindow } = await import('./emulator-window')
 				openEmulatorWindow()
 				// Bridge emulator to engine so UI transitions through onboarding
 				await engine.connectEmulator()
+				selectEmulatorWallet(getActiveFlashName())
 				return status
 			},
 			emulatorStop: async () => {
@@ -9914,11 +10180,12 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			},
 			emulatorActivateBuild: async (params) => {
 				if (!emulatorEnabled) throw new Error('Emulator is disabled')
-				const { listEmulatorBuilds, selectEmulatorBuild, selectedEmulatorBuild, clearSelectedEmulatorBuild, emulatorBuildFlashName } = await import('./emulator-library')
+				const { listEmulatorBuilds, selectEmulatorBuild, selectedEmulatorBuild, clearSelectedEmulatorBuild, resolveEmulatorWalletName, selectEmulatorWallet } = await import('./emulator-library')
 				if (!listEmulatorBuilds().some(build => build.id === params.id)) throw new Error('Emulator build is not installed')
 				const { getEmulatorStatus, getActiveFlashName, stopEmulator, initEmulator } = await import('./emulator')
 				const previousBuild = selectedEmulatorBuild()
 				const previousFlash = getEmulatorStatus().state === 'running' ? getActiveFlashName() : null
+				const flashName = resolveEmulatorWalletName({ running: previousFlash, buildId: params.id })
 				const { closeEmulatorWindow, openEmulatorWindow } = await import('./emulator-window')
 				if (previousFlash) {
 					closeEmulatorWindow()
@@ -9927,7 +10194,6 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				}
 				try {
 					selectEmulatorBuild(params.id)
-					const flashName = emulatorBuildFlashName(params.id)
 					const status = initEmulator(flashName)
 					if (status.state !== 'running') throw new Error(status.error || 'Emulator failed to start')
 					openEmulatorWindow()
@@ -9935,6 +10201,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					const version = engine.getDeviceState().firmwareVersion
 					const { recordEmulatorBuildVersion } = await import('./emulator-library')
 					if (/^\d+\.\d+\.\d+$/.test(version || '')) recordEmulatorBuildVersion(params.id, version)
+					selectEmulatorWallet(flashName)
 					return { status, flashName }
 				} catch (error) {
 					closeEmulatorWindow()
@@ -10028,6 +10295,8 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				deleteFlash(params.name)
 				deleteMnemonic(params.name)
 				deleteEmulatorWalletMeta(params.name)
+				const { selectedEmulatorWallet, clearSelectedEmulatorWallet } = await import('./emulator-library')
+				if (selectedEmulatorWallet() === params.name) clearSelectedEmulatorWallet()
 				if (meta?.deviceId) deleteDeviceSnapshot(meta.deviceId)
 				if (meta?.deviceId && engine.getDeviceState().deviceId !== meta.deviceId) bootstrapActiveWalletWatches()
 				return getEmulatorStatus()
@@ -10042,10 +10311,9 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				const status = getEmulatorStatus()
 				const activeFlash = status.state === 'running' ? getActiveFlashName() : null
 				const metaByName = new Map(getAllEmulatorWalletMeta().map(m => [m.name, m]))
-				// Sorted: directory order is arbitrary, and a list that reshuffles
-				// invites starting the wrong wallet. A selected build has exactly
-				// one wallet, listed even before its first start.
-				const names = selectedBuild ? [emulatorBuildFlashName(selectedBuild)] : listFlashImages().sort()
+				// Saved wallets remain selectable independently of the firmware.
+				const saved = listFlashImages().sort()
+				const names = saved.length ? saved : [selectedBuild ? emulatorBuildFlashName(selectedBuild) : 'default']
 				return names.map(name => {
 					const meta = metaByName.get(name)
 					return {
@@ -10064,9 +10332,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			},
 			emulatorImportWallet: async (params) => {
 				if (!emulatorEnabled) throw new Error('Emulator is disabled')
-				const { selectedEmulatorBuild, emulatorBuildFlashName } = await import('./emulator-library')
-				const selectedBuild = selectedEmulatorBuild()
-				if (selectedBuild && params.name !== emulatorBuildFlashName(selectedBuild)) throw new Error('This build has its own flash; import into its active wallet')
+				const { selectEmulatorWallet } = await import('./emulator-library')
 				// Wallet name validation lives in emulator-keychain.validateFlashName
 				// (called by every path builder) — call here too so we surface the
 				// error before doing any work.
@@ -10131,6 +10397,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 
 					// Only persist mnemonic AFTER seed is verified on device
 					saveMnemonic(params.name, params.mnemonic)
+					selectEmulatorWallet(params.name)
 					return getEmulatorStatus()
 				} catch (err) {
 					// Rollback: stop the failed emulator and clean up the orphaned
@@ -10164,15 +10431,20 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			},
 			emulatorSwitchWallet: async (params) => {
 				if (!emulatorEnabled) throw new Error('Emulator is disabled')
-				const { selectedEmulatorBuild, emulatorBuildFlashName } = await import('./emulator-library')
-				const selectedBuild = selectedEmulatorBuild()
-				if (selectedBuild && params.name !== emulatorBuildFlashName(selectedBuild)) throw new Error('This build has its own flash; switch builds to use another wallet')
+				const { selectEmulatorWallet, selectedEmulatorWallet, selectedEmulatorBuild, emulatorBuildFlashName } = await import('./emulator-library')
 				const { stopEmulator, initEmulator, getEmulatorStatus } = await import('./emulator')
-				const { listFlashImages } = await import('./emulator-keychain')
+				const { listFlashImages, validateFlashName } = await import('./emulator-keychain')
+				params = { ...params, name: validateFlashName(params.name) }
 				const saved = listFlashImages()
-				if (!selectedBuild && !saved.includes(params.name)) {
-					const problem = newEmulatorWalletNameError(params.name, saved)
-					if (problem) throw new Error(`Cannot create emulator wallet: ${problem}`)
+				if (!saved.includes(params.name)) {
+					const selectedWallet = selectedEmulatorWallet()
+					if (selectedWallet === params.name) throw new Error(`Saved emulator wallet "${params.name}" is missing. Select an existing wallet.`)
+					const build = selectedEmulatorBuild()
+					const firstUseFallback = !saved.length && !selectedWallet && params.name === (build ? emulatorBuildFlashName(build) : 'default')
+					if (!firstUseFallback) {
+						const problem = newEmulatorWalletNameError(params.name, saved)
+						if (problem) throw new Error(`Cannot create emulator wallet: ${problem}`)
+					}
 				}
 
 				// Stop current emulator if running
@@ -10191,6 +10463,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				const { openEmulatorWindow } = await import('./emulator-window')
 				openEmulatorWindow()
 				await engine.connectEmulator()
+				selectEmulatorWallet(params.name)
 				return getEmulatorStatus()
 			},
 			emulatorGetMnemonic: async () => {
@@ -10757,6 +11030,9 @@ engine.on('state-change', (state) => {
 	}
 	// needs_init = wiped: the seed that queued/owned anything here is gone.
 	if (state.state === 'disconnected' || state.state === 'needs_passphrase' || state.state === 'needs_init') {
+		safeMultisig.clear()
+		vaultImporter.clear()
+		sessionVaults = undefined
 		pendingScopedApiLogs.splice(0)
 		// Watched txs + cached history addresses belong to the session that is ending.
 		txWatch.clear()
@@ -10803,6 +11079,9 @@ engine.on('wallet-scope-ready', ({ deviceId, seedAddress }) => {
 // Reset in-memory address managers so they re-derive from the new seed.
 // Don't wipe DB — let the fresh Pioneer fetch naturally overwrite stale entries.
 engine.on('seed-changed', ({ deviceId, oldAddress, newAddress }) => {
+	safeMultisig.clear()
+	vaultImporter.clear()
+	sessionVaults = undefined
 	console.warn(`[Vault] SEED CHANGED on ${deviceId}: ${oldAddress?.slice(0, 10)} → ${newAddress?.slice(0, 10)}`)
 	resetSeedManagers()
 	clearSessionActivity()
@@ -10850,6 +11129,10 @@ onScanProgress((progress) => {
 })
 engine.on('pin-request', (req) => {
 	try { rpc.send['pin-request'](req) } catch { /* webview not ready yet */ }
+	if (engine.isEmulator) {
+		import('./emulator-window').then(({ displayPinPrompt }) => displayPinPrompt(req.type))
+			.catch((err) => console.warn('[emulator] PIN instructions unavailable:', err?.message))
+	}
 })
 engine.on('pin-error', (err) => {
 	try { rpc.send['pin-error'](err) } catch { /* webview not ready yet */ }
@@ -10959,7 +11242,10 @@ const url = await getMainViewUrl()
 
 // ── Application Menu (required for Cmd+C/V clipboard in WKWebView on macOS) ──
 // On Windows, Electrobun renders a menu bar but macOS roles are no-ops — hide it.
-if (process.platform !== 'win32') ApplicationMenu.setApplicationMenu([
+function updateApplicationMenu() {
+if (process.platform === 'win32') return
+const text = (source: string) => backendText(getSetting('app_language'), source)
+ApplicationMenu.setApplicationMenu([
 	{
 		label: "KeepKey Vault",
 		submenu: [
@@ -10967,11 +11253,11 @@ if (process.platform !== 'win32') ApplicationMenu.setApplicationMenu([
 			{ role: "hideOtherApplications" },
 			{ role: "unhideAllApplications" },
 			{ type: "separator" },
-			{ label: "Quit", role: "terminate", accelerator: "Cmd+Q" },
+			{ label: text("Quit"), role: "terminate", accelerator: "Cmd+Q" },
 		],
 	},
 	{
-		label: "Edit",
+		label: text("Edit"),
 		submenu: [
 			{ role: "undo", accelerator: "Cmd+Z" },
 			{ role: "redo", accelerator: "Cmd+Shift+Z" },
@@ -10984,13 +11270,15 @@ if (process.platform !== 'win32') ApplicationMenu.setApplicationMenu([
 		],
 	},
 	{
-		label: "Window",
+		label: text("Window"),
 		submenu: [
 			{ role: "performMiniaturize", accelerator: "Cmd+M" },
 			{ role: "performClose", accelerator: "Cmd+W" },
 		],
 	},
 ])
+}
+updateApplicationMenu()
 
 perf('creating BrowserWindow')
 let _mainWindow: BrowserWindow | null = null
@@ -11088,14 +11376,15 @@ await engine.start()
 const autostartEmulatorFlash = process.env.KEEPKEY_AUTOSTART_EMULATOR_FLASH
 if (autostartEmulatorFlash) {
 	if (!emulatorEnabled) throw new Error('KEEPKEY_AUTOSTART_EMULATOR_FLASH requires emulator_enabled=1')
-	const { validateFlashName } = await import('./emulator-keychain')
-	const flashName = validateFlashName(autostartEmulatorFlash)
+	const { resolveEmulatorWalletName, selectEmulatorWallet } = await import('./emulator-library')
+	const flashName = resolveEmulatorWalletName({ explicit: autostartEmulatorFlash })
 	const { initEmulator } = await import('./emulator')
 	const status = initEmulator(flashName)
 	if (status.state !== 'running') throw new Error(status.error || 'Emulator failed to start')
 	const { openEmulatorWindow } = await import('./emulator-window')
 	openEmulatorWindow()
 	await engine.connectEmulator()
+	selectEmulatorWallet(flashName)
 	console.log(`[emulator] Auto-started explicit flash ${flashName}`)
 }
 
