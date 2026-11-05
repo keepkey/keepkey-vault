@@ -52,6 +52,11 @@ function workerCommand(): string[] {
   throw new Error('The Monero sidecar is unavailable; build monero-cli first')
 }
 
+/** Capability check only; does not spawn a process or request wallet keys. */
+export function isMoneroSidecarAvailable(): boolean {
+  try { workerCommand(); return true } catch { return false }
+}
+
 export function createMoneroSidecarManager(options: {
   spawn?: () => WorkerProcess
   startupTimeoutMs?: number

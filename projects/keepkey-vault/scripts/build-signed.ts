@@ -49,14 +49,16 @@ if (process.platform === 'darwin' || process.platform === 'win32') {
   }
 }
 
-// Release artifacts carry the default-off Monero feature and its verified tools.
+// CI's Monero builds require all inputs; legacy builds without the optional
+// sidecar retain their existing packaging and show Monero as unavailable.
 const moneroExecutable = process.platform === 'win32' ? 'monero-cli.exe' : 'monero-cli'
 const moneroRpc = process.platform === 'win32' ? 'monero-wallet-rpc.exe' : 'monero-wallet-rpc'
-for (const relative of [`monero-cli/dist/${moneroExecutable}`, `monero-cli/vendor/${process.platform}-${process.arch}/${moneroRpc}`, `monero-cli/vendor/${process.platform}-${process.arch}/monero-tools.json`]) {
-  if (!existsSync(join(import.meta.dir, '..', relative))) {
-    console.error('[release] Missing Monero sidecar. Run bun run monero:prepare and bun run monero:build.')
-    process.exit(1)
-  }
+const moneroInputs = [`monero-cli/dist/${moneroExecutable}`, `monero-cli/vendor/${process.platform}-${process.arch}/${moneroRpc}`, `monero-cli/vendor/${process.platform}-${process.arch}/monero-tools.json`, `monero-cli/vendor/${process.platform}-${process.arch}/LICENSE`]
+const presentMoneroInputs = moneroInputs.filter(relative => existsSync(join(import.meta.dir, '..', relative)))
+const hasMoneroInputs = presentMoneroInputs.length === moneroInputs.length
+if ((process.env.KEEPKEY_REQUIRE_MONERO_SIDECAR === '1' || presentMoneroInputs.length > 0) && !hasMoneroInputs) {
+  console.error('[release] Missing Monero sidecar input. Run bun run monero:prepare and bun run monero:build.')
+  process.exit(1)
 }
 
 // Electrobun signs/notarizes before the later release re-signing pass. Stage
@@ -64,7 +66,7 @@ for (const relative of [`monero-cli/dist/${moneroExecutable}`, `monero-cli/vendo
 // official RPC signature changes its bytes, so update only the copied receipt.
 // The prepared vendor inputs remain immutable and the outer app seals metadata.
 let signedMoneroSources: Record<string, string> = {}
-if (process.platform === 'darwin' && process.env.CI !== 'true') {
+if (hasMoneroInputs && process.platform === 'darwin' && process.env.CI !== 'true') {
   const developer = process.env.ELECTROBUN_DEVELOPER_ID
   const team = process.env.ELECTROBUN_TEAMID
   if (!developer || !team) {

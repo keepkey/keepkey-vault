@@ -1543,6 +1543,7 @@ export interface AppSettings {
   numberLocale: string           // number formatting locale (default 'en-US')
   btcMultisigEnabled: boolean    // runtime feature flag: Bitcoin multisig co-signing (default OFF)
   walletConnectEnabled: boolean   // feature flag: WalletConnect dApp support (default OFF)
+  moneroAvailable?: boolean      // optional compatibility field; build contains a runnable sidecar
   moneroEnabled: boolean         // experimental XMR sidecar and wallet surface (default OFF)
   moneroDaemonUrl: string        // public HTTPS Monero daemon, or loopback local daemon
   moneroRestoreHeight: number    // earliest block to scan; zero scans from genesis

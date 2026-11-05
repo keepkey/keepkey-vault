@@ -263,7 +263,7 @@ import { initializeOrchardFromDevice, exportOrchardFvk, scanOrchardNotes, getShi
 import { inFlightShielded, type ExpectedShielded } from "../shared/zcash-pending"
 import { setMoneroEmulatorEnabled } from "./emulator-library"
 import { createMoneroVault } from "./monero-vault"
-import { startMoneroSidecar, stopMoneroSidecar } from "./monero-sidecar"
+import { startMoneroSidecar, stopMoneroSidecar, isMoneroSidecarAvailable } from "./monero-sidecar"
 import { validateMoneroNode } from "./monero-settings"
 import { findZcashCliBinary, isSidecarReady, startSidecar, stopSidecar, wipeSidecarWalletDb, hasFvkLoaded, getCachedFvk, onScanProgress, getScanState, updateSyncedTo, beginZcashSend, endZcashSend, isZcashSendInFlight } from "./zcash-sidecar"
 import { CHAINS, customChainToChainDef, isChainSupported, hiveRolePath, btcTaprootSupported, findChainByNetwork } from "../shared/chains"
@@ -1254,7 +1254,7 @@ function requireOnline(operation: string): void {
 }
 
 function loadSettings() {
-	moneroEnabled = getSetting('monero_enabled') === '1'
+	moneroEnabled = getSetting('monero_enabled') === '1' && isMoneroSidecarAvailable()
 	setMoneroEmulatorEnabled(moneroEnabled)
 	restApiEnabled = getSetting('rest_api_enabled') === '1'
 	walletConnectEnabled = getSetting('walletconnect_enabled') === '1'
@@ -1637,6 +1637,7 @@ function getAppSettings() {
 		walletConnectEnabled,
 		btcMultisigEnabled:multisigFeature.enabled,
 		moneroEnabled,
+		moneroAvailable: isMoneroSidecarAvailable(),
 		moneroDaemonUrl: getSetting('monero_daemon_url') || 'https://xmr.triplebit.org',
 		moneroRestoreHeight: Number(getSetting('monero_restore_height') || 0),
 		zcashPrivacyEnabled,
@@ -9891,6 +9892,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
             moneroGetAddress: async (params) => getMoneroWallet().getAddress(params),
             setMoneroEnabled: async ({ enabled }) => {
                 if (typeof enabled !== 'boolean') throw new Error('Monero requires an enabled boolean')
+                if (enabled && !isMoneroSidecarAvailable()) throw new Error('Monero is unavailable in this build')
                 if (enabled && offlineMode) throw new Error('Turn off offline mode before enabling Monero')
                 if (enabled) await startMoneroSidecar()
                 else { invalidateMoneroWallet(); stopMoneroSidecar() }

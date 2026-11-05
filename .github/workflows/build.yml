@@ -244,6 +244,7 @@ jobs:
       - name: Build unsigned app (CI mode)
         env:
           CI: 'true'
+          KEEPKEY_REQUIRE_MONERO_SIDECAR: '1'
         run: cd projects/keepkey-vault && bun run build:stable
         shell: bash
 

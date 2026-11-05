@@ -17,7 +17,7 @@ bun run build
 
 Preparation authenticates the pinned Monero 0.18.5.4 release manifest with the pinned binaryFate key, verifies the selected official archive, and extracts only wallet RPC and its license. The output directory must be empty for a fresh preparation. Generated vendor binaries and compiled workers are ignored by Git. `prepare.py --platform` and `build.ts --platform=...` support macOS arm64/x64, Linux arm64/x64, and Windows x64. Native macOS arm64 is validated in this PR; other targets need their own runtime validation.
 
-Release CI prepares and builds the sidecar before packaging. Release preflight refuses missing sidecar inputs. Runtime metadata belongs to the trusted app bundle; `MONERO_TOOLS_DIR` and `MONERO_CLI_BIN` are explicit developer overrides, not independent proof of an official release.
+Release CI prepares and builds the sidecar before packaging. CI sets `KEEPKEY_REQUIRE_MONERO_SIDECAR=1` to refuse missing sidecar inputs. Existing builds that omit this optional feature keep Monero unavailable; partially staged inputs are always rejected. Runtime metadata belongs to the trusted app bundle; `MONERO_TOOLS_DIR` and `MONERO_CLI_BIN` are explicit developer overrides, not independent proof of an official release.
 
 ## Vault and the emulator
 

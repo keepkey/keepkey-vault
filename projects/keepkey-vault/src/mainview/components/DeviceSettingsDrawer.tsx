@@ -1666,9 +1666,9 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
                                 <Flex justify="space-between" align="center" gap="4">
                                     <VStack gap="0" align="start">
                                         <Text fontSize="sm" color="kk.textPrimary" fontWeight="500">Monero (XMR)</Text>
-                                        <Text fontSize="2xs" color="kk.textMuted">Experimental receive and balance support. Requires the Monero research emulator.</Text>
+                                        <Text fontSize="2xs" color="kk.textMuted">{appSettings.moneroAvailable ? "Experimental receive and balance support. Requires the Monero research emulator." : "Monero is unavailable in this build."}</Text>
                                     </VStack>
-                                    <Toggle checked={appSettings.moneroEnabled} disabled={moneroBusy} onChange={async enabled => {
+                                    <Toggle checked={appSettings.moneroEnabled} disabled={moneroBusy || appSettings.moneroAvailable === false} onChange={async enabled => {
                                         setMoneroBusy(true); setMoneroError(null)
                                         try { setAppSettings(await rpcRequest<AppSettings>("setMoneroEnabled", { enabled }, 30000)); window.dispatchEvent(new Event("keepkey-settings-changed")); await reloadEmuBuilds() }
                                         catch (error) { setMoneroError(error instanceof Error ? error.message : "Unable to change Monero setting") }
