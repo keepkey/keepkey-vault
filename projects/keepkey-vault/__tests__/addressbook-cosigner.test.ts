@@ -20,7 +20,7 @@ old.close()
 mock.module('electrobun/bun', () => ({ Utils: { paths: { userData: dir } } }))
 const db = await import('../src/bun/db')
 const entry = (id: string) => db.getAddressBookList({}).find(e => e.id === id)!
-const add = (address: string, extra: { label?: string; cosigner?: boolean; networkId?: string; chainId?: string } = {}) => db.addExternalEntry({
+const add = (address: string, extra: { label?: string; cosigner?: boolean; networkId?: string; chainId?: string; walletId?: string } = {}) => db.addExternalEntry({
   walletId: 'w', deviceId: 'd', networkId: 'eip155:8453', chainId: 'base', chainFamily: 'evm', address, ...extra,
 })!
 
@@ -72,5 +72,18 @@ describe('address book co-signer flag', () => {
     const g = add('0x9768236c72F2EddE1A46aff6c1D85f5E252E6183', { label: 'Guilliman' })
     expect(db.updateAddressBookEntry(g.id, null, { label: 'Guilliman (trading)' })).toBe(true)
     expect(entry(g.id).cosigner).toBe(true)
+  })
+
+  test("the flag belongs to the wallet that set it: another wallet's row for the address is untouched", () => {
+    const addr = '0x687405A3435c6799e0Fc78C68a005b970f39799c'
+    const mine = add(addr, { label: 'Horus', cosigner: true })
+    const theirs = add(addr, { label: 'Horus', walletId: 'other' })
+    expect(theirs.cosigner).toBeUndefined() // a new row does not inherit another wallet's flag
+    db.updateAddressBookEntry(theirs.id, null, { cosigner: true })
+    db.updateAddressBookEntry(mine.id, null, { cosigner: false })
+    expect(entry(mine.id).cosigner).toBeUndefined()
+    expect(entry(theirs.id).cosigner).toBe(true) // unmarking in one wallet does not clear another's
+    // still one flag per address across EVM networks within a wallet
+    expect(add(addr, { walletId: 'other', networkId: 'eip155:1', chainId: 'ethereum' }).cosigner).toBe(true)
   })
 })
