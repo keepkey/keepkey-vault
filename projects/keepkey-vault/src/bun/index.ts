@@ -275,7 +275,7 @@ import { accountPathFromXpub, formatPath, masterFingerprintFromDepth1Xpub, toSli
 import {parseMultisigPolicy,deriveMultisig,type MultisigPolicy} from './btc-psbt/multisig-policy'
 import {analyzeMultisig,matchesMultisigPolicy,isMultisigPsbt,multisigToSignTx,applyMultisigSignatures,type MultisigAnalysis} from './btc-psbt/multisig-cosign'
 import {readMultisigCosigner,readMultisigFingerprint,matchMultisigDevice,verifyMultisigPolicy} from './btc-psbt/multisig-device'
-import {MultisigFeature,hasMultisigSigningData} from './btc-psbt/multisig-feature'
+import {MultisigFeature,hasMultisigSigningData,gateMultisigRpc} from './btc-psbt/multisig-feature'
 import {MultisigRegistry,type SavedMultisigPolicy} from './btc-psbt/multisig-registry'
 import type {MultisigPolicyPreview} from '../shared/multisig-policy'
 import { writePublicWallet } from "./btc-psbt/public-wallet"
@@ -4048,7 +4048,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 		// dispatcher drops non-Error throws without sending a response (see
 		// scripts/patch-electrobun.sh, which normalizes them), so handlers here
 		// may throw device failures without hanging the renderer.
-		requests: enforceBitcoinOnlyRpcBoundary(
+		requests: gateMultisigRpc(() => multisigFeature.enabled, enforceBitcoinOnlyRpcBoundary(
 			// Runs ahead of every UI request, so it is also where the UI's first
 			// contact is recorded (see ui-watchdog.ts).
 			// A Bitcoin-only watch-only wallet on screen is held to the same boundary as a Bitcoin-only device.
@@ -7934,7 +7934,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				const tx = (await pendingSafeTxs(info)).find(t => t.safeTxHash.toLowerCase() === params.safeTxHash.toLowerCase())
 				if (!tx) throw new Error('This proposal is no longer pending, or its fields do not produce that hash')
 				if (!tx.hashMatches) throw new Error("Safe's service published a different hash for this proposal. Do not sign it.")
-				const signOp = () => engine.wallet!.ethSignTypedData({ addressNList: evmAddressPath(me.addressIndex), typedData: safeTypedData(info.chainId, info.address, info.version, tx) } as any)
+				const signOp = () => signTypedDataWithFeatures(engine.wallet!, { addressNList: evmAddressPath(me.addressIndex), typedData: safeTypedData(info.chainId, info.address, info.version, tx) } as any)
 				const result: any = engine.isEmulator ? await emuSigningOp(signOp, { operation: 'ethSignTypedData', chain: 'Ethereum' }) : await signOp()
 				const signature = safeSignature(typeof result === 'string' ? result : result?.signature)
 				if (checkConfirmation(tx.safeTxHash, info.owners, { owner: me.address, signature }) !== 'verified') {
@@ -8558,6 +8558,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			setBtcMultisigEnabled: async (params) => {
                 multisigFeature.update(params?.enabled,!!pendingPsbt?.signing && 'multisig' in pendingPsbt.analysis)
                 if(pendingPsbt && 'multisig' in pendingPsbt.analysis)pendingPsbt=null
+                notifyVaultsChanged() // Safe/Vault lists show or hide with the toggle
                 return getAppSettings()
             },
             setWalletConnectEnabled: async (params) => {
@@ -10991,7 +10992,7 @@ udevadm trigger --subsystem-match=usb --attr-match=idVendor=2b24 || udevadm trig
 			windowGetFrame: async () => { if (!_mainWindow) throw new Error('Window not ready'); return _mainWindow.getFrame() },
 			windowSetPosition: async ({ x, y }) => { _mainWindow?.setPosition(x, y) },
 			windowSetFrame: async ({ x, y, width, height }) => { _mainWindow?.setFrame(x, y, width, height) },
-			}),
+			})),
 			messages: {},
 	},
 })

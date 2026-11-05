@@ -1779,8 +1779,8 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 
 							<Box>
                                 <Flex justify="space-between" align="center" gap="3">
-                                    <Box><Text fontSize="md" color="kk.textPrimary" fontWeight="500">{uiText("Bitcoin multisig co-signing")}</Text>
-                                    <Text fontSize="sm" color="kk.textSecondary" mt="0.5">{uiText("Experimental. Verify a public wallet policy and add KeepKey’s signature to Sparrow or Electrum PSBTs. Off by default. Completed transactions can still be broadcast with this off.")}</Text></Box>
+                                    <Box><Text fontSize="md" color="kk.textPrimary" fontWeight="500">{uiText("Multisig")}</Text>
+                                    <Text fontSize="sm" color="kk.textSecondary" mt="0.5">{uiText("Experimental. Safe multisig accounts on EVM chains and Vaults, plus Bitcoin co-signing for Sparrow or Electrum PSBTs. Off by default. Completed transactions can still be broadcast with this off.")}</Text></Box>
                                     <Toggle checked={appSettings.btcMultisigEnabled===true} onChange={toggleMultisig} disabled={togglingMultisig}/>
                                 </Flex>
                                 {multisigError && <Text role="alert" fontSize="xs" color="kk.error" mt="2">{multisigError}</Text>}

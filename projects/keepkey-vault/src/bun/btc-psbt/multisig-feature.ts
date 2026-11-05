@@ -58,3 +58,28 @@ export class MultisigFeature {
     this.revision++;
   }
 }
+
+/** The same Settings toggle gates Safe and Vaults. Lists answer empty so every
+ * entry point hides itself; everything else refuses. checkVaultDestination is
+ * a Send-side safety check and stays live. */
+export const MULTISIG_DISABLED = "Multisig is off. Enable it in Settings → Feature Flags.";
+const MULTISIG_LISTS = new Set(["safeChains", "listVaults", "listSavedVaults", "getVaultPortfolios"]);
+const MULTISIG_RPC = new Set([
+  "safeAddSignature", "safeBroadcast", "safeConfirm", "safeCreate", "safeCreatePlan", "safeImport",
+  "safeImportProposal", "safeInspect", "safeList", "safeMine", "safeOpenVaultAccount", "safePending",
+  "safePrepareCreate", "safePrepareExecute", "safePropose", "safeRefresh", "safeSaveSetup",
+  "safeSigningData", "setVaultTotalInclusion", "vaultAccountGet", "vaultAddConfirm", "vaultAddPreview",
+]);
+export function gateMultisigRpc<T extends Record<string, (...args: any[]) => any>>(enabled: () => boolean, handlers: T): T {
+  const gated: Record<string, (...args: any[]) => any> = { ...handlers };
+  for (const method of Object.keys(handlers)) {
+    const list = MULTISIG_LISTS.has(method);
+    if (!list && !MULTISIG_RPC.has(method)) continue;
+    gated[method] = async (...args: any[]) => {
+      if (enabled()) return handlers[method](...args);
+      if (list) return [];
+      throw new Error(MULTISIG_DISABLED);
+    };
+  }
+  return gated as T;
+}

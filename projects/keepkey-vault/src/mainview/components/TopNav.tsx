@@ -10,6 +10,7 @@ import kkIcon from "../assets/icon.png"
 import shapeshiftIcon from "../assets/apps/shapeshift.png"
 import { NAV_HEIGHT } from "../layout"
 import { WalletSelector } from "./WalletSelector"
+import { useBtcMultisigEnabled } from "../hooks/useBtcMultisigEnabled"
 
 export type NavTab = "vault" | "shapeshift" | "explore" | "addresses" | "multisig"
 
@@ -167,6 +168,7 @@ export function TopNav({
 	onReturnToConnected,
 	vaultView = false,
 }: TopNavProps) {
+	const multisigEnabled = useBtcMultisigEnabled()
   const uiText = useUiTranslation()
 
 	const { t } = useTranslation("nav")
@@ -397,7 +399,7 @@ export function TopNav({
 				p="3px"
 				className="electrobun-webkit-app-region-no-drag"
 			>
-				{TAB_DEFS.filter((tab) => (!vaultView || tab.id === 'vault') && !(isBitcoinOnly && tab.id === "shapeshift") && !(tab.id === "multisig" && (isBitcoinOnly || watchOnly))).map((tab) => {
+				{TAB_DEFS.filter((tab) => (!vaultView || tab.id === 'vault') && !(isBitcoinOnly && tab.id === "shapeshift") && !(tab.id === "multisig" && (isBitcoinOnly || watchOnly || !multisigEnabled))).map((tab) => {
 					const isActive = activeTab === tab.id
 					return (
 						<Box

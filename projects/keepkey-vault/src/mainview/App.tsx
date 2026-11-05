@@ -24,6 +24,7 @@ import { SplashScreen } from "./components/SplashScreen"
 import { isBitcoinOnlyVariant } from "../shared/flags"
 import { useOnline } from "./hooks/useOnline"
 import { useBtcNodeStatus } from "./hooks/useBtcNodeStatus"
+import { useBtcMultisigEnabled } from "./hooks/useBtcMultisigEnabled"
 import { OfflineBanner } from "./components/OfflineBanner"
 import { NodeStatusBar } from "./components/NodeStatusBar"
 import { NodeConnectedDialog } from "./components/NodeConnectedDialog"
@@ -66,6 +67,7 @@ const SIGNING_PAYLOAD_MIN_MS = 15000
 
 function App() {
   const uiText = useUiTranslation()
+  const multisigEnabled = useBtcMultisigEnabled()
 
 	const { t, i18n } = useTranslation()
 	useEffect(() => {
@@ -1262,7 +1264,7 @@ function App() {
 					</Flex>
 					{activeTab === "explore" && <AppStore onOpenApp={handleOpenApp} onOpenKeepKey={handleOpenKeepKey} />}
 					{activeTab === "addresses" && <AddressBookView />}
-					{activeTab === "multisig" && !splashBitcoinOnly && <SafeMultisigView key={`${deviceState.deviceId}:${deviceState.isHiddenWallet}`} />}
+					{activeTab === "multisig" && multisigEnabled && !splashBitcoinOnly && <SafeMultisigView key={`${deviceState.deviceId}:${deviceState.isHiddenWallet}`} />}
 				</Flex>
 			</Flex>
 			<DeviceSettingsDrawer

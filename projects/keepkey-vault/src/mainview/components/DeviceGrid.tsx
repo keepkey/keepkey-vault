@@ -21,6 +21,7 @@ import { WalletTile as DeviceCard, WalletTileCta as CardCta } from "./WalletTile
 import { useSavedVaults, VaultTile, VaultLinkChips } from "./VaultCards"
 import type { VaultIdentity } from "../../shared/vault-identity"
 import { useVaultPortfolios } from "../hooks/useVaultPortfolios"
+import { useBtcMultisigEnabled } from "../hooks/useBtcMultisigEnabled"
 import { includedVaultTotal } from "../../shared/vault-portfolio"
 import { AddVaultDialog } from "./AddVaultDialog"
 import { WATCH_ONLY_IMPORT_EVENT } from "./WatchOnlyImportDialog"
@@ -40,6 +41,7 @@ const SUPPORT_URL = 'https://support.keepkey.com'
 let hasRevealedOnce = false // module-level: skip delay after first reveal (e.g. returning from X)
 
 export function DeviceGrid({ onViewPortfolio, onOpenVault, onReady, emulatorEnabled = false, bitcoinOnly = false }: DeviceGridProps) {
+	const multisigEnabled = useBtcMultisigEnabled()
   const uiText = useUiTranslation()
 
 	const { vaults, error: vaultError, reload: reloadVaults } = useSavedVaults(bitcoinOnly)
@@ -372,7 +374,7 @@ export function DeviceGrid({ onViewPortfolio, onOpenVault, onReady, emulatorEnab
 
             {/* Watch-only import for a machine that never saw the KeepKey */}
 			<Flex justify="center" mt="4" gap="2" wrap="wrap">
-				<Button size="sm" variant="outline" color="var(--gold)" onClick={() => setAddingVault(true)}>{uiText("＋ Add vault")}</Button>
+				{multisigEnabled && <Button size="sm" variant="outline" color="var(--gold)" onClick={() => setAddingVault(true)}>{uiText("＋ Add vault")}</Button>}
 				<Box
 					as="button"
 					onClick={() => window.dispatchEvent(new Event(WATCH_ONLY_IMPORT_EVENT))}
