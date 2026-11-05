@@ -41,5 +41,9 @@
 	"openAddressBook": "Adres defteri",
 	"saveRecipientPrompt": "Bu alıcı kaydedilsin mi?",
 	"contactSaved": "Kişi kaydedildi",
-	"saveContactFailed": "Kişi kaydedilemedi"
+	"saveContactFailed": "Kişi kaydedilemedi",
+	"cosigner": "Ortak imzacı",
+	"cosignerOption": "Safe ortak imzacısı: çoklu imza oluştururken önce bunu öner",
+	"markCosigner": "Safe ortak imzacısı olarak işaretle",
+	"notCosigner": "Ortak imzacı değil"
 }

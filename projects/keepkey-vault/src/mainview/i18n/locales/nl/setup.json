@@ -165,7 +165,7 @@
 		"failedToCreate": "Wallet aanmaken mislukt",
 		"failedToRecover": "Wallet herstellen mislukt",
 		"writeDownWarning": "Schrijf elk woord op!",
-		"writeDownDetail": "Uw herstelzin wordt op het apparaatscherm weergegeven. Schrijf elk woord op papier. Dit is uw ENIGE back-up; u zult deze woorden NIET opnieuw zien.",
+		"writeDownDetail": "Wanneer je herstelzin op het scherm van het apparaat verschijnt, schrijf dan elk woord op papier voordat je verdergaat. Bewaar de zin veilig; je hebt hem nodig om je wallet te herstellen.",
 		"deviceLost": "Apparaat losgekoppeld. Sluit het opnieuw aan om door te gaan, of ga terug om het opnieuw te proberen.",
 		"goBack": "Terug",
 		"backToChoose": "Terug"

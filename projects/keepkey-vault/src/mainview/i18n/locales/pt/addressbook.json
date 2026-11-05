@@ -41,5 +41,9 @@
 	"openAddressBook": "Catálogo de endereços",
 	"saveRecipientPrompt": "Salvar este destinatário?",
 	"contactSaved": "Contato salvo",
-	"saveContactFailed": "Não foi possível salvar o contato"
+	"saveContactFailed": "Não foi possível salvar o contato",
+	"cosigner": "Cossignatário",
+	"cosignerOption": "Cossignatário Safe: oferecer primeiro ao criar uma multiassinatura",
+	"markCosigner": "Marcar como cossignatário Safe",
+	"notCosigner": "Não é cossignatário"
 }

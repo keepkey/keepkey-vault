@@ -92,5 +92,6 @@
   "defiSymbol": "Symbole",
   "tokenCount_many": "{{count}} jetons",
   "showFiltered_many": "Afficher {{count}} jetons filtrés",
-  "hideFiltered_many": "Masquer {{count}} jetons filtrés"
+  "hideFiltered_many": "Masquer {{count}} jetons filtrés",
+  "multisig": "Multisignature"
 }

@@ -23,5 +23,7 @@
 	"walletconnectName": "WalletConnect",
 	"walletconnectDescription": "Conecte-se a qualquer dApp compatível com WalletConnect",
 	"internal": "Abrir",
-	"open": "Abrir"
+	"open": "Abrir",
+	"safeName": "Safe{Wallet}",
+	"safeDescription": "Contas multiassinatura compartilhadas em redes EVM. Conecte sua KeepKey como proprietária. Para ver seus Safes e verificar transações pendentes no Desktop, abra Multiassinatura em um ativo EVM."
 }

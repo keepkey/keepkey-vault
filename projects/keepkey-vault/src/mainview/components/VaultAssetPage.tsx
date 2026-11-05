@@ -1,3 +1,4 @@
+import { useUiTranslation } from "../i18n/ui"
 import { useState } from 'react'
 import type { TokenBalance } from '../../shared/types'
 import type { ChainDef } from '../../shared/chains'
@@ -14,12 +15,14 @@ export function VaultAssetPage({ vault, chain, initialToken, initialAction, watc
   watchOnly?: boolean
   onBack: () => void
 }) {
+  const uiText = useUiTranslation()
+
   const [assetCaip, setAssetCaip] = useState(initialToken?.caip || chain.caip)
   const [action, setAction] = useState<'send' | 'receive'>(initialAction === 'send' && !watchOnly ? 'send' : 'receive')
   const [, setBusy] = useState(false)
   if (vault.networkId !== chain.networkId || !assetCaip.startsWith(vault.networkId + '/') ||
       !vault.supportedAssets.some(asset => asset.caip.toLowerCase() === assetCaip.toLowerCase())) {
-    return <div role="alert">This vault belongs to a different network.</div>
+    return <div role="alert">{uiText("This vault belongs to a different network.")}</div>
   }
   return <VaultAssetAccount vault={vault} assetCaip={assetCaip} networkId={vault.networkId}
     action={action} watchOnly={watchOnly} selector={null} onAction={setAction}

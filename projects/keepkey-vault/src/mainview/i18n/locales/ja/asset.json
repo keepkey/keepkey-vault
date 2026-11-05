@@ -89,5 +89,6 @@
   "showFiltered": "{{count}} 件のフィルタ済みトークンを表示",
   "invalidAddress": "無効なアドレス",
   "defiNetwork": "ネットワーク",
-  "defiSymbol": "シンボル"
+  "defiSymbol": "シンボル",
+  "multisig": "マルチシグ"
 }

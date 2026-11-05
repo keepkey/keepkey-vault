@@ -41,5 +41,9 @@
 	"openAddressBook": "Adressbuch",
 	"saveRecipientPrompt": "Diesen Empfänger speichern?",
 	"contactSaved": "Kontakt gespeichert",
-	"saveContactFailed": "Kontakt konnte nicht gespeichert werden"
+	"saveContactFailed": "Kontakt konnte nicht gespeichert werden",
+	"cosigner": "Mitunterzeichner",
+	"cosignerOption": "Safe-Mitunterzeichner: beim Erstellen einer Multisig zuerst anbieten",
+	"markCosigner": "Als Safe-Mitunterzeichner markieren",
+	"notCosigner": "Kein Mitunterzeichner"
 }

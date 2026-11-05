@@ -89,5 +89,6 @@
   "showFiltered": "{{count}} filtrelenmiş tokeni göster",
   "invalidAddress": "Geçersiz adres",
   "defiNetwork": "Ağ",
-  "defiSymbol": "Sembol"
+  "defiSymbol": "Sembol",
+  "multisig": "Çoklu imza"
 }

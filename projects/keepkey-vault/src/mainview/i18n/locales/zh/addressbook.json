@@ -41,5 +41,9 @@
 	"openAddressBook": "地址簿",
 	"saveRecipientPrompt": "保存此收款人？",
 	"contactSaved": "联系人已保存",
-	"saveContactFailed": "无法保存联系人"
+	"saveContactFailed": "无法保存联系人",
+	"cosigner": "联合签名人",
+	"cosignerOption": "Safe 联合签名人：创建多签时优先提供",
+	"markCosigner": "标记为 Safe 联合签名人",
+	"notCosigner": "非联合签名人"
 }

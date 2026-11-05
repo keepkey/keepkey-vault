@@ -165,7 +165,7 @@
 		"failedToCreate": "Creazione portafoglio fallita",
 		"failedToRecover": "Recupero portafoglio fallito",
 		"writeDownWarning": "Annota ogni parola!",
-		"writeDownDetail": "La frase di recupero è mostrata sullo schermo del dispositivo. Scrivi ogni parola su carta. È il tuo UNICO backup; NON vedrai più queste parole.",
+		"writeDownDetail": "Quando la frase di recupero appare sullo schermo del dispositivo, scrivi ogni parola su carta prima di continuare. Conserva la frase al sicuro; ti serve per recuperare il tuo wallet.",
 		"deviceLost": "Dispositivo disconnesso. Ricollegalo per continuare oppure torna indietro per riprovare.",
 		"goBack": "Indietro",
 		"backToChoose": "Indietro"

@@ -165,7 +165,7 @@
 		"failedToCreate": "Échec de la création du portefeuille",
 		"failedToRecover": "Échec de la récupération du portefeuille",
 		"writeDownWarning": "Notez chaque mot !",
-		"writeDownDetail": "Votre phrase de récupération s’affiche sur l’écran de l’appareil. Écrivez chaque mot sur papier. C’est votre SEULE sauvegarde; vous ne reverrez PAS ces mots.",
+		"writeDownDetail": "Lorsque votre phrase de récupération s'affiche sur l'écran de l'appareil, notez chaque mot sur papier avant de continuer. Conservez-la en lieu sûr ; vous en aurez besoin pour récupérer votre portefeuille.",
 		"deviceLost": "Appareil déconnecté. Rebranchez-le pour continuer, ou revenez en arrière pour réessayer.",
 		"goBack": "Retour",
 		"backToChoose": "Retour"

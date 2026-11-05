@@ -100,5 +100,14 @@
   "md94854d6": "Account niet beschikbaar",
   "m618dcd86": "Verbind en controleer het ondertekenende account",
   "mab32ada5": "Ondertekenend account niet beschikbaar",
-  "m32bfb993": "Bronaccount voor activaselectie"
+  "m32bfb993": "Bronaccount voor activaselectie",
+  "m2a797e2b": "Multisig",
+  "m4f85db76": "Experimenteel. Safe-multisigaccounts op EVM-chains en Vaults, plus Bitcoin-medeondertekening voor Sparrow- of Electrum-PSBT's. Standaard uit. Voltooide transacties kunnen ook met deze optie uit worden uitgezonden.",
+  "mc955d11c": "KeepKey-wallet",
+  "md311e6": "Niet beschikbaar — kies een account",
+  "md6e27c1f": "Account kiezen",
+  "m76c6bf28": "Walletaccounts",
+  "m1e5aa65b": "Bevestig op je KeepKey",
+  "m538b10e9": "Openen",
+  "mf2e79e8": "Medeondertekenaar"
 }

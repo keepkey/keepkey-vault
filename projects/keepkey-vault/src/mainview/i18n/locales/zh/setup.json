@@ -165,7 +165,7 @@
 		"failedToCreate": "创建钱包失败",
 		"failedToRecover": "恢复钱包失败",
 		"writeDownWarning": "写下每一个词！",
-		"writeDownDetail": "恢复短语正在设备屏幕上显示。请把每个词写在纸上。这是你唯一的备份；这些词不会再次显示。",
+		"writeDownDetail": "当恢复短语显示在设备屏幕上时，请在继续之前将每个单词写在纸上。妥善保管该短语；恢复钱包时需要它。",
 		"deviceLost": "设备已断开。请重新插入以继续，或返回后重试。",
 		"goBack": "返回",
 		"backToChoose": "返回"

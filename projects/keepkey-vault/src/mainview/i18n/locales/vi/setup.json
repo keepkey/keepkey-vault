@@ -165,7 +165,7 @@
 		"failedToCreate": "Không thể tạo ví",
 		"failedToRecover": "Không thể khôi phục ví",
 		"writeDownWarning": "Hãy ghi lại từng từ!",
-		"writeDownDetail": "Cụm từ khôi phục của bạn đang hiển thị trên màn hình thiết bị. Ghi từng từ ra giấy. Đây là bản sao lưu DUY NHẤT; bạn sẽ KHÔNG thấy lại các từ này.",
+		"writeDownDetail": "Khi cụm từ khôi phục xuất hiện trên màn hình thiết bị, hãy viết từng từ ra giấy trước khi tiếp tục. Giữ cụm từ an toàn; bạn cần nó để khôi phục ví.",
 		"deviceLost": "Thiết bị đã ngắt kết nối. Cắm lại để tiếp tục, hoặc quay lại để thử lại.",
 		"goBack": "Quay lại",
 		"backToChoose": "Quay lại"

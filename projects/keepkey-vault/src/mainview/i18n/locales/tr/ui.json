@@ -107,5 +107,14 @@
   "md94854d6": "Hesap kullanılamıyor",
   "m618dcd86": "İmzalayan hesabı bağlayın ve doğrulayın",
   "mab32ada5": "İmzalayan hesap kullanılamıyor",
-  "m32bfb993": "Varlık seçici kaynak hesabı"
+  "m32bfb993": "Varlık seçici kaynak hesabı",
+  "m2a797e2b": "Çoklu imza",
+  "m4f85db76": "Deneysel. EVM zincirlerinde Safe çoklu imza hesapları ve Vaults, ayrıca Sparrow veya Electrum PSBT'leri için Bitcoin ortak imzası. Varsayılan olarak kapalı. Tamamlanmış işlemler bu seçenek kapalıyken de yayınlanabilir.",
+  "mc955d11c": "KeepKey cüzdanı",
+  "md311e6": "Kullanılamıyor — bir hesap seçin",
+  "md6e27c1f": "Hesap seç",
+  "m76c6bf28": "Cüzdan hesapları",
+  "m1e5aa65b": "KeepKey'inizde onaylayın",
+  "m538b10e9": "Aç",
+  "mf2e79e8": "Ortak imzacı"
 }

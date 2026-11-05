@@ -89,5 +89,6 @@
   "validatingWallet": "กำลังตรวจสอบกระเป๋าเงินที่ป้องกันกับเชน...",
   "invalidAddress": "ที่อยู่ไม่ถูกต้อง",
   "defiNetwork": "เครือข่าย",
-  "defiSymbol": "สัญลักษณ์"
+  "defiSymbol": "สัญลักษณ์",
+  "multisig": "มัลติซิก"
 }

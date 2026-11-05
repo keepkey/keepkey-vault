@@ -100,5 +100,14 @@
   "md94854d6": "Compte indisponible",
   "m618dcd86": "Connectez et vérifiez le compte signataire",
   "mab32ada5": "Compte signataire indisponible",
-  "m32bfb993": "Compte source du sélecteur d’actifs"
+  "m32bfb993": "Compte source du sélecteur d’actifs",
+  "m2a797e2b": "Multisignature",
+  "m4f85db76": "Expérimental. Comptes multisignatures Safe sur les chaînes EVM et Vaults, ainsi que la cosignature Bitcoin pour les PSBT Sparrow ou Electrum. Désactivé par défaut. Les transactions finalisées peuvent toujours être diffusées lorsque cette option est désactivée.",
+  "mc955d11c": "Portefeuille KeepKey",
+  "md311e6": "Indisponible — choisissez un compte",
+  "md6e27c1f": "Choisir un compte",
+  "m76c6bf28": "Comptes du portefeuille",
+  "m1e5aa65b": "Confirmer sur votre KeepKey",
+  "m538b10e9": "Ouvrir",
+  "mf2e79e8": "Cosignataire"
 }

@@ -165,7 +165,7 @@
 		"failedToCreate": "Nie udało się utworzyć portfela",
 		"failedToRecover": "Nie udało się odzyskać portfela",
 		"writeDownWarning": "Zapisz każde słowo!",
-		"writeDownDetail": "Fraza odzyskiwania jest wyświetlana na ekranie urządzenia. Zapisz każde słowo na papierze. To JEDYNA kopia zapasowa; NIE zobaczysz tych słów ponownie.",
+		"writeDownDetail": "Gdy fraza odzyskiwania pojawi się na ekranie urządzenia, zapisz każde słowo na papierze, zanim przejdziesz dalej. Przechowuj frazę bezpiecznie; jest potrzebna do odzyskania portfela.",
 		"deviceLost": "Urządzenie odłączone. Podłącz je ponownie, aby kontynuować, albo wróć i spróbuj jeszcze raz.",
 		"goBack": "Wróć",
 		"backToChoose": "Wstecz"

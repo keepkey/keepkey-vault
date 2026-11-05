@@ -104,5 +104,14 @@
   "md94854d6": "Konto niedostępne",
   "m618dcd86": "Połącz i zweryfikuj konto podpisujące",
   "mab32ada5": "Konto podpisujące niedostępne",
-  "m32bfb993": "Konto źródłowe wyboru aktywów"
+  "m32bfb993": "Konto źródłowe wyboru aktywów",
+  "m2a797e2b": "Multisig",
+  "m4f85db76": "Eksperymentalne. Konta multisig Safe w sieciach EVM i Vaults oraz współpodpisywanie Bitcoin dla PSBT z Sparrow lub Electrum. Domyślnie wyłączone. Ukończone transakcje można rozgłosić także przy wyłączonej opcji.",
+  "mc955d11c": "Portfel KeepKey",
+  "md311e6": "Niedostępne — wybierz konto",
+  "md6e27c1f": "Wybierz konto",
+  "m76c6bf28": "Konta portfela",
+  "m1e5aa65b": "Potwierdź na swoim KeepKey",
+  "m538b10e9": "Otwórz",
+  "mf2e79e8": "Współsygnatariusz"
 }

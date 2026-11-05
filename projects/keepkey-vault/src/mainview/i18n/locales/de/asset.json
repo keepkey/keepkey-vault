@@ -88,5 +88,6 @@
   "hideFiltered": "{{count}} gefilterten Token ausblenden",
   "showFiltered": "{{count}} gefilterten Token anzeigen",
   "invalidAddress": "Ungültige Adresse",
-  "defiNetwork": "Netzwerk"
+  "defiNetwork": "Netzwerk",
+  "multisig": "Multisig"
 }

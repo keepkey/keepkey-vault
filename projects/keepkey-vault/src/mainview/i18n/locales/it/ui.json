@@ -104,5 +104,14 @@
   "md94854d6": "Conto non disponibile",
   "m618dcd86": "Collega e verifica il conto firmatario",
   "mab32ada5": "Conto firmatario non disponibile",
-  "m32bfb993": "Conto di origine del selettore di asset"
+  "m32bfb993": "Conto di origine del selettore di asset",
+  "m2a797e2b": "Multifirma",
+  "m4f85db76": "Sperimentale. Account multifirma Safe sulle chain EVM e Vaults, oltre alla cofirma Bitcoin per PSBT di Sparrow o Electrum. Disattivato per impostazione predefinita. Le transazioni completate possono comunque essere trasmesse con questa opzione disattivata.",
+  "mc955d11c": "Wallet KeepKey",
+  "md311e6": "Non disponibile — scegli un account",
+  "md6e27c1f": "Scegli account",
+  "m76c6bf28": "Account del wallet",
+  "m1e5aa65b": "Conferma sul tuo KeepKey",
+  "m538b10e9": "Apri",
+  "mf2e79e8": "Cofirmatario"
 }

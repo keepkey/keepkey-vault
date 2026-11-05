@@ -1,3 +1,4 @@
+import { useUiTranslation } from "../i18n/ui"
 /**
  * Safe multisig, inside Desktop. Everything shown is read from the chain or
  * re-derived on this computer: owners, threshold and nonce come from the Safe
@@ -61,16 +62,15 @@ function reviewRows(tx: PendingSafeTx, info: SafeInfo, symbol: string): [string,
 }
 
 function SignOnDevice() {
+  const uiText = useUiTranslation()
+
 	return createPortal(
 		<Flex position="fixed" inset={0} bg="blackAlpha.800" zIndex={Z.dialog} align="center" justify="center" p="4"
-			role="dialog" aria-modal="true" aria-label="Signing on KeepKey">
+			role="dialog" aria-modal="true" aria-label={uiText("Signing on KeepKey")}>
 			<VStack bg="var(--bg-1, #111)" border="1px solid" borderColor="var(--line)" borderRadius="xl" p="6" maxW="420px" gap="3">
 				<Spinner color="kk.gold" />
-				<Text fontSize="15px" fontWeight="600" color="var(--text-0)">Confirm on your KeepKey</Text>
-				<Text fontSize="13px" color="var(--text-2)" textAlign="center">
-					Your KeepKey shows each field of this Safe transaction. Check every screen against the review in Desktop,
-					and reject on the device if anything differs.
-				</Text>
+				<Text fontSize="15px" fontWeight="600" color="var(--text-0)">{uiText("Confirm on your KeepKey")}</Text>
+				<Text fontSize="13px" color="var(--text-2)" textAlign="center">{uiText("Your KeepKey shows each field of this Safe transaction. Check every screen against the review in Desktop, and reject on the device if anything differs.")}</Text>
 			</VStack>
 		</Flex>,
 		document.body,
@@ -78,6 +78,8 @@ function SignOnDevice() {
 }
 
 function PendingRow({ tx, info, me, symbol, onSigned }: { tx: PendingSafeTx; info: SafeInfo; me: string; symbol: string; onSigned: () => void }) {
+  const uiText = useUiTranslation()
+
 	const [reviewing, setReviewing] = useState(false)
 	const [signing, setSigning] = useState(false)
 	const [signError, setSignError] = useState<string | null>(null)
@@ -106,26 +108,25 @@ function PendingRow({ tx, info, me, symbol, onSigned }: { tx: PendingSafeTx; inf
 			<Flex justify="space-between" align="center" gap="2" wrap="wrap">
 				<Text fontSize="13px" fontWeight="600" color="var(--text-0)">#{tx.nonce} · {describe(tx, info)}</Text>
 				<Flex gap="1.5" wrap="wrap">
-					{tx.hashMatches ? <Badge tone="ok">Hash matches</Badge> : <Badge tone="bad">Hash mismatch: do not sign</Badge>}
-					{tx.delegateCall && <Badge tone="warn">Delegate call</Badge>}
-					<Badge tone={confirmations >= info.threshold ? "ok" : "muted"}>{confirmations} of {info.threshold} signed</Badge>
-					{tx.unverifiedConfirmations.length > 0 && <Badge tone="muted">{tx.unverifiedConfirmations.length} not verifiable</Badge>}
-					{signedByMe && <Badge tone="ok">Signed by you</Badge>}
+					{tx.hashMatches ? <Badge tone="ok">{uiText("Hash matches")}</Badge> : <Badge tone="bad">{uiText("Hash mismatch: do not sign")}</Badge>}
+					{tx.delegateCall && <Badge tone="warn">{uiText("Delegate call")}</Badge>}
+					<Badge tone={confirmations >= info.threshold ? "ok" : "muted"}>{confirmations}{" "}{uiText("of")}{" "}{info.threshold}{" "}{uiText("signed")}</Badge>
+					{tx.unverifiedConfirmations.length > 0 && <Badge tone="muted">{tx.unverifiedConfirmations.length}{" "}{uiText("not verifiable")}</Badge>}
+					{signedByMe && <Badge tone="ok">{uiText("Signed by you")}</Badge>}
 				</Flex>
 			</Flex>
-			<Text fontSize="12px" color="var(--text-2)" mt="1.5">
-				To <Text as="span" fontFamily="mono" wordBreak="break-all">{tx.to}</Text>{nativeAmount(tx.value, symbol) && <> · {nativeAmount(tx.value, symbol)}</>}
+			<Text fontSize="12px" color="var(--text-2)" mt="1.5">{uiText("To")}{" "}<Text as="span" fontFamily="mono" wordBreak="break-all">{tx.to}</Text>{nativeAmount(tx.value, symbol) && <> · {nativeAmount(tx.value, symbol)}</>}
 			</Text>
 			{tx.delegateCall && (
-				<Text fontSize="12px" color="#f5c542" mt="1">A delegate call runs other code with this Safe's full authority. Only approve it if you know exactly what it does.</Text>
+				<Text fontSize="12px" color="#f5c542" mt="1">{uiText("A delegate call runs other code with this Safe's full authority. Only approve it if you know exactly what it does.")}</Text>
 			)}
-			<Text fontSize="11px" color="var(--text-2)" fontFamily="mono" mt="1.5" wordBreak="break-all">Safe tx hash {tx.safeTxHash}</Text>
+			<Text fontSize="11px" color="var(--text-2)" fontFamily="mono" mt="1.5" wordBreak="break-all">{uiText("Safe tx hash")}{" "}{tx.safeTxHash}</Text>
 			{canSign && !reviewing && (
-				<Text as="button" fontSize="12px" fontWeight="600" color="var(--gold)" mt="2" onClick={() => setReviewing(true)}>Review and sign</Text>
+				<Text as="button" fontSize="12px" fontWeight="600" color="var(--gold)" mt="2" onClick={() => setReviewing(true)}>{uiText("Review and sign")}</Text>
 			)}
 			{reviewing && (
 				<Box mt="2" p="3" borderRadius="md" bg="rgba(255,255,255,0.03)" border="1px solid" borderColor="var(--line)">
-					<Text fontSize="12px" color="var(--text-1)" mb="2">Your KeepKey will show these fields. Each one must match.</Text>
+					<Text fontSize="12px" color="var(--text-1)" mb="2">{uiText("Your KeepKey will show these fields. Each one must match.")}</Text>
 					{reviewRows(tx, info, symbol).map(([k, v]) => (
 						<Flex key={k} gap="3" fontSize="12px" py="0.5">
 							<Text color="var(--text-2)" minW="150px">{k}</Text>
@@ -134,8 +135,8 @@ function PendingRow({ tx, info, me, symbol, onSigned }: { tx: PendingSafeTx; inf
 					))}
 					{signError && <Text fontSize="12px" color="#F56565" mt="2">{signError}</Text>}
 					<Flex gap="4" mt="3">
-						<Text as="button" fontSize="13px" fontWeight="600" color="var(--gold)" onClick={sign}>Sign on KeepKey</Text>
-						<Text as="button" fontSize="13px" color="var(--text-2)" onClick={() => { setReviewing(false); setSignError(null) }}>Cancel</Text>
+						<Text as="button" fontSize="13px" fontWeight="600" color="var(--gold)" onClick={sign}>{uiText("Sign on KeepKey")}</Text>
+						<Text as="button" fontSize="13px" color="var(--text-2)" onClick={() => { setReviewing(false); setSignError(null) }}>{uiText("Cancel")}</Text>
 					</Flex>
 				</Box>
 			)}
@@ -145,6 +146,8 @@ function PendingRow({ tx, info, me, symbol, onSigned }: { tx: PendingSafeTx; inf
 }
 
 function SafeCard({ info, me, symbol }: { info: SafeInfo; me: string; symbol: string }) {
+  const uiText = useUiTranslation()
+
 	const [open, setOpen] = useState(false)
 	const [pending, setPending] = useState<PendingSafeTx[] | null>(null)
 	const [error, setError] = useState<string | null>(null)
@@ -161,38 +164,38 @@ function SafeCard({ info, me, symbol }: { info: SafeInfo; me: string; symbol: st
 			<Flex as="button" w="100%" justify="space-between" align="center" onClick={() => setOpen(o => !o)} textAlign="left">
 				<Box>
 					<Text fontSize="14px" fontWeight="600" color="var(--text-0)" fontFamily="mono" wordBreak="break-all">{info.address}</Text>
-					<Text fontSize="12px" color="var(--text-2)">{info.threshold} of {info.owners.length} owners must sign · Safe {info.version} · next nonce {info.nonce}</Text>
+					<Text fontSize="12px" color="var(--text-2)">{info.threshold}{" "}{uiText("of")}{" "}{info.owners.length}{" "}{uiText("owners must sign · Safe")}{" "}{info.version}{" "}{uiText("· next nonce")}{" "}{info.nonce}</Text>
 					<Flex mt="1" gap="1.5" wrap="wrap">
-						{info.vetting.codeProblem ? <Badge tone="warn">Unrecognized Safe code</Badge> : <Badge tone="ok">Safe's own code</Badge>}
-						{info.vetting.extensions.length > 0 && <Badge tone="muted">{info.vetting.extensions.length} extension{info.vetting.extensions.length > 1 ? "s" : ""}</Badge>}
+						{info.vetting.codeProblem ? <Badge tone="warn">{uiText("Unrecognized Safe code")}</Badge> : <Badge tone="ok">{uiText("Safe's own code")}</Badge>}
+						{info.vetting.extensions.length > 0 && <Badge tone="muted">{info.vetting.extensions.length}{" "}{uiText("extension")}{info.vetting.extensions.length > 1 ? "s" : ""}</Badge>}
 					</Flex>
 				</Box>
-				<Text fontSize="12px" color="var(--gold)">{open ? "Hide" : "Open"}</Text>
+				<Text fontSize="12px" color="var(--gold)">{open ? uiText("Hide") : uiText("Open")}</Text>
 			</Flex>
 			{open && (
 				<VStack align="stretch" gap="3" mt="3">
 					{info.vetting.codeProblem && (
-						<Text fontSize="12px" color="#f5c542">{info.vetting.codeProblem}, so its owners and threshold shown here cannot be confirmed.</Text>
+						<Text fontSize="12px" color="#f5c542">{info.vetting.codeProblem}{uiText(", so its owners and threshold shown here cannot be confirmed.")}</Text>
 					)}
 					{info.vetting.extensions.length > 0 && (
 						<Box>
-							<Text fontSize="12px" fontWeight="600" color="var(--text-1)" mb="1">Extensions</Text>
+							<Text fontSize="12px" fontWeight="600" color="var(--text-1)" mb="1">{uiText("Extensions")}</Text>
 							{info.vetting.extensions.map(e => <Text key={e} fontSize="12px" color="var(--text-2)">{e}</Text>)}
 						</Box>
 					)}
 					<Box>
-						<Text fontSize="12px" fontWeight="600" color="var(--text-1)" mb="1">Owners</Text>
+						<Text fontSize="12px" fontWeight="600" color="var(--text-1)" mb="1">{uiText("Owners")}</Text>
 						{info.owners.map(o => (
 							<Text key={o} fontSize="12px" fontFamily="mono" color={same(o, me) ? "var(--gold)" : "var(--text-2)"}>
-								{o}{same(o, me) ? "  (this KeepKey)" : ""}
+								{o}{same(o, me) ? uiText("  (this KeepKey)") : ""}
 							</Text>
 						))}
 					</Box>
 					<Box>
-						<Text fontSize="12px" fontWeight="600" color="var(--text-1)" mb="1">Waiting for signatures</Text>
+						<Text fontSize="12px" fontWeight="600" color="var(--text-1)" mb="1">{uiText("Waiting for signatures")}</Text>
 						{error ? <Text fontSize="12px" color="#F56565">{error}</Text>
 							: !pending ? <Spinner size="sm" color="kk.gold" />
-							: pending.length === 0 ? <Text fontSize="12px" color="var(--text-2)">Nothing pending.</Text>
+							: pending.length === 0 ? <Text fontSize="12px" color="var(--text-2)">{uiText("Nothing pending.")}</Text>
 							: <VStack align="stretch" gap="2">{pending.map(tx => <PendingRow key={tx.safeTxHash} tx={tx} info={info} me={me} symbol={symbol} onSigned={() => setPending(null)} />)}</VStack>}
 					</Box>
 				</VStack>
@@ -202,6 +205,8 @@ function SafeCard({ info, me, symbol }: { info: SafeInfo; me: string; symbol: st
 }
 
 export function MultisigPanel({ chainId, chainName, symbol }: { chainId: number; chainName: string; symbol: string }) {
+  const uiText = useUiTranslation()
+
 	const [state, setState] = useState<{ owner: string; safes: SafeInfo[]; errors: { address: string; error: string }[] } | null>(null)
 	const [error, setError] = useState<string | null>(null)
 	const [creating, setCreating] = useState(false)
@@ -217,37 +222,32 @@ export function MultisigPanel({ chainId, chainName, symbol }: { chainId: number;
 	return (
 		<VStack align="stretch" gap="3" py="2">
 			<Box>
-				<Text fontSize="15px" fontWeight="600" color="var(--text-0)">Multisig (Safe)</Text>
-				<Text fontSize="12px" color="var(--text-2)">
-					Safes on {chainName} whose contract lists this KeepKey as an owner. Owners and threshold are read
-					from the blockchain, and each pending transaction's hash and signatures are checked on this computer.
-					Anyone can create a Safe that lists your address, so only use Safes you recognize.
-				</Text>
+				<Text fontSize="15px" fontWeight="600" color="var(--text-0)">{uiText("Multisig (Safe)")}</Text>
+				<Text fontSize="12px" color="var(--text-2)">{uiText("Safes on")}{" "}{chainName}{" "}{uiText("whose contract lists this KeepKey as an owner. Owners and threshold are read from the blockchain, and each pending transaction's hash and signatures are checked on this computer. Anyone can create a Safe that lists your address, so only use Safes you recognize.")}</Text>
 			</Box>
 			{error ? (
-				<Flex align="center" gap="2"><Text fontSize="13px" color="#F56565">{error}</Text><Text as="button" fontSize="12px" color="var(--gold)" onClick={load}>Retry</Text></Flex>
+				<Flex align="center" gap="2"><Text fontSize="13px" color="#F56565">{error}</Text><Text as="button" fontSize="12px" color="var(--gold)" onClick={load}>{uiText("Retry")}</Text></Flex>
 			) : !state ? (
-				<Flex align="center" gap="2"><Spinner size="sm" color="kk.gold" /><Text fontSize="13px" color="var(--text-2)">Looking for your Safes…</Text></Flex>
+				<Flex align="center" gap="2"><Spinner size="sm" color="kk.gold" /><Text fontSize="13px" color="var(--text-2)">{uiText("Looking for your Safes…")}</Text></Flex>
 			) : (
 				<>
 					{state.errors.length > 0 && (
 						<Flex align="center" gap="2" wrap="wrap">
-							<Text fontSize="13px" color="#F56565">
-								Could not read {state.errors.length} Safe{state.errors.length > 1 ? "s" : ""} from the blockchain: {state.errors[0].error}
+							<Text fontSize="13px" color="#F56565">{uiText("Could not read")}{" "}{state.errors.length}{" "}{uiText("Safe")}{state.errors.length > 1 ? "s" : ""}{" "}{uiText("from the blockchain:")}{" "}{state.errors[0].error}
 							</Text>
-							<Text as="button" fontSize="12px" color="var(--gold)" onClick={load}>Retry</Text>
+							<Text as="button" fontSize="12px" color="var(--gold)" onClick={load}>{uiText("Retry")}</Text>
 						</Flex>
 					)}
 					{state.safes.length === 0 && state.errors.length === 0 && (
-						<Text fontSize="13px" color="var(--text-2)">No Safe on {chainName} lists this KeepKey ({state.owner}) as an owner yet.</Text>
+						<Text fontSize="13px" color="var(--text-2)">{uiText("No Safe on")}{" "}{chainName}{" "}{uiText("lists this KeepKey (")}{state.owner}{uiText(") as an owner yet.")}</Text>
 					)}
 					{state.safes.map(s => <SafeCard key={s.address} info={s} me={state.owner} symbol={symbol} />)}
 				</>
 			)}
 			{creating
 				? <SafeCreateWizard chainId={chainId} chainName={chainName} symbol={symbol} onClose={() => setCreating(false)} onCreated={load} />
-				: <Text as="button" fontSize="13px" fontWeight="600" color="var(--gold)" alignSelf="flex-start" onClick={() => setCreating(true)}>Create a Safe</Text>}
-			<Text fontSize="11px" color="var(--text-2)">Executing, and owner changes, are coming next.</Text>
+				: <Text as="button" fontSize="13px" fontWeight="600" color="var(--gold)" alignSelf="flex-start" onClick={() => setCreating(true)}>{uiText("Create a Safe")}</Text>}
+			<Text fontSize="11px" color="var(--text-2)">{uiText("Executing, and owner changes, are coming next.")}</Text>
 		</VStack>
 	)
 }

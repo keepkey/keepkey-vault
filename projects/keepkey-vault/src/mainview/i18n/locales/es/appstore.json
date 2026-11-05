@@ -23,5 +23,7 @@
 	"walletconnectName": "WalletConnect",
 	"walletconnectDescription": "Conéctate a cualquier dApp compatible con WalletConnect",
 	"internal": "Abrir",
-	"open": "Abrir"
+	"open": "Abrir",
+	"safeName": "Safe{Wallet}",
+	"safeDescription": "Cuentas multifirma compartidas en cadenas EVM. Conecta tu KeepKey como propietario. Para ver tus Safes y revisar transacciones pendientes en Desktop, abre Multifirma en un activo EVM."
 }

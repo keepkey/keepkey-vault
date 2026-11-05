@@ -165,7 +165,7 @@
 		"failedToCreate": "Cüzdan oluşturulamadı",
 		"failedToRecover": "Cüzdan kurtarılamadı",
 		"writeDownWarning": "Her kelimeyi yazın!",
-		"writeDownDetail": "Kurtarma ifadeniz cihaz ekranında gösteriliyor. Her kelimeyi kağıda yazın. Bu TEK yedeğinizdir; bu kelimeleri tekrar GÖRMEYECEKSİNİZ.",
+		"writeDownDetail": "Kurtarma ifadeniz cihaz ekranında göründüğünde, devam etmeden önce her kelimeyi kağıda yazın. İfadeyi güvenli bir yerde saklayın; cüzdanınızı kurtarmak için gereklidir.",
 		"deviceLost": "Cihaz bağlantısı kesildi. Devam etmek için tekrar takın veya yeniden denemek için geri dönün.",
 		"goBack": "Geri dön",
 		"backToChoose": "Geri"

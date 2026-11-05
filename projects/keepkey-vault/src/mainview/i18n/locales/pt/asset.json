@@ -112,5 +112,6 @@
   "invalidAddress": "Endereço inválido",
   "tokenCount_many": "{{count}} tokens",
   "showFiltered_many": "Mostrar {{count}} tokens filtrados",
-  "hideFiltered_many": "Ocultar {{count}} tokens filtrados"
+  "hideFiltered_many": "Ocultar {{count}} tokens filtrados",
+  "multisig": "Multiassinatura"
 }

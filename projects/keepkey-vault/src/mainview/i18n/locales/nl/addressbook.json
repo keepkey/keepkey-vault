@@ -41,5 +41,9 @@
 	"openAddressBook": "Adresboek",
 	"saveRecipientPrompt": "Deze ontvanger opslaan?",
 	"contactSaved": "Contact opgeslagen",
-	"saveContactFailed": "Kon contact niet opslaan"
+	"saveContactFailed": "Kon contact niet opslaan",
+	"cosigner": "Medeondertekenaar",
+	"cosignerOption": "Safe-medeondertekenaar: als eerste aanbieden bij het maken van een multisig",
+	"markCosigner": "Markeren als Safe-medeondertekenaar",
+	"notCosigner": "Geen medeondertekenaar"
 }

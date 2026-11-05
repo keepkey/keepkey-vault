@@ -89,5 +89,6 @@
   "showFiltered": "Toon {{count}} gefilterde token",
   "invalidAddress": "Ongeldig adres",
   "defiNetwork": "Netwerk",
-  "defiSymbol": "Symbool"
+  "defiSymbol": "Symbool",
+  "multisig": "Multisig"
 }

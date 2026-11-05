@@ -51,7 +51,7 @@ export function VaultPortfolioRows({ portfolios, onOpen, onSetIncluded, title = 
             <Box minW="0" flex="1">
               <Text fontSize="13px" fontWeight="600" color="var(--text-0)" truncate>{vault.name}</Text>
               <Text fontSize="10px" color="var(--text-2)" truncate>
-                {vault.type === 'safe' ? 'Base' : 'Bitcoin'} · {vault.threshold} {uiText('of')} {vault.cosigners.length}
+                {vault.type === 'safe' ? uiText("Base") : uiText("Bitcoin")} · {vault.threshold} {uiText('of')} {vault.cosigners.length}
                 {' · '}{vault.address.slice(0, 8)}…{vault.address.slice(-6)}
               </Text>
             </Box>

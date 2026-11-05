@@ -95,5 +95,6 @@
   "showFiltered_few": "Показать {{count}} отфильтрованных токена",
   "showFiltered_many": "Показать {{count}} отфильтрованных токенов",
   "hideFiltered_few": "Скрыть {{count}} отфильтрованных токена",
-  "hideFiltered_many": "Скрыть {{count}} отфильтрованных токенов"
+  "hideFiltered_many": "Скрыть {{count}} отфильтрованных токенов",
+  "multisig": "Мультиподпись"
 }

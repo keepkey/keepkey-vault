@@ -134,5 +134,6 @@
   "cached": "Cached",
   "watchOnlyNotVerifiedTitle": "Addresses NOT verified on a KeepKey",
   "watchOnlyNotVerifiedBody": "This wallet was imported from a key, not read from your KeepKey. If that key was swapped or mistyped, coins sent here are not yours. Connect the KeepKey that holds it to verify.",
-  "watchOnlyShowUnverified": "I understand, show the address"
+  "watchOnlyShowUnverified": "I understand, show the address",
+  "multisig": "Multisig"
 }

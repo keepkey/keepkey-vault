@@ -165,7 +165,7 @@
 		"failedToCreate": "Wallet-Erstellung fehlgeschlagen",
 		"failedToRecover": "Wallet-Wiederherstellung fehlgeschlagen",
 		"writeDownWarning": "Schreiben Sie jedes Wort auf!",
-		"writeDownDetail": "Ihre Wiederherstellungsphrase wird auf dem Gerätebildschirm angezeigt. Schreiben Sie jedes Wort auf Papier. Dies ist Ihre EINZIGE Sicherung; Sie werden diese Wörter NICHT erneut sehen.",
+		"writeDownDetail": "Wenn deine Wiederherstellungsphrase auf dem Gerätedisplay erscheint, schreibe jedes Wort auf Papier, bevor du fortfährst. Bewahre die Phrase sicher auf; du brauchst sie, um deine Wallet wiederherzustellen.",
 		"deviceLost": "Gerät getrennt. Schließen Sie es wieder an, um fortzufahren, oder gehen Sie zurück und versuchen Sie es erneut.",
 		"goBack": "Zurück",
 		"backToChoose": "Zurück"

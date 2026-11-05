@@ -165,7 +165,7 @@
 		"failedToCreate": "Error al crear la billetera",
 		"failedToRecover": "Error al recuperar la billetera",
 		"writeDownWarning": "¡Anota cada palabra!",
-		"writeDownDetail": "Tu frase de recuperación aparece en la pantalla del dispositivo. Escribe cada palabra en papel. Es tu ÚNICO respaldo; NO volverás a ver estas palabras.",
+		"writeDownDetail": "Cuando tu frase de recuperación aparezca en la pantalla del dispositivo, escribe cada palabra en papel antes de continuar. Guarda la frase en un lugar seguro; la necesitas para recuperar tu billetera.",
 		"deviceLost": "Dispositivo desconectado. Vuelve a conectarlo para continuar, o regresa para intentarlo de nuevo.",
 		"goBack": "Volver",
 		"backToChoose": "Atrás"

@@ -95,5 +95,14 @@
   "md94854d6": "Konto nicht verfügbar",
   "m618dcd86": "Verbinde und überprüfe das signierende Konto",
   "mab32ada5": "Signierendes Konto nicht verfügbar",
-  "m32bfb993": "Quellkonto der Vermögensauswahl"
+  "m32bfb993": "Quellkonto der Vermögensauswahl",
+  "m2a797e2b": "Multisig",
+  "m4f85db76": "Experimentell. Safe-Multisig-Konten auf EVM-Chains und Vaults sowie Bitcoin-Mitsignatur für Sparrow- oder Electrum-PSBTs. Standardmäßig aus. Abgeschlossene Transaktionen können auch bei deaktivierter Option gesendet werden.",
+  "mc955d11c": "KeepKey-Wallet",
+  "md311e6": "Nicht verfügbar — wähle ein Konto",
+  "md6e27c1f": "Konto wählen",
+  "m76c6bf28": "Wallet-Konten",
+  "m1e5aa65b": "Auf Ihrem KeepKey bestätigen",
+  "m538b10e9": "Öffnen",
+  "mf2e79e8": "Mitunterzeichner"
 }
