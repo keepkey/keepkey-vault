@@ -1,3 +1,4 @@
+import { getNumberLocale } from "../lib/number-locale"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { Box, Flex, Image, Text } from "@chakra-ui/react"
 import type { ChainDef } from "../../shared/chains"
@@ -149,7 +150,7 @@ function HeatmapTileBox({
 				zIndex: 2,
 			}}
 			textAlign="left"
-			title={`${tile.label} · $${tile.value.toLocaleString("en-US", { maximumFractionDigits: 2 })}`}
+			title={`${tile.label} · $${tile.value.toLocaleString(getNumberLocale(), { maximumFractionDigits: 2 })}`}
 		>
 			<Flex direction="column" justify="space-between" w="100%" h="100%" p={area > 4500 ? "3" : "2"} gap="1">
 				<Flex align="center" gap="2" minW="0">
@@ -215,7 +216,7 @@ function HeatmapTileBox({
 						lineHeight="1"
 						truncate
 					>
-						${tile.value.toLocaleString("en-US", { maximumFractionDigits: 2 })}
+						${tile.value.toLocaleString(getNumberLocale(), { maximumFractionDigits: 2 })}
 					</Text>
 				)}
 			</Flex>
@@ -329,7 +330,7 @@ export function buildChainDetailTiles(
 		tiles.push({
 			id: `${chain.id}:native`,
 			label: chain.symbol,
-			subLabel: `${parseFloat(nativeBalance).toLocaleString("en-US", { maximumFractionDigits: 6 })} ${chain.symbol}`,
+			subLabel: `${parseFloat(nativeBalance).toLocaleString(getNumberLocale(), { maximumFractionDigits: 6 })} ${chain.symbol}`,
 			icon: getAssetIcon(chain.caip),
 			color: chain.color,
 			value: nativeUsd,

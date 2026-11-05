@@ -149,5 +149,9 @@
 	"downloadUpdate": "Download Update",
 	"preReleaseUpdates": "Pre-release Updates",
 	"preReleaseUpdatesDesc": "Get early access to new features before stable release",
-	"restartToUpdate": "Restart & Install"
+	"restartToUpdate": "Restart & Install",
+	"autoLock": "Auto-lock",
+	"autoLockHint": "Idle time before the device re-asks for your PIN. Unplugging always locks it immediately.",
+	"offlineMode": "Offline mode",
+	"offlineModeDescription": "Airplane mode — no network. Device, addresses, and signing still work; balances, history, and broadcast are disabled."
 }

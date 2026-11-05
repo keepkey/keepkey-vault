@@ -109,5 +109,9 @@
   "validatingWallet": "Validando carteira blindada contra a cadeia...",
   "hideFiltered": "Ocultar {{count}} token filtrado",
   "showFiltered": "Mostrar {{count}} token filtrado",
-  "invalidAddress": "Endereço inválido"
+  "invalidAddress": "Endereço inválido",
+  "tokenCount_many": "{{count}} tokens",
+  "showFiltered_many": "Mostrar {{count}} tokens filtrados",
+  "hideFiltered_many": "Ocultar {{count}} tokens filtrados",
+  "multisig": "Multiassinatura"
 }

@@ -122,7 +122,23 @@
 		"autoRebooting": "장치가 다시 시작되는 중...",
 		"autoRebootingDetail": "KeepKey가 새 펌웨어로 자동 재시작됩니다. 보통 몇 초 정도 걸립니다.",
 		"waitingForDevice": "장치를 기다리는 중...",
-		"wipeAndFlash": "초기화 후 설치"
+		"wipeAndFlash": "초기화 후 설치",
+		"installWipe": {
+			"wipeTitle": "기기 데이터가 삭제됩니다",
+			"unknownTitle": "기기 데이터가 삭제될 수 있습니다",
+			"lockTitle": "Bitcoin 전용 지갑이 잠깁니다",
+			"noFirmwareTitle": "이 KeepKey의 모든 지갑이 삭제됩니다",
+			"wipeAck": "기기 데이터가 삭제됨을 이해하며 복구 구문을 백업했습니다",
+			"unknownAck": "기기 데이터가 삭제될 수 있음을 이해하며 복구 구문을 백업했습니다",
+			"lockAck": "지갑이 잠김을 이해하며 복구 구문을 백업했습니다",
+			"downgradeTitle": "기기 데이터가 삭제됩니다",
+			"crossBody": "이 KeepKey는 {{from}} 펌웨어 v{{current}}를 사용합니다. {{to}} 펌웨어 v{{target}}는 지갑을 읽을 수 없어 시작할 때 모든 키와 설정을 삭제합니다. 다시 사용하려면 복구 구문으로 지갑을 복원해야 합니다.",
+			"downgradeBody": "v{{current}} 대신 v{{target}}를 설치합니다. 이전 펌웨어는 새 지갑 저장 형식을 읽을 수 없어 시작할 때 모든 키와 설정을 삭제합니다. 복구 구문으로 지갑을 복원해야 합니다.",
+			"lockBody": "이 KeepKey는 Bitcoin 전용 펌웨어를 사용합니다. {{variant}} 펌웨어 v{{target}}는 이 지갑을 열지 않습니다. 지갑은 기기에 남지만, 다시 사용하려면 Bitcoin 전용 펌웨어를 재설치하거나 기기를 삭제한 뒤 복구 구문으로 지갑을 복원해야 합니다.",
+			"unknownBody": "부트로더 모드에서는 설치된 펌웨어를 확인할 수 없습니다. {{variant}} 펌웨어를 설치하면 모든 키와 설정이 삭제될 수 있습니다. 종류를 전환하거나 비공식 또는 더 최신 펌웨어를 교체할 때 등이 해당됩니다. 지갑이 있다면 복구 구문을 준비하세요. 새 KeepKey에는 잃을 지갑이 없습니다.",
+			"noFirmwareBody": "이 KeepKey에는 펌웨어가 설치되어 있지 않습니다. 업데이트 중단 후 발생할 수 있습니다. 지갑이 있었다면 펌웨어 설치로 삭제되므로 복구 구문으로 복원해야 합니다.",
+			"unsignedBody": "이 KeepKey는 공식 KeepKey 릴리스가 아닌 펌웨어를 사용합니다. 공식 펌웨어를 설치하면 모든 키와 설정이 삭제됩니다."
+		}
 	},
 	"initChoose": {
 		"title": "지갑 설정",
@@ -149,9 +165,10 @@
 		"failedToCreate": "지갑 생성 실패",
 		"failedToRecover": "지갑 복구 실패",
 		"writeDownWarning": "모든 단어를 적어 두세요!",
-		"writeDownDetail": "복구 문구가 장치 화면에 표시되고 있습니다. 각 단어를 종이에 적으세요. 이것이 유일한 백업이며, 이 단어들은 다시 표시되지 않습니다.",
+		"writeDownDetail": "복구 문구가 기기 화면에 표시되면 계속하기 전에 모든 단어를 종이에 적으세요. 문구를 안전하게 보관하세요. 지갑을 복구할 때 필요합니다.",
 		"deviceLost": "장치 연결이 끊어졌습니다. 계속하려면 다시 연결하거나, 뒤로 돌아가 다시 시도하세요.",
-		"goBack": "뒤로"
+		"goBack": "뒤로",
+		"backToChoose": "뒤로"
 	},
 	"initLabel": {
 		"walletCreated": "지갑이 생성되었습니다!",
@@ -232,6 +249,17 @@
 		"walletLabels": {
 			"visible": "표시",
 			"hidden": "숨김"
+		}
+	},
+	"updateDone": {
+		"continue": "계속"
+	},
+	"coinMode": {
+		"change": "변경"
+	},
+	"security": {
+		"dice": {
+			"can": "기기 버튼으로 주사위 결과 {{rollCount}}개를 입력합니다. 이 컴퓨터에는 전혀 전달되지 않습니다."
 		}
 	}
 }

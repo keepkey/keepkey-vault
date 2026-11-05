@@ -180,6 +180,13 @@ jobs:
         run: make test-unit
         shell: bash
 
+      - name: Validate localization and financial locale boundaries
+        shell: bash
+        run: |
+          cd projects/keepkey-vault
+          bun run i18n:check
+          bun run i18n:test
+
       - name: Test Bitcoin-only host boundary (Linux)
         if: runner.os == 'Linux'
         shell: bash

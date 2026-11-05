@@ -129,5 +129,11 @@
   "zcashShieldGuide": "How to shield, unshield and sync",
   "zcashPrivacySettings": "Privacy settings",
   "zcashTransparentOnly": "Transparent balance only",
-  "zcashTransparentUpdated": "Transparent balance updated"
+  "zcashTransparentUpdated": "Transparent balance updated",
+  "createPsbt": "Create PSBT",
+  "cached": "Cached",
+  "watchOnlyNotVerifiedTitle": "Addresses NOT verified on a KeepKey",
+  "watchOnlyNotVerifiedBody": "This wallet was imported from a key, not read from your KeepKey. If that key was swapped or mistyped, coins sent here are not yours. Connect the KeepKey that holds it to verify.",
+  "watchOnlyShowUnverified": "I understand, show the address",
+  "multisig": "Multisig"
 }

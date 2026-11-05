@@ -41,5 +41,9 @@
 	"openAddressBook": "Адресная книга",
 	"saveRecipientPrompt": "Сохранить этого получателя?",
 	"contactSaved": "Контакт сохранён",
-	"saveContactFailed": "Не удалось сохранить контакт"
+	"saveContactFailed": "Не удалось сохранить контакт",
+	"cosigner": "Соподписант",
+	"cosignerOption": "Соподписант Safe: предлагать первым при создании мультиподписи",
+	"markCosigner": "Отметить как соподписанта Safe",
+	"notCosigner": "Не соподписант"
 }

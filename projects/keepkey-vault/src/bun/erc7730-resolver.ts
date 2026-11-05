@@ -28,9 +28,9 @@ import { createHash } from 'node:crypto'
 import { DEFAULT_CLEARSIGN_SERVICE_URL } from './solana-certified-registry'
 import { firmwareClearSigns } from './calldata-decoder'
 import { utils as ethersUtils } from 'ethers'
-import { erc7730CalldataSkipReason, supportsErc7730EmbeddedCalls, supportsErc7730Transport, supportsErc7730TypedData } from '../shared/erc7730-support'
+import { CAPABILITY_SAFE_TYPED_CALLS, erc7730CalldataSkipReason, supportsErc7730EmbeddedCalls, supportsErc7730Transport, supportsErc7730TypedData } from '../shared/erc7730-support'
 import { deviceErrorMessage } from '../shared/device-error'
-import { erc7730EnvelopeSigner, planErc7730EmbeddedCalls } from './erc7730-describe'
+import { erc7730EnvelopeSigner, planErc7730EmbeddedCalls, planErc7730TypedEmbeddedCalls } from './erc7730-describe'
 import type { Erc7730Catalog } from '../shared/types'
 
 const TAG = '[erc7730]'
@@ -429,7 +429,8 @@ export function checkErc7730TypedDataDefinition(
   if (header.chainId !== BigInt(key.chainId)) return { reason: `envelope chain ${header.chainId} is not ${key.chainId}` }
   if (header.contract !== key.contract) return { reason: `envelope contract ${header.contract} is not ${key.contract}` }
   if (header.selectorOrTypeHash !== typeHash) return { reason: `envelope typeHash ${header.selectorOrTypeHash.slice(0, 10)} is not ${typeHash.slice(0, 10)}` }
-  if (header.embeddedCall !== false) {
+  if (header.embeddedCall === undefined || (header.embeddedCall &&
+      typeHash !== '0xbb8310d486368db6bd6f849402fdd73ad53d316b5a4b2644ad6efe0f941286d8')) {
     return { reason: header.embeddedCall ? 'program has an embedded call' : 'program sections cannot be read' }
   }
   const claimedKind = definition.kind
@@ -459,6 +460,8 @@ export async function resolveErc7730ForTypedData(
   fetchImpl: typeof fetch = fetch,
 ): Promise<Erc7730Catalog | undefined> {
   if (!supportsErc7730TypedData(request.firmwareVersion, request.capabilities)) return undefined
+  if ((request.typedData as any)?.primaryType === 'SafeTx' &&
+      !request.capabilities?.includes(CAPABILITY_SAFE_TYPED_CALLS)) return undefined
   if (request.txMetadata) return undefined
   const key = erc7730TypedDataKey(request.typedData)
   if ('reason' in key) return undefined
@@ -483,8 +486,26 @@ export async function resolveErc7730ForTypedData(
     return undefined
   }
   if (refusedDefinitionIds.has(checked.entry.definitionId)) return undefined
-  console.info(`${TAG} ${where}: typed-data definition ${checked.entry.definitionId.slice(0, 18)}… checked`)
-  return { primaryDefinitionId: checked.entry.definitionId, definitions: [checked.entry] }
+  const inner: Erc7730Catalog['definitions'] = []
+  for (let round = 0; round <= 2; round++) {
+    const plan = planErc7730TypedEmbeddedCalls(checked.entry.envelope, request.typedData, inner)
+    if (plan.refused) {
+      console.warn(`${TAG} ${where}: typed-data definition not attached (${plan.refused})`)
+      return undefined
+    }
+    if (!plan.missing.length) {
+      console.info(`${TAG} ${where}: typed-data definition ${checked.entry.definitionId.slice(0, 18)}… checked`)
+      return { primaryDefinitionId: checked.entry.definitionId, definitions: [checked.entry, ...inner] }
+    }
+    const keys = new Set(plan.missing.map((m) => `${m.contractAddress}:${m.selector}`))
+    for (const k of keys) {
+      const [contract, selector] = k.split(':')
+      const entry = await resolveErc7730InnerDefinition(key.chainId, contract, selector, fetchImpl)
+      if (!entry) return undefined
+      inner.push(entry)
+    }
+  }
+  return undefined
 }
 
 /** Typed-data sign params with the service's definition attached, when the device takes one. */

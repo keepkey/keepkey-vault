@@ -1,3 +1,4 @@
+import { useUiTranslation } from "../i18n/ui"
 import { useState } from "react"
 import { Box, Button, Code, Flex, Text, VStack } from "@chakra-ui/react"
 import { rpcRequest } from "../lib/rpc"
@@ -10,6 +11,8 @@ const SUPPORT_URL = "https://support.keepkey.com"
 // (runUsbDiagnostic RPC → windows-usb-probe.ts) and explains the likely cause
 // with a copy-ready report the user can paste into a support request.
 export function WindowsUsbTroubleshooter() {
+  const uiText = useUiTranslation()
+
 	const [phase, setPhase] = useState<"collapsed" | "running" | "done" | "error">("collapsed")
 	const [report, setReport] = useState<UsbDiagnosticReport | null>(null)
 	const [error, setError] = useState<string | null>(null)
@@ -52,9 +55,7 @@ export function WindowsUsbTroubleshooter() {
 				letterSpacing="0.02em"
 				_hover={{ color: "var(--teal)", textDecoration: "underline" }}
 				className="electrobun-webkit-app-region-no-drag"
-			>
-				Trouble connecting? Run diagnostics
-			</Text>
+			>{uiText("Trouble connecting? Run diagnostics")}</Text>
 		)
 	}
 
@@ -73,15 +74,11 @@ export function WindowsUsbTroubleshooter() {
 			<VStack gap={4} align="stretch">
 				<Flex align="center" gap={2}>
 					<Box w="6px" h="6px" borderRadius="full" bg="var(--gold)" />
-					<Text fontSize="lg" fontWeight="600" color="var(--text-0)" letterSpacing="-0.01em">
-						USB diagnostics
-					</Text>
+					<Text fontSize="lg" fontWeight="600" color="var(--text-0)" letterSpacing="-0.01em">{uiText("USB diagnostics")}</Text>
 				</Flex>
 
 				{phase === "running" && (
-					<Text fontSize="14px" color="var(--text-1)" lineHeight="1.55">
-						Checking how Windows sees your KeepKey…
-					</Text>
+					<Text fontSize="14px" color="var(--text-1)" lineHeight="1.55">{uiText("Checking how Windows sees your KeepKey…")}</Text>
 				)}
 
 				{phase === "error" && (
@@ -134,7 +131,7 @@ export function WindowsUsbTroubleshooter() {
 							_hover={{ bg: "var(--gold-2)" }}
 							className="electrobun-webkit-app-region-no-drag"
 						>
-							{copied ? "Copied" : "Copy report"}
+							{copied ? uiText("Copied") : uiText("Copy report")}
 						</Button>
 					)}
 					<Button
@@ -146,7 +143,7 @@ export function WindowsUsbTroubleshooter() {
 						_hover={{ color: "var(--text-0)", bg: "var(--ink-2)" }}
 						className="electrobun-webkit-app-region-no-drag"
 					>
-						{phase === "done" || phase === "error" ? "Run again" : "Checking…"}
+						{phase === "done" || phase === "error" ? uiText("Run again") : uiText("Checking…")}
 					</Button>
 					<Button
 						onClick={openSupport}
@@ -154,13 +151,10 @@ export function WindowsUsbTroubleshooter() {
 						color="var(--text-2)"
 						_hover={{ color: "var(--teal)", bg: "var(--ink-2)" }}
 						className="electrobun-webkit-app-region-no-drag"
-					>
-						Contact support
-					</Button>
+					>{uiText("Contact support")}</Button>
 				</Flex>
 
-				<Text fontSize="11px" color="var(--text-3)" textAlign="center" letterSpacing="0.02em">
-					Copy the report and paste it at {SUPPORT_URL.replace("https://", "")}
+				<Text fontSize="11px" color="var(--text-3)" textAlign="center" letterSpacing="0.02em">{uiText("Copy the report and paste it at")}{" "}{SUPPORT_URL.replace("https://", "")}
 				</Text>
 			</VStack>
 		</Box>

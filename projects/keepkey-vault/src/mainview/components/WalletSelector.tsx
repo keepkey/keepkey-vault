@@ -1,3 +1,5 @@
+import { getNumberLocale } from "../lib/number-locale"
+import { useUiTranslation } from "../i18n/ui"
 import { BITCOIN_QR_SCAN_EVENT } from "./BitcoinQrImport"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { Box, Flex, Text, Image } from "@chakra-ui/react"
@@ -37,7 +39,7 @@ function relTime(ms: number): string {
 function dollars(n: number): string {
 	if (!n) return "$0.00"
 	if (n >= 10_000) return `$${(n / 1000).toFixed(1)}k`
-	return `$${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+	return `$${n.toLocaleString(getNumberLocale(), { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 }
 
 /**
@@ -62,6 +64,8 @@ export function WalletSelector({
 	onWatch,
 	onReturnToConnected,
 }: WalletSelectorProps) {
+  const uiText = useUiTranslation()
+
 	const { t } = useTranslation("nav")
 	const [devices, setDevices] = useState<RegisteredDevice[]>([])
 	const [loading, setLoading] = useState(false)
@@ -277,7 +281,7 @@ export function WalletSelector({
 					{t("importWatchOnlyHint", { defaultValue: "Electrum wallet file or xpub / ypub / zpub" })}
 				</Text>
 			</Box>
-			<Box as="button" w="100%" px="3" py="2" textAlign="left" color="var(--gold)" fontSize="12px" onClick={() => { close(); window.dispatchEvent(new Event(BITCOIN_QR_SCAN_EVENT)) }}>Scan Bitcoin QR</Box>
+			<Box as="button" w="100%" px="3" py="2" textAlign="left" color="var(--gold)" fontSize="12px" onClick={() => { close(); window.dispatchEvent(new Event(BITCOIN_QR_SCAN_EVENT)) }}>{uiText("Scan Bitcoin QR")}</Box>
 		</Box>
 	)
 }

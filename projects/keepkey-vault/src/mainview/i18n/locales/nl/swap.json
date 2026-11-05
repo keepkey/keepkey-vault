@@ -151,14 +151,10 @@
 	"approvalWaiting": "Wachten op bevestiging van goedkeuring…",
 	"approvalWaitingDesc": "Wachten tot de goedkeuring is gemined voordat we de ruil kunnen ondertekenen.",
 	"balanceChanges": "Saldowijzigingen",
-	"blindSignBody": "Solana-ruilen gebruiken een versioned transaction die je KeepKey niet volledig kan decoderen, dus moet deze blind worden ondertekend. Dit staat standaard uit. Inschakelen activeert Geavanceerde modus (blind ondertekenen) op je apparaat — je wordt gevraagd de wijziging op het apparaat te bevestigen.",
-	"blindSignCaveat": "Blind ondertekenen betekent dat het apparaat een algemene melding toont in plaats van gedecodeerde details. Ga alleen verder voor ruilen die je hier hebt gestart. Je kunt het weer uitschakelen via Apparaatinstellingen → Ondertekeningsbeleid.",
 	"blindSignConfirmOnDevice": "Bevestig op apparaat…",
 	"blindSignDeclined": "Geweigerd op apparaat — blind ondertekenen is niet ingeschakeld.",
-	"blindSignEnable": "Blind ondertekenen inschakelen",
 	"blindSignEnableFailed": "Blind ondertekenen inschakelen op het apparaat is mislukt.",
 	"blindSignHeader": "Blind ondertekenen",
-	"blindSignTitle": "Blind ondertekenen inschakelen voor Solana",
 	"block": "Blok",
 	"cancelSwapDevice": "Annuleren - apparaatmelding vrijgeven",
 	"completed": "voltooid",
@@ -202,5 +198,9 @@
 	"retry": "Opnieuw proberen",
 	"quoteTimedOut": "Offerteverzoek verlopen — de ruildienst reageert te traag. Tik op Opnieuw proberen om het nogmaals te proberen.",
 	"sent": "Verzonden",
-	"gas": "Gas"
+	"gas": "Gas",
+	"deviceBlindSignCaveat": "Blind ondertekenen blijft ingeschakeld totdat de KeepKey wordt vergrendeld of losgekoppeld, voor alle apps die hem gebruiken, niet alleen deze swap. Zolang het is ingeschakeld, toont deze app dit scherm ook niet meer vóór dergelijke transacties. Het apparaat vraagt je om te bevestigen en je pincode opnieuw in te voeren.",
+	"solanaOutflowDrain": "Waarschuwing: hierdoor wordt je wallet geleegd. Onderteken alleen als dat je bedoeling is.",
+	"solanaOutflowCaveat": "Vanaf deze computer gesimuleerd met een Solana-node. Je KeepKey kan deze cijfers niet bevestigen.",
+	"deviceBlindSignEnable": "Blind ondertekenen inschakelen"
 }

@@ -35,5 +35,6 @@
 	"loadingConnect": "KeepKey'inize bağlanılıyor",
 	"loadingSync": "Ağlar arası bakiyeler eşitleniyor",
 	"loadingPrices": "En güncel fiyatlar alınıyor",
-	"tokensCount": "+{{count}} token"
+	"tokensCount": "+{{count}} token",
+	"dismiss": "Kapat"
 }

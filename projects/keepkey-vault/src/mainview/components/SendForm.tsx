@@ -1,3 +1,4 @@
+import { useUiTranslation } from "../i18n/ui"
 import { useState, useEffect, useCallback, useMemo, useRef, Fragment } from "react"
 import { useTranslation } from "react-i18next"
 import { Box, Flex, Text, VStack, Button, Input } from "@chakra-ui/react"
@@ -18,6 +19,7 @@ import type { ChainDef } from "../../shared/chains"
 import type { ChainBalance, TokenBalance, BuildTxResult, BroadcastResult, AddressBookEntry } from "../../shared/types"
 import { validateAddress } from "../../shared/address-validation"
 import { isBalanceUnverified } from "../../shared/balance-display-state"
+import { normalizeAmountInput, decimalAmount } from '../../shared/locale'
 
 type SendPhase = 'input' | 'built' | 'signed' | 'broadcast'
 
@@ -66,8 +68,10 @@ interface SendFormProps {
 }
 
 export function SendForm({ chain, address, balance, token, tokenBalanceUnverified, onClearToken, xpubOverride, scriptTypeOverride, evmAddressIndex }: SendFormProps) {
+  const uiText = useUiTranslation()
+
 	const { t } = useTranslation("send")
-	const { fmt, fmtCompact } = useFiat()
+	const { fmt, fmtCompact, locale } = useFiat()
 	const [recipient, setRecipient] = useState("")
 	const [amount, setAmount] = useState("")
 	const [usdAmount, setUsdAmount] = useState("")
@@ -93,6 +97,9 @@ export function SendForm({ chain, address, balance, token, tokenBalanceUnverifie
 	const [showAddressBook, setShowAddressBook] = useState(false)
 	// R5 form-fill detection: as the recipient is entered, match it against the book.
 	const [matchedContact, setMatchedContact] = useState<AddressBookEntry | null>(null)
+	const [vaultDestinationError, setVaultDestinationError] = useState('')
+	const [checkingVaultDestination, setCheckingVaultDestination] = useState(false)
+	const [vaultDestinationRetry, setVaultDestinationRetry] = useState(0)
 	const [addressIsNew, setAddressIsNew] = useState(false)
 	const [showSaveDialog, setShowSaveDialog] = useState(false)
 	// Address we've already auto-prompted to save, so the dialog doesn't re-pop.
@@ -112,6 +119,8 @@ export function SendForm({ chain, address, balance, token, tokenBalanceUnverifie
 		setMemo("")
 		setIsMax(false)
 		setMatchedContact(null)
+		setVaultDestinationError('')
+		setCheckingVaultDestination(false)
 		setAddressIsNew(false)
 		setShowSaveDialog(false)
 		promptedAddressRef.current = null
@@ -154,7 +163,10 @@ export function SendForm({ chain, address, balance, token, tokenBalanceUnverifie
 	const activeCaip = isTokenSend && token?.caip ? token.caip : chain.caip
 
 	// Basic client-side validation
-	const amountNum = parseFloat(amount)
+	const canonicalAmount = normalizeAmountInput(amount, locale)
+	const amountNum = canonicalAmount === null ? NaN : Number(canonicalAmount)
+	const enteredAmount = inputMode === 'usd' ? usdAmount : amount
+	const invalidAmountInput = !isMax && enteredAmount !== '' && normalizeAmountInput(enteredAmount, locale) === null
 	const balanceNum = parseFloat(displayBalance)
 	const exceedsBalance = !isMax && !isNaN(amountNum) && amountNum > 0 && balanceNum > 0 && amountNum > balanceNum
 
@@ -176,32 +188,34 @@ export function SendForm({ chain, address, balance, token, tokenBalanceUnverifie
 	// Bidirectional conversion: crypto → USD
 	const handleCryptoChange = useCallback((v: string) => {
 		setIsMax(false)
-		setAmount(v)
+		const canonical = normalizeAmountInput(v, locale)
+		setAmount(canonical ?? v)
 		if (hasPrice && v) {
-			const n = parseFloat(v)
+			const n = canonical === null ? NaN : Number(canonical)
 			if (!isNaN(n)) setUsdAmount((n * pricePerUnit).toFixed(2))
 			else setUsdAmount("")
 		} else {
 			setUsdAmount("")
 		}
-	}, [hasPrice, pricePerUnit])
+	}, [hasPrice, pricePerUnit, locale])
 
 	// Bidirectional conversion: USD → crypto
 	const handleUsdChange = useCallback((v: string) => {
 		setIsMax(false)
-		setUsdAmount(v)
+		const canonical = normalizeAmountInput(v, locale)
+		setUsdAmount(canonical ?? v)
 		if (hasPrice && v) {
-			const n = parseFloat(v)
+			const n = canonical === null ? NaN : Number(canonical)
 			if (!isNaN(n)) {
 				const crypto = n / pricePerUnit
-				setAmount(crypto < 1 ? crypto.toPrecision(8) : crypto.toFixed(8).replace(/\.?0+$/, ''))
+				setAmount(decimalAmount(crypto))
 			} else {
 				setAmount("")
 			}
 		} else {
 			setAmount("")
 		}
-	}, [hasPrice, pricePerUnit])
+	}, [hasPrice, pricePerUnit, locale])
 
 	// Swap input mode
 	const toggleInputMode = useCallback(() => {
@@ -211,10 +225,10 @@ export function SendForm({ chain, address, balance, token, tokenBalanceUnverifie
 	// USD equivalent of current amount for display
 	const amountUsdPreview = useMemo(() => {
 		if (!hasPrice || isMax) return null
-		const n = parseFloat(amount)
+		const n = canonicalAmount === null ? NaN : Number(canonicalAmount)
 		if (isNaN(n) || n <= 0) return null
 		return n * pricePerUnit
-	}, [amount, hasPrice, pricePerUnit, isMax])
+	}, [canonicalAmount, hasPrice, pricePerUnit, isMax])
 
 	// MAX on a Bitcoin-style chain: the amount actually sent, read from the built
 	// transaction's recipient output, so the review matches what the device shows.
@@ -236,12 +250,16 @@ export function SendForm({ chain, address, balance, token, tokenBalanceUnverifie
 	useEffect(() => {
 		setMatchedContact(null)
 		setAddressIsNew(false)
+		setVaultDestinationError('')
+		setCheckingVaultDestination(false)
 		const addr = recipient.trim()
 		if (!addr || !addressValid) return
+		setCheckingVaultDestination(true)
 		let alive = true
 		const networkId = caipToNetworkId(activeCaip)
 		const handle = setTimeout(() => {
-			rpcRequest<AddressBookEntry | null>("matchAddress", { networkId, address: addr }, 5000)
+			rpcRequest('checkVaultDestination', { networkId, address: addr, assetCaip: activeCaip }, 60000)
+				.then(() => rpcRequest<AddressBookEntry | null>("matchAddress", { networkId, address: addr }, 5000))
 				.then(entry => {
 					if (!alive) return
 					if (entry) {
@@ -255,25 +273,32 @@ export function SendForm({ chain, address, balance, token, tokenBalanceUnverifie
 						}
 					}
 				})
-				.catch(() => { /* detection is best-effort; never block sending */ })
+				.catch(e => { if (alive) setVaultDestinationError(e.message || 'Could not verify vault destination') })
+				.finally(() => { if (alive) setCheckingVaultDestination(false) })
 		}, 300)
 		return () => { alive = false; clearTimeout(handle) }
-	}, [recipient, activeCaip, addressValid])
+	}, [recipient, activeCaip, addressValid, vaultDestinationRetry])
 
 	const handleBuild = useCallback(async () => {
 		if (!recipient || (!amount && !isMax)) return
+		if (!isMax && (invalidAmountInput || canonicalAmount === null || !Number.isFinite(amountNum) || amountNum <= 0)) {
+			setError(t('invalidAmount', { defaultValue: 'Enter an ungrouped decimal amount, for example 1.5. Thousands separators are not accepted.' })); return
+		}
+		if (checkingVaultDestination || vaultDestinationError) { setError(vaultDestinationError || 'Checking vault destination…'); return }
 		if (addressValidation && !addressValidation.valid) { setError(t(addressValidation.error!)); return }
 		if (exceedsBalance) { setError(t("exceedsBalanceShort")); return }
 
 		// Custom fee validation — only the field(s) relevant to this chain family.
 		const useCustom = feeMode === 'custom' && supportsCustomFee
+		const gasPrice = normalizeAmountInput(customGasPrice, locale)
+		const satRate = normalizeAmountInput(customSatPerVByte, locale)
 		if (useCustom && chain.chainFamily === 'evm') {
-			const gwei = parseFloat(customGasPrice)
+			const gwei = gasPrice === null ? NaN : Number(gasPrice)
 			if (!customGasPrice || !isFinite(gwei) || gwei <= 0) { setError(t("invalidGasPrice")); return }
 			if (customGasLimit && (!/^\d+$/.test(customGasLimit.trim()) || parseInt(customGasLimit, 10) < 21000)) { setError(t("invalidGasLimit")); return }
 		}
 		if (useCustom && chain.chainFamily === 'utxo') {
-			const rate = parseFloat(customSatPerVByte)
+			const rate = satRate === null ? NaN : Number(satRate)
 			if (!customSatPerVByte || !isFinite(rate) || rate <= 0) { setError(t("invalidSatPerVByte")); return }
 		}
 
@@ -284,7 +309,7 @@ export function SendForm({ chain, address, balance, token, tokenBalanceUnverifie
 			const result = await rpcRequest<BuildTxResult>('buildTx', {
 				chainId: chain.id,
 				to: recipient,
-				amount: isMax ? '0' : amount,
+				amount: isMax ? '0' : canonicalAmount!,
 				memo: memo || undefined,
 				feeLevel,
 				isMax,
@@ -295,9 +320,9 @@ export function SendForm({ chain, address, balance, token, tokenBalanceUnverifie
 				xpubOverride: xpubOverride || undefined,
 				scriptTypeOverride: scriptTypeOverride || undefined,
 				evmAddressIndex: evmAddressIndex,
-				gasPriceGwei: useCustom && chain.chainFamily === 'evm' ? customGasPrice : undefined,
+				gasPriceGwei: useCustom && chain.chainFamily === 'evm' ? gasPrice! : undefined,
 				gasLimit: useCustom && chain.chainFamily === 'evm' && customGasLimit ? customGasLimit : undefined,
-				satPerVByte: useCustom && chain.chainFamily === 'utxo' ? parseFloat(customSatPerVByte) : undefined,
+				satPerVByte: useCustom && chain.chainFamily === 'utxo' ? Number(satRate) : undefined,
 			}, 60000)
 
 			setBuildResult(result)
@@ -306,7 +331,7 @@ export function SendForm({ chain, address, balance, token, tokenBalanceUnverifie
 			setError(e.message || t("failedToBuild"))
 		}
 		setLoading(false)
-	}, [chain, recipient, amount, memo, feeLevel, feeMode, supportsCustomFee, customGasPrice, customGasLimit, customSatPerVByte, isMax, addressValidation, exceedsBalance, isTokenSend, token, balance?.balance, xpubOverride, scriptTypeOverride, evmAddressIndex])
+	}, [chain, recipient, amount, canonicalAmount, amountNum, invalidAmountInput, locale, t, memo, feeLevel, feeMode, supportsCustomFee, customGasPrice, customGasLimit, customSatPerVByte, isMax, addressValidation, exceedsBalance, isTokenSend, token, balance?.balance, xpubOverride, scriptTypeOverride, evmAddressIndex, checkingVaultDestination, vaultDestinationError])
 
 	const handleSign = useCallback(async () => {
 		if (!buildResult) return
@@ -444,7 +469,7 @@ export function SendForm({ chain, address, balance, token, tokenBalanceUnverifie
 		<VStack gap="4" align="stretch" py="2" px="2">
 			<Flex justify="flex-end" gap="3">
 				<DocsLink href={DOCS_LINKS.send} />
-				<DocsLink href={watch('course-05-send')} label="Watch video" />
+				<DocsLink href={watch('course-05-send')} label={uiText("Watch video")} />
 			</Flex>
 			{/* Token badge — shown when sending a token */}
 			{isTokenSend && (
@@ -455,9 +480,7 @@ export function SendForm({ chain, address, balance, token, tokenBalanceUnverifie
 						<Text fontSize="10px" color="kk.textMuted">{token!.name}</Text>
 					</Flex>
 					{onClearToken && (
-						<Button size="xs" variant="ghost" color="kk.textMuted" _hover={{ color: "kk.textPrimary" }} onClick={onClearToken} px="1" minW="auto">
-							&times;
-						</Button>
+						<Button size="xs" variant="ghost" color="kk.textMuted" _hover={{ color: "kk.textPrimary" }} onClick={onClearToken} px="1" minW="auto">{uiText("&times;")}</Button>
 					)}
 				</Flex>
 			)}
@@ -512,10 +535,9 @@ export function SendForm({ chain, address, balance, token, tokenBalanceUnverifie
 								<svg width="20" height="20" viewBox="0 0 24 24" fill="var(--rose)" xmlns="http://www.w3.org/2000/svg">
 									<path d="M3 22V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v9h1a3 3 0 0 1 3 3v3a1 1 0 0 0 2 0v-7.5l-2.4-2.4a1 1 0 0 1 1.4-1.4l3.3 3.3c.2.2.3.4.3.7V19a3 3 0 0 1-6 0v-3a1 1 0 0 0-1-1h-1v7H3zM7 6h4v5H7V6z"/>
 								</svg>
-								<Text fontSize="sm" fontWeight="700" color="var(--rose)">Low {chain.symbol} for Gas</Text>
+								<Text fontSize="sm" fontWeight="700" color="var(--rose)">{uiText("Low")}{" "}{chain.symbol}{" "}{uiText("for Gas")}</Text>
 							</Flex>
-							<Text fontSize="xs" color="var(--rose)">
-								You need {chain.symbol} to pay network fees. Deposit {chain.symbol} to send tokens on {chain.coin}.
+							<Text fontSize="xs" color="var(--rose)">{uiText("You need")}{" "}{chain.symbol}{" "}{uiText("to pay network fees. Deposit")}{" "}{chain.symbol}{" "}{uiText("to send tokens on")}{" "}{chain.coin}.
 							</Text>
 							<Text fontSize="xs" fontFamily="mono" color="var(--rose)" mt="1">
 								{t("balance", "Balance")}: {formatBalance(balance.balance)} {chain.symbol}
@@ -591,6 +613,8 @@ export function SendForm({ chain, address, balance, token, tokenBalanceUnverifie
 						{addressValidation && !addressValidation.valid && (
 							<Text fontSize="11px" color="kk.error" mt="1">{t(addressValidation.error!)}</Text>
 						)}
+						{checkingVaultDestination && <Text fontSize="11px" color="kk.textMuted" mt="1" role="status">{uiText('Verifying destination network and vault configuration…')}</Text>}
+						{vaultDestinationError && <Flex align="center" gap="2" mt="1"><Text fontSize="11px" color="kk.error" role="alert">{vaultDestinationError}</Text><Button size="xs" variant="outline" onClick={() => setVaultDestinationRetry(n => n + 1)}>{uiText('Retry verification')}</Button></Flex>}
 						{/* R5: known contact/own wallet — show its identicon + label. */}
 						{matchedContact && (
 							<Flex align="center" gap="2" mt="1.5" px="2" py="1" w="fit-content" bg="rgba(233,196,106,0.06)" border="1px solid rgba(233,196,106,0.22)" borderRadius="999px">
@@ -598,6 +622,7 @@ export function SendForm({ chain, address, balance, token, tokenBalanceUnverifie
 								<Text fontSize="11px" color="kk.gold" fontWeight="600" truncate maxW="220px">
 									{matchedContact.label || (matchedContact.kind === "own" ? (matchedContact.deviceLabel || t("ownWallet", { ns: "addressbook" })) : t("unlabeled", { ns: "addressbook" }))}
 								</Text>
+								{matchedContact.vault && <Text fontSize="10px" color="kk.gold">{uiText("Vault ·")}{" "}{matchedContact.networkId} · {matchedContact.vault.threshold}{" "}{uiText("of")}{" "}{matchedContact.vault.cosigners.length}</Text>}
 							</Flex>
 						)}
 						{/* R5: new external address — flag it + offer to save (opens dialog). */}
@@ -625,6 +650,8 @@ export function SendForm({ chain, address, balance, token, tokenBalanceUnverifie
 						<Flex gap="2" align="center">
 							<Box flex="1">
 								<Input
+									inputMode="decimal"
+									aria-invalid={invalidAmountInput || undefined}
 									value={isMax ? 'MAX' : (inputMode === 'crypto' ? amount : usdAmount)}
 									onChange={(e) => inputMode === 'crypto' ? handleCryptoChange(e.target.value) : handleUsdChange(e.target.value)}
 									placeholder={inputMode === 'usd' ? '0.00' : t("amountPlaceholder")}
@@ -639,6 +666,7 @@ export function SendForm({ chain, address, balance, token, tokenBalanceUnverifie
 									_hover={{ borderColor: "rgba(255,255,255,0.18)" }}
 									_focus={{ borderColor: "var(--gold)", bg: "rgba(255,255,255,0.02)" }}
 								/>
+								{invalidAmountInput && <Text fontSize="xs" color="kk.error" mt="1">{t('invalidAmount', { defaultValue: 'Enter an ungrouped decimal amount, for example 1.5. Thousands separators are not accepted.' })}</Text>}
 							</Box>
 							<Button
 								size="sm"
@@ -809,7 +837,7 @@ export function SendForm({ chain, address, balance, token, tokenBalanceUnverifie
 						borderRadius="12px"
 						_hover={{ bg: "var(--gold-2)" }}
 						onClick={handleBuild}
-						disabled={loading || !recipient || (!amount && !isMax) || (addressValidation != null && !addressValidation.valid)}
+						disabled={loading || invalidAmountInput || checkingVaultDestination || !!vaultDestinationError || !recipient || (!amount && !isMax) || (addressValidation != null && !addressValidation.valid)}
 						px="4" py="2"
 						w="full"
 					>
@@ -1003,6 +1031,7 @@ export function SendForm({ chain, address, balance, token, tokenBalanceUnverifie
 				<AddressBookPicker
 					networkId={caipToNetworkId(activeCaip)}
 					chainFamily={chain.chainFamily}
+					assetCaip={activeCaip}
 					// This form sends transparent ZEC: shielded (u1…/zs1…) contacts belong to the Privacy tab.
 					entryFilter={chain.id === 'zcash' ? (e) => /^(t1|t3|tex1)/i.test(e.address.trim()) : undefined}
 					onSelect={(e) => { setRecipient(e.address); promptedAddressRef.current = e.address; setShowAddressBook(false) }}
@@ -1015,7 +1044,7 @@ export function SendForm({ chain, address, balance, token, tokenBalanceUnverifie
 				<SaveRecipientDialog
 					address={recipient.trim()}
 					networkId={caipToNetworkId(activeCaip)}
-					assetCaip={chain.caip}
+					assetCaip={activeCaip}
 					symbol={displaySymbol}
 					onClose={() => setShowSaveDialog(false)}
 					onSaved={(entry) => { setMatchedContact(entry); setAddressIsNew(false); setShowSaveDialog(false) }}

@@ -1,3 +1,5 @@
+import { getNumberLocale } from "../lib/number-locale"
+import { useUiTranslation } from "../i18n/ui"
 import { useState, useEffect, useCallback, useRef } from "react"
 import { Box, Flex, Text, Button, Spinner } from "@chakra-ui/react"
 import { hex } from "@scure/base"
@@ -22,7 +24,7 @@ function toBase64(bytes: Uint8Array): string {
 /** Exact: "12,345 sats (0.00012345 BTC)". Amounts arrive as decimal strings. */
 function sats(v: string): string {
 	const n = BigInt(v)
-	return `${n.toLocaleString()} sats (${n / 100000000n}.${(n % 100000000n).toString().padStart(8, "0")} BTC)`
+	return `${n.toLocaleString(getNumberLocale())} sats (${n / 100000000n}.${(n % 100000000n).toString().padStart(8, "0")} BTC)`
 }
 
 function Mono({ children }: { children: React.ReactNode }) {
@@ -37,6 +39,8 @@ const card = { bg: "rgba(255,255,255,0.03)", borderRadius: "lg", border: "1px so
  * (the user's own node when active) and checks the returned txid.
  */
 export function BroadcastSignedDialog() {
+  const uiText = useUiTranslation()
+
 	const [phase, setPhase] = useState<Phase>("idle")
 	const [name, setName] = useState("")
 	const [data, setData] = useState("")
@@ -111,33 +115,33 @@ export function BroadcastSignedDialog() {
 
 	return (
 		<>
-			{showQr && review && <BitcoinQrDialog bytes={hex.decode(review.txHex)} title="Signed transaction QR" onClose={() => setShowQr(false)} />}
+			{showQr && review && <BitcoinQrDialog bytes={hex.decode(review.txHex)} title={uiText("Signed transaction QR")} onClose={() => setShowQr(false)} />}
 			<Box position="fixed" inset="0" bg="rgba(0,0,0,0.85)" zIndex={Z.dialog} onClick={busy ? undefined : handleDismiss} />
 			<Box
 				position="fixed" top="50%" left="50%" transform="translate(-50%, -50%)"
 				w="560px" maxW="92vw" maxH="88vh" overflowY="auto"
 				bg="kk.bg" border="1px solid" borderColor="kk.border" borderRadius="xl"
-				zIndex={Z.dialog + 1} role="dialog" aria-modal="true" aria-label="Broadcast Bitcoin transaction"
+				zIndex={Z.dialog + 1} role="dialog" aria-modal="true" aria-label={uiText("Broadcast Bitcoin transaction")}
 			>
 				<Box p="6">
-					<Text fontSize="lg" fontWeight="700" color="kk.textPrimary">Broadcast Bitcoin transaction</Text>
-					<Text fontSize="xs" color="kk.textSecondary" mb="4">Bitcoin mainnet{name ? ` · ${name}` : ""}</Text>
+					<Text fontSize="lg" fontWeight="700" color="kk.textPrimary">{uiText("Broadcast Bitcoin transaction")}</Text>
+					<Text fontSize="xs" color="kk.textSecondary" mb="4">{uiText("Bitcoin mainnet")}{name ? ` · ${name}` : ""}</Text>
 
 					{phase === "checking" && (
 						<Flex align="center" gap="2" py="6" justify="center">
 							<Spinner size="sm" color="kk.gold" />
-							<Text fontSize="sm" color="kk.textSecondary">Reading the signed transaction...</Text>
+							<Text fontSize="sm" color="kk.textSecondary">{uiText("Reading the signed transaction...")}</Text>
 						</Flex>
 					)}
 
 					{(phase === "review" || phase === "sending" || phase === "done") && review && (
 						<Flex direction="column" gap="3">
 							{phase === "done" && (
-								<Text fontSize="sm" fontWeight="600" color="var(--teal-2)">Broadcast endpoint returned the expected transaction ID. This does not establish network propagation or confirmation.</Text>
+								<Text fontSize="sm" fontWeight="600" color="var(--teal-2)">{uiText("Broadcast endpoint returned the expected transaction ID. This does not establish network propagation or confirmation.")}</Text>
 							)}
-							<Button size="sm" variant="outline" onClick={() => setShowQr(true)}>Show transaction QR</Button>
+							<Button size="sm" variant="outline" onClick={() => setShowQr(true)}>{uiText("Show transaction QR")}</Button>
 							<Box {...card}>
-								<Text fontSize="xs" fontWeight="700" color="kk.textSecondary" mb="2">TO ({review.outputs.length})</Text>
+								<Text fontSize="xs" fontWeight="700" color="kk.textSecondary" mb="2">{uiText("TO (")}{review.outputs.length})</Text>
 								{review.outputs.map((o, i) => (
 									<Box key={i} mb="2">
 										<Mono>{o.address ?? (o.opReturnHex !== undefined ? `OP_RETURN ${o.opReturnHex}` : `script ${o.scriptHex}`)}</Mono>
@@ -147,38 +151,36 @@ export function BroadcastSignedDialog() {
 							</Box>
 							<Box {...card}>
 								<Flex justify="space-between" gap="2">
-									<Text fontSize="xs" color="kk.textSecondary">Fee</Text>
+									<Text fontSize="xs" color="kk.textSecondary">{uiText("Fee")}</Text>
 									<Text fontSize="xs" color="kk.textPrimary" textAlign="right">
-										{review.fee !== null ? sats(review.fee) : "Unknown: the input amounts could not be proven (Desktop does not guess)"}
+										{review.fee !== null ? sats(review.fee) : uiText("Unknown: the input amounts could not be proven (Desktop does not guess)")}
 									</Text>
 								</Flex>
-								<Text fontSize="xs" color="kk.textSecondary" mt="2">Transaction ID</Text>
+								<Text fontSize="xs" color="kk.textSecondary" mt="2">{uiText("Transaction ID")}</Text>
 								<Mono>{review.txid}</Mono>
-								<Text fontSize="xs" color="kk.textSecondary" mt="2">
-									Outputs come from the transaction itself. Your change is listed as an output too: check every address.
-								</Text>
+								<Text fontSize="xs" color="kk.textSecondary" mt="2">{uiText("Outputs come from the transaction itself. Your change is listed as an output too: check every address.")}</Text>
 							</Box>
 							<Text fontSize="xs" color="kk.textSecondary" textAlign="right">
-								{offline ? "Offline mode: copy the raw hex, or go online to broadcast."
-									: review.backend === "pioneer" ? "Broadcast via Pioneer"
+								{offline ? uiText("Offline mode: copy the raw hex, or go online to broadcast.")
+									: review.backend === "pioneer" ? uiText("Broadcast via Pioneer")
 									: `Broadcast via your own ${review.backend === "core" ? "Bitcoin Core" : review.backend} node`}
 							</Text>
 							{phase === "sending" ? (
 								<Flex align="center" gap="2" justify="center" py="2">
 									<Spinner size="sm" color="kk.gold" />
-									<Text fontSize="sm" color="kk.textPrimary">Broadcasting...</Text>
+									<Text fontSize="sm" color="kk.textPrimary">{uiText("Broadcasting...")}</Text>
 								</Flex>
 							) : (
 								<Flex gap="2" justify="flex-end">
 									<Button {...plainButton} onClick={() => handleCopy(phase === "done" ? review.txid : review.txHex)}>
-										{copied ? "Copied" : phase === "done" ? "Copy transaction ID" : "Copy raw hex"}
+										{copied ? uiText("Copied") : phase === "done" ? uiText("Copy transaction ID") : uiText("Copy raw hex")}
 									</Button>
 									{phase === "done" ? (
-										<Button {...goldButton} onClick={handleDismiss}>Done</Button>
+										<Button {...goldButton} onClick={handleDismiss}>{uiText("Done")}</Button>
 									) : (
 										<>
-											<Button {...plainButton} onClick={handleDismiss}>Cancel</Button>
-											{!offline && <Button {...goldButton} onClick={handleBroadcast}>Broadcast</Button>}
+											<Button {...plainButton} onClick={handleDismiss}>{uiText("Cancel")}</Button>
+											{!offline && <Button {...goldButton} onClick={handleBroadcast}>{uiText("Broadcast")}</Button>}
 										</>
 									)}
 								</Flex>
@@ -188,10 +190,10 @@ export function BroadcastSignedDialog() {
 
 					{phase === "error" && (
 						<Flex direction="column" gap="3">
-							<Text fontSize="sm" color="var(--rose)">{error || "Unknown error"}</Text>
+							<Text fontSize="sm" color="var(--rose)">{error || uiText("Unknown error")}</Text>
 							<Flex gap="2" justify="flex-end">
-								{review && <Button {...plainButton} onClick={() => setPhase("review")}>Back</Button>}
-								<Button {...goldButton} onClick={handleDismiss}>Close</Button>
+								{review && <Button {...plainButton} onClick={() => setPhase("review")}>{uiText("Back")}</Button>}
+								<Button {...goldButton} onClick={handleDismiss}>{uiText("Close")}</Button>
 							</Flex>
 						</Flex>
 					)}

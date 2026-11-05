@@ -122,7 +122,23 @@
 		"autoRebooting": "Cihazınız yeniden başlatılıyor...",
 		"autoRebootingDetail": "KeepKey yeni firmware ile otomatik olarak yeniden başlayacak. Bu genellikle birkaç saniye sürer.",
 		"waitingForDevice": "Cihazınız bekleniyor...",
-		"wipeAndFlash": "Sil ve yükle"
+		"wipeAndFlash": "Sil ve yükle",
+		"installWipe": {
+			"wipeTitle": "Bu işlem cihazı silecek",
+			"unknownTitle": "Bu işlem cihazı silebilir",
+			"lockTitle": "Bu işlem yalnızca Bitcoin cüzdanınızı kilitleyecek",
+			"noFirmwareTitle": "Bu KeepKey üzerindeki tüm cüzdanlar silinecek",
+			"wipeAck": "Bu işlemin cihazımı sileceğini anlıyorum ve kurtarma ifademi yedekledim",
+			"unknownAck": "Bu işlemin cihazımı silebileceğini anlıyorum ve kurtarma ifademi yedekledim",
+			"lockAck": "Cüzdanımın kilitleneceğini anlıyorum ve kurtarma ifademi yedekledim",
+			"downgradeTitle": "Bu işlem cihazı silecek",
+			"crossBody": "Bu KeepKey, {{from}} v{{current}} ürün yazılımını kullanıyor. {{to}} v{{target}} ürün yazılımı cüzdanı okuyamaz ve başladığında tüm anahtarları ve ayarları siler. Cüzdanı yeniden kullanmak için kurtarma ifadenizle geri yüklemeniz gerekir.",
+			"downgradeBody": "v{{current}} yerine v{{target}} yüklüyorsunuz. Eski ürün yazılımı yeni cüzdan depolama biçimini okuyamaz ve başladığında tüm anahtarları ve ayarları siler. Cüzdanı kurtarma ifadenizle geri yüklemeniz gerekir.",
+			"lockBody": "Bu KeepKey yalnızca Bitcoin ürün yazılımını kullanıyor. {{variant}} v{{target}} ürün yazılımı bu cüzdanı açmayı reddeder. Cüzdan cihazda kalır ancak kullanmak için yalnızca Bitcoin ürün yazılımını yeniden yüklemeniz veya cihazı silip kurtarma ifadenizle geri yüklemeniz gerekir.",
+			"unknownBody": "Önyükleyici modunda yüklü ürün yazılımı belirlenemez. {{variant}} ürün yazılımını yüklemek, örneğin tür değiştirirken veya resmi olmayan ya da daha yeni yazılımı değiştirirken tüm anahtarları ve ayarları silebilir. Bu KeepKey bir cüzdan içeriyorsa kurtarma ifadesini hazır bulundurun. Yeni bir KeepKey'de kaybedilecek cüzdan yoktur.",
+			"noFirmwareBody": "Bu KeepKey'de ürün yazılımı yüklü değil; örneğin kesintiye uğramış bir güncellemeden sonra bu durum oluşabilir. Cüzdan içeriyorsa ürün yazılımı yüklemek onu siler ve kurtarma ifadenizle geri yüklemeniz gerekir.",
+			"unsignedBody": "Bu KeepKey resmi KeepKey sürümü olmayan bir ürün yazılımı kullanıyor. Resmi ürün yazılımını yüklemek tüm anahtarları ve ayarları siler."
+		}
 	},
 	"initChoose": {
 		"title": "Cüzdanınızı kurun",
@@ -149,9 +165,10 @@
 		"failedToCreate": "Cüzdan oluşturulamadı",
 		"failedToRecover": "Cüzdan kurtarılamadı",
 		"writeDownWarning": "Her kelimeyi yazın!",
-		"writeDownDetail": "Kurtarma ifadeniz cihaz ekranında gösteriliyor. Her kelimeyi kağıda yazın. Bu TEK yedeğinizdir; bu kelimeleri tekrar GÖRMEYECEKSİNİZ.",
+		"writeDownDetail": "Kurtarma ifadeniz cihaz ekranında göründüğünde, devam etmeden önce her kelimeyi kağıda yazın. İfadeyi güvenli bir yerde saklayın; cüzdanınızı kurtarmak için gereklidir.",
 		"deviceLost": "Cihaz bağlantısı kesildi. Devam etmek için tekrar takın veya yeniden denemek için geri dönün.",
-		"goBack": "Geri dön"
+		"goBack": "Geri dön",
+		"backToChoose": "Geri"
 	},
 	"initLabel": {
 		"walletCreated": "Cüzdan oluşturuldu!",
@@ -232,6 +249,17 @@
 		"walletLabels": {
 			"visible": "görünür",
 			"hidden": "gizli"
+		}
+	},
+	"updateDone": {
+		"continue": "Devam et"
+	},
+	"coinMode": {
+		"change": "Değiştir"
+	},
+	"security": {
+		"dice": {
+			"can": "{{rollCount}} atış sonucunu cihazın düğmesiyle girersiniz; bu sonuçlar bu bilgisayara asla ulaşmaz."
 		}
 	}
 }

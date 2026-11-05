@@ -1,3 +1,4 @@
+import { useUiTranslation } from "../i18n/ui"
 /**
  * First screen of the setup wizard — before the tutorial cards, before
  * anything is written to the device: is this a genuine KeepKey?
@@ -116,6 +117,8 @@ export function FirmwareAuthenticity({
 	/** A returning owner's KeepKey: this screen must not read as new-device setup. */
 	holdsWallet?: boolean
 }) {
+  const uiText = useUiTranslation()
+
 	const verdict = authenticityVerdict(firmwareHash, firmwareVerified, bootloaderVerified)
 	const passed = verdict === "verified" || verdict === "genuine"
 
@@ -222,16 +225,10 @@ export function FirmwareAuthenticity({
 					{/* The limits and the do-it-yourself path stay one click away.
 					    ponytail: native <details> — no state, no animation lib. */}
 					<Box bg="rgba(0,0,0,0.25)" borderRadius="md" px={3} py={2} as="details">
-						<Text as="summary" fontSize="xs" color="gray.500" cursor="pointer" _marker={{ color: "gray.600" }}>
-							How this is checked
-						</Text>
+						<Text as="summary" fontSize="xs" color="gray.500" cursor="pointer" _marker={{ color: "gray.600" }}>{uiText("How this is checked")}</Text>
 						<VStack gap={3} align="stretch" mt={3}>
-							<Text fontSize="2xs" color="gray.500" lineHeight="1.6">
-								Your KeepKey reports the hashes of its bootloader and firmware. Desktop compares them with
-								KeepKey's published releases, using a list shipped with the app. This is a cross-check, not
-								independent proof. The signature check that actually guards your device runs on the device itself.
-							</Text>
-							{firmwareHash && <HashRow label="Firmware · reported by device" value={firmwareHash} />}
+							<Text fontSize="2xs" color="gray.500" lineHeight="1.6">{uiText("Your KeepKey reports the hashes of its bootloader and firmware. Desktop compares them with KeepKey's published releases, using a list shipped with the app. This is a cross-check, not independent proof. The signature check that actually guards your device runs on the device itself.")}</Text>
+							{firmwareHash && <HashRow label={uiText("Firmware · reported by device")} value={firmwareHash} />}
 							{bootloaderHash && (
 								<HashRow
 									label={`Bootloader${bootloaderVerified === true ? ` · official${bootloaderRelease ? ` ${bootloaderRelease}` : ""}` : bootloaderVerified === false ? " · unrecognized" : ""}`}
@@ -241,28 +238,19 @@ export function FirmwareAuthenticity({
 							<HStack gap={4} flexWrap="wrap">
 								{verdict === "verified" && firmwareRelease && (
 									<Box as="button" type="button" fontSize="2xs" color={GOLD} textDecoration="underline"
-										onClick={() => openUrl(`https://github.com/keepkey/keepkey-firmware/releases/tag/${firmwareRelease.replace(/-bitcoin-only$/, "")}`)}>
-										Open the {firmwareRelease} release
-									</Box>
+										onClick={() => openUrl(`https://github.com/keepkey/keepkey-firmware/releases/tag/${firmwareRelease.replace(/-bitcoin-only$/, "")}`)}>{uiText("Open the")}{" "}{firmwareRelease}{" "}{uiText("release")}</Box>
 								)}
 								<Box as="button" type="button" fontSize="2xs" color={GOLD} textDecoration="underline"
-								onClick={() => openUrl("https://github.com/keepkey/keepkey-firmware#verifying-published-binaries")}>
-									How to reproduce the build
-								</Box>
+								onClick={() => openUrl("https://github.com/keepkey/keepkey-firmware#verifying-published-binaries")}>{uiText("How to reproduce the build")}</Box>
 							</HStack>
 							{/* Two commands, two links in the chain. Shipping only one of them is
 							    how people end up comparing a payload hash to a device hash and
 							    concluding their wallet is compromised. */}
 							<Box>
-								<Text fontSize="2xs" fontFamily="mono" color="gray.300">sha256sum firmware.keepkey.bin</Text>
-								<Text fontSize="2xs" color="gray.600" mb="2" lineHeight="1.5">
-									Run on the release binary. It must match the firmware hash shown here.
-								</Text>
-								<Text fontSize="2xs" fontFamily="mono" color="gray.300">tail -c +257 firmware.keepkey.bin | sha256sum</Text>
-								<Text fontSize="2xs" color="gray.600" lineHeight="1.5">
-									Run on the release and your own build to compare unsigned app code.
-									This is <Text as="span" color="gray.400">not</Text> the device-reported hash.
-								</Text>
+								<Text fontSize="2xs" fontFamily="mono" color="gray.300">{uiText("sha256sum firmware.keepkey.bin")}</Text>
+								<Text fontSize="2xs" color="gray.600" mb="2" lineHeight="1.5">{uiText("Run on the release binary. It must match the firmware hash shown here.")}</Text>
+								<Text fontSize="2xs" fontFamily="mono" color="gray.300">{uiText("tail -c +257 firmware.keepkey.bin | sha256sum")}</Text>
+								<Text fontSize="2xs" color="gray.600" lineHeight="1.5">{uiText("Run on the release and your own build to compare unsigned app code. This is")}{" "}<Text as="span" color="gray.400">{uiText("not")}</Text>{" "}{uiText("the device-reported hash.")}</Text>
 							</Box>
 						</VStack>
 					</Box>
@@ -272,7 +260,7 @@ export function FirmwareAuthenticity({
 			<Button w="100%" maxW="360px" size="md" bg={GOLD} color="black" fontWeight="700"
 				_hover={{ opacity: 0.9 }} _active={{ transform: "scale(0.98)" }} disabled={continueDisabled} onClick={onContinue}>
 				<Flex gap={2} align="center" justify="center">
-					<Text>{verdict === "unrecognized" ? "Continue with this build" : verdict === "unreported" ? "Continue to update" : passed && !holdsWallet ? "Set up my KeepKey" : "Continue"}</Text>
+					<Text>{verdict === "unrecognized" ? uiText("Continue with this build") : verdict === "unreported" ? uiText("Continue to update") : passed && !holdsWallet ? uiText("Set up my KeepKey") : uiText("Continue")}</Text>
 					<FaChevronRight size={10} />
 				</Flex>
 			</Button>

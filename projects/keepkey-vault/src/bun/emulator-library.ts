@@ -1,8 +1,9 @@
-import { existsSync, readFileSync, readdirSync, writeFileSync, mkdirSync, unlinkSync } from 'fs'
+import { existsSync, readFileSync, readdirSync, writeFileSync, mkdirSync, unlinkSync, renameSync } from 'fs'
 import { homedir } from 'os'
 import { join, resolve } from 'path'
 import { dlopen, FFIType } from 'bun:ffi'
 import { secp256k1 } from '@noble/curves/secp256k1'
+import { validateFlashName } from './emulator-keychain'
 
 type SupportedPlatform = 'darwin' | 'win32' | 'linux'
 
@@ -22,6 +23,57 @@ export function emulatorBuildPath(id: string, platform: SupportedPlatform = proc
 
 export function emulatorBuildFlashName(id: string): string {
   return `build-${emulatorBuildId(id).slice(0, 16)}`
+}
+
+/** Firmware selection and saved wallet selection are independent. Only the
+ * public flash name is persisted here; wallet contents stay in encrypted flash. */
+export function selectedEmulatorWallet(home = homedir()): string | null {
+  let name: string
+  try { name = readFileSync(join(home, '.keepkey', 'emulator', 'selected-wallet'), 'utf8') }
+  catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null
+    throw error
+  }
+  try { return validateFlashName(name) }
+  catch { throw new Error('Saved emulator wallet selection is invalid. Select an existing wallet.') }
+}
+
+function requireSavedEmulatorWallet(name: string, home: string): string {
+  const valid = validateFlashName(name)
+  if (!existsSync(join(home, '.keepkey', 'emulator', `${valid}.enc`))) {
+    throw new Error(`Saved emulator wallet "${valid}" is missing. Select an existing wallet.`)
+  }
+  return valid
+}
+
+export function selectEmulatorWallet(name: string, home = homedir()): void {
+  const valid = requireSavedEmulatorWallet(name, home)
+  const dir = join(home, '.keepkey', 'emulator')
+  mkdirSync(dir, { recursive: true, mode: 0o700 })
+  const temporary = join(dir, `selected-wallet.tmp-${process.pid}`)
+  writeFileSync(temporary, `${valid}\n`, { mode: 0o600 })
+  renameSync(temporary, join(dir, 'selected-wallet'))
+}
+
+export function clearSelectedEmulatorWallet(home = homedir()): void {
+  const path = join(home, '.keepkey', 'emulator', 'selected-wallet')
+  if (existsSync(path)) unlinkSync(path)
+}
+
+/** An explicit/running/saved wallet must exist: never silently replace a lost
+ * selection with a blank wallet. Legacy defaults apply only on first use. */
+export function resolveEmulatorWalletName(options: {
+  explicit?: string
+  running?: string | null
+  buildId?: string | null
+  home?: string
+} = {}): string {
+  const home = options.home ?? homedir()
+  if (options.explicit !== undefined) return requireSavedEmulatorWallet(options.explicit, home)
+  if (options.running) return requireSavedEmulatorWallet(options.running, home)
+  const selected = selectedEmulatorWallet(home)
+  if (selected) return requireSavedEmulatorWallet(selected, home)
+  return options.buildId ? emulatorBuildFlashName(options.buildId) : 'default'
 }
 
 export function selectedEmulatorBuild(home = homedir()): string | null {

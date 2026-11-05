@@ -1,0 +1,115 @@
+{
+  "keys": ["crossBody", "downgradeBody", "lockBody", "unknownBody", "noFirmwareBody", "unsignedBody"],
+  "es": [
+    "Este KeepKey usa firmware {{from}} v{{current}}. El firmware {{to}} v{{target}} no puede leer su cartera y, al iniciarse, borrará todas las claves y configuraciones. Para volver a usar la cartera tendrás que restaurarla con tu frase de recuperación.",
+    "Estás instalando v{{target}} sobre v{{current}}. El firmware antiguo no puede leer el almacenamiento más reciente y, al iniciarse, borrará todas las claves y configuraciones. Tendrás que restaurar la cartera con tu frase de recuperación.",
+    "Este KeepKey usa firmware de solo Bitcoin. El firmware {{variant}} v{{target}} no abrirá esta cartera. La cartera permanece en el dispositivo, pero solo podrás usarla reinstalando el firmware de solo Bitcoin o borrando el dispositivo y restaurándola con tu frase de recuperación.",
+    "En modo bootloader no se puede determinar qué firmware está instalado. Instalar el firmware {{variant}} podría borrar todas las claves y configuraciones, por ejemplo al cambiar de variante o reemplazar firmware no oficial o más reciente. Si este KeepKey contiene una cartera, ten preparada su frase de recuperación. Un KeepKey nuevo no tiene ninguna cartera que perder.",
+    "Este KeepKey no tiene firmware instalado, por ejemplo tras una actualización interrumpida. Si contenía una cartera, instalar firmware la borrará y tendrás que restaurarla con tu frase de recuperación.",
+    "Este KeepKey usa firmware que no es una versión oficial de KeepKey. Instalar firmware oficial borrará todas las claves y configuraciones."
+  ],
+  "pt": [
+    "Este KeepKey usa firmware {{from}} v{{current}}. O firmware {{to}} v{{target}} não consegue ler sua carteira e, ao iniciar, apagará todas as chaves e configurações. Para usar a carteira novamente, será preciso restaurá-la com a frase de recuperação.",
+    "Você está instalando v{{target}} sobre v{{current}}. O firmware antigo não consegue ler o armazenamento mais recente e, ao iniciar, apagará todas as chaves e configurações. Será preciso restaurar a carteira com a frase de recuperação.",
+    "Este KeepKey usa firmware somente Bitcoin. O firmware {{variant}} v{{target}} recusará a abertura desta carteira. Ela permanece no dispositivo, mas só poderá ser usada após reinstalar o firmware somente Bitcoin ou apagar o dispositivo e restaurá-la com a frase de recuperação.",
+    "No modo bootloader, não é possível identificar o firmware instalado. Instalar o firmware {{variant}} pode apagar todas as chaves e configurações, por exemplo ao trocar de variante ou substituir firmware não oficial ou mais recente. Se este KeepKey contém uma carteira, tenha a frase de recuperação em mãos. Um KeepKey novo não tem carteira a perder.",
+    "Este KeepKey não tem firmware instalado, por exemplo após uma atualização interrompida. Se continha uma carteira, instalar firmware a apagará e será preciso restaurá-la com a frase de recuperação.",
+    "Este KeepKey usa firmware que não é uma versão oficial da KeepKey. Instalar firmware oficial apagará todas as chaves e configurações."
+  ],
+  "fr": [
+    "Ce KeepKey utilise le firmware {{from}} v{{current}}. Le firmware {{to}} v{{target}} ne peut pas lire son portefeuille et effacera toutes les clés et tous les réglages au démarrage. Pour réutiliser ce portefeuille, vous devrez le restaurer avec votre phrase de récupération.",
+    "Vous installez v{{target}} à la place de v{{current}}. L’ancien firmware ne peut pas lire le stockage plus récent et effacera toutes les clés et tous les réglages au démarrage. Vous devrez restaurer le portefeuille avec votre phrase de récupération.",
+    "Ce KeepKey utilise le firmware Bitcoin uniquement. Le firmware {{variant}} v{{target}} refusera d’ouvrir ce portefeuille. Il restera sur l’appareil, mais vous devrez réinstaller le firmware Bitcoin uniquement ou effacer l’appareil et restaurer le portefeuille avec votre phrase de récupération.",
+    "Le firmware installé ne peut pas être identifié en mode bootloader. L’installation du firmware {{variant}} peut effacer toutes les clés et tous les réglages, notamment en changeant de variante ou en remplaçant un firmware non officiel ou plus récent. Si ce KeepKey contient un portefeuille, préparez sa phrase de récupération. Un KeepKey neuf n’a aucun portefeuille à perdre.",
+    "Aucun firmware n’est installé sur ce KeepKey, par exemple après une mise à jour interrompue. S’il contenait un portefeuille, l’installation du firmware l’effacera et vous devrez le restaurer avec votre phrase de récupération.",
+    "Ce KeepKey utilise un firmware qui n’est pas une version officielle de KeepKey. L’installation du firmware officiel effacera toutes les clés et tous les réglages."
+  ],
+  "de": [
+    "Dieser KeepKey verwendet die Firmware {{from}} v{{current}}. Die Firmware {{to}} v{{target}} kann das Wallet nicht lesen und löscht beim Start alle Schlüssel und Einstellungen. Um das Wallet erneut zu verwenden, musst du es mit deiner Wiederherstellungsphrase wiederherstellen.",
+    "Du installierst v{{target}} anstelle von v{{current}}. Die ältere Firmware kann den neueren Wallet-Speicher nicht lesen und löscht beim Start alle Schlüssel und Einstellungen. Du musst das Wallet mit deiner Wiederherstellungsphrase wiederherstellen.",
+    "Dieser KeepKey verwendet reine Bitcoin-Firmware. Die Firmware {{variant}} v{{target}} wird dieses Wallet nicht öffnen. Es bleibt auf dem Gerät, kann aber erst nach erneuter Installation der reinen Bitcoin-Firmware oder nach Löschen des Geräts und Wiederherstellen mit deiner Wiederherstellungsphrase verwendet werden.",
+    "Im Bootloader-Modus lässt sich die installierte Firmware nicht erkennen. Das Installieren der Firmware {{variant}} kann alle Schlüssel und Einstellungen löschen, etwa beim Variantenwechsel oder beim Ersetzen inoffizieller oder neuerer Firmware. Wenn dieser KeepKey ein Wallet enthält, halte dessen Wiederherstellungsphrase bereit. Ein neuer KeepKey hat kein Wallet zu verlieren.",
+    "Auf diesem KeepKey ist keine Firmware installiert, etwa nach einem unterbrochenen Update. Falls er ein Wallet enthielt, wird es durch die Firmware-Installation gelöscht. Du musst es mit deiner Wiederherstellungsphrase wiederherstellen.",
+    "Dieser KeepKey verwendet keine offizielle KeepKey-Firmware. Das Installieren offizieller Firmware löscht alle Schlüssel und Einstellungen."
+  ],
+  "it": [
+    "Questo KeepKey usa il firmware {{from}} v{{current}}. Il firmware {{to}} v{{target}} non può leggere il portafoglio e all’avvio cancellerà tutte le chiavi e le impostazioni. Per usarlo nuovamente dovrai ripristinarlo con la frase di recupero.",
+    "Stai installando v{{target}} al posto di v{{current}}. Il vecchio firmware non può leggere l’archiviazione più recente e all’avvio cancellerà tutte le chiavi e le impostazioni. Dovrai ripristinare il portafoglio con la frase di recupero.",
+    "Questo KeepKey usa il firmware solo Bitcoin. Il firmware {{variant}} v{{target}} rifiuterà di aprire questo portafoglio. Rimarrà sul dispositivo, ma per usarlo dovrai reinstallare il firmware solo Bitcoin oppure cancellare il dispositivo e ripristinarlo con la frase di recupero.",
+    "In modalità bootloader non è possibile identificare il firmware installato. Installare il firmware {{variant}} potrebbe cancellare tutte le chiavi e le impostazioni, ad esempio cambiando variante o sostituendo firmware non ufficiale o più recente. Se il KeepKey contiene un portafoglio, tieni pronta la frase di recupero. Un KeepKey nuovo non ha portafogli da perdere.",
+    "Questo KeepKey non ha firmware installato, ad esempio dopo un aggiornamento interrotto. Se conteneva un portafoglio, installare il firmware lo cancellerà e dovrai ripristinarlo con la frase di recupero.",
+    "Questo KeepKey usa un firmware che non è una versione ufficiale di KeepKey. Installare il firmware ufficiale cancellerà tutte le chiavi e le impostazioni."
+  ],
+  "nl": [
+    "Deze KeepKey gebruikt firmware {{from}} v{{current}}. Firmware {{to}} v{{target}} kan de wallet niet lezen en wist bij het starten alle sleutels en instellingen. Om de wallet weer te gebruiken, moet je deze met je herstelzin herstellen.",
+    "Je installeert v{{target}} in plaats van v{{current}}. De oudere firmware kan de nieuwere walletopslag niet lezen en wist bij het starten alle sleutels en instellingen. Je moet de wallet met je herstelzin herstellen.",
+    "Deze KeepKey gebruikt Bitcoin-only-firmware. Firmware {{variant}} v{{target}} zal deze wallet niet openen. De wallet blijft op het apparaat staan, maar je moet de Bitcoin-only-firmware opnieuw installeren of het apparaat wissen en de wallet met je herstelzin herstellen om hem te gebruiken.",
+    "In de bootloadermodus kan de geïnstalleerde firmware niet worden vastgesteld. Het installeren van firmware {{variant}} kan alle sleutels en instellingen wissen, bijvoorbeeld bij het wisselen van variant of het vervangen van onofficiële of nieuwere firmware. Houd de herstelzin klaar als deze KeepKey een wallet bevat. Een nieuwe KeepKey heeft geen wallet te verliezen.",
+    "Op deze KeepKey is geen firmware geïnstalleerd, bijvoorbeeld na een onderbroken update. Als er een wallet op stond, wordt die gewist wanneer je firmware installeert en moet je hem met je herstelzin herstellen.",
+    "Deze KeepKey gebruikt firmware die geen officiële KeepKey-versie is. Het installeren van officiële firmware wist alle sleutels en instellingen."
+  ],
+  "pl": [
+    "Ten KeepKey używa oprogramowania {{from}} v{{current}}. Oprogramowanie {{to}} v{{target}} nie odczyta portfela i przy uruchomieniu usunie wszystkie klucze oraz ustawienia. Aby ponownie użyć portfela, musisz przywrócić go z frazy odzyskiwania.",
+    "Instalujesz v{{target}} zamiast v{{current}}. Starsze oprogramowanie nie odczyta nowszego formatu danych portfela i przy uruchomieniu usunie wszystkie klucze oraz ustawienia. Musisz przywrócić portfel z frazy odzyskiwania.",
+    "Ten KeepKey używa oprogramowania tylko Bitcoin. Oprogramowanie {{variant}} v{{target}} odmówi otwarcia tego portfela. Portfel pozostanie na urządzeniu, ale aby go użyć, musisz ponownie zainstalować oprogramowanie tylko Bitcoin albo wymazać urządzenie i przywrócić portfel z frazy odzyskiwania.",
+    "W trybie bootloadera nie można ustalić, jakie oprogramowanie jest zainstalowane. Instalacja oprogramowania {{variant}} może usunąć wszystkie klucze i ustawienia, na przykład przy zmianie wariantu lub zastąpieniu nieoficjalnej bądź nowszej wersji. Jeśli KeepKey zawiera portfel, przygotuj frazę odzyskiwania. Nowy KeepKey nie ma portfela, który można utracić.",
+    "Ten KeepKey nie ma zainstalowanego oprogramowania, na przykład po przerwanej aktualizacji. Jeśli zawierał portfel, instalacja oprogramowania go usunie i konieczne będzie przywrócenie z frazy odzyskiwania.",
+    "Ten KeepKey używa oprogramowania, które nie jest oficjalnym wydaniem KeepKey. Instalacja oficjalnego oprogramowania usunie wszystkie klucze i ustawienia."
+  ],
+  "ru": [
+    "На этом KeepKey установлена прошивка {{from}} v{{current}}. Прошивка {{to}} v{{target}} не сможет прочитать кошелёк и при запуске удалит все ключи и настройки. Чтобы снова использовать кошелёк, потребуется восстановить его с помощью фразы восстановления.",
+    "Вы устанавливаете v{{target}} вместо v{{current}}. Старая прошивка не может прочитать новый формат хранения кошелька и при запуске удалит все ключи и настройки. Кошелёк потребуется восстановить с помощью фразы восстановления.",
+    "Этот KeepKey использует прошивку только для Bitcoin. Прошивка {{variant}} v{{target}} откажется открывать этот кошелёк. Он останется на устройстве, но для использования потребуется вернуть прошивку только для Bitcoin либо стереть устройство и восстановить кошелёк с помощью фразы восстановления.",
+    "В режиме загрузчика невозможно определить установленную прошивку. Установка прошивки {{variant}} может удалить все ключи и настройки, например при смене варианта или замене неофициальной либо более новой прошивки. Если на KeepKey есть кошелёк, подготовьте его фразу восстановления. На новом KeepKey нет кошелька, который можно потерять.",
+    "На этом KeepKey нет установленной прошивки, например после прерванного обновления. Если на нём был кошелёк, установка прошивки удалит его и потребуется восстановление с помощью фразы восстановления.",
+    "На этом KeepKey установлена неофициальная прошивка. Установка официальной прошивки KeepKey удалит все ключи и настройки."
+  ],
+  "ja": [
+    "このKeepKeyは{{from}}ファームウェアv{{current}}を使用しています。{{to}}ファームウェアv{{target}}はウォレットを読み取れず、起動時にすべての鍵と設定を消去します。再び使用するにはリカバリーフレーズでウォレットを復元する必要があります。",
+    "v{{current}}の代わりにv{{target}}をインストールします。古いファームウェアは新しいウォレットの保存形式を読み取れず、起動時にすべての鍵と設定を消去します。リカバリーフレーズでウォレットを復元する必要があります。",
+    "このKeepKeyはBitcoin専用ファームウェアを使用しています。{{variant}}ファームウェアv{{target}}はこのウォレットを開きません。ウォレットはデバイスに残りますが、使用するにはBitcoin専用ファームウェアを再インストールするか、デバイスを消去してリカバリーフレーズから復元する必要があります。",
+    "ブートローダーモードではインストール済みのファームウェアを特定できません。{{variant}}ファームウェアのインストールにより、すべての鍵と設定が消去される可能性があります。例として、種類の切り替えや非公式・新しいファームウェアの置き換えが該当します。ウォレットがある場合はリカバリーフレーズを用意してください。新品のKeepKeyには失うウォレットはありません。",
+    "このKeepKeyにはファームウェアがありません。更新の中断などが原因です。ウォレットがあった場合、ファームウェアのインストールで消去されるため、リカバリーフレーズから復元する必要があります。",
+    "このKeepKeyはKeepKey公式リリースではないファームウェアを使用しています。公式ファームウェアをインストールすると、すべての鍵と設定が消去されます。"
+  ],
+  "zh": [
+    "此KeepKey当前运行{{from}}固件v{{current}}。{{to}}固件v{{target}}无法读取其钱包，启动时将擦除所有密钥和设置。要再次使用该钱包，您需要通过恢复短语还原。",
+    "您正在用v{{target}}替换v{{current}}。旧固件无法读取较新的钱包存储格式，启动时将擦除所有密钥和设置。您需要通过恢复短语还原钱包。",
+    "此KeepKey运行Bitcoin专用固件。{{variant}}固件v{{target}}将拒绝打开此钱包。钱包会保留在设备上，但您必须重新安装Bitcoin专用固件，或擦除设备并通过恢复短语还原，才能再次使用。",
+    "在引导加载程序模式下，无法确定已安装的固件。安装{{variant}}固件可能擦除所有密钥和设置，例如切换固件类型或替换非官方或较新的固件。如果此KeepKey中已有钱包，请准备好恢复短语。全新的KeepKey没有可丢失的钱包。",
+    "此KeepKey没有安装固件，例如更新中断后可能出现这种情况。如果其中原有钱包，安装固件将擦除它，您需要通过恢复短语还原。",
+    "此KeepKey使用的固件不是KeepKey官方版本。安装官方固件将擦除所有密钥和设置。"
+  ],
+  "ko": [
+    "이 KeepKey는 {{from}} 펌웨어 v{{current}}를 사용합니다. {{to}} 펌웨어 v{{target}}는 지갑을 읽을 수 없어 시작할 때 모든 키와 설정을 삭제합니다. 다시 사용하려면 복구 구문으로 지갑을 복원해야 합니다.",
+    "v{{current}} 대신 v{{target}}를 설치합니다. 이전 펌웨어는 새 지갑 저장 형식을 읽을 수 없어 시작할 때 모든 키와 설정을 삭제합니다. 복구 구문으로 지갑을 복원해야 합니다.",
+    "이 KeepKey는 Bitcoin 전용 펌웨어를 사용합니다. {{variant}} 펌웨어 v{{target}}는 이 지갑을 열지 않습니다. 지갑은 기기에 남지만, 다시 사용하려면 Bitcoin 전용 펌웨어를 재설치하거나 기기를 삭제한 뒤 복구 구문으로 지갑을 복원해야 합니다.",
+    "부트로더 모드에서는 설치된 펌웨어를 확인할 수 없습니다. {{variant}} 펌웨어를 설치하면 모든 키와 설정이 삭제될 수 있습니다. 종류를 전환하거나 비공식 또는 더 최신 펌웨어를 교체할 때 등이 해당됩니다. 지갑이 있다면 복구 구문을 준비하세요. 새 KeepKey에는 잃을 지갑이 없습니다.",
+    "이 KeepKey에는 펌웨어가 설치되어 있지 않습니다. 업데이트 중단 후 발생할 수 있습니다. 지갑이 있었다면 펌웨어 설치로 삭제되므로 복구 구문으로 복원해야 합니다.",
+    "이 KeepKey는 공식 KeepKey 릴리스가 아닌 펌웨어를 사용합니다. 공식 펌웨어를 설치하면 모든 키와 설정이 삭제됩니다."
+  ],
+  "th": [
+    "KeepKey นี้ใช้เฟิร์มแวร์ {{from}} v{{current}} เฟิร์มแวร์ {{to}} v{{target}} ไม่สามารถอ่านกระเป๋าเงินได้ และจะลบคีย์และการตั้งค่าทั้งหมดเมื่อเริ่มทำงาน หากต้องการใช้กระเป๋าเงินอีกครั้ง คุณต้องกู้คืนด้วยวลีกู้คืน",
+    "คุณกำลังติดตั้ง v{{target}} แทน v{{current}} เฟิร์มแวร์เก่าไม่สามารถอ่านรูปแบบจัดเก็บกระเป๋าเงินที่ใหม่กว่าได้ และจะลบคีย์และการตั้งค่าทั้งหมดเมื่อเริ่มทำงาน คุณต้องกู้คืนกระเป๋าเงินด้วยวลีกู้คืน",
+    "KeepKey นี้ใช้เฟิร์มแวร์ Bitcoin เท่านั้น เฟิร์มแวร์ {{variant}} v{{target}} จะไม่เปิดกระเป๋าเงินนี้ กระเป๋าเงินยังอยู่บนอุปกรณ์ แต่คุณต้องติดตั้งเฟิร์มแวร์ Bitcoin เท่านั้นอีกครั้ง หรือล้างอุปกรณ์แล้วกู้คืนด้วยวลีกู้คืนก่อนจึงจะใช้งานได้",
+    "ในโหมดบูตโหลดเดอร์ ไม่สามารถระบุเฟิร์มแวร์ที่ติดตั้งอยู่ได้ การติดตั้งเฟิร์มแวร์ {{variant}} อาจลบคีย์และการตั้งค่าทั้งหมด เช่น เมื่อเปลี่ยนประเภทหรือแทนที่เฟิร์มแวร์ที่ไม่เป็นทางการหรือใหม่กว่า หาก KeepKey นี้มีกระเป๋าเงิน ให้เตรียมวลีกู้คืนไว้ KeepKey ใหม่ยังไม่มีกระเป๋าเงินให้สูญเสีย",
+    "KeepKey นี้ไม่มีเฟิร์มแวร์ติดตั้งอยู่ เช่น หลังการอัปเดตถูกขัดจังหวะ หากเคยมีกระเป๋าเงิน การติดตั้งเฟิร์มแวร์จะลบกระเป๋าเงินนั้น และคุณต้องกู้คืนด้วยวลีกู้คืน",
+    "KeepKey นี้ใช้เฟิร์มแวร์ที่ไม่ใช่รุ่นอย่างเป็นทางการของ KeepKey การติดตั้งเฟิร์มแวร์อย่างเป็นทางการจะลบคีย์และการตั้งค่าทั้งหมด"
+  ],
+  "tr": [
+    "Bu KeepKey, {{from}} v{{current}} ürün yazılımını kullanıyor. {{to}} v{{target}} ürün yazılımı cüzdanı okuyamaz ve başladığında tüm anahtarları ve ayarları siler. Cüzdanı yeniden kullanmak için kurtarma ifadenizle geri yüklemeniz gerekir.",
+    "v{{current}} yerine v{{target}} yüklüyorsunuz. Eski ürün yazılımı yeni cüzdan depolama biçimini okuyamaz ve başladığında tüm anahtarları ve ayarları siler. Cüzdanı kurtarma ifadenizle geri yüklemeniz gerekir.",
+    "Bu KeepKey yalnızca Bitcoin ürün yazılımını kullanıyor. {{variant}} v{{target}} ürün yazılımı bu cüzdanı açmayı reddeder. Cüzdan cihazda kalır ancak kullanmak için yalnızca Bitcoin ürün yazılımını yeniden yüklemeniz veya cihazı silip kurtarma ifadenizle geri yüklemeniz gerekir.",
+    "Önyükleyici modunda yüklü ürün yazılımı belirlenemez. {{variant}} ürün yazılımını yüklemek, örneğin tür değiştirirken veya resmi olmayan ya da daha yeni yazılımı değiştirirken tüm anahtarları ve ayarları silebilir. Bu KeepKey bir cüzdan içeriyorsa kurtarma ifadesini hazır bulundurun. Yeni bir KeepKey'de kaybedilecek cüzdan yoktur.",
+    "Bu KeepKey'de ürün yazılımı yüklü değil; örneğin kesintiye uğramış bir güncellemeden sonra bu durum oluşabilir. Cüzdan içeriyorsa ürün yazılımı yüklemek onu siler ve kurtarma ifadenizle geri yüklemeniz gerekir.",
+    "Bu KeepKey resmi KeepKey sürümü olmayan bir ürün yazılımı kullanıyor. Resmi ürün yazılımını yüklemek tüm anahtarları ve ayarları siler."
+  ],
+  "vi": [
+    "KeepKey này dùng firmware {{from}} v{{current}}. Firmware {{to}} v{{target}} không thể đọc ví và sẽ xóa mọi khóa cùng cài đặt khi khởi động. Để dùng lại ví, bạn phải khôi phục bằng cụm từ khôi phục.",
+    "Bạn đang cài v{{target}} thay cho v{{current}}. Firmware cũ không đọc được định dạng lưu trữ ví mới hơn và sẽ xóa mọi khóa cùng cài đặt khi khởi động. Bạn phải khôi phục ví bằng cụm từ khôi phục.",
+    "KeepKey này dùng firmware chỉ Bitcoin. Firmware {{variant}} v{{target}} sẽ từ chối mở ví này. Ví vẫn nằm trên thiết bị nhưng bạn phải cài lại firmware chỉ Bitcoin hoặc xóa thiết bị rồi khôi phục bằng cụm từ khôi phục để dùng lại.",
+    "Không thể xác định firmware đã cài trong chế độ bootloader. Cài firmware {{variant}} có thể xóa mọi khóa cùng cài đặt, chẳng hạn khi đổi loại hoặc thay firmware không chính thức hay mới hơn. Nếu KeepKey này có ví, hãy chuẩn bị cụm từ khôi phục. KeepKey mới chưa có ví để mất.",
+    "KeepKey này chưa có firmware, chẳng hạn sau khi cập nhật bị gián đoạn. Nếu trước đó có ví, việc cài firmware sẽ xóa ví và bạn phải khôi phục bằng cụm từ khôi phục.",
+    "KeepKey này dùng firmware không phải bản phát hành chính thức của KeepKey. Cài firmware chính thức sẽ xóa mọi khóa cùng cài đặt."
+  ]
+}

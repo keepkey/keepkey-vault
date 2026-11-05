@@ -127,7 +127,8 @@ export function SecurityStepPage({
         {
           tone: "can",
           text: t("security.dice.can", {
-            defaultValue: `You enter ${rollCount} rolls with the device button — they never touch this computer.`,
+            rollCount,
+            defaultValue: "You enter {{rollCount}} rolls with the device button — they never touch this computer.",
           }),
         },
         {

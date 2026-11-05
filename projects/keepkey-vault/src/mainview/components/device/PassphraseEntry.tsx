@@ -1,3 +1,4 @@
+import { useUiTranslation } from "../../i18n/ui"
 import { useState, useEffect, useCallback, useRef } from "react"
 import { Box, Text, Flex, Button, Input, Spinner } from "@chakra-ui/react"
 import { useTranslation } from "react-i18next"
@@ -15,6 +16,8 @@ interface PassphraseEntryProps {
  * Submit empty string to use default (no passphrase) wallet.
  */
 export function PassphraseEntry({ onSubmit, onCancel }: PassphraseEntryProps) {
+  const uiText = useUiTranslation()
+
 	const { t } = useTranslation("device")
 	const [passphrase, setPassphrase] = useState("")
 	const [showPassphrase, setShowPassphrase] = useState(false)
@@ -134,7 +137,7 @@ export function PassphraseEntry({ onSubmit, onCancel }: PassphraseEntryProps) {
 						</Text>
 						<Flex justify="center" gap="3" mb="2">
 							<DocsLink href={DOCS_LINKS.passphrase} />
-							<DocsLink href={watch('course-09-passphrase')} label="Watch video" />
+							<DocsLink href={watch('course-09-passphrase')} label={uiText("Watch video")} />
 						</Flex>
 						<Text color="kk.textSecondary" fontSize="sm" mb="6" textAlign="center">
 							{t("passphrase.description")}

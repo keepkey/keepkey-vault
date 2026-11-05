@@ -30,7 +30,7 @@ import firmwareTokens717 from './firmware-token-table-717.json'
 import { versionCompare } from '../shared/firmware-versions'
 import { evmTokenIdentity } from '../shared/evm-contract-identity'
 import { CHAINS } from '../shared/chains'
-import { safeContract } from '../shared/safe-tx'
+import { decodeMultiSend, safeContract } from '../shared/safe-tx'
 import type { Erc7730Description } from '../shared/types'
 
 /**
@@ -272,8 +272,10 @@ function readLevel(envelopeHex: string, call: Level, walk: Walk): { signedBy: st
     formatters.push({ kind: ft[p], flags: ft[p + 1], args })
     p += 3 + 4 * ft[p + 2]
   }
-  // Calldata definitions only (erc7730_catalog.c): the device refuses a typed-data definition with either.
-  if (call.typed && formatters.some((f) => f.kind === 13 || f.flags & FLAG_TX_VALUE)) throw new Error('a calldata-only formatter in typed data')
+  if (call.typed && formatters.some((f) => f.flags & FLAG_TX_VALUE)) throw new Error('a calldata-only formatter in typed data')
+  if (call.typed && formatters.some((f) => f.kind === 13) &&
+      hex(program.subarray(38, 70)) !== '0xbb8310d486368db6bd6f849402fdd73ad53d316b5a4b2644ad6efe0f941286d8')
+    throw new Erc7730Refusal('typed embedded calldata requires canonical SafeTx')
   const dt = section[7]
   const display = Array.from({ length: u16(dt, 0) }, (_, i) => ({ op: dt[2 + 8 * i], a: u16(dt, 4 + 8 * i), b: u16(dt, 6 + 8 * i) }))
 
@@ -419,6 +421,11 @@ function readLevel(envelopeHex: string, call: Level, walk: Walk): { signedBy: st
   const embedded = (index: number, label: string): Field[] => {
     const f = formatters[index]
     const out: Field[] = []
+    if (call.typed) {
+      const path = paths[f.args.get(1)!.index]
+      if (path.source !== 1 || path.steps.length !== 1 || path.steps[0] !== 2)
+        throw new Erc7730Refusal('Unsupported ERC-7730 typed-data path')
+    }
     resolve(f.args.get(1)!.index).forEach((bytes, i) => {
       const pick = (role: number) => { const list = argument(f, role); return list?.[list.length === 1 ? 0 : i] }
       const callee = String(pick(15)!.value).toLowerCase()
@@ -434,37 +441,46 @@ function readLevel(envelopeHex: string, call: Level, walk: Walk): { signedBy: st
       const value = pick(17)?.value as bigint | undefined
       const spender = pick(18)?.value as string | undefined
       const data = String(bytes.value).toLowerCase()
-      const length = (data.length - 2) / 2
-      const innerSelector = data.slice(0, 10)
-      const context = (withFunction: boolean) => `To ${ethersUtils.getAddress(callee)}`
-        + (length === 0 ? '\nNo data' : `${withFunction ? `\nFunction ${innerSelector}` : ''}\nData ${length} bytes`)
-        + (value === undefined ? '' : `\nValue ${nativeOf(value)}`)
-        + (spender === undefined ? '' : `\nAs ${ethersUtils.getAddress(spender)}`)
-      // No data and nothing a definition could describe: the context is all of it.
-      if (length === 0 && (value !== undefined || selector === SAFE_SETUP)
-        && (callee === ZERO_ADDRESS || (SAFE_EXEC.has(selector) && !delegatecall))) {
-        out.push({ label, value: context(false) })
-        return
+      const op = call.typed ? Number(call.typed[3]) : 0
+      if (call.typed && op !== 0 && op !== 1) throw new Erc7730Refusal('Invalid Safe operation')
+      const batch = call.typed && op === 1 ? (() => {
+        const kind = safeContract(call.chainId, callee)?.kind
+        const calls = kind === 'multisend' || kind === 'multisend-call-only' ? decodeMultiSend(data) : null
+        if (!calls || calls.length > 64 || calls.some((c) => c.operation !== 0))
+          throw new Erc7730Refusal('DELEGATECALL cannot be clear-signed')
+        return calls
+      })() : [{ to: callee, data, value }]
+      for (const { to: callee, data, value } of batch) {
+        const length = (data.length - 2) / 2
+        const innerSelector = data.slice(0, 10)
+        const context = (withFunction: boolean) => `To ${ethersUtils.getAddress(callee)}`
+          + (length === 0 ? '\nNo data' : `${withFunction ? `\nFunction ${innerSelector}` : ''}\nData ${length} bytes`)
+          + (value === undefined ? '' : `\nValue ${nativeOf(value)}`)
+          + (spender === undefined ? '' : `\nAs ${ethersUtils.getAddress(spender)}`)
+        if (length === 0 && (value !== undefined || selector === SAFE_SETUP)
+          && (callee === ZERO_ADDRESS || call.typed || (SAFE_EXEC.has(selector) && !delegatecall))) {
+          out.push({ label, value: context(false) })
+          continue
+        }
+        if (call.depth >= EMBED_MAX_DEPTH || length < 4 || (length - 4) % 32 !== 0) throw new Erc7730Refusal('Inner call cannot be clear-signed')
+        if (INNER_APPROVALS.has(innerSelector)) throw new Error('inner approval')
+        const envelope = walk.inner(callee, innerSelector)
+        if (!envelope) {
+          if (!walk.missing) throw new Erc7730Refusal('Inner call cannot be clear-signed')
+          walk.missing.push({ contractAddress: callee, selector: innerSelector })
+          continue
+        }
+        // An inner definition that shows @.value needs one from the calldata.
+        if (value === undefined && readsValue(Uint8Array.from(Buffer.from(envelope.replace(/^0x/i, ''), 'hex')))) {
+          throw new Erc7730Refusal('Inner call cannot be clear-signed')
+        }
+        out.push({ label, value: context(true) })
+        const inner = readLevel(envelope, {
+          chainId: call.chainId, to: callee, data, value: value ?? 0n,
+          from: spender ?? call.to.toLowerCase(), signer: call.signer, firmwareVersion: call.firmwareVersion, depth: call.depth + 1,
+        }, walk)
+        out.push({ label: 'Inner action', value: inner.intent, depth: call.depth + 1 }, ...inner.fields)
       }
-      if (call.depth >= EMBED_MAX_DEPTH || length < 4 || (length - 4) % 32 !== 0) throw new Erc7730Refusal('Inner call cannot be clear-signed')
-      if (INNER_APPROVALS.has(innerSelector)) throw new Error('inner approval')
-      const envelope = walk.inner(callee, innerSelector)
-      if (!envelope) {
-        if (!walk.missing) throw new Erc7730Refusal('Inner call cannot be clear-signed')
-        walk.missing.push({ contractAddress: callee, selector: innerSelector })
-        return
-      }
-      // An inner definition that shows @.value needs one from the calldata.
-      if (value === undefined && readsValue(Uint8Array.from(Buffer.from(envelope.replace(/^0x/i, ''), 'hex')))) {
-        throw new Erc7730Refusal('Inner call cannot be clear-signed')
-      }
-      out.push({ label, value: context(true) })
-      const inner = readLevel(envelope, {
-        chainId: call.chainId, to: callee, data, value: value ?? 0n,
-        // ERC-7730: inside the call @.from is whose authority it runs with, else the contract making it.
-        from: spender ?? call.to.toLowerCase(), signer: call.signer, firmwareVersion: call.firmwareVersion, depth: call.depth + 1,
-      }, walk)
-      out.push({ label: 'Inner action', value: inner.intent, depth: call.depth + 1 }, ...inner.fields)
     })
     return out
   }
@@ -564,23 +580,40 @@ export function describeErc7730Call(
  * card lists every value in its own typed-data section). `from` as for calls.
  * Typed data has one container, @.to: the domain's verifyingContract.
  */
-export function describeErc7730TypedData(envelopeHex: string, typedData: any, firmwareVersion: string | undefined, from?: string): Erc7730Description | undefined {
+function typedTuple(typedData: any, type: string, value: any): any {
+  const array = /^(.*)\[(\d*)\]$/.exec(type)
+  if (array) return (value as any[]).map((v) => typedTuple(typedData, array[1], v))
+  const members = typedData.types?.[type]
+  return Array.isArray(members) ? members.map((m: { name: string; type: string }) => typedTuple(typedData, m.type, value[m.name])) : value
+}
+
+export function planErc7730TypedEmbeddedCalls(envelopeHex: string, typedData: any, known: readonly InnerDefinition[]):
+  { missing: Array<{ contractAddress: string; selector: string }>; refused?: string } {
+  const missing: Array<{ contractAddress: string; selector: string }> = []
+  try {
+    const chainId = Number(typedData.domain.chainId)
+    readLevel(envelopeHex, {
+      chainId, to: typedData.domain.verifyingContract, data: '', value: 0n,
+      typed: typedTuple(typedData, typedData.primaryType, typedData.message),
+      from: ZERO_ADDRESS, signer: ZERO_ADDRESS, firmwareVersion: undefined, depth: 0,
+    }, { inner: innerLookup(chainId, known), missing })
+    return { missing }
+  } catch (error: any) {
+    return { missing, refused: error instanceof Erc7730Refusal ? error.message : `cannot be read (${error?.message || 'error'})` }
+  }
+}
+
+export function describeErc7730TypedData(envelopeHex: string, typedData: any, firmwareVersion: string | undefined, from?: string,
+  inner?: readonly InnerDefinition[]): Erc7730Description | undefined {
   try {
     const contract = String(typedData?.domain?.verifyingContract ?? '')
     if (!/^0x[0-9a-fA-F]{40}$/.test(contract)) return undefined
-    const types = typedData.types ?? {}
-    // The message in the program's node order: struct members in declared order.
-    const tuple = (type: string, value: any): any => {
-      const array = /^(.*)\[(\d*)\]$/.exec(type)
-      if (array) return (value as any[]).map((v) => tuple(array[1], v))
-      return Array.isArray(types[type]) ? types[type].map((m: { name: string; type: string }) => tuple(m.type, value[m.name])) : value
-    }
     const root = deviceClearSignRoot()
     if (!root) return undefined
     return describeLevel(envelopeHex, {
       chainId: Number(typedData.domain.chainId), to: contract, data: '', value: 0n, from, signer: from, firmwareVersion, depth: 0,
-      typed: tuple(String(typedData.primaryType), typedData.message),
-    }, { root, inner: () => undefined })
+      typed: typedTuple(typedData, String(typedData.primaryType), typedData.message),
+    }, { root, inner: innerLookup(Number(typedData.domain.chainId), inner) })
   } catch {
     return undefined
   }

@@ -12,5 +12,8 @@
 	"derivingAddress": "Dérivation de l'adresse...",
 	"noAddressDerived": "Aucune adresse dérivée pour le moment",
 	"deriveAddress": "Dériver l'adresse",
-	"account": "Compte {{index}}"
+	"account": "Compte {{index}}",
+	"btcAccountType": {
+		"learnMore": "En savoir plus"
+	}
 }

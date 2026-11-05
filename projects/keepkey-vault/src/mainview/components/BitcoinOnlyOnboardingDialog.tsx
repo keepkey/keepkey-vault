@@ -1,3 +1,4 @@
+import { useUiTranslation } from "../i18n/ui"
 import { useState, useEffect } from "react"
 import { Box, Flex, Text, Button } from "@chakra-ui/react"
 import { Z } from "../lib/z-index"
@@ -13,6 +14,8 @@ const ACCENT = "#F7931A" // bitcoin orange
  *  are here. Gated by the persisted `btcOnboardingShown` flag; the parent marks it
  *  on close. Every choice is changeable later in Settings → Bitcoin node. */
 export function BitcoinOnlyOnboardingDialog({ onClose }: { onClose: () => void }) {
+  const uiText = useUiTranslation()
+
   const [view, setView] = useState<"intro" | "selfhost">("intro")
   const [settings, setSettings] = useState<AppSettings | null>(null)
   const [busy, setBusy] = useState(false)
@@ -49,58 +52,48 @@ export function BitcoinOnlyOnboardingDialog({ onClose }: { onClose: () => void }
                 <Text fontSize="24px" fontWeight="800" color={ACCENT} lineHeight="1">₿</Text>
               </Flex>
               <Box>
-                <Text fontSize="lg" fontWeight="800" color="kk.textPrimary" letterSpacing="-0.02em">Your Bitcoin-only KeepKey</Text>
-                <Text fontSize="xs" color="kk.textSecondary">Focused, private, fewer moving parts.</Text>
+                <Text fontSize="lg" fontWeight="800" color="kk.textPrimary" letterSpacing="-0.02em">{uiText("Your Bitcoin-only KeepKey")}</Text>
+                <Text fontSize="xs" color="kk.textSecondary">{uiText("Focused, private, fewer moving parts.")}</Text>
               </Box>
             </Flex>
 
-            <Text fontSize="sm" color="kk.textSecondary" lineHeight="1.6">
-              Choose how Vault gets Bitcoin data. You can change this any time in <b>Settings → Bitcoin node</b>.
+            <Text fontSize="sm" color="kk.textSecondary" lineHeight="1.6">{uiText("Choose how Vault gets Bitcoin data. You can change this any time in")}{" "}<b>{uiText("Settings → Bitcoin node")}</b>.
             </Text>
 
             <OptionCard
-              title="KeepKey servers" badge="Recommended"
+              title={uiText("KeepKey servers")} badge="Recommended"
               body="KeepKey's hosted Bitcoin data. This service receives wallet queries; its availability and data accuracy affect your view."
               action="Use KeepKey servers" onClick={onClose} primary disabled={busy || offlineReady}
             />
             <OptionCard
-              title="Self-host your node"
+              title={uiText("Self-host your node")}
               body="Use your Bitcoin Core or Blockbook node for Bitcoin queries and broadcast. Fiat prices use a separate hosted service."
               action="Set up my node" onClick={() => setView("selfhost")} disabled={busy || offlineReady}
             />
             <OptionCard
-              title="Offline mode"
+              title={uiText("Offline mode")}
               body="Disable Desktop's network requests. Disconnect this computer from the network yourself; KeepKey communicates with it over USB."
               action={busy ? "Enabling…" : offlineReady ? "Continue offline" : "Enable offline mode"} onClick={offlineReady ? onClose : goOffline} disabled={busy}
             />
 
             {error && <Text role="alert" fontSize="xs" color="var(--rose)">{error}</Text>}
-            {offlineReady && <Text role="status" fontSize="xs" color="var(--teal)">Offline mode confirmed.</Text>}
-            <Text fontSize="xs" color="kk.textSecondary" lineHeight="1.6">
-              Create and export an unsigned PSBT on the online computer using a public watch-only wallet.
-              Transfer it to this computer and drop it on Desktop to review and sign with your USB-connected KeepKey.
-              Return the signed file to the online computer for broadcast. Saved files can be reopened after restarting Desktop.
-            </Text>
-            <Text fontSize="xs" color="kk.textSecondary" lineHeight="1.6">
-              Removable media and transaction parsers remain attack surfaces. Check recipients and amounts on KeepKey.
-              An offline computer cannot independently know whether an input has subsequently been spent.
-            </Text>
+            {offlineReady && <Text role="status" fontSize="xs" color="var(--teal)">{uiText("Offline mode confirmed.")}</Text>}
+            <Text fontSize="xs" color="kk.textSecondary" lineHeight="1.6">{uiText("Create and export an unsigned PSBT on the online computer using a public watch-only wallet. Transfer it to this computer and drop it on Desktop to review and sign with your USB-connected KeepKey. Return the signed file to the online computer for broadcast. Saved files can be reopened after restarting Desktop.")}</Text>
+            <Text fontSize="xs" color="kk.textSecondary" lineHeight="1.6">{uiText("Removable media and transaction parsers remain attack surfaces. Check recipients and amounts on KeepKey. An offline computer cannot independently know whether an input has subsequently been spent.")}</Text>
 
             <Text as="button" fontSize="xs" color="kk.textSecondary" textAlign="center" mt="1"
-                  _hover={{ color: "kk.textPrimary" }} aria-disabled={busy} onClick={() => { if (!busy) onClose() }}>
-              Skip — decide later
-            </Text>
+                  _hover={{ color: "kk.textPrimary" }} aria-disabled={busy} onClick={() => { if (!busy) onClose() }}>{uiText("Skip — decide later")}</Text>
           </Flex>
         ) : (
           <Flex direction="column" gap="4">
             <Flex align="center" gap="2">
               <Box as="button" onClick={() => setView("intro")} color="kk.textSecondary" _hover={{ color: "kk.textPrimary" }} fontSize="lg" lineHeight="1">←</Box>
-              <Text fontSize="md" fontWeight="700" color="kk.textPrimary">Connect your own node</Text>
+              <Text fontSize="md" fontWeight="700" color="kk.textPrimary">{uiText("Connect your own node")}</Text>
             </Flex>
             {settings
               ? <SelfHostNodePanel settings={settings} onChange={setSettings} />
-              : <Text fontSize="sm" color="kk.textSecondary">Loading…</Text>}
-            <Button size="sm" onClick={onClose} bg={ACCENT} color="kk.bg" _hover={{ opacity: 0.9 }}>Done</Button>
+              : <Text fontSize="sm" color="kk.textSecondary">{uiText("Loading…")}</Text>}
+            <Button size="sm" onClick={onClose} bg={ACCENT} color="kk.bg" _hover={{ opacity: 0.9 }}>{uiText("Done")}</Button>
           </Flex>
         )}
       </Box>

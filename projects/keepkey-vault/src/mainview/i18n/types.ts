@@ -19,6 +19,9 @@ declare module "i18next" {
 	interface CustomTypeOptions {
 		defaultNS: "common"
 		resources: {
+			// Content-hashed UI messages are accessed through useUiTranslation;
+			// keep their dynamic keys out of the typed, semantic namespace union.
+			ui: Record<never, never>
 			common: typeof common
 			nav: typeof nav
 			dashboard: typeof dashboard

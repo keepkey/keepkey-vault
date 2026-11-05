@@ -1,3 +1,4 @@
+import { useUiTranslation } from "../i18n/ui"
 import { looksLikeMultisigPolicy, MULTISIG_POLICY_EVENT } from '../../shared/multisig-policy'
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { hex } from '@scure/base'
@@ -9,6 +10,8 @@ export const BITCOIN_QR_SCAN_EVENT = 'keepkey-bitcoin-qr-scan'
 /** One global QR entry works with no device or wallet. Backend parsers perform
  * the same validation/review as file imports. Completion never signs or sends. */
 export function BitcoinQrImport() {
+  const uiText = useUiTranslation()
+
   const [open, setOpen] = useState(false)
   const [session, setSession] = useState(0)
   const [images, setImages] = useState<File[] | undefined>()
@@ -39,5 +42,5 @@ export function BitcoinQrImport() {
     return true
   }, [])
   if (!open) return null
-  return <QrScannerOverlay key={session} title="Scan Bitcoin QR" onFrame={receive} onScan={() => {}} onClose={() => setOpen(false)} onReset={reset} status={status} initialImages={images} />
+  return <QrScannerOverlay key={session} title={uiText("Scan Bitcoin QR")} onFrame={receive} onScan={() => {}} onClose={() => setOpen(false)} onReset={reset} status={status} initialImages={images} />
 }

@@ -23,6 +23,13 @@
 	"incomingTx": {
 		"onChain": "{{chain}} · Guthaben wird aktualisiert",
 		"refreshing": "Guthaben wird aktualisiert",
-		"title": "Eingehende Zahlung"
-	}
+		"title": "Eingehende Zahlung",
+		"activityOnChain": "{{chain}} · Guthaben aktualisiert"
+	},
+	"language": "Sprache",
+	"currency": "Währung",
+	"numberFormat": "Zahlenformat",
+	"usdValues": "Werte werden in USD angezeigt. Das regionale Zahlenformat kannst du unten ändern.",
+	"somethingWentWrong": "Ein Fehler ist aufgetreten",
+	"reload": "Neu laden"
 }

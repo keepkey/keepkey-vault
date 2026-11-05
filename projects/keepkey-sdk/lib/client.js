@@ -2,7 +2,8 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.SdkError = exports.VaultClient = void 0;
 const DEFAULT_TIMEOUT_MS = 30000;
-const SIGNING_TIMEOUT_MS = 600000;
+// Vault review (15 min) + device confirmation (15 min) + response overhead.
+const SIGNING_TIMEOUT_MS = 31 * 60000;
 class VaultClient {
     constructor(baseUrl, apiKey, serviceName = 'keepkey-vault-sdk', serviceImageUrl = '') {
         this.rePairPromise = null;
@@ -33,6 +34,13 @@ class VaultClient {
     signal(ms) {
         return AbortSignal.timeout(ms ?? this.timeoutMs);
     }
+    /** Raw SDK callers need the same review/device budget as typed sign helpers. */
+    postTimeout(path, override) {
+        if (override !== undefined)
+            return override;
+        const route = path.split(/[?#]/, 1)[0];
+        return /^\/[^/]+\/sign[^/]*(?:\/|$)/.test(route) ? this.signingTimeoutMs : this.timeoutMs;
+    }
     /** GET request */
     async get(path, timeoutMs) {
         const resp = await fetch(`${this.baseUrl}${path}`, {
@@ -59,11 +67,12 @@ class VaultClient {
     }
     /** POST request */
     async post(path, body, timeoutMs) {
+        const requestTimeout = this.postTimeout(path, timeoutMs);
         const resp = await fetch(`${this.baseUrl}${path}`, {
             method: 'POST',
             headers: this.headers(),
             body: body !== undefined ? JSON.stringify(body) : undefined,
-            signal: this.signal(timeoutMs),
+            signal: this.signal(requestTimeout),
         });
         if (resp.status === 401 && this.apiKey) {
             const rePaired = await this.tryRePair();
@@ -72,7 +81,7 @@ class VaultClient {
                     method: 'POST',
                     headers: this.headers(),
                     body: body !== undefined ? JSON.stringify(body) : undefined,
-                    signal: this.signal(timeoutMs),
+                    signal: this.signal(requestTimeout),
                 });
                 if (!retry.ok)
                     throw new SdkError(retry.status, await retry.text());
@@ -85,11 +94,12 @@ class VaultClient {
     }
     /** POST request returning raw bytes (for example hardware RNG output). */
     async postBytes(path, body, timeoutMs) {
+        const requestTimeout = this.postTimeout(path, timeoutMs);
         const request = () => fetch(`${this.baseUrl}${path}`, {
             method: 'POST',
             headers: this.headers(),
             body: body !== undefined ? JSON.stringify(body) : undefined,
-            signal: this.signal(timeoutMs),
+            signal: this.signal(requestTimeout),
         });
         let resp = await request();
         if (resp.status === 401 && this.apiKey) {

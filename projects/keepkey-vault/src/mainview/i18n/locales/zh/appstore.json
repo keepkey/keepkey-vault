@@ -23,5 +23,7 @@
 	"walletconnectName": "WalletConnect",
 	"walletconnectDescription": "连接到任何兼容 WalletConnect 的 dApp",
 	"internal": "打开",
-	"open": "打开"
+	"open": "打开",
+	"safeName": "Safe{Wallet}",
+	"safeDescription": "EVM 链上的共享多签账户。将你的 KeepKey 作为所有者连接。要在 Desktop 中查看你的 Safe 并检查待处理交易，请在 EVM 资产上打开多签。"
 }

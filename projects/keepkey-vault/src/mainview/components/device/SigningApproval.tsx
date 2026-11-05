@@ -1,3 +1,4 @@
+import { useUiTranslation } from "../../i18n/ui"
 import { useEffect, useRef, useState, useCallback } from "react"
 import { Box, Text, VStack, Flex, Button } from "@chakra-ui/react"
 import { useTranslation } from "react-i18next"
@@ -504,6 +505,8 @@ function Erc7730Section({ d }: { d: Erc7730Description }) {
 // ── Calldata decoded section ──────────────────────────────────────────
 
 function CalldataSection({ decoded, request, t }: { decoded: CalldataDecodedInfo; request: SigningRequestInfo; t: (k: string, f?: string) => string }) {
+  const uiText = useUiTranslation()
+
 	const erc20 = erc20Preview(request.to, request.chainId, request.data, request.recognizedSpender)
 	return (
 		<VStack gap="1.5" w="100%" bg="rgba(0,0,0,0.25)" borderRadius="xl" p="3">
@@ -517,8 +520,8 @@ function CalldataSection({ decoded, request, t }: { decoded: CalldataDecodedInfo
 			</Flex>
 			{erc20 && <Text fontSize="sm" fontWeight="700" color="kk.textPrimary" alignSelf="flex-start" wordBreak="break-word">{erc20.summary}</Text>}
 			{erc20 && <>
-				<Row label="Token" value={erc20.tokenIdentity || 'Unidentified token'} mono={false} />
-				<Row label="Token contract" value={erc20.tokenAddress} />
+				<Row label={uiText("Token")} value={erc20.tokenIdentity || 'Unidentified token'} mono={false} />
+				<Row label={uiText("Token contract")} value={erc20.tokenAddress} />
 				<Row label={erc20.counterpartyLabel} value={erc20.counterpartyIdentity || 'Unidentified address'} mono={false} />
 				<Row label={`${erc20.counterpartyLabel} address`} value={erc20.counterpartyAddress} />
 			</>}
@@ -535,6 +538,8 @@ function CalldataSection({ decoded, request, t }: { decoded: CalldataDecodedInfo
 }
 
 function SwapDecisionCard({ decoded }: { decoded: CalldataDecodedInfo }) {
+  const uiText = useUiTranslation()
+
 	const fields = new Map(decoded.fields.map(field => [field.name, field.value]))
 	const input = fields.get('Input amount')
 	const output = fields.get('Output asset')
@@ -547,17 +552,15 @@ function SwapDecisionCard({ decoded }: { decoded: CalldataDecodedInfo }) {
 		<VStack w="100%" align="stretch" gap="3" p="4" borderRadius="xl"
 			bg={noMinimum || warning ? 'rgba(239,68,68,0.09)' : 'rgba(233,196,106,0.08)'}
 			border="1px solid" borderColor={noMinimum || warning ? 'rgba(239,68,68,0.55)' : 'rgba(233,196,106,0.3)'}>
-			<Text fontSize="2xs" fontWeight="700" color="kk.textSecondary" textTransform="uppercase" letterSpacing="wide">Review this swap</Text>
-			<Text fontSize="lg" fontWeight="700" color="white" lineHeight="short" wordBreak="break-word">
-				Send {input || 'an unknown amount'}
+			<Text fontSize="2xs" fontWeight="700" color="kk.textSecondary" textTransform="uppercase" letterSpacing="wide">{uiText("Review this swap")}</Text>
+			<Text fontSize="lg" fontWeight="700" color="white" lineHeight="short" wordBreak="break-word">{uiText("Send")}{" "}{input || uiText("an unknown amount")}
 			</Text>
-			<Text fontSize="sm" color="kk.textPrimary" lineHeight="tall" wordBreak="break-word">
-				Receive {noMinimum ? 'an unguaranteed amount' : `at least ${minimum}`} on {chain || 'an unknown chain'}
+			<Text fontSize="sm" color="kk.textPrimary" lineHeight="tall" wordBreak="break-word">{uiText("Receive")}{" "}{noMinimum ? uiText("an unguaranteed amount") : uiText('at least {{minimum}}', { minimum })}{" "}{uiText("on")}{" "}{chain || uiText("an unknown chain")}
 			</Text>
-			{destination && <Text fontSize="xs" color="kk.textSecondary" wordBreak="break-all">To <Box as="span" color="white" fontFamily="mono">{destination}</Box></Text>}
-			{noMinimum && <Text fontSize="sm" fontWeight="700" color="var(--rose)">No minimum output is guaranteed. You could send the input and receive far less than expected.</Text>}
+			{destination && <Text fontSize="xs" color="kk.textSecondary" wordBreak="break-all">{uiText("To")}{" "}<Box as="span" color="white" fontFamily="mono">{destination}</Box></Text>}
+			{noMinimum && <Text fontSize="sm" fontWeight="700" color="var(--rose)">{uiText("No minimum output is guaranteed. You could send the input and receive far less than expected.")}</Text>}
 			{warning && <Text fontSize="xs" fontWeight="700" color="var(--rose)">{warning}</Text>}
-			<Text fontSize="2xs" color="kk.textMuted">Via {fields.get('Protocol') || decoded.dappName}{output ? ` · ${output}` : ''}{fields.get('Affiliate fee') ? ` · Affiliate fee ${fields.get('Affiliate fee')}` : ''}</Text>
+			<Text fontSize="2xs" color="kk.textMuted">{uiText("Via")}{" "}{fields.get('Protocol') || decoded.dappName}{output ? ` · ${output}` : ''}{fields.get('Affiliate fee') ? ` · Affiliate fee ${fields.get('Affiliate fee')}` : ''}</Text>
 		</VStack>
 	)
 }
@@ -710,6 +713,8 @@ function CertifiedVouch({ certified, appName }: {
 	certified: NonNullable<SigningRequestInfo['solanaCertified']>
 	appName: string
 }) {
+  const uiText = useUiTranslation()
+
 	return (
 		<VStack
 			gap="1.5" w="100%" align="stretch" px="3" py="2" borderRadius="lg"
@@ -717,11 +722,8 @@ function CertifiedVouch({ certified, appName }: {
 			data-testid="certified-vouch"
 		>
 			<Flex gap="2" align="center" justify="space-between" flexWrap="wrap">
-				<Text fontSize="2xs" fontWeight="700" color="kk.gold">
-					KeepKey ClearSign recognises this program
-				</Text>
-				<Text fontSize="2xs" color="kk.textMuted">
-					Asked for by {appName}
+				<Text fontSize="2xs" fontWeight="700" color="kk.gold">{uiText("KeepKey ClearSign recognises this program")}</Text>
+				<Text fontSize="2xs" color="kk.textMuted">{uiText("Asked for by")}{" "}{appName}
 				</Text>
 			</Flex>
 			<Text fontSize="xs" fontWeight="600" color="white">
@@ -734,19 +736,12 @@ function CertifiedVouch({ certified, appName }: {
 					))}
 				</VStack>
 			)}
-			<Row label="Program" value={certified.programId} />
+			<Row label={uiText("Program")} value={certified.programId} />
 			{certified.args.map((a, i) => (
 				<Row key={i} label={a.label} value={formatCertifiedArg(a, true)} />
 			))}
-			<Text fontSize="2xs" color="kk.textSecondary">
-				That signature covers the program's address, the name of this instruction and
-				the layout of the values above — nothing else. Your KeepKey checks the
-				signature itself and shows you the same values on its own screen.
-			</Text>
-			<Text fontSize="2xs" color="kk.textMuted">
-				It is not a check of this site, of where the money goes, or of whether the
-				program treats you fairly. The program's own code decides all of that.
-			</Text>
+			<Text fontSize="2xs" color="kk.textSecondary">{uiText("That signature covers the program's address, the name of this instruction and the layout of the values above — nothing else. Your KeepKey checks the signature itself and shows you the same values on its own screen.")}</Text>
+			<Text fontSize="2xs" color="kk.textMuted">{uiText("It is not a check of this site, of where the money goes, or of whether the program treats you fairly. The program's own code decides all of that.")}</Text>
 		</VStack>
 	)
 }
@@ -773,6 +768,8 @@ function SolanaDecodedSection({ decoded, t, certified }: {
 	/** Present when the device clear-signs this call from a KeepKey-certified schema. */
 	certified?: SigningRequestInfo['solanaCertified']
 }) {
+  const uiText = useUiTranslation()
+
 	return (
 		<VStack gap="2" w="100%" bg="rgba(0,0,0,0.25)" borderRadius="xl" p="3" align="stretch">
 			<Flex gap="2" align="center" w="100%">
@@ -783,7 +780,7 @@ function SolanaDecodedSection({ decoded, t, certified }: {
 					{decoded.version}
 				</Text>
 				<Text fontSize="2xs" color="kk.textMuted">
-					{decoded.instructions.length} {decoded.instructions.length === 1 ? 'instruction' : 'instructions'}
+					{decoded.instructions.length} {decoded.instructions.length === 1 ? uiText("instruction") : uiText("instructions")}
 				</Text>
 			</Flex>
 
@@ -865,6 +862,8 @@ function solanaClassificationLabel(classification: SolanaMessageDecodedInfo['cla
 function SolanaMessageSection({ decoded, t }: {
 	decoded: SolanaMessageDecodedInfo; t: (k: string, f?: string) => string
 }) {
+  const uiText = useUiTranslation()
+
 	const [showRaw, setShowRaw] = useState(!decoded.messageText)
 	return (
 		<VStack gap="1.5" w="100%" bg="rgba(0,0,0,0.25)" borderRadius="xl" p="3" align="stretch">
@@ -876,9 +875,9 @@ function SolanaMessageSection({ decoded, t }: {
 					{decoded.encoding.toUpperCase()}
 				</Text>
 			</Flex>
-			<Row label="Signer" value={decoded.signer} />
+			<Row label={uiText("Signer")} value={decoded.signer} />
 			<Row label={t("signing.solanaMessageKind", "Looks Like")} value={solanaClassificationLabel(decoded.classification, t)} mono={false} />
-			<Row label="Bytes" value={String(decoded.byteLength)} mono={false} />
+			<Row label={uiText("Bytes")} value={String(decoded.byteLength)} mono={false} />
 			{decoded.sanityCheck && (
 				<Text fontSize="2xs" color="orange.300" bg="rgba(255,140,0,0.1)" px="2" py="1" borderRadius="md">
 					{decoded.sanityCheck}
@@ -913,7 +912,7 @@ function SolanaMessageSection({ decoded, t }: {
 			{showRaw && (
 				<Box bg="rgba(0,0,0,0.35)" borderRadius="lg" p="2" maxH="200px" overflowY="auto">
 					<Text fontSize="2xs" fontFamily="mono" color="kk.textSecondary" whiteSpace="pre-wrap" wordBreak="break-all">
-						{decoded.messageHex || "(empty)"}
+						{decoded.messageHex || uiText("(empty)")}
 					</Text>
 				</Box>
 			)}
@@ -931,6 +930,8 @@ function SolanaMessageSection({ decoded, t }: {
 function EthMessageSection({ decoded, t }: {
 	decoded: EthMessageDecodedInfo; t: (k: string, f?: string) => string
 }) {
+  const uiText = useUiTranslation()
+
 	const [showHex, setShowHex] = useState(!decoded.isUtf8Text)
 	return (
 		<VStack gap="1.5" w="100%" bg="rgba(0,0,0,0.25)" borderRadius="xl" p="3" align="stretch">
@@ -942,7 +943,7 @@ function EthMessageSection({ decoded, t }: {
 					{decoded.standard ?? "EIP-191"}
 				</Text>
 			</Flex>
-			<Row label="Signer" value={decoded.address} />
+			<Row label={uiText("Signer")} value={decoded.address} />
 			{decoded.isUtf8Text && decoded.messageText !== undefined ? (
 				<Box
 					bg="rgba(0,0,0,0.35)" borderRadius="lg"
@@ -972,7 +973,7 @@ function EthMessageSection({ decoded, t }: {
 			{showHex && (
 				<Box bg="rgba(0,0,0,0.35)" borderRadius="lg" p="2" maxH="200px" overflowY="auto">
 					<Text fontSize="2xs" fontFamily="mono" color="kk.textSecondary" whiteSpace="pre-wrap" wordBreak="break-all">
-						{decoded.messageRaw || "(empty)"}
+						{decoded.messageRaw || uiText("(empty)")}
 					</Text>
 				</Box>
 			)}
@@ -983,6 +984,8 @@ function EthMessageSection({ decoded, t }: {
 // ── Typed data section ────────────────────────────────────────────────
 
 function TypedDataSection({ decoded, t }: { decoded: EIP712DecodedInfo; t: (k: string, f?: string) => string }) {
+  const uiText = useUiTranslation()
+
 	const chainId = Number(decoded.domain.chainId || 0)
 	const identified = (value: string) => {
 		const identity = /^0x[0-9a-fA-F]{40}$/.test(value) ? evmContractIdentity(chainId, value) : undefined
@@ -993,9 +996,9 @@ function TypedDataSection({ decoded, t }: { decoded: EIP712DecodedInfo; t: (k: s
 			<Text fontSize="2xs" fontWeight="600" color={decoded.isKnownType ? "kk.gold" : "kk.textSecondary"}>
 				{decoded.operationName}
 			</Text>
-			{decoded.domain.name && <Row label="Domain" value={decoded.domain.name} />}
-			{decoded.domain.verifyingContract && <Row label="Contract" value={identified(decoded.domain.verifyingContract)} />}
-			{decoded.domain.chainId !== undefined && <Row label="Chain ID" value={String(decoded.domain.chainId)} />}
+			{decoded.domain.name && <Row label={uiText("Domain")} value={decoded.domain.name} />}
+			{decoded.domain.verifyingContract && <Row label={uiText("Contract")} value={identified(decoded.domain.verifyingContract)} />}
+			{decoded.domain.chainId !== undefined && <Row label={uiText("Chain ID")} value={String(decoded.domain.chainId)} />}
 			{typedDataRows(decoded).map((row, i) => (
 				<Row key={i} label={row.label} value={identified(row.value)} />
 			))}
@@ -1003,8 +1006,8 @@ function TypedDataSection({ decoded, t }: { decoded: EIP712DecodedInfo; t: (k: s
 				<Text fontSize="2xs" color="kk.textSecondary" mt="2">
 					{t('signing.compareDigests', 'If your KeepKey displays hash digests, compare the full values below before approving.')}
 				</Text>
-				<Row label="TYPED DATA DOMAIN" value={decoded.hashes.domainHash} />
-				<Row label="TYPED DATA MESSAGE" value={decoded.hashes.messageHash} />
+				<Row label={uiText("TYPED DATA DOMAIN")} value={decoded.hashes.domainHash} />
+				<Row label={uiText("TYPED DATA MESSAGE")} value={decoded.hashes.messageHash} />
 			</> : <Text fontSize="2xs" color="kk.textSecondary">
 				{t('signing.digestsUnavailable', 'Digest comparison is unavailable for this request.')}
 			</Text>}
@@ -1014,13 +1017,15 @@ function TypedDataSection({ decoded, t }: { decoded: EIP712DecodedInfo; t: (k: s
 
 /** Keep the reviewed request beside the OLED throughout transport and confirmation. */
 function SigningReference({ request }: { request: SigningRequestInfo }) {
+  const uiText = useUiTranslation()
+
 	const { t } = useTranslation('device')
 	const translate = (key: string, fallback?: string): string => t(key, fallback ?? key)
 	return <VStack w="100%" gap="3" maxH="42vh" overflowY="auto" textAlign="left" flexShrink={1} minH="0">
-		<Row label="Account" value={request.from} />
-		<Row label="Recipient" value={request.to} />
-		<Row label="Value" value={request.chain === 'eth' ? evmNativeValue(request.value, request.chainId) ?? request.value : request.value} />
-		{request.method === '/eth/sign-transaction' && <Row label="Max network fee" value={evmMaxFee(request.rawRequestBody, request.chainId) ?? undefined} />}
+		<Row label={uiText("Account")} value={request.from} />
+		<Row label={uiText("Recipient")} value={request.to} />
+		<Row label={uiText("Value")} value={request.chain === 'eth' ? evmNativeValue(request.value, request.chainId) ?? request.value : request.value} />
+		{request.method === '/eth/sign-transaction' && <Row label={uiText("Max network fee")} value={evmMaxFee(request.rawRequestBody, request.chainId) ?? undefined} />}
 		{request.erc7730 && request.erc7730Description && <Erc7730Section d={request.erc7730Description} />}
 		{request.typedDataDecoded && <TypedDataSection decoded={request.typedDataDecoded} t={translate} />}
 		{request.calldataDecoded && <CalldataSection decoded={request.calldataDecoded} request={request} t={translate} />}
@@ -1035,6 +1040,8 @@ function SigningReference({ request }: { request: SigningRequestInfo }) {
 // ═══════════════════════════════════════════════════════════════════════
 
 export function SigningApproval({ request, phase, onApprove, onReject, onCancel }: SigningApprovalProps) {
+  const uiText = useUiTranslation()
+
 	const { t } = useTranslation("device")
 	const [elapsed, setElapsed] = useState(0)
 	const [advancedModeEnabled, setAdvancedModeEnabled] = useState(request.advancedModeEnabled ?? false)
@@ -1353,7 +1360,7 @@ export function SigningApproval({ request, phase, onApprove, onReject, onCancel 
 							<Text fontSize="2xs" fontWeight="500" color="kk.gold">{safeAppName}</Text>
 						</Flex>
 						<DocsLink href={DOCS_LINKS.verifyOnDevice} />
-						<DocsLink href={watch('course-06-verify')} label="Watch video" />
+						<DocsLink href={watch('course-06-verify')} label={uiText("Watch video")} />
 					</Flex>
 					<Flex align="center" gap="2">
 						{/*
@@ -1385,18 +1392,18 @@ export function SigningApproval({ request, phase, onApprove, onReject, onCancel 
 				<VStack flex="1" minH="0" overflowY="auto" w="100%" gap="3">
 				{/* ── Method ── */}
 				<Text fontSize="sm" fontWeight="600" color="white" alignSelf="flex-start">{methodLabel}</Text>
-				{request.typedDataDecoded && <Row label="Account" value={request.from} />}
+				{request.typedDataDecoded && <Row label={uiText("Account")} value={request.from} />}
 				{swapDecision && decoded && <SwapDecisionCard decoded={decoded} />}
 				{cosmosDeposit && (
 					<VStack w="100%" align="stretch" gap="1.5" bg="rgba(0,0,0,0.25)" borderRadius="xl" p="3">
-						<Text fontSize="xs" fontWeight="700" color="white">{cosmosDeposit.chain} deposit</Text>
-						<Row label="Input" value={`${cosmosDeposit.inputAmount} ${cosmosDeposit.inputAsset}`} />
-						<Row label="Signer" value={cosmosDeposit.signer} />
-						<Row label="Memo output asset" value={cosmosDeposit.outputAsset} />
-						<Row label="Memo destination" value={cosmosDeposit.destination} />
-						<Row label="Memo minimum" value={cosmosDeposit.minimum} />
-						<Row label="Memo affiliate fee" value={cosmosDeposit.affiliateFee} />
-						<Row label="Exact memo" value={cosmosDeposit.memo} />
+						<Text fontSize="xs" fontWeight="700" color="white">{cosmosDeposit.chain}{" "}{uiText("deposit")}</Text>
+						<Row label={uiText("Input")} value={`${cosmosDeposit.inputAmount} ${cosmosDeposit.inputAsset}`} />
+						<Row label={uiText("Signer")} value={cosmosDeposit.signer} />
+						<Row label={uiText("Memo output asset")} value={cosmosDeposit.outputAsset} />
+						<Row label={uiText("Memo destination")} value={cosmosDeposit.destination} />
+						<Row label={uiText("Memo minimum")} value={cosmosDeposit.minimum} />
+						<Row label={uiText("Memo affiliate fee")} value={cosmosDeposit.affiliateFee} />
+						<Row label={uiText("Exact memo")} value={cosmosDeposit.memo} />
 						<Text fontSize="2xs" color="var(--rose)">{cosmosDeposit.warning}</Text>
 					</VStack>
 				)}
@@ -1408,46 +1415,46 @@ export function SigningApproval({ request, phase, onApprove, onReject, onCancel 
 								{message.rows.map((row, j) => <Row key={j} label={row.label} value={row.value} />)}
 							</VStack>
 						))}
-						<Row label="Fee" value={cosmosTx.fee} />
-						<Row label="Memo" value={cosmosTx.memo} />
+						<Row label={uiText("Fee")} value={cosmosTx.fee} />
+						<Row label={uiText("Memo")} value={cosmosTx.memo} />
 					</VStack>
 				)}
 				{request.method === '/tron/sign-transaction' && request.tronDecoded && (
 					<VStack w="100%" align="stretch" gap="1.5" bg="rgba(0,0,0,0.25)" borderRadius="xl" p="3">
-						<Text fontSize="xs" fontWeight="700" color="white">TRON signed transaction</Text>
-						<Row label="Action" value={`Send ${request.tronDecoded.amount} to ${request.tronDecoded.to}`} />
-						<Row label="Owner" value={request.tronDecoded.owner} />
-						<Row label="Token contract" value={request.tronDecoded.tokenContract} />
-						<Row label="Max network fee" value={request.tronDecoded.feeLimit} />
-						<Row label="Memo output asset" value={request.tronDecoded.outputAsset} />
-						<Row label="Memo destination" value={request.tronDecoded.outputDestination} />
-						<Row label="Memo minimum" value={request.tronDecoded.minimumOutput} />
-						<Row label="Memo affiliate fee" value={request.tronDecoded.affiliateFee} />
-						<Row label="Exact signed memo" value={request.tronDecoded.memo} />
+						<Text fontSize="xs" fontWeight="700" color="white">{uiText("TRON signed transaction")}</Text>
+						<Row label={uiText("Action")} value={`Send ${request.tronDecoded.amount} to ${request.tronDecoded.to}`} />
+						<Row label={uiText("Owner")} value={request.tronDecoded.owner} />
+						<Row label={uiText("Token contract")} value={request.tronDecoded.tokenContract} />
+						<Row label={uiText("Max network fee")} value={request.tronDecoded.feeLimit} />
+						<Row label={uiText("Memo output asset")} value={request.tronDecoded.outputAsset} />
+						<Row label={uiText("Memo destination")} value={request.tronDecoded.outputDestination} />
+						<Row label={uiText("Memo minimum")} value={request.tronDecoded.minimumOutput} />
+						<Row label={uiText("Memo affiliate fee")} value={request.tronDecoded.affiliateFee} />
+						<Row label={uiText("Exact signed memo")} value={request.tronDecoded.memo} />
 						<Text fontSize="2xs" color="var(--rose)">{request.tronDecoded.warning}</Text>
 					</VStack>
 				)}
 				{request.method === '/tron/sign-transaction' && !request.tronDecoded && !request.tronCallShown && (
 					<Box w="100%" bg="rgba(239,68,68,0.15)" border="1px solid rgba(239,68,68,0.6)" borderRadius="lg" px="3" py="2">
-						<Text fontSize="xs" fontWeight="700" color="var(--rose)">TRON transaction cannot be verified from signed bytes</Text>
-						<Text fontSize="2xs" color="kk.textSecondary">Amount and destination in the request are untrusted. The device requires Advanced Mode for unsupported TRON payloads.</Text>
+						<Text fontSize="xs" fontWeight="700" color="var(--rose)">{uiText("TRON transaction cannot be verified from signed bytes")}</Text>
+						<Text fontSize="2xs" color="kk.textSecondary">{uiText("Amount and destination in the request are untrusted. The device requires Advanced Mode for unsupported TRON payloads.")}</Text>
 					</Box>
 				)}
 				{utxo && (
 					<VStack w="100%" align="stretch" gap="1.5" bg="rgba(0,0,0,0.25)" borderRadius="xl" p="3">
-						<Text fontSize="xs" fontWeight="700" color="white">{utxo.coin} transaction</Text>
-						{utxo.sends.map((send, index) => <Box key={index}><Row label={`Send ${index + 1}`} value={send.amount} /><Row label="To" value={send.address} /></Box>)}
+						<Text fontSize="xs" fontWeight="700" color="white">{utxo.coin}{" "}{uiText("transaction")}</Text>
+						{utxo.sends.map((send, index) => <Box key={index}><Row label={`Send ${index + 1}`} value={send.amount} /><Row label={uiText("To")} value={send.address} /></Box>)}
 						{utxo.change.map((amount, index) => <Row key={index} label={`Change ${index + 1}`} value={amount} />)}
-						<Row label="Network fee" value={utxo.fee} />
-						{utxo.swap && <><Row label="Memo output asset" value={utxo.swap.asset} /><Row label="Memo destination" value={utxo.swap.destination} /><Row label="Memo minimum" value={utxo.swap.minimum} /><Row label="Memo affiliate fee" value={utxo.swap.affiliate} /></>}
-						<Row label="OP_RETURN memo" value={utxo.memo} />
+						<Row label={uiText("Network fee")} value={utxo.fee} />
+						{utxo.swap && <><Row label={uiText("Memo output asset")} value={utxo.swap.asset} /><Row label={uiText("Memo destination")} value={utxo.swap.destination} /><Row label={uiText("Memo minimum")} value={utxo.swap.minimum} /><Row label={uiText("Memo affiliate fee")} value={utxo.swap.affiliate} /></>}
+						<Row label={uiText("OP_RETURN memo")} value={utxo.memo} />
 						{utxo.warning && <Text fontSize="2xs" color="var(--rose)">{utxo.warning}</Text>}
 					</VStack>
 				)}
 				{relayBridgeDeposit && (
 					<Box w="100%" bg="rgba(239,68,68,0.15)" border="1px solid rgba(239,68,68,0.6)" borderRadius="lg" px="3" py="2">
-						<Text fontSize="xs" fontWeight="700" color="var(--rose)">Relay output cannot be verified from this signature</Text>
-						<Text fontSize="2xs" color="kk.textSecondary">The verified schema covers bridgeDeposit, the ETH amount, depositor, and opaque order ID. This signed call does not contain the output chain, asset, recipient, or minimum. Do not treat schema verification as approval of the swap outcome.</Text>
+						<Text fontSize="xs" fontWeight="700" color="var(--rose)">{uiText("Relay output cannot be verified from this signature")}</Text>
+						<Text fontSize="2xs" color="kk.textSecondary">{uiText("The verified schema covers bridgeDeposit, the ETH amount, depositor, and opaque order ID. This signed call does not contain the output chain, asset, recipient, or minimum. Do not treat schema verification as approval of the swap outcome.")}</Text>
 					</Box>
 				)}
 
@@ -1513,7 +1520,7 @@ export function SigningApproval({ request, phase, onApprove, onReject, onCancel 
 
 				{/* ── Two-column: decoded info (left) + tx details (right) ── */}
 				<Box as={swapDecision ? 'details' : 'div'} w="100%">
-					{swapDecision && <Box as="summary" cursor="pointer" px="3" py="2" mb="2" borderRadius="lg" bg="rgba(0,0,0,0.2)" color="kk.textSecondary" fontSize="xs">Verify contract, addresses and exact memo</Box>}
+					{swapDecision && <Box as="summary" cursor="pointer" px="3" py="2" mb="2" borderRadius="lg" bg="rgba(0,0,0,0.2)" color="kk.textSecondary" fontSize="xs">{uiText("Verify contract, addresses and exact memo")}</Box>}
 				<Flex w="100%" gap="3" direction={{ base: "column", sm: "row" }}>
 					{/* Left: decoded calldata, typed data, Solana tx, or message payload */}
 					{(request.solanaDecoded || request.solanaMessageDecoded || request.typedDataDecoded || request.ethMessageDecoded || (decoded && decoded.source !== 'none')) && (
@@ -1535,16 +1542,14 @@ export function SigningApproval({ request, phase, onApprove, onReject, onCancel 
 					{!request.typedDataDecoded && !request.solanaDecoded && !request.solanaMessageDecoded && !request.ethMessageDecoded && (
 						<Box flex="1" minW="0">
 							<VStack gap="1.5" w="100%" bg="rgba(0,0,0,0.25)" borderRadius="xl" p="3">
-								<Text fontSize="2xs" fontWeight="600" color="kk.textSecondary" alignSelf="flex-start">
-									Transaction
-								</Text>
-								<Row label="Chain" value={evmChainName ?? request.chain?.toUpperCase()} />
-								<Row label="From" value={request.from} />
-								<Row label="To" value={request.to} />
-								<Row label="Value" value={request.method === '/eth/sign-transaction'
+								<Text fontSize="2xs" fontWeight="600" color="kk.textSecondary" alignSelf="flex-start">{uiText("Transaction")}</Text>
+								<Row label={uiText("Chain")} value={evmChainName ?? request.chain?.toUpperCase()} />
+								<Row label={uiText("From")} value={request.from} />
+								<Row label={uiText("To")} value={request.to} />
+								<Row label={uiText("Value")} value={request.method === '/eth/sign-transaction'
 									? (evmNativeValue(request.value, request.chainId) ?? request.value) : request.value} />
-								{request.method === '/eth/sign-transaction' && <Row label="Max network fee" value={evmMaxFee(request.rawRequestBody, request.chainId) ?? undefined} />}
-								{request.chainId !== undefined && <Row label="ChainID" value={String(request.chainId)} />}
+								{request.method === '/eth/sign-transaction' && <Row label={uiText("Max network fee")} value={evmMaxFee(request.rawRequestBody, request.chainId) ?? undefined} />}
+								{request.chainId !== undefined && <Row label={uiText("ChainID")} value={String(request.chainId)} />}
 								{request.data && (!decoded || decoded.source === 'none') && (
 									<CalldataInspector data={request.data} t={t} />
 								)}
@@ -1555,7 +1560,7 @@ export function SigningApproval({ request, phase, onApprove, onReject, onCancel 
 				</Box>
 
 				{/* ── Full raw payload (collapsible) ── */}
-				<RawPayload data={request.rawRequestBody} label="Full Request Payload" />
+				<RawPayload data={request.rawRequestBody} label={uiText("Full Request Payload")} />
 				</VStack>
 
 				{/* ── Action buttons (pinned below the scroll region) ── */}

@@ -122,7 +122,23 @@
 		"autoRebooting": "设备正在重启...",
 		"autoRebootingDetail": "KeepKey 将使用新固件自动重启。通常只需几秒钟。",
 		"waitingForDevice": "正在等待设备...",
-		"wipeAndFlash": "清除并刷入"
+		"wipeAndFlash": "清除并刷入",
+		"installWipe": {
+			"wipeTitle": "这将擦除设备数据",
+			"unknownTitle": "这可能擦除设备数据",
+			"lockTitle": "这将锁定您的Bitcoin专用钱包",
+			"noFirmwareTitle": "此KeepKey上的任何钱包都将被擦除",
+			"wipeAck": "我理解这将擦除设备数据，并已备份恢复短语",
+			"unknownAck": "我理解这可能擦除设备数据，并已备份恢复短语",
+			"lockAck": "我理解钱包将被锁定，并已备份恢复短语",
+			"downgradeTitle": "这将擦除设备数据",
+			"crossBody": "此KeepKey当前运行{{from}}固件v{{current}}。{{to}}固件v{{target}}无法读取其钱包，启动时将擦除所有密钥和设置。要再次使用该钱包，您需要通过恢复短语还原。",
+			"downgradeBody": "您正在用v{{target}}替换v{{current}}。旧固件无法读取较新的钱包存储格式，启动时将擦除所有密钥和设置。您需要通过恢复短语还原钱包。",
+			"lockBody": "此KeepKey运行Bitcoin专用固件。{{variant}}固件v{{target}}将拒绝打开此钱包。钱包会保留在设备上，但您必须重新安装Bitcoin专用固件，或擦除设备并通过恢复短语还原，才能再次使用。",
+			"unknownBody": "在引导加载程序模式下，无法确定已安装的固件。安装{{variant}}固件可能擦除所有密钥和设置，例如切换固件类型或替换非官方或较新的固件。如果此KeepKey中已有钱包，请准备好恢复短语。全新的KeepKey没有可丢失的钱包。",
+			"noFirmwareBody": "此KeepKey没有安装固件，例如更新中断后可能出现这种情况。如果其中原有钱包，安装固件将擦除它，您需要通过恢复短语还原。",
+			"unsignedBody": "此KeepKey使用的固件不是KeepKey官方版本。安装官方固件将擦除所有密钥和设置。"
+		}
 	},
 	"initChoose": {
 		"title": "设置您的钱包",
@@ -149,9 +165,10 @@
 		"failedToCreate": "创建钱包失败",
 		"failedToRecover": "恢复钱包失败",
 		"writeDownWarning": "写下每一个词！",
-		"writeDownDetail": "恢复短语正在设备屏幕上显示。请把每个词写在纸上。这是你唯一的备份；这些词不会再次显示。",
+		"writeDownDetail": "当恢复短语显示在设备屏幕上时，请在继续之前将每个单词写在纸上。妥善保管该短语；恢复钱包时需要它。",
 		"deviceLost": "设备已断开。请重新插入以继续，或返回后重试。",
-		"goBack": "返回"
+		"goBack": "返回",
+		"backToChoose": "返回"
 	},
 	"initLabel": {
 		"walletCreated": "钱包已创建！",
@@ -232,6 +249,17 @@
 		"walletLabels": {
 			"visible": "可见",
 			"hidden": "隐藏"
+		}
+	},
+	"updateDone": {
+		"continue": "继续"
+	},
+	"coinMode": {
+		"change": "更改"
+	},
+	"security": {
+		"dice": {
+			"can": "您使用设备按钮输入{{rollCount}}次掷骰结果，这些结果不会传到此计算机。"
 		}
 	}
 }

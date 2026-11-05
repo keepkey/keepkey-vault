@@ -23,6 +23,13 @@
 	"incomingTx": {
 		"onChain": "{{chain}} · đang làm mới số dư",
 		"refreshing": "Đang làm mới số dư",
-		"title": "Thanh toán đến"
-	}
+		"title": "Thanh toán đến",
+		"activityOnChain": "{{chain}} · đã cập nhật số dư"
+	},
+	"language": "Ngôn ngữ",
+	"currency": "Tiền tệ",
+	"numberFormat": "Định dạng số",
+	"usdValues": "Giá trị được hiển thị bằng USD. Bạn có thể đổi định dạng số theo khu vực bên dưới.",
+	"somethingWentWrong": "Đã xảy ra lỗi",
+	"reload": "Tải lại"
 }

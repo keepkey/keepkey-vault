@@ -61,6 +61,7 @@ export default {
 			// so tampering with any binary breaks Apple's signature. Provides an offline
 			// floor when the remote manifest is unreachable. See firmware-bundle/README.md.
 			"firmware-bundle": "firmware-bundle",
+			"src/bun/fonts": "report-fonts",
 			// Release builds preflight this file before Electrobun runs. Keeping the
 			// config conditional preserves emulator-free developer builds on Linux.
 			...emulatorCopy,

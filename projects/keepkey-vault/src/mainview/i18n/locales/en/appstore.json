@@ -25,5 +25,7 @@
 	"walletconnectName": "WalletConnect",
 	"walletconnectDescription": "Connect to any WalletConnect-compatible dApp",
 	"internal": "Open",
-	"open": "Open"
+	"open": "Open",
+	"safeName": "Safe{Wallet}",
+	"safeDescription": "Shared multisig accounts on EVM chains. Connect your KeepKey as an owner. To see your Safes and check pending transactions in Desktop, open Multisig on an EVM asset."
 }

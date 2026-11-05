@@ -1,10 +1,14 @@
 import type { MultisigPolicyPreview,MultisigCosignerExport,BtcPsbtSigned } from "./multisig-policy"
 import type { ElectrobunRPCSchema } from 'electrobun/bun'
+import type { SafeAccount, SafeContext, SafeCreateParams, SafeProposal, SafeTransfer, SafeTxReview, VaultAddParams, VaultAddReview } from './safe-multisig'
+import type { VaultIdentity } from './vault-identity'
+import type { VaultPortfolio } from './vault-portfolio'
+import type { VaultAssetRequest, VaultAssetAccount } from './vault-asset-account'
 import type { ZcashShieldedBalance } from './zcash-privacy'
 import type { ClearSignReport } from './clearsign-report'
 import type { TxDetailLine } from './tx-clearsign'
 import type { ClearSignCentralAssetAuditHistory, ClearSignCentralAssetReview, ClearSignCentralAssetReviewResult, ClearSignCentralContractAudit, ClearSignCentralContractReview, ClearSignCentralStatus, ClearSignProtectionCaseStudy, RuntimeProviderNamed } from './types'
-import type { DeviceStateInfo, FirmwareProgress, FirmwareAnalysis, FatalEvent, PinRequest, CharacterRequest, ChainBalance, BuildTxParams, BuildTxResult, BroadcastResult, BtcAccountSet, BtcScriptType, EvmAddressSet, CustomToken, CustomChain, AppSettings, PioneerServer, BtcGetAddressParams, EthGetAddressParams, EthSignTxParams, BtcSignTxParams, GetPublicKeysParams, UpdateInfo, UpdateStatus, TokenVisibilityStatus, PairingRequestInfo, PairedAppInfo, SigningRequestInfo, ApiLogEntry, PioneerChainInfo, ReportMeta, ReportData, AuditReport, AuditPortfolioSnapshot, AuditMode, AuditDerivedAddress, AuditInspectResult, SwapAsset, SwapQuote, SwapQuoteParams, ExecuteSwapParams, SwapResult, SwapHealth, PendingSwap, SwapStatusUpdate, SwapHistoryRecord, SwapHistoryFilter, SwapHistoryStats, SwapUiState, SwapUiCommand, RecentActivity, BuildStakingTxParams, StakingPosition, DefiPosition, NameInfo, NameQuote, BuildNameRegTxParams, ZcashTransaction, ZcashTxBatch, ZcashTexPayment, EmulatorStatus, EmulatorWalletInfo, RegisteredDevice, WcSessionInfo, AddressBookEntry, AddressBookFilter, AddressBookTx, UsbDiagnosticReport, ClearSignEvent, ClearSignCoverageSummary, ClearSignAuditJob, ClearSignSolanaSchemaArtifact, ClearSignSolanaSchemaDraft, ClearSignEvmSchemaDraft, ClearSignEvmSchemaArtifact, ClearSignEvmSignedEntry, ClearSignProviderBundle, RngAuditReport, ClearSignProvider, ClearSignProviderInput, BtcPsbtReview, BtcWatchOnlyAccounts, BtcWatchOnlyPsbt, BtcBroadcastReview, BtcWatchOnlyImport, BtcWatchOnlyReceive } from './types'
+import type { DeviceStateInfo, FirmwareProgress, FirmwareAnalysis, FatalEvent, PinRequest, CharacterRequest, ChainBalance, BuildTxParams, BuildTxResult, BroadcastResult, BtcAccountSet, BtcScriptType, EvmAddressSet, CustomToken, CustomChain, AppSettings, PioneerServer, BtcGetAddressParams, EthGetAddressParams, EthSignTxParams, BtcSignTxParams, GetPublicKeysParams, UpdateInfo, UpdateStatus, TokenVisibilityStatus, PairingRequestInfo, PairedAppInfo, SigningRequestInfo, ApiLogEntry, PioneerChainInfo, ReportMeta, ReportData, AuditReport, AuditPortfolioSnapshot, AuditMode, AuditDerivedAddress, AuditInspectResult, SwapAsset, SwapQuote, SwapQuoteParams, ExecuteSwapParams, SwapResult, SwapHealth, PendingSwap, SwapStatusUpdate, SwapHistoryRecord, SwapHistoryFilter, SwapHistoryStats, SwapUiState, SwapUiCommand, RecentActivity, BuildStakingTxParams, StakingPosition, DefiPosition, NameInfo, NameQuote, BuildNameRegTxParams, ZcashTransaction, ZcashTxBatch, ZcashTexPayment, EmulatorStatus, EmulatorWalletInfo, RegisteredDevice, WcSessionInfo, AddressBookEntry, AddressBookFilter, AddressBookTx, UsbDiagnosticReport, ClearSignEvent, ClearSignCoverageSummary, ClearSignAuditJob, ClearSignSolanaSchemaArtifact, ClearSignSolanaSchemaDraft, ClearSignEvmSchemaDraft, ClearSignEvmSchemaArtifact, ClearSignEvmSignedEntry, ClearSignProviderBundle, RngAuditReport, ClearSignProvider, ClearSignProviderInput, BtcPsbtReview, BtcWatchOnlyAccounts, BtcWatchOnlyPsbt, BtcBroadcastReview, BtcWatchOnlyImport, BtcWatchOnlyReceive, SafeInfo, PendingSafeTx } from './types'
 
 /**
  * RPC Schema for Bun ↔ WebView communication.
@@ -115,7 +119,7 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       // ── Transaction signing ───────────────────────────────────────
       btcSignTx: { params: any; response: any }
       /** PSBT to sign: base64 of the dropped file or pasted text. No network; works offline. */
-      btcPsbtAnalyze: { params: { data: string; name?: string }; response: BtcPsbtReview }
+      btcPsbtAnalyze: { params: { data: string; name?: string; expectedVaultPolicyId?: string }; response: BtcPsbtReview }
       /** Signs only the PSBT bun holds for this review id, in the wallet session it was checked in. */
       btcPsbtSign: { params: { id: string }; response: BtcPsbtSigned }
       btcPsbtShowFile: { params: void; response: void }
@@ -209,6 +213,27 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       getUtxoAccounts: { params: { chainId: string }; response: { accounts: number[] } }
 
       // ── EVM multi-address ──────────────────────────────────────────────
+      safeList: { params: void; response: SafeContext }
+      listVaults: { params: void; response: VaultIdentity[] }
+      listSavedVaults: { params: void; response: VaultIdentity[] }
+      getVaultPortfolios: { params: { refresh?: boolean } | void; response: VaultPortfolio[] }
+      setVaultTotalInclusion: { params: { vaultId: string; include: boolean }; response: { success: true } }
+      vaultAccountGet: { params: VaultAssetRequest; response: VaultAssetAccount }
+      safeOpenVaultAccount: { params: VaultAssetRequest; response: VaultAssetAccount }
+      vaultAddPreview: { params: VaultAddParams; response: VaultAddReview }
+      vaultAddConfirm: { params: { reviewId: string }; response: VaultIdentity }
+      checkVaultDestination: { params: { networkId: string; address: string; assetCaip: string }; response: { allowed: boolean } }
+      safePrepareCreate: { params: SafeCreateParams; response: SafeTxReview }
+      safeSaveSetup: { params: { reviewId: string }; response: SafeAccount }
+      safeInspect: { params: { address: string; name: string }; response: SafeAccount }
+      safeImport: { params: { address: string; name: string; expectedOwners: string[]; expectedThreshold: number }; response: SafeAccount }
+      safeRefresh: { params: { address: string }; response: SafeAccount }
+      safePropose: { params: { safe: string } & SafeTransfer; response: SafeProposal }
+      safeImportProposal: { params: { json: string; expectedSafe?: string; expectedAsset?: 'ETH' | 'USDC' }; response: SafeProposal }
+      safeSigningData: { params: { hash: string }; response: { addressNList: number[]; typedData: any } }
+      safeAddSignature: { params: { hash: string; signature: string }; response: SafeProposal }
+      safePrepareExecute: { params: { hash: string }; response: SafeTxReview }
+      safeBroadcast: { params: { reviewId: string; signedTx: string }; response: { txid: string; safe: SafeAccount } }
       getEvmAddresses: { params: void; response: EvmAddressSet }
       addEvmAddressIndex: { params: { index?: number }; response: EvmAddressSet }
       removeEvmAddressIndex: { params: { index: number }; response: EvmAddressSet }
@@ -237,6 +262,18 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       zcashShieldedScan: { params: { startHeight?: number; fullRescan?: boolean; quick?: boolean }; response: { balance: number; notes_found: number; synced_to: number } }
       // max_send / max_deshield: the most one payment can move, across as many
       // transactions as the 16-action device limit requires.
+      /** Chain ids Safe's Transaction Service supports. */
+      safeChains: { params: void; response: number[] }
+      /** Safes on this chain where this KeepKey's EVM address is an on-chain owner. */
+      safeMine: { params: { chainId: number }; response: { owner: string; safes: SafeInfo[]; errors: { address: string; error: string }[] } }
+      /** A Safe's on-chain configuration and its pending, locally re-derived proposals. */
+      safePending: { params: { chainId: number; address: string }; response: { info: SafeInfo; pending: PendingSafeTx[] } }
+      /** Plans a new Safe (owners, threshold) and checks the factory on chain; nothing is signed. */
+      safeCreatePlan: { params: { chainId: number; owners: string[]; threshold: number }; response: { plan: { chainId: number; owners: string[]; threshold: number; saltNonce: string; factory: string; singleton: string; fallbackHandler: string; data: string; predicted: string }; ownerCode: Record<string, 'none' | 'contract'>; payer: string; fee: string; balance: string; payerOwnsSafe: boolean; advancedMode: boolean | null; calldataHash: string } }
+      /** Deploys the planned Safe from the selected account (AdvancedMode for that one signature) and reads it back. */
+      safeCreate: { params: { chainId: number; owners: string[]; threshold: number; saltNonce: string; predicted: string }; response: { address: string; txHash: string } }
+      /** Signs a pending proposal on the KeepKey (firmware 7.16+) and posts the signature to Safe's service. */
+      safeConfirm: { params: { chainId: number; address: string; safeTxHash: string }; response: { signature: string } }
       zcashShieldedBalance: { params: void; response: ZcashShieldedBalance & { notes_total?: number; keepkey_release_block?: number } }
       // A payment that needs more notes than one transaction can spend is sent
       // as several; `txids` lists them all, `txid` is the last. A tex1
@@ -299,6 +336,7 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       setPioneerApiBase: { params: { url: string }; response: AppSettings }
       setFiatCurrency: { params: { currency: string }; response: AppSettings }
       setNumberLocale: { params: { locale: string }; response: AppSettings }
+      setAppLanguage: { params: { language: string }; response: AppSettings }
       setBtcMultisigEnabled: { params: { enabled: boolean }; response: AppSettings }
       setWalletConnectEnabled: { params: { enabled: boolean }; response: AppSettings }
       setOfflineMode: { params: { enabled: boolean }; response: AppSettings }
@@ -398,8 +436,8 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       matchAddress: { params: { networkId: string; address: string }; response: AddressBookEntry | null }
       // Manually add (or relabel) an external contact. networkId picks the chain;
       // the address is normalized + the row scoped to the current wallet.
-      addAddressBook: { params: { networkId: string; address: string; label?: string }; response: AddressBookEntry | null }
-      updateAddressBook: { params: { id: string; label?: string; note?: string }; response: boolean }
+      addAddressBook: { params: { networkId: string; address: string; label?: string; cosigner?: boolean }; response: AddressBookEntry | null }
+      updateAddressBook: { params: { id: string; label?: string; note?: string; cosigner?: boolean }; response: boolean }
       deleteAddressBook: { params: { id: string }; response: void }
       getAddressBookHistory: { params: { entryId: string }; response: AddressBookTx[] }
       certifyAddressBook: { params: { only?: { network: string; address: string }[] } | void; response: { revision: number; count: number; root: string; fingerprint: string } }
@@ -635,6 +673,7 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       // Address Book mutated (own-sync inserted rows, or a send created/updated a
       // recipient) — frontend re-fetches the list.
       'addressbook-changed': Record<string, never>
+      'vaults-changed': Record<string, never>
       'sweep-progress': { scanId: string; current: number; total: number; phase: string; foundCount: number; foundSats: number }
       'shield-progress': { step: string; detail?: string; batch?: ZcashTxBatch }
       'deshield-progress': { step: string; detail?: string; batch?: ZcashTxBatch }

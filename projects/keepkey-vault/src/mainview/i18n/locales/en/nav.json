@@ -20,5 +20,24 @@
 	"watchOnlyConnectPrompt": "Watch Only — Connect device for full access",
 	"passphraseMode": "Passphrase",
 	"mobileApp": "Mobile App",
-	"walletConnect": "WalletConnect"
+	"walletConnect": "WalletConnect",
+	"watchOnlyOtherDevice": "Different KeepKey connected. Still showing {{label}}; switch wallets from the wallet menu.",
+	"watchOnlyDeviceUnchecked": "Could not check whether the connected KeepKey holds {{label}}. Still showing it as watch-only.",
+	"leaveBootloader": {
+		"title": "Your KeepKey is in bootloader mode",
+		"hintVersion": "{{variant}} v{{version}} is installed and up to date. Unplug your KeepKey and plug it back in without holding the button.",
+		"hint": "Unplug your KeepKey and plug it back in without holding the button."
+	},
+	"walletSelectorTitle": "Wallets",
+	"walletSelectorEmpty": "No wallets cached yet — connect a KeepKey.",
+	"connected": "connected",
+	"viewing": "viewing",
+	"watchOnlyVerified": "verified on a KeepKey",
+	"watchOnlyNotVerified": "not verified",
+	"importWatchOnly": "Import watch-only…",
+	"importWatchOnlyHint": "Electrum wallet file or xpub / ypub / zpub",
+	"offlineBannerAirplane": "Offline mode on — no network. Device, addresses, receiving & PSBT signing (drop a PSBT here) work; balances, history & sending are paused.",
+	"offlineBannerNoNet": "No network — Vault is offline. Device, addresses, receiving & PSBT signing (drop a PSBT here) still work; balances, history & sending are paused.",
+	"offlineHint": "No network — Vault is offline. Device, addresses, and signing still work.",
+	"offline": "Offline"
 }

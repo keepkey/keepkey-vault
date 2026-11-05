@@ -1,3 +1,5 @@
+import { getNumberLocale } from "../lib/number-locale"
+import { useUiTranslation } from "../i18n/ui"
 /**
  * SwapDialog — Full-screen dialog for the swap flow.
  *
@@ -12,13 +14,14 @@ import { rpcRequest, rpcFire, onRpcMessage } from "../lib/rpc"
 import { formatBalance } from "../lib/formatting"
 import { isTokenCaip } from "../lib/asset-utils"
 import { useFiat } from "../lib/fiat-context"
+import { normalizeAmountInput, decimalAmount } from '../../shared/locale'
 import { AssetIcon } from "./AssetIcon"
 import { CHAINS, getExplorerTxUrl, getExplorerBlockUrl } from "../../shared/chains"
 import type { ChainDef } from "../../shared/chains"
 import { nativeMaxSpendableAmount, normalizeDecimals, tokenMaxSpendableAmount } from "../../shared/max-send"
 import { getAssetIcon } from "../../shared/assetLookup"
 import { validateAddress } from "../../shared/address-validation"
-import { isBalanceUnverified, selectBalanceEntry } from "../../shared/balance-display-state"
+import { isBalanceUnverified } from "../../shared/balance-display-state"
 import { mergeTrustedBalanceSnapshot } from "../../shared/balance-reconciliation"
 import type { SwapAsset, SwapQuote, ChainBalance, CustomToken, SwapStatusUpdate, SwapTrackingStatus, PendingSwap, SwapUiState, SwapUiCommand, SwapHealth } from "../../shared/types"
 import { SOLANA_BLIND_SIGNING_REQUIRED } from "../../shared/types"
@@ -37,6 +40,7 @@ import { useDeviceState } from "../hooks/useDeviceState"
 import { ClearSignReportCard } from "./ClearSignReportCard"
 import { namedProviderLine, swapReportNeedsAttention } from "../../shared/clearsign-report"
 import { versionCompare } from "../../shared/firmware-versions"
+import { scopeSwapBalances, swapAccountAmount } from "../../shared/swap-account-balances"
 import { AssetPickerDialog } from "./AssetPickerDialog"
 import { DocsLink } from "./DocsLink"
 import { DOCS_LINKS, watch } from "../../shared/docs-links"
@@ -346,6 +350,8 @@ function EvmTxSummaryCard({
   asset?: SwapAsset
   isApproval?: boolean
 }) {
+  const uiText = useUiTranslation()
+
   const nativeDecimals = chain?.decimals ?? 18
   const nativeSymbol = chain?.symbol || 'ETH'
   const gasLimit = toBigIntValue(tx?.gasLimit)
@@ -364,33 +370,32 @@ function EvmTxSummaryCard({
     <Box bg="rgba(0,0,0,0.20)" border="1px solid" borderColor="kk.border" borderRadius="lg" px="3" py="2">
       <Flex align="center" justify="space-between" mb="2" gap="2">
         <Text fontSize="11px" fontWeight="700" color="kk.textPrimary">{title}</Text>
-        <Text fontSize="10px" color="var(--teal)" fontFamily="mono">payload ready</Text>
+        <Text fontSize="10px" color="var(--teal)" fontFamily="mono">{uiText("payload ready")}</Text>
       </Flex>
       <VStack gap="1" align="stretch">
-        <ReviewRow label="Chain">{chain?.id || 'EVM'} ({tx?.chainId ?? '-'})</ReviewRow>
-        <ReviewRow label="Contract">{ellipsizeMiddle(tx?.to)}</ReviewRow>
+        <ReviewRow label={uiText("Chain")}>{chain?.id || 'EVM'} ({tx?.chainId ?? '-'})</ReviewRow>
+        <ReviewRow label={uiText("Contract")}>{ellipsizeMiddle(tx?.to)}</ReviewRow>
         {isApproval && approve && (
           <>
-            <ReviewRow label="Spender">{spenderName ? `${spenderName} - ${ellipsizeMiddle(approve.spender)}` : ellipsizeMiddle(approve.spender)}</ReviewRow>
-            <ReviewRow label="Approval amount" accent>
+            <ReviewRow label={uiText("Spender")}>{spenderName ? `${spenderName} - ${ellipsizeMiddle(approve.spender)}` : ellipsizeMiddle(approve.spender)}</ReviewRow>
+            <ReviewRow label={uiText("Approval amount")} accent>
               {asset ? `${formatUnitsBigInt(approve.amount, asset.decimals, 8)} ${asset.symbol}` : approve.amount.toString()}
             </ReviewRow>
           </>
         )}
         {!isApproval && (
-          <ReviewRow label="Value" accent>{formatNativeUnits(value, nativeDecimals, nativeSymbol)}</ReviewRow>
+          <ReviewRow label={uiText("Value")} accent>{formatNativeUnits(value, nativeDecimals, nativeSymbol)}</ReviewRow>
         )}
-        <ReviewRow label="Max network fee" accent>{formatNativeUnits(maxNetworkFee, nativeDecimals, nativeSymbol, 8)}</ReviewRow>
+        <ReviewRow label={uiText("Max network fee")} accent>{formatNativeUnits(maxNetworkFee, nativeDecimals, nativeSymbol, 8)}</ReviewRow>
         {maxFeePerGas !== null ? (
-          <ReviewRow label="Fee data">
-            max {formatGwei(maxFeePerGas)} / priority {formatGwei(maxPriorityFeePerGas)}
+          <ReviewRow label={uiText("Fee data")}>{uiText("max")}{" "}{formatGwei(maxFeePerGas)} / priority {formatGwei(maxPriorityFeePerGas)}
           </ReviewRow>
         ) : (
-          <ReviewRow label="Fee data">{formatGwei(gasPrice)}</ReviewRow>
+          <ReviewRow label={uiText("Fee data")}>{formatGwei(gasPrice)}</ReviewRow>
         )}
-        <ReviewRow label="Gas / nonce">{gasLimit?.toString() || '-'} / {nonce?.toString() || '-'}</ReviewRow>
-        <ReviewRow label="Method">{evmMethodLabel(tx?.data)}</ReviewRow>
-        <ReviewRow label="Calldata">{evmDataBytes(tx?.data)} bytes{selector ? ` - ${selector}` : ''}</ReviewRow>
+        <ReviewRow label={uiText("Gas / nonce")}>{gasLimit?.toString() || '-'} / {nonce?.toString() || '-'}</ReviewRow>
+        <ReviewRow label={uiText("Method")}>{evmMethodLabel(tx?.data)}</ReviewRow>
+        <ReviewRow label={uiText("Calldata")}>{evmDataBytes(tx?.data)}{" "}{uiText("bytes")}{selector ? ` - ${selector}` : ''}</ReviewRow>
       </VStack>
     </Box>
   )
@@ -635,6 +640,8 @@ interface AssetSelectorProps {
 }
 
 function AssetSelector({ label, selected, onOpenPicker, disabled }: AssetSelectorProps) {
+  const uiText = useUiTranslation()
+
   const { t } = useTranslation("swap")
 
   /* ── Selected asset → big prominent display ── */
@@ -651,7 +658,7 @@ function AssetSelector({ label, selected, onOpenPicker, disabled }: AssetSelecto
             <Box as="button" display="flex" alignItems="center" gap="1" color="kk.textMuted" fontSize="11px" fontWeight="500"
               _hover={{ color: "kk.gold" }} transition="color 0.15s"
               onClick={onOpenPicker}>
-              {t("change") || "Change"} <ChevronDownIcon />
+              {t("change") || uiText("Change")} <ChevronDownIcon />
             </Box>
           )}
         </Flex>
@@ -770,14 +777,17 @@ interface SwapDialogProps {
 
 // ── Main SwapDialog ─────────────────────────────────────────────────
 export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap, onOutputAssetChange, initialFromCaip, initialFromAsset }: SwapDialogProps) {
+  const uiText = useUiTranslation()
+
   const { t } = useTranslation("swap")
-  const { fmtCompact, symbol: fiatSymbol } = useFiat()
+  const { fmtCompact, symbol: fiatSymbol, locale } = useFiat()
   const { evmAddresses } = useEvmAddresses()
   const { firmwareVersion } = useDeviceState()
   // Local EVM address selection — scoped to this dialog so switching here doesn't
   // mutate the global selected index in AssetPage. null = use global selectedIndex.
   const [evmAddressIndexOverride, setEvmAddressIndexOverride] = useState<number | null>(null)
   const effectiveEvmIndex = evmAddressIndexOverride ?? evmAddresses.selectedIndex
+  const signingAccount = evmAddresses.addresses.find(a => a.addressIndex === effectiveEvmIndex)
 
   // ── State ─────────────────────────────────────────────────────────
   const [phase, setPhase] = useState<SwapPhase>('input')
@@ -1515,24 +1525,17 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
 
   // ── Derived values ────────────────────────────────────────────────
   const isZcashSource = fromAsset?.chainId === 'zcash' && !fromAsset.contractAddress
-  /* The entry fromBalance will actually READ, so confidence is judged against
-   * the same object the amount comes from. Judging only `balances` while
-   * fromBalance fell through to the `balance` prop meant a degraded prop
-   * passed a check that never looked at it: with any non-empty cache missing
-   * this chain (so the dialog skips its live fetch), the prop's placeholder
-   * zero drove Available/USD/MAX, and an account-model balance could be
-   * pre-clamped and submitted with sendIsMax=false — past the builder's own
-   * MAX verification. Both selectors must resolve the source identically. */
-  const fromBalanceEntry = useMemo(
-    () => fromAsset ? selectBalanceEntry(balances, balance, fromAsset.chainId) : undefined,
-    [fromAsset, balances, balance],
-  )
+  // EVM amounts, picker tiles and confidence use one selected-owner snapshot.
+  const accountBalances = useMemo(() => scopeSwapBalances(balances, balance, evmAddresses, effectiveEvmIndex,
+    assets.filter(a => a.chainFamily === 'evm').map(a => a.chainId)), [balances, balance, evmAddresses, effectiveEvmIndex, assets])
+  const fromBalanceEntry = useMemo(() => fromAsset ? accountBalances.find(b => b.chainId === fromAsset.chainId) : undefined,
+    [fromAsset, accountBalances])
 
   /* Confidence in the ASSET being swapped. A token proven directly over RPC
    * keeps its real figure even while its parent chain is degraded — exactly
    * what mergeTrustedBalanceSnapshot merges through. */
   const fromBalanceUnverified = useMemo(
-    () => !!fromAsset && !!fromBalanceEntry && isBalanceUnverified(fromBalanceEntry, fromAsset.caip),
+    () => !!fromAsset && isBalanceUnverified(fromBalanceEntry, fromAsset.caip),
     [fromAsset, fromBalanceEntry],
   )
 
@@ -1541,44 +1544,12 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
    * the transfer. Sharing one boolean let a verified token re-enable the
    * low-gas verdict against a native balance still sitting at placeholder 0. */
   const fromNativeUnverified = useMemo(() => {
-    if (!fromAsset || !fromBalanceEntry) return false
+    if (!fromAsset) return false
     return isBalanceUnverified(fromBalanceEntry, CHAINS.find(c => c.id === fromAsset.chainId)?.caip)
   }, [fromAsset, fromBalanceEntry])
 
-  const fromBalance = useMemo(() => {
-    if (!fromAsset || fromBalanceUnverified) return null
-    // For EVM assets, use the effective address's per-chain balance so the
-    // spendable amount reflects the address that will actually sign.
-    if (fromAsset.chainFamily === 'evm' && evmAddresses.addresses.length > 0) {
-      const selectedAddr = evmAddresses.addresses.find(a => a.addressIndex === effectiveEvmIndex)
-      const chainBal = selectedAddr?.chainBalances?.[fromAsset.chainId]
-      if (chainBal) {
-        if (fromAsset.contractAddress && chainBal.tokens) {
-          const token = chainBal.tokens.find(t =>
-            t.contractAddress?.toLowerCase() === fromAsset.contractAddress?.toLowerCase()
-          )
-          if (token) return token.balance
-        }
-        if (!fromAsset.contractAddress) return chainBal.balance
-      }
-    }
-    // Check cached balances (aggregated per-chain from getBalances RPC)
-    const cb = balances.find(b => b.chainId === fromAsset.chainId)
-    if (cb) {
-      if (fromAsset.contractAddress && cb.tokens) {
-        const token = cb.tokens.find(t =>
-          t.contractAddress?.toLowerCase() === fromAsset.contractAddress?.toLowerCase()
-        )
-        if (token) return token.balance
-      }
-      if (!fromAsset.contractAddress) return cb.balance
-    }
-    // Fall back to the SAME entry the confidence check judged. Re-deriving the
-    // fallback here is what let a degraded prop be read after a cache-only check
-    // had already declared the balance trustworthy.
-    if (fromBalanceEntry && !fromAsset.contractAddress) return fromBalanceEntry.balance
-    return null
-  }, [fromAsset, fromBalanceUnverified, fromBalanceEntry, balances, evmAddresses, effectiveEvmIndex])
+  const fromBalance = useMemo(() => fromAsset ? swapAccountAmount(fromBalanceEntry, fromAsset) : null,
+    [fromAsset, fromBalanceEntry])
 
   /* Native account-model MAX fee reservation — frontend pre-clamps the balance
    * by a conservative fee reserve so the displayed, quoted, and submitted
@@ -1609,25 +1580,9 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
     if (!fromAsset || fromNativeUnverified) return null
     const isToken = fromAsset.caip ? isTokenCaip(fromAsset.caip) : !!fromAsset.contractAddress
     if (!isToken) return null
-    // Mirror fromBalance: EVM swaps sign from the SELECTED address, so judge
-    // gas on that address's native balance — the chain aggregate can hide a
-    // dust-native signing address behind a funded sibling.
-    let nativeUsd: number | null = null
-    let nativeBalance = '0'
-    if (fromAsset.chainFamily === 'evm' && evmAddresses.addresses.length > 0) {
-      const selectedAddr = evmAddresses.addresses.find(a => a.addressIndex === effectiveEvmIndex)
-      const chainBal = selectedAddr?.chainBalances?.[fromAsset.chainId]
-      if (chainBal) {
-        nativeUsd = Number(chainBal.nativeBalanceUsd ?? 0)
-        nativeBalance = chainBal.balance || '0'
-      }
-    }
-    if (nativeUsd === null) {
-      const cb = balances.find(b => b.chainId === fromAsset.chainId)
-      if (!cb) return null
-      nativeUsd = Number(cb.nativeBalanceUsd ?? 0)
-      nativeBalance = cb.balance || '0'
-    }
+    if (!fromBalanceEntry) return null
+    const nativeUsd = Number(fromBalanceEntry.nativeBalanceUsd ?? 0)
+    const nativeBalance = fromBalanceEntry.balance || '0'
     if (nativeUsd >= 1) return null
     const chainDef = CHAINS.find(c => c.id === fromAsset.chainId)
     return {
@@ -1635,7 +1590,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
       coin: chainDef?.coin ?? fromAsset.chainId,
       balance: nativeBalance,
     }
-  }, [fromAsset, fromNativeUnverified, balances, evmAddresses, effectiveEvmIndex])
+  }, [fromAsset, fromNativeUnverified, fromBalanceEntry])
 
   /* Resolved (amount, isMax) tuple to send to the backend. For fee-reserved native
    * and token-precision-reserved MAX the amount is already clamped, so isMax
@@ -1643,11 +1598,11 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
    * all other MAX sends, isMax remains true so the backend's chain-aware fee
    * math runs. */
   const sendAmount = useMemo(() => {
-    if (!isMax) return amount
+    if (!isMax) return normalizeAmountInput(amount, locale) ?? ''
     // `|| '0'` here meant an unverifiable balance submitted a 0-amount MAX swap.
     // Empty instead: no amount, so nothing downstream quotes or signs one.
     return nativeFeeReservedMaxAmount ?? tokenPrecisionReservedMaxAmount ?? (fromBalance ?? '')
-  }, [isMax, amount, nativeFeeReservedMaxAmount, tokenPrecisionReservedMaxAmount, fromBalance])
+  }, [isMax, amount, locale, nativeFeeReservedMaxAmount, tokenPrecisionReservedMaxAmount, fromBalance])
 
   const sendIsMax = isMax && nativeFeeReservedMaxAmount === null && tokenPrecisionReservedMaxAmount === null
   const quotedSendAmount = quote?.netFromAmount ?? sendAmount
@@ -1781,17 +1736,18 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
 
   // Bidirectional conversion: crypto → fiat
   const handleCryptoChange = useCallback((v: string) => {
-    setAmount(v)
+    const canonical = normalizeAmountInput(v, locale)
+    setAmount(canonical ?? v)
     setIsMax(false)
     setMaxReserveMode('safe')
     if (hasFromPrice && v) {
-      const n = parseFloat(v)
+      const n = canonical === null ? NaN : Number(canonical)
       if (!isNaN(n)) setFiatAmount((n * fromPriceUsd).toFixed(2))
       else setFiatAmount("")
     } else {
       setFiatAmount("")
     }
-  }, [hasFromPrice, fromPriceUsd])
+  }, [hasFromPrice, fromPriceUsd, locale])
 
   // ── Auto-default amount to ~$100 or max if balance < $100 ────────
   // Skip when an amount or MAX is already set: it may have come from REST seed,
@@ -1821,30 +1777,29 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
       setIsMax(true)
       setMaxReserveMode('safe')
     } else {
-      const formatted = cryptoAmount < 1
-        ? cryptoAmount.toPrecision(6)
-        : cryptoAmount.toFixed(6).replace(/\.?0+$/, '')
+      const formatted = decimalAmount(cryptoAmount, 6)
       handleCryptoChange(formatted)
     }
   }, [fromAsset, fromPriceUsd, fromBalance, amount, isMax, handleCryptoChange])
 
   // Bidirectional conversion: fiat → crypto
   const handleFiatChange = useCallback((v: string) => {
-    setFiatAmount(v)
+    const canonical = normalizeAmountInput(v, locale)
+    setFiatAmount(canonical ?? v)
     setIsMax(false)
     setMaxReserveMode('safe')
     if (hasFromPrice && v) {
-      const n = parseFloat(v)
+      const n = canonical === null ? NaN : Number(canonical)
       if (!isNaN(n)) {
         const crypto = n / fromPriceUsd
-        setAmount(crypto < 1 ? crypto.toPrecision(8) : crypto.toFixed(8).replace(/\.?0+$/, ''))
+        setAmount(decimalAmount(crypto))
       } else {
         setAmount("")
       }
     } else {
       setAmount("")
     }
-  }, [hasFromPrice, fromPriceUsd])
+  }, [hasFromPrice, fromPriceUsd, locale])
 
   const toggleInputMode = useCallback(() => {
     setInputMode(prev => prev === 'crypto' ? 'fiat' : 'crypto')
@@ -1861,7 +1816,8 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
     return n * fromPriceUsd
   }, [quotedSendAmount, hasFromPrice, fromPriceUsd])
 
-  const amountNum = parseFloat(amount)
+  const canonicalAmount = normalizeAmountInput(amount, locale)
+  const amountNum = canonicalAmount === null ? NaN : Number(canonicalAmount)
   const balanceNum = fromBalance ? parseFloat(fromBalance) : 0
   const exceedsBalance = !isMax && !isNaN(amountNum) && amountNum > 0 && balanceNum > 0 && amountNum > balanceNum
   // Reserve-aware guard: an amount that fits the raw balance but spends into
@@ -1965,7 +1921,9 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
   ), [fromAsset])
 
   const maxAmountReady = isMax && !isNaN(parseFloat(sendAmount)) && parseFloat(sendAmount) > 0
-  const manualAmountReady = amount !== '' && !isNaN(parseFloat(amount)) && parseFloat(amount) > 0
+  const enteredAmount = inputMode === 'fiat' ? fiatAmount : amount
+  const invalidAmountInput = !isMax && enteredAmount !== '' && normalizeAmountInput(enteredAmount, locale) === null
+  const manualAmountReady = !invalidAmountInput && canonicalAmount !== null && Number.isFinite(amountNum) && amountNum > 0
   const validAmount = isMax ? (maxAmountReady && !nativeMaxInsufficient && !tokenMaxInsufficient) : manualAmountReady
   // SAFETY: never quote with an xpub as the destination. Pioneer will accept
   // it and substitute a self-derived address, but funds would land at an
@@ -2765,11 +2723,9 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
           </HStack>
           <HStack gap="3" align="center">
             <DocsLink href={DOCS_LINKS.swap} />
-            <DocsLink href={watch('course-07-swap')} label="Watch video" />
+            <DocsLink href={watch('course-07-swap')} label={uiText("Watch video")} />
             {!busy && (
-              <Button size="xs" variant="ghost" color="kk.textMuted" px="1" minW="auto" _hover={{ color: "kk.textPrimary" }} onClick={handleClose}>
-                &times;
-              </Button>
+              <Button size="xs" variant="ghost" color="kk.textMuted" px="1" minW="auto" _hover={{ color: "kk.textPrimary" }} onClick={handleClose}>{uiText("&times;")}</Button>
             )}
           </HStack>
         </Flex>
@@ -2801,9 +2757,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
               <Flex gap="2">
                 <Button size="sm" variant="outline" color="kk.textSecondary" borderColor="kk.border"
                   px="4" py="2" _hover={{ bg: "rgba(255,255,255,0.06)" }}
-                  onClick={() => { setLoadingAssets(true); setAssetLoadError(null); rpcRequest<SwapAsset[]>('getSwapAssets', undefined, 20000).then(r => { setAssets(r); setLoadingAssets(false); if (!r?.length) setAssetLoadError('No swap assets available') }).catch(e => { setLoadingAssets(false); setAssetLoadError(e?.message || 'Failed to load') }) }}>
-                  Retry
-                </Button>
+                  onClick={() => { setLoadingAssets(true); setAssetLoadError(null); rpcRequest<SwapAsset[]>('getSwapAssets', undefined, 20000).then(r => { setAssets(r); setLoadingAssets(false); if (!r?.length) setAssetLoadError('No swap assets available') }).catch(e => { setLoadingAssets(false); setAssetLoadError(e?.message || 'Failed to load') }) }}>{uiText("Retry")}</Button>
                 <Button size="sm" variant="ghost" color="kk.textMuted" px="4" py="2" onClick={handleClose}>
                   {t("close")}
                 </Button>
@@ -2813,17 +2767,17 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
 
           {phase === 'submitted' && toAsset && livePayouts.length > 0 && (
             <Box p="4" m="3" border="1px solid var(--teal)" borderRadius="lg">
-              <Text fontSize="13px" fontWeight="700">{isSwapComplete ? 'Settlement payouts' : payoutMeetsMinimum ? 'Payout received — confirming settlement' : 'Partial payout — settlement still in progress'}</Text>
-              <Text fontSize="12px" color="var(--teal)" mt="1">Total reported received: {liveReceivedOutput || '0'} {toAsset.symbol}</Text>
-              {!isSwapComplete && !payoutMeetsMinimum && quote && <Text fontSize="11px" color="kk.textMuted" mt="1">Still expected: approximately {formatBalance(String(Math.max(0, Number(quote.expectedOutput) - Number(liveReceivedOutput || 0))))} {toAsset.symbol}. A partial payment is not the final swap output.</Text>}
+              <Text fontSize="13px" fontWeight="700">{isSwapComplete ? uiText("Settlement payouts") : payoutMeetsMinimum ? uiText("Payout received — confirming settlement") : uiText("Partial payout — settlement still in progress")}</Text>
+              <Text fontSize="12px" color="var(--teal)" mt="1">{uiText("Total reported received:")}{" "}{liveReceivedOutput || '0'} {toAsset.symbol}</Text>
+              {!isSwapComplete && !payoutMeetsMinimum && quote && <Text fontSize="11px" color="kk.textMuted" mt="1">{uiText("Still expected: approximately")}{" "}{formatBalance(String(Math.max(0, Number(quote.expectedOutput) - Number(liveReceivedOutput || 0))))} {toAsset.symbol}{uiText(". A partial payment is not the final swap output.")}</Text>}
               {livePayouts.map((payout, index) => <Flex key={`${payout.txid}-${index}`} justify="space-between" mt="2" gap="3">
-                <Text fontSize="11px">Payment {index + 1}: {payout.amount} {toAsset.symbol}</Text>
+                <Text fontSize="11px">{uiText("Payment")}{" "}{index + 1}: {payout.amount} {toAsset.symbol}</Text>
                 <Box as="button" fontSize="11px" color="var(--teal)" textDecoration="underline" onClick={() => {
                   const url = getExplorerTxUrl(liveOutboundChainId || toAsset.chainId, payout.txid)
                   if (url) rpcRequest('openUrl', { url }).catch(() => {})
-                }}>View transaction</Box>
+                }}>{uiText("View transaction")}</Box>
               </Flex>)}
-              <Text fontSize="10px" color="kk.textMuted" mt="2">Reported by the settlement protocol. Explorer indexing and wallet balances can update later.</Text>
+              <Text fontSize="10px" color="kk.textMuted" mt="2">{uiText("Reported by the settlement protocol. Explorer indexing and wallet balances can update later.")}</Text>
             </Box>
           )}
 
@@ -2947,7 +2901,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                         textTransform="uppercase" letterSpacing="0.10em">
                         <Box w="6px" h="6px" borderRadius="full" bg="var(--teal)"
                           style={{ boxShadow: '0 0 8px rgba(139,227,196,0.30)' }} />
-                        <Text>{liveReceivedOutput ? t("youReceived", "You received") : "Quoted output — received amount unverified"}</Text>
+                        <Text>{liveReceivedOutput ? t("youReceived", "You received") : uiText("Quoted output — received amount unverified")}</Text>
                       </Flex>
                       <Flex position="relative" align="baseline" gap="2.5">
                         <Text fontFamily="mono" fontSize="30px" fontWeight={600} color="var(--gold)"
@@ -3002,11 +2956,11 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                           {t("transactionDetails", "Transaction details")}
                         </Text>
                         <Flex align="center" gap="2" fontSize="11px" color="kk.textMuted" fontFamily="mono">
-                          <Text>{liveOutboundTxid ? '2 hashes' : '1 hash'}</Text>
+                          <Text>{liveOutboundTxid ? uiText("2 hashes") : uiText("1 hash")}</Text>
                           {(() => {
                             const protoHint = liveSwapper || quote?.swapper || quote?.integration
                             const tracker = providerTrackerUrl(protoHint, txid, { relayRequestId: liveRelayRequestId, nearTxHash: liveNearTxHash })
-                            return tracker ? <Text>· tracker</Text> : null
+                            return tracker ? <Text>{uiText("· tracker")}</Text> : null
                           })()}
                           <svg className="kk-acc-chev" width="14" height="14" viewBox="0 0 16 16" fill="none">
                             <path d="M4 6l4 4 4-4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
@@ -3035,9 +2989,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                               return url ? (
                                 <Button size="xs" variant="outline" borderColor="kk.border" color="kk.textSecondary"
                                   px="2" h="26px" fontSize="11px"
-                                  onClick={() => rpcRequest('openUrl', { url }).catch(() => { })}>
-                                  Explorer
-                                </Button>
+                                  onClick={() => rpcRequest('openUrl', { url }).catch(() => { })}>{uiText("Explorer")}</Button>
                               ) : null
                             })()}
                           </HStack>
@@ -3053,16 +3005,14 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                             </Text>
                             <Text fontFamily="mono" fontSize="11.5px" color="kk.textSecondary"
                               overflow="hidden" textOverflow="ellipsis" whiteSpace="nowrap" flex="1">
-                              #{liveInboundBlockNumber.toLocaleString()}{liveInboundBlockHash ? ` · ${liveInboundBlockHash.slice(0, 10)}…` : ''}
+                              #{liveInboundBlockNumber.toLocaleString(getNumberLocale())}{liveInboundBlockHash ? ` · ${liveInboundBlockHash.slice(0, 10)}…` : ''}
                             </Text>
                             {(() => {
                               const url = getExplorerBlockUrl(fromAsset.chainId, liveInboundBlockNumber!)
                               return url ? (
                                 <Button size="xs" variant="outline" borderColor="kk.border" color="kk.textSecondary"
                                   px="2" h="26px" fontSize="11px"
-                                  onClick={() => rpcRequest('openUrl', { url }).catch(() => { })}>
-                                  Explorer
-                                </Button>
+                                  onClick={() => rpcRequest('openUrl', { url }).catch(() => { })}>{uiText("Explorer")}</Button>
                               ) : null
                             })()}
                           </Flex>
@@ -3092,7 +3042,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                             <Text fontFamily="mono" fontSize="11.5px" color="kk.textSecondary" flex="1">
                               {(() => {
                                 const used = Number(liveInboundGasUsed)
-                                const usedStr = Number.isFinite(used) ? used.toLocaleString() : liveInboundGasUsed
+                                const usedStr = Number.isFinite(used) ? used.toLocaleString(getNumberLocale()) : liveInboundGasUsed
                                 const gwei = liveInboundEffectiveGasPrice ? Number(liveInboundEffectiveGasPrice) / 1e9 : NaN
                                 return Number.isFinite(gwei) ? `${usedStr} gas · ${gwei.toFixed(2)} gwei` : `${usedStr} gas`
                               })()}
@@ -3122,9 +3072,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                                 return url ? (
                                   <Button size="xs" variant="outline" borderColor="kk.border" color="kk.textSecondary"
                                     px="2" h="26px" fontSize="11px"
-                                    onClick={() => rpcRequest('openUrl', { url }).catch(() => { })}>
-                                    Explorer
-                                  </Button>
+                                    onClick={() => rpcRequest('openUrl', { url }).catch(() => { })}>{uiText("Explorer")}</Button>
                                 ) : null
                               })()}
                             </HStack>
@@ -3294,7 +3242,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                     {isSwapComplete ? t("swapCompleted") : isSwapFailed ? t("swapFailed") : t("swapSubmitted")}
                   </Text>
                   {!isSwapComplete && !isSwapFailed && (
-                    <Text fontSize="xs" color="var(--gold)" fontWeight="500" mt="0.5">{liveStatus === 'completed' && requiresSettlementEvidence ? 'Verifying the full payout' : livePayouts.length ? 'Partial payout received; settlement continues' : t("waitingForConfirmations")}</Text>
+                    <Text fontSize="xs" color="var(--gold)" fontWeight="500" mt="0.5">{liveStatus === 'completed' && requiresSettlementEvidence ? uiText("Verifying the full payout") : livePayouts.length ? uiText("Partial payout received; settlement continues") : t("waitingForConfirmations")}</Text>
                   )}
                 </VStack>
                 <Box position="absolute" right="0" top="50%" transform="translateY(-50%)">
@@ -3471,7 +3419,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                     <Text fontSize="xs" color="kk.textMuted">{fmtCompact(parseFloat(displayAmount) * fromPriceUsd)}</Text>
                   )}
                 </VStack>
-                <Text color="var(--gold)" fontSize="md" fontWeight="700">&rarr;</Text>
+                <Text color="var(--gold)" fontSize="md" fontWeight="700">{uiText("&rarr;")}</Text>
                 <VStack gap="0.5">
                   <HStack gap="3">
                     <Box style={{ animation: 'kkLogoGlow 3s ease-in-out infinite' }}>
@@ -3502,7 +3450,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                   <Flex align="center" gap="1.5" mb="2" wrap="wrap" fontFamily="mono" fontSize="10px">
                     {liveInboundBlockNumber !== undefined && (() => {
                       const url = getExplorerBlockUrl(fromAsset.chainId, liveInboundBlockNumber!)
-                      const label = `${t("block", "Block")} #${liveInboundBlockNumber!.toLocaleString()}`
+                      const label = `${t("block", "Block")} #${liveInboundBlockNumber!.toLocaleString(getNumberLocale())}`
                       return url ? (
                         <Text color="var(--teal)" cursor="pointer" _hover={{ textDecoration: 'underline' }}
                           onClick={() => rpcRequest('openUrl', { url }).catch(() => {})}>{label}</Text>
@@ -3530,7 +3478,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                         style={rechecking ? { animation: 'spin 0.8s linear infinite' } : undefined}>
                         <polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
                       </svg>
-                      <Text fontSize="10px">{rechecking ? 'Checking...' : 'Recheck'}</Text>
+                      <Text fontSize="10px">{rechecking ? uiText("Checking...") : uiText("Recheck")}</Text>
                     </HStack>
                   </Button>
                   {(() => {
@@ -3541,7 +3489,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                       <Button size="xs" flex="1" variant="outline" borderColor="kk.border" color="kk.textSecondary"
                         _hover={{ bg: "rgba(255,255,255,0.06)", color: "kk.textPrimary" }}
                         onClick={() => rpcRequest('openUrl', { url }).catch(() => {})}>
-                        <HStack gap="1"><ExternalLinkIcon /><Text fontSize="10px">Explorer</Text></HStack>
+                        <HStack gap="1"><ExternalLinkIcon /><Text fontSize="10px">{uiText("Explorer")}</Text></HStack>
                       </Button>
                     ) : null
                   })()}
@@ -3612,7 +3560,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                         const url = getExplorerTxUrl(outChainId, liveOutboundTxid)
                         return url ? (
                           <Button size="xs" variant="ghost" color="var(--teal)" px="1.5" minW="auto"
-                            onClick={() => rpcRequest('openUrl', { url }).catch(() => {})} title="View on explorer">
+                            onClick={() => rpcRequest('openUrl', { url }).catch(() => {})} title={uiText("View on explorer")}>
                             <ExternalLinkIcon />
                           </Button>
                         ) : null
@@ -3625,9 +3573,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
               {/* Before / After balance comparison — shown on completion */}
               {isSwapComplete && (beforeFromBal || beforeToBal) && (
                 <Box w="full" bg="rgba(74,222,128,0.04)" border="1px solid" borderColor="rgba(74,222,128,0.12)" borderRadius="lg" p="3">
-                  <Text fontSize="10px" fontWeight="600" color="var(--teal)" mb="2" textTransform="uppercase" letterSpacing="0.05em">
-                    Balance Changes
-                  </Text>
+                  <Text fontSize="10px" fontWeight="600" color="var(--teal)" mb="2" textTransform="uppercase" letterSpacing="0.05em">{uiText("Balance Changes")}</Text>
                   <VStack gap="1.5" align="stretch">
                     {/* From asset balance change */}
                     <Flex justify="space-between" align="center">
@@ -3640,7 +3586,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                           <Text fontSize="11px" fontFamily="mono" color="kk.textMuted">
                             {beforeFromBal ? formatBalance(beforeFromBal) : '-'}
                           </Text>
-                          <Text fontSize="10px" color="kk.textMuted">&rarr;</Text>
+                          <Text fontSize="10px" color="kk.textMuted">{uiText("&rarr;")}</Text>
                           <Text fontSize="11px" fontFamily="mono" color={afterFromBal ? 'var(--gold)' : 'kk.textMuted'}>
                             {afterFromBal ? formatBalance(afterFromBal) : '...'}
                           </Text>
@@ -3668,7 +3614,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                           <Text fontSize="11px" fontFamily="mono" color="kk.textMuted">
                             {beforeToBal ? formatBalance(beforeToBal) : '-'}
                           </Text>
-                          <Text fontSize="10px" color="kk.textMuted">&rarr;</Text>
+                          <Text fontSize="10px" color="kk.textMuted">{uiText("&rarr;")}</Text>
                           <Text fontSize="11px" fontFamily="mono" color={afterToBal ? 'var(--teal)' : 'kk.textMuted'}>
                             {afterToBal ? <GreenCountUp value={afterToBal} color="var(--teal)" /> : '...'}
                           </Text>
@@ -3750,7 +3696,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                     <div style={{ display: 'flex', alignItems: 'center', gap: 14, width: '100%' }}>
                       <div style={{ flex: 1 }}>
                         <div style={{ fontSize: 11, opacity: 0.55, letterSpacing: 2, marginBottom: 4 }}>
-                          {(subStage === 'approve-signing' || phase === 'approving') ? 'APPROVE' : 'CONFIRM SWAP'}
+                          {(subStage === 'approve-signing' || phase === 'approving') ? 'APPROVE' : uiText("CONFIRM SWAP")}
                         </div>
                         <div style={{ fontSize: 22, fontWeight: 700, letterSpacing: 0.5, lineHeight: 1 }}>
                           {displayAmount} {fromAsset.symbol}
@@ -4006,8 +3952,8 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
 
               {/* Our own swap is assumed clear: the report shows only when it is
                   not what was quoted (swapReportNeedsAttention). */}
-              {previewBuild?.clearSignReports?.approval && swapReportNeedsAttention(previewBuild.clearSignReports.approval) && <ClearSignReportCard report={previewBuild.clearSignReports.approval} title="Approval ClearSign Report" />}
-              {previewBuild?.clearSignReports?.transaction && swapReportNeedsAttention(previewBuild.clearSignReports.transaction) && <ClearSignReportCard report={previewBuild.clearSignReports.transaction} title="Swap ClearSign Report" />}
+              {previewBuild?.clearSignReports?.approval && swapReportNeedsAttention(previewBuild.clearSignReports.approval) && <ClearSignReportCard report={previewBuild.clearSignReports.approval} title={uiText("Approval ClearSign Report")} />}
+              {previewBuild?.clearSignReports?.transaction && swapReportNeedsAttention(previewBuild.clearSignReports.transaction) && <ClearSignReportCard report={previewBuild.clearSignReports.transaction} title={uiText("Swap ClearSign Report")} />}
               {/* The provider the swap will ask is always named: execute pins it. */}
               {(() => {
                 const report = previewBuild?.clearSignReports?.transaction
@@ -4061,8 +4007,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                   </ReviewRow>
                   <QuoteFeeRows fees={quote.fees} />
                   <ReviewRow label={t("slippageTolerance", "Slippage tolerance")}>
-                    {(slippageBps / 100).toFixed(2)}% max
-                  </ReviewRow>
+                    {(slippageBps / 100).toFixed(2)}{uiText("% max")}</ReviewRow>
                   <ReviewRow label={t("quoteSlippage", "Quote slippage")}>
                     {quote.quotedSlippageBps != null ? `${(quote.quotedSlippageBps / 100).toFixed(2)}%` : t("notProvided", "Not provided")}
                   </ReviewRow>
@@ -4147,7 +4092,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                       </Flex>
                       {quote.memo && (
                         <Flex justify="space-between" align="flex-start" gap="2">
-                          <Text fontSize="10px" color="kk.textMuted" flexShrink={0}>memo</Text>
+                          <Text fontSize="10px" color="kk.textMuted" flexShrink={0}>{uiText("memo")}</Text>
                           <Text fontSize="10px" fontFamily="mono" color="kk.textSecondary" wordBreak="break-all" textAlign="right">{quote.memo}</Text>
                         </Flex>
                       )}
@@ -4156,14 +4101,14 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                           so the user can audit the exact tx going to the device. */}
                       <Box pt="1.5" borderTop="1px solid" borderColor="kk.border">
                         {previewLoading && (
-                          <Text fontSize="10px" color="kk.textMuted">Building transaction preview…</Text>
+                          <Text fontSize="10px" color="kk.textMuted">{uiText("Building transaction preview…")}</Text>
                         )}
                         {previewError && (
-                          <Text fontSize="10px" color="kk.error">Preview failed: {previewError}</Text>
+                          <Text fontSize="10px" color="kk.error">{uiText("Preview failed:")}{" "}{previewError}</Text>
                         )}
                         {previewBuild?.approveTx && (
                           <Box mb="2">
-                            <Text fontSize="10px" color="kk.textMuted" mb="1">Approve tx (ERC-20 allowance)</Text>
+                            <Text fontSize="10px" color="kk.textMuted" mb="1">{uiText("Approve tx (ERC-20 allowance)")}</Text>
                             <Box bg="rgba(0,0,0,0.5)" borderRadius="sm" p="2" maxH="200px" overflow="auto" border="1px solid" borderColor="kk.border">
                               <Text fontSize="10px" fontFamily="mono" color="kk.textSecondary" whiteSpace="pre-wrap" wordBreak="break-all">
                                 {JSON.stringify(previewBuild.approveTx, null, 2)}
@@ -4174,7 +4119,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                         {previewBuild?.unsignedTx && (
                           <Box>
                             <Text fontSize="10px" color="kk.textMuted" mb="1">
-                              {previewBuild.approveTx ? 'Swap tx (sent after approval)' : 'Hdwallet payload'}
+                              {previewBuild.approveTx ? uiText("Swap tx (sent after approval)") : uiText("Hdwallet payload")}
                             </Text>
                             <Box bg="rgba(0,0,0,0.5)" borderRadius="sm" p="2" maxH="240px" overflow="auto" border="1px solid" borderColor="kk.border">
                               <Text fontSize="10px" fontFamily="mono" color="kk.textSecondary" whiteSpace="pre-wrap" wordBreak="break-all">
@@ -4252,13 +4197,9 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
                       </Box>
                       <Box flex="1">
-                        <Text fontSize="11px" fontWeight="600" color="var(--teal)">
-                          Already approved · {fmt(a.current)} {fromAsset.symbol} allowance to router
-                        </Text>
+                        <Text fontSize="11px" fontWeight="600" color="var(--teal)">{uiText("Already approved ·")}{" "}{fmt(a.current)} {fromAsset.symbol}{" "}{uiText("allowance to router")}</Text>
                         <Text fontSize="10px" color="kk.textMuted" fontFamily="mono" wordBreak="break-all">{a.spender}</Text>
-                        <Text fontSize="10px" color="kk.textMuted">
-                          1 device confirmation needed: swap
-                        </Text>
+                        <Text fontSize="10px" color="kk.textMuted">{uiText("1 device confirmation needed: swap")}</Text>
                       </Box>
                     </Flex>
                   )
@@ -4269,15 +4210,11 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" /></svg>
                     </Box>
                     <Box flex="1">
-                      <Text fontSize="11px" fontWeight="700" color="var(--gold)">
-                        Approval needed: {fmt(a.required)} {fromAsset.symbol}
+                      <Text fontSize="11px" fontWeight="700" color="var(--gold)">{uiText("Approval needed:")}{" "}{fmt(a.required)} {fromAsset.symbol}
                       </Text>
-                      <Text fontSize="10px" color="kk.textSecondary">
-                        Current allowance: {fmt(a.current)} {fromAsset.symbol} · spender <Text as="span" fontFamily="mono">{a.spender.slice(0, 10)}…{a.spender.slice(-6)}</Text>
+                      <Text fontSize="10px" color="kk.textSecondary">{uiText("Current allowance:")}{" "}{fmt(a.current)} {fromAsset.symbol}{" "}{uiText("· spender")}{" "}<Text as="span" fontFamily="mono">{a.spender.slice(0, 10)}…{a.spender.slice(-6)}</Text>
                       </Text>
-                      <Text fontSize="10px" color="kk.textMuted" mt="0.5">
-                        2 device confirmations needed: 1) approve {fromAsset.symbol}, 2) swap. The approval consumes gas even if you cancel step 2.
-                      </Text>
+                      <Text fontSize="10px" color="kk.textMuted" mt="0.5">{uiText("2 device confirmations needed: 1) approve")}{" "}{fromAsset.symbol}{uiText(", 2) swap. The approval consumes gas even if you cancel step 2.")}</Text>
                     </Box>
                   </Flex>
                 )
@@ -4530,55 +4467,21 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                         </Flex>
                       </Flex>
 
-                      {/* EVM address switcher — shown when multiple addresses tracked.
-                          Uses local dialog state so switching here doesn't affect AssetPage. */}
-                      {fromAsset?.chainFamily === 'evm' && evmAddresses.addresses.length > 1 && (
-                        <Box mt="2" mb="2">
-                          <Text fontSize="8px" color="kk.textMuted" textTransform="uppercase" letterSpacing="0.08em" mb="1">From address</Text>
-                          <Flex gap="1" flexWrap="wrap">
-                            {evmAddresses.addresses.map(addr => {
-                              const isSelected = addr.addressIndex === effectiveEvmIndex
-                              const chainBal = addr.chainBalances?.[fromAsset.chainId]
-                              const chainBalLoading = chainBal === undefined
-                              // For selected address fall back to global balances when chainBal not yet loaded
-                              let bal = 0
-                              if (chainBal) {
-                                bal = parseFloat(chainBal.balance)
-                              } else if (isSelected) {
-                                const gb = balances.find(b => b.chainId === fromAsset.chainId)
-                                bal = gb ? parseFloat(gb.balance) : 0
-                              }
-                              const snippet = addr.address ? `${addr.address.slice(0, 6)}…${addr.address.slice(-4)}` : `#${addr.addressIndex}`
-                              return (
-                                <Box
-                                  key={addr.addressIndex}
-                                  as="button"
-                                  onClick={() => setEvmAddressIndexOverride(addr.addressIndex)}
-                                  px="2" py="1"
-                                  borderRadius="md"
-                                  border="1px solid"
-                                  borderColor={isSelected ? "kk.gold" : "kk.border"}
-                                  bg={isSelected ? "rgba(233,196,106,0.1)" : "rgba(255,255,255,0.03)"}
-                                  cursor="pointer"
-                                  transition="all 0.15s"
-                                  _hover={{ borderColor: "kk.gold", bg: "rgba(233,196,106,0.06)" }}
-                                  disabled={busy}
-                                >
-                                  <Flex direction="column" align="flex-start" gap="0">
-                                    <Text fontSize="9px" fontFamily="mono" color={isSelected ? "kk.gold" : "kk.textSecondary"} fontWeight="600" lineHeight="1.3">
-                                      {snippet}
-                                    </Text>
-                                    {chainBalLoading && !isSelected
-                                      ? <Spinner size="xs" color="kk.textMuted" />
-                                      : <Text fontSize="9px" fontFamily="mono" color="kk.textMuted" lineHeight="1.3">
-                                          {bal > 0 ? `${bal.toFixed(4)} ${fromAsset.symbol}` : `0 ${fromAsset.symbol}`}
-                                        </Text>
-                                    }
-                                  </Flex>
-                                </Box>
-                              )
-                            })}
-                          </Flex>
+                      {fromAsset.chainFamily === 'evm' && (
+                        <Box mt="2" mb="3" aria-label={uiText('Swap source account')}>
+                          <Text fontSize="10px" color="kk.textMuted" mb="1">{uiText('Signing account')}</Text>
+                          {evmAddresses.addresses.length > 1 ? <label>
+                            <select aria-label={uiText('Swap signing account')} value={effectiveEvmIndex} disabled={busy} onChange={e => setEvmAddressIndexOverride(Number(e.target.value))}
+                              style={{width:'100%',padding:'8px',borderRadius:6,border:'1px solid var(--line-2)',background:'var(--ink-1)',color:'var(--text-0)',fontSize:11}}>
+                              {evmAddresses.addresses.map(a => {
+                                const own = accountBalances.find(b => b.chainId === fromAsset.chainId && b.address.toLowerCase() === a.address.toLowerCase())
+                                  || scopeSwapBalances([], undefined, evmAddresses, a.addressIndex).find(b => b.chainId === fromAsset.chainId)
+                                const amount = swapAccountAmount(own, fromAsset)
+                                return <option key={a.addressIndex} value={a.addressIndex}>{uiText('Account')} #{a.addressIndex} · {amount === null ? uiText('Balance unverified') : `${formatBalance(amount)} ${fromAsset.symbol}`}</option>
+                              })}
+                            </select>
+                          </label> : <Text fontSize="11px" color="kk.textSecondary">{signingAccount ? `${uiText('Account')} #${signingAccount.addressIndex}` : uiText('Account unavailable')}</Text>}
+                          <Text as="code" display="block" fontSize="10px" mt="1" color="kk.textSecondary" overflowWrap="anywhere" title={signingAccount?.address}>{signingAccount?.address || uiText('Connect and verify the signing account')}</Text>
                         </Box>
                       )}
 
@@ -4592,6 +4495,8 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                             <Text position="absolute" left="8px" top="50%" transform="translateY(-50%)" fontSize="xs" fontWeight="600" color="kk.textSecondary" pointerEvents="none" zIndex={1}>$</Text>
                           )}
                           <Input
+                            inputMode="decimal"
+                            aria-invalid={invalidAmountInput || undefined}
                             value={isMax ? (quotedSendAmount ? formatBalance(quotedSendAmount) : 'MAX') : (inputMode === 'crypto' ? amount : fiatAmount)}
                             onChange={(e) => { if (isMax) { setIsMax(false); setMaxReserveMode('safe') } inputMode === 'crypto' ? handleCryptoChange(e.target.value) : handleFiatChange(e.target.value) }}
                             placeholder={inputMode === 'fiat' ? '0.00' : t("amountPlaceholder")}
@@ -4635,6 +4540,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                           ) : null
                         )}
                       </Flex>
+                      {invalidAmountInput && <Text fontSize="10px" color="kk.error" mt="1">{t('invalidAmount', { ns: 'send', defaultValue: 'Enter an ungrouped decimal amount, for example 1.5. Thousands separators are not accepted.' })}</Text>}
                       {exceedsBalance && (
                         <Text fontSize="10px" color="kk.error" mt="1" fontWeight="600">{t("insufficientBalance")}</Text>
                       )}
@@ -4835,7 +4741,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                         </Box>
                         <VStack gap="0" align="flex-start" minW="0">
                           <Text fontSize="xs" color="var(--gold)" fontWeight="700" letterSpacing="-0.005em">
-                            {t("findingBestRoute") || "Finding best route…"}
+                            {t("findingBestRoute") || uiText("Finding best route…")}
                           </Text>
                           <Text fontSize="10px" color="kk.textMuted" fontWeight="500">
                             {t("gettingQuote")}
@@ -4972,7 +4878,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                 cursor={busy || !fromAsset || !toAsset ? "default" : "pointer"}
                 opacity={busy || !fromAsset || !toAsset ? 0.4 : 1}
                 onClick={() => { if (!busy && fromAsset && toAsset) handleFlip() }}
-                aria-label="Swap direction"
+                aria-label={uiText("Swap direction")}
                 zIndex={2}
               >
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -4992,7 +4898,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                 <VStack align="stretch" gap="1" px="1" py="1">
                   <Flex align="center" justify="space-between" gap="2">
                     <Text fontSize="10px" color="kk.textMuted" fontWeight="600" textTransform="uppercase" letterSpacing="0.05em">
-                      {t("slippage") || "Slippage"}
+                      {t("slippage") || uiText("Slippage")}
                     </Text>
                     <HStack gap="1">
                     {SLIPPAGE_PRESETS_BPS.map(bps => {
@@ -5099,7 +5005,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                   }}
                   onClick={() => setPhase('review')}
                 >
-                  {t("reviewSwap") || "Review Swap"}
+                  {t("reviewSwap") || uiText("Review Swap")}
                 </Box>
               )}
 
@@ -5157,9 +5063,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
               flexShrink={0}
             >
               <Image src={shapeshiftLogo} alt="" w="11px" h="11px" />
-              <Text fontSize="9px" color="kk.textMuted" letterSpacing="0.04em">
-                Powered by ShapeShift API
-              </Text>
+              <Text fontSize="9px" color="kk.textMuted" letterSpacing="0.04em">{uiText("Powered by ShapeShift API")}</Text>
             </Box>}
           </Flex>
         )}
@@ -5194,7 +5098,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
           >
             {/* Dialog header */}
             <Flex px="5" py="3" borderBottom="1px solid" borderColor="kk.border" align="center" justify="space-between">
-              <Text fontSize="sm" fontWeight="700" color="kk.textPrimary">Swap Provider Status</Text>
+              <Text fontSize="sm" fontWeight="700" color="kk.textPrimary">{uiText("Swap Provider Status")}</Text>
               <HStack gap="2">
                 <Button size="xs" variant="ghost" color="kk.textMuted" px="2" minW="auto"
                   _hover={{ color: 'kk.textPrimary' }} onClick={refreshSwapHealth}
@@ -5202,9 +5106,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                   {healthRefreshing ? '↻' : '↺'}
                 </Button>
                 <Button size="xs" variant="ghost" color="kk.textMuted" px="1" minW="auto"
-                  _hover={{ color: 'kk.textPrimary' }} onClick={() => setHealthDialogOpen(false)}>
-                  &times;
-                </Button>
+                  _hover={{ color: 'kk.textPrimary' }} onClick={() => setHealthDialogOpen(false)}>{uiText("&times;")}</Button>
               </HStack>
             </Flex>
 
@@ -5240,13 +5142,12 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                     </Flex>
                     <Text fontSize="11px" color="kk.textMuted" lineHeight="1.5">{statusDesc}</Text>
                     {intg.checkScope === 'quote' && Number.isFinite(intg.checkedAt) && (
-                      <Text fontSize="10px" color="kk.textMuted" mt="1">Last quote check {new Date(intg.checkedAt!).toLocaleTimeString()}</Text>
+                      <Text fontSize="10px" color="kk.textMuted" mt="1">{uiText("Last quote check")}{" "}{new Date(intg.checkedAt!).toLocaleTimeString(getNumberLocale())}</Text>
                     )}
                     {intg.haltedPools && intg.haltedPools.length > 0 && (
                       <Box mt="2" p="2" bg="rgba(245,158,11,0.08)" borderRadius="8px"
                         border="1px solid rgba(245,158,11,0.2)">
-                        <Text fontSize="10px" fontWeight="600" color="#f59e0b" mb="1">
-                          Halted pools ({intg.haltedPools.length})
+                        <Text fontSize="10px" fontWeight="600" color="#f59e0b" mb="1">{uiText("Halted pools (")}{intg.haltedPools.length})
                         </Text>
                         <VStack gap="0.5" align="start">
                           {intg.haltedPools.map(caip => (
@@ -5263,7 +5164,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
               })}
               {!swapHealth && (
                 <Box py="6" textAlign="center">
-                  <Text fontSize="sm" color="kk.textMuted">Loading provider status…</Text>
+                  <Text fontSize="sm" color="kk.textMuted">{uiText("Loading provider status…")}</Text>
                 </Box>
               )}
             </VStack>
@@ -5271,9 +5172,9 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
             {/* Footer */}
             <Flex px="5" py="2.5" borderTop="1px solid" borderColor="kk.border" align="center" justify="space-between">
               <Text fontSize="10px" color="kk.textMuted">
-                {swapHealth?.error ? 'Status feed unavailable' : swapHealth ? `Updated ${new Date(swapHealth.fetchedAt).toLocaleTimeString()}` : 'Fetching…'}
+                {swapHealth?.error ? uiText("Status feed unavailable") : swapHealth ? `Updated ${new Date(swapHealth.fetchedAt).toLocaleTimeString(getNumberLocale())}` : uiText("Fetching…")}
               </Text>
-              <Text fontSize="10px" color="kk.textMuted">via Pioneer</Text>
+              <Text fontSize="10px" color="kk.textMuted">{uiText("via Pioneer")}</Text>
             </Flex>
           </Box>
         </Box>
@@ -5303,7 +5204,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                     </Box>
                     <Box flex="1">
                       <Text fontSize="15px" fontWeight="700" color="kk.textPrimary">{info.label}</Text>
-                      <Text fontSize="11px" color="kk.textMuted">Route details</Text>
+                      <Text fontSize="11px" color="kk.textMuted">{uiText("Route details")}</Text>
                     </Box>
                     <Box as="button" fontSize="20px" lineHeight="1" color="kk.textMuted" px="1"
                       cursor="pointer"
@@ -5328,8 +5229,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                     </ReviewRow>
                     <QuoteFeeRows fees={quote.fees} />
                     <ReviewRow label={t("slippageTolerance", "Slippage")}>
-                      {(slippageBps / 100).toFixed(2)}% max
-                    </ReviewRow>
+                      {(slippageBps / 100).toFixed(2)}{uiText("% max")}</ReviewRow>
                     <ReviewRow label={t("estimatedTime")}>
                       {formatTime(quote.estimatedTime)}
                     </ReviewRow>
@@ -5345,7 +5245,8 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
         open={pickerSide !== null}
         onClose={() => setPickerSide(null)}
         swappable={assets}
-        balances={balances}
+        balances={accountBalances}
+        sourceAccountLabel={signingAccount ? `EVM · ${uiText('Account')} #${effectiveEvmIndex} · ${signingAccount.address}` : undefined}
         balancesLoading={loadingBalances}
         customTokens={customTokens}
         excludeCaip={pickerSide === 'from' ? toAsset?.caip : fromAsset?.caip}

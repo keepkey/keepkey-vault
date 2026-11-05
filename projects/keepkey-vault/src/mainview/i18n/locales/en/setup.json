@@ -11,7 +11,10 @@
 		"complete": "Setup complete!",
 		"verifySeed": "Verify your recovery phrase",
 		"securityTips": "Security tips",
-		"updateDone": "Update complete"
+		"updateDone": "Update complete",
+		"createBriefing": "Before you create a wallet",
+		"secRandomness": "Verify device randomness",
+		"secDice": "Add your own dice rolls"
 	},
 	"visibleSteps": {
 		"bootloader": "Bootloader",
@@ -66,7 +69,12 @@
 		"bootloaderDetected": "Bootloader Mode Detected",
 		"deviceReadyForUpdate": "Your KeepKey is in bootloader mode and ready for update.",
 		"updateBootloaderTo": "Update Bootloader to v{{version}}",
-		"doNotHoldButton": "DO NOT hold down the button when reconnecting! Just plug it in normally. Holding the button will put the device back into bootloader mode."
+		"doNotHoldButton": "DO NOT hold down the button when reconnecting! Just plug it in normally. Holding the button will put the device back into bootloader mode.",
+		"followDeviceTitle": "Follow the instructions on your KeepKey",
+		"followDeviceBody": "Your KeepKey finishes the update on its own, then its screen asks you to unplug it and plug it back in. Do that when it asks, not before: unplugging while it is still updating can leave it unusable.",
+		"reconnectNoButton": "When you plug it back in, don't hold the button: that puts it back into bootloader mode.",
+		"manualReconnectIfAsked": "1. If your KeepKey is asking to be reconnected, unplug it",
+		"keepPluggedUntilAsked": "Keep your KeepKey plugged in until its screen asks you to unplug it. Unplugging before then can leave it unusable."
 	},
 	"firmware": {
 		"title": "Firmware Update",
@@ -128,7 +136,25 @@
 		"skipForNow": "Skip for now",
 		"backupConfirm": "I have my recovery phrase written down. If the update is interrupted, the wallet on this KeepKey is erased and can only be restored from it.",
 		"slowUpdate": "Taking a long time? Keep waiting and keep your KeepKey connected, and check its screen for a prompt to confirm. Unplugging before the update finishes erases the wallet on the device — you would need your recovery phrase to restore it.",
-		"skipIsSafe": "Skipping is safe. Nothing on your device changes — your wallet, funds and recovery phrase stay exactly as they are, and you can update any time."
+		"skipIsSafe": "Skipping is safe. Nothing on your device changes — your wallet, funds and recovery phrase stay exactly as they are, and you can update any time.",
+		"installWipe": {
+			"downgradeTitle": "This will wipe the device",
+			"lockTitle": "This will lock your Bitcoin-only wallet",
+			"unknownTitle": "This may wipe the device",
+			"noFirmwareTitle": "Any wallet on this KeepKey will be erased",
+			"wipeTitle": "This will wipe the device",
+			"crossBody": "This KeepKey runs {{from}} firmware v{{current}}. {{to}} firmware v{{target}} cannot read its wallet, so when it starts, your KeepKey erases all keys and settings. To use this wallet again you will restore it from your recovery phrase.",
+			"downgradeBody": "You are installing v{{target}} over v{{current}}. Older firmware cannot read the newer wallet storage, so when it starts, your KeepKey erases all keys and settings. To use this wallet again you will restore it from your recovery phrase.",
+			"lockBody": "This KeepKey runs Bitcoin-only firmware. {{variant}} firmware v{{target}} will refuse to open this wallet. It stays on the device, but you cannot use it until you reinstall the Bitcoin-only firmware, or wipe the device and restore it from your recovery phrase.",
+			"unknownBody": "In bootloader mode KeepKey Desktop cannot tell which firmware is installed on this KeepKey, so it cannot rule out that installing {{variant}} firmware erases all keys and settings (for example, over unofficial or newer firmware, or when switching between Bitcoin-only and multi-chain firmware). A new KeepKey has nothing to lose. If this one holds a wallet, have its recovery phrase ready.",
+			"noFirmwareBody": "This KeepKey has no firmware installed (for example, after an interrupted update). If it held a wallet, installing firmware erases it, and you will restore it from your recovery phrase.",
+			"unsignedBody": "This KeepKey runs firmware that is not an official KeepKey release. Installing official firmware over it erases all keys and settings.",
+			"lockAck": "I understand my wallet will be locked and I have my recovery phrase backed up",
+			"unknownAck": "I understand this may wipe my device and I have my recovery phrase backed up",
+			"wipeAck": "I understand this will wipe my device and I have my recovery phrase backed up"
+		},
+		"factoryFirmware": "Factory firmware",
+		"installVariantFirmware": "Install {{variant}} firmware v{{version}}"
 	},
 	"initChoose": {
 		"title": "Set Up Your Wallet",
@@ -150,7 +176,8 @@
 		"wipeConfirmTitle": "This device already has a wallet",
 		"wipeConfirmBody": "Creating a new wallet replaces the one on this device. Anything held by the current wallet is only recoverable from its recovery phrase. If you were just updating firmware, you do not need to do this — go back.",
 		"wipeConfirmCancel": "Go back",
-		"wipeConfirmProceed": "Replace wallet"
+		"wipeConfirmProceed": "Replace wallet",
+		"checking": "Reading your KeepKey…"
 	},
 	"initProgress": {
 		"creatingWallet": "Creating Wallet...",
@@ -162,9 +189,15 @@
 		"failedToCreate": "Failed to create wallet",
 		"failedToRecover": "Failed to recover wallet",
 		"writeDownWarning": "Write down every word!",
-		"writeDownDetail": "Your recovery phrase is showing on the device screen. Write each word on paper. This is your ONLY backup - you will NOT see these words again.",
+		"writeDownDetail": "When your recovery phrase appears on the device screen, write every word on paper before continuing. Keep the phrase safe; you need it to recover your wallet.",
 		"deviceLost": "Device disconnected. Plug it back in to continue, or go back to try again.",
-		"goBack": "Go Back"
+		"goBack": "Go Back",
+		"pinMismatchTitle": "The two PINs didn't match",
+		"createCancelledTitle": "Setup stopped on the device",
+		"pinMismatchDetail": "You enter your new PIN twice on the scrambled keypad. The second entry is deliberate: it proves you read the cipher correctly, so you cannot lock yourself in with a PIN you never intended. The two entries came out different, so nothing was saved — no PIN, no wallet.",
+		"createCancelledDetail": "The device reported the action was cancelled before setup finished. Nothing was saved — no PIN, no wallet.",
+		"tryPinAgain": "Try again",
+		"backToChoose": "Back"
 	},
 	"initLabel": {
 		"walletCreated": "Wallet Created!",
@@ -172,7 +205,8 @@
 		"giveAName": "Give your KeepKey a friendly name to identify it easily",
 		"placeholder": "My KeepKey",
 		"setDeviceName": "Set Device Name",
-		"skipForNow": "Skip for Now"
+		"skipForNow": "Skip for Now",
+		"writeDownReminder": "Make sure your recovery phrase is written on paper before you continue — you will not be shown those words again."
 	},
 	"complete": {
 		"walletCreated": "Wallet Created!",
@@ -255,5 +289,59 @@
 		"reassure": "Your update finished and your wallet is still on your KeepKey — you do not need to restore anything. An update only keeps your recovery phrase when it completes, so always have your recovery phrase written down before updating and never unplug your KeepKey during an update.",
 		"empty": "Your KeepKey has no wallet on it. If it held one before this update, restore it with your recovery phrase.",
 		"continue": "Continue"
+	},
+	"coinMode": {
+		"btcTitle": "Bitcoin-only",
+		"btcLine1": "Bitcoin only",
+		"btcLine2": "Smaller code, smaller attack surface",
+		"btcLine3": "Fewer moving parts",
+		"multiTitle": "Multi-chain",
+		"multiLine1": "Bitcoin, Ethereum, Solana and many more",
+		"multiLine2": "Swaps and dapps",
+		"pageTitle": "Choose your KeepKey firmware",
+		"pageSubtitle": "It decides which coins this KeepKey can use.",
+		"unknownInstalled": "KeepKey Desktop cannot tell which firmware is on this KeepKey. Choose the one you want installed.",
+		"pageWarning": "One-way: this KeepKey will only hold Bitcoin. Going back to Multi-chain means wiping it and restoring from your recovery phrase.",
+		"pageExistingWallet": "Your other coins stay safe on your recovery phrase.",
+		"chooseFirst": "Choose Bitcoin-only or Multi-chain",
+		"continueWith": "Continue with {{variant}}",
+		"installingBtc": "Bitcoin-only firmware",
+		"installingMulti": "Multi-chain firmware",
+		"change": "Change",
+		"choose": "Choose",
+		"goBitcoinOnly": "Go Bitcoin-only"
+	},
+	"security": {
+		"randomness": {
+			"title": "Verify device randomness",
+			"lead": "Every wallet begins with randomness. If the generator is broken, every key it creates can be predicted. This audit checks that it behaves like real randomness — before you trust it with money.",
+			"can": "Detects a generator that is stuck, repeating, or visibly biased.",
+			"cannot": "Cannot prove the randomness is unpredictable — no output test can.",
+			"more": "For more assurance, add your own dice on the next step.",
+			"action": "Run the audit",
+			"skip": "Skip — trust the device",
+			"failedTitle": "Do not use this device",
+			"failedLead": "The randomness audit found output this device should never produce. Every key it generates could be predictable, so wallet creation is blocked. Re-run the audit to confirm, and contact support@keepkey.com if it fails again.",
+			"rerun": "Run the audit again"
+		},
+		"dice": {
+			"title": "Add your own dice rolls",
+			"lead": "Roll a physical die and enter the results on the device itself. They are mixed into the seed alongside the device's own randomness, so the wallet does not depend on the generator alone.",
+			"can2": "Even a faulty generator cannot make the seed guessable on its own.",
+			"cannot": "Takes a few minutes. Skip it and the device supplies all the randomness.",
+			"action": "Use my dice",
+			"skip": "Skip — device randomness only",
+			"can": "You enter {{rollCount}} rolls with the device button — they never touch this computer."
+		}
+	},
+	"btcOnlyLock": {
+		"title": "A Bitcoin-only wallet is still on this KeepKey",
+		"hidden": "This KeepKey still holds the Bitcoin-only wallet it had before multi-chain firmware was installed. Multi-chain firmware keeps that wallet hidden and locked, so a new wallet can’t be set up over it.",
+		"lastChance": "This is your last chance to get it back from this device: reinstall Bitcoin-only firmware and the wallet unlocks again.",
+		"wipeMeans": "Wiping and continuing with multi-chain setup permanently erases the Bitcoin-only wallet from this KeepKey. After that, its paper recovery phrase is the only way to restore it, and keeping that backup safe is up to you.",
+		"acknowledge": "I understand the Bitcoin-only wallet will be erased from this KeepKey, and I have its paper recovery phrase.",
+		"reinstall": "Reinstall Bitcoin-only firmware",
+		"wiping": "Confirm on your KeepKey…",
+		"wipe": "Wipe and continue"
 	}
 }

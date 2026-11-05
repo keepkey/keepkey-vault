@@ -1,3 +1,4 @@
+import { useUiTranslation, firmwareProgressText } from "../i18n/ui"
 import { looksLikeMultisigPolicy, MULTISIG_POLICY_EVENT } from "../../shared/multisig-policy"
 import { useState, useEffect, useCallback, useRef } from "react"
 import { Box, Flex, Text, Button, Spinner } from "@chakra-ui/react"
@@ -38,6 +39,8 @@ type FlashPhase = "idle" | "analyzing" | "confirm" | "flashing" | "complete" | "
 const IS_EMU_PLATFORM = IS_MAC || IS_WINDOWS
 
 export function FirmwareDropZone() {
+  const uiText = useUiTranslation()
+
 	const [isDragging, setIsDragging] = useState(false)
 	const [phase, setPhase] = useState<FlashPhase>("idle")
 	const [analysis, setAnalysis] = useState<FirmwareAnalysis | null>(null)
@@ -292,15 +295,11 @@ export function FirmwareDropZone() {
 						<polyline points="7 10 12 15 17 10" />
 						<line x1="12" y1="15" x2="12" y2="3" />
 					</svg>
-					<Text fontSize="xl" fontWeight="700" color="kk.gold">
-						Drop File
-					</Text>
+					<Text fontSize="xl" fontWeight="700" color="kk.gold">{uiText("Drop File")}</Text>
 					<Text fontSize="sm" color="kk.textSecondary" textAlign="center">
 						{IS_EMU_PLATFORM
-							? <>Drop a Bitcoin PSBT to review and sign it, a <Text as="span" fontFamily="mono">.bin</Text> firmware to flash your KeepKey,
-							   or a <Text as="span" fontFamily="mono">{IS_WINDOWS ? '.dll' : '.dylib'}</Text> to install an emulator.</>
-							: <>Drop a Bitcoin PSBT to review and sign it, or a <Text as="span" fontFamily="mono">.bin</Text> firmware file to flash your KeepKey.
-							   Signed and unsigned firmware supported.</>}
+							? <>{uiText("Drop a Bitcoin PSBT to review and sign it, a")}{" "}<Text as="span" fontFamily="mono">{uiText(".bin")}</Text>{" "}{uiText("firmware to flash your KeepKey, or a")}{" "}<Text as="span" fontFamily="mono">{IS_WINDOWS ? uiText(".dll") : uiText(".dylib")}</Text>{" "}{uiText("to install an emulator.")}</>
+							: <>{uiText("Drop a Bitcoin PSBT to review and sign it, or a")}{" "}<Text as="span" fontFamily="mono">{uiText(".bin")}</Text>{" "}{uiText("firmware file to flash your KeepKey. Signed and unsigned firmware supported.")}</>}
 					</Text>
 				</Flex>
 			</Box>
@@ -333,14 +332,12 @@ export function FirmwareDropZone() {
 				zIndex={Z.overlay + 101}
 				role="dialog"
 				aria-modal="true"
-				aria-label="Firmware Flash"
+				aria-label={uiText("Firmware Flash")}
 			>
 				{/* ── Analyzing ─────────────────────────────── */}
 				{phase === "analyzing" && (
 					<Box p="8" textAlign="center">
-						<Text fontSize="lg" fontWeight="600" color="kk.textPrimary" mb="2">
-							Analyzing Firmware...
-						</Text>
+						<Text fontSize="lg" fontWeight="600" color="kk.textPrimary" mb="2">{uiText("Analyzing Firmware...")}</Text>
 						<Text fontSize="sm" color="kk.textSecondary">{fileName}</Text>
 					</Box>
 				)}
@@ -348,20 +345,14 @@ export function FirmwareDropZone() {
 				{/* ── Emulator dylib install (macOS-only dev feature) ─ */}
 				{phase === "emu-installing" && (
 					<Box p="8" textAlign="center">
-						<Text fontSize="lg" fontWeight="600" color="kk.textPrimary" mb="2">
-							Installing Emulator...
-						</Text>
+						<Text fontSize="lg" fontWeight="600" color="kk.textPrimary" mb="2">{uiText("Installing Emulator...")}</Text>
 						<Text fontSize="sm" color="kk.textSecondary">{fileName}</Text>
 					</Box>
 				)}
 				{phase === "emu-starting" && (
 					<Box p="8" textAlign="center">
-						<Text fontSize="lg" fontWeight="600" color="kk.textPrimary" mb="2">
-							Starting Emulator...
-						</Text>
-						<Text fontSize="sm" color="kk.textSecondary">
-							Pairing with Keychain and booting your first emulator wallet.
-						</Text>
+						<Text fontSize="lg" fontWeight="600" color="kk.textPrimary" mb="2">{uiText("Starting Emulator...")}</Text>
+						<Text fontSize="sm" color="kk.textSecondary">{uiText("Pairing with Keychain and booting your first emulator wallet.")}</Text>
 					</Box>
 				)}
 				{phase === "emu-installed" && (
@@ -370,13 +361,8 @@ export function FirmwareDropZone() {
 							<path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
 							<polyline points="22 4 12 14.01 9 11.01" />
 						</svg>
-						<Text fontSize="lg" fontWeight="700" color="var(--teal)" mb="2">
-							Emulator Updated
-						</Text>
-						<Text fontSize="sm" color="kk.textSecondary" mb="4">
-							New libkkemu installed. Your existing emulator wallets are unchanged —
-							start any of them from the device grid.
-						</Text>
+						<Text fontSize="lg" fontWeight="700" color="var(--teal)" mb="2">{uiText("Emulator Updated")}</Text>
+						<Text fontSize="sm" color="kk.textSecondary" mb="4">{uiText("New libkkemu installed. Your existing emulator wallets are unchanged — start any of them from the device grid.")}</Text>
 						<Button
 							size="sm"
 							bg="kk.gold"
@@ -385,9 +371,7 @@ export function FirmwareDropZone() {
 							px="4" py="2"
 							_hover={{ bg: "kk.goldHover" }}
 							onClick={handleDismiss}
-						>
-							Done
-						</Button>
+						>{uiText("Done")}</Button>
 					</Box>
 				)}
 
@@ -402,8 +386,8 @@ export function FirmwareDropZone() {
 									<path d="M16 7V5a4 4 0 0 0-8 0v2" />
 								</svg>
 								<Text fontSize="md" fontWeight="700" color="kk.textPrimary">
-									{analysis.imageKind === "bootloader-updater" ? "Update Bootloader"
-										: analysis.imageKind === "firmware" ? "Flash Firmware" : "Not Flashable"}
+									{analysis.imageKind === "bootloader-updater" ? uiText("Update Bootloader")
+										: analysis.imageKind === "firmware" ? uiText("Flash Firmware") : uiText("Not Flashable")}
 								</Text>
 							</Flex>
 							<Text fontSize="xs" color="kk.textSecondary" fontFamily="mono">
@@ -450,12 +434,12 @@ export function FirmwareDropZone() {
 											bg="rgba(168,239,210,0.12)"
 											color="var(--teal-2)"
 										>
-											{analysis.imageKind === "bootloader-updater" ? "BOOTLOADER UPDATER"
-												: analysis.imageKind === "raw-bootloader" ? "RAW BOOTLOADER" : "UNKNOWN IMAGE"}
+											{analysis.imageKind === "bootloader-updater" ? uiText("BOOTLOADER UPDATER")
+												: analysis.imageKind === "raw-bootloader" ? uiText("RAW BOOTLOADER") : uiText("UNKNOWN IMAGE")}
 										</Box>
 									)}
 									{analysis.hasKpkyHeader && (
-										<Text fontSize="xs" color="kk.textSecondary">KPKY header detected</Text>
+										<Text fontSize="xs" color="kk.textSecondary">{uiText("KPKY header detected")}</Text>
 									)}
 								</Flex>
 
@@ -471,7 +455,7 @@ export function FirmwareDropZone() {
 									{analysis.isBootloaderMode ? (
 										<>
 											<Flex justify="space-between" mb="2">
-												<Text fontSize="xs" color="kk.textSecondary">Device status</Text>
+												<Text fontSize="xs" color="kk.textSecondary">{uiText("Device status")}</Text>
 												<Flex align="center" gap="1.5">
 													<Box px="1.5" py="0.5" borderRadius="sm" bg="rgba(168,239,210,0.12)" fontSize="xs" fontWeight="700" color="var(--teal-2)">
 														BOOTLOADER
@@ -487,16 +471,16 @@ export function FirmwareDropZone() {
 											    release table names it when it's a known build. */}
 											{analysis.currentFirmwareVersion && (
 												<Flex justify="space-between" mb="2">
-													<Text fontSize="xs" color="kk.textSecondary">Installed firmware</Text>
+													<Text fontSize="xs" color="kk.textSecondary">{uiText("Installed firmware")}</Text>
 													<Flex align="center" gap="1.5">
 														<Text fontSize="sm" fontWeight="600" color="kk.textPrimary" fontFamily="mono">
 															v{analysis.currentFirmwareVersion}
 														</Text>
 														{analysis.currentFirmwareVerified === true && (
-															<Box as="span" color="var(--teal)" fontSize="xs">(official)</Box>
+															<Box as="span" color="var(--teal)" fontSize="xs">{uiText("(official)")}</Box>
 														)}
 														{analysis.currentFirmwareVerified === false && (
-															<Box as="span" color="var(--gold)" fontSize="xs">(unofficial)</Box>
+															<Box as="span" color="var(--gold)" fontSize="xs">{uiText("(unofficial)")}</Box>
 														)}
 													</Flex>
 												</Flex>
@@ -504,23 +488,23 @@ export function FirmwareDropZone() {
 										</>
 									) : (
 										<Flex justify="space-between" mb="2">
-											<Text fontSize="xs" color="kk.textSecondary">Device firmware</Text>
+											<Text fontSize="xs" color="kk.textSecondary">{uiText("Device firmware")}</Text>
 											<Flex align="center" gap="1.5">
 												<Text fontSize="sm" fontWeight="600" color="kk.textPrimary" fontFamily="mono">
-													v{analysis.currentFirmwareVersion || "Unknown"}
+													v{analysis.currentFirmwareVersion || uiText("Unknown")}
 												</Text>
 												{analysis.currentFirmwareVerified === true && (
-													<Box as="span" color="var(--teal)" fontSize="xs">(verified)</Box>
+													<Box as="span" color="var(--teal)" fontSize="xs">{uiText("(verified)")}</Box>
 												)}
 												{analysis.currentFirmwareVerified === false && (
-													<Box as="span" color="var(--gold)" fontSize="xs">(unverified)</Box>
+													<Box as="span" color="var(--gold)" fontSize="xs">{uiText("(unverified)")}</Box>
 												)}
 											</Flex>
 										</Flex>
 									)}
 									<Flex justify="space-between" align="center">
 										<Text fontSize="xs" color="kk.textSecondary">
-											{analysis.imageKind === "firmware" ? "Flashing to" : "Bootloader in image"}
+											{analysis.imageKind === "firmware" ? uiText("Flashing to") : uiText("Bootloader in image")}
 										</Text>
 										<Text fontSize="sm" fontWeight="600" color="kk.gold" fontFamily="mono">
 											v{analysis.detectedVersion || "?.?.?"}
@@ -528,39 +512,35 @@ export function FirmwareDropZone() {
 									</Flex>
 									{analysis.embeddedBootloader && (
 										<Flex justify="space-between" align="center" mt="2">
-											<Text fontSize="xs" color="kk.textSecondary">Bootloader hash</Text>
+											<Text fontSize="xs" color="kk.textSecondary">{uiText("Bootloader hash")}</Text>
 											<Flex align="center" gap="1.5">
 												<Text fontSize="xs" color="kk.textSecondary" fontFamily="mono">
 													{analysis.embeddedBootloader.hash.slice(0, 16)}...
 												</Text>
 												<Box as="span" fontSize="xs" fontWeight="700"
 													color={analysis.embeddedBootloader.official ? "var(--teal)" : "var(--rose)"}>
-													{analysis.embeddedBootloader.official ? "official release" : "NOT an official release"}
+													{analysis.embeddedBootloader.official ? uiText("official release") : uiText("NOT an official release")}
 												</Box>
 											</Flex>
 										</Flex>
 									)}
 									{analysis.isSameVersion && (
-										<Text fontSize="xs" color="kk.textSecondary" mt="1">
-											Same version as currently installed
-										</Text>
+										<Text fontSize="xs" color="kk.textSecondary" mt="1">{uiText("Same version as currently installed")}</Text>
 									)}
 									{analysis.isDowngrade && (
-										<Text fontSize="xs" color="var(--gold)" mt="1">
-											Downgrade — older than current version
-										</Text>
+										<Text fontSize="xs" color="var(--gold)" mt="1">{uiText("Downgrade — older than current version")}</Text>
 									)}
 								</Box>
 
 								{/* File info */}
 								<Flex justify="space-between" px="1">
-									<Text fontSize="xs" color="kk.textSecondary">Size</Text>
+									<Text fontSize="xs" color="kk.textSecondary">{uiText("Size")}</Text>
 									<Text fontSize="xs" color="kk.textSecondary" fontFamily="mono">
 										{(analysis.fileSize / 1024).toFixed(1)} KB
 									</Text>
 								</Flex>
 								<Flex justify="space-between" px="1">
-									<Text fontSize="xs" color="kk.textSecondary">Payload hash</Text>
+									<Text fontSize="xs" color="kk.textSecondary">{uiText("Payload hash")}</Text>
 									<Text fontSize="xs" color="kk.textSecondary" fontFamily="mono" maxW="200px" overflow="hidden" textOverflow="ellipsis">
 										{analysis.payloadHash.slice(0, 16)}...
 									</Text>
@@ -595,56 +575,34 @@ export function FirmwareDropZone() {
 										<line x1="12" y1="17" x2="12.01" y2="17" />
 									</svg>
 									<Text fontSize="sm" fontWeight="800" color="var(--rose)" textTransform="uppercase" letterSpacing="0.05em">
-										{analysis.wipeReason === "downgrade" ? "This downgrade will wipe the device"
-											: analysis.wipeReason === "bitcoin-only-lock" ? "This will lock your Bitcoin-only wallet"
-											: analysis.wipeReason === "unknown-installed" ? "This may wipe the device"
-											: analysis.wipeReason === "no-firmware" ? "Any wallet on this KeepKey will be erased"
-											: "THIS WILL WIPE THE DEVICE"}
+										{analysis.wipeReason === "downgrade" ? uiText("This downgrade will wipe the device")
+											: analysis.wipeReason === "bitcoin-only-lock" ? uiText("This will lock your Bitcoin-only wallet")
+											: analysis.wipeReason === "unknown-installed" ? uiText("This may wipe the device")
+											: analysis.wipeReason === "no-firmware" ? uiText("Any wallet on this KeepKey will be erased")
+											: uiText("THIS WILL WIPE THE DEVICE")}
 									</Text>
 								</Flex>
 								{analysis.wipeReason === "bitcoin-only-lock" ? (
-								<Text fontSize="sm" color="var(--rose)" lineHeight="1.6" mb="3">
-									This KeepKey runs <Text as="span" fontWeight="700">Bitcoin-only</Text> firmware
-									{analysis.currentFirmwareVersion ? <> (v{analysis.currentFirmwareVersion})</> : null}. {analysis.isBitcoinOnly
-										? <>An older Bitcoin-only version</>
-										: <>Multi-coin firmware</>} will <Text as="span" fontWeight="700">refuse to open this wallet</Text>.
-									It stays on the device, but you cannot use it until you reinstall the Bitcoin-only firmware
-									{analysis.currentFirmwareVersion ? <> v{analysis.currentFirmwareVersion} or newer</> : null}, or wipe the device and restore it from your recovery phrase.
-								</Text>
+								<Text fontSize="sm" color="var(--rose)" lineHeight="1.6" mb="3">{uiText("This KeepKey runs")}{" "}<Text as="span" fontWeight="700">{uiText("Bitcoin-only")}</Text>{" "}{uiText("firmware")}{analysis.currentFirmwareVersion ? <> (v{analysis.currentFirmwareVersion})</> : null}. {analysis.isBitcoinOnly
+										? <>{uiText("An older Bitcoin-only version")}</>
+										: <>{uiText("Multi-coin firmware")}</>}{" "}{uiText("will")}{" "}<Text as="span" fontWeight="700">{uiText("refuse to open this wallet")}</Text>{uiText(". It stays on the device, but you cannot use it until you reinstall the Bitcoin-only firmware")}{analysis.currentFirmwareVersion ? <> v{analysis.currentFirmwareVersion}{" "}{uiText("or newer")}</> : null}{uiText(", or wipe the device and restore it from your recovery phrase.")}</Text>
 								) : analysis.wipeReason === "unknown-installed" ? (
-								<Text fontSize="sm" color="var(--rose)" lineHeight="1.6" mb="3">
-									KeepKey Desktop cannot tell which firmware is installed on this KeepKey, so it cannot rule out
-									that this image <Text as="span" fontWeight="700">erases all keys and settings</Text> or locks the wallet
-									(for example, an older version, or switching between Bitcoin-only and multi-coin firmware).
-									To let it check, start the KeepKey normally once (plug it in without holding the button) so KeepKey Desktop can read it, then return to bootloader mode and open this file again.
-								</Text>
+								<Text fontSize="sm" color="var(--rose)" lineHeight="1.6" mb="3">{uiText("KeepKey Desktop cannot tell which firmware is installed on this KeepKey, so it cannot rule out that this image")}{" "}<Text as="span" fontWeight="700">{uiText("erases all keys and settings")}</Text>{" "}{uiText("or locks the wallet (for example, an older version, or switching between Bitcoin-only and multi-coin firmware). To let it check, start the KeepKey normally once (plug it in without holding the button) so KeepKey Desktop can read it, then return to bootloader mode and open this file again.")}</Text>
 								) : analysis.wipeReason === "no-firmware" ? (
-								<Text fontSize="sm" color="var(--rose)" lineHeight="1.6" mb="3">
-									This KeepKey has no firmware installed (for example, after an interrupted update). If it held a
-									wallet, flashing firmware <Text as="span" fontWeight="700">erases all keys and settings</Text>, and you will
-									restore it from your recovery phrase.
-								</Text>
+								<Text fontSize="sm" color="var(--rose)" lineHeight="1.6" mb="3">{uiText("This KeepKey has no firmware installed (for example, after an interrupted update). If it held a wallet, flashing firmware")}{" "}<Text as="span" fontWeight="700">{uiText("erases all keys and settings")}</Text>{uiText(", and you will restore it from your recovery phrase.")}</Text>
 								) : analysis.wipeReason === "downgrade" ? (
-								<Text fontSize="sm" color="var(--rose)" lineHeight="1.6" mb="3">
-									You are installing <Text as="span" fontWeight="700">v{analysis.detectedVersion}</Text> over{" "}
-									<Text as="span" fontWeight="700">v{analysis.currentFirmwareVersion}</Text>. Older firmware cannot read the
-									newer wallet storage, so when it starts, your KeepKey <Text as="span" fontWeight="700">erases all keys and
-									settings</Text>. To use this wallet again you will restore it from your recovery phrase.
-								</Text>
+								<Text fontSize="sm" color="var(--rose)" lineHeight="1.6" mb="3">{uiText("You are installing")}{" "}<Text as="span" fontWeight="700">v{analysis.detectedVersion}</Text>{" "}{uiText("over")}{" "}
+									<Text as="span" fontWeight="700">v{analysis.currentFirmwareVersion}</Text>{uiText(". Older firmware cannot read the newer wallet storage, so when it starts, your KeepKey")}{" "}<Text as="span" fontWeight="700">{uiText("erases all keys and settings")}</Text>{uiText(". To use this wallet again you will restore it from your recovery phrase.")}</Text>
 								) : (
-								<Text fontSize="sm" color="var(--rose)" lineHeight="1.6" mb="3">
-									You are crossing the <Text as="span" fontWeight="700">signed/unsigned firmware boundary</Text>.
+								<Text fontSize="sm" color="var(--rose)" lineHeight="1.6" mb="3">{uiText("You are crossing the")}{" "}<Text as="span" fontWeight="700">{uiText("signed/unsigned firmware boundary")}</Text>.
 									{analysis.isSigned
-										? <> Flashing <Text as="span" fontWeight="700">signed (official) firmware</Text> onto a device running <Text as="span" fontWeight="700">unsigned (developer) firmware</Text>.</>
-										: <> Flashing <Text as="span" fontWeight="700">unsigned firmware</Text> onto a device running <Text as="span" fontWeight="700">signed (official) firmware</Text>.</>
+										? <>{" "}{uiText("Flashing")}{" "}<Text as="span" fontWeight="700">{uiText("signed (official) firmware")}</Text>{" "}{uiText("onto a device running")}{" "}<Text as="span" fontWeight="700">{uiText("unsigned (developer) firmware")}</Text>.</>
+										: <>{" "}{uiText("Flashing")}{" "}<Text as="span" fontWeight="700">{uiText("unsigned firmware")}</Text>{" "}{uiText("onto a device running")}{" "}<Text as="span" fontWeight="700">{uiText("signed (official) firmware")}</Text>.</>
 									}
-									{' '}This transition requires a full device wipe — <Text as="span" fontWeight="700">all keys and
-									settings will be permanently erased</Text>.
+									{' '}{uiText("This transition requires a full device wipe —")}{" "}<Text as="span" fontWeight="700">{uiText("all keys and settings will be permanently erased")}</Text>.
 								</Text>
 								)}
-								<Text fontSize="sm" color="var(--rose)" lineHeight="1.6" mb="3">
-									Make sure you have your recovery seed backed up before proceeding.
-								</Text>
+								<Text fontSize="sm" color="var(--rose)" lineHeight="1.6" mb="3">{uiText("Make sure you have your recovery seed backed up before proceeding.")}</Text>
 								<Flex
 									as="label"
 									align="center"
@@ -672,10 +630,10 @@ export function FirmwareDropZone() {
 									</Box>
 									<Text fontSize="xs" fontWeight="600" color="var(--rose)">
 										{analysis.wipeReason === "bitcoin-only-lock"
-											? "I understand my wallet will be locked and I have my seed backed up"
+											? uiText("I understand my wallet will be locked and I have my seed backed up")
 											: analysis.wipeReason === "unknown-installed" || analysis.wipeReason === "no-firmware"
-												? "I understand this may wipe my device and I have my seed backed up"
-												: "I understand this will wipe my device and I have my seed backed up"}
+												? uiText("I understand this may wipe my device and I have my seed backed up")
+												: uiText("I understand this will wipe my device and I have my seed backed up")}
 									</Text>
 								</Flex>
 							</Box>
@@ -685,12 +643,12 @@ export function FirmwareDropZone() {
 						{(analysis.imageKind === "raw-bootloader" || analysis.imageKind === "unknown") && (
 							<Box mx="6" mb="3" p="4" bg="rgba(229,62,62,0.1)" border="1px solid" borderColor="var(--rose)" borderRadius="lg">
 								<Text fontSize="sm" fontWeight="700" color="var(--rose)" mb="2">
-									{analysis.imageKind === "raw-bootloader" ? "Raw bootloader image" : "Unrecognized image"}
+									{analysis.imageKind === "raw-bootloader" ? uiText("Raw bootloader image") : uiText("Unrecognized image")}
 								</Text>
 								<Text fontSize="sm" color="kk.textSecondary" lineHeight="1.6">
 									{analysis.imageKind === "raw-bootloader"
-										? "The firmware updater would write this into the firmware area, not the bootloader. Bootloaders are installed with their bootloader updater (blupdater.bin)."
-										: "This is not a KeepKey firmware image or bootloader updater, so it cannot be flashed."}
+										? uiText("The firmware updater would write this into the firmware area, not the bootloader. Bootloaders are installed with their bootloader updater (blupdater.bin).")
+										: uiText("This is not a KeepKey firmware image or bootloader updater, so it cannot be flashed.")}
 								</Text>
 							</Box>
 						)}
@@ -706,15 +664,11 @@ export function FirmwareDropZone() {
 							>
 								<Text fontSize="sm" fontWeight="700" mb="2"
 									color={analysis.embeddedBootloader?.official ? "var(--gold)" : "var(--rose)"}>
-									{analysis.embeddedBootloader?.official ? "Bootloader update" : "Unofficial bootloader"}
+									{analysis.embeddedBootloader?.official ? uiText("Bootloader update") : uiText("Unofficial bootloader")}
 								</Text>
-								<Text fontSize="sm" color="kk.textSecondary" lineHeight="1.6" mb="3">
-									This is not firmware. It runs once and replaces the device's bootloader
-									{analysis.embeddedBootloader?.version ? ` with v${analysis.embeddedBootloader.version}` : ""}, then
-									asks you to reconnect so you can install firmware.
-									{analysis.embeddedBootloader?.official
-										? " The bootloader is an official KeepKey release."
-										: " This bootloader is not an official KeepKey release: afterwards the device trusts only its signing keys, so official firmware will show as unofficial. Vault cannot restore the official bootloader. Use only on a test device."}
+								<Text fontSize="sm" color="kk.textSecondary" lineHeight="1.6" mb="3">{uiText("This is not firmware. It runs once and replaces the device's bootloader")}{analysis.embeddedBootloader?.version ? ` with v${analysis.embeddedBootloader.version}` : ""}{uiText(", then asks you to reconnect so you can install firmware.")}{analysis.embeddedBootloader?.official
+										? uiText(" The bootloader is an official KeepKey release.")
+										: uiText(" This bootloader is not an official KeepKey release: afterwards the device trusts only its signing keys, so official firmware will show as unofficial. Vault cannot restore the official bootloader. Use only on a test device.")}
 								</Text>
 								<Flex as="label" align="center" gap="2" cursor="pointer" userSelect="none"
 									onClick={() => setWarningAcknowledged(!warningAcknowledged)}>
@@ -728,9 +682,7 @@ export function FirmwareDropZone() {
 											</svg>
 										)}
 									</Box>
-									<Text fontSize="xs" fontWeight="600" color="kk.textSecondary">
-										I understand this permanently replaces the bootloader
-									</Text>
+									<Text fontSize="xs" fontWeight="600" color="kk.textSecondary">{uiText("I understand this permanently replaces the bootloader")}</Text>
 								</Flex>
 							</Box>
 						)}
@@ -750,14 +702,9 @@ export function FirmwareDropZone() {
 										<line x1="12" y1="9" x2="12" y2="13" />
 										<line x1="12" y1="17" x2="12.01" y2="17" />
 									</svg>
-									<Text fontSize="sm" fontWeight="700" color="var(--gold)">
-										Developer Firmware
-									</Text>
+									<Text fontSize="sm" fontWeight="700" color="var(--gold)">{uiText("Developer Firmware")}</Text>
 								</Flex>
-								<Text fontSize="sm" color="var(--gold-2)" lineHeight="1.6" mb="3">
-									This is unsigned firmware intended for developers only.
-									It may result in device state loss or unexpected behavior.
-								</Text>
+								<Text fontSize="sm" color="var(--gold-2)" lineHeight="1.6" mb="3">{uiText("This is unsigned firmware intended for developers only. It may result in device state loss or unexpected behavior.")}</Text>
 								<Flex
 									as="label"
 									align="center"
@@ -783,9 +730,7 @@ export function FirmwareDropZone() {
 											</svg>
 										)}
 									</Box>
-									<Text fontSize="xs" fontWeight="600" color="var(--gold-2)">
-										I understand this is developer firmware
-									</Text>
+									<Text fontSize="xs" fontWeight="600" color="var(--gold-2)">{uiText("I understand this is developer firmware")}</Text>
 								</Flex>
 							</Box>
 						)}
@@ -818,9 +763,7 @@ export function FirmwareDropZone() {
 										</svg>
 									)}
 								</Box>
-								<Text fontSize="xs" fontWeight="600" color="kk.textPrimary">
-									I have my recovery phrase written down. If the flash is interrupted, the wallet on this KeepKey is erased and can only be restored from it.
-								</Text>
+								<Text fontSize="xs" fontWeight="600" color="kk.textPrimary">{uiText("I have my recovery phrase written down. If the flash is interrupted, the wallet on this KeepKey is erased and can only be restored from it.")}</Text>
 							</Flex>
 						)}
 
@@ -833,25 +776,18 @@ export function FirmwareDropZone() {
 								borderColor="kk.border"
 								borderRadius="lg"
 							>
-								<Text fontSize="sm" fontWeight="700" color="kk.textPrimary" mb="1">
-									Put your KeepKey in bootloader mode
-								</Text>
-								<Text fontSize="xs" color="kk.textSecondary" mb="3">
-									Firmware can only be flashed from bootloader mode. Your device
-									isn't in bootloader mode yet — follow these steps:
-								</Text>
+								<Text fontSize="sm" fontWeight="700" color="kk.textPrimary" mb="1">{uiText("Put your KeepKey in bootloader mode")}</Text>
+								<Text fontSize="xs" color="kk.textSecondary" mb="3">{uiText("Firmware can only be flashed from bootloader mode. Your device isn't in bootloader mode yet — follow these steps:")}</Text>
 								<Box maxW="90px" mx="auto" mb="3" opacity={0.85} dangerouslySetInnerHTML={{ __html: holdAndConnectRaw }} sx={{ '& svg': { width: '100%', height: '100%' } }} />
 								<Box as="ol" pl="4" style={{ listStyle: "decimal" }}>
-									<Text as="li" fontSize="xs" color="kk.textSecondary">Unplug your KeepKey</Text>
-									<Text as="li" fontSize="xs" color="kk.textSecondary">Hold down the button on the device</Text>
-									<Text as="li" fontSize="xs" color="kk.textSecondary">While holding, plug in the USB cable</Text>
-									<Text as="li" fontSize="xs" color="kk.textSecondary">Release when the bootloader screen appears</Text>
+									<Text as="li" fontSize="xs" color="kk.textSecondary">{uiText("Unplug your KeepKey")}</Text>
+									<Text as="li" fontSize="xs" color="kk.textSecondary">{uiText("Hold down the button on the device")}</Text>
+									<Text as="li" fontSize="xs" color="kk.textSecondary">{uiText("While holding, plug in the USB cable")}</Text>
+									<Text as="li" fontSize="xs" color="kk.textSecondary">{uiText("Release when the bootloader screen appears")}</Text>
 								</Box>
 								<Flex align="center" gap="2" mt="3">
 									<Spinner size="xs" color="var(--teal)" />
-									<Text fontSize="xs" color="var(--teal)">
-										Waiting for your device to enter bootloader mode…
-									</Text>
+									<Text fontSize="xs" color="var(--teal)">{uiText("Waiting for your device to enter bootloader mode…")}</Text>
 								</Flex>
 							</Box>
 						)}
@@ -871,9 +807,7 @@ export function FirmwareDropZone() {
 								px="4" py="2"
 								_hover={{ color: "kk.textPrimary" }}
 								onClick={handleDismiss}
-							>
-								Cancel
-							</Button>
+							>{uiText("Cancel")}</Button>
 							<Button
 								size="sm"
 								bg={analysis.willWipeDevice ? "var(--rose)" : analysis.isSigned ? "kk.gold" : "var(--gold)"}
@@ -894,11 +828,11 @@ export function FirmwareDropZone() {
 								}
 							>
 								{!inBootloader
-									? "Enter bootloader mode first"
+									? uiText("Enter bootloader mode first")
 									: analysis.imageKind === "bootloader-updater"
 										? `Install Bootloader ${analysis.detectedVersion || ""}`.trim()
 										: analysis.imageKind !== "firmware"
-											? "Cannot flash"
+											? uiText("Cannot flash")
 											: analysis.willWipeDevice
 												? (analysis.wipeReason === "bitcoin-only-lock" || analysis.wipeReason === "unknown-installed" ? "Flash Anyway" : "Wipe & Flash")
 												: `Flash ${analysis.detectedVersion || "Firmware"}`}
@@ -910,9 +844,7 @@ export function FirmwareDropZone() {
 				{/* ── Flashing progress ─────────────────────── */}
 				{phase === "flashing" && (
 					<Box p="8">
-						<Text fontSize="lg" fontWeight="600" color="kk.textPrimary" mb="4" textAlign="center">
-							Flashing Firmware...
-						</Text>
+						<Text fontSize="lg" fontWeight="600" color="kk.textPrimary" mb="4" textAlign="center">{uiText("Flashing Firmware...")}</Text>
 						<Box
 							w="100%"
 							h="8px"
@@ -930,11 +862,9 @@ export function FirmwareDropZone() {
 							/>
 						</Box>
 						<Text fontSize="sm" color="kk.textSecondary" textAlign="center">
-							{progress?.message || "Please wait..."}
+							{firmwareProgressText(progress) || uiText("Please wait...")}
 						</Text>
-						<Text fontSize="xs" color="kk.textSecondary" textAlign="center" mt="2">
-							Do not unplug your KeepKey
-						</Text>
+						<Text fontSize="xs" color="kk.textSecondary" textAlign="center" mt="2">{uiText("Do not unplug your KeepKey")}</Text>
 					</Box>
 				)}
 
@@ -945,20 +875,10 @@ export function FirmwareDropZone() {
 							<path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
 							<polyline points="22 4 12 14.01 9 11.01" />
 						</svg>
-						<Text fontSize="lg" fontWeight="700" color="var(--teal)" mb="2">
-							Firmware Flash Complete
-						</Text>
-						<Text fontSize="sm" color="kk.gold" fontWeight="600" mb="2">
-							Unplug your KeepKey and plug it back in to finish.
-						</Text>
-						<Text fontSize="sm" color="kk.textSecondary" mb="2">
-							The device does not reboot on its own — it stays in this state
-							until you physically reconnect the USB cable.
-						</Text>
-						<Text fontSize="xs" color="kk.textSecondary" mb="4">
-							Do not hold the button while reconnecting — just plug it in
-							normally, or it will re-enter bootloader mode.
-						</Text>
+						<Text fontSize="lg" fontWeight="700" color="var(--teal)" mb="2">{uiText("Firmware Flash Complete")}</Text>
+						<Text fontSize="sm" color="kk.gold" fontWeight="600" mb="2">{uiText("Unplug your KeepKey and plug it back in to finish.")}</Text>
+						<Text fontSize="sm" color="kk.textSecondary" mb="2">{uiText("The device does not reboot on its own — it stays in this state until you physically reconnect the USB cable.")}</Text>
+						<Text fontSize="xs" color="kk.textSecondary" mb="4">{uiText("Do not hold the button while reconnecting — just plug it in normally, or it will re-enter bootloader mode.")}</Text>
 						<Button
 							size="sm"
 							bg="kk.gold"
@@ -967,9 +887,7 @@ export function FirmwareDropZone() {
 							px="4" py="2"
 							_hover={{ bg: "kk.goldHover" }}
 							onClick={handleDismiss}
-						>
-							Done
-						</Button>
+						>{uiText("Done")}</Button>
 					</Box>
 				)}
 
@@ -981,11 +899,9 @@ export function FirmwareDropZone() {
 							<line x1="15" y1="9" x2="9" y2="15" />
 							<line x1="9" y1="9" x2="15" y2="15" />
 						</svg>
-						<Text fontSize="lg" fontWeight="700" color="var(--rose)" mb="2">
-							Firmware Flash Failed
-						</Text>
+						<Text fontSize="lg" fontWeight="700" color="var(--rose)" mb="2">{uiText("Firmware Flash Failed")}</Text>
 						<Text fontSize="sm" color="kk.textSecondary" mb="4">
-							{error || "Unknown error"}
+							{error || uiText("Unknown error")}
 						</Text>
 						<Button
 							size="sm"
@@ -995,9 +911,7 @@ export function FirmwareDropZone() {
 							px="4" py="2"
 							_hover={{ bg: "kk.goldHover" }}
 							onClick={handleDismiss}
-						>
-							Dismiss
-						</Button>
+						>{uiText("Dismiss")}</Button>
 					</Box>
 				)}
 			</Box>

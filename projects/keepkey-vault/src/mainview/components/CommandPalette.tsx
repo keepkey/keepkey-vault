@@ -1,3 +1,4 @@
+import { useUiTranslation } from "../i18n/ui"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { Box, Flex, Text, Image, Input } from "@chakra-ui/react"
 import { CHAINS, isChainSupported, type ChainDef } from "../../shared/chains"
@@ -51,6 +52,8 @@ function scoreMatch(query: string, fields: { symbol?: string; coin?: string; nam
 }
 
 export function CommandPalette({ open, onClose, onJumpToVault, balances, firmwareVersion, bitcoinOnly, hiveEnabled }: CommandPaletteProps) {
+  const uiText = useUiTranslation()
+
 	const { privateModeEnabled } = useFiat()
 	const [query, setQuery] = useState("")
 	const [activeIdx, setActiveIdx] = useState(0)
@@ -165,7 +168,7 @@ export function CommandPalette({ open, onClose, onJumpToVault, balances, firmwar
 			onKeyDown={onKeyDown}
 			role="dialog"
 			aria-modal="true"
-			aria-label="Command Palette"
+			aria-label={uiText("Command Palette")}
 		>
 			<Box
 				bg="#101015"
@@ -198,7 +201,7 @@ export function CommandPalette({ open, onClose, onJumpToVault, balances, firmwar
 						ref={inputRef}
 						value={query}
 						onChange={(e) => { setQuery(e.target.value); setActiveIdx(0) }}
-						placeholder="Search chains and tokens — name, symbol, CAIP"
+						placeholder={uiText("Search chains and tokens — name, symbol, CAIP")}
 						variant="unstyled"
 						border="0"
 						outline="none"
@@ -228,16 +231,14 @@ export function CommandPalette({ open, onClose, onJumpToVault, balances, firmwar
 						letterSpacing="0.05em"
 						textTransform="uppercase"
 						fontWeight={500}
-					>
-						esc
-					</Box>
+					>{uiText("esc")}</Box>
 				</Flex>
 
 				{/* Result list */}
 				<Box ref={listRef} overflowY="auto" flex="1" minH="0" py="1" bg="#101015">
 					{results.length === 0 ? (
 						<Flex align="center" justify="center" py="10">
-							<Text fontSize="13px" color="#8a8a82">No matches</Text>
+							<Text fontSize="13px" color="#8a8a82">{uiText("No matches")}</Text>
 						</Flex>
 					) : (
 						results.map((r, idx) => {
@@ -312,10 +313,10 @@ export function CommandPalette({ open, onClose, onJumpToVault, balances, firmwar
 					color="kk.textMuted"
 				>
 					<Flex gap="3" align="center">
-						<Text>↑↓ navigate</Text>
-						<Text>↵ open</Text>
+						<Text>{uiText("↑↓ navigate")}</Text>
+						<Text>{uiText("↵ open")}</Text>
 					</Flex>
-					<Text>{results.length} result{results.length === 1 ? "" : "s"}</Text>
+					<Text>{results.length}{" "}{uiText("result")}{results.length === 1 ? "" : "s"}</Text>
 				</Flex>
 			</Box>
 		</Box>

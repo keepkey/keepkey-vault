@@ -84,12 +84,12 @@ function tree(contacts: CertifiedContact[]): Buffer[][] {
   return levels
 }
 
-export function contactsFromEntries(entries: AddressBookEntry[]): CertifiedContact[] {
+export function contactsFromEntries(entries: AddressBookEntry[], enforceLimit = true): CertifiedContact[] {
   const contacts = entries
     .filter(entry => entry.kind === 'external' && !!entry.label && entry.networkId.startsWith('eip155:'))
     .map(entry => normalizeContact({ network: entry.networkId, destinationType: CONTACT_DESTINATION.EVM_ADDRESS, destination: entry.address, label: entry.label! }))
     .sort((a, b) => a.network.localeCompare(b.network) || a.destinationType - b.destinationType || a.destination.localeCompare(b.destination) || a.label.localeCompare(b.label))
-  if (contacts.length > ADDRESS_BOOK_CLEARSIGN_MAX_ENTRIES) {
+  if (enforceLimit && contacts.length > ADDRESS_BOOK_CLEARSIGN_MAX_ENTRIES) {
     throw new Error(`Alpha firmware supports at most ${ADDRESS_BOOK_CLEARSIGN_MAX_ENTRIES} certified contacts`)
   }
   return contacts

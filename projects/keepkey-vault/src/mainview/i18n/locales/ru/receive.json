@@ -12,5 +12,8 @@
 	"derivingAddress": "Получение адреса...",
 	"noAddressDerived": "Адрес ещё не получен",
 	"deriveAddress": "Получить адрес",
-	"account": "Аккаунт {{index}}"
+	"account": "Аккаунт {{index}}",
+	"btcAccountType": {
+		"learnMore": "Подробнее"
+	}
 }

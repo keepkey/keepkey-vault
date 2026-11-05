@@ -1,3 +1,4 @@
+import { useUiTranslation } from "../i18n/ui"
 import { useEffect, useRef, useState } from "react"
 import { Box, Flex, Text } from "@chakra-ui/react"
 import { FaPlus, FaCheck, FaChevronDown } from "react-icons/fa"
@@ -38,6 +39,8 @@ const parseAcctPath = (path: string) => {
  * CompactBtcSelector.
  */
 export function UtxoAccountSelector({ accounts, selected, onSelect, onAddAccount, adding, symbol, scripts, selectedScript, onSelectScript, breakdown }: UtxoAccountSelectorProps) {
+  const uiText = useUiTranslation()
+
   const { t } = useTranslation("receive")
   const [open, setOpen] = useState(false)
   const [scriptOpen, setScriptOpen] = useState(false)
@@ -166,9 +169,7 @@ export function UtxoAccountSelector({ accounts, selected, onSelect, onAddAccount
                 >
                   <Box as={FaPlus} fontSize="9px" color="var(--teal)" />
                 </Box>
-                <Text fontSize="12px" fontWeight="500" color="var(--teal)">
-                  Add account
-                </Text>
+                <Text fontSize="12px" fontWeight="500" color="var(--teal)">{uiText("Add account")}</Text>
               </Flex>
             </Box>
           </Box>
@@ -249,11 +250,10 @@ export function UtxoAccountSelector({ accounts, selected, onSelect, onAddAccount
               )
             })}
             {extraRows.map(r => (
-              <Flex key={r.path + r.scriptType} align="center" gap="2.5" px="3" py="2" borderTop="1px solid rgba(255,255,255,0.06)" title="Tracked for balance; not selectable for receive">
+              <Flex key={r.path + r.scriptType} align="center" gap="2.5" px="3" py="2" borderTop="1px solid rgba(255,255,255,0.06)" title={uiText("Tracked for balance; not selectable for receive")}>
                 <Box flex="1" minW="0">
                   <Text fontSize="12px" fontWeight="600" color="var(--text-0)" lineHeight="1.1">
-                    {scripts.find(s => s.scriptType === r.scriptType)?.label || r.scriptType} (old path)
-                  </Text>
+                    {scripts.find(s => s.scriptType === r.scriptType)?.label || r.scriptType}{" "}{uiText("(old path)")}</Text>
                   <Text fontSize="10px" fontFamily="mono" color="var(--text-2)" lineHeight="1.2" mt="0.5">
                     {r.path}
                   </Text>

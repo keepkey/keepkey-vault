@@ -35,5 +35,6 @@
 	"loadingConnect": "Verbinden met je KeepKey",
 	"loadingSync": "Saldo's synchroniseren over netwerken",
 	"loadingPrices": "Nieuwste prijzen ophalen",
-	"tokensCount": "+{{count}} tokens"
+	"tokensCount": "+{{count}} tokens",
+	"dismiss": "Sluiten"
 }

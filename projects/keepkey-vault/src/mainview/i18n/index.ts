@@ -1,6 +1,7 @@
 import i18n from "i18next"
 import { initReactI18next } from "react-i18next"
 import resourcesToBackend from "i18next-resources-to-backend"
+import { detectLanguage, LANGUAGE_STORAGE_KEY, SUPPORTED_LANGUAGES, supportedLanguage } from './languages'
 
 // English locale files – bundled synchronously so they are always available
 import common from "./locales/en/common.json"
@@ -19,23 +20,27 @@ import swap from "./locales/en/swap.json"
 import staking from "./locales/en/staking.json"
 import names from "./locales/en/names.json"
 import addressbook from "./locales/en/addressbook.json"
-
-const STORAGE_KEY = "keepkey-vault-lang"
-
-const SUPPORTED_LANGS = ["en","es","fr","de","ja","zh","ko","pt","ru","it","pl","nl","th","tr","vi"]
+import ui from './locales/en/ui.json'
 
 function detectInitialLang(): string {
-	try {
-		const saved = localStorage.getItem(STORAGE_KEY)
-		if (saved) return saved
-		// Auto-detect from browser on first launch
-		const browserLang = (navigator.language || '').split('-')[0]
-		if (browserLang && SUPPORTED_LANGS.includes(browserLang)) return browserLang
-	} catch { /* private browsing / blocked */ }
-	return "en"
+	let saved: string | null = null
+	try { saved = localStorage.getItem(LANGUAGE_STORAGE_KEY) } catch { /* blocked storage must not disable browser detection */ }
+	return detectLanguage(saved, typeof navigator === 'undefined' ? [] : (navigator.languages?.length ? navigator.languages : [navigator.language]))
 }
 
-let savedLang = detectInitialLang()
+const savedLang = detectInitialLang()
+
+function updateLanguageMetadata(lng: string) {
+	const language = supportedLanguage(lng) || 'en'
+	if (typeof document !== 'undefined') {
+		document.documentElement.lang = language
+		document.documentElement.dir = i18n.dir(language)
+	}
+	try { localStorage.setItem(LANGUAGE_STORAGE_KEY, language) } catch { /* blocked storage */ }
+}
+
+// Register before init: its initial languageChanged event can be synchronous.
+i18n.on('languageChanged', updateLanguageMetadata)
 
 i18n
 	.use(initReactI18next)
@@ -43,19 +48,12 @@ i18n
 		resourcesToBackend((language: string, namespace: string) => {
 			// English is bundled synchronously above – skip dynamic import
 			if (language === "en") return undefined
+			// ponytail: template import, not import.meta.glob — Bun (unit tests) has no glob.
 			return import(`./locales/${language}/${namespace}.json`).catch((err: unknown) => {
-				// Vite's dynamic-import helper throws "Unknown variable dynamic import: <path>"
-				// when the requested file isn't in the generated map (i.e. the translation
-				// file doesn't exist for this locale). Suppress that one case so a single
-				// missing namespace (e.g. swap.json for staking-only locales) doesn't abort
-				// the whole changeLanguage(); i18next falls back to English via fallbackLng.
-				// Any other failure (chunk-load, network, malformed JSON) is rethrown so it
-				// surfaces as a real error.
+				// Vite throws "Unknown variable dynamic import" for a file the locale lacks;
+				// fall back to English for that namespace, rethrow anything else.
 				const msg = err instanceof Error ? err.message : String(err)
-				if (msg.includes("Unknown variable dynamic import")) {
-					console.warn(`[i18n] Missing translation file: ${language}/${namespace}.json — falling back to English`)
-					return { default: {} }
-				}
+				if (msg.includes("Unknown variable dynamic import")) return { default: {} }
 				throw err
 			})
 		}),
@@ -63,6 +61,8 @@ i18n
 	.init({
 		lng: savedLang,
 		fallbackLng: "en",
+		supportedLngs: SUPPORTED_LANGUAGES,
+		load: 'languageOnly',
 		partialBundledLanguages: true,
 		defaultNS: "common",
 		ns: [
@@ -82,6 +82,7 @@ i18n
 			"staking",
 			"names",
 			"addressbook",
+			"ui",
 		],
 		resources: {
 			en: {
@@ -101,15 +102,11 @@ i18n
 				staking,
 				names,
 				addressbook,
+				ui,
 			},
 		},
 		interpolation: { escapeValue: false },
 		react: { useSuspense: false },
 	})
-
-// Persist language changes
-i18n.on("languageChanged", (lng) => {
-	try { localStorage.setItem(STORAGE_KEY, lng) } catch { /* private browsing / blocked */ }
-})
 
 export default i18n

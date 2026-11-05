@@ -1,3 +1,4 @@
+import { getNumberLocale } from "../lib/number-locale"
 import { Flex, Text, Box } from "@chakra-ui/react"
 import { Z } from "../lib/z-index"
 import type { BtcNodeStatus } from "../hooks/useBtcNodeStatus"
@@ -24,7 +25,7 @@ export function NodeStatusBar({ status }: { status: BtcNodeStatus }) {
       ? `${kind} scanning the UTXO set · ${scanPct}% — reading your balance directly from the node.`
       : syncing
         ? `${kind} node syncing${pct !== undefined ? ` · ${pct}%` : ""} — balances may be incomplete until caught up.`
-        : `${kind} node connected${status.height ? ` · height ${status.height.toLocaleString()}` : ""} · synced`
+        : `${kind} node connected${status.height ? ` · height ${status.height.toLocaleString(getNumberLocale())}` : ""} · synced`
 
   return (
     <Flex position="fixed" bottom={0} left={0} right={0} h="30px" align="center" justify="center" gap="2" px="4"

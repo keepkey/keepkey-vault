@@ -1,3 +1,4 @@
+import { useUiTranslation } from "../../i18n/ui"
 /**
  * 360° spinning KeepKey, built as a 6-face CSS-3D box (no Three.js, no WebGL).
  * Front face is the OLED screen — content is fully customizable via the
@@ -85,6 +86,8 @@ function Face({ w, h, transform, children, style }: FaceProps) {
 }
 
 function DefaultDemoScreen() {
+  const uiText = useUiTranslation()
+
 	return (
 		<div
 			style={{
@@ -102,9 +105,7 @@ function DefaultDemoScreen() {
 						letterSpacing: 2,
 						marginBottom: 4,
 					}}
-				>
-					CONFIRM SEND
-				</div>
+				>{uiText("CONFIRM SEND")}</div>
 				<div
 					style={{
 						fontSize: 26,
@@ -112,9 +113,7 @@ function DefaultDemoScreen() {
 						letterSpacing: 0.5,
 						lineHeight: 1,
 					}}
-				>
-					0.02400 BTC
-				</div>
+				>{uiText("0.02400 BTC")}</div>
 				<div
 					style={{
 						fontSize: 10,
@@ -122,9 +121,7 @@ function DefaultDemoScreen() {
 						letterSpacing: 1,
 						marginTop: 6,
 					}}
-				>
-					TO bc1q··7v3x··x4kp
-				</div>
+				>{uiText("TO bc1q··7v3x··x4kp")}</div>
 				<div
 					style={{
 						fontSize: 9,
@@ -132,9 +129,7 @@ function DefaultDemoScreen() {
 						letterSpacing: 1,
 						marginTop: 3,
 					}}
-				>
-					FEE 1,240 sats
-				</div>
+				>{uiText("FEE 1,240 sats")}</div>
 			</div>
 			<div
 				style={{
@@ -161,6 +156,8 @@ export function SpinningDevice({
 	showWordmark = true,
 	style,
 }: SpinningDeviceProps) {
+  const uiText = useUiTranslation()
+
 	return (
 		<div
 			style={{
@@ -317,9 +314,7 @@ export function SpinningDevice({
 									color: "rgba(0,0,0,0.42)",
 									textShadow: "0 1px 0 rgba(255,255,255,0.18)",
 								}}
-							>
-								keepkey
-							</div>
+							>{uiText("keepkey")}</div>
 						)}
 					</div>
 				</Face>

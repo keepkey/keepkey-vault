@@ -159,14 +159,10 @@
 	"approvalWaiting": "Aguardando confirmação da aprovação…",
 	"approvalWaitingDesc": "Aguardando a aprovação ser minerada antes de podermos assinar a troca.",
 	"balanceChanges": "Alterações de saldo",
-	"blindSignBody": "As trocas em Solana usam uma transação versionada que seu KeepKey não consegue decodificar totalmente, então ela precisa ser assinada às cegas. Isso vem desativado por padrão. Ativá-la liga o Modo Avançado (assinatura às cegas) no seu dispositivo — você será solicitado a confirmar a alteração no dispositivo.",
-	"blindSignCaveat": "A assinatura às cegas significa que o dispositivo mostra um aviso genérico em vez de detalhes decodificados. Prossiga apenas com trocas que você iniciou aqui. Você pode desativá-la novamente em Configurações do Dispositivo → Política de Assinatura.",
 	"blindSignConfirmOnDevice": "Confirme no dispositivo…",
 	"blindSignDeclined": "Recusado no dispositivo — a assinatura às cegas não foi ativada.",
-	"blindSignEnable": "Ativar assinatura às cegas",
 	"blindSignEnableFailed": "Falha ao ativar a assinatura às cegas no dispositivo.",
 	"blindSignHeader": "Assinatura às cegas",
-	"blindSignTitle": "Ativar assinatura às cegas para Solana",
 	"block": "Bloco",
 	"cancelSwapDevice": "Cancelar - liberar aviso do dispositivo",
 	"completed": "concluída",
@@ -202,5 +198,9 @@
 	"youReceived": "Você recebeu",
 	"exceedsSafeMax": "Deixe ~{{reserve}} {{symbol}} para taxas de rede — reduza a quantia ou toque em MAX.",
 	"sent": "Enviado",
-	"gas": "Gas"
+	"gas": "Gas",
+	"deviceBlindSignCaveat": "A assinatura às cegas permanece ativada até o KeepKey ser bloqueado ou desconectado, para todos os aplicativos que o usam, não apenas esta troca. Enquanto estiver ativada, este aplicativo também deixa de mostrar esta tela antes dessas transações. O dispositivo pede confirmação e a digitação do PIN novamente.",
+	"solanaOutflowDrain": "Aviso: isso deixa sua carteira vazia. Não assine a menos que seja essa a sua intenção.",
+	"solanaOutflowCaveat": "Simulado com um nó Solana a partir deste computador. Seu KeepKey não pode confirmar esses valores.",
+	"deviceBlindSignEnable": "Ativar assinatura às cegas"
 }

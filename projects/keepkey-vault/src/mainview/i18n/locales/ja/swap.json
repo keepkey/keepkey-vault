@@ -159,14 +159,10 @@
 	"approvalWaiting": "承認の確定を待機中…",
 	"approvalWaitingDesc": "スワップに署名できるよう、承認がマイニングされるのを待機中です。",
 	"balanceChanges": "残高の変動",
-	"blindSignBody": "SolanaのスワップはKeepKeyが完全には解読できないバージョン付きトランザクションを使用するため、ブラインド署名が必要です。これは既定では無効になっています。有効にするとデバイスのアドバンスドモード（ブラインド署名）がオンになり、デバイス上で変更の確認を求められます。",
-	"blindSignCaveat": "ブラインド署名では、デバイスは解読された詳細ではなく汎用的なプロンプトを表示します。ここで開始したスワップのみ続行してください。デバイス設定 → 署名ポリシーから再び無効にできます。",
 	"blindSignConfirmOnDevice": "デバイスで確認してください…",
 	"blindSignDeclined": "デバイスで拒否されました — ブラインド署名は有効になりませんでした。",
-	"blindSignEnable": "ブラインド署名を有効にする",
 	"blindSignEnableFailed": "デバイスでブラインド署名の有効化に失敗しました。",
 	"blindSignHeader": "ブラインド署名",
-	"blindSignTitle": "Solana用にブラインド署名を有効にする",
 	"block": "ブロック",
 	"cancelSwapDevice": "キャンセル - デバイスプロンプトを解放",
 	"completed": "完了",
@@ -202,5 +198,9 @@
 	"youReceived": "受取額",
 	"exceedsSafeMax": "ネットワーク手数料用に約{{reserve}} {{symbol}}を残してください — 金額を減らすかMAXをタップしてください。",
 	"sent": "送信済み",
-	"gas": "Gas"
+	"gas": "Gas",
+	"deviceBlindSignCaveat": "ブラインド署名はKeepKeyがロックされるか接続解除されるまで、このスワップだけでなく、KeepKeyを使うすべてのアプリで有効です。有効な間、このアプリも該当する取引の前にこの画面を表示しなくなります。デバイスでの確認とPINの再入力が必要です。",
+	"solanaOutflowDrain": "警告：ウォレットが空になります。意図した場合以外は署名しないでください。",
+	"solanaOutflowCaveat": "このコンピューターからSolanaノードでシミュレーションしました。KeepKeyはこれらの数値を確認できません。",
+	"deviceBlindSignEnable": "ブラインド署名を有効にする"
 }

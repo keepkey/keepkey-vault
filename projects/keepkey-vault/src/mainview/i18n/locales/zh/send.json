@@ -53,5 +53,7 @@
 	"invalidSolanaAddress": "无效的Solana地址 — 必须是32-44个base58字符",
 	"invalidTronAddress": "无效的Tron地址 — 必须以T开头（34个字符）",
 	"invalidTonAddress": "无效的TON地址",
-	"invalidZcashShieldedAddress": "无效的隐蔽地址 — 必须以u1开头"
+	"invalidZcashShieldedAddress": "无效的隐蔽地址 — 必须以u1开头",
+	"feeCustom": "自定义",
+	"invalidAmount": "请输入不含千位分隔符的小数金额，例如1.5。"
 }

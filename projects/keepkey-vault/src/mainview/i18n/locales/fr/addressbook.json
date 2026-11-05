@@ -41,5 +41,9 @@
 	"openAddressBook": "Carnet d'adresses",
 	"saveRecipientPrompt": "Enregistrer ce destinataire ?",
 	"contactSaved": "Contact enregistré",
-	"saveContactFailed": "Impossible d'enregistrer le contact"
+	"saveContactFailed": "Impossible d'enregistrer le contact",
+	"cosigner": "Cosignataire",
+	"cosignerOption": "Cosignataire Safe : le proposer en premier lors de la création d'une multisignature",
+	"markCosigner": "Marquer comme cosignataire Safe",
+	"notCosigner": "Pas cosignataire"
 }

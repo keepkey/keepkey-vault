@@ -1,3 +1,4 @@
+import { useUiTranslation } from "../i18n/ui"
 import { useBtcMultisigEnabled } from "../hooks/useBtcMultisigEnabled";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Box, Button, Flex, Text, Textarea } from "@chakra-ui/react";
@@ -27,6 +28,8 @@ const mono = {
 /** Only public policies are imported. Every policy is matched to the actual
  * KeepKey account key, then its first receive address is displayed on device. */
 export function MultisigPolicyDialog() {
+  const uiText = useUiTranslation()
+
   const enabled = useBtcMultisigEnabled();
   const [open, setOpen] = useState(false);
   const [data, setData] = useState("");
@@ -149,7 +152,7 @@ export function MultisigPolicyDialog() {
         />
         <Box
           role="dialog"
-          aria-label="Multisig co-signing disabled"
+          aria-label={uiText("Multisig co-signing disabled")}
           position="fixed"
           top="50%"
           left="50%"
@@ -160,13 +163,8 @@ export function MultisigPolicyDialog() {
           p="6"
           maxW="90vw"
         >
-          <Text>
-            Bitcoin multisig co-signing is off. Enable it in Settings → Feature
-            Flags.
-          </Text>
-          <Button {...outline} mt="4" onClick={close}>
-            Close
-          </Button>
+          <Text>{uiText("Bitcoin multisig co-signing is off. Enable it in Settings → Feature Flags.")}</Text>
+          <Button {...outline} mt="4" onClick={close}>{uiText("Close")}</Button>
         </Box>
       </>
     );
@@ -176,7 +174,7 @@ export function MultisigPolicyDialog() {
       {qr && (
         <BitcoinQrDialog
           bytes={new TextEncoder().encode(qr)}
-          title="Public multisig policy QR"
+          title={uiText("Public multisig policy QR")}
           onClose={() => setQr(null)}
         />
       )}
@@ -204,22 +202,14 @@ export function MultisigPolicyDialog() {
         p="6"
         role="dialog"
         aria-modal="true"
-        aria-label="Multisig co-signing"
+        aria-label={uiText("Multisig co-signing")}
       >
-        <Text fontWeight="700" fontSize="lg">
-          Multisig co-signing
-        </Text>
-        <Text fontSize="sm" color="kk.textSecondary" my="3">
-          Set up the wallet in Sparrow or Electrum. Desktop adds this KeepKey’s
-          signature and returns a PSBT to the coordinator. Public keys reveal
-          wallet activity; never import recovery words or private keys.
-        </Text>
-        <Text fontSize="sm" fontWeight="600" mb="2">
-          1. Export this KeepKey’s public cosigner key
-        </Text>
+        <Text fontWeight="700" fontSize="lg">{uiText("Multisig co-signing")}</Text>
+        <Text fontSize="sm" color="kk.textSecondary" my="3">{uiText("Set up the wallet in Sparrow or Electrum. Desktop adds this KeepKey’s signature and returns a PSBT to the coordinator. Public keys reveal wallet activity; never import recovery words or private keys.")}</Text>
+        <Text fontSize="sm" fontWeight="600" mb="2">{uiText("1. Export this KeepKey’s public cosigner key")}</Text>
         <Flex gap="2" wrap="wrap" mb="2">
           <select
-            aria-label="Multisig script type"
+            aria-label={uiText("Multisig script type")}
             disabled={busy}
             value={scriptType}
             onChange={(e) => {
@@ -228,14 +218,13 @@ export function MultisigPolicyDialog() {
             }}
             style={{ background: "#202020", color: "white" }}
           >
-            <option value="p2wsh">Native SegWit (P2WSH)</option>
-            <option value="p2sh-p2wsh">Wrapped SegWit</option>
-            <option value="p2sh">Legacy (P2SH)</option>
+            <option value="p2wsh">{uiText("Native SegWit (P2WSH)")}</option>
+            <option value="p2sh-p2wsh">{uiText("Wrapped SegWit")}</option>
+            <option value="p2sh">{uiText("Legacy (P2SH)")}</option>
           </select>
-          <label>
-            Account{" "}
+          <label>{uiText("Account")}{" "}
             <input
-              aria-label="Multisig account"
+              aria-label={uiText("Multisig account")}
               disabled={busy}
               type="number"
               min="0"
@@ -262,15 +251,12 @@ export function MultisigPolicyDialog() {
                 )
               )
             }
-          >
-            Read public key
-          </Button>
+          >{uiText("Read public key")}</Button>
         </Flex>
         {key && (
           <Box mb="4">
             <Text {...mono}>{key.key}</Text>
-            <Text fontSize="xs">
-              Mainnet · {key.derivation} · fingerprint {key.fingerprint}
+            <Text fontSize="xs">{uiText("Mainnet ·")}{" "}{key.derivation}{" "}{uiText("· fingerprint")}{" "}{key.fingerprint}
             </Text>
             <Button
               {...outline}
@@ -282,19 +268,11 @@ export function MultisigPolicyDialog() {
                   setNotice("Public cosigner key copied");
                 })
               }
-            >
-              Copy key with origin
-            </Button>
+            >{uiText("Copy key with origin")}</Button>
           </Box>
         )}
-        <Text fontSize="sm" fontWeight="600" mt="4" mb="2">
-          2. Import the complete public wallet policy
-        </Text>
-        <Text fontSize="xs" color="kk.textSecondary" mb="2">
-          Paste Sparrow’s output descriptor or load an unencrypted public
-          Electrum multisig wallet. Every cosigner needs a master fingerprint
-          and derivation path. Receive and change branches are derived locally.
-        </Text>
+        <Text fontSize="sm" fontWeight="600" mt="4" mb="2">{uiText("2. Import the complete public wallet policy")}</Text>
+        <Text fontSize="xs" color="kk.textSecondary" mb="2">{uiText("Paste Sparrow’s output descriptor or load an unencrypted public Electrum multisig wallet. Every cosigner needs a master fingerprint and derivation path. Receive and change branches are derived locally.")}</Text>
         <Textarea
           disabled={busy}
           rows={5}
@@ -305,11 +283,11 @@ export function MultisigPolicyDialog() {
             setData(e.target.value);
             setPreview(null);
           }}
-          placeholder="wsh(sortedmulti(2,[fingerprint/48h/0h/0h/2h]xpub…/<0;1>/*,…))"
+          placeholder={uiText("wsh(sortedmulti(2,[fingerprint/48h/0h/0h/2h]xpub…/<0;1>/*,…))")}
         />
         <Flex gap="2" wrap="wrap" my="3">
           <input
-            aria-label="Public multisig policy file"
+            aria-label={uiText("Public multisig policy file")}
             type="file"
             disabled={busy}
             onChange={(e) => {
@@ -332,9 +310,7 @@ export function MultisigPolicyDialog() {
                 )
               )
             }
-          >
-            Check policy
-          </Button>
+          >{uiText("Check policy")}</Button>
         </Flex>
         {preview && (
           <Box
@@ -344,30 +320,23 @@ export function MultisigPolicyDialog() {
             borderRadius="lg"
           >
             <Text fontWeight="600">
-              {preview.threshold} of {preview.cosigners.length} ·{" "}
-              {preview.scriptType} · Bitcoin mainnet
-            </Text>
+              {preview.threshold}{" "}{uiText("of")}{" "}{preview.cosigners.length} ·{" "}
+              {preview.scriptType}{" "}{uiText("· Bitcoin mainnet")}</Text>
             {preview.cosigners.map((c) => (
               <Box key={c.xpub} my="2">
                 <Text fontSize="xs">
                   {c.fingerprint} · {c.path}
-                  {c.ours ? " · This KeepKey" : ""}
+                  {c.ours ? uiText(" · This KeepKey") : ""}
                 </Text>
                 <Text {...mono}>{c.xpub}</Text>
               </Box>
             ))}
-            <Text fontSize="xs" mt="2">
-              First receive address — compare with the coordinator and KeepKey:
-            </Text>
+            <Text fontSize="xs" mt="2">{uiText("First receive address — compare with the coordinator and KeepKey:")}</Text>
             <Text {...mono}>{preview.address}</Text>
             {preview.sessionOnly && (
-              <Text fontSize="xs" color="kk.gold">
-                Passphrase wallet: this policy is kept only for the current
-                unlocked session. Import and verify it again after restarting.
-              </Text>
+              <Text fontSize="xs" color="kk.gold">{uiText("Passphrase wallet: this policy is kept only for the current unlocked session. Import and verify it again after restarting.")}</Text>
             )}
-            <label>
-              Policy name{" "}
+            <label>{uiText("Policy name")}{" "}
               <input
                 disabled={busy}
                 maxLength={40}
@@ -400,16 +369,12 @@ export function MultisigPolicyDialog() {
                   window.dispatchEvent(new Event(MULTISIG_ENROLLED_EVENT));
                 })
               }
-            >
-              Verify address on KeepKey and save
-            </Button>
+            >{uiText("Verify address on KeepKey and save")}</Button>
           </Box>
         )}
         {saved.length > 0 && (
           <Box mt="4">
-            <Text fontSize="sm" fontWeight="600">
-              Verified policies
-            </Text>
+            <Text fontSize="sm" fontWeight="600">{uiText("Verified policies")}</Text>
             {saved.map((p) => (
               <Box
                 key={p.id}
@@ -418,12 +383,11 @@ export function MultisigPolicyDialog() {
                 py="3"
               >
                 <Text fontSize="sm">
-                  {p.name} · {p.threshold} of {p.cosigners.length} ·{" "}
+                  {p.name} · {p.threshold}{" "}{uiText("of")}{" "}{p.cosigners.length} ·{" "}
                   {p.scriptType}
-                  {p.sessionOnly ? " · Session only" : ""}
+                  {p.sessionOnly ? uiText(" · Session only") : ""}
                 </Text>
-                <Text fontSize="xs">
-                  Enrolled key:{" "}
+                <Text fontSize="xs">{uiText("Enrolled key:")}{" "}
                   {p.cosigners
                     .filter((c) => c.ours)
                     .map((c) => c.fingerprint)
@@ -438,23 +402,17 @@ export function MultisigPolicyDialog() {
                       setName(p.name);
                       setPreview(null);
                     }}
-                  >
-                    Load policy
-                  </Button>
+                  >{uiText("Load policy")}</Button>
                   <Button
                     {...outline}
                     disabled={busy}
                     onClick={() => download(p)}
-                  >
-                    Export public policy
-                  </Button>
+                  >{uiText("Export public policy")}</Button>
                   <Button
                     {...outline}
                     disabled={busy}
                     onClick={() => setQr(p.descriptor)}
-                  >
-                    Policy QR
-                  </Button>
+                  >{uiText("Policy QR")}</Button>
                   <Button
                     {...outline}
                     disabled={busy}
@@ -467,9 +425,7 @@ export function MultisigPolicyDialog() {
                         setPreview(null);
                       })
                     }
-                  >
-                    Remove
-                  </Button>
+                  >{uiText("Remove")}</Button>
                 </Flex>
               </Box>
             ))}
@@ -487,7 +443,7 @@ export function MultisigPolicyDialog() {
         )}
         <Flex justify="flex-end" mt="4">
           <Button {...outline} disabled={busy} onClick={close}>
-            {busy ? "Waiting for KeepKey…" : "Close"}
+            {busy ? uiText("Waiting for KeepKey…") : uiText("Close")}
           </Button>
         </Flex>
       </Box>

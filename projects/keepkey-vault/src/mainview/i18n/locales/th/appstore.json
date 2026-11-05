@@ -23,5 +23,7 @@
 	"walletconnectName": "WalletConnect",
 	"walletconnectDescription": "เชื่อมต่อกับแอปใดก็ได้ที่รองรับ WalletConnect",
 	"internal": "เปิด",
-	"open": "เปิด"
+	"open": "เปิด",
+	"safeName": "Safe{Wallet}",
+	"safeDescription": "บัญชีมัลติซิกที่ใช้ร่วมกันบนเชน EVM เชื่อมต่อ KeepKey ของคุณในฐานะเจ้าของ หากต้องการดู Safe และตรวจสอบธุรกรรมที่รอดำเนินการใน Desktop ให้เปิดมัลติซิกบนสินทรัพย์ EVM"
 }

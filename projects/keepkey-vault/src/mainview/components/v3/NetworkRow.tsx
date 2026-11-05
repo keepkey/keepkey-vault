@@ -1,3 +1,5 @@
+import { getNumberLocale } from "../../lib/number-locale"
+import { useUiTranslation } from "../../i18n/ui"
 import { type MouseEvent } from 'react';
 import { Icon } from './Icon';
 import { TokenLogo } from './TokenLogo';
@@ -17,9 +19,9 @@ interface NetworkRowProps {
 }
 
 const defaultUsd = (n: number) =>
-	'$' + n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+	'$' + n.toLocaleString(getNumberLocale(), { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const defaultAmt = (n: number, d = 6) =>
-	Number(n).toLocaleString('en-US', { maximumFractionDigits: d });
+	Number(n).toLocaleString(getNumberLocale(), { maximumFractionDigits: d });
 
 export function NetworkRow({
 	network,
@@ -30,6 +32,8 @@ export function NetworkRow({
 	formatUsd = defaultUsd,
 	formatAmount = defaultAmt,
 }: NetworkRowProps) {
+  const uiText = useUiTranslation()
+
 	const nativeAmount = network.native?.amount ?? 0;
 	const pct = totalUsd > 0 ? (network.usd / totalUsd) * 100 : 0;
 
@@ -86,7 +90,7 @@ export function NetworkRow({
 				)}
 			</div>
 			<div className="v3-mono" style={{ fontSize: 12, color: 'var(--text-2)' }}>
-				{network.tokens.length} {network.tokens.length === 1 ? 'asset' : 'assets'}
+				{network.tokens.length} {network.tokens.length === 1 ? uiText("asset") : uiText("assets")}
 			</div>
 			<div className="v3-mono" style={{ fontSize: 13, color: 'var(--text-1)', textAlign: 'right' }}>
 				{formatAmount(nativeAmount, 4)}{' '}

@@ -167,10 +167,14 @@ describe('Bitcoin-only REST boundary', () => {
   })
 
   test('fences chain-specific renderer RPC before dispatch', () => {
+    expect(bitcoinOnlyRpcRejection('vaultAccountGet',{networkId:'eip155:8453'})).not.toBeNull()
+    expect(bitcoinOnlyRpcRejection('vaultAccountGet',{networkId:'bip122:000000000019d6689c085ae165831e93'})).toBeNull()
     for (const method of [
       'ethGetAddress', 'solanaSignTx', 'cosmosSignTx', 'zcashShieldedSend',
       'clearsignAttestorSign', 'bnbGetAddress', 'binanceSignTransaction',
       'getEvmAddresses', 'executeSwap', 'getSwapQuote', 'wcPair',
+      'safeList', 'safePrepareCreate', 'safeImport', 'safeSigningData', 'safeAddSignature', 'safePrepareExecute', 'safeBroadcast',
+      'vaultAddPreview', 'vaultAddConfirm',
     ]) {
       expect(bitcoinOnlyRpcRejection(method, {})).not.toBeNull()
     }

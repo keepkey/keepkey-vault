@@ -41,5 +41,9 @@
 	"openAddressBook": "Książka adresowa",
 	"saveRecipientPrompt": "Zapisać tego odbiorcę?",
 	"contactSaved": "Kontakt zapisany",
-	"saveContactFailed": "Nie udało się zapisać kontaktu"
+	"saveContactFailed": "Nie udało się zapisać kontaktu",
+	"cosigner": "Współsygnatariusz",
+	"cosignerOption": "Współsygnatariusz Safe: proponuj go jako pierwszego przy tworzeniu multisig",
+	"markCosigner": "Oznacz jako współsygnatariusza Safe",
+	"notCosigner": "Nie jest współsygnatariuszem"
 }

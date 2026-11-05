@@ -43,8 +43,10 @@ export function useAddressBook() {
 
   const saveLabel = useCallback((id: string, label: string) =>
     rpcRequest("updateAddressBook", { id, label }, 5000).then(() => {}).catch(() => {}), [])
+  const setCosigner = useCallback((id: string, cosigner: boolean) =>
+    rpcRequest("updateAddressBook", { id, cosigner }, 5000).then(() => {}).catch(() => {}), [])
   const remove = useCallback((id: string) =>
     rpcRequest("deleteAddressBook", { id }, 5000).then(() => {}).catch(() => {}), [])
 
-  return { entries, loading, seeding, refetch, saveLabel, remove }
+  return { entries, loading, seeding, refetch, saveLabel, setCosigner, remove }
 }

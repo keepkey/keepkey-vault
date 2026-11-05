@@ -1,0 +1,467 @@
+{
+  "version": "1.6.9",
+  "status": "prerelease_published_original_signed_tag",
+  "recordedAt": "2026-11-04T07:36:25.731898+00:00",
+  "sop": {
+    "workflow": "/Users/highlander/.claude/skills/keepkey-vault-release.md",
+    "submodules": "docs/submodule-pinning-sop.md",
+    "emulator": "docs/emulator-release-sop.md"
+  },
+  "source": {
+    "baseRevision": "04c968e37e4a6624c69383d5f558fb82ade7fb27",
+    "workingBranch": "release/1.6.9",
+    "releaseChangesUncommitted": [],
+    "cachedPublicDevelop": "6763a4f58f1a93746f19ac8d91f3e0fd6c053185",
+    "freshDevelopReconciliation": "merged_candidate_into_fresh_public_develop",
+    "releaseRevision": "6e12d01ea23ebfa24f8e6f7358efcccd3b224484",
+    "remoteReleaseBranchHeadAfterConcurrentPush": "c4ab07162ce3629fdd6dc0500ca9890d118b5227",
+    "publicationDecision": "User explicitly chose the original v1.6.9 prerelease, excluding the later NEAR refund safety commit. Signed tag and local build source remain 6e12d01ea23ebfa24f8e6f7358efcccd3b224484."
+  },
+  "releaseBranch": {
+    "target": "release/1.6.9",
+    "created": true,
+    "pushed": true,
+    "url": "https://github.com/keepkey/keepkey-vault/tree/release/1.6.9"
+  },
+  "submodules": [
+    {
+      "path": "modules/hdwallet",
+      "pin": "894c2d98b549b37a133dcd1218a74e3abcd8d50a",
+      "checkoutMatchesPin": true,
+      "clean": true,
+      "canonicalRepository": "keepkey/hdwallet",
+      "canonicalBranch": "master",
+      "cachedCanonicalTip": "894c2d98b549b37a133dcd1218a74e3abcd8d50a",
+      "cachedBehind": 0,
+      "freshCanonicalVerification": "passed_head_matches_canonical_branch",
+      "pinnedCommitCi": {
+        "passed": 5,
+        "total": 5
+      },
+      "localBuild": {
+        "status": "passed",
+        "command": "yarn --offline tsc --build --force",
+        "log": "/private/tmp/vault-169-hdwallet-build.log"
+      },
+      "note": ""
+    },
+    {
+      "path": "modules/proto-tx-builder",
+      "pin": "f12f8c39add16ba3904b7c45f563cfc59cb651a5",
+      "checkoutMatchesPin": true,
+      "clean": true,
+      "canonicalRepository": "BitHighlander/proto-tx-builder",
+      "canonicalBranch": "main",
+      "cachedCanonicalTip": "f12f8c39add16ba3904b7c45f563cfc59cb651a5",
+      "cachedBehind": 0,
+      "freshCanonicalVerification": "passed_head_matches_canonical_branch",
+      "pinnedCommitCi": "no_ci_on_pin_accepted_by_sop",
+      "localBuild": {
+        "status": "passed",
+        "command": "npm run build",
+        "log": "/private/tmp/vault-169-proto-builder-build.log"
+      },
+      "note": ""
+    },
+    {
+      "path": "modules/device-protocol",
+      "pin": "bd3409106554e04eedc7b525d547a211a987ff3c",
+      "checkoutMatchesPin": true,
+      "clean": true,
+      "canonicalRepository": "keepkey/device-protocol",
+      "canonicalBranch": "master",
+      "cachedCanonicalTip": "bd3409106554e04eedc7b525d547a211a987ff3c",
+      "cachedBehind": 0,
+      "freshCanonicalVerification": "passed_head_matches_canonical_branch",
+      "pinnedCommitCi": {
+        "passed": 10,
+        "total": 10
+      },
+      "localBuild": {
+        "status": "passed",
+        "command": "npm run build",
+        "log": "/private/tmp/vault-169-device-protocol-build.log"
+      },
+      "note": ""
+    },
+    {
+      "path": "modules/electrobun",
+      "pin": "7a9bc757818674dacf2b6e048ed721d4c5187b1f",
+      "checkoutMatchesPin": true,
+      "clean": true,
+      "canonicalRepository": "BitHighlander/electrobun",
+      "canonicalBranch": "keepkey/launcher-env-uaf-fix",
+      "cachedCanonicalTip": "7a9bc757818674dacf2b6e048ed721d4c5187b1f",
+      "cachedBehind": 0,
+      "freshCanonicalVerification": "passed_head_matches_canonical_branch",
+      "pinnedCommitCi": "no_ci_on_pin_accepted_by_sop",
+      "localBuild": {
+        "status": "not_built_on_this_host",
+        "command": null,
+        "log": null
+      },
+      "note": "macOS launchers use separately certified prebuilt cores; Linux and Windows source builds require Vault CI"
+    }
+  ],
+  "submoduleReview": {
+    "hdwalletChangesSince167": [
+      "upstream PR80: capability-gated EIP-712 chunked values and refusal before unsupported signing",
+      "upstream PR81: bounded host-resolved Solana lookup accounts; disallow certificate/schema/proof combinations",
+      "upstream PR82: bounded ERC-7730 recursion and inner-definition request matching",
+      "upstream PR83: refetch empty Features cache before typed-data capability selection"
+    ],
+    "otherRuntimePinsChangedSince167": false,
+    "protoFeegrantFallback": "present in source and fresh compiled entrypoint; staged entrypoint byte-identical",
+    "electrobunLauncherFixes": "reviewed environment-map and argv/executable-path lifetime fixes; upstream v2 migration excluded"
+  },
+  "checks": {
+    "signing": {
+      "status": "passed",
+      "environmentVariablesPresent": true,
+      "keychainValidIdentities": "identity_matched_by_sign_check",
+      "log": "/private/tmp/vault-169-postreboot-host-sign.log",
+      "credentialValuesLoaded": true,
+      "liveAppleCredentialValidation": "passed_make_notary_check"
+    },
+    "preflight": {
+      "status": "passed",
+      "log": "/private/tmp/vault-169-live-preflight.log",
+      "typeDiagnostics": 813,
+      "allowedBaseline": 1033
+    },
+    "protocolPublication": {
+      "installedAlias": "@bithighlander/device-protocol@7.20.0",
+      "rebuiltLocalPackageComparison": "passed",
+      "filesCompared": 40,
+      "allowedDifferences": [
+        "package.json name",
+        "package.json version"
+      ],
+      "freshRegistryTarball": "passed_40_files_match_name_version_only",
+      "log": "/private/tmp/vault-169-protocol-published-pack.log"
+    },
+    "hdwalletReviewTests": {
+      "passed": 89,
+      "failed": 0,
+      "log": "/private/tmp/vault-169-hdwallet-review-tests.log"
+    },
+    "buildContractTests": {
+      "passed": 25,
+      "failed": 0,
+      "log": "/private/tmp/vault-169-build-contracts.log"
+    },
+    "releaseUnitSuite": {
+      "command": "make test-unit",
+      "passed": 2458,
+      "failed": 0,
+      "scriptChecksPassed": 17,
+      "log": "/private/tmp/vault-169-release-unit.log"
+    },
+    "pipelineInspection": {
+      "runtimeExternalPackages": 11,
+      "missingCollectorEntries": [],
+      "installedAndStagedRuntimeExternals": "passed",
+      "fixedAssetFilenames": "passed",
+      "relativeAssetBase": "passed",
+      "installerHasNoInstallDelete": "passed",
+      "intelRustTargetInstalled": true,
+      "generatedProtocolGuard": "passed"
+    },
+    "dependencyInventory": {
+      "status": "regenerated_and_package_json_hashes_verified",
+      "source": "_build/_ext_modules",
+      "packages": 288,
+      "files": 18090,
+      "sizeMB": 111.1,
+      "manifest": "projects/keepkey-vault/artifacts/deps.runtime.json",
+      "sbom": "projects/keepkey-vault/artifacts/sbom.cdx.json",
+      "installScripts": "projects/keepkey-vault/artifacts/deps.install-scripts.txt",
+      "scope": "external runtime dependency inventory regenerated by tagged signed build; not a complete bundled-JavaScript audit or vulnerability scan"
+    },
+    "certifiedEmulator": {
+      "version": "7.17.0",
+      "localHashesArchitectureAndAbi": "passed",
+      "freshCertifiedCiRunVerification": "passed_run_success_and_exact_artifact_digest",
+      "packagedArtifactVerification": "passed_for_both_mac_dmgs_and_signed_update_archives; both architecture text sections match certified source",
+      "artifactExpired": false,
+      "sourceRun": 38171975676,
+      "artifactId": 11714630769,
+      "artifactDigest": "sha256:748e638dbbbd0309db04e242b4c2e25482482ded37e7d808f364a336fa48c5b0",
+      "prebranchPackagedTextVerification": {
+        "arm64": true,
+        "x86_64": true
+      }
+    },
+    "signedBuild": {
+      "command": "make build-signed",
+      "status": "passed",
+      "log": "/private/tmp/vault-169-tagged-build-signed.log"
+    },
+    "platformCi": {
+      "status": "passed",
+      "run": 41787369774,
+      "url": "https://github.com/keepkey/keepkey-vault/actions/runs/41787369774"
+    },
+    "published": true,
+    "appleNotarizationCredentialCheck": {
+      "status": "passed",
+      "log": "/private/tmp/vault-169-notary-check.log"
+    },
+    "prebranchStableBuild": {
+      "command": "make build-stable",
+      "status": "completed",
+      "log": "/private/tmp/vault-169-prebranch-stable-build.log",
+      "sessionId": 69134,
+      "artifactUsedForRelease": false,
+      "note": "Performed before release commit; fresh tagged build required and queued after CI."
+    },
+    "macosArtifacts": {
+      "arm64": {
+        "arch": "arm64",
+        "version": "1.6.9",
+        "sourceCommit": "6e12d01ea23ebfa24f8e6f7358efcccd3b224484",
+        "extractedApp": "/private/tmp/vault-169-verify-arm64-jali7amf/keepkey-vault.app",
+        "archiveSha256": "41372c1ee6f89be36006a7e88c9d2e966e7cefc87275f8bd87035b0683891bef",
+        "dmgSha256": "1ac8c749f30474b4435ff538c31be9c14ebcaee5d058f8e4bb5f5229e2668199",
+        "bundleSignature": true,
+        "bundleStructure": true,
+        "dmgSignature": true,
+        "stapledTicket": true,
+        "gatekeeper": true,
+        "bunAllowJit": true,
+        "dmgAppMatchesUpdateArchive": true,
+        "packagedEmulatorSha256": "7f18f01f64b66794adccbe5e8efb48aa801f1df9e983aef7bb9bbb852dff05c9",
+        "emulatorTextMatches": {
+          "arm64": true,
+          "x86_64": true
+        }
+      },
+      "x86_64": {
+        "arch": "x86_64",
+        "version": "1.6.9",
+        "sourceCommit": "6e12d01ea23ebfa24f8e6f7358efcccd3b224484",
+        "extractedApp": "/private/tmp/vault-169-verify-x86_64-xg94ybal/keepkey-vault.app",
+        "archiveSha256": "b0c64882612d2e93fe76ca7f4d6ac0622d087ab686580ca02079e29011b65294",
+        "dmgSha256": "f7d93183d1e3ec4327ea3d81c8a60b0fd817b27aaddd36003d2b52e22ecde480",
+        "bundleSignature": true,
+        "bundleStructure": true,
+        "dmgSignature": true,
+        "stapledTicket": true,
+        "gatekeeper": true,
+        "bunAllowJit": true,
+        "dmgAppMatchesUpdateArchive": true,
+        "packagedEmulatorSha256": "9663a702a8177f9cc2e97a0a58a9662c82f19e260e21d5fd4a862740d91dcdb3",
+        "emulatorTextMatches": {
+          "arm64": true,
+          "x86_64": true
+        }
+      }
+    },
+    "appleSiliconApplicationStartup": {
+      "arch": "arm64",
+      "app": "/private/tmp/vault-169-verify-arm64-jali7amf/keepkey-vault.app",
+      "missingDependencies": false,
+      "directBackendAliveAfter12s": false,
+      "launchServicesBootComplete": true
+    },
+    "packagedEmulatorLibrarySmoke": {
+      "library": "/private/tmp/vault-169-verify-arm64-jali7amf/keepkey-vault.app/Contents/Resources/app/emulator/libkkemu.dylib",
+      "fixtureSeedOnly": true,
+      "broadcast": false,
+      "checks": {
+        "firmwareVersion": "7.17.0",
+        "litecoin44": true,
+        "litecoin49": true,
+        "litecoin84": true,
+        "consecutiveVerifiedMessageSignatures": 3,
+        "rebootPreservesSeed": true,
+        "oledFrames": 39,
+        "confirmationRequests": 7
+      },
+      "success": true
+    },
+    "interactiveEmulatorUiSmoke": {
+      "status": "pending",
+      "items": [
+        "Create/recover emulator through packaged UI with overrides absent",
+        "Encrypted flash persistence through packaged UI",
+        "Certified ETH-to-SOL ClearSign review without Advanced Mode"
+      ],
+      "note": "In-memory packaged-library smoke is not the full interactive UI gate. Pending checks disclosed in prerelease notes."
+    },
+    "releaseChecksums": {
+      "macLinuxOnWire": "passed_8_files_after_signing",
+      "combinedAfterWindowsUpload": "passed_9_files_downloaded_and_matched_to_GitHub_digests",
+      "log": "/private/tmp/vault-169-final-release-sums.log"
+    }
+  },
+  "blockingConditions": [],
+  "nextSopSteps": [
+    "Regroup and run the recorded next testing priorities from reconciled develop",
+    "Review the preserved NEAR refund safety fix for the next candidate",
+    "Complete the pending packaged emulator UI checks",
+    "Verify blue gateway deployment state before relying on it for balance/provider tests",
+    "Confirm the next release version and follow the branch-push/CI/tag/signing sequence"
+  ],
+  "scopeNotes": [
+    "Firmware source reconciliation is excluded by the Vault SOP; no firmware submodule was inspected or changed during this review",
+    "Windows production packaging is a separate Windows-host process and is not a blocker for this macOS/Linux session"
+  ],
+  "executionEnvironment": {
+    "hostNetwork": "working_after_reboot",
+    "signingIdentity": "available",
+    "notarizationCredentials": "accepted"
+  },
+  "tag": {
+    "name": "v1.6.9",
+    "signed": true,
+    "pushed": true,
+    "commit": "6e12d01ea23ebfa24f8e6f7358efcccd3b224484"
+  },
+  "publication": {
+    "url": "https://github.com/keepkey/keepkey-vault/releases/tag/v1.6.9",
+    "publishedAt": "2026-11-04T07:33:58Z",
+    "isDraft": false,
+    "isPrerelease": true,
+    "targetCommitish": "6e12d01ea23ebfa24f8e6f7358efcccd3b224484",
+    "latestStableUnchanged": "v1.6.7",
+    "windows": "Separate Windows process uploaded installer and SHA256SUMS-windows; signature and source provenance not attested by this Mac session."
+  },
+  "concurrentReleasePush": {
+    "sha": "c4ab07162ce3629fdd6dc0500ca9890d118b5227",
+    "workflowRun": 41791049004,
+    "workflowConclusion": "cancelled",
+    "reason": "Prevent unsigned artifacts and later source from overwriting the original signed prerelease selected by the user. The commit was preserved."
+  },
+  "knownLimitations": [
+    "NEAR Intents XRP/TRON (including USDT-TRON) refund-address and required-memo safety fix is excluded by explicit user choice. Avoid these routes; warning included in public release notes.",
+    "Interactive emulator UI QA remains pending."
+  ],
+  "postReleaseIntegration": {
+    "status": "master_and_develop_merged_ready_for_next_testing_round",
+    "releaseToMaster": {
+      "pr": 610,
+      "url": "https://github.com/keepkey/keepkey-vault/pull/610",
+      "headBranch": "sync/v1.6.9-to-master",
+      "headSha": "6e12d01ea23ebfa24f8e6f7358efcccd3b224484",
+      "expectedBaseSha": "ba89f2dddb1cd2a334cf2762442d9eee76a11c31",
+      "buildRun": 41854632100,
+      "codeqlStatus": "success_after_reviewed_false_positive_triage",
+      "falsePositiveAlerts": [
+        4,
+        6,
+        7,
+        9
+      ],
+      "merged": true,
+      "mergeCommit": "3920ca3f7bc94056ba440fb8a304fea2a148f8a4",
+      "mergedAt": "2026-11-04T15:23:55Z",
+      "treeEqualsPublishedTag": true,
+      "tree": "5b121a55ad4f7e5c3300d2561d396208d8470e97",
+      "freshLinuxAndCodeql": "passed",
+      "freshMacos": "cancelled_before_runner_assignment",
+      "originalTaggedMacosAndPackagedIntelSmoke": "passed"
+    },
+    "masterToDevelop": {
+      "pr": 611,
+      "url": "https://github.com/keepkey/keepkey-vault/pull/611",
+      "headSha": "3920ca3f7bc94056ba440fb8a304fea2a148f8a4",
+      "expectedBaseSha": "6763a4f58f1a93746f19ac8d91f3e0fd6c053185",
+      "status": "merged",
+      "mergeCommit": "75f81a6b22c5975de0435630d7dcdd33beb18671",
+      "mergedAt": "2026-11-04T15:42:07Z",
+      "treeEqualsPublishedTag": true,
+      "tree": "5b121a55ad4f7e5c3300d2561d396208d8470e97",
+      "ciWaitWaivedByUser": true,
+      "authorization": "User explicitly instructed not to wait for CI and to force merge the released source into develop."
+    },
+    "preservedLaterFix": {
+      "sha": "c4ab07162ce3629fdd6dc0500ca9890d118b5227",
+      "branch": "release/1.6.9",
+      "includedInPublishedTag": false
+    },
+    "recordedAt": "2026-11-04T15:48:44.444891+00:00",
+    "nextTestingPriorities": [
+      {
+        "priority": 1,
+        "area": "NEAR refund safety",
+        "checks": [
+          "Review and run the 27-case regression suite for the preserved fix",
+          "Verify sender/refundTo independently in Pioneer and 1Click for BTC, SOL, XRP, TRX and USDT-TRON",
+          "Refuse missing sender/deposit addresses, unregistered deposits and required memo/destination tags"
+        ],
+        "broadcast": false
+      },
+      {
+        "priority": 2,
+        "area": "Balances and Litecoin",
+        "checks": [
+          "Confirm Legacy/Wrapped/Native receive addresses and device verification follow the selected account",
+          "Exercise incoming/send/confirmation balance refresh and overlapping resets",
+          "Verify selected Pioneer endpoint is used consistently for balances, history, quotes and live events"
+        ],
+        "note": "Gateway blue cutover and legacy Pioneer changes are separate from the Vault release; do not assume prepared infrastructure changes are deployed."
+      },
+      {
+        "priority": 3,
+        "area": "Packaged application and emulator",
+        "checks": [
+          "Create/recover an emulator using the bundled library with overrides absent",
+          "Verify OLED preview and encrypted flash persistence after reopening",
+          "Certified ETH-to-SOL ClearSign review without Advanced Mode",
+          "Three consecutive signing operations and clean shutdown/restart"
+        ],
+        "fixtureSeedOnly": true,
+        "broadcast": false
+      },
+      {
+        "priority": 4,
+        "area": "Next release",
+        "checks": [
+          "Cut the next release branch from reconciled develop after testing",
+          "Confirm next version before bump/tag",
+          "Repeat the runtime-submodule and build preflight gates",
+          "Push branch, green CI, tag, sign/notarize/staple, verify served hashes and publish prerelease"
+        ]
+      }
+    ],
+    "liveHealthSnapshot": {
+      "recordedAt": "2026-11-04T15:21:27.472276+00:00",
+      "endpoints": [
+        {
+          "host": "api.keepkey.info",
+          "path": "/api/v1/health",
+          "httpStatus": 200,
+          "status": "degraded",
+          "service": "pioneer-server-v3",
+          "version": "1.4.5"
+        },
+        {
+          "host": "api-blue.keepkey.info",
+          "path": "/api/v1/health",
+          "httpStatus": 200,
+          "status": "degraded",
+          "service": "pioneer-server-v3",
+          "version": "1.4.5"
+        },
+        {
+          "host": "oracles.cc",
+          "path": "/api/v1/health",
+          "httpStatus": 200,
+          "status": "ok",
+          "service": "keepkey-gateway",
+          "revision": "bff70f2a83e2db01a7acb8f06d2dd714974ceaf3"
+        }
+      ],
+      "conclusion": "The blue health endpoint still identifies pioneer-server-v3 1.4.5; the gateway service is observed on oracles.cc. Do not assume the prepared blue gateway cutover is live."
+    },
+    "testingBranch": {
+      "name": "test/post-1.6.9",
+      "base": "public/develop",
+      "baseSha": "75f81a6b22c5975de0435630d7dcdd33beb18671",
+      "pushed": false,
+      "versionBumped": false,
+      "preservesExistingWorkingNotes": true
+    }
+  }
+}

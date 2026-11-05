@@ -1,3 +1,4 @@
+import { useUiTranslation } from "../i18n/ui"
 import { useState, useEffect, useCallback } from "react"
 import { Box, Flex, Text, VStack, IconButton, Image } from "@chakra-ui/react"
 import { useTranslation } from "react-i18next"
@@ -57,6 +58,8 @@ function formatDate(ts: number): string {
 }
 
 export function PairedAppsPanel({ open, onClose }: PairedAppsPanelProps) {
+  const uiText = useUiTranslation()
+
 	const [apps, setApps] = useState<PairedAppInfo[]>([])
 	const [loading, setLoading] = useState(false)
 	const [revoking, setRevoking] = useState<string | null>(null)
@@ -137,7 +140,7 @@ export function PairedAppsPanel({ open, onClose }: PairedAppsPanelProps) {
 						({apps.length})
 					</Text>
 					<DocsLink href={DOCS_LINKS.settingsPairing} ml="1" />
-					<DocsLink href={watch('course-11-app-connections')} label="Watch video" />
+					<DocsLink href={watch('course-11-app-connections')} label={uiText("Watch video")} />
 				</Flex>
 				<IconButton
 					aria-label={t('pairedAppsPanel.closePairedApps')}

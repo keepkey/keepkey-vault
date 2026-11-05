@@ -53,5 +53,7 @@
 	"invalidSolanaAddress": "Недействительный адрес Solana — должен содержать 32-44 символа base58",
 	"invalidTronAddress": "Недействительный адрес Tron — должен начинаться с T (34 символа)",
 	"invalidTonAddress": "Недействительный адрес TON",
-	"invalidZcashShieldedAddress": "Недействительный защищённый адрес — должен начинаться с u1"
+	"invalidZcashShieldedAddress": "Недействительный защищённый адрес — должен начинаться с u1",
+	"feeCustom": "Свой",
+	"invalidAmount": "Введите десятичную сумму без разделителей тысяч, например 1,5."
 }

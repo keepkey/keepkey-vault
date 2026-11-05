@@ -23,6 +23,13 @@
 	"incomingTx": {
 		"onChain": "{{chain}} · bakiye yenileniyor",
 		"refreshing": "Bakiye yenileniyor",
-		"title": "Gelen ödeme"
-	}
+		"title": "Gelen ödeme",
+		"activityOnChain": "{{chain}} · bakiye yenilendi"
+	},
+	"language": "Dil",
+	"currency": "Para birimi",
+	"numberFormat": "Sayı biçimi",
+	"usdValues": "Değerler USD olarak gösterilir. Bölgesel sayı biçimini aşağıdan değiştirebilirsiniz.",
+	"somethingWentWrong": "Bir hata oluştu",
+	"reload": "Yeniden yükle"
 }

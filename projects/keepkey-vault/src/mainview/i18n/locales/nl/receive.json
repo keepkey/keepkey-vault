@@ -12,5 +12,8 @@
 	"derivingAddress": "Adres afleiden...",
 	"noAddressDerived": "Nog geen adres afgeleid",
 	"deriveAddress": "Adres afleiden",
-	"account": "Account {{index}}"
+	"account": "Account {{index}}",
+	"btcAccountType": {
+		"learnMore": "Meer informatie"
+	}
 }

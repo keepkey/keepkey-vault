@@ -2,7 +2,7 @@ import { useCallback, useMemo } from "react"
 import CountUp from "react-countup"
 import { Text, type TextProps } from "@chakra-ui/react"
 import { useFiat } from "../lib/fiat-context"
-import { getFiatConfig } from "../../shared/fiat"
+import { getFiatConfig, fiatDisplayCurrency } from "../../shared/fiat"
 
 interface AnimatedUsdProps extends TextProps {
 	value: number
@@ -19,7 +19,8 @@ const PRIVATE_MASK = "••••••"
 
 /** Animated fiat counter. Delegates all number+symbol formatting to Intl.NumberFormat. */
 export function AnimatedUsd({ value, prefix = "", suffix = "", duration = 1.5, decimals, color = "#23DCC8", ...textProps }: AnimatedUsdProps) {
-	const { currency, locale, privateModeEnabled } = useFiat()
+	const { currency: requestedCurrency, locale, privateModeEnabled } = useFiat()
+	const currency = fiatDisplayCurrency(requestedCurrency)
 	const cfg = getFiatConfig(currency)
 	const dec = decimals ?? cfg.decimals
 

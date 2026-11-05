@@ -1,3 +1,4 @@
+import { useUiTranslation } from "../i18n/ui"
 import { useState, useEffect, useRef } from "react"
 import { Box, Flex, Text, Button, Spinner, IconButton, Input } from "@chakra-ui/react"
 import { FaCopy, FaCheck, FaTimes, FaChevronDown, FaChevronUp, FaExternalLinkAlt } from "react-icons/fa"
@@ -87,6 +88,8 @@ export function HiveAccountPanel({ activeKey, color, loading, deriveError, onRet
 	// balance display and was previously unreachable by any refresh path).
 	refreshNonce?: number
 }) {
+  const uiText = useUiTranslation()
+
 	const [state, setState] = useState<"loading" | "has" | "none" | "error">("loading")
 	const [account, setAccount] = useState<HiveAccount | null>(null)
 
@@ -107,8 +110,8 @@ export function HiveAccountPanel({ activeKey, color, loading, deriveError, onRet
 	if (!activeKey) {
 		if (deriveError || !loading) return (
 			<Box className="v3-glass-card" p="4" mt="4">
-				<Text fontSize="13px" color="var(--text-2)">{deriveError || "Couldn't derive your Hive key from the device."}</Text>
-				{onRetryDerive && <Button mt="3" size="sm" variant="outline" {...outlineBtn} onClick={onRetryDerive}>Retry</Button>}
+				<Text fontSize="13px" color="var(--text-2)">{deriveError || uiText("Couldn't derive your Hive key from the device.")}</Text>
+				{onRetryDerive && <Button mt="3" size="sm" variant="outline" {...outlineBtn} onClick={onRetryDerive}>{uiText("Retry")}</Button>}
 			</Box>
 		)
 		return <Flex justify="center" py="10"><Spinner color={color} /></Flex>
@@ -118,17 +121,17 @@ export function HiveAccountPanel({ activeKey, color, loading, deriveError, onRet
 
 	if (state === "error") return (
 		<Box className="v3-glass-card" p="4" mt="4">
-			<Text fontSize="13px" color="var(--text-2)">Couldn't reach the Hive account service. Try again shortly.</Text>
-			<Button mt="3" size="sm" variant="outline" {...outlineBtn} onClick={refresh}>Retry</Button>
+			<Text fontSize="13px" color="var(--text-2)">{uiText("Couldn't reach the Hive account service. Try again shortly.")}</Text>
+			<Button mt="3" size="sm" variant="outline" {...outlineBtn} onClick={refresh}>{uiText("Retry")}</Button>
 		</Box>
 	)
 
 	if (state === "has" && account) return (
 		<Box className="v3-glass-card" p="4" mt="4">
-			<Text fontSize="11px" color="var(--text-3)" textTransform="uppercase" letterSpacing="0.18em">Hive Account</Text>
+			<Text fontSize="11px" color="var(--text-3)" textTransform="uppercase" letterSpacing="0.18em">{uiText("Hive Account")}</Text>
 			<Flex align="center" gap="1" mt="1">
 				<Text fontSize="22px" fontWeight="700" color="var(--text-0)">@{account.name}</Text>
-				<CopyBtn value={account.name} label="copy Hive account name" />
+				<CopyBtn value={account.name} label={uiText("copy Hive account name")} />
 			</Flex>
 			<Flex gap="6" mt="3" wrap="wrap">
 				<Box><Text fontSize="11px" color="var(--text-3)">HIVE</Text><Text fontSize="14px" fontFamily="mono" color="var(--text-1)">{account.hive}</Text></Box>
@@ -137,7 +140,7 @@ export function HiveAccountPanel({ activeKey, color, loading, deriveError, onRet
 				{account.rcPercent != null && <Box><Text fontSize="11px" color="var(--text-3)">RC</Text><Text fontSize="14px" fontFamily="mono" color="var(--text-1)">{account.rcPercent}%</Text></Box>}
 			</Flex>
 			<Flex gap="2" mt="4" wrap="wrap" align="center">
-				<Text fontSize="11px" color="var(--text-3)" textTransform="uppercase" letterSpacing="0.18em" mr="1">Profile</Text>
+				<Text fontSize="11px" color="var(--text-3)" textTransform="uppercase" letterSpacing="0.18em" mr="1">{uiText("Profile")}</Text>
 				{[
 					{ label: "PeakD", url: `https://peakd.com/@${account.name}` },
 					{ label: "Hive.blog", url: `https://hive.blog/@${account.name}` },
@@ -157,6 +160,8 @@ export function HiveAccountPanel({ activeKey, color, loading, deriveError, onRet
 }
 
 function HiveOnboardWizard({ color, activeKey, onCreated }: { color: string; activeKey: string; onCreated: () => void }) {
+  const uiText = useUiTranslation()
+
 	const [keys, setKeys] = useState<RoleKeys | null>(null)
 	const [showKeys, setShowKeys] = useState(false)
 	const [username, setUsername] = useState("")
@@ -269,25 +274,19 @@ function HiveOnboardWizard({ color, activeKey, onCreated }: { color: string; act
 
 	if (needsFunding !== null) return (
 		<Box className="v3-glass-card" p="5" mt="4">
-			<Text fontSize="15px" fontWeight="700" color="var(--text-0)">Fund your ETH address first</Text>
-			<Text fontSize="12px" color="var(--text-2)" mt="2" lineHeight="1.55">
-				Sponsored Hive accounts are free, but each one needs a funded Ethereum address so the
-				service can't be drained. Send <b>any</b> amount of mainnet ETH to your KeepKey ETH
-				address below, then retry. One sponsored account per ETH address.
-			</Text>
+			<Text fontSize="15px" fontWeight="700" color="var(--text-0)">{uiText("Fund your ETH address first")}</Text>
+			<Text fontSize="12px" color="var(--text-2)" mt="2" lineHeight="1.55">{uiText("Sponsored Hive accounts are free, but each one needs a funded Ethereum address so the service can't be drained. Send")}{" "}<b>{uiText("any")}</b>{" "}{uiText("amount of mainnet ETH to your KeepKey ETH address below, then retry. One sponsored account per ETH address.")}</Text>
 			{needsFunding ? (
 				<Flex mt="3" p="3" borderRadius="md" bg="var(--surface-1)" align="center" gap="2">
 					<Text fontSize="12px" fontFamily="mono" color="var(--text-1)" flex="1" truncate>{needsFunding}</Text>
-					<IconButton aria-label="copy ETH address" size="xs" variant="ghost"
+					<IconButton aria-label={uiText("copy ETH address")} size="xs" variant="ghost"
 						onClick={() => navigator.clipboard.writeText(needsFunding)}>
 						<Box as={FaCopy} fontSize="12px" color="var(--text-3)" />
 					</IconButton>
 				</Flex>
-			) : <Text fontSize="11px" color="var(--text-3)" mt="3">Open the Ethereum asset to view your receive address.</Text>}
+			) : <Text fontSize="11px" color="var(--text-3)" mt="3">{uiText("Open the Ethereum asset to view your receive address.")}</Text>}
 			<Button mt="4" w="100%" bg={color} color="white" _hover={{ filter: "brightness(1.1)" }}
-				onClick={() => setNeedsFunding(null)}>
-				I've funded it — retry
-			</Button>
+				onClick={() => setNeedsFunding(null)}>{uiText("I've funded it — retry")}</Button>
 		</Box>
 	)
 
@@ -295,20 +294,17 @@ function HiveOnboardWizard({ color, activeKey, onCreated }: { color: string; act
 		<Box className="v3-glass-card" p="6" mt="4" position="relative" overflow="hidden" textAlign="center">
 			<Confetti />
 			<Text fontSize="40px" lineHeight="1">🎉</Text>
-			<Text fontSize="18px" fontWeight="700" color="var(--text-0)" mt="2">Account created!</Text>
+			<Text fontSize="18px" fontWeight="700" color="var(--text-0)" mt="2">{uiText("Account created!")}</Text>
 			<Text fontSize="24px" fontWeight="700" color={color} mt="1">@{created.name}</Text>
-			<Text fontSize="12px" color="var(--text-2)" mt="2" lineHeight="1.5">
-				Secured by KeepKey — sponsored by @keepkey, no fee. Loading your account…
-			</Text>
+			<Text fontSize="12px" color="var(--text-2)" mt="2" lineHeight="1.5">{uiText("Secured by KeepKey — sponsored by @keepkey, no fee. Loading your account…")}</Text>
 			{created.txid && (
 				<Text fontSize="10px" fontFamily="mono" color="var(--text-3)" mt="2" truncate cursor="pointer"
-					onClick={() => rpcRequest("openUrl", { url: `https://hiveblocks.com/tx/${created.txid}` }).catch(() => {})}>
-					tx {created.txid.slice(0, 16)}…
+					onClick={() => rpcRequest("openUrl", { url: `https://hiveblocks.com/tx/${created.txid}` }).catch(() => {})}>{uiText("tx")}{" "}{created.txid.slice(0, 16)}…
 				</Text>
 			)}
 			<Button mt="3" size="sm" bg={color} color="white" _hover={{ filter: "brightness(1.1)" }}
 				disabled={viewing} opacity={viewing ? 0.6 : 1} onClick={onViewAccount}>
-				{viewing ? <><Spinner size="sm" mr="2" /> Checking…</> : "View account"}
+				{viewing ? <><Spinner size="sm" mr="2" />{" "}{uiText("Checking…")}</> : uiText("View account")}
 			</Button>
 			{viewMsg && <Text fontSize="11px" color="var(--text-3)" mt="2">{viewMsg}</Text>}
 		</Box>
@@ -316,14 +312,11 @@ function HiveOnboardWizard({ color, activeKey, onCreated }: { color: string; act
 
 	return (
 		<Box className="v3-glass-card" p="4" mt="4">
-			<Text fontSize="15px" fontWeight="700" color="var(--text-0)">Create your Hive account</Text>
-			<Text fontSize="12px" color="var(--text-2)" mt="1.5" lineHeight="1.55">
-				Hive funds go to a <b>username</b>, not a key. KeepKey sponsors the on-chain creation — you pay nothing
-				and your keys never leave the device. Pick a name and confirm on your device.
-			</Text>
+			<Text fontSize="15px" fontWeight="700" color="var(--text-0)">{uiText("Create your Hive account")}</Text>
+			<Text fontSize="12px" color="var(--text-2)" mt="1.5" lineHeight="1.55">{uiText("Hive funds go to a")}{" "}<b>{uiText("username")}</b>{uiText(", not a key. KeepKey sponsors the on-chain creation — you pay nothing and your keys never leave the device. Pick a name and confirm on your device.")}</Text>
 
 			<Box mt="3" position="relative">
-				<Input value={username} onChange={e => setUsername(e.target.value)} placeholder="username"
+				<Input value={username} onChange={e => setUsername(e.target.value)} placeholder={uiText("username")}
 					autoCapitalize="none" autoCorrect="off" spellCheck={false}
 					bg="var(--surface-1)" border="1px solid" borderColor="var(--border)" fontSize="14px" pr="9" />
 				<Box position="absolute" right="3" top="50%" transform="translateY(-50%)">
@@ -335,25 +328,25 @@ function HiveOnboardWizard({ color, activeKey, onCreated }: { color: string; act
 			{avail && !avail.available && avail.reason && (
 				<Text fontSize="11px" color="#F87171" mt="1.5">{avail.reason}</Text>
 			)}
-			{avail?.available && <Text fontSize="11px" color="#34D399" mt="1.5">@{name} is available</Text>}
+			{avail?.available && <Text fontSize="11px" color="#34D399" mt="1.5">@{name}{" "}{uiText("is available")}</Text>}
 
 			<Button mt="3" w="100%" bg={color} color="white" _hover={{ filter: "brightness(1.1)" }}
 				disabled={!canCreate} opacity={canCreate ? 1 : 0.5} onClick={create}>
-				{creating ? <><Spinner size="sm" mr="2" /> Confirm on your device…</> : "Create account"}
+				{creating ? <><Spinner size="sm" mr="2" />{" "}{uiText("Confirm on your device…")}</> : uiText("Create account")}
 			</Button>
 			{error && <Text fontSize="11px" color="#F87171" mt="2" textAlign="center">{error}</Text>}
 
 			<Flex mt="3" align="center" gap="1.5" cursor="pointer" onClick={() => setShowKeys(s => !s)}>
 				<Box as={showKeys ? FaChevronUp : FaChevronDown} fontSize="9px" color="var(--text-3)" />
-				<Text fontSize="11px" color="var(--text-3)">Device keys for this account</Text>
+				<Text fontSize="11px" color="var(--text-3)">{uiText("Device keys for this account")}</Text>
 			</Flex>
 			{showKeys && (
 				<Box mt="2" p="3" borderRadius="md" bg="var(--surface-1)">
 					{keys ? (<>
-						<KeyRow label="owner" value={keys.owner} />
-						<KeyRow label="active" value={keys.active} />
-						<KeyRow label="posting" value={keys.posting} />
-						<KeyRow label="memo" value={keys.memo} />
+						<KeyRow label={uiText("owner")} value={keys.owner} />
+						<KeyRow label={uiText("active")} value={keys.active} />
+						<KeyRow label={uiText("posting")} value={keys.posting} />
+						<KeyRow label={uiText("memo")} value={keys.memo} />
 					</>) : <Flex justify="center" py="3"><Spinner size="sm" color={color} /></Flex>}
 				</Box>
 			)}

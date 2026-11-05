@@ -4,6 +4,7 @@ import { classifyFirmwareImage, type EmbeddedBootloader, type FirmwareImageKind 
 import { scanBundledImages, verifyFirmwareSignatures, type BundledImage } from './firmware-signature'
 import * as path from 'path'
 import * as core from '@keepkey/hdwallet-core'
+import * as Messages from '@keepkey/device-protocol/lib/messages_pb'
 import { HIDKeepKeyAdapter } from '@keepkey/hdwallet-keepkey-nodehid'
 import { NodeWebUSBKeepKeyAdapter } from '@keepkey/hdwallet-keepkey-nodewebusb'
 import { usb } from 'usb'
@@ -182,6 +183,8 @@ export class EngineController extends EventEmitter {
   private promptPinActive = false
   /** Set while wipeDevice owns the device; keeps the PIN auto-prompt and REST device calls off it. */
   wipeInProgress = false
+  /** Set while Desktop must be the device's only user (see GateState.exclusive). */
+  exclusiveHolder: string | null = null
   /** Device id of a wipe the device couldn't hear (PIN-failure countdown): sent on its next connection, before any PIN request. */
   wipeOnReconnect: string | null = null
   /** The connection the wipe was deferred on: the wipe goes out only on a newer one. */
@@ -249,6 +252,7 @@ export class EngineController extends EventEmitter {
     if (!this.wallet?.transport) return
     const transport = this.wallet.transport
     transport.removeAllListeners(String(core.Events.PIN_REQUEST))
+    transport.removeAllListeners(String(Messages.MessageType.MESSAGETYPE_PINMATRIXREQUEST))
     transport.removeAllListeners(core.Events.FAILURE)
     transport.removeAllListeners(String(core.Events.BUTTON_REQUEST))
     transport.removeAllListeners(String(core.Events.PASSPHRASE_REQUEST))
@@ -272,14 +276,16 @@ export class EngineController extends EventEmitter {
       wipeOnReconnect: !!this.wipeOnReconnect,
       // Paired but not read yet counts as locked: the read may well say needs_pin.
       locked: this.isLocked || !this.cachedFeatures,
+      exclusive: this.exclusiveHolder,
     }))
 
-    transport.on(String(core.Events.PIN_REQUEST), () => {
+    // The convenience PIN_REQUEST event drops the firmware's matrix type.
+    // Change PIN may ask for Current before NewFirst/NewSecond, so a request
+    // counter cannot tell the UI which PIN it is entering.
+    transport.on(String(Messages.MessageType.MESSAGETYPE_PINMATRIXREQUEST), (ev: any) => {
       this.pinRequestCount++
-      let type: PinRequestType = 'current'
-      if (this.setupInProgress) {
-        type = this.pinRequestCount === 1 ? 'new-first' : 'new-second'
-      }
+      const matrixType = ev?.message?.type ?? ev?.proto?.getType?.()
+      const type: PinRequestType = matrixType === 2 ? 'new-first' : matrixType === 3 ? 'new-second' : 'current'
       console.log(`[Engine] PIN_REQUEST → type=${type} (count=${this.pinRequestCount}, setup=${this.setupInProgress})`)
       // A request found the device locked (auto-lock, clear-session): from here Desktop's
       // prompt owns the unlock, and other REST requests are refused (device-gate.ts).
@@ -1279,6 +1285,23 @@ export class EngineController extends EventEmitter {
     return emuGatedConfirm(fn, this.emuDelegate, { interactive: false })
   }
 
+  /** Setup choices and PIN changes need the same visible buttons as signing.
+   * Auto-confirm would decide questions such as "Create PIN?" for the user. */
+  private async confirmDeviceSetup<T>(fn: () => Promise<T>, operation: string): Promise<T> {
+    if (!this.isEmulator) return fn()
+    const { emuInteractiveConfirm } = await import('./emulator-window')
+    try {
+      return await emuInteractiveConfirm(fn, { operation }, this.emuDelegate)
+    } catch (err) {
+      // Keep reset/recovery's cancellation classification when the visible
+      // emulator Reject button supplied the firmware's negative decision.
+      if (/rejected by user on emulator/i.test(extractErrorMessage(err))) {
+        throw new Error('Action cancelled on emulator')
+      }
+      throw err
+    }
+  }
+
   /**
    * Connect the engine to the running emulator.
    * Creates an hdwallet adapter backed by FFI emuRead/emuWrite,
@@ -1792,11 +1815,11 @@ export class EngineController extends EventEmitter {
     if (!this.wallet) throw new Error('No device connected')
     this.updatePhase = 'flashing'
     this.emit('state-change', this.getDeviceState())
-    this.emit('firmware-progress', { percent: 0, message: 'Starting bootloader update...' })
+    this.emit('firmware-progress', { percent: 0, stage: 'startingBootloader', message: 'Starting bootloader update...' })
 
     try {
       const channel = this.getChannelEntry()
-      this.emit('firmware-progress', { percent: 10, message: 'Loading bootloader...' })
+      this.emit('firmware-progress', { percent: 10, stage: 'loadingBootloader', message: 'Loading bootloader...' })
       const firmware = channel
         ? await this.loadBinary(channel.bootloader.url)
         : Buffer.from(await (await fetch(`https://github.com/keepkey/keepkey-firmware/releases/download/v${this.latestBootloader}/blupdater.bin`)).arrayBuffer())
@@ -1817,25 +1840,25 @@ export class EngineController extends EventEmitter {
       // Real hang protection requires swapping readSync() for the async read
       // API in hdwallet-keepkey-nodehid — tracked as follow-up. Until then,
       // unrecoverable hangs are handled via user-initiated reconnect/retry.
-      this.emit('firmware-progress', { percent: 30, message: 'Confirm on device, then erasing current firmware...' })
+      this.emit('firmware-progress', { percent: 30, stage: 'confirmErase', message: 'Confirm on device, then erasing current firmware...' })
       await this.wallet.firmwareErase()
 
-      this.emit('firmware-progress', { percent: 50, message: 'Look at your KeepKey — confirm to upload the bootloader…' })
+      this.emit('firmware-progress', { percent: 50, stage: 'uploadBootloader', message: 'Look at your KeepKey — confirm to upload the bootloader…' })
       await this.wallet.firmwareUpload(firmware)
 
-      this.emit('firmware-progress', { percent: 90, message: 'Bootloader uploaded. Follow the instructions on your KeepKey.' })
+      this.emit('firmware-progress', { percent: 90, stage: 'bootloaderUploaded', message: 'Bootloader uploaded. Follow the instructions on your KeepKey.' })
       this.updatePhase = 'rebooting'
       this.sawDetachSinceFlash = false
       this.clearWallet()
       this.emit('state-change', this.getDeviceState())
-      this.emit('firmware-progress', { percent: 100, message: 'Bootloader update complete' })
+      this.emit('firmware-progress', { percent: 100, stage: 'complete', message: 'Bootloader update complete' })
       this.startRebootPoll()
     } catch (err: any) {
       this.updatePhase = 'idle'
       this.emit('state-change', this.getDeviceState())
       this.emit('firmware-progress', {
         percent: 0,
-        message: 'Bootloader update failed',
+        stage: 'failed', message: 'Bootloader update failed',
         error: extractErrorMessage(err),
       })
       throw err
@@ -1859,14 +1882,14 @@ export class EngineController extends EventEmitter {
     assertInstallAllowed(plan, opts.acknowledgeWipe)
     this.updatePhase = 'flashing'
     this.emit('state-change', this.getDeviceState())
-    this.emit('firmware-progress', { percent: 0, message: 'Starting firmware update...' })
+    this.emit('firmware-progress', { percent: 0, stage: 'startingFirmware', message: 'Starting firmware update...' })
 
     try {
       // Bitcoin-only lives in its own manifest field (firmwareBitcoinOnly) and
       // REQUIRES a manifest entry — there's no github fallback for it (planInstall).
       const fwEntry = plan.entry
       console.log(`[Engine] Installing ${plan.bitcoinOnly ? 'bitcoin-only' : 'multi-chain'} firmware v${plan.version}${plan.wipeReason ? ` (wipe acknowledged: ${plan.wipeReason})` : ''}`)
-      this.emit('firmware-progress', { percent: 10, message: 'Loading firmware...' })
+      this.emit('firmware-progress', { percent: 10, stage: 'loadingFirmware', message: 'Loading firmware...' })
       const firmware = fwEntry
         ? await this.loadBinary(fwEntry.url)
         : Buffer.from(await (await fetch(`https://github.com/keepkey/keepkey-firmware/releases/download/v${this.latestFirmware}/firmware.keepkey.bin`)).arrayBuffer())
@@ -1884,7 +1907,7 @@ export class EngineController extends EventEmitter {
           throw new Error(`Firmware binary integrity check failed: expected ${fwEntry.hash}, got ${downloadedHash}`)
         }
         console.log(`[Engine] Firmware binary integrity verified${hasKpkyHeader ? ' (KPKY header stripped)' : ''}`)
-        this.emit('firmware-progress', { percent: 20, message: `Binary verified — sha256 matches the pinned release hash (${downloadedHash.slice(0, 16)}…)` })
+        this.emit('firmware-progress', { percent: 20, stage: 'verified', message: `Binary verified — sha256 matches the pinned release hash (${downloadedHash.slice(0, 16)}…)` })
       }
 
       // The hash pins the manifest entry; this pins the lineage, so a manifest
@@ -1896,25 +1919,25 @@ export class EngineController extends EventEmitter {
 
       // See note in startBootloaderUpdate: no JS timeout can cover a readSync
       // stall; real fix is async HID reads in hdwallet.
-      this.emit('firmware-progress', { percent: 30, message: 'Confirm on device, then erasing current firmware...' })
+      this.emit('firmware-progress', { percent: 30, stage: 'confirmErase', message: 'Confirm on device, then erasing current firmware...' })
       await this.wallet.firmwareErase()
 
-      this.emit('firmware-progress', { percent: 50, message: 'Look at your KeepKey — confirm the upload if prompted (unsigned firmware needs on-device approval)…' })
+      this.emit('firmware-progress', { percent: 50, stage: 'uploadFirmware', message: 'Look at your KeepKey — confirm the upload if prompted (unsigned firmware needs on-device approval)…' })
       await this.wallet.firmwareUpload(firmware)
 
-      this.emit('firmware-progress', { percent: 90, message: 'Firmware updated, rebooting...' })
+      this.emit('firmware-progress', { percent: 90, stage: 'rebooting', message: 'Firmware updated, rebooting...' })
       this.updatePhase = 'rebooting'
       this.sawDetachSinceFlash = false
       this.clearWallet()
       this.emit('state-change', this.getDeviceState())
-      this.emit('firmware-progress', { percent: 100, message: 'Firmware update complete' })
+      this.emit('firmware-progress', { percent: 100, stage: 'complete', message: 'Firmware update complete' })
       this.startRebootPoll()
     } catch (err: any) {
       this.updatePhase = 'idle'
       this.emit('state-change', this.getDeviceState())
       this.emit('firmware-progress', {
         percent: 0,
-        message: 'Firmware update failed',
+        stage: 'failed', message: 'Firmware update failed',
         error: extractErrorMessage(err),
       })
       throw err
@@ -1932,7 +1955,7 @@ export class EngineController extends EventEmitter {
     this.setupInProgress = true
     this.pinRequestCount = 0
     try {
-      await this.wallet.reset({
+      await this.confirmDeviceSetup(() => this.wallet!.reset({
         entropy: WORD_COUNT_TO_ENTROPY[opts.wordCount],
         label: 'KeepKey',
         pin: opts.pin,
@@ -1941,7 +1964,7 @@ export class EngineController extends EventEmitter {
         // Device-side dice entry. Only sent when asked: firmware older than
         // 7.15.0 has no such field and rejects unknown ones.
         ...(opts.diceEntropy ? { diceEntropy: true } : {}),
-      })
+      }), 'resetDevice')
       this.cachedFeatures = await this.wallet.getFeatures()
       this.updateState(this.deriveState(this.cachedFeatures))
     } catch (err: any) {
@@ -1976,13 +1999,13 @@ export class EngineController extends EventEmitter {
     }
 
     try {
-      await this.wallet!.recover({
+      await this.confirmDeviceSetup(() => this.wallet!.recover({
         entropy: WORD_COUNT_TO_ENTROPY[opts.wordCount],
         label: 'KeepKey',
         pin: opts.pin,
         passphrase: opts.passphrase,
         autoLockDelayMs: sendAutoLock ? DEFAULT_AUTO_LOCK_MS : undefined,
-      })
+      }), 'recoverDevice')
       this.cachedFeatures = await this.wallet!.getFeatures()
       this.updateState(this.deriveState(this.cachedFeatures))
       this.setupInProgress = false
@@ -2137,49 +2160,66 @@ export class EngineController extends EventEmitter {
 
   async applySettings(opts: { label?: string; usePassphrase?: boolean; autoLockDelayMs?: number; skipRefresh?: boolean }) {
     if (!this.wallet) throw new Error('No device connected')
-    const settings: any = {}
-    if (opts.label !== undefined) settings.label = opts.label
-    if (opts.usePassphrase !== undefined) {
-      settings.usePassphrase = opts.usePassphrase
-      // Toggling passphrase changes the effective seed — clear fingerprint + seed ID
-      this.cachedFingerprint = null
-      this.seedEthAddress = null
-    }
-    if (opts.autoLockDelayMs !== undefined) settings.autoLockDelayMs = opts.autoLockDelayMs
-    await this.wallet.applySettings(settings)
+    const wallet = this.wallet
+    // ApplySettings can ask for the current PIN. It owns that request through
+    // its terminal reply, just like ChangePin: spawning promptPin() from the
+    // mid-operation PIN event queues a second seed-access request. On the
+    // emulator the caller then reconnects and that old request steals the new
+    // Initialize reply.
+    const previousSetup = this.setupInProgress
+    this.setupInProgress = true
+    try {
+      const settings: any = {}
+      if (opts.label !== undefined) settings.label = opts.label
+      if (opts.usePassphrase !== undefined) {
+        settings.usePassphrase = opts.usePassphrase
+        // Toggling passphrase changes the effective seed — clear fingerprint + seed ID
+        this.cachedFingerprint = null
+        this.seedEthAddress = null
+      }
+      if (opts.autoLockDelayMs !== undefined) settings.autoLockDelayMs = opts.autoLockDelayMs
+      await wallet.applySettings(settings)
+      if (this.wallet !== wallet) throw new Error('Device changed while applying settings')
 
-    // Toggling passphrase protection changes the effective seed, but the firmware
-    // caches the derived seed for the session INDEPENDENTLY of the
-    // passphrase_protection flag. storage_setPassphraseProtected() only flips the
-    // flag — it does not clear session.seedCached — so storage_getRootNode() keeps
-    // returning the seed cached under the OLD setting (typically the empty-passphrase
-    // standard wallet derived earlier this session). Every subsequent
-    // GetPublicKey/GetAddress — including "view address on device" — then shows the
-    // wrong wallet until a physical reconnect power-cycles the device and clears the
-    // cache. Initialize drops the cached seed + passphrase (firmware
-    // session_clear(false)) but keeps the PIN, so the device re-derives from the
-    // correct seed and asks only for the passphrase. ClearSession would also drop
-    // the PIN, and the user entered the PIN once for ApplySettings and again here.
-    // Skipped on the emulator: a reset right after ApplySettings can leave a
-    // stale ButtonAck in the ring buffer (emulators reconnect for clean state).
-    if (opts.usePassphrase !== undefined && this.activeTransport !== 'emulator') {
-      await this.wallet.initialize()
-      // Seed + passphrase are gone — the device will re-prompt for the passphrase. Drop our
-      // session classification so it's re-established on re-entry (sendPassphrase sets
-      // hiddenWalletActive; deriveState routes through needs_pin → needs_passphrase).
-      this.passphraseSetThisSession = false
-      this.hiddenWalletActive = false
-    }
+      // Toggling passphrase protection changes the effective seed, but the firmware
+      // caches the derived seed for the session INDEPENDENTLY of the
+      // passphrase_protection flag. storage_setPassphraseProtected() only flips the
+      // flag — it does not clear session.seedCached — so storage_getRootNode() keeps
+      // returning the seed cached under the OLD setting (typically the empty-passphrase
+      // standard wallet derived earlier this session). Every subsequent
+      // GetPublicKey/GetAddress — including "view address on device" — then shows the
+      // wrong wallet until a physical reconnect power-cycles the device and clears the
+      // cache. Initialize drops the cached seed + passphrase (firmware
+      // session_clear(false)) but keeps the PIN, so the device re-derives from the
+      // correct seed and asks only for the passphrase. ClearSession would also drop
+      // the PIN, and the user entered the PIN once for ApplySettings and again here.
+      // Skipped on the emulator: a reset right after ApplySettings can leave a
+      // stale ButtonAck in the ring buffer (emulators reconnect for clean state).
+      if (opts.usePassphrase !== undefined && this.activeTransport !== 'emulator') {
+        await wallet.initialize()
+        if (this.wallet !== wallet) throw new Error('Device changed while applying settings')
+        // Seed + passphrase are gone — the device will re-prompt for the passphrase. Drop our
+        // session classification so it's re-established on re-entry (sendPassphrase sets
+        // hiddenWalletActive; deriveState routes through needs_pin → needs_passphrase).
+        this.passphraseSetThisSession = false
+        this.hiddenWalletActive = false
+      }
 
-    // Emulator: skip getFeatures — stale ButtonAck in rb_main_in causes failure.
-    // Caller should reconnect via connectEmulator() for clean state.
-    if (opts.skipRefresh) return
-    this.cachedFeatures = await this.wallet.getFeatures()
-    // Route through updateState so needs_passphrase triggers promptPin() →
-    // getPublicKeys() → PASSPHRASE_REQUEST.  Previously this emitted directly,
-    // so enabling passphrase from settings showed the overlay but the device
-    // never received the passphrase (no pending request to respond to).
-    this.updateState(this.deriveState(this.cachedFeatures))
+      // Emulator: skip getFeatures — stale ButtonAck in rb_main_in causes failure.
+      // Caller should reconnect via connectEmulator() for clean state.
+      if (opts.skipRefresh) return
+      const features = await wallet.getFeatures()
+      if (this.wallet !== wallet) throw new Error('Device changed while applying settings')
+      this.cachedFeatures = features
+      this.setupInProgress = previousSetup
+      // Route through updateState so needs_passphrase triggers promptPin() →
+      // getPublicKeys() → PASSPHRASE_REQUEST.  Previously this emitted directly,
+      // so enabling passphrase from settings showed the overlay but the device
+      // never received the passphrase (no pending request to respond to).
+      this.updateState(this.deriveState(this.cachedFeatures))
+    } finally {
+      if (this.wallet === wallet) this.setupInProgress = previousSetup
+    }
   }
 
   async changePin() {
@@ -2187,7 +2227,7 @@ export class EngineController extends EventEmitter {
     this.setupInProgress = true
     this.pinRequestCount = 0
     try {
-      await this.wallet.changePin()
+      await this.confirmDeviceSetup(() => this.wallet!.changePin(), 'changePin')
       this.cachedFeatures = await this.wallet.getFeatures()
       this.emit('state-change', this.getDeviceState())
     } finally {
@@ -2198,9 +2238,16 @@ export class EngineController extends EventEmitter {
 
   async removePin() {
     if (!this.wallet) throw new Error('No device connected')
-    await this.wallet.removePin()
-    this.cachedFeatures = await this.wallet.getFeatures()
-    this.emit('state-change', this.getDeviceState())
+    this.setupInProgress = true
+    this.pinRequestCount = 0
+    try {
+      await this.confirmDeviceSetup(() => this.wallet!.removePin(), 'removePin')
+      this.cachedFeatures = await this.wallet.getFeatures()
+      this.emit('state-change', this.getDeviceState())
+    } finally {
+      this.setupInProgress = false
+      this.pinRequestCount = 0
+    }
   }
 
   /**
@@ -2895,30 +2942,30 @@ export class EngineController extends EventEmitter {
     }
     this.updatePhase = 'flashing'
     this.emit('state-change', this.getDeviceState())
-    this.emit('firmware-progress', { percent: 0, message: 'Preparing custom firmware...' })
+    this.emit('firmware-progress', { percent: 0, stage: 'preparingCustom', message: 'Preparing custom firmware...' })
 
     try {
       // See note in startBootloaderUpdate: no JS timeout can cover a readSync
       // stall; real fix is async HID reads in hdwallet.
-      this.emit('firmware-progress', { percent: 20, message: 'Confirm on device, then erasing current firmware...' })
+      this.emit('firmware-progress', { percent: 20, stage: 'confirmErase', message: 'Confirm on device, then erasing current firmware...' })
       await this.wallet.firmwareErase()
 
-      this.emit('firmware-progress', { percent: 50, message: 'Look at your KeepKey — confirm the upload if prompted (unsigned firmware needs on-device approval)…' })
+      this.emit('firmware-progress', { percent: 50, stage: 'uploadFirmware', message: 'Look at your KeepKey — confirm the upload if prompted (unsigned firmware needs on-device approval)…' })
       await this.wallet.firmwareUpload(data)
 
-      this.emit('firmware-progress', { percent: 90, message: 'Firmware uploaded, rebooting...' })
+      this.emit('firmware-progress', { percent: 90, stage: 'rebooting', message: 'Firmware uploaded, rebooting...' })
       this.updatePhase = 'rebooting'
       this.sawDetachSinceFlash = false
       this.clearWallet()
       this.emit('state-change', this.getDeviceState())
-      this.emit('firmware-progress', { percent: 100, message: 'Custom firmware flash complete' })
+      this.emit('firmware-progress', { percent: 100, stage: 'complete', message: 'Custom firmware flash complete' })
       this.startRebootPoll()
     } catch (err: any) {
       this.updatePhase = 'idle'
       this.emit('state-change', this.getDeviceState())
       this.emit('firmware-progress', {
         percent: 0,
-        message: 'Custom firmware flash failed',
+        stage: 'failed', message: 'Custom firmware flash failed',
         error: extractErrorMessage(err),
       })
       throw err

@@ -4793,7 +4793,11 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           auth.requireAuth(req)
           const wallet = requireWallet(engine)
           const body = await parseRequest(req, S.ChangePinRequest).catch(() => ({} as any))
-          if (body.remove) {
+          if (engine.isEmulator) {
+            // Share the UI's visible confirmation gate and PIN prompt state.
+            if (body.remove) await engine.removePin()
+            else await engine.changePin()
+          } else if (body.remove) {
             await wallet.removePin()
           } else {
             await wallet.changePin()

@@ -1,3 +1,4 @@
+import { useUiTranslation } from "../i18n/ui"
 /**
  * Branded "loading dashboard" state — shown after the splash clears and the
  * Dashboard chrome is mounted, but before any balances have arrived. Replaces
@@ -23,11 +24,11 @@ const STATUS_INTERVAL_MS = 2200
 /** OLED face content for the spinning device — a "syncing portfolio" readout
  *  with an indeterminate scan bar that sweeps under the gloss. */
 function OledSyncScreen() {
+  const uiText = useUiTranslation()
+
 	return (
 		<div style={{ width: "100%" }}>
-			<div style={{ fontSize: 11, opacity: 0.55, letterSpacing: 2, marginBottom: 8 }}>
-				SYNCING PORTFOLIO
-			</div>
+			<div style={{ fontSize: 11, opacity: 0.55, letterSpacing: 2, marginBottom: 8 }}>{uiText("SYNCING PORTFOLIO")}</div>
 			<div
 				style={{
 					position: "relative",
@@ -51,9 +52,7 @@ function OledSyncScreen() {
 					}}
 				/>
 			</div>
-			<div style={{ fontSize: 9, opacity: 0.45, letterSpacing: 1.5, marginTop: 8 }}>
-				FETCHING BALANCES
-			</div>
+			<div style={{ fontSize: 9, opacity: 0.45, letterSpacing: 1.5, marginTop: 8 }}>{uiText("FETCHING BALANCES")}</div>
 		</div>
 	)
 }
