@@ -53,5 +53,7 @@
 	"invalidSolanaAddress": "Địa chỉ Solana không hợp lệ — phải có 32-44 ký tự base58",
 	"invalidTronAddress": "Địa chỉ Tron không hợp lệ — phải bắt đầu bằng T (34 ký tự)",
 	"invalidTonAddress": "Địa chỉ TON không hợp lệ",
-	"invalidZcashShieldedAddress": "Địa chỉ được bảo vệ không hợp lệ — phải bắt đầu bằng u1"
+	"invalidZcashShieldedAddress": "Địa chỉ được bảo vệ không hợp lệ — phải bắt đầu bằng u1",
+	"feeCustom": "Tùy chỉnh",
+	"invalidAmount": "Nhập số tiền thập phân không có dấu phân cách hàng nghìn, ví dụ 1,5."
 }

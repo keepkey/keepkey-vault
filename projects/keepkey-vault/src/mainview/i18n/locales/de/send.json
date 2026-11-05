@@ -53,5 +53,7 @@
 	"invalidSolanaAddress": "Ungültige Solana-Adresse — muss 32-44 Base58-Zeichen haben",
 	"invalidTronAddress": "Ungültige Tron-Adresse — muss mit T beginnen (34 Zeichen)",
 	"invalidTonAddress": "Ungültige TON-Adresse",
-	"invalidZcashShieldedAddress": "Ungültige geschützte Adresse — muss mit u1 beginnen"
+	"invalidZcashShieldedAddress": "Ungültige geschützte Adresse — muss mit u1 beginnen",
+	"feeCustom": "Eigene",
+	"invalidAmount": "Gib einen Dezimalbetrag ohne Tausendertrennzeichen ein, zum Beispiel 1,5."
 }

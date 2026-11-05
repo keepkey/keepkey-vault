@@ -17,6 +17,7 @@ import { getPioneer } from './pioneer'
 import { CHAINS } from '../shared/chains'
 import { utxoDiscoveryKey } from './btc-backend/types'
 import { getBtcBackend } from './btc-backend'
+import { createReportFonts, reportText as sanitize } from './report-fonts'
 
 const BTC_NETWORK_ID = CHAINS.find(c => c.id === 'bitcoin')!.networkId
 
@@ -765,24 +766,8 @@ const ALT_ROW = { r: 0.94, g: 0.94, b: 0.94 }
 const TEXT_COLOR = { r: 0.2, g: 0.2, b: 0.2 }
 const MUTED_COLOR = { r: 0.6, g: 0.6, b: 0.6 }
 
-/**
- * Sanitize text for pdf-lib StandardFonts (WinAnsi encoding only).
- * Strips characters outside the printable ASCII + Latin-1 Supplement range.
- */
-function sanitize(text: string): string {
-	if (!text) return ''
-	// Replace common unicode with ASCII equivalents, then strip anything outside WinAnsi
-	return text
-		.replace(/[\u2018\u2019]/g, "'")
-		.replace(/[\u201C\u201D]/g, '"')
-		.replace(/\u2026/g, '...')
-		.replace(/\u2014/g, '--')
-		.replace(/\u2013/g, '-')
-		.replace(/[^\x20-\x7E\xA0-\xFF]/g, '?')
-}
-
 export async function reportToPdfBuffer(data: ReportData): Promise<Buffer> {
-	const { PDFDocument, StandardFonts, rgb, degrees } = await import('pdf-lib')
+	const { PDFDocument, rgb, degrees } = await import('pdf-lib')
 	const reportLocale = getSetting('number_locale') || 'en-US'
 	// Stored values are always USD — use USD currency label with user's number locale for separators
 	const reportCurrency = 'USD'
@@ -790,8 +775,8 @@ export async function reportToPdfBuffer(data: ReportData): Promise<Buffer> {
 	console.log('[reports] Starting PDF generation...')
 
 	const doc = await PDFDocument.create()
-	const font = await doc.embedFont(StandardFonts.Helvetica)
-	const bold = await doc.embedFont(StandardFonts.HelveticaBold)
+	const fonts = await createReportFonts(doc, JSON.stringify(data))
+	const { regular: font, bold } = fonts
 
 	// Landscape Letter: 792 x 612
 	const pageW = 792
@@ -819,18 +804,18 @@ export async function reportToPdfBuffer(data: ReportData): Promise<Buffer> {
 	/** Break text into lines that each fit within maxW pixels. */
 	function wrapText(text: string, f: any, s: number, maxW: number): string[] {
 		if (!text || !maxW || maxW <= 0) return [text || '']
-		if (f.widthOfTextAtSize(text, s) <= maxW) return [text]
+		if (fonts.width(text, f, s) <= maxW) return [text]
 		const lines: string[] = []
-		let remaining = text
+		let remaining = Array.from(text)
 		while (remaining.length > 0) {
 			let lo = 0, hi = remaining.length
 			while (lo < hi) {
 				const mid = (lo + hi + 1) >> 1
-				if (f.widthOfTextAtSize(remaining.slice(0, mid), s) <= maxW) lo = mid
+				if (fonts.width(remaining.slice(0, mid).join(''), f, s) <= maxW) lo = mid
 				else hi = mid - 1
 			}
 			if (lo === 0) lo = 1 // at least one char per line
-			lines.push(remaining.slice(0, lo))
+			lines.push(remaining.slice(0, lo).join(''))
 			remaining = remaining.slice(lo)
 		}
 		return lines
@@ -838,22 +823,19 @@ export async function reportToPdfBuffer(data: ReportData): Promise<Buffer> {
 
 	function safeDrawText(text: string, x: number, yPos: number, f: any, s: number, c: { r: number; g: number; b: number }, maxW?: number) {
 		let t = sanitize(text)
-		if (maxW && maxW > 0 && t.length > 0 && f.widthOfTextAtSize(t, s) > maxW) {
+		if (maxW && maxW > 0 && t.length > 0 && fonts.width(t, f, s) > maxW) {
 			// Truncate to fit — no ellipsis, no dots. Used for single-line contexts.
-			let lo = 0, hi = t.length
+			const chars = Array.from(t)
+			let lo = 0, hi = chars.length
 			while (lo < hi) {
 				const mid = (lo + hi + 1) >> 1
-				if (f.widthOfTextAtSize(t.slice(0, mid), s) <= maxW) lo = mid
+				if (fonts.width(chars.slice(0, mid).join(''), f, s) <= maxW) lo = mid
 				else hi = mid - 1
 			}
-			t = t.slice(0, lo)
+			t = chars.slice(0, lo).join('')
 		}
 		if (!t) return
-		try {
-			page.drawText(t, { x, y: yPos, font: f, size: s, color: rgb(c.r, c.g, c.b) })
-		} catch (e: any) {
-			console.warn('[reports] PDF drawText failed for:', JSON.stringify(t.slice(0, 40)), e.message)
-		}
+		fonts.draw(page, t, { x, y: yPos, font: f, size: s, color: rgb(c.r, c.g, c.b) })
 	}
 
 	// ── Page 1: Dashboard + Pie Chart ────────────────────────────
@@ -893,17 +875,17 @@ export async function reportToPdfBuffer(data: ReportData): Promise<Buffer> {
 
 	// Title
 	const title = sanitize(data.title)
-	const titleW = bold.widthOfTextAtSize(title, 22)
+	const titleW = fonts.width(title, bold, 22)
 	safeDrawText(title, (pageW - titleW) / 2, y, bold, 22, { r: 0.15, g: 0.15, b: 0.15 })
 	y -= 26
 
 	const subtitle = sanitize(data.subtitle)
-	const subW = font.widthOfTextAtSize(subtitle, 13)
+	const subW = fonts.width(subtitle, font, 13)
 	safeDrawText(subtitle, (pageW - subW) / 2, y, font, 13, { r: 0.4, g: 0.4, b: 0.4 })
 	y -= 18
 
 	const dateStr = sanitize(`Generated on ${data.generatedDate}`)
-	const dateW = font.widthOfTextAtSize(dateStr, 10)
+	const dateW = fonts.width(dateStr, font, 10)
 	safeDrawText(dateStr, (pageW - dateW) / 2, y, font, 10, MUTED_COLOR)
 	y -= 30
 
@@ -918,8 +900,8 @@ export async function reportToPdfBuffer(data: ReportData): Promise<Buffer> {
 	// ── Total Portfolio Value (big number) ──
 	const totalStr = new Intl.NumberFormat(reportLocale, { style: 'currency', currency: reportCurrency, minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(totalPortfolioUsd)
 	const totalLabel = 'Total Portfolio Value'
-	const totalLabelW = font.widthOfTextAtSize(totalLabel, 11)
-	const totalValW = bold.widthOfTextAtSize(totalStr, 28)
+	const totalLabelW = fonts.width(totalLabel, font, 11)
+	const totalValW = fonts.width(totalStr, bold, 28)
 	safeDrawText(totalLabel, (pageW - totalLabelW) / 2, y, font, 11, MUTED_COLOR)
 	y -= 34
 	safeDrawText(totalStr, (pageW - totalValW) / 2, y, bold, 28, { r: 0.15, g: 0.15, b: 0.15 })
@@ -967,7 +949,7 @@ export async function reportToPdfBuffer(data: ReportData): Promise<Buffer> {
 
 		// Center text in donut hole
 		const chainCountStr = `${slices.length} Chains`
-		const ccW = bold.widthOfTextAtSize(chainCountStr, 12)
+		const ccW = fonts.width(chainCountStr, bold, 12)
 		safeDrawText(chainCountStr, pieCenterX - ccW / 2, pieCenterY - 4, bold, 12, { r: 0.3, g: 0.3, b: 0.3 })
 
 		// ── Legend (right side) ──
@@ -1120,7 +1102,7 @@ export async function reportToPdfBuffer(data: ReportData): Promise<Buffer> {
 				let line = ''
 				for (const word of words) {
 					const test = line ? `${line} ${word}` : word
-					if (font.widthOfTextAtSize(test, 9) > contentW - 20) {
+					if (fonts.width(test, font, 9) > contentW - 20) {
 						needSpace(ROW_HEIGHT)
 						safeDrawText(line, MARGIN_LEFT + 10, y, font, 9, TEXT_COLOR)
 						y -= ROW_HEIGHT

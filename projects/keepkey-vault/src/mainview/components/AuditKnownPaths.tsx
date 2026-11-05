@@ -1,3 +1,4 @@
+import { useUiTranslation } from "../i18n/ui"
 /**
  * AuditKnownPaths — checks the derivation paths OTHER wallets use, so funds a
  * user moved in via Ledger Live / MEW / legacy MetaMask still surface.
@@ -76,6 +77,8 @@ interface AuditKnownPathsProps {
 }
 
 export function AuditKnownPaths({ chainId, defaultAddress, onFound, onOpenUrl }: AuditKnownPathsProps) {
+  const uiText = useUiTranslation()
+
   const [opened, setOpened] = useState(false)
   const [rows, setRows] = useState<Row[]>([])
   const [scannedTo, setScannedTo] = useState(-1)
@@ -134,7 +137,7 @@ export function AuditKnownPaths({ chainId, defaultAddress, onFound, onOpenUrl }:
     return (
       <Button size="sm" w="100%" variant="outline" borderColor="var(--line-2)" color="var(--text-1)" fontWeight="600"
         _hover={{ borderColor: "var(--teal)", color: "var(--teal)", bg: "rgba(139,227,196,0.06)" }} onClick={() => scanRange(0, 0)}>
-        {isLtc ? 'Scan uncommon paths (older Vault versions)' : 'Check common wallet paths (Ledger, MEW, …)'}
+        {isLtc ? uiText("Scan uncommon paths (older Vault versions)") : uiText("Check common wallet paths (Ledger, MEW, …)")}
       </Button>
     )
   }
@@ -142,8 +145,8 @@ export function AuditKnownPaths({ chainId, defaultAddress, onFound, onOpenUrl }:
   return (
     <Box>
       <Text fontSize="sm" color="var(--text-1)" mb="2.5">{isLtc
-        ? 'Funds can sit on uncommon path and address-type combinations. Here’s what each branch holds:'
-        : 'Other wallets derive addresses differently from the same seed. Here’s what each common path holds:'}</Text>
+        ? uiText("Funds can sit on uncommon path and address-type combinations. Here’s what each branch holds:")
+        : uiText("Other wallets derive addresses differently from the same seed. Here’s what each common path holds:")}</Text>
       <VStack gap="2" align="stretch">
         {rows.map((r, i) => (
           <Box key={i} bg="var(--ink-2)" borderRadius="lg" px="3.5" py="2.5">
@@ -151,15 +154,15 @@ export function AuditKnownPaths({ chainId, defaultAddress, onFound, onOpenUrl }:
               <Box minW="0">
                 <Flex align="center" gap="2" wrap="wrap">
                   <Text fontSize="12px" fontFamily="mono" color="var(--text-1)">{r.pathStr}{r.scriptType ? ` · ${r.scriptType}` : ''}</Text>
-                  {r.isDefault && <Text fontSize="10px" color="var(--teal)" bg="rgba(139,227,196,0.1)" px="1.5" borderRadius="sm">your main address</Text>}
+                  {r.isDefault && <Text fontSize="10px" color="var(--teal)" bg="rgba(139,227,196,0.1)" px="1.5" borderRadius="sm">{uiText("your main address")}</Text>}
                 </Flex>
                 <Text fontSize="11px" color="var(--text-3)" truncate>{r.labels.join(' · ')}</Text>
                 <Text fontSize="10px" fontFamily="mono" color="var(--text-3)" truncate maxW="320px" title={r.address}>{r.address}</Text>
               </Box>
               <HStack gap="3" flexShrink={0}>
-                {r.balanceError ? <Text fontSize="xs" color="var(--rose)">couldn’t verify</Text>
-                  : <Text fontSize="sm" fontWeight={r.hasBalance ? '700' : '400'} color={r.hasBalance ? 'var(--teal)' : 'var(--text-3)'}>{!r.hasBalance ? 'empty' : (parseFloat(r.native) > 0 || !r.tokens?.length) ? `${r.native} ${r.symbol}` : `${r.tokens.length} token${r.tokens.length > 1 ? 's' : ''}`}</Text>}
-                {r.explorerUrl && <Box as="button" fontSize="11px" color="var(--teal)" onClick={() => onOpenUrl(r.explorerUrl!)}>explorer ↗</Box>}
+                {r.balanceError ? <Text fontSize="xs" color="var(--rose)">{uiText("couldn’t verify")}</Text>
+                  : <Text fontSize="sm" fontWeight={r.hasBalance ? '700' : '400'} color={r.hasBalance ? 'var(--teal)' : 'var(--text-3)'}>{!r.hasBalance ? uiText("empty") : (parseFloat(r.native) > 0 || !r.tokens?.length) ? `${r.native} ${r.symbol}` : `${r.tokens.length} token${r.tokens.length > 1 ? 's' : ''}`}</Text>}
+                {r.explorerUrl && <Box as="button" fontSize="11px" color="var(--teal)" onClick={() => onOpenUrl(r.explorerUrl!)}>{uiText("explorer ↗")}</Box>}
               </HStack>
             </Flex>
             {/* Funded UNCOMMON combos only: spend from the exact found path to
@@ -173,12 +176,12 @@ export function AuditKnownPaths({ chainId, defaultAddress, onFound, onOpenUrl }:
         ))}
       </VStack>
       <Flex gap="3" mt="2.5" align="center">
-        <Button size="xs" variant="outline" borderColor="var(--line-2)" color="var(--text-2)" loading={scanning} onClick={() => scanRange(scannedTo + 1, scannedTo + 2)}>Check the next addresses</Button>
+        <Button size="xs" variant="outline" borderColor="var(--line-2)" color="var(--text-2)" loading={scanning} onClick={() => scanRange(scannedTo + 1, scannedTo + 2)}>{uiText("Check the next addresses")}</Button>
         {err && <Text fontSize="xs" color="var(--rose)">{err}</Text>}
       </Flex>
       <Text fontSize="11px" color="var(--text-3)" mt="2">{isLtc
-        ? 'Standard Litecoin branches belong to accounts the portfolio can track. If a found balance is missing there, use “track account” on the finding above or send the Audit report to support.'
-        : 'Funds on a non-standard path can’t be tracked in-app — use “Still missing?” to send them to support.'}</Text>
+        ? uiText("Standard Litecoin branches belong to accounts the portfolio can track. If a found balance is missing there, use “track account” on the finding above or send the Audit report to support.")
+        : uiText("Funds on a non-standard path can’t be tracked in-app — use “Still missing?” to send them to support.")}</Text>
     </Box>
   )
 }

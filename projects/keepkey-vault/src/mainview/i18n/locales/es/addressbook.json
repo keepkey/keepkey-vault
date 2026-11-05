@@ -41,5 +41,9 @@
 	"openAddressBook": "Libreta de direcciones",
 	"saveRecipientPrompt": "¿Guardar este destinatario?",
 	"contactSaved": "Contacto guardado",
-	"saveContactFailed": "No se pudo guardar el contacto"
+	"saveContactFailed": "No se pudo guardar el contacto",
+	"cosigner": "Cofirmante",
+	"cosignerOption": "Cofirmante de Safe: ofrecerlo primero al crear una multifirma",
+	"markCosigner": "Marcar como cofirmante de Safe",
+	"notCosigner": "No es cofirmante"
 }

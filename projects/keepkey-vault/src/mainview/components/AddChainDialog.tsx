@@ -1,3 +1,4 @@
+import { useUiTranslation } from "../i18n/ui"
 import { useState, useEffect, useCallback, useRef } from "react"
 import { Box, Flex, Text, Button, Input, Spinner, Image } from "@chakra-ui/react"
 import { useTranslation } from "react-i18next"
@@ -27,6 +28,8 @@ interface AddChainDialogProps {
 }
 
 export function AddChainDialog({ onClose, onAdded, existingChainIds = [], turnedOff = [], onTurnOn }: AddChainDialogProps) {
+  const uiText = useUiTranslation()
+
 	const [turningOn, setTurningOn] = useState<string | null>(null)
 	const { t } = useTranslation("dialogs")
 	const [mode, setMode] = useState<Mode>('browse')
@@ -470,9 +473,7 @@ export function AddChainDialog({ onClose, onAdded, existingChainIds = [], turned
 									cursor={page > 0 ? "pointer" : "default"}
 									opacity={page > 0 ? 1 : 0.4}
 									onClick={() => page > 0 && handlePageChange(page - 1)}
-								>
-									Prev
-								</Box>
+								>{uiText("Prev")}</Box>
 								<Text fontSize="10px" color="kk.textMuted" fontFamily="mono">
 									{totalPages > 0 ? `${page + 1}/${totalPages}` : '-'}
 								</Text>
@@ -483,9 +484,7 @@ export function AddChainDialog({ onClose, onAdded, existingChainIds = [], turned
 									cursor={page < totalPages - 1 ? "pointer" : "default"}
 									opacity={page < totalPages - 1 ? 1 : 0.4}
 									onClick={() => page < totalPages - 1 && handlePageChange(page + 1)}
-								>
-									Next
-								</Box>
+								>{uiText("Next")}</Box>
 							</Flex>
 							<Box
 								as="button"
@@ -495,9 +494,7 @@ export function AddChainDialog({ onClose, onAdded, existingChainIds = [], turned
 								textDecoration="underline"
 								_hover={{ color: "white" }}
 								onClick={handleManualMode}
-							>
-								Enter manually
-							</Box>
+							>{uiText("Enter manually")}</Box>
 						</Flex>
 					</Box>
 				)}
@@ -525,8 +522,7 @@ export function AddChainDialog({ onClose, onAdded, existingChainIds = [], turned
 								<Text fontSize="sm" fontWeight="600" color="white" lineHeight="1.3">
 									{selectedChain.name} ({selectedChain.symbol})
 								</Text>
-								<Text fontSize="10px" color="kk.textMuted" fontFamily="mono">
-									Chain ID: {selectedChain.chainId}
+								<Text fontSize="10px" color="kk.textMuted" fontFamily="mono">{uiText("Chain ID:")}{" "}{selectedChain.chainId}
 								</Text>
 							</Box>
 						</Flex>
@@ -602,9 +598,7 @@ export function AddChainDialog({ onClose, onAdded, existingChainIds = [], turned
 								<Flex align="center" gap="2" px="3" py="2" bg="rgba(239,68,68,0.08)" border="1px solid" borderColor="rgba(239,68,68,0.2)" borderRadius="lg" mb="2">
 									<Text fontSize="xs" color="red.300">
 										{t('addChain.noWorkingNodes', { defaultValue: 'No working RPC nodes found. Find one at' })}{' '}
-										<Box as="a" href="https://chainlist.org" onClick={(e: React.MouseEvent) => { e.preventDefault(); rpcRequest("openUrl", { url: "https://chainlist.org" }).catch(() => {}) }} color="kk.gold" textDecoration="underline" _hover={{ color: "white" }}>
-											chainlist.org
-										</Box>
+										<Box as="a" href="https://chainlist.org" onClick={(e: React.MouseEvent) => { e.preventDefault(); rpcRequest("openUrl", { url: "https://chainlist.org" }).catch(() => {}) }} color="kk.gold" textDecoration="underline" _hover={{ color: "white" }}>{uiText("chainlist.org")}</Box>
 									</Text>
 								</Flex>
 							)}
@@ -656,10 +650,10 @@ export function AddChainDialog({ onClose, onAdded, existingChainIds = [], turned
 								fontFamily="mono"
 								fontSize="xs"
 							/>
-							<Text fontSize="9px" color="kk.textMuted" mt="0.5">Use {"{{address}}"} as placeholder</Text>
+							<Text fontSize="9px" color="kk.textMuted" mt="0.5">{uiText("Use")}{" "}{uiText("{{address}}")}{" "}{uiText("as placeholder")}</Text>
 						</Box>
 						<Box>
-							<Text fontSize="xs" color="kk.textMuted" mb="1">Explorer TX URL</Text>
+							<Text fontSize="xs" color="kk.textMuted" mb="1">{uiText("Explorer TX URL")}</Text>
 							<Input
 								placeholder="https://etherscan.io/tx/{{txid}}"
 								value={explorerTxLink}
@@ -672,7 +666,7 @@ export function AddChainDialog({ onClose, onAdded, existingChainIds = [], turned
 								fontFamily="mono"
 								fontSize="xs"
 							/>
-							<Text fontSize="9px" color="kk.textMuted" mt="0.5">Use {"{{txid}}"} as placeholder</Text>
+							<Text fontSize="9px" color="kk.textMuted" mt="0.5">{uiText("Use")}{" "}{uiText("{{txid}}")}{" "}{uiText("as placeholder")}</Text>
 						</Box>
 
 						{error && (
@@ -792,10 +786,10 @@ export function AddChainDialog({ onClose, onAdded, existingChainIds = [], turned
 								fontFamily="mono"
 								fontSize="xs"
 							/>
-							<Text fontSize="9px" color="kk.textMuted" mt="0.5">Use {"{{address}}"} as placeholder</Text>
+							<Text fontSize="9px" color="kk.textMuted" mt="0.5">{uiText("Use")}{" "}{uiText("{{address}}")}{" "}{uiText("as placeholder")}</Text>
 						</Box>
 						<Box>
-							<Text fontSize="xs" color="kk.textMuted" mb="1">Explorer TX URL (optional)</Text>
+							<Text fontSize="xs" color="kk.textMuted" mb="1">{uiText("Explorer TX URL (optional)")}</Text>
 							<Input
 								placeholder="https://etherscan.io/tx/{{txid}}"
 								value={explorerTxLink}
@@ -808,7 +802,7 @@ export function AddChainDialog({ onClose, onAdded, existingChainIds = [], turned
 								fontFamily="mono"
 								fontSize="xs"
 							/>
-							<Text fontSize="9px" color="kk.textMuted" mt="0.5">Use {"{{txid}}"} as placeholder</Text>
+							<Text fontSize="9px" color="kk.textMuted" mt="0.5">{uiText("Use")}{" "}{uiText("{{txid}}")}{" "}{uiText("as placeholder")}</Text>
 						</Box>
 
 						{error && (

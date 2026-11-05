@@ -1,3 +1,4 @@
+import { useUiTranslation } from "../i18n/ui"
 import { useEffect, useRef, useState } from "react"
 import { Box, Flex, Text, Button } from "@chakra-ui/react"
 import { FaPlus, FaTimes, FaCheck, FaChevronDown } from "react-icons/fa"
@@ -26,6 +27,8 @@ function snippet(addr: { address?: string; addressIndex: number }): string {
 }
 
 export function EvmAddressSelector({ evmAddresses, onSelectIndex, onAddIndex, onRemoveIndex, adding, compact }: EvmAddressSelectorProps) {
+  const uiText = useUiTranslation()
+
   const { fmtCompact } = useFiat()
   const { addresses, selectedIndex } = evmAddresses
 
@@ -48,9 +51,7 @@ export function EvmAddressSelector({ evmAddresses, onSelectIndex, onAddIndex, on
   return (
     <Box mb="3">
       <Flex gap="1" mb="1" align="center">
-        <Text fontSize="10px" color="kk.textMuted" textTransform="uppercase" letterSpacing="0.05em">
-          EVM Address
-        </Text>
+        <Text fontSize="10px" color="kk.textMuted" textTransform="uppercase" letterSpacing="0.05em">{uiText("EVM Address")}</Text>
       </Flex>
       <Flex gap="1.5" flexWrap="wrap" align="center">
         {addresses.map(addr => {
@@ -138,6 +139,8 @@ interface CompactSelectorProps {
 }
 
 function CompactSelector({ addresses, selectedIndex, onSelectIndex, onAddIndex, adding }: CompactSelectorProps) {
+  const uiText = useUiTranslation()
+
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement | null>(null)
 
@@ -195,8 +198,7 @@ function CompactSelector({ addresses, selectedIndex, onSelectIndex, onAddIndex, 
           </Text>
         </Box>
         <Box flex="1" textAlign="left" minW="0">
-          <Text fontSize="12px" fontWeight="600" color="var(--text-0)" lineHeight="1.1" truncate>
-            Account #{selected.addressIndex}
+          <Text fontSize="12px" fontWeight="600" color="var(--text-0)" lineHeight="1.1" truncate>{uiText("Account #")}{selected.addressIndex}
           </Text>
           <Text fontSize="10px" fontFamily="mono" color="var(--text-3)" lineHeight="1.2" truncate>
             {snippet(selected)}
@@ -248,8 +250,7 @@ function CompactSelector({ addresses, selectedIndex, onSelectIndex, onAddIndex, 
                     </Text>
                   </Box>
                   <Box flex="1" minW="0">
-                    <Text fontSize="12px" fontWeight="600" color="var(--text-0)" lineHeight="1.1">
-                      Account #{addr.addressIndex}
+                    <Text fontSize="12px" fontWeight="600" color="var(--text-0)" lineHeight="1.1">{uiText("Account #")}{addr.addressIndex}
                     </Text>
                     <Text fontSize="10px" fontFamily="mono" color="var(--text-2)" lineHeight="1.2" truncate>
                       {snippet(addr)}
@@ -289,9 +290,7 @@ function CompactSelector({ addresses, selectedIndex, onSelectIndex, onAddIndex, 
                 >
                   <Box as={FaPlus} fontSize="9px" color="var(--teal)" />
                 </Box>
-                <Text fontSize="12px" fontWeight="500" color="var(--teal)">
-                  Add account
-                </Text>
+                <Text fontSize="12px" fontWeight="500" color="var(--teal)">{uiText("Add account")}</Text>
               </Flex>
             </Box>
           </Box>

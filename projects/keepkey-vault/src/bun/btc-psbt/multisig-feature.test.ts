@@ -108,3 +108,27 @@ describe("runtime multisig Settings flag", () => {
     expect(parseForBroadcast(hex.encode(raw)).outputs[0].amount).toBe(1000n);
   });
 });
+
+describe("one Multisig toggle gates Safe and Vaults RPCs", () => {
+  const { gateMultisigRpc, MULTISIG_DISABLED } = require("./multisig-feature");
+  const { readFileSync } = require("node:fs");
+  const { join } = require("node:path");
+  const schema = readFileSync(join(import.meta.dir, "../../shared/rpc-schema.ts"), "utf8");
+  const names = [...schema.matchAll(/^\s+'?([A-Za-z]*(?:[Ss]afe|[Vv]ault)[A-Za-z]*)'?: \{ params/gm)].map((m) => m[1]);
+  const EXEMPT = new Set(["checkVaultDestination"]); // Send-side safety check stays live
+
+  test("off: lists answer empty, the rest refuse; on: handlers run", async () => {
+    let on = false;
+    const handlers = Object.fromEntries(names.map((n) => [n, async () => `ran:${n}`]));
+    const gated = gateMultisigRpc(() => on, { ...handlers, getDeviceState: async () => "dev" });
+    expect(names.length).toBeGreaterThan(20);
+    for (const n of names) {
+      if (EXEMPT.has(n)) { expect(await gated[n]()).toBe(`ran:${n}`); continue; }
+      if (["safeChains", "listVaults", "listSavedVaults", "getVaultPortfolios"].includes(n)) expect(await gated[n]()).toEqual([]);
+      else await expect(gated[n]()).rejects.toThrow(MULTISIG_DISABLED);
+    }
+    expect(await gated.getDeviceState()).toBe("dev");
+    on = true;
+    for (const n of names) expect(await gated[n]()).toBe(`ran:${n}`);
+  });
+});

@@ -159,14 +159,10 @@
 	"approvalWaiting": "En attente de confirmation de l'approbation…",
 	"approvalWaitingDesc": "En attente que l'approbation soit minée avant de pouvoir signer l'échange.",
 	"balanceChanges": "Variations du solde",
-	"blindSignBody": "Les échanges Solana utilisent une transaction versionnée que votre KeepKey ne peut pas entièrement décoder, elle doit donc être signée à l'aveugle. Cette option est désactivée par défaut. L'activer enclenche le mode avancé (signature à l'aveugle) sur votre appareil — il vous sera demandé de confirmer le changement sur l'appareil.",
-	"blindSignCaveat": "La signature à l'aveugle signifie que l'appareil affiche une invite générique au lieu des détails décodés. Ne continuez que pour les échanges que vous avez initiés ici. Vous pouvez la désactiver à nouveau dans Paramètres de l'appareil → Politique de signature.",
 	"blindSignConfirmOnDevice": "Confirmez sur l'appareil…",
 	"blindSignDeclined": "Refusé sur l'appareil — la signature à l'aveugle n'a pas été activée.",
-	"blindSignEnable": "Activer la signature à l'aveugle",
 	"blindSignEnableFailed": "Échec de l'activation de la signature à l'aveugle sur l'appareil.",
 	"blindSignHeader": "Signature à l'aveugle",
-	"blindSignTitle": "Activer la signature à l'aveugle pour Solana",
 	"block": "Bloc",
 	"cancelSwapDevice": "Annuler - libérer l'invite de l'appareil",
 	"completed": "terminé",
@@ -202,5 +198,9 @@
 	"youReceived": "Vous avez reçu",
 	"exceedsSafeMax": "Laissez ~{{reserve}} {{symbol}} pour les frais de réseau — réduisez le montant ou touchez MAX.",
 	"sent": "Envoyé",
-	"gas": "Gas"
+	"gas": "Gas",
+	"deviceBlindSignCaveat": "La signature à l’aveugle reste activée jusqu’au verrouillage ou au débranchement du KeepKey, pour toutes les applications qui l’utilisent, pas seulement cet échange. Tant qu’elle est activée, cette application cesse aussi d’afficher cet écran avant ces transactions. L’appareil vous demande de confirmer et de saisir à nouveau votre code PIN.",
+	"solanaOutflowDrain": "Attention : cela vide votre portefeuille. Ne signez que si c’est bien votre intention.",
+	"solanaOutflowCaveat": "Simulation effectuée avec un nœud Solana depuis cet ordinateur. Votre KeepKey ne peut pas confirmer ces chiffres.",
+	"deviceBlindSignEnable": "Activer la signature à l’aveugle"
 }

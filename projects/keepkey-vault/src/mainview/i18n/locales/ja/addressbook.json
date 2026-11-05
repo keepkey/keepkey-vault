@@ -41,5 +41,9 @@
 	"openAddressBook": "アドレス帳",
 	"saveRecipientPrompt": "この受取人を保存しますか？",
 	"contactSaved": "連絡先を保存しました",
-	"saveContactFailed": "連絡先を保存できませんでした"
+	"saveContactFailed": "連絡先を保存できませんでした",
+	"cosigner": "共同署名者",
+	"cosignerOption": "Safe共同署名者：マルチシグ作成時に最初に表示",
+	"markCosigner": "Safe共同署名者として設定",
+	"notCosigner": "共同署名者ではない"
 }

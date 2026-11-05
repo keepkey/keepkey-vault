@@ -1,3 +1,6 @@
+import i18n from '../i18n'
+import { getNumberLocale } from "../lib/number-locale"
+import { useUiTranslation } from "../i18n/ui"
 /**
  * ActivityPanel — drawer showing recent transaction activity per network.
  *
@@ -116,10 +119,11 @@ export function truncateTxid(txid: string): string {
 
 export function timeAgo(ts: number): string {
   const diff = Date.now() - ts
-  if (diff < 60_000) return 'just now'
-  if (diff < 3600_000) return `${Math.floor(diff / 60_000)}m ago`
-  if (diff < 86400_000) return `${Math.floor(diff / 3600_000)}h ago`
-  return `${Math.floor(diff / 86400_000)}d ago`
+  const formatter = new Intl.RelativeTimeFormat(i18n.resolvedLanguage || 'en', { numeric: 'auto' })
+  if (diff < 60_000) return formatter.format(0, 'second')
+  if (diff < 3600_000) return formatter.format(-Math.floor(diff / 60_000), 'minute')
+  if (diff < 86400_000) return formatter.format(-Math.floor(diff / 3600_000), 'hour')
+  return formatter.format(-Math.floor(diff / 86400_000), 'day')
 }
 
 function recentTimestamp(item: { createdAt: number }): number {
@@ -212,8 +216,8 @@ export type ActivityTimelineItem =
 
 export function formatFullDate(ts: number): string {
   const d = new Date(ts)
-  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) +
-    ' ' + d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })
+  return d.toLocaleDateString(getNumberLocale(), { month: 'short', day: 'numeric', year: 'numeric' }) +
+    ' ' + d.toLocaleTimeString(getNumberLocale(), { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })
 }
 
 function TxDetailRow({ label, value, mono, color: c, prose }: { label: string; value: string; mono?: boolean; color?: string; prose?: boolean }) {
@@ -226,6 +230,8 @@ function TxDetailRow({ label, value, mono, color: c, prose }: { label: string; v
 }
 
 function CopyableRow({ label, value, explorerUrl }: { label: string; value: string; explorerUrl?: string | null }) {
+  const uiText = useUiTranslation()
+
   const [copied, setCopied] = useState(false)
   const handleCopy = () => { navigator.clipboard.writeText(value); setCopied(true); setTimeout(() => setCopied(false), 1500) }
   return (
@@ -236,7 +242,7 @@ function CopyableRow({ label, value, explorerUrl }: { label: string; value: stri
           fontSize="11px" color="var(--teal)" fontFamily="mono" cursor="pointer" wordBreak="break-all" textAlign="right"
           _hover={{ opacity: 0.8 }} onClick={handleCopy} title={copied ? 'Copied!' : 'Click to copy'}
         >
-          {copied ? 'Copied!' : value}
+          {copied ? uiText("Copied!") : value}
         </Text>
         {explorerUrl && (
           <Text as="button" fontSize="10px" color="kk.textMuted" _hover={{ color: 'var(--teal)' }} flexShrink={0}
@@ -256,6 +262,8 @@ function CopyableRow({ label, value, explorerUrl }: { label: string; value: stri
 /** What the transaction did, in plain words. Loads after the dialog opens, so
  *  it never holds the dialog up; nothing to say renders nothing. */
 function TxDetailsSection({ networkId, txid }: { networkId: string; txid: string }) {
+  const uiText = useUiTranslation()
+
   const [lines, setLines] = useState<TxDetailLine[] | null>(null)
   useEffect(() => {
     let live = true
@@ -268,13 +276,15 @@ function TxDetailsSection({ networkId, txid }: { networkId: string; txid: string
   if (!lines?.length) return null
   return (
     <Box mt="2" pt="2" borderTop="1px solid" borderColor="kk.border">
-      <Text fontSize="11px" fontWeight="700" color="kk.textPrimary">Details</Text>
+      <Text fontSize="11px" fontWeight="700" color="kk.textPrimary">{uiText("Details")}</Text>
       {lines.map((l, i) => <TxDetailRow key={i} label={l.label} value={l.value} prose />)}
     </Box>
   )
 }
 
 export function TxDetailDialog({ detail, onClose, nativePrices }: { detail: TxDetail; onClose: () => void; nativePrices: Record<string, number> }) {
+  const uiText = useUiTranslation()
+
   if (detail.kind === 'activity') {
     const a = detail.activity
     const typeConf = TYPE_CONFIG[a.type] || TYPE_CONFIG.sign
@@ -307,7 +317,7 @@ export function TxDetailDialog({ detail, onClose, nativePrices }: { detail: TxDe
           {/* Header */}
           <Flex px="5" py="3" borderBottom="1px solid" borderColor="kk.border" align="center" justify="space-between">
             <HStack gap="2" flexWrap="wrap">
-			  <Text fontSize="sm" fontWeight="700" color="kk.textPrimary" mr="1">Transaction details</Text>
+			  <Text fontSize="sm" fontWeight="700" color="kk.textPrimary" mr="1">{uiText("Transaction details")}</Text>
               <Box px="2" py="0.5" borderRadius="md" fontSize="xs" fontWeight="700" bg={`${typeConf.color}22`} color={typeConf.color}>{typeConf.label}</Box>
               {a.type === 'swap' && a.swapStatus ? (
                 <SwapStatusBadge status={a.swapStatus} />
@@ -316,14 +326,14 @@ export function TxDetailDialog({ detail, onClose, nativePrices }: { detail: TxDe
               )}
               {a.source === 'api' && <Box px="2" py="0.5" borderRadius="md" fontSize="xs" fontWeight="600" bg="rgba(130,71,229,0.15)" color="#8247E5">API</Box>}
             </HStack>
-            <Text as="button" fontSize="lg" color="kk.textMuted" _hover={{ color: 'kk.textPrimary' }} onClick={onClose}>&times;</Text>
+            <Text as="button" fontSize="lg" color="kk.textMuted" _hover={{ color: 'kk.textPrimary' }} onClick={onClose}>{uiText("&times;")}</Text>
           </Flex>
 
           {/* Body */}
           <VStack px="5" py="4" gap="0" align="stretch">
             {/* Chain */}
             <Flex justify="space-between" align="center" py="1.5" gap="3">
-              <Text fontSize="11px" color="kk.textMuted" minW="100px" flexShrink={0}>Chain</Text>
+              <Text fontSize="11px" color="kk.textMuted" minW="100px" flexShrink={0}>{uiText("Chain")}</Text>
               <HStack gap="2">
                 {chainDef && (
                   <Image src={caipToIcon(chainDef.caip)} w="16px" h="16px" borderRadius="full"
@@ -335,30 +345,30 @@ export function TxDetailDialog({ detail, onClose, nativePrices }: { detail: TxDe
             </Flex>
 
             {/* Amount */}
-            {amountValue && <TxDetailRow label="Amount" value={`${amountValue.amount} ${a.asset || chainSymbol}${amountValue.usd ? ` (${amountValue.usd})` : ''}`} />}
+            {amountValue && <TxDetailRow label={uiText("Amount")} value={`${amountValue.amount} ${a.asset || chainSymbol}${amountValue.usd ? ` (${amountValue.usd})` : ''}`} />}
 
             {/* Received (swap output, when this activity is a swap) */}
-            {a.type === 'swap' && a.outAmount && <TxDetailRow label="Received" value={`${a.outAmount} ${a.outAsset || ''}`.trim()} color="var(--teal)" />}
+            {a.type === 'swap' && a.outAmount && <TxDetailRow label={uiText("Received")} value={`${a.outAmount} ${a.outAsset || ''}`.trim()} color="var(--teal)" />}
 
             {/* Fee */}
-            {feeValue && <TxDetailRow label="Fee" value={`${feeValue.amount} ${chainSymbol}${feeValue.usd ? ` (${feeValue.usd})` : ''}`} />}
+            {feeValue && <TxDetailRow label={uiText("Fee")} value={`${feeValue.amount} ${chainSymbol}${feeValue.usd ? ` (${feeValue.usd})` : ''}`} />}
 
             {/* Separator */}
             <Box h="1px" bg="kk.border" my="2" />
 
             {/* TxID */}
-            {a.txid && <CopyableRow label="Transaction ID" value={a.txid} explorerUrl={explorerUrl} />}
+            {a.txid && <CopyableRow label={uiText("Transaction ID")} value={a.txid} explorerUrl={explorerUrl} />}
 
             {/* From address (counterparty — most useful for received txs) */}
-            {a.from && <CopyableRow label="From" value={a.from} explorerUrl={explorerFromUrl} />}
+            {a.from && <CopyableRow label={uiText("From")} value={a.from} explorerUrl={explorerFromUrl} />}
 
             {/* To address */}
-            {a.to && <CopyableRow label="To" value={a.to} explorerUrl={explorerAddrUrl} />}
+            {a.to && <CopyableRow label={uiText("To")} value={a.to} explorerUrl={explorerAddrUrl} />}
 
             {/* Confirmations */}
             {a.confirmations !== undefined && (
               <Flex justify="space-between" align="center" py="1.5" gap="3">
-                <Text fontSize="11px" color="kk.textMuted" minW="100px" flexShrink={0}>Confirmations</Text>
+                <Text fontSize="11px" color="kk.textMuted" minW="100px" flexShrink={0}>{uiText("Confirmations")}</Text>
                 <HStack gap="2">
                   <ConfBadge confirmations={a.confirmations} chain={a.chain} />
                   <Text fontSize="11px" color="kk.textMuted">({a.confirmations} / {required})</Text>
@@ -367,21 +377,21 @@ export function TxDetailDialog({ detail, onClose, nativePrices }: { detail: TxDe
             )}
 
             {/* Block height */}
-            {a.blockHeight ? <TxDetailRow label="Block" value={String(a.blockHeight)} mono /> : null}
+            {a.blockHeight ? <TxDetailRow label={uiText("Block")} value={String(a.blockHeight)} mono /> : null}
 
             {/* Source — how this record reached us (on-chain scan / in-app / external app) */}
-            <TxDetailRow label="Source" value={SOURCE_LABELS[a.source] || a.source} />
+            <TxDetailRow label={uiText("Source")} value={SOURCE_LABELS[a.source] || a.source} />
 
             {/* App name */}
-            {a.appName && <TxDetailRow label="App" value={a.appName} />}
+            {a.appName && <TxDetailRow label={uiText("App")} value={a.appName} />}
 
             {/* Timestamp */}
-            <TxDetailRow label="Time" value={formatFullDate(a.createdAt)} />
+            <TxDetailRow label={uiText("Time")} value={formatFullDate(a.createdAt)} />
 
             {/* Explorer button */}
             {verificationLinks.length > 0 && (
               <Box mt="3">
-                <Text fontSize="10px" color="kk.textMuted" mb="2">Verify independently on a third-party block explorer</Text>
+                <Text fontSize="10px" color="kk.textMuted" mb="2">{uiText("Verify independently on a third-party block explorer")}</Text>
                 <Flex gap="2" wrap="wrap">
                   {verificationLinks.map(link => (
                     <Flex
@@ -436,42 +446,42 @@ export function TxDetailDialog({ detail, onClose, nativePrices }: { detail: TxDe
         {/* Header */}
         <Flex px="5" py="3" borderBottom="1px solid" borderColor="kk.border" align="center" justify="space-between">
           <HStack gap="2">
-            <Box px="2" py="0.5" borderRadius="md" fontSize="xs" fontWeight="700" bg="rgba(233,196,106,0.15)" color="var(--gold)">Swap</Box>
-            <Text fontSize="sm" fontWeight="600" color="kk.textPrimary">{s.fromSymbol} &rarr; {s.toSymbol}</Text>
+            <Box px="2" py="0.5" borderRadius="md" fontSize="xs" fontWeight="700" bg="rgba(233,196,106,0.15)" color="var(--gold)">{uiText("Swap")}</Box>
+            <Text fontSize="sm" fontWeight="600" color="kk.textPrimary">{s.fromSymbol}{" "}{uiText("&rarr;")}{" "}{s.toSymbol}</Text>
             <SwapStatusBadge status={displayStatus} />
           </HStack>
-          <Text as="button" fontSize="lg" color="kk.textMuted" _hover={{ color: 'kk.textPrimary' }} onClick={onClose}>&times;</Text>
+          <Text as="button" fontSize="lg" color="kk.textMuted" _hover={{ color: 'kk.textPrimary' }} onClick={onClose}>{uiText("&times;")}</Text>
         </Flex>
 
         {/* Body */}
         <VStack px="5" py="4" gap="0" align="stretch">
-          <TxDetailRow label="From" value={`${s.fromAmount} ${s.fromSymbol}`} />
-          <TxDetailRow label="Originally quoted" value={`${s.expectedOutput} ${s.toSymbol}`} />
+          <TxDetailRow label={uiText("From")} value={`${s.fromAmount} ${s.fromSymbol}`} />
+          <TxDetailRow label={uiText("Originally quoted")} value={`${s.expectedOutput} ${s.toSymbol}`} />
           {showReceived && <TxDetailRow label={settlementVerified ? 'Reported received' : 'Partial payout'} value={`${s.receivedOutput} ${s.toSymbol}`} color="var(--teal)" />}
-          {s.status === 'completed' && !settlementVerified && <Text fontSize="xs" color="var(--gold)">Verifying all settlement payments before marking this swap done.</Text>}
+          {s.status === 'completed' && !settlementVerified && <Text fontSize="xs" color="var(--gold)">{uiText("Verifying all settlement payments before marking this swap done.")}</Text>}
           {s.payouts?.map((payout, index) => <CopyableRow key={`${payout.txid}-${index}`} label={`Payment ${index + 1}: ${payout.amount} ${s.toSymbol}`} value={payout.txid} explorerUrl={getExplorerTxUrl(s.outboundChainId || s.toChainId, payout.txid)} />)}
-          {s.integration && <TxDetailRow label="Integration" value={s.integration} />}
+          {s.integration && <TxDetailRow label={uiText("Integration")} value={s.integration} />}
 
           <Box h="1px" bg="kk.border" my="2" />
 
-          <CopyableRow label="Inbound TX" value={s.txid} explorerUrl={inboundUrl} />
-          {s.outboundTxid && <CopyableRow label="Outbound TX" value={s.outboundTxid} explorerUrl={outboundUrl} />}
-          {s.inboundAddress && <CopyableRow label="Inbound Address" value={s.inboundAddress} />}
-          {s.memo && <CopyableRow label="Memo" value={s.memo} />}
-          {s.router && <CopyableRow label="Router" value={s.router} />}
+          <CopyableRow label={uiText("Inbound TX")} value={s.txid} explorerUrl={inboundUrl} />
+          {s.outboundTxid && <CopyableRow label={uiText("Outbound TX")} value={s.outboundTxid} explorerUrl={outboundUrl} />}
+          {s.inboundAddress && <CopyableRow label={uiText("Inbound Address")} value={s.inboundAddress} />}
+          {s.memo && <CopyableRow label={uiText("Memo")} value={s.memo} />}
+          {s.router && <CopyableRow label={uiText("Router")} value={s.router} />}
 
           <Box h="1px" bg="kk.border" my="2" />
 
           {/* Confirmations */}
-          {s.confirmations > 0 && <TxDetailRow label="Inbound Confs" value={String(s.confirmations)} />}
+          {s.confirmations > 0 && <TxDetailRow label={uiText("Inbound Confs")} value={String(s.confirmations)} />}
           {s.outboundConfirmations !== undefined && s.outboundRequiredConfirmations !== undefined && (
-            <TxDetailRow label="Outbound Confs" value={`${s.outboundConfirmations} / ${s.outboundRequiredConfirmations}`} />
+            <TxDetailRow label={uiText("Outbound Confs")} value={`${s.outboundConfirmations} / ${s.outboundRequiredConfirmations}`} />
           )}
 
-          {s.error && <TxDetailRow label="Error" value={s.error} color="var(--rose)" />}
+          {s.error && <TxDetailRow label={uiText("Error")} value={s.error} color="var(--rose)" />}
 
-          <TxDetailRow label="Started" value={formatFullDate(s.createdAt)} />
-          {s.estimatedTime > 0 && <TxDetailRow label="Est. Time" value={`${Math.floor(s.estimatedTime / 60)}m ${s.estimatedTime % 60}s`} />}
+          <TxDetailRow label={uiText("Started")} value={formatFullDate(s.createdAt)} />
+          {s.estimatedTime > 0 && <TxDetailRow label={uiText("Est. Time")} value={`${Math.floor(s.estimatedTime / 60)}m ${s.estimatedTime % 60}s`} />}
 
           {/* Explorer buttons */}
           <HStack gap="2" mt="3">
@@ -483,7 +493,7 @@ export function TxDetailDialog({ detail, onClose, nativePrices }: { detail: TxDe
                 _hover={{ bg: 'rgba(139,227,196,0.18)' }} transition="all 0.15s"
                 onClick={() => rpcRequest('openUrl', { url: inboundUrl }).catch(() => {})}
               >
-                <Text fontSize="xs" fontWeight="600" color="var(--teal)">Inbound Explorer</Text>
+                <Text fontSize="xs" fontWeight="600" color="var(--teal)">{uiText("Inbound Explorer")}</Text>
               </Flex>
             )}
             {outboundUrl && (
@@ -494,7 +504,7 @@ export function TxDetailDialog({ detail, onClose, nativePrices }: { detail: TxDe
                 _hover={{ bg: 'rgba(233,196,106,0.18)' }} transition="all 0.15s"
                 onClick={() => rpcRequest('openUrl', { url: outboundUrl }).catch(() => {})}
               >
-                <Text fontSize="xs" fontWeight="600" color="var(--gold)">Outbound Explorer</Text>
+                <Text fontSize="xs" fontWeight="600" color="var(--gold)">{uiText("Outbound Explorer")}</Text>
               </Flex>
             )}
           </HStack>
@@ -505,6 +515,8 @@ export function TxDetailDialog({ detail, onClose, nativePrices }: { detail: TxDe
 }
 
 export function ActivityRow({ activity, onSelect, nativePrices }: { activity: RecentActivity; onSelect: (a: RecentActivity) => void; nativePrices: Record<string, number> }) {
+  const uiText = useUiTranslation()
+
   const [copied, setCopied] = useState(false)
   const typeConf = TYPE_CONFIG[activity.type] || TYPE_CONFIG.sign
   const chainDef = CHAINS.find(c => activity.chainId && c.id === activity.chainId) || CHAINS.find(c => c.symbol === activity.chain || c.id === activity.chain)
@@ -572,14 +584,14 @@ export function ActivityRow({ activity, onSelect, nativePrices }: { activity: Re
       <Flex justify="space-between" align="center" gap="2" mt="1.5">
         {activity.txid ? (
           <Text flex="1" minW="0" fontSize="2xs" color="whiteAlpha.600" fontFamily="mono" cursor="pointer" truncate _hover={{ color: "var(--teal)" }} onClick={(e) => { e.stopPropagation(); handleCopy(activity.txid!) }} title={copied ? 'Copied!' : 'Click to copy'}>
-            {copied ? 'Copied!' : truncateTxid(activity.txid)}
+            {copied ? uiText("Copied!") : truncateTxid(activity.txid)}
           </Text>
         ) : (
-          <Text flex="1" minW="0" fontSize="2xs" color="whiteAlpha.400" fontStyle="italic">no txid</Text>
+          <Text flex="1" minW="0" fontSize="2xs" color="whiteAlpha.400" fontStyle="italic">{uiText("no txid")}</Text>
         )}
         <HStack gap="2" flexShrink={0}>
-          {activity.blockHeight ? <Text fontSize="9px" color="whiteAlpha.200" fontFamily="mono">blk {activity.blockHeight}</Text> : null}
-          {explorerUrl && <Text as="button" fontSize="2xs" color="whiteAlpha.400" _hover={{ color: "var(--teal)" }} onClick={(e) => { e.stopPropagation(); rpcRequest('openUrl', { url: explorerUrl }) }}>Explorer</Text>}
+          {activity.blockHeight ? <Text fontSize="9px" color="whiteAlpha.200" fontFamily="mono">{uiText("blk")}{" "}{activity.blockHeight}</Text> : null}
+          {explorerUrl && <Text as="button" fontSize="2xs" color="whiteAlpha.400" _hover={{ color: "var(--teal)" }} onClick={(e) => { e.stopPropagation(); rpcRequest('openUrl', { url: explorerUrl }) }}>{uiText("Explorer")}</Text>}
         </HStack>
       </Flex>
     </Box>
@@ -587,6 +599,8 @@ export function ActivityRow({ activity, onSelect, nativePrices }: { activity: Re
 }
 
 export function ActivityTableRow({ activity, onSelect, nativePrices }: { activity: RecentActivity; onSelect: (a: RecentActivity) => void; nativePrices: Record<string, number> }) {
+  const uiText = useUiTranslation()
+
   const typeConf = TYPE_CONFIG[activity.type] || TYPE_CONFIG.sign
   const chainDef = CHAINS.find(c => activity.chainId && c.id === activity.chainId) || CHAINS.find(c => c.symbol === activity.chain || c.id === activity.chain)
   const chainSymbol = chainDef?.symbol || activity.chain
@@ -632,9 +646,7 @@ export function ActivityTableRow({ activity, onSelect, nativePrices }: { activit
       <Text fontSize="2xs" color="whiteAlpha.300" flexShrink={0} w="50px" textAlign="right">{timeAgo(activity.createdAt)}</Text>
       {explorerUrl ? (
         <Text as="button" fontSize="2xs" color="whiteAlpha.400" _hover={{ color: 'var(--teal)' }} flexShrink={0} w="50px" textAlign="right"
-          onClick={e => { e.stopPropagation(); rpcRequest('openUrl', { url: explorerUrl }).catch(() => {}) }}>
-          Explorer
-        </Text>
+          onClick={e => { e.stopPropagation(); rpcRequest('openUrl', { url: explorerUrl }).catch(() => {}) }}>{uiText("Explorer")}</Text>
       ) : (
         <Box w="50px" flexShrink={0} />
       )}
@@ -643,14 +655,16 @@ export function ActivityTableRow({ activity, onSelect, nativePrices }: { activit
 }
 
 export function ActivityTable({ activities, nativePrices, onSelect }: { activities: RecentActivity[]; nativePrices: Record<string, number>; onSelect: (a: RecentActivity) => void }) {
+  const uiText = useUiTranslation()
+
   return (
     <Box border="1px solid" borderColor="rgba(255,255,255,0.08)" borderRadius="lg" overflow="hidden">
       <Flex align="center" gap="2" px="3" py="1.5" borderBottom="1px solid" borderColor="rgba(255,255,255,0.08)" bg="rgba(255,255,255,0.02)">
         <Box w="18px" flexShrink={0} />
-        <Text fontSize="9px" fontWeight="700" color="whiteAlpha.400" textTransform="uppercase" letterSpacing="0.12em" w="170px" flexShrink={0}>Asset</Text>
-        <Text fontSize="9px" fontWeight="700" color="whiteAlpha.400" textTransform="uppercase" letterSpacing="0.12em" flex="1">Amount</Text>
-        <Text fontSize="9px" fontWeight="700" color="whiteAlpha.400" textTransform="uppercase" letterSpacing="0.12em" w="90px" textAlign="right">Status</Text>
-        <Text fontSize="9px" fontWeight="700" color="whiteAlpha.400" textTransform="uppercase" letterSpacing="0.12em" w="50px" textAlign="right">Time</Text>
+        <Text fontSize="9px" fontWeight="700" color="whiteAlpha.400" textTransform="uppercase" letterSpacing="0.12em" w="170px" flexShrink={0}>{uiText("Asset")}</Text>
+        <Text fontSize="9px" fontWeight="700" color="whiteAlpha.400" textTransform="uppercase" letterSpacing="0.12em" flex="1">{uiText("Amount")}</Text>
+        <Text fontSize="9px" fontWeight="700" color="whiteAlpha.400" textTransform="uppercase" letterSpacing="0.12em" w="90px" textAlign="right">{uiText("Status")}</Text>
+        <Text fontSize="9px" fontWeight="700" color="whiteAlpha.400" textTransform="uppercase" letterSpacing="0.12em" w="50px" textAlign="right">{uiText("Time")}</Text>
         <Box w="50px" flexShrink={0} />
       </Flex>
       {activities.map((a, i) => (
@@ -663,6 +677,8 @@ export function ActivityTable({ activities, nativePrices, onSelect }: { activiti
 }
 
 export function SwapRow({ swap, onSelect }: { swap: PendingSwap; onSelect: (s: PendingSwap) => void }) {
+  const uiText = useUiTranslation()
+
   const settlementVerified = isSwapFullySettled({ status: swap.status, integration: swap.integration, swapper: swap.swapper,
     payouts: swap.payouts, receivedOutput: swap.receivedOutput, minimumOutput: swap.minimumOutput })
   const displayStatus = swap.status === 'completed' && !settlementVerified ? 'output_confirming' : swap.status
@@ -684,7 +700,7 @@ export function SwapRow({ swap, onSelect }: { swap: PendingSwap; onSelect: (s: P
         <Box minW="0" flex="1">
           <HStack gap="1.5" minW="0">
             <Text fontSize="xs" fontWeight="700" color="white" truncate>{swap.fromSymbol} {'\u2192'} {swap.toSymbol}</Text>
-            <Box px="1.5" py="0.5" borderRadius="sm" fontSize="2xs" lineHeight="1" fontWeight="700" bg="rgba(247,147,26,0.15)" color="#F7931A" flexShrink={0}>Swap</Box>
+            <Box px="1.5" py="0.5" borderRadius="sm" fontSize="2xs" lineHeight="1" fontWeight="700" bg="rgba(247,147,26,0.15)" color="#F7931A" flexShrink={0}>{uiText("Swap")}</Box>
           </HStack>
           {amountLine && <Text fontSize="2xs" color="whiteAlpha.500" mt="0.5" truncate>{amountLine}</Text>}
         </Box>
@@ -695,10 +711,10 @@ export function SwapRow({ swap, onSelect }: { swap: PendingSwap; onSelect: (s: P
       </Flex>
       <Flex justify="space-between" align="center" gap="2" mt="1.5">
         <Text flex="1" minW="0" fontSize="2xs" color="whiteAlpha.600" fontFamily="mono" cursor="pointer" truncate _hover={{ color: "var(--teal)" }} onClick={(e) => { e.stopPropagation(); handleCopy(swap.txid) }} title={copied ? 'Copied!' : 'Click to copy'}>
-          {copied ? 'Copied!' : truncateTxid(swap.txid)}
+          {copied ? uiText("Copied!") : truncateTxid(swap.txid)}
         </Text>
         <HStack gap="2" flexShrink={0}>
-          {explorerUrl && <Text as="button" fontSize="2xs" color="whiteAlpha.400" _hover={{ color: "var(--teal)" }} onClick={(e) => { e.stopPropagation(); rpcRequest('openUrl', { url: explorerUrl }) }}>Explorer</Text>}
+          {explorerUrl && <Text as="button" fontSize="2xs" color="whiteAlpha.400" _hover={{ color: "var(--teal)" }} onClick={(e) => { e.stopPropagation(); rpcRequest('openUrl', { url: explorerUrl }) }}>{uiText("Explorer")}</Text>}
         </HStack>
       </Flex>
     </Box>
@@ -724,6 +740,8 @@ function NetworkSelector({ chainOptions, selectedChain, selectedDef, scanning, s
   onSelect: (id: string) => void
   onScan: () => void
 }) {
+  const uiText = useUiTranslation()
+
   const [dropdownOpen, setDropdownOpen] = useState(false)
 
   return (
@@ -747,7 +765,7 @@ function NetworkSelector({ chainOptions, selectedChain, selectedDef, scanning, s
           </Box>
         )}
         <Text flex="1" fontSize="xs" fontWeight="600" color="white" truncate>
-          {selectedDef ? `${selectedDef.coin} (${selectedDef.symbol})` : 'All Networks'}
+          {selectedDef ? `${selectedDef.coin} (${selectedDef.symbol})` : uiText("All Networks")}
         </Text>
         {selectedDef && <Text fontSize="9px" color="whiteAlpha.300" flexShrink={0} truncate maxW="100px" fontFamily="mono">{selectedDef.networkId}</Text>}
         <Text fontSize="2xs" color="whiteAlpha.400" flexShrink={0}>{dropdownOpen ? '\u25B2' : '\u25BC'}</Text>
@@ -804,8 +822,8 @@ function NetworkSelector({ chainOptions, selectedChain, selectedDef, scanning, s
                 <Box w="18px" h="18px" borderRadius="full" bg="whiteAlpha.200" display="flex" alignItems="center" justifyContent="center" flexShrink={0}>
                   <Text fontSize="9px" color="whiteAlpha.600" fontWeight="700">*</Text>
                 </Box>
-                <Text fontSize="xs" fontWeight="600" color="white">All</Text>
-                <Text fontSize="2xs" color="whiteAlpha.400" flex="1">All Networks</Text>
+                <Text fontSize="xs" fontWeight="600" color="white">{uiText("All")}</Text>
+                <Text fontSize="2xs" color="whiteAlpha.400" flex="1">{uiText("All Networks")}</Text>
                 {!selectedChain && <Text fontSize="2xs" color="var(--teal)">{'\u2713'}</Text>}
               </Flex>
               {chainOptions.map(c => (
@@ -836,6 +854,8 @@ function NetworkSelector({ chainOptions, selectedChain, selectedDef, scanning, s
 }
 
 export function ActivityPanel({ open, onClose, activities, pendingSwaps, onRefresh, onResumeSwap, onOpenFullPage }: ActivityPanelProps) {
+  const uiText = useUiTranslation()
+
   const [tab, setTab] = useState<'activity' | 'swaps'>('activity')
   const [selectedChain, setSelectedChain] = useState<string>('')
   const [scanning, setScanning] = useState(false)
@@ -948,7 +968,7 @@ export function ActivityPanel({ open, onClose, activities, pendingSwaps, onRefre
         {/* Header */}
         <Flex px="4" pt="4" pb="2" justify="space-between" align="center" flexShrink={0}>
           <HStack gap="3">
-            <Text fontSize="sm" fontWeight="700" color="white">Recent Activity</Text>
+            <Text fontSize="sm" fontWeight="700" color="white">{uiText("Recent Activity")}</Text>
             <DocsLink href={DOCS_LINKS.activity} />
           </HStack>
           <HStack gap="2">
@@ -958,14 +978,12 @@ export function ActivityPanel({ open, onClose, activities, pendingSwaps, onRefre
                 _hover={{ opacity: 0.75 }} transition="opacity 0.15s"
                 onClick={() => { onClose(); onOpenFullPage() }}
                 display="flex" alignItems="center" gap="1"
-              >
-                Full page
-                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              >{uiText("Full page")}<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M5 12h14M12 5l7 7-7 7"/>
                 </svg>
               </Text>
             )}
-            <Text as="button" fontSize="sm" color="whiteAlpha.500" _hover={{ color: "white" }} onClick={onClose} fontWeight="600">&times;</Text>
+            <Text as="button" fontSize="sm" color="whiteAlpha.500" _hover={{ color: "white" }} onClick={onClose} fontWeight="600">{uiText("&times;")}</Text>
           </HStack>
         </Flex>
 
@@ -977,9 +995,7 @@ export function ActivityPanel({ open, onClose, activities, pendingSwaps, onRefre
             color={tab === 'activity' ? '#23DCC8' : 'whiteAlpha.500'}
             borderBottom={tab === 'activity' ? '2px solid #23DCC8' : '2px solid transparent'}
             pb="1" onClick={() => setTab('activity')}
-          >
-            History
-          </Text>
+          >{uiText("History")}</Text>
           {pendingSwaps.length > 0 && (
             <Text
               as="button" fontSize="xs"
@@ -987,8 +1003,7 @@ export function ActivityPanel({ open, onClose, activities, pendingSwaps, onRefre
               color={tab === 'swaps' ? '#F7931A' : 'whiteAlpha.500'}
               borderBottom={tab === 'swaps' ? '2px solid #F7931A' : '2px solid transparent'}
               pb="1" onClick={() => setTab('swaps')}
-            >
-              Swaps ({pendingSwaps.length})
+            >{uiText("Swaps (")}{pendingSwaps.length})
             </Text>
           )}
         </Flex>
@@ -1029,7 +1044,7 @@ export function ActivityPanel({ open, onClose, activities, pendingSwaps, onRefre
                 ))}
                 {activityTimeline.length === 0 && (
                   <Text fontSize="xs" color="whiteAlpha.400" textAlign="center" py="8">
-                    {selectedDef ? `No indexed ${selectedDef.symbol} activity. Refresh to scan.` : 'No indexed activity loaded. Choose a network to scan.'}
+                    {selectedDef ? `No indexed ${selectedDef.symbol} activity. Refresh to scan.` : uiText("No indexed activity loaded. Choose a network to scan.")}
                   </Text>
                 )}
               </>
@@ -1040,7 +1055,7 @@ export function ActivityPanel({ open, onClose, activities, pendingSwaps, onRefre
                   <SwapRow key={`swap-${swap.txid}`} swap={swap} onSelect={s => onResumeSwap ? onResumeSwap(s) : setSelectedDetail({ kind: 'swap', swap: s })} />
                 ))}
                 {recentPendingSwaps.length === 0 && (
-                  <Text fontSize="xs" color="whiteAlpha.400" textAlign="center" py="8">No swaps</Text>
+                  <Text fontSize="xs" color="whiteAlpha.400" textAlign="center" py="8">{uiText("No swaps")}</Text>
                 )}
               </>
             )}

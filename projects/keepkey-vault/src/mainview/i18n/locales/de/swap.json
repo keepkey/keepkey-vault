@@ -159,14 +159,10 @@
 	"approvalWaiting": "Warten auf Bestätigung der Freigabe…",
 	"approvalWaitingDesc": "Warten auf das Mining der Freigabe, bevor wir den Swap signieren können.",
 	"balanceChanges": "Guthabenänderungen",
-	"blindSignBody": "Solana-Swaps verwenden eine versionierte Transaktion, die Ihr KeepKey nicht vollständig dekodieren kann, daher muss sie blind signiert werden. Dies ist standardmäßig deaktiviert. Beim Aktivieren wird der Erweiterte Modus (Blind-Signieren) auf Ihrem Gerät eingeschaltet — Sie werden gebeten, die Änderung auf dem Gerät zu bestätigen.",
-	"blindSignCaveat": "Blind-Signieren bedeutet, dass das Gerät eine generische Aufforderung anstelle dekodierter Details anzeigt. Fahren Sie nur bei Swaps fort, die Sie hier gestartet haben. Sie können es in Geräteeinstellungen → Signierrichtlinie wieder deaktivieren.",
 	"blindSignConfirmOnDevice": "Auf Gerät bestätigen…",
 	"blindSignDeclined": "Auf dem Gerät abgelehnt — Blind-Signieren wurde nicht aktiviert.",
-	"blindSignEnable": "Blind-Signieren aktivieren",
 	"blindSignEnableFailed": "Blind-Signieren konnte auf dem Gerät nicht aktiviert werden.",
 	"blindSignHeader": "Blind-Signieren",
-	"blindSignTitle": "Blind-Signieren für Solana aktivieren",
 	"block": "Block",
 	"cancelSwapDevice": "Abbrechen – Geräteaufforderung freigeben",
 	"completed": "abgeschlossen",
@@ -202,5 +198,9 @@
 	"youReceived": "Sie erhielten",
 	"exceedsSafeMax": "Lassen Sie ~{{reserve}} {{symbol}} für Netzwerkgebühren — verringern Sie den Betrag oder tippen Sie auf MAX.",
 	"sent": "Gesendet",
-	"gas": "Gas"
+	"gas": "Gas",
+	"deviceBlindSignCaveat": "Blindes Signieren bleibt bis zum Sperren oder Trennen des KeepKey für alle Apps aktiviert, die ihn verwenden, nicht nur für diesen Tausch. Solange es aktiviert ist, zeigt diese App diesen Bildschirm vor solchen Transaktionen ebenfalls nicht mehr an. Das Gerät fordert dich zur Bestätigung und zur erneuten PIN-Eingabe auf.",
+	"solanaOutflowDrain": "Warnung: Dadurch wird dein Wallet geleert. Signiere nur, wenn du das beabsichtigst.",
+	"solanaOutflowCaveat": "Von diesem Computer aus mit einem Solana-Knoten simuliert. Dein KeepKey kann diese Zahlen nicht bestätigen.",
+	"deviceBlindSignEnable": "Blindes Signieren einschalten"
 }

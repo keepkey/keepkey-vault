@@ -90,6 +90,7 @@ function chainIdToVaultId(caip2: string): string {
   return map[caip2] || caip2
 }
 import {
+  advanceSwapStatus,
   isTerminalSwapStatus,
   mapRelayExecutionStatus,
   relayOutboundTxid,
@@ -474,9 +475,9 @@ async function registerWithPioneer(swap: PendingSwap): Promise<void> {
 function applyRemoteSwapData(swap: PendingSwap, remoteSwap: any): void {
   // Pioneer's mapped status only takes effect when Midgard hasn't ruled yet.
   const mappedPioneerStatus = mapPioneerStatus(remoteSwap.status)
-  // NEAR terminal state and actual output require the bound 1Click proof below.
-  // Legacy Pioneer rows can report a deposit receipt or quote as completion.
-  const pioneerStatus = isNearIntentsSwap(swap) && isTerminalSwapStatus(mappedPioneerStatus)
+  // 1Click owns NEAR lifecycle, including processing. Mixing its live state
+  // with Pioneer's older pending row caused a backward jump on every poll.
+  const pioneerStatus = isNearIntentsSwap(swap)
     ? swap.status : mappedPioneerStatus
   const needsSettlementVerification = !isNearIntentsSwap(swap)
     && /thor|maya/i.test(`${swap.integration} ${swap.swapper || ''} ${remoteSwap.details?.protocol?.protocol || ''}`)
@@ -484,11 +485,12 @@ function applyRemoteSwapData(swap: PendingSwap, remoteSwap: any): void {
   // Pioneer maps refunds → 'completed' and cannot be trusted to override a locally
   // confirmed refund (verified on-chain or via the swap-monitor's eth_getBalance check).
   const localRefundOverridesPioneer = swap.status === 'refunded' && pioneerStatus === 'completed'
-  const newStatus = swap.midgardClassified
+  const proposedStatus = swap.midgardClassified
     ? swap.status
     : (ignoreNonFinalPioneer || localRefundOverridesPioneer)
       ? swap.status
       : needsSettlementVerification && pioneerStatus === 'completed' ? 'output_confirming' : pioneerStatus
+  const newStatus = advanceSwapStatus(swap.status, proposedStatus)
   const confirmations = ignoreNonFinalPioneer ? swap.confirmations : (remoteSwap.confirmations ?? swap.confirmations)
   const outboundConfirmations = remoteSwap.outboundConfirmations
   const outboundRequiredConfirmations = remoteSwap.outboundRequiredConfirmations
@@ -854,9 +856,14 @@ export async function refreshSwap(txid: string, deviceId?: string, walletId?: st
       )
       if (resp.ok) {
         const data = await resp.json() as any
+        // A newer poll may have settled this same live object while the
+        // request was in flight. Do not repeat its completion event/ledger
+        // write using an older response with no received amount.
+        if (isTerminalSwapStatus(swap.status)) return swap
         const settlement = classifyNearIntentsStatus(swap, data)
         const previousStatus = swap.status
-        swap.status = settlement.status
+        // Another poll may have completed while this request was in flight.
+        swap.status = advanceSwapStatus(swap.status, settlement.status)
         if (settlement.nearTxHash) swap.nearTxHash = settlement.nearTxHash
         if (settlement.outboundTxid) {
           swap.outboundTxid = settlement.outboundTxid

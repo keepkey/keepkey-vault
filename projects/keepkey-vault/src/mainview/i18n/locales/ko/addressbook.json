@@ -41,5 +41,9 @@
 	"openAddressBook": "주소록",
 	"saveRecipientPrompt": "이 수신자를 저장할까요?",
 	"contactSaved": "연락처가 저장되었습니다",
-	"saveContactFailed": "연락처를 저장할 수 없습니다"
+	"saveContactFailed": "연락처를 저장할 수 없습니다",
+	"cosigner": "공동 서명자",
+	"cosignerOption": "Safe 공동 서명자: 멀티시그를 만들 때 먼저 제안",
+	"markCosigner": "Safe 공동 서명자로 표시",
+	"notCosigner": "공동 서명자 아님"
 }

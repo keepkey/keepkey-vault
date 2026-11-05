@@ -87,5 +87,8 @@
   "hideFiltered": "필터링된 토큰 {{count}}개 숨기기",
   "showFiltered": "필터링된 토큰 {{count}}개 표시",
   "validatingWallet": "체인과 대조하여 보호된 지갑 검증 중...",
-  "invalidAddress": "유효하지 않은 주소"
+  "invalidAddress": "유효하지 않은 주소",
+  "defiNetwork": "네트워크",
+  "defiSymbol": "심볼",
+  "multisig": "멀티시그"
 }

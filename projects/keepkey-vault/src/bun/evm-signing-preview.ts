@@ -139,7 +139,7 @@ export async function attachErc7730TypedDefinition(
   const catalog = await resolveErc7730ForTypedData({ typedData, firmwareVersion, capabilities })
   if (!catalog) return false
   signingInfo.erc7730 = catalog
-  const description = describeErc7730TypedData(catalog.definitions[0].envelope, typedData, firmwareVersion, from)
+  const description = describeErc7730TypedData(catalog.definitions[0].envelope, typedData, firmwareVersion, from, catalog.definitions)
   if (description) signingInfo.erc7730Description = description
   console.log(`${tag} EIP-712 clear-sign: ERC-7730 definition ${catalog.primaryDefinitionId.slice(0, 18)}… attached`)
   return true

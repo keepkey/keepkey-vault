@@ -1,3 +1,6 @@
+import { normalizeAmountInput } from '../../shared/locale'
+import { getNumberLocale } from "../lib/number-locale"
+import { useUiTranslation } from "../i18n/ui"
 import type { ReactNode } from "react"
 import { useState, useEffect, useCallback, useRef, useMemo } from "react"
 import { useTranslation } from "react-i18next"
@@ -45,6 +48,8 @@ function zcashAddrKind(addr: string): ZcashAddrKind | null {
 
 /** Small inline marker shown beside an address-book entry in the picker. */
 function ZcashKindBadge({ kind }: { kind: ZcashAddrKind | null }) {
+  const uiText = useUiTranslation()
+
 	if (!kind) return null
 	const isPrivate = kind === "private"
 	return (
@@ -55,7 +60,7 @@ function ZcashKindBadge({ kind }: { kind: ZcashAddrKind | null }) {
 			background: isPrivate ? "rgba(110,231,135,0.12)" : "rgba(217,119,87,0.12)",
 			border: `1px solid ${isPrivate ? "rgba(110,231,135,0.30)" : "rgba(217,119,87,0.30)"}`,
 		}}>
-			{isPrivate ? "Private" : "Transparent"}
+			{isPrivate ? uiText("Private") : uiText("Transparent")}
 		</span>
 	)
 }
@@ -171,6 +176,8 @@ function ensureStylesInjected() {
 }
 
 export function ZcashPrivacyTab({ initialPage, initialSection }: { initialPage?: Page; initialSection?: 'shield' | 'unshield' } = {}) {
+  const uiText = useUiTranslation()
+
 	const { t } = useTranslation(["asset", "addressbook", "common"])
 	const { locale: fiatLocale } = useFiat()
 
@@ -221,11 +228,13 @@ export function ZcashPrivacyTab({ initialPage, initialSection }: { initialPage?:
 			if (price > 0) setZecPrice(price)
 		}).catch(() => { /* no price: ZEC entry only */ })
 	}, [])
-	const usdShown = usdText ?? (zecPrice > 0 && parseFloat(amount) > 0 ? (parseFloat(amount) * zecPrice).toFixed(2) : "")
-	const setZecAmount = (v: string) => { setAmount(v); setUsdText(null) }
+	const numericAmount = Number(normalizeAmountInput(amount, fiatLocale) ?? NaN)
+	const usdShown = usdText ?? (zecPrice > 0 && numericAmount > 0 ? (numericAmount * zecPrice).toFixed(2) : "")
+	const setZecAmount = (v: string) => { setAmount(normalizeAmountInput(v, fiatLocale) ?? v); setUsdText(null) }
 	const setUsdAmount = (v: string) => {
-		setUsdText(v)
-		const n = parseFloat(v)
+		const canonical = normalizeAmountInput(v, fiatLocale)
+		setUsdText(canonical ?? v)
+		const n = canonical === null ? NaN : Number(canonical)
 		setAmount(zecPrice > 0 && n > 0 ? (n / zecPrice).toFixed(8).replace(/\.?0+$/, "") : "")
 	}
 	const [memo, setMemo] = useState("")
@@ -632,7 +641,9 @@ export function ZcashPrivacyTab({ initialPage, initialSection }: { initialPage?:
 		setBackfilling(false)
 	}, [t, loadTransactions])
 
-	const parseZatoshis = (s: string): number => {
+	const parseZatoshis = (input: string): number => {
+    const s = normalizeAmountInput(input, fiatLocale)
+    if (s === null) throw new Error(t("invalidAmount", { ns: "send", defaultValue: "Enter an ungrouped decimal amount, for example 1.5. Thousands separators are not accepted." }))
 		// Strict shape — reject "1.2.3", "abc", "" and >8 fractional digits up
 		// front so silent truncation can't fund a different amount than the
 		// user typed. Zec is 8-decimal; anything finer is a typo, not "round
@@ -688,7 +699,7 @@ export function ZcashPrivacyTab({ initialPage, initialSection }: { initialPage?:
 		} catch (e: any) { setSendError(e.message || "Send failed") }
 		setSending(false); setSendStep(null); setSendBatch(null)
 		refreshTexPending()
-	}, [recipient, amount, memo, recipientValidation, refreshBalance, refreshTexPending, t])
+	}, [recipient, amount, memo, recipientValidation, refreshBalance, refreshTexPending, fiatLocale, t])
 
 	const handleShield = useCallback(async () => {
 		if (!shieldAmount) return
@@ -701,7 +712,7 @@ export function ZcashPrivacyTab({ initialPage, initialSection }: { initialPage?:
 			refreshBalance(); refreshTransparentBalance()
 		} catch (e: any) { setShieldError(e.message || "Shield failed") }
 		setShielding(false); setShieldStep(null); setShieldBatch(null)
-	}, [shieldAmount, refreshBalance, refreshTransparentBalance])
+	}, [shieldAmount, refreshBalance, refreshTransparentBalance, fiatLocale, t])
 
 	const handleDeshield = useCallback(async () => {
 		if (!deshieldRecipient || !deshieldAmount) return
@@ -722,7 +733,7 @@ export function ZcashPrivacyTab({ initialPage, initialSection }: { initialPage?:
 			refreshBalance(); refreshTransparentBalance()
 		} catch (e: any) { setDeshieldError(e.message || "Deshield failed") }
 		setDeshielding(false); setDeshieldStep(null); setDeshieldBatch(null)
-	}, [deshieldRecipient, deshieldAmount, deshieldRecipientValidation, refreshBalance, refreshTransparentBalance, t])
+	}, [deshieldRecipient, deshieldAmount, deshieldRecipientValidation, refreshBalance, refreshTransparentBalance, fiatLocale, t])
 
 	const copyAddress = useCallback(() => {
 		if (!orchardAddress) return
@@ -882,8 +893,8 @@ export function ZcashPrivacyTab({ initialPage, initialSection }: { initialPage?:
 		return (
 			<div className="zcash-v2">
 				<div className="empty-card">
-					<h3>Setting up privacy</h3>
-					<p>Deriving the viewing key from your KeepKey. One-time setup, takes a few seconds.</p>
+					<h3>{uiText("Setting up privacy")}</h3>
+					<p>{uiText("Deriving the viewing key from your KeepKey. One-time setup, takes a few seconds.")}</p>
 				</div>
 			</div>
 		)
@@ -905,7 +916,7 @@ export function ZcashPrivacyTab({ initialPage, initialSection }: { initialPage?:
 					</svg>
 				</div>
 				<div className="main">
-					<div className="lbl">{synced ? 'Shielded ZEC · available to send' : balanceAmounts ? 'Shielded ZEC · last known balance' : 'Shielded ZEC · scan needed'}</div>
+					<div className="lbl">{synced ? uiText("Shielded ZEC · available to send") : balanceAmounts ? uiText("Shielded ZEC · last known balance") : uiText("Shielded ZEC · scan needed")}</div>
 					<div className="amount">
 						{/* confirmed = total across all unspent notes; pending = immature
 						  slice (<10 confs, e.g. change from a fresh unshield). Show the
@@ -913,38 +924,36 @@ export function ZcashPrivacyTab({ initialPage, initialSection }: { initialPage?:
 						{balanceAmounts ? formatZec(balanceAmounts.available) : "—"}
 						<span className="ticker">ZEC</span>
 						{onTheWay > 0 && (
-							<span className="pending">+ {formatZec(onTheWay)} pending</span>
+							<span className="pending">+ {formatZec(onTheWay)}{" "}{uiText("pending")}</span>
 						)}
 					</div>
 					{scanInFlight && scanProgress ? (
 						<div className="syncing">
 							<div className="pb"><div className="pb-fill" style={{ width: `${Math.max(displayPercent, 0.5)}%` }} /></div>
-							<span>Syncing {Math.floor(displayPercent)}%</span>
+							<span>{uiText("Syncing")}{" "}{Math.floor(displayPercent)}%</span>
 						</div>
 					) : (
 						<div className="sub">
 							{syncedTo
 								? `Last scanned: block #${syncedTo.toLocaleString(fiatLocale)}${needsScan ? ' · Scan needed' : ''}`
-								: "Not synced yet"}
+								: uiText("Not synced yet")}
 						</div>
 					)}
 				</div>
 				<div className="status-pill">
 					<span className={`led ${!synced ? "amber" : ""}`} />
-					{scanInFlight || scanState === "scanning" ? "Scanning" : scanError ? "Scan failed" : synced ? "Last scan complete" : "Scan needed"}
+					{scanInFlight || scanState === "scanning" ? uiText("Scanning") : scanError ? uiText("Scan failed") : synced ? uiText("Last scan complete") : uiText("Scan needed")}
 					<button
 						className="ghost-btn refresh-compact"
 						onClick={() => handleScan(undefined, undefined, true)}
 						disabled={scanInFlight || scanState === "scanning"}
-						title="Sync to the latest block"
+						title={uiText("Sync to the latest block")}
 					>↻</button>
 				</div>
 			</div>
-			<p style={{ fontSize: 12, color: 'var(--zk-fg-dim)', margin: '0 0 12px' }}>
-				Transparent ZEC and shielded ZEC are separate balances. Refreshing transparent ZEC does not scan private payments.
-			</p>
+			<p style={{ fontSize: 12, color: 'var(--zk-fg-dim)', margin: '0 0 12px' }}>{uiText("Transparent ZEC and shielded ZEC are separate balances. Refreshing transparent ZEC does not scan private payments.")}</p>
 			{scanError && <div className="result-box err" role="alert" style={{ marginBottom: 12 }}>
-				<div className="result-msg">{scanError} <button className="ghost-btn" onClick={() => setPage('scan')}>Open shielded sync →</button></div>
+				<div className="result-msg">{scanError} <button className="ghost-btn" onClick={() => setPage('scan')}>{uiText("Open shielded sync →")}</button></div>
 			</div>}
 
 			{/* page nav */}
@@ -964,11 +973,11 @@ export function ZcashPrivacyTab({ initialPage, initialSection }: { initialPage?:
 			{page === "send" && (
 				<section>
 					<div className="page-head">
-						<h2>{publicRecipient ? 'Unshield to a transparent recipient' : 'Send from shielded balance'}</h2>
+						<h2>{publicRecipient ? uiText("Unshield to a transparent recipient") : uiText("Send from shielded balance")}</h2>
 						<p>{publicRecipient
-							? 'The recipient address and amount will be public. You can pay this address directly from your shielded balance.'
-							: 'Send privately to a u1 address, or unshield directly to a public t1/t3 address.'}</p>
-						{recipient.trim().startsWith('tex1') && <p>TEX recipients require two transactions: unshield to a one-time address, then send to the recipient.</p>}
+							? uiText("The recipient address and amount will be public. You can pay this address directly from your shielded balance.")
+							: uiText("Send privately to a u1 address, or unshield directly to a public t1/t3 address.")}</p>
+						{recipient.trim().startsWith('tex1') && <p>{uiText("TEX recipients require two transactions: unshield to a one-time address, then send to the recipient.")}</p>}
 					</div>
 
 					<div className="form-page with-aside">
@@ -976,17 +985,17 @@ export function ZcashPrivacyTab({ initialPage, initialSection }: { initialPage?:
 							<div className="card-body">
 								<div className="field-grid">
 									<div className="field">
-										<span className="lbl">To</span>
+										<span className="lbl">{uiText("To")}</span>
 										<div className="zk-qr-field">
 											<input
 												type="text"
-												placeholder="Paste a Zcash address (u1… or t1…)"
+												placeholder={uiText("Paste a Zcash address (u1… or t1…)")}
 												value={recipient}
 												onChange={e => setRecipient(e.target.value)}
 											/>
 											<button
 												type="button"
-												title="Address book"
+												title={uiText("Address book")}
 												className="qr-scan-btn"
 												onClick={() => setAddressBookFor("send")}
 											>
@@ -999,7 +1008,7 @@ export function ZcashPrivacyTab({ initialPage, initialSection }: { initialPage?:
 											</button>
 											<button
 												type="button"
-												title="Scan QR code"
+												title={uiText("Scan QR code")}
 												className="qr-scan-btn"
 												onClick={() => setShowScanner(true)}
 											>
@@ -1039,7 +1048,7 @@ export function ZcashPrivacyTab({ initialPage, initialSection }: { initialPage?:
 										<div className="field-err">{t(recipientValidation.error)}</div>
 									)}
 									<div className="field">
-										<span className="lbl">Amount</span>
+										<span className="lbl">{uiText("Amount")}</span>
 										<input
 											type="text"
 											placeholder={amountUnit === "usd" ? "0.00" : "0.00000000"}
@@ -1051,10 +1060,10 @@ export function ZcashPrivacyTab({ initialPage, initialSection }: { initialPage?:
 											className="max"
 											onClick={() => setZecAmount(formatZec(sendMaxZatoshis))}
 											disabled={sendMaxZatoshis === 0}
-										>Max</button>
+										>{uiText("Max")}</button>
 									</div>
 									{zecPrice > 0 && (
-										<button className="unit-flip" title="Switch between USD and ZEC"
+										<button className="unit-flip" title={uiText("Switch between USD and ZEC")}
 											onClick={() => { setAmountUnit(u => u === "usd" ? "zec" : "usd"); setUsdText(null) }}>
 											{amountUnit === "usd"
 												? `${amount || "0"} ZEC`
@@ -1062,7 +1071,7 @@ export function ZcashPrivacyTab({ initialPage, initialSection }: { initialPage?:
 										</button>
 									)}
 									<div className="field">
-										<span className="lbl">Memo</span>
+										<span className="lbl">{uiText("Memo")}</span>
 										<input
 											type="text"
 											placeholder={publicRecipient ? 'Not available for transparent recipients' : 'Optional, encrypted to recipient'}
@@ -1071,67 +1080,63 @@ export function ZcashPrivacyTab({ initialPage, initialSection }: { initialPage?:
 										/>
 										<span className="suffix">{new TextEncoder().encode(memo).length}/512</span>
 									</div>
-									{publicRecipient && memo.trim() && <div className="field-err">Remove the memo: transparent recipients cannot receive encrypted memos.</div>}
+									{publicRecipient && memo.trim() && <div className="field-err">{uiText("Remove the memo: transparent recipients cannot receive encrypted memos.")}</div>}
 								</div>
 
 								<TxFlowStatus step={sendStep} scanProgress={scanProgress} batch={sendBatch} awaitingButton={awaitingButton} deviceProgress={deviceProgress} kind="send" intent={publicRecipient ? 'unshield to a public recipient' : 'shielded send'} />
 								{texPending.length > 0 && (
 									<div className="tex-pending">
-										<div className="tex-pending-title">Unfinished TEX payments</div>
-										<p>These funds left your shielded balance for a one-time address but never reached the TEX recipient. Complete the payment, or shield the funds back.</p>
+										<div className="tex-pending-title">{uiText("Unfinished TEX payments")}</div>
+										<p>{uiText("These funds left your shielded balance for a one-time address but never reached the TEX recipient. Complete the payment, or shield the funds back.")}</p>
 										{texPending.map(p => {
 											const held = p.funding.reduce((sum, f) => sum + f.value, 0)
 											return (
 												<div key={p.index} className="tex-pending-row">
 													<div className="tex-pending-info">
-														<span>{formatZec(held)} ZEC → {p.tex.slice(0, 12)}…{p.tex.slice(-6)}</span>
+														<span>{formatZec(held)}{" "}{uiText("ZEC →")}{" "}{p.tex.slice(0, 12)}…{p.tex.slice(-6)}</span>
 														{p.error && <span className="tex-pending-error">{p.error}</span>}
 													</div>
 													<button type="button" disabled={texBusy !== null} onClick={() => handleTexRecovery(p.index, "zcashTexComplete")}>
-														{texBusy === p.index ? "Working…" : "Complete payment"}
+														{texBusy === p.index ? uiText("Working…") : uiText("Complete payment")}
 													</button>
-													<button type="button" disabled={texBusy !== null} onClick={() => handleTexRecovery(p.index, "zcashTexShieldBack")}>
-														Shield back
-													</button>
+													<button type="button" disabled={texBusy !== null} onClick={() => handleTexRecovery(p.index, "zcashTexShieldBack")}>{uiText("Shield back")}</button>
 												</div>
 											)
 										})}
-										{texError && <ResultBox kind="err" title="TEX payment" message={texError} />}
+										{texError && <ResultBox kind="err" title={uiText("TEX payment")} message={texError} />}
 									</div>
 								)}
 
 								{!sending && (
 									<div className="submit-row">
 										<div className="submit-hint">
-											<div className="kk-glyph">kk</div>
-											Verify the recipient and amount on your KeepKey
-										</div>
+											<div className="kk-glyph">{uiText("kk")}</div>{uiText("Verify the recipient and amount on your KeepKey")}</div>
 										<button
 											className="submit"
 											onClick={handleSend}
 											disabled={!recipient || !amount || (publicRecipient && !!memo.trim()) || (recipientValidation != null && !recipientValidation.valid)}
-										>Send</button>
+										>{uiText("Send")}</button>
 									</div>
 								)}
 
-								{sendResult && <ResultBox kind="ok" title="Sent" txid={sendResult} />}
-								{sendError && <ResultBox kind="err" title="Send failed" message={sendError} />}
+								{sendResult && <ResultBox kind="ok" title={uiText("Sent")} txid={sendResult} />}
+								{sendError && <ResultBox kind="err" title={uiText("Send failed")} message={sendError} />}
 							</div>
 						</div>
 
 						<div className="form-aside">
 							<div className="aside-card">
-								<h5>Summary</h5>
-								<div className="kv"><span>Amount</span><span className="v">{amount || "—"} ZEC</span></div>
-								<div className="kv"><span>Network fee</span><span className="v">{recipient.trim().startsWith('tex1') ? 'Two transactions' : `~${formatZec(5000 * (Math.max(2, Math.max(1, balance?.spendable_notes_count ?? 1)) + (transparentRecipient ? 1 : 0)))} ZEC`}</span></div>
-								<div className="kv"><span>Recipient</span><span className="v gold">{publicRecipient ? 'Public address and amount' : 'Shielded'}</span></div>
+								<h5>{uiText("Summary")}</h5>
+								<div className="kv"><span>{uiText("Amount")}</span><span className="v">{amount || "—"} ZEC</span></div>
+								<div className="kv"><span>{uiText("Network fee")}</span><span className="v">{recipient.trim().startsWith('tex1') ? uiText("Two transactions") : `~${formatZec(5000 * (Math.max(2, Math.max(1, balance?.spendable_notes_count ?? 1)) + (transparentRecipient ? 1 : 0)))} ZEC`}</span></div>
+								<div className="kv"><span>{uiText("Recipient")}</span><span className="v gold">{publicRecipient ? uiText("Public address and amount") : uiText("Shielded")}</span></div>
 							</div>
 							<div className="aside-card">
-								<h5>{synced ? 'Available to send' : 'Last known available balance'}</h5>
+								<h5>{synced ? uiText("Available to send") : uiText("Last known available balance")}</h5>
 								<p style={{ fontFamily: "var(--zk-font-mono)", fontSize: 14, color: "var(--zk-fg)" }}>
 									{balanceAmounts ? formatZec(sendMaxZatoshis) : '—'} ZEC
 								</p>
-								<p style={{ marginTop: 4 }}>After network fee. Notes need {balance?.min_confirmations ?? 10} confirmations.</p>
+								<p style={{ marginTop: 4 }}>{uiText("After network fee. Notes need")}{" "}{balance?.min_confirmations ?? 10}{" "}{uiText("confirmations.")}</p>
 							</div>
 						</div>
 					</div>
@@ -1178,40 +1183,39 @@ export function ZcashPrivacyTab({ initialPage, initialSection }: { initialPage?:
 			{page === "shield" && (
 				<section>
 					<div className="page-head">
-						<h2>Shield &amp; Unshield</h2>
-						<p>Shield moves your transparent ZEC into the private balance. Unshield pays a transparent address—your own or someone else’s.</p>
-						<DocsLink href={watch('zec-04-shield-sync')} label="Watch: shield, unshield and sync" />
+						<h2>{uiText("Shield & Unshield")}</h2>
+						<p>{uiText("Shield moves your transparent ZEC into the private balance. Unshield pays a transparent address—your own or someone else’s.")}</p>
+						<DocsLink href={watch('zec-04-shield-sync')} label={uiText("Watch: shield, unshield and sync")} />
 					</div>
 					{balance && onTheWay > 0 && <MaturingBanner zat={onTheWay} confirmations={balance.min_confirmations ?? 10} />}
 
 					<div className="form-page">
 						<div className="card" ref={shieldFormRef}>
 							<div className="card-head">
-								<div className="title" style={{ color: "var(--zk-gold)" }}>Shield → private</div>
-								<span className="meta">From your t-addr</span>
+								<div className="title" style={{ color: "var(--zk-gold)" }}>{uiText("Shield → private")}</div>
+								<span className="meta">{uiText("From your t-addr")}</span>
 							</div>
 							<div className="card-body">
 								<div className="balance-row">
-									<span>Available to shield</span>
+									<span>{uiText("Available to shield")}</span>
 									<strong>
 										{transparentBalanceLoading
-											? "loading…"
+											? uiText("loading…")
 											: transparentBalanceZat == null
 												? "—"
 												: `${formatZec(transparentBalanceZat)} ZEC`}
 									</strong>
 									{transparentBalanceZat != null && !transparentBalanceLoading && (
-										<button className="ghost-btn" onClick={refreshTransparentBalance} title="Refresh">↻</button>
+										<button className="ghost-btn" onClick={refreshTransparentBalance} title={uiText("Refresh")}>↻</button>
 									)}
 								</div>
 								{transparentPendingZat > 0 && (
 									<div className="pending-note">
-										+{formatZec(transparentPendingZat)} ZEC pending — UTXOs need 10 confirmations before they can be shielded (reorg safety). Refresh in a few minutes.
-									</div>
+										+{formatZec(transparentPendingZat)}{" "}{uiText("ZEC pending — UTXOs need 10 confirmations before they can be shielded (reorg safety). Refresh in a few minutes.")}</div>
 								)}
 								<div className="field-grid">
 									<div className="field">
-										<span className="lbl">Amount</span>
+										<span className="lbl">{uiText("Amount")}</span>
 										<input
 											type="text"
 											placeholder="0.00000000"
@@ -1224,7 +1228,7 @@ export function ZcashPrivacyTab({ initialPage, initialSection }: { initialPage?:
 											onClick={() => setShieldAmount(formatZec(shieldMaxZatoshis))}
 											disabled={shieldMaxZatoshis === 0}
 											title={`Reserves ${formatZec(SHIELD_FEE_ZAT)} ZEC for the network fee`}
-										>Max</button>
+										>{uiText("Max")}</button>
 									</div>
 								</div>
 								<TxFlowStatus step={shieldStep} scanProgress={scanProgress} batch={shieldBatch} awaitingButton={awaitingButton} deviceProgress={deviceProgress} kind="shield" intent="shield transaction" />
@@ -1232,73 +1236,68 @@ export function ZcashPrivacyTab({ initialPage, initialSection }: { initialPage?:
 								{!shielding && (
 									<div className="submit-row">
 										<div className="submit-hint">
-											<div className="kk-glyph">kk</div>
-											Confirm the shield on your KeepKey
-										</div>
+											<div className="kk-glyph">{uiText("kk")}</div>{uiText("Confirm the shield on your KeepKey")}</div>
 										<button
 											className="submit"
 											onClick={handleShield}
 											disabled={!shieldAmount}
-										>Shield</button>
+										>{uiText("Shield")}</button>
 									</div>
 								)}
-								{shieldResult && <ResultBox kind="ok" title="Shielded" txid={shieldResult} />}
-								{shieldError && <ResultBox kind="err" title="Shield failed" message={shieldError} />}
+								{shieldResult && <ResultBox kind="ok" title={uiText("Shielded")} txid={shieldResult} />}
+								{shieldError && <ResultBox kind="err" title={uiText("Shield failed")} message={shieldError} />}
 							</div>
 						</div>
 
 						<div className="card" ref={unshieldFormRef}>
 							<div className="card-head">
-								<div className="title" style={{ color: "var(--zk-copper)" }}>Unshield → public</div>
-								<span className="meta">Visible on chain</span>
+								<div className="title" style={{ color: "var(--zk-copper)" }}>{uiText("Unshield → public")}</div>
+								<span className="meta">{uiText("Visible on chain")}</span>
 							</div>
 							<div className="card-body">
 								<div className="balance-row">
-									<span>Available shielded</span>
+									<span>{uiText("Available shielded")}</span>
 									<strong>
 										{balance ? `${formatZec(deshieldMaxZatoshis)} ZEC` : "—"}
 									</strong>
 									{balance && (
-										<span className="balance-hint">
-											after fee · {balance.spendable_notes_count ?? 0} spendable notes
-										</span>
+										<span className="balance-hint">{uiText("after fee ·")}{" "}{balance.spendable_notes_count ?? 0}{" "}{uiText("spendable notes")}</span>
 									)}
 									{onTheWay > 0 && (
 										<span className="balance-hint maturing">
-											+ {formatZec(onTheWay)} ZEC pending
-										</span>
+											+ {formatZec(onTheWay)}{" "}{uiText("ZEC pending")}</span>
 									)}
 								</div>
 								<div className="field-grid">
 									<div className="field">
-										<span className="lbl">To</span>
+										<span className="lbl">{uiText("To")}</span>
 										<input
 											type="text"
-											placeholder="Transparent address (t1… or t3…)"
+											placeholder={uiText("Transparent address (t1… or t3…)")}
 											value={deshieldRecipient}
 											onChange={e => setDeshieldRecipient(e.target.value)}
 										/>
 										<button
 											className="max"
 											onClick={() => setAddressBookFor("deshield")}
-											title="Pick a transparent address from your address book"
-										>Book</button>
+											title={uiText("Pick a transparent address from your address book")}
+										>{uiText("Book")}</button>
 										{myTransparentAddr && deshieldRecipient !== myTransparentAddr && (
 											<button
 												className="max"
 												onClick={() => setDeshieldRecipient(myTransparentAddr)}
 												title={`Use your own t-addr: ${myTransparentAddr}`}
-											>My t-addr</button>
+											>{uiText("My t-addr")}</button>
 										)}
 									</div>
 									{myTransparentAddr && deshieldRecipient === myTransparentAddr && (
-										<div className="field-hint">Sending to your own t-addr (m/44'/133'/0'/0/0)</div>
+										<div className="field-hint">{uiText("Sending to your own t-addr (m/44'/133'/0'/0/0)")}</div>
 									)}
 									{deshieldRecipientValidation && !deshieldRecipientValidation.valid && deshieldRecipientValidation.error && (
 										<div className="field-err">{t(deshieldRecipientValidation.error)}</div>
 									)}
 									<div className="field">
-										<span className="lbl">Amount</span>
+										<span className="lbl">{uiText("Amount")}</span>
 										<input
 											type="text"
 											placeholder="0.00000000"
@@ -1310,25 +1309,23 @@ export function ZcashPrivacyTab({ initialPage, initialSection }: { initialPage?:
 											className="max"
 											onClick={() => setDeshieldAmount(formatZec(deshieldMaxZatoshis))}
 											disabled={deshieldMaxZatoshis === 0}
-										>Max</button>
+										>{uiText("Max")}</button>
 									</div>
 								</div>
 								<TxFlowStatus step={deshieldStep} scanProgress={scanProgress} batch={deshieldBatch} awaitingButton={awaitingButton} deviceProgress={deviceProgress} kind="unshield" intent="unshield transaction" />
 
 								{!deshielding && (
 									<div className="submit-row">
-										<div className="submit-hint" style={{ color: "var(--zk-copper)" }}>
-											⚠ This will be publicly visible on chain
-										</div>
+										<div className="submit-hint" style={{ color: "var(--zk-copper)" }}>{uiText("⚠ This will be publicly visible on chain")}</div>
 										<button
 											className="submit warn"
 											onClick={handleDeshield}
 											disabled={!deshieldRecipient || !deshieldAmount || (deshieldRecipientValidation != null && !deshieldRecipientValidation.valid)}
-										>Unshield</button>
+										>{uiText("Unshield")}</button>
 									</div>
 								)}
-								{deshieldResult && <ResultBox kind="ok" title="Unshielded" txid={deshieldResult} />}
-								{deshieldError && <ResultBox kind="err" title="Unshield failed" message={deshieldError} />}
+								{deshieldResult && <ResultBox kind="ok" title={uiText("Unshielded")} txid={deshieldResult} />}
+								{deshieldError && <ResultBox kind="err" title={uiText("Unshield failed")} message={deshieldError} />}
 							</div>
 						</div>
 					</div>
@@ -1339,8 +1336,8 @@ export function ZcashPrivacyTab({ initialPage, initialSection }: { initialPage?:
 			{page === "receive" && orchardAddress && (
 				<section>
 					<div className="page-head">
-						<h2>Receive ZEC</h2>
-						<p>Share this unified address. New shielded funds enter the Ironwood pool.</p>
+						<h2>{uiText("Receive ZEC")}</h2>
+						<p>{uiText("Share this unified address. New shielded funds enter the Ironwood pool.")}</p>
 					</div>
 
 					<div className="card">
@@ -1350,10 +1347,10 @@ export function ZcashPrivacyTab({ initialPage, initialSection }: { initialPage?:
 									<div dangerouslySetInnerHTML={{ __html: generateQRSvg(orchardAddress, 4, 0) }} />
 								</div>
 								<div>
-									<div className="addr-eyebrow">Your Zcash address (Unified)</div>
+									<div className="addr-eyebrow">{uiText("Your Zcash address (Unified)")}</div>
 									<div className="addr-box">{orchardAddress}</div>
 									<button className="ghost-btn" onClick={copyAddress}>
-										{copied ? "✓ Copied" : "Copy address"}
+										{copied ? uiText("✓ Copied") : uiText("Copy address")}
 									</button>
 								</div>
 							</div>
@@ -1367,13 +1364,8 @@ export function ZcashPrivacyTab({ initialPage, initialSection }: { initialPage?:
 						<div className="verify-head">
 							<div className="verify-ico">{ICO_SHIELD}</div>
 							<div>
-								<div className="verify-title">Always verify before receiving large amounts</div>
-								<div className="verify-sub">
-									Compare the full address on your KeepKey screen to the one shown above.
-									This is the only defense against a compromised computer swapping the address.
-									For Zcash, also check the address on the sender's screen — once funds arrive,
-									the on-chain trail is private to you.
-								</div>
+								<div className="verify-title">{uiText("Always verify before receiving large amounts")}</div>
+								<div className="verify-sub">{uiText("Compare the full address on your KeepKey screen to the one shown above. This is the only defense against a compromised computer swapping the address. For Zcash, also check the address on the sender's screen — once funds arrive, the on-chain trail is private to you.")}</div>
 							</div>
 						</div>
 						<button
@@ -1383,17 +1375,12 @@ export function ZcashPrivacyTab({ initialPage, initialSection }: { initialPage?:
 						>
 							<span className="verify-btn-ico">{ICO_SHIELD}</span>
 							{verifyingOnDevice
-								? "Check your KeepKey screen…"
+								? uiText("Check your KeepKey screen…")
 								: verifySucceeded
-									? "✓ Verified on device"
-									: "Show address on KeepKey"}
+									? uiText("✓ Verified on device")
+									: uiText("Show address on KeepKey")}
 						</button>
-						<div className="verify-note">
-							⏱ Takes <strong>over 60 seconds</strong> — deriving a Zcash address on the
-							KeepKey requires heavy cryptographic computation (Orchard / Halo 2). The
-							device will appear busy; this is normal. The full address shows on screen
-							when the computation completes.
-						</div>
+						<div className="verify-note">{uiText("⏱ Takes")}{" "}<strong>{uiText("over 60 seconds")}</strong>{" "}{uiText("— deriving a Zcash address on the KeepKey requires heavy cryptographic computation (Orchard / Halo 2). The device will appear busy; this is normal. The full address shows on screen when the computation completes.")}</div>
 						{verifyError && <div className="field-err" style={{ marginTop: 10 }}>{verifyError}</div>}
 					</div>
 				</section>
@@ -1403,8 +1390,8 @@ export function ZcashPrivacyTab({ initialPage, initialSection }: { initialPage?:
 			{page === "scan" && (
 				<section>
 					<div className="page-head">
-						<h2>Sync</h2>
-						<p>Vault scans the Zcash chain locally to find your incoming payments. Your viewing key never leaves this machine.</p>
+						<h2>{uiText("Sync")}</h2>
+						<p>{uiText("Vault scans the Zcash chain locally to find your incoming payments. Your viewing key never leaves this machine.")}</p>
 					</div>
 
 					<div className="card">
@@ -1414,15 +1401,15 @@ export function ZcashPrivacyTab({ initialPage, initialSection }: { initialPage?:
 							</div>
 							<div className="text">
 								<div className="title">
-									{scanState === "scanning" ? "Scanning…"
-										: scanInFlight ? "Catching up…"
-										: synced ? "Last synced"
-										: "Not synced yet"}
+									{scanState === "scanning" ? uiText("Scanning…")
+										: scanInFlight ? uiText("Catching up…")
+										: synced ? uiText("Last synced")
+										: uiText("Not synced yet")}
 								</div>
 								<div className="sub">
 									{syncedTo
 										? `Block #${syncedTo.toLocaleString(fiatLocale)}`
-										: "No blocks scanned"}
+										: uiText("No blocks scanned")}
 									{transactions.length > 0 && ` · ${transactions.length} payment${transactions.length === 1 ? "" : "s"}`}
 								</div>
 							</div>
@@ -1433,7 +1420,7 @@ export function ZcashPrivacyTab({ initialPage, initialSection }: { initialPage?:
 								<div className="pb"><div className="pb-fill" style={{ width: `${Math.max(displayPercent, 0.5)}%` }} /></div>
 								<div className="meta">
 									<span>{scanProgress.scannedHeight.toLocaleString(fiatLocale)} / {scanProgress.tipHeight.toLocaleString(fiatLocale)}</span>
-									<span>{scanProgress.blocksPerSec > 0 ? `${scanProgress.blocksPerSec} blk/s · ${formatEta(scanProgress.etaSeconds)} left` : "calculating…"}</span>
+									<span>{scanProgress.blocksPerSec > 0 ? `${scanProgress.blocksPerSec} blk/s · ${formatEta(scanProgress.etaSeconds)} left` : uiText("calculating…")}</span>
 								</div>
 							</div>
 						)}
@@ -1445,7 +1432,7 @@ export function ZcashPrivacyTab({ initialPage, initialSection }: { initialPage?:
 								disabled={scanState === "scanning"}
 								style={{ flex: 1 }}
 							>
-								{scanState === "scanning" ? "Scanning…" : "Sync now"}
+								{scanState === "scanning" ? uiText("Scanning…") : uiText("Sync now")}
 							</button>
 						</div>
 					</div>
@@ -1458,14 +1445,14 @@ export function ZcashPrivacyTab({ initialPage, initialSection }: { initialPage?:
 
 					<div className="advanced">
 						<button className="advanced-toggle" onClick={() => setAdvancedScanOpen(o => !o)}>
-							<span>Advanced</span>
+							<span>{uiText("Advanced")}</span>
 							<span className="chev">{advancedScanOpen ? "▾" : "▸"}</span>
 						</button>
 						{advancedScanOpen && (
 							<div className="advanced-body">
 								<div className="field-grid">
 									<div className="field">
-										<span className="lbl">From block</span>
+										<span className="lbl">{uiText("From block")}</span>
 										<input
 											type="text"
 											placeholder={KEEPKEY_RELEASE_BLOCK.toLocaleString(fiatLocale)}
@@ -1475,7 +1462,7 @@ export function ZcashPrivacyTab({ initialPage, initialSection }: { initialPage?:
 										<button
 											className="max"
 											onClick={() => setScanFromHeight(String(KEEPKEY_RELEASE_BLOCK))}
-										>KK release</button>
+										>{uiText("KK release")}</button>
 									</div>
 									<div style={{ display: "flex", gap: 10 }}>
 										<button
@@ -1483,17 +1470,15 @@ export function ZcashPrivacyTab({ initialPage, initialSection }: { initialPage?:
 											onClick={() => handleScan(scanFromHeight ? parseInt(scanFromHeight, 10) : undefined)}
 											disabled={!scanFromHeight || scanState === "scanning"}
 											style={{ flex: 1 }}
-										>Scan from block</button>
+										>{uiText("Scan from block")}</button>
 										<button
 											className="submit alt"
 											onClick={() => handleScan(undefined, true)}
 											disabled={scanState === "scanning"}
 											style={{ flex: 1 }}
-										>Full rescan (~30 min)</button>
+										>{uiText("Full rescan (~30 min)")}</button>
 									</div>
-									<p style={{ margin: 0, fontSize: 11.5, color: "var(--zk-fg-mute)", lineHeight: 1.5 }}>
-										KeepKey shielded support shipped at block {KEEPKEY_RELEASE_BLOCK.toLocaleString(fiatLocale)}. Earlier blocks contain no notes for this account.
-									</p>
+									<p style={{ margin: 0, fontSize: 11.5, color: "var(--zk-fg-mute)", lineHeight: 1.5 }}>{uiText("KeepKey shielded support shipped at block")}{" "}{KEEPKEY_RELEASE_BLOCK.toLocaleString(fiatLocale)}{uiText(". Earlier blocks contain no notes for this account.")}</p>
 								</div>
 							</div>
 						)}
@@ -1505,8 +1490,8 @@ export function ZcashPrivacyTab({ initialPage, initialSection }: { initialPage?:
 			{page === "history" && (
 				<section>
 					<div className="page-head">
-						<h2>History</h2>
-						<p>Decrypted locally with your viewing key.</p>
+						<h2>{uiText("History")}</h2>
+						<p>{uiText("Decrypted locally with your viewing key.")}</p>
 					</div>
 
 					<div className="history-controls">
@@ -1525,7 +1510,7 @@ export function ZcashPrivacyTab({ initialPage, initialSection }: { initialPage?:
 							))}
 						</div>
 						<button className="ghost-btn" onClick={handleBackfillMemos} disabled={backfilling}>
-							{backfilling ? "Fetching…" : "Fetch memos"}
+							{backfilling ? uiText("Fetching…") : uiText("Fetch memos")}
 						</button>
 					</div>
 					{backfillResult && <div className="field-err" style={{ color: "var(--zk-green)", marginBottom: 12 }}>{backfillResult}</div>}
@@ -1534,26 +1519,26 @@ export function ZcashPrivacyTab({ initialPage, initialSection }: { initialPage?:
 						<table>
 							<thead>
 								<tr>
-									<th style={{ width: 100 }}>Block</th>
-									<th style={{ width: 110 }}>Type</th>
-									<th>Memo</th>
-									<th className="num">Amount</th>
-									<th style={{ width: 110 }}>Status</th>
+									<th style={{ width: 100 }}>{uiText("Block")}</th>
+									<th style={{ width: 110 }}>{uiText("Type")}</th>
+									<th>{uiText("Memo")}</th>
+									<th className="num">{uiText("Amount")}</th>
+									<th style={{ width: 110 }}>{uiText("Status")}</th>
 									<th style={{ width: 120 }}>TX</th>
 								</tr>
 							</thead>
 							<tbody>
 								{loadingTxs ? (
-									<tr><td colSpan={6} style={{ textAlign: "center", color: "var(--zk-fg-mute)", padding: 28 }}>Loading…</td></tr>
+									<tr><td colSpan={6} style={{ textAlign: "center", color: "var(--zk-fg-mute)", padding: 28 }}>{uiText("Loading…")}</td></tr>
 								) : filteredTxs.length === 0 ? (
-									<tr><td colSpan={6} style={{ textAlign: "center", color: "var(--zk-fg-mute)", padding: 28 }}>No matching transactions</td></tr>
+									<tr><td colSpan={6} style={{ textAlign: "center", color: "var(--zk-fg-mute)", padding: 28 }}>{uiText("No matching transactions")}</td></tr>
 								) : filteredTxs.map(tx => (
 									<tr key={tx.id}>
 										<td className="block">#{tx.block_height.toLocaleString(fiatLocale)}</td>
 										<td>
 											<span className="tx-kind">
 												<span className={`pill ${tx.is_spent ? "pill-trans" : "pill-orchard"}`}>
-													{tx.is_spent ? "Sent" : "Received"}
+													{tx.is_spent ? uiText("Sent") : uiText("Received")}
 												</span>
 											</span>
 										</td>
@@ -1565,7 +1550,7 @@ export function ZcashPrivacyTab({ initialPage, initialSection }: { initialPage?:
 										</td>
 										<td>
 											<span className={`tx-status ${tx.is_spent ? "spent" : "received"}`}>
-												{tx.is_spent ? "Sent" : "Received"}
+												{tx.is_spent ? uiText("Sent") : uiText("Received")}
 											</span>
 										</td>
 										<td>
@@ -1576,9 +1561,7 @@ export function ZcashPrivacyTab({ initialPage, initialSection }: { initialPage?:
 														rpcRequest("openExternal", { url: `https://blockchair.com/zcash/transaction/${tx.txid}` }, 5000).catch(() => {})
 													}}
 													title={tx.txid}
-												>
-													View ↗
-												</button>
+												>{uiText("View ↗")}</button>
 											) : (
 												<span style={{ color: "var(--zk-fg-faint)" }}>—</span>
 											)}
@@ -1635,6 +1618,8 @@ function TxFlowStatus({ step, batch = null, awaitingButton, kind, intent, scanPr
 	/** Plain-English description of what the user is doing — used in the title */
 	intent: string
 }) {
+  const uiText = useUiTranslation()
+
 	// Elapsed time across all steps, so a slow step still visibly moves.
 	const [startedAt, setStartedAt] = useState<number | null>(null)
 	const [, setTick] = useState(0)
@@ -1676,7 +1661,7 @@ function TxFlowStatus({ step, batch = null, awaitingButton, kind, intent, scanPr
 			{label && (
 				<div className="tx-flow-batch">
 					{label}
-					{batch?.fee != null && <span> · fee {formatZec(batch.fee)} ZEC</span>}
+					{batch?.fee != null && <span>{" "}{uiText("· fee")}{" "}{formatZec(batch.fee)} ZEC</span>}
 				</div>
 			)}
 			<div className="tx-flow-stepper">
@@ -1692,27 +1677,27 @@ function TxFlowStatus({ step, batch = null, awaitingButton, kind, intent, scanPr
 					)
 				})}
 			</div>
-			<div className="tx-flow-elapsed">Working · {Math.floor(elapsed / 60)}:{String(elapsed % 60).padStart(2, "0")}</div>
+			<div className="tx-flow-elapsed">{uiText("Working ·")}{" "}{Math.floor(elapsed / 60)}:{String(elapsed % 60).padStart(2, "0")}</div>
 			{step === "signing" && elapsed >= 300 && (
-				<div className="tx-flow-elapsed">Taking unusually long. To cancel, unplug your KeepKey.</div>
+				<div className="tx-flow-elapsed">{uiText("Taking unusually long. To cancel, unplug your KeepKey.")}</div>
 			)}
 
 			{step === "syncing" && !awaitingButton && (
 				<div className="tx-flow-body">
-					<div className="tx-flow-headline">Syncing your wallet…</div>
-					<p>Catching up to the latest Zcash block before building your {intent}. The first sync can take a few minutes; later ones take seconds.</p>
+					<div className="tx-flow-headline">{uiText("Syncing your wallet…")}</div>
+					<p>{uiText("Catching up to the latest Zcash block before building your")}{" "}{intent}{uiText(". The first sync can take a few minutes; later ones take seconds.")}</p>
 					<ProgressBar percent={scanProgress && scanProgress.percent < 100 ? scanProgress.percent : null} />
 					{scanProgress && scanProgress.percent < 100 && (
-						<p>{scanProgress.scannedHeight.toLocaleString()} / {scanProgress.tipHeight.toLocaleString()} blocks · {formatEta(scanProgress.etaSeconds)} left</p>
+						<p>{scanProgress.scannedHeight.toLocaleString(getNumberLocale())} / {scanProgress.tipHeight.toLocaleString(getNumberLocale())}{" "}{uiText("blocks ·")}{" "}{formatEta(scanProgress.etaSeconds)}{" "}{uiText("left")}</p>
 					)}
 				</div>
 			)}
 
 			{step === "building" && (
 				<div className="tx-flow-body">
-					<div className="tx-flow-headline">Building your {intent}…</div>
+					<div className="tx-flow-headline">{uiText("Building your")}{" "}{intent}…</div>
 					<ProgressBar percent={null} />
-					<p>The Zcash sidecar is generating a Halo 2 zero-knowledge proof. Usually under a minute; transactions with more notes take longer.</p>
+					<p>{uiText("The Zcash sidecar is generating a Halo 2 zero-knowledge proof. Usually under a minute; transactions with more notes take longer.")}</p>
 				</div>
 			)}
 
@@ -1732,9 +1717,9 @@ function TxFlowStatus({ step, batch = null, awaitingButton, kind, intent, scanPr
 							</circle>
 						</svg>
 					</div>
-					<div className="tx-flow-headline">Press the button on your KeepKey →</div>
+					<div className="tx-flow-headline">{uiText("Press the button on your KeepKey →")}</div>
 					<p>{step === "syncing"
-						? "Approve the Zcash view key export on the device screen, then press the round button."
+						? uiText("Approve the Zcash view key export on the device screen, then press the round button.")
 						: `Confirm the ${intent} on the device screen, then press the round button.`}</p>
 				</div>
 			)}
@@ -1751,17 +1736,17 @@ function TxFlowStatus({ step, batch = null, awaitingButton, kind, intent, scanPr
 							<circle cx="32" cy="78" r="6" fill="none" stroke="currentColor" strokeWidth="1.5"/>
 						</svg>
 					</div>
-					<div className="tx-flow-headline"><span className="tx-flow-spin" /> Signing on device…</div>
+					<div className="tx-flow-headline"><span className="tx-flow-spin" />{" "}{uiText("Signing on device…")}</div>
 					<ProgressBar percent={deviceProgress?.total ? (deviceProgress.done / deviceProgress.total) * 100 : null} />
 					<p className="tx-flow-checkin">{deviceCheckin(deviceProgress)}</p>
-					<p>Your KeepKey is working on the transaction. <strong>This can take 1–3 minutes</strong>, longer for transactions with more inputs or notes. Keep it plugged in; no input needed yet.</p>
+					<p>{uiText("Your KeepKey is working on the transaction.")}{" "}<strong>{uiText("This can take 1–3 minutes")}</strong>{uiText(", longer for transactions with more inputs or notes. Keep it plugged in; no input needed yet.")}</p>
 				</div>
 			)}
 
 			{step === "broadcasting" && (
 				<div className="tx-flow-body">
-					<div className="tx-flow-headline">Broadcasting to the network…</div>
-					<p>Almost done. Just pushing the signed transaction to a Zcash node.</p>
+					<div className="tx-flow-headline">{uiText("Broadcasting to the network…")}</div>
+					<p>{uiText("Almost done. Just pushing the signed transaction to a Zcash node.")}</p>
 				</div>
 			)}
 		</div>
@@ -1791,18 +1776,22 @@ function ProgressBar({ percent }: { percent: number | null }) {
 /** Shielded ZEC that is the user's but not spendable yet: impossible to miss,
  *  so it never reads as missing money. Zcash targets a block every 75 s. */
 function MaturingBanner({ zat, confirmations }: { zat: number; confirmations: number }) {
+  const uiText = useUiTranslation()
+
 	return (
 		<div className="maturing-banner" role="status">
 			<span className="maturing-icon">⏳</span>
 			<div>
-				<strong>{formatZec(zat)} ZEC is on its way into your shielded balance</strong>
-				<span>Waiting for confirmation or a shielded scan. Notes need {confirmations} confirmations to become spendable. Use Sync to check for updates.</span>
+				<strong>{formatZec(zat)}{" "}{uiText("ZEC is on its way into your shielded balance")}</strong>
+				<span>{uiText("Waiting for confirmation or a shielded scan. Notes need")}{" "}{confirmations}{" "}{uiText("confirmations to become spendable. Use Sync to check for updates.")}</span>
 			</div>
 		</div>
 	)
 }
 
 function ResultBox({ kind, title, txid, message }: { kind: "ok" | "err"; title: string; txid?: string; message?: string }) {
+  const uiText = useUiTranslation()
+
 	// Blockchair indexes Zcash transactions reliably; mainnet.zcashexplorer.app
 	// has been hit-or-miss with newly-broadcast txs.
 	const explorerUrl = txid ? `https://blockchair.com/zcash/transaction/${txid}` : null
@@ -1831,10 +1820,10 @@ function ResultBox({ kind, title, txid, message }: { kind: "ok" | "err"; title: 
 					<span className="txid-hash">{txid}</span>
 					<div className="txid-actions">
 						{explorerUrl && (
-							<button type="button" onClick={openExplorer}>View on explorer ↗</button>
+							<button type="button" onClick={openExplorer}>{uiText("View on explorer ↗")}</button>
 						)}
 						<button type="button" className="txid-copy" onClick={copyTxid}>
-							{copied ? "✓ Copied" : "Copy txid"}
+							{copied ? uiText("✓ Copied") : uiText("Copy txid")}
 						</button>
 					</div>
 				</div>

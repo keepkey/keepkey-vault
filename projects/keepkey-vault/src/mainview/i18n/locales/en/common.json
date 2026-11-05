@@ -23,6 +23,15 @@
 	"incomingTx": {
 		"onChain": "{{chain}} · refreshing balance",
 		"refreshing": "Refreshing balance",
-		"title": "Incoming payment"
-	}
+		"title": "Incoming payment",
+		"activityRefreshed": "Balance refreshed",
+		"activityTitle": "Wallet activity",
+		"activityOnChain": "{{chain}} · balance refreshed"
+	},
+	"language": "Language",
+	"currency": "Currency",
+	"numberFormat": "Number Format",
+	"usdValues": "Values are shown in USD. You can change the regional number format below.",
+	"somethingWentWrong": "Something went wrong",
+	"reload": "Reload"
 }

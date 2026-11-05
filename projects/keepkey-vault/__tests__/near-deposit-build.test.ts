@@ -20,6 +20,18 @@ mock.module('../src/bun/pioneer', () => ({ getPioneer: async () => pioneer, getP
 mock.module('electrobun/bun', () => ({ Utils: { paths: { userData: '/private/tmp/vault-near-build-test' } } }))
 const { previewSwapBuild, executeSwap } = await import('../src/bun/swap')
 
+test('an expired EVM router deadline is refused instead of silently extended', async () => {
+  let signs = 0
+  const ctx: any = { wallet: {}, getAllChains: () => CHAINS, getEvmRpcSource: () => { throw new Error('No network request expected') },
+    pushSubStage: () => {}, wrapSign: async () => { signs++; throw new Error('No device request expected') } }
+  const params: ExecuteSwapParams = { fromChainId: 'ethereum', toChainId: 'ripple', fromCaip: 'eip155:1/slip44:60',
+    toCaip: CHAINS.find(c => c.id === 'ripple')!.caip, amount: '0.003', memo: '=:XRP.XRP:rRecipient',
+    inboundAddress: '0xVault', router: '0xRouter', expectedOutput: '6', expiry: Math.floor(Date.now() / 1000) - 1,
+    fromAddressOverride: '0xSender', toAddressOverride: 'rRecipient' }
+  await expect(executeSwap(params, ctx)).rejects.toThrow(/expired/)
+  expect(signs).toBe(0)
+})
+
 const sources = [
   { chain: 'solana', caip: CHAINS.find(chain => chain.id === 'solana')!.caip, amount: '0.25', kind: 'sol', base: '250000000', deposit: 'ALUVVWPJb2XY1AXzh3mxAnGVGxgwbLvYZKufs5hk1kzK' },
   { chain: 'solana', caip: 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp/token:Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB', amount: '12.345678', decimals: 6, kind: 'spl', base: '12345678', deposit: 'ALUVVWPJb2XY1AXzh3mxAnGVGxgwbLvYZKufs5hk1kzK' },
@@ -46,7 +58,22 @@ for (const source of sources) test(`NEAR ${source.kind} plain deposit reaches it
   }
   builds.length = 0
   const grid = fakeTronGrid()
-  if (source.chain === 'tron') globalThis.fetch = grid.handler
+  let statusReads = 0
+  globalThis.fetch = (async (input: any, init?: RequestInit) => {
+    const url = new URL(typeof input === 'string' ? input : input.url)
+    if (url.origin === 'https://1click.chaindefuser.com' && url.pathname === '/v0/status') {
+      expect(url.searchParams.get('depositAddress')).toBe(source.deposit)
+      statusReads++
+      return Response.json({ status: 'PENDING_DEPOSIT', quoteResponse: {
+        quoteRequest: { refundTo: params.fromAddressOverride, refundType: 'ORIGIN_CHAIN',
+          recipient: params.toAddressOverride, recipientType: 'DESTINATION_CHAIN', depositType: 'ORIGIN_CHAIN',
+          deadline: new Date(Date.now() + 3_600_000).toISOString() },
+        quote: { depositAddress: source.deposit },
+      } })
+    }
+    if (source.chain === 'tron') return grid.handler(input, init)
+    throw new Error(`unexpected fixture fetch: ${url.pathname}`)
+  }) as typeof fetch
   const preview = await previewSwapBuild(params, ctx)
   if (source.kind === 'xrp') {
     expect(preview.unsignedTx.payment).toMatchObject({ amount: source.base, destination: source.deposit })
@@ -61,6 +88,7 @@ for (const source of sources) test(`NEAR ${source.kind} plain deposit reaches it
     expect(preview.unsignedTx.rawTx).toContain('fixture-')
   }
   await expect(executeSwap(params, ctx)).rejects.toThrow('TEST_STOP_BEFORE_DEVICE')
+  expect(statusReads).toBe(1)
   expect(signingBoundary).toBe(true)
   if (source.chain === 'tron') expect(grid.requests[source.kind === 'trc20' ? 'triggersmartcontract' : 'createtransaction']).toHaveLength(2)
   else expect(builds).toHaveLength(2)

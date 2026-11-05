@@ -41,5 +41,9 @@
 	"openAddressBook": "Sổ địa chỉ",
 	"saveRecipientPrompt": "Lưu người nhận này?",
 	"contactSaved": "Đã lưu liên hệ",
-	"saveContactFailed": "Không thể lưu liên hệ"
+	"saveContactFailed": "Không thể lưu liên hệ",
+	"cosigner": "Người đồng ký",
+	"cosignerOption": "Người đồng ký Safe: đề xuất trước tiên khi tạo đa chữ ký",
+	"markCosigner": "Đánh dấu là người đồng ký Safe",
+	"notCosigner": "Không phải người đồng ký"
 }

@@ -23,5 +23,7 @@
 	"walletconnectName": "WalletConnect",
 	"walletconnectDescription": "WalletConnect 호환 dApp에 연결",
 	"internal": "열기",
-	"open": "열기"
+	"open": "열기",
+	"safeName": "Safe{Wallet}",
+	"safeDescription": "EVM 체인의 공유 멀티시그 계정. KeepKey를 소유자로 연결하세요. Desktop에서 Safe를 보고 대기 중인 거래를 확인하려면 EVM 자산에서 멀티시그를 여세요."
 }

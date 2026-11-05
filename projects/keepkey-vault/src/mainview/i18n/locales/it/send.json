@@ -53,5 +53,7 @@
 	"invalidSolanaAddress": "Indirizzo Solana non valido — deve avere 32-44 caratteri base58",
 	"invalidTronAddress": "Indirizzo Tron non valido — deve iniziare con T (34 caratteri)",
 	"invalidTonAddress": "Indirizzo TON non valido",
-	"invalidZcashShieldedAddress": "Indirizzo protetto non valido — deve iniziare con u1"
+	"invalidZcashShieldedAddress": "Indirizzo protetto non valido — deve iniziare con u1",
+	"feeCustom": "Personalizzato",
+	"invalidAmount": "Inserisci un importo decimale senza separatori delle migliaia, ad esempio 1,5."
 }

@@ -1,3 +1,4 @@
+import { useUiTranslation } from "../i18n/ui"
 import { useEffect, useRef, useState } from "react"
 import { Box, Flex, Text, Button } from "@chakra-ui/react"
 import { FaPlus, FaCheck, FaChevronDown, FaTimes, FaExclamationTriangle } from "react-icons/fa"
@@ -193,6 +194,8 @@ const SCRIPT_TYPE_GUIDE = [
 ]
 
 function BitcoinScriptTypeDialog({ onClose }: { onClose: () => void }) {
+  const uiText = useUiTranslation()
+
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => { if (event.key === 'Escape') onClose() }
     document.addEventListener('keydown', onKey)
@@ -213,18 +216,14 @@ function BitcoinScriptTypeDialog({ onClose }: { onClose: () => void }) {
       >
         <Flex justify="space-between" align="flex-start" gap="4" mb="5">
           <Box>
-            <Text id="bitcoin-script-guide-title" fontSize={{ base: 'xl', md: '2xl' }} fontWeight="700" color="kk.textPrimary">
-              Bitcoin address types
-            </Text>
-            <Text mt="1" fontSize="sm" color="kk.textSecondary" maxW="680px" lineHeight="1.6">
-              These are separate accounts derived from the same recovery phrase. Funds remain yours in every account; the format mainly changes fees and service compatibility.
-            </Text>
+            <Text id="bitcoin-script-guide-title" fontSize={{ base: 'xl', md: '2xl' }} fontWeight="700" color="kk.textPrimary">{uiText("Bitcoin address types")}</Text>
+            <Text mt="1" fontSize="sm" color="kk.textSecondary" maxW="680px" lineHeight="1.6">{uiText("These are separate accounts derived from the same recovery phrase. Funds remain yours in every account; the format mainly changes fees and service compatibility.")}</Text>
             <Flex mt="2" gap="3">
               <DocsLink href={DOCS_LINKS.addressTypes} />
-              <DocsLink href={watch('intro-more-address')} label="Watch video" />
+              <DocsLink href={watch('intro-more-address')} label={uiText("Watch video")} />
             </Flex>
           </Box>
-          <Box as="button" aria-label="Close" onClick={onClose} color="kk.textMuted" p="2" borderRadius="lg" _hover={{ color: 'white', bg: 'rgba(255,255,255,0.06)' }}>
+          <Box as="button" aria-label={uiText("Close")} onClick={onClose} color="kk.textMuted" p="2" borderRadius="lg" _hover={{ color: 'white', bg: 'rgba(255,255,255,0.06)' }}>
             <Box as={FaTimes} />
           </Box>
         </Flex>
@@ -233,13 +232,13 @@ function BitcoinScriptTypeDialog({ onClose }: { onClose: () => void }) {
           {SCRIPT_TYPE_GUIDE.map(item => (
             <Box key={item.standard} position="relative" p="4" borderRadius="xl" bg="rgba(255,255,255,0.025)" border="1px solid" borderColor={item.recommended ? 'rgba(233,196,106,0.55)' : 'kk.border'}>
               {item.recommended && (
-                <Text position="absolute" top="3" right="3" fontSize="9px" fontWeight="700" letterSpacing="0.08em" color="kk.gold" textTransform="uppercase">Recommended</Text>
+                <Text position="absolute" top="3" right="3" fontSize="9px" fontWeight="700" letterSpacing="0.08em" color="kk.gold" textTransform="uppercase">{uiText("Recommended")}</Text>
               )}
               <Flex align="baseline" gap="2" pr={item.recommended ? '24' : '0'}>
                 <Text fontSize="md" fontWeight="700" color="kk.textPrimary">{item.name}</Text>
                 <Text fontSize="11px" fontFamily="mono" color="kk.gold">{item.address}</Text>
               </Flex>
-              <Text mt="0.5" fontSize="10px" fontFamily="mono" color="kk.textMuted">{item.standard} · introduced {item.introduced}</Text>
+              <Text mt="0.5" fontSize="10px" fontFamily="mono" color="kk.textMuted">{item.standard}{" "}{uiText("· introduced")}{" "}{item.introduced}</Text>
               <Flex mt="3" gap="2" flexWrap="wrap">
                 <Box px="2" py="1" borderRadius="md" bg="rgba(139,227,196,0.08)">
                   <Text fontSize="10px" color="var(--teal)">{item.feeLabel} · {item.fee}</Text>
@@ -252,18 +251,16 @@ function BitcoinScriptTypeDialog({ onClose }: { onClose: () => void }) {
               {item.warning && (
                 <Flex mt="3" gap="2" align="flex-start" p="2.5" borderRadius="lg" bg="rgba(246,173,85,0.08)" border="1px solid rgba(246,173,85,0.22)">
                   <Box as={FaExclamationTriangle} color="orange.300" fontSize="11px" mt="0.5" flexShrink={0} />
-                  <Text fontSize="10px" color="orange.200" lineHeight="1.5">Confirm the sending service supports Taproot or bc1p before using this address.</Text>
+                  <Text fontSize="10px" color="orange.200" lineHeight="1.5">{uiText("Confirm the sending service supports Taproot or bc1p before using this address.")}</Text>
                 </Flex>
               )}
             </Box>
           ))}
         </Box>
 
-        <Text mt="4" fontSize="10px" color="kk.textMuted" lineHeight="1.5">
-          Input sizes are typical spending estimates, not quoted transaction fees. Your final fee also depends on the number and type of inputs and outputs, transaction structure, and the current fee rate.
-        </Text>
+        <Text mt="4" fontSize="10px" color="kk.textMuted" lineHeight="1.5">{uiText("Input sizes are typical spending estimates, not quoted transaction fees. Your final fee also depends on the number and type of inputs and outputs, transaction structure, and the current fee rate.")}</Text>
         <Flex justify="flex-end" mt="5">
-          <Button size="sm" bg="kk.gold" color="black" _hover={{ bg: 'kk.goldHover' }} onClick={onClose}>Got it</Button>
+          <Button size="sm" bg="kk.gold" color="black" _hover={{ bg: 'kk.goldHover' }} onClick={onClose}>{uiText("Got it")}</Button>
         </Flex>
       </Box>
     </Box>
@@ -286,6 +283,8 @@ interface CompactBtcSelectorProps {
 function CompactBtcSelector({
   accounts, activeAccount, selAcct, selScript, onSelectXpub, onAddAccount, addingAccount, t,
 }: CompactBtcSelectorProps) {
+  const uiText = useUiTranslation()
+
   const [accountOpen, setAccountOpen] = useState(false)
   const [scriptOpen, setScriptOpen] = useState(false)
   const accountRef = useRef<HTMLDivElement | null>(null)
@@ -391,7 +390,7 @@ function CompactBtcSelector({
                         {t('account', { index: acct.accountIndex })}
                       </Text>
                       <Text fontSize="10px" fontFamily="mono" color="var(--text-2)" lineHeight="1.2" truncate>
-                        {totalBtc > 0 ? `${formatBalance(String(totalBtc))} BTC` : '0 BTC'}
+                        {totalBtc > 0 ? `${formatBalance(String(totalBtc))} BTC` : uiText("0 BTC")}
                       </Text>
                     </Box>
                     {isSel && <Box as={FaCheck} color="var(--teal)" fontSize="10px" flexShrink={0} />}
@@ -418,9 +417,7 @@ function CompactBtcSelector({
                   >
                     <Box as={FaPlus} fontSize="9px" color="var(--teal)" />
                   </Box>
-                  <Text fontSize="12px" fontWeight="500" color="var(--teal)">
-                    Add account
-                  </Text>
+                  <Text fontSize="12px" fontWeight="500" color="var(--teal)">{uiText("Add account")}</Text>
                 </Flex>
               </Box>
             </Box>

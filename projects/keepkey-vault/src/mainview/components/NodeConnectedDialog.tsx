@@ -1,3 +1,5 @@
+import { getNumberLocale } from "../lib/number-locale"
+import { useUiTranslation } from "../i18n/ui"
 import { useEffect, useRef, useState } from "react"
 import { Box, Flex, Text, Button } from "@chakra-ui/react"
 import { Z } from "../lib/z-index"
@@ -36,6 +38,8 @@ function useEta(height?: number, headers?: number, syncing?: boolean): string | 
  *  states the limitations, and — if the node is still syncing — shows a live
  *  progress + rough ETA so the user knows how long before balances are complete. */
 export function NodeConnectedDialog({ onClose }: { onClose: () => void }) {
+  const uiText = useUiTranslation()
+
   const status = useBtcNodeStatus(true)
   const kind = status?.kind === "core" ? "Bitcoin Core" : "Blockbook"
   const isCore = status?.kind === "core"
@@ -71,36 +75,35 @@ export function NodeConnectedDialog({ onClose }: { onClose: () => void }) {
               <Text fontSize="24px" fontWeight="800" color={ACCENT} lineHeight="1">₿</Text>
             </Flex>
             <Box>
-              <Text fontSize="lg" fontWeight="800" color="kk.textPrimary" letterSpacing="-0.02em">Connected to your node</Text>
-              <Text fontSize="xs" color="kk.textSecondary">{kind}{status?.height ? ` · height ${status.height.toLocaleString()}` : ""}</Text>
+              <Text fontSize="lg" fontWeight="800" color="kk.textPrimary" letterSpacing="-0.02em">{uiText("Connected to your node")}</Text>
+              <Text fontSize="xs" color="kk.textSecondary">{kind}{status?.height ? ` · height ${status.height.toLocaleString(getNumberLocale())}` : ""}</Text>
             </Box>
           </Flex>
 
           {failing ? (
             <Box p="3" borderRadius="10px" bg="rgba(224,140,123,0.10)" border="1px solid rgba(224,140,123,0.30)">
-              <Text fontSize="sm" color="var(--rose)" wordBreak="break-word">Node unreachable — {status?.error}</Text>
+              <Text fontSize="sm" color="var(--rose)" wordBreak="break-word">{uiText("Node unreachable —")}{" "}{status?.error}</Text>
             </Box>
           ) : syncing ? (
             <Box p="3.5" borderRadius="12px" bg="rgba(233,196,106,0.08)" border="1px solid rgba(233,196,106,0.30)">
               <Flex justify="space-between" align="baseline" mb="2">
-                <Text fontSize="sm" fontWeight="700" color="var(--gold)">Node is syncing{pct !== undefined ? ` · ${pct}%` : ""}</Text>
-                <Text fontSize="11px" color="kk.textSecondary">{eta ? `${eta} left` : "estimating…"}</Text>
+                <Text fontSize="sm" fontWeight="700" color="var(--gold)">{uiText("Node is syncing")}{pct !== undefined ? ` · ${pct}%` : ""}</Text>
+                <Text fontSize="11px" color="kk.textSecondary">{eta ? `${eta} left` : uiText("estimating…")}</Text>
               </Flex>
               <Box h="6px" borderRadius="full" bg="rgba(255,255,255,0.08)" overflow="hidden">
                 <Box h="100%" borderRadius="full" bg="var(--gold)" w={`${pct ?? 0}%`} transition="width 0.6s" />
               </Box>
               <Text fontSize="11px" color="kk.textSecondary" mt="2">
-                {behind !== undefined ? `${behind.toLocaleString()} blocks behind. ` : ""}Balances may be incomplete until it catches up — you can keep using Vault; this keeps running in the background.
-              </Text>
+                {behind !== undefined ? `${behind.toLocaleString(getNumberLocale())} blocks behind. ` : ""}{uiText("Balances may be incomplete until it catches up — you can keep using Vault; this keeps running in the background.")}</Text>
             </Box>
           ) : (
             <Box p="3" borderRadius="10px" bg="rgba(139,227,196,0.08)" border="1px solid rgba(139,227,196,0.30)">
-              <Text fontSize="sm" color="var(--teal)" fontWeight="600">Synced — your Bitcoin balances now come from your own node.</Text>
+              <Text fontSize="sm" color="var(--teal)" fontWeight="600">{uiText("Synced — your Bitcoin balances now come from your own node.")}</Text>
             </Box>
           )}
 
           <Box>
-            <Text fontSize="11px" color="kk.textSecondary" textTransform="uppercase" letterSpacing="0.05em" mb="1.5">What to expect</Text>
+            <Text fontSize="11px" color="kk.textSecondary" textTransform="uppercase" letterSpacing="0.05em" mb="1.5">{uiText("What to expect")}</Text>
             <Flex direction="column" gap="1">
               {limitations.map((l, i) => (
                 <Flex key={i} gap="2" align="flex-start">
@@ -111,7 +114,7 @@ export function NodeConnectedDialog({ onClose }: { onClose: () => void }) {
             </Flex>
           </Box>
 
-          <Button size="sm" onClick={onClose} bg={ACCENT} color="kk.bg" _hover={{ opacity: 0.9 }}>Done</Button>
+          <Button size="sm" onClick={onClose} bg={ACCENT} color="kk.bg" _hover={{ opacity: 0.9 }}>{uiText("Done")}</Button>
         </Flex>
       </Box>
     </Flex>

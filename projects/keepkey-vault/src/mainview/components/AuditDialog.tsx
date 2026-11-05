@@ -1,3 +1,5 @@
+import { getNumberLocale } from "../lib/number-locale"
+import { useUiTranslation } from "../i18n/ui"
 /**
  * AuditDialog — the "where's my money" recovery wizard.
  *
@@ -73,7 +75,7 @@ const ANIM = `
 `
 
 function usd(n: number): string {
-  return '$' + n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+  return '$' + n.toLocaleString(getNumberLocale(), { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
 function scriptLabel(st: string): string {
   if (st === 'p2pkh') return 'Legacy'
@@ -107,7 +109,7 @@ function walkRank(chainId: string): number {
 // Human-readable token amount — trims long decimal tails to 6 significant places.
 function fmtAmt(s: string): string {
   const n = parseFloat(s)
-  return Number.isFinite(n) ? n.toLocaleString('en-US', { maximumFractionDigits: 6 }) : s
+  return Number.isFinite(n) ? n.toLocaleString(getNumberLocale(), { maximumFractionDigits: 6 }) : s
 }
 
 /** Split a CAIP-19 ("eip155:1/slip44:60") into its chain + asset halves. */
@@ -119,6 +121,8 @@ function parseCaip(caip: string): { chain: string; asset: string | null } {
 /** The full CAIP shown as a mono chip, with a tap-to-open "what's a CAIP?"
  *  popover that breaks it into its chain and asset halves. */
 function CaipBadge({ caip }: { caip: string }) {
+  const uiText = useUiTranslation()
+
   const [open, setOpen] = useState(false)
   const { chain, asset } = parseCaip(caip)
   return (
@@ -136,23 +140,21 @@ function CaipBadge({ caip }: { caip: string }) {
           <Box position="absolute" bottom="calc(100% + 9px)" left="50%" transform="translateX(-50%)" zIndex={2} w="320px"
             bg="var(--ink-4)" border="1px solid" borderColor="rgba(233,196,106,0.35)" borderRadius="14px" p="4" textAlign="left"
             boxShadow="0 16px 44px rgba(0,0,0,0.55)">
-            <Text fontSize="13px" fontWeight="700" color="var(--gold)" mb="1.5">What’s a CAIP?</Text>
-            <Text fontSize="12px" color="var(--text-1)" lineHeight="1.55" mb="3">
-              A Chain-Agnostic identifier — it names this asset the same way everywhere, so ETH on Ethereum is never confused with ETH on Arbitrum.
-            </Text>
+            <Text fontSize="13px" fontWeight="700" color="var(--gold)" mb="1.5">{uiText("What’s a CAIP?")}</Text>
+            <Text fontSize="12px" color="var(--text-1)" lineHeight="1.55" mb="3">{uiText("A Chain-Agnostic identifier — it names this asset the same way everywhere, so ETH on Ethereum is never confused with ETH on Arbitrum.")}</Text>
             <VStack gap="1.5" align="stretch" mb="3">
               <Flex justify="space-between" gap="3" align="center">
-                <Text fontSize="11px" color="var(--text-3)" textTransform="uppercase" letterSpacing="0.06em">chain</Text>
+                <Text fontSize="11px" color="var(--text-3)" textTransform="uppercase" letterSpacing="0.06em">{uiText("chain")}</Text>
                 <Text fontSize="11.5px" fontFamily="mono" color="var(--text-0)">{chain}</Text>
               </Flex>
               {asset && (
                 <Flex justify="space-between" gap="3" align="center">
-                  <Text fontSize="11px" color="var(--text-3)" textTransform="uppercase" letterSpacing="0.06em">asset</Text>
+                  <Text fontSize="11px" color="var(--text-3)" textTransform="uppercase" letterSpacing="0.06em">{uiText("asset")}</Text>
                   <Text fontSize="11.5px" fontFamily="mono" color="var(--text-0)">{asset}</Text>
                 </Flex>
               )}
             </VStack>
-            <Text fontSize="11px" color="var(--text-3)" lineHeight="1.5">KeepKey and Pioneer use CAIPs internally for every balance and address.</Text>
+            <Text fontSize="11px" color="var(--text-3)" lineHeight="1.5">{uiText("KeepKey and Pioneer use CAIPs internally for every balance and address.")}</Text>
           </Box>
         </>
       )}
@@ -214,6 +216,8 @@ interface AuditDialogProps {
 }
 
 export function AuditDialog({ onClose, snapshot, isHidden, chainCatalog, chainAddresses, onRecovered }: AuditDialogProps) {
+  const uiText = useUiTranslation()
+
   const [report, setReport] = useState<AuditReport | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [stale, setStale] = useState(false)
@@ -529,6 +533,8 @@ export function AuditDialog({ onClose, snapshot, isHidden, chainCatalog, chainAd
   )
 
   const AddrRow = ({ chain, a, gold }: { chain: AuditChainFinding; a: AuditDerivedAddress; gold?: boolean }) => {
+  const uiText = useUiTranslation()
+
     // UTXO altcoins persist via the device-scoped pubkey cache, which deliberately
     // never holds hidden-wallet xpubs — so they're only trackable on the standard wallet.
     const trackAccount = auditTrackLevel(chain, a, isHidden)
@@ -539,18 +545,18 @@ export function AuditDialog({ onClose, snapshot, isHidden, chainCatalog, chainAd
     return (
       <Box bg={gold ? 'var(--ink-1)' : 'var(--ink-3)'} border="1px solid" borderColor={gold ? 'rgba(233,196,106,0.22)' : 'var(--line)'} borderRadius="12px" px="3.5" py="3">
         <Flex justify="space-between" align="center" gap="3">
-          <Text fontSize="sm" color="var(--text-0)" whiteSpace="nowrap">{displayLevel != null ? (chain.family === 'evm' ? `Address #${displayLevel}` : `Account #${displayLevel}`) : 'Custom path'}</Text>
+          <Text fontSize="sm" color="var(--text-0)" whiteSpace="nowrap">{displayLevel != null ? (chain.family === 'evm' ? `Address #${displayLevel}` : `Account #${displayLevel}`) : uiText("Custom path")}</Text>
           {a.balanceError
-            ? <Text fontSize="sm" fontWeight="600" color="var(--rose)" whiteSpace="nowrap">couldn’t verify</Text>
+            ? <Text fontSize="sm" fontWeight="600" color="var(--rose)" whiteSpace="nowrap">{uiText("couldn’t verify")}</Text>
             : <Text fontSize="sm" fontWeight="700" whiteSpace="nowrap" color={parseFloat(a.native) > 0 ? 'var(--gold)' : 'var(--text-2)'}>{fmtAmt(a.native)} {a.symbol}</Text>}
         </Flex>
         <Flex justify="space-between" align="center" mt="1.5" gap="3">
           {hasXpubs
-            ? <Text flex="1" minW="0" fontSize="11px" color="var(--text-3)">{a.xpubs!.length} xpubs — every address style</Text>
+            ? <Text flex="1" minW="0" fontSize="11px" color="var(--text-3)">{a.xpubs!.length}{" "}{uiText("xpubs — every address style")}</Text>
             : <Text flex="1" minW="0" fontSize="11px" color="var(--text-3)" truncate title={`${a.pathStr} · ${a.address}`}>{a.pathStr} · {a.address}</Text>}
           <HStack gap="3" flexShrink={0}>
-            {a.explorerUrl && <Box as="button" fontSize="11px" color="var(--teal)" onClick={() => openUrl(a.explorerUrl!)}>explorer ↗</Box>}
-            {a.hasBalance && canTrack && <Box as="button" fontSize="11px" color="var(--gold)" fontWeight="700" onClick={() => trackLevel(chain, trackAccount!)}>{a.level == null ? 'track account' : 'track'}</Box>}
+            {a.explorerUrl && <Box as="button" fontSize="11px" color="var(--teal)" onClick={() => openUrl(a.explorerUrl!)}>{uiText("explorer ↗")}</Box>}
+            {a.hasBalance && canTrack && <Box as="button" fontSize="11px" color="var(--gold)" fontWeight="700" onClick={() => trackLevel(chain, trackAccount!)}>{a.level == null ? uiText("track account") : uiText("track")}</Box>}
           </HStack>
         </Flex>
         {hasXpubs && <XpubRows xpubs={a.xpubs!} gold={gold} />}
@@ -574,7 +580,7 @@ export function AuditDialog({ onClose, snapshot, isHidden, chainCatalog, chainAd
             ))}
           </VStack>
         )}
-        {fundedNoTrack && <Text fontSize="11px" color="var(--gold)" mt="1.5">Funds here, but KeepKey can’t track this path in-app. <Box as="button" textDecoration="underline" onClick={() => { patchLadder(chain.chainId, { showHandoff: true }); scrollDown() }}>Send to support →</Box></Text>}
+        {fundedNoTrack && <Text fontSize="11px" color="var(--gold)" mt="1.5">{uiText("Funds here, but KeepKey can’t track this path in-app.")}{" "}<Box as="button" textDecoration="underline" onClick={() => { patchLadder(chain.chainId, { showHandoff: true }); scrollDown() }}>{uiText("Send to support →")}</Box></Text>}
       </Box>
     )
   }
@@ -596,18 +602,18 @@ export function AuditDialog({ onClose, snapshot, isHidden, chainCatalog, chainAd
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--gold)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="11" width="18" height="11" rx="2.5" /><path d="M7 11V7a5 5 0 0 1 10 0v4" /></svg>
             </Box>
             <Box>
-              <Text fontSize="lg" fontWeight="700" color="var(--gold)" letterSpacing="-0.01em" lineHeight="1.15">Audit balances</Text>
-              <Text fontSize="xs" color="var(--text-2)">Let’s walk every chain and make sure nothing’s hiding.</Text>
+              <Text fontSize="lg" fontWeight="700" color="var(--gold)" letterSpacing="-0.01em" lineHeight="1.15">{uiText("Audit balances")}</Text>
+              <Text fontSize="xs" color="var(--text-2)">{uiText("Let’s walk every chain and make sure nothing’s hiding.")}</Text>
               <Flex mt="1" gap="3">
                 <DocsLink href={DOCS_LINKS.audit} />
-                <DocsLink href={watch('course-14-audit')} label="Watch video" />
+                <DocsLink href={watch('course-14-audit')} label={uiText("Watch video")} />
               </Flex>
             </Box>
           </Flex>
           <Flex align="center" gap="4">
             {phase === 'walkthrough' && <Text fontSize="sm" color="var(--text-2)">{chainIdx + 1} / {walk.length}</Text>}
             {phase !== 'scanning' && (
-              <Box as="button" onClick={() => start('light')} color="var(--text-3)" _hover={{ color: "var(--text-0)" }} title="Restart audit" opacity={busy ? 0.3 : 1} cursor={busy ? "not-allowed" : "pointer"}>
+              <Box as="button" onClick={() => start('light')} color="var(--text-3)" _hover={{ color: "var(--text-0)" }} title={uiText("Restart audit")} opacity={busy ? 0.3 : 1} cursor={busy ? "not-allowed" : "pointer"}>
                 <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7L3 8" /><path d="M3 3v5h5" /></svg>
               </Box>
             )}
@@ -620,8 +626,8 @@ export function AuditDialog({ onClose, snapshot, isHidden, chainCatalog, chainAd
         {/* Stale / error banners (shown above any phase) */}
         {stale && (
           <Box p="6"><VStack gap="3" align="stretch">
-            <Text fontSize="sm" color="var(--gold)">The wallet changed while auditing — these results are no longer reliable.</Text>
-            <Button size="sm" alignSelf="flex-start" {...goldBtn} onClick={() => start('light')}>Re-run audit</Button>
+            <Text fontSize="sm" color="var(--gold)">{uiText("The wallet changed while auditing — these results are no longer reliable.")}</Text>
+            <Button size="sm" alignSelf="flex-start" {...goldBtn} onClick={() => start('light')}>{uiText("Re-run audit")}</Button>
           </VStack></Box>
         )}
         {!stale && error && <Box mx="7" mt="4" px="3.5" py="2.5" bg="rgba(224,140,123,0.08)" border="1px solid" borderColor="rgba(224,140,123,0.3)" borderRadius="md"><Text fontSize="sm" color="var(--rose)">{error}</Text></Box>}
@@ -653,21 +659,19 @@ export function AuditDialog({ onClose, snapshot, isHidden, chainCatalog, chainAd
             </Box>
 
             <Box textAlign="center" maxW="460px" mb="2">
-              <Text fontSize="lg" color="var(--text-0)" lineHeight="1.5">{scanReady ? 'All chains lined up.' : 'Checking your funds across every chain.'}</Text>
+              <Text fontSize="lg" color="var(--text-0)" lineHeight="1.5">{scanReady ? uiText("All chains lined up.") : uiText("Checking your funds across every chain.")}</Text>
               <Text fontSize="sm" color="var(--text-2)" mt="2" lineHeight="1.55">
                 {scanReady
-                  ? 'Nothing’s hiding that we couldn’t reach. Let’s walk through them together, chain by chain.'
-                  : isHidden ? 'Auditing your hidden wallet — nothing is written to disk.' : 'Reading your device and lining up every chain. Nothing is written to disk.'}
+                  ? uiText("Nothing’s hiding that we couldn’t reach. Let’s walk through them together, chain by chain.")
+                  : isHidden ? uiText("Auditing your hidden wallet — nothing is written to disk.") : uiText("Reading your device and lining up every chain. Nothing is written to disk.")}
               </Text>
             </Box>
 
             <Box mt="6" minH="52px" display="flex" alignItems="center">
               {report && report.status !== 'running' && report.status !== 'complete'
-                ? <Text fontSize="sm" color="var(--gold)">Scan stopped early ({report.error || 'device interrupted'}). <Box as="button" textDecoration="underline" onClick={() => start('light')}>Retry</Box></Text>
+                ? <Text fontSize="sm" color="var(--gold)">{uiText("Scan stopped early (")}{report.error || uiText("device interrupted")}). <Box as="button" textDecoration="underline" onClick={() => start('light')}>{uiText("Retry")}</Box></Text>
                 : scanReady
-                  ? <Button size="lg" px="9" py="6" borderRadius="full" {...goldBtn} boxShadow="0 8px 26px -8px rgba(233,196,106,0.6)" onClick={goWalk}>
-                      Walk me through it
-                      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" style={{ marginLeft: 8 }}><path d="M5 12h14M13 6l6 6-6 6" /></svg>
+                  ? <Button size="lg" px="9" py="6" borderRadius="full" {...goldBtn} boxShadow="0 8px 26px -8px rgba(233,196,106,0.6)" onClick={goWalk}>{uiText("Walk me through it")}<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" style={{ marginLeft: 8 }}><path d="M5 12h14M13 6l6 6-6 6" /></svg>
                     </Button>
                   : <Spinner size="md" color="var(--gold)" />}
             </Box>
@@ -718,7 +722,7 @@ export function AuditDialog({ onClose, snapshot, isHidden, chainCatalog, chainAd
                     <Box w="6px" h="6px" borderRadius="full" bg={COVERAGE_PILL[current.coverage].color} />{COVERAGE_PILL[current.coverage].label}
                   </Flex>
                   {currentCaip && <CaipBadge key={currentCaip} caip={currentCaip} />}
-                  {explorerForCurrent && <Box as="button" fontSize="11.5px" color="var(--text-3)" _hover={{ color: "var(--teal)" }} onClick={() => openUrl(explorerForCurrent)}>explorer ↗</Box>}
+                  {explorerForCurrent && <Box as="button" fontSize="11.5px" color="var(--text-3)" _hover={{ color: "var(--teal)" }} onClick={() => openUrl(explorerForCurrent)}>{uiText("explorer ↗")}</Box>}
                 </HStack>
               </Box>
             </Box>
@@ -732,7 +736,7 @@ export function AuditDialog({ onClose, snapshot, isHidden, chainCatalog, chainAd
                     block). Fixed-address chains have no per-account scan, so
                     they keep the conclusion up top. */}
                 {ladder.autoScanning
-                  ? <Text fontSize="sm" color="var(--text-1)" lineHeight="1.65" textAlign="center" mb="4.5">Checking the first few {current.symbol} accounts…</Text>
+                  ? <Text fontSize="sm" color="var(--text-1)" lineHeight="1.65" textAlign="center" mb="4.5">{uiText("Checking the first few")}{" "}{current.symbol}{" "}{uiText("accounts…")}</Text>
                   : !accountScannable && <Text fontSize="sm" color="var(--text-1)" lineHeight="1.65" textAlign="center" mb="4.5">{statusCopy(current, accountScannable)}</Text>}
 
                 {/* Account 0 = the main wallet, verified directly from its xpub(s). */}
@@ -741,10 +745,10 @@ export function AuditDialog({ onClose, snapshot, isHidden, chainCatalog, chainAd
                     <Flex justify="space-between" align="center" gap="3">
                       <Flex align="center" gap="2" minW="0">
                         <svg width="15" height="15" style={{ flexShrink: 0 }} viewBox="0 0 24 24" fill="none" stroke="var(--teal)" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
-                        <Text fontSize="sm" color="var(--text-1)" truncate>Account #0 — your main {current.symbol} wallet, checked on-device</Text>
+                        <Text fontSize="sm" color="var(--text-1)" truncate>{uiText("Account #0 — your main")}{" "}{current.symbol}{" "}{uiText("wallet, checked on-device")}</Text>
                       </Flex>
                       {primaryFind.balanceError
-                        ? <Text fontSize="sm" fontWeight="600" color="var(--rose)" flexShrink={0}>couldn’t verify</Text>
+                        ? <Text fontSize="sm" fontWeight="600" color="var(--rose)" flexShrink={0}>{uiText("couldn’t verify")}</Text>
                         : <Text fontSize="sm" fontWeight="700" color="var(--text-0)" flexShrink={0}>{fmtAmt(primaryFind.native)} {primaryFind.symbol}</Text>}
                     </Flex>
                     {primaryFind.xpubs?.length
@@ -758,8 +762,8 @@ export function AuditDialog({ onClose, snapshot, isHidden, chainCatalog, chainAd
                     portfolio fetch. Only where a level scan is meaningful. */}
                 {current.coverage === 'unverified' && accountScannable && !ladder.scanning && !checkedPrimary && (
                   <Box bg="rgba(224,140,123,0.09)" border="1px solid" borderColor="rgba(224,140,123,0.28)" borderRadius="16px" p="4.5" mb="4">
-                    <Text fontSize="13px" color="var(--rose)" mb="3.5" lineHeight="1.55">We couldn’t reach {current.symbol}’s node just now — so we won’t pretend it’s empty. Let’s read your primary address straight from the device.</Text>
-                    <Button size="sm" variant="outline" borderColor="var(--line-2)" color="var(--text-0)" _hover={{ borderColor: "var(--teal)", color: "var(--teal)" }} onClick={() => runScan(current, 0, 1, false)}>Check it directly</Button>
+                    <Text fontSize="13px" color="var(--rose)" mb="3.5" lineHeight="1.55">{uiText("We couldn’t reach")}{" "}{current.symbol}{uiText("’s node just now — so we won’t pretend it’s empty. Let’s read your primary address straight from the device.")}</Text>
+                    <Button size="sm" variant="outline" borderColor="var(--line-2)" color="var(--text-0)" _hover={{ borderColor: "var(--teal)", color: "var(--teal)" }} onClick={() => runScan(current, 0, 1, false)}>{uiText("Check it directly")}</Button>
                   </Box>
                 )}
 
@@ -768,9 +772,9 @@ export function AuditDialog({ onClose, snapshot, isHidden, chainCatalog, chainAd
                   <Box style={{ background: 'linear-gradient(135deg, rgba(233,196,106,0.15), rgba(233,196,106,0.05))' }} border="1px solid" borderColor="rgba(233,196,106,0.42)" borderRadius="16px" p="4.5" mb="4" css={{ animation: "auditPop 0.55s cubic-bezier(0.16,1,0.3,1)" }}>
                     <Flex align="center" gap="2.5" mb="2.5">
                       <Box w="26px" h="26px" borderRadius="full" bg="var(--gold)" display="flex" alignItems="center" justifyContent="center" flexShrink={0}><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--ink-0)" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg></Box>
-                      <Text fontSize="15px" fontWeight="700" color="var(--gold)">{current.family === 'evm' ? 'Found funds you weren’t tracking' : `Found ${current.symbol} you weren’t tracking`}</Text>
+                      <Text fontSize="15px" fontWeight="700" color="var(--gold)">{current.family === 'evm' ? uiText("Found funds you weren’t tracking") : `Found ${current.symbol} you weren’t tracking`}</Text>
                     </Flex>
-                    <Text fontSize="12.5px" color="var(--text-1)" lineHeight="1.55" mb="3.5">It was sitting on a higher account from an earlier setup. {isHidden ? 'We’ll track it for this hidden-wallet session.' : 'Add it to your portfolio and it’ll always show up from now on.'}</Text>
+                    <Text fontSize="12.5px" color="var(--text-1)" lineHeight="1.55" mb="3.5">{uiText("It was sitting on a higher account from an earlier setup.")}{" "}{isHidden ? uiText("We’ll track it for this hidden-wallet session.") : uiText("Add it to your portfolio and it’ll always show up from now on.")}</Text>
                     <VStack gap="2" align="stretch">{fundedFinds.map((a, i) => <AddrRow key={`f${i}`} chain={current} a={a} gold />)}</VStack>
                   </Box>
                 )}
@@ -786,7 +790,7 @@ export function AuditDialog({ onClose, snapshot, isHidden, chainCatalog, chainAd
                 {emptyFinds.length > 0 && (
                   <Box mb="4">
                     <Flex align="flex-start" gap="2.5"><svg width="15" height="15" style={{ flexShrink: 0, marginTop: 2 }} viewBox="0 0 24 24" fill="none" stroke="var(--teal)" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
-                      <Text fontSize="sm" color="var(--text-2)">Checked {emptyFinds.length} more {emptyFinds.length === 1 ? 'account' : 'accounts'} — {emptyFinds.length === 1 ? 'it’s' : 'they’re'} empty. <Box as="button" color="var(--text-3)" textDecoration="underline" onClick={() => patchLadder(current.chainId, { showEmpties: !ladder.showEmpties })}>{ladder.showEmpties ? 'hide' : 'show'}</Box></Text>
+                      <Text fontSize="sm" color="var(--text-2)">{uiText("Checked")}{" "}{emptyFinds.length}{" "}{uiText("more")}{" "}{emptyFinds.length === 1 ? uiText("account") : uiText("accounts")} — {emptyFinds.length === 1 ? uiText("it’s") : uiText("they’re")}{" "}{uiText("empty.")}{" "}<Box as="button" color="var(--text-3)" textDecoration="underline" onClick={() => patchLadder(current.chainId, { showEmpties: !ladder.showEmpties })}>{ladder.showEmpties ? uiText("hide") : uiText("show")}</Box></Text>
                     </Flex>
                     {ladder.showEmpties && <VStack gap="2" align="stretch" mt="2.5" maxH="220px" overflow="auto">{emptyFinds.map((a, i) => <Box key={`s${i}`} css={{ animation: "auditRise 0.45s cubic-bezier(0.16,1,0.3,1) both", animationDelay: `${Math.min(i, 6) * 0.09}s` }}><AddrRow chain={current} a={a} /></Box>)}</VStack>}
                   </Box>
@@ -802,7 +806,7 @@ export function AuditDialog({ onClose, snapshot, isHidden, chainCatalog, chainAd
 
                 {/* common (other-wallet) paths */}
                 {ladder.showCommon && (current.family === 'evm' || current.chainId === 'litecoin') && <Box mb="4"><AuditKnownPaths chainId={current.chainId} defaultAddress={currentAddr} onFound={(r) => pushExtra(current.chainId, r)} onOpenUrl={openUrl} /></Box>}
-                {ladder.showCommon && current.chainId === 'bitcoin' && <Box mb="4"><Text fontSize="11px" color="var(--text-2)" textTransform="uppercase" letterSpacing="0.08em" mb="1.5">Deep Bitcoin scans</Text><AuditBtcDeep onRecovered={() => onRecovered?.()} /></Box>}
+                {ladder.showCommon && current.chainId === 'bitcoin' && <Box mb="4"><Text fontSize="11px" color="var(--text-2)" textTransform="uppercase" letterSpacing="0.08em" mb="1.5">{uiText("Deep Bitcoin scans")}</Text><AuditBtcDeep onRecovered={() => onRecovered?.()} /></Box>}
 
                 {/* custom + inspector */}
                 {ladder.showCustom && currentDef0 && (
@@ -815,15 +819,15 @@ export function AuditDialog({ onClose, snapshot, isHidden, chainCatalog, chainAd
                 {/* handoff */}
                 {ladder.showHandoff && (
                   <Box bg="var(--ink-3)" border="1px solid" borderColor="var(--line)" borderRadius="13px" p="4" mb="4">
-                    <Text fontSize="sm" color="var(--text-0)" mb="2.5">We’ll bundle everything we checked into a report you can hand to support.</Text>
-                    <Textarea size="sm" placeholder="What balance did you expect? (optional)" value={ladder.handoffNote} onChange={e => patchLadder(current.chainId, { handoffNote: e.target.value })} bg="var(--ink-1)" border="1px solid" borderColor="var(--line-2)" fontSize="sm" rows={2} mb="3" />
+                    <Text fontSize="sm" color="var(--text-0)" mb="2.5">{uiText("We’ll bundle everything we checked into a report you can hand to support.")}</Text>
+                    <Textarea size="sm" placeholder={uiText("What balance did you expect? (optional)")} value={ladder.handoffNote} onChange={e => patchLadder(current.chainId, { handoffNote: e.target.value })} bg="var(--ink-1)" border="1px solid" borderColor="var(--line-2)" fontSize="sm" rows={2} mb="3" />
                     <Flex gap="2">
                       <Button size="sm" flex="1" variant="outline" borderColor="var(--line-2)" color="var(--text-1)" fontWeight="600"
                         _hover={{ borderColor: "var(--gold)", color: "var(--gold)" }}
                         onClick={() => copyHandoff(current, ladder, current.balanceUsd, false)}>
-                        {handoffCopied ? 'Copied ✓' : 'Copy report'}
+                        {handoffCopied ? uiText("Copied ✓") : uiText("Copy report")}
                       </Button>
-                      <Button size="sm" flex="1" {...goldBtn} onClick={() => copyHandoff(current, ladder, current.balanceUsd, true)}>Open support with report ↗</Button>
+                      <Button size="sm" flex="1" {...goldBtn} onClick={() => copyHandoff(current, ladder, current.balanceUsd, true)}>{uiText("Open support with report ↗")}</Button>
                     </Flex>
                   </Box>
                 )}
@@ -832,29 +836,28 @@ export function AuditDialog({ onClose, snapshot, isHidden, chainCatalog, chainAd
 
             {/* persistent action bar */}
             <Flex flexShrink={0} align="center" gap="3" wrap="wrap" px="7" py="3.5" borderTop="1px solid" borderColor="var(--line)" bg="rgba(255,255,255,0.022)">
-              <Text fontSize="12px" color="var(--text-2)" whiteSpace="nowrap">Expected more?</Text>
+              <Text fontSize="12px" color="var(--text-2)" whiteSpace="nowrap">{uiText("Expected more?")}</Text>
               {accountScannable && (
                 <Box as="button" style={chip} onClick={() => { runScan(current, ladder.nextLevel, 3, false); scrollDown() }}>
-                  {ladder.scanning && <Spinner size="xs" color="var(--gold)" />}Scan more accounts
-                </Box>
+                  {ladder.scanning && <Spinner size="xs" color="var(--gold)" />}{uiText("Scan more accounts")}</Box>
               )}
               {hasCommon && (
                 <Box as="button" style={chip} onClick={() => { patchLadder(current.chainId, { showCommon: !ladder.showCommon }); scrollDown() }}>
-                  {current.family === 'evm' ? 'Scan common wallet paths' : current.chainId === 'litecoin' ? 'Scan uncommon paths' : 'Scan unusual paths'}
+                  {current.family === 'evm' ? uiText("Scan common wallet paths") : current.chainId === 'litecoin' ? uiText("Scan uncommon paths") : uiText("Scan unusual paths")}
                 </Box>
               )}
-              <Box as="button" style={chip} onClick={() => { patchLadder(current.chainId, { showCustom: !ladder.showCustom }); scrollDown() }}>Scan a custom path</Box>
-              {!ladder.showHandoff && <Box as="button" ml="auto" fontSize="12px" color="var(--text-3)" _hover={{ color: "var(--text-1)" }} onClick={() => { patchLadder(current.chainId, { showHandoff: true }); scrollDown() }}>Still missing? →</Box>}
+              <Box as="button" style={chip} onClick={() => { patchLadder(current.chainId, { showCustom: !ladder.showCustom }); scrollDown() }}>{uiText("Scan a custom path")}</Box>
+              {!ladder.showHandoff && <Box as="button" ml="auto" fontSize="12px" color="var(--text-3)" _hover={{ color: "var(--text-1)" }} onClick={() => { patchLadder(current.chainId, { showHandoff: true }); scrollDown() }}>{uiText("Still missing? →")}</Box>}
             </Flex>
 
             {/* footer nav */}
             <Flex flexShrink={0} px="7" py="4" gap="3" align="center" justify="space-between" borderTop="1px solid" borderColor="var(--line)">
-              <Box as="button" fontSize="13.5px" color={chainIdx === 0 ? 'var(--text-3)' : 'var(--text-2)'} cursor={chainIdx === 0 ? 'default' : 'pointer'} onClick={() => { if (chainIdx > 0) goChain(chainIdx - 1) }}>← Back</Box>
+              <Box as="button" fontSize="13.5px" color={chainIdx === 0 ? 'var(--text-3)' : 'var(--text-2)'} cursor={chainIdx === 0 ? 'default' : 'pointer'} onClick={() => { if (chainIdx > 0) goChain(chainIdx - 1) }}>{uiText("← Back")}</Box>
               <Button size="lg" px="9" borderRadius="full" {...goldBtn} boxShadow="0 8px 24px -8px rgba(233,196,106,0.6)" _hover={{ bg: "var(--gold-2)", transform: "translateY(-1px)" }} _active={{ transform: "scale(0.98)" }} onClick={advance}>
-                {chainIdx + 1 < walk.length ? 'Looks right' : 'Finish'}
+                {chainIdx + 1 < walk.length ? uiText("Looks right") : uiText("Finish")}
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" style={{ marginLeft: 8 }}><polyline points="20 6 9 17 4 12" /></svg>
               </Button>
-              <Box as="button" fontSize="13.5px" color="var(--text-2)" _hover={{ color: "var(--text-1)" }} visibility={chainIdx + 1 < walk.length ? 'visible' : 'hidden'} onClick={() => goChain(chainIdx + 1)}>Skip →</Box>
+              <Box as="button" fontSize="13.5px" color="var(--text-2)" _hover={{ color: "var(--text-1)" }} visibility={chainIdx + 1 < walk.length ? 'visible' : 'hidden'} onClick={() => goChain(chainIdx + 1)}>{uiText("Skip →")}</Box>
             </Flex>
           </Flex>
         )}
@@ -867,18 +870,18 @@ export function AuditDialog({ onClose, snapshot, isHidden, chainCatalog, chainAd
                 style={{ background: 'linear-gradient(145deg, var(--ink-4), var(--ink-3))' }} border="1px solid" borderColor="rgba(233,196,106,0.5)" css={{ animation: "auditGold 2.4s ease-in-out infinite" }}>
                 <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="var(--gold)" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 12l2 2 4-4" /><circle cx="12" cy="12" r="9" /></svg>
               </Box>
-              <Text fontSize="2xl" fontWeight="700" color="var(--text-0)" letterSpacing="-0.02em">{report?.anyUnverified ? 'Audit complete — a couple chains need a second look.' : report?.anyShallow ? 'Audit complete — your tracked balances are accounted for.' : 'Everything’s accounted for.'}</Text>
-              <Text fontSize="13.5px" color="var(--text-2)" mt="3" maxW="460px" mx="auto" lineHeight="1.6">We walked all {walk.length} chains on your device and checked every tracked address. Here’s what we found.</Text>
+              <Text fontSize="2xl" fontWeight="700" color="var(--text-0)" letterSpacing="-0.02em">{report?.anyUnverified ? uiText("Audit complete — a couple chains need a second look.") : report?.anyShallow ? uiText("Audit complete — your tracked balances are accounted for.") : uiText("Everything’s accounted for.")}</Text>
+              <Text fontSize="13.5px" color="var(--text-2)" mt="3" maxW="460px" mx="auto" lineHeight="1.6">{uiText("We walked all")}{" "}{walk.length}{" "}{uiText("chains on your device and checked every tracked address. Here’s what we found.")}</Text>
             </Box>
 
             <Flex gap="4" maxW="580px" mx="auto" mb="6">
               <Box flex="1" bg="var(--ink-3)" border="1px solid" borderColor="var(--line)" borderRadius="16px" p="4.5" textAlign="center">
-                <Text fontSize="11px" color="var(--text-3)" textTransform="uppercase" letterSpacing="0.06em">{report?.anyUnverified || report?.anyShallow ? 'Total balance' : 'Total verified'}</Text>
+                <Text fontSize="11px" color="var(--text-3)" textTransform="uppercase" letterSpacing="0.06em">{report?.anyUnverified || report?.anyShallow ? uiText("Total balance") : uiText("Total verified")}</Text>
                 <Text fontSize="26px" fontWeight="700" color="var(--text-0)" mt="1.5">{usd(totalBalance)}</Text>
               </Box>
               <Box flex="1" style={{ background: 'linear-gradient(135deg, rgba(233,196,106,0.14), rgba(233,196,106,0.04))' }} border="1px solid" borderColor="rgba(233,196,106,0.32)" borderRadius="16px" p="4.5" textAlign="center">
-                <Text fontSize="11px" color="var(--gold)" textTransform="uppercase" letterSpacing="0.06em">Recovered</Text>
-                <Text fontSize="26px" fontWeight="700" color="var(--gold)" mt="1.5">{recoveredCount > 0 ? `${recoveredCount} ${recoveredCount === 1 ? 'account' : 'accounts'}` : 'none'}</Text>
+                <Text fontSize="11px" color="var(--gold)" textTransform="uppercase" letterSpacing="0.06em">{uiText("Recovered")}</Text>
+                <Text fontSize="26px" fontWeight="700" color="var(--gold)" mt="1.5">{recoveredCount > 0 ? `${recoveredCount} ${recoveredCount === 1 ? 'account' : 'accounts'}` : uiText("none")}</Text>
               </Box>
             </Flex>
 
@@ -901,8 +904,8 @@ export function AuditDialog({ onClose, snapshot, isHidden, chainCatalog, chainAd
             </VStack>
 
             <Flex gap="3" justify="center" mt="8">
-              <Button size="lg" px="6" borderRadius="full" variant="outline" borderColor="var(--line-2)" color="var(--text-1)" _hover={{ borderColor: "var(--text-2)", color: "var(--text-0)" }} onClick={() => start('light')}>Run it again</Button>
-              <Button size="lg" px="8" borderRadius="full" {...goldBtn} onClick={handleClose}>Done — back to wallet</Button>
+              <Button size="lg" px="6" borderRadius="full" variant="outline" borderColor="var(--line-2)" color="var(--text-1)" _hover={{ borderColor: "var(--text-2)", color: "var(--text-0)" }} onClick={() => start('light')}>{uiText("Run it again")}</Button>
+              <Button size="lg" px="8" borderRadius="full" {...goldBtn} onClick={handleClose}>{uiText("Done — back to wallet")}</Button>
             </Flex>
           </Box>
         )}

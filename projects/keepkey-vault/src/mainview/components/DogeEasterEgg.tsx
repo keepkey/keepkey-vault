@@ -1,3 +1,4 @@
+import { useUiTranslation } from "../i18n/ui"
 import { useCallback, useEffect, useRef, useState } from "react"
 import { Box, Image } from "@chakra-ui/react"
 import { playBark } from "../lib/sounds"
@@ -67,6 +68,8 @@ const ANIMS = `
  *  Slides in, gently bobs, barks on first appearance and on click, then
  *  auto-dismisses after a few seconds (timer resets on each click). */
 export function DogeEasterEgg() {
+  const uiText = useUiTranslation()
+
 	const [bubble, setBubble] = useState<string | null>(null)
 	const [leaving, setLeaving] = useState(false)
 	const [unmounted, setUnmounted] = useState(false)
@@ -157,11 +160,11 @@ export function DogeEasterEgg() {
 					animation: "doge-bob 2.2s ease-in-out infinite",
 					filter: "drop-shadow(0 8px 18px rgba(0,0,0,0.5)) drop-shadow(0 0 28px rgba(233,196,106,0.55))",
 				}}
-				title="click for bark"
+				title={uiText("click for bark")}
 			>
 				<Image
 					src={dogeImg}
-					alt="doge"
+					alt={uiText("doge")}
 					w={{ base: "120px", md: "150px" }}
 					h="auto"
 					draggable={false}

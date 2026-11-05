@@ -53,5 +53,7 @@
 	"invalidSolanaAddress": "Endereço Solana inválido — deve ter 32-44 caracteres base58",
 	"invalidTronAddress": "Endereço Tron inválido — deve começar com T (34 caracteres)",
 	"invalidTonAddress": "Endereço TON inválido",
-	"invalidZcashShieldedAddress": "Endereço protegido inválido — deve começar com u1"
+	"invalidZcashShieldedAddress": "Endereço protegido inválido — deve começar com u1",
+	"feeCustom": "Personalizado",
+	"invalidAmount": "Digite um valor decimal sem separadores de milhares, por exemplo 1,5."
 }

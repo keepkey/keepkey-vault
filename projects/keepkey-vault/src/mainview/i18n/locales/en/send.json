@@ -62,5 +62,8 @@
 	"invalidSolanaAddress": "Invalid Solana address — must be 32-44 base58 characters",
 	"invalidTronAddress": "Invalid Tron address — must start with T (34 characters)",
 	"invalidTonAddress": "Invalid TON address",
-	"invalidZcashShieldedAddress": "Invalid Zcash address — must start with u1 (unified), zs1 (Sapling), t1, or t3"
+	"invalidZcashShieldedAddress": "Invalid Zcash address — must start with u1 (unified), zs1 (Sapling), t1, or t3",
+	"invalidAmount": "Enter an ungrouped decimal amount, for example 1.5. Thousands separators are not accepted.",
+	"balance": "Balance",
+	"switchAmountUnit": "Tap to switch between USD and native amount"
 }

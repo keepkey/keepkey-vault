@@ -1,3 +1,4 @@
+import { useUiTranslation } from "../i18n/ui"
 import { useState } from "react"
 import { Box, Flex, Text, VStack, IconButton, Image } from "@chakra-ui/react"
 import { useTranslation } from "react-i18next"
@@ -124,6 +125,8 @@ function truncateJson(data: any, maxLen = 500): string {
 
 /** Collapsible JSON block with copy button */
 function JsonBlock({ label, data }: { label: string; data: any }) {
+  const uiText = useUiTranslation()
+
 	const [copied, setCopied] = useState(false)
 	if (data === undefined || data === null) return null
 
@@ -152,7 +155,7 @@ function JsonBlock({ label, data }: { label: string; data: any }) {
 					onClick={handleCopy}
 					transition="color 0.15s"
 				>
-					{copied ? "Copied!" : "Copy"}
+					{copied ? uiText("Copied!") : uiText("Copy")}
 				</Text>
 			</Flex>
 			<Box
@@ -180,6 +183,8 @@ function JsonBlock({ label, data }: { label: string; data: any }) {
 }
 
 export function ApiAuditLog({ open, entries, onClose, side = "right" }: ApiAuditLogProps) {
+  const uiText = useUiTranslation()
+
 	const [expandedIndex, setExpandedIndex] = useState<number | null>(null)
 	const { t } = useTranslation("settings")
 
@@ -329,8 +334,7 @@ export function ApiAuditLog({ open, entries, onClose, side = "right" }: ApiAudit
 									)}
 									{entry.durationMs !== undefined && entry.durationMs > 0 && (
 										<Text fontSize="9px" color="kk.textMuted" fontFamily="mono" flexShrink={0}>
-											{entry.durationMs}ms
-										</Text>
+											{entry.durationMs}{uiText("ms")}</Text>
 									)}
 									<StatusBadge status={entry.status} />
 									<Text fontSize="9px" color="kk.textMuted" flexShrink={0} minW="40px" textAlign="right">

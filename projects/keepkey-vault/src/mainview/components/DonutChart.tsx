@@ -1,3 +1,5 @@
+import { getNumberLocale } from "../lib/number-locale"
+import { useUiTranslation } from "../i18n/ui"
 import { Box, Flex, Text } from "@chakra-ui/react"
 import { AnimatedUsd } from "./AnimatedUsd"
 import type { StackedBarItem } from "./StackedBarView"
@@ -17,6 +19,8 @@ interface DonutChartProps {
 }
 
 export function DonutChart({ data, size = 210, activeIndex, onHoverSlice, onClickSlice }: DonutChartProps) {
+  const uiText = useUiTranslation()
+
 	const total = data.reduce((sum, d) => sum + d.value, 0)
 	const cx = size / 2
 	const cy = size / 2
@@ -32,7 +36,7 @@ export function DonutChart({ data, size = 210, activeIndex, onHoverSlice, onClic
 					<circle cx={cx} cy={cy} r={ringR} fill="none" stroke="rgba(255,255,255,0.07)" strokeWidth={ringW} />
 				</svg>
 				<Flex position="absolute" top="0" left="0" right="0" bottom="0" align="center" justify="center" direction="column" pointerEvents="none" gap="1">
-					<Text fontSize="10px" color="var(--text-3)" letterSpacing="0.20em" textTransform="uppercase" fontWeight="500" lineHeight="1">Total</Text>
+					<Text fontSize="10px" color="var(--text-3)" letterSpacing="0.20em" textTransform="uppercase" fontWeight="500" lineHeight="1">{uiText("Total")}</Text>
 					<AnimatedUsd value={0} fontSize={`${Math.round(size * 0.10)}px`} color="var(--text-0)" fontWeight="500" lineHeight="1.1" />
 				</Flex>
 			</Box>
@@ -123,9 +127,7 @@ export function DonutChart({ data, size = 210, activeIndex, onHoverSlice, onClic
 					textTransform="uppercase"
 					fontWeight="500"
 					lineHeight="1"
-				>
-					Total
-				</Text>
+				>{uiText("Total")}</Text>
 				<AnimatedUsd
 					value={total}
 					fontSize={`${Math.round(size * 0.10)}px`}
@@ -214,7 +216,7 @@ export function SelectedSlice({ active, total, breakdown, onClick }: SelectedSli
 								onClick={it.onSelect}
 								_hover={it.onSelect ? { opacity: 0.85 } : undefined}
 								transition="opacity 0.15s"
-								title={`${it.label} · $${it.value.toLocaleString("en-US", { maximumFractionDigits: 2 })}`}
+								title={`${it.label} · $${it.value.toLocaleString(getNumberLocale(), { maximumFractionDigits: 2 })}`}
 							/>
 						))}
 					</Flex>
@@ -236,7 +238,7 @@ export function SelectedSlice({ active, total, breakdown, onClick }: SelectedSli
 							>
 								<Box w="8px" h="8px" borderRadius="full" bg={it.color} flexShrink={0} />
 								<Text fontSize="11px" lineHeight="1.2" whiteSpace="nowrap">
-									{it.label} · ${it.value.toLocaleString("en-US", { maximumFractionDigits: 2 })}
+									{it.label} · ${it.value.toLocaleString(getNumberLocale(), { maximumFractionDigits: 2 })}
 								</Text>
 							</Flex>
 						))}

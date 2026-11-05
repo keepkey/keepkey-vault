@@ -159,14 +159,10 @@
 	"approvalWaiting": "Esperando a que se confirme la aprobación…",
 	"approvalWaitingDesc": "Esperando a que la aprobación se mine antes de poder firmar el intercambio.",
 	"balanceChanges": "Cambios de saldo",
-	"blindSignBody": "Los intercambios de Solana usan una transacción versionada que tu KeepKey no puede decodificar por completo, por lo que debe firmarse a ciegas. Esto está desactivado por defecto. Activarlo habilita el Modo Avanzado (firma a ciegas) en tu dispositivo — se te pedirá confirmar el cambio en el dispositivo.",
-	"blindSignCaveat": "La firma a ciegas significa que el dispositivo muestra un aviso genérico en lugar de los detalles decodificados. Procede solo con intercambios que iniciaste aquí. Puedes volver a desactivarlo en Configuración del dispositivo → Política de firma.",
 	"blindSignConfirmOnDevice": "Confirmar en el dispositivo…",
 	"blindSignDeclined": "Rechazado en el dispositivo — no se habilitó la firma a ciegas.",
-	"blindSignEnable": "Habilitar firma a ciegas",
 	"blindSignEnableFailed": "Error al habilitar la firma a ciegas en el dispositivo.",
 	"blindSignHeader": "Firma a ciegas",
-	"blindSignTitle": "Habilitar firma a ciegas para Solana",
 	"block": "Bloque",
 	"cancelSwapDevice": "Cancelar - liberar aviso del dispositivo",
 	"completed": "completado",
@@ -202,5 +198,9 @@
 	"youReceived": "Recibiste",
 	"exceedsSafeMax": "Deja ~{{reserve}} {{symbol}} para comisiones de red — reduce la cantidad o toca MÁX.",
 	"sent": "Enviado",
-	"gas": "Gas"
+	"gas": "Gas",
+	"deviceBlindSignCaveat": "La firma a ciegas permanece activada hasta que el KeepKey se bloquea o se desconecta, para todas las aplicaciones que lo usan, no solo este intercambio. Mientras está activada, esta aplicación también deja de mostrar esta pantalla antes de dichas transacciones. El dispositivo te pide confirmar y volver a introducir tu PIN.",
+	"solanaOutflowDrain": "Advertencia: esto deja tu cartera vacía. No firmes a menos que esa sea tu intención.",
+	"solanaOutflowCaveat": "Simulado con un nodo de Solana desde este ordenador. Tu KeepKey no puede confirmar estas cifras.",
+	"deviceBlindSignEnable": "Activar firma a ciegas"
 }

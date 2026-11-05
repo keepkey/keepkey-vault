@@ -53,5 +53,7 @@
 	"invalidSolanaAddress": "無効なSolanaアドレス — 32-44文字のbase58である必要があります",
 	"invalidTronAddress": "無効なTronアドレス — Tで始まる必要があります（34文字）",
 	"invalidTonAddress": "無効なTONアドレス",
-	"invalidZcashShieldedAddress": "無効なシールドアドレス — u1で始まる必要があります"
+	"invalidZcashShieldedAddress": "無効なシールドアドレス — u1で始まる必要があります",
+	"feeCustom": "カスタム",
+	"invalidAmount": "桁区切りのない小数を入力してください。例：1.5。"
 }

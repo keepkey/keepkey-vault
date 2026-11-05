@@ -1,0 +1,15 @@
+.vault-wallet-scope.vault-asset-page { width: min(960px, 100%); padding: 28px 24px 48px; }
+.vault-wallet-scope .vault-asset-hero { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 12px; padding: 35px 0; }
+.vault-wallet-scope .vault-asset-hero h1 { margin: 0; font-size: 18px; font-weight: 500; }
+.vault-wallet-scope .vault-asset-hero > code { color: var(--text-2); }
+.vault-wallet-scope .vault-asset-balance { margin: 4px 0; font-size: clamp(32px, 5vw, 52px); font-weight: 500; font-variant-numeric: tabular-nums; letter-spacing: -.025em; }
+.vault-wallet-scope .vault-asset-balance span { font-size: .6em; }
+.vault-wallet-scope .vault-asset-hero p { margin: 0; }
+.vault-wallet-scope .vault-asset-toolbar { display: flex; align-items: center; justify-content: center; gap: 14px; }
+.vault-wallet-scope .vault-asset-pills, .vault-wallet-scope .vault-action-pills { padding: 4px; border: 1px solid var(--line); border-radius: 999px; background: rgba(20, 22, 25, .8); }
+.vault-wallet-scope .vault-asset-pills button, .vault-wallet-scope .vault-action-pills button { border-radius: 999px; border-color: transparent; background: transparent; padding: 9px 18px; color: var(--text-2); font-weight: 600; }
+.vault-wallet-scope .vault-asset-pills button[aria-pressed=true] { color: var(--gold); background: rgba(233, 196, 106, .12); }
+.vault-wallet-scope .vault-action-pills button[aria-pressed=true]:first-child { color: var(--teal); background: rgba(139, 227, 196, .14); }
+.vault-wallet-scope .vault-action-pills button[aria-pressed=true]:nth-child(2) { color: #ff9a42; background: rgba(255, 154, 66, .14); }
+.vault-wallet-scope .vault-asset-receive, .vault-wallet-scope .vault-asset-send { border-radius: 20px; background: rgba(16, 18, 22, .8); border-color: var(--line); }
+@media(max-width:600px) { .vault-wallet-scope.vault-asset-page { padding: 20px 14px; } .vault-wallet-scope .vault-asset-toolbar { gap: 10px; } }

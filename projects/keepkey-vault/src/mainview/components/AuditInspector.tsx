@@ -1,3 +1,4 @@
+import { useUiTranslation } from "../i18n/ui"
 /**
  * AuditInspector — raw-path debug panel. Derive any path and read back the
  * device's address + pubkey + xpub + balance (read-only). For power users
@@ -27,6 +28,8 @@ function parsePath(input: string): number[] | null {
 }
 
 function CopyRow({ label, value }: { label: string; value: string | null }) {
+  const uiText = useUiTranslation()
+
   const [copied, setCopied] = useState(false)
   if (!value) return null
   return (
@@ -35,7 +38,7 @@ function CopyRow({ label, value }: { label: string; value: string | null }) {
       <Box as="button" textAlign="right"
         onClick={() => navigator.clipboard.writeText(value).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1200) }).catch(() => {})}
         fontSize="10px" fontFamily="mono" color={copied ? "var(--teal)" : "kk.textSecondary"} truncate maxW="300px" title={value}>
-        {copied ? 'copied ✓' : value}
+        {copied ? uiText("copied ✓") : value}
       </Box>
     </Flex>
   )
@@ -50,6 +53,8 @@ interface AuditInspectorProps {
 }
 
 export function AuditInspector({ chainId, family, defaultPath, scriptType, onOpenUrl }: AuditInspectorProps) {
+  const uiText = useUiTranslation()
+
   const [opened, setOpened] = useState(false)
   const [raw, setRaw] = useState(bip32(defaultPath))
   const [result, setResult] = useState<AuditInspectResult | null>(null)
@@ -67,32 +72,30 @@ export function AuditInspector({ chainId, family, defaultPath, scriptType, onOpe
 
   if (!opened) {
     return (
-      <Box as="button" fontSize="10px" color="kk.textMuted" _hover={{ color: "var(--teal)" }} onClick={() => setOpened(true)}>
-        Path inspector (debug) →
-      </Box>
+      <Box as="button" fontSize="10px" color="kk.textMuted" _hover={{ color: "var(--teal)" }} onClick={() => setOpened(true)}>{uiText("Path inspector (debug) →")}</Box>
     )
   }
 
   return (
     <Box bg="whiteAlpha.50" borderRadius="md" p="3" mt="1">
-      <Text fontSize="11px" color="kk.textMuted" textTransform="uppercase" letterSpacing="0.08em" mb="2">Path inspector</Text>
+      <Text fontSize="11px" color="kk.textMuted" textTransform="uppercase" letterSpacing="0.08em" mb="2">{uiText("Path inspector")}</Text>
       <Flex gap="2">
         <Input size="sm" value={raw} onChange={e => setRaw(e.target.value)} bg="whiteAlpha.50" border="1px solid" borderColor="kk.border" fontFamily="mono" fontSize="xs" />
-        <Button size="sm" bg="var(--teal)" color="black" fontWeight="600" _hover={{ bg: "#22c55e" }} loading={busy} onClick={inspect}>Derive</Button>
+        <Button size="sm" bg="var(--teal)" color="black" fontWeight="600" _hover={{ bg: "#22c55e" }} loading={busy} onClick={inspect}>{uiText("Derive")}</Button>
       </Flex>
       {err && <Text fontSize="xs" color="red.400" mt="1">{err}</Text>}
       {result && (
         <Box mt="2">
           <Flex justify="space-between" align="center" mb="1">
             <Text fontSize="xs" fontWeight="600" color={result.hasBalance ? "var(--teal)" : "kk.textSecondary"}>
-              {result.balanceError ? 'balance unknown' : `${result.native} ${result.symbol}`}
+              {result.balanceError ? uiText("balance unknown") : `${result.native} ${result.symbol}`}
             </Text>
-            {result.explorerUrl && <Box as="button" fontSize="10px" color="var(--teal)" onClick={() => onOpenUrl(result.explorerUrl!)}>explorer ↗</Box>}
+            {result.explorerUrl && <Box as="button" fontSize="10px" color="var(--teal)" onClick={() => onOpenUrl(result.explorerUrl!)}>{uiText("explorer ↗")}</Box>}
           </Flex>
           <Box bg="whiteAlpha.50" borderRadius="sm" p="2">
-            <CopyRow label="address" value={result.address} />
-            <CopyRow label="xpub" value={result.xpub} />
-            <CopyRow label="pubkey" value={result.pubkey} />
+            <CopyRow label={uiText("address")} value={result.address} />
+            <CopyRow label={uiText("xpub")} value={result.xpub} />
+            <CopyRow label={uiText("pubkey")} value={result.pubkey} />
           </Box>
         </Box>
       )}

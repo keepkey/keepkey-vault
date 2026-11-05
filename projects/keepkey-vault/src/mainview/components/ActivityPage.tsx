@@ -1,3 +1,6 @@
+import i18n from '../i18n'
+import { getNumberLocale } from "../lib/number-locale"
+import { useUiTranslation } from "../i18n/ui"
 import { useState, useEffect, useCallback, useMemo, useRef } from "react"
 import { Box, Flex, Text, VStack, HStack, Image, Spinner } from "@chakra-ui/react"
 import { rpcRequest, onRpcMessage } from "../lib/rpc"
@@ -29,7 +32,7 @@ const TYPE_COLORS: Record<string, string> = {
   message: 'var(--violet)',
 }
 
-function bucketByDate(items: ActivityTimelineItem[]): Array<{ label: string; items: ActivityTimelineItem[] }> {
+function bucketByDate(items: ActivityTimelineItem[], language: string): Array<{ label: string; items: ActivityTimelineItem[] }> {
   const today = new Date()
   const yesterday = new Date(today)
   yesterday.setDate(yesterday.getDate() - 1)
@@ -38,10 +41,10 @@ function bucketByDate(items: ActivityTimelineItem[]): Array<{ label: string; ite
   for (const item of items) {
     const d = new Date(item.createdAt)
     let label: string
-    if (d.toDateString() === today.toDateString()) label = 'Today'
-    else if (d.toDateString() === yesterday.toDateString()) label = 'Yesterday'
+    if (d.toDateString() === today.toDateString()) label = new Intl.RelativeTimeFormat(language, { numeric: 'auto' }).format(0, 'day')
+    else if (d.toDateString() === yesterday.toDateString()) label = new Intl.RelativeTimeFormat(language, { numeric: 'auto' }).format(-1, 'day')
     else {
-      label = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+      label = d.toLocaleDateString(getNumberLocale(), { month: 'short', day: 'numeric', year: 'numeric' })
     }
     if (!groups.has(label)) groups.set(label, [])
     groups.get(label)!.push(item)
@@ -82,6 +85,8 @@ function ChainFilterDropdown({
   selected: string
   onSelect: (id: string) => void
 }) {
+  const uiText = useUiTranslation()
+
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
   useEffect(() => {
@@ -125,9 +130,7 @@ function ChainFilterDropdown({
           <>
             <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>
-            </svg>
-            All Networks
-          </>
+            </svg>{uiText("All Networks")}</>
         )}
         <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
           <polyline points="6 9 12 15 18 9" />
@@ -161,7 +164,7 @@ function ChainFilterDropdown({
               <Box w="14px" h="14px" borderRadius="full" bg="var(--ink-4)" display="flex" alignItems="center" justifyContent="center">
                 <Text fontSize="8px" color="var(--text-3)">*</Text>
               </Box>
-              <Text fontSize="11px" fontWeight={!selected ? '600' : '500'} color={!selected ? 'var(--teal)' : 'var(--text-1)'}>All Networks</Text>
+              <Text fontSize="11px" fontWeight={!selected ? '600' : '500'} color={!selected ? 'var(--teal)' : 'var(--text-1)'}>{uiText("All Networks")}</Text>
             </Flex>
             {chains.map(c => (
               <Flex
@@ -185,6 +188,8 @@ function ChainFilterDropdown({
 }
 
 export function ActivityPage({ defaultChainId, onBack, onResumeSwap, watchOnly = false, watchOnlyDeviceId }: ActivityPageProps) {
+  const uiText = useUiTranslation()
+
   // Every activity row (no cap), kept live by the backend's 'activity-changed' push.
   const { activities, loaded, error: historyError, refresh: fetchActivities } = useRecentActivity(watchOnly, watchOnlyDeviceId)
   const [pendingSwaps, setPendingSwaps] = useState<PendingSwap[]>([])
@@ -309,7 +314,7 @@ export function ActivityPage({ defaultChainId, onBack, onResumeSwap, watchOnly =
     return { total, sent, received, swaps }
   }, [activities, pendingSwaps])
 
-  const dateGroups = useMemo(() => bucketByDate(filteredTimeline), [filteredTimeline])
+  const dateGroups = useMemo(() => bucketByDate(filteredTimeline, i18n.resolvedLanguage || 'en'), [filteredTimeline, uiText])
 
   const toggleType = (t: string) => {
     setTypeFilters(prev => {
@@ -399,7 +404,7 @@ export function ActivityPage({ defaultChainId, onBack, onResumeSwap, watchOnly =
                 transition="all 0.18s"
                 flexShrink={0}
                 className="electrobun-webkit-app-region-no-drag"
-                aria-label="Back"
+                aria-label={uiText("Back")}
               >
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M19 12H5M12 19l-7-7 7-7"/>
@@ -410,12 +415,8 @@ export function ActivityPage({ defaultChainId, onBack, onResumeSwap, watchOnly =
               <Text
                 fontWeight="500" fontSize={{ base: "28px", md: "36px" }}
                 letterSpacing="-0.02em" color="var(--text-0)" lineHeight="1"
-              >
-                Activity
-              </Text>
-              <Text fontSize="11px" color="var(--text-3)" mt="1" letterSpacing="0.04em" textTransform="uppercase">
-                Every signature &amp; on-chain move
-              </Text>
+              >{uiText("Activity")}</Text>
+              <Text fontSize="11px" color="var(--text-3)" mt="1" letterSpacing="0.04em" textTransform="uppercase">{uiText("Every signature & on-chain move")}</Text>
             </Box>
           </Flex>
 
@@ -433,9 +434,7 @@ export function ActivityPage({ defaultChainId, onBack, onResumeSwap, watchOnly =
             >
               <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/>
-              </svg>
-              Reports
-            </Box>
+              </svg>{uiText("Reports")}</Box>
             <Box
               as="button"
               onClick={handleRescan}
@@ -453,7 +452,7 @@ export function ActivityPage({ defaultChainId, onBack, onResumeSwap, watchOnly =
               <svg width="11" height="11" viewBox="0 0 16 16" fill="none" style={scanning ? { animation: 'spin 1s linear infinite' } : {}}>
                 <path d="M13.65 2.35A7.96 7.96 0 0 0 8 0C3.58 0 0 3.58 0 8s3.58 8 8 8c3.73 0 6.84-2.55 7.73-6h-2.08A5.99 5.99 0 0 1 8 14 6 6 0 1 1 8 2c1.66 0 3.14.69 4.22 1.78L9 7h7V0l-2.35 2.35z" fill="currentColor" />
               </svg>
-              {scanning ? 'Scanning…' : 'Rescan'}
+              {scanning ? uiText("Scanning…") : uiText("Rescan")}
             </Box>
           </HStack>
         </Flex>
@@ -468,8 +467,7 @@ export function ActivityPage({ defaultChainId, onBack, onResumeSwap, watchOnly =
             <Box w="8px" h="8px" borderRadius="full" bg="var(--gold)" flexShrink={0}
               style={{ animation: 'kkActivityPulse 1.6s ease-in-out infinite' }} />
             <Text fontSize="12px" color="var(--text-0)" fontWeight="600">
-              {pending.length} transaction{pending.length === 1 ? '' : 's'} broadcasting
-            </Text>
+              {pending.length}{" "}{uiText("transaction")}{pending.length === 1 ? '' : 's'}{" "}{uiText("broadcasting")}</Text>
             <Text fontSize="11px" color="var(--text-2)">
               {pending.map(s => `${s.fromSymbol} → ${s.toSymbol}`).join(' · ')}
             </Text>
@@ -490,10 +488,10 @@ export function ActivityPage({ defaultChainId, onBack, onResumeSwap, watchOnly =
 
         {/* Stat cards */}
         <Flex gap="3" mb="5" wrap={{ base: "wrap", md: "nowrap" }}>
-          <StatCard label="Total Events" value={stats.total} sub={loading ? 'Loading…' : undefined} />
-          <StatCard label="Sent" value={stats.sent} sub={stats.sent > 0 ? `${stats.sent} tx${stats.sent > 1 ? 's' : ''}` : 'None'} accent="var(--rose)" />
-          <StatCard label="Received" value={stats.received} sub={stats.received > 0 ? `${stats.received} tx${stats.received > 1 ? 's' : ''}` : 'None'} accent="var(--teal)" />
-          <StatCard label="Swaps" value={stats.swaps} sub={stats.swaps > 0 ? `${stats.swaps} total` : 'None'} accent="var(--gold)" />
+          <StatCard label={uiText("Total Events")} value={stats.total} sub={loading ? 'Loading…' : undefined} />
+          <StatCard label={uiText("Sent")} value={stats.sent} sub={stats.sent > 0 ? `${stats.sent} tx${stats.sent > 1 ? 's' : ''}` : 'None'} accent="var(--rose)" />
+          <StatCard label={uiText("Received")} value={stats.received} sub={stats.received > 0 ? `${stats.received} tx${stats.received > 1 ? 's' : ''}` : 'None'} accent="var(--teal)" />
+          <StatCard label={uiText("Swaps")} value={stats.swaps} sub={stats.swaps > 0 ? `${stats.swaps} total` : 'None'} accent="var(--gold)" />
         </Flex>
 
         {/* Filter toolbar */}
@@ -519,7 +517,7 @@ export function ActivityPage({ defaultChainId, onBack, onResumeSwap, watchOnly =
               color="var(--text-0)"
               fontSize="12px"
               fontFamily="var(--font-mono)"
-              placeholder="Search tx, address, app…"
+              placeholder={uiText("Search tx, address, app…")}
               value={search}
               onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSearch(e.target.value)}
               sx={{ '::placeholder': { color: 'var(--text-3)' } }}
@@ -577,12 +575,12 @@ export function ActivityPage({ defaultChainId, onBack, onResumeSwap, watchOnly =
               <line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/>
               <line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/>
             </svg>
-            {sort === 'recent' ? 'Newest' : 'Oldest'}
+            {sort === 'recent' ? uiText("Newest") : uiText("Oldest")}
           </Box>
 
           {/* Result count */}
           <Text fontSize="11px" color="var(--text-3)" ml="auto" flexShrink={0}>
-            {filteredTimeline.length} of {activities.length + pendingSwaps.filter(s => s.status !== 'completed' && s.status !== 'failed' && s.status !== 'refunded').length}
+            {filteredTimeline.length}{" "}{uiText("of")}{" "}{activities.length + pendingSwaps.filter(s => s.status !== 'completed' && s.status !== 'failed' && s.status !== 'refunded').length}
           </Text>
         </Flex>
 
@@ -590,15 +588,15 @@ export function ActivityPage({ defaultChainId, onBack, onResumeSwap, watchOnly =
         {loading ? (
           <Flex justify="center" align="center" py="16" gap="3">
             <Spinner size="sm" color="var(--gold)" />
-            <Text fontSize="12px" color="var(--text-3)">Loading activity…</Text>
+            <Text fontSize="12px" color="var(--text-3)">{uiText("Loading activity…")}</Text>
           </Flex>
         ) : filteredTimeline.length === 0 ? (
           <Flex direction="column" align="center" justify="center" py="16" gap="3">
             <Text fontSize="24px" opacity={0.3}>⚡</Text>
             <Text fontSize="13px" color="var(--text-3)" textAlign="center">
               {typeFilters.size > 0 || chainFilter || search
-                ? 'No activity matches your filters'
-                : historyError || 'No activity yet — click Rescan to load history.'}
+                ? uiText("No activity matches your filters")
+                : historyError || uiText("No activity yet — click Rescan to load history.")}
             </Text>
             {!chainFilter && !search && typeFilters.size === 0 && (
               <Box
@@ -611,9 +609,7 @@ export function ActivityPage({ defaultChainId, onBack, onResumeSwap, watchOnly =
                 transition="all 0.15s"
                 onClick={handleRescan}
                 className="electrobun-webkit-app-region-no-drag"
-              >
-                Scan all networks
-              </Box>
+              >{uiText("Scan all networks")}</Box>
             )}
           </Flex>
         ) : (

@@ -23,5 +23,7 @@
 	"walletconnectName": "WalletConnect",
 	"walletconnectDescription": "Подключайтесь к любому dApp, совместимому с WalletConnect",
 	"internal": "Открыть",
-	"open": "Открыть"
+	"open": "Открыть",
+	"safeName": "Safe{Wallet}",
+	"safeDescription": "Общие мультиподписные счета в EVM-сетях. Подключите KeepKey как владельца. Чтобы увидеть свои Safe и проверить ожидающие транзакции в Desktop, откройте «Мультиподпись» на EVM-активе."
 }

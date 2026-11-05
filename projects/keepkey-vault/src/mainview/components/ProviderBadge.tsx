@@ -1,3 +1,4 @@
+import { useUiTranslation } from "../i18n/ui"
 // Single source of truth for "what swap provider is this and how do we show it?"
 //
 // Resolves a swapper/integration string to a (icon, label) pair and renders it
@@ -110,6 +111,8 @@ export function ProviderBadge({
   variant = "detailed",
   showVia = true,
 }: ProviderBadgeProps) {
+  const uiText = useUiTranslation()
+
   // Native vault routes (mayachain, thorchain) ARE the swapper — there is no
   // underlying executor to discover. Pioneer historically wrote
   // swapper='thorchain' even on Maya pools (Maya forks Thor's protocol naming),
@@ -154,8 +157,7 @@ export function ProviderBadge({
             {primary.label}
           </Text>
           {showIntegrationSuffix && (
-            <Text fontSize="10px" color="kk.textMuted" lineHeight="1.2">
-              via {integrationInfo!.label}
+            <Text fontSize="10px" color="kk.textMuted" lineHeight="1.2">{uiText("via")}{" "}{integrationInfo!.label}
             </Text>
           )}
         </Box>
@@ -171,7 +173,7 @@ export function ProviderBadge({
         {primary.label}
       </Text>
       {showIntegrationSuffix && (
-        <Text fontSize="10px" color="kk.textMuted">via {integrationInfo!.label}</Text>
+        <Text fontSize="10px" color="kk.textMuted">{uiText("via")}{" "}{integrationInfo!.label}</Text>
       )}
     </HStack>
   )

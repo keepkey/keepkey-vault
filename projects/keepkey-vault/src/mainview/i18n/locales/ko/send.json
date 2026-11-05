@@ -53,5 +53,7 @@
 	"invalidSolanaAddress": "유효하지 않은 Solana 주소 — 32-44자의 base58이어야 합니다",
 	"invalidTronAddress": "유효하지 않은 Tron 주소 — T로 시작해야 합니다 (34자)",
 	"invalidTonAddress": "유효하지 않은 TON 주소",
-	"invalidZcashShieldedAddress": "유효하지 않은 보호 주소 — u1로 시작해야 합니다"
+	"invalidZcashShieldedAddress": "유효하지 않은 보호 주소 — u1로 시작해야 합니다",
+	"feeCustom": "사용자 지정",
+	"invalidAmount": "천 단위 구분 기호 없이 소수 금액을 입력하세요. 예: 1.5."
 }

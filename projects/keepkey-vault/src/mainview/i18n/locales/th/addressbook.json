@@ -41,5 +41,9 @@
 	"openAddressBook": "สมุดที่อยู่",
 	"saveRecipientPrompt": "บันทึกผู้รับนี้ไหม?",
 	"contactSaved": "บันทึกผู้ติดต่อแล้ว",
-	"saveContactFailed": "ไม่สามารถบันทึกผู้ติดต่อได้"
+	"saveContactFailed": "ไม่สามารถบันทึกผู้ติดต่อได้",
+	"cosigner": "ผู้ร่วมลงนาม",
+	"cosignerOption": "ผู้ร่วมลงนาม Safe: แสดงเป็นตัวเลือกแรกเมื่อสร้างมัลติซิก",
+	"markCosigner": "ทำเครื่องหมายเป็นผู้ร่วมลงนาม Safe",
+	"notCosigner": "ไม่ใช่ผู้ร่วมลงนาม"
 }

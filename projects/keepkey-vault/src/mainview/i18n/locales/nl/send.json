@@ -53,5 +53,7 @@
 	"invalidSolanaAddress": "Ongeldig Solana-adres — moet 32-44 base58-tekens zijn",
 	"invalidTronAddress": "Ongeldig Tron-adres — moet beginnen met T (34 tekens)",
 	"invalidTonAddress": "Ongeldig TON-adres",
-	"invalidZcashShieldedAddress": "Ongeldig beschermd adres — moet beginnen met u1"
+	"invalidZcashShieldedAddress": "Ongeldig beschermd adres — moet beginnen met u1",
+	"feeCustom": "Aangepast",
+	"invalidAmount": "Voer een decimaal bedrag in zonder scheidingstekens voor duizendtallen, bijvoorbeeld 1,5."
 }

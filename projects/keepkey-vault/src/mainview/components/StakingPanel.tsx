@@ -1,3 +1,5 @@
+import { normalizeAmountInput } from '../../shared/locale'
+import { useUiTranslation } from "../i18n/ui"
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { Box, Button, Flex, HStack, IconButton, Input, Spinner, Text, VStack, Badge } from "@chakra-ui/react"
 import { FaCoins, FaExternalLinkAlt, FaMinus, FaPlus, FaSyncAlt, FaCopy, FaCheck } from "react-icons/fa"
@@ -54,8 +56,10 @@ interface DelegateDialogProps {
 }
 
 function DelegateDialog({ isOpen, onClose, chain, availableBalance, rewardAmount, rewardUsd, onSuccess, watchOnly }: DelegateDialogProps) {
+  const uiText = useUiTranslation()
+
 	const { t } = useTranslation("staking")
-	const { fmtCompact } = useFiat()
+	const { fmtCompact, locale } = useFiat()
 	const [validatorAddress, setValidatorAddress] = useState("")
 	const [amount, setAmount] = useState("")
 	const [isMax, setIsMax] = useState(false)
@@ -91,10 +95,12 @@ function DelegateDialog({ isOpen, onClose, chain, availableBalance, rewardAmount
 		setSignTimeout(null)
 	}, [isOpen])
 
+	const canonicalAmount = normalizeAmountInput(amount, locale)
+	const numericAmount = canonicalAmount === null ? NaN : Number(canonicalAmount)
 	const canBuild = isValidValidator && (
 		isMax
 			? parseFloat(availableBalance) > 0
-			: !!amount && parseFloat(amount) > 0 && parseFloat(amount) <= parseFloat(availableBalance)
+			: Number.isFinite(numericAmount) && numericAmount > 0 && numericAmount <= Number(availableBalance)
 	)
 
 	const handleBuild = useCallback(async () => {
@@ -105,7 +111,7 @@ function DelegateDialog({ isOpen, onClose, chain, availableBalance, rewardAmount
 			const result = await rpcRequest<BuildTxResult>('buildDelegateTx', {
 				chainId: chain.id,
 				validatorAddress: validatorAddress.trim(),
-				amount: isMax ? '0' : amount,
+				amount: isMax ? '0' : canonicalAmount!,
 				memo: memo || undefined,
 				isMax,
 			}, 60000)
@@ -115,7 +121,7 @@ function DelegateDialog({ isOpen, onClose, chain, availableBalance, rewardAmount
 			setError(e.message || t('failedToBuildDelegation'))
 		}
 		setLoading(false)
-	}, [canBuild, watchOnly, chain.id, validatorAddress, amount, isMax, memo, t])
+	}, [canBuild, watchOnly, chain.id, validatorAddress, canonicalAmount, isMax, memo, t])
 
 	const handleSign = useCallback(async () => {
 		if (!buildResult || watchOnly) return
@@ -233,9 +239,7 @@ function DelegateDialog({ isOpen, onClose, chain, availableBalance, rewardAmount
 											h="auto"
 											_hover={{ color: "kk.gold" }}
 											onClick={() => setValidatorAddress("osmovaloper1q5xvvmf03dx8amz66ku6z0x4u39f0aphqf42wc")}
-										>
-											osmovaloper1q5xvvmf03dx8amz66ku6z0x4u39f0aphqf42wc (Meria)
-										</Button>
+										>{uiText("osmovaloper1q5xvvmf03dx8amz66ku6z0x4u39f0aphqf42wc (Meria)")}</Button>
 										<Button
 											size="xs"
 											variant="ghost"
@@ -246,9 +250,7 @@ function DelegateDialog({ isOpen, onClose, chain, availableBalance, rewardAmount
 											h="auto"
 											_hover={{ color: "kk.gold" }}
 											onClick={() => setValidatorAddress("osmovaloper1pxphtfhqnx9ny27d53z4052e3r76e7qq495ehm")}
-										>
-											osmovaloper1pxphtfhqnx9ny27d53z4052e3r76e7qq495ehm (AutoStake)
-										</Button>
+										>{uiText("osmovaloper1pxphtfhqnx9ny27d53z4052e3r76e7qq495ehm (AutoStake)")}</Button>
 									</VStack>
 								)}
 								{chain.id === "cosmos" && (
@@ -263,9 +265,7 @@ function DelegateDialog({ isOpen, onClose, chain, availableBalance, rewardAmount
 											h="auto"
 											_hover={{ color: "kk.gold" }}
 											onClick={() => setValidatorAddress("cosmosvaloper1sjllsnramtg3ewxqwwrwjxfgc4n4ef9u2lcnj0")}
-										>
-											cosmosvaloper1sjllsnramtg3ewxqwwrwjxfgc4n4ef9u2lcnj0 (Stake.fish)
-										</Button>
+										>{uiText("cosmosvaloper1sjllsnramtg3ewxqwwrwjxfgc4n4ef9u2lcnj0 (Stake.fish)")}</Button>
 										<Button
 											size="xs"
 											variant="ghost"
@@ -276,9 +276,7 @@ function DelegateDialog({ isOpen, onClose, chain, availableBalance, rewardAmount
 											h="auto"
 											_hover={{ color: "kk.gold" }}
 											onClick={() => setValidatorAddress("cosmosvaloper14lultfckehtszvzw4ehu0apvsr77afvyju5zzy")}
-										>
-											cosmosvaloper14lultfckehtszvzw4ehu0apvsr77afvyju5zzy (DokiaCapital)
-										</Button>
+										>{uiText("cosmosvaloper14lultfckehtszvzw4ehu0apvsr77afvyju5zzy (DokiaCapital)")}</Button>
 									</VStack>
 								)}
 								<Button
@@ -309,10 +307,12 @@ function DelegateDialog({ isOpen, onClose, chain, availableBalance, rewardAmount
 							<HStack>
 								<Input
 									placeholder="0.00"
+                  inputMode="decimal"
+                  aria-invalid={amount !== "" && canonicalAmount === null || undefined}
 									value={isMax ? 'MAX' : amount}
 									disabled={isMax}
 									onChange={(e) => {
-										const sanitized = e.target.value.replace(/[^0-9.]/g, '').replace(/(\..*)\./g, '$1')
+										const sanitized = normalizeAmountInput(e.target.value, locale) ?? e.target.value
 										setIsMax(false)
 										setAmount(sanitized)
 									}}
@@ -476,6 +476,7 @@ interface UndelegateDialogProps {
 }
 
 function UndelegateDialog({ isOpen, onClose, chain, delegations, onSuccess, watchOnly }: UndelegateDialogProps) {
+  const { locale } = useFiat()
 	const { t } = useTranslation("staking")
 	const [selected, setSelected] = useState("")
 	const [amount, setAmount] = useState("")
@@ -510,7 +511,9 @@ function UndelegateDialog({ isOpen, onClose, chain, delegations, onSuccess, watc
 		setSignTimeout(null)
 	}, [isOpen])
 
-	const canBuild = selectedPosition && amount && parseFloat(amount) > 0 && parseFloat(amount) <= parseFloat(selectedPosition.balance || '0')
+	const canonicalAmount = normalizeAmountInput(amount, locale)
+	const numericAmount = canonicalAmount === null ? NaN : Number(canonicalAmount)
+	const canBuild = selectedPosition && Number.isFinite(numericAmount) && numericAmount > 0 && numericAmount <= Number(selectedPosition.balance || '0')
 
 	const handleBuild = useCallback(async () => {
 		if (!canBuild || watchOnly || !selectedPosition) return
@@ -520,7 +523,7 @@ function UndelegateDialog({ isOpen, onClose, chain, delegations, onSuccess, watc
 			const result = await rpcRequest<BuildTxResult>('buildUndelegateTx', {
 				chainId: chain.id,
 				validatorAddress: selectedPosition.validatorAddress || selected,
-				amount,
+				amount: canonicalAmount!,
 				memo: memo || undefined,
 			}, 60000)
 			setBuildResult(result)
@@ -529,7 +532,7 @@ function UndelegateDialog({ isOpen, onClose, chain, delegations, onSuccess, watc
 			setError(e.message || t('failedToBuildUndelegation'))
 		}
 		setLoading(false)
-	}, [canBuild, watchOnly, chain.id, selectedPosition, selected, amount, memo, t])
+	}, [canBuild, watchOnly, chain.id, selectedPosition, selected, canonicalAmount, memo, t])
 
 	const handleSign = useCallback(async () => {
 		if (!buildResult || watchOnly) return
@@ -641,9 +644,11 @@ function UndelegateDialog({ isOpen, onClose, chain, delegations, onSuccess, watc
 								<HStack>
 									<Input
 										placeholder="0.00"
+                  inputMode="decimal"
+                  aria-invalid={amount !== "" && canonicalAmount === null || undefined}
 										value={amount}
 										onChange={(e) => {
-											const sanitized = e.target.value.replace(/[^0-9.]/g, '').replace(/(\..*)\./g, '$1')
+											const sanitized = normalizeAmountInput(e.target.value, locale) ?? e.target.value
 											setAmount(sanitized)
 										}}
 										bg="kk.bg"

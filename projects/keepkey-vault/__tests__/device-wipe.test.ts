@@ -227,6 +227,13 @@ describe('REST writes to the device (device-gate.ts)', () => {
     expect(restWriteRefusal({ ...free, wipeOnReconnect: true }, T.MESSAGETYPE_GETADDRESS, asRest)?.status).toBe(409)
   })
 
+  test("while Desktop holds the device, every new REST request is refused; Desktop's own calls and replies pass", () => {
+    const held = { ...free, exclusive: 'creating a Safe' }
+    expect(restWriteRefusal(held, T.MESSAGETYPE_ETHEREUMSIGNTX, asRest)).toEqual({ status: 409, message: 'KeepKey is busy: creating a Safe. Try again when it finishes.' })
+    expect(restWriteRefusal(held, T.MESSAGETYPE_ETHEREUMSIGNTX, undefined)).toBeNull()
+    expect(restWriteRefusal(held, T.MESSAGETYPE_BUTTONACK, asRest)).toBeNull()
+  })
+
   /** Takes writes, answers each with an empty Features once released. */
   function quietKeepKey() {
     const written: number[] = []
@@ -348,7 +355,7 @@ describe('wiring', () => {
   })
 
   test('a PIN request on the deferring connection drops the deferred wipe (needs a new click)', () => {
-    const listener = engine.slice(engine.indexOf('transport.on(String(core.Events.PIN_REQUEST)'), engine.indexOf("this.emit('pin-request'"))
+    const listener = engine.slice(engine.indexOf('transport.on(String(Messages.MessageType.MESSAGETYPE_PINMATRIXREQUEST)'), engine.indexOf("this.emit('pin-request'"))
     expect(listener).toContain('this.wipeOnReconnect = null')
   })
 
@@ -375,7 +382,7 @@ describe('wiring', () => {
     expect(engine).toContain('await restRequest.exit(() => wipeOwningDevice(')
     expect(engine).toContain('gateRestWrites(transport, () => ({')
     // A PIN prompt the device raises on its own (auto-lock) hands the unlock to Desktop.
-    const listener = engine.slice(engine.indexOf('transport.on(String(core.Events.PIN_REQUEST)'), engine.indexOf("this.emit('pin-request'"))
+    const listener = engine.slice(engine.indexOf('transport.on(String(Messages.MessageType.MESSAGETYPE_PINMATRIXREQUEST)'), engine.indexOf("this.emit('pin-request'"))
     expect(listener).toContain("if (this.lastState === 'ready' && !this.setupInProgress && !this.verifyInProgress) this.updateState('needs_pin')")
   })
 
@@ -385,7 +392,7 @@ describe('wiring', () => {
   })
 
   test("the PIN pad is live only while the device asks for the PIN, not during its countdown (hardware test 2026-10-24)", () => {
-    const listener = engine.slice(engine.indexOf('transport.on(String(core.Events.PIN_REQUEST)'), engine.indexOf("this.emit('pin-request'") + 40)
+    const listener = engine.slice(engine.indexOf('transport.on(String(Messages.MessageType.MESSAGETYPE_PINMATRIXREQUEST)'), engine.indexOf("this.emit('pin-request'") + 40)
     expect(listener).toContain('this.setPinPromptOpen(true)')
     const failures = engine.slice(engine.indexOf('transport.on(core.Events.FAILURE'), engine.indexOf('transport.on(core.Events.FAILURE') + 500)
     expect(failures).toContain('this.setPinPromptOpen(false)')

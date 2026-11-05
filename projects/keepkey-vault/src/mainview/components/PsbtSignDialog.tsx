@@ -1,3 +1,5 @@
+import { getNumberLocale } from "../lib/number-locale"
+import { useUiTranslation } from "../i18n/ui"
 import {useBtcMultisigEnabled} from "../hooks/useBtcMultisigEnabled"
 import { useState, useEffect, useCallback, useRef } from "react"
 import { Box, Flex, Text, Button, Spinner, Textarea } from "@chakra-ui/react"
@@ -29,7 +31,7 @@ export function toBase64(bytes: Uint8Array): string {
 /** Exact: "12,345 sats (0.00012345 BTC)". Amounts arrive as decimal strings. */
 function sats(v: string): string {
 	const n = BigInt(v)
-	return `${n.toLocaleString()} sats (${n / 100000000n}.${(n % 100000000n).toString().padStart(8, "0")} BTC)`
+	return `${n.toLocaleString(getNumberLocale())} sats (${n / 100000000n}.${(n % 100000000n).toString().padStart(8, "0")} BTC)`
 }
 
 function Mono({ children, color = "kk.textPrimary" }: { children: React.ReactNode; color?: string }) {
@@ -55,8 +57,11 @@ const card = { bg: "rgba(255,255,255,0.03)", borderRadius: "lg", border: "1px so
  * an explicit Sign click. No network: works online and offline.
  */
 export function PsbtSignDialog() {
+  const uiText = useUiTranslation()
+
 	const multisigEnabled=useBtcMultisigEnabled()
 	const [phase, setPhase] = useState<Phase>("idle")
+	const expectedVaultPolicy = useRef<string | undefined>(undefined)
 	const [name, setName] = useState("")
 	const [review, setReview] = useState<Review | null>(null)
 	const [signed, setSigned] = useState<BtcPsbtSigned | null>(null)
@@ -77,7 +82,7 @@ export function PsbtSignDialog() {
 		setSigned(null)
 		try {
 			if (bytes.length > MAX_PSBT_BYTES) throw new Error("PSBT is larger than 1 MB, refusing")
-			const result = await rpcRequest<BtcPsbtReview>("btcPsbtAnalyze", { data: toBase64(bytes), name: fileName }, 60000)
+			const result = await rpcRequest<BtcPsbtReview>("btcPsbtAnalyze", { data: toBase64(bytes), name: fileName, expectedVaultPolicyId: expectedVaultPolicy.current }, 60000)
 			if (result.kind === "signed") {
 				// Already signed: nothing to sign, so review it for broadcast instead.
 				window.dispatchEvent(new CustomEvent(BTC_BROADCAST_EVENT, { detail: new File([new Uint8Array(bytes)], fileName) }))
@@ -109,8 +114,11 @@ export function PsbtSignDialog() {
 			}
 			await analyze(new Uint8Array(await file.arrayBuffer()), file.name)
 		}
-		const onPaste = () => {
+		const onPaste = (event: Event) => {
 			if (busy()) return
+			const policyId = (event as CustomEvent<{ vaultPolicyId?: string }>).detail?.vaultPolicyId
+			if (typeof policyId === 'string') expectedVaultPolicy.current = policyId
+			else if (phaseRef.current === 'idle') expectedVaultPolicy.current = undefined
 			setReview(null)
 			setSigned(null)
 			setError(null)
@@ -151,6 +159,7 @@ export function PsbtSignDialog() {
 	}, [signed])
 
 	const handleDismiss = useCallback(() => {
+		expectedVaultPolicy.current = undefined
 		pendingInput.current=null
 		setPhase("idle")
 		setReview(null)
@@ -187,41 +196,38 @@ export function PsbtSignDialog() {
 				position="fixed" top="50%" left="50%" transform="translate(-50%, -50%)"
 				w="560px" maxW="92vw" maxH="88vh" overflowY="auto"
 				bg="kk.bg" border="1px solid" borderColor="kk.border" borderRadius="xl"
-				zIndex={Z.dialog + 1} role="dialog" aria-modal="true" aria-label="Sign Bitcoin PSBT"
+				zIndex={Z.dialog + 1} role="dialog" aria-modal="true" aria-label={uiText("Sign Bitcoin PSBT")}
 			>
 				<Box p="6">
-					<Text fontSize="lg" fontWeight="700" color="kk.textPrimary">Sign Bitcoin PSBT</Text>
-					<Text fontSize="xs" color="kk.textSecondary" mb="4">Bitcoin mainnet{name ? ` · ${name}` : ""}</Text>
+					<Text fontSize="lg" fontWeight="700" color="kk.textPrimary">{uiText("Sign Bitcoin PSBT")}</Text>
+					<Text fontSize="xs" color="kk.textSecondary" mb="4">{uiText("Bitcoin mainnet")}{name ? ` · ${name}` : ""}</Text>
 
 					{phase === "analyzing" && (
 						<Flex align="center" gap="2" py="6" justify="center">
 							<Spinner size="sm" color="kk.gold" />
-							<Text fontSize="sm" color="kk.textSecondary">Checking the PSBT against this wallet...</Text>
+							<Text fontSize="sm" color="kk.textSecondary">{uiText("Checking the PSBT against this wallet...")}</Text>
 						</Flex>
 					)}
 
-					{phase === "policy" && <Flex direction="column" gap="3"><Text fontSize="sm">{error}</Text><Button {...plainButton} onClick={()=>window.dispatchEvent(new Event(MULTISIG_POLICY_EVENT))}>Import and verify multisig policy</Button><Button {...plainButton} onClick={handleDismiss}>Close</Button></Flex>}
+					{phase === "policy" && <Flex direction="column" gap="3"><Text fontSize="sm">{error}</Text><Button {...plainButton} onClick={()=>window.dispatchEvent(new Event(MULTISIG_POLICY_EVENT))}>{uiText("Import and verify multisig policy")}</Button><Button {...plainButton} onClick={handleDismiss}>{uiText("Close")}</Button></Flex>}
 
 					{phase === "paste" && (
 						<>
-							<Text fontSize="sm" color="kk.textSecondary" mb="2">Paste a PSBT (base64 or hex), or drop the file on this window:</Text>
-							<Textarea value={pasted} onChange={(e) => setPasted(e.target.value)} rows={6} fontFamily="mono" fontSize="xs" mb="3" placeholder="cHNidP8..." />
+							<Text fontSize="sm" color="kk.textSecondary" mb="2">{uiText("Paste a PSBT (base64 or hex), or drop the file on this window:")}</Text>
+							<Textarea value={pasted} onChange={(e) => setPasted(e.target.value)} rows={6} fontFamily="mono" fontSize="xs" mb="3" placeholder={uiText("cHNidP8...")} />
 							<Flex gap="2" justify="flex-end">
-								<Button {...plainButton} onClick={handleDismiss}>Cancel</Button>
-								{multisigEnabled && <Button {...plainButton} onClick={()=>window.dispatchEvent(new Event(MULTISIG_POLICY_EVENT))}>Multisig setup</Button>}
-								<Button {...plainButton} onClick={() => { handleDismiss(); window.dispatchEvent(new Event(BITCOIN_QR_SCAN_EVENT)) }}>Scan QR</Button>
-								<Button {...goldButton} disabled={!pasted.trim()} onClick={() => void analyze(new TextEncoder().encode(pasted), "pasted")}>Check</Button>
+								<Button {...plainButton} onClick={handleDismiss}>{uiText("Cancel")}</Button>
+								{multisigEnabled && <Button {...plainButton} onClick={()=>window.dispatchEvent(new Event(MULTISIG_POLICY_EVENT))}>{uiText("Multisig setup")}</Button>}
+								<Button {...plainButton} onClick={() => { handleDismiss(); window.dispatchEvent(new Event(BITCOIN_QR_SCAN_EVENT)) }}>{uiText("Scan QR")}</Button>
+								<Button {...goldButton} disabled={!pasted.trim()} onClick={() => void analyze(new TextEncoder().encode(pasted), "pasted")}>{uiText("Check")}</Button>
 							</Flex>
 						</>
 					)}
 
 					{(phase === "review" || phase === "signing") && review && (
 						<Flex direction="column" gap="3">
-							<Text fontSize="xs" color="kk.textSecondary">
-								KeepKey communicates with this computer over USB. For offline signing, disconnect the computer from the network.
-								Removable media and transaction parsers remain attack surfaces. This review does not establish whether the inputs are still unspent.
-							</Text>
-							{review.multisig && <Box {...card}><Text fontSize="sm" fontWeight="600">{review.multisig.threshold} of {review.multisig.cosigners} multisig · KeepKey {review.multisig.fingerprint}</Text><Text fontSize="xs">Verified signatures per input: {review.multisig.signedCounts.join(", ")}. Desktop adds this KeepKey’s signature; return the PSBT to your coordinator.</Text></Box>}
+							<Text fontSize="xs" color="kk.textSecondary">{uiText("KeepKey communicates with this computer over USB. For offline signing, disconnect the computer from the network. Removable media and transaction parsers remain attack surfaces. This review does not establish whether the inputs are still unspent.")}</Text>
+							{review.multisig && <Box {...card}><Text fontSize="sm" fontWeight="600">{review.multisig.threshold}{" "}{uiText("of")}{" "}{review.multisig.cosigners}{" "}{uiText("multisig · KeepKey")}{" "}{review.multisig.fingerprint}</Text><Text fontSize="xs">{uiText("Verified signatures per input:")}{" "}{review.multisig.signedCounts.join(", ")}{uiText(". Desktop adds this KeepKey’s signature; return the PSBT to your coordinator.")}</Text></Box>}
 							{warnings.length > 0 && (
 								<Box {...card} borderColor="rgba(233,196,106,0.4)" bg="rgba(233,196,106,0.06)">
 									{warnings.map((w) => <Text key={w} fontSize="xs" color="var(--gold)">{w}</Text>)}
@@ -229,13 +235,13 @@ export function PsbtSignDialog() {
 							)}
 
 							<Box {...card}>
-								<Text fontSize="xs" fontWeight="700" color="kk.textSecondary" mb="2">FROM ({review.inputs.length})</Text>
+								<Text fontSize="xs" fontWeight="700" color="kk.textSecondary" mb="2">{uiText("FROM (")}{review.inputs.length})</Text>
 								{review.inputs.map((x) => (
 									<Box key={`${x.txid}:${x.vout}`} mb="2">
 										<Mono>{x.address}</Mono>
 										<Flex justify="space-between" align="center" gap="2" mt="0.5">
 											<Text fontSize="xs" color="kk.textSecondary">{x.path} · {x.scriptType}</Text>
-											<Badge ok={x.amountVerified}>{x.amountVerified ? "amount verified" : "amount not verified"}</Badge>
+											<Badge ok={x.amountVerified}>{x.amountVerified ? uiText("amount verified") : uiText("amount not verified")}</Badge>
 										</Flex>
 										<Text fontSize="xs" color="kk.textPrimary">{sats(x.amount)}</Text>
 									</Box>
@@ -243,7 +249,7 @@ export function PsbtSignDialog() {
 							</Box>
 
 							<Box {...card}>
-								<Text fontSize="xs" fontWeight="700" color="kk.textSecondary" mb="2">TO ({review.outputs.length})</Text>
+								<Text fontSize="xs" fontWeight="700" color="kk.textSecondary" mb="2">{uiText("TO (")}{review.outputs.length})</Text>
 								{review.outputs.map((o) => (
 									<Box key={o.index} mb="2">
 										{o.opReturn ? (
@@ -258,9 +264,9 @@ export function PsbtSignDialog() {
 											<Text fontSize="xs" color="kk.textPrimary">{sats(o.amount)}</Text>
 											<Badge ok={o.deviceWillShow !== "address" || o.kind === "payment"}>
 												{o.deviceWillShow === "hidden-change" ? `change, hidden on KeepKey · ${o.path}`
-													: o.deviceWillShow === "op-return" ? "KeepKey shows the data"
+													: o.deviceWillShow === "op-return" ? uiText("KeepKey shows the data")
 													: o.kind === "own" ? `yours (${o.path}) · KeepKey shows address`
-													: "KeepKey shows address"}
+													: uiText("KeepKey shows address")}
 											</Badge>
 										</Flex>
 									</Box>
@@ -268,30 +274,28 @@ export function PsbtSignDialog() {
 							</Box>
 
 							<Box {...card}>
-								<Flex justify="space-between"><Text fontSize="xs" color="kk.textSecondary">Sent (excluding change)</Text><Text fontSize="xs" color="kk.textPrimary">{sats(review.sent)}</Text></Flex>
-								<Flex justify="space-between"><Text fontSize="xs" color="kk.textSecondary">Fee</Text><Text fontSize="xs" color="kk.textPrimary">{sats(review.fee)}</Text></Flex>
+								<Flex justify="space-between"><Text fontSize="xs" color="kk.textSecondary">{uiText("Sent (excluding change)")}</Text><Text fontSize="xs" color="kk.textPrimary">{sats(review.sent)}</Text></Flex>
+								<Flex justify="space-between"><Text fontSize="xs" color="kk.textSecondary">{uiText("Fee")}</Text><Text fontSize="xs" color="kk.textPrimary">{sats(review.fee)}</Text></Flex>
 								<Flex justify="space-between">
-									<Text fontSize="xs" color="kk.textSecondary">Fee rate</Text>
-									<Text fontSize="xs" color="kk.textPrimary">~{review.satPerVbyte} sat/vB (est. {review.estVsize} vB){review.feePercent !== null ? ` · ${review.feePercent}% of sent` : ""}</Text>
+									<Text fontSize="xs" color="kk.textSecondary">{uiText("Fee rate")}</Text>
+									<Text fontSize="xs" color="kk.textPrimary">~{review.satPerVbyte}{" "}{uiText("sat/vB (est.")}{" "}{review.estVsize}{" "}{uiText("vB)")}{review.feePercent !== null ? ` · ${review.feePercent}% of sent` : ""}</Text>
 								</Flex>
 								<Flex justify="space-between" mt="1">
-									<Text fontSize="xs" color="kk.textSecondary">KeepKey "total" screen (sent + fee)</Text>
+									<Text fontSize="xs" color="kk.textSecondary">{uiText("KeepKey \"total\" screen (sent + fee)")}</Text>
 									<Text fontSize="xs" fontWeight="700" color="kk.gold">{sats(review.deviceTotal)}</Text>
 								</Flex>
-								<Text fontSize="xs" color="kk.textSecondary" mt="2">
-									Version {review.version} · Locktime {review.locktime} · {review.flags.rbf ? "Replaceable (RBF)" : "Not replaceable"} — not shown on the KeepKey
-								</Text>
+								<Text fontSize="xs" color="kk.textSecondary" mt="2">{uiText("Version")}{" "}{review.version}{" "}{uiText("· Locktime")}{" "}{review.locktime} · {review.flags.rbf ? uiText("Replaceable (RBF)") : uiText("Not replaceable")}{" "}{uiText("— not shown on the KeepKey")}</Text>
 							</Box>
 
 							{phase === "signing" ? (
 								<Flex align="center" gap="2" justify="center" py="2">
 									<Spinner size="sm" color="kk.gold" />
-									<Text fontSize="sm" color="kk.textPrimary">Confirm each recipient, then the total and fee, on your KeepKey.</Text>
+									<Text fontSize="sm" color="kk.textPrimary">{uiText("Confirm each recipient, then the total and fee, on your KeepKey.")}</Text>
 								</Flex>
 							) : (
 								<Flex gap="2" justify="flex-end">
-									<Button {...plainButton} onClick={handleDismiss}>Cancel</Button>
-									<Button {...goldButton} onClick={handleSign}>Sign with KeepKey</Button>
+									<Button {...plainButton} onClick={handleDismiss}>{uiText("Cancel")}</Button>
+									<Button {...goldButton} onClick={handleSign}>{uiText("Sign with KeepKey")}</Button>
 								</Flex>
 							)}
 						</Flex>
@@ -300,32 +304,32 @@ export function PsbtSignDialog() {
 					{phase === "done" && signed && (
 						<Flex direction="column" gap="3">
 							<Text fontSize="sm" fontWeight="600" color="var(--teal-2)">
-								{signed.complete ? (signed.threshold ? "Signed. Quorum reached; return the PSBT to your coordinator or broadcast the completed transaction." : "Signed. Load the file back into your wallet, or broadcast the raw transaction.") : "KeepKey’s signature added. More signatures are needed. Return this PSBT to Sparrow or Electrum."}
+								{signed.complete ? (signed.threshold ? "Signed. Quorum reached; return the PSBT to your coordinator or broadcast the completed transaction." : "Signed. Load the file back into your wallet, or broadcast the raw transaction.") : uiText("KeepKey’s signature added. More signatures are needed. Return this PSBT to Sparrow or Electrum.")}
 							</Text>
 							<Box {...card}>
 								<Box mb="2">
-									<Text fontSize="xs" color="kk.textSecondary">Saved to</Text>
+									<Text fontSize="xs" color="kk.textSecondary">{uiText("Saved to")}</Text>
 									<Mono>{signed.filePath}</Mono>
 								</Box>
-								{signed.txid && <><Text fontSize="xs" color="kk.textSecondary">Transaction ID</Text><Mono>{signed.txid}</Mono></>}
+								{signed.txid && <><Text fontSize="xs" color="kk.textSecondary">{uiText("Transaction ID")}</Text><Mono>{signed.txid}</Mono></>}
 							</Box>
 							<Flex gap="2" justify="flex-end" wrap="wrap">
-								<Button {...plainButton} onClick={() => setShowQr("psbt")}>Signed PSBT QR</Button>
-								{signed.txHex && <Button {...plainButton} onClick={() => setShowQr("transaction")}>Raw transaction QR</Button>}
-								<Button {...plainButton} onClick={() => void rpcRequest("btcPsbtShowFile")}>Show in Finder</Button>
-								{signed.txHex && <Button {...plainButton} onClick={handleCopy}>{copied ? "Copied" : "Copy raw hex"}</Button>}
-								<Button {...goldButton} onClick={handleDismiss}>Done</Button>
+								<Button {...plainButton} onClick={() => setShowQr("psbt")}>{uiText("Signed PSBT QR")}</Button>
+								{signed.txHex && <Button {...plainButton} onClick={() => setShowQr("transaction")}>{uiText("Raw transaction QR")}</Button>}
+								<Button {...plainButton} onClick={() => void rpcRequest("btcPsbtShowFile")}>{uiText("Show in Finder")}</Button>
+								{signed.txHex && <Button {...plainButton} onClick={handleCopy}>{copied ? uiText("Copied") : uiText("Copy raw hex")}</Button>}
+								<Button {...goldButton} onClick={handleDismiss}>{uiText("Done")}</Button>
 							</Flex>
 						</Flex>
 					)}
 
 					{phase === "error" && (
 						<Flex direction="column" gap="3">
-							<Text fontSize="sm" color="var(--rose)">{error || "Unknown error"}</Text>
+							<Text fontSize="sm" color="var(--rose)">{error || uiText("Unknown error")}</Text>
 							<Flex gap="2" justify="flex-end">
-								{review && <Button {...plainButton} onClick={() => setPhase("review")}>Back to review</Button>}
-								<Button {...plainButton} onClick={() => { setReview(null); setPhase("paste") }}>Paste a PSBT</Button>
-								<Button {...goldButton} onClick={handleDismiss}>Close</Button>
+								{review && <Button {...plainButton} onClick={() => setPhase("review")}>{uiText("Back to review")}</Button>}
+								<Button {...plainButton} onClick={() => { setReview(null); setPhase("paste") }}>{uiText("Paste a PSBT")}</Button>
+								<Button {...goldButton} onClick={handleDismiss}>{uiText("Close")}</Button>
 							</Flex>
 						</Flex>
 					)}

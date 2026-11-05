@@ -23,5 +23,7 @@
 	"walletconnectName": "WalletConnect",
 	"walletconnectDescription": "WalletConnect対応のあらゆるdAppに接続",
 	"internal": "開く",
-	"open": "開く"
+	"open": "開く",
+	"safeName": "Safe{Wallet}",
+	"safeDescription": "EVMチェーン上の共有マルチシグアカウント。KeepKeyをオーナーとして接続します。DesktopでSafeを確認し保留中のトランザクションをチェックするには、EVMアセットでマルチシグを開いてください。"
 }

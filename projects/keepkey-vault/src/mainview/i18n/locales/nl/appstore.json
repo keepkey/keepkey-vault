@@ -23,5 +23,7 @@
 	"walletconnectName": "WalletConnect",
 	"walletconnectDescription": "Verbind met elke WalletConnect-compatibele applicatie",
 	"internal": "Openen",
-	"open": "Openen"
+	"open": "Openen",
+	"safeName": "Safe{Wallet}",
+	"safeDescription": "Gedeelde multisigaccounts op EVM-chains. Verbind je KeepKey als eigenaar. Open Multisig bij een EVM-asset om je Safes te zien en openstaande transacties in Desktop te controleren."
 }

@@ -1,3 +1,4 @@
+import { useUiTranslation } from "../../i18n/ui"
 import type { DeviceState } from './types';
 import kkGif from '../../assets/swap/kk.gif';
 
@@ -27,6 +28,8 @@ export function KeepKeyDevice({
 	state = 'idle',
 	size = 32,
 }: KeepKeyDeviceProps) {
+  const uiText = useUiTranslation()
+
 	const isInteractive = state === 'signing' || state === 'active';
 
 	if (isInteractive) {
@@ -56,7 +59,7 @@ export function KeepKeyDevice({
 			>
 				<img
 					src={kkGif}
-					alt="KeepKey device"
+					alt={uiText("KeepKey device")}
 					style={{
 						width: '100%',
 						height: '100%',

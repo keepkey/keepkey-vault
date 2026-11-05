@@ -23,6 +23,13 @@
 	"incomingTx": {
 		"onChain": "{{chain}} · 残高を更新中",
 		"refreshing": "残高を更新中",
-		"title": "入金"
-	}
+		"title": "入金",
+		"activityOnChain": "{{chain}} · 残高を更新しました"
+	},
+	"language": "言語",
+	"currency": "通貨",
+	"numberFormat": "数値の形式",
+	"usdValues": "金額はUSDで表示されます。地域の数値形式は以下で変更できます。",
+	"somethingWentWrong": "エラーが発生しました",
+	"reload": "再読み込み"
 }

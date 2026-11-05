@@ -41,5 +41,9 @@
 	"openAddressBook": "Rubrica",
 	"saveRecipientPrompt": "Salvare questo destinatario?",
 	"contactSaved": "Contatto salvato",
-	"saveContactFailed": "Impossibile salvare il contatto"
+	"saveContactFailed": "Impossibile salvare il contatto",
+	"cosigner": "Cofirmatario",
+	"cosignerOption": "Cofirmatario Safe: proporlo per primo quando si crea una multifirma",
+	"markCosigner": "Segna come cofirmatario Safe",
+	"notCosigner": "Non è cofirmatario"
 }

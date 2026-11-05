@@ -49,5 +49,9 @@
 	"notNow": "Not now",
 	"saving": "Saving…",
 	"savedToBook": "Saved to Address Book",
-	"addedOn": "Added {{date}}"
+	"addedOn": "Added {{date}}",
+	"cosignerOption": "Safe co-signer: offer it first when creating a multisig",
+	"cosigner": "Co-signer",
+	"notCosigner": "Not a co-signer",
+	"markCosigner": "Mark as Safe co-signer"
 }

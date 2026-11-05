@@ -1,6 +1,8 @@
 import { createContext, useContext, useState, useCallback, useEffect } from "react"
 import type { FiatCurrency, AppSettings } from "../../shared/types"
-import { formatFiat, formatFiatCompact, getFiatConfig } from "../../shared/fiat"
+import { formatFiat, formatFiatCompact, getFiatConfig, fiatDisplayCurrency } from "../../shared/fiat"
+import { validNumberLocale } from "../../shared/locale"
+import { setNumberLocale } from "./number-locale"
 import { rpcRequest } from "./rpc"
 
 interface FiatContextValue {
@@ -41,12 +43,12 @@ export function useFiat() {
 export function FiatProvider({ children }: { children: React.ReactNode }) {
   const [currency, setCurrencyState] = useState<FiatCurrency>(() => {
     try {
-      return (localStorage.getItem('keepkey-vault-fiat') as FiatCurrency) || 'USD'
+      return fiatDisplayCurrency(localStorage.getItem('keepkey-vault-fiat') as FiatCurrency)
     } catch { return 'USD' }
   })
   const [locale, setLocaleState] = useState(() => {
     try {
-      return localStorage.getItem('keepkey-vault-locale') || 'en-US'
+      return validNumberLocale(localStorage.getItem('keepkey-vault-locale'))
     } catch { return 'en-US' }
   })
   const [privateModeEnabled, setPrivateModeState] = useState(() => {
@@ -59,14 +61,19 @@ export function FiatProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     rpcRequest<AppSettings>('getAppSettings')
       .then(s => {
-        if (s.fiatCurrency) setCurrencyState(s.fiatCurrency)
-        if (s.numberLocale) setLocaleState(s.numberLocale)
+        if (s.fiatCurrency) setCurrencyState(fiatDisplayCurrency(s.fiatCurrency))
+        if (s.numberLocale) {
+          const nextLocale = validNumberLocale(s.numberLocale)
+          setNumberLocale(nextLocale)
+          setLocaleState(nextLocale)
+        }
         setPrivateModeState(!!s.privateModeEnabled)
       })
       .catch(() => {})
   }, [])
 
   const setCurrency = useCallback((c: FiatCurrency) => {
+    c = fiatDisplayCurrency(c)
     setCurrencyState(c)
     try { localStorage.setItem('keepkey-vault-fiat', c) } catch {}
     // Persist to backend
@@ -74,6 +81,8 @@ export function FiatProvider({ children }: { children: React.ReactNode }) {
   }, [])
 
   const setLocale = useCallback((l: string) => {
+    l = validNumberLocale(l)
+    setNumberLocale(l)
     setLocaleState(l)
     try { localStorage.setItem('keepkey-vault-locale', l) } catch {}
     rpcRequest('setNumberLocale', { locale: l }).catch(() => {})

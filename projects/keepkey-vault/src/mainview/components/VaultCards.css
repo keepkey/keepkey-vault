@@ -1,0 +1,94 @@
+.vault-tile-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 7px;
+  border: 1px solid color-mix(in srgb, var(--vault-link) 35%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--vault-link) 10%, transparent);
+  color: var(--vault-link);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.vault-link-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--vault-link);
+  flex-shrink: 0;
+}
+.vault-tile-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--ink-4);
+  background: var(--ink-2);
+}
+.vault-tile-network {
+  margin-bottom: 5px;
+}
+.vault-tile-network svg {
+  width: 15px;
+  height: 17px;
+}
+.vault-tile-address {
+  font-size: 10px;
+  color: var(--text-2);
+  margin-bottom: 9px;
+}
+.vault-wallet-links,
+.vault-tile-cosigners {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 10px;
+}
+.vault-link-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  color: var(--text-2);
+  font-size: 9px;
+  line-height: 1.4;
+  padding: 3px 6px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: transparent;
+  overflow-wrap: anywhere;
+}
+button.vault-link-chip {
+  cursor: pointer;
+}
+button.vault-link-chip:hover {
+  border-color: var(--vault-link);
+  color: var(--text-0);
+}
+button.vault-link-chip:focus-visible {
+  outline: 2px solid var(--vault-link);
+  outline-offset: 2px;
+}
+.vault-tile-muted {
+  color: var(--text-3);
+  font-size: 9px;
+}
+.vault-tile-warning {
+  font-size: 10px;
+  color: var(--gold);
+  line-height: 1.5;
+  margin-bottom: 8px;
+}
+.wallet-tile-identity {
+  min-width: 0;
+}
+.vault-tile-balance { display: flex; flex-direction: column; gap: 4px; margin: 9px 0; }
+.vault-tile-balance > span { color: var(--text-3); font-size: 9px; letter-spacing: .08em; }
+.vault-tile-balance > strong { color: var(--text-0); font-size: 20px; font-weight: 500; font-variant-numeric: tabular-nums; }
+.vault-total-toggle { display: flex; align-items: center; gap: 6px; margin-bottom: 10px; font-size: 10px; color: var(--text-2); cursor: pointer; }
+.vault-total-toggle input { accent-color: var(--gold); width: 14px; height: 14px; }

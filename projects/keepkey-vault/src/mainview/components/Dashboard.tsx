@@ -1,3 +1,5 @@
+import { getNumberLocale } from "../lib/number-locale"
+import { useUiTranslation } from "../i18n/ui"
 import { Component, Fragment, lazy, Suspense, useState, useEffect, useCallback, useMemo, useRef, type ReactNode, type ErrorInfo } from "react"
 import { Box, Flex, Text, Spinner, Image, Button } from "@chakra-ui/react"
 import { useTranslation } from "react-i18next"
@@ -40,6 +42,12 @@ import { DOCS_LINKS, watch } from "../../shared/docs-links"
 import { categorizeTokens } from "../../shared/spamFilter"
 import { useBtcAccounts } from "../hooks/useBtcAccounts"
 import { useEvmAddresses } from "../hooks/useEvmAddresses"
+import { useVaultPortfolios } from "../hooks/useVaultPortfolios"
+import { VaultPortfolioRows } from "./VaultPortfolioRows"
+import { VaultIdentityBadge, VaultIdentityDetails } from "./VaultIdentityBadge"
+import type { VaultIdentity } from "../../shared/vault-identity"
+import { assertVaultPortfolioResponse, vaultPortfolioAccountKey } from "../../shared/vault-portfolio"
+import { vaultLinkColor } from "../../shared/vault-wallet-links"
 import type { ChainBalance, CustomChain, TokenVisibilityStatus, AppSettings, TokenBalance, PendingSwap, SwapStatusUpdate, AuditPortfolioSnapshot } from "../../shared/types"
 import {
 	beginSwapBalanceReconciliation,
@@ -196,6 +204,8 @@ function OrbitalView({
 	onSelect: (c: ChainDef) => void
 	privateModeEnabled: boolean
 }) {
+  const uiText = useUiTranslation()
+
 	const [hover, setHover] = useState<string | null>(null)
 	const [size, setSize] = useState(540)
 
@@ -255,9 +265,7 @@ function OrbitalView({
 					textTransform="uppercase"
 					mb="2"
 					fontWeight="500"
-				>
-					Total
-				</Text>
+				>{uiText("Total")}</Text>
 				<Flex align="baseline" justify="center" gap="0">
 					{privateModeEnabled ? (
 						<Text
@@ -278,7 +286,7 @@ function OrbitalView({
 								letterSpacing="-0.04em"
 								lineHeight="1"
 							>
-								{partial ? '≥ ' : ''}${totalDollars.toLocaleString()}
+								{partial ? '≥ ' : ''}${totalDollars.toLocaleString(getNumberLocale())}
 							</Text>
 							<Text
 								fontSize={{ base: "20px", md: "24px" }}
@@ -392,7 +400,7 @@ function OrbitalView({
 									{chain.coin}
 								</Text>
 								<Text fontSize="11px" fontFamily="mono" color="var(--text-2)" textAlign="center">
-									${usd.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+									${usd.toLocaleString(getNumberLocale(), { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
 									{totalUsd > 0 && ` · ${pct.toFixed(1)}%`}
 								</Text>
 							</Box>
@@ -484,7 +492,7 @@ function TokenSatellite({
 						{tok.symbol}
 					</Text>
 					<Text fontSize="11px" color="var(--text-2)" textAlign="center">
-						{formatBalance(tok.balance)} · ${usd.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+						{formatBalance(tok.balance)} · ${usd.toLocaleString(getNumberLocale(), { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
 					</Text>
 				</Box>
 			)}
@@ -521,6 +529,8 @@ function ChainDetailOrbital({
 	onSelectChain: () => void
 	onSelectToken: (tok: import("../../shared/types").TokenBalance) => void
 }) {
+  const uiText = useUiTranslation()
+
 	const [hover, setHover] = useState<string | null>(null)
 	const [size, setSize] = useState(380)
 
@@ -621,15 +631,14 @@ function ChainDetailOrbital({
 				</Text>
 				{(nativeBalanceUsd + shielded.usd) > 0 && (
 					<Text fontSize="13px" color="var(--text-2)" fontWeight="400">
-						≈ ${(nativeBalanceUsd + shielded.usd).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+						≈ ${(nativeBalanceUsd + shielded.usd).toLocaleString(getNumberLocale(), { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
 					</Text>
 				)}
 				{(shielded.amount > 0 || shielded.pending > 0) && (
 					<Flex align="center" justify="center" gap="1" mt="0.5">
 						<ShieldGlyph size={11} />
 						<Text fontSize="12px" color="var(--gold)" fontWeight="500">
-							{formatBalance(String(shielded.amount))} shielded · {formatBalance(nativeBal)} transparent
-							{shielded.pending > 0 && ` · ${formatBalance(String(shielded.pending))} pending`}
+							{formatBalance(String(shielded.amount))}{" "}{uiText("shielded ·")}{" "}{formatBalance(nativeBal)}{" "}{uiText("transparent")}{shielded.pending > 0 && ` · ${formatBalance(String(shielded.pending))} pending`}
 						</Text>
 					</Flex>
 				)}
@@ -682,6 +691,8 @@ interface PortfolioFault {
 }
 
 interface DashboardProps {
+	vault?: VaultIdentity
+	onOpenVault?: (vault: VaultIdentity) => void
 	onLoaded?: () => void
 	watchOnly?: boolean
 	/** When in watchOnly mode, load cached data for this specific device (defaults to latest) */
@@ -715,7 +726,121 @@ function formatTimeAgo(ts: number, t: (key: string, opts?: Record<string, unknow
 	return t('timeDaysAgo', { count: days })
 }
 
-export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettings, firmwareVersion, firmwareVariant, forceRefresh, onForceRefreshConsumed, isHiddenWallet, knownEmpty }: DashboardProps) {
+/** Dispatch before mounting personal-wallet hooks: a vault must never derive
+ * addresses or borrow the connected owner's spendable balance. */
+export function Dashboard(props: DashboardProps) {
+	return props.vault
+		? <VaultPortfolioDashboard key={props.vault.id} {...props} vault={props.vault} />
+		: <PersonalDashboard {...props} />
+}
+
+function VaultPortfolioDashboard({ vault, onLoaded, watchOnly, firmwareVersion }: DashboardProps & { vault: VaultIdentity }) {
+	const uiText = useUiTranslation()
+	const { fmt, privateModeEnabled } = useFiat()
+	const { portfolios, loading, error, reload, setIncluded } = useVaultPortfolios({ bitcoinOnly: vault.type === 'bitcoin-multisig' })
+	const [selection, setSelection] = useState<{ action?: 'receive' | 'send'; token?: TokenBalance }>()
+	const [preferenceError, setPreferenceError] = useState('')
+	const [savingPreference, setSavingPreference] = useState(false)
+	const chain = CHAINS.find(c => c.id === vault.chainId && c.networkId === vault.networkId)
+	const candidate = portfolios.find(p => p.identity.id === vault.id)
+	let portfolio = candidate
+	let validationError = ''
+	if (candidate) {
+		try { assertVaultPortfolioResponse(vault, candidate) }
+		catch (err) { portfolio = undefined; validationError = err instanceof Error ? err.message : String(err) }
+	}
+	const identity = portfolio?.identity ?? vault
+	const balance = portfolio?.balance
+	const tokens = balance?.tokens ?? []
+	const color = vaultLinkColor(vault.id)
+	const loaded = useRef(false)
+	useEffect(() => {
+		if (!loading && !loaded.current) { loaded.current = true; onLoaded?.() }
+	}, [loading, onLoaded])
+	const changeInclusion = async (include: boolean) => {
+		setSavingPreference(true)
+		setPreferenceError('')
+		try { await setIncluded(vault.id, include) }
+		catch (err) { setPreferenceError(err instanceof Error ? err.message : String(err)) }
+		finally { setSavingPreference(false) }
+	}
+	if (!chain) return <Text role="alert" color="var(--rose)">{uiText('Vault network is unavailable')}</Text>
+	if (selection) return <AssetPageErrorBoundary onBack={() => setSelection(undefined)} chainName={chain.coin}>
+		<AssetPage key={`${vault.id}:${selection.token?.caip ?? chain.caip}`} chain={chain} vault={identity}
+			balance={balance} onBack={() => setSelection(undefined)} initialAction={selection.action}
+			initialToken={selection.token} firmwareVersion={firmwareVersion} watchOnly={watchOnly} />
+	</AssetPageErrorBoundary>
+	const openAsset = (token?: TokenBalance, action?: 'receive' | 'send') => setSelection({ token, action })
+	const failure = validationError || error || portfolio?.error
+	return <Flex w="100%" pt="2" align="stretch" gap={{ base: 3, md: 5 }} px={{ base: 0, md: 3 }} minH="100%" flexWrap={{ base: 'wrap', md: 'nowrap' }}>
+		<style>{DASHBOARD_ANIMATIONS}</style>
+		<Box w={{ base: '100%', md: '280px' }} flexShrink="0">
+			<Box p="4" borderRadius="xl" bg="kk.cardBg" border="1px solid" borderColor="kk.border" borderTop={`3px solid ${color}`}>
+				<Text fontSize="10px" color={color} letterSpacing="0.14em" textTransform="uppercase">{uiText('Shared vault')}</Text>
+				<Text fontSize="19px" fontWeight="600" color="var(--text-0)" mt="1">{identity.name}</Text>
+				<Text fontSize="25px" color="var(--text-0)" mt="3">
+					{privateModeEnabled ? '••••' : portfolio?.totalUsd === undefined ? '—' : fmt(portfolio.totalUsd)}
+				</Text>
+				<Flex align="center" gap="2" mt="4" p="2" borderRadius="md" bg="var(--ink-2)">
+					<Image src={getAssetIcon(chain.caip)} alt={chain.symbol} boxSize="28px" borderRadius="full" />
+					<Box><Text fontSize="13px" fontWeight="600">{chain.coin}</Text><Text fontSize="10px" color="var(--text-2)">{uiText('Only enabled network')}</Text></Box>
+				</Flex>
+				<Text fontSize="10px" color="var(--text-2)" mt="2" overflowWrap="anywhere">{identity.networkId}</Text>
+				<Box mt="4">
+					<label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: 'var(--text-1)', cursor: 'pointer' }}>
+						<input type="checkbox" checked={portfolio?.includeInTotal ?? true} disabled={!portfolio || savingPreference}
+							onChange={event => { void changeInclusion(event.target.checked) }} style={{ accentColor: color }} />
+						{uiText('Include in portfolio total')}
+					</label>
+					<Text fontSize="10px" color="var(--text-3)" mt="2">{uiText('Includes the full shared balance, not an ownership share.')}</Text>
+					{preferenceError && <Text role="alert" fontSize="11px" color="var(--rose)" mt="2">{preferenceError}</Text>}
+				</Box>
+			</Box>
+		</Box>
+		<Box flex="1" minW="0" pb="6">
+			<Flex align="center" justify="space-between" gap="3" mb="2">
+				<VaultIdentityBadge vault={identity} />
+				<Button size="xs" variant="ghost" color="var(--gold)" disabled={loading} onClick={() => { void reload(true) }}>
+					{loading ? <Spinner size="xs" /> : '↻'} {uiText('Refresh balances')}
+				</Button>
+			</Flex>
+			{failure && <Text role="alert" fontSize="12px" color="var(--gold)" mb="2">{failure}</Text>}
+			{loading && !balance ? <Flex justify="center" align="center" minH="300px"><Spinner color="kk.gold" /></Flex>
+				: <ChainDetailOrbital chain={chain} balance={privateModeEnabled ? undefined : balance} nativeBalanceUsd={privateModeEnabled ? 0 : balance?.nativeBalanceUsd ?? 0}
+					cleanTokens={privateModeEnabled ? [] : tokens} onSelectChain={() => openAsset()} onSelectToken={token => openAsset(token)} />}
+			<Flex justify="center" mb="5" gap="1" p="1" w="fit-content" mx="auto" borderRadius="full" bg="var(--ink-2)" border="1px solid var(--line)">
+				<Button borderRadius="full" bg="rgba(74,222,128,0.12)" color="#4ade80" onClick={() => openAsset(undefined, 'receive')}>↓ {uiText('Receive')}</Button>
+				{!watchOnly && <Button borderRadius="full" bg="rgba(251,146,60,0.12)" color="#fb923c" disabled={!balance || !!validationError}
+					onClick={() => openAsset(undefined, 'send')}>↑ {uiText('Send')}</Button>}
+			</Flex>
+			<Text fontSize="10px" color="var(--text-3)" letterSpacing="0.2em" textTransform="uppercase" mb="2">{uiText('Assets')}</Text>
+			{identity.supportedAssets.map(asset => {
+				const native = asset.caip.toLowerCase() === chain.caip.toLowerCase()
+				const token = native ? undefined : tokens.find(t => t.caip.toLowerCase() === asset.caip.toLowerCase())
+				const amount = native ? balance?.balance : token?.balance
+				const usd = native ? balance?.nativeBalanceUsd : token?.balanceUsd
+				return <Flex key={asset.caip} asChild align="center" gap="3" w="100%" textAlign="left" p="3" mb="1" borderRadius="lg"
+					bg="transparent" border="0" _hover={{ bg: 'kk.cardBg' }} cursor={native || token ? 'pointer' : 'default'}>
+					<button type="button" disabled={!native && !token} onClick={() => openAsset(token)}>
+					<AssetIcon caip={asset.caip} iconUrl={token?.icon} chainCaip={chain.caip} alt={asset.symbol} size={32} />
+					<Box flex="1" minW="0"><Text fontSize="14px" fontWeight="600">{asset.symbol}</Text><Text fontSize="11px" color="var(--text-2)">{chain.coin}</Text></Box>
+					<Box textAlign="right"><Text fontSize="14px">{privateModeEnabled ? '••••' : amount === undefined ? '—' : formatBalance(amount)}</Text>
+						<Text fontSize="11px" color="var(--text-2)">{privateModeEnabled ? '••••' : usd === undefined || balance?.fiatValueState === 'unavailable' ? '—' : fmt(usd)}</Text></Box>
+					</button>
+				</Flex>
+			})}
+			<details style={{ borderTop: '1px solid var(--line)', marginTop: 20, paddingTop: 16, color: 'var(--text-2)', fontSize: 12 }}>
+				<summary style={{ cursor: 'pointer' }}>{identity.threshold} {uiText('of')} {identity.cosigners.length} · {uiText('Cosigners & account details')}</summary>
+				<Box mt="4"><VaultIdentityDetails vault={identity} compact showCertification={false} /></Box>
+			</details>
+		</Box>
+	</Flex>
+}
+
+function PersonalDashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettings, firmwareVersion, firmwareVariant, forceRefresh, onForceRefreshConsumed, isHiddenWallet, knownEmpty, onOpenVault }: DashboardProps) {
+  const uiText = useUiTranslation()
+	const { portfolios: vaultPortfolios, loading: vaultsLoading, error: vaultsError, reload: reloadVaultPortfolios, setIncluded: setVaultIncluded } = useVaultPortfolios({ bitcoinOnly: isBitcoinOnlyVariant(firmwareVariant) })
+
 	const { t } = useTranslation("dashboard")
 	const [selectedChain, setSelectedChain] = useState<ChainDef | null>(null)
 	const [selectedChainAction, setSelectedChainAction] = useState<"send" | "receive" | "swap" | "privacy" | undefined>(undefined)
@@ -1150,6 +1275,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 	// swapDestCaips: CAIP-19 ids of just-received swap outputs — forwarded so the
 	// backend can verify token balances directly while portfolio indexers catch up.
 	const refreshBalances = useCallback(async (forceRefresh = false, swapDestCaips: string[] = []) => {
+		if (forceRefresh) void reloadVaultPortfolios(true)
 		// Watch-only: no device, so re-fetch from Pioneer using cached addresses.
 		if (watchOnly) {
 			if (loadingBalancesRef.current) return
@@ -1246,7 +1372,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 			loadingBalancesRef.current = false
 			setLoadingBalances(false)
 		}
-	}, [watchOnly, watchOnlyDeviceId, clearPioneerError, stagePioneerError, commitBalanceReconciliations])
+	}, [watchOnly, watchOnlyDeviceId, clearPioneerError, stagePioneerError, commitBalanceReconciliations, reloadVaultPortfolios])
 
 	// Phase 2 trigger — window focus: catch long idle periods. If the last live
 	// fetch is older than 5 min, force-refresh on return to the window.
@@ -1513,8 +1639,25 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 				result.set(chainId, { usd: bal.balanceUsd || 0, cleanTokenCount: 0 })
 			}
 		}
+		// Shared accounts affect portfolio valuation only. They never replace an
+		// owner's native/token balances used to prepare a transaction.
+		const seen = new Set<string>()
+		for (const portfolio of vaultPortfolios) {
+			const vault = portfolio.identity
+			const key = vaultPortfolioAccountKey(vault)
+			if (seen.has(key)) continue
+			seen.add(key)
+			if (!portfolio.includeInTotal || disabledNetworks.includes(vault.chainId)) continue
+			const chain = CHAINS.find(c => c.id === vault.chainId && c.networkId === vault.networkId)
+			if (!chain || (isBitcoinOnlyVariant(firmwareVariant) && chain.id !== 'bitcoin')) continue
+			const walletAddress = balances.get(chain.id)?.address
+			if (walletAddress && walletAddress.toLowerCase() === vault.address.toLowerCase()) continue
+			if (portfolio.totalUsd === undefined || !Number.isFinite(portfolio.totalUsd)) continue
+			const existing = result.get(chain.id) ?? { usd: 0, cleanTokenCount: 0 }
+			result.set(chain.id, { ...existing, usd: existing.usd + portfolio.totalUsd })
+		}
 		return result
-	}, [balances, visibilityMap, hiveEnabled, disabledNetworks])
+	}, [balances, visibilityMap, hiveEnabled, disabledNetworks, vaultPortfolios, firmwareVariant])
 
 	const totalUsd = useMemo(() => Array.from(cleanBalanceUsd.values()).reduce((sum, b) => sum + b.usd, 0), [cleanBalanceUsd])
 
@@ -1657,6 +1800,18 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 				value: p.balanceUsd ?? 0,
 				onSelect: () => openChainPage(chain),
 			}))
+		if (!drilledChainId) {
+			const seen = new Set<string>()
+			for (const portfolio of vaultPortfolios) {
+				const vault = portfolio.identity
+				const key = vaultPortfolioAccountKey(vault)
+				if (seen.has(key) || !portfolio.includeInTotal || vault.networkId !== chain.networkId || vault.chainId !== chain.id) continue
+				seen.add(key)
+				if (balances.get(chain.id)?.address.toLowerCase() === vault.address.toLowerCase()) continue
+				if (portfolio.totalUsd === undefined || portfolio.totalUsd <= 0) continue
+				arr.push({ id: vault.id, label: vault.name, color: vaultLinkColor(vault.id), value: portfolio.totalUsd, onSelect: () => onOpenVault?.(vault) })
+			}
+		}
 		return arr
 	}
 
@@ -1732,12 +1887,13 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 		loadingBalances,
 		initialLoaded,
 	}))
-	const anyChainPending = sidebarChainStates.includes('pending')
+	const anyChainPending = sidebarChainStates.includes('pending') || (vaultsLoading && vaultPortfolios.length === 0)
 	// An unknown row contributes 0 to totalUsd, so the sum is a floor, not a
 	// total — showing it bare would reassert the same confident zero the rows
 	// below just stopped claiming. It can't spin like `pending` does: a chain
 	// the backend keeps failing would spin forever. Mark it instead.
-	const anyChainUnknown = sidebarChainStates.includes('unknown')
+	const anyChainUnknown = sidebarChainStates.includes('unknown') || !!vaultsError || vaultPortfolios.some(p =>
+		p.includeInTotal && !disabledNetworks.includes(p.identity.chainId) && p.totalUsd === undefined)
 
 	// Is data stale? (loaded from cache but haven't refreshed yet this session)
 	const isStale = !hasEverRefreshed && !loadingBalances
@@ -1870,11 +2026,11 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 								</svg>
 							</Box>
 							<Box flex="1" minW="0">
-								<Text fontSize="14px" fontWeight="600" color="var(--text-0)" lineHeight="1.2">All Chains</Text>
+								<Text fontSize="14px" fontWeight="600" color="var(--text-0)" lineHeight="1.2">{uiText("All Chains")}</Text>
 								{anyChainPending && knownEmpty ? (
 									<Flex align="center" gap="1.5">
 										<Text fontSize="14px" color="var(--text-1)" fontWeight="500" lineHeight="1.3">{privateModeEnabled ? "••••••" : "$0"}</Text>
-										<Spinner size="xs" color="kk.gold" opacity={0.6} title="New wallet — confirming it is empty" />
+										<Spinner size="xs" color="kk.gold" opacity={0.6} title={uiText("New wallet — confirming it is empty")} />
 									</Flex>
 								) : anyChainPending ? (
 									<Spinner size="xs" color="kk.gold" mt="1" />
@@ -1889,7 +2045,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 									>
 										{privateModeEnabled
 											? "••••••"
-											: `${anyChainUnknown ? '≥ ' : ''}$${totalUsd.toLocaleString('en-US', { maximumFractionDigits: 2 })}`}
+											: `${anyChainUnknown ? '≥ ' : ''}$${totalUsd.toLocaleString(getNumberLocale(), { maximumFractionDigits: 2 })}`}
 									</Text>
 								)}
 							</Box>
@@ -1924,7 +2080,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 						// (TRC-20 needs TRX, ERC-20 needs ETH, SPL needs SOL, …).
 						// Shielded funds pay their own fees, so they're never stranded.
 						const nativeUsd = bal?.nativeBalanceUsd ?? 0
-						const lowGas = nativeUsd < 1 && (usdNum - nativeUsd - shielded.usd) > 1
+						const lowGas = nativeUsd < 1 && ((bal?.balanceUsd ?? 0) - nativeUsd - shielded.usd) > 1
 						const isActive = drilledChainId === chain.id
 						// Per-account (BIP44) sub-rows: BTC accountIndex or EVM addressIndex.
 						// Only chains that have multiple funded accounts/addresses get a drop-down.
@@ -1994,7 +2150,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 											</Text>
 											{usdNum > 0 && (
 												<Text fontSize="14px" color="var(--text-0)" fontWeight="500" lineHeight="1.2" letterSpacing="-0.01em" flexShrink={0}>
-													{privateModeEnabled ? "••••" : `$${usdNum.toLocaleString('en-US', { maximumFractionDigits: 2 })}`}
+													{privateModeEnabled ? "••••" : `$${usdNum.toLocaleString(getNumberLocale(), { maximumFractionDigits: 2 })}`}
 												</Text>
 											)}
 										</Flex>
@@ -2030,7 +2186,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 													<svg width="10" height="10" viewBox="0 0 24 24" fill="#E53E3E" xmlns="http://www.w3.org/2000/svg">
 														<path d="M3 22V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v9h1a3 3 0 0 1 3 3v3a1 1 0 0 0 2 0v-7.5l-2.4-2.4a1 1 0 0 1 1.4-1.4l3.3 3.3c.2.2.3.4.3.7V19a3 3 0 0 1-6 0v-3a1 1 0 0 0-1-1h-1v7H3zM7 6h4v5H7V6z"/>
 													</svg>
-													<Text as="span" fontSize="8px" fontWeight="700" color="#E53E3E" lineHeight="1">LOW GAS</Text>
+													<Text as="span" fontSize="8px" fontWeight="700" color="#E53E3E" lineHeight="1">{uiText("LOW GAS")}</Text>
 												</Flex>
 											)}
 											{tokenCount > 0 && (
@@ -2043,8 +2199,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 											<Flex align="center" gap="1" mt="0.5">
 												<ShieldGlyph />
 												<Text fontSize="10px" color="var(--text-2)" lineHeight="1">
-													{privateModeEnabled ? "••••" : formatBalance(String(shielded.amount))} shielded
-												</Text>
+													{privateModeEnabled ? "••••" : formatBalance(String(shielded.amount))}{" "}{uiText("shielded")}</Text>
 											</Flex>
 										)}
 									</Box>
@@ -2081,8 +2236,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 												textAlign="left"
 											>
 												<Box minW="0" flex="1">
-													<Text fontSize="11px" color={acc.isSelected ? "var(--text-0)" : "var(--text-1)"} fontWeight={acc.isSelected ? "600" : "500"} lineHeight="1.2">
-														Account #{acc.index}
+													<Text fontSize="11px" color={acc.isSelected ? "var(--text-0)" : "var(--text-1)"} fontWeight={acc.isSelected ? "600" : "500"} lineHeight="1.2">{uiText("Account #")}{acc.index}
 													</Text>
 													{snippet && (
 														<Text fontSize="9px" color="var(--text-2)" lineHeight="1.2" fontFamily="mono" mt="0.5">
@@ -2092,7 +2246,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 												</Box>
 												<Box textAlign="right" flexShrink={0}>
 													<Text fontSize="11px" color="var(--text-0)" fontWeight={acc.isSelected ? "600" : "500"} lineHeight="1.2">
-														{privateModeEnabled ? "••••" : `$${acc.balanceUsd.toLocaleString('en-US', { maximumFractionDigits: 2 })}`}
+														{privateModeEnabled ? "••••" : `$${acc.balanceUsd.toLocaleString(getNumberLocale(), { maximumFractionDigits: 2 })}`}
 													</Text>
 													<Text fontSize="9px" color="var(--text-2)" lineHeight="1.2" mt="0.5">
 														{formatBalance(String(acc.balance))} {chain.symbol}
@@ -2179,15 +2333,13 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 						transition="all 0.2s"
 						_hover={{ color: "white", bg: "rgba(233,196,106,0.12)" }}
 						onClick={() => setShowAudit(true)}
-						title="Audit balances — find funds on alternate paths, higher accounts, or chains that didn't report"
+						title={uiText("Audit balances — find funds on alternate paths, higher accounts, or chains that didn't report")}
 					>
 						<Flex align="center" gap="1.5">
 							<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
 								<circle cx="11" cy="11" r="7" />
 								<path d="M21 21l-4.35-4.35" />
-							</svg>
-							Audit
-						</Flex>
+							</svg>{uiText("Audit")}</Flex>
 					</Box>}
 					<Box
 						as="button"
@@ -2266,9 +2418,8 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 
 			{/* Watch-only banner */}
 			{watchOnly && balances.get('bitcoin')?.fiatValueState && (
-				<Text fontSize="xs" color="var(--gold)" mb="3" role="status">
-					Bitcoin balance refreshed from your node. {balances.get('bitcoin')?.fiatValueState === 'stale'
-						? 'Fiat values use a cached price.' : 'Fiat prices are unavailable; displayed USD totals exclude this Bitcoin balance.'}
+				<Text fontSize="xs" color="var(--gold)" mb="3" role="status">{uiText("Bitcoin balance refreshed from your node.")}{" "}{balances.get('bitcoin')?.fiatValueState === 'stale'
+						? uiText("Fiat values use a cached price.") : uiText("Fiat prices are unavailable; displayed USD totals exclude this Bitcoin balance.")}
 				</Text>
 			)}
 			{watchOnly && (
@@ -2289,7 +2440,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 						<circle cx="12" cy="12" r="3" />
 					</svg>
 					<Text fontSize="xs" color="kk.gold" fontWeight="500">
-						{t("watchOnlyBanner")}{cacheUpdatedAt ? ` · ${t("lastUpdated", { time: new Date(cacheUpdatedAt).toLocaleString([], { dateStyle: "medium", timeStyle: "short" }) })}` : ""}
+						{t("watchOnlyBanner")}{cacheUpdatedAt ? ` · ${t("lastUpdated", { time: new Date(cacheUpdatedAt).toLocaleString(getNumberLocale(), { dateStyle: "medium", timeStyle: "short" }) })}` : ""}
 					</Text>
 				</Flex>
 			)}
@@ -2360,7 +2511,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 							</Box>
 							<Box
 								as="button"
-								aria-label="Dismiss"
+								aria-label={uiText("Dismiss")}
 								onClick={() => commitBalanceReconciliations(current => current.filter(r => r.txid !== item.txid))}
 								fontSize="14px"
 								color="kk.textMuted"
@@ -2402,7 +2553,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 							color="whiteAlpha.400"
 							_hover={{ color: "var(--rose)" }}
 							onClick={(e) => { e.stopPropagation(); dismissedSwapTxids.current.add(swap.txid); try { localStorage.setItem('kk-dismissed-swaps', JSON.stringify([...dismissedSwapTxids.current])) } catch {} ; setActiveSwaps(prev => prev.filter(s => s.txid !== swap.txid)) }}
-							title="Dismiss"
+							title={uiText("Dismiss")}
 						>
 							<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
 								<line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
@@ -2412,8 +2563,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 							<circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
 						</svg>
 						<Text fontSize="11px" color="var(--teal)" fontWeight="600" flex="1">
-							{swap.fromAmount} {swap.fromSymbol} → {swap.toSymbol} swap in progress
-						</Text>
+							{swap.fromAmount} {swap.fromSymbol} → {swap.toSymbol}{" "}{uiText("swap in progress")}</Text>
 						<Text fontSize="10px" color="kk.textMuted" textTransform="capitalize">{swap.status.replace(/_/g, ' ')}</Text>
 						<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, color: 'var(--teal)' }}>
 							<polyline points="9 18 15 12 9 6"/>
@@ -2537,7 +2687,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 								{portfolioFault.degradedChains.length > 0 ? t("degradedTitle") : t("staleTitle")}
 							</Text>
 							<DocsLink href={DOCS_LINKS.missingCoins} ml="1" />
-							<DocsLink href={watch('course-13-not-showing')} label="Watch video" />
+							<DocsLink href={watch('course-13-not-showing')} label={uiText("Watch video")} />
 						</Flex>
 						{/* Backend can report degraded and stale chains together; render
 						    both so the stale warning isn't swallowed by the degraded one. */}
@@ -2612,9 +2762,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 								cursor="pointer"
 								_hover={{ color: "white" }}
 								onClick={() => setShowAudit(true)}
-							>
-								Run audit
-							</Box>
+							>{uiText("Run audit")}</Box>
 						</Flex>
 					</Flex>
 				</Box>
@@ -2697,15 +2845,14 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 											{hasAggregate ? (
 												<>
 													<Text fontSize="28px" fontWeight="600" fontFamily="mono" color="var(--text-0)" lineHeight="1.1">
-														{privateModeEnabled ? "••••" : `$${(agg!.balanceUsd || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+														{privateModeEnabled ? "••••" : `$${(agg!.balanceUsd || 0).toLocaleString(getNumberLocale(), { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
 													</Text>
 													<Text fontSize="12px" color="var(--text-2)" fontFamily="mono" mt="1">
 														{formatBalance(agg!.balance || '0')} {dchain.symbol}
 													</Text>
 													{isEvm && fundedAddrs.length > 0 && (
 														<Flex direction="column" align="center" gap="1.5" mt="3">
-															<Text fontSize="11px" color="var(--text-3)">
-																Selected account has $0 — held on {fundedAddrs.length === 1 ? '1 other account' : `${fundedAddrs.length} other accounts`}
+															<Text fontSize="11px" color="var(--text-3)">{uiText("Selected account has $0 — held on")}{" "}{fundedAddrs.length === 1 ? uiText("1 other account") : `${fundedAddrs.length} other accounts`}
 															</Text>
 															{fundedAddrs.slice(0, 3).map(a => (
 																<Box
@@ -2739,9 +2886,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 													<Text fontSize="28px" fontWeight="600" fontFamily="mono" color="var(--text-1)" lineHeight="1.1">
 														{privateModeEnabled ? "••••" : "$0.00"}
 													</Text>
-													<Text fontSize="13px" color="var(--text-3)" mt="1">
-														No {dchain.coin} balance yet
-													</Text>
+													<Text fontSize="13px" color="var(--text-3)" mt="1">{uiText("No")}{" "}{dchain.coin}{" "}{uiText("balance yet")}</Text>
 												</>
 											)}
 										</Box>
@@ -2911,9 +3056,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 								<Text fontSize="15px" fontWeight="600" color="var(--text-0)" mb="1">
 									{t("welcomeTitle")}
 								</Text>
-								<Text fontSize="13px" color="var(--text-2)" lineHeight="1.5">
-									Pick a chain from the list on the left to get your deposit address.
-								</Text>
+								<Text fontSize="13px" color="var(--text-2)" lineHeight="1.5">{uiText("Pick a chain from the list on the left to get your deposit address.")}</Text>
 							</Box>
 							{visibleChains.length > 0 && (
 								<Box
@@ -2927,9 +3070,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 									_hover={{ bg: 'var(--gold-2)' }}
 									transition="all 0.15s"
 									className="electrobun-webkit-app-region-no-drag"
-								>
-									Get {visibleChains[0]!.symbol} address →
-								</Box>
+								>{uiText("Get")}{" "}{visibleChains[0]!.symbol}{" "}{uiText("address →")}</Box>
 							)}
 						</Flex>
 					) : null}
@@ -2991,6 +3132,14 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 							</Box>
 						)
 					})()}
+
+					{!drilledChainId && <>
+						<VaultPortfolioRows portfolios={vaultPortfolios.filter(p => !disabledNetworks.includes(p.identity.chainId))}
+							onOpen={onOpenVault} onSetIncluded={setVaultIncluded} />
+						{vaultPortfolios.some(p => p.includeInTotal && !disabledNetworks.includes(p.identity.chainId)) &&
+							<Text fontSize="10px" color="var(--text-3)" w="100%" mt="2">{uiText('Totals include the full balance of selected shared vaults, not an ownership share.')}</Text>}
+						{vaultsError && <Text role="alert" color="var(--gold)" fontSize="11px" mt="2">{uiText('Vault balances unavailable')} · {vaultsError}</Text>}
+					</>}
 
 					{/* Drilled-chain action row (Receive/Send/Swap). NOT gated on
 					    hasAnyBalance: a fresh wallet holds nothing, but the whole
@@ -3117,7 +3266,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 																{formatBalance(tok.balance)}
 															</Text>
 															<Text fontSize="10px" color="var(--text-2)" lineHeight="1.3">
-																${(tok.balanceUsd ?? 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+																${(tok.balanceUsd ?? 0).toLocaleString(getNumberLocale(), { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
 															</Text>
 														</Box>
 													</Flex>
@@ -3125,6 +3274,9 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 										</Flex>
 									</Box>
 								)}
+
+								<VaultPortfolioRows portfolios={vaultPortfolios.filter(p => p.identity.networkId === dchain.networkId && p.identity.chainId === dchain.id)}
+									onOpen={onOpenVault} onSetIncluded={setVaultIncluded} />
 
 								{/* DeFi positions for the drilled chain. Mirrors the
 								    AssetPage section; reads from the ChainBalance the
@@ -3307,7 +3459,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 					_active={{ transform: "scale(0.95)" }}
 					onClick={() => setShowBip85(true)}
 					zIndex={10}
-					title="BIP-85 Seed Vault"
+					title={uiText("BIP-85 Seed Vault")}
 				>
 					<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--gold)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
 						<rect x="3" y="11" width="18" height="11" rx="2" ry="2" />

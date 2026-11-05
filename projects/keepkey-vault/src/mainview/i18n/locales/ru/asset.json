@@ -87,5 +87,14 @@
   "hideFiltered": "Скрыть {{count}} отфильтрованный токен",
   "showFiltered": "Показать {{count}} отфильтрованный токен",
   "validatingWallet": "Проверка защищённого кошелька по цепочке...",
-  "invalidAddress": "Недействительный адрес"
+  "invalidAddress": "Недействительный адрес",
+  "defiNetwork": "Сеть",
+  "defiSymbol": "Символ",
+  "tokenCount_few": "{{count}} токена",
+  "tokenCount_many": "{{count}} токенов",
+  "showFiltered_few": "Показать {{count}} отфильтрованных токена",
+  "showFiltered_many": "Показать {{count}} отфильтрованных токенов",
+  "hideFiltered_few": "Скрыть {{count}} отфильтрованных токена",
+  "hideFiltered_many": "Скрыть {{count}} отфильтрованных токенов",
+  "multisig": "Мультиподпись"
 }

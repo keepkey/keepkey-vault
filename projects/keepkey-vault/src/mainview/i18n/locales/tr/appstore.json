@@ -23,5 +23,7 @@
 	"walletconnectName": "WalletConnect",
 	"walletconnectDescription": "WalletConnect uyumlu herhangi bir uygulamaya bağlanın",
 	"internal": "Aç",
-	"open": "Aç"
+	"open": "Aç",
+	"safeName": "Safe{Wallet}",
+	"safeDescription": "EVM zincirlerinde paylaşılan çoklu imza hesapları. KeepKey'inizi sahip olarak bağlayın. Desktop'ta Safe'lerinizi görmek ve bekleyen işlemleri kontrol etmek için bir EVM varlığında Çoklu imza'yı açın."
 }

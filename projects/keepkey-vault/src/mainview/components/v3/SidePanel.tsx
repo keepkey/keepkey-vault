@@ -1,3 +1,4 @@
+import { useUiTranslation } from "../../i18n/ui"
 import type { ReactNode } from 'react';
 import { Icon } from './Icon';
 import { TokenLogo } from './TokenLogo';
@@ -17,6 +18,8 @@ interface SidePanelProps {
 /** Side-by-side swap panel primitive. The pivot button is rendered by the
  *  parent (it overlays the gap absolutely between two SidePanels). */
 export function SidePanel({ token, label, accent, onChange, children }: SidePanelProps) {
+  const uiText = useUiTranslation()
+
 	return (
 		<div
 			style={{
@@ -59,8 +62,7 @@ export function SidePanel({ token, label, accent, onChange, children }: SidePane
 							cursor: 'pointer',
 							fontFamily: 'inherit',
 						}}
-					>
-						Change <Icon name="chevronDown" size={12}/>
+					>{uiText("Change")}{" "}<Icon name="chevronDown" size={12}/>
 					</button>
 				)}
 			</div>

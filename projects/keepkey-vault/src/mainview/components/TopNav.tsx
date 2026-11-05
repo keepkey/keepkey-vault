@@ -1,3 +1,4 @@
+import { useUiTranslation } from "../i18n/ui"
 import { useRef, useState } from "react"
 import { Flex, Text, Box, Image, IconButton, HStack } from "@chakra-ui/react"
 import { useTranslation } from "react-i18next"
@@ -9,8 +10,9 @@ import kkIcon from "../assets/icon.png"
 import shapeshiftIcon from "../assets/apps/shapeshift.png"
 import { NAV_HEIGHT } from "../layout"
 import { WalletSelector } from "./WalletSelector"
+import { useBtcMultisigEnabled } from "../hooks/useBtcMultisigEnabled"
 
-export type NavTab = "vault" | "shapeshift" | "explore" | "addresses"
+export type NavTab = "vault" | "shapeshift" | "explore" | "addresses" | "multisig"
 
 interface TopNavProps {
 	label?: string
@@ -30,6 +32,7 @@ interface TopNavProps {
 	onTabChange: (tab: NavTab) => void
 	watchOnly?: boolean
 	onExitToDeviceSelect?: () => void
+	onStopEmulator?: () => void
 	passphraseActive?: boolean
 	/** btc-only device: hide multi-chain surfaces (ShapeShift tab, WalletConnect). */
 	isBitcoinOnly?: boolean
@@ -41,6 +44,7 @@ interface TopNavProps {
 	watchingDeviceId?: string | null
 	onWatchWallet?: (deviceId: string, label: string) => void
 	onReturnToConnected?: () => void
+	vaultView?: boolean
 }
 
 const NAV_BG = "rgba(11,11,14,0.92)"
@@ -75,6 +79,8 @@ const ShieldCheckIcon = ({ color }: { color: string }) => (
 /** Logo tile reused by both nav variants. Subtle ambient glow when active
     /signing — gold/teal hint without the alarm-bell red of the old border. */
 const LogoTile = ({ glow, onClick, title }: { glow?: 'idle' | 'connected' | 'signing'; onClick?: () => void; title?: string }) => {
+  const uiText = useUiTranslation()
+
 	const halo =
 		glow === 'signing'   ? '0 0 14px rgba(233,196,106,0.45)'
 		: glow === 'connected' ? '0 0 12px rgba(139,227,196,0.30)'
@@ -99,13 +105,15 @@ const LogoTile = ({ glow, onClick, title }: { glow?: 'idle' | 'connected' | 'sig
 			display="grid"
 			placeItems="center"
 		>
-			<Image src={kkIcon} alt="KeepKey" w="100%" h="100%" objectFit="cover" />
+			<Image src={kkIcon} alt={uiText("KeepKey")} w="100%" h="100%" objectFit="cover" />
 		</Box>
 	)
 }
 
 /** Minimal nav bar for splash / setup phases. */
 export function SplashNav() {
+  const uiText = useUiTranslation()
+
 	const windowDrag = useWindowDrag()
 	return (
 		<Flex
@@ -126,9 +134,7 @@ export function SplashNav() {
 		>
 			<Flex align="center" gap="2.5">
 				<LogoTile />
-				<Text fontSize="13px" fontWeight="600" letterSpacing="-0.01em" color="var(--text-0)" fontFamily={FONT_SANS}>
-					KeepKey Vault
-				</Text>
+				<Text fontSize="13px" fontWeight="600" letterSpacing="-0.01em" color="var(--text-0)" fontFamily={FONT_SANS}>{uiText("KeepKey Vault")}</Text>
 			</Flex>
 		</Flex>
 	)
@@ -152,6 +158,7 @@ export function TopNav({
 	onTabChange,
 	watchOnly,
 	onExitToDeviceSelect,
+	onStopEmulator,
 	passphraseActive,
 	isBitcoinOnly,
 	offline,
@@ -159,7 +166,11 @@ export function TopNav({
 	watchingDeviceId,
 	onWatchWallet,
 	onReturnToConnected,
+	vaultView = false,
 }: TopNavProps) {
+	const multisigEnabled = useBtcMultisigEnabled()
+  const uiText = useUiTranslation()
+
 	const { t } = useTranslation("nav")
 	const windowDrag = useWindowDrag()
 
@@ -194,7 +205,7 @@ export function TopNav({
 		{
 			id: "vault",
 			label: t("keepkey"),
-			icon: <Image src={kkIcon} alt="KeepKey" w="14px" h="14px" borderRadius="3px" />,
+			icon: <Image src={kkIcon} alt={uiText("KeepKey")} w="14px" h="14px" borderRadius="3px" />,
 		},
 		{
 			id: "addresses",
@@ -211,7 +222,12 @@ export function TopNav({
 		{
 			id: "shapeshift",
 			label: t("shapeshift"),
-			icon: <Image src={shapeshiftIcon} alt="ShapeShift" w="14px" h="14px" borderRadius="3px" />,
+			icon: <Image src={shapeshiftIcon} alt={uiText("ShapeShift")} w="14px" h="14px" borderRadius="3px" />,
+		},
+		{
+			id: "multisig",
+			label: "Multisig",
+			icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3 3 7v5c0 5 5 8 9 10 4-2 9-5 9-10V7z"/><circle cx="9" cy="11" r="2"/><path d="m10.5 12.5 3 3m-1.5-1.5 2-2M15 8h2v4"/></svg>,
 		},
 	]
 
@@ -249,14 +265,14 @@ export function TopNav({
 				<Flex direction="column" minW={0} gap="0">
 					<Flex align="center" gap="1.5" minW={0}>
 						<Text fontSize="13px" fontWeight="600" letterSpacing="-0.01em" color="var(--text-0)" fontFamily={FONT_SANS} truncate>
-							{label || "KeepKey"}
+							{label || uiText("KeepKey")}
 						</Text>
 						{watchOnly && (
 							<Text fontSize="9.5px" color="var(--gold)" fontWeight="500" bg="rgba(233,196,106,0.10)" px="1.5" py="0.5" borderRadius="sm" letterSpacing="0.04em" textTransform="uppercase" fontFamily={FONT_MONO}>
 								{t("watchOnly")}
 							</Text>
 						)}
-						{watchOnly && onExitToDeviceSelect && (
+						{(watchOnly || vaultView) && onExitToDeviceSelect && (
 							<Box
 								as="button"
 								fontSize="9.5px"
@@ -273,25 +289,26 @@ export function TopNav({
 								onClick={onExitToDeviceSelect}
 								className="electrobun-webkit-app-region-no-drag"
 								fontFamily={FONT_MONO}
-							>
-								Exit
-							</Box>
+								>{vaultView ? uiText("Wallets") : uiText("Exit")}</Box>
 						)}
 						{isEmulator && (
 							<>
-								<Text fontSize="9px" color="var(--rose)" fontWeight="600" bg="rgba(224,140,123,0.12)" px="1.5" py="0.5" borderRadius="sm" textTransform="uppercase" letterSpacing="0.08em" fontFamily={FONT_MONO}>
+								<Text flexShrink={0} fontSize="9px" color="var(--rose)" fontWeight="600" bg="rgba(224,140,123,0.12)" px="1.5" py="0.5" borderRadius="sm" textTransform="uppercase" letterSpacing="0.08em" fontFamily={FONT_MONO}>
 									EMU
 								</Text>
-								{onExitToDeviceSelect && (
+								{(onStopEmulator || onExitToDeviceSelect) && (
 									<Box
 										as="button"
-										w="14px"
-										h="14px"
-										borderRadius="full"
+										minW="58px"
+										h="28px"
+										px="2"
+										gap="1.5"
+										flexShrink={0}
+										borderRadius="md"
 										display="flex"
 										alignItems="center"
 										justifyContent="center"
-										fontSize="9px"
+										fontSize="11px"
 										fontWeight="700"
 										color="var(--rose)"
 										bg="rgba(224,140,123,0.10)"
@@ -299,11 +316,13 @@ export function TopNav({
 										cursor="pointer"
 										_hover={{ bg: "rgba(224,140,123,0.25)" }}
 										transition="all 0.15s"
-										onClick={onExitToDeviceSelect}
+										onClick={onStopEmulator || onExitToDeviceSelect}
 										className="electrobun-webkit-app-region-no-drag"
-										title="Back to device select"
+										title={uiText("Stop emulator")}
+										aria-label={uiText("Stop emulator")}
 									>
-										&times;
+										<svg aria-hidden="true" width="9" height="9" viewBox="0 0 9 9" fill="currentColor"><rect width="9" height="9" rx="1.5" /></svg>
+										{uiText("Stop")}
 									</Box>
 								)}
 							</>
@@ -342,8 +361,7 @@ export function TopNav({
 								<>
 									<ConstructionIcon />
 									<Text fontSize="10px" color="var(--violet)" fontFamily={FONT_MONO} letterSpacing="0.02em">
-										v{firmwareVersion} · dev
-									</Text>
+										v{firmwareVersion}{" "}{uiText("· dev")}</Text>
 								</>
 							) : needsFirmwareUpdate ? (
 								<>
@@ -356,7 +374,7 @@ export function TopNav({
 								<>
 									<ShieldCheckIcon color="var(--teal)" />
 									<Text fontSize="10px" color="var(--text-2)" fontFamily={FONT_MONO} letterSpacing="0.02em">
-										v{firmwareVersion} · {connected ? "connected" : "offline"}
+										v{firmwareVersion} · {connected ? uiText("connected") : uiText("offline")}
 									</Text>
 								</>
 							)}
@@ -365,7 +383,7 @@ export function TopNav({
 						<Flex align="center" gap="1" mt="1px" lineHeight="1">
 							<Box w="5px" h="5px" borderRadius="full" bg={dotColor} />
 							<Text fontSize="10px" color="var(--text-3)" fontFamily={FONT_MONO} letterSpacing="0.02em">
-								{connected ? "connected" : "offline"}
+								{connected ? uiText("connected") : uiText("offline")}
 							</Text>
 						</Flex>
 					) : null}
@@ -381,7 +399,7 @@ export function TopNav({
 				p="3px"
 				className="electrobun-webkit-app-region-no-drag"
 			>
-				{TAB_DEFS.filter((tab) => !(isBitcoinOnly && tab.id === "shapeshift")).map((tab) => {
+				{TAB_DEFS.filter((tab) => (!vaultView || tab.id === 'vault') && !(isBitcoinOnly && tab.id === "shapeshift") && !(tab.id === "multisig" && (isBitcoinOnly || watchOnly || !multisigEnabled))).map((tab) => {
 					const isActive = activeTab === tab.id
 					return (
 						<Box
@@ -405,7 +423,7 @@ export function TopNav({
 							onClick={() => onTabChange(tab.id)}
 						>
 							{tab.icon}
-							{tab.label}
+							{vaultView ? uiText("Vault") : tab.label}
 						</Box>
 					)
 				})}

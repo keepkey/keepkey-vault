@@ -10,7 +10,7 @@ const BITCOIN_ASSET_CAIPS = new Set([
   'bip122:000000000933ea01ad0ee984209779ba/slip44:1',
 ])
 const NON_BITCOIN_RPC_PREFIXES = [
-  'clearsign', 'eth', 'cosmos', 'thorchain', 'mayachain', 'osmosis',
+  'vaultAdd', 'safe', 'clearsign', 'eth', 'cosmos', 'thorchain', 'mayachain', 'osmosis',
   'xrp', 'solana', 'tron', 'ton', 'hive', 'zcash', 'bnb', 'binance',
 ]
 
@@ -151,6 +151,7 @@ export function bitcoinOnlyCoinList<T extends { coin: string }>(coins: T[]): T[]
  * script must not be able to dispatch an altcoin operation after the firmware
  * has identified itself as Bitcoin-only. */
 export function bitcoinOnlyRpcRejection(method: string, params?: any): string | null {
+  if (method === 'vaultAccountGet' && !BITCOIN_NETWORK_IDS.has(params?.networkId)) return 'This vault network is unavailable on Bitcoin-only firmware'
   if (method.toLowerCase().includes('swap')) {
     return `${method} is not available on bitcoin-only firmware`
   }

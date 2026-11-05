@@ -53,5 +53,7 @@
 	"invalidSolanaAddress": "Dirección Solana inválida — debe tener 32-44 caracteres base58",
 	"invalidTronAddress": "Dirección Tron inválida — debe comenzar con T (34 caracteres)",
 	"invalidTonAddress": "Dirección TON inválida",
-	"invalidZcashShieldedAddress": "Dirección protegida inválida — debe comenzar con u1"
+	"invalidZcashShieldedAddress": "Dirección protegida inválida — debe comenzar con u1",
+	"feeCustom": "Personalizado",
+	"invalidAmount": "Introduce un importe decimal sin separadores de miles, por ejemplo 1,5."
 }

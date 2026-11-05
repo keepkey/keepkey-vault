@@ -4,11 +4,11 @@ import { ChakraProvider } from "@chakra-ui/react"
 import { system } from "./theme"
 import "./index.css"
 import "./styles/tokens.css"
-import "./i18n"
 import splashBg from "./assets/splash-bg.png"
 import App from "./App"
 import { FiatProvider } from "./lib/fiat-context"
 import { DashboardViewProvider } from "./lib/dashboardViewContext"
+import i18n from './i18n'
 
 // Global error handler — prevent stray promise rejections from crashing the WebView
 window.addEventListener('unhandledrejection', (e) => {
@@ -31,13 +31,13 @@ class RootBoundary extends Component<{ children: ReactNode }, { error: Error | n
 		if (!this.state.error) return this.props.children
 		return (
 			<div style={{ color: '#eee', fontFamily: 'monospace', padding: 24, maxWidth: 640, margin: '10vh auto' }}>
-				<h2 style={{ color: '#e66464' }}>Something went wrong</h2>
+				<h2 style={{ color: '#e66464' }}>{i18n.t('somethingWentWrong')}</h2>
 				<p style={{ whiteSpace: 'pre-wrap', fontSize: 12 }}>{String(this.state.error?.message ?? this.state.error)}</p>
 				<button
 					style={{ marginTop: 16, padding: '8px 16px', background: '#E9C46A', color: '#000', border: 0, borderRadius: 8, cursor: 'pointer' }}
 					onClick={() => location.reload()}
 				>
-					Reload
+					{i18n.t('reload')}
 				</button>
 			</div>
 		)

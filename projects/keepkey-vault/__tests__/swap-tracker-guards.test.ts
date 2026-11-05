@@ -3,7 +3,32 @@ import {
   isPlaceholderOutboundTxHash,
   selectOutboundTxid,
   shouldRetryCompletedSwapMetadata,
+  retainSwapProgress,
 } from '../src/shared/swap-tracker-guards'
+import { advanceSwapStatus } from '../src/shared/relay-status'
+import type { SwapTrackingStatus } from '../src/shared/types'
+
+describe('swap progress never moves backward on stale data', () => {
+  test('processing and payout stages survive older poll/push responses', () => {
+    let status: SwapTrackingStatus = 'pending'
+    const sequence: SwapTrackingStatus[] = ['confirming', 'pending', 'output_detected', 'confirming', 'output_confirmed', 'pending', 'completed', 'output_confirming']
+    const seen = sequence.map(incoming => (status = advanceSwapStatus(status, incoming)))
+    expect(seen).toEqual(['confirming', 'confirming', 'output_detected', 'output_detected', 'output_confirmed', 'output_confirmed', 'completed', 'completed'])
+  })
+  test('failure and refund remain explicit terminal outcomes', () => {
+    expect(advanceSwapStatus('confirming', 'failed')).toBe('failed')
+    expect(advanceSwapStatus('output_confirming', 'refunded')).toBe('refunded')
+    expect(advanceSwapStatus('refunded', 'pending')).toBe('refunded')
+    expect(advanceSwapStatus('completed', 'refunded')).toBe('refunded')
+  })
+  test('a confirmation disappearing does not erase a visited checkpoint', () => {
+    let progress = { txid: 'first', step: 0 }
+    const seen = [1, 0, 1, 2, 0, 3, 1].map(step => (progress = retainSwapProgress(progress, 'first', step)).step)
+    expect(seen).toEqual([1, 1, 1, 2, 2, 3, 3])
+    expect(retainSwapProgress(progress, 'second', 0)).toEqual({ txid: 'second', step: 0 })
+    expect(retainSwapProgress(progress, null, 0)).toEqual({ txid: null, step: 0 })
+  })
+})
 
 describe('outbound transaction guards', () => {
   test.each(['', '  ', '0x', '0X', '0', '0000', '0x0000', '0X0000', ' 0x0000 '])(

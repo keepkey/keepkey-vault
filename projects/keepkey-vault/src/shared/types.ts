@@ -581,6 +581,7 @@ export interface ClearSignProtectionCaseStudy {
 }
 
 export interface FirmwareProgress {
+  stage?: import('./firmware-progress').FirmwareProgressStage
   percent: number
   message: string
   /** Present when the update failed. UI should show retry UX; the app itself stays alive. */
@@ -908,6 +909,8 @@ export interface BroadcastResult {
 export type AddressBookKind = 'own' | 'external'
 
 export interface AddressBookEntry {
+  /** A chain-bound registered vault, projected from its verified account/policy. */
+  vault?: import('./vault-identity').VaultIdentity
   id: string
   walletId: string
   deviceId: string
@@ -923,6 +926,7 @@ export interface AddressBookEntry {
   firstSeenTxid?: string     // external rows — txid that introduced the recipient
   note?: string
   savedAt?: number           // external rows — when the user explicitly saved it (R4); null = history-only
+  cosigner?: boolean         // user marked it as a Safe co-owner candidate (a note, not a verification)
   lastUsedAt?: number        // latest send to this entry from the Send page (list reads only)
   createdAt: number
   updatedAt: number
@@ -1121,6 +1125,49 @@ export interface SolanaMessageDecodedInfo {
 }
 
 // ── Calldata clear-signing types ─────────────────────────────────────────
+
+/** A Safe multisig, as its contract reports it on-chain. */
+export interface SafeInfo {
+  chainId: number
+  address: string
+  owners: string[]
+  threshold: number
+  nonce: number
+  version: string
+  vetting: SafeVetting
+}
+
+export interface SafeVetting {
+  /** Why the contract is not Safe's own code, or null when it is. Owners and threshold read from it cannot be trusted otherwise. */
+  codeProblem: string | null
+  /** Extensions the Safe has enabled (modules, a guard, a custom fallback handler). Normal for DAOs; described, never blocking. */
+  extensions: string[]
+}
+
+/** A proposed, not-yet-executed Safe transaction, re-derived locally. */
+export interface PendingSafeTx {
+  to: string
+  value: string
+  data: string | null
+  operation: number
+  safeTxGas: string
+  baseGas: string
+  gasPrice: string
+  gasToken: string
+  refundReceiver: string
+  nonce: string
+  /** Hash computed here from the fields above, never taken from the service. */
+  safeTxHash: string
+  /** The service published the same hash for these fields. */
+  hashMatches: boolean
+  /** Owners whose signature recovers over safeTxHash. */
+  confirmedBy: string[]
+  /** Owners listed as approved whose approval cannot be checked offline. */
+  unverifiedConfirmations: string[]
+  delegateCall: boolean
+  decoded: CalldataDecodedInfo | null
+  submittedAt: string | null
+}
 
 export interface CalldataDecodedField {
   name: string
@@ -1510,6 +1557,7 @@ export interface ClearSignProviderInput {
 
 // Application-level settings (persisted in SQLite)
 export interface AppSettings {
+  appLanguage?: string          // shared with native menus and dialogs
   restApiEnabled: boolean        // controls entire REST API server on/off
   pioneerApiBase: string         // current Pioneer API base URL
   pioneerServers: PioneerServer[] // all configured Pioneer servers
@@ -1594,6 +1642,8 @@ export interface RegisteredDevice {
   /** Watch-only import (no device); verified once a KeepKey returned the same account xpub */
   imported?: boolean
   verified?: boolean
+  /** Display-only cosigner links, matched against cached public addresses/xpubs. */
+  vaultIds?: string[]
 }
 
 // ── BIP-85 types ────────────────────────────────────────────────────────
@@ -2050,6 +2100,11 @@ export interface SwapQuoteFeeItem {
 
 /** Quote response from Pioneer (aggregated across DEXes) */
 export interface SwapQuote {
+  /** Vault-issued, single-execution identity; never a provider's quote ID. */
+  quoteId?: string
+  quoteCreatedAt?: number
+  quoteExpiresAt?: number
+  risk?: import('./swap-risk').SwapRisk
   expectedOutput: string     // human-readable amount out
   minimumOutput: string      // after slippage
   minimumOutputSource?: 'memo' | 'quote' | 'estimate'
@@ -2082,7 +2137,7 @@ export interface SwapQuote {
   /** Inferred from the source transaction, not a provider's review claim. */
   executionMode?: 'relay-solver-deposit'
   minAmountIn?: string       // minimum sell amount for this route (human-readable, in sell asset units)
-  /** Actual send amount after UTXO fee deduction (NEAR Intents MAX only).
+  /** Actual send amount after MAX fee/reserve deduction (UTXO or XRP).
    *  When set, the tracker must record this instead of the original params.amount. */
   netFromAmount?: string
   /** NEAR Intents 1Click deposit address — the address funds are actually sent to.
@@ -2107,6 +2162,7 @@ export interface SwapQuote {
  *  THORChain-style asset names are display concerns — derived from CAIP
  *  by the tracker, not passed as parameters. */
 export interface SwapQuoteParams {
+  fromEvmAddressIndex?: number
   fromCaip: string         // CAIP-19 of the sell asset
   toCaip: string           // CAIP-19 of the buy asset
   amount: string           // human-readable amount
@@ -2121,6 +2177,8 @@ export interface SwapQuoteParams {
  *  resolves symbol/name/asset-string for display from the CAIP via
  *  pioneer-discovery. Caller never specifies a token via symbol. */
 export interface ExecuteSwapParams {
+  quoteId?: string
+  riskAcknowledged?: boolean
   fromChainId: string             // our chain id (resolves to ChainDef for signing)
   toChainId: string               // our chain id
   fromCaip: string                // CAIP-19 — primary identifier
@@ -2474,8 +2532,8 @@ export interface SwapUiState {
  *  can drive every UI button up to the device prompt, then the user must
  *  confirm on hardware. */
 export type SwapUiCommand =
-  | { kind: 'open'; fromAsset?: string; toAsset?: string; amount?: string; slippageBps?: number; useCustomAddress?: boolean; customToAddress?: string }
-  | { kind: 'set'; fromAsset?: string; toAsset?: string; amount?: string; slippageBps?: number; inputMode?: 'crypto' | 'fiat'; isMax?: boolean; useCustomAddress?: boolean; customToAddress?: string }
+  | { kind: 'open'; fromAsset?: string; toAsset?: string; fromAssetDefinition?: SwapAsset; toAssetDefinition?: SwapAsset; amount?: string; slippageBps?: number; useCustomAddress?: boolean; customToAddress?: string }
+  | { kind: 'set'; fromAsset?: string; toAsset?: string; fromAssetDefinition?: SwapAsset; toAssetDefinition?: SwapAsset; amount?: string; slippageBps?: number; inputMode?: 'crypto' | 'fiat'; isMax?: boolean; useCustomAddress?: boolean; customToAddress?: string }
   | { kind: 'requote' }
   | { kind: 'advance' }   // input → review (UI navigation only)
   | { kind: 'confirm' }   // click "Confirm Swap" → kicks off executeSwap

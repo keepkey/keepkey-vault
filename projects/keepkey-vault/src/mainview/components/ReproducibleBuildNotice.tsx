@@ -1,3 +1,4 @@
+import { useUiTranslation } from "../i18n/ui"
 /**
  * ReproducibleBuildNotice — shown before installing official firmware.
  * Describes the download hash check separately from independent reproduction,
@@ -16,6 +17,8 @@ interface Props {
 }
 
 export function ReproducibleBuildNotice({ version, payloadHash }: Props) {
+  const uiText = useUiTranslation()
+
   const releaseUrl = `https://github.com/keepkey/keepkey-firmware/releases/tag/v${version}`
 
   return (
@@ -35,22 +38,11 @@ export function ReproducibleBuildNotice({ version, payloadHash }: Props) {
           </svg>
         </Box>
         <VStack gap={1} align="start" flex={1} minW={0}>
-          <Text fontSize="xs" fontWeight="700" color="green.300">
-            Download integrity checked before install
-          </Text>
-          <Text fontSize="2xs" color="whiteAlpha.600" lineHeight="1.5">
-            Vault compares the downloaded firmware&apos;s payload SHA256 (the signed
-            file minus its 256-byte signature header) with the pinned release hash
-            before flashing. This checks download integrity; it does not rebuild the source.
-          </Text>
-          <Text fontSize="2xs" color="whiteAlpha.600" lineHeight="1.5">
-            Reproduction compares locally built application code with the published payload.
-            Publisher signatures authenticate the release. A device-reported hash
-            cross-checks the installed image. A matching hash does not prove the source is bug-free.
-          </Text>
+          <Text fontSize="xs" fontWeight="700" color="green.300">{uiText("Download integrity checked before install")}</Text>
+          <Text fontSize="2xs" color="whiteAlpha.600" lineHeight="1.5">{uiText("Vault compares the downloaded firmware's payload SHA256 (the signed file minus its 256-byte signature header) with the pinned release hash before flashing. This checks download integrity; it does not rebuild the source.")}</Text>
+          <Text fontSize="2xs" color="whiteAlpha.600" lineHeight="1.5">{uiText("Reproduction compares locally built application code with the published payload. Publisher signatures authenticate the release. A device-reported hash cross-checks the installed image. A matching hash does not prove the source is bug-free.")}</Text>
           {payloadHash && (
-            <Text fontSize="2xs" color="whiteAlpha.500" fontFamily="mono" wordBreak="break-all">
-              payload sha256 {payloadHash}
+            <Text fontSize="2xs" color="whiteAlpha.500" fontFamily="mono" wordBreak="break-all">{uiText("payload sha256")}{" "}{payloadHash}
             </Text>
           )}
           <HStack gap={3} pt={0.5}>
@@ -65,9 +57,7 @@ export function ReproducibleBuildNotice({ version, payloadHash }: Props) {
               color="green.400"
               textDecoration="underline"
               _hover={{ color: 'green.300' }}
-            >
-              Release hashes
-            </Box>
+            >{uiText("Release hashes")}</Box>
             <Box
               as="a"
               href={REPRO_DOC_URL}
@@ -79,9 +69,7 @@ export function ReproducibleBuildNotice({ version, payloadHash }: Props) {
               color="green.400"
               textDecoration="underline"
               _hover={{ color: 'green.300' }}
-            >
-              Verify it yourself
-            </Box>
+            >{uiText("Verify it yourself")}</Box>
           </HStack>
         </VStack>
       </HStack>

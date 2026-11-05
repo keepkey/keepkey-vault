@@ -122,7 +122,23 @@
 		"autoRebooting": "Uw apparaat wordt opnieuw opgestart...",
 		"autoRebootingDetail": "Uw KeepKey start automatisch opnieuw op met de nieuwe firmware. Dit duurt meestal enkele seconden.",
 		"waitingForDevice": "Wachten op uw apparaat...",
-		"wipeAndFlash": "Wissen en flashen"
+		"wipeAndFlash": "Wissen en flashen",
+		"installWipe": {
+			"wipeTitle": "Hierdoor wordt het apparaat gewist",
+			"unknownTitle": "Hierdoor kan het apparaat worden gewist",
+			"lockTitle": "Hierdoor wordt je Bitcoin-only-wallet vergrendeld",
+			"noFirmwareTitle": "Elke wallet op deze KeepKey wordt gewist",
+			"wipeAck": "Ik begrijp dat mijn apparaat wordt gewist en ik heb een back-up van mijn herstelzin",
+			"unknownAck": "Ik begrijp dat mijn apparaat kan worden gewist en ik heb een back-up van mijn herstelzin",
+			"lockAck": "Ik begrijp dat mijn wallet wordt vergrendeld en ik heb een back-up van mijn herstelzin",
+			"downgradeTitle": "Hierdoor wordt het apparaat gewist",
+			"crossBody": "Deze KeepKey gebruikt firmware {{from}} v{{current}}. Firmware {{to}} v{{target}} kan de wallet niet lezen en wist bij het starten alle sleutels en instellingen. Om de wallet weer te gebruiken, moet je deze met je herstelzin herstellen.",
+			"downgradeBody": "Je installeert v{{target}} in plaats van v{{current}}. De oudere firmware kan de nieuwere walletopslag niet lezen en wist bij het starten alle sleutels en instellingen. Je moet de wallet met je herstelzin herstellen.",
+			"lockBody": "Deze KeepKey gebruikt Bitcoin-only-firmware. Firmware {{variant}} v{{target}} zal deze wallet niet openen. De wallet blijft op het apparaat staan, maar je moet de Bitcoin-only-firmware opnieuw installeren of het apparaat wissen en de wallet met je herstelzin herstellen om hem te gebruiken.",
+			"unknownBody": "In de bootloadermodus kan de geïnstalleerde firmware niet worden vastgesteld. Het installeren van firmware {{variant}} kan alle sleutels en instellingen wissen, bijvoorbeeld bij het wisselen van variant of het vervangen van onofficiële of nieuwere firmware. Houd de herstelzin klaar als deze KeepKey een wallet bevat. Een nieuwe KeepKey heeft geen wallet te verliezen.",
+			"noFirmwareBody": "Op deze KeepKey is geen firmware geïnstalleerd, bijvoorbeeld na een onderbroken update. Als er een wallet op stond, wordt die gewist wanneer je firmware installeert en moet je hem met je herstelzin herstellen.",
+			"unsignedBody": "Deze KeepKey gebruikt firmware die geen officiële KeepKey-versie is. Het installeren van officiële firmware wist alle sleutels en instellingen."
+		}
 	},
 	"initChoose": {
 		"title": "Stel je wallet in",
@@ -149,9 +165,10 @@
 		"failedToCreate": "Wallet aanmaken mislukt",
 		"failedToRecover": "Wallet herstellen mislukt",
 		"writeDownWarning": "Schrijf elk woord op!",
-		"writeDownDetail": "Uw herstelzin wordt op het apparaatscherm weergegeven. Schrijf elk woord op papier. Dit is uw ENIGE back-up; u zult deze woorden NIET opnieuw zien.",
+		"writeDownDetail": "Wanneer je herstelzin op het scherm van het apparaat verschijnt, schrijf dan elk woord op papier voordat je verdergaat. Bewaar de zin veilig; je hebt hem nodig om je wallet te herstellen.",
 		"deviceLost": "Apparaat losgekoppeld. Sluit het opnieuw aan om door te gaan, of ga terug om het opnieuw te proberen.",
-		"goBack": "Terug"
+		"goBack": "Terug",
+		"backToChoose": "Terug"
 	},
 	"initLabel": {
 		"walletCreated": "Wallet aangemaakt!",
@@ -232,6 +249,17 @@
 		"walletLabels": {
 			"visible": "zichtbaar",
 			"hidden": "verborgen"
+		}
+	},
+	"updateDone": {
+		"continue": "Doorgaan"
+	},
+	"coinMode": {
+		"change": "Wijzigen"
+	},
+	"security": {
+		"dice": {
+			"can": "Je voert {{rollCount}} worpen in met de knop op het apparaat; ze komen nooit op deze computer terecht."
 		}
 	}
 }

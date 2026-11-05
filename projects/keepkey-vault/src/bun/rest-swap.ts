@@ -24,7 +24,8 @@ import type { AuthStore } from './auth'
 import type { RestApiCallbacks } from './rest-api'
 import { parseRequest } from './validate'
 import * as S from './schemas'
-import type { SwapUiCommand } from '../shared/types'
+import type { SwapAsset, SwapUiCommand } from '../shared/types'
+import { blocksSwapUiCommand } from '../shared/swap-ui-control'
 
 const TAG = '[rest-swap]'
 
@@ -44,6 +45,11 @@ export async function handleSwapRoute(
   if (!path.startsWith('/api/v2/swap/') && path !== '/api/v2/swap') return null
 
   try {
+    const command = path.slice('/api/v2/swap/'.length)
+    if (method === 'POST' && blocksSwapUiCommand(callbacks?.getSwapUiState?.().state.phase, command)) {
+      auth.requireAuth(req)
+      return json({ error: 'Swap inputs are locked while signing or showing a submitted transaction. Close the receipt before opening another swap.' }, 409)
+    }
     if (path === '/api/v2/swap/state' && method === 'GET') {
       auth.requireAuth(req)
       if (!callbacks?.getSwapUiState) return json({ error: 'Swap UI mirror not wired' }, 503)
@@ -64,9 +70,10 @@ export async function handleSwapRoute(
       if (!callbacks?.getSwapQuoteHeadless) return json({ error: 'Headless swap not wired' }, 503)
       const body = await parseRequest(req, S.SwapQuoteHeadlessRequest)
       // Reject unknown assets at the boundary (CAIP form), same as the dialog seed path.
-      const validation = await validateSeedAssets({ fromAsset: body.fromCaip, toAsset: body.toCaip }, callbacks)
-      if (validation) return json(validation, 400)
-      const quote = await callbacks.getSwapQuoteHeadless(body as any)
+      const resolved = await resolveSeedAssets({ fromAsset: body.fromCaip, toAsset: body.toCaip }, callbacks)
+      if ('error' in resolved) return json(resolved, 400)
+      const quote = await callbacks.getSwapQuoteHeadless({ ...body,
+        fromCaip: resolved.fromAssetDefinition!.caip!, toCaip: resolved.toAssetDefinition!.caip! } as any)
       return json({ data: quote })
     }
 
@@ -84,9 +91,9 @@ export async function handleSwapRoute(
       auth.requireAuth(req)
       const body = await parseRequest(req, S.SwapUiOpenRequest)
       if (!callbacks?.sendSwapCmd) return json({ error: 'Swap UI bridge not wired' }, 503)
-      const validation = await validateSeedAssets(body, callbacks)
-      if (validation) return json(validation, 400)
-      callbacks.sendSwapCmd({ kind: 'open', ...body } as SwapUiCommand)
+      const resolved = await resolveSeedAssets(body, callbacks)
+      if ('error' in resolved) return json(resolved, 400)
+      callbacks.sendSwapCmd({ ...body, kind: 'open', fromAssetDefinition: undefined, toAssetDefinition: undefined, ...resolved } as SwapUiCommand)
       return json({ data: { ok: true } })
     }
 
@@ -94,9 +101,9 @@ export async function handleSwapRoute(
       auth.requireAuth(req)
       const body = await parseRequest(req, S.SwapUiSetRequest)
       if (!callbacks?.sendSwapCmd) return json({ error: 'Swap UI bridge not wired' }, 503)
-      const validation = await validateSeedAssets(body, callbacks)
-      if (validation) return json(validation, 400)
-      callbacks.sendSwapCmd({ kind: 'set', ...body } as SwapUiCommand)
+      const resolved = await resolveSeedAssets(body, callbacks)
+      if ('error' in resolved) return json(resolved, 400)
+      callbacks.sendSwapCmd({ ...body, kind: 'set', fromAssetDefinition: undefined, toAssetDefinition: undefined, ...resolved } as SwapUiCommand)
       return json({ data: { ok: true } })
     }
 
@@ -162,12 +169,17 @@ async function resolveDeviceSwapAssets(callbacks: RestApiCallbacks | undefined) 
 // Uses the firmware-filtered list so a seed naming a chain the device can't
 // sign (e.g. ZEC on old firmware) is rejected here rather than accepted and
 // then unresolvable in the UI asset list.
-async function validateSeedAssets(body: { fromAsset?: string; toAsset?: string }, callbacks: RestApiCallbacks | undefined): Promise<{ error: string; details: { unknownAsset: string; field: 'fromAsset' | 'toAsset' } } | null> {
-  if (!body.fromAsset && !body.toAsset) return null
-  let assets: Awaited<ReturnType<typeof resolveDeviceSwapAssets>>
-  try { assets = await resolveDeviceSwapAssets(callbacks) } catch { return null /* don't block on transient asset-list failures */ }
-  const has = (key: string) => assets.some(a => a.asset === key || a.caip === key)
-  if (body.fromAsset && !has(body.fromAsset)) return { error: 'Unknown fromAsset', details: { unknownAsset: body.fromAsset, field: 'fromAsset' } }
-  if (body.toAsset && !has(body.toAsset)) return { error: 'Unknown toAsset', details: { unknownAsset: body.toAsset, field: 'toAsset' } }
-  return null
+async function resolveSeedAssets(body: { fromAsset?: string; toAsset?: string }, callbacks: RestApiCallbacks | undefined): Promise<{
+  fromAssetDefinition?: SwapAsset; toAssetDefinition?: SwapAsset
+} | { error: string; details: { unknownAsset: string; field: string } }> {
+  const resolved: { fromAssetDefinition?: SwapAsset; toAssetDefinition?: SwapAsset } = {}
+  for (const field of ['fromAsset', 'toAsset'] as const) {
+    const key = body[field]
+    if (!key) continue
+    const asset = callbacks?.resolveSwapAsset ? await callbacks.resolveSwapAsset(key)
+      : (await resolveDeviceSwapAssets(callbacks)).find(a => a.asset === key || a.caip === key)
+    if (!asset?.caip) return { error: `Unknown or unsupported ${field}`, details: { unknownAsset: key, field } }
+    resolved[field === 'fromAsset' ? 'fromAssetDefinition' : 'toAssetDefinition'] = asset
+  }
+  return resolved
 }

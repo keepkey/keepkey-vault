@@ -1,3 +1,4 @@
+import { useUiTranslation } from "../i18n/ui"
 import { useState, useEffect, useCallback } from "react"
 import { Box, Flex, Text, Button, Spinner } from "@chakra-ui/react"
 import { BitcoinQrDialog } from "./BitcoinQrDialog"
@@ -24,6 +25,8 @@ const card = { bg: "rgba(255,255,255,0.03)", borderRadius: "lg", border: "1px so
  * read from the KeepKey; this dialog only picks the account and shows the result.
  */
 export function WatchOnlyExportDialog({ accounts, isHiddenWallet, onClose }: { accounts: BtcAccount[]; isHiddenWallet?: boolean; onClose: () => void }) {
+  const uiText = useUiTranslation()
+
 	const [accountIndex, setAccountIndex] = useState(accounts[0]?.accountIndex ?? 0)
 	const [scriptType, setScriptType] = useState<ExportScriptType>("p2wpkh")
 	const [data, setData] = useState<ExportData | null>(null)
@@ -72,35 +75,30 @@ export function WatchOnlyExportDialog({ accounts, isHiddenWallet, onClose }: { a
 
 	return (
 		<>
-			{showQr && data?.publicWallet && <BitcoinQrDialog bytes={new TextEncoder().encode(data.publicWallet)} title="Desktop public wallet QR" onClose={() => setShowQr(false)} />}
+			{showQr && data?.publicWallet && <BitcoinQrDialog bytes={new TextEncoder().encode(data.publicWallet)} title={uiText("Desktop public wallet QR")} onClose={() => setShowQr(false)} />}
 			<Box position="fixed" inset="0" bg="rgba(0,0,0,0.85)" zIndex={Z.dialog} onClick={busy ? undefined : onClose} />
 			<Box
 				position="fixed" top="50%" left="50%" transform="translate(-50%, -50%)"
 				w="520px" maxW="92vw" maxH="88vh" overflowY="auto"
 				bg="kk.bg" border="1px solid" borderColor="kk.border" borderRadius="xl"
-				zIndex={Z.dialog + 1} role="dialog" aria-modal="true" aria-label="Export watch-only wallet"
+				zIndex={Z.dialog + 1} role="dialog" aria-modal="true" aria-label={uiText("Export watch-only wallet")}
 			>
 				<Box p="6">
-					<Text fontSize="lg" fontWeight="700" color="kk.textPrimary">Export watch-only wallet</Text>
-					<Text fontSize="xs" color="kk.textSecondary" mb="4">For Desktop, Electrum or Sparrow · Bitcoin mainnet</Text>
+					<Text fontSize="lg" fontWeight="700" color="kk.textPrimary">{uiText("Export watch-only wallet")}</Text>
+					<Text fontSize="xs" color="kk.textSecondary" mb="4">{uiText("For Desktop, Electrum or Sparrow · Bitcoin mainnet")}</Text>
 
 					<Flex direction="column" gap="3">
 						<Box {...card} borderColor="rgba(233,196,106,0.4)" bg="rgba(233,196,106,0.06)">
-							<Text fontSize="xs" color="var(--gold)">
-								Anyone with this file or key can see every balance and transaction of this account, past and future. They cannot spend.
-							</Text>
+							<Text fontSize="xs" color="var(--gold)">{uiText("Anyone with this file or key can see every balance and transaction of this account, past and future. They cannot spend.")}</Text>
 							{isHiddenWallet && (
-								<Text fontSize="xs" color="var(--gold)" mt="1">
-									This is a passphrase (hidden) wallet: the export reveals it to anyone who opens it. Desktop itself keeps nothing.
-								</Text>
+								<Text fontSize="xs" color="var(--gold)" mt="1">{uiText("This is a passphrase (hidden) wallet: the export reveals it to anyone who opens it. Desktop itself keeps nothing.")}</Text>
 							)}
 						</Box>
 
 						{accounts.length > 1 && (
 							<Flex gap="2" wrap="wrap">
 								{accounts.map((a) => (
-									<Box key={a.accountIndex} {...pick(a.accountIndex === accountIndex)} onClick={() => !busy && setAccountIndex(a.accountIndex)}>
-										Account {a.accountIndex}
+									<Box key={a.accountIndex} {...pick(a.accountIndex === accountIndex)} onClick={() => !busy && setAccountIndex(a.accountIndex)}>{uiText("Account")}{" "}{a.accountIndex}
 									</Box>
 								))}
 							</Flex>
@@ -112,25 +110,25 @@ export function WatchOnlyExportDialog({ accounts, isHiddenWallet, onClose }: { a
 								</Box>
 							))}
 						</Flex>
-						<Text fontSize="xs" color="kk.textSecondary">Save a Desktop public wallet file to prepare transactions on an online computer without connecting your KeepKey. It includes the fingerprint, path, script type, network and receive/change branches.</Text>
-						{scriptType === "p2tr" && <Text fontSize="xs" color="kk.textSecondary">Taproot signing uses Desktop. Sparrow's KeepKey USB integration and Electrum's KeepKey plugin do not support Taproot signing. File exchange is a separate compatibility check.</Text>}
+						<Text fontSize="xs" color="kk.textSecondary">{uiText("Save a Desktop public wallet file to prepare transactions on an online computer without connecting your KeepKey. It includes the fingerprint, path, script type, network and receive/change branches.")}</Text>
+						{scriptType === "p2tr" && <Text fontSize="xs" color="kk.textSecondary">{uiText("Taproot signing uses Desktop. Sparrow's KeepKey USB integration and Electrum's KeepKey plugin do not support Taproot signing. File exchange is a separate compatibility check.")}</Text>}
 
 						{!data && !error && (
 							<Flex align="center" gap="2" py="3" justify="center">
 								<Spinner size="sm" color="kk.gold" />
-								<Text fontSize="sm" color="kk.textSecondary">Reading the account...</Text>
+								<Text fontSize="sm" color="kk.textSecondary">{uiText("Reading the account...")}</Text>
 							</Flex>
 						)}
 
 						{data && (
 							<Box {...card}>
-								<Text fontSize="xs" color="kk.textSecondary">{scriptType === "p2tr" ? "BIP86 public key (Sparrow: Taproot)" : 'Public key (Electrum: "Use a master key")'}</Text>
+								<Text fontSize="xs" color="kk.textSecondary">{scriptType === "p2tr" ? uiText("BIP86 public key (Sparrow: Taproot)") : uiText("Public key (Electrum: \"Use a master key\")")}</Text>
 								<Text fontSize="xs" fontFamily="mono" color="kk.textPrimary" wordBreak="break-all" mb="2">{data.key}</Text>
-								<Flex justify="space-between"><Text fontSize="xs" color="kk.textSecondary">Master fingerprint</Text><Text fontSize="xs" fontFamily="mono" color="kk.textPrimary">{data.fingerprint ?? "unknown"}</Text></Flex>
-								<Flex justify="space-between"><Text fontSize="xs" color="kk.textSecondary">Derivation path</Text><Text fontSize="xs" fontFamily="mono" color="kk.textPrimary">{data.derivation}</Text></Flex>
+								<Flex justify="space-between"><Text fontSize="xs" color="kk.textSecondary">{uiText("Master fingerprint")}</Text><Text fontSize="xs" fontFamily="mono" color="kk.textPrimary">{data.fingerprint ?? uiText("unknown")}</Text></Flex>
+								<Flex justify="space-between"><Text fontSize="xs" color="kk.textSecondary">{uiText("Derivation path")}</Text><Text fontSize="xs" fontFamily="mono" color="kk.textPrimary">{data.derivation}</Text></Flex>
 								{data.filePath && (
 									<Box mt="2">
-										<Text fontSize="xs" color="var(--teal-2)">{savedFormat === 'desktop' ? 'Saved. Drop this public wallet file on Desktop on the online computer.' : 'Saved. Open it in Electrum with File > Open.'}</Text>
+										<Text fontSize="xs" color="var(--teal-2)">{savedFormat === 'desktop' ? uiText("Saved. Drop this public wallet file on Desktop on the online computer.") : uiText("Saved. Open it in Electrum with File > Open.")}</Text>
 										<Text fontSize="xs" fontFamily="mono" color="kk.textPrimary" wordBreak="break-all">{data.filePath}</Text>
 									</Box>
 								)}
@@ -140,14 +138,12 @@ export function WatchOnlyExportDialog({ accounts, isHiddenWallet, onClose }: { a
 						{error && <Text fontSize="sm" color="var(--rose)">{error}</Text>}
 
 						<Flex gap="2" justify="flex-end" wrap="wrap">
-							<Button {...plainButton} onClick={onClose} disabled={busy}>Close</Button>
-							<Button {...plainButton} disabled={!data?.publicWallet} onClick={() => setShowQr(true)}>Public wallet QR</Button>
-							<Button {...plainButton} onClick={handleCopy} disabled={!data}>{copied ? "Copied" : "Copy key"}</Button>
-							<Button {...plainButton} onClick={() => void handleSave('electrum')} disabled={!data || !data.fingerprint || busy || scriptType === "p2tr"}>
-								Save Electrum file
-							</Button>
+							<Button {...plainButton} onClick={onClose} disabled={busy}>{uiText("Close")}</Button>
+							<Button {...plainButton} disabled={!data?.publicWallet} onClick={() => setShowQr(true)}>{uiText("Public wallet QR")}</Button>
+							<Button {...plainButton} onClick={handleCopy} disabled={!data}>{copied ? uiText("Copied") : uiText("Copy key")}</Button>
+							<Button {...plainButton} onClick={() => void handleSave('electrum')} disabled={!data || !data.fingerprint || busy || scriptType === "p2tr"}>{uiText("Save Electrum file")}</Button>
 							<Button {...goldButton} onClick={() => void handleSave('desktop')} disabled={!data || !data.fingerprint || busy}>
-								{busy ? "Saving..." : "Save Desktop public wallet"}
+								{busy ? uiText("Saving...") : uiText("Save Desktop public wallet")}
 							</Button>
 						</Flex>
 					</Flex>

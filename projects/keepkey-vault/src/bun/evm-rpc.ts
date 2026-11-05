@@ -9,8 +9,12 @@ import { pioneerEvmRpc, pioneerTokenMetadata } from './pioneer-evm'
 export const ARBITRUM_ONE_RPC = 'https://arb1.arbitrum.io/rpc'
 export const isPioneerEvmSource = (source: string): boolean => source.startsWith('eip155:')
 
-async function ethCall(rpcUrl: string, to: string, data: string): Promise<string> {
+export async function ethCall(rpcUrl: string, to: string, data: string): Promise<string> {
   return (await ethRpc(rpcUrl, 'eth_call', [{ to, data }, 'latest'])) || '0x'
+}
+
+export async function ethGetCode(rpcUrl: string, address: string): Promise<string> {
+  return (await ethRpc(rpcUrl, 'eth_getCode', [address, 'latest'])) || '0x'
 }
 
 async function ethRpc(rpcUrl: string, method: string, params: any[]): Promise<any> {

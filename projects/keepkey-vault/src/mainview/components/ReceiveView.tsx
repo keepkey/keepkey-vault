@@ -1,3 +1,4 @@
+import { useUiTranslation } from "../i18n/ui"
 import { useState, useCallback } from "react"
 import { useTranslation } from "react-i18next"
 import { Box, Text, Flex } from "@chakra-ui/react"
@@ -9,12 +10,14 @@ import { PathEditDialog } from "./PathEditDialog"
 import { DocsLink } from "./DocsLink"
 import { DOCS_LINKS, watch } from "../../shared/docs-links"
 import type { ChainDef } from "../../shared/chains"
+import { evmAssetReceiveUri } from '../../shared/vault-asset-account'
 
 const MAX_NEW_ADDRESSES_PER_SESSION = 10
 
 interface ReceiveViewProps {
 	chain: ChainDef
 	address: string | null
+	assetCaip?: string
 	loading: boolean
 	error?: string | null
 	currentPath: number[]
@@ -149,10 +152,12 @@ function PillToggle<T extends string | number>({
 }
 
 export function ReceiveView({
-	chain, address, loading, error, currentPath, onDerive, scriptType, xpub,
+	chain, address, assetCaip, loading, error, currentPath, onDerive, scriptType, xpub,
 	isBtc, btcChangeIndex = 0, btcAddressIndex = 0, btcAddressWarning, onBtcChangeIndex, onBtcAddressIndex,
 	isTon, tonBounceable = false, onTonBounceableChange, watchOnly = false, onShowOnDevice,
 }: ReceiveViewProps) {
+  const uiText = useUiTranslation()
+
 	const { t } = useTranslation("receive")
 	const [showing, setShowing] = useState(false)
 	const [pathDialogOpen, setPathDialogOpen] = useState(false)
@@ -264,8 +269,11 @@ export function ReceiveView({
 	}
 
 	// EIP-681 URI for EVM chains so mobile wallets (Rainbow, etc.) auto-detect send
-	const qrContent = chain.chainFamily === 'evm' && chain.chainId
-		? `ethereum:${address!}@${chain.chainId}`
+	let evmRequest: string | undefined
+	try { if (chain.chainFamily === 'evm') evmRequest = evmAssetReceiveUri(chain.networkId,assetCaip || chain.caip,address!) }
+	catch { return <Text role="alert" color="red.300">{uiText("The receive asset and account network do not match. Select the asset again.")}</Text> }
+	const qrContent = evmRequest
+		? evmRequest
 		: chain.chainFamily === 'solana'
 			? `solana:${address!}`
 			: address!
@@ -278,6 +286,8 @@ export function ReceiveView({
 				{/* Left column: framed QR + verify chip */}
 				<Flex direction="column" align="center" gap="3" flexShrink={0}>
 					<Box
+						role="img"
+						aria-label={`Receive QR for ${assetCaip || chain.caip}`}
 						bg="white"
 						borderRadius="12px"
 						p="3"
@@ -330,7 +340,7 @@ export function ReceiveView({
 						</Text>
 						<Flex gap="3">
 							<DocsLink href={DOCS_LINKS.receive} />
-							<DocsLink href={watch('course-04-receive')} label="Watch video" />
+							<DocsLink href={watch('course-04-receive')} label={uiText("Watch video")} />
 						</Flex>
 					</Flex>
 
@@ -421,9 +431,7 @@ export function ReceiveView({
 					{/* TON: bounceable / non-bounceable — re-derives via device, hidden offline */}
 					{!watchOnly && isTon && onTonBounceableChange && (
 						<Box>
-							<Text fontSize="10px" color="var(--text-3)" textTransform="uppercase" letterSpacing="0.18em" fontWeight="500" mb="2">
-								Address Type
-							</Text>
+							<Text fontSize="10px" color="var(--text-3)" textTransform="uppercase" letterSpacing="0.18em" fontWeight="500" mb="2">{uiText("Address Type")}</Text>
 							<PillToggle
 								options={[
 									{ value: 0, label: "UQ (Safe)" },
@@ -433,14 +441,10 @@ export function ReceiveView({
 								onChange={(v) => onTonBounceableChange(v === 1)}
 							/>
 							{!tonBounceable && (
-								<Text fontSize="11px" color="var(--text-3)" mt="2" letterSpacing="-0.005em">
-									Non-bounceable — funds won't bounce back if wallet is uninitialized
-								</Text>
+								<Text fontSize="11px" color="var(--text-3)" mt="2" letterSpacing="-0.005em">{uiText("Non-bounceable — funds won't bounce back if wallet is uninitialized")}</Text>
 							)}
 							{tonBounceable && (
-								<Text fontSize="11px" color="var(--gold)" mt="2" letterSpacing="-0.005em">
-									Bounceable — funds will bounce back if wallet contract is not deployed
-								</Text>
+								<Text fontSize="11px" color="var(--gold)" mt="2" letterSpacing="-0.005em">{uiText("Bounceable — funds will bounce back if wallet contract is not deployed")}</Text>
 							)}
 						</Box>
 					)}

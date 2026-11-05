@@ -1,3 +1,4 @@
+import { useUiTranslation } from "../i18n/ui"
 import { useState, useEffect, useCallback, useRef } from "react"
 import { Box, Flex, Text, Spinner, Image } from "@chakra-ui/react"
 import { rpcRequest, onRpcMessage } from "../lib/rpc"
@@ -27,6 +28,8 @@ interface ReportDialogProps {
 }
 
 export function ReportDialog({ onClose }: ReportDialogProps) {
+  const uiText = useUiTranslation()
+
 	const { locale: fiatLocale, fmtCompact } = useFiat()
 	const [generating, setGenerating] = useState(false)
 	const [progress, setProgress] = useState<{ message: string; percent: number } | null>(null)
@@ -137,9 +140,7 @@ export function ReportDialog({ onClose }: ReportDialogProps) {
 					flexShrink={0}
 				>
 					<Flex align="center" gap="3">
-						<Text fontSize="lg" fontWeight="700" color="kk.gold">
-							Reports &amp; Tax Export
-						</Text>
+						<Text fontSize="lg" fontWeight="700" color="kk.gold">{uiText("Reports & Tax Export")}</Text>
 						<DocsLink href={DOCS_LINKS.reports} />
 					</Flex>
 					{!generating && (
@@ -150,9 +151,7 @@ export function ReportDialog({ onClose }: ReportDialogProps) {
 							cursor="pointer"
 							_hover={{ color: "white" }}
 							onClick={onClose}
-						>
-							&times;
-						</Box>
+						>{uiText("&times;")}</Box>
 					)}
 				</Flex>
 
@@ -167,12 +166,7 @@ export function ReportDialog({ onClose }: ReportDialogProps) {
 						borderColor="rgba(233,196,106,0.15)"
 						borderRadius="lg"
 					>
-						<Text fontSize="10px" color="kk.gold" lineHeight="1.5">
-							Generate a report then export as KeepKey branded PDF or CSV.
-							Reports include device info, chain balances,
-							BTC transaction history, and address flow analysis.
-							Store securely and never share with untrusted parties.
-						</Text>
+						<Text fontSize="10px" color="kk.gold" lineHeight="1.5">{uiText("Generate a report then export as KeepKey branded PDF or CSV. Reports include device info, chain balances, BTC transaction history, and address flow analysis. Store securely and never share with untrusted parties.")}</Text>
 					</Box>
 
 					{/* Generate button */}
@@ -195,7 +189,7 @@ export function ReportDialog({ onClose }: ReportDialogProps) {
 						{generating ? (
 							<Flex align="center" justify="center" gap="2">
 								<Spinner size="xs" />
-								<Text>{progress?.message || "Generating..."}</Text>
+								<Text>{progress?.message || uiText("Generating...")}</Text>
 							</Flex>
 						) : (
 							"Generate Report"
@@ -241,9 +235,7 @@ export function ReportDialog({ onClose }: ReportDialogProps) {
 						</Flex>
 					) : reports.length > 0 ? (
 						<Box>
-							<Text fontSize="xs" color="kk.textSecondary" mb="2" fontWeight="600">
-								Previous Reports
-							</Text>
+							<Text fontSize="xs" color="kk.textSecondary" mb="2" fontWeight="600">{uiText("Previous Reports")}</Text>
 							<Flex direction="column" gap="3">
 								{reports.map(r => (
 									<Box
@@ -255,11 +247,9 @@ export function ReportDialog({ onClose }: ReportDialogProps) {
 										borderRadius="lg"
 									>
 										<Flex justify="space-between" align="center" mb="1">
-											<Text fontSize="xs" fontWeight="600" color="white">
-												Full Detail Report
-											</Text>
+											<Text fontSize="xs" fontWeight="600" color="white">{uiText("Full Detail Report")}</Text>
 											<Text fontSize="10px" color={r.status === "error" ? "var(--rose)" : "kk.textMuted"}>
-												{r.status === "error" ? "Failed" : fmtCompact(r.totalUsd)}
+												{r.status === "error" ? uiText("Failed") : fmtCompact(r.totalUsd)}
 											</Text>
 										</Flex>
 										<Text fontSize="10px" color="kk.textMuted" mb="3">
@@ -304,7 +294,7 @@ export function ReportDialog({ onClose }: ReportDialogProps) {
 																/>
 																<Box textAlign="left">
 																	<Text fontSize="10px" fontWeight="700" color="white" lineHeight="1.2">
-																		{isSavingThis ? "Saving..." : label}
+																		{isSavingThis ? uiText("Saving...") : label}
 																	</Text>
 																	<Text fontSize="8px" color="kk.textMuted" lineHeight="1.2">
 																		{sub}
@@ -332,9 +322,7 @@ export function ReportDialog({ onClose }: ReportDialogProps) {
 														borderRadius="md"
 														cursor="pointer"
 														onClick={() => handleDelete(r.id)}
-													>
-														Confirm
-													</Box>
+													>{uiText("Confirm")}</Box>
 													<Box
 														as="button"
 														px="2"
@@ -348,9 +336,7 @@ export function ReportDialog({ onClose }: ReportDialogProps) {
 														borderRadius="md"
 														cursor="pointer"
 														onClick={() => setConfirmDeleteId(null)}
-													>
-														Cancel
-													</Box>
+													>{uiText("Cancel")}</Box>
 												</Flex>
 											) : (
 												<Box
@@ -367,9 +353,7 @@ export function ReportDialog({ onClose }: ReportDialogProps) {
 													cursor="pointer"
 													_hover={{ borderColor: "var(--rose)", color: "var(--rose)" }}
 													onClick={() => setConfirmDeleteId(r.id)}
-												>
-													Delete
-												</Box>
+												>{uiText("Delete")}</Box>
 											)}
 										</Flex>
 									</Box>
@@ -377,9 +361,7 @@ export function ReportDialog({ onClose }: ReportDialogProps) {
 							</Flex>
 						</Box>
 					) : (
-						<Text fontSize="xs" color="kk.textMuted" textAlign="center" py="4">
-							No reports generated yet.
-						</Text>
+						<Text fontSize="xs" color="kk.textMuted" textAlign="center" py="4">{uiText("No reports generated yet.")}</Text>
 					)}
 				</Box>
 			</Box>

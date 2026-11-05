@@ -122,7 +122,23 @@
 		"autoRebooting": "Seu dispositivo está reiniciando...",
 		"autoRebootingDetail": "Seu KeepKey reiniciará automaticamente com o novo firmware. Isso geralmente leva alguns segundos.",
 		"waitingForDevice": "Aguardando seu dispositivo...",
-		"wipeAndFlash": "Apagar e instalar"
+		"wipeAndFlash": "Apagar e instalar",
+		"installWipe": {
+			"wipeTitle": "Isso apagará o dispositivo",
+			"unknownTitle": "Isso pode apagar o dispositivo",
+			"lockTitle": "Isso bloqueará sua carteira somente Bitcoin",
+			"noFirmwareTitle": "Qualquer carteira neste KeepKey será apagada",
+			"wipeAck": "Entendo que isso apagará meu dispositivo e tenho uma cópia de segurança da minha frase de recuperação",
+			"unknownAck": "Entendo que isso pode apagar meu dispositivo e tenho uma cópia de segurança da minha frase de recuperação",
+			"lockAck": "Entendo que minha carteira será bloqueada e tenho uma cópia de segurança da minha frase de recuperação",
+			"downgradeTitle": "Isso apagará o dispositivo",
+			"crossBody": "Este KeepKey usa firmware {{from}} v{{current}}. O firmware {{to}} v{{target}} não consegue ler sua carteira e, ao iniciar, apagará todas as chaves e configurações. Para usar a carteira novamente, será preciso restaurá-la com a frase de recuperação.",
+			"downgradeBody": "Você está instalando v{{target}} sobre v{{current}}. O firmware antigo não consegue ler o armazenamento mais recente e, ao iniciar, apagará todas as chaves e configurações. Será preciso restaurar a carteira com a frase de recuperação.",
+			"lockBody": "Este KeepKey usa firmware somente Bitcoin. O firmware {{variant}} v{{target}} recusará a abertura desta carteira. Ela permanece no dispositivo, mas só poderá ser usada após reinstalar o firmware somente Bitcoin ou apagar o dispositivo e restaurá-la com a frase de recuperação.",
+			"unknownBody": "No modo bootloader, não é possível identificar o firmware instalado. Instalar o firmware {{variant}} pode apagar todas as chaves e configurações, por exemplo ao trocar de variante ou substituir firmware não oficial ou mais recente. Se este KeepKey contém uma carteira, tenha a frase de recuperação em mãos. Um KeepKey novo não tem carteira a perder.",
+			"noFirmwareBody": "Este KeepKey não tem firmware instalado, por exemplo após uma atualização interrompida. Se continha uma carteira, instalar firmware a apagará e será preciso restaurá-la com a frase de recuperação.",
+			"unsignedBody": "Este KeepKey usa firmware que não é uma versão oficial da KeepKey. Instalar firmware oficial apagará todas as chaves e configurações."
+		}
 	},
 	"initChoose": {
 		"title": "Configure sua carteira",
@@ -149,9 +165,10 @@
 		"failedToCreate": "Falha ao criar a carteira",
 		"failedToRecover": "Falha ao recuperar a carteira",
 		"writeDownWarning": "Anote cada palavra!",
-		"writeDownDetail": "Sua frase de recuperação está aparecendo na tela do dispositivo. Escreva cada palavra em papel. Este é seu ÚNICO backup; você NÃO verá essas palavras novamente.",
+		"writeDownDetail": "Quando sua frase de recuperação aparecer na tela do dispositivo, escreva cada palavra em papel antes de continuar. Guarde a frase em segurança; você precisa dela para recuperar sua carteira.",
 		"deviceLost": "Dispositivo desconectado. Conecte-o novamente para continuar, ou volte para tentar de novo.",
-		"goBack": "Voltar"
+		"goBack": "Voltar",
+		"backToChoose": "Voltar"
 	},
 	"initLabel": {
 		"walletCreated": "Carteira criada!",
@@ -232,6 +249,17 @@
 		"walletLabels": {
 			"visible": "visível",
 			"hidden": "oculta"
+		}
+	},
+	"updateDone": {
+		"continue": "Continuar"
+	},
+	"coinMode": {
+		"change": "Alterar"
+	},
+	"security": {
+		"dice": {
+			"can": "Você insere {{rollCount}} lançamentos com o botão do dispositivo; eles nunca passam por este computador."
 		}
 	}
 }

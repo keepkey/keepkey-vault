@@ -87,5 +87,13 @@
   "validatingWallet": "Walidacja osłoniętego portfela względem łańcucha...",
   "hideFiltered": "Ukryj {{count}} odfiltrowany token",
   "showFiltered": "Pokaż {{count}} odfiltrowany token",
-  "invalidAddress": "Nieprawidłowy adres"
+  "invalidAddress": "Nieprawidłowy adres",
+  "defiNetwork": "Sieć",
+  "tokenCount_few": "{{count}} tokeny",
+  "tokenCount_many": "{{count}} tokenów",
+  "showFiltered_few": "Pokaż {{count}} odfiltrowane tokeny",
+  "showFiltered_many": "Pokaż {{count}} odfiltrowanych tokenów",
+  "hideFiltered_few": "Ukryj {{count}} odfiltrowane tokeny",
+  "hideFiltered_many": "Ukryj {{count}} odfiltrowanych tokenów",
+  "multisig": "Multisig"
 }

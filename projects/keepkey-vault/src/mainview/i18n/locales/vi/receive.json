@@ -12,5 +12,8 @@
 	"derivingAddress": "Đang dẫn xuất địa chỉ...",
 	"noAddressDerived": "Chưa có địa chỉ được dẫn xuất",
 	"deriveAddress": "Dẫn xuất địa chỉ",
-	"account": "Tài khoản {{index}}"
+	"account": "Tài khoản {{index}}",
+	"btcAccountType": {
+		"learnMore": "Tìm hiểu thêm"
+	}
 }

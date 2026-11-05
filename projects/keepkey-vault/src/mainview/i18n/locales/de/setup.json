@@ -122,7 +122,23 @@
 		"autoRebooting": "Ihr Gerät wird neu gestartet...",
 		"autoRebootingDetail": "Ihre KeepKey startet mit der neuen Firmware automatisch neu. Das dauert normalerweise nur wenige Sekunden.",
 		"waitingForDevice": "Warte auf Ihr Gerät...",
-		"wipeAndFlash": "Löschen & flashen"
+		"wipeAndFlash": "Löschen & flashen",
+		"installWipe": {
+			"wipeTitle": "Dadurch wird das Gerät gelöscht",
+			"unknownTitle": "Dadurch könnte das Gerät gelöscht werden",
+			"lockTitle": "Dadurch wird dein reines Bitcoin-Wallet gesperrt",
+			"noFirmwareTitle": "Jedes Wallet auf diesem KeepKey wird gelöscht",
+			"wipeAck": "Ich verstehe, dass mein Gerät gelöscht wird, und habe meine Wiederherstellungsphrase gesichert",
+			"unknownAck": "Ich verstehe, dass mein Gerät gelöscht werden könnte, und habe meine Wiederherstellungsphrase gesichert",
+			"lockAck": "Ich verstehe, dass mein Wallet gesperrt wird, und habe meine Wiederherstellungsphrase gesichert",
+			"downgradeTitle": "Dadurch wird das Gerät gelöscht",
+			"crossBody": "Dieser KeepKey verwendet die Firmware {{from}} v{{current}}. Die Firmware {{to}} v{{target}} kann das Wallet nicht lesen und löscht beim Start alle Schlüssel und Einstellungen. Um das Wallet erneut zu verwenden, musst du es mit deiner Wiederherstellungsphrase wiederherstellen.",
+			"downgradeBody": "Du installierst v{{target}} anstelle von v{{current}}. Die ältere Firmware kann den neueren Wallet-Speicher nicht lesen und löscht beim Start alle Schlüssel und Einstellungen. Du musst das Wallet mit deiner Wiederherstellungsphrase wiederherstellen.",
+			"lockBody": "Dieser KeepKey verwendet reine Bitcoin-Firmware. Die Firmware {{variant}} v{{target}} wird dieses Wallet nicht öffnen. Es bleibt auf dem Gerät, kann aber erst nach erneuter Installation der reinen Bitcoin-Firmware oder nach Löschen des Geräts und Wiederherstellen mit deiner Wiederherstellungsphrase verwendet werden.",
+			"unknownBody": "Im Bootloader-Modus lässt sich die installierte Firmware nicht erkennen. Das Installieren der Firmware {{variant}} kann alle Schlüssel und Einstellungen löschen, etwa beim Variantenwechsel oder beim Ersetzen inoffizieller oder neuerer Firmware. Wenn dieser KeepKey ein Wallet enthält, halte dessen Wiederherstellungsphrase bereit. Ein neuer KeepKey hat kein Wallet zu verlieren.",
+			"noFirmwareBody": "Auf diesem KeepKey ist keine Firmware installiert, etwa nach einem unterbrochenen Update. Falls er ein Wallet enthielt, wird es durch die Firmware-Installation gelöscht. Du musst es mit deiner Wiederherstellungsphrase wiederherstellen.",
+			"unsignedBody": "Dieser KeepKey verwendet keine offizielle KeepKey-Firmware. Das Installieren offizieller Firmware löscht alle Schlüssel und Einstellungen."
+		}
 	},
 	"initChoose": {
 		"title": "Wallet einrichten",
@@ -149,9 +165,10 @@
 		"failedToCreate": "Wallet-Erstellung fehlgeschlagen",
 		"failedToRecover": "Wallet-Wiederherstellung fehlgeschlagen",
 		"writeDownWarning": "Schreiben Sie jedes Wort auf!",
-		"writeDownDetail": "Ihre Wiederherstellungsphrase wird auf dem Gerätebildschirm angezeigt. Schreiben Sie jedes Wort auf Papier. Dies ist Ihre EINZIGE Sicherung; Sie werden diese Wörter NICHT erneut sehen.",
+		"writeDownDetail": "Wenn deine Wiederherstellungsphrase auf dem Gerätedisplay erscheint, schreibe jedes Wort auf Papier, bevor du fortfährst. Bewahre die Phrase sicher auf; du brauchst sie, um deine Wallet wiederherzustellen.",
 		"deviceLost": "Gerät getrennt. Schließen Sie es wieder an, um fortzufahren, oder gehen Sie zurück und versuchen Sie es erneut.",
-		"goBack": "Zurück"
+		"goBack": "Zurück",
+		"backToChoose": "Zurück"
 	},
 	"initLabel": {
 		"walletCreated": "Wallet erstellt!",
@@ -232,6 +249,17 @@
 		"walletLabels": {
 			"visible": "sichtbar",
 			"hidden": "versteckt"
+		}
+	},
+	"updateDone": {
+		"continue": "Fortfahren"
+	},
+	"coinMode": {
+		"change": "Ändern"
+	},
+	"security": {
+		"dice": {
+			"can": "Du gibst {{rollCount}} Würfe mit der Gerätetaste ein. Sie gelangen niemals auf diesen Computer."
 		}
 	}
 }

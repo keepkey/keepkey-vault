@@ -1,3 +1,4 @@
+import { useUiTranslation } from "../i18n/ui"
 import { Box, Button, Flex, HStack, Text, VStack } from "@chakra-ui/react"
 import { FaChevronRight, FaKey, FaLock } from "react-icons/fa"
 import { rpcRequest } from "../lib/rpc"
@@ -44,6 +45,8 @@ export function CreateWalletBriefing({
 	onWordCountChange: (wc: 12 | 18 | 24) => void
 	onConfirm: () => void
 }) {
+  const uiText = useUiTranslation()
+
 	return (
 		<VStack gap={4} w="100%" maxW="400px" mx="auto" css={{ animation: "tutorialFadeIn 0.3s ease-out" }}>
 			<style>{CARD_CSS}</style>
@@ -82,18 +85,12 @@ export function CreateWalletBriefing({
 						</Box>
 					</HStack>
 
-					<Text fontSize="xl" fontWeight="800" color="white" textAlign="center" letterSpacing="-0.02em">
-						Before you create a wallet
-					</Text>
+					<Text fontSize="xl" fontWeight="800" color="white" textAlign="center" letterSpacing="-0.02em">{uiText("Before you create a wallet")}</Text>
 
-					<Text fontSize="sm" color="gray.400" textAlign="center" lineHeight="1.6" maxW="340px">
-						The device generates the seed and shows the {wordCount} recovery words only on its
-						own screen — this computer never sees them. The words are the wallet: write them
-						on paper and never type them anywhere. A PIN protects the device, not the words.
-					</Text>
+					<Text fontSize="sm" color="gray.400" textAlign="center" lineHeight="1.6" maxW="340px">{uiText("The device generates the seed and shows the")}{" "}{wordCount}{" "}{uiText("recovery words only on its own screen — this computer never sees them. The words are the wallet: write them on paper and never type them anywhere. A PIN protects the device, not the words.")}</Text>
 
 					<VStack gap="1.5" w="100%">
-						<Text fontSize="xs" color="gray.500">Seed length</Text>
+						<Text fontSize="xs" color="gray.500">{uiText("Seed length")}</Text>
 						<Flex gap="2">
 							{([12, 18, 24] as const).map((wc) => (
 								<Box
@@ -112,14 +109,13 @@ export function CreateWalletBriefing({
 									transition="all 0.15s"
 									onClick={() => onWordCountChange(wc)}
 								>
-									{wc} words
-								</Box>
+									{wc}{" "}{uiText("words")}</Box>
 							))}
 						</Flex>
 						{/* ponytail: only nag when they leave the 128-bit default */}
 						{wordCount !== 12 && (
 							<Text fontSize="2xs" color="gray.500" textAlign="center" lineHeight="tall" maxW="320px">
-								{"Bitcoin's core standard is 128-bit (12 words). 256-bit seeds are supported but not recommended. "}
+								{uiText("Bitcoin's core standard is 128-bit (12 words). 256-bit seeds are supported but not recommended. ")}
 								{/* target="_blank" is a dead click in Electrobun — go through the RPC. */}
 								<Text
 									as="button"
@@ -128,9 +124,7 @@ export function CreateWalletBriefing({
 									onClick={() => {
 										rpcRequest("openUrl", { url: DOCS_LINKS.seedLengthEntropy }).catch(() => {})
 									}}
-								>
-									Learn more
-								</Text>
+								>{uiText("Learn more")}</Text>
 							</Text>
 						)}
 					</VStack>
@@ -149,7 +143,7 @@ export function CreateWalletBriefing({
 				onClick={onConfirm}
 			>
 				<HStack gap={2} justify="center">
-					<Text>Continue</Text>
+					<Text>{uiText("Continue")}</Text>
 					<FaChevronRight size={10} />
 				</HStack>
 			</Button>

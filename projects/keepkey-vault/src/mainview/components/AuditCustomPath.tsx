@@ -1,3 +1,4 @@
+import { useUiTranslation } from "../i18n/ui"
 /**
  * Custom-path search for the Audit walkthrough — guided steppers (account /
  * index / script-type) with an advanced raw BIP32 expander. Derives the path on
@@ -53,6 +54,8 @@ interface AuditCustomPathProps {
 }
 
 export function AuditCustomPath({ chainId, family, defaultPath, scriptType, onResult }: AuditCustomPathProps) {
+  const uiText = useUiTranslation()
+
   const [account, setAccount] = useState(0)
   const [index, setIndex] = useState(0)
   const [script, setScript] = useState(scriptType || 'p2wpkh')
@@ -102,14 +105,14 @@ export function AuditCustomPath({ chainId, family, defaultPath, scriptType, onRe
   return (
     <Box bg="whiteAlpha.50" borderRadius="md" p="3" mt="2">
       <Flex justify="space-between" align="center" mb="2">
-        <Text fontSize="11px" color="kk.textMuted" textTransform="uppercase" letterSpacing="0.08em">Custom path</Text>
-        <Button size="2xs" variant="ghost" color="kk.textMuted" onClick={() => setAdvanced(a => !a)}>{advanced ? 'Guided' : 'Advanced'}</Button>
+        <Text fontSize="11px" color="kk.textMuted" textTransform="uppercase" letterSpacing="0.08em">{uiText("Custom path")}</Text>
+        <Button size="2xs" variant="ghost" color="kk.textMuted" onClick={() => setAdvanced(a => !a)}>{advanced ? uiText("Guided") : uiText("Advanced")}</Button>
       </Flex>
 
       {!advanced ? (
         <Flex direction="column" gap="2">
           <Stepper label={isEvm ? 'Address index' : 'Account'} value={account} setValue={setAccount} />
-          {!isEvm && hasIndexSlot && <Stepper label="Receive index" value={index} setValue={setIndex} />}
+          {!isEvm && hasIndexSlot && <Stepper label={uiText("Receive index")} value={index} setValue={setIndex} />}
           {family === 'utxo' && (
             <Flex gap="1">
               {BTC_SCRIPTS.map(s => (
@@ -130,9 +133,7 @@ export function AuditCustomPath({ chainId, family, defaultPath, scriptType, onRe
 
       <Text fontSize="10px" fontFamily="mono" color="kk.textMuted" mt="2">{previewPath}</Text>
       {err && <Text fontSize="xs" color="red.400" mt="1">{err}</Text>}
-      <Button size="sm" w="100%" mt="2" bg="var(--teal)" color="black" fontWeight="600" _hover={{ bg: "#22c55e" }} loading={busy} onClick={check}>
-        Check this path
-      </Button>
+      <Button size="sm" w="100%" mt="2" bg="var(--teal)" color="black" fontWeight="600" _hover={{ bg: "#22c55e" }} loading={busy} onClick={check}>{uiText("Check this path")}</Button>
     </Box>
   )
 }

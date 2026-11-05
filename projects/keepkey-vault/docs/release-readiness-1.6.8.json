@@ -1,9 +1,9 @@
 {
   "version": "1.6.8",
-  "status": "gateway_deployed_local_candidate_verified_not_published",
-  "recordedAt": "2026-11-03T23:14:16.587154+00:00",
+  "status": "local_release_tests_passed_live_checks_and_packaging_blocked",
+  "recordedAt": "2026-11-04T05:16:18.654803+00:00",
   "branch": "prepare/1.6.8-candidate",
-  "candidateCodeRevision": "f0866499886ae2839ba9a05295dce00f182a536b",
+  "candidateCodeRevision": "04c968e37e4a6624c69383d5f558fb82ade7fb27",
   "baseReleaseRevision": "1368fadbb17516553c720ea535fe249c6b3f37d7",
   "auditSourceRevision": "661fc89653b04f150001f4458879dc78f5fb4db9",
   "auditIntegratedRevision": "2e162f0f8",
@@ -38,6 +38,10 @@
         4,
         6,
         49,
+        10,
+        8,
+        2,
+        35,
         3,
         5,
         12,
@@ -45,10 +49,10 @@
         53
       ],
       "scriptSuites": "passed",
-      "log": "/private/tmp/vault-live-release-tests.log",
-      "totalTestsPassed": 2403,
+      "log": "/private/tmp/vault-168-final-unit-unsandboxed.log",
+      "totalTestsPassed": 2458,
       "scriptChecksPassed": 17,
-      "codeRevision": "f0866499886ae2839ba9a05295dce00f182a536b"
+      "codeRevision": "04c968e37e4a6624c69383d5f558fb82ade7fb27"
     },
     "auditFocusedTests": {
       "status": "passed",
@@ -60,24 +64,26 @@
     },
     "preflight": {
       "command": "make preflight",
-      "status": "passed",
-      "log": "/private/tmp/vault-live-preflight.log",
-      "codeRevision": "f0866499886ae2839ba9a05295dce00f182a536b"
+      "status": "blocked_network",
+      "log": "/private/tmp/vault-168-final-preflight-unsandboxed.log",
+      "codeRevision": "04c968e37e4a6624c69383d5f558fb82ade7fb27",
+      "note": "Local pins, certified emulator, build inputs and host contract pass. Remote canonical branch and pinned-commit CI checks unavailable because DNS resolution fails."
     },
     "typecheck": {
       "status": "within_existing_baseline",
-      "diagnostics": 812,
+      "diagnostics": 813,
       "baseline": 1033,
       "clean": false
     },
     "nativeBuild": {
       "command": "bun run build",
-      "status": "passed",
+      "status": "blocked_at_macos_icon_conversion",
       "platform": "macOS arm64 development",
       "signed": false,
       "notarized": false,
-      "log": "/private/tmp/vault-live-native-build.log",
-      "codeRevision": "f0866499886ae2839ba9a05295dce00f182a536b"
+      "log": "/private/tmp/vault-168-final-build.log",
+      "codeRevision": "04c968e37e4a6624c69383d5f558fb82ade7fb27",
+      "note": "Backend and frontend bundling completed; sandboxed macOS iconutil conversion failed. Unsandboxed build was interrupted before execution. Packaging is not verified on this revision."
     },
     "certifiedEmulator": {
       "status": "verified",
@@ -117,9 +123,9 @@
       "customerBalanceReconciled": false
     },
     "platformCi": {
-      "status": "pending_on_final_candidate_push",
-      "revision": "f0866499886ae2839ba9a05295dce00f182a536b",
-      "note": "Full local release checks and the macOS arm64 development build pass. Final platform packaging remains a release gate."
+      "status": "unverified_network_unavailable",
+      "revision": "04c968e37e4a6624c69383d5f558fb82ade7fb27",
+      "note": "GitHub API is unreachable from this session; no final-candidate CI dispatch or result has been verified."
     },
     "quoteErrorParsing": {
       "status": "passed",
@@ -279,5 +285,40 @@
     "document": "https://github.com/BitHighlander/keepkey-gateway/blob/master/docs/REALTIME-PARITY.md",
     "evidence": "projects/keepkey-vault/docs/provider-parity-audit-20261103/live-payments.json",
     "note": "Standard-wallet closed-client monitoring, bounded history catchup, seven-day queue replay and explicit acknowledgments are verified. Hidden wallets remain active-only. Provider-page limits and exact receipt metadata limits are documented."
+  },
+  "blueGatewayPreparation": {
+    "status": "applied_to_pioneer_and_gateway_working_trees_not_deployed",
+    "target": "https://api-blue.keepkey.info",
+    "gatewayBaseRevision": "bff70f2a83e2db01a7acb8f06d2dd714974ceaf3",
+    "legacyPioneerBaseRevision": "628bb6054b0c62ea5303a90509e9a9fefdaad466",
+    "patchDirectory": "docs/handoffs/blue-gateway-cutover-20261104",
+    "gatewayTests": {
+      "passed": 234,
+      "skipped": 21,
+      "failed": 0,
+      "typecheck": "passed",
+      "note": "Skipped integration checks need an isolated database; this run does not establish live deployment readiness."
+    },
+    "workflowVerification": "YAML parses, retained legacy jobs unchanged against their base, all job dependencies resolve",
+    "blockingConditions": [
+      "No host DNS configuration; API, gateway and GitHub names fail to resolve",
+      "doctl fails with unknown userid 501; live Kubernetes inventory unavailable"
+    ],
+    "liveChangesApplied": false,
+    "sourceCheckouts": {
+      "pioneer": "/Users/highlander/WebstormProjects/keepkey-stack/projects/pioneer",
+      "gateway": "/Users/highlander/WebstormProjects/keepkey-stack/projects/keepkey-gateway"
+    }
+  },
+  "legacyPioneerBalanceFix": {
+    "status": "applied_to_source_and_compiled_entrypoint_not_deployed",
+    "change": "Preserve Litecoin Mtub wrapped SegWit version instead of converting to Bitcoin ypub. Retain legacy Ltub/dgub/drkp normalization.",
+    "regressionTest": "modules/intergrations/blockbook/__tests__/test-descriptor-routing.js",
+    "regressionResult": "passed: routing, Mtub preservation, native key preservation and legacy descriptor normalization",
+    "credentialTestsPassed": 6,
+    "moduleTypecheck": "passed",
+    "existingWorktreeEditsPreserved": true,
+    "committed": false,
+    "published": false
   }
 }

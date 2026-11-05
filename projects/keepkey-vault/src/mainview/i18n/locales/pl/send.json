@@ -53,5 +53,7 @@
 	"invalidSolanaAddress": "Nieprawidłowy adres Solana — musi mieć 32-44 znaki base58",
 	"invalidTronAddress": "Nieprawidłowy adres Tron — musi zaczynać się od T (34 znaki)",
 	"invalidTonAddress": "Nieprawidłowy adres TON",
-	"invalidZcashShieldedAddress": "Nieprawidłowy adres chroniony — musi zaczynać się od u1"
+	"invalidZcashShieldedAddress": "Nieprawidłowy adres chroniony — musi zaczynać się od u1",
+	"feeCustom": "Własny",
+	"invalidAmount": "Wpisz kwotę dziesiętną bez separatorów tysięcy, na przykład 1,5."
 }

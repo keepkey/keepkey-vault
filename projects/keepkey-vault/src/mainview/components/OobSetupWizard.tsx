@@ -1,3 +1,4 @@
+import { useUiTranslation, firmwareProgressText } from "../i18n/ui"
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Box, Text, VStack, HStack, Flex, Button, Spinner, Input } from '@chakra-ui/react'
@@ -155,6 +156,8 @@ const confettiPieces = Array.from({ length: 50 }, (_, i) => ({
 // ── Main Wizard ─────────────────────────────────────────────────────────────
 
 export function OobSetupWizard({ onComplete: onCompleteProp, onWalletCreated, onSkipFirmware, onSetupInProgress, onWordCountChange }: OobSetupWizardProps) {
+  const uiText = useUiTranslation()
+
   const [step, setStep] = useState<WizardStep>('authenticity')
   useEffect(() => {
     rpcRequest('logOnboarding', { event: `wizard step=${step}` }).catch(() => {})
@@ -1500,7 +1503,7 @@ export function OobSetupWizard({ onComplete: onCompleteProp, onWalletCreated, on
                                 : t('bootloader.outdated')}
                             </Text>
                           </VStack>
-                          <Text color="kk.textMuted">&rarr;</Text>
+                          <Text color="kk.textMuted">{uiText("&rarr;")}</Text>
                           <VStack gap={0.5} align="end">
                             <Text fontSize="2xs" color="kk.textSecondary" textTransform="uppercase">{t('bootloader.latest')}</Text>
                             <Text fontSize="sm" color="var(--teal)" fontWeight="bold">
@@ -1515,8 +1518,7 @@ export function OobSetupWizard({ onComplete: onCompleteProp, onWalletCreated, on
                         <HStack justify="center" gap={2}>
                           <FaCheckCircle color="var(--teal)" size={14} />
                           <Text fontSize="sm" color="var(--teal)" fontWeight="bold">
-                            v{deviceStatus.bootloaderVersion || deviceStatus.latestBootloader} — Up to date
-                          </Text>
+                            v{deviceStatus.bootloaderVersion || deviceStatus.latestBootloader}{" "}{uiText("— Up to date")}</Text>
                         </HStack>
                       </Box>
                     )}
@@ -1581,7 +1583,7 @@ export function OobSetupWizard({ onComplete: onCompleteProp, onWalletCreated, on
                                 : t('bootloader.outdated')}
                             </Text>
                           </VStack>
-                          <Text color="kk.textMuted">&rarr;</Text>
+                          <Text color="kk.textMuted">{uiText("&rarr;")}</Text>
                           <VStack gap={0.5} align="end">
                             <Text fontSize="2xs" color="kk.textSecondary" textTransform="uppercase">{t('bootloader.latest')}</Text>
                             <Text fontSize="sm" color="var(--teal)" fontWeight="bold">
@@ -1596,8 +1598,7 @@ export function OobSetupWizard({ onComplete: onCompleteProp, onWalletCreated, on
                         <HStack justify="center" gap={2}>
                           <FaCheckCircle color="var(--teal)" size={14} />
                           <Text fontSize="sm" color="var(--teal)" fontWeight="bold">
-                            v{deviceStatus.bootloaderVersion || deviceStatus.latestBootloader} — Up to date
-                          </Text>
+                            v{deviceStatus.bootloaderVersion || deviceStatus.latestBootloader}{" "}{uiText("— Up to date")}</Text>
                         </HStack>
                       </Box>
                     )}
@@ -1722,7 +1723,7 @@ export function OobSetupWizard({ onComplete: onCompleteProp, onWalletCreated, on
                     </Text>
                     <Spinner size="md" color="blue.400" />
                     <Text fontSize="xs" color="kk.textSecondary">
-                      {updateProgress?.message || t('bootloader.updatingBootloader')}
+                      {firmwareProgressText(updateProgress) || t('bootloader.updatingBootloader')}
                     </Text>
 
                     {deviceStatus.latestBootloader && (
@@ -1734,7 +1735,7 @@ export function OobSetupWizard({ onComplete: onCompleteProp, onWalletCreated, on
                               v{deviceStatus.firmwareVersion || '?'}
                             </Text>
                           </VStack>
-                          <Text color="kk.textMuted">&rarr;</Text>
+                          <Text color="kk.textMuted">{uiText("&rarr;")}</Text>
                           <VStack gap={0.5} align="end">
                             <Text fontSize="2xs" color="kk.textSecondary" textTransform="uppercase">{t('bootloader.latest')}</Text>
                             <Text fontSize="sm" color="var(--teal)" fontWeight="bold">
@@ -1834,7 +1835,7 @@ export function OobSetupWizard({ onComplete: onCompleteProp, onWalletCreated, on
                             </Box>
                           )}
                         </VStack>
-                        <Text color="kk.textMuted" fontSize="lg">&rarr;</Text>
+                        <Text color="kk.textMuted" fontSize="lg">{uiText("&rarr;")}</Text>
                         <VStack gap={0.5} align="end">
                           <Text fontSize="xs" color="kk.textSecondary" textTransform="uppercase" fontWeight="600">{t('bootloader.latest')}</Text>
                           <Text fontSize="md" color="var(--teal)" fontWeight="bold">
@@ -2011,15 +2012,15 @@ export function OobSetupWizard({ onComplete: onCompleteProp, onWalletCreated, on
                     {customFwAnalysis.imageKind !== 'firmware' && (
                       <Text fontSize="xs" color="red.300" w="100%">
                         {customFwAnalysis.imageKind === 'bootloader-updater'
-                          ? 'This is a bootloader updater, not firmware. Drop it on the Vault window to review and install it there.'
-                          : 'This is not a KeepKey firmware image, so it cannot be flashed.'}
+                          ? uiText("This is a bootloader updater, not firmware. Drop it on the Vault window to review and install it there.")
+                          : uiText("This is not a KeepKey firmware image, so it cannot be flashed.")}
                       </Text>
                     )}
 
                     <Box w="100%" p={3} bg="kk.cardBg" borderRadius="lg">
                       <VStack gap={2} align="stretch">
                         <HStack justify="space-between">
-                          <Text fontSize="xs" color="kk.textSecondary">File</Text>
+                          <Text fontSize="xs" color="kk.textSecondary">{uiText("File")}</Text>
                           <Text fontSize="xs" color="white" fontFamily="mono">{customFwFileName}</Text>
                         </HStack>
                         <HStack justify="space-between">
@@ -2059,9 +2060,7 @@ export function OobSetupWizard({ onComplete: onCompleteProp, onWalletCreated, on
                       <Box w="100%" p={3} bg="rgba(224,140,123,0.10)" borderRadius="md" borderWidth="2px" borderColor="var(--rose)">
                         <HStack gap={2} mb={2}>
                           <FaExclamationTriangle color="var(--rose)" size={16} />
-                          <Text fontSize="sm" fontWeight="bold" color="var(--rose)" textTransform="uppercase" letterSpacing="0.03em">
-                            THIS WILL WIPE THE DEVICE
-                          </Text>
+                          <Text fontSize="sm" fontWeight="bold" color="var(--rose)" textTransform="uppercase" letterSpacing="0.03em">{uiText("THIS WILL WIPE THE DEVICE")}</Text>
                         </HStack>
                         <Text fontSize="xs" color="red.200" mb={2} lineHeight="1.5">
                           {t('firmware.willWipeWarning')}
@@ -2096,9 +2095,7 @@ export function OobSetupWizard({ onComplete: onCompleteProp, onWalletCreated, on
                       <Box w="100%" p={3} bg="rgba(224,140,123,0.10)" borderRadius="md" borderWidth="2px" borderColor="orange.500">
                         <HStack gap={2} mb={2}>
                           <FaExclamationTriangle color="var(--gold)" size={14} />
-                          <Text fontSize="xs" fontWeight="bold" color="orange.300">
-                            Developer Firmware — Potential Device Wipe
-                          </Text>
+                          <Text fontSize="xs" fontWeight="bold" color="orange.300">{uiText("Developer Firmware — Potential Device Wipe")}</Text>
                         </HStack>
                         <Text fontSize="2xs" color="orange.200" mb={2} lineHeight="1.5">
                           {t('firmware.unsignedBootloaderWarning')}
@@ -2154,9 +2151,7 @@ export function OobSetupWizard({ onComplete: onCompleteProp, onWalletCreated, on
                         _hover={{ borderColor: 'var(--gold)', color: 'white', bg: 'rgba(233,196,106, 0.08)' }}
                         transition="all 0.15s ease"
                         onClick={handleCustomFwReset}
-                      >
-                        Cancel
-                      </Button>
+                      >{uiText("Cancel")}</Button>
                       <Button
                         flex={1}
                         size="sm"
@@ -2193,7 +2188,7 @@ export function OobSetupWizard({ onComplete: onCompleteProp, onWalletCreated, on
                   <VStack gap={2} w="100%">
                     <Spinner size="md" color={HIGHLIGHT} />
                     <Text fontSize="sm" fontWeight="bold" color="white">
-                      {customFwProgress?.message || t('firmware.uploadingFirmware')}
+                      {firmwareProgressText(customFwProgress) || t('firmware.uploadingFirmware')}
                     </Text>
                     <Box w="100%" h="8px" bg="kk.cardBg" borderRadius="full" overflow="hidden">
                       <Box
@@ -2764,9 +2759,7 @@ export function OobSetupWizard({ onComplete: onCompleteProp, onWalletCreated, on
                   textAlign="center"
                   _hover={{ color: 'gray.500' }}
                   onClick={() => setDevLoadOpen(true)}
-                >
-                  Developer: load seed
-                </Text>
+                >{uiText("Developer: load seed")}</Text>
               </VStack>
             )}
 
@@ -2835,17 +2828,12 @@ export function OobSetupWizard({ onComplete: onCompleteProp, onWalletCreated, on
                     <Box w="100%" bg="rgba(255,255,255,0.03)" border="1px solid" borderColor="rgba(233,196,106,0.33)" borderRadius="2xl" p={6}>
                       <VStack gap={3}>
                         <FaExclamationTriangle color="var(--gold)" size={26} />
-                        <Text fontSize="xl" fontWeight="800" color="white" textAlign="center">Set a PIN to finish setup</Text>
-                        <Text fontSize="sm" color="gray.400" textAlign="center" lineHeight="1.6">
-                          The seed is loaded, but the device has no PIN yet ({devPinError}). Anyone holding it
-                          could use the wallet, so setup does not finish until a PIN is set.
-                        </Text>
+                        <Text fontSize="xl" fontWeight="800" color="white" textAlign="center">{uiText("Set a PIN to finish setup")}</Text>
+                        <Text fontSize="sm" color="gray.400" textAlign="center" lineHeight="1.6">{uiText("The seed is loaded, but the device has no PIN yet (")}{devPinError}{uiText("). Anyone holding it could use the wallet, so setup does not finish until a PIN is set.")}</Text>
                       </VStack>
                     </Box>
                     <Button w="100%" size="md" bg="var(--gold)" color="black" fontWeight="700" _hover={{ opacity: 0.9 }}
-                      onClick={() => void handleDevSetPin()}>
-                      Set PIN
-                    </Button>
+                      onClick={() => void handleDevSetPin()}>{uiText("Set PIN")}</Button>
                   </VStack>
                 )}
 
@@ -2878,7 +2866,7 @@ export function OobSetupWizard({ onComplete: onCompleteProp, onWalletCreated, on
                             <FaExclamationTriangle color="var(--rose)" size={20} />
                           </HStack>
                           <Text fontSize="xs" color="var(--rose)" textAlign="center" fontWeight="600">
-                            {t('initProgress.writeDownDetail', { defaultValue: 'Your recovery phrase is showing on the device screen. Write each word on paper. This is your ONLY backup — you will NOT see these words again.' })}
+                            {t('initProgress.writeDownDetail', { defaultValue: 'When your recovery phrase appears on the device screen, write every word on paper before continuing. Keep the phrase safe; you need it to recover your wallet.' })}
                           </Text>
                         </VStack>
                       </Box>
@@ -2888,9 +2876,7 @@ export function OobSetupWizard({ onComplete: onCompleteProp, onWalletCreated, on
                       <Box w="100%" p={3} bg="orange.900" borderRadius="lg" borderWidth="2px" borderColor="orange.400">
                         <HStack gap={2} justify="center">
                           <Spinner size="xs" color="orange.300" />
-                          <Text fontSize="xs" color="orange.200" fontWeight="bold">
-                            Check the Emulator window for prompts
-                          </Text>
+                          <Text fontSize="xs" color="orange.200" fontWeight="bold">{uiText("Check the Emulator window for prompts")}</Text>
                         </HStack>
                       </Box>
                     )}
@@ -3093,8 +3079,7 @@ export function OobSetupWizard({ onComplete: onCompleteProp, onWalletCreated, on
                     <VStack gap={3} w="100%">
                       {quizPositions.map((pos) => (
                         <Box key={pos} w="100%">
-                          <Text fontSize="xs" color="kk.textSecondary" mb={1} textAlign="left">
-                            Word #{pos}
+                          <Text fontSize="xs" color="kk.textSecondary" mb={1} textAlign="left">{uiText("Word #")}{pos}
                           </Text>
                           <input
                             type="text"
@@ -3551,29 +3536,16 @@ export function OobSetupWizard({ onComplete: onCompleteProp, onWalletCreated, on
             <Box px={4} py={3} borderBottomWidth="1px" borderColor="kk.cardBg">
               <HStack gap={2}>
                 <FaExclamationTriangle color="var(--rose)" size={16} />
-                <Text fontSize="sm" fontWeight="bold" color="var(--rose)">
-                  Developer Seed Loading
-                </Text>
+                <Text fontSize="sm" fontWeight="bold" color="var(--rose)">{uiText("Developer Seed Loading")}</Text>
               </HStack>
             </Box>
 
             <Box px={4} py={3}>
               <Box p={4} bg="rgba(224,140,123,0.10)" borderRadius="md" borderWidth="1px" borderColor="var(--rose)" mb={4}>
                 <VStack gap={3} align="start">
-                  <Text fontSize="sm" color="red.200" fontWeight="bold">
-                    This defeats the purpose of a hardware wallet.
-                  </Text>
-                  <Text fontSize="xs" color="var(--rose)" lineHeight="tall">
-                    Loading a seed phrase via software transmits it over USB in
-                    plaintext. Any malware on this computer can intercept it.
-                    The entire security model of your KeepKey relies on the seed
-                    never leaving the device — this bypasses that protection
-                    entirely.
-                  </Text>
-                  <Text fontSize="xs" color="var(--rose)" lineHeight="tall">
-                    For development purposes only.
-                    Never load a seed that controls real funds.
-                  </Text>
+                  <Text fontSize="sm" color="red.200" fontWeight="bold">{uiText("This defeats the purpose of a hardware wallet.")}</Text>
+                  <Text fontSize="xs" color="var(--rose)" lineHeight="tall">{uiText("Loading a seed phrase via software transmits it over USB in plaintext. Any malware on this computer can intercept it. The entire security model of your KeepKey relies on the seed never leaving the device — this bypasses that protection entirely.")}</Text>
+                  <Text fontSize="xs" color="var(--rose)" lineHeight="tall">{uiText("For development purposes only. Never load a seed that controls real funds.")}</Text>
                 </VStack>
               </Box>
 
@@ -3598,21 +3570,17 @@ export function OobSetupWizard({ onComplete: onCompleteProp, onWalletCreated, on
                   mt="2px"
                   style={{ accentColor: '#E53E3E', width: '16px', height: '16px', flexShrink: 0 }}
                 />
-                <Text fontSize="xs" color="kk.textSecondary" lineHeight="tall">
-                  I understand this is for development only and that loading a
-                  seed over USB compromises device security. I will not use a
-                  seed that holds real funds.
-                </Text>
+                <Text fontSize="xs" color="kk.textSecondary" lineHeight="tall">{uiText("I understand this is for development only and that loading a seed over USB compromises device security. I will not use a seed that holds real funds.")}</Text>
               </Box>
 
               {/* Seed input */}
               <Box mb={4}>
-                <Text fontSize="xs" color="kk.textSecondary" mb={1}>BIP-39 Mnemonic (12, 18, or 24 words)</Text>
+                <Text fontSize="xs" color="kk.textSecondary" mb={1}>{uiText("BIP-39 Mnemonic (12, 18, or 24 words)")}</Text>
                 <Box
                   as="textarea"
                   value={devSeed}
                   onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setDevSeed(e.target.value)}
-                  placeholder="abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about"
+                  placeholder={uiText("abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about")}
                   w="100%"
                   rows={3}
                   p={3}
@@ -3631,8 +3599,7 @@ export function OobSetupWizard({ onComplete: onCompleteProp, onWalletCreated, on
                 />
                 {devSeed.trim() && (
                   <Text fontSize="xs" color="kk.textMuted" mt={1}>
-                    {devSeed.trim().split(/\s+/).length} words
-                  </Text>
+                    {devSeed.trim().split(/\s+/).length}{" "}{uiText("words")}</Text>
                 )}
               </Box>
 
@@ -3643,18 +3610,14 @@ export function OobSetupWizard({ onComplete: onCompleteProp, onWalletCreated, on
                   color="kk.textSecondary"
                   _hover={{ color: 'white', bg: 'gray.700' }}
                   onClick={handleDevLoadCancel}
-                >
-                  Cancel
-                </Button>
+                >{uiText("Cancel")}</Button>
                 <Button
                   bg="var(--rose)"
                   color="white"
                   _hover={{ bg: 'red.500' }}
                   disabled={!devAcknowledged || !devSeed.trim() || devSeed.trim().split(/\s+/).length < 12}
                   onClick={handleDevLoadDevice}
-                >
-                  Load Device
-                </Button>
+                >{uiText("Load Device")}</Button>
               </HStack>
             </Box>
           </Box>

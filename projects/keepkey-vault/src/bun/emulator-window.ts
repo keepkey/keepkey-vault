@@ -16,6 +16,7 @@ import { join } from 'path'
 import { homedir } from 'os'
 import { getActiveFlashName } from './emulator'
 import { recordReviewScreen, reviewTapeRecording } from './test-review-tape'
+import type { PinRequestType } from '../shared/types'
 
 const TAG = '[emu-window]'
 
@@ -130,8 +131,11 @@ let pendingCapture: {
  * crashes the WebContent process (EXC_BREAKPOINT in WebPageProxy launch).
  */
 let viewReady = false
+// Close events and bridge requests can arrive after a replacement window opens.
+// Each window owns its callbacks; an old one must never mutate the new display.
+let windowGeneration = 0
 
-function startBridge(): number {
+function startBridge(generation: number): number {
   if (bridgeServer) return bridgePort
 
   bridgeServer = Bun.serve({
@@ -144,6 +148,9 @@ function startBridge(): number {
     // of emitting Bun's default 10-second request timeout after a valid click.
     idleTimeout: 120,
     fetch(req) {
+      if (generation !== windowGeneration) {
+        return new Response('window closed', { status: 410, headers: { 'Access-Control-Allow-Origin': '*' } })
+      }
       const url = new URL(req.url)
 
       if (url.pathname === '/_emu/confirm' && req.method === 'POST') {
@@ -244,25 +251,32 @@ export function openEmulatorWindow(): void {
   // prior window can't let sendToWindow inject before this webview is ready.
   viewReady = false
 
-  const port = startBridge()
+  const generation = ++windowGeneration
+  const port = startBridge(generation)
   const saved = loadWindowState()
   console.log(`${TAG} Opening emulator window at (${saved.x}, ${saved.y}) ${saved.width}x${saved.height}`)
 
-  emuWindow = new BrowserWindow({
+  const window = new BrowserWindow({
     title: `KeepKey Emulator: ${getActiveFlashName()}`,
     html: buildEmulatorHTML(port),
     rpc: emuRpc,
     frame: { width: saved.width, height: saved.height, x: saved.x, y: saved.y },
   })
+  emuWindow = window
 
-  emuWindow.on('close', () => {
+  window.on('close', () => {
+    if (emuWindow !== window) return
     try {
-      const frame = emuWindow?.getFrame?.()
+      const frame = window.getFrame?.()
       if (frame) saveWindowState(frame)
     } catch {}
 
     console.log(`${TAG} Emulator window closed`)
+    emuWindow = null
+    viewReady = false
+    windowGeneration++
     stopDisplayPoll()
+    stopBridge()
     if (pendingConfirm) {
       pendingConfirm.resolve(false)
       pendingConfirm = null
@@ -274,8 +288,6 @@ export function openEmulatorWindow(): void {
       pendingSeedAck.reject(new Error('Emulator window closed before seed words were acknowledged'))
       pendingSeedAck = null
     }
-    emuWindow = null
-    viewReady = false
   })
 
   startDisplayPoll()
@@ -283,9 +295,15 @@ export function openEmulatorWindow(): void {
 
 export function closeEmulatorWindow(): void {
   if (!emuWindow) return
+  const window = emuWindow
+  // Retire this owner before close(): Electrobun can deliver the close event
+  // synchronously or after the caller has already opened another window.
+  emuWindow = null
+  viewReady = false
+  windowGeneration++
   stopDisplayPoll()
   try {
-    const frame = emuWindow.getFrame?.()
+    const frame = window.getFrame?.()
     if (frame) saveWindowState(frame)
   } catch {}
   console.log(`${TAG} Closing emulator window`)
@@ -297,9 +315,7 @@ export function closeEmulatorWindow(): void {
     pendingSeedAck.reject(new Error('Emulator window closed before seed words were acknowledged'))
     pendingSeedAck = null
   }
-  try { emuWindow.close() } catch {}
-  emuWindow = null
-  viewReady = false
+  try { window.close() } catch {}
   stopBridge()
 }
 
@@ -506,6 +522,16 @@ function sendDismiss(): void {
   sendToWindow('emu-state', { state: 'idle' })
 }
 
+/** Update instructions without exposing or copying the firmware's PIN grid. */
+export function displayPinPrompt(type: PinRequestType): void {
+  sendToWindow('pin-request', { type })
+}
+
+/** The device stopped asking (PIN sent or refused): drop the stale instructions. */
+export function clearPinPrompt(): void {
+  sendToWindow('confirm-dismiss', {})
+}
+
 // ── Display polling (real OLED framebuffer) ─────────────────────────────
 //
 // Strategy: the dylib's libkkemu_capture_frame() callback fires from inside
@@ -521,6 +547,8 @@ function sendDismiss(): void {
 // doesn't fill the queue.
 
 let displayPollTimer: ReturnType<typeof setInterval> | null = null
+let displayPollStarting = false
+let displayPollGeneration = 0
 let cachedPopFrames: (() => Uint8Array[]) | null = null
 const playbackQueue: Uint8Array[] = []
 /** Newest frame the firmware drew, whatever the window has played back so far. */
@@ -531,13 +559,18 @@ const PLAYBACK_TICK_SLOW_MS = 350 // post-approval: linger so confirm screens ar
 let slowPlaybackUntil = 0 // epoch ms; emit at the slow cadence until then (F4)
 
 export function startDisplayPoll(): void {
-  if (displayPollTimer) return
+  if (displayPollTimer || displayPollStarting) return
+  const generation = ++displayPollGeneration
+  displayPollStarting = true
   import('./emulator').then(mod => {
+    if (generation !== displayPollGeneration) return
+    displayPollStarting = false
     cachedPopFrames = mod.emuPopFrames
     // Self-rescheduling timer so the cadence can change per tick: normal
     // ~15fps, but slower right after an approval so the burst of confirm
     // screens (rendered in one synchronous kkemu_poll) is readable (F4).
     const tick = () => {
+      if (generation !== displayPollGeneration) return
       if (!emuWindow || !cachedPopFrames) { displayPollTimer = setTimeout(tick, PLAYBACK_TICK_MS); return }
 
       // Always drain the C ring so the dylib doesn't overflow during the
@@ -566,13 +599,20 @@ export function startDisplayPoll(): void {
       displayPollTimer = setTimeout(tick, delay)
     }
     displayPollTimer = setTimeout(tick, PLAYBACK_TICK_MS)
+  }).catch(err => {
+    if (generation !== displayPollGeneration) return
+    displayPollStarting = false
+    console.warn(`${TAG} Failed to start display polling:`, err?.message)
   })
 }
 
 export function stopDisplayPoll(): void {
+  displayPollGeneration++
+  displayPollStarting = false
   if (displayPollTimer) { clearTimeout(displayPollTimer); displayPollTimer = null }
   cachedPopFrames = null
   playbackQueue.length = 0
+  latestFrame = null
 }
 
 /** Transport delegate fields the confirm gate needs (a subset of EmulatorTransportDelegate). */
@@ -871,6 +911,7 @@ function buildEmulatorHTML(bridgePort: number): string {
       console.log('[emu-ui] Received:', packet.id);
       if (packet.id === 'confirm-request') onConfirmRequest(packet.payload);
       if (packet.id === 'confirm-dismiss') onConfirmDismiss();
+      if (packet.id === 'pin-request') onPinRequest(packet.payload);
       if (packet.id === 'seed-display') onSeedDisplay(packet.payload);
       if (packet.id === 'seed-dismiss') onSeedDismiss();
       if (packet.id === 'capture-request') onCaptureRequest(packet.payload);
@@ -960,6 +1001,16 @@ function buildEmulatorHTML(bridgePort: number): string {
     confirmMeta.innerHTML = '';
     confirmMeta.classList.remove('visible');
     buttons.classList.remove('visible');
+  }
+
+  function onPinRequest(data) {
+    currentConfirmId = null;
+    buttons.classList.remove('visible');
+    var heading = data.type === 'new-first' ? 'Create PIN (1 of 2)'
+      : data.type === 'new-second' ? 'Confirm PIN (2 of 2)' : 'Enter current PIN';
+    confirmMeta.innerHTML = '<div class="op-label">' + heading + '</div>'
+      + '<div class="detail">Use the numbers on this screen to select the matching positions in KeepKey Vault.</div>';
+    confirmMeta.classList.add('visible');
   }
 
   function onSeedDisplay(data) {

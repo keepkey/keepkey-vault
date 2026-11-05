@@ -87,5 +87,11 @@
   "validatingWallet": "Validando la billetera blindada contra la cadena...",
   "hideFiltered": "Ocultar {{count}} token filtrado",
   "showFiltered": "Mostrar {{count}} token filtrado",
-  "invalidAddress": "Dirección inválida"
+  "invalidAddress": "Dirección inválida",
+  "defiNetwork": "Red",
+  "defiSymbol": "Símbolo",
+  "tokenCount_many": "{{count}} tokens",
+  "showFiltered_many": "Mostrar {{count}} tokens filtrados",
+  "hideFiltered_many": "Ocultar {{count}} tokens filtrados",
+  "multisig": "Multifirma"
 }

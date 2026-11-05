@@ -159,14 +159,10 @@
 	"approvalWaiting": "승인 확인 대기 중…",
 	"approvalWaitingDesc": "스왑에 서명하기 전에 승인이 채굴되기를 기다리는 중입니다.",
 	"balanceChanges": "잔액 변동",
-	"blindSignBody": "Solana 스왑은 KeepKey가 완전히 해독할 수 없는 버전 트랜잭션을 사용하므로 블라인드 서명이 필요합니다. 이 기능은 기본적으로 꺼져 있습니다. 활성화하면 기기에서 고급 모드(블라인드 서명)가 켜지며, 기기에서 변경을 확인하라는 요청을 받게 됩니다.",
-	"blindSignCaveat": "블라인드 서명은 기기가 해독된 세부 정보 대신 일반 프롬프트를 표시함을 의미합니다. 여기서 직접 시작한 스왑에 대해서만 진행하세요. 기기 설정 → 서명 정책에서 다시 끌 수 있습니다.",
 	"blindSignConfirmOnDevice": "기기에서 확인하세요…",
 	"blindSignDeclined": "기기에서 거부됨 — 블라인드 서명이 활성화되지 않았습니다.",
-	"blindSignEnable": "블라인드 서명 활성화",
 	"blindSignEnableFailed": "기기에서 블라인드 서명을 활성화하지 못했습니다.",
 	"blindSignHeader": "블라인드 서명",
-	"blindSignTitle": "Solana용 블라인드 서명 활성화",
 	"block": "블록",
 	"cancelSwapDevice": "취소 - 기기 프롬프트 해제",
 	"completed": "완료됨",
@@ -202,5 +198,9 @@
 	"youReceived": "수령 금액",
 	"exceedsSafeMax": "네트워크 수수료를 위해 ~{{reserve}} {{symbol}}를 남기세요 — 수량을 줄이거나 MAX를 탭하세요.",
 	"sent": "전송됨",
-	"gas": "Gas"
+	"gas": "Gas",
+	"deviceBlindSignCaveat": "블라인드 서명은 KeepKey가 잠기거나 연결이 해제될 때까지 이 스왑뿐 아니라 KeepKey를 사용하는 모든 앱에 적용됩니다. 활성화된 동안 이 앱도 해당 거래 전에 이 화면을 표시하지 않습니다. 기기에서 확인하고 PIN을 다시 입력해야 합니다.",
+	"solanaOutflowDrain": "경고: 이 작업으로 지갑이 비게 됩니다. 의도한 경우가 아니라면 서명하지 마세요.",
+	"solanaOutflowCaveat": "이 컴퓨터에서 Solana 노드로 시뮬레이션했습니다. KeepKey는 이 수치를 확인할 수 없습니다.",
+	"deviceBlindSignEnable": "블라인드 서명 켜기"
 }

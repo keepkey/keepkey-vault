@@ -1,3 +1,5 @@
+import { getNumberLocale } from "../lib/number-locale"
+import { useUiTranslation } from "../i18n/ui"
 import { useState, useEffect, useCallback, useRef } from "react"
 import { Box, Flex, Text, Button, Input, Spinner } from "@chakra-ui/react"
 import { useTranslation } from "react-i18next"
@@ -12,6 +14,8 @@ interface Bip85VaultDialogProps {
 }
 
 export function Bip85VaultDialog({ onClose }: Bip85VaultDialogProps) {
+  const uiText = useUiTranslation()
+
 	const { t } = useTranslation("settings")
 
 	// Create form
@@ -158,7 +162,7 @@ export function Bip85VaultDialog({ onClose }: Bip85VaultDialogProps) {
 				w="440px" maxW="92vw" maxH="85vh"
 				bg="kk.bg" border="1px solid" borderColor="kk.border" borderRadius="xl"
 				zIndex={Z.dialog + 1} overflow="hidden" display="flex" flexDirection="column"
-				role="dialog" aria-modal="true" aria-label="BIP-85 Seed Vault"
+				role="dialog" aria-modal="true" aria-label={uiText("BIP-85 Seed Vault")}
 			>
 				{/* Header */}
 				<Flex px="5" py="4" align="center" justify="space-between" borderBottom="1px solid" borderColor="kk.border" flexShrink={0}>
@@ -204,12 +208,9 @@ export function Bip85VaultDialog({ onClose }: Bip85VaultDialogProps) {
 										<line x1="12" y1="17" x2="12" y2="21" />
 									</svg>
 								</Box>
-								<Text fontSize="sm" fontWeight="600" color="kk.gold" textAlign="center">
-									Your slot {displayedSeed.index} key is shown on the screen of the device
-								</Text>
+								<Text fontSize="sm" fontWeight="600" color="kk.gold" textAlign="center">{uiText("Your slot")}{" "}{displayedSeed.index}{" "}{uiText("key is shown on the screen of the device")}</Text>
 								<Text fontSize="xs" color="kk.textMuted" textAlign="center">
-									{displayedSeed.wordCount}-word seed &middot; Write it down carefully
-								</Text>
+									{displayedSeed.wordCount}{uiText("-word seed &middot; Write it down carefully")}</Text>
 							</Flex>
 							<Flex gap="2" mt="3" justify="center">
 								<Button size="xs" variant="outline" borderColor="kk.border" color="kk.textSecondary" _hover={{ bg: "rgba(255,255,255,0.06)" }} onClick={clearDisplay}>
@@ -243,22 +244,18 @@ export function Bip85VaultDialog({ onClose }: Bip85VaultDialogProps) {
 							<Flex align="center" gap="2">
 								<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
 									<line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
-								</svg>
-								New Derived Seed
-							</Flex>
+								</svg>{uiText("New Derived Seed")}</Flex>
 						</Button>
 					) : (
 						<Box bg="rgba(255,255,255,0.03)" border="1px solid" borderColor="kk.border" borderRadius="lg" p="4" mb="4">
 							<Flex align="center" justify="space-between" mb="3">
-								<Text fontSize="sm" fontWeight="600" color="kk.textPrimary">New Derived Seed</Text>
-								<Box as="button" fontSize="xs" color="kk.textMuted" cursor="pointer" _hover={{ color: "kk.textPrimary" }} onClick={() => setCreating(false)}>
-									Cancel
-								</Box>
+								<Text fontSize="sm" fontWeight="600" color="kk.textPrimary">{uiText("New Derived Seed")}</Text>
+								<Box as="button" fontSize="xs" color="kk.textMuted" cursor="pointer" _hover={{ color: "kk.textPrimary" }} onClick={() => setCreating(false)}>{uiText("Cancel")}</Box>
 							</Flex>
 
 							{/* Label — the main input */}
 							<Box mb="3">
-								<Text fontSize="xs" color="kk.textSecondary" mb="1" fontWeight="500">Label</Text>
+								<Text fontSize="xs" color="kk.textSecondary" mb="1" fontWeight="500">{uiText("Label")}</Text>
 								<Input
 									size="sm"
 									placeholder={`e.g. Hot wallet, Trading, Savings...`}
@@ -275,8 +272,8 @@ export function Bip85VaultDialog({ onClose }: Bip85VaultDialogProps) {
 							{/* Advanced: word count toggle */}
 							<Box mb="3">
 								<Box as="button" fontSize="xs" color="kk.textMuted" cursor="pointer" _hover={{ color: "kk.textSecondary" }} onClick={() => setShowAdvanced(!showAdvanced)} mb={showAdvanced ? "2" : "0"}>
-									{showAdvanced ? "- Hide options" : "+ Options"}
-									<Text as="span" color="kk.textMuted" ml="1">({wordCount} words)</Text>
+									{showAdvanced ? uiText("- Hide options") : uiText("+ Options")}
+									<Text as="span" color="kk.textMuted" ml="1">({wordCount}{" "}{uiText("words)")}</Text>
 								</Box>
 								{showAdvanced && (
 									<>
@@ -291,12 +288,11 @@ export function Bip85VaultDialog({ onClose }: Bip85VaultDialogProps) {
 												transition="all 0.15s"
 												onClick={() => setWordCount(wc)}
 											>
-												{wc} words
-											</Box>
+												{wc}{" "}{uiText("words")}</Box>
 										))}
 									</Flex>
 									<Flex align="center" gap="2">
-										<Text fontSize="xs" color="kk.textMuted" flexShrink={0}>Index:</Text>
+										<Text fontSize="xs" color="kk.textMuted" flexShrink={0}>{uiText("Index:")}</Text>
 										<Input
 											size="sm" type="number" min={0} placeholder={`auto (${nextIndex(wordCount)})`}
 											value={customIndex} onChange={(e) => setCustomIndex(e.target.value)}
@@ -322,16 +318,12 @@ export function Bip85VaultDialog({ onClose }: Bip85VaultDialogProps) {
 
 					{/* Saved seeds list */}
 					<Box>
-						<Text fontSize="xs" color="kk.textMuted" fontWeight="600" mb="2" textTransform="uppercase" letterSpacing="0.5px">
-							Your Seeds
-						</Text>
+						<Text fontSize="xs" color="kk.textMuted" fontWeight="600" mb="2" textTransform="uppercase" letterSpacing="0.5px">{uiText("Your Seeds")}</Text>
 
 						{loadingSeeds ? (
 							<Flex justify="center" py="4"><Spinner size="sm" color="kk.gold" /></Flex>
 						) : savedSeeds.length === 0 ? (
-							<Text fontSize="xs" color="kk.textMuted" textAlign="center" py="4">
-								No seeds yet. Create your first derived seed above.
-							</Text>
+							<Text fontSize="xs" color="kk.textMuted" textAlign="center" py="4">{uiText("No seeds yet. Create your first derived seed above.")}</Text>
 						) : (
 							<Flex direction="column" gap="1.5">
 								{savedSeeds.map((seed) => {
@@ -377,28 +369,23 @@ export function Bip85VaultDialog({ onClose }: Bip85VaultDialogProps) {
 													<Text fontSize="10px" color="kk.textMuted" fontFamily="mono">
 														{seed.wordCount}w
 													</Text>
-													<Text fontSize="10px" color="kk.textMuted" fontFamily="mono">
-														idx:{seed.index}
+													<Text fontSize="10px" color="kk.textMuted" fontFamily="mono">{uiText("idx:")}{seed.index}
 													</Text>
 													<Text fontSize="10px" color="kk.textMuted">
-														{new Date(seed.createdAt).toLocaleDateString()}
+														{new Date(seed.createdAt).toLocaleDateString(getNumberLocale())}
 													</Text>
 												</Flex>
 											</Box>
 											<Flex align="center" gap="1.5" flexShrink={0}>
 												{isActive && (
-													<Text fontSize="10px" color="kk.gold" fontWeight="600">ON DEVICE</Text>
+													<Text fontSize="10px" color="kk.gold" fontWeight="600">{uiText("ON DEVICE")}</Text>
 												)}
 												{confirmDeleteKey === key ? (
 													<Flex gap="1">
 														<Box as="button" px="2" py="0.5" fontSize="10px" color="kk.error" bg="rgba(239,68,68,0.1)" borderRadius="md" cursor="pointer" _hover={{ bg: "rgba(239,68,68,0.2)" }}
-															onClick={(e: React.MouseEvent) => { e.stopPropagation(); handleDelete(seed) }}>
-															Delete
-														</Box>
+															onClick={(e: React.MouseEvent) => { e.stopPropagation(); handleDelete(seed) }}>{uiText("Delete")}</Box>
 														<Box as="button" px="2" py="0.5" fontSize="10px" color="kk.textMuted" borderRadius="md" cursor="pointer" _hover={{ color: "kk.textPrimary" }}
-															onClick={(e: React.MouseEvent) => { e.stopPropagation(); setConfirmDeleteKey(null) }}>
-															Cancel
-														</Box>
+															onClick={(e: React.MouseEvent) => { e.stopPropagation(); setConfirmDeleteKey(null) }}>{uiText("Cancel")}</Box>
 													</Flex>
 												) : (
 													<Box as="button" p="1" borderRadius="md" cursor="pointer" color="kk.textMuted" _hover={{ color: "kk.error" }}

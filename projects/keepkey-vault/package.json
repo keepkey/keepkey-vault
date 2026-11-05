@@ -1,8 +1,12 @@
 {
   "name": "keepkey-vault",
-  "version": "1.6.9",
+  "version": "1.6.10",
   "description": "KeepKey Vault - Desktop hardware wallet management powered by Electrobun",
   "scripts": {
+    "i18n:check": "bun scripts/check-i18n.ts",
+    "i18n:extract": "bun scripts/extract-ui-strings.ts",
+    "i18n:sync": "bun scripts/sync-i18n.ts",
+    "i18n:test": "bun test __tests__/i18n-safety.test.ts __tests__/report-fonts.test.ts",
     "dev": "bun scripts/bundle-backend.ts && vite build && bun scripts/collect-externals.ts && electrobun build && bun scripts/patch-bundle.ts && electrobun dev",
     "dev:hmr": "bun run hmr & bun scripts/bundle-backend.ts && vite build && bun scripts/collect-externals.ts && electrobun build && bun scripts/patch-bundle.ts && electrobun dev",
     "dev:hmr:win": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/dev-hmr-windows.ps1",
@@ -29,6 +33,7 @@
     "@keepkey/hdwallet-keepkey-nodewebusb": "file:../../modules/hdwallet/packages/hdwallet-keepkey-nodewebusb",
     "@keepkey/proto-tx-builder": "file:../../modules/proto-tx-builder",
     "@ngraveio/bc-ur": "1.1.13",
+    "@pdf-lib/fontkit": "1.1.1",
     "@pioneer-platform/pioneer-client": "^11.1.0",
     "@pioneer-platform/pioneer-coins": "^11.0.0",
     "@pioneer-platform/pioneer-discovery": "10.3.2",

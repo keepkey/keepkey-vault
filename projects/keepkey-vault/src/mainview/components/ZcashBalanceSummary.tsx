@@ -1,3 +1,4 @@
+import { getNumberLocale } from "../lib/number-locale"
 import { useCallback, useEffect, useState } from 'react'
 import { Box, Button, Flex, Text } from '@chakra-ui/react'
 import { useTranslation } from 'react-i18next'
@@ -56,7 +57,7 @@ export function ZcashBalanceSummary({ transparent, enabled, supported, watchOnly
     : !supported ? t('zcashPrivacyFirmware')
     : failed ? t('zcashPrivateUnavailable')
     : scanActive || status?.verifying ? t('zcashPrivateScanning')
-    : status?.synced_to != null ? t('zcashLastScanned', { height: status.synced_to.toLocaleString() })
+    : status?.synced_to != null ? t('zcashLastScanned', { height: status.synced_to.toLocaleString(getNumberLocale()) })
     : t('zcashPrivateScanNeeded')
   return (
     <Box mb="4" border="1px solid" borderColor="var(--line)" borderRadius="12px" p="4" role="region" aria-label={t('zcashBalances')}>
