@@ -926,6 +926,7 @@ export interface AddressBookEntry {
   firstSeenTxid?: string     // external rows — txid that introduced the recipient
   note?: string
   savedAt?: number           // external rows — when the user explicitly saved it (R4); null = history-only
+  cosigner?: boolean         // user marked it as a Safe co-owner candidate (a note, not a verification)
   lastUsedAt?: number        // latest send to this entry from the Send page (list reads only)
   createdAt: number
   updatedAt: number
@@ -1124,6 +1125,49 @@ export interface SolanaMessageDecodedInfo {
 }
 
 // ── Calldata clear-signing types ─────────────────────────────────────────
+
+/** A Safe multisig, as its contract reports it on-chain. */
+export interface SafeInfo {
+  chainId: number
+  address: string
+  owners: string[]
+  threshold: number
+  nonce: number
+  version: string
+  vetting: SafeVetting
+}
+
+export interface SafeVetting {
+  /** Why the contract is not Safe's own code, or null when it is. Owners and threshold read from it cannot be trusted otherwise. */
+  codeProblem: string | null
+  /** Extensions the Safe has enabled (modules, a guard, a custom fallback handler). Normal for DAOs; described, never blocking. */
+  extensions: string[]
+}
+
+/** A proposed, not-yet-executed Safe transaction, re-derived locally. */
+export interface PendingSafeTx {
+  to: string
+  value: string
+  data: string | null
+  operation: number
+  safeTxGas: string
+  baseGas: string
+  gasPrice: string
+  gasToken: string
+  refundReceiver: string
+  nonce: string
+  /** Hash computed here from the fields above, never taken from the service. */
+  safeTxHash: string
+  /** The service published the same hash for these fields. */
+  hashMatches: boolean
+  /** Owners whose signature recovers over safeTxHash. */
+  confirmedBy: string[]
+  /** Owners listed as approved whose approval cannot be checked offline. */
+  unverifiedConfirmations: string[]
+  delegateCall: boolean
+  decoded: CalldataDecodedInfo | null
+  submittedAt: string | null
+}
 
 export interface CalldataDecodedField {
   name: string
