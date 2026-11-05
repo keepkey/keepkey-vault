@@ -3885,7 +3885,8 @@ function syncBitcoinVaultBook() {
 	return vaults
 }
 function registeredVaults() {
-	const all = [...(engine.isPassphraseWallet && sessionVaults?.key === safeSessionKey() ? sessionVaults.vaults : []), ...vaultBook().list().map(e => e.vault!)]
+	// No database: no saved vaults to protect, so ordinary sends must still work.
+	const all = [...(engine.isPassphraseWallet && sessionVaults?.key === safeSessionKey() ? sessionVaults.vaults : []), ...(getDb() ? vaultBook().list().map(e => e.vault!) : [])]
 	return all.filter((v, i) => all.findIndex(other => other.id === v.id) === i)
 }
 function vaultAddressEntries(networkId?: string) {
@@ -8736,8 +8737,11 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					}
 				}
 				const external = getAddressBookList({ kind: 'external', networkId, search, savedOnly: true, chainId: bitcoinOnly ? 'bitcoin' : undefined })
-				await listRegisteredVaults()
-				const vaults = vaultAddressEntries(networkId).filter(e => (!bitcoinOnly || e.chainId === 'bitcoin') && (!search || `${e.label} ${e.address}`.toLowerCase().includes(search.toLowerCase())))
+				// Vault rows only with Multisig on, and never at the cost of the contact list.
+				const vaultRows = multisigFeature.enabled && getDb()
+					? await listRegisteredVaults().then(() => vaultAddressEntries(networkId), (err) => { console.warn('[addressbook] vaults unavailable:', err?.message || err); return [] })
+					: []
+				const vaults = vaultRows.filter(e => (!bitcoinOnly || e.chainId === 'bitcoin') && (!search || `${e.label} ${e.address}`.toLowerCase().includes(search.toLowerCase())))
 				const vaultIds = new Set(vaults.map(e => `${e.networkId}:${e.address.toLowerCase()}`))
 				return [...own, ...external.filter(e => !vaultIds.has(`${e.networkId}:${e.address.toLowerCase()}`)), ...vaults].map(e => ({ ...e, deviceLabel: labels[e.deviceId] || e.deviceLabel }))
 			},

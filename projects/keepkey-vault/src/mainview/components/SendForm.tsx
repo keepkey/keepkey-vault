@@ -259,20 +259,21 @@ export function SendForm({ chain, address, balance, token, tokenBalanceUnverifie
 		const networkId = caipToNetworkId(activeCaip)
 		const handle = setTimeout(() => {
 			rpcRequest('checkVaultDestination', { networkId, address: addr, assetCaip: activeCaip }, 60000)
-				.then(() => rpcRequest<AddressBookEntry | null>("matchAddress", { networkId, address: addr }, 5000))
-				.then(entry => {
-					if (!alive) return
-					if (entry) {
-						setMatchedContact(entry)
-					} else {
-						setAddressIsNew(true)
-						// Auto-prompt to save — once per distinct new address.
-						if (promptedAddressRef.current !== addr) {
-							promptedAddressRef.current = addr
-							setShowSaveDialog(true)
+				.then(() => rpcRequest<AddressBookEntry | null>("matchAddress", { networkId, address: addr }, 5000)
+					.then(entry => {
+						if (!alive) return
+						if (entry) {
+							setMatchedContact(entry)
+						} else {
+							setAddressIsNew(true)
+							// Auto-prompt to save — once per distinct new address.
+							if (promptedAddressRef.current !== addr) {
+								promptedAddressRef.current = addr
+								setShowSaveDialog(true)
+							}
 						}
-					}
-				})
+					})
+					.catch(() => { /* contact detection is best-effort; never block sending */ }))
 				.catch(e => { if (alive) setVaultDestinationError(e.message || 'Could not verify vault destination') })
 				.finally(() => { if (alive) setCheckingVaultDestination(false) })
 		}, 300)
