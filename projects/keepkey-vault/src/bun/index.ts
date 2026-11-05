@@ -11294,12 +11294,19 @@ engine.on('firmware-progress', (progress) => {
 onScanProgress((progress) => {
 	try { rpc.send['scan-progress'](progress) } catch { /* webview not ready yet */ }
 })
+let emulatorPinPromptShown = false
 engine.on('pin-request', (req) => {
 	try { rpc.send['pin-request'](req) } catch { /* webview not ready yet */ }
 	if (engine.isEmulator) {
+		emulatorPinPromptShown = true
 		import('./emulator-window').then(({ displayPinPrompt }) => displayPinPrompt(req.type))
 			.catch((err) => console.warn('[emulator] PIN instructions unavailable:', err?.message))
 	}
+})
+engine.on('state-change', (state) => {
+	if (!emulatorPinPromptShown || state.pinPromptOpen) return
+	emulatorPinPromptShown = false
+	import('./emulator-window').then(({ clearPinPrompt }) => clearPinPrompt()).catch(() => { /* window closed */ })
 })
 engine.on('pin-error', (err) => {
 	try { rpc.send['pin-error'](err) } catch { /* webview not ready yet */ }

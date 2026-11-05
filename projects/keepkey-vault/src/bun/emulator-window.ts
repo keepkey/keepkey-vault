@@ -527,6 +527,11 @@ export function displayPinPrompt(type: PinRequestType): void {
   sendToWindow('pin-request', { type })
 }
 
+/** The device stopped asking (PIN sent or refused): drop the stale instructions. */
+export function clearPinPrompt(): void {
+  sendToWindow('confirm-dismiss', {})
+}
+
 // ── Display polling (real OLED framebuffer) ─────────────────────────────
 //
 // Strategy: the dylib's libkkemu_capture_frame() callback fires from inside
