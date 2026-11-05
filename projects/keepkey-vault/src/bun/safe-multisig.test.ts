@@ -3,13 +3,15 @@ import { Wallet, utils } from 'ethers'
 import {
   FACTORY_ABI,
   SAFE_ABI,
-  SAFE_DEPLOYMENTS,
-  SAFE_TYPES,
   SafeMultisigService,
   describeSafeTransfer,
   validateSafeProposal,
 } from './safe-multisig'
 import { SAFE_USDC, type SafeProposal } from '../shared/safe-multisig'
+import { SAFE_CREATE } from '../shared/safe-deployments'
+import { SAFE_TX_TYPE } from './safe-core'
+const SAFE_TYPES = { SafeTx: SAFE_TX_TYPE }
+const DEPLOYED = { factory: SAFE_CREATE.factory.address, singleton: SAFE_CREATE.singleton.address, handler: SAFE_CREATE.fallbackHandler.address }
 // Unmodified deployed bytecode from @safe-global/safe-contracts@1.4.1 build artifacts.
 // Each fixture is checked against the pinned safe-deployments hash by the service.
 import code from './safe-multisig.contracts.fixture.json'
@@ -36,7 +38,7 @@ function harness(hidden = false) {
     if (method === 'eth_getCode') {
       if (holdCode) await holdCode()
       if (badCode) return '0x6000'
-      for (const [name, [a]] of Object.entries(SAFE_DEPLOYMENTS))
+      for (const [name, a] of Object.entries(DEPLOYED))
         if (a.toLowerCase() === params[0].toLowerCase())
           return code[name as 'factory' | 'singleton' | 'handler']
       return params[0] === SAFE ? code.proxy : '0x'
@@ -53,7 +55,7 @@ function harness(hidden = false) {
       const { to, data } = params[0]
       if (to.toLowerCase() === SAFE_USDC.toLowerCase())
         return utils.defaultAbiCoder.encode(['uint256'], [1_000_000])
-      if (to.toLowerCase() === SAFE_DEPLOYMENTS.factory[0].toLowerCase()) {
+      if (to.toLowerCase() === DEPLOYED.factory.toLowerCase()) {
         const parsed = FACTORY_ABI.parseTransaction({ data })
         if (parsed.name === 'proxyCreationCode')
           return FACTORY_ABI.encodeFunctionResult(parsed.name, [code.proxyCreationCode])
@@ -78,7 +80,7 @@ function harness(hidden = false) {
         getOwners: [owners],
         getThreshold: [2],
         nonce: [safeNonce],
-        masterCopy: [SAFE_DEPLOYMENTS.singleton[0]],
+        masterCopy: [DEPLOYED.singleton],
       }
       if (parsed.name === 'getTransactionHash') {
         const t = Object.fromEntries(SAFE_TYPES.SafeTx.map((f, i) => [f.name, parsed.args[i]]))

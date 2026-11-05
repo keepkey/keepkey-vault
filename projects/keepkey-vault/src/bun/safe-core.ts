@@ -33,6 +33,11 @@ export const SAFE_TX_TYPE = [
   { name: 'nonce', type: 'uint256' },
 ]
 
+/** keccak256 of the SafeTx type string: the one typed-data type whose embedded call
+ *  an ERC-7730 definition may describe (CAPABILITY_SAFE_TYPED_CALLS). */
+export const SAFE_TX_TYPEHASH = ethers.utils.keccak256(ethers.utils.toUtf8Bytes(
+  ethers.utils._TypedDataEncoder.from({ SafeTx: SAFE_TX_TYPE }).encodeType('SafeTx')))
+
 /** Safe 1.3.0 added chainId to the domain; 1.1.1 and older sign without it. */
 export function safeTxDomain(chainId: number, safe: string, version: string): ethers.TypedDataDomain {
   const [major, minor] = version.split('.').map(Number)

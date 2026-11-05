@@ -30,6 +30,7 @@ import { firmwareClearSigns } from './calldata-decoder'
 import { utils as ethersUtils } from 'ethers'
 import { CAPABILITY_SAFE_TYPED_CALLS, erc7730CalldataSkipReason, supportsErc7730EmbeddedCalls, supportsErc7730Transport, supportsErc7730TypedData } from '../shared/erc7730-support'
 import { deviceErrorMessage } from '../shared/device-error'
+import { SAFE_TX_TYPEHASH } from './safe-core'
 import { erc7730EnvelopeSigner, planErc7730EmbeddedCalls, planErc7730TypedEmbeddedCalls } from './erc7730-describe'
 import type { Erc7730Catalog } from '../shared/types'
 
@@ -430,7 +431,7 @@ export function checkErc7730TypedDataDefinition(
   if (header.contract !== key.contract) return { reason: `envelope contract ${header.contract} is not ${key.contract}` }
   if (header.selectorOrTypeHash !== typeHash) return { reason: `envelope typeHash ${header.selectorOrTypeHash.slice(0, 10)} is not ${typeHash.slice(0, 10)}` }
   if (header.embeddedCall === undefined || (header.embeddedCall &&
-      typeHash !== '0xbb8310d486368db6bd6f849402fdd73ad53d316b5a4b2644ad6efe0f941286d8')) {
+      typeHash !== SAFE_TX_TYPEHASH)) {
     return { reason: header.embeddedCall ? 'program has an embedded call' : 'program sections cannot be read' }
   }
   const claimedKind = definition.kind
