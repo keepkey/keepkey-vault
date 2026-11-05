@@ -116,6 +116,12 @@ function App() {
 	const [viewingVault, setViewingVault] = useState<VaultIdentity | null>(null)
 	const [vaultDetailsOpen, setVaultDetailsOpen] = useState(false)
 	useEffect(() => onRpcMessage('wallet-data-purged', () => { setViewingVault(null); setVaultDetailsOpen(false) }), [])
+	// Multisig switched off while its tab is open: the tab disappears, so leave it.
+	useEffect(() => {
+		if (multisigEnabled) return
+		if (activeTab === "multisig") setActiveTab("vault")
+		setViewingVault(null); setVaultDetailsOpen(false)
+	}, [activeTab, multisigEnabled])
 	const [paletteOpen, setPaletteOpen] = useState(false)
 	const paletteBalances = useLatestBalances()
 	const [updateDismissed, setUpdateDismissed] = useState(false)
