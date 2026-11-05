@@ -3,6 +3,7 @@ import { Box, Button, Flex, Spinner, Text } from "@chakra-ui/react"
 import { FaArrowLeft, FaCheck, FaCopy, FaEye, FaMonero, FaSyncAlt } from "react-icons/fa"
 import { generateQRSvg } from "../lib/qr"
 import { rpcRequest } from "../lib/rpc"
+import { useFiat } from "../lib/fiat-context"
 import type { MoneroStatus } from "../../shared/types"
 
 interface MoneroPanelProps {
@@ -48,6 +49,7 @@ function checkedStatus(status: MoneroStatus): MoneroStatus {
 }
 
 export function MoneroPanel({ onBack, onLoaded }: MoneroPanelProps = {}) {
+	const { privateModeEnabled } = useFiat()
 	const [status, setStatus] = useState<MoneroStatus | null>(null)
 	const [refreshing, setRefreshing] = useState(false)
 	const [connecting, setConnecting] = useState(false)
@@ -189,16 +191,16 @@ export function MoneroPanel({ onBack, onLoaded }: MoneroPanelProps = {}) {
 					</Flex>
 				</Flex>
 				<Text data-monero-total-balance="" fontSize={{ base: "25px", md: "34px" }} color="var(--text-0)" fontFamily="mono" letterSpacing="-0.04em" overflowWrap="anywhere">
-					{balance === null ? "—" : formatXmr(balance)} <Box as="span" fontSize="16px" color="var(--text-2)" letterSpacing="0">XMR</Box>
+					{balance === null ? "—" : privateModeEnabled ? "••••••" : formatXmr(balance)} <Box as="span" fontSize="16px" color="var(--text-2)" letterSpacing="0">XMR</Box>
 				</Text>
 				<Flex gap={{ base: "5", md: "10" }} mt="5" flexWrap="wrap">
 					<Box>
 						<Text fontSize="11px" color="var(--text-3)" mb="1">Unlocked received</Text>
-						<Text data-monero-unlocked-balance="" fontSize="13px" fontFamily="mono" color="var(--teal)">{unlocked === null ? "—" : `${formatXmr(unlocked)} XMR`}</Text>
+						<Text data-monero-unlocked-balance="" fontSize="13px" fontFamily="mono" color="var(--teal)">{unlocked === null ? "—" : privateModeEnabled ? "•••••• XMR" : `${formatXmr(unlocked)} XMR`}</Text>
 					</Box>
 					<Box>
 						<Text fontSize="11px" color="var(--text-3)" mb="1">Locked</Text>
-						<Text data-monero-locked-balance="" fontSize="13px" fontFamily="mono" color="var(--text-1)">{locked === null ? "—" : `${formatXmr(locked)} XMR`}</Text>
+						<Text data-monero-locked-balance="" fontSize="13px" fontFamily="mono" color="var(--text-1)">{locked === null ? "—" : privateModeEnabled ? "•••••• XMR" : `${formatXmr(locked)} XMR`}</Text>
 					</Box>
 				</Flex>
 				{wallet && <Text fontSize="11px" color="var(--text-3)" mt="4">Wallet scanned through block {wallet.walletHeight.toLocaleString()}</Text>}
@@ -242,7 +244,7 @@ export function MoneroPanel({ onBack, onLoaded }: MoneroPanelProps = {}) {
 									<Text fontSize="11px" fontFamily="mono" color="var(--text-3)" mt="1" title={tx.txid}>{tx.txid.slice(0, 12)}…{tx.txid.slice(-12)}</Text>
 									<Text fontSize="11px" color="var(--text-2)" mt="1">{tx.confirmations.toLocaleString()} {tx.confirmations === 1 ? "confirmation" : "confirmations"} · {tx.locked ? "Locked" : "Unlocked"}</Text>
 								</Box>
-								<Text fontSize="13px" fontFamily="mono" color="var(--teal)" overflowWrap="anywhere">+{formatXmr(atomicAmount(tx.amountAtomic))} XMR</Text>
+								<Text fontSize="13px" fontFamily="mono" color="var(--teal)" overflowWrap="anywhere">{privateModeEnabled ? "••••••" : `+${formatXmr(atomicAmount(tx.amountAtomic))}`} XMR</Text>
 							</Flex>
 						))}
 					</Box>
