@@ -109,3 +109,9 @@ test('read calls encode the standard Safe selectors', () => {
   expect(SAFE_READS.VERSION).toBe('0xffa1ad74')
   expect(decodeSafeRead('getThreshold', '0x' + '3'.padStart(64, '0')).toString()).toBe('3')
 })
+
+test('SAFE_TX_TYPEHASH is the canonical SafeTx typehash Safe contracts use', () => {
+  const { SAFE_TX_TYPEHASH } = require('../src/bun/safe-core')
+  // SafeTx typehash constant from Safe.sol (1.3.0–1.5.0).
+  expect(SAFE_TX_TYPEHASH).toBe('0xbb8310d486368db6bd6f849402fdd73ad53d316b5a4b2644ad6efe0f941286d8')
+})

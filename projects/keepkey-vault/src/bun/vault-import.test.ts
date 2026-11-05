@@ -1,7 +1,9 @@
 import { describe, expect, test } from 'bun:test'
 import { Database } from 'bun:sqlite'
 import { VaultImportService } from './vault-import'
-import { inspectBaseSafe, SAFE_ABI, SAFE_V150 } from './safe-multisig'
+import { inspectBaseSafe, SAFE_ABI } from './safe-multisig'
+import { SAFE_SINGLETONS } from '../shared/safe-deployments'
+const SAFE_L2_150 = SAFE_SINGLETONS.find(c => c.version === '1.5.0')!.address
 import { VaultAddressBook } from './vault-addressbook'
 import type { VaultAddParams } from '../shared/safe-multisig'
 import type { VaultIdentity } from '../shared/vault-identity'
@@ -40,7 +42,7 @@ function setup(hidden = false) {
       expect(args[1]).toBe('0x123')
       const fn = SAFE_ABI.parseTransaction({ data: args[0].data }).name
       const results: Record<string, any[]> = {
-        masterCopy: [SAFE_V150.singleton],
+        masterCopy: [SAFE_L2_150],
         VERSION: [version],
         getOwners: [currentOwners],
         getThreshold: [2],

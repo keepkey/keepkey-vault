@@ -3126,15 +3126,16 @@ export function getAddressBookHistory(entryId: string, walletId: string | null, 
 
 /** Manually add (or relabel) an external contact. Upserts on the dedupe key so a
  *  re-add just updates the label. Returns the resulting row. */
+/** One address is one Safe owner on every EVM chain — within the wallet that marked it. */
 function setEvmCosigner(id: string, on: boolean) {
   db!.run(`UPDATE addressbook SET cosigner = ? WHERE network_id LIKE 'eip155:%'
-             AND address = (SELECT address FROM addressbook WHERE id = ? AND network_id LIKE 'eip155:%')`, [on ? 1 : 0, id])
+             AND (address, wallet_id) = (SELECT address, wallet_id FROM addressbook WHERE id = ? AND network_id LIKE 'eip155:%')`, [on ? 1 : 0, id])
 }
 
-/** A new EVM row takes the flag its address already has on other networks. */
-function evmCosigner(address: string, networkId: string): number {
+/** A new EVM row takes the flag its address already has on this wallet's other networks. */
+function evmCosigner(address: string, networkId: string, walletId: string): number {
   if (!networkId.startsWith('eip155:')) return 0
-  const row = db!.query(`SELECT MAX(cosigner) AS c FROM addressbook WHERE address = ? AND network_id LIKE 'eip155:%'`).get(address) as { c: number | null } | null
+  const row = db!.query(`SELECT MAX(cosigner) AS c FROM addressbook WHERE address = ? AND wallet_id = ? AND network_id LIKE 'eip155:%'`).get(address, walletId) as { c: number | null } | null
   return row?.c ? 1 : 0
 }
 
@@ -3163,7 +3164,7 @@ export function addExternalEntry(args: {
         `INSERT INTO addressbook
            (id, wallet_id, device_id, kind, network_id, chain_id, address, label, saved_at, cosigner, created_at, updated_at)
          VALUES (?, ?, ?, 'external', ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [id, args.walletId, args.deviceId, args.networkId, args.chainId, addr, args.label ?? null, now, cosigner ?? evmCosigner(addr, args.networkId), now, now],
+        [id, args.walletId, args.deviceId, args.networkId, args.chainId, addr, args.label ?? null, now, cosigner ?? evmCosigner(addr, args.networkId, args.walletId), now, now],
       )
     }
     if (cosigner !== null) setEvmCosigner(id, cosigner === 1)

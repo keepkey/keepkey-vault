@@ -9,6 +9,8 @@
 export const SAFE_PROXY_CODE_HASHES: Record<string, string> = {
   '0xb89c1b3bdf2cf8827818646bce9a8f6e372885f8c55e5c07acbd307cb133b000': '1.3.0',
   '0xd7d408ebcd99b2b70be43e20253d6d92a8ea8fab29bd3be7f55b10032331fb4c': '1.4.1',
+  // 1.5.0: matched to @safe-global/safe-smart-account@1.5.0 on Base (safe-v150.contracts.fixture.json).
+  '0x4e381985ca68b3e5d27b4425fa581c19cf33146d3f887a3cfca96f55528ea46f': '1.5.0',
 }
 
 export interface SafeContract { address: string; codeHash: string; chains: number[]; version?: string }
@@ -21,6 +23,8 @@ export const SAFE_SINGLETONS: SafeContract[] = [
   { address: '0xfb1bffC9d739B8D520DaF37dF666da4C687191EA', codeHash: '0x21842597390c4c6e3c1239e434a682b054bd9548eee5e9b1d6a4482731023c0f', version: '1.3.0', chains: [1, 10, 56, 100, 137, 143, 4663, 8453, 42161, 43114] },
   { address: '0x41675C099F32341bf84BFc5382aF534df5C7461a', codeHash: '0x1fe2df852ba3299d6534ef416eefa406e56ced995bca886ab7a553e6d0c5e1c4', version: '1.4.1', chains: [1, 10, 56, 100, 137, 143, 4663, 8453, 42161, 43114] },
   { address: '0x29fcB43b46531BcA003ddC8FCB67FFE91900C762', codeHash: '0xb1f926978a0f44a2c0ec8fe822418ae969bd8c3f18d61e5103100339894f81ff', version: '1.4.1', chains: [1, 10, 56, 100, 137, 143, 4663, 8453, 42161, 43114] },
+  // SafeL2 1.5.0: code verified on Base only, so pinned for Base only.
+  { address: '0xEdd160fEBBD92E350D4D398fb636302fccd67C7e', codeHash: '0x180193227186ccb85316c94db1f0d156ed932b14712cfaac78901899178572dc', version: '1.5.0', chains: [8453] },
 ]
 
 export const SAFE_FALLBACK_HANDLERS: SafeContract[] = [

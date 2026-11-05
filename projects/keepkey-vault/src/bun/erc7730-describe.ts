@@ -31,6 +31,7 @@ import { versionCompare } from '../shared/firmware-versions'
 import { evmTokenIdentity } from '../shared/evm-contract-identity'
 import { CHAINS } from '../shared/chains'
 import { decodeMultiSend, safeContract } from '../shared/safe-tx'
+import { SAFE_TX_TYPEHASH } from './safe-core'
 import type { Erc7730Description } from '../shared/types'
 
 /**
@@ -274,7 +275,7 @@ function readLevel(envelopeHex: string, call: Level, walk: Walk): { signedBy: st
   }
   if (call.typed && formatters.some((f) => f.flags & FLAG_TX_VALUE)) throw new Error('a calldata-only formatter in typed data')
   if (call.typed && formatters.some((f) => f.kind === 13) &&
-      hex(program.subarray(38, 70)) !== '0xbb8310d486368db6bd6f849402fdd73ad53d316b5a4b2644ad6efe0f941286d8')
+      hex(program.subarray(38, 70)) !== SAFE_TX_TYPEHASH)
     throw new Erc7730Refusal('typed embedded calldata requires canonical SafeTx')
   const dt = section[7]
   const display = Array.from({ length: u16(dt, 0) }, (_, i) => ({ op: dt[2 + 8 * i], a: u16(dt, 4 + 8 * i), b: u16(dt, 6 + 8 * i) }))

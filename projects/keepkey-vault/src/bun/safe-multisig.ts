@@ -1,6 +1,9 @@
 import { BigNumber, utils } from 'ethers'
 import { randomUUID } from 'node:crypto'
 import { evmAddressPath } from '../shared/chains'
+import { SAFE_CREATE, SAFE_PROXY_CODE_HASHES, SAFE_SINGLETONS } from '../shared/safe-deployments'
+import { safeContract } from '../shared/safe-tx'
+import { safeTxHash, safeTypedData } from './safe-core'
 import {
   SAFE_CHAIN_ID,
   SAFE_USDC,
@@ -13,24 +16,9 @@ import {
   type SafeTxReview,
 } from '../shared/safe-multisig'
 
-// safe-global/safe-deployments@685f22be940739259cfc4148db3df7048f39a4e8,
-// canonical Base v1.4.1. Proxy runtime: @safe-global/safe-contracts@1.4.1 artifact.
-export const SAFE_DEPLOYMENTS = {
-  factory: [
-    '0x4e1DCf7AD4e460CfD30791CCC4F9c8a4f820ec67',
-    '0x50c3cdc4074750a7a974204a716c999edd37482f907608d960b2b025ee0b3317',
-  ],
-  singleton: [
-    '0x29fcB43b46531BcA003ddC8FCB67FFE91900C762',
-    '0xb1f926978a0f44a2c0ec8fe822418ae969bd8c3f18d61e5103100339894f81ff',
-  ],
-  handler: [
-    '0xfd0732Dc9E303f09fCEf3a7388Ad10A83459Ec99',
-    '0x7c6007a5d711cea8dfd5d91f5940ec29c7f200fe511eb1fc1397b367af3c42f9',
-  ],
-} as const
-const PROXY_HASH = '0xd7d408ebcd99b2b70be43e20253d6d92a8ea8fab29bd3be7f55b10032331fb4c'
 const ZERO = '0x0000000000000000000000000000000000000000'
+// ponytail: Vaults accept SafeL2 1.4.1/1.5.0 only; both sign with the chainId domain, so one version string serves.
+const DOMAIN_VERSION = '1.4.1'
 export const SAFE_ABI = new utils.Interface([
   'function setup(address[],uint256,address,bytes,address,address,uint256,address)',
   'function VERSION() view returns (string)',
@@ -49,34 +37,6 @@ const TOKEN_ABI = new utils.Interface([
   'function transfer(address,uint256) returns (bool)',
   'function balanceOf(address) view returns (uint256)',
 ])
-export const SAFE_TYPES = {
-  SafeTx: [
-    { name: 'to', type: 'address' },
-    { name: 'value', type: 'uint256' },
-    { name: 'data', type: 'bytes' },
-    { name: 'operation', type: 'uint8' },
-    { name: 'safeTxGas', type: 'uint256' },
-    { name: 'baseGas', type: 'uint256' },
-    { name: 'gasPrice', type: 'uint256' },
-    { name: 'gasToken', type: 'address' },
-    { name: 'refundReceiver', type: 'address' },
-    { name: 'nonce', type: 'uint256' },
-  ],
-}
-export function safeTypedData(proposal: SafeProposal) {
-  return {
-    domain: { chainId: SAFE_CHAIN_ID, verifyingContract: proposal.safe },
-    primaryType: 'SafeTx',
-    types: {
-      EIP712Domain: [
-        { name: 'chainId', type: 'uint256' },
-        { name: 'verifyingContract', type: 'address' },
-      ],
-      ...SAFE_TYPES,
-    },
-    message: proposal.transaction,
-  }
-}
 function txArgs(t: SafeTransaction) {
   return [
     t.to,
@@ -176,11 +136,7 @@ export function validateSafeProposal(input: unknown): SafeProposal {
   if (typeof t.data !== 'string' || !/^0x(?:[0-9a-fA-F]{2})*$/.test(t.data) || t.data.length > 1024)
     throw new Error('Invalid calldata')
   describeSafeTransfer(t)
-  const hash = utils._TypedDataEncoder.hash(
-    { chainId: SAFE_CHAIN_ID, verifyingContract: p.safe },
-    SAFE_TYPES,
-    t
-  )
+  const hash = safeTxHash(SAFE_CHAIN_ID, p.safe, DOMAIN_VERSION, t)
   if (p.hash !== hash) throw new Error('Proposal hash does not match its transaction')
   if (
     !p.signatures ||
@@ -230,13 +186,6 @@ interface SafeDeps {
   changed?: (session: SafeSession, accounts: SafeAccount[]) => void
   assertDestination?: (networkId: string, address: string, assetCaip: string) => void | Promise<void>
 }
-// SafeL2 v1.5.0 deployment: safe-global/safe-deployments@685f22be940739259cfc4148db3df7048f39a4e8.
-// Proxy runtime independently matched to @safe-global/safe-smart-account@1.5.0.
-export const SAFE_V150 = {
-  singleton: '0xEdd160fEBBD92E350D4D398fb636302fccd67C7e',
-  codeHash: '0x180193227186ccb85316c94db1f0d156ed932b14712cfaac78901899178572dc',
-  proxyHash: '0x4e381985ca68b3e5d27b4425fa581c19cf33146d3f887a3cfca96f55528ea46f',
-} as const
 export async function inspectBaseSafe(
   rpc: (method: string, params: any[]) => Promise<any>,
   input: string,
@@ -248,7 +197,8 @@ export async function inspectBaseSafe(
   const block = await rpc('eth_blockNumber', [])
   if (typeof block !== 'string' || !/^0x[0-9a-f]+$/i.test(block)) throw new Error('Invalid Base block number')
   const proxyHash = utils.keccak256(await rpc('eth_getCode', [a, block]))
-  if (![PROXY_HASH, SAFE_V150.proxyHash].includes(proxyHash))
+  const proxyVersion = SAFE_PROXY_CODE_HASHES[proxyHash]
+  if (proxyVersion !== '1.4.1' && proxyVersion !== '1.5.0')
     throw new Error('Unsupported Safe proxy bytecode on Base')
   const call = async (to: string, abi: utils.Interface, fn: string, args: any[] = []) =>
     abi.decodeFunctionResult(
@@ -256,12 +206,11 @@ export async function inspectBaseSafe(
       await rpc('eth_call', [{ to, data: abi.encodeFunctionData(fn, args) }, block])
     )
   const [implementation] = await call(a, SAFE_ABI, 'masterCopy')
-  const expected =
-    same(implementation, SAFE_DEPLOYMENTS.singleton[0]) && proxyHash === PROXY_HASH
-      ? { version: '1.4.1' as const, hash: SAFE_DEPLOYMENTS.singleton[1] }
-      : same(implementation, SAFE_V150.singleton) && proxyHash === SAFE_V150.proxyHash
-      ? { version: '1.5.0' as const, hash: SAFE_V150.codeHash }
-      : undefined
+  // The pinned SafeL2 singleton of the same version as the proxy.
+  const pinned = SAFE_SINGLETONS.find(c => same(c.address, implementation) && c.version === proxyVersion && c.chains.includes(SAFE_CHAIN_ID))
+  const expected = pinned && safeContract(SAFE_CHAIN_ID, pinned.address)?.kind === 'singleton-l2'
+    ? { version: proxyVersion as '1.4.1' | '1.5.0', hash: pinned.codeHash } // narrowed by the throw above
+    : undefined
   if (!expected) throw new Error('Unsupported Safe implementation (requires pinned SafeL2 v1.4.1 or v1.5.0)')
   if (utils.keccak256(await rpc('eth_getCode', [implementation, block])) !== expected.hash)
     throw new Error('Safe implementation bytecode verification failed')
@@ -357,8 +306,8 @@ export class SafeMultisigService {
   private async verifyDeployments(s: SafeSession, block = 'latest') {
     if (Number(await this.rpc(s, 'eth_chainId', [])) !== SAFE_CHAIN_ID) throw new Error('RPC is not on Base')
     await Promise.all(
-      Object.values(SAFE_DEPLOYMENTS).map(async ([a, hash]) => {
-        if (utils.keccak256(await this.rpc(s, 'eth_getCode', [a, block])) !== hash)
+      [SAFE_CREATE.factory, SAFE_CREATE.singleton, SAFE_CREATE.fallbackHandler].map(async ({ address: a, codeHash }) => {
+        if (utils.keccak256(await this.rpc(s, 'eth_getCode', [a, block])) !== codeHash)
           throw new Error('Safe deployment bytecode verification failed')
       })
     )
@@ -509,12 +458,12 @@ export class SafeMultisigService {
       params.threshold,
       ZERO,
       '0x',
-      SAFE_DEPLOYMENTS.handler[0],
+      SAFE_CREATE.fallbackHandler.address,
       ZERO,
       0,
       ZERO,
     ])
-    const [code] = await this.call(s, SAFE_DEPLOYMENTS.factory[0], FACTORY_ABI, 'proxyCreationCode')
+    const [code] = await this.call(s, SAFE_CREATE.factory.address, FACTORY_ABI, 'proxyCreationCode')
     const salt = utils.keccak256(
       utils.hexConcat([
         utils.keccak256(initializer),
@@ -523,18 +472,18 @@ export class SafeMultisigService {
     )
     const initCode = utils.hexConcat([
       code,
-      utils.defaultAbiCoder.encode(['address'], [SAFE_DEPLOYMENTS.singleton[0]]),
+      utils.defaultAbiCoder.encode(['address'], [SAFE_CREATE.singleton.address]),
     ])
-    const predicted = utils.getCreate2Address(SAFE_DEPLOYMENTS.factory[0], salt, utils.keccak256(initCode))
+    const predicted = utils.getCreate2Address(SAFE_CREATE.factory.address, salt, utils.keccak256(initCode))
     if ((await this.rpc(s, 'eth_getCode', [predicted, 'latest'])) !== '0x')
       throw new Error('This Safe is already deployed. Import its address instead.')
     const data = FACTORY_ABI.encodeFunctionData('createProxyWithNonce', [
-      SAFE_DEPLOYMENTS.singleton[0],
+      SAFE_CREATE.singleton.address,
       initializer,
       saltNonce,
     ])
     const result = await this.rpc(s, 'eth_call', [
-      { from: s.owner, to: SAFE_DEPLOYMENTS.factory[0], data },
+      { from: s.owner, to: SAFE_CREATE.factory.address, data },
       'latest',
     ])
     if (!same(FACTORY_ABI.decodeFunctionResult('createProxyWithNonce', result)[0], predicted))
@@ -551,7 +500,7 @@ export class SafeMultisigService {
         deployed: false,
         saltNonce,
       },
-      SAFE_DEPLOYMENTS.factory[0],
+      SAFE_CREATE.factory.address,
       data,
       { saltNonce }
     )
@@ -650,11 +599,7 @@ export class SafeMultisigService {
       chainId: SAFE_CHAIN_ID,
       safe: a.address,
       transaction,
-      hash: utils._TypedDataEncoder.hash(
-        { chainId: SAFE_CHAIN_ID, verifyingContract: a.address },
-        SAFE_TYPES,
-        transaction
-      ),
+      hash: safeTxHash(SAFE_CHAIN_ID, a.address, DOMAIN_VERSION, transaction),
       signatures: {},
     }
     await this.checkProposal(s, store, p)
@@ -678,7 +623,7 @@ export class SafeMultisigService {
     if (!old) throw new Error('Proposal not found')
     const { p, a } = await this.checkProposal(s, store, old)
     if (!a.owners.some((v) => same(v, s.owner))) throw new Error('Connected KeepKey is not a Safe owner')
-    return { addressNList: evmAddressPath(0), typedData: safeTypedData(p) }
+    return { addressNList: evmAddressPath(0), typedData: safeTypedData(SAFE_CHAIN_ID, p.safe, DOMAIN_VERSION, p.transaction) }
   }
   async addSignature(params: { hash: string; signature: string }) {
     const { s, store } = await this.open()
