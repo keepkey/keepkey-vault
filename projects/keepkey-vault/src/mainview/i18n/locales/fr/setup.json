@@ -122,7 +122,23 @@
 		"autoRebooting": "Votre appareil redémarre...",
 		"autoRebootingDetail": "Votre KeepKey redémarrera automatiquement avec le nouveau firmware. Cela prend généralement quelques secondes.",
 		"waitingForDevice": "En attente de votre appareil...",
-		"wipeAndFlash": "Effacer et flasher"
+		"wipeAndFlash": "Effacer et flasher",
+		"installWipe": {
+			"wipeTitle": "Cela effacera l’appareil",
+			"unknownTitle": "Cela pourrait effacer l’appareil",
+			"lockTitle": "Cela verrouillera votre portefeuille Bitcoin uniquement",
+			"noFirmwareTitle": "Tout portefeuille sur ce KeepKey sera effacé",
+			"wipeAck": "Je comprends que cela effacera mon appareil et j’ai sauvegardé ma phrase de récupération",
+			"unknownAck": "Je comprends que cela pourrait effacer mon appareil et j’ai sauvegardé ma phrase de récupération",
+			"lockAck": "Je comprends que mon portefeuille sera verrouillé et j’ai sauvegardé ma phrase de récupération",
+			"downgradeTitle": "Cela effacera l’appareil",
+			"crossBody": "Ce KeepKey utilise le firmware {{from}} v{{current}}. Le firmware {{to}} v{{target}} ne peut pas lire son portefeuille et effacera toutes les clés et tous les réglages au démarrage. Pour réutiliser ce portefeuille, vous devrez le restaurer avec votre phrase de récupération.",
+			"downgradeBody": "Vous installez v{{target}} à la place de v{{current}}. L’ancien firmware ne peut pas lire le stockage plus récent et effacera toutes les clés et tous les réglages au démarrage. Vous devrez restaurer le portefeuille avec votre phrase de récupération.",
+			"lockBody": "Ce KeepKey utilise le firmware Bitcoin uniquement. Le firmware {{variant}} v{{target}} refusera d’ouvrir ce portefeuille. Il restera sur l’appareil, mais vous devrez réinstaller le firmware Bitcoin uniquement ou effacer l’appareil et restaurer le portefeuille avec votre phrase de récupération.",
+			"unknownBody": "Le firmware installé ne peut pas être identifié en mode bootloader. L’installation du firmware {{variant}} peut effacer toutes les clés et tous les réglages, notamment en changeant de variante ou en remplaçant un firmware non officiel ou plus récent. Si ce KeepKey contient un portefeuille, préparez sa phrase de récupération. Un KeepKey neuf n’a aucun portefeuille à perdre.",
+			"noFirmwareBody": "Aucun firmware n’est installé sur ce KeepKey, par exemple après une mise à jour interrompue. S’il contenait un portefeuille, l’installation du firmware l’effacera et vous devrez le restaurer avec votre phrase de récupération.",
+			"unsignedBody": "Ce KeepKey utilise un firmware qui n’est pas une version officielle de KeepKey. L’installation du firmware officiel effacera toutes les clés et tous les réglages."
+		}
 	},
 	"initChoose": {
 		"title": "Configurez votre portefeuille",
@@ -151,7 +167,8 @@
 		"writeDownWarning": "Notez chaque mot !",
 		"writeDownDetail": "Votre phrase de récupération s’affiche sur l’écran de l’appareil. Écrivez chaque mot sur papier. C’est votre SEULE sauvegarde; vous ne reverrez PAS ces mots.",
 		"deviceLost": "Appareil déconnecté. Rebranchez-le pour continuer, ou revenez en arrière pour réessayer.",
-		"goBack": "Retour"
+		"goBack": "Retour",
+		"backToChoose": "Retour"
 	},
 	"initLabel": {
 		"walletCreated": "Portefeuille créé !",
@@ -232,6 +249,17 @@
 		"walletLabels": {
 			"visible": "visible",
 			"hidden": "caché"
+		}
+	},
+	"updateDone": {
+		"continue": "Continuer"
+	},
+	"coinMode": {
+		"change": "Modifier"
+	},
+	"security": {
+		"dice": {
+			"can": "Vous saisissez {{rollCount}} lancers avec le bouton de l’appareil ; ils ne passent jamais par cet ordinateur."
 		}
 	}
 }

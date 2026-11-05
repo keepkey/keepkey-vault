@@ -1,3 +1,4 @@
+import { useUiTranslation } from "../../i18n/ui"
 import { useEffect, useState } from "react"
 import { Box, Text, VStack, Flex, Button, Image } from "@chakra-ui/react"
 import { useTranslation } from "react-i18next"
@@ -75,6 +76,8 @@ function PairingFallbackIcon() {
 }
 
 export function PairingApproval({ request, onApprove, onReject }: PairingApprovalProps) {
+  const uiText = useUiTranslation()
+
 	const { t } = useTranslation("device")
 	const [imgError, setImgError] = useState(false)
 	const hasImage = !!request.imageUrl && !imgError
@@ -143,7 +146,7 @@ export function PairingApproval({ request, onApprove, onReject }: PairingApprova
 					)}
 					<Flex gap="3" justify="center">
 						<DocsLink href={DOCS_LINKS.settingsPairing} />
-						<DocsLink href={watch('course-11-app-connections')} label="Watch video" />
+						<DocsLink href={watch('course-11-app-connections')} label={uiText("Watch video")} />
 					</Flex>
 				</VStack>
 

@@ -1,3 +1,5 @@
+import { getNumberLocale } from "../lib/number-locale"
+import { useUiTranslation } from "../i18n/ui"
 import { useState } from "react"
 import { Box, Flex, Text, Input, Button } from "@chakra-ui/react"
 import { rpcRequest } from "../lib/rpc"
@@ -11,6 +13,8 @@ type TestResult = { ok: boolean; error?: string; chain?: string; blocks?: number
  *  node instead of Pioneer. Verbose Test Connection; no silent fallback — if the
  *  node is enabled and fails, the app surfaces the error rather than phoning home. */
 export function SelfHostNodePanel({ settings, onChange, onConnected }: { settings: AppSettings; onChange: (s: AppSettings) => void; onConnected?: () => void }) {
+  const uiText = useUiTranslation()
+
   const [type, setType] = useState<"blockbook" | "core">(settings.btcNodeType || "blockbook")
   const [url, setUrl] = useState(settings.btcNodeUrl || "")
   const [rpcUser, setRpcUser] = useState("")
@@ -60,14 +64,12 @@ export function SelfHostNodePanel({ settings, onChange, onConnected }: { setting
   return (
     <Box border="1px solid" borderColor="kk.border" borderRadius="12px" p="3" bg="kk.bg">
       <Flex align="center" gap="2" mb="1">
-        <Text fontSize="md" color="kk.textPrimary" fontWeight="500">Self-host node</Text>
-        {enabled && <Text fontSize="9px" color="var(--teal)" bg="rgba(139,227,196,0.12)" px="1.5" py="0.5" borderRadius="sm" textTransform="uppercase" letterSpacing="0.05em">Active</Text>}
+        <Text fontSize="md" color="kk.textPrimary" fontWeight="500">{uiText("Self-host node")}</Text>
+        {enabled && <Text fontSize="9px" color="var(--teal)" bg="rgba(139,227,196,0.12)" px="1.5" py="0.5" borderRadius="sm" textTransform="uppercase" letterSpacing="0.05em">{uiText("Active")}</Text>}
       </Flex>
-      <Text fontSize="sm" color="kk.textSecondary" mb="3">
-        Point KeepKey Desktop at your own {type === "blockbook" ? "Blockbook indexer" : "Bitcoin Core node"} instead of KeepKey servers. If your node fails, KeepKey Desktop shows the error — it never falls back to KeepKey servers.
-      </Text>
+      <Text fontSize="sm" color="kk.textSecondary" mb="3">{uiText("Point KeepKey Desktop at your own")}{" "}{type === "blockbook" ? uiText("Blockbook indexer") : uiText("Bitcoin Core node")}{" "}{uiText("instead of KeepKey servers. If your node fails, KeepKey Desktop shows the error — it never falls back to KeepKey servers.")}</Text>
 
-      <Text fontSize="11px" color="kk.textSecondary" mb="1">Node type</Text>
+      <Text fontSize="11px" color="kk.textSecondary" mb="1">{uiText("Node type")}</Text>
       <Flex gap="1.5" mb="2">
         {(["blockbook", "core"] as const).map((tp) => (
           <Box as="button" key={tp} flex="1" onClick={() => setType(tp)}
@@ -75,29 +77,29 @@ export function SelfHostNodePanel({ settings, onChange, onConnected }: { setting
                border="1px solid" borderColor={type === tp ? `${ACCENT}88` : "kk.border"}
                bg={type === tp ? `${ACCENT}18` : "transparent"} color={type === tp ? "kk.textPrimary" : "kk.textSecondary"}
                _hover={{ color: "kk.textPrimary" }}>
-            {tp === "blockbook" ? "Blockbook" : "Bitcoin Core"}
+            {tp === "blockbook" ? uiText("Blockbook") : uiText("Bitcoin Core")}
           </Box>
         ))}
       </Flex>
       <Text fontSize="10px" color="kk.textSecondary" mb="2.5">
         {type === "blockbook"
-          ? "Trezor indexer — xpub-native, full history. What KeepKey servers use."
-          : "Bitcoin Core RPC — UTXO scan, fees and broadcast. Desktop does not discover transaction history, even with archival storage and txindex."}
+          ? uiText("Trezor indexer — xpub-native, full history. What KeepKey servers use.")
+          : uiText("Bitcoin Core RPC — UTXO scan, fees and broadcast. Desktop does not discover transaction history, even with archival storage and txindex.")}
       </Text>
 
-      <Text fontSize="11px" color="kk.textSecondary" mb="1">{type === "blockbook" ? "Blockbook URL" : "Node RPC URL"}</Text>
+      <Text fontSize="11px" color="kk.textSecondary" mb="1">{type === "blockbook" ? uiText("Blockbook URL") : uiText("Node RPC URL")}</Text>
       <Input value={url} onChange={(e) => setUrl(e.target.value)} placeholder={type === "blockbook" ? "http://127.0.0.1:9130" : "http://127.0.0.1:8332"}
              bg="var(--ink-0)" border="1px solid" borderColor="kk.border" color="kk.textPrimary" size="sm" fontFamily="mono" fontSize="xs" mb="2" />
 
       {type === "core" && (
         <>
-          <Text fontSize="11px" color="kk.textSecondary" mb="1">RPC username {enabled ? "(leave blank to keep saved)" : ""}</Text>
-          <Input value={rpcUser} onChange={(e) => setRpcUser(e.target.value)} autoComplete="off" spellCheck={false} placeholder="rpcuser"
+          <Text fontSize="11px" color="kk.textSecondary" mb="1">{uiText("RPC username")}{" "}{enabled ? uiText("(leave blank to keep saved)") : ""}</Text>
+          <Input value={rpcUser} onChange={(e) => setRpcUser(e.target.value)} autoComplete="off" spellCheck={false} placeholder={uiText("rpcuser")}
                  bg="var(--ink-0)" border="1px solid" borderColor="kk.border" color="kk.textPrimary" size="sm" fontFamily="mono" fontSize="xs" mb="2" />
-          <Text fontSize="11px" color="kk.textSecondary" mb="1">RPC password {enabled ? "(leave blank to keep saved)" : ""}</Text>
-          <Input value={rpcPass} onChange={(e) => setRpcPass(e.target.value)} type="password" autoComplete="off" spellCheck={false} placeholder="rpcpassword"
+          <Text fontSize="11px" color="kk.textSecondary" mb="1">{uiText("RPC password")}{" "}{enabled ? uiText("(leave blank to keep saved)") : ""}</Text>
+          <Input value={rpcPass} onChange={(e) => setRpcPass(e.target.value)} type="password" autoComplete="off" spellCheck={false} placeholder={uiText("rpcpassword")}
                  bg="var(--ink-0)" border="1px solid" borderColor="kk.border" color="kk.textPrimary" size="sm" fontFamily="mono" fontSize="xs" mb="1" />
-          <Text fontSize="10px" color="kk.textSecondary" mb="3">Paste each field separately — no colon, no quotes, watch for a trailing space.</Text>
+          <Text fontSize="10px" color="kk.textSecondary" mb="3">{uiText("Paste each field separately — no colon, no quotes, watch for a trailing space.")}</Text>
         </>
       )}
 
@@ -107,13 +109,12 @@ export function SelfHostNodePanel({ settings, onChange, onConnected }: { setting
              bg={result.ok ? "rgba(139,227,196,0.08)" : "rgba(224,140,123,0.08)"}>
           {result.ok ? (
             <>
-              <Text fontSize="xs" color="var(--teal)" fontWeight="600">
-                Connected as {result.detectedType === "core" ? "Bitcoin Core" : "Blockbook"} — {result.chain} · height {result.blocks?.toLocaleString()}
+              <Text fontSize="xs" color="var(--teal)" fontWeight="600">{uiText("Connected as")}{" "}{result.detectedType === "core" ? uiText("Bitcoin Core") : uiText("Blockbook")} — {result.chain}{" "}{uiText("· height")}{" "}{result.blocks?.toLocaleString(getNumberLocale())}
               </Text>
-              {type === "blockbook" && result.inSync === false && <Text fontSize="11px" color="var(--gold)" mt="1">⚠ Indexer still syncing — balances may be incomplete until caught up.</Text>}
-              {type === "core" && result.pruned && <Text fontSize="11px" color="var(--gold)" mt="1">⚠ Pruned node — older previous transactions may be unavailable. Desktop does not discover Core wallet history.</Text>}
-              {type === "core" && result.txindex === false && <Text fontSize="11px" color="var(--gold)" mt="1">⚠ txindex off — full previous transactions for legacy inputs may be unavailable. Enabling txindex requires the relevant block data.</Text>}
-              {type === "core" && result.txindex === undefined && <Text fontSize="11px" color="kk.textSecondary" mt="1">txindex status unknown (old Core) — legacy-input spends may fail.</Text>}
+              {type === "blockbook" && result.inSync === false && <Text fontSize="11px" color="var(--gold)" mt="1">{uiText("⚠ Indexer still syncing — balances may be incomplete until caught up.")}</Text>}
+              {type === "core" && result.pruned && <Text fontSize="11px" color="var(--gold)" mt="1">{uiText("⚠ Pruned node — older previous transactions may be unavailable. Desktop does not discover Core wallet history.")}</Text>}
+              {type === "core" && result.txindex === false && <Text fontSize="11px" color="var(--gold)" mt="1">{uiText("⚠ txindex off — full previous transactions for legacy inputs may be unavailable. Enabling txindex requires the relevant block data.")}</Text>}
+              {type === "core" && result.txindex === undefined && <Text fontSize="11px" color="kk.textSecondary" mt="1">{uiText("txindex status unknown (old Core) — legacy-input spends may fail.")}</Text>}
             </>
           ) : (
             <Text fontSize="11px" color="var(--rose)" wordBreak="break-word">{result.error}</Text>
@@ -124,20 +125,18 @@ export function SelfHostNodePanel({ settings, onChange, onConnected }: { setting
       <Flex gap="2">
         <Button size="sm" variant="outline" flex="1" onClick={test} disabled={testing || !url.trim()}
                 borderColor="kk.border" color="kk.textPrimary" _hover={{ bg: "var(--ink-2)" }}>
-          {testing ? "Testing…" : "Test connection"}
+          {testing ? uiText("Testing…") : uiText("Test connection")}
         </Button>
         {/* Always a save path — editing the URL/type/creds while already enabled
             must persist (otherwise the node keeps probing the stale config). */}
         <Button size="sm" flex="1" onClick={() => save(true)} disabled={saving || !url.trim()}
                 bg="var(--gold)" color="kk.bg" _hover={{ opacity: 0.9 }}>
-          {saving ? "…" : enabled ? "Save changes" : "Use my node"}
+          {saving ? "…" : enabled ? uiText("Save changes") : uiText("Use my node")}
         </Button>
       </Flex>
       {enabled && (
         <Box as="button" mt="2" w="100%" textAlign="center" fontSize="11px" color="var(--rose)"
-             _hover={{ textDecoration: "underline" }} onClick={() => !saving && save(false)}>
-          Disable self-host node
-        </Box>
+             _hover={{ textDecoration: "underline" }} onClick={() => !saving && save(false)}>{uiText("Disable self-host node")}</Box>
       )}
     </Box>
   )

@@ -1,3 +1,4 @@
+import { useUiTranslation } from "../i18n/ui"
 import { useState, useEffect } from "react"
 import { Box, Text, Flex } from "@chakra-ui/react"
 import { Logo } from './logo/Logo'
@@ -28,6 +29,8 @@ const BTC_ORANGE = '#F7931A'
 const RETRY_HINT_DELAY_MS = 10_000
 
 export function SplashScreen({ statusText, hintText, children, variant = 'searching', childrenReady = false, onLogoClick, isBitcoinOnly = false }: SplashScreenProps) {
+  const uiText = useUiTranslation()
+
   const dotColor = isBitcoinOnly ? BTC_ORANGE : STATUS_DOT_COLORS[variant]
   const [showRetry, setShowRetry] = useState(false)
 
@@ -97,9 +100,7 @@ export function SplashScreen({ statusText, hintText, children, variant = 'search
                 bg="rgba(247,147,26,0.14)" border="1px solid rgba(247,147,26,0.45)" flexShrink={0}>
                 <Text fontSize="14px" fontWeight="700" color={BTC_ORANGE} lineHeight="1">₿</Text>
               </Flex>
-              <Text fontSize="14px" fontWeight="700" color={BTC_ORANGE} letterSpacing="0.02em">
-                Bitcoin-Only KeepKey
-              </Text>
+              <Text fontSize="14px" fontWeight="700" color={BTC_ORANGE} letterSpacing="0.02em">{uiText("Bitcoin-Only KeepKey")}</Text>
             </Flex>
           )}
           {showRetry && !childrenReady && (
@@ -115,9 +116,7 @@ export function SplashScreen({ statusText, hintText, children, variant = 'search
               textTransform="uppercase"
               fontFamily="mono"
               pointerEvents={onLogoClick ? "auto" : "none"}
-            >
-              Tap to retry
-            </Text>
+            >{uiText("Tap to retry")}</Text>
           )}
           {/* Children stay mounted while hidden so DeviceGrid can call onReady. */}
           <Flex

@@ -1,3 +1,4 @@
+import { useUiTranslation } from "../i18n/ui"
 import { useState } from "react"
 import { Box, Button, Code, Flex, Text, VStack, Link } from "@chakra-ui/react"
 import { rpcRequest } from "../lib/rpc"
@@ -15,6 +16,8 @@ EOF
 sudo udevadm control --reload-rules && sudo udevadm trigger`
 
 export function LinuxUdevWarning() {
+  const uiText = useUiTranslation()
+
 	const [phase, setPhase] = useState<"idle" | "running" | "success" | "error">("idle")
 	const [error, setError] = useState<string | null>(null)
 	const [showManual, setShowManual] = useState(false)
@@ -55,15 +58,10 @@ export function LinuxUdevWarning() {
 			<VStack gap={4} align="stretch">
 				<Flex align="center" gap={2}>
 					<Box w="6px" h="6px" borderRadius="full" bg="var(--gold)" />
-					<Text fontSize="lg" fontWeight="600" color="var(--text-0)" letterSpacing="-0.01em">
-						KeepKey detected, but Linux is blocking access
-					</Text>
+					<Text fontSize="lg" fontWeight="600" color="var(--text-0)" letterSpacing="-0.01em">{uiText("KeepKey detected, but Linux is blocking access")}</Text>
 				</Flex>
 
-				<Text fontSize="14px" color="var(--text-1)" lineHeight="1.55">
-					Your KeepKey is plugged in, but this user account doesn't have permission to talk to it.
-					Linux requires a one-time udev rule to grant USB access to the device.
-				</Text>
+				<Text fontSize="14px" color="var(--text-1)" lineHeight="1.55">{uiText("Your KeepKey is plugged in, but this user account doesn't have permission to talk to it. Linux requires a one-time udev rule to grant USB access to the device.")}</Text>
 				<DocsLink href={DOCS_LINKS.linuxTips} alignSelf="flex-start" mt={-2} />
 
 				{phase === "success" ? (
@@ -76,9 +74,7 @@ export function LinuxUdevWarning() {
 					>
 						<Flex align="center" gap="2">
 							<Box w="6px" h="6px" borderRadius="full" bg="var(--teal)" />
-							<Text fontSize="13px" color="var(--teal-2)" fontWeight="500" letterSpacing="-0.005em">
-								Rules installed. Unplug and re-plug your KeepKey if it doesn't reconnect automatically in a few seconds.
-							</Text>
+							<Text fontSize="13px" color="var(--teal-2)" fontWeight="500" letterSpacing="-0.005em">{uiText("Rules installed. Unplug and re-plug your KeepKey if it doesn't reconnect automatically in a few seconds.")}</Text>
 						</Flex>
 					</Box>
 				) : phase === "error" ? (
@@ -106,9 +102,7 @@ export function LinuxUdevWarning() {
 							fontWeight="600"
 							_hover={{ bg: "var(--gold-2)" }}
 							className="electrobun-webkit-app-region-no-drag"
-						>
-							Fix it for me
-						</Button>
+						>{uiText("Fix it for me")}</Button>
 						<Button
 							onClick={() => setShowManual((s) => !s)}
 							variant="ghost"
@@ -116,22 +110,18 @@ export function LinuxUdevWarning() {
 							_hover={{ color: "var(--text-0)", bg: "var(--ink-2)" }}
 							className="electrobun-webkit-app-region-no-drag"
 						>
-							{showManual ? "Hide manual steps" : "Manual install"}
+							{showManual ? uiText("Hide manual steps") : uiText("Manual install")}
 						</Button>
 					</Flex>
 				)}
 
 				{phase === "running" && (
-					<Text fontSize="11px" color="var(--text-3)" textAlign="center" letterSpacing="-0.005em">
-						Look for the system password prompt — it may be behind this window.
-					</Text>
+					<Text fontSize="11px" color="var(--text-3)" textAlign="center" letterSpacing="-0.005em">{uiText("Look for the system password prompt — it may be behind this window.")}</Text>
 				)}
 
 				{showManual && (
 					<VStack gap={2} align="stretch">
-						<Text fontSize="13px" color="var(--text-2)" letterSpacing="-0.005em">
-							Run this in a terminal, then unplug and re-plug your KeepKey:
-						</Text>
+						<Text fontSize="13px" color="var(--text-2)" letterSpacing="-0.005em">{uiText("Run this in a terminal, then unplug and re-plug your KeepKey:")}</Text>
 						<Code
 							display="block"
 							whiteSpace="pre"
@@ -162,9 +152,7 @@ export function LinuxUdevWarning() {
 					letterSpacing="0.04em"
 					_hover={{ color: "var(--teal)", textDecoration: "underline" }}
 					className="electrobun-webkit-app-region-no-drag"
-				>
-					Need help? support.keepkey.com
-				</Link>
+				>{uiText("Need help? support.keepkey.com")}</Link>
 			</VStack>
 		</Box>
 	)

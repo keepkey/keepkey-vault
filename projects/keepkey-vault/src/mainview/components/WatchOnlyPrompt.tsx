@@ -1,3 +1,4 @@
+import { useUiTranslation } from "../i18n/ui"
 import { Box, Flex, Text, Button } from "@chakra-ui/react"
 import { useTranslation } from "react-i18next"
 import { DocsLink } from "./DocsLink"
@@ -25,6 +26,8 @@ function useFormatTimeAgo() {
 }
 
 export function WatchOnlyPrompt({ deviceLabel, lastSynced, onViewPortfolio, onConnectWallet }: WatchOnlyPromptProps) {
+  const uiText = useUiTranslation()
+
   const { t } = useTranslation("dialogs")
   const formatTimeAgo = useFormatTimeAgo()
   return (
@@ -44,7 +47,7 @@ export function WatchOnlyPrompt({ deviceLabel, lastSynced, onViewPortfolio, onCo
     >
       <Box px="5" pt="4" pb="3">
         <Text fontSize="sm" fontWeight="600" color="kk.textPrimary" mb="1">
-          {deviceLabel || "KeepKey"}
+          {deviceLabel || uiText("KeepKey")}
         </Text>
         <Text fontSize="xs" color="kk.textMuted">
           {t("watchOnly.lastSynced", { time: formatTimeAgo(lastSynced) })}

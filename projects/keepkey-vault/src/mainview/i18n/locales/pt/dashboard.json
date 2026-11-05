@@ -35,5 +35,7 @@
 	"loadingConnect": "Conectando ao seu KeepKey",
 	"loadingSync": "Sincronizando saldos entre redes",
 	"loadingPrices": "Buscando os preços mais recentes",
-	"tokensCount": "+{{count}} tokens"
+	"tokensCount": "+{{count}} tokens",
+	"dismiss": "Dispensar",
+	"tokensCount_many": "+{{count}} tokens"
 }

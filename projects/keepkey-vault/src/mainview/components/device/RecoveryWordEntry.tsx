@@ -1,3 +1,4 @@
+import { useUiTranslation } from "../../i18n/ui"
 import { useState, useEffect, useCallback, useRef } from "react"
 import { useTranslation } from "react-i18next"
 import { Box, Text, VStack, Flex, Button, HStack } from "@chakra-ui/react"
@@ -53,6 +54,8 @@ export function RecoveryWordEntry({
   error,
   errorType,
 }: RecoveryWordEntryProps) {
+  const uiText = useUiTranslation()
+
   const { t } = useTranslation("device")
   const [currentChars, setCurrentChars] = useState<string[]>([])
   const [wordAccepted, setWordAccepted] = useState(false)
@@ -373,7 +376,7 @@ export function RecoveryWordEntry({
             {showHelp ? t('recovery.hideHelp') : t('recovery.howCipherWorks')}
           </Button>
           <DocsLink href={DOCS_LINKS.cipherRecovery} />
-          <DocsLink href={watch('intro-more-cipher')} label="Watch video" />
+          <DocsLink href={watch('intro-more-cipher')} label={uiText("Watch video")} />
         </Flex>
 
         {showHelp && (

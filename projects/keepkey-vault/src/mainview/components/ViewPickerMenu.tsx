@@ -1,3 +1,4 @@
+import { useUiTranslation } from "../i18n/ui"
 import { useEffect, useRef, useState, type ReactNode } from "react"
 import { Box, Flex, Text } from "@chakra-ui/react"
 import { useDashboardView, type DashboardView } from "../lib/dashboardViewContext"
@@ -76,6 +77,8 @@ const VIEWS: Array<{ id: DashboardView; label: string; description: string; prev
  *  comparison views (heatmap, stack) are hidden because they can't compare
  *  one thing. */
 export function ViewPickerButton({ assetCount }: { assetCount?: number } = {}) {
+  const uiText = useUiTranslation()
+
 	const { viewMode, setViewMode } = useDashboardView()
 	const [open, setOpen] = useState(false)
 	const wrapRef = useRef<HTMLDivElement>(null)
@@ -117,7 +120,7 @@ export function ViewPickerButton({ assetCount }: { assetCount?: number } = {}) {
 				_hover={{ color: "var(--text-0)", bg: "var(--ink-3)" }}
 				transition="all 0.18s"
 				cursor="pointer"
-				title="Switch view"
+				title={uiText("Switch view")}
 				aria-haspopup="menu"
 				aria-expanded={open}
 				overflow="hidden"

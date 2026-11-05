@@ -1,3 +1,5 @@
+import { getNumberLocale } from "../lib/number-locale"
+import { useUiTranslation } from "../i18n/ui"
 import { useState } from "react"
 import { Box, Flex, Text } from "@chakra-ui/react"
 
@@ -37,6 +39,8 @@ export function StackedBarView({
 	deltaPct,
 	maxWidth = 720,
 }: StackedBarViewProps) {
+  const uiText = useUiTranslation()
+
 	const total = totalProp ?? items.reduce((s, it) => s + it.value, 0)
 	const [hoverId, setHoverId] = useState<string | null>(null)
 	if (total <= 0) return null
@@ -75,7 +79,7 @@ export function StackedBarView({
 					fontWeight={500}
 					lineHeight="1"
 				>
-					{totalLabel || "Total"}
+					{totalLabel || uiText("Total")}
 				</Text>
 				<Flex align="baseline" justify="center" gap="0">
 					<Text
@@ -85,7 +89,7 @@ export function StackedBarView({
 						letterSpacing="-0.04em"
 						lineHeight="1"
 					>
-						${dollars.toLocaleString()}
+						${dollars.toLocaleString(getNumberLocale())}
 					</Text>
 					<Text
 						fontSize={{ base: "22px", md: "28px" }}
@@ -102,7 +106,7 @@ export function StackedBarView({
 					<Flex align="center" gap="2" mt="1">
 						{deltaUsd !== undefined && (
 							<Text fontSize="13px" color={deltaColor} fontWeight={500}>
-								{deltaPositive ? "+" : ""}${Math.abs(deltaUsd).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+								{deltaPositive ? "+" : ""}${Math.abs(deltaUsd).toLocaleString(getNumberLocale(), { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
 							</Text>
 						)}
 						{deltaPct !== undefined && (
@@ -137,7 +141,7 @@ export function StackedBarView({
 								onClick={s.onSelect}
 								border="0"
 								p={0}
-								title={`${s.label} · ${(s.pct * 100).toFixed(1)}% · $${s.value.toLocaleString("en-US", { maximumFractionDigits: 2 })}`}
+								title={`${s.label} · ${(s.pct * 100).toFixed(1)}% · $${s.value.toLocaleString(getNumberLocale(), { maximumFractionDigits: 2 })}`}
 							/>
 						)
 					})}
@@ -174,7 +178,7 @@ export function StackedBarView({
 									{s.label}
 								</Text>
 								<Text fontSize="11px" color="var(--text-2)" lineHeight="1.4" truncate>
-									{(s.pct * 100).toFixed(1)}% · ${s.value.toLocaleString("en-US", { maximumFractionDigits: 2 })}
+									{(s.pct * 100).toFixed(1)}% · ${s.value.toLocaleString(getNumberLocale(), { maximumFractionDigits: 2 })}
 								</Text>
 							</Box>
 						)
@@ -202,7 +206,7 @@ export function StackedBarView({
 						>
 							<Box w="8px" h="8px" borderRadius="full" bg={s.color} flexShrink={0} />
 							<Text fontSize="11px" lineHeight="1.2">
-								{s.label} · ${s.value.toLocaleString("en-US", { maximumFractionDigits: 2 })}
+								{s.label} · ${s.value.toLocaleString(getNumberLocale(), { maximumFractionDigits: 2 })}
 							</Text>
 						</Flex>
 					))}

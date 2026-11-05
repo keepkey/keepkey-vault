@@ -154,14 +154,10 @@
 	"approvalWaiting": "Oczekiwanie na potwierdzenie zatwierdzenia…",
 	"approvalWaitingDesc": "Oczekiwanie na zatwierdzenie w bloku, zanim podpiszemy wymianę.",
 	"balanceChanges": "Zmiany salda",
-	"blindSignBody": "Wymiany Solana używają transakcji wersjonowanej, której Twój KeepKey nie potrafi w pełni zdekodować, więc musi zostać podpisana na ślepo. Jest to domyślnie wyłączone. Włączenie tego aktywuje Tryb zaawansowany (podpisywanie na ślepo) na Twoim urządzeniu — zostaniesz poproszony o potwierdzenie zmiany na urządzeniu.",
-	"blindSignCaveat": "Podpisywanie na ślepo oznacza, że urządzenie pokazuje ogólny komunikat zamiast zdekodowanych szczegółów. Kontynuuj tylko dla wymian zainicjowanych tutaj. Możesz to ponownie wyłączyć w Ustawienia urządzenia → Polityka podpisywania.",
 	"blindSignConfirmOnDevice": "Potwierdź na urządzeniu…",
 	"blindSignDeclined": "Odrzucono na urządzeniu — podpisywanie na ślepo nie zostało włączone.",
-	"blindSignEnable": "Włącz podpisywanie na ślepo",
 	"blindSignEnableFailed": "Nie udało się włączyć podpisywania na ślepo na urządzeniu.",
 	"blindSignHeader": "Podpisywanie na ślepo",
-	"blindSignTitle": "Włącz podpisywanie na ślepo dla Solana",
 	"block": "Blok",
 	"cancelSwapDevice": "Anuluj - zwolnij komunikat urządzenia",
 	"completed": "zakończone",
@@ -202,5 +198,9 @@
 	"hidePayload": "Ukryj ładunek transakcji",
 	"payloadPending": "Dostępne po potwierdzeniu",
 	"sent": "Wysłano",
-	"gas": "Gas"
+	"gas": "Gas",
+	"deviceBlindSignCaveat": "Podpisywanie w ciemno pozostaje włączone do zablokowania lub odłączenia KeepKey, dla wszystkich korzystających z niego aplikacji, nie tylko tej wymiany. Gdy jest włączone, ta aplikacja również przestaje wyświetlać ten ekran przed takimi transakcjami. Urządzenie prosi o potwierdzenie i ponowne wpisanie kodu PIN.",
+	"solanaOutflowDrain": "Uwaga: to opróżni Twój portfel. Nie podpisuj, chyba że właśnie to zamierzasz zrobić.",
+	"solanaOutflowCaveat": "Symulacja z węzłem Solana z tego komputera. KeepKey nie może potwierdzić tych wartości.",
+	"deviceBlindSignEnable": "Włącz podpisywanie w ciemno"
 }

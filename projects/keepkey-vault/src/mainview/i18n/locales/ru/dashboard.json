@@ -35,5 +35,7 @@
 	"loadingConnect": "Подключение к вашему KeepKey",
 	"loadingSync": "Синхронизация балансов по сетям",
 	"loadingPrices": "Получение актуальных цен",
-	"tokensCount": "+{{count}} токенов"
+	"tokensCount": "+{{count}} токенов",
+	"tokensCount_few": "+{{count}} токена",
+	"tokensCount_many": "+{{count}} токенов"
 }

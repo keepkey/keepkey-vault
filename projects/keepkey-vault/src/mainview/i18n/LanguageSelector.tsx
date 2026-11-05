@@ -1,35 +1,21 @@
-import { Flex, Box, Text, Button } from "@chakra-ui/react"
+import { Flex, Box, Text } from "@chakra-ui/react"
 import { useTranslation } from "react-i18next"
 import { FaGlobe } from "react-icons/fa"
 import { useState, useRef, useEffect } from "react"
-
-export const LANGUAGES = [
-	{ code: "en", label: "English" },
-	{ code: "es", label: "Español" },
-	{ code: "fr", label: "Français" },
-	{ code: "de", label: "Deutsch" },
-	{ code: "ja", label: "日本語" },
-	{ code: "zh", label: "中文" },
-	{ code: "ko", label: "한국어" },
-	{ code: "pt", label: "Português" },
-	{ code: "ru", label: "Русский" },
-	{ code: "it", label: "Italiano" },
-	{ code: "pl", label: "Polski" },
-	{ code: "nl", label: "Nederlands" },
-	{ code: "th", label: "ไทย" },
-	{ code: "tr", label: "Türkçe" },
-	{ code: "vi", label: "Tiếng Việt" },
-] as const
+import { LANGUAGES, supportedLanguage } from './languages'
+export { LANGUAGES } from './languages'
 
 export function LanguageSelector() {
-	const { i18n } = useTranslation()
+	const { t, i18n } = useTranslation()
 	const [expanded, setExpanded] = useState(false)
-	const current = LANGUAGES.find(l => l.code === i18n.language) || LANGUAGES[0]
+	const language = supportedLanguage(i18n.resolvedLanguage || i18n.language)
+	const current = LANGUAGES.find(l => l.code === language) || LANGUAGES[0]
 
 	return (
 		<Box>
 			<Flex
 				as="button"
+				aria-expanded={expanded}
 				align="center"
 				justify="space-between"
 				w="100%"
@@ -37,7 +23,7 @@ export function LanguageSelector() {
 				onClick={() => setExpanded(o => !o)}
 				py="1"
 			>
-				<Text fontSize="xs" color="kk.textSecondary">Language</Text>
+				<Text fontSize="xs" color="kk.textSecondary">{t('language', { defaultValue: 'Language' })}</Text>
 				<Flex align="center" gap="1.5">
 					<Text fontSize="xs" color="kk.textPrimary" fontWeight="500">{current.label}</Text>
 					<svg
@@ -52,11 +38,12 @@ export function LanguageSelector() {
 			{expanded && (
 				<Flex flexWrap="wrap" gap="1" mt="2">
 					{LANGUAGES.map(({ code, label }) => {
-						const active = i18n.language === code
+						const active = language === code
 						return (
 							<Box
 								key={code}
 								as="button"
+								aria-pressed={active}
 								px="2"
 								py="0.5"
 								borderRadius="md"
@@ -100,12 +87,14 @@ export function LanguagePicker() {
 		return () => document.removeEventListener("mousedown", handler)
 	}, [open])
 
-	const current = LANGUAGES.find(l => l.code === i18n.language) || LANGUAGES[0]
+	const language = supportedLanguage(i18n.resolvedLanguage || i18n.language)
+	const current = LANGUAGES.find(l => l.code === language) || LANGUAGES[0]
 
 	return (
 		<Box ref={ref} position="relative">
 			<Flex
 				as="button"
+				aria-expanded={open}
 				align="center"
 				gap="1.5"
 				px="2"
@@ -136,11 +125,12 @@ export function LanguagePicker() {
 					overflowY="auto"
 				>
 					{LANGUAGES.map(({ code, label }) => {
-						const active = i18n.language === code
+						const active = language === code
 						return (
 							<Flex
 								key={code}
 								as="button"
+								aria-pressed={active}
 								w="100%"
 								px="3"
 								py="1.5"

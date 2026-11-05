@@ -23,6 +23,13 @@
 	"incomingTx": {
 		"onChain": "{{chain}} · 正在刷新余额",
 		"refreshing": "正在刷新余额",
-		"title": "收到付款"
-	}
+		"title": "收到付款",
+		"activityOnChain": "{{chain}} · 余额已刷新"
+	},
+	"language": "语言",
+	"currency": "货币",
+	"numberFormat": "数字格式",
+	"usdValues": "金额以USD显示。您可以在下方更改地区数字格式。",
+	"somethingWentWrong": "发生错误",
+	"reload": "重新加载"
 }

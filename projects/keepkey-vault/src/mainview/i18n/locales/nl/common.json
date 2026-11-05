@@ -23,6 +23,13 @@
 	"incomingTx": {
 		"onChain": "{{chain}} · saldo vernieuwen",
 		"refreshing": "Saldo vernieuwen",
-		"title": "Inkomende betaling"
-	}
+		"title": "Inkomende betaling",
+		"activityOnChain": "{{chain}} · saldo bijgewerkt"
+	},
+	"language": "Taal",
+	"currency": "Valuta",
+	"numberFormat": "Getalnotatie",
+	"usdValues": "Waarden worden in USD weergegeven. Je kunt de regionale getalnotatie hieronder wijzigen.",
+	"somethingWentWrong": "Er is iets misgegaan",
+	"reload": "Opnieuw laden"
 }

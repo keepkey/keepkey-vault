@@ -159,14 +159,10 @@
 	"approvalWaiting": "正在等待授权确认…",
 	"approvalWaitingDesc": "等待授权上链后才能签署兑换。",
 	"balanceChanges": "余额变动",
-	"blindSignBody": "Solana 兑换使用您的 KeepKey 无法完全解码的版本化交易，因此必须进行盲签。此功能默认关闭。启用后会在您的设备上开启高级模式（盲签）— 系统将要求您在设备上确认此更改。",
-	"blindSignCaveat": "盲签意味着设备显示通用提示，而非解码后的详情。仅对您在此发起的兑换继续操作。您可以在设备设置 → 签名策略中将其重新关闭。",
 	"blindSignConfirmOnDevice": "请在设备上确认…",
 	"blindSignDeclined": "已在设备上拒绝 — 未启用盲签。",
-	"blindSignEnable": "启用盲签",
 	"blindSignEnableFailed": "在设备上启用盲签失败。",
 	"blindSignHeader": "盲签",
-	"blindSignTitle": "为 Solana 启用盲签",
 	"block": "区块",
 	"cancelSwapDevice": "取消 - 释放设备提示",
 	"completed": "已完成",
@@ -202,5 +198,9 @@
 	"youReceived": "您收到",
 	"exceedsSafeMax": "请保留约 {{reserve}} {{symbol}} 用于网络费 — 减少数量或点击 MAX。",
 	"sent": "已发送",
-	"gas": "Gas"
+	"gas": "Gas",
+	"deviceBlindSignCaveat": "盲签会保持开启，直到KeepKey锁定或断开连接，并对所有使用它的应用生效，而不仅限于本次兑换。开启期间，此应用也不再在此类交易前显示此页面。设备会要求您确认并重新输入PIN码。",
+	"solanaOutflowDrain": "警告：这将清空您的钱包。除非这正是您的意图，否则请勿签名。",
+	"solanaOutflowCaveat": "通过此计算机连接Solana节点进行模拟。您的KeepKey无法确认这些数值。",
+	"deviceBlindSignEnable": "开启盲签"
 }

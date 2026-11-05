@@ -23,6 +23,13 @@
 	"incomingTx": {
 		"onChain": "{{chain}} · odświeżanie salda",
 		"refreshing": "Odświeżanie salda",
-		"title": "Płatność przychodząca"
-	}
+		"title": "Płatność przychodząca",
+		"activityOnChain": "{{chain}} · saldo odświeżone"
+	},
+	"language": "Język",
+	"currency": "Waluta",
+	"numberFormat": "Format liczb",
+	"usdValues": "Wartości są wyświetlane w USD. Poniżej możesz zmienić regionalny format liczb.",
+	"somethingWentWrong": "Wystąpił błąd",
+	"reload": "Wczytaj ponownie"
 }

@@ -1,3 +1,4 @@
+import { useUiTranslation } from "../i18n/ui"
 import { Box, Flex, Text, Button, Input } from "@chakra-ui/react"
 import { useRef, useEffect, useState, useCallback } from "react"
 import { useTranslation } from "react-i18next"
@@ -82,6 +83,8 @@ interface WalletConnectPanelProps {
 }
 
 export function WalletConnectPanel({ open, wcUri, onClose, nativeEnabled }: WalletConnectPanelProps) {
+  const uiText = useUiTranslation()
+
 	const iframeRef = useRef<HTMLIFrameElement>(null)
 	const { t } = useTranslation("settings")
 	const [sessions, setSessions] = useState<WcSessionInfo[]>([])
@@ -265,7 +268,7 @@ export function WalletConnectPanel({ open, wcUri, onClose, nativeEnabled }: Wall
 					<Flex gap="2">
 						<Input
 							size="sm"
-							placeholder="wc:..."
+							placeholder={uiText("wc:...")}
 							value={pairInput}
 							onChange={(e: any) => setPairInput(e.target.value)}
 							onKeyDown={(e: any) => e.key === 'Enter' && handlePair()}
@@ -286,7 +289,7 @@ export function WalletConnectPanel({ open, wcUri, onClose, nativeEnabled }: Wall
 							disabled={pairing || !pairInput.trim()}
 							px="4"
 						>
-							{pairing ? "..." : "Pair"}
+							{pairing ? "..." : uiText("Pair")}
 						</Button>
 					</Flex>
 					<Flex gap="2" mt="2">
@@ -310,7 +313,7 @@ export function WalletConnectPanel({ open, wcUri, onClose, nativeEnabled }: Wall
 									<line x1="14" y1="20" x2="20" y2="20" />
 									<line x1="20" y1="14" x2="20" y2="20" />
 								</svg>
-								<Text fontSize="sm">Scan QR</Text>
+								<Text fontSize="sm">{uiText("Scan QR")}</Text>
 							</Flex>
 						</Button>
 						<Button
@@ -329,12 +332,12 @@ export function WalletConnectPanel({ open, wcUri, onClose, nativeEnabled }: Wall
 									<polyline points="17 8 12 3 7 8" />
 									<line x1="12" y1="3" x2="12" y2="15" />
 								</svg>
-								<Text fontSize="sm">Upload image</Text>
+								<Text fontSize="sm">{uiText("Upload image")}</Text>
 							</Flex>
 						</Button>
 					</Flex>
 					<Text fontSize="xs" color="kk.textSecondary" mt="2" textAlign="center">
-						{dragOver ? "Drop QR image to pair" : "Or drop a screenshot here"}
+						{dragOver ? uiText("Drop QR image to pair") : uiText("Or drop a screenshot here")}
 					</Text>
 					<input
 						ref={fileInputRef}
@@ -378,6 +381,8 @@ export function WalletConnectPanel({ open, wcUri, onClose, nativeEnabled }: Wall
 }
 
 function EmptyState() {
+  const uiText = useUiTranslation()
+
 	const steps: Array<{ n: number; title: string; body: string }> = [
 		{ n: 1, title: "Open a dApp", body: "Uniswap, Aave, OpenSea — anything that supports WalletConnect." },
 		{ n: 2, title: "Find the QR", body: "Click \"Connect Wallet\" → \"WalletConnect\"." },
@@ -399,10 +404,8 @@ function EmptyState() {
 						<path d="M31.5 38.5c10.2-10.2 26.8-10.2 37 0l1.2 1.2a1.3 1.3 0 0 1 0 1.8l-4.2 4.2a.65.65 0 0 1-.9 0l-1.7-1.7a19.3 19.3 0 0 0-26.8 0l-1.8 1.8a.65.65 0 0 1-.9 0l-4.2-4.2a1.3 1.3 0 0 1 0-1.8l1.3-1.3zm45.7 8.5l3.7 3.7a1.3 1.3 0 0 1 0 1.8L64.7 68.7a1.3 1.3 0 0 1-1.8 0L52.1 57.9a.33.33 0 0 0-.45 0L40.9 68.7a1.3 1.3 0 0 1-1.8 0L22.9 52.5a1.3 1.3 0 0 1 0-1.8l3.7-3.7a1.3 1.3 0 0 1 1.8 0l10.8 10.8a.33.33 0 0 0 .45 0L50.4 47a1.3 1.3 0 0 1 1.8 0L63 57.8a.33.33 0 0 0 .45 0L74.3 47a1.3 1.3 0 0 1 1.8 0z" fill="#3B99FC" />
 					</svg>
 				</Box>
-				<Text fontSize="sm" fontWeight="600" color="kk.textPrimary">No active sessions</Text>
-				<Text fontSize="xs" color="kk.textSecondary" textAlign="center" maxW="280px">
-					Connect to a dApp in three steps:
-				</Text>
+				<Text fontSize="sm" fontWeight="600" color="kk.textPrimary">{uiText("No active sessions")}</Text>
+				<Text fontSize="xs" color="kk.textSecondary" textAlign="center" maxW="280px">{uiText("Connect to a dApp in three steps:")}</Text>
 			</Flex>
 			<Flex direction="column" gap="2.5" px="2">
 				{steps.map(s => (
@@ -437,6 +440,8 @@ function PairApprovalOverlay({ request, onApprove, onReject }: {
 	onApprove: () => void
 	onReject: () => void
 }) {
+  const uiText = useUiTranslation()
+
 	const host = (() => { try { return new URL(request.peerUrl).host } catch { return request.peerUrl } })()
 	const labels = request.chains
 		.map(c => CAIP_LABEL[c] ?? c)
@@ -475,11 +480,9 @@ function PairApprovalOverlay({ request, onApprove, onReject }: {
 					)}
 					<Box textAlign="center">
 						<Text fontSize="md" fontWeight="600" color="kk.textPrimary">
-							{request.peerName || "Unknown dApp"}
+							{request.peerName || uiText("Unknown dApp")}
 						</Text>
-						<Text fontSize="xs" color="kk.textSecondary" mt="0.5">
-							wants to connect
-						</Text>
+						<Text fontSize="xs" color="kk.textSecondary" mt="0.5">{uiText("wants to connect")}</Text>
 					</Box>
 					<Text fontSize="xs" color="kk.textSecondary">{host}</Text>
 				</Flex>
@@ -487,10 +490,10 @@ function PairApprovalOverlay({ request, onApprove, onReject }: {
 				<Box my="4" h="1px" bg="kk.border" />
 
 				<Box>
-					<Text fontSize="xs" color="kk.textSecondary" mb="1.5">Networks</Text>
+					<Text fontSize="xs" color="kk.textSecondary" mb="1.5">{uiText("Networks")}</Text>
 					<Flex gap="1.5" wrap="wrap">
 						{labels.length === 0 ? (
-							<Text fontSize="xs" color="kk.textSecondary">(none specified)</Text>
+							<Text fontSize="xs" color="kk.textSecondary">{uiText("(none specified)")}</Text>
 						) : labels.map(label => (
 							<Box
 								key={label}
@@ -517,9 +520,7 @@ function PairApprovalOverlay({ request, onApprove, onReject }: {
 						color="kk.textPrimary"
 						_hover={{ borderColor: "red.400", color: "red.400" }}
 						onClick={onReject}
-					>
-						Reject
-					</Button>
+					>{uiText("Reject")}</Button>
 					<Button
 						flex="1"
 						size="md"
@@ -528,9 +529,7 @@ function PairApprovalOverlay({ request, onApprove, onReject }: {
 						fontWeight="600"
 						_hover={{ bg: "kk.goldHover" }}
 						onClick={onApprove}
-					>
-						Approve
-					</Button>
+					>{uiText("Approve")}</Button>
 				</Flex>
 			</Box>
 		</Flex>
@@ -538,6 +537,8 @@ function PairApprovalOverlay({ request, onApprove, onReject }: {
 }
 
 function SessionCard({ session, onDisconnect }: { session: WcSessionInfo; onDisconnect: () => void }) {
+  const uiText = useUiTranslation()
+
 	const labels = session.chains
 		.map(c => CAIP_LABEL[c] ?? c.split(":")[0])
 		.filter((v, i, a) => a.indexOf(v) === i) // dedupe
@@ -570,9 +571,9 @@ function SessionCard({ session, onDisconnect }: { session: WcSessionInfo; onDisc
 				)}
 				<Box flex="1" minW="0">
 					<Flex align="center" gap="2">
-						<Box w="6px" h="6px" borderRadius="full" bg="green.400" flexShrink={0} title="Connected" />
+						<Box w="6px" h="6px" borderRadius="full" bg="green.400" flexShrink={0} title={uiText("Connected")} />
 						<Text fontSize="sm" fontWeight="600" color="kk.textPrimary" truncate>
-							{session.peerName || "Unknown dApp"}
+							{session.peerName || uiText("Unknown dApp")}
 						</Text>
 					</Flex>
 					<Text fontSize="xs" color="kk.textSecondary" truncate mt="0.5">
@@ -586,8 +587,8 @@ function SessionCard({ session, onDisconnect }: { session: WcSessionInfo; onDisc
 					color="kk.textSecondary"
 					_hover={{ color: "red.400", bg: "rgba(255,0,0,0.08)" }}
 					onClick={onDisconnect}
-					aria-label="Disconnect"
-					title="Disconnect"
+					aria-label={uiText("Disconnect")}
+					title={uiText("Disconnect")}
 				>
 					<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
 						<line x1="18" y1="6" x2="6" y2="18" />
@@ -616,8 +617,7 @@ function SessionCard({ session, onDisconnect }: { session: WcSessionInfo; onDisc
 					</Text>
 				)}
 				<Box flex="1" />
-				<Text fontSize="10px" color="kk.textSecondary">
-					expires in {expiresIn}
+				<Text fontSize="10px" color="kk.textSecondary">{uiText("expires in")}{" "}{expiresIn}
 				</Text>
 			</Flex>
 		</Box>
@@ -625,6 +625,8 @@ function SessionCard({ session, onDisconnect }: { session: WcSessionInfo; onDisc
 }
 
 function PanelHeader({ onClose, title }: { onClose: () => void; title: string }) {
+  const uiText = useUiTranslation()
+
 	return (
 		<Flex align="center" justify="space-between" px="4" py="3" borderBottom="1px solid" borderColor="kk.border" flexShrink={0}>
 			<Flex align="center" gap="2">
@@ -633,7 +635,7 @@ function PanelHeader({ onClose, title }: { onClose: () => void; title: string })
 					<path d="M31.5 38.5c10.2-10.2 26.8-10.2 37 0l1.2 1.2a1.3 1.3 0 0 1 0 1.8l-4.2 4.2a.65.65 0 0 1-.9 0l-1.7-1.7a19.3 19.3 0 0 0-26.8 0l-1.8 1.8a.65.65 0 0 1-.9 0l-4.2-4.2a1.3 1.3 0 0 1 0-1.8l1.3-1.3zm45.7 8.5l3.7 3.7a1.3 1.3 0 0 1 0 1.8L64.7 68.7a1.3 1.3 0 0 1-1.8 0L52.1 57.9a.33.33 0 0 0-.45 0L40.9 68.7a1.3 1.3 0 0 1-1.8 0L22.9 52.5a1.3 1.3 0 0 1 0-1.8l3.7-3.7a1.3 1.3 0 0 1 1.8 0l10.8 10.8a.33.33 0 0 0 .45 0L50.4 47a1.3 1.3 0 0 1 1.8 0L63 57.8a.33.33 0 0 0 .45 0L74.3 47a1.3 1.3 0 0 1 1.8 0z" fill="#fff" />
 				</svg>
 				<Text fontSize="sm" fontWeight="600" color="kk.textPrimary">{title}</Text>
-				<DocsLink href={watch('course-11-app-connections')} label="Watch video" ml="1" />
+				<DocsLink href={watch('course-11-app-connections')} label={uiText("Watch video")} ml="1" />
 			</Flex>
 			<Box as="button" p="1" borderRadius="md" color="kk.textSecondary" _hover={{ color: "kk.textPrimary", bg: "rgba(255,255,255,0.06)" }} onClick={onClose}>
 				<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">

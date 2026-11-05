@@ -1,3 +1,4 @@
+import { useUiTranslation } from "../i18n/ui"
 import { useState, useCallback, useEffect } from "react"
 import { Box, Flex, Text, Button, Input } from "@chakra-ui/react"
 import { pathToString, stringToPath } from "../lib/bip44"
@@ -10,6 +11,8 @@ interface PathEditDialogProps {
 }
 
 export function PathEditDialog({ path, onApply, onClose }: PathEditDialogProps) {
+  const uiText = useUiTranslation()
+
 	const [value, setValue] = useState(pathToString(path))
 	const [error, setError] = useState<string | null>(null)
 
@@ -57,12 +60,8 @@ export function PathEditDialog({ path, onApply, onClose }: PathEditDialogProps) 
 				maxW="90vw"
 				onClick={(e) => e.stopPropagation()}
 			>
-				<Text id="path-dialog-title" fontSize="sm" fontWeight="600" color="kk.textPrimary" mb="1">
-					Derivation Path
-				</Text>
-				<Text fontSize="xs" color="kk.textMuted" mb="3">
-					Edit the BIP44 derivation path. Use ' for hardened indices.
-				</Text>
+				<Text id="path-dialog-title" fontSize="sm" fontWeight="600" color="kk.textPrimary" mb="1">{uiText("Derivation Path")}</Text>
+				<Text fontSize="xs" color="kk.textMuted" mb="3">{uiText("Edit the BIP44 derivation path. Use ' for hardened indices.")}</Text>
 				<Input
 					value={value}
 					onChange={(e) => { setValue(e.target.value); setError(null) }}
@@ -90,9 +89,7 @@ export function PathEditDialog({ path, onApply, onClose }: PathEditDialogProps) 
 						color="kk.textSecondary"
 						_hover={{ color: "kk.textPrimary" }}
 						onClick={onClose}
-					>
-						Cancel
-					</Button>
+					>{uiText("Cancel")}</Button>
 					<Button
 						size="sm"
 						px="4"
@@ -101,9 +98,7 @@ export function PathEditDialog({ path, onApply, onClose }: PathEditDialogProps) 
 						color="black"
 						_hover={{ bg: "kk.goldHover" }}
 						onClick={handleApply}
-					>
-						Apply & Re-derive
-					</Button>
+					>{uiText("Apply & Re-derive")}</Button>
 				</Flex>
 			</Box>
 		</Box>

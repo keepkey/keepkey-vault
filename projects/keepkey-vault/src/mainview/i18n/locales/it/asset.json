@@ -87,5 +87,10 @@
   "validatingWallet": "Convalida del portafoglio schermato rispetto alla catena...",
   "hideFiltered": "Nascondi {{count}} token filtrato",
   "showFiltered": "Mostra {{count}} token filtrato",
-  "invalidAddress": "Indirizzo non valido"
+  "invalidAddress": "Indirizzo non valido",
+  "defiNetwork": "Rete",
+  "defiSymbol": "Simbolo",
+  "tokenCount_many": "{{count}} token",
+  "showFiltered_many": "Mostra {{count}} token filtrati",
+  "hideFiltered_many": "Nascondi {{count}} token filtrati"
 }

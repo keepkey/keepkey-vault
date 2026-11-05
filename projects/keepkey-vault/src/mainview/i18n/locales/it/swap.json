@@ -159,14 +159,10 @@
 	"approvalWaiting": "In attesa della conferma dell'approvazione…",
 	"approvalWaitingDesc": "In attesa che l'approvazione venga minata prima di poter firmare lo scambio.",
 	"balanceChanges": "Variazioni del saldo",
-	"blindSignBody": "Gli scambi su Solana usano una transazione versioned che il tuo KeepKey non può decodificare completamente, quindi deve essere firmata alla cieca. Questa opzione è disattivata per impostazione predefinita. Abilitandola si attiva la Modalità avanzata (firma alla cieca) sul tuo dispositivo — ti verrà chiesto di confermare la modifica sul dispositivo.",
-	"blindSignCaveat": "La firma alla cieca significa che il dispositivo mostra un messaggio generico invece dei dettagli decodificati. Procedi solo per scambi avviati qui. Puoi disattivarla di nuovo in Impostazioni dispositivo → Criteri di firma.",
 	"blindSignConfirmOnDevice": "Conferma sul dispositivo…",
 	"blindSignDeclined": "Rifiutato sul dispositivo — la firma alla cieca non è stata abilitata.",
-	"blindSignEnable": "Abilita firma alla cieca",
 	"blindSignEnableFailed": "Impossibile abilitare la firma alla cieca sul dispositivo.",
 	"blindSignHeader": "Firma alla cieca",
-	"blindSignTitle": "Abilita la firma alla cieca per Solana",
 	"block": "Blocco",
 	"cancelSwapDevice": "Annulla - rilascia il prompt del dispositivo",
 	"completed": "completato",
@@ -202,5 +198,9 @@
 	"youReceived": "Hai ricevuto",
 	"exceedsSafeMax": "Lascia ~{{reserve}} {{symbol}} per le commissioni di rete — riduci l'importo o tocca MAX.",
 	"sent": "Inviato",
-	"gas": "Gas"
+	"gas": "Gas",
+	"deviceBlindSignCaveat": "La firma alla cieca rimane attiva fino al blocco o alla disconnessione del KeepKey, per tutte le app che lo usano, non solo per questo scambio. Mentre è attiva, anche questa app smette di mostrare questa schermata prima di tali transazioni. Il dispositivo richiede conferma e l’inserimento nuovamente del PIN.",
+	"solanaOutflowDrain": "Attenzione: questo svuota il portafoglio. Non firmare a meno che sia ciò che intendi fare.",
+	"solanaOutflowCaveat": "Simulato con un nodo Solana da questo computer. Il tuo KeepKey non può confermare queste cifre.",
+	"deviceBlindSignEnable": "Attiva la firma alla cieca"
 }

@@ -53,5 +53,7 @@
 	"invalidSolanaAddress": "ที่อยู่ Solana ไม่ถูกต้อง — ต้องมี 32-44 อักขระ base58",
 	"invalidTronAddress": "ที่อยู่ Tron ไม่ถูกต้อง — ต้องเริ่มต้นด้วย T (34 อักขระ)",
 	"invalidTonAddress": "ที่อยู่ TON ไม่ถูกต้อง",
-	"invalidZcashShieldedAddress": "ที่อยู่ที่มีการป้องกันไม่ถูกต้อง — ต้องเริ่มต้นด้วย u1"
+	"invalidZcashShieldedAddress": "ที่อยู่ที่มีการป้องกันไม่ถูกต้อง — ต้องเริ่มต้นด้วย u1",
+	"feeCustom": "กำหนดเอง",
+	"invalidAmount": "ป้อนจำนวนทศนิยมโดยไม่ใส่ตัวคั่นหลักพัน เช่น 1.5"
 }

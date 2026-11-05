@@ -53,5 +53,7 @@
 	"invalidSolanaAddress": "Geçersiz Solana adresi — 32-44 base58 karakter olmalıdır",
 	"invalidTronAddress": "Geçersiz Tron adresi — T ile başlamalıdır (34 karakter)",
 	"invalidTonAddress": "Geçersiz TON adresi",
-	"invalidZcashShieldedAddress": "Geçersiz korumalı adres — u1 ile başlamalıdır"
+	"invalidZcashShieldedAddress": "Geçersiz korumalı adres — u1 ile başlamalıdır",
+	"feeCustom": "Özel",
+	"invalidAmount": "Binlik ayırıcı kullanmadan ondalık bir tutar girin, örneğin 1,5."
 }

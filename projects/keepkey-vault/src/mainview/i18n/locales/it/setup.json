@@ -122,7 +122,23 @@
 		"autoRebooting": "Il dispositivo si sta riavviando...",
 		"autoRebootingDetail": "Il tuo KeepKey si riavvierà automaticamente con il nuovo firmware. Di solito richiede pochi secondi.",
 		"waitingForDevice": "In attesa del dispositivo...",
-		"wipeAndFlash": "Cancella e installa"
+		"wipeAndFlash": "Cancella e installa",
+		"installWipe": {
+			"wipeTitle": "Questo cancellerà il dispositivo",
+			"unknownTitle": "Questo potrebbe cancellare il dispositivo",
+			"lockTitle": "Questo bloccherà il portafoglio solo Bitcoin",
+			"noFirmwareTitle": "Qualsiasi portafoglio su questo KeepKey verrà cancellato",
+			"wipeAck": "Comprendo che questo cancellerà il dispositivo e ho salvato la frase di recupero",
+			"unknownAck": "Comprendo che questo potrebbe cancellare il dispositivo e ho salvato la frase di recupero",
+			"lockAck": "Comprendo che il portafoglio verrà bloccato e ho salvato la frase di recupero",
+			"downgradeTitle": "Questo cancellerà il dispositivo",
+			"crossBody": "Questo KeepKey usa il firmware {{from}} v{{current}}. Il firmware {{to}} v{{target}} non può leggere il portafoglio e all’avvio cancellerà tutte le chiavi e le impostazioni. Per usarlo nuovamente dovrai ripristinarlo con la frase di recupero.",
+			"downgradeBody": "Stai installando v{{target}} al posto di v{{current}}. Il vecchio firmware non può leggere l’archiviazione più recente e all’avvio cancellerà tutte le chiavi e le impostazioni. Dovrai ripristinare il portafoglio con la frase di recupero.",
+			"lockBody": "Questo KeepKey usa il firmware solo Bitcoin. Il firmware {{variant}} v{{target}} rifiuterà di aprire questo portafoglio. Rimarrà sul dispositivo, ma per usarlo dovrai reinstallare il firmware solo Bitcoin oppure cancellare il dispositivo e ripristinarlo con la frase di recupero.",
+			"unknownBody": "In modalità bootloader non è possibile identificare il firmware installato. Installare il firmware {{variant}} potrebbe cancellare tutte le chiavi e le impostazioni, ad esempio cambiando variante o sostituendo firmware non ufficiale o più recente. Se il KeepKey contiene un portafoglio, tieni pronta la frase di recupero. Un KeepKey nuovo non ha portafogli da perdere.",
+			"noFirmwareBody": "Questo KeepKey non ha firmware installato, ad esempio dopo un aggiornamento interrotto. Se conteneva un portafoglio, installare il firmware lo cancellerà e dovrai ripristinarlo con la frase di recupero.",
+			"unsignedBody": "Questo KeepKey usa un firmware che non è una versione ufficiale di KeepKey. Installare il firmware ufficiale cancellerà tutte le chiavi e le impostazioni."
+		}
 	},
 	"initChoose": {
 		"title": "Configura il tuo portafoglio",
@@ -151,7 +167,8 @@
 		"writeDownWarning": "Annota ogni parola!",
 		"writeDownDetail": "La frase di recupero è mostrata sullo schermo del dispositivo. Scrivi ogni parola su carta. È il tuo UNICO backup; NON vedrai più queste parole.",
 		"deviceLost": "Dispositivo disconnesso. Ricollegalo per continuare oppure torna indietro per riprovare.",
-		"goBack": "Indietro"
+		"goBack": "Indietro",
+		"backToChoose": "Indietro"
 	},
 	"initLabel": {
 		"walletCreated": "Portafoglio creato!",
@@ -232,6 +249,17 @@
 		"walletLabels": {
 			"visible": "visibile",
 			"hidden": "nascosto"
+		}
+	},
+	"updateDone": {
+		"continue": "Continua"
+	},
+	"coinMode": {
+		"change": "Modifica"
+	},
+	"security": {
+		"dice": {
+			"can": "Inserisci {{rollCount}} lanci con il pulsante del dispositivo: non passano mai da questo computer."
 		}
 	}
 }

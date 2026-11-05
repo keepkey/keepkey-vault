@@ -23,6 +23,13 @@
 	"incomingTx": {
 		"onChain": "{{chain}} · обновление баланса",
 		"refreshing": "Обновление баланса",
-		"title": "Входящий платёж"
-	}
+		"title": "Входящий платёж",
+		"activityOnChain": "{{chain}} · баланс обновлён"
+	},
+	"language": "Язык",
+	"currency": "Валюта",
+	"numberFormat": "Формат чисел",
+	"usdValues": "Значения указаны в USD. Региональный формат чисел можно изменить ниже.",
+	"somethingWentWrong": "Произошла ошибка",
+	"reload": "Перезагрузить"
 }

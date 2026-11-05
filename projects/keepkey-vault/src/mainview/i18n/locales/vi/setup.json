@@ -122,7 +122,23 @@
 		"autoRebooting": "Thiết bị của bạn đang khởi động lại...",
 		"autoRebootingDetail": "KeepKey sẽ tự động khởi động lại với firmware mới. Việc này thường mất vài giây.",
 		"waitingForDevice": "Đang chờ thiết bị của bạn...",
-		"wipeAndFlash": "Xóa và cài đặt"
+		"wipeAndFlash": "Xóa và cài đặt",
+		"installWipe": {
+			"wipeTitle": "Thao tác này sẽ xóa thiết bị",
+			"unknownTitle": "Thao tác này có thể xóa thiết bị",
+			"lockTitle": "Thao tác này sẽ khóa ví chỉ Bitcoin của bạn",
+			"noFirmwareTitle": "Mọi ví trên KeepKey này sẽ bị xóa",
+			"wipeAck": "Tôi hiểu rằng thao tác này sẽ xóa thiết bị và tôi đã sao lưu cụm từ khôi phục",
+			"unknownAck": "Tôi hiểu rằng thao tác này có thể xóa thiết bị và tôi đã sao lưu cụm từ khôi phục",
+			"lockAck": "Tôi hiểu rằng ví sẽ bị khóa và tôi đã sao lưu cụm từ khôi phục",
+			"downgradeTitle": "Thao tác này sẽ xóa thiết bị",
+			"crossBody": "KeepKey này dùng firmware {{from}} v{{current}}. Firmware {{to}} v{{target}} không thể đọc ví và sẽ xóa mọi khóa cùng cài đặt khi khởi động. Để dùng lại ví, bạn phải khôi phục bằng cụm từ khôi phục.",
+			"downgradeBody": "Bạn đang cài v{{target}} thay cho v{{current}}. Firmware cũ không đọc được định dạng lưu trữ ví mới hơn và sẽ xóa mọi khóa cùng cài đặt khi khởi động. Bạn phải khôi phục ví bằng cụm từ khôi phục.",
+			"lockBody": "KeepKey này dùng firmware chỉ Bitcoin. Firmware {{variant}} v{{target}} sẽ từ chối mở ví này. Ví vẫn nằm trên thiết bị nhưng bạn phải cài lại firmware chỉ Bitcoin hoặc xóa thiết bị rồi khôi phục bằng cụm từ khôi phục để dùng lại.",
+			"unknownBody": "Không thể xác định firmware đã cài trong chế độ bootloader. Cài firmware {{variant}} có thể xóa mọi khóa cùng cài đặt, chẳng hạn khi đổi loại hoặc thay firmware không chính thức hay mới hơn. Nếu KeepKey này có ví, hãy chuẩn bị cụm từ khôi phục. KeepKey mới chưa có ví để mất.",
+			"noFirmwareBody": "KeepKey này chưa có firmware, chẳng hạn sau khi cập nhật bị gián đoạn. Nếu trước đó có ví, việc cài firmware sẽ xóa ví và bạn phải khôi phục bằng cụm từ khôi phục.",
+			"unsignedBody": "KeepKey này dùng firmware không phải bản phát hành chính thức của KeepKey. Cài firmware chính thức sẽ xóa mọi khóa cùng cài đặt."
+		}
 	},
 	"initChoose": {
 		"title": "Thiết lập ví của bạn",
@@ -151,7 +167,8 @@
 		"writeDownWarning": "Hãy ghi lại từng từ!",
 		"writeDownDetail": "Cụm từ khôi phục của bạn đang hiển thị trên màn hình thiết bị. Ghi từng từ ra giấy. Đây là bản sao lưu DUY NHẤT; bạn sẽ KHÔNG thấy lại các từ này.",
 		"deviceLost": "Thiết bị đã ngắt kết nối. Cắm lại để tiếp tục, hoặc quay lại để thử lại.",
-		"goBack": "Quay lại"
+		"goBack": "Quay lại",
+		"backToChoose": "Quay lại"
 	},
 	"initLabel": {
 		"walletCreated": "Ví đã được tạo!",
@@ -232,6 +249,17 @@
 		"walletLabels": {
 			"visible": "hiển thị",
 			"hidden": "ẩn"
+		}
+	},
+	"updateDone": {
+		"continue": "Tiếp tục"
+	},
+	"coinMode": {
+		"change": "Thay đổi"
+	},
+	"security": {
+		"dice": {
+			"can": "Bạn nhập kết quả {{rollCount}} lần gieo bằng nút trên thiết bị; chúng không bao giờ được chuyển đến máy tính này."
 		}
 	}
 }

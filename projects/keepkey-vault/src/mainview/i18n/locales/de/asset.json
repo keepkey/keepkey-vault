@@ -87,5 +87,6 @@
   "validatingWallet": "Abgeschirmtes Wallet wird mit der Chain validiert...",
   "hideFiltered": "{{count}} gefilterten Token ausblenden",
   "showFiltered": "{{count}} gefilterten Token anzeigen",
-  "invalidAddress": "Ungültige Adresse"
+  "invalidAddress": "Ungültige Adresse",
+  "defiNetwork": "Netzwerk"
 }

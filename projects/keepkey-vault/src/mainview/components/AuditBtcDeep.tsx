@@ -1,3 +1,5 @@
+import { getNumberLocale } from "../lib/number-locale"
+import { useUiTranslation } from "../i18n/ui"
 /**
  * AuditBtcDeep — Bitcoin deep-recovery scanners, opt-in. Drives the existing
  * sweepScan/sweepGetStatus/sweepExecute engine with custom config:
@@ -11,7 +13,7 @@ import { rpcRequest, onRpcMessage } from "../lib/rpc"
 
 function formatSats(sats: number): string {
   if (sats >= 100_000_000) return (sats / 100_000_000).toFixed(8).replace(/0+$/, '').replace(/\.$/, '') + ' BTC'
-  return sats.toLocaleString() + ' sats'
+  return sats.toLocaleString(getNumberLocale()) + ' sats'
 }
 
 function scriptLabel(st: string): string {
@@ -34,6 +36,8 @@ interface AuditBtcDeepProps {
 }
 
 export function AuditBtcDeep({ onRecovered }: AuditBtcDeepProps) {
+  const uiText = useUiTranslation()
+
   const [mode, setMode] = useState<Mode | null>(null)
   const [phase, setPhase] = useState<Phase>('idle')
   const [scanId, setScanId] = useState<string | null>(null)
@@ -111,8 +115,8 @@ export function AuditBtcDeep({ onRecovered }: AuditBtcDeepProps) {
   if (phase === 'idle') {
     return (
       <Flex gap="2" wrap="wrap">
-        <Button size="xs" variant="outline" borderColor="kk.border" color="kk.textSecondary" _hover={{ borderColor: "kk.gold", color: "kk.gold" }} onClick={() => start('scripttype')}>Scan wrong script types</Button>
-        <Button size="xs" variant="outline" borderColor="kk.border" color="kk.textSecondary" _hover={{ borderColor: "kk.gold", color: "kk.gold" }} onClick={() => start('gaplimit')}>Expand gap limit</Button>
+        <Button size="xs" variant="outline" borderColor="kk.border" color="kk.textSecondary" _hover={{ borderColor: "kk.gold", color: "kk.gold" }} onClick={() => start('scripttype')}>{uiText("Scan wrong script types")}</Button>
+        <Button size="xs" variant="outline" borderColor="kk.border" color="kk.textSecondary" _hover={{ borderColor: "kk.gold", color: "kk.gold" }} onClick={() => start('gaplimit')}>{uiText("Expand gap limit")}</Button>
       </Flex>
     )
   }
@@ -120,15 +124,15 @@ export function AuditBtcDeep({ onRecovered }: AuditBtcDeepProps) {
   return (
     <Box bg="whiteAlpha.50" borderRadius="md" p="3" mt="1">
       <Flex justify="space-between" align="center" mb="2">
-        <Text fontSize="xs" fontWeight="600" color="kk.gold">{mode === 'scripttype' ? 'Wrong script-type scan' : 'Gap-limit expansion'}</Text>
-        {phase !== 'scanning' && phase !== 'sweeping' && <Box as="button" fontSize="10px" color="kk.textMuted" onClick={() => { stop(); setPhase('idle') }}>reset</Box>}
+        <Text fontSize="xs" fontWeight="600" color="kk.gold">{mode === 'scripttype' ? uiText("Wrong script-type scan") : uiText("Gap-limit expansion")}</Text>
+        {phase !== 'scanning' && phase !== 'sweeping' && <Box as="button" fontSize="10px" color="kk.textMuted" onClick={() => { stop(); setPhase('idle') }}>{uiText("reset")}</Box>}
       </Flex>
 
       {phase === 'scanning' && (
         <Text fontSize="11px" color="kk.textMuted" mb="2.5" lineHeight="1.5">
           {mode === 'scripttype'
-            ? 'Checking your accounts under every other address style — coins from an old wallet that used a different format show up here.'
-            : 'Looking deeper into each account (receive addresses 0–19 and change), in case funds landed past the usual range.'}
+            ? uiText("Checking your accounts under every other address style — coins from an old wallet that used a different format show up here.")
+            : uiText("Looking deeper into each account (receive addresses 0–19 and change), in case funds landed past the usual range.")}
         </Text>
       )}
 
@@ -138,14 +142,13 @@ export function AuditBtcDeep({ onRecovered }: AuditBtcDeepProps) {
         <VStack align="stretch" gap="2">
           <Flex align="center" gap="2">
             <Spinner size="xs" color="kk.gold" />
-            <Text fontSize="xs" color="kk.textSecondary">
-              Checking path {live.checked || status?.progress?.current || 0}{(live.total || status?.progress?.total) ? ` of ${live.total || status.progress.total}` : ''}
+            <Text fontSize="xs" color="kk.textSecondary">{uiText("Checking path")}{" "}{live.checked || status?.progress?.current || 0}{(live.total || status?.progress?.total) ? ` of ${live.total || status.progress.total}` : ''}
               {live.found > 0 && ` · ${live.found} with funds`}
             </Text>
           </Flex>
           {live.current
             ? <Text fontSize="10px" fontFamily="mono" color="kk.textMuted" truncate>{live.current} · {scriptLabel(live.scriptType)}</Text>
-            : <Text fontSize="10px" color="kk.textMuted">Starting scan…</Text>}
+            : <Text fontSize="10px" color="kk.textMuted">{uiText("Starting scan…")}</Text>}
           {foundLog.length > 0 && (
             <VStack align="stretch" gap="1" maxH="84px" overflow="auto" pt="1" borderTop="1px solid" borderColor="kk.border">
               {foundLog.map((f, i) => (
@@ -161,36 +164,36 @@ export function AuditBtcDeep({ onRecovered }: AuditBtcDeepProps) {
 
       {phase === 'results' && (
         nonStandard.length === 0
-          ? <Text fontSize="xs" color="var(--teal)">No funds found on these paths.</Text>
+          ? <Text fontSize="xs" color="var(--teal)">{uiText("No funds found on these paths.")}</Text>
           : (
             <>
-              <Text fontSize="xs" fontWeight="600" color="kk.gold" mb="1">{formatSats(nonStandardSats)} on {nonStandard.length} path{nonStandard.length > 1 ? 's' : ''}</Text>
+              <Text fontSize="xs" fontWeight="600" color="kk.gold" mb="1">{formatSats(nonStandardSats)}{" "}{uiText("on")}{" "}{nonStandard.length}{" "}{uiText("path")}{nonStandard.length > 1 ? 's' : ''}</Text>
               <VStack gap="1" align="stretch" maxH="120px" overflow="auto" mb="2">
                 {nonStandard.map((r: any, i: number) => (
                   <Flex key={i} justify="space-between"><Text fontSize="10px" fontFamily="mono" color="kk.textMuted" truncate maxW="240px">{r.path} · {r.scriptType}</Text><Text fontSize="10px" color="kk.gold">{formatSats(r.balanceSats)}</Text></Flex>
                 ))}
               </VStack>
-              <Button size="sm" w="100%" bg="kk.gold" color="black" fontWeight="600" _hover={{ bg: "kk.goldHover" }} onClick={() => sweep(true)}>Sweep to main address</Button>
+              <Button size="sm" w="100%" bg="kk.gold" color="black" fontWeight="600" _hover={{ bg: "kk.goldHover" }} onClick={() => sweep(true)}>{uiText("Sweep to main address")}</Button>
             </>
           )
       )}
 
-      {phase === 'sweeping' && <Flex align="center" gap="2"><Spinner size="xs" color="kk.gold" /><Text fontSize="xs" color="kk.textSecondary">Building & signing… confirm on device</Text></Flex>}
+      {phase === 'sweeping' && <Flex align="center" gap="2"><Spinner size="xs" color="kk.gold" /><Text fontSize="xs" color="kk.textSecondary">{uiText("Building & signing… confirm on device")}</Text></Flex>}
 
       {phase === 'done' && sweepResult && (
         sweepResult.dryRun ? (
           <>
             <Box bg="whiteAlpha.50" borderRadius="md" p="2" mb="2">
-              <Flex justify="space-between"><Text fontSize="xs" color="kk.textMuted">You receive</Text><Text fontSize="xs" fontWeight="600" color="kk.gold">{formatSats(sweepResult.outputSats)}</Text></Flex>
-              <Flex justify="space-between"><Text fontSize="xs" color="kk.textMuted">Fee</Text><Text fontSize="xs">{formatSats(sweepResult.fee)}</Text></Flex>
+              <Flex justify="space-between"><Text fontSize="xs" color="kk.textMuted">{uiText("You receive")}</Text><Text fontSize="xs" fontWeight="600" color="kk.gold">{formatSats(sweepResult.outputSats)}</Text></Flex>
+              <Flex justify="space-between"><Text fontSize="xs" color="kk.textMuted">{uiText("Fee")}</Text><Text fontSize="xs">{formatSats(sweepResult.fee)}</Text></Flex>
             </Box>
             <Flex gap="2">
-              <Button flex="1" size="sm" variant="ghost" color="kk.textSecondary" onClick={() => setPhase('results')}>Back</Button>
-              <Button flex="1" size="sm" bg="kk.gold" color="black" fontWeight="600" _hover={{ bg: "kk.goldHover" }} onClick={() => sweep(false)}>Confirm & broadcast</Button>
+              <Button flex="1" size="sm" variant="ghost" color="kk.textSecondary" onClick={() => setPhase('results')}>{uiText("Back")}</Button>
+              <Button flex="1" size="sm" bg="kk.gold" color="black" fontWeight="600" _hover={{ bg: "kk.goldHover" }} onClick={() => sweep(false)}>{uiText("Confirm & broadcast")}</Button>
             </Flex>
           </>
         ) : (
-          <Text fontSize="xs" color="var(--teal)">Swept {formatSats(sweepResult.outputSats)} — txid {String(sweepResult.txid).slice(0, 16)}…</Text>
+          <Text fontSize="xs" color="var(--teal)">{uiText("Swept")}{" "}{formatSats(sweepResult.outputSats)}{" "}{uiText("— txid")}{" "}{String(sweepResult.txid).slice(0, 16)}…</Text>
         )
       )}
     </Box>

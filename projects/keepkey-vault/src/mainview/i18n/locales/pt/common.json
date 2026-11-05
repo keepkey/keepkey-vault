@@ -23,6 +23,13 @@
 	"incomingTx": {
 		"onChain": "{{chain}} · atualizando saldo",
 		"refreshing": "Atualizando saldo",
-		"title": "Pagamento recebido"
-	}
+		"title": "Pagamento recebido",
+		"activityOnChain": "{{chain}} · saldo atualizado"
+	},
+	"language": "Idioma",
+	"currency": "Moeda",
+	"numberFormat": "Formato numérico",
+	"usdValues": "Os valores são exibidos em USD. Você pode alterar o formato numérico regional abaixo.",
+	"somethingWentWrong": "Algo deu errado",
+	"reload": "Recarregar"
 }

@@ -35,5 +35,7 @@
 	"loadingConnect": "Connexion à votre KeepKey",
 	"loadingSync": "Synchronisation des soldes entre les chaînes",
 	"loadingPrices": "Récupération des derniers prix",
-	"tokensCount": "+{{count}} jetons"
+	"tokensCount": "+{{count}} jetons",
+	"dismiss": "Ignorer",
+	"tokensCount_many": "+{{count}} jetons"
 }

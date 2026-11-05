@@ -1,3 +1,4 @@
+import { useUiTranslation } from "../i18n/ui"
 import { useMemo, useState } from "react"
 import { Box, Flex, Text, Button, Image } from "@chakra-ui/react"
 import { Z } from "../lib/z-index"
@@ -19,6 +20,8 @@ export function NetworkPickerDialog({ chains, initialDisabled, onDone, onCancel 
 	/** Settings passes this; onboarding instead offers "Keep all on". */
 	onCancel?: () => void
 }) {
+  const uiText = useUiTranslation()
+
 	const [off, setOff] = useState(() => new Set(initialDisabled.filter(id => id !== "bitcoin")))
 	const toggle = (id: string) => setOff(prev => {
 		const next = new Set(prev)
@@ -37,10 +40,8 @@ export function NetworkPickerDialog({ chains, initialDisabled, onDone, onCancel 
 			align="center" justify="center" zIndex={Z.dialog} backdropFilter="blur(3px)">
 			<Box bg="kk.cardBg" borderRadius="xl" border="1px solid" borderColor="kk.border"
 				p="5" maxW="460px" w="92%" maxH="88vh" overflowY="auto" boxShadow="0 8px 32px rgba(0,0,0,0.6)">
-				<Text fontSize="md" fontWeight="800" color="kk.textPrimary">Choose your networks</Text>
-				<Text fontSize="xs" color="kk.textSecondary" mt="1" lineHeight="1.6">
-					Turn off networks you don't use and your dashboard loads faster. Their balances won't show
-					until you turn them back on. Change this any time in Settings.{" "}
+				<Text fontSize="md" fontWeight="800" color="kk.textPrimary">{uiText("Choose your networks")}</Text>
+				<Text fontSize="xs" color="kk.textSecondary" mt="1" lineHeight="1.6">{uiText("Turn off networks you don't use and your dashboard loads faster. Their balances won't show until you turn them back on. Change this any time in Settings.")}{" "}
 					<DocsLink href={DOCS_LINKS.performance} />
 				</Text>
 
@@ -60,13 +61,11 @@ export function NetworkPickerDialog({ chains, initialDisabled, onDone, onCancel 
 						)
 					})}
 				</Flex>
-				<Text fontSize="2xs" color="kk.textMuted" mt="2" lineHeight="1.5">
-					Bitcoin is always on. EVM networks share one address that is always read, so turning them off doesn't change load time.
-				</Text>
+				<Text fontSize="2xs" color="kk.textMuted" mt="2" lineHeight="1.5">{uiText("Bitcoin is always on. EVM networks share one address that is always read, so turning them off doesn't change load time.")}</Text>
 
 				<Box mt="4">
 					<Flex justify="space-between" mb="1">
-						<Text fontSize="2xs" color="kk.textSecondary">Estimated first load after connecting</Text>
+						<Text fontSize="2xs" color="kk.textSecondary">{uiText("Estimated first load after connecting")}</Text>
 						<Text fontSize="xs" fontWeight="700" color={barColor}>~{Math.max(1, Math.round(ms / 1000))} s</Text>
 					</Flex>
 					<Box h="6px" borderRadius="full" bg="kk.border" overflow="hidden">
@@ -76,11 +75,11 @@ export function NetworkPickerDialog({ chains, initialDisabled, onDone, onCancel 
 
 				<Flex justify="flex-end" gap="2" mt="4">
 					{onCancel
-						? <Button size="xs" variant="ghost" color="kk.textSecondary" onClick={onCancel}>Cancel</Button>
-						: <Button size="xs" variant="ghost" color="kk.textSecondary" onClick={() => onDone([])}>Keep all on</Button>}
+						? <Button size="xs" variant="ghost" color="kk.textSecondary" onClick={onCancel}>{uiText("Cancel")}</Button>
+						: <Button size="xs" variant="ghost" color="kk.textSecondary" onClick={() => onDone([])}>{uiText("Keep all on")}</Button>}
 					<Button size="xs" bg="kk.gold" color="black" fontWeight="700" _hover={{ opacity: 0.9 }}
 						onClick={() => onDone([...off])}>
-						{onCancel ? "Save" : "Continue"}
+						{onCancel ? uiText("Save") : uiText("Continue")}
 					</Button>
 				</Flex>
 			</Box>

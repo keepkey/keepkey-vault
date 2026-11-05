@@ -87,5 +87,10 @@
   "hideFiltered": "Masquer {{count}} jeton filtré",
   "showFiltered": "Afficher {{count}} jeton filtré",
   "validatingWallet": "Validation du portefeuille protégé par rapport à la chaîne…",
-  "invalidAddress": "Adresse invalide"
+  "invalidAddress": "Adresse invalide",
+  "defiNetwork": "Réseau",
+  "defiSymbol": "Symbole",
+  "tokenCount_many": "{{count}} jetons",
+  "showFiltered_many": "Afficher {{count}} jetons filtrés",
+  "hideFiltered_many": "Masquer {{count}} jetons filtrés"
 }

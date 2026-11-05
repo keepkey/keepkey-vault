@@ -1,3 +1,4 @@
+import { useUiTranslation } from "../i18n/ui"
 import { useState, useEffect, useRef, useCallback } from "react"
 import { createPortal } from "react-dom"
 import { Box, Flex, Text, Button } from "@chakra-ui/react"
@@ -39,6 +40,8 @@ async function decodeImage(file: Blob): Promise<string | null> {
 /** One frame for addresses/WalletConnect; continuing frames for Bitcoin UR/BBQr.
  * Images and camera frames are decoded locally. Camera tracks always stop on exit. */
 export function QrScannerOverlay({ onScan, onClose, onFrame, onReset, status, title = "Scan QR Code", initialImages }: QrScannerOverlayProps) {
+  const uiText = useUiTranslation()
+
   const [mode, setMode] = useState<"starting" | "streaming" | "images">(initialImages?.length ? "images" : "starting")
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
@@ -135,23 +138,21 @@ export function QrScannerOverlay({ onScan, onClose, onFrame, onReset, status, ti
     <Flex position="fixed" inset={0} bg="blackAlpha.900" zIndex={2000} align="center" justify="center" direction="column" overflowY="auto" py="5" gap="3" role="dialog" aria-modal="true" aria-label={title}>
       <Text color="white" fontSize="lg" fontWeight="bold">{title}</Text>
       {mode !== "images" && <Box w="90%" maxW="560px" bg="black" border="1px solid" borderColor="kk.gold" borderRadius="lg" overflow="hidden">
-        {mode === "starting" && <Text p="5" color="gray.400">Starting camera…</Text>}
+        {mode === "starting" && <Text p="5" color="gray.400">{uiText("Starting camera…")}</Text>}
         <video ref={video} playsInline muted style={{ width: "100%", display: mode === "streaming" ? "block" : "none" }} />
       </Box>}
-      <Text color="gray.300" fontSize="sm" textAlign="center" maxW="90%" role="status">{loading ? "Reading QR images…" : status || "Point the camera at a QR code. Keep animated codes playing until all frames arrive."}</Text>
+      <Text color="gray.300" fontSize="sm" textAlign="center" maxW="90%" role="status">{loading ? uiText("Reading QR images…") : status || uiText("Point the camera at a QR code. Keep animated codes playing until all frames arrive.")}</Text>
       {error && <Text color="red.300" fontSize="sm" maxW="90%" textAlign="center" role="alert">{error}</Text>}
       <Box border="1px dashed" borderColor="gray.500" p="4" borderRadius="lg" color="gray.300" cursor="pointer" maxW="90%"
         onClick={() => input.current?.click()}
         onDragOver={e => { e.preventDefault(); e.stopPropagation() }}
-        onDrop={e => { e.preventDefault(); e.stopPropagation(); void processImages(Array.from(e.dataTransfer.files)) }}>
-        Choose or drop QR images (select all frames for animated codes)
-      </Box>
+        onDrop={e => { e.preventDefault(); e.stopPropagation(); void processImages(Array.from(e.dataTransfer.files)) }}>{uiText("Choose or drop QR images (select all frames for animated codes)")}</Box>
       <input ref={input} type="file" accept="image/png,image/jpeg,image/webp,image/bmp" multiple style={{ display: "none" }} onChange={e => { const files = Array.from(e.target.files ?? []); e.target.value = ""; void processImages(files) }} />
       <Flex gap="2" wrap="wrap" justify="center">
-        {mode === "images" ? <Button size="sm" bg="gray.800" color="gray.200" onClick={() => { setError(null); setMode("starting"); setCameraAttempt(n => n + 1) }}>Retry camera</Button>
-          : <Button size="sm" bg="gray.800" color="gray.200" onClick={() => { stop(); setMode("images") }}>Stop camera</Button>}
-        {onReset && <Button size="sm" bg="gray.800" color="gray.200" disabled={loading} onClick={() => { done.current = false; onReset(); setError(null) }}>Reset scan</Button>}
-        <Button size="sm" bg="gray.800" color="gray.200" onClick={close}>Cancel</Button>
+        {mode === "images" ? <Button size="sm" bg="gray.800" color="gray.200" onClick={() => { setError(null); setMode("starting"); setCameraAttempt(n => n + 1) }}>{uiText("Retry camera")}</Button>
+          : <Button size="sm" bg="gray.800" color="gray.200" onClick={() => { stop(); setMode("images") }}>{uiText("Stop camera")}</Button>}
+        {onReset && <Button size="sm" bg="gray.800" color="gray.200" disabled={loading} onClick={() => { done.current = false; onReset(); setError(null) }}>{uiText("Reset scan")}</Button>}
+        <Button size="sm" bg="gray.800" color="gray.200" onClick={close}>{uiText("Cancel")}</Button>
       </Flex>
     </Flex>, document.body)
 }

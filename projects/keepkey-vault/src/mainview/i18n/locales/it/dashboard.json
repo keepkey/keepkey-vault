@@ -35,5 +35,6 @@
 	"loadingConnect": "Connessione al tuo KeepKey",
 	"loadingSync": "Sincronizzazione dei saldi tra le catene",
 	"loadingPrices": "Recupero dei prezzi più recenti",
-	"tokensCount": "+{{count}} token"
+	"tokensCount": "+{{count}} token",
+	"tokensCount_many": "+{{count}} token"
 }

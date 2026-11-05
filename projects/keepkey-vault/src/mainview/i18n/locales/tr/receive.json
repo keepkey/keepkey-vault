@@ -12,5 +12,8 @@
 	"derivingAddress": "Adres türetiliyor...",
 	"noAddressDerived": "Henüz adres türetilmedi",
 	"deriveAddress": "Adres türet",
-	"account": "Hesap {{index}}"
+	"account": "Hesap {{index}}",
+	"btcAccountType": {
+		"learnMore": "Daha fazla bilgi"
+	}
 }

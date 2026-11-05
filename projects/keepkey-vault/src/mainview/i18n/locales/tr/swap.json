@@ -157,14 +157,10 @@
 	"approvalWaiting": "Onayın onaylanması bekleniyor…",
 	"approvalWaitingDesc": "Takası imzalayabilmemiz için onayın blok kazınması bekleniyor.",
 	"balanceChanges": "Bakiye değişiklikleri",
-	"blindSignBody": "Solana takasları, KeepKey'inizin tam olarak çözemediği sürümlü bir işlem kullandığından kör imzalanmalıdır. Bu varsayılan olarak kapalıdır. Etkinleştirmek, cihazınızda Gelişmiş Mod'u (kör imzalama) açar — değişikliği cihazda onaylamanız istenecektir.",
-	"blindSignCaveat": "Kör imzalama, cihazın çözümlenmiş ayrıntılar yerine genel bir istem göstermesi anlamına gelir. Yalnızca burada başlattığınız takaslar için devam edin. Cihaz Ayarları → İmzalama Politikası bölümünden tekrar kapatabilirsiniz.",
 	"blindSignConfirmOnDevice": "Cihazda onaylayın…",
 	"blindSignDeclined": "Cihazda reddedildi — kör imzalama etkinleştirilmedi.",
-	"blindSignEnable": "Kör İmzalamayı Etkinleştir",
 	"blindSignEnableFailed": "Cihazda kör imzalama etkinleştirilemedi.",
 	"blindSignHeader": "Kör İmzalama",
-	"blindSignTitle": "Solana için Kör İmzalamayı Etkinleştir",
 	"block": "Blok",
 	"cancelSwapDevice": "İptal - cihaz istemini bırak",
 	"completed": "tamamlandı",
@@ -202,5 +198,9 @@
 	"retry": "Tekrar dene",
 	"quoteTimedOut": "Fiyat teklifi isteği zaman aşımına uğradı — takas servisi yanıt vermekte çok yavaş. Tekrar denemek için Tekrar Dene'ye dokunun.",
 	"sent": "Gönderildi",
-	"gas": "Gas"
+	"gas": "Gas",
+	"deviceBlindSignCaveat": "Kör imzalama, KeepKey kilitlenene veya bağlantısı kesilene kadar yalnızca bu takas için değil, onu kullanan tüm uygulamalar için açık kalır. Açıkken bu uygulama da bu tür işlemlerden önce bu ekranı göstermeyi bırakır. Cihaz onay vermenizi ve PIN kodunuzu yeniden girmenizi ister.",
+	"solanaOutflowDrain": "Uyarı: Bu, cüzdanınızı boşaltır. Amacınız bu değilse imzalamayın.",
+	"solanaOutflowCaveat": "Bu bilgisayardan bir Solana düğümüyle simüle edildi. KeepKey bu değerleri doğrulayamaz.",
+	"deviceBlindSignEnable": "Kör imzalamayı aç"
 }

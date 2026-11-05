@@ -39,20 +39,27 @@ export function getFiatConfig(code: FiatCurrency): FiatConfig {
  * Format a fiat value with locale-aware separators and currency symbol.
  * All prices in the app are stored as USD — this applies a conversion rate.
  */
+export function fiatDisplayCurrency(currency: FiatCurrency, conversionRate?: number): FiatCurrency {
+  // An absent rate must never turn a USD balance into the same number of EUR,
+  // JPY, etc. Callers can opt in to conversion only with a positive finite rate.
+  return currency === 'USD' || (conversionRate !== undefined && Number.isFinite(conversionRate) && conversionRate > 0) ? currency : 'USD'
+}
+
 export function formatFiat(
   usdValue: number | string | null | undefined,
   currency: FiatCurrency,
   locale: string,
-  conversionRate = 1,
+  conversionRate?: number,
 ): string {
   if (usdValue === null || usdValue === undefined) return ''
-  const num = (typeof usdValue === 'string' ? parseFloat(usdValue) : usdValue) * conversionRate
+  const displayCurrency = fiatDisplayCurrency(currency, conversionRate)
+  const num = (typeof usdValue === 'string' ? Number(usdValue) : usdValue) * (displayCurrency === 'USD' ? 1 : conversionRate!)
   if (!isFinite(num)) return ''
-  const cfg = getFiatConfig(currency)
+  const cfg = getFiatConfig(displayCurrency)
   try {
     return new Intl.NumberFormat(locale, {
       style: 'currency',
-      currency: currency,
+      currency: displayCurrency,
       minimumFractionDigits: cfg.decimals,
       maximumFractionDigits: cfg.decimals,
     }).format(num)
@@ -70,16 +77,17 @@ export function formatFiatCompact(
   usdValue: number | string | null | undefined,
   currency: FiatCurrency,
   locale: string,
-  conversionRate = 1,
+  conversionRate?: number,
 ): string {
   if (usdValue === null || usdValue === undefined) return ''
-  const num = (typeof usdValue === 'string' ? parseFloat(usdValue) : usdValue) * conversionRate
+  const displayCurrency = fiatDisplayCurrency(currency, conversionRate)
+  const num = (typeof usdValue === 'string' ? Number(usdValue) : usdValue) * (displayCurrency === 'USD' ? 1 : conversionRate!)
   if (!isFinite(num) || num === 0) return ''
-  const cfg = getFiatConfig(currency)
+  const cfg = getFiatConfig(displayCurrency)
   try {
     return new Intl.NumberFormat(locale, {
       style: 'currency',
-      currency: currency,
+      currency: displayCurrency,
       minimumFractionDigits: cfg.decimals,
       maximumFractionDigits: cfg.decimals,
       currencyDisplay: 'narrowSymbol',

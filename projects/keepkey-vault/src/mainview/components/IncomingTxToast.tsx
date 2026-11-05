@@ -22,9 +22,9 @@ export function IncomingTxToast({ tx, onDismiss }: Props) {
   if (!tx) return null
 
   const subtitle = tx.activityOnly
-    ? (tx.chainName ? t("incomingTx.activityOnChain", { chain: tx.chainName, defaultValue: `${tx.chainName} · balance refreshed` }) : t("incomingTx.activityRefreshed", { defaultValue: "Balance refreshed" }))
+    ? (tx.chainName ? t("incomingTx.activityOnChain", { chain: tx.chainName, defaultValue: "{{chain}} · balance refreshed" }) : t("incomingTx.activityRefreshed", { defaultValue: "Balance refreshed" }))
     : tx.chainName
-    ? t("incomingTx.onChain", { chain: tx.chainName, defaultValue: `${tx.chainName} · refreshing balance` })
+    ? t("incomingTx.onChain", { chain: tx.chainName, defaultValue: "{{chain}} · refreshing balance" })
     : t("incomingTx.refreshing", { defaultValue: "Refreshing balance" })
 
   return (

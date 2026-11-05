@@ -1,3 +1,4 @@
+import { useUiTranslation } from "../i18n/ui"
 import { useState, useEffect, useCallback, useRef } from "react"
 import { Box, Flex, Text, Button, Spinner, Textarea, Input } from "@chakra-ui/react"
 import { rpcRequest } from "../lib/rpc"
@@ -25,6 +26,8 @@ const SCRIPT_LABEL: Record<string, string> = { p2wpkh: "Native SegWit (bc1q)", "
  * saves and refreshes balances through the active backend (the user's own node when set).
  */
 export function WatchOnlyImportDialog({ onImported }: { onImported: (deviceId: string, label: string) => void }) {
+  const uiText = useUiTranslation()
+
 	const [phase, setPhase] = useState<Phase>("idle")
 	const [source, setSource] = useState<Source | null>(null)
 	const [fileName, setFileName] = useState("")
@@ -123,25 +126,23 @@ export function WatchOnlyImportDialog({ onImported }: { onImported: (deviceId: s
 				position="fixed" top="50%" left="50%" transform="translate(-50%, -50%)"
 				w="520px" maxW="92vw" maxH="88vh" overflowY="auto"
 				bg="kk.bg" border="1px solid" borderColor="kk.border" borderRadius="xl"
-				zIndex={Z.dialog + 1} role="dialog" aria-modal="true" aria-label="Import watch-only wallet"
+				zIndex={Z.dialog + 1} role="dialog" aria-modal="true" aria-label={uiText("Import watch-only wallet")}
 			>
 				<Box p="6">
-					<Text fontSize="lg" fontWeight="700" color="kk.textPrimary">Import watch-only wallet</Text>
-					<Text fontSize="xs" color="kk.textSecondary" mb="4">Bitcoin mainnet{fileName ? ` · ${fileName}` : ""}</Text>
+					<Text fontSize="lg" fontWeight="700" color="kk.textPrimary">{uiText("Import watch-only wallet")}</Text>
+					<Text fontSize="xs" color="kk.textSecondary" mb="4">{uiText("Bitcoin mainnet")}{fileName ? ` · ${fileName}` : ""}</Text>
 
 					{phase === "input" && (
 						<>
-							<Text fontSize="sm" color="kk.textSecondary" mb="2">
-								Paste an xpub, ypub or zpub, or choose a Desktop public wallet or Electrum wallet file (you can also drop it on this window). Never a private key or seed.
-							</Text>
-							<Textarea value={pasted} onChange={(e) => setPasted(e.target.value)} rows={4} fontFamily="mono" fontSize="xs" mb="3" placeholder="zpub6r..." />
+							<Text fontSize="sm" color="kk.textSecondary" mb="2">{uiText("Paste an xpub, ypub or zpub, or choose a Desktop public wallet or Electrum wallet file (you can also drop it on this window). Never a private key or seed.")}</Text>
+							<Textarea value={pasted} onChange={(e) => setPasted(e.target.value)} rows={4} fontFamily="mono" fontSize="xs" mb="3" placeholder={uiText("zpub6r...")} />
 							<input ref={fileRef} type="file" accept=".json,application/json,text/plain,*" style={{ display: "none" }}
 								onChange={(e) => { const f = e.currentTarget.files?.[0]; e.currentTarget.value = ""; if (f) void readFile(f) }} />
 							<Flex gap="2" justify="flex-end">
-								<Button {...plainButton} onClick={close}>Cancel</Button>
-								<Button {...plainButton} onClick={() => { close(); window.dispatchEvent(new Event(BITCOIN_QR_SCAN_EVENT)) }}>Scan QR</Button>
-								<Button {...plainButton} onClick={() => fileRef.current?.click()}>Choose file</Button>
-								<Button {...goldButton} disabled={!pasted.trim()} onClick={() => void check({ data: pasted }, "")}>Check</Button>
+								<Button {...plainButton} onClick={close}>{uiText("Cancel")}</Button>
+								<Button {...plainButton} onClick={() => { close(); window.dispatchEvent(new Event(BITCOIN_QR_SCAN_EVENT)) }}>{uiText("Scan QR")}</Button>
+								<Button {...plainButton} onClick={() => fileRef.current?.click()}>{uiText("Choose file")}</Button>
+								<Button {...goldButton} disabled={!pasted.trim()} onClick={() => void check({ data: pasted }, "")}>{uiText("Check")}</Button>
 							</Flex>
 						</>
 					)}
@@ -149,68 +150,65 @@ export function WatchOnlyImportDialog({ onImported }: { onImported: (deviceId: s
 					{(phase === "checking" || phase === "saving") && (
 						<Flex align="center" gap="2" py="6" justify="center">
 							<Spinner size="sm" color="kk.gold" />
-							<Text fontSize="sm" color="kk.textSecondary">{phase === "checking" ? "Reading the wallet..." : "Saving and fetching balances..."}</Text>
+							<Text fontSize="sm" color="kk.textSecondary">{phase === "checking" ? uiText("Reading the wallet...") : uiText("Saving and fetching balances...")}</Text>
 						</Flex>
 					)}
 
 					{phase === "preview" && preview && (
 						<Flex direction="column" gap="3">
 							<Box {...card} borderColor="rgba(233,196,106,0.4)" bg="rgba(233,196,106,0.06)">
-								<Text fontSize="xs" color="var(--gold)">
-									Not verified on a KeepKey. Until a KeepKey that holds this key is connected, Desktop cannot prove these addresses are yours.
-									Balances are looked up by the balance server (or your own Bitcoin node, when set), which learns this key.
-								</Text>
+								<Text fontSize="xs" color="var(--gold)">{uiText("Not verified on a KeepKey. Until a KeepKey that holds this key is connected, Desktop cannot prove these addresses are yours. Balances are looked up by the balance server (or your own Bitcoin node, when set), which learns this key.")}</Text>
 							</Box>
 							<Box {...card}>
-								<Text fontSize="xs" color="kk.textSecondary">{SCRIPT_LABEL[selectedType!]} · {preview.source === "desktop" ? "Desktop public wallet file" : preview.source === "electrum" ? "Electrum wallet file" : "extended public key"}</Text>
+								<Text fontSize="xs" color="kk.textSecondary">{SCRIPT_LABEL[selectedType!]} · {preview.source === "desktop" ? uiText("Desktop public wallet file") : preview.source === "electrum" ? uiText("Electrum wallet file") : uiText("extended public key")}</Text>
 								<Text fontSize="xs" fontFamily="mono" color="kk.textPrimary" wordBreak="break-all" mt="1">{preview.key}</Text>
-								<Text fontSize="xs" color="kk.textSecondary" mt="2">Derivation path: <Text as="span" fontFamily="mono" color="kk.textPrimary">{selectedPath}</Text>{preview.pathAssumed ? " (confirm below)" : ""}</Text>
-								<Text fontSize="xs" color="kk.textSecondary">Master fingerprint: <Text as="span" fontFamily="mono" color="kk.textPrimary">{preview.fingerprint ?? "unknown"}</Text></Text>
+								<Text fontSize="xs" color="kk.textSecondary" mt="2">{uiText("Derivation path:")}{" "}<Text as="span" fontFamily="mono" color="kk.textPrimary">{selectedPath}</Text>{preview.pathAssumed ? uiText(" (confirm below)") : ""}</Text>
+								<Text fontSize="xs" color="kk.textSecondary">{uiText("Master fingerprint:")}{" "}<Text as="span" fontFamily="mono" color="kk.textPrimary">{preview.fingerprint ?? uiText("unknown")}</Text></Text>
 							</Box>
 
 							{preview.pathAssumed && (
 								<Box {...card}>
-									<Text fontSize="xs" color="kk.textSecondary" mb="2">A bare key does not say where it came from. Confirm it:</Text>
+									<Text fontSize="xs" color="kk.textSecondary" mb="2">{uiText("A bare key does not say where it came from. Confirm it:")}</Text>
 									<Box as="label" display="flex" alignItems="flex-start" gap={2} cursor="pointer">
 										<input type="radio" name="wo-path" checked={pathOk && !taproot}
 											onChange={() => { setPathOk(true); setTaproot(false) }} style={{ marginTop: 2, accentColor: "#E9C46A", flexShrink: 0 }} />
-										<Text fontSize="xs" color="kk.textPrimary">This is the {SCRIPT_LABEL[preview.scriptType]} account <Text as="span" fontFamily="mono">{preview.path}</Text></Text>
+										<Text fontSize="xs" color="kk.textPrimary">{uiText("This is the")}{" "}{SCRIPT_LABEL[preview.scriptType]}{" "}{uiText("account")}{" "}<Text as="span" fontFamily="mono">{preview.path}</Text></Text>
 									</Box>
 									{preview.scriptType === "p2pkh" && (
 										<Box as="label" display="flex" alignItems="flex-start" gap={2} cursor="pointer" mt="1">
 											<input type="radio" name="wo-path" checked={taproot}
 												onChange={() => { setTaproot(true); setPathOk(false) }} style={{ marginTop: 2, accentColor: "#E9C46A", flexShrink: 0 }} />
-											<Text fontSize="xs" color="kk.textPrimary">It is a Taproot (BIP86) key</Text>
+											<Text fontSize="xs" color="kk.textPrimary">{uiText("It is a Taproot (BIP86) key")}</Text>
 										</Box>
 									)}
 								</Box>
 							)}
 
 							<Box>
-								<Text fontSize="xs" color="kk.textSecondary" mb="1">Name (shown as "Imported · name")</Text>
+								<Text fontSize="xs" color="kk.textSecondary" mb="1">{uiText("Name (shown as \"Imported · name\")")}</Text>
 								<Input size="sm" value={label} maxLength={40} onChange={(e) => setLabel(e.target.value)} placeholder={`Bitcoin ${preview.path}`} />
 							</Box>
 							{!preview.fingerprint && (
 								<Box>
-									<Text fontSize="xs" color="kk.textSecondary" mb="1">Master fingerprint (optional, 8 hex). Without it, PSBTs use Electrum's relative key paths.</Text>
-									<Input size="sm" fontFamily="mono" value={fingerprint} maxLength={8} onChange={(e) => setFingerprint(e.target.value)} placeholder="unknown" />
+									<Text fontSize="xs" color="kk.textSecondary" mb="1">{uiText("Master fingerprint (optional, 8 hex). Without it, PSBTs use Electrum's relative key paths.")}</Text>
+									<Input size="sm" fontFamily="mono" value={fingerprint} maxLength={8} onChange={(e) => setFingerprint(e.target.value)} placeholder={uiText("unknown")} />
 								</Box>
 							)}
 
 							<Flex gap="2" justify="flex-end">
-								<Button {...plainButton} onClick={close}>Cancel</Button>
-								<Button {...goldButton} disabled={!canImport} onClick={handleImport}>Import</Button>
+								<Button {...plainButton} onClick={close}>{uiText("Cancel")}</Button>
+								<Button {...goldButton} disabled={!canImport} onClick={handleImport}>{uiText("Import")}</Button>
 							</Flex>
 						</Flex>
 					)}
 
 					{phase === "error" && (
 						<Flex direction="column" gap="3">
-							<Text fontSize="sm" color="var(--rose)">{error || "Unknown error"}</Text>
+							<Text fontSize="sm" color="var(--rose)">{error || uiText("Unknown error")}</Text>
 							<Flex gap="2" justify="flex-end">
-								{preview && <Button {...plainButton} onClick={() => setPhase("preview")}>Back</Button>}
-								<Button {...plainButton} onClick={() => { setPreview(null); setPhase("input") }}>Try another</Button>
-								<Button {...goldButton} onClick={close}>Close</Button>
+								{preview && <Button {...plainButton} onClick={() => setPhase("preview")}>{uiText("Back")}</Button>}
+								<Button {...plainButton} onClick={() => { setPreview(null); setPhase("input") }}>{uiText("Try another")}</Button>
+								<Button {...goldButton} onClick={close}>{uiText("Close")}</Button>
 							</Flex>
 						</Flex>
 					)}

@@ -35,5 +35,6 @@
 	"loadingConnect": "KeepKey に接続中",
 	"loadingSync": "チェーン間で残高を同期中",
 	"loadingPrices": "最新の価格を取得中",
-	"tokensCount": "+{{count}} トークン"
+	"tokensCount": "+{{count}} トークン",
+	"dismiss": "閉じる"
 }

@@ -1,3 +1,4 @@
+import { useUiTranslation } from "../i18n/ui"
 import { Box, Flex, Text, Button } from "@chakra-ui/react"
 import { useTranslation } from "react-i18next"
 import { FaUserSecret } from "react-icons/fa"
@@ -19,6 +20,8 @@ interface PassphraseIntroDialogProps {
  * to actually enable it; works regardless of device/connection state.
  */
 export function PassphraseIntroDialog({ onClose }: PassphraseIntroDialogProps) {
+  const uiText = useUiTranslation()
+
 	const { t } = useTranslation("setup")
 
 	return (
@@ -61,7 +64,7 @@ export function PassphraseIntroDialog({ onClose }: PassphraseIntroDialogProps) {
 
 					<Flex gap="3">
 						<DocsLink href={DOCS_LINKS.passphrase} />
-						<DocsLink href={watch('intro-more-passphrase')} label="Watch video" />
+						<DocsLink href={watch('intro-more-passphrase')} label={uiText("Watch video")} />
 					</Flex>
 
 					<Text fontSize="sm" color="kk.textSecondary" textAlign="center" lineHeight="1.6">

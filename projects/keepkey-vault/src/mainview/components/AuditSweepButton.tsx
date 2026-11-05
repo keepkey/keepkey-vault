@@ -1,3 +1,4 @@
+import { useUiTranslation } from "../i18n/ui"
 /**
  * AuditSweepButton — spend a funded address-level audit find (uncommon
  * path/scriptType combo or custom path) to the chain's standard receive
@@ -34,6 +35,8 @@ interface AuditSweepButtonProps {
 }
 
 export function AuditSweepButton({ chainId, addressNList, scriptType, address, onOpenUrl }: AuditSweepButtonProps) {
+  const uiText = useUiTranslation()
+
   const [phase, setPhase] = useState<'idle' | 'quoting' | 'quoted' | 'signing' | 'done'>('idle')
   const [quote, setQuote] = useState<SweepQuote | null>(null)
   const [err, setErr] = useState<string | null>(null)
@@ -63,10 +66,10 @@ export function AuditSweepButton({ chainId, addressNList, scriptType, address, o
   if (phase === 'done' && quote?.txid) {
     return (
       <Flex mt="2" pt="2" borderTop="1px solid" borderColor="rgba(233,196,106,0.2)" align="center" gap="2" wrap="wrap">
-        <Text fontSize="12px" color="var(--teal)" fontWeight="700">Swept ✓</Text>
-        <Text fontSize="11px" color="var(--text-2)">{fmtSats(quote.outputSats)} {quote.symbol} → your main wallet</Text>
+        <Text fontSize="12px" color="var(--teal)" fontWeight="700">{uiText("Swept ✓")}</Text>
+        <Text fontSize="11px" color="var(--text-2)">{fmtSats(quote.outputSats)} {quote.symbol}{" "}{uiText("→ your main wallet")}</Text>
         <Text fontSize="10px" fontFamily="mono" color="var(--text-3)" truncate maxW="200px" title={quote.txid}>{quote.txid}</Text>
-        {quote.explorerTxUrl && <Box as="button" fontSize="11px" color="var(--teal)" onClick={() => onOpenUrl(quote.explorerTxUrl!)}>view tx ↗</Box>}
+        {quote.explorerTxUrl && <Box as="button" fontSize="11px" color="var(--teal)" onClick={() => onOpenUrl(quote.explorerTxUrl!)}>{uiText("view tx ↗")}</Box>}
       </Flex>
     )
   }
@@ -76,23 +79,23 @@ export function AuditSweepButton({ chainId, addressNList, scriptType, address, o
       {phase === 'idle' || phase === 'quoting' ? (
         <Flex align="center" gap="3" wrap="wrap">
           <Button size="2xs" bg="var(--gold)" color="var(--ink-0)" fontWeight="700" _hover={{ bg: 'var(--gold-2)' }}
-            loading={phase === 'quoting'} onClick={getQuote}>Sweep to main wallet</Button>
-          <Text fontSize="11px" color="var(--text-3)">moves these funds to your standard address</Text>
+            loading={phase === 'quoting'} onClick={getQuote}>{uiText("Sweep to main wallet")}</Button>
+          <Text fontSize="11px" color="var(--text-3)">{uiText("moves these funds to your standard address")}</Text>
         </Flex>
       ) : (
         <Box>
           {quote && (
             <Box fontSize="11px" color="var(--text-2)" mb="2">
-              <Text>Send <Text as="span" color="var(--text-0)" fontWeight="700">{fmtSats(quote.outputSats)} {quote.symbol}</Text> (fee {fmtSats(quote.fee)} {quote.symbol}, {quote.inputCount} input{quote.inputCount > 1 ? 's' : ''})</Text>
+              <Text>{uiText("Send")}{" "}<Text as="span" color="var(--text-0)" fontWeight="700">{fmtSats(quote.outputSats)} {quote.symbol}</Text>{" "}{uiText("(fee")}{" "}{fmtSats(quote.fee)} {quote.symbol}, {quote.inputCount}{" "}{uiText("input")}{quote.inputCount > 1 ? 's' : ''})</Text>
               <Text fontFamily="mono" fontSize="10px" color="var(--text-3)" truncate title={quote.destination}>→ {quote.destination}</Text>
             </Box>
           )}
           {phase === 'signing' ? (
-            <Flex align="center" gap="2"><Spinner size="xs" color="var(--gold)" /><Text fontSize="12px" color="var(--gold)">Confirm on your KeepKey…</Text></Flex>
+            <Flex align="center" gap="2"><Spinner size="xs" color="var(--gold)" /><Text fontSize="12px" color="var(--gold)">{uiText("Confirm on your KeepKey…")}</Text></Flex>
           ) : (
             <Flex gap="2">
-              <Button size="2xs" bg="var(--gold)" color="var(--ink-0)" fontWeight="700" _hover={{ bg: 'var(--gold-2)' }} onClick={sweep}>Confirm sweep</Button>
-              <Button size="2xs" variant="outline" borderColor="var(--line-2)" color="var(--text-2)" onClick={() => { setPhase('idle'); setQuote(null) }}>Cancel</Button>
+              <Button size="2xs" bg="var(--gold)" color="var(--ink-0)" fontWeight="700" _hover={{ bg: 'var(--gold-2)' }} onClick={sweep}>{uiText("Confirm sweep")}</Button>
+              <Button size="2xs" variant="outline" borderColor="var(--line-2)" color="var(--text-2)" onClick={() => { setPhase('idle'); setQuote(null) }}>{uiText("Cancel")}</Button>
             </Flex>
           )}
         </Box>

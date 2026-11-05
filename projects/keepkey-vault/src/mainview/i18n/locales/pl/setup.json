@@ -122,7 +122,23 @@
 		"autoRebooting": "Urządzenie uruchamia się ponownie...",
 		"autoRebootingDetail": "KeepKey automatycznie uruchomi się ponownie z nowym firmware. Zwykle trwa to kilka sekund.",
 		"waitingForDevice": "Oczekiwanie na urządzenie...",
-		"wipeAndFlash": "Wyczyść i zainstaluj"
+		"wipeAndFlash": "Wyczyść i zainstaluj",
+		"installWipe": {
+			"wipeTitle": "To wymaże urządzenie",
+			"unknownTitle": "To może wymazać urządzenie",
+			"lockTitle": "To zablokuje Twój portfel tylko Bitcoin",
+			"noFirmwareTitle": "Każdy portfel na tym KeepKey zostanie wymazany",
+			"wipeAck": "Rozumiem, że urządzenie zostanie wymazane, i mam kopię zapasową frazy odzyskiwania",
+			"unknownAck": "Rozumiem, że urządzenie może zostać wymazane, i mam kopię zapasową frazy odzyskiwania",
+			"lockAck": "Rozumiem, że portfel zostanie zablokowany, i mam kopię zapasową frazy odzyskiwania",
+			"downgradeTitle": "To wymaże urządzenie",
+			"crossBody": "Ten KeepKey używa oprogramowania {{from}} v{{current}}. Oprogramowanie {{to}} v{{target}} nie odczyta portfela i przy uruchomieniu usunie wszystkie klucze oraz ustawienia. Aby ponownie użyć portfela, musisz przywrócić go z frazy odzyskiwania.",
+			"downgradeBody": "Instalujesz v{{target}} zamiast v{{current}}. Starsze oprogramowanie nie odczyta nowszego formatu danych portfela i przy uruchomieniu usunie wszystkie klucze oraz ustawienia. Musisz przywrócić portfel z frazy odzyskiwania.",
+			"lockBody": "Ten KeepKey używa oprogramowania tylko Bitcoin. Oprogramowanie {{variant}} v{{target}} odmówi otwarcia tego portfela. Portfel pozostanie na urządzeniu, ale aby go użyć, musisz ponownie zainstalować oprogramowanie tylko Bitcoin albo wymazać urządzenie i przywrócić portfel z frazy odzyskiwania.",
+			"unknownBody": "W trybie bootloadera nie można ustalić, jakie oprogramowanie jest zainstalowane. Instalacja oprogramowania {{variant}} może usunąć wszystkie klucze i ustawienia, na przykład przy zmianie wariantu lub zastąpieniu nieoficjalnej bądź nowszej wersji. Jeśli KeepKey zawiera portfel, przygotuj frazę odzyskiwania. Nowy KeepKey nie ma portfela, który można utracić.",
+			"noFirmwareBody": "Ten KeepKey nie ma zainstalowanego oprogramowania, na przykład po przerwanej aktualizacji. Jeśli zawierał portfel, instalacja oprogramowania go usunie i konieczne będzie przywrócenie z frazy odzyskiwania.",
+			"unsignedBody": "Ten KeepKey używa oprogramowania, które nie jest oficjalnym wydaniem KeepKey. Instalacja oficjalnego oprogramowania usunie wszystkie klucze i ustawienia."
+		}
 	},
 	"initChoose": {
 		"title": "Skonfiguruj swój portfel",
@@ -151,7 +167,8 @@
 		"writeDownWarning": "Zapisz każde słowo!",
 		"writeDownDetail": "Fraza odzyskiwania jest wyświetlana na ekranie urządzenia. Zapisz każde słowo na papierze. To JEDYNA kopia zapasowa; NIE zobaczysz tych słów ponownie.",
 		"deviceLost": "Urządzenie odłączone. Podłącz je ponownie, aby kontynuować, albo wróć i spróbuj jeszcze raz.",
-		"goBack": "Wróć"
+		"goBack": "Wróć",
+		"backToChoose": "Wstecz"
 	},
 	"initLabel": {
 		"walletCreated": "Portfel utworzony!",
@@ -232,6 +249,17 @@
 		"walletLabels": {
 			"visible": "widoczny",
 			"hidden": "ukryty"
+		}
+	},
+	"updateDone": {
+		"continue": "Kontynuuj"
+	},
+	"coinMode": {
+		"change": "Zmień"
+	},
+	"security": {
+		"dice": {
+			"can": "Wprowadzasz wyniki {{rollCount}} rzutów przyciskiem urządzenia; nigdy nie trafiają na ten komputer."
 		}
 	}
 }

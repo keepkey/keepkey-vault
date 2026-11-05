@@ -1,3 +1,4 @@
+import { useUiTranslation } from "../../i18n/ui"
 import { useState, useEffect, useCallback } from "react"
 import { Box, Text, VStack, Flex, Button } from "@chakra-ui/react"
 import { useTranslation } from "react-i18next"
@@ -69,6 +70,8 @@ const PIN_ANIMATIONS = `
  * position-based buttons (1-9) on this grid.
  */
 export function PinEntry({ type = "current", failed, errorDetail, requestSeq, onSubmit, onCancel, onWipe, deviceAsking = true }: PinEntryProps) {
+  const uiText = useUiTranslation()
+
 	const { t } = useTranslation("device")
 	const [pin, setPin] = useState("")
 	const [showError, setShowError] = useState(false)
@@ -200,7 +203,7 @@ export function PinEntry({ type = "current", failed, errorDetail, requestSeq, on
 						onClick={() => rpcRequest("openUrl", { url: DOCS_LINKS.pinScrambled }).catch(() => {})}>
 						{t("pin.howPinWorks")}
 					</Box>
-					<DocsLink href={watch('intro-more-forgot-pin')} label="Watch video" />
+					<DocsLink href={watch('intro-more-forgot-pin')} label={uiText("Watch video")} />
 				</Flex>
 
 				{!showWipeConfirm && (<>

@@ -1,3 +1,5 @@
+import { getNumberLocale } from "../lib/number-locale"
+import { useUiTranslation } from "../i18n/ui"
 /**
  * SwapHistoryDialog — Full dialog for viewing active + historical swaps.
  *
@@ -62,8 +64,8 @@ function formatElapsed(ms: number): string {
 
 function formatDate(ts: number): string {
   const d = new Date(ts)
-  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) +
-    ' ' + d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false })
+  return d.toLocaleDateString(getNumberLocale(), { month: 'short', day: 'numeric', year: 'numeric' }) +
+    ' ' + d.toLocaleTimeString(getNumberLocale(), { hour: '2-digit', minute: '2-digit', hour12: false })
 }
 
 /** Open the raw pendingTx JSON (everything Pioneer has on a swap) in the browser. */
@@ -125,6 +127,8 @@ function StageIndicator({ stage, status }: { stage: 1 | 2 | 3; status: string })
 // ── Active Swap Card (live polling) ─────────────────────────────────
 
 function ActiveSwapCard({ swap, onDismiss, onResume }: { swap: PendingSwap; onDismiss: (txid: string) => void; onResume?: (swap: PendingSwap) => void }) {
+  const uiText = useUiTranslation()
+
   const { t } = useTranslation("swap")
   const stage = getStage(swap.status)
   const color = getStatusColor(swap.status)
@@ -166,7 +170,7 @@ function ActiveSwapCard({ swap, onDismiss, onResume }: { swap: PendingSwap; onDi
       <Flex justify="space-between" align="center" mb="1.5">
         <HStack gap="2">
           <Text fontSize="sm" fontWeight="600" color="kk.textPrimary">{swap.fromSymbol}</Text>
-          <Text fontSize="xs" color="kk.textMuted">&rarr;</Text>
+          <Text fontSize="xs" color="kk.textMuted">{uiText("&rarr;")}</Text>
           <Text fontSize="sm" fontWeight="600" color="kk.textPrimary">{swap.toSymbol}</Text>
         </HStack>
         <Text fontSize="10px" fontWeight="600" color={color} bg={`${color}15`} px="2" py="0.5" borderRadius="md">
@@ -175,7 +179,7 @@ function ActiveSwapCard({ swap, onDismiss, onResume }: { swap: PendingSwap; onDi
       </Flex>
 
       <Text fontSize="xs" color="kk.textSecondary" mb="1">
-        {swap.fromAmount} {swap.fromSymbol} &rarr; ~{swap.expectedOutput} {swap.toSymbol}
+        {swap.fromAmount} {swap.fromSymbol}{" "}{uiText("&rarr; ~")}{swap.expectedOutput} {swap.toSymbol}
       </Text>
 
       <StageIndicator stage={stage} status={swap.status} />
@@ -229,7 +233,7 @@ function ActiveSwapCard({ swap, onDismiss, onResume }: { swap: PendingSwap; onDi
             const url = getExplorerTxUrl(swap.fromChainId, swap.txid)
             return url ? (
               <Button size="xs" variant="ghost" color="var(--teal)" px="1" minW="auto" h="auto" py="0.5"
-                onClick={(e) => { e.stopPropagation(); rpcRequest('openUrl', { url }).catch(() => {}) }} title="View on explorer">
+                onClick={(e) => { e.stopPropagation(); rpcRequest('openUrl', { url }).catch(() => {}) }} title={uiText("View on explorer")}>
                 <ExternalLinkIcon />
               </Button>
             ) : null
@@ -238,10 +242,8 @@ function ActiveSwapCard({ swap, onDismiss, onResume }: { swap: PendingSwap; onDi
             size="xs" variant="ghost" color="kk.textMuted" px="1.5" minW="auto" h="auto" py="0.5"
             fontSize="10px" fontFamily="mono"
             onClick={(e) => { e.stopPropagation(); openSwapApi(swap.txid) }}
-            _hover={{ color: "var(--teal)" }} title="View raw swap data (JSON)"
-          >
-            api
-          </Button>
+            _hover={{ color: "var(--teal)" }} title={uiText("View raw swap data (JSON)")}
+          >{uiText("api")}</Button>
           {swap.outboundTxid && (() => {
             // Refunds outbound on the SOURCE chain (Maya returns the inbound
             // asset). Use outboundChainId from the classifier when present
@@ -249,7 +251,7 @@ function ActiveSwapCard({ swap, onDismiss, onResume }: { swap: PendingSwap; onDi
             const url = getExplorerTxUrl(swap.outboundChainId || swap.toChainId, swap.outboundTxid)
             return url ? (
               <Button size="xs" variant="ghost" color="var(--teal)" px="1" minW="auto" h="auto" py="0.5"
-                onClick={(e) => { e.stopPropagation(); rpcRequest('openUrl', { url }).catch(() => {}) }} title="View outbound on explorer">
+                onClick={(e) => { e.stopPropagation(); rpcRequest('openUrl', { url }).catch(() => {}) }} title={uiText("View outbound on explorer")}>
                 <ExternalLinkIcon />
               </Button>
             ) : null
@@ -272,6 +274,8 @@ function ActiveSwapCard({ swap, onDismiss, onResume }: { swap: PendingSwap; onDi
 // ── History Record Card (from SQLite) ───────────────────────────────
 
 function HistoryCard({ record, onResume }: { record: SwapHistoryRecord; onResume?: (swap: PendingSwap) => void }) {
+  const uiText = useUiTranslation()
+
   const [expanded, setExpanded] = useState(false)
   const [copied, setCopied] = useState<string | null>(null)
   const color = getStatusColor(record.status)
@@ -318,7 +322,7 @@ function HistoryCard({ record, onResume }: { record: SwapHistoryRecord; onResume
       <Flex justify="space-between" align="center" mb="1">
         <HStack gap="2">
           <Text fontSize="sm" fontWeight="600" color="kk.textPrimary">
-            {record.fromSymbol} &rarr; {record.toSymbol}
+            {record.fromSymbol}{" "}{uiText("&rarr;")}{" "}{record.toSymbol}
           </Text>
           <Text fontSize="10px" fontWeight="600" color={color} bg={`${color}15`} px="2" py="0.5" borderRadius="md">
             {record.status}
@@ -335,8 +339,8 @@ function HistoryCard({ record, onResume }: { record: SwapHistoryRecord; onResume
         <Text fontSize="xs" color="kk.textSecondary">
           {record.fromAmount} {record.fromSymbol}
           {record.receivedOutput
-            ? <> &rarr; {record.receivedOutput} {record.toSymbol}</>
-            : <> &rarr; ~{record.quotedOutput} {record.toSymbol} <Text as="span" color="kk.textMuted">(quoted)</Text></>
+            ? <>{" "}{uiText("&rarr;")}{" "}{record.receivedOutput} {record.toSymbol}</>
+            : <>{" "}{uiText("&rarr; ~")}{record.quotedOutput} {record.toSymbol} <Text as="span" color="kk.textMuted">{uiText("(quoted)")}</Text></>
           }
         </Text>
         {durationStr && (
@@ -348,8 +352,7 @@ function HistoryCard({ record, onResume }: { record: SwapHistoryRecord; onResume
       {quoteAccuracy && (
         <HStack gap="1" mt="1">
           <Text fontSize="10px" color={quoteAccuracy.positive ? 'var(--teal)' : '#EF4444'}>
-            {quoteAccuracy.positive ? '+' : ''}{quoteAccuracy.pct}% vs quote
-          </Text>
+            {quoteAccuracy.positive ? '+' : ''}{quoteAccuracy.pct}{uiText("% vs quote")}</Text>
         </HStack>
       )}
 
@@ -367,39 +370,39 @@ function HistoryCard({ record, onResume }: { record: SwapHistoryRecord; onResume
         <Box mt="3" pt="3" borderTop="1px solid" borderColor="rgba(255,255,255,0.06)">
           <VStack gap="1.5" align="stretch">
             <Flex justify="space-between" align="center" gap="2">
-              <Text fontSize="10px" color="kk.textMuted" minW="80px">Route</Text>
+              <Text fontSize="10px" color="kk.textMuted" minW="80px">{uiText("Route")}</Text>
               <ProviderBadge swapper={record.swapper || record.integration} integration={record.integration} size={16} variant="detailed" />
             </Flex>
             {record.swapper && record.integration && record.swapper.toLowerCase() !== record.integration.toLowerCase() && (
-              <DetailRow label="Source" value={record.integration} />
+              <DetailRow label={uiText("Source")} value={record.integration} />
             )}
-            <DetailRow label="Slippage" value={`${record.slippageBps} bps (${(record.slippageBps / 100).toFixed(1)}%)`} />
-            <DetailRow label="Fee" value={`${record.feeBps} bps`} />
-            <DetailRow label="Outbound Fee" value={record.feeOutbound} />
-            <DetailRow label="Quoted" value={`${record.quotedOutput} ${record.toSymbol}`} />
-            <DetailRow label="Minimum" value={`${record.minimumOutput} ${record.toSymbol}`} />
+            <DetailRow label={uiText("Slippage")} value={`${record.slippageBps} bps (${(record.slippageBps / 100).toFixed(1)}%)`} />
+            <DetailRow label={uiText("Fee")} value={`${record.feeBps} bps`} />
+            <DetailRow label={uiText("Outbound Fee")} value={record.feeOutbound} />
+            <DetailRow label={uiText("Quoted")} value={`${record.quotedOutput} ${record.toSymbol}`} />
+            <DetailRow label={uiText("Minimum")} value={`${record.minimumOutput} ${record.toSymbol}`} />
             {record.receivedOutput && (
-              <DetailRow label="Received" value={`${record.receivedOutput} ${record.toSymbol}`} />
+              <DetailRow label={uiText("Received")} value={`${record.receivedOutput} ${record.toSymbol}`} />
             )}
-            <DetailRow label="Est. Time" value={`${record.estimatedTimeSeconds}s`} />
+            <DetailRow label={uiText("Est. Time")} value={`${record.estimatedTimeSeconds}s`} />
             {record.actualTimeSeconds !== undefined && (
-              <DetailRow label="Actual Time" value={`${record.actualTimeSeconds}s`} />
+              <DetailRow label={uiText("Actual Time")} value={`${record.actualTimeSeconds}s`} />
             )}
             {/* Input-confirmed timing — confirmedAt minus broadcast (createdAt). */}
             {record.inboundConfirmedAt !== undefined && record.createdAt && record.inboundConfirmedAt > record.createdAt && (
-              <DetailRow label="Input Confirmed" value={`in ${formatElapsed(record.inboundConfirmedAt - record.createdAt)}`} />
+              <DetailRow label={uiText("Input Confirmed")} value={`in ${formatElapsed(record.inboundConfirmedAt - record.createdAt)}`} />
             )}
             {/* How long the input sat unconfirmed before a timeout failure. */}
             {record.errorElapsedMinutes !== undefined && record.errorElapsedMinutes > 0 && (
-              <DetailRow label="Unconfirmed For" value={`~${record.errorElapsedMinutes} min`} />
+              <DetailRow label={uiText("Unconfirmed For")} value={`~${record.errorElapsedMinutes} min`} />
             )}
             {/* EVM network fee actually paid by the input tx (EVM-only). */}
             {record.inboundGasUsed && record.fromCaip?.startsWith('eip155:') && (
               <DetailRow
-                label="Gas Used"
+                label={uiText("Gas Used")}
                 value={(() => {
                   const used = Number(record.inboundGasUsed)
-                  const usedStr = Number.isFinite(used) ? used.toLocaleString() : record.inboundGasUsed!
+                  const usedStr = Number.isFinite(used) ? used.toLocaleString(getNumberLocale()) : record.inboundGasUsed!
                   const gwei = record.inboundEffectiveGasPrice ? Number(record.inboundEffectiveGasPrice) / 1e9 : NaN
                   return Number.isFinite(gwei) ? `${usedStr} gas · ${gwei.toFixed(2)} gwei` : `${usedStr} gas`
                 })()}
@@ -408,14 +411,14 @@ function HistoryCard({ record, onResume }: { record: SwapHistoryRecord; onResume
             {/* Inbound block # — best-effort; clickable on EVM/UTXO explorers. */}
             {record.inboundBlockNumber !== undefined && record.inboundBlockNumber > 0 && (
               <Flex justify="space-between" align="center">
-                <Text fontSize="10px" color="kk.textMuted" minW="80px">Inbound Block</Text>
+                <Text fontSize="10px" color="kk.textMuted" minW="80px">{uiText("Inbound Block")}</Text>
                 {(() => {
-                  const label = `#${record.inboundBlockNumber!.toLocaleString()}${record.inboundBlockHash ? ` · ${record.inboundBlockHash.slice(0, 10)}…` : ''}`
+                  const label = `#${record.inboundBlockNumber!.toLocaleString(getNumberLocale())}${record.inboundBlockHash ? ` · ${record.inboundBlockHash.slice(0, 10)}…` : ''}`
                   const url = getExplorerBlockUrl(record.fromChainId, record.inboundBlockNumber!)
                   return url ? (
                     <Button size="xs" variant="ghost" color="var(--teal)" px="1" minW="auto" h="auto" py="0.5"
                       fontSize="10px" fontFamily="mono"
-                      onClick={(e) => { e.stopPropagation(); rpcRequest('openUrl', { url }).catch(() => {}) }} title="View block on explorer">
+                      onClick={(e) => { e.stopPropagation(); rpcRequest('openUrl', { url }).catch(() => {}) }} title={uiText("View block on explorer")}>
                       {label}
                     </Button>
                   ) : (
@@ -427,20 +430,20 @@ function HistoryCard({ record, onResume }: { record: SwapHistoryRecord; onResume
 
             {/* TX IDs with copy + explorer buttons */}
             <Flex justify="space-between" align="center">
-              <Text fontSize="10px" color="kk.textMuted" minW="80px">Inbound TX</Text>
+              <Text fontSize="10px" color="kk.textMuted" minW="80px">{uiText("Inbound TX")}</Text>
               <HStack gap="1">
                 <Button
                   size="xs" variant="ghost" color="var(--teal)" px="1" minW="auto" h="auto" py="0.5"
                   fontSize="10px" onClick={(e) => { e.stopPropagation(); copyValue(record.txid, 'inbound') }}
                   _hover={{ color: "var(--teal)" }}
                 >
-                  {copied === 'inbound' ? 'Copied!' : record.txid.slice(0, 10) + '...' + record.txid.slice(-6)}
+                  {copied === 'inbound' ? uiText("Copied!") : record.txid.slice(0, 10) + '...' + record.txid.slice(-6)}
                 </Button>
                 {(() => {
                   const url = getExplorerTxUrl(record.fromChainId, record.txid)
                   return url ? (
                     <Button size="xs" variant="ghost" color="var(--teal)" px="1" minW="auto" h="auto" py="0.5"
-                      onClick={(e) => { e.stopPropagation(); rpcRequest('openUrl', { url }).catch(() => {}) }} title="View on explorer">
+                      onClick={(e) => { e.stopPropagation(); rpcRequest('openUrl', { url }).catch(() => {}) }} title={uiText("View on explorer")}>
                       <ExternalLinkIcon />
                     </Button>
                   ) : null
@@ -449,22 +452,20 @@ function HistoryCard({ record, onResume }: { record: SwapHistoryRecord; onResume
                   size="xs" variant="ghost" color="kk.textMuted" px="1.5" minW="auto" h="auto" py="0.5"
                   fontSize="10px" fontFamily="mono"
                   onClick={(e) => { e.stopPropagation(); openSwapApi(record.txid) }}
-                  _hover={{ color: "var(--teal)" }} title="View raw swap data (JSON)"
-                >
-                  api
-                </Button>
+                  _hover={{ color: "var(--teal)" }} title={uiText("View raw swap data (JSON)")}
+                >{uiText("api")}</Button>
               </HStack>
             </Flex>
             {record.outboundTxid && (
               <Flex justify="space-between" align="center">
-                <Text fontSize="10px" color="kk.textMuted" minW="80px">Outbound TX</Text>
+                <Text fontSize="10px" color="kk.textMuted" minW="80px">{uiText("Outbound TX")}</Text>
                 <HStack gap="1">
                   <Button
                     size="xs" variant="ghost" color="var(--teal)" px="1" minW="auto" h="auto" py="0.5"
                     fontSize="10px" onClick={(e) => { e.stopPropagation(); copyValue(record.outboundTxid!, 'outbound') }}
                     _hover={{ color: "var(--teal)" }}
                   >
-                    {copied === 'outbound' ? 'Copied!' : record.outboundTxid.slice(0, 10) + '...' + record.outboundTxid.slice(-6)}
+                    {copied === 'outbound' ? uiText("Copied!") : record.outboundTxid.slice(0, 10) + '...' + record.outboundTxid.slice(-6)}
                   </Button>
                   {(() => {
                     // Refunded swaps deliver outbound on the source chain.
@@ -473,7 +474,7 @@ function HistoryCard({ record, onResume }: { record: SwapHistoryRecord; onResume
                     const url = getExplorerTxUrl(record.outboundChainId || record.toChainId, record.outboundTxid)
                     return url ? (
                       <Button size="xs" variant="ghost" color="var(--teal)" px="1" minW="auto" h="auto" py="0.5"
-                        onClick={(e) => { e.stopPropagation(); rpcRequest('openUrl', { url }).catch(() => {}) }} title="View on explorer">
+                        onClick={(e) => { e.stopPropagation(); rpcRequest('openUrl', { url }).catch(() => {}) }} title={uiText("View on explorer")}>
                         <ExternalLinkIcon />
                       </Button>
                     ) : null
@@ -483,20 +484,20 @@ function HistoryCard({ record, onResume }: { record: SwapHistoryRecord; onResume
             )}
             {record.approvalTxid && (
               <Flex justify="space-between" align="center">
-                <Text fontSize="10px" color="kk.textMuted" minW="80px">Approval TX</Text>
+                <Text fontSize="10px" color="kk.textMuted" minW="80px">{uiText("Approval TX")}</Text>
                 <HStack gap="1">
                   <Button
                     size="xs" variant="ghost" color="var(--teal)" px="1" minW="auto" h="auto" py="0.5"
                     fontSize="10px" onClick={(e) => { e.stopPropagation(); copyValue(record.approvalTxid!, 'approval') }}
                     _hover={{ color: "var(--teal)" }}
                   >
-                    {copied === 'approval' ? 'Copied!' : record.approvalTxid.slice(0, 10) + '...' + record.approvalTxid.slice(-6)}
+                    {copied === 'approval' ? uiText("Copied!") : record.approvalTxid.slice(0, 10) + '...' + record.approvalTxid.slice(-6)}
                   </Button>
                   {(() => {
                     const url = getExplorerTxUrl(record.fromChainId, record.approvalTxid)
                     return url ? (
                       <Button size="xs" variant="ghost" color="var(--teal)" px="1" minW="auto" h="auto" py="0.5"
-                        onClick={(e) => { e.stopPropagation(); rpcRequest('openUrl', { url }).catch(() => {}) }} title="View on explorer">
+                        onClick={(e) => { e.stopPropagation(); rpcRequest('openUrl', { url }).catch(() => {}) }} title={uiText("View on explorer")}>
                         <ExternalLinkIcon />
                       </Button>
                     ) : null
@@ -553,9 +554,7 @@ function HistoryCard({ record, onResume }: { record: SwapHistoryRecord; onResume
                     errorElapsedMinutes: record.errorElapsedMinutes,
                   })
                 }}
-              >
-                View Swap
-              </Button>
+              >{uiText("View Swap")}</Button>
             )}
           </VStack>
         </Box>
@@ -592,6 +591,8 @@ interface SwapHistoryDialogProps {
 }
 
 export function SwapHistoryDialog({ open, onClose, onResumeSwap }: SwapHistoryDialogProps) {
+  const uiText = useUiTranslation()
+
   const { t } = useTranslation("swap")
   const [tab, setTab] = useState<TabId>('active')
   const [pendingSwaps, setPendingSwaps] = useState<PendingSwap[]>([])
@@ -746,14 +747,11 @@ export function SwapHistoryDialog({ open, onClose, onResumeSwap }: SwapHistoryDi
                   </Text>
                 )}
                 <Text fontSize="10px" color="kk.textMuted" bg="rgba(255,255,255,0.06)" px="1.5" py="0.5" borderRadius="md">
-                  {stats.totalSwaps} total
-                </Text>
+                  {stats.totalSwaps}{" "}{uiText("total")}</Text>
               </HStack>
             )}
           </HStack>
-          <Button size="xs" variant="ghost" color="kk.textMuted" px="1" minW="auto" _hover={{ color: "kk.textPrimary" }} onClick={onClose}>
-            &times;
-          </Button>
+          <Button size="xs" variant="ghost" color="kk.textMuted" px="1" minW="auto" _hover={{ color: "kk.textPrimary" }} onClick={onClose}>{uiText("&times;")}</Button>
         </Flex>
 
         {/* Tabs */}
@@ -764,8 +762,7 @@ export function SwapHistoryDialog({ open, onClose, onResumeSwap }: SwapHistoryDi
             color={tab === 'active' ? '#23DCC8' : 'kk.textMuted'}
             _hover={{ bg: 'rgba(35,220,200,0.1)' }}
             onClick={() => setTab('active')}
-          >
-            Active {activeSwaps.length > 0 && `(${activeSwaps.length})`}
+          >{uiText("Active")}{" "}{activeSwaps.length > 0 && `(${activeSwaps.length})`}
           </Button>
           <Button
             size="xs" variant={tab === 'history' ? 'solid' : 'ghost'}
@@ -773,8 +770,7 @@ export function SwapHistoryDialog({ open, onClose, onResumeSwap }: SwapHistoryDi
             color={tab === 'history' ? '#23DCC8' : 'kk.textMuted'}
             _hover={{ bg: 'rgba(35,220,200,0.1)' }}
             onClick={() => setTab('history')}
-          >
-            History {stats ? `(${stats.totalSwaps})` : ''}
+          >{uiText("History")}{" "}{stats ? `(${stats.totalSwaps})` : ''}
           </Button>
 
           {/* Export buttons */}
@@ -786,7 +782,7 @@ export function SwapHistoryDialog({ open, onClose, onResumeSwap }: SwapHistoryDi
                 disabled={!!exporting}
                 _hover={{ color: '#23DCC8' }}
               >
-                {exporting === 'csv' ? 'Exporting...' : 'CSV'}
+                {exporting === 'csv' ? uiText("Exporting...") : 'CSV'}
               </Button>
               <Button
                 size="xs" variant="ghost" color="kk.textMuted" fontSize="10px"
@@ -794,7 +790,7 @@ export function SwapHistoryDialog({ open, onClose, onResumeSwap }: SwapHistoryDi
                 disabled={!!exporting}
                 _hover={{ color: '#23DCC8' }}
               >
-                {exporting === 'pdf' ? 'Exporting...' : 'PDF'}
+                {exporting === 'pdf' ? uiText("Exporting...") : 'PDF'}
               </Button>
             </HStack>
           )}
@@ -811,9 +807,7 @@ export function SwapHistoryDialog({ open, onClose, onResumeSwap }: SwapHistoryDi
                 {exportResult.startsWith('Error') ? exportResult : `Saved to ${exportResult}`}
               </Text>
               <Button size="xs" variant="ghost" color="kk.textMuted" px="1" minW="auto"
-                onClick={() => setExportResult(null)} fontSize="10px">
-                &times;
-              </Button>
+                onClick={() => setExportResult(null)} fontSize="10px">{uiText("&times;")}</Button>
             </Flex>
           </Box>
         )}
@@ -825,10 +819,8 @@ export function SwapHistoryDialog({ open, onClose, onResumeSwap }: SwapHistoryDi
             pendingSwaps.length === 0 ? (
               <Flex justify="center" align="center" py="12" direction="column" gap="2">
                 <Text fontSize="2xl" color="kk.textMuted" opacity={0.3}>&#9889;</Text>
-                <Text fontSize="sm" color="kk.textMuted">No active swaps</Text>
-                <Text fontSize="xs" color="kk.textMuted" opacity={0.5}>
-                  Completed swaps are in the History tab
-                </Text>
+                <Text fontSize="sm" color="kk.textMuted">{uiText("No active swaps")}</Text>
+                <Text fontSize="xs" color="kk.textMuted" opacity={0.5}>{uiText("Completed swaps are in the History tab")}</Text>
               </Flex>
             ) : (
               <VStack gap="3" align="stretch">
@@ -849,9 +841,7 @@ export function SwapHistoryDialog({ open, onClose, onResumeSwap }: SwapHistoryDi
                 {pendingSwaps.filter(s => s.status === 'completed' || s.status === 'failed' || s.status === 'refunded').length > 0 && (
                   <>
                     {activeSwaps.length > 0 && <Box h="2px" bg="rgba(255,255,255,0.06)" my="2" />}
-                    <Text fontSize="xs" fontWeight="600" color="kk.textMuted" textTransform="uppercase" letterSpacing="0.05em" mb="1">
-                      Recently Finished
-                    </Text>
+                    <Text fontSize="xs" fontWeight="600" color="kk.textMuted" textTransform="uppercase" letterSpacing="0.05em" mb="1">{uiText("Recently Finished")}</Text>
                     {pendingSwaps
                       .filter(s => s.status === 'completed' || s.status === 'failed' || s.status === 'refunded')
                       .map(swap => (
@@ -891,7 +881,7 @@ export function SwapHistoryDialog({ open, onClose, onResumeSwap }: SwapHistoryDi
 
               {/* Search */}
               <Input
-                placeholder="Search by asset (BTC, ETH, USDT...)"
+                placeholder={uiText("Search by asset (BTC, ETH, USDT...)")}
                 size="sm"
                 bg="rgba(255,255,255,0.04)"
                 border="1px solid"
@@ -908,11 +898,9 @@ export function SwapHistoryDialog({ open, onClose, onResumeSwap }: SwapHistoryDi
               {/* History records */}
               {history.length === 0 ? (
                 <Flex justify="center" align="center" py="10" direction="column" gap="2">
-                  <Text fontSize="sm" color="kk.textMuted">No swap history found</Text>
+                  <Text fontSize="sm" color="kk.textMuted">{uiText("No swap history found")}</Text>
                   {statusFilter !== 'all' && (
-                    <Button size="xs" variant="ghost" color="var(--teal)" onClick={() => setStatusFilter('all')}>
-                      Clear filter
-                    </Button>
+                    <Button size="xs" variant="ghost" color="var(--teal)" onClick={() => setStatusFilter('all')}>{uiText("Clear filter")}</Button>
                   )}
                 </Flex>
               ) : (

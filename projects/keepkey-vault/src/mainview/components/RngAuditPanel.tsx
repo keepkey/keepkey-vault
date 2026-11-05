@@ -1,3 +1,4 @@
+import { useUiTranslation } from "../i18n/ui"
 import { Box, Button, Flex, Text, VStack } from "@chakra-ui/react"
 import { useEffect, useState } from "react"
 import { rpcRequest, onRpcMessage } from "../lib/rpc"
@@ -98,6 +99,8 @@ export function RngAuditPanel({
 	/** Fires once per completed run, so the caller can gate on the outcome. */
 	onVerdict?: (verdict: RngAuditReport["verdict"]) => void
 }) {
+  const uiText = useUiTranslation()
+
 	const [sizeIdx, setSizeIdx] = useState(0)
 	const [running, setRunning] = useState(false)
 	const [progress, setProgress] = useState(0)
@@ -141,7 +144,7 @@ export function RngAuditPanel({
 				<Box
 					role="dialog"
 					aria-modal="true"
-					aria-label="RNG health test"
+					aria-label={uiText("RNG health test")}
 					pointerEvents="auto"
 					w="min(560px, 92vw)"
 					maxH="86vh"
@@ -152,24 +155,17 @@ export function RngAuditPanel({
 					borderRadius="16px"
 					p="5"
 				>
-					<Text fontSize="md" fontWeight="700" color="kk.textPrimary">RNG health test</Text>
-					<Text fontSize="xs" color="kk.textSecondary" mt="1">
-						Pulls entropy from the device's random number generator and checks it for stuck,
-						repeated, or grossly biased output.
-					</Text>
+					<Text fontSize="md" fontWeight="700" color="kk.textPrimary">{uiText("RNG health test")}</Text>
+					<Text fontSize="xs" color="kk.textSecondary" mt="1">{uiText("Pulls entropy from the device's random number generator and checks it for stuck, repeated, or grossly biased output.")}</Text>
 
 					<Box mt="3" px="3" py="2" borderRadius="10px" bg="rgba(233,196,106,0.06)" border="1px solid rgba(233,196,106,0.18)">
-						<Text fontSize="xs" color="kk.textSecondary">
-							This is a health test, not an entropy measurement. A strong generator seeded with
-							very little secret state passes every check here, so a pass cannot prove the device's
-							randomness is unpredictable — only that it is not obviously broken.
-						</Text>
+						<Text fontSize="xs" color="kk.textSecondary">{uiText("This is a health test, not an entropy measurement. A strong generator seeded with very little secret state passes every check here, so a pass cannot prove the device's randomness is unpredictable — only that it is not obviously broken.")}</Text>
 					</Box>
 
 					{!running && !report && (
 						<Box mt="4">
 							<Flex justify="space-between" align="baseline" mb="1">
-								<Text fontSize="xs" color="kk.textSecondary">Sample size</Text>
+								<Text fontSize="xs" color="kk.textSecondary">{uiText("Sample size")}</Text>
 								<Text fontSize="xs" fontFamily="mono" color="kk.textPrimary">
 									{label(SIZES[sizeIdx])} · {duration(SIZES[sizeIdx])}
 								</Text>
@@ -211,19 +207,14 @@ export function RngAuditPanel({
 							</Text>
 
 							{SIZES[sizeIdx] > PRESS_FREE_BYTES && (
-								<Text fontSize="2xs" color="kk.textSecondary" mt="1.5" lineHeight="tall">
-									Past {label(PRESS_FREE_BYTES)} the device asks for one button press, then
-									streams the rest unmetered. Requires firmware 7.15.0+ and an uninitialized
-									device; on older firmware every kilobyte needs its own press.
-								</Text>
+								<Text fontSize="2xs" color="kk.textSecondary" mt="1.5" lineHeight="tall">{uiText("Past")}{" "}{label(PRESS_FREE_BYTES)}{" "}{uiText("the device asks for one button press, then streams the rest unmetered. Requires firmware 7.15.0+ and an uninitialized device; on older firmware every kilobyte needs its own press.")}</Text>
 							)}
 						</Box>
 					)}
 
 					{running && (
 						<Box mt="4">
-							<Text fontSize="xs" color="kk.textSecondary" mb="1">
-								Collecting… {(progress * 100).toFixed(0)}%
+							<Text fontSize="xs" color="kk.textSecondary" mb="1">{uiText("Collecting…")}{" "}{(progress * 100).toFixed(0)}%
 							</Text>
 							<Box h="6px" bg="rgba(255,255,255,0.08)" borderRadius="3px" overflow="hidden">
 								<Box h="100%" w={`${progress * 100}%`} bg="kk.gold" transition="width 120ms linear" />
@@ -247,7 +238,7 @@ export function RngAuditPanel({
 								return (
 									<>
 										<Text fontSize="md" fontWeight="800" textAlign="center" color={failed ? "#e66464" : "kk.success"}>
-											{failed ? "Health test failed" : "Health test passed"}
+											{failed ? uiText("Health test failed") : uiText("Health test passed")}
 										</Text>
 										<Text fontSize="xs" fontWeight="500" textAlign="center" color="kk.textSecondary" mt="0.5">
 											{failed
@@ -258,10 +249,7 @@ export function RngAuditPanel({
 										</Text>
 										{report.verdict === "failed" && (
 											<Box mt="3" px="3" py="2" borderRadius="10px" bg="rgba(230,100,100,0.08)" border="1px solid rgba(230,100,100,0.3)">
-												<Text fontSize="xs" fontWeight="600" color="kk.textPrimary">
-													Do not create a wallet with this device. Its generator produced output
-													that real randomness never produces.
-												</Text>
+												<Text fontSize="xs" fontWeight="600" color="kk.textPrimary">{uiText("Do not create a wallet with this device. Its generator produced output that real randomness never produces.")}</Text>
 											</Box>
 										)}
 
@@ -294,17 +282,17 @@ export function RngAuditPanel({
 
 							<Box as="details" mt="3" pt="2" borderTop="1px solid rgba(255,255,255,0.06)">
 								<Box as="summary" cursor="pointer" mb="1">
-									<Text as="span" fontSize="xs" color="kk.textSecondary">Advanced details</Text>
+									<Text as="span" fontSize="xs" color="kk.textSecondary">{uiText("Advanced details")}</Text>
 								</Box>
-								<Row label="Sample size" value={`${(s.bytes / 1024).toFixed(0)} KB`} />
-								<Row label="Shannon entropy" value={`${s.shannonBitsPerByte.toFixed(5)} bits/byte`} />
-								<Row label="Bit balance (ideal 0.5)" value={s.onesFraction.toFixed(5)} />
-								<Row label="Byte chi-square (255 dof)" value={s.chiSquare.toFixed(1)} />
-								<Row label="Distinct byte values" value={`${s.distinctBytes}/256`} />
-								<Row label="Longest identical-bit run" value={String(s.longestBitRun)} />
-								<Row label="Repeated 8-byte blocks" value={String(s.repeatedBlocks8)} />
+								<Row label={uiText("Sample size")} value={`${(s.bytes / 1024).toFixed(0)} KB`} />
+								<Row label={uiText("Shannon entropy")} value={`${s.shannonBitsPerByte.toFixed(5)} bits/byte`} />
+								<Row label={uiText("Bit balance (ideal 0.5)")} value={s.onesFraction.toFixed(5)} />
+								<Row label={uiText("Byte chi-square (255 dof)")} value={s.chiSquare.toFixed(1)} />
+								<Row label={uiText("Distinct byte values")} value={`${s.distinctBytes}/256`} />
+								<Row label={uiText("Longest identical-bit run")} value={String(s.longestBitRun)} />
+								<Row label={uiText("Repeated 8-byte blocks")} value={String(s.repeatedBlocks8)} />
 								<Row
-									label="4-byte collisions (control)"
+									label={uiText("4-byte collisions (control)")}
 									value={
 										s.collisionControlUsable
 											? `${s.collisions4} seen / ${s.expectedCollisions4.toFixed(1)} expected`
@@ -312,17 +300,12 @@ export function RngAuditPanel({
 									}
 									muted={!s.collisionControlUsable}
 								/>
-								<Row label="Sample SHA-256" value={`${report.sampleSha256.slice(0, 16)}…`} />
+								<Row label={uiText("Sample SHA-256")} value={`${report.sampleSha256.slice(0, 16)}…`} />
 							</Box>
 
 							{!s.collisionControlUsable && (
-								<Text fontSize="xs" color="kk.textSecondary" mt="2">
-									The collision check is the positive control — the one test that proves the
-									detector works at all. At {(s.bytes / 1024).toFixed(0)} KB it expects{" "}
-									{s.expectedCollisions4.toFixed(2)} collisions, so finding none says nothing.
-									Re-run at a larger size to make it meaningful: past the first 64 KB the
-									device asks once, then streams unmetered while it holds no seed.
-								</Text>
+								<Text fontSize="xs" color="kk.textSecondary" mt="2">{uiText("The collision check is the positive control — the one test that proves the detector works at all. At")}{" "}{(s.bytes / 1024).toFixed(0)}{" "}{uiText("KB it expects")}{" "}
+									{s.expectedCollisions4.toFixed(2)}{" "}{uiText("collisions, so finding none says nothing. Re-run at a larger size to make it meaningful: past the first 64 KB the device asks once, then streams unmetered while it holds no seed.")}</Text>
 							)}
 						</Box>
 					)}
@@ -332,7 +315,7 @@ export function RngAuditPanel({
 					<Flex mt="5" gap="2" justify="flex-end">
 						{report?.verdict === "healthy" ? (
 							<>
-								<Button size="sm" variant="ghost" onClick={run}>Run again</Button>
+								<Button size="sm" variant="ghost" onClick={run}>{uiText("Run again")}</Button>
 								<Button
 									size="sm"
 									bg="var(--gold)"
@@ -340,13 +323,11 @@ export function RngAuditPanel({
 									fontWeight="600"
 									_hover={{ bg: "#D4BC6A" }}
 									onClick={onClose}
-								>
-									Continue
-								</Button>
+								>{uiText("Continue")}</Button>
 							</>
 						) : (
 							<>
-								<Button size="sm" variant="ghost" onClick={onClose} disabled={running}>Close</Button>
+								<Button size="sm" variant="ghost" onClick={onClose} disabled={running}>{uiText("Close")}</Button>
 								<Button
 									size="sm"
 									variant="outline"
@@ -355,7 +336,7 @@ export function RngAuditPanel({
 									onClick={run}
 									disabled={running}
 								>
-									{running ? "Running…" : report ? "Run again" : `Run ${label(SIZES[sizeIdx])} test`}
+									{running ? uiText("Running…") : report ? uiText("Run again") : `Run ${label(SIZES[sizeIdx])} test`}
 								</Button>
 							</>
 						)}

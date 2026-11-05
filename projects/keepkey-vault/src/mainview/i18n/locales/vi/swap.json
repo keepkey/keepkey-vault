@@ -159,14 +159,10 @@
 	"approvalWaiting": "Đang đợi phê duyệt được xác nhận…",
 	"approvalWaitingDesc": "Đang đợi phê duyệt được khai thác trước khi chúng tôi có thể ký giao dịch đổi.",
 	"balanceChanges": "Thay đổi số dư",
-	"blindSignBody": "Giao dịch đổi Solana dùng giao dịch có phiên bản mà KeepKey của bạn không thể giải mã đầy đủ, nên phải ký mù. Tính năng này tắt theo mặc định. Bật nó sẽ kích hoạt Chế độ nâng cao (ký mù) trên thiết bị — bạn sẽ được yêu cầu xác nhận thay đổi trên thiết bị.",
-	"blindSignCaveat": "Ký mù nghĩa là thiết bị hiển thị lời nhắc chung chung thay vì chi tiết đã giải mã. Chỉ tiếp tục với các giao dịch đổi bạn khởi tạo tại đây. Bạn có thể tắt lại trong Cài đặt thiết bị → Chính sách ký.",
 	"blindSignConfirmOnDevice": "Xác nhận trên thiết bị…",
 	"blindSignDeclined": "Đã từ chối trên thiết bị — ký mù chưa được bật.",
-	"blindSignEnable": "Bật ký mù",
 	"blindSignEnableFailed": "Không thể bật ký mù trên thiết bị.",
 	"blindSignHeader": "Ký mù",
-	"blindSignTitle": "Bật ký mù cho Solana",
 	"block": "Khối",
 	"cancelSwapDevice": "Hủy - giải phóng lời nhắc thiết bị",
 	"completed": "đã hoàn thành",
@@ -202,5 +198,9 @@
 	"youReceived": "Bạn đã nhận",
 	"exceedsSafeMax": "Để lại ~{{reserve}} {{symbol}} cho phí mạng — giảm số lượng hoặc nhấn TỐI ĐA.",
 	"sent": "Đã gửi",
-	"gas": "Gas"
+	"gas": "Gas",
+	"deviceBlindSignCaveat": "Ký mù vẫn được bật cho đến khi KeepKey bị khóa hoặc ngắt kết nối, áp dụng cho mọi ứng dụng sử dụng thiết bị, không chỉ giao dịch hoán đổi này. Khi bật, ứng dụng này cũng không hiển thị màn hình này trước những giao dịch đó nữa. Thiết bị yêu cầu bạn xác nhận và nhập lại mã PIN.",
+	"solanaOutflowDrain": "Cảnh báo: thao tác này sẽ làm rỗng ví của bạn. Đừng ký trừ khi đó là điều bạn muốn.",
+	"solanaOutflowCaveat": "Được mô phỏng với một nút Solana từ máy tính này. KeepKey không thể xác nhận các số liệu này.",
+	"deviceBlindSignEnable": "Bật ký mù"
 }

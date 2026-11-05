@@ -1,3 +1,5 @@
+import { getNumberLocale } from "../lib/number-locale"
+import { useUiTranslation } from "../i18n/ui"
 /**
  * SweepDialog — scans non-standard BTC derivation paths and recovers funds.
  *
@@ -37,7 +39,7 @@ interface ScanStatus {
 
 function formatSats(sats: number): string {
   if (sats >= 100_000_000) return (sats / 100_000_000).toFixed(8).replace(/0+$/, '').replace(/\.$/, '') + ' BTC'
-  return sats.toLocaleString() + ' sats'
+  return sats.toLocaleString(getNumberLocale()) + ' sats'
 }
 
 interface SweepDialogProps {
@@ -49,6 +51,8 @@ interface SweepDialogProps {
 }
 
 export function SweepDialog({ onClose, currentMaxAccountHint, refreshAccounts }: SweepDialogProps) {
+  const uiText = useUiTranslation()
+
   const [phase, setPhase] = useState<Phase>('idle')
   const [scanId, setScanId] = useState<string | null>(null)
   const [scanStatus, setScanStatus] = useState<ScanStatus | null>(null)
@@ -193,7 +197,7 @@ export function SweepDialog({ onClose, currentMaxAccountHint, refreshAccounts }:
               <path d="M14 6h4v4" />
               <path d="M18 2l4 4-4 4" />
             </svg>
-            <Text fontSize="lg" fontWeight="600" color="var(--teal)">BTC Sweep Scanner</Text>
+            <Text fontSize="lg" fontWeight="600" color="var(--teal)">{uiText("BTC Sweep Scanner")}</Text>
           </Flex>
           <Box as="button" onClick={handleClose} color="kk.textMuted" _hover={{ color: "white" }} p="1" opacity={busy ? 0.3 : 1} cursor={busy ? "not-allowed" : "pointer"}>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -205,23 +209,15 @@ export function SweepDialog({ onClose, currentMaxAccountHint, refreshAccounts }:
         {/* ── Idle ──────────────────────────────────────────────── */}
         {phase === 'idle' && (
           <VStack gap="4" align="stretch">
-            <Text fontSize="sm" color="kk.textSecondary" lineHeight="1.5">
-              Scans for BTC on non-standard derivation paths and higher accounts you haven't added yet.
-            </Text>
-            <Text fontSize="xs" color="kk.textMuted">
-              Checks account-level keys, mismatched script types, and standard paths up to account #9.
-              No funds will be moved without your confirmation.
-            </Text>
-            <Text fontSize="xs" color="kk.textMuted">
-              Currently tracking accounts 0{currentMaxAccountHint > 0 ? `–${currentMaxAccountHint}` : ''}.
+            <Text fontSize="sm" color="kk.textSecondary" lineHeight="1.5">{uiText("Scans for BTC on non-standard derivation paths and higher accounts you haven't added yet.")}</Text>
+            <Text fontSize="xs" color="kk.textMuted">{uiText("Checks account-level keys, mismatched script types, and standard paths up to account #9. No funds will be moved without your confirmation.")}</Text>
+            <Text fontSize="xs" color="kk.textMuted">{uiText("Currently tracking accounts 0")}{currentMaxAccountHint > 0 ? `–${currentMaxAccountHint}` : ''}.
             </Text>
             <Button
               size="md" bg="var(--teal)" color="black" fontWeight="600"
               _hover={{ bg: "#22c55e" }}
               onClick={startScan}
-            >
-              Start Scan
-            </Button>
+            >{uiText("Start Scan")}</Button>
           </VStack>
         )}
 
@@ -231,7 +227,7 @@ export function SweepDialog({ onClose, currentMaxAccountHint, refreshAccounts }:
             <Flex align="center" gap="3">
               <Spinner size="sm" color="var(--teal)" />
               <Text fontSize="sm" color="kk.textSecondary">
-                {scanStatus.progress.phase === 'deriving' ? 'Deriving addresses from device...' : 'Checking balances...'}
+                {scanStatus.progress.phase === 'deriving' ? uiText("Deriving addresses from device...") : uiText("Checking balances...")}
               </Text>
             </Flex>
             <Box bg="whiteAlpha.100" borderRadius="full" h="6px" overflow="hidden">
@@ -251,7 +247,7 @@ export function SweepDialog({ onClose, currentMaxAccountHint, refreshAccounts }:
         {phase === 'scanning' && !scanStatus && (
           <Flex align="center" gap="3" py="4">
             <Spinner size="sm" color="var(--teal)" />
-            <Text fontSize="sm" color="kk.textSecondary">Starting scan...</Text>
+            <Text fontSize="sm" color="kk.textSecondary">{uiText("Starting scan...")}</Text>
           </Flex>
         )}
 
@@ -265,9 +261,9 @@ export function SweepDialog({ onClose, currentMaxAccountHint, refreshAccounts }:
                     <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
                     <polyline points="22 4 12 14.01 9 11.01" />
                   </svg>
-                  <Text fontSize="sm" color="var(--teal)" fontWeight="500">All clear — no funds on non-standard paths or higher accounts</Text>
+                  <Text fontSize="sm" color="var(--teal)" fontWeight="500">{uiText("All clear — no funds on non-standard paths or higher accounts")}</Text>
                 </Flex>
-                <Button size="sm" variant="ghost" color="kk.textSecondary" onClick={handleClose}>Close</Button>
+                <Button size="sm" variant="ghost" color="kk.textSecondary" onClick={handleClose}>{uiText("Close")}</Button>
               </>
             )}
 
@@ -276,19 +272,16 @@ export function SweepDialog({ onClose, currentMaxAccountHint, refreshAccounts }:
               <Box>
                 <Box bg="rgba(74,222,128,0.08)" border="1px solid" borderColor="rgba(74,222,128,0.2)" borderRadius="lg" p="3" mb="2">
                   <Text fontSize="sm" fontWeight="600" color="var(--teal)">
-                    {formatSats(higherSats)} on {discoveredAccountIndices.length} undiscovered account{discoveredAccountIndices.length > 1 ? 's' : ''}
+                    {formatSats(higherSats)}{" "}{uiText("on")}{" "}{discoveredAccountIndices.length}{" "}{uiText("undiscovered account")}{discoveredAccountIndices.length > 1 ? 's' : ''}
                   </Text>
-                  <Text fontSize="xs" color="kk.textMuted" mt="1">
-                    Standard paths — will add account{discoveredAccountIndices.length > 1 ? 's' : ''} #{discoveredAccountIndices.join(', #')} to your wallet
-                  </Text>
+                  <Text fontSize="xs" color="kk.textMuted" mt="1">{uiText("Standard paths — will add account")}{discoveredAccountIndices.length > 1 ? 's' : ''} #{discoveredAccountIndices.join(', #')}{" "}{uiText("to your wallet")}</Text>
                 </Box>
 
                 <VStack gap="1.5" align="stretch" maxH="140px" overflow="auto" mb="2">
                   {higherAccounts.map((r, i) => (
                     <Box key={i} bg="whiteAlpha.50" borderRadius="md" px="3" py="1.5">
                       <Flex justify="space-between" align="center">
-                        <Text fontSize="xs" color="kk.textSecondary">
-                          Account #{r.accountIndex} · {r.scriptType}
+                        <Text fontSize="xs" color="kk.textSecondary">{uiText("Account #")}{r.accountIndex} · {r.scriptType}
                         </Text>
                         <Text fontSize="xs" fontWeight="600" color="var(--teal)">{formatSats(r.balanceSats)}</Text>
                       </Flex>
@@ -301,8 +294,7 @@ export function SweepDialog({ onClose, currentMaxAccountHint, refreshAccounts }:
                   size="sm" w="100%" bg="var(--teal)" color="black" fontWeight="600"
                   _hover={{ bg: "#22c55e" }}
                   onClick={handleAddAccounts}
-                >
-                  Add Account{discoveredAccountIndices.length > 1 ? 's' : ''} ({discoveredAccountIndices.map(i => `#${i}`).join(', ')})
+                >{uiText("Add Account")}{discoveredAccountIndices.length > 1 ? 's' : ''} ({discoveredAccountIndices.map(i => `#${i}`).join(', ')})
                 </Button>
               </Box>
             )}
@@ -317,11 +309,9 @@ export function SweepDialog({ onClose, currentMaxAccountHint, refreshAccounts }:
               <Box>
                 <Box bg="rgba(233,196,106,0.08)" border="1px solid" borderColor="rgba(233,196,106,0.2)" borderRadius="lg" p="3" mb="2">
                   <Text fontSize="sm" fontWeight="600" color="kk.gold">
-                    {formatSats(nonStandardSats)} on {nonStandard.length} non-standard path{nonStandard.length > 1 ? 's' : ''}
+                    {formatSats(nonStandardSats)}{" "}{uiText("on")}{" "}{nonStandard.length}{" "}{uiText("non-standard path")}{nonStandard.length > 1 ? 's' : ''}
                   </Text>
-                  <Text fontSize="xs" color="kk.textMuted" mt="1">
-                    Mismatched script types or account-level keys — will sweep to your standard address
-                  </Text>
+                  <Text fontSize="xs" color="kk.textMuted" mt="1">{uiText("Mismatched script types or account-level keys — will sweep to your standard address")}</Text>
                 </Box>
 
                 <VStack gap="1.5" align="stretch" maxH="140px" overflow="auto" mb="2">
@@ -334,7 +324,7 @@ export function SweepDialog({ onClose, currentMaxAccountHint, refreshAccounts }:
                         <Text fontSize="xs" fontWeight="600" color="kk.gold">{formatSats(r.balanceSats)}</Text>
                       </Flex>
                       <Text fontSize="10px" color="kk.textMuted">
-                        {r.path} as {r.scriptType} ({r.category === 'account-key' ? 'account key' : 'mismatch'}) — {r.utxoCount} UTXO{r.utxoCount !== 1 ? 's' : ''}
+                        {r.path}{" "}{uiText("as")}{" "}{r.scriptType} ({r.category === 'account-key' ? uiText("account key") : uiText("mismatch")}) — {r.utxoCount} UTXO{r.utxoCount !== 1 ? 's' : ''}
                       </Text>
                     </Box>
                   ))}
@@ -345,16 +335,12 @@ export function SweepDialog({ onClose, currentMaxAccountHint, refreshAccounts }:
                     flex="1" size="sm" variant="outline" borderColor="kk.border" color="kk.textSecondary"
                     _hover={{ borderColor: "kk.gold", color: "kk.gold" }}
                     onClick={() => executeSweep(true)}
-                  >
-                    Dry Run
-                  </Button>
+                  >{uiText("Dry Run")}</Button>
                   <Button
                     flex="1" size="sm" bg="kk.gold" color="black" fontWeight="600"
                     _hover={{ bg: "kk.goldHover" }}
                     onClick={() => executeSweep(false)}
-                  >
-                    Sweep to Standard Address
-                  </Button>
+                  >{uiText("Sweep to Standard Address")}</Button>
                 </Flex>
               </Box>
             )}
@@ -365,8 +351,7 @@ export function SweepDialog({ onClose, currentMaxAccountHint, refreshAccounts }:
         {phase === 'adding' && (
           <Flex align="center" gap="3" py="4">
             <Spinner size="sm" color="var(--teal)" />
-            <Text fontSize="sm" color="kk.textSecondary">
-              Adding account {accountsAdded + 1} of {accountsTarget}...
+            <Text fontSize="sm" color="kk.textSecondary">{uiText("Adding account")}{" "}{accountsAdded + 1}{" "}{uiText("of")}{" "}{accountsTarget}...
             </Text>
           </Flex>
         )}
@@ -375,7 +360,7 @@ export function SweepDialog({ onClose, currentMaxAccountHint, refreshAccounts }:
         {phase === 'sweeping' && (
           <Flex align="center" gap="3" py="4">
             <Spinner size="sm" color="kk.gold" />
-            <Text fontSize="sm" color="kk.textSecondary">Building & signing sweep transaction... confirm on device</Text>
+            <Text fontSize="sm" color="kk.textSecondary">{uiText("Building & signing sweep transaction... confirm on device")}</Text>
           </Flex>
         )}
 
@@ -385,21 +370,19 @@ export function SweepDialog({ onClose, currentMaxAccountHint, refreshAccounts }:
             {sweepResult ? (
               sweepResult.dryRun ? (
                 <>
-                  <Text fontSize="sm" fontWeight="600" color="var(--teal)">Dry Run Complete</Text>
+                  <Text fontSize="sm" fontWeight="600" color="var(--teal)">{uiText("Dry Run Complete")}</Text>
                   <Box bg="whiteAlpha.50" borderRadius="md" p="3">
                     <VStack gap="1" align="stretch">
-                      <Flex justify="space-between"><Text fontSize="xs" color="kk.textMuted">Inputs</Text><Text fontSize="xs">{sweepResult.inputCount}</Text></Flex>
-                      <Flex justify="space-between"><Text fontSize="xs" color="kk.textMuted">Total</Text><Text fontSize="xs">{formatSats(sweepResult.totalSweptSats)}</Text></Flex>
-                      <Flex justify="space-between"><Text fontSize="xs" color="kk.textMuted">Fee</Text><Text fontSize="xs">{formatSats(sweepResult.fee)}</Text></Flex>
-                      <Flex justify="space-between"><Text fontSize="xs" color="kk.textMuted">Output</Text><Text fontSize="xs" fontWeight="600" color="kk.gold">{formatSats(sweepResult.outputSats)}</Text></Flex>
-                      <Flex justify="space-between"><Text fontSize="xs" color="kk.textMuted">To</Text><Text fontSize="xs" fontFamily="mono" truncate maxW="240px">{sweepResult.destination}</Text></Flex>
+                      <Flex justify="space-between"><Text fontSize="xs" color="kk.textMuted">{uiText("Inputs")}</Text><Text fontSize="xs">{sweepResult.inputCount}</Text></Flex>
+                      <Flex justify="space-between"><Text fontSize="xs" color="kk.textMuted">{uiText("Total")}</Text><Text fontSize="xs">{formatSats(sweepResult.totalSweptSats)}</Text></Flex>
+                      <Flex justify="space-between"><Text fontSize="xs" color="kk.textMuted">{uiText("Fee")}</Text><Text fontSize="xs">{formatSats(sweepResult.fee)}</Text></Flex>
+                      <Flex justify="space-between"><Text fontSize="xs" color="kk.textMuted">{uiText("Output")}</Text><Text fontSize="xs" fontWeight="600" color="kk.gold">{formatSats(sweepResult.outputSats)}</Text></Flex>
+                      <Flex justify="space-between"><Text fontSize="xs" color="kk.textMuted">{uiText("To")}</Text><Text fontSize="xs" fontFamily="mono" truncate maxW="240px">{sweepResult.destination}</Text></Flex>
                     </VStack>
                   </Box>
                   <Flex gap="2">
-                    <Button flex="1" size="sm" variant="ghost" color="kk.textSecondary" onClick={() => setPhase('results')}>Back</Button>
-                    <Button flex="1" size="sm" bg="kk.gold" color="black" fontWeight="600" _hover={{ bg: "kk.goldHover" }} onClick={() => executeSweep(false)}>
-                      Confirm & Broadcast
-                    </Button>
+                    <Button flex="1" size="sm" variant="ghost" color="kk.textSecondary" onClick={() => setPhase('results')}>{uiText("Back")}</Button>
+                    <Button flex="1" size="sm" bg="kk.gold" color="black" fontWeight="600" _hover={{ bg: "kk.goldHover" }} onClick={() => executeSweep(false)}>{uiText("Confirm & Broadcast")}</Button>
                   </Flex>
                 </>
               ) : (
@@ -409,17 +392,17 @@ export function SweepDialog({ onClose, currentMaxAccountHint, refreshAccounts }:
                       <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
                       <polyline points="22 4 12 14.01 9 11.01" />
                     </svg>
-                    <Text fontSize="sm" fontWeight="600" color="var(--teal)">Sweep Broadcast</Text>
+                    <Text fontSize="sm" fontWeight="600" color="var(--teal)">{uiText("Sweep Broadcast")}</Text>
                   </Flex>
                   <Box bg="whiteAlpha.50" borderRadius="md" p="3">
                     <VStack gap="1" align="stretch">
-                      <Flex justify="space-between"><Text fontSize="xs" color="kk.textMuted">Swept</Text><Text fontSize="xs" fontWeight="600" color="kk.gold">{formatSats(sweepResult.outputSats)}</Text></Flex>
-                      <Flex justify="space-between"><Text fontSize="xs" color="kk.textMuted">Fee</Text><Text fontSize="xs">{formatSats(sweepResult.fee)}</Text></Flex>
+                      <Flex justify="space-between"><Text fontSize="xs" color="kk.textMuted">{uiText("Swept")}</Text><Text fontSize="xs" fontWeight="600" color="kk.gold">{formatSats(sweepResult.outputSats)}</Text></Flex>
+                      <Flex justify="space-between"><Text fontSize="xs" color="kk.textMuted">{uiText("Fee")}</Text><Text fontSize="xs">{formatSats(sweepResult.fee)}</Text></Flex>
                       <Text fontSize="xs" color="kk.textMuted" mt="1">TXID:</Text>
                       <Text fontSize="10px" fontFamily="mono" color="kk.textSecondary" wordBreak="break-all">{sweepResult.txid}</Text>
                     </VStack>
                   </Box>
-                  <Button size="sm" variant="ghost" color="kk.textSecondary" onClick={handleClose}>Close</Button>
+                  <Button size="sm" variant="ghost" color="kk.textSecondary" onClick={handleClose}>{uiText("Close")}</Button>
                 </>
               )
             ) : (
@@ -430,15 +413,11 @@ export function SweepDialog({ onClose, currentMaxAccountHint, refreshAccounts }:
                     <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
                     <polyline points="22 4 12 14.01 9 11.01" />
                   </svg>
-                  <Text fontSize="sm" fontWeight="600" color="var(--teal)">
-                    Added {accountsAdded} account{accountsAdded > 1 ? 's' : ''}
+                  <Text fontSize="sm" fontWeight="600" color="var(--teal)">{uiText("Added")}{" "}{accountsAdded}{" "}{uiText("account")}{accountsAdded > 1 ? 's' : ''}
                   </Text>
                 </Flex>
-                <Text fontSize="xs" color="kk.textMuted">
-                  Your wallet now tracks accounts up to #{maxDiscoveredAccount}.
-                  Balances will appear after the next refresh.
-                </Text>
-                <Button size="sm" variant="ghost" color="kk.textSecondary" onClick={handleClose}>Close</Button>
+                <Text fontSize="xs" color="kk.textMuted">{uiText("Your wallet now tracks accounts up to #")}{maxDiscoveredAccount}{uiText(". Balances will appear after the next refresh.")}</Text>
+                <Button size="sm" variant="ghost" color="kk.textSecondary" onClick={handleClose}>{uiText("Close")}</Button>
               </>
             )}
           </VStack>
@@ -447,10 +426,10 @@ export function SweepDialog({ onClose, currentMaxAccountHint, refreshAccounts }:
         {/* ── Error ─────────────────────────────────────────────── */}
         {phase === 'error' && (
           <VStack gap="3" align="stretch">
-            <Text fontSize="sm" color="red.400">{error || 'An error occurred'}</Text>
+            <Text fontSize="sm" color="red.400">{error || uiText("An error occurred")}</Text>
             <Flex gap="2">
-              <Button flex="1" size="sm" variant="ghost" color="kk.textSecondary" onClick={handleClose}>Close</Button>
-              <Button flex="1" size="sm" variant="outline" borderColor="kk.border" color="var(--teal)" onClick={startScan}>Retry</Button>
+              <Button flex="1" size="sm" variant="ghost" color="kk.textSecondary" onClick={handleClose}>{uiText("Close")}</Button>
+              <Button flex="1" size="sm" variant="outline" borderColor="kk.border" color="var(--teal)" onClick={startScan}>{uiText("Retry")}</Button>
             </Flex>
           </VStack>
         )}

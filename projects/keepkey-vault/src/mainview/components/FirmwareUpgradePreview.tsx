@@ -1,3 +1,4 @@
+import { useUiTranslation } from "../i18n/ui"
 /**
  * FirmwareUpgradePreview — shows users what new features they'll unlock
  * by upgrading firmware. Animated chain logos, feature cards, and a
@@ -70,6 +71,8 @@ interface Props {
 }
 
 export function FirmwareUpgradePreview({ currentVersion, targetVersion, isBitcoinOnly }: Props) {
+  const uiText = useUiTranslation()
+
   const [visible, setVisible] = useState(false)
 
   useEffect(() => {
@@ -162,9 +165,7 @@ export function FirmwareUpgradePreview({ currentVersion, targetVersion, isBitcoi
               letterSpacing="0.15em"
               color="whiteAlpha.500"
               mb={1}
-            >
-              What's New
-            </Text>
+            >{uiText("What's New")}</Text>
 
             {/* Headline */}
             <Text
@@ -176,7 +177,7 @@ export function FirmwareUpgradePreview({ currentVersion, targetVersion, isBitcoi
                 animation: visible ? 'fw-fade-up 0.6s cubic-bezier(0.16, 1, 0.3, 1) 0.15s both' : undefined,
               }}
             >
-              {isBitcoinOnly ? 'Bitcoin-only firmware' : (versionInfo?.headline || `Firmware v${targetVersion}`)}
+              {isBitcoinOnly ? uiText("Bitcoin-only firmware") : (versionInfo?.headline || `Firmware v${targetVersion}`)}
             </Text>
           </Box>
 
@@ -287,6 +288,8 @@ export function FirmwareUpgradePreview({ currentVersion, targetVersion, isBitcoi
 // ── Feature card ────────────────────────────────────────────────────
 
 function FeatureCard({ feature, index, visible }: { feature: FirmwareFeature; index: number; visible: boolean }) {
+  const uiText = useUiTranslation()
+
   const color = feature.color || 'var(--gold)'
 
   // Resolve chain logos for this feature
@@ -397,9 +400,7 @@ function FeatureCard({ feature, index, visible }: { feature: FirmwareFeature; in
                 borderColor="purple.700"
                 lineHeight="1"
                 whiteSpace="nowrap"
-              >
-                Coming Soon
-              </Box>
+              >{uiText("Coming Soon")}</Box>
             )}
           </HStack>
           <Text fontSize="xs" color="whiteAlpha.600" lineHeight="1.4">
