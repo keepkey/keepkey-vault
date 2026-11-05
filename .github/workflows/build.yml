@@ -19,7 +19,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  BUN_VERSION: '1.3.5'
+  BUN_VERSION: '1.3.14'
   NODE_VERSION: '20'
   EMU_RELEASE_VERSION: '7.17.0'
   EMU_SOURCE_RUN_ID: '38171975676'
@@ -233,11 +233,28 @@ jobs:
           cargo build --release
           file target/release/zcash-cli
 
+      - name: Verify and build Monero CLI sidecar
+        shell: bash
+        run: |
+          cd projects/keepkey-vault
+          python3 monero-cli/prepare.py
+          bun run monero:build
+          bun run monero:test
+
       - name: Build unsigned app (CI mode)
         env:
           CI: 'true'
         run: cd projects/keepkey-vault && bun run build:stable
         shell: bash
+
+      - name: Smoke-test packaged Monero tools without developer overrides
+        shell: bash
+        run: |
+          MONERO_METADATA=$(find "$PWD/projects/keepkey-vault/_build" -path '*/monero-tools/monero-tools.json' -type f | head -1)
+          test -n "$MONERO_METADATA"
+          MONERO_APP_DIR=$(dirname "$(dirname "$MONERO_METADATA")")
+          cd projects/keepkey-vault
+          bun monero-cli/package-smoke.ts --app-dir="$MONERO_APP_DIR"
 
       - name: Stage Windows emulator build input
         if: runner.os == 'macOS'
@@ -347,6 +364,19 @@ jobs:
 
           APP=$(find "$WORK" -name "*.app" -maxdepth 1 | head -1)
           if [ -z "$APP" ]; then echo "::error::No .app found after extraction"; exit 1; fi
+
+          # Monero ships a matching worker and official wallet RPC on Intel.
+          (
+            cd projects/keepkey-vault
+            python3 monero-cli/prepare.py --platform darwin-x64
+            bun monero-cli/build.ts --platform=darwin-x64
+          )
+          cp projects/keepkey-vault/monero-cli/dist/monero-cli "$APP/Contents/Resources/app/monero-cli"
+          cp projects/keepkey-vault/monero-cli/vendor/darwin-x64/monero-wallet-rpc "$APP/Contents/Resources/app/monero-tools/monero-wallet-rpc"
+          cp projects/keepkey-vault/monero-cli/vendor/darwin-x64/monero-tools.json "$APP/Contents/Resources/app/monero-tools/monero-tools.json"
+          cp projects/keepkey-vault/monero-cli/vendor/darwin-x64/LICENSE "$APP/Contents/Resources/app/monero-tools/LICENSE"
+          test "$(lipo -archs "$APP/Contents/Resources/app/monero-cli")" = x86_64
+          test "$(lipo -archs "$APP/Contents/Resources/app/monero-tools/monero-wallet-rpc")" = x86_64
 
           # Swap Electrobun runtime binaries with x64 versions
           echo "Swapping Electrobun binaries for x86_64..."

@@ -17,6 +17,22 @@ const emulatorCopy = emulatorSource && existsSync(emulatorSource)
 	? { [emulatorSource]: `emulator/${emulatorSource.split('/').pop()}` }
 	: {};
 
+const moneroPlatform = `${process.platform}-${process.arch}`;
+const moneroSidecar = isWindows ? "monero-cli.exe" : "monero-cli";
+const moneroRpc = isWindows ? "monero-wallet-rpc.exe" : "monero-wallet-rpc";
+const moneroVendor = `monero-cli/vendor/${moneroPlatform}`;
+const moneroCliSource = process.env.KEEPKEY_MONERO_CLI_SOURCE || `monero-cli/dist/${moneroSidecar}`;
+const moneroRpcSource = process.env.KEEPKEY_MONERO_RPC_SOURCE || `${moneroVendor}/${moneroRpc}`;
+const moneroMetadataSource = process.env.KEEPKEY_MONERO_METADATA_SOURCE || `${moneroVendor}/monero-tools.json`;
+const moneroCopy = existsSync(moneroCliSource) && existsSync(moneroRpcSource)
+    ? { [moneroCliSource]: moneroSidecar,
+        [moneroRpcSource]: `monero-tools/${moneroRpc}`,
+        [moneroMetadataSource]: "monero-tools/monero-tools.json",
+        [`${moneroVendor}/LICENSE`]: "monero-tools/LICENSE" } : {};
+const moneroEmulatorCopy = process.env.KEEPKEY_INCLUDE_MONERO_EMULATOR === '1' && existsSync("monero-emulator-bundle/libkkemu-monero.dylib")
+    ? { "monero-emulator-bundle/manifest.json": "monero-emulator/manifest.json",
+        "monero-emulator-bundle/libkkemu-monero.dylib": "monero-emulator/libkkemu-monero.dylib" } : {};
+
 export default {
 	app: {
 		name: "keepkey-vault",
@@ -64,6 +80,8 @@ export default {
 			// Release builds preflight this file before Electrobun runs. Keeping the
 			// config conditional preserves emulator-free developer builds on Linux.
 			...emulatorCopy,
+			...moneroCopy,
+			...moneroEmulatorCopy,
 			// Zcash privacy engine sidecar (Rust binary -- .exe on Windows)
 			[isWindows ? "zcash-cli/target/release/zcash-cli.exe" : "zcash-cli/target/release/zcash-cli"]: isWindows ? "zcash-cli.exe" : "zcash-cli",
 		},

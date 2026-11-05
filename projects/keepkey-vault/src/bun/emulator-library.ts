@@ -3,6 +3,8 @@ import { homedir } from 'os'
 import { join, resolve } from 'path'
 import { dlopen, FFIType } from 'bun:ffi'
 import { secp256k1 } from '@noble/curves/secp256k1'
+import { bundledMoneroEmulatorBuild } from './monero-emulator'
+export { setMoneroEmulatorEnabled } from './monero-emulator'
 
 type SupportedPlatform = 'darwin' | 'win32' | 'linux'
 
@@ -48,17 +50,22 @@ export function recordEmulatorBuildVersion(id: string, version: string, home = h
   writeFileSync(join(emulatorBuildDir(home), `${id}.version`), `${version}\n`, { mode: 0o600 })
 }
 
-export function listEmulatorBuilds(platform: SupportedPlatform = process.platform as SupportedPlatform, home = homedir()): Array<{ id: string; path: string; selected: boolean; version?: string }> {
+export function listEmulatorBuilds(platform: SupportedPlatform = process.platform as SupportedPlatform, home = homedir(), options: {
+  importDir?: string; cwd?: string; arch?: string; moneroEnabled?: boolean
+} = {}): Array<{ id: string; path: string; selected: boolean; version?: string; label?: string; research?: boolean; monero?: boolean }> {
   const dir = emulatorBuildDir(home)
-  if (!existsSync(dir)) return []
   const suffix = `-${emulatorLibFilename(platform)}`
   const selected = selectedEmulatorBuild(home)
-  return readdirSync(dir).filter(name => name.endsWith(suffix) && /^[a-f0-9]{64}-/.test(name)).map(name => {
+  const research = bundledMoneroEmulatorBuild({ importDir: options.importDir ?? import.meta.dir,
+    cwd: options.cwd, platform, arch: options.arch, enabled: options.moneroEnabled, selectedId: selected })
+  const installed = (existsSync(dir) ? readdirSync(dir) : []).filter(name => name.endsWith(suffix) && /^[a-f0-9]{64}-/.test(name)).map(name => {
     const id = name.slice(0, 64)
     let version: string | undefined
     try { version = readFileSync(join(dir, `${id}.version`), 'utf8').trim() } catch {}
     return { id, path: join(dir, name), selected: id === selected, version }
-  }).sort((a, b) => a.id.localeCompare(b.id))
+  })
+  return [...installed.filter(build => build.id !== research?.id), ...(research ? [research] : [])]
+    .sort((a, b) => a.id.localeCompare(b.id))
 }
 
 export function emulatorLibFilename(platform: SupportedPlatform = process.platform as SupportedPlatform): string {
@@ -99,11 +106,16 @@ export function resolveEmulatorLibPath(options: {
   home?: string
   platform?: SupportedPlatform
   exists?: (path: string) => boolean
+  moneroEnabled?: boolean
+  arch?: string
 }): string | null {
   const platform = options.platform ?? process.platform as SupportedPlatform
   const exists = options.exists ?? existsSync
   const selected = selectedEmulatorBuild(options.home ?? homedir())
   if (selected) {
+    const research = bundledMoneroEmulatorBuild({ importDir: options.importDir,
+      cwd: options.cwd, platform, arch: options.arch, enabled: options.moneroEnabled, selectedId: selected })
+    if (research?.id === selected) return research.path
     const path = emulatorBuildPath(selected, platform, options.home ?? homedir())
     return exists(path) ? path : null
   }

@@ -261,6 +261,10 @@ import { buildTx, broadcastTx, canonicalizeTronTokenCaip } from "./txbuilder"
 import { buildCosmosStakingTx, buildCosmosNameRegTx } from "./txbuilder/cosmos"
 import { initializeOrchardFromDevice, exportOrchardFvk, scanOrchardNotes, getShieldedBalance, sendShielded, ensureFvkLoaded, displayOrchardAddressOnDevice, setFvkDiskAllowed } from "./txbuilder/zcash-shielded"
 import { inFlightShielded, type ExpectedShielded } from "../shared/zcash-pending"
+import { setMoneroEmulatorEnabled } from "./emulator-library"
+import { createMoneroVault } from "./monero-vault"
+import { startMoneroSidecar, stopMoneroSidecar } from "./monero-sidecar"
+import { validateMoneroNode } from "./monero-settings"
 import { findZcashCliBinary, isSidecarReady, startSidecar, stopSidecar, wipeSidecarWalletDb, hasFvkLoaded, getCachedFvk, onScanProgress, getScanState, updateSyncedTo, beginZcashSend, endZcashSend, isZcashSendInFlight } from "./zcash-sidecar"
 import { CHAINS, customChainToChainDef, isChainSupported, hiveRolePath, btcTaprootSupported, findChainByNetwork } from "../shared/chains"
 import { versionCompare } from "../shared/firmware-versions"
@@ -1190,6 +1194,9 @@ async function requestSigningApprovalDecision(id: string) {
 // Settings loaded lazily after DB init — defaults used until then
 let restApiEnabled = false
 let walletConnectEnabled = false
+let moneroEnabled = false
+let moneroWallet: ReturnType<typeof createMoneroVault> | null = null
+let moneroSession: unknown = null
 let zcashPrivacyEnabled = false
 let hiveEnabled = false
 // Networks the user turned off (network picker). Off = not derived, not
@@ -1247,6 +1254,8 @@ function requireOnline(operation: string): void {
 }
 
 function loadSettings() {
+	moneroEnabled = getSetting('monero_enabled') === '1'
+	setMoneroEmulatorEnabled(moneroEnabled)
 	restApiEnabled = getSetting('rest_api_enabled') === '1'
 	walletConnectEnabled = getSetting('walletconnect_enabled') === '1'
 	const storedZcashPrivacyEnabled = getSetting('zcash_privacy_enabled') === '1'
@@ -1627,6 +1636,9 @@ function getAppSettings() {
 		numberLocale: getSetting('number_locale') || 'en-US',
 		walletConnectEnabled,
 		btcMultisigEnabled:multisigFeature.enabled,
+		moneroEnabled,
+		moneroDaemonUrl: getSetting('monero_daemon_url') || 'https://xmr.triplebit.org',
+		moneroRestoreHeight: Number(getSetting('monero_restore_height') || 0),
 		zcashPrivacyEnabled,
 		hiveEnabled,
 		emulatorEnabled,
@@ -2110,6 +2122,20 @@ const swapQuoteLeases = createSwapQuoteLeases()
 async function emuConfirmOp(fn: () => Promise<any>, _confirmCount = 2): Promise<any> {
 	const { emuGatedConfirm } = await import('./emulator-window')
 	return emuGatedConfirm(fn, engine.emuDelegate, { interactive: false })
+}
+
+function getMoneroWallet() {
+    if (!moneroWallet) moneroWallet = createMoneroVault({
+        engine, confirm: emuSigningOp,
+        getConfig: () => ({ enabled: moneroEnabled, offline: offlineMode,
+            daemonUrl: getSetting('monero_daemon_url') || 'https://xmr.triplebit.org',
+            restoreHeight: Number(getSetting('monero_restore_height') || 0) }),
+    })
+    return moneroWallet
+}
+function invalidateMoneroWallet() {
+    moneroWallet?.invalidate()
+    moneroSession = null
 }
 
 // ── Emulator interactive signing helper ─────────────────────────────
@@ -8036,6 +8062,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				setSetting('offline_mode', params.enabled ? '1' : '0')
 				if (getSetting('offline_mode') !== (params.enabled ? '1' : '0')) throw new Error('Could not save offline mode. Try again.')
 				offlineMode = params.enabled
+				if (offlineMode) { invalidateMoneroWallet(); stopMoneroSidecar() }
 				setBtcBackendOffline(offlineMode)
 				setPioneerOffline(offlineMode)
 				setPerfTelemetryOffline(offlineMode)
@@ -8051,6 +8078,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					loadSupportedChains(getPioneerApiBase()).catch(() => { /* static fallback handles it */ })
 					initSwapTrackerIfAllowed().catch((e) => console.warn('[swap-tracker] Reconnect init failed:', e.message || e))
 				}
+				if (!offlineMode && moneroEnabled) startMoneroSidecar().catch(() => console.warn('[monero] Sidecar could not resume monitoring'))
 				console.log('[settings] Offline (airplane) mode:', params.enabled)
 				return getAppSettings()
 			},
@@ -9858,6 +9886,27 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			// Reads return a safe stopped/empty state so any UI path that still
 			// polls (e.g. during a toggle transition) renders nothing rather than
 			// a toast-worthy error.
+            moneroGetStatus: async () => getMoneroWallet().getStatus(),
+            moneroConnect: async () => getMoneroWallet().connect({}),
+            moneroGetAddress: async (params) => getMoneroWallet().getAddress(params),
+            setMoneroEnabled: async ({ enabled }) => {
+                if (typeof enabled !== 'boolean') throw new Error('Monero requires an enabled boolean')
+                if (enabled && offlineMode) throw new Error('Turn off offline mode before enabling Monero')
+                if (enabled) await startMoneroSidecar()
+                else { invalidateMoneroWallet(); stopMoneroSidecar() }
+                moneroEnabled = enabled
+                setMoneroEmulatorEnabled(enabled)
+                setSetting('monero_enabled', enabled ? '1' : '0')
+                return getAppSettings()
+            },
+            setMoneroNode: async (params) => {
+                const node = validateMoneroNode(params)
+                invalidateMoneroWallet()
+                setSetting('monero_daemon_url', node.daemonUrl)
+                setSetting('monero_restore_height', String(node.restoreHeight))
+                if (moneroEnabled && !offlineMode) await startMoneroSidecar()
+                return getAppSettings()
+            },
 			emulatorPair: async () => {
 				if (!emulatorEnabled) throw new Error('Emulator is disabled')
 				const { pairEmulator, getEmulatorStatus } = await import('./emulator')
@@ -10604,6 +10653,10 @@ function startPioneerSocketIfAllowed(): void {
 
 // Push engine events to WebView
 engine.on('state-change', (state) => {
+	if (state.state !== 'ready' || moneroSession !== engine.wallet) {
+		invalidateMoneroWallet()
+		moneroSession = state.state === 'ready' ? engine.wallet : null
+	}
 	try { rpc.send['device-state'](state) } catch { /* webview not ready yet */ }
 	// The Studio provider key belongs to the device it was derived with.
 	providerKeySession.onDeviceState(state)
@@ -10803,6 +10856,7 @@ engine.on('wallet-scope-ready', ({ deviceId, seedAddress }) => {
 // Reset in-memory address managers so they re-derive from the new seed.
 // Don't wipe DB — let the fresh Pioneer fetch naturally overwrite stale entries.
 engine.on('seed-changed', ({ deviceId, oldAddress, newAddress }) => {
+	invalidateMoneroWallet()
 	console.warn(`[Vault] SEED CHANGED on ${deviceId}: ${oldAddress?.slice(0, 10)} → ${newAddress?.slice(0, 10)}`)
 	resetSeedManagers()
 	clearSessionActivity()
@@ -11276,6 +11330,7 @@ let quitting = false
 function cleanupAndQuit() {
 	if (quitting) return
 	quitting = true
+	stopMoneroSidecar()
 	// Zero the Studio provider key: the window (and its close effect) is going away.
 	try { providerKeySession.clear() } catch { /* nothing to zero */ }
 
@@ -11340,4 +11395,7 @@ if (zcashPrivacyEnabled) {
 }
 
 perf('boot complete')
+if (moneroEnabled && !offlineMode) {
+    startMoneroSidecar().catch(error => console.error('[monero] Sidecar startup failed:', error.message))
+}
 console.log("KeepKey Vault started!")

@@ -1,3 +1,4 @@
+import type { MoneroStatus } from './types'
 import type { MultisigPolicyPreview,MultisigCosignerExport,BtcPsbtSigned } from "./multisig-policy"
 import type { ElectrobunRPCSchema } from 'electrobun/bun'
 import type { ZcashShieldedBalance } from './zcash-privacy'
@@ -456,6 +457,11 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       auditInspectPath: { params: { chainId: string; addressNList: number[]; scriptType?: string }; response: AuditInspectResult }
 
       // ── Emulator (macOS only — Keychain-encrypted flash) ────────────
+      moneroGetStatus: { params: Record<string, never>; response: MoneroStatus }
+      moneroConnect: { params: Record<string, never>; response: MoneroStatus }
+      moneroGetAddress: { params: { showDisplay: boolean }; response: { address: string; network: 'mainnet'; displayed: boolean } }
+      setMoneroEnabled: { params: { enabled: boolean }; response: AppSettings }
+      setMoneroNode: { params: { daemonUrl: string; restoreHeight: number }; response: AppSettings }
       emulatorPair: { params: void; response: EmulatorStatus }
       emulatorInit: { params: { flashName?: string } | void; response: EmulatorStatus }
       emulatorStop: { params: void; response: EmulatorStatus }

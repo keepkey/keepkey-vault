@@ -10,7 +10,7 @@ import shapeshiftIcon from "../assets/apps/shapeshift.png"
 import { NAV_HEIGHT } from "../layout"
 import { WalletSelector } from "./WalletSelector"
 
-export type NavTab = "vault" | "shapeshift" | "explore" | "addresses"
+export type NavTab = "vault" | "shapeshift" | "explore" | "addresses" | "monero"
 
 interface TopNavProps {
 	label?: string
@@ -20,6 +20,7 @@ interface TopNavProps {
 	needsFirmwareUpdate?: boolean
 	latestFirmware?: string
 	isEmulator?: boolean
+	moneroEnabled?: boolean
 	onSettingsToggle: () => void
 	onMobileToggle?: () => void
 	onWalletConnectToggle?: () => void
@@ -142,6 +143,7 @@ export function TopNav({
 	needsFirmwareUpdate,
 	latestFirmware,
 	isEmulator,
+	moneroEnabled,
 	onSettingsToggle,
 	onMobileToggle,
 	onWalletConnectToggle,
@@ -214,6 +216,8 @@ export function TopNav({
 			icon: <Image src={shapeshiftIcon} alt="ShapeShift" w="14px" h="14px" borderRadius="3px" />,
 		},
 	]
+
+	if (moneroEnabled && !watchOnly && !isBitcoinOnly) TAB_DEFS.splice(2, 0, { id: "monero", label: "Monero", icon: <Text fontSize="14px" color="#ff7a26">ɱ</Text> })
 
 	const dotColor = connected ? "var(--teal)" : "var(--text-3)"
 	const logoGlow = passphraseActive ? 'signing' : connected ? 'connected' : 'idle'

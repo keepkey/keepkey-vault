@@ -687,6 +687,7 @@ interface DashboardProps {
 	/** When in watchOnly mode, load cached data for this specific device (defaults to latest) */
 	watchOnlyDeviceId?: string
 	onOpenSettings?: () => void
+	onOpenMonero?: () => void
 	firmwareVersion?: string
 	/** Device firmware variant — when bitcoin-only, the chain list is restricted to Bitcoin */
 	firmwareVariant?: string
@@ -715,7 +716,7 @@ function formatTimeAgo(ts: number, t: (key: string, opts?: Record<string, unknow
 	return t('timeDaysAgo', { count: days })
 }
 
-export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettings, firmwareVersion, firmwareVariant, forceRefresh, onForceRefreshConsumed, isHiddenWallet, knownEmpty }: DashboardProps) {
+export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettings, onOpenMonero, firmwareVersion, firmwareVariant, forceRefresh, onForceRefreshConsumed, isHiddenWallet, knownEmpty }: DashboardProps) {
 	const { t } = useTranslation("dashboard")
 	const [selectedChain, setSelectedChain] = useState<ChainDef | null>(null)
 	const [selectedChainAction, setSelectedChainAction] = useState<"send" | "receive" | "swap" | "privacy" | undefined>(undefined)
@@ -782,6 +783,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 	const [showAudit, setShowAudit] = useState(false)
 	const [showBip85, setShowBip85] = useState(false)
 	const [zcashEnabled, setZcashEnabled] = useState(false)
+	const [moneroEnabled, setMoneroEnabled] = useState(false)
 	const [hiveEnabled, setHiveEnabled] = useState(false)
 	// Networks turned off in the network picker: not loaded, not shown, not totalled.
 	const [disabledNetworks, setDisabledNetworks] = useState<string[]>([])
@@ -964,6 +966,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 		rpcRequest<AppSettings>('getAppSettings', undefined, 5000)
 			.then(s => {
 				setZcashEnabled(s.zcashPrivacyEnabled)
+				setMoneroEnabled(s.moneroEnabled)
 				setHiveEnabled(s.hiveEnabled)
 				setDisabledNetworks(s.disabledNetworks)
 				setPassphraseIntroSeen(s.passphraseIntroShown)
@@ -1846,6 +1849,12 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 						},
 					}}
 				>
+                    {moneroEnabled && !watchOnly && onOpenMonero && !isBitcoinOnlyVariant(firmwareVariant) && (
+                        <Button onClick={onOpenMonero} variant="ghost" w="100%" justifyContent="start" mb="2" color="var(--text-0)">
+                            <Text color="#ff7a26" fontSize="22px" mr="2">ɱ</Text>
+                            <Box textAlign="left"><Text fontSize="14px">Monero · XMR</Text><Text fontSize="11px" color="var(--text-2)">Receive &amp; balances</Text></Box>
+                        </Button>
+                    )}
 					{/* "All Chains" reset row */}
 					<Box
 						as="button"
