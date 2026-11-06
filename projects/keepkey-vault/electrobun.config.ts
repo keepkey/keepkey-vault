@@ -29,9 +29,19 @@ const moneroCopy = existsSync(moneroCliSource) && existsSync(moneroRpcSource)
         [moneroRpcSource]: `monero-tools/${moneroRpc}`,
         [moneroMetadataSource]: "monero-tools/monero-tools.json",
         [`${moneroVendor}/LICENSE`]: "monero-tools/LICENSE" } : {};
-const moneroEmulatorCopy = process.env.KEEPKEY_INCLUDE_MONERO_EMULATOR === '1' && existsSync("monero-emulator-bundle/libkkemu-monero.dylib")
-    ? { "monero-emulator-bundle/manifest.json": "monero-emulator/manifest.json",
-        "monero-emulator-bundle/libkkemu-monero.dylib": "monero-emulator/libkkemu-monero.dylib" } : {};
+// Development-only research artifacts (build-signed.ts refuses this flag): the receive-only and/or
+// signing emulator builds, and the research signing adapter pinned in monero-tools.json.
+const includeMoneroResearch = process.env.KEEPKEY_INCLUDE_MONERO_EMULATOR === '1';
+const moneroEmulatorCopy = {
+    ...(includeMoneroResearch && existsSync("monero-emulator-bundle/libkkemu-monero.dylib")
+        ? { "monero-emulator-bundle/manifest.json": "monero-emulator/manifest.json",
+            "monero-emulator-bundle/libkkemu-monero.dylib": "monero-emulator/libkkemu-monero.dylib" } : {}),
+    ...(includeMoneroResearch && existsSync("monero-emulator-bundle/libkkemu-monero-signing.dylib")
+        ? { "monero-emulator-bundle/signing-manifest.json": "monero-emulator/signing-manifest.json",
+            "monero-emulator-bundle/libkkemu-monero-signing.dylib": "monero-emulator/libkkemu-monero-signing.dylib" } : {}),
+    ...(includeMoneroResearch && existsSync(`${moneroVendor}/monero-host-adapter`)
+        ? { [`${moneroVendor}/monero-host-adapter`]: "monero-tools/monero-host-adapter" } : {}),
+};
 
 export default {
 	app: {

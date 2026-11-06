@@ -63,6 +63,9 @@ export function getRuntimeDylibPath(): string | null {
 let ffi: ReturnType<typeof dlopen> | null = null
 /** The loaded library reads KK_CLEARSIGN_TEST_ROOT (see libraryReadsClearSignTestRoot). */
 let readsTestRoot = false
+/** Path of the library behind `ffi`, so callers can tell which verified build is running. */
+let loadedDylibPath: string | null = null
+export function getLoadedEmulatorLibPath(): string | null { return ffi ? loadedDylibPath : null }
 
 /** Whether the running emulator library reads a ClearSign test root. */
 export function emulatorReadsClearSignTestRoot(): boolean {
@@ -169,6 +172,7 @@ export function initEmulator(flashName = 'default'): EmulatorStatus {
 
     console.log(`${TAG} Loading dylib: ${dylibPath}`)
     ffi = loadDylib(dylibPath)
+    loadedDylibPath = dylibPath
     readsTestRoot = libraryReadsClearSignTestRoot(dylibPath)
 
     // 3. Pass flash buffer to firmware
