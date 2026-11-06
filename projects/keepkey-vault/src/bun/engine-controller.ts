@@ -16,7 +16,7 @@ import { resolveOndeviceFirmwareVersion } from '../shared/firmware-versions'
 import { OFFICIAL_RELEASE_TAG, assertInstallAllowed, installedFromBootloader, installedInFirmwareMode, isBitcoinOnlyImage, latestFor, mergeManifests, needsFirmware, planInstall, type CoinVariant, type InstalledFirmware } from '../shared/firmware-install'
 import { flashWipeReason, type WipeReason } from '../shared/flash-wipe'
 import { EmulatorKeepKeyAdapter } from './emulator-transport'
-import { requestUnlock, isTransportTimeout, UNLOCK_TIMEOUT_MESSAGE } from './pin-unlock'
+import { requestUnlock, isTransportTimeout, UNLOCK_TIMEOUT_MESSAGE, EMULATOR_UNLOCK_FIRST_REPLY_MS, EMULATOR_UNLOCK_TIMEOUT_MESSAGE } from './pin-unlock'
 import { forceReleaseWebUsb, isUnreleasable } from './webusb-recovery'
 import type { DeviceFailure } from './device-refusal'
 import { flushRingBuffers, getActiveFlashName, getEmulatorStatus } from './emulator'
@@ -192,6 +192,9 @@ export class EngineController extends EventEmitter {
   /** The device sent PinMatrixRequest and no PIN or answer has followed. Before that, after
    *  wrong PINs, it is counting down and reads no USB: a PIN typed then is lost. */
   private pinPromptOpen = false
+  /** Emulator reconnects after a PIN wait outlived hdwallet's deadline, since the user last
+   *  entered a PIN or (re)started the emulator. One is allowed; then the user is told. */
+  private emulatorUnlockReconnects = 0
   /** promptPin's seed-access request while it waits on the PIN (device-wipe.ts reads it). */
   unlockRequest: Promise<unknown> | null = null
 
@@ -566,6 +569,9 @@ export class EngineController extends EventEmitter {
     // After a firmware/bootloader flash the device reboots — give the transport
     // time to stabilise before firing getPublicKeys, otherwise the device may
     // respond with Failure(7) "Invalid PIN" before the user even sees the overlay.
+    // Both auto-prompts belong to this connection: a switch before they run leaves
+    // the next connection to prompt for itself.
+    const connection = this.wallet
     if (state === 'needs_pin') {
       const delay = this.updatePhase === 'rebooting' ? 2000 : 0
       if (this.updatePhase === 'rebooting') {
@@ -574,6 +580,7 @@ export class EngineController extends EventEmitter {
       }
       const autoPrompt = (): void => {
         if (this.wipeInProgress) return
+        if (this.wallet !== connection) return
         // The replug a deferred wipe asked for: the same device on a new connection gets the
         // wipe before a PIN request can restart its countdown. Another device just unlocks.
         if (this.wipeOnReconnect && this.wallet !== this.wipeDeferredWallet && !this.unlockRequest) {
@@ -584,18 +591,26 @@ export class EngineController extends EventEmitter {
             return
           }
         }
-        const wallet = this.wallet
         this.promptPin().catch(err => {
           console.warn('[Engine] Auto prompt-pin failed (expected if PIN flow interrupts):', err?.message)
           // That connection is gone (switch, stop, unplug): the next one prompts for itself.
-          if (this.wallet !== wallet) return
+          if (this.wallet !== connection) return
           // A timeout leaves the transport unusable; retrying would just
           // reshow the PIN grid with no pending request. Tell the user.
-          // The emulator needs no replug: a new connection's Initialize ends the
-          // firmware's PIN wait, and needs_pin prompts again.
+          // On the emulator this is the PIN wait itself: the first reply has no
+          // deadline there (EMULATOR_UNLOCK_FIRST_REPLY_MS), so a backoff countdown
+          // is waited out, not timed out. It needs no replug: a new connection's
+          // Initialize ends the firmware's wait, and needs_pin prompts again. Once;
+          // after that the user is told, not re-prompted every five minutes.
           if (isTransportTimeout(err) && this.isEmulator) {
-            console.warn('[Engine] Emulator PIN wait outlived the transport deadline — reconnecting')
-            this.connectEmulator().catch(e => console.warn('[Engine] Emulator reconnect failed:', e?.message))
+            if (this.emulatorUnlockReconnects++ === 0) {
+              console.warn('[Engine] Emulator PIN wait outlived the transport deadline — reconnecting')
+              this.connectEmulator().catch(e => console.warn('[Engine] Emulator reconnect failed:', e?.message))
+            } else {
+              console.warn('[Engine] Emulator PIN wait outlived the transport deadline again — stopping')
+              this.lastError = EMULATOR_UNLOCK_TIMEOUT_MESSAGE
+              this.updateState('error')
+            }
             return
           }
           if (isTransportTimeout(err)) {
@@ -628,7 +643,7 @@ export class EngineController extends EventEmitter {
     // promptPin() completes and clears promptPinActive in its finally block.
     if (state === 'needs_passphrase') {
       setTimeout(() => {
-        if (!this.promptPinActive) {
+        if (this.wallet === connection && !this.promptPinActive) {
           this.promptPin().catch(err => {
             console.warn('[Engine] Auto prompt-passphrase failed:', err?.message)
           })
@@ -1560,6 +1575,7 @@ export class EngineController extends EventEmitter {
   disconnectEmulator(): void {
     if (this.activeTransport !== 'emulator') return
     console.log('[Engine] Disconnecting emulator')
+    this.emulatorUnlockReconnects = 0 // stopped or switched by the user
     this.clearWallet()
     this.lastError = null
     this.updateState('disconnected')
@@ -2280,7 +2296,7 @@ export class EngineController extends EventEmitter {
     this.promptPinActive = true
     // Not wallet.getPublicKeys(): it uses a 5 s timeout, shorter than the
     // firmware's post-failure PIN lockout wait (see pin-unlock.ts).
-    const promise = requestUnlock(wallet.transport)
+    const promise = requestUnlock(wallet.transport, this.isEmulator ? EMULATOR_UNLOCK_FIRST_REPLY_MS : undefined)
     this.unlockRequest = promise
     promise.catch(() => {}).finally(() => { if (this.unlockRequest === promise) this.unlockRequest = null })
     try {
@@ -2288,7 +2304,9 @@ export class EngineController extends EventEmitter {
       if (this.wallet !== wallet) throw new Error('The device connection changed during the unlock')
       // getPublicKeys completed — PIN (and passphrase if needed) were provided.
       // Now it's safe to refresh features.
-      this.cachedFeatures = await wallet.getFeatures()
+      const features = await wallet.getFeatures()
+      if (this.wallet !== wallet) throw new Error('The device connection changed during the unlock')
+      this.cachedFeatures = features
       this.updateState(this.deriveState(this.cachedFeatures))
       // If sendPassphrase() ran while promptPin owned the transport, it could
       // not derive the hidden-wallet scope there. Do it now, after the seed
@@ -2366,6 +2384,7 @@ export class EngineController extends EventEmitter {
     this.setPinPromptOpen(false)
     console.log(`[Engine] sendPin (pinRequests=${this.pinRequestCount}, promptPinActive=${this.promptPinActive})`)
     this.pinAwaitingResult = true
+    this.emulatorUnlockReconnects = 0 // the user is here
     await this.wallet.sendPin(pin)
     // Don't call getFeatures if another operation owns the transport:
     // - setupInProgress: reset/recover is still running

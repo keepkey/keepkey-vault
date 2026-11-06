@@ -40,6 +40,7 @@ function lockedDevice(outcome: 'confirm' | 'refuse' = 'confirm', link: Link = {}
     unlockRequest: link.unlock ?? null,
     deferWipeUntilReplug() { if (link.canDefer === false) return false; this.deferred++; return true },
     repromptPin() { this.reprompts++ },
+    cancelDevicePrompt() { return this.wallet!.cancel() },
     wallet: {
       transport: { userActionRequired: link.matrixShown ?? true, isOpened: async () => link.open ?? true },
       async cancel() { log.push('cancel') },
@@ -142,7 +143,7 @@ describe('wipeOwningDevice', () => {
   })
 
   test('no device: refused before anything is sent', async () => {
-    const host: WipeHost = { wallet: null, wipeInProgress: false, unlockRequest: null, deferWipeUntilReplug: () => true, repromptPin() {} }
+    const host: WipeHost = { wallet: null, wipeInProgress: false, unlockRequest: null, deferWipeUntilReplug: () => true, repromptPin() {}, cancelDevicePrompt: async () => {} }
     await expect(wipeOwningDevice(host, direct, async () => {})).rejects.toThrow('No device connected')
     expect(host.wipeInProgress).toBe(false)
   })
@@ -186,6 +187,7 @@ describe('with the real hdwallet transport', () => {
       unlockRequest: unlock,
       deferWipeUntilReplug: () => { deferred++; return true },
       repromptPin() {},
+      cancelDevicePrompt: () => transport.cancel(),
     }
     // Bounded: the 1.6.5 behaviour is a wipe that hangs behind the unlock, and a hang must fail, not stall CI.
     const outcome = await Promise.race([

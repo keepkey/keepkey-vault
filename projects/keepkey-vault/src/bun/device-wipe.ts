@@ -24,8 +24,11 @@ export interface WipeHost {
   wallet: {
     cancel(): Promise<unknown>
     wipe(): Promise<unknown>
-    transport?: { userActionRequired: boolean; isOpened(): Promise<boolean> }
+    /** awaitingInput: set by device-gate.ts guardInputWait on Desktop's transports. */
+    transport?: { userActionRequired: boolean; awaitingInput?: string | null; isOpened(): Promise<boolean> }
   } | null
+  /** Cancel the PIN prompt the device shows (engine-controller cancelDevicePrompt). */
+  cancelDevicePrompt(): Promise<unknown>
   wipeInProgress: boolean
   /** The seed-access request waiting on the PIN, if any. */
   unlockRequest: Promise<unknown> | null
@@ -59,10 +62,13 @@ export async function wipeOwningDevice(
     const open = !!transport && await transport.isOpened()
     const unlock = host.unlockRequest
     // Unlock sent but no PIN matrix yet = the device is in its countdown; a closed transport = quarantined by a timeout.
-    if (!open || (unlock && !transport!.userActionRequired)) {
+    // The matrix shows when the device's last message asked for the PIN (device-gate.ts), even
+    // after another call cleared hdwallet's userActionRequired.
+    const matrixShown = !!transport && (transport.userActionRequired || transport.awaitingInput === 'pin')
+    if (!open || (unlock && !matrixShown)) {
       throw new Error(host.deferWipeUntilReplug() ? WIPE_AFTER_REPLUG_MESSAGE : WIPE_UNREACHABLE_MESSAGE)
     }
-    await wallet.cancel().catch(() => {})
+    await host.cancelDevicePrompt().catch(() => {})
     // Let the cancelled unlock read its "PIN Cancelled" before the wipe starts reading.
     if (unlock) await Promise.race([unlock.catch(() => {}), new Promise((r) => setTimeout(r, 5000))])
     try {
