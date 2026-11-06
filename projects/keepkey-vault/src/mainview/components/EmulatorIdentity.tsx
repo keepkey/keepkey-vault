@@ -7,7 +7,7 @@ import { useUiTranslation } from "../i18n/ui"
 import { useCallback, useEffect, useState } from "react"
 import { Text, chakra } from "@chakra-ui/react"
 import { rpcRequest } from "../lib/rpc"
-import type { EmulatorRunningBuild, EmulatorStatus } from "../../shared/types"
+import type { EmulatorBuildInfo, EmulatorNextBuild, EmulatorRunningBuild, EmulatorStatus } from "../../shared/types"
 
 const BUILD_HASH_NAME = /^build-[0-9a-f]{16}$/
 
@@ -25,6 +25,23 @@ export function useEmulatorNames() {
 	const walletTitle = useCallback((wallet: { name: string; label?: string }) =>
 		wallet.label?.trim() || (BUILD_HASH_NAME.test(wallet.name) ? uiText("Unnamed wallet") : wallet.name), [uiText])
 	return { buildTitle, walletTitle }
+}
+
+/** The <option>s of every emulator firmware select: "" is the bundled emulator;
+ *  a selected build that is not available (a research build while Monero is off)
+ *  stays listed, marked, so the select never shows a build that isn't selected. */
+export function EmulatorBuildOptions({ builds, next, showId }: { builds: EmulatorBuildInfo[]; next: EmulatorNextBuild | null; showId?: boolean }) {
+	const uiText = useUiTranslation()
+	const { buildTitle } = useEmulatorNames()
+	const unavailable = next?.id && !builds.some((b) => b.id === next.id) ? next : null
+	const label = (b: EmulatorRunningBuild) => `${buildTitle(b)}${showId && b.id && b.label ? ` · ${b.id.slice(0, 12)}` : ""}`
+	return (
+		<>
+			<option value="">{buildTitle(next?.id === null ? next : { id: null })}</option>
+			{builds.map((b) => <option key={b.id} value={b.id}>{label(b)}</option>)}
+			{unavailable && <option value={unavailable.id!}>{uiText("{{firmware}} (unavailable)", { firmware: label(unavailable) })}</option>}
+		</>
+	)
 }
 
 /** The running EMU badge: which wallet on which firmware. Clicking it brings the emulator window forward. */

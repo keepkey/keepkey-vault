@@ -17,7 +17,7 @@ const { createRoot } = await import('react-dom/client')
 const { ChakraProvider, defaultSystem } = await import('@chakra-ui/react')
 await import('../../src/mainview/i18n/index')
 const { EmulatorWalletChooser } = await import('../../src/mainview/components/EmulatorWalletChooser')
-const { EmulatorBadgeView } = await import('../../src/mainview/components/EmulatorIdentity')
+const { EmulatorBadgeView, EmulatorBuildOptions } = await import('../../src/mainview/components/EmulatorIdentity')
 
 const SIGNING = '92079869551ab26ccd41d33ede1fe6c69735927e38a3203f932cdb37abe134f7'
 const PIN = '249bcff134356ee7' + 'e'.repeat(48)
@@ -132,6 +132,26 @@ const out: Record<string, unknown> = {}
   const unnamed = await render(React.createElement(EmulatorBadgeView, { wallet: { name: 'build-249bcff134356ee7' }, build: { id: null, version: '7.17.0' } }))
   out.badgeUnnamed = text(unnamed.container.querySelector('button')!)
   await unnamed.unmount()
+}
+
+// ── Settings' build select with a research selection hidden while Monero is off ──
+{
+  const changes: string[] = []
+  function SettingsSelect() {
+    const [value, setValue] = React.useState(SIGNING)
+    return React.createElement('select', { 'aria-label': 'Emulator build', value,
+      onChange: (e: any) => { changes.push(e.target.value); setValue(e.target.value) } },
+      React.createElement(EmulatorBuildOptions, { builds: [builds[0]], showId: true,
+        next: { id: SIGNING, version: '7.17.0', label: 'Monero signing (research)', research: true, problem: 'needs Monero' } }))
+  }
+  const { container, unmount } = await render(React.createElement(SettingsSelect))
+  const select = container.querySelector('select') as HTMLSelectElement
+  out.settingsOptions = [...select.options].map(o => o.textContent)
+  out.settingsShown = select.selectedOptions[0]?.textContent
+  await choose(select, '')
+  out.settingsChanges = changes
+  out.settingsShownAfter = select.selectedOptions[0]?.textContent
+  await unmount()
 }
 
 console.log(JSON.stringify(out))

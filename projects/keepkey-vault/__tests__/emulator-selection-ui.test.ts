@@ -52,6 +52,17 @@ describe('B3: an unavailable selected build', () => {
   })
 })
 
+describe("Settings' build select", () => {
+  test('a selected research build hidden while Monero is off shows as unavailable, not as the bundled emulator', () => {
+    expect(ui.settingsOptions).toEqual(['Bundled emulator', 'v7.17.0 · build 249bcff13435', 'v7.17.0 · Monero signing (research) · 92079869551a (unavailable)'])
+    expect(ui.settingsShown).toBe('v7.17.0 · Monero signing (research) · 92079869551a (unavailable)')
+  })
+  test('picking the bundled emulator from there is a change (before, it was already "shown" and fired nothing)', () => {
+    expect(ui.settingsChanges).toEqual([''])
+    expect(ui.settingsShownAfter).toBe('Bundled emulator')
+  })
+})
+
 describe('B5: deleting a seed', () => {
   test('the running wallet has no delete', () => {
     expect(ui.deleteButtons).toEqual(['Delete seed XMR mainnet', 'Delete seed Unnamed wallet', 'Delete seed my-test-seed'])

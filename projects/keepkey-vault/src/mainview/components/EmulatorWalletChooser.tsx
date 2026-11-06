@@ -11,7 +11,7 @@ import { Box, Flex, Text, chakra } from "@chakra-ui/react"
 import type { EmulatorBuildInfo, EmulatorNextBuild, EmulatorRunningBuild, EmulatorWalletInfo } from "../../shared/types"
 import { emulatorWalletDetail, newEmulatorWalletNameError } from "../../shared/emulatorWallets"
 import { rpcRequest } from "../lib/rpc"
-import { useEmulatorNames } from "./EmulatorIdentity"
+import { EmulatorBuildOptions, useEmulatorNames } from "./EmulatorIdentity"
 
 /** The firmware builds a start can pick, and what the next start loads (or why it can't). */
 export interface EmulatorFirmwareChoices { builds: EmulatorBuildInfo[]; next: EmulatorNextBuild }
@@ -24,9 +24,7 @@ export function loadEmulatorFirmware(): Promise<EmulatorFirmwareChoices | null> 
 /** Firmware select. "" is the bundled emulator; an unavailable selected build stays listed, marked. */
 function FirmwarePicker({ firmware, value, onChange, busy }: { firmware: EmulatorFirmwareChoices; value: string; onChange: (id: string) => void; busy?: boolean }) {
 	const uiText = useUiTranslation()
-	const { buildTitle } = useEmulatorNames()
 	const next = firmware.next
-	const unavailable = next.id && !firmware.builds.some((b) => b.id === next.id) ? next : null
 	const problem = (value || null) === next.id ? next.problem : null
 	return (
 		<Box mb="3">
@@ -34,9 +32,7 @@ function FirmwarePicker({ firmware, value, onChange, busy }: { firmware: Emulato
 			<chakra.select aria-label={uiText("Emulator firmware")} value={value} disabled={busy}
 				onChange={(e: React.ChangeEvent<HTMLSelectElement>) => onChange(e.target.value)}
 				w="100%" px="2" py="1.5" fontSize="12px" color="var(--text-0)" bg="var(--ink-1)" border="1px solid var(--ink-3)" borderRadius="md">
-				<option value="">{buildTitle(next.id === null ? next : { id: null })}</option>
-				{firmware.builds.map((b) => <option key={b.id} value={b.id}>{buildTitle(b)}</option>)}
-				{unavailable && <option value={unavailable.id!}>{uiText("{{firmware}} (unavailable)", { firmware: buildTitle(unavailable) })}</option>}
+				<EmulatorBuildOptions builds={firmware.builds} next={next} />
 			</chakra.select>
 			{problem && <Text mt="1" fontSize="11px" color="var(--rose)" wordBreak="break-word" data-testid="firmware-problem">{problem}</Text>}
 		</Box>

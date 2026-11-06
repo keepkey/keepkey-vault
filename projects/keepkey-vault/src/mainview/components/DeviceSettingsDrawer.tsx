@@ -10,10 +10,10 @@ import { rpcRequest, onRpcMessage } from "../lib/rpc"
 import { IS_MAC, IS_WINDOWS } from "../lib/platform"
 import { AUTO_LOCK_CHOICES, DEFAULT_AUTO_LOCK_MS } from "../../shared/flags"
 import { Z } from "../lib/z-index"
-import type { DeviceStateInfo, AppSettings, EmulatorWalletInfo } from "../../shared/types"
+import type { DeviceStateInfo, AppSettings, EmulatorWalletInfo, EmulatorBuildInfo, EmulatorNextBuild } from "../../shared/types"
 import { isBitcoinOnlyVariant } from "../../shared/flags"
 import { SelfHostNodePanel } from "./SelfHostNodePanel"
-import { useEmulatorNames } from "./EmulatorIdentity"
+import { EmulatorBuildOptions, useEmulatorNames } from "./EmulatorIdentity"
 import { ClearSignStudio } from "./ClearSignStudio"
 import { ClearSignProvidersPanel } from "./ClearSignProvidersPanel"
 import { RngAuditPanel } from "./RngAuditPanel"
@@ -419,12 +419,13 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 	const emuFileRef = useRef<HTMLInputElement>(null)
 	const [installingEmu, setInstallingEmu] = useState(false)
 	const [emuInstallMsg, setEmuInstallMsg] = useState<string | null>(null)
-	const [emuBuilds, setEmuBuilds] = useState<Array<{ id: string; path: string; selected: boolean; version?: string; label?: string; research?: boolean; monero?: boolean }>>([])
+	const [emuBuilds, setEmuBuilds] = useState<EmulatorBuildInfo[]>([])
 	const [selectedEmuBuild, setSelectedEmuBuild] = useState<string | null>(null)
+	const [emuNextBuild, setEmuNextBuild] = useState<EmulatorNextBuild | null>(null)
 	const { buildTitle, walletTitle } = useEmulatorNames()
 	const reloadEmuBuilds = useCallback(async () => {
-		const result = await rpcRequest<{ builds: Array<{ id: string; path: string; selected: boolean; version?: string; label?: string; research?: boolean; monero?: boolean }>; selected: string | null }>("emulatorListBuilds", undefined, 10000)
-		setEmuBuilds(result.builds); setSelectedEmuBuild(result.selected)
+		const result = await rpcRequest<{ builds: EmulatorBuildInfo[]; selected: string | null; next: EmulatorNextBuild }>("emulatorListBuilds", undefined, 10000)
+		setEmuBuilds(result.builds); setSelectedEmuBuild(result.selected); setEmuNextBuild(result.next)
 	}, [])
 	useEffect(() => { if (deviceState.isEmulator) reloadEmuBuilds().catch(console.error) }, [deviceState.isEmulator, reloadEmuBuilds])
 	async function activateEmuBuild(id: string | null) {
@@ -965,14 +966,13 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 								>
 									{installingEmu ? uiText("Installing…") : uiText("Change Version…")}
 								</Button>
-								{emuBuilds.length > 0 && (
+								{(emuBuilds.length > 0 || !!emuNextBuild?.id) && (
 									<Box as="select" aria-label={uiText("Emulator build")} value={selectedEmuBuild || ""}
 										disabled={installingEmu || emuBusy}
 										onChange={(e: React.ChangeEvent<HTMLSelectElement>) => activateEmuBuild(e.target.value || null)}
 										fontSize="xs" color="kk.textPrimary" bg="kk.bgSecondary" border="1px solid" borderColor="kk.border" borderRadius="md" p="2">
-										{/* The bundled emulator is a choice too: without it the select showed a build that was not running. */}
-										<option value="">{buildTitle({ id: null })}</option>
-										{emuBuilds.map(build => <option key={build.id} value={build.id}>{buildTitle(build)}{build.label ? ` · ${build.id.slice(0, 12)}` : ''}</option>)}
+										{/* Bundled and unavailable-selected builds are listed too: the select never shows a build that isn't selected. */}
+										<EmulatorBuildOptions builds={emuBuilds} next={emuNextBuild} showId />
 									</Box>
 								)}
 								{emuInstallMsg && <Text fontSize="xs" color="kk.textSecondary">{emuInstallMsg}</Text>}
