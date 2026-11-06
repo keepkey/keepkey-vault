@@ -59,6 +59,57 @@ export function restWriteRefusal(state: GateState, messageType: number, rest: Re
   return null
 }
 
+/** What a KeepKey waiting for its PIN or passphrase reads (firmware pin_sm.c, msg_read_tiny).
+ *  Anything else gets Failure "Unknown message", and 7.17 firmware then ends the wait:
+ *  the request that was waiting on the PIN fails, and the PIN the user is typing is lost. */
+const INPUT_WAIT_REPLIES = new Set<number>([
+  T.MESSAGETYPE_PINMATRIXACK, T.MESSAGETYPE_PASSPHRASEACK, T.MESSAGETYPE_CANCEL, T.MESSAGETYPE_INITIALIZE,
+])
+const INPUT_WAIT_DEBUG = new Set<number>([T.MESSAGETYPE_DEBUGLINKGETSTATE])
+
+export const DEVICE_AWAITING_INPUT_MESSAGE = 'KeepKey is waiting for its PIN or passphrase: enter it in KeepKey Desktop, then try again'
+
+export type AwaitingInput = 'pin' | 'passphrase' | null
+
+/** The device's last message asked for a PIN or passphrase and nothing has answered it yet. */
+export function awaitingInput(transport: any): AwaitingInput {
+  return transport?.awaitingInput ?? null
+}
+
+/**
+ * While the device waits for its PIN or passphrase, only the answer (or Cancel/Initialize)
+ * goes to it, whoever sends. Requests queued behind the PIN normally wait on hdwallet's
+ * call lock, but a read that ends without the device's answer (a delegate timeout,
+ * hdwallet's cancel() dropping the call queue) lets the next one out into the wait.
+ * Refused here, it fails on its own and the user's PIN still lands.
+ * Wraps hdwallet's private per-message read and write, like gateRestWrites.
+ */
+export function guardInputWait(transport: any) {
+  if (transport.inputWaitGuarded) return
+  transport.inputWaitGuarded = true
+  transport.awaitingInput = null
+  const read = transport.read.bind(transport)
+  transport.read = async (debugLink: boolean) => {
+    const buf: Uint8Array = await read(debugLink)
+    // Report id '?', '##', then the big-endian message type.
+    if (!debugLink) {
+      const type = (buf[3] << 8) | buf[4]
+      transport.awaitingInput = type === T.MESSAGETYPE_PINMATRIXREQUEST ? 'pin'
+        : type === T.MESSAGETYPE_PASSPHRASEREQUEST ? 'passphrase' : null
+    }
+    return buf
+  }
+  const write = transport.write.bind(transport)
+  transport.write = async (buf: Uint8Array, debugLink: boolean) => {
+    const type = (buf[2] << 8) | buf[3]
+    if (transport.awaitingInput && !(debugLink ? INPUT_WAIT_DEBUG : INPUT_WAIT_REPLIES).has(type)) {
+      throw new HttpError(423, DEVICE_AWAITING_INPUT_MESSAGE)
+    }
+    await write(buf, debugLink)
+    if (!debugLink && INPUT_WAIT_REPLIES.has(type)) transport.awaitingInput = null
+  }
+}
+
 /**
  * Wrap hdwallet's per-message write (private, one call per message) once per transport.
  * One device request = a `call` without omitLock, or a `lockDuring` block (multi-message

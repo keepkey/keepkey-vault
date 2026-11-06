@@ -33,6 +33,7 @@ function fixture() {
     call: async () => { throw new Error('Unexpected second device request') },
     lockDuring: async (fn: () => Promise<unknown>) => fn(),
     write: async () => {},
+    read: async () => new Uint8Array(64),
   })
   const wallet = {
     transport,
