@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
 import { readFile, lstat } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
-import { MONERO_VERSION } from './protocol'
+import { MONERO_VERSION, parseExactJson } from './protocol'
 
 let versionProbe: ReturnType<typeof Bun.spawn> | null = null
 export function stopToolVersionProbe(): void {
@@ -46,4 +46,37 @@ export async function verifiedWalletRpc(): Promise<string> {
     } catch { /* Try only known bundle locations; no runtime downloads. */ }
   }
   throw new Error('Verified Monero wallet RPC is unavailable; prepare the pinned host tools during the build')
+}
+
+/** Research signing adapter beside the verified wallet RPC, pinned by `hostAdapterSha256` in the same metadata. */
+export async function verifiedHostAdapter(walletRpc: string): Promise<string | null> {
+  try {
+    const directory = dirname(walletRpc)
+    const info = JSON.parse(await readFile(join(directory, 'monero-tools.json'), 'utf8'))
+    if (typeof info.hostAdapterSha256 !== 'string' || !/^[0-9a-f]{64}$/.test(info.hostAdapterSha256)) return null
+    const binary = join(directory, process.platform === 'win32' ? 'monero-host-adapter.exe' : 'monero-host-adapter'), file = await lstat(binary)
+    if (!file.isFile() || file.isSymbolicLink() || file.size > 256 * 1024 * 1024 || (process.platform !== 'win32' && (file.mode & 0o022))) return null
+    return createHash('sha256').update(new Uint8Array(await readFile(binary))).digest('hex') === info.hostAdapterSha256 ? binary : null
+  } catch { return null }
+}
+
+/** One JSON request on stdin, one bounded JSON reply on stdout. Credentials never reach argv; stderr is discarded. */
+export async function runHostAdapter(binary: string, request: Record<string, string>): Promise<any> {
+  const child = Bun.spawn([binary], { stdin: 'pipe', stdout: 'pipe', stderr: 'ignore', env: {} })
+  const timeout = setTimeout(() => child.kill('SIGKILL'), 60000)
+  try {
+    child.stdin.write(JSON.stringify(request)); await child.stdin.end()
+    const reader = child.stdout.getReader(), chunks: Uint8Array[] = []
+    let size = 0
+    while (true) {
+      const { done, value } = await reader.read(); if (done) break
+      size += value.length
+      if (size > 4 * 1024 * 1024) { child.kill('SIGKILL'); throw new Error('Monero adapter reply exceeds its bound') }
+      chunks.push(value)
+    }
+    const exit = await child.exited
+    const reply = parseExactJson(Buffer.concat(chunks).toString('utf8'))
+    if (exit !== 0 || reply?.status !== 'pass') throw new Error('The Monero adapter refused the wallet data')
+    return reply
+  } finally { clearTimeout(timeout); request.view_key = '' }
 }

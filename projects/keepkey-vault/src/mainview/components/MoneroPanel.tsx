@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { Box, Button, Flex, Spinner, Text } from "@chakra-ui/react"
-import { FaArrowLeft, FaCheck, FaCopy, FaEye, FaMonero, FaSyncAlt } from "react-icons/fa"
+import { Box, Button, Flex, Input, Spinner, Text } from "@chakra-ui/react"
+import { FaArrowLeft, FaCheck, FaCopy, FaEye, FaKey, FaMonero, FaPaperPlane, FaSyncAlt } from "react-icons/fa"
 import { generateQRSvg } from "../lib/qr"
 import { rpcRequest } from "../lib/rpc"
 import { useFiat } from "../lib/fiat-context"
 import { useUiTranslation } from "../i18n/ui"
-import type { MoneroStatus } from "../../shared/types"
+import type { MoneroSendReview, MoneroStatus } from "../../shared/types"
+import { moneroAddressKind, parseXmrAmount } from "../../shared/monero-address"
 
 interface MoneroPanelProps {
 	onBack?: () => void
@@ -60,6 +61,13 @@ export function MoneroPanel({ onBack, onLoaded }: MoneroPanelProps = {}) {
 	const [showingAddress, setShowingAddress] = useState(false)
 	const [verifiedAddress, setVerifiedAddress] = useState<string | null>(null)
 	const [copied, setCopied] = useState(false)
+	const [syncingKeyImages, setSyncingKeyImages] = useState(false)
+	const [sendAddress, setSendAddress] = useState("")
+	const [sendAmount, setSendAmount] = useState("")
+	const [review, setReview] = useState<MoneroSendReview | null>(null)
+	const [sendBusy, setSendBusy] = useState<"prepare" | "confirm" | null>(null)
+	const [sendError, setSendError] = useState<string | null>(null)
+	const [sentTxid, setSentTxid] = useState<string | null>(null)
 	const mounted = useRef(false)
 	const requestSequence = useRef(0)
 	const loaded = useRef(false)
@@ -116,7 +124,88 @@ export function MoneroPanel({ onBack, onLoaded }: MoneroPanelProps = {}) {
 		setCopied(false)
 		setVerifiedAddress(null)
 		setActionError(null)
+		setReview(null)
+		setSendError(null)
+		setSentTxid(null)
 	}, [address])
+
+	// Sending is a research path: only the signing emulator build with the pinned adapter offers it.
+	const receiveOnly = !wallet || wallet.sendBlocked === "emulator" || wallet.sendBlocked === "adapter"
+	const recipientKind = sendAddress.trim() ? moneroAddressKind(sendAddress.trim()) : null
+	const amountAtomic = sendAmount.trim() ? parseXmrAmount(sendAmount) : null
+	const addressProblem = !sendAddress.trim() ? null
+		: recipientKind === "integrated" ? uiText("Integrated addresses are not supported by this preview.")
+		: !recipientKind ? uiText("Enter a valid Monero mainnet address.")
+		: sendAddress.trim() === address ? uiText("Sending to this same wallet is not supported by this preview.") : null
+	const amountProblem = sendAmount.trim() && !amountAtomic ? uiText("Enter a positive XMR amount with at most 12 decimals.") : null
+
+	const syncKeyImages = useCallback(async () => {
+		if (syncingKeyImages) return
+		setSyncingKeyImages(true)
+		setSendError(null)
+		try {
+			const next = checkedStatus(await rpcRequest<MoneroStatus>("moneroSyncKeyImages", {}, 300_000))
+			if (mounted.current) setStatus(next)
+		} catch (error) {
+			if (mounted.current) setSendError(error instanceof Error ? error.message : "Unable to sync key images.")
+		} finally {
+			if (mounted.current) setSyncingKeyImages(false)
+		}
+	}, [syncingKeyImages])
+
+	const prepareSend = useCallback(async () => {
+		if (sendBusy || !amountAtomic || addressProblem || !recipientKind) return
+		setSendBusy("prepare")
+		setSendError(null)
+		setSentTxid(null)
+		try {
+			const next = await rpcRequest<MoneroSendReview>("moneroPrepareSend", { address: sendAddress.trim(), amountAtomic }, 180_000)
+			if (!mounted.current) return
+			if (next?.recipient !== sendAddress.trim() || next.amountAtomic !== amountAtomic || !/^[0-9a-f]{32}$/.test(next.prepareId)) {
+				throw new Error("The prepared transaction does not match your request.")
+			}
+			setReview(next)
+		} catch (error) {
+			if (mounted.current) setSendError(error instanceof Error ? error.message : "Unable to prepare the transaction.")
+		} finally {
+			if (mounted.current) setSendBusy(null)
+		}
+	}, [sendBusy, amountAtomic, addressProblem, recipientKind, sendAddress])
+
+	const confirmSend = useCallback(async () => {
+		if (sendBusy || !review) return
+		setSendBusy("confirm")
+		setSendError(null)
+		try {
+			const result = await rpcRequest<{ txid: string }>("moneroSend", { prepareId: review.prepareId }, 600_000)
+			if (!mounted.current) return
+			if (!/^[0-9a-f]{64}$/.test(result?.txid ?? "")) throw new Error("The wallet returned an invalid transaction ID.")
+			setSentTxid(result.txid)
+			setReview(null)
+			setSendAddress("")
+			setSendAmount("")
+			void refresh()
+		} catch (error) {
+			if (mounted.current) { setSendError(error instanceof Error ? error.message : "Unable to send the transaction."); setReview(null) }
+		} finally {
+			if (mounted.current) setSendBusy(null)
+		}
+	}, [sendBusy, review, refresh])
+
+	const retryBroadcast = useCallback(async () => {
+		if (sendBusy) return
+		setSendBusy("confirm")
+		setSendError(null)
+		try {
+			const result = await rpcRequest<{ txid: string }>("moneroRetryRelay", undefined, 120_000)
+			if (mounted.current && /^[0-9a-f]{64}$/.test(result?.txid ?? "")) setSentTxid(result.txid)
+		} catch (error) {
+			if (mounted.current) setSendError(error instanceof Error ? error.message : "Unable to broadcast the transaction.")
+		} finally {
+			if (mounted.current) setSendBusy(null)
+			void refresh()
+		}
+	}, [sendBusy, refresh])
 
 	const copyAddress = useCallback(async () => {
 		if (!address) return
@@ -178,7 +267,11 @@ export function MoneroPanel({ onBack, onLoaded }: MoneroPanelProps = {}) {
 				</Flex>
 			</Flex>
 
-            <Text fontSize="12px" color="var(--text-2)" mb="5">{uiText("Receive-only preview. Sending and spent-output sync are unavailable; this balance can include funds spent from another wallet.")}</Text>
+            <Text fontSize="12px" color="var(--text-2)" mb="5">{receiveOnly
+                ? uiText("Receive-only preview. Sending and spent-output sync are unavailable; this balance can include funds spent from another wallet.")
+                : wallet?.keyImagesSynced
+                    ? uiText("Research send preview on the signing emulator. Spent outputs are known from the last key-image sync.")
+                    : uiText("Research send preview on the signing emulator. Until you sync key images, this balance can include funds spent from another wallet.")}</Text>
 			{statusError && (
 				<Box role="alert" mb="5" p="3" borderRadius="10px" border="1px solid var(--line)" bg="var(--ink-2)">
 					<Text fontSize="13px" color="var(--rose)">{statusError}</Text>
@@ -237,6 +330,84 @@ export function MoneroPanel({ onBack, onLoaded }: MoneroPanelProps = {}) {
 						</Box>
 					</Box>
 
+					{!receiveOnly && (
+						<Box data-monero-send="" border="1px solid var(--line)" borderRadius="18px" bg="var(--ink-2)" p={{ base: "5", md: "6" }} mb="5">
+							<Flex justify="space-between" align="center" gap="3" mb="4" flexWrap="wrap">
+								<Text fontSize="15px" color="var(--text-0)" fontWeight="500">{uiText("Send XMR")}</Text>
+								<Button data-monero-sync-key-images="" onClick={() => { void syncKeyImages() }} disabled={syncingKeyImages || !!sendBusy || wallet.sendBlocked === "syncing"} size="xs" variant="outline" color="var(--text-1)" borderColor="var(--line-2)" className="electrobun-webkit-app-region-no-drag">
+									{syncingKeyImages ? <Spinner size="xs" /> : <FaKey />}
+									{syncingKeyImages ? uiText("Confirm on KeepKey…") : wallet.keyImagesSynced ? uiText("Sync key images again") : uiText("Sync key images on KeepKey")}
+								</Button>
+							</Flex>
+							<Text fontSize="11px" color="var(--text-3)" mb="2">{uiText("Syncing key images shares them with your Monero node, which lets that node link your spends. Use your own node for full privacy.")}</Text>
+							{wallet.unrelayedTxid && <Box mt="1" mb="2" role="alert">
+								<Text fontSize="13px" color="var(--gold)">{uiText("The broadcast result of your last send is unknown. Check this transaction on a block explorer before doing anything else. Retry broadcast resends the same transaction; it cannot pay twice.")}</Text>
+								<Text fontSize="11px" fontFamily="mono" color="var(--text-2)" wordBreak="break-all" userSelect="all" mt="1">{wallet.unrelayedTxid}</Text>
+								<Button data-monero-retry-relay="" mt="2" size="xs" variant="outline" onClick={() => { void retryBroadcast() }} disabled={!!sendBusy} className="electrobun-webkit-app-region-no-drag">{uiText("Retry broadcast")}</Button>
+							</Box>}
+							{wallet.sendBlocked === "syncing" && <Text fontSize="13px" color="var(--text-2)">{uiText("Wait for the watch wallet to finish syncing before sending.")}</Text>}
+							{wallet.sendBlocked === "key-images" && <Text fontSize="13px" color="var(--text-2)">{uiText("Sync key images on KeepKey so the watch wallet knows which outputs are already spent. Sending is available after the sync.")}</Text>}
+							{wallet.canSend && !review && (
+								<Box>
+									<Text fontSize="11px" color="var(--text-3)" mb="1">{uiText("Recipient address")}</Text>
+									<Input data-monero-send-address="" value={sendAddress} onChange={event => setSendAddress(event.target.value)} placeholder={uiText("Monero mainnet address")} spellCheck={false} bg="transparent" border="1px solid var(--line-2)" borderRadius="12px" color="var(--text-0)" size="sm" fontFamily="mono" px="3" _focus={{ borderColor: "var(--gold)" }} className="electrobun-webkit-app-region-no-drag" />
+									{addressProblem && <Text mt="1" fontSize="12px" color="var(--rose)">{addressProblem}</Text>}
+									<Text fontSize="11px" color="var(--text-3)" mt="3" mb="1">{uiText("Amount (XMR)")}</Text>
+									<Input data-monero-send-amount="" value={sendAmount} onChange={event => setSendAmount(event.target.value)} placeholder="0.000000000000" inputMode="decimal" bg="transparent" border="1px solid var(--line-2)" borderRadius="12px" color="var(--text-0)" size="sm" fontFamily="mono" px="3" _focus={{ borderColor: "var(--gold)" }} className="electrobun-webkit-app-region-no-drag" />
+									{amountProblem && <Text mt="1" fontSize="12px" color="var(--rose)">{amountProblem}</Text>}
+									<Text mt="2" fontSize="11px" color="var(--text-3)">{uiText("The watch wallet chooses the inputs and fee; you review both before KeepKey signs.")}</Text>
+									<Button data-monero-review-send="" mt="4" size="sm" onClick={() => { void prepareSend() }} disabled={!!sendBusy || !amountAtomic || !recipientKind || !!addressProblem} className="electrobun-webkit-app-region-no-drag">
+										{sendBusy === "prepare" ? <Spinner size="xs" /> : <FaPaperPlane />}
+										{sendBusy === "prepare" ? uiText("Preparing…") : uiText("Review send")}
+									</Button>
+								</Box>
+							)}
+							{review && (
+								<Box data-monero-send-review="">
+									<Text fontSize="12px" color="var(--text-2)" mb="3">{uiText("KeepKey will show these screens. Check each one on the device before approving.")}</Text>
+									<Box bg="var(--ink-0)" border="1px solid var(--line)" borderRadius="12px" px="3.5" py="3" mb="3">
+										<Text fontSize="12px" color="var(--text-0)" fontWeight="500">{uiText("Monero transaction")}</Text>
+										<Text fontSize="12px" fontFamily="mono" color="var(--text-1)">{uiText("Mainnet")} · m/44'/128'/0'</Text>
+										<Text fontSize="12px" color="var(--text-1)">{uiText("{{inputs}} inputs, {{outputs}} outputs", { inputs: review.inputCount, outputs: review.outputs.length })}</Text>
+										<Text fontSize="12px" fontFamily="mono" color="var(--text-1)">{uiText("Fee")} {formatXmr(atomicAmount(review.feeAtomic))} XMR</Text>
+									</Box>
+									{review.outputs.map((output, index) => (
+										<Box key={index} bg="var(--ink-0)" border="1px solid var(--line)" borderRadius="12px" px="3.5" py="3" mb="3">
+											<Text fontSize="12px" color="var(--text-0)" fontWeight="500">{uiText("Output {{index}}/{{count}}", { index: index + 1, count: review.outputs.length })}: {output.role === "change" ? uiText("Change") : uiText("Recipient")}</Text>
+											<Text fontSize="12px" fontFamily="mono" color="var(--text-1)">{uiText("Amount")} {formatXmr(atomicAmount(output.amountAtomic))} XMR</Text>
+											{output.role === "change" && <Text fontSize="12px" color="var(--text-2)">{uiText("Change subaddress 0/0")}</Text>}
+											<Text fontSize="12px" fontFamily="mono" color="var(--text-0)" wordBreak="break-all" mt="1">{output.address}</Text>
+										</Box>
+									))}
+									<Box bg="var(--ink-0)" border="1px solid var(--line)" borderRadius="12px" px="3.5" py="3" mb="4">
+										<Text fontSize="12px" color="var(--text-0)" fontWeight="500">{uiText("Sign Monero tx")}</Text>
+										<Text fontSize="12px" color="var(--text-1)">{uiText("All {{count}} outputs reviewed.", { count: review.outputs.length })}</Text>
+										<Text fontSize="12px" fontFamily="mono" color="var(--text-1)">{uiText("Fee")} {formatXmr(atomicAmount(review.feeAtomic))} XMR</Text>
+									</Box>
+									<Flex gap={{ base: "4", md: "8" }} mb="4" flexWrap="wrap">
+										<Box><Text fontSize="11px" color="var(--text-3)">{uiText("Amount")}</Text><Text fontSize="13px" fontFamily="mono" color="var(--text-0)">{formatXmr(atomicAmount(review.amountAtomic))} XMR</Text></Box>
+										<Box><Text fontSize="11px" color="var(--text-3)">{uiText("Fee")}</Text><Text fontSize="13px" fontFamily="mono" color="var(--text-0)">{formatXmr(atomicAmount(review.feeAtomic))} XMR</Text></Box>
+										<Box><Text fontSize="11px" color="var(--text-3)">{uiText("Change")}</Text><Text fontSize="13px" fontFamily="mono" color="var(--text-0)">{formatXmr(atomicAmount(review.changeAtomic))} XMR</Text></Box>
+										<Box><Text fontSize="11px" color="var(--text-3)">{uiText("Total")}</Text><Text fontSize="13px" fontFamily="mono" color="var(--text-0)">{formatXmr(atomicAmount(review.totalAtomic))} XMR</Text></Box>
+									</Flex>
+									<Flex gap="3">
+										<Button data-monero-confirm-send="" size="sm" onClick={() => { void confirmSend() }} disabled={!!sendBusy} className="electrobun-webkit-app-region-no-drag">
+											{sendBusy === "confirm" ? <Spinner size="xs" /> : <FaCheck />}
+											{sendBusy === "confirm" ? uiText("Confirm on KeepKey…") : uiText("Confirm on KeepKey")}
+										</Button>
+										<Button size="sm" variant="ghost" color="var(--text-2)" onClick={() => setReview(null)} disabled={!!sendBusy} className="electrobun-webkit-app-region-no-drag">{uiText("Cancel")}</Button>
+									</Flex>
+								</Box>
+							)}
+							{sentTxid && (
+								<Box mt="3" role="status">
+									<Text fontSize="12px" color="var(--teal)">{uiText("Transaction sent to the Monero daemon.")}</Text>
+									<Text fontSize="11px" fontFamily="mono" color="var(--text-2)" wordBreak="break-all" userSelect="all">{sentTxid}</Text>
+								</Box>
+							)}
+							{sendError && <Text mt="3" fontSize="12px" color="var(--rose)" role="alert">{sendError}</Text>}
+						</Box>
+					)}
 					<Box border="1px solid var(--line)" borderRadius="18px" bg="var(--ink-2)" p={{ base: "5", md: "6" }}>
 						<Text fontSize="15px" color="var(--text-0)" fontWeight="500" mb="4">{uiText("Transactions")}</Text>
 						{wallet.transactions.length === 0 ? (

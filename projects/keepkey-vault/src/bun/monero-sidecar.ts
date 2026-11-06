@@ -1,10 +1,11 @@
 /** Managed, watch-only Monero CLI worker. Private IPC payloads are never logged. */
 import { lstatSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
-import { MAX_IPC_LINE, MONERO_VERSION, SIDECAR_VERSION, validateConfiguration, validateWalletStatus,
-  type MoneroSidecarStatus, type MoneroWalletStatus, type MoneroWatchConfiguration } from '../../monero-cli/src/protocol'
+import { MAX_IPC_LINE, MONERO_VERSION, PUBLIC_ERRORS, SIDECAR_VERSION, validateConfiguration, validateKeyImageImport, validateKeyImageResult,
+  validateOutputs, validateRelayRequest, validateTransferDraft, validateTransferRequest, validateWalletStatus,
+  type MoneroOutputRecord, type MoneroSidecarStatus, type MoneroTransferDraft, type MoneroWalletStatus, type MoneroWatchConfiguration } from '../../monero-cli/src/protocol'
 
-export type { MoneroSidecarStatus, MoneroWalletStatus } from '../../monero-cli/src/protocol'
+export type { MoneroOutputRecord, MoneroPlan, MoneroSidecarStatus, MoneroTransferDraft, MoneroWalletStatus } from '../../monero-cli/src/protocol'
 export type ConfigureMoneroWatch = Omit<MoneroWatchConfiguration, 'viewKey'> & { viewKey: string | Uint8Array }
 
 interface WorkerProcess {
@@ -103,13 +104,14 @@ export function createMoneroSidecarManager(options: {
             if (current.receivedReady || response.version !== SIDECAR_VERSION || response.binaryVersion !== MONERO_VERSION || runtime !== current || current.stopped) throw new Error('version')
             current.receivedReady = true
             clearTimeout(current.startupTimer)
-            status = { state: 'ready', configured: false, version: response.version, binaryVersion: response.binaryVersion }
+            status = { state: 'ready', configured: false, version: response.version, binaryVersion: response.binaryVersion, sendReady: response.sendReady === true }
             current.readyResolve()
           } else if (Number.isSafeInteger(response?._req_id) && current.pending.has(response._req_id)) {
             const pending = current.pending.get(response._req_id)!
             current.pending.delete(response._req_id); clearTimeout(pending.timer)
             if (response.ok === true) pending.resolve(response.result)
-            else pending.reject(new Error('The watch-only Monero operation could not complete'))
+            // Only the worker's fixed public diagnostics pass through; anything else stays generic.
+            else pending.reject(new Error((PUBLIC_ERRORS as readonly string[]).includes(response.error) ? response.error : 'The watch-only Monero operation could not complete'))
           } else throw new Error('unexpected')
         }
         if (Buffer.byteLength(buffer) > MAX_IPC_LINE) throw new Error('bound')
@@ -204,6 +206,25 @@ export function createMoneroSidecarManager(options: {
       if (result.address !== walletAddress) throw new Error('The Monero watch wallet identity changed')
       return result
     },
+    sendReady: (): boolean => status.state === 'ready' && status.configured && status.sendReady === true,
+    async exportOutputs(): Promise<MoneroOutputRecord[]> {
+      if (!walletAddress || !status.configured) throw new Error('Connect a Monero watch wallet first')
+      return validateOutputs(await request('export_outputs', undefined, 120000))
+    },
+    async importKeyImages(input: { offset: 0; signedKeyImages: Array<{ keyImage: string; signature: string }> }) {
+      if (!walletAddress || !status.configured) throw new Error('Connect a Monero watch wallet first')
+      return validateKeyImageResult(await request('import_key_images', validateKeyImageImport(input), 180000))
+    },
+    async createTransfer(input: { address: string; amountAtomic: string; priority: number }): Promise<MoneroTransferDraft> {
+      if (!walletAddress || !status.configured) throw new Error('Connect a Monero watch wallet first')
+      return validateTransferDraft(await request('create_transfer', validateTransferRequest(input), 180000))
+    },
+    async relay(input: { txHex: string }): Promise<{ relayed: true }> {
+      if (!walletAddress || !status.configured) throw new Error('Connect a Monero watch wallet first')
+      const result = await request('relay_tx', validateRelayRequest(input), 90000)
+      if (result?.relayed !== true) throw new Error('The Monero transaction was not relayed')
+      return { relayed: true }
+    },
   }
 }
 
@@ -214,3 +235,8 @@ export const getMoneroSidecarStatus = manager.status
 export const configureMoneroWatch = manager.configureWatch
 export const getMoneroWalletStatus = manager.getWalletStatus
 export const refreshMoneroWatch = manager.refresh
+export const isMoneroSendReady = manager.sendReady
+export const exportMoneroOutputs = manager.exportOutputs
+export const importMoneroKeyImages = manager.importKeyImages
+export const createMoneroTransfer = manager.createTransfer
+export const relayMoneroTransaction = manager.relay

@@ -23,7 +23,7 @@ include .env
 export ELECTROBUN_DEVELOPER_ID ELECTROBUN_TEAMID ELECTROBUN_APPLEID ELECTROBUN_APPLEIDPASS
 endif
 
-.PHONY: release-sums monero-cli monero-emulator firmware-token-table-717 clearsign-worker-test sync-asset-data clearsign-worker-rehearsal-guard clearsign-worker-rehearsal-deploy install dev dev-hmr build build-stable build-canary build-signed patch-arm64-release-tar prune-bundle dmg clean help vault sign-check notary-check verify verify-entitlements publish release upload-dmg upload-all-dmgs sign-release sign-release-intel verify-arch audit-macos-bundle submodules modules-install modules-build device-protocol-build modules-clean audit build-zcash-cli build-zcash-cli-debug build-zcash-cli-intel test test-unit test-rest test-sign-gating test-zcash-cli test-emu test-emu-erc7730 test-emu-erc7730-717 test-emu-solana-lut test-emu-erc7730-typed build-intel build-signed-intel build-electrobun-x64-core build-electrobun-arm64-core prepare-electrobun-arm64-core publish-electrobun-x64-core build-electrobun-linux-x64-core preflight build-emulator build-emulator-windows build-emulator-macos-release build-emulator-release clean-emulator test-emu-python i18n-extract i18n-sync i18n-baseline test-i18n
+.PHONY: release-sums monero-cli monero-emulator monero-emulator-signing monero-adapter firmware-token-table-717 clearsign-worker-test sync-asset-data clearsign-worker-rehearsal-guard clearsign-worker-rehearsal-deploy install dev dev-hmr build build-stable build-canary build-signed patch-arm64-release-tar prune-bundle dmg clean help vault sign-check notary-check verify verify-entitlements publish release upload-dmg upload-all-dmgs sign-release sign-release-intel verify-arch audit-macos-bundle submodules modules-install modules-build device-protocol-build modules-clean audit build-zcash-cli build-zcash-cli-debug build-zcash-cli-intel test test-unit test-rest test-sign-gating test-zcash-cli test-emu test-emu-erc7730 test-emu-erc7730-717 test-emu-solana-lut test-emu-erc7730-typed build-intel build-signed-intel build-electrobun-x64-core build-electrobun-arm64-core prepare-electrobun-arm64-core publish-electrobun-x64-core build-electrobun-linux-x64-core preflight build-emulator build-emulator-windows build-emulator-macos-release build-emulator-release clean-emulator test-emu-python i18n-extract i18n-sync i18n-baseline test-i18n
 
 # --- Submodules (auto-init on fresh worktrees/clones) ---
 
@@ -296,6 +296,15 @@ monero-cli: install
 monero-emulator: install
 	@test -n "$(SOURCE)" || (echo "usage: make monero-emulator SOURCE=/path/to/libkkemu.dylib" && exit 1)
 	cd $(PROJECT_DIR) && bun scripts/stage-monero-emulator.ts --source "$(SOURCE)"
+
+# Research signing build (needs a reviewed monero-emulator-bundle/signing-manifest.json) and its host adapter. Dev-only.
+monero-emulator-signing: install
+	@test -n "$(SOURCE)" || (echo "usage: make monero-emulator-signing SOURCE=/path/to/libkkemu.dylib" && exit 1)
+	cd $(PROJECT_DIR) && bun scripts/stage-monero-emulator.ts --signing --source "$(SOURCE)"
+
+monero-adapter: install
+	@test -n "$(SOURCE)" -a -n "$(SHA256)" || (echo "usage: make monero-adapter SOURCE=/path/to/monero-host-adapter SHA256=reviewed-sha256" && exit 1)
+	cd $(PROJECT_DIR) && bun scripts/stage-monero-adapter.ts --source "$(SOURCE)" --sha256 "$(SHA256)"
 
 dev: install $(ZCASH_CLI_STAMP)
 	cd $(PROJECT_DIR) && bun run dev

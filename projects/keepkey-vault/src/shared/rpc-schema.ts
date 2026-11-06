@@ -1,4 +1,4 @@
-import type { MoneroStatus } from './types'
+import type { MoneroSendReview, MoneroStatus } from './types'
 import type { MultisigPolicyPreview,MultisigCosignerExport,BtcPsbtSigned } from "./multisig-policy"
 import type { ElectrobunRPCSchema } from 'electrobun/bun'
 import type { SafeAccount, SafeContext, SafeCreateParams, SafeProposal, SafeTransfer, SafeTxReview, VaultAddParams, VaultAddReview } from './safe-multisig'
@@ -498,6 +498,10 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       moneroGetStatus: { params: Record<string, never>; response: MoneroStatus }
       moneroConnect: { params: Record<string, never>; response: MoneroStatus }
       moneroGetAddress: { params: { showDisplay: boolean }; response: { address: string; network: 'mainnet'; displayed: boolean } }
+      moneroSyncKeyImages: { params: Record<string, never>; response: MoneroStatus }
+      moneroPrepareSend: { params: { address: string; amountAtomic: string }; response: MoneroSendReview }
+      moneroSend: { params: { prepareId: string }; response: { txid: string } }
+      moneroRetryRelay: { params: undefined; response: { txid: string } }
       setMoneroEnabled: { params: { enabled: boolean }; response: AppSettings }
       setMoneroNode: { params: { daemonUrl: string; restoreHeight: number }; response: AppSettings }
       emulatorPair: { params: void; response: EmulatorStatus }
