@@ -55,12 +55,13 @@ describe('EmulatorTransportDelegate', () => {
     await expect(delegate.writeChunk(new Uint8Array(64))).rejects.toThrow('Write refused: emulator stopped')
   })
 
-  test('a connected read still returns frames, and a slow user does not end it', async () => {
+  test('a connected read still returns frames, and no time ends it', async () => {
     const delegate = new EmulatorTransportDelegate()
     await delegate.connect()
     const read = delegate.readChunk(false)
-    // Four minutes pass with the PIN unanswered (the old 240 s deadline): hdwallet owns that deadline now.
-    setSystemTime(new Date(Date.now() + 241_000))
+    // Ten minutes pass: past the old 240 s and 360 s delegate deadlines, and past the
+    // 512 s wrong-PIN countdown at 9 failures. Callers own their deadlines.
+    setSystemTime(new Date(Date.now() + 600_000))
     await sleep(30)
     expect(await outcome(read, 10)).toBe('pending')
     const frame = new Uint8Array(64).fill(7)

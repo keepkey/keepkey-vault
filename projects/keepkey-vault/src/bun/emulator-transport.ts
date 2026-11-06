@@ -10,7 +10,6 @@
  *       ↕
  *   hdwallet Transport → KeepKeyHDWallet → engine-controller
  */
-import * as core from '@keepkey/hdwallet-core'
 import { Adapter, type TransportDelegate, type AdapterDelegate } from '@keepkey/hdwallet-keepkey'
 import { emuWrite, emuRead, getEmulatorStatus, getEmulatorInstance } from './emulator'
 
@@ -18,13 +17,15 @@ const TAG = '[emu-transport]'
 
 // Poll interval for non-blocking emuRead (ms)
 const READ_POLL_MS = 5
-// Backstop only, for callers that read the delegate directly (monero-vault.ts).
-// hdwallet bounds its own reads (5 s for a reply, LONG_TIMEOUT once the device
-// waits on the user) and on expiry quarantines the transport and disconnects
-// us, which ends the read. This deadline must never fire first: a read it ends
-// leaves the firmware still waiting for its PIN, and the next request queued on
-// the transport then lands in that wait ("Unknown message"), which ends it.
-const READ_TIMEOUT_MS = core.LONG_TIMEOUT + 60_000
+// No read deadline of its own. A read ends when its connection is disconnected or
+// the emulator it belongs to stops (closedReason), and the FFI watchdog covers a
+// hung library. Callers own deadlines: hdwallet bounds each reply and on expiry
+// quarantines the transport and disconnects us, which ends the read. A deadline
+// here ended reads the caller still wanted: the wrong-PIN countdown (2^fails s,
+// 512 s at 9 fails) outlasted it, and the next request then went into a firmware
+// that was not reading and landed in its PIN wait when the countdown ended.
+// Hardware delegates have no read deadline either; monero-vault.ts reads both
+// directly.
 
 export class EmulatorTransportDelegate implements TransportDelegate {
   private connected = false
@@ -102,10 +103,7 @@ export class EmulatorTransportDelegate implements TransportDelegate {
 
   async readChunk(debugLink?: boolean): Promise<Uint8Array> {
     const iface = debugLink ? 1 : 0
-    const deadline = Date.now() + READ_TIMEOUT_MS
-    let pollCount = 0
-
-    while (Date.now() < deadline) {
+    for (;;) {
       const closed = this.closedReason()
       if (closed) throw new Error(`${TAG} Read aborted: ${closed}`)
       const data = emuRead(iface)
@@ -122,12 +120,9 @@ export class EmulatorTransportDelegate implements TransportDelegate {
         }
         return data
       }
-      pollCount++
       // Non-blocking read returned nothing — yield then retry
       await new Promise(r => setTimeout(r, READ_POLL_MS))
     }
-
-    throw new Error(`${TAG} Read timeout after ${READ_TIMEOUT_MS}ms (iface=${iface}, polls=${pollCount})`)
   }
 }
 
