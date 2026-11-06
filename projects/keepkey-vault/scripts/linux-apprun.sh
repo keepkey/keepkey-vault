@@ -6,26 +6,51 @@
 # app: the native layer did not load and the user got a JavaScript stack trace
 # ("null is not an object (evaluating 'bridge.requestHost')"). Check the
 # libraries the native layer links against first and name the packages.
+#
+# The AppImage bundles the tray stack (Ayatana AppIndicator + dbusmenu) in
+# usr/lib, so normally only WebKitGTK can be missing — it is too big and too
+# coupled to the host (helper subprocesses, GStreamer, Mesa) to bundle.
 SELF=$(readlink -f "$0")
 HERE=${SELF%/*}
 BIN="$HERE/usr/bin/bin"
+LIB="$HERE/usr/lib"
 
-# libasar.so ships next to libNativeWrapper.so, hence LD_LIBRARY_PATH. No ldd,
+# Bundled libs (tray stack) must be visible to the check below and to the app
+# itself, which dlopens libNativeWrapper.so at runtime.
+export LD_LIBRARY_PATH="$LIB${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+
+# libasar.so ships next to libNativeWrapper.so, hence $BIN on the path. No ldd,
 # or nothing missing, leaves $missing empty and the app starts as before.
-missing=$(LD_LIBRARY_PATH="$BIN${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" ldd "$BIN/libNativeWrapper.so" 2>/dev/null \
+missing=$(LD_LIBRARY_PATH="$BIN:$LD_LIBRARY_PATH" ldd "$BIN/libNativeWrapper.so" 2>/dev/null \
   | awk '/=> not found/ { print $1 }' | sort -u)
 
 if [ -n "$missing" ]; then
   ID=""; ID_LIKE=""
-  [ -r /etc/os-release ] && . /etc/os-release
+  # KK_APPRUN_OS_RELEASE: test override only.
+  OS_RELEASE="${KK_APPRUN_OS_RELEASE:-/etc/os-release}"
+  [ -r "$OS_RELEASE" ] && . "$OS_RELEASE"
   case "$ID $ID_LIKE" in
-    *debian*|*ubuntu*) fix="sudo apt install libwebkit2gtk-4.1-0 libayatana-appindicator3-1" ;;
-    *fedora*|*rhel*)   fix="sudo dnf install webkit2gtk4.1 libayatana-appindicator-gtk3" ;;
-    *suse*)            fix="sudo zypper install libwebkit2gtk-4_1-0 libayatana-appindicator3-1" ;;
-    *arch*)            fix="sudo pacman -S webkit2gtk-4.1 libayatana-appindicator" ;;
-    *)                 fix="Install WebKitGTK 4.1 and Ayatana AppIndicator 3 with your package manager." ;;
+    *debian*|*ubuntu*) pm="sudo apt install";    webkit_pkg="libwebkit2gtk-4.1-0"; tray_pkg="libayatana-appindicator3-1" ;;
+    *fedora*|*rhel*)   pm="sudo dnf install";    webkit_pkg="webkit2gtk4.1";       tray_pkg="libayatana-appindicator-gtk3" ;;
+    *suse*)            pm="sudo zypper install"; webkit_pkg="libwebkit2gtk-4_1-0"; tray_pkg="libayatana-appindicator3-1" ;;
+    *arch*)            pm="sudo pacman -S";      webkit_pkg="webkit2gtk-4.1";      tray_pkg="libayatana-appindicator" ;;
+    *)                 pm="";                    webkit_pkg="WebKitGTK 4.1";       tray_pkg="Ayatana AppIndicator 3" ;;
   esac
-  msg="KeepKey Desktop cannot start. These system libraries are missing:
+
+  # Name only the packages that cover what is actually missing.
+  pkgs=""
+  case "$missing" in *webkit2gtk*|*javascriptcoregtk*|*soup*) pkgs="$webkit_pkg" ;; esac
+  case "$missing" in *ayatana*|*appindicator*|*dbusmenu*) pkgs="${pkgs:+$pkgs }$tray_pkg" ;; esac
+
+  if [ -n "$pm" ] && [ -n "$pkgs" ]; then
+    fix="$pm $pkgs"
+  elif [ -n "$pkgs" ]; then
+    fix="Install $pkgs with your package manager."
+  else
+    fix="Use your system package manager."
+  fi
+
+  msg="KeepKey Vault cannot start. These system libraries are missing:
 
 $missing
 
@@ -33,8 +58,8 @@ To install them:
 $fix"
   echo "$msg" >&2
   # Launched from a file manager there is no terminal to read, so show a dialog.
-  if command -v zenity >/dev/null 2>&1; then zenity --error --title="KeepKey Desktop" --text="$msg" 2>/dev/null
-  elif command -v kdialog >/dev/null 2>&1; then kdialog --title "KeepKey Desktop" --error "$msg" 2>/dev/null
+  if command -v zenity >/dev/null 2>&1; then zenity --error --title="KeepKey Vault" --text="$msg" 2>/dev/null
+  elif command -v kdialog >/dev/null 2>&1; then kdialog --title "KeepKey Vault" --error "$msg" 2>/dev/null
   elif command -v xmessage >/dev/null 2>&1; then xmessage "$msg" 2>/dev/null
   fi
   exit 1

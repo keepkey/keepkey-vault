@@ -1,5 +1,5 @@
 import { afterAll, expect, test } from "bun:test"
-import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -14,12 +14,18 @@ function appDir(name: string, lddOutput?: string) {
 	const bin = join(dir, "usr", "bin", "bin")
 	const stubs = join(dir, "stubs")
 	mkdirSync(bin, { recursive: true })
+	mkdirSync(join(dir, "usr", "lib"), { recursive: true })
 	mkdirSync(stubs)
 	copyFileSync(join(import.meta.dir, "..", "scripts", "linux-apprun.sh"), join(dir, "AppRun"))
 	writeFileSync(join(bin, "libNativeWrapper.so"), "")
-	writeFileSync(join(bin, "launcher"), '#!/bin/bash\necho "LAUNCHED $*"\n')
+	writeFileSync(join(bin, "launcher"), '#!/bin/bash\necho "LAUNCHED $*"\necho "LAUNCHER_LD=$LD_LIBRARY_PATH"\n')
 	if (lddOutput !== undefined) {
-		writeFileSync(join(stubs, "ldd"), `#!/bin/bash\ncat <<'EOF'\n${lddOutput}\nEOF\n`)
+		// The stub also records the LD_LIBRARY_PATH it was invoked with, so tests
+		// can assert the bundled usr/lib directory is on the search path.
+		writeFileSync(
+			join(stubs, "ldd"),
+			`#!/bin/bash\necho "LDD_LD=$LD_LIBRARY_PATH" > "${join(dir, "ldd-env.txt")}"\ncat <<'EOF'\n${lddOutput}\nEOF\n`,
+		)
 		chmodSync(join(stubs, "ldd"), 0o755)
 	}
 	chmodSync(join(dir, "AppRun"), 0o755)
@@ -27,10 +33,10 @@ function appDir(name: string, lddOutput?: string) {
 	return { dir, stubs }
 }
 
-function run(app: { dir: string; stubs: string }, args: string[] = []) {
+function run(app: { dir: string; stubs: string }, args: string[] = [], env: Record<string, string> = {}) {
 	const proc = Bun.spawnSync([join(app.dir, "AppRun"), ...args], {
 		// No DISPLAY: any dialog tool present on the machine exits at once.
-		env: { PATH: `${app.stubs}:/usr/bin:/bin` },
+		env: { PATH: `${app.stubs}:/usr/bin:/bin`, ...env },
 		stdout: "pipe",
 		stderr: "pipe",
 	})
@@ -47,6 +53,21 @@ it("starts the app when every library resolves", () => {
 	expect(r.out).toContain("LAUNCHED --flag value")
 })
 
+it("puts the bundled usr/lib on the library path for the check and the app", () => {
+	const app = appDir("libpath", [
+		"\tlibayatana-appindicator3.so.1 => /usr/lib/libayatana-appindicator3.so.1 (0x00007f0000000000)",
+	].join("\n"))
+	const r = run(app)
+	expect(r.code).toBe(0)
+	const bundledLib = join(app.dir, "usr", "lib")
+	// The ldd check saw both the bundled libs and the app's own bin dir.
+	const lddEnv = readFileSync(join(app.dir, "ldd-env.txt"), "utf8")
+	expect(lddEnv).toContain(join(app.dir, "usr", "bin", "bin"))
+	expect(lddEnv).toContain(bundledLib)
+	// The launcher inherits the bundled lib dir, so dlopen finds the tray stack.
+	expect(r.out).toContain(`LAUNCHER_LD=${bundledLib}`)
+})
+
 it("names the missing libraries and does not start the app", () => {
 	const app = appDir("missing", [
 		"\tlibgtk-3.so.0 => /lib/x86_64-linux-gnu/libgtk-3.so.0 (0x00007f0000000000)",
@@ -60,6 +81,44 @@ it("names the missing libraries and does not start the app", () => {
 	expect(r.err).toContain("libayatana-appindicator3.so.1")
 	expect(r.err).not.toContain("libgtk-3.so.0")
 	expect(r.err.toLowerCase()).toContain("install")
+})
+
+it("suggests only the package that is actually missing", () => {
+	// Fedora KDE ships without WebKitGTK; the tray stack is bundled, so the fix
+	// line must name the webkit package and not tell the user to install a
+	// tray package they do not need.
+	const osRelease = join(root, "os-release-fedora")
+	writeFileSync(osRelease, 'ID=fedora\nID_LIKE=""\n')
+	const app = appDir("webkit-only", [
+		"\tlibwebkit2gtk-4.1.so.0 => not found",
+		"\tlibjavascriptcoregtk-4.1.so.0 => not found",
+	].join("\n"))
+	const r = run(app, [], { KK_APPRUN_OS_RELEASE: osRelease })
+	expect(r.code).toBe(1)
+	expect(r.err).toContain("sudo dnf install webkit2gtk4.1")
+	expect(r.err).not.toContain("ayatana")
+})
+
+it("suggests both packages when both stacks are missing", () => {
+	const osRelease = join(root, "os-release-debian")
+	writeFileSync(osRelease, 'ID=debian\nID_LIKE=""\n')
+	const app = appDir("both-missing", [
+		"\tlibwebkit2gtk-4.1.so.0 => not found",
+		"\tlibayatana-appindicator3.so.1 => not found",
+	].join("\n"))
+	const r = run(app, [], { KK_APPRUN_OS_RELEASE: osRelease })
+	expect(r.code).toBe(1)
+	expect(r.err).toContain("sudo apt install libwebkit2gtk-4.1-0 libayatana-appindicator3-1")
+})
+
+it("falls back to a generic hint for unmapped libraries", () => {
+	const osRelease = join(root, "os-release-arch")
+	writeFileSync(osRelease, 'ID=arch\nID_LIKE=""\n')
+	const app = appDir("unmapped", ["\tlibfancy.so.9 => not found"].join("\n"))
+	const r = run(app, [], { KK_APPRUN_OS_RELEASE: osRelease })
+	expect(r.code).toBe(1)
+	expect(r.err).toContain("libfancy.so.9")
+	expect(r.err).toContain("package manager")
 })
 
 it("starts the app when the libraries cannot be inspected", () => {
