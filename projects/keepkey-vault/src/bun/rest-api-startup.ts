@@ -73,3 +73,14 @@ export async function startRestApiOrReport(port: number, when: 'startup' | 'sett
   // 'settings' does not wait for the dialog: the Settings call would time out.
   return null
 }
+
+/** Runs before the main window opens. A Desktop older than the instance lock
+ *  (single-instance.ts), or a program answering like one, already has the
+ *  port: show the same startup dialog and quit, with no window left behind. */
+export async function refuseSecondDesktop(port: number, deps: Pick<RestApiStartDeps, 'answersLikeDesktop' | 'showError' | 'exit'>): Promise<void> {
+  if (!(await deps.answersLikeDesktop())) return
+  console.error(`[Vault] REST API port ${port} is in use (answers-like-desktop); quitting before the window opens`)
+  await deps.showError(restPortDialog(port, 'answers-like-desktop', 'startup'))
+    .catch(err => console.error('[Vault] Could not show the port-in-use dialog:', err))
+  deps.exit(1)
+}
