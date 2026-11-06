@@ -625,12 +625,15 @@ jobs:
           # 22.04 (jammy) debs, not this runner's distro, to respect the glibc
           # 2.35 floor; an audit below enforces that.
           TRAY_PKGS="libayatana-appindicator3-1 libayatana-indicator3-7 libayatana-ido3-0.4-0 libdbusmenu-glib4 libdbusmenu-gtk3-4"
-          echo "deb [arch=amd64] http://archive.ubuntu.com/ubuntu jammy main universe" \
+          echo "deb [arch=amd64 signed-by=/usr/share/keyrings/ubuntu-archive-keyring.gpg] http://archive.ubuntu.com/ubuntu jammy main universe" \
             | sudo tee /etc/apt/sources.list.d/kk-jammy-tray.list >/dev/null
           sudo apt-get update
           DEBS="$WORK/tray-debs"
           mkdir -p "$DEBS/x"
           (cd "$DEBS" && apt-get download $(for p in $TRAY_PKGS; do printf '%s/jammy ' "$p"; done))
+          # Drop the jammy source immediately: a later apt-get install in this
+          # job must never see jammy package candidates.
+          sudo rm /etc/apt/sources.list.d/kk-jammy-tray.list
           for deb in "$DEBS"/*.deb; do dpkg-deb -x "$deb" "$DEBS/x"; done
 
           # Audit before copying: the bundled libs must not raise the glibc
@@ -643,7 +646,7 @@ jobs:
               echo "::error::$(basename "$so") requires GLIBC_$max, above the 2.35 floor"
               exit 1
             fi
-          done < <(find "$DEBS/x/usr/lib" -type f -name '*.so.*' -print0)
+          done < <(find "$DEBS/x/usr/lib" -type f \( -name '*.so' -o -name '*.so.*' \) -print0)
 
           find "$DEBS/x/usr/lib" \( -name '*.so' -o -name '*.so.*' \) -exec cp -a {} "$APPDIR/usr/bin/bin/" \;
           for lib in libayatana-appindicator3.so.1 libayatana-indicator3.so.7 libayatana-ido3-0.4.so.0 libdbusmenu-glib.so.4 libdbusmenu-gtk3.so.4; do
