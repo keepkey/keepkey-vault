@@ -93,6 +93,17 @@ export function selectBalanceEntry<T extends { chainId?: string }>(
  * twice with different caips. One shared boolean let a directly-confirmed SPL
  * token vouch for a SOL balance nobody had fetched.
  */
+/** Why a balance is not a usable figure: no entry yet ('missing'), or the backend
+ *  said it could not answer for the chain ('degraded'). Undefined = verified.
+ *  Screens pick their message from this; "could not reach" is only true for 'degraded'. */
+export function balanceUnverifiedReason(
+  balance?: { syncState?: BalanceDisplayInput['syncState']; confirmedAssetCaips?: string[] },
+  assetCaip?: string,
+): 'missing' | 'degraded' | undefined {
+  if (!balance) return 'missing'
+  return isBalanceUnverified(balance, assetCaip) ? 'degraded' : undefined
+}
+
 export function isBalanceUnverified(
   balance?: { syncState?: BalanceDisplayInput['syncState']; confirmedAssetCaips?: string[] },
   assetCaip?: string,

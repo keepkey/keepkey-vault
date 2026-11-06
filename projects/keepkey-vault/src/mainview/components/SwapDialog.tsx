@@ -21,7 +21,7 @@ import type { ChainDef } from "../../shared/chains"
 import { nativeMaxSpendableAmount, normalizeDecimals, tokenMaxSpendableAmount } from "../../shared/max-send"
 import { getAssetIcon } from "../../shared/assetLookup"
 import { validateAddress } from "../../shared/address-validation"
-import { isBalanceUnverified } from "../../shared/balance-display-state"
+import { balanceUnverifiedReason, isBalanceUnverified } from "../../shared/balance-display-state"
 import { mergeTrustedBalanceSnapshot } from "../../shared/balance-reconciliation"
 import type { SwapAsset, SwapQuote, ChainBalance, CustomToken, SwapStatusUpdate, SwapTrackingStatus, PendingSwap, SwapUiState, SwapUiCommand, SwapHealth } from "../../shared/types"
 import { SOLANA_BLIND_SIGNING_REQUIRED } from "../../shared/types"
@@ -1538,6 +1538,33 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
     () => !!fromAsset && isBalanceUnverified(fromBalanceEntry, fromAsset.caip),
     [fromAsset, fromBalanceEntry],
   )
+  /* 'missing' = no answer for this chain yet; only 'degraded' means the refresh failed. */
+  const fromBalanceReason = useMemo(
+    () => fromAsset ? balanceUnverifiedReason(fromBalanceEntry, fromAsset.caip) : undefined,
+    [fromAsset, fromBalanceEntry],
+  )
+
+  /* A cached snapshot can lack the chain being swapped from (it was not in the
+   * last refresh). Fetch live once per chain instead of waiting on another screen
+   * to push it; after that settles, a still-missing chain is reported as such. */
+  const liveFetchedChains = useRef(new Set<string>())
+  // Bumped on close: a fetch from an earlier opening must not write into this one.
+  // (Not an effect cleanup: setting loadingBalances re-runs the effect, and a
+  // cleanup would cancel the very fetch that is in flight.)
+  const swapOpenGeneration = useRef(0)
+  useEffect(() => {
+    if (!open) { swapOpenGeneration.current++; liveFetchedChains.current.clear() }
+  }, [open])
+  useEffect(() => {
+    if (!open || !fromAsset || fromBalanceEntry || loadingBalances || liveFetchedChains.current.has(fromAsset.chainId)) return
+    liveFetchedChains.current.add(fromAsset.chainId)
+    const generation = swapOpenGeneration.current
+    setLoadingBalances(true)
+    rpcRequest<ChainBalance[]>('getBalances', undefined, 120000)
+      .then(live => { if (generation === swapOpenGeneration.current && Array.isArray(live)) setBalances(live) })
+      .catch(() => {})
+      .finally(() => { if (generation === swapOpenGeneration.current) setLoadingBalances(false) })
+  }, [open, fromAsset, fromBalanceEntry, loadingBalances])
 
   /* Confidence in the chain's NATIVE balance, which is a different question:
    * a directly-confirmed SPL token says nothing about the SOL that pays for
@@ -4544,14 +4571,24 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                       {exceedsBalance && (
                         <Text fontSize="10px" color="kk.error" mt="1" fontWeight="600">{t("insufficientBalance")}</Text>
                       )}
-                      {fromBalanceUnverified && fromAsset && (
+                      {fromBalanceUnverified && fromAsset && (fromBalanceReason === 'missing' && loadingBalances ? (
+                        <Text fontSize="10px" color="kk.textMuted" mt="1" fontWeight="600">
+                          {t("balanceLoading", {
+                            defaultValue: "Loading {{symbol}} balance… MAX is available once it arrives.",
+                            symbol: fromAsset.symbol,
+                          })}
+                        </Text>
+                      ) : (
                         <Text fontSize="10px" color="kk.gold" mt="1" fontWeight="600">
-                          {t("balanceUnverified", {
+                          {fromBalanceReason === 'missing' ? t("balanceMissing", {
+                            defaultValue: "{{symbol}} balance was not returned by the last refresh, so MAX is unavailable. Enter an amount, or refresh and try again.",
+                            symbol: fromAsset.symbol,
+                          }) : t("balanceUnverified", {
                             defaultValue: "{{symbol}} balance unavailable — the last refresh could not reach this chain, so MAX is unavailable. Enter an amount, or refresh and try again.",
                             symbol: fromAsset.symbol,
                           })}
                         </Text>
-                      )}
+                      ))}
                       {exceedsSafeMax && fromAsset && (
                         <Text fontSize="10px" color="kk.gold" mt="1" fontWeight="600">
                           {t("exceedsSafeMax", {

@@ -18,7 +18,7 @@ import { caipToNetworkId, isTokenCaip } from "../../shared/chains"
 import type { ChainDef } from "../../shared/chains"
 import type { ChainBalance, TokenBalance, BuildTxResult, BroadcastResult, AddressBookEntry } from "../../shared/types"
 import { validateAddress } from "../../shared/address-validation"
-import { isBalanceUnverified } from "../../shared/balance-display-state"
+import { balanceUnverifiedReason, isBalanceUnverified } from "../../shared/balance-display-state"
 import { normalizeAmountInput, decimalAmount } from '../../shared/locale'
 
 type SendPhase = 'input' | 'built' | 'signed' | 'broadcast'
@@ -155,6 +155,10 @@ export function SendForm({ chain, address, balance, token, tokenBalanceUnverifie
 	// being sent. A directly-confirmed token cleared the shared flag and let the
 	// warning judge a SOL balance that was still a placeholder zero.
 	const nativeBalanceUnverified = isBalanceUnverified(balance, chain.caip)
+	// "Could not reach this chain" is only true when the refresh said so; no entry = not loaded yet.
+	const unverifiedTitle = balanceUnverifiedReason(balance, chain.caip) === 'missing'
+		? `${chain.coin} balance has not loaded yet`
+		: `${chain.coin} balance unavailable — the last refresh could not reach this chain`
 	// Fee controls: presets where a builder honors feeLevel; free-form custom only where
 	// the builder accepts an exact rate (EVM gas price/limit, UTXO sat/vByte).
 	const supportsFeePresets = chain.chainFamily === 'utxo' || chain.chainFamily === 'evm' || chain.chainFamily === 'cosmos'
@@ -501,7 +505,7 @@ export function SendForm({ chain, address, balance, token, tokenBalanceUnverifie
 						color="kk.textPrimary"
 						letterSpacing="-0.01em"
 						title={activeAssetUnverified
-							? `${chain.coin} balance unavailable — the last refresh could not reach this chain`
+							? unverifiedTitle
 							: `${displayBalance} ${displaySymbol}`}
 						cursor="help"
 					>
@@ -553,7 +557,7 @@ export function SendForm({ chain, address, balance, token, tokenBalanceUnverifie
 							fontSize="10px"
 							fontFamily="mono"
 							color="kk.textMuted"
-							title={nativeBalanceUnverified ? `${chain.coin} balance unavailable — the last refresh could not reach this chain` : undefined}
+							title={nativeBalanceUnverified ? unverifiedTitle : undefined}
 						>
 							{nativeBalanceUnverified ? "—" : formatBalance(balance.balance)} {chain.symbol}
 						</Text>
