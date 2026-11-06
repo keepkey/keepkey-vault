@@ -7,7 +7,7 @@
  * to run `zip -y -r -9 ...` which overflows when there are 13K+ files.
  * Our shim at scripts/zip adds -q (quiet) to suppress per-file output.
  */
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import { copyFileSync, existsSync, mkdirSync } from 'node:fs'
 
 const env = process.argv[2] || 'stable'
@@ -49,6 +49,51 @@ if (process.platform === 'darwin' || process.platform === 'win32') {
   }
 }
 
+// CI's Monero builds require all inputs; legacy builds without the optional
+// sidecar retain their existing packaging and show Monero as unavailable.
+const moneroExecutable = process.platform === 'win32' ? 'monero-cli.exe' : 'monero-cli'
+const moneroRpc = process.platform === 'win32' ? 'monero-wallet-rpc.exe' : 'monero-wallet-rpc'
+const moneroInputs = [`monero-cli/dist/${moneroExecutable}`, `monero-cli/vendor/${process.platform}-${process.arch}/${moneroRpc}`, `monero-cli/vendor/${process.platform}-${process.arch}/monero-tools.json`, `monero-cli/vendor/${process.platform}-${process.arch}/LICENSE`]
+const presentMoneroInputs = moneroInputs.filter(relative => existsSync(join(import.meta.dir, '..', relative)))
+const hasMoneroInputs = presentMoneroInputs.length === moneroInputs.length
+if ((process.env.KEEPKEY_REQUIRE_MONERO_SIDECAR === '1' || presentMoneroInputs.length > 0) && !hasMoneroInputs) {
+  console.error('[release] Missing Monero sidecar input. Run bun run monero:prepare and bun run monero:build.')
+  process.exit(1)
+}
+
+// Electrobun signs/notarizes before the later release re-signing pass. Stage
+// Developer ID signed copies of both extensionless helpers first; changing the
+// official RPC signature changes its bytes, so update only the copied receipt.
+// The prepared vendor inputs remain immutable and the outer app seals metadata.
+let signedMoneroSources: Record<string, string> = {}
+if (hasMoneroInputs && process.platform === 'darwin' && process.env.CI !== 'true') {
+  const developer = process.env.ELECTROBUN_DEVELOPER_ID
+  const team = process.env.ELECTROBUN_TEAMID
+  if (!developer || !team) {
+    console.error('[release] Developer ID and Team ID are required for the Monero helper signatures.')
+    process.exit(1)
+  }
+  const project = resolve(import.meta.dir, '..')
+  const tools = join(project, 'monero-cli', 'vendor', `${process.platform}-${process.arch}`)
+  const output = join(project, '_build', '_signed_monero')
+  const staged = Bun.spawnSync(['python3', resolve(project, '../../scripts/monero-signing-metadata.py'), 'stage',
+    '--worker', join(project, 'monero-cli/dist', moneroExecutable),
+    '--rpc', join(tools, moneroRpc), '--metadata', join(tools, 'monero-tools.json'),
+    '--output', output, '--entitlements', join(project, 'entitlements.plist'),
+    '--identity', `Developer ID Application: ${developer} (${team})`], { stdout: 'inherit', stderr: 'inherit' })
+  if (staged.exitCode !== 0) process.exit(staged.exitCode ?? 1)
+  signedMoneroSources = {
+    KEEPKEY_MONERO_CLI_SOURCE: join(output, moneroExecutable),
+    KEEPKEY_MONERO_RPC_SOURCE: join(output, moneroRpc),
+    KEEPKEY_MONERO_METADATA_SOURCE: join(output, 'monero-tools.json'),
+  }
+}
+
+if (process.env.KEEPKEY_INCLUDE_MONERO_EMULATOR === '1') {
+  console.error('[release] The Monero research emulator is a development artifact; its signing and deployment target are not release-certified.')
+  process.exit(1)
+}
+
 const result = Bun.spawnSync(
   ['electrobun', 'build', `--env=${env}`],
   {
@@ -57,6 +102,7 @@ const result = Bun.spawnSync(
       ...process.env,
       PATH: `${scriptsDir}:${currentPath}`,
       ...(emulatorSource ? { KEEPKEY_EMULATOR_SOURCE: emulatorSource } : {}),
+      ...signedMoneroSources,
     },
     stdout: 'inherit',
     stderr: 'inherit',

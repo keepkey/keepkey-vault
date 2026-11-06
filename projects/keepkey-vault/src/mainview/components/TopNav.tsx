@@ -12,7 +12,7 @@ import { NAV_HEIGHT } from "../layout"
 import { WalletSelector } from "./WalletSelector"
 import { useBtcMultisigEnabled } from "../hooks/useBtcMultisigEnabled"
 
-export type NavTab = "vault" | "shapeshift" | "explore" | "addresses" | "multisig"
+export type NavTab = "vault" | "shapeshift" | "explore" | "addresses" | "multisig" | "monero"
 
 interface TopNavProps {
 	label?: string
@@ -22,6 +22,7 @@ interface TopNavProps {
 	needsFirmwareUpdate?: boolean
 	latestFirmware?: string
 	isEmulator?: boolean
+	moneroEnabled?: boolean
 	onSettingsToggle: () => void
 	onMobileToggle?: () => void
 	onWalletConnectToggle?: () => void
@@ -148,6 +149,7 @@ export function TopNav({
 	needsFirmwareUpdate,
 	latestFirmware,
 	isEmulator,
+	moneroEnabled,
 	onSettingsToggle,
 	onMobileToggle,
 	onWalletConnectToggle,
@@ -230,6 +232,8 @@ export function TopNav({
 			icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3 3 7v5c0 5 5 8 9 10 4-2 9-5 9-10V7z"/><circle cx="9" cy="11" r="2"/><path d="m10.5 12.5 3 3m-1.5-1.5 2-2M15 8h2v4"/></svg>,
 		},
 	]
+
+	if (moneroEnabled && !watchOnly && !isBitcoinOnly) TAB_DEFS.splice(2, 0, { id: "monero", label: "Monero", icon: <Text fontSize="14px" color="#ff7a26">ɱ</Text> })
 
 	const dotColor = connected ? "var(--teal)" : "var(--text-3)"
 	const logoGlow = passphraseActive ? 'signing' : connected ? 'connected' : 'idle'

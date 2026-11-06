@@ -43,6 +43,7 @@ import { TopNav, SplashNav } from "./components/TopNav"
 import { WindowResizeHandles } from "./components/WindowResizeHandles"
 import type { NavTab } from "./components/TopNav"
 import { Dashboard } from "./components/Dashboard"
+import { MoneroPanel } from "./components/MoneroPanel"
 import { CommandPalette } from "./components/CommandPalette"
 import { useLatestBalances } from "./lib/commandBus"
 import { AppStore } from "./components/AppStore"
@@ -130,6 +131,8 @@ function App() {
 	const [walletConnectEnabled, setWalletConnectEnabled] = useState(false)
 	const [hiveEnabled, setHiveEnabled] = useState(false)
 	const [emulatorEnabled, setEmulatorEnabled] = useState(false)
+	const [moneroEnabled, setMoneroEnabled] = useState(false)
+	useEffect(() => { if (!moneroEnabled && activeTab === "monero") setActiveTab("vault") }, [moneroEnabled, activeTab])
 	const [offlineModeSetting, setOfflineModeSetting] = useState(false)
 	// One-time btc-only data-source onboarding. Starts true so it never flashes
 	// before settings load; the real value arrives from getAppSettings.
@@ -209,7 +212,7 @@ function App() {
 		const refreshSettings = () => {
 			rpcRequest<AppSettings>("getAppSettings")
 				.then((s) => {
-					setRestApiEnabled(s.restApiEnabled); setWalletConnectEnabled(s.walletConnectEnabled); setEmulatorEnabled(s.emulatorEnabled); setHiveEnabled(s.hiveEnabled); setOfflineModeSetting(s.offlineMode); setBtcOnboardingSeen(s.btcOnboardingShown); setBtcNodeEnabledSetting(s.btcNodeEnabled); setNetworksChosen(s.networksChosen); setDisabledNetworks(s.disabledNetworks); setZcashEnabled(s.zcashPrivacyEnabled)
+					setRestApiEnabled(s.restApiEnabled); setWalletConnectEnabled(s.walletConnectEnabled); setEmulatorEnabled(s.emulatorEnabled); setMoneroEnabled(s.moneroEnabled); setHiveEnabled(s.hiveEnabled); setOfflineModeSetting(s.offlineMode); setBtcOnboardingSeen(s.btcOnboardingShown); setBtcNodeEnabledSetting(s.btcNodeEnabled); setNetworksChosen(s.networksChosen); setDisabledNetworks(s.disabledNetworks); setZcashEnabled(s.zcashPrivacyEnabled)
 					if (s.pioneerApiBase) loadSupportedChains(s.pioneerApiBase).catch(() => {})
 				})
 				.catch(() => {})
@@ -1242,6 +1245,7 @@ function App() {
 					needsFirmwareUpdate={deviceState.needsFirmwareUpdate}
 					latestFirmware={deviceState.latestFirmware}
 					isEmulator={deviceState.isEmulator}
+					moneroEnabled={moneroEnabled}
 					onSettingsToggle={() => setSettingsOpen((o) => !o)}
 					onMobileToggle={() => setMobilePanelOpen((o) => !o)}
 					onWalletConnectToggle={walletConnectEnabled ? handleOpenWalletConnect : undefined}
@@ -1266,11 +1270,12 @@ function App() {
 					    time (always for passphrase wallets, which keep no cache). Only
 					    the refresh button fetches. */}
 					<Flex flex="1" direction="column" display={activeTab === "vault" ? "flex" : "none"}>
-						<Dashboard onLoaded={handlePortfolioLoaded} onOpenVault={handleOpenVault} onOpenSettings={() => setSettingsOpen(true)} firmwareVersion={deviceState.firmwareVersion} firmwareVariant={deviceState.firmwareVariant} forceRefresh={wizardComplete} onForceRefreshConsumed={() => setWizardComplete(false)} isHiddenWallet={deviceState.isHiddenWallet} knownEmpty={freshWallet} />
+						<Dashboard onOpenMonero={moneroEnabled ? () => setActiveTab("monero") : undefined} onLoaded={handlePortfolioLoaded} onOpenVault={handleOpenVault} onOpenSettings={() => setSettingsOpen(true)} firmwareVersion={deviceState.firmwareVersion} firmwareVariant={deviceState.firmwareVariant} forceRefresh={wizardComplete} onForceRefreshConsumed={() => setWizardComplete(false)} isHiddenWallet={deviceState.isHiddenWallet} knownEmpty={freshWallet} />
 					</Flex>
 					{activeTab === "explore" && <AppStore onOpenApp={handleOpenApp} onOpenKeepKey={handleOpenKeepKey} />}
 					{activeTab === "addresses" && <AddressBookView />}
 					{activeTab === "multisig" && multisigEnabled && !splashBitcoinOnly && <SafeMultisigView key={`${deviceState.deviceId}:${deviceState.isHiddenWallet}`} />}
+					{moneroEnabled && activeTab === "monero" && <MoneroPanel />}
 				</Flex>
 			</Flex>
 			<DeviceSettingsDrawer
@@ -1278,7 +1283,7 @@ function App() {
 				onClose={() => {
 					setSettingsOpen(false)
 					rpcRequest<AppSettings>("getAppSettings")
-						.then((s) => { setRestApiEnabled(s.restApiEnabled); setWalletConnectEnabled(s.walletConnectEnabled); setEmulatorEnabled(s.emulatorEnabled); setHiveEnabled(s.hiveEnabled); setOfflineModeSetting(s.offlineMode) })
+						.then((s) => { setRestApiEnabled(s.restApiEnabled); setWalletConnectEnabled(s.walletConnectEnabled); setEmulatorEnabled(s.emulatorEnabled); setMoneroEnabled(s.moneroEnabled); setHiveEnabled(s.hiveEnabled); setOfflineModeSetting(s.offlineMode) })
 						.catch(() => {})
 					window.dispatchEvent(new Event("keepkey-settings-changed"))
 				}}

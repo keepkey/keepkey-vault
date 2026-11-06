@@ -20,7 +20,10 @@
     "clearsign:uniswap-provider": "bun scripts/uniswap-runtime-provider.ts",
     "clearsign:verify-pioneer-signatures": "bun scripts/clearsign-verify-pioneer-signatures.ts",
     "start": "bun run dev",
-    "postinstall": "bash scripts/patch-electrobun.sh"
+    "postinstall": "bash scripts/patch-electrobun.sh",
+    "monero:prepare": "python3 monero-cli/prepare.py",
+    "monero:build": "bun monero-cli/build.ts",
+    "monero:test": "bun test src/bun/monero-vault.test.ts src/bun/monero-sidecar.test.ts src/bun/monero-emulator.test.ts src/bun/monero-settings.test.ts src/bun/emulator-library.test.ts monero-cli/src"
   },
   "dependencies": {
     "@chakra-ui/react": "^3.33.0",

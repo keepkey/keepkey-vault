@@ -199,12 +199,14 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 	const [togglingPassphrase, setTogglingPassphrase] = useState(false)
 	const [togglingPolicy, setTogglingPolicy] = useState("")
 	const [browserPromptStatus, setBrowserPromptStatus] = useState("")
-	const [appSettings, setAppSettings] = useState<AppSettings>({ restApiEnabled: false, pioneerApiBase: '', pioneerServers: [], activePioneerServer: '', fiatCurrency: 'USD', numberLocale: 'en-US', walletConnectEnabled: false, btcMultisigEnabled: false, zcashPrivacyEnabled: false, hiveEnabled: false, emulatorEnabled: false, offlineMode: false, btcNodeEnabled: false, btcNodeType: 'blockbook', btcNodeUrl: '', btcOnboardingShown: false, preReleaseUpdates: false, alphaFirmware: false, addressBookClearsignEnabled: false, privateModeEnabled: false, passphraseIntroShown: false, evmSimulationRpcUrls: {}, disabledNetworks: [], networksChosen: false })
+	const [appSettings, setAppSettings] = useState<AppSettings>({ restApiEnabled: false, pioneerApiBase: '', pioneerServers: [], activePioneerServer: '', fiatCurrency: 'USD', numberLocale: 'en-US', walletConnectEnabled: false, btcMultisigEnabled: false, zcashPrivacyEnabled: false, moneroEnabled: false, moneroDaemonUrl: "https://xmr.triplebit.org", moneroRestoreHeight: 0, hiveEnabled: false, emulatorEnabled: false, offlineMode: false, btcNodeEnabled: false, btcNodeType: 'blockbook', btcNodeUrl: '', btcOnboardingShown: false, preReleaseUpdates: false, alphaFirmware: false, addressBookClearsignEnabled: false, privateModeEnabled: false, passphraseIntroShown: false, evmSimulationRpcUrls: {}, disabledNetworks: [], networksChosen: false })
 	const [togglingRestApi, setTogglingRestApi] = useState(false)
 	const [windowFocusState, setWindowFocusState] = useState<{ refs: number; alwaysOnTop: boolean } | null>(null)
 	const [releasingWindowFocus, setReleasingWindowFocus] = useState(false)
 	const [togglingWalletConnect, setTogglingWalletConnect] = useState(false)
 	const [togglingEmulator, setTogglingEmulator] = useState(false)
+	const [moneroBusy, setMoneroBusy] = useState(false)
+	const [moneroError, setMoneroError] = useState<string | null>(null)
 	const [togglingPreRelease, setTogglingPreRelease] = useState(false)
 	const [togglingAlphaFirmware, setTogglingAlphaFirmware] = useState(false)
 	const [togglingPrivateMode, setTogglingPrivateMode] = useState(false)
@@ -415,10 +417,10 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 	const emuFileRef = useRef<HTMLInputElement>(null)
 	const [installingEmu, setInstallingEmu] = useState(false)
 	const [emuInstallMsg, setEmuInstallMsg] = useState<string | null>(null)
-	const [emuBuilds, setEmuBuilds] = useState<Array<{ id: string; path: string; selected: boolean; version?: string }>>([])
+	const [emuBuilds, setEmuBuilds] = useState<Array<{ id: string; path: string; selected: boolean; version?: string; label?: string; research?: boolean; monero?: boolean }>>([])
 	const [selectedEmuBuild, setSelectedEmuBuild] = useState<string | null>(null)
 	const reloadEmuBuilds = useCallback(async () => {
-		const result = await rpcRequest<{ builds: Array<{ id: string; path: string; selected: boolean; version?: string }>; selected: string | null }>("emulatorListBuilds", undefined, 10000)
+		const result = await rpcRequest<{ builds: Array<{ id: string; path: string; selected: boolean; version?: string; label?: string; research?: boolean; monero?: boolean }>; selected: string | null }>("emulatorListBuilds", undefined, 10000)
 		setEmuBuilds(result.builds); setSelectedEmuBuild(result.selected)
 	}, [])
 	useEffect(() => { if (deviceState.isEmulator) reloadEmuBuilds().catch(console.error) }, [deviceState.isEmulator, reloadEmuBuilds])
@@ -965,7 +967,7 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 										disabled={installingEmu || emuBusy}
 										onChange={(e: React.ChangeEvent<HTMLSelectElement>) => activateEmuBuild(e.target.value)}
 										fontSize="xs" color="kk.textPrimary" bg="kk.bgSecondary" border="1px solid" borderColor="kk.border" borderRadius="md" p="2">
-										{emuBuilds.map(build => <option key={build.id} value={build.id}>{build.version ? `v${build.version}` : uiText("Unverified build")} · {build.id.slice(0, 12)}</option>)}
+										{emuBuilds.map(build => <option key={build.id} value={build.id}>{build.label || (build.version ? `v${build.version}` : uiText("Unverified build"))}{build.research ? ' · Research' : ''} · {build.id.slice(0, 12)}</option>)}
 									</Box>
 								)}
 								{emuInstallMsg && <Text fontSize="xs" color="kk.textSecondary">{emuInstallMsg}</Text>}
@@ -1653,6 +1655,34 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 									/>
 								</Box>
 							</Flex>
+
+                            <Box mt="3" pt="3" borderTopWidth="1px" borderColor="kk.border">
+                                <Flex justify="space-between" align="center" gap="4">
+                                    <VStack gap="0" align="start">
+                                        <Text fontSize="sm" color="kk.textPrimary" fontWeight="500">Monero (XMR)</Text>
+                                        <Text fontSize="2xs" color="kk.textMuted">{appSettings.moneroAvailable ? "Experimental receive and balance support. Requires the Monero research emulator." : "Monero is unavailable in this build."}</Text>
+                                    </VStack>
+                                    <Toggle checked={appSettings.moneroEnabled} disabled={moneroBusy || appSettings.moneroAvailable === false} onChange={async enabled => {
+                                        setMoneroBusy(true); setMoneroError(null)
+                                        try { setAppSettings(await rpcRequest<AppSettings>("setMoneroEnabled", { enabled }, 30000)); window.dispatchEvent(new Event("keepkey-settings-changed")); await reloadEmuBuilds() }
+                                        catch (error) { setMoneroError(error instanceof Error ? error.message : "Unable to change Monero setting") }
+                                        finally { setMoneroBusy(false) }
+                                    }} />
+                                </Flex>
+                                {appSettings.moneroEnabled && <VStack gap="2" align="stretch" mt="3">
+                                    <Text fontSize="xs" color="kk.textSecondary">Monero daemon</Text>
+                                    <Input aria-label="Monero daemon URL" size="sm" value={appSettings.moneroDaemonUrl} onChange={event => setAppSettings(previous => ({ ...previous, moneroDaemonUrl: event.target.value }))} />
+                                    <Text fontSize="xs" color="kk.textSecondary">Restore height (0 scans the full chain)</Text>
+                                    <Input aria-label="Monero restore height" size="sm" type="number" min="0" value={appSettings.moneroRestoreHeight} onChange={event => setAppSettings(previous => ({ ...previous, moneroRestoreHeight: Number(event.target.value) }))} />
+                                    <Button size="xs" disabled={moneroBusy} onClick={async () => {
+                                        setMoneroBusy(true); setMoneroError(null)
+                                        try { setAppSettings(await rpcRequest<AppSettings>("setMoneroNode", { daemonUrl: appSettings.moneroDaemonUrl, restoreHeight: appSettings.moneroRestoreHeight })); window.dispatchEvent(new Event("keepkey-settings-changed")) }
+                                        catch (error) { setMoneroError(error instanceof Error ? error.message : "Unable to save Monero daemon") }
+                                        finally { setMoneroBusy(false) }
+                                    }}>Save Monero settings</Button>
+                                </VStack>}
+                                {moneroError && <Text role="alert" fontSize="xs" color="red.400" mt="2">{moneroError}</Text>}
+                            </Box>
 
 							{/* Alpha firmware toggle */}
 							<Flex justify="space-between" align="center" mt="3" pt="3" borderTopWidth="1px" borderColor="kk.border">

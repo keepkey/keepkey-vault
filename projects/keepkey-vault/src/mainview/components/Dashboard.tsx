@@ -698,6 +698,7 @@ interface DashboardProps {
 	/** When in watchOnly mode, load cached data for this specific device (defaults to latest) */
 	watchOnlyDeviceId?: string
 	onOpenSettings?: () => void
+	onOpenMonero?: () => void
 	firmwareVersion?: string
 	/** Device firmware variant — when bitcoin-only, the chain list is restricted to Bitcoin */
 	firmwareVariant?: string
@@ -837,7 +838,7 @@ function VaultPortfolioDashboard({ vault, onLoaded, watchOnly, firmwareVersion }
 	</Flex>
 }
 
-function PersonalDashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettings, firmwareVersion, firmwareVariant, forceRefresh, onForceRefreshConsumed, isHiddenWallet, knownEmpty, onOpenVault }: DashboardProps) {
+function PersonalDashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettings, onOpenMonero, firmwareVersion, firmwareVariant, forceRefresh, onForceRefreshConsumed, isHiddenWallet, knownEmpty, onOpenVault }: DashboardProps) {
   const uiText = useUiTranslation()
 	const { portfolios: vaultPortfolios, loading: vaultsLoading, error: vaultsError, reload: reloadVaultPortfolios, setIncluded: setVaultIncluded } = useVaultPortfolios({ bitcoinOnly: isBitcoinOnlyVariant(firmwareVariant) })
 
@@ -907,6 +908,7 @@ function PersonalDashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSetti
 	const [showAudit, setShowAudit] = useState(false)
 	const [showBip85, setShowBip85] = useState(false)
 	const [zcashEnabled, setZcashEnabled] = useState(false)
+	const [moneroEnabled, setMoneroEnabled] = useState(false)
 	const [hiveEnabled, setHiveEnabled] = useState(false)
 	// Networks turned off in the network picker: not loaded, not shown, not totalled.
 	const [disabledNetworks, setDisabledNetworks] = useState<string[]>([])
@@ -1089,6 +1091,7 @@ function PersonalDashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSetti
 		rpcRequest<AppSettings>('getAppSettings', undefined, 5000)
 			.then(s => {
 				setZcashEnabled(s.zcashPrivacyEnabled)
+				setMoneroEnabled(s.moneroEnabled)
 				setHiveEnabled(s.hiveEnabled)
 				setDisabledNetworks(s.disabledNetworks)
 				setPassphraseIntroSeen(s.passphraseIntroShown)
@@ -2002,6 +2005,12 @@ function PersonalDashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSetti
 						},
 					}}
 				>
+                    {moneroEnabled && !watchOnly && onOpenMonero && !isBitcoinOnlyVariant(firmwareVariant) && (
+                        <Button onClick={onOpenMonero} variant="ghost" w="100%" justifyContent="start" mb="2" color="var(--text-0)">
+                            <Text color="#ff7a26" fontSize="22px" mr="2">ɱ</Text>
+                            <Box textAlign="left"><Text fontSize="14px">Monero · XMR</Text><Text fontSize="11px" color="var(--text-2)">Receive &amp; balances</Text></Box>
+                        </Button>
+                    )}
 					{/* "All Chains" reset row */}
 					<Box
 						as="button"

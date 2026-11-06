@@ -580,6 +580,31 @@ export interface ClearSignProtectionCaseStudy {
   checkedAt: number
 }
 
+export interface MoneroTransaction {
+  txid: string
+  amountAtomic: string
+  confirmations: number
+  locked: boolean
+  height?: number
+  type?: 'in' | 'pool'
+}
+
+export interface MoneroStatus {
+  available: boolean
+  network: 'mainnet'
+  address: string
+  balanceAtomic: string
+  unlockedBalanceAtomic: string
+  walletHeight: number
+  transactions: MoneroTransaction[]
+  monitorReady: boolean
+  emulatorReady?: boolean
+  updatedAt?: string
+  error?: string
+  canSend: false
+  spendStateKnown: false
+}
+
 export interface FirmwareProgress {
   stage?: import('./firmware-progress').FirmwareProgressStage
   percent: number
@@ -1566,6 +1591,10 @@ export interface AppSettings {
   numberLocale: string           // number formatting locale (default 'en-US')
   btcMultisigEnabled: boolean    // runtime feature flag: Bitcoin multisig co-signing (default OFF)
   walletConnectEnabled: boolean   // feature flag: WalletConnect dApp support (default OFF)
+  moneroAvailable?: boolean      // optional compatibility field; build contains a runnable sidecar
+  moneroEnabled: boolean         // experimental XMR sidecar and wallet surface (default OFF)
+  moneroDaemonUrl: string        // public HTTPS Monero daemon, or loopback local daemon
+  moneroRestoreHeight: number    // earliest block to scan; zero scans from genesis
   zcashPrivacyEnabled: boolean   // read-only capability: auto-ON when firmware >= 7.15.0 and this build includes zcash-cli
   hiveEnabled: boolean           // read-only capability: Hive blockchain — auto-ON when firmware >= 7.15.0
   emulatorEnabled: boolean       // feature flag: macOS emulator surface (default OFF — dev-only)
