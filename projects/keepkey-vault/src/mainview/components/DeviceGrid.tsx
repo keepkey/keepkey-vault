@@ -280,7 +280,7 @@ export function DeviceGrid({ onViewPortfolio, onOpenVault, onReady, emulatorEnab
 										<SmallCircleBtn color="var(--text-3)" label="N" onClick={() => setConfirmForget(null)} />
 									</Flex>
 								) : (
-									<SmallCircleBtn color="var(--text-3)" label={uiText("&times;")} onClick={() => setConfirmForget(d.deviceId)} />
+									<SmallCircleBtn color="var(--text-3)" label={uiText("×")} onClick={() => setConfirmForget(d.deviceId)} />
 								)}
 							</Flex>
 

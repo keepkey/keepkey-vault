@@ -2725,7 +2725,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
             <DocsLink href={DOCS_LINKS.swap} />
             <DocsLink href={watch('course-07-swap')} label={uiText("Watch video")} />
             {!busy && (
-              <Button size="xs" variant="ghost" color="kk.textMuted" px="1" minW="auto" _hover={{ color: "kk.textPrimary" }} onClick={handleClose}>{uiText("&times;")}</Button>
+              <Button size="xs" variant="ghost" color="kk.textMuted" px="1" minW="auto" _hover={{ color: "kk.textPrimary" }} onClick={handleClose}>{uiText("×")}</Button>
             )}
           </HStack>
         </Flex>
@@ -3419,7 +3419,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                     <Text fontSize="xs" color="kk.textMuted">{fmtCompact(parseFloat(displayAmount) * fromPriceUsd)}</Text>
                   )}
                 </VStack>
-                <Text color="var(--gold)" fontSize="md" fontWeight="700">{uiText("&rarr;")}</Text>
+                <Text color="var(--gold)" fontSize="md" fontWeight="700">{uiText("→")}</Text>
                 <VStack gap="0.5">
                   <HStack gap="3">
                     <Box style={{ animation: 'kkLogoGlow 3s ease-in-out infinite' }}>
@@ -3586,7 +3586,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                           <Text fontSize="11px" fontFamily="mono" color="kk.textMuted">
                             {beforeFromBal ? formatBalance(beforeFromBal) : '-'}
                           </Text>
-                          <Text fontSize="10px" color="kk.textMuted">{uiText("&rarr;")}</Text>
+                          <Text fontSize="10px" color="kk.textMuted">{uiText("→")}</Text>
                           <Text fontSize="11px" fontFamily="mono" color={afterFromBal ? 'var(--gold)' : 'kk.textMuted'}>
                             {afterFromBal ? formatBalance(afterFromBal) : '...'}
                           </Text>
@@ -3614,7 +3614,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                           <Text fontSize="11px" fontFamily="mono" color="kk.textMuted">
                             {beforeToBal ? formatBalance(beforeToBal) : '-'}
                           </Text>
-                          <Text fontSize="10px" color="kk.textMuted">{uiText("&rarr;")}</Text>
+                          <Text fontSize="10px" color="kk.textMuted">{uiText("→")}</Text>
                           <Text fontSize="11px" fontFamily="mono" color={afterToBal ? 'var(--teal)' : 'kk.textMuted'}>
                             {afterToBal ? <GreenCountUp value={afterToBal} color="var(--teal)" /> : '...'}
                           </Text>
@@ -5106,7 +5106,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                   {healthRefreshing ? '↻' : '↺'}
                 </Button>
                 <Button size="xs" variant="ghost" color="kk.textMuted" px="1" minW="auto"
-                  _hover={{ color: 'kk.textPrimary' }} onClick={() => setHealthDialogOpen(false)}>{uiText("&times;")}</Button>
+                  _hover={{ color: 'kk.textPrimary' }} onClick={() => setHealthDialogOpen(false)}>{uiText("×")}</Button>
               </HStack>
             </Flex>
 

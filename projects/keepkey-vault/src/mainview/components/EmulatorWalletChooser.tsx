@@ -51,7 +51,7 @@ export function EmulatorWalletChooser({ wallets, onPick, onDelete, onClose, busy
 				bg="rgba(16,16,21,0.98)" border="1px solid var(--ink-3)" borderRadius="14px" onClick={(e: React.MouseEvent) => e.stopPropagation()}>
 				<Flex justify="space-between" align="center" mb="1">
 					<Text fontSize="14px" fontWeight="600" color="var(--text-0)">{uiText("Pick the seed to load into the emulator")}</Text>
-					<Box as="button" aria-label={uiText("Close")} onClick={onClose} px="1.5" fontSize="16px" color="var(--text-3)" cursor="pointer">{uiText("&times;")}</Box>
+					<Box as="button" aria-label={uiText("Close")} onClick={onClose} px="1.5" fontSize="16px" color="var(--text-3)" cursor="pointer">{uiText("×")}</Box>
 				</Flex>
 				<Text fontSize="11px" color="var(--text-3)" mb="3">
 					{wallets.length ? uiText("Each seed is a separate wallet saved on this computer. The emulator opens with the one you pick.") : uiText("No saved seeds yet. Name one to start.")}
@@ -79,7 +79,7 @@ export function EmulatorWalletChooser({ wallets, onPick, onDelete, onClose, busy
 							</Flex>
 						) : (
 							<Box as="button" aria-label={`Delete seed ${w.name}`} onClick={() => setDeleting(w.name)} px="2" fontSize="14px" color="var(--text-3)" cursor="pointer"
-								_hover={{ color: "var(--rose)" }}>{uiText("&times;")}</Box>
+								_hover={{ color: "var(--rose)" }}>{uiText("×")}</Box>
 						))}
 					</Flex>
 				))}
