@@ -600,13 +600,15 @@ test-emu-pin:
 EMU_FW_DIR := modules/keepkey-firmware
 EMU_BUILD_DIR := $(EMU_FW_DIR)/build-emu
 EMU_INSTALL_DIR := $(HOME)/.keepkey/emulator
-# Vault's developer emulator must carry the same alpha ClearSign root as the
-# firmware CI emulator. A rootless build is deliberately fail-closed, but it
-# cannot exercise certified 7.16 flows and otherwise looks healthy until the
-# first certificate reaches the device.
+# Vault's developer emulator must carry the ClearSign root the firmware
+# compiles in. A rootless build is deliberately fail-closed, but it cannot
+# exercise certified flows and otherwise looks healthy until the first
+# certificate reaches the device.
 EMU_CLEARSIGN_ALPHA_ROOT ?= ON
 # Checked in the built library (7.16 compiles the root in with no CMake flag).
-CLEARSIGN_ALPHA_ROOT_PUBKEY := 02de9231b2094433235532fb1932e324a2c7304195e12e610c675cccbbd606dae7
+# Since 7.16 that is the production root (firmware clearsign_root.c; Desktop
+# PRODUCTION_ROOT_PUBLIC_KEY); the alpha root 02de9231... is gone from it.
+CLEARSIGN_ROOT_PUBKEY := 027c1fde75db6c36393e095e0dc5ab9a5bcf1ae9eb92b5d36e212a2bf7f8a6e321
 
 build-emulator:
 	@echo "=== Building emulator from current $(EMU_FW_DIR) checkout ==="
@@ -618,8 +620,13 @@ build-emulator:
 	@# KK_BUILD_DYLIB=ON: produces libkkemu.dylib alongside standalone kkemu.
 	@# Toolchain: nanopb 0.3.9.4 + protoc-gen-nanopb live in pyenv 3.10.15;
 	@# protoc is pinned to 3.21.x (from the .toolchain cache if present, else
-	@# whatever is on PATH). cmake MUST get NANOPB_DIR/NANOPB_PLUGIN — without
-	@# them it falls back to a bogus /root/nanopb default and proto-gen fails.
+	@# whatever is on PATH). cmake MUST get NANOPB_DIR — without it it falls
+	@# back to a bogus /root/nanopb default and proto-gen fails.
+	@# The plugin is pip's protoc-gen-nanopb entry point, which imports the
+	@# generator as a package. Left to itself, cmake finds the wheel's
+	@# $NANOPB_DIR/generator/protoc-gen-nanopb shell script first; that runs
+	@# nanopb_generator.py as a plain script, and its `from .proto import`
+	@# fails with "attempted relative import with no known parent package".
 	cd $(EMU_BUILD_DIR) && \
 		PYBIN="$(HOME)/.pyenv/versions/3.10.15/bin"; \
 		test -x "$$PYBIN/python" || { echo "ERROR: pyenv 3.10.15 required (pyenv install 3.10.15 + pip install nanopb==0.3.9.4.post3)"; exit 1; }; \
@@ -631,15 +638,15 @@ build-emulator:
 			-DKK_CLEARSIGN_ALPHA_ROOT=$(EMU_CLEARSIGN_ALPHA_ROOT) \
 			-DCMAKE_BUILD_TYPE=Release -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
 			-DNANOPB_DIR="$$NANOPB_DIR" \
-			-DNANOPB_PLUGIN="$$(command -v protoc-gen-nanopb)" \
+			-DPROTOC_GEN_NANOPB_EXECUTABLE="$$PYBIN/protoc-gen-nanopb" \
 			-DCMAKE_C_FLAGS="-DPB_NO_PACKED_STRUCTS=1" \
 			-DCMAKE_CXX_FLAGS="-DPB_NO_PACKED_STRUCTS=1" && \
 		make -j$$(sysctl -n hw.ncpu) kkemu kkemulator_dylib
 	mkdir -p $(EMU_INSTALL_DIR)
 	@if [ -f $(EMU_BUILD_DIR)/lib/libkkemu.dylib ]; then \
 		if [ "$(EMU_CLEARSIGN_ALPHA_ROOT)" = "ON" ]; then \
-			xxd -p $(EMU_BUILD_DIR)/lib/libkkemu.dylib | tr -d '\n' | grep -q $(CLEARSIGN_ALPHA_ROOT_PUBKEY) || \
-				{ echo "ERROR: emulator does not contain the ClearSign alpha root"; exit 1; }; \
+			xxd -p $(EMU_BUILD_DIR)/lib/libkkemu.dylib | tr -d '\n' | grep -q $(CLEARSIGN_ROOT_PUBKEY) || \
+				{ echo "ERROR: emulator does not contain the ClearSign root"; exit 1; }; \
 		fi; \
 		cp $(EMU_BUILD_DIR)/lib/libkkemu.dylib $(EMU_INSTALL_DIR)/libkkemu.dylib; \
 		codesign --force --sign - $(EMU_INSTALL_DIR)/libkkemu.dylib; \
