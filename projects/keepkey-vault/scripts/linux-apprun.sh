@@ -7,21 +7,22 @@
 # ("null is not an object (evaluating 'bridge.requestHost')"). Check the
 # libraries the native layer links against first and name the packages.
 #
-# The AppImage bundles the tray stack (Ayatana AppIndicator + dbusmenu) in
-# usr/lib, so normally only WebKitGTK can be missing — it is too big and too
-# coupled to the host (helper subprocesses, GStreamer, Mesa) to bundle.
+# The AppImage bundles the tray stack (Ayatana AppIndicator + dbusmenu) next to
+# libNativeWrapper.so in usr/bin/bin — NOT usr/lib: the Electrobun launcher
+# replaces the child's LD_LIBRARY_PATH with that one directory, so it is the
+# only place a bundled library is guaranteed to be found. Normally only
+# WebKitGTK can be missing — it is too big and too coupled to the host (helper
+# subprocesses, GStreamer, Mesa) to bundle.
 SELF=$(readlink -f "$0")
 HERE=${SELF%/*}
 BIN="$HERE/usr/bin/bin"
-LIB="$HERE/usr/lib"
 
-# Bundled libs (tray stack) must be visible to the check below and to the app
-# itself, which dlopens libNativeWrapper.so at runtime.
-export LD_LIBRARY_PATH="$LIB${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+# $BIN holds libasar.so and the bundled tray stack. Exported for the ldd check
+# below and as a belt-and-braces for the launcher, which sets it anyway.
+export LD_LIBRARY_PATH="$BIN${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 
-# libasar.so ships next to libNativeWrapper.so, hence $BIN on the path. No ldd,
-# or nothing missing, leaves $missing empty and the app starts as before.
-missing=$(LD_LIBRARY_PATH="$BIN:$LD_LIBRARY_PATH" ldd "$BIN/libNativeWrapper.so" 2>/dev/null \
+# No ldd, or nothing missing, leaves $missing empty and the app starts as before.
+missing=$(ldd "$BIN/libNativeWrapper.so" 2>/dev/null \
   | awk '/=> not found/ { print $1 }' | sort -u)
 
 if [ -n "$missing" ]; then

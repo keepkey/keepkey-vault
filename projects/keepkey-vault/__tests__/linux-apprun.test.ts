@@ -14,7 +14,6 @@ function appDir(name: string, lddOutput?: string) {
 	const bin = join(dir, "usr", "bin", "bin")
 	const stubs = join(dir, "stubs")
 	mkdirSync(bin, { recursive: true })
-	mkdirSync(join(dir, "usr", "lib"), { recursive: true })
 	mkdirSync(stubs)
 	copyFileSync(join(import.meta.dir, "..", "scripts", "linux-apprun.sh"), join(dir, "AppRun"))
 	writeFileSync(join(bin, "libNativeWrapper.so"), "")
@@ -53,19 +52,19 @@ it("starts the app when every library resolves", () => {
 	expect(r.out).toContain("LAUNCHED --flag value")
 })
 
-it("puts the bundled usr/lib on the library path for the check and the app", () => {
+it("puts the bin dir (bundled tray libs) on the library path for the check and the app", () => {
 	const app = appDir("libpath", [
 		"\tlibayatana-appindicator3.so.1 => /usr/lib/libayatana-appindicator3.so.1 (0x00007f0000000000)",
 	].join("\n"))
 	const r = run(app)
 	expect(r.code).toBe(0)
-	const bundledLib = join(app.dir, "usr", "lib")
-	// The ldd check saw both the bundled libs and the app's own bin dir.
+	// The tray stack is bundled next to libNativeWrapper.so in usr/bin/bin,
+	// because the Electrobun launcher replaces the child's LD_LIBRARY_PATH
+	// with exactly that directory. The ldd check must look there too.
+	const bin = join(app.dir, "usr", "bin", "bin")
 	const lddEnv = readFileSync(join(app.dir, "ldd-env.txt"), "utf8")
-	expect(lddEnv).toContain(join(app.dir, "usr", "bin", "bin"))
-	expect(lddEnv).toContain(bundledLib)
-	// The launcher inherits the bundled lib dir, so dlopen finds the tray stack.
-	expect(r.out).toContain(`LAUNCHER_LD=${bundledLib}`)
+	expect(lddEnv).toContain(bin)
+	expect(r.out).toContain(`LAUNCHER_LD=${bin}`)
 })
 
 it("names the missing libraries and does not start the app", () => {
