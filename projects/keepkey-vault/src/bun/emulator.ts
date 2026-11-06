@@ -24,7 +24,7 @@ import {
 } from './emulator-keychain'
 import { startEmulatorWatchdog, stopEmulatorWatchdog } from './emulator-watchdog'
 import type { EmulatorStatus, EmulatorProcessState } from '../shared/types'
-import { emulatorLibFilename, libraryReadsClearSignTestRoot, resolveEmulatorLibPath, selectedEmulatorLibrary } from './emulator-library'
+import { emulatorLibFilename, libraryReadsClearSignTestRoot, resolveEmulatorLibPath, selectedEmulatorLibrary, type SelectedEmulatorLibrary } from './emulator-library'
 
 const TAG = '[emulator]'
 const FLASH_SIZE = 1048576  // 1 MB
@@ -58,6 +58,11 @@ export function getRuntimeDylibPath(): string | null {
   return resolveEmulatorLibPath({ importDir: import.meta.dir })
 }
 
+/** The firmware the next start loads, or why it can't, with this app's paths. */
+export function getRuntimeLibrary(): SelectedEmulatorLibrary {
+  return selectedEmulatorLibrary({ importDir: import.meta.dir })
+}
+
 // ── FFI Handle ──────────────────────────────────────────────────────────
 
 let ffi: ReturnType<typeof dlopen> | null = null
@@ -66,6 +71,9 @@ let readsTestRoot = false
 /** Path of the library behind `ffi`, so callers can tell which verified build is running. */
 let loadedDylibPath: string | null = null
 export function getLoadedEmulatorLibPath(): string | null { return ffi ? loadedDylibPath : null }
+/** The build the running emulator loaded, as resolved when it started. */
+let loadedLibrary: SelectedEmulatorLibrary | null = null
+export function getLoadedEmulatorLibrary(): SelectedEmulatorLibrary | null { return ffi ? loadedLibrary : null }
 
 /** Whether the running emulator library reads a ClearSign test root. */
 export function emulatorReadsClearSignTestRoot(): boolean {
@@ -161,7 +169,7 @@ export function initEmulator(flashName = 'default'): EmulatorStatus {
     // 1. Locate dylib BEFORE touching flash — failing early avoids creating
     // an orphan flash file when the user hasn't installed an emulator yet.
     // A selected build that can't start names itself; nothing else starts in its place.
-    const library = selectedEmulatorLibrary({ importDir: import.meta.dir })
+    const library = getRuntimeLibrary()
     const dylibPath = library.path
     if (!dylibPath) throw new Error(library.problem || 'Emulator library unavailable')
 
@@ -176,6 +184,7 @@ export function initEmulator(flashName = 'default'): EmulatorStatus {
     console.log(`${TAG} Loading dylib: ${dylibPath}`)
     ffi = loadDylib(dylibPath)
     loadedDylibPath = dylibPath
+    loadedLibrary = library
     readsTestRoot = libraryReadsClearSignTestRoot(dylibPath)
 
     // 3. Pass flash buffer to firmware

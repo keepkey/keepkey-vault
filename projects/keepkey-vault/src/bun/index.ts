@@ -347,7 +347,6 @@ import type { VaultRPCSchema } from "../shared/rpc-schema"
 import type { WipeReason } from "../shared/flash-wipe"
 import { collectAndAnalyzeWithGate, MAX_CHUNK_BYTES } from "./rng-audit"
 import { withoutCallerErc7730 } from '../shared/erc7730-support'
-import { newEmulatorWalletNameError } from '../shared/emulatorWallets'
 import { recordReviewCard, recordReviewCardText, reviewTapeRecording } from './test-review-tape'
 import { ADDRESS_BOOK_CERTIFY_UNSUPPORTED, buildCertificationRequest, contactProofAllowed, buildContactProof, contactsFromEntries, CONTACT_DESTINATION, evmRecipient, isAddressBookCertifyUnsupported, signWithContactProofAck, type AddressBookCertification } from "./addressbook-clearsign"
 
@@ -10398,12 +10397,30 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				if (!emulatorEnabled) {
 					return { state: 'stopped' as const, bridgeReady: false, host: 'not loaded', paired: false, platform: process.platform, flashImages: [], storagePath: '' }
 				}
-				const { getEmulatorStatus } = await import('./emulator')
-				return getEmulatorStatus()
+				const { getEmulatorStatus, getActiveFlashName, getLoadedEmulatorLibrary } = await import('./emulator')
+				const status = getEmulatorStatus()
+				if (status.state !== 'running') return status
+				const { runningEmulatorIdentity } = await import('./emulator-session')
+				const { getAllEmulatorWalletMeta } = await import('./db')
+				const flashName = getActiveFlashName()
+				const live = engine.isEmulator ? engine.getDeviceState() : null
+				return { ...status, ...runningEmulatorIdentity({
+					flashName, loaded: getLoadedEmulatorLibrary(), firmwareVersion: live?.firmwareVersion,
+					label: live?.label || getAllEmulatorWalletMeta().find(m => m.name === flashName)?.label,
+				}) }
 			},
 			emulatorListBuilds: async () => {
 				const { listEmulatorBuilds, selectedEmulatorBuild } = await import('./emulator-library')
-				return { builds: listEmulatorBuilds(), selected: selectedEmulatorBuild() }
+				const { getRuntimeLibrary } = await import('./emulator')
+				const { path: _path, ...next } = getRuntimeLibrary()
+				return { builds: listEmulatorBuilds(), selected: selectedEmulatorBuild(), next }
+			},
+			emulatorShowWindow: async () => {
+				if (!emulatorEnabled) throw new Error('Emulator is disabled')
+				const { getEmulatorStatus } = await import('./emulator')
+				if (getEmulatorStatus().state !== 'running') throw new Error('The emulator is not running')
+				const { showEmulatorWindow } = await import('./emulator-window')
+				return { window: showEmulatorWindow() }
 			},
 			emulatorSelectBuild: async (params) => {
 				if (!emulatorEnabled) throw new Error('Emulator is disabled')
@@ -10417,34 +10434,37 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			emulatorActivateBuild: async (params) => {
 				if (!emulatorEnabled) throw new Error('Emulator is disabled')
 				const { listEmulatorBuilds, selectEmulatorBuild, selectedEmulatorBuild, clearSelectedEmulatorBuild, resolveEmulatorWalletName, selectEmulatorWallet } = await import('./emulator-library')
-				if (!listEmulatorBuilds().some(build => build.id === params.id)) throw new Error('Emulator build is not installed')
-				const { getEmulatorStatus, getActiveFlashName, stopEmulator, initEmulator } = await import('./emulator')
+				if (params.id !== null && !listEmulatorBuilds().some(build => build.id === params.id)) throw new Error('Emulator build is not installed')
+				const { getEmulatorStatus, getActiveFlashName, stopEmulator, initEmulator, getRuntimeLibrary } = await import('./emulator')
 				const previousBuild = selectedEmulatorBuild()
 				const previousFlash = getEmulatorStatus().state === 'running' ? getActiveFlashName() : null
 				const flashName = resolveEmulatorWalletName({ running: previousFlash, buildId: params.id })
 				const { closeEmulatorWindow, openEmulatorWindow } = await import('./emulator-window')
+				const restoreBuild = () => { if (previousBuild) selectEmulatorBuild(previousBuild); else clearSelectedEmulatorBuild() }
+				// Refuse a build that can't start before the running one stops (B3).
+				if (params.id) selectEmulatorBuild(params.id); else clearSelectedEmulatorBuild()
+				const problem = getRuntimeLibrary().problem
+				if (problem) { restoreBuild(); throw new Error(problem) }
 				if (previousFlash) {
 					closeEmulatorWindow()
 					engine.disconnectEmulator()
 					stopEmulator()
 				}
 				try {
-					selectEmulatorBuild(params.id)
 					const status = initEmulator(flashName)
 					if (status.state !== 'running') throw new Error(status.error || 'Emulator failed to start')
 					openEmulatorWindow()
 					await engine.connectEmulator()
 					const version = engine.getDeviceState().firmwareVersion
 					const { recordEmulatorBuildVersion } = await import('./emulator-library')
-					if (/^\d+\.\d+\.\d+$/.test(version || '')) recordEmulatorBuildVersion(params.id, version)
+					if (params.id && /^\d+\.\d+\.\d+$/.test(version || '')) recordEmulatorBuildVersion(params.id, version)
 					selectEmulatorWallet(flashName)
 					return { status, flashName }
 				} catch (error) {
 					closeEmulatorWindow()
 					engine.disconnectEmulator()
 					stopEmulator()
-					if (previousBuild) selectEmulatorBuild(previousBuild)
-					else clearSelectedEmulatorBuild()
+					restoreBuild()
 					if (previousFlash) {
 						const restored = initEmulator(previousFlash)
 						if (restored.state === 'running') { openEmulatorWindow(); await engine.connectEmulator() }
@@ -10505,6 +10525,10 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				if (!emulatorEnabled) throw new Error('Emulator is disabled')
 				const { deleteFlash, getEmulatorStatus, getActiveFlashName, stopEmulator } = await import('./emulator')
 				const { deleteMnemonic } = await import('./emulator-keychain')
+				const running = getEmulatorStatus().state === 'running' && getActiveFlashName() === params.name
+				// The seed picker never deletes the wallet that is running (its list can be stale);
+				// only Settings' "Delete Flash", which says it stops the emulator, may.
+				if (running && params.stopIfRunning !== true) throw new Error(`"${params.name}" is running. Stop the emulator before deleting it.`)
 				const { deleteEmulatorWalletMeta, getAllEmulatorWalletMeta, deleteDeviceSnapshot } = await import('./db')
 
 				// Look up the deviceId BEFORE deleting metadata so we can purge
@@ -10521,7 +10545,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 
 				// If deleting the active wallet, stop it first so shutdown
 				// doesn't re-save the flash we're about to delete
-				if (getEmulatorStatus().state === 'running' && getActiveFlashName() === params.name) {
+				if (running) {
 					const { closeEmulatorWindow } = await import('./emulator-window')
 					closeEmulatorWindow()
 					engine.disconnectEmulator()
@@ -10542,8 +10566,10 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				const { listFlashImages, hasMnemonic } = await import('./emulator-keychain')
 				const { getActiveFlashName, getEmulatorStatus } = await import('./emulator')
 				const { getAllEmulatorWalletMeta } = await import('./db')
-				const { selectedEmulatorBuild, emulatorBuildFlashName } = await import('./emulator-library')
+				const { selectedEmulatorBuild, emulatorBuildFlashName, selectedEmulatorWallet } = await import('./emulator-library')
 				const selectedBuild = selectedEmulatorBuild()
+				let selectedWallet: string | null = null
+				try { selectedWallet = selectedEmulatorWallet() } catch { /* an invalid saved selection marks nothing */ }
 				const status = getEmulatorStatus()
 				const activeFlash = status.state === 'running' ? getActiveFlashName() : null
 				const metaByName = new Map(getAllEmulatorWalletMeta().map(m => [m.name, m]))
@@ -10556,6 +10582,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						name,
 						hasMnemonic: hasMnemonic(name),
 						isActive: name === activeFlash,
+						isSelected: name === selectedWallet,
 						label: meta?.label || undefined,
 						firmwareVersion: meta?.firmwareVersion || undefined,
 						channel: meta?.channel || undefined,
@@ -10667,40 +10694,17 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			},
 			emulatorSwitchWallet: async (params) => {
 				if (!emulatorEnabled) throw new Error('Emulator is disabled')
-				const { selectEmulatorWallet, selectedEmulatorWallet, selectedEmulatorBuild, emulatorBuildFlashName } = await import('./emulator-library')
-				const { stopEmulator, initEmulator, getEmulatorStatus } = await import('./emulator')
-				const { listFlashImages, validateFlashName } = await import('./emulator-keychain')
-				params = { ...params, name: validateFlashName(params.name) }
-				const saved = listFlashImages()
-				if (!saved.includes(params.name)) {
-					const selectedWallet = selectedEmulatorWallet()
-					if (selectedWallet === params.name) throw new Error(`Saved emulator wallet "${params.name}" is missing. Select an existing wallet.`)
-					const build = selectedEmulatorBuild()
-					const firstUseFallback = !saved.length && !selectedWallet && params.name === (build ? emulatorBuildFlashName(build) : 'default')
-					if (!firstUseFallback) {
-						const problem = newEmulatorWalletNameError(params.name, saved)
-						if (problem) throw new Error(`Cannot create emulator wallet: ${problem}`)
-					}
-				}
-
-				// Stop current emulator if running
-				if (getEmulatorStatus().state === 'running') {
-					const { closeEmulatorWindow } = await import('./emulator-window')
-					closeEmulatorWindow()
-					engine.disconnectEmulator()
-					stopEmulator()
-				}
-
-				// Init with the requested flash name + channel
-				const status = initEmulator(params.name)
-				if (status.state !== 'running') throw new Error(status.error || 'Emulator failed to start')
-
-				// Open window + connect engine (auto-reloads saved mnemonic)
-				const { openEmulatorWindow } = await import('./emulator-window')
-				openEmulatorWindow()
-				await engine.connectEmulator()
-				selectEmulatorWallet(params.name)
-				return getEmulatorStatus()
+				const emu = await import('./emulator')
+				const { listFlashImages } = await import('./emulator-keychain')
+				const { listEmulatorBuilds } = await import('./emulator-library')
+				const { openEmulatorWindow, closeEmulatorWindow } = await import('./emulator-window')
+				const { startEmulatorWallet } = await import('./emulator-session')
+				return startEmulatorWallet({
+					getEmulatorStatus: emu.getEmulatorStatus, stopEmulator: emu.stopEmulator, initEmulator: emu.initEmulator,
+					openWindow: openEmulatorWindow, closeWindow: closeEmulatorWindow,
+					connectEmulator: () => engine.connectEmulator(), disconnectEmulator: () => engine.disconnectEmulator(),
+					listFlashImages, library: emu.getRuntimeLibrary, builds: () => listEmulatorBuilds(),
+				}, { name: params.name, buildId: params.buildId })
 			},
 			emulatorGetMnemonic: async () => {
 				if (!emulatorEnabled) return null

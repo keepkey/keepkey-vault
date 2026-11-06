@@ -33,7 +33,7 @@ import { NetworkPickerDialog } from "./components/NetworkPickerDialog"
 import { DeviceGrid } from "./components/DeviceGrid"
 import type { VaultIdentity } from "../shared/vault-identity"
 import { VaultIdentityDialog } from "./components/VaultCards"
-import { EmulatorWalletChooser } from "./components/EmulatorWalletChooser"
+import { EmulatorWalletChooser, loadEmulatorFirmware, type EmulatorFirmwareChoices } from "./components/EmulatorWalletChooser"
 import { DeviceClaimedDialog } from "./components/DeviceClaimedDialog"
 import { LinuxUdevWarning } from "./components/LinuxUdevWarning"
 import { WindowsUsbTroubleshooter } from "./components/WindowsUsbTroubleshooter"
@@ -163,7 +163,8 @@ function App() {
 	// operator in Welcome/Intro when they intend to use an emulator instead.
 	// null = closed. The wallet is always chosen by name; nothing is picked for the user.
 	const [emulatorChoices, setEmulatorChoices] = useState<EmulatorWalletInfo[] | null>(null)
-	const startEmulatorFromSetup = useCallback(async (name: string) => {
+	const [emulatorFirmware, setEmulatorFirmware] = useState<EmulatorFirmwareChoices | null>(null)
+	const startEmulatorFromSetup = useCallback(async (name: string, buildId?: string | null) => {
 		if (startingEmulator) return
 		setStartingEmulator(true)
 		setEmulatorStartError(null)
@@ -173,7 +174,7 @@ function App() {
 				setEmulatorEnabled(settings.emulatorEnabled)
 			}
 			try { await rpcRequest('emulatorPair', undefined, 10000) } catch { /* already paired */ }
-			await rpcRequest('emulatorSwitchWallet', { name }, 30000)
+			await rpcRequest('emulatorSwitchWallet', { name, buildId }, 30000)
 			setEmulatorChoices(null)
 			oobEnteredRef.current = false
 			setSetupInProgress(false)
@@ -1177,9 +1178,13 @@ function App() {
 				{/* Developer-only: shown once the emulator is enabled in Settings. */}
 				{emulatorEnabled && <Box position="fixed" right="24px" bottom="24px" zIndex={1900} textAlign="right">
 					{emulatorStartError && <Text mb="2" maxW="340px" fontSize="12px" color="kk.error">{emulatorStartError}</Text>}
-					{emulatorChoices && <EmulatorWalletChooser wallets={emulatorChoices} onPick={startEmulatorFromSetup} onClose={() => setEmulatorChoices(null)} busy={startingEmulator} error={emulatorStartError} />}
+					{emulatorChoices && <EmulatorWalletChooser wallets={emulatorChoices} firmware={emulatorFirmware} onPick={startEmulatorFromSetup} onClose={() => setEmulatorChoices(null)} busy={startingEmulator} error={emulatorStartError} />}
 					<Button
-						onClick={async () => setEmulatorChoices(await rpcRequest<EmulatorWalletInfo[]>('emulatorListWallets', undefined, 10000).catch(() => []))}
+						onClick={async () => {
+							const [wallets, firmware] = await Promise.all([rpcRequest<EmulatorWalletInfo[]>('emulatorListWallets', undefined, 10000).catch(() => []), loadEmulatorFirmware()])
+							setEmulatorFirmware(firmware)
+							setEmulatorChoices(wallets)
+						}}
 						disabled={startingEmulator}
 						bg="rgba(168,85,247,0.16)"
 						border="1px solid rgba(168,85,247,0.55)"

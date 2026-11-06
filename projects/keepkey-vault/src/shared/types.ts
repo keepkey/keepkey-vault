@@ -1655,6 +1655,35 @@ export interface EmulatorStatus {
   platform: string                // 'darwin' for macOS
   flashImages: string[]           // available encrypted flash images
   storagePath: string             // ~/.keepkey/emulator/
+  /** While running: the saved wallet it loaded, and its device label when known. */
+  wallet?: { name: string; label?: string }
+  /** While running: the firmware build it loaded. */
+  build?: EmulatorRunningBuild
+}
+
+/** An emulator firmware build. id null: the bundled (or user-installed) library. */
+export interface EmulatorRunningBuild {
+  id: string | null
+  version?: string
+  label?: string
+  research?: boolean
+}
+
+/** An installed or bundled-research emulator build the start screen can pick. */
+export interface EmulatorBuildInfo {
+  id: string
+  path: string
+  selected: boolean
+  version?: string
+  label?: string
+  research?: boolean
+  monero?: boolean
+  signingEnabled?: boolean
+}
+
+/** What the next emulator start loads, or why it can't (naming the build). */
+export interface EmulatorNextBuild extends EmulatorRunningBuild {
+  problem: string | null
 }
 
 /** Info about a single emulator wallet profile (flash image + optional seed). */
@@ -1676,6 +1705,8 @@ export interface EmulatorWalletInfo {
   lastUsed?: number
   /** First Ethereum account (m/44'/60'/0'/0/0), cached from the last connect. */
   ethAddress?: string
+  /** The saved selection: the wallet the next start opens unless another is picked. */
+  isSelected?: boolean
 }
 
 /** Persisted device snapshot — one per device_id, stored in SQLite. */
