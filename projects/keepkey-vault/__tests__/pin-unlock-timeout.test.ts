@@ -55,7 +55,7 @@ describe('engine-controller wiring', () => {
   const promptPinBody = src.slice(src.indexOf('async promptPin()'), src.indexOf('async sendPin('))
 
   test('promptPin uses requestUnlock, not the 5 s getPublicKeys', () => {
-    expect(promptPinBody).toContain('requestUnlock(this.wallet.transport)')
+    expect(promptPinBody).toContain('requestUnlock(wallet.transport')
     expect(promptPinBody).not.toContain('this.wallet.getPublicKeys(')
   })
 

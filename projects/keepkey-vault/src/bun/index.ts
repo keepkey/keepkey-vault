@@ -4736,7 +4736,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				// signing promise inside hdwallet rejects with a "Cancelled"
 				// error — the swap dialog catches it and resets to 'review'.
 				if (!engine.wallet) return { ok: false }
-				await engine.wallet.cancel().catch(() => {})
+				await engine.cancelDevicePrompt().catch(() => {})
 				return { ok: true }
 			},
 			wipeDevice: async () => {

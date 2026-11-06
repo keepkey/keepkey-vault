@@ -40,6 +40,7 @@ function lockedDevice(outcome: 'confirm' | 'refuse' = 'confirm', link: Link = {}
     unlockRequest: link.unlock ?? null,
     deferWipeUntilReplug() { if (link.canDefer === false) return false; this.deferred++; return true },
     repromptPin() { this.reprompts++ },
+    cancelDevicePrompt() { return this.wallet!.cancel() },
     wallet: {
       transport: { userActionRequired: link.matrixShown ?? true, isOpened: async () => link.open ?? true },
       async cancel() { log.push('cancel') },
@@ -142,7 +143,7 @@ describe('wipeOwningDevice', () => {
   })
 
   test('no device: refused before anything is sent', async () => {
-    const host: WipeHost = { wallet: null, wipeInProgress: false, unlockRequest: null, deferWipeUntilReplug: () => true, repromptPin() {} }
+    const host: WipeHost = { wallet: null, wipeInProgress: false, unlockRequest: null, deferWipeUntilReplug: () => true, repromptPin() {}, cancelDevicePrompt: async () => {} }
     await expect(wipeOwningDevice(host, direct, async () => {})).rejects.toThrow('No device connected')
     expect(host.wipeInProgress).toBe(false)
   })
@@ -186,6 +187,7 @@ describe('with the real hdwallet transport', () => {
       unlockRequest: unlock,
       deferWipeUntilReplug: () => { deferred++; return true },
       repromptPin() {},
+      cancelDevicePrompt: () => transport.cancel(),
     }
     // Bounded: the 1.6.5 behaviour is a wipe that hangs behind the unlock, and a hang must fail, not stall CI.
     const outcome = await Promise.race([
@@ -396,7 +398,7 @@ describe('wiring', () => {
     expect(listener).toContain('this.setPinPromptOpen(true)')
     const failures = engine.slice(engine.indexOf('transport.on(core.Events.FAILURE'), engine.indexOf('transport.on(core.Events.FAILURE') + 500)
     expect(failures).toContain('this.setPinPromptOpen(false)')
-    const sendPin = engine.slice(engine.indexOf('  async sendPin(pin: string) {'), engine.indexOf('  async sendPin(pin: string) {') + 400)
+    const sendPin = engine.slice(engine.indexOf('  async sendPin(pin: string) {'), engine.indexOf('  async sendPin(pin: string) {') + 600)
     expect(sendPin).toContain('this.setPinPromptOpen(false)')
     const app = readFileSync(path.join(import.meta.dir, '../src/mainview/App.tsx'), 'utf8')
     expect(app).toContain('deviceAsking={deviceState.pinPromptOpen ?? true}')
