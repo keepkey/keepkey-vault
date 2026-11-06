@@ -3,7 +3,9 @@ import { Agent, request } from 'node:http'
 import { parseExactJson } from './protocol'
 
 const MAX_BODY = 8 * 1024 * 1024
-const ALLOWED = new Set(['get_version', 'generate_from_keys', 'open_wallet', 'get_address', 'query_key', 'refresh', 'get_balance', 'get_transfers', 'get_height', 'stop_wallet'])
+// export_outputs/import_key_images/transfer serve the research send path; a view-only wallet cannot sign or relay.
+const ALLOWED = new Set(['get_version', 'generate_from_keys', 'open_wallet', 'get_address', 'query_key', 'refresh', 'get_balance', 'get_transfers', 'get_height', 'stop_wallet',
+  'export_outputs', 'import_key_images', 'transfer'])
 const md5 = (value: string) => createHash('md5').update(value).digest('hex')
 
 export class RpcFailure extends Error {
@@ -79,7 +81,9 @@ export class DigestWalletRpc {
 
   private async performCall(method: string, params: Record<string, unknown>, timeout: number): Promise<any> {
     if (!ALLOWED.has(method)) throw new Error('Operation is unavailable in the watch-only Monero sidecar')
-    const id = String(++this.id), body = JSON.stringify({ jsonrpc: '2.0', id, method, params })
+    // BigInt params serialize as exact JSON integers (uint64 amounts never pass through Number).
+    const id = String(++this.id), body = JSON.stringify({ jsonrpc: '2.0', id, method, params },
+      (_, value) => typeof value === 'bigint' ? `\u0000u64:${value}` : value).replace(/"\\u0000u64:([0-9]+)"/g, '$1')
     for (let attempt = 0; attempt < 3; attempt++) {
       const response = await this.exchange(body, timeout)
       if (response.status === 401 && response.challenge) {

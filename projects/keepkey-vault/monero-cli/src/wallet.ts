@@ -4,7 +4,9 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { connect } from 'node:tls'
 import { DigestWalletRpc, RpcFailure } from './digest'
-import { atomic, unsigned, validateConfiguration, type MoneroWalletStatus } from './protocol'
+import { MAX_KEY_IMAGE_OUTPUTS, PublicError, atomic, checkRelayResponse, unsigned, validateConfiguration, validateKeyImageImport, validateOutputs,
+  validatePlan, validateRelayRequest, validateTransferRequest, type MoneroWalletStatus } from './protocol'
+import { runHostAdapter } from './tools'
 
 const delay = (milliseconds: number) => new Promise(resolve => setTimeout(resolve, milliseconds))
 
@@ -49,6 +51,7 @@ interface Session {
   restoreHeight: number
   daemonUrl: string
   daemonSynchronized: boolean
+  daemonFingerprint?: string
   proc: ReturnType<typeof Bun.spawn>
   rpc: DigestWalletRpc
   status: MoneroWalletStatus
@@ -60,7 +63,8 @@ export class MoneroWatchService {
   private timer: ReturnType<typeof setInterval> | null = null
   private generation = 0
   private pending: { directory: string; proc: ReturnType<typeof Bun.spawn> } | null = null
-  constructor(private binary: string) {}
+  constructor(private binary: string, private adapter: string | null = null) {}
+  get sendReady(): boolean { return !!this.adapter }
 
   async configure(input: unknown): Promise<MoneroWalletStatus> {
     const config = validateConfiguration(input)
@@ -109,7 +113,7 @@ export class MoneroWatchService {
       const status: MoneroWalletStatus = { network: 'mainnet', address: config.address, balanceAtomic: '0', unlockedBalanceAtomic: '0',
         walletHeight: 0, transactions: [], monitorReady: false, updatedAt: new Date().toISOString(), canSend: false }
       const session: Session = { directory, address: config.address, restoreHeight: config.restoreHeight, daemonUrl: config.daemonUrl,
-        daemonSynchronized: daemon.synchronized, proc, rpc, status }
+        daemonSynchronized: daemon.synchronized, daemonFingerprint: daemon.fingerprint, proc, rpc, status }
       this.session = session
       this.pending = null
       void proc.exited.then(() => {
@@ -178,6 +182,73 @@ export class MoneroWatchService {
     return operation
   }
 
+  private current(): Session {
+    if (!this.session) throw new Error('Connect a Monero watch wallet first')
+    return this.session
+  }
+
+  private async exportedOutputs(session: Session): Promise<string> {
+    const hex = (await session.rpc.call('export_outputs', { all: true }, 60000)).outputs_data_hex
+    if (typeof hex !== 'string' || hex.length > 8 * 1024 * 1024 || !/^(?:[0-9a-f]{2})+$/.test(hex)) throw new Error('Invalid Monero output export')
+    return hex
+  }
+
+  /** The view key is read back from this worker's own watch wallet and goes to the adapter only over stdin. */
+  private async adapterRequest(session: Session, op: 'outputs' | 'plan', outputsHex: string, unsignedTxset?: string): Promise<any> {
+    if (!this.adapter) throw new PublicError('The Monero signing adapter is not installed')
+    const key = await session.rpc.call('query_key', { key_type: 'view_key' })
+    const request: Record<string, string> = { op, address: session.address, view_key: typeof key.key === 'string' ? key.key : '',
+      outputs_data_hex: outputsHex, ...(unsignedTxset ? { unsigned_txset: unsignedTxset } : {}) }
+    key.key = ''
+    const reply = await runHostAdapter(this.adapter, request)
+    if (this.session !== session) throw new Error('The Monero wallet changed')
+    return reply
+  }
+
+  /** Complete wallet export in transfer order (public output metadata only). */
+  async exportOutputs(): Promise<unknown> {
+    const session = this.current()
+    const reply = await this.adapterRequest(session, 'outputs', await this.exportedOutputs(session))
+    if (validateOutputs(reply).length > MAX_KEY_IMAGE_OUTPUTS) throw new PublicError('This preview syncs at most 64 wallet outputs')
+    return reply
+  }
+
+  async importKeyImages(input: unknown): Promise<{ height: number; spentAtomic: string; unspentAtomic: string }> {
+    const { offset, signedKeyImages } = validateKeyImageImport(input), session = this.current()
+    const result = await session.rpc.call('import_key_images', { offset,
+      signed_key_images: signedKeyImages.map(item => ({ key_image: item.keyImage, signature: item.signature })) }, 120000)
+    const value = { height: unsigned(result.height), spentAtomic: atomic(result.spent), unspentAtomic: atomic(result.unspent) }
+    void this.refresh().catch(() => {})
+    return value
+  }
+
+  /** Watch-only `transfer` yields an unsigned set; the adapter decodes it against a fresh export. Nothing is relayed. */
+  async createTransfer(input: unknown): Promise<{ feeAtomic: string; amountAtomic: string; plan: unknown }> {
+    const request = validateTransferRequest(input), session = this.current()
+    if (!this.adapter) throw new PublicError('The Monero signing adapter is not installed')
+    let created: any
+    try {
+      created = await session.rpc.call('transfer', { destinations: [{ address: request.address, amount: BigInt(request.amountAtomic) }],
+        account_index: 0, priority: request.priority, ring_size: 16, unlock_time: 0, do_not_relay: true }, 120000)
+    } catch (error) {
+      if (error instanceof RpcFailure) throw new PublicError(error.code === -17 ? 'Not enough unlocked XMR for this amount and fee' : 'The watch wallet cannot build this transaction')
+      throw error
+    }
+    const unsignedTxset = created.unsigned_txset
+    if (typeof unsignedTxset !== 'string' || unsignedTxset.length > 8 * 1024 * 1024 || !/^(?:[0-9a-f]{2})+$/.test(unsignedTxset)) throw new Error('Invalid unsigned Monero transaction')
+    const plan = await this.adapterRequest(session, 'plan', await this.exportedOutputs(session), unsignedTxset)
+    validatePlan(plan)
+    return { feeAtomic: atomic(created.fee), amountAtomic: atomic(created.amount), plan }
+  }
+
+  /** Relay an already verified raw transaction to this session's daemon, with its TLS pin. */
+  async relay(input: unknown): Promise<{ relayed: true }> {
+    const { txHex } = validateRelayRequest(input), session = this.current()
+    await relayRawTransaction(session.daemonUrl, session.daemonFingerprint, txHex)
+    void this.refresh().catch(() => {})
+    return { relayed: true }
+  }
+
   async stop(): Promise<void> {
     ++this.generation
     if (this.timer) clearInterval(this.timer)
@@ -200,4 +271,30 @@ export class MoneroWatchService {
     }
     await rm(session.directory, { recursive: true, force: true })
   }
+}
+
+/** POST /send_raw_transaction. HTTPS must present the certificate pinned at configuration. */
+export async function relayRawTransaction(origin: string, fingerprint: string | undefined, txHex: string,
+  fetcher: (url: string, init: any) => Promise<Response> = fetch as any): Promise<void> {
+  const url = new URL(origin)
+  const loopback = ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname)
+  if (url.protocol === 'https:' ? !fingerprint : !(url.protocol === 'http:' && loopback)) throw new Error('Invalid Monero daemon origin')
+  const tls = url.protocol === 'https:' ? { checkServerIdentity: (_host: string, certificate: { raw?: Uint8Array }) =>
+    certificate?.raw && createHash('sha256').update(certificate.raw).digest('hex') === fingerprint ? undefined : new Error('pin') } : undefined
+  let response: Response
+  try {
+    response = await fetcher(`${url.origin}/send_raw_transaction`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tx_as_hex: txHex, do_not_relay: false }), signal: AbortSignal.timeout(60000), redirect: 'error', ...(tls ? { tls } : {}) })
+  } catch { throw new PublicError('The Monero daemon is unavailable') }
+  if (!response.ok) throw new PublicError('The Monero daemon is unavailable')
+  const reader = response.body?.getReader(), chunks: Uint8Array[] = []
+  let size = 0
+  while (reader) {
+    const { done, value } = await reader.read(); if (done) break
+    if ((size += value.length) > 65536) { await reader.cancel(); throw new PublicError('The daemon rejected the transaction') }
+    chunks.push(value)
+  }
+  let value: unknown
+  try { value = JSON.parse(Buffer.concat(chunks).toString('utf8')) } catch { throw new PublicError('The daemon rejected the transaction') }
+  checkRelayResponse(value)
 }

@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 /** Watch-only NDJSON worker. It never opens USB or accepts spend keys/seeds. */
-import { MAX_IPC_LINE, MONERO_VERSION, SIDECAR_VERSION } from './protocol'
-import { verifiedWalletRpc, stopToolVersionProbe } from './tools'
+import { MAX_IPC_LINE, MONERO_VERSION, PublicError, SIDECAR_VERSION } from './protocol'
+import { verifiedHostAdapter, verifiedWalletRpc, stopToolVersionProbe } from './tools'
 import { MoneroWatchService } from './wallet'
 
 if (process.argv.includes('--version')) {
@@ -25,8 +25,8 @@ process.on('unhandledRejection', () => { void quit() })
 
 try {
   const binary = await verifiedWalletRpc()
-  service = new MoneroWatchService(binary)
-  write({ ok: true, ready: true, version: SIDECAR_VERSION, binaryVersion: MONERO_VERSION, configured: false })
+  service = new MoneroWatchService(binary, await verifiedHostAdapter(binary))
+  write({ ok: true, ready: true, version: SIDECAR_VERSION, binaryVersion: MONERO_VERSION, configured: false, sendReady: service.sendReady })
 } catch {
   write({ ok: false, ready: false, error: 'Verified Monero host tools are unavailable' })
   process.exit(1)
@@ -46,12 +46,16 @@ async function dispatch(raw: string) {
       case 'configure_watch': result = await service!.configure(value.params); break
       case 'get_status': result = service!.getStatus(); break
       case 'refresh': void service!.refresh().catch(() => {}); result = service!.getStatus(); break
+      case 'export_outputs': result = await service!.exportOutputs(); break
+      case 'import_key_images': result = await service!.importKeyImages(value.params); break
+      case 'create_transfer': result = await service!.createTransfer(value.params); break
+      case 'relay_tx': result = await service!.relay(value.params); break
       default: throw new Error('unsupported')
     }
     write({ ok: true, _req_id: value._req_id, result })
-  } catch {
+  } catch (error) {
     write({ ok: false, _req_id: Number.isSafeInteger(value?._req_id) ? value._req_id : undefined,
-      error: 'The watch-only Monero operation could not complete' })
+      error: error instanceof PublicError ? error.message : 'The watch-only Monero operation could not complete' })
   } finally {
     if (value?.params && typeof value.params === 'object') value.params.viewKey = ''
     raw = ''

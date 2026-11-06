@@ -35,7 +35,13 @@ The script requires the checked-in `monero-emulator-bundle/manifest.json` byte h
 
 ## Scope and validation
 
-The panel shows incoming payments, received/unlocked/locked amounts, confirmations, the receive QR, and address review. This implementation has no sending or key-image import into the host wallet. A view-only wallet cannot establish which outputs were spent elsewhere, so its received balance is not a verified spendable balance. Fiat portfolio totals do not include this separate receive preview.
+The panel shows incoming payments, received/unlocked/locked amounts, confirmations, the receive QR, and address review. A view-only wallet cannot establish which outputs were spent elsewhere, so its received balance is not a verified spendable balance until key images are synced. Fiat portfolio totals do not include this separate receive preview.
+
+## Research send (signing emulator only)
+
+Sending is offered only when the running emulator is a verified `Monero signing (research)` build and the worker finds `monero-host-adapter` beside the wallet RPC, pinned by `hostAdapterSha256` in `monero-tools.json`. Stage them with `make monero-emulator-signing SOURCE=...` (requires a reviewed `monero-emulator-bundle/signing-manifest.json`, file `libkkemu-monero-signing.dylib`, capabilities `address`, `watch-key`, `key-image`, `sign`) and `make monero-adapter SOURCE=... SHA256=...`. Both are development artifacts: only `KEEPKEY_INCLUDE_MONERO_EMULATOR=1` copies them and signed release builds refuse that flag.
+
+The flow follows the firmware research host runner: wallet `export_outputs`, adapter `outputs`, device key-image sync (530..535) and wallet `import_key_images`; then wallet `transfer` (unsigned set), adapter `plan`, a plan-versus-request check (one recipient, exact amount, wallet fee, change only to this wallet, inputs only from synced outputs), research signing (65000/65001) on the emulator, a check of the signed bytes (hash, fee, rings, key images), and `/send_raw_transaction` to the configured daemon over the same pinned HTTPS or loopback HTTP. The view key reaches the adapter only on stdin. Integrated addresses and payment IDs are refused.
 
 The full bounded CLSAG/Bulletproof+ signing experiment remains separately opt-in in the firmware research tree and is not a hardware signing implementation. Physical-device support requires the audit gates recorded there.
 

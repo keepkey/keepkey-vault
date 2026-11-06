@@ -11,7 +11,7 @@ const status = { network: 'mainnet' as const, address: ADDRESS, balanceAtomic: '
   unlockedBalanceAtomic: '84653050000', walletHeight: 3799260, transactions: [], monitorReady: true,
   updatedAt: new Date().toISOString(), canSend: false as const }
 
-function fakeWorker(options: { ready?: boolean; version?: string; hang?: string; response?: any } = {}) {
+function fakeWorker(options: { ready?: boolean; version?: string; hang?: string; response?: any; sendReady?: boolean; error?: string } = {}) {
   let stdout!: ReadableStreamDefaultController<Uint8Array>, stderr!: ReadableStreamDefaultController<Uint8Array>
   let resolveExit!: (code: number) => void, ended = false
   const encoder = new TextEncoder(), requests: any[] = [], kills: any[] = []
@@ -24,11 +24,12 @@ function fakeWorker(options: { ready?: boolean; version?: string; hang?: string;
     stdin: { write(value: string) {
       const request = JSON.parse(value); requests.push(request)
       if (request.cmd === 'quit') return
-      if (request.cmd !== options.hang) queueMicrotask(() => send({ ok: true, _req_id: request._req_id, result: options.response ?? status }))
+      if (request.cmd !== options.hang) queueMicrotask(() => send(options.error ? { ok: false, _req_id: request._req_id, error: options.error }
+        : { ok: true, _req_id: request._req_id, result: options.response ?? status }))
     }, flush() {} },
     kill(signal?: any) { kills.push(signal); exit() },
   }
-  queueMicrotask(() => { if (options.ready !== false) send({ ok: true, ready: true, version: options.version ?? SIDECAR_VERSION, binaryVersion: MONERO_VERSION }) })
+  queueMicrotask(() => { if (options.ready !== false) send({ ok: true, ready: true, version: options.version ?? SIDECAR_VERSION, binaryVersion: MONERO_VERSION, sendReady: options.sendReady }) })
   return { proc, send, exit, requests, kills, bytes(value: string) { stdout.enqueue(encoder.encode(value)) } }
 }
 
@@ -46,7 +47,7 @@ describe('managed Monero sidecar boundary', () => {
     const sidecar = manager(worker, { spawn: () => { spawns++; return worker.proc } })
     await Promise.all([sidecar.start(), sidecar.start(), sidecar.start()])
     expect(spawns).toBe(1)
-    expect(sidecar.status()).toEqual({ state: 'ready', configured: false, version: SIDECAR_VERSION, binaryVersion: MONERO_VERSION })
+    expect(sidecar.status()).toEqual({ state: 'ready', configured: false, version: SIDECAR_VERSION, binaryVersion: MONERO_VERSION, sendReady: false })
     expect(worker.requests).toHaveLength(0)
   })
 
@@ -124,6 +125,52 @@ describe('managed Monero sidecar boundary', () => {
   })
 })
 
+describe('research send commands', () => {
+  test('send readiness comes only from the worker that found a pinned adapter', async () => {
+    const none = manager(fakeWorker()); await none.configureWatch(config)
+    expect(none.sendReady()).toBe(false)
+    const ready = manager(fakeWorker({ sendReady: true }))
+    expect(ready.sendReady()).toBe(false)
+    await ready.configureWatch(config)
+    expect(ready.sendReady()).toBe(true)
+  })
+
+  test('send commands need a configured wallet and validate requests before any IPC', async () => {
+    const worker = fakeWorker({ sendReady: true }), sidecar = manager(worker)
+    await expect(sidecar.createTransfer({ address: ADDRESS, amountAtomic: '1', priority: 0 })).rejects.toThrow('Connect')
+    await sidecar.configureWatch(config)
+    const before = worker.requests.length
+    await expect(sidecar.createTransfer({ address: ADDRESS, amountAtomic: '-1', priority: 0 })).rejects.toThrow()
+    await expect(sidecar.relay({ txHex: 'zz' })).rejects.toThrow()
+    await expect(sidecar.importKeyImages({ offset: 0, signedKeyImages: [] })).rejects.toThrow()
+    expect(worker.requests.length).toBe(before)
+  })
+
+  test('worker replies are validated: an adapter plan outside bounds never reaches the bridge', async () => {
+    const worker = fakeWorker(), sidecar = manager(worker)
+    await sidecar.configureWatch(config)
+    ;(worker as any).proc.stdin.write = (value: string) => {
+      const request = JSON.parse(value)
+      if (request.cmd !== 'quit') queueMicrotask(() => worker.send({ ok: true, _req_id: request._req_id,
+        result: { feeAtomic: '1', amountAtomic: '1', plan: { status: 'pass', network: '0', fee: '1', inputs: [], outputs: [] } } }))
+    }
+    await expect(sidecar.createTransfer({ address: ADDRESS, amountAtomic: '1', priority: 0 })).rejects.toThrow('Invalid Monero transaction plan')
+    expect(sidecar.status().configured).toBe(true)
+  })
+
+  test('only fixed public diagnostics pass through; anything else stays generic', async () => {
+    const worker = fakeWorker(), relay = manager(worker)
+    await relay.configureWatch(config)
+    ;(worker as any).proc.stdin.write = (value: string) => {
+      const request = JSON.parse(value)
+      if (request.cmd === 'quit') return
+      queueMicrotask(() => worker.send({ ok: false, _req_id: request._req_id, error: request.params.txHex === 'aa' ? 'The daemon rejected the transaction: double spend' : 'secret /Users/x rpc.log' }))
+    }
+    await expect(relay.relay({ txHex: 'aa' })).rejects.toThrow('The daemon rejected the transaction: double spend')
+    await expect(relay.relay({ txHex: 'bb' })).rejects.toThrow('The watch-only Monero operation could not complete')
+  })
+})
+
 describe('exact money and local Digest RPC', () => {
   test('uint64 money stays exact while JSON strings and escaped digits remain unchanged', () => {
     const value = parseExactJson('{"balance":18446744073709551615,"height":3799260,"text":"key12\\\"3","fraction":1.5}')
@@ -147,9 +194,9 @@ describe('exact money and local Digest RPC', () => {
     }
   })
 
-  test('RPC allowlist refuses transfer/sign/export methods without any exchange', async () => {
+  test('RPC allowlist refuses sign/relay/sweep methods without any exchange', async () => {
     const rpc = new DigestWalletRpc(1, 'test', 'test')
-    for (const method of ['transfer', 'transfer_split', 'sign_transfer', 'relay_tx', 'query_key_spend']) {
+    for (const method of ['transfer_split', 'sign_transfer', 'submit_transfer', 'relay_tx', 'sweep_all', 'query_key_spend']) {
       await expect(rpc.call(method)).rejects.toThrow('unavailable')
     }
     rpc.close()
