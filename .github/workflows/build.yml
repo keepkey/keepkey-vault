@@ -226,6 +226,13 @@ jobs:
         run: scripts/stage-certified-emulator.sh ".certified-emulator-${EMU_RELEASE_VERSION}"
         shell: bash
 
+      # The emulator Desktop ships must draw the PIN grid and end every PIN
+      # wait; the 7.17 alpha certified before firmware #1042 did neither.
+      - name: Test PIN entry on the certified emulator
+        if: runner.os == 'macOS'
+        run: make test-emu-pin KK_EMU_DYLIB="$PWD/projects/keepkey-vault/emulator-bundle/libkkemu.dylib"
+        shell: bash
+
       - name: Install Linux packaging tools
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y fakeroot lintian dpkg-dev
