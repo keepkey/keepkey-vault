@@ -49,6 +49,14 @@ export async function verifyDaemon(origin: string, minimumHeight: number): Promi
   return { height: unsigned(info.height), fingerprint, synchronized: info.synchronized === true, regtest }
 }
 
+/** wallet-rpc refuses import_key_images without a trusted daemon. As in Monero's own default, only a loopback daemon is trusted. */
+export function walletDaemonArgs(daemonUrl: string, daemon: { fingerprint?: string; regtest: boolean }): string[] {
+  const loopback = ['localhost', '127.0.0.1', '[::1]'].includes(new URL(daemonUrl).hostname)
+  return [loopback ? '--trusted-daemon' : '--untrusted-daemon', '--daemon-address', daemonUrl,
+    ...(daemon.fingerprint ? ['--daemon-ssl', 'enabled', '--daemon-ssl-allowed-fingerprints', daemon.fingerprint] : ['--daemon-ssl', 'disabled']),
+    ...(daemon.regtest ? ['--allow-mismatched-daemon-version'] : [])]
+}
+
 interface Session {
   directory: string
   address: string
@@ -84,9 +92,7 @@ export class MoneroWatchService {
       const port = reservation.port; reservation.stop(true)
       const ringdb = join(directory, 'ringdb'); await mkdir(ringdb, { mode: 0o700 })
       const args = [this.binary, '--wallet-dir', directory, '--rpc-bind-ip', '127.0.0.1', '--rpc-bind-port', String(port),
-        '--rpc-ssl', 'disabled', '--untrusted-daemon', '--daemon-address', config.daemonUrl,
-        ...(daemon.fingerprint ? ['--daemon-ssl', 'enabled', '--daemon-ssl-allowed-fingerprints', daemon.fingerprint] : ['--daemon-ssl', 'disabled']),
-        ...(daemon.regtest ? ['--allow-mismatched-daemon-version'] : []),
+        '--rpc-ssl', 'disabled', ...walletDaemonArgs(config.daemonUrl, daemon),
         '--no-initial-sync', '--shared-ringdb-dir', ringdb, '--log-level', '0', '--log-file', join(directory, 'rpc.log')]
       proc = Bun.spawn(args, { cwd: directory, stdin: 'ignore', stdout: 'ignore', stderr: 'ignore' })
       this.pending = { directory, proc }
