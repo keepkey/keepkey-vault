@@ -2008,7 +2008,7 @@ function PersonalDashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSetti
                     {moneroEnabled && !watchOnly && onOpenMonero && !isBitcoinOnlyVariant(firmwareVariant) && (
                         <Button onClick={onOpenMonero} variant="ghost" w="100%" justifyContent="start" mb="2" color="var(--text-0)">
                             <Text color="#ff7a26" fontSize="22px" mr="2">ɱ</Text>
-                            <Box textAlign="left"><Text fontSize="14px">Monero · XMR</Text><Text fontSize="11px" color="var(--text-2)">Receive &amp; balances</Text></Box>
+                            <Box textAlign="left"><Text fontSize="14px">{uiText("Monero · XMR")}</Text><Text fontSize="11px" color="var(--text-2)">{uiText("Receive & balances")}</Text></Box>
                         </Button>
                     )}
 					{/* "All Chains" reset row */}
