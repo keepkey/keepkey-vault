@@ -57,7 +57,7 @@ function fixture(emulator = false) {
   let locked = false, reviews = 0, configures = 0, starts = 0, stops = 0
   let configuredKey: Uint8Array | null = null
   let configuredOptions: Record<string, unknown> | null = null
-  const state = { state: 'ready', deviceId: 'PUBLIC-DEVICE-A', activeTransport: emulator ? 'emulator' : 'hid', isHiddenWallet: false }
+  const state = { state: 'ready', deviceId: 'PUBLIC-DEVICE-A', activeTransport: emulator ? 'emulator' : 'hid', isHiddenWallet: false, firmwareVersion: '7.17.0' }
   const config = { enabled: true, offline: false, daemonUrl: 'https://node.example', restoreHeight: 100 }
   const status = { network: 'mainnet' as const, address: ADDRESS, balanceAtomic: '84653050000', unlockedBalanceAtomic: '84653050000',
     walletHeight: 120, transactions: [{ txid: 'ab'.repeat(32), amountAtomic: '84653050000', confirmations: 12, locked: false, height: 108, type: 'in' }],
@@ -213,6 +213,13 @@ test('unexpected PIN challenge is cancelled and never answered by the raw bridge
   const f = fixture(); f.delegate.pinChallenge = true
   await expect(f.api.connect()).rejects.toThrow('Unlock')
   expect(f.delegate.sent.map(item => item.type)).toEqual([540, 20])
+  expect(f.counts().configures).toBe(0)
+})
+
+test('firmware older than 7.17.0 refuses connect before any USB traffic', async () => {
+  const f = fixture(); f.state.firmwareVersion = '7.16.0'
+  await expect(f.api.connect()).rejects.toThrow('7.17.0')
+  expect(f.delegate.sent).toHaveLength(0)
   expect(f.counts().configures).toBe(0)
 })
 

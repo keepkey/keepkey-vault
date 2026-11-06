@@ -1,4 +1,5 @@
 import { useUiTranslation } from "../i18n/ui"
+import { firmwareSupportsMonero, MONERO_MIN_FIRMWARE } from "../../shared/firmware-versions"
 import { useState, useEffect, useCallback, useRef } from "react"
 import { useFiat } from "../lib/fiat-context"
 import { Box, Flex, Text, VStack, Button, Input, IconButton } from "@chakra-ui/react"
@@ -1660,7 +1661,7 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
                                 <Flex justify="space-between" align="center" gap="4">
                                     <VStack gap="0" align="start">
                                         <Text fontSize="sm" color="kk.textPrimary" fontWeight="500">Monero (XMR)</Text>
-                                        <Text fontSize="2xs" color="kk.textMuted">{appSettings.moneroAvailable ? "Experimental receive and balance support. Requires the Monero research emulator." : "Monero is unavailable in this build."}</Text>
+                                        <Text fontSize="2xs" color="kk.textMuted">{!appSettings.moneroAvailable ? "Monero is unavailable in this build." : firmwareSupportsMonero(deviceState.firmwareVersion) ? "Experimental receive and balance support. Requires the Monero research emulator." : `Needs KeepKey firmware ${MONERO_MIN_FIRMWARE} or newer.`}</Text>
                                     </VStack>
                                     <Toggle checked={appSettings.moneroEnabled} disabled={moneroBusy || appSettings.moneroAvailable === false} onChange={async enabled => {
                                         setMoneroBusy(true); setMoneroError(null)

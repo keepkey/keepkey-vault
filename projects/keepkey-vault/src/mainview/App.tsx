@@ -44,6 +44,7 @@ import { WindowResizeHandles } from "./components/WindowResizeHandles"
 import type { NavTab } from "./components/TopNav"
 import { Dashboard } from "./components/Dashboard"
 import { MoneroPanel } from "./components/MoneroPanel"
+import { firmwareSupportsMonero } from "../shared/firmware-versions"
 import { CommandPalette } from "./components/CommandPalette"
 import { useLatestBalances } from "./lib/commandBus"
 import { AppStore } from "./components/AppStore"
@@ -131,7 +132,9 @@ function App() {
 	const [walletConnectEnabled, setWalletConnectEnabled] = useState(false)
 	const [hiveEnabled, setHiveEnabled] = useState(false)
 	const [emulatorEnabled, setEmulatorEnabled] = useState(false)
-	const [moneroEnabled, setMoneroEnabled] = useState(false)
+	const [moneroSetting, setMoneroEnabled] = useState(false)
+	// Setting AND firmware 7.17+; older firmware has no Monero commands.
+	const moneroEnabled = moneroSetting && firmwareSupportsMonero(deviceState.firmwareVersion)
 	useEffect(() => { if (!moneroEnabled && activeTab === "monero") setActiveTab("vault") }, [moneroEnabled, activeTab])
 	const [offlineModeSetting, setOfflineModeSetting] = useState(false)
 	// One-time btc-only data-source onboarding. Starts true so it never flashes

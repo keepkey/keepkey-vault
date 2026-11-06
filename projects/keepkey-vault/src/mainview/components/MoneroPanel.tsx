@@ -101,8 +101,10 @@ export function MoneroPanel({ onBack, onLoaded }: MoneroPanelProps = {}) {
 
 	const wallet = status?.available ? status : null
 	const address = wallet?.address ?? ""
-	const balance = wallet ? atomicAmount(wallet.balanceAtomic) : null
-	const unlocked = wallet ? atomicAmount(wallet.unlockedBalanceAtomic) : null
+	// Height 0 = no scan has finished yet: the sidecar's '0' is a placeholder, not a balance.
+	const scanned = !!wallet && wallet.walletHeight > 0
+	const balance = scanned ? atomicAmount(wallet.balanceAtomic) : null
+	const unlocked = scanned ? atomicAmount(wallet.unlockedBalanceAtomic) : null
 	const locked = balance !== null && unlocked !== null ? balance - unlocked : null
 	const qrSvg = useMemo(() => address ? generateQRSvg(address, 4, 2) : "", [address])
 	const statusError = refreshError || status?.error || null
@@ -203,7 +205,7 @@ export function MoneroPanel({ onBack, onLoaded }: MoneroPanelProps = {}) {
 						<Text data-monero-locked-balance="" fontSize="13px" fontFamily="mono" color="var(--text-1)">{locked === null ? "—" : privateModeEnabled ? "•••••• XMR" : `${formatXmr(locked)} XMR`}</Text>
 					</Box>
 				</Flex>
-				{wallet && <Text fontSize="11px" color="var(--text-3)" mt="4">Wallet scanned through block {wallet.walletHeight.toLocaleString()}</Text>}
+				{scanned && <Text fontSize="11px" color="var(--text-3)" mt="4">Wallet scanned through block {wallet.walletHeight.toLocaleString()}</Text>}
 			</Box>
 
 			{wallet ? (

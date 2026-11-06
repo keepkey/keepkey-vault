@@ -11,17 +11,17 @@
   "signingEnabled": false,
   "source": {
     "repository": "https://github.com/BitHighlander/keepkey-firmware",
-    "commit": "42492b977143b3e718f48e2682e4a62b2c9b9f07",
-    "sourceManifestSha256": "6d1d628208924022a00f6c40dd1d5c81a39a670baa00fef2656bee7fb2651600",
-    "validationReportSha256": "942f8a16c70da701e0c483164c737e149e43cefe874c22bc5a53e1296fbdfb23",
-    "rawValidationReportSha256": "2911ea5247c85580bf427bcfbb8113e2fa15961839bc6b3c38a75c8b95e21a45",
-    "actionsRun": "https://github.com/BitHighlander/keepkey-firmware/actions/runs/41946980802",
-    "artifactId": 13378633988
+    "commit": "c960b01ab79b38bcd4db985e34eb95cce39df15e",
+    "sourceManifestSha256": "25194f124cac4b8c6484f1ee030843fe8d9baf7f3932306c269d14892f30b99e",
+    "validationReportSha256": "68db6976d0c005c8b321c9d94befd0a12f5dc1371367b743e0a82eb35cbf925c",
+    "rawValidationReportSha256": "6954e14d20845a1231fa9f0c24761900ed551b7fdc2bb925654a6daac940e2f8",
+    "actionsRun": "https://github.com/BitHighlander/keepkey-firmware/actions/runs/42084835278",
+    "artifactId": 13442452380
   },
   "files": {
     "darwin-arm64": {
       "filename": "libkkemu-monero.dylib",
-      "sha256": "6d4ca83720e716497a81e5ca6839ad7ab66a5a2928e3a7b50752cff21ec61a5f",
+      "sha256": "ef76a605e76e08f1f216a6a97419375c83cd8726d68abee02cbc92792357b5a3",
       "size": 1987504
     }
   }

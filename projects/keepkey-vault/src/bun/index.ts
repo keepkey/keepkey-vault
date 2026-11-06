@@ -264,7 +264,7 @@ import { buildTx, broadcastTx, canonicalizeTronTokenCaip } from "./txbuilder"
 import { buildCosmosStakingTx, buildCosmosNameRegTx } from "./txbuilder/cosmos"
 import { initializeOrchardFromDevice, exportOrchardFvk, scanOrchardNotes, getShieldedBalance, sendShielded, ensureFvkLoaded, displayOrchardAddressOnDevice, setFvkDiskAllowed } from "./txbuilder/zcash-shielded"
 import { inFlightShielded, type ExpectedShielded } from "../shared/zcash-pending"
-import { setMoneroEmulatorEnabled } from "./emulator-library"
+import { setMoneroEmulatorEnabled, listEmulatorBuilds, clearSelectedEmulatorBuild } from "./emulator-library"
 import { createMoneroVault } from "./monero-vault"
 import { startMoneroSidecar, stopMoneroSidecar, isMoneroSidecarAvailable } from "./monero-sidecar"
 import { validateMoneroNode } from "./monero-settings"
@@ -10327,7 +10327,12 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
                 if (enabled && !isMoneroSidecarAvailable()) throw new Error('Monero is unavailable in this build')
                 if (enabled && offlineMode) throw new Error('Turn off offline mode before enabling Monero')
                 if (enabled) await startMoneroSidecar()
-                else { invalidateMoneroWallet(); stopMoneroSidecar() }
+                else {
+                    invalidateMoneroWallet(); stopMoneroSidecar()
+                    // The research emulator is listed only while Monero is on: drop a selection of it
+                    // so the emulator falls back to the default library instead of a missing build.
+                    if (listEmulatorBuilds().find(build => build.selected)?.research) clearSelectedEmulatorBuild()
+                }
                 moneroEnabled = enabled
                 setMoneroEmulatorEnabled(enabled)
                 setSetting('monero_enabled', enabled ? '1' : '0')

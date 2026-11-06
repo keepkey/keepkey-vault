@@ -1,5 +1,6 @@
 /** Monero receiving bridge. Only an explicitly approved device view key reaches the local sidecar. */
 import * as managedSidecar from './monero-sidecar'
+import { firmwareSupportsMonero, MONERO_MIN_FIRMWARE } from '../shared/firmware-versions'
 
 const MAX_RESPONSE = 4096
 const MAX_UINT64 = 18446744073709551615n
@@ -44,7 +45,7 @@ type Engine = {
   wallet: { transport?: unknown } | null
   emuDelegate?: unknown
   currentSeedEthAddress?: string | null
-  getDeviceState(): { state: string; deviceId?: string; activeTransport?: unknown; isHiddenWallet?: boolean; firmwareHash?: string }
+  getDeviceState(): { state: string; deviceId?: string; firmwareVersion?: string; activeTransport?: unknown; isHiddenWallet?: boolean; firmwareHash?: string }
 }
 type Confirm = (operation: () => Promise<any>, details: { operation: string; chain?: string; to?: string }) => Promise<any>
 export interface MoneroWatchSidecar {
@@ -164,6 +165,7 @@ export function createMoneroVault({ engine, confirm, getConfig, sidecar = manage
   const snapshot = (): Snapshot | null => {
     const config = getConfig(), state = engine.getDeviceState(), wallet = engine.wallet
     if (!config.enabled || config.offline || state.state !== 'ready' || !wallet || !state.deviceId) return null
+    if (!firmwareSupportsMonero(state.firmwareVersion)) throw new MoneroError(`Monero needs KeepKey firmware ${MONERO_MIN_FIRMWARE} or newer`)
     if (!Number.isSafeInteger(config.restoreHeight) || config.restoreHeight < 0) throw new MoneroError('Invalid Monero restore height')
     let url: URL
     try { url = new URL(config.daemonUrl) } catch { throw new MoneroError('Configure a Monero daemon URL first') }
