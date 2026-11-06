@@ -4,7 +4,8 @@ import { join, resolve } from 'path'
 import { dlopen, FFIType } from 'bun:ffi'
 import { secp256k1 } from '@noble/curves/secp256k1'
 import { validateFlashName } from './emulator-keychain'
-import { bundledMoneroEmulatorBuilds } from './monero-emulator'
+import { bundledMoneroEmulatorBuilds, isMoneroEmulatorEnabled, moneroEmulatorManifestFor, REVIEWED_MONERO_SIGNING_SHA256 } from './monero-emulator'
+import { emulatorBuildTitle } from '../shared/emulatorWallets'
 export { setMoneroEmulatorEnabled } from './monero-emulator'
 
 type SupportedPlatform = 'darwin' | 'win32' | 'linux'
@@ -151,8 +152,21 @@ export function bundledEmulatorCandidates(
   return [...new Set(candidates)]
 }
 
-/** User-installed libraries remain an explicit override; releases need no install. */
-export function resolveEmulatorLibPath(options: {
+/** The firmware the next start loads, or why it can't, naming it. */
+export interface SelectedEmulatorLibrary {
+  /** The selected build, or null for the user-installed or bundled library. */
+  id: string | null
+  version?: string
+  label?: string
+  research?: boolean
+  path: string | null
+  /** Set exactly when path is null: what is missing and what to do. */
+  problem: string | null
+}
+
+/** User-installed libraries remain an explicit override; releases need no install.
+ *  A selected build that is not available is reported, never replaced by another. */
+export function selectedEmulatorLibrary(options: {
   importDir: string
   cwd?: string
   home?: string
@@ -160,21 +174,41 @@ export function resolveEmulatorLibPath(options: {
   exists?: (path: string) => boolean
   moneroEnabled?: boolean
   arch?: string
-}): string | null {
+}): SelectedEmulatorLibrary {
   const platform = options.platform ?? process.platform as SupportedPlatform
   const exists = options.exists ?? existsSync
-  const selected = selectedEmulatorBuild(options.home ?? homedir())
-  if (selected) {
-    const research = bundledMoneroEmulatorBuilds({ importDir: options.importDir,
-      cwd: options.cwd, platform, arch: options.arch, enabled: options.moneroEnabled, selectedId: selected }).find(build => build.id === selected)
-    if (research) return research.path
-    const path = emulatorBuildPath(selected, platform, options.home ?? homedir())
-    return exists(path) ? path : null
+  const home = options.home ?? homedir()
+  const selected = selectedEmulatorBuild(home)
+  if (!selected) {
+    const override = userEmulatorLibPath(platform, home)
+    if (exists(override)) return { id: null, path: override, problem: null }
+    const bundled = bundledEmulatorCandidates(options.importDir, options.cwd ?? process.cwd(), platform).find(exists) ?? null
+    const how = platform === 'win32' ? 'make build-emulator-windows' : 'make build-emulator'
+    return { id: null, path: bundled, problem: bundled ? null : `Bundled emulator missing. Drop a ${emulatorLibFilename(platform)} onto the window or run: ${how}` }
   }
-  const override = userEmulatorLibPath(platform, options.home ?? homedir())
-  if (exists(override)) return override
-  return bundledEmulatorCandidates(options.importDir, options.cwd ?? process.cwd(), platform)
-    .find(exists) ?? null
+  const research = bundledMoneroEmulatorBuilds({ importDir: options.importDir,
+    cwd: options.cwd, platform, arch: options.arch, enabled: options.moneroEnabled, selectedId: selected }).find(build => build.id === selected)
+  if (research) return { id: selected, version: research.version, label: research.label, research: true, path: research.path, problem: null }
+  const manifest = moneroEmulatorManifestFor(selected, { importDir: options.importDir, cwd: options.cwd })
+    ?? (REVIEWED_MONERO_SIGNING_SHA256.has(selected) ? { version: undefined, label: 'Monero signing (research)' } : null)
+  if (manifest) {
+    const named = { id: selected, version: manifest.version, label: manifest.label, research: true }
+    const title = emulatorBuildTitle(named)
+    const problem = !(options.moneroEnabled ?? isMoneroEmulatorEnabled())
+      ? `The selected emulator firmware "${title}" needs Monero. Turn Monero on in Settings, or pick another firmware.`
+      : `The selected emulator firmware "${title}" is missing from this app or failed its integrity check. Pick another firmware, or stage it with: make monero-emulator`
+    return { ...named, path: null, problem }
+  }
+  let version: string | undefined
+  try { version = readFileSync(join(emulatorBuildDir(home), `${selected}.version`), 'utf8').trim() || undefined } catch {}
+  const path = emulatorBuildPath(selected, platform, home)
+  if (exists(path)) return { id: selected, version, path, problem: null }
+  return { id: selected, version, path: null,
+    problem: `The selected emulator firmware "${emulatorBuildTitle({ id: selected, version })}" is missing: ${path} is not there. Pick another firmware, or drop its library onto the window again.` }
+}
+
+export function resolveEmulatorLibPath(options: Parameters<typeof selectedEmulatorLibrary>[0]): string | null {
+  return selectedEmulatorLibrary(options).path
 }
 
 /**

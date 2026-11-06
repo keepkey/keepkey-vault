@@ -24,7 +24,7 @@ import {
 } from './emulator-keychain'
 import { startEmulatorWatchdog, stopEmulatorWatchdog } from './emulator-watchdog'
 import type { EmulatorStatus, EmulatorProcessState } from '../shared/types'
-import { emulatorLibFilename, libraryReadsClearSignTestRoot, resolveEmulatorLibPath } from './emulator-library'
+import { emulatorLibFilename, libraryReadsClearSignTestRoot, resolveEmulatorLibPath, selectedEmulatorLibrary } from './emulator-library'
 
 const TAG = '[emulator]'
 const FLASH_SIZE = 1048576  // 1 MB
@@ -160,12 +160,10 @@ export function initEmulator(flashName = 'default'): EmulatorStatus {
 
     // 1. Locate dylib BEFORE touching flash — failing early avoids creating
     // an orphan flash file when the user hasn't installed an emulator yet.
-    const dylibPath = getRuntimeDylibPath()
-    if (!dylibPath) {
-      const lib = getLibFilename()
-      const how = process.platform === 'win32' ? 'make build-emulator-windows' : 'make build-emulator'
-      throw new Error(`Bundled emulator missing. Drop a ${lib} onto the window or run: ${how}`)
-    }
+    // A selected build that can't start names itself; nothing else starts in its place.
+    const library = selectedEmulatorLibrary({ importDir: import.meta.dir })
+    const dylibPath = library.path
+    if (!dylibPath) throw new Error(library.problem || 'Emulator library unavailable')
 
     // 2. Decrypt flash
     activeFlash = loadFlash(flashName)
