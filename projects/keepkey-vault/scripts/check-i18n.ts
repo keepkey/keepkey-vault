@@ -72,6 +72,8 @@ for(const file of walk(sourceRoot).filter(f=>f.endsWith('.tsx')&&!/(__|\.test\.|
     if(text&&/[A-Za-z]{2}/.test(text)&&!/^(?:https?:|\/|[A-Z0-9_./:#-]{1,14}$)/.test(text))rawUi.add(`${path.relative(sourceRoot,file)}:${messageKey(text)}`)
     if(ts.isCallExpression(node)&&ts.isIdentifier(node.expression)&&node.expression.text==='uiText'&&node.arguments[0]&&ts.isStringLiteral(node.arguments[0])) {
       if(catalogs.en.ui?.[messageKey(node.arguments[0].text)]!==node.arguments[0].text)errors.push(`UI source missing from English catalog: ${path.relative(sourceRoot,file)}:${node.arguments[0].text}`)
+      // A JS string is not JSX text: React prints '&times;' literally. Use the character itself.
+      if(/&[a-zA-Z]+;|&#[0-9]+;/.test(node.arguments[0].text))errors.push(`HTML entity in UI string (renders literally): ${path.relative(sourceRoot,file)}:${node.arguments[0].text}`)
     }
     ts.forEachChild(node,visit)
   }

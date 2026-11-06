@@ -481,7 +481,7 @@ export function SendForm({ chain, address, balance, token, tokenBalanceUnverifie
 						<Text fontSize="10px" color="kk.textMuted">{token!.name}</Text>
 					</Flex>
 					{onClearToken && (
-						<Button size="xs" variant="ghost" color="kk.textMuted" _hover={{ color: "kk.textPrimary" }} onClick={onClearToken} px="1" minW="auto">{uiText("&times;")}</Button>
+						<Button size="xs" variant="ghost" color="kk.textMuted" _hover={{ color: "kk.textPrimary" }} onClick={onClearToken} px="1" minW="auto">{uiText("×")}</Button>
 					)}
 				</Flex>
 			)}

@@ -170,7 +170,7 @@ function ActiveSwapCard({ swap, onDismiss, onResume }: { swap: PendingSwap; onDi
       <Flex justify="space-between" align="center" mb="1.5">
         <HStack gap="2">
           <Text fontSize="sm" fontWeight="600" color="kk.textPrimary">{swap.fromSymbol}</Text>
-          <Text fontSize="xs" color="kk.textMuted">{uiText("&rarr;")}</Text>
+          <Text fontSize="xs" color="kk.textMuted">{uiText("→")}</Text>
           <Text fontSize="sm" fontWeight="600" color="kk.textPrimary">{swap.toSymbol}</Text>
         </HStack>
         <Text fontSize="10px" fontWeight="600" color={color} bg={`${color}15`} px="2" py="0.5" borderRadius="md">
@@ -179,7 +179,7 @@ function ActiveSwapCard({ swap, onDismiss, onResume }: { swap: PendingSwap; onDi
       </Flex>
 
       <Text fontSize="xs" color="kk.textSecondary" mb="1">
-        {swap.fromAmount} {swap.fromSymbol}{" "}{uiText("&rarr; ~")}{swap.expectedOutput} {swap.toSymbol}
+        {swap.fromAmount} {swap.fromSymbol}{" "}{uiText("→ ~")}{swap.expectedOutput} {swap.toSymbol}
       </Text>
 
       <StageIndicator stage={stage} status={swap.status} />
@@ -322,7 +322,7 @@ function HistoryCard({ record, onResume }: { record: SwapHistoryRecord; onResume
       <Flex justify="space-between" align="center" mb="1">
         <HStack gap="2">
           <Text fontSize="sm" fontWeight="600" color="kk.textPrimary">
-            {record.fromSymbol}{" "}{uiText("&rarr;")}{" "}{record.toSymbol}
+            {record.fromSymbol}{" "}{uiText("→")}{" "}{record.toSymbol}
           </Text>
           <Text fontSize="10px" fontWeight="600" color={color} bg={`${color}15`} px="2" py="0.5" borderRadius="md">
             {record.status}
@@ -339,8 +339,8 @@ function HistoryCard({ record, onResume }: { record: SwapHistoryRecord; onResume
         <Text fontSize="xs" color="kk.textSecondary">
           {record.fromAmount} {record.fromSymbol}
           {record.receivedOutput
-            ? <>{" "}{uiText("&rarr;")}{" "}{record.receivedOutput} {record.toSymbol}</>
-            : <>{" "}{uiText("&rarr; ~")}{record.quotedOutput} {record.toSymbol} <Text as="span" color="kk.textMuted">{uiText("(quoted)")}</Text></>
+            ? <>{" "}{uiText("→")}{" "}{record.receivedOutput} {record.toSymbol}</>
+            : <>{" "}{uiText("→ ~")}{record.quotedOutput} {record.toSymbol} <Text as="span" color="kk.textMuted">{uiText("(quoted)")}</Text></>
           }
         </Text>
         {durationStr && (
@@ -751,7 +751,7 @@ export function SwapHistoryDialog({ open, onClose, onResumeSwap }: SwapHistoryDi
               </HStack>
             )}
           </HStack>
-          <Button size="xs" variant="ghost" color="kk.textMuted" px="1" minW="auto" _hover={{ color: "kk.textPrimary" }} onClick={onClose}>{uiText("&times;")}</Button>
+          <Button size="xs" variant="ghost" color="kk.textMuted" px="1" minW="auto" _hover={{ color: "kk.textPrimary" }} onClick={onClose}>{uiText("×")}</Button>
         </Flex>
 
         {/* Tabs */}
@@ -807,7 +807,7 @@ export function SwapHistoryDialog({ open, onClose, onResumeSwap }: SwapHistoryDi
                 {exportResult.startsWith('Error') ? exportResult : `Saved to ${exportResult}`}
               </Text>
               <Button size="xs" variant="ghost" color="kk.textMuted" px="1" minW="auto"
-                onClick={() => setExportResult(null)} fontSize="10px">{uiText("&times;")}</Button>
+                onClick={() => setExportResult(null)} fontSize="10px">{uiText("×")}</Button>
             </Flex>
           </Box>
         )}

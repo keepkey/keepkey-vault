@@ -210,7 +210,7 @@ export function Bip85VaultDialog({ onClose }: Bip85VaultDialogProps) {
 								</Box>
 								<Text fontSize="sm" fontWeight="600" color="kk.gold" textAlign="center">{uiText("Your slot")}{" "}{displayedSeed.index}{" "}{uiText("key is shown on the screen of the device")}</Text>
 								<Text fontSize="xs" color="kk.textMuted" textAlign="center">
-									{displayedSeed.wordCount}{uiText("-word seed &middot; Write it down carefully")}</Text>
+									{displayedSeed.wordCount}{uiText("-word seed · Write it down carefully")}</Text>
 							</Flex>
 							<Flex gap="2" mt="3" justify="center">
 								<Button size="xs" variant="outline" borderColor="kk.border" color="kk.textSecondary" _hover={{ bg: "rgba(255,255,255,0.06)" }} onClick={clearDisplay}>

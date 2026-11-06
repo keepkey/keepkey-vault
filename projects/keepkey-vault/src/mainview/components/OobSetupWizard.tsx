@@ -1503,7 +1503,7 @@ export function OobSetupWizard({ onComplete: onCompleteProp, onWalletCreated, on
                                 : t('bootloader.outdated')}
                             </Text>
                           </VStack>
-                          <Text color="kk.textMuted">{uiText("&rarr;")}</Text>
+                          <Text color="kk.textMuted">{uiText("→")}</Text>
                           <VStack gap={0.5} align="end">
                             <Text fontSize="2xs" color="kk.textSecondary" textTransform="uppercase">{t('bootloader.latest')}</Text>
                             <Text fontSize="sm" color="var(--teal)" fontWeight="bold">
@@ -1583,7 +1583,7 @@ export function OobSetupWizard({ onComplete: onCompleteProp, onWalletCreated, on
                                 : t('bootloader.outdated')}
                             </Text>
                           </VStack>
-                          <Text color="kk.textMuted">{uiText("&rarr;")}</Text>
+                          <Text color="kk.textMuted">{uiText("→")}</Text>
                           <VStack gap={0.5} align="end">
                             <Text fontSize="2xs" color="kk.textSecondary" textTransform="uppercase">{t('bootloader.latest')}</Text>
                             <Text fontSize="sm" color="var(--teal)" fontWeight="bold">
@@ -1735,7 +1735,7 @@ export function OobSetupWizard({ onComplete: onCompleteProp, onWalletCreated, on
                               v{deviceStatus.firmwareVersion || '?'}
                             </Text>
                           </VStack>
-                          <Text color="kk.textMuted">{uiText("&rarr;")}</Text>
+                          <Text color="kk.textMuted">{uiText("→")}</Text>
                           <VStack gap={0.5} align="end">
                             <Text fontSize="2xs" color="kk.textSecondary" textTransform="uppercase">{t('bootloader.latest')}</Text>
                             <Text fontSize="sm" color="var(--teal)" fontWeight="bold">
@@ -1835,7 +1835,7 @@ export function OobSetupWizard({ onComplete: onCompleteProp, onWalletCreated, on
                             </Box>
                           )}
                         </VStack>
-                        <Text color="kk.textMuted" fontSize="lg">{uiText("&rarr;")}</Text>
+                        <Text color="kk.textMuted" fontSize="lg">{uiText("→")}</Text>
                         <VStack gap={0.5} align="end">
                           <Text fontSize="xs" color="kk.textSecondary" textTransform="uppercase" fontWeight="600">{t('bootloader.latest')}</Text>
                           <Text fontSize="md" color="var(--teal)" fontWeight="bold">

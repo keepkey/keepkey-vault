@@ -151,7 +151,7 @@ export function ReportDialog({ onClose }: ReportDialogProps) {
 							cursor="pointer"
 							_hover={{ color: "white" }}
 							onClick={onClose}
-						>{uiText("&times;")}</Box>
+						>{uiText("×")}</Box>
 					)}
 				</Flex>
 
