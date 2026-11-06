@@ -10,7 +10,10 @@ import { runHostAdapter } from './tools'
 
 const delay = (milliseconds: number) => new Promise(resolve => setTimeout(resolve, milliseconds))
 
-export async function verifyDaemon(origin: string, minimumHeight: number): Promise<{ height: number; fingerprint?: string; synchronized: boolean }> {
+// Dev/E2E only: an offline loopback regtest daemon ("fakechain"). Mainnet rules are unchanged otherwise.
+const LOCAL_REGTEST = process.env.KEEPKEY_MONERO_LOCAL_REGTEST === '1'
+
+export async function verifyDaemon(origin: string, minimumHeight: number): Promise<{ height: number; fingerprint?: string; synchronized: boolean; regtest: boolean }> {
   const url = new URL(origin)
   const loopback = ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname)
   if (url.protocol !== 'https:' && !(url.protocol === 'http:' && loopback)) throw new Error('Invalid Monero daemon origin')
@@ -38,11 +41,12 @@ export async function verifyDaemon(origin: string, minimumHeight: number): Promi
     chunks.push(value)
   }
   const info = JSON.parse(Buffer.concat(chunks).toString('utf8')).result
-  if (!info || info.nettype !== 'mainnet' || info.testnet || info.stagenet ||
+  const regtest = LOCAL_REGTEST && loopback && url.protocol === 'http:' && info?.nettype === 'fakechain' && info.offline === true
+  if (!info || (!regtest && info.nettype !== 'mainnet') || info.testnet || info.stagenet ||
       (!info.synchronized && !(loopback && info.offline === true)) || unsigned(info.height) < minimumHeight) {
     throw new Error('The selected Monero daemon is not synchronized on mainnet')
   }
-  return { height: unsigned(info.height), fingerprint, synchronized: info.synchronized === true }
+  return { height: unsigned(info.height), fingerprint, synchronized: info.synchronized === true, regtest }
 }
 
 interface Session {
@@ -82,6 +86,7 @@ export class MoneroWatchService {
       const args = [this.binary, '--wallet-dir', directory, '--rpc-bind-ip', '127.0.0.1', '--rpc-bind-port', String(port),
         '--rpc-ssl', 'disabled', '--untrusted-daemon', '--daemon-address', config.daemonUrl,
         ...(daemon.fingerprint ? ['--daemon-ssl', 'enabled', '--daemon-ssl-allowed-fingerprints', daemon.fingerprint] : ['--daemon-ssl', 'disabled']),
+        ...(daemon.regtest ? ['--allow-mismatched-daemon-version'] : []),
         '--no-initial-sync', '--shared-ringdb-dir', ringdb, '--log-level', '0', '--log-file', join(directory, 'rpc.log')]
       proc = Bun.spawn(args, { cwd: directory, stdin: 'ignore', stdout: 'ignore', stderr: 'ignore' })
       this.pending = { directory, proc }
