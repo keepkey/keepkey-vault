@@ -327,8 +327,9 @@ describe('PIN prompt on real emulator firmware', () => {
     newEngine()
     await connect('cross-ack')
     await until(() => pins.length > 0, 'PIN request')
-    const err = await engine.sendPassphrase('').then(() => null, (e: any) => e)
-    expect(err?.status).toBe(423)
+    // The engine refuses it as unasked; sent past the engine (REST's direct wallet call), the guard refuses it.
+    expect((await engine.sendPassphrase('').then(() => null, (e: any) => e))?.status).toBe(409)
+    expect((await (engine.wallet as any).sendPassphrase('').then(() => null, (e: any) => e))?.status).toBe(423)
     await enterPin('1234')
     await until(() => state() === 'ready', 'unlock')
     expect(unknownMessages()).toEqual([])

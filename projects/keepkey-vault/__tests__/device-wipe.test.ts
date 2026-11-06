@@ -398,7 +398,7 @@ describe('wiring', () => {
     expect(listener).toContain('this.setPinPromptOpen(true)')
     const failures = engine.slice(engine.indexOf('transport.on(core.Events.FAILURE'), engine.indexOf('transport.on(core.Events.FAILURE') + 500)
     expect(failures).toContain('this.setPinPromptOpen(false)')
-    const sendPin = engine.slice(engine.indexOf('  async sendPin(pin: string) {'), engine.indexOf('  async sendPin(pin: string) {') + 400)
+    const sendPin = engine.slice(engine.indexOf('  async sendPin(pin: string) {'), engine.indexOf('  async sendPin(pin: string) {') + 600)
     expect(sendPin).toContain('this.setPinPromptOpen(false)')
     const app = readFileSync(path.join(import.meta.dir, '../src/mainview/App.tsx'), 'utf8')
     expect(app).toContain('deviceAsking={deviceState.pinPromptOpen ?? true}')

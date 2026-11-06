@@ -30,7 +30,7 @@ mock.module('electrobun/bun', () => ({ Utils: { paths: { userData: '/tmp/kk-pin-
 
 const { DEVICE_AWAITING_INPUT_MESSAGE, awaitingInput, guardInputWait } = await import('../src/bun/device-gate')
 const { EngineController } = await import('../src/bun/engine-controller')
-const { wipeOwningDevice } = await import('../src/bun/device-wipe')
+const { wipeOwningDevice, WIPE_AFTER_REPLUG_MESSAGE } = await import('../src/bun/device-wipe')
 
 const T = Messages.MessageType
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
@@ -68,6 +68,8 @@ class ScriptedKeepKey implements TransportDelegate {
   failReads = 0
   /** ChangePin-like: a correct PIN is answered with the next PinMatrixRequest. */
   pinRequestsLeft = 1
+  /** After 3+ wrong PINs: seed access gets no reply (the firmware counts down, reading no USB). */
+  countdown = false
   /** Features arrive this long after GetFeatures. */
   featuresDelayMs = 0
   out: Uint8Array[] = []
@@ -115,7 +117,8 @@ class ScriptedKeepKey implements TransportDelegate {
   }
   private topLevel(type: number) {
     if (type === T.MESSAGETYPE_GETPUBLICKEY || type === T.MESSAGETYPE_ETHEREUMGETADDRESS) {
-      if (this.locked) { this.wait = 'pin'; this.out.push(frame(T.MESSAGETYPE_PINMATRIXREQUEST)) }
+      if (this.locked && this.countdown) this.wait = null
+      else if (this.locked) { this.wait = 'pin'; this.out.push(frame(T.MESSAGETYPE_PINMATRIXREQUEST)) }
       else this.out.push(frame(T.MESSAGETYPE_SUCCESS))
     } else if (type === T.MESSAGETYPE_GETFEATURES || type === T.MESSAGETYPE_INITIALIZE) {
       const reply = features({ pinCached: !this.locked })
@@ -295,7 +298,7 @@ describe.each(['7.17', '7.16'] as const)('EngineController on a USB/HID-like tra
     await until(() => awaitingInput(transport) === 'pin', 'PIN request')
     await engine.sendPin('1')
     await until(() => awaitingInput(transport) === 'passphrase', 'passphrase request')
-    await expect(engine.sendPin('1')).rejects.toMatchObject({ status: 423 })
+    await expect(engine.sendPin('1')).rejects.toMatchObject({ status: 409 }) // the device asks for a passphrase, not a PIN
     await engine.sendPassphrase('')
     await unlock
     expect(device.inputWaitTraffic()).toEqual([T.MESSAGETYPE_PINMATRIXACK, T.MESSAGETYPE_PASSPHRASEACK])
@@ -372,5 +375,54 @@ describe.each(['7.17', '7.16'] as const)('EngineController on a USB/HID-like tra
     await unlock
     expect(engine.getDeviceState().state).toBe('disconnected')
     expect((engine as any).cachedFeatures?.label).toBeUndefined()
+  })
+
+  test('a PIN sent during the countdown is refused and leaves no flag behind', async () => {
+    const device = new ScriptedKeepKey(fw)
+    device.countdown = true
+    const { engine, wallet, transport } = await engineWith(device)
+    const errors: unknown[] = []
+    engine.on('pin-error', (e: unknown) => errors.push(e))
+    const unlock = engine.promptPin().catch(() => {})
+    await until(() => device.received.length === 1, 'unlock request')
+    await expect(engine.sendPin('1')).rejects.toMatchObject({ status: 409 })
+    expect((engine as any).pinAwaitingResult).toBe(false)
+    await expect(wallet.sendPin('1')).rejects.toMatchObject({ status: 409 }) // REST /system/recovery/pin's call
+    await expect(wallet.sendPassphrase('')).rejects.toMatchObject({ status: 409 })
+    expect(transport.userActionRequired).toBe(false)
+    transport.emit(core.Events.FAILURE, { message: { code: 1, message: 'unrelated' } })
+    expect(errors).toEqual([]) // not reported as a wrong PIN
+    expect(device.received.map(r => r.type)).toEqual([T.MESSAGETYPE_GETPUBLICKEY])
+    void unlock
+  })
+
+  test('a wipe after a refused PIN during the countdown still waits for the replug', async () => {
+    const device = new ScriptedKeepKey(fw)
+    device.countdown = true
+    const { engine, wallet } = await engineWith(device)
+    Object.assign(engine, { cachedFeatures: { initialized: true, pinProtection: true, deviceId: 'scripted-id' } })
+    const unlock = engine.promptPin().catch(() => {})
+    await until(() => device.received.length === 1, 'unlock request')
+    await wallet.sendPin('1').catch(() => {})
+    const outcome = await Promise.race([
+      wipeOwningDevice(engine as any, (wipe) => wipe(), async () => {}).then(() => 'wiped', (e: Error) => e.message),
+      sleep(1000).then(() => 'hung'),
+    ])
+    expect(outcome).toBe(WIPE_AFTER_REPLUG_MESSAGE)
+    expect(device.received.map(r => r.type)).toEqual([T.MESSAGETYPE_GETPUBLICKEY]) // no Cancel into the countdown
+    void unlock
+  })
+
+  test('a wipe during the passphrase wait cancels it even after userActionRequired was cleared', async () => {
+    const device = new ScriptedKeepKey(fw, true)
+    const { engine, transport } = await engineWith(device)
+    const unlock = engine.promptPin().catch(() => {})
+    await until(() => awaitingInput(transport) === 'pin', 'PIN request')
+    await engine.sendPin('1')
+    await until(() => awaitingInput(transport) === 'passphrase', 'passphrase request')
+    transport.userActionRequired = false
+    await wipeOwningDevice(engine as any, (wipe) => wipe(), async () => {})
+    expect(device.received.map(r => r.type).slice(-2)).toEqual([T.MESSAGETYPE_CANCEL, T.MESSAGETYPE_WIPEDEVICE])
+    void unlock
   })
 })

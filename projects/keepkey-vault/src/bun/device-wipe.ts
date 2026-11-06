@@ -62,10 +62,10 @@ export async function wipeOwningDevice(
     const open = !!transport && await transport.isOpened()
     const unlock = host.unlockRequest
     // Unlock sent but no PIN matrix yet = the device is in its countdown; a closed transport = quarantined by a timeout.
-    // The matrix shows when the device's last message asked for the PIN (device-gate.ts), even
-    // after another call cleared hdwallet's userActionRequired.
-    const matrixShown = !!transport && (transport.userActionRequired || transport.awaitingInput === 'pin')
-    if (!open || (unlock && !matrixShown)) {
+    // The device is asking when its last message asked for the PIN or passphrase
+    // (device-gate.ts), even after another call cleared hdwallet's userActionRequired.
+    const asking = !!transport && (transport.userActionRequired || !!transport.awaitingInput)
+    if (!open || (unlock && !asking)) {
       throw new Error(host.deferWipeUntilReplug() ? WIPE_AFTER_REPLUG_MESSAGE : WIPE_UNREACHABLE_MESSAGE)
     }
     await host.cancelDevicePrompt().catch(() => {})

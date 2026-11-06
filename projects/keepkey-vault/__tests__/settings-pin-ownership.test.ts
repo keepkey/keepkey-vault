@@ -40,6 +40,7 @@ function fixture() {
     applySettings: async () => {
       operations.push('settings')
       transport.emit(String(Messages.MessageType.MESSAGETYPE_PINMATRIXREQUEST), { message: { type: 1 } })
+      ;(transport as any).awaitingInput = 'pin' // what device-gate.ts records when it reads that request
       await pin.promise
       operations.push('settings-complete')
     },

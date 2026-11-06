@@ -70,6 +70,10 @@ const WAIT_ANSWERS = {
   passphrase: new Set<number>([T.MESSAGETYPE_PASSPHRASEACK, T.MESSAGETYPE_CANCEL, T.MESSAGETYPE_INITIALIZE]),
 }
 const INPUT_ACKS = new Set<number>([T.MESSAGETYPE_PINMATRIXACK, T.MESSAGETYPE_PASSPHRASEACK])
+/** Device messages after which the user still has to act once the PIN/passphrase waits are excluded. */
+const USER_ACTION_REQUESTS = new Set<number>([
+  T.MESSAGETYPE_BUTTONREQUEST, T.MESSAGETYPE_CHARACTERREQUEST, T.MESSAGETYPE_WORDREQUEST,
+])
 const INPUT_WAIT_DEBUG = new Set<number>([T.MESSAGETYPE_DEBUGLINKGETSTATE])
 
 export const DEVICE_AWAITING_INPUT_MESSAGE = 'KeepKey is waiting for its PIN or passphrase: enter it in KeepKey Desktop, then try again'
@@ -124,6 +128,7 @@ export function guardInputWait(transport: any) {
     // Report id '?', '##', then the big-endian message type.
     if (!debugLink) {
       const type = (buf[3] << 8) | buf[4]
+      transport.lastReadType = type
       transport.awaitingInput = type === T.MESSAGETYPE_PINMATRIXREQUEST ? 'pin'
         : type === T.MESSAGETYPE_PASSPHRASEREQUEST ? 'passphrase' : null
     }
@@ -137,7 +142,12 @@ export function guardInputWait(transport: any) {
       return write(buf, debugLink)
     }
     if (wait && !WAIT_ANSWERS[wait].has(type)) throw new HttpError(423, DEVICE_AWAITING_INPUT_MESSAGE)
-    if (!wait && INPUT_ACKS.has(type)) throw new HttpError(409, DEVICE_NOT_ASKING_MESSAGE)
+    if (!wait && INPUT_ACKS.has(type)) {
+      // hdwallet set userActionRequired for this ack before writing it. Put back what the
+      // device's last message says, or a wipe would take a countdown for a PIN prompt.
+      transport.userActionRequired = USER_ACTION_REQUESTS.has(transport.lastReadType)
+      throw new HttpError(409, DEVICE_NOT_ASKING_MESSAGE)
+    }
     // Answered from here on: the device's next message (it may beat this write's
     // completion) sets the next wait, and must not be overwritten after it.
     if (wait) transport.awaitingInput = null

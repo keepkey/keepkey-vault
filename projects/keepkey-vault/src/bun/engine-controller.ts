@@ -21,7 +21,7 @@ import { forceReleaseWebUsb, isUnreleasable } from './webusb-recovery'
 import type { DeviceFailure } from './device-refusal'
 import { flushRingBuffers, getActiveFlashName, getEmulatorStatus } from './emulator'
 import { wipeOwningDevice, WIPE_BUSY_MESSAGE, type WipeHost } from './device-wipe'
-import { awaitingInput, gateRestWrites, guardInputWait, restRequest } from './device-gate'
+import { awaitingInput, DEVICE_NOT_ASKING_MESSAGE, gateRestWrites, guardInputWait, restRequest } from './device-gate'
 
 const KEEPKEY_VENDOR_ID = 0x2B24 // 11044
 // Firmware manifest lives in keepkey-vault (migrated from keepkey-desktop, which is now stale).
@@ -2381,6 +2381,8 @@ export class EngineController extends EventEmitter {
     if (!this.wallet) throw new Error('No device connected')
     // A PinMatrixAck during the wipe confirmation breaks the wipe (device-wipe.ts).
     if (this.wipeInProgress) throw new Error(WIPE_BUSY_MESSAGE)
+    // Before any flag: no PIN goes unasked (countdown, stale UI).
+    if (awaitingInput((this.wallet as any).transport) !== 'pin') throw new HttpError(409, DEVICE_NOT_ASKING_MESSAGE)
     this.setPinPromptOpen(false)
     console.log(`[Engine] sendPin (pinRequests=${this.pinRequestCount}, promptPinActive=${this.promptPinActive})`)
     this.pinAwaitingResult = true
@@ -2399,6 +2401,7 @@ export class EngineController extends EventEmitter {
 
   async sendPassphrase(passphrase: string) {
     if (!this.wallet) throw new Error('No device connected')
+    if (awaitingInput((this.wallet as any).transport) !== 'passphrase') throw new HttpError(409, DEVICE_NOT_ASKING_MESSAGE)
     // Passphrase changes the effective seed — clear fingerprint + seed ID so they're re-derived
     this.cachedFingerprint = null
     this.seedEthAddress = null
