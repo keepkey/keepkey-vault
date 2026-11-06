@@ -13,8 +13,9 @@ export type { MoneroSendReview } from './monero-wire'
 const MAX_RESPONSE = 4096
 const PRIMARY_ADDRESS = /^4[123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz]{94}$/
 const PREPARED_LIFETIME_MS = 10 * 60 * 1000
-export type MoneroSendBlocker = 'emulator' | 'adapter' | 'syncing' | 'key-images'
+export type MoneroSendBlocker = 'unrelayed' | 'emulator' | 'adapter' | 'syncing' | 'key-images'
 const BLOCKER_MESSAGES: Record<MoneroSendBlocker, string> = {
+  unrelayed: 'A signed transaction may already be broadcast: retry broadcasting that same transaction first',
   emulator: 'Sending needs the Monero signing (research) emulator build',
   adapter: 'The Monero signing adapter is not installed in this build',
   syncing: 'Wait for the watch wallet to finish syncing',
@@ -46,6 +47,7 @@ export interface MoneroVaultStatus {
   canSend: boolean
   /** The first unmet send gate, when sending is unavailable. */
   sendBlocked?: MoneroSendBlocker
+  unrelayedTxid?: string
   /** This session imported device key images for every wallet output. */
   keyImagesSynced: boolean
   /** View-only scanning alone cannot prove whether received outputs were spent. */
@@ -151,6 +153,9 @@ export function createMoneroVault({ engine, confirm, getConfig, sidecar = manage
   let lastGood: MoneroVaultStatus | null = null
   let synced: { key: string; generation: number; owned: Owned } | null = null
   let prepared: Prepared | null = null
+  // A signed tx whose broadcast outcome is unknown. Kept (even across reconnects) so a retry
+  // re-sends these exact bytes instead of building a second, different payment.
+  let unrelayed: { txid: string; txHex: string } | null = null
   const snapshot = (): Snapshot | null => {
     const config = getConfig(), state = engine.getDeviceState(), wallet = engine.wallet
     if (!config.enabled || config.offline || state.state !== 'ready' || !wallet || !state.deviceId) return null
@@ -248,15 +253,34 @@ export function createMoneroVault({ engine, confirm, getConfig, sidecar = manage
   const keyImagesFor = (current: Snapshot) => synced && synced.key === current.key && synced.generation === epoch ? synced : null
   /** Every gate, in the order a user can fix them. Undefined means sending is possible. */
   const sendBlocker = (current: Snapshot, status: MoneroVaultStatus): MoneroSendBlocker | undefined => {
+    if (unrelayed) return 'unrelayed'
     if (!current.emulator || !signingEmulator()) return 'emulator'
     if (!sidecar.isMoneroSendReady?.() || !sidecar.createMoneroTransfer || !sidecar.relayMoneroTransaction) return 'adapter'
     if (!status.monitorReady) return 'syncing'
     if (!keyImagesFor(current)) return 'key-images'
   }
+  const relayUnrelayed = async (retry: boolean) => {
+    const pending = unrelayed!
+    try { await sidecar.relayMoneroTransaction!({ txHex: pending.txHex }) }
+    catch (error) {
+      const message = error instanceof Error ? error.message : ''
+      // A definite rejection sent nothing. On a retry, "double spend" means these inputs are already
+      // spent (normally by this same tx in the pool/chain), so it cannot pay twice either way.
+      if (message.startsWith('The daemon rejected the transaction')) {
+        unrelayed = null
+        if (retry && /double spend/.test(message)) { void sidecar.refreshMoneroWatch?.().catch(() => {}); return }
+        throw error
+      }
+      // Timeout, network or worker failure, or accepted-but-not-relayed: the outcome is unknown.
+      throw new MoneroError(`The broadcast result is unknown for transaction ${pending.txid}. Check it on a block explorer; Retry broadcast resends this same transaction`)
+    }
+    unrelayed = null
+    void sidecar.refreshMoneroWatch?.().catch(() => {})
+  }
   const withSendState = (status: MoneroVaultStatus, current: Snapshot): MoneroVaultStatus => {
     const blocker = sendBlocker(current, status), keyImagesSynced = !!keyImagesFor(current)
     return { ...status, transactions: status.transactions.map(tx => ({ ...tx })), canSend: !blocker, keyImagesSynced, spendStateKnown: keyImagesSynced,
-      ...(blocker ? { sendBlocked: blocker } : {}) }
+      ...(blocker ? { sendBlocked: blocker } : {}), ...(unrelayed ? { unrelayedTxid: unrelayed.txid } : {}) }
   }
   const deviceOperation = async <T,>(current: Snapshot, operation: () => Promise<T>, details: Parameters<Confirm>[1]): Promise<T> =>
     current.transport.lockDuring(async () => {
@@ -399,6 +423,7 @@ export function createMoneroVault({ engine, confirm, getConfig, sidecar = manage
       if (busy) throw new MoneroError('A Monero device request is already in progress')
       const current = requireReady(), binding = bindingFor(current)
       if (address === binding.address) throw new MoneroError('Sending to this same wallet is not supported by this preview')
+      if (unrelayed) throw new MoneroError(BLOCKER_MESSAGES.unrelayed)
       busy = true; prepared = null
       const generation = epoch
       try {
@@ -439,10 +464,20 @@ export function createMoneroVault({ engine, confirm, getConfig, sidecar = manage
         checkSignedTransaction(parsed, signed.hash, draft.plan, keyImages.owned)
         // These inputs are now spent: another send needs a fresh key-image sync.
         synced = null
-        await sidecar.relayMoneroTransaction({ txHex: Buffer.from(signed.blob).toString('hex') })
-        void sidecar.refreshMoneroWatch?.().catch(() => {})
+        unrelayed = { txid: parsed.hash, txHex: Buffer.from(signed.blob).toString('hex') }
+        await relayUnrelayed(false)
         return { txid: parsed.hash }
       } catch (error) { throw publicError(error, 'Unable to send the Monero transaction') }
+      finally { busy = false }
+    },
+    /** Re-broadcast the same signed bytes after an unknown relay outcome; never builds a new transaction. */
+    async retryRelay(): Promise<{ txid: string }> {
+      if (!unrelayed) throw new MoneroError('No Monero transaction is waiting to be broadcast')
+      if (busy) throw new MoneroError('A Monero device request is already in progress')
+      const txid = unrelayed.txid
+      busy = true
+      try { await relayUnrelayed(true); return { txid } }
+      catch (error) { throw publicError(error, 'Unable to broadcast the Monero transaction') }
       finally { busy = false }
     },
   }

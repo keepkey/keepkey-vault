@@ -266,6 +266,7 @@ import { initializeOrchardFromDevice, exportOrchardFvk, scanOrchardNotes, getShi
 import { inFlightShielded, type ExpectedShielded } from "../shared/zcash-pending"
 import { setMoneroEmulatorEnabled, listEmulatorBuilds, clearSelectedEmulatorBuild } from "./emulator-library"
 import { createMoneroVault } from "./monero-vault"
+import { REVIEWED_MONERO_SIGNING_SHA256 } from "./monero-emulator"
 import { startMoneroSidecar, stopMoneroSidecar, isMoneroSidecarAvailable } from "./monero-sidecar"
 import { validateMoneroNode } from "./monero-settings"
 import { findZcashCliBinary, isSidecarReady, startSidecar, stopSidecar, wipeSidecarWalletDb, hasFvkLoaded, getCachedFvk, onScanProgress, getScanState, updateSyncedTo, beginZcashSend, endZcashSend, isZcashSendInFlight } from "./zcash-sidecar"
@@ -2160,7 +2161,7 @@ let moneroSigningBuild: { key: string; signing: boolean } | null = null
 function moneroSigningEmulatorActive(): boolean {
     const path = engine.isEmulator && moneroEnabled ? getLoadedEmulatorLibPath() : null
     if (!path) return false
-    if (moneroSigningBuild?.key !== path) moneroSigningBuild = { key: path, signing: listEmulatorBuilds().some(build => build.signingEnabled && build.path === path) }
+    if (moneroSigningBuild?.key !== path) moneroSigningBuild = { key: path, signing: listEmulatorBuilds().some(build => build.signingEnabled && build.path === path && REVIEWED_MONERO_SIGNING_SHA256.has(build.id)) }
     return moneroSigningBuild.signing
 }
 function getMoneroWallet() {
@@ -10333,6 +10334,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
             moneroSyncKeyImages: async () => getMoneroWallet().syncKeyImages(),
             moneroPrepareSend: async (params) => getMoneroWallet().prepareSend(params),
             moneroSend: async (params) => getMoneroWallet().send(params),
+            moneroRetryRelay: async () => getMoneroWallet().retryRelay(),
             setMoneroEnabled: async ({ enabled }) => {
                 if (typeof enabled !== 'boolean') throw new Error('Monero requires an enabled boolean')
                 if (enabled && !isMoneroSidecarAvailable()) throw new Error('Monero is unavailable in this build')

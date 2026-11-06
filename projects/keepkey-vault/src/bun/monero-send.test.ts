@@ -421,7 +421,36 @@ describe('Desktop Monero send bridge', () => {
     b.setRelayError(new Error('ECONNRESET with DO-NOT-EXPOSE detail'))
     await b.api.syncKeyImages()
     review = await b.api.prepareSend({ address: RECIPIENT, amountAtomic: '2000000000000' })
-    await expect(b.api.send({ prepareId: review.prepareId })).rejects.toThrow('Unable to send the Monero transaction')
+    await expect(b.api.send({ prepareId: review.prepareId })).rejects.toThrow(`broadcast result is unknown for transaction ${referenceHash('base')}`)
+  })
+
+  test('an unknown broadcast outcome blocks new sends until the same bytes are re-broadcast', async () => {
+    const b = bridge()
+    await b.api.connect(); await b.api.syncKeyImages()
+    b.setRelayError(new Error('The Monero daemon is unavailable'))
+    const review = await b.api.prepareSend({ address: RECIPIENT, amountAtomic: '2000000000000' })
+    await expect(b.api.send({ prepareId: review.prepareId })).rejects.toThrow('broadcast result is unknown')
+    const status = await b.api.getStatus()
+    expect(status.unrelayedTxid).toBe(referenceHash('base'))
+    expect(status.canSend).toBe(false)
+    expect(status.sendBlocked).toBe('unrelayed')
+    await b.api.syncKeyImages()
+    await expect(b.api.prepareSend({ address: RECIPIENT, amountAtomic: '2000000000000' })).rejects.toThrow('retry broadcasting')
+    const signs = sentTypes(b).filter(type => type === 65000).length
+    b.setRelayError(null)
+    expect(await b.api.retryRelay()).toEqual({ txid: referenceHash('base') })
+    expect(b.calls.relays).toHaveLength(2)
+    expect(b.calls.relays[1]).toEqual(b.calls.relays[0])
+    expect(sentTypes(b).filter(type => type === 65000).length).toBe(signs)
+    expect((await b.api.getStatus()).unrelayedTxid).toBeUndefined()
+  })
+
+  test('a fee above the cap or not below the payment is refused before signing', async () => {
+    const b = bridge()
+    await b.api.connect(); await b.api.syncKeyImages()
+    b.setDraft(() => { const plan = planOf('base'); plan.feeAtomic = '6000000000'; return { feeAtomic: '6000000000', amountAtomic: '2000000000000', plan } })
+    await expect(b.api.prepareSend({ address: RECIPIENT, amountAtomic: '2000000000000' })).rejects.toThrow('fee')
+    expect(sentTypes(b)).not.toContain(65000)
   })
 
   test('a device, seed or configuration change revokes synced key images and prepared sends', async () => {
