@@ -322,6 +322,82 @@ describe('PIN prompt on real emulator firmware', () => {
     expect(unknownMessages()).toEqual([])
   }, 40_000)
 
+  test('a stale passphrase sent during the PIN wait is refused, and the PIN still lands', async () => {
+    await makeWallet('cross-ack', SEED_A, '1234')
+    newEngine()
+    await connect('cross-ack')
+    await until(() => pins.length > 0, 'PIN request')
+    const err = await engine.sendPassphrase('').then(() => null, (e: any) => e)
+    expect(err?.status).toBe(423)
+    await enterPin('1234')
+    await until(() => state() === 'ready', 'unlock')
+    expect(unknownMessages()).toEqual([])
+  }, 30_000)
+
+  test("a new connection's Initialize ends a PIN wait the old connection abandoned", async () => {
+    await makeWallet('reinit', SEED_A, '1234')
+    newEngine()
+    await connect('reinit')
+    await until(() => pins.length > 0, 'PIN request')
+    const prompt = engine.unlockRequest
+    await (engine.wallet as any).transport.delegate.disconnect() // the firmware still waits for its PIN
+    expect((await settled(prompt, 1000)).state).toBe('rejected')
+    pins.length = 0
+    await engine.connectEmulator() // same emulator boot: Initialize lands in that wait
+    expect(state()).toBe('needs_pin')
+    await enterPin('1234')
+    await until(() => state() === 'ready', 'unlock')
+    expect(emu.emuRead(0)).toBeNull() // no reply left over for the next request
+    expect(unknownMessages()).toEqual([])
+  }, 30_000)
+
+  test('the wrong-PIN countdown is waited out with the pad disabled, not timed out into an error', async () => {
+    await makeWallet('countdown', SEED_A, '1234')
+    newEngine()
+    const states: string[] = []
+    engine.on('state-change', (s: any) => states.push(s.state))
+    await connect('countdown')
+    for (let i = 0; i < 3; i++) {
+      await enterPin('1111')
+      await until(() => pinErrors.length === i + 1, `wrong PIN ${i + 1}`)
+    }
+    // Three failures: the next request counts down 8 s before its PinMatrixRequest. Give this
+    // connection a 1.5 s LONG_TIMEOUT so a deadline on the countdown would fire well inside it.
+    const transport = (engine.wallet as any).transport
+    const withDeadline = transport.withDeadline.bind(transport)
+    transport.withDeadline = (action: any, ms: number, op: string) => withDeadline(action, ms === core.LONG_TIMEOUT ? 1500 : ms, op)
+    engine.once('pin-request', () => { transport.withDeadline = withDeadline }) // the PIN wait itself keeps its deadline
+    await sleep(3000 + 4000) // the 3 s re-prompt, then half the countdown
+    expect(state()).toBe('needs_pin')
+    expect(engine.getDeviceState().pinPromptOpen).toBe(false) // PinEntry shows the pad disabled
+    await until(() => pins.length > 0, 'PIN request after the countdown', 15_000)
+    await enterPin('1234')
+    await until(() => state() === 'ready', 'unlock')
+    expect(states).not.toContain('error')
+    expect(unknownMessages()).toEqual([])
+  }, 60_000)
+
+  test('a PIN prompt left unanswered reconnects once, then tells the user instead of re-prompting forever', async () => {
+    await makeWallet('idle', SEED_A, '1234')
+    newEngine()
+    // Every connection's PIN wait gets a 1.5 s deadline instead of 5 minutes.
+    engine.on('pin-request', () => {
+      const transport = (engine.wallet as any).transport
+      if (transport.shortDeadline) return
+      transport.shortDeadline = true
+      const withDeadline = transport.withDeadline.bind(transport)
+      transport.withDeadline = (action: any, ms: number, op: string) => withDeadline(action, ms === core.LONG_TIMEOUT ? 1500 : ms, op)
+    })
+    await connect('idle')
+    await until(() => state() === 'error', 'the second timeout', 15_000)
+    const {EMULATOR_UNLOCK_TIMEOUT_MESSAGE} = await import('../../src/bun/pin-unlock')
+    expect(engine.getDeviceState().error).toBe(EMULATOR_UNLOCK_TIMEOUT_MESSAGE)
+    const prompts = pins.length
+    expect(prompts).toBe(2)
+    await sleep(4000)
+    expect(pins.length).toBe(prompts)
+  }, 40_000)
+
   test('PIN plus passphrase: a message during the passphrase wait is refused and the wallet unlocks', async () => {
     await makeWallet('passphrase', SEED_A, '1234', true)
     newEngine()
