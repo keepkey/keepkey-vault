@@ -10,22 +10,26 @@
  *       ↕
  *   hdwallet Transport → KeepKeyHDWallet → engine-controller
  */
+import * as core from '@keepkey/hdwallet-core'
 import { Adapter, type TransportDelegate, type AdapterDelegate } from '@keepkey/hdwallet-keepkey'
-import { emuWrite, emuRead, getEmulatorStatus } from './emulator'
+import { emuWrite, emuRead, getEmulatorStatus, getEmulatorInstance } from './emulator'
 
 const TAG = '[emu-transport]'
 
 // Poll interval for non-blocking emuRead (ms)
 const READ_POLL_MS = 5
-// Read timeout MUST outlive the emulator confirm prompt (CONFIRM_TIMEOUT_MS,
-// 120s) plus the firmware roundtrip — fn() runs before the user is asked
-// to approve, so the readChunk deadline is ticking while the user thinks.
-// At 240s the user has up to 120s to decide, plus another ~120s for the
-// firmware to process the approval and emit the response.
-const READ_TIMEOUT_MS = 240_000
+// Backstop only, for callers that read the delegate directly (monero-vault.ts).
+// hdwallet bounds its own reads (5 s for a reply, LONG_TIMEOUT once the device
+// waits on the user) and on expiry quarantines the transport and disconnects
+// us, which ends the read. This deadline must never fire first: a read it ends
+// leaves the firmware still waiting for its PIN, and the next request queued on
+// the transport then lands in that wait ("Unknown message"), which ends it.
+const READ_TIMEOUT_MS = core.LONG_TIMEOUT + 60_000
 
 export class EmulatorTransportDelegate implements TransportDelegate {
   private connected = false
+  /** The emulator boot this connection belongs to (see getEmulatorInstance). */
+  private instance = 0
   /** Chunk counter (legacy; retained for callers that still reset it). */
   chunkCount = 0
   /**
@@ -56,6 +60,7 @@ export class EmulatorTransportDelegate implements TransportDelegate {
       throw new Error('Emulator is not running — call initEmulator() first')
     }
     this.connected = true
+    this.instance = getEmulatorInstance()
     console.log(`${TAG} Connected (device: ${this.deviceId})`)
   }
 
@@ -70,8 +75,19 @@ export class EmulatorTransportDelegate implements TransportDelegate {
     console.log(`${TAG} Disconnected`)
   }
 
+  /** Why this connection may no longer touch the device, or null while it may. Checked
+   *  on every write and every read poll: a closed connection's pending read stops within
+   *  one poll instead of taking frames meant for whoever connects next. */
+  private closedReason(): string | null {
+    if (!this.connected) return 'transport disconnected'
+    if (this.instance !== getEmulatorInstance()) return 'emulator stopped'
+    return null
+  }
+
   async writeChunk(buf: Uint8Array, debugLink?: boolean): Promise<void> {
     const iface = debugLink ? 1 : 0
+    const closed = this.closedReason()
+    if (closed) throw new Error(`${TAG} Write refused: ${closed}`)
 
     // No ButtonAck suppression: in the reactive model hdwallet's ButtonAck is
     // exactly what sets button_request_acked in confirm_helper. We add only the
@@ -90,6 +106,8 @@ export class EmulatorTransportDelegate implements TransportDelegate {
     let pollCount = 0
 
     while (Date.now() < deadline) {
+      const closed = this.closedReason()
+      if (closed) throw new Error(`${TAG} Read aborted: ${closed}`)
       const data = emuRead(iface)
       if (data) {
         // A ButtonRequest on the main interface means the firmware just

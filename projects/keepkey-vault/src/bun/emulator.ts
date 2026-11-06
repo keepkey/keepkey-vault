@@ -98,6 +98,11 @@ let activeFlash: EmulatorFlash | null = null
 let activeFlashName: string = 'default'
 let emuState: EmulatorProcessState = 'stopped'
 let emuError: string | undefined
+/** Which boot of the emulator is running; 0 when stopped. A transport connected to one
+ *  boot must never read or write another: the FFI rings are shared by every connection. */
+let emuInstance = 0
+let emuBoots = 0
+export function getEmulatorInstance(): number { return emuInstance }
 
 /** Returns the name of the currently active flash image (for mnemonic persistence). */
 export function getActiveFlashName(): string { return activeFlashName }
@@ -198,6 +203,7 @@ export function initEmulator(flashName = 'default'): EmulatorStatus {
     startEmulatorWatchdog()
 
     emuState = 'running'
+    emuInstance = ++emuBoots
     console.log(`${TAG} Emulator running — flash "${flashName}"`)
     return getEmulatorStatus()
   } catch (err: any) {
@@ -276,6 +282,7 @@ export function stopEmulator(): EmulatorStatus {
   }
 
   try {
+    emuInstance = 0
     // Disarm the FFI watchdog first.
     stopEmulatorWatchdog()
 
