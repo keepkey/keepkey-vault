@@ -501,6 +501,7 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       moneroSyncKeyImages: { params: Record<string, never>; response: MoneroStatus }
       moneroPrepareSend: { params: { address: string; amountAtomic: string }; response: MoneroSendReview }
       moneroSend: { params: { prepareId: string }; response: { txid: string } }
+      moneroRetryRelay: { params: undefined; response: { txid: string } }
       setMoneroEnabled: { params: { enabled: boolean }; response: AppSettings }
       setMoneroNode: { params: { daemonUrl: string; restoreHeight: number }; response: AppSettings }
       emulatorPair: { params: void; response: EmulatorStatus }

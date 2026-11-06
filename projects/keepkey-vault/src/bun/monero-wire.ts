@@ -113,6 +113,8 @@ export interface MoneroSendReview {
   outputs: Array<{ role: 'recipient' | 'change'; address: string; amountAtomic: string }>
 }
 
+export const MAX_FEE_ATOMIC = 5_000_000_000n
+
 /** Refuse any plan that is not exactly the user's payment plus change back to this wallet, from synced owned outputs. */
 export function reviewPlan(plan: MoneroPlan, intent: {
   address: string; amountAtomic: string; walletAddress: string; walletFeeAtomic: string; walletAmountAtomic: string
@@ -124,7 +126,9 @@ export function reviewPlan(plan: MoneroPlan, intent: {
   if (recipients.length !== 1 || recipients[0].address !== intent.address) fail('recipient')
   if (recipients[0].amountAtomic !== intent.amountAtomic || intent.walletAmountAtomic !== intent.amountAtomic) fail('amount')
   if (change.length > 1 || change.some(output => output.address !== intent.walletAddress || output.changeMajor || output.changeMinor)) fail('change')
-  if (plan.feeAtomic !== intent.walletFeeAtomic || BigInt(plan.feeAtomic) <= 0n) fail('fee')
+  // The fee estimate comes from an untrusted daemon: cap it (0.005 XMR; mainnet fees are ~0.0001) and below the payment.
+  if (plan.feeAtomic !== intent.walletFeeAtomic || BigInt(plan.feeAtomic) <= 0n || BigInt(plan.feeAtomic) > MAX_FEE_ATOMIC ||
+      BigInt(plan.feeAtomic) >= BigInt(intent.amountAtomic)) fail('fee')
   const seen = new Set<string>()
   let inputTotal = 0n
   for (const input of plan.inputs) {

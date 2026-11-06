@@ -13,7 +13,7 @@ const delay = (milliseconds: number) => new Promise(resolve => setTimeout(resolv
 // Dev/E2E only: an offline loopback regtest daemon ("fakechain"). Mainnet rules are unchanged otherwise.
 const LOCAL_REGTEST = process.env.KEEPKEY_MONERO_LOCAL_REGTEST === '1'
 
-export async function verifyDaemon(origin: string, minimumHeight: number): Promise<{ height: number; fingerprint?: string; synchronized: boolean; regtest: boolean }> {
+export async function verifyDaemon(origin: string, minimumHeight: number): Promise<{ height: number; fingerprint?: string; synchronized: boolean; regtest: boolean; offline: boolean }> {
   const url = new URL(origin)
   const loopback = ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname)
   if (url.protocol !== 'https:' && !(url.protocol === 'http:' && loopback)) throw new Error('Invalid Monero daemon origin')
@@ -46,7 +46,7 @@ export async function verifyDaemon(origin: string, minimumHeight: number): Promi
       (!info.synchronized && !(loopback && info.offline === true)) || unsigned(info.height) < minimumHeight) {
     throw new Error('The selected Monero daemon is not synchronized on mainnet')
   }
-  return { height: unsigned(info.height), fingerprint, synchronized: info.synchronized === true, regtest }
+  return { height: unsigned(info.height), fingerprint, synchronized: info.synchronized === true, regtest, offline: info.offline === true }
 }
 
 interface Session {
@@ -55,6 +55,8 @@ interface Session {
   restoreHeight: number
   daemonUrl: string
   daemonSynchronized: boolean
+  /** An offline daemon cannot broadcast; sending needs a live one (local regtest excepted). */
+  sendable: boolean
   daemonFingerprint?: string
   proc: ReturnType<typeof Bun.spawn>
   rpc: DigestWalletRpc
@@ -118,7 +120,7 @@ export class MoneroWatchService {
       const status: MoneroWalletStatus = { network: 'mainnet', address: config.address, balanceAtomic: '0', unlockedBalanceAtomic: '0',
         walletHeight: 0, transactions: [], monitorReady: false, updatedAt: new Date().toISOString(), canSend: false }
       const session: Session = { directory, address: config.address, restoreHeight: config.restoreHeight, daemonUrl: config.daemonUrl,
-        daemonSynchronized: daemon.synchronized, daemonFingerprint: daemon.fingerprint, proc, rpc, status }
+        daemonSynchronized: daemon.synchronized, sendable: daemon.regtest || (daemon.synchronized && !daemon.offline), daemonFingerprint: daemon.fingerprint, proc, rpc, status }
       this.session = session
       this.pending = null
       void proc.exited.then(() => {
@@ -231,6 +233,7 @@ export class MoneroWatchService {
   async createTransfer(input: unknown): Promise<{ feeAtomic: string; amountAtomic: string; plan: unknown }> {
     const request = validateTransferRequest(input), session = this.current()
     if (!this.adapter) throw new PublicError('The Monero signing adapter is not installed')
+    if (!session.sendable) throw new PublicError('The Monero daemon is unavailable')
     let created: any
     try {
       created = await session.rpc.call('transfer', { destinations: [{ address: request.address, amount: BigInt(request.amountAtomic) }],

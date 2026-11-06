@@ -192,6 +192,21 @@ export function MoneroPanel({ onBack, onLoaded }: MoneroPanelProps = {}) {
 		}
 	}, [sendBusy, review, refresh])
 
+	const retryBroadcast = useCallback(async () => {
+		if (sendBusy) return
+		setSendBusy("confirm")
+		setSendError(null)
+		try {
+			const result = await rpcRequest<{ txid: string }>("moneroRetryRelay", undefined, 120_000)
+			if (mounted.current && /^[0-9a-f]{64}$/.test(result?.txid ?? "")) setSentTxid(result.txid)
+		} catch (error) {
+			if (mounted.current) setSendError(error instanceof Error ? error.message : "Unable to broadcast the transaction.")
+		} finally {
+			if (mounted.current) setSendBusy(null)
+			void refresh()
+		}
+	}, [sendBusy, refresh])
+
 	const copyAddress = useCallback(async () => {
 		if (!address) return
 		setActionError(null)
@@ -324,6 +339,11 @@ export function MoneroPanel({ onBack, onLoaded }: MoneroPanelProps = {}) {
 									{syncingKeyImages ? uiText("Confirm on KeepKey…") : wallet.keyImagesSynced ? uiText("Sync key images again") : uiText("Sync key images on KeepKey")}
 								</Button>
 							</Flex>
+							{wallet.unrelayedTxid && <Box mt="1" mb="2" role="alert">
+								<Text fontSize="13px" color="var(--gold)">{uiText("The broadcast result of your last send is unknown. Check this transaction on a block explorer before doing anything else. Retry broadcast resends the same transaction; it cannot pay twice.")}</Text>
+								<Text fontSize="11px" fontFamily="mono" color="var(--text-2)" wordBreak="break-all" userSelect="all" mt="1">{wallet.unrelayedTxid}</Text>
+								<Button data-monero-retry-relay="" mt="2" size="xs" variant="outline" onClick={() => { void retryBroadcast() }} disabled={!!sendBusy} className="electrobun-webkit-app-region-no-drag">{uiText("Retry broadcast")}</Button>
+							</Box>}
 							{wallet.sendBlocked === "syncing" && <Text fontSize="13px" color="var(--text-2)">{uiText("Wait for the watch wallet to finish syncing before sending.")}</Text>}
 							{wallet.sendBlocked === "key-images" && <Text fontSize="13px" color="var(--text-2)">{uiText("Sync key images on KeepKey so the watch wallet knows which outputs are already spent. Sending is available after the sync.")}</Text>}
 							{wallet.canSend && !review && (
