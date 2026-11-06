@@ -234,8 +234,8 @@ process.on('unhandledRejection', (reason) => {
 import { EngineController, withTimeout } from "./engine-controller"
 import { runUsbDiagnostic as runUsbDiagnosticProbe } from "./windows-usb-probe"
 import { startRestApi, clearFeaturesCache, setUiActive, uiHeartbeat, type RestApiCallbacks } from "./rest-api"
-import { portAnswersLikeDesktop, refuseSecondDesktop, startRestApiOrReport } from "./rest-api-startup"
-import { claimSingleInstance, SECOND_INSTANCE_UNRESPONSIVE } from "./single-instance"
+import { portAnswersLikeDesktop, startRestApiOrReport } from "./rest-api-startup"
+import { instanceSocketPath, startupInstanceGate } from "./single-instance"
 import { signSolanaWireTransaction } from "./solana-signing"
 import { AuthStore } from "./auth"
 import { ensurePioneerQueryKeyRegistered, getPioneer, getPioneerApiBase, resetPioneer, setPioneerOffline, DEFAULT_API_BASE, getQueryKey as getPioneerQueryKey } from "./pioneer"
@@ -2122,6 +2122,7 @@ async function applyRestApiState(when: 'startup' | 'settings') {
 			answersLikeDesktop: () => portAnswersLikeDesktop(REST_API_PORT),
 			showError: (dialog) => Utils.showMessageBox({ type: 'error', title: 'KeepKey Desktop', ...dialog }),
 			exit: (code) => process.exit(code),
+			hideWindow: () => _mainWindow?.hide(),
 		})
 		if (restServer) {
 			console.log(`[Vault] REST API started on port ${REST_API_PORT}`)
@@ -11532,27 +11533,21 @@ ApplicationMenu.setApplicationMenu([
 }
 updateApplicationMenu()
 
-// One Desktop per user, settled before any window exists. A second copy used to
-// open its window and then block in the port-in-use alert: a UI with no backend.
+// One Desktop per identifier and channel, settled before any window exists. A
+// second copy used to open its window and then block in the port-in-use alert:
+// a UI with no backend. Dev, stable and other channels still run side by side.
 let _mainWindow: BrowserWindow | null = null
-const instanceClaim = await claimSingleInstance(path.join(os.homedir(), '.keepkey', 'desktop.sock'), () => {
-	const window = _mainWindow
-	if (!window) return
-	if (window.isMinimized()) window.unminimize()
-	window.activate()
-})
-if (instanceClaim.role === 'focused-existing') {
-	console.log('[Vault] KeepKey Desktop is already running: brought its window to the front; this copy quits')
-	process.exit(0)
-}
-if (instanceClaim.role === 'unresponsive') {
-	console.error('[Vault] Another KeepKey Desktop holds the instance socket but did not answer')
-	Utils.showMessageBox({ type: 'error', title: 'KeepKey Desktop', ...SECOND_INSTANCE_UNRESPONSIVE })
-	process.exit(1)
-}
-await refuseSecondDesktop(REST_API_PORT, {
-	answersLikeDesktop: () => portAnswersLikeDesktop(REST_API_PORT),
-	showError: async (dialog) => Utils.showMessageBox({ type: 'error', title: 'KeepKey Desktop', ...dialog }),
+const appInfo = await Updater.getLocalInfo()
+const instanceClaim = await startupInstanceGate({
+	path: instanceSocketPath(os.homedir(), appInfo.identifier, appInfo.channel),
+	version: pkg.version,
+	onFocusRequest: () => {
+		const window = _mainWindow
+		if (!window) return
+		if (window.isMinimized()) window.unminimize()
+		window.activate()
+	},
+	showDialog: (dialog) => Utils.showMessageBox({ type: 'warning', title: 'KeepKey Desktop', ...dialog, buttons: ['OK'] }),
 	exit: (code) => process.exit(code),
 })
 
@@ -11840,6 +11835,11 @@ let quitting = false
 function cleanupAndQuit() {
 	if (quitting) return
 	quitting = true
+	// Hand off first: a copy launched while this one cleans up (cleanup can block the
+	// event loop for seconds) then takes the instance and the REST port at once.
+	instanceClaim?.release()
+	restServer?.stop()
+	restServer = null
 	stopMoneroSidecar()
 	// Zero the Studio provider key: the window (and its close effect) is going away.
 	try { providerKeySession.clear() } catch { /* nothing to zero */ }
@@ -11872,8 +11872,6 @@ function cleanupAndQuit() {
 	postTxBalances.clear()
 	stopActiveWalletWatches()
 	engine.stop()
-	restServer?.stop()
-	if (instanceClaim.role === 'primary') instanceClaim.release()
 	Utils.quit()
 }
 
