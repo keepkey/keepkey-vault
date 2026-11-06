@@ -39,7 +39,7 @@ export interface MoneroEmulatorManifest {
 /** Does not execute the library. Staging and runtime use the same byte pin. */
 /** Signing research builds Desktop may sign with: reviewed artifacts only, pinned in code (a manifest on disk is not enough). */
 export const REVIEWED_MONERO_SIGNING_SHA256 = new Set([
-  '92079869551ab26ccd41d33ede1fe6c69735927e38a3203f932cdb37abe134f7', // firmware alpha 570e88356, self-contained relink
+  '3e613e3c5e267363bb436fd1e492c2458d2292d72cbc3d3490ce6e55620d15dd', // firmware alpha 97236a794, self-contained relink
 ])
 
 export function verifyMoneroEmulatorArtifact(
