@@ -10,14 +10,17 @@
 import { homedir } from 'os'
 import { validateFlashName } from './emulator-keychain'
 import {
-  clearSelectedEmulatorBuild, emulatorBuildFlashName, selectEmulatorBuild, selectEmulatorWallet,
-  selectedEmulatorBuild, selectedEmulatorWallet, type SelectedEmulatorLibrary,
+  clearSelectedEmulatorBuild, emulatorBuildFlashName, recordEmulatorBuildVersion, resolveEmulatorWalletName,
+  selectEmulatorBuild, selectEmulatorWallet, selectedEmulatorBuild, selectedEmulatorWallet, type SelectedEmulatorLibrary,
 } from './emulator-library'
 import { newEmulatorWalletNameError } from '../shared/emulatorWallets'
 import type { EmulatorRunningBuild, EmulatorStatus } from '../shared/types'
 
 export interface EmulatorSessionDeps {
   getEmulatorStatus(): EmulatorStatus
+  getActiveFlashName(): string
+  /** The running firmware's version as the engine read it, if it has. */
+  firmwareVersion?(): string | undefined
   stopEmulator(): unknown
   initEmulator(name: string): EmulatorStatus
   openWindow(): void
@@ -37,8 +40,13 @@ export interface EmulatorSessionDeps {
  * user-installed) library. The old connection is not waited on: disconnecting
  * the engine and stopping the emulator end its pending reads, a PIN prompt's
  * included, within one poll (emulator-transport.ts closedReason).
+ *
+ * A failed start leaves things as they were: the build selection is put back
+ * and the wallet that was running is started again on it.
+ * `allowBuildWallet`: a build change may open (create) that build's own
+ * "build-<id>" wallet when no wallet is running or selected (first use).
  */
-export async function startEmulatorWallet(deps: EmulatorSessionDeps, params: { name: string; buildId?: string | null }): Promise<EmulatorStatus> {
+export async function startEmulatorWallet(deps: EmulatorSessionDeps, params: { name: string; buildId?: string | null; allowBuildWallet?: boolean }): Promise<EmulatorStatus> {
   const home = deps.home ?? homedir()
   const name = validateFlashName(params.name)
   const previousBuild = selectedEmulatorBuild(home)
@@ -47,7 +55,8 @@ export async function startEmulatorWallet(deps: EmulatorSessionDeps, params: { n
   if (!saved.includes(name)) {
     const selectedWallet = selectedEmulatorWallet(home)
     if (selectedWallet === name) throw new Error(`Saved emulator wallet "${name}" is missing. Select an existing wallet.`)
-    const firstUseFallback = !saved.length && !selectedWallet && name === (targetBuild ? emulatorBuildFlashName(targetBuild) : 'default')
+    const buildWallet = name === (targetBuild ? emulatorBuildFlashName(targetBuild) : 'default')
+    const firstUseFallback = buildWallet && !selectedWallet && (!saved.length || params.allowBuildWallet === true)
     if (!firstUseFallback) {
       const problem = newEmulatorWalletNameError(name, saved)
       if (problem) throw new Error(`Cannot create emulator wallet: ${problem}`)
@@ -74,7 +83,8 @@ export async function startEmulatorWallet(deps: EmulatorSessionDeps, params: { n
     throw new Error(library.problem)
   }
 
-  if (deps.getEmulatorStatus().state === 'running') {
+  const previousWallet = deps.getEmulatorStatus().state === 'running' ? deps.getActiveFlashName() : null
+  if (previousWallet) {
     deps.closeWindow()
     deps.disconnectEmulator()
     deps.stopEmulator()
@@ -85,17 +95,60 @@ export async function startEmulatorWallet(deps: EmulatorSessionDeps, params: { n
     deps.openWindow()
     await deps.connectEmulator()
   } catch (error) {
-    if (changeBuild) {
-      // Never leave a different firmware running than the selection says.
-      deps.closeWindow()
-      deps.disconnectEmulator()
-      deps.stopEmulator()
-      restoreBuild()
+    // Never leave a different firmware or wallet running than the selections say.
+    deps.closeWindow()
+    deps.disconnectEmulator()
+    deps.stopEmulator()
+    restoreBuild()
+    if (previousWallet) {
+      try {
+        const restored = deps.initEmulator(previousWallet)
+        if (restored.state === 'running') { deps.openWindow(); await deps.connectEmulator() }
+      } catch (restoreError) {
+        console.error('[emulator] Could not restart the previous wallet:', (restoreError as Error)?.message)
+      }
     }
     throw error
   }
   selectEmulatorWallet(name, home)
   return deps.getEmulatorStatus()
+}
+
+/** Settings' build select: run the wallet that is running (or the saved one) on
+ *  another build. Same path, refusals and restore as a start from the picker. */
+export async function activateEmulatorBuild(deps: EmulatorSessionDeps, id: string | null): Promise<{ status: EmulatorStatus; flashName: string }> {
+  const home = deps.home ?? homedir()
+  const running = deps.getEmulatorStatus().state === 'running' ? deps.getActiveFlashName() : null
+  const flashName = resolveEmulatorWalletName({ running, buildId: id, home })
+  const status = await startEmulatorWallet(deps, { name: flashName, buildId: id, allowBuildWallet: true })
+  const version = deps.firmwareVersion?.()
+  if (id && version && /^\d+\.\d+\.\d+$/.test(version)) recordEmulatorBuildVersion(id, version, home)
+  return { status, flashName }
+}
+
+/**
+ * Delete a saved emulator wallet. The seed picker's list can be stale, so the
+ * running wallet is refused unless the caller stops it (Settings' "Delete
+ * Flash", which says so). Checked again after `prepare` awaits: the wallet may
+ * have been started meanwhile.
+ */
+export async function deleteEmulatorWallet(deps: {
+  isRunning(name: string): boolean
+  /** Work that must see the wallet's metadata before it goes (monitoring); may await. */
+  prepare(name: string): Promise<void>
+  stopRunning(): void
+  erase(name: string): void
+}, params: { name: string; stopIfRunning?: boolean }): Promise<void> {
+  const refuse = () => {
+    const running = deps.isRunning(params.name)
+    if (running && params.stopIfRunning !== true) throw new Error(`"${params.name}" is running. Stop the emulator before deleting it.`)
+    return running
+  }
+  refuse()
+  await deps.prepare(params.name)
+  // Stop it first so shutdown doesn't re-save the flash about to be deleted.
+  if (refuse()) deps.stopRunning()
+  deps.erase(params.name)
 }
 
 /** What the running emulator is, for the EMU badge: the wallet it loaded and the

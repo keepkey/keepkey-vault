@@ -17,14 +17,14 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { selectEmulatorBuild, selectEmulatorWallet, selectedEmulatorBuild, selectedEmulatorWallet, type SelectedEmulatorLibrary } from '../src/bun/emulator-library'
-import { runningEmulatorIdentity, startEmulatorWallet, type EmulatorSessionDeps } from '../src/bun/emulator-session'
+import { activateEmulatorBuild, deleteEmulatorWallet, runningEmulatorIdentity, startEmulatorWallet, type EmulatorSessionDeps } from '../src/bun/emulator-session'
 
 const SIGNING = 'a'.repeat(64)
 const PIN_BUILD = 'b'.repeat(64)
 const homes: string[] = []
 afterEach(() => { for (const home of homes.splice(0)) rmSync(home, { recursive: true, force: true }) })
 
-function rig(options: { running?: string | null; problemFor?: (id: string | null) => string | null; initError?: string } = {}) {
+function rig(options: { running?: string | null; problemFor?: (id: string | null) => string | null; initError?: string; initErrorFor?: string } = {}) {
   const home = mkdtempSync(join(tmpdir(), 'kk-emu-session-'))
   homes.push(home)
   const dir = join(home, '.keepkey', 'emulator')
@@ -40,10 +40,12 @@ function rig(options: { running?: string | null; problemFor?: (id: string | null
   const deps: EmulatorSessionDeps = {
     home,
     getEmulatorStatus: () => ({ state: running ? 'running' : 'stopped', bridgeReady: !!running, host: '', paired: true, platform: 'darwin', flashImages: wallets, storagePath: dir }),
+    getActiveFlashName: () => running ?? 'default',
+    firmwareVersion: () => '7.17.0',
     stopEmulator: () => { calls.push(`stop ${running}`); running = null },
     initEmulator: (name: string) => {
       calls.push(`init ${name} on ${selectedEmulatorBuild(home) ?? 'bundled'}`)
-      if (options.initError) return { state: 'error', error: options.initError } as any
+      if (options.initError && (!options.initErrorFor || options.initErrorFor === name)) return { state: 'error', error: options.initError } as any
       running = name
       return { state: 'running' } as any
     },
@@ -100,14 +102,23 @@ describe('a start runs the firmware and wallet the start screen showed', () => {
     expect(selectedEmulatorBuild(r.home)).toBe(PIN_BUILD)
   })
 
-  test('a failed start on a new build leaves nothing running on it and puts the selections back', async () => {
-    const r = rig({ initError: 'kkemu_init returned 3' })
+  test('a failed start on a new build puts the selections back and starts the previous wallet again on its build', async () => {
+    const r = rig({ running: 'pin-wallet', initError: 'kkemu_init returned 3', initErrorFor: 'signing-wallet' })
     selectEmulatorBuild(PIN_BUILD, r.home)
     selectEmulatorWallet('pin-wallet', r.home)
     await expect(startEmulatorWallet(r.deps, { name: 'signing-wallet', buildId: SIGNING })).rejects.toThrow('kkemu_init returned 3')
     expect(selectedEmulatorBuild(r.home)).toBe(PIN_BUILD)
     expect(selectedEmulatorWallet(r.home)).toBe('pin-wallet')
-    expect(r.calls.at(-1)).toBe('stop null')
+    expect(r.running()).toBe('pin-wallet')
+    expect(r.calls.slice(-3)).toEqual([`init pin-wallet on ${PIN_BUILD}`, 'open window', 'connect'])
+  })
+
+  test('nothing was running: a failed start leaves nothing running and the selections as they were', async () => {
+    const r = rig({ initError: 'kkemu_init returned 3' })
+    selectEmulatorBuild(PIN_BUILD, r.home)
+    await expect(startEmulatorWallet(r.deps, { name: 'signing-wallet', buildId: SIGNING })).rejects.toThrow('kkemu_init returned 3')
+    expect(selectedEmulatorBuild(r.home)).toBe(PIN_BUILD)
+    expect(r.running()).toBeNull()
   })
 
   test('a build that is not installed changes nothing', async () => {
@@ -148,27 +159,77 @@ describe('the running EMU badge names what was loaded', () => {
   })
 })
 
-describe('the app uses this one implementation', () => {
-  const index = readFileSync(join(import.meta.dir, '..', 'src/bun/index.ts'), 'utf8')
-  test('emulatorSwitchWallet passes the build the picker showed', () => {
-    const handler = index.slice(index.indexOf('emulatorSwitchWallet: async'), index.indexOf('emulatorGetMnemonic: async'))
-    expect(handler).toContain('startEmulatorWallet(')
-    expect(handler).toContain('buildId: params.buildId')
+describe("Settings' build select (emulatorActivateBuild) takes the same path", () => {
+  test('the running wallet moves to the chosen build, and its version is recorded', async () => {
+    const r = rig({ running: 'pin-wallet' })
+    selectEmulatorBuild(PIN_BUILD, r.home)
+    expect((await activateEmulatorBuild(r.deps, SIGNING)).flashName).toBe('pin-wallet')
+    expect(r.calls).toContain(`init pin-wallet on ${SIGNING}`)
+    expect(readFileSync(join(r.home, '.keepkey', 'emulator', 'builds', `${SIGNING}.version`), 'utf8').trim()).toBe('7.17.0')
   })
-  test('B5: the backend refuses to delete the running wallet unless the caller says it stops it', () => {
-    const handler = index.slice(index.indexOf('emulatorDeleteFlash: async'), index.indexOf('emulatorListWallets: async'))
-    const refusal = handler.indexOf("if (running && params.stopIfRunning !== true) throw new Error(")
-    expect(refusal).toBeGreaterThan(0)
-    expect(refusal).toBeLessThan(handler.indexOf('deleteFlash(params.name)'))
-    const src = (file: string) => readFileSync(join(import.meta.dir, '..', file), 'utf8')
-    expect(src('src/mainview/components/DeviceSettingsDrawer.tsx')).toContain('"emulatorDeleteFlash", { name, stopIfRunning: true }')
-    expect(src('src/mainview/components/DeviceGrid.tsx')).toContain('"emulatorDeleteFlash", { name }')
+  test('a build that cannot start is refused before the running wallet is stopped', async () => {
+    const r = rig({ running: 'pin-wallet', problemFor: id => id === SIGNING ? 'needs Monero' : null })
+    selectEmulatorBuild(PIN_BUILD, r.home)
+    await expect(activateEmulatorBuild(r.deps, SIGNING)).rejects.toThrow('needs Monero')
+    expect(r.calls).toEqual([`check ${SIGNING}`])
+    expect(r.running()).toBe('pin-wallet')
+    expect(selectedEmulatorBuild(r.home)).toBe(PIN_BUILD)
   })
-  test('B4: the EMU badge calls emulatorShowWindow, which focuses or reopens the running emulator', () => {
-    const handler = index.slice(index.indexOf('emulatorShowWindow: async'), index.indexOf('emulatorSelectBuild: async'))
-    expect(handler).toContain("if (getEmulatorStatus().state !== 'running') throw new Error('The emulator is not running')")
-    expect(handler).toContain('showEmulatorWindow()')
-    const nav = readFileSync(join(import.meta.dir, '..', 'src/mainview/components/TopNav.tsx'), 'utf8')
-    expect(nav).toContain('<EmulatorBadge ')
+  test('a failed start restores the build and restarts the wallet that was running', async () => {
+    const r = rig({ running: 'pin-wallet' })
+    selectEmulatorBuild(PIN_BUILD, r.home)
+    const starts: string[] = []
+    r.deps.initEmulator = (name) => {
+      const build = selectedEmulatorBuild(r.home) ?? 'bundled'
+      starts.push(`${name} on ${build}`)
+      return build === SIGNING ? { state: 'error', error: 'kkemu_init returned 3' } as any : { state: 'running' } as any
+    }
+    await expect(activateEmulatorBuild(r.deps, SIGNING)).rejects.toThrow('kkemu_init returned 3')
+    expect(starts).toEqual([`pin-wallet on ${SIGNING}`, `pin-wallet on ${PIN_BUILD}`])
+    expect(selectedEmulatorBuild(r.home)).toBe(PIN_BUILD)
+  })
+  test('the bundled emulator (null) clears the build selection', async () => {
+    const r = rig({ running: 'pin-wallet' })
+    selectEmulatorBuild(PIN_BUILD, r.home)
+    await activateEmulatorBuild(r.deps, null)
+    expect(selectedEmulatorBuild(r.home)).toBeNull()
+    expect(r.calls).toContain('init pin-wallet on bundled')
+  })
+})
+
+describe('B5: deleting a saved wallet', () => {
+  function deletion(running: string | null) {
+    const calls: string[] = []
+    let current = running
+    return {
+      calls, start: (name: string) => { current = name },
+      deps: {
+        isRunning: (name: string) => current === name,
+        prepare: async (name: string) => { calls.push(`prepare ${name}`) },
+        stopRunning: () => { calls.push(`stop ${current}`); current = null },
+        erase: (name: string) => { calls.push(`erase ${name}`) },
+      },
+    }
+  }
+  test('the running wallet is refused before anything happens', async () => {
+    const d = deletion('pin-wallet')
+    await expect(deleteEmulatorWallet(d.deps, { name: 'pin-wallet' })).rejects.toThrow('"pin-wallet" is running. Stop the emulator before deleting it.')
+    expect(d.calls).toEqual([])
+  })
+  test('a wallet started while the delete awaited is refused, not erased under the running emulator', async () => {
+    const d = deletion(null)
+    d.deps.prepare = async (name: string) => { d.calls.push(`prepare ${name}`); d.start(name) }
+    await expect(deleteEmulatorWallet(d.deps, { name: 'pin-wallet' })).rejects.toThrow('is running')
+    expect(d.calls).toEqual(['prepare pin-wallet'])
+  })
+  test("Settings' Delete Flash (stopIfRunning) stops it first, then erases", async () => {
+    const d = deletion('pin-wallet')
+    await deleteEmulatorWallet(d.deps, { name: 'pin-wallet', stopIfRunning: true })
+    expect(d.calls).toEqual(['prepare pin-wallet', 'stop pin-wallet', 'erase pin-wallet'])
+  })
+  test('a wallet that is not running is erased without stopping anything', async () => {
+    const d = deletion('pin-wallet')
+    await deleteEmulatorWallet(d.deps, { name: 'signing-wallet' })
+    expect(d.calls).toEqual(['prepare signing-wallet', 'erase signing-wallet'])
   })
 })
