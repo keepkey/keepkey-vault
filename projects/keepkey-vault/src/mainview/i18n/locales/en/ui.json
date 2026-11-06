@@ -1211,6 +1211,7 @@
   "ma8b2f13f": "Observed contract and instruction spectrum",
   "ma8b6be89": "Fetching…",
   "ma8cb6076": "Taproot signing uses Desktop. Sparrow's KeepKey USB integration and Electrum's KeepKey plugin do not support Taproot signing. File exchange is a separate compatibility check.",
+  "ma8e3c18a": "Syncing key images shares them with your Monero node, which lets that node link your spends. Use your own node for full privacy.",
   "ma8f6eda2": "Node is syncing",
   "ma9384453": "wants to connect",
   "ma9442aa9": "Show in Finder",

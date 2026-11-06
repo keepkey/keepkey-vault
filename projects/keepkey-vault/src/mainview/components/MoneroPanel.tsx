@@ -339,6 +339,7 @@ export function MoneroPanel({ onBack, onLoaded }: MoneroPanelProps = {}) {
 									{syncingKeyImages ? uiText("Confirm on KeepKey…") : wallet.keyImagesSynced ? uiText("Sync key images again") : uiText("Sync key images on KeepKey")}
 								</Button>
 							</Flex>
+							<Text fontSize="11px" color="var(--text-3)" mb="2">{uiText("Syncing key images shares them with your Monero node, which lets that node link your spends. Use your own node for full privacy.")}</Text>
 							{wallet.unrelayedTxid && <Box mt="1" mb="2" role="alert">
 								<Text fontSize="13px" color="var(--gold)">{uiText("The broadcast result of your last send is unknown. Check this transaction on a block explorer before doing anything else. Retry broadcast resends the same transaction; it cannot pay twice.")}</Text>
 								<Text fontSize="11px" fontFamily="mono" color="var(--text-2)" wordBreak="break-all" userSelect="all" mt="1">{wallet.unrelayedTxid}</Text>

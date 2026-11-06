@@ -57,6 +57,20 @@ export function walletDaemonArgs(daemonUrl: string, daemon: { fingerprint?: stri
     ...(daemon.regtest ? ['--allow-mismatched-daemon-version'] : [])]
 }
 
+/**
+ * wallet-rpc imports key images only from a trusted daemon. A remote daemon is trusted just for this call
+ * (owner decision 2026-11-06: that node sees these key images, a privacy cost; it cannot move funds), keeping
+ * its TLS pin, then untrusted again. If untrusting fails the caller must end the session (fail closed).
+ */
+export async function withDaemonTrusted<T>(rpc: { call(method: string, params: unknown, timeout?: number): Promise<any> },
+  daemonUrl: string, fingerprint: string | undefined, work: () => Promise<T>): Promise<T> {
+  if (['localhost', '127.0.0.1', '[::1]'].includes(new URL(daemonUrl).hostname)) return work()
+  const trust = (trusted: boolean) => rpc.call('set_daemon', { address: daemonUrl, trusted,
+    ssl_support: fingerprint ? 'enabled' : 'disabled', ssl_allowed_fingerprints: fingerprint ? [fingerprint] : [] }, 30000)
+  await trust(true)
+  try { return await work() } finally { await trust(false) }
+}
+
 interface Session {
   directory: string
   address: string
@@ -228,8 +242,15 @@ export class MoneroWatchService {
 
   async importKeyImages(input: unknown): Promise<{ height: number; spentAtomic: string; unspentAtomic: string }> {
     const { offset, signedKeyImages } = validateKeyImageImport(input), session = this.current()
-    const result = await session.rpc.call('import_key_images', { offset,
-      signed_key_images: signedKeyImages.map(item => ({ key_image: item.keyImage, signature: item.signature })) }, 120000)
+    let result: any
+    try {
+      result = await withDaemonTrusted(session.rpc, session.daemonUrl, session.daemonFingerprint, () => session.rpc.call('import_key_images', { offset,
+        signed_key_images: signedKeyImages.map(item => ({ key_image: item.keyImage, signature: item.signature })) }, 120000))
+    } catch (error) {
+      // Unknown trust state after a failed call: end the wallet rather than leave a remote daemon trusted.
+      await this.stop().catch(() => {})
+      throw error
+    }
     const value = { height: unsigned(result.height), spentAtomic: atomic(result.spent), unspentAtomic: atomic(result.unspent) }
     void this.refresh().catch(() => {})
     return value
