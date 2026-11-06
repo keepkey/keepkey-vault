@@ -601,8 +601,23 @@ export interface MoneroStatus {
   emulatorReady?: boolean
   updatedAt?: string
   error?: string
-  canSend: false
-  spendStateKnown: false
+  canSend: boolean
+  /** The first unmet send gate: signing emulator build, adapter, wallet sync, key images. */
+  sendBlocked?: 'emulator' | 'adapter' | 'syncing' | 'key-images'
+  keyImagesSynced?: boolean
+  spendStateKnown: boolean
+}
+
+/** What the KeepKey will show for a prepared Monero send, in device order. */
+export interface MoneroSendReview {
+  prepareId: string
+  recipient: string
+  amountAtomic: string
+  feeAtomic: string
+  changeAtomic: string
+  totalAtomic: string
+  inputCount: number
+  outputs: Array<{ role: 'recipient' | 'change'; address: string; amountAtomic: string }>
 }
 
 export interface FirmwareProgress {

@@ -324,7 +324,7 @@ import { addClearSignProvider, listClearSignProviders, removeClearSignProvider, 
 import { supportsCertifiedClearSign } from "./solana-certified-policy"
 import { configureProductionRootTrust } from "../shared/certified-evm-envelope"
 import { emulatorClearSignTestRoot } from "./emulator-library"
-import { emulatorReadsClearSignTestRoot } from "./emulator"
+import { emulatorReadsClearSignTestRoot, getLoadedEmulatorLibPath } from "./emulator"
 import { DEFAULT_CLEARSIGN_SERVICE_URL } from "./solana-certified-registry"
 import { createRpcAltFetcher } from "./solana-alt"
 import { createProviderKeySession } from "./clearsign-provider-session"
@@ -2155,9 +2155,17 @@ async function emuConfirmOp(fn: () => Promise<any>, _confirmCount = 2): Promise<
 	return emuGatedConfirm(fn, engine.emuDelegate, { interactive: false })
 }
 
+// Research signing only runs on a verified signing-enabled emulator build (never in signed releases).
+let moneroSigningBuild: { key: string; signing: boolean } | null = null
+function moneroSigningEmulatorActive(): boolean {
+    const path = engine.isEmulator && moneroEnabled ? getLoadedEmulatorLibPath() : null
+    if (!path) return false
+    if (moneroSigningBuild?.key !== path) moneroSigningBuild = { key: path, signing: listEmulatorBuilds().some(build => build.signingEnabled && build.path === path) }
+    return moneroSigningBuild.signing
+}
 function getMoneroWallet() {
     if (!moneroWallet) moneroWallet = createMoneroVault({
-        engine, confirm: emuSigningOp,
+        engine, confirm: emuSigningOp, signingEmulator: moneroSigningEmulatorActive,
         getConfig: () => ({ enabled: moneroEnabled, offline: offlineMode,
             daemonUrl: getSetting('monero_daemon_url') || 'https://xmr.triplebit.org',
             restoreHeight: Number(getSetting('monero_restore_height') || 0) }),
@@ -10322,6 +10330,9 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
             moneroGetStatus: async () => getMoneroWallet().getStatus(),
             moneroConnect: async () => getMoneroWallet().connect({}),
             moneroGetAddress: async (params) => getMoneroWallet().getAddress(params),
+            moneroSyncKeyImages: async () => getMoneroWallet().syncKeyImages(),
+            moneroPrepareSend: async (params) => getMoneroWallet().prepareSend(params),
+            moneroSend: async (params) => getMoneroWallet().send(params),
             setMoneroEnabled: async ({ enabled }) => {
                 if (typeof enabled !== 'boolean') throw new Error('Monero requires an enabled boolean')
                 if (enabled && !isMoneroSidecarAvailable()) throw new Error('Monero is unavailable in this build')
