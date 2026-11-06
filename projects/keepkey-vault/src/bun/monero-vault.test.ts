@@ -42,7 +42,12 @@ class Device {
       this.queue.push(...reports(this.pending, this.pending === 543 ? this.watchBody : this.addressBody)); this.pending = 0
     } else if (type === 20) { this.queue.push(...reports(3, new Uint8Array([8, 4]))); this.pending = 0 }
   }
+  silent = false
+  disconnects = 0
+  private hang: ((error: Error) => void) | null = null
+  disconnect() { this.disconnects++; this.hang?.(new Error('disconnected')); this.hang = null }
   async readChunk() {
+    if (this.silent) return new Promise<Uint8Array>((_, reject) => { this.hang = reject })
     const report = this.queue.shift()
     if (!report) throw new Error('Public fixture response exhausted')
     this.consumed.push(report)
@@ -52,7 +57,7 @@ class Device {
     return report
   }
 }
-function fixture(emulator = false) {
+function fixture(emulator = false, replyMs?: { device: number; human: number }) {
   const delegate = new Device()
   let locked = false, reviews = 0, configures = 0, starts = 0, stops = 0
   let configuredKey: Uint8Array | null = null
@@ -87,7 +92,7 @@ function fixture(emulator = false) {
     expect(locked).toBe(true); delegate.onButtonRequest = () => { reviews++ }
     try { return await operation() } finally { delegate.onButtonRequest = null }
   }
-  const api = createMoneroVault({ engine, confirm, getConfig: () => ({ ...config }), sidecar })
+  const api = createMoneroVault({ engine, confirm, getConfig: () => ({ ...config }), sidecar, ...(replyMs ? { replyMs } : {}) })
   return { api, delegate, engine, config, state, status, sidecar,
     counts: () => ({ reviews, configures, starts, stops }), key: () => configuredKey, options: () => configuredOptions }
 }
@@ -264,4 +269,19 @@ test('saved HTTP loopback daemon settings can connect through the device bridge'
     expect(f.options()?.daemonUrl).toBe(daemonUrl)
     f.api.stop()
   }
+})
+
+test('a device that never answers ends the read within its bound, disconnects and frees the lock', async () => {
+  const f = fixture(false, { device: 50, human: 200 })
+  f.delegate.silent = true
+  const started = Date.now()
+  await expect(f.api.connect()).rejects.toThrow('did not answer')
+  expect(Date.now() - started).toBeLessThan(2000)
+  expect(f.delegate.disconnects).toBe(1)
+  expect(f.counts().configures).toBe(0)
+  // the transport lock was released: a later request runs instead of queuing forever
+  f.delegate.silent = false
+  f.delegate.queue.length = 0 // replies the silent device scripted for the abandoned request
+  const second = await f.api.connect().then(() => 'ok', (e: any) => String(e?.message ?? e))
+  expect(second).toBe('ok')
 })

@@ -57,6 +57,7 @@ type Delegate = {
   writeChunk(data: Uint8Array, debugLink?: boolean): Promise<void>
   readChunk(debugLink?: boolean): Promise<Uint8Array>
   onButtonRequest?: (() => void) | null
+  disconnect?: () => unknown
 }
 type Transport = { delegate: Delegate; lockDuring<T>(operation: () => Promise<T>): Promise<T> }
 type Engine = {
@@ -117,6 +118,24 @@ async function writeMessage(delegate: Delegate, type: number, payload: Uint8Arra
     await delegate.writeChunk(report, false)
   }
 }
+/** A device answer not waiting on a person (computation included) vs one after ButtonAck. */
+export const MONERO_DEVICE_REPLY_MS = 120_000
+export const MONERO_HUMAN_REPLY_MS = 15 * 60_000
+/** The emulator delegate has no read deadline of its own, so every raw read here is bounded:
+ *  on expiry the delegate is disconnected (ending the pending read) and the lock is released. */
+async function readBounded(delegate: Delegate, ms: number, max = MAX_RESPONSE): Promise<Message> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const read = readMessage(delegate, max)
+  const expired = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new MoneroError('The KeepKey did not answer the Monero request in time; reconnect it and try again')), ms) })
+  try { return await Promise.race([read, expired]) }
+  catch (error) {
+    if (error instanceof MoneroError && /did not answer/.test(error.message)) {
+      read.then(message => message.body.fill(0), () => {})
+      try { await delegate.disconnect?.() } catch { /* the read is abandoned either way */ }
+    }
+    throw error
+  } finally { clearTimeout(timer) }
+}
 async function readMessage(delegate: Delegate, max = MAX_RESPONSE): Promise<Message> {
   const first = await delegate.readChunk(false)
   let body: Uint8Array | null = null
@@ -142,10 +161,13 @@ async function readMessage(delegate: Delegate, max = MAX_RESPONSE): Promise<Mess
 }
 
 /** Injected engine/config keep device state authoritative; no private keys enter frontend RPC. */
-export function createMoneroVault({ engine, confirm, getConfig, sidecar = managedSidecar, signingEmulator = () => false }: {
+export function createMoneroVault({ engine, confirm, getConfig, sidecar = managedSidecar, signingEmulator = () => false,
+  replyMs = { device: MONERO_DEVICE_REPLY_MS, human: MONERO_HUMAN_REPLY_MS } }: {
   engine: Engine; confirm?: Confirm; getConfig: () => MoneroVaultConfig; sidecar?: MoneroWatchSidecar
   /** The running emulator is a verified signing-enabled research build. */
   signingEmulator?: () => boolean
+  /** Raw read bounds (tests shorten them). */
+  replyMs?: { device: number; human: number }
 }) {
   let epoch = 0, busy = false
   let activeDelegate: Delegate | null = null
@@ -192,23 +214,26 @@ export function createMoneroVault({ engine, confirm, getConfig, sidecar = manage
   const receive = async (current: Snapshot, generation: number, request: number, responseType: number, body: Uint8Array, review: boolean, max = MAX_RESPONSE): Promise<Uint8Array> => {
     const delegate = current.transport.delegate
     check(current, generation); await writeMessage(delegate, request, body)
+    let waitingOnPerson = false
     for (let screens = 0; screens < 64; screens++) {
-      const response = await readMessage(delegate, max)
+      const response = await readBounded(delegate, waitingOnPerson ? replyMs.human : replyMs.device, max)
+      waitingOnPerson = false
       let transferred = false
       try {
         check(current, generation)
         if (response.type === 26) {
           if (!review || (current.emulator && typeof delegate.onButtonRequest !== 'function')) {
             await writeMessage(delegate, 20)
-            const cancelled = await readMessage(delegate); cancelled.body.fill(0)
+            const cancelled = await readBounded(delegate, replyMs.device); cancelled.body.fill(0)
             throw new MoneroError('Monero approval requires the emulator confirmation window')
           }
           await writeMessage(delegate, 27)
+          waitingOnPerson = true
           continue
         }
         if (response.type === 18 || response.type === 41) {
           await writeMessage(delegate, 20)
-          const cancelled = await readMessage(delegate); cancelled.body.fill(0)
+          const cancelled = await readBounded(delegate, replyMs.device); cancelled.body.fill(0)
           throw new MoneroError('Unlock the KeepKey wallet first, then connect Monero again')
         }
         if (response.type === 3) throw new MoneroError('The KeepKey rejected or cancelled the Monero request')
