@@ -11,6 +11,8 @@
  * host gives up before the PIN prompt ever arrives, and the failure counter
  * can never be reset by a correct PIN. LONG_TIMEOUT (5 min) covers the wait
  * up to 8 prior failures; beyond that the timeout is surfaced to the user.
+ * Once PinMatrixRequest arrives, the transport waits indefinitely for user
+ * input and starts a fresh response deadline when the PIN is submitted.
  */
 import * as core from '@keepkey/hdwallet-core'
 import * as Messages from '@keepkey/device-protocol/lib/messages_pb'
@@ -39,5 +41,5 @@ export function isTransportTimeout(err: unknown): boolean {
 }
 
 export const UNLOCK_TIMEOUT_MESSAGE =
-  'Timed out waiting for the KeepKey PIN prompt. After repeated wrong PINs the device ' +
+  'Timed out waiting for the KeepKey to respond. After repeated wrong PINs the device ' +
   'makes you wait before asking again. Unplug and reconnect your KeepKey, then try again.'
