@@ -101,7 +101,31 @@ describe('the node is asked directly (its own height, the pending tx)', () => {
       return url.endsWith('/get_transactions') ? Response.json({ status: 'OK', missed_tx: [txid] }) : Response.json({ status: 'OK', spent_status: [0] })
     })
     expect(result).toEqual({ state: 'unknown', keyImages: ['unspent'] })
-    expect(paths).toEqual([`/get_transactions {"txs_hashes":["${txid}"]}`, `/is_key_image_spent {"key_images":["${image}"]}`])
+    expect(paths).toEqual([`/is_key_image_spent {"key_images":["${image}"]}`, `/get_transactions {"txs_hashes":["${txid}"]}`])
+  })
+
+  test('a block landing between the two calls reads as mined, never as spent by another tx', async () => {
+    // A scripted node: our tx was never in its pool; its block arrives right after the first request.
+    const txid = 'ab'.repeat(32), image = 'cd'.repeat(32)
+    let requests = 0
+    const node = async (url: string) => {
+      const mined = requests++ > 0
+      if (url.endsWith('/is_key_image_spent')) return Response.json({ status: 'OK', spent_status: [mined ? 1 : 0] })
+      return Response.json(mined ? { status: 'OK', txs: [{ tx_hash: txid, in_pool: false, block_height: 90 }] } : { status: 'OK', missed_tx: [txid] })
+    }
+    expect((await lookupTransaction('http://127.0.0.1:18081', undefined, txid, [image], node)).state).toBe('mined')
+  })
+
+  test('spent on chain but the tx not indexed yet: the tx is asked once more before "superseded"', async () => {
+    const txid = 'ab'.repeat(32), image = 'cd'.repeat(32)
+    let txAsks = 0
+    const node = async (url: string) => url.endsWith('/is_key_image_spent') ? Response.json({ status: 'OK', spent_status: [1] })
+      : Response.json(txAsks++ === 0 ? { status: 'OK', missed_tx: [txid] } : { status: 'OK', txs: [{ tx_hash: txid, in_pool: false, block_height: 90 }] })
+    expect((await lookupTransaction('http://127.0.0.1:18081', undefined, txid, [image], node)).state).toBe('mined')
+    expect(txAsks).toBe(2)
+    // Still missed on the second ask: then it really was spent by something else.
+    const other = async (url: string) => url.endsWith('/is_key_image_spent') ? Response.json({ status: 'OK', spent_status: [1] }) : Response.json({ status: 'OK', missed_tx: [txid] })
+    expect(await lookupTransaction('http://127.0.0.1:18081', undefined, txid, [image], other)).toEqual({ state: 'unknown', keyImages: ['spent'] })
   })
 
   test('an unreadable daemon reply is never treated as a rejection', async () => {

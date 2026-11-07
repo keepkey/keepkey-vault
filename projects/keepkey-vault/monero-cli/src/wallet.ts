@@ -382,12 +382,17 @@ export async function relayRawTransaction(origin: string, fingerprint: string | 
   checkRelayResponse(await daemonRequest(origin, fingerprint, '/send_raw_transaction', { tx_as_hex: txHex, do_not_relay: false }, fetcher))
 }
 
-/** Where the node has a transaction (pool, block, or not at all) and whether its inputs are spent. */
+/** Where the node has a transaction (pool, block, or not at all) and whether its inputs are spent.
+ *  Key images first, then the tx: a block landing between the two calls then shows the tx as mined, never
+ *  as "missed but spent" (which reads as another tx spending them). If they are spent on chain and the tx is
+ *  still missed, the tx is asked once more before that conclusion stands. */
 export async function lookupTransaction(origin: string, fingerprint: string | undefined, txid: string, keyImages: string[],
   fetcher: Fetcher = fetch as any): Promise<MoneroTxLookup> {
-  const transactions = await daemonRequest(origin, fingerprint, '/get_transactions', { txs_hashes: [txid] }, fetcher, 30000)
   const spent = await daemonRequest(origin, fingerprint, '/is_key_image_spent', { key_images: keyImages }, fetcher, 30000)
-  return parseTxLookup(txid, transactions, spent, keyImages.length)
+  const ask = () => daemonRequest(origin, fingerprint, '/get_transactions', { txs_hashes: [txid] }, fetcher, 30000)
+  const first = parseTxLookup(txid, await ask(), spent, keyImages.length)
+  if (first.state !== 'unknown' || !first.keyImages.includes('spent')) return first
+  return parseTxLookup(txid, await ask(), spent, keyImages.length)
 }
 
 /** The node's own chain height (/get_height), not the wallet's: the scan target and the node-alive signal. */
