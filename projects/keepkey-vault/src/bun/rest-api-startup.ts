@@ -77,3 +77,22 @@ export async function startRestApiOrReport(port: number, when: 'startup' | 'sett
   // 'settings' does not wait for the dialog: the Settings call would time out.
   return null
 }
+
+/** The deps Desktop starts its REST API with. The window is required: at startup
+ *  a port conflict hides it before the dialog, so no UI is left without a backend. */
+export function desktopRestStartDeps(options: {
+  start: () => RestApiServer
+  port: number
+  mainWindow: () => { hide(): unknown } | null
+  showMessageBox: (dialog: RestPortDialog & { type: 'error'; title: string }) => Promise<unknown> | unknown
+  exit: (code: number) => void
+  answersLikeDesktop?: () => Promise<boolean>
+}): RestApiStartDeps {
+  return {
+    start: options.start,
+    answersLikeDesktop: options.answersLikeDesktop ?? (() => portAnswersLikeDesktop(options.port)),
+    showError: async (dialog) => options.showMessageBox({ type: 'error', title: 'KeepKey Desktop', ...dialog }),
+    exit: options.exit,
+    hideWindow: () => { options.mainWindow()?.hide() },
+  }
+}

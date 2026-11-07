@@ -14,7 +14,7 @@
  * may not answer at once: the claim keeps trying until a long bound, and only
  * then reports it as not answering.
  */
-import { chmodSync, closeSync, mkdirSync, openSync, readFileSync, unlinkSync, writeSync } from 'node:fs'
+import { chmodSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, unlinkSync, writeSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 
 export type InstanceClaim =
@@ -35,8 +35,10 @@ export interface ClaimOptions {
 
 export const INSTANCE_DEADLINE_MS = 20_000
 const RETRY_MS = 100
-/** A live pid whose socket refuses connections this long is not a Desktop (a reused pid). */
-const REFUSED_STALE_MS = 5_000
+/** A live pid whose socket refuses connections this long is not a Desktop (a reused pid
+ *  after a crash). A Desktop listens within milliseconds of taking the lock, and on quit
+ *  drops the socket and the lock together, so a real one is never refused this long. */
+const REFUSED_STALE_MS = 1_000
 
 /** ~/.keepkey/desktop-<identifier>-<channel>.sock: one per identifier and channel,
  *  like Electrobun's app data folder. Short, for the ~104-byte socket path limit. */
@@ -156,11 +158,27 @@ export async function claimSingleInstance(path: string, options: ClaimOptions): 
         },
       }
     }
+    // A stale lock we cannot remove (a read-only folder): no hand-off is possible, so
+    // start without the lock rather than loop with no window.
+    const withoutLock = (why: string): InstanceClaim => {
+      console.warn(`[instance] starting without the single-instance lock: ${why}`)
+      return { role: 'primary', release: () => {} }
+    }
+    const replaceStale = (holder: number | null): InstanceClaim | null => {
+      removeLockIf(lock, holder)
+      if (existsSync(lock) && readLockPid(lock) === holder) return withoutLock(`could not remove the stale lock ${lock}`)
+      return Date.now() >= deadline ? withoutLock('the stale lock kept coming back until the deadline') : null
+    }
     const holder = readLockPid(lock)
     if (holder === null || !pidAlive(holder)) {
-      // A copy that crashed, or one between creating the lock and writing its pid.
-      if (holder === null && Date.now() < deadline) await Bun.sleep(RETRY_MS)
-      if (holder !== null || readLockPid(lock) === null) removeLockIf(lock, holder)
+      // A copy that crashed, garbage in the file, or a copy between creating the lock
+      // and writing its pid (give that one a moment).
+      if (holder === null) {
+        await Bun.sleep(RETRY_MS)
+        if (readLockPid(lock) !== null) continue
+      }
+      const settled = replaceStale(holder)
+      if (settled) return settled
       continue
     }
     const answer = await askToFocus(path, options.version, deadline - Date.now())
@@ -170,7 +188,12 @@ export async function claimSingleInstance(path: string, options: ClaimOptions): 
       // Not listening yet (just started), or gone (quitting). A live pid that never
       // listens is not a Desktop: the pid was reused after a crash.
       refusedSince ??= Date.now()
-      if (Date.now() - refusedSince > REFUSED_STALE_MS) { removeLockIf(lock, holder); refusedSince = null; continue }
+      if (Date.now() - refusedSince > REFUSED_STALE_MS) {
+        const settled = replaceStale(holder)
+        if (settled) return settled
+        refusedSince = null
+        continue
+      }
     } else refusedSince = null
     await Bun.sleep(RETRY_MS)
   }
@@ -201,8 +224,15 @@ export async function startupInstanceGate(options: ClaimOptions & {
   path: string
   showDialog: (dialog: Dialog) => Promise<unknown> | unknown
   exit: (code: number) => void
+  /** A non-blocking notice (a system notification) if the running copy is slow to
+   *  answer: until the bound, there is no window and no dialog to explain why. */
+  notify?: (text: string) => void
+  waitingNoticeMs?: number
 }): Promise<Extract<InstanceClaim, { role: 'primary' }> | null> {
-  const claim = await claimSingleInstance(options.path, options)
+  const notice = setTimeout(() => {
+    try { options.notify?.('Waiting for the KeepKey Desktop that is already open to answer…') } catch { /* best effort */ }
+  }, options.waitingNoticeMs ?? 5000)
+  const claim = await claimSingleInstance(options.path, options).finally(() => clearTimeout(notice))
   if (claim.role === 'primary') return claim
   if (claim.role === 'focused-existing') {
     console.log('[Vault] KeepKey Desktop is already running: brought its window to the front; this copy quits')

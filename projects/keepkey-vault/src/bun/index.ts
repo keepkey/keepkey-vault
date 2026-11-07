@@ -234,7 +234,7 @@ process.on('unhandledRejection', (reason) => {
 import { EngineController, withTimeout } from "./engine-controller"
 import { runUsbDiagnostic as runUsbDiagnosticProbe } from "./windows-usb-probe"
 import { startRestApi, clearFeaturesCache, setUiActive, uiHeartbeat, type RestApiCallbacks } from "./rest-api"
-import { portAnswersLikeDesktop, startRestApiOrReport } from "./rest-api-startup"
+import { desktopRestStartDeps, startRestApiOrReport } from "./rest-api-startup"
 import { instanceSocketPath, startupInstanceGate } from "./single-instance"
 import { signSolanaWireTransaction } from "./solana-signing"
 import { AuthStore } from "./auth"
@@ -2117,13 +2117,13 @@ const restCallbacks: RestApiCallbacks = {
 /** Start or stop the REST API server based on the persisted setting */
 async function applyRestApiState(when: 'startup' | 'settings') {
 	if (restApiEnabled && !restServer) {
-		restServer = await startRestApiOrReport(REST_API_PORT, when, {
+		restServer = await startRestApiOrReport(REST_API_PORT, when, desktopRestStartDeps({
 			start: () => startRestApi(engine, auth, REST_API_PORT, restCallbacks),
-			answersLikeDesktop: () => portAnswersLikeDesktop(REST_API_PORT),
-			showError: (dialog) => Utils.showMessageBox({ type: 'error', title: 'KeepKey Desktop', ...dialog }),
+			port: REST_API_PORT,
+			mainWindow: () => _mainWindow,
+			showMessageBox: (dialog) => Utils.showMessageBox(dialog),
 			exit: (code) => process.exit(code),
-			hideWindow: () => _mainWindow?.hide(),
-		})
+		}))
 		if (restServer) {
 			console.log(`[Vault] REST API started on port ${REST_API_PORT}`)
 		} else {
@@ -11513,6 +11513,7 @@ const instanceClaim = await startupInstanceGate({
 		window.activate()
 	},
 	showDialog: (dialog) => Utils.showMessageBox({ type: 'warning', title: 'KeepKey Desktop', ...dialog, buttons: ['OK'] }),
+	notify: (text) => Utils.showNotification({ title: 'KeepKey Desktop', body: text }),
 	exit: (code) => process.exit(code),
 })
 

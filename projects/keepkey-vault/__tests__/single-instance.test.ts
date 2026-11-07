@@ -12,10 +12,10 @@
  * Run: bun test __tests__/single-instance.test.ts
  */
 import { afterEach, describe, expect, test } from 'bun:test'
-import { existsSync, mkdtempSync, rmSync, statSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { claimSingleInstance, instanceSocketPath, startupInstanceGate, type InstanceClaim } from '../src/bun/single-instance'
-import { startRestApiOrReport } from '../src/bun/rest-api-startup'
+import { desktopRestStartDeps, startRestApiOrReport } from '../src/bun/rest-api-startup'
 
 const CLAIMANT = new URL('./support/instance-claimant.ts', import.meta.url).pathname
 const dirs: string[] = []
@@ -99,6 +99,57 @@ describe('one KeepKey Desktop per channel', () => {
     expect(existsSync(path.replace(/\.sock$/, '.lock'))).toBe(true) // exited without releasing
     expect((await claim(path)).role).toBe('primary')
   })
+
+  test('a stale lock that cannot be removed (read-only folder): starts without the lock, within the bound', async () => {
+    const dir = home()
+    const path = socketIn(dir)
+    mkdirSync(join(dir, '.keepkey'), { recursive: true })
+    const dead = Bun.spawnSync([process.execPath, '-e', 'console.log(process.pid)']).stdout.toString().trim()
+    writeFileSync(path.replace(/\.sock$/, '.lock'), `${dead}\n`)
+    chmodSync(join(dir, '.keepkey'), 0o500)
+    try {
+      const started = Date.now()
+      const result = await claim(path, { deadlineMs: 3000 })
+      expect(result.role).toBe('primary')
+      expect(Date.now() - started).toBeLessThan(3500)
+    } finally { chmodSync(join(dir, '.keepkey'), 0o700) }
+  }, 15_000)
+
+  test('a lock with garbage in it is replaced', async () => {
+    const dir = home()
+    const path = socketIn(dir)
+    mkdirSync(join(dir, '.keepkey'), { recursive: true })
+    writeFileSync(path.replace(/\.sock$/, '.lock'), 'not a pid')
+    const started = Date.now()
+    expect((await claim(path, { deadlineMs: 3000 })).role).toBe('primary')
+    expect(Date.now() - started).toBeLessThan(1500)
+    expect((await claim(path)).role).toBe('focused-existing')
+  }, 15_000)
+
+  test('garbage in a lock in a read-only folder: starts without the lock, within the bound', async () => {
+    const dir = home()
+    const path = socketIn(dir)
+    mkdirSync(join(dir, '.keepkey'), { recursive: true })
+    writeFileSync(path.replace(/\.sock$/, '.lock'), 'not a pid')
+    chmodSync(join(dir, '.keepkey'), 0o500)
+    try {
+      const started = Date.now()
+      expect((await claim(path, { deadlineMs: 3000 })).role).toBe('primary')
+      expect(Date.now() - started).toBeLessThan(3500)
+    } finally { chmodSync(join(dir, '.keepkey'), 0o700) }
+  }, 15_000)
+
+  test('a reused pid (a live, unrelated process) with no socket answering: starts normally, quickly', async () => {
+    const dir = home()
+    const path = socketIn(dir)
+    mkdirSync(join(dir, '.keepkey'), { recursive: true })
+    const unrelated = Bun.spawn(['sleep', '30'])
+    children.push(unrelated)
+    writeFileSync(path.replace(/\.sock$/, '.lock'), `${unrelated.pid}\n`)
+    const started = Date.now()
+    expect((await claim(path)).role).toBe('primary')
+    expect(Date.now() - started).toBeLessThan(2500)
+  }, 15_000)
 
   test('released on quit: the next launch starts normally', async () => {
     const path = socketIn(home())
@@ -194,6 +245,29 @@ describe('what a launch does with the claim', () => {
     expect(r.dialogs[0].detail).toContain('1.6.10')
   })
 
+  test('a copy that is slow to answer: a notice that this copy is waiting, before the dialog', async () => {
+    const path = socketIn(home())
+    const stuck = spawnClaimant({ CLAIM_PATH: path, BLOCK_MS: '4000', RELEASE: 'never' })
+    await stuck.waitFor(l => l === 'blocking')
+    const events: string[] = []
+    await startupInstanceGate({ path, version: '1.6.10', onFocusRequest: () => {}, deadlineMs: 1500, waitingNoticeMs: 300,
+      notify: text => { events.push(`notice: ${text}`) }, showDialog: async d => { events.push(`dialog: ${d.message}`) }, exit: c => { events.push(`exit ${c}`) } })
+    expect(events).toEqual(['notice: Waiting for the KeepKey Desktop that is already open to answer…', 'dialog: KeepKey Desktop is already open but has not answered', 'exit 1'])
+  }, 15_000)
+
+  test('no notice when the running copy answers at once', async () => {
+    const r = await (async () => {
+      const path = socketIn(home())
+      await claim(path, { version: '1.6.10' })
+      const events: string[] = []
+      await startupInstanceGate({ path, version: '1.6.10', onFocusRequest: () => {}, waitingNoticeMs: 300,
+        notify: t => { events.push(t) }, showDialog: async () => {}, exit: () => {} })
+      await Bun.sleep(400)
+      return events
+    })()
+    expect(r).toEqual([])
+  })
+
   test('a copy that never answers: an honest dialog, then this copy quits', async () => {
     const path = socketIn(home())
     const stuck = spawnClaimant({ CLAIM_PATH: path, BLOCK_MS: '4000', RELEASE: 'never' })
@@ -218,6 +292,17 @@ describe('another channel holds the REST port', () => {
       exit: code => { order.push(`exit ${code}`) },
     })
     expect(result).toBeNull()
+    expect(order).toEqual(['hide window', "dialog: KeepKey Desktop can't start: port 1646 is in use", 'exit 1'])
+  })
+  test("Desktop's own startup deps hide its main window (the wiring index.ts uses)", async () => {
+    const order: string[] = []
+    const window = { hide: () => { order.push('hide window') } }
+    const deps = desktopRestStartDeps({
+      start: () => { throw new Error('EADDRINUSE') }, port: 1646, mainWindow: () => window,
+      showMessageBox: async (d: { message: string }) => { order.push(`dialog: ${d.message}`) }, exit: code => { order.push(`exit ${code}`) },
+      answersLikeDesktop: async () => true,
+    })
+    await startRestApiOrReport(1646, 'startup', deps)
     expect(order).toEqual(['hide window', "dialog: KeepKey Desktop can't start: port 1646 is in use", 'exit 1'])
   })
   test('Settings (REST turned on later) keeps the window: Desktop stays up with the REST API off', async () => {
