@@ -88,6 +88,18 @@ const out: Record<string, unknown> = {}
   await unmount()
 }
 
+// Friendly names remain distinguishable when two wallets have the same device label.
+{
+ const picks: string[] = []
+ const {container,unmount}=await render(React.createElement(EmulatorWalletChooser, {
+  wallets:[{name:'qa-one',label:'KeepKey',hasMnemonic:true},{name:'qa-two',label:'KeepKey',hasMnemonic:true}],
+  firmware:{builds,next:{id:PIN,version:'7.17.0',problem:null}},onPick:(name:string)=>picks.push(name),onClose:()=>{},
+ }))
+ out.distinctNames=[...container.querySelectorAll('button[title^="Start "]')].map(button=>button.getAttribute('aria-label'))
+ await click(byLabel(container,'Start KeepKey (qa-two) on v7.17.0 · build 249bcff13435'))
+ out.distinctPicks=picks;await unmount()
+}
+
 // ── B3: an unavailable selected build is shown, named, and blocks starts ──
 {
   const picks: string[] = []

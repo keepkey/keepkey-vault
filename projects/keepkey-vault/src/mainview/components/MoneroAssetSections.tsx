@@ -10,8 +10,9 @@ import type { MoneroSendReview } from "../../shared/types"
 import { formatXmr, formatXmrShort, moneroBalanceView, moneroSendInputProblems, type MoneroBalanceView, type MoneroSendProblem } from "../../shared/monero-asset"
 import { getNumberLocale } from "../lib/number-locale"
 import type { MoneroClient } from "../lib/monero-client"
-import { openMoneroWallet, prepareMoneroSend } from "../lib/monero-flow"
+import { openMoneroWallet, prepareMoneroSend, verifyMoneroBalance } from "../lib/monero-flow"
 import { useMoneroStatus, type MoneroStatusState } from "../hooks/useMoneroStatus"
+import { useMoneroBalanceVerification } from "../hooks/useMoneroBalanceVerification"
 import { ReceiveView } from "./ReceiveView"
 
 const MONERO_PATH = [0x8000002c, 0x80000080, 0x80000000]
@@ -29,17 +30,18 @@ export function useMoneroStateLabel(view: MoneroBalanceView): string {
 	const uiText = useUiTranslation()
 	if (view.state === "loading") return uiText("Loading…")
 	if (view.state === "not-connected") return uiText("Not connected")
-	if (view.state === "ready") return uiText("Synced")
+	if (view.state === "ready") return !view.spendVerified && view.balanceAtomic !== "0" ? uiText("Balance needs verification") : uiText("Synced")
 	if (view.state === "unreachable") return uiText("Node unreachable")
 	return view.progress === undefined ? uiText("Syncing") : uiText("Syncing {{percent}}%", { percent: Math.floor(view.progress * 100) })
 }
 
 export function MoneroStatusChip({ view }: { view: MoneroBalanceView }) {
 	const label = useMoneroStateLabel(view)
-	const color = view.state === "ready" ? "var(--teal)" : view.state === "unreachable" ? "var(--rose)" : "var(--gold)"
+	const verified = view.state === "ready" && (view.spendVerified || view.balanceAtomic === "0")
+	const color = verified ? "var(--teal)" : view.state === "unreachable" ? "var(--rose)" : "var(--gold)"
 	return (
 		<Flex data-monero-state={view.state} align="center" gap="1" color={color} className="v3-glass-chip" px="2" py="0.5">
-			{view.state === "ready" ? <Box as={FaCheck} fontSize="9px" /> : <Box w="6px" h="6px" borderRadius="full" bg={color} />}
+			{verified ? <Box as={FaCheck} fontSize="9px" /> : <Box w="6px" h="6px" borderRadius="full" bg={color} />}
 			<Text fontSize="10px" fontFamily="mono" fontWeight="500" letterSpacing="0.02em">{label}</Text>
 		</Flex>
 	)
@@ -55,11 +57,12 @@ function MoneroFreshness({ view }: { view: MoneroBalanceView }) {
 /** Header amount: "—" when unknown; fiat is never shown (no price source), it says "not included". */
 export function MoneroHeaderBalance({ view, privateMode }: { view: MoneroBalanceView; privateMode: boolean }) {
 	const uiText = useUiTranslation()
+	const balance = view.spendVerified || view.balanceAtomic === "0" ? view.balanceAtomic : null
 	return (
 		<Flex direction="column" align="flex-end" gap="0.5">
 			<Flex align="baseline" gap="1.5">
 				<Text data-monero-header-balance="" fontFamily="mono" fontSize={{ base: "20px", md: "26px" }} fontWeight="600" color="var(--text-0)" lineHeight="1.05">
-					{view.balanceAtomic === null ? "—" : privateMode ? "••••••" : formatXmrShort(view.balanceAtomic)}
+					{balance === null ? "—" : privateMode ? "••••••" : formatXmrShort(balance)}
 				</Text>
 				<Text fontFamily="mono" fontSize={{ base: "12px", md: "14px" }} color="var(--text-3)">XMR</Text>
 			</Flex>
@@ -83,8 +86,8 @@ function MoneroBalanceNote({ view }: { view: MoneroBalanceView }) {
 	if (view.state === "ready" && (view.restoreHeight ?? 0) > 0) {
 		return <Text data-monero-note="partial" fontSize="12px" color="var(--text-2)">{uiText("Earlier payments may be missing. Check the wallet history start in Settings → Monero if this wallet is older.")}</Text>
 	}
-	if (view.state === "ready" && !view.spendVerified) {
-		return <Text data-monero-note="unverified" fontSize="12px" color="var(--text-2)">{uiText("Your balance is verified on KeepKey when you send.")}</Text>
+	if (view.state === "ready" && !view.spendVerified && view.balanceAtomic !== "0") {
+		return <Text data-monero-note="unverified" fontSize="12px" color="var(--text-2)">{uiText("Confirm on KeepKey to verify your balance.")}</Text>
 	}
 	return null
 }
@@ -95,8 +98,8 @@ function MoneroAmounts({ view, privateMode }: { view: MoneroBalanceView; private
 	return (
 		<Flex gap={{ base: "5", md: "10" }} flexWrap="wrap">
 			<Box><Text fontSize="11px" color="var(--text-3)">{uiText("Received")}</Text><Text data-monero-balance="" fontSize="13px" fontFamily="mono" color="var(--text-0)">{show(view.balanceAtomic)}</Text></Box>
-			<Box><Text fontSize="11px" color="var(--text-3)">{uiText("Unlocked")}</Text><Text data-monero-unlocked="" fontSize="13px" fontFamily="mono" color="var(--teal)">{show(view.unlockedAtomic)}</Text></Box>
-			<Box><Text fontSize="11px" color="var(--text-3)">{uiText("Locked (fewer than 10 confirmations)")}</Text><Text data-monero-locked="" fontSize="13px" fontFamily="mono" color="var(--text-1)">{show(view.lockedAtomic)}</Text></Box>
+			<Box><Text fontSize="11px" color="var(--text-3)">{uiText("Unlocked")}</Text><Text data-monero-unlocked="" fontSize="13px" fontFamily="mono" color="var(--teal)">{show(view.spendVerified || view.balanceAtomic === "0" ? view.unlockedAtomic : null)}</Text></Box>
+			<Box><Text fontSize="11px" color="var(--text-3)">{uiText("Locked (fewer than 10 confirmations)")}</Text><Text data-monero-locked="" fontSize="13px" fontFamily="mono" color="var(--text-1)">{show(view.spendVerified || view.balanceAtomic === "0" ? view.lockedAtomic : null)}</Text></Box>
 		</Flex>
 	)
 }
@@ -147,6 +150,7 @@ export function MoneroConnectCard({ client, monero }: { client: MoneroClient; mo
 export function MoneroReceiveSection({ chain, monero, client, privateMode }: { chain: ChainDef; monero: MoneroStatusState; client: MoneroClient; privateMode: boolean }) {
 	const uiText = useUiTranslation()
 	const view = useMoneroView(monero)
+	const verification = useMoneroBalanceVerification(monero, client)
 	const wallet = monero.status?.available ? monero.status : null
 	const [minor, setMinor] = useState(0)
 	const [subaddress, setSubaddress] = useState<{ minor: number; address: string } | null>(null)
@@ -177,6 +181,8 @@ export function MoneroReceiveSection({ chain, monero, client, privateMode }: { c
 	}
 	return (
 		<Box data-monero-receive="">
+			{verification.busy && <Text role="status" fontSize="12px" mb="3">{uiText("Checking your balance on KeepKey…")}</Text>}
+			{verification.error && <Box role="alert" mb="3"><Text fontSize="12px" color="var(--rose)">{verification.error}</Text><Button size="xs" mt="2" onClick={() => { void verification.retry() }}>{uiText("Try again")}</Button></Box>}
 			<Box mb="4"><MoneroBalanceNote view={view} /><MoneroFreshness view={view} /></Box>
 			<details style={{ marginBottom: 16, color: "var(--text-3)", fontSize: 12 }}><summary style={{ cursor: "pointer" }}>{uiText("Balance details")}</summary><Box mt="3"><MoneroAmounts view={view} privateMode={privateMode} /></Box></details>
 			<details style={{ marginBottom: 12, color: "var(--text-3)", fontSize: 12 }}><summary style={{ cursor: "pointer" }}>{uiText("Receive address options")}</summary>
@@ -197,7 +203,7 @@ export function MoneroReceiveSection({ chain, monero, client, privateMode }: { c
 				{wallet.transactions.length === 0 ? (
 					<Text fontSize="12px" color="var(--text-2)">{view.state === "ready" ? uiText("No incoming transactions yet.") : uiText("Transactions appear as the wallet scans.")}</Text>
 				) : wallet.transactions.map((tx, index) => (
-					<Flex key={tx.txid} justify="space-between" gap="4" py="2" borderTop={index ? "1px solid var(--line)" : undefined} flexWrap="wrap">
+					<Flex key={`${tx.txid}:${index}`} justify="space-between" gap="4" py="2" borderTop={index ? "1px solid var(--line)" : undefined} flexWrap="wrap">
 						<Box minW="0">
 							<Text fontSize="12px" color="var(--text-0)">{tx.type === "pool" ? uiText("Incoming · in the mempool") : uiText("Received")}</Text>
 							<Text fontSize="11px" fontFamily="mono" color="var(--text-3)" title={tx.txid}>{tx.txid.slice(0, 12)}…{tx.txid.slice(-12)}</Text>
@@ -227,6 +233,7 @@ export function MoneroSendSection({ monero, client, privateMode = false }: { mon
 	const uiText = useUiTranslation()
 	const problemText = useProblemText()
 	const view = useMoneroView(monero)
+	const verification = useMoneroBalanceVerification(monero, client)
 	const wallet = monero.status?.available ? monero.status : null
 	const [recipient, setRecipient] = useState("")
 	const [amount, setAmount] = useState("")
@@ -240,14 +247,14 @@ export function MoneroSendSection({ monero, client, privateMode = false }: { mon
 	const address = wallet?.address ?? ""
 	useEffect(() => { setReview(null); setError(null); setSentTxid(null) }, [address])
 	if (!wallet) return <MoneroConnectCard client={client} monero={monero} />
-	const problems = moneroSendInputProblems({ address: recipient, amount, max, walletAddress: address, unlockedAtomic: view.unlockedAtomic })
+	const problems = moneroSendInputProblems({ address: recipient, amount, max, walletAddress: address, unlockedAtomic: view.spendVerified ? view.unlockedAtomic : null })
 	const ready = !!recipient.trim() && !problems.address && (max || (!!problems.amountAtomic && !problems.amount))
 	const run = async (kind: NonNullable<typeof busy>, action: () => Promise<void>) => {
 		if (busy) return
 		setBusy(kind); setError(null)
 		try { await action() } catch (e) { setError(errorText(e, "The Monero request failed.")) } finally { setBusy(null) }
 	}
-	const sync = () => run("sync", async () => { monero.setStatus(await client.syncKeyImages()) })
+	const sync = () => run("sync", async () => { monero.setStatus(await verifyMoneroBalance(client)) })
 	const prepare = () => run("prepare", async () => {
 		setSentTxid(null)
 		const next = await prepareMoneroSend(client, wallet, { address: recipient.trim(), ...(max ? { max: true } : { amountAtomic: problems.amountAtomic! }) }, status => monero.setStatus(status), () => setBusy("sync"))
@@ -278,12 +285,15 @@ export function MoneroSendSection({ monero, client, privateMode = false }: { mon
 	const receiveOnly = wallet.sendBlocked === "emulator" || wallet.sendBlocked === "adapter"
 	return (
 		<Box data-monero-send="">
+			{verification.busy && <Text role="status" fontSize="12px" mb="3">{uiText("Checking your balance on KeepKey…")}</Text>}
+			{verification.error && <Box role="alert" mb="3"><Text fontSize="12px" color="var(--rose)">{verification.error}</Text><Button size="xs" mt="2" onClick={() => { void verification.retry() }}>{uiText("Try again")}</Button></Box>}
 			{wallet.unrelayedTxid && (
 				<Box role="alert" mb="4" {...cardProps} borderColor="var(--gold)">
 					<Text fontSize="13px" color="var(--gold)">{uiText("Your last send is still being checked. New sends are paused. Checking again resends the same transaction and cannot pay twice.")}</Text>
-					<Text data-monero-unrelayed="" fontSize="11px" fontFamily="mono" color="var(--text-2)" wordBreak="break-all" userSelect="all" mt="1">{wallet.unrelayedTxid}</Text>
+
 					<Button data-monero-retry-relay="" mt="2" size="xs" variant="outline" onClick={() => { void retry() }} disabled={!!busy} className="electrobun-webkit-app-region-no-drag">{busy === "retry" ? <Spinner size="xs" /> : null}{uiText("Check again")}</Button>
 					<details style={{ marginTop: 12, fontSize: 12, color: "var(--text-3)" }}><summary style={{ cursor: "pointer" }}>{uiText("Recovery details")}</summary>
+					<Text data-monero-unrelayed="" fontSize="11px" fontFamily="mono" color="var(--text-2)" wordBreak="break-all" userSelect="all" mt="1">{wallet.unrelayedTxid}</Text>
 					{wallet.unrelayedCheck?.state === "unknown" && (
 						<Text data-monero-unrelayed-check="" mt="2" fontSize="11px" color="var(--text-2)">{wallet.unrelayedCheck.discardable
 							? uiText("The node checked at {{time}}: it does not have this transaction, and its inputs are still unspent.", { time: new Date(wallet.unrelayedCheck.checkedAt).toLocaleTimeString(getNumberLocale()) })
@@ -316,26 +326,26 @@ export function MoneroSendSection({ monero, client, privateMode = false }: { mon
 			) : (
 				<>
 					<Text fontSize="15px" color="var(--text-0)" fontWeight="500" mb="3">{uiText("Send XMR")}</Text>
-					{wallet.discardedTxid && <Text data-monero-discarded="" fontSize="12px" color="var(--gold)" mb="2">{uiText("You discarded transaction {{txid}}. Until its inputs are spent, a new send must reuse one of them (Max does), so both cannot be mined.", { txid: `${wallet.discardedTxid.slice(0, 12)}…` })}</Text>}
+					{wallet.discardedTxid && <Text data-monero-discarded="" fontSize="12px" color="var(--gold)" mb="2">{uiText("Your discarded send will be checked before another payment.")}</Text>}
 					{wallet.sendBlocked === "syncing" && <Text data-monero-send-blocked="syncing" fontSize="13px" color="var(--text-2)">{uiText("Wait for the wallet to finish scanning before sending.")}</Text>}
 					{(wallet.canSend || wallet.sendBlocked === "key-images") && !wallet.unrelayedTxid && !review && (
 						<Box>
 							<Text fontSize="11px" color="var(--text-3)" mb="1">{uiText("Recipient address")}</Text>
 							<Input data-monero-send-address="" disabled={!!busy} value={recipient} onChange={e => setRecipient(e.target.value)} placeholder={uiText("Monero address or subaddress")} spellCheck={false} size="sm" fontFamily="mono" className="electrobun-webkit-app-region-no-drag" />
-							{problems.address && <Text data-monero-problem="address" mt="1" fontSize="12px" color="var(--rose)">{problemText(problems.address, view.unlockedAtomic)}</Text>}
+							{problems.address && <Text data-monero-problem="address" mt="1" fontSize="12px" color="var(--rose)">{problemText(problems.address, privateMode ? null : view.unlockedAtomic)}</Text>}
 							<Flex align="center" justify="space-between" mt="3" mb="1">
 								<Text fontSize="11px" color="var(--text-3)">{uiText("Amount (XMR)")}</Text>
-								<Text fontSize="11px" color="var(--text-3)">{uiText("Unlocked")}: {view.unlockedAtomic === null ? "—" : `${formatXmr(view.unlockedAtomic)} XMR`}</Text>
+								<Text fontSize="11px" color="var(--text-3)">{uiText("Unlocked")}: {!view.spendVerified || view.unlockedAtomic === null ? "—" : privateMode ? "••••••" : `${formatXmr(view.unlockedAtomic)} XMR`}</Text>
 							</Flex>
 							<Flex gap="2">
 								<Input data-monero-send-amount="" value={max ? uiText("Max") : amount} disabled={max || !!busy} onChange={e => setAmount(e.target.value)} placeholder="0.000000000000" inputMode="decimal" size="sm" fontFamily="mono" className="electrobun-webkit-app-region-no-drag" />
 								<Button data-monero-max="" disabled={!!busy} size="sm" variant={max ? "solid" : "outline"} onClick={() => setMax(m => !m)} className="electrobun-webkit-app-region-no-drag">{uiText("Max")}</Button>
 							</Flex>
-							{problems.amount && <Text data-monero-problem="amount" mt="1" fontSize="12px" color="var(--rose)">{problemText(problems.amount, view.unlockedAtomic)}</Text>}
+							{problems.amount && <Text data-monero-problem="amount" mt="1" fontSize="12px" color="var(--rose)">{problemText(problems.amount, privateMode ? null : view.unlockedAtomic)}</Text>}
 							<Text mt="2" fontSize="11px" color="var(--text-3)">{max
 								? uiText("Sends your available balance minus the network fee and a small amount kept for change.")
 								: uiText("Review the amount and fee before confirming on KeepKey.")}</Text>
-							<Button data-monero-review-send="" mt="4" size="sm" onClick={() => { void prepare() }} disabled={!!busy || !ready} className="electrobun-webkit-app-region-no-drag">
+							<Button data-monero-review-send="" mt="4" size="sm" onClick={() => { void prepare() }} disabled={!!busy || verification.busy || !ready} className="electrobun-webkit-app-region-no-drag">
 								{busy === "sync" || busy === "prepare" ? <Spinner size="xs" /> : <FaPaperPlane />}{busy === "sync" ? uiText("Confirm on KeepKey to verify your balance…") : busy === "prepare" ? uiText("Preparing…") : uiText("Review send")}
 							</Button>
 						</Box>
@@ -379,9 +389,10 @@ export function MoneroSendSection({ monero, client, privateMode = false }: { mon
 			)}
 			<details data-monero-send-details="" style={{ marginTop: 24, color: "var(--text-3)", fontSize: 12 }}>
 				<summary style={{ cursor: "pointer" }}>{uiText("Wallet details")}</summary>
+				{wallet.discardedTxid && <Text mt="2" fontFamily="mono" wordBreak="break-all">{wallet.discardedTxid}</Text>}
 				<Box mt="3"><MoneroAmounts view={view} privateMode={privateMode} /></Box>
 				<Text mt="2">{uiText("Balance verification uses key images to check which outputs are spent. It runs automatically before preparing a send. Your node can link those spends; use your own node for full privacy.")}</Text>
-				<Button data-monero-sync-key-images="" mt="2" size="xs" variant="outline" onClick={() => { void sync() }} disabled={!!busy || !!wallet.unrelayedTxid || wallet.sendBlocked === "syncing"}>{uiText("Verify balance again")}</Button>
+				<Button data-monero-sync-key-images="" mt="2" size="xs" variant="outline" onClick={() => { void sync() }} disabled={!!busy || verification.busy || !!wallet.unrelayedTxid || wallet.sendBlocked === "syncing"}>{uiText("Verify balance again")}</Button>
 			</details>
 			{sentTxid && (
 				<Box mt="3" role="status">
@@ -390,7 +401,7 @@ export function MoneroSendSection({ monero, client, privateMode = false }: { mon
 				</Box>
 			)}
 			{notice && <Text data-monero-notice="" mt="3" fontSize="12px" color="var(--teal)" role="status">{notice}</Text>}
-			{error && <Text data-monero-error="" mt="3" fontSize="12px" color="var(--rose)" role="alert">{error}</Text>}
+			{error && !wallet.unrelayedTxid && <Text data-monero-error="" mt="3" fontSize="12px" color="var(--rose)" role="alert">{error}</Text>}
 		</Box>
 	)
 }
@@ -401,6 +412,7 @@ export function MoneroChainRow({ chain, iconSrc, privateMode, onOpen, client }: 
 	const monero = useMoneroStatus(true, client)
 	const view = useMoneroView(monero)
 	const label = useMoneroStateLabel(view)
+	const balance = view.spendVerified || view.balanceAtomic === "0" ? view.balanceAtomic : null
 	return (
 		<Box data-monero-row="" as="button" onClick={onOpen} w="100%" textAlign="left" p="2.5" mb="1.5" borderRadius="lg" bg="transparent"
 			border="1px solid transparent" _hover={{ bg: "kk.cardBg", borderColor: `${chain.color}50` }} cursor="pointer" transition="all 0.15s"
@@ -414,9 +426,9 @@ export function MoneroChainRow({ chain, iconSrc, privateMode, onOpen, client }: 
 					</Flex>
 					<Flex align="baseline" justify="space-between" gap="2" mt="0.5">
 						<Text data-monero-row-balance="" fontSize="12px" color="var(--text-2)" lineHeight="1.3" truncate>
-							{view.balanceAtomic === null ? `— ${chain.symbol}` : privateMode ? "••••" : `${formatXmrShort(view.balanceAtomic)} ${chain.symbol}`}
+							{balance === null ? `— ${chain.symbol}` : privateMode ? "••••" : `${formatXmrShort(balance)} ${chain.symbol}`}
 						</Text>
-						{(view.state !== "ready" || (view.restoreHeight ?? 0) > 0) && <Text data-monero-row-state={view.state} fontSize="10px" color={view.state === "unreachable" ? "var(--gold)" : "var(--text-3)"} flexShrink={0}>{label}</Text>}
+						{(view.state !== "ready" || (view.restoreHeight ?? 0) > 0 || balance === null) && <Text data-monero-row-state={view.state} fontSize="10px" color={view.state === "unreachable" ? "var(--gold)" : "var(--text-3)"} flexShrink={0}>{label}</Text>}
 					</Flex>
 				</Box>
 			</Flex>

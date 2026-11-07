@@ -33,15 +33,17 @@ export function checkedMoneroStatus(status: MoneroStatus): MoneroStatus {
 	return status
 }
 
+// Device consent/signing uses the backend's bounded waits. A shorter UI timer
+// must not announce failure while the same operation can still finish.
 export const rpcMoneroClient: MoneroClient = {
 	getStatus: async () => checkedMoneroStatus(await rpcRequest<MoneroStatus>("moneroGetStatus", {}, 8000)),
 	getSettings: () => rpcRequest<AppSettings>("getAppSettings", undefined, 5000),
 	suggestRestoreHeight: () => rpcRequest("moneroSuggestRestoreHeight", {}, 20000),
-	connect: async restoreHeight => checkedMoneroStatus(await rpcRequest<MoneroStatus>("moneroConnect", restoreHeight === undefined ? {} : { restoreHeight }, 180_000)),
-	getAddress: (minor, showDisplay) => rpcRequest("moneroGetAddress", { showDisplay, minor }, showDisplay ? 180_000 : 60_000),
-	syncKeyImages: async () => checkedMoneroStatus(await rpcRequest<MoneroStatus>("moneroSyncKeyImages", {}, 600_000)),
+	connect: async restoreHeight => checkedMoneroStatus(await rpcRequest<MoneroStatus>("moneroConnect", restoreHeight === undefined ? {} : { restoreHeight }, 0)),
+	getAddress: (minor, showDisplay) => rpcRequest("moneroGetAddress", { showDisplay, minor }, showDisplay ? 0 : 60_000),
+	syncKeyImages: async () => checkedMoneroStatus(await rpcRequest<MoneroStatus>("moneroSyncKeyImages", {}, 0)),
 	prepareSend: params => rpcRequest<MoneroSendReview>("moneroPrepareSend", params, 300_000),
-	send: prepareId => rpcRequest<{ txid: string }>("moneroSend", { prepareId }, 600_000),
-	retryRelay: () => rpcRequest<{ txid: string }>("moneroRetryRelay", undefined, 120_000),
+	send: prepareId => rpcRequest<{ txid: string }>("moneroSend", { prepareId }, 0),
+	retryRelay: () => rpcRequest<{ txid: string }>("moneroRetryRelay", undefined, 0),
 	discardPending: () => rpcRequest("moneroDiscardPending", { confirm: true }, 120_000),
 }

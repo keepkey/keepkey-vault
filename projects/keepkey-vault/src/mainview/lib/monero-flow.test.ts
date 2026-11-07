@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { openMoneroWallet, prepareMoneroSend } from './monero-flow'
+import { openMoneroWallet, prepareMoneroSend, verifyMoneroBalance } from './monero-flow'
 import type { MoneroClient } from './monero-client'
 import type { MoneroStatus } from '../../shared/types'
 const wallet = (over: Partial<MoneroStatus> = {}): MoneroStatus => ({ available: true, network: 'mainnet', address: 'wallet-A',
@@ -61,4 +61,15 @@ describe('Review send performs required verification',()=>{
   await expect(prepareMoneroSend(api,wallet({unrelayedTxid:'pending',keyImagesStale:true}),payment,()=>{},()=>{})).rejects.toThrow('previous transaction')
   expect(calls).toEqual([])
  })
+})
+
+
+test('opening XMR and reviewing a send share balance verification already in progress', async () => {
+ const {api,calls}=client(), pending=deferred<MoneroStatus>()
+ api.syncKeyImages=async()=>{calls.push('sync');return pending.promise}
+ const opening=verifyMoneroBalance(api)
+ const preparing=prepareMoneroSend(api,wallet({keyImagesSynced:false}),payment,()=>{},()=>{})
+ expect(calls).toEqual(['sync'])
+ pending.resolve(wallet());await opening;await preparing
+ expect(calls).toEqual(['sync','prepare'])
 })

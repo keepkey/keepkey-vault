@@ -46,6 +46,11 @@ test('an obsolete signing hash uses the reviewed signing version with the wallet
   expect(ui.recoverySummary).not.toContain('/private/path')
 })
 
+test('two wallets with the same device label keep distinct accessible names and picks', () => {
+ expect(ui.distinctNames).toEqual(['Start KeepKey (qa-one) on v7.17.0 · build 249bcff13435','Start KeepKey (qa-two) on v7.17.0 · build 249bcff13435'])
+ expect(ui.distinctPicks).toEqual(['qa-two'])
+})
+
 describe('B3: an unavailable selected build', () => {
   test('uses the current available version and explains the replacement', () => {
     expect(ui.unavailableShown).toBe('Bundled emulator')

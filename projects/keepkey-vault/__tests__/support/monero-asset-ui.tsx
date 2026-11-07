@@ -17,7 +17,7 @@ const { createRoot } = await import('react-dom/client')
 const { ChakraProvider, defaultSystem } = await import('@chakra-ui/react')
 await import('../../src/mainview/i18n/index')
 const { CHAINS } = await import('../../src/shared/chains')
-const { MoneroChainRow, MoneroReceiveSection, MoneroSendSection } = await import('../../src/mainview/components/MoneroAssetSections')
+const { MoneroChainRow, MoneroReceiveSection, MoneroSendSection, MoneroHeaderBalance } = await import('../../src/mainview/components/MoneroAssetSections')
 
 const WALLET = '44jKQv6ZKMd5ecLLmkNJGi7azgSptEq8ki7TFiat1TfLfdDQ1tQ7ZYa3cRh7X2uRwvLDjddWh97ajeyhR2seKSECQeDx1WR'
 const SUBADDRESS = '84AxZu7xYb7fi7hnQrgTBdHFyP2xz6vdrZbLaJxbe73JJTWj6JG4cV8cbNnEhMvvi9PxSHvGnXQiaaLf2HNXJfzFKtWqk3H'
@@ -41,7 +41,7 @@ function fakeClient(initial: any, settingsHeight = 0) {
     suggestRestoreHeight: async () => ({ tipHeight: 3_300_000, restoreHeight: 3_294_960, marginBlocks: 5040 }),
     connect: async (height?: number) => { calls.push(['connect', height]); if (client.holdConnect) await new Promise<void>(resolve => { releaseConnect = resolve }); current = connected(); return current },
     getAddress: async (minor: number, showDisplay: boolean) => { calls.push(['getAddress', minor, showDisplay]); return { address: minor ? SUBADDRESS : WALLET, network: 'mainnet', displayed: showDisplay, minor } },
-    syncKeyImages: async () => { calls.push(['sync']); current = connected({ canSend: true, sendBlocked: undefined, keyImagesSynced: true, spendStateKnown: true }); return current },
+    syncKeyImages: async () => { calls.push(['sync']); current = connected({ ...current, canSend: true, sendBlocked: undefined, keyImagesSynced: true, keyImagesStale: false, spendStateKnown: true }); return current },
     prepareSend: async (params: any) => { calls.push(['prepare', params]); return { prepareId: 'ab'.repeat(16), max: !!params.max, recipient: params.address,
       amountAtomic: params.max ? '84633049999' : params.amountAtomic, feeAtomic: '20000000', changeAtomic: '1', totalAtomic: '84653049999', inputCount: 1,
       outputs: [{ role: 'recipient', address: params.address, amountAtomic: '84633049999' }, { role: 'change', address: WALLET, amountAtomic: '1' }] } },
@@ -83,9 +83,17 @@ function Host({ Section, client, extra }: any) {
 
 const out: Record<string, unknown> = {}
 
+// A view-only total can include spent change; it must not look like verified balance.
+const { moneroBalanceView } = await import('../../src/shared/monero-asset')
+for (const [name, verified, privateMode] of [['headerUnverified', false, false], ['headerVerified', true, false], ['headerPrivate', true, true]] as const) {
+  const {container, unmount} = await render(React.createElement(MoneroHeaderBalance, {view:moneroBalanceView(connected({spendStateKnown:verified})),privateMode}))
+  out[name] = text(q(container,'[data-monero-header-balance]'))
+  await unmount()
+}
+
 // ── The Dashboard row: "—" until known, never fiat, the last balance when the node is down ──
-for (const [name, status] of [['rowNotConnected', notConnected], ['rowReady', connected()], ['rowScanning', connected({ syncState: 'scanning', walletHeight: 3_297_480, restoreHeight: 3_294_960, monitorReady: false })],
-  ['rowUnreachable', connected({ syncState: 'unreachable', monitorReady: false })]] as const) {
+for (const [name, status] of [['rowNotConnected', notConnected], ['rowReady', connected({ spendStateKnown: true, keyImagesSynced: true })], ['rowScanning', connected({ syncState: 'scanning', walletHeight: 3_297_480, restoreHeight: 3_294_960, monitorReady: false })],
+  ['rowUnreachable', connected({ syncState: 'unreachable', monitorReady: false, spendStateKnown: true })], ['rowUnverified', connected()]] as const) {
   let opened = 0
   const { container, unmount } = await render(React.createElement(MoneroChainRow, { chain: monero, iconSrc: '', privateMode: false, onOpen: () => { opened++ }, client: fakeClient(status) }))
   out[name] = { balance: text(q(container, '[data-monero-row-balance]')), fiat: text(q(container, '[data-monero-row-fiat]')), state: text(q(container, '[data-monero-row-state]')) }
@@ -123,12 +131,20 @@ for (const [name, status] of [['rowNotConnected', notConnected], ['rowReady', co
   await unmount()
 }
 
+{
+ const client = fakeClient(connected({balanceAtomic:'0',unlockedBalanceAtomic:'0'}))
+ const {container,unmount}=await render(React.createElement(Host,{Section:MoneroReceiveSection,client}))
+ out.zeroBalanceChecks=client.calls.filter(call=>call[0]==='sync').length
+ out.zeroBalanceNote=text(q(container,'[data-monero-note]'))
+ await unmount()
+}
+
 // ── A guessed scan start never reads as complete; an old figure carries its time ──
 {
   const { container, unmount } = await render(React.createElement(Host, { Section: MoneroReceiveSection, client: fakeClient(connected({ restoreHeight: 3_294_960, updatedAt: new Date().toISOString() })) }))
   out.partial = text(q(container, '[data-monero-note]'))
   await unmount()
-  const row = await render(React.createElement(MoneroChainRow, { chain: monero, iconSrc: '', privateMode: false, onOpen() {}, client: fakeClient(connected({ restoreHeight: 3_294_960 })) }))
+  const row = await render(React.createElement(MoneroChainRow, { chain: monero, iconSrc: '', privateMode: false, onOpen() {}, client: fakeClient(connected({ restoreHeight: 3_294_960, spendStateKnown: true, keyImagesSynced: true })) }))
   out.rowPartial = text(q(row.container, '[data-monero-row-state]'))
   await row.unmount()
   const old = await render(React.createElement(Host, { Section: MoneroReceiveSection, client: fakeClient(connected({ restoreHeight: 0, syncState: 'scanning', monitorReady: false, updatedAt: '2026-11-06T12:00:00.000Z' })) }))
@@ -215,6 +231,12 @@ for (const [name, status] of [['rowNotConnected', notConnected], ['rowReady', co
   const { container, unmount } = await render(React.createElement(Host, { Section: MoneroSendSection, client: fakeClient(connected({ sendBlocked: 'emulator' })) }))
   out.receiveOnly = text(q(container, '[data-monero-send-blocked]'))
   await unmount()
+}
+
+{
+ const client=fakeClient(connected({canSend:true,sendBlocked:undefined,keyImagesSynced:true,spendStateKnown:true}))
+ const {container,unmount}=await render(React.createElement(Host,{Section:MoneroSendSection,client,extra:{privateMode:true}}))
+ out.sendPrivateText=text(container);await unmount()
 }
 
 console.log(JSON.stringify(out))

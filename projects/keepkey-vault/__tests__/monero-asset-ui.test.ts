@@ -21,12 +21,19 @@ beforeAll(() => {
   ui = JSON.parse(run.stdout.toString().trim().split('\n').at(-1)!)
 }, 120_000)
 
+test('the main balance is hidden until verified and still respects private mode', () => {
+  expect(ui.headerUnverified).toBe('—')
+  expect(ui.headerVerified).toBe('0.08465305')
+  expect(ui.headerPrivate).toBe('••••••')
+})
+
 describe('C1/C2: the XMR row in the chain list', () => {
   test('not connected and scanning show "—", never 0; fiat always says not included', () => {
     expect(ui.rowNotConnected).toEqual({ balance: '— XMR', fiat: 'not included', state: 'Not connected' })
     expect(ui.rowScanning).toEqual({ balance: '— XMR', fiat: 'not included', state: 'Syncing 50%' })
   })
   test('synced shows the balance; node down keeps the last known balance and says so', () => {
+    expect(ui.rowUnverified).toEqual({ balance: '— XMR', fiat: 'not included', state: 'Balance needs verification' })
     expect(ui.rowReady).toEqual({ balance: '0.08465305 XMR', fiat: 'not included', state: '' })
     expect(ui.rowUnreachable).toEqual({ balance: '0.08465305 XMR', fiat: 'not included', state: 'Node unreachable' })
   })
@@ -55,9 +62,14 @@ describe('XMR opens without a setup checklist', () => {
   })
 })
 
+test('an empty scanned wallet needs no balance confirmation and shows no false prompt', () => {
+ expect(ui.zeroBalanceChecks).toBe(0)
+ expect(ui.zeroBalanceNote).toBe('')
+})
+
 describe('C2: balance states on the page', () => {
-  test('connected: the balance, marked not yet verified as spendable', () => {
-    expect(ui.afterConnect).toEqual({ balance: '0.084653050000 XMR', note: 'unverified' })
+  test('connected: verifies the balance automatically', () => {
+    expect(ui.afterConnect).toEqual({ balance: '0.084653050000 XMR' })
   })
   test('scanning: "—" and where the scan is', () => {
     expect(ui.scanning.balance).toBe('—')
@@ -79,9 +91,9 @@ describe('Receive: subaddresses come from the device and verify on it', () => {
 })
 
 describe('C3: Send', () => {
-  test('shows the form immediately and verifies the balance as part of Review send', () => {
+  test('checks the balance automatically on opening and prepares without another manual sync', () => {
     expect(ui.formBeforeSync).toBe(true)
-    expect(ui.syncBeforeReview).toBe(0)
+    expect(ui.syncBeforeReview).toBe(1)
     expect(ui.syncPrepareOrder).toEqual(['sync', 'prepare'])
     expect(ui.syncDetailsClosed).toBe(true)
   })
@@ -113,9 +125,14 @@ describe('C3: Send', () => {
   test('a check answered by a different node than the one the tx went to says so; a discarded tx is named', () => {
     expect(ui.otherNode).toContain('It was sent to https://a.example, but https://b.example answered this check')
     expect(ui.sameNode).toBe(false)
-    expect(ui.discardedNote).toContain('You discarded transaction efefefefefef…')
+    expect(ui.discardedNote).toBe('Your discarded send will be checked before another payment.')
   })
   test('without the signing emulator, Send says receive-only instead of a dead form', () => {
     expect(ui.receiveOnly).toContain('Receiving works.')
   })
+})
+
+
+test('private mode hides the available balance in the send form as well as the header', () => {
+ expect(ui.sendPrivateText).not.toContain('0.084653050000')
 })

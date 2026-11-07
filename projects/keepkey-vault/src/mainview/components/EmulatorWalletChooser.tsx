@@ -122,7 +122,8 @@ export function EmulatorWalletChooser({ wallets, firmware, onPick, onDelete, onC
 				{wallets.map((w) => {
 					const title = walletTitle(w)
 					const subtitle = /^build-[0-9a-f]{16}$/.test(w.name) ? (w.ethAddress ? `…${w.ethAddress.slice(-8)}` : "") : w.name
-					const startLabel = chosenInfo ? uiText("Start {{wallet}} on {{firmware}}", { wallet: title, firmware: buildTitle(chosenInfo) }) : uiText("Start {{wallet}}", { wallet: title })
+					const accessibleTitle = subtitle && title !== w.name ? `${title} (${subtitle})` : title
+					const startLabel = chosenInfo ? uiText("Start {{wallet}} on {{firmware}}", { wallet: accessibleTitle, firmware: buildTitle(chosenInfo) }) : uiText("Start {{wallet}}", { wallet: accessibleTitle })
 					return (
 					<Flex key={w.name} direction="column" mb="1.5">
 					<Flex align="stretch" gap="1.5">

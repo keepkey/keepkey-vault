@@ -291,7 +291,15 @@ export class MoneroWatchService {
       throw error
     }
     const value = { height: unsigned(result.height), spentAtomic: atomic(result.spent), unspentAtomic: atomic(result.unspent) }
-    void this.refresh().catch(() => {})
+    // The import can discover spends. Publish its new balance before the host
+    // checks whether verification is stale; the pre-import cache can be higher.
+    // An existing refresh may still contain pre-import reads, so let it settle
+    // and then start a fresh one. Never refresh a replacement wallet for this call.
+    if (this.session !== session) throw new Error('The Monero wallet changed during key-image import')
+    await this.refreshPromise?.catch(() => {})
+    if (this.session !== session) throw new Error('The Monero wallet changed during key-image import')
+    await this.refresh().catch(() => {})
+    if (this.session !== session) throw new Error('The Monero wallet changed during key-image import')
     return value
   }
 
