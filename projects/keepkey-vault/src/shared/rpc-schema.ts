@@ -1,5 +1,5 @@
 import type { MultisigPolicyPreview,MultisigCosignerExport,BtcPsbtSigned } from "./multisig-policy"
-import type { PasswordBankView, PasswordBrowserTarget } from './password-bank'
+import type { PasswordBankView, PasswordBrowserTarget, PasswordRiskKind, PasswordAgentApproval } from './password-bank'
 import type { ElectrobunRPCSchema } from 'electrobun/bun'
 import type { SafeAccount, SafeContext, SafeCreateParams, SafeProposal, SafeTransfer, SafeTxReview, VaultAddParams, VaultAddReview } from './safe-multisig'
 import type { VaultIdentity } from './vault-identity'
@@ -345,6 +345,9 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       passwordBankBrowserTargets: { params: { id: string }; response: PasswordBrowserTarget[] }
       passwordBankBrowserFill: { params: { grant: string }; response: { filled: true; submitted: false } }
       passwordBankBrowserGrant: { params: { id: string; pending?: boolean; browser: string; tabId: number; documentToken: string; ref: string }; response: { grant: string } }
+      passwordBankReportRisk: { params: { id: string; kind: PasswordRiskKind; source: 'user' | 'chrome-password-checkup' }; response: PasswordBankView }
+      passwordAgentApproveFill: { params: { id: string }; response: { id: string; state: string; expiresAt: number; error?: string } }
+      passwordAgentRejectFill: { params: { id: string }; response: void }
       markPassphraseIntroShown: { params: void; response: AppSettings }
       markBtcOnboardingShown: { params: void; response: AppSettings }
       setDisabledNetworks: { params: { chainIds: string[] }; response: AppSettings }
@@ -609,6 +612,7 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
         unresolvedFaultCount?: number
       }
       'pair-request': PairingRequestInfo
+      'password-agent-approval': { approval: PasswordAgentApproval | null }
       'pair-dismissed': Record<string, never>
       'signing-request': SigningRequestInfo
       'signing-dismissed': { id: string }

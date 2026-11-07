@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Box, Button, Flex, Input, Text } from '@chakra-ui/react'
-import { PASSWORD_ROTATION_GUIDES, type PasswordBankView as BankView } from '../../shared/password-bank'
+import { PASSWORD_ROTATION_GUIDES, type PasswordBankView as BankView, type PasswordRiskKind } from '../../shared/password-bank'
+import { passwordInventory, activePasswordRiskKinds } from '../../shared/password-inventory'
 import { rpcRequest } from '../lib/rpc'
 import { useUiTranslation } from '../i18n/ui'
 import { PasswordBrowserFill } from './PasswordBrowserFill'
@@ -17,6 +18,8 @@ export function PasswordBankView() {
   const [reviewDays, setReviewDays] = useState(90)
   const [backupRevision, setBackupRevision] = useState<number | null>(null)
   const [verified, setVerified] = useState<Record<string, boolean>>({})
+  const [riskKind, setRiskKind] = useState<Record<string, string>>({})
+  const [riskSource, setRiskSource] = useState<Record<string, string>>({})
   const [reveal, setReveal] = useState<{ id: string; pending: boolean; password: string; expiresAt: number } | null>(null)
   const mounted = useRef(true)
   const revision = useRef(0)
@@ -125,7 +128,7 @@ export function PasswordBankView() {
       <Text fontSize="lg" fontWeight="600" mb="3">{uiText('Accounts and rotation')}</Text>
       {bank.profiles.length === 0 && <Box {...card}><Text color="kk.textSecondary">{uiText('Generate a few entries, then assign a login domain and account. Your accounts and rotation checklist appear here.')}</Text></Box>}
       <Flex direction="column" gap="3">
-        {bank.profiles.map(p => {
+        {passwordInventory(bank).profiles.map(item => bank.profiles.find(p => p.id === item.id)!).map(p => {
           const guide = PASSWORD_ROTATION_GUIDES.find(g => g.loginOrigin === p.origin)
           const pending = p.pendingSlot !== undefined
           return <Box {...card} key={p.id}>
@@ -138,6 +141,14 @@ export function PasswordBankView() {
               </Flex>
             </Flex>
             <Text fontSize="xs" mt="2" color="kk.textMuted">{p.cachedUntil ? `${uiText('Cache expires')}: ${new Date(p.cachedUntil).toLocaleTimeString()}` : uiText('Current password is not cached')}</Text>
+            <Text fontSize="sm" mt="2" color={activePasswordRiskKinds(p).length ? 'red.300' : 'kk.textMuted'}>{activePasswordRiskKinds(p).length ? `${uiText('Reported risk')}: ${activePasswordRiskKinds(p).join(', ')}` : uiText('Risk status: not assessed. No report does not mean safe.')}</Text>
+            <Flex gap="2" mt="2" wrap="wrap" align="center">
+              <select aria-label={uiText('Report account risk')} style={selectStyle} value={riskKind[p.id] || ''} onChange={e => setRiskKind(v => ({ ...v, [p.id]: e.target.value }))}>
+                <option value="">{uiText('Choose a reported finding')}</option><option value="compromised">{uiText('Compromised')}</option><option value="reused">{uiText('Reused')}</option><option value="weak">{uiText('Weak')}</option>
+              </select>
+              <select aria-label={uiText('Finding source')} style={selectStyle} value={riskSource[p.id] || 'user'} onChange={e => setRiskSource(v => ({ ...v, [p.id]: e.target.value }))}><option value="user">{uiText('User report')}</option><option value="chrome-password-checkup">{uiText('Chrome Password Checkup — user reported')}</option></select>
+              <Button size="xs" disabled={busy || !riskKind[p.id]} onClick={() => void run(async () => { await rpcRequest('passwordBankReportRisk', { id: p.id, kind: riskKind[p.id] as PasswordRiskKind, source: riskSource[p.id] || 'user' }); setRiskKind(v => ({ ...v, [p.id]: '' })) })}>{uiText('Record finding')}</Button>
+            </Flex>
             {!p.changedAt && <Text fontSize="sm" mt="2" color="kk.textSecondary">{uiText('This generated entry does not import or change the existing website password. Complete guided setup and verify a sign-in before using it for login.')}</Text>}
             <PasswordBrowserFill id={p.id} pending={false} disabled={busy || !p.cachedUntil || !p.changedAt} />
             {reveal?.id === p.id && <Flex mt="3" p="3" bg="kk.bg" borderRadius="md" gap="3" align="center"><input aria-label={reveal.pending ? uiText('Pending password') : uiText('Current password')} type="password" autoComplete="off" data-keepkey-secret="true" readOnly value={reveal.password} style={{ ...selectStyle, flex: 1 }} /><Button size="xs" onClick={() => { void navigator.clipboard.writeText(reveal.password).catch(() => setError(uiText('Clipboard unavailable. Use the password field to copy.'))) }}>{uiText('Copy')}</Button><Button size="xs" onClick={() => setReveal(null)}>{uiText('Hide')}</Button></Flex>}
