@@ -280,9 +280,9 @@ afterAll(async () => {
 // What Desktop must do with each transaction on 7.17 (AdvancedMode off).
 const EXPECT: Record<string, { outcome: 'clear-signed' | 'not-attached'; innerDepths?: number[]; screen?: RegExp }> = {
   safe_create: { outcome: 'clear-signed', innerDepths: [1], screen: /Setup Safe/ },
-  // setup()'s module DELEGATECALLs, which 7.17 refuses to clear-sign. Desktop
-  // sees it in the calldata and attaches nothing: the normal review, once.
-  safe_create_l2_setup: { outcome: 'not-attached', screen: /Ethereum Data Hash/ },
+  // setup()'s module DELEGATECALLs Safe's own SafeToL2Setup.setupToL2(SafeL2):
+  // since firmware 89ca9322c (alpha #1034) 7.17 names it and clear-signs.
+  safe_create_l2_setup: { outcome: 'clear-signed', innerDepths: [1], screen: /SafeToL2Setup/ },
   safe_exec_transfer: { outcome: 'clear-signed', innerDepths: [1], screen: /NOT this wallet/ },
   safe_exec_native: { outcome: 'clear-signed' },
   safe_exec_self: { outcome: 'clear-signed', innerDepths: [1], screen: /Add signer/ },

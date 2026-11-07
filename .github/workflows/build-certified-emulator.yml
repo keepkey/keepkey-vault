@@ -111,6 +111,30 @@ jobs:
           shasum -a 256 projects/keepkey-vault/emulator-bundle/libkkemu.dylib \
             projects/keepkey-vault/emulator-bundle/libkkemu.dll
 
+      # Never certify an emulator that cannot take a PIN: Desktop's PIN suites
+      # run against the library about to be uploaded. Set up after the
+      # Electrobun core build so that build keeps its own Bun.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.3.14'
+
+      - name: Build Desktop test dependencies
+        run: |
+          git submodule update --init modules/hdwallet modules/proto-tx-builder modules/device-protocol
+          npm install -g yarn
+          (cd modules/hdwallet && yarn install --frozen-lockfile && yarn tsc --build)
+          (cd modules/proto-tx-builder && git submodule update --init osmosis-frontend && \
+            yarn install --frozen-lockfile && npx tsc -p . && test -f dist/index.js)
+          make device-protocol-build
+          cd projects/keepkey-vault && bun install --frozen-lockfile
+
+      - name: Test PIN entry on the library to certify
+        run: make test-emu-pin KK_EMU_DYLIB="$PWD/projects/keepkey-vault/emulator-bundle/libkkemu.dylib"
+
       - name: Upload immutable certified artifact
         uses: actions/upload-artifact@v4
         with:
