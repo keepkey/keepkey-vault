@@ -146,6 +146,7 @@ export const PUBLIC_ERRORS = [
   'The daemon accepted the transaction but did not relay it',
   'The Monero daemon is unavailable',
   'The selected Monero node is not synchronized on mainnet',
+  'The daemon reply could not be read',
 ] as const
 export class PublicError extends Error {
   constructor(message: typeof PUBLIC_ERRORS[number]) { super(message) }
@@ -270,13 +271,43 @@ export function validateRelayRequest(value: unknown): { txHex: string } {
   return { txHex: v.txHex }
 }
 
-/** Daemon /send_raw_transaction reply. Every failure flag is checked, not only status. */
+const REJECTION_FLAGS = ['low_mixin', 'invalid_input', 'invalid_output', 'too_big', 'overspend', 'too_few_outputs',
+  'sanity_check_failed', 'tx_extra_too_big', 'nonzero_unlock_time'] as const
+/** Daemon /send_raw_transaction reply. Only a reply with an explicit rejection flag is a rejection (nothing was sent);
+ *  every other unexpected reply is an unknown outcome. Re-sending a tx the node already has (pool or block) answers
+ *  status OK, not_relayed true, reason "Not relayed" (monerod 0.18.5.4, checked on regtest): unknown, then looked up. */
 export function checkRelayResponse(value: unknown): void {
   const v = value as any
-  if (!v || typeof v !== 'object') throw new PublicError('The daemon rejected the transaction')
+  if (!v || typeof v !== 'object' || Array.isArray(v)) throw new PublicError('The daemon reply could not be read')
   if (v.double_spend === true) throw new PublicError('The daemon rejected the transaction: double spend')
   if (v.fee_too_low === true) throw new PublicError('The daemon rejected the transaction: fee too low')
-  if (v.status !== 'OK' || ['low_mixin', 'invalid_input', 'invalid_output', 'too_big', 'overspend', 'too_few_outputs',
-      'sanity_check_failed', 'tx_extra_too_big', 'nonzero_unlock_time'].some(flag => v[flag] === true)) throw new PublicError('The daemon rejected the transaction')
-  if (v.not_relayed !== false) throw new PublicError('The daemon accepted the transaction but did not relay it')
+  if (REJECTION_FLAGS.some(flag => v[flag] === true)) throw new PublicError('The daemon rejected the transaction')
+  if (v.status !== 'OK' || v.not_relayed !== false) throw new PublicError('The daemon accepted the transaction but did not relay it')
+}
+
+export type MoneroTxLookup = { state: 'pool' | 'mined' | 'unknown'; height?: number; keyImages: Array<'unspent' | 'spent' | 'pool'> }
+export function validateTxLookupRequest(value: unknown): { txid: string; keyImages: string[] } {
+  const v = value as any
+  if (!exactKeys(v, ['txid', 'keyImages']) || typeof v.txid !== 'string' || !HEX32.test(v.txid) || !Array.isArray(v.keyImages) ||
+      !v.keyImages.length || v.keyImages.length > 4 || v.keyImages.some((k: unknown) => typeof k !== 'string' || !HEX32.test(k))) throw new Error('Invalid Monero transaction lookup')
+  return { txid: v.txid, keyImages: [...v.keyImages] }
+}
+/** /get_transactions + /is_key_image_spent replies: in the pool, in a block, or unknown; each input unspent, spent on chain or in the pool. */
+export function parseTxLookup(txid: string, transactions: any, spent: any, keyImageCount: number): MoneroTxLookup {
+  if (!transactions || transactions.status !== 'OK' || !spent || spent.status !== 'OK' || !Array.isArray(spent.spent_status) ||
+      spent.spent_status.length !== keyImageCount || spent.spent_status.some((s: unknown) => s !== 0 && s !== 1 && s !== 2)) throw new PublicError('The daemon reply could not be read')
+  const keyImages = spent.spent_status.map((s: number) => s === 0 ? 'unspent' : s === 1 ? 'spent' : 'pool') as MoneroTxLookup['keyImages']
+  const found = (Array.isArray(transactions.txs) ? transactions.txs : []).find((t: any) => t?.tx_hash === txid)
+  const missed = Array.isArray(transactions.missed_tx) && transactions.missed_tx.includes(txid)
+  if (found && found.in_pool === true) return { state: 'pool', keyImages }
+  if (found && found.in_pool === false && Number.isSafeInteger(found.block_height) && found.block_height > 0) return { state: 'mined', height: found.block_height, keyImages }
+  if (!found && missed) return { state: 'unknown', keyImages }
+  throw new PublicError('The daemon reply could not be read')
+}
+export function validateTxLookup(value: unknown): MoneroTxLookup {
+  const v = value as any
+  if (!v || !['pool', 'mined', 'unknown'].includes(v.state) || !Array.isArray(v.keyImages) || v.keyImages.length > 4 ||
+      v.keyImages.some((k: unknown) => !['unspent', 'spent', 'pool'].includes(k as string)) ||
+      (v.height !== undefined && (!Number.isSafeInteger(v.height) || v.height < 1))) throw new Error('Invalid Monero transaction lookup')
+  return { state: v.state, ...(v.height === undefined ? {} : { height: v.height }), keyImages: [...v.keyImages] }
 }
