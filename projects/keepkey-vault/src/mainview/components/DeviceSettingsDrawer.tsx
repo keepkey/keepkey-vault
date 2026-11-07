@@ -79,6 +79,21 @@ function Section({ title, category, color, docsHref, videoHref, children }: {
   </Box>
 }
 
+function FeatureIcon({ kind }: { kind: 'monero' | 'passwords' | 'offline' | 'multisig' | 'walletconnect' | 'emulator' }) {
+  const colors = { monero: '#F5841F', passwords: '#E9C46A', offline: '#E08C7B', multisig: '#4FB7A5', walletconnect: '#3B99FC', emulator: '#A855F7' }
+  const icons = {
+    monero: <><circle cx="12" cy="12" r="10" /><path d="M5 16V9l7 7 7-7v7" /></>,
+    passwords: <><circle cx="8" cy="15" r="5" /><path d="m11.5 11.5 9-9M16 7l3 3M18 5l3 3" /></>,
+    offline: <><path d="m2 2 20 20M8.5 16.5a5 5 0 0 1 7 0M2 8.82a15 15 0 0 1 4.17-2.65M10.66 5c4.01-.36 8.14.9 11.34 3.76M16.85 11.25a10 10 0 0 1 2.22 1.68M12 20h.01" /></>,
+    multisig: <><circle cx="9" cy="7" r="3" /><path d="M3 21v-3a6 6 0 0 1 12 0v3M17 4a3 3 0 0 1 0 6M18 13a5 5 0 0 1 3 5v3" /></>,
+    walletconnect: <><path d="M6.5 9.5c3-3 8-3 11 0M4 7c4.5-4.5 11.5-4.5 16 0" /><circle cx="12" cy="15" r="1.5" fill="currentColor" /></>,
+    emulator: <><rect x="4" y="2" width="16" height="20" rx="2" /><path d="M8 6h8M12 18h.01" /></>,
+  }
+  return <Flex data-feature-icon={kind} aria-hidden="true" align="center" justify="center" w="32px" h="32px" flexShrink="0" borderRadius="lg" bg={`${colors[kind]}1a`} color={colors[kind]}>
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">{icons[kind]}</svg>
+  </Flex>
+}
+
 // ── Toggle Switch ───────────────────────────────────────────────────
 
 function Toggle({ checked, onChange, disabled, label }: { checked: boolean; onChange: (v: boolean) => void; disabled?: boolean; label: string }) {
@@ -1753,15 +1768,15 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 					<Section title={uiText("Available features")} category="features" docsHref={DOCS_LINKS.settingsFeatureFlags}>
 						<VStack gap="4" align="stretch">
               <Flex justify="space-between" align="center" gap="4" pb="4" borderBottom="1px solid" borderColor="kk.border">
-                <Box><Text fontSize="md" fontWeight="500" color="kk.textPrimary">{uiText('Monero (XMR)')}</Text>
-                  <Text fontSize="sm" color="kk.textSecondary" mt="0.5">{appSettings.moneroAvailable === false ? uiText('Monero is unavailable in this build.') : !firmwareSupportsMonero(deviceState.firmwareVersion) ? `Needs KeepKey firmware ${MONERO_MIN_FIRMWARE} or newer.` : uiText('Add Monero to your wallet. Manage its node and scan history in Settings → Monero.')}</Text></Box>
+                <Flex align="center" gap="3" minW="0"><FeatureIcon kind="monero" /><Box><Text fontSize="md" fontWeight="500" color="kk.textPrimary">{uiText('Monero (XMR)')}</Text>
+                  <Text fontSize="sm" color="kk.textSecondary" mt="0.5">{appSettings.moneroAvailable === false ? uiText('Monero is unavailable in this build.') : !firmwareSupportsMonero(deviceState.firmwareVersion) ? `Needs KeepKey firmware ${MONERO_MIN_FIRMWARE} or newer.` : uiText('Add Monero to your wallet. Manage its node and scan history in Settings → Monero.')}</Text></Box></Flex>
                 <Toggle label={uiText('Monero (XMR)')} checked={appSettings.moneroEnabled} disabled={moneroBusy || appSettings.moneroAvailable === false} onChange={toggleMonero} />
               </Flex>
               {moneroError && <Text role="alert" fontSize="xs" color="kk.error">{moneroError}</Text>}
 
 							<Box>
 								<Flex justify="space-between" align="center" gap="3">
-									<Box><Text fontSize="md" color="kk.textPrimary" fontWeight="500">{uiText("Password manager")}</Text><Text fontSize="sm" color="kk.textSecondary" mt="0.5">{uiText("Experimental. Encrypted password storage, backups and guided rotation with KeepKey approval. Off by default.")}</Text></Box>
+									<Flex align="center" gap="3" minW="0"><FeatureIcon kind="passwords" /><Box><Text fontSize="md" color="kk.textPrimary" fontWeight="500">{uiText("Password manager")}</Text><Text fontSize="sm" color="kk.textSecondary" mt="0.5">{uiText("Experimental. Encrypted password storage, backups and guided rotation with KeepKey approval. Off by default.")}</Text></Box></Flex>
 									<Toggle label={uiText('Password manager')} checked={appSettings.passwordManagerEnabled === true} onChange={togglePasswords} disabled={togglingPasswords} />
 								</Flex>
 								{passwordsError && <Text role="alert" fontSize="xs" color="kk.error">{passwordsError}</Text>}
@@ -1769,16 +1784,7 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 							{/* Offline (airplane) mode toggle */}
 							<Flex justify="space-between" align="center">
 								<Flex align="center" gap="3">
-									<Flex align="center" justify="center" w="32px" h="32px" borderRadius="lg" bg="rgba(224,140,123,0.1)">
-										<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--rose)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-											<line x1="2" y1="2" x2="22" y2="22" />
-											<path d="M8.5 16.5a5 5 0 0 1 7 0" />
-											<path d="M2 8.82a15 15 0 0 1 4.17-2.65" />
-											<path d="M10.66 5c4.01-.36 8.14.9 11.34 3.76" />
-											<path d="M16.85 11.25a10 10 0 0 1 2.22 1.68" />
-											<line x1="12" y1="20" x2="12.01" y2="20" />
-										</svg>
-									</Flex>
+									<FeatureIcon kind="offline" />
 									<Box>
 										<Text fontSize="md" color="kk.textPrimary" fontWeight="500">{t("offlineMode", { defaultValue: "Offline mode" })}</Text>
 										<Text fontSize="sm" color="kk.textSecondary" mt="0.5">
@@ -1796,8 +1802,8 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 
 							<Box>
                                 <Flex justify="space-between" align="center" gap="3">
-                                    <Box><Text fontSize="md" color="kk.textPrimary" fontWeight="500">{uiText("Multisig")}</Text>
-                                    <Text fontSize="sm" color="kk.textSecondary" mt="0.5">{uiText("Experimental. Safe multisig accounts on EVM chains and Vaults, plus Bitcoin co-signing for Sparrow or Electrum PSBTs. Off by default. Completed transactions can still be broadcast with this off.")}</Text></Box>
+                                    <Flex align="center" gap="3" minW="0"><FeatureIcon kind="multisig" /><Box><Text fontSize="md" color="kk.textPrimary" fontWeight="500">{uiText("Multisig")}</Text>
+                                    <Text fontSize="sm" color="kk.textSecondary" mt="0.5">{uiText("Experimental. Safe multisig accounts on EVM chains and Vaults, plus Bitcoin co-signing for Sparrow or Electrum PSBTs. Off by default. Completed transactions can still be broadcast with this off.")}</Text></Box></Flex>
                                     <Toggle label={uiText("Multisig")} checked={appSettings.btcMultisigEnabled===true} onChange={toggleMultisig} disabled={togglingMultisig}/>
                                 </Flex>
                                 {multisigError && <Text role="alert" fontSize="xs" color="kk.error" mt="2">{multisigError}</Text>}
@@ -1807,13 +1813,7 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 							    setting must not re-expose it on Bitcoin-only firmware. */}
 							{!isBitcoinOnlyVariant(deviceState.firmwareVariant) && <Flex justify="space-between" align="center">
 								<Flex align="center" gap="3">
-									<Flex align="center" justify="center" w="32px" h="32px" borderRadius="lg" bg="rgba(59,153,252,0.1)">
-										<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#3B99FC" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-											<path d="M6.5 9.5c3-3 8-3 11 0" />
-											<path d="M4 7c4.5-4.5 11.5-4.5 16 0" />
-											<circle cx="12" cy="15" r="1.5" fill="#3B99FC" />
-										</svg>
-									</Flex>
+									<FeatureIcon kind="walletconnect" />
 									<Box>
 										<Text fontSize="md" color="kk.textPrimary" fontWeight="500">{t("walletConnectFeature")}</Text>
 										<Text fontSize="sm" color="kk.textSecondary" mt="0.5">
@@ -1838,13 +1838,7 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 								<VStack align="stretch" gap="2">
 									<Flex justify="space-between" align="center">
 										<Flex align="center" gap="3">
-											<Flex align="center" justify="center" w="32px" h="32px" borderRadius="lg" bg="rgba(168,85,247,0.1)">
-												<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#A855F7" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-													<rect x="4" y="2" width="16" height="20" rx="2" />
-													<line x1="8" y1="6" x2="16" y2="6" />
-													<line x1="12" y1="18" x2="12.01" y2="18" />
-												</svg>
-											</Flex>
+											<FeatureIcon kind="emulator" />
 											<Box>
 												<Text fontSize="md" color="kk.textPrimary" fontWeight="500">{uiText("Emulator")}</Text>
 												<Text fontSize="sm" color="kk.textSecondary" mt="0.5">{uiText("Run a KeepKey firmware emulator locally for development and testing.")}</Text>
