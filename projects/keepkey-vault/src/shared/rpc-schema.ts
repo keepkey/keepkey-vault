@@ -552,8 +552,8 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       /** Wipes the active flash and loads a freshly generated mnemonic. */
       emulatorCreateWallet: { params: { wordCount?: 12 | 18 | 24 }; response: { seedDisplayed: true } }
       emulatorGetMnemonic: { params: void; response: string | null }
-      /** Emulator-only: read the saved mnemonic for the active flash, for backup display. */
-      emulatorRevealSeed: { params: void; response: { mnemonic: string; flashName: string } }
+      /** Emulator-only: display live recovery words in its window; no words in the RPC reply. */
+      emulatorRevealSeed: { params: void; response: { seedDisplayed: true; flashName: string } }
       /** Emulator-only: capture the current OLED frame as a PNG on disk (visual proof for automated test drivers). */
       emulatorCaptureFrame: { params: { label?: string; dir?: string } | void; response: { path: string } }
 

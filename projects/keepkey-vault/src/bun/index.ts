@@ -10800,21 +10800,12 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				if (!emulatorEnabled) return null
 				return await engine.getEmulatorMnemonic()
 			},
-			// Emulator-only "view seed for backup" — reads the persisted (encrypted)
-			// mnemonic for the active flash rather than a live DebugLink read, since
-			// DebugLink can hang on the dylib path (see raceVerifyMnemonic) and the
-			// saved mnemonic IS the backup of record. Hard-gated on engine.isEmulator
-			// (not just the emulatorEnabled feature flag) so this can never be reached
-			// against real hardware regardless of what the UI does.
-			emulatorRevealSeed: async () => {
-				if (!engine.isEmulator) throw new Error('Seed reveal is emulator-only')
-				const { loadMnemonic } = await import('./emulator-keychain')
-				const { getActiveFlashName } = await import('./emulator')
-				const flashName = getActiveFlashName()
-				const mnemonic = loadMnemonic(flashName)
-				if (!mnemonic) throw new Error('No saved seed for this emulator wallet')
-				return { mnemonic, flashName }
-			},
+            // Recovery words go directly to the emulator window, never back to the main UI.
+            emulatorRevealSeed: async () => {
+                const { revealEmulatorSeed } = await import('./emulator-seed-runtime')
+                return revealEmulatorSeed(engine, () => emulatorEnabled)
+            },
+
 			// Grabs whatever is currently on the emulator's OLED and writes it to
 			// disk as a PNG — visual proof for an automated test driver to attach
 			// alongside a txid (e.g. the mainnet test suite). Defaults to

@@ -380,7 +380,8 @@ function sendToWindow(messageName: string, payload: any): boolean {
 
 // ── Seed word display ───────────────────────────────────────────────────
 
-export async function displaySeedWords(mnemonic: string): Promise<void> {
+export async function displaySeedWords(mnemonic: string, flashName?: string): Promise<void> {
+  if (pendingSeedAck) throw new Error('An emulator recovery phrase is already displayed')
   const words = mnemonic.trim().split(/\s+/)
 
   if (!emuWindow) {
@@ -407,6 +408,7 @@ export async function displaySeedWords(mnemonic: string): Promise<void> {
 
   try { emuWindow!.focus() } catch {}
 
+  if (pendingSeedAck) throw new Error('An emulator recovery phrase is already displayed')
   return new Promise<void>((resolve, reject) => {
     pendingSeedAck = { resolve, reject }
 
@@ -414,7 +416,7 @@ export async function displaySeedWords(mnemonic: string): Promise<void> {
     // not ready, executeJavascript threw). Without this check, the pending
     // ack stays installed and the RPC hangs forever waiting for an "I've
     // recorded my words" click on a webview that never got the request.
-    const delivered = sendToWindow('seed-display', { words }) && sendToWindow('emu-state', { state: 'seed-display' })
+    const delivered = sendToWindow('seed-display', { words, flashName }) && sendToWindow('emu-state', { state: 'seed-display' })
     if (!delivered) {
       pendingSeedAck = null
       reject(new Error('Failed to deliver seed display to emulator webview'))
@@ -1043,6 +1045,7 @@ function buildEmulatorHTML(bridgePort: number): string {
 
   function onSeedDisplay(data) {
     var words = data.words || [];
+    document.querySelector('.seed-title').textContent = data.flashName ? 'Recovery phrase — ' + data.flashName : 'Recovery Phrase';
     seedGrid.innerHTML = '';
     words.forEach(function(word, i) {
       var el = document.createElement('div');
