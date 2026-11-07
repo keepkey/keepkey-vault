@@ -1,0 +1,33 @@
+{
+  "date": "2026-11-07",
+  "implementation": "81b0e945f",
+  "featureIcons": "0f6d56064",
+  "affectedTests": {
+    "passed": 201,
+    "failed": 0,
+    "files": 12
+  },
+  "startupRegressionReproducedWithoutFix": true,
+  "publicFixtureStartupSeconds": 2.5,
+  "browser": {
+    "categories": 8,
+    "independentLiveFlags": true,
+    "narrowWindow": true,
+    "pageErrors": []
+  },
+  "native": {
+    "physicalViewConsentCompleted": true,
+    "watchWalletOpened": true,
+    "walletState": "scanning",
+    "scanStartBlock": 3799129,
+    "passwordManagerEnabled": false,
+    "liveApiBoundaryChecks": 8
+  },
+  "typecheck": {
+    "unchangedIntegratedDiagnostics": 806,
+    "currentDiagnostics": 806,
+    "newNormalizedMessages": 0
+  },
+  "paymentAttempted": false,
+  "iconsLoadedOnNextLaunch": true
+}
