@@ -199,6 +199,20 @@ for (const [name, status] of [['rowNotConnected', notConnected], ['rowReady', co
   await unmount()
 }
 {
+  const client = fakeClient(connected({ unrelayedTxid: 'cd'.repeat(32), sendBlocked: 'unrelayed',
+    unrelayedCheck: { state: 'unknown', discardable: true, checkedAt: new Date().toISOString(), relayNode: 'https://a.example', checkedNode: 'https://b.example' } }))
+  const { container, unmount } = await render(React.createElement(Host, { Section: MoneroSendSection, client }))
+  out.otherNode = text(q(container, '[data-monero-other-node]'))
+  await unmount()
+  const same = await render(React.createElement(Host, { Section: MoneroSendSection, client: fakeClient(connected({ unrelayedTxid: 'cd'.repeat(32), sendBlocked: 'unrelayed',
+    unrelayedCheck: { state: 'unknown', discardable: true, checkedAt: new Date().toISOString(), relayNode: 'https://a.example', checkedNode: 'https://a.example' } })) }))
+  out.sameNode = !!q(same.container, '[data-monero-other-node]')
+  await same.unmount()
+  const guarded = await render(React.createElement(Host, { Section: MoneroSendSection, client: fakeClient(connected({ canSend: true, sendBlocked: undefined, keyImagesSynced: true, spendStateKnown: true, discardedTxid: 'ef'.repeat(32) })) }))
+  out.discardedNote = text(q(guarded.container, '[data-monero-discarded]'))
+  await guarded.unmount()
+}
+{
   const { container, unmount } = await render(React.createElement(Host, { Section: MoneroSendSection, client: fakeClient(connected({ sendBlocked: 'emulator' })) }))
   out.receiveOnly = text(q(container, '[data-monero-send-blocked]'))
   await unmount()

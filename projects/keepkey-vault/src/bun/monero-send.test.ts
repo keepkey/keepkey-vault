@@ -800,6 +800,18 @@ describe('review fixes: node silence, Max fee drift, stale baseline', () => {
     b.wallet.balanceAtomic = '8000000000000'
     expect((await b.api.getStatus()).keyImagesStale).toBe(true)
   })
+
+  test('with more than 64 outputs the cumulative import total is used once, not added per session', async () => {
+    const b = bridge()
+    const base = validateOutputs(structuredClone(fixtures.cases.base.adapterOutputs))[0]
+    b.setOutputs(() => Array.from({ length: 130 }, (_, i) => i === 0 ? base : { ...base, transferIndex: i, outKey: hex(keccak_256(new Uint8Array([i, 2]))), globalIndex: String(2000 + i) }))
+    await b.api.connect(); await b.api.syncKeyImages()
+    // wallet2 answers every session with the running total (7 XMR); summing would make 21 XMR the baseline.
+    expect(b.calls.imports).toHaveLength(3)
+    expect((await b.api.getStatus()).keyImagesStale).toBeUndefined()
+    b.wallet.balanceAtomic = '8000000000000'
+    expect((await b.api.getStatus()).keyImagesStale).toBe(true)
+  })
 })
 
 describe('C3: a pending broadcast is settled by asking the node, never left blocking forever', () => {
@@ -877,5 +889,76 @@ describe('C3: a pending broadcast is settled by asking the node, never left bloc
     expect(await again.b.api.discardPending({ confirm: true })).toEqual({ outcome: 'discarded', txid: referenceHash('base') })
     expect((await again.b.api.getStatus()).sendBlocked).not.toBe('unrelayed')
     expect(signs(again.b)).toBe(1)
+  })
+})
+
+describe('discard guard: a discarded tx that another node could still mine', () => {
+  const base = () => validateOutputs(structuredClone(fixtures.cases.base.adapterOutputs))[0]
+  const otherOutKey = hex(keccak_256(new Uint8Array([7, 7])))
+  /** Two owned 7 XMR outputs; the discarded fixture tx spent the first. `useOther` builds plans from the second. */
+  async function discarded(pendingStore?: MoneroPendingStore) {
+    const b = bridge({ pendingStore })
+    b.setOutputs(() => [base(), { ...base(), transferIndex: 1, outKey: otherOutKey, globalIndex: '4242' }])
+    b.setDraft(walletDraft)
+    await b.api.connect(); await b.api.syncKeyImages()
+    b.setRelayError(new Error('ETIMEDOUT'))
+    const review = await b.api.prepareSend({ address: RECIPIENT, amountAtomic: '2000000000000' })
+    await expect(b.api.send({ prepareId: review.prepareId })).rejects.toThrow('broadcast result is unknown')
+    b.setLookup({ state: 'unknown', keyImages: ['unspent'] })
+    expect((await b.api.discardPending({ confirm: true })).outcome).toBe('discarded')
+    b.setRelayError(null)
+    await b.api.syncKeyImages()
+    return b
+  }
+  const useOther = (b: ReturnType<typeof bridge>) => b.setDraft(input => { const d = walletDraft(input); d.plan.inputs[0].ring[d.plan.inputs[0].realMember].publicKey = otherOutKey; return d })
+
+  test('the record names the node the relay went to; a check through another node says which answered', async () => {
+    const b = await ready()
+    b.setRelayError(new Error('ETIMEDOUT'))
+    const review = await b.api.prepareSend({ address: RECIPIENT, amountAtomic: '2000000000000' })
+    await expect(b.api.send({ prepareId: review.prepareId })).rejects.toThrow('broadcast result is unknown')
+    expect((await b.api.getStatus()).unrelayedCheck).toMatchObject({ relayNode: 'http://127.0.0.1:18081', checkedNode: 'http://127.0.0.1:18081' })
+    b.config.daemonUrl = 'http://localhost:18089'
+    await b.api.connect()
+    expect((await b.api.getStatus()).unrelayedCheck).toMatchObject({ relayNode: 'http://127.0.0.1:18081', checkedNode: 'http://localhost:18089' })
+  })
+
+  test('after a discard, a send using other inputs is refused; one reusing an input of the discarded tx is allowed', async () => {
+    const b = await discarded()
+    expect((await b.api.getStatus()).discardedTxid).toBe(referenceHash('base'))
+    useOther(b)
+    await expect(b.api.prepareSend({ address: RECIPIENT, amountAtomic: '2000000000000' })).rejects.toThrow('could still be mined from another node')
+    b.setDraft(walletDraft)
+    expect((await b.api.prepareSend({ address: RECIPIENT, amountAtomic: '2000000000000' })).recipient).toBe(RECIPIENT)
+  })
+
+  test('once its inputs are spent on chain the guard lifts; if the node now has the tx, the user is told it was sent', async () => {
+    const b = await discarded()
+    useOther(b)
+    b.setLookup({ state: 'unknown', keyImages: ['spent'] })
+    expect((await b.api.prepareSend({ address: RECIPIENT, amountAtomic: '2000000000000' })).recipient).toBe(RECIPIENT)
+    expect((await b.api.getStatus()).discardedTxid).toBeUndefined()
+    const again = await discarded()
+    again.setLookup({ state: 'mined', height: 99, keyImages: ['spent'] })
+    await expect(again.api.prepareSend({ address: RECIPIENT, amountAtomic: '2000000000000' })).rejects.toThrow('was sent after all: the node has it in a block')
+    expect((await again.api.getStatus()).discardedTxid).toBeUndefined()
+  })
+
+  test('the node unreachable: nothing new is built while a discarded tx is unresolved', async () => {
+    const b = await discarded()
+    b.setLookup(new Error('The Monero daemon is unavailable'))
+    await expect(b.api.prepareSend({ address: RECIPIENT, amountAtomic: '2000000000000' })).rejects.toThrow('could not be checked with the node')
+    expect(b.calls.transfers.filter(t => t.amountAtomic === '2000000000000')).toHaveLength(1)
+  })
+
+  test('the guard survives a restart', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'kk-monero-pending-'))
+    await discarded(createFilePendingStore(dir))
+    expect(statSync(join(dir, 'monero-discarded-broadcast.json')).mode & 0o777).toBe(0o600)
+    const next = bridge({ pendingStore: createFilePendingStore(dir) })
+    next.setOutputs(() => [base(), { ...base(), transferIndex: 1, outKey: otherOutKey, globalIndex: '4242' }])
+    await next.api.connect(); await next.api.syncKeyImages()
+    useOther(next)
+    await expect(next.api.prepareSend({ address: RECIPIENT, amountAtomic: '2000000000000' })).rejects.toThrow('could still be mined from another node')
   })
 })

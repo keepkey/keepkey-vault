@@ -614,7 +614,9 @@ export interface MoneroStatus {
   /** Key images were synced, but outputs arrived since: sync again before sending. */
   keyImagesStale?: boolean
   /** The node's last answer about the pending tx: it does not have it; discardable only if its inputs are unspent. */
-  unrelayedCheck?: { state: 'unknown'; discardable: boolean; checkedAt: string }
+  unrelayedCheck?: { state: 'unknown'; discardable: boolean; checkedAt: string; relayNode?: string; checkedNode: string }
+  /** A discarded tx that another node could still mine: the next send must reuse one of its inputs. */
+  discardedTxid?: string
   spendStateKnown: boolean
 }
 

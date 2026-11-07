@@ -309,12 +309,17 @@ export function MoneroSendSection({ monero, client }: { monero: MoneroStatusStat
 							? uiText("The node checked at {{time}}: it does not have this transaction, and its inputs are still unspent.", { time: new Date(wallet.unrelayedCheck.checkedAt).toLocaleTimeString(getNumberLocale()) })
 							: uiText("The node does not have this transaction, but its inputs are spent in the node's pool by another one. Wait for that to settle.")}</Text>
 					)}
+					{wallet.unrelayedCheck?.state === "unknown" && wallet.unrelayedCheck.relayNode !== wallet.unrelayedCheck.checkedNode && (
+						<Text data-monero-other-node="" mt="1" fontSize="11px" color="var(--gold)">{wallet.unrelayedCheck.relayNode
+							? uiText("It was sent to {{relay}}, but {{checked}} answered this check. A node that never received it cannot tell whether it is waiting elsewhere.", { relay: wallet.unrelayedCheck.relayNode, checked: wallet.unrelayedCheck.checkedNode })
+							: uiText("The node it was sent to was not recorded, so {{checked}} may never have received it.", { checked: wallet.unrelayedCheck.checkedNode })}</Text>
+					)}
 					{wallet.unrelayedCheck?.discardable && !confirmDiscard && (
 						<Button data-monero-discard="" mt="2" ml="2" size="xs" variant="ghost" onClick={() => setConfirmDiscard(true)} disabled={!!busy} className="electrobun-webkit-app-region-no-drag">{uiText("Discard this transaction…")}</Button>
 					)}
 					{confirmDiscard && (
 						<Box data-monero-discard-confirm="" mt="2" role="alertdialog">
-							<Text fontSize="12px" color="var(--rose)">{uiText("Discard only if you are sure it was never broadcast. The node is asked again first; if it has the transaction, nothing is discarded. If the transaction is still waiting on another node and you send again, you could pay twice.")}</Text>
+							<Text fontSize="12px" color="var(--rose)">{uiText("Discard only if you are sure it was never broadcast. The node is asked again first; if it has the transaction, nothing is discarded. Because another node could still mine it, the next send from this wallet must reuse one of its inputs until they are spent, so the two cannot both be paid.")}</Text>
 							<Flex gap="2" mt="2">
 								<Button data-monero-discard-yes="" size="xs" colorPalette="red" onClick={() => { void discard() }} disabled={!!busy}>{busy === "discard" ? <Spinner size="xs" /> : null}{uiText("Discard it")}</Button>
 								<Button size="xs" variant="ghost" onClick={() => setConfirmDiscard(false)} disabled={!!busy}>{uiText("Keep it")}</Button>
@@ -337,6 +342,7 @@ export function MoneroSendSection({ monero, client }: { monero: MoneroStatusStat
 						</Button>
 					</Flex>
 					<Text fontSize="11px" color="var(--text-3)" mb="3">{uiText("Syncing key images shares them with your Monero node, which lets that node link your spends. Use your own node for full privacy. KeepKey asks once per 64 received outputs.")}</Text>
+					{wallet.discardedTxid && <Text data-monero-discarded="" fontSize="12px" color="var(--gold)" mb="2">{uiText("You discarded transaction {{txid}}. Until its inputs are spent, a new send must reuse one of them (Max does), so both cannot be mined.", { txid: `${wallet.discardedTxid.slice(0, 12)}…` })}</Text>}
 					{wallet.sendBlocked === "syncing" && <Text data-monero-send-blocked="syncing" fontSize="13px" color="var(--text-2)">{uiText("Wait for the wallet to finish scanning before sending.")}</Text>}
 					{wallet.sendBlocked === "key-images" && <Text data-monero-send-blocked="key-images" fontSize="13px" color="var(--text-2)">{wallet.keyImagesStale
 						? uiText("New XMR arrived since the last key-image sync. Sync key images again so the wallet knows which outputs are spent.")

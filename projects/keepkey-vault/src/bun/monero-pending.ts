@@ -11,10 +11,23 @@ export interface MoneroPendingBroadcast {
   txid: string
   txHex: string
   createdAt: string
+  /** The node the bytes were relayed to (a later check against another node is said to be one). */
+  node?: string
+}
+/** A pending tx the user discarded. Until its inputs are spent, the wallet's next send must reuse one of
+ *  them, so the discarded tx (which another node may still mine) and the new one cannot both land. */
+export interface MoneroDiscardGuard {
+  wallet: string
+  txid: string
+  keyImages: string[]
+  node?: string
+  discardedAt: string
 }
 export interface MoneroPendingStore {
   load(): MoneroPendingBroadcast[]
   save(records: MoneroPendingBroadcast[]): void
+  loadGuards?(): MoneroDiscardGuard[]
+  saveGuards?(guards: MoneroDiscardGuard[]): void
 }
 
 const MAX_RECORDS = 16
@@ -25,17 +38,44 @@ export function validPendingBroadcast(value: unknown): MoneroPendingBroadcast | 
   const v = value as MoneroPendingBroadcast
   if (!v || typeof v !== 'object' || typeof v.wallet !== 'string' || !WALLET.test(v.wallet) || typeof v.txid !== 'string' ||
       !/^[0-9a-f]{64}$/.test(v.txid) || typeof v.txHex !== 'string' || !/^(?:[0-9a-f]{2}){1,16384}$/.test(v.txHex) ||
-      typeof v.createdAt !== 'string' || !Number.isFinite(Date.parse(v.createdAt))) return null
+      typeof v.createdAt !== 'string' || !Number.isFinite(Date.parse(v.createdAt)) || (v.node !== undefined && !validNode(v.node))) return null
   try {
     if (parseSignedTransaction(Uint8Array.from(Buffer.from(v.txHex, 'hex'))).hash !== v.txid) return null
   } catch { return null }
-  return { wallet: v.wallet, txid: v.txid, txHex: v.txHex, createdAt: v.createdAt }
+  return { wallet: v.wallet, txid: v.txid, txHex: v.txHex, createdAt: v.createdAt, ...(v.node === undefined ? {} : { node: v.node }) }
+}
+const validNode = (node: unknown) => typeof node === 'string' && node.length <= 2048 && /^https?:\/\//.test(node)
+export function validDiscardGuard(value: unknown): MoneroDiscardGuard | null {
+  const v = value as MoneroDiscardGuard
+  if (!v || typeof v !== 'object' || typeof v.wallet !== 'string' || !WALLET.test(v.wallet) || typeof v.txid !== 'string' || !/^[0-9a-f]{64}$/.test(v.txid) ||
+      !Array.isArray(v.keyImages) || !v.keyImages.length || v.keyImages.length > 4 || v.keyImages.some(k => typeof k !== 'string' || !/^[0-9a-f]{64}$/.test(k)) ||
+      typeof v.discardedAt !== 'string' || !Number.isFinite(Date.parse(v.discardedAt)) || (v.node !== undefined && !validNode(v.node))) return null
+  return { wallet: v.wallet, txid: v.txid, keyImages: [...v.keyImages], discardedAt: v.discardedAt, ...(v.node === undefined ? {} : { node: v.node }) }
 }
 
 /** One owner-only JSON file (directory 0700, file 0600), replaced atomically so a crash never leaves half a record. */
 export function createFilePendingStore(directory: string): MoneroPendingStore {
-  const file = join(directory, 'monero-pending-broadcast.json')
+  const file = join(directory, 'monero-pending-broadcast.json'), guardFile = join(directory, 'monero-discarded-broadcast.json')
+  const write = (target: string, value: unknown) => {
+    mkdirSync(directory, { recursive: true, mode: 0o700 })
+    chmodSync(directory, 0o700)
+    const temporary = `${target}.${process.pid}.tmp`
+    writeFileSync(temporary, JSON.stringify(value), { mode: 0o600 })
+    chmodSync(temporary, 0o600)
+    renameSync(temporary, target)
+  }
   return {
+    loadGuards() {
+      if (!existsSync(guardFile)) return []
+      try {
+        const parsed = JSON.parse(readFileSync(guardFile, 'utf8'))
+        return (Array.isArray(parsed?.guards) ? parsed.guards.slice(-MAX_RECORDS) : []).map(validDiscardGuard).filter((g: MoneroDiscardGuard | null): g is MoneroDiscardGuard => !!g)
+      } catch { console.warn('[monero] The discarded-broadcast file is unreadable'); return [] }
+    },
+    saveGuards(guards) {
+      if (!guards.length) { if (existsSync(guardFile)) unlinkSync(guardFile); return }
+      write(guardFile, { version: 1, guards: guards.slice(-MAX_RECORDS) })
+    },
     load() {
       if (!existsSync(file)) return []
       try {
@@ -51,12 +91,7 @@ export function createFilePendingStore(directory: string): MoneroPendingStore {
     },
     save(records) {
       if (!records.length) { if (existsSync(file)) unlinkSync(file); return }
-      mkdirSync(directory, { recursive: true, mode: 0o700 })
-      chmodSync(directory, 0o700)
-      const temporary = `${file}.${process.pid}.tmp`
-      writeFileSync(temporary, JSON.stringify({ version: 1, records: records.slice(-MAX_RECORDS) }), { mode: 0o600 })
-      chmodSync(temporary, 0o600)
-      renameSync(temporary, file)
+      write(file, { version: 1, records: records.slice(-MAX_RECORDS) })
     },
   }
 }

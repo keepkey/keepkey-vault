@@ -108,11 +108,17 @@ describe('C3: Send', () => {
   test('discard is offered only after the node says unknown with unspent inputs, and asks first', () => {
     expect(ui.checkText).toContain('it does not have this transaction, and its inputs are still unspent')
     expect(ui.discardCallsBeforeConfirm).toBe(0)
-    expect(ui.discardConfirmText).toContain('you could pay twice')
+    expect(ui.discardConfirmText).toContain('Discard only if you are sure it was never broadcast')
     expect(ui.discardCalls).toBe(1)
     expect(ui.discardNotice).toContain('Discarded')
     expect(ui.notDiscardable.button).toBe(false)
     expect(ui.notDiscardable.text).toContain('Wait for that to settle')
+    expect(ui.discardConfirmText).toContain('the next send from this wallet must reuse one of its inputs')
+  })
+  test('a check answered by a different node than the one the tx went to says so; a discarded tx is named', () => {
+    expect(ui.otherNode).toContain('It was sent to https://a.example, but https://b.example answered this check')
+    expect(ui.sameNode).toBe(false)
+    expect(ui.discardedNote).toContain('You discarded transaction efefefefefef…')
   })
   test('without the signing emulator, Send says receive-only instead of a dead form', () => {
     expect(ui.receiveOnly).toContain('Receiving works.')
