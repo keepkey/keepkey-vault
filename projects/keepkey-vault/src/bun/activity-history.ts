@@ -237,7 +237,7 @@ function selectChains(
   return chains
     .filter(chain => requested.size === 0 || requested.has(chain.id) || requested.has(chain.symbol))
     .filter(chain => options.includeHidden || !chain.hidden)
-    .filter(chain => chain.chainFamily !== 'zcash-shielded')
+    .filter(chain => chain.chainFamily !== 'zcash-shielded' && chain.chainFamily !== 'monero')
     .filter(chain => isChainSupported(chain, firmwareVersion))
 }
 

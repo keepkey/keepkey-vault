@@ -21,7 +21,7 @@ Release CI prepares and builds the sidecar before packaging. CI sets `KEEPKEY_RE
 
 ## Vault and the emulator
 
-Enable Monero in Settings, then open the Monero tab or the XMR entry in the wallet chain list. Choose the daemon and earliest restore height in Settings before connecting. Zero scans the entire chain; choosing a height after an older payment can omit it.
+Enable Monero in Settings, then open Monero (XMR) in the wallet chain list: it uses the standard asset page, with Connect, Receive and Send inside it. Connecting asks where the scan starts (a new wallet defaults to about a week before the node's tip; zero scans the entire chain, and a height after an older payment omits it) and names the node; choose your own node in Settings.
 
 The current firmware counterpart is [keepkey-firmware PR 1036](https://github.com/BitHighlander/keepkey-firmware/pull/1036). Its receive-only native emulator build implements address, private-view-key consent, and experimental key-image commands without the native Core signing dependency. The ordinary emulator and production device builds do not gain these commands.
 
@@ -35,7 +35,7 @@ The script requires the checked-in `monero-emulator-bundle/manifest.json` byte h
 
 ## Scope and validation
 
-The panel shows incoming payments, received/unlocked/locked amounts, confirmations, the receive QR, and address review. A view-only wallet cannot establish which outputs were spent elsewhere, so its received balance is not a verified spendable balance until key images are synced. Fiat portfolio totals do not include this separate receive preview.
+The asset page shows incoming payments, received/unlocked/locked amounts, confirmations, the receive QR, and address review. A view-only wallet cannot establish which outputs were spent elsewhere, so its received balance is not a verified spendable balance until key images are synced. Fiat portfolio totals do not include this separate receive preview.
 
 ## Research send (signing emulator only)
 

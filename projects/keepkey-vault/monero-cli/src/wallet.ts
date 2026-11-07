@@ -4,11 +4,19 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { connect } from 'node:tls'
 import { DigestWalletRpc, RpcFailure } from './digest'
-import { MAX_KEY_IMAGE_OUTPUTS, PublicError, atomic, checkRelayResponse, unsigned, validateConfiguration, validateKeyImageImport, validateOutputs,
+import { PublicError, WATCH_NODE_UNREACHABLE, WATCH_SCANNING, atomic, checkRelayResponse, parseTxLookup, unsigned, validateTxLookupRequest, type MoneroTxLookup, validateConfiguration, validateKeyImageImport, validateOutputs,
   validatePlan, validateRelayRequest, validateTransferRequest, type MoneroWalletStatus } from './protocol'
 import { runHostAdapter } from './tools'
 
 const delay = (milliseconds: number) => new Promise(resolve => setTimeout(resolve, milliseconds))
+
+/** How recently the node itself must have answered for a slow wallet refresh to count as scanning. */
+export const NODE_ANSWER_WINDOW_MS = 45_000
+/** A refresh that ran out of time while the node itself still answers is a scan in progress (wallet-rpc keeps
+ *  going); a timeout with a silent node, or any other failure, is the node being unreachable. */
+export function refreshFailure(error: unknown, nodeAnsweredRecently: boolean): string {
+  return error instanceof Error && error.message === 'Monero wallet RPC timed out' && nodeAnsweredRecently ? WATCH_SCANNING : WATCH_NODE_UNREACHABLE
+}
 
 // Dev/E2E only: an offline loopback regtest daemon ("fakechain"). Mainnet rules are unchanged otherwise.
 const LOCAL_REGTEST = process.env.KEEPKEY_MONERO_LOCAL_REGTEST === '1'
@@ -20,7 +28,7 @@ export async function verifyDaemon(origin: string, minimumHeight: number): Promi
   const fingerprint = url.protocol === 'http:' ? undefined : await new Promise<string>((resolve, reject) => {
     const socket = connect({ host: url.hostname, port: Number(url.port || 443), servername: url.hostname, rejectUnauthorized: true })
     socket.setTimeout(15000, () => socket.destroy(new Error('timeout')))
-    socket.once('error', () => reject(new Error('Cannot verify the Monero daemon TLS identity')))
+    socket.once('error', () => reject(new PublicError('The Monero daemon is unavailable')))
     socket.once('secureConnect', () => {
       const certificate = socket.getPeerCertificate().raw
       if (!socket.authorized || !certificate) { socket.destroy(); reject(new Error('Cannot verify the Monero daemon TLS identity')); return }
@@ -28,11 +36,14 @@ export async function verifyDaemon(origin: string, minimumHeight: number): Promi
       socket.end(); resolve(pin)
     })
   })
-  const response = await fetch(`${url.origin}/json_rpc`, { method: 'POST',
-    headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: 'probe', method: 'get_info' }),
-    signal: AbortSignal.timeout(20000), redirect: 'error' })
-  if (!response.ok) throw new Error('The Monero daemon is unavailable')
-  const reader = response.body?.getReader(); if (!reader) throw new Error('The Monero daemon is unavailable')
+  let response: Response
+  try {
+    response = await fetch(`${url.origin}/json_rpc`, { method: 'POST',
+      headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: 'probe', method: 'get_info' }),
+      signal: AbortSignal.timeout(20000), redirect: 'error' })
+  } catch { throw new PublicError('The Monero daemon is unavailable') }
+  if (!response.ok) throw new PublicError('The Monero daemon is unavailable')
+  const reader = response.body?.getReader(); if (!reader) throw new PublicError('The Monero daemon is unavailable')
   const chunks: Uint8Array[] = []; let size = 0
   while (true) {
     const { done, value } = await reader.read(); if (done) break
@@ -44,7 +55,7 @@ export async function verifyDaemon(origin: string, minimumHeight: number): Promi
   const regtest = LOCAL_REGTEST && loopback && url.protocol === 'http:' && info?.nettype === 'fakechain' && info.offline === true
   if (!info || (!regtest && info.nettype !== 'mainnet') || info.testnet || info.stagenet ||
       (!info.synchronized && !(loopback && info.offline === true)) || unsigned(info.height) < minimumHeight) {
-    throw new Error('The selected Monero daemon is not synchronized on mainnet')
+    throw new PublicError('The selected Monero node is not synchronized on mainnet')
   }
   return { height: unsigned(info.height), fingerprint, synchronized: info.synchronized === true, regtest, offline: info.offline === true }
 }
@@ -80,6 +91,10 @@ interface Session {
   /** An offline daemon cannot broadcast; sending needs a live one (local regtest excepted). */
   sendable: boolean
   daemonFingerprint?: string
+  /** The node's own height (/get_height, pinned), polled independently of the wallet refresh: the scan target. */
+  daemonHeight: number
+  /** When the node last answered that poll. */
+  nodeAnsweredAt: number
   proc: ReturnType<typeof Bun.spawn>
   rpc: DigestWalletRpc
   status: MoneroWalletStatus
@@ -138,9 +153,10 @@ export class MoneroWatchService {
       catch (error) { if (!(error instanceof RpcFailure) || error.code !== -29) throw error }
       if (this.generation !== generation) throw new Error('Monero configuration was cancelled')
       const status: MoneroWalletStatus = { network: 'mainnet', address: config.address, balanceAtomic: '0', unlockedBalanceAtomic: '0',
-        walletHeight: 0, transactions: [], monitorReady: false, updatedAt: new Date().toISOString(), canSend: false }
+        walletHeight: 0, transactions: [], monitorReady: false, updatedAt: new Date().toISOString(), canSend: false, daemonHeight: daemon.height }
       const session: Session = { directory, address: config.address, restoreHeight: config.restoreHeight, daemonUrl: config.daemonUrl,
-        daemonSynchronized: daemon.synchronized, sendable: daemon.regtest || (daemon.synchronized && !daemon.offline), daemonFingerprint: daemon.fingerprint, proc, rpc, status }
+        daemonSynchronized: daemon.synchronized, sendable: daemon.regtest || (daemon.synchronized && !daemon.offline), daemonFingerprint: daemon.fingerprint,
+        daemonHeight: daemon.height, nodeAnsweredAt: Date.now(), proc, rpc, status }
       this.session = session
       this.pending = null
       void proc.exited.then(() => {
@@ -149,7 +165,7 @@ export class MoneroWatchService {
           session.rpc.close()
         }
       })
-      this.timer = setInterval(() => { void this.refresh().catch(() => {}) }, 15000)
+      this.timer = setInterval(() => { void this.probeNode(session); void this.refresh().catch(() => {}) }, 15000)
       void this.refresh().catch(() => {})
       return { ...status, transactions: [] }
     } catch (error) {
@@ -194,19 +210,41 @@ export class MoneroWatchService {
         }).sort((a, b) => b.height - a.height)
         const status: MoneroWalletStatus = { network: 'mainnet', address: session.address, balanceAtomic: balance, unlockedBalanceAtomic: unlocked,
           walletHeight: height, transactions: transactions.slice(0, 100), transactionsTruncated: transactions.length > 100,
-          monitorReady: session.daemonSynchronized && height >= session.restoreHeight, updatedAt: new Date().toISOString(), canSend: false }
+          monitorReady: session.daemonSynchronized && height >= session.restoreHeight, updatedAt: new Date().toISOString(), canSend: false,
+          daemonHeight: session.daemonHeight }
         if (this.session !== session) throw new Error('The Monero wallet changed during refresh')
         session.status = status
         return structuredClone(status)
-      } catch {
+      } catch (error) {
+        // wallet-rpc keeps scanning after our call times out; only a failed refresh means the node is unreachable.
         if (this.session === session) session.status = { ...session.status, monitorReady: false,
-          error: 'The Monero watch wallet is reconnecting or could not refresh' }
+          error: refreshFailure(error, Date.now() - session.nodeAnsweredAt <= NODE_ANSWER_WINDOW_MS) }
         throw new Error('The Monero watch wallet could not refresh')
       }
     })()
     this.refreshPromise = operation
     void operation.finally(() => { if (this.refreshPromise === operation) this.refreshPromise = null }).catch(() => {})
     return operation
+  }
+
+  /** The node's height straight from the node (its pinned TLS identity), on the same 15 s beat as the wallet
+   *  refresh but outside the wallet-RPC queue, so a node that stops answering shows even during a long scan. */
+  async probeNode(session: Session): Promise<void> {
+    try {
+      const height = await nodeHeight(session.daemonUrl, session.daemonFingerprint)
+      if (this.session !== session) return
+      session.daemonHeight = height; session.nodeAnsweredAt = Date.now()
+      session.status = { ...session.status, daemonHeight: height,
+        ...(session.status.error === WATCH_NODE_UNREACHABLE ? { error: undefined } : {}) }
+    } catch {
+      if (this.session === session) session.status = { ...session.status, monitorReady: false, error: WATCH_NODE_UNREACHABLE }
+    }
+  }
+
+  /** Is this transaction in the node's pool or a block, and are its inputs spent? (No wallet state is changed.) */
+  async lookup(input: unknown): Promise<MoneroTxLookup> {
+    const { txid, keyImages } = validateTxLookupRequest(input), session = this.current()
+    return lookupTransaction(session.daemonUrl, session.daemonFingerprint, txid, keyImages)
   }
 
   private current(): Session {
@@ -236,10 +274,11 @@ export class MoneroWatchService {
   async exportOutputs(): Promise<unknown> {
     const session = this.current()
     const reply = await this.adapterRequest(session, 'outputs', await this.exportedOutputs(session))
-    if (validateOutputs(reply).length > MAX_KEY_IMAGE_OUTPUTS) throw new PublicError('This preview syncs at most 64 wallet outputs')
+    validateOutputs(reply)
     return reply
   }
 
+  /** One device session's key images (at most 64), imported at their transfer offset. */
   async importKeyImages(input: unknown): Promise<{ height: number; spentAtomic: string; unspentAtomic: string }> {
     const { offset, signedKeyImages } = validateKeyImageImport(input), session = this.current()
     let result: any
@@ -308,9 +347,12 @@ export class MoneroWatchService {
   }
 }
 
-/** POST /send_raw_transaction. HTTPS must present the certificate pinned at configuration. */
-export async function relayRawTransaction(origin: string, fingerprint: string | undefined, txHex: string,
-  fetcher: (url: string, init: any) => Promise<Response> = fetch as any): Promise<void> {
+type Fetcher = (url: string, init: any) => Promise<Response>
+
+/** A bounded JSON POST to the configured daemon; HTTPS must present the certificate pinned at configuration.
+ *  No answer: "unavailable". An answer that is not bounded JSON: "could not be read" (never a rejection). */
+export async function daemonRequest(origin: string, fingerprint: string | undefined, path: string, body: unknown,
+  fetcher: Fetcher = fetch as any, timeoutMs = 60000): Promise<unknown> {
   const url = new URL(origin)
   const loopback = ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname)
   if (url.protocol === 'https:' ? !fingerprint : !(url.protocol === 'http:' && loopback)) throw new Error('Invalid Monero daemon origin')
@@ -318,18 +360,44 @@ export async function relayRawTransaction(origin: string, fingerprint: string | 
     certificate?.raw && createHash('sha256').update(certificate.raw).digest('hex') === fingerprint ? undefined : new Error('pin') } : undefined
   let response: Response
   try {
-    response = await fetcher(`${url.origin}/send_raw_transaction`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ tx_as_hex: txHex, do_not_relay: false }), signal: AbortSignal.timeout(60000), redirect: 'error', ...(tls ? { tls } : {}) })
+    response = await fetcher(`${url.origin}${path}`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body), signal: AbortSignal.timeout(timeoutMs), redirect: 'error', ...(tls ? { tls } : {}) })
   } catch { throw new PublicError('The Monero daemon is unavailable') }
   if (!response.ok) throw new PublicError('The Monero daemon is unavailable')
-  const reader = response.body?.getReader(), chunks: Uint8Array[] = []
+  const chunks: Uint8Array[] = []
   let size = 0
-  while (reader) {
-    const { done, value } = await reader.read(); if (done) break
-    if ((size += value.length) > 65536) { await reader.cancel(); throw new PublicError('The daemon rejected the transaction') }
-    chunks.push(value)
-  }
-  let value: unknown
-  try { value = JSON.parse(Buffer.concat(chunks).toString('utf8')) } catch { throw new PublicError('The daemon rejected the transaction') }
-  checkRelayResponse(value)
+  try {
+    const reader = response.body?.getReader()
+    while (reader) {
+      const { done, value } = await reader.read(); if (done) break
+      if ((size += value.length) > 65536) { await reader.cancel(); throw new PublicError('The daemon reply could not be read') }
+      chunks.push(value)
+    }
+  } catch (error) { throw error instanceof PublicError ? error : new PublicError('The daemon reply could not be read') }
+  try { return JSON.parse(Buffer.concat(chunks).toString('utf8')) } catch { throw new PublicError('The daemon reply could not be read') }
+}
+
+/** POST /send_raw_transaction once. Only explicit rejection flags reject; anything else unexpected is unknown. */
+export async function relayRawTransaction(origin: string, fingerprint: string | undefined, txHex: string, fetcher: Fetcher = fetch as any): Promise<void> {
+  checkRelayResponse(await daemonRequest(origin, fingerprint, '/send_raw_transaction', { tx_as_hex: txHex, do_not_relay: false }, fetcher))
+}
+
+/** Where the node has a transaction (pool, block, or not at all) and whether its inputs are spent.
+ *  Key images first, then the tx: a block landing between the two calls then shows the tx as mined, never
+ *  as "missed but spent" (which reads as another tx spending them). If they are spent on chain and the tx is
+ *  still missed, the tx is asked once more before that conclusion stands. */
+export async function lookupTransaction(origin: string, fingerprint: string | undefined, txid: string, keyImages: string[],
+  fetcher: Fetcher = fetch as any): Promise<MoneroTxLookup> {
+  const spent = await daemonRequest(origin, fingerprint, '/is_key_image_spent', { key_images: keyImages }, fetcher, 30000)
+  const ask = () => daemonRequest(origin, fingerprint, '/get_transactions', { txs_hashes: [txid] }, fetcher, 30000)
+  const first = parseTxLookup(txid, await ask(), spent, keyImages.length)
+  if (first.state !== 'unknown' || !first.keyImages.includes('spent')) return first
+  return parseTxLookup(txid, await ask(), spent, keyImages.length)
+}
+
+/** The node's own chain height (/get_height), not the wallet's: the scan target and the node-alive signal. */
+export async function nodeHeight(origin: string, fingerprint: string | undefined, fetcher: Fetcher = fetch as any): Promise<number> {
+  const value = await daemonRequest(origin, fingerprint, '/get_height', {}, fetcher, 15000) as any
+  if (value?.status !== 'OK' || !Number.isSafeInteger(value.height) || value.height < 1) throw new PublicError('The daemon reply could not be read')
+  return value.height
 }

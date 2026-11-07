@@ -269,7 +269,8 @@ import { setMoneroEmulatorEnabled, listEmulatorBuilds } from "./emulator-library
 import { createMoneroVault } from "./monero-vault"
 import { REVIEWED_MONERO_SIGNING_SHA256 } from "./monero-emulator"
 import { startMoneroSidecar, stopMoneroSidecar, isMoneroSidecarAvailable } from "./monero-sidecar"
-import { validateMoneroNode } from "./monero-settings"
+import { storedRestoreHeight, suggestRestoreHeight, validateMoneroNode } from "./monero-settings"
+import { createFilePendingStore } from "./monero-pending"
 import { findZcashCliBinary, isSidecarReady, startSidecar, stopSidecar, wipeSidecarWalletDb, hasFvkLoaded, getCachedFvk, onScanProgress, getScanState, updateSyncedTo, beginZcashSend, endZcashSend, isZcashSendInFlight } from "./zcash-sidecar"
 import { CHAINS, customChainToChainDef, isChainSupported, hiveRolePath, btcTaprootSupported, findChainByNetwork } from "../shared/chains"
 import { versionCompare } from "../shared/firmware-versions"
@@ -1225,6 +1226,8 @@ async function requestSigningApprovalDecision(id: string) {
 let restApiEnabled = false
 let walletConnectEnabled = false
 let moneroEnabled = false
+/** A public node, used until the user picks their own (Settings explains the privacy trade-off). */
+const MONERO_DEFAULT_NODE = 'https://xmr.triplebit.org'
 let moneroWallet: ReturnType<typeof createMoneroVault> | null = null
 let moneroSession: unknown = null
 let zcashPrivacyEnabled = false
@@ -1669,8 +1672,11 @@ function getAppSettings() {
 		btcMultisigEnabled:multisigFeature.enabled,
 		moneroEnabled,
 		moneroAvailable: isMoneroSidecarAvailable(),
-		moneroDaemonUrl: getSetting('monero_daemon_url') || 'https://xmr.triplebit.org',
-		moneroRestoreHeight: Number(getSetting('monero_restore_height') || 0),
+		moneroDaemonUrl: getSetting('monero_daemon_url') || MONERO_DEFAULT_NODE,
+		moneroRestoreHeight: storedRestoreHeight(getSetting('monero_restore_height')),
+		// Unresolved unknown-outcome sends are kept when Monero is turned off or the device is wiped (a restored
+		// seed can still spend those inputs); Settings names them instead of dropping them.
+		moneroPendingBroadcasts: getMoneroWallet().pendingCount(),
 		zcashPrivacyEnabled,
 		hiveEnabled,
 		emulatorEnabled,
@@ -2184,9 +2190,11 @@ function moneroSigningEmulatorActive(): boolean {
 function getMoneroWallet() {
     if (!moneroWallet) moneroWallet = createMoneroVault({
         engine, confirm: emuSigningOp, signingEmulator: moneroSigningEmulatorActive,
+        // Unknown-outcome broadcasts survive a restart (owner-only file beside the app database).
+        pendingStore: createFilePendingStore(path.join(Utils.paths.userData, 'monero')),
         getConfig: () => ({ enabled: moneroEnabled, offline: offlineMode,
-            daemonUrl: getSetting('monero_daemon_url') || 'https://xmr.triplebit.org',
-            restoreHeight: Number(getSetting('monero_restore_height') || 0) }),
+            daemonUrl: getSetting('monero_daemon_url') || MONERO_DEFAULT_NODE,
+            restoreHeight: storedRestoreHeight(getSetting('monero_restore_height')) }),
     })
     return moneroWallet
 }
@@ -10033,6 +10041,8 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				const bitcoinOnly = isBitcoinOnlyVariant(engine.getDeviceState().firmwareVariant)
 				const enabledChains = bitcoinOnlyChainList(getAllChains(), bitcoinOnly).filter(c => {
 					if (!isChainSupported(c, fwVersion)) return false
+					// Monero balances come from the watch-only sidecar, not an address audit.
+					if (c.chainFamily === 'monero') return false
 					if ((c.id === 'zcash' || c.id === 'zcash-shielded') && !zcashPrivacyEnabled) return false
 					if (c.id === 'hive' && !hiveEnabled) return false
 					return true
@@ -10346,12 +10356,21 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			// polls (e.g. during a toggle transition) renders nothing rather than
 			// a toast-worthy error.
             moneroGetStatus: async () => getMoneroWallet().getStatus(),
-            moneroConnect: async () => getMoneroWallet().connect({}),
+            moneroConnect: async (params) => {
+                // The scan start chosen on the connect card is saved first, so the wallet scans from it.
+                if (params?.restoreHeight !== undefined) {
+                    const node = validateMoneroNode({ daemonUrl: getSetting('monero_daemon_url') || MONERO_DEFAULT_NODE, restoreHeight: params.restoreHeight })
+                    setSetting('monero_restore_height', String(node.restoreHeight))
+                }
+                return getMoneroWallet().connect({})
+            },
+            moneroSuggestRestoreHeight: async (params) => suggestRestoreHeight(params?.daemonUrl || getSetting('monero_daemon_url') || MONERO_DEFAULT_NODE),
             moneroGetAddress: async (params) => getMoneroWallet().getAddress(params),
             moneroSyncKeyImages: async () => getMoneroWallet().syncKeyImages(),
             moneroPrepareSend: async (params) => getMoneroWallet().prepareSend(params),
             moneroSend: async (params) => getMoneroWallet().send(params),
             moneroRetryRelay: async () => getMoneroWallet().retryRelay(),
+            moneroDiscardPending: async (params) => getMoneroWallet().discardPending(params),
             setMoneroEnabled: async ({ enabled }) => {
                 if (typeof enabled !== 'boolean') throw new Error('Monero requires an enabled boolean')
                 if (enabled && !isMoneroSidecarAvailable()) throw new Error('Monero is unavailable in this build')

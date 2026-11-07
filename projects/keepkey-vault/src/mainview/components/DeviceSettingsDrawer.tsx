@@ -1665,7 +1665,7 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
                                 <Flex justify="space-between" align="center" gap="4">
                                     <VStack gap="0" align="start">
                                         <Text fontSize="sm" color="kk.textPrimary" fontWeight="500">{uiText("Monero (XMR)")}</Text>
-                                        <Text fontSize="2xs" color="kk.textMuted">{!appSettings.moneroAvailable ? uiText("Monero is unavailable in this build.") : firmwareSupportsMonero(deviceState.firmwareVersion) ? uiText("Experimental receive and balance support. Requires the Monero research emulator.") : `Needs KeepKey firmware ${MONERO_MIN_FIRMWARE} or newer.`}</Text>
+                                        <Text fontSize="2xs" color="kk.textMuted">{!appSettings.moneroAvailable ? uiText("Monero is unavailable in this build.") : firmwareSupportsMonero(deviceState.firmwareVersion) ? uiText("Experimental. Adds XMR to the asset list; sending needs the Monero signing (research) emulator.") : `Needs KeepKey firmware ${MONERO_MIN_FIRMWARE} or newer.`}</Text>
                                     </VStack>
                                     <Toggle checked={appSettings.moneroEnabled} disabled={moneroBusy || appSettings.moneroAvailable === false} onChange={async enabled => {
                                         setMoneroBusy(true); setMoneroError(null)
@@ -1674,11 +1674,22 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
                                         finally { setMoneroBusy(false) }
                                     }} />
                                 </Flex>
+                                {(appSettings.moneroPendingBroadcasts ?? 0) > 0 && <Text data-monero-pending-kept="" fontSize="2xs" color="orange.300" mt="2">{uiText("{{count}} Monero send(s) have an unknown broadcast result. They stay recorded even with Monero off or the device wiped, so no second payment is built from the same funds; open XMR to resolve them.", { count: appSettings.moneroPendingBroadcasts ?? 0 })}</Text>}
                                 {appSettings.moneroEnabled && <VStack gap="2" align="stretch" mt="3">
-                                    <Text fontSize="xs" color="kk.textSecondary">{uiText("Monero daemon")}</Text>
+                                    <Text fontSize="xs" color="kk.textSecondary">{uiText("Monero node")}</Text>
                                     <Input aria-label={uiText("Monero daemon URL")} size="sm" value={appSettings.moneroDaemonUrl} onChange={event => setAppSettings(previous => ({ ...previous, moneroDaemonUrl: event.target.value }))} />
-                                    <Text fontSize="xs" color="kk.textSecondary">{uiText("Restore height (0 scans the full chain)")}</Text>
-                                    <Input aria-label={uiText("Monero restore height")} size="sm" type="number" min="0" value={appSettings.moneroRestoreHeight} onChange={event => setAppSettings(previous => ({ ...previous, moneroRestoreHeight: Number(event.target.value) }))} />
+                                    <Text fontSize="2xs" color="kk.textMuted">{uiText("The default is a public node. Any node sees your IP address and, after a key-image sync, which outputs you spend. A node you run yourself (for example http://127.0.0.1:18081) keeps that private. Remote nodes must use HTTPS.")}</Text>
+                                    <Text fontSize="xs" color="kk.textSecondary">{uiText("Scan start block (restore height)")}</Text>
+                                    <Flex gap="2">
+                                        <Input aria-label={uiText("Monero restore height")} size="sm" type="number" min="0" value={appSettings.moneroRestoreHeight} onChange={event => setAppSettings(previous => ({ ...previous, moneroRestoreHeight: Number(event.target.value) }))} />
+                                        <Button size="xs" variant="outline" disabled={moneroBusy} onClick={async () => {
+                                            setMoneroBusy(true); setMoneroError(null)
+                                            try { const suggested = await rpcRequest<{ restoreHeight: number }>("moneroSuggestRestoreHeight", { daemonUrl: appSettings.moneroDaemonUrl }, 20000); setAppSettings(previous => ({ ...previous, moneroRestoreHeight: suggested.restoreHeight })) }
+                                            catch (error) { setMoneroError(error instanceof Error ? error.message : "Unable to read the node height") }
+                                            finally { setMoneroBusy(false) }
+                                        }}>{uiText("New wallet: a week back")}</Button>
+                                    </Flex>
+                                    <Text fontSize="2xs" color="kk.textMuted">{uiText("0 scans the whole chain (hours) and finds every payment. A later block is faster but hides anything received before it, so use it only for a wallet that has never received XMR. The week-back block comes from the node, which KeepKey can't verify.")}</Text>
                                     <Button size="xs" disabled={moneroBusy} onClick={async () => {
                                         setMoneroBusy(true); setMoneroError(null)
                                         try { setAppSettings(await rpcRequest<AppSettings>("setMoneroNode", { daemonUrl: appSettings.moneroDaemonUrl, restoreHeight: appSettings.moneroRestoreHeight })); window.dispatchEvent(new Event("keepkey-settings-changed")) }

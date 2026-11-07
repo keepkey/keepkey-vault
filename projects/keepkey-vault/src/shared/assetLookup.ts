@@ -72,9 +72,13 @@ const BITCOIN_SVG =
 /** Shielded ZEC (zZEC) — synthetic asset, never in the CDN catalog: gold shield + Zcash Z. */
 const ZCASH_SHIELDED_SVG =
   `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><path fill="#f4b728" d="M32 4l24 9v17c0 15.5-10.2 25.7-24 30C18.2 55.7 8 45.5 8 30V13z"/><path fill="#fff" d="M21 20h22v6L31 38h12v6H21v-6l12-12H21z"/><rect x="29" y="14" width="6" height="6" fill="#fff"/><rect x="29" y="44" width="6" height="6" fill="#fff"/></svg>`
+/** Monero (XMR) — not in the CDN catalog under our CAIP: orange disc, white M over the grey band. */
+const MONERO_SVG =
+  `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><circle cx="32" cy="32" r="32" fill="#ff6600"/><path fill="#4c4c4c" d="M6.5 42h11V26l14.5 14.5L46.5 26v16h11a30 30 0 0 1-51 0z"/><path fill="#fff" d="M32 6a26 26 0 0 0-25.5 30.9h7.9V18.3L32 35.9l17.6-17.6v18.6h7.9A26 26 0 0 0 32 6z"/></svg>`
 const LOCAL_ICONS: Record<string, string> = {
   'bip122:000000000019d6689c085ae165831e93/slip44:0': `data:image/svg+xml,${encodeURIComponent(BITCOIN_SVG)}`,
   'bip122:00040fe8ec8471911baa1db1266ea15d/orchard:shielded': `data:image/svg+xml,${encodeURIComponent(ZCASH_SHIELDED_SVG)}`,
+  'monero:418015bb9ae982a1975da7d79277c270/slip44:128': `data:image/svg+xml,${encodeURIComponent(MONERO_SVG)}`,
 }
 const OFFLINE_ASSET_ICONS = offlineAssetIconsJson as Record<string, string>
 

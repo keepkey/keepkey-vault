@@ -331,7 +331,8 @@ export function ActivityPage({ defaultChainId, onBack, onResumeSwap, watchOnly =
     setScanning(true)
     setScanResult(null)
     try {
-      const chainsToScan = chainFilter ? [chainFilter] : watchOnly ? historyChains : CHAINS.map(c => c.id)
+      // Monero history lives in its watch wallet (asset page), not Pioneer: never part of Rescan all.
+      const chainsToScan = chainFilter ? [chainFilter] : watchOnly ? historyChains : CHAINS.filter(c => c.chainFamily !== 'monero').map(c => c.id)
       let failures = 0
       let lastError = ''
       let total = 0

@@ -1573,7 +1573,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             status: 'healthy',
             syncing: engine.isSyncing,
             apiVersion: 2,
-            supportedChains: CHAINS.filter(c => isChainSupported(c, ds.firmwareVersion) && (c.id !== 'hive' || getSetting('hive_enabled') === '1')).map(c => c.networkId),
+            supportedChains: CHAINS.filter(c => isChainSupported(c, ds.firmwareVersion) && (c.id !== 'hive' || getSetting('hive_enabled') === '1') && c.chainFamily !== 'monero').map(c => c.networkId),
             device_connected: engine.wallet !== null,
             version: callbacks?.getVersion?.() || 'unknown',
             connected: engine.wallet !== null,
@@ -4764,7 +4764,8 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
         // ═══════════════════════════════════════════════════════════════
         if (path === '/system/info/list-coins' && method === 'POST') {
           auth.requireAuth(req)
-          const visibleChains = deviceIsBitcoinOnly() ? bitcoinOnlyCoinList(CHAINS) : CHAINS
+          // Monero has no REST surface (its wallet is the local sidecar, behind the monero* RPCs).
+          const visibleChains = (deviceIsBitcoinOnly() ? bitcoinOnlyCoinList(CHAINS) : CHAINS).filter(c => c.chainFamily !== 'monero')
           return json(visibleChains.map(c => ({
             coin_name: c.coin,
             coin_shortcut: c.symbol,

@@ -20,6 +20,9 @@ import { ReceiveView } from "./ReceiveView"
 import { HiveAccountPanel } from "./HiveAccountPanel"
 import { SendForm } from "./SendForm"
 import { ZcashBalanceSummary, type ZcashPrivacyAction } from './ZcashBalanceSummary'
+import { MoneroHeaderBalance, MoneroReceiveSection, MoneroSendSection, MoneroStatusChip, useMoneroView } from './MoneroAssetSections'
+import { useMoneroStatus } from "../hooks/useMoneroStatus"
+import { rpcMoneroClient } from "../lib/monero-client"
 
 // Lazy-load optional feature components — defers module evaluation to avoid
 // bundler TDZ issues when these heavy modules are statically imported.
@@ -116,7 +119,11 @@ function PersonalAssetPage({ chain, balance, onBack, firmwareVersion, initialAct
   const uiText = useUiTranslation()
 
 	const { t } = useTranslation("asset")
-	const { fmtCompact, symbol: fiatSymbol } = useFiat()
+	const { fmtCompact, symbol: fiatSymbol, privateModeEnabled } = useFiat()
+	// Monero: balance and sync come from the local watch wallet (monero* RPCs), not Pioneer.
+	const isMonero = chain.chainFamily === 'monero'
+	const monero = useMoneroStatus(isMonero && !watchOnly)
+	const moneroView = useMoneroView(monero)
 	// Watch-only mode never lands on a signing view, regardless of the
 	// requested initialAction.
 	const safeInitial = watchOnly ? "receive" : initialAction
@@ -170,6 +177,7 @@ function PersonalAssetPage({ chain, balance, onBack, firmwareVersion, initialAct
 	// data (HiveAccountPanel) re-fetch too.
 	const [refreshNonce, setRefreshNonce] = useState(0)
 	const handleRefresh = useCallback(async () => {
+		if (isMonero) { setRefreshing(true); try { await monero.refresh() } finally { setRefreshing(false) } return }
 		setRefreshing(true)
 		setRefreshError(null)
 		try {
@@ -187,7 +195,7 @@ function PersonalAssetPage({ chain, balance, onBack, firmwareVersion, initialAct
 		} finally {
 			setRefreshing(false)
 		}
-	}, [chain.id])
+	}, [chain.id, isMonero, monero.refresh])
 	// A fresh balance for this chain (from any refresh path — incl. a backend
 	// getBalance that outlived the 90s rpc timeout above) supersedes the error:
 	// keeping the chip up next to just-updated data would be a false alarm.
@@ -518,6 +526,7 @@ function PersonalAssetPage({ chain, balance, onBack, firmwareVersion, initialAct
 	const isUtxo = chain.chainFamily === 'utxo'
 	useEffect(() => {
 		if (isBtc) return // BTC address derived by account-aware effect above
+		if (isMonero) return // MoneroReceiveSection reads its addresses from the connected watch wallet
 		if (isTon || isUtxo || (!address && !deriveError)) deriveAddress()
 	}, []) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -1127,7 +1136,9 @@ function PersonalAssetPage({ chain, balance, onBack, firmwareVersion, initialAct
 										{/* Sync status — design study: replaces the redundant chain symbol
 										    that used to sit here. Single source of sync truth (the duplicate
 										    badge on the right column was removed below). */}
-										{refreshError ? (
+										{isMonero ? (
+											<MoneroStatusChip view={moneroView} />
+										) : refreshError ? (
 											<Flex align="center" gap="1" color="var(--rose)" className="v3-glass-chip" px="2" py="0.5" title={refreshError} cursor="help">
 												<Box w="6px" h="6px" borderRadius="full" bg="var(--rose)" />
 												<Text fontSize="10px" fontFamily="mono" fontWeight="500" letterSpacing="0.02em">{t("refreshFailed")}</Text>
@@ -1200,6 +1211,10 @@ function PersonalAssetPage({ chain, balance, onBack, firmwareVersion, initialAct
 								</Text>
 							)}
 						</Flex>
+					) : isMonero ? (
+						<Box flexShrink={0} display={{ base: "none", sm: "block" }}>
+							<MoneroHeaderBalance view={moneroView} privateMode={privateModeEnabled} />
+						</Box>
 					) : (
 						<Flex
 							direction="column"
@@ -1308,6 +1323,8 @@ function PersonalAssetPage({ chain, balance, onBack, firmwareVersion, initialAct
 							<Text fontSize="13px" fontFamily="mono" color="var(--text-2)">≈ {fmtCompact(selectedToken.balanceUsd)}</Text>
 						)}
 					</Flex>
+				) : isMonero ? (
+					<Box display={{ base: "block", sm: "none" }} mb="4"><MoneroHeaderBalance view={moneroView} privateMode={privateModeEnabled} /></Box>
 				) : activeBalance && (
 					<>
 						<Flex display={{ base: "flex", sm: "none" }} align="baseline" justify="space-between" mb="1" gap="3">
@@ -1436,7 +1453,13 @@ function PersonalAssetPage({ chain, balance, onBack, firmwareVersion, initialAct
 
 				{/* Content */}
 				<Box className="v3-glass-card" borderRadius="var(--r-lg)" p={{ base: "4", md: "6" }} minH="280px">
-					{isShieldedToken && zcashPrivacyEnabled ? (
+					{isMonero ? (
+						// Monero's standard Receive/Send: connect (view-key consent), key-image sync and the
+						// device review are Monero-specific steps inside them.
+						view === "send"
+							? <MoneroSendSection monero={monero} client={rpcMoneroClient} />
+							: <MoneroReceiveSection chain={chain} monero={monero} client={rpcMoneroClient} privateMode={privateModeEnabled} />
+					) : isShieldedToken && zcashPrivacyEnabled ? (
 						// zZEC page: all send/receive surfaces are shielded-only. Never fall
 						// through to SendForm/ReceiveView — those expose the transparent
 						// t-addr + xpub under a "Shielded ZEC" heading.
@@ -1684,8 +1707,8 @@ function PersonalAssetPage({ chain, balance, onBack, firmwareVersion, initialAct
 					<WatchOnlyExportDialog accounts={btcAccounts.accounts} isHiddenWallet={isHiddenWallet} onClose={() => setShowWatchOnlyExport(false)} />
 				)}
 
-				{/* Activity preview */}
-				<Box mt="6">
+				{/* Activity preview (Monero lists its incoming transactions in its Receive section) */}
+				{!isMonero && <Box mt="6">
 					<Flex align="center" justify="space-between" mb="3" px="1">
 						<Text fontSize="11px" fontWeight="500" color="var(--text-3)" textTransform="uppercase" letterSpacing="0.18em">{uiText("Recent Activity")}{previewActivities.length > 0 && ` · ${previewActivities.length}`}
 						</Text>
@@ -1772,7 +1795,7 @@ function PersonalAssetPage({ chain, balance, onBack, firmwareVersion, initialAct
 							onSelect={act => setActivityDetail({ kind: 'activity', activity: act })}
 						/>
 					)}
-				</Box>
+				</Box>}
 			</Box>
 			{/* SwapDialog rendered outside overflow container so position:fixed works */}
 			{showSwapDialog && (

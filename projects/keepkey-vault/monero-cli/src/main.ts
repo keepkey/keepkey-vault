@@ -50,6 +50,7 @@ async function dispatch(raw: string) {
       case 'import_key_images': result = await service!.importKeyImages(value.params); break
       case 'create_transfer': result = await service!.createTransfer(value.params); break
       case 'relay_tx': result = await service!.relay(value.params); break
+      case 'lookup_tx': result = await service!.lookup(value.params); break
       default: throw new Error('unsupported')
     }
     write({ ok: true, _req_id: value._req_id, result })

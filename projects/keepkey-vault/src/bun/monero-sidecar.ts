@@ -2,10 +2,10 @@
 import { lstatSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { MAX_IPC_LINE, MONERO_VERSION, PUBLIC_ERRORS, SIDECAR_VERSION, validateConfiguration, validateKeyImageImport, validateKeyImageResult,
-  validateOutputs, validateRelayRequest, validateTransferDraft, validateTransferRequest, validateWalletStatus,
-  type MoneroOutputRecord, type MoneroSidecarStatus, type MoneroTransferDraft, type MoneroWalletStatus, type MoneroWatchConfiguration } from '../../monero-cli/src/protocol'
+  validateOutputs, validateRelayRequest, validateTransferDraft, validateTransferRequest, validateTxLookup, validateTxLookupRequest, validateWalletStatus,
+  type MoneroOutputRecord, type MoneroTxLookup, type MoneroSidecarStatus, type MoneroTransferDraft, type MoneroWalletStatus, type MoneroWatchConfiguration } from '../../monero-cli/src/protocol'
 
-export type { MoneroOutputRecord, MoneroPlan, MoneroSidecarStatus, MoneroTransferDraft, MoneroWalletStatus } from '../../monero-cli/src/protocol'
+export type { MoneroOutputRecord, MoneroPlan, MoneroSidecarStatus, MoneroTxLookup, MoneroTransferDraft, MoneroWalletStatus } from '../../monero-cli/src/protocol'
 export type ConfigureMoneroWatch = Omit<MoneroWatchConfiguration, 'viewKey'> & { viewKey: string | Uint8Array }
 
 interface WorkerProcess {
@@ -211,13 +211,17 @@ export function createMoneroSidecarManager(options: {
       if (!walletAddress || !status.configured) throw new Error('Connect a Monero watch wallet first')
       return validateOutputs(await request('export_outputs', undefined, 120000))
     },
-    async importKeyImages(input: { offset: 0; signedKeyImages: Array<{ keyImage: string; signature: string }> }) {
+    async importKeyImages(input: { offset: number; signedKeyImages: Array<{ keyImage: string; signature: string }> }) {
       if (!walletAddress || !status.configured) throw new Error('Connect a Monero watch wallet first')
       return validateKeyImageResult(await request('import_key_images', validateKeyImageImport(input), 180000))
     },
     async createTransfer(input: { address: string; amountAtomic: string; priority: number }): Promise<MoneroTransferDraft> {
       if (!walletAddress || !status.configured) throw new Error('Connect a Monero watch wallet first')
       return validateTransferDraft(await request('create_transfer', validateTransferRequest(input), 180000))
+    },
+    async lookupTransaction(input: { txid: string; keyImages: string[] }): Promise<MoneroTxLookup> {
+      if (!walletAddress || !status.configured) throw new Error('Connect a Monero watch wallet first')
+      return validateTxLookup(await request('lookup_tx', validateTxLookupRequest(input), 90000))
     },
     async relay(input: { txHex: string }): Promise<{ relayed: true }> {
       if (!walletAddress || !status.configured) throw new Error('Connect a Monero watch wallet first')
@@ -240,3 +244,4 @@ export const exportMoneroOutputs = manager.exportOutputs
 export const importMoneroKeyImages = manager.importKeyImages
 export const createMoneroTransfer = manager.createTransfer
 export const relayMoneroTransaction = manager.relay
+export const lookupMoneroTransaction = manager.lookupTransaction

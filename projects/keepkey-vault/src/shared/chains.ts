@@ -1,6 +1,6 @@
 import { Chain, ChainToNetworkId, ChainToCaip, BaseDecimal } from '@pioneer-platform/pioneer-caip'
 import type { BtcScriptType, CustomChain } from './types'
-import { versionCompare } from './firmware-versions'
+import { versionCompare, MONERO_MIN_FIRMWARE } from './firmware-versions'
 
 export interface ChainDef {
   id: string
@@ -10,7 +10,7 @@ export interface ChainDef {
   networkId: string       // CAIP-2 (derived from pioneer-caip)
   caip: string            // CAIP-19 (derived from pioneer-caip)
   decimals: number        // Base decimals (derived from pioneer-caip)
-  chainFamily: 'utxo' | 'evm' | 'cosmos' | 'xrp' | 'solana' | 'zcash-shielded' | 'tron' | 'ton' | 'hive'
+  chainFamily: 'utxo' | 'evm' | 'cosmos' | 'xrp' | 'solana' | 'zcash-shielded' | 'tron' | 'ton' | 'hive' | 'monero'
   color: string
   rpcMethod: string
   signMethod: string
@@ -347,6 +347,18 @@ const CONFIGS: ChainConfig[] = [
     explorerTxUrl: 'https://hiveblocks.com/tx/{{txid}}',
     minFirmware: '7.15.0',  // Hive handler ships in firmware 7.15.0 (alpha), same as Zcash
   },
+  {
+    // Monero (preview). Balances come from the local watch-only sidecar, not Pioneer, so
+    // hidden keeps it out of every Pioneer/pubkey/swap loop; the Dashboard opts it in when the
+    // Monero setting is on (moneroChainVisible). Receive/Send use the monero* RPCs.
+    id: 'monero', chain: 'XMR' as any, coin: 'Monero', symbol: 'XMR',
+    chainFamily: 'monero', color: '#FF6600',
+    rpcMethod: 'moneroGetAddress', signMethod: 'moneroSend',
+    defaultPath: [0x8000002C, 0x80000080, 0x80000000],
+    explorerTxUrl: 'https://xmrchain.net/tx/{{txid}}',
+    hidden: true,
+    minFirmware: MONERO_MIN_FIRMWARE,
+  },
 ]
 
 // Fallbacks for chains not fully covered by pioneer-caip
@@ -356,6 +368,7 @@ const CAIP_FALLBACKS: Record<string, string> = {
   TRX: 'tron:27Lqcw/slip44:195',
   TON: 'ton:-239/slip44:607',
   HIVE: 'hive:beeab0de/slip44:1275',
+  XMR: 'monero:418015bb9ae982a1975da7d79277c270/slip44:128',
 }
 const NETWORKID_FALLBACKS: Record<string, string> = {
   GNO: 'eip155:100',
@@ -363,6 +376,7 @@ const NETWORKID_FALLBACKS: Record<string, string> = {
   TRX: 'tron:27Lqcw',
   TON: 'ton:-239',
   HIVE: 'hive:beeab0de',
+  XMR: 'monero:418015bb9ae982a1975da7d79277c270',
 }
 const DECIMAL_FALLBACKS: Record<string, number> = {
   GNO: 18,
@@ -370,6 +384,7 @@ const DECIMAL_FALLBACKS: Record<string, number> = {
   TRX: 6,
   TON: 9,
   HIVE: 3,
+  XMR: 12,
 }
 
 // Derive CAIP identifiers from pioneer-caip — single source of truth

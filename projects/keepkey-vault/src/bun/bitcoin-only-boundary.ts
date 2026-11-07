@@ -11,7 +11,7 @@ const BITCOIN_ASSET_CAIPS = new Set([
 ])
 const NON_BITCOIN_RPC_PREFIXES = [
   'vaultAdd', 'safe', 'clearsign', 'eth', 'cosmos', 'thorchain', 'mayachain', 'osmosis',
-  'xrp', 'solana', 'tron', 'ton', 'hive', 'zcash', 'bnb', 'binance',
+  'xrp', 'solana', 'tron', 'ton', 'hive', 'zcash', 'bnb', 'binance', 'monero',
 ]
 
 const NON_BITCOIN_REST_PREFIXES = [

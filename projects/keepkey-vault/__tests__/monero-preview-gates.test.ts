@@ -1,7 +1,9 @@
 import { describe, expect, test } from 'bun:test'
-import { readFileSync } from 'fs'
+import { existsSync, readFileSync } from 'fs'
 import { join } from 'path'
-import { firmwareSupportsMonero } from '../src/shared/firmware-versions'
+import { firmwareSupportsMonero, MONERO_MIN_FIRMWARE } from '../src/shared/firmware-versions'
+import { CHAINS, isChainSupported } from '../src/shared/chains'
+import { bitcoinOnlyRpcRejection } from '../src/bun/bitcoin-only-boundary'
 
 const src = (path: string) => readFileSync(join(import.meta.dir, '..', path), 'utf8')
 
@@ -13,14 +15,28 @@ describe('Monero preview gates', () => {
 		expect(firmwareSupportsMonero(undefined)).toBe(false)
 	})
 
-	test('the tab and panel need the setting AND the firmware', () => {
-		expect(src('src/mainview/App.tsx')).toContain('const moneroEnabled = moneroSetting && firmwareSupportsMonero(deviceState.firmwareVersion)')
+	test('XMR is a chain-list row opening the standard asset page; the separate tab, panel and button are gone', () => {
+		const monero = CHAINS.find(c => c.id === 'monero')!
+		expect(monero).toMatchObject({ chainFamily: 'monero', symbol: 'XMR', decimals: 12, hidden: true, minFirmware: MONERO_MIN_FIRMWARE })
+		expect(isChainSupported(monero, '7.16.0')).toBe(false)
+		expect(existsSync(join(import.meta.dir, '..', 'src/mainview/components/MoneroPanel.tsx'))).toBe(false)
+		expect(src('src/mainview/components/TopNav.tsx')).not.toContain('"monero"')
+		expect(src('src/mainview/App.tsx')).not.toMatch(/Monero/)
+		const dashboard = src('src/mainview/components/Dashboard.tsx')
+		expect(dashboard).not.toContain('onOpenMonero')
+		expect(dashboard).toContain('moneroChainVisible({ settingEnabled: moneroEnabled, firmwareVersion, watchOnly, bitcoinOnly: btcOnly })')
+		expect(dashboard).toContain('<MoneroChainRow chain={moneroChain}')
+		expect(dashboard).toContain('onOpen={() => openChainPage(moneroChain)}')
+		const page = src('src/mainview/components/AssetPage.tsx')
+		expect(page).toContain('? <MoneroSendSection monero={monero} client={rpcMoneroClient} />')
+		expect(page).toContain(': <MoneroReceiveSection chain={chain} monero={monero}')
 	})
 
-	test('no balance is shown before the first scan finishes', () => {
-		const panel = src('src/mainview/components/MoneroPanel.tsx')
-		expect(panel).toContain('const scanned = !!wallet && wallet.walletHeight > 0')
-		expect(panel).toContain('const balance = scanned ? atomicAmount(wallet.balanceAtomic) : null')
+	test('Pioneer, REST and audit loops never treat XMR as a Pioneer chain', () => {
+		expect(src('src/bun/rest-api.ts')).toContain("c.chainFamily !== 'monero').map(c => c.networkId)")
+		expect(src('src/bun/rest-api.ts')).toContain(".filter(c => c.chainFamily !== 'monero')")
+		expect(src('src/bun/activity-history.ts')).toContain("chain.chainFamily !== 'monero'")
+		expect(src('src/bun/index.ts')).toContain("if (c.chainFamily === 'monero') return false")
 	})
 
 	test('switching Monero off keeps a research emulator selection (the next start names it; see emulator-build-unavailable.test.ts)', () => {
@@ -39,10 +55,15 @@ describe('Monero preview gates', () => {
 	})
 
 	test('the send form appears only past every backend gate, and confirms on the device', () => {
-		const panel = src('src/mainview/components/MoneroPanel.tsx')
-		expect(panel).toContain('const receiveOnly = !wallet || wallet.sendBlocked === "emulator" || wallet.sendBlocked === "adapter"')
-		expect(panel).toContain('{wallet.canSend && !review && (')
-		expect(panel).toContain('"moneroSend", { prepareId: review.prepareId }')
+		const sections = src('src/mainview/components/MoneroAssetSections.tsx')
+		expect(sections).toContain('const receiveOnly = wallet.sendBlocked === "emulator" || wallet.sendBlocked === "adapter"')
+		expect(sections).toContain('{wallet.canSend && !review && (')
+		expect(src('src/mainview/lib/monero-client.ts')).toContain('rpcRequest<{ txid: string }>("moneroSend", { prepareId }')
 		expect(src('src/bun/index.ts')).toContain('signingEmulator: moneroSigningEmulatorActive')
+	})
+
+	test('bitcoin-only firmware refuses every monero RPC but still lets Monero be switched off', () => {
+		expect(bitcoinOnlyRpcRejection('moneroPrepareSend', {})).toContain('not available on bitcoin-only firmware')
+		expect(bitcoinOnlyRpcRejection('setMoneroEnabled', { enabled: false })).toBeNull()
 	})
 })

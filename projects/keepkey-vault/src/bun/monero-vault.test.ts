@@ -248,7 +248,7 @@ test('exact uint64 strings remain exact; invalid and stale monitor data cannot c
 
 test('getAddress still derives from the bound device and revokes if the selected wallet changed', async () => {
   const f = fixture(); await f.api.connect()
-  expect(await f.api.getAddress({ showDisplay: false })).toEqual({ address: ADDRESS, network: 'mainnet', displayed: false })
+  expect(await f.api.getAddress({ showDisplay: false })).toEqual({ address: ADDRESS, network: 'mainnet', displayed: false, minor: 0 })
   f.delegate.addressBody = text(1, OTHER)
   await expect(f.api.getAddress()).rejects.toThrow('changed')
   expect((await f.api.getStatus()).available).toBe(false)

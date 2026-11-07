@@ -496,12 +496,14 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
 
       // ── Emulator (macOS only — Keychain-encrypted flash) ────────────
       moneroGetStatus: { params: Record<string, never>; response: MoneroStatus }
-      moneroConnect: { params: Record<string, never>; response: MoneroStatus }
-      moneroGetAddress: { params: { showDisplay: boolean }; response: { address: string; network: 'mainnet'; displayed: boolean } }
+      moneroConnect: { params: { restoreHeight?: number }; response: MoneroStatus }
+      moneroSuggestRestoreHeight: { params: { daemonUrl?: string }; response: { tipHeight: number; restoreHeight: number; marginBlocks: number } }
+      moneroGetAddress: { params: { showDisplay: boolean; minor?: number }; response: { address: string; network: 'mainnet'; displayed: boolean; minor: number } }
       moneroSyncKeyImages: { params: Record<string, never>; response: MoneroStatus }
-      moneroPrepareSend: { params: { address: string; amountAtomic: string }; response: MoneroSendReview }
+      moneroPrepareSend: { params: { address: string; amountAtomic?: string; max?: boolean }; response: MoneroSendReview }
       moneroSend: { params: { prepareId: string }; response: { txid: string } }
       moneroRetryRelay: { params: undefined; response: { txid: string } }
+      moneroDiscardPending: { params: { confirm: boolean }; response: { outcome: 'discarded' | 'sent' | 'superseded'; txid: string } }
       setMoneroEnabled: { params: { enabled: boolean }; response: AppSettings }
       setMoneroNode: { params: { daemonUrl: string; restoreHeight: number }; response: AppSettings }
       emulatorPair: { params: void; response: EmulatorStatus }
