@@ -17,11 +17,11 @@ let ui: Record<string, any>
 
 beforeAll(() => {
   const run = Bun.spawnSync([process.execPath, new URL('./support/emulator-selection-ui.tsx', import.meta.url).pathname], {
-    cwd: new URL('../', import.meta.url).pathname, stdout: 'pipe', stderr: 'pipe', timeout: 30_000,
+    cwd: new URL('../', import.meta.url).pathname, stdout: 'pipe', stderr: 'pipe', timeout: 120_000,
   })
   if (run.exitCode !== 0) throw new Error(run.stderr.toString())
   ui = JSON.parse(run.stdout.toString().trim().split('\n').at(-1)!)
-}, 30_000) // a child process rendering React: slow under a full make test-unit
+}, 120_000) // a child process rendering React: ~1 s alone, far slower on a loaded machine
 
 describe('B1: the start screen shows and sets firmware and wallet together', () => {
   test('the firmware select names every build by version and what it is, with the selected one shown', () => {

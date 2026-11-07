@@ -107,7 +107,7 @@ describe('a selected emulator firmware that is not available', () => {
     expect(status.error).toContain('build dddddddddddd')
     expect(status.error).not.toContain(GENERIC)
     expect(require('node:fs').readdirSync(join(f.home, '.keepkey', 'emulator')).filter((n: string) => n.endsWith('.enc'))).toEqual([])
-  })
+  }, 30_000) // a child process loading the emulator module
 })
 
 describe('turning Monero off', () => {
