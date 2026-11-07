@@ -20,6 +20,10 @@ const call = async (body: unknown, headers?: Record<string, string>) => {
 }
 
 describe('MCP JSON-RPC handler', () => {
+  test('agents cannot invoke the private password fill namespace', async () => {
+    const { json } = await call({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: '__vault_password_fill_v1', arguments: { password: 'synthetic' } } })
+    expect(json.error.code).toBe(-32601)
+  })
   test('unparseable body → -32700 Parse error envelope (not a bare 400)', async () => {
     const { json } = await call('{not json')
     expect(json).toMatchObject({ jsonrpc: '2.0', id: null, error: { code: -32700 } })

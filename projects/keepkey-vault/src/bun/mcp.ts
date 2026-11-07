@@ -254,6 +254,7 @@ export async function handleMcpRequest(req: Request, cors: Record<string, string
       if (typeof name !== 'string' || name === '') {
         return rpcError(id, -32602, 'Invalid params: name must be a non-empty string', undefined, cors)
       }
+      if (name.startsWith('__vault_password_')) return rpcError(id, -32601, 'Password fill is available only through the Vault password manager UI', undefined, cors)
       if (name === 'bex_browsers') {
         const browsers = await Promise.all(listBrowsers().map(async b => {
           try {

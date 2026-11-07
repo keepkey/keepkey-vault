@@ -1,0 +1,15 @@
+{
+  "bexBrowserSecurityChecks": [
+    "foreign origin refused",
+    "disabled fields excluded",
+    "document swap refused",
+    "expired fill refused",
+    "foreign form action refused",
+    "fills selected password only and never submits",
+    "one-use field reference",
+    "redacts nested tool results",
+    "enables protected-page mode",
+    "password and OTP fields classified as secret"
+  ],
+  "realAccountRequests": false
+}

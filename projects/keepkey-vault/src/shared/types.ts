@@ -1611,6 +1611,7 @@ export interface ClearSignProviderInput {
 
 // Application-level settings (persisted in SQLite)
 export interface AppSettings {
+  passwordManagerEnabled?: boolean // experimental password bank; runtime, default OFF
   appLanguage?: string          // shared with native menus and dialogs
   restApiEnabled: boolean        // controls entire REST API server on/off
   pioneerApiBase: string         // current Pioneer API base URL
