@@ -13,7 +13,7 @@ import { WalletSelector } from "./WalletSelector"
 import { EmulatorBadge } from "./EmulatorIdentity"
 import { useBtcMultisigEnabled } from "../hooks/useBtcMultisigEnabled"
 
-export type NavTab = "vault" | "shapeshift" | "explore" | "addresses" | "multisig" | "monero"
+export type NavTab = "vault" | "shapeshift" | "explore" | "addresses" | "multisig"
 
 interface TopNavProps {
 	label?: string
@@ -23,7 +23,6 @@ interface TopNavProps {
 	needsFirmwareUpdate?: boolean
 	latestFirmware?: string
 	isEmulator?: boolean
-	moneroEnabled?: boolean
 	onSettingsToggle: () => void
 	onMobileToggle?: () => void
 	onWalletConnectToggle?: () => void
@@ -150,7 +149,6 @@ export function TopNav({
 	needsFirmwareUpdate,
 	latestFirmware,
 	isEmulator,
-	moneroEnabled,
 	onSettingsToggle,
 	onMobileToggle,
 	onWalletConnectToggle,
@@ -234,7 +232,6 @@ export function TopNav({
 		},
 	]
 
-	if (moneroEnabled && !watchOnly && !isBitcoinOnly) TAB_DEFS.splice(2, 0, { id: "monero", label: "Monero", icon: <Text fontSize="14px" color="#ff7a26">ɱ</Text> })
 
 	const dotColor = connected ? "var(--teal)" : "var(--text-3)"
 	const logoGlow = passphraseActive ? 'signing' : connected ? 'connected' : 'idle'

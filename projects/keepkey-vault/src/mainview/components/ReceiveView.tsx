@@ -39,6 +39,8 @@ interface ReceiveViewProps {
 	watchOnly?: boolean
 	/** Watch-only with a connected KeepKey that holds this wallet: verify-on-device goes through this. */
 	onShowOnDevice?: () => Promise<void>
+	/** False for chains whose firmware fixes the account path (Monero): no path editor. */
+	pathEditable?: boolean
 }
 
 /** Eyebrow + ink-0 mono block + copy chip on the right.
@@ -154,7 +156,7 @@ function PillToggle<T extends string | number>({
 export function ReceiveView({
 	chain, address, assetCaip, loading, error, currentPath, onDerive, scriptType, xpub,
 	isBtc, btcChangeIndex = 0, btcAddressIndex = 0, btcAddressWarning, onBtcChangeIndex, onBtcAddressIndex,
-	isTon, tonBounceable = false, onTonBounceableChange, watchOnly = false, onShowOnDevice,
+	isTon, tonBounceable = false, onTonBounceableChange, watchOnly = false, onShowOnDevice, pathEditable = true,
 }: ReceiveViewProps) {
   const uiText = useUiTranslation()
 
@@ -465,7 +467,7 @@ export function ReceiveView({
 								{pathToString(currentPath)}
 							</Text>
 							{/* Editing the path re-derives on the device — hidden in watch-only. */}
-							{!watchOnly && (
+							{!watchOnly && pathEditable && (
 							<Box
 								as="button"
 								className="electrobun-webkit-app-region-no-drag"

@@ -10,6 +10,8 @@ import { versionCompare } from "../../shared/firmware-versions"
 import { formatBalance, hasNonZeroBalance } from "../lib/formatting"
 import { AnimatedUsd } from "./AnimatedUsd"
 import { getAssetIcon, registerCustomAsset } from "../../shared/assetLookup"
+import { moneroChainVisible } from "../../shared/monero-asset"
+import { MoneroChainRow } from "./MoneroAssetSections"
 import { AssetPage } from "./AssetPage"
 import { ActivityPage } from "./ActivityPage"
 import { DonutChart, SelectedSlice, type DonutChartItem } from "./DonutChart"
@@ -698,7 +700,6 @@ interface DashboardProps {
 	/** When in watchOnly mode, load cached data for this specific device (defaults to latest) */
 	watchOnlyDeviceId?: string
 	onOpenSettings?: () => void
-	onOpenMonero?: () => void
 	firmwareVersion?: string
 	/** Device firmware variant — when bitcoin-only, the chain list is restricted to Bitcoin */
 	firmwareVariant?: string
@@ -838,7 +839,7 @@ function VaultPortfolioDashboard({ vault, onLoaded, watchOnly, firmwareVersion }
 	</Flex>
 }
 
-function PersonalDashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettings, onOpenMonero, firmwareVersion, firmwareVariant, forceRefresh, onForceRefreshConsumed, isHiddenWallet, knownEmpty, onOpenVault }: DashboardProps) {
+function PersonalDashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettings, firmwareVersion, firmwareVariant, forceRefresh, onForceRefreshConsumed, isHiddenWallet, knownEmpty, onOpenVault }: DashboardProps) {
   const uiText = useUiTranslation()
 	const { portfolios: vaultPortfolios, loading: vaultsLoading, error: vaultsError, reload: reloadVaultPortfolios, setIncluded: setVaultIncluded } = useVaultPortfolios({ bitcoinOnly: isBitcoinOnlyVariant(firmwareVariant) })
 
@@ -1857,6 +1858,12 @@ function PersonalDashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSetti
 		return !c.hidden
 	}), [allChains, btcOnly, firmwareVersion, zcashEnabled, hiveEnabled, disabledNetworks])
 
+	// XMR: a row in the chain list (setting + firmware 7.17+), opening the standard asset page.
+	// Its balance comes from the local watch wallet and has no fiat price, so it stays out of
+	// visibleChains, whose fiat totals, charts and sync states all come from Pioneer.
+	const moneroChain = useMemo(() => moneroChainVisible({ settingEnabled: moneroEnabled, firmwareVersion, watchOnly, bitcoinOnly: btcOnly })
+		&& !disabledNetworks.includes('monero') ? CHAINS.find(c => c.id === 'monero') : undefined, [moneroEnabled, firmwareVersion, watchOnly, btcOnly, disabledNetworks])
+
 	// Built-in networks the user turned off: offered back in the Add network dialog.
 	const turnedOffChains = useMemo(() => btcOnly ? [] : allChains.filter(c =>
 		disabledNetworks.includes(c.id) && !c.hidden && isChainSupported(c, firmwareVersion)
@@ -2005,12 +2012,6 @@ function PersonalDashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSetti
 						},
 					}}
 				>
-                    {moneroEnabled && !watchOnly && onOpenMonero && !isBitcoinOnlyVariant(firmwareVariant) && (
-                        <Button onClick={onOpenMonero} variant="ghost" w="100%" justifyContent="start" mb="2" color="var(--text-0)">
-                            <Text color="#ff7a26" fontSize="22px" mr="2">ɱ</Text>
-                            <Box textAlign="left"><Text fontSize="14px">{uiText("Monero · XMR")}</Text><Text fontSize="11px" color="var(--text-2)">{uiText("Receive & balances")}</Text></Box>
-                        </Button>
-                    )}
 					{/* "All Chains" reset row */}
 					<Box
 						as="button"
@@ -2057,6 +2058,7 @@ function PersonalDashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSetti
 											: `${anyChainUnknown ? '≥ ' : ''}$${totalUsd.toLocaleString(getNumberLocale(), { maximumFractionDigits: 2 })}`}
 									</Text>
 								)}
+								{moneroChain && <Text data-monero-total-note="" fontSize="10px" color="var(--text-3)" lineHeight="1.2">{uiText("XMR not included")}</Text>}
 							</Box>
 						</Flex>
 					</Box>
@@ -2269,6 +2271,8 @@ function PersonalDashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSetti
 							</Fragment>
 						)
 					})}
+
+					{moneroChain && <MoneroChainRow chain={moneroChain} iconSrc={getAssetIcon(moneroChain.caip)} privateMode={privateModeEnabled} onOpen={() => openChainPage(moneroChain)} />}
 
 					{/* Add network — turns a network back on that the network picker
 					    turned off, or adds a custom EVM network (by chainId / RPC, or
