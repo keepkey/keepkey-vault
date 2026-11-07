@@ -63,30 +63,30 @@ export function MoneroNodePanel({ client = nodeClient, compact = false }: { clie
     : node?.state === 'starting' ? uiText('Starting node…') : stopping ? uiText('Stopping node…') : node?.state === 'error' ? uiText('Node needs attention') : uiText('Node stopped')
   const nodeView = <Box data-monero-node="" mt={compact ? '0' : '3'}>
     <Flex align="center" justify="space-between" gap="3">
-      <Box><Text fontSize="sm" fontWeight="500">{uiText('Your Monero node')}</Text><Text data-node-state="" role="status" fontSize="xs" color="var(--text-2)">{state}</Text></Box>
+      <Box><Text fontSize="sm" fontWeight="500">{uiText('Your Monero node')}</Text><Text data-node-state="" role="status" fontSize="13px" color="var(--text-2)">{state}</Text></Box>
       <Button data-node-toggle="" size="xs" disabled={busy || !node?.available || stopping || !node} onClick={() => { void action(async () => { setNode(running ? await client.stop() : await client.start()) }) }}>
         {stopping ? uiText('Stopping…') : running ? uiText('Stop node') : uiText('Start node')}
       </Button>
     </Flex>
-    {!node?.available && node && <Text fontSize="xs" mt="2">{uiText('Local node support is unavailable in this build.')}</Text>}
+    {!node?.available && node && <Text fontSize="13px" mt="2">{uiText('Local node support is unavailable in this build.')}</Text>}
     {node && <>
-      <Text data-node-height="" fontSize="xs" mt="2">{uiText('Block height')}: {node.height?.toLocaleString() ?? '—'} / {node.targetHeight?.toLocaleString() ?? '—'}{node.percent === null ? '' : ` · ${node.percent.toFixed(1)}%`}</Text>
+      <Text data-node-height="" fontSize="13px" mt="2">{uiText('Block height')}: {node.height?.toLocaleString() ?? '—'} / {node.targetHeight?.toLocaleString() ?? '—'}{node.percent === null ? '' : ` · ${node.percent.toFixed(1)}%`}</Text>
       {running && <progress aria-label={uiText('Blockchain sync by block height')} max={100} {...(node.percent === null ? {} : { value: node.percent })} style={{ width: '100%', accentColor: 'var(--teal)', height: 5 }} />}
-      <Text fontSize="xs" color="var(--text-2)">{uiText('Storage used')}: {bytes(node.diskBytes)} · {uiText('Free space')}: {bytes(node.freeBytes)}</Text>
-      <Text data-node-location="" fontSize="xs" color="var(--text-3)" overflowWrap="anywhere" mt="1">{node.dataDir}</Text>
-      <Text fontSize="xs" color="var(--text-3)" mt="2">{activeMode === 'local' ? uiText('The first sync can take days. Your wallet connects when the node is ready. Closing Vault pauses the node; Start resumes from the saved blocks.') : uiText('Your local node keeps syncing. Switch back when it is ready.')}</Text>
-      <details style={{ marginTop: 12 }}><summary style={{ cursor: 'pointer', fontSize: 12 }}>{uiText('Storage and node details')}</summary>
-        <Text fontSize="xs" mt="2">{uiText('Pruned blockchain')}: {uiText('about {{size}}; grows over time', { size: bytes(node.estimatedBytes) })}</Text>
-        <Text fontSize="xs">{uiText('Free-space reserve')}: {bytes(node.reserveBytes)}</Text>
-        <Text fontSize="xs">{uiText('Peers')}: {node.peers ?? '—'}</Text>
-        <Text fontSize="xs" overflowWrap="anywhere">{uiText('Node log')}: {node.logPath}</Text>
-        <Text fontSize="xs" mt="2">{uiText('Block progress is approximate; later blocks can take longer. Wallet scanning is a separate step.')}</Text>
-        <label htmlFor={compact ? 'asset-node-folder' : 'settings-node-folder'} style={{ fontSize: 12, marginTop: 12, display: 'block' }}>{uiText('Blockchain folder')}</label>
+      <Text fontSize="13px" color="var(--text-2)">{uiText('Storage used')}: {bytes(node.diskBytes)} · {uiText('Free space')}: {bytes(node.freeBytes)}</Text>
+      <Text data-node-location="" fontSize="13px" color="var(--text-2)" overflowWrap="anywhere" mt="1">{node.dataDir}</Text>
+      <Text fontSize="13px" color="var(--text-2)" mt="2">{activeMode === 'local' ? uiText('The first sync can take days. Your wallet connects when the node is ready. Closing Vault pauses the node; Start resumes from the saved blocks.') : uiText('Your local node keeps syncing. Switch back when it is ready.')}</Text>
+      <details style={{ marginTop: 12 }}><summary style={{ cursor: 'pointer', fontSize: 13 }}>{uiText('Storage and node details')}</summary>
+        <Text fontSize="13px" mt="2">{uiText('Pruned blockchain')}: {uiText('about {{size}}; grows over time', { size: bytes(node.estimatedBytes) })}</Text>
+        <Text fontSize="13px">{uiText('Free-space reserve')}: {bytes(node.reserveBytes)}</Text>
+        <Text fontSize="13px">{uiText('Peers')}: {node.peers ?? '—'}</Text>
+        <Text fontSize="13px" overflowWrap="anywhere">{uiText('Node log')}: {node.logPath}</Text>
+        <Text fontSize="13px" mt="2">{uiText('Block progress is approximate; later blocks can take longer. Wallet scanning is a separate step.')}</Text>
+        <label htmlFor={compact ? 'asset-node-folder' : 'settings-node-folder'} style={{ fontSize: 13, marginTop: 12, display: 'block' }}>{uiText('Blockchain folder')}</label>
         <Input id={compact ? 'asset-node-folder' : 'settings-node-folder'} data-node-folder="" size="sm" value={folder} disabled={!!running || busy} onChange={e => setFolder(e.target.value)} />
         <Button data-node-folder-save="" size="xs" mt="2" variant="outline" disabled={!!running || busy || folder === node.dataDir || !folder.trim()} onClick={() => { void action(async () => { setNode(await client.configure(folder)) }) }}>{uiText('Use this folder')}</Button>
-        <Text fontSize="xs" mt="2">{uiText('Stop the node before changing folders. Choosing a folder does not move or delete existing blockchain data.')}</Text>
+        <Text fontSize="13px" mt="2">{uiText('Stop the node before changing folders. Choosing a folder does not move or delete existing blockchain data.')}</Text>
       </details>
-      {node.error && <Text role="alert" mt="2" color="var(--rose)" fontSize="xs">{node.error}</Text>}
+      {node.error && <Text role="alert" mt="2" color="var(--rose)" fontSize="13px">{node.error}</Text>}
     </>}
   </Box>
   const connectionControls = <>
@@ -105,24 +105,24 @@ export function MoneroNodePanel({ client = nodeClient, compact = false }: { clie
           <option value="">{uiText('Custom URL')}</option>
         </select>
         <Input aria-label={uiText('Monero daemon URL')} placeholder="https://" size="sm" value={remote} onChange={e => setRemote(e.target.value)} />
-        <Text fontSize="xs" mt="2">{uiText('A remote node sees your IP address and can link the spends you verify. Remote connections require HTTPS. Vault never switches to a public node automatically.')}</Text>
+        <Text fontSize="13px" mt="2">{uiText('A remote node sees your IP address and can link the spends you verify. Remote connections require HTTPS. Vault never switches to a public node automatically.')}</Text>
         <Button data-node-remote-connect="" size="xs" mt="2" disabled={busy || !remote.trim()} onClick={() => { void action(async () => { setSettings(await client.save({ ...settings!, mode: 'remote', daemonUrl: remote, restoreHeight: settings!.moneroRestoreHeight })); setDraftMode(null); setEditing(false) }) }}>{busy ? uiText('Checking node…') : uiText('Connect to remote node')}</Button>
       </Box>}
   </>
   return <Box data-monero-node-panel="" fontSize="sm">
     {compact ? <>
       <Flex align="center" justify="space-between" gap="3">
-        <Text data-node-connection="" fontSize="xs">{uiText('Connection')}: {activeMode === 'local' ? uiText('Your node') : uiText('Remote node')}</Text>
+        <Text data-node-connection="" fontSize="13px">{uiText('Connection')}: {activeMode === 'local' ? uiText('Your node') : uiText('Remote node')}</Text>
         <Button data-node-change="" variant="ghost" size="xs" disabled={busy || !settings} onClick={() => setEditing(value => !value)}>{uiText('Change node')}</Button>
       </Flex>
-      {activeMode === 'remote' && <Text fontSize="xs" color="var(--text-3)" overflowWrap="anywhere">{settings?.moneroDaemonUrl}</Text>}
+      {activeMode === 'remote' && <Text fontSize="13px" color="var(--text-2)" overflowWrap="anywhere">{settings?.moneroDaemonUrl}</Text>}
       {activeMode === 'local' && node?.state !== 'ready' && !editing && <Button data-node-use-remote="" variant="outline" size="xs" mt="2" disabled={!settings} onClick={() => { setDraftMode('remote'); setRemote(value => value || MONERO_REMOTE_NODES[0].url); setEditing(true) }}>{uiText('Use a remote node while yours syncs')}</Button>}
       {editing && <Box mt="2" mb="3">{connectionControls}</Box>}
     </> : <>
-      <Text fontSize="xs" color="var(--text-2)" mb="2">{uiText('Run your own node for the most private connection. Vault manages its storage and sync for you.')}</Text>
+      <Text fontSize="13px" color="var(--text-2)" mb="2">{uiText('Run your own node for the most private connection. Vault manages its storage and sync for you.')}</Text>
       {connectionControls}
     </>}
-    {(activeMode === 'local' || running) && (compact ? <details><summary style={{ cursor: 'pointer', fontSize: 12 }}>{activeMode === 'local' ? uiText('Your node') : uiText('Local node')}: {state}</summary><Box mt="3">{nodeView}</Box></details> : nodeView)}
-    {error && <Text role="alert" fontSize="xs" color="var(--rose)" mt="2">{error}</Text>}
+    {(activeMode === 'local' || running) && (compact ? <details><summary style={{ cursor: 'pointer', fontSize: 13 }}>{activeMode === 'local' ? uiText('Your node') : uiText('Local node')}: {state}</summary><Box mt="3">{nodeView}</Box></details> : nodeView)}
+    {error && <Text role="alert" fontSize="13px" color="var(--rose)" mt="2">{error}</Text>}
   </Box>
 }

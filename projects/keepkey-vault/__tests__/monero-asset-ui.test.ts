@@ -50,6 +50,11 @@ describe('C1/C2: the XMR row in the chain list', () => {
 })
 
 describe('XMR opens without a setup checklist', () => {
+  test('after device consent, progress names wallet preparation instead of requesting more button presses', () => {
+    expect(ui.walletOpeningText).toContain('Opening Monero wallet')
+    expect(ui.walletOpeningText).toContain('no further device confirmation is needed')
+    expect(ui.walletOpeningText).not.toContain('Confirm on KeepKey')
+  })
   test('connects once automatically with complete history by default', () => {
     expect(ui.connectCalls).toEqual([['connect', 0]])
     expect(ui.connectButtons).toEqual([])

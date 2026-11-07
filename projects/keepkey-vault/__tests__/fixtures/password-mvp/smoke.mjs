@@ -12,7 +12,8 @@ try {
  await expect(page.getByTestId('fixture-home')).toBeVisible();
  await expect(page.getByRole('button',{name:'Passwords',exact:true})).toHaveCount(0);
  await page.getByRole('button',{name:'Device Settings'}).click();
- if(!await page.getByRole('switch',{name:'Password manager',exact:true}).isVisible()) await page.getByText('Feature Flags',{exact:true}).click();
+ await expect(page.getByRole('dialog', {name:'Settings',exact:true})).toBeVisible();
+ await page.getByRole('button',{name:'Feature Flags',exact:true}).click();
  const toggle=page.getByRole('switch',{name:'Password manager',exact:true});
  await expect(toggle).toHaveAttribute('aria-checked','false');
  await toggle.click();
@@ -42,7 +43,8 @@ try {
  await expect(page.getByText('Last change verified',{exact:true})).toBeVisible();
  await page.screenshot({path:'./password-mvp-ui.png',fullPage:true});
  await page.getByRole('button',{name:'Device Settings'}).click();
- if(!await page.getByRole('switch',{name:'Password manager',exact:true}).isVisible()) await page.getByText('Feature Flags',{exact:true}).click();
+ await expect(page.getByRole('dialog', {name:'Settings',exact:true})).toBeVisible();
+ await page.getByRole('button',{name:'Feature Flags',exact:true}).click();
  await page.getByRole('switch',{name:'Password manager',exact:true}).click();
  await expect(page.getByRole('button',{name:'Passwords',exact:true})).toHaveCount(0);
  await page.getByRole('button',{name:'Close settings'}).click();

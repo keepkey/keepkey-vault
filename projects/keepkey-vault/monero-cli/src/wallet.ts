@@ -100,6 +100,24 @@ interface Session {
   status: MoneroWalletStatus
 }
 
+/** Establish a watch-only wallet before scheduling any scan. Core's automatic idle
+ * refresh must be disabled before creation, otherwise it can block identity checks. */
+export async function initializeWatchRpc(rpc: Pick<DigestWalletRpc, 'call'>,
+  config: { address: string; viewKey: string; restoreHeight: number }, password: string): Promise<void> {
+  try {
+    // Core's idle auto-refresh can start as soon as generate_from_keys returns and
+    // monopolize its RPC thread before get_address/query_key. Disable it while
+    // there is no wallet yet; this service explicitly schedules refresh below.
+    await rpc.call('auto_refresh', { enable: false })
+    await rpc.call('generate_from_keys', { filename: 'watch', address: config.address,
+      viewkey: config.viewKey, spendkey: '', password, restore_height: config.restoreHeight, language: 'English' }, 30000)
+  } finally { config.viewKey = '' }
+  const actual = await rpc.call('get_address', { account_index: 0 })
+  if (actual.address !== config.address) throw new Error('The Monero watch wallet does not match the device')
+  try { await rpc.call('query_key', { key_type: 'spend_key' }); throw new Error('The Monero sidecar unexpectedly has a spend key') }
+  catch (error) { if (!(error instanceof RpcFailure) || error.code !== -29) throw error }
+}
+
 export class MoneroWatchService {
   private session: Session | null = null
   private refreshPromise: Promise<MoneroWalletStatus> | null = null
@@ -142,15 +160,7 @@ export class MoneroWatchService {
         } catch { rpc?.close(); rpc = null; await delay(100) }
       }
       if (!rpc) throw new Error('The private Monero wallet RPC did not become ready')
-      const password = randomBytes(32).toString('hex')
-      try {
-        await rpc.call('generate_from_keys', { filename: 'watch', address: config.address,
-          viewkey: config.viewKey, spendkey: '', password, restore_height: config.restoreHeight, language: 'English' }, 30000)
-      } finally { config.viewKey = '' }
-      const actual = await rpc.call('get_address', { account_index: 0 })
-      if (actual.address !== config.address) throw new Error('The Monero watch wallet does not match the device')
-      try { await rpc.call('query_key', { key_type: 'spend_key' }); throw new Error('The Monero sidecar unexpectedly has a spend key') }
-      catch (error) { if (!(error instanceof RpcFailure) || error.code !== -29) throw error }
+      await initializeWatchRpc(rpc, config, randomBytes(32).toString('hex'))
       if (this.generation !== generation) throw new Error('Monero configuration was cancelled')
       const status: MoneroWalletStatus = { network: 'mainnet', address: config.address, balanceAtomic: '0', unlockedBalanceAtomic: '0',
         walletHeight: 0, transactions: [], monitorReady: false, updatedAt: new Date().toISOString(), canSend: false, daemonHeight: daemon.height }

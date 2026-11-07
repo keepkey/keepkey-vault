@@ -1,3 +1,4 @@
+import { SettingsLayout, useSettingsCategory, type SettingsCategory } from "./SettingsLayout"
 import { useUiTranslation } from "../i18n/ui"
 import { firmwareSupportsMonero, MONERO_MIN_FIRMWARE } from "../../shared/firmware-versions"
 import { useState, useEffect, useCallback, useRef } from "react"
@@ -60,70 +61,34 @@ interface DeviceSettingsDrawerProps {
 	onWordCountChange?: (count: 12 | 18 | 24) => void
 }
 
-// ── Collapsible Section ─────────────────────────────────────────────
-
-function Section({ title, color, defaultOpen = true, docsHref, videoHref, children }: {
-	title: string
-	color?: string
-	defaultOpen?: boolean
-	docsHref?: string
-	videoHref?: string
-	children: React.ReactNode
+function Section({ title, category, color, docsHref, videoHref, children }: {
+  title: string; category: SettingsCategory; color?: string; docsHref?: string; videoHref?: string; children: React.ReactNode
 }) {
   const uiText = useUiTranslation()
-
-	const [open, setOpen] = useState(defaultOpen)
-	return (
-		<Box bg="kk.cardBg" border="1px solid" borderColor={color === "kk.error" ? "kk.error" : "kk.border"} borderRadius="xl" overflow="hidden">
-			{/* Docs links sit outside the toggle buttons: an anchor inside a button is invalid. */}
-			<Flex
-				align="center"
-				px="5"
-				_hover={{ bg: "rgba(255,255,255,0.02)" }}
-				borderBottom={open ? "1px solid" : "none"}
-				borderColor="kk.border"
-			>
-				<Box as="button" py="3" textAlign="left" cursor="pointer" onClick={() => setOpen(o => !o)}>
-					<Text fontSize="lg" fontWeight="600" color={color || "kk.gold"}>{title}</Text>
-				</Box>
-				{(docsHref || videoHref) && (
-					<Flex align="center" gap="3" ml="3">
-						{docsHref && <DocsLink href={docsHref} />}
-						{videoHref && <DocsLink href={videoHref} label={uiText("Watch video")} />}
-					</Flex>
-				)}
-				<Flex
-					as="button"
-					tabIndex={-1}
-					aria-hidden="true"
-					flex="1"
-					alignSelf="stretch"
-					align="center"
-					justify="flex-end"
-					pl="3"
-					cursor="pointer"
-					onClick={() => setOpen(o => !o)}
-				>
-					<svg
-						width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-						strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
-						style={{ transform: open ? "rotate(180deg)" : "rotate(0deg)", transition: "transform 0.2s", color: "var(--chakra-colors-kk-textSecondary)" }}
-					>
-						<polyline points="6 9 12 15 18 9" />
-					</svg>
-				</Flex>
-			</Flex>
-			{open && <Box px="5" py="4">{children}</Box>}
-		</Box>
-	)
+  const selected = useSettingsCategory()
+  if (selected !== category) return null
+  return <Box as="section" bg="kk.cardBg" border="1px solid" borderColor={color === 'kk.error' ? 'kk.error' : 'kk.border'} borderRadius="lg" overflow="hidden">
+    <Flex align="center" justify="space-between" gap="3" px="4" py="3" borderBottom="1px solid" borderColor="kk.border" wrap="wrap">
+      <Text as="h3" fontSize="sm" fontWeight="600" color={color || 'kk.textPrimary'}>{title}</Text>
+      {(docsHref || videoHref) && <Flex gap="3" align="center">
+        {docsHref && <DocsLink href={docsHref} />}
+        {videoHref && <DocsLink href={videoHref} label={uiText('Watch video')} />}
+      </Flex>}
+    </Flex>
+    <Box p="4">{children}</Box>
+  </Box>
 }
 
 // ── Toggle Switch ───────────────────────────────────────────────────
 
-function Toggle({ checked, onChange, disabled, label }: { checked: boolean; onChange: (v: boolean) => void; disabled?: boolean; label?: string }) {
+function Toggle({ checked, onChange, disabled, label }: { checked: boolean; onChange: (v: boolean) => void; disabled?: boolean; label: string }) {
 	return (
-		<Box
-			as="button"
+		<Button
+			type="button"
+			variant="plain"
+			p="0"
+			minW="40px"
+			disabled={disabled}
 			role="switch"
 			aria-label={label}
 			aria-checked={checked}
@@ -149,7 +114,7 @@ function Toggle({ checked, onChange, disabled, label }: { checked: boolean; onCh
 				transition="left 0.2s"
 				boxShadow="0 1px 3px rgba(0,0,0,0.3)"
 			/>
-		</Box>
+		</Button>
 	)
 }
 
@@ -184,6 +149,7 @@ function VerificationBadge({ verified, t }: { verified?: boolean; t: (key: strin
 export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpdate, onDownloadUpdate, onApplyUpdate, updatePhase, updateVersion, appVersion, onOpenAuditLog, onOpenPairedApps, onOpenMobilePairing, onChooseNetworks, onRestApiChanged, onNodeConnected, onWordCountChange }: DeviceSettingsDrawerProps) {
   const uiText = useUiTranslation()
 
+	const [settingsCategory, setSettingsCategory] = useState<SettingsCategory>("general")
 	const { t } = useTranslation("settings")
 	const [features, setFeatures] = useState<DeviceFeatures | null>(null)
 	const [featuresError, setFeaturesError] = useState(false)
@@ -371,6 +337,15 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 		setTogglingRestApi(false)
 	}, [onRestApiChanged])
 
+  const toggleMonero = async (enabled: boolean) => {
+    setMoneroBusy(true); setMoneroError(null)
+    try {
+      setAppSettings(await rpcRequest<AppSettings>("setMoneroEnabled", { enabled }, 30000))
+      window.dispatchEvent(new Event("keepkey-settings-changed"))
+      await reloadEmuBuilds()
+    } catch (error) { setMoneroError(error instanceof Error ? error.message : "Unable to change Monero setting") }
+    finally { setMoneroBusy(false) }
+  }
 	const [togglingPasswords, setTogglingPasswords] = useState(false)
 	const [passwordsError, setPasswordsError] = useState('')
 	const togglePasswords = useCallback(async (enabled: boolean) => {
@@ -786,16 +761,20 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 				top="0"
 				right="0"
 				h="100vh"
-				w="440px"
-				maxW="90vw"
+				w={{ base: "100vw", md: "860px" }}
+				maxW="100vw"
 				bg="kk.bg"
+				fontFamily="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif"
+				css={{ '& button, & select': { fontFamily: 'inherit' } }}
 				borderLeft="1px solid"
 				borderColor="kk.border"
 				zIndex={Z.drawerPanel}
 				transform={open ? "translateX(0)" : "translateX(100%)"}
 				visibility={open ? "visible" : "hidden"}
 				transition="transform 0.25s ease, visibility 0.25s"
-				overflowY="auto"
+				display="flex"
+				flexDirection="column"
+				overflow="hidden"
 				outline="none"
 				role={open ? "dialog" : undefined}
 				aria-label={t("title")}
@@ -832,10 +811,10 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 				</Flex>
 
 				{/* Content */}
-				<VStack gap="3" align="stretch" p="4" pb="16">
+				<SettingsLayout category={settingsCategory} onChange={category => { setSettingsCategory(category); setWipeConfirm(false); setResetConfirm(false); setRemovePinConfirm(false) }}>
 
 					{/* ── Language & Currency ─────────────────────────── */}
-					<Section title={t("language")} defaultOpen={false}>
+					<Section title={t("language")} category="general">
 						<LanguageSelector />
 						<Box mt="2">
 							<CurrencySelector />
@@ -843,7 +822,7 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 					</Section>
 
 					{/* ── Device Identity ─────────────────────────────── */}
-					<Section title={t("device")} docsHref={DOCS_LINKS.settingsDevice} videoHref={watch('course-08-firmware')}>
+					<Section title={uiText("Device information")} category="device" docsHref={DOCS_LINKS.settingsDevice} videoHref={watch('course-08-firmware')}>
 						<VStack gap="2" align="stretch">
 							<InfoRow label={t("label")} value={features?.label || deviceState.label || "—"} />
 							<InfoRow label={t("deviceId")} value={deviceState.deviceId ? deviceState.deviceId.slice(0, 16) + "..." : "—"} />
@@ -867,20 +846,20 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 							<InfoRow label={t("transport")} value={deviceState.activeTransport || "—"} />
 							{/* Collapsible hash display for advanced users */}
 							{(deviceState.firmwareHash || deviceState.bootloaderHash) && (
-								<Box mt="1" pt="2" borderTop="1px solid" borderColor="kk.border">
+								<details style={{ marginTop: 8 }}><summary style={{ cursor: "pointer", fontSize: 13, color: "var(--chakra-colors-kk-textSecondary)" }}>{uiText("Firmware details")}</summary>
 									{deviceState.firmwareHash && (
 										<Box mb="1">
-											<Text fontSize="10px" color="kk.textSecondary">{t("fwHash")}</Text>
-											<Text fontSize="9px" color="kk.textMuted" fontFamily="mono" wordBreak="break-all">{deviceState.firmwareHash}</Text>
+											<Text fontSize="xs" color="kk.textSecondary">{t("fwHash")}</Text>
+											<Text fontSize="xs" color="kk.textMuted" fontFamily="mono" wordBreak="break-all">{deviceState.firmwareHash}</Text>
 										</Box>
 									)}
 									{deviceState.bootloaderHash && (
 										<Box>
-											<Text fontSize="10px" color="kk.textSecondary">{t("blHash")}</Text>
-											<Text fontSize="9px" color="kk.textMuted" fontFamily="mono" wordBreak="break-all">{deviceState.bootloaderHash}</Text>
+											<Text fontSize="xs" color="kk.textSecondary">{t("blHash")}</Text>
+											<Text fontSize="xs" color="kk.textMuted" fontFamily="mono" wordBreak="break-all">{deviceState.bootloaderHash}</Text>
 										</Box>
 									)}
-								</Box>
+								</details>
 							)}
 						</VStack>
 
@@ -915,7 +894,7 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 
 					{/* ── Emulator ────────────────────────────────────── */}
 					{deviceState.isEmulator && (
-						<Section title={uiText("Emulator")} defaultOpen={true}>
+						<Section title={uiText("Emulator")} category="device">
 							<VStack gap="2" align="stretch">
 								<Box bg="rgba(255,152,0,0.08)" border="1px solid" borderColor="rgba(255,152,0,0.3)" borderRadius="md" px="3" py="2">
 									<Text fontSize="xs" color="orange.300" fontWeight="600">{uiText("For Development Purposes Only")}</Text>
@@ -1076,7 +1055,7 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 					)}
 
 					{/* ── Security ────────────────────────────────────── */}
-					<Section title={t("security")} docsHref={DOCS_LINKS.settingsSecurity} videoHref={watch('course-03-pin')}>
+					<Section title={uiText("Protection and privacy")} category="security" docsHref={DOCS_LINKS.settingsSecurity} videoHref={watch('course-03-pin')}>
 						{featuresError && (
 							<Text fontSize="sm" color="kk.error" mb="2">{t("couldNotLoadFeatures")}</Text>
 						)}
@@ -1274,7 +1253,7 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 								</Box>
 							</Flex>
 							<Toggle
-								checked={!!features?.passphraseProtection}
+								label={t("bip39Passphrase")} checked={!!features?.passphraseProtection}
 								onChange={handleTogglePassphrase}
 								disabled={togglingPassphrase || !features}
 							/>
@@ -1357,7 +1336,7 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 								</Box>
 							</Flex>
 							<Toggle
-								checked={appSettings.privateModeEnabled}
+								label={uiText("Private Mode")} checked={appSettings.privateModeEnabled}
 								onChange={togglePrivateMode}
 								disabled={togglingPrivateMode}
 							/>
@@ -1365,7 +1344,7 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 					</Section>
 
 					{/* ── Signing Policy ─────────────────────────────── */}
-					<Section title={t("signingPolicy")} defaultOpen={false} docsHref={DOCS_LINKS.settingsSigningPolicy}>
+					<Section title={t("signingPolicy")} category="security" docsHref={DOCS_LINKS.settingsSigningPolicy}>
 						<VStack gap="4" align="stretch">
 							{/* Advanced Mode (blind signing) */}
 							<Flex
@@ -1390,7 +1369,7 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 									</Box>
 								</Flex>
 								<Toggle
-									checked={isPolicyEnabled("AdvancedMode")}
+									label={t("advancedMode")} checked={isPolicyEnabled("AdvancedMode")}
 									onChange={(v) => handleTogglePolicy("AdvancedMode", v)}
 									disabled={togglingPolicy === "AdvancedMode" || !features}
 								/>
@@ -1425,7 +1404,7 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 					</Section>
 
 					{/* ── Application Settings ────────────────────────── */}
-					<Section title={t("application")} defaultOpen={false} docsHref={DOCS_LINKS.settingsApplication}>
+					<Section title={uiText("App connections")} category="connections" docsHref={DOCS_LINKS.settingsApplication}>
 						<VStack gap="4" align="stretch">
 							{/* REST API server toggle */}
 							<Flex justify="space-between" align="center">
@@ -1445,7 +1424,7 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 									</Box>
 								</Flex>
 								<Toggle
-									checked={appSettings.restApiEnabled}
+									label={t("apiBridge")} checked={appSettings.restApiEnabled}
 									onChange={toggleRestApi}
 									disabled={togglingRestApi}
 								/>
@@ -1543,7 +1522,10 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 								</Flex>
 							</Box>
 
-							{/* ── App Version + Update Check ────── */}
+							</VStack>
+                    </Section>
+                    <Section title={t("application")} category="general"><VStack gap="4" align="stretch">
+{/* ── App Version + Update Check ────── */}
 							<Box pt="3" borderTop="1px solid" borderColor="rgba(255,255,255,0.06)">
 								<Flex justify="space-between" align="center">
 									<Box>
@@ -1634,14 +1616,17 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 										</Box>
 									</Flex>
 									<Toggle
-										checked={windowFocusState?.alwaysOnTop ?? false}
+										label={uiText("Always on Top")} checked={windowFocusState?.alwaysOnTop ?? false}
 										onChange={toggleWindowAlwaysOnTop}
 									/>
 								</Flex>
 								<Text fontSize="xs" color="kk.textMuted" mt="1.5" ml="44px">{uiText("Vault raises itself to the front when a signing or pairing request arrives.")}</Text>
 							</Box>
 
-							{/* Pre-release updates toggle */}
+							</VStack>
+                    </Section>
+                    <Section title={uiText("Preview releases")} category="advanced"><VStack gap="4" align="stretch">
+                        {/* Pre-release updates toggle */}
 							<Flex justify="space-between" align="center" mt="3" pt="3" borderTopWidth="1px" borderColor="kk.border">
 								<Flex align="center" gap="3">
 									<Box w="8" h="8" borderRadius="lg" bg="rgba(139,92,246,0.15)" display="flex" alignItems="center" justifyContent="center">
@@ -1649,49 +1634,24 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 									</Box>
 									<VStack gap="0" align="start">
 										<Text fontSize="sm" color="kk.textPrimary" fontWeight="500">{t("preReleaseUpdates", { defaultValue: "Pre-release Updates" })}</Text>
-										<Text fontSize="2xs" color="kk.textMuted">{t("preReleaseUpdatesDesc", { defaultValue: "Get early access to new features before stable release" })}</Text>
+										<Text fontSize="xs" color="kk.textMuted">{t("preReleaseUpdatesDesc", { defaultValue: "Get early access to new features before stable release" })}</Text>
 									</VStack>
 								</Flex>
-								<Box
-									as="button"
-									w="44px" h="24px"
-									borderRadius="full"
-									bg={appSettings.preReleaseUpdates ? "rgba(139,92,246,0.5)" : "rgba(255,255,255,0.1)"}
-									position="relative"
-									transition="all 0.2s"
-									cursor={togglingPreRelease ? "not-allowed" : "pointer"}
-									opacity={togglingPreRelease ? 0.5 : 1}
-									onClick={() => !togglingPreRelease && togglePreRelease(!appSettings.preReleaseUpdates)}
-								>
-									<Box
-										w="18px" h="18px"
-										borderRadius="full"
-										bg={appSettings.preReleaseUpdates ? "#8B5CF6" : "rgba(255,255,255,0.3)"}
-										position="absolute"
-										top="3px"
-										left={appSettings.preReleaseUpdates ? "23px" : "3px"}
-										transition="all 0.2s"
-									/>
-								</Box>
+								<Toggle label={t("preReleaseUpdates")} checked={appSettings.preReleaseUpdates} onChange={togglePreRelease} disabled={togglingPreRelease} />
 							</Flex>
 
-                            <Box mt="3" pt="3" borderTopWidth="1px" borderColor="kk.border">
-                                <Flex justify="space-between" align="center" gap="4">
-                                    <VStack gap="0" align="start">
-                                        <Text fontSize="sm" color="kk.textPrimary" fontWeight="500">{uiText("Monero (XMR)")}</Text>
-                                        <Text fontSize="2xs" color="kk.textMuted">{!appSettings.moneroAvailable ? uiText("Monero is unavailable in this build.") : firmwareSupportsMonero(deviceState.firmwareVersion) ? uiText("Experimental. Adds XMR to the asset list; sending needs the Monero signing (research) emulator.") : `Needs KeepKey firmware ${MONERO_MIN_FIRMWARE} or newer.`}</Text>
-                                    </VStack>
-                                    <Toggle checked={appSettings.moneroEnabled} disabled={moneroBusy || appSettings.moneroAvailable === false} onChange={async enabled => {
-                                        setMoneroBusy(true); setMoneroError(null)
-                                        try { setAppSettings(await rpcRequest<AppSettings>("setMoneroEnabled", { enabled }, 30000)); window.dispatchEvent(new Event("keepkey-settings-changed")); await reloadEmuBuilds() }
-                                        catch (error) { setMoneroError(error instanceof Error ? error.message : "Unable to change Monero setting") }
-                                        finally { setMoneroBusy(false) }
-                                    }} />
-                                </Flex>
-                                {(appSettings.moneroPendingBroadcasts ?? 0) > 0 && <Text data-monero-pending-kept="" fontSize="2xs" color="orange.300" mt="2">{uiText("{{count}} Monero send(s) have an unknown broadcast result. They stay recorded even with Monero off or the device wiped, so no second payment is built from the same funds; open XMR to resolve them.", { count: appSettings.moneroPendingBroadcasts ?? 0 })}</Text>}
+                            </VStack>
+                    </Section>
+                    <Section title={uiText("Node connection")} category="monero"><VStack gap="4" align="stretch">
+                            <Box>
+                                {!appSettings.moneroEnabled && <Box>
+                                  <Text fontSize="sm" color="kk.textSecondary">{appSettings.moneroAvailable === false ? uiText("Monero is unavailable in this build.") : uiText("Enable Monero in Feature Flags to connect your wallet and manage its node.")}</Text>
+                                  <Button mt="3" size="sm" variant="outline" onClick={() => setSettingsCategory('features')}>{uiText("Open Feature Flags")}</Button>
+                                </Box>}
+                                {(appSettings.moneroPendingBroadcasts ?? 0) > 0 && <Text data-monero-pending-kept="" fontSize="xs" color="orange.300" mt="2">{uiText("{{count}} Monero send(s) have an unknown broadcast result. They stay recorded even with Monero off or the device wiped, so no second payment is built from the same funds; open XMR to resolve them.", { count: appSettings.moneroPendingBroadcasts ?? 0 })}</Text>}
                                 {appSettings.moneroEnabled && <VStack gap="2" align="stretch" mt="3">
                                     {open && <MoneroNodePanel />}
-                                    <details style={{ marginTop: 12 }}><summary style={{ cursor: 'pointer', fontSize: 12 }}>{uiText('Wallet history settings')}</summary>
+                                    <details style={{ marginTop: 12 }}><summary style={{ cursor: 'pointer', fontSize: 13 }}>{uiText('Wallet history settings')}</summary>
                                     <Text fontSize="xs" color="kk.textSecondary">{uiText("Scan start block (restore height)")}</Text>
                                     <Flex gap="2">
                                         <Input aria-label={uiText("Monero restore height")} size="sm" type="number" min="0" value={appSettings.moneroRestoreHeight} onChange={event => setAppSettings(previous => ({ ...previous, moneroRestoreHeight: Number(event.target.value) }))} />
@@ -1702,7 +1662,7 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
                                             finally { setMoneroBusy(false) }
                                         }}>{uiText("New wallet: a week back")}</Button>
                                     </Flex>
-                                    <Text fontSize="2xs" color="kk.textMuted">{uiText("0 scans the whole chain (hours) and finds every payment. A later block is faster but hides anything received before it, so use it only for a wallet that has never received XMR. The week-back block comes from the node, which KeepKey can't verify.")}</Text>
+                                    <Text fontSize="xs" color="kk.textMuted">{uiText("0 scans the whole chain (hours) and finds every payment. A later block is faster but hides anything received before it, so use it only for a wallet that has never received XMR. The week-back block comes from the node, which KeepKey can't verify.")}</Text>
                                     <Button size="xs" disabled={moneroBusy} onClick={async () => {
                                         setMoneroBusy(true); setMoneroError(null)
                                         try { const current = await rpcRequest<AppSettings>('getAppSettings'); setAppSettings(await rpcRequest<AppSettings>("setMoneroNode", { daemonUrl: current.moneroDaemonUrl, mode: current.moneroNodeMode, restoreHeight: appSettings.moneroRestoreHeight })); window.dispatchEvent(new Event("keepkey-settings-changed")) }
@@ -1714,7 +1674,10 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
                                 {moneroError && <Text role="alert" fontSize="xs" color="red.400" mt="2">{moneroError}</Text>}
                             </Box>
 
-							{/* Alpha firmware toggle */}
+							</VStack>
+                    </Section>
+                    <Section title={uiText("Research firmware")} category="advanced"><VStack gap="4" align="stretch">
+                        {/* Alpha firmware toggle */}
 							<Flex justify="space-between" align="center" mt="3" pt="3" borderTopWidth="1px" borderColor="kk.border">
 								<Flex align="center" gap="3">
 									<Box w="8" h="8" borderRadius="lg" bg="rgba(236,72,153,0.15)" display="flex" alignItems="center" justifyContent="center">
@@ -1722,37 +1685,17 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 									</Box>
 									<VStack gap="0" align="start">
 										<Text fontSize="sm" color="kk.textPrimary" fontWeight="500">{t("alphaFirmware", { defaultValue: "Alpha Firmware" })}</Text>
-										<Text fontSize="2xs" color="kk.textMuted">{t("alphaFirmwareDesc", { defaultValue: "Opt in to early firmware releases from the beta channel" })}</Text>
+										<Text fontSize="xs" color="kk.textMuted">{t("alphaFirmwareDesc", { defaultValue: "Opt in to early firmware releases from the beta channel" })}</Text>
 									</VStack>
 								</Flex>
-								<Box
-									as="button"
-									w="44px" h="24px"
-									borderRadius="full"
-									bg={appSettings.alphaFirmware ? "rgba(236,72,153,0.5)" : "rgba(255,255,255,0.1)"}
-									position="relative"
-									transition="all 0.2s"
-									cursor={togglingAlphaFirmware ? "not-allowed" : "pointer"}
-									opacity={togglingAlphaFirmware ? 0.5 : 1}
-									onClick={() => !togglingAlphaFirmware && toggleAlphaFirmware(!appSettings.alphaFirmware)}
-								>
-									<Box
-										w="18px" h="18px"
-										borderRadius="full"
-										bg={appSettings.alphaFirmware ? "#EC4899" : "rgba(255,255,255,0.3)"}
-										position="absolute"
-										top="3px"
-										left={appSettings.alphaFirmware ? "23px" : "3px"}
-										transition="all 0.2s"
-									/>
-								</Box>
+								<Toggle label={t("alphaFirmware")} checked={appSettings.alphaFirmware} onChange={toggleAlphaFirmware} disabled={togglingAlphaFirmware} />
 							</Flex>
 
 						</VStack>
 					</Section>
 
 					{/* ── Browser use — needs the REST API, so only shown once it is on ── */}
-					{appSettings.restApiEnabled && <Section title={uiText("Browser use")} defaultOpen={false}>
+					{appSettings.restApiEnabled && <Section title={uiText("Browser use")} category="connections">
 						<Box>
 							<Text fontSize="sm" color="kk.textSecondary">{uiText("Use your existing Chrome profile with an agent. Install and pair the extension, enable its Agent Mode, then paste this prompt into your local agent. The prompt contains no credentials.")}</Text>
 							<Flex gap="2" mt="3" flexWrap="wrap">
@@ -1773,13 +1716,13 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 
 					{/* ── Bitcoin node (self-host) — btc-only devices ─── */}
 					{isBitcoinOnlyVariant(deviceState.firmwareVariant) && (
-						<Section title={uiText("Bitcoin node")} defaultOpen={true} videoHref={watch('btc-node-desktop-core')}>
+						<Section title={uiText("Bitcoin node")} category="networks" videoHref={watch('btc-node-desktop-core')}>
 							<SelfHostNodePanel settings={appSettings} onChange={setAppSettings} onConnected={onNodeConnected} />
 						</Section>
 					)}
 
 					{!isBitcoinOnlyVariant(deviceState.firmwareVariant) && onChooseNetworks && (
-						<Section title={uiText("Networks")} defaultOpen={false} docsHref={DOCS_LINKS.performance}>
+						<Section title={uiText("Networks")} category="networks" docsHref={DOCS_LINKS.performance}>
 							<Flex align="center" justify="space-between" gap="3">
 								<Text fontSize="sm" color="kk.textSecondary">
 									{appSettings.disabledNetworks.length === 0
@@ -1792,7 +1735,7 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 					)}
 
 					{!isBitcoinOnlyVariant(deviceState.firmwareVariant) && isPolicyEnabled("AdvancedMode") && (
-						<Section title={uiText("ClearSign simulation")} defaultOpen={false}>
+						<Section title={uiText("ClearSign simulation")} category="advanced">
 							<VStack gap="3" align="stretch">
 								<Text fontSize="sm" color="kk.textSecondary">{uiText("Use an explicit JSON-RPC provider for pre-sign execution, logs, and call traces. Vault verifies the chain ID before saving. Providers can observe transaction data.")}</Text>
 								<Flex gap="2">
@@ -1807,11 +1750,18 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 					)}
 
 					{/* ── Feature Flags ──────────────────────────────── */}
-					<Section title={t("featureFlags")} defaultOpen={false} docsHref={DOCS_LINKS.settingsFeatureFlags}>
+					<Section title={uiText("Available features")} category="features" docsHref={DOCS_LINKS.settingsFeatureFlags}>
 						<VStack gap="4" align="stretch">
+              <Flex justify="space-between" align="center" gap="4" pb="4" borderBottom="1px solid" borderColor="kk.border">
+                <Box><Text fontSize="md" fontWeight="500" color="kk.textPrimary">{uiText('Monero (XMR)')}</Text>
+                  <Text fontSize="sm" color="kk.textSecondary" mt="0.5">{appSettings.moneroAvailable === false ? uiText('Monero is unavailable in this build.') : !firmwareSupportsMonero(deviceState.firmwareVersion) ? `Needs KeepKey firmware ${MONERO_MIN_FIRMWARE} or newer.` : uiText('Add Monero to your wallet. Manage its node and scan history in Settings → Monero.')}</Text></Box>
+                <Toggle label={uiText('Monero (XMR)')} checked={appSettings.moneroEnabled} disabled={moneroBusy || appSettings.moneroAvailable === false} onChange={toggleMonero} />
+              </Flex>
+              {moneroError && <Text role="alert" fontSize="xs" color="kk.error">{moneroError}</Text>}
+
 							<Box>
 								<Flex justify="space-between" align="center" gap="3">
-									<Box><Text fontSize="md" color="kk.textPrimary" fontWeight="500">{uiText("Password manager")}</Text><Text fontSize="sm" color="kk.textSecondary" mt="0.5">{uiText("Experimental. Recoverable password bank, encrypted backups and guided rotation. Off by default. The Passwords tab appears immediately; no restart needed.")}</Text></Box>
+									<Box><Text fontSize="md" color="kk.textPrimary" fontWeight="500">{uiText("Password manager")}</Text><Text fontSize="sm" color="kk.textSecondary" mt="0.5">{uiText("Experimental. Encrypted password storage, backups and guided rotation with KeepKey approval. Off by default.")}</Text></Box>
 									<Toggle label={uiText('Password manager')} checked={appSettings.passwordManagerEnabled === true} onChange={togglePasswords} disabled={togglingPasswords} />
 								</Flex>
 								{passwordsError && <Text role="alert" fontSize="xs" color="kk.error">{passwordsError}</Text>}
@@ -1837,7 +1787,7 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 									</Box>
 								</Flex>
 								<Toggle
-									checked={appSettings.offlineMode}
+									label={t("offlineMode", { defaultValue: "Offline mode" })} checked={appSettings.offlineMode}
 									onChange={toggleOffline}
 									disabled={togglingOffline}
 								/>
@@ -1848,7 +1798,7 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
                                 <Flex justify="space-between" align="center" gap="3">
                                     <Box><Text fontSize="md" color="kk.textPrimary" fontWeight="500">{uiText("Multisig")}</Text>
                                     <Text fontSize="sm" color="kk.textSecondary" mt="0.5">{uiText("Experimental. Safe multisig accounts on EVM chains and Vaults, plus Bitcoin co-signing for Sparrow or Electrum PSBTs. Off by default. Completed transactions can still be broadcast with this off.")}</Text></Box>
-                                    <Toggle checked={appSettings.btcMultisigEnabled===true} onChange={toggleMultisig} disabled={togglingMultisig}/>
+                                    <Toggle label={uiText("Multisig")} checked={appSettings.btcMultisigEnabled===true} onChange={toggleMultisig} disabled={togglingMultisig}/>
                                 </Flex>
                                 {multisigError && <Text role="alert" fontSize="xs" color="kk.error" mt="2">{multisigError}</Text>}
                             </Box>
@@ -1872,7 +1822,7 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 									</Box>
 								</Flex>
 								<Toggle
-									checked={appSettings.walletConnectEnabled}
+									label={t("walletConnectFeature")} checked={appSettings.walletConnectEnabled}
 									onChange={toggleWalletConnect}
 									disabled={togglingWalletConnect}
 								/>
@@ -1901,7 +1851,7 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 											</Box>
 										</Flex>
 										<Toggle
-											checked={appSettings.emulatorEnabled}
+											label={uiText("Emulator")} checked={appSettings.emulatorEnabled}
 											onChange={toggleEmulator}
 											disabled={togglingEmulator}
 										/>
@@ -1923,7 +1873,7 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 					</Section>
 
 					{/* ── API Services ────────────────────────────────── */}
-					<Section title={uiText("API Services")} defaultOpen={false} docsHref={DOCS_LINKS.settingsApi} videoHref={watch('course-11-app-connections')}>
+					<Section title={uiText("API Services")} category="connections" docsHref={DOCS_LINKS.settingsApi} videoHref={watch('course-11-app-connections')}>
 						<VStack gap="4" align="stretch">
 							<Box>
 								<Text fontSize="md" color="kk.textPrimary" fontWeight="500">{uiText("Pioneer API Servers")}</Text>
@@ -2053,7 +2003,7 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 					</Section>
 
 					{/* ── Danger Zone ─────────────────────────────────── */}
-					<Section title={t("dangerZone")} color="kk.error" defaultOpen={false} docsHref={DOCS_LINKS.wipeDevice} videoHref={watch('intro-more-forgot-pin')}>
+					<Section title={t("dangerZone")} category="advanced" color="kk.error" docsHref={DOCS_LINKS.wipeDevice} videoHref={watch('intro-more-forgot-pin')}>
 						<Text fontSize="sm" color="kk.textSecondary" mb="3">
 							{t("wipeWarning")}
 						</Text>
@@ -2098,7 +2048,7 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 						</Box>
 					</Section>
 
-				</VStack>
+				</SettingsLayout>
 			</Box>
 			<RngAuditPanel open={rngAuditOpen} onClose={() => setRngAuditOpen(false)} />
 			<ClearSignStudio

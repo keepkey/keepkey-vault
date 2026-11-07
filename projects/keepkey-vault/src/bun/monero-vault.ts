@@ -53,6 +53,7 @@ export interface MoneroVaultStatus {
   monitorReady: boolean
   /** What the balance means now: not connected (unknown), still scanning, current, or the last update (node down). */
   syncState: 'not-connected' | 'scanning' | 'ready' | 'unreachable'
+  connectionPhase?: 'device' | 'wallet'
   /** Scan start and target, for progress. */
   restoreHeight?: number
   daemonHeight?: number
@@ -198,6 +199,7 @@ export function createMoneroVault({ engine, confirm, getConfig, sidecar = manage
   pendingStore?: MoneroPendingStore
 }) {
   let epoch = 0, busy = false
+  let connectionPhase: 'device' | 'wallet' | undefined
   let activeDelegate: Delegate | null = null
   let bound: { snapshot: Snapshot; address: string } | null = null
   let lastGood: MoneroVaultStatus | null = null
@@ -240,6 +242,7 @@ export function createMoneroVault({ engine, confirm, getConfig, sidecar = manage
   }
   const stop = () => {
     epoch++; bound = null; lastGood = null; synced = null; prepared = null
+    connectionPhase = undefined
     try { sidecar.stopMoneroSidecar() } catch { /* stop must still invalidate local authorization */ }
     if (activeDelegate) void writeMessage(activeDelegate, 20).catch(() => {})
   }
@@ -404,7 +407,7 @@ export function createMoneroVault({ engine, confirm, getConfig, sidecar = manage
     let current: Snapshot | null
     try { current = snapshot() } catch { stop(); return empty(!!getConfig().enabled, false, 'The Monero configuration or device transport is unavailable') }
     if (!current) { stop(); const config = getConfig(); return empty(config.enabled, false, config.offline ? 'Monero is unavailable in offline mode' : undefined) }
-    if (!bound) return withPendingHint({ ...empty(true, true), restoreHeight: current.config.restoreHeight })
+    if (!bound) return withPendingHint({ ...empty(true, true), restoreHeight: current.config.restoreHeight, ...(connectionPhase ? { connectionPhase } : {}) })
     if (bound.snapshot.key !== current.key || bound.snapshot.wallet !== current.wallet || bound.snapshot.transport !== current.transport) { stop(); return withPendingHint(empty(true, true)) }
     const authorized = bound, generation = epoch
     try {
@@ -430,6 +433,7 @@ export function createMoneroVault({ engine, confirm, getConfig, sidecar = manage
       if (busy) throw new MoneroError('A Monero device request is already in progress')
       const current = requireReady()
       busy = true; stop(); const generation = epoch
+      connectionPhase = 'device'
       let viewKey: Uint8Array | null = null
       try {
         const approved = await current.transport.lockDuring(async () => {
@@ -453,6 +457,7 @@ export function createMoneroVault({ engine, confirm, getConfig, sidecar = manage
         const address = approved.address
         check(current, generation)
         if (!viewKey) throw new MoneroError('The KeepKey did not authorize Monero monitoring')
+        connectionPhase = 'wallet'
         await sidecar.startMoneroSidecar(); check(current, generation)
         const value = await sidecar.configureMoneroWatch({ walletId: `${engine.getDeviceState().deviceId}:${address}`, network: 'mainnet', address,
           viewKey, restoreHeight: current.config.restoreHeight, daemonUrl: current.config.daemonUrl })
@@ -467,7 +472,7 @@ export function createMoneroVault({ engine, confirm, getConfig, sidecar = manage
         // Never forward arbitrary subprocess/transport diagnostics that might contain credentials;
         // the worker's fixed messages (node unavailable / not synchronized) do pass.
         throw publicError(error, 'Unable to connect the Monero watch wallet; review the device and try again')
-      } finally { viewKey?.fill(0); busy = false }
+      } finally { viewKey?.fill(0); busy = false; connectionPhase = undefined }
     },
     /** The primary address (minor 0) or receive subaddress 0/minor, read from the device. */
     async getAddress({ showDisplay = false, minor = 0 }: { showDisplay?: boolean; minor?: number } = {}): Promise<{ address: string; network: 'mainnet'; displayed: boolean; minor: number }> {

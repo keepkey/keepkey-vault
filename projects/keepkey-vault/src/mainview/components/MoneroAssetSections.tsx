@@ -141,17 +141,23 @@ export function MoneroConnectCard({ client, monero }: { client: MoneroClient; mo
 		return () => clearInterval(timer)
 	}, [nodeWaiting, connecting, connect])
 	useEffect(() => {
+		if (!connecting) return
+		const timer = setInterval(() => { void monero.refresh() }, 1000)
+		return () => clearInterval(timer)
+	}, [connecting, monero.refresh])
+	useEffect(() => {
 		const changed = () => { if (!connecting) void connect() }
 		window.addEventListener('keepkey-settings-changed', changed)
 		return () => window.removeEventListener('keepkey-settings-changed', changed)
 	}, [connect, connecting])
+	const openingWallet = connecting && monero.status?.connectionPhase === 'wallet'
 	return (
 		<Box data-monero-connect="" py="4" maxW="520px">
 			<Flex align="center" gap="2" mb="2" role="status">
 				{!error && <Spinner size="sm" />}
-				<Text fontSize="15px" color="var(--text-0)" fontWeight="500">{error ? uiText("Monero couldn't open") : nodeWaiting ? uiText('Waiting for your node') : uiText("Confirm on KeepKey")}</Text>
+				<Text fontSize="15px" color="var(--text-0)" fontWeight="500">{error ? uiText("Monero couldn't open") : nodeWaiting ? uiText('Waiting for your node') : openingWallet ? uiText('Opening Monero wallet') : uiText("Confirm on KeepKey")}</Text>
 			</Flex>
-			<Text fontSize="13px" color="var(--text-2)">{nodeWaiting ? uiText('Your wallet will connect when your node is fully synced. You can follow its progress above.') : uiText("Approve access on your KeepKey to see your Monero balance and receive payments.")}</Text>
+			<Text fontSize="13px" color="var(--text-2)">{nodeWaiting ? uiText('Your wallet will connect when your node is fully synced. You can follow its progress above.') : openingWallet ? uiText('KeepKey approved access. Preparing your local watch wallet; no further device confirmation is needed.') : error ? uiText('Access did not finish. Try again to reconnect your wallet.') : uiText("Approve access on your KeepKey to see your Monero balance and receive payments.")}</Text>
 			{error && <><Text role="alert" color="var(--rose)" fontSize="13px" mt="3">{error}</Text><Button data-monero-connect-button="" mt="3" size="sm" disabled={connecting} onClick={() => { void connect() }}>{uiText("Try again")}</Button></>}
 			<details data-monero-connection-details="" style={{ marginTop: 20, color: "var(--text-3)", fontSize: 12 }}>
 				<summary style={{ cursor: "pointer" }}>{uiText("Connection details")}</summary>

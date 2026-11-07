@@ -112,6 +112,9 @@ for (const [name, status] of [['rowNotConnected', notConnected], ['rowReady', co
   out.connectButtons = [...container.querySelectorAll('[data-monero-connect] button')].map(text)
   out.settingsClosed = !(q(container, '[data-monero-connection-details]') as HTMLDetailsElement | null)?.open
   out.scanChoices = container.querySelectorAll('input[name="monero-scan-start"]').length
+  client.set({ ...notConnected, connectionPhase: 'wallet' })
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, 1100)) })
+  out.walletOpeningText = text(q(container, '[data-monero-connect]'))
   await act(async () => { client.releaseConnect() })
   out.technicalReceiveHidden = !q(container, '[data-receive-technical]')
   out.afterConnect = { balance: text(q(container, '[data-monero-balance]')), note: q(container, '[data-monero-note]')?.getAttribute('data-monero-note') }

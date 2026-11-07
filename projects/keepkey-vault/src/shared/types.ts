@@ -600,6 +600,7 @@ export interface MoneroStatus {
   monitorReady: boolean
   /** What the balance means now: unknown (not connected), scanning, current, or the last update (node down). */
   syncState: 'not-connected' | 'scanning' | 'ready' | 'unreachable'
+  connectionPhase?: 'device' | 'wallet'
   restoreHeight?: number
   daemonHeight?: number
   emulatorReady?: boolean

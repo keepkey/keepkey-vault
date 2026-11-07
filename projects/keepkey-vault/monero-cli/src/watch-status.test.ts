@@ -1,10 +1,41 @@
 import { describe, expect, test } from 'bun:test'
-import { DigestWalletRpc } from './digest'
+import { DigestWalletRpc, RpcFailure } from './digest'
 import { WATCH_NODE_UNREACHABLE, WATCH_SCANNING, parseTxLookup, validateKeyImageImport, validateWalletStatus } from './protocol'
-import { MoneroWatchService, daemonRequest, lookupTransaction, nodeHeight, refreshFailure, verifyDaemon } from './wallet'
+import { MoneroWatchService, daemonRequest, initializeWatchRpc, lookupTransaction, nodeHeight, refreshFailure, verifyDaemon } from './wallet'
 
 // Loopback fakes only: no wallet-rpc, daemon or network beyond 127.0.0.1.
 const ADDRESS = '44jKQv6ZKMd5ecLLmkNJGi7azgSptEq8ki7TFiat1TfLfdDQ1tQ7ZYa3cRh7X2uRwvLDjddWh97ajeyhR2seKSECQeDx1WR'
+
+test('watch creation cannot start an idle scan before wallet identity and spend-key checks', async () => {
+  let automatic = true, scanning = false
+  const calls: string[] = []
+  // Model Core's idle scan taking over its RPC thread after wallet creation.
+  const server = Bun.serve({ hostname: '127.0.0.1', port: 0, async fetch(req) {
+    const { id, method, params } = await req.json()
+    calls.push(method)
+    if (scanning) return Response.json({ jsonrpc: '2.0', id, error: { code: -1 } })
+    if (method === 'auto_refresh') automatic = params.enable
+    if (method === 'generate_from_keys') scanning = automatic
+    return Response.json({ jsonrpc: '2.0', id, ...(method === 'query_key' ? { error: { code: -29 } } :
+      { result: method === 'get_address' ? { address: ADDRESS } : {} }) })
+  } })
+  const rpc = new DigestWalletRpc(server.port, 'test', 'test')
+  const config = { address: ADDRESS, viewKey: '07'.repeat(32), restoreHeight: 100 }
+  try {
+    await initializeWatchRpc(rpc, config, 'public-fixture')
+    expect(scanning).toBe(false)
+    expect(calls).toEqual(['auto_refresh', 'generate_from_keys', 'get_address', 'query_key'])
+    expect(config.viewKey).toBe('')
+  } finally { rpc.close(); server.stop(true) }
+})
+
+test('watch startup refuses to proceed if automatic scanning cannot be disabled', async () => {
+  const config = { address: ADDRESS, viewKey: '07'.repeat(32), restoreHeight: 100 }
+  let calls = 0
+  await expect(initializeWatchRpc({ call: async () => { calls++; throw new RpcFailure(-1) } }, config, 'public-fixture')).rejects.toThrow()
+  expect(calls).toBe(1)
+  expect(config.viewKey).toBe('')
+})
 
 describe('a long scan is not an unreachable node', () => {
   test('a wallet-rpc call that runs out of time reports a timeout (it used to read as "unavailable")', async () => {

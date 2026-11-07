@@ -130,6 +130,20 @@ test('emulator wraps both address display and view export in the interactive con
   expect(f.delegate.sent.some(item => item.debug || item.type === 100)).toBe(false)
 })
 
+test('connection progress moves from device approval to opening the wallet and clears on completion', async () => {
+  const f = fixture()
+  let release!: () => void, started!: () => void
+  const waiting = new Promise<void>(resolve => { started = resolve })
+  f.sidecar.startMoneroSidecar = async () => { started(); await new Promise<void>(resolve => { release = resolve }) }
+  const connection = f.api.connect()
+  expect((await f.api.getStatus()).connectionPhase).toBe('device')
+  await waiting
+  expect((await f.api.getStatus()).connectionPhase).toBe('wallet')
+  release()
+  expect((await connection).connectionPhase).toBeUndefined()
+  expect((await f.api.getStatus()).connectionPhase).toBeUndefined()
+})
+
 test('address/view-key identity mismatch, duplicate fields and invalid key dimensions never configure a sidecar', async () => {
   for (const body of [combine(bytes(1, DUMMY_VIEW), text(2, OTHER)), combine(bytes(1, DUMMY_VIEW), bytes(1, DUMMY_VIEW), text(2, ADDRESS)),
     combine(bytes(1, new Uint8Array(31).fill(7)), text(2, ADDRESS)), combine(bytes(1, new Uint8Array(32)), text(2, ADDRESS))]) {
