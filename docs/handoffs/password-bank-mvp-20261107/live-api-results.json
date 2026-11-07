@@ -1,0 +1,10 @@
+{
+  "pairedInventoryDisabled": true,
+  "noStore": true,
+  "noBrowserCors": true,
+  "unauthenticatedRejected": true,
+  "browserOriginRejected": true,
+  "browserFetchRejected": true,
+  "disabledGenerateRejected": true,
+  "passwordToolsHiddenWhileOff": true
+}
