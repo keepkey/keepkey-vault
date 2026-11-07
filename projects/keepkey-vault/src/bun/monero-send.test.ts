@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test'
-import { readFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { keccak_256 } from '@noble/hashes/sha3'
 import { chacha20poly1305 } from '@noble/ciphers/chacha'
@@ -10,6 +11,7 @@ import { DigestWalletRpc } from '../../monero-cli/src/digest'
 import { checkSignedTransaction, concat, keyImageInitRequest, lengthField, openKeyImage, parseFields, parseSignedTransaction, reviewPlan,
   signRequest, transferDetails, varint } from './monero-wire'
 import { createMoneroVault, type MoneroWatchSidecar } from './monero-vault'
+import { createFilePendingStore, type MoneroPendingStore } from './monero-pending'
 import { formatXmrAtomic, moneroAddressKind, parseXmrAmount } from '../shared/monero-address'
 
 // Public research fixtures only (scripts/make-monero-send-fixtures.py, from the firmware tree's
@@ -257,6 +259,11 @@ class Emulator {
   signedBlob = blobOf('base')
   signedHash = unhex(referenceHash('base'))
   reviewScreens = 3
+  address = WALLET
+  /** PinMatrixRequest (18) instead of an answer: a PIN-locked wallet. */
+  pinLocked = false
+  /** Runs at each 65000 review screen (switch device / turn Monero off mid-signing). */
+  onReviewScreen: (() => void) | null = null
   private respond(messages: Array<[number, Uint8Array]>) {
     const [first, ...rest] = messages
     this.queue.push(...reports(first[0], first[1]))
@@ -265,15 +272,21 @@ class Emulator {
   private handle(type: number, body: Uint8Array) {
     this.received.push({ type, body })
     const images = fixtures.cases.base.signedTransaction.keyImages as string[]
-    if (type === 27) return this.respond(this.pending)
+    if (type === 27) { if (this.pending[0]?.[0] === 26 || this.pending[0]?.[0] === 65001) this.onReviewScreen?.(); return this.respond(this.pending) }
     if (type === 20) return this.respond([[3, new Uint8Array([8, 4])]])
-    if (type === 540) return this.respond([[541, lengthField(1, new TextEncoder().encode(WALLET))]])
-    if (type === 542) return this.respond([[26, new Uint8Array()], [543, concat([lengthField(1, new Uint8Array(32).fill(7)), lengthField(2, new TextEncoder().encode(WALLET))])]])
+    if (this.pinLocked && (type === 540 || type === 542 || type === 530 || type === 65000)) return this.respond([[18, new Uint8Array([8, 1])]])
+    if (type === 540) {
+      const minor = Number(parseFields(body).get(5)?.[0] ?? 0n)
+      return this.respond([[541, lengthField(1, new TextEncoder().encode(minor ? SUBADDRESS : this.address))]])
+    }
+    if (type === 542) return this.respond([[26, new Uint8Array()], [543, concat([lengthField(1, new Uint8Array(32).fill(7)), lengthField(2, new TextEncoder().encode(this.address))])]])
     if (type === 530) return this.respond([[26, new Uint8Array()], [531, new Uint8Array()]])
     if (type === 532) {
-      const count = parseFields(body).get(1)!.length
-      return this.respond([[533, concat(Array.from({ length: count }, (_, i) => {
-        const iv = new Uint8Array(12).fill(i + 1), plain = concat([unhex(images[i]), new Uint8Array(64).fill(5)])
+      // Key image per output: the fixture's for the fixture output, a derived one for synthetic outputs.
+      const outKeys = parseFields(body).get(1)!.map(record => hex(parseFields(record as Uint8Array).get(1)![0] as Uint8Array))
+      return this.respond([[533, concat(outKeys.map((outKey, i) => {
+        const image = outKey === fixtures.cases.base.adapterOutputs.outputs[0].out_key ? images[0] : hex(keccak_256(unhex(outKey)))
+        const iv = new Uint8Array(12).fill(i + 1), plain = concat([unhex(image), new Uint8Array(64).fill(5)])
         return lengthField(1, concat([lengthField(1, iv), lengthField(3, chacha20poly1305(ENC_KEY, iv).encrypt(plain))]))
       }))]])
     }
@@ -303,26 +316,31 @@ class Emulator {
   }
 }
 
-function bridge(options: { signing?: boolean; sendReady?: boolean; monitorReady?: boolean } = {}) {
+function bridge(options: { signing?: boolean; sendReady?: boolean; monitorReady?: boolean; pendingStore?: MoneroPendingStore } = {}) {
   const delegate = new Emulator()
   const calls: Record<string, any[]> = { imports: [], transfers: [], relays: [], refreshes: [] }
-  const watch = () => ({ network: 'mainnet', address: WALLET, balanceAtomic: '7000000000000', unlockedBalanceAtomic: '7000000000000', walletHeight: 120,
-    transactions: [], monitorReady: options.monitorReady !== false, updatedAt: new Date().toISOString(), canSend: false })
-  let draft = () => ({ feeAtomic: '20000000', amountAtomic: '2000000000000', plan: planOf('base') })
+  // The watch wallet as the sidecar reports it; tests edit it (new tx, node down, scanning).
+  const wallet: Record<string, any> = { balanceAtomic: '7000000000000', unlockedBalanceAtomic: '7000000000000', walletHeight: 120, transactions: [],
+    monitorReady: options.monitorReady !== false }
+  const watch = () => ({ network: 'mainnet', address: delegate.address, canSend: false, updatedAt: new Date().toISOString(), ...structuredClone(wallet) })
+  let draft = (_input: { address: string; amountAtomic: string }) => ({ feeAtomic: '20000000', amountAtomic: '2000000000000', plan: planOf('base') })
   let relayError: Error | null = null
+  let transferError: Error | null = null
+  let outputs = () => validateOutputs(structuredClone(fixtures.cases.base.adapterOutputs))
   const sidecar: MoneroWatchSidecar = {
     async startMoneroSidecar() {}, stopMoneroSidecar() {},
     async configureMoneroWatch() { return watch() },
     async getMoneroWalletStatus() { return watch() },
     isMoneroSendReady: () => options.sendReady !== false,
-    async exportMoneroOutputs() { return validateOutputs(structuredClone(fixtures.cases.base.adapterOutputs)) },
+    async exportMoneroOutputs() { return outputs() },
     async importMoneroKeyImages(input) { calls.imports.push(input); return { height: 120, spentAtomic: '0', unspentAtomic: '7000000000000' } },
-    async createMoneroTransfer(input) { calls.transfers.push(input); return draft() },
+    async createMoneroTransfer(input) { calls.transfers.push(input); if (transferError) throw transferError; return draft(input) },
     async relayMoneroTransaction(input) { calls.relays.push(input); if (relayError) throw relayError; return { relayed: true } },
     async refreshMoneroWatch() { calls.refreshes.push(true) },
   }
   const transport = { delegate, lockDuring: <T,>(operation: () => Promise<T>) => operation() }
-  const state = { state: 'ready', deviceId: 'PUBLIC-EMULATOR', activeTransport: 'emulator', isHiddenWallet: false, firmwareVersion: '7.17.0' }
+  const state: { state: string; deviceId: string; activeTransport: string; isHiddenWallet: boolean; firmwareVersion: string } = { state: 'ready', deviceId: 'PUBLIC-EMULATOR', activeTransport: 'emulator', isHiddenWallet: false, firmwareVersion: '7.17.0' }
+  const config: { enabled: boolean; offline: boolean; daemonUrl: string; restoreHeight: number | null } = { enabled: true, offline: false, daemonUrl: 'http://127.0.0.1:18081', restoreHeight: 0 }
   const engine = { isEmulator: true, wallet: { transport }, emuDelegate: delegate, currentSeedEthAddress: null as string | null, getDeviceState: () => ({ ...state }) }
   const confirmed: any[] = []
   const confirm = async (operation: () => Promise<any>, details: any) => {
@@ -330,9 +348,10 @@ function bridge(options: { signing?: boolean; sendReady?: boolean; monitorReady?
     try { return await operation() } finally { delegate.onButtonRequest = null }
   }
   const api = createMoneroVault({ engine, confirm, sidecar, signingEmulator: () => options.signing !== false,
-    getConfig: () => ({ enabled: true, offline: false, daemonUrl: 'http://127.0.0.1:18081', restoreHeight: 0 }) })
-  return { api, delegate, calls, confirmed, engine,
-    setDraft(next: typeof draft) { draft = next }, setRelayError(error: Error | null) { relayError = error } }
+    getConfig: () => ({ ...config }), pendingStore: options.pendingStore })
+  return { api, delegate, calls, confirmed, engine, state, config, wallet,
+    setDraft(next: typeof draft) { draft = next }, setRelayError(error: Error | null) { relayError = error },
+    setTransferError(error: Error | null) { transferError = error }, setOutputs(next: typeof outputs) { outputs = next } }
 }
 const sentTypes = (b: ReturnType<typeof bridge>) => b.delegate.received.map(message => message.type)
 
@@ -390,7 +409,7 @@ describe('Desktop Monero send bridge', () => {
     await expect(b.api.prepareSend({ address: RECIPIENT, amountAtomic: '0' })).rejects.toThrow('positive')
     await expect(b.api.prepareSend({ address: RECIPIENT, amountAtomic: 5 as any })).rejects.toThrow('positive')
     await expect(b.api.prepareSend({ address: RECIPIENT, amountAtomic: '18446744073709551616' })).rejects.toThrow('positive')
-    await expect(b.api.prepareSend({ address: WALLET, amountAtomic: '1' })).rejects.toThrow('same wallet')
+    await expect(b.api.prepareSend({ address: WALLET, amountAtomic: '1' })).rejects.toThrow("this wallet's own main address")
     expect(b.calls.transfers).toHaveLength(0)
   })
 
@@ -462,5 +481,252 @@ describe('Desktop Monero send bridge', () => {
     expect(sentTypes(b)).not.toContain(65000)
     b.engine.currentSeedEthAddress = null
     expect((await b.api.getStatus()).keyImagesSynced).toBe(false)
+  })
+})
+
+// ── Stability plan C2/C3: every balance state and send edge case, through the same bridge ──
+
+const UNLOCKED = 7_000_000_000_000n, FEE = 20_000_000n
+/** A wallet that behaves like wallet-rpc + the adapter for the one 7 XMR fixture output: fee 0.00002,
+ *  "not enough" past the balance, and no plan at all for exactly zero change (the adapter refuses zero outputs). */
+function walletDraft(input: { address: string; amountAtomic: string }) {
+  const amount = BigInt(input.amountAtomic)
+  if (amount + FEE > UNLOCKED) throw new Error('Not enough unlocked XMR for this amount and fee')
+  if (amount + FEE === UNLOCKED) throw new Error('The watch wallet cannot build this transaction')
+  const plan = planOf('base')
+  plan.outputs[0] = { ...plan.outputs[0], address: input.address, amountAtomic: amount.toString() }
+  plan.outputs[1] = { ...plan.outputs[1], amountAtomic: (UNLOCKED - amount - FEE).toString() }
+  return { feeAtomic: FEE.toString(), amountAtomic: amount.toString(), plan }
+}
+async function ready(options: Parameters<typeof bridge>[0] = {}) {
+  const b = bridge(options)
+  b.setDraft(walletDraft)
+  await b.api.connect(); await b.api.syncKeyImages()
+  return b
+}
+const signs = (b: ReturnType<typeof bridge>) => sentTypes(b).filter(type => type === 65000).length
+
+describe('C2: balance states', () => {
+  test('scanning: no balance claim until the first scan finishes, progress from the node tip', async () => {
+    const b = bridge()
+    Object.assign(b.wallet, { walletHeight: 0, monitorReady: false, balanceAtomic: '0', unlockedBalanceAtomic: '0', daemonHeight: 3_000_000 })
+    expect((await b.api.connect()).syncState).toBe('scanning')
+    Object.assign(b.wallet, { walletHeight: 2_000_000 })
+    expect(await b.api.getStatus()).toMatchObject({ syncState: 'scanning', walletHeight: 2_000_000, daemonHeight: 3_000_000, restoreHeight: 0, error: undefined })
+  })
+
+  test('node down: the last balance stays, labelled unreachable (worker error and worker gone)', async () => {
+    const b = bridge()
+    await b.api.connect()
+    b.wallet.monitorReady = false; b.wallet.error = 'The Monero node could not be reached; showing the last wallet update'
+    expect(await b.api.getStatus()).toMatchObject({ syncState: 'unreachable', balanceAtomic: '7000000000000', available: true })
+    // The worker itself gone: the vault keeps its last good status, labelled.
+    Object.defineProperty(b.wallet, 'walletHeight', { enumerable: true, get() { throw new Error('worker gone') } })
+    expect(await b.api.getStatus()).toMatchObject({ syncState: 'unreachable', balanceAtomic: '7000000000000', walletHeight: 120,
+      error: 'The Monero monitor is temporarily unavailable; showing the last wallet update' })
+  })
+
+  test('a long scan whose refresh timed out is scanning, not a node failure', async () => {
+    const b = bridge()
+    await b.api.connect()
+    Object.assign(b.wallet, { monitorReady: false, error: 'The Monero watch wallet is still scanning' })
+    expect(await b.api.getStatus()).toMatchObject({ syncState: 'scanning', error: undefined })
+  })
+
+  test('received but not verified spendable until key images are synced', async () => {
+    const b = bridge()
+    expect(await b.api.connect()).toMatchObject({ syncState: 'ready', spendStateKnown: false, keyImagesSynced: false })
+    expect(await b.api.syncKeyImages()).toMatchObject({ spendStateKnown: true, keyImagesSynced: true })
+  })
+})
+
+describe('C3: send edge cases', () => {
+  test('more than the unlocked balance is refused before the wallet builds anything, naming the locked part', async () => {
+    const b = bridge(); b.setDraft(walletDraft)
+    b.wallet.balanceAtomic = '9000000000000'
+    await b.api.connect(); await b.api.syncKeyImages()
+    await expect(b.api.prepareSend({ address: RECIPIENT, amountAtomic: '8000000000000' })).rejects.toThrow('more than your unlocked balance (7.000000000000 XMR); 2.000000000000 XMR is still locked')
+    expect(b.calls.transfers).toHaveLength(0)
+  })
+
+  test('exactly the balance minus the fee (zero change) is explained, never signed; balance minus less than the fee is short', async () => {
+    const b = await ready()
+    await expect(b.api.prepareSend({ address: RECIPIENT, amountAtomic: (UNLOCKED - FEE).toString() })).rejects.toThrow('leaves no change output')
+    await expect(b.api.prepareSend({ address: RECIPIENT, amountAtomic: (UNLOCKED - 1n).toString() })).rejects.toThrow('Not enough unlocked XMR for this amount plus the 0.000020000000 XMR network fee')
+    expect(signs(b)).toBe(0)
+  })
+
+  test('Max sends the whole unlocked balance minus the fee, keeping one atomic unit of change, and signs it', async () => {
+    const b = await ready()
+    const review = await b.api.prepareSend({ address: RECIPIENT, max: true })
+    expect(review).toMatchObject({ max: true, amountAtomic: (UNLOCKED - FEE - 1n).toString(), feeAtomic: FEE.toString(), changeAtomic: '1' })
+    expect(await b.api.send({ prepareId: review.prepareId })).toEqual({ txid: referenceHash('base') })
+    expect(b.calls.relays).toHaveLength(1)
+  })
+
+  test('dust: an amount not above the fee is refused with the fee named, nothing signed', async () => {
+    const b = await ready()
+    await expect(b.api.prepareSend({ address: RECIPIENT, amountAtomic: '1' })).rejects.toThrow('The network fee (0.000020000000 XMR) is not less than this amount')
+    expect(signs(b)).toBe(0)
+  })
+
+  test('a fee above the 0.005 XMR cap is refused, naming the cap', async () => {
+    const b = await ready()
+    b.setDraft(input => { const d = walletDraft(input); d.plan.feeAtomic = d.feeAtomic = '6000000000'; d.plan.outputs[1].amountAtomic = (UNLOCKED - BigInt(input.amountAtomic) - 6_000_000_000n).toString(); return d })
+    await expect(b.api.prepareSend({ address: RECIPIENT, amountAtomic: '2000000000000' })).rejects.toThrow('above the 0.005000000000 XMR safety cap')
+    expect(signs(b)).toBe(0)
+  })
+
+  test('node down before signing: the prepare fails with the node named and nothing reaches the device', async () => {
+    const b = await ready()
+    b.setTransferError(new Error('The Monero daemon is unavailable'))
+    await expect(b.api.prepareSend({ address: RECIPIENT, amountAtomic: '2000000000000' })).rejects.toThrow('The Monero daemon is unavailable')
+    expect(signs(b)).toBe(0)
+  })
+
+  test('device switched while KeepKey shows the review: the signed bytes are dropped, never relayed or kept', async () => {
+    const b = await ready()
+    const review = await b.api.prepareSend({ address: RECIPIENT, amountAtomic: '2000000000000' })
+    b.delegate.onReviewScreen = () => { b.state.deviceId = 'OTHER-DEVICE' }
+    await expect(b.api.send({ prepareId: review.prepareId })).rejects.toThrow('changed')
+    expect(b.calls.relays).toHaveLength(0)
+    b.state.deviceId = 'PUBLIC-EMULATOR'
+    expect((await b.api.getStatus()).unrelayedTxid).toBeUndefined()
+  })
+
+  test('Monero turned off between review and confirm, or during signing: nothing is signed or relayed', async () => {
+    const b = await ready()
+    let review = await b.api.prepareSend({ address: RECIPIENT, amountAtomic: '2000000000000' })
+    b.config.enabled = false
+    await expect(b.api.send({ prepareId: review.prepareId })).rejects.toThrow('Monero is disabled in settings')
+    expect(signs(b)).toBe(0)
+    b.config.enabled = true
+    await b.api.connect(); await b.api.syncKeyImages()
+    review = await b.api.prepareSend({ address: RECIPIENT, amountAtomic: '2000000000000' })
+    b.delegate.onReviewScreen = () => { b.config.enabled = false }
+    await expect(b.api.send({ prepareId: review.prepareId })).rejects.toThrow()
+    expect(b.calls.relays).toHaveLength(0)
+  })
+
+  test('key images go out of date when XMR arrives after the sync; a plan spending an unsynced output is refused', async () => {
+    const b = await ready()
+    b.wallet.transactions = [{ txid: 'cd'.repeat(32), amountAtomic: '1000000000000', confirmations: 0, locked: true, height: 0, type: 'pool' }]
+    expect(await b.api.getStatus()).toMatchObject({ canSend: false, sendBlocked: 'key-images', keyImagesStale: true, spendStateKnown: false })
+    await expect(b.api.prepareSend({ address: RECIPIENT, amountAtomic: '2000000000000' })).rejects.toThrow('New XMR arrived since the last key-image sync')
+    expect((await b.api.syncKeyImages()).canSend).toBe(true)
+    b.setDraft(input => { const d = walletDraft(input); d.plan.inputs[0].ring[d.plan.inputs[0].realMember].publicKey = 'ee'.repeat(32); return d })
+    await expect(b.api.prepareSend({ address: RECIPIENT, amountAtomic: '2000000000000' })).rejects.toThrow('New XMR arrived since the last key-image sync')
+    expect(signs(b)).toBe(0)
+  })
+
+  test('more than 64 outputs sync in sessions of 64, each imported at its offset', async () => {
+    const b = bridge()
+    const base = validateOutputs(structuredClone(fixtures.cases.base.adapterOutputs))[0]
+    const many = Array.from({ length: 130 }, (_, i) => i === 0 ? base : { ...base, transferIndex: i, outKey: hex(keccak_256(new Uint8Array([i, 1]))), globalIndex: String(1000 + i) })
+    b.setOutputs(() => many)
+    await b.api.connect()
+    expect((await b.api.syncKeyImages()).keyImagesSynced).toBe(true)
+    expect(sentTypes(b).filter(type => type === 530)).toHaveLength(3)
+    const counts = b.delegate.received.filter(m => m.type === 530).map(m => Number(parseFields(m.body).get(1)![0]))
+    expect(counts).toEqual([64, 64, 2])
+    expect(b.calls.imports.map(i => [i.offset, i.signedKeyImages.length])).toEqual([[0, 64], [64, 64], [128, 2]])
+    expect(b.calls.imports[0].signedKeyImages[0].keyImage).toBe(fixtures.cases.base.signedTransaction.keyImages[0])
+  })
+
+  test('subaddress recipients are prepared; integrated addresses are refused with the reason', async () => {
+    const b = await ready()
+    expect((await b.api.prepareSend({ address: SUBADDRESS, amountAtomic: '2000000000000' })).outputs[0]).toEqual({ role: 'recipient', address: SUBADDRESS, amountAtomic: '2000000000000' })
+    const integrated = '4LL9oSLmtpccfufTMvppY6JwXNouMBzSkbLYfpAV5Usx3skxNgYeYTRj5UzqtReoS44qo9mtmXCqY45DJ852K5Jv2bYXZKKQePHES9khPK'
+    expect(moneroAddressKind(integrated)).toBe('integrated')
+    await expect(b.api.prepareSend({ address: integrated, amountAtomic: '1' })).rejects.toThrow('Integrated addresses are not supported')
+    expect(b.calls.transfers.every(t => t.address !== integrated)).toBe(true)
+  })
+
+  test('my own main address is refused with the way to move funds; my own subaddress comes from the device', async () => {
+    const b = await ready()
+    await expect(b.api.prepareSend({ address: WALLET, amountAtomic: '2000000000000' })).rejects.toThrow('send it to one of its subaddresses')
+    expect(await b.api.getAddress({ showDisplay: false, minor: 1 })).toEqual({ address: SUBADDRESS, network: 'mainnet', displayed: false, minor: 1 })
+    await expect(b.api.getAddress({ showDisplay: false, minor: 200 })).rejects.toThrow('from 0 to 199')
+    expect((await b.api.prepareSend({ address: SUBADDRESS, amountAtomic: '2000000000000' })).recipient).toBe(SUBADDRESS)
+  })
+
+  test('a PIN-locked wallet cancels the request and says to unlock; nothing is signed', async () => {
+    const b = await ready()
+    const review = await b.api.prepareSend({ address: RECIPIENT, amountAtomic: '2000000000000' })
+    b.delegate.pinLocked = true
+    await expect(b.api.send({ prepareId: review.prepareId })).rejects.toThrow('Unlock the KeepKey wallet first')
+    expect(sentTypes(b).at(-1)).toBe(20)
+    expect(b.calls.relays).toHaveLength(0)
+    await expect(b.api.connect()).rejects.toThrow('Unlock the KeepKey wallet first')
+  })
+})
+
+describe('C3: the unknown-broadcast guard survives an app restart', () => {
+  const store = () => { const dir = mkdtempSync(join(tmpdir(), 'kk-monero-pending-')); return { dir, store: createFilePendingStore(dir) } }
+
+  test('a restarted app restores the block from an owner-only file and re-broadcasts the same bytes', async () => {
+    const { dir, store: pendingStore } = store()
+    const first = await ready({ pendingStore })
+    first.setRelayError(new Error('The Monero daemon is unavailable'))
+    const review = await first.api.prepareSend({ address: RECIPIENT, amountAtomic: '2000000000000' })
+    await expect(first.api.send({ prepareId: review.prepareId })).rejects.toThrow('broadcast result is unknown')
+    const file = join(dir, 'monero-pending-broadcast.json')
+    expect(statSync(file).mode & 0o777).toBe(0o600)
+    expect(statSync(dir).mode & 0o777).toBe(0o700)
+
+    // "Restart": a new bridge (new vault, same file); nothing in memory carries over.
+    const second = bridge({ pendingStore: createFilePendingStore(dir) })
+    second.setDraft(walletDraft)
+    expect((await second.api.getStatus()).unrelayedTxid).toBe(referenceHash('base'))
+    await second.api.connect(); await second.api.syncKeyImages()
+    expect(await second.api.getStatus()).toMatchObject({ canSend: false, sendBlocked: 'unrelayed', unrelayedTxid: referenceHash('base') })
+    await expect(second.api.prepareSend({ address: RECIPIENT, amountAtomic: '2000000000000' })).rejects.toThrow('retry broadcasting')
+    expect(await second.api.retryRelay()).toEqual({ txid: referenceHash('base') })
+    expect(second.calls.relays).toEqual([{ txHex: fixtures.cases.base.signedTransaction.hex }])
+    expect(signs(second)).toBe(0)
+    expect(existsSync(file)).toBe(false)
+    expect((await second.api.getStatus()).canSend).toBe(true)
+  })
+
+  test('the block belongs to the wallet that signed: a passphrase wallet is not blocked, its owner still is', async () => {
+    const { store: pendingStore } = store()
+    const b = await ready({ pendingStore })
+    b.setRelayError(new Error('ETIMEDOUT'))
+    const review = await b.api.prepareSend({ address: RECIPIENT, amountAtomic: '2000000000000' })
+    await expect(b.api.send({ prepareId: review.prepareId })).rejects.toThrow('broadcast result is unknown')
+    b.state.isHiddenWallet = true; b.engine.currentSeedEthAddress = '0xpassphrase'; b.delegate.address = RECIPIENT
+    const hidden = await b.api.connect()
+    expect(hidden.address).toBe(RECIPIENT)
+    expect(hidden.sendBlocked).not.toBe('unrelayed')
+    expect(hidden.unrelayedTxid).toBeUndefined()
+    b.state.isHiddenWallet = false; b.engine.currentSeedEthAddress = null; b.delegate.address = WALLET
+    expect((await b.api.connect()).sendBlocked).toBe('unrelayed')
+  })
+
+  test('a record whose bytes do not hash to its txid is not restored', () => {
+    const { dir } = store()
+    writeFileSync(join(dir, 'monero-pending-broadcast.json'), JSON.stringify({ version: 1, records: [
+      { wallet: `PUBLIC-EMULATOR:${WALLET}`, txid: 'ab'.repeat(32), txHex: fixtures.cases.base.signedTransaction.hex, createdAt: new Date().toISOString() }] }))
+    expect(createFilePendingStore(dir).load()).toEqual([])
+    writeFileSync(join(dir, 'monero-pending-broadcast.json'), 'not json')
+    expect(createFilePendingStore(dir).load()).toEqual([])
+  })
+
+  test('if the record cannot be saved, the signed transaction is not broadcast', async () => {
+    const b = await ready({ pendingStore: { load: () => [], save: () => { throw new Error('disk full') } } })
+    const review = await b.api.prepareSend({ address: RECIPIENT, amountAtomic: '2000000000000' })
+    await expect(b.api.send({ prepareId: review.prepareId })).rejects.toThrow('could not be saved for recovery, so it was not broadcast')
+    expect(b.calls.relays).toHaveLength(0)
+    expect((await b.api.getStatus()).unrelayedTxid).toBeUndefined()
+  })
+})
+
+describe('C4: the scan start', () => {
+  test('connecting with no scan start chosen is refused before the device is asked', async () => {
+    const b = bridge()
+    b.config.restoreHeight = null
+    expect((await b.api.getStatus()).restoreHeight).toBeUndefined()
+    await expect(b.api.connect()).rejects.toThrow('Choose the block where the wallet scan starts')
+    expect(b.delegate.received).toHaveLength(0)
   })
 })

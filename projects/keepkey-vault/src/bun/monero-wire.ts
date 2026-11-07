@@ -2,6 +2,7 @@
 import { keccak_256 } from '@noble/hashes/sha3'
 import { chacha20poly1305 } from '@noble/ciphers/chacha'
 import type { MoneroOutputRecord, MoneroPlan } from '../../monero-cli/src/protocol'
+import { formatXmrAtomic } from '../shared/monero-address'
 
 export class MoneroError extends Error {}
 export const MAX_UINT64 = 18446744073709551615n
@@ -126,9 +127,14 @@ export function reviewPlan(plan: MoneroPlan, intent: {
   if (recipients.length !== 1 || recipients[0].address !== intent.address) fail('recipient')
   if (recipients[0].amountAtomic !== intent.amountAtomic || intent.walletAmountAtomic !== intent.amountAtomic) fail('amount')
   if (change.length > 1 || change.some(output => output.address !== intent.walletAddress || output.changeMajor || output.changeMinor)) fail('change')
+  if (plan.feeAtomic !== intent.walletFeeAtomic || BigInt(plan.feeAtomic) <= 0n) fail('fee')
   // The fee estimate comes from an untrusted daemon: cap it (0.005 XMR; mainnet fees are ~0.0001) and below the payment.
-  if (plan.feeAtomic !== intent.walletFeeAtomic || BigInt(plan.feeAtomic) <= 0n || BigInt(plan.feeAtomic) > MAX_FEE_ATOMIC ||
-      BigInt(plan.feeAtomic) >= BigInt(intent.amountAtomic)) fail('fee')
+  if (BigInt(plan.feeAtomic) > MAX_FEE_ATOMIC) {
+    throw new MoneroError(`The node asked for a fee of ${formatXmrAtomic(plan.feeAtomic)}, above the ${formatXmrAtomic(MAX_FEE_ATOMIC)} safety cap. Nothing was signed; try again later or use another node.`)
+  }
+  if (BigInt(plan.feeAtomic) >= BigInt(intent.amountAtomic)) {
+    throw new MoneroError(`The network fee (${formatXmrAtomic(plan.feeAtomic)}) is not less than this amount. Send more than the fee; nothing was signed.`)
+  }
   const seen = new Set<string>()
   let inputTotal = 0n
   for (const input of plan.inputs) {

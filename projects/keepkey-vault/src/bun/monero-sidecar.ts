@@ -211,7 +211,7 @@ export function createMoneroSidecarManager(options: {
       if (!walletAddress || !status.configured) throw new Error('Connect a Monero watch wallet first')
       return validateOutputs(await request('export_outputs', undefined, 120000))
     },
-    async importKeyImages(input: { offset: 0; signedKeyImages: Array<{ keyImage: string; signature: string }> }) {
+    async importKeyImages(input: { offset: number; signedKeyImages: Array<{ keyImage: string; signature: string }> }) {
       if (!walletAddress || !status.configured) throw new Error('Connect a Monero watch wallet first')
       return validateKeyImageResult(await request('import_key_images', validateKeyImageImport(input), 180000))
     },

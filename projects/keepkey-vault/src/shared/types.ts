@@ -598,6 +598,10 @@ export interface MoneroStatus {
   walletHeight: number
   transactions: MoneroTransaction[]
   monitorReady: boolean
+  /** What the balance means now: unknown (not connected), scanning, current, or the last update (node down). */
+  syncState: 'not-connected' | 'scanning' | 'ready' | 'unreachable'
+  restoreHeight?: number
+  daemonHeight?: number
   emulatorReady?: boolean
   updatedAt?: string
   error?: string
@@ -607,12 +611,16 @@ export interface MoneroStatus {
   /** Signed transaction whose broadcast outcome is unknown; only a retry of it is allowed. */
   unrelayedTxid?: string
   keyImagesSynced?: boolean
+  /** Key images were synced, but outputs arrived since: sync again before sending. */
+  keyImagesStale?: boolean
   spendStateKnown: boolean
 }
 
 /** What the KeepKey will show for a prepared Monero send, in device order. */
 export interface MoneroSendReview {
   prepareId: string
+  /** Prepared with Max: the whole unlocked balance minus the fee and one atomic unit of change. */
+  max?: boolean
   recipient: string
   amountAtomic: string
   feeAtomic: string
@@ -1611,7 +1619,7 @@ export interface AppSettings {
   moneroAvailable?: boolean      // optional compatibility field; build contains a runnable sidecar
   moneroEnabled: boolean         // experimental XMR sidecar and wallet surface (default OFF)
   moneroDaemonUrl: string        // public HTTPS Monero daemon, or loopback local daemon
-  moneroRestoreHeight: number    // earliest block to scan; zero scans from genesis
+  moneroRestoreHeight: number | null  // earliest block to scan; zero scans from genesis; null = not chosen yet
   zcashPrivacyEnabled: boolean   // read-only capability: auto-ON when firmware >= 7.15.0 and this build includes zcash-cli
   hiveEnabled: boolean           // read-only capability: Hive blockchain — auto-ON when firmware >= 7.15.0
   emulatorEnabled: boolean       // feature flag: macOS emulator surface (default OFF — dev-only)
