@@ -25,6 +25,8 @@ import { isBitcoinOnlyVariant } from "../shared/flags"
 import { useOnline } from "./hooks/useOnline"
 import { useBtcNodeStatus } from "./hooks/useBtcNodeStatus"
 import { useBtcMultisigEnabled } from "./hooks/useBtcMultisigEnabled"
+import { usePasswordManagerEnabled } from './hooks/usePasswordManagerEnabled'
+import { PasswordBankView } from './components/PasswordBankView'
 import { OfflineBanner } from "./components/OfflineBanner"
 import { NodeStatusBar } from "./components/NodeStatusBar"
 import { NodeConnectedDialog } from "./components/NodeConnectedDialog"
@@ -68,6 +70,8 @@ const SIGNING_PAYLOAD_MIN_MS = 15000
 function App() {
   const uiText = useUiTranslation()
   const multisigEnabled = useBtcMultisigEnabled()
+  const passwordsEnabled = usePasswordManagerEnabled()
+  useEffect(() => { if (!passwordsEnabled) setActiveTab(tab => tab === 'passwords' ? 'vault' : tab) }, [passwordsEnabled])
 
 	const { t, i18n } = useTranslation()
 	useEffect(() => {
@@ -1264,6 +1268,7 @@ function App() {
 					</Flex>
 					{activeTab === "explore" && <AppStore onOpenApp={handleOpenApp} onOpenKeepKey={handleOpenKeepKey} />}
 					{activeTab === "addresses" && <AddressBookView />}
+					{activeTab === 'passwords' && passwordsEnabled && <PasswordBankView />}
 					{activeTab === "multisig" && multisigEnabled && !splashBitcoinOnly && <SafeMultisigView key={`${deviceState.deviceId}:${deviceState.isHiddenWallet}`} />}
 				</Flex>
 			</Flex>

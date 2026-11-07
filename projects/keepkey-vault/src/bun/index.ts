@@ -23,6 +23,9 @@ import * as path from "path"
 import { createHash, randomUUID } from "crypto"
 import { createSwapQuoteLeases } from './swap-quote-lease'
 import { assessSwapRisk } from '../shared/swap-risk'
+import { PasswordBank } from './password-bank'
+import { PasswordBex } from './password-bex'
+import { callBex, listBrowsers } from './bex-bridge'
 
 /**
  * hdwallet returns signature/pubkey fields as `Uint8Array | string`
@@ -1022,6 +1025,34 @@ let watchOnlyViewBtcOnly = false
 let pendingPsbt: { id: string; stem: string; analysis: PsbtAnalysis | MultisigAnalysis; deviceId: string; hidden: boolean; epoch: number; wallet: unknown; signing: boolean } | null = null
 let lastSignedPsbtPath: string | null = null
 const multisigFeature = new MultisigFeature(getSetting,setSetting)
+const passwordBank = new PasswordBank({
+	read: getSetting,
+	write: setSetting,
+	replace: (key, value, expected) => {
+		const db = getDb()
+		if (!db) throw new Error('Password-bank storage is unavailable')
+		const result = expected === null
+			? db.run('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO NOTHING', [key, value])
+			: db.run('UPDATE settings SET value = ? WHERE key = ? AND value = ?', [value, key, expected])
+		return result.changes === 1
+	},
+	device: () => {
+		const wallet = engine.wallet as any
+		const state = engine.getDeviceState()
+		if (!wallet || state.state !== 'ready' || typeof wallet.cipherKeyValue !== 'function') throw new Error('Connect and unlock a KeepKey to use the password bank')
+		if (isBitcoinOnlyVariant(state.firmwareVariant)) throw new Error('Password-bank derivation requires multi-chain firmware')
+		return {
+			session: `${activitySessionEpoch}:${state.deviceId}:${engine.isPassphraseWallet}`,
+			cipher: async (addressNList, key) => {
+				const result = await wallet.cipherKeyValue({ addressNList, key, value: new Uint8Array(32), iv: new Uint8Array(16), encrypt: true, askOnEncrypt: true, askOnDecrypt: true })
+				return typeof result === 'string' ? new Uint8Array(Buffer.from(result, 'base64')) : new Uint8Array(result)
+			},
+		}
+	},
+})
+// Clean expired session secrets even when the password tab is not visible.
+setInterval(() => { passwordBank.view() }, 1000).unref()
+const passwordBex = new PasswordBex(passwordBank, { browsers: listBrowsers, call: (tool, args, browser) => callBex(tool, args, browser, 10000) })
 const multisigRegistry = new MultisigRegistry(getSetting, setSetting, () => ({
 	hidden: engine.isPassphraseWallet,
 	epoch: activitySessionEpoch,
@@ -1657,6 +1688,7 @@ function getAppSettings() {
 		numberLocale: validNumberLocale(getSetting('number_locale')),
 		walletConnectEnabled,
 		btcMultisigEnabled:multisigFeature.enabled,
+		passwordManagerEnabled: passwordBank.enabled,
 		zcashPrivacyEnabled,
 		hiveEnabled,
 		emulatorEnabled,
@@ -8394,6 +8426,24 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			getAppSettings: async () => {
 				return getAppSettings()
 			},
+			setPasswordManagerEnabled: async (params) => {
+				passwordBank.setEnabled(params?.enabled)
+				return getAppSettings()
+			},
+			passwordBankStatus: async () => passwordBank.view(),
+			passwordBankUnlock: async (params) => passwordBank.unlock(params?.create === true),
+			passwordBankLock: async () => { passwordBank.lock(); return passwordBank.view() },
+			passwordBankGenerate: async (params) => passwordBank.generate(params.count, params.ttlMinutes),
+			passwordBankAssign: async (params) => passwordBank.assign(params.origin, params.account, params.reviewDays),
+			passwordBankRehydrate: async (params) => passwordBank.rehydrate(params.id, params.pending === true, params.ttlMinutes),
+			passwordBankReveal: async (params) => passwordBank.reveal(params.id, params.pending === true),
+			passwordBankRotate: async (params) => passwordBank.rotate(params.id, params.action, params.confirmed === true),
+			passwordBankExport: async () => passwordBank.exportBackup(),
+			passwordBankBackupSaved: async (params) => passwordBank.acknowledgeBackup(params.revision),
+			passwordBankImport: async (params) => passwordBank.unlock(false, params.json),
+			passwordBankBrowserTargets: async (params) => passwordBex.discover(params.id),
+			passwordBankBrowserGrant: async (params) => passwordBex.grant(params),
+			passwordBankBrowserFill: async (params) => passwordBex.fill(params.grant),
 			// One-time: mark the passphrase/hidden-wallet intro dialog as seen so it
 			// never shows again (also set when the OOB passphrase card is completed).
 			markPassphraseIntroShown: async () => {
@@ -11044,6 +11094,7 @@ function startPioneerSocketIfAllowed(): void {
 
 // Push engine events to WebView
 engine.on('state-change', (state) => {
+	if (state.state === 'disconnected' || state.state === 'bootloader' || state.state === 'error') passwordBank.lock()
 	try { rpc.send['device-state'](state) } catch { /* webview not ready yet */ }
 	// The Studio provider key belongs to the device it was derived with.
 	providerKeySession.onDeviceState(state)

@@ -117,11 +117,12 @@ function Section({ title, color, defaultOpen = true, docsHref, videoHref, childr
 
 // ── Toggle Switch ───────────────────────────────────────────────────
 
-function Toggle({ checked, onChange, disabled }: { checked: boolean; onChange: (v: boolean) => void; disabled?: boolean }) {
+function Toggle({ checked, onChange, disabled, label }: { checked: boolean; onChange: (v: boolean) => void; disabled?: boolean; label?: string }) {
 	return (
 		<Box
 			as="button"
 			role="switch"
+			aria-label={label}
 			aria-checked={checked}
 			onClick={() => !disabled && onChange(!checked)}
 			w="40px"
@@ -365,6 +366,16 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 		setTogglingRestApi(false)
 	}, [onRestApiChanged])
 
+	const [togglingPasswords, setTogglingPasswords] = useState(false)
+	const [passwordsError, setPasswordsError] = useState('')
+	const togglePasswords = useCallback(async (enabled: boolean) => {
+		setTogglingPasswords(true); setPasswordsError('')
+		try {
+			setAppSettings(await rpcRequest<AppSettings>('setPasswordManagerEnabled', { enabled }))
+			window.dispatchEvent(new Event('keepkey-settings-changed'))
+		} catch (e: any) { setPasswordsError(e?.message || 'Could not change password manager') }
+		finally { setTogglingPasswords(false) }
+	}, [])
 	const [togglingMultisig,setTogglingMultisig]=useState(false)
     const [multisigError,setMultisigError]=useState<string|null>(null)
     const toggleMultisig=useCallback(async(enabled:boolean)=>{
@@ -1749,6 +1760,13 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 					{/* ── Feature Flags ──────────────────────────────── */}
 					<Section title={t("featureFlags")} defaultOpen={false} docsHref={DOCS_LINKS.settingsFeatureFlags}>
 						<VStack gap="4" align="stretch">
+							<Box>
+								<Flex justify="space-between" align="center" gap="3">
+									<Box><Text fontSize="md" color="kk.textPrimary" fontWeight="500">{uiText("Password manager")}</Text><Text fontSize="sm" color="kk.textSecondary" mt="0.5">{uiText("Experimental. Recoverable password bank, encrypted backups and guided rotation. Off by default. The Passwords tab appears immediately; no restart needed.")}</Text></Box>
+									<Toggle label={uiText('Password manager')} checked={appSettings.passwordManagerEnabled === true} onChange={togglePasswords} disabled={togglingPasswords} />
+								</Flex>
+								{passwordsError && <Text role="alert" fontSize="xs" color="kk.error">{passwordsError}</Text>}
+							</Box>
 							{/* Offline (airplane) mode toggle */}
 							<Flex justify="space-between" align="center">
 								<Flex align="center" gap="3">

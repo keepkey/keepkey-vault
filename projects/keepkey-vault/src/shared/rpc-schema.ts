@@ -1,4 +1,5 @@
 import type { MultisigPolicyPreview,MultisigCosignerExport,BtcPsbtSigned } from "./multisig-policy"
+import type { PasswordBankView, PasswordBrowserTarget } from './password-bank'
 import type { ElectrobunRPCSchema } from 'electrobun/bun'
 import type { SafeAccount, SafeContext, SafeCreateParams, SafeProposal, SafeTransfer, SafeTxReview, VaultAddParams, VaultAddReview } from './safe-multisig'
 import type { VaultIdentity } from './vault-identity'
@@ -329,6 +330,21 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
 
       // ── App Settings ──────────────────────────────────────────────────
       getAppSettings: { params: void; response: AppSettings }
+      setPasswordManagerEnabled: { params: { enabled: boolean }; response: AppSettings }
+      passwordBankStatus: { params: void; response: PasswordBankView }
+      passwordBankUnlock: { params: { create?: boolean }; response: PasswordBankView }
+      passwordBankLock: { params: void; response: PasswordBankView }
+      passwordBankGenerate: { params: { count: number; ttlMinutes: number }; response: PasswordBankView }
+      passwordBankAssign: { params: { origin: string; account: string; reviewDays: number }; response: PasswordBankView }
+      passwordBankRehydrate: { params: { id: string; pending?: boolean; ttlMinutes: number }; response: PasswordBankView }
+      passwordBankReveal: { params: { id: string; pending?: boolean }; response: { password: string; expiresAt: number } }
+      passwordBankRotate: { params: { id: string; action: 'prepare' | 'submitted' | 'verify' | 'cancel'; confirmed?: boolean }; response: PasswordBankView }
+      passwordBankExport: { params: void; response: { json: string; revision: number } }
+      passwordBankBackupSaved: { params: { revision: number }; response: PasswordBankView }
+      passwordBankImport: { params: { json: string }; response: PasswordBankView }
+      passwordBankBrowserTargets: { params: { id: string }; response: PasswordBrowserTarget[] }
+      passwordBankBrowserFill: { params: { grant: string }; response: { filled: true; submitted: false } }
+      passwordBankBrowserGrant: { params: { id: string; pending?: boolean; browser: string; tabId: number; documentToken: string; ref: string }; response: { grant: string } }
       markPassphraseIntroShown: { params: void; response: AppSettings }
       markBtcOnboardingShown: { params: void; response: AppSettings }
       setDisabledNetworks: { params: { chainIds: string[] }; response: AppSettings }
