@@ -1,27 +1,25 @@
 import { getNumberLocale } from "../lib/number-locale"
 import { useCallback, useEffect, useState } from 'react'
-import { Box, Button, Flex, Text } from '@chakra-ui/react'
+import { Box, Flex, Text, chakra } from '@chakra-ui/react'
 import { useTranslation } from 'react-i18next'
 import { rpcRequest, onRpcMessage } from '../lib/rpc'
 import { formatBalance } from '../lib/formatting'
-import { zcashShieldedAmounts, type ZcashShieldedBalance, type ZcashPrivacyPage } from '../../shared/zcash-privacy'
-import { DocsLink } from './DocsLink'
-import { DOCS_LINKS, watch } from '../../shared/docs-links'
+import { zcashShieldedAmounts, type ZcashShieldedBalance, type ZcashPool } from '../../shared/zcash-privacy'
 
-export type ZcashPrivacyAction = ZcashPrivacyPage | 'unshield'
 interface Props {
   transparent?: string
   enabled: boolean
   supported: boolean
   watchOnly?: boolean
   refreshNonce: number
-  onNavigate: (action: ZcashPrivacyAction) => void
+  pool: ZcashPool
+  onSelectPool: (pool: ZcashPool) => void
 }
 type PrivacyStatus = { ready: boolean; fvk_loaded: boolean; verified: boolean; verifying: boolean; synced_to: number | null }
 
 /** Reads the shielded wallet separately; never treats a transparent refresh as
  * a privacy scan, or a missing private balance as zero. No key initialization. */
-export function ZcashBalanceSummary({ transparent, enabled, supported, watchOnly, refreshNonce, onNavigate }: Props) {
+export function ZcashBalanceSummary({ transparent, enabled, supported, watchOnly, refreshNonce, pool, onSelectPool }: Props) {
   const { t } = useTranslation('asset')
   const [status, setStatus] = useState<PrivacyStatus | null>(null)
   const [balance, setBalance] = useState<ZcashShieldedBalance | null>(null)
@@ -51,7 +49,7 @@ export function ZcashBalanceSummary({ transparent, enabled, supported, watchOnly
     })()
     return () => { cancelled = true }
   }, [canOpen, refreshNonce, revision])
-  const amounts = zcashShieldedAmounts(balance)
+  const amounts = canOpen ? zcashShieldedAmounts(balance) : null
   const hint = watchOnly ? t('zcashConnectForPrivacy')
     : !enabled ? t('zcashEnablePrivacy')
     : !supported ? t('zcashPrivacyFirmware')
@@ -60,30 +58,29 @@ export function ZcashBalanceSummary({ transparent, enabled, supported, watchOnly
     : status?.synced_to != null ? t('zcashLastScanned', { height: status.synced_to.toLocaleString(getNumberLocale()) })
     : t('zcashPrivateScanNeeded')
   return (
-    <Box mb="4" border="1px solid" borderColor="var(--line)" borderRadius="12px" p="4" role="region" aria-label={t('zcashBalances')}>
-      <Flex gap="5" wrap="wrap">
-        <Box flex="1" minW="210px">
-          <Text fontSize="12px" fontWeight="600" color="var(--text-1)">{t('zcashTransparentPublic')}</Text>
+    <Box mb="4" role="group" aria-label={t('zcashBalances')}>
+      <Flex gap="2" wrap="wrap">
+        <chakra.button type="button" flex="1" minW="200px" textAlign="left" p="3.5" borderRadius="12px"
+          aria-pressed={pool === 'transparent'} aria-label={t('zcashTransparentPublic')}
+          border="1px solid" borderColor={pool === 'transparent' ? 'var(--gold)' : 'var(--line)'}
+          bg={pool === 'transparent' ? 'rgba(233,196,106,0.05)' : 'transparent'} cursor="pointer"
+          _hover={{ borderColor: 'var(--line-2)' }} _focusVisible={{ outline: '2px solid var(--gold)', outlineOffset: '2px' }}
+          onClick={() => onSelectPool('transparent')}>
+          <Text fontSize="12px" fontWeight="600" color="var(--text-1)">{t('zcashTransparentPublic')}{pool === 'transparent' ? ' · ✓' : ''}</Text>
           <Text fontFamily="mono" fontSize="18px" color="var(--text-0)">{transparent == null ? '—' : formatBalance(transparent)} ZEC</Text>
-          <Text fontSize="12px" color="var(--text-2)" mt="1">{t('zcashTransparentUse')}</Text>
-          <Button mt="2" size="xs" variant="outline" disabled={!canOpen} onClick={() => onNavigate('shield')}>{t('zcashShieldAction')}</Button>
-        </Box>
-        <Box flex="1" minW="210px">
-          <Text fontSize="12px" fontWeight="600" color="var(--text-1)">{t('zcashShieldedPrivate')}</Text>
+        </chakra.button>
+        <chakra.button type="button" flex="1" minW="200px" textAlign="left" p="3.5" borderRadius="12px"
+          aria-pressed={pool === 'shielded'} aria-label={t('zcashShieldedPrivate')} disabled={!canOpen}
+          border="1px solid" borderColor={pool === 'shielded' ? 'var(--gold)' : 'var(--line)'}
+          bg={pool === 'shielded' ? 'rgba(233,196,106,0.05)' : 'transparent'} cursor={canOpen ? 'pointer' : 'not-allowed'}
+          _hover={canOpen ? { borderColor: 'var(--line-2)' } : {}} _focusVisible={{ outline: '2px solid var(--gold)', outlineOffset: '2px' }}
+          onClick={() => onSelectPool('shielded')}>
+          <Text fontSize="12px" fontWeight="600" color="var(--text-1)">{t('zcashShieldedPrivate')}{pool === 'shielded' ? ' · ✓' : ''}</Text>
           <Text fontFamily="mono" fontSize="18px" color="var(--text-0)">{amounts ? formatBalance(String(amounts.available / 1e8)) : '—'} ZEC</Text>
-          <Text fontSize="12px" color={failed || !amounts ? 'var(--gold)' : 'var(--text-2)'} mt="1" aria-live="polite">{hint}</Text>
           {amounts && amounts.pending > 0 && <Text fontSize="11px" color="var(--gold)">{t('zcashPrivatePending', { amount: formatBalance(String(amounts.pending / 1e8)) })}</Text>}
-          <Flex gap="2" mt="2" wrap="wrap">
-            <Button size="xs" variant="outline" disabled={!canOpen} onClick={() => onNavigate('scan')}>{t('zcashSyncShielded')}</Button>
-            <Button size="xs" variant="outline" disabled={!canOpen} onClick={() => onNavigate('unshield')}>{t('zcashUnshieldAction')}</Button>
-          </Flex>
-        </Box>
+        </chakra.button>
       </Flex>
-      <Flex mt="3" gap="3" wrap="wrap" align="center">
-        <Text fontSize="11px" color="var(--text-2)">{t('zcashSeparateSync')}</Text>
-        <DocsLink href={watch('zec-04-shield-sync')} label={t('zcashShieldGuide')} />
-        {!enabled && <DocsLink href={DOCS_LINKS.settingsFeatureFlags} label={t('zcashPrivacySettings')} />}
-      </Flex>
+      <Text fontSize="11px" color={failed || !amounts ? 'var(--gold)' : 'var(--text-2)'} mt="2" aria-live="polite">{hint}</Text>
     </Box>
   )
 }
