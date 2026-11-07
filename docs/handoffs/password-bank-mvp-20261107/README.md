@@ -94,6 +94,18 @@ The repeatable synthetic UI fixture is `projects/keepkey-vault/__tests__/fixture
 
 ## Before the next signed release
 
+### Monero development integration (2026-11-07)
+
+Integrated onto `feat/xmr-own-node` in `/Users/highlander/keepkey-toolchain/vault-xmr`, preserving its `20c6a339b` Monero baseline. Code candidate: `02e93e130`. Built and launched `_build/dev-macos-arm64/keepkey-vault-dev.app` from that checkout; the previously running node-development copy was closed gracefully. Both use the same existing application identifier and profile. No flag value or Monero configuration was migrated or auto-enabled. The paired live API confirmed Password Manager disabled, no bank and no profiles. No real website credential was changed.
+
+- Final combined password, provider lifecycle, and Monero settings/node checks: **74 passed, zero failures**. The nine new agent tests include independent default-off flags, live MCP catalog visibility, metadata filtering, no secret output, revision checks, native approval, rejection/expiry and disabled fill rejection.
+- Integrated backend/native package build and frontend production build passed; combined i18n integrity passed. The synthetic browser UI test again passed live enable/disable without reload and guided backup/verification gates, with zero page errors. The migration skill passed its format validator.
+- Eight [live API boundary checks](live-api-results.json) passed, including unauthenticated/browser-origin rejection, no CORS, no-store, hidden password tools while off and refusal to generate while off. The live flag was never enabled during these checks.
+- The root full unit suite passed 3,036 tests before integration; the added agent group was also tested separately. Root TypeScript remains at the same 809 pre-existing diagnostics; no new password-module diagnostics remain.
+- The full Monero checkout suite is **not green**: seven failing assertions were reproduced on unchanged `20c6a339b` with identical dependencies (three device-wipe transport cases, three typed-data/hdwallet cases and a static loopback-test check on the existing Monero node fixture). The isolated device-wipe process stalled after the failures and was terminated. Two Linux launcher timeouts in the concurrent build run passed when rerun alone. One provider lifecycle source-order assertion affected by integration was fixed and its whole group passed. Do not treat this as a clean signed-release candidate.
+
+Remaining hardware recovery, native supported-platform and real-service migration gates below still apply. Keep the password switch off until the operator explicitly enables a test.
+
 1. On physical test hardware, check device labels/confirmations, PIN/passphrase handling, cancel, unplug, firmware compatibility and repeated derivation. Match the frozen vector where possible.
 2. Restore a backup on a second/recovered test device and confirm active and staged passwords match exactly. Verify wrong passphrase and tampered backup failure. Check interrupted/cancelled generation preserves or burns the correct slots.
 3. On dedicated test accounts, verify actual login and guided rotation with the compatible extension, including browser navigation, form rejection, ambiguous submission and MFA. Confirm the actual Google/GitHub/Microsoft account settings match their guide.
