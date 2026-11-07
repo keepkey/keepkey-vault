@@ -11106,10 +11106,10 @@ function startPioneerSocketIfAllowed(): void {
 
 // Push engine events to WebView
 engine.on('state-change', (state) => {
-	if (state.state === 'disconnected' || state.state === 'bootloader' || state.state === 'error') passwordBank.lock()
 	try { rpc.send['device-state'](state) } catch { /* webview not ready yet */ }
 	// The Studio provider key belongs to the device it was derived with.
 	providerKeySession.onDeviceState(state)
+	if (state.state === 'disconnected' || state.state === 'bootloader' || state.state === 'error') passwordBank.lock()
 	const bitcoinOnly = isBitcoinOnlyVariant(state.firmwareVariant)
 	// Scope the self-host node to the connected device: only a btc-only device may
 	// use the (global) persisted node. A multichain device — which can't even see
