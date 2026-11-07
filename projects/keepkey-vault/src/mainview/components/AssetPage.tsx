@@ -19,7 +19,8 @@ import { useFiat } from "../lib/fiat-context"
 import { ReceiveView } from "./ReceiveView"
 import { HiveAccountPanel } from "./HiveAccountPanel"
 import { SendForm } from "./SendForm"
-import { ZcashBalanceSummary, type ZcashPrivacyAction } from './ZcashBalanceSummary'
+import { ZcashBalanceSummary } from './ZcashBalanceSummary'
+import type { ZcashPool, ZcashPrivacyPage } from '../../shared/zcash-privacy'
 import { MoneroHeaderBalance, MoneroReceiveSection, MoneroSendSection, MoneroStatusChip, useMoneroView } from './MoneroAssetSections'
 import { MoneroNodePanel } from './MoneroNodePanel'
 import { useMoneroStatus } from "../hooks/useMoneroStatus"
@@ -140,7 +141,7 @@ function PersonalAssetPage({ chain, balance, onBack, firmwareVersion, initialAct
 		}
 		setViewRaw(v)
 	}
-	const [selectedTokenState, setSelectedTokenState] = useState<SelectedTokenState | null>(() => initialToken ? {
+	const [selectedTokenState, setSelectedTokenState] = useState<SelectedTokenState | null>(() => initialToken && !(chain.id === 'zcash' && initialToken.type === 'shielded') ? {
 		token: initialToken, chainId: chain.id,
 		// EVM dashboard tokens may aggregate owners. Bind their amounts only
 		// after the selected address's own cache has answered.
@@ -212,7 +213,8 @@ function PersonalAssetPage({ chain, balance, onBack, firmwareVersion, initialAct
 	// Feature flags: zcash privacy
 	const [swappableChainIds, setSwappableChainIds] = useState<Set<string>>(new Set())
 	const [zcashPrivacyEnabled, setZcashPrivacyEnabled] = useState(false)
-	const [zcashPrivacyAction, setZcashPrivacyAction] = useState<ZcashPrivacyAction>('send')
+	const [zcashPrivacyAction, setZcashPrivacyAction] = useState<ZcashPrivacyPage>(safeInitial === 'privacy' ? 'scan' : 'receive')
+	const [zcashPool, setZcashPool] = useState<ZcashPool>(initialToken?.type === 'shielded' || safeInitial === 'privacy' ? 'shielded' : 'transparent')
 	// EVM chains Safe supports: the Multisig pill shows only there.
 	const [safeChainIds, setSafeChainIds] = useState<number[]>([])
 	useEffect(() => {
@@ -239,8 +241,9 @@ function PersonalAssetPage({ chain, balance, onBack, firmwareVersion, initialAct
 		return () => window.removeEventListener('keepkey-settings-changed', refreshFeatureFlags)
 	}, [refreshFeatureFlags])
 
-	// Reset view if user is on privacy tab but flag got turned off — skip until settings are loaded
-	// to avoid race where zcashPrivacyEnabled starts false and stomps the initialAction
+	// Leave an advanced Zcash tool when its flag turns off. Keep the selected
+	// pool so unavailable shielded actions cannot become transparent actions.
+	// Wait for settings to load before replacing a legacy privacy deep link.
 	useEffect(() => {
 		if (settingsLoaded.current && view === "privacy" && !zcashPrivacyEnabled) setView("receive")
 	}, [view, zcashPrivacyEnabled])
@@ -282,9 +285,14 @@ function PersonalAssetPage({ chain, balance, onBack, firmwareVersion, initialAct
 	const selectedToken = tokenReconciliation.selection?.token ?? null
 	const selectedTokenUnverified = tokenReconciliation.unverified
 	const vaultAssetCaip = vaultSelection?.assetCaip || selectedToken?.caip || chain.caip
-	const setSelectedToken = (token: TokenBalance | null) => setSelectedTokenState(token ? {
-		token, chainId: chain.id, ownerAddress: selectedTokenOwner || undefined,
-	} : null)
+	const setSelectedToken = (token: TokenBalance | null) => {
+		if (chain.id === 'zcash' && token?.type === 'shielded') {
+			setZcashPool('shielded')
+			setSelectedTokenState(null)
+			return
+		}
+		setSelectedTokenState(token ? { token, chainId: chain.id, ownerAddress: selectedTokenOwner || undefined } : null)
+	}
 	useEffect(() => {
 		// Retain the newest owner-scoped amount for a later failed refresh; the
 		// synchronously reconciled value above also prevents a stale render.
@@ -598,7 +606,9 @@ function PersonalAssetPage({ chain, balance, onBack, firmwareVersion, initialAct
 	}, [isAltUtxo, chain.coin, chain.scriptType, utxoPath, utxoAccount, utxoScripts, utxoScriptType, xpubRequests])
 
 	// ── Token spam filter ──────────────────────────────────────────────
-	const tokens = useMemo(() => activeBalance?.tokens || [], [activeBalance?.tokens])
+	// The private pool is a balance selector on Zcash's account, not another
+	// token detail page. Preserve existing dashboard deep links to that pool.
+	const tokens = useMemo(() => (activeBalance?.tokens || []).filter(token => chain.id !== 'zcash' || token.type !== 'shielded'), [activeBalance?.tokens, chain.id])
 	const [visibilityMap, setVisibilityMap] = useState<Record<string, TokenVisibilityStatus>>({})
 	const [showHidden, setShowHidden] = useState(false)
 
@@ -730,16 +740,14 @@ function PersonalAssetPage({ chain, balance, onBack, firmwareVersion, initialAct
 	const isZcash = chain.id === 'zcash'
 	const zcashShieldedDef = CHAINS.find(c => c.id === 'zcash-shielded')
 	const zcashShieldedSupported = isZcash && zcashShieldedDef && isChainSupported(zcashShieldedDef, firmwareVersion)
-	// The synthetic zZEC token (fetchShieldedZecToken). Its page must NOT show
-	// the transparent receive card or SendForm — a t-addr QR under a "Shielded
-	// ZEC" heading silently defeats the privacy feature. Everything shielded
-	// (z→z send, Orchard receive + device verify) lives in ZcashPrivacyTab.
+	// A shielded token deep link selects the shielded pool within this same page.
+	// It must never fall through to a transparent QR or send form, even when the
+	// privacy flag is disabled or the wallet is watch-only.
 	const isShieldedToken = isZcash && !!selectedToken && selectedToken.type === 'shielded'
-
-	// Keep the (sole) Privacy pill lit while the shielded token page is open.
+	const shieldedSelected = isZcash && (zcashPool === 'shielded' || isShieldedToken)
 	useEffect(() => {
-		if (isShieldedToken && zcashPrivacyEnabled && view !== "privacy") setView("privacy")
-	}, [isShieldedToken, zcashPrivacyEnabled, view])
+		if (isShieldedToken) setZcashPool('shielded')
+	}, [isShieldedToken])
 
 	// Pre-build a SwapAsset from the selected token so SwapDialog can use it
 	// directly without needing to find it in Pioneer's limited GetAvailableAssets list.
@@ -768,25 +776,22 @@ function PersonalAssetPage({ chain, balance, onBack, firmwareVersion, initialAct
 	// + a subtle hairline. Reads more standard / sober alongside the rest
 	// of the glassy chrome.
 	const PILLS: { id: AssetView | 'swap'; label: string; icon: JSX.Element }[] = [
-		...(!selectedToken ? [{ id: "receive" as const, label: t("receive"), icon: (
+		...(!selectedToken || isShieldedToken ? [{ id: "receive" as const, label: t("receive"), icon: (
 			<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19" /><polyline points="5 12 12 19 19 12" /></svg>
 		) }] : []),
-		...(!watchOnly && !isShieldedToken ? [{ id: "send" as const, label: t("send"), icon: (
+		...(!watchOnly ? [{ id: "send" as const, label: t("send"), icon: (
 			<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="19" x2="12" y2="5" /><polyline points="5 12 12 5 19 12" /></svg>
 		) }] : []),
 		// Watch-only Bitcoin: Send becomes Create PSBT (unsigned; a KeepKey signs it later).
 		...(watchOnly && isBtc && !selectedToken ? [{ id: "psbt" as const, label: t("createPsbt", { defaultValue: "Create PSBT" }), icon: (
 			<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="19" x2="12" y2="5" /><polyline points="5 12 12 5 19 12" /></svg>
 		) }] : []),
-		...(!watchOnly && swappableChainIds.has(chain.id) && !isShieldedToken ? [{ id: "swap" as const, label: t("swap"), icon: (
+		...(!watchOnly && swappableChainIds.has(chain.id) && !shieldedSelected ? [{ id: "swap" as const, label: t("swap"), icon: (
 			<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="17 1 21 5 17 9" /><path d="M3 11V9a4 4 0 0 1 4-4h14" /><polyline points="7 23 3 19 7 15" /><path d="M21 13v2a4 4 0 0 1-4 4H3" /></svg>
 		) }] : []),
 		// Multisig: Safe on supported EVM chains; Bitcoin co-signing when enabled.
 		...(!watchOnly && !selectedToken && (evmMultisig || (isBtc && multisigEnabled)) ? [{ id: "multisig" as const, label: t("multisig", { defaultValue: "Multisig" }), icon: (
 			<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M23 21v-2a4 4 0 0 0-3-3.87" /><path d="M16 3.13a4 4 0 0 1 0 7.75" /></svg>
-		) }] : []),
-		...(!watchOnly && (!selectedToken || isShieldedToken) && zcashPrivacyEnabled && zcashShieldedSupported ? [{ id: "privacy" as const, label: t("privacy"), icon: (
-			<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" /></svg>
 		) }] : []),
 	]
 
@@ -1051,7 +1056,7 @@ function PersonalAssetPage({ chain, balance, onBack, firmwareVersion, initialAct
 						</Box>
 						)}
 
-						{selectedToken ? (
+						{selectedToken && !isShieldedToken ? (
 							<>
 								<AssetIcon
 									caip={selectedToken.caip}
@@ -1155,7 +1160,7 @@ function PersonalAssetPage({ chain, balance, onBack, firmwareVersion, initialAct
 											</Flex>
 										) : chain.id === 'zcash' ? (
 											<Text fontSize="10px" fontFamily="mono" color="var(--text-2)" title={t('zcashSeparateSync')}>
-												{lastSyncedAt ? t('zcashTransparentUpdated') : t('zcashTransparentOnly')}
+												{shieldedSelected ? t('zcashShieldedPrivate') : lastSyncedAt ? t('zcashTransparentUpdated') : t('zcashTransparentOnly')}
 											</Text>
 										) : activeBalance ? (
 											<Flex align="center" gap="1" color="var(--teal)" className="v3-glass-chip" px="2" py="0.5"
@@ -1176,7 +1181,7 @@ function PersonalAssetPage({ chain, balance, onBack, firmwareVersion, initialAct
 										{!isMonero && <Text fontSize="11px" fontFamily="mono" color="var(--text-3)" letterSpacing="0.02em" truncate>
 											{chain.caip}
 										</Text>}
-										{address && chain.explorerAddressUrl && (
+										{address && chain.explorerAddressUrl && !shieldedSelected && (
 											<Box
 												as="button"
 												color="var(--text-3)"
@@ -1196,7 +1201,7 @@ function PersonalAssetPage({ chain, balance, onBack, firmwareVersion, initialAct
 						)}
 					</Flex>
 
-					{selectedToken ? (
+					{isZcash ? null : selectedToken ? (
 						<Flex direction="column" align="flex-end" gap="1" flexShrink={0} display={{ base: "none", sm: "flex" }}>
 							<Text fontFamily="mono" fontSize={{ base: "16px", md: "20px" }} fontWeight="500" color="var(--text-0)" letterSpacing="0.01em" lineHeight="1.2">
 								{selectedTokenUnverified ? '—' : formatBalance(selectedToken.balance)}
@@ -1283,7 +1288,7 @@ function PersonalAssetPage({ chain, balance, onBack, firmwareVersion, initialAct
 
 					{/* Refresh needs a connected device (bun getBalance derives on-device) —
 					    hide in watch-only mode like the other device-gated actions. */}
-					{!watchOnly && <Box
+					{!watchOnly && !shieldedSelected && <Box
 						as="button"
 						onClick={refreshing ? undefined : handleRefresh}
 						disabled={refreshing}
@@ -1313,7 +1318,7 @@ function PersonalAssetPage({ chain, balance, onBack, firmwareVersion, initialAct
 				</Flex>
 
 				{/* Mobile-only balance row */}
-				{selectedToken ? (
+				{isZcash ? null : selectedToken ? (
 					<Flex display={{ base: "flex", sm: "none" }} align="baseline" justify="space-between" mb="4" gap="3">
 						<Text fontFamily="mono" fontSize="18px" fontWeight="500" color="var(--text-0)" letterSpacing="0.01em">
 							{selectedTokenUnverified ? '—' : formatBalance(selectedToken.balance)}
@@ -1377,7 +1382,8 @@ function PersonalAssetPage({ chain, balance, onBack, firmwareVersion, initialAct
 								))}
 							</Box>
 						) : null}
-						{!watchOnly && !isHiddenWallet && isAltUtxo && (
+						{shieldedSelected && <Text fontSize="12px" color="var(--text-2)">{uiText('Account #')}0</Text>}
+						{!watchOnly && !isHiddenWallet && isAltUtxo && !shieldedSelected && (
 							<UtxoAccountSelector
 								accounts={utxoAccounts}
 								selected={utxoAccount}
@@ -1414,7 +1420,7 @@ function PersonalAssetPage({ chain, balance, onBack, firmwareVersion, initialAct
 									onClick={() => {
 										if (p.id === 'swap') { setShowSwapDialog(true); return }
 										if (p.id === 'multisig' && isBtc) { window.dispatchEvent(new Event(MULTISIG_POLICY_EVENT)); return }
-										setView(p.id as AssetView); if (p.id === 'receive') setSelectedToken(null)
+										setView(p.id as AssetView); if (p.id === 'receive' && !isShieldedToken) setSelectedToken(null)
 									}}
 									display="flex"
 									alignItems="center"
@@ -1446,10 +1452,11 @@ function PersonalAssetPage({ chain, balance, onBack, firmwareVersion, initialAct
 				{/* Account selector now lives inline with the action pills above
 				    (per the design study). Original duplicate block removed. */}
 
-				{isZcash && !selectedToken && view !== 'privacy' && <ZcashBalanceSummary
+				{isZcash && (!selectedToken || isShieldedToken) && <ZcashBalanceSummary
 					transparent={activeBalance?.balance} enabled={zcashPrivacyEnabled} supported={!!zcashShieldedSupported}
 					watchOnly={watchOnly} refreshNonce={refreshNonce}
-					onNavigate={action => { setZcashPrivacyAction(action); setSelectedToken(null); setView('privacy') }}
+					pool={shieldedSelected ? 'shielded' : 'transparent'}
+					onSelectPool={pool => { setZcashPool(pool); setSelectedToken(null); if (view === 'privacy') setView('receive') }}
 				/>}
 
 				{/* Content */}
@@ -1461,13 +1468,13 @@ function PersonalAssetPage({ chain, balance, onBack, firmwareVersion, initialAct
 						view === "send"
 							? <MoneroSendSection monero={monero} client={rpcMoneroClient} privateMode={privateModeEnabled} />
 							: <MoneroReceiveSection chain={chain} monero={monero} client={rpcMoneroClient} privateMode={privateModeEnabled} />
-					) : isShieldedToken && zcashPrivacyEnabled ? (
-						// zZEC page: all send/receive surfaces are shielded-only. Never fall
-						// through to SendForm/ReceiveView — those expose the transparent
-						// t-addr + xpub under a "Shielded ZEC" heading.
+					) : shieldedSelected ? (
+						!watchOnly && zcashPrivacyEnabled && zcashShieldedSupported ? (
 						<Suspense fallback={<Spinner size="sm" color="kk.gold" />}>
-							<ZcashPrivacyTab initialPage={safeInitial === "send" ? "send" : "receive"} />
+							<ZcashPrivacyTab embedded initialPage={view === 'send' ? 'send' : view === 'privacy' ? zcashPrivacyAction : 'receive'}
+								onPageChange={page => { setZcashPrivacyAction(page); setView(page === 'send' || page === 'receive' ? page : 'privacy') }} />
 						</Suspense>
+						) : <Text role="status" fontSize="sm" color="var(--text-2)">{watchOnly ? t('zcashConnectForPrivacy') : !zcashPrivacyEnabled ? t('zcashEnablePrivacy') : t('zcashPrivacyFirmware')}</Text>
 					) : view === "multisig" && evmMultisig ? (
 						<Suspense fallback={<Spinner size="sm" color="kk.gold" />}>
 							<MultisigPanel chainId={Number(chain.chainId)} chainName={chain.coin} symbol={chain.symbol} />
@@ -1498,11 +1505,6 @@ function PersonalAssetPage({ chain, balance, onBack, firmwareVersion, initialAct
 							evmAddressIndex={isEvm ? evmAddresses.selectedIndex : undefined}
 						/>
 						)
-					) : view === "privacy" && isZcash && zcashPrivacyEnabled ? (
-						<Suspense fallback={<Spinner size="sm" color="kk.gold" />}>
-							<ZcashPrivacyTab initialPage={zcashPrivacyAction === 'unshield' ? 'shield' : zcashPrivacyAction}
-								initialSection={zcashPrivacyAction === 'shield' || zcashPrivacyAction === 'unshield' ? zcashPrivacyAction : undefined} />
-						</Suspense>
 					) : isHive ? (
 						<HiveAccountPanel activeKey={address} color={chain.color} loading={loading} deriveError={deriveError} onRetryDerive={deriveAddress} refreshNonce={refreshNonce} />
 					) : (

@@ -2220,5 +2220,10 @@
   "mffb3f6bc": "Safe proposal file",
   "mffc6a238": "Pre-sign simulation success",
   "mffddea35": ", or wipe the device and restore it from your recovery phrase.",
-  "mfffe7d13": "The connected verifier shows a mandatory Trust signer prompt. Studio does not request persistence."
+  "mfffe7d13": "The connected verifier shows a mandatory Trust signer prompt. Studio does not request persistence.",
+  "m5cf132fa": "Zcash tools and details",
+  "md76ef351": "Zcash tools",
+  "m541e8fd0": "Shielded receive",
+  "md1472831": "Shielded address QR code",
+  "mbc257ea6": "Compare the full address on your KeepKey before receiving. Address verification can take over 60 seconds."
 }
