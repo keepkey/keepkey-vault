@@ -67,7 +67,9 @@ export class DigestWalletRpc {
       })
       // Core nonces belong to the TCP connection. Renegotiate on an actual
       // 401 rather than comparing Bun's per-request socket wrapper objects.
-      req.setTimeout(timeout, () => req.destroy(new Error('Monero wallet RPC timed out')))
+      // Reject here: under Bun, destroy() after a timeout emits no 'error', so the call (and the
+      // serial queue behind it) would never settle. The timeout is its own message: a long scan.
+      req.setTimeout(timeout, () => { this.challenge = null; reject(new Error('Monero wallet RPC timed out')); req.destroy() })
       req.on('error', () => { this.challenge = null; reject(new Error('The local Monero wallet RPC is unavailable')) })
       req.end(body)
     })

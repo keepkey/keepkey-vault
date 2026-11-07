@@ -26,7 +26,13 @@ export interface MoneroWalletStatus {
   updatedAt: string
   error?: string
   canSend: false
+  /** The node's chain height when last seen (configure, then each completed refresh): the scan target. */
+  daemonHeight?: number
 }
+
+/** Fixed watch-status diagnostics, so Desktop can tell a long scan from an unreachable node. */
+export const WATCH_SCANNING = 'The Monero watch wallet is still scanning'
+export const WATCH_NODE_UNREACHABLE = 'The Monero node could not be reached; showing the last wallet update'
 
 export interface MoneroSidecarStatus {
   state: 'stopped' | 'starting' | 'ready' | 'error'
@@ -74,7 +80,7 @@ export function atomic(value: unknown): string {
 export function validateWalletStatus(value: unknown): MoneroWalletStatus {
   const v = value as MoneroWalletStatus
   const allowed = ['network', 'address', 'balanceAtomic', 'unlockedBalanceAtomic', 'walletHeight', 'transactions',
-    'transactionsTruncated', 'monitorReady', 'updatedAt', 'error', 'canSend']
+    'transactionsTruncated', 'monitorReady', 'updatedAt', 'error', 'canSend', 'daemonHeight']
   if (!v || typeof v !== 'object' || Array.isArray(v) || Object.keys(v).some(k => !allowed.includes(k)) ||
       v.network !== 'mainnet' || typeof v.address !== 'string' || !v.address.startsWith('4') || !BASE58.test(v.address) ||
       typeof v.monitorReady !== 'boolean' || v.canSend !== false || typeof v.updatedAt !== 'string' ||
@@ -93,7 +99,8 @@ export function validateWalletStatus(value: unknown): MoneroWalletStatus {
   })
   return { network: 'mainnet', address: v.address, balanceAtomic: balance, unlockedBalanceAtomic: unlocked,
     walletHeight: unsigned(v.walletHeight), transactions, monitorReady: v.monitorReady, updatedAt: v.updatedAt,
-    transactionsTruncated: v.transactionsTruncated, error: v.error, canSend: false }
+    transactionsTruncated: v.transactionsTruncated, error: v.error, canSend: false,
+    ...(v.daemonHeight === undefined ? {} : { daemonHeight: unsigned(v.daemonHeight) }) }
 }
 
 /** Preserve integer JSON tokens before JavaScript can round monetary uint64s. */
@@ -121,6 +128,8 @@ export function parseExactJson(text: string): any {
 
 // ── Send path (research emulator only). Amounts stay exact decimal strings. ──
 export const MAX_KEY_IMAGE_OUTPUTS = 64
+/** Wallets with more outputs sync in device sessions of MAX_KEY_IMAGE_OUTPUTS; each imports at its transfer offset. */
+export const MAX_WALLET_OUTPUTS = 4096
 export const MAX_SIGNED_TX_BYTES = 16384
 const HEX32 = /^[0-9a-f]{64}$/
 const SEND_ADDRESS = /^[48][123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz]{94}$/
@@ -136,6 +145,7 @@ export const PUBLIC_ERRORS = [
   'The daemon rejected the transaction',
   'The daemon accepted the transaction but did not relay it',
   'The Monero daemon is unavailable',
+  'The selected Monero node is not synchronized on mainnet',
 ] as const
 export class PublicError extends Error {
   constructor(message: typeof PUBLIC_ERRORS[number]) { super(message) }
@@ -176,7 +186,7 @@ function keys(value: unknown): string[] {
 export function validateOutputs(value: unknown): MoneroOutputRecord[] {
   const v = value as any
   if (!exactKeys(v, ['status', 'offset', 'total', 'outputs']) || v.status !== 'pass' || unsigned(v.offset) !== 0 ||
-      !Array.isArray(v.outputs) || unsigned(v.total) !== v.outputs.length || v.outputs.length > 4096) throw new Error('Invalid Monero output export')
+      !Array.isArray(v.outputs) || unsigned(v.total) !== v.outputs.length || v.outputs.length > MAX_WALLET_OUTPUTS) throw new Error('Invalid Monero output export')
   const seen = new Set<string>()
   return v.outputs.map((item: any, index: number) => {
     if (!exactKeys(item, ['transfer_index', 'amount', 'global_index', 'out_key', 'tx_public_key', 'additional_tx_public_keys',
@@ -235,11 +245,12 @@ export function validateTransferDraft(value: unknown): MoneroTransferDraft {
   return { feeAtomic: atomic(v.feeAtomic), amountAtomic: atomic(v.amountAtomic), plan: validatePlan(v.plan) }
 }
 
-export function validateKeyImageImport(value: unknown): { offset: 0; signedKeyImages: Array<{ keyImage: string; signature: string }> } {
+export function validateKeyImageImport(value: unknown): { offset: number; signedKeyImages: Array<{ keyImage: string; signature: string }> } {
   const v = value as any
-  if (!exactKeys(v, ['offset', 'signedKeyImages']) || v.offset !== 0 || !Array.isArray(v.signedKeyImages) ||
-      !v.signedKeyImages.length || v.signedKeyImages.length > MAX_KEY_IMAGE_OUTPUTS) throw new Error('Invalid Monero key-image import')
-  return { offset: 0, signedKeyImages: v.signedKeyImages.map((item: any) => {
+  if (!exactKeys(v, ['offset', 'signedKeyImages']) || !Number.isSafeInteger(v.offset) || v.offset < 0 || v.offset % MAX_KEY_IMAGE_OUTPUTS !== 0 ||
+      !Array.isArray(v.signedKeyImages) || !v.signedKeyImages.length || v.signedKeyImages.length > MAX_KEY_IMAGE_OUTPUTS ||
+      v.offset + v.signedKeyImages.length > MAX_WALLET_OUTPUTS) throw new Error('Invalid Monero key-image import')
+  return { offset: v.offset, signedKeyImages: v.signedKeyImages.map((item: any) => {
     if (!exactKeys(item, ['keyImage', 'signature']) || !HEX32.test(item.keyImage) || typeof item.signature !== 'string' ||
         !/^[0-9a-f]{128}$/.test(item.signature)) throw new Error('Invalid Monero key image')
     return { keyImage: item.keyImage, signature: item.signature }
