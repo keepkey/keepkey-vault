@@ -781,12 +781,14 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 				borderColor="kk.border"
 				zIndex={Z.drawerPanel}
 				transform={open ? "translateX(0)" : "translateX(100%)"}
-				transition="transform 0.25s ease"
+				visibility={open ? "visible" : "hidden"}
+				transition="transform 0.25s ease, visibility 0.25s"
 				overflowY="auto"
 				outline="none"
-				role="dialog"
+				role={open ? "dialog" : undefined}
 				aria-label={t("title")}
-				aria-modal="true"
+				aria-hidden={!open}
+				aria-modal={open || undefined}
 			>
 				{/* Header */}
 				<Flex
