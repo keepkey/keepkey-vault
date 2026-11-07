@@ -1172,9 +1172,9 @@ function PersonalAssetPage({ chain, balance, onBack, firmwareVersion, initialAct
 										)}
 									</Flex>
 									<Flex align="center" gap="2" mt="0.5" flexWrap="wrap">
-										<Text fontSize="11px" fontFamily="mono" color="var(--text-3)" letterSpacing="0.02em" truncate>
+										{!isMonero && <Text fontSize="11px" fontFamily="mono" color="var(--text-3)" letterSpacing="0.02em" truncate>
 											{chain.caip}
-										</Text>
+										</Text>}
 										{address && chain.explorerAddressUrl && (
 											<Box
 												as="button"
@@ -1457,7 +1457,7 @@ function PersonalAssetPage({ chain, balance, onBack, firmwareVersion, initialAct
 						// Monero's standard Receive/Send: connect (view-key consent), key-image sync and the
 						// device review are Monero-specific steps inside them.
 						view === "send"
-							? <MoneroSendSection monero={monero} client={rpcMoneroClient} />
+							? <MoneroSendSection monero={monero} client={rpcMoneroClient} privateMode={privateModeEnabled} />
 							: <MoneroReceiveSection chain={chain} monero={monero} client={rpcMoneroClient} privateMode={privateModeEnabled} />
 					) : isShieldedToken && zcashPrivacyEnabled ? (
 						// zZEC page: all send/receive surfaces are shielded-only. Never fall

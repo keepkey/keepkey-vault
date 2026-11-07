@@ -35,29 +35,23 @@ describe('C1/C2: the XMR row in the chain list', () => {
   })
 })
 
-describe('C4: connecting asks where the scan starts and names the node', () => {
-  test('an unset (legacy) scan start means an existing wallet scanned from 0, never a guessed week', () => {
-    expect(ui.defaultChoice).toBe('existing')
-    expect(ui.defaultHeight).toBe('0')
-    expect(ui.connectText).toContain('0 scans the whole chain: it takes hours, and it finds every payment')
-    expect(ui.connectText).toContain('Node: https://node.example')
-    expect(ui.connectText).toContain('A node you run yourself')
+describe('XMR opens without a setup checklist', () => {
+  test('connects once automatically with complete history by default', () => {
+    expect(ui.connectCalls).toEqual([['connect', 0]])
+    expect(ui.connectButtons).toEqual([])
+    expect(ui.scanChoices).toBe(0)
+    expect(ui.connectText).toContain('Confirm on KeepKey')
+    expect(ui.settingsClosed).toBe(true)
+    expect(ui.technicalReceiveHidden).toBe(true)
   })
-  test('"never received XMR" is a deliberate choice, warned, with the tip said to come from the unverified node', () => {
-    expect(ui.connectText).toContain("start at block 3,294,960, a week before block 3,300,000, the current height the node reports (KeepKey can't verify it)")
-    expect(ui.warningBeforeNew).toBe(false)
-    expect(ui.warningAfterNew).toContain('Anything received before this block will not appear')
-    expect(ui.connectCalls).toEqual([['connect', 3294960]])
+  test('respects a previously chosen scan start', () => {
+    expect(ui.storedHeightCalls).toEqual([['connect', 3000000]])
   })
-  test('a guessed start is never shown as complete; an old figure says when it is from', () => {
-    expect(ui.partial).toContain('Scanned from block 3,294,960: XMR received before that block is not shown')
-    expect(ui.rowPartial).toBe('Synced from block 3,294,960')
+  test('a partial scan still says that older payments can be missing', () => {
+    expect(ui.partial).toContain('Earlier payments may be missing')
+    expect(ui.rowPartial).toBe('Synced')
     expect(ui.staleScanning.balance).toBe('0.084653050000 XMR')
     expect(ui.staleScanning.stale).toStartWith('Last updated ')
-  })
-  test('a scan start already chosen in Settings is kept, not replaced', () => {
-    expect(ui.storedHeightField).toBe('3000000')
-    expect(ui.storedHeightCalls).toEqual([['connect', 3000000]])
   })
 })
 
@@ -67,7 +61,7 @@ describe('C2: balance states on the page', () => {
   })
   test('scanning: "—" and where the scan is', () => {
     expect(ui.scanning.balance).toBe('—')
-    expect(ui.scanning.note).toContain('Scanning the chain from block 3,294,960')
+    expect(ui.scanning.note).toContain('Syncing your Monero wallet')
   })
   test('node down: the last known balance with its time', () => {
     expect(ui.unreachable.balance).toBe('0.084653050000 XMR')
@@ -85,10 +79,11 @@ describe('Receive: subaddresses come from the device and verify on it', () => {
 })
 
 describe('C3: Send', () => {
-  test('no form until key images are synced', () => {
-    expect(ui.sendBlockedBefore).toBe('key-images')
-    expect(ui.formBeforeSync).toBe(false)
-    expect(ui.formAfterSync).toBe(true)
+  test('shows the form immediately and verifies the balance as part of Review send', () => {
+    expect(ui.formBeforeSync).toBe(true)
+    expect(ui.syncBeforeReview).toBe(0)
+    expect(ui.syncPrepareOrder).toEqual(['sync', 'prepare'])
+    expect(ui.syncDetailsClosed).toBe(true)
   })
   test('my own main address and more than the unlocked balance are explained before anything is built', () => {
     expect(ui.ownAddressProblem).toContain('send to one of its subaddresses')

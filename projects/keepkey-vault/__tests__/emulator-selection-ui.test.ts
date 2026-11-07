@@ -28,27 +28,34 @@ describe('B1: the start screen shows and sets firmware and wallet together', () 
     expect(ui.firmwareOptions).toEqual(['Bundled emulator', 'v7.17.0 · build 249bcff13435', 'v7.17.0 · Monero signing (research)'])
     expect(ui.firmwareShown).toBe('v7.17.0 · build 249bcff13435')
   })
-  test('wallets carry human labels; a build-hash file name is shown only beside one', () => {
-    expect(ui.walletTitles[0].startsWith('PIN wallet (running)build-249bcff134356ee7')).toBe(true)
-    expect(ui.walletTitles[1].startsWith('XMR mainnet (last used)build-92079869551ab26c')).toBe(true)
-    expect(ui.walletTitles[2].startsWith('Unnamed walletbuild-0123456789abcdef')).toBe(true)
+  test('wallets carry human labels and keep file hashes out of the normal list', () => {
+    expect(ui.walletTitles[0].startsWith('PIN wallet (running)')).toBe(true)
+    expect(ui.walletTitles[1].startsWith('XMR mainnet (last used)')).toBe(true)
+    expect(ui.walletTitles[2].startsWith('Unnamed wallet')).toBe(true)
     expect(ui.walletTitles[3].startsWith('my-test-seed')).toBe(true)
+    expect(ui.walletTitles.join(' ')).not.toContain('build-')
   })
   test('the wallet clicked starts on the firmware shown: each pick carries the build', () => {
     expect(ui.picks).toEqual([['build-92079869551ab26c', SIGNING], ['my-test-seed', null]])
   })
 })
 
+test('an obsolete signing hash uses the reviewed signing version with the wallet the user chose', () => {
+  expect(ui.recommendedVersion).toBe(SIGNING)
+  expect(ui.recommendedPicks).toEqual([['build-92079869551ab26c', SIGNING]])
+  expect(ui.recoverySummary).not.toContain('/private/path')
+})
+
 describe('B3: an unavailable selected build', () => {
-  test('stays shown, marked unavailable, with the message naming it and what to do', () => {
-    expect(ui.unavailableShown).toBe('v7.17.0 · Monero signing (research) (unavailable)')
-    expect(ui.unavailableProblem).toContain('"v7.17.0 · Monero signing (research)" needs Monero. Turn Monero on')
+  test('uses the current available version and explains the replacement', () => {
+    expect(ui.unavailableShown).toBe('Bundled emulator')
+    expect(ui.unavailableProblem).toContain('previous emulator version is unavailable')
     expect(ui.unavailableProblem).not.toContain('Bundled emulator missing')
   })
-  test('cannot be started until another build is picked, and nothing else starts in its place', () => {
-    expect(ui.unavailablePicks).toEqual([])
+  test('keeps the chosen wallet while replacing an unavailable version', () => {
+    expect(ui.unavailablePicks).toEqual(['build-92079869551ab26c'])
     expect(ui.problemAfterSwitch).toBe('gone')
-    expect(ui.picksAfterSwitch).toEqual(['build-92079869551ab26c'])
+    expect(ui.picksAfterSwitch).toEqual(['build-92079869551ab26c', 'build-92079869551ab26c'])
   })
 })
 
@@ -64,7 +71,8 @@ describe("Settings' build select", () => {
 })
 
 describe('B5: deleting a seed', () => {
-  test('the running wallet has no delete', () => {
+  test('wallet management is on demand and the running wallet has no delete', () => {
+    expect(ui.deleteButtonsBeforeManage).toBe(0)
     expect(ui.deleteButtons).toEqual(['Delete seed XMR mainnet', 'Delete seed Unnamed wallet', 'Delete seed my-test-seed'])
   })
   test('× only asks; the question names the wallet and its file and says it cannot be undone', () => {

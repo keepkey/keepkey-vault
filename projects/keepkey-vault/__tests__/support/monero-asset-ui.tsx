@@ -32,12 +32,14 @@ const connected = (over: Record<string, unknown> = {}) => ({ ...notConnected, av
 function fakeClient(initial: any, settingsHeight = 0) {
   const calls: any[] = []
   let current = initial
+  let releaseConnect: (() => void) | undefined
   const client = {
+    holdConnect: false, releaseConnect: () => releaseConnect?.(),
     calls, set(next: any) { current = next },
     getStatus: async () => current,
     getSettings: async () => ({ moneroDaemonUrl: 'https://node.example', moneroRestoreHeight: settingsHeight }),
     suggestRestoreHeight: async () => ({ tipHeight: 3_300_000, restoreHeight: 3_294_960, marginBlocks: 5040 }),
-    connect: async (height?: number) => { calls.push(['connect', height]); current = connected(); return current },
+    connect: async (height?: number) => { calls.push(['connect', height]); if (client.holdConnect) await new Promise<void>(resolve => { releaseConnect = resolve }); current = connected(); return current },
     getAddress: async (minor: number, showDisplay: boolean) => { calls.push(['getAddress', minor, showDisplay]); return { address: minor ? SUBADDRESS : WALLET, network: 'mainnet', displayed: showDisplay, minor } },
     syncKeyImages: async () => { calls.push(['sync']); current = connected({ canSend: true, sendBlocked: undefined, keyImagesSynced: true, spendStateKnown: true }); return current },
     prepareSend: async (params: any) => { calls.push(['prepare', params]); return { prepareId: 'ab'.repeat(16), max: !!params.max, recipient: params.address,
@@ -92,21 +94,19 @@ for (const [name, status] of [['rowNotConnected', notConnected], ['rowReady', co
   await unmount()
 }
 
-// ── Connect: the scan start defaults to a week before the tip for a new wallet; the node is named ──
+// ── Opening XMR connects once; technical choices are disclosed only on request ──
 {
-  // A legacy/unset scan start reads as 0: "scan from a block I choose" is selected with 0.
   const client = fakeClient(notConnected)
+  client.holdConnect = true
   const { container, unmount } = await render(React.createElement(Host, { Section: MoneroReceiveSection, client }))
   out.connectText = text(q(container, '[data-monero-connect]'))
-  out.defaultChoice = (container.querySelector('input[name="monero-scan-start"]:checked') as HTMLInputElement | null)?.value
-  out.defaultHeight = (q(container, '[data-monero-restore-height]') as HTMLInputElement | null)?.value
-  out.warningBeforeNew = !!q(container, '[data-monero-new-wallet-warning]')
-  await click(container.querySelector('input[name="monero-scan-start"][value="new"]'))
-  out.warningAfterNew = text(q(container, '[data-monero-new-wallet-warning]'))
-  await click(q(container, '[data-monero-connect-button]'))
   out.connectCalls = client.calls.filter(c => c[0] === 'connect')
+  out.connectButtons = [...container.querySelectorAll('[data-monero-connect] button')].map(text)
+  out.settingsClosed = !(q(container, '[data-monero-connection-details]') as HTMLDetailsElement | null)?.open
+  out.scanChoices = container.querySelectorAll('input[name="monero-scan-start"]').length
+  await act(async () => { client.releaseConnect() })
+  out.technicalReceiveHidden = !q(container, '[data-receive-technical]')
   out.afterConnect = { balance: text(q(container, '[data-monero-balance]')), note: q(container, '[data-monero-note]')?.getAttribute('data-monero-note') }
-  // Receive to subaddress #1, read from the device, then verify it on the device.
   await click(container.querySelector('[aria-label="Next subaddress"]'))
   out.subaddressShown = text(q(container, '[data-monero-subaddress]'))
   out.subaddressAddress = [...container.querySelectorAll('*')].some(el => el.children.length === 0 && text(el) === SUBADDRESS)
@@ -119,8 +119,6 @@ for (const [name, status] of [['rowNotConnected', notConnected], ['rowReady', co
 {
   const client = fakeClient(notConnected, 3_000_000)
   const { container, unmount } = await render(React.createElement(Host, { Section: MoneroReceiveSection, client }))
-  out.storedHeightField = (q(container, '[data-monero-restore-height]') as HTMLInputElement | null)?.value
-  await click(q(container, '[data-monero-connect-button]'))
   out.storedHeightCalls = client.calls.filter(c => c[0] === 'connect')
   await unmount()
 }
@@ -155,9 +153,9 @@ for (const [name, status] of [['rowNotConnected', notConnected], ['rowReady', co
   const client = fakeClient(connected())
   const { container, unmount } = await render(React.createElement(Host, { Section: MoneroSendSection, client }))
   out.sendBlockedBefore = q(container, '[data-monero-send-blocked]')?.getAttribute('data-monero-send-blocked')
+  out.syncDetailsClosed = !(q(container, '[data-monero-send-details]') as HTMLDetailsElement | null)?.open
   out.formBeforeSync = !!q(container, '[data-monero-send-address]')
-  await click(q(container, '[data-monero-sync-key-images]'))
-  out.formAfterSync = !!q(container, '[data-monero-send-address]')
+  out.syncBeforeReview = client.calls.filter(c => c[0] === 'sync').length
   await type(q(container, '[data-monero-send-address]'), WALLET)
   out.ownAddressProblem = text(q(container, '[data-monero-problem="address"]'))
   await type(q(container, '[data-monero-send-address]'), RECIPIENT)
@@ -167,6 +165,7 @@ for (const [name, status] of [['rowNotConnected', notConnected], ['rowReady', co
   await click(q(container, '[data-monero-max]'))
   await click(q(container, '[data-monero-review-send]'))
   out.maxPrepare = client.calls.filter(c => c[0] === 'prepare').at(-1)
+  out.syncPrepareOrder = client.calls.filter(c => c[0] === 'sync' || c[0] === 'prepare').map(c => c[0])
   out.reviewAmount = text(q(container, '[data-monero-review-amount]'))
   await unmount()
 }

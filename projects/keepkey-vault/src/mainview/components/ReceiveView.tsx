@@ -41,6 +41,8 @@ interface ReceiveViewProps {
 	onShowOnDevice?: () => Promise<void>
 	/** False for chains whose firmware fixes the account path (Monero): no path editor. */
 	pathEditable?: boolean
+	/** Account and network identifiers are available separately for simplified asset flows. */
+	showDetails?: boolean
 }
 
 /** Eyebrow + ink-0 mono block + copy chip on the right.
@@ -156,7 +158,7 @@ function PillToggle<T extends string | number>({
 export function ReceiveView({
 	chain, address, assetCaip, loading, error, currentPath, onDerive, scriptType, xpub,
 	isBtc, btcChangeIndex = 0, btcAddressIndex = 0, btcAddressWarning, onBtcChangeIndex, onBtcAddressIndex,
-	isTon, tonBounceable = false, onTonBounceableChange, watchOnly = false, onShowOnDevice, pathEditable = true,
+	isTon, tonBounceable = false, onTonBounceableChange, watchOnly = false, onShowOnDevice, pathEditable = true, showDetails = true,
 }: ReceiveViewProps) {
   const uiText = useUiTranslation()
 
@@ -457,7 +459,8 @@ export function ReceiveView({
 						<CopyableField label={t("extendedPublicKey")} value={xpub} />
 					)}
 
-					{/* Derivation path */}
+					{/* Derivation path and network identifiers */}
+					{showDetails && <Box data-receive-technical="">
 					<Box>
 						<Text fontSize="10px" color="var(--text-3)" textTransform="uppercase" letterSpacing="0.18em" fontWeight="500" mb="2">
 							{t("path")}
@@ -526,6 +529,7 @@ export function ReceiveView({
 							</Text>
 						)}
 					</Flex>
+					</Box>}
 				</Flex>
 			</Flex>
 
