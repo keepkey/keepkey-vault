@@ -189,7 +189,8 @@ describe('daemon relay', () => {
     expect(() => checkRelayResponse({ ...ok, double_spend: true, status: 'Failed' })).toThrow('double spend')
     expect(() => checkRelayResponse({ ...ok, fee_too_low: true, status: 'Failed' })).toThrow('fee too low')
     expect(() => checkRelayResponse({ ...ok, sanity_check_failed: true })).toThrow('rejected')
-    expect(() => checkRelayResponse({ ...ok, status: 'BUSY' })).toThrow('rejected')
+    // No rejection flag: not a rejection (nothing proves nothing was sent), so an unknown outcome to look up.
+    expect(() => checkRelayResponse({ ...ok, status: 'BUSY' })).toThrow('did not relay')
     expect(() => checkRelayResponse({ ...ok, not_relayed: true })).toThrow('did not relay')
     expect(() => checkRelayResponse({ status: 'OK' })).toThrow('did not relay')
   })
@@ -204,7 +205,20 @@ describe('daemon relay', () => {
     await expect(relayRawTransaction('http://127.0.0.1:18081', undefined, 'abcd', reply({ ...ok, double_spend: true }))).rejects.toThrow('double spend')
     await expect(relayRawTransaction('http://127.0.0.1:18081', undefined, 'abcd', reply(ok, 500))).rejects.toThrow('unavailable')
     await expect(relayRawTransaction('http://127.0.0.1:18081', undefined, 'abcd', async () => { throw new Error('ECONNREFUSED secret') })).rejects.toThrow('The Monero daemon is unavailable')
-    await expect(relayRawTransaction('http://127.0.0.1:18081', undefined, 'abcd', async () => new Response('x'.repeat(70000)))).rejects.toThrow('rejected')
+  })
+
+  test('garbage replies are unknown outcomes, never a rejection that would clear the pending tx', async () => {
+    for (const body of ['x'.repeat(70000), 'not json', '[1,2]', 'null', '"OK"', '{"status":"Failed"}', '{"status":"OK"}']) {
+      const error = await relayRawTransaction('http://127.0.0.1:18081', undefined, 'abcd', async () => new Response(body)).catch(e => e)
+      expect(error.message).not.toStartWith('The daemon rejected')
+      expect(['The daemon reply could not be read', 'The daemon accepted the transaction but did not relay it']).toContain(error.message)
+    }
+  })
+
+  test('monerod 0.18.5.4 re-send of a tx it already has (pool or block): OK + not_relayed, an unknown outcome', () => {
+    // Recorded on an offline regtest chain: the second and third /send_raw_transaction of the same bytes.
+    const resend = { ...ok, not_relayed: true, reason: 'Not relayed', status: 'OK' }
+    expect(() => checkRelayResponse(resend)).toThrow('The daemon accepted the transaction but did not relay it')
   })
 
   test('HTTPS relay requires the configured certificate pin; remote HTTP is refused', async () => {
@@ -318,11 +332,14 @@ class Emulator {
 
 function bridge(options: { signing?: boolean; sendReady?: boolean; monitorReady?: boolean; pendingStore?: MoneroPendingStore } = {}) {
   const delegate = new Emulator()
-  const calls: Record<string, any[]> = { imports: [], transfers: [], relays: [], refreshes: [] }
+  const calls: Record<string, any[]> = { imports: [], transfers: [], relays: [], refreshes: [], lookups: [] }
+  // What the node says about a txid (/get_transactions + /is_key_image_spent).
+  type Lookup = { state: 'pool' | 'mined' | 'unknown'; height?: number; keyImages: Array<'unspent' | 'spent' | 'pool'> } | Error
+  let lookup: Lookup | ((n: number) => Lookup) = { state: 'unknown', keyImages: ['unspent'] }
   // The watch wallet as the sidecar reports it; tests edit it (new tx, node down, scanning).
   const wallet: Record<string, any> = { balanceAtomic: '7000000000000', unlockedBalanceAtomic: '7000000000000', walletHeight: 120, transactions: [],
     monitorReady: options.monitorReady !== false }
-  const watch = () => ({ network: 'mainnet', address: delegate.address, canSend: false, updatedAt: new Date().toISOString(), ...structuredClone(wallet) })
+  const watch = () => { const { afterImport: _, ...reported } = structuredClone(wallet); return { network: 'mainnet', address: delegate.address, canSend: false, updatedAt: new Date().toISOString(), ...reported } }
   let draft = (_input: { address: string; amountAtomic: string }) => ({ feeAtomic: '20000000', amountAtomic: '2000000000000', plan: planOf('base') })
   let relayError: Error | null = null
   let transferError: Error | null = null
@@ -333,14 +350,21 @@ function bridge(options: { signing?: boolean; sendReady?: boolean; monitorReady?
     async getMoneroWalletStatus() { return watch() },
     isMoneroSendReady: () => options.sendReady !== false,
     async exportMoneroOutputs() { return outputs() },
-    async importMoneroKeyImages(input) { calls.imports.push(input); return { height: 120, spentAtomic: '0', unspentAtomic: '7000000000000' } },
+    // Importing key images can reveal spends: the wallet then reports a lower balance.
+    async importMoneroKeyImages(input) { calls.imports.push(input); if (wallet.afterImport) wallet.balanceAtomic = wallet.afterImport; return { height: 120, spentAtomic: '0', unspentAtomic: wallet.balanceAtomic } },
+    async lookupMoneroTransaction(input) {
+      calls.lookups.push(input)
+      const next = typeof lookup === 'function' ? lookup(calls.lookups.length) : lookup
+      if (next instanceof Error) throw next
+      return structuredClone(next)
+    },
     async createMoneroTransfer(input) { calls.transfers.push(input); if (transferError) throw transferError; return draft(input) },
     async relayMoneroTransaction(input) { calls.relays.push(input); if (relayError) throw relayError; return { relayed: true } },
     async refreshMoneroWatch() { calls.refreshes.push(true) },
   }
   const transport = { delegate, lockDuring: <T,>(operation: () => Promise<T>) => operation() }
   const state: { state: string; deviceId: string; activeTransport: string; isHiddenWallet: boolean; firmwareVersion: string } = { state: 'ready', deviceId: 'PUBLIC-EMULATOR', activeTransport: 'emulator', isHiddenWallet: false, firmwareVersion: '7.17.0' }
-  const config: { enabled: boolean; offline: boolean; daemonUrl: string; restoreHeight: number | null } = { enabled: true, offline: false, daemonUrl: 'http://127.0.0.1:18081', restoreHeight: 0 }
+  const config: { enabled: boolean; offline: boolean; daemonUrl: string; restoreHeight: number } = { enabled: true, offline: false, daemonUrl: 'http://127.0.0.1:18081', restoreHeight: 0 }
   const engine = { isEmulator: true, wallet: { transport }, emuDelegate: delegate, currentSeedEthAddress: null as string | null, getDeviceState: () => ({ ...state }) }
   const confirmed: any[] = []
   const confirm = async (operation: () => Promise<any>, details: any) => {
@@ -351,7 +375,7 @@ function bridge(options: { signing?: boolean; sendReady?: boolean; monitorReady?
     getConfig: () => ({ ...config }), pendingStore: options.pendingStore })
   return { api, delegate, calls, confirmed, engine, state, config, wallet,
     setDraft(next: typeof draft) { draft = next }, setRelayError(error: Error | null) { relayError = error },
-    setTransferError(error: Error | null) { transferError = error }, setOutputs(next: typeof outputs) { outputs = next } }
+    setTransferError(error: Error | null) { transferError = error }, setLookup(next: typeof lookup) { lookup = next }, setOutputs(next: typeof outputs) { outputs = next } }
 }
 const sentTypes = (b: ReturnType<typeof bridge>) => b.delegate.received.map(message => message.type)
 
@@ -433,10 +457,11 @@ describe('Desktop Monero send bridge', () => {
     expect(b.calls.relays).toHaveLength(0)
 
     b.delegate.signedHash = unhex(referenceHash('base'))
-    b.setRelayError(new Error('The daemon rejected the transaction: double spend'))
+    b.setRelayError(new Error('The daemon rejected the transaction: fee too low'))
     review = await b.api.prepareSend({ address: RECIPIENT, amountAtomic: '2000000000000' })
-    await expect(b.api.send({ prepareId: review.prepareId })).rejects.toThrow('double spend')
+    await expect(b.api.send({ prepareId: review.prepareId })).rejects.toThrow('fee too low')
     expect(b.calls.relays).toHaveLength(1)
+    expect((await b.api.getStatus()).unrelayedTxid).toBeUndefined()
     b.setRelayError(new Error('ECONNRESET with DO-NOT-EXPOSE detail'))
     await b.api.syncKeyImages()
     review = await b.api.prepareSend({ address: RECIPIENT, amountAtomic: '2000000000000' })
@@ -712,6 +737,14 @@ describe('C3: the unknown-broadcast guard survives an app restart', () => {
     expect(createFilePendingStore(dir).load()).toEqual([])
   })
 
+  test('past the 16-record cap the newest records are kept', () => {
+    const { dir } = store()
+    const record = { wallet: `PUBLIC-EMULATOR:${WALLET}`, txid: referenceHash('base'), txHex: fixtures.cases.base.signedTransaction.hex }
+    const records = Array.from({ length: 20 }, (_, i) => ({ ...record, wallet: `DEVICE-${i}:${WALLET}`, createdAt: new Date(Date.UTC(2026, 10, 1, i)).toISOString() }))
+    createFilePendingStore(dir).save(records)
+    expect(createFilePendingStore(dir).load().map(r => r.wallet)).toEqual(records.slice(4).map(r => r.wallet))
+  })
+
   test('if the record cannot be saved, the signed transaction is not broadcast', async () => {
     const b = await ready({ pendingStore: { load: () => [], save: () => { throw new Error('disk full') } } })
     const review = await b.api.prepareSend({ address: RECIPIENT, amountAtomic: '2000000000000' })
@@ -722,11 +755,127 @@ describe('C3: the unknown-broadcast guard survives an app restart', () => {
 })
 
 describe('C4: the scan start', () => {
-  test('connecting with no scan start chosen is refused before the device is asked', async () => {
+  test('the scan start in use is reported before and after connecting', async () => {
     const b = bridge()
-    b.config.restoreHeight = null
-    expect((await b.api.getStatus()).restoreHeight).toBeUndefined()
-    await expect(b.api.connect()).rejects.toThrow('Choose the block where the wallet scan starts')
-    expect(b.delegate.received).toHaveLength(0)
+    b.config.restoreHeight = 3_294_960
+    expect((await b.api.getStatus()).restoreHeight).toBe(3_294_960)
+    expect((await b.api.connect()).restoreHeight).toBe(3_294_960)
+  })
+})
+
+describe('review fixes: node silence, Max fee drift, stale baseline', () => {
+  test('a node that stops answering after the first sync shows the last balance as unreachable, not syncing', async () => {
+    const b = await ready()
+    // What the worker's node probe writes when /get_height stops answering mid-session.
+    Object.assign(b.wallet, { monitorReady: false, error: 'The Monero node could not be reached; showing the last wallet update', daemonHeight: 3_300_000 })
+    expect(await b.api.getStatus()).toMatchObject({ syncState: 'unreachable', balanceAtomic: '7000000000000', canSend: false, sendBlocked: 'syncing' })
+  })
+
+  test('Max when the fee grows between the estimate and the plan still leaves exactly one atomic unit', async () => {
+    const b = await ready()
+    let call = 0
+    b.setDraft(input => {
+      const fee = ++call === 1 ? FEE : FEE * 2n  // the probe saw FEE; the real plan costs twice that
+      const amount = BigInt(input.amountAtomic)
+      if (amount + fee > UNLOCKED) throw new Error('Not enough unlocked XMR for this amount and fee')
+      const plan = planOf('base')
+      plan.feeAtomic = fee.toString()
+      plan.outputs[0] = { ...plan.outputs[0], address: input.address, amountAtomic: amount.toString() }
+      plan.outputs[1] = { ...plan.outputs[1], amountAtomic: (UNLOCKED - amount - fee).toString() }
+      return { feeAtomic: fee.toString(), amountAtomic: amount.toString(), plan }
+    })
+    const review = await b.api.prepareSend({ address: RECIPIENT, max: true })
+    expect(review).toMatchObject({ amountAtomic: (UNLOCKED - FEE * 2n - 1n).toString(), feeAtomic: (FEE * 2n).toString(), changeAtomic: '1' })
+  })
+
+  test('key images go stale against the post-import balance, not the higher pre-import one', async () => {
+    const b = bridge(); b.setDraft(walletDraft)
+    b.wallet.balanceAtomic = '9000000000000'
+    await b.api.connect()
+    // The import finds 2 XMR already spent elsewhere: the wallet now has 7 XMR unspent.
+    b.wallet.afterImport = '7000000000000'
+    await b.api.syncKeyImages()
+    expect((await b.api.getStatus()).keyImagesStale).toBeUndefined()
+    // A new 1 XMR deposit (balance back to 8, still under the old 9): stale.
+    b.wallet.balanceAtomic = '8000000000000'
+    expect((await b.api.getStatus()).keyImagesStale).toBe(true)
+  })
+})
+
+describe('C3: a pending broadcast is settled by asking the node, never left blocking forever', () => {
+  const pendingSend = async (relayError = new Error('The daemon accepted the transaction but did not relay it')) => {
+    const b = await ready()
+    b.setRelayError(relayError)
+    const review = await b.api.prepareSend({ address: RECIPIENT, amountAtomic: '2000000000000' })
+    return { b, sending: b.api.send({ prepareId: review.prepareId }) }
+  }
+  const keyImage = fixtures.cases.base.signedTransaction.keyImages[0]
+
+  test('an unknown outcome the node already has in its pool is a sent payment', async () => {
+    const { b, sending } = await pendingSend()
+    b.setLookup({ state: 'pool', keyImages: ['pool'] })
+    expect(await sending).toEqual({ txid: referenceHash('base') })
+    expect(b.calls.lookups[0]).toEqual({ txid: referenceHash('base'), keyImages: [keyImage] })
+    expect((await b.api.getStatus()).unrelayedTxid).toBeUndefined()
+  })
+
+  test('a retry that gets "Not relayed" (the node already has it) looks it up and settles as sent', async () => {
+    const { b, sending } = await pendingSend(new Error('ETIMEDOUT'))
+    await expect(sending).rejects.toThrow('broadcast result is unknown')
+    // The first reply was lost; the node received it and mined it. Re-sending answers "Not relayed".
+    b.setRelayError(new Error('The daemon accepted the transaction but did not relay it'))
+    b.setLookup(n => n <= 1 ? { state: 'unknown', keyImages: ['unspent'] } : { state: 'mined', height: 81, keyImages: ['spent'] })
+    expect(await b.api.retryRelay()).toEqual({ txid: referenceHash('base') })
+    expect((await b.api.getStatus()).sendBlocked).not.toBe('unrelayed')
+  })
+
+  test('after a restart, a pending tx the node has mined is settled on connect', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'kk-monero-pending-'))
+    const first = await ready({ pendingStore: createFilePendingStore(dir) })
+    first.setRelayError(new Error('ETIMEDOUT'))
+    const review = await first.api.prepareSend({ address: RECIPIENT, amountAtomic: '2000000000000' })
+    await expect(first.api.send({ prepareId: review.prepareId })).rejects.toThrow('broadcast result is unknown')
+    const second = bridge({ pendingStore: createFilePendingStore(dir) })
+    second.setLookup({ state: 'mined', height: 81, keyImages: ['spent'] })
+    expect((await second.api.connect()).unrelayedTxid).toBeUndefined()
+    expect(existsSync(join(dir, 'monero-pending-broadcast.json'))).toBe(false)
+  })
+
+  test('"double spend": ours in a block is sent; spent on chain by another tx is settled as never sendable', async () => {
+    let { b, sending } = await pendingSend(new Error('The daemon rejected the transaction: double spend'))
+    b.setLookup({ state: 'mined', height: 90, keyImages: ['spent'] })
+    expect(await sending).toEqual({ txid: referenceHash('base') })
+    ;({ b, sending } = await pendingSend(new Error('The daemon rejected the transaction: double spend')))
+    b.setLookup({ state: 'unknown', keyImages: ['spent'] })
+    await expect(sending).rejects.toThrow('spent by a different transaction, so it can never be sent')
+    expect((await b.api.getStatus()).unrelayedTxid).toBeUndefined()
+  })
+
+  test('the node unreachable for the lookup keeps the block; unknown with unspent inputs offers discard', async () => {
+    const { b, sending } = await pendingSend()
+    b.setLookup(new Error('The Monero daemon is unavailable'))
+    await expect(sending).rejects.toThrow('broadcast result is unknown')
+    expect(await b.api.getStatus()).toMatchObject({ sendBlocked: 'unrelayed', unrelayedTxid: referenceHash('base') })
+    expect((await b.api.getStatus()).unrelayedCheck).toBeUndefined()
+    await expect(b.api.discardPending({ confirm: true })).rejects.toThrow('could not be asked')
+    b.setLookup({ state: 'unknown', keyImages: ['unspent'] })
+    await expect(b.api.retryRelay()).rejects.toThrow('broadcast result is unknown')
+    expect((await b.api.getStatus()).unrelayedCheck).toMatchObject({ state: 'unknown', discardable: true })
+  })
+
+  test('discard needs confirmation, and only when the node has neither the tx nor its inputs spent', async () => {
+    const { b, sending } = await pendingSend()
+    b.setLookup({ state: 'unknown', keyImages: ['pool'] })
+    await expect(sending).rejects.toThrow('broadcast result is unknown')
+    await expect(b.api.discardPending({})).rejects.toThrow('Confirm discarding')
+    await expect(b.api.discardPending({ confirm: true })).rejects.toThrow("spent in the node's pool by another transaction")
+    b.setLookup({ state: 'pool', keyImages: ['pool'] })
+    expect(await b.api.discardPending({ confirm: true })).toEqual({ outcome: 'sent', txid: referenceHash('base') })
+    const again = await pendingSend()
+    again.b.setLookup({ state: 'unknown', keyImages: ['unspent'] })
+    await expect(again.sending).rejects.toThrow('broadcast result is unknown')
+    expect(await again.b.api.discardPending({ confirm: true })).toEqual({ outcome: 'discarded', txid: referenceHash('base') })
+    expect((await again.b.api.getStatus()).sendBlocked).not.toBe('unrelayed')
+    expect(signs(again.b)).toBe(1)
   })
 })

@@ -11,15 +11,16 @@ export function validateMoneroNode(input: { daemonUrl: string; restoreHeight: nu
   return { daemonUrl: url.toString().replace(/\/$/, ''), restoreHeight: input.restoreHeight }
 }
 
-/** A new wallet starts its scan about a week (5,040 two-minute blocks) before the node's tip:
- *  scanning from block 0 takes hours, and the margin still catches anything received this week. */
+/** "New wallet" starts its scan about a week (5,040 two-minute blocks) before the tip the node reports.
+ *  The node is not verified, so the UI says the height comes from it; it is never the default. */
 export const RESTORE_HEIGHT_MARGIN = 5040
 
-/** Unset ('' or missing) means no scan start was chosen yet; Desktop then offers the suggestion. */
-export function storedRestoreHeight(value: string | null): number | null {
-  if (value === null || value === '') return null
+/** Unset, empty (an older build's "not chosen") or unreadable means 0: treat the wallet as one that may
+ *  already hold XMR and scan everything. A later start is only ever a deliberate choice. */
+export function storedRestoreHeight(value: string | null): number {
+  if (value === null || value === '') return 0
   const height = Number(value)
-  return Number.isSafeInteger(height) && height >= 0 ? height : null
+  return Number.isSafeInteger(height) && height >= 0 ? height : 0
 }
 
 /** The node's current height (/get_height) and the suggested scan start for a new wallet. */

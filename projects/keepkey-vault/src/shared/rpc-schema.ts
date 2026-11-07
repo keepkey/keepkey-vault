@@ -503,8 +503,9 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       moneroPrepareSend: { params: { address: string; amountAtomic?: string; max?: boolean }; response: MoneroSendReview }
       moneroSend: { params: { prepareId: string }; response: { txid: string } }
       moneroRetryRelay: { params: undefined; response: { txid: string } }
+      moneroDiscardPending: { params: { confirm: boolean }; response: { outcome: 'discarded' | 'sent' | 'superseded'; txid: string } }
       setMoneroEnabled: { params: { enabled: boolean }; response: AppSettings }
-      setMoneroNode: { params: { daemonUrl: string; restoreHeight: number | null }; response: AppSettings }
+      setMoneroNode: { params: { daemonUrl: string; restoreHeight: number }; response: AppSettings }
       emulatorPair: { params: void; response: EmulatorStatus }
       emulatorInit: { params: { flashName?: string } | void; response: EmulatorStatus }
       emulatorStop: { params: void; response: EmulatorStatus }

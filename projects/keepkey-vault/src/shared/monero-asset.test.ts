@@ -42,6 +42,14 @@ describe('C2: never a fake 0', () => {
     expect(moneroBalanceView(status())).toMatchObject({ state: 'ready', balanceAtomic: '84653050000', unlockedAtomic: '80000000000', lockedAtomic: '4653050000', spendVerified: false })
     expect(moneroBalanceView(status({ spendStateKnown: true })).spendVerified).toBe(true)
   })
+  test('an old figure is marked stale with its time, whatever the state; a fresh one is not', () => {
+    const at = Date.parse('2026-11-06T12:00:00.000Z')
+    expect(moneroBalanceView(status(), null, at + 60_000).stale).toBe(false)
+    expect(moneroBalanceView(status(), null, at + 10 * 60_000)).toMatchObject({ stale: true, updatedAt: '2026-11-06T12:00:00.000Z' })
+    // Caught up to the node's own height but not refreshed lately: still labelled with its time.
+    expect(moneroBalanceView(status({ syncState: 'scanning', monitorReady: false }), null, at + 10 * 60_000)).toMatchObject({ balanceAtomic: '84653050000', stale: true })
+    expect(moneroBalanceView(status({ available: false, syncState: 'not-connected' }), null, at + 10 * 60_000).stale).toBe(false)
+  })
   test('row amounts keep exact digits', () => {
     expect(formatXmrShort('84653050000')).toBe('0.08465305')
     expect(formatXmrShort('1')).toBe('0.000000000001')

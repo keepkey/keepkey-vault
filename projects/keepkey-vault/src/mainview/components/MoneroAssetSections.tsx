@@ -28,7 +28,7 @@ export function useMoneroStateLabel(view: MoneroBalanceView): string {
 	const uiText = useUiTranslation()
 	if (view.state === "loading") return uiText("Loading…")
 	if (view.state === "not-connected") return uiText("Not connected")
-	if (view.state === "ready") return uiText("Synced")
+	if (view.state === "ready") return (view.restoreHeight ?? 0) > 0 ? uiText("Synced from block {{height}}", { height: (view.restoreHeight ?? 0).toLocaleString(getNumberLocale()) }) : uiText("Synced")
 	if (view.state === "unreachable") return uiText("Node unreachable")
 	return view.progress === undefined ? uiText("Syncing") : uiText("Syncing {{percent}}%", { percent: Math.floor(view.progress * 100) })
 }
@@ -44,6 +44,13 @@ export function MoneroStatusChip({ view }: { view: MoneroBalanceView }) {
 	)
 }
 
+/** "Last updated <time>" whenever a shown figure is not fresh (the unreachable note already says it). */
+function MoneroFreshness({ view }: { view: MoneroBalanceView }) {
+	const uiText = useUiTranslation()
+	if (!view.stale || view.state === "unreachable") return null
+	return <Text data-monero-stale="" fontSize="11px" color="var(--gold)">{uiText("Last updated {{time}}", { time: view.updatedAt ? new Date(view.updatedAt).toLocaleString(getNumberLocale()) : "—" })}</Text>
+}
+
 /** Header amount: "—" when unknown; fiat is never shown (no price source), it says "not included". */
 export function MoneroHeaderBalance({ view, privateMode }: { view: MoneroBalanceView; privateMode: boolean }) {
 	const uiText = useUiTranslation()
@@ -56,6 +63,7 @@ export function MoneroHeaderBalance({ view, privateMode }: { view: MoneroBalance
 				<Text fontFamily="mono" fontSize={{ base: "12px", md: "14px" }} color="var(--text-3)">XMR</Text>
 			</Flex>
 			<Text fontSize="10px" color="var(--text-3)" title={uiText("XMR has no price source here, so it is not included in the portfolio total.")}>{uiText("Fiat value not included")}</Text>
+			<MoneroFreshness view={view} />
 		</Flex>
 	)
 }
@@ -72,6 +80,9 @@ function MoneroBalanceNote({ view }: { view: MoneroBalanceView }) {
 		return <Text data-monero-note="unreachable" role="alert" fontSize="12px" color="var(--gold)">{view.balanceAtomic === null
 			? uiText("The Monero node can't be reached, and no balance has been read yet.")
 			: uiText("The Monero node can't be reached. Showing the last known balance, from {{time}}.", { time: view.updatedAt ? new Date(view.updatedAt).toLocaleString(getNumberLocale()) : "—" })}</Text>
+	}
+	if (view.state === "ready" && (view.restoreHeight ?? 0) > 0) {
+		return <Text data-monero-note="partial" fontSize="12px" color="var(--text-2)">{uiText("Scanned from block {{height}}: XMR received before that block is not shown. Lower the scan start in Settings → Monero if this wallet is older.", { height: (view.restoreHeight ?? 0).toLocaleString(getNumberLocale()) })}{!view.spendVerified ? ` ${uiText("Not yet verified as spendable: sync key images on the Send tab.")}` : ""}</Text>
 	}
 	if (view.state === "ready" && !view.spendVerified) {
 		return <Text data-monero-note="unverified" fontSize="12px" color="var(--text-2)">{uiText("Received, not yet verified as spendable: a view-only wallet can't see spends made from another wallet. Sync key images on the Send tab to verify.")}</Text>
@@ -94,10 +105,11 @@ function MoneroAmounts({ view, privateMode }: { view: MoneroBalanceView; private
 /** The view-key consent step, with where the scan starts and which node is used. */
 export function MoneroConnectCard({ client, monero }: { client: MoneroClient; monero: MoneroStatusState }) {
 	const uiText = useUiTranslation()
-	const [settings, setSettings] = useState<{ moneroDaemonUrl: string; moneroRestoreHeight: number | null } | null>(null)
+	const [settings, setSettings] = useState<{ moneroDaemonUrl: string; moneroRestoreHeight: number } | null>(null)
 	const [suggestion, setSuggestion] = useState<{ tipHeight: number; restoreHeight: number } | null>(null)
 	const [suggestionError, setSuggestionError] = useState<string | null>(null)
-	const [choice, setChoice] = useState<"new" | "existing">("new")
+	// Default: the wallet may already hold XMR, so scan from the saved block (0 unless the user chose one).
+	const [choice, setChoice] = useState<"new" | "existing">("existing")
 	const [height, setHeight] = useState("0")
 	const [connecting, setConnecting] = useState(false)
 	const [error, setError] = useState<string | null>(null)
@@ -106,10 +118,11 @@ export function MoneroConnectCard({ client, monero }: { client: MoneroClient; mo
 		client.getSettings().then(next => {
 			if (!live) return
 			setSettings(next)
-			if (next.moneroRestoreHeight !== null) { setChoice("existing"); setHeight(String(next.moneroRestoreHeight)) }
+			setHeight(String(next.moneroRestoreHeight ?? 0))
 		}).catch(e => { if (live) setError(errorText(e, "Unable to read the Monero settings.")) })
 		client.suggestRestoreHeight().then(next => { if (live) setSuggestion(next) })
 			.catch(e => { if (live) { setSuggestionError(errorText(e, "Unable to read the node height.")); setChoice("existing") } })
+		// The suggestion is only ever fetched; "new wallet" stays an explicit choice.
 		return () => { live = false }
 	}, [client])
 	const chosenHeight = choice === "new" ? suggestion?.restoreHeight : /^(0|[1-9][0-9]{0,9})$/.test(height.trim()) ? Number(height.trim()) : undefined
@@ -133,11 +146,12 @@ export function MoneroConnectCard({ client, monero }: { client: MoneroClient; mo
 			<Box {...cardProps} mb="3">
 				<Text fontSize="12px" color="var(--text-0)" fontWeight="500" mb="2">{uiText("Where should the scan start?")}</Text>
 				<Flex direction="column" gap="2">
+					{option("existing", uiText("Scan from a block I choose. 0 scans the whole chain: it takes hours, and it finds every payment this wallet ever received."))}
 					{option("new", suggestion
-						? uiText("New wallet (no XMR received yet): start at block {{height}}, about a week before the current block {{tip}}.", { height: suggestion.restoreHeight.toLocaleString(getNumberLocale()), tip: suggestion.tipHeight.toLocaleString(getNumberLocale()) })
-						: uiText("New wallet (no XMR received yet): start about a week before the current block."), !suggestion)}
-					{option("existing", uiText("This wallet has received XMR before: start at an earlier block (0 scans everything, which takes hours)."))}
+						? uiText("This wallet has never received XMR: start at block {{height}}, a week before block {{tip}}, the current height the node reports (KeepKey can't verify it).", { height: suggestion.restoreHeight.toLocaleString(getNumberLocale()), tip: suggestion.tipHeight.toLocaleString(getNumberLocale()) })
+						: uiText("This wallet has never received XMR: start a week before the node's current block."), !suggestion)}
 				</Flex>
+				{choice === "new" && <Text data-monero-new-wallet-warning="" mt="2" fontSize="12px" color="var(--gold)">{uiText("Only for a wallet that has never received XMR. Anything received before this block will not appear, and the balance will look complete when it isn't.")}</Text>}
 				{choice === "existing" && <Input data-monero-restore-height="" mt="2" size="sm" maxW="200px" inputMode="numeric" aria-label={uiText("Scan start block")} value={height} onChange={e => setHeight(e.target.value)} />}
 				{choice === "existing" && chosenHeight === undefined && <Text mt="1" fontSize="12px" color="var(--rose)">{uiText("Enter a block height (a whole number, 0 or more).")}</Text>}
 				{suggestionError && <Text mt="2" fontSize="12px" color="var(--text-2)">{uiText("Couldn't read the node's current block: {{error}}", { error: suggestionError })}</Text>}
@@ -187,7 +201,7 @@ export function MoneroReceiveSection({ chain, monero, client, privateMode }: { c
 	}
 	return (
 		<Box data-monero-receive="">
-			<Box mb="5"><MoneroAmounts view={view} privateMode={privateMode} /><Box mt="2"><MoneroBalanceNote view={view} /></Box></Box>
+			<Box mb="5"><MoneroAmounts view={view} privateMode={privateMode} /><Box mt="2"><MoneroBalanceNote view={view} /><MoneroFreshness view={view} /></Box></Box>
 			<Flex align="center" gap="2" mb="3" flexWrap="wrap">
 				<Text fontSize="10px" color="var(--text-3)" textTransform="uppercase" letterSpacing="0.18em">{uiText("Receive to")}</Text>
 				<Button aria-label={uiText("Previous subaddress")} size="xs" variant="ghost" disabled={minor === 0} onClick={() => setMinor(m => Math.max(0, m - 1))}><FaMinus /></Button>
@@ -240,7 +254,9 @@ export function MoneroSendSection({ monero, client }: { monero: MoneroStatusStat
 	const [amount, setAmount] = useState("")
 	const [max, setMax] = useState(false)
 	const [review, setReview] = useState<MoneroSendReview | null>(null)
-	const [busy, setBusy] = useState<"sync" | "prepare" | "confirm" | "retry" | null>(null)
+	const [busy, setBusy] = useState<"sync" | "prepare" | "confirm" | "retry" | "discard" | null>(null)
+	const [confirmDiscard, setConfirmDiscard] = useState(false)
+	const [notice, setNotice] = useState<string | null>(null)
 	const [error, setError] = useState<string | null>(null)
 	const [sentTxid, setSentTxid] = useState<string | null>(null)
 	const address = wallet?.address ?? ""
@@ -272,6 +288,14 @@ export function MoneroSendSection({ monero, client }: { monero: MoneroStatusStat
 		try { const result = await client.retryRelay(); if (/^[0-9a-f]{64}$/.test(result?.txid ?? "")) setSentTxid(result.txid) }
 		finally { void monero.refresh() }
 	})
+	const discard = () => run("discard", async () => {
+		try {
+			const result = await client.discardPending()
+			setNotice(result.outcome === "sent" ? uiText("The node has this transaction, so it was sent; nothing was discarded.")
+				: result.outcome === "superseded" ? uiText("Its inputs were spent by a different transaction, so it can never be sent. It was cleared.")
+				: uiText("Discarded. Its funds are spendable again; the next send builds a new transaction."))
+		} finally { setConfirmDiscard(false); void monero.refresh() }
+	})
 	const receiveOnly = wallet.sendBlocked === "emulator" || wallet.sendBlocked === "adapter"
 	return (
 		<Box data-monero-send="">
@@ -280,6 +304,23 @@ export function MoneroSendSection({ monero, client }: { monero: MoneroStatusStat
 					<Text fontSize="13px" color="var(--gold)">{uiText("The broadcast result of your last send is unknown. Check this transaction on a block explorer before doing anything else. Retry broadcast resends the same transaction; it cannot pay twice. New sends from this wallet wait until it is settled, even after a restart.")}</Text>
 					<Text data-monero-unrelayed="" fontSize="11px" fontFamily="mono" color="var(--text-2)" wordBreak="break-all" userSelect="all" mt="1">{wallet.unrelayedTxid}</Text>
 					<Button data-monero-retry-relay="" mt="2" size="xs" variant="outline" onClick={() => { void retry() }} disabled={!!busy} className="electrobun-webkit-app-region-no-drag">{busy === "retry" ? <Spinner size="xs" /> : null}{uiText("Retry broadcast")}</Button>
+					{wallet.unrelayedCheck?.state === "unknown" && (
+						<Text data-monero-unrelayed-check="" mt="2" fontSize="11px" color="var(--text-2)">{wallet.unrelayedCheck.discardable
+							? uiText("The node checked at {{time}}: it does not have this transaction, and its inputs are still unspent.", { time: new Date(wallet.unrelayedCheck.checkedAt).toLocaleTimeString(getNumberLocale()) })
+							: uiText("The node does not have this transaction, but its inputs are spent in the node's pool by another one. Wait for that to settle.")}</Text>
+					)}
+					{wallet.unrelayedCheck?.discardable && !confirmDiscard && (
+						<Button data-monero-discard="" mt="2" ml="2" size="xs" variant="ghost" onClick={() => setConfirmDiscard(true)} disabled={!!busy} className="electrobun-webkit-app-region-no-drag">{uiText("Discard this transaction…")}</Button>
+					)}
+					{confirmDiscard && (
+						<Box data-monero-discard-confirm="" mt="2" role="alertdialog">
+							<Text fontSize="12px" color="var(--rose)">{uiText("Discard only if you are sure it was never broadcast. The node is asked again first; if it has the transaction, nothing is discarded. If the transaction is still waiting on another node and you send again, you could pay twice.")}</Text>
+							<Flex gap="2" mt="2">
+								<Button data-monero-discard-yes="" size="xs" colorPalette="red" onClick={() => { void discard() }} disabled={!!busy}>{busy === "discard" ? <Spinner size="xs" /> : null}{uiText("Discard it")}</Button>
+								<Button size="xs" variant="ghost" onClick={() => setConfirmDiscard(false)} disabled={!!busy}>{uiText("Keep it")}</Button>
+							</Flex>
+						</Box>
+					)}
 				</Box>
 			)}
 			{receiveOnly ? (
@@ -361,6 +402,7 @@ export function MoneroSendSection({ monero, client }: { monero: MoneroStatusStat
 					<Text data-monero-sent="" fontSize="11px" fontFamily="mono" color="var(--text-2)" wordBreak="break-all" userSelect="all">{sentTxid}</Text>
 				</Box>
 			)}
+			{notice && <Text data-monero-notice="" mt="3" fontSize="12px" color="var(--teal)" role="status">{notice}</Text>}
 			{error && <Text data-monero-error="" mt="3" fontSize="12px" color="var(--rose)" role="alert">{error}</Text>}
 		</Box>
 	)
@@ -387,7 +429,7 @@ export function MoneroChainRow({ chain, iconSrc, privateMode, onOpen, client }: 
 						<Text data-monero-row-balance="" fontSize="12px" color="var(--text-2)" lineHeight="1.3" truncate>
 							{view.balanceAtomic === null ? `— ${chain.symbol}` : privateMode ? "••••" : `${formatXmrShort(view.balanceAtomic)} ${chain.symbol}`}
 						</Text>
-						{view.state !== "ready" && <Text data-monero-row-state={view.state} fontSize="10px" color={view.state === "unreachable" ? "var(--gold)" : "var(--text-3)"} flexShrink={0}>{label}</Text>}
+						{(view.state !== "ready" || (view.restoreHeight ?? 0) > 0) && <Text data-monero-row-state={view.state} fontSize="10px" color={view.state === "unreachable" ? "var(--gold)" : "var(--text-3)"} flexShrink={0}>{label}</Text>}
 					</Flex>
 				</Box>
 			</Flex>

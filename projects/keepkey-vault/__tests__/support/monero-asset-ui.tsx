@@ -26,10 +26,10 @@ const monero = CHAINS.find(c => c.id === 'monero')!
 const notConnected = { available: false, network: 'mainnet', address: '', balanceAtomic: '0', unlockedBalanceAtomic: '0', walletHeight: 0, transactions: [],
   monitorReady: false, syncState: 'not-connected', canSend: false, spendStateKnown: false }
 const connected = (over: Record<string, unknown> = {}) => ({ ...notConnected, available: true, address: WALLET, balanceAtomic: '84653050000',
-  unlockedBalanceAtomic: '84653050000', walletHeight: 3_300_000, daemonHeight: 3_300_000, restoreHeight: 3_294_960, monitorReady: true, syncState: 'ready',
-  updatedAt: '2026-11-06T12:00:00.000Z', sendBlocked: 'key-images', ...over })
+  unlockedBalanceAtomic: '84653050000', walletHeight: 3_300_000, daemonHeight: 3_300_000, restoreHeight: 0, monitorReady: true, syncState: 'ready',
+  updatedAt: new Date().toISOString(), sendBlocked: 'key-images', ...over })
 
-function fakeClient(initial: any, settingsHeight: number | null = null) {
+function fakeClient(initial: any, settingsHeight = 0) {
   const calls: any[] = []
   let current = initial
   const client = {
@@ -45,6 +45,7 @@ function fakeClient(initial: any, settingsHeight: number | null = null) {
       outputs: [{ role: 'recipient', address: params.address, amountAtomic: '84633049999' }, { role: 'change', address: WALLET, amountAtomic: '1' }] } },
     send: async () => ({ txid: 'cd'.repeat(32) }),
     retryRelay: async () => { calls.push(['retry']); return { txid: 'ef'.repeat(32) } },
+    discardPending: async () => { calls.push(['discard']); return { outcome: 'discarded', txid: 'cd'.repeat(32) } },
   }
   return client
 }
@@ -81,7 +82,7 @@ function Host({ Section, client, extra }: any) {
 const out: Record<string, unknown> = {}
 
 // ── The Dashboard row: "—" until known, never fiat, the last balance when the node is down ──
-for (const [name, status] of [['rowNotConnected', notConnected], ['rowReady', connected()], ['rowScanning', connected({ syncState: 'scanning', walletHeight: 3_297_480, monitorReady: false })],
+for (const [name, status] of [['rowNotConnected', notConnected], ['rowReady', connected()], ['rowScanning', connected({ syncState: 'scanning', walletHeight: 3_297_480, restoreHeight: 3_294_960, monitorReady: false })],
   ['rowUnreachable', connected({ syncState: 'unreachable', monitorReady: false })]] as const) {
   let opened = 0
   const { container, unmount } = await render(React.createElement(MoneroChainRow, { chain: monero, iconSrc: '', privateMode: false, onOpen: () => { opened++ }, client: fakeClient(status) }))
@@ -93,9 +94,15 @@ for (const [name, status] of [['rowNotConnected', notConnected], ['rowReady', co
 
 // ── Connect: the scan start defaults to a week before the tip for a new wallet; the node is named ──
 {
+  // A legacy/unset scan start reads as 0: "scan from a block I choose" is selected with 0.
   const client = fakeClient(notConnected)
   const { container, unmount } = await render(React.createElement(Host, { Section: MoneroReceiveSection, client }))
   out.connectText = text(q(container, '[data-monero-connect]'))
+  out.defaultChoice = (container.querySelector('input[name="monero-scan-start"]:checked') as HTMLInputElement | null)?.value
+  out.defaultHeight = (q(container, '[data-monero-restore-height]') as HTMLInputElement | null)?.value
+  out.warningBeforeNew = !!q(container, '[data-monero-new-wallet-warning]')
+  await click(container.querySelector('input[name="monero-scan-start"][value="new"]'))
+  out.warningAfterNew = text(q(container, '[data-monero-new-wallet-warning]'))
   await click(q(container, '[data-monero-connect-button]'))
   out.connectCalls = client.calls.filter(c => c[0] === 'connect')
   out.afterConnect = { balance: text(q(container, '[data-monero-balance]')), note: q(container, '[data-monero-note]')?.getAttribute('data-monero-note') }
@@ -110,7 +117,7 @@ for (const [name, status] of [['rowNotConnected', notConnected], ['rowReady', co
   await unmount()
 }
 {
-  const client = fakeClient(notConnected, 0)
+  const client = fakeClient(notConnected, 3_000_000)
   const { container, unmount } = await render(React.createElement(Host, { Section: MoneroReceiveSection, client }))
   out.storedHeightField = (q(container, '[data-monero-restore-height]') as HTMLInputElement | null)?.value
   await click(q(container, '[data-monero-connect-button]'))
@@ -118,14 +125,27 @@ for (const [name, status] of [['rowNotConnected', notConnected], ['rowReady', co
   await unmount()
 }
 
+// ── A guessed scan start never reads as complete; an old figure carries its time ──
+{
+  const { container, unmount } = await render(React.createElement(Host, { Section: MoneroReceiveSection, client: fakeClient(connected({ restoreHeight: 3_294_960, updatedAt: new Date().toISOString() })) }))
+  out.partial = text(q(container, '[data-monero-note]'))
+  await unmount()
+  const row = await render(React.createElement(MoneroChainRow, { chain: monero, iconSrc: '', privateMode: false, onOpen() {}, client: fakeClient(connected({ restoreHeight: 3_294_960 })) }))
+  out.rowPartial = text(q(row.container, '[data-monero-row-state]'))
+  await row.unmount()
+  const old = await render(React.createElement(Host, { Section: MoneroReceiveSection, client: fakeClient(connected({ restoreHeight: 0, syncState: 'scanning', monitorReady: false, updatedAt: '2026-11-06T12:00:00.000Z' })) }))
+  out.staleScanning = { balance: text(q(old.container, '[data-monero-balance]')), stale: text(q(old.container, '[data-monero-stale]')) }
+  await old.unmount()
+}
+
 // ── Node down after connect: the last known balance, labelled ──
 {
-  const { container, unmount } = await render(React.createElement(Host, { Section: MoneroReceiveSection, client: fakeClient(connected({ syncState: 'unreachable', monitorReady: false })) }))
+  const { container, unmount } = await render(React.createElement(Host, { Section: MoneroReceiveSection, client: fakeClient(connected({ syncState: 'unreachable', monitorReady: false, updatedAt: '2026-11-06T12:00:00.000Z' })) }))
   out.unreachable = { balance: text(q(container, '[data-monero-balance]')), note: text(q(container, '[data-monero-note]')) }
   await unmount()
 }
 {
-  const { container, unmount } = await render(React.createElement(Host, { Section: MoneroReceiveSection, client: fakeClient(connected({ syncState: 'scanning', walletHeight: 0, monitorReady: false, balanceAtomic: '0', unlockedBalanceAtomic: '0' })) }))
+  const { container, unmount } = await render(React.createElement(Host, { Section: MoneroReceiveSection, client: fakeClient(connected({ syncState: 'scanning', walletHeight: 0, restoreHeight: 3_294_960, monitorReady: false, balanceAtomic: '0', unlockedBalanceAtomic: '0' })) }))
   out.scanning = { balance: text(q(container, '[data-monero-balance]')), note: text(q(container, '[data-monero-note]')) }
   await unmount()
 }
@@ -157,6 +177,25 @@ for (const [name, status] of [['rowNotConnected', notConnected], ['rowReady', co
   out.formWhileUnrelayed = !!q(container, '[data-monero-send-address]')
   await click(q(container, '[data-monero-retry-relay]'))
   out.retryCalls = client.calls.filter(c => c[0] === 'retry').length
+  out.discardWithoutCheck = !!q(container, '[data-monero-discard]')
+  await unmount()
+}
+{
+  const client = fakeClient(connected({ unrelayedTxid: 'cd'.repeat(32), sendBlocked: 'unrelayed', unrelayedCheck: { state: 'unknown', discardable: true, checkedAt: new Date().toISOString() } }))
+  const { container, unmount } = await render(React.createElement(Host, { Section: MoneroSendSection, client }))
+  out.checkText = text(q(container, '[data-monero-unrelayed-check]'))
+  await click(q(container, '[data-monero-discard]'))
+  out.discardCallsBeforeConfirm = client.calls.filter(c => c[0] === 'discard').length
+  out.discardConfirmText = text(q(container, '[data-monero-discard-confirm]'))
+  await click(q(container, '[data-monero-discard-yes]'))
+  out.discardCalls = client.calls.filter(c => c[0] === 'discard').length
+  out.discardNotice = text(q(container, '[data-monero-notice]'))
+  await unmount()
+}
+{
+  const client = fakeClient(connected({ unrelayedTxid: 'cd'.repeat(32), sendBlocked: 'unrelayed', unrelayedCheck: { state: 'unknown', discardable: false, checkedAt: new Date().toISOString() } }))
+  const { container, unmount } = await render(React.createElement(Host, { Section: MoneroSendSection, client }))
+  out.notDiscardable = { button: !!q(container, '[data-monero-discard]'), text: text(q(container, '[data-monero-unrelayed-check]')) }
   await unmount()
 }
 {

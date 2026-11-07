@@ -35,11 +35,11 @@ describe('C4: the scan start for a new wallet', () => {
     await expect(suggestRestoreHeight(`http://127.0.0.1:${port}`)).rejects.toThrow('could not be reached')
     await expect(suggestRestoreHeight('http://remote.example')).rejects.toThrow('HTTPS')
   })
-  test('an unset restore height stays unchosen (it used to read as 0, a scan from genesis)', () => {
-    expect(storedRestoreHeight(null)).toBeNull()
-    expect(storedRestoreHeight('')).toBeNull()
+  test('an unset, legacy-empty or unreadable restore height is 0 (scan everything), never a guess', () => {
+    expect(storedRestoreHeight(null)).toBe(0)
+    expect(storedRestoreHeight('')).toBe(0)
+    expect(storedRestoreHeight('-1')).toBe(0)
     expect(storedRestoreHeight('0')).toBe(0)
     expect(storedRestoreHeight('3200000')).toBe(3_200_000)
-    expect(storedRestoreHeight('-1')).toBeNull()
   })
 })

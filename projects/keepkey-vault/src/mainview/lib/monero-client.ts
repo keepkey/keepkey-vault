@@ -12,6 +12,7 @@ export interface MoneroClient {
 	prepareSend(params: { address: string; amountAtomic?: string; max?: boolean }): Promise<MoneroSendReview>
 	send(prepareId: string): Promise<{ txid: string }>
 	retryRelay(): Promise<{ txid: string }>
+	discardPending(): Promise<{ outcome: "discarded" | "sent" | "superseded"; txid: string }>
 }
 
 const ATOMIC = /^(0|[1-9][0-9]*)$/
@@ -42,4 +43,5 @@ export const rpcMoneroClient: MoneroClient = {
 	prepareSend: params => rpcRequest<MoneroSendReview>("moneroPrepareSend", params, 300_000),
 	send: prepareId => rpcRequest<{ txid: string }>("moneroSend", { prepareId }, 600_000),
 	retryRelay: () => rpcRequest<{ txid: string }>("moneroRetryRelay", undefined, 120_000),
+	discardPending: () => rpcRequest("moneroDiscardPending", { confirm: true }, 120_000),
 }

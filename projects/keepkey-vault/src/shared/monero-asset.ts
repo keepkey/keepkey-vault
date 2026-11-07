@@ -39,7 +39,12 @@ export interface MoneroBalanceView {
   updatedAt?: string
   /** False until key images prove which received outputs are unspent. */
   spendVerified: boolean
+  /** A balance is shown but its last refresh is older than STALE_AFTER_MS (or unknown): say when it is from. */
+  stale: boolean
 }
+
+/** The watch wallet refreshes every 15 s; older than this, a figure is labelled with its time. */
+export const STALE_AFTER_MS = 120_000
 
 /**
  * - not connected / loading: "—";
@@ -47,8 +52,8 @@ export interface MoneroBalanceView {
  * - node or monitor down: the last known balance (or "—" if there never was one), labelled with its time;
  * - ready: the balance, with spendVerified false until key images are synced.
  */
-export function moneroBalanceView(status: MoneroStatus | null, refreshError?: string | null): MoneroBalanceView {
-  const unknown = (state: MoneroBalanceState): MoneroBalanceView => ({ state, balanceAtomic: null, unlockedAtomic: null, lockedAtomic: null, spendVerified: false })
+export function moneroBalanceView(status: MoneroStatus | null, refreshError?: string | null, now = Date.now()): MoneroBalanceView {
+  const unknown = (state: MoneroBalanceState): MoneroBalanceView => ({ state, balanceAtomic: null, unlockedAtomic: null, lockedAtomic: null, spendVerified: false, stale: false })
   if (!status) return unknown(refreshError ? 'unreachable' : 'loading')
   if (!status.available) return unknown('not-connected')
   const heights = { walletHeight: status.walletHeight, daemonHeight: status.daemonHeight, restoreHeight: status.restoreHeight }
@@ -68,6 +73,7 @@ export function moneroBalanceView(status: MoneroStatus | null, refreshError?: st
     unlockedAtomic: showBalance ? unlocked.toString() : null,
     lockedAtomic: showBalance ? (balance - unlocked).toString() : null,
     spendVerified: showBalance && status.spendStateKnown === true,
+    stale: showBalance && !(status.updatedAt && now - Date.parse(status.updatedAt) <= STALE_AFTER_MS),
   }
 }
 

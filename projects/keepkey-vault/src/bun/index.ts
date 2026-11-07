@@ -1674,6 +1674,9 @@ function getAppSettings() {
 		moneroAvailable: isMoneroSidecarAvailable(),
 		moneroDaemonUrl: getSetting('monero_daemon_url') || MONERO_DEFAULT_NODE,
 		moneroRestoreHeight: storedRestoreHeight(getSetting('monero_restore_height')),
+		// Unresolved unknown-outcome sends are kept when Monero is turned off or the device is wiped (a restored
+		// seed can still spend those inputs); Settings names them instead of dropping them.
+		moneroPendingBroadcasts: getMoneroWallet().pendingCount(),
 		zcashPrivacyEnabled,
 		hiveEnabled,
 		emulatorEnabled,
@@ -10367,6 +10370,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
             moneroPrepareSend: async (params) => getMoneroWallet().prepareSend(params),
             moneroSend: async (params) => getMoneroWallet().send(params),
             moneroRetryRelay: async () => getMoneroWallet().retryRelay(),
+            moneroDiscardPending: async (params) => getMoneroWallet().discardPending(params),
             setMoneroEnabled: async ({ enabled }) => {
                 if (typeof enabled !== 'boolean') throw new Error('Monero requires an enabled boolean')
                 if (enabled && !isMoneroSidecarAvailable()) throw new Error('Monero is unavailable in this build')
@@ -10383,11 +10387,10 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
                 return getAppSettings()
             },
             setMoneroNode: async (params) => {
-                // A null restore height stays unchosen: the connect step then asks for it.
-                const node = validateMoneroNode({ daemonUrl: params?.daemonUrl, restoreHeight: params?.restoreHeight ?? 0 })
+                const node = validateMoneroNode(params)
                 invalidateMoneroWallet()
                 setSetting('monero_daemon_url', node.daemonUrl)
-                setSetting('monero_restore_height', params.restoreHeight === null ? '' : String(node.restoreHeight))
+                setSetting('monero_restore_height', String(node.restoreHeight))
                 if (moneroEnabled && !offlineMode) await startMoneroSidecar()
                 return getAppSettings()
             },

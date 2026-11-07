@@ -36,16 +36,28 @@ describe('C1/C2: the XMR row in the chain list', () => {
 })
 
 describe('C4: connecting asks where the scan starts and names the node', () => {
-  test('a new wallet defaults to a week before the node tip; the node and its privacy cost are shown', () => {
-    expect(ui.connectText).toContain('start at block 3,294,960, about a week before the current block 3,300,000')
-    expect(ui.connectText).toContain('0 scans everything, which takes hours')
+  test('an unset (legacy) scan start means an existing wallet scanned from 0, never a guessed week', () => {
+    expect(ui.defaultChoice).toBe('existing')
+    expect(ui.defaultHeight).toBe('0')
+    expect(ui.connectText).toContain('0 scans the whole chain: it takes hours, and it finds every payment')
     expect(ui.connectText).toContain('Node: https://node.example')
     expect(ui.connectText).toContain('A node you run yourself')
+  })
+  test('"never received XMR" is a deliberate choice, warned, with the tip said to come from the unverified node', () => {
+    expect(ui.connectText).toContain("start at block 3,294,960, a week before block 3,300,000, the current height the node reports (KeepKey can't verify it)")
+    expect(ui.warningBeforeNew).toBe(false)
+    expect(ui.warningAfterNew).toContain('Anything received before this block will not appear')
     expect(ui.connectCalls).toEqual([['connect', 3294960]])
   })
+  test('a guessed start is never shown as complete; an old figure says when it is from', () => {
+    expect(ui.partial).toContain('Scanned from block 3,294,960: XMR received before that block is not shown')
+    expect(ui.rowPartial).toBe('Synced from block 3,294,960')
+    expect(ui.staleScanning.balance).toBe('0.084653050000 XMR')
+    expect(ui.staleScanning.stale).toStartWith('Last updated ')
+  })
   test('a scan start already chosen in Settings is kept, not replaced', () => {
-    expect(ui.storedHeightField).toBe('0')
-    expect(ui.storedHeightCalls).toEqual([['connect', 0]])
+    expect(ui.storedHeightField).toBe('3000000')
+    expect(ui.storedHeightCalls).toEqual([['connect', 3000000]])
   })
 })
 
@@ -91,6 +103,16 @@ describe('C3: Send', () => {
     expect(ui.unrelayedShown).toBe('cd'.repeat(32))
     expect(ui.formWhileUnrelayed).toBe(false)
     expect(ui.retryCalls).toBe(1)
+    expect(ui.discardWithoutCheck).toBe(false)
+  })
+  test('discard is offered only after the node says unknown with unspent inputs, and asks first', () => {
+    expect(ui.checkText).toContain('it does not have this transaction, and its inputs are still unspent')
+    expect(ui.discardCallsBeforeConfirm).toBe(0)
+    expect(ui.discardConfirmText).toContain('you could pay twice')
+    expect(ui.discardCalls).toBe(1)
+    expect(ui.discardNotice).toContain('Discarded')
+    expect(ui.notDiscardable.button).toBe(false)
+    expect(ui.notDiscardable.text).toContain('Wait for that to settle')
   })
   test('without the signing emulator, Send says receive-only instead of a dead form', () => {
     expect(ui.receiveOnly).toContain('Receiving works.')

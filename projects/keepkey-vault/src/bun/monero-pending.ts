@@ -40,7 +40,7 @@ export function createFilePendingStore(directory: string): MoneroPendingStore {
       if (!existsSync(file)) return []
       try {
         const parsed = JSON.parse(readFileSync(file, 'utf8'))
-        const records = Array.isArray(parsed?.records) ? parsed.records.slice(0, MAX_RECORDS) : []
+        const records = Array.isArray(parsed?.records) ? parsed.records.slice(-MAX_RECORDS) : []
         const valid = records.map(validPendingBroadcast).filter((record: MoneroPendingBroadcast | null): record is MoneroPendingBroadcast => !!record)
         if (valid.length !== records.length) console.warn('[monero] Ignored a pending-broadcast record that does not verify')
         return valid
@@ -54,7 +54,7 @@ export function createFilePendingStore(directory: string): MoneroPendingStore {
       mkdirSync(directory, { recursive: true, mode: 0o700 })
       chmodSync(directory, 0o700)
       const temporary = `${file}.${process.pid}.tmp`
-      writeFileSync(temporary, JSON.stringify({ version: 1, records: records.slice(0, MAX_RECORDS) }), { mode: 0o600 })
+      writeFileSync(temporary, JSON.stringify({ version: 1, records: records.slice(-MAX_RECORDS) }), { mode: 0o600 })
       chmodSync(temporary, 0o600)
       renameSync(temporary, file)
     },

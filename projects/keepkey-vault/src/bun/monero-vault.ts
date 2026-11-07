@@ -4,6 +4,7 @@ import * as managedSidecar from './monero-sidecar'
 import type { MoneroOutputRecord, MoneroTransferDraft } from './monero-sidecar'
 import { MAX_KEY_IMAGE_OUTPUTS, MAX_WALLET_OUTPUTS, PUBLIC_ERRORS, WATCH_NODE_UNREACHABLE, WATCH_SCANNING } from '../../monero-cli/src/protocol'
 import type { MoneroPendingBroadcast, MoneroPendingStore } from './monero-pending'
+import type { MoneroTxLookup } from '../../monero-cli/src/protocol'
 import { firmwareSupportsMonero, MONERO_MIN_FIRMWARE } from '../shared/firmware-versions'
 import { formatXmrAtomic, moneroAddressKind } from '../shared/monero-address'
 import { MAX_FEE_ATOMIC, MAX_SIGNED_RESPONSE, MAX_UINT64, MONERO_PATH as PATH, MoneroError, bytesField, checkSignedTransaction, concat, keyImageInitRequest,
@@ -28,13 +29,14 @@ export const KEY_IMAGES_STALE = 'New XMR arrived since the last key-image sync, 
 export const SELF_SEND = "This is this wallet's own main address, which also receives the change, so it cannot be the recipient too. To move XMR within this wallet, send it to one of its subaddresses"
 export const ZERO_CHANGE = "This amount is your whole spendable balance minus the fee, which leaves no change output, and KeepKey's Monero preview cannot sign a transaction without one. Use Max instead: it keeps 0.000000000001 XMR as change"
 const NOT_ENOUGH = 'Not enough unlocked XMR for this amount and fee'
+export const SUPERSEDED = 'The inputs of the pending transaction were spent by a different transaction, so it can never be sent. It was not sent, and nothing more will be sent from it'
 
 export interface MoneroVaultConfig {
   enabled: boolean
   offline: boolean
   daemonUrl: string
-  /** Earliest block the watch wallet scans; null until one is chosen (see suggestRestoreHeight). */
-  restoreHeight: number | null
+  /** Earliest block the watch wallet scans; 0 (also when unset) scans everything. */
+  restoreHeight: number
 }
 export interface MoneroVaultStatus {
   available: boolean
@@ -65,6 +67,8 @@ export interface MoneroVaultStatus {
   keyImagesSynced: boolean
   /** Key images were synced, but outputs arrived since. */
   keyImagesStale?: boolean
+  /** The node's last answer about the pending tx: it does not have it; discardable only if its inputs are unspent. */
+  unrelayedCheck?: { state: 'unknown'; discardable: boolean; checkedAt: string }
   /** View-only scanning alone cannot prove whether received outputs were spent. */
   spendStateKnown: boolean
 }
@@ -94,6 +98,7 @@ export interface MoneroWatchSidecar {
   importMoneroKeyImages?(input: { offset: number; signedKeyImages: Array<{ keyImage: string; signature: string }> }): Promise<unknown>
   createMoneroTransfer?(input: { address: string; amountAtomic: string; priority: number }): Promise<MoneroTransferDraft>
   relayMoneroTransaction?(input: { txHex: string }): Promise<unknown>
+  lookupMoneroTransaction?(input: { txid: string; keyImages: string[] }): Promise<MoneroTxLookup>
   refreshMoneroWatch?(): Promise<unknown>
 }
 type Owned = Map<string, { amountAtomic: string; keyImage: string }>
@@ -200,12 +205,14 @@ export function createMoneroVault({ engine, confirm, getConfig, sidecar = manage
   try { for (const record of pendingStore.load()) pending.set(record.wallet, record) }
   catch { console.warn('[monero] Could not read pending broadcasts') }
   const persistPending = () => pendingStore.save([...pending.values()])
+  /** The node's answer for each wallet's pending tx (this run only). */
+  const checks = new Map<string, { state: 'unknown'; discardable: boolean; checkedAt: string }>()
   const walletKey = (current: Snapshot, address: string) => `${current.deviceId}:${address}`
   const snapshot = (): Snapshot | null => {
     const config = getConfig(), state = engine.getDeviceState(), wallet = engine.wallet
     if (!config.enabled || config.offline || state.state !== 'ready' || !wallet || !state.deviceId) return null
     if (!firmwareSupportsMonero(state.firmwareVersion)) throw new MoneroError(`Monero needs KeepKey firmware ${MONERO_MIN_FIRMWARE} or newer`)
-    if (config.restoreHeight !== null && (!Number.isSafeInteger(config.restoreHeight) || config.restoreHeight < 0)) throw new MoneroError('Invalid Monero restore height')
+    if (!Number.isSafeInteger(config.restoreHeight) || config.restoreHeight < 0) throw new MoneroError('Invalid Monero restore height')
     let url: URL
     try { url = new URL(config.daemonUrl) } catch { throw new MoneroError('Configure a Monero daemon URL first') }
     const loopback = ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname)
@@ -287,7 +294,7 @@ export function createMoneroVault({ engine, confirm, getConfig, sidecar = manage
     })
     const updated = typeof data.updatedAt === 'string' ? Date.parse(data.updatedAt) : NaN
     const fresh = Number.isFinite(updated) && updated <= Date.now() + 30000 && Date.now() - updated <= 120000
-    const restoreHeight = current.config.restoreHeight ?? 0
+    const restoreHeight = current.config.restoreHeight
     const ready = data.monitorReady && fresh && walletHeight >= restoreHeight
     const daemonHeight = data.daemonHeight === undefined ? undefined : integer(data.daemonHeight)
     // A refresh that failed (node down, local RPC stopped) keeps the last balance, labelled; a long scan is not an error.
@@ -317,30 +324,57 @@ export function createMoneroVault({ engine, confirm, getConfig, sidecar = manage
     const images = keyImagesFor(current)
     if (!images || keyImagesStale(images, status)) return 'key-images'
   }
+  const settlePending = (wallet: string) => {
+    pending.delete(wallet); checks.delete(wallet)
+    try { persistPending() } catch { console.warn('[monero] Could not clear a pending broadcast record') }
+  }
+  /** Ask the node where the pending tx is. In its pool or a block: it was sent (settled). Not there but its
+   *  inputs spent on chain: another tx spent them, so this one can never land (settled). Otherwise it stays
+   *  pending, discardable only if every input is still unspent. */
+  const resolvePending = async (wallet: string): Promise<'sent' | 'superseded' | 'unknown' | 'unchecked'> => {
+    const record = pending.get(wallet)
+    if (!record || !sidecar.lookupMoneroTransaction) return 'unchecked'
+    let found: MoneroTxLookup
+    try {
+      const keyImages = parseSignedTransaction(Uint8Array.from(Buffer.from(record.txHex, 'hex'))).inputs.map(input => input.keyImage)
+      found = await sidecar.lookupMoneroTransaction({ txid: record.txid, keyImages })
+    } catch { checks.delete(wallet); return 'unchecked' }
+    if (pending.get(wallet) !== record) return 'unchecked'
+    if (found.state !== 'unknown') { settlePending(wallet); void sidecar.refreshMoneroWatch?.().catch(() => {}); return 'sent' }
+    if (found.keyImages.includes('spent')) { settlePending(wallet); return 'superseded' }
+    checks.set(wallet, { state: 'unknown', discardable: found.keyImages.every(state => state === 'unspent'), checkedAt: new Date().toISOString() })
+    return 'unknown'
+  }
+  const unknownOutcome = (record: MoneroPendingBroadcast) => new MoneroError(`The broadcast result is unknown for transaction ${record.txid}: the node does not have it yet. Check it on a block explorer; Retry broadcast resends this same transaction`)
+  /** Broadcast the pending bytes once. Only an explicit rejection means nothing was sent; any other failure,
+   *  including the "Not relayed" a node answers for a tx it already has, is settled by looking the txid up. */
   const relayPending = async (wallet: string, retry: boolean) => {
     const record = pending.get(wallet)!
-    const settle = () => { pending.delete(wallet); try { persistPending() } catch { console.warn('[monero] Could not clear a pending broadcast record') } }
+    const outcome = async () => {
+      const result = await resolvePending(wallet)
+      if (result === 'sent') return
+      if (result === 'superseded') throw new MoneroError(SUPERSEDED)
+      throw unknownOutcome(record)
+    }
+    if (retry) { const first = await resolvePending(wallet); if (first === 'sent') return; if (first === 'superseded') throw new MoneroError(SUPERSEDED) }
     try { await sidecar.relayMoneroTransaction!({ txHex: record.txHex }) }
     catch (error) {
       const message = error instanceof Error ? error.message : ''
-      // A definite rejection sent nothing. On a retry, "double spend" means these inputs are already
-      // spent (normally by this same tx in the pool/chain), so it cannot pay twice either way.
-      if (message.startsWith('The daemon rejected the transaction')) {
-        settle()
-        if (retry && /double spend/.test(message)) { void sidecar.refreshMoneroWatch?.().catch(() => {}); return }
-        throw error
-      }
-      // Timeout, network or worker failure, or accepted-but-not-relayed: the outcome is unknown.
-      throw new MoneroError(`The broadcast result is unknown for transaction ${record.txid}. Check it on a block explorer; Retry broadcast resends this same transaction`)
+      // "double spend": these inputs are spent, by this tx (then it was sent) or by another one; ask the node which.
+      if (message === 'The daemon rejected the transaction: double spend') return outcome()
+      // Any other explicit rejection flag: the node refused these bytes and sent nothing.
+      if (message.startsWith('The daemon rejected the transaction')) { settlePending(wallet); throw error }
+      return outcome()
     }
-    settle()
+    settlePending(wallet)
     void sidecar.refreshMoneroWatch?.().catch(() => {})
   }
   const withSendState = (status: MoneroVaultStatus, current: Snapshot): MoneroVaultStatus => {
     const blocker = sendBlocker(current, status), images = keyImagesFor(current)
     const stale = !!images && keyImagesStale(images, status), keyImagesSynced = !!images && !stale, record = pendingFor(current)
     return { ...status, transactions: status.transactions.map(tx => ({ ...tx })), canSend: !blocker, keyImagesSynced, spendStateKnown: keyImagesSynced,
-      ...(stale ? { keyImagesStale: true } : {}), ...(blocker ? { sendBlocked: blocker } : {}), ...(record ? { unrelayedTxid: record.txid } : {}) }
+      ...(stale ? { keyImagesStale: true } : {}), ...(blocker ? { sendBlocked: blocker } : {}), ...(record ? { unrelayedTxid: record.txid } : {}),
+      ...(record && checks.get(record.wallet) ? { unrelayedCheck: { ...checks.get(record.wallet)! } } : {}) }
   }
   /** Before connecting (e.g. after a restart) a pending broadcast from this device is still named. */
   const withPendingHint = (status: MoneroVaultStatus): MoneroVaultStatus => {
@@ -358,7 +392,7 @@ export function createMoneroVault({ engine, confirm, getConfig, sidecar = manage
     let current: Snapshot | null
     try { current = snapshot() } catch { stop(); return empty(!!getConfig().enabled, false, 'The Monero configuration or device transport is unavailable') }
     if (!current) { stop(); const config = getConfig(); return empty(config.enabled, false, config.offline ? 'Monero is unavailable in offline mode' : undefined) }
-    if (!bound) return withPendingHint({ ...empty(true, true), ...(current.config.restoreHeight === null ? {} : { restoreHeight: current.config.restoreHeight }) })
+    if (!bound) return withPendingHint({ ...empty(true, true), restoreHeight: current.config.restoreHeight })
     if (bound.snapshot.key !== current.key || bound.snapshot.wallet !== current.wallet || bound.snapshot.transport !== current.transport) { stop(); return withPendingHint(empty(true, true)) }
     const authorized = bound, generation = epoch
     try {
@@ -383,7 +417,6 @@ export function createMoneroVault({ engine, confirm, getConfig, sidecar = manage
       if (typeof showDisplay !== 'boolean') throw new MoneroError('Invalid Monero address display option')
       if (busy) throw new MoneroError('A Monero device request is already in progress')
       const current = requireReady()
-      if (current.config.restoreHeight === null) throw new MoneroError('Choose the block where the wallet scan starts before connecting')
       busy = true; stop(); const generation = epoch
       let viewKey: Uint8Array | null = null
       try {
@@ -410,10 +443,12 @@ export function createMoneroVault({ engine, confirm, getConfig, sidecar = manage
         if (!viewKey) throw new MoneroError('The KeepKey did not authorize Monero monitoring')
         await sidecar.startMoneroSidecar(); check(current, generation)
         const value = await sidecar.configureMoneroWatch({ walletId: `${engine.getDeviceState().deviceId}:${address}`, network: 'mainnet', address,
-          viewKey, restoreHeight: current.config.restoreHeight ?? 0, daemonUrl: current.config.daemonUrl })
+          viewKey, restoreHeight: current.config.restoreHeight, daemonUrl: current.config.daemonUrl })
         check(current, generation)
         const status = statusFrom(value, current, address)
         bound = { snapshot: current, address }; lastGood = status
+        // A pending broadcast (e.g. from before a restart) is looked up once: settled if the node has it.
+        if (pending.has(walletKey(current, address))) await resolvePending(walletKey(current, address))
         return withSendState(status, current)
       } catch (error) {
         stop()
@@ -486,12 +521,17 @@ export function createMoneroVault({ engine, confirm, getConfig, sidecar = manage
           return opened
         }, { operation: 'moneroSyncKeyImages', chain: 'Monero' })
         check(current, generation)
+        // The post-import unspent total is the baseline: importing can only lower the balance (spends found),
+        // so comparing against the pre-import balance would hide a later deposit up to that amount.
+        let unspent = 0n, reported = true
         for (let index = 0; index < sessions.length; index++) {
           const offset = index * MAX_KEY_IMAGE_OUTPUTS
-          await sidecar.importMoneroKeyImages({ offset, signedKeyImages: proofs.slice(offset, offset + sessions[index].length) }); check(current, generation)
+          const result = await sidecar.importMoneroKeyImages({ offset, signedKeyImages: proofs.slice(offset, offset + sessions[index].length) }) as { unspentAtomic?: unknown }
+          check(current, generation)
+          if (typeof result?.unspentAtomic === 'string' && /^(0|[1-9][0-9]{0,19})$/.test(result.unspentAtomic)) unspent += BigInt(result.unspentAtomic); else reported = false
         }
         synced = { key: current.key, generation, owned: new Map(outputs.map((output, i) => [output.outKey, { amountAtomic: output.amountAtomic, keyImage: proofs[i].keyImage }])),
-          txids: new Set(before.transactions.map(tx => tx.txid)), balanceAtomic: BigInt(before.balanceAtomic) }
+          txids: new Set(before.transactions.map(tx => tx.txid)), balanceAtomic: reported ? unspent : BigInt(before.balanceAtomic) }
       } catch (error) { synced = null; throw publicError(error, 'Unable to sync Monero key images; review the device and try again') }
       finally { busy = false }
       return getStatus()
@@ -608,6 +648,25 @@ export function createMoneroVault({ engine, confirm, getConfig, sidecar = manage
       try { await relayPending(wallet, true); return { txid: record.txid } }
       catch (error) { throw publicError(error, 'Unable to broadcast the Monero transaction') }
       finally { busy = false }
+    },
+    /** Unresolved unknown-outcome sends on record, for every wallet. */
+    pendingCount: () => pending.size,
+    /** Forget a pending tx the user chose to give up on. Allowed only when, asked right now, the node does
+     *  not have it and every input is still unspent; a tx the node has is settled as sent instead. */
+    async discardPending(params: { confirm?: unknown } = {}): Promise<{ outcome: 'discarded' | 'sent' | 'superseded'; txid: string }> {
+      if (params?.confirm !== true) throw new MoneroError('Confirm discarding the pending transaction')
+      const current = requireReady(), binding = bindingFor(current), wallet = walletKey(current, binding.address), record = pending.get(wallet)
+      if (!record) throw new MoneroError('No Monero transaction is waiting to be broadcast')
+      if (busy) throw new MoneroError('A Monero device request is already in progress')
+      busy = true
+      try {
+        const result = await resolvePending(wallet)
+        if (result === 'sent' || result === 'superseded') return { outcome: result, txid: record.txid }
+        if (result === 'unchecked') throw new MoneroError('The node could not be asked about this transaction, so it was not discarded')
+        if (!checks.get(wallet)?.discardable) throw new MoneroError("This transaction's inputs are spent in the node's pool by another transaction. Wait until that settles; it was not discarded")
+        settlePending(wallet)
+        return { outcome: 'discarded', txid: record.txid }
+      } finally { busy = false }
     },
   }
 }
