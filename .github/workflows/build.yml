@@ -394,10 +394,12 @@ jobs:
           )
           cp projects/keepkey-vault/monero-cli/dist/monero-cli "$APP/Contents/Resources/app/monero-cli"
           cp projects/keepkey-vault/monero-cli/vendor/darwin-x64/monero-wallet-rpc "$APP/Contents/Resources/app/monero-tools/monero-wallet-rpc"
+          cp projects/keepkey-vault/monero-cli/vendor/darwin-x64/monerod "$APP/Contents/Resources/app/monero-tools/monerod"
           cp projects/keepkey-vault/monero-cli/vendor/darwin-x64/monero-tools.json "$APP/Contents/Resources/app/monero-tools/monero-tools.json"
           cp projects/keepkey-vault/monero-cli/vendor/darwin-x64/LICENSE "$APP/Contents/Resources/app/monero-tools/LICENSE"
           test "$(lipo -archs "$APP/Contents/Resources/app/monero-cli")" = x86_64
           test "$(lipo -archs "$APP/Contents/Resources/app/monero-tools/monero-wallet-rpc")" = x86_64
+          test "$(lipo -archs "$APP/Contents/Resources/app/monero-tools/monerod")" = x86_64
 
           # Swap Electrobun runtime binaries with x64 versions
           echo "Swapping Electrobun binaries for x86_64..."

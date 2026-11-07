@@ -109,6 +109,7 @@ export function MoneroConnectCard({ client, monero }: { client: MoneroClient; mo
 	const uiText = useUiTranslation()
 	const [settings, setSettings] = useState<{ moneroDaemonUrl: string; moneroRestoreHeight: number } | null>(null)
 	const [connecting, setConnecting] = useState(false)
+	const [nodeWaiting, setNodeWaiting] = useState(false)
 	const [error, setError] = useState<string | null>(null)
 	const attempted = useRef(false)
 	const mounted = useRef(true)
@@ -118,6 +119,12 @@ export function MoneroConnectCard({ client, monero }: { client: MoneroClient; mo
 			const next = await client.getSettings()
 			if (!mounted.current) return
 			setSettings(next)
+			if (next.moneroNodeMode === 'local' && client.getNodeStatus) {
+				const node = await client.getNodeStatus()
+				if (!mounted.current) return
+				if (node.state !== 'ready') { setNodeWaiting(true); return }
+			}
+			setNodeWaiting(false)
 			const status = await openMoneroWallet(client, next.moneroRestoreHeight ?? 0)
 			if (mounted.current) monero.setStatus(status)
 		} catch (e) { if (mounted.current) setError(errorText(e, "Unable to open Monero. Try again.")) }
@@ -128,13 +135,23 @@ export function MoneroConnectCard({ client, monero }: { client: MoneroClient; mo
 		if (monero.status && !attempted.current) { attempted.current = true; void connect() }
 		return () => { mounted.current = false }
 	}, [!!monero.status, connect])
+	useEffect(() => {
+		if (!nodeWaiting) return
+		const timer = setInterval(() => { if (!connecting) void connect() }, 5000)
+		return () => clearInterval(timer)
+	}, [nodeWaiting, connecting, connect])
+	useEffect(() => {
+		const changed = () => { if (!connecting) void connect() }
+		window.addEventListener('keepkey-settings-changed', changed)
+		return () => window.removeEventListener('keepkey-settings-changed', changed)
+	}, [connect, connecting])
 	return (
 		<Box data-monero-connect="" py="4" maxW="520px">
 			<Flex align="center" gap="2" mb="2" role="status">
 				{!error && <Spinner size="sm" />}
-				<Text fontSize="15px" color="var(--text-0)" fontWeight="500">{error ? uiText("Monero couldn't open") : uiText("Confirm on KeepKey")}</Text>
+				<Text fontSize="15px" color="var(--text-0)" fontWeight="500">{error ? uiText("Monero couldn't open") : nodeWaiting ? uiText('Waiting for your node') : uiText("Confirm on KeepKey")}</Text>
 			</Flex>
-			<Text fontSize="13px" color="var(--text-2)">{uiText("Approve access on your KeepKey to see your Monero balance and receive payments.")}</Text>
+			<Text fontSize="13px" color="var(--text-2)">{nodeWaiting ? uiText('Your wallet will connect when your node is fully synced. You can follow its progress above.') : uiText("Approve access on your KeepKey to see your Monero balance and receive payments.")}</Text>
 			{error && <><Text role="alert" color="var(--rose)" fontSize="13px" mt="3">{error}</Text><Button data-monero-connect-button="" mt="3" size="sm" disabled={connecting} onClick={() => { void connect() }}>{uiText("Try again")}</Button></>}
 			<details data-monero-connection-details="" style={{ marginTop: 20, color: "var(--text-3)", fontSize: 12 }}>
 				<summary style={{ cursor: "pointer" }}>{uiText("Connection details")}</summary>

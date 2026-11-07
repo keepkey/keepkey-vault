@@ -27,6 +27,13 @@ test('the main balance is hidden until verified and still respects private mode'
   expect(ui.headerPrivate).toBe('••••••')
 })
 
+test('local node syncing waits without device prompts or public fallback; a ready node connects automatically', () => {
+ expect(ui.nodeWaitCalls).toBe(0)
+ expect(ui.nodeWaitText).toContain('Waiting for your node')
+ expect(ui.nodeWaitText).not.toContain('Confirm on KeepKey')
+ expect(ui.nodeReadyConnects).toBe(1)
+})
+
 describe('C1/C2: the XMR row in the chain list', () => {
   test('not connected and scanning show "—", never 0; fiat always says not included', () => {
     expect(ui.rowNotConnected).toEqual({ balance: '— XMR', fiat: 'not included', state: 'Not connected' })

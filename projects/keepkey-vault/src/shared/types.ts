@@ -1623,6 +1623,7 @@ export interface AppSettings {
   moneroAvailable?: boolean      // optional compatibility field; build contains a runnable sidecar
   moneroEnabled: boolean         // experimental XMR sidecar and wallet surface (default OFF)
   moneroDaemonUrl: string        // public HTTPS Monero daemon, or loopback local daemon
+  moneroNodeMode?: 'local' | 'remote'
   moneroRestoreHeight: number    // earliest block to scan; zero (also unset/legacy) scans from genesis
   moneroPendingBroadcasts?: number  // signed XMR sends whose broadcast is unresolved (kept across off/wipe)
   zcashPrivacyEnabled: boolean   // read-only capability: auto-ON when firmware >= 7.15.0 and this build includes zcash-cli

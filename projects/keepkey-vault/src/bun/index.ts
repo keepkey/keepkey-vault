@@ -269,6 +269,8 @@ import { setMoneroEmulatorEnabled, listEmulatorBuilds } from "./emulator-library
 import { createMoneroVault } from "./monero-vault"
 import { REVIEWED_MONERO_SIGNING_SHA256 } from "./monero-emulator"
 import { startMoneroSidecar, stopMoneroSidecar, isMoneroSidecarAvailable } from "./monero-sidecar"
+import { createMoneroNodeManager } from './monero-node'
+import { MONERO_LOCAL_URL, moneroNodeMode } from '../shared/monero-node'
 import { storedRestoreHeight, suggestRestoreHeight, validateMoneroNode } from "./monero-settings"
 import { createFilePendingStore } from "./monero-pending"
 import { findZcashCliBinary, isSidecarReady, startSidecar, stopSidecar, wipeSidecarWalletDb, hasFvkLoaded, getCachedFvk, onScanProgress, getScanState, updateSyncedTo, beginZcashSend, endZcashSend, isZcashSendInFlight } from "./zcash-sidecar"
@@ -1226,8 +1228,8 @@ async function requestSigningApprovalDecision(id: string) {
 let restApiEnabled = false
 let walletConnectEnabled = false
 let moneroEnabled = false
-/** A public node, used until the user picks their own (Settings explains the privacy trade-off). */
-const MONERO_DEFAULT_NODE = 'https://xmr.triplebit.org'
+/** Own node is preferred. Existing explicit remote URLs are preserved. */
+const MONERO_DEFAULT_NODE = MONERO_LOCAL_URL
 let moneroWallet: ReturnType<typeof createMoneroVault> | null = null
 let moneroSession: unknown = null
 let zcashPrivacyEnabled = false
@@ -1673,6 +1675,7 @@ function getAppSettings() {
 		moneroEnabled,
 		moneroAvailable: isMoneroSidecarAvailable(),
 		moneroDaemonUrl: getSetting('monero_daemon_url') || MONERO_DEFAULT_NODE,
+		moneroNodeMode: moneroNodeMode(getSetting('monero_node_mode'), getSetting('monero_daemon_url')),
 		moneroRestoreHeight: storedRestoreHeight(getSetting('monero_restore_height')),
 		// Unresolved unknown-outcome sends are kept when Monero is turned off or the device is wiped (a restored
 		// seed can still spend those inputs); Settings names them instead of dropping them.
@@ -2201,6 +2204,16 @@ function getMoneroWallet() {
 function invalidateMoneroWallet() {
     moneroWallet?.invalidate()
     moneroSession = null
+}
+
+const localMoneroNode = createMoneroNodeManager({ stateFile: path.join(Utils.paths.userData, 'monero-node.json') })
+// Adopt only a daemon matching our saved binary/config/directory. Resume a sync
+// on launch only after the user has explicitly pressed Start in Vault.
+async function resumeLocalMoneroNode() {
+    if (offlineMode) { await localMoneroNode.stop(); return }
+    await localMoneroNode.status()
+    if (moneroEnabled && getSetting('monero_node_autostart') === '1'
+        && moneroNodeMode(getSetting('monero_node_mode'), getSetting('monero_daemon_url')) === 'local') await localMoneroNode.start()
 }
 
 // ── Emulator interactive signing helper ─────────────────────────────
@@ -8501,6 +8514,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			},
 			setOfflineMode: async (params) => {
 				if (typeof params.enabled !== 'boolean') throw new Error('Offline mode requires an enabled boolean')
+				if (params.enabled && (await localMoneroNode.stop()).state === 'stopping') throw new Error('The Monero node is flushing its database. Wait for it to stop before enabling offline mode.')
 				if (params.enabled) await revokeKnownWalletMonitoring()
 				setSetting('offline_mode', params.enabled ? '1' : '0')
 				if (getSetting('offline_mode') !== (params.enabled ? '1' : '0')) throw new Error('Could not save offline mode. Try again.')
@@ -10379,7 +10393,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
                 else {
                     // A research emulator selection stays selected: the next start names it and
                     // says to turn Monero on, instead of silently running other firmware.
-                    invalidateMoneroWallet(); stopMoneroSidecar()
+                    invalidateMoneroWallet(); stopMoneroSidecar(); await localMoneroNode.stop()
                 }
                 moneroEnabled = enabled
                 setMoneroEmulatorEnabled(enabled)
@@ -10387,12 +10401,33 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
                 return getAppSettings()
             },
             setMoneroNode: async (params) => {
+                if (params.mode !== undefined && !['local', 'remote'].includes(params.mode)) throw new Error('Choose a local or remote Monero node')
+                if (params.mode === 'local') params = { ...params, daemonUrl: MONERO_LOCAL_URL }
                 const node = validateMoneroNode(params)
                 invalidateMoneroWallet()
                 setSetting('monero_daemon_url', node.daemonUrl)
                 setSetting('monero_restore_height', String(node.restoreHeight))
+                setSetting('monero_node_mode', params.mode ?? (node.daemonUrl === MONERO_LOCAL_URL ? 'local' : 'remote'))
                 if (moneroEnabled && !offlineMode) await startMoneroSidecar()
                 return getAppSettings()
+            },
+            moneroNodeStatus: async () => localMoneroNode.status(),
+            moneroNodeConfigure: async (params) => {
+                if (typeof params?.dataDir !== 'string') throw new Error('Choose a folder for the Monero blockchain')
+                return localMoneroNode.configure(params.dataDir)
+            },
+            moneroNodeStart: async () => {
+                requireOnline('starting a Monero node')
+                const status = await localMoneroNode.start()
+                setSetting('monero_node_autostart', '1')
+                if (getSetting('monero_daemon_url') !== MONERO_LOCAL_URL) invalidateMoneroWallet()
+                setSetting('monero_node_mode', 'local')
+                setSetting('monero_daemon_url', MONERO_LOCAL_URL)
+                return status
+            },
+            moneroNodeStop: async () => {
+                setSetting('monero_node_autostart', '0')
+                return localMoneroNode.stop()
             },
 			emulatorPair: async () => {
 				if (!emulatorEnabled) throw new Error('Emulator is disabled')
@@ -11618,6 +11653,7 @@ perf('window created, starting deferred init')
 deferredInit()
 auth.reloadPairings()
 loadSettings()
+void resumeLocalMoneroNode().catch(error => console.warn('[monero-node]', error.message))
 await applyRestApiState('startup')
 if (!restApiEnabled) console.log('[Vault] REST API disabled by user setting')
 perf('REST API applied, starting engine')
@@ -11826,6 +11862,7 @@ function cleanupAndQuit() {
 	restServer?.stop()
 	restServer = null
 	stopMoneroSidecar()
+	localMoneroNode.shutdown()
 	// Zero the Studio provider key: the window (and its close effect) is going away.
 	try { providerKeySession.clear() } catch { /* nothing to zero */ }
 

@@ -15,13 +15,21 @@ bun run monero:test
 bun run build
 ```
 
-Preparation authenticates the pinned Monero 0.18.5.4 release manifest with the pinned binaryFate key, verifies the selected official archive, and extracts only wallet RPC and its license. The output directory must be empty for a fresh preparation. Generated vendor binaries and compiled workers are ignored by Git. `prepare.py --platform` and `build.ts --platform=...` support macOS arm64/x64, Linux arm64/x64, and Windows x64. Native macOS arm64 is validated in this PR; other targets need their own runtime validation.
+Preparation authenticates the pinned Monero 0.18.5.4 release manifest with the pinned binaryFate key, verifies the selected official archive, and extracts wallet RPC, `monerod`, and their license. The output directory must be empty for a fresh preparation. Generated vendor binaries and compiled workers are ignored by Git. `prepare.py --platform` and `build.ts --platform=...` support macOS arm64/x64, Linux arm64/x64, and Windows x64. Native macOS arm64 is validated; other targets need their own runtime validation.
 
 Release CI prepares and builds the sidecar before packaging. CI sets `KEEPKEY_REQUIRE_MONERO_SIDECAR=1` to refuse missing sidecar inputs. Existing builds that omit this optional feature keep Monero unavailable; partially staged inputs are always rejected. Runtime metadata belongs to the trusted app bundle; `MONERO_TOOLS_DIR` and `MONERO_CLI_BIN` are explicit developer overrides, not independent proof of an official release.
 
 ## Vault and the emulator
 
-Enable Monero in Settings, then open Monero (XMR) in the wallet chain list: it uses the standard asset page, with Connect, Receive and Send inside it. Connecting asks where the scan starts (a new wallet defaults to about a week before the node's tip; zero scans the entire chain, and a height after an older payment omits it) and names the node; choose your own node in Settings.
+Enable Monero in Settings, then open Monero (XMR) in the wallet chain list. Connection and balance verification run automatically, with explicit device consent and signing. Wallet scanning starts at zero unless a later start was deliberately saved; older payments before that start are omitted.
+
+## Run your own node
+
+Settings → Monero prefers a local pruned mainnet node. Existing remote URLs survive upgrades; switching to a remote node is explicit and there is no automatic public-node fallback. The node panel shows block height, approximate progress, allocated storage, free space, and the blockchain folder. Wallet scanning is separate from node sync; automatic wallet connection waits for the local node to be fully synced.
+
+Start verifies the bundled daemon, checks capacity for an estimated 105 GiB chain plus a 25 GiB reserve, and starts restricted loopback RPC at `127.0.0.1:18081`. It limits concurrency to two and disables incoming peers. While Vault runs, storage monitoring stops the owned daemon gracefully if the drive disappears or space falls below the reserve. Closing Vault requests a graceful stop; after an explicit Start, reopening Vault resumes the node when Monero is enabled and local mode is selected. Offline mode stops it as well. A unique config path, executable and data directory identify the owned process across app restarts; another process on the RPC port is never stopped or replaced.
+
+The storage folder can change only while stopped. Selecting another folder does not move or delete a blockchain. Estimates grow with the chain, and block percentages are not time estimates. The initial sync can take days. The local node contains public chain data, not wallet spending keys. macOS signing updates the daemon receipt before sealing the outer app signature, preserving the authenticated release hash separately.
 
 The current firmware counterpart is [keepkey-firmware PR 1036](https://github.com/BitHighlander/keepkey-firmware/pull/1036). Its receive-only native emulator build implements address, private-view-key consent, and experimental key-image commands without the native Core signing dependency. The ordinary emulator and production device builds do not gain these commands.
 

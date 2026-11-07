@@ -239,4 +239,16 @@ for (const [name, status] of [['rowNotConnected', notConnected], ['rowReady', co
  out.sendPrivateText=text(container);await unmount()
 }
 
+{
+ const client = fakeClient(notConnected) as any
+ let ready = false
+ client.getSettings = async () => ({moneroDaemonUrl:'http://127.0.0.1:18081',moneroRestoreHeight:0,moneroNodeMode:'local'})
+ client.getNodeStatus = async () => ({state:ready?'ready':'syncing'})
+ const {container,unmount}=await render(React.createElement(Host,{Section:MoneroReceiveSection,client}))
+ out.nodeWaitCalls=client.calls.length;out.nodeWaitText=text(container)
+ ready=true
+ await act(async()=>{window.dispatchEvent(new Event('keepkey-settings-changed'));await new Promise(resolve=>setTimeout(resolve,30))})
+ out.nodeReadyConnects=client.calls.filter((call:any[])=>call[0]==='connect').length
+ await unmount()
+}
 console.log(JSON.stringify(out))

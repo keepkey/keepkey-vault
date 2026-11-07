@@ -3,6 +3,7 @@ import type { MultisigPolicyPreview,MultisigCosignerExport,BtcPsbtSigned } from 
 import type { ElectrobunRPCSchema } from 'electrobun/bun'
 import type { SafeAccount, SafeContext, SafeCreateParams, SafeProposal, SafeTransfer, SafeTxReview, VaultAddParams, VaultAddReview } from './safe-multisig'
 import type { VaultIdentity } from './vault-identity'
+import type { MoneroNodeStatus } from './monero-node'
 import type { VaultPortfolio } from './vault-portfolio'
 import type { VaultAssetRequest, VaultAssetAccount } from './vault-asset-account'
 import type { ZcashShieldedBalance } from './zcash-privacy'
@@ -505,7 +506,11 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       moneroRetryRelay: { params: undefined; response: { txid: string } }
       moneroDiscardPending: { params: { confirm: boolean }; response: { outcome: 'discarded' | 'sent' | 'superseded'; txid: string } }
       setMoneroEnabled: { params: { enabled: boolean }; response: AppSettings }
-      setMoneroNode: { params: { daemonUrl: string; restoreHeight: number }; response: AppSettings }
+      setMoneroNode: { params: { daemonUrl: string; restoreHeight: number; mode?: 'local' | 'remote' }; response: AppSettings }
+      moneroNodeStatus: { params: void; response: MoneroNodeStatus }
+      moneroNodeConfigure: { params: { dataDir: string }; response: MoneroNodeStatus }
+      moneroNodeStart: { params: void; response: MoneroNodeStatus }
+      moneroNodeStop: { params: void; response: MoneroNodeStatus }
       emulatorPair: { params: void; response: EmulatorStatus }
       emulatorInit: { params: { flashName?: string } | void; response: EmulatorStatus }
       emulatorStop: { params: void; response: EmulatorStatus }

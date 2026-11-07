@@ -1,10 +1,12 @@
 /** The monero* RPCs the XMR asset page uses, behind one interface so the page can be rendered in tests. */
 import { rpcRequest } from "./rpc"
 import type { AppSettings, MoneroSendReview, MoneroStatus } from "../../shared/types"
+import type { MoneroNodeStatus } from '../../shared/monero-node'
 
 export interface MoneroClient {
 	getStatus(): Promise<MoneroStatus>
-	getSettings(): Promise<Pick<AppSettings, "moneroDaemonUrl" | "moneroRestoreHeight">>
+	getSettings(): Promise<Pick<AppSettings, "moneroDaemonUrl" | "moneroRestoreHeight" | 'moneroNodeMode'>>
+	getNodeStatus?(): Promise<MoneroNodeStatus>
 	suggestRestoreHeight(): Promise<{ tipHeight: number; restoreHeight: number; marginBlocks: number }>
 	connect(restoreHeight?: number): Promise<MoneroStatus>
 	getAddress(minor: number, showDisplay: boolean): Promise<{ address: string; network: "mainnet"; displayed: boolean; minor: number }>
@@ -38,6 +40,7 @@ export function checkedMoneroStatus(status: MoneroStatus): MoneroStatus {
 export const rpcMoneroClient: MoneroClient = {
 	getStatus: async () => checkedMoneroStatus(await rpcRequest<MoneroStatus>("moneroGetStatus", {}, 8000)),
 	getSettings: () => rpcRequest<AppSettings>("getAppSettings", undefined, 5000),
+	getNodeStatus: () => rpcRequest('moneroNodeStatus', undefined, 15000),
 	suggestRestoreHeight: () => rpcRequest("moneroSuggestRestoreHeight", {}, 20000),
 	connect: async restoreHeight => checkedMoneroStatus(await rpcRequest<MoneroStatus>("moneroConnect", restoreHeight === undefined ? {} : { restoreHeight }, 0)),
 	getAddress: (minor, showDisplay) => rpcRequest("moneroGetAddress", { showDisplay, minor }, showDisplay ? 0 : 60_000),

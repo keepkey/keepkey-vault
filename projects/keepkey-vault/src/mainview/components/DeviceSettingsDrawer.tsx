@@ -13,6 +13,7 @@ import { Z } from "../lib/z-index"
 import type { DeviceStateInfo, AppSettings, EmulatorWalletInfo, EmulatorBuildInfo, EmulatorNextBuild } from "../../shared/types"
 import { isBitcoinOnlyVariant } from "../../shared/flags"
 import { SelfHostNodePanel } from "./SelfHostNodePanel"
+import { MoneroNodePanel } from './MoneroNodePanel'
 import { EmulatorBuildOptions, useEmulatorNames } from "./EmulatorIdentity"
 import { ClearSignStudio } from "./ClearSignStudio"
 import { ClearSignProvidersPanel } from "./ClearSignProvidersPanel"
@@ -201,7 +202,7 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 	const [togglingPassphrase, setTogglingPassphrase] = useState(false)
 	const [togglingPolicy, setTogglingPolicy] = useState("")
 	const [browserPromptStatus, setBrowserPromptStatus] = useState("")
-	const [appSettings, setAppSettings] = useState<AppSettings>({ restApiEnabled: false, pioneerApiBase: '', pioneerServers: [], activePioneerServer: '', fiatCurrency: 'USD', numberLocale: 'en-US', walletConnectEnabled: false, btcMultisigEnabled: false, zcashPrivacyEnabled: false, moneroEnabled: false, moneroDaemonUrl: "https://xmr.triplebit.org", moneroRestoreHeight: 0, hiveEnabled: false, emulatorEnabled: false, offlineMode: false, btcNodeEnabled: false, btcNodeType: 'blockbook', btcNodeUrl: '', btcOnboardingShown: false, preReleaseUpdates: false, alphaFirmware: false, addressBookClearsignEnabled: false, privateModeEnabled: false, passphraseIntroShown: false, evmSimulationRpcUrls: {}, disabledNetworks: [], networksChosen: false })
+	const [appSettings, setAppSettings] = useState<AppSettings>({ restApiEnabled: false, pioneerApiBase: '', pioneerServers: [], activePioneerServer: '', fiatCurrency: 'USD', numberLocale: 'en-US', walletConnectEnabled: false, btcMultisigEnabled: false, zcashPrivacyEnabled: false, moneroEnabled: false, moneroDaemonUrl: "http://127.0.0.1:18081", moneroNodeMode: "local", moneroRestoreHeight: 0, hiveEnabled: false, emulatorEnabled: false, offlineMode: false, btcNodeEnabled: false, btcNodeType: 'blockbook', btcNodeUrl: '', btcOnboardingShown: false, preReleaseUpdates: false, alphaFirmware: false, addressBookClearsignEnabled: false, privateModeEnabled: false, passphraseIntroShown: false, evmSimulationRpcUrls: {}, disabledNetworks: [], networksChosen: false })
 	const [togglingRestApi, setTogglingRestApi] = useState(false)
 	const [windowFocusState, setWindowFocusState] = useState<{ refs: number; alwaysOnTop: boolean } | null>(null)
 	const [releasingWindowFocus, setReleasingWindowFocus] = useState(false)
@@ -1678,15 +1679,14 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
                                 </Flex>
                                 {(appSettings.moneroPendingBroadcasts ?? 0) > 0 && <Text data-monero-pending-kept="" fontSize="2xs" color="orange.300" mt="2">{uiText("{{count}} Monero send(s) have an unknown broadcast result. They stay recorded even with Monero off or the device wiped, so no second payment is built from the same funds; open XMR to resolve them.", { count: appSettings.moneroPendingBroadcasts ?? 0 })}</Text>}
                                 {appSettings.moneroEnabled && <VStack gap="2" align="stretch" mt="3">
-                                    <Text fontSize="xs" color="kk.textSecondary">{uiText("Monero node")}</Text>
-                                    <Input aria-label={uiText("Monero daemon URL")} size="sm" value={appSettings.moneroDaemonUrl} onChange={event => setAppSettings(previous => ({ ...previous, moneroDaemonUrl: event.target.value }))} />
-                                    <Text fontSize="2xs" color="kk.textMuted">{uiText("The default is a public node. Any node sees your IP address and, after a key-image sync, which outputs you spend. A node you run yourself (for example http://127.0.0.1:18081) keeps that private. Remote nodes must use HTTPS.")}</Text>
+                                    {open && <MoneroNodePanel />}
+                                    <details style={{ marginTop: 12 }}><summary style={{ cursor: 'pointer', fontSize: 12 }}>{uiText('Wallet history settings')}</summary>
                                     <Text fontSize="xs" color="kk.textSecondary">{uiText("Scan start block (restore height)")}</Text>
                                     <Flex gap="2">
                                         <Input aria-label={uiText("Monero restore height")} size="sm" type="number" min="0" value={appSettings.moneroRestoreHeight} onChange={event => setAppSettings(previous => ({ ...previous, moneroRestoreHeight: Number(event.target.value) }))} />
                                         <Button size="xs" variant="outline" disabled={moneroBusy} onClick={async () => {
                                             setMoneroBusy(true); setMoneroError(null)
-                                            try { const suggested = await rpcRequest<{ restoreHeight: number }>("moneroSuggestRestoreHeight", { daemonUrl: appSettings.moneroDaemonUrl }, 20000); setAppSettings(previous => ({ ...previous, moneroRestoreHeight: suggested.restoreHeight })) }
+                                            try { const suggested = await rpcRequest<{ restoreHeight: number }>("moneroSuggestRestoreHeight", {}, 20000); setAppSettings(previous => ({ ...previous, moneroRestoreHeight: suggested.restoreHeight })) }
                                             catch (error) { setMoneroError(error instanceof Error ? error.message : "Unable to read the node height") }
                                             finally { setMoneroBusy(false) }
                                         }}>{uiText("New wallet: a week back")}</Button>
@@ -1694,10 +1694,11 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
                                     <Text fontSize="2xs" color="kk.textMuted">{uiText("0 scans the whole chain (hours) and finds every payment. A later block is faster but hides anything received before it, so use it only for a wallet that has never received XMR. The week-back block comes from the node, which KeepKey can't verify.")}</Text>
                                     <Button size="xs" disabled={moneroBusy} onClick={async () => {
                                         setMoneroBusy(true); setMoneroError(null)
-                                        try { setAppSettings(await rpcRequest<AppSettings>("setMoneroNode", { daemonUrl: appSettings.moneroDaemonUrl, restoreHeight: appSettings.moneroRestoreHeight })); window.dispatchEvent(new Event("keepkey-settings-changed")) }
+                                        try { const current = await rpcRequest<AppSettings>('getAppSettings'); setAppSettings(await rpcRequest<AppSettings>("setMoneroNode", { daemonUrl: current.moneroDaemonUrl, mode: current.moneroNodeMode, restoreHeight: appSettings.moneroRestoreHeight })); window.dispatchEvent(new Event("keepkey-settings-changed")) }
                                         catch (error) { setMoneroError(error instanceof Error ? error.message : "Unable to save Monero daemon") }
                                         finally { setMoneroBusy(false) }
                                     }}>{uiText("Save Monero settings")}</Button>
+                                    </details>
                                 </VStack>}
                                 {moneroError && <Text role="alert" fontSize="xs" color="red.400" mt="2">{moneroError}</Text>}
                             </Box>

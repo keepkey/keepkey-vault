@@ -21,6 +21,7 @@ import { HiveAccountPanel } from "./HiveAccountPanel"
 import { SendForm } from "./SendForm"
 import { ZcashBalanceSummary, type ZcashPrivacyAction } from './ZcashBalanceSummary'
 import { MoneroHeaderBalance, MoneroReceiveSection, MoneroSendSection, MoneroStatusChip, useMoneroView } from './MoneroAssetSections'
+import { MoneroNodePanel } from './MoneroNodePanel'
 import { useMoneroStatus } from "../hooks/useMoneroStatus"
 import { rpcMoneroClient } from "../lib/monero-client"
 
@@ -1452,6 +1453,7 @@ function PersonalAssetPage({ chain, balance, onBack, firmwareVersion, initialAct
 				/>}
 
 				{/* Content */}
+				{isMonero && <Box mb="3"><MoneroNodePanel compact /></Box>}
 				<Box className="v3-glass-card" borderRadius="var(--r-lg)" p={{ base: "4", md: "6" }} minH="280px">
 					{isMonero ? (
 						// Monero's standard Receive/Send: connect (view-key consent), key-image sync and the
