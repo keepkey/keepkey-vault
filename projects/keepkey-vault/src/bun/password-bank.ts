@@ -1,5 +1,5 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID } from 'node:crypto'
-import { PASSWORD_BANK_ALGORITHM, passwordOrigin, type PasswordBankBackup, type PasswordBankView, type PasswordProfile } from '../shared/password-bank'
+import { PASSWORD_BANK_ALGORITHM, passwordOrigin, type PasswordBankBackup, type PasswordBankView, type PasswordProfile, type PasswordRiskKind } from '../shared/password-bank'
 
 export const PASSWORD_BANK_SETTING = 'password_bank_v1'
 export const PASSWORD_BANK_FLAG = 'password_manager_enabled'
@@ -152,6 +152,10 @@ export class PasswordBank {
       for (const p of r.profiles) {
         if (typeof p.id !== 'string' || ids.has(p.id) || typeof p.account !== 'string' || !p.account.trim() || p.account.length > 200 || passwordOrigin(p.origin) !== p.origin || !['active', 'prepared', 'submitted'].includes(p.rotationState) || !Number.isSafeInteger(p.reviewDays) || p.reviewDays < 1 || p.reviewDays > 3650 || !Number.isFinite(p.createdAt) || (p.changedAt !== undefined && !Number.isFinite(p.changedAt))) throw new Error('Invalid password profile')
         ids.add(p.id); use(p.slot)
+        if (p.riskFindings !== undefined) {
+          if (!Array.isArray(p.riskFindings) || p.riskFindings.length > 100) throw new Error('Invalid risk history')
+          for (const f of p.riskFindings) if (!['compromised', 'reused', 'weak'].includes(f.kind) || !['user', 'chrome-password-checkup'].includes(f.source) || f.mode !== 'user-reported' || !Number.isFinite(f.observedAt) || (f.resolvedAt !== undefined && !Number.isFinite(f.resolvedAt)) || (f.slot !== null && (!Number.isSafeInteger(f.slot) || f.slot < 0 || f.slot >= r.nextSlot))) throw new Error('Invalid risk finding')
+        }
         if (p.pendingSlot !== undefined) use(p.pendingSlot)
         if ((p.rotationState === 'active') !== (p.pendingSlot === undefined)) throw new Error('Invalid rotation journal')
       }
@@ -272,12 +276,24 @@ export class PasswordBank {
     } else if (action === 'verify') {
       if (p.rotationState !== 'submitted' || !confirmed || p.pendingSlot === undefined) throw new Error('Confirm a successful sign-in with the new password first')
       this.cache.get(p.slot)?.bytes.fill(0); this.cache.delete(p.slot)
+      for (const finding of p.riskFindings || []) if (!finding.resolvedAt && (finding.slot === p.slot || finding.slot === null)) finding.resolvedAt = this.now()
       p.slot = p.pendingSlot; delete p.pendingSlot; p.rotationState = 'active'; p.changedAt = this.now()
     } else if (action === 'cancel') {
       if (p.rotationState !== 'prepared' || p.pendingSlot === undefined) throw new Error('A submitted change must be reconciled; it cannot be discarded')
       this.cache.get(p.pendingSlot)?.bytes.fill(0); this.cache.delete(p.pendingSlot)
       delete p.pendingSlot; p.rotationState = 'active'
     } else throw new Error('Invalid rotation action')
+    this.commit(r)
+    return this.view()
+  }
+  reportRisk(id: string, kind: PasswordRiskKind, source: 'user' | 'chrome-password-checkup') {
+    if (!['compromised', 'reused', 'weak'].includes(kind) || !['user', 'chrome-password-checkup'].includes(source)) throw new Error('Invalid risk finding')
+    const r = this.copy(), p = this.profile(r, id)
+    const slot = p.changedAt ? p.slot : null
+    const findings = p.riskFindings || []
+    if (!findings.some(f => f.kind === kind && f.source === source && f.slot === slot && !f.resolvedAt)) findings.push({ kind, source, slot, mode: 'user-reported', observedAt: this.now() })
+    if (findings.length > 100) throw new Error('Risk history is full')
+    p.riskFindings = findings
     this.commit(r)
     return this.view()
   }

@@ -27,6 +27,7 @@ import { useBtcNodeStatus } from "./hooks/useBtcNodeStatus"
 import { useBtcMultisigEnabled } from "./hooks/useBtcMultisigEnabled"
 import { usePasswordManagerEnabled } from './hooks/usePasswordManagerEnabled'
 import { PasswordBankView } from './components/PasswordBankView'
+import { PasswordAgentApprovalDialog } from './components/PasswordAgentApprovalDialog'
 import { OfflineBanner } from "./components/OfflineBanner"
 import { NodeStatusBar } from "./components/NodeStatusBar"
 import { NodeConnectedDialog } from "./components/NodeConnectedDialog"
@@ -939,9 +940,10 @@ function App() {
 		<SigningApproval request={signingRequest} phase={signingPhase} onApprove={handleApproveSign} onReject={handleRejectSign} onCancel={handleCancelSign} />
 	) : null
 
-	const pairingOverlay = pairRequest ? (
-		<PairingApproval request={pairRequest} onApprove={handleApprovePairing} onReject={handleRejectPairing} />
-	) : null
+	const pairingOverlay = <>
+		<PasswordAgentApprovalDialog />
+		{pairRequest && <PairingApproval request={pairRequest} onApprove={handleApprovePairing} onReject={handleRejectPairing} />}
+	</>
 
 	const passphraseOverlay = passphraseRequested ? (
 		<PassphraseEntry onSubmit={handlePassphraseSubmit} onCancel={handlePassphraseCancel} />

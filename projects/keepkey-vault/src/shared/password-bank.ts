@@ -1,4 +1,13 @@
 export const PASSWORD_BANK_ALGORITHM = 'keepkey-ckv-base64url-v1' as const
+export type PasswordRiskKind = 'compromised' | 'reused' | 'weak'
+export interface PasswordRiskFinding {
+  kind: PasswordRiskKind
+  source: 'user' | 'chrome-password-checkup'
+  mode: 'user-reported'
+  observedAt: number
+  slot: number | null // null: the pre-migration website password is not in KeepKey
+  resolvedAt?: number
+}
 export interface PasswordProfile {
   id: string
   origin: string
@@ -9,6 +18,18 @@ export interface PasswordProfile {
   changedAt?: number
   reviewDays: number
   createdAt: number
+  riskFindings?: PasswordRiskFinding[]
+}
+export interface PasswordAgentApproval {
+  id: string
+  profileId: string
+  account: string
+  origin: string
+  browser: string
+  tabId: number
+  fieldLabel: string
+  pending: boolean
+  expiresAt: number
 }
 export interface PasswordBankView {
   enabled: boolean
@@ -55,5 +76,5 @@ export const PASSWORD_ROTATION_GUIDES = [
 /** Explicit identity-provider origins, never a wildcard or suffix match. */
 export function passwordFillOrigins(loginOrigin: string): string[] {
   const guide = PASSWORD_ROTATION_GUIDES.find(g => g.loginOrigin === loginOrigin)
-  return [...new Set([loginOrigin, ...(guide ? [new URL(guide.settingsUrl).origin] : [])])]
+  return [...new Set([loginOrigin, ...(guide ? [new URL(guide.settingsUrl).origin] : []), ...(guide?.id === 'microsoft' ? ['https://account.live.com'] : [])])]
 }

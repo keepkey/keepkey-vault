@@ -25,6 +25,7 @@ import { createSwapQuoteLeases } from './swap-quote-lease'
 import { assessSwapRisk } from '../shared/swap-risk'
 import { PasswordBank } from './password-bank'
 import { PasswordBex } from './password-bex'
+import { PasswordAgent } from './password-agent'
 import { callBex, listBrowsers } from './bex-bridge'
 
 /**
@@ -1059,8 +1060,11 @@ const passwordBank = new PasswordBank({
 	},
 })
 // Clean expired session secrets even when the password tab is not visible.
-setInterval(() => { passwordBank.view() }, 1000).unref()
 const passwordBex = new PasswordBex(passwordBank, { browsers: listBrowsers, call: (tool, args, browser) => callBex(tool, args, browser, 10000) })
+const passwordAgent = new PasswordAgent(passwordBank, passwordBex, approval => {
+	try { rpc.send['password-agent-approval']({ approval }) } catch { /* native UI not ready; request will expire */ }
+})
+setInterval(() => { if (!passwordBank.view().unlocked) passwordAgent.cancelPending() }, 1000).unref()
 const multisigRegistry = new MultisigRegistry(getSetting, setSetting, () => ({
 	hidden: engine.isPassphraseWallet,
 	epoch: activitySessionEpoch,
@@ -2050,6 +2054,7 @@ async function resolveDeviceSwapAsset(key: string) {
 
 // Callbacks bridge REST → RPC UI
 const restCallbacks: RestApiCallbacks = {
+	passwordAgent,
 	onApiLog: (entry: ApiLogEntry) => {
 		if (entryIsStale(entry)) {
 			console.warn(`[api-log] dropped ${entry.method} ${entry.route}: wallet session changed mid-request`)
@@ -8501,12 +8506,13 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				return getAppSettings()
 			},
 			setPasswordManagerEnabled: async (params) => {
+				passwordAgent.cancelPending()
 				passwordBank.setEnabled(params?.enabled)
 				return getAppSettings()
 			},
 			passwordBankStatus: async () => passwordBank.view(),
 			passwordBankUnlock: async (params) => passwordBank.unlock(params?.create === true),
-			passwordBankLock: async () => { passwordBank.lock(); return passwordBank.view() },
+			passwordBankLock: async () => { passwordAgent.cancelPending(); passwordBank.lock(); return passwordBank.view() },
 			passwordBankGenerate: async (params) => passwordBank.generate(params.count, params.ttlMinutes),
 			passwordBankAssign: async (params) => passwordBank.assign(params.origin, params.account, params.reviewDays),
 			passwordBankRehydrate: async (params) => passwordBank.rehydrate(params.id, params.pending === true, params.ttlMinutes),
@@ -8518,6 +8524,9 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			passwordBankBrowserTargets: async (params) => passwordBex.discover(params.id),
 			passwordBankBrowserGrant: async (params) => passwordBex.grant(params),
 			passwordBankBrowserFill: async (params) => passwordBex.fill(params.grant),
+			passwordBankReportRisk: async (params) => passwordBank.reportRisk(params.id, params.kind, params.source),
+			passwordAgentApproveFill: async (params) => passwordAgent.approve(params.id),
+			passwordAgentRejectFill: async (params) => { passwordAgent.reject(params.id) },
 			// One-time: mark the passphrase/hidden-wallet intro dialog as seen so it
 			// never shows again (also set when the OOB passphrase card is completed).
 			markPassphraseIntroShown: async () => {

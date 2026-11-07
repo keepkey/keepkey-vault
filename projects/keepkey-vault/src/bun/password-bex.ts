@@ -15,6 +15,13 @@ export class PasswordBex {
   private prune() {
     for (const map of [this.selections, this.grants]) for (const [id, value] of map) if (value.expiresAt <= this.now()) map.delete(id)
   }
+  describe(input: { id: string; browser: string; tabId: number; documentToken: string; ref: string }) {
+    this.prune()
+    const s = this.selections.get(`${input.browser}:${input.tabId}:${input.ref}`)
+    if (!s || s.id !== input.id || s.documentToken !== input.documentToken) throw new Error('Review the matching browser fields again')
+    s.assertCurrent()
+    return { origin: s.origin, fieldLabel: s.targets.find(f => f.ref === input.ref)?.label || 'Password', expiresAt: s.expiresAt }
+  }
   async discover(id: string): Promise<PasswordBrowserTarget[]> {
     const assertCurrent = this.bank.capture()
     const p = this.bank.view().profiles.find(p => p.id === id)

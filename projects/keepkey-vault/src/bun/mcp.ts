@@ -11,7 +11,7 @@
  * responses (no SSE stream, no sessions; both optional per spec). Swap in the
  * SDK if we ever need notifications/resources.
  *
- * All tools execute inside the BEX, and the BEX also owns the CATALOG: this
+ * Browser tools execute inside the BEX, and the BEX owns their catalog: this
  * file is a dumb pipe that serves whatever bex_list_tools reports and passes
  * tool content straight through. A new BEX tool therefore ships without a vault
  * release. Bridge down → structured bridge_disconnected error, and tools/list
@@ -23,11 +23,14 @@
  * process without a paired key cannot read wallet data. Defense in depth:
  * browsers are also excluded at the transport layer (Origin/Sec-Fetch reject),
  * since vault-served content at http://localhost:1646 could otherwise hold the
- * user's token. The BEX 'Agent mode' toggle (default off) remains the gate for
- * the tools actually returning data. Tools are Tier-1 READ-ONLY (no signing).
+ * user's token. Browser tools also require BEX Agent mode. Vault password
+ * tools use a separate default-off runtime flag and the unlocked native bank;
+ * fills additionally require a one-use native approval. No password values are
+ * returned through MCP. The private BEX password transport is never forwarded.
  */
 
 import { callBex, bridgeStatus, listBrowsers, type BridgeError } from './bex-bridge'
+import { PASSWORD_AGENT_TOOLS, type PasswordAgent } from './password-agent'
 
 // Default to 2025-06-18, which REMOVED JSON-RPC batching — so advertising it
 // while this (deliberately single-request) server rejects batches is honest.
@@ -174,7 +177,7 @@ function promoteBrowser(): void {
 }
 
 /** Handle POST /mcp. Caller has already enforced loopback-only. */
-export async function handleMcpRequest(req: Request, cors: Record<string, string>): Promise<Response> {
+export async function handleMcpRequest(req: Request, cors: Record<string, string>, passwords?: PasswordAgent): Promise<Response> {
   // Validate the negotiated protocol version header when present (the spec says
   // to reject an unsupported one, not ignore it). Absent is fine — the version
   // is negotiated in the initialize body.
@@ -233,14 +236,14 @@ export async function handleMcpRequest(req: Request, cors: Record<string, string
       for (const { browser } of listBrowsers()) {
         try {
           const { tools } = (await callBex('bex_list_tools', {}, browser, PROBE_TIMEOUT_MS)) as { tools: unknown[] }
-          return rpcResult(id, { tools: withBrowserArg(tools) }, cors)
+          return rpcResult(id, { tools: [...withBrowserArg(tools.filter((t: any) => !String(t?.name).startsWith('password_'))), ...(passwords?.enabled ? PASSWORD_AGENT_TOOLS : [])] }, cors)
         } catch {
           // silent or broken — try the next browser
         }
       }
       // Bridge down (BEX closed, or Agent mode off) or no browser answered —
       // serve the static fallback so tools/list still succeeds.
-      return rpcResult(id, { tools: withBrowserArg(FALLBACK_TOOLS) }, cors)
+      return rpcResult(id, { tools: [...withBrowserArg(FALLBACK_TOOLS), ...(passwords?.enabled ? PASSWORD_AGENT_TOOLS : [])] }, cors)
     }
 
     case 'tools/call': {
@@ -255,6 +258,15 @@ export async function handleMcpRequest(req: Request, cors: Record<string, string
         return rpcError(id, -32602, 'Invalid params: name must be a non-empty string', undefined, cors)
       }
       if (name.startsWith('__vault_password_')) return rpcError(id, -32601, 'Password fill is available only through the Vault password manager UI', undefined, cors)
+      if (name.startsWith('password_')) {
+        if (!passwords) return rpcError(id, -32601, 'This Vault build has no password agent API', undefined, cors)
+        try {
+          const result = await passwords.invoke(name, params?.arguments ?? {})
+          return rpcResult(id, { content: [{ type: 'text', text: JSON.stringify(result) }] }, cors)
+        } catch (error) {
+          return rpcResult(id, { isError: true, content: [{ type: 'text', text: JSON.stringify({ error: error instanceof Error ? error.message : 'Password operation failed' }) }] }, cors)
+        }
+      }
       if (name === 'bex_browsers') {
         const browsers = await Promise.all(listBrowsers().map(async b => {
           try {
