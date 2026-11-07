@@ -1062,7 +1062,10 @@ const passwordBank = new PasswordBank({
 // Clean expired session secrets even when the password tab is not visible.
 const passwordBex = new PasswordBex(passwordBank, { browsers: listBrowsers, call: (tool, args, browser) => callBex(tool, args, browser, 10000) })
 const passwordAgent = new PasswordAgent(passwordBank, passwordBex, approval => {
-	try { rpc.send['password-agent-approval']({ approval }) } catch { /* native UI not ready; request will expire */ }
+	// The legacy schema declares outgoing events under bun.messages; constrain
+	// this event to that payload despite Electrobun inferring remote messages.
+	const send = rpc.send['password-agent-approval'] as (value: VaultRPCSchema['bun']['messages']['password-agent-approval']) => void
+	try { send({ approval }) } catch { /* native UI not ready; request will expire */ }
 })
 setInterval(() => { if (!passwordBank.view().unlocked) passwordAgent.cancelPending() }, 1000).unref()
 const multisigRegistry = new MultisigRegistry(getSetting, setSetting, () => ({
