@@ -14,6 +14,7 @@ import { useState, useEffect, useCallback } from "react"
 import { Box, Flex, Text, Image, Button } from "@chakra-ui/react"
 import kkIcon from "../assets/icon.png"
 import { rpcRequest, onRpcMessage } from "../lib/rpc"
+import { retryOnTimeout } from "../lib/retry-on-timeout"
 import type { RegisteredDevice, EmulatorStatus, EmulatorWalletInfo } from "../../shared/types"
 import { emulatorWalletDetail } from "../../shared/emulatorWallets"
 import { EmulatorWalletChooser, loadEmulatorFirmware, type EmulatorFirmwareChoices } from "./EmulatorWalletChooser"
@@ -58,6 +59,7 @@ export function DeviceGrid({ onViewPortfolio, onOpenVault, onReady, emulatorEnab
 	const [emuFirmware, setEmuFirmware] = useState<EmulatorFirmwareChoices | null>(null)
 	const { buildTitle, walletTitle } = useEmulatorNames()
 	const [error, setError] = useState<string | null>(null)
+	const [slow, setSlow] = useState(false)
 	const [showValues, setShowValues] = useState(false)
 	const [revealed, setRevealed] = useState(hasRevealedOnce)
 
@@ -70,7 +72,8 @@ export function DeviceGrid({ onViewPortfolio, onOpenVault, onReady, emulatorEnab
 	const refresh = useCallback(async () => {
 		try {
 			const [devs, status, wallets] = await Promise.all([
-				rpcRequest<RegisteredDevice[]>("getRegisteredDevices", undefined, 5000),
+				// Busy at startup (heavy first load) is not an error: wait longer before saying so.
+				retryOnTimeout(ms => rpcRequest<RegisteredDevice[]>("getRegisteredDevices", undefined, ms), undefined, () => setSlow(true)),
 				emulatorEnabled
 					? rpcRequest<EmulatorStatus>("emulatorStatus", undefined, 5000).catch(() => null)
 					: Promise.resolve(null),
@@ -84,7 +87,7 @@ export function DeviceGrid({ onViewPortfolio, onOpenVault, onReady, emulatorEnab
 			setError(null)
 		} catch (e: any) {
 			setError(e?.message || String(e))
-		}
+		} finally { setSlow(false) }
 	}, [emulatorEnabled])
 
 	useEffect(() => {
@@ -224,11 +227,15 @@ export function DeviceGrid({ onViewPortfolio, onOpenVault, onReady, emulatorEnab
 				</Text>
 			</Flex>
 
+			{slow && !error && (
+				<Text mb="3" fontSize="11px" color="var(--text-2)" role="status">{uiText("KeepKey Desktop is busy starting up — still loading your wallets…")}</Text>
+			)}
 			{/* Error banner */}
 			{(error || vaultError) && (
-				<Box mb="3" px="3" py="2" bg="rgba(224,140,123,0.12)" border="1px solid" borderColor="rgba(224,140,123,0.32)" borderRadius="lg">
-					<Text fontSize="11px" color="var(--rose)" wordBreak="break-all">{error || vaultError}</Text>
-				</Box>
+				<Flex mb="3" px="3" py="2" gap="3" align="center" bg="rgba(224,140,123,0.12)" border="1px solid" borderColor="rgba(224,140,123,0.32)" borderRadius="lg">
+					<Text flex="1" fontSize="11px" color="var(--rose)" wordBreak="break-all">{error || vaultError}</Text>
+					{error && <Button size="xs" variant="outline" onClick={() => { void refresh() }}>{uiText("Retry")}</Button>}
+				</Flex>
 			)}
 
 			{/* Empty-state hero — when there's nothing registered yet */}
