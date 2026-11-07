@@ -1,4 +1,8 @@
 export const MONERO_LOCAL_URL = 'http://127.0.0.1:18081'
+export const MONERO_REMOTE_NODES = [
+  { label: 'Triplebit', url: 'https://xmr.triplebit.org' },
+  { label: 'Seth for Privacy', url: 'https://node.sethforprivacy.com' },
+] as const
 export const MONERO_NODE_ESTIMATE_BYTES = 105 * 1024 ** 3
 export const MONERO_NODE_RESERVE_BYTES = 25 * 1024 ** 3
 

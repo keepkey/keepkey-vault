@@ -271,7 +271,7 @@ import { REVIEWED_MONERO_SIGNING_SHA256 } from "./monero-emulator"
 import { startMoneroSidecar, stopMoneroSidecar, isMoneroSidecarAvailable } from "./monero-sidecar"
 import { createMoneroNodeManager } from './monero-node'
 import { MONERO_LOCAL_URL, moneroNodeMode } from '../shared/monero-node'
-import { storedRestoreHeight, suggestRestoreHeight, validateMoneroNode } from "./monero-settings"
+import { checkMoneroNode, storedRestoreHeight, suggestRestoreHeight, validateMoneroNode } from "./monero-settings"
 import { createFilePendingStore } from "./monero-pending"
 import { findZcashCliBinary, isSidecarReady, startSidecar, stopSidecar, wipeSidecarWalletDb, hasFvkLoaded, getCachedFvk, onScanProgress, getScanState, updateSyncedTo, beginZcashSend, endZcashSend, isZcashSendInFlight } from "./zcash-sidecar"
 import { CHAINS, customChainToChainDef, isChainSupported, hiveRolePath, btcTaprootSupported, findChainByNetwork } from "../shared/chains"
@@ -10404,6 +10404,14 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
                 if (params.mode !== undefined && !['local', 'remote'].includes(params.mode)) throw new Error('Choose a local or remote Monero node')
                 if (params.mode === 'local') params = { ...params, daemonUrl: MONERO_LOCAL_URL }
                 const node = validateMoneroNode(params)
+                if (params.mode === 'remote' || (params.mode === undefined && node.daemonUrl !== MONERO_LOCAL_URL)) {
+                    requireOnline('connecting to a Monero node')
+                    // The explicit offline-chain QA mode is checked again by
+                    // the sidecar. Public remote nodes always need mainnet.
+                    const localQa = process.env.KEEPKEY_MONERO_LOCAL_REGTEST === '1'
+                        && ['localhost', '127.0.0.1', '[::1]'].includes(new URL(node.daemonUrl).hostname)
+                    if (!localQa) await checkMoneroNode(node.daemonUrl)
+                }
                 invalidateMoneroWallet()
                 setSetting('monero_daemon_url', node.daemonUrl)
                 setSetting('monero_restore_height', String(node.restoreHeight))

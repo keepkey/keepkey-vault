@@ -21,3 +21,11 @@ test('remote node is explicit, remains editable across polling, and requires a v
 test('the asset page keeps node details collapsed and distinguishes full sync',()=>{
  expect(ui.compact).toEqual({summary:'Your node: Fully synced',closed:true,selectors:0})
 })
+test('the asset page offers a named HTTPS remote without changing connection until confirmed',()=>{
+ expect(ui.remoteShortcut).toEqual({url:'https://xmr.triplebit.org',saves:0,privacy:true})
+ expect(ui.failedShortcut).toEqual({mode:'Connection: Your node',error:true,editing:true})
+})
+test('using a remote keeps local sync visible and running; changing back uses the local node',()=>{
+ expect(ui.connectedShortcut).toEqual({mode:'Connection: Remote node',url:'https://xmr.triplebit.org',localStillRunning:true,stops:1,localDetails:'Local node: Syncing blockchain',editing:false})
+ expect(ui.returnToLocal).toBe('http://127.0.0.1:18081')
+})

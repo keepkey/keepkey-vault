@@ -23,6 +23,33 @@ export function storedRestoreHeight(value: string | null): number {
   return Number.isSafeInteger(height) && height >= 0 ? height : 0
 }
 
+/** Connectivity preflight only: a remote node's reported height is not a trusted checkpoint. */
+export async function checkMoneroNode(daemonUrl: string,
+  fetcher: (url: string, init: RequestInit) => Promise<Response> = fetch): Promise<{ height: number }> {
+  const { daemonUrl: origin } = validateMoneroNode({ daemonUrl, restoreHeight: 0 })
+  try {
+    const response = await fetcher(`${origin}/json_rpc`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 'vault-node-check', method: 'get_info' }), redirect: 'error', signal: AbortSignal.timeout(10000) })
+    if (!response.ok || !response.body) throw new Error()
+    const reader = response.body.getReader(), chunks: Uint8Array[] = []; let size = 0
+    try {
+      while (true) {
+        const { done, value } = await reader.read(); if (done) break
+        size += value.length
+        if (size > 65536) throw new Error()
+        chunks.push(value)
+      }
+    } finally { await reader.cancel().catch(() => {}); reader.releaseLock() }
+    const info = JSON.parse(Buffer.concat(chunks).toString('utf8')).result
+    if (info?.status !== 'OK' || info.nettype !== 'mainnet' || !Number.isSafeInteger(info.height) || info.height < 1) throw new Error()
+    if (info.synchronized !== true || info.busy_syncing === true) throw new Error('syncing')
+    return { height: info.height }
+  } catch (error) {
+    if (error instanceof Error && error.message === 'syncing') throw new Error('This node is still syncing. Choose another node or try again later.')
+    throw new Error('Could not reach a Monero mainnet node at this address. Check the URL and try again.')
+  }
+}
+
 /** The node's current height (/get_height) and the suggested scan start for a new wallet. */
 export async function suggestRestoreHeight(daemonUrl: string,
   fetcher: (url: string, init: RequestInit) => Promise<Response> = fetch): Promise<{ tipHeight: number; restoreHeight: number; marginBlocks: number }> {
