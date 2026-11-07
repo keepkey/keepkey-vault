@@ -2,7 +2,7 @@
 
 The MVP adds a default-off **Password manager** switch in **Settings → Feature Flags**. Switching it on inserts the **Passwords** tab immediately. Switching it off removes the tab and clears the unlocked bank and password cache immediately. No restart or reload is required for either operation.
 
-Vault implementation branch: `feat/password-bank-mvp`, based on Desktop 1.6.10. Companion BEX branch: `feat/password-bank-mvp` in the `keepkey-client` repository, commit `ece6fff`. Its isolated checkout is `/private/tmp/keepkey-password-bank-bex`; the complete unpacked build is in its `dist` directory. Release both changes together for browser fill. No release tag, signed app, store upload or production deployment was made.
+Vault implementation branch: `feat/password-bank-mvp`, based on Desktop 1.6.10. Companion BEX branch: `feat/password-bank-mvp` in the `keepkey-client` repository, commit `b3bc025` (fill implementation `ece6fff`, followed by test-build labeling). Its isolated checkout is `/private/tmp/keepkey-password-bank-bex`. The stable load-unpacked package is `artifacts/password-bank-mvp/bex`; a ZIP, SHA-256 checksum and per-file provenance manifest sit beside it. Release both changes together for browser fill. No release tag, signed app, store upload or production deployment was made.
 
 ## Included functionality
 
@@ -32,11 +32,21 @@ Use test accounts and a test wallet for initial acceptance. Physical KeepKey beh
 
 ## Try BEX fill
 
-Load `/private/tmp/keepkey-password-bank-bex/dist` as an unpacked extension in a dedicated Chrome profile, or build its branch normally with `pnpm build`. Pair it with this Vault and enable the existing **Agent mode** bridge. This MVP does not add a page-provider API, a generic password-reveal REST endpoint, or a new permission for arbitrary websites.
+Open `chrome://extensions` in a dedicated Chrome profile, enable Developer mode, choose **Load unpacked**, and select `artifacts/password-bank-mvp/bex` in this repository. It identifies itself as **KeepKey — Password Bank MVP**, version name **0.0.38 Password Bank MVP**. To reproduce this label from the BEX source, run `bun run build:password-mvp`; the regular `pnpm build` keeps its normal name. Pair it with this Vault and enable the existing **Agent mode** bridge. This MVP does not add a page-provider API, a generic password-reveal REST endpoint, or a new permission for arbitrary websites.
 
 Open a matching HTTPS login/security page with a visible password field. In Vault, use **Find BEX login field** or, after starting a backed-up change, **Find BEX field for staged password**. Select the exact browser and field, then **Fill selected field**. Review and submit in the browser yourself. Fields expire after thirty seconds or navigation; discover them again when necessary.
 
 The compatible extension is required: an older BEX has neither private field discovery/fill nor the new redaction behavior. Keep Agent mode's existing authorization separate from permission to change an account password. Browser fill is initiated only by this Vault UI, not by an agent request.
+
+## Chrome saved credential inventory boundary
+
+Ordinary webpages and extensions cannot enumerate Chrome's saved-password vault, including a metadata-only list of every saved account matching the current page. Chromium restricts its `passwordsPrivate` permission to browser components; it is not a permission BEX can acquire through its manifest. Chrome's autofill chooser is browser UI, separate from the webpage DOM. [Chromium permission definitions](https://raw.githubusercontent.com/chromium/chromium/main/chrome/common/extensions/api/_permission_features.json), [extension security boundaries](https://chromium.googlesource.com/chromium/src/+/main/extensions/docs/security_faq.md).
+
+An extension with host access can inspect the page's login fields and values after fill; masking an input visually does not make its value secret from the destination page. BEX redacts password values from agent observations and does not turn an observed username into an assertion that it knows every saved account for that site.
+
+For a rotation inventory, a separate native Vault importer could read only site/account metadata from a user-selected, supported Chrome profile database, subject to operating-system file access and schema compatibility. This is an inference from Chromium's separate URL/username/encrypted-password columns; it is not a supported extension API and is not implemented by this build. [Chromium login database](https://raw.githubusercontent.com/chromium/chromium/main/components/password_manager/core/browser/password_store/login_database.cc).
+
+The user can also view saved entries in Chrome Password Manager. Chrome's CSV export contains actual password values, so it must not be described as a metadata-only export. [Chrome import/export documentation](https://support.google.com/chrome/answer/13068232?hl=en).
 
 ## Recovery and expiry contract
 
