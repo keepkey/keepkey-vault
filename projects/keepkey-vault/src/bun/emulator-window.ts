@@ -174,6 +174,7 @@ function startBridge(generation: number): number {
       if (url.pathname === '/_emu/ready' && req.method === 'POST') {
         viewReady = true
         console.log(`${TAG} Bridge: webview signaled ready`)
+        if (openPinPrompt) sendToWindow('pin-request', { type: openPinPrompt })
         return new Response('ok', { headers: { 'Access-Control-Allow-Origin': '*' } })
       }
 
@@ -240,6 +241,11 @@ const emuRpc = BrowserView.defineRPC<EmulatorWindowRPC>({
 // ── Window state ────────────────────────────────────────────────────────
 
 let emuWindow: BrowserWindow<typeof emuRpc> | null = null
+/** The PIN prompt the device has open, if any: a reopened window shows it again. */
+let openPinPrompt: PinRequestType | null = null
+/** The screen the device was on when the user closed the window while it ran.
+ *  An idle firmware (a PIN grid waiting) draws no new frame for a reopened window. */
+let retainedFrame: Uint8Array | null = null
 
 // ── Window lifecycle ────────────────────────────────────────────────────
 
@@ -263,6 +269,7 @@ export function openEmulatorWindow(): void {
     frame: { width: saved.width, height: saved.height, x: saved.x, y: saved.y },
   })
   emuWindow = window
+  if (retainedFrame) { playbackQueue.push(retainedFrame); retainedFrame = null }
 
   window.on('close', () => {
     if (emuWindow !== window) return
@@ -272,6 +279,8 @@ export function openEmulatorWindow(): void {
     } catch {}
 
     console.log(`${TAG} Emulator window closed`)
+    // The emulator keeps running: keep its screen for the EMU badge's reopen.
+    retainedFrame = latestFrame
     emuWindow = null
     viewReady = false
     windowGeneration++
@@ -294,6 +303,9 @@ export function openEmulatorWindow(): void {
 }
 
 export function closeEmulatorWindow(): void {
+  // Called when the emulator stops or switches: its screen and prompt go with it.
+  retainedFrame = null
+  openPinPrompt = null
   if (!emuWindow) return
   const window = emuWindow
   // Retire this owner before close(): Electrobun can deliver the close event
@@ -321,6 +333,20 @@ export function closeEmulatorWindow(): void {
 
 export function isEmulatorWindowOpen(): boolean {
   return emuWindow !== null
+}
+
+/** The EMU badge: bring the running emulator's window to the front (restoring
+ *  it if minimized), or reopen it if the user closed it. */
+export function showEmulatorWindow(): 'focused' | 'reopened' {
+  if (emuWindow) {
+    try {
+      if (emuWindow.isMinimized()) emuWindow.unminimize()
+      emuWindow.activate()
+    } catch (e: any) { console.warn(`${TAG} activate failed:`, e?.message) }
+    return 'focused'
+  }
+  openEmulatorWindow()
+  return 'reopened'
 }
 
 // ── Send to webview (bun → webview via executeJavascript) ───────────────
@@ -524,11 +550,13 @@ function sendDismiss(): void {
 
 /** Update instructions without exposing or copying the firmware's PIN grid. */
 export function displayPinPrompt(type: PinRequestType): void {
+  openPinPrompt = type
   sendToWindow('pin-request', { type })
 }
 
 /** The device stopped asking (PIN sent or refused): drop the stale instructions. */
 export function clearPinPrompt(): void {
+  openPinPrompt = null
   sendToWindow('confirm-dismiss', {})
 }
 

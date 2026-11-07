@@ -10,6 +10,7 @@ import kkIcon from "../assets/icon.png"
 import shapeshiftIcon from "../assets/apps/shapeshift.png"
 import { NAV_HEIGHT } from "../layout"
 import { WalletSelector } from "./WalletSelector"
+import { EmulatorBadge } from "./EmulatorIdentity"
 import { useBtcMultisigEnabled } from "../hooks/useBtcMultisigEnabled"
 
 export type NavTab = "vault" | "shapeshift" | "explore" | "addresses" | "multisig" | "monero"
@@ -297,9 +298,7 @@ export function TopNav({
 						)}
 						{isEmulator && (
 							<>
-								<Text flexShrink={0} fontSize="9px" color="var(--rose)" fontWeight="600" bg="rgba(224,140,123,0.12)" px="1.5" py="0.5" borderRadius="sm" textTransform="uppercase" letterSpacing="0.08em" fontFamily={FONT_MONO}>
-									EMU
-								</Text>
+								<EmulatorBadge refreshKey={`${label}|${firmwareVersion}|${connectedDeviceId}`} fontFamily={FONT_MONO} />
 								{(onStopEmulator || onExitToDeviceSelect) && (
 									<Box
 										as="button"

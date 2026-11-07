@@ -16,7 +16,8 @@ import kkIcon from "../assets/icon.png"
 import { rpcRequest, onRpcMessage } from "../lib/rpc"
 import type { RegisteredDevice, EmulatorStatus, EmulatorWalletInfo } from "../../shared/types"
 import { emulatorWalletDetail } from "../../shared/emulatorWallets"
-import { EmulatorWalletChooser } from "./EmulatorWalletChooser"
+import { EmulatorWalletChooser, loadEmulatorFirmware, type EmulatorFirmwareChoices } from "./EmulatorWalletChooser"
+import { useEmulatorNames } from "./EmulatorIdentity"
 import { WalletTile as DeviceCard, WalletTileCta as CardCta } from "./WalletTile"
 import { useSavedVaults, VaultTile, VaultLinkChips } from "./VaultCards"
 import type { VaultIdentity } from "../../shared/vault-identity"
@@ -54,6 +55,8 @@ export function DeviceGrid({ onViewPortfolio, onOpenVault, onReady, emulatorEnab
 	const [loading, setLoading] = useState<string | null>(null)
 	const [confirmForget, setConfirmForget] = useState<string | null>(null)
 	const [pickingSeed, setPickingSeed] = useState(false)
+	const [emuFirmware, setEmuFirmware] = useState<EmulatorFirmwareChoices | null>(null)
+	const { buildTitle, walletTitle } = useEmulatorNames()
 	const [error, setError] = useState<string | null>(null)
 	const [showValues, setShowValues] = useState(false)
 	const [revealed, setRevealed] = useState(hasRevealedOnce)
@@ -117,14 +120,14 @@ export function DeviceGrid({ onViewPortfolio, onOpenVault, onReady, emulatorEnab
 		setConfirmForget(null)
 	}, [refresh])
 
-	const handleStartEmu = useCallback(async (name: string) => {
+	const handleStartEmu = useCallback(async (name: string, buildId?: string | null) => {
 		setLoading(`emu:${name}`)
 		setError(null)
 		try {
 			// Never dead-click: the backend throws on failure, but even if a path
 			// resolves with a non-running status (or nothing), surface it rather
 			// than silently reverting to the Start card.
-			const status = await rpcRequest<EmulatorStatus>("emulatorSwitchWallet", { name }, 20000)
+			const status = await rpcRequest<EmulatorStatus>("emulatorSwitchWallet", { name, buildId }, 30000)
 			if (!status || status.state !== "running") {
 				throw new Error(status?.error || "Emulator did not start (no error reported)")
 			}
@@ -329,9 +332,12 @@ export function DeviceGrid({ onViewPortfolio, onOpenVault, onReady, emulatorEnab
 								<Flex align="center" gap="2.5" mb="2.5">
 									<EmulatorIcon active={!!running} />
 									<Box flex="1" minW="0">
-										<Text fontSize="14px" fontWeight="500" fontFamily={running ? "mono" : undefined} color={running ? "var(--teal)" : "var(--text-0)"} truncate lineHeight="1.2">
-											{running ? running.name : uiText("KeepKey Emulator")}
+										<Text fontSize="14px" fontWeight="500" color={running ? "var(--teal)" : "var(--text-0)"} truncate lineHeight="1.2">
+											{running ? walletTitle(running) : uiText("KeepKey Emulator")}
 										</Text>
+										{running && emuStatus?.build && (
+											<Text fontSize="10px" color="var(--text-2)" lineHeight="1.35" truncate>{buildTitle(emuStatus.build)}</Text>
+										)}
 										<Text fontSize="10px" color="var(--text-3)" lineHeight="1.35">
 											{running ? emulatorWalletDetail(running) : `${emuWallets.length} saved seed${emuWallets.length === 1 ? "" : "s"}`}
 										</Text>
@@ -345,7 +351,7 @@ export function DeviceGrid({ onViewPortfolio, onOpenVault, onReady, emulatorEnab
 										<CardCta tone="rose" onClick={handleStopEmu} loading={loading === "emu:__stop"}>{uiText("Stop emulator")}</CardCta>
 									</Box>
 								)}
-								<CardCta tone="teal" onClick={() => { setError(null); setPickingSeed(true) }}>
+								<CardCta tone="teal" onClick={async () => { setError(null); setEmuFirmware(await loadEmulatorFirmware()); setPickingSeed(true) }}>
 									{running ? uiText("Switch seed…") : uiText("Start emulator…")}
 								</CardCta>
 							</DeviceCard>
@@ -357,10 +363,11 @@ export function DeviceGrid({ onViewPortfolio, onOpenVault, onReady, emulatorEnab
 			{pickingSeed && (
 				<EmulatorWalletChooser
 					wallets={emuWallets}
+					firmware={emuFirmware}
 					busy={!!loading}
 					error={error}
 					onClose={() => setPickingSeed(false)}
-					onPick={async (name) => { if (await handleStartEmu(name)) setPickingSeed(false) }}
+					onPick={async (name, buildId) => { if (await handleStartEmu(name, buildId)) setPickingSeed(false) }}
 					onDelete={handleDeleteEmu}
 				/>
 			)}

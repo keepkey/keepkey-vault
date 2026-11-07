@@ -1,4 +1,4 @@
-import type { MoneroSendReview, MoneroStatus } from './types'
+import type { MoneroSendReview, MoneroStatus, EmulatorBuildInfo, EmulatorNextBuild } from './types'
 import type { MultisigPolicyPreview,MultisigCosignerExport,BtcPsbtSigned } from "./multisig-policy"
 import type { ElectrobunRPCSchema } from 'electrobun/bun'
 import type { SafeAccount, SafeContext, SafeCreateParams, SafeProposal, SafeTransfer, SafeTxReview, VaultAddParams, VaultAddReview } from './safe-multisig'
@@ -509,13 +509,18 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       emulatorStop: { params: void; response: EmulatorStatus }
       emulatorSave: { params: void; response: void }
       emulatorStatus: { params: void; response: EmulatorStatus }
-      emulatorListBuilds: { params: void; response: { builds: Array<{ id: string; path: string; selected: boolean; version?: string }>; selected: string | null } }
-      emulatorSelectBuild: { params: { id: string }; response: { builds: Array<{ id: string; path: string; selected: boolean; version?: string }>; selected: string } }
-      emulatorActivateBuild: { params: { id: string }; response: { status: EmulatorStatus; flashName: string } }
-      emulatorDeleteFlash: { params: { name: string }; response: EmulatorStatus }
+      emulatorListBuilds: { params: void; response: { builds: EmulatorBuildInfo[]; selected: string | null; next: EmulatorNextBuild } }
+      emulatorSelectBuild: { params: { id: string }; response: { builds: EmulatorBuildInfo[]; selected: string } }
+      /** id null: the bundled (or user-installed) library. */
+      emulatorActivateBuild: { params: { id: string | null }; response: { status: EmulatorStatus; flashName: string } }
+      /** Refuses the running wallet unless stopIfRunning (Settings' "Delete Flash", which says so). */
+      emulatorDeleteFlash: { params: { name: string; stopIfRunning?: boolean }; response: EmulatorStatus }
+      /** Bring the running emulator's window to the front, or reopen it if it was closed. */
+      emulatorShowWindow: { params: void; response: { window: 'focused' | 'reopened' } }
       emulatorListWallets: { params: void; response: EmulatorWalletInfo[] }
       emulatorImportWallet: { params: { name: string; mnemonic: string; label?: string }; response: EmulatorStatus }
-      emulatorSwitchWallet: { params: { name: string }; response: EmulatorStatus }
+      /** buildId: omitted keeps the selected build; null is the bundled library. */
+      emulatorSwitchWallet: { params: { name: string; buildId?: string | null }; response: EmulatorStatus }
       /** Store a content-addressed emulator build, then select it for the next start. */
       emulatorInstallDylib: { params: { data: string }; response: { path: string; size: number; buildId: string; emulatorEnabled: boolean } }
       /** Wipes the active flash and loads a freshly generated mnemonic. */

@@ -125,3 +125,22 @@ export function bundledMoneroEmulatorBuilds(options: {
   }
   return builds
 }
+
+/** Names a research build from its staged manifest without verifying or loading
+ *  the library, so a build that can't start can still be named. Never a fallback. */
+export function moneroEmulatorManifestFor(id: string, options: { importDir: string; cwd?: string }): { version: string; label: string } | null {
+  for (const slot of SLOTS) {
+    for (const directory of moneroEmulatorBundleCandidates(options.importDir, options.cwd ?? process.cwd())) {
+      try {
+        const metadata = resolve(directory, slot.manifest)
+        const info = lstatSync(metadata)
+        if (!info.isFile() || info.isSymbolicLink() || info.size > 65536) continue
+        const manifest = JSON.parse(readFileSync(metadata, 'utf8')) as MoneroEmulatorManifest
+        if (!Object.values(manifest?.files ?? {}).some(file => file?.sha256 === id)) continue
+        if (typeof manifest.label !== 'string' || typeof manifest.version !== 'string') continue
+        return { version: manifest.version, label: manifest.label }
+      } catch { /* not this candidate */ }
+    }
+  }
+  return null
+}

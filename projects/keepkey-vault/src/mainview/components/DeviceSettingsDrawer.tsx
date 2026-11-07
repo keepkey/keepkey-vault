@@ -10,9 +10,10 @@ import { rpcRequest, onRpcMessage } from "../lib/rpc"
 import { IS_MAC, IS_WINDOWS } from "../lib/platform"
 import { AUTO_LOCK_CHOICES, DEFAULT_AUTO_LOCK_MS } from "../../shared/flags"
 import { Z } from "../lib/z-index"
-import type { DeviceStateInfo, AppSettings, EmulatorWalletInfo } from "../../shared/types"
+import type { DeviceStateInfo, AppSettings, EmulatorWalletInfo, EmulatorBuildInfo, EmulatorNextBuild } from "../../shared/types"
 import { isBitcoinOnlyVariant } from "../../shared/flags"
 import { SelfHostNodePanel } from "./SelfHostNodePanel"
+import { EmulatorBuildOptions, useEmulatorNames } from "./EmulatorIdentity"
 import { ClearSignStudio } from "./ClearSignStudio"
 import { ClearSignProvidersPanel } from "./ClearSignProvidersPanel"
 import { RngAuditPanel } from "./RngAuditPanel"
@@ -418,20 +419,22 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 	const emuFileRef = useRef<HTMLInputElement>(null)
 	const [installingEmu, setInstallingEmu] = useState(false)
 	const [emuInstallMsg, setEmuInstallMsg] = useState<string | null>(null)
-	const [emuBuilds, setEmuBuilds] = useState<Array<{ id: string; path: string; selected: boolean; version?: string; label?: string; research?: boolean; monero?: boolean }>>([])
+	const [emuBuilds, setEmuBuilds] = useState<EmulatorBuildInfo[]>([])
 	const [selectedEmuBuild, setSelectedEmuBuild] = useState<string | null>(null)
+	const [emuNextBuild, setEmuNextBuild] = useState<EmulatorNextBuild | null>(null)
+	const { buildTitle, walletTitle } = useEmulatorNames()
 	const reloadEmuBuilds = useCallback(async () => {
-		const result = await rpcRequest<{ builds: Array<{ id: string; path: string; selected: boolean; version?: string; label?: string; research?: boolean; monero?: boolean }>; selected: string | null }>("emulatorListBuilds", undefined, 10000)
-		setEmuBuilds(result.builds); setSelectedEmuBuild(result.selected)
+		const result = await rpcRequest<{ builds: EmulatorBuildInfo[]; selected: string | null; next: EmulatorNextBuild }>("emulatorListBuilds", undefined, 10000)
+		setEmuBuilds(result.builds); setSelectedEmuBuild(result.selected); setEmuNextBuild(result.next)
 	}, [])
 	useEffect(() => { if (deviceState.isEmulator) reloadEmuBuilds().catch(console.error) }, [deviceState.isEmulator, reloadEmuBuilds])
-	async function activateEmuBuild(id: string) {
+	async function activateEmuBuild(id: string | null) {
 		setInstallingEmu(true); setEmuInstallMsg(null); setRevealedSeed(null)
 		try {
 			const result = await rpcRequest<{ flashName: string }>("emulatorActivateBuild", { id }, 30000)
 			await reloadEmuBuilds()
 			await reloadEmuWallets()
-			setEmuInstallMsg(`Build ${id.slice(0, 12)} running with saved wallet ${result.flashName}.`)
+			setEmuInstallMsg(`${buildTitle(id ? emuBuilds.find(b => b.id === id) ?? { id } : { id: null })} running with saved wallet ${result.flashName}.`)
 		} catch (err: any) { setEmuInstallMsg(err?.message || "Build switch failed") }
 		setInstallingEmu(false)
 	}
@@ -945,10 +948,10 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 									onClick={async () => {
 										// Only ever the wallet that is running, and say which one.
 										const name = emuWallets.find((w) => w.isActive)?.name
-										if (!name || !confirm(`Delete emulator wallet "${name}" and stop? This erases its seed from this computer.`)) return
+										if (!name || !confirm(`Delete emulator wallet "${name}" and stop? This erases its seed from this computer. This can't be undone.`)) return
 										setRevealedSeed(null)
 										try {
-											await rpcRequest("emulatorDeleteFlash", { name }, 5000)
+											await rpcRequest("emulatorDeleteFlash", { name, stopIfRunning: true }, 5000)
 										} catch (e: any) {
 											console.error("Flash delete failed:", e?.message)
 										}
@@ -963,12 +966,13 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 								>
 									{installingEmu ? uiText("Installing…") : uiText("Change Version…")}
 								</Button>
-								{emuBuilds.length > 0 && (
+								{(emuBuilds.length > 0 || !!emuNextBuild?.id) && (
 									<Box as="select" aria-label={uiText("Emulator build")} value={selectedEmuBuild || ""}
 										disabled={installingEmu || emuBusy}
-										onChange={(e: React.ChangeEvent<HTMLSelectElement>) => activateEmuBuild(e.target.value)}
+										onChange={(e: React.ChangeEvent<HTMLSelectElement>) => activateEmuBuild(e.target.value || null)}
 										fontSize="xs" color="kk.textPrimary" bg="kk.bgSecondary" border="1px solid" borderColor="kk.border" borderRadius="md" p="2">
-										{emuBuilds.map(build => <option key={build.id} value={build.id}>{build.label || (build.version ? `v${build.version}` : uiText("Unverified build"))}{build.research ? uiText(" · Research") : ''} · {build.id.slice(0, 12)}</option>)}
+										{/* Bundled and unavailable-selected builds are listed too: the select never shows a build that isn't selected. */}
+										<EmulatorBuildOptions builds={emuBuilds} next={emuNextBuild} showId />
 									</Box>
 								)}
 								{emuInstallMsg && <Text fontSize="xs" color="kk.textSecondary">{emuInstallMsg}</Text>}
@@ -987,7 +991,7 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 										borderRadius="md" fontSize="xs" px="2" py="1"
 									>
 										{emuWallets.map((w) => (
-											<option key={w.name} value={w.name}>{w.name}{w.label ? ` · "${w.label}"` : ""}{w.firmwareVersion ? ` (fw ${w.firmwareVersion})` : ""}</option>
+											<option key={w.name} value={w.name}>{walletTitle(w)}{walletTitle(w) !== w.name ? ` · ${w.name}` : ""}{w.firmwareVersion ? ` (fw ${w.firmwareVersion})` : ""}</option>
 										))}
 									</Box>
 								</Flex>

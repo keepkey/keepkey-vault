@@ -234,7 +234,8 @@ process.on('unhandledRejection', (reason) => {
 import { EngineController, withTimeout } from "./engine-controller"
 import { runUsbDiagnostic as runUsbDiagnosticProbe } from "./windows-usb-probe"
 import { startRestApi, clearFeaturesCache, setUiActive, uiHeartbeat, type RestApiCallbacks } from "./rest-api"
-import { portAnswersLikeDesktop, startRestApiOrReport } from "./rest-api-startup"
+import { desktopRestStartDeps, startRestApiOrReport } from "./rest-api-startup"
+import { instanceSocketPath, startupInstanceGate } from "./single-instance"
 import { signSolanaWireTransaction } from "./solana-signing"
 import { AuthStore } from "./auth"
 import { ensurePioneerQueryKeyRegistered, getPioneer, getPioneerApiBase, resetPioneer, setPioneerOffline, DEFAULT_API_BASE, getQueryKey as getPioneerQueryKey } from "./pioneer"
@@ -264,7 +265,7 @@ import { buildTx, broadcastTx, canonicalizeTronTokenCaip } from "./txbuilder"
 import { buildCosmosStakingTx, buildCosmosNameRegTx } from "./txbuilder/cosmos"
 import { initializeOrchardFromDevice, exportOrchardFvk, scanOrchardNotes, getShieldedBalance, sendShielded, ensureFvkLoaded, displayOrchardAddressOnDevice, setFvkDiskAllowed } from "./txbuilder/zcash-shielded"
 import { inFlightShielded, type ExpectedShielded } from "../shared/zcash-pending"
-import { setMoneroEmulatorEnabled, listEmulatorBuilds, clearSelectedEmulatorBuild } from "./emulator-library"
+import { setMoneroEmulatorEnabled, listEmulatorBuilds } from "./emulator-library"
 import { createMoneroVault } from "./monero-vault"
 import { REVIEWED_MONERO_SIGNING_SHA256 } from "./monero-emulator"
 import { startMoneroSidecar, stopMoneroSidecar, isMoneroSidecarAvailable } from "./monero-sidecar"
@@ -346,7 +347,6 @@ import type { VaultRPCSchema } from "../shared/rpc-schema"
 import type { WipeReason } from "../shared/flash-wipe"
 import { collectAndAnalyzeWithGate, MAX_CHUNK_BYTES } from "./rng-audit"
 import { withoutCallerErc7730 } from '../shared/erc7730-support'
-import { newEmulatorWalletNameError } from '../shared/emulatorWallets'
 import { recordReviewCard, recordReviewCardText, reviewTapeRecording } from './test-review-tape'
 import { ADDRESS_BOOK_CERTIFY_UNSUPPORTED, buildCertificationRequest, contactProofAllowed, buildContactProof, contactsFromEntries, CONTACT_DESTINATION, evmRecipient, isAddressBookCertifyUnsupported, signWithContactProofAck, type AddressBookCertification } from "./addressbook-clearsign"
 
@@ -2117,12 +2117,13 @@ const restCallbacks: RestApiCallbacks = {
 /** Start or stop the REST API server based on the persisted setting */
 async function applyRestApiState(when: 'startup' | 'settings') {
 	if (restApiEnabled && !restServer) {
-		restServer = await startRestApiOrReport(REST_API_PORT, when, {
+		restServer = await startRestApiOrReport(REST_API_PORT, when, desktopRestStartDeps({
 			start: () => startRestApi(engine, auth, REST_API_PORT, restCallbacks),
-			answersLikeDesktop: () => portAnswersLikeDesktop(REST_API_PORT),
-			showError: (dialog) => Utils.showMessageBox({ type: 'error', title: 'KeepKey Desktop', ...dialog }),
+			port: REST_API_PORT,
+			mainWindow: () => _mainWindow,
+			showMessageBox: (dialog) => Utils.showMessageBox(dialog),
 			exit: (code) => process.exit(code),
-		})
+		}))
 		if (restServer) {
 			console.log(`[Vault] REST API started on port ${REST_API_PORT}`)
 		} else {
@@ -2143,6 +2144,22 @@ async function applyRestApiState(when: 'startup' | 'settings') {
 import type { SwapQuote, SwapQuoteParams, ExecuteSwapParams, SwapResult, SwapSubStage } from '../shared/types'
 import { isThorchainBankToken, thorchainBankTokenFirmwareOK, THORCHAIN_BANK_TOKEN_MIN_FW } from '../shared/swap-support-matrix'
 const swapQuoteLeases = createSwapQuoteLeases()
+
+// ── Emulator session (start, switch, build change) ───────────────────
+async function emulatorSessionDeps(): Promise<import('./emulator-session').EmulatorSessionDeps> {
+	const emu = await import('./emulator')
+	const { listFlashImages } = await import('./emulator-keychain')
+	const { listEmulatorBuilds } = await import('./emulator-library')
+	const { openEmulatorWindow, closeEmulatorWindow } = await import('./emulator-window')
+	return {
+		getEmulatorStatus: emu.getEmulatorStatus, getActiveFlashName: emu.getActiveFlashName,
+		stopEmulator: emu.stopEmulator, initEmulator: emu.initEmulator,
+		openWindow: openEmulatorWindow, closeWindow: closeEmulatorWindow,
+		connectEmulator: () => engine.connectEmulator(), disconnectEmulator: () => engine.disconnectEmulator(),
+		firmwareVersion: () => engine.getDeviceState().firmwareVersion || undefined,
+		listFlashImages, library: emu.getRuntimeLibrary, builds: () => listEmulatorBuilds(),
+	}
+}
 
 // ── Emulator confirm helper ──────────────────────────────────────────
 // Setup-op confirm (wipe / loadDevice / applySettings): the firmware shows
@@ -10341,10 +10358,9 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
                 if (enabled && offlineMode) throw new Error('Turn off offline mode before enabling Monero')
                 if (enabled) await startMoneroSidecar()
                 else {
+                    // A research emulator selection stays selected: the next start names it and
+                    // says to turn Monero on, instead of silently running other firmware.
                     invalidateMoneroWallet(); stopMoneroSidecar()
-                    // The research emulator is listed only while Monero is on: drop a selection of it
-                    // so the emulator falls back to the default library instead of a missing build.
-                    if (listEmulatorBuilds().find(build => build.selected)?.research) clearSelectedEmulatorBuild()
                 }
                 moneroEnabled = enabled
                 setMoneroEmulatorEnabled(enabled)
@@ -10398,12 +10414,30 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				if (!emulatorEnabled) {
 					return { state: 'stopped' as const, bridgeReady: false, host: 'not loaded', paired: false, platform: process.platform, flashImages: [], storagePath: '' }
 				}
-				const { getEmulatorStatus } = await import('./emulator')
-				return getEmulatorStatus()
+				const { getEmulatorStatus, getActiveFlashName, getLoadedEmulatorLibrary } = await import('./emulator')
+				const status = getEmulatorStatus()
+				if (status.state !== 'running') return status
+				const { runningEmulatorIdentity } = await import('./emulator-session')
+				const { getAllEmulatorWalletMeta } = await import('./db')
+				const flashName = getActiveFlashName()
+				const live = engine.isEmulator ? engine.getDeviceState() : null
+				return { ...status, ...runningEmulatorIdentity({
+					flashName, loaded: getLoadedEmulatorLibrary(), firmwareVersion: live?.firmwareVersion,
+					label: live?.label || getAllEmulatorWalletMeta().find(m => m.name === flashName)?.label,
+				}) }
 			},
 			emulatorListBuilds: async () => {
 				const { listEmulatorBuilds, selectedEmulatorBuild } = await import('./emulator-library')
-				return { builds: listEmulatorBuilds(), selected: selectedEmulatorBuild() }
+				const { getRuntimeLibrary } = await import('./emulator')
+				const { path: _path, ...next } = getRuntimeLibrary()
+				return { builds: listEmulatorBuilds(), selected: selectedEmulatorBuild(), next }
+			},
+			emulatorShowWindow: async () => {
+				if (!emulatorEnabled) throw new Error('Emulator is disabled')
+				const { getEmulatorStatus } = await import('./emulator')
+				if (getEmulatorStatus().state !== 'running') throw new Error('The emulator is not running')
+				const { showEmulatorWindow } = await import('./emulator-window')
+				return { window: showEmulatorWindow() }
 			},
 			emulatorSelectBuild: async (params) => {
 				if (!emulatorEnabled) throw new Error('Emulator is disabled')
@@ -10416,41 +10450,8 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			},
 			emulatorActivateBuild: async (params) => {
 				if (!emulatorEnabled) throw new Error('Emulator is disabled')
-				const { listEmulatorBuilds, selectEmulatorBuild, selectedEmulatorBuild, clearSelectedEmulatorBuild, resolveEmulatorWalletName, selectEmulatorWallet } = await import('./emulator-library')
-				if (!listEmulatorBuilds().some(build => build.id === params.id)) throw new Error('Emulator build is not installed')
-				const { getEmulatorStatus, getActiveFlashName, stopEmulator, initEmulator } = await import('./emulator')
-				const previousBuild = selectedEmulatorBuild()
-				const previousFlash = getEmulatorStatus().state === 'running' ? getActiveFlashName() : null
-				const flashName = resolveEmulatorWalletName({ running: previousFlash, buildId: params.id })
-				const { closeEmulatorWindow, openEmulatorWindow } = await import('./emulator-window')
-				if (previousFlash) {
-					closeEmulatorWindow()
-					engine.disconnectEmulator()
-					stopEmulator()
-				}
-				try {
-					selectEmulatorBuild(params.id)
-					const status = initEmulator(flashName)
-					if (status.state !== 'running') throw new Error(status.error || 'Emulator failed to start')
-					openEmulatorWindow()
-					await engine.connectEmulator()
-					const version = engine.getDeviceState().firmwareVersion
-					const { recordEmulatorBuildVersion } = await import('./emulator-library')
-					if (/^\d+\.\d+\.\d+$/.test(version || '')) recordEmulatorBuildVersion(params.id, version)
-					selectEmulatorWallet(flashName)
-					return { status, flashName }
-				} catch (error) {
-					closeEmulatorWindow()
-					engine.disconnectEmulator()
-					stopEmulator()
-					if (previousBuild) selectEmulatorBuild(previousBuild)
-					else clearSelectedEmulatorBuild()
-					if (previousFlash) {
-						const restored = initEmulator(previousFlash)
-						if (restored.state === 'running') { openEmulatorWindow(); await engine.connectEmulator() }
-					}
-					throw error
-				}
+				const { activateEmulatorBuild } = await import('./emulator-session')
+				return activateEmulatorBuild(await emulatorSessionDeps(), params.id)
 			},
 			emulatorInstallDylib: async (params) => {
 				// Keep user-supplied libraries side by side under their content IDs.
@@ -10506,7 +10507,9 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				const { deleteFlash, getEmulatorStatus, getActiveFlashName, stopEmulator } = await import('./emulator')
 				const { deleteMnemonic } = await import('./emulator-keychain')
 				const { deleteEmulatorWalletMeta, getAllEmulatorWalletMeta, deleteDeviceSnapshot } = await import('./db')
-
+				const { deleteEmulatorWallet } = await import('./emulator-session')
+				const { closeEmulatorWindow } = await import('./emulator-window')
+				const { selectedEmulatorWallet, clearSelectedEmulatorWallet } = await import('./emulator-library')
 				// Look up the deviceId BEFORE deleting metadata so we can purge
 				// all keyed-by-deviceId data (balances, cached_pubkeys, reports,
 				// device_snapshot) — the same set physical forgetDevice purges.
@@ -10514,26 +10517,22 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				// + xpub cache + report rows on disk keyed by an emulator
 				// deviceId that no longer maps to anything.
 				const meta = getAllEmulatorWalletMeta().find(m => m.name === params.name)
-				if (meta?.deviceId) {
-					await revokeKnownWalletMonitoring(meta.deviceId)
-					forgottenMonitorEpochs.set(meta.deviceId, activitySessionEpoch)
-				}
-
-				// If deleting the active wallet, stop it first so shutdown
-				// doesn't re-save the flash we're about to delete
-				if (getEmulatorStatus().state === 'running' && getActiveFlashName() === params.name) {
-					const { closeEmulatorWindow } = await import('./emulator-window')
-					closeEmulatorWindow()
-					engine.disconnectEmulator()
-					stopEmulator()
-				}
-
-				deleteFlash(params.name)
-				deleteMnemonic(params.name)
-				deleteEmulatorWalletMeta(params.name)
-				const { selectedEmulatorWallet, clearSelectedEmulatorWallet } = await import('./emulator-library')
-				if (selectedEmulatorWallet() === params.name) clearSelectedEmulatorWallet()
-				if (meta?.deviceId) deleteDeviceSnapshot(meta.deviceId)
+				await deleteEmulatorWallet({
+					isRunning: (name) => getEmulatorStatus().state === 'running' && getActiveFlashName() === name,
+					prepare: async () => {
+						if (!meta?.deviceId) return
+						await revokeKnownWalletMonitoring(meta.deviceId)
+						forgottenMonitorEpochs.set(meta.deviceId, activitySessionEpoch)
+					},
+					stopRunning: () => { closeEmulatorWindow(); engine.disconnectEmulator(); stopEmulator() },
+					erase: (name) => {
+						deleteFlash(name)
+						deleteMnemonic(name)
+						deleteEmulatorWalletMeta(name)
+						if (selectedEmulatorWallet() === name) clearSelectedEmulatorWallet()
+						if (meta?.deviceId) deleteDeviceSnapshot(meta.deviceId)
+					},
+				}, params)
 				if (meta?.deviceId && engine.getDeviceState().deviceId !== meta.deviceId) bootstrapActiveWalletWatches()
 				return getEmulatorStatus()
 			},
@@ -10542,8 +10541,10 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				const { listFlashImages, hasMnemonic } = await import('./emulator-keychain')
 				const { getActiveFlashName, getEmulatorStatus } = await import('./emulator')
 				const { getAllEmulatorWalletMeta } = await import('./db')
-				const { selectedEmulatorBuild, emulatorBuildFlashName } = await import('./emulator-library')
+				const { selectedEmulatorBuild, emulatorBuildFlashName, selectedEmulatorWallet } = await import('./emulator-library')
 				const selectedBuild = selectedEmulatorBuild()
+				let selectedWallet: string | null = null
+				try { selectedWallet = selectedEmulatorWallet() } catch { /* an invalid saved selection marks nothing */ }
 				const status = getEmulatorStatus()
 				const activeFlash = status.state === 'running' ? getActiveFlashName() : null
 				const metaByName = new Map(getAllEmulatorWalletMeta().map(m => [m.name, m]))
@@ -10556,6 +10557,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						name,
 						hasMnemonic: hasMnemonic(name),
 						isActive: name === activeFlash,
+						isSelected: name === selectedWallet,
 						label: meta?.label || undefined,
 						firmwareVersion: meta?.firmwareVersion || undefined,
 						channel: meta?.channel || undefined,
@@ -10667,40 +10669,8 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			},
 			emulatorSwitchWallet: async (params) => {
 				if (!emulatorEnabled) throw new Error('Emulator is disabled')
-				const { selectEmulatorWallet, selectedEmulatorWallet, selectedEmulatorBuild, emulatorBuildFlashName } = await import('./emulator-library')
-				const { stopEmulator, initEmulator, getEmulatorStatus } = await import('./emulator')
-				const { listFlashImages, validateFlashName } = await import('./emulator-keychain')
-				params = { ...params, name: validateFlashName(params.name) }
-				const saved = listFlashImages()
-				if (!saved.includes(params.name)) {
-					const selectedWallet = selectedEmulatorWallet()
-					if (selectedWallet === params.name) throw new Error(`Saved emulator wallet "${params.name}" is missing. Select an existing wallet.`)
-					const build = selectedEmulatorBuild()
-					const firstUseFallback = !saved.length && !selectedWallet && params.name === (build ? emulatorBuildFlashName(build) : 'default')
-					if (!firstUseFallback) {
-						const problem = newEmulatorWalletNameError(params.name, saved)
-						if (problem) throw new Error(`Cannot create emulator wallet: ${problem}`)
-					}
-				}
-
-				// Stop current emulator if running
-				if (getEmulatorStatus().state === 'running') {
-					const { closeEmulatorWindow } = await import('./emulator-window')
-					closeEmulatorWindow()
-					engine.disconnectEmulator()
-					stopEmulator()
-				}
-
-				// Init with the requested flash name + channel
-				const status = initEmulator(params.name)
-				if (status.state !== 'running') throw new Error(status.error || 'Emulator failed to start')
-
-				// Open window + connect engine (auto-reloads saved mnemonic)
-				const { openEmulatorWindow } = await import('./emulator-window')
-				openEmulatorWindow()
-				await engine.connectEmulator()
-				selectEmulatorWallet(params.name)
-				return getEmulatorStatus()
+				const { startEmulatorWallet } = await import('./emulator-session')
+				return startEmulatorWallet(await emulatorSessionDeps(), { name: params.name, buildId: params.buildId })
 			},
 			emulatorGetMnemonic: async () => {
 				if (!emulatorEnabled) return null
@@ -11528,8 +11498,26 @@ ApplicationMenu.setApplicationMenu([
 }
 updateApplicationMenu()
 
-perf('creating BrowserWindow')
+// One Desktop per identifier and channel, settled before any window exists. A
+// second copy used to open its window and then block in the port-in-use alert:
+// a UI with no backend. Dev, stable and other channels still run side by side.
 let _mainWindow: BrowserWindow | null = null
+const appInfo = await Updater.getLocalInfo()
+const instanceClaim = await startupInstanceGate({
+	path: instanceSocketPath(os.homedir(), appInfo.identifier, appInfo.channel),
+	version: pkg.version,
+	onFocusRequest: () => {
+		const window = _mainWindow
+		if (!window) return
+		if (window.isMinimized()) window.unminimize()
+		window.activate()
+	},
+	showDialog: (dialog) => Utils.showMessageBox({ type: 'warning', title: 'KeepKey Desktop', ...dialog, buttons: ['OK'] }),
+	notify: (text) => Utils.showNotification({ title: 'KeepKey Desktop', body: text }),
+	exit: (code) => process.exit(code),
+})
+
+perf('creating BrowserWindow')
 const mainWindow = new BrowserWindow({
 	title: `KeepKey Vault v${pkg.version}`,
 	url,
@@ -11813,6 +11801,11 @@ let quitting = false
 function cleanupAndQuit() {
 	if (quitting) return
 	quitting = true
+	// Hand off first: a copy launched while this one cleans up (cleanup can block the
+	// event loop for seconds) then takes the instance and the REST port at once.
+	instanceClaim?.release()
+	restServer?.stop()
+	restServer = null
 	stopMoneroSidecar()
 	// Zero the Studio provider key: the window (and its close effect) is going away.
 	try { providerKeySession.clear() } catch { /* nothing to zero */ }
@@ -11845,7 +11838,6 @@ function cleanupAndQuit() {
 	postTxBalances.clear()
 	stopActiveWalletWatches()
 	engine.stop()
-	restServer?.stop()
 	Utils.quit()
 }
 

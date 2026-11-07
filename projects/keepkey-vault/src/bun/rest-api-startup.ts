@@ -16,6 +16,9 @@ export interface RestApiStartDeps {
   answersLikeDesktop: () => Promise<boolean>
   showError: (dialog: RestPortDialog) => Promise<unknown>
   exit: (code: number) => void
+  /** Startup only: the window is already up; hide it so the dialog is the only UI
+   *  (a window with no backend behind it is what a half-started copy looked like). */
+  hideWindow?: () => void
 }
 
 /** True if 127.0.0.1 or ::1 on `port` answers /api/v1/health/fast the way
@@ -65,6 +68,7 @@ export async function startRestApiOrReport(port: number, when: 'startup' | 'sett
   }
   console.error(`[Vault] REST API port ${port} is in use (${conflict})`)
   const dialog = restPortDialog(port, conflict, when)
+  if (when === 'startup') { try { deps.hideWindow?.() } catch (err) { console.error('[Vault] Could not hide the window:', err) } }
   const shown = deps.showError(dialog).catch(err => console.error('[Vault] Could not show the port-in-use dialog:', err))
   if (when === 'startup') {
     await shown
@@ -72,4 +76,23 @@ export async function startRestApiOrReport(port: number, when: 'startup' | 'sett
   }
   // 'settings' does not wait for the dialog: the Settings call would time out.
   return null
+}
+
+/** The deps Desktop starts its REST API with. The window is required: at startup
+ *  a port conflict hides it before the dialog, so no UI is left without a backend. */
+export function desktopRestStartDeps(options: {
+  start: () => RestApiServer
+  port: number
+  mainWindow: () => { hide(): unknown } | null
+  showMessageBox: (dialog: RestPortDialog & { type: 'error'; title: string }) => Promise<unknown> | unknown
+  exit: (code: number) => void
+  answersLikeDesktop?: () => Promise<boolean>
+}): RestApiStartDeps {
+  return {
+    start: options.start,
+    answersLikeDesktop: options.answersLikeDesktop ?? (() => portAnswersLikeDesktop(options.port)),
+    showError: async (dialog) => options.showMessageBox({ type: 'error', title: 'KeepKey Desktop', ...dialog }),
+    exit: options.exit,
+    hideWindow: () => { options.mainWindow()?.hide() },
+  }
 }

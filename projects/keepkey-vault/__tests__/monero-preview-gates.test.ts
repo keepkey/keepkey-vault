@@ -23,8 +23,8 @@ describe('Monero preview gates', () => {
 		expect(panel).toContain('const balance = scanned ? atomicAmount(wallet.balanceAtomic) : null')
 	})
 
-	test('switching Monero off drops a research emulator selection', () => {
-		expect(src('src/bun/index.ts')).toContain('if (listEmulatorBuilds().find(build => build.selected)?.research) clearSelectedEmulatorBuild()')
+	test('switching Monero off keeps a research emulator selection (the next start names it; see emulator-build-unavailable.test.ts)', () => {
+		expect(src('src/bun/index.ts')).not.toContain('if (listEmulatorBuilds().find(build => build.selected)?.research) clearSelectedEmulatorBuild()')
 	})
 
 	test('research signing artifacts are copied only by the dev-only flag that signed releases refuse', () => {
