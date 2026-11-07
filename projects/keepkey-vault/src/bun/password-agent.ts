@@ -33,7 +33,7 @@ export class PasswordAgent {
     if (!definition) throw new Error('Unknown password operation')
     if (!args || typeof args !== 'object' || Array.isArray(args)) throw new Error('Arguments must be an object')
     const a = args as Record<string, any>
-    if (Object.keys(a).some(k => !Object.hasOwn(definition.inputSchema.properties, k))) throw new Error('Unexpected argument; do not send password values')
+    if (Object.keys(a).some(k => !Object.prototype.hasOwnProperty.call(definition.inputSchema.properties, k))) throw new Error('Unexpected argument; do not send password values')
     for (const key of definition.inputSchema.required) if (!(key in a)) throw new Error(`Missing argument: ${key}`)
     for (const [key, value] of Object.entries(a)) {
       const schema = definition.inputSchema.properties[key] as { type: string; enum?: string[] }
