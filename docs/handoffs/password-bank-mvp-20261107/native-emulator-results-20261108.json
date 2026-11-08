@@ -1,0 +1,33 @@
+{
+  "date": "2026-11-08",
+  "wallet": "disposable emulator only",
+  "checks": {
+    "newBankCreatedOnDisposableWallet": true,
+    "emulatorConfirmAndRejectVisible": true,
+    "rejectedGenerationCreatesNoReadyEntry": true,
+    "threeSeparateGenerationApprovals": true,
+    "testAccountAssigned": true,
+    "rotationBlockedUntilBackupSaved": true,
+    "encryptedBackupSavedOwnerOnly": true,
+    "stagedEntryCancelledBeforeAnyWebsiteChange": true,
+    "lockHidesAccountsAndEvictsCache": true,
+    "unlockRestoresRegistryWithoutPlaintextCache": true,
+    "approvedRehydrationRestoresCache": true,
+    "oneMinuteCacheExpiryNeedsRehydration": true,
+    "liveDisableLocksAndHidesAgentTools": true,
+    "moneroFlagRemainsUnchanged": true,
+    "reenablingDoesNotReopenBankOrRestoreCache": true,
+    "cacheExpiryAndFlagToggleDoNotRotateAccount": true,
+    "testEntryAvailableForFiveMinutes": true,
+    "nativeLockHostsBothSectionsWithoutTopBarTab": true,
+    "sqliteRegistryIsEncryptedEnvelope": true
+  },
+  "passed": 19,
+  "failed": 0,
+  "physicalHardwareTested": false,
+  "realWebsitePasswordsChanged": false,
+  "passwordValuesPrinted": false,
+  "seedOrPinChangedDuringPasswordChecks": false,
+  "browserAccount": "synthetic reserved example domain",
+  "backupsCommitted": false
+}

@@ -36,7 +36,8 @@ try {
   await expect(monero).toHaveAttribute('aria-checked', 'true');
   await expect(passwords).toHaveAttribute('aria-checked', 'false');
   await passwords.click();
-  await expect(page.getByRole('button', { name: 'Passwords', exact: true })).toHaveCount(1);
+  await expect(page.getByRole('button', { name: 'Passwords', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Passwords and seed vault', exact: true })).toHaveCount(1);
   await expect(monero).toHaveAttribute('aria-checked', 'true');
   await passwords.click();
   await expect(page.getByRole('button', { name: 'Passwords', exact: true })).toHaveCount(0);

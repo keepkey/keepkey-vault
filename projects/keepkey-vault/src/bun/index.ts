@@ -24,6 +24,7 @@ import { createHash, randomUUID } from "crypto"
 import { createSwapQuoteLeases } from './swap-quote-lease'
 import { assessSwapRisk } from '../shared/swap-risk'
 import { PasswordBank } from './password-bank'
+import { passwordDeviceCipher } from './password-device'
 import { PasswordBex } from './password-bex'
 import { PasswordAgent } from './password-agent'
 import { callBex, listBrowsers } from './bex-bridge'
@@ -1055,10 +1056,7 @@ const passwordBank = new PasswordBank({
 		if (isBitcoinOnlyVariant(state.firmwareVariant)) throw new Error('Password-bank derivation requires multi-chain firmware')
 		return {
 			session: `${activitySessionEpoch}:${state.deviceId}:${engine.isPassphraseWallet}`,
-			cipher: async (addressNList, key) => {
-				const result = await wallet.cipherKeyValue({ addressNList, key, value: new Uint8Array(32), iv: new Uint8Array(16), encrypt: true, askOnEncrypt: true, askOnDecrypt: true })
-				return typeof result === 'string' ? new Uint8Array(Buffer.from(result, 'base64')) : new Uint8Array(result)
-			},
+			cipher: (addressNList, key) => passwordDeviceCipher(wallet, addressNList, key, engine.isEmulator, emuSigningOp),
 		}
 	},
 })

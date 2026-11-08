@@ -18,8 +18,14 @@ try {
  await expect(toggle).toHaveAttribute('aria-checked','false');
  await toggle.click();
  await expect(toggle).toHaveAttribute('aria-checked','true');
- await expect(page.getByRole('button',{name:'Passwords',exact:true})).toHaveCount(1);
+ await expect(page.getByRole('button',{name:'Passwords',exact:true})).toHaveCount(0);
+ await expect(page.getByRole('button',{name:'Passwords and seed vault',exact:true})).toHaveCount(1);
  await page.getByRole('button',{name:'Close settings'}).click();
+ await page.getByRole('button',{name:'Passwords and seed vault',exact:true}).click();
+ await expect(page.getByRole('dialog',{name:'Vault',exact:true})).toBeVisible();
+ await expect(page.getByRole('button',{name:'Seed vault (BIP-85)',exact:true})).toBeVisible();
+ await page.getByRole('button',{name:'Seed vault (BIP-85)',exact:true}).click();
+ await expect(page.getByRole('button',{name:'Create with KeepKey',exact:true})).toHaveCount(0);
  await page.getByRole('button',{name:'Passwords',exact:true}).click();
  await page.getByRole('button',{name:'Create with KeepKey'}).click();
  await expect(page.getByText('Ready password bank',{exact:true})).toBeVisible();
@@ -41,15 +47,24 @@ try {
  await page.getByLabel('I successfully signed in with the new password').check();
  await page.getByRole('button',{name:'Activate verified password'}).click();
  await expect(page.getByText('Last change verified',{exact:true})).toBeVisible();
+ await page.setViewportSize({width:390,height:844});
+ await expect(page.getByRole('dialog',{name:'Vault',exact:true})).toBeVisible();
+ assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
+ await page.screenshot({path:'./password-vault-mobile.png',fullPage:true});
+ await page.keyboard.press('Escape');
+ await expect(page.getByRole('dialog',{name:'Vault',exact:true})).toHaveCount(0);
+ await expect(page.getByRole('button',{name:'Passwords and seed vault',exact:true})).toBeFocused();
+ await page.getByRole('button',{name:'Passwords and seed vault',exact:true}).click();
+ await page.setViewportSize({width:1440,height:1100});
  await page.screenshot({path:'./password-mvp-ui.png',fullPage:true});
- await page.getByRole('button',{name:'Device Settings'}).click();
- await expect(page.getByRole('dialog', {name:'Settings',exact:true})).toBeVisible();
- await page.getByRole('button',{name:'Feature Flags',exact:true}).click();
- await page.getByRole('switch',{name:'Password manager',exact:true}).click();
+ await page.request.post('http://127.0.0.1:5198/__test_rpc',{data:{method:'setPasswordManagerEnabled',params:{enabled:false}}});
+ await page.evaluate(()=>window.dispatchEvent(new Event('keepkey-settings-changed')));
  await expect(page.getByRole('button',{name:'Passwords',exact:true})).toHaveCount(0);
- await page.getByRole('button',{name:'Close settings'}).click();
+ await expect(page.getByRole('button',{name:'Seed vault (BIP-85)',exact:true})).toBeVisible();
+ await page.getByRole('button',{name:'Close vault',exact:true}).click();
+ await expect(page.getByRole('button',{name:'BIP-85 Seed Vault',exact:true})).toBeVisible();
  await expect(page.getByTestId('fixture-home')).toBeVisible();
  assert.deepEqual(errors,[]);
- console.log(JSON.stringify({liveEnableWithoutReload:true,bankGenerateAssign:true,guidedRotationRequiresBackupAndVerification:true,liveDisableWithoutReload:true,pageErrors:errors,screenshot:'./password-mvp-ui.png'},null,2));
+ console.log(JSON.stringify({lockButtonHostsBothTools:true,narrowVaultFits:true,escapeRestoresLockFocus:true,noPasswordTopBarTab:true,liveEnableWithoutReload:true,bankGenerateAssign:true,guidedRotationRequiresBackupAndVerification:true,liveDisableWithoutReload:true,pageErrors:errors,screenshot:'./password-mvp-ui.png'},null,2));
 } catch(error) { console.error(await page.locator('body').innerText()); throw error; }
 finally { await browser.close(); }

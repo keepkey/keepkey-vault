@@ -29,6 +29,7 @@ const rpc = Bun.serve({ hostname: '127.0.0.1', port: 0, async fetch(req) {
       case 'passwordBankBackupSaved': payload = bank.acknowledgeBackup(p.revision); break
       case 'passwordBankImport': payload = await bank.unlock(false, p.json); break
       case 'passwordBankBrowserTargets': payload = []; break
+      case 'listBip85Seeds': payload = []; break
       case 'getFeatures': payload = { label: 'Synthetic test KeepKey', policiesList: [] }; break
       case 'listRegisteredDevices': case 'listEmulatorWallets': case 'getPairedApps': case 'getPioneerServers': payload = []; break
     }

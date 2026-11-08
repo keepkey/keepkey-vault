@@ -11,9 +11,10 @@ import type { Bip85SeedMeta } from "../../shared/types"
 
 interface Bip85VaultDialogProps {
 	onClose: () => void
+	embedded?: boolean
 }
 
-export function Bip85VaultDialog({ onClose }: Bip85VaultDialogProps) {
+export function Bip85VaultDialog({ onClose, embedded = false }: Bip85VaultDialogProps) {
   const uiText = useUiTranslation()
 
 	const { t } = useTranslation("settings")
@@ -156,15 +157,16 @@ export function Bip85VaultDialog({ onClose }: Bip85VaultDialogProps) {
 
 	return (
 		<>
-			<Box position="fixed" inset="0" bg="blackAlpha.700" zIndex={Z.dialog} onClick={onClose} />
+			{!embedded && <Box position="fixed" inset="0" bg="blackAlpha.700" zIndex={Z.dialog} onClick={onClose} />}
 			<Box
-				position="fixed" top="50%" left="50%" transform="translate(-50%, -50%)"
-				w="440px" maxW="92vw" maxH="85vh"
-				bg="kk.bg" border="1px solid" borderColor="kk.border" borderRadius="xl"
+				position={embedded ? 'relative' : 'fixed'} top={embedded ? undefined : '50%'} left={embedded ? undefined : '50%'} transform={embedded ? undefined : 'translate(-50%, -50%)'}
+				w={embedded ? '100%' : '440px'} maxW={embedded ? '100%' : '92vw'} maxH={embedded ? undefined : '85vh'}
+				bg="kk.bg" border={embedded ? "none" : "1px solid"} borderColor="kk.border" borderRadius={embedded ? "0" : "xl"}
 				zIndex={Z.dialog + 1} overflow="hidden" display="flex" flexDirection="column"
-				role="dialog" aria-modal="true" aria-label={uiText("BIP-85 Seed Vault")}
+				role={embedded ? undefined : 'dialog'} aria-modal={embedded ? undefined : true} aria-label={embedded ? undefined : uiText("BIP-85 Seed Vault")}
 			>
 				{/* Header */}
+				{!embedded && (
 				<Flex px="5" py="4" align="center" justify="space-between" borderBottom="1px solid" borderColor="kk.border" flexShrink={0}>
 					<Flex align="center" gap="2.5">
 						<Box w="32px" h="32px" borderRadius="lg" bg="rgba(233,196,106,0.15)" display="flex" alignItems="center" justifyContent="center">
@@ -184,9 +186,11 @@ export function Bip85VaultDialog({ onClose }: Bip85VaultDialogProps) {
 						</svg>
 					</Box>
 				</Flex>
+				)}
 
 				{/* Body */}
 				<Box flex="1" overflow="auto" px="5" py="4">
+					{embedded && <Box mb="3"><DocsLink href={DOCS_LINKS.bip85} /></Box>}
 					{/* Warning */}
 					<Flex bg="rgba(251,146,60,0.08)" border="1px solid rgba(251,146,60,0.2)" borderRadius="lg" p="3" gap="2" align="start" mb="4">
 						<Text fontSize="sm" color="var(--gold)" mt="0.5">&#9888;</Text>
