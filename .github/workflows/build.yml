@@ -659,6 +659,46 @@ jobs:
           # Copy app contents
           cp -r "$APP_DIR"/* "$APPDIR/usr/bin/"
 
+          # Bundle the tray stack (Ayatana AppIndicator + dbusmenu): small,
+          # self-contained, and absent on default Fedora KDE / minimal installs,
+          # where the AppImage refused to start. It goes next to
+          # libNativeWrapper.so in usr/bin/bin — NOT usr/lib: the Electrobun
+          # launcher replaces the child's LD_LIBRARY_PATH with that one
+          # directory, so it is the only place a bundled library is found.
+          # WebKitGTK stays a system dependency — too big and too coupled to the
+          # host (helper subprocesses, GStreamer, Mesa) to bundle; AppRun still
+          # checks for it and names the package. The .so files come from Ubuntu
+          # 22.04 (jammy) debs, not this runner's distro, to respect the glibc
+          # 2.35 floor; an audit below enforces that.
+          TRAY_PKGS="libayatana-appindicator3-1 libayatana-indicator3-7 libayatana-ido3-0.4-0 libdbusmenu-glib4 libdbusmenu-gtk3-4"
+          echo "deb [arch=amd64 signed-by=/usr/share/keyrings/ubuntu-archive-keyring.gpg] http://archive.ubuntu.com/ubuntu jammy main universe" \
+            | sudo tee /etc/apt/sources.list.d/kk-jammy-tray.list >/dev/null
+          sudo apt-get update
+          DEBS="$WORK/tray-debs"
+          mkdir -p "$DEBS/x"
+          (cd "$DEBS" && apt-get download $(for p in $TRAY_PKGS; do printf '%s/jammy ' "$p"; done))
+          # Drop the jammy source immediately: a later apt-get install in this
+          # job must never see jammy package candidates.
+          sudo rm /etc/apt/sources.list.d/kk-jammy-tray.list
+          for deb in "$DEBS"/*.deb; do dpkg-deb -x "$deb" "$DEBS/x"; done
+
+          # Audit before copying: the bundled libs must not raise the glibc
+          # floor (2.35; the "Audit Linux glibc footprint" step runs before this
+          # one and does not see these files).
+          while IFS= read -r -d '' so; do
+            max=$(strings "$so" | grep -oE 'GLIBC_[0-9]+\.[0-9]+' | sed 's/^GLIBC_//' | sort -V | tail -1)
+            echo "  $(basename "$so") needs GLIBC_${max:-none}"
+            if [ -n "$max" ] && [ "$(printf '%s\n2.35\n' "$max" | sort -V | tail -1)" != "2.35" ]; then
+              echo "::error::$(basename "$so") requires GLIBC_$max, above the 2.35 floor"
+              exit 1
+            fi
+          done < <(find "$DEBS/x/usr/lib" -type f \( -name '*.so' -o -name '*.so.*' \) -print0)
+
+          find "$DEBS/x/usr/lib" \( -name '*.so' -o -name '*.so.*' \) -exec cp -a {} "$APPDIR/usr/bin/bin/" \;
+          for lib in libayatana-appindicator3.so.1 libayatana-indicator3.so.7 libayatana-ido3-0.4.so.0 libdbusmenu-glib.so.4 libdbusmenu-gtk3.so.4; do
+            [ -e "$APPDIR/usr/bin/bin/$lib" ] || { echo "::error::expected $lib in AppDir usr/bin/bin"; exit 1; }
+          done
+
           # Icon
           cp "$APPDIR/usr/bin/Resources/appIcon.png" "$APPDIR/keepkey-vault.png"
           cp "$APPDIR/usr/bin/Resources/appIcon.png" "$APPDIR/usr/share/icons/hicolor/256x256/apps/keepkey-vault.png"
