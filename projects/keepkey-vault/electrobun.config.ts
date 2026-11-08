@@ -38,6 +38,8 @@ const moneroCopy = existsSync(moneroCliSource) && existsSync(moneroRpcSource)
 // Development-only research artifacts (build-signed.ts refuses this flag): the receive-only and/or
 // signing emulator builds, and the research signing adapter pinned in monero-tools.json.
 const includeMoneroResearch = process.env.KEEPKEY_INCLUDE_MONERO_EMULATOR === '1';
+const moneroDeviceCopy = includeMoneroResearch && existsSync('monero-device-bundle/libmonero_device_proof.dylib') && existsSync('monero-device-bundle/libmonero_core_verify.dylib')
+    ? { 'monero-device-bundle': 'monero-device' } : {};
 const moneroEmulatorCopy = {
     ...(includeMoneroResearch && existsSync("monero-emulator-bundle/libkkemu-monero.dylib")
         ? { "monero-emulator-bundle/manifest.json": "monero-emulator/manifest.json",
@@ -99,6 +101,7 @@ export default {
 			...emulatorCopy,
 			...moneroCopy,
 			...moneroEmulatorCopy,
+			...moneroDeviceCopy,
 			// Zcash privacy engine sidecar (Rust binary -- .exe on Windows)
 			[isWindows ? "zcash-cli/target/release/zcash-cli.exe" : "zcash-cli/target/release/zcash-cli"]: isWindows ? "zcash-cli.exe" : "zcash-cli",
 		},

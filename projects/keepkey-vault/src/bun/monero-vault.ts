@@ -1,5 +1,6 @@
 /** Monero receiving bridge. Only an explicitly approved device view key reaches the local sidecar. */
 import { createHash, randomBytes } from 'node:crypto'
+import { checkDeviceSigningBounds, type MoneroDeviceSigner } from './monero-device-signing'
 import type { MoneroWatchStore } from './monero-watch-store'
 import * as managedSidecar from './monero-sidecar'
 import type { MoneroOutputRecord, MoneroTransferDraft } from './monero-sidecar'
@@ -18,9 +19,10 @@ const PRIMARY_ADDRESS = /^4[123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrst
 const PREPARED_LIFETIME_MS = 10 * 60 * 1000
 /** The watch wallet scans subaddresses 0/0..0/199 (wallet-rpc's default minor lookahead). */
 export const MAX_RECEIVE_SUBADDRESS = 199
-export type MoneroSendBlocker = 'unrelayed' | 'emulator' | 'adapter' | 'syncing' | 'key-images'
+export type MoneroSendBlocker = 'unrelayed' | 'emulator' | 'firmware' | 'adapter' | 'syncing' | 'key-images'
 const BLOCKER_MESSAGES: Record<MoneroSendBlocker, string> = {
   unrelayed: 'A signed transaction may already be broadcast: retry broadcasting that same transaction first',
+  firmware: 'Monero hardware signing is not available for this firmware in this build',
   emulator: 'Sending needs the Monero signing (research) emulator build',
   adapter: 'The Monero signing adapter is not installed in this build',
   syncing: 'Wait for the watch wallet to finish syncing',
@@ -190,7 +192,8 @@ async function readMessage(delegate: Delegate, max = MAX_RESPONSE): Promise<Mess
 
 /** Injected engine/config keep device state authoritative; no private keys enter frontend RPC. */
 export function createMoneroVault({ engine, confirm, getConfig, sidecar = managedSidecar, signingEmulator = () => false,
-  watchStore, replyMs = { device: MONERO_DEVICE_REPLY_MS, human: MONERO_HUMAN_REPLY_MS }, pendingStore = { load: () => [], save() {} } }: {
+  hardwareSigner, watchStore, replyMs = { device: MONERO_DEVICE_REPLY_MS, human: MONERO_HUMAN_REPLY_MS }, pendingStore = { load: () => [], save() {} } }: {
+  hardwareSigner?: MoneroDeviceSigner
   watchStore?: MoneroWatchStore
   engine: Engine; confirm?: Confirm; getConfig: () => MoneroVaultConfig; sidecar?: MoneroWatchSidecar
   /** The running emulator is a verified signing-enabled research build. */
@@ -335,7 +338,7 @@ export function createMoneroVault({ engine, confirm, getConfig, sidecar = manage
   /** Every gate, in the order a user can fix them. Undefined means sending is possible. */
   const sendBlocker = (current: Snapshot, status: MoneroVaultStatus): MoneroSendBlocker | undefined => {
     if (pendingFor(current)) return 'unrelayed'
-    if (!current.emulator || !signingEmulator()) return 'emulator'
+    if (current.emulator ? !signingEmulator() : !hardwareSigner?.available(engine.getDeviceState().firmwareHash)) return current.emulator ? 'emulator' : 'firmware'
     if (!sidecar.isMoneroSendReady?.() || !sidecar.createMoneroTransfer || !sidecar.relayMoneroTransaction) return 'adapter'
     if (!status.monitorReady) return 'syncing'
     const images = keyImagesFor(current)
@@ -678,6 +681,7 @@ export function createMoneroVault({ engine, confirm, getConfig, sidecar = manage
         if (guardActive && guard && !draft.plan.inputs.some(input => guard.keyImages.includes(keyImages.owned.get(input.ring[input.realMember].publicKey)!.keyImage))) {
           throw new MoneroError(`The transaction you discarded (${guard.txid}) could still be mined from another node's pool. Until its inputs are spent, a new send must spend at least one of them, so both cannot be mined; this send would use other funds, so it was not built. Send an amount that needs those funds (Max does), or wait until it settles`)
         }
+        if (!current.emulator) checkDeviceSigningBounds(draft.plan)
         const review = reviewPlan(draft.plan, { address, amountAtomic: amount.toString(), walletAddress: binding.address,
           walletFeeAtomic: draft.feeAtomic, walletAmountAtomic: draft.amountAtomic, owned: keyImages.owned })
         prepared = { id: randomBytes(16).toString('hex'), key: current.key, generation, expires: Date.now() + PREPARED_LIFETIME_MS, draft, review }
@@ -685,7 +689,7 @@ export function createMoneroVault({ engine, confirm, getConfig, sidecar = manage
       } catch (error) { throw publicError(error, 'Unable to prepare the Monero transaction') }
       finally { busy = false }
     },
-    /** Sign the reviewed plan once (65000/65001), check the signed bytes against it, then relay. */
+    /** Sign the reviewed plan once using the selected firmware protocol, verify it, then relay. */
     async send(params: { prepareId?: unknown } = {}): Promise<{ txid: string }> {
       const id = params?.prepareId, reviewed = prepared
       if (typeof id !== 'string' || !reviewed || reviewed.id !== id || Date.now() > reviewed.expires) throw new MoneroError('This Monero send review expired; prepare it again')
@@ -695,12 +699,16 @@ export function createMoneroVault({ engine, confirm, getConfig, sidecar = manage
       const keyImages = bound && bound.snapshot.key === current.key && bound.snapshot.wallet === current.wallet &&
         bound.snapshot.transport === current.transport ? keyImagesFor(current) : null
       if (current.key !== reviewed.key || epoch !== reviewed.generation || !keyImages || !bound) { stop(); throw new MoneroError('The Monero wallet or configuration changed; connect again') }
-      if (!current.emulator || !signingEmulator() || !sidecar.relayMoneroTransaction) throw new MoneroError(BLOCKER_MESSAGES.emulator)
+      if ((current.emulator ? !signingEmulator() : !hardwareSigner?.available(engine.getDeviceState().firmwareHash)) || !sidecar.relayMoneroTransaction) throw new MoneroError(BLOCKER_MESSAGES[current.emulator ? 'emulator' : 'firmware'])
       busy = true
       const { draft, review, generation } = reviewed, wallet = walletKey(current, bound.address)
+      let hardware: Awaited<ReturnType<MoneroDeviceSigner['prepare']>> | null = null
       try {
+        if (!current.emulator) { hardware = await hardwareSigner!.prepare(draft.plan); check(current,generation) }
         const signed = await deviceOperation(current, async () => {
-          const body = await receive(current, generation, 65000, 65001, signRequest(draft.plan), true, MAX_SIGNED_RESPONSE)
+          const body = hardware
+            ? await receive(current, generation, 65002, 65003, hardware.payload, true, MAX_SIGNED_RESPONSE)
+            : await receive(current, generation, 65000, 65001, signRequest(draft.plan), true, MAX_SIGNED_RESPONSE)
           try {
             const fields = parseFields(body), blob = bytesField(fields, 1), hash = bytesField(fields, 2)
             if (fields.size !== 2 || hash.length !== 32 || !blob.length || blob.length > 16384) throw new MoneroError('The KeepKey returned an invalid Monero transaction')
@@ -710,6 +718,7 @@ export function createMoneroVault({ engine, confirm, getConfig, sidecar = manage
         check(current, generation)
         const parsed = parseSignedTransaction(signed.blob)
         checkSignedTransaction(parsed, signed.hash, draft.plan, keyImages.owned)
+        if (hardware && !hardware.verify(signed.blob)) throw new MoneroError('The hardware Monero transaction failed independent output, signature or proof verification; nothing was sent')
         // These inputs are now spent: another send needs a fresh key-image sync.
         synced = null
         // Saved before the broadcast, so an outcome lost to a crash or restart still blocks a second payment.
@@ -719,7 +728,7 @@ export function createMoneroVault({ engine, confirm, getConfig, sidecar = manage
         await relayPending(wallet, false)
         return { txid: parsed.hash }
       } catch (error) { throw publicError(error, 'Unable to send the Monero transaction') }
-      finally { busy = false }
+      finally { hardware?.dispose(); busy = false }
     },
     /** Re-broadcast the same signed bytes after an unknown relay outcome; never builds a new transaction. */
     async retryRelay(): Promise<{ txid: string }> {

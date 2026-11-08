@@ -608,7 +608,7 @@ export interface MoneroStatus {
   error?: string
   canSend: boolean
   /** The first unmet send gate: signing emulator build, adapter, wallet sync, key images. */
-  sendBlocked?: 'unrelayed' | 'emulator' | 'adapter' | 'syncing' | 'key-images'
+  sendBlocked?: 'unrelayed' | 'emulator' | 'firmware' | 'adapter' | 'syncing' | 'key-images'
   /** Signed transaction whose broadcast outcome is unknown; only a retry of it is allowed. */
   unrelayedTxid?: string
   keyImagesSynced?: boolean

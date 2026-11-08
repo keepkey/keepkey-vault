@@ -2225,5 +2225,6 @@
   "md76ef351": "Zcash tools",
   "m541e8fd0": "Shielded receive",
   "md1472831": "Shielded address QR code",
-  "mbc257ea6": "Compare the full address on your KeepKey before receiving. Address verification can take over 60 seconds."
+  "mbc257ea6": "Compare the full address on your KeepKey before receiving. Address verification can take over 60 seconds.",
+  "mbc78edf7": "Monero hardware signing is not available for this firmware in this build. Receiving works."
 }

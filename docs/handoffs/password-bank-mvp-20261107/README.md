@@ -112,6 +112,8 @@ Settings now has responsive category navigation, consistent cards and switches, 
 
 `0f6d56064` gives every feature row a matching icon badge. Its browser checks and frontend build passed. The updated frontend is staged for the next launch; the active Monero scan was left running. This follow-up does not satisfy the password hardware/recovery or real-service migration gates below.
 
+Later physical-wallet follow-up: the user restored the funded wallet and set its PIN. Vault completed address/view-key/key-image approval and showed **Synced, 0.08465305 XMR, unlocked** at `44J3pVF3…`. `13419cd75` fixes automatic balance verification on receive-only hardware; `f9833f887` implements encrypted monitoring persistence. The feature-row icons are loaded in the native preview. No real payment was prepared, signed or broadcast. The [firmware subaddress handoff](../monero-subaddress-firmware-20261107/README.md) covers the remaining Feather destination support and hardware qualification.
+
 Remaining hardware recovery, native supported-platform and real-service migration gates below still apply. Keep the password switch off until the operator explicitly enables a test.
 
 1. On physical test hardware, check device labels/confirmations, PIN/passphrase handling, cancel, unplug, firmware compatibility and repeated derivation. Match the frozen vector where possible.

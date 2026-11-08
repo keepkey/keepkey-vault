@@ -18,10 +18,14 @@
   "native": {
     "physicalViewConsentCompleted": true,
     "watchWalletOpened": true,
-    "walletState": "scanning",
+    "walletState": "ready",
     "scanStartBlock": 3799129,
     "passwordManagerEnabled": false,
-    "liveApiBoundaryChecks": 8
+    "liveApiBoundaryChecks": 8,
+    "physicalAddressPrefix": "44J3pVF3",
+    "pinProtected": true,
+    "balanceXmr": "0.08465305",
+    "spendStateVerified": true
   },
   "typecheck": {
     "unchangedIntegratedDiagnostics": 806,
@@ -29,5 +33,8 @@
     "newNormalizedMessages": 0
   },
   "paymentAttempted": false,
-  "iconsLoadedOnNextLaunch": true
+  "iconsLoadedOnNextLaunch": false,
+  "iconsLoaded": true,
+  "balanceVerificationFix": "13419cd75",
+  "encryptedMonitoringPersistence": "f9833f887"
 }

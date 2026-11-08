@@ -154,6 +154,10 @@ export interface ParsedMoneroTransaction {
   hash: string
   fee: bigint
   outputCount: number
+  outputData: Uint8Array
+  extra: Uint8Array
+  encryptedAmounts: Uint8Array
+  commitments: Uint8Array
   inputs: Array<{ indices: bigint[]; keyImage: string }>
 }
 
@@ -185,12 +189,15 @@ export function parseSignedTransaction(blob: Uint8Array): ParsedMoneroTransactio
   }
   const outputCount = small(4)
   if (outputCount < 2) bad()
+  const outputStart = offset
   for (let i = 0; i < outputCount; i++) { if (number() !== 0n || take(1)[0] !== 3) bad(); take(33) }
-  take(small(1060))
+  const outputData = blob.slice(outputStart,offset)
+  const extra = take(small(1060)).slice()
   const prefixEnd = offset
   if (take(1)[0] !== 6) bad()
   const fee = number()
-  take(outputCount * 40)
+  const encryptedAmounts = take(outputCount * 8).slice()
+  const commitments = take(outputCount * 32).slice()
   const baseEnd = offset
   const proofs = small(outputCount)
   if (proofs < 1) bad()
@@ -205,7 +212,7 @@ export function parseSignedTransaction(blob: Uint8Array): ParsedMoneroTransactio
   take(inputCount * 18 * 32 + inputCount * 32)
   if (offset !== blob.length) bad()
   const hash = keccak_256(concat([keccak_256(blob.subarray(0, prefixEnd)), keccak_256(blob.subarray(prefixEnd, baseEnd)), keccak_256(blob.subarray(baseEnd))]))
-  return { hash: hex(hash), fee, outputCount, inputs }
+  return { hash: hex(hash), fee, outputCount, inputs, outputData, extra, encryptedAmounts, commitments }
 }
 
 /** The signed bytes must spend exactly the reviewed inputs, with the reviewed rings, outputs and fee. */

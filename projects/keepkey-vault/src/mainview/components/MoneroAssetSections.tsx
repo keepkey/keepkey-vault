@@ -305,7 +305,7 @@ export function MoneroSendSection({ monero, client, privateMode = false }: { mon
 				: uiText("Discarded. Its funds are spendable again; the next send builds a new transaction."))
 		} finally { setConfirmDiscard(false); void monero.refresh() }
 	})
-	const receiveOnly = wallet.sendBlocked === "emulator" || wallet.sendBlocked === "adapter"
+	const receiveOnly = wallet.sendBlocked === "emulator" || wallet.sendBlocked === "adapter" || wallet.sendBlocked === "firmware"
 	return (
 		<Box data-monero-send="">
 			{verification.busy && <Text role="status" fontSize="12px" mb="3">{uiText("Checking your balance on KeepKey…")}</Text>}
@@ -343,7 +343,9 @@ export function MoneroSendSection({ monero, client, privateMode = false }: { mon
 				</Box>
 			)}
 			{receiveOnly ? (
-				<Text data-monero-send-blocked={wallet.sendBlocked} fontSize="13px" color="var(--text-2)">{wallet.sendBlocked === "adapter"
+				<Text data-monero-send-blocked={wallet.sendBlocked} fontSize="13px" color="var(--text-2)">{wallet.sendBlocked === "firmware"
+					? uiText("Monero hardware signing is not available for this firmware in this build. Receiving works.")
+					: wallet.sendBlocked === "adapter"
 					? uiText("Sending isn't available: this build has no Monero signing adapter. Receiving works.")
 					: uiText("Sending isn't available: Monero signing needs the signing (research) emulator build. Receiving works.")}</Text>
 			) : (
