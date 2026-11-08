@@ -2253,15 +2253,37 @@ export class EngineController extends EventEmitter {
 
   async changePin() {
     if (!this.wallet) throw new Error('No device connected')
+    const wallet = this.wallet
     this.setupInProgress = true
     this.pinRequestCount = 0
     try {
-      await this.confirmDeviceSetup(() => this.wallet!.changePin(), 'changePin')
-      this.cachedFeatures = await this.wallet.getFeatures()
+      await this.confirmDeviceSetup(() => wallet.changePin(), 'changePin')
+      if (this.wallet !== wallet) throw new Error('Device changed while setting PIN')
+      const features = await wallet.getFeatures()
+      if (this.wallet !== wallet) throw new Error('Device changed while setting PIN')
+      this.cachedFeatures = features
       this.emit('state-change', this.getDeviceState())
+    } catch (err) {
+      // hdwallet closes a timed-out transport. A visible Set PIN/Add PIN retry
+      // must get a fresh emulator connection, rather than the same stored error.
+      // Never reconnect a different wallet selected while this operation waited.
+      if (this.wallet === wallet && this.isEmulator && isTransportTimeout(err)) {
+        this.setPinPromptOpen(false)
+        this.setupInProgress = false
+        this.pinRequestCount = 0
+        try {
+          await this.connectEmulator()
+        } catch {
+          throw new Error('PIN setup timed out. Stop and start the emulator before trying again')
+        }
+        throw new Error('PIN setup timed out. The emulator has reconnected; try setting the PIN again')
+      }
+      throw err
     } finally {
-      this.setupInProgress = false
-      this.pinRequestCount = 0
+      if (this.wallet === wallet) {
+        this.setupInProgress = false
+        this.pinRequestCount = 0
+      }
     }
   }
 

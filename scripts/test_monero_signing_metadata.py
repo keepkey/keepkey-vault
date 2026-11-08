@@ -122,6 +122,26 @@ class MoneroSigningMetadata(unittest.TestCase):
                                           "PUBLIC TEST IDENTITY", run=lambda *args, **kwargs: self.fail("must not sign"))
         self.assertEqual(self.rpc.read_bytes(), original)
 
+    def test_staging_signs_a_disposable_node_with_separate_raw_and_runtime_hashes(self):
+        daemon = self.tools / "monerod"
+        daemon.write_bytes(b"PUBLIC-NODE")
+        original = daemon.read_bytes()
+        self.metadata.write_text(json.dumps(dict(self.prepared, daemonSha256=hashlib.sha256(original).hexdigest())))
+        worker = self.root / "worker"
+        worker.write_bytes(b"PUBLIC-WORKER")
+        entitlement = self.root / "entitlements.plist"
+        entitlement.write_text("PUBLIC-ENTITLEMENTS")
+        output = self.root / "signed"
+        def mock(command, check):
+            if command[1] == "--force":
+                target = Path(command[-1])
+                target.write_bytes(target.read_bytes() + b"PUBLIC-SIGNATURE")
+        HELPER["stage_signed_copies"](worker, self.rpc, self.metadata, output, entitlement, "PUBLIC-IDENTITY", run=mock, daemon=daemon)
+        self.assertEqual(daemon.read_bytes(), original)
+        value = json.loads((output / "monero-tools.json").read_text())
+        self.assertEqual(value["daemonRawSha256"], hashlib.sha256(original).hexdigest())
+        self.assertEqual(value["daemonSha256"], hashlib.sha256((output / "monerod").read_bytes()).hexdigest())
+
     def signing_fixture(self):
         worker = self.tools.parent / "monero-cli"
         worker.write_bytes(b"PUBLIC-FAKE-COMPILED-WORKER")
@@ -186,6 +206,32 @@ with Path(os.environ['PUBLIC_SIGNING_TEST_LOG']).open('a') as out:
         self.assertNotEqual(result.returncode, 0)
         self.assertFalse(log.exists())
         self.assertEqual(json.loads(self.metadata.read_text()), self.prepared)
+
+    def test_pipeline_signs_node_and_records_its_checksum_without_changing_rpc_receipt(self):
+        daemon = self.tools / "monerod"
+        daemon.write_bytes(b"PUBLIC-FAKE-NODE")
+        original = hashlib.sha256(daemon.read_bytes()).hexdigest()
+        self.metadata.write_text(json.dumps(dict(self.prepared, daemonSha256=original)))
+        entitlement, env, log = self.signing_fixture()
+        result = subprocess.run(["bash", str(SCRIPTS / "sign-macos-app.sh"), str(self.app), str(entitlement)],
+                                env=env, capture_output=True, text=True, timeout=20)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        value = json.loads(self.metadata.read_text())
+        self.assertEqual(value["daemonRawSha256"], original)
+        self.assertEqual(value["daemonSha256"], hashlib.sha256(daemon.read_bytes()).hexdigest())
+        self.assertEqual(value["walletRpcSha256"], hashlib.sha256(self.rpc.read_bytes()).hexdigest())
+        records = [json.loads(line) for line in log.read_text().splitlines()]
+        self.assertEqual([row["target"] for row in records], ["monero-cli", "monero-wallet-rpc", "monerod", "bun", self.app.name])
+
+    def test_pipeline_refuses_tampered_node_before_any_signing(self):
+        daemon = self.tools / "monerod"
+        daemon.write_bytes(b"PUBLIC-TAMPERED-NODE")
+        self.metadata.write_text(json.dumps(dict(self.prepared, daemonSha256="0" * 64)))
+        entitlement, env, log = self.signing_fixture()
+        result = subprocess.run(["bash", str(SCRIPTS / "sign-macos-app.sh"), str(self.app), str(entitlement)],
+                                env=env, capture_output=True, text=True, timeout=20)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse(log.exists())
 
 
 if __name__ == "__main__":

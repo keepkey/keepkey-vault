@@ -1,0 +1,38 @@
+{
+  "date": "2026-11-08",
+  "tests": {
+    "passed": 254,
+    "failed": 0,
+    "files": 20
+  },
+  "nativeCandidateCasesIncluded": 5,
+  "typecheck": {
+    "baselineDiagnostics": 803,
+    "currentDiagnostics": 803,
+    "newNormalizedDiagnostics": 0
+  },
+  "backendBuildPassed": true,
+  "frontendBuildPassed": true,
+  "nativePackagePassed": true,
+  "i18nIntegrityPassed": true,
+  "previewPath": "/private/tmp/keepkey-c5-resume/fix/projects/keepkey-vault/_build/dev-macos-arm64/keepkey-vault-dev.app",
+  "previewLaunched": false,
+  "runningWalletsRestartedForFailover": false,
+  "remoteFailover": {
+    "presetNodes": [
+      "https://xmr.triplebit.org",
+      "https://node.sethforprivacy.com"
+    ],
+    "retryCooldownSeconds": 30,
+    "localAndCustomPublicFallback": false,
+    "transactionReviewOrPendingBroadcastPausesAutomaticChanges": true,
+    "cancelledDeviceConsentIsNotRetried": true,
+    "knownOutputsReverifiedAfterNodeSessionChanges": true
+  },
+  "ssdNode": {
+    "lastObservedState": "stopped",
+    "lastObservedFreeGiB": 98.5,
+    "estimatedAdditionalFreeGiBNeeded": 15,
+    "reserveGiB": 25
+  }
+}

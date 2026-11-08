@@ -1,5 +1,7 @@
 import { expect, test } from 'bun:test'
 import { createMoneroVault, type MoneroWatchSidecar } from './monero-vault'
+import { Database } from 'bun:sqlite'
+import { createMoneroWatchStore, type MoneroWatchStore } from './monero-watch-store'
 
 // Published disposable address fixtures and dummy view bytes only. No USB,
 // daemon, native firmware library or existing wallet is accessed by these tests.
@@ -57,7 +59,7 @@ class Device {
     return report
   }
 }
-function fixture(emulator = false, replyMs?: { device: number; human: number }) {
+function fixture(emulator = false, replyMs?: { device: number; human: number }, watchStore?: MoneroWatchStore, onTransportFailure?: (transport: unknown) => void) {
   const delegate = new Device()
   let locked = false, reviews = 0, configures = 0, starts = 0, stops = 0
   let configuredKey: Uint8Array | null = null
@@ -92,7 +94,7 @@ function fixture(emulator = false, replyMs?: { device: number; human: number }) 
     expect(locked).toBe(true); delegate.onButtonRequest = () => { reviews++ }
     try { return await operation() } finally { delegate.onButtonRequest = null }
   }
-  const api = createMoneroVault({ engine, confirm, getConfig: () => ({ ...config }), sidecar, ...(replyMs ? { replyMs } : {}) })
+  const api = createMoneroVault({ engine, confirm, getConfig: () => ({ ...config }), sidecar, watchStore, onTransportFailure, ...(replyMs ? { replyMs } : {}) })
   return { api, delegate, engine, config, state, status, sidecar,
     counts: () => ({ reviews, configures, starts, stops }), key: () => configuredKey, options: () => configuredOptions }
 }
@@ -128,6 +130,20 @@ test('emulator wraps both address display and view export in the interactive con
   expect(f.counts().reviews).toBe(2)
   expect(f.delegate.sent.map(item => item.type)).toEqual([540, 27, 542, 27])
   expect(f.delegate.sent.some(item => item.debug || item.type === 100)).toBe(false)
+})
+
+test('connection progress moves from device approval to opening the wallet and clears on completion', async () => {
+  const f = fixture()
+  let release!: () => void, started!: () => void
+  const waiting = new Promise<void>(resolve => { started = resolve })
+  f.sidecar.startMoneroSidecar = async () => { started(); await new Promise<void>(resolve => { release = resolve }) }
+  const connection = f.api.connect()
+  expect((await f.api.getStatus()).connectionPhase).toBe('device')
+  await waiting
+  expect((await f.api.getStatus()).connectionPhase).toBe('wallet')
+  release()
+  expect((await connection).connectionPhase).toBeUndefined()
+  expect((await f.api.getStatus()).connectionPhase).toBeUndefined()
 })
 
 test('address/view-key identity mismatch, duplicate fields and invalid key dimensions never configure a sidecar', async () => {
@@ -284,4 +300,81 @@ test('a device that never answers ends the read within its bound, disconnects an
   f.delegate.queue.length = 0 // replies the silent device scripted for the abandoned request
   const second = await f.api.connect().then(() => 'ok', (e: any) => String(e?.message ?? e))
   expect(second).toBe('ok')
+})
+
+
+test('saved physical monitoring access reconnects without exporting the view key again; address verification still reaches hardware',async()=>{
+ const db=new Database(':memory:')
+ const store=createMoneroWatchStore({database:()=>db,profile:'test',key:async()=>new Uint8Array(32).fill(9)})
+ const f=fixture(false,undefined,store)
+ f.engine.currentSeedEthAddress='0x'+'a'.repeat(40)
+ try {
+  await f.api.connect()
+  expect(f.delegate.sent.filter(x=>x.type===542)).toHaveLength(1)
+  f.api.invalidate();f.delegate.sent=[]
+  await f.api.connect()
+  expect(f.delegate.sent.map(x=>x.type)).toEqual([540])
+  expect([...f.key()!]).toEqual(Array(32).fill(0))
+  f.delegate.sent=[]
+  await f.api.getAddress({showDisplay:false})
+  expect(f.delegate.sent).toHaveLength(0)
+  await f.api.getAddress({showDisplay:true})
+  expect(f.delegate.sent.map(x=>x.type)).toEqual([540,27])
+  f.engine.currentSeedEthAddress='0x'+'b'.repeat(40);f.api.invalidate();f.delegate.sent=[]
+  await f.api.connect()
+  expect(f.delegate.sent.some(x=>x.type===542)).toBe(true)
+ }finally{db.close()}
+})
+
+test('missing seed identity never reads or writes saved monitoring access',async()=>{
+ const db=new Database(':memory:')
+ const store=createMoneroWatchStore({database:()=>db,profile:'test',key:async()=>{throw Error('must not access OS store')}})
+ const f=fixture(false,undefined,store)
+ try {await f.api.connect();f.api.invalidate();await f.api.connect();expect(f.delegate.sent.filter(x=>x.type===542)).toHaveLength(2)}
+ finally{db.close()}
+})
+
+
+test('a Monero read timeout invalidates the current engine transport instead of leaving it ready',async()=>{
+ let recovered=0
+ const f=fixture(false,{device:30,human:100},undefined,transport=>{
+  expect(transport).toBe(f.engine.wallet!.transport);recovered++;f.engine.wallet=null;f.state.state='disconnected'
+ })
+ f.delegate.silent=true
+ await expect(f.api.connect()).rejects.toThrow('did not answer')
+ expect(recovered).toBe(1)
+ expect(await f.api.getStatus()).toMatchObject({available:false,deviceReady:false})
+ expect(f.counts().configures).toBe(0)
+})
+
+test('LIBUSB_ERROR_NOT_FOUND requests a fresh transport without replaying the failed operation',async()=>{
+ let recovered=0,writes=0
+ const f=fixture(false,undefined,undefined,()=>{recovered++;f.engine.wallet=null;f.state.state='disconnected'})
+ f.delegate.writeChunk=async()=>{writes++;throw Error('transferOut error: Error: LIBUSB_ERROR_NOT_FOUND')}
+ await expect(f.api.connect()).rejects.toThrow('Unable to connect')
+ expect(recovered).toBe(1);expect(writes).toBeLessThanOrEqual(2)
+ expect(await f.api.getStatus()).toMatchObject({available:false,deviceReady:false})
+ expect(f.counts().configures).toBe(0)
+})
+
+test('a normal cancelled Monero approval does not trigger transport recovery',async()=>{
+ let recovered=0
+ const f=fixture(false,undefined,undefined,()=>{recovered++});f.delegate.unsupported=true
+ await expect(f.api.connect()).rejects.toThrow('rejected or cancelled')
+ expect(recovered).toBe(0)
+})
+
+
+test('approved monitoring access survives an unreachable node, so another node needs no repeated export',async()=>{
+ const db=new Database(':memory:')
+ const store=createMoneroWatchStore({database:()=>db,profile:'test',key:async()=>new Uint8Array(32).fill(9)})
+ const f=fixture(false,undefined,store);f.engine.currentSeedEthAddress='0x'+'a'.repeat(40)
+ const configure=f.sidecar.configureMoneroWatch
+ f.sidecar.configureMoneroWatch=async()=>{throw Error('The Monero daemon is unavailable')}
+ try {
+  await expect(f.api.connect()).rejects.toThrow()
+  f.sidecar.configureMoneroWatch=configure;f.config.daemonUrl='https://other.example';f.delegate.sent=[]
+  await f.api.connect()
+  expect(f.delegate.sent.map(x=>x.type)).toEqual([540])
+ }finally{db.close()}
 })

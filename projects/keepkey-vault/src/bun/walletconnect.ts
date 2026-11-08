@@ -30,7 +30,8 @@ import { simulateSolanaEffects } from './solana-effects'
 import { buildClearSignReport, solanaDecodedReportFindings } from '../shared/clearsign-report'
 import { uniswapReportFindingsWithState } from './uniswap-report'
 import { classifyEffectExposure, observeEvmCall, observeEvmTypedData, observeMalformedSolanaTransaction, observeSigningInfo, observeSolanaTransaction } from './clearsign-observation'
-import { resolveEvmSchema, type SignedEvmSchema } from './evm-schema-registry'
+import { measureLiveDeployment, resolveEvmSchema, type SignedEvmSchema } from './evm-schema-registry'
+import { findContractRating } from './clearsign-review'
 import { nameRuntimeProvider, resolveProviderTxMetadata } from './clearsign-providers'
 import { trustRuntimeSigner, type RuntimeEvmSigner } from './evm-runtime-metadata'
 import { supportsCertifiedClearSign } from './solana-certified-policy'
@@ -1096,6 +1097,7 @@ export class WalletConnectManager {
         simulation,
         hostFindings: universalRouterFindings.findings,
         hostLimitations: universalRouterFindings.limitations,
+        rating: await findContractRating(effectiveChainId, String(tx.to || ''), measureLiveDeployment),
       })
     }
     await contractFacts

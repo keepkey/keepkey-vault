@@ -21,12 +21,26 @@ beforeAll(() => {
   ui = JSON.parse(run.stdout.toString().trim().split('\n').at(-1)!)
 }, 120_000)
 
+test('the main balance is hidden until verified and still respects private mode', () => {
+  expect(ui.headerUnverified).toBe('—')
+  expect(ui.headerVerified).toBe('0.08465305')
+  expect(ui.headerPrivate).toBe('••••••')
+})
+
+test('local node syncing waits without device prompts or public fallback; a ready node connects automatically', () => {
+ expect(ui.nodeWaitCalls).toBe(0)
+ expect(ui.nodeWaitText).toContain('Waiting for your node')
+ expect(ui.nodeWaitText).not.toContain('Confirm on KeepKey')
+ expect(ui.nodeReadyConnects).toBe(1)
+})
+
 describe('C1/C2: the XMR row in the chain list', () => {
   test('not connected and scanning show "—", never 0; fiat always says not included', () => {
     expect(ui.rowNotConnected).toEqual({ balance: '— XMR', fiat: 'not included', state: 'Not connected' })
     expect(ui.rowScanning).toEqual({ balance: '— XMR', fiat: 'not included', state: 'Syncing 50%' })
   })
   test('synced shows the balance; node down keeps the last known balance and says so', () => {
+    expect(ui.rowUnverified).toEqual({ balance: '— XMR', fiat: 'not included', state: 'Balance needs verification' })
     expect(ui.rowReady).toEqual({ balance: '0.08465305 XMR', fiat: 'not included', state: '' })
     expect(ui.rowUnreachable).toEqual({ balance: '0.08465305 XMR', fiat: 'not included', state: 'Node unreachable' })
   })
@@ -35,39 +49,43 @@ describe('C1/C2: the XMR row in the chain list', () => {
   })
 })
 
-describe('C4: connecting asks where the scan starts and names the node', () => {
-  test('an unset (legacy) scan start means an existing wallet scanned from 0, never a guessed week', () => {
-    expect(ui.defaultChoice).toBe('existing')
-    expect(ui.defaultHeight).toBe('0')
-    expect(ui.connectText).toContain('0 scans the whole chain: it takes hours, and it finds every payment')
-    expect(ui.connectText).toContain('Node: https://node.example')
-    expect(ui.connectText).toContain('A node you run yourself')
+describe('XMR opens without a setup checklist', () => {
+  test('after device consent, progress names wallet preparation instead of requesting more button presses', () => {
+    expect(ui.walletOpeningText).toContain('Opening Monero wallet')
+    expect(ui.walletOpeningText).toContain('no further device confirmation is needed')
+    expect(ui.walletOpeningText).not.toContain('Confirm on KeepKey')
   })
-  test('"never received XMR" is a deliberate choice, warned, with the tip said to come from the unverified node', () => {
-    expect(ui.connectText).toContain("start at block 3,294,960, a week before block 3,300,000, the current height the node reports (KeepKey can't verify it)")
-    expect(ui.warningBeforeNew).toBe(false)
-    expect(ui.warningAfterNew).toContain('Anything received before this block will not appear')
-    expect(ui.connectCalls).toEqual([['connect', 3294960]])
+  test('connects once automatically with complete history by default', () => {
+    expect(ui.connectCalls).toEqual([['connect', 0]])
+    expect(ui.connectButtons).toEqual([])
+    expect(ui.scanChoices).toBe(0)
+    expect(ui.connectText).toContain('Confirm on KeepKey')
+    expect(ui.settingsClosed).toBe(true)
+    expect(ui.technicalReceiveHidden).toBe(true)
   })
-  test('a guessed start is never shown as complete; an old figure says when it is from', () => {
-    expect(ui.partial).toContain('Scanned from block 3,294,960: XMR received before that block is not shown')
-    expect(ui.rowPartial).toBe('Synced from block 3,294,960')
+  test('respects a previously chosen scan start', () => {
+    expect(ui.storedHeightCalls).toEqual([['connect', 3000000]])
+  })
+  test('a partial scan still says that older payments can be missing', () => {
+    expect(ui.partial).toContain('Earlier payments may be missing')
+    expect(ui.rowPartial).toBe('Synced')
     expect(ui.staleScanning.balance).toBe('0.084653050000 XMR')
     expect(ui.staleScanning.stale).toStartWith('Last updated ')
   })
-  test('a scan start already chosen in Settings is kept, not replaced', () => {
-    expect(ui.storedHeightField).toBe('3000000')
-    expect(ui.storedHeightCalls).toEqual([['connect', 3000000]])
-  })
+})
+
+test('an empty scanned wallet needs no balance confirmation and shows no false prompt', () => {
+ expect(ui.zeroBalanceChecks).toBe(0)
+ expect(ui.zeroBalanceNote).toBe('')
 })
 
 describe('C2: balance states on the page', () => {
-  test('connected: the balance, marked not yet verified as spendable', () => {
-    expect(ui.afterConnect).toEqual({ balance: '0.084653050000 XMR', note: 'unverified' })
+  test('connected: verifies the balance automatically', () => {
+    expect(ui.afterConnect).toEqual({ balance: '0.084653050000 XMR' })
   })
   test('scanning: "—" and where the scan is', () => {
     expect(ui.scanning.balance).toBe('—')
-    expect(ui.scanning.note).toContain('Scanning the chain from block 3,294,960')
+    expect(ui.scanning.note).toContain('Syncing your Monero wallet')
   })
   test('node down: the last known balance with its time', () => {
     expect(ui.unreachable.balance).toBe('0.084653050000 XMR')
@@ -85,10 +103,11 @@ describe('Receive: subaddresses come from the device and verify on it', () => {
 })
 
 describe('C3: Send', () => {
-  test('no form until key images are synced', () => {
-    expect(ui.sendBlockedBefore).toBe('key-images')
-    expect(ui.formBeforeSync).toBe(false)
-    expect(ui.formAfterSync).toBe(true)
+  test('checks the balance automatically on opening and prepares without another manual sync', () => {
+    expect(ui.formBeforeSync).toBe(true)
+    expect(ui.syncBeforeReview).toBe(1)
+    expect(ui.syncPrepareOrder).toEqual(['sync', 'prepare'])
+    expect(ui.syncDetailsClosed).toBe(true)
   })
   test('my own main address and more than the unlocked balance are explained before anything is built', () => {
     expect(ui.ownAddressProblem).toContain('send to one of its subaddresses')
@@ -118,9 +137,36 @@ describe('C3: Send', () => {
   test('a check answered by a different node than the one the tx went to says so; a discarded tx is named', () => {
     expect(ui.otherNode).toContain('It was sent to https://a.example, but https://b.example answered this check')
     expect(ui.sameNode).toBe(false)
-    expect(ui.discardedNote).toContain('You discarded transaction efefefefefef…')
+    expect(ui.discardedNote).toBe('Your discarded send will be checked before another payment.')
   })
   test('without the signing emulator, Send says receive-only instead of a dead form', () => {
     expect(ui.receiveOnly).toContain('Receiving works.')
   })
+})
+
+
+test('private mode hides the available balance in the send form as well as the header', () => {
+ expect(ui.sendPrivateText).not.toContain('0.084653050000')
+})
+
+for (const blocker of ['emulator', 'adapter']) {
+ test(`a receive-only wallet (${blocker}) verifies its balance without enabling sending`, () => {
+  expect(ui[`receiveOnlyBalance_${blocker}`]).toEqual({checks:1,balance:'0.08465305',blocked:blocker,prepared:false})
+ })
+}
+
+
+test('remote failover shows the active node, failures and last successful response in collapsed details',()=>{
+ expect(ui.connectionDiagnostics.text).toContain('Active node: https://second.example')
+ expect(ui.connectionDiagnostics.text).toContain('Automatic remote failover is on.')
+ expect(ui.connectionDiagnostics.text).toContain('The node did not respond within 10 seconds.')
+ expect(ui.connectionDiagnostics.text).toContain('Last successful node response')
+ expect(ui.connectionDiagnostics.text).toContain('120 ms')
+ expect(ui.connectionDiagnostics.detailsClosed).toBe(true)
+})
+
+
+test('failover rechecks known outputs automatically and preserves a declined device approval',()=>{
+ expect(ui.reverifiedAfterFailover).toBe(2)
+ expect(ui.declinedAcrossFailover).toBe(1)
 })

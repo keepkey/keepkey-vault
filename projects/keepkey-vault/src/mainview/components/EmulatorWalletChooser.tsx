@@ -39,6 +39,14 @@ function FirmwarePicker({ firmware, value, onChange, busy }: { firmware: Emulato
 	)
 }
 
+/** Preserve a usable selection. Replace an unavailable version with the reviewed
+ * signing build when offered, otherwise the bundled emulator. Wallet choice stays explicit. */
+function defaultBuild(firmware?: EmulatorFirmwareChoices | null): string {
+	if (!firmware?.next.problem) return firmware?.next.id ?? ""
+	if (firmware.next.id === null) return "" // the bundled library itself is unavailable
+	return firmware.builds.find(build => build.signingEnabled)?.id ?? ""
+}
+
 /** Name field + Create. Starts a blank emulator under that name. */
 function NewSeedForm({ existing, onCreate, busy }: { existing: string[]; onCreate: (name: string) => void; busy?: boolean }) {
   const uiText = useUiTranslation()
@@ -78,9 +86,10 @@ export function EmulatorWalletChooser({ wallets, firmware, onPick, onDelete, onC
   const uiText = useUiTranslation()
 
 	const { buildTitle, walletTitle } = useEmulatorNames()
+	const [managing, setManaging] = useState(false)
 	const [deleting, setDeleting] = useState<string | null>(null)
-	const [buildChoice, setBuildChoice] = useState<string>(firmware?.next.id ?? "")
-	useEffect(() => { setBuildChoice(firmware?.next.id ?? "") }, [firmware?.next.id])
+	const [buildChoice, setBuildChoice] = useState<string>(() => defaultBuild(firmware))
+	useEffect(() => { setBuildChoice(defaultBuild(firmware)) }, [firmware?.next.id, firmware?.next.problem])
 	const chosenBuild = firmware ? (buildChoice || null) : undefined
 	const chosenInfo: EmulatorRunningBuild | null = !firmware ? null
 		: firmware.next.id === (chosenBuild ?? null) ? firmware.next
@@ -92,19 +101,29 @@ export function EmulatorWalletChooser({ wallets, firmware, onPick, onDelete, onC
 			<Box role="dialog" aria-label={uiText("Pick the seed to load into the emulator")} w="420px" maxW="92vw" maxH="80vh" overflowY="auto" p="4" textAlign="left"
 				bg="rgba(16,16,21,0.98)" border="1px solid var(--ink-3)" borderRadius="14px" onClick={(e: React.MouseEvent) => e.stopPropagation()}>
 				<Flex justify="space-between" align="center" mb="1">
-					<Text fontSize="14px" fontWeight="600" color="var(--text-0)">{firmware ? uiText("Pick the firmware and the seed for the emulator") : uiText("Pick the seed to load into the emulator")}</Text>
+					<Text fontSize="14px" fontWeight="600" color="var(--text-0)">{uiText("Choose a wallet")}</Text>
 					<Box as="button" aria-label={uiText("Close")} onClick={onClose} px="1.5" fontSize="16px" color="var(--text-3)" cursor="pointer">{uiText("×")}</Box>
 				</Flex>
 				<Text fontSize="11px" color="var(--text-3)" mb="3">
 					{wallets.length ? uiText("Each seed is a separate wallet saved on this computer. The emulator opens with the one you pick.") : uiText("No saved seeds yet. Name one to start.")}
-					{firmware ? " " + uiText("Firmware and seed are separate choices: the seed you pick starts on the firmware shown here.") : ""}
+
 				</Text>
-				{firmware && <FirmwarePicker firmware={firmware} value={buildChoice} onChange={setBuildChoice} busy={busy} />}
+				{firmware && <>
+					{firmware.next.problem && !blocked && <Text data-testid="firmware-recovery" mb="2" fontSize="12px" color="var(--text-2)">{uiText("The previous emulator version is unavailable. Your chosen wallet will open with {{firmware}}.", { firmware: buildTitle(chosenInfo) })}</Text>}
+					{blocked && <Text fontSize="12px" color="var(--rose)" mb="2">{uiText("The emulator is unavailable. Open emulator settings to choose a version.")}</Text>}
+					<details style={{ marginBottom: 12, color: "var(--text-3)", fontSize: 11 }}>
+						<summary style={{ cursor: "pointer" }}>{uiText("Emulator settings")} · {chosenInfo?.label || (chosenInfo?.version ? `v${chosenInfo.version}` : uiText("Current version"))}</summary>
+						<Box mt="2"><FirmwarePicker firmware={firmware} value={buildChoice} onChange={setBuildChoice} busy={busy} /></Box>
+						{firmware.next.problem && !blocked && <Text fontSize="11px" wordBreak="break-word">{firmware.next.problem}</Text>}
+					</details>
+				</>}
 				{error && <Text fontSize="11px" color="var(--rose)" mb="2" wordBreak="break-word">{error}</Text>}
 
 				{wallets.map((w) => {
 					const title = walletTitle(w)
-					const startLabel = chosenInfo ? uiText("Start {{wallet}} on {{firmware}}", { wallet: title, firmware: buildTitle(chosenInfo) }) : uiText("Start {{wallet}}", { wallet: title })
+					const subtitle = /^build-[0-9a-f]{16}$/.test(w.name) ? (w.ethAddress ? `…${w.ethAddress.slice(-8)}` : "") : w.name
+					const accessibleTitle = subtitle && title !== w.name ? `${title} (${subtitle})` : title
+					const startLabel = chosenInfo ? uiText("Start {{wallet}} on {{firmware}}", { wallet: accessibleTitle, firmware: buildTitle(chosenInfo) }) : uiText("Start {{wallet}}", { wallet: accessibleTitle })
 					return (
 					<Flex key={w.name} direction="column" mb="1.5">
 					<Flex align="stretch" gap="1.5">
@@ -115,19 +134,19 @@ export function EmulatorWalletChooser({ wallets, firmware, onPick, onDelete, onC
 							<Text fontSize="13px" fontWeight="600" color="var(--text-0)">
 								{title}{w.isActive ? uiText("  (running)") : w.isSelected ? uiText("  (last used)") : ""}
 							</Text>
-							{title !== w.name && <Text fontSize="10px" fontFamily="mono" color="var(--text-3)">{w.name}</Text>}
-							{w.ethAddress && <Text fontSize="10px" fontFamily="mono" color="var(--text-1)">ETH {w.ethAddress}</Text>}
+							{title !== w.name && (managing || subtitle) && <Text fontSize="10px" fontFamily="mono" color="var(--text-3)">{managing ? w.name : subtitle}</Text>}
+							{managing && w.ethAddress && <Text fontSize="10px" fontFamily="mono" color="var(--text-1)">ETH {w.ethAddress}</Text>}
 							<Text fontSize="10px" color="var(--text-3)">
-								{emulatorWalletDetail(w)}{w.hasMnemonic ? uiText(" · seed saved") : ""}{(w.totalUsd ?? 0) > 0 ? uiText(" · has cached balance") : ""}
+								{managing ? emulatorWalletDetail(w) : w.firmwareVersion ? `v${w.firmwareVersion}` : ""}{managing && w.hasMnemonic ? uiText(" · seed saved") : ""}{(w.totalUsd ?? 0) > 0 ? uiText(" · has cached balance") : ""}
 							</Text>
 						</chakra.button>
 						{/* The running wallet has no delete: stop the emulator first (the backend refuses it too). */}
-						{onDelete && !w.isActive && deleting !== w.name && (
+						{managing && onDelete && !w.isActive && deleting !== w.name && (
 							<chakra.button type="button" aria-label={uiText("Delete seed {{wallet}}", { wallet: title })} disabled={busy} onClick={() => setDeleting(w.name)} px="2" fontSize="14px" color="var(--text-3)" cursor="pointer"
 								_hover={{ color: "var(--rose)" }}>{uiText("×")}</chakra.button>
 						)}
 					</Flex>
-					{onDelete && !w.isActive && deleting === w.name && (
+					{managing && onDelete && !w.isActive && deleting === w.name && (
 						<Box role="alertdialog" aria-label={uiText("Delete seed {{wallet}}", { wallet: title })} mt="1" px="3" py="2" borderRadius="md" bg="rgba(224,140,123,0.10)" border="1px solid rgba(224,140,123,0.35)">
 							<Text fontSize="11px" color="var(--text-0)" data-testid="delete-confirm">
 								{uiText("Delete \"{{wallet}}\" ({{file}})? Its flash and saved seed are erased from this computer. This can't be undone.", { wallet: title, file: w.name })}
@@ -143,7 +162,8 @@ export function EmulatorWalletChooser({ wallets, firmware, onPick, onDelete, onC
 				})}
 
 				<Box mt="3" pt="3" borderTop="1px solid var(--ink-3)">
-					<NewSeedForm existing={wallets.map((w) => w.name)} onCreate={pick} busy={busy || blocked} />
+					<chakra.button aria-label={uiText("Manage wallets")} type="button" onClick={() => { setManaging(value => !value); setDeleting(null) }} fontSize="11px" color="var(--text-3)" cursor="pointer">{managing ? uiText("Done") : uiText("Manage wallets")}</chakra.button>
+					{managing && <Box mt="3"><NewSeedForm existing={wallets.map((w) => w.name)} onCreate={pick} busy={busy || blocked} /></Box>}
 				</Box>
 			</Box>
 		</Box>

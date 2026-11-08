@@ -11,6 +11,8 @@
  * host gives up before the PIN prompt ever arrives, and the failure counter
  * can never be reset by a correct PIN. LONG_TIMEOUT (5 min) covers the wait
  * up to 8 prior failures; beyond that the timeout is surfaced to the user.
+ * Once PinMatrixRequest arrives, the transport waits for user input and starts
+ * a fresh response deadline when the PIN is submitted.
  */
 import * as core from '@keepkey/hdwallet-core'
 import * as Messages from '@keepkey/device-protocol/lib/messages_pb'

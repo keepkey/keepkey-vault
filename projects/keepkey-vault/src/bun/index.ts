@@ -23,6 +23,10 @@ import * as path from "path"
 import { createHash, randomUUID } from "crypto"
 import { createSwapQuoteLeases } from './swap-quote-lease'
 import { assessSwapRisk } from '../shared/swap-risk'
+import { PasswordBank } from './password-bank'
+import { PasswordBex } from './password-bex'
+import { PasswordAgent } from './password-agent'
+import { callBex, listBrowsers } from './bex-bridge'
 
 /**
  * hdwallet returns signature/pubkey fields as `Uint8Array | string`
@@ -267,9 +271,14 @@ import { initializeOrchardFromDevice, exportOrchardFvk, scanOrchardNotes, getShi
 import { inFlightShielded, type ExpectedShielded } from "../shared/zcash-pending"
 import { setMoneroEmulatorEnabled, listEmulatorBuilds } from "./emulator-library"
 import { createMoneroVault } from "./monero-vault"
+import { createMoneroFailoverVault } from "./monero-remote-failover"
+import { createMoneroWatchStore } from "./monero-watch-store"
+import { createMoneroDeviceSigner } from "./monero-device-signing"
 import { REVIEWED_MONERO_SIGNING_SHA256 } from "./monero-emulator"
 import { startMoneroSidecar, stopMoneroSidecar, isMoneroSidecarAvailable } from "./monero-sidecar"
-import { storedRestoreHeight, suggestRestoreHeight, validateMoneroNode } from "./monero-settings"
+import { createMoneroNodeManager } from './monero-node'
+import { MONERO_LOCAL_URL, moneroNodeMode } from '../shared/monero-node'
+import { checkMoneroNode, storedRestoreHeight, suggestRestoreHeight, validateMoneroNode } from "./monero-settings"
 import { createFilePendingStore } from "./monero-pending"
 import { findZcashCliBinary, isSidecarReady, startSidecar, stopSidecar, wipeSidecarWalletDb, hasFvkLoaded, getCachedFvk, onScanProgress, getScanState, updateSyncedTo, beginZcashSend, endZcashSend, isZcashSendInFlight } from "./zcash-sidecar"
 import { CHAINS, customChainToChainDef, isChainSupported, hiveRolePath, btcTaprootSupported, findChainByNetwork } from "../shared/chains"
@@ -1028,6 +1037,40 @@ let watchOnlyViewBtcOnly = false
 let pendingPsbt: { id: string; stem: string; analysis: PsbtAnalysis | MultisigAnalysis; deviceId: string; hidden: boolean; epoch: number; wallet: unknown; signing: boolean } | null = null
 let lastSignedPsbtPath: string | null = null
 const multisigFeature = new MultisigFeature(getSetting,setSetting)
+const passwordBank = new PasswordBank({
+	read: getSetting,
+	write: setSetting,
+	replace: (key, value, expected) => {
+		const db = getDb()
+		if (!db) throw new Error('Password-bank storage is unavailable')
+		const result = expected === null
+			? db.run('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO NOTHING', [key, value])
+			: db.run('UPDATE settings SET value = ? WHERE key = ? AND value = ?', [value, key, expected])
+		return result.changes === 1
+	},
+	device: () => {
+		const wallet = engine.wallet as any
+		const state = engine.getDeviceState()
+		if (!wallet || state.state !== 'ready' || typeof wallet.cipherKeyValue !== 'function') throw new Error('Connect and unlock a KeepKey to use the password bank')
+		if (isBitcoinOnlyVariant(state.firmwareVariant)) throw new Error('Password-bank derivation requires multi-chain firmware')
+		return {
+			session: `${activitySessionEpoch}:${state.deviceId}:${engine.isPassphraseWallet}`,
+			cipher: async (addressNList, key) => {
+				const result = await wallet.cipherKeyValue({ addressNList, key, value: new Uint8Array(32), iv: new Uint8Array(16), encrypt: true, askOnEncrypt: true, askOnDecrypt: true })
+				return typeof result === 'string' ? new Uint8Array(Buffer.from(result, 'base64')) : new Uint8Array(result)
+			},
+		}
+	},
+})
+// Clean expired session secrets even when the password tab is not visible.
+const passwordBex = new PasswordBex(passwordBank, { browsers: listBrowsers, call: (tool, args, browser) => callBex(tool, args, browser, 10000) })
+const passwordAgent = new PasswordAgent(passwordBank, passwordBex, approval => {
+	// The legacy schema declares outgoing events under bun.messages; constrain
+	// this event to that payload despite Electrobun inferring remote messages.
+	const send = rpc.send['password-agent-approval'] as (value: VaultRPCSchema['bun']['messages']['password-agent-approval']) => void
+	try { send({ approval }) } catch { /* native UI not ready; request will expire */ }
+})
+setInterval(() => { if (!passwordBank.view().unlocked) passwordAgent.cancelPending() }, 1000).unref()
 const multisigRegistry = new MultisigRegistry(getSetting, setSetting, () => ({
 	hidden: engine.isPassphraseWallet,
 	epoch: activitySessionEpoch,
@@ -1226,8 +1269,8 @@ async function requestSigningApprovalDecision(id: string) {
 let restApiEnabled = false
 let walletConnectEnabled = false
 let moneroEnabled = false
-/** A public node, used until the user picks their own (Settings explains the privacy trade-off). */
-const MONERO_DEFAULT_NODE = 'https://xmr.triplebit.org'
+/** Own node is preferred. Existing explicit remote URLs are preserved. */
+const MONERO_DEFAULT_NODE = MONERO_LOCAL_URL
 let moneroWallet: ReturnType<typeof createMoneroVault> | null = null
 let moneroSession: unknown = null
 let zcashPrivacyEnabled = false
@@ -1673,10 +1716,12 @@ function getAppSettings() {
 		moneroEnabled,
 		moneroAvailable: isMoneroSidecarAvailable(),
 		moneroDaemonUrl: getSetting('monero_daemon_url') || MONERO_DEFAULT_NODE,
+		moneroNodeMode: moneroNodeMode(getSetting('monero_node_mode'), getSetting('monero_daemon_url')),
 		moneroRestoreHeight: storedRestoreHeight(getSetting('monero_restore_height')),
 		// Unresolved unknown-outcome sends are kept when Monero is turned off or the device is wiped (a restored
 		// seed can still spend those inputs); Settings names them instead of dropping them.
 		moneroPendingBroadcasts: getMoneroWallet().pendingCount(),
+		passwordManagerEnabled: passwordBank.enabled,
 		zcashPrivacyEnabled,
 		hiveEnabled,
 		emulatorEnabled,
@@ -2015,6 +2060,7 @@ async function resolveDeviceSwapAsset(key: string) {
 
 // Callbacks bridge REST → RPC UI
 const restCallbacks: RestApiCallbacks = {
+	passwordAgent,
 	onApiLog: (entry: ApiLogEntry) => {
 		if (entryIsStale(entry)) {
 			console.warn(`[api-log] dropped ${entry.method} ${entry.route}: wallet session changed mid-request`)
@@ -2188,10 +2234,18 @@ function moneroSigningEmulatorActive(): boolean {
     return moneroSigningBuild.signing
 }
 function getMoneroWallet() {
-    if (!moneroWallet) moneroWallet = createMoneroVault({
+    if (!moneroWallet) moneroWallet = createMoneroFailoverVault({
+      create: getConfig => createMoneroVault({
         engine, confirm: emuSigningOp, signingEmulator: moneroSigningEmulatorActive,
+        watchStore: createMoneroWatchStore({ database: getDb, profile: Utils.paths.userData }),
+        hardwareSigner: createMoneroDeviceSigner(),
+        onTransportFailure: transport => {
+            if (engine.wallet?.transport === transport) return engine.retryConnect()
+        },
         // Unknown-outcome broadcasts survive a restart (owner-only file beside the app database).
         pendingStore: createFilePendingStore(path.join(Utils.paths.userData, 'monero')),
+        getConfig,
+      }),
         getConfig: () => ({ enabled: moneroEnabled, offline: offlineMode,
             daemonUrl: getSetting('monero_daemon_url') || MONERO_DEFAULT_NODE,
             restoreHeight: storedRestoreHeight(getSetting('monero_restore_height')) }),
@@ -2201,6 +2255,16 @@ function getMoneroWallet() {
 function invalidateMoneroWallet() {
     moneroWallet?.invalidate()
     moneroSession = null
+}
+
+const localMoneroNode = createMoneroNodeManager({ stateFile: path.join(Utils.paths.userData, 'monero-node.json') })
+// Adopt only a daemon matching our saved binary/config/directory. Resume a sync
+// on launch only after the user has explicitly pressed Start in Vault.
+async function resumeLocalMoneroNode() {
+    if (offlineMode) { await localMoneroNode.stop(); return }
+    await localMoneroNode.status()
+    if (moneroEnabled && getSetting('monero_node_autostart') === '1'
+        && moneroNodeMode(getSetting('monero_node_mode'), getSetting('monero_daemon_url')) === 'local') await localMoneroNode.start()
 }
 
 // ── Emulator interactive signing helper ─────────────────────────────
@@ -8455,6 +8519,28 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			getAppSettings: async () => {
 				return getAppSettings()
 			},
+			setPasswordManagerEnabled: async (params) => {
+				passwordAgent.cancelPending()
+				passwordBank.setEnabled(params?.enabled)
+				return getAppSettings()
+			},
+			passwordBankStatus: async () => passwordBank.view(),
+			passwordBankUnlock: async (params) => passwordBank.unlock(params?.create === true),
+			passwordBankLock: async () => { passwordAgent.cancelPending(); passwordBank.lock(); return passwordBank.view() },
+			passwordBankGenerate: async (params) => passwordBank.generate(params.count, params.ttlMinutes),
+			passwordBankAssign: async (params) => passwordBank.assign(params.origin, params.account, params.reviewDays),
+			passwordBankRehydrate: async (params) => passwordBank.rehydrate(params.id, params.pending === true, params.ttlMinutes),
+			passwordBankReveal: async (params) => passwordBank.reveal(params.id, params.pending === true),
+			passwordBankRotate: async (params) => passwordBank.rotate(params.id, params.action, params.confirmed === true),
+			passwordBankExport: async () => passwordBank.exportBackup(),
+			passwordBankBackupSaved: async (params) => passwordBank.acknowledgeBackup(params.revision),
+			passwordBankImport: async (params) => passwordBank.unlock(false, params.json),
+			passwordBankBrowserTargets: async (params) => passwordBex.discover(params.id),
+			passwordBankBrowserGrant: async (params) => passwordBex.grant(params),
+			passwordBankBrowserFill: async (params) => passwordBex.fill(params.grant),
+			passwordBankReportRisk: async (params) => passwordBank.reportRisk(params.id, params.kind, params.source),
+			passwordAgentApproveFill: async (params) => passwordAgent.approve(params.id),
+			passwordAgentRejectFill: async (params) => { passwordAgent.reject(params.id) },
 			// One-time: mark the passphrase/hidden-wallet intro dialog as seen so it
 			// never shows again (also set when the OOB passphrase card is completed).
 			markPassphraseIntroShown: async () => {
@@ -8501,6 +8587,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			},
 			setOfflineMode: async (params) => {
 				if (typeof params.enabled !== 'boolean') throw new Error('Offline mode requires an enabled boolean')
+				if (params.enabled && (await localMoneroNode.stop()).state === 'stopping') throw new Error('The Monero node is flushing its database. Wait for it to stop before enabling offline mode.')
 				if (params.enabled) await revokeKnownWalletMonitoring()
 				setSetting('offline_mode', params.enabled ? '1' : '0')
 				if (getSetting('offline_mode') !== (params.enabled ? '1' : '0')) throw new Error('Could not save offline mode. Try again.')
@@ -10379,7 +10466,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
                 else {
                     // A research emulator selection stays selected: the next start names it and
                     // says to turn Monero on, instead of silently running other firmware.
-                    invalidateMoneroWallet(); stopMoneroSidecar()
+                    invalidateMoneroWallet(); stopMoneroSidecar(); await localMoneroNode.stop()
                 }
                 moneroEnabled = enabled
                 setMoneroEmulatorEnabled(enabled)
@@ -10387,12 +10474,41 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
                 return getAppSettings()
             },
             setMoneroNode: async (params) => {
+                if (params.mode !== undefined && !['local', 'remote'].includes(params.mode)) throw new Error('Choose a local or remote Monero node')
+                if (params.mode === 'local') params = { ...params, daemonUrl: MONERO_LOCAL_URL }
                 const node = validateMoneroNode(params)
+                if (params.mode === 'remote' || (params.mode === undefined && node.daemonUrl !== MONERO_LOCAL_URL)) {
+                    requireOnline('connecting to a Monero node')
+                    // The explicit offline-chain QA mode is checked again by
+                    // the sidecar. Public remote nodes always need mainnet.
+                    const localQa = process.env.KEEPKEY_MONERO_LOCAL_REGTEST === '1'
+                        && ['localhost', '127.0.0.1', '[::1]'].includes(new URL(node.daemonUrl).hostname)
+                    if (!localQa) await checkMoneroNode(node.daemonUrl)
+                }
                 invalidateMoneroWallet()
                 setSetting('monero_daemon_url', node.daemonUrl)
                 setSetting('monero_restore_height', String(node.restoreHeight))
+                setSetting('monero_node_mode', params.mode ?? (node.daemonUrl === MONERO_LOCAL_URL ? 'local' : 'remote'))
                 if (moneroEnabled && !offlineMode) await startMoneroSidecar()
                 return getAppSettings()
+            },
+            moneroNodeStatus: async () => localMoneroNode.status(),
+            moneroNodeConfigure: async (params) => {
+                if (typeof params?.dataDir !== 'string') throw new Error('Choose a folder for the Monero blockchain')
+                return localMoneroNode.configure(params.dataDir)
+            },
+            moneroNodeStart: async () => {
+                requireOnline('starting a Monero node')
+                const status = await localMoneroNode.start()
+                setSetting('monero_node_autostart', '1')
+                if (getSetting('monero_daemon_url') !== MONERO_LOCAL_URL) invalidateMoneroWallet()
+                setSetting('monero_node_mode', 'local')
+                setSetting('monero_daemon_url', MONERO_LOCAL_URL)
+                return status
+            },
+            moneroNodeStop: async () => {
+                setSetting('monero_node_autostart', '0')
+                return localMoneroNode.stop()
             },
 			emulatorPair: async () => {
 				if (!emulatorEnabled) throw new Error('Emulator is disabled')
@@ -10695,21 +10811,12 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				if (!emulatorEnabled) return null
 				return await engine.getEmulatorMnemonic()
 			},
-			// Emulator-only "view seed for backup" — reads the persisted (encrypted)
-			// mnemonic for the active flash rather than a live DebugLink read, since
-			// DebugLink can hang on the dylib path (see raceVerifyMnemonic) and the
-			// saved mnemonic IS the backup of record. Hard-gated on engine.isEmulator
-			// (not just the emulatorEnabled feature flag) so this can never be reached
-			// against real hardware regardless of what the UI does.
-			emulatorRevealSeed: async () => {
-				if (!engine.isEmulator) throw new Error('Seed reveal is emulator-only')
-				const { loadMnemonic } = await import('./emulator-keychain')
-				const { getActiveFlashName } = await import('./emulator')
-				const flashName = getActiveFlashName()
-				const mnemonic = loadMnemonic(flashName)
-				if (!mnemonic) throw new Error('No saved seed for this emulator wallet')
-				return { mnemonic, flashName }
-			},
+            // Recovery words go directly to the emulator window, never back to the main UI.
+            emulatorRevealSeed: async () => {
+                const { revealEmulatorSeed } = await import('./emulator-seed-runtime')
+                return revealEmulatorSeed(engine, () => emulatorEnabled)
+            },
+
 			// Grabs whatever is currently on the emulator's OLED and writes it to
 			// disk as a PNG — visual proof for an automated test driver to attach
 			// alongside a txid (e.g. the mainnet test suite). Defaults to
@@ -11109,6 +11216,7 @@ engine.on('state-change', (state) => {
 	try { rpc.send['device-state'](state) } catch { /* webview not ready yet */ }
 	// The Studio provider key belongs to the device it was derived with.
 	providerKeySession.onDeviceState(state)
+	if (state.state === 'disconnected' || state.state === 'bootloader' || state.state === 'error') passwordBank.lock()
 	const bitcoinOnly = isBitcoinOnlyVariant(state.firmwareVariant)
 	// Scope the self-host node to the connected device: only a btc-only device may
 	// use the (global) persisted node. A multichain device — which can't even see
@@ -11618,6 +11726,7 @@ perf('window created, starting deferred init')
 deferredInit()
 auth.reloadPairings()
 loadSettings()
+void resumeLocalMoneroNode().catch(error => console.warn('[monero-node]', error.message))
 await applyRestApiState('startup')
 if (!restApiEnabled) console.log('[Vault] REST API disabled by user setting')
 perf('REST API applied, starting engine')
@@ -11826,6 +11935,7 @@ function cleanupAndQuit() {
 	restServer?.stop()
 	restServer = null
 	stopMoneroSidecar()
+	localMoneroNode.shutdown()
 	// Zero the Studio provider key: the window (and its close effect) is going away.
 	try { providerKeySession.clear() } catch { /* nothing to zero */ }
 

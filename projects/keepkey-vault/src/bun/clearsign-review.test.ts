@@ -3,7 +3,8 @@ import { createHash } from 'node:crypto'
 import { Wallet } from 'ethers'
 
 import { buildEvmSchemaBody, CERTIFIED_METADATA_KEY_ID } from './evm-certified-schema'
-import { deploymentMismatch, findContractRating, verifyContractRating, verifyPublishedReview } from './clearsign-review'
+import { deploymentMismatch, findContractRating, validateContractRating, verifyPublishedReview } from './clearsign-review'
+import { buildClearSignReport } from '../shared/clearsign-report'
 import { findCertifiedEvmSchema } from './evm-schema-registry'
 import { testCertifiedEnvelope, trustTestRoot } from '../../__tests__/support/clearsign-test-root'
 
@@ -23,16 +24,12 @@ const AUDITED = [
 const unchanged = async () => AUDITED
 const semantics = new Wallet(`0x${'0a'.padStart(64, '0')}`)
 const security = new Wallet(`0x${'0b'.padStart(64, '0')}`)
-const rater = new Wallet(`0x${'0c'.padStart(64, '0')}`)
 const addr = (w: Wallet) => w.address.toLowerCase()
 
 // Must match keepkey-clearsign-server worker/src/attestation.ts.
 const DOMAIN = { name: 'KeepKey ClearSign', version: '1' }
 const APPROVAL = { DefinitionApproval: [{ name: 'auditId', type: 'bytes32' }, { name: 'evidenceHash', type: 'bytes32' },
   { name: 'role', type: 'string' }, { name: 'decision', type: 'string' }, { name: 'reviewedAt', type: 'uint64' }] }
-const RATING = { ContractRating: [{ name: 'network', type: 'string' }, { name: 'contract', type: 'address' },
-  { name: 'deploymentHash', type: 'bytes32' }, { name: 'riskLevel', type: 'string' }, { name: 'ratingHash', type: 'bytes32' },
-  { name: 'ratedAt', type: 'uint64' }] }
 
 function canonical(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`
@@ -62,14 +59,12 @@ async function publishedReview(keys: [Wallet, Wallet] = [semantics, security]) {
 }
 
 /** A rating exactly as the Worker serves /v1/ratings. */
-async function servedRating(key = rater, deployment = AUDITED) {
+async function servedRating(deployment = AUDITED) {
   const rating = { version: 1, network: 'eip155:8453', contract: MANAGER, deployment, ratedAt: 5,
     factors: { sourceVerified: true, upgradeable: true, adminDelaySeconds: 864000, controller: 'single-key', privilegedFundAccess: true, uncappedMint: true },
     findings: [{ severity: 'high', title: 'Single-key upgrade control', detail: '1-of-1 EOA Safe behind a 10-day timelock.' }],
     risk: { rubric: 'keepkey-contract-risk-v1', level: 'high', reasons: ['a single key controls upgrades, deposits, minting (delay 10d)'] } }
-  const signature = await key._signTypedData(DOMAIN, RATING, { network: rating.network, contract: MANAGER,
-    deploymentHash: `0x${sha(deployment)}`, riskLevel: 'high', ratingHash: `0x${sha(rating)}`, ratedAt: 5 })
-  return { rating, rater: addr(key), signature }
+  return { rating, ratingId: '0x' + 'aa'.repeat(32), rater: 'Contract audit team', source: 'hosted-assessment' }
 }
 
 describe('verifyPublishedReview (clearsign definition)', () => {
@@ -105,27 +100,91 @@ describe('verifyPublishedReview (clearsign definition)', () => {
   })
 })
 
-describe('verifyContractRating (app-only opinion)', () => {
-  it('accepts the signed MDM rating for the live deployment', async () => {
-    const rating = verifyContractRating(await servedRating(), 8453, MANAGER, AUDITED)
-    expect(rating).toMatchObject({ riskLevel: 'high', rater: addr(rater), raterPinned: false })
+describe('validateContractRating (app-only opinion)', () => {
+  it('accepts a hosted assessment without an auditor signature', async () => {
+    const rating = validateContractRating(await servedRating(), 8453, MANAGER, AUDITED)
+    expect(rating).toMatchObject({ riskLevel: 'high', rater: 'Contract audit team', source: 'hosted-assessment' })
     expect(rating?.findings).toHaveLength(1)
+  })
+
+  it('keeps the audit opinion out of clear-signing protection and authentication claims', async () => {
+    const rating = validateContractRating(await servedRating(), 8453, MANAGER, AUDITED)!
+    const simulation: any = { chain: 'Ethereum', transactionFingerprint: 'a'.repeat(64), status: 'unavailable',
+      warnings: [], unknowns: [], assetChanges: [], authorityChanges: [], stateReference: {} }
+    for (const authenticated of [false, true]) {
+      const input = { requestedLevel: 'P4' as const, descriptor: { source: 'native' as const, authenticated }, simulation, now: 1 }
+      const baseline = buildClearSignReport(input)
+      for (const riskLevel of ['low', 'critical'] as const) {
+        const report = buildClearSignReport({ ...input, rating: { ...rating, riskLevel } })
+        expect(report.protectionLevel).toBe(baseline.protectionLevel)
+        expect(report.claims).toEqual(baseline.claims)
+      }
+    }
+    expect(rating.reportUrl).toEndWith('/audits/0x' + 'aa'.repeat(32))
   })
 
   it('ignores a rating of a different deployment', async () => {
     const upgraded = [AUDITED[0], { ...AUDITED[1], codeHash: `0x${'ab'.repeat(32)}` }]
-    expect(verifyContractRating(await servedRating(), 8453, MANAGER, upgraded)).toBeUndefined()
+    expect(validateContractRating(await servedRating(), 8453, MANAGER, upgraded)).toBeUndefined()
   })
 
-  it('refuses a rating whose content or level was changed after signing', async () => {
-    const served = await servedRating()
-    served.rating.risk.level = 'low'
-    expect(() => verifyContractRating(served, 8453, MANAGER, AUDITED)).toThrow('signature is invalid')
+  it('rejects wrong networks, missing attribution and malformed findings', async () => {
+    for (const edit of [
+      (s: any) => { s.rating.network = 'eip155:1' },
+      (s: any) => { s.rater = '' },
+      (s: any) => { s.rating.findings = [null] },
+      (s: any) => { s.rating.risk.reasons = 'not an array' },
+      (s: any) => { s.rating.deployment = [] },
+    ]) {
+      const served = await servedRating()
+      edit(served)
+      expect(() => validateContractRating(served, 8453, MANAGER, AUDITED)).toThrow('malformed')
+    }
   })
 
-  it('refuses an unpinned rater once raters are pinned', async () => {
-    const served = await servedRating(semantics)
-    expect(() => verifyContractRating(served, 8453, MANAGER, AUDITED, [addr(rater)])).toThrow('does not trust')
+  it('accepts bounded service/client clock skew and rejects distant future dates', async () => {
+    const near = await servedRating()
+    near.rating.ratedAt = Date.now() + 4 * 60_000
+    expect(validateContractRating(near, 8453, MANAGER, AUDITED)?.riskLevel).toBe('high')
+    near.rating.ratedAt = Date.now() + 6 * 60_000
+    expect(() => validateContractRating(near, 8453, MANAGER, AUDITED)).toThrow('malformed')
+  })
+
+  it('bounds the entire optional lookup when live deployment measurement stalls', async () => {
+    const original = globalThis.fetch
+    const good = await servedRating()
+    try {
+      globalThis.fetch = (async () => Response.json({ rating: good })) as unknown as typeof fetch
+      const start = performance.now()
+      const result = await findContractRating(8453, MANAGER, async () => new Promise<never>(() => {}))
+      expect(result).toBeUndefined()
+      expect(performance.now() - start).toBeLessThan(2_200)
+    } finally { globalThis.fetch = original }
+  })
+
+  it('cancels deployment RPC reads when the overall assessment budget expires', async () => {
+    const original = globalThis.fetch
+    const good = await servedRating()
+    const { snapshotEvmIdentities } = await import('./clearsign-live-auditor')
+    let started = 0, aborted = 0, active = 0
+    try {
+      globalThis.fetch = (async (url: any, init: any) => {
+        if (String(url).includes('/v1/ratings?')) return Response.json({ rating: good })
+        started++; active++
+        return new Promise<Response>((_resolve, reject) => {
+          const cancel = () => { aborted++; active--; reject(init.signal.reason) }
+          if (init.signal.aborted) cancel()
+          else init.signal.addEventListener('abort', cancel, { once: true })
+        })
+      }) as typeof fetch
+      const result = await findContractRating(8453, MANAGER, async (_chain, contract, signal) =>
+        (await snapshotEvmIdentities(contract, 'https://rpc.example', signal)).identities)
+      await new Promise(resolve => setTimeout(resolve, 0))
+      expect(result).toBeUndefined()
+      expect(started).toBe(4)
+      expect(aborted).toBe(started)
+      expect(active).toBe(0)
+    } finally { globalThis.fetch = original }
   })
 
   it('findContractRating is best-effort: no rating, bad data, or no network are all undefined', async () => {
@@ -133,13 +192,15 @@ describe('verifyContractRating (app-only opinion)', () => {
     try {
       globalThis.fetch = (async () => Response.json({ rating: null })) as unknown as typeof fetch
       expect(await findContractRating(8453, MANAGER, unchanged)).toBeUndefined()
-      const tampered = await servedRating(); tampered.rating.findings = []
-      globalThis.fetch = (async () => Response.json(tampered)) as unknown as typeof fetch
+      const tampered = await servedRating(); tampered.rating.findings = [null] as any
+      globalThis.fetch = (async () => Response.json({ rating: tampered })) as unknown as typeof fetch
       expect(await findContractRating(8453, MANAGER, unchanged)).toBeUndefined()
       globalThis.fetch = (async () => { throw new Error('offline') }) as unknown as typeof fetch
       expect(await findContractRating(8453, MANAGER, unchanged)).toBeUndefined()
       const good = await servedRating()
-      globalThis.fetch = (async () => Response.json(good)) as unknown as typeof fetch
+      // Match the Worker's real wire shape: { rating: { rating, ratingId, rater, source } }.
+      const workerResponse = { rating: good }
+      globalThis.fetch = (async () => Response.json(workerResponse)) as unknown as typeof fetch
       expect((await findContractRating(8453, MANAGER, unchanged))?.riskLevel).toBe('high')
     } finally { globalThis.fetch = original }
   })

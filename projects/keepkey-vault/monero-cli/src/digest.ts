@@ -4,7 +4,7 @@ import { parseExactJson } from './protocol'
 
 const MAX_BODY = 8 * 1024 * 1024
 // export_outputs/import_key_images/transfer serve the research send path; a view-only wallet cannot sign or relay.
-const ALLOWED = new Set(['get_version', 'generate_from_keys', 'open_wallet', 'get_address', 'query_key', 'refresh', 'get_balance', 'get_transfers', 'get_height', 'stop_wallet',
+const ALLOWED = new Set(['get_version', 'auto_refresh', 'set_daemon', 'generate_from_keys', 'open_wallet', 'get_address', 'query_key', 'refresh', 'get_balance', 'get_transfers', 'get_height', 'stop_wallet',
   'export_outputs', 'import_key_images', 'transfer'])
 const md5 = (value: string) => createHash('md5').update(value).digest('hex')
 

@@ -1,0 +1,14 @@
+{
+  "txid": "2edd5c273bf44b629be55760ae7d5d8467dd1fc0e3857b3dc2d1ccb75da6fb6a",
+  "node": "https://node.sethforprivacy.com",
+  "found": true,
+  "inPool": false,
+  "blockHeight": 3801979,
+  "confirmations": 1,
+  "independentlyVerified": true,
+  "featherReceiptReportedByUser": true,
+  "hardwareFirmwareHash": "123af6de3b5ddbc1eeb94568825d1bb8107079bc9100ac67f9f6162ca34e2f83",
+  "recipientReceiptSource": "User reported that Feather detected the payment",
+  "initiatedAndApprovedBy": "user",
+  "amountXmr": null
+}

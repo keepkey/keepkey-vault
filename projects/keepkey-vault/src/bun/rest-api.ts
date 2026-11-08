@@ -83,6 +83,7 @@ import {
 } from './txbuilder/ton'
 import { usb } from 'usb'
 import { handleMcpRequest } from './mcp'
+import { passwordAgentHttp, type PasswordAgent } from './password-agent'
 import { onBexOpen, onBexClose, onBexMessage } from './bex-bridge'
 import { simulateEvmEffects } from './evm-effects'
 import { simulateSolanaEffects } from './solana-effects'
@@ -129,6 +130,7 @@ export interface SigningApprovalDecision {
 export type RestActivityTag = { txid?: string; chain?: string; activityType?: string; meta?: Record<string, unknown> }
 
 export interface RestApiCallbacks {
+  passwordAgent?: PasswordAgent
   onApiLog: (entry: ApiLogEntry) => void
   /** Activity rows changed outside onApiLog (e.g. a REST history rebuild). */
   onActivityChanged?: () => void
@@ -1382,6 +1384,18 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
       // /bex-bridge stays token-gated (the extension is a chrome-extension://
       // origin needing a valid pairing key; https→ws://localhost is
       // mixed-content-blocked for web pages regardless).
+      if (path.startsWith('/api/v1/passwords')) {
+        const ip = server.requestIP(req)?.address
+        if (!['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(ip || '') || req.headers.has('origin') || req.headers.has('sec-fetch-site')) {
+          return new Response(JSON.stringify({ error: 'Password API is for paired local agents, not browser fetches' }), { status: 403, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' } })
+        }
+        try { auth.requireAuth(req) }
+        catch { return new Response(JSON.stringify({ error: 'Pair with Vault first' }), { status: 401, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' } }) }
+        // Password metadata must not flow through the generic request/response
+        // audit recorder or become a browser-origin CORS response.
+        server.timeout(req, 0)
+        return passwordAgentHttp(req, callbacks?.passwordAgent)
+      }
       if (path === '/mcp' || path === '/bex-bridge') {
         const ip = server.requestIP(req)?.address
         const isLoopback = ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1'
@@ -1433,7 +1447,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
               { status: typeof err?.status === 'number' ? err.status : 401,
                 headers: { 'Content-Type': 'application/json' } })
           }
-          return handleMcpRequest(req, {})
+          return handleMcpRequest(req, {}, callbacks?.passwordAgent)
         }
         return new Response(JSON.stringify({ error: 'POST only' }),
           { status: 405, headers: { 'Content-Type': 'application/json' } })

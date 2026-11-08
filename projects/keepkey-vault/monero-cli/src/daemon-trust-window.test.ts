@@ -1,5 +1,22 @@
 import { expect, test } from 'bun:test'
 import { withDaemonTrusted } from './wallet'
+import { DigestWalletRpc } from './digest'
+
+test('the actual local RPC client permits the remote key-image trust window and restores untrusted mode', async () => {
+  const calls: Array<{ method: string; params: any }> = []
+  const server = Bun.serve({ hostname: '127.0.0.1', port: 0, async fetch(request) {
+    const { id, method, params } = await request.json()
+    calls.push({ method, params })
+    return Response.json({ jsonrpc: '2.0', id, result: {} })
+  } })
+  const rpc = new DigestWalletRpc(server.port, 'public-test', 'public-test')
+  try {
+    await withDaemonTrusted(rpc, 'https://node.example', 'ab'.repeat(32), () => rpc.call('import_key_images', { offset: 0, signed_key_images: [] }))
+    expect(calls.map(call => call.method)).toEqual(['set_daemon', 'import_key_images', 'set_daemon'])
+    expect(calls[0].params).toMatchObject({ trusted: true, ssl_support: 'enabled', ssl_allowed_fingerprints: ['ab'.repeat(32)] })
+    expect(calls[2].params).toEqual({ ...calls[0].params, trusted: false })
+  } finally { rpc.close(); server.stop(true) }
+})
 
 const recorder = (failUntrust = false) => {
   const calls: Array<[string, any]> = []
