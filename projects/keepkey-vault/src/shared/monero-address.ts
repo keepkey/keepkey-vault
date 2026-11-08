@@ -44,6 +44,14 @@ export function moneroStandardAddressKeys(address: string): { spend: Uint8Array;
   return { spend: data.slice(1,33), view: data.slice(33,65) }
 }
 
+/** Checked mainnet standard/subaddress public keys for construction v2. */
+export function moneroDestinationAddressKeys(address: string): { kind: 'standard' | 'subaddress'; spend: Uint8Array; view: Uint8Array } | null {
+  const kind=moneroAddressKind(address)
+  if(kind!=='standard'&&kind!=='subaddress')return null
+  const data=decode(address)!
+  return {kind,spend:data.slice(1,33),view:data.slice(33,65)}
+}
+
 /** "1.5" -> "1500000000000". Null for zero, more than 12 decimals or above uint64. */
 export function parseXmrAmount(text: string): string | null {
   const match = /^([0-9]{1,8})(?:\.([0-9]{1,12}))?$/.exec(text.trim())

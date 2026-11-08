@@ -154,3 +154,19 @@ for (const blocker of ['emulator', 'adapter']) {
   expect(ui[`receiveOnlyBalance_${blocker}`]).toEqual({checks:1,balance:'0.08465305',blocked:blocker,prepared:false})
  })
 }
+
+
+test('remote failover shows the active node, failures and last successful response in collapsed details',()=>{
+ expect(ui.connectionDiagnostics.text).toContain('Active node: https://second.example')
+ expect(ui.connectionDiagnostics.text).toContain('Automatic remote failover is on.')
+ expect(ui.connectionDiagnostics.text).toContain('The node did not respond within 10 seconds.')
+ expect(ui.connectionDiagnostics.text).toContain('Last successful node response')
+ expect(ui.connectionDiagnostics.text).toContain('120 ms')
+ expect(ui.connectionDiagnostics.detailsClosed).toBe(true)
+})
+
+
+test('failover rechecks known outputs automatically and preserves a declined device approval',()=>{
+ expect(ui.reverifiedAfterFailover).toBe(2)
+ expect(ui.declinedAcrossFailover).toBe(1)
+})

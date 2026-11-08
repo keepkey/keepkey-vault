@@ -589,7 +589,19 @@ export interface MoneroTransaction {
   type?: 'in' | 'pool'
 }
 
+export interface MoneroConnectionInfo {
+  sessionId?: number
+  preferredNode: string
+  activeNode: string
+  automaticFailover: boolean
+  state: 'idle' | 'checking' | 'switching' | 'scanning' | 'connected' | 'failed' | 'waiting'
+  retryAt?: string
+  pausedForTransaction?: boolean
+  attempts: Array<{ url: string; state: 'untested' | 'checking' | 'responding' | 'failed'; checkedAt?: string; lastResponseAt?: string; retryAt?: string; error?: string; height?: number; latencyMs?: number }>
+}
+
 export interface MoneroStatus {
+  connection?: MoneroConnectionInfo
   available: boolean
   network: 'mainnet'
   address: string

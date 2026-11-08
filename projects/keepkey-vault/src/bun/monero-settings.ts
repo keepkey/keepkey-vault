@@ -30,7 +30,8 @@ export async function checkMoneroNode(daemonUrl: string,
   try {
     const response = await fetcher(`${origin}/json_rpc`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ jsonrpc: '2.0', id: 'vault-node-check', method: 'get_info' }), redirect: 'error', signal: AbortSignal.timeout(10000) })
-    if (!response.ok || !response.body) throw new Error()
+    if (!response.ok) throw new Error(`http:${response.status}`)
+    if (!response.body) throw new Error()
     const reader = response.body.getReader(), chunks: Uint8Array[] = []; let size = 0
     try {
       while (true) {
@@ -46,6 +47,11 @@ export async function checkMoneroNode(daemonUrl: string,
     return { height: info.height }
   } catch (error) {
     if (error instanceof Error && error.message === 'syncing') throw new Error('This node is still syncing. Choose another node or try again later.')
+    if (error instanceof Error && ['TimeoutError','AbortError'].includes(error.name)) throw new Error('The node did not respond within 10 seconds.')
+    const http = error instanceof Error ? /^http:([45][0-9]{2})$/.exec(error.message) : null
+    if (http) throw new Error(`The node returned HTTP ${http[1]}.`)
+    const code = error && typeof error === 'object' && 'code' in error ? String(error.code) : ''
+    if (/CERT|TLS/.test(code)) throw new Error('The node TLS certificate could not be verified.')
     throw new Error('Could not reach a Monero mainnet node at this address. Check the URL and try again.')
   }
 }

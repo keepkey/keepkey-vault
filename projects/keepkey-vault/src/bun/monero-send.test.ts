@@ -13,7 +13,7 @@ import { DigestWalletRpc } from '../../monero-cli/src/digest'
 import { checkSignedTransaction, concat, keyImageInitRequest, lengthField, openKeyImage, parseFields, parseSignedTransaction, reviewPlan,
   signRequest, transferDetails, varint } from './monero-wire'
 import { createMoneroVault, type MoneroWatchSidecar } from './monero-vault'
-import type { MoneroDeviceSigner } from './monero-device-signing'
+import { MONERO_DEVICE_SUBADDRESS_CANDIDATE_SHA256, type MoneroDeviceSigner } from './monero-device-signing'
 import { createFilePendingStore, type MoneroPendingStore } from './monero-pending'
 import { formatXmrAtomic, moneroAddressKind, parseXmrAmount } from '../shared/monero-address'
 
@@ -273,6 +273,7 @@ class Emulator {
   pending: Array<[number, Uint8Array]> = []
   received: Array<{ type: number; body: Uint8Array }> = []
   partial: { type: number; length: number; data: number[] } | null = null
+  keyImageOverride:string|null=null
   signedBlob = blobOf('base')
   signedHash = unhex(referenceHash('base'))
   reviewScreens = 3
@@ -288,7 +289,7 @@ class Emulator {
   }
   private handle(type: number, body: Uint8Array) {
     this.received.push({ type, body })
-    const images = fixtures.cases.base.signedTransaction.keyImages as string[]
+    const images = this.keyImageOverride?[this.keyImageOverride]:fixtures.cases.base.signedTransaction.keyImages as string[]
     if (type === 27) { if (this.pending[0]?.[0] === 26 || (this.pending[0]?.[0] === 65001 || this.pending[0]?.[0] === 65003)) this.onReviewScreen?.(); return this.respond(this.pending) }
     if (type === 20) return this.respond([[3, new Uint8Array([8, 4])]])
     if (this.pinLocked && (type === 540 || type === 542 || type === 530 || (type === 65000 || type === 65002))) return this.respond([[18, new Uint8Array([8, 1])]])
@@ -1017,4 +1018,45 @@ test('unsupported physical firmware gets a hardware-specific blocker',async()=>{
  await b.api.connect();expect((await b.api.getStatus()).sendBlocked).toBe('firmware')
  await expect(b.api.prepareSend({address:RECIPIENT,amountAtomic:'2000000000000'})).rejects.toThrow('hardware signing')
  expect(b.calls.transfers).toHaveLength(0)
+})
+
+
+test('subaddress hardware send uses the exact image, scoped monitoring credential, and device protocol',async()=>{
+ const record=JSON.parse(readFileSync(join(import.meta.dir,'monero-device-subaddress.fixtures.json'),'utf8')).cases.find((c:any)=>c.name==='v2-single-sub-network0')
+ const p=validatePlan(record.adapterPlan),db=new Database(':memory:')
+ const store=createMoneroWatchStore({database:()=>db,profile:'subaddress-test',key:async()=>new Uint8Array(32).fill(9)})
+ let monitoring:Uint8Array|null=null
+ const hardwareSigner:MoneroDeviceSigner={available:hash=>hash===MONERO_DEVICE_SUBADDRESS_CANDIDATE_SHA256,prepare:async(actual,context)=>{
+  expect(actual).toEqual(p);expect(context?.firmwareHash).toBe(MONERO_DEVICE_SUBADDRESS_CANDIDATE_SHA256)
+  expect(context?.viewKey?.length).toBe(32);expect(context!.viewKey!.some(b=>b!==0)).toBe(true)
+  monitoring=context!.viewKey!
+  return {payload:new Uint8Array([1]),verify:()=>true,dispose(){}}
+ }}
+ const b=bridge({watchStore:store,hardwareSigner});b.engine.isEmulator=false;b.state.activeTransport='hid'
+ ;(b.state as any).firmwareHash=MONERO_DEVICE_SUBADDRESS_CANDIDATE_SHA256
+ b.engine.currentSeedEthAddress='0x'+'a'.repeat(40)
+ try{
+  b.delegate.keyImageOverride=parseSignedTransaction(unhex(record.transactionHex)).inputs[0].keyImage
+  await b.api.connect();await b.api.syncKeyImages()
+  b.setDraft(()=>({feeAtomic:p.feeAtomic,amountAtomic:p.outputs[0].amountAtomic,plan:p}))
+  b.delegate.signedBlob=unhex(record.transactionHex);b.delegate.signedHash=unhex(parseSignedTransaction(b.delegate.signedBlob).hash)
+  const review=await b.api.prepareSend({address:p.outputs[0].address,amountAtomic:p.outputs[0].amountAtomic})
+  await b.api.send({prepareId:review.prepareId})
+  expect(sentTypes(b)).toContain(65002);expect(sentTypes(b)).not.toContain(65000)
+  expect(b.calls.relays).toHaveLength(1);expect(b.confirmed).toHaveLength(0)
+  expect(monitoring!.every(b=>b===0)).toBe(true)
+ }finally{db.close()}
+})
+
+test('standard hardware sends do not reopen an unnecessary private monitoring credential',async()=>{
+ const db=new Database(':memory:');let loads=0
+ const inner=createMoneroWatchStore({database:()=>db,profile:'standard-test',key:async()=>new Uint8Array(32).fill(9)})
+ const store={...inner,async loadWatch(){loads++;throw new Error('locked test keystore')}}
+ const hardwareSigner:MoneroDeviceSigner={available:()=>true,prepare:async(_plan,context)=>{expect(context?.viewKey).toBeNull();return {payload:new Uint8Array([1]),verify:()=>true,dispose(){}}}}
+ const b=bridge({watchStore:store,hardwareSigner});b.engine.isEmulator=false;b.state.activeTransport='hid';b.engine.currentSeedEthAddress='0x'+'b'.repeat(40)
+ try{
+  await b.api.connect();await b.api.syncKeyImages();const before=loads
+  const review=await b.api.prepareSend({address:RECIPIENT,amountAtomic:'2000000000000'})
+  await b.api.send({prepareId:review.prepareId});expect(loads).toBe(before);expect(b.calls.relays).toHaveLength(1)
+ }finally{db.close()}
 })

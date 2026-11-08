@@ -59,7 +59,7 @@ class Device {
     return report
   }
 }
-function fixture(emulator = false, replyMs?: { device: number; human: number }, watchStore?: MoneroWatchStore) {
+function fixture(emulator = false, replyMs?: { device: number; human: number }, watchStore?: MoneroWatchStore, onTransportFailure?: (transport: unknown) => void) {
   const delegate = new Device()
   let locked = false, reviews = 0, configures = 0, starts = 0, stops = 0
   let configuredKey: Uint8Array | null = null
@@ -94,7 +94,7 @@ function fixture(emulator = false, replyMs?: { device: number; human: number }, 
     expect(locked).toBe(true); delegate.onButtonRequest = () => { reviews++ }
     try { return await operation() } finally { delegate.onButtonRequest = null }
   }
-  const api = createMoneroVault({ engine, confirm, getConfig: () => ({ ...config }), sidecar, watchStore, ...(replyMs ? { replyMs } : {}) })
+  const api = createMoneroVault({ engine, confirm, getConfig: () => ({ ...config }), sidecar, watchStore, onTransportFailure, ...(replyMs ? { replyMs } : {}) })
   return { api, delegate, engine, config, state, status, sidecar,
     counts: () => ({ reviews, configures, starts, stops }), key: () => configuredKey, options: () => configuredOptions }
 }
@@ -332,4 +332,49 @@ test('missing seed identity never reads or writes saved monitoring access',async
  const f=fixture(false,undefined,store)
  try {await f.api.connect();f.api.invalidate();await f.api.connect();expect(f.delegate.sent.filter(x=>x.type===542)).toHaveLength(2)}
  finally{db.close()}
+})
+
+
+test('a Monero read timeout invalidates the current engine transport instead of leaving it ready',async()=>{
+ let recovered=0
+ const f=fixture(false,{device:30,human:100},undefined,transport=>{
+  expect(transport).toBe(f.engine.wallet!.transport);recovered++;f.engine.wallet=null;f.state.state='disconnected'
+ })
+ f.delegate.silent=true
+ await expect(f.api.connect()).rejects.toThrow('did not answer')
+ expect(recovered).toBe(1)
+ expect(await f.api.getStatus()).toMatchObject({available:false,deviceReady:false})
+ expect(f.counts().configures).toBe(0)
+})
+
+test('LIBUSB_ERROR_NOT_FOUND requests a fresh transport without replaying the failed operation',async()=>{
+ let recovered=0,writes=0
+ const f=fixture(false,undefined,undefined,()=>{recovered++;f.engine.wallet=null;f.state.state='disconnected'})
+ f.delegate.writeChunk=async()=>{writes++;throw Error('transferOut error: Error: LIBUSB_ERROR_NOT_FOUND')}
+ await expect(f.api.connect()).rejects.toThrow('Unable to connect')
+ expect(recovered).toBe(1);expect(writes).toBeLessThanOrEqual(2)
+ expect(await f.api.getStatus()).toMatchObject({available:false,deviceReady:false})
+ expect(f.counts().configures).toBe(0)
+})
+
+test('a normal cancelled Monero approval does not trigger transport recovery',async()=>{
+ let recovered=0
+ const f=fixture(false,undefined,undefined,()=>{recovered++});f.delegate.unsupported=true
+ await expect(f.api.connect()).rejects.toThrow('rejected or cancelled')
+ expect(recovered).toBe(0)
+})
+
+
+test('approved monitoring access survives an unreachable node, so another node needs no repeated export',async()=>{
+ const db=new Database(':memory:')
+ const store=createMoneroWatchStore({database:()=>db,profile:'test',key:async()=>new Uint8Array(32).fill(9)})
+ const f=fixture(false,undefined,store);f.engine.currentSeedEthAddress='0x'+'a'.repeat(40)
+ const configure=f.sidecar.configureMoneroWatch
+ f.sidecar.configureMoneroWatch=async()=>{throw Error('The Monero daemon is unavailable')}
+ try {
+  await expect(f.api.connect()).rejects.toThrow()
+  f.sidecar.configureMoneroWatch=configure;f.config.daemonUrl='https://other.example';f.delegate.sent=[]
+  await f.api.connect()
+  expect(f.delegate.sent.map(x=>x.type)).toEqual([540])
+ }finally{db.close()}
 })

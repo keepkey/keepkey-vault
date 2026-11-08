@@ -1,8 +1,10 @@
 /** Vault owns only the daemon identified by its unique config path, binary and data directory.
  * RPC is restricted and bound to loopback. No wallet, seed or spending key is involved. */
-import { spawn, execFileSync, type ChildProcess } from 'node:child_process'
+import { spawn, execFile, execFileSync, type ChildProcess } from 'node:child_process'
 import { createHash, randomBytes } from 'node:crypto'
-import { existsSync, mkdirSync, readFileSync, writeFileSync, renameSync, openSync, closeSync, lstatSync, realpathSync, statSync, statfsSync, readdirSync } from 'node:fs'
+import { mkdirSync, readFileSync, writeFileSync, renameSync, openSync, closeSync, lstatSync, realpathSync } from 'node:fs'
+import * as asyncFs from 'node:fs/promises'
+import { promisify } from 'node:util'
 import { dirname, isAbsolute, join, parse, resolve } from 'node:path'
 import { homedir } from 'node:os'
 import { createServer } from 'node:net'
@@ -22,49 +24,51 @@ export async function verifiedMonerod(): Promise<string> {
   ]
   for (const directory of candidates) {
     try {
-      const meta = JSON.parse(readFileSync(join(directory, 'monero-tools.json'), 'utf8'))
-      const binary = join(directory, name), file = lstatSync(binary)
+      const meta = JSON.parse(await asyncFs.readFile(join(directory, 'monero-tools.json'), 'utf8'))
+      const binary = join(directory, name), file = await asyncFs.lstat(binary)
       if (meta.version !== MONERO_VERSION || meta.platform !== platform || meta.archiveSha256 !== ARCHIVE_HASHES[platform]
           || meta.signerFingerprint !== '81AC591FE9C4B65C5806AFC3F0AF4D462A0BDF92'
           || !/^[a-f0-9]{64}$/.test(meta.daemonSha256 ?? '') || !file.isFile() || file.isSymbolicLink()
           || file.size > 256 * 1024 ** 2 || (process.platform !== 'win32' && (file.mode & 0o022))) continue
-      if (createHash('sha256').update(new Uint8Array(readFileSync(binary))).digest('hex') === meta.daemonSha256) return binary
+      if (createHash('sha256').update(new Uint8Array(await asyncFs.readFile(binary))).digest('hex') === meta.daemonSha256) return binary
     } catch { /* Only signed-release preparation outputs are accepted. */ }
   }
   throw new Error('This build does not include the verified Monero node. Use a build with local node support.')
 }
 
-function diskUsage(path: string): number {
-  if (!existsSync(path)) return 0
+const runFile = promisify(execFile)
+async function pathExists(path: string) { try { await asyncFs.stat(path); return true } catch (error: any) { if (error.code === 'ENOENT') return false; throw error } }
+async function diskUsage(path: string): Promise<number> {
+  if (!await pathExists(path)) return 0
   let bytes = 0, count = 0
-  const visit = (directory: string) => {
-    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+  const visit = async (directory: string) => {
+    for (const entry of await asyncFs.readdir(directory, { withFileTypes: true })) {
       if (++count > 10000) throw new Error('Choose a dedicated Monero node folder')
-      const p = join(directory, entry.name), stat = lstatSync(p)
+      const p = join(directory, entry.name), stat = await asyncFs.lstat(p)
       if (stat.isSymbolicLink()) continue
-      if (stat.isDirectory()) visit(p)
+      if (stat.isDirectory()) await visit(p)
       else bytes += stat.blocks === undefined ? stat.size : stat.blocks * 512
     }
   }
-  visit(path); return bytes
+  await visit(path); return bytes
 }
 
 /** Check the mounted volume before creating directories; never create a fallback on the system disk. */
-function storage(path: string, expectedDevice?: number) {
+async function storage(path: string, expectedDevice?: number) {
   if (!isAbsolute(path) || path.includes('\0') || path.length > 2048 || path === parse(path).root) throw new Error('Choose an absolute folder path for the Monero blockchain')
   if (process.platform === 'darwin' && path.startsWith('/Volumes/')) {
     const mount = '/' + path.split('/').slice(1, 3).join('/')
-    if (!existsSync(mount) || statSync(mount).dev === statSync('/').dev) throw new Error('The selected storage drive is not mounted')
+    if (!await pathExists(mount) || (await asyncFs.stat(mount)).dev === (await asyncFs.stat('/')).dev) throw new Error('The selected storage drive is not mounted')
   }
   let existing = path
-  while (!existsSync(existing)) existing = dirname(existing)
-  const device = statSync(existing).dev
+  while (!await pathExists(existing)) existing = dirname(existing)
+  const device = (await asyncFs.stat(existing)).dev
   if (expectedDevice !== undefined && device !== expectedDevice) throw new Error('The storage drive changed. Choose the node folder again.')
-  const fs = statfsSync(existing)
+  const fs = await asyncFs.statfs(existing)
   return { freeBytes: Number(fs.bavail) * Number(fs.bsize), device }
 }
 
-export function createMoneroNodeManager(options: { stateFile: string; binary?: () => Promise<string>; disk?: typeof storage;
+export function createMoneroNodeManager(options: { stateFile: string; binary?: () => Promise<string>; disk?: (path: string, expectedDevice?: number) => ReturnType<typeof storage> | Awaited<ReturnType<typeof storage>>;
   reserveBytes?: number; estimatedBytes?: number; port?: number; pollMs?: number; stopWaitMs?: number;
   processCommand?: (pid: number) => string } ) {
   const port = options.port ?? 18081, rpcUrl = `http://127.0.0.1:${port}`
@@ -91,6 +95,17 @@ export function createMoneroNodeManager(options: { stateFile: string; binary?: (
       return actual === saved.command.join(' ')
     } catch { return false }
   }
+  const ownedForStatus = async () => {
+    const pid = saved.pid, command = saved.command?.join(' ')
+    if (!alive(pid) || !command || !saved.configPath) return false
+    if (child && child.pid === pid && child.exitCode === null && child.signalCode === null) return true
+    try {
+      const actual = options.processCommand ? options.processCommand(pid!) : process.platform === 'linux'
+        ? (await asyncFs.readFile(`/proc/${pid}/cmdline`, 'utf8')).replace(/\0/g, ' ').trim()
+        : (await runFile('/bin/ps', ['-ww', '-p', String(pid), '-o', 'command='], { encoding: 'utf8', timeout: 3000 })).stdout.trim()
+      return saved.pid === pid && saved.command?.join(' ') === command && actual === command
+    } catch { return false }
+  }
   const checkDisk = () => (options.disk ?? storage)(saved.dataDir, saved.device)
   const serialize = <T>(fn: () => Promise<T>): Promise<T> => { const op = queue.then(fn); queue = op.catch(() => {}); return op }
   const startMonitor = () => {
@@ -98,21 +113,23 @@ export function createMoneroNodeManager(options: { stateFile: string; binary?: (
     monitor = setInterval(() => { void status().catch(() => {}) }, options.pollMs ?? 10000)
     monitor.unref?.()
   }
-  const signalStop = (reason?: string) => {
-    if (!owned()) throw new Error('Vault cannot verify ownership of the running node; it has not stopped another process')
+  const signalStop = (reason?: string, ownerChecked = false) => {
+    if (!ownerChecked && !owned()) throw new Error('Vault cannot verify ownership of the running node; it has not stopped another process')
     if (!saved.stopping) { process.kill(saved.pid!, 'SIGTERM'); saved.stopping = true; saved.error = reason; save() }
   }
   async function readStatus(): Promise<MoneroNodeStatus> {
     if (available === undefined) { try { await (options.binary ?? verifiedMonerod)(); available = true } catch { available = false } }
+    const checking = JSON.stringify([saved.dataDir, saved.device, saved.pid, saved.stopping])
     let freeBytes: number | null = null, diskBytes = 0, error = saved.error
-    try { freeBytes = checkDisk().freeBytes; diskBytes = diskUsage(saved.dataDir) } catch (e: any) { error = saved.error ?? e.message }
+    try { freeBytes = (await checkDisk()).freeBytes; diskBytes = await diskUsage(saved.dataDir) } catch (e: any) { error = saved.error ?? e.message }
+    if (checking !== JSON.stringify([saved.dataDir, saved.device, saved.pid, saved.stopping])) return readStatus()
     let state: MoneroNodeStatus['state'] = 'stopped'
     if (alive(saved.pid)) {
-      if (!owned()) { state = 'error'; error = 'The saved node process does not belong to Vault. It has not been changed.' }
+      if (!await ownedForStatus()) { state = 'error'; error = 'The saved node process does not belong to Vault. It has not been changed.' }
       else {
         startMonitor()
         if ((freeBytes === null || freeBytes < reserveBytes) && !saved.stopping) {
-          signalStop(freeBytes === null ? 'Node stopped because its storage drive is unavailable.' : 'Node stopped to keep 25 GiB free. Free space or choose another drive before restarting.')
+          signalStop(freeBytes === null ? 'Node stopped because its storage drive is unavailable.' : 'Node stopped to keep 25 GiB free. Free space or choose another drive before restarting.', true)
           error = saved.error
         }
         state = saved.stopping ? 'stopping' : 'starting'
@@ -148,7 +165,7 @@ export function createMoneroNodeManager(options: { stateFile: string; binary?: (
     if (alive(saved.pid)) throw new Error('Stop the node before changing its storage folder')
     const path = resolve(dataDir.startsWith('~/') ? join(homedir(), dataDir.slice(2)) : dataDir)
     if (!isAbsolute(dataDir) && !dataDir.startsWith('~/')) throw new Error('Choose an absolute folder path for the Monero blockchain')
-    const disk = (options.disk ?? storage)(path)
+    const disk = await (options.disk ?? storage)(path)
     saved = { dataDir: path, device: disk.device }; save()
     metrics = { height: null, targetHeight: null, percent: null, peers: 0 }
     return status()
@@ -156,7 +173,7 @@ export function createMoneroNodeManager(options: { stateFile: string; binary?: (
   async function start() {
     if (alive(saved.pid)) { if (!owned()) throw new Error('The saved node process does not belong to Vault'); return status() }
     const binary = await (options.binary ?? verifiedMonerod)(); available = true
-    const disk = checkDisk()
+    const disk = await checkDisk()
     // Only existing chain data reduces the remaining download estimate. Logs
     // or unrelated files in a chosen folder do not make a new chain smaller.
     let used = 0

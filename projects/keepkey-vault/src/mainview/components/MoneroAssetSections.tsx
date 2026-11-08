@@ -13,6 +13,7 @@ import type { MoneroClient } from "../lib/monero-client"
 import { openMoneroWallet, prepareMoneroSend, verifyMoneroBalance } from "../lib/monero-flow"
 import { useMoneroStatus, type MoneroStatusState } from "../hooks/useMoneroStatus"
 import { useMoneroBalanceVerification } from "../hooks/useMoneroBalanceVerification"
+import { MoneroConnectionDetails } from "./MoneroConnectionInfo"
 import { ReceiveView } from "./ReceiveView"
 
 const MONERO_PATH = [0x8000002c, 0x80000080, 0x80000000]
@@ -151,13 +152,15 @@ export function MoneroConnectCard({ client, monero }: { client: MoneroClient; mo
 		return () => window.removeEventListener('keepkey-settings-changed', changed)
 	}, [connect, connecting])
 	const openingWallet = connecting && monero.status?.connectionPhase === 'wallet'
+	const checkingNode = ['checking','switching','waiting'].includes(monero.status?.connection?.state ?? '')
 	return (
 		<Box data-monero-connect="" py="4" maxW="520px">
+			<MoneroConnectionDetails status={monero.status} />
 			<Flex align="center" gap="2" mb="2" role="status">
 				{!error && <Spinner size="sm" />}
-				<Text fontSize="15px" color="var(--text-0)" fontWeight="500">{error ? uiText("Monero couldn't open") : nodeWaiting ? uiText('Waiting for your node') : openingWallet ? uiText('Opening Monero wallet') : uiText("Confirm on KeepKey")}</Text>
+				<Text fontSize="15px" color="var(--text-0)" fontWeight="500">{checkingNode ? uiText("Connecting to a remote node") : error ? uiText("Monero couldn't open") : nodeWaiting ? uiText('Waiting for your node') : openingWallet ? uiText('Opening Monero wallet') : uiText("Confirm on KeepKey")}</Text>
 			</Flex>
-			<Text fontSize="13px" color="var(--text-2)">{nodeWaiting ? uiText('Your wallet will connect when your node is fully synced. You can follow its progress above.') : openingWallet ? uiText('KeepKey approved access. Preparing your local watch wallet; no further device confirmation is needed.') : error ? uiText('Access did not finish. Try again to reconnect your wallet.') : uiText("Approve access on your KeepKey to see your Monero balance and receive payments.")}</Text>
+			<Text fontSize="13px" color="var(--text-2)">{checkingNode ? uiText("Vault is checking remote nodes and will reconnect using your saved monitoring access.") : nodeWaiting ? uiText('Your wallet will connect when your node is fully synced. You can follow its progress above.') : openingWallet ? uiText('KeepKey approved access. Preparing your local watch wallet; no further device confirmation is needed.') : error ? uiText('Access did not finish. Try again to reconnect your wallet.') : uiText("Approve access on your KeepKey to see your Monero balance and receive payments.")}</Text>
 			{error && <><Text role="alert" color="var(--rose)" fontSize="13px" mt="3">{error}</Text><Button data-monero-connect-button="" mt="3" size="sm" disabled={connecting} onClick={() => { void connect() }}>{uiText("Try again")}</Button></>}
 			<details data-monero-connection-details="" style={{ marginTop: 20, color: "var(--text-3)", fontSize: 12 }}>
 				<summary style={{ cursor: "pointer" }}>{uiText("Connection details")}</summary>
@@ -204,6 +207,7 @@ export function MoneroReceiveSection({ chain, monero, client, privateMode }: { c
 	}
 	return (
 		<Box data-monero-receive="">
+			<MoneroConnectionDetails status={monero.status} />
 			{verification.busy && <Text role="status" fontSize="12px" mb="3">{uiText("Checking your balance on KeepKey…")}</Text>}
 			{verification.error && <Box role="alert" mb="3"><Text fontSize="12px" color="var(--rose)">{verification.error}</Text><Button size="xs" mt="2" onClick={() => { void verification.retry() }}>{uiText("Try again")}</Button></Box>}
 			<Box mb="4"><MoneroBalanceNote view={view} /><MoneroFreshness view={view} /></Box>
@@ -308,6 +312,7 @@ export function MoneroSendSection({ monero, client, privateMode = false }: { mon
 	const receiveOnly = wallet.sendBlocked === "emulator" || wallet.sendBlocked === "adapter" || wallet.sendBlocked === "firmware"
 	return (
 		<Box data-monero-send="">
+			<MoneroConnectionDetails status={monero.status} />
 			{verification.busy && <Text role="status" fontSize="12px" mb="3">{uiText("Checking your balance on KeepKey…")}</Text>}
 			{verification.error && <Box role="alert" mb="3"><Text fontSize="12px" color="var(--rose)">{verification.error}</Text><Button size="xs" mt="2" onClick={() => { void verification.retry() }}>{uiText("Try again")}</Button></Box>}
 			{wallet.unrelayedTxid && (

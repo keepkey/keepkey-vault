@@ -42,4 +42,11 @@ failRemote=false;await click('[data-node-remote-connect]');out.connectedShortcut
 await click('[data-node-change]')
 await act(async()=>{const select=c.querySelector('select[aria-label="Monero connection"]')as HTMLSelectElement;select.value='local';select.dispatchEvent(new Event('change',{bubbles:true}));await wait()})
 out.returnToLocal=settings.moneroDaemonUrl
+// Local status must not prevent the independently configured remote from appearing.
+settings={...settings,moneroNodeMode:'remote',moneroDaemonUrl:'https://remote.example'}
+client.status=async()=>{throw Error('RPC request timed out: moneroNodeStatus')}
+await refresh()
+out.remoteWithStatusFailure={mode:c.querySelector('[data-node-connection]')?.textContent,hasChange:!(c.querySelector('[data-node-change]') as HTMLButtonElement).disabled,globalError:!!c.querySelector('[data-monero-node-panel] > [role=alert]')}
+client.status=async()=>node;await refresh()
+out.statusRecovered=!c.querySelector('[data-node-status-error]')
 await act(async()=>root.unmount());console.log(JSON.stringify(out))

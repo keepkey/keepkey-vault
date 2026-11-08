@@ -29,3 +29,9 @@ test('using a remote keeps local sync visible and running; changing back uses th
  expect(ui.connectedShortcut).toEqual({mode:'Connection: Remote node',url:'https://xmr.triplebit.org',localStillRunning:true,stops:1,localDetails:'Local node: Syncing blockchain',editing:false})
  expect(ui.returnToLocal).toBe('http://127.0.0.1:18081')
 })
+
+
+test('a local-node status failure cannot block the remote connection and clears on recovery',()=>{
+ expect(ui.remoteWithStatusFailure).toEqual({mode:'Connection: Remote node',hasChange:true,globalError:false})
+ expect(ui.statusRecovered).toBe(true)
+})

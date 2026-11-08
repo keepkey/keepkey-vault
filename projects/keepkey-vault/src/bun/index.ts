@@ -271,6 +271,7 @@ import { initializeOrchardFromDevice, exportOrchardFvk, scanOrchardNotes, getShi
 import { inFlightShielded, type ExpectedShielded } from "../shared/zcash-pending"
 import { setMoneroEmulatorEnabled, listEmulatorBuilds } from "./emulator-library"
 import { createMoneroVault } from "./monero-vault"
+import { createMoneroFailoverVault } from "./monero-remote-failover"
 import { createMoneroWatchStore } from "./monero-watch-store"
 import { createMoneroDeviceSigner } from "./monero-device-signing"
 import { REVIEWED_MONERO_SIGNING_SHA256 } from "./monero-emulator"
@@ -2233,12 +2234,18 @@ function moneroSigningEmulatorActive(): boolean {
     return moneroSigningBuild.signing
 }
 function getMoneroWallet() {
-    if (!moneroWallet) moneroWallet = createMoneroVault({
+    if (!moneroWallet) moneroWallet = createMoneroFailoverVault({
+      create: getConfig => createMoneroVault({
         engine, confirm: emuSigningOp, signingEmulator: moneroSigningEmulatorActive,
         watchStore: createMoneroWatchStore({ database: getDb, profile: Utils.paths.userData }),
         hardwareSigner: createMoneroDeviceSigner(),
+        onTransportFailure: transport => {
+            if (engine.wallet?.transport === transport) return engine.retryConnect()
+        },
         // Unknown-outcome broadcasts survive a restart (owner-only file beside the app database).
         pendingStore: createFilePendingStore(path.join(Utils.paths.userData, 'monero')),
+        getConfig,
+      }),
         getConfig: () => ({ enabled: moneroEnabled, offline: offlineMode,
             daemonUrl: getSetting('monero_daemon_url') || MONERO_DEFAULT_NODE,
             restoreHeight: storedRestoreHeight(getSetting('monero_restore_height')) }),

@@ -165,6 +165,28 @@ for (const blocker of ['emulator', 'adapter']) {
  await unmount()
 }
 
+// A new node/session reimports known outputs, while a declined device prompt stays declined.
+for(const cancel of [false,true]) {
+ const initial=connected({connection:{activeNode:'https://first.example',preferredNode:'https://first.example',sessionId:1,automaticFailover:true,state:'connected',attempts:[]}})
+ const client=fakeClient(initial)
+ if(cancel)client.syncKeyImages=async()=>{client.calls.push(['sync']);throw Error('The KeepKey rejected or cancelled the Monero request')}
+ let update!:(status:any)=>void
+ function SessionHost(){const [status,setStatus]=React.useState(initial);update=setStatus;return <MoneroReceiveSection monero={{status,setStatus,refresh:async()=>{},refreshing:false,refreshError:null}} client={client} chain={monero} privateMode={false}/>}
+ const {unmount}=await render(<SessionHost />)
+ const next=connected({connection:{activeNode:'https://second.example',preferredNode:'https://first.example',sessionId:2,automaticFailover:true,state:'connected',attempts:[]}})
+ client.set(next);await act(async()=>{update(next);await new Promise(r=>setTimeout(r,20))})
+ out[cancel?'declinedAcrossFailover':'reverifiedAfterFailover']=client.calls.filter(c=>c[0]==='sync').length
+ await unmount()
+}
+
+// Public diagnostics name the active fallback and retain the failed node's reason.
+{
+ const client=fakeClient(connected({spendStateKnown:true,keyImagesSynced:true,connection:{preferredNode:'https://first.example',activeNode:'https://second.example',automaticFailover:true,state:'connected',attempts:[{url:'https://first.example',state:'failed',checkedAt:'2026-11-08T12:00:00Z',error:'The node did not respond within 10 seconds.'},{url:'https://second.example',state:'responding',height:3801979,lastResponseAt:'2026-11-08T12:00:10Z',latencyMs:120}]}}))
+ const {container,unmount}=await render(<Host Section={MoneroReceiveSection} client={client} />)
+ out.connectionDiagnostics={text:text(q(container,'[data-monero-connection-info]')),detailsClosed:!(q(container,'[data-monero-connection-info] details') as HTMLDetailsElement).open}
+ await unmount()
+}
+
 // ── A guessed scan start never reads as complete; an old figure carries its time ──
 {
   const { container, unmount } = await render(React.createElement(Host, { Section: MoneroReceiveSection, client: fakeClient(connected({ restoreHeight: 3_294_960, updatedAt: new Date().toISOString() })) }))

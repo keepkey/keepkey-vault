@@ -14,9 +14,14 @@ export function useMoneroBalanceVerification(monero: MoneroStatusState, client: 
   const operationAddress = useRef(status?.address)
   currentAddress.current = status?.address
   const fingerprint = status
-    ? `${status.address}:${status.balanceAtomic}:${status.transactions.map(tx => `${tx.txid}:${tx.type ?? ''}:${tx.locked}`).join(',')}` : ''
+    ? `${status.address}:${status.connection?.activeNode ?? ""}:${status.connection?.sessionId ?? 0}:${status.balanceAtomic}:${status.transactions.map(tx => `${tx.txid}:${tx.type ?? ''}:${tx.locked}`).join(',')}` : ''
+
+  const currentFingerprint = useRef(fingerprint)
+  currentFingerprint.current = fingerprint
+  const declined = !!error && operationAddress.current === status?.address && /declin|reject|cancel/i.test(error)
 
   const verify = useCallback(async () => {
+    attempted.current = currentFingerprint.current
     const address = currentAddress.current
     operationAddress.current = address
     setBusy(true)
@@ -38,14 +43,14 @@ export function useMoneroBalanceVerification(monero: MoneroStatusState, client: 
   useEffect(() => {
     mounted.current = true
     // Verifying spent outputs is independent of whether this build can sign a send.
-    if (status?.available && status.monitorReady
+    if (!declined && status?.available && status.monitorReady
         && (!status.spendStateKnown || !status.keyImagesSynced || status.keyImagesStale)
         && status.balanceAtomic !== '0' && attempted.current !== fingerprint) {
       attempted.current = fingerprint
       void verify()
     }
     return () => { mounted.current = false }
-  }, [fingerprint, status?.available, status?.monitorReady, status?.spendStateKnown, status?.keyImagesSynced, status?.keyImagesStale, verify])
+  }, [fingerprint, declined, status?.available, status?.monitorReady, status?.spendStateKnown, status?.keyImagesSynced, status?.keyImagesStale, verify])
 
   const sameWallet = operationAddress.current === status?.address
   return { busy: sameWallet && busy, error: sameWallet ? error : null, retry: verify }

@@ -102,3 +102,16 @@ describe('managed process and storage', () => {
     expect(stopped.error).toContain(reason === 'low' ? '25 GiB' : 'storage drive')
   })
 })
+
+
+test('slow storage status is awaited without blocking the event loop',async()=>{
+ const f=await fixture()
+ let release!:()=>void,finished=false,ticked=false
+ const gate=new Promise<void>(resolve=>{release=resolve})
+ const manager=createMoneroNodeManager({...f.options,disk:async()=>{await gate;return {freeBytes:10000,device:42}}})
+ cleanup.push(()=>manager.dispose())
+ const pending=manager.status().then(value=>{finished=true;return value})
+ await new Promise<void>(resolve=>setTimeout(()=>{ticked=true;resolve()},20))
+ try {expect(ticked).toBe(true);expect(finished).toBe(false)}finally{release()}
+ expect((await pending).freeBytes).toBe(10000)
+})

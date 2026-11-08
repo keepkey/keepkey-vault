@@ -62,3 +62,9 @@ describe('C4: the scan start for a new wallet', () => {
     expect(storedRestoreHeight('3200000')).toBe(3_200_000)
   })
 })
+
+
+test('node diagnostics distinguish an HTTP failure and a timed-out request without exposing response bodies',async()=>{
+ await expect(checkMoneroNode('https://node.example',async()=>new Response('private upstream detail',{status:503}))).rejects.toThrow('HTTP 503')
+ await expect(checkMoneroNode('https://node.example',async()=>{throw new DOMException('private transport detail','TimeoutError')})).rejects.toThrow('within 10 seconds')
+})

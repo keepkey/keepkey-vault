@@ -1,6 +1,7 @@
 /** Monero receiving bridge. Only an explicitly approved device view key reaches the local sidecar. */
+import type { MoneroConnectionInfo } from '../shared/types'
 import { createHash, randomBytes } from 'node:crypto'
-import { checkDeviceSigningBounds, type MoneroDeviceSigner } from './monero-device-signing'
+import { moneroDeviceNeedsMonitoringKey, moneroDeviceConstructionVersion, checkDeviceSigningBounds, type MoneroDeviceSigner } from './monero-device-signing'
 import type { MoneroWatchStore } from './monero-watch-store'
 import * as managedSidecar from './monero-sidecar'
 import type { MoneroOutputRecord, MoneroTransferDraft } from './monero-sidecar'
@@ -42,6 +43,7 @@ export interface MoneroVaultConfig {
   restoreHeight: number
 }
 export interface MoneroVaultStatus {
+  connection?: MoneroConnectionInfo
   available: boolean
   enabled: boolean
   deviceReady: boolean
@@ -192,7 +194,9 @@ async function readMessage(delegate: Delegate, max = MAX_RESPONSE): Promise<Mess
 
 /** Injected engine/config keep device state authoritative; no private keys enter frontend RPC. */
 export function createMoneroVault({ engine, confirm, getConfig, sidecar = managedSidecar, signingEmulator = () => false,
-  hardwareSigner, watchStore, replyMs = { device: MONERO_DEVICE_REPLY_MS, human: MONERO_HUMAN_REPLY_MS }, pendingStore = { load: () => [], save() {} } }: {
+  onTransportFailure, hardwareSigner, watchStore, replyMs = { device: MONERO_DEVICE_REPLY_MS, human: MONERO_HUMAN_REPLY_MS }, pendingStore = { load: () => [], save() {} } }: {
+  /** Invalidate/re-pair only the transport that failed; never replay the device operation. */
+  onTransportFailure?: (transport: unknown) => Promise<unknown> | void
   hardwareSigner?: MoneroDeviceSigner
   watchStore?: MoneroWatchStore
   engine: Engine; confirm?: Confirm; getConfig: () => MoneroVaultConfig; sidecar?: MoneroWatchSidecar
@@ -263,6 +267,7 @@ export function createMoneroVault({ engine, confirm, getConfig, sidecar = manage
   }
   const receive = async (current: Snapshot, generation: number, request: number, responseType: number, body: Uint8Array, review: boolean, max = MAX_RESPONSE): Promise<Uint8Array> => {
     const delegate = current.transport.delegate
+    try {
     check(current, generation); await writeMessage(delegate, request, body)
     let waitingOnPerson = false
     for (let screens = 0; screens < 64; screens++) {
@@ -293,6 +298,16 @@ export function createMoneroVault({ engine, confirm, getConfig, sidecar = manage
       } finally { if (!transferred) response.body.fill(0) }
     }
     throw new MoneroError('Monero review exceeded its bound')
+    } catch (error) {
+      const message = error instanceof Error ? error.message : ''
+      const transportLost = /did not answer the Monero request|LIBUSB_(?:ERROR_(?:NOT_FOUND|NO_DEVICE|PIPE|IO)|TRANSFER_(?:ERROR|NO_DEVICE))|device (?:was disconnected|is not opened)/i.test(message)
+      if (transportLost && engine.wallet?.transport === current.transport) {
+        stop()
+        try { void Promise.resolve(onTransportFailure?.(current.transport)).catch(() => {}) }
+        catch { /* The failed transport remains unauthorized even if re-pairing fails. */ }
+      }
+      throw error
+    }
   }
   const actualAddress = async (current: Snapshot, generation: number, display: boolean, minor = 0) => {
     const request = concat([...PATH.map(part => numberField(1, part)), numberField(2, Number(display)), numberField(3, 0), numberField(4, 0), numberField(5, minor)])
@@ -474,19 +489,18 @@ export function createMoneroVault({ engine, confirm, getConfig, sidecar = manage
         const address = approved.address
         check(current, generation)
         if (!viewKey) throw new MoneroError('The KeepKey did not authorize Monero monitoring')
+        // Device-approved monitoring access belongs to this wallet, independently of node availability.
+        if (watchStore && current.watchScope) {
+          try { await watchStore.saveWatch(current.watchScope, address, viewKey); await watchStore.saveAddress(current.watchScope,address,0,address) }
+          catch { console.warn('[monero] Monitoring access could not be saved securely') }
+          check(current,generation)
+        }
         connectionPhase = 'wallet'
         await sidecar.startMoneroSidecar(); check(current, generation)
         const value = await sidecar.configureMoneroWatch({ walletId: `${engine.getDeviceState().deviceId}:${address}`, network: 'mainnet', address,
           viewKey, restoreHeight: current.config.restoreHeight, daemonUrl: current.config.daemonUrl })
         check(current, generation)
         const status = statusFrom(value, current, address)
-        if (watchStore && current.watchScope) {
-          try {
-            await watchStore.saveWatch(current.watchScope, address, viewKey)
-            await watchStore.saveAddress(current.watchScope, address, 0, address)
-          } catch { console.warn('[monero] Monitoring access could not be saved securely') }
-          check(current, generation)
-        }
         bound = { snapshot: current, address }; lastGood = status
         // A pending broadcast (e.g. from before a restart) is looked up once: settled if the node has it.
         if (pending.has(walletKey(current, address))) await resolvePending(walletKey(current, address))
@@ -681,7 +695,7 @@ export function createMoneroVault({ engine, confirm, getConfig, sidecar = manage
         if (guardActive && guard && !draft.plan.inputs.some(input => guard.keyImages.includes(keyImages.owned.get(input.ring[input.realMember].publicKey)!.keyImage))) {
           throw new MoneroError(`The transaction you discarded (${guard.txid}) could still be mined from another node's pool. Until its inputs are spent, a new send must spend at least one of them, so both cannot be mined; this send would use other funds, so it was not built. Send an amount that needs those funds (Max does), or wait until it settles`)
         }
-        if (!current.emulator) checkDeviceSigningBounds(draft.plan)
+        if (!current.emulator) checkDeviceSigningBounds(draft.plan,moneroDeviceConstructionVersion(engine.getDeviceState().firmwareHash))
         const review = reviewPlan(draft.plan, { address, amountAtomic: amount.toString(), walletAddress: binding.address,
           walletFeeAtomic: draft.feeAtomic, walletAmountAtomic: draft.amountAtomic, owned: keyImages.owned })
         prepared = { id: randomBytes(16).toString('hex'), key: current.key, generation, expires: Date.now() + PREPARED_LIFETIME_MS, draft, review }
@@ -704,7 +718,15 @@ export function createMoneroVault({ engine, confirm, getConfig, sidecar = manage
       const { draft, review, generation } = reviewed, wallet = walletKey(current, bound.address)
       let hardware: Awaited<ReturnType<MoneroDeviceSigner['prepare']>> | null = null
       try {
-        if (!current.emulator) { hardware = await hardwareSigner!.prepare(draft.plan); check(current,generation) }
+        if (!current.emulator) {
+          let monitoring:Uint8Array|null=null
+          try {
+            if(moneroDeviceNeedsMonitoringKey(draft.plan,moneroDeviceConstructionVersion(engine.getDeviceState().firmwareHash))&&watchStore&&current.watchScope)monitoring=await watchStore.loadWatch(current.watchScope,bound.address)
+            check(current,generation)
+            hardware=await hardwareSigner!.prepare(draft.plan,{firmwareHash:engine.getDeviceState().firmwareHash,viewKey:monitoring})
+            check(current,generation)
+          } finally {monitoring?.fill(0)}
+        }
         const signed = await deviceOperation(current, async () => {
           const body = hardware
             ? await receive(current, generation, 65002, 65003, hardware.payload, true, MAX_SIGNED_RESPONSE)

@@ -33,21 +33,34 @@ export function MoneroNodePanel({ client = nodeClient, compact = false }: { clie
   const [draftMode, setDraftMode] = useState<'local' | 'remote' | null>(null)
   const [editing, setEditing] = useState(false)
   const [busy, setBusy] = useState(false), [error, setError] = useState<string | null>(null)
-  const mounted = useRef(true)
+  const [statusError, setStatusError] = useState<string | null>(null)
+  const [settingsError, setSettingsError] = useState<string | null>(null)
+  const mounted = useRef(true), reading = useRef(false), generation = useRef(0)
   const refresh = useCallback(async () => {
+    if (reading.current) return
+    reading.current = true
+    const current = generation.current
+    const active = () => mounted.current && current === generation.current
     try {
-      const [next, config] = await Promise.all([client.status(), client.settings()])
-      if (!mounted.current) return
-      setNode(next); setSettings(config)
-      setFolder(current => current || next.dataDir)
-      if (config.moneroNodeMode === 'remote') setRemote(current => current || config.moneroDaemonUrl)
-    } catch (e) { if (mounted.current) setError(e instanceof Error ? e.message : 'Unable to read node status') }
+      await Promise.all([
+        client.settings().then(config => {
+          if (!active()) return
+          setSettings(config); setSettingsError(null)
+          if (config.moneroNodeMode === 'remote') setRemote(value => value || config.moneroDaemonUrl)
+        }, error => { if (active()) setSettingsError(error instanceof Error ? error.message : 'Unable to read node settings') }),
+        client.status().then(next => {
+          if (!active()) return
+          setNode(next); setStatusError(null)
+          setFolder(value => value || next.dataDir)
+        }, error => { if (active()) setStatusError(error instanceof Error ? error.message : 'Unable to read node status') }),
+      ])
+    } finally { if (current === generation.current) reading.current = false }
   }, [client])
   useEffect(() => {
     mounted.current = true; void refresh()
     const timer = setInterval(() => { void refresh() }, 5000)
     window.addEventListener('keepkey-settings-changed', refresh)
-    return () => { mounted.current = false; clearInterval(timer); window.removeEventListener('keepkey-settings-changed', refresh) }
+    return () => { mounted.current = false; ++generation.current; reading.current = false; clearInterval(timer); window.removeEventListener('keepkey-settings-changed', refresh) }
   }, [refresh])
   async function action(fn: () => Promise<void>) {
     setBusy(true); setError(null)
@@ -68,6 +81,7 @@ export function MoneroNodePanel({ client = nodeClient, compact = false }: { clie
         {stopping ? uiText('Stopping…') : running ? uiText('Stop node') : uiText('Start node')}
       </Button>
     </Flex>
+    {statusError && <Text data-node-status-error="" role="alert" mt="2" color="var(--rose)" fontSize="13px">{statusError}</Text>}
     {!node?.available && node && <Text fontSize="13px" mt="2">{uiText('Local node support is unavailable in this build.')}</Text>}
     {node && <>
       <Text data-node-height="" fontSize="13px" mt="2">{uiText('Block height')}: {node.height?.toLocaleString() ?? '—'} / {node.targetHeight?.toLocaleString() ?? '—'}{node.percent === null ? '' : ` · ${node.percent.toFixed(1)}%`}</Text>
@@ -105,7 +119,7 @@ export function MoneroNodePanel({ client = nodeClient, compact = false }: { clie
           <option value="">{uiText('Custom URL')}</option>
         </select>
         <Input aria-label={uiText('Monero daemon URL')} placeholder="https://" size="sm" value={remote} onChange={e => setRemote(e.target.value)} />
-        <Text fontSize="13px" mt="2">{uiText('A remote node sees your IP address and can link the spends you verify. Remote connections require HTTPS. Vault never switches to a public node automatically.')}</Text>
+        <Text fontSize="13px" mt="2">{uiText('A remote node sees your IP address and can link the spends you verify. Preset public nodes fail over automatically to another listed HTTPS node. Custom and local nodes keep their chosen connection.')}</Text>
         <Button data-node-remote-connect="" size="xs" mt="2" disabled={busy || !remote.trim()} onClick={() => { void action(async () => { setSettings(await client.save({ ...settings!, mode: 'remote', daemonUrl: remote, restoreHeight: settings!.moneroRestoreHeight })); setDraftMode(null); setEditing(false) }) }}>{busy ? uiText('Checking node…') : uiText('Connect to remote node')}</Button>
       </Box>}
   </>
@@ -115,7 +129,7 @@ export function MoneroNodePanel({ client = nodeClient, compact = false }: { clie
         <Text data-node-connection="" fontSize="13px">{uiText('Connection')}: {activeMode === 'local' ? uiText('Your node') : uiText('Remote node')}</Text>
         <Button data-node-change="" variant="ghost" size="xs" disabled={busy || !settings} onClick={() => setEditing(value => !value)}>{uiText('Change node')}</Button>
       </Flex>
-      {activeMode === 'remote' && <Text fontSize="13px" color="var(--text-2)" overflowWrap="anywhere">{settings?.moneroDaemonUrl}</Text>}
+      {activeMode === 'remote' && <Text fontSize="13px" color="var(--text-2)" overflowWrap="anywhere">{uiText('Preferred node')}: {settings?.moneroDaemonUrl}</Text>}
       {activeMode === 'local' && node?.state !== 'ready' && !editing && <Button data-node-use-remote="" variant="outline" size="xs" mt="2" disabled={!settings} onClick={() => { setDraftMode('remote'); setRemote(value => value || MONERO_REMOTE_NODES[0].url); setEditing(true) }}>{uiText('Use a remote node while yours syncs')}</Button>}
       {editing && <Box mt="2" mb="3">{connectionControls}</Box>}
     </> : <>
@@ -123,6 +137,7 @@ export function MoneroNodePanel({ client = nodeClient, compact = false }: { clie
       {connectionControls}
     </>}
     {(activeMode === 'local' || running) && (compact ? <details><summary style={{ cursor: 'pointer', fontSize: 13 }}>{activeMode === 'local' ? uiText('Your node') : uiText('Local node')}: {state}</summary><Box mt="3">{nodeView}</Box></details> : nodeView)}
+    {settingsError && <Text data-node-settings-error="" role="alert" fontSize="13px" color="var(--rose)" mt="2">{settingsError}</Text>}
     {error && <Text role="alert" fontSize="13px" color="var(--rose)" mt="2">{error}</Text>}
   </Box>
 }
