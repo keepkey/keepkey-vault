@@ -1059,7 +1059,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
   // reaches a terminal state, when the user closes the dialog, or when the
   // phase moves away.
   //
-  // NOTE: deps are deliberately [txid, phase] — NOT liveStatus. Including
+  // NOTE: deps are deliberately [open, txid, phase] — NOT liveStatus. Including
   // liveStatus here causes a runaway loop: every status push from the
   // tracker re-runs the effect, the cleanup cancels the in-flight tick,
   // a new tick fires immediately, hits Pioneer/Midgard, gets a different
@@ -1068,7 +1068,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
   const liveStatusRef = useRef(liveStatus)
   useEffect(() => { liveStatusRef.current = liveStatus }, [liveStatus])
   useEffect(() => {
-    if (!txid || phase !== 'submitted') return
+    if (!open || !txid || phase !== 'submitted') return
     let cancelled = false
     let timer: ReturnType<typeof setTimeout> | null = null
     let completedMetadataPolls = 0
@@ -1101,7 +1101,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
     }
     tick()
     return () => { cancelled = true; if (timer) clearTimeout(timer) }
-  }, [txid, phase])
+  }, [open, txid, phase])
 
   // ── Manual recheck — fires a single immediate poll on demand ──────
   const handleRecheck = useCallback(async () => {
@@ -2436,10 +2436,10 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
   }, [])
 
   const handleClose = useCallback(() => {
-    if (phase === 'signing' || phase === 'broadcasting' || phase === 'approving') return
     onClose()
-    // Reset state after close animation
-    setTimeout(reset, 200)
+    // Closing hides the view. Bun owns execution, its lease and saved receipt.
+    // Do not reset state still used by a pending execution callback.
+    if (!['signing', 'broadcasting', 'approving'].includes(phase)) reset()
   }, [phase, onClose, reset])
 
   // Cancel a confirm-on-device prompt and back out to review. Sends a Cancel
@@ -2540,10 +2540,12 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
     rpcFire('publishSwapUiState', snapshot)
   }, [open, phase, busy, sentAmount, fromAsset?.asset, toAsset?.asset, amount, fiatAmount, inputMode, isMax, slippageBps, fromAddress, toAddress, useCustomAddress, customToAddress, quote, previewBuild, error, txid, liveStatus, liveConfirmations, liveOutboundConfirmations, liveOutboundRequired, liveOutboundTxid, liveRelayRequestId, liveRefundReason])
 
-  // Reset the cached snapshot to 'closed' when the dialog unmounts so a stale
-  // open state doesn't outlive the user closing the dialog.
+  // Retained tracker dialogs also close without unmounting. Hidden instances
+  // that never opened must not overwrite another dialog's active snapshot.
   useEffect(() => {
+    if (!open) return
     return () => {
+      lastPublishedRef.current = ''
       rpcFire('publishSwapUiState', {
         phase: 'closed', fromAsset: null, toAsset: null, amount: '', fiatAmount: '',
         inputMode: 'crypto', isMax: false, slippageBps: 100,
@@ -2554,7 +2556,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
         outboundTxid: null, relayRequestId: null, refundReason: null,
       } satisfies SwapUiState)
     }
-  }, [])
+  }, [open])
 
   // ── Listen for swap-cmd messages (REST → UI control) ───────────────
   // 'open' is handled by SwapRpcMount before we mount; here we just treat
@@ -2578,7 +2580,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
       // Recheck in the mounted dialog as well: signing may begin between the
       // REST snapshot check and delivery of this command to the renderer.
       if (blocksSwapUiCommand(phase, cmd.kind)) return
-      if (cmd.kind === 'close') { onClose(); return }
+      if (cmd.kind === 'close') { handleClose(); return }
       if (cmd.kind === 'requote') { setRequoteTick(t => t + 1); return }
       if (cmd.kind === 'advance') {
         // input → review (UI navigation only; signing still requires user button press)
@@ -2624,7 +2626,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
       if ('slippageBps' in fields && fields.slippageBps !== undefined) setSlippageBps(fields.slippageBps)
     }
     return onRpcMessage('swap-cmd', apply)
-  }, [open, assets, onClose, setSlippageBps, phase, quote, fromAsset, toAsset, handleExecuteSwap, findAssetByKey, previewBuild, previewError, previewLoading])
+  }, [open, assets, handleClose, setSlippageBps, phase, quote, fromAsset, toAsset, handleExecuteSwap, findAssetByKey, previewBuild, previewError, previewLoading])
 
   // Drain any seed keys that arrived before the asset list finished loading.
   // Without this, REST `/swap/open` silently lost fromAsset/toAsset on first
@@ -2641,12 +2643,41 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
     }
   }, [assets, findAssetByKey])
 
+  const dialogPanel = useRef<HTMLDivElement>(null)
+  const unsupported = !!(chain && !resumeSwap && !loadingAssets && assets.length > 0 && !swappableChainIds.has(chain.id))
+  useEffect(() => {
+    if (!open) return
+    const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    const panel = dialogPanel.current
+    return () => {
+      const focused = document.activeElement
+      if (opener?.isConnected && (focused === document.body || (focused && panel?.contains(focused)))) opener.focus()
+    }
+  }, [open])
+  useEffect(() => { if (open) dialogPanel.current?.focus() }, [open, unsupported])
+  const dialogKeys = (event: React.KeyboardEvent) => {
+    // The picker, health details and device overlays own their own focus/keys.
+    if (event.defaultPrevented || pickerSide !== null) return
+    if (event.key === 'Escape') {
+      event.preventDefault(); event.stopPropagation()
+      if (healthDialogOpen) setHealthDialogOpen(false)
+      else if (quoteDetailsOpen) setQuoteDetailsOpen(false)
+      else if (customSlippageOpen) setCustomSlippageOpen(false)
+      else handleClose()
+    }
+    if (event.key !== 'Tab' || healthDialogOpen || quoteDetailsOpen) return
+    const nodes = [...(dialogPanel.current?.querySelectorAll<HTMLElement>('button:not(:disabled),input:not(:disabled),select:not(:disabled),a[href],[tabindex="0"]') || [])].filter(n => n.offsetParent !== null && n.getClientRects().length)
+    const first = nodes[0], last = nodes[nodes.length - 1]
+    if (event.shiftKey && (document.activeElement === first || document.activeElement === dialogPanel.current)) { event.preventDefault(); last?.focus() }
+    else if (!event.shiftKey && (document.activeElement === last || document.activeElement === dialogPanel.current)) { event.preventDefault(); first?.focus() }
+  }
+
   if (!open) return null
-  if (chain && !resumeSwap && !loadingAssets && assets.length > 0 && !swappableChainIds.has(chain.id)) {
+  if (unsupported) {
     return (
-      <Box position="fixed" inset="0" zIndex={Z.dialog} display="flex" alignItems="center" justifyContent="center">
-        <Box position="absolute" inset="0" bg="rgba(11,11,14,0.28)" backdropFilter="blur(20px) saturate(140%)" />
-        <Box
+      <Box position="fixed" inset="0" zIndex={Z.dialog} display="flex" alignItems="center" justifyContent="center" onKeyDown={dialogKeys}>
+        <Box position="absolute" inset="0" bg="rgba(11,11,14,0.28)" backdropFilter="blur(20px) saturate(140%)" onClick={handleClose} data-testid="swap-backdrop" />
+        <Box ref={dialogPanel} role="dialog" aria-modal="true" aria-label={t('title')} tabIndex={-1}
           position="relative"
           borderRadius="22px"
           border="1px solid rgba(255,255,255,0.10)"
@@ -2665,7 +2696,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
           {/* No provider badge: the swappable-asset list is a union across
               providers (THORChain, Maya, Relay, …), so a missing asset is not
               any single provider's limitation. */}
-          <Text fontSize="sm" color="kk.textMuted">{t("notSupported", { coin: chain.coin })}</Text>
+          <Text fontSize="sm" color="kk.textMuted">{t("notSupported", { coin: chain?.coin })}</Text>
           <Text fontSize="xs" color="kk.textMuted" mt="2" opacity={0.75}>
             {t("notSupportedHint", "Routes come from our swap providers and change over time — this asset may become available later.")}
           </Text>
@@ -2676,10 +2707,10 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
   }
 
   return (
-    <Box position="fixed" inset="0" zIndex={Z.dialog} display="flex" alignItems="center" justifyContent="center">
+    <Box position="fixed" inset="0" zIndex={Z.dialog} display="flex" alignItems="center" justifyContent="center" onKeyDown={dialogKeys}>
       <style>{DIALOG_CSS}</style>
-      <Box position="absolute" inset="0" bg="rgba(11,11,14,0.28)" backdropFilter="blur(20px) saturate(140%)" />
-      <Box
+      <Box position="absolute" inset="0" bg="rgba(11,11,14,0.28)" backdropFilter="blur(20px) saturate(140%)" onClick={handleClose} data-testid="swap-backdrop" />
+      <Box ref={dialogPanel} role="dialog" aria-modal="true" aria-label={t('title')} tabIndex={-1}
         position="relative"
         borderRadius="22px"
         border="1px solid rgba(255,255,255,0.10)"
@@ -2700,7 +2731,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
       >
         {/* ── Header ──────────────────────────────────────────────── */}
         <Flex px="5" py="2.5" borderBottom="1px solid" borderColor="kk.border" align="center" justify="space-between"
-          bg="transparent">
+          position="sticky" top="0" zIndex="2" bg="kk.cardBg">
           <HStack gap="2.5" align="center">
             <ProviderBadge swapper={quote?.swapper || liveSwapper || quote?.integration} size={22} variant="compact" />
             <Text fontSize="sm" fontWeight="700" color="kk.textPrimary" letterSpacing="-0.01em">
@@ -2748,12 +2779,14 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
               )
             })()}
           </HStack>
-          <HStack gap="3" align="center">
+          <HStack gap={{ base: "1", md: "3" }} align="center">
             <DocsLink href={DOCS_LINKS.swap} />
-            <DocsLink href={watch('course-07-swap')} label={uiText("Watch video")} />
-            {!busy && (
-              <Button size="xs" variant="ghost" color="kk.textMuted" px="1" minW="auto" _hover={{ color: "kk.textPrimary" }} onClick={handleClose}>{uiText("×")}</Button>
-            )}
+            <DocsLink href={watch('course-07-swap')} label={uiText("Watch video")} display={{ base: "none", sm: "inline-flex" }} />
+            <Button size="sm" variant="ghost" color="kk.textSecondary" w="36px" h="36px" minW="36px" p="0" flexShrink={0}
+              aria-label={uiText('Close swap')} title={busy ? uiText('Closing this view does not cancel the swap. Track it in Activity.') : uiText('Close swap')}
+              _hover={{ color: 'kk.textPrimary', bg: 'whiteAlpha.100' }} onClick={handleClose}>
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18" /></svg>
+            </Button>
           </HStack>
         </Flex>
 
@@ -3688,6 +3721,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
               instead of competing with the device illustration. */}
           {busy && fromAsset && toAsset && (
             <VStack gap="6" py="6" align="center" position="relative" style={{ animation: 'kkSwapFadeIn 0.3s ease-out' }}>
+              <Text fontSize="xs" color="kk.textSecondary">{uiText('Closing this view does not cancel the swap. Track it in Activity.')}</Text>
               {/* Cancel/X — only meaningful while the device is awaiting a
                   button press (signing/approving). Once the user has confirmed
                   on device and we're broadcasting, the tx is already going
