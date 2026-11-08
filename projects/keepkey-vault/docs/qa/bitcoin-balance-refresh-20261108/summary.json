@@ -1,0 +1,45 @@
+{
+  "date": "2026-11-08",
+  "change": "Show cached balance refreshes and reject incomplete Bitcoin portfolio responses",
+  "unitTests": {
+    "passed": 74,
+    "failed": 0,
+    "files": 8,
+    "command": "bun test __tests__/btc-portfolio-confidence.test.ts __tests__/balance-display-state.test.ts __tests__/balance-reconciliation.test.ts __tests__/post-tx-balance.test.ts __tests__/watch-only-portfolio.test.ts __tests__/portfolio-owner-confidence.test.ts __tests__/portfolio-extra-contracts.test.ts src/bun/vault-portfolio.test.ts"
+  },
+  "browserTests": {
+    "checks": {
+      "cached-bitcoin-zero-shows-refreshing-without-clearing-value": true,
+      "confirmed-empty-bitcoin-stops-refreshing": true,
+      "all-cached-aggregate-keeps-amount-and-shows-refreshing": true,
+      "partial-result-marks-missing-chain-unavailable-without-spinning": true,
+      "degraded-bitcoin-without-cache-is-unavailable-not-zero": true,
+      "failed-refresh-preserves-cached-funded-bitcoin-and-stops-spinner": true,
+      "degraded-refresh-does-not-replace-cached-funded-bitcoin": true,
+      "optional-feature-flags-stay-off": true
+    },
+    "failures": [],
+    "browserErrors": [],
+    "fixture": "__tests__/fixtures/bitcoin-balance-refresh",
+    "serverCommand": "bun __tests__/fixtures/bitcoin-balance-refresh/server.ts",
+    "testCommand": "bun __tests__/fixtures/bitcoin-balance-refresh/smoke.mjs",
+    "port": 5205,
+    "previousScreenFails": true,
+    "nativeMutationAttempts": 0
+  },
+  "review": {
+    "blockingFindings": 0
+  },
+  "typecheck": {
+    "baselineDiagnostics": 803,
+    "currentDiagnostics": 803,
+    "newDiagnostics": 0,
+    "passed": false
+  },
+  "backendBuild": true,
+  "frontendBuild": true,
+  "macOSPreviewBuild": true,
+  "optionalFeatureAcceptanceTested": false,
+  "realDeviceUsedInTests": false,
+  "realDatabaseUsedInTests": false
+}

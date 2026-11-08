@@ -261,7 +261,7 @@ import { createPioneerServerSwitch } from "./pioneer-server-switch"
 import { startEventStream, stopEventStream, type AddressEntry, type StreamEvent } from "./event-stream"
 import { pioneerSupportsDurableWalletMonitoring } from "../shared/pioneer-event-capabilities"
 import { rebuildActivityHistory, clearHistoryQueryCache } from "./activity-history"
-import { watchOnlyPortfolioKeys, watchOnlyNativeBalances, watchOnlyNodeBalances, portfolioNativeMatch, trackedUtxoScriptPaths } from './watch-only-portfolio'
+import { watchOnlyPortfolioKeys, watchOnlyNativeBalances, watchOnlyNodeBalances, portfolioNativeMatch, confirmedPortfolioNativeMatches, trackedUtxoScriptPaths } from './watch-only-portfolio'
 import { cachedHistoryQueries, watchOnlyWalletScope, watchOnlyBitcoinScope } from './watch-only-history'
 import { createTxWatch, MAX_WATCH_MS, UNSEEN_GIVE_UP_MS } from "./tx-watch"
 import { activityBalanceTarget, createPostTxBalanceRefresh, sameBalanceRefreshScope, type BalanceRefreshScope } from "./post-tx-balance"
@@ -2765,11 +2765,20 @@ async function getChainBalance(params: { chainId: string; forceRefresh?: boolean
 		let selectedPkAddress = ''  // address from selected xpub (BTC) or sole xpub (other UTXO)
 		let fallbackPkAddress = ''  // first Pioneer-returned address from any xpub
 		const evmNativeByPubkey = new Map<string, { balance: number; usd: number }>()
+		const btcResponses = isBtc ? confirmedPortfolioNativeMatches(
+			pubkeys.map(p => ({ ...p, chainId: chain.id, symbol: chain.symbol, networkId: chain.networkId, path: p.path || '', scriptType: p.scriptType || '' })),
+			pureNatives,
+			new Set(),
+		) : null
+		if (btcResponses && !btcResponses.confirmed) {
+			pioneerConfirmed = false
+			syncState = 'degraded'
+		}
 
 		for (const pk of pubkeys) {
 			const sourcePubkey = pk.sourcePubkey || unwrapUtxoDiscoveryKey(pk.pubkey)
 			// Find ONE matching native entry for this requested pubkey (no double-counting)
-			const match = pureNatives.find((d: any) => d.pubkey === pk.pubkey)
+			const match = btcResponses ? btcResponses.matches.get(pk.pubkey) : pureNatives.find((d: any) => d.pubkey === pk.pubkey)
 				|| pureNatives.find((d: any) => d.pubkey === sourcePubkey)
 				|| pureNatives.find((d: any) => d.caip === pk.caip && d.address === pk.pubkey)
 				|| pureNatives.find((d: any) => d.address?.toLowerCase() === pk.pubkey.toLowerCase())
@@ -2792,7 +2801,7 @@ async function getChainBalance(params: { chainId: string; forceRefresh?: boolean
 				if (!isBtc && isUtxo) selectedPkAddress = match.address
 			}
 
-			if (isBtc) {
+			if (isBtc && pioneerConfirmed && match) {
 				const xpubBal = String(match?.balance ?? '0')
 				btcAccounts.updateXpubBalance(sourcePubkey, xpubBal, usd)
 				// PRIVACY: Skip DB write for hidden passphrase wallets.
@@ -2973,7 +2982,7 @@ async function getChainBalance(params: { chainId: string; forceRefresh?: boolean
 		// Sync DB cache so getCachedBalances returns aggregate (not stale single-xpub)
 		try {
 			const devId = engine.getDeviceState().deviceId
-			if (devId && !engine.isPassphraseWallet) {
+			if (devId && !engine.isPassphraseWallet && pioneerConfirmed) {
 				updateCachedBalance(devId, {
 					chainId: 'bitcoin', symbol: 'BTC',
 					balance: btcSet.totalBalance,
@@ -6354,6 +6363,11 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						const meta = chunkResults[i].meta
 						if (meta?.degraded || meta?.failures?.length || meta?.staleChains?.length) {
 							for (const p of pubkeyChunks[i].filter(p => utxoChains.some(c => c.id === p.chainId))) failedPubkeySetForDb.add(`${p.caip}:${p.pubkey}`)
+							const bitcoinNetwork = btcChain.caip.split('/')[0].toLowerCase()
+							const bitcoinFault = [...(meta.failures || []), ...(meta.staleChains || [])]
+								.some(fault => String(fault.caip || '').split('/')[0].toLowerCase() === bitcoinNetwork)
+								|| (meta.degraded && !meta.failures?.length && !meta.staleChains?.length)
+							if (bitcoinFault) for (const p of pubkeyChunks[i].filter(p => p.chainId === 'bitcoin')) failedPubkeySetForDb.add(`${p.caip}:${p.pubkey}`)
 						}
 					}
 					console.log(`[getBalances] effectivePubkeys: ${effectivePubkeys.length}/${pubkeys.length} — chains: ${[...new Set(effectivePubkeys.map(p => p.chainId))].join(', ')}`)
@@ -6639,6 +6653,11 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					let btcTotalUsd = 0
 					let btcSelectedAddress = '' // address from the user's selected script type
 					let btcFallbackAddress = '' // first address from any xpub (fallback)
+					const btcResponses = confirmedPortfolioNativeMatches(
+						pubkeys.filter(p => p.chainId === 'bitcoin').map(p => ({ ...p, path: p.path || '', scriptType: p.scriptType || '' })),
+						pureNatives,
+						failedPubkeySetForDb,
+					)
 
 					// Aggregate EVM entries per-chain (sum across address indices)
 					const evmChainAgg = new Map<string, { balance: number; usd: number; address: string; symbol: string }>()
@@ -6655,9 +6674,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						if (entry.chainId === 'bitcoin') {
 							const sourceXpub = entry.sourcePubkey || unwrapUtxoDiscoveryKey(entry.pubkey)
 							// Find the Pioneer response for this xpub
-							const match = pureNatives.find((d: any) => d.pubkey === entry.pubkey)
-								|| pureNatives.find((d: any) => d.pubkey === sourceXpub)
-								|| pureNatives.find((d: any) => d.caip === entry.caip && d.address === entry.pubkey)
+							const match = btcResponses.matches.get(entry.pubkey)
 							console.debug(`[getBalances] BTC match for ${entry.pubkey?.substring(0, 20)}...: ${match ? `balance=${match.balance}, usd=${match.valueUsd}` : 'NO MATCH'}`)
 							const bal = parseFloat(String(match?.balance ?? '0'))
 							const usd = Number(match?.valueUsd ?? 0)
@@ -6672,7 +6689,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 							// PRIVACY: Skip DB write for hidden passphrase wallets.
 							// Skip if this entry came from a failed chunk (don't persist zeros).
 							const xpubBal = String(match?.balance ?? '0')
-							if (!isFailedEntry) {
+							if (match && !isFailedEntry) {
 								btcAccounts.updateXpubBalance(sourceXpub, xpubBal, usd)
 								try {
 									const devId = engine.getDeviceState().deviceId
@@ -6845,7 +6862,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						)
 					)
 					// BTC is aggregated from multiple pubkeys — it's confirmed only if ALL its pubkeys succeeded.
-					const btcConfirmed = btcPubkeyEntries.every(e => !failedPubkeySetForDb.has(`${e.caip}:${e.pubkey}`))
+					const btcConfirmed = btcResponses.confirmed
 					if (btcConfirmed) confirmedChainIds.add('bitcoin')
 					else confirmedChainIds.delete('bitcoin')
 					// Never persist an aggregate we didn't fully validate: like BTC above, a
@@ -6857,14 +6874,14 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					}
 
 					// Mark that Pioneer has responded — prevents getBtcAccounts from re-loading stale DB rows
-					if (btcPubkeyEntries.length > 0) btcAccounts.markPioneerFetched()
+					if (btcConfirmed) btcAccounts.markPioneerFetched()
 
 					{
 						const btcSet = btcAccounts.toAccountSet()
 						try { rpc.send['btc-accounts-update'](btcSet) } catch { /* webview not ready */ }
 						try {
 							const devId = engine.getDeviceState().deviceId
-							if (devId && !engine.isPassphraseWallet && parseFloat(btcSet.totalBalance) >= 0) {
+							if (devId && !engine.isPassphraseWallet && btcConfirmed && parseFloat(btcSet.totalBalance) >= 0) {
 								updateCachedBalance(devId, {
 									chainId: 'bitcoin', symbol: 'BTC',
 									balance: btcSet.totalBalance,
@@ -6898,8 +6915,8 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					try {
 						const deviceId = engine.getDeviceState().deviceId || 'unknown'
 						if (results.length > 0 && !engine.isPassphraseWallet) {
-							setCachedBalances(deviceId, results.filter(r => !utxoChains.some(c => c.id === r.chainId) || confirmedChainIds.has(r.chainId)), confirmedChainIds)
-							rectifyWallet(deviceId, results)
+							setCachedBalances(deviceId, results.filter(r => (r.chainId !== 'bitcoin' && !utxoChains.some(c => c.id === r.chainId)) || confirmedChainIds.has(r.chainId)), confirmedChainIds)
+							rectifyWallet(deviceId, results.filter(r => r.chainId !== 'bitcoin' || btcConfirmed))
 						}
 					} catch { /* never block on cache failure */ }
 
