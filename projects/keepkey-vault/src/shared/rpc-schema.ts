@@ -28,7 +28,7 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       getDeviceState: { params: void; response: DeviceStateInfo }
       retryConnect: { params: void; response: void }
       startBootloaderUpdate: { params: void; response: void }
-      startFirmwareUpdate: { params: { variant?: 'multi' | 'bitcoin-only'; acknowledgeWipe?: import('./flash-wipe').WipeReason }; response: void }
+      startFirmwareUpdate: { params: { variant?: 'multi' | 'bitcoin-only'; acknowledgeWipe?: import('./flash-wipe').WipeReason; requireOfficialSignatures?: boolean }; response: void }
       flashFirmware: { params: void; response: void }
       analyzeFirmware: { params: { data: string }; response: FirmwareAnalysis }
       flashCustomFirmware: { params: { data: string }; response: void }
