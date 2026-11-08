@@ -59,8 +59,8 @@ export interface ClearSignDefinitionReview {
   approvals: Array<{ role: string; reviewer: string }>
 }
 
-/** A human auditor's EIP-712-signed opinion of the contract, checked by this
- * app only. Never shown to or checked by the device; never gates clearsign. */
+/** A hosted audit assessment. Publisher-supplied attribution is not a verified
+ * auditor identity. This opinion never gates clearsign. */
 export interface ContractRating {
   network: string
   contract: string
@@ -69,7 +69,10 @@ export interface ContractRating {
   findings: Array<{ severity: string; title: string; detail: string; reference?: string }>
   ratedAt: number
   rater: string
-  raterPinned: boolean
+  source: 'hosted-assessment'
+  reportUrl: string
+  /** Kept optional until the display phase replaces the previous rating view. */
+  raterPinned?: boolean
 }
 
 /** The single object consumed by Vault approval UI, evidence storage, and API. */

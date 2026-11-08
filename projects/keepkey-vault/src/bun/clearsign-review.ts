@@ -10,7 +10,7 @@ import { DEFAULT_CLEARSIGN_SERVICE_URL } from './solana-certified-registry'
  * - a definition review: two EIP-712 approvals of the clearsign definition
  *   (the device schema for one audited deployment). It decides whether the
  *   call clearsigns.
- * - a contract rating: one auditor's EIP-712-signed opinion of the project.
+ * - a contract rating: an attributed assessment hosted by the service.
  *   Shown by this app only; it never reaches the device and never decides
  *   whether a call clearsigns.
  *
@@ -22,8 +22,6 @@ import { DEFAULT_CLEARSIGN_SERVICE_URL } from './solana-certified-registry'
  * ceremony: approvals then verify but show as unpinned. Once populated, any
  * other signer is refused. */
 export const PINNED_APPROVERS: Record<string, Array<'semantics-review' | 'security-review'>> = {}
-/** Raters this Vault trusts. Empty: ratings verify but show as unpinned. */
-export const PINNED_RATERS: string[] = []
 
 const DOMAIN = { name: 'KeepKey ClearSign', version: '1' }
 const DEFINITION_APPROVAL_TYPES = {
@@ -32,13 +30,8 @@ const DEFINITION_APPROVAL_TYPES = {
     { name: 'role', type: 'string' }, { name: 'decision', type: 'string' }, { name: 'reviewedAt', type: 'uint64' },
   ],
 }
-const CONTRACT_RATING_TYPES = {
-  ContractRating: [
-    { name: 'network', type: 'string' }, { name: 'contract', type: 'address' }, { name: 'deploymentHash', type: 'bytes32' },
-    { name: 'riskLevel', type: 'string' }, { name: 'ratingHash', type: 'bytes32' }, { name: 'ratedAt', type: 'uint64' },
-  ],
-}
 const RISK_LEVELS = ['low', 'medium', 'high', 'critical']
+const MAX_CLOCK_SKEW_MS = 5 * 60_000
 
 function canonical(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`
@@ -129,39 +122,40 @@ export function verifyPublishedReview(review: any, shape: { chainId: number; con
   }
 }
 
-/**
- * Verify a contract rating served by /v1/ratings: the EIP-712 ContractRating
- * signature commits to this exact rating content, deployment and risk level.
- * Returns it only if it rates the deployment measured now.
- */
-export function verifyContractRating(served: any, chainId: number, contract: string, live: unknown,
-  pinned = PINNED_RATERS): ContractRating | undefined {
+/** Validate a hosted assessment and match its deployment. Attribution is a
+ * publisher claim; this does not authenticate an auditor or prove the opinion. */
+export function validateContractRating(served: any, chainId: number, contract: string, live: unknown): ContractRating | undefined {
   const rating = served?.rating
   const network = `eip155:${chainId}`
-  if (!rating || rating.version !== 1 || rating.network !== network || String(rating.contract).toLowerCase() !== contract.toLowerCase()
-    || !RISK_LEVELS.includes(rating.risk?.level) || !Array.isArray(rating.findings) || !Number.isSafeInteger(rating.ratedAt)) {
-    throw new Error('ClearSign rating is malformed')
+  const text = (value: unknown, max: number) => typeof value === 'string' && value.trim().length > 0 && value.length <= max
+  if (served?.source !== 'hosted-assessment' || !/^0x[0-9a-f]{64}$/.test(served.ratingId) || !text(served.rater, 120)
+    || !rating || rating.version !== 1 || rating.network !== network || String(rating.contract).toLowerCase() !== contract.toLowerCase()
+    || !RISK_LEVELS.includes(rating.risk?.level) || !Array.isArray(rating.risk?.reasons) || rating.risk.reasons.length > 50
+    || rating.risk.reasons.some((reason: unknown) => !text(reason, 2000))
+    || !Array.isArray(rating.findings) || rating.findings.length > 50
+    || rating.findings.some((item: any) => !item || !['info', ...RISK_LEVELS].includes(item.severity)
+      || !text(item.title, 120) || !text(item.detail, 2000) || (item.reference !== undefined && !text(item.reference, 500)))
+    || !Number.isSafeInteger(rating.ratedAt) || rating.ratedAt < 1 || rating.ratedAt > Date.now() + MAX_CLOCK_SKEW_MS
+    || !Array.isArray(rating.deployment) || rating.deployment.length > 3
+    || !rating.deployment.some((item: any) => item?.role === 'contract' && String(item.address).toLowerCase() === contract.toLowerCase())
+    || rating.deployment.some((item: any) => !item || !DEPLOYMENT_ROLES.includes(item.role)
+      || !/^0x[0-9a-f]{40}$/i.test(item.address) || !/^0x[0-9a-f]{64}$/i.test(item.codeHash))
+    || new Set(rating.deployment.map((item: any) => item.role)).size !== rating.deployment.length) {
+    throw new Error('ClearSign audit assessment is malformed')
   }
-  const message = { network, contract: String(rating.contract).toLowerCase(), deploymentHash: `0x${sha(rating.deployment)}`,
-    riskLevel: rating.risk.level, ratingHash: `0x${sha(rating)}`, ratedAt: rating.ratedAt }
-  const rater = signer(CONTRACT_RATING_TYPES, message, served.signature)
-  if (rater !== String(served.rater).toLowerCase()) throw new Error('ClearSign rating signature is invalid')
-  const raterPinned = pinned.map((item) => item.toLowerCase()).includes(rater)
-  if (pinned.length && !raterPinned) throw new Error('ClearSign rating is signed by a rater this Vault does not trust')
-  // An opinion about a different deployment says nothing about this one.
   if (deploymentMismatch(rating.deployment, live)) return undefined
   return {
-    network, contract: message.contract, riskLevel: rating.risk.level, riskReasons: (rating.risk.reasons || []).map(String),
-    findings: rating.findings.map((item: any) => ({ severity: String(item.severity), title: String(item.title),
-      detail: String(item.detail), ...(item.reference ? { reference: String(item.reference) } : {}) })),
-    ratedAt: rating.ratedAt, rater, raterPinned,
+    network, contract: contract.toLowerCase(), riskLevel: rating.risk.level, riskReasons: rating.risk.reasons,
+    findings: rating.findings.map((item: any) => ({ severity: item.severity, title: item.title,
+      detail: item.detail, ...(item.reference ? { reference: item.reference } : {}) })),
+    ratedAt: rating.ratedAt, rater: served.rater, source: 'hosted-assessment',
+    reportUrl: `${serviceBase()}/audits/${served.ratingId}`,
   }
 }
 
 const serviceBase = () => String(process.env.CLEARSIGN_SERVICE_URL || DEFAULT_CLEARSIGN_SERVICE_URL).trim().replace(/\/+$/, '')
 
-/** Best-effort: the verified rating of this contract's live deployment, or
- * undefined for no rating, a stale deployment, any failure, or a bad signature. */
+/** Best-effort assessment lookup. Missing or stale assessments do not affect clearsign. */
 export async function findContractRating(chainId: number, contract: string,
   measure: (chainId: number, contract: string) => Promise<unknown>): Promise<ContractRating | undefined> {
   if (!Number.isSafeInteger(chainId) || chainId < 1 || !/^0x[0-9a-f]{40}$/i.test(contract)) return undefined
@@ -170,7 +164,8 @@ export async function findContractRating(chainId: number, contract: string,
       { signal: AbortSignal.timeout(3_000) })
     const served: any = await response.json()
     if (!response.ok || !served?.rating) return undefined
-    return verifyContractRating(served, chainId, contract, await measure(chainId, contract))
+    // The Worker responds { rating: { rating, ratingId, rater, source } }.
+    return validateContractRating(served.rating, chainId, contract, await measure(chainId, contract))
   } catch (error: any) {
     console.warn(`[clearsign] contract rating unavailable: ${error?.message || error}`)
     return undefined

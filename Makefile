@@ -483,6 +483,7 @@ test-unit:
 	cd $(PROJECT_DIR) && bun test __tests__/single-instance.test.ts __tests__/emulator-build-unavailable.test.ts __tests__/emulator-session.test.ts __tests__/emulator-selection-ui.test.ts
 	cd modules/hdwallet && bun test packages/hdwallet-keepkey/src/multisig.test.ts
 	$(MAKE) clearsign-worker-test
+	cd $(PROJECT_DIR) && bun test src/mainview/components/ClearSignReportCard.provenance.test.tsx
 	cd $(PROJECT_DIR) && bun src/bun/btc-backend/core.test.ts
 	# Script-style suites (own runner + process.exit — must NOT join the `bun test`
 	# list above, where the exit would cut the run short). cosmos.test.ts was green

@@ -326,6 +326,15 @@ describe('assessSigningRisk — EVM', () => {
     expect(tx('0xdeadbeef' + word(1n), { to: '0x1111111111111111111111111111111111111111', chainId: 1 }).tier).toBe('red')
   })
 
+  test('hosted assessments use publisher wording without auditor pinning claims', () => {
+    const deposit = '0x47e7ef24' + word(0n) + word(100n)
+    const hosted = { clearSignReport: { rating: { riskLevel: 'high', source: 'hosted-assessment',
+      riskReasons: ['Single-key control'], findings: [] } } } as unknown as Partial<SigningRequestInfo>
+    const r = tx(deposit, { to: '0x6b6c05ee7f49d00e63e74a9426d74ef9614f6a0f', chainId: 8453,
+      deviceClearSigns: true, ...hosted })
+    expect(r.reasons[0].text).toBe('Publisher-hosted assessment rates this contract high risk: Single-key control. Submitter attribution is supplied by the publisher.')
+  })
+
   test('a low-risk rating never lowers a critical payload', () => {
     const r = tx('0x095ea7b3' + SPENDER + word((1n << 256n) - 1n), reviewed('low', true))
     expect(r.level).toBe('critical')
