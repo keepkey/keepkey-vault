@@ -33,6 +33,7 @@ const rpc=Bun.serve({hostname:'127.0.0.1',port:0,async fetch(req){
  }
  return Response.json({success:true,payload})
 }})
-const vite=await createServer({configFile:false,plugins:[react()],root:import.meta.dir,server:{host:'127.0.0.1',port:5199,strictPort:true,fs:{allow:[new URL('../../../..',import.meta.url).pathname]},proxy:{'/__test_rpc':`http://127.0.0.1:${rpc.port}`}}})
+const port=Number(process.env.ZCASH_UI_PORT || 5199)
+const vite=await createServer({configFile:false,plugins:[react()],root:import.meta.dir,server:{host:'127.0.0.1',port,strictPort:true,fs:{allow:[new URL('../../../..',import.meta.url).pathname]},proxy:{'/__test_rpc':`http://127.0.0.1:${rpc.port}`}}})
 await vite.listen()
-console.log('Zcash unified UI fixture: http://127.0.0.1:5199')
+console.log(`Zcash unified UI fixture: http://127.0.0.1:${port}`)

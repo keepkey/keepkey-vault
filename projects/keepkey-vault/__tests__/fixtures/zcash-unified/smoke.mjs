@@ -7,7 +7,7 @@ const browser=await chromium.launch({executablePath:process.env.CHROME_EXECUTABL
 const page=await browser.newPage({viewport:{width:1280,height:1000}});
 const errors=[], checks={};
 page.on('pageerror',e=>errors.push(e.message));
-const base='http://127.0.0.1:5199';
+const base=`http://127.0.0.1:${process.env.ZCASH_UI_PORT || 5199}`;
 await page.route('**/*',route=>route.request().url().startsWith(base)?route.continue():route.request().resourceType()==='image'?route.fulfill({contentType:'image/svg+xml',body:'<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64"><circle cx="32" cy="32" r="30" fill="#ecb244"/><text x="32" y="44" fill="#111" text-anchor="middle" font-size="38">Z</text></svg>'}):route.abort());
 const rpc=async(method,params)=> (await (await page.request.post(base+'/__test_rpc',{data:{method,params}})).json()).payload;
 const transparent=page.getByRole('button',{name:'Transparent · public',exact:true});

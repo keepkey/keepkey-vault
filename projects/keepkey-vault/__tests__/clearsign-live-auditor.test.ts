@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from 'bun:test'
 import bs58 from 'bs58'
 import { utils as ethersUtils } from 'ethers'
 
-import { auditEvmIdentity, auditEvmTypedDataIdentity, auditSolanaIdentity } from '../src/bun/clearsign-live-auditor'
+import { auditEvmIdentity, auditEvmTypedDataIdentity, auditSolanaIdentity, snapshotEvmIdentities } from '../src/bun/clearsign-live-auditor'
 import { observeEvmCall, observeEvmTypedData } from '../src/bun/clearsign-observation'
 
 const originalFetch = globalThis.fetch
@@ -13,6 +13,22 @@ function rpcResult(result: unknown): Response {
 }
 
 describe('live ClearSign identity auditor', () => {
+  test('bounded assessments skip the non-cancellable SDK without starting background requests', async () => {
+    let calls = 0
+    globalThis.fetch = (async () => { calls++; throw new Error('unexpected request') }) as typeof fetch
+    await expect(snapshotEvmIdentities('0x' + '11'.repeat(20), 'eip155:1', new AbortController().signal))
+      .rejects.toThrow('Cancellable deployment measurement is unavailable')
+    expect(calls).toBe(0)
+  })
+
+  test('an expired deployment scan never starts another RPC request', async () => {
+    let calls = 0
+    globalThis.fetch = (async () => { calls++; throw new Error('unexpected request') }) as typeof fetch
+    const controller = new AbortController(); controller.abort(new Error('expired'))
+    await expect(snapshotEvmIdentities('0x' + '11'.repeat(20), 'https://rpc.example', controller.signal)).rejects.toThrow('expired')
+    expect(calls).toBe(0)
+  })
+
   test('captures EVM implementation identity without treating it as trusted coverage', async () => {
     const contract = '0x1111111111111111111111111111111111111111'
     const implementation = '0x2222222222222222222222222222222222222222'

@@ -162,6 +162,31 @@ describe('validateContractRating (app-only opinion)', () => {
     } finally { globalThis.fetch = original }
   })
 
+  it('cancels deployment RPC reads when the overall assessment budget expires', async () => {
+    const original = globalThis.fetch
+    const good = await servedRating()
+    const { snapshotEvmIdentities } = await import('./clearsign-live-auditor')
+    let started = 0, aborted = 0, active = 0
+    try {
+      globalThis.fetch = (async (url: any, init: any) => {
+        if (String(url).includes('/v1/ratings?')) return Response.json({ rating: good })
+        started++; active++
+        return new Promise<Response>((_resolve, reject) => {
+          const cancel = () => { aborted++; active--; reject(init.signal.reason) }
+          if (init.signal.aborted) cancel()
+          else init.signal.addEventListener('abort', cancel, { once: true })
+        })
+      }) as typeof fetch
+      const result = await findContractRating(8453, MANAGER, async (_chain, contract, signal) =>
+        (await snapshotEvmIdentities(contract, 'https://rpc.example', signal)).identities)
+      await new Promise(resolve => setTimeout(resolve, 0))
+      expect(result).toBeUndefined()
+      expect(started).toBe(4)
+      expect(aborted).toBe(started)
+      expect(active).toBe(0)
+    } finally { globalThis.fetch = original }
+  })
+
   it('findContractRating is best-effort: no rating, bad data, or no network are all undefined', async () => {
     const original = globalThis.fetch
     try {

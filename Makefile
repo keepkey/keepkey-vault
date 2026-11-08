@@ -482,7 +482,7 @@ test-unit:
 	cd $(PROJECT_DIR) && bun test __tests__/activity-history-accounts.test.ts
 	cd $(PROJECT_DIR) && bun test __tests__/selected-token-balance.test.ts __tests__/evm-owner-balance.test.ts
 	cd $(PROJECT_DIR) && bun test __tests__/single-instance.test.ts __tests__/emulator-build-unavailable.test.ts __tests__/emulator-session.test.ts __tests__/emulator-selection-ui.test.ts
-	cd modules/hdwallet && bun test packages/hdwallet-keepkey/src/multisig.test.ts
+	cd modules/hdwallet && bun test packages/hdwallet-keepkey/src/multisig.test.ts packages/hdwallet-keepkey/src/transport-timeout.test.ts
 	$(MAKE) clearsign-worker-test
 	cd $(PROJECT_DIR) && bun test src/mainview/components/ClearSignReportCard.provenance.test.tsx
 	cd $(PROJECT_DIR) && bun src/bun/btc-backend/core.test.ts

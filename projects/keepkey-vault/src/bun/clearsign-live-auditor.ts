@@ -20,18 +20,24 @@ function endpointLabel(endpoint: string): string {
   try { return new URL(endpoint).origin } catch { return 'configured-provider' }
 }
 
-async function jsonRpc(endpoint: string, method: string, params: unknown[]): Promise<any> {
+async function jsonRpc(endpoint: string, method: string, params: unknown[], signal?: AbortSignal): Promise<any> {
+  signal?.throwIfAborted()
   if (endpoint.startsWith('eip155:')) {
+    // The installed Pioneer SDK cannot cancel requests. Optional assessments
+    // omit enrichment on that transport rather than leave scans running past
+    // their deadline. Explicit audits retain the existing SDK path.
+    if (signal) throw new Error('Cancellable deployment measurement is unavailable for this provider')
     const [{ getPioneer }, { pioneerEvmRpc }] = await Promise.all([import('./pioneer'), import('./pioneer-evm')])
     return pioneerEvmRpc(await getPioneer(), endpoint, method, params)
   }
   const response = await fetch(endpoint, {
     method: 'POST', headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
-    signal: AbortSignal.timeout(7_000),
+    signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(7_000)]) : AbortSignal.timeout(7_000),
   })
   if (!response.ok) throw new Error(`HTTP_${response.status}`)
   const payload: any = await response.json()
+  signal?.throwIfAborted()
   if (payload.error) throw new Error(`RPC_${payload.error.code ?? 'ERROR'}`)
   return payload.result
 }
@@ -209,13 +215,14 @@ async function discoverErc7730TypedDataCandidates(
 /** Code identity of a contract as deployed right now: its code hash plus any
  * EIP-1967 implementation/beacon (or implementation()) target. The audit
  * records this, and signing re-measures it — an upgrade or redeploy changes it. */
-export async function snapshotEvmIdentities(contract: string, endpoint: string) {
+export async function snapshotEvmIdentities(contract: string, endpoint: string, signal?: AbortSignal) {
   const [block, code, implementationWord, beaconWord] = await Promise.all([
-    jsonRpc(endpoint, 'eth_blockNumber', []),
-    jsonRpc(endpoint, 'eth_getCode', [contract, 'latest']),
-    jsonRpc(endpoint, 'eth_getStorageAt', [contract, EIP1967_IMPLEMENTATION, 'latest']).catch(() => undefined),
-    jsonRpc(endpoint, 'eth_getStorageAt', [contract, EIP1967_BEACON, 'latest']).catch(() => undefined),
+    jsonRpc(endpoint, 'eth_blockNumber', [], signal),
+    jsonRpc(endpoint, 'eth_getCode', [contract, 'latest'], signal),
+    jsonRpc(endpoint, 'eth_getStorageAt', [contract, EIP1967_IMPLEMENTATION, 'latest'], signal).catch(() => undefined),
+    jsonRpc(endpoint, 'eth_getStorageAt', [contract, EIP1967_BEACON, 'latest'], signal).catch(() => undefined),
   ])
+  signal?.throwIfAborted()
   const identities: ClearSignAuditEvidence['identities'] = [{
     address: contract, role: 'contract',
     codeHash: typeof code === 'string' && code !== '0x' ? ethersUtils.keccak256(code) : undefined,
@@ -226,18 +233,19 @@ export async function snapshotEvmIdentities(contract: string, endpoint: string) 
   ].filter((entry): entry is { address: string; role: 'implementation' | 'beacon' } => Boolean(entry.address))
   if (!proxyTargets.some((entry) => entry.role === 'implementation')) {
     try {
-      const result = await jsonRpc(endpoint, 'eth_call', [{ to: contract, data: '0x5c60da1b' }, block])
+      const result = await jsonRpc(endpoint, 'eth_call', [{ to: contract, data: '0x5c60da1b' }, block], signal)
       const address = storageAddress(result)
       if (address && address !== contract) proxyTargets.push({ address, role: 'implementation' })
     } catch { /* not an implementation() proxy */ }
   }
   for (const target of proxyTargets) {
-    const targetCode = await jsonRpc(endpoint, 'eth_getCode', [target.address, block])
+    const targetCode = await jsonRpc(endpoint, 'eth_getCode', [target.address, block], signal)
     identities.push({
       address: target.address, role: target.role,
       codeHash: typeof targetCode === 'string' && targetCode !== '0x' ? ethersUtils.keccak256(targetCode) : undefined,
     })
   }
+  signal?.throwIfAborted()
   return { block, code, identities }
 }
 

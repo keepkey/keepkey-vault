@@ -17,7 +17,8 @@ async function fixture() {
   writeFileSync(script, `import {writeFileSync} from 'node:fs';
 const args=process.argv.slice(2); const value=(key)=>args[args.indexOf(key)+1];
 writeFileSync(${JSON.stringify(join(root, 'args.json'))},JSON.stringify(args));
-const server=Bun.serve({hostname:value('--rpc-bind-ip'),port:Number(value('--rpc-bind-port')),fetch:()=>Response.json({result:{status:'OK',nettype:'mainnet',height:200,target_height:200,synchronized:true,busy_syncing:false,outgoing_connections_count:3}})});
+if(value('--rpc-bind-ip')!=='127.0.0.1')throw new Error('Fixture daemon must bind loopback');
+const server=Bun.serve({hostname: '127.0.0.1',port:Number(value('--rpc-bind-port')),fetch:()=>Response.json({result:{status:'OK',nettype:'mainnet',height:200,target_height:200,synchronized:true,busy_syncing:false,outgoing_connections_count:3}})});
 process.on('SIGTERM',()=>{server.stop(true);process.exit(0)});`)
   const quote = (value: string) => "'" + value.replace(/'/g, "'\\''") + "'"
   writeFileSync(binary, '#!/bin/sh\nexec ' + quote(process.execPath) + ' ' + quote(script) + ' "$@"\n', { mode: 0o755 })

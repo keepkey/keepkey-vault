@@ -1,5 +1,5 @@
 import { afterAll, expect, test } from "bun:test"
-import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -20,7 +20,7 @@ function appDir(name: string, lddOutput?: string) {
 	writeFileSync(join(bin, "launcher"), '#!/bin/bash\necho "LAUNCHED $*"\necho "LAUNCHER_LD=$LD_LIBRARY_PATH"\n')
 	if (lddOutput !== undefined) {
 		// The stub also records the LD_LIBRARY_PATH it was invoked with, so tests
-		// can assert the bundled usr/lib directory is on the search path.
+		// can assert the bundled bin directory is on the search path.
 		writeFileSync(
 			join(stubs, "ldd"),
 			`#!/bin/bash\necho "LDD_LD=$LD_LIBRARY_PATH" > "${join(dir, "ldd-env.txt")}"\ncat <<'EOF'\n${lddOutput}\nEOF\n`,
@@ -61,7 +61,7 @@ it("puts the bin dir (bundled tray libs) on the library path for the check and t
 	// The tray stack is bundled next to libNativeWrapper.so in usr/bin/bin,
 	// because the Electrobun launcher replaces the child's LD_LIBRARY_PATH
 	// with exactly that directory. The ldd check must look there too.
-	const bin = join(app.dir, "usr", "bin", "bin")
+	const bin = realpathSync(join(app.dir, "usr", "bin", "bin"))
 	const lddEnv = readFileSync(join(app.dir, "ldd-env.txt"), "utf8")
 	expect(lddEnv).toContain(bin)
 	expect(r.out).toContain(`LAUNCHER_LD=${bin}`)

@@ -9,7 +9,7 @@ test('shows attributed assessment separately from the clear-signing result', asy
   const report = {
     protectionLevel: 'P1', headline: 'Opaque transaction', transactionFingerprint: 'a'.repeat(64),
     simulation: { status: 'unavailable', stateReference: {}, assetChanges: [], authorityChanges: [] },
-    findings: [], limitations: [],
+    findings: [], limitations: [], descriptor: {},
     rating: { network: 'eip155:1', contract: '0x' + '11'.repeat(20), riskLevel: 'high',
       riskReasons: ['Single-key control'], findings: [{ severity: 'high', title: 'Upgradeable', detail: 'Admin can change code.', reference: 'audit:section-2' }],
       ratedAt: Date.UTC(2026, 8, 25), rater: '<Auditor>', source: 'hosted-assessment', reportUrl: 'https://clearsign.example/audits/0x' + 'aa'.repeat(32) },

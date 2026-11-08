@@ -159,26 +159,36 @@ const serviceBase = () => String(process.env.CLEARSIGN_SERVICE_URL || DEFAULT_CL
  * live-deployment RPC calls. Missing or slow assessments never delay approval
  * beyond this budget or affect clear-signing verification. */
 export async function findContractRating(chainId: number, contract: string,
-  measure: (chainId: number, contract: string) => Promise<unknown>): Promise<ContractRating | undefined> {
+  measure: (chainId: number, contract: string, signal?: AbortSignal) => Promise<unknown>): Promise<ContractRating | undefined> {
   if (!Number.isSafeInteger(chainId) || chainId < 1 || !/^0x[0-9a-f]{40}$/i.test(contract)) return undefined
   const budgetMs = 1_500
+  const controller = new AbortController()
   let timeoutId: ReturnType<typeof setTimeout> | undefined
-  const timeout = new Promise<undefined>(resolve => { timeoutId = setTimeout(() => resolve(undefined), budgetMs) })
+  const timeout = new Promise<undefined>(resolve => { timeoutId = setTimeout(() => {
+    controller.abort(new Error('Assessment lookup deadline exceeded'))
+    resolve(undefined)
+  }, budgetMs) })
   const lookup = async (): Promise<ContractRating | undefined> => {
     try {
       const response = await fetch(`${serviceBase()}/v1/ratings?network=eip155:${chainId}&contract=${contract.toLowerCase()}`,
-        { signal: AbortSignal.timeout(budgetMs) })
+        { signal: controller.signal })
       const served: any = await response.json()
+      controller.signal.throwIfAborted()
       if (!response.ok || !served?.rating) return undefined
       // The Worker responds { rating: { rating, ratingId, rater, source } }.
-      return validateContractRating(served.rating, chainId, contract, await measure(chainId, contract))
+      const live = await measure(chainId, contract, controller.signal)
+      controller.signal.throwIfAborted()
+      return validateContractRating(served.rating, chainId, contract, live)
     } catch (error: any) {
       console.warn(`[clearsign] contract rating unavailable: ${error?.message || error}`)
       return undefined
     }
   }
   try { return await Promise.race([lookup(), timeout]) }
-  finally { if (timeoutId) clearTimeout(timeoutId) }
+  finally {
+    if (timeoutId) clearTimeout(timeoutId)
+    controller.abort()
+  }
 }
 
 /** The user's explicit "Request clearsign review". Sends only the public call

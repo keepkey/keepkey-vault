@@ -79,9 +79,9 @@ export function evmCatalogEntryId(spec: Pick<EvmSchemaSpec, 'chainId' | 'contrac
 
 /** Fetch a KeepKey-certified v3 envelope from the isolated signer service. */
 /** Measures the live deployment for a reviewed contract (injectable for tests). */
-export type MeasureDeployment = (chainId: number, contract: string) => Promise<unknown>
-export const measureLiveDeployment: MeasureDeployment = async (chainId, contract) =>
-  (await snapshotEvmIdentities(contract.toLowerCase(), getEvmSimulationEndpoint(chainId))).identities
+export type MeasureDeployment = (chainId: number, contract: string, signal?: AbortSignal) => Promise<unknown>
+export const measureLiveDeployment: MeasureDeployment = async (chainId, contract, signal) =>
+  (await snapshotEvmIdentities(contract.toLowerCase(), getEvmSimulationEndpoint(chainId), signal)).identities
 
 export async function findCertifiedEvmSchema(
   chainId: number | undefined,
