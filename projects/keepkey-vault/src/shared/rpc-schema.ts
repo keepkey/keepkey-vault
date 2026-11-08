@@ -341,6 +341,7 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       passwordBankRehydrate: { params: { id: string; pending?: boolean; ttlMinutes: number }; response: PasswordBankView }
       passwordBankReveal: { params: { id: string; pending?: boolean }; response: { password: string; expiresAt: number } }
       passwordBankRotate: { params: { id: string; action: 'prepare' | 'submitted' | 'verify' | 'cancel'; confirmed?: boolean }; response: PasswordBankView }
+      passwordBankSaveBackup: { params: void; response: { filePath: string; revision: number } }
       passwordBankExport: { params: void; response: { json: string; revision: number } }
       passwordBankBackupSaved: { params: { revision: number }; response: PasswordBankView }
       passwordBankImport: { params: { json: string }; response: PasswordBankView }
