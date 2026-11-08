@@ -34,6 +34,9 @@ try {
  await expect(page.getByText('Send from shielded balance',{exact:true})).toBeVisible();
  await expect(page.locator('details.form-aside')).not.toHaveAttribute('open');
  await page.getByPlaceholder('Paste a Zcash address (u1… or t1…)').fill('t1'+'A'.repeat(33));
+ // A new recipient opens the normal debounced address-book prompt. Finish it
+ // before navigating tools so the dialog cannot intercept later clicks.
+ await page.getByRole('button',{name:'Not now',exact:true}).click();
  await expect(page.getByText('Unshield to a transparent recipient',{exact:true})).toBeVisible();
  await expect(page.getByText('The recipient address and amount will be public. You can pay this address directly from your shielded balance.',{exact:true})).toBeVisible();
  checks.publicRecipientWarningStaysVisibleWithDetailsCollapsed=true;

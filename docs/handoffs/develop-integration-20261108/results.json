@@ -1,0 +1,70 @@
+{
+  "date": "2026-11-08",
+  "codeRevision": "43a5ff1f16558440edb288d296425c599e5aebba",
+  "unitGate": {
+    "passed": 3435,
+    "failed": 0,
+    "skippedWithoutNativeInputs": 5,
+    "bunGroups": 36,
+    "command": "make test-unit"
+  },
+  "nativeMonero": {
+    "passed": 17,
+    "failed": 0,
+    "previouslySkippedCasesExercised": 5,
+    "usesPhysicalDevice": false
+  },
+  "i18n": {
+    "integrityPassed": true,
+    "safetyAndFontsPassed": 7,
+    "languages": 15
+  },
+  "typecheck": {
+    "baselineDiagnostics": 803,
+    "currentDiagnostics": 803,
+    "newFileAndDiagnosticCodePairs": [],
+    "comparison": "Counts by source file and diagnostic code; dependency paths normalized. Existing message text differs with dependency resolution and UI key unions."
+  },
+  "passwordBrowser": {
+    "liveEnableWithoutReload": true,
+    "bankGenerateAssign": true,
+    "guidedRotationRequiresBackupAndVerification": true,
+    "liveDisableWithoutReload": true,
+    "pageErrors": [],
+    "screenshot": "./password-mvp-ui.png"
+  },
+  "settingsBrowser": {
+    "categories": 8,
+    "independentLiveFlags": true,
+    "noWritesOnNavigation": true,
+    "nodeStorageAndHeight": true,
+    "narrowWindow": true,
+    "pageErrors": []
+  },
+  "zcashBrowser": {
+    "standardTransparentDefaultWithoutPrivateInitialization": true,
+    "shieldedUsesSharedReceiveAndHidesAdvancedByDefault": true,
+    "publicRecipientWarningStaysVisibleWithDetailsCollapsed": true,
+    "advancedToolsRemainReachableAndCollapseBackToShieldedReceive": true,
+    "liveDisableNeverFallsBackToTransparentReceive": true,
+    "explicitPoolChangeRestoresTransparentReceive": true,
+    "watchOnlyShieldedDeepLinkHasNoPrivateInitializationOrTransparentFallback": true,
+    "unsupportedFirmwareNeverFallsBackToTransparentReceive": true,
+    "shieldedSendDeepLinkUsesStandardSendAction": true,
+    "liveDisableNeverFallsBackToTransparentSend": true,
+    "legacyPrivacyDeepLinkOpensToolsInUnifiedPage": true,
+    "mobileReceiveFitsViewport": true,
+    "noPageErrors": true
+  },
+  "macOSDevelopmentBuild": {
+    "passed": true,
+    "path": "/private/tmp/vault-develop-integration-20261108/projects/keepkey-vault/_build/dev-macos-arm64/keepkey-vault-dev.app",
+    "launched": false,
+    "researchMoneroArtifacts": true,
+    "signedRelease": false
+  },
+  "originalMoneroCheckoutModified": false,
+  "runningVaultAndFeatherRestarted": false,
+  "realWebsitePasswordsChanged": false,
+  "passwordFlag": "independent, default off; live UI enable and disable"
+}
