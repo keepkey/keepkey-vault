@@ -148,3 +148,9 @@ describe('C3: Send', () => {
 test('private mode hides the available balance in the send form as well as the header', () => {
  expect(ui.sendPrivateText).not.toContain('0.084653050000')
 })
+
+for (const blocker of ['emulator', 'adapter']) {
+ test(`a receive-only wallet (${blocker}) verifies its balance without enabling sending`, () => {
+  expect(ui[`receiveOnlyBalance_${blocker}`]).toEqual({checks:1,balance:'0.08465305',blocked:blocker,prepared:false})
+ })
+}

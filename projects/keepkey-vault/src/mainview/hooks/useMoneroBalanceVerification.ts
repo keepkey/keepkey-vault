@@ -37,13 +37,15 @@ export function useMoneroBalanceVerification(monero: MoneroStatusState, client: 
 
   useEffect(() => {
     mounted.current = true
-    if (status?.available && status.monitorReady && status.sendBlocked === 'key-images'
+    // Verifying spent outputs is independent of whether this build can sign a send.
+    if (status?.available && status.monitorReady
+        && (!status.spendStateKnown || !status.keyImagesSynced || status.keyImagesStale)
         && status.balanceAtomic !== '0' && attempted.current !== fingerprint) {
       attempted.current = fingerprint
       void verify()
     }
     return () => { mounted.current = false }
-  }, [fingerprint, status?.available, status?.monitorReady, status?.sendBlocked, verify])
+  }, [fingerprint, status?.available, status?.monitorReady, status?.spendStateKnown, status?.keyImagesSynced, status?.keyImagesStale, verify])
 
   const sameWallet = operationAddress.current === status?.address
   return { busy: sameWallet && busy, error: sameWallet ? error : null, retry: verify }

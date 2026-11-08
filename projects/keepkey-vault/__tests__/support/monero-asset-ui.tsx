@@ -41,7 +41,7 @@ function fakeClient(initial: any, settingsHeight = 0) {
     suggestRestoreHeight: async () => ({ tipHeight: 3_300_000, restoreHeight: 3_294_960, marginBlocks: 5040 }),
     connect: async (height?: number) => { calls.push(['connect', height]); if (client.holdConnect) await new Promise<void>(resolve => { releaseConnect = resolve }); current = connected(); return current },
     getAddress: async (minor: number, showDisplay: boolean) => { calls.push(['getAddress', minor, showDisplay]); return { address: minor ? SUBADDRESS : WALLET, network: 'mainnet', displayed: showDisplay, minor } },
-    syncKeyImages: async () => { calls.push(['sync']); current = connected({ ...current, canSend: true, sendBlocked: undefined, keyImagesSynced: true, keyImagesStale: false, spendStateKnown: true }); return current },
+    syncKeyImages: async () => { calls.push(['sync']); const receiveOnly = ['emulator', 'adapter'].includes(current.sendBlocked); current = connected({ ...current, canSend: !receiveOnly, sendBlocked: receiveOnly ? current.sendBlocked : undefined, keyImagesSynced: true, keyImagesStale: false, spendStateKnown: true }); return current },
     prepareSend: async (params: any) => { calls.push(['prepare', params]); return { prepareId: 'ab'.repeat(16), max: !!params.max, recipient: params.address,
       amountAtomic: params.max ? '84633049999' : params.amountAtomic, feeAtomic: '20000000', changeAtomic: '1', totalAtomic: '84653049999', inputCount: 1,
       outputs: [{ role: 'recipient', address: params.address, amountAtomic: '84633049999' }, { role: 'change', address: WALLET, amountAtomic: '1' }] } },
@@ -139,6 +139,29 @@ for (const [name, status] of [['rowNotConnected', notConnected], ['rowReady', co
  const {container,unmount}=await render(React.createElement(Host,{Section:MoneroReceiveSection,client}))
  out.zeroBalanceChecks=client.calls.filter(call=>call[0]==='sync').length
  out.zeroBalanceNote=text(q(container,'[data-monero-note]'))
+ await unmount()
+}
+
+// Physical/receive-only wallets still need a spent-output check to show a balance.
+for (const blocker of ['emulator', 'adapter']) {
+ const client = fakeClient(connected({canSend:false,sendBlocked:blocker}))
+ client.syncKeyImages = async () => {
+  client.calls.push(['sync'])
+  const verified = connected({canSend:false,sendBlocked:blocker,keyImagesSynced:true,spendStateKnown:true})
+  client.set(verified)
+  return verified
+ }
+ function BalanceHost() {
+  const state = useMoneroStatus(true, client)
+  return <><MoneroHeaderBalance view={moneroBalanceView(state.status)} privateMode={false} /><MoneroReceiveSection monero={state} client={client} chain={monero} privateMode={false} /><MoneroSendSection monero={state} client={client} /></>
+ }
+ const {container,unmount}=await render(<BalanceHost />)
+ out[`receiveOnlyBalance_${blocker}`] = {
+  checks:client.calls.filter(call=>call[0]==='sync').length,
+  balance:text(q(container,'[data-monero-header-balance]')),
+  blocked:q(container,'[data-monero-send-blocked]')?.getAttribute('data-monero-send-blocked'),
+  prepared:client.calls.some(call=>call[0]==='prepare'),
+ }
  await unmount()
 }
 
