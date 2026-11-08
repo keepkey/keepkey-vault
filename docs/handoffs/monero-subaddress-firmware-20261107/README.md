@@ -12,6 +12,12 @@ The restored physical wallet is PIN protected. Its Monero address is `44J3pVF3V2
 
 Vault source is `/Users/highlander/keepkey-toolchain/vault-xmr`, branch `feat/xmr-own-node`; the working implementation is also on `feat/monero-local-node` at `/private/tmp/keepkey-c5-resume/fix`. Balance verification was fixed in `13419cd75`; encrypted monitoring persistence is in `f9833f887`. The Vault adapter now implements 65002/65003 for this exact candidate and verifies output bindings plus Core CLSAG/Bulletproof+ results. A public fixture passed against the candidate emulator; physical signing and the future subaddress firmware still require qualification. Preserve concurrent Zcash/settings/password work. Never stage submodule symlinks from the temporary worktree.
 
+## Running preview
+
+The packaged preview includes `719e8c712` and is running from the durable checkout. The physical wallet's Send tab now shows normal hardware behavior; the old emulator-only blocker is gone. The actual encrypted view-key and primary-address records are saved in Vault's SQLite database, and a separate process successfully reopened the view key without displaying it. Changing the remote node reopened monitoring through the saved access.
+
+After the rebuild, the fresh scan waited for block data from Triplebit. The active remote node was changed in Vault to `https://node.sethforprivacy.com`; the new scan is still in progress. **0.08465305 XMR was physically verified before the rebuild**, rather than a claimed result from this incomplete rescan. Signed key-image persistence is covered by the fixture tests; its first live cache write awaits completion of the current scan and device verification. The SSD node was resumed and last observed at 1,440,508 of 3,801,534 blocks. Password Manager remains disabled, with all eight live API boundary checks passing.
+
 ## Recipient acceptance case
 
 Feather destination supplied by the user:
