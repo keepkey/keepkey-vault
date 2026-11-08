@@ -53,7 +53,8 @@ if (process.platform === 'darwin' || process.platform === 'win32') {
 // sidecar retain their existing packaging and show Monero as unavailable.
 const moneroExecutable = process.platform === 'win32' ? 'monero-cli.exe' : 'monero-cli'
 const moneroRpc = process.platform === 'win32' ? 'monero-wallet-rpc.exe' : 'monero-wallet-rpc'
-const moneroInputs = [`monero-cli/dist/${moneroExecutable}`, `monero-cli/vendor/${process.platform}-${process.arch}/${moneroRpc}`, `monero-cli/vendor/${process.platform}-${process.arch}/monero-tools.json`, `monero-cli/vendor/${process.platform}-${process.arch}/LICENSE`]
+const moneroDaemon = process.platform === 'win32' ? 'monerod.exe' : 'monerod'
+const moneroInputs = [`monero-cli/dist/${moneroExecutable}`, `monero-cli/vendor/${process.platform}-${process.arch}/${moneroRpc}`, `monero-cli/vendor/${process.platform}-${process.arch}/${moneroDaemon}`, `monero-cli/vendor/${process.platform}-${process.arch}/monero-tools.json`, `monero-cli/vendor/${process.platform}-${process.arch}/LICENSE`]
 const presentMoneroInputs = moneroInputs.filter(relative => existsSync(join(import.meta.dir, '..', relative)))
 const hasMoneroInputs = presentMoneroInputs.length === moneroInputs.length
 if ((process.env.KEEPKEY_REQUIRE_MONERO_SIDECAR === '1' || presentMoneroInputs.length > 0) && !hasMoneroInputs) {
@@ -79,6 +80,7 @@ if (hasMoneroInputs && process.platform === 'darwin' && process.env.CI !== 'true
   const staged = Bun.spawnSync(['python3', resolve(project, '../../scripts/monero-signing-metadata.py'), 'stage',
     '--worker', join(project, 'monero-cli/dist', moneroExecutable),
     '--rpc', join(tools, moneroRpc), '--metadata', join(tools, 'monero-tools.json'),
+    '--daemon', join(tools, moneroDaemon),
     '--output', output, '--entitlements', join(project, 'entitlements.plist'),
     '--identity', `Developer ID Application: ${developer} (${team})`], { stdout: 'inherit', stderr: 'inherit' })
   if (staged.exitCode !== 0) process.exit(staged.exitCode ?? 1)
@@ -86,6 +88,7 @@ if (hasMoneroInputs && process.platform === 'darwin' && process.env.CI !== 'true
     KEEPKEY_MONERO_CLI_SOURCE: join(output, moneroExecutable),
     KEEPKEY_MONERO_RPC_SOURCE: join(output, moneroRpc),
     KEEPKEY_MONERO_METADATA_SOURCE: join(output, 'monero-tools.json'),
+    KEEPKEY_MONERO_DAEMON_SOURCE: join(output, moneroDaemon),
   }
 }
 

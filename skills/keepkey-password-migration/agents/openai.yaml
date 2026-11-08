@@ -1,0 +1,4 @@
+interface:
+  display_name: "KeepKey Password Migration"
+  short_description: "Guide hardware-backed password migrations through Vault and BEX"
+  default_prompt: "Use $keepkey-password-migration to inspect my Vault password profiles and guide a service password migration."

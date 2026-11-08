@@ -23,7 +23,7 @@
     "postinstall": "bash scripts/patch-electrobun.sh",
     "monero:prepare": "python3 monero-cli/prepare.py",
     "monero:build": "bun monero-cli/build.ts",
-    "monero:test": "bun test src/bun/monero-vault.test.ts src/bun/monero-send.test.ts src/bun/monero-sidecar.test.ts src/bun/monero-emulator.test.ts src/bun/monero-settings.test.ts src/bun/emulator-library.test.ts monero-cli/src"
+    "monero:test": "bun test src/bun/monero-vault.test.ts src/bun/monero-send.test.ts src/bun/monero-sidecar.test.ts src/bun/monero-emulator.test.ts src/bun/monero-settings.test.ts src/bun/emulator-library.test.ts monero-cli/src src/bun/monero-node.test.ts __tests__/monero-node-ui.test.ts"
   },
   "dependencies": {
     "@chakra-ui/react": "^3.33.0",

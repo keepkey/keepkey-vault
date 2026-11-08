@@ -1,0 +1,11 @@
+<!doctype html><html><head><meta charset="UTF-8"><title>KeepKey password MVP test fixture</title></head><body style="background:#09090d;color:#eee"><div id="root"></div><script>
+// Synthetic native RPC transport. No real device, seed, database or network account.
+window.__electrobunBunBridge = { postMessage: async function(packet) {
+  if (typeof packet === 'string') packet = JSON.parse(packet);
+  try {
+    const response = await fetch('/__test_rpc', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(packet)});
+    const result = await response.json();
+    window.__electrobun.receiveMessageFromBun({type:'response',id:packet.id,...result});
+  } catch (error) { window.__electrobun.receiveMessageFromBun({type:'response',id:packet.id,success:false,error:String(error)}); }
+}};
+</script><script type="module" src="/entry.tsx"></script></body></html>

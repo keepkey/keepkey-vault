@@ -290,7 +290,7 @@ const CONFIGS: ChainConfig[] = [
     chainFamily: 'zcash-shielded', color: '#ECB244',
     rpcMethod: 'zcashGetOrchardFvk', signMethod: 'zcashSignPczt',
     defaultPath: [0x80000020, 0x80000085, 0x80000000], // m/32'/133'/0' (ZIP-32 Orchard)
-    hidden: true, // Shown via Privacy tab on Zcash AssetPage, not as separate Dashboard card
+    hidden: true, // Shielded pool within Zcash's asset page, not a separate Dashboard card
     minFirmware: '7.15.0',
   },
   {

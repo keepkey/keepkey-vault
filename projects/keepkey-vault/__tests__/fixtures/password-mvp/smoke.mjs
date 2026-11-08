@@ -1,0 +1,55 @@
+// Optional browser smoke runner. Start server.ts first.
+const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || 'playwright');
+import assert from 'node:assert/strict';
+const browser = await chromium.launch({ executablePath: process.env.CHROME_EXECUTABLE, headless: true });
+const page = await browser.newPage({ viewport: { width: 1440, height: 1100 }, acceptDownloads: true });
+const errors=[];
+page.on('pageerror', e=>errors.push(e.message));
+const { expect } = await import(process.env.PLAYWRIGHT_TEST_MODULE || '@playwright/test');
+try {
+ await page.request.post('http://127.0.0.1:5198/__test_rpc',{data:{method:'testReset'}});
+ await page.goto('http://127.0.0.1:5198');
+ await expect(page.getByTestId('fixture-home')).toBeVisible();
+ await expect(page.getByRole('button',{name:'Passwords',exact:true})).toHaveCount(0);
+ await page.getByRole('button',{name:'Device Settings'}).click();
+ await expect(page.getByRole('dialog', {name:'Settings',exact:true})).toBeVisible();
+ await page.getByRole('button',{name:'Feature Flags',exact:true}).click();
+ const toggle=page.getByRole('switch',{name:'Password manager',exact:true});
+ await expect(toggle).toHaveAttribute('aria-checked','false');
+ await toggle.click();
+ await expect(toggle).toHaveAttribute('aria-checked','true');
+ await expect(page.getByRole('button',{name:'Passwords',exact:true})).toHaveCount(1);
+ await page.getByRole('button',{name:'Close settings'}).click();
+ await page.getByRole('button',{name:'Passwords',exact:true}).click();
+ await page.getByRole('button',{name:'Create with KeepKey'}).click();
+ await expect(page.getByText('Ready password bank',{exact:true})).toBeVisible();
+ await page.getByRole('button',{name:'Generate on KeepKey'}).click();
+ await page.getByLabel('Login domain',{exact:true}).fill('accounts.google.com');
+ await page.getByLabel('Account name',{exact:true}).fill('person@example.com');
+ await page.getByRole('button',{name:'Assign next ready password'}).click();
+ await expect(page.getByText('person@example.com',{exact:true})).toBeVisible();
+ await page.getByRole('button',{name:'Stage next password'}).click();
+ await expect(page.getByText(/Guided rotation · Pending slot/)).toBeVisible();
+ await expect(page.getByRole('button',{name:'Backup saved — begin website change'})).toBeDisabled();
+ const downloadPromise=page.waitForEvent('download');
+ await page.getByRole('button',{name:'Export recovery backup'}).click();
+ const download=await downloadPromise;
+ await download.saveAs('./password-mvp-synthetic-backup.json');
+ await page.getByRole('button',{name:'I saved the backup'}).click();
+ await page.getByRole('button',{name:'Backup saved — begin website change'}).click();
+ await expect(page.getByRole('button',{name:'Activate verified password'})).toBeDisabled();
+ await page.getByLabel('I successfully signed in with the new password').check();
+ await page.getByRole('button',{name:'Activate verified password'}).click();
+ await expect(page.getByText('Last change verified',{exact:true})).toBeVisible();
+ await page.screenshot({path:'./password-mvp-ui.png',fullPage:true});
+ await page.getByRole('button',{name:'Device Settings'}).click();
+ await expect(page.getByRole('dialog', {name:'Settings',exact:true})).toBeVisible();
+ await page.getByRole('button',{name:'Feature Flags',exact:true}).click();
+ await page.getByRole('switch',{name:'Password manager',exact:true}).click();
+ await expect(page.getByRole('button',{name:'Passwords',exact:true})).toHaveCount(0);
+ await page.getByRole('button',{name:'Close settings'}).click();
+ await expect(page.getByTestId('fixture-home')).toBeVisible();
+ assert.deepEqual(errors,[]);
+ console.log(JSON.stringify({liveEnableWithoutReload:true,bankGenerateAssign:true,guidedRotationRequiresBackupAndVerification:true,liveDisableWithoutReload:true,pageErrors:errors,screenshot:'./password-mvp-ui.png'},null,2));
+} catch(error) { console.error(await page.locator('body').innerText()); throw error; }
+finally { await browser.close(); }

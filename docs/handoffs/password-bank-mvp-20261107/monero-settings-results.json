@@ -1,0 +1,40 @@
+{
+  "date": "2026-11-07",
+  "implementation": "81b0e945f",
+  "featureIcons": "0f6d56064",
+  "affectedTests": {
+    "passed": 201,
+    "failed": 0,
+    "files": 12
+  },
+  "startupRegressionReproducedWithoutFix": true,
+  "publicFixtureStartupSeconds": 2.5,
+  "browser": {
+    "categories": 8,
+    "independentLiveFlags": true,
+    "narrowWindow": true,
+    "pageErrors": []
+  },
+  "native": {
+    "physicalViewConsentCompleted": true,
+    "watchWalletOpened": true,
+    "walletState": "ready",
+    "scanStartBlock": 3799129,
+    "passwordManagerEnabled": false,
+    "liveApiBoundaryChecks": 8,
+    "physicalAddressPrefix": "44J3pVF3",
+    "pinProtected": true,
+    "balanceXmr": "0.08465305",
+    "spendStateVerified": true
+  },
+  "typecheck": {
+    "unchangedIntegratedDiagnostics": 806,
+    "currentDiagnostics": 806,
+    "newNormalizedMessages": 0
+  },
+  "paymentAttempted": false,
+  "iconsLoadedOnNextLaunch": false,
+  "iconsLoaded": true,
+  "balanceVerificationFix": "13419cd75",
+  "encryptedMonitoringPersistence": "f9833f887"
+}

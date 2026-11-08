@@ -2,11 +2,11 @@ import { normalizeAmountInput } from '../../shared/locale'
 import { getNumberLocale } from "../lib/number-locale"
 import { useUiTranslation } from "../i18n/ui"
 import type { ReactNode } from "react"
-import { useState, useEffect, useCallback, useRef, useMemo } from "react"
+import { useState, useEffect, useCallback, useRef, useMemo, useId } from "react"
 import { useTranslation } from "react-i18next"
 import { createPortal } from "react-dom"
-import { Box, Flex, Text, Button, Spinner, IconButton } from "@chakra-ui/react"
-import { FaShieldAlt, FaArrowRotateRight } from "react-icons/fa"
+import { Box, Flex, Text, Button, Spinner } from "@chakra-ui/react"
+import { FaShieldAlt } from "react-icons/fa"
 import { rpcRequest, onRpcMessage } from "../lib/rpc"
 import { Z } from "../lib/z-index"
 import { playAttention, playSent } from "../lib/sounds"
@@ -165,17 +165,19 @@ let stylesInjected = false
 function ensureStylesInjected() {
 	if (stylesInjected || typeof document === "undefined") return
 	stylesInjected = true
-	const link = document.createElement("link")
-	link.rel = "stylesheet"
-	link.href = "https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap"
-	document.head.appendChild(link)
 	const style = document.createElement("style")
 	style.setAttribute("data-zcash-v2", "")
 	style.textContent = ZCASH_V2_CSS
 	document.head.appendChild(style)
 }
 
-export function ZcashPrivacyTab({ initialPage, initialSection }: { initialPage?: Page; initialSection?: 'shield' | 'unshield' } = {}) {
+export function ZcashPrivacyTab({ initialPage, initialSection, embedded = false, onPageChange }: {
+	initialPage?: Page
+	initialSection?: 'shield' | 'unshield'
+	/** Use the asset page's Send/Receive navigation and shared visual tokens. */
+	embedded?: boolean
+	onPageChange?: (page: Page) => void
+} = {}) {
   const uiText = useUiTranslation()
 
 	const { t } = useTranslation(["asset", "addressbook", "common"])
@@ -184,7 +186,19 @@ export function ZcashPrivacyTab({ initialPage, initialSection }: { initialPage?:
 	useEffect(() => { ensureStylesInjected() }, [])
 
 	const [page, setPage] = useState<Page>(initialPage ?? "send")
-	useEffect(() => { if (initialPage) setPage(initialPage) }, [initialPage])
+	const [toolsOpen, setToolsOpen] = useState(!!initialPage && initialPage !== 'send' && initialPage !== 'receive')
+	const toolsId = useId()
+	const rootClass = embedded ? 'zcash-v2 zcash-embedded' : 'zcash-v2'
+	useEffect(() => {
+		if (!initialPage) return
+		setPage(initialPage)
+		setToolsOpen(initialPage !== 'send' && initialPage !== 'receive')
+	}, [initialPage])
+	const navigate = (next: Page) => {
+		setPage(next)
+		if (next !== 'send' && next !== 'receive') setToolsOpen(true)
+		onPageChange?.(next)
+	}
 	const shieldFormRef = useRef<HTMLDivElement>(null)
 	const unshieldFormRef = useRef<HTMLDivElement>(null)
 
@@ -831,7 +845,7 @@ export function ZcashPrivacyTab({ initialPage, initialSection }: { initialPage?:
 		}
 
 		return (
-			<div className="zcash-v2">
+			<div className={rootClass}>
 				<div className="empty-card" style={{ textAlign: "center", padding: "32px 24px" }}>
 					<Box
 						w="56px" h="56px" borderRadius="full"
@@ -891,7 +905,7 @@ export function ZcashPrivacyTab({ initialPage, initialSection }: { initialPage?:
 
 	if (status === "checking" || status === "initializing") {
 		return (
-			<div className="zcash-v2">
+			<div className={rootClass}>
 				<div className="empty-card">
 					<h3>{uiText("Setting up privacy")}</h3>
 					<p>{uiText("Deriving the viewing key from your KeepKey. One-time setup, takes a few seconds.")}</p>
@@ -907,7 +921,13 @@ export function ZcashPrivacyTab({ initialPage, initialSection }: { initialPage?:
 	const sendMaxZatoshis = transparentRecipient ? deshieldMaxZatoshis : spendableMaxZatoshis
 
 	return (
-		<div className="zcash-v2">
+		<div className={rootClass}>
+			{embedded ? <Flex align="center" justify="space-between" gap="3" mb="4" wrap="wrap">
+				<Text fontSize="12px" color={!synced ? 'var(--gold)' : 'var(--text-2)'} role="status">
+					{uiText('Shielded')} · {scanInFlight || scanState === 'scanning' ? uiText('Scanning') : scanError ? uiText('Scan failed') : synced ? uiText('Last scan complete') : uiText('Scan needed')}
+				</Text>
+				<Button size="xs" variant="outline" onClick={() => handleScan(undefined, undefined, true)} disabled={scanInFlight || scanState === 'scanning'}>{t('zcashSyncShielded')}</Button>
+			</Flex> : <>
 			{/* balance card */}
 			<div className="zk-balance">
 				<div className="bal-glyph">
@@ -952,22 +972,30 @@ export function ZcashPrivacyTab({ initialPage, initialSection }: { initialPage?:
 				</div>
 			</div>
 			<p style={{ fontSize: 12, color: 'var(--zk-fg-dim)', margin: '0 0 12px' }}>{uiText("Transparent ZEC and shielded ZEC are separate balances. Refreshing transparent ZEC does not scan private payments.")}</p>
+			</>}
 			{scanError && <div className="result-box err" role="alert" style={{ marginBottom: 12 }}>
-				<div className="result-msg">{scanError} <button className="ghost-btn" onClick={() => setPage('scan')}>{uiText("Open shielded sync →")}</button></div>
+				<div className="result-msg">{scanError} <button className="ghost-btn" onClick={() => navigate('scan')}>{uiText("Open shielded sync →")}</button></div>
 			</div>}
 
 			{/* page nav */}
-			<nav className="page-nav">
-				{NAV_TABS.map(tab => (
+			{embedded && <Button size="xs" variant="ghost" mb="3" aria-expanded={toolsOpen} aria-controls={toolsId}
+				onClick={() => { if (toolsOpen) { setToolsOpen(false); if (page !== 'send' && page !== 'receive') navigate('receive') } else setToolsOpen(true) }}>
+				{uiText('Zcash tools and details')} {toolsOpen ? '▴' : '▾'}
+			</Button>}
+			<div id={toolsId} hidden={embedded && !toolsOpen}>
+			{embedded && <Text fontSize="12px" color="var(--text-2)" mb="3">{t('zcashSeparateSync')}</Text>}
+			<nav className="page-nav" aria-label={uiText('Zcash tools')}>
+				{NAV_TABS.filter(tab => !embedded || (tab.id !== 'send' && tab.id !== 'receive')).map(tab => (
 					<button key={tab.id}
 						data-active={page === tab.id ? "1" : undefined}
-						onClick={() => setPage(tab.id as Page)}
+						onClick={() => navigate(tab.id as Page)}
 					>
 						<span className="ico" style={{ color: tab.color }}>{tab.icon}</span>
 						{tab.label}
 					</button>
 				))}
 			</nav>
+			</div>
 
 			{/* ===== SEND ===== */}
 			{page === "send" && (
@@ -1124,7 +1152,8 @@ export function ZcashPrivacyTab({ initialPage, initialSection }: { initialPage?:
 							</div>
 						</div>
 
-						<div className="form-aside">
+						<details className="form-aside" open={embedded ? undefined : true}>
+							<summary hidden={!embedded}>{uiText('Transaction details')}</summary>
 							<div className="aside-card">
 								<h5>{uiText("Summary")}</h5>
 								<div className="kv"><span>{uiText("Amount")}</span><span className="v">{amount || "—"} ZEC</span></div>
@@ -1138,7 +1167,7 @@ export function ZcashPrivacyTab({ initialPage, initialSection }: { initialPage?:
 								</p>
 								<p style={{ marginTop: 4 }}>{uiText("After network fee. Notes need")}{" "}{balance?.min_confirmations ?? 10}{" "}{uiText("confirmations.")}</p>
 							</div>
-						</div>
+						</details>
 					</div>
 				</section>
 			)}
@@ -1334,6 +1363,22 @@ export function ZcashPrivacyTab({ initialPage, initialSection }: { initialPage?:
 
 			{/* ===== RECEIVE ===== */}
 			{page === "receive" && orchardAddress && (
+				embedded ? <Flex gap="6" wrap="wrap" align="flex-start" aria-label={uiText('Shielded receive')}>
+					<Box bg="white" p="3" borderRadius="12px" flexShrink={0} aria-label={uiText('Shielded address QR code')}
+						dangerouslySetInnerHTML={{ __html: generateQRSvg(orchardAddress, 4, 0) }} />
+					<Box flex="1" minW={{ base: '100%', sm: '200px' }}>
+						<Text fontSize="12px" fontWeight="600" color="var(--text-1)" mb="2">{uiText('Your Zcash address (Unified)')}</Text>
+						<Text fontFamily="mono" fontSize="13px" wordBreak="break-all" bg="var(--ink-0)" border="1px solid var(--line)" borderRadius="12px" p="3">{orchardAddress}</Text>
+						<Flex gap="2" mt="3" wrap="wrap">
+							<Button size="sm" variant="outline" onClick={copyAddress}>{copied ? uiText('✓ Copied') : uiText('Copy address')}</Button>
+							<Button size="sm" variant="outline" onClick={verifyOnDevice} disabled={verifyingOnDevice}>
+								{verifyingOnDevice ? uiText('Check your KeepKey screen…') : verifySucceeded ? uiText('✓ Verified on device') : uiText('Show address on KeepKey')}
+							</Button>
+						</Flex>
+						<Text fontSize="12px" color="var(--text-2)" mt="3">{uiText('Compare the full address on your KeepKey before receiving. Address verification can take over 60 seconds.')}</Text>
+						{verifyError && <Text fontSize="12px" color="var(--rose)" role="alert" mt="2">{verifyError}</Text>}
+					</Box>
+				</Flex> :
 				<section>
 					<div className="page-head">
 						<h2>{uiText("Receive ZEC")}</h2>

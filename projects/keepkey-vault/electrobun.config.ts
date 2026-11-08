@@ -1,5 +1,6 @@
 import type { ElectrobunConfig } from "electrobun";
 import { existsSync } from "node:fs";
+import { isAbsolute, relative } from 'node:path';
 import pkg from "./package.json";
 
 const isWindows = process.platform === "win32";
@@ -21,17 +22,24 @@ const moneroPlatform = `${process.platform}-${process.arch}`;
 const moneroSidecar = isWindows ? "monero-cli.exe" : "monero-cli";
 const moneroRpc = isWindows ? "monero-wallet-rpc.exe" : "monero-wallet-rpc";
 const moneroVendor = `monero-cli/vendor/${moneroPlatform}`;
-const moneroCliSource = process.env.KEEPKEY_MONERO_CLI_SOURCE || `monero-cli/dist/${moneroSidecar}`;
-const moneroRpcSource = process.env.KEEPKEY_MONERO_RPC_SOURCE || `${moneroVendor}/${moneroRpc}`;
-const moneroMetadataSource = process.env.KEEPKEY_MONERO_METADATA_SOURCE || `${moneroVendor}/monero-tools.json`;
+// Electrobun resolves copy keys relative to the project, even for absolute inputs.
+const toolSource = (path: string) => isAbsolute(path) ? relative(process.cwd(), path) : path;
+const moneroCliSource = toolSource(process.env.KEEPKEY_MONERO_CLI_SOURCE || `monero-cli/dist/${moneroSidecar}`);
+const moneroRpcSource = toolSource(process.env.KEEPKEY_MONERO_RPC_SOURCE || `${moneroVendor}/${moneroRpc}`);
+const moneroMetadataSource = toolSource(process.env.KEEPKEY_MONERO_METADATA_SOURCE || `${moneroVendor}/monero-tools.json`);
+const moneroDaemon = isWindows ? 'monerod.exe' : 'monerod';
+const moneroDaemonSource = toolSource(process.env.KEEPKEY_MONERO_DAEMON_SOURCE || `${moneroVendor}/${moneroDaemon}`);
 const moneroCopy = existsSync(moneroCliSource) && existsSync(moneroRpcSource)
     ? { [moneroCliSource]: moneroSidecar,
         [moneroRpcSource]: `monero-tools/${moneroRpc}`,
         [moneroMetadataSource]: "monero-tools/monero-tools.json",
+        ...(existsSync(moneroDaemonSource) ? { [moneroDaemonSource]: `monero-tools/${moneroDaemon}` } : {}),
         [`${moneroVendor}/LICENSE`]: "monero-tools/LICENSE" } : {};
 // Development-only research artifacts (build-signed.ts refuses this flag): the receive-only and/or
 // signing emulator builds, and the research signing adapter pinned in monero-tools.json.
 const includeMoneroResearch = process.env.KEEPKEY_INCLUDE_MONERO_EMULATOR === '1';
+const moneroDeviceCopy = includeMoneroResearch && existsSync('monero-device-bundle/libmonero_device_proof.dylib') && existsSync('monero-device-bundle/libmonero_core_verify.dylib')
+    ? { 'monero-device-bundle': 'monero-device' } : {};
 const moneroEmulatorCopy = {
     ...(includeMoneroResearch && existsSync("monero-emulator-bundle/libkkemu-monero.dylib")
         ? { "monero-emulator-bundle/manifest.json": "monero-emulator/manifest.json",
@@ -93,6 +101,7 @@ export default {
 			...emulatorCopy,
 			...moneroCopy,
 			...moneroEmulatorCopy,
+			...moneroDeviceCopy,
 			// Zcash privacy engine sidecar (Rust binary -- .exe on Windows)
 			[isWindows ? "zcash-cli/target/release/zcash-cli.exe" : "zcash-cli/target/release/zcash-cli"]: isWindows ? "zcash-cli.exe" : "zcash-cli",
 		},

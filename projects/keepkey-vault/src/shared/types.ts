@@ -600,6 +600,7 @@ export interface MoneroStatus {
   monitorReady: boolean
   /** What the balance means now: unknown (not connected), scanning, current, or the last update (node down). */
   syncState: 'not-connected' | 'scanning' | 'ready' | 'unreachable'
+  connectionPhase?: 'device' | 'wallet'
   restoreHeight?: number
   daemonHeight?: number
   emulatorReady?: boolean
@@ -607,7 +608,7 @@ export interface MoneroStatus {
   error?: string
   canSend: boolean
   /** The first unmet send gate: signing emulator build, adapter, wallet sync, key images. */
-  sendBlocked?: 'unrelayed' | 'emulator' | 'adapter' | 'syncing' | 'key-images'
+  sendBlocked?: 'unrelayed' | 'emulator' | 'firmware' | 'adapter' | 'syncing' | 'key-images'
   /** Signed transaction whose broadcast outcome is unknown; only a retry of it is allowed. */
   unrelayedTxid?: string
   keyImagesSynced?: boolean
@@ -1611,6 +1612,7 @@ export interface ClearSignProviderInput {
 
 // Application-level settings (persisted in SQLite)
 export interface AppSettings {
+  passwordManagerEnabled?: boolean // experimental password bank; runtime, default OFF
   appLanguage?: string          // shared with native menus and dialogs
   restApiEnabled: boolean        // controls entire REST API server on/off
   pioneerApiBase: string         // current Pioneer API base URL
@@ -1623,6 +1625,7 @@ export interface AppSettings {
   moneroAvailable?: boolean      // optional compatibility field; build contains a runnable sidecar
   moneroEnabled: boolean         // experimental XMR sidecar and wallet surface (default OFF)
   moneroDaemonUrl: string        // public HTTPS Monero daemon, or loopback local daemon
+  moneroNodeMode?: 'local' | 'remote'
   moneroRestoreHeight: number    // earliest block to scan; zero (also unset/legacy) scans from genesis
   moneroPendingBroadcasts?: number  // signed XMR sends whose broadcast is unresolved (kept across off/wipe)
   zcashPrivacyEnabled: boolean   // read-only capability: auto-ON when firmware >= 7.15.0 and this build includes zcash-cli

@@ -1037,7 +1037,7 @@ export function SendForm({ chain, address, balance, token, tokenBalanceUnverifie
 					networkId={caipToNetworkId(activeCaip)}
 					chainFamily={chain.chainFamily}
 					assetCaip={activeCaip}
-					// This form sends transparent ZEC: shielded (u1…/zs1…) contacts belong to the Privacy tab.
+					// This form spends transparent ZEC; shielded recipients use the shielded balance selector.
 					entryFilter={chain.id === 'zcash' ? (e) => /^(t1|t3|tex1)/i.test(e.address.trim()) : undefined}
 					onSelect={(e) => { setRecipient(e.address); promptedAddressRef.current = e.address; setShowAddressBook(false) }}
 					onClose={() => setShowAddressBook(false)}

@@ -41,6 +41,7 @@ MACOS_DIR="$APP_PATH/Contents/MacOS"
 RESOURCES_DIR="$APP_PATH/Contents/Resources"
 SIGNING_SCRIPTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 MONERO_RPC="$RESOURCES_DIR/app/monero-tools/monero-wallet-rpc"
+MONERO_DAEMON="$RESOURCES_DIR/app/monero-tools/monerod"
 MONERO_METADATA="$RESOURCES_DIR/app/monero-tools/monero-tools.json"
 MONERO_WORKER="$RESOURCES_DIR/app/monero-cli"
 MONERO_SIGN_RECEIPT_DIR=""
@@ -64,6 +65,11 @@ if [ -e "$MONERO_RPC" ] || [ -e "$MONERO_METADATA" ] || [ -e "$MONERO_WORKER" ];
   MONERO_SIGN_RECEIPT_DIR="$(mktemp -d)"
   python3 "$SIGNING_SCRIPTS_DIR/monero-signing-metadata.py" verify \
     --rpc "$MONERO_RPC" --metadata "$MONERO_METADATA" --receipt "$MONERO_SIGN_RECEIPT_DIR/receipt.json"
+  if [ -e "$MONERO_DAEMON" ]; then
+    file -b "$MONERO_DAEMON" | grep -q 'Mach-O' || { echo "ERROR: Monero node is not a Mach-O binary"; exit 1; }
+    python3 "$SIGNING_SCRIPTS_DIR/monero-signing-metadata.py" verify --field daemon \
+      --rpc "$MONERO_DAEMON" --metadata "$MONERO_METADATA" --receipt "$MONERO_SIGN_RECEIPT_DIR/daemon.json"
+  fi
 fi
 
 # --- 1. Native addons in Resources/ (no entitlements) ---
@@ -84,6 +90,14 @@ if [ -n "$MONERO_SIGN_RECEIPT_DIR" ]; then
   codesign --verify --strict "$MONERO_RPC"
   python3 "$SIGNING_SCRIPTS_DIR/monero-signing-metadata.py" record \
     --rpc "$MONERO_RPC" --metadata "$MONERO_METADATA" --receipt "$MONERO_SIGN_RECEIPT_DIR/receipt.json"
+  if [ -e "$MONERO_DAEMON" ]; then
+    python3 "$SIGNING_SCRIPTS_DIR/monero-signing-metadata.py" verify --field daemon \
+      --rpc "$MONERO_DAEMON" --metadata "$MONERO_METADATA" --receipt "$MONERO_SIGN_RECEIPT_DIR/daemon.json"
+    sign_file "$MONERO_DAEMON"
+    codesign --verify --strict "$MONERO_DAEMON"
+    python3 "$SIGNING_SCRIPTS_DIR/monero-signing-metadata.py" record --field daemon \
+      --rpc "$MONERO_DAEMON" --metadata "$MONERO_METADATA" --receipt "$MONERO_SIGN_RECEIPT_DIR/daemon.json"
+  fi
 fi
 
 # --- 2. All Mach-O in MacOS/ — WITH entitlements ---

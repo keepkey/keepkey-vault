@@ -1,0 +1,8 @@
+{
+  "liveEnableWithoutReload": true,
+  "bankGenerateAssign": true,
+  "guidedRotationRequiresBackupAndVerification": true,
+  "liveDisableWithoutReload": true,
+  "pageErrors": [],
+  "screenshot": "ui.png"
+}

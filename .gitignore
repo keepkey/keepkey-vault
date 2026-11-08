@@ -59,3 +59,6 @@ rmdir-result.txt
 /firmware-7.15.0-2676ec4-full/
 /bun
 /docs/clearsign-ecosystem/assets.jsonl
+
+# Pinned host libraries for unsigned Monero hardware research builds.
+/projects/keepkey-vault/monero-device-bundle/

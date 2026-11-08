@@ -1,4 +1,6 @@
 import { describe, expect, test } from 'bun:test'
+import { Database } from 'bun:sqlite'
+import { createMoneroWatchStore, type MoneroWatchStore } from './monero-watch-store'
 import { existsSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -11,6 +13,7 @@ import { DigestWalletRpc } from '../../monero-cli/src/digest'
 import { checkSignedTransaction, concat, keyImageInitRequest, lengthField, openKeyImage, parseFields, parseSignedTransaction, reviewPlan,
   signRequest, transferDetails, varint } from './monero-wire'
 import { createMoneroVault, type MoneroWatchSidecar } from './monero-vault'
+import type { MoneroDeviceSigner } from './monero-device-signing'
 import { createFilePendingStore, type MoneroPendingStore } from './monero-pending'
 import { formatXmrAtomic, moneroAddressKind, parseXmrAmount } from '../shared/monero-address'
 
@@ -286,9 +289,9 @@ class Emulator {
   private handle(type: number, body: Uint8Array) {
     this.received.push({ type, body })
     const images = fixtures.cases.base.signedTransaction.keyImages as string[]
-    if (type === 27) { if (this.pending[0]?.[0] === 26 || this.pending[0]?.[0] === 65001) this.onReviewScreen?.(); return this.respond(this.pending) }
+    if (type === 27) { if (this.pending[0]?.[0] === 26 || (this.pending[0]?.[0] === 65001 || this.pending[0]?.[0] === 65003)) this.onReviewScreen?.(); return this.respond(this.pending) }
     if (type === 20) return this.respond([[3, new Uint8Array([8, 4])]])
-    if (this.pinLocked && (type === 540 || type === 542 || type === 530 || type === 65000)) return this.respond([[18, new Uint8Array([8, 1])]])
+    if (this.pinLocked && (type === 540 || type === 542 || type === 530 || (type === 65000 || type === 65002))) return this.respond([[18, new Uint8Array([8, 1])]])
     if (type === 540) {
       const minor = Number(parseFields(body).get(5)?.[0] ?? 0n)
       return this.respond([[541, lengthField(1, new TextEncoder().encode(minor ? SUBADDRESS : this.address))]])
@@ -305,10 +308,10 @@ class Emulator {
       }))]])
     }
     if (type === 534) return this.respond([[535, lengthField(1, ENC_KEY.slice())]])
-    if (type === 65000) {
+    if (type === 65000 || type === 65002) {
       const screens: Array<[number, Uint8Array]> = Array.from({ length: this.reviewScreens }, () => [26, new Uint8Array()])
       // Each ButtonRequest waits for its own ButtonAck before the next message.
-      return this.respond([...screens, [65001, concat([lengthField(1, this.signedBlob), lengthField(2, this.signedHash)])]])
+      return this.respond([...screens, [type === 65002 ? 65003 : 65001, concat([lengthField(1, this.signedBlob), lengthField(2, this.signedHash)])]])
     }
     this.respond([[3, new Uint8Array([8, 1])]])
   }
@@ -330,7 +333,7 @@ class Emulator {
   }
 }
 
-function bridge(options: { signing?: boolean; sendReady?: boolean; monitorReady?: boolean; pendingStore?: MoneroPendingStore } = {}) {
+function bridge(options: { signing?: boolean; sendReady?: boolean; monitorReady?: boolean; pendingStore?: MoneroPendingStore; watchStore?: MoneroWatchStore; hardwareSigner?: MoneroDeviceSigner } = {}) {
   const delegate = new Emulator()
   const calls: Record<string, any[]> = { imports: [], transfers: [], relays: [], refreshes: [], lookups: [] }
   // What the node says about a txid (/get_transactions + /is_key_image_spent).
@@ -372,7 +375,7 @@ function bridge(options: { signing?: boolean; sendReady?: boolean; monitorReady?
     try { return await operation() } finally { delegate.onButtonRequest = null }
   }
   const api = createMoneroVault({ engine, confirm, sidecar, signingEmulator: () => options.signing !== false,
-    getConfig: () => ({ ...config }), pendingStore: options.pendingStore })
+    getConfig: () => ({ ...config }), pendingStore: options.pendingStore, watchStore: options.watchStore, hardwareSigner: options.hardwareSigner })
   return { api, delegate, calls, confirmed, engine, state, config, wallet,
     setDraft(next: typeof draft) { draft = next }, setRelayError(error: Error | null) { relayError = error },
     setTransferError(error: Error | null) { transferError = error }, setLookup(next: typeof lookup) { lookup = next }, setOutputs(next: typeof outputs) { outputs = next } }
@@ -961,4 +964,57 @@ describe('discard guard: a discarded tx that another node could still mine', () 
     useOther(next)
     await expect(next.api.prepareSend({ address: RECIPIENT, amountAtomic: '2000000000000' })).rejects.toThrow('could still be mined from another node')
   })
+})
+
+
+test('saved image proofs recheck known outputs after reconnect without hardware; changed outputs need fresh approval',async()=>{
+ const db=new Database(':memory:')
+ const store=createMoneroWatchStore({database:()=>db,profile:'test',key:async()=>new Uint8Array(32).fill(9)})
+ const b=bridge({watchStore:store})
+ b.engine.currentSeedEthAddress='0x'+'a'.repeat(40)
+ try {
+  await b.api.connect();await b.api.syncKeyImages()
+  expect(sentTypes(b)).toContain(530)
+  b.api.invalidate();await b.api.connect();b.delegate.received.length=0;b.confirmed.length=0
+  expect((await b.api.syncKeyImages()).spendStateKnown).toBe(true)
+  expect(sentTypes(b)).not.toContain(530)
+  expect(b.confirmed).toHaveLength(0)
+  expect(b.calls.imports).toHaveLength(2)
+  b.setOutputs(()=>validateOutputs(structuredClone(fixtures.cases.base.adapterOutputs)).map(o=>({...o,amountAtomic:'1'})))
+  await b.api.syncKeyImages()
+  expect(sentTypes(b)).toContain(530)
+  expect(b.calls.transfers).toHaveLength(0)
+  expect(b.calls.relays).toHaveLength(0)
+ } finally {db.close()}
+})
+
+
+test('physical candidate uses 65002/65003 and independent verification before relay; no emulator confirmation wrapper',async()=>{
+ let verified=0,disposed=0
+ const hardwareSigner:MoneroDeviceSigner={available:()=>true,prepare:async()=>({payload:new Uint8Array([1]),verify:()=>{verified++;return true},dispose:()=>{disposed++}})}
+ const b=bridge({hardwareSigner});b.engine.isEmulator=false;b.state.activeTransport='hid'
+ await b.api.connect();await b.api.syncKeyImages()
+ expect((await b.api.getStatus()).canSend).toBe(true)
+ const review=await b.api.prepareSend({address:RECIPIENT,amountAtomic:'2000000000000'})
+ await b.api.send({prepareId:review.prepareId})
+ expect(sentTypes(b)).toContain(65002);expect(sentTypes(b)).not.toContain(65000)
+ expect(verified).toBe(1);expect(disposed).toBe(1);expect(b.confirmed).toHaveLength(0)
+ expect(b.calls.relays).toHaveLength(1)
+})
+
+test('a failed hardware output/proof verification never persists or relays a payment',async()=>{
+ let disposed=false
+ const hardwareSigner:MoneroDeviceSigner={available:()=>true,prepare:async()=>({payload:new Uint8Array([1]),verify:()=>false,dispose:()=>{disposed=true}})}
+ const b=bridge({hardwareSigner});b.engine.isEmulator=false;b.state.activeTransport='hid'
+ await b.api.connect();await b.api.syncKeyImages()
+ const review=await b.api.prepareSend({address:RECIPIENT,amountAtomic:'2000000000000'})
+ await expect(b.api.send({prepareId:review.prepareId})).rejects.toThrow('independent output')
+ expect(b.calls.relays).toHaveLength(0);expect(b.api.pendingCount()).toBe(0);expect(disposed).toBe(true)
+})
+
+test('unsupported physical firmware gets a hardware-specific blocker',async()=>{
+ const b=bridge();b.engine.isEmulator=false;b.state.activeTransport='hid'
+ await b.api.connect();expect((await b.api.getStatus()).sendBlocked).toBe('firmware')
+ await expect(b.api.prepareSend({address:RECIPIENT,amountAtomic:'2000000000000'})).rejects.toThrow('hardware signing')
+ expect(b.calls.transfers).toHaveLength(0)
 })

@@ -1,6 +1,25 @@
 import { describe, expect, test } from 'bun:test'
-import { RESTORE_HEIGHT_MARGIN, storedRestoreHeight, suggestRestoreHeight, validateMoneroNode } from './monero-settings'
+import { checkMoneroNode, RESTORE_HEIGHT_MARGIN, storedRestoreHeight, suggestRestoreHeight, validateMoneroNode } from './monero-settings'
 describe('Monero daemon settings', () => {
+  test('remote connection checks the selected mainnet node before it can be saved', async () => {
+    let request: {url:string;init:RequestInit} | undefined
+    const result = await checkMoneroNode('https://node.example', async (url, init) => {
+      request={url,init};return Response.json({result:{status:'OK',nettype:'mainnet',height:3801465,synchronized:true,busy_syncing:false}})
+    })
+    expect(result).toEqual({height:3801465})
+    expect(request!.url).toBe('https://node.example/json_rpc')
+    expect(request!.init.redirect).toBe('error')
+    expect(JSON.parse(String(request!.init.body)).method).toBe('get_info')
+  })
+  test('unreachable, malformed, oversized and wrong-network nodes are rejected', async () => {
+    for(const fetcher of [async()=>{throw Error('private diagnostic')},async()=>new Response('not json'),
+      async()=>new Response('x'.repeat(65537)),async()=>Response.json({result:{status:'OK',nettype:'stagenet',height:42,synchronized:true}})]) {
+      await expect(checkMoneroNode('https://node.example',fetcher)).rejects.toThrow('Could not reach a Monero mainnet node')
+    }
+  })
+  test('a node still syncing is rejected without describing it as ready', async () => {
+    await expect(checkMoneroNode('https://node.example',async()=>Response.json({result:{status:'OK',nettype:'mainnet',height:42,synchronized:false}}))).rejects.toThrow('still syncing')
+  })
   test('remote HTTPS and explicit loopback HTTP have a consistent origin', () => {
     expect(validateMoneroNode({ daemonUrl: 'https://xmr.example/', restoreHeight: 42 })).toEqual({ daemonUrl: 'https://xmr.example', restoreHeight: 42 })
     for (const host of ['127.0.0.1', 'localhost', '[::1]']) expect(validateMoneroNode({ daemonUrl: `http://${host}:18081`, restoreHeight: 0 }).restoreHeight).toBe(0)

@@ -23,7 +23,7 @@ const SIGNING = '92079869551ab26ccd41d33ede1fe6c69735927e38a3203f932cdb37abe134f
 const PIN = '249bcff134356ee7' + 'e'.repeat(48)
 const builds = [
   { id: PIN, path: '/b/pin', selected: true, version: '7.17.0' },
-  { id: SIGNING, path: '/b/sig', selected: false, version: '7.17.0', label: 'Monero signing (research)', research: true },
+  { id: SIGNING, path: '/b/sig', selected: false, version: '7.17.0', label: 'Monero signing (research)', research: true, signingEnabled: true },
 ]
 const wallets = [
   { name: 'build-249bcff134356ee7', hasMnemonic: true, isActive: true, label: 'PIN wallet', deviceId: 'emu:aaaaaa' },
@@ -74,6 +74,32 @@ const out: Record<string, unknown> = {}
   await unmount()
 }
 
+// An obsolete signing hash is replaced by the reviewed signing version, preserving the wallet.
+{
+  const picks: unknown[] = []
+  const { container, unmount } = await render(React.createElement(EmulatorWalletChooser, {
+    wallets, firmware: { builds, next: { id: 'missing-old-hash', problem: 'Missing: /private/path/libkkemu.dylib' } },
+    onPick: (name: string, buildId: string | null) => picks.push([name, buildId]), onClose: () => {},
+  }))
+  out.recommendedVersion = (container.querySelector('select') as HTMLSelectElement).value
+  out.recoverySummary = text(container.querySelector('[data-testid="firmware-recovery"]')!)
+  await click(byLabel(container, 'Start XMR mainnet on v7.17.0 · Monero signing (research)'))
+  out.recommendedPicks = picks
+  await unmount()
+}
+
+// Friendly names remain distinguishable when two wallets have the same device label.
+{
+ const picks: string[] = []
+ const {container,unmount}=await render(React.createElement(EmulatorWalletChooser, {
+  wallets:[{name:'qa-one',label:'KeepKey',hasMnemonic:true},{name:'qa-two',label:'KeepKey',hasMnemonic:true}],
+  firmware:{builds,next:{id:PIN,version:'7.17.0',problem:null}},onPick:(name:string)=>picks.push(name),onClose:()=>{},
+ }))
+ out.distinctNames=[...container.querySelectorAll('button[title^="Start "]')].map(button=>button.getAttribute('aria-label'))
+ await click(byLabel(container,'Start KeepKey (qa-two) on v7.17.0 · build 249bcff13435'))
+ out.distinctPicks=picks;await unmount()
+}
+
 // ── B3: an unavailable selected build is shown, named, and blocks starts ──
 {
   const picks: string[] = []
@@ -84,8 +110,8 @@ const out: Record<string, unknown> = {}
   }))
   const select = container.querySelector('select[aria-label="Emulator firmware"]') as HTMLSelectElement
   out.unavailableShown = select.selectedOptions[0]?.textContent
-  out.unavailableProblem = text(container.querySelector('[data-testid="firmware-problem"]')!)
-  await click(byLabel(container, 'Start XMR mainnet on v7.17.0 · Monero signing (research)'))
+  out.unavailableProblem = text(container.querySelector('[data-testid="firmware-recovery"]') ?? container.querySelector('[data-testid="firmware-problem"]')!)
+  await click([...container.querySelectorAll('button[title^="Start XMR mainnet"]')][0] ?? null)
   out.unavailablePicks = [...picks]
   await choose(select, PIN)
   out.problemAfterSwitch = container.querySelector('[data-testid="firmware-problem"]') ? 'shown' : 'gone'
@@ -100,6 +126,8 @@ const out: Record<string, unknown> = {}
   const { container, unmount } = await render(React.createElement(EmulatorWalletChooser, {
     wallets, onPick: () => {}, onDelete: (name: string) => deleted.push(name), onClose: () => {},
   }))
+  out.deleteButtonsBeforeManage = [...container.querySelectorAll('button[aria-label^="Delete seed"]')].length
+  await click(byLabel(container, 'Manage wallets'))
   out.deleteButtons = [...container.querySelectorAll('button[aria-label^="Delete seed "]')].map(b => b.getAttribute('aria-label'))
   await click(byLabel(container, 'Delete seed XMR mainnet'))
   out.deletedAfterX = [...deleted]

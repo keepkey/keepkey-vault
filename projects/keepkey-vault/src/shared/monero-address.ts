@@ -37,6 +37,13 @@ export function moneroAddressKind(address: unknown): MoneroAddressKind | null {
   return checksum.subarray(0, 4).every((byte, i) => byte === data[data.length - 4 + i]) ? kind : null
 }
 
+/** Public keys from a checked mainnet standard address, for the bounded device signer. */
+export function moneroStandardAddressKeys(address: string): { spend: Uint8Array; view: Uint8Array } | null {
+  if (moneroAddressKind(address) !== 'standard') return null
+  const data = decode(address)!
+  return { spend: data.slice(1,33), view: data.slice(33,65) }
+}
+
 /** "1.5" -> "1500000000000". Null for zero, more than 12 decimals or above uint64. */
 export function parseXmrAmount(text: string): string | null {
   const match = /^([0-9]{1,8})(?:\.([0-9]{1,12}))?$/.exec(text.trim())

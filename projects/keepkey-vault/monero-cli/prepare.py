@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Prepare pinned, signed official Monero wallet RPC. Never starts a wallet/network."""
+"""Prepare pinned, signed official Monero wallet RPC and node. Never starts a wallet/network."""
 import argparse
 import hashlib
 import json
@@ -76,16 +76,17 @@ def main():
         if sha(archive) != matches[0]:
             raise RuntimeError("Monero archive does not match authenticated release hash")
         binary = "monero-wallet-rpc.exe" if args.platform.startswith("win32-") else "monero-wallet-rpc"
+        daemon = "monerod.exe" if args.platform.startswith("win32-") else "monerod"
         if extension == ".zip":
             with zipfile.ZipFile(archive) as content:
-                for name in [binary, "LICENSE"]:
+                for name in [binary, daemon, "LICENSE"]:
                     entries = [v for v in content.infolist() if not v.is_dir() and Path(v.filename).name == name]
                     if len(entries) != 1 or entries[0].file_size > 256 * 1024 * 1024 or stat.S_ISLNK(entries[0].external_attr >> 16):
                         raise RuntimeError("Invalid official archive contents")
                     (out / name).write_bytes(content.read(entries[0]))
         else:
             with tarfile.open(archive, "r:bz2") as content:
-                for name in [binary, "LICENSE"]:
+                for name in [binary, daemon, "LICENSE"]:
                     entries = [v for v in content if v.isfile() and Path(v.name).name == name]
                     if len(entries) != 1 or entries[0].size > 256 * 1024 * 1024:
                         raise RuntimeError("Invalid official archive contents")
@@ -94,8 +95,9 @@ def main():
                         raise RuntimeError("Cannot read official archive")
                     (out / name).write_bytes(stream.read())
         (out / binary).chmod(0o755)
+        (out / daemon).chmod(0o755)
         metadata = {"version": VERSION, "platform": args.platform, "archiveSha256": matches[0],
-                    "signerFingerprint": FINGERPRINT, "walletRpcSha256": sha(out / binary)}
+                    "signerFingerprint": FINGERPRINT, "walletRpcSha256": sha(out / binary), "daemonSha256": sha(out / daemon)}
         (out / "monero-tools.json").write_text(json.dumps(metadata, indent=2) + "\n")
     print(json.dumps({"status": "pass", **metadata}))
 

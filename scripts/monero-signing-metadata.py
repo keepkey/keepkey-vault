@@ -70,34 +70,37 @@ def write_json(path, value, mode):
             os.unlink(temporary)
 
 
-def verify_before_signing(rpc, metadata, receipt):
+def verify_before_signing(rpc, metadata, receipt, field="walletRpc"):
     regular_file(rpc)
     value = read_json(metadata)
-    before = checksum(value.get("walletRpcSha256"))
+    require(field in ("walletRpc", "daemon"), "Invalid Monero helper field")
+    before = checksum(value.get(field + "Sha256"))
     require(sha256(rpc) == before, "Staged Monero wallet RPC does not match its prepared receipt")
-    raw = checksum(value.get("walletRpcRawSha256", before))
+    raw = checksum(value.get(field + "RawSha256", before))
     write_json(receipt, {"rpc": str(rpc.resolve()), "metadata": str(metadata.resolve()),
                         "metadataSha256": sha256(metadata), "beforeSha256": before,
-                        "rawSha256": raw}, 0o600)
+                        "rawSha256": raw, "field": field}, 0o600)
 
 
-def record_after_signing(rpc, metadata, receipt):
+def record_after_signing(rpc, metadata, receipt, field="walletRpc"):
     regular_file(rpc)
     before = read_json(receipt)
+    require(field in ("walletRpc", "daemon") and before.get("field", "walletRpc") == field,
+            "Monero signing receipt belongs to another helper")
     require(before.get("rpc") == str(rpc.resolve()) and before.get("metadata") == str(metadata.resolve()),
             "Monero signing receipt belongs to different inputs")
     require(sha256(metadata) == checksum(before.get("metadataSha256")),
             "Monero metadata changed after pre-sign verification")
     value = read_json(metadata)
-    require(checksum(value.get("walletRpcSha256")) == checksum(before.get("beforeSha256")),
+    require(checksum(value.get(field + "Sha256")) == checksum(before.get("beforeSha256")),
             "Monero pre-sign checksum changed")
-    value["walletRpcRawSha256"] = checksum(before.get("rawSha256"))
-    value["walletRpcSha256"] = sha256(rpc)
+    value[field + "RawSha256"] = checksum(before.get("rawSha256"))
+    value[field + "Sha256"] = sha256(rpc)
     write_json(metadata, value, stat.S_IMODE(metadata.stat().st_mode))
     receipt.unlink()
 
 
-def stage_signed_copies(worker, rpc, metadata, output, entitlements, identity, run=subprocess.run):
+def stage_signed_copies(worker, rpc, metadata, output, entitlements, identity, run=subprocess.run, daemon=None):
     """Sign disposable inputs before Electrobun's own app signing/notarization."""
     for source in (worker, rpc, metadata, entitlements):
         regular_file(source)
@@ -110,6 +113,14 @@ def stage_signed_copies(worker, rpc, metadata, output, entitlements, identity, r
     for source, target in zip(sources, copies):
         shutil.copy2(source, target)
     signed_worker, signed_rpc, signed_metadata = copies
+    if daemon:
+        regular_file(daemon)
+        signed_daemon = output / "monerod"
+        require(not signed_daemon.is_symlink() and signed_daemon.resolve() != daemon.resolve(),
+                "Monero signing must use disposable copies")
+        require(sha256(daemon) == checksum(read_json(metadata).get("daemonSha256")),
+                "Staged Monero node does not match its prepared receipt")
+        shutil.copy2(daemon, signed_daemon)
     receipt = output / ".monero-pre-sign.json"
     verify_before_signing(signed_rpc, signed_metadata, receipt)
     command = ["codesign", "--force", "--verbose", "--timestamp", "--options", "runtime", "--sign", identity]
@@ -117,6 +128,11 @@ def stage_signed_copies(worker, rpc, metadata, output, entitlements, identity, r
     run(command + [str(signed_rpc)], check=True)
     run(["codesign", "--verify", "--strict", str(signed_rpc)], check=True)
     record_after_signing(signed_rpc, signed_metadata, receipt)
+    if daemon:
+        verify_before_signing(signed_daemon, signed_metadata, receipt, "daemon")
+        run(command + [str(signed_daemon)], check=True)
+        run(["codesign", "--verify", "--strict", str(signed_daemon)], check=True)
+        record_after_signing(signed_daemon, signed_metadata, receipt, "daemon")
 
 
 def main():
@@ -129,16 +145,18 @@ def main():
     parser.add_argument("--output", type=Path)
     parser.add_argument("--entitlements", type=Path)
     parser.add_argument("--identity")
+    parser.add_argument("--daemon", type=Path)
+    parser.add_argument("--field", choices=("walletRpc", "daemon"), default="walletRpc")
     args = parser.parse_args()
     try:
         if args.operation == "stage":
             require(args.worker and args.output and args.entitlements and args.identity,
                     "Monero staging requires worker, output, entitlements and identity")
-            stage_signed_copies(args.worker, args.rpc, args.metadata, args.output, args.entitlements, args.identity)
+            stage_signed_copies(args.worker, args.rpc, args.metadata, args.output, args.entitlements, args.identity, daemon=args.daemon)
         else:
             require(args.receipt, "Monero signing receipt is required")
             operation = verify_before_signing if args.operation == "verify" else record_after_signing
-            operation(args.rpc, args.metadata, args.receipt)
+            operation(args.rpc, args.metadata, args.receipt, args.field)
     except (ReceiptError, OSError, ValueError, subprocess.CalledProcessError):
         parser.exit(1, "Monero signing metadata verification failed; use a fresh prepared bundle.\n")
 

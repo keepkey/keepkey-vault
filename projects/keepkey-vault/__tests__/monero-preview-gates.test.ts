@@ -28,7 +28,7 @@ describe('Monero preview gates', () => {
 		expect(dashboard).toContain('<MoneroChainRow chain={moneroChain}')
 		expect(dashboard).toContain('onOpen={() => openChainPage(moneroChain)}')
 		const page = src('src/mainview/components/AssetPage.tsx')
-		expect(page).toContain('? <MoneroSendSection monero={monero} client={rpcMoneroClient} />')
+		expect(page).toContain('? <MoneroSendSection monero={monero} client={rpcMoneroClient} privateMode={privateModeEnabled} />')
 		expect(page).toContain(': <MoneroReceiveSection chain={chain} monero={monero}')
 	})
 
@@ -54,10 +54,10 @@ describe('Monero preview gates', () => {
 		}
 	})
 
-	test('the send form appears only past every backend gate, and confirms on the device', () => {
+	test('the form can collect a payment before automatic verification, and signing still confirms on the device', () => {
 		const sections = src('src/mainview/components/MoneroAssetSections.tsx')
 		expect(sections).toContain('const receiveOnly = wallet.sendBlocked === "emulator" || wallet.sendBlocked === "adapter"')
-		expect(sections).toContain('{wallet.canSend && !review && (')
+		expect(sections).toContain('{(wallet.canSend || wallet.sendBlocked === "key-images") && !wallet.unrelayedTxid && !review && (')
 		expect(src('src/mainview/lib/monero-client.ts')).toContain('rpcRequest<{ txid: string }>("moneroSend", { prepareId }')
 		expect(src('src/bun/index.ts')).toContain('signingEmulator: moneroSigningEmulatorActive')
 	})
