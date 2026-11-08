@@ -96,16 +96,22 @@ describe('a selected emulator firmware that is not available', () => {
     expect(selectedEmulatorLibrary(f.options)).toMatchObject({ id: null, path: f.bundled, problem: null })
   })
 
-  test('starting the emulator shows that message, before any flash is read or created', () => {
+  test('startup reports platform support or the selected-build error before touching flash', () => {
     const f = fixture()
     selectEmulatorBuild('d'.repeat(64), f.home)
     const run = Bun.spawnSync([process.execPath, '-e', `
       const { initEmulator } = await import(${JSON.stringify(join(import.meta.dir, '..', 'src/bun/emulator.ts'))})
       console.log(JSON.stringify(initEmulator('fixture-wallet')))`], { env: { ...process.env, HOME: f.home }, stdout: 'pipe', stderr: 'pipe' })
     const status = JSON.parse(run.stdout.toString().trim().split('\n').at(-1)!)
-    expect(status.state).toBe('error')
-    expect(status.error).toContain('build dddddddddddd')
-    expect(status.error).not.toContain(GENERIC)
+    if (process.platform === 'darwin' || process.platform === 'win32') {
+      expect(status.state).toBe('error')
+      expect(status.error).toContain('build dddddddddddd')
+      expect(status.error).not.toContain(GENERIC)
+    } else {
+      // Unsupported platforms stop before attempting library selection.
+      expect(status.state).toBe('stopped')
+      expect(status.error).toBe('Emulator requires macOS or Windows')
+    }
     expect(require('node:fs').readdirSync(join(f.home, '.keepkey', 'emulator')).filter((n: string) => n.endsWith('.enc'))).toEqual([])
   }, 30_000) // a child process loading the emulator module
 })
