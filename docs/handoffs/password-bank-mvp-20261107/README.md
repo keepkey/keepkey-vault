@@ -1,10 +1,20 @@
 # Password bank MVP release handoff
 
-The MVP adds a default-off **Password manager** switch in **Settings → Feature Flags**. Switching it on inserts the **Passwords** tab immediately. Switching it off removes the tab and clears the unlocked bank and password cache immediately. No restart or reload is required for either operation.
+The MVP adds a default-off **Password manager** switch in **Settings → Feature Flags**. Switching it on adds **Passwords** inside the existing lock button’s **Vault** panel immediately, alongside **Seed vault (BIP-85)**. Switching it off removes that section and clears the unlocked bank and password cache immediately. No restart or reload is required for either operation.
 
 This flag is independent of Monero: `password_manager_enabled` is never inferred from `monero_enabled`. Integrating the MVP into the Monero development build does not enable passwords or change Monero settings. Password tools disappear from MCP discovery when disabled; calling them cannot unlock a bank or contact hardware. The metadata status endpoint can still report `disabled` with no account list.
 
 Vault implementation branch: `feat/password-bank-mvp`, based on Desktop 1.6.10. Companion BEX branch: `feat/password-bank-mvp` in the `keepkey-client` repository, commit `b3bc025` (fill implementation `ece6fff`, followed by test-build labeling). Its isolated checkout is `/private/tmp/keepkey-password-bank-bex`. The stable load-unpacked package is `artifacts/password-bank-mvp/bex`; a ZIP, SHA-256 checksum and per-file provenance manifest sit beside it. Release both changes together for browser fill. No release tag, signed app, store upload or production deployment was made.
+
+## Native emulator acceptance on November 8
+
+Password manager and BIP-85 now share the existing lock button’s Vault panel. No Passwords tab is added to the top navigation. The independent flag shows or hides the password section immediately; BIP-85 remains available with the flag off.
+
+Fixed the missing emulator approval controls: password derivation now uses the existing interactive emulator confirmation gate. Physical KeepKeys retain firmware confirmation. All 36 password tests pass, including three new approval/cancellation regressions; the browser fixture covers both tools behind the lock, backup and verification gates, and live feature disable. TypeScript remains at 803 existing diagnostics.
+
+The running development preview passed 19 native checks on the fresh disposable `password-mvp-qa-20261108` emulator wallet. These covered visible Confirm/Reject controls, rejected generation without a usable entry, three separately approved entries, test-account assignment, backup-gated staging and cancellation before website changes, owner-only encrypted backups, lock/unlock, cache eviction, one-minute expiry, approved rehydration, live disable and hidden agent tools, independent Monero state, and encrypted SQLite metadata. No website credential was changed and no password value was printed. Physical hardware and real-service acceptance remain separate.
+
+Local evidence is under `/private/tmp/vault-develop-evidence-20261108/`; encrypted test backups are owner-only under `/private/tmp/vault-password-manager-test-20261108/` and must not be committed. The test bank remains bound to the disposable wallet; it is not a bank for the funded Monero wallet.
 
 ## Included functionality
 
@@ -27,12 +37,12 @@ New account assignment does not import an existing website password or change it
 ## Try the actual app
 
 1. Build/run the feature branch with `make dev` using the normal Vault workflow.
-2. Open **Settings → Feature Flags → Password manager**. The switch is initially off. Enable it and observe the new navigation tab before closing settings.
-3. Open **Passwords**, connect a test KeepKey, and select **Create with KeepKey**. Approve the device request. Generate a small bank and approve each entry.
+2. Open **Settings → Feature Flags → Password manager**. The switch is initially off. Enable it and observe the lock button update before closing settings.
+3. Open the lock button, then **Passwords**, connect a test KeepKey, and select **Create with KeepKey**. Approve the device request. Generate a small bank and approve each entry.
 4. Assign the exact login domain and account. Export the recovery backup, save it separately, and acknowledge that it was saved.
 5. Use **Stage next password** to start guided setup/rotation. Export the updated backup containing both locations. Choose **Backup saved — begin website change** before submitting the site change. This records an uncertain/submitted state before the external mutation.
 6. Open the account settings guide. Complete existing-password and MFA challenges yourself, set the staged password, and test a fresh sign-in. Check the sign-in acknowledgment in Vault and activate it only when it works. Save the new backup afterward.
-7. Disable the switch while the password tab is open. The UI returns to the wallet and the bank locks, without restarting.
+7. Disable the switch while the password panel is open. The password section disappears and the bank locks, without restarting. The BIP-85 seed tools remain available.
 
 Use test accounts and a test wallet for initial acceptance. Physical KeepKey behavior and replacement-device recovery have not been exercised in this implementation session.
 

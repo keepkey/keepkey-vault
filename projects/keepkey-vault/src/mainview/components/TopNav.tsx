@@ -12,9 +12,8 @@ import { NAV_HEIGHT } from "../layout"
 import { WalletSelector } from "./WalletSelector"
 import { EmulatorBadge } from "./EmulatorIdentity"
 import { useBtcMultisigEnabled } from "../hooks/useBtcMultisigEnabled"
-import { usePasswordManagerEnabled } from '../hooks/usePasswordManagerEnabled'
 
-export type NavTab = "vault" | "shapeshift" | "explore" | "addresses" | "multisig" | "passwords"
+export type NavTab = "vault" | "shapeshift" | "explore" | "addresses" | "multisig"
 
 interface TopNavProps {
 	label?: string
@@ -171,7 +170,6 @@ export function TopNav({
 	vaultView = false,
 }: TopNavProps) {
 	const multisigEnabled = useBtcMultisigEnabled()
-	const passwordsEnabled = usePasswordManagerEnabled()
   const uiText = useUiTranslation()
 
 	const { t } = useTranslation("nav")
@@ -193,7 +191,6 @@ export function TopNav({
 	}
 
 	const TAB_DEFS: { id: NavTab; label: string; icon: JSX.Element }[] = [
-		...(passwordsEnabled ? [{ id: 'passwords' as NavTab, label: uiText('Passwords'), icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6"><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V6a4 4 0 0 1 8 0v4"/></svg> }] : []),
 		{
 			id: "explore",
 			label: t("explore"),

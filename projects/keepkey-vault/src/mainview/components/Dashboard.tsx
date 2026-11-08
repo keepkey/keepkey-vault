@@ -18,7 +18,7 @@ import { DonutChart, SelectedSlice, type DonutChartItem } from "./DonutChart"
 import { AddChainDialog } from "./AddChainDialog"
 import { ReportDialog } from "./ReportDialog"
 import { AuditDialog } from "./AuditDialog"
-import { Bip85VaultDialog } from "./Bip85VaultDialog"
+import { VaultToolsButton } from "./VaultToolsButton"
 import { PassphraseIntroDialog } from "./PassphraseIntroDialog"
 import { DogeEasterEgg } from "./DogeEasterEgg"
 import { HeatmapView, buildAllChainsTiles, buildChainDetailTiles } from "./HeatmapView"
@@ -907,7 +907,6 @@ function PersonalDashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSetti
 	const [showAddChain, setShowAddChain] = useState(false)
 	const [showReports, setShowReports] = useState(false)
 	const [showAudit, setShowAudit] = useState(false)
-	const [showBip85, setShowBip85] = useState(false)
 	const [zcashEnabled, setZcashEnabled] = useState(false)
 	const [moneroEnabled, setMoneroEnabled] = useState(false)
 	const [hiveEnabled, setHiveEnabled] = useState(false)
@@ -3427,9 +3426,6 @@ function PersonalDashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSetti
 				/>
 			)}
 
-			{showBip85 && (
-				<Bip85VaultDialog onClose={() => setShowBip85(false)} />
-			)}
 
 			{/* One-time passphrase/hidden-wallet intro — shown the first time a user
 			    reaches the dashboard, then persisted so it never reappears. Skipped
@@ -3443,43 +3439,11 @@ function PersonalDashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSetti
 				/>
 			)}
 
-			{/* BIP-85 Seed Vault — firmware >= 7.16.0. Stacked above the Activity
-			    pill (ActivityTracker, fixed bottom-right) so the two never overlap. */}
-			{!watchOnly && firmwareVersion && versionCompare(firmwareVersion, '7.16.0') >= 0 && (
-				<Box
-					as="button"
-					position="fixed"
-					bottom="76px"
-					right="28px"
-					w="52px"
-					h="52px"
-					borderRadius="full"
-					bg="rgba(233,196,106,0.22)"
-					border="1.5px solid"
-					borderColor="rgba(233,196,106,0.7)"
-					boxShadow="0 0 16px rgba(233,196,106,0.25)"
-					display="flex"
-					alignItems="center"
-					justifyContent="center"
-					cursor="pointer"
-					transition="all 0.2s"
-					_hover={{
-						bg: "rgba(233,196,106,0.32)",
-						borderColor: "kk.gold",
-						transform: "scale(1.08)",
-						boxShadow: "0 0 24px rgba(233,196,106,0.4)",
-					}}
-					_active={{ transform: "scale(0.95)" }}
-					onClick={() => setShowBip85(true)}
-					zIndex={10}
-					title={uiText("BIP-85 Seed Vault")}
-				>
-					<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--gold)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-						<rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
-						<path d="M7 11V7a5 5 0 0 1 10 0v4" />
-					</svg>
-				</Box>
-			)}
+			{/* One lock button for password and seed tools. */}
+			{!watchOnly && firmwareVersion && <VaultToolsButton
+				seedVaultAvailable={versionCompare(firmwareVersion, '7.16.0') >= 0}
+				passwordsAvailable={!btcOnly} />}
+
 			</Flex>
 		</Flex>
 	)
