@@ -1,5 +1,6 @@
 /** Monero receiving bridge. Only an explicitly approved device view key reaches the local sidecar. */
-import { randomBytes } from 'node:crypto'
+import { createHash, randomBytes } from 'node:crypto'
+import type { MoneroWatchStore } from './monero-watch-store'
 import * as managedSidecar from './monero-sidecar'
 import type { MoneroOutputRecord, MoneroTransferDraft } from './monero-sidecar'
 import { MAX_KEY_IMAGE_OUTPUTS, MAX_WALLET_OUTPUTS, PUBLIC_ERRORS, WATCH_NODE_UNREACHABLE, WATCH_SCANNING } from '../../monero-cli/src/protocol'
@@ -107,7 +108,7 @@ export interface MoneroWatchSidecar {
 }
 type Owned = Map<string, { amountAtomic: string; keyImage: string }>
 type Prepared = { id: string; key: string; generation: number; expires: number; draft: MoneroTransferDraft; review: MoneroSendReview }
-type Snapshot = { key: string; deviceId: string; wallet: NonNullable<Engine['wallet']>; transport: Transport; config: MoneroVaultConfig; emulator: boolean }
+type Snapshot = { key: string; deviceId: string; wallet: NonNullable<Engine['wallet']>; transport: Transport; config: MoneroVaultConfig; emulator: boolean; watchScope: string | null }
 type Synced = { key: string; generation: number; owned: Owned; txids: Set<string>; balanceAtomic: bigint }
 type PendingCheck = { state: 'unknown'; discardable: boolean; checkedAt: string; relayNode?: string; checkedNode: string }
 type Message = { type: number; body: Uint8Array }
@@ -189,7 +190,8 @@ async function readMessage(delegate: Delegate, max = MAX_RESPONSE): Promise<Mess
 
 /** Injected engine/config keep device state authoritative; no private keys enter frontend RPC. */
 export function createMoneroVault({ engine, confirm, getConfig, sidecar = managedSidecar, signingEmulator = () => false,
-  replyMs = { device: MONERO_DEVICE_REPLY_MS, human: MONERO_HUMAN_REPLY_MS }, pendingStore = { load: () => [], save() {} } }: {
+  watchStore, replyMs = { device: MONERO_DEVICE_REPLY_MS, human: MONERO_HUMAN_REPLY_MS }, pendingStore = { load: () => [], save() {} } }: {
+  watchStore?: MoneroWatchStore
   engine: Engine; confirm?: Confirm; getConfig: () => MoneroVaultConfig; sidecar?: MoneroWatchSidecar
   /** The running emulator is a verified signing-enabled research build. */
   signingEmulator?: () => boolean
@@ -235,7 +237,9 @@ export function createMoneroVault({ engine, confirm, getConfig, sidecar = manage
     if (engine.isEmulator && (!confirm || transport.delegate !== engine.emuDelegate)) throw new MoneroError('The emulator confirmation window is unavailable')
     const key = JSON.stringify([state.deviceId, state.activeTransport, state.isHiddenWallet, state.firmwareHash,
       engine.currentSeedEthAddress, config.daemonUrl, config.restoreHeight])
-    return { key, deviceId: state.deviceId, wallet, transport, config: { ...config }, emulator: engine.isEmulator }
+    const seed = engine.currentSeedEthAddress?.toLowerCase()
+    const watchScope = seed && /^0x[0-9a-f]{40}$/.test(seed) ? JSON.stringify(['mainnet', PATH, state.deviceId, seed, !!state.isHiddenWallet]) : null
+    return { key, deviceId: state.deviceId, wallet, transport, config: { ...config }, emulator: engine.isEmulator, watchScope }
   }
   const matches = (expected: Snapshot): boolean => {
     try { const current = snapshot(); return !!current && current.key === expected.key && current.wallet === expected.wallet && current.transport === expected.transport } catch { return false }
@@ -439,7 +443,17 @@ export function createMoneroVault({ engine, confirm, getConfig, sidecar = manage
         const approved = await current.transport.lockDuring(async () => {
           activeDelegate = current.transport.delegate
           const operation = async () => {
+            // Always bind cached monitoring access to the address read from this device now.
             const address = await actualAddress(current, generation, showDisplay)
+            if (watchStore && current.watchScope) {
+              try {
+                const saved = await watchStore.loadWatch(current.watchScope, address)
+                if (saved) {
+                  try { check(current, generation); return { address, viewKey: saved } }
+                  catch (error) { saved.fill(0); throw error }
+                }
+              } catch { check(current, generation) } // Locked/missing OS storage falls back to device consent.
+            }
             const request = concat([...PATH.map(part => numberField(1, part)), numberField(2, 0)])
             const body = await receive(current, generation, 542, 543, request, true)
             try {
@@ -463,6 +477,13 @@ export function createMoneroVault({ engine, confirm, getConfig, sidecar = manage
           viewKey, restoreHeight: current.config.restoreHeight, daemonUrl: current.config.daemonUrl })
         check(current, generation)
         const status = statusFrom(value, current, address)
+        if (watchStore && current.watchScope) {
+          try {
+            await watchStore.saveWatch(current.watchScope, address, viewKey)
+            await watchStore.saveAddress(current.watchScope, address, 0, address)
+          } catch { console.warn('[monero] Monitoring access could not be saved securely') }
+          check(current, generation)
+        }
         bound = { snapshot: current, address }; lastGood = status
         // A pending broadcast (e.g. from before a restart) is looked up once: settled if the node has it.
         if (pending.has(walletKey(current, address))) await resolvePending(walletKey(current, address))
@@ -481,6 +502,14 @@ export function createMoneroVault({ engine, confirm, getConfig, sidecar = manage
       if (busy) throw new MoneroError('A Monero device request is already in progress')
       const current = requireReady(), generation = epoch; busy = true
       try {
+        const primary = bound?.snapshot.key === current.key && bound.snapshot.wallet === current.wallet && bound.snapshot.transport === current.transport ? bound.address : undefined
+        if (!showDisplay && primary && current.watchScope && watchStore) {
+          try {
+            const cached = await watchStore.loadAddress(current.watchScope, primary, minor)
+            check(current, generation)
+            if (cached) return { address: checkedAddress(cached, minor), network: 'mainnet' as const, displayed: false, minor }
+          } catch { check(current, generation) }
+        }
         return await current.transport.lockDuring(async () => {
           activeDelegate = current.transport.delegate
           const operation = () => actualAddress(current, generation, showDisplay, minor)
@@ -488,6 +517,11 @@ export function createMoneroVault({ engine, confirm, getConfig, sidecar = manage
             const address = current.emulator && showDisplay ? await confirm!(operation, { operation: 'moneroGetAddress', chain: 'Monero', to: minor ? undefined : bound?.address }) : await operation()
             check(current, generation)
             if (minor === 0 && bound && bound.address !== address) { stop(); throw new MoneroError('The Monero wallet changed; connect again') }
+            if (primary && watchStore && current.watchScope) {
+              try { await watchStore.saveAddress(current.watchScope, primary, minor, address) }
+              catch { console.warn('[monero] Receive address could not be saved') }
+              check(current, generation)
+            }
             return { address, network: 'mainnet' as const, displayed: showDisplay, minor }
           } finally { activeDelegate = null }
         })
@@ -509,7 +543,14 @@ export function createMoneroVault({ engine, confirm, getConfig, sidecar = manage
         // The device syncs at most 64 outputs per session: one session per 64, each imported at its offset.
         const sessions: MoneroOutputRecord[][] = []
         for (let start = 0; start < outputs.length; start += MAX_KEY_IMAGE_OUTPUTS) sessions.push(outputs.slice(start, start + MAX_KEY_IMAGE_OUTPUTS))
-        const proofs = await deviceOperation(current, async () => {
+        const outputHash = createHash('sha256').update(JSON.stringify(outputs)).digest('hex')
+        let savedProofs = null
+        if (watchStore && current.watchScope) {
+          try { savedProofs = await watchStore.loadImages(current.watchScope, bindingFor(current).address, outputHash) }
+          catch { /* No reusable proof: request the device's approval. */ }
+          check(current, generation)
+        }
+        const proofs = savedProofs?.length === outputs.length ? savedProofs : await deviceOperation(current, async () => {
           const opened: Array<{ keyImage: string; signature: string }> = []
           for (const session of sessions) {
             (await receive(current, generation, 530, 531, keyImageInitRequest(session), true)).fill(0)
@@ -547,6 +588,11 @@ export function createMoneroVault({ engine, confirm, getConfig, sidecar = manage
           const result = await sidecar.importMoneroKeyImages({ offset, signedKeyImages: proofs.slice(offset, offset + sessions[index].length) }) as { unspentAtomic?: unknown }
           check(current, generation)
           unspent = typeof result?.unspentAtomic === 'string' && /^(0|[1-9][0-9]{0,19})$/.test(result.unspentAtomic) ? BigInt(result.unspentAtomic) : null
+        }
+        if (watchStore && current.watchScope) {
+          try { await watchStore.saveImages(current.watchScope, bindingFor(current).address, outputHash, proofs) }
+          catch { console.warn('[monero] Balance verification proofs could not be saved') }
+          check(current, generation)
         }
         synced = { key: current.key, generation, owned: new Map(outputs.map((output, i) => [output.outKey, { amountAtomic: output.amountAtomic, keyImage: proofs[i].keyImage }])),
           txids: new Set(before.transactions.map(tx => tx.txid)), balanceAtomic: unspent ?? BigInt(before.balanceAtomic) }
