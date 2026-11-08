@@ -4,7 +4,19 @@ The MVP adds a default-off **Password manager** switch in **Settings → Feature
 
 This flag is independent of Monero: `password_manager_enabled` is never inferred from `monero_enabled`. Integrating the MVP into the Monero development build does not enable passwords or change Monero settings. Password tools disappear from MCP discovery when disabled; calling them cannot unlock a bank or contact hardware. The metadata status endpoint can still report `disabled` with no account list.
 
-Vault implementation branch: `feat/password-bank-mvp`, based on Desktop 1.6.10. Companion BEX branch: `feat/password-bank-mvp` in the `keepkey-client` repository, commit `b3bc025` (fill implementation `ece6fff`, followed by test-build labeling). Its isolated checkout is `/private/tmp/keepkey-password-bank-bex`. The stable load-unpacked package is `artifacts/password-bank-mvp/bex`; a ZIP, SHA-256 checksum and per-file provenance manifest sit beside it. Release both changes together for browser fill. No release tag, signed app, store upload or production deployment was made.
+The simplified password UI and automatic backups build on the integrated Desktop implementation. The compatible BEX is now included in the reviewed local `keepkey-client` **develop** candidate `8322d6f`. It is built into that repository's existing `dist` folder, so the existing unpacked Chrome extension entry can be reloaded. Its `docs/develop-candidate-20261108.json` records all 16 open PR dispositions: 14 integrated, two dependency upgrades held. The initial isolated password branch/package remains available for historical reproduction. No release tag, signed app, store upload or production deployment was made.
+
+## Simple list, recovery and native reveal
+
+The default view contains **Add password** and the saved account list. Adding an account automatically unlocks/creates the bank, generates the required entries with KeepKey approval, assigns the login domain and account, and saves encrypted backups. Changing a password prepares its new location automatically; opening its website saves the backup before recording submission. A disk failure blocks the website step. Final activation still requires an explicitly verified password sign-in. Passkey/Touch ID login does not verify the generated password.
+
+Backups are written to **Documents/KeepKey Password Backups**: directory mode 0700, exclusive random-named files mode 0600, file and directory fsync before revision acknowledgment. Earlier exports remain available. Recovery instructions, manual save, restore and lock controls are under **Options**. A local backup still needs to be copied to separate storage alongside the recovery plan.
+
+Each staged or verified password has a masked field, eye control and copy control. Masking fetches no secret. Only an explicit native eye action fetches its temporary value; copy becomes available after revealing. The value is hidden on window blur, page hiding, or expiry (at most 30 seconds). Native agent APIs still cannot reveal passwords or activate rotations.
+
+All 61 affected password/emulator tests pass (39 focused password checks plus emulator session, PIN and startup-recovery checks). Synthetic UI checks cover the simple list, automatic backup, failed-backup blocking, eye masking, explicit clipboard copy, blur/expiry hiding, narrow layout, both lock-panel tools, focus restoration and live feature flags. No new TypeScript file/code diagnostics were introduced against the 803-diagnostic existing baseline. Native eye/reveal and clipboard behavior was also confirmed by the owner in the preview.
+
+The native test exposed an intermittent blank emulator window: the firmware process remained running, but its WebView never posted readiness. Reopening only its display recovered the session without replacing the wallet. Startup now retries unready HTML loads within the existing deadline, stops on readiness/close/replacement, and uses a per-load identifier so a stale readiness response cannot enable JavaScript delivery into a newer load. The bridge uses its bound IPv4 loopback address directly.
 
 ## Native emulator acceptance on November 8
 
@@ -12,7 +24,7 @@ Password manager and BIP-85 now share the existing lock button’s Vault panel. 
 
 Fixed the missing emulator approval controls: password derivation now uses the existing interactive emulator confirmation gate. Physical KeepKeys retain firmware confirmation. All 36 password tests pass, including three new approval/cancellation regressions; the browser fixture covers both tools behind the lock, backup and verification gates, and live feature disable. TypeScript remains at 803 existing diagnostics.
 
-The running development preview passed 19 native checks on the fresh disposable `password-mvp-qa-20261108` emulator wallet. These covered visible Confirm/Reject controls, rejected generation without a usable entry, three separately approved entries, test-account assignment, backup-gated staging and cancellation before website changes, owner-only encrypted backups, lock/unlock, cache eviction, one-minute expiry, approved rehydration, live disable and hidden agent tools, independent Monero state, and encrypted SQLite metadata. No website credential was changed and no password value was printed. Physical hardware and real-service acceptance remain separate.
+The running development preview passed 19 native checks on the fresh disposable `password-mvp-qa-20261108` emulator wallet. These covered visible Confirm/Reject controls, rejected generation without a usable entry, three separately approved entries, test-account assignment, backup-gated staging and cancellation before website changes, owner-only encrypted backups, lock/unlock, cache eviction, one-minute expiry, approved rehydration, live disable and hidden agent tools, independent Monero state, and encrypted SQLite metadata. At this initial checkpoint, no website credential was changed and no password value was printed. Physical hardware and real-service acceptance remain separate.
 
 Local evidence is under `/private/tmp/vault-develop-evidence-20261108/`; encrypted test backups are owner-only under `/private/tmp/vault-password-manager-test-20261108/` and must not be committed. The test bank remains bound to the disposable wallet; it is not a bank for the funded Monero wallet.
 
@@ -38,21 +50,21 @@ New account assignment does not import an existing website password or change it
 
 1. Build/run the feature branch with `make dev` using the normal Vault workflow.
 2. Open **Settings → Feature Flags → Password manager**. The switch is initially off. Enable it and observe the lock button update before closing settings.
-3. Open the lock button, then **Passwords**, connect a test KeepKey, and select **Create with KeepKey**. Approve the device request. Generate a small bank and approve each entry.
-4. Assign the exact login domain and account. Export the recovery backup, save it separately, and acknowledge that it was saved.
-5. Use **Stage next password** to start guided setup/rotation. Export the updated backup containing both locations. Choose **Backup saved — begin website change** before submitting the site change. This records an uncertain/submitted state before the external mutation.
-6. Open the account settings guide. Complete existing-password and MFA challenges yourself, set the staged password, and test a fresh sign-in. Check the sign-in acknowledgment in Vault and activate it only when it works. Save the new backup afterward.
-7. Disable the switch while the password panel is open. The password section disappears and the bank locks, without restarting. The BIP-85 seed tools remain available.
+3. Open the lock button → **Passwords** → **Add password**, enter the login domain/account, and select **Create password**. Approve the requested device operations.
+4. Vault saves encrypted recovery backups automatically. Copy the backup folder to separate storage; recovery needs this manifest as well as the wallet seed/passphrase.
+5. Choose **Open website** to begin the backed-up change. Complete current-password authentication/MFA yourself. Use **Fill in browser** for the new and confirmation fields, review the account, and submit the website change.
+6. Test a fresh sign-in using the generated password. In Vault, check the successful-sign-in acknowledgment and select **Finish** only when that password works. Vault saves the updated backup automatically. Until then both locations remain recorded.
+7. Use the eye to reveal the staged/verified password and the copy icon to copy it. Values hide on blur or timeout. Disabling the feature immediately removes Passwords and locks the bank; BIP-85 remains available.
 
 Use test accounts and a test wallet for initial acceptance. Physical KeepKey behavior and replacement-device recovery have not been exercised in this implementation session.
 
 ## Try BEX fill
 
-Open `chrome://extensions` in a dedicated Chrome profile, enable Developer mode, choose **Load unpacked**, and select `artifacts/password-bank-mvp/bex` in this repository. It identifies itself as **KeepKey — Password Bank MVP**, version name **0.0.38 Password Bank MVP**. To reproduce this label from the BEX source, run `bun run build:password-mvp`; the regular `pnpm build` keeps its normal name. Pair it with this Vault and enable the existing **Agent mode** bridge. This MVP does not add a page-provider API, a generic password-reveal REST endpoint, or a new permission for arbitrary websites.
+Reload the existing unpacked entry pointing to the sibling `keepkey-client/dist` candidate and enable its existing **Agent mode**. The version remains 0.0.38; `dist/keepkey-develop-candidate.json` records the source commit and artifact hashes. This adds no page-provider password API or generic password-reveal REST endpoint.
 
-Open a matching HTTPS login/security page with a visible password field. In Vault, use **Find BEX login field** or, after starting a backed-up change, **Find BEX field for staged password**. Select the exact browser and field, then **Fill selected field**. Review and submit in the browser yourself. Fields expire after thirty seconds or navigation; discover them again when necessary.
+Open the matching HTTPS login/security page. In Vault choose **Fill in browser**. A single matching field is filled directly from that explicit action; multiple fields require selection. Native generation/rehydration runs before field discovery so approval time does not consume a discovered field's short lifetime. Agent-initiated fills still require individual approval in native Vault. Fields expire after thirty seconds or navigation; discover again when necessary.
 
-The compatible extension is required: an older BEX has neither private field discovery/fill nor the new redaction behavior. Keep Agent mode's existing authorization separate from permission to change an account password. Browser fill is initiated only by this Vault UI, not by an agent request.
+The compatible extension is required: an older BEX has neither private field discovery/fill nor the new redaction behavior. Keep Agent mode's existing authorization separate from permission to change an account password. Agent requests can queue a fill but cannot approve themselves; only native Vault approval permits the exact document-bound fill.
 
 ## Chrome saved credential inventory boundary
 

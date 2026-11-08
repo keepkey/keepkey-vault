@@ -1,0 +1,18 @@
+{
+  "lockButtonHostsBothTools": true,
+  "narrowVaultFits": true,
+  "escapeRestoresLockFocus": true,
+  "noPasswordTopBarTab": true,
+  "liveEnableWithoutReload": true,
+  "simpleAddAndList": true,
+  "maskedUntilEye": true,
+  "explicitClipboardCopy": true,
+  "hidesOnBlurAndExpiry": true,
+  "automaticRecoveryBackup": true,
+  "agentMetadataChangesBackedUpAutomatically": true,
+  "failedBackupBlocksWebsiteChange": true,
+  "guidedRotationRequiresBackupAndVerification": true,
+  "liveDisableWithoutReload": true,
+  "pageErrors": [],
+  "screenshot": "./password-mvp-ui.png"
+}

@@ -25,6 +25,7 @@ import { createSwapQuoteLeases } from './swap-quote-lease'
 import { assessSwapRisk } from '../shared/swap-risk'
 import { PasswordBank } from './password-bank'
 import { passwordDeviceCipher } from './password-device'
+import { savePasswordBackup } from './password-backup'
 import { PasswordBex } from './password-bex'
 import { PasswordAgent } from './password-agent'
 import { callBex, listBrowsers } from './bex-bridge'
@@ -8531,6 +8532,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			passwordBankReveal: async (params) => passwordBank.reveal(params.id, params.pending === true),
 			passwordBankRotate: async (params) => passwordBank.rotate(params.id, params.action, params.confirmed === true),
 			passwordBankExport: async () => passwordBank.exportBackup(),
+			passwordBankSaveBackup: async () => savePasswordBackup(passwordBank, path.join(os.homedir(), "Documents", "KeepKey Password Backups")),
 			passwordBankBackupSaved: async (params) => passwordBank.acknowledgeBackup(params.revision),
 			passwordBankImport: async (params) => passwordBank.unlock(false, params.json),
 			passwordBankBrowserTargets: async (params) => passwordBex.discover(params.id),

@@ -10,6 +10,8 @@
  *   bun → webview:  executeJavascript → window.handlePacket(...)
  *   webview → bun:  fetch('http://localhost:EMU_BRIDGE_PORT/_emu/confirm')
  */
+import { randomUUID } from 'node:crypto'
+import { recoverEmulatorView } from './emulator-view-recovery'
 import { BrowserView, BrowserWindow, type RPCSchema } from 'electrobun/bun'
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs'
 import { join } from 'path'
@@ -131,6 +133,8 @@ let pendingCapture: {
  * crashes the WebContent process (EXC_BREAKPOINT in WebPageProxy launch).
  */
 let viewReady = false
+let activeViewLoad = ''
+let stopViewRecovery: (() => void) | null = null
 // Close events and bridge requests can arrive after a replacement window opens.
 // Each window owns its callbacks; an old one must never mutate the new display.
 let windowGeneration = 0
@@ -172,10 +176,16 @@ function startBridge(generation: number): number {
       }
 
       if (url.pathname === '/_emu/ready' && req.method === 'POST') {
-        viewReady = true
-        console.log(`${TAG} Bridge: webview signaled ready`)
-        if (openPinPrompt) sendToWindow('pin-request', { type: openPinPrompt })
-        return new Response('ok', { headers: { 'Access-Control-Allow-Origin': '*' } })
+        return req.json().then((body: any) => {
+          // An older HTML attempt may finish after a retry has begun loading.
+          // Never inject JS into the replacement until its own script is ready.
+          if (generation !== windowGeneration || body.loadId !== activeViewLoad) return new Response('stale load', { status: 410, headers: { 'Access-Control-Allow-Origin': '*' } })
+          viewReady = true
+          stopViewRecovery?.(); stopViewRecovery = null
+          console.log(`${TAG} Bridge: webview signaled ready`)
+          if (openPinPrompt) sendToWindow('pin-request', { type: openPinPrompt })
+          return new Response('ok', { headers: { 'Access-Control-Allow-Origin': '*' } })
+        })
       }
 
       if (url.pathname === '/_emu/seed-ack' && req.method === 'POST') {
@@ -262,13 +272,19 @@ export function openEmulatorWindow(): void {
   const saved = loadWindowState()
   console.log(`${TAG} Opening emulator window at (${saved.x}, ${saved.y}) ${saved.width}x${saved.height}`)
 
+  const nextHTML = () => { activeViewLoad = randomUUID(); return buildEmulatorHTML(port, activeViewLoad) }
   const window = new BrowserWindow({
     title: `KeepKey Emulator: ${getActiveFlashName()}`,
-    html: buildEmulatorHTML(port),
+    html: nextHTML(),
     rpc: emuRpc,
     frame: { width: saved.width, height: saved.height, x: saved.x, y: saved.y },
   })
   emuWindow = window
+  stopViewRecovery = recoverEmulatorView({
+    needsLoad: () => emuWindow === window && !viewReady,
+    reload: () => { console.warn(`${TAG} Retrying initial display load`); window.webview.loadHTML(nextHTML()) },
+    onError: () => console.warn(`${TAG} Initial display reload failed`),
+  })
   if (retainedFrame) { playbackQueue.push(retainedFrame); retainedFrame = null }
 
   window.on('close', () => {
@@ -278,6 +294,7 @@ export function openEmulatorWindow(): void {
       if (frame) saveWindowState(frame)
     } catch {}
 
+    stopViewRecovery?.(); stopViewRecovery = null
     console.log(`${TAG} Emulator window closed`)
     // The emulator keeps running: keep its screen for the EMU badge's reopen.
     retainedFrame = latestFrame
@@ -303,6 +320,7 @@ export function openEmulatorWindow(): void {
 }
 
 export function closeEmulatorWindow(): void {
+  stopViewRecovery?.(); stopViewRecovery = null
   // Called when the emulator stops or switches: its screen and prompt go with it.
   retainedFrame = null
   openPinPrompt = null
@@ -747,7 +765,7 @@ export async function emuInteractiveConfirm(
 
 // ── Inline HTML ─────────────────────────────────────────────────────────
 
-function buildEmulatorHTML(bridgePort: number): string {
+function buildEmulatorHTML(bridgePort: number, loadId: string): string {
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -917,7 +935,7 @@ function buildEmulatorHTML(bridgePort: number): string {
 
 <script>
 (function() {
-  var BRIDGE = 'http://localhost:${bridgePort}';
+  var BRIDGE = 'http://127.0.0.1:${bridgePort}';
   var oled = document.getElementById('oled');
   var buttons = document.getElementById('buttons');
   var confirmBtn = document.getElementById('confirmBtn');
@@ -1112,7 +1130,7 @@ function buildEmulatorHTML(bridgePort: number): string {
   // Tell bun the WebView is ready to receive executeJavascript packets.
   // Without this, display-update polls fire before window.handlePacket is
   // defined and crash the WKWebView process (EXC_BREAKPOINT in WebKit).
-  postBridge('/_emu/ready', {});
+  postBridge('/_emu/ready', { loadId: '${loadId}' });
 })();
 </script>
 </body>

@@ -55,7 +55,7 @@ export function VaultToolsButton({ seedVaultAvailable, passwordsAvailable = true
       <Box position="fixed" inset="0" bg="blackAlpha.700" zIndex={Z.dialog} onClick={close} />
       <Box ref={panel} tabIndex={-1} role="dialog" aria-modal="true" aria-label={uiText('Vault')}
         position="fixed" top="50%" left="50%" transform="translate(-50%, -50%)"
-        w={section === 'passwords' && passwords ? '1040px' : '520px'} maxW="94vw" maxH="88vh"
+        w={section === 'passwords' && passwords ? '760px' : '520px'} maxW="94vw" maxH="88vh"
         bg="kk.bg" border="1px solid" borderColor="kk.border" borderRadius="xl" zIndex={Z.dialog + 1}
         display="flex" flexDirection="column" overflow="hidden"
         onKeyDown={event => {
@@ -68,11 +68,11 @@ export function VaultToolsButton({ seedVaultAvailable, passwordsAvailable = true
         }}>
         <Flex px="5" py="3" align="center" justify="space-between" gap="3" borderBottom="1px solid" borderColor="kk.border">
           <Text fontSize="lg" fontWeight="600">{uiText('Vault')}</Text>
-          <Button size="xs" variant="ghost" aria-label={uiText('Close vault')} onClick={close}>×</Button>
+          <Button size="xs" variant="ghost" color="kk.textSecondary" aria-label={uiText('Close vault')} onClick={close}>×</Button>
         </Flex>
         <Flex as="nav" aria-label={uiText('Vault tools')} gap="2" px="5" py="3" borderBottom="1px solid" borderColor="kk.border">
-          {passwords && <Button size="sm" variant={section === 'passwords' ? 'solid' : 'ghost'} aria-pressed={section === 'passwords'} onClick={() => setSection('passwords')}>{uiText('Passwords')}</Button>}
-          {seedVaultAvailable && <Button size="sm" variant={section === 'seeds' ? 'solid' : 'ghost'} aria-pressed={section === 'seeds'} onClick={() => setSection('seeds')}>{uiText('Seed vault (BIP-85)')}</Button>}
+          {passwords && <Button size="sm" color={section === 'passwords' ? 'kk.textPrimary' : 'kk.textSecondary'} variant={section === 'passwords' ? 'solid' : 'ghost'} aria-pressed={section === 'passwords'} onClick={() => setSection('passwords')}>{uiText('Passwords')}</Button>}
+          {seedVaultAvailable && <Button size="sm" color={section === 'seeds' ? 'kk.textPrimary' : 'kk.textSecondary'} variant={section === 'seeds' ? 'solid' : 'ghost'} aria-pressed={section === 'seeds'} onClick={() => setSection('seeds')}>{uiText('Seed vault (BIP-85)')}</Button>}
         </Flex>
         <Box overflow="auto" minH="0">
           {section === 'passwords' && passwords ? <PasswordBankView /> : seedVaultAvailable ? <Bip85VaultDialog embedded onClose={close} /> : null}
