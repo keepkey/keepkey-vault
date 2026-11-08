@@ -1,0 +1,15 @@
+{
+  "standardTransparentDefaultWithoutPrivateInitialization": true,
+  "shieldedUsesSharedReceiveAndHidesAdvancedByDefault": true,
+  "publicRecipientWarningStaysVisibleWithDetailsCollapsed": true,
+  "advancedToolsRemainReachableAndCollapseBackToShieldedReceive": true,
+  "liveDisableNeverFallsBackToTransparentReceive": true,
+  "explicitPoolChangeRestoresTransparentReceive": true,
+  "watchOnlyShieldedDeepLinkHasNoPrivateInitializationOrTransparentFallback": true,
+  "unsupportedFirmwareNeverFallsBackToTransparentReceive": true,
+  "shieldedSendDeepLinkUsesStandardSendAction": true,
+  "liveDisableNeverFallsBackToTransparentSend": true,
+  "legacyPrivacyDeepLinkOpensToolsInUnifiedPage": true,
+  "mobileReceiveFitsViewport": true,
+  "noPageErrors": true
+}
