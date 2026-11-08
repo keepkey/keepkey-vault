@@ -1684,13 +1684,11 @@ export function assessSigningRisk(req: SigningRequestInfo): RiskAssessment | nul
     const shown = req.deviceClearSigns || req.certifiedEvmSchema || certifiedBlobShown(req) || req.erc7730
     if (shown && (!thorDepositProtocol(req) || thorDepositShown(req))) recognition = 'shows'
     if (reasons.length === 0) add('low', 'Your KeepKey decodes this call on its screen. Check the recipient and amount there.')
-    // An assessment can only add a reason, so it can only raise the level.
+    // A hosted audit assessment can only add a reason, so it can only raise the level.
     const rating = req.clearSignReport?.rating
-    if (rating?.source === 'hosted-assessment') {
-      add(rating.riskLevel, `Publisher-hosted assessment rates this contract ${rating.riskLevel} risk: ${rating.riskReasons[0] || 'see findings'}. Submitter attribution is supplied by the publisher.`)
-    } else if (rating) {
-      add(rating.riskLevel, `An auditor rates this contract ${rating.riskLevel} risk: ${rating.riskReasons[0] || 'see findings'}.`
-        + (rating.raterPinned ? '' : ' The rater is not yet pinned in this Vault.'))
+    if (rating) {
+      add(rating.riskLevel, `Publisher-hosted assessment rates this contract ${rating.riskLevel} risk: ${rating.riskReasons[0] || 'see findings'}.`
+        + ' Submitter attribution is supplied by the publisher.')
     }
   } else if (req.method === '/eth/sign-typed-data') {
     recognition = evmTypedData(req, add)

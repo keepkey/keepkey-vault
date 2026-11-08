@@ -155,21 +155,30 @@ export function validateContractRating(served: any, chainId: number, contract: s
 
 const serviceBase = () => String(process.env.CLEARSIGN_SERVICE_URL || DEFAULT_CLEARSIGN_SERVICE_URL).trim().replace(/\/+$/, '')
 
-/** Best-effort assessment lookup. Missing or stale assessments do not affect clearsign. */
+/** Best-effort assessment lookup with one budget for the hosted fetch and all
+ * live-deployment RPC calls. Missing or slow assessments never delay approval
+ * beyond this budget or affect clear-signing verification. */
 export async function findContractRating(chainId: number, contract: string,
   measure: (chainId: number, contract: string) => Promise<unknown>): Promise<ContractRating | undefined> {
   if (!Number.isSafeInteger(chainId) || chainId < 1 || !/^0x[0-9a-f]{40}$/i.test(contract)) return undefined
-  try {
-    const response = await fetch(`${serviceBase()}/v1/ratings?network=eip155:${chainId}&contract=${contract.toLowerCase()}`,
-      { signal: AbortSignal.timeout(3_000) })
-    const served: any = await response.json()
-    if (!response.ok || !served?.rating) return undefined
-    // The Worker responds { rating: { rating, ratingId, rater, source } }.
-    return validateContractRating(served.rating, chainId, contract, await measure(chainId, contract))
-  } catch (error: any) {
-    console.warn(`[clearsign] contract rating unavailable: ${error?.message || error}`)
-    return undefined
+  const budgetMs = 1_500
+  let timeoutId: ReturnType<typeof setTimeout> | undefined
+  const timeout = new Promise<undefined>(resolve => { timeoutId = setTimeout(() => resolve(undefined), budgetMs) })
+  const lookup = async (): Promise<ContractRating | undefined> => {
+    try {
+      const response = await fetch(`${serviceBase()}/v1/ratings?network=eip155:${chainId}&contract=${contract.toLowerCase()}`,
+        { signal: AbortSignal.timeout(budgetMs) })
+      const served: any = await response.json()
+      if (!response.ok || !served?.rating) return undefined
+      // The Worker responds { rating: { rating, ratingId, rater, source } }.
+      return validateContractRating(served.rating, chainId, contract, await measure(chainId, contract))
+    } catch (error: any) {
+      console.warn(`[clearsign] contract rating unavailable: ${error?.message || error}`)
+      return undefined
+    }
   }
+  try { return await Promise.race([lookup(), timeout]) }
+  finally { if (timeoutId) clearTimeout(timeoutId) }
 }
 
 /** The user's explicit "Request clearsign review". Sends only the public call

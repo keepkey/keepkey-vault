@@ -1,10 +1,11 @@
-import { expect, test } from 'bun:test'
+import { expect, mock, test } from 'bun:test'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { ChakraProvider, defaultSystem } from '@chakra-ui/react'
-import { ClearSignReportCard } from './ClearSignReportCard'
 import type { ClearSignReport } from '../../shared/clearsign-report'
 
-test('hosted assessments do not inherit signature or pinning claims', () => {
+test('hosted assessments do not inherit signature or pinning claims', async () => {
+  mock.module('../lib/rpc', () => ({ rpcRequest: async () => undefined }))
+  const { ClearSignReportCard } = await import('./ClearSignReportCard')
   const report = {
     protectionLevel: 'P1', headline: 'Opaque transaction', transactionFingerprint: 'a'.repeat(64),
     simulation: { status: 'unavailable', stateReference: {}, assetChanges: [], authorityChanges: [] },

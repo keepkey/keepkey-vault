@@ -1096,6 +1096,7 @@ export class WalletConnectManager {
         simulation,
         hostFindings: universalRouterFindings.findings,
         hostLimitations: universalRouterFindings.limitations,
+        rating: await findContractRating(effectiveChainId, String(tx.to || ''), measureLiveDeployment),
       })
     }
     await contractFacts

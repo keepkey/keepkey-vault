@@ -150,6 +150,18 @@ describe('validateContractRating (app-only opinion)', () => {
     expect(() => validateContractRating(near, 8453, MANAGER, AUDITED)).toThrow('malformed')
   })
 
+  it('bounds the entire optional lookup when live deployment measurement stalls', async () => {
+    const original = globalThis.fetch
+    const good = await servedRating()
+    try {
+      globalThis.fetch = (async () => Response.json({ rating: good })) as unknown as typeof fetch
+      const start = performance.now()
+      const result = await findContractRating(8453, MANAGER, async () => new Promise<never>(() => {}))
+      expect(result).toBeUndefined()
+      expect(performance.now() - start).toBeLessThan(2_200)
+    } finally { globalThis.fetch = original }
+  })
+
   it('findContractRating is best-effort: no rating, bad data, or no network are all undefined', async () => {
     const original = globalThis.fetch
     try {

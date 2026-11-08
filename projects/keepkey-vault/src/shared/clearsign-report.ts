@@ -71,8 +71,6 @@ export interface ContractRating {
   rater: string
   source: 'hosted-assessment'
   reportUrl: string
-  /** Kept optional until the display phase replaces the previous rating view. */
-  raterPinned?: boolean
 }
 
 /** The single object consumed by Vault approval UI, evidence storage, and API. */

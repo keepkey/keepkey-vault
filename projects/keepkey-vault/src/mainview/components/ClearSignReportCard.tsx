@@ -1,3 +1,4 @@
+import { DocsLink } from './DocsLink'
 import { useUiTranslation } from "../i18n/ui"
 import { Flex, Text } from '@chakra-ui/react'
 import { runtimeProviderLine, type ClearSignReport, type ContractRating } from '../../shared/clearsign-report'
@@ -35,25 +36,24 @@ const RISK_COLOR: Record<ContractRating['riskLevel'], string> = {
   low: 'var(--teal)', medium: 'var(--gold)', high: 'var(--rose)', critical: 'var(--rose)',
 }
 
-/** Contract assessment display; hosted attribution is publisher supplied. */
+/** Hosted assessment, kept distinct from the device's cryptographic checks. */
 function ContractRatingView({ rating }: { rating: ContractRating }) {
   const uiText = useUiTranslation()
 
   const color = RISK_COLOR[rating.riskLevel]
-  const hosted = rating.source === 'hosted-assessment'
   return <Flex direction="column" gap="1" mt="1" pt="1.5" borderTop="1px solid rgba(255,255,255,0.12)" data-contract-risk={rating.riskLevel}>
     <Flex justify="space-between" align="center" gap="2">
-      <Text fontSize="xs" fontWeight="800" color="white">{hosted ? 'Contract assessment' : 'Auditor rating'}</Text>
+      <Text fontSize="xs" fontWeight="800" color="white">Contract audit assessment</Text>
       <Text fontSize="2xs" fontWeight="800" color={color} textTransform="uppercase">{rating.riskLevel} risk</Text>
     </Flex>
     {rating.riskReasons.map((reason, index) => <Text key={`reason:${index}`} fontSize="2xs" color={color}>• {reason}</Text>)}
     {rating.findings.map((finding, index) => <Text key={`finding:${index}`} fontSize="2xs" color="kk.textSecondary">
-      <Text as="span" fontWeight="700" color={finding.severity === 'high' || finding.severity === 'critical' ? 'var(--rose)' : 'white'}>{finding.severity}: {finding.title}.</Text> {finding.detail}
+      <Text as="span" fontWeight="700" color={finding.severity === 'high' || finding.severity === 'critical' ? 'var(--rose)' : 'white'}>{finding.severity}: {finding.title}.</Text> {finding.detail}{finding.reference && ` Reference: ${finding.reference}`}
     </Text>)}
     <Text fontSize="2xs" color="kk.textMuted">
-      {hosted ? 'Publisher-hosted opinion; submitter attribution is supplied by the publisher.'
-        : 'A human opinion of this contract, checked by this app — not by your KeepKey.'}
-      {!hosted && !rating.raterPinned && ' The rater is not yet pinned in this Vault.'}
+      Submitted by {rating.rater} · {new Date(rating.ratedAt).toISOString().slice(0, 10)}. Author attribution is supplied by the publisher.
+      This assessment is an opinion; clear-signing verification is shown separately.
     </Text>
+    <DocsLink href={rating.reportUrl} label="More info" color="var(--teal)" />
   </Flex>
 }

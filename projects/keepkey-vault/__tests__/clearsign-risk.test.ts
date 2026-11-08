@@ -308,15 +308,15 @@ describe('assessSigningRisk — EVM', () => {
     expect(r.level).toBe('high')
   })
 
-  const reviewed = (riskLevel: string, raterPinned = false) => ({ clearSignReport: { rating: {
-    riskLevel, riskReasons: ['a single key controls upgrades, deposits, minting (delay 10d)'], findings: [], raterPinned,
+  const reviewed = (riskLevel: string) => ({ clearSignReport: { rating: {
+    riskLevel, riskReasons: ['a single key controls upgrades, deposits, minting (delay 10d)'], findings: [], source: 'hosted-assessment',
   } } } as unknown as Partial<SigningRequestInfo>)
 
-  test('a verified contract rating raises the level (MDM CapitalManager.deposit: high)', () => {
+  test('a hosted contract audit assessment raises the level (MDM CapitalManager.deposit: high)', () => {
     const deposit = '0x47e7ef24' + word(0n) + word(100n)
     const r = tx(deposit, { to: '0x6b6c05ee7f49d00e63e74a9426d74ef9614f6a0f', chainId: 8453, deviceClearSigns: true, ...reviewed('high') })
     expect(r.level).toBe('high')
-    expect(r.reasons[0].text).toBe('An auditor rates this contract high risk: a single key controls upgrades, deposits, minting (delay 10d). The rater is not yet pinned in this Vault.')
+    expect(r.reasons[0].text).toBe('Publisher-hosted assessment rates this contract high risk: a single key controls upgrades, deposits, minting (delay 10d). Submitter attribution is supplied by the publisher.')
   })
 
   test('three-level verdict: what the KeepKey shows is green, an unknown call is red', () => {
@@ -336,7 +336,7 @@ describe('assessSigningRisk — EVM', () => {
   })
 
   test('a low-risk rating never lowers a critical payload', () => {
-    const r = tx('0x095ea7b3' + SPENDER + word((1n << 256n) - 1n), reviewed('low', true))
+    const r = tx('0x095ea7b3' + SPENDER + word((1n << 256n) - 1n), reviewed('low'))
     expect(r.level).toBe('critical')
   })
 })
