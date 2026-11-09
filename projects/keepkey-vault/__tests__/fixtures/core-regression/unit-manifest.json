@@ -15,6 +15,7 @@
       "__tests__/wizard-messaging.test.ts",
       "__tests__/firmware-authenticity-verdict.test.ts",
       "__tests__/firmware-install.test.ts",
+      "__tests__/firmware-official-install.test.ts",
       "__tests__/update-safety.test.ts",
       "__tests__/settings-drawer-accessibility.test.ts",
       "__tests__/single-instance.test.ts",
