@@ -1,0 +1,9 @@
+<!doctype html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Firmware authenticity regression fixture</title></head><body style="background:#0b0b0e"><div id="root"></div><script>
+// In-memory test transport only. No native app, wallet, device or remote RPC.
+window.__electrobunBunBridge={postMessage:async function(packet){
+ if(typeof packet==='string')packet=JSON.parse(packet);
+ try {const r=await fetch('/__test_rpc',{method:'POST',headers:{'Content-Type':'application/json','X-Fixture-Scenario':new URLSearchParams(location.search).get('scenario')||'normal'},body:JSON.stringify(packet)});window.__electrobun.receiveMessageFromBun({type:'response',id:packet.id,...await r.json()});}
+ catch(e){window.__electrobun.receiveMessageFromBun({type:'response',id:packet.id,success:false,error:String(e)});}
+}};
+window.__fixturePush=function(id,payload){window.__electrobun.receiveMessageFromBun({type:'message',id:id,payload:payload});};
+</script><script type="module" src="/entry.tsx"></script></body></html>

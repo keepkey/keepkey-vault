@@ -1,0 +1,48 @@
+{
+  "date": "2026-11-08",
+  "change": "Offer official firmware installation from the unlisted firmware screen",
+  "unitTests": {
+    "passed": 89,
+    "failed": 0,
+    "files": 6,
+    "command": "bun test __tests__/firmware-official-install.test.ts src/bun/firmware-signature.test.ts __tests__/firmware-install.test.ts __tests__/firmware-authenticity-verdict.test.ts __tests__/flash-wipe.test.ts __tests__/wizard-messaging.test.ts"
+  },
+  "browserTests": {
+    "checks": {
+      "official-action-visible-with-continue-wide": true,
+      "explicit-install-stays-on-updater-for-newer-custom-firmware": true,
+      "continue-retains-normal-onboarding-route": true,
+      "disconnected-actions-disabled": true,
+      "official-install-respects-bootloader-prerequisite": true,
+      "unknown-lineage-requires-explicit-firmware-choice": true,
+      "verified-release-retains-normal-continue": true,
+      "bootloader-install-keeps-existing-wipe-acknowledgement": true,
+      "official-and-continue-actions-accessible-narrow": true,
+      "optional-features-and-alpha-remain-disabled": true
+    },
+    "failures": [],
+    "errors": [],
+    "fixture": "__tests__/fixtures/firmware-authenticity",
+    "serverCommand": "bun __tests__/fixtures/firmware-authenticity/server.ts",
+    "testCommand": "bun __tests__/fixtures/firmware-authenticity/smoke.mjs",
+    "port": 5204,
+    "previousCommitFailsNewActionCheck": true,
+    "nativeMutationAttempts": 0
+  },
+  "build": {
+    "backend": true,
+    "frontend": true,
+    "macOSPreview": true,
+    "packagedSignatureGuardVerified": true
+  },
+  "i18n": true,
+  "typecheck": {
+    "baselineDiagnostics": 803,
+    "currentDiagnostics": 803,
+    "newDiagnostics": [],
+    "passed": false
+  },
+  "physicalDeviceFlashed": false,
+  "realDeviceUsedInTests": false,
+  "optionalFeatureAcceptanceTested": false
+}

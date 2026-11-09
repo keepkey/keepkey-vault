@@ -1,0 +1,11 @@
+{
+  "nativePreview": true,
+  "sourceBase": "c2888b64c",
+  "ethSwapButtonOpenAndClose": true,
+  "escapeClosesSwap": true,
+  "returnedToAssetView": true,
+  "transactionReviewed": false,
+  "transactionSigned": false,
+  "transactionBroadcast": false,
+  "optionalFeatureFlowsTested": false
+}
