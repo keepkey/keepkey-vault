@@ -1900,7 +1900,7 @@ export class EngineController extends EventEmitter {
    * erased) a flash that may wipe or lock the wallet unless `acknowledgeWipe`
    * names that exact outcome: `WIPE_ACK_REQUIRED:<reason>`.
    */
-  async startFirmwareUpdate(opts: { variant?: CoinVariant; acknowledgeWipe?: WipeReason } = {}) {
+  async startFirmwareUpdate(opts: { variant?: CoinVariant; acknowledgeWipe?: WipeReason; requireOfficialSignatures?: boolean } = {}) {
     if (!this.wallet) throw new Error('No device connected')
     const plan = planInstall({
       installed: this.installedFirmware(),
@@ -1944,6 +1944,13 @@ export class EngineController extends EventEmitter {
       // the bitcoin-only build compiles in this string (see analyzeFirmware).
       if (isBitcoinOnlyImage(firmware) !== plan.bitcoinOnly) {
         throw new Error(`Firmware image is not the ${plan.bitcoinOnly ? 'Bitcoin-only' : 'multi-chain'} build`)
+      }
+
+      // The official-install entry point promises a KeepKey release image.
+      // Payload hashes do not cover the KPKY header's signature slots, so check
+      // the actual bytes before erasing anything on the device.
+      if (opts.requireOfficialSignatures && !verifyFirmwareSignatures(new Uint8Array(firmware))) {
+        throw new Error('Official firmware installation requires valid KeepKey release signatures. No firmware was erased or uploaded.')
       }
 
       // See note in startBootloaderUpdate: no JS timeout can cover a readSync

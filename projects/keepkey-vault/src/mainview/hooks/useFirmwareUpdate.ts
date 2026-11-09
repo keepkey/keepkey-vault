@@ -44,7 +44,7 @@ export function useFirmwareUpdate() {
     }
   }, [])
 
-  const startFirmwareUpdate = useCallback(async (opts: { variant?: 'multi' | 'bitcoin-only'; acknowledgeWipe?: WipeReason } = {}) => {
+  const startFirmwareUpdate = useCallback(async (opts: { variant?: 'multi' | 'bitcoin-only'; acknowledgeWipe?: WipeReason; requireOfficialSignatures?: boolean } = {}) => {
     activeRef.current = true
     setState('updating')
     setError(null)

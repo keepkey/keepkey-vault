@@ -182,6 +182,9 @@ export function OobSetupWizard({ onComplete: onCompleteProp, onWalletCreated, on
   // Where "Change" on the bootloader/firmware page came from; the coin-choice
   // page returns there instead of going on to the tutorial.
   const [coinReturnStep, setCoinReturnStep] = useState<WizardStep | null>(null)
+  // An explicit reinstall must remain available even when a custom build's
+  // version is the same as, or newer than, the official release.
+  const [officialFirmwareRequested, setOfficialFirmwareRequested] = useState(false)
   // Wipe/lock acknowledgement for the official install (see installWipeReason).
   const [installWipeAcknowledged, setInstallWipeAcknowledged] = useState(false)
   const [setupType, setSetupType] = useState<'create' | 'recover' | null>(null)
@@ -351,7 +354,7 @@ export function OobSetupWizard({ onComplete: onCompleteProp, onWalletCreated, on
   // A current multi-chain device the user switched to Bitcoin-only ("Go
   // Bitcoin-only" on the wallet page) still needs the install.
   const switchingToBitcoinOnly = coinMode === 'bitcoin-only' && deviceStatus.installedBitcoinOnly === false
-  const needsFirmware = deviceStatus.needsFirmwareUpdate || switchingToBitcoinOnly
+  const needsFirmware = officialFirmwareRequested || deviceStatus.needsFirmwareUpdate || switchingToBitcoinOnly
   // A wiped multi-chain KeepKey never sees the setup choice (its firmware is
   // current), so the wallet page offers it. No wallet, nothing lost.
   const offerBitcoinOnly = BITCOIN_ONLY_ONBOARDING && !!deviceStatus.latestFirmwareBitcoinOnly
@@ -1355,6 +1358,19 @@ export function OobSetupWizard({ onComplete: onCompleteProp, onWalletCreated, on
                 continueDisabled={!hasFeatures}
                 holdsWallet={everSeenInitializedRef.current || lastAppModeInitializedRef.current === true}
                 onContinue={() => setStep(stepAfterAuthenticity({ showPicker: showCoinPicker, hasFeatures }))}
+                onInstallOfficialFirmware={() => {
+                  if (!hasFeatures) return
+                  setOfficialFirmwareRequested(true)
+                  setBackupConfirmed(false)
+                  setInstallWipeAcknowledged(false)
+                  const target = needsBootloader ? 'bootloader' : 'firmware'
+                  if (showCoinPicker) {
+                    setCoinReturnStep(target)
+                    setStep('coin-choice')
+                  } else {
+                    setStep(target)
+                  }
+                }}
               />
             )}
 
@@ -1903,7 +1919,7 @@ export function OobSetupWizard({ onComplete: onCompleteProp, onWalletCreated, on
                         if (!coinMode) return
                         // The reason the user acknowledged: the engine refuses
                         // if its own plan has a different one by now.
-                        startFirmwareUpdate({ variant: coinMode, acknowledgeWipe: installWipeAcknowledged ? installWipeReason : undefined })
+                        startFirmwareUpdate({ variant: coinMode, acknowledgeWipe: installWipeAcknowledged ? installWipeReason : undefined, requireOfficialSignatures: officialFirmwareRequested })
                       }}
                       disabled={!coinMode || !installVersion || (installWipeReason ? !installWipeAcknowledged : backupBlocked)}
                     >
