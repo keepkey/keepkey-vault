@@ -196,8 +196,9 @@
     "testSource": "Actual DeviceSettingsDrawer with synthetic fixture RPC"
   },
   "unitTests": {
-    "passed": 23,
-    "failed": 0
+    "passed": 49,
+    "failed": 0,
+    "files": 5
   },
   "frontendBuild": true,
   "i18n": true,
