@@ -19,7 +19,9 @@ function harness(over: Partial<LegacyCleanupDeps> & {
   links?: Record<string, string>
   answers?: number[]
   trashOk?: boolean
+  versions?: Record<string, string>
 } = {}) {
+  const versions = over.versions ?? {}
   const files = over.files ?? { [NEW_APP]: BUNDLE_IDENTIFIER, [OLD_APP]: BUNDLE_IDENTIFIER }
   const links = over.links ?? {}
   const settings = new Map<string, string>()
@@ -36,6 +38,7 @@ function harness(over: Partial<LegacyCleanupDeps> & {
       return links[p] ?? p
     },
     bundleIdentifier: p => files[p] ?? null,
+    bundleVersion: p => versions[p] ?? null,
     getSetting: k => settings.get(k) ?? null,
     setSetting: (k, v) => { settings.set(k, v) },
     ask: async d => { dialogs.push(d); return answers.shift() ?? 0 },
@@ -96,6 +99,18 @@ describe('findLegacyCopies', () => {
       links: { [OLD_USER_APP]: OLD_APP },
     })
     expect(findLegacyCopies(deps)).toEqual([OLD_APP])
+  })
+
+  test('offers an old copy at an older or equal version', () => {
+    const { deps } = harness({ versions: { [NEW_APP]: '1.6.11', [OLD_APP]: '1.6.10' } })
+    expect(findLegacyCopies(deps)).toEqual([OLD_APP])
+    const same = harness({ versions: { [NEW_APP]: '1.6.11', [OLD_APP]: '1.6.11' } })
+    expect(findLegacyCopies(same.deps)).toEqual([OLD_APP])
+  })
+
+  test('leaves an old-named copy that auto-updated past this one', () => {
+    const { deps } = harness({ versions: { [NEW_APP]: '1.6.11', [OLD_APP]: '1.7.0' } })
+    expect(findLegacyCopies(deps)).toEqual([])
   })
 
   test('does nothing off macOS', () => {

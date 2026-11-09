@@ -102,6 +102,14 @@ for _ in $(seq 1 20); do
 	sleep 0.5
 done
 [ -f "$MOUNT/.DS_Store" ] || { echo "ERROR: Finder did not write .DS_Store" >&2; exit 1; }
+# Finder can rewrite it once the icon positions flush; wait until it stops changing.
+prev=""
+for _ in $(seq 1 20); do
+	cur=$(stat -f '%m %z' "$MOUNT/.DS_Store")
+	[ "$cur" = "$prev" ] && break
+	prev=$cur
+	sleep 1
+done
 sync
 diskutil rename "$VOLDEV" "$VOLNAME" >/dev/null
 

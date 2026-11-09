@@ -11588,6 +11588,10 @@ if (process.platform === 'darwin') {
 				const r = Bun.spawnSync(['/usr/bin/plutil', '-extract', 'CFBundleIdentifier', 'raw', '-o', '-', path.join(appPath, 'Contents', 'Info.plist')])
 				return r.exitCode === 0 ? r.stdout.toString().trim() : null
 			},
+			bundleVersion: appPath => {
+				const r = Bun.spawnSync(['/usr/bin/plutil', '-extract', 'CFBundleVersion', 'raw', '-o', '-', path.join(appPath, 'Contents', 'Info.plist')])
+				return r.exitCode === 0 ? r.stdout.toString().trim() : null
+			},
 			getSetting,
 			setSetting,
 			ask: async dialog => (await Utils.showMessageBox({ title: 'KeepKey Vault', ...dialog })).response,
