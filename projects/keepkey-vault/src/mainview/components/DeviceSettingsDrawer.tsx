@@ -79,9 +79,10 @@ function Section({ title, category, color, docsHref, videoHref, children }: {
   </Box>
 }
 
-function FeatureIcon({ kind }: { kind: 'monero' | 'passwords' | 'offline' | 'multisig' | 'walletconnect' | 'emulator' }) {
-  const colors = { monero: '#F5841F', passwords: '#E9C46A', offline: '#E08C7B', multisig: '#4FB7A5', walletconnect: '#3B99FC', emulator: '#A855F7' }
+function FeatureIcon({ kind }: { kind: 'firmware' | 'monero' | 'passwords' | 'offline' | 'multisig' | 'walletconnect' | 'emulator' }) {
+  const colors = { firmware: '#EC4899', monero: '#F5841F', passwords: '#E9C46A', offline: '#E08C7B', multisig: '#4FB7A5', walletconnect: '#3B99FC', emulator: '#A855F7' }
   const icons = {
+    firmware: <><rect x="6" y="6" width="12" height="12" rx="2" /><path d="M9 2v4M15 2v4M9 18v4M15 18v4M2 9h4M2 15h4M18 9h4M18 15h4" /></>,
     monero: <><circle cx="12" cy="12" r="10" /><path d="M5 16V9l7 7 7-7v7" /></>,
     passwords: <><circle cx="8" cy="15" r="5" /><path d="m11.5 11.5 9-9M16 7l3 3M18 5l3 3" /></>,
     offline: <><path d="m2 2 20 20M8.5 16.5a5 5 0 0 1 7 0M2 8.82a15 15 0 0 1 4.17-2.65M10.66 5c4.01-.36 8.14.9 11.34 3.76M16.85 11.25a10 10 0 0 1 2.22 1.68M12 20h.01" /></>,
@@ -769,7 +770,7 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 				top="0"
 				right="0"
 				h="100vh"
-				w={{ base: "100vw", md: "860px" }}
+				w={{ base: "100vw", md: "760px" }}
 				maxW="100vw"
 				bg="kk.bg"
 				fontFamily="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif"
@@ -1643,7 +1644,7 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 
                             </VStack>
                     </Section>
-                    <Section title={uiText("Node connection")} category="monero"><VStack gap="4" align="stretch">
+                    {(appSettings.moneroEnabled || (appSettings.moneroPendingBroadcasts ?? 0) > 0) && <Section title={uiText("Monero (XMR)")} category="networks"><VStack gap="4" align="stretch">
                             <Box>
                                 {!appSettings.moneroEnabled && <Box>
                                   <Text fontSize="sm" color="kk.textSecondary">{appSettings.moneroAvailable === false ? uiText("Monero is unavailable in this build.") : uiText("Enable Monero in Feature Flags to connect your wallet and manage its node.")}</Text>
@@ -1676,24 +1677,7 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
                             </Box>
 
 							</VStack>
-                    </Section>
-                    <Section title={uiText("Research firmware")} category="advanced"><VStack gap="4" align="stretch">
-                        {/* Alpha firmware toggle */}
-							<Flex justify="space-between" align="center" mt="3" pt="3" borderTopWidth="1px" borderColor="kk.border">
-								<Flex align="center" gap="3">
-									<Box w="8" h="8" borderRadius="lg" bg="rgba(236,72,153,0.15)" display="flex" alignItems="center" justifyContent="center">
-										<Text fontSize="sm">🚧</Text>
-									</Box>
-									<VStack gap="0" align="start">
-										<Text fontSize="sm" color="kk.textPrimary" fontWeight="500">{t("alphaFirmware", { defaultValue: "Alpha Firmware" })}</Text>
-										<Text fontSize="xs" color="kk.textMuted">{t("alphaFirmwareDesc", { defaultValue: "Opt in to early firmware releases from the beta channel" })}</Text>
-									</VStack>
-								</Flex>
-								<Toggle label={t("alphaFirmware")} checked={appSettings.alphaFirmware} onChange={toggleAlphaFirmware} disabled={togglingAlphaFirmware} />
-							</Flex>
-
-						</VStack>
-					</Section>
+                    </Section>}
 
 					{/* ── Browser use — needs the REST API, so only shown once it is on ── */}
 					{appSettings.restApiEnabled && <Section title={uiText("Browser use")} category="connections">
@@ -1754,22 +1738,29 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 					<Section title={uiText("Available features")} category="features" docsHref={DOCS_LINKS.settingsFeatureFlags}>
 						<VStack gap="4" align="stretch">
               <Flex justify="space-between" align="center" gap="4" pb="4" borderBottom="1px solid" borderColor="kk.border">
+                <Flex align="center" gap="3" minW="0"><FeatureIcon kind="firmware" /><Box>
+                  <Text fontSize="md" color="kk.textPrimary" fontWeight="500">{t("alphaFirmware", { defaultValue: "Alpha Firmware" })}</Text>
+                  <Text fontSize="sm" color="kk.textSecondary" mt="0.5">{t("alphaFirmwareDesc", { defaultValue: "Opt in to early firmware releases from the beta channel" })}</Text>
+                </Box></Flex>
+                <Toggle label={t("alphaFirmware")} checked={appSettings.alphaFirmware} onChange={toggleAlphaFirmware} disabled={togglingAlphaFirmware} />
+              </Flex>
+              <Flex justify="space-between" align="center" gap="4" pb="4" borderBottom="1px solid" borderColor="kk.border">
                 <Flex align="center" gap="3" minW="0"><FeatureIcon kind="monero" /><Box><Text fontSize="md" fontWeight="500" color="kk.textPrimary">{uiText('Monero (XMR)')}</Text>
-                  <Text fontSize="sm" color="kk.textSecondary" mt="0.5">{appSettings.moneroAvailable === false ? uiText('Monero is unavailable in this build.') : !firmwareSupportsMonero(deviceState.firmwareVersion) ? `Needs KeepKey firmware ${MONERO_MIN_FIRMWARE} or newer.` : uiText('Add Monero to your wallet. Manage its node and scan history in Settings → Monero.')}</Text></Box></Flex>
+                  <Text fontSize="sm" color="kk.textSecondary" mt="0.5">{appSettings.moneroAvailable === false ? uiText('Monero is unavailable in this build.') : !firmwareSupportsMonero(deviceState.firmwareVersion) ? `Needs KeepKey firmware ${MONERO_MIN_FIRMWARE} or newer.` : uiText('Add Monero to your wallet. Manage its node and scan history in Settings → Networks.')}</Text></Box></Flex>
                 <Toggle label={uiText('Monero (XMR)')} checked={appSettings.moneroEnabled} disabled={moneroBusy || appSettings.moneroAvailable === false} onChange={toggleMonero} />
               </Flex>
               {moneroError && <Text role="alert" fontSize="xs" color="kk.error">{moneroError}</Text>}
 
 							<Box>
-								<Flex justify="space-between" align="center" gap="3">
+								<Flex justify="space-between" align="center" gap="4">
 									<Flex align="center" gap="3" minW="0"><FeatureIcon kind="passwords" /><Box><Text fontSize="md" color="kk.textPrimary" fontWeight="500">{uiText("Password manager")}</Text><Text fontSize="sm" color="kk.textSecondary" mt="0.5">{uiText("Experimental. Encrypted password storage, backups and guided rotation with KeepKey approval. Off by default.")}</Text></Box></Flex>
 									<Toggle label={uiText('Password manager')} checked={appSettings.passwordManagerEnabled === true} onChange={togglePasswords} disabled={togglingPasswords} />
 								</Flex>
 								{passwordsError && <Text role="alert" fontSize="xs" color="kk.error">{passwordsError}</Text>}
 							</Box>
 							{/* Offline (airplane) mode toggle */}
-							<Flex justify="space-between" align="center">
-								<Flex align="center" gap="3">
+							<Flex justify="space-between" align="center" gap="4">
+								<Flex align="center" gap="3" minW="0">
 									<FeatureIcon kind="offline" />
 									<Box>
 										<Text fontSize="md" color="kk.textPrimary" fontWeight="500">{t("offlineMode", { defaultValue: "Offline mode" })}</Text>
@@ -1787,7 +1778,7 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 							{offlineError && <Text role="alert" fontSize="xs" color="kk.error" mt="2">{offlineError}</Text>}
 
 							<Box>
-                                <Flex justify="space-between" align="center" gap="3">
+                                <Flex justify="space-between" align="center" gap="4">
                                     <Flex align="center" gap="3" minW="0"><FeatureIcon kind="multisig" /><Box><Text fontSize="md" color="kk.textPrimary" fontWeight="500">{uiText("Multisig")}</Text>
                                     <Text fontSize="sm" color="kk.textSecondary" mt="0.5">{uiText("Experimental. Safe multisig accounts on EVM chains and Vaults, plus Bitcoin co-signing for Sparrow or Electrum PSBTs. Off by default. Completed transactions can still be broadcast with this off.")}</Text></Box></Flex>
                                     <Toggle label={uiText("Multisig")} checked={appSettings.btcMultisigEnabled===true} onChange={toggleMultisig} disabled={togglingMultisig}/>
@@ -1797,8 +1788,8 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 
                             {/* WalletConnect is an altcoin signing surface. A persisted global
 							    setting must not re-expose it on Bitcoin-only firmware. */}
-							{!isBitcoinOnlyVariant(deviceState.firmwareVariant) && <Flex justify="space-between" align="center">
-								<Flex align="center" gap="3">
+							{!isBitcoinOnlyVariant(deviceState.firmwareVariant) && <Flex justify="space-between" align="center" gap="4">
+								<Flex align="center" gap="3" minW="0">
 									<FeatureIcon kind="walletconnect" />
 									<Box>
 										<Text fontSize="md" color="kk.textPrimary" fontWeight="500">{t("walletConnectFeature")}</Text>
@@ -1822,8 +1813,8 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 							    (Keychain) and Windows (DPAPI); Linux has no key store wired up. */}
 							{(IS_MAC || IS_WINDOWS) && (
 								<VStack align="stretch" gap="2">
-									<Flex justify="space-between" align="center">
-										<Flex align="center" gap="3">
+									<Flex justify="space-between" align="center" gap="4">
+										<Flex align="center" gap="3" minW="0">
 											<FeatureIcon kind="emulator" />
 											<Box>
 												<Text fontSize="md" color="kk.textPrimary" fontWeight="500">{uiText("Emulator")}</Text>

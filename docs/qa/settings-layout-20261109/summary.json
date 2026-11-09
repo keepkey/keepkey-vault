@@ -1,0 +1,210 @@
+{
+  "date": "2026-11-09",
+  "changes": {
+    "desktopDrawerWidth": 760,
+    "previousWidth": 860,
+    "settingsCategories": 7,
+    "moneroControls": "Networks",
+    "firstFeatureFlag": "Alpha Firmware"
+  },
+  "browser": {
+    "checks": {
+      "seven-navigation-categories-without-monero-tab": true,
+      "desktop-drawer-is-760px": true,
+      "alpha-firmware-is-first-feature-with-consistent-icon": true,
+      "alpha-opt-in-is-independent-and-keeps-passwords-off": true,
+      "advanced-does-not-duplicate-alpha-opt-in": true,
+      "disabled-monero-hides-node-settings-without-status-polling": true,
+      "enabled-monero-node-and-history-live-under-networks": true,
+      "390px-mobile-drawer-fits-and-navigation-stays-accessible": true,
+      "pending-monero-broadcasts-stay-visible-with-feature-off": true,
+      "only-authorized-in-memory-settings-writes-occurred": true
+    },
+    "failures": [],
+    "browserErrors": [],
+    "writes": [
+      {
+        "type": "request",
+        "id": 7,
+        "method": "setAlphaFirmware",
+        "params": {
+          "enabled": true
+        }
+      },
+      {
+        "type": "request",
+        "id": 8,
+        "method": "setAlphaFirmware",
+        "params": {
+          "enabled": false
+        }
+      },
+      {
+        "type": "request",
+        "id": 9,
+        "method": "setMoneroEnabled",
+        "params": {
+          "enabled": true
+        }
+      },
+      {
+        "type": "request",
+        "id": 15,
+        "method": "setMoneroEnabled",
+        "params": {
+          "enabled": false
+        }
+      }
+    ],
+    "calls": [
+      {
+        "type": "request",
+        "id": 1,
+        "method": "getAppSettings"
+      },
+      {
+        "type": "request",
+        "id": 2,
+        "method": "getAppSettings"
+      },
+      {
+        "type": "request",
+        "id": 3,
+        "method": "getAppSettings"
+      },
+      {
+        "type": "request",
+        "id": 4,
+        "method": "getFeatures"
+      },
+      {
+        "type": "request",
+        "id": 5,
+        "method": "getAppSettings"
+      },
+      {
+        "type": "request",
+        "id": 6,
+        "method": "getWindowFocusState"
+      },
+      {
+        "type": "request",
+        "id": 7,
+        "method": "setAlphaFirmware",
+        "params": {
+          "enabled": true
+        }
+      },
+      {
+        "type": "request",
+        "id": 8,
+        "method": "setAlphaFirmware",
+        "params": {
+          "enabled": false
+        }
+      },
+      {
+        "type": "request",
+        "id": 9,
+        "method": "setMoneroEnabled",
+        "params": {
+          "enabled": true
+        }
+      },
+      {
+        "type": "request",
+        "id": 10,
+        "method": "getAppSettings"
+      },
+      {
+        "type": "request",
+        "id": 11,
+        "method": "getAppSettings"
+      },
+      {
+        "type": "request",
+        "id": 12,
+        "method": "emulatorListBuilds"
+      },
+      {
+        "type": "request",
+        "id": 13,
+        "method": "getAppSettings"
+      },
+      {
+        "type": "request",
+        "id": 14,
+        "method": "moneroNodeStatus"
+      },
+      {
+        "type": "request",
+        "id": 15,
+        "method": "setMoneroEnabled",
+        "params": {
+          "enabled": false
+        }
+      },
+      {
+        "type": "request",
+        "id": 16,
+        "method": "getAppSettings"
+      },
+      {
+        "type": "request",
+        "id": 17,
+        "method": "getAppSettings"
+      },
+      {
+        "type": "request",
+        "id": 18,
+        "method": "emulatorListBuilds"
+      },
+      {
+        "type": "request",
+        "id": 1,
+        "method": "getAppSettings"
+      },
+      {
+        "type": "request",
+        "id": 2,
+        "method": "getAppSettings"
+      },
+      {
+        "type": "request",
+        "id": 3,
+        "method": "getAppSettings"
+      },
+      {
+        "type": "request",
+        "id": 4,
+        "method": "getFeatures"
+      },
+      {
+        "type": "request",
+        "id": 5,
+        "method": "getAppSettings"
+      },
+      {
+        "type": "request",
+        "id": 6,
+        "method": "getWindowFocusState"
+      }
+    ],
+    "realDeviceUsed": false,
+    "realDatabaseUsed": false,
+    "passwordManagerEnabled": false,
+    "testSource": "Actual DeviceSettingsDrawer with synthetic fixture RPC"
+  },
+  "unitTests": {
+    "passed": 23,
+    "failed": 0
+  },
+  "frontendBuild": true,
+  "i18n": true,
+  "typecheck": {
+    "baseline": 803,
+    "current": 803,
+    "newErrors": 0,
+    "passed": false
+  }
+}

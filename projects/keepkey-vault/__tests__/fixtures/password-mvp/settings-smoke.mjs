@@ -19,7 +19,7 @@ try {
   const dialog = page.getByRole('dialog', { name: 'Settings', exact: true });
   await expect(dialog).toBeVisible();
   const nav = dialog.getByRole('navigation', { name: 'Settings sections' });
-  for (const name of ['General', 'Device', 'Security', 'Networks', 'Monero', 'Connections', 'Feature Flags', 'Advanced']) {
+  for (const name of ['General', 'Device', 'Security', 'Networks', 'Connections', 'Feature Flags', 'Advanced']) {
     await nav.getByRole('button', { name, exact: true }).click();
     await expect(dialog.getByRole('heading', { level: 2, name, exact: true })).toBeVisible();
     await expect(nav.getByRole('button', { name, exact: true })).toHaveAttribute('aria-current', 'page');
@@ -43,13 +43,13 @@ try {
   await expect(page.getByRole('button', { name: 'Passwords', exact: true })).toHaveCount(0);
   await expect(monero).toHaveAttribute('aria-checked', 'true');
   await page.screenshot({ path: './settings-features.png' });
-  await nav.getByRole('button', { name: 'Monero', exact: true }).click();
+  await nav.getByRole('button', { name: 'Networks', exact: true }).click();
   await expect(dialog.getByText('/Volumes/SSD/keepkey/monero/mainnet', { exact: true })).toBeVisible();
   await expect(dialog.getByText(/Storage used: 12 GiB/)).toBeVisible();
   await expect(dialog.getByText(/1,350,000.*3,800,000/)).toBeVisible();
   await page.screenshot({ path: './settings-monero.png' });
   await page.setViewportSize({ width: 390, height: 844 });
-  for (const name of ['General', 'Security', 'Feature Flags', 'Monero', 'Advanced']) {
+  for (const name of ['General', 'Security', 'Feature Flags', 'Networks', 'Advanced']) {
     await nav.getByRole('button', { name, exact: true }).click();
     await expect(dialog.getByRole('heading', { level: 2, name, exact: true })).toBeVisible();
     assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `${name} fits narrow window`);
@@ -58,5 +58,5 @@ try {
   await page.getByRole('button', { name: 'Close settings' }).click();
   await expect(dialog).not.toBeVisible();
   assert.deepEqual(errors, []);
-  console.log(JSON.stringify({ categories: 8, independentLiveFlags: true, noWritesOnNavigation: true, nodeStorageAndHeight: true, narrowWindow: true, pageErrors: errors }, null, 2));
+  console.log(JSON.stringify({ categories: 7, independentLiveFlags: true, noWritesOnNavigation: true, nodeStorageAndHeight: true, narrowWindow: true, pageErrors: errors }, null, 2));
 } finally { await browser.close(); }

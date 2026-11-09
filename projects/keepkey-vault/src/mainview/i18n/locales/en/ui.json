@@ -2301,5 +2301,9 @@
   "mcebd7450": "Refreshing balance",
   "mef4697da": "Install official firmware",
   "me0c34f2a": "Close swap",
-  "ma7b05571": "Closing this view does not cancel the swap. Track it in Activity."
+  "ma7b05571": "Closing this view does not cancel the swap. Track it in Activity.",
+  "m34efd94f": "Choose your networks and manage node connections.",
+  "m580fcf57": "Add Monero to your wallet. Manage its node and scan history in Settings → Networks.",
+  "m630ebe53": "Earlier payments may be missing. Check the wallet history start in Settings → Networks if this wallet is older.",
+  "m626eb323": "The full history is scanned unless you have chosen a later start. Change the node or wallet history in Settings → Networks."
 }
