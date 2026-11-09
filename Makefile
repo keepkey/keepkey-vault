@@ -343,7 +343,9 @@ patch-arm64-release-tar: sign-check
 # Create a proper DMG from the fully-extracted app (workaround for Electrobun self-extractor bug)
 dmg: verify-arch
 	@echo "Creating DMG from tar.zst artifact..."
-	@TAR_ZST=$$(find $(PROJECT_DIR)/artifacts -name "*.app.tar.zst" | head -1); \
+	@# set -e: a failed sign, verify, notarize or staple step must stop the recipe.
+	@set -e; \
+	TAR_ZST=$$(find $(PROJECT_DIR)/artifacts -name "*.app.tar.zst" | head -1); \
 	if [ -z "$$TAR_ZST" ]; then echo "ERROR: No .app.tar.zst found in artifacts/"; exit 1; fi; \
 	STAGING=$$(mktemp -d); \
 	trap 'rm -rf "$$STAGING"' EXIT; \
@@ -354,7 +356,7 @@ dmg: verify-arch
 	APP=$$(find "$$STAGING" -name "*.app" -maxdepth 1 | head -1); \
 	if [ -z "$$APP" ]; then echo "ERROR: No .app found after extraction"; exit 1; fi; \
 	echo "Verifying extracted app..."; \
-	codesign --verify --deep --strict "$$APP" || (echo "ERROR: codesign verification failed"; exit 1); \
+	codesign --verify --deep --strict "$$APP" || { echo "ERROR: codesign verification failed"; exit 1; }; \
 	DMG_OUT="$$(pwd)/$(PROJECT_DIR)/artifacts/$(DMG_NAME)"; \
 	echo "Creating DMG..."; \
 	./scripts/create-macos-dmg.sh "$$STAGING" "$$DMG_OUT" || exit 1; \
