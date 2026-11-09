@@ -2044,18 +2044,21 @@ function PersonalDashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSetti
 								) : anyChainPending ? (
 									<Spinner size="xs" color="kk.gold" mt="1" />
 								) : (
-									<Text
-										fontSize="14px"
-										color="var(--text-1)"
-										fontWeight="500"
-										lineHeight="1.3"
-										letterSpacing="-0.01em"
-										title={anyChainUnknown ? "At least this much — one or more chains could not be reached, so their balances are missing from the total" : undefined}
-									>
-										{privateModeEnabled
-											? "••••••"
-											: `${anyChainUnknown ? '≥ ' : ''}$${totalUsd.toLocaleString(getNumberLocale(), { maximumFractionDigits: 2 })}`}
-									</Text>
+									<Flex align="center" gap="1.5">
+										<Text
+											fontSize="14px"
+											color="var(--text-1)"
+											fontWeight="500"
+											lineHeight="1.3"
+											letterSpacing="-0.01em"
+											title={anyChainUnknown ? "At least this much — one or more chains could not be reached, so their balances are missing from the total" : undefined}
+										>
+											{privateModeEnabled
+												? "••••••"
+												: `${anyChainUnknown ? '≥ ' : ''}$${totalUsd.toLocaleString(getNumberLocale(), { maximumFractionDigits: 2 })}`}
+										</Text>
+										{loadingBalances && <Spinner size="xs" color="kk.gold" aria-label={uiText("Refreshing balance")} title={uiText("Refreshing balance")} />}
+									</Flex>
 								)}
 								{moneroChain && <Text data-monero-total-note="" fontSize="10px" color="var(--text-3)" lineHeight="1.2">{uiText("XMR not included")}</Text>}
 							</Box>
@@ -2076,6 +2079,9 @@ function PersonalDashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSetti
 						})
 						const pending = displayState === 'pending'
 						const unknown = displayState === 'unknown'
+						// Cached figures remain visible while the bulk request checks
+						// them again. Confidence and refresh activity are separate.
+						const refreshing = loadingBalances && displayState === 'known'
 						const clean = cleanBalanceUsd.get(chain.id)
 						const balNum = parseFloat(bal?.balance || '0')
 						const usdNum = clean?.usd || 0
@@ -2149,7 +2155,7 @@ function PersonalDashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSetti
 								_hover={{ bg: "kk.cardBg", borderColor: `${chain.color}50` }}
 								cursor="pointer"
 								transition="all 0.15s"
-								opacity={hasBalance || pending || unknown ? 1 : 0.55}
+								opacity={hasBalance || pending || unknown || refreshing ? 1 : 0.55}
 							>
 								<Flex align="center" gap="3">
 									<Image src={getAssetIcon(chain.caip)} alt={chain.symbol} w="32px" h="32px" borderRadius="full" flexShrink={0} bg={chain.color} />
@@ -2180,9 +2186,12 @@ function PersonalDashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSetti
 													{`— ${chain.symbol}`}
 												</Text>
 											) : (
-												<Text fontSize="12px" color="var(--text-2)" lineHeight="1.3" truncate>
-													{`${formatBalance(String(balNum + shielded.amount + shielded.pending))} ${chain.symbol}`}
-												</Text>
+												<Flex align="center" gap="1.5" minW={0}>
+													<Text fontSize="12px" color="var(--text-2)" lineHeight="1.3" truncate>
+														{`${formatBalance(String(balNum + shielded.amount + shielded.pending))} ${chain.symbol}`}
+													</Text>
+													{refreshing && <Spinner size="xs" color="kk.gold" flexShrink={0} aria-label={uiText("Refreshing balance")} title={uiText("Refreshing balance")} />}
+												</Flex>
 											)}
 											{lowGas && (
 												<Flex
