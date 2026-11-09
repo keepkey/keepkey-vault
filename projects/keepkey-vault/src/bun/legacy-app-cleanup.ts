@@ -63,8 +63,9 @@ export function runningBundlePath(execPath: string): string | null {
 }
 
 /** Old copies to offer for removal: same bundle id, old name, installed in an
- *  Applications folder, not the app that is running, and not newer than it
- *  (an old-named copy the user kept launching may have auto-updated past it). */
+ *  Applications folder, not the app that is running, and provably not newer
+ *  than it (an old-named copy the user kept launching may have auto-updated
+ *  past it). A copy whose version can't be read is left alone. */
 export function findLegacyCopies(deps: LegacyCleanupDeps): string[] {
   if (deps.platform !== 'darwin') return []
   const running = runningBundlePath(deps.execPath)
@@ -93,7 +94,12 @@ export function findLegacyCopies(deps: LegacyCleanupDeps): string[] {
     }
     const oldVersion = deps.bundleVersion(candidate)
     const runningVersion = deps.bundleVersion(running)
-    if (oldVersion && runningVersion && versionCompare(oldVersion, runningVersion) > 0) {
+    // Without both versions we can't rule out that the old copy is newer.
+    if (!oldVersion || !runningVersion) {
+      deps.log(`[legacy-app] can't read the version of ${oldVersion ? 'this copy' : candidate}; leaving ${candidate} alone`)
+      continue
+    }
+    if (versionCompare(oldVersion, runningVersion) > 0) {
       deps.log(`[legacy-app] ${candidate} (${oldVersion}) is newer than this copy (${runningVersion}); leaving it alone`)
       continue
     }

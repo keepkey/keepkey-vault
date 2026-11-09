@@ -21,7 +21,7 @@ function harness(over: Partial<LegacyCleanupDeps> & {
   trashOk?: boolean
   versions?: Record<string, string>
 } = {}) {
-  const versions = over.versions ?? {}
+  const versions = over.versions ?? { [NEW_APP]: '1.6.11', [OLD_APP]: '1.6.10', [OLD_USER_APP]: '1.6.9' }
   const files = over.files ?? { [NEW_APP]: BUNDLE_IDENTIFIER, [OLD_APP]: BUNDLE_IDENTIFIER }
   const links = over.links ?? {}
   const settings = new Map<string, string>()
@@ -110,6 +110,16 @@ describe('findLegacyCopies', () => {
 
   test('leaves an old-named copy that auto-updated past this one', () => {
     const { deps } = harness({ versions: { [NEW_APP]: '1.6.11', [OLD_APP]: '1.7.0' } })
+    expect(findLegacyCopies(deps)).toEqual([])
+  })
+
+  test('leaves the old copy alone when its version is unreadable', () => {
+    const { deps } = harness({ versions: { [NEW_APP]: '1.6.11' } })
+    expect(findLegacyCopies(deps)).toEqual([])
+  })
+
+  test('leaves the old copy alone when the running version is unreadable', () => {
+    const { deps } = harness({ versions: { [OLD_APP]: '1.6.10' } })
     expect(findLegacyCopies(deps)).toEqual([])
   })
 
