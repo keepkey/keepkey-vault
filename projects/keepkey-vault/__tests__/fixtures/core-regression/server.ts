@@ -60,6 +60,10 @@ const rpc = Bun.serve({ hostname: '127.0.0.1', port: 0, idleTimeout: 0, async fe
       case 'testFinishExecution': {
         if (!pendingExecution) throw new Error('No synthetic execution is pending')
         const execution = pendingExecution; pendingExecution = null
+        if (p?.error) {
+          execution.complete(Response.json({ success: false, error: p.error }))
+          payload = { saved: false }; break
+        }
         const terms = execution.params
         const from = assets.find(a => a.chainId === terms.fromChainId) || assets[1], to = assets.find(a => a.chainId === terms.toChainId) || assets[0]
         const receipt = { txid: 'e'.repeat(64), fromChainId: from.chainId, toChainId: to.chainId, fromAsset: from.asset, toAsset: to.asset, fromCaip: from.caip, toCaip: to.caip, fromSymbol: from.symbol, toSymbol: to.symbol, fromAmount: terms.amount, expectedOutput: terms.expectedOutput, status: 'pending', confirmations: 0, requiredConfirmations: 1, createdAt: Date.now(), integration: 'thorchain', fixtureOnly: true }

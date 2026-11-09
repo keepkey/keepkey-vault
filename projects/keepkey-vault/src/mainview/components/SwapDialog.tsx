@@ -790,6 +790,11 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
   const signingAccount = evmAddresses.addresses.find(a => a.addressIndex === effectiveEvmIndex)
 
   // ── State ─────────────────────────────────────────────────────────
+  // A retained dialog can show another receipt while an older execution is
+  // still running. Its completion belongs to that execution, not the new view.
+  // Hiding a busy dialog keeps its context so it can finish while hidden.
+  const executionUiGeneration = useRef(0)
+  useEffect(() => () => { executionUiGeneration.current++ }, [])
   const [phase, setPhase] = useState<SwapPhase>('input')
   const [assets, setAssets] = useState<SwapAsset[]>([])
   const [loadingAssets, setLoadingAssets] = useState(true)
@@ -1106,16 +1111,18 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
   // ── Manual recheck — fires a single immediate poll on demand ──────
   const handleRecheck = useCallback(async () => {
     if (!txid || rechecking) return
+    const generation = executionUiGeneration.current
     setRechecking(true)
     try {
       // Manual press forces a Pioneer rescan (?rescan=true) so a failed/stuck
       // swap can be re-derived from chain on demand.
       const snap = await rpcRequest<any>('refreshSwap', { txid, rescan: true })
+      if (generation !== executionUiGeneration.current) return
       if (snap?.nearTxHash) setLiveNearTxHash(snap.nearTxHash)
       if (snap?.relayRequestId) setLiveRelayRequestId(snap.relayRequestId)
       applyInboundSnap(snap)
     } catch { /* swap-update push covers the failure */ }
-    setRechecking(false)
+    if (generation === executionUiGeneration.current) setRechecking(false)
   }, [txid, rechecking, applyInboundSnap])
 
   // When the user switches EVM address in the dialog while a quote is active,
@@ -1185,10 +1192,11 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
   // Fire confetti + sound + fetch after-balances when swap completes
   useEffect(() => {
     if (!isSwapComplete || completionFiredRef.current) return
+    const generation = executionUiGeneration.current
     completionFiredRef.current = true
     setShowConfetti(true)
     playCompletionSound()
-    setTimeout(() => setShowConfetti(false), 1500)
+    setTimeout(() => { if (generation === executionUiGeneration.current) setShowConfetti(false) }, 1500)
     // Fetch updated balances to show before/after diff
     const swapDestCaip = toAsset?.chainFamily === 'evm' && toAsset.contractAddress ? toAsset.caip : undefined
     rpcRequest<ChainBalance[]>(
@@ -1197,6 +1205,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
       120000,
     )
       .then((result) => {
+        if (generation !== executionUiGeneration.current) return
         if (!result || !fromAsset || !toAsset) return
         const fromCb = result.find(b => b.chainId === fromAsset.chainId)
         const toCb = result.find(b => b.chainId === toAsset.chainId)
@@ -1437,6 +1446,11 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
   useEffect(() => {
     if (!open || !resumeSwap || hasResumedRef.current === resumeSwap.txid) return
     hasResumedRef.current = resumeSwap.txid
+    executionUiGeneration.current++
+    setRefreshingQuote(false)
+    setManualQuoting(false)
+    setEnablingBlindSign(false)
+    setRechecking(false)
 
     // Build SwapAsset objects from PendingSwap data, resolving chain metadata from CHAINS.
     // CAIPs are persisted on the swap row so we can resolve asset logos here without
@@ -1993,6 +2007,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
   // address exists.
   const handleManualQuote = useCallback(async () => {
     if (manualQuoting || !toAsset) return
+    const generation = executionUiGeneration.current
     const requestedChainId = toAsset.chainId
     setManualQuoting(true)
     setError(null)
@@ -2006,19 +2021,21 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
           if (toChain.scriptType) params.scriptType = toChain.scriptType
           const result = await rpcRequest<any>(toChain.rpcMethod, params, 60000)
           // Output asset switched mid-RPC → this address is for the wrong chain.
-          if (toAssetChainIdRef.current !== requestedChainId) return
+          if (generation !== executionUiGeneration.current || toAssetChainIdRef.current !== requestedChainId) return
           const addr = typeof result === 'string' ? result : (result?.address || '')
           if (addr) setResolvedToAddress(addr)
         }
         const cached = await rpcRequest<{ balances: ChainBalance[] } | null>('getCachedBalances', undefined, 8000).catch(() => null)
-        if (toAssetChainIdRef.current !== requestedChainId) return
+        if (generation !== executionUiGeneration.current || toAssetChainIdRef.current !== requestedChainId) return
         if (cached?.balances) setBalances(cached.balances)
       }
     } catch (e: any) {
-      if (toAssetChainIdRef.current === requestedChainId) setError(e?.message || t("errorQuote"))
+      if (generation === executionUiGeneration.current && toAssetChainIdRef.current === requestedChainId) setError(e?.message || t("errorQuote"))
     } finally {
-      setManualQuoting(false)
-      setRequoteTick(tick => tick + 1)
+      if (generation === executionUiGeneration.current) {
+        setManualQuoting(false)
+        setRequoteTick(tick => tick + 1)
+      }
     }
   }, [manualQuoting, toAsset, toAddress, useCustomAddress, t])
 
@@ -2109,6 +2126,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
     if (quoteTimerRef.current) clearTimeout(quoteTimerRef.current)
     setQuote(null)
     const version = ++quoteVersionRef.current
+    const generation = executionUiGeneration.current
 
     if (!canQuote) {
       if (phase === 'quoting') setPhase('input')
@@ -2143,12 +2161,12 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
           isMax: sendIsMax,
           fromEvmAddressIndex: fromAsset!.chainFamily === 'evm' ? effectiveEvmIndex : undefined,
         }, 60000)
-        if (version !== quoteVersionRef.current) return
+        if (generation !== executionUiGeneration.current || version !== quoteVersionRef.current) return
         setQuote(result)
         setQuoteFetchedAt(Date.now())
         setPhase('input')
       } catch (e: any) {
-        if (version !== quoteVersionRef.current) return
+        if (generation !== executionUiGeneration.current || version !== quoteVersionRef.current) return
         const msg = e.message || ''
         // Parse common DEX node errors into user-friendly messages
         if (/not enough asset to pay for fees/i.test(msg)) {
@@ -2201,6 +2219,9 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
   }, [fromAsset, toAsset])
 
   const handleBackToInput = useCallback(() => {
+    executionUiGeneration.current++
+    setRefreshingQuote(false)
+    setManualQuoting(false)
     setQuote(null)
     setPhase('input')
     setError(null)
@@ -2211,6 +2232,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
   // ── Execute swap ──────────────────────────────────────────────────
   const handleExecuteSwap = useCallback(async () => {
     if (!quote || !fromAsset || !toAsset) return
+    const generation = executionUiGeneration.current
     if (riskLocked) { setError(swapRisk.blocked ? 'This route exceeds the 5% cost limit for trades of $1,000 or more.' : 'Review and acknowledge the trade cost before signing.'); return }
     if (phase === 'review') {
       if (previewLoading) {
@@ -2248,6 +2270,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
           fromEvmAddressIndex: fromAsset.chainFamily === 'evm' ? effectiveEvmIndex : undefined,
         }, 60000)
         // Block on >1% output drop — quote degraded, user should re-review
+        if (generation !== executionUiGeneration.current) return
         const oldOut = parseFloat(quote.expectedOutput || '0')
         const newOut = parseFloat(refreshed.expectedOutput || '0')
         if (oldOut > 0 && newOut > 0 && (oldOut - newOut) / oldOut > 0.01) {
@@ -2266,6 +2289,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
         setError(t("quoteRefreshedReviewPayload", "Quote refreshed. Review the rebuilt payload before confirming."))
         return
       } catch (e: any) {
+        if (generation !== executionUiGeneration.current) return
         setRefreshingQuote(false)
         setError(`Failed to refresh stale quote: ${e?.message || 'unknown error'}`)
         return
@@ -2323,8 +2347,10 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
         runtimeProvider: previewBuild?.runtimeProvider ?? null,
       }, 600000)
 
-      setTxid(result.txid)
-      setPhase('submitted')
+      if (generation === executionUiGeneration.current) {
+        setTxid(result.txid)
+        setPhase('submitted')
+      }
       window.dispatchEvent(new CustomEvent('keepkey-swap-executed', {
         detail: {
           txid: result.txid,
@@ -2341,6 +2367,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
         },
       }))
     } catch (e: any) {
+      if (generation !== executionUiGeneration.current) return
       const raw = e?.message || ''
       // This exact Relay payload has no signed ClearSign descriptor and needs
       // route-specific, one-request opaque consent.
@@ -2407,6 +2434,10 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
 
   // ── Reset ─────────────────────────────────────────────────────────
   const reset = useCallback(() => {
+    executionUiGeneration.current++
+    setRefreshingQuote(false)
+    setManualQuoting(false)
+    setRechecking(false)
     setPhase('input')
     setFromAsset(null)
     setToAsset(null)
@@ -2449,9 +2480,11 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
   // already on its way to the network and there's no unwind.
   const handleCancelSigning = useCallback(async () => {
     if (phase !== 'signing' && phase !== 'approving') return
+    const generation = executionUiGeneration.current
     try { await rpcRequest<{ ok: boolean }>('cancelDeviceSigning', undefined, 5000) } catch (e: any) {
       console.warn('[SwapDialog] cancelDeviceSigning failed:', e?.message || e)
     }
+    if (generation !== executionUiGeneration.current) return
     setPhase('review')
     setQuoteFetchedAt(0)
     setError(t('swapCancelled', 'Swap cancelled — confirm again or change inputs'))
@@ -2462,6 +2495,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
   // the policy is on. It is session state on 7.15+: the device disarms it when
   // it locks or is unplugged, so the user may be asked again.
   const handleEnableBlindSigning = useCallback(async () => {
+    const generation = executionUiGeneration.current
     setEnablingBlindSign(true)
     setBlindSignError(null)
     try {
@@ -2471,6 +2505,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
       // leaving the policy ON while the UI claims it failed.
       await rpcRequest('applyPolicy', { policyName: 'AdvancedMode', enabled: true }, 0)
     } catch (e: any) {
+      if (generation !== executionUiGeneration.current) return
       const msg = e?.message || ''
       setBlindSignError(/cancel|denied|rejected/i.test(msg)
         ? t('blindSignDeclined', 'Declined on device — blind signing was not enabled.')
@@ -2478,6 +2513,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
       setEnablingBlindSign(false)
       return
     }
+    if (generation !== executionUiGeneration.current) return
     setError(null)
     setPhase('review')
     setEnablingBlindSign(false)
@@ -2602,6 +2638,11 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
         return
       }
       // Both 'open' and 'set' carry the same partial-update fields below.
+      if (!['fromAsset', 'toAsset', 'amount', 'isMax', 'inputMode', 'useCustomAddress', 'customToAddress', 'slippageBps']
+        .some(key => Object.prototype.hasOwnProperty.call(cmd, key))) return
+      // Even an idempotent edit must restart a quote invalidated by the new
+      // context; merely bumping its generation could leave it quoting forever.
+      handleBackToInput()
       const fields = cmd
       if ('fromAsset' in fields && fields.fromAsset !== undefined) {
         const a = fields.fromAssetDefinition || findAssetByKey(fields.fromAsset)
@@ -2626,7 +2667,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
       if ('slippageBps' in fields && fields.slippageBps !== undefined) setSlippageBps(fields.slippageBps)
     }
     return onRpcMessage('swap-cmd', apply)
-  }, [open, assets, handleClose, setSlippageBps, phase, quote, fromAsset, toAsset, handleExecuteSwap, findAssetByKey, previewBuild, previewError, previewLoading])
+  }, [open, assets, handleClose, handleBackToInput, setSlippageBps, phase, quote, fromAsset, toAsset, handleExecuteSwap, findAssetByKey, previewBuild, previewError, previewLoading])
 
   // Drain any seed keys that arrived before the asset list finished loading.
   // Without this, REST `/swap/open` silently lost fromAsset/toAsset on first

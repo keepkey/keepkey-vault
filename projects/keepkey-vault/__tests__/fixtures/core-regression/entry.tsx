@@ -11,7 +11,7 @@ import { SwapHistoryDialog } from '../../../src/mainview/components/SwapHistoryD
 import { CHAINS } from '../../../src/shared/chains'
 import { dispatchLocalRpcMessage } from '../../../src/mainview/lib/rpc'
 import { FiatProvider } from '../../../src/mainview/lib/fiat-context'
-import type { ChainBalance, DeviceStateInfo } from '../../../src/shared/types'
+import type { ChainBalance, DeviceStateInfo, PendingSwap } from '../../../src/shared/types'
 import '../../../src/mainview/i18n'
 import '../../../src/mainview/index.css'
 import '../../../src/mainview/styles/tokens.css'
@@ -35,6 +35,18 @@ const readyDevice: DeviceStateInfo = {
   initialized: true, passphraseProtection: false, isOob: false, isEmulator: false,
   firmwareVersion: '7.17.0', label: 'Synthetic regression wallet',
 }
+const otherReceipt: PendingSwap = {
+  txid: 'c'.repeat(64), fromChainId: 'bitcoin', toChainId: 'ethereum',
+  fromAsset: 'BTC.BTC', toAsset: 'ETH.ETH',
+  fromCaip: CHAINS.find(c => c.id === 'bitcoin')!.caip,
+  toCaip: CHAINS.find(c => c.id === 'ethereum')!.caip,
+  fromSymbol: 'BTC', toSymbol: 'ETH', fromAmount: '0.125',
+  expectedOutput: '3', minimumOutput: '2.9', status: 'pending',
+  confirmations: 0, requiredConfirmations: 1, createdAt: 1_800_000_000_000,
+  updatedAt: 1_800_000_000_000, estimatedTime: 60,
+  memo: 'SYNTHETIC RESUMED RECEIPT', inboundAddress: publicAddresses.bitcoin,
+  integration: 'thorchain',
+}
 function Fixture() {
   const [chainId, setChainId] = useState(params.get('chain') || 'ethereum')
   const [page, setPage] = useState(params.get('page') || 'asset')
@@ -42,6 +54,7 @@ function Fixture() {
   const [settings, setSettings] = useState(false)
   const [history, setHistory] = useState(false)
   const [retainedSwapOpen, setRetainedSwapOpen] = useState(true)
+  const [retainedResumeSwap, setRetainedResumeSwap] = useState<PendingSwap | null>(null)
   const [nav, setNav] = useState<NavTab>('vault')
   const [pinResult, setPinResult] = useState('')
   const [pinLength, setPinLength] = useState(0)
@@ -61,6 +74,7 @@ function Fixture() {
         <Button size="xs" data-testid="fixture-portfolio" onClick={() => setPage('dashboard')}>Portfolio</Button>
         {['bitcoin', 'ethereum', 'zcash'].map(id => <Button key={id} size="xs" data-testid={`fixture-${id}`} onClick={() => { setChainId(id); setPage('asset') }}>{id}</Button>)}
         {params.has('retainSwap') && <Button size="xs" data-testid="fixture-retained-swap" onClick={() => setRetainedSwapOpen(true)}>Open retained swap</Button>}
+        {params.has('retainSwap') && <Button size="xs" data-testid="fixture-resume-receipt" onClick={() => { setRetainedResumeSwap(otherReceipt); setRetainedSwapOpen(true) }}>Open another receipt</Button>}
         <Button size="xs" data-testid="fixture-history" onClick={() => setHistory(true)}>Swap history</Button>
         <Button size="xs" data-testid="fixture-disconnect" onClick={() => changeScreen('disconnected')}>Simulate disconnect</Button>
         <Button size="xs" data-testid="fixture-reconnect" onClick={() => changeScreen('ready')}>Simulate reconnect</Button>
@@ -72,7 +86,7 @@ function Fixture() {
         : page === 'dashboard' ? <Dashboard firmwareVersion="7.17.0" onOpenSettings={() => setSettings(true)} />
         : <AssetPage key={chain.id} chain={chain} balance={balances.find(b => b.chainId === chain.id)} firmwareVersion="7.17.0" initialAction={initialAction || 'receive'} watchOnly={params.has('watchOnly')} onBack={() => setPage('dashboard')} />}
     </Box>
-    {params.has('retainSwap') && <Suspense fallback={null}><RetainedSwap open={retainedSwapOpen} onClose={() => setRetainedSwapOpen(false)} chain={chain} balance={balances.find(b => b.chainId === chain.id)} address={balances.find(b => b.chainId === chain.id)?.address} /></Suspense>}
+    {params.has('retainSwap') && <Suspense fallback={null}><RetainedSwap open={retainedSwapOpen} onClose={() => { setRetainedSwapOpen(false); setRetainedResumeSwap(null) }} resumeSwap={retainedResumeSwap} chain={chain} balance={balances.find(b => b.chainId === chain.id)} address={balances.find(b => b.chainId === chain.id)?.address} /></Suspense>}
     <DeviceSettingsDrawer open={settings} onClose={() => setSettings(false)} onChooseNetworks={() => {}} deviceState={device} />
     <SwapHistoryDialog open={history} onClose={() => setHistory(false)} onResumeSwap={() => {}} />
   </>

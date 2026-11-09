@@ -31,6 +31,28 @@ const quote = async () => {
  await expect.poll(async () => (await state())?.phase).toBe('review')
  await expect.poll(async () => !!(await state())?.previewBuild?.unsignedTx).toBe(true)
 }
+const openOtherReceiptDuringExecution = async () => {
+ await load({ retained: true, scenario: 'execute-stall' }); await quote(); await command({ kind: 'confirm' })
+ await expect.poll(async () => (await rpc('testState')).pendingExecution).toBe(true)
+ await close().click(); await expect(dialog()).toHaveCount(0)
+ await expect.poll(async () => (await state())?.phase).toBe('closed')
+ await page.getByTestId('fixture-resume-receipt').click(); await expect(close()).toBeVisible()
+ await expect.poll(async () => (await state())?.txid).toBe('c'.repeat(64))
+}
+const finishExecution = async params => {
+ const reply = page.waitForResponse(response => response.url().endsWith('/__test_rpc') && response.request().postDataJSON()?.method === 'executeSwap')
+ await rpc('testFinishExecution', params)
+ await (await reply).finished()
+ // Let the real RPC continuation, React render and mirror effect all commit.
+ await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))
+}
+const expectOtherReceipt = async () => {
+ await expect.poll(async () => {
+  const snapshot = await state()
+  return { phase: snapshot?.phase, txid: snapshot?.txid, from: snapshot?.fromAsset, to: snapshot?.toAsset,
+   amount: snapshot?.amount, expectedOutput: snapshot?.quote?.expectedOutput, error: snapshot?.error }
+ }).toEqual({ phase: 'submitted', txid: 'c'.repeat(64), from: 'BTC.BTC', to: 'ETH.ETH', amount: '0.125', expectedOutput: '3', error: null })
+}
 const check = async (name, work) => {
  try { await work(); checks[name] = true; console.log('PASS ' + name) }
  catch (error) { checks[name] = false; failures.push({ name, error: error.message }); console.log('FAIL ' + name + ': ' + error.message.slice(0, 500)); await page.screenshot({ path: path.join(out, name + '-failure.png'), fullPage: true }).catch(() => {}) }
@@ -76,7 +98,37 @@ try {
   assert.equal((await state()).txid, 'e'.repeat(64))
   await page.keyboard.press('Escape'); await expect(dialog()).toHaveCount(0)
  })
- assert.deepEqual(errors, [])
+ await check('old-execution-success-keeps-newly-resumed-receipt', async () => {
+  await openOtherReceiptDuringExecution()
+  await finishExecution()
+  await expect.poll(async () => (await page.evaluate(() => window.__qaReceiptEvents)).length).toBe(1)
+  await expectOtherReceipt()
+  const events = await page.evaluate(() => window.__qaReceiptEvents)
+  assert.equal(events[0].txid, 'e'.repeat(64)); assert.equal(events[0].fromChainId, 'ethereum'); assert.equal(events[0].toChainId, 'bitcoin')
+  const saved = await rpc('testState'); assert.equal(saved.pendingSwaps[0].txid, 'e'.repeat(64))
+  assert.equal(saved.calls.filter(c => c.method === 'executeSwap').length, 1)
+ })
+ for (const [kind, error] of [
+  ['failure', 'Synthetic execution failed'],
+  ['blind-signing-refusal', 'SOLANA_BLIND_SIGNING_REQUIRED {}'],
+  ['device-policy-refusal', 'AdvancedMode is required'],
+ ]) await check(`old-execution-${kind}-keeps-newly-resumed-receipt`, async () => {
+  await openOtherReceiptDuringExecution()
+  await finishExecution({ error })
+  await expectOtherReceipt()
+  assert.equal((await page.evaluate(() => window.__qaReceiptEvents)).length, 0)
+  assert.equal((await rpc('testState')).pendingSwaps.length, 0)
+ })
+ await check('idempotent-input-edit-does-not-strand-quote-generation', async () => {
+  await load({ retained: true })
+  await command({ kind: 'set', fromAsset: 'ETH.ETH', toAsset: 'BTC.BTC', amount: '.1', inputMode: 'crypto' })
+  await expect.poll(async () => (await state())?.phase).toBe('quoting')
+  await command({ kind: 'set', amount: '.1' })
+  await expect.poll(async () => !!(await state())?.quote).toBe(true)
+  await expect.poll(async () => (await state())?.phase).toBe('input')
+  assert.equal((await state()).amount, '.1')
+ })
+ if (errors.length) failures.push({ name: 'browser-runtime', error: errors.join('\n') })
  const result = { checks, failures, pageErrors: errors, allOptionalFeaturesOff: true, syntheticExecutionOnly: true, realSignatures: 0, realBroadcasts: 0 }
  fs.writeFileSync(path.join(out, 'swap-lifecycle-results.json'), JSON.stringify(result, null, 2) + '\n')
  console.log(JSON.stringify(result, null, 2))
