@@ -110,6 +110,8 @@ export default {
 			icons: "icon.iconset",
 			codesign: process.env.CI !== 'true',
 			notarize: process.env.CI !== 'true',
+			// CI ships the Intel update archive and discards the ARM disk image.
+			createDmg: process.env.CI !== 'true',
 			entitlements: {
 				"com.apple.security.cs.allow-jit": true,
 				"com.apple.security.cs.allow-unsigned-executable-memory": true,
