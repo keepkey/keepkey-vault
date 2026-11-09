@@ -30,10 +30,12 @@ def sha(path):
     return digest.hexdigest()
 
 
-def run(command):
-    result = subprocess.run(list(map(str, command)), stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=180)
+def run(command, timeout=180):
+    result = subprocess.run(list(map(str, command)), stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=timeout)
     if result.returncode:
-        raise RuntimeError("Pinned Monero tools preparation command failed: " + str(command[0]))
+        detail = result.stderr.decode("utf-8", errors="replace").strip()
+        raise RuntimeError(f"Pinned Monero tools preparation command failed: {command[0]} (exit {result.returncode})"
+                           + (": " + detail if detail else ""))
     return result.stdout.decode("utf-8", errors="strict")
 
 
@@ -71,8 +73,12 @@ def main():
             raise RuntimeError("Release signature does not match pinned signing fingerprint")
         archive = args.archive.resolve() if args.archive else root / archive_name
         if not args.archive:
+            # Retry transient server/transfer failures without changing the
+            # official source or the authenticated hash checked below. Three
+            # 160-second attempts plus backoff fit within the process deadline.
             run(["curl", "-fL", "--proto", "=https", "--tlsv1.2", "--connect-timeout", "15", "--max-time", "160",
-                 "https://downloads.getmonero.org/cli/" + archive_name, "-o", archive])
+                 "--retry", "2", "--retry-delay", "2", "--retry-max-time", "480",
+                 "https://downloads.getmonero.org/cli/" + archive_name, "-o", archive], timeout=500)
         if sha(archive) != matches[0]:
             raise RuntimeError("Monero archive does not match authenticated release hash")
         binary = "monero-wallet-rpc.exe" if args.platform.startswith("win32-") else "monero-wallet-rpc"
