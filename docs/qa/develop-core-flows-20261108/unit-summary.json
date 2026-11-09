@@ -1,0 +1,59 @@
+{
+  "runtime": "1.3.14",
+  "files": 102,
+  "unitFiles": 96,
+  "assertionScriptFiles": 6,
+  "passed": 1348,
+  "failed": 0,
+  "skipped": 0,
+  "assertions": 93,
+  "assertionFailures": 0,
+  "invalidFiles": [],
+  "groups": [
+    {
+      "group": "device-pin-settings",
+      "files": 21,
+      "passed": 277,
+      "failed": 0,
+      "assertions": 0,
+      "assertionFailures": 0,
+      "invalidFiles": []
+    },
+    {
+      "group": "balances-receive-history",
+      "files": 29,
+      "passed": 242,
+      "failed": 0,
+      "assertions": 83,
+      "assertionFailures": 0,
+      "invalidFiles": []
+    },
+    {
+      "group": "standard-send-safety",
+      "files": 24,
+      "passed": 207,
+      "failed": 0,
+      "assertions": 10,
+      "assertionFailures": 0,
+      "invalidFiles": []
+    },
+    {
+      "group": "swap-safety",
+      "files": 27,
+      "passed": 616,
+      "failed": 0,
+      "assertions": 0,
+      "assertionFailures": 0,
+      "invalidFiles": []
+    },
+    {
+      "group": "default-off-isolation",
+      "files": 1,
+      "passed": 6,
+      "failed": 0,
+      "assertions": 0,
+      "assertionFailures": 0,
+      "invalidFiles": []
+    }
+  ]
+}

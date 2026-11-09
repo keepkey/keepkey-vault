@@ -1,0 +1,65 @@
+{
+  "baseDevelop": "c2888b64c9b95fa77db30c672303eda34328b87e",
+  "scope": "Core wallet regressions; optional feature acceptance excluded.",
+  "swapReport": {
+    "screenshot": "Owner-reported swap view with literal &times; and no usable exit.",
+    "finding": "Develop had corrected the text glyph, but the small close control had no accessible name, scrolled away and disappeared during active execution. Escape and backdrop exit were absent.",
+    "fixed": [
+      "Visible 36px SVG Close swap control in a sticky header, including active phases.",
+      "Scoped Escape/backdrop exit with keyboard focus containment and restoration. Higher device overlays retain focus.",
+      "Closing the view preserves active execution; explicit device cancellation stays separate.",
+      "Retained closed dialogs clear the UI mirror and stop hidden polling; reopened submitted receipts remain reachable."
+    ],
+    "regressionProof": "The close test fails against exact unmodified develop via a Vite source override and passes with the fix; native button and Escape also pass."
+  },
+  "validation": {
+    "unitTestsPassed": 1348,
+    "unitTestFiles": 96,
+    "browserChecksPassed": 29,
+    "browserErrors": 0,
+    "native": "Development macOS preview: ETH swap X/Escape return to asset page, without review/signing/broadcast.",
+    "builds": [
+      "backend bundle",
+      "Vite production frontend",
+      "macOS development package",
+      "i18n integrity"
+    ],
+    "typecheck": "803 existing diagnostics; zero new file/code pairs.",
+    "assertionScriptFiles": 6,
+    "scriptAssertionsPassed": 93,
+    "selectedCoreFiles": 102,
+    "unitRerun": "Final repeatable runner completed after the swap fix, with zero failures/skips/invalid files."
+  },
+  "disabledFeaturesNotExercised": [
+    "Monero",
+    "Password manager",
+    "Zcash shielded/privacy",
+    "Multisig/Safe",
+    "WalletConnect",
+    "Emulator feature acceptance",
+    "Hive",
+    "alpha/prerelease firmware"
+  ],
+  "testIsolation": {
+    "browser": "Real React components, all optional fixture flags immutable false, in-memory native replies and external requests blocked.",
+    "unit": "One Bun subprocess per selected test file to avoid shared mocks; live REST scripts excluded.",
+    "native": "Only existing core swap navigation; user settings and wallet contents preserved.",
+    "realSignatures": 0,
+    "realBroadcasts": 0
+  },
+  "limits": [
+    "Synthetic PIN callback does not establish physical hardware authentication.",
+    "Simulated build/review/cancel and execution ownership do not establish a live funded send or swap.",
+    "No optional-feature acceptance or physical firmware flashing was performed."
+  ],
+  "repeat": {
+    "unit": "bun run qa:core (one file per process; CORE_QA_EVIDENCE optional)",
+    "browserServer": "bun __tests__/fixtures/core-regression/server.ts",
+    "browserRunners": [
+      "__tests__/fixtures/core-regression/smoke.mjs",
+      "__tests__/fixtures/core-regression/swap-lifecycle.mjs",
+      "__tests__/fixtures/core-regression/core-extra.mjs"
+    ],
+    "browserEnvironment": "Set matching CORE_QA_PORT; optional PLAYWRIGHT_MODULE, PLAYWRIGHT_TEST_MODULE and CHROME_EXECUTABLE overrides; CORE_QA_EVIDENCE selects output directory."
+  }
+}

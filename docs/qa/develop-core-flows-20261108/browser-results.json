@@ -1,0 +1,29 @@
+{
+  "checks": {
+    "swap-visible-close-and-focus-return": true,
+    "swap-exit-assets-stall": true,
+    "swap-exit-assets-error": true,
+    "swap-exit-quote-stall": true,
+    "swap-exit-quote-error": true,
+    "swap-backdrop-dismissal": true,
+    "swap-review-exit-without-signing": true,
+    "swap-close-visible-after-scroll-narrow": true,
+    "swap-keyboard-focus-contained": true,
+    "swap-nested-picker-escape-keeps-swap-open": true,
+    "swap-route-details-escape-keeps-swap-open": true,
+    "receive-ethereum": true,
+    "receive-bitcoin": true,
+    "receive-zcash": true,
+    "portfolio-assets-and-balances": true,
+    "send-invalid-recipient-stays-before-signing": true,
+    "history-open-close": true,
+    "settings-main-sections-without-mutations": true,
+    "disconnect-reconnect-navigation": true,
+    "optional-features-remain-off": true
+  },
+  "failures": [],
+  "browserErrors": [],
+  "optionalFeaturesEnabled": false,
+  "realTransactions": false,
+  "testSource": "real React components with synthetic native RPC"
+}

@@ -1,0 +1,15 @@
+{
+  "checks": {
+    "pin-grid-backspace-submit-uses-only-synthetic-positions": true,
+    "pin-cancel-returns-to-disconnected-without-mutation": true,
+    "eth-invalid-recipient-blocks-build": true,
+    "eth-build-review-back-stops-before-signing": true,
+    "main-settings-narrow-layout-default-features-remain-off": true
+  },
+  "failures": [],
+  "pageErrors": [],
+  "allOptionalFeaturesOff": true,
+  "pinBoundary": "Real PinEntry UI; synthetic callback only, no hardware PIN verification",
+  "realSignatures": 0,
+  "realBroadcasts": 0
+}
