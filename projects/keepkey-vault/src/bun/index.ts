@@ -11573,6 +11573,32 @@ setTimeout(() => {
 	}, 60 * 60 * 1000)
 }, 5_000)
 
+// The DMG renamed keepkey-vault.app to "KeepKey Vault.app"; offer once to
+// trash an old copy left beside the new one. Deferred so it doesn't land on
+// top of the first window paint.
+if (process.platform === 'darwin') {
+	setTimeout(() => {
+		import('./legacy-app-cleanup').then(({ offerLegacyAppCleanup }) => offerLegacyAppCleanup({
+			platform: process.platform,
+			execPath: process.execPath,
+			homeDir: os.homedir(),
+			exists: p => fs.existsSync(p),
+			realpath: p => fs.realpathSync(p),
+			bundleIdentifier: appPath => {
+				const r = Bun.spawnSync(['/usr/bin/plutil', '-extract', 'CFBundleIdentifier', 'raw', '-o', '-', path.join(appPath, 'Contents', 'Info.plist')])
+				return r.exitCode === 0 ? r.stdout.toString().trim() : null
+			},
+			getSetting,
+			setSetting,
+			ask: async dialog => (await Utils.showMessageBox({ title: 'KeepKey Vault', ...dialog })).response,
+			moveToTrash: p => Utils.moveToTrash(p),
+			log: msg => console.log(msg),
+		})).then(result => {
+			if (result !== 'none-found' && result !== 'not-applicable') console.log(`[legacy-app] ${result}`)
+		}).catch((e: any) => console.warn('[legacy-app] cleanup failed:', e.message))
+	}, 3_000)
+}
+
 // Zcash sidecar is started eagerly at the end of boot (see bottom of file)
 
 // Cache app version for REST health endpoint
