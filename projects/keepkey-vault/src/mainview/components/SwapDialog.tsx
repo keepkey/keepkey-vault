@@ -28,13 +28,12 @@ import { SOLANA_BLIND_SIGNING_REQUIRED } from "../../shared/types"
 import { Z } from "../lib/z-index"
 import { providerTrackerUrl } from "../lib/trackers"
 import { ProviderBadge, ProverChip, resolveProvider } from "./ProviderBadge"
-import { getSwapperAnimation } from "../lib/swapper-animations"
 import { assessSwapRisk } from "../../shared/swap-risk"
 import { swapHealthSummary, swapProviderPresentation, swapHealthQuoteExplanation } from "../../shared/swap-health"
 import { knownSpenderName } from "../../shared/evm-known-spenders"
 import { isSwapFullySettled, payoutReachesMinimum } from "../../shared/swap-settlement"
 import { SwapRiskReview } from "./SwapRiskReview"
-import { computeDustWarning, shouldWarnHighSlippage, computeEffectiveSlippageBps, isSmallSwapQuoteWarning } from "../../shared/swap-warnings"
+import { shouldWarnHighSlippage, computeEffectiveSlippageBps, isSmallSwapQuoteWarning } from "../../shared/swap-warnings"
 import { useEvmAddresses } from "../hooks/useEvmAddresses"
 import { useDeviceState } from "../hooks/useDeviceState"
 import { ClearSignReportCard } from "./ClearSignReportCard"
@@ -57,7 +56,7 @@ import {
   normalizeSlippageBps,
   parseCustomSlippagePercent,
 } from "../../shared/slippage"
-import { KeepKeyDevice, RouteMap, SpinningDevice } from "./v3"
+import { KeepKeyDevice, SpinningDevice } from "./v3"
 import calculatingGif from "../assets/swap/calculating.gif"
 import shiftingGif from "../assets/swap/shifting.gif"
 import completedGif from "../assets/swap/completed.gif"
@@ -302,7 +301,7 @@ function ellipsizeMiddle(value: unknown, start = 10, end = 8): string {
 function ReviewRow({ label, children, accent = false }: { label: ReactNode; children: ReactNode; accent?: boolean }) {
   return (
     <Flex justify="space-between" align="flex-start" gap="3">
-      <Text fontSize="11px" color="kk.textMuted" flexShrink={0}>{label}</Text>
+      <Text fontSize="11px" color="kk.textMuted" maxW="50%">{label}</Text>
       <Text
         fontSize="11px"
         fontFamily="mono"
@@ -780,7 +779,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
   const uiText = useUiTranslation()
 
   const { t } = useTranslation("swap")
-  const { fmtCompact, symbol: fiatSymbol, locale } = useFiat()
+  const { fmt, fmtCompact, symbol: fiatSymbol, locale } = useFiat()
   const { evmAddresses } = useEvmAddresses()
   const { firmwareVersion } = useDeviceState()
   // Local EVM address selection — scoped to this dialog so switching here doesn't
@@ -2088,8 +2087,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
   const riskAcknowledged = riskAcceptedKey === riskKey
   const riskLocked = swapRisk.blocked || (swapRisk.requiresAcknowledgment && !riskAcknowledged)
   const riskPanel = quote && toAsset ? <SwapRiskReview risk={swapRisk}
-    expected={formatBalance(quote.expectedOutput)} minimum={formatBalance(quote.minimumOutput)} symbol={toAsset.symbol}
-    minimumSource={quote.minimumOutputSource} acknowledged={riskAcknowledged}
+    acknowledged={riskAcknowledged}
     onAcknowledge={accepted => setRiskAcceptedKey(accepted ? riskKey : '')} /> : null
 
   const auditPayloadReady = !!previewBuild?.unsignedTx
@@ -4017,28 +4015,32 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
           {/* ── REVIEW (confirm quote) ──────────────────────────── */}
           {phase === 'review' && quote && fromAsset && toAsset && !busy && (
             <VStack gap="2" style={{ animation: 'kkSwapFadeIn 0.2s ease-out' }}>
-              {/* Combined send/receive — single tight card with from → to */}
-              <Box w="full" bg="rgba(255,255,255,0.03)" border="1px solid" borderColor="kk.border" borderRadius="xl" p="3">
-                <Flex align="center" gap="3">
-                  <AssetIcon caip={fromAsset.caip} iconUrl={fromAsset.icon} chainCaip={chainBadgeCaip(fromAsset)} size={40} alt={fromAsset.symbol} />
+              {/* One quote-bound summary: fiat and costs share the risk snapshot. */}
+              <Box w="full" bg="rgba(255,255,255,0.03)" border="1px solid" borderColor="kk.border" borderRadius="xl" p="4" data-trade-summary>
+                <Flex align="center" justify="space-between" gap="2" mb="4">
+                  <Text fontSize="10px" color="kk.textMuted">{t("route", "Route")}</Text>
+                  <Box maxW="70%">
+                    <ProviderBadge swapper={quote.swapper} integration={quote.integration} size={16} variant="row" />
+                  </Box>
+                </Flex>
+                <Flex align="center" gap="2">
+                  <AssetIcon caip={fromAsset.caip} iconUrl={fromAsset.icon} chainCaip={chainBadgeCaip(fromAsset)} size={32} alt={fromAsset.symbol} />
                   <Box flex="1" minW="0">
-                    <Text fontSize="sm" fontWeight="700" color="kk.textPrimary" truncate>{displayAmount} {fromAsset.symbol}</Text>
-                    {hasFromPrice && (
-                      <Text fontSize="10px" fontFamily="mono" color="kk.textMuted">{fmtCompact(parseFloat(displayAmount) * fromPriceUsd)}</Text>
+                    <Text fontSize="10px" color="kk.textMuted">{uiText("You send")}</Text>
+                    <Text fontSize="sm" fontWeight="700" color="kk.textPrimary" wordBreak="break-word">{displayAmount} {fromAsset.symbol}</Text>
+                    {swapRisk.inputUsd !== undefined && (
+                      <Text fontSize="11px" fontFamily="mono" color="kk.textMuted" data-trade-input-fiat>{fmt(swapRisk.inputUsd)}</Text>
                     )}
                   </Box>
-                  <Box color="var(--gold)" flexShrink={0}>
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                      <line x1="5" y1="12" x2="19" y2="12" /><polyline points="12 5 19 12 12 19" />
-                    </svg>
-                  </Box>
+                  <Box color="var(--gold)" flexShrink={0} aria-hidden="true">→</Box>
                   <Box flex="1" minW="0" textAlign="right">
-                    <Text fontSize="sm" fontWeight="700" color="var(--teal)" truncate>~<GreenCountUp value={quote.expectedOutput} color="var(--teal)" suffix={` ${toAsset.symbol}`} /></Text>
-                    {hasToPrice && (
-                      <Text fontSize="10px" fontFamily="mono" color="kk.textMuted">{fmtCompact(parseFloat(quote.expectedOutput) * toPriceUsd)}</Text>
+                    <Text fontSize="10px" color="kk.textMuted">{uiText("Expected receive")}</Text>
+                    <Text fontSize="sm" fontWeight="700" color="var(--teal)" wordBreak="break-word">{formatBalance(quote.expectedOutput)} {toAsset.symbol}</Text>
+                    {swapRisk.expectedUsd !== undefined && (
+                      <Text fontSize="11px" fontFamily="mono" color="kk.textMuted" data-trade-output-fiat>{fmt(swapRisk.expectedUsd)}</Text>
                     )}
                   </Box>
-                  <AssetIcon caip={toAsset.caip} iconUrl={toAsset.icon} chainCaip={chainBadgeCaip(toAsset)} size={40} alt={toAsset.symbol} />
+                  <AssetIcon caip={toAsset.caip} iconUrl={toAsset.icon} chainCaip={chainBadgeCaip(toAsset)} size={32} alt={toAsset.symbol} />
                 </Flex>
                 {isFeeReservedNativeMax && fromAsset && nativeMaxReserveDisplay && (
                   <Text fontSize="10px" color="var(--gold)" mt="1.5">
@@ -4050,6 +4052,18 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                     })}
                   </Text>
                 )}
+                <VStack gap="2" align="stretch" mt="4" pt="3" borderTop="1px solid" borderColor="kk.border">
+                  <ReviewRow label={quote.minimumOutputSource === 'estimate' ? uiText("Estimated minimum") : uiText("Minimum receive")} accent>
+                    {formatBalance(quote.minimumOutput)} {toAsset.symbol}{swapRisk.minimumUsd !== undefined ? ` (${fmt(swapRisk.minimumUsd)})` : ''}
+                  </ReviewRow>
+                  <ReviewRow label={uiText("Estimated swap cost")}>
+                    <span data-trade-cost>{swapRisk.expectedLossPct !== undefined
+                      ? `${swapRisk.expectedLossUsd !== undefined ? `${fmt(swapRisk.expectedLossUsd)} · ` : ''}${swapRisk.expectedLossPct.toFixed(2)}%`
+                      : uiText("Price data unavailable")}</span>
+                  </ReviewRow>
+                  <ReviewRow label={uiText("Source network fee")}>{uiText("Paid separately")}</ReviewRow>
+                  <ReviewRow label={uiText("Estimated time")}>{formatTime(quote.estimatedTime)}</ReviewRow>
+                </VStack>
               </Box>
 
               {/* Our own swap is assumed clear: the report shows only when it is
@@ -4063,125 +4077,64 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                 return line ? <Text fontSize="2xs" color="kk.textSecondary" data-clearsign-provider>{line}</Text> : null
               })()}
 
-              {/* Animated route map — gold dot travels from-token →
-                  integration → to-token. Shows the actual swap topology
-                  (not just a pill). Integration label uses Pioneer's
-                  authoritative swapper name when available. */}
-              {(() => {
-                const info = resolveProvider(quote.swapper || quote.integration)
-                const integrationName = quote.swapper || quote.integration || info.name
-                const fromColor = CHAINS.find(c => c.id === fromAsset.chainId)?.color
-                const toColor   = CHAINS.find(c => c.id === toAsset.chainId)?.color
-                return (
-                  <Box w="full" bg="rgba(255,255,255,0.03)" border="1px solid" borderColor="kk.border" borderRadius="xl" px="3" py="3">
-                    <Flex align="center" justify="space-between" mb="1.5" px="1">
-                      <Text fontSize="10px" color="kk.textMuted" letterSpacing="0.04em" textTransform="uppercase">
-                        {t("route", "Route")}
-                      </Text>
-                      <ProviderBadge swapper={quote.swapper} integration={quote.integration} size={16} variant="compact" />
-                    </Flex>
-                    <RouteMap
-                      from={{ iconUrl: fromAsset.icon, color: fromColor, glyph: fromAsset.symbol.slice(0, 1) }}
-                      to={{ iconUrl: toAsset.icon, color: toColor, glyph: toAsset.symbol.slice(0, 1) }}
-                      integration={typeof integrationName === 'string' ? integrationName : undefined}
-                      centerImageUrl={getSwapperAnimation(quote.swapper, quote.integration)}
-                    />
-                  </Box>
-                )
-              })()}
-
-              {/* Key quote numbers — always visible, condensed */}
               {quote.executionMode === 'relay-solver-deposit' && (
                 <Text fontSize="11px" color="kk.textSecondary" role="note">
                   {t('relayDepositReview', 'Relay executes the swap after your deposit; destination terms are shown in this app.')}
                 </Text>
               )}
-              <Box w="full" bg="rgba(255,255,255,0.02)" border="1px solid" borderColor="kk.border" borderRadius="lg" px="3" py="2">
-                <VStack gap="1" align="stretch">
-                  <ReviewRow label={t("rate")}>
-                    1 {fromAsset.symbol} = {formatBalance((parseFloat(quote.expectedOutput) / parseFloat(displayAmount || '1')).toString())} {toAsset.symbol}
-                  </ReviewRow>
-                  <ReviewRow label={t("expectedAfterFees", "Expected after fees")}>
-                    {formatBalance(quote.expectedOutput)} {toAsset.symbol}{hasToPrice && !toPriceIsDerived ? ` (${fmtCompact(parseFloat(quote.expectedOutput) * toPriceUsd)})` : ''}
-                  </ReviewRow>
-                  <ReviewRow label={t("minimumAfterFeesSlippage", "Minimum receive after fees/slippage")} accent>
-                    {formatBalance(quote.minimumOutput)} {toAsset.symbol}{hasToPrice && !toPriceIsDerived ? ` (${fmtCompact(parseFloat(quote.minimumOutput) * toPriceUsd)})` : ''}
-                  </ReviewRow>
-                  <QuoteFeeRows fees={quote.fees} />
-                  <ReviewRow label={t("slippageTolerance", "Slippage tolerance")}>
-                    {(slippageBps / 100).toFixed(2)}{uiText("% max")}</ReviewRow>
-                  <ReviewRow label={t("quoteSlippage", "Quote slippage")}>
-                    {quote.quotedSlippageBps != null ? `${(quote.quotedSlippageBps / 100).toFixed(2)}%` : t("notProvided", "Not provided")}
-                  </ReviewRow>
-                  <ReviewRow label={t("estimatedTime")}>
-                    {formatTime(quote.estimatedTime)}
-                  </ReviewRow>
-                </VStack>
-              </Box>
 
-              {fromAsset.chainFamily === 'evm' && (
-                <Box as="details" className="kk-acc" w="full" bg="rgba(255,255,255,0.02)" border="1px solid" borderColor={auditPayloadReady ? "rgba(139,227,196,0.22)" : "rgba(233,196,106,0.28)"} borderRadius="lg" overflow="hidden">
-                  <Box as="summary" px="3" py="2"
-                    display="flex" alignItems="center" justifyContent="space-between" gap="2"
-                    _hover={{ bg: "rgba(255,255,255,0.03)" }} style={{ transition: 'background 120ms ease-out' }}>
-                    <Text fontSize="11px" fontWeight="700" color="kk.textPrimary">
-                      {t("evmSummary", "EVM summary")}
-                    </Text>
-                    <Flex align="center" gap="2" color="kk.textMuted">
-                      <Text fontSize="10px" fontFamily="mono" color={auditPayloadReady ? "var(--teal)" : "var(--gold)"}>
-                        {previewLoading
-                          ? t("payloadBuilding", "building payload")
-                          : previewError
-                            ? t("payloadFailed", "payload failed")
-                            : auditPayloadReady
-                              ? t("payloadReady", "payload ready")
-                              : t("payloadRequiredShort", "payload required")}
-                      </Text>
-                      <svg className="kk-acc-chev" width="14" height="14" viewBox="0 0 16 16" fill="none">
-                        <path d="M4 6l4 4 4-4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
-                      </svg>
-                    </Flex>
-                  </Box>
-                  <Box className="kk-acc-body" px="3" pt="1" pb="2">
-                  <VStack gap="2" align="stretch">
-                    {previewLoading && (
-                      <Text fontSize="10px" color="kk.textMuted">{t("buildingPayloadDetail", "Building the exact transaction payload for review...")}</Text>
-                    )}
-                    {previewError && (
-                      <Text fontSize="10px" color="kk.error">{t("previewFailed", "Build preview failed")}: {previewError}</Text>
-                    )}
-                    {previewBuild?.approveTx && (
-                      <EvmTxSummaryCard
-                        title={t("approvalTx", "Approval transaction")}
-                        tx={previewBuild.approveTx}
-                        chain={fromChainDef}
-                        asset={fromAsset}
-                        isApproval
-                      />
-                    )}
-                    {previewBuild?.unsignedTx && (
-                      <EvmTxSummaryCard
-                        title={previewBuild.approveTx ? t("swapTxAfterApproval", "Swap transaction after approval") : t("swapTx", "Swap transaction")}
-                        tx={previewBuild.unsignedTx}
-                        chain={fromChainDef}
-                        asset={fromAsset}
-                      />
-                    )}
-                  </VStack>
-                  </Box>
-                </Box>
-              )}
-
-              {/* Collapsible details: vault/router/memo + hdwallet payload audit */}
               <Box w="full">
                 <Button size="xs" variant="ghost" color="kk.textMuted" w="full"
+                  aria-expanded={showDetails} aria-controls="swap-fees-details"
                   onClick={() => setShowDetails(!showDetails)}
                   _hover={{ color: "kk.textSecondary" }}>
-                  {showDetails ? t("hideDetails", "Hide details") : t("showDetails", "Show details")}
+                  {uiText("Fees & details")}{" "}{showDetails ? '⌃' : '⌄'}
                 </Button>
                 {showDetails && (
-                  <Box bg="rgba(0,0,0,0.3)" borderRadius="md" p="2" mt="1">
-                    <VStack gap="1.5" align="stretch">
+                  <Box id="swap-fees-details" bg="rgba(0,0,0,0.3)" borderRadius="md" p="3" mt="1">
+                    <VStack gap="2" align="stretch">
+                      <ReviewRow label={t("rate")}>
+                        1 {fromAsset.symbol} = {formatBalance((parseFloat(quote.expectedOutput) / parseFloat(displayAmount || '1')).toString())} {toAsset.symbol}
+                      </ReviewRow>
+                      <QuoteFeeRows fees={quote.fees} />
+                      <ReviewRow label={t("slippageTolerance", "Slippage tolerance")}>
+                        {(slippageBps / 100).toFixed(2)}{uiText("% max")}
+                      </ReviewRow>
+                      {quote.quotedSlippageBps != null && (
+                        <ReviewRow label={t("quoteSlippage", "Quote slippage")}>{(quote.quotedSlippageBps / 100).toFixed(2)}%</ReviewRow>
+                      )}
+                      <ReviewRow label={uiText("Minimum source")}>
+                        {quote.minimumOutputSource === 'memo' ? uiText("Transaction memo") : quote.minimumOutputSource === 'estimate' ? uiText("Estimate") : uiText("Provider quote")}
+                      </ReviewRow>
+                      {swapRisk.minimumLossPct !== undefined && (
+                        <ReviewRow label={uiText("Value difference at minimum")}>
+                          {swapRisk.minimumLossUsd !== undefined ? `${fmt(swapRisk.minimumLossUsd)} · ` : ''}{swapRisk.minimumLossPct.toFixed(2)}%
+                        </ReviewRow>
+                      )}
+                      <Text fontSize="10px" color="kk.textMuted">
+                        {uiText("Swap cost compares the quoted input and output values, including the rate and route fees. The source network fee is separate. Minimum receive is an execution limit, not a guaranteed refund.")}
+                      </Text>
+                      {fromAsset.chainFamily === 'evm' && (
+                        <VStack gap="2" align="stretch">
+                          {previewBuild?.approveTx && (
+                            <EvmTxSummaryCard
+                              title={t("approvalTx", "Approval transaction")}
+                              tx={previewBuild.approveTx}
+                              chain={fromChainDef}
+                              asset={fromAsset}
+                              isApproval
+                            />
+                          )}
+                          {previewBuild?.unsignedTx && (
+                            <EvmTxSummaryCard
+                              title={previewBuild.approveTx ? t("swapTxAfterApproval", "Swap transaction after approval") : t("swapTx", "Swap transaction")}
+                              tx={previewBuild.unsignedTx}
+                              chain={fromChainDef}
+                              asset={fromAsset}
+                            />
+                          )}
+                        </VStack>
+                      )}
                       {quote.router && fromAsset.chainFamily === 'evm' && (
                         <Flex justify="space-between" align="flex-start" gap="2">
                           <Text fontSize="10px" color="kk.textMuted" flexShrink={0}>{t("routerContract")}</Text>
@@ -4341,37 +4294,6 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
 
               {riskPanel}
 
-              {/* Dust-fee warning — protocol fees + spread eat too much of the swap.
-                  THORChain has fixed ~$1.20 BTC outbound fee that crushes small swaps:
-                  $2 in → $1.78 out is 11% loss. Tier the warning so users understand:
-                  >DUST_FEE_WARNING_PCT = strongly recommend bigger amount;
-                  >DUST_FEE_SEVERE_PCT  = "you're throwing money away".
-                  Computed from displayed in/out USD values, not just quote.fees.totalBps,
-                  so msg.value EVM fees and spread are captured. */}
-              {(() => {
-                const dust = computeDustWarning({
-                  inAmount: parseFloat(quotedSendAmount) || 0,
-                  outAmount: parseFloat(quote.expectedOutput || '0') || 0,
-                  fromPriceUsd,
-                  toPriceUsd: toPriceIsDerived ? 0 : toPriceUsd,
-                })
-                if (!dust) return null
-                const { severe, lossPct, inUsd, lostUsd, recommendedMinUsd } = dust
-                return (
-                  <Flex align="center" gap="2"
-                    bg={severe ? "rgba(224,140,123,0.12)" : "rgba(251,146,60,0.08)"}
-                    border="1px solid"
-                    borderColor={severe ? "rgba(255,23,68,0.4)" : "rgba(251,146,60,0.3)"}
-                    px="3" py="2" borderRadius="lg" w="full">
-                    <Text fontSize="10px" color={severe ? "kk.error" : "var(--gold)"} lineHeight="1.4">
-                      {severe
-                        ? t("dustFeeSevere", "⚠️ FEES EAT {{pct}}% OF THIS SWAP — you'd lose ${{lostUsd}} of your ${{inUsd}} input. THORChain has a fixed ~$1.20 outbound fee on BTC; small swaps are uneconomic. Strongly recommend ${{minUsd}}+ for this pair, or pick a different route.", { pct: lossPct.toFixed(0), lostUsd: lostUsd.toFixed(2), inUsd: inUsd.toFixed(2), minUsd: recommendedMinUsd })
-                        : t("dustFeeHigh", "Heads up — fees + spread will cost {{pct}}% of this swap (~${{lostUsd}} of ${{inUsd}}). For small amounts the fixed protocol fee dominates. Larger swaps get a better rate.", { pct: lossPct.toFixed(0), lostUsd: lostUsd.toFixed(2), inUsd: inUsd.toFixed(2) })}
-                    </Text>
-                  </Flex>
-                )
-              })()}
-
               {/* Firmware 7.15+ parses native TRX and TRC-20 transfers from the
                   signed raw_data. Only older firmware gets the legacy generic
                   warning; TRON as the destination never affects source signing. */}
@@ -4382,12 +4304,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                     {t("tronLegacySigningWarning", "Firmware before 7.15 may show a generic Tron prompt. Update firmware for native TRX and TRC-20 ClearSign details, or verify the complete payload above before approving.")}
                   </Text>
                 </Flex>
-              ) : (
-                <Flex align="center" gap="2" bg="rgba(35,220,200,0.04)" px="3" py="1.5" borderRadius="lg" w="full">
-                  <ShieldIcon />
-                  <Text fontSize="10px" color="var(--teal)">{t("verifyOnDevice")}</Text>
-                </Flex>
-              )}
+              ) : null}
 
               {error && (
                 <Box bg={errorIsWarning ? "rgba(251,146,60,0.08)" : "rgba(224,140,123,0.10)"} border="1px solid" borderColor={errorIsWarning ? "rgba(251,146,60,0.3)" : "kk.error"} borderRadius="lg" px="3" py="2" w="full">
@@ -4400,9 +4317,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                 </Box>
               )}
 
-              {/* Safety note — "Address will be verified on your KeepKey
-                  device." Per handoff design, this primes the user for the
-                  confirm-on-device step before they sign. */}
+              {/* A single device prompt; route-specific warnings remain above. */}
               <Flex
                 w="full"
                 align="center"
@@ -4419,7 +4334,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                   </svg>
                 </Box>
                 <Text fontSize="11px" color="var(--text-1)" letterSpacing="-0.005em">
-                  {t("addressVerifiedOnDevice", "Address will be verified on your KeepKey device.")}
+                  {uiText("Review and approve on KeepKey")}
                 </Text>
               </Flex>
 
