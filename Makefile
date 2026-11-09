@@ -355,11 +355,9 @@ dmg: verify-arch
 	if [ -z "$$APP" ]; then echo "ERROR: No .app found after extraction"; exit 1; fi; \
 	echo "Verifying extracted app..."; \
 	codesign --verify --deep --strict "$$APP" || (echo "ERROR: codesign verification failed"; exit 1); \
-	ln -s /Applications "$$STAGING/Applications"; \
 	DMG_OUT="$$(pwd)/$(PROJECT_DIR)/artifacts/$(DMG_NAME)"; \
-	rm -f "$$DMG_OUT"; \
 	echo "Creating DMG..."; \
-	hdiutil create -volname "KeepKey Vault" -srcfolder "$$STAGING" -ov -format UDZO "$$DMG_OUT"; \
+	./scripts/create-macos-dmg.sh "$$STAGING" "$$DMG_OUT" || exit 1; \
 	echo "Signing DMG..."; \
 	codesign --force --timestamp --sign "Developer ID Application: $$ELECTROBUN_DEVELOPER_ID ($$ELECTROBUN_TEAMID)" "$$DMG_OUT"; \
 	codesign --verify --verbose=2 "$$DMG_OUT"; \
@@ -904,11 +902,9 @@ _sign-one-dmg:
 	SIGNED_TAR="$$(pwd)/$(PROJECT_DIR)/artifacts/$$(basename $(_SRC_TAR))"; \
 	(cd "$$STAGING" && tar cf - "$$(basename $$APP)") | zstd -o "$$SIGNED_TAR" --force; \
 	echo "  Signed tar.zst: $$SIGNED_TAR"; \
-	ln -s /Applications "$$STAGING/Applications"; \
 	DMG_OUT="$$(pwd)/$(PROJECT_DIR)/artifacts/KeepKey-Vault-$(VERSION)-$(_DMG_ARCH).dmg"; \
-	rm -f "$$DMG_OUT"; \
 	echo "  Creating DMG..."; \
-	hdiutil create -volname "KeepKey Vault" -srcfolder "$$STAGING" -ov -format UDZO "$$DMG_OUT"; \
+	./scripts/create-macos-dmg.sh "$$STAGING" "$$DMG_OUT" || exit 1; \
 	echo "  Signing DMG..."; \
 	codesign --force --timestamp \
 		--sign "Developer ID Application: $$ELECTROBUN_DEVELOPER_ID ($$ELECTROBUN_TEAMID)" \
