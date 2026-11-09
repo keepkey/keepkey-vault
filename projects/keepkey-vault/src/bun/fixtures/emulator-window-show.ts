@@ -13,7 +13,10 @@ class FakeWindow {
   packets: string[] = []
   activations = 0
   minimized = false
-  webview = { executeJavascript: (script: string) => { this.packets.push(script) } }
+  webview = {
+    executeJavascript: (script: string) => { this.packets.push(script) },
+    loadHTML: (html: string) => { this.options.html = html },
+  }
   constructor(public options: any) { FakeWindow.instances.push(this) }
   on(event: string, callback: () => void) { this.handlers.set(event, callback) }
   getFrame() { return this.options.frame }
@@ -39,7 +42,14 @@ mock.module('../emulator', () => ({ getActiveFlashName: () => 'fixture-wallet', 
 mock.module('../test-review-tape', () => ({ recordReviewScreen() {}, reviewTapeRecording: () => false }))
 
 const emulatorWindow = await import('../emulator-window')
-const ready = (index: number) => bridges[index].fetch(new Request('http://127.0.0.1/_emu/ready', { method: 'POST' }))
+const ready = (index: number) => {
+  const loadId = /postBridge\('\/_emu\/ready', \{ loadId: '([^']+)' \}\)/.exec(FakeWindow.instances[index].options.html)?.[1]
+  assert(loadId, 'the emulator HTML includes its ready-message load ID')
+  return bridges[index].fetch(new Request('http://127.0.0.1/_emu/ready', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ loadId }),
+  }))
+}
 const pinGrid = new Uint8Array(2048).fill(0x5a)
 
 try {
