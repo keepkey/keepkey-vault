@@ -1,0 +1,19 @@
+{
+  "checks": {
+    "swap-visible-close-and-focus-return": false
+  },
+  "failures": [
+    {
+      "name": "swap-visible-close-and-focus-return",
+      "error": "expect(locator).toBeVisible() failed\n\nLocator: getByRole('button', { name: 'Close swap', exact: true })\nExpected: visible\nTimeout: 5000ms\nError: element(s) not found\n\nCall log:\n  - Expect \"to.be.visible\" with timeout 5000ms\n  - waiting for getByRole('button', { name: 'Close swap', exact: true })\n"
+    },
+    {
+      "name": "runner",
+      "error": "Close regression reproduced"
+    }
+  ],
+  "browserErrors": [],
+  "optionalFeaturesEnabled": false,
+  "realTransactions": false,
+  "testSource": "real React components with synthetic native RPC"
+}

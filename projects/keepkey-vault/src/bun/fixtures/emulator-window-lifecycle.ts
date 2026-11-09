@@ -10,7 +10,10 @@ class FakeWindow {
   static instances: FakeWindow[] = []
   handlers = new Map<string, () => void>()
   packets: string[] = []
-  webview = { executeJavascript: (script: string) => { this.packets.push(script) } }
+  webview = {
+    executeJavascript: (script: string) => { this.packets.push(script) },
+    loadHTML: (html: string) => { this.options.html = html },
+  }
   constructor(public options: any) { FakeWindow.instances.push(this) }
   on(event: string, callback: () => void) { this.handlers.set(event, callback) }
   getFrame() { return this.options.frame }
@@ -37,7 +40,16 @@ mock.module('../emulator', () => ({
 mock.module('../test-review-tape', () => ({ recordReviewScreen() {}, reviewTapeRecording: () => false }))
 
 const emulatorWindow = await import('../emulator-window')
-const ready = (index: number) => bridges[index].fetch(new Request('http://127.0.0.1/_emu/ready', { method: 'POST' }))
+const ready = (index: number, overrideLoadId?: string) => {
+  // Simulate the ready message emitted by this window's current HTML, including
+  // a replacement HTML load if recovery retried before the view became ready.
+  const loadId = /postBridge\('\/_emu\/ready', \{ loadId: '([^']+)' \}\)/.exec(FakeWindow.instances[index].options.html)?.[1]
+  assert(loadId, 'the emulator HTML includes its ready-message load ID')
+  return bridges[index].fetch(new Request('http://127.0.0.1/_emu/ready', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ loadId: overrideLoadId ?? loadId }),
+  }))
+}
 
 try {
   // Close before the display module's dynamic import settles, then replace it.
@@ -46,6 +58,9 @@ try {
   emulatorWindow.closeEmulatorWindow()
   emulatorWindow.openEmulatorWindow()
   const replacement = FakeWindow.instances[1]
+  assert.equal((await ready(1, 'a-retired-html-load')).status, 410, 'a stale HTML load cannot mark the replacement view ready')
+  emulatorWindow.displayPinPrompt('current')
+  assert(!replacement.packets.some(packet => packet.includes('pin-request')), 'a stale ready message must not enable script injection')
   await ready(1)
   oldWindow.emitClose()
   assert.equal(emulatorWindow.isEmulatorWindowOpen(), true, 'late old close must preserve the replacement window')
