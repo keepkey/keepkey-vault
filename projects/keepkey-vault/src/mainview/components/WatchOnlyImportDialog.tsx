@@ -1,6 +1,7 @@
 import { useUiTranslation } from "../i18n/ui"
 import { useState, useEffect, useCallback, useRef } from "react"
 import { Box, Flex, Text, Button, Spinner, Textarea, Input } from "@chakra-ui/react"
+import { actionToneProps } from "./ui/ActionButton"
 import { rpcRequest } from "../lib/rpc"
 import { BITCOIN_QR_SCAN_EVENT } from "./BitcoinQrImport"
 import { Z } from "../lib/z-index"
@@ -113,8 +114,9 @@ export function WatchOnlyImportDialog({ onImported }: { onImported: (deviceId: s
 
 	if (phase === "idle") return null
 
-	const goldButton = { size: "sm", bg: "kk.gold", color: "black", fontWeight: "600", px: "4", py: "2", _hover: { bg: "kk.goldHover" } } as const
-	const plainButton = { size: "sm", variant: "outline", color: "kk.textSecondary", borderColor: "kk.border", px: "4", py: "2" } as const
+	// Shared primary/neutral variants (components/ui/ActionButton.tsx, theme.ts button recipe).
+	const goldButton = { size: "sm" as const, ...actionToneProps("primary") }
+	const plainButton = { size: "sm", variant: "outline" } as const
 	const canImport = !!preview && (!preview.pathAssumed || pathOk || taproot)
 	const selectedPath = taproot ? preview?.path.replace(/^m\/44'/, "m/86'") : preview?.path
 	const selectedType = taproot ? "p2tr" : preview?.scriptType

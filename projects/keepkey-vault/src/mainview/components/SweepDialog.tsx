@@ -12,6 +12,7 @@ import { useUiTranslation } from "../i18n/ui"
  */
 import { useState, useEffect, useRef, useCallback } from "react"
 import { Box, Flex, Text, Button, VStack, Spinner } from "@chakra-ui/react"
+import { actionToneProps } from "./ui/ActionButton"
 import { rpcRequest } from "../lib/rpc"
 import { Z } from "../lib/z-index"
 import type { BtcAccountSet } from "../../shared/types"
@@ -336,9 +337,8 @@ export function SweepDialog({ onClose, currentMaxAccountHint, refreshAccounts }:
                     _hover={{ borderColor: "kk.gold", color: "kk.gold" }}
                     onClick={() => executeSweep(true)}
                   >{uiText("Dry Run")}</Button>
-                  <Button
-                    flex="1" size="sm" bg="kk.gold" color="black" fontWeight="600"
-                    _hover={{ bg: "kk.goldHover" }}
+                  <Button {...actionToneProps("primary")}
+                    flex="1" size="sm"
                     onClick={() => executeSweep(false)}
                   >{uiText("Sweep to Standard Address")}</Button>
                 </Flex>
@@ -382,7 +382,7 @@ export function SweepDialog({ onClose, currentMaxAccountHint, refreshAccounts }:
                   </Box>
                   <Flex gap="2">
                     <Button flex="1" size="sm" variant="ghost" color="kk.textSecondary" onClick={() => setPhase('results')}>{uiText("Back")}</Button>
-                    <Button flex="1" size="sm" bg="kk.gold" color="black" fontWeight="600" _hover={{ bg: "kk.goldHover" }} onClick={() => executeSweep(false)}>{uiText("Confirm & Broadcast")}</Button>
+                    <Button {...actionToneProps("primary")} flex="1" size="sm" onClick={() => executeSweep(false)}>{uiText("Confirm & Broadcast")}</Button>
                   </Flex>
                 </>
               ) : (

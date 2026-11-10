@@ -19,6 +19,7 @@ import { useUiTranslation } from "../i18n/ui"
  */
 import { useState, useEffect, useRef, useCallback } from "react"
 import { Box, Flex, Text, Button, VStack, HStack, Spinner, Textarea, Image } from "@chakra-ui/react"
+import { actionToneProps } from './ui/ActionButton'
 import { rpcRequest, onRpcMessage } from "../lib/rpc"
 import { Z } from "../lib/z-index"
 import { ChainLogo } from "./ChainLogo"
@@ -515,10 +516,7 @@ export function AuditDialog({ onClose, snapshot, isHidden, chainCatalog, chainAd
     background: 'var(--ink-4)', border: '1px solid var(--line-2)', borderRadius: '10px',
     padding: '9px 15px', fontSize: '12.5px', color: 'var(--text-1)', whiteSpace: 'nowrap' as const,
   }
-  const goldBtn = {
-    bg: 'var(--gold)', color: 'var(--ink-0)', fontWeight: '700',
-    _hover: { bg: 'var(--gold-2)' }, transition: 'all 0.15s ease',
-  }
+  const goldBtn = actionToneProps('primary')
 
   // UTXO per-account xpubs (one per script type) — shown as derivation proof.
   const XpubRows = ({ xpubs, gold }: { xpubs: NonNullable<AuditDerivedAddress['xpubs']>; gold?: boolean }) => (

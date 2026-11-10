@@ -3,6 +3,7 @@ import { useUiTranslation } from "../i18n/ui"
 import { useState, useMemo, useCallback, useEffect } from "react"
 import type { ReactNode } from "react"
 import { Box, Flex, Text, Input, Button } from "@chakra-ui/react"
+import { actionToneProps } from "./ui/ActionButton"
 import { useTranslation } from "react-i18next"
 import { rpcRequest } from "../lib/rpc"
 import { CHAINS, getExplorerTxUrl, caipToNetworkId } from "../../shared/chains"
@@ -468,7 +469,7 @@ function Row({ entry, connected, onSave, onRemove, onCosigner }: {
                 <Input value={draft} onChange={(e) => setDraft(e.target.value)} size="xs" flex="1"
                        bg="var(--ink-0)" border="1px solid var(--line)" color="var(--text-0)" maxLength={100}
                        placeholder={t("labelPlaceholder", { defaultValue: "Label" })} />
-                <Button size="xs" bg="var(--gold)" color="var(--ink-0)" onClick={async () => { await onSave(entry.memberIds, draft.trim()); setEditing(false) }}>
+                <Button {...actionToneProps("primary")} size="xs" onClick={async () => { await onSave(entry.memberIds, draft.trim()); setEditing(false) }}>
                   {t("save", { ns: "common", defaultValue: "Save" })}
                 </Button>
                 <Button size="xs" variant="ghost" color="var(--text-2)" onClick={() => { setDraft(entry.label || ""); setEditing(false) }}>
