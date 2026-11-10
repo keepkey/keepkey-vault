@@ -287,7 +287,7 @@ import { MONERO_LOCAL_URL, moneroNodeMode } from '../shared/monero-node'
 import { checkMoneroNode, storedRestoreHeight, suggestRestoreHeight, validateMoneroNode } from "./monero-settings"
 import { createFilePendingStore } from "./monero-pending"
 import { findZcashCliBinary, isSidecarReady, startSidecar, stopSidecar, wipeSidecarWalletDb, hasFvkLoaded, getCachedFvk, onScanProgress, getScanState, updateSyncedTo, beginZcashSend, endZcashSend, isZcashSendInFlight } from "./zcash-sidecar"
-import { CHAINS, customChainToChainDef, isChainSupported, hiveRolePath, btcTaprootSupported, findChainByNetwork } from "../shared/chains"
+import { CHAINS, customChainToChainDef, isChainSupported, hiveRolePath, btcTaprootSupported, findChainByNetwork, isStaleHyperliquidMetadata } from "../shared/chains"
 import { versionCompare } from "../shared/firmware-versions"
 import { supportsZcashPrivacyBuild } from "./zcash-capability"
 import type { ChainDef } from "../shared/chains"
@@ -893,6 +893,8 @@ const BUILTIN_EVM_CHAIN_IDS = new Set(
 function parseRawEntry(entry: any): PioneerChainInfo | null {
 	if (!entry.chainId?.startsWith('eip155:')) return null
 	if (!entry.assetId?.endsWith('/slip44:60')) return null
+	if (entry.assetId.split('/')[0] !== entry.chainId) return null
+	if (isStaleHyperliquidMetadata(entry.assetId, entry.symbol, entry.name)) return null
 	const numericId = parseInt(entry.chainId.replace('eip155:', ''), 10)
 	if (isNaN(numericId) || numericId < 1) return null
 	if (BUILTIN_EVM_CHAIN_IDS.has(numericId)) return null

@@ -33,6 +33,9 @@
       "__tests__/window-approval-focus.test.ts"
     ],
     "balances-receive-history": [
+      "__tests__/hyperliquid-identity.test.ts",
+      "__tests__/receive-payment-uri.test.ts",
+      "__tests__/swap-row-explorer.test.ts",
       "__tests__/asset-page-loading.test.ts",
       "__tests__/evm-addresses-loading.test.ts",
       "__tests__/asset-catalog-sync.test.ts",

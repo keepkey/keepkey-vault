@@ -130,7 +130,7 @@ const CONFIGS: ChainConfig[] = [
     explorerAddressUrl: 'https://etherscan.io/address/{{address}}',
   },
   {
-    id: 'polygon', chain: Chain.Polygon, coin: 'Polygon', symbol: 'MATIC',
+    id: 'polygon', chain: Chain.Polygon, coin: 'Polygon', symbol: 'POL',
     chainFamily: 'evm', color: '#8247E5',
     rpcMethod: 'ethGetAddress', signMethod: 'ethSignTx',
     defaultPath: [0x8000002C, 0x8000003C, 0x80000000, 0, 0], chainId: '137',
@@ -198,12 +198,17 @@ const CONFIGS: ChainConfig[] = [
     chainFamily: 'evm', color: '#1F70FF',
     rpcMethod: 'ethGetAddress', signMethod: 'ethSignTx',
     defaultPath: [0x8000002C, 0x8000003C, 0x80000000, 0, 0], chainId: '143',
+    explorerTxUrl: 'https://monadscan.com/tx/{{txid}}',
+    explorerAddressUrl: 'https://monadscan.com/address/{{address}}',
   },
   {
     id: 'hyperliquid', chain: Chain.Hyperliquid, coin: 'Hyperliquid', symbol: 'HYPE',
     chainFamily: 'evm', color: '#00D084',
     rpcMethod: 'ethGetAddress', signMethod: 'ethSignTx',
-    defaultPath: [0x8000002C, 0x8000003C, 0x80000000, 0, 0], chainId: '2868',
+    // HyperEVM mainnet: https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/hyperevm
+    defaultPath: [0x8000002C, 0x8000003C, 0x80000000, 0, 0], chainId: '999',
+    explorerTxUrl: 'https://hyperevmscan.io/tx/{{txid}}',
+    explorerAddressUrl: 'https://hyperevmscan.io/address/{{address}}',
   },
   {
     id: 'cosmos', chain: Chain.Cosmos, coin: 'Cosmos', symbol: 'ATOM',
@@ -387,12 +392,27 @@ const DECIMAL_FALLBACKS: Record<string, number> = {
   XMR: 12,
 }
 
-// Derive CAIP identifiers from pioneer-caip — single source of truth
+// The pinned pioneer-caip package incorrectly identifies HYPE as chain 2868.
+// Override its built-in identity, never alias that unrelated chain to HyperEVM.
+const CHAIN_METADATA_OVERRIDES: Partial<Record<string, Pick<ChainDef, 'networkId' | 'caip' | 'decimals'>>> = {
+  [Chain.Hyperliquid]: { networkId: 'eip155:999', caip: 'eip155:999/slip44:60', decimals: 18 },
+}
+
+/** Reject a known mislabeled provider/catalog entry, not unrelated custom
+ * chains using 2868. These inputs are curated discovery metadata only. */
+export function isStaleHyperliquidMetadata(networkId: string, symbol?: string, name?: string): boolean {
+  const [network, asset] = networkId.split('/')
+  return network === 'eip155:2868' && (!asset || asset.startsWith('slip44:'))
+    && (symbol?.toUpperCase() === 'HYPE' || /hyperliquid|hyperevm/i.test(name || ''))
+}
+
+// Derive identifiers from pioneer-caip with reviewed identity corrections.
 export const CHAINS: ChainDef[] = CONFIGS.map(c => ({
   ...c,
   networkId: ChainToNetworkId[c.chain as keyof typeof ChainToNetworkId] || NETWORKID_FALLBACKS[c.chain] || '',
   caip: ChainToCaip[c.chain as keyof typeof ChainToCaip] || CAIP_FALLBACKS[c.chain] || '',
   decimals: BaseDecimal[c.chain as keyof typeof BaseDecimal] ?? DECIMAL_FALLBACKS[c.chain] ?? 8,
+  ...CHAIN_METADATA_OVERRIDES[c.chain],
 }))
 
 /** Display name + native symbol for an EVM chain id ("8453" or 8453), from

@@ -10,6 +10,7 @@
  * blocking initial render.
  */
 import offlineAssetIconsJson from './offlineAssetIcons.json'
+import { CHAINS, isStaleHyperliquidMetadata } from './chains'
 
 interface SlimAssetEntry {
   symbol: string
@@ -49,7 +50,20 @@ function getAssetMap(): Record<string, SlimAssetEntry> | null {
   // Kick off lazy load if not started yet
   if (!loadPromise) {
     loadPromise = import('./assetData.json').then((m) => {
-      assetMap = (m.default || m) as Record<string, SlimAssetEntry>
+      assetMap = { ...(m.default || m) } as Record<string, SlimAssetEntry>
+      // Correct only curated native metadata. Never reinterpret the old 2868
+      // HYPE entries as mainnet, and leave custom registrations independent.
+      for (const [caip, entry] of Object.entries(assetMap)) {
+        if (isStaleHyperliquidMetadata(caip, entry.symbol, entry.name)) delete assetMap[caip]
+      }
+      for (const chain of CHAINS.filter(c => ['hyperliquid', 'monad', 'polygon', 'base'].includes(c.id))) {
+        assetMap[chain.caip] = {
+          ...assetMap[chain.caip], symbol: chain.symbol, name: chain.coin,
+          decimals: chain.decimals, color: chain.color, isNative: true, type: 'native',
+          explorerAddressLink: chain.explorerAddressUrl,
+          explorerTxLink: chain.explorerTxUrl,
+        }
+      }
       return assetMap
     }).catch((err) => {
       console.warn('[assetLookup] Failed to load asset data:', err)

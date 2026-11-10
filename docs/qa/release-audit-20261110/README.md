@@ -50,10 +50,15 @@ key was approved, and the coordinator verified that no pairing record was saved.
   Privacy shortcut was found and removed during this audit. Thirteen unified-page
   checks and six actual-dashboard checks now pass.
 
+The later supplied Windows 1.6.7 audit is reconciled separately in the
+[network and asset report](network-assets-167-report.md), including the confirmed
+Hyperliquid identity defect and distinctions between app, server-content and
+personal-wallet receiving behavior.
+
 ## Validation so far
 
 - Initial core regressions: 1,540 tests and 93 script assertions, zero failures.
-- Final combined candidate: 1,581 core tests and 93 script assertions pass,
+- Final combined candidate: 1,601 core tests and 93 script assertions pass,
   including the local protocol-lock invariant and the Base icon regression.
 - Swap browser QA: nine delayed-account/network cases and twelve review cases,
   no runtime errors; fixtures use synthetic balances and transactions.
@@ -76,13 +81,11 @@ key was approved, and the coordinator verified that no pairing record was saved.
   persistence are implemented and independently reviewed. Monero policy and
   standard synthetic flows pass 153 tests / 825 assertions.
 
-PR #634 Linux CI passed at `4bbc47982`; macOS crashed in the focus fixture's
-native HTTP harness. The fixture now executes the same production router without
-native HTTP sockets, keeps all twelve assertions and remains red against the old
-focus code. Ten local repeats pass. The standalone PR's platform CI is running again;
-the crash persisted without sockets. The final fixture also mocks USB/HID before
-imports and forbids all native addons. It retains every assertion and remains red
-against the old behavior. The final macOS CI result is still pending.
+PR #634 at `92ac07211` passes Linux, macOS and Intel packaged-app smoke CI in
+run `42864966453`. Earlier macOS runs crashed in the focus fixture; removing
+HTTP sockets alone was insufficient. The final fixture executes the production
+router in-process, mocks USB/HID before imports and forbids native addons. All
+twelve assertions remain and the previous focus behavior still fails them.
 
 PR #642's first integration run, `42868784631`, failed before tests on both
 platforms because Bun rejected incomplete local-package lock metadata. A full
@@ -91,6 +94,12 @@ passes fresh frozen installs for macOS arm64 and Linux x64 dependency selection
 (1,183 packages each, scripts disabled for this install-only check), without
 changing registry versions, local protocol sources or the elliptic 6.6.1 pin.
 Exact-head platform build and smoke checks remain required after this repair.
+The repair run `42870743907` passed fresh Linux dependency installation, then
+exposed two outdated test fixtures: a missing required WalletConnect dismissal
+callback and a provider-session wiring assertion limited to the first 400 source
+characters. Both are corrected without weakening production checks; the two
+complete suites pass 91 tests / 311 assertions. The next combined revision must
+complete platform CI before merging.
 
 Local detailed results are under `/private/tmp/keepkey-release-core-20261110`,
 `/private/tmp/keepkey-swap-loading-20261110`, and

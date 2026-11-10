@@ -11,7 +11,7 @@
  * session.
  */
 import type { SwapAsset, ChainBalance, CustomToken } from './types'
-import { CHAINS, isChainSupported, type ChainDef } from './chains'
+import { CHAINS, isChainSupported, isStaleHyperliquidMetadata, type ChainDef } from './chains'
 import { COIN_MAP_LONG } from '@pioneer-platform/pioneer-coins'
 import { assessAvailability, normalizeChainCaip2, CHAIN_CAIP2_ALIASES, isThorchainBankToken, thorchainBankTokenFirmwareOK, THORCHAIN_BANK_TOKEN_MIN_FW, type AvailabilityAssessment } from './swap-support-matrix'
 // Static-imported chains metadata — ~218KB, used synchronously by
@@ -238,7 +238,17 @@ async function getDiscoveryMap(): Promise<Map<string, DiscoveryAssetRaw>> {
   // user never opens the asset picker.
   const mod = await import('@pioneer-platform/pioneer-discovery')
   const data = (mod as any).assetData as Record<string, DiscoveryAssetRaw>
-  cachedDiscovery = new Map(Object.entries(data))
+  cachedDiscovery = new Map(Object.entries(data).filter(([caip, asset]) =>
+    !isStaleHyperliquidMetadata(caip, asset.symbol, asset.name)))
+  // Replace the catalog's two mislabeled 2868 native HYPE entries with the
+  // independently configured mainnet identity. No old asset is remapped.
+  for (const chain of CHAINS.filter(c => ['hyperliquid', 'monad', 'polygon', 'base'].includes(c.id))) {
+    cachedDiscovery.set(chain.caip, {
+      ...cachedDiscovery.get(chain.caip), symbol: chain.symbol, name: chain.coin,
+      chainId: chain.networkId, assetId: chain.caip,
+      decimals: chain.decimals, isNative: true,
+    })
+  }
   return cachedDiscovery
 }
 
@@ -383,6 +393,7 @@ export function networkDisplayName(caip2: string): string {
   const meta = getChainMetaMap().get(caip2)
   if (meta) return meta.displayName
   const discovery = discoveryChains[caip2]
+  if (isStaleHyperliquidMetadata(caip2, discovery?.nativeCurrency?.symbol, discovery?.name)) return caip2
   if (discovery?.name) return discovery.name
   return caip2
 }
@@ -455,6 +466,7 @@ export function synthesizeSwapAsset(entry: AssetEntry): {
 } | null {
   const meta = chainMetaForCaip2(entry.chainId)
   if (!meta) return null  // unknown chain — caller should refuse the selection
+  if (meta.vaultChainId === 'hyperliquid' && parseCaip(entry.caip).chainCaip2 !== entry.chainId) return null
 
   // Single parser, namespace-aware. Was previously homemade and missed `/bep20:`
   // entirely — BSC tokens lost their contract address during synthesis and the
@@ -512,6 +524,7 @@ export async function buildAssetEntries(input: BuildEntriesInput): Promise<Asset
   const discovery = await getDiscoveryMap()
   const swappableByCaip = new Map<string, SwapAsset>()
   for (const s of input.swappable) {
+    if (s.caip && isStaleHyperliquidMetadata(s.caip, s.symbol, s.name)) continue
     if (s.caip) swappableByCaip.set(s.caip, s)
   }
 

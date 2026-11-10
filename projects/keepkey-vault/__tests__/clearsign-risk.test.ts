@@ -703,12 +703,15 @@ describe('message verdicts', () => {
   test('a WalletConnect personal_sign SIWE login gets the same green verdict as REST', async () => {
     const siwe = `app.uniswap.org wants you to sign in with your Ethereum account:\n${USER}\n\nSign in to Uniswap\n\nURI: https://app.uniswap.org\nVersion: 1\nChain ID: 1\nNonce: abcdef12345\nIssued At: 2026-10-16T00:00:00.000Z`
     let seen: SigningRequestInfo | undefined
+    const dismissed: string[] = []
     const wc = new WalletConnectManager({
       getEvmAddressInfo: () => ({ address: USER }),
       recordClearSignObservation: () => undefined,
       requestSigningApproval: async (info: SigningRequestInfo) => { seen = info; return false },
+      dismissSigning: (id: string) => { dismissed.push(id) },
     } as any)
     await expect((wc as any).signMessage(hex(siwe), [], 'Uniswap', 1)).rejects.toThrow('User rejected signing')
+    expect(dismissed).toEqual([seen!.id])
     // index.ts attachSigningPolicySnapshot adds the firmware version before the overlay assesses it.
     const r = assessSigningRisk({ ...seen!, firmwareVersion: '7.16.0' })!
     expect(r.tier).toBe('green')
