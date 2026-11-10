@@ -9,11 +9,36 @@
  */
 import { join, resolve } from 'node:path'
 import { copyFileSync, existsSync, mkdirSync } from 'node:fs'
+import { writeZcashNu7Manifest } from './write-zcash-nu7-manifest'
+import { verifyEmulatorBeforeSigning, writeEmulatorSigningReceipt } from './write-emulator-signing-receipt'
 
 const env = process.argv[2] || 'stable'
 const scriptsDir = join(import.meta.dir)
 const currentPath = process.env.PATH || ''
 let emulatorSource: string | undefined
+let emulatorReceiptSource: string | undefined
+let zcashSource: string | undefined
+
+// Electrobun seals Resources but does not sign extensionless helpers there.
+// Sign a disposable copy first, then hash the signed bytes before app sealing.
+const zcashExecutable = process.platform === 'win32' ? 'zcash-cli.exe' : 'zcash-cli'
+const zcashInput = resolve(import.meta.dir, '..', 'zcash-cli', 'target', 'release', zcashExecutable)
+if (existsSync(zcashInput)) {
+  let manifestBinary = zcashInput
+  if (process.platform === 'darwin' && process.env.CI !== 'true') {
+    const developer = process.env.ELECTROBUN_DEVELOPER_ID
+    const team = process.env.ELECTROBUN_TEAMID
+    if (!developer || !team) throw new Error('Developer ID and Team ID are required for the Zcash helper signature.')
+    zcashSource = join('_build', '_signed_zcash', zcashExecutable)
+    manifestBinary = resolve(import.meta.dir, '..', zcashSource)
+    mkdirSync(resolve(import.meta.dir, '..', '_build', '_signed_zcash'), { recursive: true })
+    copyFileSync(zcashInput, manifestBinary)
+    const signed = Bun.spawnSync(['codesign', '--force', '--verbose', '--timestamp', '--options', 'runtime',
+      '--sign', `Developer ID Application: ${developer} (${team})`, manifestBinary], { stdout: 'inherit', stderr: 'inherit' })
+    if (signed.exitCode !== 0) process.exit(signed.exitCode ?? 1)
+  }
+  writeZcashNu7Manifest(manifestBinary)
+}
 
 // Stable/canary packages for supported emulator hosts must never silently ship
 // without the pinned library. Developer `bun run build` remains optional.
@@ -25,6 +50,7 @@ if (process.platform === 'darwin' || process.platform === 'win32') {
     console.error('[release] Stage the certified emulator artifact with scripts/stage-certified-emulator.sh <artifact-dir>.')
     process.exit(1)
   }
+  const reviewedSource = verifyEmulatorBeforeSigning(staged)
 
   // Apple notarization requires every embedded Mach-O to carry a timestamped
   // Developer ID signature. Verify-certified-emulator runs before this wrapper
@@ -46,6 +72,8 @@ if (process.platform === 'darwin' || process.platform === 'win32') {
       '--sign', `Developer ID Application: ${developer} (${team})`, signedCopy,
     ], { stdout: 'inherit', stderr: 'inherit' })
     if (signed.exitCode !== 0) process.exit(signed.exitCode ?? 1)
+    writeEmulatorSigningReceipt(signedCopy, reviewedSource)
+    emulatorReceiptSource = join('_build', '_signed_emulator', 'nu7-emulator-receipt.json')
   }
 }
 
@@ -105,6 +133,8 @@ const result = Bun.spawnSync(
       ...process.env,
       PATH: `${scriptsDir}:${currentPath}`,
       ...(emulatorSource ? { KEEPKEY_EMULATOR_SOURCE: emulatorSource } : {}),
+      ...(emulatorReceiptSource ? { KEEPKEY_EMULATOR_RECEIPT_SOURCE: emulatorReceiptSource } : {}),
+      ...(zcashSource ? { KEEPKEY_ZCASH_CLI_SOURCE: zcashSource } : {}),
       ...signedMoneroSources,
     },
     stdout: 'inherit',

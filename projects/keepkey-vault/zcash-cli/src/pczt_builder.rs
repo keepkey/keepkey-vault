@@ -2129,6 +2129,27 @@ fn serialize_v6_ironwood_hybrid_tx(
     branch_id: u32,
     compressed_pubkey: Option<&[u8]>,
 ) -> Result<Vec<u8>> {
+    let pubkeys = compressed_pubkey
+        .map(|key| vec![key.to_vec(); transparent_inputs.len()])
+        .unwrap_or_default();
+    serialize_v6_ironwood_hybrid_tx_with_pubkeys(
+        bundle,
+        transparent_inputs,
+        transparent_outputs,
+        transparent_signatures,
+        branch_id,
+        &pubkeys,
+    )
+}
+
+fn serialize_v6_ironwood_hybrid_tx_with_pubkeys(
+    bundle: Option<&orchard::Bundle<orchard::bundle::Authorized, i64>>,
+    transparent_inputs: &[zip244::TransparentInput],
+    transparent_outputs: &[zip244::TransparentOutput],
+    transparent_signatures: &[Vec<u8>],
+    branch_id: u32,
+    compressed_pubkeys: &[Vec<u8>],
+) -> Result<Vec<u8>> {
     if bundle.is_some_and(|b| b.bundle_version() != IRONWOOD_BUNDLE_VERSION) {
         return Err(anyhow::anyhow!(
             "Refusing to serialize a non-Ironwood bundle in the v6 Ironwood slot"
@@ -2155,7 +2176,8 @@ fn serialize_v6_ironwood_hybrid_tx(
         tx.extend_from_slice(&input.prevout_index.to_le_bytes());
 
         let signature = &transparent_signatures[index];
-        let pubkey = compressed_pubkey
+        let pubkey = compressed_pubkeys
+            .get(index)
             .ok_or_else(|| anyhow::anyhow!("Compressed pubkey required for P2PKH scriptSig"))?;
         if pubkey.len() != 33 || signature.len() + 1 > 75 {
             return Err(anyhow::anyhow!(
@@ -3081,6 +3103,55 @@ pub struct TransparentOnlyState {
 /// Firmware 7.15 limits on transparent inputs and outputs per transaction.
 pub const MAX_TRANSPARENT_INPUTS: usize = 8;
 pub const MAX_TRANSPARENT_OUTPUTS: usize = 8;
+const MAX_ZATOSHI: u64 = 21_000_000 * 100_000_000;
+
+/// Mainnet inclusion branch for the reviewed transparent v6 formats only.
+/// No unknown future upgrade is inferred from a node's branch string.
+pub fn transparent_branch_at_height(height: u64) -> Result<u32> {
+    u32::try_from(height).map_err(|_| anyhow::anyhow!("Invalid mainnet inclusion height"))?;
+    if height >= crate::zip229::NU7_ACTIVATION_HEIGHT {
+        Ok(crate::zip229::NU7_BRANCH_ID)
+    } else if height >= crate::zip229::NU6_3_ACTIVATION_HEIGHT {
+        Ok(crate::zip229::NU6_3_BRANCH_ID)
+    } else {
+        Err(anyhow::anyhow!("Transparent v6 requires NU6.3 or NU7"))
+    }
+}
+
+pub fn validate_transparent_branch(branch_id: u32, target_height: u64) -> Result<()> {
+    if branch_id != transparent_branch_at_height(target_height)? {
+        return Err(anyhow::anyhow!(
+            "Node consensus branch 0x{:08x} does not match mainnet target height {}",
+            branch_id,
+            target_height
+        ));
+    }
+    Ok(())
+}
+
+pub fn validate_transparent_path(path: &[u32]) -> Result<()> {
+    const H: u32 = 0x80000000;
+    if path.len() != 5
+        || path[0] != H + 44
+        || path[1] != H + 133
+        || path[2] < H
+        || path[3] > 2
+        || path[4] >= H
+    {
+        return Err(anyhow::anyhow!(
+            "Expected m/44'/133'/account'/{{0,1,2}}/index"
+        ));
+    }
+    Ok(())
+}
+
+fn is_p2pkh(script: &[u8]) -> bool {
+    script.len() == 25 && script[..3] == [0x76, 0xa9, 0x14] && script[23..] == [0x88, 0xac]
+}
+
+fn is_p2sh(script: &[u8]) -> bool {
+    script.len() == 23 && script[..2] == [0xa9, 0x14] && script[22] == 0x87
+}
 
 /// ZIP-317 fee for P2PKH inputs and outputs only.
 pub fn zip317_transparent_fee(n_inputs: usize, n_outputs: usize) -> u64 {
@@ -3100,10 +3171,24 @@ pub fn build_transparent_only(
     address_path: Vec<u32>,
     branch_id: u32,
 ) -> Result<TransparentOnlyState> {
-    if branch_id != crate::zip229::NU6_3_BRANCH_ID {
+    build_transparent_only_with_paths(
+        inputs,
+        outputs,
+        &vec![address_path; inputs.len()],
+        branch_id,
+    )
+}
+
+/// Each input retains its own verified receive/change/ephemeral derivation.
+pub fn build_transparent_only_with_paths(
+    inputs: &[ShieldTransparentInput],
+    outputs: &[DeshieldTransparentOutput],
+    address_paths: &[Vec<u32>],
+    branch_id: u32,
+) -> Result<TransparentOnlyState> {
+    if branch_id != crate::zip229::NU6_3_BRANCH_ID && branch_id != crate::zip229::NU7_BRANCH_ID {
         return Err(anyhow::anyhow!(
-            "Transparent v6 transactions require NU6.3 branch 0x{:08x}; node reported 0x{:08x}",
-            crate::zip229::NU6_3_BRANCH_ID,
+            "Unsupported transparent v6 consensus branch 0x{:08x}",
             branch_id
         ));
     }
@@ -3121,35 +3206,78 @@ pub fn build_transparent_only(
             outputs.len()
         ));
     }
+    if address_paths.len() != inputs.len() {
+        return Err(anyhow::anyhow!(
+            "Each transparent input needs its derivation path"
+        ));
+    }
+    for path in address_paths {
+        validate_transparent_path(path)?;
+        if path[2] != address_paths[0][2] {
+            return Err(anyhow::anyhow!(
+                "Transparent inputs must belong to the same account"
+            ));
+        }
+    }
 
     let mut zip_inputs = Vec::with_capacity(inputs.len());
+    let mut prevouts = std::collections::HashSet::new();
     for ti in inputs {
         let txid_bytes = hex::decode(&ti.txid)?;
         let mut prevout_hash: [u8; 32] = txid_bytes
             .try_into()
             .map_err(|_| anyhow::anyhow!("Invalid txid length"))?;
         prevout_hash.reverse(); // display order → internal byte order
+        if !prevouts.insert((prevout_hash, ti.vout)) {
+            return Err(anyhow::anyhow!("Duplicate transparent input"));
+        }
+        let script_pubkey = hex::decode(&ti.script_pubkey)?;
+        if !is_p2pkh(&script_pubkey) {
+            return Err(anyhow::anyhow!(
+                "Transparent inputs must be canonical P2PKH outputs"
+            ));
+        }
+        if ti.value == 0 || ti.value > MAX_ZATOSHI {
+            return Err(anyhow::anyhow!(
+                "Transparent input amount is outside the monetary range"
+            ));
+        }
         zip_inputs.push(zip244::TransparentInput {
             prevout_hash,
             prevout_index: ti.vout,
-            script_pubkey: hex::decode(&ti.script_pubkey)?,
+            script_pubkey,
             value: ti.value,
             sequence: 0xFFFFFFFF,
         });
     }
     let mut zip_outputs = Vec::with_capacity(outputs.len());
     for o in outputs {
-        if o.value == 0 {
-            return Err(anyhow::anyhow!("Transparent output value must be positive"));
+        if o.value == 0 || o.value > MAX_ZATOSHI {
+            return Err(anyhow::anyhow!(
+                "Transparent output amount is outside the monetary range"
+            ));
+        }
+        let script_pubkey = hex::decode(&o.script_pubkey)?;
+        if !is_p2pkh(&script_pubkey) && !is_p2sh(&script_pubkey) {
+            return Err(anyhow::anyhow!(
+                "Transparent outputs must be canonical P2PKH or P2SH"
+            ));
         }
         zip_outputs.push(zip244::TransparentOutput {
             value: o.value,
-            script_pubkey: hex::decode(&o.script_pubkey)?,
+            script_pubkey,
         });
     }
 
-    let total_in: u64 = zip_inputs.iter().map(|i| i.value).sum();
-    let total_out: u64 = zip_outputs.iter().map(|o| o.value).sum();
+    let total = |values: Vec<u64>| -> Result<u64> {
+        values.into_iter().try_fold(0u64, |sum, value| {
+            sum.checked_add(value)
+                .filter(|n| *n <= MAX_ZATOSHI)
+                .ok_or_else(|| anyhow::anyhow!("Transparent total exceeds the monetary range"))
+        })
+    };
+    let total_in = total(zip_inputs.iter().map(|i| i.value).collect())?;
+    let total_out = total(zip_outputs.iter().map(|o| o.value).collect())?;
     let fee = total_in.checked_sub(total_out).ok_or_else(|| {
         anyhow::anyhow!(
             "Outputs ({} ZAT) exceed inputs ({} ZAT)",
@@ -3187,7 +3315,7 @@ pub fn build_transparent_only(
                 branch_id,
             )
             .to_vec(),
-            address_path: address_path.clone(),
+            address_path: address_paths[i].clone(),
             amount: input.value,
             prevout_txid: hex::encode(input.prevout_hash),
             prevout_index: input.prevout_index,
@@ -3214,6 +3342,18 @@ pub fn finalize_transparent_only(
     transparent_signatures: &[Vec<u8>],
     compressed_pubkey: &[u8],
 ) -> Result<(Vec<u8>, String)> {
+    finalize_transparent_only_with_pubkeys(
+        state,
+        transparent_signatures,
+        &vec![compressed_pubkey.to_vec(); state.transparent_inputs.len()],
+    )
+}
+
+pub fn finalize_transparent_only_with_pubkeys(
+    state: &TransparentOnlyState,
+    transparent_signatures: &[Vec<u8>],
+    compressed_pubkeys: &[Vec<u8>],
+) -> Result<(Vec<u8>, String)> {
     if transparent_signatures.len() != state.transparent_inputs.len() {
         return Err(anyhow::anyhow!(
             "Expected {} transparent signatures, got {}",
@@ -3221,21 +3361,30 @@ pub fn finalize_transparent_only(
             transparent_signatures.len()
         ));
     }
+    if compressed_pubkeys.len() != state.transparent_inputs.len() {
+        return Err(anyhow::anyhow!(
+            "Each transparent input needs its compressed public key"
+        ));
+    }
     let secp = secp256k1::Secp256k1::verification_only();
-    let pubkey = secp256k1::PublicKey::from_slice(compressed_pubkey)
-        .map_err(|e| anyhow::anyhow!("Invalid compressed pubkey: {}", e))?;
-    let pubkey_hash = {
-        use ripemd::Ripemd160;
-        use sha2::{Digest, Sha256};
-        Ripemd160::digest(Sha256::digest(compressed_pubkey))
-    };
     for (i, (sig, input)) in transparent_signatures
         .iter()
         .zip(&state.transparent_signing_inputs)
         .enumerate()
     {
+        let compressed_pubkey = &compressed_pubkeys[i];
+        if compressed_pubkey.len() != 33 {
+            return Err(anyhow::anyhow!("Input {} needs a compressed public key", i));
+        }
+        let pubkey = secp256k1::PublicKey::from_slice(compressed_pubkey)
+            .map_err(|e| anyhow::anyhow!("Invalid compressed pubkey: {}", e))?;
+        let pubkey_hash = {
+            use ripemd::Ripemd160;
+            use sha2::{Digest, Sha256};
+            Ripemd160::digest(Sha256::digest(compressed_pubkey))
+        };
         let script = hex::decode(&input.script_pubkey)?;
-        if script.len() != 25 || script[3..23] != pubkey_hash[..] {
+        if !is_p2pkh(&script) || script[3..23] != pubkey_hash[..] {
             return Err(anyhow::anyhow!(
                 "Input {} is not a P2PKH output of the signing key",
                 i
@@ -3252,13 +3401,13 @@ pub fn finalize_transparent_only(
         .map_err(|_| anyhow::anyhow!("Input {}: device signature does not verify", i))?;
     }
 
-    let tx = serialize_v6_ironwood_hybrid_tx(
+    let tx = serialize_v6_ironwood_hybrid_tx_with_pubkeys(
         None,
         &state.transparent_inputs,
         &state.transparent_outputs,
         transparent_signatures,
         state.branch_id,
-        Some(compressed_pubkey),
+        compressed_pubkeys,
     )?;
     let txid = crate::zip229::compute_txid(
         crate::zip229::empty_ironwood_digest(),
@@ -3294,6 +3443,274 @@ mod transparent_only_tests {
 
     fn ephemeral_path() -> Vec<u32> {
         vec![0x8000002C, 0x80000085, 0x80000000, 2, 0]
+    }
+
+    fn nu7_case() -> (TransparentOnlyState, Vec<Vec<u8>>, Vec<Vec<u8>>) {
+        use ripemd::Ripemd160;
+        use sha2::{Digest, Sha256};
+        let secp = secp256k1::Secp256k1::new();
+        let keys: Vec<_> = [0x11, 0x22]
+            .iter()
+            .map(|byte| secp256k1::SecretKey::from_slice(&[*byte; 32]).unwrap())
+            .collect();
+        let pubkeys: Vec<_> = keys
+            .iter()
+            .map(|key| {
+                secp256k1::PublicKey::from_secret_key(&secp, key)
+                    .serialize()
+                    .to_vec()
+            })
+            .collect();
+        let inputs: Vec<_> = pubkeys
+            .iter()
+            .enumerate()
+            .map(|(i, key)| ShieldTransparentInput {
+                txid: format!("{:02x}", i + 1).repeat(32),
+                vout: i as u32,
+                value: if i == 0 { 110_000 } else { 90_000 },
+                script_pubkey: p2pkh(&Ripemd160::digest(Sha256::digest(key))),
+            })
+            .collect();
+        let outputs = vec![
+            DeshieldTransparentOutput {
+                value: 100_000,
+                script_pubkey: p2pkh(&[0xab; 20]),
+            },
+            DeshieldTransparentOutput {
+                value: 85_000,
+                script_pubkey: p2pkh(&Ripemd160::digest(Sha256::digest(&pubkeys[1]))),
+            },
+        ];
+        let paths = vec![
+            vec![0x8000002c, 0x80000085, 0x80000000, 0, 2],
+            vec![0x8000002c, 0x80000085, 0x80000000, 1, 1],
+        ];
+        let state = build_transparent_only_with_paths(
+            &inputs,
+            &outputs,
+            &paths,
+            crate::zip229::NU7_BRANCH_ID,
+        )
+        .unwrap();
+        let sigs = keys
+            .iter()
+            .zip(&state.transparent_signing_inputs)
+            .map(|(key, input)| {
+                let message =
+                    secp256k1::Message::from_digest(input.sighash.as_slice().try_into().unwrap());
+                secp.sign_ecdsa(&message, key).serialize_der().to_vec()
+            })
+            .collect();
+        (state, sigs, pubkeys)
+    }
+
+    #[test]
+    fn nu7_transparent_fixture_matches_production() {
+        let (state, sigs, pubkeys) = nu7_case();
+        let (raw, txid) = finalize_transparent_only_with_pubkeys(&state, &sigs, &pubkeys).unwrap();
+        let actual = serde_json::json!({
+            "branch_id": state.branch_id, "tx_version": 6,
+            "version_group_id": crate::zip229::VERSION_GROUP_ID, "lock_time": 0, "expiry_height": 0,
+            "raw_tx": hex::encode(raw), "txid": txid,
+            "inputs": state.transparent_inputs.iter().enumerate().map(|(i, input)| serde_json::json!({
+                "prevout_hash": hex::encode(input.prevout_hash), "prevout_index": input.prevout_index,
+                "value": input.value, "sequence": input.sequence, "script_pubkey": hex::encode(&input.script_pubkey),
+                "address_path": state.transparent_signing_inputs[i].address_path,
+                "compressed_pubkey": hex::encode(&pubkeys[i]), "sighash": hex::encode(&state.transparent_signing_inputs[i].sighash),
+            })).collect::<Vec<_>>(),
+            "outputs": state.transparent_outputs.iter().map(|o| serde_json::json!({ "value": o.value,
+                "script_pubkey": hex::encode(&o.script_pubkey) })).collect::<Vec<_>>(),
+            "digests": { "header": hex::encode(state.digests.header_digest),
+                "transparent": hex::encode(state.digests.transparent_digest), "sapling": hex::encode(state.digests.sapling_digest),
+                "orchard": hex::encode(state.digests.orchard_digest), "ironwood": hex::encode(state.digests.ironwood_digest) },
+        });
+        // This public synthetic fixture is independently verified by the
+        // standalone, exact-pinned NU7 reference crate (not this old cohort).
+        println!("NU7_FIXTURE:{}", actual);
+        let expected: serde_json::Value =
+            serde_json::from_str(include_str!("../tests/fixtures/transparent-nu7.json")).unwrap();
+        assert_eq!(actual, expected);
+        assert_eq!(state.fee, 15_000);
+        assert_eq!(
+            state.transparent_signing_inputs[0].address_path[3..],
+            [0, 2]
+        );
+        assert_eq!(
+            state.transparent_signing_inputs[1].address_path[3..],
+            [1, 1]
+        );
+    }
+
+    #[test]
+    fn nu7_branch_boundary_and_unknown_branch_fail_closed() {
+        let activation = crate::zip229::NU7_ACTIVATION_HEIGHT;
+        assert_eq!(
+            transparent_branch_at_height(activation - 1).unwrap(),
+            crate::zip229::NU6_3_BRANCH_ID
+        );
+        assert_eq!(
+            transparent_branch_at_height(activation).unwrap(),
+            crate::zip229::NU7_BRANCH_ID
+        );
+        assert!(validate_transparent_branch(crate::zip229::NU6_3_BRANCH_ID, activation).is_err());
+        assert!(validate_transparent_branch(crate::zip229::NU7_BRANCH_ID, activation - 1).is_err());
+        assert!(validate_transparent_branch(0xffff_ffff, activation).is_err());
+        assert!(transparent_branch_at_height(crate::zip229::NU6_3_ACTIVATION_HEIGHT - 1).is_err());
+        assert!(transparent_branch_at_height(u32::MAX as u64 + 1).is_err());
+    }
+
+    #[test]
+    fn nu7_each_input_requires_its_own_key_and_signature() {
+        let (state, sigs, keys) = nu7_case();
+        assert!(finalize_transparent_only(&state, &sigs, &keys[0]).is_err());
+        assert!(finalize_transparent_only_with_pubkeys(&state, &sigs, &keys[..1]).is_err());
+        assert!(finalize_transparent_only_with_pubkeys(&state, &sigs[..1], &keys).is_err());
+        let mut swapped = keys.clone();
+        swapped.swap(0, 1);
+        assert!(finalize_transparent_only_with_pubkeys(&state, &sigs, &swapped).is_err());
+        let mut swapped_sigs = sigs.clone();
+        swapped_sigs.swap(0, 1);
+        assert!(finalize_transparent_only_with_pubkeys(&state, &swapped_sigs, &keys).is_err());
+        let mut malformed = sigs.clone();
+        malformed[0].push(1);
+        assert!(finalize_transparent_only_with_pubkeys(&state, &malformed, &keys).is_err());
+    }
+
+    #[test]
+    fn nu7_signatures_bind_all_prevouts_amounts_scripts_outputs_and_header() {
+        let (state, signatures, keys) = nu7_case();
+        let secp = secp256k1::Secp256k1::verification_only();
+        for mutation in 0..10 {
+            let mut inputs = state.transparent_inputs.clone();
+            let mut outputs = state.transparent_outputs.clone();
+            let mut branch = state.branch_id;
+            let mut header = state.digests.header_digest;
+            match mutation {
+                0 => inputs[0].value += 1,
+                1 => inputs[0].script_pubkey[3] ^= 1,
+                2 => inputs[0].prevout_hash[0] ^= 1,
+                3 => inputs[0].prevout_index += 1,
+                4 => inputs[0].sequence -= 1,
+                5 => outputs[0].value -= 1,
+                6 => outputs[0].script_pubkey[3] ^= 1,
+                7 => {
+                    branch = crate::zip229::NU6_3_BRANCH_ID;
+                    header = crate::zip229::digest_header(branch, 0, 0);
+                }
+                8 => header = crate::zip244::digest_header(branch, 0, 0), // different tx version/group
+                9 => header = crate::zip229::digest_header(branch, 1, 1),
+                _ => unreachable!(),
+            }
+            let digests = crate::zip229::Zip229Digests {
+                header_digest: header,
+                transparent_digest: zip244::digest_transparent_sig_for_orchard(&inputs, &outputs),
+                sapling_digest: zip244::EMPTY_SAPLING_DIGEST,
+                orchard_digest: crate::zip229::empty_orchard_digest(),
+                ironwood_digest: crate::zip229::empty_ironwood_digest(),
+            };
+            for i in 0..inputs.len() {
+                let changed = crate::zip229::compute_transparent_sig_hash(
+                    i, &inputs, &outputs, &digests, branch,
+                );
+                assert_ne!(
+                    changed.as_slice(),
+                    state.transparent_signing_inputs[i].sighash,
+                    "mutation {} input {}",
+                    mutation,
+                    i
+                );
+                assert!(secp
+                    .verify_ecdsa(
+                        &secp256k1::Message::from_digest(changed),
+                        &secp256k1::ecdsa::Signature::from_der(&signatures[i]).unwrap(),
+                        &secp256k1::PublicKey::from_slice(&keys[i]).unwrap()
+                    )
+                    .is_err());
+            }
+        }
+    }
+
+    #[test]
+    fn nu7_rejects_invalid_amounts_paths_scripts_duplicates_and_fees() {
+        let (_, _, script) = key();
+        let input = ShieldTransparentInput {
+            txid: "11".repeat(32),
+            vout: 0,
+            value: 30_000,
+            script_pubkey: script,
+        };
+        let output = DeshieldTransparentOutput {
+            value: 20_000,
+            script_pubkey: p2pkh(&[0xab; 20]),
+        };
+        let path = ephemeral_path();
+        let branch = crate::zip229::NU7_BRANCH_ID;
+        let build =
+            |inputs: &[ShieldTransparentInput],
+             outputs: &[DeshieldTransparentOutput],
+             paths: &[Vec<u32>],
+             b| build_transparent_only_with_paths(inputs, outputs, paths, b);
+        assert!(build(&[input.clone()], &[output.clone()], &[path.clone()], branch).is_ok());
+        for value in [0, MAX_ZATOSHI + 1, u64::MAX] {
+            let mut bad = input.clone();
+            bad.value = value;
+            assert!(build(&[bad], &[output.clone()], &[path.clone()], branch).is_err());
+            let mut bad = output.clone();
+            bad.value = value;
+            assert!(build(&[input.clone()], &[bad], &[path.clone()], branch).is_err());
+        }
+        let mut malformed = input.clone();
+        malformed.script_pubkey.replace_range(..2, "00");
+        assert!(build(&[malformed], &[output.clone()], &[path.clone()], branch).is_err());
+        let mut malformed = output.clone();
+        malformed.script_pubkey = "51".into();
+        assert!(build(&[input.clone()], &[malformed], &[path.clone()], branch).is_err());
+        assert!(build(
+            &[input.clone(), input.clone()],
+            &[output.clone()],
+            &[path.clone(), path.clone()],
+            branch
+        )
+        .is_err());
+        let mut second = input.clone();
+        second.vout = 1;
+        second.value = MAX_ZATOSHI;
+        assert!(build(
+            &[input.clone(), second.clone()],
+            &[output.clone()],
+            &[path.clone(), path.clone()],
+            branch
+        )
+        .is_err());
+        second.value = input.value;
+        let mut other_account = path.clone();
+        other_account[2] += 1;
+        assert!(build(
+            &[input.clone(), second],
+            &[output.clone()],
+            &[path.clone(), other_account],
+            branch
+        )
+        .is_err());
+        for index in 0..5 {
+            let mut invalid = path.clone();
+            invalid[index] = [0, 0, 0, 3, 0x80000000][index];
+            assert!(build(&[input.clone()], &[output.clone()], &[invalid], branch).is_err());
+        }
+        assert!(build(&[input.clone()], &[output.clone()], &[], branch).is_err());
+        assert!(build(
+            &[input.clone()],
+            &[output.clone()],
+            &[path.clone()],
+            0xffff_ffff
+        )
+        .is_err());
+        let mut underfee = output.clone();
+        underfee.value += 1;
+        assert!(build(&[input.clone()], &[underfee], &[path.clone()], branch).is_err());
+        let mut excess = output;
+        excess.value = input.value + 1;
+        assert!(build(&[input], &[excess], &[path], branch).is_err());
     }
 
     #[test]

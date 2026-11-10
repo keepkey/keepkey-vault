@@ -50,10 +50,10 @@ describe('transparent Zcash transaction policy', () => {
 			xpub: 'xpub-test',
 		})
 
-		// NU6.3 "Ironwood" — active on mainnet since height 3,428,143
-		// (2026-07-28). With no sidecar tip the builder assumes the newest
-		// known upgrade, which is what this path hits.
-		expect(tx.branchId).toBe(0x37a5165b)
+		// Modern plans use Rust PCZT construction and live Nu7 branch checks.
+		expect(tx.branchId).toBe(0x77190ad9)
+		expect(tx).toMatchObject({ version: 6, versionGroupId: 0xd884b698, zcashTransparent: true })
+		expect(tx.inputs[0].scriptPubkey).toMatch(/^76a914[0-9a-f]{40}88ac$/)
 		expect(tx.inputs).toHaveLength(1)
 		expect(tx.inputs[0].amount).toBe('14727242')
 		expect(tx.outputs[0].amount).toBe('14717242')
@@ -83,6 +83,11 @@ describe('transparent Zcash transaction policy', () => {
 // the branch ID. These pin the boundary so the next upgrade flips on height
 // instead of on someone noticing.
 describe('Zcash consensus branch selection', () => {
+	it('uses Nu7 from its activation and keeps the previous block on Ironwood', () => {
+		expect(zcashBranchId(3_543_405)).toBe(0x77190ad9)
+		expect(zcashBranchId(3_559_307)).toBe(0x77190ad9)
+		expect(zcashBranchId(3_543_404)).toBe(0x37a5165b)
+	})
 	it('uses Ironwood at and above its activation height', () => {
 		expect(zcashBranchId(3_428_143)).toBe(0x37a5165b)
 		expect(zcashBranchId(3_500_000)).toBe(0x37a5165b)
@@ -101,6 +106,6 @@ describe('Zcash consensus branch selection', () => {
 
 	it('assumes the newest upgrade when no tip is available', () => {
 		// Guessing old is the failure that survives every future activation.
-		expect(zcashBranchId(null)).toBe(0x37a5165b)
+		expect(zcashBranchId(null)).toBe(0x77190ad9)
 	})
 })

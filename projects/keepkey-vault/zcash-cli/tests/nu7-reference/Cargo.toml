@@ -1,0 +1,17 @@
+[package]
+name = "keepkey-zcash-nu7-reference"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+# A separate reference cohort avoids changing the shipped sidecar's shielded
+# dependencies. No app, sidecar, profile, node or device is loaded by these tests.
+[workspace]
+
+[dependencies]
+zcash_primitives = { version = "=0.31.0", default-features = false }
+zcash_protocol = { version = "=0.11.0", default-features = false }
+zcash_transparent = { version = "=0.11.0", default-features = false }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+hex = "0.4"

@@ -15,7 +15,10 @@ const certifiedEmulatorSource = isWindows
 // directly. Keeping the signed copy separate preserves source hash verification.
 const emulatorSource = process.env.KEEPKEY_EMULATOR_SOURCE || certifiedEmulatorSource;
 const emulatorCopy = emulatorSource && existsSync(emulatorSource)
-	? { [emulatorSource]: `emulator/${emulatorSource.split('/').pop()}` }
+	? { [emulatorSource]: `emulator/${emulatorSource.split('/').pop()}`,
+		...(process.env.KEEPKEY_EMULATOR_RECEIPT_SOURCE ? {
+			[process.env.KEEPKEY_EMULATOR_RECEIPT_SOURCE]: 'emulator/nu7-emulator-receipt.json',
+		} : {}) }
 	: {};
 
 const moneroPlatform = `${process.platform}-${process.arch}`;
@@ -24,6 +27,8 @@ const moneroRpc = isWindows ? "monero-wallet-rpc.exe" : "monero-wallet-rpc";
 const moneroVendor = `monero-cli/vendor/${moneroPlatform}`;
 // Electrobun resolves copy keys relative to the project, even for absolute inputs.
 const toolSource = (path: string) => isAbsolute(path) ? relative(process.cwd(), path) : path;
+const zcashSidecar = isWindows ? 'zcash-cli.exe' : 'zcash-cli';
+const zcashCliSource = toolSource(process.env.KEEPKEY_ZCASH_CLI_SOURCE || `zcash-cli/target/release/${zcashSidecar}`);
 const moneroCliSource = toolSource(process.env.KEEPKEY_MONERO_CLI_SOURCE || `monero-cli/dist/${moneroSidecar}`);
 const moneroRpcSource = toolSource(process.env.KEEPKEY_MONERO_RPC_SOURCE || `${moneroVendor}/${moneroRpc}`);
 const moneroMetadataSource = toolSource(process.env.KEEPKEY_MONERO_METADATA_SOURCE || `${moneroVendor}/monero-tools.json`);
@@ -103,7 +108,8 @@ export default {
 			...moneroEmulatorCopy,
 			...moneroDeviceCopy,
 			// Zcash privacy engine sidecar (Rust binary -- .exe on Windows)
-			[isWindows ? "zcash-cli/target/release/zcash-cli.exe" : "zcash-cli/target/release/zcash-cli"]: isWindows ? "zcash-cli.exe" : "zcash-cli",
+			[zcashCliSource]: zcashSidecar,
+			[`${zcashCliSource}.nu7.json`]: `${zcashSidecar}.nu7.json`,
 		},
 		mac: {
 			bundleCEF: false,

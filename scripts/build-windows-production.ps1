@@ -544,6 +544,8 @@ if (-not $SkipBuild) {
         cargo build --release
         if ($LASTEXITCODE -ne 0) { throw "cargo build --release failed for zcash-cli" }
         Pop-Location
+        bun (Join-Path $ProjectDir "scripts\write-zcash-nu7-manifest.ts") (Join-Path $ZcashCliDir "target\release\zcash-cli.exe")
+        if ($LASTEXITCODE -ne 0) { throw "Zcash Nu7 builder manifest generation failed" }
         Write-Success "zcash-cli.exe built"
     } else {
         Write-Host "    [SKIP] zcash-cli/ not found - Zcash shielded features will be unavailable" -ForegroundColor Yellow
@@ -623,6 +625,17 @@ if (-not $SkipBuild) {
     }
 }
 Write-Success "Verified bundled Windows emulator: $BundledEmulatorDll"
+# Authenticate pristine bytes before Authenticode changes their checksum. A
+# re-sign accepts a prior packaged receipt only for an already signed DLL.
+$EmulatorVerifyMode = "--verify"
+if ($SkipBuild -and (Test-Path (Join-Path (Split-Path $BundledEmulatorDll) "nu7-emulator-receipt.json"))) {
+    if ((Get-AuthenticodeSignature $BundledEmulatorDll).Status -ne "Valid") {
+        throw "Cannot authenticate the previously signed emulator DLL"
+    }
+    $EmulatorVerifyMode = "--verify-sealed"
+}
+$EmulatorReviewedSourceSha = bun (Join-Path $ProjectDir "scripts\write-emulator-signing-receipt.ts") $EmulatorVerifyMode $BundledEmulatorDll
+if ($LASTEXITCODE -ne 0) { throw "Emulator pre-sign source verification failed" }
 
 # ============================================================================
 # Sign Executables and DLLs
@@ -661,6 +674,15 @@ foreach ($file in $filesToSign) {
         $failedCount++
     }
 }
+
+# Authenticode changes PE bytes. Refresh each staged helper's paired checksum
+# after signing and before installer/package collection seals the application.
+foreach ($zcash in @(Get-ChildItem -Path $resourcesDir -Filter "zcash-cli.exe" -Recurse -ErrorAction SilentlyContinue)) {
+    bun (Join-Path $ProjectDir "scripts\write-zcash-nu7-manifest.ts") $zcash.FullName
+    if ($LASTEXITCODE -ne 0) { throw "Signed Zcash Nu7 builder manifest generation failed" }
+}
+bun (Join-Path $ProjectDir "scripts\write-emulator-signing-receipt.ts") --record $BundledEmulatorDll $EmulatorReviewedSourceSha
+if ($LASTEXITCODE -ne 0) { throw "Signed emulator receipt generation failed" }
 
 Write-Host ""
 Write-Host "    Signed: $signedCount, Failed: $failedCount" -ForegroundColor $(if ($failedCount -eq 0) { "Green" } else { "Yellow" })

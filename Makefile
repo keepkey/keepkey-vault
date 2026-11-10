@@ -15,7 +15,7 @@ PROTO_BUILD_INPUTS := $(shell find modules/proto-tx-builder/src -type f \( -name
 DEVICE_PROTOCOL_BUILD_STAMP := $(STAMP_DIR)/device-protocol-build.stamp
 DEVICE_PROTOCOL_INPUTS := $(shell find modules/device-protocol -maxdepth 1 -name '*.proto' -o -name 'package.json' 2>/dev/null)
 ZCASH_CLI_STAMP := $(STAMP_DIR)/zcash-cli.stamp
-ZCASH_CLI_SOURCES := $(shell find $(PROJECT_DIR)/zcash-cli/src -name '*.rs' 2>/dev/null) $(PROJECT_DIR)/zcash-cli/Cargo.toml
+ZCASH_CLI_SOURCES := $(shell find $(PROJECT_DIR)/zcash-cli/src -name '*.rs' 2>/dev/null) $(PROJECT_DIR)/zcash-cli/Cargo.toml $(PROJECT_DIR)/zcash-cli/Cargo.lock $(PROJECT_DIR)/scripts/write-zcash-nu7-manifest.ts $(PROJECT_DIR)/src/bun/zcash-nu7-binary.ts
 
 # Auto-load .env if present (only export signing-related vars to sub-processes)
 ifneq (,$(wildcard .env))
@@ -108,15 +108,23 @@ endif
 	@touch $@
 
 build-zcash-cli: $(ZCASH_CLI_STAMP)
+	cd $(PROJECT_DIR) && bun scripts/write-zcash-nu7-manifest.ts zcash-cli/target/release/zcash-cli
 	@echo "zcash-cli ready for Electrobun packaging:"
 	@ls -lh $(PROJECT_DIR)/zcash-cli/target/release/zcash-cli
 
 test-zcash-cli:
 	cd $(PROJECT_DIR)/zcash-cli && cargo test
+	cd $(PROJECT_DIR)/zcash-cli && cargo test --locked --manifest-path tests/nu7-reference/Cargo.toml
+
+.PHONY: test-emu-zcash-nu7
+test-emu-zcash-nu7:
+	@test -n "$(KK_EMU_DYLIB)" || { echo 'Set KK_EMU_DYLIB to the reviewed 7.17 alpha emulator'; exit 1; }
+	cd $(PROJECT_DIR) && VAULT_API_URL=http://127.0.0.1:9 KK_EMU_DYLIB="$(KK_EMU_DYLIB)" bun test tests/emulator/14-zcash-nu7.test.ts
 
 build-zcash-cli-debug:
 	cd $(PROJECT_DIR)/zcash-cli && cargo test
 	cd $(PROJECT_DIR)/zcash-cli && cargo build
+	cd $(PROJECT_DIR) && bun scripts/write-zcash-nu7-manifest.ts zcash-cli/target/debug/zcash-cli
 
 # Cross-compile zcash-cli for Intel Mac from Apple Silicon
 build-zcash-cli-intel:
@@ -129,6 +137,7 @@ ifdef ELECTROBUN_DEVELOPER_ID
 		--options runtime \
 		$(PROJECT_DIR)/zcash-cli/target/x86_64-apple-darwin/release/zcash-cli
 endif
+	cd $(PROJECT_DIR) && bun scripts/write-zcash-nu7-manifest.ts zcash-cli/target/x86_64-apple-darwin/release/zcash-cli
 	@echo "=== Intel zcash-cli ready at $(PROJECT_DIR)/zcash-cli/target/x86_64-apple-darwin/release/zcash-cli ==="
 
 # --- Architecture Verification ---
@@ -320,7 +329,7 @@ build: install build-zcash-cli
 build-stable: install build-zcash-cli
 	cd $(PROJECT_DIR) && bun run build:stable
 
-build-canary: install
+build-canary: install build-zcash-cli
 	cd $(PROJECT_DIR) && bun run build:canary
 
 # Prune the app bundle after Electrobun build (strips nested node_modules, .d.ts, etc.)
@@ -451,6 +460,14 @@ test-i18n:
 	cd $(PROJECT_DIR) && bun scripts/check-i18n.ts && bun test __tests__/i18n-safety.test.ts __tests__/report-fonts.test.ts
 
 test-unit:
+	cd $(PROJECT_DIR) && bun test __tests__/rest-zcash-admission.test.ts
+	cd $(PROJECT_DIR) && bun test __tests__/broadcast-provider-error.test.ts
+	cd $(PROJECT_DIR) && bun test __tests__/zcash-nu7-admission.test.ts __tests__/zcash-nu7-binary.test.ts __tests__/zcash-tex-admission.test.ts
+	cd $(PROJECT_DIR) && bun test __tests__/zcash-nu7-transparent.test.ts
+	cd $(PROJECT_DIR) && bun test __tests__/zcash-transparent-sidecar.test.ts
+	cd $(PROJECT_DIR) && bun test __tests__/send-zcash-readiness.test.ts
+	cd $(PROJECT_DIR) && bun test __tests__/zcash-nu7-packaging.test.ts
+	cd $(PROJECT_DIR) && bun test __tests__/emulator-signing-receipt.test.ts
 	cd $(PROJECT_DIR) && bun test __tests__/hyperliquid-identity.test.ts
 	cd $(PROJECT_DIR) && bun test __tests__/receive-payment-uri.test.ts
 	cd $(PROJECT_DIR) && bun test __tests__/swap-row-explorer.test.ts

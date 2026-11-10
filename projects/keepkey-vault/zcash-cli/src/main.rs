@@ -25,6 +25,8 @@ use zcash_protocol::consensus::NetworkType;
 /// Matches zcashd / ywallet / zecwallet defaults; protects against small
 /// reorgs and lightwalletd tree-state lag (see `wallet_db::get_spendable_notes`).
 const MIN_CONFIRMATIONS: u64 = 10;
+/// Paired runtime manifests attest this exact no-private-wallet startup mode.
+const TRANSPARENT_CAPABILITY: &str = "keepkey-zcash-cli:nu7-transparent:v1";
 
 /// Global state persisted across IPC commands within a single sidecar session.
 struct State {
@@ -37,7 +39,7 @@ struct State {
     /// Pending deshield (Orchard → transparent) PCZT state waiting for signatures
     pending_deshield_pczt: Option<pczt_builder::DeshieldPcztState>,
     /// Pending transparent-only (TEX step 2) transaction waiting for signatures
-    pending_transparent: Option<pczt_builder::TransparentOnlyState>,
+    pending_transparent: Option<(String, pczt_builder::TransparentOnlyState)>,
     /// Spent-note nullifiers keyed by finalized raw-tx hex — marked spent in
     /// the wallet DB when THAT transaction broadcasts, so the shielded balance
     /// drops immediately instead of double-counting until the next chain scan.
@@ -1006,7 +1008,59 @@ fn parse_transparent_path(v: Option<&Value>) -> Result<Vec<u32>> {
 
 // ── Transparent-only (ZIP-320 TEX step 2) IPC handlers ───────────────────
 
+fn transparent_signing_request(
+    tx: &pczt_builder::TransparentOnlyState,
+    account: u32,
+    request_id: &str,
+    target_height: u64,
+) -> Value {
+    let paid: u64 = tx.transparent_outputs.iter().map(|o| o.value).sum();
+    serde_json::json!({
+        "n_actions": 0,
+        "request_id": request_id,
+        "target_height": target_height,
+        "account": account,
+        "branch_id": tx.branch_id,
+        "digests": {
+            "header": hex::encode(tx.digests.header_digest),
+            "transparent": hex::encode(tx.digests.transparent_digest),
+            "orchard": hex::encode(tx.digests.orchard_digest),
+            "ironwood": hex::encode(tx.digests.ironwood_digest),
+        },
+        "header_fields": {
+            "tx_version": 6,
+            "version_group_id": zip229::VERSION_GROUP_ID,
+            "lock_time": 0,
+            "expiry_height": 0,
+        },
+        "actions": [],
+        // The PCZT review wire requires these fields even with zero actions.
+        // No shielded bundle is serialized into this transparent transaction.
+        "bundle_meta": { "flags": 0, "value_balance": 0, "anchor": hex::encode([0u8; 32]) },
+        "transparent_inputs": tx.transparent_signing_inputs.iter().map(|ti| serde_json::json!({
+            "index": ti.index,
+            "address_path": ti.address_path,
+            "amount": ti.amount,
+            "prevout_txid": ti.prevout_txid,
+            "prevout_index": ti.prevout_index,
+            "sequence": ti.sequence,
+            "script_pubkey": ti.script_pubkey,
+        })).collect::<Vec<_>>(),
+        "transparent_outputs": tx.transparent_outputs.iter().enumerate().map(|(i, o)| serde_json::json!({
+            "index": i,
+            "value": o.value,
+            "script_pubkey": hex::encode(&o.script_pubkey),
+        })).collect::<Vec<_>>(),
+        "display": {
+            "amount": format!("{:.8} ZEC", paid as f64 / 1e8),
+            "fee": format!("{:.8} ZEC", tx.fee as f64 / 1e8),
+        },
+    })
+}
+
 async fn handle_build_transparent_pczt(state: &mut State, params: &Value) -> Result<Value> {
+    // Retire the old draft even when validation or the node read below fails.
+    state.pending_transparent = None;
     let parse_inputs = || -> Option<Vec<pczt_builder::ShieldTransparentInput>> {
         params
             .get("transparent_inputs")?
@@ -1040,56 +1094,66 @@ async fn handle_build_transparent_pczt(state: &mut State, params: &Value) -> Res
     })?;
     let outputs = parse_outputs()
         .ok_or_else(|| anyhow::anyhow!("transparent_outputs needs value, script_pubkey"))?;
-    let address_path = parse_transparent_path(params.get("address_path"))?;
-    let account = params.get("account").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+    let paths = params
+        .get("transparent_inputs")
+        .and_then(Value::as_array)
+        .unwrap()
+        .iter()
+        .map(|input| {
+            parse_transparent_path(
+                input
+                    .get("address_path")
+                    .or_else(|| params.get("address_path")),
+            )
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let account = match params.get("account") {
+        Some(value) => value
+            .as_u64()
+            .and_then(|n| u32::try_from(n).ok())
+            .ok_or_else(|| anyhow::anyhow!("Invalid transparent account"))?,
+        None => 0,
+    };
+    if account >= 0x80000000 || paths.iter().any(|path| path[2] != account + 0x80000000) {
+        return Err(anyhow::anyhow!(
+            "Transparent input paths do not match the selected account"
+        ));
+    }
 
-    let mut lwd_client = scanner::LightwalletClient::connect(None).await?;
-    let branch_id = lwd_client.get_consensus_branch_id().await?;
-    let tx = pczt_builder::build_transparent_only(&inputs, &outputs, address_path, branch_id)?;
+    let server_url = params
+        .get("server_url")
+        .map(|value| {
+            value
+                .as_str()
+                .ok_or_else(|| anyhow::anyhow!("server_url must be a string"))
+        })
+        .transpose()?;
+    let mut lwd_client = scanner::LightwalletClient::connect(server_url).await?;
+    let (branch_id, target_height) = lwd_client.get_transparent_consensus_context().await?;
+    let tx = pczt_builder::build_transparent_only_with_paths(&inputs, &outputs, &paths, branch_id)?;
+    let request_id = hex::encode(rand::random::<[u8; 16]>());
 
-    let paid: u64 = tx.transparent_outputs.iter().map(|o| o.value).sum();
-    let request = serde_json::json!({
-        "n_actions": 0,
-        "account": account,
-        "branch_id": branch_id,
-        "digests": {
-            "header": hex::encode(tx.digests.header_digest),
-            "transparent": hex::encode(tx.digests.transparent_digest),
-            "orchard": hex::encode(tx.digests.orchard_digest),
-            "ironwood": hex::encode(tx.digests.ironwood_digest),
-        },
-        "header_fields": {
-            "tx_version": 6,
-            "version_group_id": zip229::VERSION_GROUP_ID,
-            "lock_time": 0,
-            "expiry_height": 0,
-        },
-        "actions": [],
-        "transparent_inputs": tx.transparent_signing_inputs.iter().map(|ti| serde_json::json!({
-            "index": ti.index,
-            "address_path": ti.address_path,
-            "amount": ti.amount,
-            "prevout_txid": ti.prevout_txid,
-            "prevout_index": ti.prevout_index,
-            "sequence": ti.sequence,
-            "script_pubkey": ti.script_pubkey,
-        })).collect::<Vec<_>>(),
-        "transparent_outputs": tx.transparent_outputs.iter().enumerate().map(|(i, o)| serde_json::json!({
-            "index": i,
-            "value": o.value,
-            "script_pubkey": hex::encode(&o.script_pubkey),
-        })).collect::<Vec<_>>(),
-        "display": {
-            "amount": format!("{:.8} ZEC", paid as f64 / 1e8),
-            "fee": format!("{:.8} ZEC", tx.fee as f64 / 1e8),
-        },
-    });
-    state.pending_transparent = Some(tx);
+    let request = transparent_signing_request(&tx, account, &request_id, target_height);
+    state.pending_transparent = Some((request_id, tx));
     Ok(request)
 }
 
 async fn handle_finalize_transparent(state: &mut State, params: &Value) -> Result<Value> {
-    let tx = state.pending_transparent.take().ok_or_else(|| {
+    let request_id = params
+        .get("request_id")
+        .and_then(Value::as_str)
+        .ok_or_else(|| anyhow::anyhow!("Missing transparent request_id"))?;
+    if state
+        .pending_transparent
+        .as_ref()
+        .map(|(id, _)| id.as_str())
+        != Some(request_id)
+    {
+        return Err(anyhow::anyhow!(
+            "Transparent request_id does not match the pending transaction"
+        ));
+    }
+    let (_, tx) = state.pending_transparent.take().ok_or_else(|| {
         anyhow::anyhow!("No pending transparent transaction — call build_transparent_pczt first")
     })?;
     let sigs = params
@@ -1105,13 +1169,30 @@ async fn handle_finalize_transparent(state: &mut State, params: &Value) -> Resul
             .map_err(Into::into)
         })
         .collect::<Result<Vec<_>>>()?;
-    let pubkey = hex::decode(
-        params
-            .get("compressed_pubkey")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| anyhow::anyhow!("Missing compressed_pubkey"))?,
-    )?;
-    let (raw_tx, txid) = pczt_builder::finalize_transparent_only(&tx, &sigs, &pubkey)?;
+    let pubkeys = if let Some(value) = params.get("compressed_pubkeys") {
+        let keys = value
+            .as_array()
+            .ok_or_else(|| anyhow::anyhow!("compressed_pubkeys must be an array"))?;
+        keys.iter()
+            .map(|key| {
+                hex::decode(
+                    key.as_str()
+                        .ok_or_else(|| anyhow::anyhow!("compressed_pubkeys must be hex strings"))?,
+                )
+                .map_err(Into::into)
+            })
+            .collect::<Result<Vec<_>>>()?
+    } else {
+        let key = hex::decode(
+            params
+                .get("compressed_pubkey")
+                .and_then(Value::as_str)
+                .ok_or_else(|| anyhow::anyhow!("Missing compressed_pubkeys"))?,
+        )?;
+        vec![key; tx.transparent_inputs.len()]
+    };
+    let (raw_tx, txid) =
+        pczt_builder::finalize_transparent_only_with_pubkeys(&tx, &sigs, &pubkeys)?;
     Ok(serde_json::json!({ "raw_tx": hex::encode(&raw_tx), "txid": txid }))
 }
 
@@ -1759,6 +1840,48 @@ async fn handle_broadcast(state: &mut State, params: &Value) -> Result<Value> {
     }
 }
 
+/// Native transparent sessions never hydrate or expose the private wallet,
+/// including when ordinary background UI polling shares the child process.
+fn native_command_allowed(cmd: &str) -> bool {
+    matches!(
+        cmd,
+        "ping" | "build_transparent_pczt" | "finalize_transparent" | "quit"
+    )
+}
+
+async fn dispatch_command(
+    state: &mut State,
+    cmd: &str,
+    params: &Value,
+    transparent_only: bool,
+) -> Result<Value> {
+    if transparent_only && !native_command_allowed(cmd) {
+        return Err(anyhow::anyhow!("Command '{}' is unavailable in transparent-only mode. Only transparent Zcash payments are supported in this Nu7 alpha.", cmd));
+    }
+    match cmd {
+        "derive_fvk" => handle_derive_fvk(state, params).await,
+        "set_fvk" => handle_set_fvk(state, params).await,
+        "scan" => handle_scan(state, params).await,
+        "balance" => handle_balance(state, params).await,
+        "plan_spend" => handle_plan_spend(state, params).await,
+        "build_pczt" => handle_build_pczt(state, params).await,
+        "finalize" => handle_finalize(state, params).await,
+        "build_shield_pczt" => handle_build_shield_pczt(state, params).await,
+        "finalize_shield" => handle_finalize_shield(state, params).await,
+        "build_transparent_pczt" => handle_build_transparent_pczt(state, params).await,
+        "finalize_transparent" => handle_finalize_transparent(state, params).await,
+        "build_deshield_pczt" => handle_build_deshield_pczt(state, params).await,
+        "finalize_deshield" => handle_finalize_deshield(state, params).await,
+        "broadcast" => handle_broadcast(state, params).await,
+        "get_transactions" => handle_get_transactions(state, params).await,
+        "backfill_memos" => handle_backfill_memos(state, params).await,
+        "diagnose_anchor" => handle_diagnose_anchor(state, params).await,
+        "ping" => Ok(serde_json::json!({"pong": true})),
+        "quit" => Ok(serde_json::json!({ "quitting": true })),
+        other => Err(anyhow::anyhow!("Unknown command: {}", other)),
+    }
+}
+
 // ── Main IPC loop ──────────────────────────────────────────────────────
 
 #[tokio::main]
@@ -1774,21 +1897,32 @@ async fn main() {
     let stdin = io::stdin();
     let stdout = io::stdout();
 
-    // Try to auto-load FVK from database
-    let has_fvk = match state.try_load_fvk() {
-        Ok(loaded) => loaded,
-        Err(e) => {
-            error!("Failed to auto-load FVK: {}", e);
-            false
+    // Native transparent sends need neither a viewing key nor wallet storage.
+    // Profile mode retains its original startup; native mode rejects private
+    // commands for this process's lifetime rather than lazily opening its DB.
+    let transparent_only = std::env::args().any(|arg| arg == "--transparent-only");
+    let has_fvk = if transparent_only {
+        false
+    } else {
+        match state.try_load_fvk() {
+            Ok(loaded) => loaded,
+            Err(e) => {
+                error!("Failed to auto-load FVK: {}", e);
+                false
+            }
         }
     };
 
     // Build ready signal with FVK status + scan state
-    let synced_to = state
-        .ensure_db()
-        .ok()
-        .and_then(|db| db.last_scanned_height().ok().flatten());
-    let ready_data = if has_fvk {
+    let synced_to = if transparent_only {
+        None
+    } else {
+        state
+            .ensure_db()
+            .ok()
+            .and_then(|db| db.last_scanned_height().ok().flatten())
+    };
+    let mut ready_data = if has_fvk {
         let fvk = state.fvk.as_ref().unwrap();
         let addr = fvk.address_at(0u32, orchard::keys::Scope::External);
         let ua = encode_unified_address(&addr).unwrap_or_default();
@@ -1816,6 +1950,11 @@ async fn main() {
     // Send ready signal
     {
         let mut out = stdout.lock();
+        // A qualified process already started for explicit privacy use can
+        // serve transparent work too, without another profile/FVK read. The
+        // host still verifies that running process's binary provenance.
+        ready_data["transparent_capability"] = serde_json::json!(TRANSPARENT_CAPABILITY);
+        ready_data["transparent_only"] = serde_json::json!(transparent_only);
         serde_json::to_writer(&mut out, &ready_data).ok();
         writeln!(out).ok();
         out.flush().ok();
@@ -1848,35 +1987,12 @@ async fn main() {
 
         info!("Received command: {}", request.cmd);
 
-        let result = match request.cmd.as_str() {
-            "derive_fvk" => handle_derive_fvk(&mut state, &request.params).await,
-            "set_fvk" => handle_set_fvk(&mut state, &request.params).await,
-            "scan" => handle_scan(&mut state, &request.params).await,
-            "balance" => handle_balance(&mut state, &request.params).await,
-            "plan_spend" => handle_plan_spend(&mut state, &request.params).await,
-            "build_pczt" => handle_build_pczt(&mut state, &request.params).await,
-            "finalize" => handle_finalize(&mut state, &request.params).await,
-            "build_shield_pczt" => handle_build_shield_pczt(&mut state, &request.params).await,
-            "finalize_shield" => handle_finalize_shield(&mut state, &request.params).await,
-            "build_transparent_pczt" => {
-                handle_build_transparent_pczt(&mut state, &request.params).await
-            }
-            "finalize_transparent" => {
-                handle_finalize_transparent(&mut state, &request.params).await
-            }
-            "build_deshield_pczt" => handle_build_deshield_pczt(&mut state, &request.params).await,
-            "finalize_deshield" => handle_finalize_deshield(&mut state, &request.params).await,
-            "broadcast" => handle_broadcast(&mut state, &request.params).await,
-            "get_transactions" => handle_get_transactions(&mut state, &request.params).await,
-            "backfill_memos" => handle_backfill_memos(&mut state, &request.params).await,
-            "diagnose_anchor" => handle_diagnose_anchor(&mut state, &request.params).await,
-            "ping" => Ok(serde_json::json!({"pong": true})),
-            "quit" => {
-                info!("Received quit command");
-                break;
-            }
-            other => Err(anyhow::anyhow!("Unknown command: {}", other)),
-        };
+        if request.cmd == "quit" {
+            info!("Received quit command");
+            break;
+        }
+        let result =
+            dispatch_command(&mut state, &request.cmd, &request.params, transparent_only).await;
 
         let response = match result {
             Ok(data) => ok_response_with_id(data, request._req_id),
@@ -2470,6 +2586,212 @@ mod tests {
             serde_json::json!([H + 44, H + 0, H, 0, 0]),
         ] {
             assert!(parse_transparent_path(Some(&bad)).is_err(), "{}", bad);
+        }
+    }
+
+    fn synthetic_pending_transparent() -> pczt_builder::TransparentOnlyState {
+        let fixture: Value =
+            serde_json::from_str(include_str!("../tests/fixtures/transparent-nu7.json")).unwrap();
+        let inputs: Vec<_> = fixture["inputs"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|input| {
+                let mut hash = hex::decode(input["prevout_hash"].as_str().unwrap()).unwrap();
+                hash.reverse();
+                pczt_builder::ShieldTransparentInput {
+                    txid: hex::encode(hash),
+                    vout: input["prevout_index"].as_u64().unwrap() as u32,
+                    value: input["value"].as_u64().unwrap(),
+                    script_pubkey: input["script_pubkey"].as_str().unwrap().into(),
+                }
+            })
+            .collect();
+        let outputs: Vec<_> = fixture["outputs"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|output| pczt_builder::DeshieldTransparentOutput {
+                value: output["value"].as_u64().unwrap(),
+                script_pubkey: output["script_pubkey"].as_str().unwrap().into(),
+            })
+            .collect();
+        let paths: Vec<Vec<u32>> = fixture["inputs"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|input| {
+                input["address_path"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|n| n.as_u64().unwrap() as u32)
+                    .collect()
+            })
+            .collect();
+        pczt_builder::build_transparent_only_with_paths(
+            &inputs,
+            &outputs,
+            &paths,
+            zip229::NU7_BRANCH_ID,
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn transparent_request_json_matches_the_actual_ipc_response() {
+        let tx = synthetic_pending_transparent();
+        let request = transparent_signing_request(&tx, 0, &"11".repeat(16), 3_543_406);
+        println!("NU7_REQUEST:{}", request);
+        assert_eq!(
+            request["bundle_meta"],
+            serde_json::json!({
+                "flags": 0, "value_balance": 0, "anchor": "00".repeat(32),
+            })
+        );
+        let expected: Value = serde_json::from_str(include_str!(
+            "../tests/fixtures/transparent-nu7-request.json"
+        ))
+        .unwrap();
+        assert_eq!(request, expected);
+        assert_eq!(request["n_actions"], 0);
+        assert_eq!(request["account"], 0);
+        assert_eq!(request["branch_id"], 0x77190ad9u32);
+        assert_eq!(request["transparent_inputs"].as_array().unwrap().len(), 2);
+        assert!(request["actions"].as_array().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn transparent_finalize_is_scoped_one_shot_and_never_opens_wallet_db() {
+        let mut state = State::new();
+        state.pending_transparent = Some(("new-request".into(), synthetic_pending_transparent()));
+        for cmd in [
+            "balance",
+            "get_transactions",
+            "get_scan_status",
+            "derive_fvk",
+            "set_fvk",
+            "scan",
+        ] {
+            let error = dispatch_command(&mut state, cmd, &serde_json::json!({}), true)
+                .await
+                .unwrap_err();
+            assert!(error.to_string().contains("transparent-only mode"));
+            assert_eq!(state.pending_transparent.as_ref().unwrap().0, "new-request");
+            assert!(state.db.is_none());
+            assert!(state.fvk.is_none());
+        }
+        let error = handle_finalize_transparent(
+            &mut state,
+            &serde_json::json!({ "request_id": "retired-request" }),
+        )
+        .await
+        .unwrap_err();
+        assert!(error.to_string().contains("request_id"));
+        assert!(state.pending_transparent.is_some());
+        assert!(
+            handle_finalize_transparent(&mut state, &serde_json::json!({}))
+                .await
+                .is_err()
+        );
+        assert!(state.pending_transparent.is_some());
+        // A failed new build retires old state before validation/any node read.
+        assert!(
+            handle_build_transparent_pczt(&mut state, &serde_json::json!({}))
+                .await
+                .is_err()
+        );
+        assert!(state.pending_transparent.is_none());
+
+        let tx = synthetic_pending_transparent();
+        let secp = secp256k1::Secp256k1::new();
+        let keys: Vec<_> = [0x11, 0x22]
+            .iter()
+            .map(|b| secp256k1::SecretKey::from_slice(&[*b; 32]).unwrap())
+            .collect();
+        let sigs: Vec<_> = tx
+            .transparent_signing_inputs
+            .iter()
+            .zip(&keys)
+            .map(|(input, key)| {
+                hex::encode(
+                    secp.sign_ecdsa(
+                        &secp256k1::Message::from_digest(
+                            input.sighash.as_slice().try_into().unwrap(),
+                        ),
+                        key,
+                    )
+                    .serialize_der(),
+                )
+            })
+            .collect();
+        let pubkeys: Vec<_> = keys
+            .iter()
+            .map(|key| hex::encode(secp256k1::PublicKey::from_secret_key(&secp, key).serialize()))
+            .collect();
+        state.pending_transparent = Some(("current-request".into(), tx));
+        let params = serde_json::json!({ "request_id": "current-request", "transparent_signatures": sigs, "compressed_pubkeys": pubkeys });
+        let finalized = handle_finalize_transparent(&mut state, &params)
+            .await
+            .unwrap();
+        let fixture: Value =
+            serde_json::from_str(include_str!("../tests/fixtures/transparent-nu7.json")).unwrap();
+        assert_eq!(finalized["raw_tx"], fixture["raw_tx"]);
+        assert_eq!(finalized["txid"], fixture["txid"]);
+        assert!(handle_finalize_transparent(&mut state, &params)
+            .await
+            .is_err());
+        assert!(state.pending_transparent.is_none());
+        assert!(state.db.is_none());
+        assert!(state.fvk.is_none());
+        // Failed verification also consumes only the matching request.
+        state.pending_transparent =
+            Some(("invalid-signature".into(), synthetic_pending_transparent()));
+        assert!(handle_finalize_transparent(
+            &mut state,
+            &serde_json::json!({ "request_id": "invalid-signature",
+            "transparent_signatures": ["00", "00"], "compressed_pubkeys": pubkeys })
+        )
+        .await
+        .is_err());
+        assert!(state.pending_transparent.is_none());
+    }
+
+    #[test]
+    fn native_mode_admits_only_the_reviewed_transparent_protocol() {
+        for cmd in [
+            "ping",
+            "build_transparent_pczt",
+            "finalize_transparent",
+            "quit",
+        ] {
+            assert!(native_command_allowed(cmd));
+        }
+        // Pure policy checks: never dispatch network-capable negative controls.
+        for cmd in [
+            "balance",
+            "get_transactions",
+            "get_scan_status",
+            "derive_fvk",
+            "set_fvk",
+            "scan",
+            "plan_spend",
+            "build_pczt",
+            "finalize",
+            "build_shield_pczt",
+            "finalize_shield",
+            "build_deshield_pczt",
+            "finalize_deshield",
+            "broadcast",
+            "backfill_memos",
+            "diagnose_anchor",
+            "unknown",
+        ] {
+            assert!(
+                !native_command_allowed(cmd),
+                "{} must be denied before its handler",
+                cmd
+            );
         }
     }
 }
