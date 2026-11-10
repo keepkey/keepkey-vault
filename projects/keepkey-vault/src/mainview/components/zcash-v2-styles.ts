@@ -899,11 +899,17 @@ export const ZCASH_V2_CSS = `
 .zcash-embedded .page-head p { font-size: 12px; }
 .zcash-embedded .field { background: var(--ink-0); border-radius: 12px; }
 .zcash-embedded .submit { border-radius: 12px; }
+/* Embedded actions must read as enabled: full-strength text and a visible
+   border (the old --text-1 on a 10% border made every action look disabled). */
 .zcash-embedded .chakra-button {
-	color: var(--text-1); border-color: var(--line-2);
+	color: var(--text-0); border-color: rgba(255,255,255,0.22);
 	padding: 8px 12px; min-height: 32px; border-radius: 10px;
 	font-size: 12px; font-weight: 500; line-height: 1.2;
 }
+.zcash-embedded .chakra-button:hover:not(:disabled) { background: var(--ink-3); border-color: rgba(255,255,255,0.32); }
+/* The one primary receive action: verify the address on the KeepKey screen. */
+.zcash-embedded .chakra-button.zk-primary { color: var(--ink-0); background: var(--gold); border-color: var(--gold); font-weight: 600; }
+.zcash-embedded .chakra-button.zk-primary:hover:not(:disabled) { background: var(--gold-2); border-color: var(--gold-2); }
 .zcash-embedded details.form-aside { display: block; }
 .zcash-embedded details.form-aside > summary { cursor: pointer; font-size: 12px; color: var(--text-2); padding: 8px 0; }
 .zcash-embedded .form-aside .aside-card { margin-top: 8px; }

@@ -303,7 +303,7 @@ export function ReceiveView({
 							w="100%"
 							h="100%"
 							dangerouslySetInnerHTML={{ __html: qrSvg }}
-							sx={{ '& svg': { width: '100%', height: '100%', display: 'block' } }}
+							css={{ '& svg': { width: '100%', height: '100%', display: 'block' } }}
 						/>
 					</Box>
 					{/* Verify-on-device requires the device — in watch-only only via onShowOnDevice (matching KeepKey). */}
