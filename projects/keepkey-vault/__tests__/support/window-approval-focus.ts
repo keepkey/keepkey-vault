@@ -9,6 +9,12 @@ import { join } from 'node:path'
 const profile = mkdtempSync(join(tmpdir(), 'vault-window-focus-'))
 mock.module('electrobun/bun', () => ({ Utils: { paths: { userData: profile } } }))
 mock.module('@keepkey/hdwallet-keepkey-nodehid', () => ({ HIDKeepKeyAdapter: class {} }))
+mock.module('@keepkey/hdwallet-keepkey-nodewebusb', () => ({ NodeWebUSBKeepKeyAdapter: class {} }))
+mock.module('usb', () => ({ usb: Object.assign(new EventEmitter(), { getDeviceList: () => [] }) }))
+mock.module('node-hid', () => ({ devices: () => [], HID: class {} }))
+// The router imports USB metadata helpers even though these cases use a fake
+// engine. Never initialize a native addon's callbacks in this isolated child.
+process.dlopen = (() => { throw new Error('Native addons are forbidden in the focus fixture') }) as typeof process.dlopen
 globalThis.fetch = (() => { throw new Error('Network requests are forbidden in the focus fixture') }) as typeof fetch
 const db = await import('../../src/bun/db')
 const { AuthStore } = await import('../../src/bun/auth')
