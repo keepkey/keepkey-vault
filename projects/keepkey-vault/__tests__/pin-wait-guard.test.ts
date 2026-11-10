@@ -28,7 +28,7 @@ mock.module('@keepkey/hdwallet-keepkey-nodewebusb', () => ({ NodeWebUSBKeepKeyAd
 mock.module('usb', () => ({ usb: new EventEmitter() }))
 mock.module('electrobun/bun', () => ({ Utils: { paths: { userData: '/tmp/kk-pin-wait-guard-unused' } } }))
 
-const { DEVICE_AWAITING_INPUT_MESSAGE, awaitingInput, guardInputWait } = await import('../src/bun/device-gate')
+const { DEVICE_AWAITING_INPUT_MESSAGE, awaitingInput, guardInputWait, restRequest } = await import('../src/bun/device-gate')
 const { EngineController } = await import('../src/bun/engine-controller')
 const { wipeOwningDevice, WIPE_AFTER_REPLUG_MESSAGE } = await import('../src/bun/device-wipe')
 
@@ -67,6 +67,7 @@ class ScriptedKeepKey implements TransportDelegate {
   /** The next N reads fail as a USB I/O error would, transport left open. */
   failReads = 0
   /** ChangePin-like: a correct PIN is answered with the next PinMatrixRequest. */
+  wrongPinsLeft = 0
   pinRequestsLeft = 1
   /** After 3+ wrong PINs: seed access gets no reply (the firmware counts down, reading no USB). */
   countdown = false
@@ -100,6 +101,9 @@ class ScriptedKeepKey implements TransportDelegate {
   private inWait(type: number) {
     const answer = this.wait === 'pin' ? T.MESSAGETYPE_PINMATRIXACK : T.MESSAGETYPE_PASSPHRASEACK
     if (type === answer) {
+      if (this.wait === 'pin' && this.wrongPinsLeft-- > 0) {
+        this.wait = null; this.out.push(failure(7, 'Invalid PIN')); return
+      }
       if (this.wait === 'pin' && --this.pinRequestsLeft > 0) { this.out.push(frame(T.MESSAGETYPE_PINMATRIXREQUEST)); return }
       if (this.wait === 'pin' && this.passphrase) { this.locked = false; this.wait = 'passphrase'; this.out.push(frame(T.MESSAGETYPE_PASSPHRASEREQUEST)); return }
       this.locked = false; this.wait = null; this.out.push(frame(T.MESSAGETYPE_SUCCESS))
@@ -279,6 +283,214 @@ describe.each(['7.17', '7.16'] as const)('EngineController on a USB/HID-like tra
     engine.attachTransportListeners()
   }
 
+  test('locked PIN and passphrase states stay passive until explicit device intent', async () => {
+    const device = new ScriptedKeepKey(fw)
+    const { engine } = await engineWith(device)
+    ;(engine as any).applyState('needs_pin')
+    await sleep(20)
+    ;(engine as any).applyState('needs_passphrase')
+    await sleep(20)
+    expect(engine.isLocked).toBe(true)
+    expect(device.received).toEqual([])
+  })
+
+  test('concurrent explicit unlocks and the unlock button share one wire exchange', async () => {
+    const device = new ScriptedKeepKey(fw)
+    const { engine, transport } = await engineWith(device)
+    const first = engine.promptPin(), second = engine.promptPin(), manual = engine.requestDeviceUnlock()
+    await until(() => awaitingInput(transport) === 'pin', 'PIN request')
+    expect(device.received.filter(r => r.type === T.MESSAGETYPE_GETPUBLICKEY)).toHaveLength(1)
+    await engine.sendPin('1')
+    await Promise.all([first, second, manual])
+    expect(engine.getDeviceState().state).toBe('ready')
+    expect(device.received.filter(r => r.type === T.MESSAGETYPE_GETPUBLICKEY)).toHaveLength(1)
+  })
+
+  test('a foreground REST request unlocks as Desktop, then resumes in its original context', async () => {
+    const device = new ScriptedKeepKey(fw)
+    const { engine, transport } = await engineWith(device)
+    let dispatched = false
+    const request = restRequest.run({ whileLocked: false }, () => engine.withDeviceOperation(async () => {
+      expect(restRequest.getStore()?.whileLocked).toBe(false)
+      dispatched = true
+    }, { unlock: true }))
+    await until(() => awaitingInput(transport) === 'pin', 'PIN request')
+    expect(dispatched).toBe(false)
+    await engine.sendPin('1'); await request
+    expect(dispatched).toBe(true)
+  })
+
+  test('the manual unlock button waits for an operation already using the device', async () => {
+    const device = new ScriptedKeepKey(fw); device.locked = false
+    const { engine, transport } = await engineWith(device)
+    ;(engine as any).lastState = 'ready'
+    const release = await engine.acquireDeviceOperation()
+    device.locked = true
+    ;(engine as any).lastState = 'needs_pin'
+    const manual = engine.requestDeviceUnlock()
+    await sleep(20)
+    expect(device.received.map(r => r.type)).toEqual([T.MESSAGETYPE_GETFEATURES])
+    release()
+    await until(() => awaitingInput(transport) === 'pin', 'PIN request')
+    await engine.sendPin('1'); await manual
+    expect(device.received.filter(r => r.type === T.MESSAGETYPE_GETPUBLICKEY)).toHaveLength(1)
+  })
+
+  test('a manual unlock that has not reported its PIN wait still finishes before device work', async () => {
+    const device = new ScriptedKeepKey(fw)
+    const { engine, transport } = await engineWith(device)
+    ;(engine as any).lastState = 'ready' // stale snapshot before the manual request reads PinMatrixRequest
+    const manual = engine.promptPin()
+    let dispatched = false
+    const request = engine.withDeviceOperation(async () => { dispatched = true }, { unlock: true })
+    await until(() => awaitingInput(transport) === 'pin', 'PIN request')
+    expect(dispatched).toBe(false)
+    await engine.sendPin('1'); await Promise.all([manual, request])
+    expect(dispatched).toBe(true)
+  })
+
+  test('cancelling during the post-flash delay never sends a later unlock request', async () => {
+    const device = new ScriptedKeepKey(fw)
+    const { engine } = await engineWith(device)
+    ;(engine as any).unlockReadyAfter = Date.now() + 40
+    const abort = new AbortController()
+    const request = engine.acquireDeviceOperation({ unlock: true, signal: abort.signal })
+    request.catch(() => {})
+    await sleep(5); abort.abort()
+    await expect(request).rejects.toMatchObject({ status: 499 })
+    await sleep(60)
+    expect(device.received).toEqual([])
+  })
+
+  test('an aborted countdown drains its eventual PIN request without showing a ghost prompt', async () => {
+    const device = new ScriptedKeepKey(fw); device.countdown = true
+    const { engine, transport } = await engineWith(device)
+    const abort = new AbortController(), prompts: unknown[] = []
+    engine.on('pin-request', prompt => prompts.push(prompt))
+    const request = engine.acquireDeviceOperation({ signal: abort.signal, unlock: true })
+    request.catch(() => {})
+    await until(() => device.received.length === 1, 'unlock countdown')
+    abort.abort()
+    await expect(request).rejects.toMatchObject({ status: 499 })
+    expect(device.received.map(r => r.type)).toEqual([T.MESSAGETYPE_GETPUBLICKEY])
+    device.countdown = false; device.wait = 'pin'; device.out.push(frame(T.MESSAGETYPE_PINMATRIXREQUEST))
+    await until(() => device.received.some(r => r.type === T.MESSAGETYPE_CANCEL), 'abandoned PIN cancellation')
+    await until(() => awaitingInput(transport) === null, 'cancel reply')
+    expect(prompts).toEqual([])
+    expect(device.received.map(r => r.type)).toEqual([T.MESSAGETYPE_GETPUBLICKEY, T.MESSAGETYPE_CANCEL])
+  })
+
+  test('a Desktop action behind a REST unlock is refused and its scoped Cancel cannot affect REST', async () => {
+    const device = new ScriptedKeepKey(fw)
+    const { engine, transport } = await engineWith(device)
+    const rest = engine.acquireDeviceOperation({ unlock: true })
+    await until(() => awaitingInput(transport) === 'pin', 'REST PIN request')
+    let dispatched = false
+    await expect(engine.withDeviceOperation(async () => { dispatched = true }, {
+      origin: 'desktop', unlock: true, rejectIfBusy: true,
+    })).rejects.toMatchObject({ status: 409 })
+    expect(engine.cancelDesktopDeviceOperation()).toBe(false)
+    expect(device.received.some(r => r.type === T.MESSAGETYPE_CANCEL)).toBe(false)
+    expect(awaitingInput(transport)).toBe('pin')
+    await engine.sendPin('1'); (await rest)()
+    await sleep(20)
+    expect(dispatched).toBe(false)
+    expect(device.received.filter(r => r.type === T.MESSAGETYPE_GETPUBLICKEY)).toHaveLength(1)
+  })
+
+  test('scoped Desktop Cancel stops only its pending unlock before the original action dispatches', async () => {
+    const device = new ScriptedKeepKey(fw)
+    const { engine, transport } = await engineWith(device)
+    let dispatched = false
+    const desktop = engine.withDeviceOperation(async () => { dispatched = true }, {
+      origin: 'desktop', unlock: true, rejectIfBusy: true,
+    })
+    desktop.catch(() => {})
+    await until(() => awaitingInput(transport) === 'pin', 'Desktop PIN request')
+    expect(engine.cancelDesktopDeviceOperation()).toBe(true)
+    await expect(desktop).rejects.toMatchObject({ status: 499 })
+    await until(() => awaitingInput(transport) === null, 'Desktop unlock cancellation')
+    expect(dispatched).toBe(false)
+    expect(device.received.map(r => r.type)).toEqual([T.MESSAGETYPE_GETPUBLICKEY, T.MESSAGETYPE_CANCEL])
+  })
+
+  test('scoped Cancel keeps an already-dispatched Desktop action owned until its handler drains', async () => {
+    const device = new ScriptedKeepKey(fw); device.locked = false
+    const { engine, wallet, transport } = await engineWith(device)
+    ;(engine as any).lastState = 'ready'
+    let drain!: () => void
+    const drained = new Promise<void>(resolve => { drain = resolve })
+    const desktop = engine.withDeviceOperation(async () => {
+      device.locked = true
+      try { await wallet.ethGetAddress({ addressNList: [1], showDisplay: false }) }
+      catch (error) { await drained; throw error }
+    }, { origin: 'desktop', unlock: true, rejectIfBusy: true })
+    const result = desktop.then(() => null, error => error)
+    await until(() => awaitingInput(transport) === 'pin', 'Desktop action PIN request')
+    expect(engine.cancelDesktopDeviceOperation()).toBe(true)
+    await until(() => awaitingInput(transport) === null, 'owned PIN cancellation')
+    await expect(engine.withDeviceOperation(async () => {}, {
+      origin: 'desktop', unlock: true, rejectIfBusy: true,
+    })).rejects.toMatchObject({ status: 409 })
+    expect(engine.cancelDesktopDeviceOperation()).toBe(false) // the old owner was not replaced
+    const abort = new AbortController()
+    const rest = engine.acquireDeviceOperation({ signal: abort.signal, unlock: true })
+    rest.catch(() => {})
+    await sleep(10)
+    expect(device.received.filter(r => r.type === T.MESSAGETYPE_GETPUBLICKEY)).toHaveLength(0)
+    abort.abort(); await expect(rest).rejects.toMatchObject({ status: 499 })
+    drain()
+    expect((await result)?.message?.code).toBe(6)
+    expect(device.received.filter(r => r.type === T.MESSAGETYPE_CANCEL)).toHaveLength(1)
+  })
+
+  test('a retired Desktop action cannot cancel a replacement wallet prompt', async () => {
+    const device = new ScriptedKeepKey(fw); device.locked = false
+    const { engine } = await engineWith(device)
+    ;(engine as any).lastState = 'ready'
+    let finish!: () => void, started = false, cancellations = 0
+    const pending = new Promise<void>(resolve => { finish = resolve })
+    const desktop = engine.withDeviceOperation(async () => { started = true; await pending }, {
+      origin: 'desktop', unlock: true, rejectIfBusy: true,
+    })
+    await until(() => started, 'Desktop dispatch')
+    ;(engine as any).wallet = { transport: { awaitingInput: 'pin', userActionRequired: true } }
+    engine.cancelDevicePrompt = async () => { cancellations++ }
+    expect(engine.cancelDesktopDeviceOperation()).toBe(true)
+    await sleep(10)
+    expect(cancellations).toBe(0)
+    finish(); await desktop
+  })
+
+  test('a wrong PIN retries the unlock without replaying another operation', async () => {
+    const device = new ScriptedKeepKey(fw); device.wrongPinsLeft = 1
+    const { engine, transport } = await engineWith(device)
+    const unlock = engine.promptPin()
+    await until(() => awaitingInput(transport) === 'pin', 'first PIN request')
+    await engine.sendPin('wrong')
+    await until(() => device.received.filter(r => r.type === T.MESSAGETYPE_GETPUBLICKEY).length === 2 && awaitingInput(transport) === 'pin', 'retry PIN request')
+    await engine.sendPin('1'); await unlock
+    expect(device.received.filter(r => r.type === T.MESSAGETYPE_GETPUBLICKEY)).toHaveLength(2)
+    expect(engine.getDeviceState().state).toBe('ready')
+  })
+
+  test('aborting the foreground request cancels its unlock and never dispatches work', async () => {
+    const device = new ScriptedKeepKey(fw)
+    const { engine, transport } = await engineWith(device)
+    const abort = new AbortController()
+    let operations = 0
+    const request = engine.withDeviceOperation(async () => { operations++ }, { signal: abort.signal, unlock: true })
+    request.catch(() => {})
+    await until(() => awaitingInput(transport) === 'pin', 'PIN request')
+    abort.abort()
+    await expect(request).rejects.toMatchObject({ status: 499 })
+    await until(() => device.received.some(r => r.type === T.MESSAGETYPE_CANCEL), 'unlock cancellation')
+    await sleep(20)
+    expect(operations).toBe(0)
+    expect(device.received.filter(r => r.type === T.MESSAGETYPE_GETPUBLICKEY)).toHaveLength(1)
+    expect(awaitingInput(transport)).toBeNull()
+  })
+
   test('PIN entry unlocks, and a request bypassing the lock in the wait is refused', async () => {
     const device = new ScriptedKeepKey(fw)
     const { engine, transport } = await engineWith(device)
@@ -323,6 +535,7 @@ describe.each(['7.17', '7.16'] as const)('EngineController on a USB/HID-like tra
     const device = new ScriptedKeepKey(fw)
     const { engine, transport } = await engineWith(device)
     ;(engine as any).applyState('needs_pin')
+    void engine.promptPin().catch(() => {})
     await until(() => awaitingInput(transport) === 'pin', 'PIN request')
     transport.userActionRequired = false
     await wipeOwningDevice(engine as any, (wipe) => wipe(), async () => {})
@@ -332,11 +545,13 @@ describe.each(['7.17', '7.16'] as const)('EngineController on a USB/HID-like tra
   test("a dropped connection's prompt neither clears the next connection's prompt nor retries on it", async () => {
     const oldDevice = new ScriptedKeepKey(fw)
     const { engine } = await engineWith(oldDevice)
-    ;(engine as any).applyState('needs_pin') // auto prompt-pin on the old connection
+    ;(engine as any).applyState('needs_pin')
+    void engine.promptPin().catch(() => {}) // explicit unlock on the old connection
     await until(() => oldDevice.wait === 'pin', 'old PIN request')
     const device = new ScriptedKeepKey(fw)
     await swap(engine, device)
-    ;(engine as any).applyState('needs_pin') // and on the new one
+    ;(engine as any).applyState('needs_pin')
+    void engine.promptPin().catch(() => {}) // explicit unlock on the new one
     await until(() => device.wait === 'pin', 'new PIN request')
     let prompts = 0
     const promptPin = engine.promptPin.bind(engine)
@@ -349,10 +564,10 @@ describe.each(['7.17', '7.16'] as const)('EngineController on a USB/HID-like tra
     expect(device.received.map(r => r.type)).toEqual([T.MESSAGETYPE_GETPUBLICKEY])
   }, 10_000)
 
-  test("a dropped connection's passphrase prompt is not re-issued on the next connection", async () => {
+  test("a passive passphrase state never requests input on either connection", async () => {
     const oldDevice = new ScriptedKeepKey(fw)
     const { engine } = await engineWith(oldDevice)
-    ;(engine as any).applyState('needs_passphrase') // schedules the passphrase auto-prompt
+    ;(engine as any).applyState('needs_passphrase') // passive state detection
     const device = new ScriptedKeepKey(fw)
     await swap(engine, device) // before that timer runs
     await sleep(50)

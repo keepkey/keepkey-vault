@@ -2322,5 +2322,8 @@
   "m934a6f3d": "Swap cost compares the quoted input and output values, including the rate and route fees. The source network fee is separate. Minimum receive is an execution limit, not a guaranteed refund.",
   "m981df2e2": "Review and approve on KeepKey",
   "m53c7aeaa": "I accept the estimated swap cost of {{cost}} and a value difference of {{loss}} at minimum receive. The source network fee is separate.",
-  "m310febeb": "High swap cost: {{cost}}, excluding the source network fee."
+  "m310febeb": "High swap cost: {{cost}}, excluding the source network fee.",
+  "m2541ef4d": "Unable to unlock KeepKey",
+  "m9ad5be83": "KeepKey locked",
+  "m16909797": "Unlocking…"
 }

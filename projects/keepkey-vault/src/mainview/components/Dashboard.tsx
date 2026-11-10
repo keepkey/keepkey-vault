@@ -6,6 +6,7 @@ import { useTranslation } from "react-i18next"
 import { CHAINS, customChainToChainDef, isChainSupported, type ChainDef } from "../../shared/chains"
 import { isBitcoinOnlyVariant } from "../../shared/flags"
 import { balanceDisplayState } from "../../shared/balance-display-state"
+import { isLocalDeviceAccessError } from "../../shared/device-access-error"
 import { versionCompare } from "../../shared/firmware-versions"
 import { formatBalance, hasNonZeroBalance } from "../lib/formatting"
 import { AnimatedUsd } from "./AnimatedUsd"
@@ -678,6 +679,8 @@ function ChainDetailOrbital({
 interface PioneerError {
 	message: string
 	url: string
+	status?: number
+	statusCode?: number
 }
 
 // Soft fault: balances were returned but some chains are degraded (fresh fetch
@@ -1009,7 +1012,17 @@ function PersonalDashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSetti
 		setPioneerError(null)
 	}, [])
 
+	// A previous device-admission failure may have been shown as an outage.
+	// Remove only that local error; a real provider failure must stay visible.
+	const clearLocalPioneerError = useCallback(() => {
+		setPioneerError(current => isLocalDeviceAccessError(current) ? null : current)
+	}, [])
+
 	const stagePioneerError = useCallback((error: PioneerError) => {
+		if (isLocalDeviceAccessError(error)) {
+			clearLocalPioneerError()
+			return
+		}
 		if (!hasUsableBalanceSnapshot) {
 			pioneerErrorFirstSeenRef.current = Date.now()
 			if (pioneerErrorTimerRef.current) {
@@ -1031,7 +1044,7 @@ function PersonalDashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSetti
 				setPioneerError(error)
 			}, PIONEER_ERROR_GRACE_MS - elapsed)
 		}
-	}, [hasUsableBalanceSnapshot])
+	}, [hasUsableBalanceSnapshot, clearLocalPioneerError])
 
 	useEffect(() => {
 		return () => {
@@ -1114,6 +1127,10 @@ function PersonalDashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSetti
 	useEffect(() => {
 		return onRpcMessage("pioneer-error", (payload) => {
 			const p = payload as PioneerError & Partial<PortfolioFault> & { severity?: 'error' | 'warning' | 'none' }
+			if (isLocalDeviceAccessError(p)) {
+				clearLocalPioneerError()
+				return
+			}
 			if (p.severity === 'none') {
 				setPortfolioFault(null)
 				return
@@ -1135,9 +1152,9 @@ function PersonalDashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSetti
 			// payload (e.g. a {code, message} JSON-RPC error) would crash the tree.
 			const message = typeof p.message === 'string' ? p.message : JSON.stringify(p.message)
 			if (typeof p.message !== 'string') console.error('[Dashboard] pioneer-error carried non-string message:', p.message)
-			stagePioneerError({ message, url: p.url })
+			stagePioneerError({ message, url: p.url, status: p.status, statusCode: p.statusCode })
 		})
-	}, [stagePioneerError])
+	}, [stagePioneerError, clearLocalPioneerError])
 
 	// Load custom chains on mount and register their explorer links
 	useEffect(() => {
@@ -1174,6 +1191,7 @@ function PersonalDashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSetti
 						for (const b of result) map.set(b.chainId, b)
 						setBalances(map)
 						// Cached rows: show the oldest row's age, never present them as current.
+						clearLocalPioneerError()
 						const ages = result.map(b => b.updatedAt || 0).filter(Boolean)
 						setCacheUpdatedAt(ages.length ? Math.min(...ages) : null)
 					}
@@ -1191,6 +1209,7 @@ function PersonalDashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSetti
 						for (const b of cached.balances) map.set(b.chainId, b)
 						setBalances(map)
 						setCacheUpdatedAt(cached.updatedAt)
+						clearLocalPioneerError()
 						console.log(`[Dashboard] Cache hit: ${cached.balances.length} chains, $${cached.balances.reduce((s, b) => s + (b.balanceUsd || 0), 0).toFixed(2)}, age: ${formatTimeAgo(cached.updatedAt, t)}`)
 						if (cached.staleReasons && cached.staleReasons.length > 0) {
 							console.log(`[Dashboard] Cache incomplete (${cached.staleReasons.join(', ')}) — will auto-refresh`)
@@ -1307,7 +1326,7 @@ function PersonalDashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSetti
 			} catch (e: any) {
 				const message = e?.message || 'Unable to refresh balances'
 				console.warn('[Dashboard] refreshWatchOnlyBalances failed:', message)
-				stagePioneerError({ message, url: 'the configured balance server' })
+				stagePioneerError({ message, url: 'the configured balance server', status: e?.status, statusCode: e?.statusCode })
 			} finally {
 				loadingBalancesRef.current = false
 				setLoadingBalances(false)
@@ -1359,15 +1378,22 @@ function PersonalDashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSetti
 					balancesRef.current = map
 					return map
 				})
-				setCacheUpdatedAt(Date.now())
-				setHasEverRefreshed(true)
-				clearPioneerError()
+				if (result.some(b => b.syncState !== 'stale' && b.syncState !== 'degraded')) {
+					setCacheUpdatedAt(Date.now())
+					setHasEverRefreshed(true)
+					clearPioneerError()
+				} else {
+					// Device contention can return the scoped RAM snapshot. It is
+					// useful data, but neither a new balance check nor proof that a
+					// previous provider failure recovered.
+					clearLocalPioneerError()
+				}
 			}
 		} catch (e: any) {
 			if (gen === refreshGenRef.current) {
 				const message = e?.message || 'Unable to refresh balances'
 				console.warn('[Dashboard] getBalances failed:', message)
-				stagePioneerError({ message, url: 'the configured balance server' })
+				stagePioneerError({ message, url: 'the configured balance server', status: e?.status, statusCode: e?.statusCode })
 			}
 		}
 
@@ -1375,7 +1401,7 @@ function PersonalDashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSetti
 			loadingBalancesRef.current = false
 			setLoadingBalances(false)
 		}
-	}, [watchOnly, watchOnlyDeviceId, clearPioneerError, stagePioneerError, commitBalanceReconciliations, reloadVaultPortfolios])
+	}, [watchOnly, watchOnlyDeviceId, clearPioneerError, clearLocalPioneerError, stagePioneerError, commitBalanceReconciliations, reloadVaultPortfolios])
 
 	// Phase 2 trigger — window focus: catch long idle periods. If the last live
 	// fetch is older than 5 min, force-refresh on return to the window.
@@ -1595,9 +1621,10 @@ function PersonalDashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSetti
 				balancesRef.current = next
 				return next
 			})
-			setCacheUpdatedAt(receivedAt)
+			if (updated.syncState !== 'stale' && updated.syncState !== 'degraded') setCacheUpdatedAt(receivedAt)
+			clearLocalPioneerError()
 		})
-	}, [commitBalanceReconciliations])
+	}, [commitBalanceReconciliations, clearLocalPioneerError])
 
 	// Seed-staleness purge: the backend detected the wallet data belonged to a
 	// DIFFERENT seed than the device (passphrase toggle, hidden↔standard

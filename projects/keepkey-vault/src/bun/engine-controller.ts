@@ -20,8 +20,9 @@ import { requestUnlock, isTransportTimeout, UNLOCK_TIMEOUT_MESSAGE, EMULATOR_UNL
 import { forceReleaseWebUsb, isUnreleasable } from './webusb-recovery'
 import type { DeviceFailure } from './device-refusal'
 import { flushRingBuffers, getActiveFlashName, getEmulatorStatus } from './emulator'
-import { wipeOwningDevice, WIPE_BUSY_MESSAGE, type WipeHost } from './device-wipe'
+import { wipeOwningDevice, WIPE_BUSY_MESSAGE, WIPE_REPLUG_PENDING_MESSAGE, type WipeHost } from './device-wipe'
 import { awaitingInput, DEVICE_NOT_ASKING_MESSAGE, gateRestWrites, guardInputWait, restRequest } from './device-gate'
+import { DeviceOperationCoordinator, type DeviceOperationOptions } from './device-operation'
 
 const KEEPKEY_VENDOR_ID = 0x2B24 // 11044
 // Firmware manifest lives in keepkey-vault (migrated from keepkey-desktop, which is now stale).
@@ -195,12 +196,140 @@ export class EngineController extends EventEmitter {
   /** Emulator reconnects after a PIN wait outlived hdwallet's deadline, since the user last
    *  entered a PIN or (re)started the emulator. One is allowed; then the user is told. */
   private emulatorUnlockReconnects = 0
+  private unlockReadyAfter = 0
   /** promptPin's seed-access request while it waits on the PIN (device-wipe.ts reads it). */
   unlockRequest: Promise<unknown> | null = null
+  private pinUnlock: { wallet: unknown; promise: Promise<{ status: string; message: string }>; abort: AbortController } | null = null
+  private desktopOperation: {
+    abort: AbortController; wallet: unknown; deviceId?: string; seedAddress: string | null; dispatched: boolean
+  } | null = null
+  private deviceOperations = new DeviceOperationCoordinator({
+    snapshot: () => ({
+      wallet: this.wallet, deviceId: this.cachedFeatures?.deviceId,
+      seedAddress: this.seedEthAddress, state: this.lastState,
+      blocked: this.wipeInProgress ? WIPE_BUSY_MESSAGE : this.wipeOnReconnect ? WIPE_REPLUG_PENDING_MESSAGE
+        : this.exclusiveHolder || (this.setupInProgress || this.verifyInProgress ? 'KeepKey is busy with device setup.' : null),
+    }),
+    prepare: signal => this.prepareDeviceOperation(signal),
+    unlock: signal => this.unlockForOperation(signal),
+  })
 
   get isSyncing(): boolean { return this.syncing }
-  /** Waiting for its PIN: only Desktop's own prompt should talk to it (rest-api.ts requireWallet). */
-  get isLocked(): boolean { return this.lastState === 'needs_pin' }
+  /** PIN and passphrase are device access requirements, independent of API availability. */
+  get isLocked(): boolean { return this.lastState === 'needs_pin' || this.lastState === 'needs_passphrase' }
+
+  acquireDeviceOperation(options: DeviceOperationOptions = {}): Promise<() => void> {
+    return this.deviceOperations.acquire(options)
+  }
+
+  async withDeviceOperation<T>(action: () => Promise<T>, options: DeviceOperationOptions = {}): Promise<T> {
+    if (options.origin === 'desktop') return this.withDesktopDeviceOperation(action, options)
+    const release = await this.acquireDeviceOperation(options)
+    try { return await action() } finally { release() }
+  }
+
+  private async withDesktopDeviceOperation<T>(action: () => Promise<T>, options: DeviceOperationOptions): Promise<T> {
+    if (this.desktopOperation || (options.rejectIfBusy && this.deviceOperations.busy)) {
+      throw new HttpError(409, 'KeepKey is busy with another request. Wait for it to finish, then try again.')
+    }
+    if (options.signal?.aborted) throw new HttpError(499, 'KeepKey request cancelled')
+    const operation = {
+      abort: new AbortController(), wallet: this.wallet as unknown,
+      deviceId: this.cachedFeatures?.deviceId as string | undefined,
+      seedAddress: this.seedEthAddress, dispatched: false,
+    }
+    // Set once before acquiring. A second Desktop request is refused rather
+    // than replacing the controller that the visible Cancel button belongs to.
+    this.desktopOperation = operation
+    const abort = () => operation.abort.abort()
+    const cancelOwnedInput = () => {
+      const transport = this.wallet?.transport as any
+      if (operation.dispatched && this.desktopOperation === operation && this.wallet === operation.wallet
+        && this.cachedFeatures?.deviceId === operation.deviceId && this.seedEthAddress === operation.seedAddress
+        && !this.setupInProgress && !this.verifyInProgress && !this.wipeInProgress && !this.exclusiveHolder
+        && (awaitingInput(transport) || transport?.userActionRequired)) {
+        void restRequest.exit(() => this.cancelDevicePrompt()).catch(() => {})
+      }
+    }
+    options.signal?.addEventListener('abort', abort, { once: true })
+    let release: (() => void) | undefined
+    try {
+      if (options.signal?.aborted) abort()
+      release = await this.acquireDeviceOperation({ ...options, signal: operation.abort.signal })
+      if (operation.abort.signal.aborted) throw new HttpError(499, 'KeepKey request cancelled')
+      operation.wallet = this.wallet
+      operation.deviceId = this.cachedFeatures?.deviceId
+      operation.seedAddress = this.seedEthAddress
+      operation.abort.signal.addEventListener('abort', cancelOwnedInput, { once: true })
+      // No await between this check and dispatch: a cancelled acquisition can
+      // never wake later and run the original GUI signing/build action.
+      if (operation.abort.signal.aborted) throw new HttpError(499, 'KeepKey request cancelled')
+      operation.dispatched = true
+      return await action()
+    } finally {
+      operation.dispatched = false
+      operation.abort.signal.removeEventListener('abort', cancelOwnedInput)
+      options.signal?.removeEventListener('abort', abort)
+      if (this.desktopOperation === operation) this.desktopOperation = null
+      // Do not hand the transport to another owner before the actual action
+      // has drained, even when Cancel was pressed during a device prompt.
+      release?.()
+    }
+  }
+
+  cancelDesktopDeviceOperation(): boolean {
+    const operation = this.desktopOperation
+    if (!operation || operation.abort.signal.aborted) return false
+    operation.abort.abort()
+    return true
+  }
+
+  /** An explicit unlock click joins the existing prompt; it never queues a
+   * second GetPublicKey behind an operation already waiting for its PIN. */
+  async requestDeviceUnlock(): Promise<void> {
+    if (this.pinUnlock?.wallet === this.wallet) { await this.pinUnlock.promise; return }
+    if (awaitingInput(this.wallet?.transport)) return
+    await this.withDeviceOperation(async () => {}, { unlock: true })
+  }
+
+  private async prepareDeviceOperation(signal: AbortSignal): Promise<void> {
+    const wallet = this.wallet
+    if (signal.aborted) throw new HttpError(499, 'KeepKey request cancelled')
+    if (!wallet) return
+    if (this.pinUnlock?.wallet === wallet) { await this.pinUnlock.promise; return }
+    if (this.lastState !== 'ready' || awaitingInput(wallet.transport)) return
+    // Auto-lock may have happened since the last snapshot. Read Features while
+    // this foreground request owns the queue, before its original device action.
+    const features = await restRequest.exit(() => wallet.getFeatures())
+    if (this.wallet !== wallet) throw new HttpError(409, 'The KeepKey connection changed before the operation')
+    if (signal.aborted) throw new HttpError(499, 'KeepKey request cancelled')
+    if (this.wipeInProgress || this.setupInProgress || this.verifyInProgress) throw new HttpError(409, 'KeepKey is busy with device setup.')
+    this.cachedFeatures = features
+    const state = this.deriveState(features)
+    if (state !== this.lastState) this.updateState(state)
+  }
+
+  private async unlockForOperation(signal: AbortSignal): Promise<unknown> {
+    const wallet = this.wallet
+    const ownsUnlock = !this.pinUnlock || this.pinUnlock.wallet !== wallet
+    let unlock: typeof this.pinUnlock = null
+    const cancel = () => {
+      if (ownsUnlock && unlock && this.pinUnlock === unlock && this.wallet === wallet) {
+        unlock.abort.abort()
+        // A countdown reads no USB. Do not drop hdwallet's call queue or
+        // send Cancel before this request has an answerable input wait.
+        if (awaitingInput(wallet?.transport)) void this.cancelDevicePrompt().catch(() => {})
+      }
+    }
+    signal.addEventListener('abort', cancel, { once: true })
+    try {
+      if (signal.aborted) throw new HttpError(499, 'KeepKey request cancelled')
+      // The unlock belongs to Desktop, even if a REST request asked for it.
+      const promise = restRequest.exit(() => this.promptPin())
+      unlock = this.pinUnlock
+      return await promise
+    } finally { signal.removeEventListener('abort', cancel) }
+  }
 
   get isEmulator(): boolean { return this.activeTransport === 'emulator' }
   /** Get the emulator transport delegate (for chunk counting in confirmOp). */
@@ -233,6 +362,7 @@ export class EngineController extends EventEmitter {
    * rejects with "cannot connect an already-connected connection".
    */
   private clearWallet() {
+    this.deviceOperations.invalidate()
     this.cleanupTransportListeners()
     this.wallet = null
     this.activeTransport = null
@@ -242,6 +372,7 @@ export class EngineController extends EventEmitter {
     this.hiddenWalletActive = false
     this.passphraseSetThisSession = false
     this.unlockRequest = null // belonged to the old connection
+    this.pinUnlock = null
     this.promptPinActive = false // so did its unlock request
     this.pinPromptOpen = false
     this.resetRecoveryState()
@@ -290,6 +421,10 @@ export class EngineController extends EventEmitter {
     // counter cannot tell the UI which PIN it is entering.
     transport.on(String(Messages.MessageType.MESSAGETYPE_PINMATRIXREQUEST), (ev: any) => {
       this.pinRequestCount++
+      if (this.pinUnlock?.wallet === this.wallet && this.pinUnlock?.abort.signal.aborted) {
+        void this.cancelDevicePrompt().catch(() => {})
+        return
+      }
       const matrixType = ev?.message?.type ?? ev?.proto?.getType?.()
       const type: PinRequestType = matrixType === 2 ? 'new-first' : matrixType === 3 ? 'new-second' : 'current'
       console.log(`[Engine] PIN_REQUEST → type=${type} (count=${this.pinRequestCount}, setup=${this.setupInProgress})`)
@@ -353,6 +488,10 @@ export class EngineController extends EventEmitter {
     for (const [type, fn] of this.zcashProgressListeners) transport.on(type, fn)
 
     transport.on(String(core.Events.PASSPHRASE_REQUEST), () => {
+      if (this.pinUnlock?.wallet === this.wallet && this.pinUnlock?.abort.signal.aborted) {
+        void this.cancelDevicePrompt().catch(() => {})
+        return
+      }
       console.log('[Engine] PASSPHRASE_REQUEST → emitting to UI')
       // Device has moved past PIN and now waits for passphrase — update derived
       // state immediately so the UI reflects what the device actually needs.
@@ -479,7 +618,10 @@ export class EngineController extends EventEmitter {
   }
 
   private applyState(state: DeviceState) {
+    const previousState = this.lastState
     this.lastState = state
+    if (state === 'needs_passphrase' && previousState !== state) this.deviceOperations.invalidateQueued()
+    if (!['ready', 'needs_pin', 'needs_passphrase'].includes(state)) this.deviceOperations.invalidate()
     if (state !== 'needs_pin') this.pinAwaitingResult = false
     if (state === 'ready') this.wipeOnReconnect = null // unlocked with the PIN after all
     console.log(`[Engine] State → ${state}`)
@@ -565,90 +707,21 @@ export class EngineController extends EventEmitter {
       }
     }
 
-    // Auto-trigger PIN matrix on device OLED when state becomes needs_pin.
-    // After a firmware/bootloader flash the device reboots — give the transport
-    // time to stabilise before firing getPublicKeys, otherwise the device may
-    // respond with Failure(7) "Invalid PIN" before the user even sees the overlay.
-    // Both auto-prompts belong to this connection: a switch before they run leaves
-    // the next connection to prompt for itself.
+    // Detecting a locked device is passive. Only an explicit unlock or an
+    // intentional device operation may ask for a PIN/passphrase. A deferred
+    // wipe remains explicit intent and must run on its requested replug.
     const connection = this.wallet
-    if (state === 'needs_pin') {
-      const delay = this.updatePhase === 'rebooting' ? 2000 : 0
-      if (this.updatePhase === 'rebooting') {
-        this.updatePhase = 'idle'
-        this.emit('state-change', this.getDeviceState())
-      }
-      const autoPrompt = (): void => {
-        if (this.wipeInProgress) return
-        if (this.wallet !== connection) return
-        // The replug a deferred wipe asked for: the same device on a new connection gets the
-        // wipe before a PIN request can restart its countdown. Another device just unlocks.
-        if (this.wipeOnReconnect && this.wallet !== this.wipeDeferredWallet && !this.unlockRequest) {
-          const sameDevice = this.wipeOnReconnect === this.cachedFeatures?.deviceId
-          this.wipeOnReconnect = null
-          if (sameDevice) {
-            this.wipeDevice().catch(err => console.warn('[Engine] Wipe after replug failed:', err?.message))
-            return
-          }
-        }
-        this.promptPin().catch(err => {
-          console.warn('[Engine] Auto prompt-pin failed (expected if PIN flow interrupts):', err?.message)
-          // That connection is gone (switch, stop, unplug): the next one prompts for itself.
-          if (this.wallet !== connection) return
-          // A timeout leaves the transport unusable; retrying would just
-          // reshow the PIN grid with no pending request. Tell the user.
-          // On the emulator this is the PIN wait itself: the first reply has no
-          // deadline there (EMULATOR_UNLOCK_FIRST_REPLY_MS), so a backoff countdown
-          // is waited out, not timed out. It needs no replug: a new connection's
-          // Initialize ends the firmware's wait, and needs_pin prompts again. Once;
-          // after that the user is told, not re-prompted every five minutes.
-          if (isTransportTimeout(err) && this.isEmulator) {
-            if (this.emulatorUnlockReconnects++ === 0) {
-              console.warn('[Engine] Emulator PIN wait outlived the transport deadline — reconnecting')
-              this.connectEmulator().catch(e => console.warn('[Engine] Emulator reconnect failed:', e?.message))
-            } else {
-              console.warn('[Engine] Emulator PIN wait outlived the transport deadline again — stopping')
-              this.lastError = EMULATOR_UNLOCK_TIMEOUT_MESSAGE
-              this.updateState('error')
-            }
-            return
-          }
-          if (isTransportTimeout(err)) {
-            this.lastError = UNLOCK_TIMEOUT_MESSAGE
-            this.updateState('error')
-            return
-          }
-          // If device is still locked (wrong PIN, transport error, etc.), retry so
-          // the PIN overlay re-appears.  Without this, promptPinActive stays false,
-          // lastState is already 'needs_pin', and updateState won't re-fire —
-          // leaving the user with no PIN overlay while the device still needs PIN.
-          // Keep retrying for as long as the device stays locked — every wrong
-          // PIN lands here. Never while a wipe owns the transport.
-          setTimeout(() => {
-            if (this.lastState === 'needs_pin' && !this.promptPinActive && !this.wipeInProgress) {
-              console.log('[Engine] Retrying prompt-pin (device still locked)')
-              autoPrompt()
-            }
-          }, 3000)
-        })
-      }
-      setTimeout(autoPrompt, delay)
-    }
-
-    // Same for needs_passphrase — device has passphrase protection but PIN is
-    // already cached (or disabled).  We must call promptPin() → getPublicKeys()
-    // so the device sends PASSPHRASE_REQUEST; without it, the UI overlay shows
-    // but sendPassphrase() has no pending device request to respond to.
-    // Use setTimeout (like needs_pin) so the check runs after any in-flight
-    // promptPin() completes and clears promptPinActive in its finally block.
-    if (state === 'needs_passphrase') {
-      setTimeout(() => {
-        if (this.wallet === connection && !this.promptPinActive) {
-          this.promptPin().catch(err => {
-            console.warn('[Engine] Auto prompt-passphrase failed:', err?.message)
-          })
-        }
+    if (state === 'needs_pin' && !this.wipeInProgress && this.wipeOnReconnect && connection !== this.wipeDeferredWallet && !this.unlockRequest) {
+      const sameDevice = this.wipeOnReconnect === this.cachedFeatures?.deviceId
+      this.wipeOnReconnect = null
+      if (sameDevice) setTimeout(() => {
+        if (this.wallet === connection && !this.wipeInProgress) this.wipeDevice().catch(err => console.warn('[Engine] Wipe after replug failed:', err?.message))
       }, 0)
+    }
+    if (state === 'needs_pin' && this.updatePhase === 'rebooting') {
+      this.unlockReadyAfter = Date.now() + 2000
+      this.updatePhase = 'idle'
+      this.emit('state-change', this.getDeviceState())
     }
   }
 
@@ -2248,11 +2321,12 @@ export class EngineController extends EventEmitter {
       if (this.wallet !== wallet) throw new Error('Device changed while applying settings')
       this.cachedFeatures = features
       this.setupInProgress = previousSetup
-      // Route through updateState so needs_passphrase triggers promptPin() →
-      // getPublicKeys() → PASSPHRASE_REQUEST.  Previously this emitted directly,
-      // so enabling passphrase from settings showed the overlay but the device
-      // never received the passphrase (no pending request to respond to).
       this.updateState(this.deriveState(this.cachedFeatures))
+      // This settings change is intentional foreground work. Finish the
+      // passphrase prompt after ApplySettings has released the transport.
+      if (opts.usePassphrase === true && this.lastState === 'needs_passphrase') {
+        void restRequest.exit(() => this.promptPin()).catch(err => console.warn('[Engine] Settings unlock failed:', err?.message))
+      }
     } finally {
       if (this.wallet === wallet) this.setupInProgress = previousSetup
     }
@@ -2316,37 +2390,66 @@ export class EngineController extends EventEmitter {
   async promptPin() {
     const wallet = this.wallet
     if (!wallet?.transport) throw new Error('No device connected')
+    if (this.pinUnlock?.wallet === wallet) return this.pinUnlock.promise
     if (this.wipeInProgress) throw new Error(WIPE_BUSY_MESSAGE)
-    // getPublicKeys accesses the seed → triggers PinMatrixRequest on locked device.
-    // It also triggers PASSPHRASE_REQUEST if passphrase protection is enabled.
-    // Both are resolved via transport event handlers (sendPin/sendPassphrase).
-    // While this promise is pending, sendPin/sendPassphrase must NOT call
-    // getFeatures — that would race with getPublicKeys and cause FAILURE.
+    if (awaitingInput(wallet.transport)) throw new HttpError(409, 'KeepKey already has a PIN or passphrase request. Answer the current prompt.')
+    const abort = new AbortController()
+    const promise = Promise.resolve().then(() => this.performPinUnlock(wallet, abort.signal))
+    this.pinUnlock = { wallet, promise, abort }
+    try { return await promise } finally {
+      if (this.pinUnlock?.promise === promise) this.pinUnlock = null
+    }
+  }
+
+  private async performPinUnlock(wallet: core.HDWallet & Record<string, any>, signal: AbortSignal) {
+    const knownSeed = this.seedEthAddress
+    if (!wallet.transport) throw new Error('No device connected')
+    if (this.wallet !== wallet) throw new Error('The device connection changed during the unlock')
     this.promptPinActive = true
-    // Not wallet.getPublicKeys(): it uses a 5 s timeout, shorter than the
-    // firmware's post-failure PIN lockout wait (see pin-unlock.ts).
-    const promise = requestUnlock(wallet.transport, this.isEmulator ? EMULATOR_UNLOCK_FIRST_REPLY_MS : undefined)
-    this.unlockRequest = promise
-    promise.catch(() => {}).finally(() => { if (this.unlockRequest === promise) this.unlockRequest = null })
     try {
-      await promise
+      const delay = this.unlockReadyAfter - Date.now()
+      if (delay > 0) await new Promise(resolve => setTimeout(resolve, delay))
       if (this.wallet !== wallet) throw new Error('The device connection changed during the unlock')
-      // getPublicKeys completed — PIN (and passphrase if needed) were provided.
-      // Now it's safe to refresh features.
+      if (signal.aborted) throw new HttpError(499, 'KeepKey request cancelled')
+      // Retry only the unlock exchange after a device-reported wrong PIN.
+      // Cancellation, transport errors and wallet changes never replay work.
+      for (;;) {
+        if (signal.aborted) throw new HttpError(499, 'KeepKey request cancelled')
+        const requestsBefore = this.pinRequestCount
+        const promise = requestUnlock(wallet.transport, this.isEmulator ? EMULATOR_UNLOCK_FIRST_REPLY_MS : undefined)
+        this.unlockRequest = promise
+        try {
+          await promise
+          break
+        } catch (err: any) {
+          if (this.wallet !== wallet || this.wipeInProgress) throw err
+          if ((err?.message?.code ?? err?.code) === 7 && this.pinRequestCount > requestsBefore) continue
+          if (isTransportTimeout(err)) {
+            if (this.isEmulator && this.emulatorUnlockReconnects++ === 0) {
+              console.warn('[Engine] Emulator PIN wait outlived the transport deadline — reconnecting')
+              await this.connectEmulator()
+            } else {
+              this.lastError = this.isEmulator ? EMULATOR_UNLOCK_TIMEOUT_MESSAGE : UNLOCK_TIMEOUT_MESSAGE
+              this.updateState('error')
+            }
+          }
+          throw err
+        } finally { if (this.unlockRequest === promise) this.unlockRequest = null }
+      }
+      if (this.wallet !== wallet) throw new Error('The device connection changed during the unlock')
+      if (signal.aborted) throw new HttpError(499, 'KeepKey request cancelled')
       const features = await wallet.getFeatures()
       if (this.wallet !== wallet) throw new Error('The device connection changed during the unlock')
       this.cachedFeatures = features
       this.updateState(this.deriveState(this.cachedFeatures))
-      // If sendPassphrase() ran while promptPin owned the transport, it could
-      // not derive the hidden-wallet scope there. Do it now, after the seed
-      // access request has fully completed.
+      // Resolve a fresh effective-wallet identity before a queued operation
+      // can be admitted. Never persist a hidden wallet's identity here.
+      const freshSeed = await this.deriveSeedIdentity()
+      if (knownSeed && !freshSeed) throw new HttpError(409, 'Could not verify the wallet after unlocking. Reconnect and start the request again.')
+      if (this.wallet !== wallet) throw new Error('The device connection changed during the unlock')
       await this.deriveHiddenWalletScopeInMemory()
       return { status: 'unlocked', message: 'Device already unlocked' }
-    } catch (err: any) {
-      // PIN/passphrase flow interruption is expected — the UI handles input
-      throw err
     } finally {
-      // A newer connection's prompt is not this one's to clear (clearWallet reset it).
       if (this.wallet === wallet) this.promptPinActive = false
     }
   }
@@ -2362,6 +2465,8 @@ export class EngineController extends EventEmitter {
   async cancelDevicePrompt(): Promise<void> {
     const wallet = this.wallet as any
     if (!wallet) return
+    const unlock = this.pinUnlock
+    if (unlock && unlock.wallet === wallet) unlock.abort.abort()
     if (!awaitingInput(wallet.transport)) return wallet.cancel()
     this.setPinPromptOpen(false)
     await wallet.transport.call(Messages.MessageType.MESSAGETYPE_CANCEL, new Messages.Cancel(), {
@@ -2389,7 +2494,7 @@ export class EngineController extends EventEmitter {
 
   /** Re-issue the PIN prompt after something else (a failed wipe) cancelled it. */
   repromptPin() {
-    if (this.lastState === 'needs_pin') this.updateState('needs_pin')
+    if (this.lastState === 'needs_pin') void restRequest.exit(() => this.promptPin()).catch(err => console.warn('[Engine] PIN retry failed:', err?.message))
   }
 
   /** Wipe the device, owning it until it answers (see device-wipe.ts). Used by the UI and REST. */
@@ -2821,15 +2926,17 @@ export class EngineController extends EventEmitter {
    * signs or loses funds. Revisit only if variant-swap-on-one-seed is a real flow.
    */
   private async deriveSeedFingerprint(): Promise<string | null> {
-    if (!this.wallet) return null
+    const wallet = this.wallet
+    if (!wallet) return null
     // Bitcoin-only firmware refuses ETH ("Unknown message"); asking anyway cost a
     // failed round trip on every connect. Go straight to the btc: fingerprint.
     const btcOnly = isBitcoinOnlyVariant(this.cachedFeatures?.firmwareVariant)
     if (!btcOnly) try {
-      const result = await (this.wallet as any).ethGetAddress({
+      const result = await (wallet as any).ethGetAddress({
         addressNList: [0x80000000 + 44, 0x80000000 + 60, 0x80000000 + 0, 0, 0],
         showDisplay: false,
       })
+      if (this.wallet !== wallet) return null
       const addr = (typeof result === 'string' ? result : result?.address)?.toLowerCase()
       if (addr) return addr
     } catch (err: any) {
@@ -2841,15 +2948,17 @@ export class EngineController extends EventEmitter {
     // btc: fingerprint would trigger a false "seed changed" purge. Multi-chain here
     // is uncertain → return null. (Guard sits AFTER the attempt so it catches the
     // resolve-empty case too, not just thrown errors.)
+    if (this.wallet !== wallet) return null
     if (!isBitcoinOnlyVariant(this.cachedFeatures?.firmwareVariant)) {
       console.warn('[Engine] seed fingerprint: ETH unavailable on multi-chain fw — uncertain, returning null')
       return null
     }
     try {
-      const result = await (this.wallet as any).btcGetAddress({
+      const result = await (wallet as any).btcGetAddress({
         addressNList: [0x80000000 + 84, 0x80000000 + 0, 0x80000000 + 0, 0, 0],
         coin: 'Bitcoin', scriptType: 'p2wpkh', showDisplay: false,
       })
+      if (this.wallet !== wallet) return null
       const addr = (typeof result === 'string' ? result : result?.address)
       return addr ? `btc:${addr.toLowerCase()}` : null
     } catch (err: any) {
@@ -2859,7 +2968,9 @@ export class EngineController extends EventEmitter {
   }
 
   async deriveSeedIdentity(): Promise<string | null> {
+    const wallet = this.wallet
     const addr = await this.deriveSeedFingerprint()
+    if (this.wallet !== wallet) return null
     if (addr) this.seedEthAddress = addr
     return addr
   }
@@ -2871,10 +2982,11 @@ export class EngineController extends EventEmitter {
    * trace of the hidden wallet.
    */
   private async deriveHiddenWalletScopeInMemory(): Promise<void> {
-    if (!this.wallet || !this.hiddenWalletActive) return
+    const wallet = this.wallet
+    if (!wallet || !this.hiddenWalletActive) return
     try {
       const addr = await this.deriveSeedFingerprint()
-      if (!addr) return
+      if (!addr || this.wallet !== wallet) return
       this.seedEthAddress = addr // RAM only — never written to disk for hidden wallets
       this.emit('wallet-scope-ready', { deviceId: this.cachedFeatures?.deviceId || 'unknown', seedAddress: addr })
       this.emit('state-change', this.getDeviceState())
@@ -2888,9 +3000,11 @@ export class EngineController extends EventEmitter {
    * Emits 'seed-changed' if the address differs from what's stored in settings DB.
    */
   async checkSeedIdentity(): Promise<void> {
-    if (!this.wallet) return
+    const wallet = this.wallet
+    if (!wallet) return
     try {
       const addr = await this.deriveSeedFingerprint()
+      if (this.wallet !== wallet) return
       if (!addr) {
         console.warn('[Engine] checkSeedIdentity: could not derive seed fingerprint')
         return

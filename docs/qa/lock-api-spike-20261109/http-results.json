@@ -1,0 +1,90 @@
+{
+  "rows": [
+    {
+      "phase": "ready",
+      "path": "/addresses/eth",
+      "method": "POST",
+      "status": 200
+    },
+    {
+      "phase": "locked",
+      "path": "/api/v1/health/fast",
+      "method": "GET",
+      "status": 200
+    },
+    {
+      "phase": "locked",
+      "path": "/api/health",
+      "method": "GET",
+      "status": 200,
+      "ready": false,
+      "connected": true
+    },
+    {
+      "phase": "locked",
+      "path": "/auth/pair",
+      "method": "GET",
+      "status": 200,
+      "paired": true
+    },
+    {
+      "phase": "locked",
+      "path": "/system/info/get-features",
+      "method": "POST",
+      "status": 200
+    },
+    {
+      "phase": "locked-warm-cache",
+      "path": "/addresses/eth",
+      "method": "POST",
+      "status": 423,
+      "error": "KeepKey is locked: enter the PIN in KeepKey Desktop, then try again"
+    },
+    {
+      "phase": "locked",
+      "path": "/api/pubkeys/batch",
+      "method": "POST",
+      "status": 423,
+      "error": "KeepKey is locked: enter the PIN in KeepKey Desktop, then try again"
+    },
+    {
+      "phase": "pin-wait-no-snapshot",
+      "path": "/system/info/get-features",
+      "method": "POST",
+      "status": 423,
+      "error": "KeepKey is waiting for its PIN or passphrase: enter it in KeepKey Desktop, then try again"
+    },
+    {
+      "phase": "pin-wait",
+      "path": "/api/v1/health/fast",
+      "method": "GET",
+      "status": 200
+    },
+    {
+      "phase": "pin-wait",
+      "path": "/auth/pair",
+      "method": "GET",
+      "status": 200,
+      "paired": true
+    },
+    {
+      "phase": "unlocked-retry",
+      "path": "/addresses/eth",
+      "method": "POST",
+      "status": 200
+    },
+    {
+      "phase": "unlocked-retry",
+      "path": "/auth/pair",
+      "method": "GET",
+      "status": 200,
+      "paired": true
+    }
+  ],
+  "addressReads": 1,
+  "signs": 0,
+  "approvals": 0,
+  "externalRequests": [],
+  "synthetic": true,
+  "realDeviceUsed": false
+}

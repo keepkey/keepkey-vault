@@ -16,6 +16,7 @@ import {EventEmitter} from 'node:events'
 import {existsSync} from 'node:fs'
 import * as core from '@keepkey/hdwallet-core'
 import * as Messages from '@keepkey/device-protocol/lib/messages_pb'
+import {EMULATOR_UNLOCK_FIRST_REPLY_MS, EMULATOR_UNLOCK_TIMEOUT_MESSAGE} from '../../src/bun/pin-unlock'
 
 const library = process.env.KK_EMU_DYLIB
 if (!library || !existsSync(library)) throw new Error('Set KK_EMU_DYLIB to the firmware library under test')
@@ -144,15 +145,56 @@ let engine: InstanceType<typeof EngineController>
 let pins: string[]
 let passphrases: number
 let pinErrors: Array<{code: number}>
+let unlocks: Promise<void>[]
 
 async function connect(name: string) {
   emu.initEmulator(name)
   await engine.connectEmulator()
+  await sleep(20)
+  expect(pins).toEqual([]) // Connecting a locked wallet must not ask for its PIN.
+  expect(engine.unlockRequest).toBeNull()
+}
+
+function trackUnlock(request: Promise<void>) {
+  unlocks.push(request)
+  void request.catch(() => {}) // Cancel/disconnect cases assert the rejection below.
+  return request
+}
+
+function requestUnlock() { return trackUnlock(engine.requestDeviceUnlock()) }
+
+/** Lose one connection's firmware reply, exercising a real wire deadline.
+ * Human input still owns the normal submission signal and never times out idle. */
+function stallWireReply(transport: any, firstReply = false) {
+  const delegate = transport.delegate
+  const readChunk = delegate.readChunk.bind(delegate)
+  let stalled = false
+  delegate.readChunk = async (debug?: boolean) => {
+    const reply = await readChunk(debug)
+    if (!debug && stalled) {
+      // Consume this connection's reply so a later Initialize cannot read it.
+      // Its original reader drains when hdwallet quarantines the connection.
+      while (await delegate.isOpened()) await sleep(5)
+      throw new Error('Stalled fixture reply ended when its transport disconnected')
+    }
+    return reply
+  }
+  const withDeadline = transport.withDeadline.bind(transport)
+  transport.withDeadline = (action: any, ms: number, operation: string, startDeadline?: Promise<void>) =>
+    withDeadline(action, ms === core.LONG_TIMEOUT || (firstReply && ms === EMULATOR_UNLOCK_FIRST_REPLY_MS) ? 1500 : ms, operation, startDeadline)
+  return () => { stalled = true }
+}
+
+async function assertQuarantined(transport: any) {
+  expect(transport.timeoutError?.name).toBe('TransportTimeoutError')
+  expect(await transport.delegate.isOpened()).toBe(false)
+  await expect(transport.call(Messages.MessageType.MESSAGETYPE_GETFEATURES, new Messages.GetFeatures()))
+    .rejects.toBe(transport.timeoutError)
 }
 
 function newEngine() {
   engine = new EngineController()
-  pins = []; passphrases = 0; pinErrors = []
+  pins = []; passphrases = 0; pinErrors = []; unlocks = []
   engine.on('pin-request', ({type}: any) => pins.push(type))
   engine.on('passphrase-request', () => passphrases++)
   engine.on('pin-error', (e: any) => pinErrors.push(e))
@@ -173,6 +215,7 @@ afterEach(async () => {
   setSystemTime()
   try { engine?.disconnectEmulator() } catch {}
   emu.stopEmulator()
+  expect((await settled(Promise.allSettled(unlocks ?? []), 2000)).state).toBe('resolved')
   await sleep(50)
 })
 
@@ -184,10 +227,12 @@ describe('PIN prompt on real emulator firmware', () => {
     newEngine()
     await connect('wrong')
     expect(state()).toBe('needs_pin')
+    const unlock = requestUnlock()
     await enterPin('1111')
     await until(() => pinErrors.length > 0, 'PIN verdict')
     expect(pinErrors[0].code).toBe(7)
     await enterPin('1234')
+    await unlock
     await until(() => state() === 'ready', 'unlock')
     expect(unknownMessages()).toEqual([])
   }, 30_000)
@@ -196,16 +241,39 @@ describe('PIN prompt on real emulator firmware', () => {
     await makeWallet('cancel', SEED_A, '1234')
     newEngine()
     await connect('cancel')
+    const unlock = requestUnlock()
     await until(() => pins.length > 0, 'PIN request')
     const prompt = engine.unlockRequest
     const seed = engine.deriveSeedIdentity()
     await sleep(100)
     await engine.cancelDevicePrompt()
     expect((await settled(prompt, 2000)).state).toBe('rejected')
+    expect((await settled(unlock, 2000)).state).toBe('rejected')
     pins.length = 0
     await enterPin('1234')
     expect(await seed).toBe(ETH_A)
     await until(() => state() === 'ready', 'unlock')
+    expect(unknownMessages()).toEqual([])
+  }, 30_000)
+
+  test('cancel without another owner stays idle until a new explicit unlock', async () => {
+    await makeWallet('cancel-idle', SEED_A, '1234')
+    newEngine()
+    await connect('cancel-idle')
+    const unlock = requestUnlock()
+    await until(() => pins.length > 0, 'PIN request')
+    pins.length = 0
+    await engine.cancelDevicePrompt()
+    expect((await settled(unlock, 2000)).state).toBe('rejected')
+    await sleep(200)
+    expect(state()).toBe('needs_pin')
+    expect(engine.getDeviceState().pinPromptOpen).toBe(false)
+    expect(engine.unlockRequest).toBeNull()
+    expect(pins).toEqual([])
+    const retry = requestUnlock()
+    await enterPin('1234')
+    await retry
+    expect(state()).toBe('ready')
     expect(unknownMessages()).toEqual([])
   }, 30_000)
 
@@ -214,6 +282,7 @@ describe('PIN prompt on real emulator firmware', () => {
     await makeWallet('switch-b', SEED_B, '5678')
     newEngine()
     await connect('switch-a')
+    const oldUnlock = requestUnlock()
     await until(() => pins.length > 0, 'wallet A PIN request')
     const prompt = engine.unlockRequest
     const staleSeed = engine.deriveSeedIdentity()
@@ -226,12 +295,15 @@ describe('PIN prompt on real emulator firmware', () => {
     await connect('switch-b')
     expect(Date.now() - t0).toBeLessThan(5000)
     expect((await settled(prompt, 2000)).state).toBe('rejected')
+    expect((await settled(oldUnlock, 2000)).state).toBe('rejected')
     const stale = await settled(staleSeed, 2000)
     expect(stale.state).toBe('resolved')
     expect((stale as any).value).toBeNull()
     expect(engine.getDeviceState().label).toBe('switch-b')
     expect(state()).toBe('needs_pin')
+    const unlock = requestUnlock()
     await enterPin('5678')
+    await unlock
     await until(() => state() === 'ready', 'wallet B unlock')
     expect(await engine.deriveSeedIdentity()).toBe(ETH_B)
     expect(unknownMessages()).toEqual([])
@@ -241,15 +313,19 @@ describe('PIN prompt on real emulator firmware', () => {
     await makeWallet('stop', SEED_A, '1234')
     newEngine()
     await connect('stop')
+    const oldUnlock = requestUnlock()
     await until(() => pins.length > 0, 'PIN request')
     const prompt = engine.unlockRequest
     engine.disconnectEmulator()
     emu.stopEmulator()
     expect((await settled(prompt, 1000)).state).toBe('rejected')
+    expect((await settled(oldUnlock, 1000)).state).toBe('rejected')
     // The same wallet comes back and unlocks.
     pins.length = 0
     await connect('stop')
+    const unlock = requestUnlock()
     await enterPin('1234')
+    await unlock
     await until(() => state() === 'ready', 'unlock after restart')
     expect(unknownMessages()).toEqual([])
   }, 30_000)
@@ -258,16 +334,19 @@ describe('PIN prompt on real emulator firmware', () => {
     await makeWallet('quit', SEED_A, '1234')
     newEngine()
     await connect('quit')
+    const unlock = requestUnlock()
     await until(() => pins.length > 0, 'PIN request')
     const prompt = engine.unlockRequest
     emu.stopEmulator() // cleanupAndQuit: stopEmulator(), no disconnectEmulator()
     expect((await settled(prompt, 1000)).state).toBe('rejected')
+    expect((await settled(unlock, 1000)).state).toBe('rejected')
   }, 30_000)
 
   test('a seed request queued behind an unanswered PIN never lands in the PIN wait', async () => {
     await makeWallet('queued', SEED_A, '1234')
     newEngine()
     await connect('queued')
+    const unlock = requestUnlock()
     await until(() => pins.length > 0, 'PIN request')
     const prompt = engine.unlockRequest
     const seed = engine.deriveSeedIdentity()
@@ -279,6 +358,7 @@ describe('PIN prompt on real emulator firmware', () => {
     expect(unknownMessages()).toEqual([])
     await enterPin('1234')
     expect(await seed).toBe(ETH_A)
+    await unlock
     await until(() => state() === 'ready', 'unlock')
     expect(unknownMessages()).toEqual([])
   }, 30_000)
@@ -287,6 +367,7 @@ describe('PIN prompt on real emulator firmware', () => {
     await makeWallet('bypass', SEED_A, '1234')
     newEngine()
     await connect('bypass')
+    const unlock = requestUnlock()
     await until(() => pins.length > 0, 'PIN request')
     const prompt = engine.unlockRequest
     const err = await (engine.wallet as any).transport.call(
@@ -294,30 +375,37 @@ describe('PIN prompt on real emulator firmware', () => {
     expect(err?.status).toBe(423)
     expect((await settled(prompt, 300)).state).toBe('pending')
     await enterPin('1234')
+    await unlock
     await until(() => state() === 'ready', 'unlock')
     expect(unknownMessages()).toEqual([])
   }, 30_000)
 
-  test('a PIN prompt past the transport deadline reconnects and prompts again', async () => {
+  test('a submitted PIN whose reply times out reconnects, then waits for explicit unlock intent', async () => {
     await makeWallet('deadline', SEED_A, '1234')
     newEngine()
     await connect('deadline')
-    await until(() => pins.length > 0, 'first PIN request')
-    pins.length = 0
-    // hdwallet's own deadline, shortened for this connection: 1.5 s instead of 5 minutes.
     const transport = (engine.wallet as any).transport
-    const withDeadline = transport.withDeadline.bind(transport)
-    transport.withDeadline = (action: any, ms: number, op: string) =>
-      withDeadline(action, ms === core.LONG_TIMEOUT ? 1500 : ms, op)
-    // Release the current wait so the re-prompt is the one under the short deadline.
+    const stallReply = stallWireReply(transport)
+    let dispatched = 0
+    const unlock = trackUnlock(engine.withDeviceOperation(async () => { dispatched++ }, {unlock: true}))
+    await until(() => pins.length > 0, 'first PIN request')
     const prompt = engine.unlockRequest
-    await engine.cancelDevicePrompt()
-    await settled(prompt, 2000)
-    await until(() => pins.length > 0, 'PIN request under the short deadline')
-    pins.length = 0
-    await until(() => pins.length > 0, 'PIN request after the deadline', 15_000)
+    stallReply()
+    await enterPin('1111') // Real firmware rejects it, but this connection loses the reply.
+    expect((await settled(prompt, 4000)).state).toBe('rejected')
+    expect((await settled(unlock, 4000)).state).toBe('rejected')
+    await until(() => !!engine.wallet && (engine.wallet as any).transport !== transport
+      && engine.getCachedFeaturesSnapshot()?.pinProtection === true && state() === 'needs_pin', 'replacement connection')
+    await assertQuarantined(transport)
+    expect(dispatched).toBe(0)
     expect((engine.wallet as any).transport).not.toBe(transport)
+    await sleep(200)
+    expect(pins).toEqual([])
+    expect(engine.unlockRequest).toBeNull()
+    const retry = requestUnlock()
     await enterPin('1234')
+    await retry
+    expect(dispatched).toBe(0) // A new unlock never replays the abandoned foreground action.
     await until(() => state() === 'ready', 'unlock')
     expect(unknownMessages()).toEqual([])
   }, 40_000)
@@ -326,11 +414,13 @@ describe('PIN prompt on real emulator firmware', () => {
     await makeWallet('cross-ack', SEED_A, '1234')
     newEngine()
     await connect('cross-ack')
+    const unlock = requestUnlock()
     await until(() => pins.length > 0, 'PIN request')
     // The engine refuses it as unasked; sent past the engine (REST's direct wallet call), the guard refuses it.
     expect((await engine.sendPassphrase('').then(() => null, (e: any) => e))?.status).toBe(409)
     expect((await (engine.wallet as any).sendPassphrase('').then(() => null, (e: any) => e))?.status).toBe(423)
     await enterPin('1234')
+    await unlock
     await until(() => state() === 'ready', 'unlock')
     expect(unknownMessages()).toEqual([])
   }, 30_000)
@@ -339,14 +429,19 @@ describe('PIN prompt on real emulator firmware', () => {
     await makeWallet('reinit', SEED_A, '1234')
     newEngine()
     await connect('reinit')
+    const oldUnlock = requestUnlock()
     await until(() => pins.length > 0, 'PIN request')
     const prompt = engine.unlockRequest
     await (engine.wallet as any).transport.delegate.disconnect() // the firmware still waits for its PIN
     expect((await settled(prompt, 1000)).state).toBe('rejected')
+    expect((await settled(oldUnlock, 1000)).state).toBe('rejected')
     pins.length = 0
     await engine.connectEmulator() // same emulator boot: Initialize lands in that wait
     expect(state()).toBe('needs_pin')
+    expect(engine.unlockRequest).toBeNull()
+    const unlock = requestUnlock()
     await enterPin('1234')
+    await unlock
     await until(() => state() === 'ready', 'unlock')
     expect(emu.emuRead(0)).toBeNull() // no reply left over for the next request
     expect(unknownMessages()).toEqual([])
@@ -358,51 +453,81 @@ describe('PIN prompt on real emulator firmware', () => {
     const states: string[] = []
     engine.on('state-change', (s: any) => states.push(s.state))
     await connect('countdown')
+    // Install before any wrong PIN: code 7 retries immediately, so installing
+    // after the third verdict could miss the countdown's first-reply deadline.
+    const transport = (engine.wallet as any).transport
+    const withDeadline = transport.withDeadline.bind(transport)
+    transport.withDeadline = (action: any, ms: number, op: string, startDeadline?: Promise<void>) =>
+      withDeadline(action, ms === core.LONG_TIMEOUT ? 1500 : ms, op, startDeadline)
+    const unlock = requestUnlock()
     for (let i = 0; i < 3; i++) {
       await enterPin('1111')
       await until(() => pinErrors.length === i + 1, `wrong PIN ${i + 1}`)
     }
-    // Three failures: the next request counts down 8 s before its PinMatrixRequest. Give this
-    // connection a 1.5 s LONG_TIMEOUT so a deadline on the countdown would fire well inside it.
-    const transport = (engine.wallet as any).transport
-    const withDeadline = transport.withDeadline.bind(transport)
-    transport.withDeadline = (action: any, ms: number, op: string) => withDeadline(action, ms === core.LONG_TIMEOUT ? 1500 : ms, op)
-    engine.once('pin-request', () => { transport.withDeadline = withDeadline }) // the PIN wait itself keeps its deadline
-    await sleep(3000 + 4000) // the 3 s re-prompt, then half the countdown
+    // Three failures: the next request counts down 8 s before its PinMatrixRequest.
+    // The 1.5 s ordinary deadline must not replace the emulator's long first reply.
+    await sleep(4000) // Half the real 8 s firmware backoff; no host retry or timeout.
     expect(state()).toBe('needs_pin')
     expect(engine.getDeviceState().pinPromptOpen).toBe(false) // PinEntry shows the pad disabled
     await until(() => pins.length > 0, 'PIN request after the countdown', 15_000)
     await enterPin('1234')
+    await unlock
     await until(() => state() === 'ready', 'unlock')
     expect(states).not.toContain('error')
     expect(unknownMessages()).toEqual([])
   }, 60_000)
 
-  test('a PIN prompt left unanswered reconnects once, then tells the user instead of re-prompting forever', async () => {
+  test('an unanswered PIN keeps waiting past the wire deadline, then accepts the user input', async () => {
     await makeWallet('idle', SEED_A, '1234')
     newEngine()
-    // Every connection's PIN wait gets a 1.5 s deadline instead of 5 minutes.
-    engine.on('pin-request', () => {
-      const transport = (engine.wallet as any).transport
-      if (transport.shortDeadline) return
-      transport.shortDeadline = true
-      const withDeadline = transport.withDeadline.bind(transport)
-      transport.withDeadline = (action: any, ms: number, op: string) => withDeadline(action, ms === core.LONG_TIMEOUT ? 1500 : ms, op)
-    })
     await connect('idle')
+    const firstTransport = (engine.wallet as any).transport
+    stallWireReply(firstTransport) // Shorten only the wire deadline; keep its submission signal.
+    const first = requestUnlock()
+    await until(() => pins.length > 0, 'first PIN request')
+    await sleep(2000) // Past the shortened wire deadline, without submitting anything.
+    expect((await settled(first, 10)).state).toBe('pending')
+    expect((engine.wallet as any).transport).toBe(firstTransport)
+    expect(engine.getDeviceState().pinPromptOpen).toBe(true)
+    await enterPin('1234')
+    await first
+    expect(state()).toBe('ready')
+    expect((engine.wallet as any).transport).toBe(firstTransport)
+    expect(unknownMessages()).toEqual([])
+  }, 30_000)
+
+  test('two unanswered wire requests without PIN submission exhaust one reconnect and do not prompt forever', async () => {
+    await makeWallet('wire-timeout', SEED_A, '1234')
+    newEngine()
+    await connect('wire-timeout')
+    const firstTransport = (engine.wallet as any).transport
+    stallWireReply(firstTransport, true)() // Firmware sends a matrix; the old connection loses that frame.
+    const first = requestUnlock()
+    expect((await settled(first, 4000)).state).toBe('rejected')
+    await until(() => !!engine.wallet && (engine.wallet as any).transport !== firstTransport
+      && engine.getCachedFeaturesSnapshot()?.pinProtection === true && state() === 'needs_pin', 'single reconnect')
+    expect(engine.unlockRequest).toBeNull()
+    expect(pins).toEqual([])
+    await assertQuarantined(firstTransport)
+    const secondTransport = (engine.wallet as any).transport
+    stallWireReply(secondTransport, true)()
+    const second = requestUnlock()
+    expect((await settled(second, 4000)).state).toBe('rejected')
     await until(() => state() === 'error', 'the second timeout', 15_000)
-    const {EMULATOR_UNLOCK_TIMEOUT_MESSAGE} = await import('../../src/bun/pin-unlock')
     expect(engine.getDeviceState().error).toBe(EMULATOR_UNLOCK_TIMEOUT_MESSAGE)
-    const prompts = pins.length
-    expect(prompts).toBe(2)
+    expect((engine.wallet as any).transport).toBe(secondTransport)
+    await assertQuarantined(secondTransport)
+    expect(pins).toEqual([])
     await sleep(4000)
-    expect(pins.length).toBe(prompts)
+    expect(pins).toEqual([])
+    expect(engine.unlockRequest).toBeNull()
   }, 40_000)
 
   test('PIN plus passphrase: a message during the passphrase wait is refused and the wallet unlocks', async () => {
     await makeWallet('passphrase', SEED_A, '1234', true)
     newEngine()
     await connect('passphrase')
+    const unlock = requestUnlock()
     await enterPin('1234')
     await until(() => passphrases > 0, 'passphrase request')
     const err = await (engine.wallet as any).transport.call(
@@ -411,6 +536,7 @@ describe('PIN prompt on real emulator firmware', () => {
     // 7.17 shows the passphrase for a press: the user presses the emulator's button.
     ;(engine.wallet as any).transport.delegate.onButtonRequest = () => writeDecision(true)
     await engine.sendPassphrase('')
+    await unlock
     await until(() => state() === 'ready', 'unlock')
     expect(await engine.deriveSeedIdentity()).toBe(ETH_A)
     expect(unknownMessages()).toEqual([])

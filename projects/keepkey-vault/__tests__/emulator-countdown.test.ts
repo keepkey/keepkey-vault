@@ -17,10 +17,12 @@ import { afterEach, expect, mock, setSystemTime, test } from 'bun:test'
 import { EventEmitter } from 'node:events'
 import * as core from '@keepkey/hdwallet-core'
 import * as Messages from '@keepkey/device-protocol/lib/messages_pb'
+import * as Ethereum from '@keepkey/device-protocol/lib/messages-ethereum_pb'
 import { Transport, create } from '@keepkey/hdwallet-keepkey'
 
 const T = Messages.MessageType
 const COUNTDOWN_MS = 512_000 // 9 failures
+const SEED_ADDRESS = '0x0000000000000000000000000000000000000001'
 const frame = (type: number, body: Uint8Array = new Uint8Array()) => {
   const f = new Uint8Array(64); f.set([0x3f, 0x23, 0x23, type >> 8, type & 255, 0, 0, 0, body.length]); f.set(body, 9); return f
 }
@@ -49,6 +51,9 @@ const fw = {
         if (type === T.MESSAGETYPE_GETFEATURES) {
           const m = new Messages.Features(); m.setMajorVersion(7); m.setMinorVersion(17); m.setInitialized(true); m.setPinProtection(true); m.setPinCached(!this.locked)
           this.outbox.push(frame(T.MESSAGETYPE_FEATURES, m.serializeBinary()))
+        } else if (type === T.MESSAGETYPE_ETHEREUMGETADDRESS && !this.locked) {
+          const m = new Ethereum.EthereumAddress(); m.setAddressStr(SEED_ADDRESS)
+          this.outbox.push(frame(T.MESSAGETYPE_ETHEREUMADDRESS, m.serializeBinary()))
         } else this.outbox.push(frame(T.MESSAGETYPE_SUCCESS))
       }
     }
@@ -84,7 +89,10 @@ test('a 512 s countdown is waited out: one unlock request, then the PIN prompt, 
   engine.on('pin-request', ({ type }: any) => pins.push(type))
   Object.assign(engine, { wallet: create(transport), activeTransport: 'emulator', cachedFeatures: { initialized: true, pinProtection: true } })
   ;(engine as any).attachTransportListeners()
-  ;(engine as any).applyState('needs_pin') // the auto-prompt sends the unlock; the countdown starts
+  ;(engine as any).applyState('needs_pin')
+  await sleep(20)
+  expect(fw.received).toEqual([]) // Detecting a lock stays passive.
+  const unlock = engine.requestDeviceUnlock() // Foreground intent starts the countdown once.
   await sleep(50)
   expect(fw.received).toEqual([T.MESSAGETYPE_GETPUBLICKEY])
   setSystemTime(new Date(Date.now() + 400_000)) // past any 360 s read deadline, inside the countdown
@@ -97,7 +105,12 @@ test('a 512 s countdown is waited out: one unlock request, then the PIN prompt, 
   while (!pins.length && Date.now() < deadline) await sleep(5)
   expect(pins).toEqual(['current'])
   await engine.sendPin('1')
-  while (engine.getDeviceState().state !== 'ready' && Date.now() < deadline + 2000) await sleep(5)
+  await unlock // Includes Features and verification of the effective wallet identity.
   expect(engine.getDeviceState().state).toBe('ready')
-  expect(fw.received).toEqual([T.MESSAGETYPE_GETPUBLICKEY, T.MESSAGETYPE_PINMATRIXACK, T.MESSAGETYPE_GETFEATURES])
+  expect(engine.currentSeedEthAddress).toBe(SEED_ADDRESS)
+  expect(engine.unlockRequest).toBeNull()
+  expect(fw.received).toEqual([T.MESSAGETYPE_GETPUBLICKEY, T.MESSAGETYPE_PINMATRIXACK, T.MESSAGETYPE_GETFEATURES, T.MESSAGETYPE_ETHEREUMGETADDRESS])
+  expect(fw.inbox).toEqual([])
+  expect(fw.outbox).toEqual([])
+  await transport.disconnect()
 }, 15_000)

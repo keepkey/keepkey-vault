@@ -1,0 +1,23 @@
+[
+  {
+    "ref": "v1.6.7",
+    "commit": "e3b416c4eaeec85b73b9a92a0621a909317c11c7",
+    "requireWalletSha256": "025233309814257cb1991c873aca7d616a15375904a77e62be55decc2aa7aaa2",
+    "appPhaseSha256": "00d4a4e315a79102bed02af41e75895f1f8f7f0ca304890d683d029022a35d2b",
+    "locked423": true
+  },
+  {
+    "ref": "v1.6.10",
+    "commit": "88caa37014a45b154bbec8d8805f0ceffd2467eb",
+    "requireWalletSha256": "025233309814257cb1991c873aca7d616a15375904a77e62be55decc2aa7aaa2",
+    "appPhaseSha256": "00d4a4e315a79102bed02af41e75895f1f8f7f0ca304890d683d029022a35d2b",
+    "locked423": true
+  },
+  {
+    "ref": "public/develop",
+    "commit": "343c4cd368947e219861eaeeccf16088e4c2de66",
+    "requireWalletSha256": "025233309814257cb1991c873aca7d616a15375904a77e62be55decc2aa7aaa2",
+    "appPhaseSha256": "00d4a4e315a79102bed02af41e75895f1f8f7f0ca304890d683d029022a35d2b",
+    "locked423": true
+  }
+]

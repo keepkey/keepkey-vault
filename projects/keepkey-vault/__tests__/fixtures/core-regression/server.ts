@@ -109,7 +109,7 @@ const rpc = Bun.serve({ hostname: '127.0.0.1', port: 0, idleTimeout: 0, async fe
       }
       case 'previewSwapBuild': if (mode === 'preview-stall') return never(); if (mode === 'preview-error') throw new Error('Synthetic swap preview unavailable'); payload = { unsignedTx: { to: addresses.ethereum, value: '0x16345785d8a0000', data: '0x', gasLimit: '0x5208', gasPrice: '0x3b9aca00', chainId: 1, fixtureOnly: true }, balance: { current: '2', required: '0.1', sufficient: true } }; break
       case 'publishSwapUiState': swapUi = p; break
-      case 'setBtcSelectedXpub': case 'setEvmSelectedIndex': case 'cancelDeviceSigning': payload = { ok: true }; break
+      case 'setBtcSelectedXpub': case 'setEvmSelectedIndex': case 'cancelDeviceSigning': case 'cancelForegroundDeviceOperation': payload = { ok: true }; break
       case 'openUrl': case 'openExternal': payload = { opened: false, fixtureOnly: true }; break
       default: call.error = 'Unhandled synthetic RPC'; throw new Error(`Unhandled synthetic RPC: ${method}`)
     }
