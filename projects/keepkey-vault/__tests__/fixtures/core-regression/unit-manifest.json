@@ -26,7 +26,8 @@
       "src/bun/features-format.test.ts",
       "__tests__/device-operation.test.ts",
       "__tests__/device-rpc.test.ts",
-      "__tests__/rest-demand-unlock.test.ts"
+      "__tests__/rest-demand-unlock.test.ts",
+      "__tests__/window-approval-focus.test.ts"
     ],
     "balances-receive-history": [
       "__tests__/asset-catalog-sync.test.ts",

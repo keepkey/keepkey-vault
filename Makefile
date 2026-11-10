@@ -463,6 +463,7 @@ test-unit:
 	cd $(PROJECT_DIR) && bun test __tests__/pin-wait-guard.test.ts
 	cd $(PROJECT_DIR) && bun test __tests__/device-operation.test.ts __tests__/device-rpc.test.ts
 	cd $(PROJECT_DIR) && bun test __tests__/rest-demand-unlock.test.ts
+	cd $(PROJECT_DIR) && bun test __tests__/window-approval-focus.test.ts
 	cd $(PROJECT_DIR) && bun test __tests__/device-access-error.test.ts __tests__/dashboard-device-errors.test.ts
 	cd $(PROJECT_DIR) && bun test __tests__/settings-pin-ownership.test.ts __tests__/emulator-pin-prompt.test.ts src/bun/emulator-window-lifecycle.test.ts src/bun/erc7730-safe.test.ts src/bun/safe-multisig.test.ts src/bun/swap-account-balances.test.ts src/bun/vault-addressbook.test.ts src/bun/vault-asset-account.test.ts src/bun/vault-import.test.ts src/bun/vault-portfolio.test.ts src/bun/vault-wallet-links.test.ts
 	cd $(PROJECT_DIR) && bun test __tests__/defi-position-details.test.ts __tests__/retry-on-timeout.test.ts __tests__/swap-health.test.ts __tests__/swap-preflight.test.ts __tests__/swap-route-selection.test.ts __tests__/pioneer-evm.test.ts __tests__/relay-status.test.ts __tests__/zcash-privacy.test.ts

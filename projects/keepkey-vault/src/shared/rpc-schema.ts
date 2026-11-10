@@ -330,7 +330,6 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       // ── Window Focus ──────────────────────────────────────────────────
       getWindowFocusState: { params: void; response: { refs: number; alwaysOnTop: boolean } }
       forceReleaseWindowFocus: { params: void; response: void }
-      setWindowAlwaysOnTop: { params: { enabled: boolean }; response: void }
 
       // ── App Settings ──────────────────────────────────────────────────
       getAppSettings: { params: void; response: AppSettings }

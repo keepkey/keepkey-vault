@@ -41,6 +41,7 @@ function fixture(initiallyLocked = true) {
  } })
  engine.acquireDeviceOperation = async (options: any) => { const release = await coordinator.acquire(options); state.leases++; return () => { state.releases++; release() } }
  const server = startRestApi(engine, new AuthStore(), 0, { onApiLog: () => {}, onPairRequest: () => {}, getVersion: () => 'synthetic', getSessionEpoch: () => state.epoch,
+  // A legacy caller cannot elevate the window merely by requesting device data.
   onDeviceRequest: () => { state.focus++; return () => { state.focus-- } },
   onSigningRequest: async (_info: unknown, signal?: AbortSignal) => { state.approvals++; if (state.waitApproval) return new Promise(resolve => { const done = () => resolve({ approved: false }); signal?.addEventListener('abort', done, { once: true }); if (signal?.aborted) done() }); return { approved: false } }, onSigningDismissed: () => {},
  } as any, '127.0.0.1')
@@ -102,6 +103,7 @@ describe('API availability is separate from device access', () => {
   const f = fixture()
   const pending = f.request('/addresses/eth', { address_n: path }, 'foreground')
   await until(() => f.state.unlocks === 1)
+  expect(f.state.focus).toBe(0)
   expect(f.state.reads).toBe(0); expect((await f.request('/api/v1/health/fast')).status).toBe(200)
   f.unlock(); expect((await pending).data.address).toBe(address)
   expect(f.state.reads).toBe(1); expect(f.state.releases).toBe(1); expect(f.state.focus).toBe(0)

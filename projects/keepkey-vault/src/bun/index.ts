@@ -1474,7 +1474,7 @@ export function resetSwapUiState(): void {
 	swapUiUpdatedAt = Date.now()
 }
 
-// Refcounted setAlwaysOnTop. Multiple sources (WC pair approval, signing
+// Approval-only setAlwaysOnTop. Multiple sources (WC pair approval, signing
 // approval, device pairing approval) can independently want the window
 // elevated; using the raw API per-event drops the window prematurely when
 // any one source dismisses while another is still pending.
@@ -2088,7 +2088,6 @@ const restCallbacks: RestApiCallbacks = {
 		},
 		onActivityChanged: () => notifyActivityChanged(),
 		getSessionEpoch: () => activitySessionEpoch,
-	onDeviceRequest: () => { acquireWindowFocus(); return releaseWindowFocus },
 		resolveChain: (networkId: string) => findChainByNetwork(networkId, undefined, getAllChains()),
 	onSigningRequest: async (info: SigningRequestInfo, signal?: AbortSignal) => {
 		attachSigningPolicySnapshot(info)
@@ -4199,10 +4198,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			// ── Device lifecycle ──────────────────────────────────────
 			getDeviceState: async () => engine.getDeviceState(),
 			retryConnect: async () => { await engine.retryConnect() },
-			requestDeviceUnlock: async () => {
-				acquireWindowFocus()
-				try { await engine.requestDeviceUnlock() } finally { releaseWindowFocus() }
-			},
+			requestDeviceUnlock: async () => { await engine.requestDeviceUnlock() },
 			startBootloaderUpdate: async () => { requireOnline('bootloader update'); await engine.startBootloaderUpdate() },
 			startFirmwareUpdate: async (params: { variant?: 'multi' | 'bitcoin-only'; acknowledgeWipe?: WipeReason; requireOfficialSignatures?: boolean }) => { requireOnline('firmware update'); await engine.startFirmwareUpdate({ variant: params?.variant, acknowledgeWipe: params?.acknowledgeWipe, requireOfficialSignatures: params?.requireOfficialSignatures }) },
 			flashFirmware: async () => { await engine.flashFirmware() },
@@ -8531,19 +8527,6 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					_emitWindowFocusChanged()
 				}
 			},
-			setWindowAlwaysOnTop: async (params) => {
-				if (params.enabled) {
-					acquireWindowFocus()
-				} else {
-					// Force-release all refs when manually toggling off
-					if (_alwaysOnTopRefs > 0) {
-						_alwaysOnTopRefs = 0
-						try { mainWindow.setAlwaysOnTop(false) } catch { /* ignore */ }
-						_emitWindowFocusChanged()
-					}
-				}
-			},
-
 			// ── App Settings ─────────────────────────────────────────
 			getAppSettings: async () => {
 				return getAppSettings()

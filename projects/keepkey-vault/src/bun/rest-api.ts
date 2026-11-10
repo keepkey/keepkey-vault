@@ -140,8 +140,6 @@ export interface RestApiCallbacks {
   getSessionEpoch?: () => number
   /** networkId → chain over the FULL list (built-in + user-added chains). */
   resolveChain?: (networkId: string) => import('../shared/chains').ChainDef | undefined
-  /** Foreground device work needs the native unlock UI, without changing API availability. */
-  onDeviceRequest?: () => void | (() => void)
   onSigningRequest: (info: SigningRequestInfo, signal?: AbortSignal) => Promise<SigningApprovalDecision>
   onSigningDismissed?: (id: string) => void
   onPairRequest: (info: { name: string; url: string; imageUrl: string }) => void
@@ -1246,7 +1244,6 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
       let deviceWorkStart = requestStart
       const sessionEpoch = callbacks?.getSessionEpoch?.()
       let releaseDevice: (() => void) | undefined
-      let releaseDeviceFocus: (() => void) | undefined
       let acquiringDevice: Promise<void> | undefined
       let deviceWorkStarted = false
       let leaseWallet: unknown
@@ -1271,7 +1268,6 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           // Older test adapters have no coordinator; their original lock check remains.
           if (typeof engine.acquireDeviceOperation !== 'function') return
           server.timeout(req, 0) // Human input must not inherit the ordinary 10-second idle limit.
-          releaseDeviceFocus = callbacks?.onDeviceRequest?.() || undefined
           releaseDevice = await engine.acquireDeviceOperation({ signal: req.signal, unlock: true })
           leaseWallet = engine.wallet
           leaseEpoch = callbacks?.getSessionEpoch?.()
@@ -5360,9 +5356,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
         activeClearSignObservationId = undefined
         activeSolanaCertified = undefined
         } finally {
-          try { releaseDevice?.() } finally {
-            try { releaseDeviceFocus?.() } finally { req.signal.removeEventListener('abort', cancelOwnedDevice) }
-          }
+          try { releaseDevice?.() } finally { req.signal.removeEventListener('abort', cancelOwnedDevice) }
         }
       }
     }) },
