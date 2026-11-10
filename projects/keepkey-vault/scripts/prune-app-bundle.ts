@@ -11,6 +11,9 @@
  */
 import { existsSync, readFileSync, readdirSync, statSync, rmSync, mkdirSync } from 'node:fs'
 import { join, basename } from 'node:path'
+import { writeZcashNu7Manifest } from './write-zcash-nu7-manifest'
+import { requireZcashNu7Builder } from '../src/bun/zcash-nu7-binary'
+import { verifyEmulatorBeforeSigning, writeEmulatorSigningReceipt } from './write-emulator-signing-receipt'
 
 const env = process.argv[2] || 'stable'
 const projectRoot = join(import.meta.dir, '..')
@@ -69,6 +72,17 @@ if (!appDir) {
 
 const appPath = join(tmpDir, appDir)
 const resourcesDir = join(appPath, 'Contents', 'Resources')
+const bundledEmulator = join(resourcesDir, 'app', 'emulator', 'libkkemu.dylib')
+let reviewedEmulatorSource: string | undefined
+if (process.env.ELECTROBUN_DEVELOPER_ID && process.env.ELECTROBUN_TEAMID) {
+  // Authenticate any previous receipt before pruning invalidates the outer seal.
+  const hasReceipt = existsSync(join(resourcesDir, 'app', 'emulator', 'nu7-emulator-receipt.json'))
+  if (hasReceipt) {
+    const verified = Bun.spawnSync(['codesign', '--verify', '--deep', '--strict', appPath])
+    if (verified.exitCode !== 0) throw new Error('Cannot authenticate the previously sealed emulator receipt')
+  }
+  reviewedEmulatorSource = verifyEmulatorBeforeSigning(bundledEmulator, hasReceipt)
+}
 
 // Find node_modules inside the app bundle
 function findNodeModules(dir: string): string | null {
@@ -453,7 +467,6 @@ if (existsSync(infoPlistPath)) {
 // Emulator releases are a two-architecture contract: CI converts this arm64
 // app archive into the Intel archive later, so a thin dylib here would produce
 // an Intel app that installs successfully but fails at dlopen time.
-const bundledEmulator = join(resourcesDir, 'app', 'emulator', 'libkkemu.dylib')
 if (!existsSync(bundledEmulator)) {
   console.error(`[prune-bundle] ERROR: bundled 7.17 emulator missing: ${bundledEmulator}`)
   process.exit(1)
@@ -495,6 +508,9 @@ if (DEVELOPER_ID && TEAM_ID) {
     } catch {}
   }
   signBinaries(resourcesDir)
+  const emulatorSignature = Bun.spawnSync(['codesign', '--verify', '--strict', bundledEmulator])
+  if (emulatorSignature.exitCode !== 0) throw new Error('Cannot record an invalid emulator signature')
+  writeEmulatorSigningReceipt(bundledEmulator, reviewedEmulatorSource!)
   console.log(`[prune-bundle] Re-signed ${signedCount} native binaries`)
 }
 
@@ -529,6 +545,13 @@ if (DEVELOPER_ID && TEAM_ID && existsSync(macosDir)) {
     if (r.exitCode !== 0) {
       console.warn(`[prune-bundle]   WARNING: failed to sign ${entry}: ${r.stderr.toString()}`)
     }
+  }
+
+  // Record the final helper bytes before the outer app seals its paired manifest.
+  const zcashBinary = join(resourcesDir, 'app', 'zcash-cli')
+  if (existsSync(zcashBinary)) {
+    requireZcashNu7Builder(zcashBinary)
+    writeZcashNu7Manifest(zcashBinary)
   }
 
   // Now sign the .app bundle itself (without --deep since internals are already signed)

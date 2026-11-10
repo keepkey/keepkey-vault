@@ -1,4 +1,5 @@
 import {hasMultisigSigningData,btcMultisigEnabled,BTC_MULTISIG_DISABLED} from './btc-psbt/multisig-feature'
+import { signUtxoTx } from './txbuilder/zcash-transparent'
 import type { EngineController } from './engine-controller'
 import { takeDeviceRefusal } from './device-refusal'
 import { withPermit2SpenderName } from './permit2-spender-name'
@@ -1743,6 +1744,16 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           }
         }
 
+        // REST's UTXO schema carries only the legacy transaction format. Nu7
+        // plans must use Desktop's validated transparent flow; reject before
+        // requireWallet can acquire a lease, unlock, or open host approval.
+        if (method === 'POST' && path === '/utxo/sign-transaction') {
+          auth.requireAuth(req)
+          if (typeof reqBody?.coin === 'string' && reqBody.coin.trim().toLowerCase() === 'zcash') {
+            return json({ error: 'Zcash signing over REST is not supported. Use KeepKey Vault Desktop with the 7.17 alpha emulator; physical support is not yet available.' }, 501)
+          }
+        }
+
         // ═══════════════════════════════════════════════════════════════
         // SIGNING APPROVAL GATE — auth required, then user must approve
         // ═══════════════════════════════════════════════════════════════
@@ -3294,7 +3305,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             }
           }
 
-          const result = await emuWrap(() => wallet.btcSignTx({
+          const result = await emuWrap(() => signUtxoTx(wallet, {
             coin,
             inputs: body.inputs,
             outputs: body.outputs,
@@ -3304,7 +3315,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             ...(body.expiry !== undefined ? { expiry: body.expiry } : {}),
             ...(body.versionGroupId !== undefined ? { versionGroupId: body.versionGroupId } : {}),
             ...(body.branchId !== undefined ? { branchId: body.branchId } : {}),
-          }), { operation: 'btcSignTx', chain: coin })
+          }, { firmwareVersion: engine.getDeviceState().firmwareVersion }), { operation: 'btcSignTx', chain: coin })
           // Explicit chain for UTXO — auto-detect defaults to BTC but could be LTC/DOGE/etc
           const coinSymbol = coin === 'Bitcoin' ? 'BTC' : coin === 'Litecoin' ? 'LTC' : coin === 'Dogecoin' ? 'DOGE' : coin === 'Dash' ? 'DASH' : coin === 'BitcoinCash' ? 'BCH' : coin
           return json(validateResponse(result, S.UtxoSignTransactionResponse, path), 200, { chain: coinSymbol, activityType: 'sign' })

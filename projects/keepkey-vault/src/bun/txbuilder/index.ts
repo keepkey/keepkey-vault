@@ -5,6 +5,7 @@ import { isTokenCaip, type ChainDef } from '../../shared/chains'
 import type { BuildTxParams } from '../../shared/types'
 import { decimalToBaseUnitsStrict, tokenMaxSpendableAmount, tokenMaxSpendableBaseUnits } from '../../shared/max-send'
 import { buildUtxoTx, type BuildUtxoParams, type XpubInfo } from './utxo'
+import { signUtxoTx } from './zcash-transparent'
 import { buildEvmTx, type BuildEvmParams } from './evm'
 import { buildCosmosTx, type BuildCosmosParams } from './cosmos'
 import { buildXrpTx, type BuildXrpParams } from './xrp'
@@ -19,6 +20,7 @@ import { getBtcBackend } from '../btc-backend'
 import { canonicalTronAddress, decodeTronTransfer } from '../tron-preview'
 import { getPioneerApiBase } from '../pioneer'
 import { ARBITRUM_ONE_RPC } from '../evm-rpc'
+import { broadcastHttpRejectionReason, broadcastRejectionReason } from './broadcast-error'
 
 /** BTC mainnet — the only UTXO chain that broadcasts via a self-host node. */
 const BTC_NETWORK_ID = 'bip122:000000000019d6689c085ae165831e93'
@@ -715,7 +717,10 @@ export async function signTx(
 ): Promise<any> {
   switch (chain.chainFamily) {
     case 'utxo':
-      return wallet.btcSignTx(unsignedTx)
+      if ((chain.id === 'zcash' || unsignedTx?.coin === 'Zcash') && (chain.id !== 'zcash' || unsignedTx?.coin !== 'Zcash')) {
+        throw new Error('Zcash transaction does not match the selected signing network')
+      }
+      return signUtxoTx(wallet, unsignedTx)
     case 'evm':
       return wallet.ethSignTx(unsignedTx)
     case 'cosmos': {
@@ -962,7 +967,16 @@ export async function broadcastTx(
   }
 
   console.log(`[broadcast] Sending to Pioneer: networkId=${chain.networkId}, format=${chain.chainFamily === 'cosmos' ? 'base64' : 'hex'}, len=${serializedTx.length}`)
-  const result = await pioneer.Broadcast({ networkId: chain.networkId, serialized: serializedTx })
+  let result: any
+  try {
+    result = await pioneer.Broadcast({ networkId: chain.networkId, serialized: serializedTx })
+  } catch (error: any) {
+    // Swagger rejects non-2xx responses before the ordinary result parser runs.
+    const reason = broadcastHttpRejectionReason(error)
+    if (reason) throw new Error(`Broadcast rejected: ${reason}`)
+    const message = typeof error?.message === 'string' ? error.message : typeof error === 'string' ? error : ''
+    throw new Error(`Broadcast failed: ${message.trim().slice(0, 2_000) || 'provider request failed'}`)
+  }
   const data = result?.data
   console.log(`[broadcast] Pioneer response: ${JSON.stringify(data).slice(0, 500)}`)
 
@@ -975,9 +989,7 @@ export async function broadcastTx(
 
   // Detect broadcast failure — Pioneer wraps errors in { success: false, error: ... }
   if (data && typeof data === 'object' && data.success === false) {
-    const errMsg = typeof data.error === 'string' ? data.error
-      : typeof data.error?.error === 'string' ? data.error.error
-      : JSON.stringify(data.error || data)
+    const errMsg = broadcastRejectionReason(data) || JSON.stringify(data.error || data)
     throw new Error(`Broadcast rejected: ${errMsg}`)
   }
 

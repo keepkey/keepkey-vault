@@ -271,6 +271,13 @@ import { activityBalanceTarget, createPostTxBalanceRefresh, sameBalanceRefreshSc
 import { getRequiredConfs } from "../shared/confirmations"
 import { addSessionActivity, getSessionActivity, clearSessionActivity } from "./session-activity"
 import { buildTx, broadcastTx, canonicalizeTronTokenCaip } from "./txbuilder"
+import { signUtxoTx, configureZcashNu7WalletAuthorizer } from './txbuilder/zcash-transparent'
+import { isQualifiedNu7AlphaEmulator } from './zcash-nu7-emulator'
+import { reviewedBundledEmulatorSourceSha256 } from './emulator-signed-provenance'
+import { preflightNu7DeviceRpc, requiresNu7DeviceRpc } from './zcash-nu7-admission'
+import { requireZcashNu7Builder } from './zcash-nu7-binary'
+import { zcashNu7SupportError } from '../shared/zcash-nu7'
+import { EmulatorTransportDelegate } from './emulator-transport'
 import { buildCosmosStakingTx, buildCosmosNameRegTx } from "./txbuilder/cosmos"
 import { initializeOrchardFromDevice, exportOrchardFvk, scanOrchardNotes, getShieldedBalance, sendShielded, ensureFvkLoaded, displayOrchardAddressOnDevice, setFvkDiskAllowed } from "./txbuilder/zcash-shielded"
 import { inFlightShielded, type ExpectedShielded } from "../shared/zcash-pending"
@@ -342,7 +349,7 @@ import { addClearSignProvider, listClearSignProviders, removeClearSignProvider, 
 import { supportsCertifiedClearSign } from "./solana-certified-policy"
 import { configureProductionRootTrust } from "../shared/certified-evm-envelope"
 import { emulatorClearSignTestRoot } from "./emulator-library"
-import { emulatorReadsClearSignTestRoot, getLoadedEmulatorLibPath } from "./emulator"
+import { emulatorReadsClearSignTestRoot, getLoadedEmulatorLibPath, getLoadedEmulatorLibrarySha256, getEmulatorInstance } from "./emulator"
 import { DEFAULT_CLEARSIGN_SERVICE_URL } from "./solana-certified-registry"
 import { createRpcAltFetcher } from "./solana-alt"
 import { createProviderKeySession } from "./clearsign-provider-session"
@@ -1322,6 +1329,40 @@ let zcashPurgeInFlight: Promise<void> | null = null
 let emulatorEnabled = false
 let preReleaseUpdates = false
 let alphaFirmware = false
+function qualifiedNu7Wallet(wallet: unknown): boolean {
+	return isQualifiedNu7AlphaEmulator(wallet, {
+		wallet: engine.wallet,
+		isEmulator: engine.isEmulator && engine.emuDelegate instanceof EmulatorTransportDelegate,
+		running: getEmulatorInstance() > 0,
+		alphaFirmware,
+		firmwareVersion: engine.getDeviceState().firmwareVersion,
+		librarySha256: getLoadedEmulatorLibrarySha256(),
+		reviewedSourceSha256: reviewedBundledEmulatorSourceSha256(getLoadedEmulatorLibPath(), getLoadedEmulatorLibrarySha256()),
+	})
+}
+configureZcashNu7WalletAuthorizer(qualifiedNu7Wallet)
+const nu7WalletSessionIds = new WeakMap<object, number>()
+let nu7WalletSessionCounter = 0
+function nu7WalletSessionId(): string {
+	const wallet = engine.wallet
+	let owner = wallet ? nu7WalletSessionIds.get(wallet) : 0
+	if (wallet && !owner) { owner = ++nu7WalletSessionCounter; nu7WalletSessionIds.set(wallet, owner) }
+	return `${owner || 0}:${activitySessionEpoch}:${engine.isEmulator ? getEmulatorInstance() : 0}`
+}
+
+function getZcashNu7Support() {
+	const firmwareVersion = engine.getDeviceState().firmwareVersion
+	let reason = zcashNu7SupportError(firmwareVersion, true, qualifiedNu7Wallet(engine.wallet))
+	if (!reason) {
+		const binary = findZcashCliBinary()
+		if (!binary) reason = zcashNu7SupportError(firmwareVersion, false, true)
+		else {
+			try { requireZcashNu7Builder(binary) }
+			catch (error) { reason = error instanceof Error ? error.message : 'The Zcash Nu7 transaction builder is unavailable.' }
+		}
+	}
+	return { available: !reason, requiredFirmware: '7.17.0' as const, emulatorOnly: true as const, alphaOnly: true as const, sessionId: nu7WalletSessionId(), ...(reason ? { reason } : {}) }
+}
 let addressBookClearsignEnabled = false
 let privateModeEnabled = false
 
@@ -3591,21 +3632,29 @@ function maybeStartBackgroundWalletVerification(): void {
 async function texRecovery(action: 'complete' | 'shieldBack', index: number): Promise<{ txid: string }> {
 	if (!zcashPrivacyEnabled) throw new Error('Zcash privacy feature is disabled')
 	if (!engine.wallet) throw new Error('No device connected')
-	await ensureFvkLoaded(engine.wallet, 0)
-	await ensureZcashDeviceMatch(0, true)
-	const signWrap = engine.isEmulator
-		? <T,>(fn: () => Promise<T>) => emuSigningOp(fn, { operation: 'zcashShieldedSend', chain: 'Zcash' }) as Promise<T>
-		: undefined
-	const onProgress = (step: string, batch?: { index: number; total: number; fee?: number; phase?: string }) => {
-		try { rpc.send['send-progress']({ step, batch }) } catch { /* webview not ready */ }
+	if (isZcashSendInFlight()) throw new Error('A Zcash payment is already in progress. Wait for it to finish before recovering a TEX payment.')
+	// Reserve before the first await. Nested TEX stages keep their existing
+	// counters, while a native send cannot replace this operation's PCZT state.
+	beginZcashSend()
+	try {
+		await ensureFvkLoaded(engine.wallet, 0)
+		await ensureZcashDeviceMatch(0, true)
+		const signWrap = engine.isEmulator
+			? <T,>(fn: () => Promise<T>) => emuSigningOp(fn, { operation: 'zcashShieldedSend', chain: 'Zcash' }) as Promise<T>
+			: undefined
+		const onProgress = (step: string, batch?: { index: number; total: number; fee?: number; phase?: string }) => {
+			try { rpc.send['send-progress']({ step, batch }) } catch { /* webview not ready */ }
+		}
+		const { payTex, shieldBackTex } = await import("./txbuilder/zcash-tex-send")
+		const result = action === 'complete'
+			? await payTex(engine.wallet as any, index, { signWrap, onProgress })
+			: await shieldBackTex(engine.wallet as any, index, { signWrap, onProgress })
+		try { rpc.send['send-progress']({ step: 'complete', detail: result.txid }) } catch { /* webview not ready */ }
+		schedulePostZcashTxRescans()
+		return { txid: result.txid }
+	} finally {
+		endZcashSend()
 	}
-	const { payTex, shieldBackTex } = await import("./txbuilder/zcash-tex-send")
-	const result = action === 'complete'
-		? await payTex(engine.wallet as any, index, { signWrap, onProgress })
-		: await shieldBackTex(engine.wallet as any, index, { signWrap, onProgress })
-	try { rpc.send['send-progress']({ step: 'complete', detail: result.txid }) } catch { /* webview not ready */ }
-	schedulePostZcashTxRescans()
-	return { txid: result.txid }
 }
 
 /** After a private tx broadcasts (shield/deshield/z2z), the wallet DB only
@@ -4216,6 +4265,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			gateDeviceRpc({
 			// ── Device lifecycle ──────────────────────────────────────
 			getDeviceState: async () => engine.getDeviceState(),
+			getZcashNu7Support: async () => getZcashNu7Support(),
 			retryConnect: async () => { await engine.retryConnect() },
 			requestDeviceUnlock: async () => { await engine.requestDeviceUnlock() },
 			startBootloaderUpdate: async () => { requireOnline('bootloader update'); await engine.startBootloaderUpdate() },
@@ -5012,11 +5062,11 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					const fee = sumIn > sumOut ? String(sumIn - sumOut) + unit : undefined
 					const amt = outs[0]?.amount
 					return observedRpcSign('btcSignTx', params, () => emuSigningOp(
-						() => engine.wallet!.btcSignTx(params),
+						() => signUtxoTx(engine.wallet!, params, { firmwareVersion: engine.getDeviceState().firmwareVersion }),
 						{ operation: 'btcSignTx', chain: coin, to: outs[0]?.address, value: amt != null ? String(amt) + unit : undefined, fee },
 					))
 				}
-				return await observedRpcSign('btcSignTx', params, () => engine.wallet!.btcSignTx(params))
+				return await observedRpcSign('btcSignTx', params, () => signUtxoTx(engine.wallet!, params, { firmwareVersion: engine.getDeviceState().firmwareVersion }))
 			},
 			btcMultisigCosigner: async (params) => {
 				const { wallet, assertCurrent } = multisigSession()
@@ -11203,6 +11253,12 @@ udevadm trigger --subsystem-match=usb --attr-match=idVendor=2b24 || udevadm trig
 				scope: () => ({ wallet: engine.wallet, epoch: activitySessionEpoch, seed: engine.currentSeedEthAddress }),
 				locked: () => engine.isLocked,
 				run: (action, options) => engine.withDeviceOperation(action, { ...options, rejectIfBusy: true, ...(options.unlock ? { origin: 'desktop' as const } : {}) }),
+				preflight: (method, params) => {
+					if (!requiresNu7DeviceRpc(method, params)) return
+					const qualified = qualifiedNu7Wallet(engine.wallet)
+					preflightNu7DeviceRpc(method, params, engine.getDeviceState().firmwareVersion,
+						qualified && getZcashNu7Support().available, qualified)
+				},
 			}))),
 			messages: {},
 	},

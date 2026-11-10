@@ -16,6 +16,7 @@ import { getBtcBackend } from '../btc-backend'
 import type { BtcBackend } from '../btc-backend'
 import { utxoDiscoveryKey } from '../btc-backend/types'
 import { filterSpendableZcashUtxos, summarizeZcashMaturity, ZCASH_MIN_CONFIRMATIONS } from '../../shared/zcash-maturity'
+import { ZCASH_NU7_ACTIVATION_HEIGHT, ZCASH_NU7_BRANCH_ID, ZCASH_V6_VERSION_GROUP_ID } from '../../shared/zcash-nu7'
 
 /** BTC mainnet — the ONLY UTXO chain that routes to a self-host node; every other
  *  coin (LTC/DOGE/BCH/Dash/Zcash) stays on Pioneer. */
@@ -53,6 +54,7 @@ async function zcashTipHeight(): Promise<number | null> {
  *  and transparent sends broke silently. Adding the next upgrade's row ahead
  *  of its activation lets the switch happen on its own at the right height. */
 const ZCASH_BRANCH_IDS: ReadonlyArray<{ activationHeight: number; branchId: number; name: string }> = [
+  { activationHeight: ZCASH_NU7_ACTIVATION_HEIGHT, branchId: ZCASH_NU7_BRANCH_ID, name: 'Nu7' },
   { activationHeight: 3_428_143, branchId: 0x37a5165b, name: 'NU6.3 Ironwood' },
   { activationHeight: 3_364_600, branchId: 0x5437f330, name: 'NU6.2' },
   { activationHeight: 3_146_400, branchId: 0x4dec4df0, name: 'NU6.1' },
@@ -437,6 +439,7 @@ export async function buildUtxoTx(
   params: BuildUtxoParams,
 ) {
   const { memo, feeLevel = 5, isMax = false, xpub, allXpubs, scriptTypeOverride, accountPath, satPerVByte, isSwapDeposit = false, strictBackend } = params
+  if (chain.id === 'zcash' && memo?.trim()) throw new Error('Zcash Nu7 transparent sends cannot include a memo in this build. Clear the memo and rebuild.')
   const strict = !!strictBackend
   if (strict && chain.networkId !== BTC_NETWORK_ID) throw new Error(`${TAG} strict build is Bitcoin mainnet only`)
   // Chain tip for ZEC maturity + consensus branch selection; null when the
@@ -793,6 +796,7 @@ export async function buildUtxoTx(
     } else if (strict) {
       throw new Error(`${chain.coin} backend returned UTXO ${input.txid}:${input.vout} without its derivation path; refusing to guess one`)
     } else {
+      if (chain.id === 'zcash') throw new Error('Zcash Nu7 requires the selected input derivation path; the balance server did not return it.')
       // No path from API — derive from this input's scriptType + account path
       const inputPurpose = PURPOSE[inputScriptType] ?? purpose
       const fb = inputAccountPath || [inputPurpose + 0x80000000, coinType + 0x80000000, 0x80000000]
@@ -806,6 +810,11 @@ export async function buildUtxoTx(
       vout: input.vout,
       txid: input.txid,
       hex: input.txHex || input.hex || '',
+      ...(chain.id === 'zcash' ? {
+        scriptPubkey: getUtxoScriptPubKeyHex(input)
+          || (typeof input.scriptPubKey === 'string' ? input.scriptPubKey : input.scriptPubKey?.hex)
+          || input.script_pubkey || (input.address ? addressToScriptPubKeyHex(input.address) : undefined),
+      } : {}),
     }
   })
   // Strict: every input's full previous transaction comes from the backend, never ''.
@@ -871,17 +880,15 @@ export async function buildUtxoTx(
     coin: chain.coin,
     inputs: preparedInputs,
     outputs: preparedOutputs,
-    version: chain.coin === 'Zcash' ? 4 : 1,
+    version: chain.coin === 'Zcash' ? 6 : 1,
     locktime: 0,
     ...(chain.coin === 'Zcash' ? {
       overwintered: true,
-      versionGroupId: 0x892F2085,
-      // Consensus branch id baked into the ZIP-243 transparent sighash. A
-      // stale value makes every node reject the tx as ScriptInvalid, because
-      // the signature commits to the wrong branch. Selected by chain tip from
-      // ZCASH_BRANCH_IDS rather than hardcoded — the previous constant said
-      // NU6.2 and outlived Ironwood's activation, silently breaking sends.
-      branchId: zcashBranchId(zcashTip),
+      zcashTransparent: true,
+      versionGroupId: ZCASH_V6_VERSION_GROUP_ID,
+      // The modern dispatcher builds/signs/finalizes through Rust PCZT, never
+      // btcSignTx's legacy serializer. Rust rechecks the node's live Nu7 branch.
+      branchId: ZCASH_NU7_BRANCH_ID,
       expiry: 0,
     } : {}),
     fee: String(fee / 10 ** chain.decimals),

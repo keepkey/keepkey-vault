@@ -72,6 +72,16 @@
       "src/bun/offline-policy.test.ts"
     ],
     "standard-send-safety": [
+      "__tests__/rest-zcash-admission.test.ts",
+      "__tests__/broadcast-provider-error.test.ts",
+      "__tests__/zcash-nu7-admission.test.ts",
+      "__tests__/zcash-nu7-binary.test.ts",
+      "__tests__/zcash-nu7-transparent.test.ts",
+      "__tests__/zcash-tex-admission.test.ts",
+      "__tests__/zcash-transparent-sidecar.test.ts",
+      "__tests__/send-zcash-readiness.test.ts",
+      "__tests__/zcash-nu7-packaging.test.ts",
+      "__tests__/emulator-signing-receipt.test.ts",
       "__tests__/send-form-requests.test.ts",
       "__tests__/max-send.test.ts",
       "__tests__/evm-max-send.test.ts",

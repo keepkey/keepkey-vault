@@ -20,6 +20,7 @@ import type { ChainBalance, TokenBalance, BuildTxResult, BroadcastResult, Addres
 import { validateAddress } from "../../shared/address-validation"
 import { balanceUnverifiedReason, isBalanceUnverified } from "../../shared/balance-display-state"
 import { normalizeAmountInput, decimalAmount } from '../../shared/locale'
+import { useZcashNu7Support } from '../hooks/useZcashNu7Support'
 
 type SendPhase = 'input' | 'built' | 'signed' | 'broadcast'
 
@@ -127,13 +128,14 @@ export function SendForm({ chain, address, balance, balanceLoading = false, toke
 	// Balances/prices can update without changing the send. Only actual owner,
 	// asset and input changes retire work already awaiting an RPC response.
 	const owner = xpubOverride || address || ''
+	const zcashSupport = useZcashNu7Support(chain.id === 'zcash', JSON.stringify([chain.id, chain.networkId, owner]))
 	// The owner hook can be pending/empty while its default index is zero.
 	// Only the matching device-derived address makes that EVM sender usable.
 	const senderReady = chain.chainFamily !== 'evm' || !!address
 	const requestKey = JSON.stringify([chain.id, chain.signMethod, tokenCaip,
 		chain.chainFamily === 'evm' ? owner.toLowerCase() : owner,
 		scriptTypeOverride, evmAddressIndex, recipient, amount, usdAmount, inputMode,
-		memo, isMax, feeLevel, feeMode, customGasPrice, customGasLimit, customSatPerVByte])
+		memo, isMax, feeLevel, feeMode, customGasPrice, customGasLimit, customSatPerVByte, zcashSupport.sessionEpoch])
 	const requestKeyRef = useRef(requestKey)
 	const operationGeneration = useRef(0)
 	const mounted = useRef(true)
@@ -336,7 +338,7 @@ export function SendForm({ chain, address, balance, balanceLoading = false, toke
 	}, [recipient, activeCaip, addressValid, vaultDestinationRetry])
 
 	const handleBuild = useCallback(async () => {
-		if (!senderReady) return
+		if (!senderReady || !zcashSupport.canSend()) return
 		if (!recipient || (!amount && !isMax)) return
 		if (isMax && balanceLoading && activeAssetUnverified) return
 		if (!isMax && (invalidAmountInput || canonicalAmount === null || !Number.isFinite(amountNum) || amountNum <= 0)) {
@@ -398,10 +400,10 @@ export function SendForm({ chain, address, balance, balanceLoading = false, toke
 		} finally {
 			if (operationIsCurrent(generation)) setLoading(false)
 		}
-	}, [chain, recipient, amount, canonicalAmount, amountNum, invalidAmountInput, locale, t, memo, feeLevel, feeMode, supportsCustomFee, customGasPrice, customGasLimit, customSatPerVByte, isMax, addressValidation, exceedsBalance, isTokenSend, token, balance?.balance, xpubOverride, scriptTypeOverride, evmAddressIndex, checkingVaultDestination, vaultDestinationError, requestKey, displaySymbol, displayBalance, activeCaip, address, balanceLoading, activeAssetUnverified, senderReady])
+	}, [chain, recipient, amount, canonicalAmount, amountNum, invalidAmountInput, locale, t, memo, feeLevel, feeMode, supportsCustomFee, customGasPrice, customGasLimit, customSatPerVByte, isMax, addressValidation, exceedsBalance, isTokenSend, token, balance?.balance, xpubOverride, scriptTypeOverride, evmAddressIndex, checkingVaultDestination, vaultDestinationError, requestKey, displaySymbol, displayBalance, activeCaip, address, balanceLoading, activeAssetUnverified, senderReady, zcashSupport.canSend])
 
 	const handleSign = useCallback(async () => {
-		if (!senderReady || !buildResult || !currentSigningContext) return
+		if (!senderReady || !zcashSupport.canSend() || !buildResult || !currentSigningContext) return
 		const context = currentSigningContext
 		const generation = ++operationGeneration.current
 		setLoading(true)
@@ -417,10 +419,10 @@ export function SendForm({ chain, address, balance, balanceLoading = false, toke
 		} finally {
 			if (operationIsCurrent(generation)) setLoading(false)
 		}
-	}, [buildResult, currentSigningContext, t, senderReady])
+	}, [buildResult, currentSigningContext, t, senderReady, zcashSupport.canSend])
 
 	const handleBroadcast = useCallback(async () => {
-		if (!signedTx || !currentSigningContext) return
+		if (!zcashSupport.canSend() || !signedTx || !currentSigningContext) return
 		const context = currentSigningContext
 		const generation = ++operationGeneration.current
 		setLoading(true)
@@ -460,7 +462,7 @@ export function SendForm({ chain, address, balance, balanceLoading = false, toke
 		} finally {
 			if (operationIsCurrent(generation)) setLoading(false)
 		}
-	}, [signedTx, buildResult, currentSigningContext, t])
+	}, [signedTx, buildResult, currentSigningContext, t, zcashSupport.canSend])
 
 	const edit = useCallback(() => {
 		operationGeneration.current++
@@ -605,6 +607,13 @@ export function SendForm({ chain, address, balance, balanceLoading = false, toke
 					)}
 				</Flex>
 			</Flex>
+			{/* Native Zcash sending is limited to the reviewed alpha emulator. */}
+			{chain.id === 'zcash' && (
+				<Flex role="status" align="center" gap="2" px="3" py="2" borderRadius="10px" bg="var(--ink-2)">
+					{zcashSupport.pending && <Spinner size="xs" flexShrink={0} aria-label={uiText("Checking Zcash sending support…")} />}
+					<Text fontSize="xs" color="kk.textMuted">{uiText("Zcash sending requires the 7.17 alpha emulator. Hardware support is not available yet.")}</Text>
+				</Flex>
+			)}
 			{/* Gas balance hint for token sends */}
 			{isTokenSend && balance && (() => {
 				// ponytail: gate on the native balance itself, not on nativeBalanceUsd.
@@ -927,7 +936,7 @@ export function SendForm({ chain, address, balance, balanceLoading = false, toke
 						borderRadius="12px"
 						_hover={{ bg: "var(--gold-2)" }}
 						onClick={handleBuild}
-						disabled={loading || !senderReady || (isMax && balanceLoading && activeAssetUnverified) || invalidAmountInput || checkingVaultDestination || !!vaultDestinationError || !recipient || (!amount && !isMax) || (addressValidation != null && !addressValidation.valid)}
+						disabled={loading || !senderReady || !zcashSupport.available || (isMax && balanceLoading && activeAssetUnverified) || invalidAmountInput || checkingVaultDestination || !!vaultDestinationError || !recipient || (!amount && !isMax) || (addressValidation != null && !addressValidation.valid)}
 						px="4" py="2"
 						w="full"
 					>
@@ -1005,7 +1014,7 @@ export function SendForm({ chain, address, balance, balanceLoading = false, toke
 							color="black"
 							_hover={{ bg: "kk.goldHover" }}
 							onClick={handleSign}
-							disabled={loading || !senderReady}
+							disabled={loading || !senderReady || !zcashSupport.available}
 							px="4" py="2"
 						>
 							{loading ? t("confirmOnDevice") : t("signOnDevice")}
@@ -1045,7 +1054,7 @@ export function SendForm({ chain, address, balance, balanceLoading = false, toke
 							color="black"
 							_hover={{ opacity: 0.9 }}
 							onClick={handleBroadcast}
-							disabled={loading}
+							disabled={loading || !zcashSupport.available}
 							px="4" py="2"
 						>
 							{loading ? t("broadcasting") : t("broadcastTransaction")}

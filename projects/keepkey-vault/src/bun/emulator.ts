@@ -15,7 +15,8 @@
  */
 import { dlopen, FFIType, ptr } from 'bun:ffi'
 import { join } from 'path'
-import { existsSync, mkdirSync } from 'fs'
+import { existsSync, mkdirSync, readFileSync } from 'fs'
+import { createHash } from 'node:crypto'
 import { homedir } from 'os'
 import {
   isMacOS, isEmulatorSupported, getOrCreateKey, getPairingStatus,
@@ -74,6 +75,9 @@ export function getLoadedEmulatorLibPath(): string | null { return ffi ? loadedD
 /** The build the running emulator loaded, as resolved when it started. */
 let loadedLibrary: SelectedEmulatorLibrary | null = null
 export function getLoadedEmulatorLibrary(): SelectedEmulatorLibrary | null { return ffi ? loadedLibrary : null }
+/** Digest of the bytes verified when this FFI instance was loaded. */
+let loadedLibrarySha256: string | null = null
+export function getLoadedEmulatorLibrarySha256(): string | null { return ffi ? loadedLibrarySha256 : null }
 
 /** Whether the running emulator library reads a ClearSign test root. */
 export function emulatorReadsClearSignTestRoot(): boolean {
@@ -172,6 +176,7 @@ export function initEmulator(flashName = 'default'): EmulatorStatus {
     const library = getRuntimeLibrary()
     const dylibPath = library.path
     if (!dylibPath) throw new Error(library.problem || 'Emulator library unavailable')
+    const librarySha256 = createHash('sha256').update(new Uint8Array(readFileSync(dylibPath))).digest('hex')
 
     // 2. Decrypt flash
     activeFlash = loadFlash(flashName)
@@ -183,6 +188,13 @@ export function initEmulator(flashName = 'default'): EmulatorStatus {
 
     console.log(`${TAG} Loading dylib: ${dylibPath}`)
     ffi = loadDylib(dylibPath)
+    // Bind qualification to this load, rather than editable picker metadata.
+    if (createHash('sha256').update(new Uint8Array(readFileSync(dylibPath))).digest('hex') !== librarySha256) {
+      ffi.close()
+      ffi = null
+      throw new Error('The emulator library changed while loading. Start it again.')
+    }
+    loadedLibrarySha256 = librarySha256
     loadedDylibPath = dylibPath
     loadedLibrary = library
     readsTestRoot = libraryReadsClearSignTestRoot(dylibPath)
@@ -223,6 +235,7 @@ export function initEmulator(flashName = 'default'): EmulatorStatus {
     // the poll thread was never started).
     stopEmulatorWatchdog()
     if (ffi) { try { ffi.symbols.kkemu_stop() } catch {} ; try { ffi.close() } catch {} ; ffi = null }
+    loadedLibrarySha256 = null
     if (activeFlash) { zeroFlash(activeFlash); activeFlash = null }
 
     return getEmulatorStatus()
@@ -304,6 +317,8 @@ export function stopEmulator(): EmulatorStatus {
       try { ffi.close() } catch {}
       ffi = null
     }
+
+    loadedLibrarySha256 = null
 
     // Encrypt + save
     if (activeFlash) {

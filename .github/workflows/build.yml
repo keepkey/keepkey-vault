@@ -236,6 +236,11 @@ jobs:
         run: make test-emu-pin KK_EMU_DYLIB="$PWD/projects/keepkey-vault/emulator-bundle/libkkemu.dylib"
         shell: bash
 
+      - name: Test Nu7 transparent signing on the certified alpha emulator
+        if: runner.os == 'macOS'
+        run: make test-emu-zcash-nu7 KK_EMU_DYLIB="$PWD/projects/keepkey-vault/emulator-bundle/libkkemu.dylib"
+        shell: bash
+
       - name: Install Linux packaging tools
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y fakeroot lintian dpkg-dev
@@ -247,7 +252,9 @@ jobs:
           echo "=== Building zcash-cli for $(uname -m) ==="
           cd projects/keepkey-vault/zcash-cli
           cargo test
+          cargo test --locked --manifest-path tests/nu7-reference/Cargo.toml
           cargo build --release
+          bun ../scripts/write-zcash-nu7-manifest.ts target/release/zcash-cli
           file target/release/zcash-cli
 
       - name: Verify and build Monero CLI sidecar
@@ -432,7 +439,7 @@ jobs:
             echo "::error::ARM64 source app contains incompatible zcash-cli ($ZCASH_ARCH)"
             exit 1
           fi
-          rm "$ZCASH_DEST"
+          rm "$ZCASH_DEST" "${ZCASH_DEST}.nu7.json"
           echo "  zcash-cli: removed (Intel not supported; privacy capability will stay disabled)"
 
           # The certified emulator is universal and audited for macOS 13. Keep

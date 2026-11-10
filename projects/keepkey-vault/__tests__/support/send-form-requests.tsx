@@ -35,7 +35,7 @@ function deferred() {
   return { promise, resolve, reject }
 }
 const calls: Array<{ method: string; params: any; pending: ReturnType<typeof deferred> }> = []
-mock.module('../../src/mainview/lib/rpc', () => ({ rpcRequest: async (method: string, params: any) => {
+mock.module('../../src/mainview/lib/rpc', () => ({ onRpcMessage: () => () => {}, rpcRequest: async (method: string, params: any) => {
   if (method === 'checkVaultDestination') return undefined
   if (method === 'matchAddress') return { address: params.address, kind: 'external', label: 'Known test recipient' }
   if (!['buildTx', 'ethSignTx', 'broadcastTx'].includes(method)) throw new Error(`Unexpected RPC: ${method}`)
