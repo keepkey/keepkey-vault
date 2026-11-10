@@ -87,117 +87,104 @@ export function UpdateBanner({ phase, progress, message, error, onDownload, onAp
     )
   }
 
-  // Actionable phases: full-width top banner
+  // Actionable phases: top banner. Neutral surface with an accent edge and an
+  // icon badge, a two-level text block (title + version / progress), and
+  // padded actions — explicit px because the app's unlayered `* { padding: 0 }`
+  // reset beats Chakra's layered button recipe.
   const isReady = phase === "ready"
   const accentColor = isReady ? "var(--teal)" : "var(--gold)"
   const accentRgb   = isReady ? "139,227,196"  : "233,196,106"
+  // useUpdateState reports "Version X available" for the available phase.
+  const version = phase === "available" ? message.match(/(\d+\.\d+\.\d+[^\s]*)/)?.[1] : undefined
+  const title =
+    phase === "available" ? t("newVersionAvailable")
+    : phase === "downloading" ? (progress !== undefined ? t("downloadingWithProgress", { progress: Math.round(progress) }) : t("downloading"))
+    : phase === "ready" ? t("readyToInstall")
+    : t("applying")
 
   return (
-    <Box
-      position="fixed"
-      top="50px"
-      left="0"
-      right="0"
-      zIndex={999}
-      px="4"
-      py="0"
-    >
+    <Box position="fixed" top="50px" left="0" right="0" zIndex={999} px="4">
       <Flex
+        role="status"
         align="center"
-        justify="space-between"
-        bg={`rgba(${accentRgb},0.08)`}
-        border="1px solid"
-        borderColor={`rgba(${accentRgb},0.22)`}
-        borderRadius="14px"
-        px="4"
-        py="2.5"
+        gap="4"
         mx="auto"
-        maxW="900px"
-        mt="2"
-        gap="3"
-        backdropFilter="blur(8px)"
+        mt="3"
+        maxW="720px"
+        pl="4"
+        pr="3"
+        py="3"
+        bg="rgba(22,22,29,0.92)"
+        border="1px solid var(--line-2)"
+        borderLeft={`3px solid ${accentColor}`}
+        borderRadius="14px"
+        boxShadow="0 8px 24px rgba(0,0,0,0.35)"
+        backdropFilter="blur(10px)"
       >
-        <Flex align="center" gap="3" flex="1" minW="0">
+        <Flex
+          align="center"
+          justify="center"
+          w="34px"
+          h="34px"
+          borderRadius="full"
+          bg={`rgba(${accentRgb},0.14)`}
+          flexShrink={0}
+        >
           {isReady ? (
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
-              <circle cx="12" cy="12" r="10" fill={accentColor} />
-              <path d="M9 12l2 2 4-4" stroke="var(--ink-0)" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={accentColor} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M5 12l4 4 10-10" />
             </svg>
           ) : (
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={accentColor} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={accentColor} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
               <polyline points="7 10 12 15 17 10" />
               <line x1="12" y1="15" x2="12" y2="3" />
             </svg>
           )}
+        </Flex>
 
-          <Box flex="1" minW="0">
-            <Text fontSize="13px" color={accentColor} fontWeight="500" truncate letterSpacing="-0.005em">
-              {phase === "available" && t("newVersionAvailable")}
-              {phase === "downloading" && (
-                progress !== undefined
-                  ? t("downloadingWithProgress", { progress: Math.round(progress) })
-                  : t("downloading")
-              )}
-              {phase === "ready" && t("readyToInstall")}
-              {phase === "applying" && t("applying")}
+        <Box flex="1" minW="0">
+          <Text fontSize="13px" fontWeight="600" color="var(--text-0)" truncate letterSpacing="-0.005em">
+            {title}
+          </Text>
+          {version && (
+            <Text as="span" display="inline-block" mt="1" px="2" py="0.5" borderRadius="999px"
+              fontSize="11px" fontFamily="mono" color={accentColor} bg={`rgba(${accentRgb},0.10)`}>
+              v{version.replace(/^v/, "")}
             </Text>
-            {phase === "downloading" && progress !== undefined && (
-              <Box mt="1.5" h="3px" bg="var(--ink-3)" borderRadius="999px" overflow="hidden">
-                <Box h="100%" w={`${Math.min(progress, 100)}%`} bg="var(--gold)" borderRadius="999px" transition="width 0.3s" />
-              </Box>
-            )}
-          </Box>
-        </Flex>
+          )}
+          {phase === "downloading" && progress !== undefined && (
+            <Box mt="2" h="4px" bg="var(--ink-3)" borderRadius="999px" overflow="hidden">
+              <Box h="100%" w={`${Math.min(progress, 100)}%`} bg={accentColor} borderRadius="999px" transition="width 0.3s" />
+            </Box>
+          )}
+        </Box>
 
-        <Flex gap="2" flexShrink={0}>
-          {phase === "available" && (
-            <>
-              <Button
-                size="xs"
-                bg="var(--gold)"
-                color="var(--ink-0)"
-                fontWeight="600"
-                _hover={{ bg: "var(--gold-2)" }}
-                onClick={onDownload}
-              >
-                {t("download")}
-              </Button>
-              <Button
-                size="xs"
-                variant="ghost"
-                color="var(--text-2)"
-                _hover={{ color: "var(--text-0)" }}
-                onClick={onDismiss}
-              >
-                {t("later")}
-              </Button>
-            </>
-          )}
-          {phase === "ready" && (
-            <>
-              <Button
-                size="xs"
-                bg="var(--teal)"
-                color="var(--ink-0)"
-                fontWeight="600"
-                _hover={{ bg: "var(--teal-2)" }}
-                onClick={onApply}
-              >
-                {t("restartToUpdate")}
-              </Button>
-              <Button
-                size="xs"
-                variant="ghost"
-                color="var(--text-2)"
-                _hover={{ color: "var(--text-0)" }}
-                onClick={onDismiss}
-              >
-                {t("later")}
-              </Button>
-            </>
-          )}
-        </Flex>
+        {(phase === "available" || phase === "ready") && (
+          <Flex gap="1" align="center" flexShrink={0}>
+            <Button
+              size="sm"
+              px="3"
+              variant="ghost"
+              color="var(--text-2)"
+              _hover={{ color: "var(--text-0)", bg: "var(--ink-3)" }}
+              onClick={onDismiss}
+            >
+              {t("later")}
+            </Button>
+            <Button
+              size="sm"
+              px="4"
+              bg={accentColor}
+              color="var(--ink-0)"
+              fontWeight="600"
+              _hover={{ bg: isReady ? "var(--teal-2)" : "var(--gold-2)" }}
+              onClick={isReady ? onApply : onDownload}
+            >
+              {isReady ? t("restartToUpdate") : t("download")}
+            </Button>
+          </Flex>
+        )}
       </Flex>
     </Box>
   )
