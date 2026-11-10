@@ -112,5 +112,22 @@
   "mf2e79e8": "Medeondertekenaar",
   "m68390565": "bevestigingen",
   "mc691454b": "Gesynchroniseerd",
-  "mc1163767": "Laatst bijgewerkt {{time}}"
+  "mc1163767": "Laatst bijgewerkt {{time}}",
+  "mbe593b8a": "Je verstuurt",
+  "m2b1566d2": "Minimaal te ontvangen",
+  "mcfd73f69": "Geschatte wisselkosten",
+  "m4141d374": "Prijsgegevens niet beschikbaar",
+  "m63d34722": "Netwerkkosten van de bronketen",
+  "mdb55a3bf": "Apart te betalen",
+  "me49736e2": "Geschatte tijd",
+  "m6fb8a4dc": "Kosten en details",
+  "mab865c88": "Bron van het minimum",
+  "mbfc93277": "Transactiememo",
+  "m2649bd57": "Schatting",
+  "mcbc95930": "Offerte van de aanbieder",
+  "me79a318a": "Waardeverschil bij het minimum",
+  "m934a6f3d": "De wisselkosten vergelijken de geoffreerde invoer- en uitvoerwaarden, inclusief de koers en routekosten. De netwerkkosten van de bronketen worden apart betaald. Het minimaal te ontvangen bedrag is een uitvoeringsgrens, geen gegarandeerde terugbetaling.",
+  "m981df2e2": "Controleer en keur goed op KeepKey",
+  "m53c7aeaa": "Ik accepteer de geschatte wisselkosten van {{cost}} en een waardeverschil van {{loss}} bij het minimaal te ontvangen bedrag. De netwerkkosten van de bronketen worden apart betaald.",
+  "m310febeb": "Hoge wisselkosten: {{cost}}, exclusief de netwerkkosten van de bronketen."
 }
