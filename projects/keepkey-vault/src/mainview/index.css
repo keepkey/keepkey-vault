@@ -1,7 +1,14 @@
-* {
-	margin: 0;
-	padding: 0;
-	box-sizing: border-box;
+/* Global reset, kept in Chakra's lowest-priority "reset" cascade layer.
+   Unlayered, `* { padding: 0 }` beat every Chakra recipe (recipes live in
+   @layer recipes), so <Button>, <Input>, badges and dialogs lost their
+   built-in padding and call sites had to re-add px/py by hand. Inside the
+   layer it still zeroes browser defaults but no longer overrides components. */
+@layer reset {
+	* {
+		margin: 0;
+		padding: 0;
+		box-sizing: border-box;
+	}
 }
 
 html, body, #root {

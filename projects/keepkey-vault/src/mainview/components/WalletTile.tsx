@@ -1,4 +1,5 @@
-import { Box, Flex } from "@chakra-ui/react";
+import { Flex } from "@chakra-ui/react";
+import { ActionButton } from "./ui/ActionButton";
 import type { ReactNode } from "react";
 
 export function WalletTile({
@@ -12,13 +13,11 @@ export function WalletTile({
     <Flex
       direction="column"
       w="220px"
-      minH="230px"
       bg="rgba(16,16,21,0.85)"
       border="1px solid"
       borderColor={active ? "rgba(139,227,196,0.45)" : "var(--ink-3)"}
-      borderRadius="16px"
-      px="3.5"
-      py="3"
+      borderRadius="card"
+      p="4"
       backdropFilter="blur(8px)"
       boxShadow={
         active
@@ -52,51 +51,21 @@ export function WalletTileCta({
   loading?: boolean;
   tone?: "gold" | "teal" | "rose";
 }) {
-  const accent =
-    tone === "teal"
-      ? "var(--teal)"
-      : tone === "rose"
-      ? "var(--rose)"
-      : "var(--gold)";
-  const accentSoft =
-    tone === "teal"
-      ? "rgba(139,227,196,0.10)"
-      : tone === "rose"
-      ? "rgba(224,140,123,0.10)"
-      : "rgba(233,196,106,0.10)";
-  const accentBorder =
-    tone === "teal"
-      ? "rgba(139,227,196,0.30)"
-      : tone === "rose"
-      ? "rgba(224,140,123,0.30)"
-      : "rgba(233,196,106,0.30)";
-  const accentHover =
-    tone === "teal"
-      ? "rgba(139,227,196,0.20)"
-      : tone === "rose"
-      ? "rgba(224,140,123,0.20)"
-      : "rgba(233,196,106,0.20)";
+  // Same shared button as the actions below the grid, so card CTAs and page
+  // actions share one height, radius and type size. `loading` keeps its old
+  // behaviour (dimmed, wait cursor, still clickable) rather than Chakra's
+  // spinner state, which would block the click.
   return (
-    <Box
-      as="button"
+    <ActionButton
+      tone={tone}
+      size="sm"
       w="100%"
-      px="3"
-      py="1.5"
-      borderRadius="10px"
-      fontSize="11px"
-      fontWeight="600"
-      letterSpacing="0.04em"
-      color={accent}
-      bg={accentSoft}
-      border="1px solid"
-      borderColor={accentBorder}
+      mt="auto"
       cursor={loading ? "wait" : "pointer"}
       opacity={loading ? 0.5 : 1}
-      _hover={{ bg: accentHover }}
-      mt="auto"
       onClick={onClick}
     >
       {children}
-    </Box>
+    </ActionButton>
   );
 }
