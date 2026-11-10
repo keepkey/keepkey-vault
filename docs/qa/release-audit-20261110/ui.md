@@ -92,13 +92,45 @@ with the exact #635 theme/ActionButton. At 320 pixels in the ready phase, the
 banner ends at x=304 while Restart to Update ends at x=328.7, outside the
 viewport; the status-title width becomes zero. At 390 pixels the status title
 has only 32 pixels. Fixed icon/gaps and a nonshrinking, nonwrapping action row
-leave no room for the copy. Root assigned a responsive-stack correction and
-separate before/after verification to the security reviewer. The unchanged
-pre-641 banner lacks the new status role, so the first negative-control story
-attempt stopped on a selector mismatch rather than furnishing a baseline result.
+leave no room for the copy. The security reviewer applied the responsive-stack
+correction and completed 72 before/after story cases across 320/390/1280 pixels,
+three text lengths and four phases. Corrected cases had no layout/browser
+errors; 36 callbacks passed. The 320-pixel title width increased from zero to
+206 pixels, the 390-pixel title from 32 to 276 pixels, and desktop geometry was
+unchanged. Evidence is under
+`/private/tmp/keepkey-ui-pr-review-20261110/responsive-evidence`.
 
 The current-PR measurements/screenshots are preserved under
 `/private/tmp/keepkey-ui-pr-review-20261110/after/`. This story confirmed native
 disabled semantics and keyboard activation of the shared ActionButton without
-running application update handlers. The integration candidate still needs its
-own combined UI regression run after the responsive correction.
+running application update handlers. The combined actual-component run is
+recorded in the following section.
+
+## Combined integration UI qualification
+
+After local integration of #635–641 and the responsive UpdateBanner correction,
+the actual component sweep was rerun at 1280×900 and 390×844. All 30 states
+completed with no horizontal overflow or browser runtime errors. This is new
+evidence for the combined reset/theme/control styles, not reuse of the earlier
+baseline screenshots.
+
+The four Bitcoin/Ethereum Receive samples measured a 184×184 white frame,
+12-pixel padding and a 160×160 SVG. Horizontal/vertical center deltas were zero.
+Actual Copy clicks completed using an in-memory clipboard. Button computed
+padding, geometry and center-hit measurements are recorded, and the sweep
+successfully clicked the normal navigation, swap review/close, history close
+and six settings-section controls. Background controls covered by an active
+modal, or scrolled under the fixed top navigation after Copy, are not treated
+as foreground click-target failures. No concrete new regression was confirmed.
+
+Evidence: `/private/tmp/keepkey-ui-audit-integration-20261110/results.json`,
+`summary.json` and 30 PNGs. The earlier evidence directories are preserved.
+All optional flags remained disabled; no application setting, transaction,
+signing or broadcast operation was requested. The localhost fixture server
+was stopped after the sweep.
+
+The earlier focused Zcash 13+6 checks were not rerun after this UI integration:
+the user requested wrap-up before additional scans. Their gating/navigation
+evidence remains recorded above; updated shielded-QR styling is source-reviewed
+but is not represented as a newly executed 19-check pass. Setup/firmware and
+physical/native acceptance limits also remain as described above.

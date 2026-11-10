@@ -53,19 +53,24 @@ key was approved, and the coordinator verified that no pairing record was saved.
 ## Validation so far
 
 - Initial core regressions: 1,540 tests and 93 script assertions, zero failures.
-- Combined audit fixes: 1,575 core tests and 93 script assertions pass. The local
-  protocol-lock invariant is subsequently added to the core manifest as well.
+- Final combined candidate: 1,581 core tests and 93 script assertions pass,
+  including the local protocol-lock invariant and the Base icon regression.
 - Swap browser QA: nine delayed-account/network cases and twelve review cases,
   no runtime errors; fixtures use synthetic balances and transactions.
 - Focused dashboard/asset/token/default-off regression group: 20 tests pass after
   removing the remaining Zcash shortcut.
 - Frontend/backend builds and all 15 locale checks pass.
-- Type checking retains the known 800-diagnostic baseline with no new diagnostic
-  signatures. The repository does not currently have a clean typecheck.
+- Type checking decreases from the known 800-diagnostic baseline to 799, with no
+  new diagnostic signatures. The Receive QR change fixes the obsolete Chakra
+  `sx` prop diagnostic. The repository does not have a clean typecheck.
 - The native development preview is running; its API remains healthy while
   locked and its window uses normal layer 0. This is not a signed release artifact.
 - The bounded UI audit captures thirty desktop/mobile states with no horizontal
   overflow or runtime errors. See the UI report for the exact limits.
+- The combined UI is rechecked after integrating PRs #635–#641: all thirty states
+  pass; shared Receive QR frames, SVGs and Copy actions are checked directly.
+  PR #641's 320px update-button overflow is fixed. A portable browser regression
+  passes 45 layout states, 36 callbacks and one timeout case with real components.
 - Audit fixes for late Dashboard cache replies, cancellation before a later wire
   exchange, WalletConnect session/topic binding and Monero hidden-wallet
   persistence are implemented and independently reviewed. Monero policy and
@@ -90,9 +95,9 @@ run exact-head platform CI, review release packaging and produce a final candida
 record. Physical signing acceptance, signing/notarization and publication are
 separate from the synthetic regression evidence recorded here.
 
-The package version is advanced to 1.6.11; validate the exact integrated version
-before publication. Additional UI PRs #635–#641 were opened during
-the audit and must be reviewed and checked as an integration before merging.
+The package version is advanced to 1.6.11; validate exact-head platform CI before
+publication. UI PRs #635–#641 are reviewed and integrated locally with their
+original commits preserved, including the responsive correction to #641.
 Dependency reproducibility work restores a tracked Vault lockfile and makes CI
 reject a missing lockfile. The only registry-version remediation is elliptic
 6.6.1, replacing the vulnerable nested 6.5.4/6.5.7 copies. Bun 1.3.14's npm-alias

@@ -107,6 +107,7 @@ export function UpdateBanner({ phase, progress, message, error, onDownload, onAp
       <Flex
         role="status"
         align="center"
+        flexWrap={{ base: "wrap", md: "nowrap" }}
         gap="4"
         mx="auto"
         mt="3"
@@ -144,7 +145,7 @@ export function UpdateBanner({ phase, progress, message, error, onDownload, onAp
         </Flex>
 
         <Box flex="1" minW="0">
-          <Text fontSize="13px" fontWeight="600" color="var(--text-0)" truncate letterSpacing="-0.005em">
+          <Text fontSize="13px" fontWeight="600" color="var(--text-0)" overflowWrap="anywhere" letterSpacing="-0.005em">
             {title}
           </Text>
           {version && (
@@ -161,10 +162,17 @@ export function UpdateBanner({ phase, progress, message, error, onDownload, onAp
         </Box>
 
         {(phase === "available" || phase === "ready") && (
-          <Flex gap="1" align="center" flexShrink={0}>
+          <Flex gap="1" align="center" justify="flex-end" flexShrink={0} flexWrap="wrap"
+            w={{ base: "100%", md: "auto" }} maxW={{ base: "100%", md: "50%" }}>
             <Button
               size="sm"
               px="3"
+              py="1.5"
+              h="auto"
+              minH="8"
+              maxW="100%"
+              whiteSpace="normal"
+              overflowWrap="anywhere"
               variant="ghost"
               color="var(--text-2)"
               _hover={{ color: "var(--text-0)", bg: "var(--ink-3)" }}
@@ -175,6 +183,12 @@ export function UpdateBanner({ phase, progress, message, error, onDownload, onAp
             <Button
               size="sm"
               px="4"
+              py="1.5"
+              h="auto"
+              minH="8"
+              maxW="100%"
+              whiteSpace="normal"
+              overflowWrap="anywhere"
               bg={accentColor}
               color="var(--ink-0)"
               fontWeight="600"
