@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { rpcRequest, onRpcMessage } from '../lib/rpc'
 import type { DeviceStateInfo } from '../../shared/types'
+import { retainLivePortfolioSession, type LivePortfolioSession } from '../../shared/app-phase'
 
 const DEFAULT_STATE: DeviceStateInfo = {
   state: 'disconnected',
@@ -17,12 +18,24 @@ const DEFAULT_STATE: DeviceStateInfo = {
 }
 
 export function useDeviceState() {
-  const [deviceState, setDeviceState] = useState<DeviceStateInfo>(DEFAULT_STATE)
+  const [snapshot, setSnapshot] = useState<{ device: DeviceStateInfo; portfolio: LivePortfolioSession | null }>({ device: DEFAULT_STATE, portfolio: null })
 
   useEffect(() => {
+    // Reduce every pushed state, even when React batches a quick replug into
+    // one render. A ready device before disconnect cannot authorize browsing
+    // a locked device after reconnect, even when its device id is identical.
+    const receive = (device: DeviceStateInfo) => setSnapshot(previous => ({
+      device, portfolio: retainLivePortfolioSession(previous.portfolio, device),
+    }))
+    let receivedPush = false
     // Listen for pushed device-state messages from Bun
     const unsubscribe = onRpcMessage('device-state', (payload: DeviceStateInfo) => {
-      setDeviceState(payload)
+      receivedPush = true
+      receive(payload)
+    })
+    const unsubscribePurge = onRpcMessage('wallet-data-purged', () => {
+      receivedPush = true
+      setSnapshot(previous => ({ ...previous, portfolio: null }))
     })
 
     // Fetch initial state — retry until success (Windows WebView2 RPC may not be ready)
@@ -30,7 +43,8 @@ export function useDeviceState() {
     let retryTimer: ReturnType<typeof setTimeout> | null = null
     const fetchInitial = (attempt: number) => {
       rpcRequest<DeviceStateInfo>('getDeviceState').then((state) => {
-        if (!cancelled) setDeviceState(state)
+        // A late initial reply must not undo a newer push/disconnect.
+        if (!cancelled && !receivedPush) receive(state)
       }).catch((err) => {
         if (attempt <= 3) console.warn(`[useDeviceState] fetch attempt ${attempt} failed:`, err?.message)
         if (!cancelled) {
@@ -46,8 +60,9 @@ export function useDeviceState() {
       cancelled = true
       if (retryTimer) clearTimeout(retryTimer)
       unsubscribe()
+      unsubscribePurge()
     }
   }, [])
 
-  return deviceState
+  return { ...snapshot.device, lockedPortfolioAvailable: snapshot.device.state === 'needs_pin' && snapshot.portfolio !== null }
 }

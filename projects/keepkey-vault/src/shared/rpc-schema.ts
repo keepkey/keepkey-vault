@@ -27,6 +27,7 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       // ── Device lifecycle ──────────────────────────────────────────
       getDeviceState: { params: void; response: DeviceStateInfo }
       retryConnect: { params: void; response: void }
+      requestDeviceUnlock: { params: void; response: void }
       startBootloaderUpdate: { params: void; response: void }
       startFirmwareUpdate: { params: { variant?: 'multi' | 'bitcoin-only'; acknowledgeWipe?: import('./flash-wipe').WipeReason; requireOfficialSignatures?: boolean }; response: void }
       flashFirmware: { params: void; response: void }
@@ -104,6 +105,7 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       // passphrase prompt is on screen and frees the transport lock so the
       // user can back out of an in-flight signing flow without unplugging.
       cancelDeviceSigning: { params: void; response: { ok: boolean } }
+      cancelForegroundDeviceOperation: { params: void; response: { ok: boolean } }
       // Types defined in types.ts: GetPublicKeysParams, BtcGetAddressParams, EthGetAddressParams, EthSignTxParams, BtcSignTxParams
       getPublicKeys: { params: any; response: any }
 

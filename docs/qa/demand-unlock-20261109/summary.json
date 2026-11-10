@@ -1,0 +1,54 @@
+{
+  "behavior": [
+    "API and pairing are independent of PIN lock",
+    "Only verified same-live-session cached portfolio/address/public-key/account data is served while locked",
+    "Background reads do not request PIN",
+    "Foreground REST work serializes and resumes only after wallet/session validation",
+    "Desktop device actions fail busy instead of queueing, and their scoped cancellation cannot affect a REST owner",
+    "PIN/passphrase transport, setup, wipe, device-change, quote and hidden-wallet guards remain active",
+    "No signature or broadcast is automatically retried"
+  ],
+  "validation": {
+    "coreTests": 1444,
+    "coreFailures": 0,
+    "scriptAssertions": 93,
+    "uiBrowserChecks": 11,
+    "bexTests": 372,
+    "bexBuildTasks": 9,
+    "vaultFrontend": "pass",
+    "vaultBackend": "pass",
+    "i18n": "pass",
+    "vaultTypeScriptDiagnostics": 802,
+    "previousTypeScriptDiagnostics": 802,
+    "newTypeScriptFileCodePairs": 0,
+    "bexTypeScript": "pass",
+    "realPaymentSigned": false
+  },
+  "bex": {
+    "branch": "fix/demand-unlock-20261109",
+    "commit": "89a6641",
+    "baseCandidate": "8322d6f",
+    "mainLocalDevelopFastForwarded": true,
+    "existingUnpackedDirectoryUpdated": true,
+    "extensionReloadRequired": true
+  },
+  "limitations": [
+    "UI browser fixture uses real App routing, device-state and PIN components with heavy child screens replaced by placeholders.",
+    "Native preview startup is checked, but actual user PIN/device signing acceptance is not automated.",
+    "Existing Vault typecheck debt remains."
+  ],
+  "reproduction": {
+    "core": "CORE_QA_EVIDENCE=<output-dir> bun scripts/qa-core-regressions.ts",
+    "uiFixture": "LOCK_UI_QA_PORT=5208 bun __tests__/fixtures/locked-portfolio/server.ts",
+    "uiBrowser": "LOCK_UI_QA_PORT=5208 LOCK_UI_QA_EVIDENCE=<output-dir> PLAYWRIGHT_MODULE=<module-path> PLAYWRIGHT_TEST_MODULE=<test-module-path> CHROME_EXECUTABLE=<chrome-path> node __tests__/fixtures/locked-portfolio/smoke.mjs"
+  },
+  "nativePreview": {
+    "apiStatus": "healthy",
+    "deviceConnected": true,
+    "deviceLocked": true,
+    "ready": false,
+    "swapPhase": "closed",
+    "existingQaPairingAuthenticated": true,
+    "port": 1646
+  }
+}

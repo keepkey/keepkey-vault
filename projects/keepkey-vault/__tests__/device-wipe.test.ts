@@ -250,6 +250,26 @@ describe('REST writes to the device (device-gate.ts)', () => {
     return { transport, written, features, failure }
   }
 
+  test('cache-only GUI work cannot derive a public key through call or lockDuring, while metadata remains usable', async () => {
+    const { transport, written, features } = quietKeepKey()
+    gateRestWrites(transport, () => ({ ...free })) // The cached engine state still looks unlocked.
+    const t = transport as any
+    for (const lockedCall of [false, true]) {
+      const derive = () => t.call(T.MESSAGETYPE_GETPUBLICKEY, new Messages.GetPublicKey(), {
+        ...(lockedCall ? { omitLock: true } : {}), msgTimeout: 100,
+      })
+      const request = restRequest.run({ whileLocked: false, cachedOnly: true }, () => lockedCall ? t.lockDuring(derive) : derive())
+      await expect(request).rejects.toMatchObject({ status: 423 })
+      expect(written).toEqual([])
+    }
+    const metadata = restRequest.run({ whileLocked: true, cachedOnly: true }, () =>
+      transport.call(T.MESSAGETYPE_GETFEATURES, new Messages.GetFeatures(), { msgTimeout: 2000 }))
+    await tick()
+    expect(written).toEqual([T.MESSAGETYPE_GETFEATURES])
+    features()
+    await metadata
+  })
+
   test("the wipe's cancel releases Desktop's queued PIN request; it is refused, the wipe goes (hardware test 2026-10-24)", async () => {
     const { transport, written, features, failure } = quietKeepKey()
     const state = { ...free, locked: true }
@@ -327,7 +347,7 @@ describe('REST requests already running when the device locks (review 2026-10-24
     expect(written).toEqual([T.MESSAGETYPE_SIGNTX, T.MESSAGETYPE_TXACK])
   })
 
-  test("what a state change starts is Desktop's, not the REST request's (the PIN auto-prompt timer)", async () => {
+  test("engine-owned unlock work and timers run outside the REST request store", async () => {
     const seen = await restRequest.run({ whileLocked: false }, () => new Promise((resolve) => {
       restRequest.exit(() => setTimeout(() => resolve(restRequest.getStore()), 0))
     }))
@@ -348,12 +368,14 @@ describe('wiring', () => {
   })
 
   test('the reconnect sends the deferred wipe before any PIN request, only for the same device on a new connection', () => {
-    const auto = engine.slice(engine.indexOf('const autoPrompt = (): void => {'))
-    const wipeBranch = auto.slice(0, auto.indexOf('this.promptPin()'))
-    expect(wipeBranch).toContain('if (this.wipeInProgress) return')
-    expect(wipeBranch).toContain('this.wallet !== this.wipeDeferredWallet')
+    const wipeBranch = engine.slice(engine.indexOf('// Detecting a locked device is passive.'), engine.indexOf('// ── Firmware Manifest'))
+    expect(wipeBranch).toContain('!this.wipeInProgress')
+    expect(wipeBranch).toContain('connection !== this.wipeDeferredWallet')
     expect(wipeBranch).toContain('this.cachedFeatures?.deviceId')
+    expect(wipeBranch).toContain('if (sameDevice)')
+    expect(wipeBranch).toContain('this.wallet === connection')
     expect(wipeBranch).toContain('this.wipeDevice()')
+    expect(wipeBranch).not.toContain('this.promptPin()')
   })
 
   test('a PIN request on the deferring connection drops the deferred wipe (needs a new click)', () => {
@@ -370,17 +392,24 @@ describe('wiring', () => {
     expect(attach).toContain('this.wipeInProgress')
   })
 
-  test('a locked device: REST seed calls are refused at once; features, wipe, clear-session, PIN entry are not', () => {
+  test('locked metadata and cache reads stay available while new device work acquires the unlock lease', () => {
     const requireWallet = rest.slice(rest.indexOf('function requireWallet('), rest.indexOf('const KEEPKEY_VENDOR_ID'))
-    expect(requireWallet).toContain('if (!whileLocked && engine.isLocked) throw new HttpError(423, DEVICE_LOCKED_MESSAGE)')
+    expect(requireWallet).toContain('await rest?.acquireDevice?.()')
+    expect(requireWallet).toContain('if (engine.isLocked) throw new HttpError(423, DEVICE_LOCKED_MESSAGE)')
+    expect(requireWallet.indexOf('await rest?.acquireDevice?.()')).toBeLessThan(requireWallet.indexOf('if (engine.isLocked)'))
     const exempt = (route: string) => rest.slice(rest.indexOf(`'${route}'`), rest.indexOf(`'${route}'`) + 400)
       .includes('requireWallet(engine, { whileLocked: true })')
     for (const route of ['/system/info/get-features', '/system/wipe-device', '/system/clear-session', '/system/recovery/pin']) expect([route, exempt(route)]).toEqual([route, true])
-    for (const route of ['/api/pubkeys/batch', '/eth/sign-transaction', '/addresses/utxo']) expect([route, exempt(route)]).toEqual([route, false])
+    for (const route of ['/api/pubkeys/batch', '/addresses/utxo']) {
+      const start = rest.indexOf(`if (path === '${route}'`)
+      const branch = rest.slice(start, rest.indexOf('\n        if (path', start + 1))
+      expect(branch).toContain('requireWallet(engine, { whileLocked: true })')
+      expect(branch).toContain('await requireWallet(engine)')
+    }
   })
 
   test('every REST request runs tagged, the wipe runs untagged, and the engine gates the transport', () => {
-    expect(rest).toContain('fetch(req, server) { return restRequest.run({ whileLocked: false }, async () => {')
+    expect(rest).toMatch(/fetch\(req, server\) \{ return restRequest\.run\(\{[^}]*whileLocked: false/)
     expect(engine).toContain('await restRequest.exit(() => wipeOwningDevice(')
     expect(engine).toContain('gateRestWrites(transport, () => ({')
     // A PIN prompt the device raises on its own (auto-lock) hands the unlock to Desktop.

@@ -7,7 +7,7 @@
  * Run: bun test __tests__/app-phase.test.ts
  */
 import { describe, expect, test } from 'bun:test'
-import { resolveAppPhase, showWatchOnly } from '../src/shared/app-phase'
+import { resolveAppPhase, retainLivePortfolioSession, showWatchOnly } from '../src/shared/app-phase'
 
 const base = { state: 'disconnected', oobLock: false, isClaimed: false, firmwareSkipped: false, wizardComplete: false }
 
@@ -48,5 +48,69 @@ describe('resolveAppPhase', () => {
     expect(resolveAppPhase({ ...base, state: 'bootloader', bootloaderIdle: true, oobLock: true })).toBe('setup')
     // Something to install: setup as before.
     expect(resolveAppPhase({ ...base, state: 'bootloader', bootloaderIdle: false })).toBe('setup')
+  })
+})
+
+describe('browsing an already opened wallet while its device is locked', () => {
+  const ready = { state: 'ready', deviceId: 'device-a', activeTransport: 'webusb', initialized: true, isHiddenWallet: false }
+  const locked = { ...ready, state: 'needs_pin' }
+  const opened = retainLivePortfolioSession(null, ready)
+
+  test('a cold locked connection cannot open the portfolio', () => {
+    expect(retainLivePortfolioSession(null, locked)).toBeNull()
+    expect(resolveAppPhase({ ...base, state: 'needs_pin', lockedPortfolioAvailable: false })).toBe('splash')
+  })
+
+  test('a PIN lock keeps the same live portfolio, with its normal device actions', () => {
+    expect(retainLivePortfolioSession(opened, locked)).toEqual(opened)
+    const phase = resolveAppPhase({ ...base, state: 'needs_pin', lockedPortfolioAvailable: true })
+    expect(phase).toBe('ready')
+    expect(showWatchOnly(false, phase)).toBe(false)
+  })
+
+  test('a device, transport, or wallet-mode change cannot inherit the open portfolio', () => {
+    expect(retainLivePortfolioSession(opened, { ...locked, deviceId: 'device-b' })).toBeNull()
+    expect(retainLivePortfolioSession(opened, { ...locked, activeTransport: 'emulator' })).toBeNull()
+    expect(retainLivePortfolioSession(opened, { ...locked, isHiddenWallet: true })).toBeNull()
+    expect(retainLivePortfolioSession(opened, { ...locked, deviceId: undefined })).toBeNull()
+    expect(retainLivePortfolioSession(opened, { ...locked, activeTransport: null })).toBeNull()
+  })
+
+  test('every transition is reduced, including a quick replug of the same device', () => {
+    let session = opened
+    for (const state of ['disconnected', 'connected_unpaired', 'needs_pin']) {
+      session = retainLivePortfolioSession(session, { ...ready, state })
+    }
+    expect(session).toBeNull()
+    expect(retainLivePortfolioSession(session, ready)).toEqual(opened)
+  })
+
+  test('passphrase, seed-purge, and setup boundaries invalidate a previously opened wallet', () => {
+    for (const state of ['needs_passphrase', 'needs_init', 'needs_firmware', 'bootloader', 'error']) {
+      const session = retainLivePortfolioSession(opened, { ...ready, state })
+      expect(session).toBeNull()
+      expect(retainLivePortfolioSession(session, locked)).toBeNull()
+    }
+    // wallet-data-purged clears the RAM-only session before the next device push.
+    expect(retainLivePortfolioSession(null, locked)).toBeNull()
+    expect(retainLivePortfolioSession(opened, { ...locked, initialized: false })).toBeNull()
+    expect(retainLivePortfolioSession(opened, { ...locked, wipePending: 'confirm' })).toBeNull()
+  })
+
+  test('a hidden wallet may keep only its current in-memory view through a PIN lock', () => {
+    const hidden = { ...ready, isHiddenWallet: true }
+    const session = retainLivePortfolioSession(null, hidden)
+    expect(retainLivePortfolioSession(session, { ...hidden, state: 'needs_pin' })).toEqual(session)
+    expect(retainLivePortfolioSession(session, { ...hidden, state: 'needs_passphrase' })).toBeNull()
+  })
+
+  test('locked continuity never overrides setup, claim, passphrase, or disconnect precedence', () => {
+    const retained = { ...base, lockedPortfolioAvailable: true }
+    expect(resolveAppPhase({ ...retained, state: 'needs_pin', oobLock: true })).toBe('setup')
+    expect(resolveAppPhase({ ...retained, state: 'needs_pin', isClaimed: true })).toBe('claimed')
+    for (const state of ['needs_passphrase', 'disconnected', 'connected_unpaired', 'error']) {
+      expect(resolveAppPhase({ ...retained, state })).toBe('splash')
+    }
+    expect(resolveAppPhase({ ...retained, state: 'needs_init' })).toBe('setup')
   })
 })

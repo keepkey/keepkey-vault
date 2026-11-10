@@ -2479,8 +2479,8 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
   const handleCancelSigning = useCallback(async () => {
     if (phase !== 'signing' && phase !== 'approving') return
     const generation = executionUiGeneration.current
-    try { await rpcRequest<{ ok: boolean }>('cancelDeviceSigning', undefined, 5000) } catch (e: any) {
-      console.warn('[SwapDialog] cancelDeviceSigning failed:', e?.message || e)
+    try { await rpcRequest<{ ok: boolean }>('cancelForegroundDeviceOperation', undefined, 5000) } catch (e: any) {
+      console.warn('[SwapDialog] cancelForegroundDeviceOperation failed:', e?.message || e)
     }
     if (generation !== executionUiGeneration.current) return
     setPhase('review')

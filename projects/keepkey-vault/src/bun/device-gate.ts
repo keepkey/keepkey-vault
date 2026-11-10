@@ -22,7 +22,16 @@ import { HttpError } from './auth'
 
 /** `whileLocked`: set by requireWallet for routes that never ask for the PIN.
  *  `admitted`: this device request's first message already passed the lock check. */
-export interface RestRequest { whileLocked: boolean; admitted?: boolean }
+export interface RestRequest {
+  whileLocked: boolean
+  admitted?: boolean
+  /** Background callers explicitly request cache-only reads, never PIN prompts. */
+  cachedOnly?: boolean
+  /** The owning HTTP request acquires and releases one serialized device lease. */
+  acquireDevice?: () => Promise<void>
+  assertCurrent?: () => void
+  onDeviceWrite?: () => void
+}
 export const restRequest = new AsyncLocalStorage<RestRequest>()
 
 export const DEVICE_LOCKED_MESSAGE = 'KeepKey is locked: enter the PIN in KeepKey Desktop, then try again'
@@ -53,6 +62,7 @@ export function restWriteRefusal(state: GateState, messageType: number, rest: Re
   if (state.wipeInProgress) return WIPE_OWN.has(messageType) ? null : { status: 409, message: WIPE_BUSY_MESSAGE }
   if (!rest || REPLIES.has(messageType)) return null
   if (state.exclusive) return { status: 409, message: `KeepKey is busy: ${state.exclusive}. Try again when it finishes.` }
+  if (rest.cachedOnly && !rest.whileLocked) return { status: 423, message: 'Device access is required; unlock KeepKey to load this account' }
   if (state.wipeOnReconnect) return { status: 409, message: WIPE_REPLUG_PENDING_MESSAGE }
   // Only a request's first message: once it runs, the device may lock mid-flow (its own
   // PIN prompt), and the TxAcks, data chunks and struct acks that follow must still go.
@@ -171,7 +181,7 @@ export function gateRestWrites(transport: any, state: () => GateState) {
   transport.restGated = true
   const ownRequest = <T>(run: () => T): T => {
     const rest = restRequest.getStore()
-    return rest ? restRequest.run({ whileLocked: rest.whileLocked }, run) : run()
+    return rest ? restRequest.run({ whileLocked: rest.whileLocked, cachedOnly: rest.cachedOnly, assertCurrent: rest.assertCurrent, onDeviceWrite: rest.onDeviceWrite }, run) : run()
   }
   const call = transport.call.bind(transport)
   transport.call = (type: number, msg: unknown, options?: { omitLock?: boolean }) =>
@@ -182,9 +192,10 @@ export function gateRestWrites(transport: any, state: () => GateState) {
   transport.write = async (buf: Uint8Array, debugLink: boolean) => {
     const rest = restRequest.getStore()
     // Message buffer: '##', then the big-endian message type (hdwallet toMessageBuffer).
+    if (rest && !rest.admitted) rest.assertCurrent?.()
     const refusal = restWriteRefusal(state(), (buf[2] << 8) | buf[3], rest)
     if (refusal) throw new HttpError(refusal.status, refusal.message)
-    if (rest) rest.admitted = true
+    if (rest) { rest.admitted = true; rest.onDeviceWrite?.() }
     return write(buf, debugLink)
   }
 }

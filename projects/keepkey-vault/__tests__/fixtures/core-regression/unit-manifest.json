@@ -23,7 +23,10 @@
       "src/bun/device-refusal.test.ts",
       "src/bun/pubkeys-batch-setup.test.ts",
       "src/bun/bitcoin-only-boundary.test.ts",
-      "src/bun/features-format.test.ts"
+      "src/bun/features-format.test.ts",
+      "__tests__/device-operation.test.ts",
+      "__tests__/device-rpc.test.ts",
+      "__tests__/rest-demand-unlock.test.ts"
     ],
     "balances-receive-history": [
       "__tests__/asset-catalog-sync.test.ts",

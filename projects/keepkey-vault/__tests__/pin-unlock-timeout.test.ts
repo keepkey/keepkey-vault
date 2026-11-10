@@ -59,18 +59,12 @@ describe('engine-controller wiring', () => {
     expect(promptPinBody).not.toContain('this.wallet.getPublicKeys(')
   })
 
-  test('auto prompt-pin surfaces a timeout instead of silently retrying', () => {
-    const start = src.indexOf("if (state === 'needs_pin')")
-    const block = src.slice(start, src.indexOf("if (state === 'needs_passphrase')", start))
-    expect(block).toMatch(/isTransportTimeout\(err\)[\s\S]*?this\.lastError = UNLOCK_TIMEOUT_MESSAGE[\s\S]*?this\.updateState\('error'\)/)
-  })
-
-  // Every wrong PIN rejects promptPin. The retry used to be a one-shot, so the
-  // second wrong PIN left a grid with no pending device request.
-  test('auto prompt-pin retries every time, never during a wipe', () => {
-    const start = src.indexOf("if (state === 'needs_pin')")
-    const block = src.slice(start, src.indexOf("if (state === 'needs_passphrase')", start))
-    expect(block).toMatch(/const autoPrompt = [\s\S]*?!this\.wipeInProgress\)[\s\S]*?autoPrompt\(\)/)
+  test('an explicit unlock surfaces transport timeout and retries only a wrong PIN', () => {
+    const block = src.slice(src.indexOf('private async performPinUnlock('), src.indexOf('async cancelDevicePrompt('))
+    expect(block).toContain('isTransportTimeout(err)')
+    expect(block).toContain('UNLOCK_TIMEOUT_MESSAGE')
+    expect(block).toContain("this.updateState('error')")
+    expect(block).toContain("(err?.message?.code ?? err?.code) === 7")
   })
 
   // The wipe moved to device-wipe.ts (shared by the UI and REST); its behaviour is in device-wipe.test.ts.

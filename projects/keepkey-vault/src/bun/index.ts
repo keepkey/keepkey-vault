@@ -238,6 +238,8 @@ process.on('unhandledRejection', (reason) => {
 })
 
 import { EngineController, withTimeout } from "./engine-controller"
+import { gateDeviceRpc } from "./device-rpc"
+import { restRequest } from "./device-gate"
 import { runUsbDiagnostic as runUsbDiagnosticProbe } from "./windows-usb-probe"
 import { startRestApi, clearFeaturesCache, setUiActive, uiHeartbeat, type RestApiCallbacks } from "./rest-api"
 import { desktopRestStartDeps, startRestApiOrReport } from "./rest-api-startup"
@@ -1258,8 +1260,13 @@ const auth = new AuthStore()
 // the awaiting REST callback consumes and deletes it immediately.
 const blindSigningApprovalIds = new Set<string>()
 const pendingSigningApprovalInfo = new Map<string, SigningRequestInfo>()
-async function requestSigningApprovalDecision(id: string) {
-	const approved = await auth.requestSigningApproval(id)
+async function requestSigningApprovalDecision(id: string, signal?: AbortSignal) {
+	const pending = auth.requestSigningApproval(id)
+	const cancel = () => auth.rejectSigningRequest(id)
+	signal?.addEventListener('abort', cancel, { once: true })
+	if (signal?.aborted) cancel()
+	let approved: boolean
+	try { approved = await pending } finally { signal?.removeEventListener('abort', cancel) }
 	const allowBlindSigning = approved && blindSigningApprovalIds.has(id)
 	blindSigningApprovalIds.delete(id)
 	return { approved, allowBlindSigning: allowBlindSigning || undefined }
@@ -2081,8 +2088,9 @@ const restCallbacks: RestApiCallbacks = {
 		},
 		onActivityChanged: () => notifyActivityChanged(),
 		getSessionEpoch: () => activitySessionEpoch,
+	onDeviceRequest: () => { acquireWindowFocus(); return releaseWindowFocus },
 		resolveChain: (networkId: string) => findChainByNetwork(networkId, undefined, getAllChains()),
-	onSigningRequest: async (info: SigningRequestInfo) => {
+	onSigningRequest: async (info: SigningRequestInfo, signal?: AbortSignal) => {
 		attachSigningPolicySnapshot(info)
 		attachSafeKnownAddresses(info)
 		await attachSafeCallPreviews(info)
@@ -2105,7 +2113,7 @@ const restCallbacks: RestApiCallbacks = {
 		try { rpc.send['signing-request'](info) } catch { /* webview not ready */ }
 		acquireWindowFocus()
 		try {
-			return await requestSigningApprovalDecision(info.id)
+			return await requestSigningApprovalDecision(info.id, signal)
 		} finally {
 			pendingSigningApprovalInfo.delete(info.id)
 			releaseWindowFocus()
@@ -4187,10 +4195,14 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			// contact is recorded (see ui-watchdog.ts).
 			// A Bitcoin-only watch-only wallet on screen is held to the same boundary as a Bitcoin-only device.
 			() => { uiWatchdog.seen(); return isBitcoinOnlyVariant(engine.getDeviceState().firmwareVariant) || watchOnlyViewBtcOnly },
-			{
+			gateDeviceRpc({
 			// ── Device lifecycle ──────────────────────────────────────
 			getDeviceState: async () => engine.getDeviceState(),
 			retryConnect: async () => { await engine.retryConnect() },
+			requestDeviceUnlock: async () => {
+				acquireWindowFocus()
+				try { await engine.requestDeviceUnlock() } finally { releaseWindowFocus() }
+			},
 			startBootloaderUpdate: async () => { requireOnline('bootloader update'); await engine.startBootloaderUpdate() },
 			startFirmwareUpdate: async (params: { variant?: 'multi' | 'bitcoin-only'; acknowledgeWipe?: WipeReason; requireOfficialSignatures?: boolean }) => { requireOnline('firmware update'); await engine.startFirmwareUpdate({ variant: params?.variant, acknowledgeWipe: params?.acknowledgeWipe, requireOfficialSignatures: params?.requireOfficialSignatures }) },
 			flashFirmware: async () => { await engine.flashFirmware() },
@@ -4826,6 +4838,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				}
 				return { ok: true as const }
 			},
+			cancelForegroundDeviceOperation: async () => ({ ok: engine.cancelDesktopDeviceOperation() }),
 			cancelDeviceSigning: async () => {
 				// User backed out of an in-flight confirm/PIN/passphrase prompt.
 				// Sends a Cancel message to the device, which dismisses the on-
@@ -9330,7 +9343,9 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 
 				return { hits }
 			},
-			getSwapQuote: (params) => headlessSwapQuote(params),
+			getSwapQuote: (params) => params.isMax
+				? engine.withDeviceOperation(() => headlessSwapQuote(params), { unlock: true, rejectIfBusy: true, origin: 'desktop' })
+				: restRequest.run({ whileLocked: false, cachedOnly: true }, () => headlessSwapQuote(params)),
 			executeSwap: (params) => headlessExecuteSwap(params, (stage) => {
 				try { rpc.send["swap-substage"]({ stage }) } catch { /* webview not ready */ }
 			}),
@@ -11178,7 +11193,11 @@ udevadm trigger --subsystem-match=usb --attr-match=idVendor=2b24 || udevadm trig
 			windowGetFrame: async () => { if (!_mainWindow) throw new Error('Window not ready'); return _mainWindow.getFrame() },
 			windowSetPosition: async ({ x, y }) => { _mainWindow?.setPosition(x, y) },
 			windowSetFrame: async ({ x, y, width, height }) => { _mainWindow?.setFrame(x, y, width, height) },
-			})),
+			}, {
+				scope: () => ({ wallet: engine.wallet, epoch: activitySessionEpoch, seed: engine.currentSeedEthAddress }),
+				locked: () => engine.isLocked,
+				run: (action, options) => engine.withDeviceOperation(action, { ...options, rejectIfBusy: true, ...(options.unlock ? { origin: 'desktop' as const } : {}) }),
+			}))),
 			messages: {},
 	},
 })

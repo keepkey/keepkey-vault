@@ -1,0 +1,98 @@
+{
+  "scope": "Read-only source comparison and isolated HTTP spike; no shipping behavior changed.",
+  "baselines": [
+    {
+      "ref": "v1.6.7",
+      "commit": "e3b416c4eaeec85b73b9a92a0621a909317c11c7",
+      "requireWalletSha256": "025233309814257cb1991c873aca7d616a15375904a77e62be55decc2aa7aaa2",
+      "appPhaseSha256": "00d4a4e315a79102bed02af41e75895f1f8f7f0ca304890d683d029022a35d2b",
+      "locked423": true
+    },
+    {
+      "ref": "v1.6.10",
+      "commit": "88caa37014a45b154bbec8d8805f0ceffd2467eb",
+      "requireWalletSha256": "025233309814257cb1991c873aca7d616a15375904a77e62be55decc2aa7aaa2",
+      "appPhaseSha256": "00d4a4e315a79102bed02af41e75895f1f8f7f0ca304890d683d029022a35d2b",
+      "locked423": true
+    },
+    {
+      "ref": "public/develop",
+      "commit": "343c4cd368947e219861eaeeccf16088e4c2de66",
+      "requireWalletSha256": "025233309814257cb1991c873aca7d616a15375904a77e62be55decc2aa7aaa2",
+      "appPhaseSha256": "00d4a4e315a79102bed02af41e75895f1f8f7f0ca304890d683d029022a35d2b",
+      "locked423": true
+    }
+  ],
+  "latestStableRelease": {
+    "tag": "v1.6.7",
+    "published": "2026-10-28T22:12:06Z",
+    "url": "https://github.com/keepkey/keepkey-vault/releases/tag/v1.6.7"
+  },
+  "latestPublishedPrerelease": {
+    "tag": "v1.6.10",
+    "published": "2026-11-05T22:10:18Z"
+  },
+  "currentClientInspected": {
+    "path": "/Users/highlander/WebstormProjects/keepkey-stack/projects/keepkey-client",
+    "commit": "8322d6f",
+    "scope": "Local source; this is not a claim about every installed BEX version."
+  },
+  "findings": [
+    "The REST listener remains up when the device locks in both releases and current develop; listener shutdown follows API setting changes or application exit.",
+    "Health and existing pairing remain available. Known-locked seed-dependent requests return HTTP 423.",
+    "The requireWallet lock check and top-level app phase resolver are byte-identical across all three refs.",
+    "Address and pubkey-batch routes call requireWallet before their cache lookup, so even correctly scoped warm caches are blocked while locked.",
+    "Needs-PIN eagerly prompts and replaces the main app with splash in both releases and develop; the setup default auto-lock remains one hour.",
+    "Develop protects active PIN/passphrase input from unrelated transport writes and stray acknowledgments. Preserve these guards.",
+    "A request already admitted before firmware reports a lock can continue after PIN entry; one started after known-lock receives 423 and is not automatically resumed.",
+    "Current BEX cold initialization without cached pubkeys can convert batch-pubkey failure into its errored state, despite the API remaining reachable.",
+    "Current BEX foreground EVM connect/message-sign flows read the address again; these can fail with 423. Signing has no dedicated unlock/resume contract.",
+    "Get-features is allowed during ordinary lock. With no usable snapshot while an input wait is active, the new transport input guard can refuse a live feature read; this does not stop the API or invalidate pairing."
+  ],
+  "recommendedContract": [
+    "Represent API reachability, pairing validity, device presence, device lock and operation status separately.",
+    "Keep an already verified same-wallet portfolio and scoped public caches available while the device is locked; maintain setup and hidden-wallet privacy boundaries.",
+    "Background health, balance and metadata polling must not start PIN prompts.",
+    "Deliberate device operations enter one serialized, cancellable coordinator above transport, foreground Vault and await unlock once.",
+    "After unlock, revalidate wallet/device/session and quote freshness, then continue only the exact authorized request. Never blindly replay signing or broadcast.",
+    "On rejection, timeout, disconnect or wallet/passphrase change, return an explicit terminal result and clear that pending operation.",
+    "Keep transport PIN/passphrase/wipe ownership guards. Do not globally mark routes whileLocked or remove low-level checks.",
+    "Give BEX a locked/awaiting-unlock state that preserves pairing and cached data rather than calling a reachable Vault offline."
+  ],
+  "implementationOrder": [
+    "Separate BEX liveness/readiness states and stop using a pubkey failure as evidence the API is offline.",
+    "Permit safe cache reads before the device-unlocked gate and preserve verified portfolio UI on device lock.",
+    "Implement a shared device-operation unlock coordinator and foreground prompt; update callers to wait/resume with cancellation and session fences.",
+    "Replace eager lock-state PIN prompting with demand-driven prompting after every sensitive caller uses the coordinator."
+  ],
+  "evidence": {
+    "httpProbeTests": 5,
+    "httpAssertions": 21,
+    "existingLockTests": 88,
+    "existingAssertions": 291,
+    "testFailures": 0,
+    "externalRequests": 0,
+    "realDevicesUsed": false,
+    "realVaultModified": false,
+    "productionCodeChanged": false,
+    "temporaryProbe": "/private/tmp/keepkey-lock-spike-20261109/probe.test.ts",
+    "temporaryDatabase": "/private/tmp/keepkey-lock-spike-20261109/profile/vault.db",
+    "probeLog": "/private/tmp/keepkey-lock-spike-20261109/probe.log",
+    "lockSuiteLog": "/private/tmp/keepkey-lock-spike-20261109/lock-suites.log"
+  },
+  "sourceReferences": [
+    "projects/keepkey-vault/src/bun/index.ts:2169 (REST lifecycle)",
+    "projects/keepkey-vault/src/bun/rest-api.ts:203 (known-locked rejection)",
+    "projects/keepkey-vault/src/bun/rest-api.ts:1583 (health)",
+    "projects/keepkey-vault/src/bun/rest-api.ts:1671 (pairing)",
+    "projects/keepkey-vault/src/bun/rest-api.ts:2294 (address cache ordering)",
+    "projects/keepkey-vault/src/bun/rest-api.ts:4344 (pubkey cache ordering)",
+    "projects/keepkey-vault/src/bun/device-gate.ts:63 (PIN/passphrase wait guard)",
+    "projects/keepkey-vault/src/bun/engine-controller.ts:568 (eager PIN prompt)",
+    "projects/keepkey-vault/src/shared/app-phase.ts:19 (locked app phase)",
+    "keepkey-client/chrome-extension/src/background/wallet.ts:337 (pubkey init fallback)",
+    "keepkey-client/chrome-extension/src/background/index.ts:1028 (initialization error state)",
+    "keepkey-client/chrome-extension/src/background/evmIdentity.ts:26 (foreground address read)",
+    "keepkey-client/chrome-extension/src/background/wallet.ts:693 (direct signing request)"
+  ]
+}
