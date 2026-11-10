@@ -1,4 +1,4 @@
-/** Production approval callbacks, with no GUI, native wallet or saved profile. */
+/** Production approval callbacks/router, without GUI, sockets or saved profile. */
 import { mock } from 'bun:test'
 import ts from 'typescript'
 import { EventEmitter } from 'node:events'
@@ -9,6 +9,7 @@ import { join } from 'node:path'
 const profile = mkdtempSync(join(tmpdir(), 'vault-window-focus-'))
 mock.module('electrobun/bun', () => ({ Utils: { paths: { userData: profile } } }))
 mock.module('@keepkey/hdwallet-keepkey-nodehid', () => ({ HIDKeepKeyAdapter: class {} }))
+globalThis.fetch = (() => { throw new Error('Network requests are forbidden in the focus fixture') }) as typeof fetch
 const db = await import('../../src/bun/db')
 const { AuthStore } = await import('../../src/bun/auth')
 const { startRestApi } = await import('../../src/bun/rest-api')
@@ -84,7 +85,7 @@ const unlockCallback = expression(required(rpcProperty('requestDeviceUnlock')?.i
 const restCallbackNames = ['onDeviceRequest', 'onSigningRequest', 'onSigningDismissed', 'onPairRequest', 'onPairDismissed']
 const code = transpiler.transformSync(`
   const {mainWindow, rpc, auth, engine, BrowserWindow, pkg, url, attachSigningPolicySnapshot,
-    attachSafeKnownAddresses, attachSafeCallPreviews, attachSafeMessagePreimage, reviewTapeRecording, recordReviewCard} = dependencies;
+    attachSafeKnownAddresses, attachSafeCallPreviews, attachSafeMessagePreimage, reviewTapeRecording, recordReviewCard, deviceOperationContext} = dependencies;
   let _alwaysOnTopRefs = 0;
   const blindSigningApprovalIds = new Set();
   const pendingSigningApprovalInfo = new Map();
@@ -120,35 +121,45 @@ function harness() {
     BrowserWindow: class { options: any; constructor(options: any) { this.options = options } }, pkg: { version: 'synthetic' }, url: 'about:blank',
     attachSigningPolicySnapshot() {}, attachSafeKnownAddresses() {}, attachSafeCallPreviews: async () => {}, attachSafeMessagePreimage: async () => {},
     reviewTapeRecording: () => false, recordReviewCard() { throw new Error('A real-device callback cannot record a tape') },
+    deviceOperationContext: { getStore: () => undefined },
   }
   const callbacks = createCallbacks(dependencies)
   let server: ReturnType<typeof startRestApi> | undefined
-  const nativeServers: Array<ReturnType<typeof Bun.serve>> = []
+  let handleRequest: ((request: Request, server: typeof requestServer) => Response | Promise<Response>) | undefined
+  // startRestApi receives the same server surface used by these routes, but
+  // no native listener is created. macOS CI hit a native Bun crash in the HTTP
+  // fixture; its exact cause is unproven. rest-demand-unlock.test.ts separately
+  // exercises real HTTP routing.
+  const requestServer = {
+    hostname: '127.0.0.1', port: 0,
+    timeout(_request: Request, _seconds: number) {},
+    requestIP: (_request: Request) => ({ address: '127.0.0.1', family: 'IPv4', port: 0 }),
+    upgrade() { throw new Error('WebSocket upgrade is outside the focus fixture') },
+    stop() {},
+  }
   const pendingRequests = new Set<Promise<{ status: number; body: string }>>()
   const apiKey = auth.pair({ name: `focus-fixture-${++sequence}`, url: 'https://focus.example.invalid', imageUrl: '' })
   const request = (route: string, body?: unknown, access?: string) => {
     if (!server) {
-      // startRestApi's public stop wrapper does not return native stop promises.
-      // Capture only this synchronous creation so teardown can await them.
+      // Capture the actual production router only during synchronous creation;
+      // the production auth, request scopes, lease and approval paths run below.
       const serve = Bun.serve
       Bun.serve = ((options: any) => {
-        const native = serve(options)
-        nativeServers.push(native)
-        return native
+        if (handleRequest) throw new Error('Unexpected second focus-fixture listener')
+        handleRequest = required(options.fetch, 'production REST fetch router')
+        return requestServer
       }) as typeof Bun.serve
       try {
         server = startRestApi(engine, auth, 0, { ...callbacks.rest, onApiLog() {}, getVersion: () => 'synthetic', getSessionEpoch: () => 0 } as any, '127.0.0.1')
       } finally { Bun.serve = serve }
     }
-    const url = `http://127.0.0.1:${server.port}${route}`
     const pending = (async () => {
-      const response = await fetch(url, {
+      const input = new Request(`http://window-focus.invalid${route}`, {
         method: body === undefined ? 'GET' : 'POST',
-        headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json', Connection: 'close', ...(access ? { 'X-KeepKey-Device-Access': access } : {}) },
+        headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json', ...(access ? { 'X-KeepKey-Device-Access': access } : {}) },
         ...(body === undefined ? {} : { body: JSON.stringify(body) }),
       })
-      // A status/header arrival does not finish the native HTTP request. Drain
-      // its body before releasing either side of this fixture's connection.
+      const response = await required(handleRequest, 'production REST fetch router')(input, requestServer)
       return { status: response.status, body: await response.text() }
     })()
     pendingRequests.add(pending)
@@ -156,14 +167,15 @@ function harness() {
     return pending
   }
   const stop = async () => {
-    // A failed assertion while pairing is pending must still let its HTTP
-    // handler finish before the fixture closes its server or SQLite profile.
+    // A failed assertion while pairing is pending must still let its router
+    // handler finish before the fixture closes its isolated SQLite profile.
     auth.rejectPairing()
     device.locked = false
     unlock.resolve()
     await Promise.allSettled([...pendingRequests])
-    await Promise.all(nativeServers.splice(0).map(native => native.stop(false)))
+    server?.stop()
     server = undefined
+    handleRequest = undefined
   }
   return { auth, callbacks, calls, events, device, request, unlock: () => { device.locked = false; unlock.resolve() }, stop }
 }

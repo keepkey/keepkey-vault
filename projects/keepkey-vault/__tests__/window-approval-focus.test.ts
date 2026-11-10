@@ -4,7 +4,8 @@ import { fileURLToPath } from 'node:url'
 let results: Record<string, any>
 beforeAll(async () => {
   // Native app startup is intentionally never imported. The child executes the
-  // production callbacks with a fake window, real AuthStore and isolated HTTP.
+  // production callbacks and REST router with a fake window, real AuthStore,
+  // Request/AbortSignal objects and no native HTTP sockets.
   const child = Bun.spawn([process.execPath, fileURLToPath(new URL('./support/window-approval-focus.ts', import.meta.url))], {
     cwd: fileURLToPath(new URL('../', import.meta.url)), stdout: 'pipe', stderr: 'pipe',
   })
