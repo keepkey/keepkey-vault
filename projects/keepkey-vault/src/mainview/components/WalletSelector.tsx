@@ -281,7 +281,13 @@ export function WalletSelector({
 					{t("importWatchOnlyHint", { defaultValue: "Electrum wallet file or xpub / ypub / zpub" })}
 				</Text>
 			</Box>
-			<Box as="button" w="100%" px="3" py="2" textAlign="left" color="var(--gold)" fontSize="12px" onClick={() => { close(); window.dispatchEvent(new Event(BITCOIN_QR_SCAN_EVENT)) }}>{uiText("Scan Bitcoin QR")}</Box>
+			<Box
+				as="button" w="100%" px="3" py="2" textAlign="left" cursor="pointer"
+				_hover={{ bg: "rgba(255,255,255,0.04)" }}
+				onClick={() => { close(); window.dispatchEvent(new Event(BITCOIN_QR_SCAN_EVENT)) }}
+			>
+				<Text fontSize="12px" fontWeight="600" color="var(--gold)">{uiText("Scan Bitcoin QR")}</Text>
+			</Box>
 		</Box>
 	)
 }
