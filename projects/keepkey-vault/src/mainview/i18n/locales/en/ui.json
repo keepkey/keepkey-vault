@@ -366,6 +366,7 @@
   "m36b17c88": "Available shielded",
   "m36be1eb6": "Search tx, address, app…",
   "m36f097be": "KeepKey and Pioneer use CAIPs internally for every balance and address.",
+  "m37298692": "Monero is unavailable in hidden wallets. Switch to your standard wallet to use Monero.",
   "m37751f75": "Without a configured endpoint, Vault keeps the Pioneer fallback and explicitly marks unavailable or incomplete simulation evidence.",
   "m37968efd": "accounts",
   "m37a7c341": "Bitcoin's core standard is 128-bit (12 words). 256-bit seeds are supported but not recommended. ",

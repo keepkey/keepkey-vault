@@ -1,6 +1,6 @@
 {
   "name": "keepkey-vault",
-  "version": "1.6.10",
+  "version": "1.6.11",
   "description": "KeepKey Vault - Desktop hardware wallet management powered by Electrobun",
   "scripts": {
     "i18n:check": "bun scripts/check-i18n.ts",
@@ -89,6 +89,7 @@
     "tiny-secp256k1"
   ],
   "overrides": {
+    "elliptic": "6.6.1",
     "@keepkey/device-protocol": "file:../../modules/device-protocol",
     "@keepkey/proto-tx-builder": "file:../../modules/proto-tx-builder",
     "@keepkey/hdwallet-core": "file:../../modules/hdwallet/packages/hdwallet-core",

@@ -2,6 +2,7 @@ import { expect, test } from 'bun:test'
 import { createMoneroVault, type MoneroWatchSidecar } from './monero-vault'
 import { Database } from 'bun:sqlite'
 import { createMoneroWatchStore, type MoneroWatchStore } from './monero-watch-store'
+import { MONERO_STANDARD_WALLET_REQUIRED } from '../shared/monero-wallet-policy'
 
 // Published disposable address fixtures and dummy view bytes only. No USB,
 // daemon, native firmware library or existing wallet is accessed by these tests.
@@ -377,4 +378,91 @@ test('approved monitoring access survives an unreachable node, so another node n
   await f.api.connect()
   expect(f.delegate.sent.map(x=>x.type)).toEqual([540])
  }finally{db.close()}
+})
+
+for (const identity of ['device-state', 'engine-session'] as const) test(`hidden ${identity} blocks every wallet action before transport, cache, pending files or sidecar access`, async () => {
+  const f = fixture()
+  if (identity === 'device-state') f.state.isHiddenWallet = true
+  else Object.defineProperty(f.engine, 'isPassphraseWallet', { get: () => true })
+  const calls: string[] = []
+  const store: MoneroWatchStore = {
+    async loadWatch() { calls.push('load-watch'); return null }, async saveWatch() { calls.push('save-watch') },
+    async loadAddress() { calls.push('load-address'); return null }, async saveAddress() { calls.push('save-address') },
+    async loadImages() { calls.push('load-images'); return null }, async saveImages() { calls.push('save-images') },
+  }
+  const api = createMoneroVault({ engine: f.engine, sidecar: f.sidecar, getConfig: () => ({ ...f.config }), watchStore: store,
+    pendingStore: { load() { calls.push('load-pending'); return [] }, save() { calls.push('save-pending') },
+      loadGuards() { calls.push('load-guards'); return [] }, saveGuards() { calls.push('save-guards') } } })
+  expect(calls).toEqual([]) // Factory construction must not hydrate hidden identities.
+  for (const operation of [() => api.connect(), () => api.getAddress(), () => api.syncKeyImages(),
+    () => api.prepareSend({ address: OTHER, amountAtomic: '1' }), () => api.send({ prepareId: 'expired' }),
+    () => api.retryRelay(), () => api.discardPending({ confirm: true })]) {
+    await expect(operation()).rejects.toThrow(MONERO_STANDARD_WALLET_REQUIRED)
+  }
+  expect(() => api.pendingCount()).toThrow(MONERO_STANDARD_WALLET_REQUIRED)
+  expect(await api.getStatus()).toMatchObject({ available: false, address: '', transactions: [], canSend: false,
+    deviceReady: false, error: MONERO_STANDARD_WALLET_REQUIRED })
+  expect(calls).toEqual([])
+  expect(f.delegate.sent).toHaveLength(0)
+  expect(f.counts().starts).toBe(0)
+  expect(f.counts().configures).toBe(0)
+})
+
+test('a hidden transition during device consent cannot save a watch identity or start its sidecar', async () => {
+  const f = fixture()
+  let saved = 0
+  const store: MoneroWatchStore = {
+    async loadWatch() { return null }, async saveWatch() { saved++ }, async loadAddress() { return null },
+    async saveAddress() { saved++ }, async loadImages() { return null }, async saveImages() { saved++ },
+  }
+  const api = createMoneroVault({ engine: f.engine, sidecar: f.sidecar, getConfig: () => ({ ...f.config }), watchStore: store })
+  f.delegate.watchReadHook = () => { f.state.isHiddenWallet = true }
+  await expect(api.connect()).rejects.toThrow(MONERO_STANDARD_WALLET_REQUIRED)
+  expect(saved).toBe(0)
+  expect(f.counts().starts).toBe(0)
+  expect(f.counts().configures).toBe(0)
+  expect(await api.getStatus()).toMatchObject({ address: '', available: false, error: MONERO_STANDARD_WALLET_REQUIRED })
+})
+
+test('a hidden transition while polling clears the prior monitor instead of returning its cached balance', async () => {
+  const f = fixture()
+  await f.api.connect()
+  f.sidecar.getMoneroWalletStatus = async () => { f.state.isHiddenWallet = true; return f.status }
+  const status = await f.api.getStatus()
+  expect(status).toMatchObject({ available: false, address: '', balanceAtomic: '0', transactions: [], error: MONERO_STANDARD_WALLET_REQUIRED })
+  expect(f.counts().stops).toBeGreaterThan(0)
+})
+
+test('hidden policy does not erase previously saved pending transactions and standard-wallet access can resume', async () => {
+  const f = fixture()
+  let reads = 0, saves = 0
+  const record = { wallet: `PUBLIC-DEVICE-A:${ADDRESS}`, txid: 'ab'.repeat(32), txHex: '00', createdAt: new Date().toISOString() }
+  const api = createMoneroVault({ engine: f.engine, sidecar: f.sidecar, getConfig: () => ({ ...f.config }),
+    pendingStore: { load() { reads++; return [record] }, save() { saves++ } } })
+  expect(reads).toBe(0)
+  expect(api.pendingCount()).toBe(1)
+  f.state.isHiddenWallet = true
+  expect((await api.getStatus()).unrelayedTxid).toBeUndefined()
+  expect(() => api.pendingCount()).toThrow(MONERO_STANDARD_WALLET_REQUIRED)
+  expect(saves).toBe(0)
+  f.state.isHiddenWallet = false
+  expect(api.pendingCount()).toBe(1)
+  expect(reads).toBe(1)
+  expect(saves).toBe(0)
+})
+
+test('a hidden connect does not create the monitoring table or request an OS storage key', async () => {
+  const db = new Database(':memory:')
+  const f = fixture(); f.state.isHiddenWallet = true; f.engine.currentSeedEthAddress = '0x' + 'c'.repeat(40)
+  let databaseReads = 0, keyReads = 0
+  const store = createMoneroWatchStore({ database: () => { databaseReads++; return db }, profile: 'synthetic-hidden-policy',
+    key: async () => { keyReads++; return new Uint8Array(32).fill(9) } })
+  const api = createMoneroVault({ engine: f.engine, sidecar: f.sidecar, getConfig: () => ({ ...f.config }), watchStore: store })
+  try {
+    await expect(api.connect()).rejects.toThrow(MONERO_STANDARD_WALLET_REQUIRED)
+    expect(databaseReads).toBe(0)
+    expect(keyReads).toBe(0)
+    expect(db.query("SELECT count(*) AS count FROM sqlite_master WHERE name='monero_watch_cache'").get()).toEqual({ count: 0 })
+    expect(f.delegate.sent).toHaveLength(0)
+  } finally { api.stop(); db.close() }
 })

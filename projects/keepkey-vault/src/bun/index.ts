@@ -239,6 +239,7 @@ process.on('unhandledRejection', (reason) => {
 
 import { EngineController, withTimeout } from "./engine-controller"
 import { gateDeviceRpc } from "./device-rpc"
+import { deviceOperationContext } from './device-operation'
 import { restRequest } from "./device-gate"
 import { runUsbDiagnostic as runUsbDiagnosticProbe } from "./windows-usb-probe"
 import { startRestApi, clearFeaturesCache, setUiActive, uiHeartbeat, type RestApiCallbacks } from "./rest-api"
@@ -274,8 +275,9 @@ import { buildCosmosStakingTx, buildCosmosNameRegTx } from "./txbuilder/cosmos"
 import { initializeOrchardFromDevice, exportOrchardFvk, scanOrchardNotes, getShieldedBalance, sendShielded, ensureFvkLoaded, displayOrchardAddressOnDevice, setFvkDiskAllowed } from "./txbuilder/zcash-shielded"
 import { inFlightShielded, type ExpectedShielded } from "../shared/zcash-pending"
 import { setMoneroEmulatorEnabled, listEmulatorBuilds } from "./emulator-library"
-import { createMoneroVault } from "./monero-vault"
+import { createMoneroVault, moneroHiddenWalletStatus } from "./monero-vault"
 import { createMoneroFailoverVault } from "./monero-remote-failover"
+import { assertMoneroStandardWallet, moneroHiddenWallet } from "../shared/monero-wallet-policy"
 import { createMoneroWatchStore } from "./monero-watch-store"
 import { createMoneroDeviceSigner } from "./monero-device-signing"
 import { REVIEWED_MONERO_SIGNING_SHA256 } from "./monero-emulator"
@@ -1500,6 +1502,15 @@ function releaseWindowFocus() {
 function getOrCreateWcManager(): WalletConnectManager {
 	if (wcManager) return wcManager
 	wcManager = new WalletConnectManager({
+		getWalletSession: () => {
+			const state = engine.getDeviceState()
+			const seedAddress = engine.currentSeedEthAddress
+			return walletConnectEnabled && engine.wallet && state.state === 'ready' && state.deviceId && seedAddress ? {
+				wallet: engine.wallet, deviceId: state.deviceId,
+				seedAddress, epoch: activitySessionEpoch, hidden: engine.isPassphraseWallet,
+			} : null
+		},
+		runDeviceOperation: action => deviceOperationContext.exit(() => engine.withDeviceOperation(action, { unlock: true, rejectIfBusy: true, origin: 'desktop' })),
 		getEvmAddressInfo: () => {
 			if (isBitcoinOnlyVariant(engine.getDeviceState().firmwareVariant)) return null
 			const sel = evmAddresses.getSelectedAddress()
@@ -1669,6 +1680,8 @@ function getOrCreateWcManager(): WalletConnectManager {
 		// WalletConnect has already matched tx.from to the signing account.
 		addContractFacts: (info) => addContractFacts(info, engine.isPassphraseWallet ? undefined : engine.getDeviceState().deviceId, info.from),
 		requestSigningApproval: async (info) => {
+			const request = deviceOperationContext.getStore()
+			request?.assertCurrent()
 			attachSigningPolicySnapshot(info)
 			attachSafeKnownAddresses(info)
 			await attachSafeCallPreviews(info)
@@ -1678,6 +1691,7 @@ function getOrCreateWcManager(): WalletConnectManager {
 			if (info.method === '/eth/sign-typed-data' && !info.clearSignReport) {
 				info.clearSignReport = (await import('./evm-presign-report')).buildTypedDataReport(info)
 			}
+			request?.assertCurrent()
 			try { rpc.send['signing-request'](info) } catch { /* webview not ready */ }
 			acquireWindowFocus()
 			try {
@@ -1724,9 +1738,9 @@ function getAppSettings() {
 		moneroDaemonUrl: getSetting('monero_daemon_url') || MONERO_DEFAULT_NODE,
 		moneroNodeMode: moneroNodeMode(getSetting('monero_node_mode'), getSetting('monero_daemon_url')),
 		moneroRestoreHeight: storedRestoreHeight(getSetting('monero_restore_height')),
-		// Unresolved unknown-outcome sends are kept when Monero is turned off or the device is wiped (a restored
-		// seed can still spend those inputs); Settings names them instead of dropping them.
-		moneroPendingBroadcasts: getMoneroWallet().pendingCount(),
+		// Pending signed bytes remain on disk across disable/wipe, but a hidden
+		// or disabled view must not hydrate or disclose wallet monitoring records.
+		moneroPendingBroadcasts: moneroEnabled && !moneroHiddenWallet(engine) ? getMoneroWallet().pendingCount() : 0,
 		passwordManagerEnabled: passwordBank.enabled,
 		zcashPrivacyEnabled,
 		hiveEnabled,
@@ -2240,7 +2254,10 @@ function moneroSigningEmulatorActive(): boolean {
     return moneroSigningBuild.signing
 }
 function getMoneroWallet() {
+    if (moneroHiddenWallet(engine)) invalidateMoneroWallet()
+    assertMoneroStandardWallet(engine)
     if (!moneroWallet) moneroWallet = createMoneroFailoverVault({
+      assertAllowed: () => assertMoneroStandardWallet(engine),
       create: getConfig => createMoneroVault({
         engine, confirm: emuSigningOp, signingEmulator: moneroSigningEmulatorActive,
         watchStore: createMoneroWatchStore({ database: getDb, profile: Utils.paths.userData }),
@@ -8621,7 +8638,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					loadSupportedChains(getPioneerApiBase()).catch(() => { /* static fallback handles it */ })
 					initSwapTrackerIfAllowed().catch((e) => console.warn('[swap-tracker] Reconnect init failed:', e.message || e))
 				}
-				if (!offlineMode && moneroEnabled) startMoneroSidecar().catch(() => console.warn('[monero] Sidecar could not resume monitoring'))
+                if (!offlineMode && moneroEnabled && !moneroHiddenWallet(engine)) startMoneroSidecar().catch(() => console.warn('[monero] Sidecar could not resume monitoring'))
 				console.log('[settings] Offline (airplane) mode:', params.enabled)
 				return getAppSettings()
 			},
@@ -10457,8 +10474,12 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			// Reads return a safe stopped/empty state so any UI path that still
 			// polls (e.g. during a toggle transition) renders nothing rather than
 			// a toast-worthy error.
-            moneroGetStatus: async () => getMoneroWallet().getStatus(),
+            moneroGetStatus: async () => {
+                if (moneroHiddenWallet(engine)) { invalidateMoneroWallet(); return moneroHiddenWalletStatus(moneroEnabled) }
+                return getMoneroWallet().getStatus()
+            },
             moneroConnect: async (params) => {
+                assertMoneroStandardWallet(engine)
                 // The scan start chosen on the connect card is saved first, so the wallet scans from it.
                 if (params?.restoreHeight !== undefined) {
                     const node = validateMoneroNode({ daemonUrl: getSetting('monero_daemon_url') || MONERO_DEFAULT_NODE, restoreHeight: params.restoreHeight })
@@ -10477,7 +10498,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
                 if (typeof enabled !== 'boolean') throw new Error('Monero requires an enabled boolean')
                 if (enabled && !isMoneroSidecarAvailable()) throw new Error('Monero is unavailable in this build')
                 if (enabled && offlineMode) throw new Error('Turn off offline mode before enabling Monero')
-                if (enabled) await startMoneroSidecar()
+                if (enabled) { if (!moneroHiddenWallet(engine)) await startMoneroSidecar() }
                 else {
                     // A research emulator selection stays selected: the next start names it and
                     // says to turn Monero on, instead of silently running other firmware.
@@ -10504,7 +10525,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
                 setSetting('monero_daemon_url', node.daemonUrl)
                 setSetting('monero_restore_height', String(node.restoreHeight))
                 setSetting('monero_node_mode', params.mode ?? (node.daemonUrl === MONERO_LOCAL_URL ? 'local' : 'remote'))
-                if (moneroEnabled && !offlineMode) await startMoneroSidecar()
+                if (moneroEnabled && !offlineMode && !moneroHiddenWallet(engine)) await startMoneroSidecar()
                 return getAppSettings()
             },
             moneroNodeStatus: async () => localMoneroNode.status(),
@@ -11228,9 +11249,9 @@ function startPioneerSocketIfAllowed(): void {
 
 // Push engine events to WebView
 engine.on('state-change', (state) => {
-	if (state.state !== 'ready' || moneroSession !== engine.wallet) {
+	if (state.state !== 'ready' || moneroSession !== engine.wallet || moneroHiddenWallet(engine)) {
 		invalidateMoneroWallet()
-		moneroSession = state.state === 'ready' ? engine.wallet : null
+		moneroSession = state.state === 'ready' && !moneroHiddenWallet(engine) ? engine.wallet : null
 	}
 	try { rpc.send['device-state'](state) } catch { /* webview not ready yet */ }
 	// The Studio provider key belongs to the device it was derived with.
@@ -12048,7 +12069,7 @@ if (zcashPrivacyEnabled) {
 }
 
 perf('boot complete')
-if (moneroEnabled && !offlineMode) {
+if (moneroEnabled && !offlineMode && !moneroHiddenWallet(engine)) {
     startMoneroSidecar().catch(error => console.error('[monero] Sidecar startup failed:', error.message))
 }
 console.log("KeepKey Vault started!")

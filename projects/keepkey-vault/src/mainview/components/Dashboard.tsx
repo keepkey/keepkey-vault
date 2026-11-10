@@ -947,6 +947,11 @@ function PersonalDashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSetti
 	// Used by full refreshes to skip chains that received a fresher per-chain update while
 	// the bulk request was in-flight (prevents old getBalances response from overwriting newer data).
 	const chainLastUpdatedRef = useRef(new Map<string, number>())
+	// Cache reads may return after a newer balance read, push, or wallet purge.
+	// Use revisions rather than wall time so same-millisecond updates still win.
+	const balanceSnapshotRevisionRef = useRef(0)
+	const chainSnapshotRevisionRef = useRef(new Map<string, number>())
+	const cacheScopeRevisionRef = useRef(0)
 
 	// Capture a destination baseline as soon as a swap is broadcast. This must
 	// happen before any post-transaction portfolio refresh can replace the
@@ -1179,6 +1184,8 @@ function PersonalDashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSetti
 	// When forceRefresh (e.g. new seed after OOB setup), skip stale cache entirely.
 	useEffect(() => {
 		let cancelled = false
+		const cacheScope = cacheScopeRevisionRef.current
+		const requestedSnapshotRevision = balanceSnapshotRevisionRef.current
 
 		async function loadCached() {
 			let needsAutoRefresh = false
@@ -1204,10 +1211,17 @@ function PersonalDashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSetti
 			if (!forceRefresh) {
 				try {
 					const cached = await rpcRequest<{ balances: ChainBalance[]; updatedAt: number; staleReasons?: string[] } | null>('getCachedBalances', undefined, 3000)
-					if (!cancelled && cached && cached.balances.length > 0) {
-						const map = new Map<string, ChainBalance>()
-						for (const b of cached.balances) map.set(b.chainId, b)
-						setBalances(map)
+					if (!cancelled && cacheScope === cacheScopeRevisionRef.current && cached && cached.balances.length > 0) {
+						setBalances(current => {
+							const map = new Map(current)
+							for (const b of cached.balances) {
+								if ((chainSnapshotRevisionRef.current.get(b.chainId) ?? 0) > requestedSnapshotRevision) continue
+								const merged = mergeTrustedBalanceSnapshot(map.get(b.chainId), b, false)
+								if (merged) map.set(b.chainId, merged)
+							}
+							balancesRef.current = map
+							return map
+						})
 						setCacheUpdatedAt(cached.updatedAt)
 						clearLocalPioneerError()
 						console.log(`[Dashboard] Cache hit: ${cached.balances.length} chains, $${cached.balances.reduce((s, b) => s + (b.balanceUsd || 0), 0).toFixed(2)}, age: ${formatTimeAgo(cached.updatedAt, t)}`)
@@ -1373,7 +1387,12 @@ function PersonalDashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSetti
 							b,
 							protectedChains.has(b.chainId),
 						)
-						if (merged) map.set(b.chainId, merged)
+						if (merged) {
+							map.set(b.chainId, merged)
+							if (b.syncState !== 'stale' && b.syncState !== 'degraded') {
+								chainSnapshotRevisionRef.current.set(b.chainId, ++balanceSnapshotRevisionRef.current)
+							}
+						}
 					}
 					balancesRef.current = map
 					return map
@@ -1599,6 +1618,7 @@ function PersonalDashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSetti
 		return onRpcMessage("balance-updated", (updated: ChainBalance) => {
 			const receivedAt = Date.now()
 			chainLastUpdatedRef.current.set(updated.chainId, receivedAt)
+			chainSnapshotRevisionRef.current.set(updated.chainId, ++balanceSnapshotRevisionRef.current)
 			const reconciled = observeBalanceRefresh(balanceReconciliationsRef.current, [updated])
 			const protectedChains = protectedBalanceChainIds(reconciled)
 			commitBalanceReconciliations(reconciled)
@@ -1634,6 +1654,8 @@ function PersonalDashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSetti
 	useEffect(() => {
 		return onRpcMessage("wallet-data-purged", ({ reason }: { reason: string }) => {
 			console.warn(`[Dashboard] Wallet data purged (${reason}) — clearing displayed balances`)
+			cacheScopeRevisionRef.current++
+			chainSnapshotRevisionRef.current.clear()
 			chainLastUpdatedRef.current.clear()
 			commitBalanceReconciliations([])
 			externalDestinationTxidsRef.current.clear()

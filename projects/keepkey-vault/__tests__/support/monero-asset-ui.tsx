@@ -83,6 +83,16 @@ function Host({ Section, client, extra }: any) {
 
 const out: Record<string, unknown> = {}
 
+// Hidden-wallet status is actionable and cannot start the automatic connect flow.
+{
+  const { MONERO_STANDARD_WALLET_REQUIRED } = await import('../../src/shared/monero-wallet-policy')
+  const client = fakeClient({ ...notConnected, error: MONERO_STANDARD_WALLET_REQUIRED })
+  const { container, unmount } = await render(React.createElement(Host, { Section: MoneroReceiveSection, client }))
+  out.hiddenWallet = { text: text(q(container, '[data-monero-connect]')), calls: client.calls,
+    buttons: container.querySelectorAll('[data-monero-connect] button').length, prompts: text(container).includes('Confirm on KeepKey') }
+  await unmount()
+}
+
 // A view-only total can include spent change; it must not look like verified balance.
 const { moneroBalanceView } = await import('../../src/shared/monero-asset')
 for (const [name, verified, privateMode] of [['headerUnverified', false, false], ['headerVerified', true, false], ['headerPrivate', true, true]] as const) {

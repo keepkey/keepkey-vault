@@ -22,9 +22,10 @@ function publicReason(error: unknown): string {
 }
 const nodeError=(error:unknown)=>error instanceof Error && /Monero (?:daemon|node|watch wallet)|watch-only Monero operation|private Monero wallet RPC/i.test(error.message)
 
-export function createMoneroFailoverVault({create,getConfig,checkNode=checkMoneroNode,now=Date.now,retryMs=30_000,probeMs=15_000}:{
+export function createMoneroFailoverVault({create,getConfig,checkNode=checkMoneroNode,now=Date.now,retryMs=30_000,probeMs=15_000,assertAllowed=()=>{}}:{
  create:(config:()=>MoneroVaultConfig)=>Vault;getConfig:()=>MoneroVaultConfig
  checkNode?:(url:string)=>Promise<{height:number}>;now?:()=>number;retryMs?:number;probeMs?:number
+ assertAllowed?:()=>void
 }):Vault {
  let key='',urls:string[]=[],active='',generation=0,sessionId=0,requested=false,inFlight=0,preparedUntil=0,nextRetry=0,lastProbe=0
  let connecting:Promise<MoneroVaultStatus>|null=null,probing:Promise<void>|null=null
@@ -46,8 +47,9 @@ export function createMoneroFailoverVault({create,getConfig,checkNode=checkMoner
  const success=(url:string,height?:number,latencyMs?:number)=>Object.assign(entry(url),{state:'responding',checkedAt:new Date(now()).toISOString(),lastResponseAt:new Date(now()).toISOString(),error:undefined,retryAt:undefined,...(height===undefined?{}:{height}),...(latencyMs===undefined?{}:{latencyMs})})
  const failure=(url:string,error:unknown)=>Object.assign(entry(url),{state:'failed',checkedAt:new Date(now()).toISOString(),error:publicReason(error),retryAt:new Date(now()+retryMs).toISOString()})
  const eligible=(url:string)=>!entry(url).retryAt||Date.parse(entry(url).retryAt!)<=now()
- async function run<T>(operation:()=>Promise<T>){inFlight++;try{return await operation()}finally{inFlight--}}
+ async function run<T>(operation:()=>Promise<T>){assertAllowed();inFlight++;try{const result=await operation();assertAllowed();return result}finally{inFlight--}}
  function connect(options:Parameters<Vault['connect']>[0]={},force=true):Promise<MoneroVaultStatus>{
+  assertAllowed()
   if(connecting)return connecting
   const config=pool();const current=generation
   if (!config.enabled || config.offline) { requested=false; return vault.connect(options) }
@@ -62,10 +64,12 @@ export function createMoneroFailoverVault({create,getConfig,checkNode=checkMoner
     const paused=vault.pendingCount()>0||preparedUntil>now()
     const order=(paused?[active]:[active,...urls.filter(url=>url!==active)]).filter(url=>force||eligible(url))
     for(const url of order){
+     assertAllowed()
      if(current!==generation)throw Error('The Monero connection changed')
      state=url===active?'checking':'switching';entry(url).state='checking'
      try {
       const began=now(),health=await checkNode(url)
+      assertAllowed()
       if(current!==generation)throw Error('The Monero connection changed')
       success(url,health.height,Math.max(0,now()-began));state='idle'
       if(url!==active){vault.invalidate();active=url}
@@ -75,6 +79,7 @@ export function createMoneroFailoverVault({create,getConfig,checkNode=checkMoner
       return decorate(status,false)
      }catch(error){
       if(current!==generation)throw error
+      assertAllowed()
       // A device refusal/cancellation or USB fault must never trigger another consent prompt.
       if(entry(url).state==='responding'&&!nodeError(error)){requested=false;state='failed';throw error}
       failure(url,error)
@@ -90,14 +95,16 @@ export function createMoneroFailoverVault({create,getConfig,checkNode=checkMoner
   return work
  }
  function backgroundConnect(){
+  try{assertAllowed()}catch{return}
   if(connecting||inFlight||preparedUntil>now()||vault.pendingCount()>0||lastStatus?.unrelayedTxid||now()<nextRetry)return
   void connect({},false).catch(()=>{})
  }
  function probe(){
+  try{assertAllowed()}catch{return}
   if(probing||connecting||now()-lastProbe<probeMs)return
   lastProbe=now();const current=generation,url=active,began=now()
   const work=(async()=>{
-   try{const health=await checkNode(url);if(current!==generation)return;success(url,health.height,Math.max(0,now()-began));if(!connecting)state=lastStatus?.monitorReady?'connected':'scanning'}
+   try{const health=await checkNode(url);assertAllowed();if(current!==generation)return;success(url,health.height,Math.max(0,now()-began));if(!connecting)state=lastStatus?.monitorReady?'connected':'scanning'}
    catch(error){if(current!==generation)return;failure(url,error);state='failed';backgroundConnect()}
   })()
   probing=work;void work.finally(()=>{if(probing===work)probing=null}).catch(()=>{})
@@ -107,8 +114,11 @@ export function createMoneroFailoverVault({create,getConfig,checkNode=checkMoner
   connect:options=>connect(options),
   invalidate,stop:invalidate,
   async getStatus(){
+   try{assertAllowed()}catch{invalidate();return vault.getStatus()}
    const config=pool()
-   const status=await vault.getStatus();lastStatus=status
+   const status=await vault.getStatus()
+   try{assertAllowed()}catch{invalidate();return vault.getStatus()}
+   lastStatus=status
    if(requested&&config.enabled&&!config.offline&&status.deviceReady&&urls.length>1){
     if(!connecting){
      if(status.syncState==='unreachable'){if(entry(active).state!=='failed')failure(active,Error(status.error||'Monero node unavailable'));state='failed';backgroundConnect()}

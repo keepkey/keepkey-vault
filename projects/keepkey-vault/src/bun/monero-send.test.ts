@@ -13,6 +13,7 @@ import { DigestWalletRpc } from '../../monero-cli/src/digest'
 import { checkSignedTransaction, concat, keyImageInitRequest, lengthField, openKeyImage, parseFields, parseSignedTransaction, reviewPlan,
   signRequest, transferDetails, varint } from './monero-wire'
 import { createMoneroVault, type MoneroWatchSidecar } from './monero-vault'
+import { MONERO_STANDARD_WALLET_REQUIRED } from '../shared/monero-wallet-policy'
 import { MONERO_DEVICE_SUBADDRESS_CANDIDATE_SHA256, type MoneroDeviceSigner } from './monero-device-signing'
 import { createFilePendingStore, type MoneroPendingStore } from './monero-pending'
 import { formatXmrAtomic, moneroAddressKind, parseXmrAmount } from '../shared/monero-address'
@@ -717,16 +718,17 @@ describe('C3: the unknown-broadcast guard survives an app restart', () => {
     expect((await second.api.getStatus()).canSend).toBe(true)
   })
 
-  test('the block belongs to the wallet that signed: a passphrase wallet is not blocked, its owner still is', async () => {
+  test('hidden wallets are unavailable without erasing the original owner pending block', async () => {
     const { store: pendingStore } = store()
     const b = await ready({ pendingStore })
     b.setRelayError(new Error('ETIMEDOUT'))
     const review = await b.api.prepareSend({ address: RECIPIENT, amountAtomic: '2000000000000' })
     await expect(b.api.send({ prepareId: review.prepareId })).rejects.toThrow('broadcast result is unknown')
     b.state.isHiddenWallet = true; b.engine.currentSeedEthAddress = '0xpassphrase'; b.delegate.address = RECIPIENT
-    const hidden = await b.api.connect()
-    expect(hidden.address).toBe(RECIPIENT)
-    expect(hidden.sendBlocked).not.toBe('unrelayed')
+    await expect(b.api.connect()).rejects.toThrow(MONERO_STANDARD_WALLET_REQUIRED)
+    const hidden = await b.api.getStatus()
+    expect(hidden.available).toBe(false)
+    expect(hidden.address).toBe('')
     expect(hidden.unrelayedTxid).toBeUndefined()
     b.state.isHiddenWallet = false; b.engine.currentSeedEthAddress = null; b.delegate.address = WALLET
     expect((await b.api.connect()).sendBlocked).toBe('unrelayed')
