@@ -46,6 +46,12 @@ function forgetCoinChoice() {
 
 // ── Design tokens ───────────────────────────────────────────────────────────
 const HIGHLIGHT = 'green.500'
+// Step indicator: green means done, so the step in progress uses the gold
+// action accent. Otherwise a finished step and the current one look the same
+// (two green indicators during a firmware update).
+const STEP_DONE = 'green.500'
+const STEP_CURRENT = 'var(--gold)'
+const STEP_TODO = 'gray.600'
 
 // ── Animations ──────────────────────────────────────────────────────────────
 const ANIMATIONS_CSS = `
@@ -1289,18 +1295,18 @@ export function OobSetupWizard({ onComplete: onCompleteProp, onWalletCreated, on
                     w={7}
                     h={7}
                     borderRadius="full"
-                    bg={completed ? 'green.500' : current ? HIGHLIGHT : 'gray.600'}
+                    bg={completed ? STEP_DONE : current ? STEP_CURRENT : STEP_TODO}
                     display="flex"
                     alignItems="center"
                     justifyContent="center"
                     transition="all 0.3s"
                     flexShrink={0}
-                    boxShadow={current ? '0 0 0 3px rgba(72, 187, 120, 0.25)' : 'none'}
+                    boxShadow={current ? '0 0 0 3px rgba(233, 196, 106, 0.25)' : 'none'}
                   >
                     {completed ? (
                       <FaCheckCircle color="white" size={12} />
                     ) : (
-                      <Text color="white" fontSize="xs" fontWeight="bold">
+                      <Text color={current ? 'var(--ink-0)' : 'white'} fontSize="xs" fontWeight="bold">
                         {vs.number}
                       </Text>
                     )}
@@ -1309,7 +1315,7 @@ export function OobSetupWizard({ onComplete: onCompleteProp, onWalletCreated, on
                     ml={1.5}
                     fontSize="xs"
                     fontWeight={current ? '700' : '500'}
-                    color={completed ? 'green.500' : current ? HIGHLIGHT : 'gray.400'}
+                    color={completed ? STEP_DONE : current ? STEP_CURRENT : 'gray.400'}
                     whiteSpace="nowrap"
                     overflow="hidden"
                     textOverflow="ellipsis"
@@ -1320,7 +1326,7 @@ export function OobSetupWizard({ onComplete: onCompleteProp, onWalletCreated, on
                     <Box
                       w={6}
                       h="2px"
-                      bg={completed ? 'green.500' : current ? HIGHLIGHT : 'gray.600'}
+                      bg={completed ? STEP_DONE : STEP_TODO}
                       ml={1.5}
                       flexShrink={0}
                     />
@@ -1871,10 +1877,15 @@ export function OobSetupWizard({ onComplete: onCompleteProp, onWalletCreated, on
                 {/* In bootloader — show firmware install options (user must click) */}
                 {updateState === 'idle' && inBootloader && !isRebooting && customFwPhase === 'idle' && (
                   <>
-                    <FaCheckCircle color="var(--teal)" size={24} />
-                    <Text fontSize="sm" fontWeight="bold" color="var(--teal)" textAlign="center">
-                      {t('firmware.bootloaderReadyForFirmware')}
-                    </Text>
+                    {/* Device status, not a second success check: the step
+                        indicator above is the one "done/current" signal. */}
+                    <Flex role="status" align="center" gap={2} alignSelf="center" maxW="100%"
+                      px={3} py={1.5} borderRadius="full" bg="var(--ink-2)" border="1px solid var(--line-2)">
+                      <Box w="7px" h="7px" borderRadius="full" bg="var(--teal)" flexShrink={0} />
+                      <Text fontSize="xs" color="kk.textSecondary">
+                        {t('firmware.bootloaderReadyForFirmware')}
+                      </Text>
+                    </Flex>
 
                     {/* Upgrade preview — show new features coming with this firmware */}
                     {installVersion && (
