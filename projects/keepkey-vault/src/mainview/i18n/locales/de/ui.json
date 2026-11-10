@@ -107,5 +107,22 @@
   "mf2e79e8": "Mitunterzeichner",
   "m68390565": "Bestätigungen",
   "mc691454b": "Synchronisiert",
-  "mc1163767": "Zuletzt aktualisiert {{time}}"
+  "mc1163767": "Zuletzt aktualisiert {{time}}",
+  "mbe593b8a": "Sie senden",
+  "m2b1566d2": "Mindestens erhalten",
+  "mcfd73f69": "Geschätzte Swap-Kosten",
+  "m4141d374": "Preisdaten nicht verfügbar",
+  "m63d34722": "Gebühr des Ausgangsnetzwerks",
+  "mdb55a3bf": "Separat zu zahlen",
+  "me49736e2": "Geschätzte Dauer",
+  "m6fb8a4dc": "Gebühren und Details",
+  "mab865c88": "Quelle des Mindestbetrags",
+  "mbfc93277": "Transaktionsmemo",
+  "m2649bd57": "Schätzung",
+  "mcbc95930": "Angebot des Anbieters",
+  "me79a318a": "Wertdifferenz beim Mindestbetrag",
+  "m934a6f3d": "Die Swap-Kosten vergleichen die angebotenen Eingangs- und Ausgangswerte einschließlich Wechselkurs und Routengebühren. Die Gebühr des Ausgangsnetzwerks fällt separat an. Der Mindestbetrag beim Empfang ist eine Ausführungsgrenze, keine garantierte Rückerstattung.",
+  "m981df2e2": "Auf KeepKey prüfen und bestätigen",
+  "m53c7aeaa": "Ich akzeptiere die geschätzten Swap-Kosten von {{cost}} und eine Wertdifferenz von {{loss}} beim Mindestbetrag. Die Gebühr des Ausgangsnetzwerks fällt separat an.",
+  "m310febeb": "Hohe Swap-Kosten: {{cost}}, ohne die Gebühr des Ausgangsnetzwerks."
 }
