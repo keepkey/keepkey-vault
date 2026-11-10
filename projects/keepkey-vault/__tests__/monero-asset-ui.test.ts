@@ -21,6 +21,10 @@ beforeAll(() => {
   ui = JSON.parse(run.stdout.toString().trim().split('\n').at(-1)!)
 }, 120_000)
 
+test('hidden wallets show the standard-wallet action without automatic consent or new buttons', () => {
+  expect(ui.hiddenWallet).toEqual({ text: 'Monero is unavailable in hidden wallets. Switch to your standard wallet to use Monero.', calls: [], buttons: 0, prompts: false })
+})
+
 test('the main balance is hidden until verified and still respects private mode', () => {
   expect(ui.headerUnverified).toBe('—')
   expect(ui.headerVerified).toBe('0.08465305')

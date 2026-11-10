@@ -15,6 +15,7 @@
       "__tests__/wizard-messaging.test.ts",
       "__tests__/firmware-authenticity-verdict.test.ts",
       "__tests__/firmware-install.test.ts",
+      "__tests__/device-protocol-install.test.ts",
       "__tests__/firmware-official-install.test.ts",
       "__tests__/update-safety.test.ts",
       "__tests__/settings-drawer-accessibility.test.ts",
@@ -25,10 +26,18 @@
       "src/bun/bitcoin-only-boundary.test.ts",
       "src/bun/features-format.test.ts",
       "__tests__/device-operation.test.ts",
+      "__tests__/desktop-operation-cancellation.test.ts",
+      "__tests__/walletconnect-session.test.ts",
       "__tests__/device-rpc.test.ts",
-      "__tests__/rest-demand-unlock.test.ts"
+      "__tests__/rest-demand-unlock.test.ts",
+      "__tests__/window-approval-focus.test.ts"
     ],
     "balances-receive-history": [
+      "__tests__/hyperliquid-identity.test.ts",
+      "__tests__/receive-payment-uri.test.ts",
+      "__tests__/swap-row-explorer.test.ts",
+      "__tests__/asset-page-loading.test.ts",
+      "__tests__/evm-addresses-loading.test.ts",
       "__tests__/asset-catalog-sync.test.ts",
       "__tests__/selected-token-balance.test.ts",
       "__tests__/balance-reconciliation.test.ts",
@@ -63,6 +72,7 @@
       "src/bun/offline-policy.test.ts"
     ],
     "standard-send-safety": [
+      "__tests__/send-form-requests.test.ts",
       "__tests__/max-send.test.ts",
       "__tests__/evm-max-send.test.ts",
       "__tests__/cosmos-max-send.test.ts",
@@ -89,6 +99,8 @@
       "src/bun/txbuilder/cosmos.test.ts"
     ],
     "swap-safety": [
+      "__tests__/route-map.test.ts",
+      "__tests__/swap-network-identity.test.ts",
       "__tests__/swap-api-assets.test.ts",
       "__tests__/swap-classify.test.ts",
       "__tests__/swap-discovery.test.ts",

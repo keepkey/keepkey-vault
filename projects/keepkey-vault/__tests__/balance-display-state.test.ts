@@ -109,8 +109,9 @@ describe('balanceUnverifiedReason: loading is not "could not reach this chain"',
   })
   test('the swap dialog says "could not reach" only for degraded, and fetches a missing chain', () => {
     const src = require('fs').readFileSync(require('path').join(import.meta.dir, '../src/mainview/components/SwapDialog.tsx'), 'utf8')
-    expect(src).toContain("fromBalanceReason === 'missing' && loadingBalances")
+    expect(src).toContain('fromBalancePending')
     expect(src).toContain("fromBalanceReason === 'missing' ? t(\"balanceMissing\"")
-    expect(src).toContain('liveFetchedChains.current.add(fromAsset.chainId)')
+    expect(src).toContain("[sourceKey]: 'pending'")
+    expect(src).toContain('await refreshEvmAddresses()')
   })
 })

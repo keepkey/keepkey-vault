@@ -978,7 +978,7 @@ export function ZcashPrivacyTab({ initialPage, initialSection, embedded = false,
 			</div>}
 
 			{/* page nav */}
-			{embedded && <Button size="xs" variant="ghost" mb="3" aria-expanded={toolsOpen} aria-controls={toolsId}
+			{embedded && <Button size="xs" variant="outline" mb="3" aria-expanded={toolsOpen} aria-controls={toolsId}
 				onClick={() => { if (toolsOpen) { setToolsOpen(false); if (page !== 'send' && page !== 'receive') navigate('receive') } else setToolsOpen(true) }}>
 				{uiText('Zcash tools and details')} {toolsOpen ? '▴' : '▾'}
 			</Button>}
@@ -1364,16 +1364,19 @@ export function ZcashPrivacyTab({ initialPage, initialSection, embedded = false,
 			{/* ===== RECEIVE ===== */}
 			{page === "receive" && orchardAddress && (
 				embedded ? <Flex gap="6" wrap="wrap" align="flex-start" aria-label={uiText('Shielded receive')}>
-					<Box bg="white" p="3" borderRadius="12px" flexShrink={0} aria-label={uiText('Shielded address QR code')}
+					{/* Same 184px framed tile as the transparent receive QR; the SVG scales to fill it. */}
+					<Box bg="white" p="3" borderRadius="12px" flexShrink={0} w="184px" h="184px" boxShadow="var(--shadow-2)"
+						aria-label={uiText('Shielded address QR code')}
+						css={{ '& svg': { width: '100%', height: '100%', display: 'block' } }}
 						dangerouslySetInnerHTML={{ __html: generateQRSvg(orchardAddress, 4, 0) }} />
 					<Box flex="1" minW={{ base: '100%', sm: '200px' }}>
 						<Text fontSize="12px" fontWeight="600" color="var(--text-1)" mb="2">{uiText('Your Zcash address (Unified)')}</Text>
 						<Text fontFamily="mono" fontSize="13px" wordBreak="break-all" bg="var(--ink-0)" border="1px solid var(--line)" borderRadius="12px" p="3">{orchardAddress}</Text>
 						<Flex gap="2" mt="3" wrap="wrap">
-							<Button size="sm" variant="outline" onClick={copyAddress}>{copied ? uiText('✓ Copied') : uiText('Copy address')}</Button>
-							<Button size="sm" variant="outline" onClick={verifyOnDevice} disabled={verifyingOnDevice}>
+							<Button size="sm" className="zk-primary" onClick={verifyOnDevice} disabled={verifyingOnDevice}>
 								{verifyingOnDevice ? uiText('Check your KeepKey screen…') : verifySucceeded ? uiText('✓ Verified on device') : uiText('Show address on KeepKey')}
 							</Button>
+							<Button size="sm" variant="outline" onClick={copyAddress}>{copied ? uiText('✓ Copied') : uiText('Copy address')}</Button>
 						</Flex>
 						<Text fontSize="12px" color="var(--text-2)" mt="3">{uiText('Compare the full address on your KeepKey before receiving. Address verification can take over 60 seconds.')}</Text>
 						{verifyError && <Text fontSize="12px" color="var(--rose)" role="alert" mt="2">{verifyError}</Text>}

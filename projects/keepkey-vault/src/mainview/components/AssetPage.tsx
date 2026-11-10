@@ -43,6 +43,7 @@ import { BtcXpubSelector } from "./BtcXpubSelector"
 import { UtxoAccountSelector } from "./UtxoAccountSelector"
 import { EvmAddressSelector } from "./EvmAddressSelector"
 import { useBtcAccounts } from "../hooks/useBtcAccounts"
+import { isBalanceUnverified } from "../../shared/balance-display-state"
 import { useEvmAddresses } from "../hooks/useEvmAddresses"
 import { AddTokenDialog } from "./AddTokenDialog"
 import { PSBT_PASTE_EVENT } from "./PsbtSignDialog"
@@ -90,6 +91,8 @@ interface AssetPageProps {
 	vault?: VaultIdentity
 	chain: ChainDef
 	balance?: ChainBalance
+	/** A same-wallet portfolio refresh is still in flight. Keep unknown rows pending. */
+	balanceLoading?: boolean
 	onBack: () => void
 	firmwareVersion?: string
 	/** Open the page on a specific action ("send" / "receive" / "swap" / "privacy"). */
@@ -117,7 +120,7 @@ export function AssetPage(props: AssetPageProps) {
 	return <PersonalAssetPage {...props} />
 }
 
-function PersonalAssetPage({ chain, balance, onBack, firmwareVersion, initialAction, initialToken, onViewActivity, watchOnly, watchOnlyDeviceId, isHiddenWallet, hideBack }: AssetPageProps) {
+function PersonalAssetPage({ chain, balance, balanceLoading = false, onBack, firmwareVersion, initialAction, initialToken, onViewActivity, watchOnly, watchOnlyDeviceId, isHiddenWallet, hideBack }: AssetPageProps) {
   const uiText = useUiTranslation()
 
 	const { t } = useTranslation("asset")
@@ -148,8 +151,9 @@ function PersonalAssetPage({ chain, balance, onBack, firmwareVersion, initialAct
 		ownerAddress: chain.chainFamily === 'evm' ? undefined : balance?.address,
 	} : null)
 	const [copiedCaip, setCopiedCaip] = useState<string | null>(null)
-	const [address, setAddress] = useState<string | null>(balance?.address || null)
-	const [loading, setLoading] = useState(false)
+	// Aggregate EVM addresses/amounts cannot stand in for the selected owner.
+	const [address, setAddress] = useState<string | null>(chain.chainFamily === 'evm' && !watchOnly ? null : balance?.address || null)
+	const [loading, setLoading] = useState(chain.chainFamily === 'evm' && !watchOnly)
 	const [deriveError, setDeriveError] = useState<string | null>(null)
 	const [currentPath, setCurrentPath] = useState<number[]>(chain.defaultPath)
 	const [vaultChoices, setVaultChoices] = useState<VaultIdentity[]>([])
@@ -162,7 +166,7 @@ function PersonalAssetPage({ chain, balance, onBack, firmwareVersion, initialAct
 
 	// BTC multi-account support
 	const isBtc = chain.id === 'bitcoin'
-	const { btcAccounts, selectXpub, addAccount, refresh: refreshBtcAccounts, loading: btcLoading, error: btcAccountsError } = useBtcAccounts()
+	const { btcAccounts, selectXpub, addAccount, refresh: refreshBtcAccounts, loading: btcLoading, error: btcAccountsError } = useBtcAccounts(isBtc && !watchOnly)
 
 	// Single-chain refresh. Always forced (bun getBalance passes forceRefresh:true
 	// to Pioneer). The result is NOT kept locally: the backend pushes the identical
@@ -254,14 +258,14 @@ function PersonalAssetPage({ chain, balance, onBack, firmwareVersion, initialAct
 
 	// EVM multi-address support
 	const isEvm = chain.chainFamily === 'evm'
-	const { evmAddresses, selectIndex: evmSelectIndex, addIndex: evmAddIndex, removeIndex: evmRemoveIndex, loading: evmLoading } = useEvmAddresses()
+	const { evmAddresses, selectIndex: evmSelectIndex, addIndex: evmAddIndex, removeIndex: evmRemoveIndex, loading: evmLoading, initialLoaded: evmInitialLoaded } = useEvmAddresses(isEvm && !watchOnly)
 	const previousEvmSelectedIndex = useRef<number | null>(null)
 	const selectedEvmAddress = isEvm
 		? evmAddresses.addresses.find(a => a.addressIndex === evmAddresses.selectedIndex)
 		: undefined
 	const selectedEvmChainBalance = selectedEvmAddress?.chainBalances?.[chain.id]
-	const activeBalance: ChainBalance | undefined = isEvm && !watchOnly && selectedEvmAddress && selectedEvmChainBalance
-		? {
+	const activeBalance: ChainBalance | undefined = isEvm && !watchOnly
+		? selectedEvmAddress && selectedEvmChainBalance ? {
 			chainId: chain.id,
 			symbol: chain.symbol,
 			balance: selectedEvmChainBalance.balance,
@@ -273,8 +277,10 @@ function PersonalAssetPage({ chain, balance, onBack, firmwareVersion, initialAct
 			syncState: selectedEvmChainBalance.syncState,
 			updatedAt: selectedEvmChainBalance.updatedAt,
 			confirmedAssetCaips: selectedEvmChainBalance.confirmedAssetCaips,
-		}
+		} : undefined
 		: balance
+	const balanceReadPending = balanceLoading || refreshing || (isEvm && !watchOnly && !evmInitialLoaded)
+	const headerBalanceKnown = !isBalanceUnverified(activeBalance, chain.caip)
 	const selectedTokenOwner = isEvm && !watchOnly ? selectedEvmAddress?.address : activeBalance?.address || address
 	// The aggregate balance prop can contain tokens summed across EVM owners.
 	// It must never fill an absent selected-owner cache or prove token absence.
@@ -513,8 +519,11 @@ function PersonalAssetPage({ chain, balance, onBack, firmwareVersion, initialAct
 		// Watch-only: balance.address is the source of truth; the evmAddresses hook is
 		// device-backed and stays empty offline, which would wipe the cached address.
 		if (watchOnly) return
+		if (!evmInitialLoaded) { setLoading(true); return }
+		setLoading(false)
 		if (evmAddresses.addresses.length === 0) { setAddress(null); return }
 		const selected = evmAddresses.addresses.find(a => a.addressIndex === evmAddresses.selectedIndex)
+		if (!selected) { setAddress(null); return }
 		if (selected) {
 			if (previousEvmSelectedIndex.current !== null && previousEvmSelectedIndex.current !== selected.addressIndex) {
 				setSelectedToken(null)
@@ -526,7 +535,7 @@ function PersonalAssetPage({ chain, balance, onBack, firmwareVersion, initialAct
 			// DIFFERENT address than the one on screen.
 			setCurrentPath(evmAddressPath(selected.addressIndex))
 		}
-	}, [isEvm, evmAddresses.selectedIndex, evmAddresses.addresses, watchOnly])
+	}, [isEvm, evmAddresses.selectedIndex, evmAddresses.addresses, evmInitialLoaded, watchOnly])
 
 	// Auto-derive once on mount; TON always re-derives to ensure correct bounceable flag;
 	// UTXO chains always re-derive because balance.address may be empty (xpub is not an address)
@@ -535,6 +544,7 @@ function PersonalAssetPage({ chain, balance, onBack, firmwareVersion, initialAct
 	const isUtxo = chain.chainFamily === 'utxo'
 	useEffect(() => {
 		if (isBtc) return // BTC address derived by account-aware effect above
+		if (isEvm) return // EVM addresses come from the selected account cache above
 		if (isMonero) return // MoneroReceiveSection reads its addresses from the connected watch wallet
 		if (isTon || isUtxo || (!address && !deriveError)) deriveAddress()
 	}, []) // eslint-disable-line react-hooks/exhaustive-deps
@@ -659,7 +669,7 @@ function PersonalAssetPage({ chain, balance, onBack, firmwareVersion, initialAct
 		: activeBalance?.balance ?? '0'
 	const headerBalanceTitle = chain.id === 'zcash' ? t('zcashTransparentOnly') : shieldedAmount + pendingAmount > 0
 		? `${shieldedAmount} shielded + ${activeBalance?.balance ?? '0'} transparent${pendingAmount > 0 ? ` + ${pendingAmount} pending` : ''} ${chain.symbol}`
-		: `${headerBalance} ${chain.symbol}`
+		: headerBalanceKnown ? `${headerBalance} ${chain.symbol}` : uiText("Balance unverified")
 
 	const [showAddToken, setShowAddToken] = useState(false)
 	const [showWatchOnlyExport, setShowWatchOnlyExport] = useState(false)
@@ -1149,6 +1159,11 @@ function PersonalAssetPage({ chain, balance, onBack, firmwareVersion, initialAct
 												<Box w="6px" h="6px" borderRadius="full" bg="var(--rose)" />
 												<Text fontSize="10px" fontFamily="mono" fontWeight="500" letterSpacing="0.02em">{t("refreshFailed")}</Text>
 											</Flex>
+									) : balanceReadPending ? (
+										<Flex align="center" gap="1.5" minH="20px" color="var(--text-2)" role="status" data-asset-balance-loading>
+											<Spinner size="xs" color="var(--gold)" aria-label={uiText("Refreshing balance")} />
+											<Text fontSize="10px" fontFamily="mono">{uiText("Refreshing balance")}</Text>
+										</Flex>
 										) : watchOnly && activeBalance?.syncState === "stale" ? (
 											// Watch-only cache: never "Synced". Say it is cached and how old it is.
 											<Flex align="center" gap="1" color="var(--gold)" className="v3-glass-chip" px="2" py="0.5"
@@ -1162,7 +1177,7 @@ function PersonalAssetPage({ chain, balance, onBack, firmwareVersion, initialAct
 											<Text fontSize="10px" fontFamily="mono" color="var(--text-2)" title={t('zcashSeparateSync')}>
 												{shieldedSelected ? t('zcashShieldedPrivate') : lastSyncedAt ? t('zcashTransparentUpdated') : t('zcashTransparentOnly')}
 											</Text>
-										) : activeBalance ? (
+									) : headerBalanceKnown ? (
 											<Flex align="center" gap="1" color="var(--teal)" className="v3-glass-chip" px="2" py="0.5"
 												title={lastSyncedAt ? `Last updated ${lastSyncedAt.toLocaleString(getNumberLocale())}` : undefined}>
 												<Box as={FaCheck} fontSize="9px" />
@@ -1171,9 +1186,8 @@ function PersonalAssetPage({ chain, balance, onBack, firmwareVersion, initialAct
 												</Text>
 											</Flex>
 										) : (
-											<Flex align="center" gap="1" color="var(--rose)" className="v3-glass-chip" px="2" py="0.5">
-												<Box w="6px" h="6px" borderRadius="full" bg="var(--rose)" />
-												<Text fontSize="10px" fontFamily="mono" fontWeight="500" letterSpacing="0.02em">{t("outOfSync")}</Text>
+										<Flex align="center" gap="1" color="var(--text-3)" className="v3-glass-chip" px="2" py="0.5">
+											<Text fontSize="10px" fontFamily="mono" fontWeight="500" letterSpacing="0.02em">{uiText("Balance unverified")}</Text>
 											</Flex>
 										)}
 									</Flex>
@@ -1227,13 +1241,14 @@ function PersonalAssetPage({ chain, balance, onBack, firmwareVersion, initialAct
 							align="flex-end"
 							gap="0.5"
 							flexShrink={0}
+							minW="160px"
 							display={{ base: "none", sm: "flex" }}
 							css={{ fontVariantNumeric: "tabular-nums" }}
 						>
 							{/* Sync status moved inline next to the chain name (above) per the
 							    design study — single source of truth, no duplicate badge here. */}
 							{/* Balance display (only when available) */}
-							{activeBalance && (
+							{(
 								<>
 									{/* Primary row: native balance + symbol AND USD value on
 									    one line. There's room horizontally, and the
@@ -1251,7 +1266,7 @@ function PersonalAssetPage({ chain, balance, onBack, firmwareVersion, initialAct
 												title={headerBalanceTitle}
 												cursor="help"
 											>
-												{formatBalance(headerBalance)}
+												{headerBalanceKnown ? formatBalance(headerBalance) : '—'}
 											</Text>
 											<Text
 												fontFamily="mono"
@@ -1263,7 +1278,7 @@ function PersonalAssetPage({ chain, balance, onBack, firmwareVersion, initialAct
 												{chain.symbol}
 											</Text>
 										</Flex>
-										{cleanBalanceUsd > 0 && (
+										{headerBalanceKnown && cleanBalanceUsd > 0 && (
 											<AnimatedUsd
 												value={cleanBalanceUsd}
 												prefix="≈ "
@@ -1331,14 +1346,14 @@ function PersonalAssetPage({ chain, balance, onBack, firmwareVersion, initialAct
 					</Flex>
 				) : isMonero ? (
 					<Box display={{ base: "block", sm: "none" }} mb="4"><MoneroHeaderBalance view={moneroView} privateMode={privateModeEnabled} /></Box>
-				) : activeBalance && (
+				) : (
 					<>
 						<Flex display={{ base: "flex", sm: "none" }} align="baseline" justify="space-between" mb="1" gap="3">
 							<Text fontFamily="mono" fontSize="18px" fontWeight="500" color="var(--text-0)" letterSpacing="0.01em" title={headerBalanceTitle}>
-								{formatBalance(headerBalance)}
+								{headerBalanceKnown ? formatBalance(headerBalance) : '—'}
 								<Box as="span" color="var(--text-3)" ml="1.5" fontSize="13px">{chain.symbol}</Box>
 							</Text>
-							{cleanBalanceUsd > 0 && (
+							{headerBalanceKnown && cleanBalanceUsd > 0 && (
 								<AnimatedUsd value={cleanBalanceUsd} prefix="≈ " fontSize="13px" fontFamily="mono" color="var(--text-2)" fontWeight="400" />
 							)}
 						</Flex>
@@ -1490,7 +1505,8 @@ function PersonalAssetPage({ chain, balance, onBack, firmwareVersion, initialAct
 						) : (
 						<SendForm
 							chain={chain}
-							address={address}
+							address={isEvm ? selectedEvmAddress?.address ?? null : address}
+							balanceLoading={balanceReadPending}
 							balance={isBtc && btcSelected?.xpubData ? {
 								...activeBalance!,
 								balance: btcSelected.xpubData.balance,
@@ -1502,7 +1518,7 @@ function PersonalAssetPage({ chain, balance, onBack, firmwareVersion, initialAct
 							onClearToken={() => setSelectedToken(null)}
 							xpubOverride={isBtc ? btcSelected?.xpubData?.xpub : undefined}
 							scriptTypeOverride={isBtc ? btcSelected?.scriptType : undefined}
-							evmAddressIndex={isEvm ? evmAddresses.selectedIndex : undefined}
+							evmAddressIndex={isEvm ? selectedEvmAddress?.addressIndex : undefined}
 						/>
 						)
 					) : isHive ? (

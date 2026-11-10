@@ -4,10 +4,54 @@ import { join } from 'path'
 import { firmwareSupportsMonero, MONERO_MIN_FIRMWARE } from '../src/shared/firmware-versions'
 import { CHAINS, isChainSupported } from '../src/shared/chains'
 import { bitcoinOnlyRpcRejection } from '../src/bun/bitcoin-only-boundary'
+import ts from 'typescript'
+import { runInNewContext } from 'node:vm'
+import { assertMoneroStandardWallet, moneroHiddenWallet, MONERO_STANDARD_WALLET_REQUIRED } from '../src/shared/monero-wallet-policy'
 
 const src = (path: string) => readFileSync(join(import.meta.dir, '..', path), 'utf8')
 
+/** Evaluate the actual settings/factory functions without importing app startup,
+ * opening a profile, constructing a sidecar or contacting any API. */
+function moneroSettingsFixture(enabled: boolean, hidden: boolean) {
+  const file = ts.createSourceFile('index.ts', process.env.MONERO_SETTINGS_SOURCE
+    ? readFileSync(process.env.MONERO_SETTINGS_SOURCE, 'utf8') : src('src/bun/index.ts'), ts.ScriptTarget.Latest, true, ts.ScriptKind.TS)
+  const named = (name: string) => {
+    const node = file.statements.find(node => ts.isFunctionDeclaration(node) && node.name?.text === name)
+    if (!node) throw new Error(`Missing actual ${name}`)
+    return node.getText(file)
+  }
+  let walletReads = 0, constructions = 0
+  const context = {
+    restApiEnabled: true, walletConnectEnabled: false, multisigFeature: { enabled: false }, moneroEnabled: enabled,
+    passwordBank: { enabled: true }, zcashPrivacyEnabled: false, hiveEnabled: false, emulatorEnabled: false, offlineMode: false,
+    disabledNetworks: [], preReleaseUpdates: false, alphaFirmware: false, addressBookClearsignEnabled: false, privateModeEnabled: false,
+    getPioneerServers: () => [], getPioneerApiBase: () => 'https://synthetic.example', getSetting: () => null,
+    supportedLanguage: () => 'en', validNumberLocale: () => 'en-US', isMoneroSidecarAvailable: () => true,
+    MONERO_DEFAULT_NODE: 'http://127.0.0.1:18081', moneroNodeMode: () => 'local', storedRestoreHeight: () => 0,
+    addressBookCertifyUnsupported: () => false, getEvmSimulationRpcUrls: () => ({}),
+    engine: { isPassphraseWallet: hidden, getDeviceState: () => ({ isHiddenWallet: hidden }) },
+    assertMoneroStandardWallet, moneroHiddenWallet, invalidateMoneroWallet() {}, moneroWallet: null,
+    getMoneroWallet: () => { walletReads++; if (hidden) throw new Error(MONERO_STANDARD_WALLET_REQUIRED); return { pendingCount: () => 3 } },
+    createMoneroFailoverVault: () => { constructions++; throw new Error('Must not construct a hidden monitor') },
+  }
+  const evaluate = (text: string) => runInNewContext(ts.transpileModule(text, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText, context)
+  return { settings: () => evaluate(`${named('getAppSettings')}\ngetAppSettings()`),
+    construct: () => evaluate(`${named('getMoneroWallet')}\ngetMoneroWallet()`), counts: () => ({ walletReads, constructions }) }
+}
+
 describe('Monero preview gates', () => {
+	for (const enabled of [false, true]) test(`actual settings remain usable in a hidden wallet with Monero ${enabled ? 'on' : 'off'}`, () => {
+		const fixture = moneroSettingsFixture(enabled, true)
+		expect(fixture.settings()).toMatchObject({ restApiEnabled: true, moneroEnabled: enabled, passwordManagerEnabled: true, moneroPendingBroadcasts: 0 })
+		expect(fixture.counts()).toEqual({ walletReads: 0, constructions: 0 })
+		expect(() => fixture.construct()).toThrow(MONERO_STANDARD_WALLET_REQUIRED)
+		expect(fixture.counts().constructions).toBe(0)
+	})
+	test('actual standard-wallet settings keep their pending-transaction count when enabled', () => {
+		const fixture = moneroSettingsFixture(true, false)
+		expect(fixture.settings().moneroPendingBroadcasts).toBe(3)
+		expect(fixture.counts()).toEqual({ walletReads: 1, constructions: 0 })
+	})
 	test('firmware 7.17.0 or newer only', () => {
 		expect(firmwareSupportsMonero('7.17.0')).toBe(true)
 		expect(firmwareSupportsMonero('7.18.1')).toBe(true)

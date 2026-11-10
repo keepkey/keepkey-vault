@@ -3,6 +3,8 @@ dist/
 build/
 artifacts/
 bun.lock
+# The Desktop release must resolve the same audited dependency graph in CI.
+!/projects/keepkey-vault/bun.lock
 *.log
 .DS_Store
 .idea/

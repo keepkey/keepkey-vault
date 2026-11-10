@@ -684,7 +684,10 @@ export function SwapRow({ swap, onSelect }: { swap: PendingSwap; onSelect: (s: P
   const displayStatus = swap.status === 'completed' && !settlementVerified ? 'output_confirming' : swap.status
   const [copied, setCopied] = useState(false)
   const handleCopy = (text: string) => { navigator.clipboard.writeText(text); setCopied(true); setTimeout(() => setCopied(false), 1500) }
-  const explorerUrl = getExplorerUrl(swap.fromSymbol, swap.txid)
+  // Tickers are not network identities (ETH and USDC exist on many chains).
+  // Persisted swaps carry the Vault source-chain ID; unknown/legacy identities
+  // stay unlinked rather than opening an unrelated chain's explorer.
+  const explorerUrl = swap.fromChainId && swap.txid ? getExplorerTxUrl(swap.fromChainId, swap.txid) : null
   const amountLine = swap.fromAmount
     ? `${swap.fromAmount} ${swap.fromSymbol}${swap.expectedOutput ? ` \u2192 ${swap.expectedOutput} ${swap.toSymbol}` : ''}`
     : null

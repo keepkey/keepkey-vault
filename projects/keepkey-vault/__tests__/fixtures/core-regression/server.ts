@@ -119,7 +119,12 @@ const rpc = Bun.serve({ hostname: '127.0.0.1', port: 0, idleTimeout: 0, async fe
 const port = Number(process.env.CORE_QA_PORT || 5201)
 const swapSource = resolve(import.meta.dir, '../../../src/mainview/components/SwapDialog.tsx')
 const baselineFile = process.env.QA_SWAP_BASELINE_FILE
-const baselinePlugin = { name: 'qa-swap-baseline', enforce: 'pre' as const, load(id: string) { if (baselineFile && id.split('?')[0] === swapSource) return readFileSync(baselineFile, 'utf8') } }
+const dashboardSource = resolve(import.meta.dir, '../../../src/mainview/components/Dashboard.tsx')
+const dashboardBaselineFile = process.env.QA_DASHBOARD_BASELINE_FILE
+const baselinePlugin = { name: 'qa-source-baseline', enforce: 'pre' as const, load(id: string) {
+  if (baselineFile && id.split('?')[0] === swapSource) return readFileSync(baselineFile, 'utf8')
+  if (dashboardBaselineFile && id.split('?')[0] === dashboardSource) return readFileSync(dashboardBaselineFile, 'utf8')
+} }
 const vite = await createServer({ configFile: false, plugins: [baselinePlugin, react()], root: import.meta.dir, server: { host: '127.0.0.1', port, strictPort: true, fs: { allow: [new URL('../../../..', import.meta.url).pathname] }, proxy: { '/__test_rpc': `http://127.0.0.1:${rpc.port}` } } })
 await vite.listen()
 console.log(`Synthetic core regression fixture: http://127.0.0.1:${port}`)

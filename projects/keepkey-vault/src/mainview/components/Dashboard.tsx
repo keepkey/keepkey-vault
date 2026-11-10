@@ -947,6 +947,11 @@ function PersonalDashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSetti
 	// Used by full refreshes to skip chains that received a fresher per-chain update while
 	// the bulk request was in-flight (prevents old getBalances response from overwriting newer data).
 	const chainLastUpdatedRef = useRef(new Map<string, number>())
+	// Cache reads may return after a newer balance read, push, or wallet purge.
+	// Use revisions rather than wall time so same-millisecond updates still win.
+	const balanceSnapshotRevisionRef = useRef(0)
+	const chainSnapshotRevisionRef = useRef(new Map<string, number>())
+	const cacheScopeRevisionRef = useRef(0)
 
 	// Capture a destination baseline as soon as a swap is broadcast. This must
 	// happen before any post-transaction portfolio refresh can replace the
@@ -1179,6 +1184,8 @@ function PersonalDashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSetti
 	// When forceRefresh (e.g. new seed after OOB setup), skip stale cache entirely.
 	useEffect(() => {
 		let cancelled = false
+		const cacheScope = cacheScopeRevisionRef.current
+		const requestedSnapshotRevision = balanceSnapshotRevisionRef.current
 
 		async function loadCached() {
 			let needsAutoRefresh = false
@@ -1204,10 +1211,17 @@ function PersonalDashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSetti
 			if (!forceRefresh) {
 				try {
 					const cached = await rpcRequest<{ balances: ChainBalance[]; updatedAt: number; staleReasons?: string[] } | null>('getCachedBalances', undefined, 3000)
-					if (!cancelled && cached && cached.balances.length > 0) {
-						const map = new Map<string, ChainBalance>()
-						for (const b of cached.balances) map.set(b.chainId, b)
-						setBalances(map)
+					if (!cancelled && cacheScope === cacheScopeRevisionRef.current && cached && cached.balances.length > 0) {
+						setBalances(current => {
+							const map = new Map(current)
+							for (const b of cached.balances) {
+								if ((chainSnapshotRevisionRef.current.get(b.chainId) ?? 0) > requestedSnapshotRevision) continue
+								const merged = mergeTrustedBalanceSnapshot(map.get(b.chainId), b, false)
+								if (merged) map.set(b.chainId, merged)
+							}
+							balancesRef.current = map
+							return map
+						})
 						setCacheUpdatedAt(cached.updatedAt)
 						clearLocalPioneerError()
 						console.log(`[Dashboard] Cache hit: ${cached.balances.length} chains, $${cached.balances.reduce((s, b) => s + (b.balanceUsd || 0), 0).toFixed(2)}, age: ${formatTimeAgo(cached.updatedAt, t)}`)
@@ -1373,7 +1387,12 @@ function PersonalDashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSetti
 							b,
 							protectedChains.has(b.chainId),
 						)
-						if (merged) map.set(b.chainId, merged)
+						if (merged) {
+							map.set(b.chainId, merged)
+							if (b.syncState !== 'stale' && b.syncState !== 'degraded') {
+								chainSnapshotRevisionRef.current.set(b.chainId, ++balanceSnapshotRevisionRef.current)
+							}
+						}
 					}
 					balancesRef.current = map
 					return map
@@ -1599,6 +1618,7 @@ function PersonalDashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSetti
 		return onRpcMessage("balance-updated", (updated: ChainBalance) => {
 			const receivedAt = Date.now()
 			chainLastUpdatedRef.current.set(updated.chainId, receivedAt)
+			chainSnapshotRevisionRef.current.set(updated.chainId, ++balanceSnapshotRevisionRef.current)
 			const reconciled = observeBalanceRefresh(balanceReconciliationsRef.current, [updated])
 			const protectedChains = protectedBalanceChainIds(reconciled)
 			commitBalanceReconciliations(reconciled)
@@ -1634,6 +1654,8 @@ function PersonalDashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSetti
 	useEffect(() => {
 		return onRpcMessage("wallet-data-purged", ({ reason }: { reason: string }) => {
 			console.warn(`[Dashboard] Wallet data purged (${reason}) — clearing displayed balances`)
+			cacheScopeRevisionRef.current++
+			chainSnapshotRevisionRef.current.clear()
 			chainLastUpdatedRef.current.clear()
 			commitBalanceReconciliations([])
 			externalDestinationTxidsRef.current.clear()
@@ -1971,7 +1993,7 @@ function PersonalDashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSetti
 		if (btc) {
 			return (
 				<AssetPageErrorBoundary onBack={() => {}} chainName={btc.coin}>
-					<AssetPage chain={btc} balance={balances.get('bitcoin')} onBack={() => {}} hideBack firmwareVersion={firmwareVersion} onViewActivity={handleViewActivity} watchOnly={watchOnly} watchOnlyDeviceId={watchOnlyDeviceId} isHiddenWallet={isHiddenWallet} />
+					<AssetPage chain={btc} balance={balances.get('bitcoin')} balanceLoading={loadingBalances || !initialLoaded} onBack={() => {}} hideBack firmwareVersion={firmwareVersion} onViewActivity={handleViewActivity} watchOnly={watchOnly} watchOnlyDeviceId={watchOnlyDeviceId} isHiddenWallet={isHiddenWallet} />
 				</AssetPageErrorBoundary>
 			)
 		}
@@ -1983,7 +2005,7 @@ function PersonalDashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSetti
 			<AssetPageErrorBoundary onBack={() => setSelectedChain(null)} chainName={selectedChain.coin}>
 				{/* key: remount on chain switch — AssetPage's mount-only effects (address
 				    derive, initial view) must not leak chain A state into chain B */}
-				<AssetPage key={selectedChain.id} chain={selectedChain} balance={bal} onBack={() => { setSelectedChain(null); setSelectedChainAction(undefined); setSelectedChainInitialToken(undefined) }} firmwareVersion={firmwareVersion} initialAction={selectedChainAction} initialToken={selectedChainInitialToken} onViewActivity={handleViewActivity} watchOnly={watchOnly} watchOnlyDeviceId={watchOnlyDeviceId} isHiddenWallet={isHiddenWallet} />
+				<AssetPage key={selectedChain.id} chain={selectedChain} balance={bal} balanceLoading={loadingBalances || !initialLoaded} onBack={() => { setSelectedChain(null); setSelectedChainAction(undefined); setSelectedChainInitialToken(undefined) }} firmwareVersion={firmwareVersion} initialAction={selectedChainAction} initialToken={selectedChainInitialToken} onViewActivity={handleViewActivity} watchOnly={watchOnly} watchOnlyDeviceId={watchOnlyDeviceId} isHiddenWallet={isHiddenWallet} />
 			</AssetPageErrorBoundary>
 		)
 	}
@@ -3231,11 +3253,6 @@ function PersonalDashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSetti
 												<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#60a5fa" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><polyline points="17 1 21 5 17 9" /><path d="M3 11V9a4 4 0 0 1 4-4h14" /><polyline points="7 23 3 19 7 15" /><path d="M21 13v2a4 4 0 0 1-4 4H3" /></svg>
 											) },
 										] : []),
-										...(!watchOnly && dchain.id === 'zcash' && zcashEnabled ? [{
-											id: 'privacy' as const, label: 'Privacy', color: '#a78bfa', bg: 'rgba(167,139,250,0.12)', icon: (
-												<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#a78bfa" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" /></svg>
-											),
-										}] : []),
 									]).map((p) => (
 										<Box
 											key={p.id}

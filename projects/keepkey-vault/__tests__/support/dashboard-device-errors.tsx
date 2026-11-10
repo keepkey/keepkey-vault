@@ -14,6 +14,8 @@ const row = { chainId: 'bitcoin', symbol: 'BTC', balance: '0.25', balanceUsd: 16
 let cached = true
 let readError: Error | null = new Error(busy)
 let staleReply = false
+let holdCache = false
+let finishCache: ((value: unknown) => void) | undefined
 const realNow = Date.now
 let clockOffset = 0
 Date.now = () => realNow() + clockOffset
@@ -22,7 +24,7 @@ mock.module('../../src/mainview/lib/rpc', () => ({
   rpcRequest: async (method: string) => {
     calls.push(method)
     switch (method) {
-      case 'getCachedBalances': return cached ? { balances: [row], updatedAt: Date.now() - 60000 } : null
+      case 'getCachedBalances': return holdCache ? new Promise(resolve => { finishCache = resolve }) : cached ? { balances: [row], updatedAt: Date.now() - 60000 } : null
       case 'getBalances': if (readError) throw readError; return [{ ...row, syncState: staleReply ? 'stale' : 'confirmed' }]
       case 'getAppSettings': return { disabledNetworks: CHAINS.filter(c => c.id !== 'bitcoin').map(c => c.id), passphraseIntroShown: true, zcashPrivacyEnabled: false, moneroEnabled: false, hiveEnabled: false }
       case 'getPendingSwaps': case 'getCustomChains': return []
@@ -73,6 +75,13 @@ const age = () => Array.from(container.querySelectorAll('button')).find(button =
 const push = async (payload: unknown) => {
   await act(async () => { for (const listener of listeners.get('pioneer-error') || []) listener(payload) })
 }
+const walletPush = async (name: string, payload: unknown) => {
+  await act(async () => { for (const listener of listeners.get(name) || []) listener(payload) })
+}
+const releaseCache = async (cachedRow = row) => {
+  await act(async () => { finishCache?.({ balances: [cachedRow], updatedAt: Date.now() - 60000 }) })
+  await settle()
+}
 const result: Record<string, unknown> = {}
 try {
   await mount(); await refresh()
@@ -111,6 +120,29 @@ try {
   result.recovered = { outage: outage(), balance: balance() }
   await push({ severity: 'error', message: busy, url: 'synthetic-balance-server' })
   result.localPush = outage()
+
+  await unmount(); holdCache = true; cached = true; readError = new Error(busy)
+  await mount()
+  await walletPush('balance-updated', { ...row, balance: '7', balanceUsd: 455000, nativeBalanceUsd: 455000 })
+  result.pushBeforeCache = text().includes('7.0000 BTC')
+  await releaseCache()
+  result.newerPushSurvivesCache = text().includes('7.0000 BTC') && !text().includes('0.250000 BTC')
+
+  await unmount(); await mount()
+  await walletPush('balance-updated', { ...row, balance: '0', balanceUsd: 0, nativeBalanceUsd: 0 })
+  await releaseCache()
+  result.confirmedZeroSurvivesCache = text().includes('0 BTC') && !text().includes('0.250000 BTC')
+
+  await unmount(); await mount(); readError = null
+  await refresh()
+  await releaseCache({ ...row, balance: '7', balanceUsd: 455000, nativeBalanceUsd: 455000 })
+  result.completedReadSurvivesCache = text().includes('0.250000 BTC') && !text().includes('7.0000 BTC')
+  readError = new Error(busy)
+
+  await unmount(); await mount()
+  await walletPush('wallet-data-purged', { reason: 'synthetic-wallet-switch' })
+  await releaseCache()
+  result.purgedCacheStaysEmpty = !text().includes('0.250000 BTC') && text().includes('—')
   result.deviceIntents = calls.filter(method => /unlock|pin|sign|broadcast/i.test(method))
 } finally {
   await unmount()

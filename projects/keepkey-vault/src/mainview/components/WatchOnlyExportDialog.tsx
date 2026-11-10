@@ -1,6 +1,7 @@
 import { useUiTranslation } from "../i18n/ui"
 import { useState, useEffect, useCallback } from "react"
 import { Box, Flex, Text, Button, Spinner } from "@chakra-ui/react"
+import { actionToneProps } from "./ui/ActionButton"
 import { BitcoinQrDialog } from "./BitcoinQrDialog"
 import { rpcRequest } from "../lib/rpc"
 import { Z } from "../lib/z-index"
@@ -66,8 +67,9 @@ export function WatchOnlyExportDialog({ accounts, isHiddenWallet, onClose }: { a
 		setTimeout(() => setCopied(false), 1500)
 	}, [data])
 
-	const goldButton = { size: "sm", bg: "kk.gold", color: "black", fontWeight: "600", px: "4", py: "2", _hover: { bg: "kk.goldHover" } } as const
-	const plainButton = { size: "sm", variant: "outline", color: "kk.textSecondary", borderColor: "kk.border", px: "4", py: "2" } as const
+	// Shared primary/neutral variants (components/ui/ActionButton.tsx, theme.ts button recipe).
+	const goldButton = { size: "sm" as const, ...actionToneProps("primary") }
+	const plainButton = { size: "sm", variant: "outline" } as const
 	const pick = (active: boolean) => ({
 		as: "button" as const, px: "2.5", py: "1", borderRadius: "md", fontSize: "xs", border: "1px solid",
 		borderColor: active ? "kk.gold" : "kk.border", color: active ? "kk.gold" : "kk.textSecondary",

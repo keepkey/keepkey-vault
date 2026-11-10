@@ -19,6 +19,7 @@ import * as core from '@keepkey/hdwallet-core'
 import * as Messages from '@keepkey/device-protocol/lib/messages_pb'
 import { WIPE_BUSY_MESSAGE, WIPE_REPLUG_PENDING_MESSAGE } from './device-wipe'
 import { HttpError } from './auth'
+import { deviceOperationContext } from './device-operation'
 
 /** `whileLocked`: set by requireWallet for routes that never ask for the PIN.
  *  `admitted`: this device request's first message already passed the lock check. */
@@ -181,7 +182,9 @@ export function gateRestWrites(transport: any, state: () => GateState) {
   transport.restGated = true
   const ownRequest = <T>(run: () => T): T => {
     const rest = restRequest.getStore()
-    return rest ? restRequest.run({ whileLocked: rest.whileLocked, cachedOnly: rest.cachedOnly, assertCurrent: rest.assertCurrent, onDeviceWrite: rest.onDeviceWrite }, run) : run()
+    const operation = deviceOperationContext.getStore()
+    const runOwned = () => operation ? deviceOperationContext.run({ assertCurrent: operation.assertCurrent }, run) : run()
+    return rest ? restRequest.run({ whileLocked: rest.whileLocked, cachedOnly: rest.cachedOnly, assertCurrent: rest.assertCurrent, onDeviceWrite: rest.onDeviceWrite }, runOwned) : runOwned()
   }
   const call = transport.call.bind(transport)
   transport.call = (type: number, msg: unknown, options?: { omitLock?: boolean }) =>
@@ -191,10 +194,17 @@ export function gateRestWrites(transport: any, state: () => GateState) {
   const write = transport.write.bind(transport)
   transport.write = async (buf: Uint8Array, debugLink: boolean) => {
     const rest = restRequest.getStore()
+    const operation = deviceOperationContext.getStore()
     // Message buffer: '##', then the big-endian message type (hdwallet toMessageBuffer).
+    const messageType = (buf[2] << 8) | buf[3]
+    const reply = REPLIES.has(messageType)
+    if (operation && !operation.admitted && !reply) operation.assertCurrent()
     if (rest && !rest.admitted) rest.assertCurrent?.()
-    const refusal = restWriteRefusal(state(), (buf[2] << 8) | buf[3], rest)
+    const refusal = restWriteRefusal(state(), messageType, rest)
     if (refusal) throw new HttpError(refusal.status, refusal.message)
+    // Replies can finish the old exchange after Cancel, but cannot authorize
+    // a new exchange in a cancelled action's context.
+    if (operation && !reply) operation.admitted = true
     if (rest) { rest.admitted = true; rest.onDeviceWrite?.() }
     return write(buf, debugLink)
   }

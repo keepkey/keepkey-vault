@@ -136,7 +136,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: projects/keepkey-vault/node_modules
-          key: vault-${{ runner.os }}-${{ hashFiles('projects/keepkey-vault/package.json') }}
+          key: vault-${{ runner.os }}-${{ hashFiles('projects/keepkey-vault/package.json', 'projects/keepkey-vault/bun.lock') }}
 
       - name: Cache Rust/Cargo (macOS)
         if: runner.os == 'macOS'
@@ -170,7 +170,10 @@ jobs:
         # floats caret ranges to latest — e.g. @pioneer-platform/pioneer-discovery
         # ^10.0.9 → 10.2.0, which added a strict exports map that blocks the raw
         # `lib/chains.json` subpath import and breaks the vite build.
-        run: cd projects/keepkey-vault && bun install --frozen-lockfile
+        run: |
+          cd projects/keepkey-vault
+          test -f bun.lock || { echo "::error::The audited Vault dependency lockfile is missing"; exit 1; }
+          bun install --frozen-lockfile
         shell: bash
 
       - name: Run Vault unit and submodule-contract tests

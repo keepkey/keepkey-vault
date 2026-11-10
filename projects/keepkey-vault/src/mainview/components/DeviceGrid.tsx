@@ -11,7 +11,7 @@ import { BITCOIN_QR_SCAN_EVENT } from "./BitcoinQrImport"
  * can tell at a glance which wallets have signing live and which are cached.
  */
 import { useState, useEffect, useCallback } from "react"
-import { Box, Flex, Text, Image, Button } from "@chakra-ui/react"
+import { Box, Flex, Text, Image } from "@chakra-ui/react"
 import kkIcon from "../assets/icon.png"
 import { rpcRequest, onRpcMessage } from "../lib/rpc"
 import { retryOnTimeout } from "../lib/retry-on-timeout"
@@ -20,6 +20,7 @@ import { emulatorWalletDetail } from "../../shared/emulatorWallets"
 import { EmulatorWalletChooser, loadEmulatorFirmware, type EmulatorFirmwareChoices } from "./EmulatorWalletChooser"
 import { useEmulatorNames } from "./EmulatorIdentity"
 import { WalletTile as DeviceCard, WalletTileCta as CardCta } from "./WalletTile"
+import { ActionButton } from "./ui/ActionButton"
 import { useSavedVaults, VaultTile, VaultLinkChips } from "./VaultCards"
 import type { VaultIdentity } from "../../shared/vault-identity"
 import { useVaultPortfolios } from "../hooks/useVaultPortfolios"
@@ -234,7 +235,7 @@ export function DeviceGrid({ onViewPortfolio, onOpenVault, onReady, emulatorEnab
 			{(error || vaultError) && (
 				<Flex mb="3" px="3" py="2" gap="3" align="center" bg="rgba(224,140,123,0.12)" border="1px solid" borderColor="rgba(224,140,123,0.32)" borderRadius="lg">
 					<Text flex="1" fontSize="11px" color="var(--rose)" wordBreak="break-all">{error || vaultError}</Text>
-					{error && <Button size="xs" variant="outline" onClick={() => { void refresh() }}>{uiText("Retry")}</Button>}
+					{error && <ActionButton tone="rose" size="xs" onClick={() => { void refresh() }}>{uiText("Retry")}</ActionButton>}
 				</Flex>
 			)}
 
@@ -386,23 +387,20 @@ export function DeviceGrid({ onViewPortfolio, onOpenVault, onReady, emulatorEnab
                 onOpenVault(vault)
             }} />}
 
-            {/* Watch-only import for a machine that never saw the KeepKey */}
-			<Flex justify="center" mt="4" gap="2" wrap="wrap">
-				{multisigEnabled && <Button size="sm" variant="outline" color="var(--gold)" onClick={() => setAddingVault(true)}>{uiText("＋ Add vault")}</Button>}
-				<Box
-					as="button"
-					onClick={() => window.dispatchEvent(new Event(WATCH_ONLY_IMPORT_EVENT))}
-					px="3" py="1.5" borderRadius="10px" fontSize="11px" fontWeight="600" letterSpacing="0.04em"
-					color="var(--gold)" bg="rgba(233,196,106,0.10)" border="1px solid rgba(233,196,106,0.30)"
-					cursor="pointer" _hover={{ bg: "rgba(233,196,106,0.20)" }}
-				>{uiText("Import watch-only (Electrum file or xpub)")}</Box>
-				<Button size="sm" variant="outline" color="var(--gold)" onClick={() => window.dispatchEvent(new Event(BITCOIN_QR_SCAN_EVENT))}>{uiText("Scan Bitcoin QR")}</Button>
+            {/* Watch-only import for a machine that never saw the KeepKey.
+                One shared button style and size for every action in this row. */}
+			<Flex justify="center" align="center" mt="5" gap="2" wrap="wrap">
+				{multisigEnabled && <ActionButton tone="gold" size="sm" onClick={() => setAddingVault(true)}>{uiText("＋ Add vault")}</ActionButton>}
+				<ActionButton tone="gold" size="sm" onClick={() => window.dispatchEvent(new Event(WATCH_ONLY_IMPORT_EVENT))}>
+					{uiText("Import watch-only (Electrum file or xpub)")}
+				</ActionButton>
+				<ActionButton tone="gold" size="sm" onClick={() => window.dispatchEvent(new Event(BITCOIN_QR_SCAN_EVENT))}>{uiText("Scan Bitcoin QR")}</ActionButton>
 			</Flex>
 
 			{/* Grand total + eyeball toggle */}
 			{(grandTotal > 0 || vaultTotalPartial || portfolios.length > 0) && (
 				<Flex justify="center" align="center" gap="2" mt="5">
-					<Text fontSize="11px" color="var(--text-3)" letterSpacing="0.04em">{uiText("Wallets and included vaults:")}<Text as="span" fontWeight="600" color={showValues ? "var(--text-1)" : "var(--text-3)"} fontFamily="mono">
+					<Text fontSize="11px" color="var(--text-3)" letterSpacing="0.04em">{uiText("Wallets and included vaults:")}{" "}<Text as="span" fontWeight="600" color={showValues ? "var(--text-1)" : "var(--text-3)"} fontFamily="mono">
 							{showValues ? `${vaultTotalPartial ? '≥ ' : ''}$${formatUsd(grandTotal)}` : '$ ••••'}
 						</Text>
 					</Text>

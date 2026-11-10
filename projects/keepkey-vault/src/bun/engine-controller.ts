@@ -22,7 +22,7 @@ import type { DeviceFailure } from './device-refusal'
 import { flushRingBuffers, getActiveFlashName, getEmulatorStatus } from './emulator'
 import { wipeOwningDevice, WIPE_BUSY_MESSAGE, WIPE_REPLUG_PENDING_MESSAGE, type WipeHost } from './device-wipe'
 import { awaitingInput, DEVICE_NOT_ASKING_MESSAGE, gateRestWrites, guardInputWait, restRequest } from './device-gate'
-import { DeviceOperationCoordinator, type DeviceOperationOptions } from './device-operation'
+import { DeviceOperationCoordinator, deviceOperationContext, type DeviceOperationOptions } from './device-operation'
 
 const KEEPKEY_VENDOR_ID = 0x2B24 // 11044
 // Firmware manifest lives in keepkey-vault (migrated from keepkey-desktop, which is now stale).
@@ -265,7 +265,13 @@ export class EngineController extends EventEmitter {
       // never wake later and run the original GUI signing/build action.
       if (operation.abort.signal.aborted) throw new HttpError(499, 'KeepKey request cancelled')
       operation.dispatched = true
-      return await action()
+      return await deviceOperationContext.run({ assertCurrent: () => {
+        if (operation.abort.signal.aborted) throw new HttpError(499, 'KeepKey request cancelled')
+        if (this.desktopOperation !== operation || this.wallet !== operation.wallet
+          || this.cachedFeatures?.deviceId !== operation.deviceId || this.seedEthAddress !== operation.seedAddress) {
+          throw new HttpError(409, 'The KeepKey wallet changed. Start the request again with the current wallet.')
+        }
+      } }, action)
     } finally {
       operation.dispatched = false
       operation.abort.signal.removeEventListener('abort', cancelOwnedInput)

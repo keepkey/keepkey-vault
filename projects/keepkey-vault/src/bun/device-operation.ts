@@ -1,6 +1,15 @@
 /** Serializes intentional device work without turning device lock into API unavailability.
  * A cancelled waiter never dispatches work. An unlock that is already on the wire
  * must drain before another owner is admitted, even when its HTTP caller leaves. */
+import { AsyncLocalStorage } from 'node:async_hooks'
+
+/** A Desktop action may await network/build work before its next device call.
+ * Fence each new wire exchange, while allowing an admitted exchange to drain. */
+export const deviceOperationContext = new AsyncLocalStorage<{
+  assertCurrent: () => void
+  admitted?: boolean
+}>()
+
 export interface DeviceOperationSnapshot {
   wallet: unknown | null
   deviceId?: string

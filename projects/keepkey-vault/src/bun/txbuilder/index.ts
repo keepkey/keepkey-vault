@@ -166,11 +166,15 @@ export async function injectTronMemo(tronGridTx: any, memo: string): Promise<any
     const fieldStart = reader.pos
     const tag = reader.uint32()
     const fieldNum = tag >>> 3
+    const wireType = tag & 7
+    // TRON has no protobuf groups. Reject them before skipType can recurse
+    // through an upstream payload with attacker-controlled nesting depth.
+    if (wireType === 3 || wireType === 4) throw new Error('Unsupported TRON protobuf group')
     if (fieldNum >= 11 && insertAt === null) {
       insertAt = fieldStart
       break
     }
-    reader.skipType(tag & 7)
+    reader.skipType(wireType)
   }
   if (insertAt === null) insertAt = origBytes.length
 

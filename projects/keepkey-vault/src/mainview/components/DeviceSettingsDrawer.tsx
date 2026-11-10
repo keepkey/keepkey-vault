@@ -187,8 +187,6 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 	const [browserPromptStatus, setBrowserPromptStatus] = useState("")
 	const [appSettings, setAppSettings] = useState<AppSettings>({ restApiEnabled: false, pioneerApiBase: '', pioneerServers: [], activePioneerServer: '', fiatCurrency: 'USD', numberLocale: 'en-US', walletConnectEnabled: false, btcMultisigEnabled: false, zcashPrivacyEnabled: false, moneroEnabled: false, moneroDaemonUrl: "http://127.0.0.1:18081", moneroNodeMode: "local", moneroRestoreHeight: 0, hiveEnabled: false, emulatorEnabled: false, offlineMode: false, btcNodeEnabled: false, btcNodeType: 'blockbook', btcNodeUrl: '', btcOnboardingShown: false, preReleaseUpdates: false, alphaFirmware: false, addressBookClearsignEnabled: false, privateModeEnabled: false, passphraseIntroShown: false, evmSimulationRpcUrls: {}, disabledNetworks: [], networksChosen: false })
 	const [togglingRestApi, setTogglingRestApi] = useState(false)
-	const [windowFocusState, setWindowFocusState] = useState<{ refs: number; alwaysOnTop: boolean } | null>(null)
-	const [releasingWindowFocus, setReleasingWindowFocus] = useState(false)
 	const [togglingWalletConnect, setTogglingWalletConnect] = useState(false)
 	const [togglingEmulator, setTogglingEmulator] = useState(false)
 	const [moneroBusy, setMoneroBusy] = useState(false)
@@ -225,13 +223,8 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 		rpcRequest<AppSettings>("getAppSettings")
 			.then(s => setAppSettings(s))
 			.catch(() => {})
-		rpcRequest<{ refs: number; alwaysOnTop: boolean }>("getWindowFocusState")
-			.then(s => setWindowFocusState(s))
-			.catch(() => {})
 	}, [open, deviceState.state])
 
-	// Keep window-focus indicator live — bun pushes this whenever alwaysOnTop changes
-	useEffect(() => onRpcMessage('window-focus-changed', (state) => setWindowFocusState(state)), [])
 	useEffect(() => onRpcMessage('pioneer-server-changed', settings => {
 		setAppSettings(settings)
 		window.dispatchEvent(new Event('keepkey-settings-changed'))
@@ -325,22 +318,6 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 			setResetting(false)
 			setResetConfirm(false)
 		}
-	}, [])
-
-	const forceReleaseWindowFocus = useCallback(async () => {
-		setReleasingWindowFocus(true)
-		try {
-			await rpcRequest("forceReleaseWindowFocus", undefined, 5000)
-			const updated = await rpcRequest<{ refs: number; alwaysOnTop: boolean }>("getWindowFocusState")
-			setWindowFocusState(updated)
-		} catch (e: any) { console.error("forceReleaseWindowFocus:", e) }
-		setReleasingWindowFocus(false)
-	}, [])
-
-	const toggleWindowAlwaysOnTop = useCallback(async (enabled: boolean) => {
-		try {
-			await rpcRequest("setWindowAlwaysOnTop", { enabled }, 5000)
-		} catch (e: any) { console.error("setWindowAlwaysOnTop:", e) }
 	}, [])
 
 	const toggleRestApi = useCallback(async (enabled: boolean) => {
@@ -1595,35 +1572,6 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 								)}
 							</Box>
 
-							{/* Always on Top toggle */}
-							<Box mt="3" pt="3" borderTop="1px solid" borderColor="rgba(255,255,255,0.06)">
-								<Flex align="center" justify="space-between">
-									<Flex align="center" gap="3">
-										<Flex align="center" justify="center" w="32px" h="32px" borderRadius="lg" bg="rgba(233,196,106,0.07)">
-											<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--gold)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-												<rect x="3" y="3" width="18" height="18" rx="2" />
-												<path d="M9 9h6M9 12h6M9 15h4" />
-											</svg>
-										</Flex>
-										<Box>
-											<Text fontSize="md" color="kk.textPrimary" fontWeight="500">{uiText("Always on Top")}</Text>
-											<Text fontSize="sm" color="kk.textSecondary" mt="0.5">
-												{windowFocusState === null
-													? uiText("Loading...")
-													: windowFocusState.alwaysOnTop
-														? `Active — ${windowFocusState.refs} request${windowFocusState.refs === 1 ? "" : "s"} holding focus`
-														: uiText("Inactive — window behaves normally")
-												}
-											</Text>
-										</Box>
-									</Flex>
-									<Toggle
-										label={uiText("Always on Top")} checked={windowFocusState?.alwaysOnTop ?? false}
-										onChange={toggleWindowAlwaysOnTop}
-									/>
-								</Flex>
-								<Text fontSize="xs" color="kk.textMuted" mt="1.5" ml="44px">{uiText("Vault raises itself to the front when a signing or pairing request arrives.")}</Text>
-							</Box>
 
 							</VStack>
                     </Section>

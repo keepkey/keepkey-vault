@@ -7,8 +7,14 @@
  *
  * No network calls — uses a captured real TronGrid response as a fixture.
  */
-import { describe, test, expect } from 'bun:test'
-import { injectTronMemo } from '../src/bun/txbuilder'
+import { afterAll, describe, test, expect, mock } from 'bun:test'
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+const profile = mkdtempSync(join(tmpdir(), 'vault-tron-memo-'))
+mock.module('electrobun/bun', () => ({ Utils: { paths: { userData: profile } } }))
+afterAll(() => rmSync(profile, { recursive: true, force: true }))
+const { injectTronMemo } = await import('../src/bun/txbuilder')
 import protobuf from 'protobufjs/light'
 
 // Real TronGrid /wallet/triggersmartcontract response captured 2026-04-22 for
@@ -42,6 +48,15 @@ const FIXTURE_TX = {
 const MEMO = '=:b:bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq'
 
 describe('injectTronMemo', () => {
+  test.each([
+    ['a start group', '0b0c'],
+    ['an unexpected end group', '0c'],
+    ['deeply nested groups', Buffer.concat([Buffer.alloc(200_000, 0x0b), Buffer.alloc(200_000, 0x0c)]).toString('hex')],
+  ])('rejects %s before the protobuf reader can recurse', async (_name, raw_data_hex) => {
+    await expect(injectTronMemo({ ...FIXTURE_TX, raw_data_hex }, MEMO))
+      .rejects.toThrow('Unsupported TRON protobuf group')
+  })
+
   test('writes memo bytes into raw_data.data', async () => {
     const result = await injectTronMemo({ ...FIXTURE_TX }, MEMO)
     const decodedData = Buffer.from(result.raw_data.data, 'hex').toString('utf8')

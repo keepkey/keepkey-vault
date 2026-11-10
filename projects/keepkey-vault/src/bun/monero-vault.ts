@@ -10,6 +10,7 @@ import type { MoneroDiscardGuard, MoneroPendingBroadcast, MoneroPendingStore } f
 import type { MoneroTxLookup } from '../../monero-cli/src/protocol'
 import { firmwareSupportsMonero, MONERO_MIN_FIRMWARE } from '../shared/firmware-versions'
 import { formatXmrAtomic, moneroAddressKind } from '../shared/monero-address'
+import { assertMoneroStandardWallet, moneroHiddenWallet, MoneroWalletPolicyError, MONERO_STANDARD_WALLET_REQUIRED } from '../shared/monero-wallet-policy'
 import { MAX_FEE_ATOMIC, MAX_SIGNED_RESPONSE, MAX_UINT64, MONERO_PATH as PATH, MoneroError, bytesField, checkSignedTransaction, concat, keyImageInitRequest,
   lengthField, numberField, openKeyImage, parseFields, parseSignedTransaction, reviewPlan, signRequest, transferDetails,
   type MoneroSendReview } from './monero-wire'
@@ -90,6 +91,7 @@ type Delegate = {
 type Transport = { delegate: Delegate; lockDuring<T>(operation: () => Promise<T>): Promise<T> }
 type Engine = {
   isEmulator: boolean
+  readonly isPassphraseWallet?: boolean
   wallet: { transport?: unknown } | null
   emuDelegate?: unknown
   currentSeedEthAddress?: string | null
@@ -122,6 +124,8 @@ function empty(enabled: boolean, deviceReady: boolean, error?: string): MoneroVa
     network: 'mainnet', address: '', balanceAtomic: '0', unlockedBalanceAtomic: '0', walletHeight: 0,
     transactions: [], monitorReady: false, syncState: 'not-connected', emulatorReady: false, error, canSend: false, keyImagesSynced: false, spendStateKnown: false }
 }
+/** Safe polling result: never retain another wallet's address/balance while hidden. */
+export const moneroHiddenWalletStatus = (enabled: boolean): MoneroVaultStatus => empty(enabled, false, MONERO_STANDARD_WALLET_REQUIRED)
 function checkedAddress(value: unknown, minor = 0): string {
   const valid = typeof value === 'string' && (minor === 0 ? PRIMARY_ADDRESS.test(value) : moneroAddressKind(value) === 'subaddress')
   if (!valid) throw new MoneroError('The device returned an invalid Monero mainnet address')
@@ -138,6 +142,7 @@ function atomic(value: unknown): string {
 /** Sidecar errors pass through only as the worker's fixed public diagnostics. */
 function publicError(error: unknown, fallback: string): MoneroError {
   if (error instanceof MoneroError) return error
+  if (error instanceof MoneroWalletPolicyError) return new MoneroError(error.message)
   return new MoneroError(error instanceof Error && (PUBLIC_ERRORS as readonly string[]).includes(error.message) ? error.message : fallback)
 }
 function decodeAddress(bytes: Uint8Array, minor = 0): string { return checkedAddress(new TextDecoder('utf-8', { fatal: true }).decode(bytes), minor) }
@@ -217,19 +222,26 @@ export function createMoneroVault({ engine, confirm, getConfig, sidecar = manage
   // Signed txs whose broadcast outcome is unknown, per wallet, persisted. Kept across reconnects and
   // restarts so a retry re-sends these exact bytes instead of building a second, different payment.
   const pending = new Map<string, MoneroPendingBroadcast>()
-  try { for (const record of pendingStore.load()) pending.set(record.wallet, record) }
-  catch { console.warn('[monero] Could not read pending broadcasts') }
-  const persistPending = () => pendingStore.save([...pending.values()])
+  const persistPending = () => { assertMoneroStandardWallet(engine); pendingStore.save([...pending.values()]) }
   /** The node's answer for each wallet's pending tx (this run only). */
   const checks = new Map<string, PendingCheck>()
   // Discarded txs whose inputs are still unspent, per wallet, persisted (see MoneroDiscardGuard).
   const guards = new Map<string, MoneroDiscardGuard>()
-  try { for (const guard of pendingStore.loadGuards?.() ?? []) guards.set(guard.wallet, guard) }
-  catch { console.warn('[monero] Could not read discarded broadcasts') }
-  const persistGuards = () => pendingStore.saveGuards?.([...guards.values()])
-  const clearGuard = (wallet: string) => { guards.delete(wallet); try { persistGuards() } catch { console.warn('[monero] Could not clear a discard guard') } }
+  let persistenceLoaded = false
+  const loadPersistence = () => {
+    assertMoneroStandardWallet(engine)
+    if (persistenceLoaded) return
+    persistenceLoaded = true
+    try { for (const record of pendingStore.load()) pending.set(record.wallet, record) }
+    catch { console.warn('[monero] Could not read pending broadcasts') }
+    try { for (const guard of pendingStore.loadGuards?.() ?? []) guards.set(guard.wallet, guard) }
+    catch { console.warn('[monero] Could not read discarded broadcasts') }
+  }
+  const persistGuards = () => { assertMoneroStandardWallet(engine); pendingStore.saveGuards?.([...guards.values()]) }
+  const clearGuard = (wallet: string) => { assertMoneroStandardWallet(engine); guards.delete(wallet); try { persistGuards() } catch { console.warn('[monero] Could not clear a discard guard') } }
   const walletKey = (current: Snapshot, address: string) => `${current.deviceId}:${address}`
   const snapshot = (): Snapshot | null => {
+    assertMoneroStandardWallet(engine)
     const config = getConfig(), state = engine.getDeviceState(), wallet = engine.wallet
     if (!config.enabled || config.offline || state.state !== 'ready' || !wallet || !state.deviceId) return null
     if (!firmwareSupportsMonero(state.firmwareVersion)) throw new MoneroError(`Monero needs KeepKey firmware ${MONERO_MIN_FIRMWARE} or newer`)
@@ -258,11 +270,13 @@ export function createMoneroVault({ engine, confirm, getConfig, sidecar = manage
     if (activeDelegate) void writeMessage(activeDelegate, 20).catch(() => {})
   }
   const check = (expected: Snapshot, generation: number) => {
+    assertMoneroStandardWallet(engine)
     if (epoch !== generation || !matches(expected)) throw new MoneroError('The Monero wallet or configuration changed; connect again')
   }
   const requireReady = (): Snapshot => {
     const current = snapshot()
     if (!current) throw new MoneroError(getConfig().offline ? 'Monero is unavailable in offline mode' : !getConfig().enabled ? 'Monero is disabled in settings' : 'Unlock and connect a KeepKey before connecting Monero')
+    loadPersistence()
     return current
   }
   const receive = async (current: Snapshot, generation: number, request: number, responseType: number, body: Uint8Array, review: boolean, max = MAX_RESPONSE): Promise<Uint8Array> => {
@@ -360,6 +374,7 @@ export function createMoneroVault({ engine, confirm, getConfig, sidecar = manage
     if (!images || keyImagesStale(images, status)) return 'key-images'
   }
   const settlePending = (wallet: string) => {
+    assertMoneroStandardWallet(engine)
     pending.delete(wallet); checks.delete(wallet)
     try { persistPending() } catch { console.warn('[monero] Could not clear a pending broadcast record') }
   }
@@ -373,7 +388,8 @@ export function createMoneroVault({ engine, confirm, getConfig, sidecar = manage
     try {
       const keyImages = parseSignedTransaction(Uint8Array.from(Buffer.from(record.txHex, 'hex'))).inputs.map(input => input.keyImage)
       found = await sidecar.lookupMoneroTransaction({ txid: record.txid, keyImages })
-    } catch { checks.delete(wallet); return 'unchecked' }
+    } catch { assertMoneroStandardWallet(engine); checks.delete(wallet); return 'unchecked' }
+    assertMoneroStandardWallet(engine)
     if (pending.get(wallet) !== record) return 'unchecked'
     if (found.state !== 'unknown') { settlePending(wallet); void sidecar.refreshMoneroWatch?.().catch(() => {}); return 'sent' }
     if (found.keyImages.includes('spent')) { settlePending(wallet); return 'superseded' }
@@ -385,6 +401,7 @@ export function createMoneroVault({ engine, confirm, getConfig, sidecar = manage
   /** Broadcast the pending bytes once. Only an explicit rejection means nothing was sent; any other failure,
    *  including the "Not relayed" a node answers for a tx it already has, is settled by looking the txid up. */
   const relayPending = async (wallet: string, retry: boolean) => {
+    assertMoneroStandardWallet(engine)
     const record = pending.get(wallet)!
     const outcome = async () => {
       const result = await resolvePending(wallet)
@@ -395,6 +412,7 @@ export function createMoneroVault({ engine, confirm, getConfig, sidecar = manage
     if (retry) { const first = await resolvePending(wallet); if (first === 'sent') return; if (first === 'superseded') throw new MoneroError(SUPERSEDED) }
     try { await sidecar.relayMoneroTransaction!({ txHex: record.txHex }) }
     catch (error) {
+      assertMoneroStandardWallet(engine)
       const message = error instanceof Error ? error.message : ''
       // "double spend": these inputs are spent, by this tx (then it was sent) or by another one; ask the node which.
       if (message === 'The daemon rejected the transaction: double spend') return outcome()
@@ -402,6 +420,7 @@ export function createMoneroVault({ engine, confirm, getConfig, sidecar = manage
       if (message.startsWith('The daemon rejected the transaction')) { settlePending(wallet); throw error }
       return outcome()
     }
+    assertMoneroStandardWallet(engine)
     settlePending(wallet)
     void sidecar.refreshMoneroWatch?.().catch(() => {})
   }
@@ -426,9 +445,11 @@ export function createMoneroVault({ engine, confirm, getConfig, sidecar = manage
       finally { activeDelegate = null }
     })
   const getStatus = async (): Promise<MoneroVaultStatus> => {
+    if (moneroHiddenWallet(engine)) { stop(); return moneroHiddenWalletStatus(!!getConfig().enabled) }
     let current: Snapshot | null
     try { current = snapshot() } catch { stop(); return empty(!!getConfig().enabled, false, 'The Monero configuration or device transport is unavailable') }
     if (!current) { stop(); const config = getConfig(); return empty(config.enabled, false, config.offline ? 'Monero is unavailable in offline mode' : undefined) }
+    loadPersistence()
     if (!bound) return withPendingHint({ ...empty(true, true), restoreHeight: current.config.restoreHeight, ...(connectionPhase ? { connectionPhase } : {}) })
     if (bound.snapshot.key !== current.key || bound.snapshot.wallet !== current.wallet || bound.snapshot.transport !== current.transport) { stop(); return withPendingHint(empty(true, true)) }
     const authorized = bound, generation = epoch
@@ -441,6 +462,7 @@ export function createMoneroVault({ engine, confirm, getConfig, sidecar = manage
       lastGood = statusFrom(value, current, authorized.address)
       return withSendState(lastGood, current)
     } catch {
+      if (moneroHiddenWallet(engine)) { stop(); return moneroHiddenWalletStatus(!!getConfig().enabled) }
       if (!matches(current) || epoch !== generation) { stop(); return empty(!!getConfig().enabled, false) }
       if (lastGood) return withSendState({ ...lastGood, monitorReady: false, syncState: 'unreachable', error: 'The Monero monitor is temporarily unavailable; showing the last wallet update' }, current)
       throw new MoneroError('The Monero watch wallet status is unavailable')
@@ -451,6 +473,7 @@ export function createMoneroVault({ engine, confirm, getConfig, sidecar = manage
     invalidate: stop,
     getStatus,
     async connect({ showDisplay = false }: { showDisplay?: boolean } = {}): Promise<MoneroVaultStatus> {
+      assertMoneroStandardWallet(engine)
       if (typeof showDisplay !== 'boolean') throw new MoneroError('Invalid Monero address display option')
       if (busy) throw new MoneroError('A Monero device request is already in progress')
       const current = requireReady()
@@ -491,7 +514,7 @@ export function createMoneroVault({ engine, confirm, getConfig, sidecar = manage
         if (!viewKey) throw new MoneroError('The KeepKey did not authorize Monero monitoring')
         // Device-approved monitoring access belongs to this wallet, independently of node availability.
         if (watchStore && current.watchScope) {
-          try { await watchStore.saveWatch(current.watchScope, address, viewKey); await watchStore.saveAddress(current.watchScope,address,0,address) }
+          try { await watchStore.saveWatch(current.watchScope, address, viewKey); check(current, generation); await watchStore.saveAddress(current.watchScope,address,0,address) }
           catch { console.warn('[monero] Monitoring access could not be saved securely') }
           check(current,generation)
         }
@@ -514,6 +537,7 @@ export function createMoneroVault({ engine, confirm, getConfig, sidecar = manage
     },
     /** The primary address (minor 0) or receive subaddress 0/minor, read from the device. */
     async getAddress({ showDisplay = false, minor = 0 }: { showDisplay?: boolean; minor?: number } = {}): Promise<{ address: string; network: 'mainnet'; displayed: boolean; minor: number }> {
+      assertMoneroStandardWallet(engine)
       if (typeof showDisplay !== 'boolean') throw new MoneroError('Invalid Monero address display option')
       if (!Number.isSafeInteger(minor) || minor < 0 || minor > MAX_RECEIVE_SUBADDRESS) throw new MoneroError(`Choose a subaddress from 0 to ${MAX_RECEIVE_SUBADDRESS}`)
       if (busy) throw new MoneroError('A Monero device request is already in progress')
@@ -546,6 +570,7 @@ export function createMoneroVault({ engine, confirm, getConfig, sidecar = manage
     },
     /** Device key images (530..535) for every wallet output, imported so the watch wallet knows which outputs are spent. */
     async syncKeyImages(): Promise<MoneroVaultStatus> {
+      assertMoneroStandardWallet(engine)
       if (busy) throw new MoneroError('A Monero device request is already in progress')
       const current = requireReady(); bindingFor(current)
       if (!sidecar.exportMoneroOutputs || !sidecar.importMoneroKeyImages) throw new MoneroError('Monero key-image sync is unavailable in this build')
@@ -620,6 +645,7 @@ export function createMoneroVault({ engine, confirm, getConfig, sidecar = manage
     /** Build with the watch wallet, decode with the adapter, and refuse anything but the user's payment plus own change.
      *  `max` sends the whole unlocked balance minus the fee and one atomic unit, which stays as the change output. */
     async prepareSend(params: { address?: unknown; amountAtomic?: unknown; max?: unknown } = {}): Promise<MoneroSendReview & { prepareId: string; max: boolean }> {
+      assertMoneroStandardWallet(engine)
       const { address, amountAtomic, max = false } = params ?? {}
       const kind = moneroAddressKind(address)
       if (kind === 'integrated') throw new MoneroError('Integrated addresses are not supported by this preview')
@@ -705,6 +731,7 @@ export function createMoneroVault({ engine, confirm, getConfig, sidecar = manage
     },
     /** Sign the reviewed plan once using the selected firmware protocol, verify it, then relay. */
     async send(params: { prepareId?: unknown } = {}): Promise<{ txid: string }> {
+      assertMoneroStandardWallet(engine)
       const id = params?.prepareId, reviewed = prepared
       if (typeof id !== 'string' || !reviewed || reviewed.id !== id || Date.now() > reviewed.expires) throw new MoneroError('This Monero send review expired; prepare it again')
       if (busy) throw new MoneroError('A Monero device request is already in progress')
@@ -754,6 +781,7 @@ export function createMoneroVault({ engine, confirm, getConfig, sidecar = manage
     },
     /** Re-broadcast the same signed bytes after an unknown relay outcome; never builds a new transaction. */
     async retryRelay(): Promise<{ txid: string }> {
+      assertMoneroStandardWallet(engine)
       const current = requireReady(), binding = bindingFor(current), wallet = walletKey(current, binding.address), record = pending.get(wallet)
       if (!record) throw new MoneroError('No Monero transaction is waiting to be broadcast')
       if (busy) throw new MoneroError('A Monero device request is already in progress')
@@ -763,10 +791,11 @@ export function createMoneroVault({ engine, confirm, getConfig, sidecar = manage
       finally { busy = false }
     },
     /** Unresolved unknown-outcome sends on record, for every wallet. */
-    pendingCount: () => pending.size,
+    pendingCount: () => { assertMoneroStandardWallet(engine); if (getConfig().enabled) loadPersistence(); return pending.size },
     /** Forget a pending tx the user chose to give up on. Allowed only when, asked right now, the node does
      *  not have it and every input is still unspent; a tx the node has is settled as sent instead. */
     async discardPending(params: { confirm?: unknown } = {}): Promise<{ outcome: 'discarded' | 'sent' | 'superseded'; txid: string }> {
+      assertMoneroStandardWallet(engine)
       if (params?.confirm !== true) throw new MoneroError('Confirm discarding the pending transaction')
       const current = requireReady(), binding = bindingFor(current), wallet = walletKey(current, binding.address), record = pending.get(wallet)
       if (!record) throw new MoneroError('No Monero transaction is waiting to be broadcast')

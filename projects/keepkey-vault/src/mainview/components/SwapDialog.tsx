@@ -22,6 +22,7 @@ import { nativeMaxSpendableAmount, normalizeDecimals, tokenMaxSpendableAmount } 
 import { getAssetIcon } from "../../shared/assetLookup"
 import { validateAddress } from "../../shared/address-validation"
 import { balanceUnverifiedReason, isBalanceUnverified } from "../../shared/balance-display-state"
+import { isLocalDeviceAccessError } from "../../shared/device-access-error"
 import { mergeTrustedBalanceSnapshot } from "../../shared/balance-reconciliation"
 import type { SwapAsset, SwapQuote, ChainBalance, CustomToken, SwapStatusUpdate, SwapTrackingStatus, PendingSwap, SwapUiState, SwapUiCommand, SwapHealth } from "../../shared/types"
 import { SOLANA_BLIND_SIGNING_REQUIRED } from "../../shared/types"
@@ -40,6 +41,7 @@ import { ClearSignReportCard } from "./ClearSignReportCard"
 import { namedProviderLine, swapReportNeedsAttention } from "../../shared/clearsign-report"
 import { versionCompare } from "../../shared/firmware-versions"
 import { scopeSwapBalances, swapAccountAmount } from "../../shared/swap-account-balances"
+import { sameSwapAsset, swapNetworkIdentity } from "../../shared/swap-network-identity"
 import { AssetPickerDialog } from "./AssetPickerDialog"
 import { DocsLink } from "./DocsLink"
 import { DOCS_LINKS, watch } from "../../shared/docs-links"
@@ -56,7 +58,8 @@ import {
   normalizeSlippageBps,
   parseCustomSlippagePercent,
 } from "../../shared/slippage"
-import { KeepKeyDevice, SpinningDevice } from "./v3"
+import { KeepKeyDevice, RouteMap, SpinningDevice } from "./v3"
+import { getSwapperAnimation } from "../lib/swapper-animations"
 import calculatingGif from "../assets/swap/calculating.gif"
 import shiftingGif from "../assets/swap/shifting.gif"
 import completedGif from "../assets/swap/completed.gif"
@@ -780,13 +783,10 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
 
   const { t } = useTranslation("swap")
   const { fmt, fmtCompact, symbol: fiatSymbol, locale } = useFiat()
-  const { evmAddresses } = useEvmAddresses()
   const { firmwareVersion } = useDeviceState()
   // Local EVM address selection — scoped to this dialog so switching here doesn't
   // mutate the global selected index in AssetPage. null = use global selectedIndex.
   const [evmAddressIndexOverride, setEvmAddressIndexOverride] = useState<number | null>(null)
-  const effectiveEvmIndex = evmAddressIndexOverride ?? evmAddresses.selectedIndex
-  const signingAccount = evmAddresses.addresses.find(a => a.addressIndex === effectiveEvmIndex)
 
   // ── State ─────────────────────────────────────────────────────────
   // A retained dialog can show another receipt while an older execution is
@@ -800,12 +800,23 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
   const [assetLoadError, setAssetLoadError] = useState<string | null>(null)
   const [balances, setBalances] = useState<ChainBalance[]>([])
   const [loadingBalances, setLoadingBalances] = useState(false)
+  const [balanceInitialLoaded, setBalanceInitialLoaded] = useState(false)
+  const [balanceReloadEpoch, setBalanceReloadEpoch] = useState(0)
+  const [sourceBalanceReads, setSourceBalanceReads] = useState<Record<string, 'pending' | 'settled' | 'blocked'>>({})
+  const swapOpenGeneration = useRef(0)
+  const balancePushRevision = useRef(0)
+  const chainBalancePushRevision = useRef(new Map<string, number>())
   // User-added custom tokens, refetched whenever the asset picker opens so a
   // freshly-added contract shows up on the next open without restarting.
   const [customTokens, setCustomTokens] = useState<CustomToken[]>([])
 
   const [fromAsset, setFromAsset] = useState<SwapAsset | null>(null)
   const [toAsset, setToAsset] = useState<SwapAsset | null>(null)
+  const evmEnabled = open && (fromAsset?.chainFamily === 'evm' || toAsset?.chainFamily === 'evm'
+    || (!fromAsset && (initialFromAsset?.chainFamily === 'evm' || chain?.chainFamily === 'evm')))
+  const { evmAddresses, initialLoaded: evmInitialLoaded, refresh: refreshEvmAddresses } = useEvmAddresses(evmEnabled)
+  const effectiveEvmIndex = evmAddressIndexOverride ?? evmAddresses.selectedIndex
+  const signingAccount = evmAddresses.addresses.find(a => a.addressIndex === effectiveEvmIndex)
   useEffect(() => { onOutputAssetChange?.(toAsset?.chainId ?? null) }, [toAsset?.chainId, onOutputAssetChange])
   // Which side opened the asset picker — null when closed. Single shared
   // AssetPickerDialog rendered at modal-over-modal z-index for both sides.
@@ -1261,30 +1272,53 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
   // for hidden wallets and non-EVM fromAddress never resolves (it reads
   // balances.find()?.address). getBalances derives addresses live from the
   // device and persists nothing for hidden wallets.
+  const mergeBalanceRead = useCallback((rows: ChainBalance[], requestedRevision: number) => {
+    setBalances(previous => {
+      const next = new Map(previous.map(row => [row.chainId, row]))
+      for (const row of rows) {
+        if ((chainBalancePushRevision.current.get(row.chainId) ?? 0) > requestedRevision) continue
+        const current = next.get(row.chainId)
+        if (current?.updatedAt && row.updatedAt && current.updatedAt > row.updatedAt) continue
+        const merged = mergeTrustedBalanceSnapshot(current, row, false)
+        if (merged) next.set(row.chainId, merged)
+      }
+      return [...next.values()]
+    })
+  }, [])
   useEffect(() => {
     if (!open) {
       setLoadingBalances(false)
+      setBalanceInitialLoaded(false)
       return
     }
     let cancelled = false
+    const generation = swapOpenGeneration.current
+    const requestedRevision = balancePushRevision.current
     setLoadingBalances(true)
+    setBalanceInitialLoaded(false)
     rpcRequest<{ balances: ChainBalance[]; updatedAt: number } | null>('getCachedBalances', undefined, 5000)
-      .then((result) => {
-        if (cancelled) return
+      .catch(() => null) // A cache miss/failure still gets one live read.
+      .then(async (result) => {
+        if (cancelled || generation !== swapOpenGeneration.current) return
         if (result?.balances?.length) {
-          setBalances(result.balances)
-          setLoadingBalances(false)
+          mergeBalanceRead(result.balances, requestedRevision)
           return
         }
-        return rpcRequest<ChainBalance[]>('getBalances', undefined, 120000)
-          .then((live) => {
-            if (!cancelled && Array.isArray(live)) setBalances(live)
-          })
-          .finally(() => { if (!cancelled) setLoadingBalances(false) })
+        const live = await rpcRequest<ChainBalance[]>('getBalances', undefined, 120000)
+        if (cancelled || generation !== swapOpenGeneration.current) return
+        if (Array.isArray(live)) mergeBalanceRead(live, requestedRevision)
+        // EVM spendable values are owner-scoped. An aggregate portfolio reply
+        // does not mean its separately-delivered owner snapshot is ready yet.
+        await refreshEvmAddresses()
       })
-      .catch(() => { if (!cancelled) setLoadingBalances(false) })
+      .catch(() => {})
+      .finally(() => {
+        if (cancelled || generation !== swapOpenGeneration.current) return
+        setLoadingBalances(false)
+        setBalanceInitialLoaded(true)
+      })
     return () => { cancelled = true }
-  }, [open])
+  }, [open, balanceReloadEpoch, mergeBalanceRead, refreshEvmAddresses])
 
   // ── Live balance sync — keep sendMax math current ──────────────────
   // Dashboard subscribes to balance-updated; SwapDialog must too, or
@@ -1292,6 +1326,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
   useEffect(() => {
     if (!open) return
     return onRpcMessage('balance-updated', (updated: ChainBalance) => {
+      chainBalancePushRevision.current.set(updated.chainId, ++balancePushRevision.current)
       setBalances(prev => {
         const idx = prev.findIndex(b => b.chainId === updated.chainId)
         if (idx === -1) return [...prev, updated]
@@ -1301,6 +1336,16 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
       })
     })
   }, [open])
+
+  useEffect(() => onRpcMessage('wallet-data-purged', () => {
+    swapOpenGeneration.current++
+    balancePushRevision.current++
+    chainBalancePushRevision.current.clear()
+    setBalances([])
+    setSourceBalanceReads({})
+    setBalanceInitialLoaded(false)
+    setBalanceReloadEpoch(epoch => epoch + 1)
+  }), [])
 
   // ── Load user-added custom tokens ─────────────────────────────────
   // Refetch each time the picker is opened so a token added in the previous
@@ -1543,41 +1588,62 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
     assets.filter(a => a.chainFamily === 'evm').map(a => a.chainId)), [balances, balance, evmAddresses, effectiveEvmIndex, assets])
   const fromBalanceEntry = useMemo(() => fromAsset ? accountBalances.find(b => b.chainId === fromAsset.chainId) : undefined,
     [fromAsset, accountBalances])
+  const fromBalance = useMemo(() => fromAsset ? swapAccountAmount(fromBalanceEntry, fromAsset) : null,
+    [fromAsset, fromBalanceEntry])
 
   /* Confidence in the ASSET being swapped. A token proven directly over RPC
    * keeps its real figure even while its parent chain is degraded — exactly
    * what mergeTrustedBalanceSnapshot merges through. */
   const fromBalanceUnverified = useMemo(
-    () => !!fromAsset && isBalanceUnverified(fromBalanceEntry, fromAsset.caip),
-    [fromAsset, fromBalanceEntry],
+    () => !!fromAsset && fromBalance === null,
+    [fromAsset, fromBalance],
   )
   /* 'missing' = no answer for this chain yet; only 'degraded' means the refresh failed. */
   const fromBalanceReason = useMemo(
-    () => fromAsset ? balanceUnverifiedReason(fromBalanceEntry, fromAsset.caip) : undefined,
-    [fromAsset, fromBalanceEntry],
+    () => fromAsset ? balanceUnverifiedReason(fromBalanceEntry, fromAsset.caip) ?? (fromBalance === null ? 'missing' : undefined) : undefined,
+    [fromAsset, fromBalanceEntry, fromBalance],
   )
 
   /* A cached snapshot can lack the chain being swapped from (it was not in the
    * last refresh). Fetch live once per chain instead of waiting on another screen
    * to push it; after that settles, a still-missing chain is reported as such. */
-  const liveFetchedChains = useRef(new Set<string>())
-  // Bumped on close: a fetch from an earlier opening must not write into this one.
-  // (Not an effect cleanup: setting loadingBalances re-runs the effect, and a
-  // cleanup would cancel the very fetch that is in flight.)
-  const swapOpenGeneration = useRef(0)
+  const sourceBalanceKey = fromAsset
+    ? `${fromAsset.chainId}:${fromAsset.caip || fromAsset.asset}:${fromAsset.chainFamily === 'evm' ? effectiveEvmIndex : 'native'}`
+    : ''
+  const sourceBalanceRead = sourceBalanceReads[sourceBalanceKey]
+  // A new selection is pending on its FIRST paint, before its effect can start.
+  // Keep that state until both the portfolio read and EVM owner snapshot settle.
+  const fromBalancePending = fromBalanceUnverified && (!balanceInitialLoaded || loadingBalances
+    || (fromAsset?.chainFamily === 'evm' && !evmInitialLoaded) || !sourceBalanceRead || sourceBalanceRead === 'pending')
   useEffect(() => {
-    if (!open) { swapOpenGeneration.current++; liveFetchedChains.current.clear() }
+    if (!open) { swapOpenGeneration.current++; setSourceBalanceReads({}) }
   }, [open])
   useEffect(() => {
-    if (!open || !fromAsset || fromBalanceEntry || loadingBalances || liveFetchedChains.current.has(fromAsset.chainId)) return
-    liveFetchedChains.current.add(fromAsset.chainId)
+    if (!open || !fromAsset || !fromBalanceUnverified || !balanceInitialLoaded || loadingBalances
+      || (fromAsset.chainFamily === 'evm' && !evmInitialLoaded) || sourceBalanceRead) return
+    const sourceKey = sourceBalanceKey
     const generation = swapOpenGeneration.current
+    const requestedRevision = balancePushRevision.current
+    let outcome: 'settled' | 'blocked' = 'settled'
+    setSourceBalanceReads(previous => ({ ...previous, [sourceKey]: 'pending' }))
     setLoadingBalances(true)
     rpcRequest<ChainBalance[]>('getBalances', undefined, 120000)
-      .then(live => { if (generation === swapOpenGeneration.current && Array.isArray(live)) setBalances(live) })
-      .catch(() => {})
-      .finally(() => { if (generation === swapOpenGeneration.current) setLoadingBalances(false) })
-  }, [open, fromAsset, fromBalanceEntry, loadingBalances])
+      .then(async live => {
+        if (generation !== swapOpenGeneration.current) return
+        if (Array.isArray(live) && live.length > 0 && live.every(row => row.syncState === 'stale')) outcome = 'blocked'
+        if (Array.isArray(live)) mergeBalanceRead(live, requestedRevision)
+        await refreshEvmAddresses()
+      })
+      .catch(error => { if (isLocalDeviceAccessError(error)) outcome = 'blocked' })
+      .finally(() => {
+        if (generation !== swapOpenGeneration.current) return
+        setSourceBalanceReads(previous => ({ ...previous, [sourceKey]: outcome }))
+        setLoadingBalances(false)
+      })
+    // No effect cleanup: completing a different selection cannot cancel the
+    // active read. Only close/purge retire its generation and discard replies.
+  }, [open, fromAsset, fromBalanceUnverified, balanceInitialLoaded, loadingBalances, evmInitialLoaded,
+    sourceBalanceRead, sourceBalanceKey, mergeBalanceRead, refreshEvmAddresses])
 
   /* Confidence in the chain's NATIVE balance, which is a different question:
    * a directly-confirmed SPL token says nothing about the SOL that pays for
@@ -1587,9 +1653,6 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
     if (!fromAsset) return false
     return isBalanceUnverified(fromBalanceEntry, CHAINS.find(c => c.id === fromAsset.chainId)?.caip)
   }, [fromAsset, fromBalanceEntry])
-
-  const fromBalance = useMemo(() => fromAsset ? swapAccountAmount(fromBalanceEntry, fromAsset) : null,
-    [fromAsset, fromBalanceEntry])
 
   /* Native account-model MAX fee reservation — frontend pre-clamps the balance
    * by a conservative fee reserve so the displayed, quoted, and submitted
@@ -1867,15 +1930,20 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
   // frontend reserve safeMax == balance, so this never fires beyond exceedsBalance.
   const safeMaxAmountNum = fromAsset && fromBalance ? parseFloat(maxSpendableAmount(fromAsset, fromBalance, 'safe')) : 0
   const exceedsSafeMax = !isMax && !exceedsBalance && !isNaN(amountNum) && amountNum > 0 && Number.isFinite(safeMaxAmountNum) && safeMaxAmountNum > 0 && amountNum > safeMaxAmountNum
-  const sameAsset = fromAsset && toAsset && fromAsset.asset === toAsset.asset
+  const fromNetwork = fromAsset ? swapNetworkIdentity(fromAsset) : null
+  const toNetwork = toAsset ? swapNetworkIdentity(toAsset) : null
+  const networkMismatch = !!(fromNetwork?.conflict || toNetwork?.conflict)
+  const sameAsset = !!(fromAsset && toAsset && sameSwapAsset(fromAsset, toAsset))
 
   const fromAddress = useMemo(() => {
     if (!fromAsset) return ''
     // EVM: always derive from the effective address index so fromAddress,
     // fromBalance, and fromEvmAddressIndex are always in sync.
-    if (fromAsset.chainFamily === 'evm' && evmAddresses.addresses.length > 0) {
+    if (fromAsset.chainFamily === 'evm') {
       const selectedAddr = evmAddresses.addresses.find(a => a.addressIndex === effectiveEvmIndex)
-      if (selectedAddr?.address) return selectedAddr.address
+      // An aggregate/prop address cannot identify this signing account. Wait
+      // for its owner snapshot rather than quote owner N with index zero.
+      return selectedAddr?.address || ''
     }
     // Non-EVM: prefer the prop address when chain matches (AssetPage already derived it)
     if (address && chain && fromAsset.chainId === chain.id) return address
@@ -1898,9 +1966,9 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
     // cache is empty (e.g. balance server unavailable). Without this fallback,
     // toAddress was '' until a balance-updated event happened to stream the dest
     // chain — leaving canQuote false and the receive panel a silent dead-end.
-    if (toAsset.chainFamily === 'evm' && evmAddresses.addresses.length > 0) {
+    if (toAsset.chainFamily === 'evm') {
       const selectedAddr = evmAddresses.addresses.find(a => a.addressIndex === effectiveEvmIndex)
-      if (selectedAddr?.address) return selectedAddr.address
+      return selectedAddr?.address || ''
     }
     const cb = balances.find(b => b.chainId === toAsset.chainId)
     return cb?.address || ''
@@ -1971,7 +2039,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
   // resolver to populate a real receive address.
   const toAddressIsXpub = !!toAddress && !useCustomAddress && XPUB_RE.test(toAddress)
 
-  const canQuote = !!(fromAsset && toAsset && !sameAsset && validAmount && fromAddress && toAddress && !toAddressIsXpub && !exceedsBalance && !exceedsSafeMax && !customAddressError)
+  const canQuote = !!(fromAsset && toAsset && !networkMismatch && !sameAsset && validAmount && fromAddress && toAddress && !toAddressIsXpub && !exceedsBalance && !exceedsSafeMax && !customAddressError)
 
   // Human reason a quote can't fire right now, but ONLY for the cases that
   // otherwise render nothing — a missing send/receive address. Conditions that
@@ -1979,12 +2047,14 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
   // address, max-insufficient, invalid amount) are excluded so we don't double
   // up. Non-null ⇒ we're in a silent dead-end the user can recover from.
   const quoteBlockReason = useMemo(() => {
-    if (!fromAsset || !toAsset || sameAsset || !validAmount) return null
+    if (!fromAsset || !toAsset) return null
+    if (networkMismatch) return uiText("The asset and network do not match. Select the asset again.")
+    if (sameAsset || !validAmount) return null
     if (exceedsBalance || exceedsSafeMax || customAddressError) return null
     if (!fromAddress) return t("resolvingSendAddress", "Preparing your {{symbol}} send address…", { symbol: fromAsset.symbol })
     if (!toAddress && !toAddressIsXpub) return t("resolvingReceiveAddress", "Preparing your {{symbol}} receive address…", { symbol: toAsset.symbol })
     return null
-  }, [fromAsset, toAsset, sameAsset, validAmount, exceedsBalance, exceedsSafeMax, customAddressError, fromAddress, toAddress, toAddressIsXpub, t])
+  }, [fromAsset, toAsset, networkMismatch, sameAsset, validAmount, exceedsBalance, exceedsSafeMax, customAddressError, fromAddress, toAddress, toAddressIsXpub, t, uiText])
 
   // A missing DESTINATION address is the dead-end the manual button can fix by
   // deriving on demand. A missing SOURCE address is a transient that the quote
@@ -2094,6 +2164,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
   const previewBalanceBlocked = !!previewBuild?.balance && !previewBuild.balance.sufficient
   const reviewConfirmLocked =
     phase === 'review' && (
+      networkMismatch ||
       riskLocked ||
       refreshingQuote ||
       previewLoading ||
@@ -2102,6 +2173,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
       previewBalanceBlocked
     )
   const reviewConfirmLockLabel =
+    networkMismatch ? uiText("The asset and network do not match. Select the asset again.") :
     swapRisk.blocked ? "Route exceeds cost limit" :
     riskLocked ? "Review and acknowledge trade cost" :
     refreshingQuote ? t("refreshingQuote", "Refreshing quote...") :
@@ -2200,7 +2272,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
     return () => {
       if (quoteTimerRef.current) clearTimeout(quoteTimerRef.current)
     }
-  }, [fromAsset?.caip, toAsset?.caip, sendAmount, sendIsMax, fromAddress, toAddress, exceedsBalance, fromBalance, slippageBps, requoteTick, destAddressError, toAddressIsXpub, effectiveEvmIndex])
+  }, [fromAsset?.caip, toAsset?.caip, networkMismatch, sendAmount, sendIsMax, fromAddress, toAddress, exceedsBalance, fromBalance, slippageBps, requoteTick, destAddressError, toAddressIsXpub, effectiveEvmIndex])
 
   // ── Flip ──────────────────────────────────────────────────────────
   const handleFlip = useCallback(() => {
@@ -2230,6 +2302,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
   // ── Execute swap ──────────────────────────────────────────────────
   const handleExecuteSwap = useCallback(async () => {
     if (!quote || !fromAsset || !toAsset) return
+    if (networkMismatch) { setError(uiText("The asset and network do not match. Select the asset again.")); return }
     const generation = executionUiGeneration.current
     if (riskLocked) { setError(swapRisk.blocked ? 'This route exceeds the 5% cost limit for trades of $1,000 or more.' : 'Review and acknowledge the trade cost before signing.'); return }
     if (phase === 'review') {
@@ -2428,7 +2501,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
       // Require a fresh quote and review before another execute request.
       setQuoteFetchedAt(0)
     }
-  }, [quote, quoteFetchedAt, fromAsset, toAsset, sendAmount, sendIsMax, fromBalance, fromAddress, toAddress, slippageBps, balances, phase, previewLoading, previewError, previewBuild, useCustomAddress, riskLocked, riskAcknowledged, swapRisk.blocked, swapRisk.quoteMaxAgeMs, effectiveEvmIndex])
+  }, [quote, quoteFetchedAt, fromAsset, toAsset, sendAmount, sendIsMax, fromBalance, fromAddress, toAddress, slippageBps, balances, phase, previewLoading, previewError, previewBuild, useCustomAddress, networkMismatch, uiText, riskLocked, riskAcknowledged, swapRisk.blocked, swapRisk.quoteMaxAgeMs, effectiveEvmIndex])
 
   // ── Reset ─────────────────────────────────────────────────────────
   const reset = useCallback(() => {
@@ -4023,11 +4096,22 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                     <ProviderBadge swapper={quote.swapper} integration={quote.integration} size={16} variant="row" />
                   </Box>
                 </Flex>
+                <Box data-trade-route-map>
+                  <RouteMap
+                    from={{ iconUrl: fromAsset.icon, caip: fromAsset.caip, chainCaip: fromNetwork?.chainCaip, color: fromNetwork?.color, glyph: fromAsset.symbol.slice(0, 1) }}
+                    to={{ iconUrl: toAsset.icon, caip: toAsset.caip, chainCaip: toNetwork?.chainCaip, color: toNetwork?.color, glyph: toAsset.symbol.slice(0, 1) }}
+                    integration={quote.swapper || quote.integration || resolveProvider(quote.swapper || quote.integration).label}
+                    showIntegrationLabel={false}
+                    centerImageUrl={getSwapperAnimation(quote.swapper, quote.integration)}
+                  />
+                </Box>
                 <Flex align="center" gap="2">
                   <AssetIcon caip={fromAsset.caip} iconUrl={fromAsset.icon} chainCaip={chainBadgeCaip(fromAsset)} size={32} alt={fromAsset.symbol} />
                   <Box flex="1" minW="0">
                     <Text fontSize="10px" color="kk.textMuted">{uiText("You send")}</Text>
                     <Text fontSize="sm" fontWeight="700" color="kk.textPrimary" wordBreak="break-word">{displayAmount} {fromAsset.symbol}</Text>
+                    <Text fontSize="11px" color="kk.textSecondary" data-trade-from-network>{fromNetwork?.name}</Text>
+                    <Text fontSize="10px" fontFamily="mono" color="kk.textMuted" wordBreak="break-all">{fromNetwork?.networkId}</Text>
                     {swapRisk.inputUsd !== undefined && (
                       <Text fontSize="11px" fontFamily="mono" color="kk.textMuted" data-trade-input-fiat>{fmt(swapRisk.inputUsd)}</Text>
                     )}
@@ -4036,6 +4120,8 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                   <Box flex="1" minW="0" textAlign="right">
                     <Text fontSize="10px" color="kk.textMuted">{uiText("Expected receive")}</Text>
                     <Text fontSize="sm" fontWeight="700" color="var(--teal)" wordBreak="break-word">{formatBalance(quote.expectedOutput)} {toAsset.symbol}</Text>
+                    <Text fontSize="11px" color="kk.textSecondary" data-trade-to-network>{toNetwork?.name}</Text>
+                    <Text fontSize="10px" fontFamily="mono" color="kk.textMuted" wordBreak="break-all">{toNetwork?.networkId}</Text>
                     {swapRisk.expectedUsd !== undefined && (
                       <Text fontSize="11px" fontFamily="mono" color="kk.textMuted" data-trade-output-fiat>{fmt(swapRisk.expectedUsd)}</Text>
                     )}
@@ -4093,6 +4179,8 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                 {showDetails && (
                   <Box id="swap-fees-details" bg="rgba(0,0,0,0.3)" borderRadius="md" p="3" mt="1">
                     <VStack gap="2" align="stretch">
+                      <ReviewRow label={`${t("from")} · CAIP-19`}><span data-trade-from-caip>{fromNetwork?.assetCaip || '—'}</span></ReviewRow>
+                      <ReviewRow label={`${t("to")} · CAIP-19`}><span data-trade-to-caip>{toNetwork?.assetCaip || '—'}</span></ReviewRow>
                       <ReviewRow label={t("rate")}>
                         1 {fromAsset.symbol} = {formatBalance((parseFloat(quote.expectedOutput) / parseFloat(displayAmount || '1')).toString())} {toAsset.symbol}
                       </ReviewRow>
@@ -4422,9 +4510,12 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                       <Flex justify="space-between" align="center" mb="2">
                         <VStack gap="0" align="flex-start">
                           <Text fontSize="9px" color="kk.textMuted" fontWeight="600" textTransform="uppercase" letterSpacing="0.05em">{isZcashSource ? t("zcashTransparentAvailable") : t("available")}</Text>
-                          <Text fontSize="xs" fontFamily="mono" color="kk.textSecondary" fontWeight="600">
-                            {fromBalance ? `${formatBalance(fromBalance)} ${fromAsset.symbol}` : '\u2014'}
-                          </Text>
+                          <Flex align="center" gap="1.5" minH="20px" aria-busy={fromBalancePending}>
+                            <Text fontSize="xs" fontFamily="mono" color="kk.textSecondary" fontWeight="600">
+                              {fromBalance !== null ? `${formatBalance(fromBalance)} ${fromAsset.symbol}` : '\u2014'}
+                            </Text>
+                            {(fromBalancePending || loadingBalances) && <Spinner size="xs" color="kk.gold" aria-label={t('loadingBalances')} />}
+                          </Flex>
                           {fromBalance && hasFromPrice && (
                             <Text fontSize="11px" color="kk.textSecondary" fontWeight="500">{fmtCompact(parseFloat(fromBalance) * fromPriceUsd)}</Text>
                           )}
@@ -4477,7 +4568,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                             borderRadius="md"
                             _hover={{ bg: isMax ? "kk.goldHover" : "rgba(233,196,106,0.1)" }}
                             onClick={() => { setIsMax(true); setMaxReserveMode('safe'); setAmount(""); setFiatAmount("") }}
-                            disabled={busy}
+                            disabled={busy || fromBalance === null}
                           >
                             {t("max")}
                           </Button>
@@ -4561,15 +4652,18 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                       {exceedsBalance && (
                         <Text fontSize="10px" color="kk.error" mt="1" fontWeight="600">{t("insufficientBalance")}</Text>
                       )}
-                      {fromBalanceUnverified && fromAsset && (fromBalanceReason === 'missing' && loadingBalances ? (
-                        <Text fontSize="10px" color="kk.textMuted" mt="1" fontWeight="600">
+                      <Box minH="30px" mt="1" role="status" aria-live="polite">
+                      {fromBalanceUnverified && fromAsset && (fromBalancePending ? (
+                        <Text fontSize="10px" color="kk.textMuted" fontWeight="600">
                           {t("balanceLoading", {
                             defaultValue: "Loading {{symbol}} balance… MAX is available once it arrives.",
                             symbol: fromAsset.symbol,
                           })}
                         </Text>
+                      ) : sourceBalanceRead === 'blocked' ? (
+                        <Text fontSize="10px" color="kk.textMuted">{uiText('Balance unverified')}</Text>
                       ) : (
-                        <Text fontSize="10px" color="kk.gold" mt="1" fontWeight="600">
+                        <Text fontSize="10px" color="kk.gold" fontWeight="600">
                           {fromBalanceReason === 'missing' ? t("balanceMissing", {
                             defaultValue: "{{symbol}} balance was not returned by the last refresh, so MAX is unavailable. Enter an amount, or refresh and try again.",
                             symbol: fromAsset.symbol,
@@ -4579,6 +4673,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                           })}
                         </Text>
                       ))}
+                      </Box>
                       {exceedsSafeMax && fromAsset && (
                         <Text fontSize="10px" color="kk.gold" mt="1" fontWeight="600">
                           {t("exceedsSafeMax", {

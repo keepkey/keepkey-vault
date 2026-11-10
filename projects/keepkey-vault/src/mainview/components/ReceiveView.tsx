@@ -10,7 +10,7 @@ import { PathEditDialog } from "./PathEditDialog"
 import { DocsLink } from "./DocsLink"
 import { DOCS_LINKS, watch } from "../../shared/docs-links"
 import type { ChainDef } from "../../shared/chains"
-import { evmAssetReceiveUri } from '../../shared/vault-asset-account'
+import { receivePaymentUri } from '../../shared/receive-payment-uri'
 
 const MAX_NEW_ADDRESSES_PER_SESSION = 10
 
@@ -272,15 +272,9 @@ export function ReceiveView({
 		)
 	}
 
-	// EIP-681 URI for EVM chains so mobile wallets (Rainbow, etc.) auto-detect send
-	let evmRequest: string | undefined
-	try { if (chain.chainFamily === 'evm') evmRequest = evmAssetReceiveUri(chain.networkId,assetCaip || chain.caip,address!) }
+	let qrContent: string
+	try { qrContent = receivePaymentUri(chain, address!, assetCaip || chain.caip) }
 	catch { return <Text role="alert" color="red.300">{uiText("The receive asset and account network do not match. Select the asset again.")}</Text> }
-	const qrContent = evmRequest
-		? evmRequest
-		: chain.chainFamily === 'solana'
-			? `solana:${address!}`
-			: address!
 	const qrSvg = generateQRSvg(qrContent, 4, 2)
 	const remaining = MAX_NEW_ADDRESSES_PER_SESSION - newAddressCount
 
@@ -303,7 +297,7 @@ export function ReceiveView({
 							w="100%"
 							h="100%"
 							dangerouslySetInnerHTML={{ __html: qrSvg }}
-							sx={{ '& svg': { width: '100%', height: '100%', display: 'block' } }}
+							css={{ '& svg': { width: '100%', height: '100%', display: 'block' } }}
 						/>
 					</Box>
 					{/* Verify-on-device requires the device — in watch-only only via onShowOnDevice (matching KeepKey). */}

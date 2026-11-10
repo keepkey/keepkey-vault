@@ -15,6 +15,7 @@ import { useMoneroStatus, type MoneroStatusState } from "../hooks/useMoneroStatu
 import { useMoneroBalanceVerification } from "../hooks/useMoneroBalanceVerification"
 import { MoneroConnectionDetails } from "./MoneroConnectionInfo"
 import { ReceiveView } from "./ReceiveView"
+import { MONERO_STANDARD_WALLET_REQUIRED } from "../../shared/monero-wallet-policy"
 
 const MONERO_PATH = [0x8000002c, 0x80000080, 0x80000000]
 const MAX_SUBADDRESS = 199
@@ -108,6 +109,7 @@ function MoneroAmounts({ view, privateMode }: { view: MoneroBalanceView; private
 /** Opening XMR starts the normal device consent. A failed/cancelled attempt waits for Retry. */
 export function MoneroConnectCard({ client, monero }: { client: MoneroClient; monero: MoneroStatusState }) {
 	const uiText = useUiTranslation()
+	const hiddenWalletBlocked = monero.status?.error === MONERO_STANDARD_WALLET_REQUIRED
 	const [settings, setSettings] = useState<{ moneroDaemonUrl: string; moneroRestoreHeight: number } | null>(null)
 	const [connecting, setConnecting] = useState(false)
 	const [nodeWaiting, setNodeWaiting] = useState(false)
@@ -115,6 +117,7 @@ export function MoneroConnectCard({ client, monero }: { client: MoneroClient; mo
 	const attempted = useRef(false)
 	const mounted = useRef(true)
 	const connect = useCallback(async () => {
+		if (hiddenWalletBlocked) return
 		setConnecting(true); setError(null)
 		try {
 			const next = await client.getSettings()
@@ -130,10 +133,10 @@ export function MoneroConnectCard({ client, monero }: { client: MoneroClient; mo
 			if (mounted.current) monero.setStatus(status)
 		} catch (e) { if (mounted.current) setError(errorText(e, "Unable to open Monero. Try again.")) }
 		finally { if (mounted.current) setConnecting(false) }
-	}, [client, monero.setStatus])
+	}, [client, monero.setStatus, hiddenWalletBlocked])
 	useEffect(() => {
 		mounted.current = true
-		if (monero.status && !attempted.current) { attempted.current = true; void connect() }
+		if (monero.status && !hiddenWalletBlocked && !attempted.current) { attempted.current = true; void connect() }
 		return () => { mounted.current = false }
 	}, [!!monero.status, connect])
 	useEffect(() => {
@@ -153,6 +156,9 @@ export function MoneroConnectCard({ client, monero }: { client: MoneroClient; mo
 	}, [connect, connecting])
 	const openingWallet = connecting && monero.status?.connectionPhase === 'wallet'
 	const checkingNode = ['checking','switching','waiting'].includes(monero.status?.connection?.state ?? '')
+	if (hiddenWalletBlocked) return <Box data-monero-connect="" py="4" maxW="520px">
+		<Text role="alert" color="var(--rose)" fontSize="13px">{uiText(MONERO_STANDARD_WALLET_REQUIRED)}</Text>
+	</Box>
 	return (
 		<Box data-monero-connect="" py="4" maxW="520px">
 			<MoneroConnectionDetails status={monero.status} />
