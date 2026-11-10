@@ -2207,7 +2207,10 @@ function PersonalDashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSetti
 								opacity={hasBalance || pending || unknown || refreshing ? 1 : 0.55}
 							>
 								<Flex align="center" gap="3">
-									<Image src={getAssetIcon(chain.caip)} alt={chain.symbol} w="32px" h="32px" borderRadius="full" flexShrink={0} bg={chain.color} />
+									{/* Neutral backdrop, like the orbit and centre icons. Several logos cut their mark out as
+									    transparency (Optimism's "OP", Hive) or draw it in the brand colour (BNB), so a
+									    chain.color backdrop filled the mark in and left a plain coloured disc. */}
+									<Image src={getAssetIcon(chain.caip)} alt={chain.symbol} w="32px" h="32px" borderRadius="full" flexShrink={0} bg="var(--ink-2)" boxShadow="0 0 0 1px var(--line)" />
 									<Box flex="1" minW="0">
 										<Flex align="baseline" justify="space-between" gap="2">
 											<Text fontSize="14px" fontWeight="600" color="var(--text-0)" lineHeight="1.2" truncate>
