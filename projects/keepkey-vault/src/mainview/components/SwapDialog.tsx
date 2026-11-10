@@ -695,12 +695,13 @@ function AssetSelector({ label, selected, onOpenPicker, disabled }: AssetSelecto
               <VStack gap="0.5" align="center" minW="0" maxW="100%">
                 <Flex align="center" justify="center" gap="2">
                   <Text fontSize="lg" fontWeight="800" color="kk.textPrimary" lineHeight="1.1">{selected.symbol}</Text>
-                  {/* GAS vs TOKEN — never let a token masquerade as the chain coin */}
+                  {/* NATIVE vs TOKEN — never let a token masquerade as the chain coin.
+                      "GAS" was wrong for UTXO coins (BTC has no gas) and read as a fee. */}
                   <Box
                     bg={isToken ? "rgba(255,255,255,0.06)" : "rgba(233,196,106,0.14)"}
                     color={isToken ? "kk.textMuted" : "kk.gold"}
                     px="1.5" py="0.5" borderRadius="4px" fontSize="9px" fontWeight="700" letterSpacing="0.06em">
-                    {isToken ? "TOKEN" : "GAS"}
+                    {isToken ? "TOKEN" : "NATIVE"}
                   </Box>
                 </Flex>
                 {/* Network — distinguishes USDC-on-Ethereum from USDC-on-Optimism */}
