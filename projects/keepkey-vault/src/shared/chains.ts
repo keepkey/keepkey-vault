@@ -348,8 +348,9 @@ const CONFIGS: ChainConfig[] = [
     // SLIP-0048 active-role key: m/48'/13'/1'/0'/0' (matches Ledger / Hive Keychain).
     // Was m/44'/1275'/0'/0/0 (v1, BIP-44) — non-interoperable; see hiveRolePath().
     defaultPath: [0x80000030, 0x8000000D, 0x80000001, 0x80000000, 0x80000000],
-    explorerAddressUrl: 'https://hiveblocks.com/@{{address}}',
-    explorerTxUrl: 'https://hiveblocks.com/tx/{{txid}}',
+    // hiveblocks.com started returning 502 (Nov 2026); hivehub.dev uses the same /@account and /tx/<id> paths.
+    explorerAddressUrl: 'https://hivehub.dev/@{{address}}',
+    explorerTxUrl: 'https://hivehub.dev/tx/{{txid}}',
     minFirmware: '7.15.0',  // Hive handler ships in firmware 7.15.0 (alpha), same as Zcash
   },
   {
