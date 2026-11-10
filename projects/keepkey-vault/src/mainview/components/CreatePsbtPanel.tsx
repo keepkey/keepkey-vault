@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next'
 import { useUiTranslation } from "../i18n/ui"
 import { useState, useEffect, useCallback, useRef } from "react"
 import { Box, Flex, Text, Button, Input, Spinner } from "@chakra-ui/react"
+import { actionToneProps } from "./ui/ActionButton"
 import { base64 } from "@scure/base"
 import { BitcoinQrDialog } from "./BitcoinQrDialog"
 import { rpcRequest } from "../lib/rpc"
@@ -82,7 +83,8 @@ export function CreatePsbtPanel({ deviceId }: { deviceId?: string }) {
 		}
 	}, [info, account, deviceId, to, amount, isMax, feeLevel, t, uiText])
 
-	const goldButton = { size: "sm", bg: "kk.gold", color: "black", fontWeight: "600", px: "4", py: "2", _hover: { bg: "kk.goldHover" } } as const
+	// Shared primary/neutral variants (components/ui/ActionButton.tsx, theme.ts button recipe).
+	const goldButton = { size: "sm" as const, ...actionToneProps("primary") }
 	const pick = (active: boolean) => ({
 		as: "button" as const, px: "2.5", py: "1", borderRadius: "md", fontSize: "xs", border: "1px solid",
 		borderColor: active ? "kk.gold" : "kk.border", color: active ? "kk.gold" : "kk.textSecondary",

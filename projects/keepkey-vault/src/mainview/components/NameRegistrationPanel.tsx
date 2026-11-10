@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { Box, Button, Flex, HStack, IconButton, Input, Spinner, Text, VStack, Badge } from "@chakra-ui/react"
+import { actionToneProps } from "./ui/ActionButton"
 import { FaTag, FaExternalLinkAlt, FaCopy, FaCheck } from "react-icons/fa"
 import { useTranslation } from "react-i18next"
 import type { ChainDef } from "../../shared/chains"
@@ -372,20 +373,20 @@ export function NameRegistrationPanel({ chain, address, availableBalance, watchO
 					</Button>
 				) : null}
 				{phase === "input" && (
-					<Button size="sm" bg="kk.gold" color="black" px="4" py="2" _hover={{ bg: "kk.goldHover" }} disabled={!canBuild || loading} onClick={handleBuild}>
+					<Button {...actionToneProps("primary")} size="sm" disabled={!canBuild || loading} onClick={handleBuild}>
 						{loading ? t("building") : t("registerButton")}
 					</Button>
 				)}
 				{phase === "built" && (
-					<Button size="sm" bg="kk.gold" color="black" px="4" py="2" _hover={{ bg: "kk.goldHover" }} disabled={loading || watchOnly} onClick={handleSign}>
+					<Button {...actionToneProps("primary")} size="sm" disabled={loading || watchOnly} onClick={handleSign}>
 						{loading ? t("signing") : t("sign")}
 					</Button>
 				)}
 				{phase === "signing" && (
-					<Button size="sm" bg="kk.gold" color="black" px="4" py="2" disabled>{t("signing")}</Button>
+					<Button {...actionToneProps("primary")} size="sm" disabled>{t("signing")}</Button>
 				)}
 				{phase === "signed" && (
-					<Button size="sm" bg="kk.gold" color="black" px="4" py="2" _hover={{ bg: "kk.goldHover" }} disabled={loading || watchOnly} onClick={handleBroadcast}>
+					<Button {...actionToneProps("primary")} size="sm" disabled={loading || watchOnly} onClick={handleBroadcast}>
 						{loading ? t("broadcasting") : t("broadcast")}
 					</Button>
 				)}

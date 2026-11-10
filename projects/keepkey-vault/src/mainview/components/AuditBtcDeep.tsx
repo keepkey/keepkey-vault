@@ -9,6 +9,7 @@ import { useUiTranslation } from "../i18n/ui"
  */
 import { useState, useRef, useEffect, useCallback } from "react"
 import { Box, Flex, Text, Button, VStack, Spinner } from "@chakra-ui/react"
+import { actionToneProps } from "./ui/ActionButton"
 import { rpcRequest, onRpcMessage } from "../lib/rpc"
 
 function formatSats(sats: number): string {
@@ -173,7 +174,7 @@ export function AuditBtcDeep({ onRecovered }: AuditBtcDeepProps) {
                   <Flex key={i} justify="space-between"><Text fontSize="10px" fontFamily="mono" color="kk.textMuted" truncate maxW="240px">{r.path} · {r.scriptType}</Text><Text fontSize="10px" color="kk.gold">{formatSats(r.balanceSats)}</Text></Flex>
                 ))}
               </VStack>
-              <Button size="sm" w="100%" bg="kk.gold" color="black" fontWeight="600" _hover={{ bg: "kk.goldHover" }} onClick={() => sweep(true)}>{uiText("Sweep to main address")}</Button>
+              <Button {...actionToneProps("primary")} size="sm" w="100%" onClick={() => sweep(true)}>{uiText("Sweep to main address")}</Button>
             </>
           )
       )}
@@ -189,7 +190,7 @@ export function AuditBtcDeep({ onRecovered }: AuditBtcDeepProps) {
             </Box>
             <Flex gap="2">
               <Button flex="1" size="sm" variant="ghost" color="kk.textSecondary" onClick={() => setPhase('results')}>{uiText("Back")}</Button>
-              <Button flex="1" size="sm" bg="kk.gold" color="black" fontWeight="600" _hover={{ bg: "kk.goldHover" }} onClick={() => sweep(false)}>{uiText("Confirm & broadcast")}</Button>
+              <Button {...actionToneProps("primary")} flex="1" size="sm" onClick={() => sweep(false)}>{uiText("Confirm & broadcast")}</Button>
             </Flex>
           </>
         ) : (
