@@ -1339,6 +1339,7 @@
   "ma21cd6d": "Approve agent password fill",
   "ma2564d38": "assets",
   "ma262edd6": "Verify contract, addresses and exact memo",
+  "ma2687919": "The asset and network do not match. Select the asset again.",
   "ma275958e": "BIP-85 child mnemonic",
   "ma2817ff1": "Use a remote node",
   "ma2cc7c1d": "Fill selected field",

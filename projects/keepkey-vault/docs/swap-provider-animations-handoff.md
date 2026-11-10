@@ -102,3 +102,33 @@ Anything that doesn't match falls back to `shapeshift` (which itself currently f
 3. Verify on a real swap (Confirm screen, rendered by `keepkey-stack/projects/keepkey-vault-v11/projects/keepkey-vault/src/mainview/components/SwapDialog.tsx`) — the integration label below the centerpiece should match the animation; the gold value-dot should still travel through cleanly.
 
 That's the whole loop — once the assets exist the wire-up is mechanical.
+
+## Regression checks (2026-11-10)
+
+The route map now lives inside the single trade summary. The summary header names
+the provider once; the map keeps its provider glyph/animation without repeating
+that label. Network names and CAIP-2 identities distinguish same-symbol routes,
+and Fees & details retains the full asset CAIP-19 values. Reduced motion stops
+both the traveling dot and animated centerpiece.
+
+From `projects/keepkey-vault`, start the in-memory fixture in one terminal:
+
+```sh
+CORE_QA_PORT=5209 bun __tests__/fixtures/core-regression/server.ts
+```
+
+With `playwright` and `@playwright/test` available, run these scripts sequentially
+in another terminal. Set `CHROME_EXECUTABLE` when using a system Chrome binary;
+`PLAYWRIGHT_MODULE` and `PLAYWRIGHT_TEST_MODULE` can point to external module files.
+
+```sh
+CORE_QA_PORT=5209 CORE_QA_EVIDENCE=/tmp/vault-swap-qa node __tests__/fixtures/core-regression/swap-balance-loading.mjs
+CORE_QA_PORT=5209 CORE_QA_EVIDENCE=/tmp/vault-swap-qa node __tests__/fixtures/core-regression/swap-review-smoke.mjs
+```
+
+The loading runner covers delayed owner/portfolio replies, MAX gating, cached
+values, completed failures, local device contention, close/reopen races, deferred
+manual quotes for account #2, Ethereum → Arbitrum network identity, mismatched
+network rejection, and reduced motion. The review suite checks unique amounts and
+costs, disclosures, risk acknowledgments, blocked trades, mobile fit, Back, and
+Close. Both use synthetic data and do not sign, broadcast, or access an app profile.

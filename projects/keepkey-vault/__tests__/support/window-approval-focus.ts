@@ -123,15 +123,49 @@ function harness() {
   }
   const callbacks = createCallbacks(dependencies)
   let server: ReturnType<typeof startRestApi> | undefined
+  const nativeServers: Array<ReturnType<typeof Bun.serve>> = []
+  const pendingRequests = new Set<Promise<{ status: number; body: string }>>()
   const apiKey = auth.pair({ name: `focus-fixture-${++sequence}`, url: 'https://focus.example.invalid', imageUrl: '' })
   const request = (route: string, body?: unknown, access?: string) => {
-    server ??= startRestApi(engine, auth, 0, { ...callbacks.rest, onApiLog() {}, getVersion: () => 'synthetic', getSessionEpoch: () => 0 } as any, '127.0.0.1')
-    return fetch(`http://127.0.0.1:${server.port}${route}`, {
-      method: body === undefined ? 'GET' : 'POST', headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json', ...(access ? { 'X-KeepKey-Device-Access': access } : {}) },
-      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-    })
+    if (!server) {
+      // startRestApi's public stop wrapper does not return native stop promises.
+      // Capture only this synchronous creation so teardown can await them.
+      const serve = Bun.serve
+      Bun.serve = ((options: any) => {
+        const native = serve(options)
+        nativeServers.push(native)
+        return native
+      }) as typeof Bun.serve
+      try {
+        server = startRestApi(engine, auth, 0, { ...callbacks.rest, onApiLog() {}, getVersion: () => 'synthetic', getSessionEpoch: () => 0 } as any, '127.0.0.1')
+      } finally { Bun.serve = serve }
+    }
+    const url = `http://127.0.0.1:${server.port}${route}`
+    const pending = (async () => {
+      const response = await fetch(url, {
+        method: body === undefined ? 'GET' : 'POST',
+        headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json', Connection: 'close', ...(access ? { 'X-KeepKey-Device-Access': access } : {}) },
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+      })
+      // A status/header arrival does not finish the native HTTP request. Drain
+      // its body before releasing either side of this fixture's connection.
+      return { status: response.status, body: await response.text() }
+    })()
+    pendingRequests.add(pending)
+    void pending.then(() => pendingRequests.delete(pending), () => pendingRequests.delete(pending))
+    return pending
   }
-  return { auth, callbacks, calls, events, device, request, unlock: () => { device.locked = false; unlock.resolve() }, stop: () => server?.stop(true) }
+  const stop = async () => {
+    // A failed assertion while pairing is pending must still let its HTTP
+    // handler finish before the fixture closes its server or SQLite profile.
+    auth.rejectPairing()
+    device.locked = false
+    unlock.resolve()
+    await Promise.allSettled([...pendingRequests])
+    await Promise.all(nativeServers.splice(0).map(native => native.stop(false)))
+    server = undefined
+  }
+  return { auth, callbacks, calls, events, device, request, unlock: () => { device.locked = false; unlock.resolve() }, stop }
 }
 const info = (id: string) => ({ id, method: '/eth/sign', address: 'synthetic', message: 'synthetic' })
 const pairInfo = () => ({ name: `Approval ${++sequence}`, url: 'https://approval.example.invalid', imageUrl: '' })
@@ -164,7 +198,7 @@ try {
       h.unlock()
       const foreground = (await request).status
       results.reads = { health, cacheMiss, cacheLeases, pending, foreground, foregroundLeases: h.device.acquisitions, calls: h.calls }
-    } finally { h.stop() }
+    } finally { await h.stop() }
   }
   for (const outcome of ['approve', 'reject', 'abort', 'timeout']) {
     const h = harness(), abort = new AbortController(), id = `sign-${outcome}`
@@ -188,7 +222,7 @@ try {
       else if (outcome === 'reject') h.auth.rejectPairing()
       else expireApproval(600_000)
       results[`pair-${outcome}`] = { pending, status: (await request).status, done: h.callbacks.state(), calls: h.calls }
-    } finally { h.stop() }
+    } finally { await h.stop() }
   }
   {
     const h = harness()
@@ -202,7 +236,7 @@ try {
       const afterSign = h.callbacks.state()
       h.auth.rejectPairing(); await pair
       results.overlap = { both, afterSign, done: h.callbacks.state(), calls: h.calls }
-    } finally { h.stop() }
+    } finally { await h.stop() }
   }
   {
     const h = harness()

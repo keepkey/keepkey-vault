@@ -30,6 +30,8 @@
       "__tests__/window-approval-focus.test.ts"
     ],
     "balances-receive-history": [
+      "__tests__/asset-page-loading.test.ts",
+      "__tests__/evm-addresses-loading.test.ts",
       "__tests__/asset-catalog-sync.test.ts",
       "__tests__/selected-token-balance.test.ts",
       "__tests__/balance-reconciliation.test.ts",
@@ -64,6 +66,7 @@
       "src/bun/offline-policy.test.ts"
     ],
     "standard-send-safety": [
+      "__tests__/send-form-requests.test.ts",
       "__tests__/max-send.test.ts",
       "__tests__/evm-max-send.test.ts",
       "__tests__/cosmos-max-send.test.ts",
@@ -90,6 +93,8 @@
       "src/bun/txbuilder/cosmos.test.ts"
     ],
     "swap-safety": [
+      "__tests__/route-map.test.ts",
+      "__tests__/swap-network-identity.test.ts",
       "__tests__/swap-api-assets.test.ts",
       "__tests__/swap-classify.test.ts",
       "__tests__/swap-discovery.test.ts",

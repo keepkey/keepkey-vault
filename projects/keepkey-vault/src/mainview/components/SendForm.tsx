@@ -1,7 +1,7 @@
 import { useUiTranslation } from "../i18n/ui"
 import { useState, useEffect, useCallback, useMemo, useRef, Fragment } from "react"
 import { useTranslation } from "react-i18next"
-import { Box, Flex, Text, VStack, Button, Input } from "@chakra-ui/react"
+import { Box, Flex, Text, VStack, Button, Input, Spinner } from "@chakra-ui/react"
 import { rpcRequest } from "../lib/rpc"
 import { playSent } from "../lib/sounds"
 import { formatBalance } from "../lib/formatting"
@@ -22,6 +22,20 @@ import { balanceUnverifiedReason, isBalanceUnverified } from "../../shared/balan
 import { normalizeAmountInput, decimalAmount } from '../../shared/locale'
 
 type SendPhase = 'input' | 'built' | 'signed' | 'broadcast'
+
+interface SigningContext {
+	requestKey: string
+	chainId: string
+	signMethod: string
+	recipient: string
+	amount: string
+	isMax: boolean
+	isTokenSend: boolean
+	displaySymbol: string
+	displayBalance: string
+	activeCaip: string
+	address: string | null
+}
 
 
 // ── Confetti ────────────────────────────────────────────────────────────────
@@ -58,6 +72,8 @@ interface SendFormProps {
 	chain: ChainDef
 	address: string | null
 	balance?: ChainBalance
+	/** A balance lookup is pending; retain known amounts while it refreshes. */
+	balanceLoading?: boolean
 	token?: TokenBalance | null
 	/** Confidence in the selected owner's token; independent of native gas. */
 	tokenBalanceUnverified?: boolean
@@ -67,7 +83,7 @@ interface SendFormProps {
 	evmAddressIndex?: number      // EVM multi-address: derivation index for buildTx
 }
 
-export function SendForm({ chain, address, balance, token, tokenBalanceUnverified, onClearToken, xpubOverride, scriptTypeOverride, evmAddressIndex }: SendFormProps) {
+export function SendForm({ chain, address, balance, balanceLoading = false, token, tokenBalanceUnverified, onClearToken, xpubOverride, scriptTypeOverride, evmAddressIndex }: SendFormProps) {
   const uiText = useUiTranslation()
 
 	const { t } = useTranslation("send")
@@ -89,6 +105,7 @@ export function SendForm({ chain, address, balance, token, tokenBalanceUnverifie
 	const [error, setError] = useState<string | null>(null)
 
 	const [buildResult, setBuildResult] = useState<BuildTxResult | null>(null)
+	const [signingContext, setSigningContext] = useState<SigningContext | null>(null)
 	const [signedTx, setSignedTx] = useState<any>(null)
 	const [txid, setTxid] = useState<string | null>(null)
 	const [copied, setCopied] = useState(false)
@@ -107,6 +124,40 @@ export function SendForm({ chain, address, balance, token, tokenBalanceUnverifie
 
 	// Reset form when token selection changes
 	const tokenCaip = token?.caip ?? null
+	// Balances/prices can update without changing the send. Only actual owner,
+	// asset and input changes retire work already awaiting an RPC response.
+	const owner = xpubOverride || address || ''
+	// The owner hook can be pending/empty while its default index is zero.
+	// Only the matching device-derived address makes that EVM sender usable.
+	const senderReady = chain.chainFamily !== 'evm' || !!address
+	const requestKey = JSON.stringify([chain.id, chain.signMethod, tokenCaip,
+		chain.chainFamily === 'evm' ? owner.toLowerCase() : owner,
+		scriptTypeOverride, evmAddressIndex, recipient, amount, usdAmount, inputMode,
+		memo, isMax, feeLevel, feeMode, customGasPrice, customGasLimit, customSatPerVByte])
+	const requestKeyRef = useRef(requestKey)
+	const operationGeneration = useRef(0)
+	const mounted = useRef(true)
+	if (requestKeyRef.current !== requestKey) {
+		requestKeyRef.current = requestKey
+		operationGeneration.current++
+	}
+	useEffect(() => {
+		mounted.current = true
+		return () => { mounted.current = false; operationGeneration.current++ }
+	}, [])
+	const operationIsCurrent = (generation: number) => mounted.current && generation === operationGeneration.current
+	useEffect(() => {
+		setPhase('input')
+		setBuildResult(null)
+		setSigningContext(null)
+		setSignedTx(null)
+		setTxid(null)
+		setError(null)
+		setLoading(false)
+	}, [requestKey])
+	// Hide retired review controls during the render before effects clear them.
+	const currentSigningContext = signingContext?.requestKey === requestKey ? signingContext : null
+	const visiblePhase = phase === 'input' || currentSigningContext ? phase : 'input'
 	useEffect(() => {
 		setPhase('input')
 		setBuildResult(null)
@@ -285,7 +336,9 @@ export function SendForm({ chain, address, balance, token, tokenBalanceUnverifie
 	}, [recipient, activeCaip, addressValid, vaultDestinationRetry])
 
 	const handleBuild = useCallback(async () => {
+		if (!senderReady) return
 		if (!recipient || (!amount && !isMax)) return
+		if (isMax && balanceLoading && activeAssetUnverified) return
 		if (!isMax && (invalidAmountInput || canonicalAmount === null || !Number.isFinite(amountNum) || amountNum <= 0)) {
 			setError(t('invalidAmount', { defaultValue: 'Enter an ungrouped decimal amount, for example 1.5. Thousands separators are not accepted.' })); return
 		}
@@ -309,6 +362,12 @@ export function SendForm({ chain, address, balance, token, tokenBalanceUnverifie
 
 		setLoading(true)
 		setError(null)
+		const generation = ++operationGeneration.current
+		const context: SigningContext = {
+			requestKey, chainId: chain.id, signMethod: chain.signMethod,
+			recipient, amount: canonicalAmount ?? '', isMax, isTokenSend,
+			displaySymbol, displayBalance, activeCaip, address,
+		}
 
 		try {
 			const result = await rpcRequest<BuildTxResult>('buildTx', {
@@ -330,71 +389,95 @@ export function SendForm({ chain, address, balance, token, tokenBalanceUnverifie
 				satPerVByte: useCustom && chain.chainFamily === 'utxo' ? Number(satRate) : undefined,
 			}, 60000)
 
+			if (!operationIsCurrent(generation)) return
+			setSigningContext(context)
 			setBuildResult(result)
 			setPhase('built')
 		} catch (e: any) {
-			setError(e.message || t("failedToBuild"))
+			if (operationIsCurrent(generation)) setError(e.message || t("failedToBuild"))
+		} finally {
+			if (operationIsCurrent(generation)) setLoading(false)
 		}
-		setLoading(false)
-	}, [chain, recipient, amount, canonicalAmount, amountNum, invalidAmountInput, locale, t, memo, feeLevel, feeMode, supportsCustomFee, customGasPrice, customGasLimit, customSatPerVByte, isMax, addressValidation, exceedsBalance, isTokenSend, token, balance?.balance, xpubOverride, scriptTypeOverride, evmAddressIndex, checkingVaultDestination, vaultDestinationError])
+	}, [chain, recipient, amount, canonicalAmount, amountNum, invalidAmountInput, locale, t, memo, feeLevel, feeMode, supportsCustomFee, customGasPrice, customGasLimit, customSatPerVByte, isMax, addressValidation, exceedsBalance, isTokenSend, token, balance?.balance, xpubOverride, scriptTypeOverride, evmAddressIndex, checkingVaultDestination, vaultDestinationError, requestKey, displaySymbol, displayBalance, activeCaip, address, balanceLoading, activeAssetUnverified, senderReady])
 
 	const handleSign = useCallback(async () => {
-		if (!buildResult) return
+		if (!senderReady || !buildResult || !currentSigningContext) return
+		const context = currentSigningContext
+		const generation = ++operationGeneration.current
 		setLoading(true)
 		setError(null)
 
 		try {
-			const result = await rpcRequest(chain.signMethod, buildResult.unsignedTx, 120000)
+			const result = await rpcRequest(context.signMethod, buildResult.unsignedTx, 120000)
+			if (!operationIsCurrent(generation)) return
 			setSignedTx(result)
 			setPhase('signed')
 		} catch (e: any) {
-			setError(describeSigningError(e, t))
+			if (operationIsCurrent(generation)) setError(describeSigningError(e, t))
+		} finally {
+			if (operationIsCurrent(generation)) setLoading(false)
 		}
-		setLoading(false)
-	}, [chain, buildResult])
+	}, [buildResult, currentSigningContext, t, senderReady])
 
 	const handleBroadcast = useCallback(async () => {
-		if (!signedTx) return
+		if (!signedTx || !currentSigningContext) return
+		const context = currentSigningContext
+		const generation = ++operationGeneration.current
 		setLoading(true)
 		setError(null)
 
 		// History needs a real amount even for MAX sends (BuildTxResult has none):
 		// token MAX = full token balance; native MAX = balance − network fee.
 		let sendAmount: string | undefined
-		if (!isMax) {
-			sendAmount = amount || undefined
-		} else if (isTokenSend) {
-			sendAmount = displayBalance || undefined
+		if (!context.isMax) {
+			sendAmount = context.amount || undefined
+		} else if (context.isTokenSend) {
+			sendAmount = context.displayBalance || undefined
 		} else {
-			const net = parseFloat(displayBalance) - parseFloat(buildResult?.fee || '0')
-			sendAmount = net > 0 ? String(net) : (displayBalance || undefined)
+			const net = parseFloat(context.displayBalance) - parseFloat(buildResult?.fee || '0')
+			sendAmount = net > 0 ? String(net) : (context.displayBalance || undefined)
 		}
 
 		try {
 			const result = await rpcRequest<BroadcastResult>('broadcastTx', {
-				chainId: chain.id,
+				chainId: context.chainId,
 				signedTx,
-				to: recipient,
+				to: context.recipient,
 				amount: sendAmount,
 				fee: buildResult?.fee,
-				symbol: displaySymbol,
-				caip: activeCaip,
-				fromAddress: address || undefined,
+				symbol: context.displaySymbol,
+				caip: context.activeCaip,
+				fromAddress: context.address || undefined,
 			}, 60000)
+			if (!operationIsCurrent(generation)) return
 			setTxid(result.txid)
 			setPhase('broadcast')
 			playSent()
 			// Balance resync + confirmation tracking are owned by the backend for every
 			// broadcast source (in-app, REST, swap): broadcastTx → onActivityLogged.
 		} catch (e: any) {
-			setError(e.message || t("broadcastFailed"))
+			if (operationIsCurrent(generation)) setError(e.message || t("broadcastFailed"))
+		} finally {
+			if (operationIsCurrent(generation)) setLoading(false)
 		}
-		setLoading(false)
-	}, [chain, signedTx, recipient, amount, isMax, isTokenSend, displaySymbol, displayBalance, buildResult, activeCaip, address])
+	}, [signedTx, buildResult, currentSigningContext, t])
 
-	const reset = useCallback(() => {
+	const edit = useCallback(() => {
+		operationGeneration.current++
+		setLoading(false)
 		setPhase('input')
 		setBuildResult(null)
+		setSigningContext(null)
+		setSignedTx(null)
+		setError(null)
+	}, [])
+
+	const reset = useCallback(() => {
+		operationGeneration.current++
+		setLoading(false)
+		setPhase('input')
+		setBuildResult(null)
+		setSigningContext(null)
 		setSignedTx(null)
 		setTxid(null)
 		setError(null)
@@ -504,7 +587,7 @@ export function SendForm({ chain, address, balance, token, tokenBalanceUnverifie
 						fontWeight="600"
 						color="kk.textPrimary"
 						letterSpacing="-0.01em"
-						title={activeAssetUnverified
+						title={balanceLoading && activeAssetUnverified ? uiText("Refreshing balance") : activeAssetUnverified
 							? unverifiedTitle
 							: `${displayBalance} ${displaySymbol}`}
 						cursor="help"
@@ -514,6 +597,7 @@ export function SendForm({ chain, address, balance, token, tokenBalanceUnverifie
 					<Text fontSize={{ base: "12px", md: "13px" }} fontFamily="mono" color="kk.textMuted" letterSpacing="0.04em">
 						{displaySymbol}
 					</Text>
+					{balanceLoading && <Spinner size="xs" color="kk.textMuted" aria-label={uiText("Refreshing balance")} />}
 					{hasPrice && !activeAssetUnverified && (
 						<Text fontSize="12px" fontFamily="mono" color="kk.textMuted" ml="2">
 							{fmtCompact(parseFloat(displayBalance) * pricePerUnit)}
@@ -566,7 +650,7 @@ export function SendForm({ chain, address, balance, token, tokenBalanceUnverifie
 			})()}
 
 			{/* Phase: Input */}
-			{phase === 'input' && (
+			{visiblePhase === 'input' && (
 				<>
 					<Box>
 						<Text fontSize="xs" color="kk.textMuted" mb="1">{t("recipient")}</Text>
@@ -684,6 +768,7 @@ export function SendForm({ chain, address, balance, token, tokenBalanceUnverifie
 								fontSize="11px"
 								_hover={{ bg: isMax ? "var(--gold-2)" : "var(--ink-4)" }}
 								onClick={() => { setIsMax(prev => !prev); setAmount(""); setUsdAmount("") }}
+								disabled={!senderReady || (balanceLoading && activeAssetUnverified)}
 								px="4" py="2"
 								h="32px"
 							>
@@ -842,7 +927,7 @@ export function SendForm({ chain, address, balance, token, tokenBalanceUnverifie
 						borderRadius="12px"
 						_hover={{ bg: "var(--gold-2)" }}
 						onClick={handleBuild}
-						disabled={loading || invalidAmountInput || checkingVaultDestination || !!vaultDestinationError || !recipient || (!amount && !isMax) || (addressValidation != null && !addressValidation.valid)}
+						disabled={loading || !senderReady || (isMax && balanceLoading && activeAssetUnverified) || invalidAmountInput || checkingVaultDestination || !!vaultDestinationError || !recipient || (!amount && !isMax) || (addressValidation != null && !addressValidation.valid)}
 						px="4" py="2"
 						w="full"
 					>
@@ -852,19 +937,19 @@ export function SendForm({ chain, address, balance, token, tokenBalanceUnverifie
 			)}
 
 			{/* Phase: Built — show fee, sign button */}
-			{phase === 'built' && buildResult && (
+			{visiblePhase === 'built' && buildResult && currentSigningContext && (
 				<>
 					<Box bg="rgba(233,196,106,0.06)" border="1px solid rgba(233,196,106,0.22)" borderRadius="14px" p="4">
 						<Text fontSize="xs" color="kk.textMuted" mb="2">{t("transactionReady")}</Text>
 						<Flex justify="space-between" mb="1">
 							<Text fontSize="xs" color="kk.textSecondary">{t("to")}</Text>
 							{/* Full address, never truncated: this is what the user checks against the device. */}
-							<Text fontSize="xs" fontFamily="mono" color="kk.textPrimary" maxW="300px" textAlign="right" wordBreak="break-all">{recipient}</Text>
+							<Text fontSize="xs" fontFamily="mono" color="kk.textPrimary" maxW="300px" textAlign="right" wordBreak="break-all">{currentSigningContext.recipient}</Text>
 						</Flex>
 						<Flex justify="space-between" mb="1">
 							<Text fontSize="xs" color="kk.textSecondary">{t("amount")}</Text>
 							<Flex direction="column" align="flex-end">
-								<Text fontSize="xs" fontFamily="mono" color="kk.textPrimary">{isMax ? (maxSentAmount ?? 'MAX') : amount} {displaySymbol}</Text>
+								<Text fontSize="xs" fontFamily="mono" color="kk.textPrimary">{currentSigningContext.isMax ? (maxSentAmount ?? 'MAX') : currentSigningContext.amount} {currentSigningContext.displaySymbol}</Text>
 								{!isMax && amountUsdPreview !== null && (
 									<Text fontSize="10px" fontFamily="mono" color="kk.textMuted">{fmtCompact(amountUsdPreview)}</Text>
 								)}
@@ -908,7 +993,7 @@ export function SendForm({ chain, address, balance, token, tokenBalanceUnverifie
 							border="1px solid var(--line)"
 							borderRadius="12px"
 							_hover={{ color: "var(--text-0)", bg: "var(--ink-2)" }}
-							onClick={() => setPhase('input')}
+							onClick={edit}
 							px="4" py="2"
 						>
 							{t("back", { ns: "common" })}
@@ -920,7 +1005,7 @@ export function SendForm({ chain, address, balance, token, tokenBalanceUnverifie
 							color="black"
 							_hover={{ bg: "kk.goldHover" }}
 							onClick={handleSign}
-							disabled={loading}
+							disabled={loading || !senderReady}
 							px="4" py="2"
 						>
 							{loading ? t("confirmOnDevice") : t("signOnDevice")}
@@ -930,7 +1015,7 @@ export function SendForm({ chain, address, balance, token, tokenBalanceUnverifie
 			)}
 
 			{/* Phase: Signed — show broadcast button */}
-			{phase === 'signed' && signedTx && (
+			{visiblePhase === 'signed' && signedTx && (
 				<>
 					<Box bg="rgba(139,227,196,0.06)" border="1px solid rgba(139,227,196,0.22)" borderRadius="14px" p="4">
 						<Text fontSize="xs" color="var(--teal)" mb="1">{t("transactionSigned")}</Text>
@@ -948,7 +1033,7 @@ export function SendForm({ chain, address, balance, token, tokenBalanceUnverifie
 							border="1px solid var(--line)"
 							borderRadius="12px"
 							_hover={{ color: "var(--text-0)", bg: "var(--ink-2)" }}
-							onClick={() => setPhase('input')}
+							onClick={edit}
 							px="4" py="2"
 						>
 							{t("cancel", { ns: "common" })}
@@ -970,7 +1055,7 @@ export function SendForm({ chain, address, balance, token, tokenBalanceUnverifie
 			)}
 
 			{/* Phase: Broadcast — success with confetti */}
-			{phase === 'broadcast' && txid && (
+			{visiblePhase === 'broadcast' && txid && (
 				<Box position="relative" overflow="hidden" borderRadius="lg">
 					<style>{CONFETTI_CSS}</style>
 					{confettiPieces.map(p => (
