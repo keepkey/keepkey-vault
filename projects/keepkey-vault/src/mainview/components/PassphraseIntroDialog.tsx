@@ -6,7 +6,8 @@ import { Z } from "../lib/z-index"
 import { DocsLink } from "./DocsLink"
 import { DOCS_LINKS, watch } from "../../shared/docs-links"
 
-const ACCENT = "#8B5CF6"
+// App-wide primary accent (was a one-off purple).
+const ACCENT = "#E9C46A"
 
 interface PassphraseIntroDialogProps {
 	/** Called when the user dismisses — the parent persists the one-time flag. */
@@ -80,9 +81,9 @@ export function PassphraseIntroDialog({ onClose }: PassphraseIntroDialogProps) {
 						w="100%"
 						size="md"
 						bg={ACCENT}
-						color="white"
+						color="var(--ink-0)"
 						fontWeight="700"
-						_hover={{ opacity: 0.9 }}
+						_hover={{ bg: "var(--gold-2)" }}
 						_active={{ transform: "scale(0.98)" }}
 						transition="all 0.15s ease"
 						onClick={onClose}
