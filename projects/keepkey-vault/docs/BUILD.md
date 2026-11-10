@@ -120,7 +120,7 @@ Creates a distributable DMG from the pruned app:
 
 1. Extracts `.app` from the `.app.tar.zst` archive
 2. Verifies codesign on extracted app
-3. Creates a DMG with `hdiutil` (UDZO compression)
+3. Builds the DMG with `scripts/create-macos-dmg.sh` (also used by `make sign-release`): renames the bundle to `KeepKey Vault.app`, adds the `Applications` link, has Finder save the window layout (app on the left, `Applications` on the right), then compresses to UDZO. The first run from a new terminal app asks for permission to control Finder.
 4. Signs the DMG
 5. Notarizes the DMG with Apple
 6. Staples the notarization ticket

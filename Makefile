@@ -360,7 +360,9 @@ patch-arm64-release-tar: sign-check
 # Create a proper DMG from the fully-extracted app (workaround for Electrobun self-extractor bug)
 dmg: verify-arch
 	@echo "Creating DMG from tar.zst artifact..."
-	@TAR_ZST=$$(find $(PROJECT_DIR)/artifacts -name "*.app.tar.zst" | head -1); \
+	@# set -e: a failed sign, verify, notarize or staple step must stop the recipe.
+	@set -e; \
+	TAR_ZST=$$(find $(PROJECT_DIR)/artifacts -name "*.app.tar.zst" | head -1); \
 	if [ -z "$$TAR_ZST" ]; then echo "ERROR: No .app.tar.zst found in artifacts/"; exit 1; fi; \
 	STAGING=$$(mktemp -d); \
 	trap 'rm -rf "$$STAGING"' EXIT; \
@@ -371,12 +373,10 @@ dmg: verify-arch
 	APP=$$(find "$$STAGING" -name "*.app" -maxdepth 1 | head -1); \
 	if [ -z "$$APP" ]; then echo "ERROR: No .app found after extraction"; exit 1; fi; \
 	echo "Verifying extracted app..."; \
-	codesign --verify --deep --strict "$$APP" || (echo "ERROR: codesign verification failed"; exit 1); \
-	ln -s /Applications "$$STAGING/Applications"; \
+	codesign --verify --deep --strict "$$APP" || { echo "ERROR: codesign verification failed"; exit 1; }; \
 	DMG_OUT="$$(pwd)/$(PROJECT_DIR)/artifacts/$(DMG_NAME)"; \
-	rm -f "$$DMG_OUT"; \
 	echo "Creating DMG..."; \
-	hdiutil create -volname "KeepKey Vault" -srcfolder "$$STAGING" -ov -format UDZO "$$DMG_OUT"; \
+	./scripts/create-macos-dmg.sh "$$STAGING" "$$DMG_OUT" || exit 1; \
 	echo "Signing DMG..."; \
 	codesign --force --timestamp --sign "Developer ID Application: $$ELECTROBUN_DEVELOPER_ID ($$ELECTROBUN_TEAMID)" "$$DMG_OUT"; \
 	codesign --verify --verbose=2 "$$DMG_OUT"; \
@@ -469,7 +469,7 @@ test-unit:
 	cd $(PROJECT_DIR) && bun test __tests__/swap-ui-control.test.ts
 	cd $(PROJECT_DIR) && bun test __tests__/swap-api-assets.test.ts __tests__/swap-quote-lease.test.ts
 	cd $(PROJECT_DIR) && bun test __tests__/swap-rest-approval.test.ts
-	cd $(PROJECT_DIR) && bun test src/bun/txbuilder/xrp.test.ts
+	cd $(PROJECT_DIR) && bun test src/bun/txbuilder/xrp.test.ts src/bun/legacy-app-cleanup.test.ts
 	cd $(PROJECT_DIR) && bun test __tests__/swap-fees.test.ts __tests__/swap-server-capabilities.test.ts __tests__/swap-registration.test.ts __tests__/near-intents-status.test.ts
 	cd $(PROJECT_DIR) && bun test __tests__/near-deposit-build.test.ts
 	cd $(PROJECT_DIR) && bun test __tests__/near-refund-safety.test.ts
@@ -955,11 +955,9 @@ _sign-one-dmg:
 	SIGNED_TAR="$$(pwd)/$(PROJECT_DIR)/artifacts/$$(basename $(_SRC_TAR))"; \
 	(cd "$$STAGING" && tar cf - "$$(basename $$APP)") | zstd -o "$$SIGNED_TAR" --force; \
 	echo "  Signed tar.zst: $$SIGNED_TAR"; \
-	ln -s /Applications "$$STAGING/Applications"; \
 	DMG_OUT="$$(pwd)/$(PROJECT_DIR)/artifacts/KeepKey-Vault-$(VERSION)-$(_DMG_ARCH).dmg"; \
-	rm -f "$$DMG_OUT"; \
 	echo "  Creating DMG..."; \
-	hdiutil create -volname "KeepKey Vault" -srcfolder "$$STAGING" -ov -format UDZO "$$DMG_OUT"; \
+	./scripts/create-macos-dmg.sh "$$STAGING" "$$DMG_OUT" || exit 1; \
 	echo "  Signing DMG..."; \
 	codesign --force --timestamp \
 		--sign "Developer ID Application: $$ELECTROBUN_DEVELOPER_ID ($$ELECTROBUN_TEAMID)" \
