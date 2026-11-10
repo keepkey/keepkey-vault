@@ -117,5 +117,22 @@
   "mf2e79e8": "Cofirmante",
   "m68390565": "confirmaciones",
   "mc691454b": "Sincronizado",
-  "mc1163767": "Última actualización {{time}}"
+  "mc1163767": "Última actualización {{time}}",
+  "mbe593b8a": "Envías",
+  "m2b1566d2": "Recepción mínima",
+  "mcfd73f69": "Costo estimado del intercambio",
+  "m4141d374": "Datos de precios no disponibles",
+  "m63d34722": "Comisión de la red de origen",
+  "mdb55a3bf": "Se paga por separado",
+  "me49736e2": "Tiempo estimado",
+  "m6fb8a4dc": "Comisiones y detalles",
+  "mab865c88": "Origen del mínimo",
+  "mbfc93277": "Memo de la transacción",
+  "m2649bd57": "Estimación",
+  "mcbc95930": "Cotización del proveedor",
+  "me79a318a": "Diferencia de valor con la recepción mínima",
+  "m934a6f3d": "El costo del intercambio compara los valores cotizados de entrada y salida, incluidos el tipo de cambio y las comisiones de la ruta. La comisión de la red de origen es independiente. La recepción mínima es un límite de ejecución, no un reembolso garantizado.",
+  "m981df2e2": "Revisa y aprueba en KeepKey",
+  "m53c7aeaa": "Acepto el costo estimado del intercambio de {{cost}} y una diferencia de valor de {{loss}} con la recepción mínima. La comisión de la red de origen es independiente.",
+  "m310febeb": "Costo de intercambio elevado: {{cost}}, sin incluir la comisión de la red de origen."
 }

@@ -85,7 +85,7 @@ function MoneroBalanceNote({ view }: { view: MoneroBalanceView }) {
 			: uiText("The Monero node can't be reached. Showing the last known balance, from {{time}}.", { time: view.updatedAt ? new Date(view.updatedAt).toLocaleString(getNumberLocale()) : "—" })}</Text>
 	}
 	if (view.state === "ready" && (view.restoreHeight ?? 0) > 0) {
-		return <Text data-monero-note="partial" fontSize="12px" color="var(--text-2)">{uiText("Earlier payments may be missing. Check the wallet history start in Settings → Monero if this wallet is older.")}</Text>
+		return <Text data-monero-note="partial" fontSize="12px" color="var(--text-2)">{uiText("Earlier payments may be missing. Check the wallet history start in Settings → Networks if this wallet is older.")}</Text>
 	}
 	if (view.state === "ready" && !view.spendVerified && view.balanceAtomic !== "0") {
 		return <Text data-monero-note="unverified" fontSize="12px" color="var(--text-2)">{uiText("Confirm on KeepKey to verify your balance.")}</Text>
@@ -167,7 +167,7 @@ export function MoneroConnectCard({ client, monero }: { client: MoneroClient; mo
 				<Text mt="2">{uiText("KeepKey shares a view key with the local wallet to find incoming payments. Spending still requires confirmation on KeepKey.")}</Text>
 				<Text mt="2" wordBreak="break-all">{uiText("Node")}: {settings?.moneroDaemonUrl ?? "—"}</Text>
 				<Text>{uiText("Scan start block")}: {settings?.moneroRestoreHeight ?? "—"}</Text>
-				<Text mt="2">{uiText("The full history is scanned unless you have chosen a later start. Change the node or wallet history in Settings → Monero.")}</Text>
+				<Text mt="2">{uiText("The full history is scanned unless you have chosen a later start. Change the node or wallet history in Settings → Networks.")}</Text>
 			</details>
 		</Box>
 	)

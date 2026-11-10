@@ -116,5 +116,22 @@
   "mf2e79e8": "Współsygnatariusz",
   "m68390565": "potwierdzenia",
   "mc691454b": "Zsynchronizowane",
-  "mc1163767": "Ostatnia aktualizacja {{time}}"
+  "mc1163767": "Ostatnia aktualizacja {{time}}",
+  "mbe593b8a": "Wysyłasz",
+  "m2b1566d2": "Minimalna kwota odbioru",
+  "mcfd73f69": "Szacowany koszt wymiany",
+  "m4141d374": "Dane cenowe niedostępne",
+  "m63d34722": "Opłata sieci źródłowej",
+  "mdb55a3bf": "Płatna oddzielnie",
+  "me49736e2": "Szacowany czas",
+  "m6fb8a4dc": "Opłaty i szczegóły",
+  "mab865c88": "Źródło kwoty minimalnej",
+  "mbfc93277": "Memo transakcji",
+  "m2649bd57": "Szacunek",
+  "mcbc95930": "Oferta dostawcy",
+  "me79a318a": "Różnica wartości przy kwocie minimalnej",
+  "m934a6f3d": "Koszt wymiany porównuje podane w ofercie wartości wejściową i wyjściową, uwzględniając kurs i opłaty trasy. Opłata sieci źródłowej jest oddzielna. Minimalna kwota odbioru to limit realizacji, a nie gwarantowany zwrot.",
+  "m981df2e2": "Sprawdź i zatwierdź na KeepKey",
+  "m53c7aeaa": "Akceptuję szacowany koszt wymiany {{cost}} oraz różnicę wartości {{loss}} przy minimalnej kwocie odbioru. Opłata sieci źródłowej jest oddzielna.",
+  "m310febeb": "Wysoki koszt wymiany: {{cost}}, bez opłaty sieci źródłowej."
 }

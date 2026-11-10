@@ -8,6 +8,7 @@ import { detectLanguage, supportedLanguage, SUPPORTED_LANGUAGES } from '../src/m
 import { formatBalance } from '../src/mainview/lib/formatting'
 import { backendText } from '../src/bun/i18n'
 import { FIRMWARE_PROGRESS_KEYS } from '../src/shared/firmware-progress'
+import { messageKey } from '../src/shared/message-key'
 
 describe('financial locale boundaries', () => {
   test('never relabels USD without a valid exchange rate', () => {
@@ -92,4 +93,35 @@ test('shipped plural categories and translated critical acknowledgments resolve'
   expect(instance.t('showFiltered',{ns:'asset',count:2})).toBe('Pokaż 2 odfiltrowane tokeny')
   expect(backendText('pt-BR','Quit')).toBe('Sair')
   expect(backendText('de','at least {{minimum}}',{minimum:'1 ETH'})).toBe('mindestens 1 ETH')
+})
+
+test('the unified trade summary and cost acknowledgments stay translated', async () => {
+  const sources = [
+    'You send', 'Minimum receive', 'Estimated swap cost', 'Price data unavailable',
+    'Source network fee', 'Paid separately', 'Estimated time', 'Fees & details',
+    'Minimum source', 'Transaction memo', 'Estimate', 'Provider quote',
+    'Value difference at minimum',
+    'Swap cost compares the quoted input and output values, including the rate and route fees. The source network fee is separate. Minimum receive is an execution limit, not a guaranteed refund.',
+    'Review and approve on KeepKey',
+    'I accept the estimated swap cost of {{cost}} and a value difference of {{loss}} at minimum receive. The source network fee is separate.',
+    'High swap cost: {{cost}}, excluding the source network fee.',
+  ]
+  const root = join(import.meta.dir, '../src/mainview/i18n/locales')
+  const resources = Object.fromEntries(SUPPORTED_LANGUAGES.map(language => [language, {
+    ui: JSON.parse(readFileSync(join(root, language, 'ui.json'), 'utf8')) as Record<string, string>,
+  }]))
+  const instance = i18next.createInstance()
+  await instance.init({ resources, lng: 'en', fallbackLng: 'en', defaultNS: 'ui', interpolation: { escapeValue: false } })
+  for (const language of SUPPORTED_LANGUAGES) {
+    for (const source of sources) {
+      const key = messageKey(source)
+      expect(instance.exists(key, { lng: language, fallbackLng: false })).toBe(true)
+      const translated = instance.t(key, { lng: language, cost: 'COST_TEST', loss: 'LOSS_TEST' })
+      expect(translated).toBe(resources[language].ui[key].replace('{{cost}}', 'COST_TEST').replace('{{loss}}', 'LOSS_TEST'))
+      expect(translated).not.toContain('{{')
+      if (language !== 'en') expect(resources[language].ui[key]).not.toBe(source)
+      if (source.includes('{{cost}}')) expect(translated).toContain('COST_TEST')
+      if (source.includes('{{loss}}')) expect(translated).toContain('LOSS_TEST')
+    }
+  }
 })

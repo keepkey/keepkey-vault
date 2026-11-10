@@ -1464,6 +1464,10 @@
     "components/Dashboard.tsx:mf5b37c9a"
   ],
   "missing": {
+    "ui:m34efd94f": "es,fr,de,ja,zh,ko,pt,ru,it,pl,nl,th,tr,vi",
+    "ui:m580fcf57": "es,fr,de,ja,zh,ko,pt,ru,it,pl,nl,th,tr,vi",
+    "ui:m630ebe53": "es,fr,de,ja,zh,ko,pt,ru,it,pl,nl,th,tr,vi",
+    "ui:m626eb323": "es,fr,de,ja,zh,ko,pt,ru,it,pl,nl,th,tr,vi",
     "ui:mef4697da": "es,fr,de,ja,zh,ko,pt,ru,it,pl,nl,th,tr,vi",
     "ui:me0c34f2a": "de,es,fr,it,ja,ko,nl,pl,pt,ru,th,tr,vi,zh",
     "ui:ma7b05571": "de,es,fr,it,ja,ko,nl,pl,pt,ru,th,tr,vi,zh",

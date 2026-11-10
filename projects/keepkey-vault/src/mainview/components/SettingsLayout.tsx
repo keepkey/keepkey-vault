@@ -2,7 +2,7 @@ import { createContext, useContext } from 'react'
 import { Box, Button, Flex, Text, VStack } from '@chakra-ui/react'
 import { useUiTranslation } from '../i18n/ui'
 
-export type SettingsCategory = 'general' | 'device' | 'security' | 'networks' | 'monero' | 'connections' | 'features' | 'advanced'
+export type SettingsCategory = 'general' | 'device' | 'security' | 'networks' | 'connections' | 'features' | 'advanced'
 const SettingsCategoryContext = createContext<SettingsCategory>('general')
 export const useSettingsCategory = () => useContext(SettingsCategoryContext)
 
@@ -14,8 +14,7 @@ export function SettingsLayout({ category, onChange, children }: {
     { id: 'general', label: uiText('General'), description: uiText('Language, display preferences and app updates.') },
     { id: 'device', label: uiText('Device'), description: uiText('Your KeepKey and its firmware.') },
     { id: 'security', label: uiText('Security'), description: uiText('PIN, wallet privacy and signing permissions.') },
-    { id: 'networks', label: uiText('Networks'), description: uiText('Choose your networks and Bitcoin node.') },
-    { id: 'monero', label: uiText('Monero'), description: uiText('Node connection, storage and wallet history.') },
+    { id: 'networks', label: uiText('Networks'), description: uiText('Choose your networks and manage node connections.') },
     { id: 'connections', label: uiText('Connections'), description: uiText('Connected apps, browser access and API services.') },
     { id: 'features', label: uiText('Feature Flags'), description: uiText('Optional features. Each switch is independent.') },
     { id: 'advanced', label: uiText('Advanced'), description: uiText('Development options and reset controls.') },

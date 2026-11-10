@@ -116,5 +116,22 @@
   "mf2e79e8": "Cofirmatario",
   "m68390565": "conferme",
   "mc691454b": "Sincronizzato",
-  "mc1163767": "Ultimo aggiornamento {{time}}"
+  "mc1163767": "Ultimo aggiornamento {{time}}",
+  "mbe593b8a": "Invii",
+  "m2b1566d2": "Ricezione minima",
+  "mcfd73f69": "Costo stimato dello scambio",
+  "m4141d374": "Dati sui prezzi non disponibili",
+  "m63d34722": "Commissione della rete di origine",
+  "mdb55a3bf": "Pagata separatamente",
+  "me49736e2": "Tempo stimato",
+  "m6fb8a4dc": "Commissioni e dettagli",
+  "mab865c88": "Fonte del minimo",
+  "mbfc93277": "Memo della transazione",
+  "m2649bd57": "Stima",
+  "mcbc95930": "Preventivo del fornitore",
+  "me79a318a": "Differenza di valore al minimo",
+  "m934a6f3d": "Il costo dello scambio confronta i valori in entrata e in uscita del preventivo, inclusi il tasso e le commissioni del percorso. La commissione della rete di origine è separata. La ricezione minima è un limite di esecuzione, non un rimborso garantito.",
+  "m981df2e2": "Controlla e approva su KeepKey",
+  "m53c7aeaa": "Accetto il costo stimato dello scambio di {{cost}} e una differenza di valore di {{loss}} alla ricezione minima. La commissione della rete di origine è separata.",
+  "m310febeb": "Costo dello scambio elevato: {{cost}}, esclusa la commissione della rete di origine."
 }

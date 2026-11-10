@@ -5,22 +5,26 @@ import react from '@vitejs/plugin-react'
 import { PasswordBank } from '../../../src/bun/password-bank'
 const db = new Map<string, string>()
 let moneroEnabled = false
+let alphaFirmware = false
+let moneroPendingBroadcasts = 0
 let backupFailure = false
 let openedWebsites = 0
 const bank = new PasswordBank({ read: k => db.get(k) || null, write: (k, v) => { db.set(k, v) }, device: () => ({ session: 'synthetic-device', cipher: async (p, l) => new Uint8Array(createHmac('sha256', 'PUBLIC UI TEST FIXTURE ONLY').update(JSON.stringify(p)).update(l).digest()) }) })
-const settings = () => ({ passwordManagerEnabled: bank.enabled, moneroEnabled, moneroAvailable: true, moneroNodeMode: 'local', moneroDaemonUrl: 'http://127.0.0.1:18081', moneroRestoreHeight: 0, restApiEnabled: false, btcMultisigEnabled: false, walletConnectEnabled: false, zcashPrivacyEnabled: false, hiveEnabled: false, emulatorEnabled: false, offlineMode: false, pioneerApiBase: '', pioneerServers: [], activePioneerServer: '', fiatCurrency: 'USD', numberLocale: 'en-US', disabledNetworks: [], evmSimulationRpcUrls: {}, appLanguage: 'en' })
+const settings = () => ({ passwordManagerEnabled: bank.enabled, moneroEnabled, alphaFirmware, moneroPendingBroadcasts, moneroAvailable: true, moneroNodeMode: 'local', moneroDaemonUrl: 'http://127.0.0.1:18081', moneroRestoreHeight: 0, restApiEnabled: false, btcMultisigEnabled: false, walletConnectEnabled: false, zcashPrivacyEnabled: false, hiveEnabled: false, emulatorEnabled: false, offlineMode: false, pioneerApiBase: '', pioneerServers: [], activePioneerServer: '', fiatCurrency: 'USD', numberLocale: 'en-US', disabledNetworks: [], evmSimulationRpcUrls: {}, appLanguage: 'en' })
 const rpc = Bun.serve({ hostname: '127.0.0.1', port: 0, async fetch(req) {
   const { method, params: p } = await req.json()
   try {
     let payload: unknown = {}
     switch (method) {
-      case 'testReset': bank.lock(); db.clear(); moneroEnabled = false; backupFailure = false; openedWebsites = 0; payload = settings(); break
+      case 'testReset': bank.lock(); db.clear(); moneroEnabled = false; alphaFirmware = false; moneroPendingBroadcasts = 0; backupFailure = false; openedWebsites = 0; payload = settings(); break
+      case 'testMoneroPending': moneroPendingBroadcasts = p.count; payload = settings(); break
       case 'testBackupFailure': backupFailure = p.enabled; break
       case 'testOpenedWebsites': payload = openedWebsites; break
       case 'openExternal': openedWebsites++; break
       case 'getAppSettings': payload = settings(); break
       case 'setPasswordManagerEnabled': bank.setEnabled(p.enabled); payload = settings(); break
       case 'setMoneroEnabled': moneroEnabled = p.enabled; payload = settings(); break
+      case 'setAlphaFirmware': alphaFirmware = p.enabled; payload = settings(); break
       case 'moneroNodeStatus': payload = { available: true, state: 'syncing', dataDir: '/Volumes/SSD/keepkey/monero/mainnet', logPath: '/Volumes/SSD/keepkey/monero/mainnet/node.log', rpcUrl: 'http://127.0.0.1:18081', pruned: true, diskBytes: 12 * 1024 ** 3, freeBytes: 135 * 1024 ** 3, reserveBytes: 25 * 1024 ** 3, estimatedBytes: 105 * 1024 ** 3, height: 1350000, targetHeight: 3800000, percent: 35.5, peers: 8 }; break
       case 'passwordBankStatus': payload = bank.view(); break
       case 'passwordBankUnlock': payload = await bank.unlock(p?.create); break
