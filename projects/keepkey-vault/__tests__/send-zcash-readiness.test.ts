@@ -9,6 +9,6 @@ test('actual Zcash send UI uses scoped host readiness and never authorizes physi
     physicalVersions: 2, qualifiedEmulator: true, alphaDisabled: true, staleStatus: true,
     immediateRevocation: true, unlockPreservesReview: true, retiredSigning: true,
     ownerScope: true, otherChain: true, unmounted: true, statusFailure: true,
-    malformedStatus: true, firstDevicePush: true, broadcasts: 0,
+    malformedStatus: true, firstDevicePush: true, settingsPending: true, settingsFailure: true, settingsSaved: true, broadcasts: 0,
   })
 }, 35_000)

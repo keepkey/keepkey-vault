@@ -540,6 +540,7 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 		try {
 			const result = await rpcRequest<AppSettings>("setAlphaFirmware", { enabled }, 10000)
 			setAppSettings(result)
+			window.dispatchEvent(new Event('keepkey-settings-changed'))
 		} catch (e: any) { console.error("setAlphaFirmware:", e) }
 		setTogglingAlphaFirmware(false)
 	}, [])
