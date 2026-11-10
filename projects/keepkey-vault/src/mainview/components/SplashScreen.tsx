@@ -8,6 +8,8 @@ import { NAV_HEIGHT, SPLASH_STAGE_Y_PADDING, SPLASH_STATUS_BOTTOM, SPLASH_STATUS
 interface SplashScreenProps {
   statusText: string
   hintText?: string
+  /** Raw technical detail (e.g. a libusb error code) shown small under the hint, for support. */
+  detailText?: string
   children?: React.ReactNode
   variant?: 'searching' | 'connecting' | 'error' | 'claimed'
   /** When true, the centered logo/content stack is visible. When false, only the logo is centered. */
@@ -28,7 +30,7 @@ const STATUS_DOT_COLORS: Record<NonNullable<SplashScreenProps['variant']>, strin
 const BTC_ORANGE = '#F7931A'
 const RETRY_HINT_DELAY_MS = 10_000
 
-export function SplashScreen({ statusText, hintText, children, variant = 'searching', childrenReady = false, onLogoClick, isBitcoinOnly = false }: SplashScreenProps) {
+export function SplashScreen({ statusText, hintText, detailText, children, variant = 'searching', childrenReady = false, onLogoClick, isBitcoinOnly = false }: SplashScreenProps) {
   const uiText = useUiTranslation()
 
   const dotColor = isBitcoinOnly ? BTC_ORANGE : STATUS_DOT_COLORS[variant]
@@ -166,6 +168,11 @@ export function SplashScreen({ statusText, hintText, children, variant = 'search
         {hintText && (
           <Text fontSize="11px" color="var(--text-3)" mt={2.5} maxW="340px" textAlign="center" mx="auto" letterSpacing="-0.005em">
             {hintText}
+          </Text>
+        )}
+        {detailText && (
+          <Text fontSize="10px" fontFamily="mono" color="var(--text-3)" opacity={0.8} mt={1.5} maxW="340px" textAlign="center" mx="auto" overflowWrap="anywhere">
+            {detailText}
           </Text>
         )}
       </Box>

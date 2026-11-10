@@ -1454,7 +1454,15 @@
     "staking:refreshStaking": "aaacd74a3034624527950c3be2e62f3690d8eab92fc091c34b1809b2dcf7ef90",
     "staking:noPositions": "14596fab8ec5859ff4093099ae6e1637ce277f57a4ae7ad99ead4525633986ae",
     "staking:delegateToEarn": "174f0a925bd84de5cce38ef42f48dd3a7bde3a48f133cd738563017fc0c56625",
-    "staking:failedToLoadPositions": "ce4fe3c4ee13a26e4d4e5f9e879433440add49b9d62b9e9580322e010652be3d"
+    "staking:failedToLoadPositions": "ce4fe3c4ee13a26e4d4e5f9e879433440add49b9d62b9e9580322e010652be3d",
+    "nav:deviceErrorInUse": "c8887cf417071c10e643dee0bb3a433267176072818af26009de08ca658a3112",
+    "nav:deviceErrorInUseHint": "095e9ea856bfbe4276a12412cd1ff6f7109cb4b8fbfe39f3ffbdfad86fb7359a",
+    "nav:deviceErrorDisconnected": "a4edd5ad737d2ea0396d5a56b11ccd92a88a6d6c5cdbcc28a138d1e3e84a97c7",
+    "nav:deviceErrorDisconnectedHint": "04fa2a18fc77a0d95ab1a4e7f7d8dab783320d794598cee57f2156e39dd5ef23",
+    "nav:deviceErrorNotResponding": "78cd27780164a894f8fefde01a58110e7562edf7b0fce232da94524c531fe93d",
+    "nav:deviceErrorNotRespondingHint": "fb083b248bd6c6cd034ecd3022e84e3962cd7ea7dcfbf989a6660db2a4ede68a",
+    "nav:deviceErrorUnknown": "8fa76411982761756a7f7fa91d410abbde52c96020e9003fffae63ce32115e2f",
+    "nav:deviceErrorDetail": "27d5fc51e2844ae0595872e1d03e510023742fa4621b71a9987bc3344303cdaa"
   },
   "rawUi": [
     "components/ApiAuditLog.tsx:m17059795",
@@ -3947,6 +3955,14 @@
     "ui:m290d14f5": "de,es,fr,it,ja,ko,nl,pl,pt,ru,th,tr,vi,zh",
     "ui:m2541ef4d": "es,fr,de,ja,zh,ko,pt,ru,it,pl,nl,th,tr,vi",
     "ui:m9ad5be83": "es,fr,de,ja,zh,ko,pt,ru,it,pl,nl,th,tr,vi",
-    "ui:m16909797": "es,fr,de,ja,zh,ko,pt,ru,it,pl,nl,th,tr,vi"
+    "ui:m16909797": "es,fr,de,ja,zh,ko,pt,ru,it,pl,nl,th,tr,vi",
+    "nav:deviceErrorInUse": "es,fr,de,ja,zh,ko,pt,ru,it,pl,nl,th,tr,vi",
+    "nav:deviceErrorInUseHint": "es,fr,de,ja,zh,ko,pt,ru,it,pl,nl,th,tr,vi",
+    "nav:deviceErrorDisconnected": "es,fr,de,ja,zh,ko,pt,ru,it,pl,nl,th,tr,vi",
+    "nav:deviceErrorDisconnectedHint": "es,fr,de,ja,zh,ko,pt,ru,it,pl,nl,th,tr,vi",
+    "nav:deviceErrorNotResponding": "es,fr,de,ja,zh,ko,pt,ru,it,pl,nl,th,tr,vi",
+    "nav:deviceErrorNotRespondingHint": "es,fr,de,ja,zh,ko,pt,ru,it,pl,nl,th,tr,vi",
+    "nav:deviceErrorUnknown": "es,fr,de,ja,zh,ko,pt,ru,it,pl,nl,th,tr,vi",
+    "nav:deviceErrorDetail": "es,fr,de,ja,zh,ko,pt,ru,it,pl,nl,th,tr,vi"
   }
 }
