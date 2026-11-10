@@ -4,6 +4,7 @@ import type { ElectrobunRPCSchema } from 'electrobun/bun'
 import type { SafeAccount, SafeContext, SafeCreateParams, SafeProposal, SafeTransfer, SafeTxReview, VaultAddParams, VaultAddReview } from './safe-multisig'
 import type { VaultIdentity } from './vault-identity'
 import type { VaultPortfolio } from './vault-portfolio'
+import type {ProviderRefreshReason,ProviderUsageStatus} from './provider-refresh'
 import type { VaultAssetRequest, VaultAssetAccount } from './vault-asset-account'
 import type { ZcashShieldedBalance } from './zcash-privacy'
 import type { ClearSignReport } from './clearsign-report'
@@ -165,7 +166,8 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       hiveSignTx: { params: any; response: any }
 
       // ── Pioneer integration ─────────────────────────────────────────
-      getBalances: { params: { forceRefresh?: boolean; swapDestCaips?: string[] }; response: ChainBalance[] }
+      getBalances: { params: { forceRefresh?: boolean; swapDestCaips?: string[]; refreshReason?: ProviderRefreshReason }; response: ChainBalance[] }
+      getProviderUsage: {params:void;response:ProviderUsageStatus|null}
       /** forceRefresh defaults to TRUE (user-clicked refresh / tx pushes must bypass
        *  Pioneer's cache). Pass false only when Pioneer's cache is known-fresh. */
       getBalance: { params: { chainId: string; forceRefresh?: boolean }; response: ChainBalance }
@@ -481,7 +483,7 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       checkWatchOnlyCache: { params: void; response: { available: boolean; deviceLabel?: string; lastSynced?: number } }
       watchOnlySetView: { params: { active: boolean; deviceId?: string }; response: { bitcoinOnly: boolean } }
       getWatchOnlyBalances: { params: { deviceId?: string } | void; response: ChainBalance[] | null }
-      refreshWatchOnlyBalances: { params: { deviceId?: string } | void; response: ChainBalance[] | null }
+      refreshWatchOnlyBalances: { params: { deviceId?: string; refreshReason?: ProviderRefreshReason } | void; response: ChainBalance[] | null }
       getWatchOnlyPubkeys: { params: { deviceId?: string } | void; response: Array<{ chainId: string; path: string; xpub: string; address: string }> }
 
       // ── Registered devices (device history) ──────────────────────────

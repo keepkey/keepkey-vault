@@ -1,3 +1,5 @@
+import {useProviderUsage} from '../hooks/useProviderUsage'
+import { paidProviderRefreshOptions, type ProviderRefreshReason } from '../../shared/provider-refresh'
 import { getNumberLocale } from "../lib/number-locale"
 import { useUiTranslation } from "../i18n/ui"
 import { Component, Fragment, lazy, Suspense, useState, useEffect, useCallback, useMemo, useRef, type ReactNode, type ErrorInfo } from "react"
@@ -838,6 +840,7 @@ function VaultPortfolioDashboard({ vault, onLoaded, watchOnly, firmwareVersion }
 }
 
 function PersonalDashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettings, firmwareVersion, firmwareVariant, forceRefresh, onForceRefreshConsumed, isHiddenWallet, knownEmpty, onOpenVault }: DashboardProps) {
+    const providerUsage=useProviderUsage()
   const uiText = useUiTranslation()
 	const { portfolios: vaultPortfolios, loading: vaultsLoading, error: vaultsError, reload: reloadVaultPortfolios, setIncluded: setVaultIncluded } = useVaultPortfolios({ bitcoinOnly: isBitcoinOnlyVariant(firmwareVariant) })
 
@@ -1274,15 +1277,16 @@ function PersonalDashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSetti
 	// forceRefresh=true bypasses Pioneer's balance cache — only pass it on explicit user action
 	// swapDestCaips: CAIP-19 ids of just-received swap outputs — forwarded so the
 	// backend can verify token balances directly while portfolio indexers catch up.
-	const refreshBalances = useCallback(async (forceRefresh = false, swapDestCaips: string[] = []) => {
-		if (forceRefresh) void reloadVaultPortfolios(true)
+	const refreshBalances = useCallback(async (forceRefresh = false, swapDestCaips: string[] = [], refreshReason: ProviderRefreshReason = forceRefresh ? 'manual' : 'wallet-open') => {
+		if (paidProviderRefreshOptions(refreshReason).providerRefreshPolicy === 'cache-only' && loadingBalancesRef.current) return
+        if (forceRefresh && paidProviderRefreshOptions(refreshReason).providerRefreshPolicy === 'on-demand') void reloadVaultPortfolios(true)
 		// Watch-only: no device, so re-fetch from Pioneer using cached addresses.
 		if (watchOnly) {
 			if (loadingBalancesRef.current) return
 			loadingBalancesRef.current = true
 			setLoadingBalances(true)
 			try {
-				const result = await rpcRequest<ChainBalance[] | null>('refreshWatchOnlyBalances', watchOnlyDeviceId ? { deviceId: watchOnlyDeviceId } : undefined, 200000)
+				const result = await rpcRequest<ChainBalance[] | null>('refreshWatchOnlyBalances', { ...(watchOnlyDeviceId ? { deviceId: watchOnlyDeviceId } : {}), refreshReason }, 200000)
 				if (result) {
 					setBalances(prev => {
 						const map = new Map(prev)
@@ -1322,7 +1326,7 @@ function PersonalDashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSetti
 		setLoadingBalances(true)
 
 		try {
-			const result = await rpcRequest<ChainBalance[]>('getBalances', swapDestCaips.length ? { forceRefresh, swapDestCaips } : { forceRefresh }, 200000)
+			const result = await rpcRequest<ChainBalance[]>('getBalances', { forceRefresh, swapDestCaips, refreshReason }, 200000)
 			if (result && gen === refreshGenRef.current) {
 				const tokenTotal = result.reduce((n, b) => n + (b.tokens?.length || 0), 0)
 				const balTotal = result.reduce((n, b) => n + (b.balanceUsd || 0), 0)
@@ -1381,7 +1385,7 @@ function PersonalDashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSetti
 		const onFocus = () => {
 			const AGE_BEFORE_REFETCH_MS = 5 * 60 * 1000
 			if (Date.now() - lastFetchAttemptRef.current > AGE_BEFORE_REFETCH_MS) {
-				refreshBalances(true)
+				refreshBalances(true, [], 'focus')
 			}
 		}
 		window.addEventListener('focus', onFocus)
@@ -1418,7 +1422,7 @@ function PersonalDashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSetti
 			degradedTimerRef.current = null
 			if (!loadingBalancesRef.current) {
 				console.log('[Dashboard] Retrying degraded chains:', portfolioFault?.degradedChains.join(', '))
-				refreshBalances(true)
+				refreshBalances(true, [], 'degraded-retry')
 			}
 		}, delay)
 		return () => {
@@ -1499,11 +1503,11 @@ function PersonalDashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSetti
 			const reconcileCaip = swap.status === 'refunded' ? swap.fromCaip : swap.toCaip
 			const assets = reconcileCaip ? [reconcileCaip] : []
 			console.log(`[Dashboard] Swap terminal — reconciling ${reconcileCaip || swap.toChainId}`)
-			refreshBalances(true, assets)
+			refreshBalances(true, assets, 'swap-reconcile')
 			for (const delay of [30_000, 90_000]) {
 				const timer = setTimeout(() => {
 					timers.delete(timer)
-					refreshBalances(true, assets)
+					refreshBalances(true, assets, 'swap-reconcile')
 				}, delay)
 				timers.add(timer)
 			}
@@ -1543,7 +1547,7 @@ function PersonalDashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSetti
 		if (watchOnly || waiting.length === 0) return
 		const timer = setInterval(() => {
 			if (!loadingBalancesRef.current) {
-				refreshBalances(true, waiting.flatMap(item => item.assetCaip ? [item.assetCaip] : []))
+				refreshBalances(true, waiting.flatMap(item => item.assetCaip ? [item.assetCaip] : []), 'swap-reconcile')
 			}
 		}, 120_000)
 		return () => clearInterval(timer)
@@ -1613,7 +1617,7 @@ function PersonalDashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSetti
 			// If a fetch is already in flight it self-heals (the purge ran at its
 			// start, before any derivation) and its result repopulates the cleared
 			// map. Otherwise force-refresh now.
-			if (!loadingBalancesRef.current) refreshBalances(true)
+			if (!loadingBalancesRef.current) refreshBalances(true, [], 'wallet-open')
 		})
 	}, [refreshBalances, commitBalanceReconciliations])
 
@@ -2572,7 +2576,13 @@ function PersonalDashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSetti
 				</Box>
 			))}
 
-			{/* Pioneer connection error banner */}
+			{providerUsage && providerUsage.state !== 'normal' && (
+                <Box role="status" mb="3" px="4" py="3" border="1px solid" borderColor="orange.500" borderRadius="md">
+                    <Text fontWeight="600">{uiText(providerUsage.reason === 'upstream' ? 'Token discovery is temporarily unavailable' : providerUsage.state === 'limited' ? 'Balance discovery refresh is temporarily limited' : 'Balance discovery refresh capacity is running low')}</Text>
+                    <Text fontSize="sm" color="kk.textMuted">{uiText('Cached balances remain available. Automatic updates will not spend additional discovery requests.')}</Text>
+                </Box>
+            )}
+            {/* Pioneer connection error banner */}
 			{pioneerError && (
 				<Box
 					mb="3"

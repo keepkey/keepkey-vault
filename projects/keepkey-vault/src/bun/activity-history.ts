@@ -1,3 +1,4 @@
+import {paidProviderRefreshOptions,type ProviderRefreshReason} from '../shared/provider-refresh'
 import { withTimeout } from './engine-controller'
 import { getPioneer } from './pioneer'
 import { apiLogScanTxidExists, insertApiLog, updateApiLogTxMeta } from './db'
@@ -26,6 +27,7 @@ export type ActivityHistoryRebuildOptions = {
     /** Bypass Pioneer's history cache (up to 5 min stale). The pending-tx watcher
     *  needs this — a cached page never contains the tx it is waiting for. */
     forceRefresh?: boolean
+    refreshReason?: ProviderRefreshReason
   }
 
 export type HistoryQuery = {
@@ -320,7 +322,7 @@ export async function rebuildActivityHistory(params: {
         } else {
           const resp = await withTimeout(
             pioneer.GetTransactionHistory(
-              { queries: [{ pubkey: query.pubkey, caip: query.caip }] },
+              { queries: [{ pubkey: query.pubkey, caip: query.caip }], ...paidProviderRefreshOptions(options.refreshReason ?? 'manual') },
               options.forceRefresh ? { forceRefresh: true } : undefined,
             ),
             PIONEER_TIMEOUT_MS,
