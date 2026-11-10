@@ -27,6 +27,17 @@ mock.module('@keepkey/hdwallet-keepkey-nodehid', () => ({HIDKeepKeyAdapter: {use
 mock.module('@keepkey/hdwallet-keepkey-nodewebusb', () => ({NodeWebUSBKeepKeyAdapter: {useKeyring: () => ({})}}))
 mock.module('usb', () => ({usb: new EventEmitter()}))
 mock.module('electrobun/bun', () => ({Utils: {paths: {userData: '/tmp/kk-pin-test-unused'}}}))
+// This fixture owns its anonymous FFI flash directly. A fallback through the
+// saved-emulator adapter must fail here instead of consulting the user's home.
+mock.module('../../src/bun/emulator', () => ({
+  getActiveFlashName: () => 'isolated-pin-regression',
+  getEmulatorStatus: () => ({state: 'running', bridgeReady: true}),
+  getEmulatorInstance: () => 1,
+  flushRingBuffers() {},
+  emuRead: () => { throw new Error('Unexpected saved-emulator access in anonymous PIN setup fixture') },
+  emuWrite: () => { throw new Error('Unexpected saved-emulator access in anonymous PIN setup fixture') },
+}))
+mock.module('../../src/bun/emulator-keychain', () => ({hasMnemonic: () => false, loadMnemonic: () => null}))
 mock.module('../../src/bun/emulator-window', () => ({
   emuInteractiveConfirm: async (fn: () => Promise<unknown>, details: {operation: string}, delegate: Delegate) => {
     gateCalls.push(details.operation)
