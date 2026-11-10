@@ -2267,21 +2267,19 @@
 
     "@jest/types/@types/node": ["@types/node@17.0.45", "", {}, "sha512-w+tIMs3rq2afQdsPJlODhoUEKzFP1ayaoyl1CcnwtIlsVe7K7bA1NGm4s3PraqTLlXnbIN84zuBlxBWo1u9BLw=="],
 
-    "@keepkey/hdwallet-core/@keepkey/proto-tx-builder": ["@keepkey/proto-tx-builder@file:../../modules/proto-tx-builder", {}],
+    "@keepkey/hdwallet-core/@keepkey/proto-tx-builder": ["@shapeshiftoss/proto-tx-builder@file:../../modules/proto-tx-builder", { "dependencies": { "@cosmjs/amino": "^0.29.4", "@cosmjs/crypto": "0.29.4", "@cosmjs/encoding": "^0.29.4", "@cosmjs/proto-signing": "^0.29.4", "@cosmjs/stargate": "^0.29.4", "bn.js": "^5.2.1", "cosmjs-types": "^0.5.1", "google-protobuf": "^3.17.0", "osmojs": "^0.37.0" }, "devDependencies": { "@types/bn.js": "^5.1.1", "@types/glob": "^7.2.0", "@types/google-protobuf": "^3.15.2", "@types/jest": "^26.0.22", "@types/node": "^15.0.2", "glob": "^7.2.0", "jest": "^26.6.3", "prettier": "^2.5.1", "ts-jest": "^26.5.5", "ts-proto": "^1.110.0", "typescript": "^4.2.4" } }],
 
     "@keepkey/hdwallet-keepkey/@keepkey/device-protocol": ["@keepkey/device-protocol@file:../../modules/device-protocol", { "dependencies": { "google-protobuf": "3.21.4" }, "devDependencies": { "grpc-tools": "1.13.1", "protobufjs": "^6.8.8", "ts-protoc-gen": "^0.10.0" } }],
 
-    "@keepkey/hdwallet-keepkey/@keepkey/hdwallet-core": ["@keepkey/hdwallet-core@file:../../modules/hdwallet/packages/hdwallet-core", {}],
+    "@keepkey/hdwallet-keepkey/@keepkey/hdwallet-core": ["@keepkey/hdwallet-core@file:../../modules/hdwallet/packages/hdwallet-core", { "dependencies": { "@keepkey/proto-tx-builder": "^0.9.1", "eip-712": "^1.0.0", "eventemitter2": "^5.0.1", "type-assertions": "^1.1.0" }, "devDependencies": { "@types/google-protobuf": "^3.15.1" } }],
 
-    "@keepkey/hdwallet-keepkey/@keepkey/proto-tx-builder": ["@keepkey/proto-tx-builder@file:../../modules/proto-tx-builder", {}],
+    "@keepkey/hdwallet-keepkey/@keepkey/proto-tx-builder": ["@shapeshiftoss/proto-tx-builder@file:../../modules/proto-tx-builder", { "dependencies": { "@cosmjs/amino": "^0.29.4", "@cosmjs/crypto": "0.29.4", "@cosmjs/encoding": "^0.29.4", "@cosmjs/proto-signing": "^0.29.4", "@cosmjs/stargate": "^0.29.4", "bn.js": "^5.2.1", "cosmjs-types": "^0.5.1", "google-protobuf": "^3.17.0", "osmojs": "^0.37.0" }, "devDependencies": { "@types/bn.js": "^5.1.1", "@types/glob": "^7.2.0", "@types/google-protobuf": "^3.15.2", "@types/jest": "^26.0.22", "@types/node": "^15.0.2", "glob": "^7.2.0", "jest": "^26.6.3", "prettier": "^2.5.1", "ts-jest": "^26.5.5", "ts-proto": "^1.110.0", "typescript": "^4.2.4" } }],
 
-    "@keepkey/hdwallet-keepkey/bs58": ["bs58@4.0.1", "", { "dependencies": { "base-x": "^3.0.2" } }, "sha512-Ok3Wdf5vOIlBrgCvTq96gBkJw+JUEzdBgyaza5HLtPm7yTHkjRy8+JzNyHF7BHa0bNWOQIp3m5YF0nnFcOIKLw=="],
+    "@keepkey/hdwallet-keepkey-nodehid/@keepkey/hdwallet-keepkey": ["@keepkey/hdwallet-keepkey@file:../../modules/hdwallet/packages/hdwallet-keepkey", { "dependencies": { "@ethereumjs/common": "^2.4.0", "@ethereumjs/tx": "^3.3.0", "@keepkey/device-protocol": "npm:@bithighlander/device-protocol@7.20.0", "@keepkey/hdwallet-core": "1.53.16", "@keepkey/proto-tx-builder": "^0.9.1", "@shapeshiftoss/bitcoinjs-lib": "5.2.0-shapeshift.2", "bignumber.js": "^9.0.1", "bs58": "^4.0.0", "bs58check": "^2.1.2", "crypto-js": "^4.0.0", "eip-712": "^1.0.0", "eip55": "^2.1.0", "google-protobuf": "^3.15.8", "icepick": "^2.4.0", "p-lazy": "^3.1.0", "semver": "^7.3.8", "tiny-secp256k1": "^1.1.6" }, "devDependencies": { "@cosmjs/amino": "^0.28.13", "@cosmjs/proto-signing": "^0.28.13", "@cosmjs/stargate": "^0.28.13", "@types/bs58": "^4.0.1", "@types/bs58check": "^2.1.0", "@types/create-hash": "^1.2.2", "@types/crypto-js": "^4.0.0", "@types/google-protobuf": "^3.15.1", "@types/icepick": "^2.3.0", "@types/semver": "^6.2.2", "@types/tiny-secp256k1": "^1.0.0", "typedoc": "^0.20.36" } }],
 
-    "@keepkey/hdwallet-keepkey-nodehid/@keepkey/hdwallet-keepkey": ["@keepkey/hdwallet-keepkey@file:../../modules/hdwallet/packages/hdwallet-keepkey", {}],
+    "@keepkey/hdwallet-keepkey-nodewebusb/@keepkey/hdwallet-core": ["@keepkey/hdwallet-core@file:../../modules/hdwallet/packages/hdwallet-core", { "dependencies": { "@keepkey/proto-tx-builder": "^0.9.1", "eip-712": "^1.0.0", "eventemitter2": "^5.0.1", "type-assertions": "^1.1.0" }, "devDependencies": { "@types/google-protobuf": "^3.15.1" } }],
 
-    "@keepkey/hdwallet-keepkey-nodewebusb/@keepkey/hdwallet-core": ["@keepkey/hdwallet-core@file:../../modules/hdwallet/packages/hdwallet-core", {}],
-
-    "@keepkey/hdwallet-keepkey-nodewebusb/@keepkey/hdwallet-keepkey": ["@keepkey/hdwallet-keepkey@file:../../modules/hdwallet/packages/hdwallet-keepkey", {}],
+    "@keepkey/hdwallet-keepkey-nodewebusb/@keepkey/hdwallet-keepkey": ["@keepkey/hdwallet-keepkey@file:../../modules/hdwallet/packages/hdwallet-keepkey", { "dependencies": { "@ethereumjs/common": "^2.4.0", "@ethereumjs/tx": "^3.3.0", "@keepkey/device-protocol": "npm:@bithighlander/device-protocol@7.20.0", "@keepkey/hdwallet-core": "1.53.16", "@keepkey/proto-tx-builder": "^0.9.1", "@shapeshiftoss/bitcoinjs-lib": "5.2.0-shapeshift.2", "bignumber.js": "^9.0.1", "bs58": "^4.0.0", "bs58check": "^2.1.2", "crypto-js": "^4.0.0", "eip-712": "^1.0.0", "eip55": "^2.1.0", "google-protobuf": "^3.15.8", "icepick": "^2.4.0", "p-lazy": "^3.1.0", "semver": "^7.3.8", "tiny-secp256k1": "^1.1.6" }, "devDependencies": { "@cosmjs/amino": "^0.28.13", "@cosmjs/proto-signing": "^0.28.13", "@cosmjs/stargate": "^0.28.13", "@types/bs58": "^4.0.1", "@types/bs58check": "^2.1.0", "@types/create-hash": "^1.2.2", "@types/crypto-js": "^4.0.0", "@types/google-protobuf": "^3.15.1", "@types/icepick": "^2.3.0", "@types/semver": "^6.2.2", "@types/tiny-secp256k1": "^1.0.0", "typedoc": "^0.20.36" } }],
 
     "@keepkey/proto-tx-builder/@cosmjs/amino": ["@cosmjs/amino@0.29.5", "", { "dependencies": { "@cosmjs/crypto": "^0.29.5", "@cosmjs/encoding": "^0.29.5", "@cosmjs/math": "^0.29.5", "@cosmjs/utils": "^0.29.5" } }, "sha512-Qo8jpC0BiziTSUqpkNatBcwtKNhCovUnFul9SlT/74JUCdLYaeG5hxr3q1cssQt++l4LvlcpF+OUXL48XjNjLw=="],
 
@@ -2557,7 +2555,41 @@
 
     "@istanbuljs/load-nyc-config/js-yaml/argparse": ["argparse@1.0.10", "", { "dependencies": { "sprintf-js": "~1.0.2" } }, "sha512-o5Roy6tNG4SL/FOkCAN6RzjiakZS25RLYFrcMttJqbdd8BWrnA+fGz57iN5Pb06pvBGvl5gQ0B48dJlslXvoTg=="],
 
-    "@keepkey/hdwallet-keepkey/bs58/base-x": ["base-x@3.0.11", "", { "dependencies": { "safe-buffer": "^5.0.1" } }, "sha512-xz7wQ8xDhdyP7tQxwdteLYeFfS68tSMNCZ/Y37WJ4bhGfKPpqEIlmIyueQHqOyoPhE6xNUqjzRr8ra0eF9VRvA=="],
+    "@keepkey/hdwallet-core/@keepkey/proto-tx-builder/@cosmjs/amino": ["@cosmjs/amino@0.29.5", "", { "dependencies": { "@cosmjs/crypto": "^0.29.5", "@cosmjs/encoding": "^0.29.5", "@cosmjs/math": "^0.29.5", "@cosmjs/utils": "^0.29.5" } }, "sha512-Qo8jpC0BiziTSUqpkNatBcwtKNhCovUnFul9SlT/74JUCdLYaeG5hxr3q1cssQt++l4LvlcpF+OUXL48XjNjLw=="],
+
+    "@keepkey/hdwallet-core/@keepkey/proto-tx-builder/@cosmjs/proto-signing": ["@cosmjs/proto-signing@0.29.5", "", { "dependencies": { "@cosmjs/amino": "^0.29.5", "@cosmjs/crypto": "^0.29.5", "@cosmjs/encoding": "^0.29.5", "@cosmjs/math": "^0.29.5", "@cosmjs/utils": "^0.29.5", "cosmjs-types": "^0.5.2", "long": "^4.0.0" } }, "sha512-QRrS7CiKaoETdgIqvi/7JC2qCwCR7lnWaUsTzh/XfRy3McLkEd+cXbKAW3cygykv7IN0VAEIhZd2lyIfT8KwNA=="],
+
+    "@keepkey/hdwallet-core/@keepkey/proto-tx-builder/@cosmjs/stargate": ["@cosmjs/stargate@0.29.5", "", { "dependencies": { "@confio/ics23": "^0.6.8", "@cosmjs/amino": "^0.29.5", "@cosmjs/encoding": "^0.29.5", "@cosmjs/math": "^0.29.5", "@cosmjs/proto-signing": "^0.29.5", "@cosmjs/stream": "^0.29.5", "@cosmjs/tendermint-rpc": "^0.29.5", "@cosmjs/utils": "^0.29.5", "cosmjs-types": "^0.5.2", "long": "^4.0.0", "protobufjs": "~6.11.3", "xstream": "^11.14.0" } }, "sha512-hjEv8UUlJruLrYGJcUZXM/CziaINOKwfVm2BoSdUnNTMxGvY/jC1ABHKeZUYt9oXHxEJ1n9+pDqzbKc8pT0nBw=="],
+
+    "@keepkey/hdwallet-core/@keepkey/proto-tx-builder/@types/node": ["@types/node@15.14.9", "", {}, "sha512-qjd88DrCxupx/kJD5yQgZdcYKZKSIGBVDIBE1/LTGcNm3d2Np/jxojkdePDdfnBHJc5W7vSMpbJ1aB7p/Py69A=="],
+
+    "@keepkey/hdwallet-core/@keepkey/proto-tx-builder/typescript": ["typescript@4.9.5", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-1FXk9E2Hm+QzZQ7z+McJiHL4NW1F2EzMu9Nq9i3zAaGqibafqYwCVU6WyWAuyQRRzOlxou8xZSyXLEN8oKj24g=="],
+
+    "@keepkey/hdwallet-keepkey-nodehid/@keepkey/hdwallet-keepkey/@keepkey/device-protocol": ["@keepkey/device-protocol@file:../../modules/device-protocol", { "dependencies": { "google-protobuf": "3.21.4" }, "devDependencies": { "grpc-tools": "1.13.1", "protobufjs": "^6.8.8", "ts-protoc-gen": "^0.10.0" } }],
+
+    "@keepkey/hdwallet-keepkey-nodehid/@keepkey/hdwallet-keepkey/@keepkey/hdwallet-core": ["@keepkey/hdwallet-core@file:../../modules/hdwallet/packages/hdwallet-core", { "dependencies": { "@keepkey/proto-tx-builder": "^0.9.1", "eip-712": "^1.0.0", "eventemitter2": "^5.0.1", "type-assertions": "^1.1.0" }, "devDependencies": { "@types/google-protobuf": "^3.15.1" } }],
+
+    "@keepkey/hdwallet-keepkey-nodehid/@keepkey/hdwallet-keepkey/@keepkey/proto-tx-builder": ["@shapeshiftoss/proto-tx-builder@file:../../modules/proto-tx-builder", { "dependencies": { "@cosmjs/amino": "^0.29.4", "@cosmjs/crypto": "0.29.4", "@cosmjs/encoding": "^0.29.4", "@cosmjs/proto-signing": "^0.29.4", "@cosmjs/stargate": "^0.29.4", "bn.js": "^5.2.1", "cosmjs-types": "^0.5.1", "google-protobuf": "^3.17.0", "osmojs": "^0.37.0" }, "devDependencies": { "@types/bn.js": "^5.1.1", "@types/glob": "^7.2.0", "@types/google-protobuf": "^3.15.2", "@types/jest": "^26.0.22", "@types/node": "^15.0.2", "glob": "^7.2.0", "jest": "^26.6.3", "prettier": "^2.5.1", "ts-jest": "^26.5.5", "ts-proto": "^1.110.0", "typescript": "^4.2.4" } }],
+
+    "@keepkey/hdwallet-keepkey-nodewebusb/@keepkey/hdwallet-core/@keepkey/proto-tx-builder": ["@shapeshiftoss/proto-tx-builder@file:../../modules/proto-tx-builder", { "dependencies": { "@cosmjs/amino": "^0.29.4", "@cosmjs/crypto": "0.29.4", "@cosmjs/encoding": "^0.29.4", "@cosmjs/proto-signing": "^0.29.4", "@cosmjs/stargate": "^0.29.4", "bn.js": "^5.2.1", "cosmjs-types": "^0.5.1", "google-protobuf": "^3.17.0", "osmojs": "^0.37.0" }, "devDependencies": { "@types/bn.js": "^5.1.1", "@types/glob": "^7.2.0", "@types/google-protobuf": "^3.15.2", "@types/jest": "^26.0.22", "@types/node": "^15.0.2", "glob": "^7.2.0", "jest": "^26.6.3", "prettier": "^2.5.1", "ts-jest": "^26.5.5", "ts-proto": "^1.110.0", "typescript": "^4.2.4" } }],
+
+    "@keepkey/hdwallet-keepkey-nodewebusb/@keepkey/hdwallet-keepkey/@keepkey/device-protocol": ["@keepkey/device-protocol@file:../../modules/device-protocol", { "dependencies": { "google-protobuf": "3.21.4" }, "devDependencies": { "grpc-tools": "1.13.1", "protobufjs": "^6.8.8", "ts-protoc-gen": "^0.10.0" } }],
+
+    "@keepkey/hdwallet-keepkey-nodewebusb/@keepkey/hdwallet-keepkey/@keepkey/hdwallet-core": ["@keepkey/hdwallet-core@file:../../modules/hdwallet/packages/hdwallet-core", { "dependencies": { "@keepkey/proto-tx-builder": "^0.9.1", "eip-712": "^1.0.0", "eventemitter2": "^5.0.1", "type-assertions": "^1.1.0" }, "devDependencies": { "@types/google-protobuf": "^3.15.1" } }],
+
+    "@keepkey/hdwallet-keepkey-nodewebusb/@keepkey/hdwallet-keepkey/@keepkey/proto-tx-builder": ["@shapeshiftoss/proto-tx-builder@file:../../modules/proto-tx-builder", { "dependencies": { "@cosmjs/amino": "^0.29.4", "@cosmjs/crypto": "0.29.4", "@cosmjs/encoding": "^0.29.4", "@cosmjs/proto-signing": "^0.29.4", "@cosmjs/stargate": "^0.29.4", "bn.js": "^5.2.1", "cosmjs-types": "^0.5.1", "google-protobuf": "^3.17.0", "osmojs": "^0.37.0" }, "devDependencies": { "@types/bn.js": "^5.1.1", "@types/glob": "^7.2.0", "@types/google-protobuf": "^3.15.2", "@types/jest": "^26.0.22", "@types/node": "^15.0.2", "glob": "^7.2.0", "jest": "^26.6.3", "prettier": "^2.5.1", "ts-jest": "^26.5.5", "ts-proto": "^1.110.0", "typescript": "^4.2.4" } }],
+
+    "@keepkey/hdwallet-keepkey/@keepkey/hdwallet-core/@keepkey/proto-tx-builder": ["@shapeshiftoss/proto-tx-builder@file:../../modules/proto-tx-builder", { "dependencies": { "@cosmjs/amino": "^0.29.4", "@cosmjs/crypto": "0.29.4", "@cosmjs/encoding": "^0.29.4", "@cosmjs/proto-signing": "^0.29.4", "@cosmjs/stargate": "^0.29.4", "bn.js": "^5.2.1", "cosmjs-types": "^0.5.1", "google-protobuf": "^3.17.0", "osmojs": "^0.37.0" }, "devDependencies": { "@types/bn.js": "^5.1.1", "@types/glob": "^7.2.0", "@types/google-protobuf": "^3.15.2", "@types/jest": "^26.0.22", "@types/node": "^15.0.2", "glob": "^7.2.0", "jest": "^26.6.3", "prettier": "^2.5.1", "ts-jest": "^26.5.5", "ts-proto": "^1.110.0", "typescript": "^4.2.4" } }],
+
+    "@keepkey/hdwallet-keepkey/@keepkey/proto-tx-builder/@cosmjs/amino": ["@cosmjs/amino@0.29.5", "", { "dependencies": { "@cosmjs/crypto": "^0.29.5", "@cosmjs/encoding": "^0.29.5", "@cosmjs/math": "^0.29.5", "@cosmjs/utils": "^0.29.5" } }, "sha512-Qo8jpC0BiziTSUqpkNatBcwtKNhCovUnFul9SlT/74JUCdLYaeG5hxr3q1cssQt++l4LvlcpF+OUXL48XjNjLw=="],
+
+    "@keepkey/hdwallet-keepkey/@keepkey/proto-tx-builder/@cosmjs/proto-signing": ["@cosmjs/proto-signing@0.29.5", "", { "dependencies": { "@cosmjs/amino": "^0.29.5", "@cosmjs/crypto": "^0.29.5", "@cosmjs/encoding": "^0.29.5", "@cosmjs/math": "^0.29.5", "@cosmjs/utils": "^0.29.5", "cosmjs-types": "^0.5.2", "long": "^4.0.0" } }, "sha512-QRrS7CiKaoETdgIqvi/7JC2qCwCR7lnWaUsTzh/XfRy3McLkEd+cXbKAW3cygykv7IN0VAEIhZd2lyIfT8KwNA=="],
+
+    "@keepkey/hdwallet-keepkey/@keepkey/proto-tx-builder/@cosmjs/stargate": ["@cosmjs/stargate@0.29.5", "", { "dependencies": { "@confio/ics23": "^0.6.8", "@cosmjs/amino": "^0.29.5", "@cosmjs/encoding": "^0.29.5", "@cosmjs/math": "^0.29.5", "@cosmjs/proto-signing": "^0.29.5", "@cosmjs/stream": "^0.29.5", "@cosmjs/tendermint-rpc": "^0.29.5", "@cosmjs/utils": "^0.29.5", "cosmjs-types": "^0.5.2", "long": "^4.0.0", "protobufjs": "~6.11.3", "xstream": "^11.14.0" } }, "sha512-hjEv8UUlJruLrYGJcUZXM/CziaINOKwfVm2BoSdUnNTMxGvY/jC1ABHKeZUYt9oXHxEJ1n9+pDqzbKc8pT0nBw=="],
+
+    "@keepkey/hdwallet-keepkey/@keepkey/proto-tx-builder/@types/node": ["@types/node@15.14.9", "", {}, "sha512-qjd88DrCxupx/kJD5yQgZdcYKZKSIGBVDIBE1/LTGcNm3d2Np/jxojkdePDdfnBHJc5W7vSMpbJ1aB7p/Py69A=="],
+
+    "@keepkey/hdwallet-keepkey/@keepkey/proto-tx-builder/typescript": ["typescript@4.9.5", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-1FXk9E2Hm+QzZQ7z+McJiHL4NW1F2EzMu9Nq9i3zAaGqibafqYwCVU6WyWAuyQRRzOlxou8xZSyXLEN8oKj24g=="],
 
     "@keepkey/proto-tx-builder/@cosmjs/amino/@cosmjs/crypto": ["@cosmjs/crypto@0.29.5", "", { "dependencies": { "@cosmjs/encoding": "^0.29.5", "@cosmjs/math": "^0.29.5", "@cosmjs/utils": "^0.29.5", "@noble/hashes": "^1", "bn.js": "^5.2.0", "elliptic": "^6.5.4", "libsodium-wrappers": "^0.7.6" } }, "sha512-2bKkaLGictaNL0UipQCL6C1afaisv6k8Wr/GCLx9FqiyFkh9ZgRHDyetD64ZsjnWV/N/D44s/esI+k6oPREaiQ=="],
 
@@ -2800,6 +2832,90 @@
     "unset-value/has-value/has-values": ["has-values@0.1.4", "", {}, "sha512-J8S0cEdWuQbqD9//tlZxiMuMNmxB8PlEwvYwuxsTmR1G5RXUePEX/SJn7aD0GMLieuZYSwNH0cQuJGwnYunXRQ=="],
 
     "unset-value/has-value/isobject": ["isobject@2.1.0", "", { "dependencies": { "isarray": "1.0.0" } }, "sha512-+OUdGJlgjOBZDfxnDjYYG6zp487z0JGNQq3cYQYg5f5hKR+syHMsaztzGeml/4kGG55CSpKSpWTY+jYGgsHLgA=="],
+
+    "@keepkey/hdwallet-core/@keepkey/proto-tx-builder/@cosmjs/amino/@cosmjs/crypto": ["@cosmjs/crypto@0.29.5", "", { "dependencies": { "@cosmjs/encoding": "^0.29.5", "@cosmjs/math": "^0.29.5", "@cosmjs/utils": "^0.29.5", "@noble/hashes": "^1", "bn.js": "^5.2.0", "elliptic": "^6.5.4", "libsodium-wrappers": "^0.7.6" } }, "sha512-2bKkaLGictaNL0UipQCL6C1afaisv6k8Wr/GCLx9FqiyFkh9ZgRHDyetD64ZsjnWV/N/D44s/esI+k6oPREaiQ=="],
+
+    "@keepkey/hdwallet-core/@keepkey/proto-tx-builder/@cosmjs/amino/@cosmjs/math": ["@cosmjs/math@0.29.5", "", { "dependencies": { "bn.js": "^5.2.0" } }, "sha512-2GjKcv+A9f86MAWYLUkjhw1/WpRl2R1BTb3m9qPG7lzMA7ioYff9jY5SPCfafKdxM4TIQGxXQlYGewQL16O68Q=="],
+
+    "@keepkey/hdwallet-core/@keepkey/proto-tx-builder/@cosmjs/amino/@cosmjs/utils": ["@cosmjs/utils@0.29.5", "", {}, "sha512-m7h+RXDUxOzEOGt4P+3OVPX7PuakZT3GBmaM/Y2u+abN3xZkziykD/NvedYFvvCCdQo714XcGl33bwifS9FZPQ=="],
+
+    "@keepkey/hdwallet-core/@keepkey/proto-tx-builder/@cosmjs/proto-signing/@cosmjs/crypto": ["@cosmjs/crypto@0.29.5", "", { "dependencies": { "@cosmjs/encoding": "^0.29.5", "@cosmjs/math": "^0.29.5", "@cosmjs/utils": "^0.29.5", "@noble/hashes": "^1", "bn.js": "^5.2.0", "elliptic": "^6.5.4", "libsodium-wrappers": "^0.7.6" } }, "sha512-2bKkaLGictaNL0UipQCL6C1afaisv6k8Wr/GCLx9FqiyFkh9ZgRHDyetD64ZsjnWV/N/D44s/esI+k6oPREaiQ=="],
+
+    "@keepkey/hdwallet-core/@keepkey/proto-tx-builder/@cosmjs/proto-signing/@cosmjs/math": ["@cosmjs/math@0.29.5", "", { "dependencies": { "bn.js": "^5.2.0" } }, "sha512-2GjKcv+A9f86MAWYLUkjhw1/WpRl2R1BTb3m9qPG7lzMA7ioYff9jY5SPCfafKdxM4TIQGxXQlYGewQL16O68Q=="],
+
+    "@keepkey/hdwallet-core/@keepkey/proto-tx-builder/@cosmjs/proto-signing/@cosmjs/utils": ["@cosmjs/utils@0.29.5", "", {}, "sha512-m7h+RXDUxOzEOGt4P+3OVPX7PuakZT3GBmaM/Y2u+abN3xZkziykD/NvedYFvvCCdQo714XcGl33bwifS9FZPQ=="],
+
+    "@keepkey/hdwallet-core/@keepkey/proto-tx-builder/@cosmjs/stargate/@cosmjs/math": ["@cosmjs/math@0.29.5", "", { "dependencies": { "bn.js": "^5.2.0" } }, "sha512-2GjKcv+A9f86MAWYLUkjhw1/WpRl2R1BTb3m9qPG7lzMA7ioYff9jY5SPCfafKdxM4TIQGxXQlYGewQL16O68Q=="],
+
+    "@keepkey/hdwallet-core/@keepkey/proto-tx-builder/@cosmjs/stargate/@cosmjs/stream": ["@cosmjs/stream@0.29.5", "", { "dependencies": { "xstream": "^11.14.0" } }, "sha512-TToTDWyH1p05GBtF0Y8jFw2C+4783ueDCmDyxOMM6EU82IqpmIbfwcdMOCAm0JhnyMh+ocdebbFvnX/sGKzRAA=="],
+
+    "@keepkey/hdwallet-core/@keepkey/proto-tx-builder/@cosmjs/stargate/@cosmjs/tendermint-rpc": ["@cosmjs/tendermint-rpc@0.29.5", "", { "dependencies": { "@cosmjs/crypto": "^0.29.5", "@cosmjs/encoding": "^0.29.5", "@cosmjs/json-rpc": "^0.29.5", "@cosmjs/math": "^0.29.5", "@cosmjs/socket": "^0.29.5", "@cosmjs/stream": "^0.29.5", "@cosmjs/utils": "^0.29.5", "axios": "^0.21.2", "readonly-date": "^1.0.0", "xstream": "^11.14.0" } }, "sha512-ar80twieuAxsy0x2za/aO3kBr2DFPAXDmk2ikDbmkda+qqfXgl35l9CVAAjKRqd9d+cRvbQyb5M4wy6XQpEV6w=="],
+
+    "@keepkey/hdwallet-core/@keepkey/proto-tx-builder/@cosmjs/stargate/@cosmjs/utils": ["@cosmjs/utils@0.29.5", "", {}, "sha512-m7h+RXDUxOzEOGt4P+3OVPX7PuakZT3GBmaM/Y2u+abN3xZkziykD/NvedYFvvCCdQo714XcGl33bwifS9FZPQ=="],
+
+    "@keepkey/hdwallet-keepkey-nodehid/@keepkey/hdwallet-keepkey/@keepkey/hdwallet-core/@keepkey/proto-tx-builder": ["@shapeshiftoss/proto-tx-builder@file:../../modules/proto-tx-builder", { "dependencies": { "@cosmjs/amino": "^0.29.4", "@cosmjs/crypto": "0.29.4", "@cosmjs/encoding": "^0.29.4", "@cosmjs/proto-signing": "^0.29.4", "@cosmjs/stargate": "^0.29.4", "bn.js": "^5.2.1", "cosmjs-types": "^0.5.1", "google-protobuf": "^3.17.0", "osmojs": "^0.37.0" }, "devDependencies": { "@types/bn.js": "^5.1.1", "@types/glob": "^7.2.0", "@types/google-protobuf": "^3.15.2", "@types/jest": "^26.0.22", "@types/node": "^15.0.2", "glob": "^7.2.0", "jest": "^26.6.3", "prettier": "^2.5.1", "ts-jest": "^26.5.5", "ts-proto": "^1.110.0", "typescript": "^4.2.4" } }],
+
+    "@keepkey/hdwallet-keepkey-nodehid/@keepkey/hdwallet-keepkey/@keepkey/proto-tx-builder/@cosmjs/amino": ["@cosmjs/amino@0.29.5", "", { "dependencies": { "@cosmjs/crypto": "^0.29.5", "@cosmjs/encoding": "^0.29.5", "@cosmjs/math": "^0.29.5", "@cosmjs/utils": "^0.29.5" } }, "sha512-Qo8jpC0BiziTSUqpkNatBcwtKNhCovUnFul9SlT/74JUCdLYaeG5hxr3q1cssQt++l4LvlcpF+OUXL48XjNjLw=="],
+
+    "@keepkey/hdwallet-keepkey-nodehid/@keepkey/hdwallet-keepkey/@keepkey/proto-tx-builder/@cosmjs/proto-signing": ["@cosmjs/proto-signing@0.29.5", "", { "dependencies": { "@cosmjs/amino": "^0.29.5", "@cosmjs/crypto": "^0.29.5", "@cosmjs/encoding": "^0.29.5", "@cosmjs/math": "^0.29.5", "@cosmjs/utils": "^0.29.5", "cosmjs-types": "^0.5.2", "long": "^4.0.0" } }, "sha512-QRrS7CiKaoETdgIqvi/7JC2qCwCR7lnWaUsTzh/XfRy3McLkEd+cXbKAW3cygykv7IN0VAEIhZd2lyIfT8KwNA=="],
+
+    "@keepkey/hdwallet-keepkey-nodehid/@keepkey/hdwallet-keepkey/@keepkey/proto-tx-builder/@cosmjs/stargate": ["@cosmjs/stargate@0.29.5", "", { "dependencies": { "@confio/ics23": "^0.6.8", "@cosmjs/amino": "^0.29.5", "@cosmjs/encoding": "^0.29.5", "@cosmjs/math": "^0.29.5", "@cosmjs/proto-signing": "^0.29.5", "@cosmjs/stream": "^0.29.5", "@cosmjs/tendermint-rpc": "^0.29.5", "@cosmjs/utils": "^0.29.5", "cosmjs-types": "^0.5.2", "long": "^4.0.0", "protobufjs": "~6.11.3", "xstream": "^11.14.0" } }, "sha512-hjEv8UUlJruLrYGJcUZXM/CziaINOKwfVm2BoSdUnNTMxGvY/jC1ABHKeZUYt9oXHxEJ1n9+pDqzbKc8pT0nBw=="],
+
+    "@keepkey/hdwallet-keepkey-nodehid/@keepkey/hdwallet-keepkey/@keepkey/proto-tx-builder/@types/node": ["@types/node@15.14.9", "", {}, "sha512-qjd88DrCxupx/kJD5yQgZdcYKZKSIGBVDIBE1/LTGcNm3d2Np/jxojkdePDdfnBHJc5W7vSMpbJ1aB7p/Py69A=="],
+
+    "@keepkey/hdwallet-keepkey-nodehid/@keepkey/hdwallet-keepkey/@keepkey/proto-tx-builder/typescript": ["typescript@4.9.5", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-1FXk9E2Hm+QzZQ7z+McJiHL4NW1F2EzMu9Nq9i3zAaGqibafqYwCVU6WyWAuyQRRzOlxou8xZSyXLEN8oKj24g=="],
+
+    "@keepkey/hdwallet-keepkey-nodewebusb/@keepkey/hdwallet-core/@keepkey/proto-tx-builder/@cosmjs/amino": ["@cosmjs/amino@0.29.5", "", { "dependencies": { "@cosmjs/crypto": "^0.29.5", "@cosmjs/encoding": "^0.29.5", "@cosmjs/math": "^0.29.5", "@cosmjs/utils": "^0.29.5" } }, "sha512-Qo8jpC0BiziTSUqpkNatBcwtKNhCovUnFul9SlT/74JUCdLYaeG5hxr3q1cssQt++l4LvlcpF+OUXL48XjNjLw=="],
+
+    "@keepkey/hdwallet-keepkey-nodewebusb/@keepkey/hdwallet-core/@keepkey/proto-tx-builder/@cosmjs/proto-signing": ["@cosmjs/proto-signing@0.29.5", "", { "dependencies": { "@cosmjs/amino": "^0.29.5", "@cosmjs/crypto": "^0.29.5", "@cosmjs/encoding": "^0.29.5", "@cosmjs/math": "^0.29.5", "@cosmjs/utils": "^0.29.5", "cosmjs-types": "^0.5.2", "long": "^4.0.0" } }, "sha512-QRrS7CiKaoETdgIqvi/7JC2qCwCR7lnWaUsTzh/XfRy3McLkEd+cXbKAW3cygykv7IN0VAEIhZd2lyIfT8KwNA=="],
+
+    "@keepkey/hdwallet-keepkey-nodewebusb/@keepkey/hdwallet-core/@keepkey/proto-tx-builder/@cosmjs/stargate": ["@cosmjs/stargate@0.29.5", "", { "dependencies": { "@confio/ics23": "^0.6.8", "@cosmjs/amino": "^0.29.5", "@cosmjs/encoding": "^0.29.5", "@cosmjs/math": "^0.29.5", "@cosmjs/proto-signing": "^0.29.5", "@cosmjs/stream": "^0.29.5", "@cosmjs/tendermint-rpc": "^0.29.5", "@cosmjs/utils": "^0.29.5", "cosmjs-types": "^0.5.2", "long": "^4.0.0", "protobufjs": "~6.11.3", "xstream": "^11.14.0" } }, "sha512-hjEv8UUlJruLrYGJcUZXM/CziaINOKwfVm2BoSdUnNTMxGvY/jC1ABHKeZUYt9oXHxEJ1n9+pDqzbKc8pT0nBw=="],
+
+    "@keepkey/hdwallet-keepkey-nodewebusb/@keepkey/hdwallet-core/@keepkey/proto-tx-builder/@types/node": ["@types/node@15.14.9", "", {}, "sha512-qjd88DrCxupx/kJD5yQgZdcYKZKSIGBVDIBE1/LTGcNm3d2Np/jxojkdePDdfnBHJc5W7vSMpbJ1aB7p/Py69A=="],
+
+    "@keepkey/hdwallet-keepkey-nodewebusb/@keepkey/hdwallet-core/@keepkey/proto-tx-builder/typescript": ["typescript@4.9.5", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-1FXk9E2Hm+QzZQ7z+McJiHL4NW1F2EzMu9Nq9i3zAaGqibafqYwCVU6WyWAuyQRRzOlxou8xZSyXLEN8oKj24g=="],
+
+    "@keepkey/hdwallet-keepkey-nodewebusb/@keepkey/hdwallet-keepkey/@keepkey/hdwallet-core/@keepkey/proto-tx-builder": ["@shapeshiftoss/proto-tx-builder@file:../../modules/proto-tx-builder", { "dependencies": { "@cosmjs/amino": "^0.29.4", "@cosmjs/crypto": "0.29.4", "@cosmjs/encoding": "^0.29.4", "@cosmjs/proto-signing": "^0.29.4", "@cosmjs/stargate": "^0.29.4", "bn.js": "^5.2.1", "cosmjs-types": "^0.5.1", "google-protobuf": "^3.17.0", "osmojs": "^0.37.0" }, "devDependencies": { "@types/bn.js": "^5.1.1", "@types/glob": "^7.2.0", "@types/google-protobuf": "^3.15.2", "@types/jest": "^26.0.22", "@types/node": "^15.0.2", "glob": "^7.2.0", "jest": "^26.6.3", "prettier": "^2.5.1", "ts-jest": "^26.5.5", "ts-proto": "^1.110.0", "typescript": "^4.2.4" } }],
+
+    "@keepkey/hdwallet-keepkey-nodewebusb/@keepkey/hdwallet-keepkey/@keepkey/proto-tx-builder/@cosmjs/amino": ["@cosmjs/amino@0.29.5", "", { "dependencies": { "@cosmjs/crypto": "^0.29.5", "@cosmjs/encoding": "^0.29.5", "@cosmjs/math": "^0.29.5", "@cosmjs/utils": "^0.29.5" } }, "sha512-Qo8jpC0BiziTSUqpkNatBcwtKNhCovUnFul9SlT/74JUCdLYaeG5hxr3q1cssQt++l4LvlcpF+OUXL48XjNjLw=="],
+
+    "@keepkey/hdwallet-keepkey-nodewebusb/@keepkey/hdwallet-keepkey/@keepkey/proto-tx-builder/@cosmjs/proto-signing": ["@cosmjs/proto-signing@0.29.5", "", { "dependencies": { "@cosmjs/amino": "^0.29.5", "@cosmjs/crypto": "^0.29.5", "@cosmjs/encoding": "^0.29.5", "@cosmjs/math": "^0.29.5", "@cosmjs/utils": "^0.29.5", "cosmjs-types": "^0.5.2", "long": "^4.0.0" } }, "sha512-QRrS7CiKaoETdgIqvi/7JC2qCwCR7lnWaUsTzh/XfRy3McLkEd+cXbKAW3cygykv7IN0VAEIhZd2lyIfT8KwNA=="],
+
+    "@keepkey/hdwallet-keepkey-nodewebusb/@keepkey/hdwallet-keepkey/@keepkey/proto-tx-builder/@cosmjs/stargate": ["@cosmjs/stargate@0.29.5", "", { "dependencies": { "@confio/ics23": "^0.6.8", "@cosmjs/amino": "^0.29.5", "@cosmjs/encoding": "^0.29.5", "@cosmjs/math": "^0.29.5", "@cosmjs/proto-signing": "^0.29.5", "@cosmjs/stream": "^0.29.5", "@cosmjs/tendermint-rpc": "^0.29.5", "@cosmjs/utils": "^0.29.5", "cosmjs-types": "^0.5.2", "long": "^4.0.0", "protobufjs": "~6.11.3", "xstream": "^11.14.0" } }, "sha512-hjEv8UUlJruLrYGJcUZXM/CziaINOKwfVm2BoSdUnNTMxGvY/jC1ABHKeZUYt9oXHxEJ1n9+pDqzbKc8pT0nBw=="],
+
+    "@keepkey/hdwallet-keepkey-nodewebusb/@keepkey/hdwallet-keepkey/@keepkey/proto-tx-builder/@types/node": ["@types/node@15.14.9", "", {}, "sha512-qjd88DrCxupx/kJD5yQgZdcYKZKSIGBVDIBE1/LTGcNm3d2Np/jxojkdePDdfnBHJc5W7vSMpbJ1aB7p/Py69A=="],
+
+    "@keepkey/hdwallet-keepkey-nodewebusb/@keepkey/hdwallet-keepkey/@keepkey/proto-tx-builder/typescript": ["typescript@4.9.5", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-1FXk9E2Hm+QzZQ7z+McJiHL4NW1F2EzMu9Nq9i3zAaGqibafqYwCVU6WyWAuyQRRzOlxou8xZSyXLEN8oKj24g=="],
+
+    "@keepkey/hdwallet-keepkey/@keepkey/hdwallet-core/@keepkey/proto-tx-builder/@cosmjs/amino": ["@cosmjs/amino@0.29.5", "", { "dependencies": { "@cosmjs/crypto": "^0.29.5", "@cosmjs/encoding": "^0.29.5", "@cosmjs/math": "^0.29.5", "@cosmjs/utils": "^0.29.5" } }, "sha512-Qo8jpC0BiziTSUqpkNatBcwtKNhCovUnFul9SlT/74JUCdLYaeG5hxr3q1cssQt++l4LvlcpF+OUXL48XjNjLw=="],
+
+    "@keepkey/hdwallet-keepkey/@keepkey/hdwallet-core/@keepkey/proto-tx-builder/@cosmjs/proto-signing": ["@cosmjs/proto-signing@0.29.5", "", { "dependencies": { "@cosmjs/amino": "^0.29.5", "@cosmjs/crypto": "^0.29.5", "@cosmjs/encoding": "^0.29.5", "@cosmjs/math": "^0.29.5", "@cosmjs/utils": "^0.29.5", "cosmjs-types": "^0.5.2", "long": "^4.0.0" } }, "sha512-QRrS7CiKaoETdgIqvi/7JC2qCwCR7lnWaUsTzh/XfRy3McLkEd+cXbKAW3cygykv7IN0VAEIhZd2lyIfT8KwNA=="],
+
+    "@keepkey/hdwallet-keepkey/@keepkey/hdwallet-core/@keepkey/proto-tx-builder/@cosmjs/stargate": ["@cosmjs/stargate@0.29.5", "", { "dependencies": { "@confio/ics23": "^0.6.8", "@cosmjs/amino": "^0.29.5", "@cosmjs/encoding": "^0.29.5", "@cosmjs/math": "^0.29.5", "@cosmjs/proto-signing": "^0.29.5", "@cosmjs/stream": "^0.29.5", "@cosmjs/tendermint-rpc": "^0.29.5", "@cosmjs/utils": "^0.29.5", "cosmjs-types": "^0.5.2", "long": "^4.0.0", "protobufjs": "~6.11.3", "xstream": "^11.14.0" } }, "sha512-hjEv8UUlJruLrYGJcUZXM/CziaINOKwfVm2BoSdUnNTMxGvY/jC1ABHKeZUYt9oXHxEJ1n9+pDqzbKc8pT0nBw=="],
+
+    "@keepkey/hdwallet-keepkey/@keepkey/hdwallet-core/@keepkey/proto-tx-builder/@types/node": ["@types/node@15.14.9", "", {}, "sha512-qjd88DrCxupx/kJD5yQgZdcYKZKSIGBVDIBE1/LTGcNm3d2Np/jxojkdePDdfnBHJc5W7vSMpbJ1aB7p/Py69A=="],
+
+    "@keepkey/hdwallet-keepkey/@keepkey/hdwallet-core/@keepkey/proto-tx-builder/typescript": ["typescript@4.9.5", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-1FXk9E2Hm+QzZQ7z+McJiHL4NW1F2EzMu9Nq9i3zAaGqibafqYwCVU6WyWAuyQRRzOlxou8xZSyXLEN8oKj24g=="],
+
+    "@keepkey/hdwallet-keepkey/@keepkey/proto-tx-builder/@cosmjs/amino/@cosmjs/crypto": ["@cosmjs/crypto@0.29.5", "", { "dependencies": { "@cosmjs/encoding": "^0.29.5", "@cosmjs/math": "^0.29.5", "@cosmjs/utils": "^0.29.5", "@noble/hashes": "^1", "bn.js": "^5.2.0", "elliptic": "^6.5.4", "libsodium-wrappers": "^0.7.6" } }, "sha512-2bKkaLGictaNL0UipQCL6C1afaisv6k8Wr/GCLx9FqiyFkh9ZgRHDyetD64ZsjnWV/N/D44s/esI+k6oPREaiQ=="],
+
+    "@keepkey/hdwallet-keepkey/@keepkey/proto-tx-builder/@cosmjs/amino/@cosmjs/math": ["@cosmjs/math@0.29.5", "", { "dependencies": { "bn.js": "^5.2.0" } }, "sha512-2GjKcv+A9f86MAWYLUkjhw1/WpRl2R1BTb3m9qPG7lzMA7ioYff9jY5SPCfafKdxM4TIQGxXQlYGewQL16O68Q=="],
+
+    "@keepkey/hdwallet-keepkey/@keepkey/proto-tx-builder/@cosmjs/amino/@cosmjs/utils": ["@cosmjs/utils@0.29.5", "", {}, "sha512-m7h+RXDUxOzEOGt4P+3OVPX7PuakZT3GBmaM/Y2u+abN3xZkziykD/NvedYFvvCCdQo714XcGl33bwifS9FZPQ=="],
+
+    "@keepkey/hdwallet-keepkey/@keepkey/proto-tx-builder/@cosmjs/proto-signing/@cosmjs/crypto": ["@cosmjs/crypto@0.29.5", "", { "dependencies": { "@cosmjs/encoding": "^0.29.5", "@cosmjs/math": "^0.29.5", "@cosmjs/utils": "^0.29.5", "@noble/hashes": "^1", "bn.js": "^5.2.0", "elliptic": "^6.5.4", "libsodium-wrappers": "^0.7.6" } }, "sha512-2bKkaLGictaNL0UipQCL6C1afaisv6k8Wr/GCLx9FqiyFkh9ZgRHDyetD64ZsjnWV/N/D44s/esI+k6oPREaiQ=="],
+
+    "@keepkey/hdwallet-keepkey/@keepkey/proto-tx-builder/@cosmjs/proto-signing/@cosmjs/math": ["@cosmjs/math@0.29.5", "", { "dependencies": { "bn.js": "^5.2.0" } }, "sha512-2GjKcv+A9f86MAWYLUkjhw1/WpRl2R1BTb3m9qPG7lzMA7ioYff9jY5SPCfafKdxM4TIQGxXQlYGewQL16O68Q=="],
+
+    "@keepkey/hdwallet-keepkey/@keepkey/proto-tx-builder/@cosmjs/proto-signing/@cosmjs/utils": ["@cosmjs/utils@0.29.5", "", {}, "sha512-m7h+RXDUxOzEOGt4P+3OVPX7PuakZT3GBmaM/Y2u+abN3xZkziykD/NvedYFvvCCdQo714XcGl33bwifS9FZPQ=="],
+
+    "@keepkey/hdwallet-keepkey/@keepkey/proto-tx-builder/@cosmjs/stargate/@cosmjs/math": ["@cosmjs/math@0.29.5", "", { "dependencies": { "bn.js": "^5.2.0" } }, "sha512-2GjKcv+A9f86MAWYLUkjhw1/WpRl2R1BTb3m9qPG7lzMA7ioYff9jY5SPCfafKdxM4TIQGxXQlYGewQL16O68Q=="],
+
+    "@keepkey/hdwallet-keepkey/@keepkey/proto-tx-builder/@cosmjs/stargate/@cosmjs/stream": ["@cosmjs/stream@0.29.5", "", { "dependencies": { "xstream": "^11.14.0" } }, "sha512-TToTDWyH1p05GBtF0Y8jFw2C+4783ueDCmDyxOMM6EU82IqpmIbfwcdMOCAm0JhnyMh+ocdebbFvnX/sGKzRAA=="],
+
+    "@keepkey/hdwallet-keepkey/@keepkey/proto-tx-builder/@cosmjs/stargate/@cosmjs/tendermint-rpc": ["@cosmjs/tendermint-rpc@0.29.5", "", { "dependencies": { "@cosmjs/crypto": "^0.29.5", "@cosmjs/encoding": "^0.29.5", "@cosmjs/json-rpc": "^0.29.5", "@cosmjs/math": "^0.29.5", "@cosmjs/socket": "^0.29.5", "@cosmjs/stream": "^0.29.5", "@cosmjs/utils": "^0.29.5", "axios": "^0.21.2", "readonly-date": "^1.0.0", "xstream": "^11.14.0" } }, "sha512-ar80twieuAxsy0x2za/aO3kBr2DFPAXDmk2ikDbmkda+qqfXgl35l9CVAAjKRqd9d+cRvbQyb5M4wy6XQpEV6w=="],
+
+    "@keepkey/hdwallet-keepkey/@keepkey/proto-tx-builder/@cosmjs/stargate/@cosmjs/utils": ["@cosmjs/utils@0.29.5", "", {}, "sha512-m7h+RXDUxOzEOGt4P+3OVPX7PuakZT3GBmaM/Y2u+abN3xZkziykD/NvedYFvvCCdQo714XcGl33bwifS9FZPQ=="],
 
     "@keepkey/proto-tx-builder/@cosmjs/stargate/@cosmjs/tendermint-rpc/@cosmjs/crypto": ["@cosmjs/crypto@0.29.5", "", { "dependencies": { "@cosmjs/encoding": "^0.29.5", "@cosmjs/math": "^0.29.5", "@cosmjs/utils": "^0.29.5", "@noble/hashes": "^1", "bn.js": "^5.2.0", "elliptic": "^6.5.4", "libsodium-wrappers": "^0.7.6" } }, "sha512-2bKkaLGictaNL0UipQCL6C1afaisv6k8Wr/GCLx9FqiyFkh9ZgRHDyetD64ZsjnWV/N/D44s/esI+k6oPREaiQ=="],
 
@@ -3197,6 +3313,118 @@
 
     "unset-value/has-value/isobject/isarray": ["isarray@1.0.0", "", {}, "sha512-VLghIWNM6ELQzo7zwmcg0NmTVyWKYjvIeM83yjp0wRDTmUnrM678fQbcKBo6n2CJEF0szoG//ytg+TKla89ALQ=="],
 
+    "@keepkey/hdwallet-core/@keepkey/proto-tx-builder/@cosmjs/stargate/@cosmjs/tendermint-rpc/@cosmjs/crypto": ["@cosmjs/crypto@0.29.5", "", { "dependencies": { "@cosmjs/encoding": "^0.29.5", "@cosmjs/math": "^0.29.5", "@cosmjs/utils": "^0.29.5", "@noble/hashes": "^1", "bn.js": "^5.2.0", "elliptic": "^6.5.4", "libsodium-wrappers": "^0.7.6" } }, "sha512-2bKkaLGictaNL0UipQCL6C1afaisv6k8Wr/GCLx9FqiyFkh9ZgRHDyetD64ZsjnWV/N/D44s/esI+k6oPREaiQ=="],
+
+    "@keepkey/hdwallet-core/@keepkey/proto-tx-builder/@cosmjs/stargate/@cosmjs/tendermint-rpc/@cosmjs/json-rpc": ["@cosmjs/json-rpc@0.29.5", "", { "dependencies": { "@cosmjs/stream": "^0.29.5", "xstream": "^11.14.0" } }, "sha512-C78+X06l+r9xwdM1yFWIpGl03LhB9NdM1xvZpQHwgCOl0Ir/WV8pw48y3Ez2awAoUBRfTeejPe4KvrE6NoIi/w=="],
+
+    "@keepkey/hdwallet-core/@keepkey/proto-tx-builder/@cosmjs/stargate/@cosmjs/tendermint-rpc/@cosmjs/socket": ["@cosmjs/socket@0.29.5", "", { "dependencies": { "@cosmjs/stream": "^0.29.5", "isomorphic-ws": "^4.0.1", "ws": "^7", "xstream": "^11.14.0" } }, "sha512-5VYDupIWbIXq3ftPV1LkS5Ya/T7Ol/AzWVhNxZ79hPe/mBfv1bGau/LqIYOm2zxGlgm9hBHOTmWGqNYDwr9LNQ=="],
+
+    "@keepkey/hdwallet-keepkey-nodehid/@keepkey/hdwallet-keepkey/@keepkey/hdwallet-core/@keepkey/proto-tx-builder/@cosmjs/amino": ["@cosmjs/amino@0.29.5", "", { "dependencies": { "@cosmjs/crypto": "^0.29.5", "@cosmjs/encoding": "^0.29.5", "@cosmjs/math": "^0.29.5", "@cosmjs/utils": "^0.29.5" } }, "sha512-Qo8jpC0BiziTSUqpkNatBcwtKNhCovUnFul9SlT/74JUCdLYaeG5hxr3q1cssQt++l4LvlcpF+OUXL48XjNjLw=="],
+
+    "@keepkey/hdwallet-keepkey-nodehid/@keepkey/hdwallet-keepkey/@keepkey/hdwallet-core/@keepkey/proto-tx-builder/@cosmjs/proto-signing": ["@cosmjs/proto-signing@0.29.5", "", { "dependencies": { "@cosmjs/amino": "^0.29.5", "@cosmjs/crypto": "^0.29.5", "@cosmjs/encoding": "^0.29.5", "@cosmjs/math": "^0.29.5", "@cosmjs/utils": "^0.29.5", "cosmjs-types": "^0.5.2", "long": "^4.0.0" } }, "sha512-QRrS7CiKaoETdgIqvi/7JC2qCwCR7lnWaUsTzh/XfRy3McLkEd+cXbKAW3cygykv7IN0VAEIhZd2lyIfT8KwNA=="],
+
+    "@keepkey/hdwallet-keepkey-nodehid/@keepkey/hdwallet-keepkey/@keepkey/hdwallet-core/@keepkey/proto-tx-builder/@cosmjs/stargate": ["@cosmjs/stargate@0.29.5", "", { "dependencies": { "@confio/ics23": "^0.6.8", "@cosmjs/amino": "^0.29.5", "@cosmjs/encoding": "^0.29.5", "@cosmjs/math": "^0.29.5", "@cosmjs/proto-signing": "^0.29.5", "@cosmjs/stream": "^0.29.5", "@cosmjs/tendermint-rpc": "^0.29.5", "@cosmjs/utils": "^0.29.5", "cosmjs-types": "^0.5.2", "long": "^4.0.0", "protobufjs": "~6.11.3", "xstream": "^11.14.0" } }, "sha512-hjEv8UUlJruLrYGJcUZXM/CziaINOKwfVm2BoSdUnNTMxGvY/jC1ABHKeZUYt9oXHxEJ1n9+pDqzbKc8pT0nBw=="],
+
+    "@keepkey/hdwallet-keepkey-nodehid/@keepkey/hdwallet-keepkey/@keepkey/hdwallet-core/@keepkey/proto-tx-builder/@types/node": ["@types/node@15.14.9", "", {}, "sha512-qjd88DrCxupx/kJD5yQgZdcYKZKSIGBVDIBE1/LTGcNm3d2Np/jxojkdePDdfnBHJc5W7vSMpbJ1aB7p/Py69A=="],
+
+    "@keepkey/hdwallet-keepkey-nodehid/@keepkey/hdwallet-keepkey/@keepkey/hdwallet-core/@keepkey/proto-tx-builder/typescript": ["typescript@4.9.5", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-1FXk9E2Hm+QzZQ7z+McJiHL4NW1F2EzMu9Nq9i3zAaGqibafqYwCVU6WyWAuyQRRzOlxou8xZSyXLEN8oKj24g=="],
+
+    "@keepkey/hdwallet-keepkey-nodehid/@keepkey/hdwallet-keepkey/@keepkey/proto-tx-builder/@cosmjs/amino/@cosmjs/crypto": ["@cosmjs/crypto@0.29.5", "", { "dependencies": { "@cosmjs/encoding": "^0.29.5", "@cosmjs/math": "^0.29.5", "@cosmjs/utils": "^0.29.5", "@noble/hashes": "^1", "bn.js": "^5.2.0", "elliptic": "^6.5.4", "libsodium-wrappers": "^0.7.6" } }, "sha512-2bKkaLGictaNL0UipQCL6C1afaisv6k8Wr/GCLx9FqiyFkh9ZgRHDyetD64ZsjnWV/N/D44s/esI+k6oPREaiQ=="],
+
+    "@keepkey/hdwallet-keepkey-nodehid/@keepkey/hdwallet-keepkey/@keepkey/proto-tx-builder/@cosmjs/amino/@cosmjs/math": ["@cosmjs/math@0.29.5", "", { "dependencies": { "bn.js": "^5.2.0" } }, "sha512-2GjKcv+A9f86MAWYLUkjhw1/WpRl2R1BTb3m9qPG7lzMA7ioYff9jY5SPCfafKdxM4TIQGxXQlYGewQL16O68Q=="],
+
+    "@keepkey/hdwallet-keepkey-nodehid/@keepkey/hdwallet-keepkey/@keepkey/proto-tx-builder/@cosmjs/amino/@cosmjs/utils": ["@cosmjs/utils@0.29.5", "", {}, "sha512-m7h+RXDUxOzEOGt4P+3OVPX7PuakZT3GBmaM/Y2u+abN3xZkziykD/NvedYFvvCCdQo714XcGl33bwifS9FZPQ=="],
+
+    "@keepkey/hdwallet-keepkey-nodehid/@keepkey/hdwallet-keepkey/@keepkey/proto-tx-builder/@cosmjs/proto-signing/@cosmjs/crypto": ["@cosmjs/crypto@0.29.5", "", { "dependencies": { "@cosmjs/encoding": "^0.29.5", "@cosmjs/math": "^0.29.5", "@cosmjs/utils": "^0.29.5", "@noble/hashes": "^1", "bn.js": "^5.2.0", "elliptic": "^6.5.4", "libsodium-wrappers": "^0.7.6" } }, "sha512-2bKkaLGictaNL0UipQCL6C1afaisv6k8Wr/GCLx9FqiyFkh9ZgRHDyetD64ZsjnWV/N/D44s/esI+k6oPREaiQ=="],
+
+    "@keepkey/hdwallet-keepkey-nodehid/@keepkey/hdwallet-keepkey/@keepkey/proto-tx-builder/@cosmjs/proto-signing/@cosmjs/math": ["@cosmjs/math@0.29.5", "", { "dependencies": { "bn.js": "^5.2.0" } }, "sha512-2GjKcv+A9f86MAWYLUkjhw1/WpRl2R1BTb3m9qPG7lzMA7ioYff9jY5SPCfafKdxM4TIQGxXQlYGewQL16O68Q=="],
+
+    "@keepkey/hdwallet-keepkey-nodehid/@keepkey/hdwallet-keepkey/@keepkey/proto-tx-builder/@cosmjs/proto-signing/@cosmjs/utils": ["@cosmjs/utils@0.29.5", "", {}, "sha512-m7h+RXDUxOzEOGt4P+3OVPX7PuakZT3GBmaM/Y2u+abN3xZkziykD/NvedYFvvCCdQo714XcGl33bwifS9FZPQ=="],
+
+    "@keepkey/hdwallet-keepkey-nodehid/@keepkey/hdwallet-keepkey/@keepkey/proto-tx-builder/@cosmjs/stargate/@cosmjs/math": ["@cosmjs/math@0.29.5", "", { "dependencies": { "bn.js": "^5.2.0" } }, "sha512-2GjKcv+A9f86MAWYLUkjhw1/WpRl2R1BTb3m9qPG7lzMA7ioYff9jY5SPCfafKdxM4TIQGxXQlYGewQL16O68Q=="],
+
+    "@keepkey/hdwallet-keepkey-nodehid/@keepkey/hdwallet-keepkey/@keepkey/proto-tx-builder/@cosmjs/stargate/@cosmjs/stream": ["@cosmjs/stream@0.29.5", "", { "dependencies": { "xstream": "^11.14.0" } }, "sha512-TToTDWyH1p05GBtF0Y8jFw2C+4783ueDCmDyxOMM6EU82IqpmIbfwcdMOCAm0JhnyMh+ocdebbFvnX/sGKzRAA=="],
+
+    "@keepkey/hdwallet-keepkey-nodehid/@keepkey/hdwallet-keepkey/@keepkey/proto-tx-builder/@cosmjs/stargate/@cosmjs/tendermint-rpc": ["@cosmjs/tendermint-rpc@0.29.5", "", { "dependencies": { "@cosmjs/crypto": "^0.29.5", "@cosmjs/encoding": "^0.29.5", "@cosmjs/json-rpc": "^0.29.5", "@cosmjs/math": "^0.29.5", "@cosmjs/socket": "^0.29.5", "@cosmjs/stream": "^0.29.5", "@cosmjs/utils": "^0.29.5", "axios": "^0.21.2", "readonly-date": "^1.0.0", "xstream": "^11.14.0" } }, "sha512-ar80twieuAxsy0x2za/aO3kBr2DFPAXDmk2ikDbmkda+qqfXgl35l9CVAAjKRqd9d+cRvbQyb5M4wy6XQpEV6w=="],
+
+    "@keepkey/hdwallet-keepkey-nodehid/@keepkey/hdwallet-keepkey/@keepkey/proto-tx-builder/@cosmjs/stargate/@cosmjs/utils": ["@cosmjs/utils@0.29.5", "", {}, "sha512-m7h+RXDUxOzEOGt4P+3OVPX7PuakZT3GBmaM/Y2u+abN3xZkziykD/NvedYFvvCCdQo714XcGl33bwifS9FZPQ=="],
+
+    "@keepkey/hdwallet-keepkey-nodewebusb/@keepkey/hdwallet-core/@keepkey/proto-tx-builder/@cosmjs/amino/@cosmjs/crypto": ["@cosmjs/crypto@0.29.5", "", { "dependencies": { "@cosmjs/encoding": "^0.29.5", "@cosmjs/math": "^0.29.5", "@cosmjs/utils": "^0.29.5", "@noble/hashes": "^1", "bn.js": "^5.2.0", "elliptic": "^6.5.4", "libsodium-wrappers": "^0.7.6" } }, "sha512-2bKkaLGictaNL0UipQCL6C1afaisv6k8Wr/GCLx9FqiyFkh9ZgRHDyetD64ZsjnWV/N/D44s/esI+k6oPREaiQ=="],
+
+    "@keepkey/hdwallet-keepkey-nodewebusb/@keepkey/hdwallet-core/@keepkey/proto-tx-builder/@cosmjs/amino/@cosmjs/math": ["@cosmjs/math@0.29.5", "", { "dependencies": { "bn.js": "^5.2.0" } }, "sha512-2GjKcv+A9f86MAWYLUkjhw1/WpRl2R1BTb3m9qPG7lzMA7ioYff9jY5SPCfafKdxM4TIQGxXQlYGewQL16O68Q=="],
+
+    "@keepkey/hdwallet-keepkey-nodewebusb/@keepkey/hdwallet-core/@keepkey/proto-tx-builder/@cosmjs/amino/@cosmjs/utils": ["@cosmjs/utils@0.29.5", "", {}, "sha512-m7h+RXDUxOzEOGt4P+3OVPX7PuakZT3GBmaM/Y2u+abN3xZkziykD/NvedYFvvCCdQo714XcGl33bwifS9FZPQ=="],
+
+    "@keepkey/hdwallet-keepkey-nodewebusb/@keepkey/hdwallet-core/@keepkey/proto-tx-builder/@cosmjs/proto-signing/@cosmjs/crypto": ["@cosmjs/crypto@0.29.5", "", { "dependencies": { "@cosmjs/encoding": "^0.29.5", "@cosmjs/math": "^0.29.5", "@cosmjs/utils": "^0.29.5", "@noble/hashes": "^1", "bn.js": "^5.2.0", "elliptic": "^6.5.4", "libsodium-wrappers": "^0.7.6" } }, "sha512-2bKkaLGictaNL0UipQCL6C1afaisv6k8Wr/GCLx9FqiyFkh9ZgRHDyetD64ZsjnWV/N/D44s/esI+k6oPREaiQ=="],
+
+    "@keepkey/hdwallet-keepkey-nodewebusb/@keepkey/hdwallet-core/@keepkey/proto-tx-builder/@cosmjs/proto-signing/@cosmjs/math": ["@cosmjs/math@0.29.5", "", { "dependencies": { "bn.js": "^5.2.0" } }, "sha512-2GjKcv+A9f86MAWYLUkjhw1/WpRl2R1BTb3m9qPG7lzMA7ioYff9jY5SPCfafKdxM4TIQGxXQlYGewQL16O68Q=="],
+
+    "@keepkey/hdwallet-keepkey-nodewebusb/@keepkey/hdwallet-core/@keepkey/proto-tx-builder/@cosmjs/proto-signing/@cosmjs/utils": ["@cosmjs/utils@0.29.5", "", {}, "sha512-m7h+RXDUxOzEOGt4P+3OVPX7PuakZT3GBmaM/Y2u+abN3xZkziykD/NvedYFvvCCdQo714XcGl33bwifS9FZPQ=="],
+
+    "@keepkey/hdwallet-keepkey-nodewebusb/@keepkey/hdwallet-core/@keepkey/proto-tx-builder/@cosmjs/stargate/@cosmjs/math": ["@cosmjs/math@0.29.5", "", { "dependencies": { "bn.js": "^5.2.0" } }, "sha512-2GjKcv+A9f86MAWYLUkjhw1/WpRl2R1BTb3m9qPG7lzMA7ioYff9jY5SPCfafKdxM4TIQGxXQlYGewQL16O68Q=="],
+
+    "@keepkey/hdwallet-keepkey-nodewebusb/@keepkey/hdwallet-core/@keepkey/proto-tx-builder/@cosmjs/stargate/@cosmjs/stream": ["@cosmjs/stream@0.29.5", "", { "dependencies": { "xstream": "^11.14.0" } }, "sha512-TToTDWyH1p05GBtF0Y8jFw2C+4783ueDCmDyxOMM6EU82IqpmIbfwcdMOCAm0JhnyMh+ocdebbFvnX/sGKzRAA=="],
+
+    "@keepkey/hdwallet-keepkey-nodewebusb/@keepkey/hdwallet-core/@keepkey/proto-tx-builder/@cosmjs/stargate/@cosmjs/tendermint-rpc": ["@cosmjs/tendermint-rpc@0.29.5", "", { "dependencies": { "@cosmjs/crypto": "^0.29.5", "@cosmjs/encoding": "^0.29.5", "@cosmjs/json-rpc": "^0.29.5", "@cosmjs/math": "^0.29.5", "@cosmjs/socket": "^0.29.5", "@cosmjs/stream": "^0.29.5", "@cosmjs/utils": "^0.29.5", "axios": "^0.21.2", "readonly-date": "^1.0.0", "xstream": "^11.14.0" } }, "sha512-ar80twieuAxsy0x2za/aO3kBr2DFPAXDmk2ikDbmkda+qqfXgl35l9CVAAjKRqd9d+cRvbQyb5M4wy6XQpEV6w=="],
+
+    "@keepkey/hdwallet-keepkey-nodewebusb/@keepkey/hdwallet-core/@keepkey/proto-tx-builder/@cosmjs/stargate/@cosmjs/utils": ["@cosmjs/utils@0.29.5", "", {}, "sha512-m7h+RXDUxOzEOGt4P+3OVPX7PuakZT3GBmaM/Y2u+abN3xZkziykD/NvedYFvvCCdQo714XcGl33bwifS9FZPQ=="],
+
+    "@keepkey/hdwallet-keepkey-nodewebusb/@keepkey/hdwallet-keepkey/@keepkey/hdwallet-core/@keepkey/proto-tx-builder/@cosmjs/amino": ["@cosmjs/amino@0.29.5", "", { "dependencies": { "@cosmjs/crypto": "^0.29.5", "@cosmjs/encoding": "^0.29.5", "@cosmjs/math": "^0.29.5", "@cosmjs/utils": "^0.29.5" } }, "sha512-Qo8jpC0BiziTSUqpkNatBcwtKNhCovUnFul9SlT/74JUCdLYaeG5hxr3q1cssQt++l4LvlcpF+OUXL48XjNjLw=="],
+
+    "@keepkey/hdwallet-keepkey-nodewebusb/@keepkey/hdwallet-keepkey/@keepkey/hdwallet-core/@keepkey/proto-tx-builder/@cosmjs/proto-signing": ["@cosmjs/proto-signing@0.29.5", "", { "dependencies": { "@cosmjs/amino": "^0.29.5", "@cosmjs/crypto": "^0.29.5", "@cosmjs/encoding": "^0.29.5", "@cosmjs/math": "^0.29.5", "@cosmjs/utils": "^0.29.5", "cosmjs-types": "^0.5.2", "long": "^4.0.0" } }, "sha512-QRrS7CiKaoETdgIqvi/7JC2qCwCR7lnWaUsTzh/XfRy3McLkEd+cXbKAW3cygykv7IN0VAEIhZd2lyIfT8KwNA=="],
+
+    "@keepkey/hdwallet-keepkey-nodewebusb/@keepkey/hdwallet-keepkey/@keepkey/hdwallet-core/@keepkey/proto-tx-builder/@cosmjs/stargate": ["@cosmjs/stargate@0.29.5", "", { "dependencies": { "@confio/ics23": "^0.6.8", "@cosmjs/amino": "^0.29.5", "@cosmjs/encoding": "^0.29.5", "@cosmjs/math": "^0.29.5", "@cosmjs/proto-signing": "^0.29.5", "@cosmjs/stream": "^0.29.5", "@cosmjs/tendermint-rpc": "^0.29.5", "@cosmjs/utils": "^0.29.5", "cosmjs-types": "^0.5.2", "long": "^4.0.0", "protobufjs": "~6.11.3", "xstream": "^11.14.0" } }, "sha512-hjEv8UUlJruLrYGJcUZXM/CziaINOKwfVm2BoSdUnNTMxGvY/jC1ABHKeZUYt9oXHxEJ1n9+pDqzbKc8pT0nBw=="],
+
+    "@keepkey/hdwallet-keepkey-nodewebusb/@keepkey/hdwallet-keepkey/@keepkey/hdwallet-core/@keepkey/proto-tx-builder/@types/node": ["@types/node@15.14.9", "", {}, "sha512-qjd88DrCxupx/kJD5yQgZdcYKZKSIGBVDIBE1/LTGcNm3d2Np/jxojkdePDdfnBHJc5W7vSMpbJ1aB7p/Py69A=="],
+
+    "@keepkey/hdwallet-keepkey-nodewebusb/@keepkey/hdwallet-keepkey/@keepkey/hdwallet-core/@keepkey/proto-tx-builder/typescript": ["typescript@4.9.5", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-1FXk9E2Hm+QzZQ7z+McJiHL4NW1F2EzMu9Nq9i3zAaGqibafqYwCVU6WyWAuyQRRzOlxou8xZSyXLEN8oKj24g=="],
+
+    "@keepkey/hdwallet-keepkey-nodewebusb/@keepkey/hdwallet-keepkey/@keepkey/proto-tx-builder/@cosmjs/amino/@cosmjs/crypto": ["@cosmjs/crypto@0.29.5", "", { "dependencies": { "@cosmjs/encoding": "^0.29.5", "@cosmjs/math": "^0.29.5", "@cosmjs/utils": "^0.29.5", "@noble/hashes": "^1", "bn.js": "^5.2.0", "elliptic": "^6.5.4", "libsodium-wrappers": "^0.7.6" } }, "sha512-2bKkaLGictaNL0UipQCL6C1afaisv6k8Wr/GCLx9FqiyFkh9ZgRHDyetD64ZsjnWV/N/D44s/esI+k6oPREaiQ=="],
+
+    "@keepkey/hdwallet-keepkey-nodewebusb/@keepkey/hdwallet-keepkey/@keepkey/proto-tx-builder/@cosmjs/amino/@cosmjs/math": ["@cosmjs/math@0.29.5", "", { "dependencies": { "bn.js": "^5.2.0" } }, "sha512-2GjKcv+A9f86MAWYLUkjhw1/WpRl2R1BTb3m9qPG7lzMA7ioYff9jY5SPCfafKdxM4TIQGxXQlYGewQL16O68Q=="],
+
+    "@keepkey/hdwallet-keepkey-nodewebusb/@keepkey/hdwallet-keepkey/@keepkey/proto-tx-builder/@cosmjs/amino/@cosmjs/utils": ["@cosmjs/utils@0.29.5", "", {}, "sha512-m7h+RXDUxOzEOGt4P+3OVPX7PuakZT3GBmaM/Y2u+abN3xZkziykD/NvedYFvvCCdQo714XcGl33bwifS9FZPQ=="],
+
+    "@keepkey/hdwallet-keepkey-nodewebusb/@keepkey/hdwallet-keepkey/@keepkey/proto-tx-builder/@cosmjs/proto-signing/@cosmjs/crypto": ["@cosmjs/crypto@0.29.5", "", { "dependencies": { "@cosmjs/encoding": "^0.29.5", "@cosmjs/math": "^0.29.5", "@cosmjs/utils": "^0.29.5", "@noble/hashes": "^1", "bn.js": "^5.2.0", "elliptic": "^6.5.4", "libsodium-wrappers": "^0.7.6" } }, "sha512-2bKkaLGictaNL0UipQCL6C1afaisv6k8Wr/GCLx9FqiyFkh9ZgRHDyetD64ZsjnWV/N/D44s/esI+k6oPREaiQ=="],
+
+    "@keepkey/hdwallet-keepkey-nodewebusb/@keepkey/hdwallet-keepkey/@keepkey/proto-tx-builder/@cosmjs/proto-signing/@cosmjs/math": ["@cosmjs/math@0.29.5", "", { "dependencies": { "bn.js": "^5.2.0" } }, "sha512-2GjKcv+A9f86MAWYLUkjhw1/WpRl2R1BTb3m9qPG7lzMA7ioYff9jY5SPCfafKdxM4TIQGxXQlYGewQL16O68Q=="],
+
+    "@keepkey/hdwallet-keepkey-nodewebusb/@keepkey/hdwallet-keepkey/@keepkey/proto-tx-builder/@cosmjs/proto-signing/@cosmjs/utils": ["@cosmjs/utils@0.29.5", "", {}, "sha512-m7h+RXDUxOzEOGt4P+3OVPX7PuakZT3GBmaM/Y2u+abN3xZkziykD/NvedYFvvCCdQo714XcGl33bwifS9FZPQ=="],
+
+    "@keepkey/hdwallet-keepkey-nodewebusb/@keepkey/hdwallet-keepkey/@keepkey/proto-tx-builder/@cosmjs/stargate/@cosmjs/math": ["@cosmjs/math@0.29.5", "", { "dependencies": { "bn.js": "^5.2.0" } }, "sha512-2GjKcv+A9f86MAWYLUkjhw1/WpRl2R1BTb3m9qPG7lzMA7ioYff9jY5SPCfafKdxM4TIQGxXQlYGewQL16O68Q=="],
+
+    "@keepkey/hdwallet-keepkey-nodewebusb/@keepkey/hdwallet-keepkey/@keepkey/proto-tx-builder/@cosmjs/stargate/@cosmjs/stream": ["@cosmjs/stream@0.29.5", "", { "dependencies": { "xstream": "^11.14.0" } }, "sha512-TToTDWyH1p05GBtF0Y8jFw2C+4783ueDCmDyxOMM6EU82IqpmIbfwcdMOCAm0JhnyMh+ocdebbFvnX/sGKzRAA=="],
+
+    "@keepkey/hdwallet-keepkey-nodewebusb/@keepkey/hdwallet-keepkey/@keepkey/proto-tx-builder/@cosmjs/stargate/@cosmjs/tendermint-rpc": ["@cosmjs/tendermint-rpc@0.29.5", "", { "dependencies": { "@cosmjs/crypto": "^0.29.5", "@cosmjs/encoding": "^0.29.5", "@cosmjs/json-rpc": "^0.29.5", "@cosmjs/math": "^0.29.5", "@cosmjs/socket": "^0.29.5", "@cosmjs/stream": "^0.29.5", "@cosmjs/utils": "^0.29.5", "axios": "^0.21.2", "readonly-date": "^1.0.0", "xstream": "^11.14.0" } }, "sha512-ar80twieuAxsy0x2za/aO3kBr2DFPAXDmk2ikDbmkda+qqfXgl35l9CVAAjKRqd9d+cRvbQyb5M4wy6XQpEV6w=="],
+
+    "@keepkey/hdwallet-keepkey-nodewebusb/@keepkey/hdwallet-keepkey/@keepkey/proto-tx-builder/@cosmjs/stargate/@cosmjs/utils": ["@cosmjs/utils@0.29.5", "", {}, "sha512-m7h+RXDUxOzEOGt4P+3OVPX7PuakZT3GBmaM/Y2u+abN3xZkziykD/NvedYFvvCCdQo714XcGl33bwifS9FZPQ=="],
+
+    "@keepkey/hdwallet-keepkey/@keepkey/hdwallet-core/@keepkey/proto-tx-builder/@cosmjs/amino/@cosmjs/crypto": ["@cosmjs/crypto@0.29.5", "", { "dependencies": { "@cosmjs/encoding": "^0.29.5", "@cosmjs/math": "^0.29.5", "@cosmjs/utils": "^0.29.5", "@noble/hashes": "^1", "bn.js": "^5.2.0", "elliptic": "^6.5.4", "libsodium-wrappers": "^0.7.6" } }, "sha512-2bKkaLGictaNL0UipQCL6C1afaisv6k8Wr/GCLx9FqiyFkh9ZgRHDyetD64ZsjnWV/N/D44s/esI+k6oPREaiQ=="],
+
+    "@keepkey/hdwallet-keepkey/@keepkey/hdwallet-core/@keepkey/proto-tx-builder/@cosmjs/amino/@cosmjs/math": ["@cosmjs/math@0.29.5", "", { "dependencies": { "bn.js": "^5.2.0" } }, "sha512-2GjKcv+A9f86MAWYLUkjhw1/WpRl2R1BTb3m9qPG7lzMA7ioYff9jY5SPCfafKdxM4TIQGxXQlYGewQL16O68Q=="],
+
+    "@keepkey/hdwallet-keepkey/@keepkey/hdwallet-core/@keepkey/proto-tx-builder/@cosmjs/amino/@cosmjs/utils": ["@cosmjs/utils@0.29.5", "", {}, "sha512-m7h+RXDUxOzEOGt4P+3OVPX7PuakZT3GBmaM/Y2u+abN3xZkziykD/NvedYFvvCCdQo714XcGl33bwifS9FZPQ=="],
+
+    "@keepkey/hdwallet-keepkey/@keepkey/hdwallet-core/@keepkey/proto-tx-builder/@cosmjs/proto-signing/@cosmjs/crypto": ["@cosmjs/crypto@0.29.5", "", { "dependencies": { "@cosmjs/encoding": "^0.29.5", "@cosmjs/math": "^0.29.5", "@cosmjs/utils": "^0.29.5", "@noble/hashes": "^1", "bn.js": "^5.2.0", "elliptic": "^6.5.4", "libsodium-wrappers": "^0.7.6" } }, "sha512-2bKkaLGictaNL0UipQCL6C1afaisv6k8Wr/GCLx9FqiyFkh9ZgRHDyetD64ZsjnWV/N/D44s/esI+k6oPREaiQ=="],
+
+    "@keepkey/hdwallet-keepkey/@keepkey/hdwallet-core/@keepkey/proto-tx-builder/@cosmjs/proto-signing/@cosmjs/math": ["@cosmjs/math@0.29.5", "", { "dependencies": { "bn.js": "^5.2.0" } }, "sha512-2GjKcv+A9f86MAWYLUkjhw1/WpRl2R1BTb3m9qPG7lzMA7ioYff9jY5SPCfafKdxM4TIQGxXQlYGewQL16O68Q=="],
+
+    "@keepkey/hdwallet-keepkey/@keepkey/hdwallet-core/@keepkey/proto-tx-builder/@cosmjs/proto-signing/@cosmjs/utils": ["@cosmjs/utils@0.29.5", "", {}, "sha512-m7h+RXDUxOzEOGt4P+3OVPX7PuakZT3GBmaM/Y2u+abN3xZkziykD/NvedYFvvCCdQo714XcGl33bwifS9FZPQ=="],
+
+    "@keepkey/hdwallet-keepkey/@keepkey/hdwallet-core/@keepkey/proto-tx-builder/@cosmjs/stargate/@cosmjs/math": ["@cosmjs/math@0.29.5", "", { "dependencies": { "bn.js": "^5.2.0" } }, "sha512-2GjKcv+A9f86MAWYLUkjhw1/WpRl2R1BTb3m9qPG7lzMA7ioYff9jY5SPCfafKdxM4TIQGxXQlYGewQL16O68Q=="],
+
+    "@keepkey/hdwallet-keepkey/@keepkey/hdwallet-core/@keepkey/proto-tx-builder/@cosmjs/stargate/@cosmjs/stream": ["@cosmjs/stream@0.29.5", "", { "dependencies": { "xstream": "^11.14.0" } }, "sha512-TToTDWyH1p05GBtF0Y8jFw2C+4783ueDCmDyxOMM6EU82IqpmIbfwcdMOCAm0JhnyMh+ocdebbFvnX/sGKzRAA=="],
+
+    "@keepkey/hdwallet-keepkey/@keepkey/hdwallet-core/@keepkey/proto-tx-builder/@cosmjs/stargate/@cosmjs/tendermint-rpc": ["@cosmjs/tendermint-rpc@0.29.5", "", { "dependencies": { "@cosmjs/crypto": "^0.29.5", "@cosmjs/encoding": "^0.29.5", "@cosmjs/json-rpc": "^0.29.5", "@cosmjs/math": "^0.29.5", "@cosmjs/socket": "^0.29.5", "@cosmjs/stream": "^0.29.5", "@cosmjs/utils": "^0.29.5", "axios": "^0.21.2", "readonly-date": "^1.0.0", "xstream": "^11.14.0" } }, "sha512-ar80twieuAxsy0x2za/aO3kBr2DFPAXDmk2ikDbmkda+qqfXgl35l9CVAAjKRqd9d+cRvbQyb5M4wy6XQpEV6w=="],
+
+    "@keepkey/hdwallet-keepkey/@keepkey/hdwallet-core/@keepkey/proto-tx-builder/@cosmjs/stargate/@cosmjs/utils": ["@cosmjs/utils@0.29.5", "", {}, "sha512-m7h+RXDUxOzEOGt4P+3OVPX7PuakZT3GBmaM/Y2u+abN3xZkziykD/NvedYFvvCCdQo714XcGl33bwifS9FZPQ=="],
+
+    "@keepkey/hdwallet-keepkey/@keepkey/proto-tx-builder/@cosmjs/stargate/@cosmjs/tendermint-rpc/@cosmjs/crypto": ["@cosmjs/crypto@0.29.5", "", { "dependencies": { "@cosmjs/encoding": "^0.29.5", "@cosmjs/math": "^0.29.5", "@cosmjs/utils": "^0.29.5", "@noble/hashes": "^1", "bn.js": "^5.2.0", "elliptic": "^6.5.4", "libsodium-wrappers": "^0.7.6" } }, "sha512-2bKkaLGictaNL0UipQCL6C1afaisv6k8Wr/GCLx9FqiyFkh9ZgRHDyetD64ZsjnWV/N/D44s/esI+k6oPREaiQ=="],
+
+    "@keepkey/hdwallet-keepkey/@keepkey/proto-tx-builder/@cosmjs/stargate/@cosmjs/tendermint-rpc/@cosmjs/json-rpc": ["@cosmjs/json-rpc@0.29.5", "", { "dependencies": { "@cosmjs/stream": "^0.29.5", "xstream": "^11.14.0" } }, "sha512-C78+X06l+r9xwdM1yFWIpGl03LhB9NdM1xvZpQHwgCOl0Ir/WV8pw48y3Ez2awAoUBRfTeejPe4KvrE6NoIi/w=="],
+
+    "@keepkey/hdwallet-keepkey/@keepkey/proto-tx-builder/@cosmjs/stargate/@cosmjs/tendermint-rpc/@cosmjs/socket": ["@cosmjs/socket@0.29.5", "", { "dependencies": { "@cosmjs/stream": "^0.29.5", "isomorphic-ws": "^4.0.1", "ws": "^7", "xstream": "^11.14.0" } }, "sha512-5VYDupIWbIXq3ftPV1LkS5Ya/T7Ol/AzWVhNxZ79hPe/mBfv1bGau/LqIYOm2zxGlgm9hBHOTmWGqNYDwr9LNQ=="],
+
     "@pioneer-platform/pioneer-discovery/ethers/@ethersproject/abi/@ethersproject/address/@ethersproject/rlp": ["@ethersproject/rlp@5.8.0", "", { "dependencies": { "@ethersproject/bytes": "^5.8.0", "@ethersproject/logger": "^5.8.0" } }, "sha512-LqZgAznqDbiEunaUvykH2JAoXTT9NV0Atqk8rQN9nx9SEgThA/WMx5DnW8a9FOufo//6FZOCHZ+XiClzgbqV9Q=="],
 
     "@pioneer-platform/pioneer-discovery/ethers/@ethersproject/abi/@ethersproject/hash/@ethersproject/abstract-signer": ["@ethersproject/abstract-signer@5.8.0", "", { "dependencies": { "@ethersproject/abstract-provider": "^5.8.0", "@ethersproject/bignumber": "^5.8.0", "@ethersproject/bytes": "^5.8.0", "@ethersproject/logger": "^5.8.0", "@ethersproject/properties": "^5.8.0" } }, "sha512-N0XhZTswXcmIZQdYtUnd79VJzvEwXQw6PK0dTl9VoYrEBxxCPXqS0Eod7q5TNKRxe1/5WUMuR0u0nqTF/avdCA=="],
@@ -3373,6 +3601,70 @@
 
     "sane/micromatch/braces/fill-range/to-regex-range": ["to-regex-range@2.1.1", "", { "dependencies": { "is-number": "^3.0.0", "repeat-string": "^1.6.1" } }, "sha512-ZZWNfCjUokXXDGXFpZehJIkZqq91BcULFq/Pi7M5i4JnxXdhMKAK682z8bCW3o8Hj1wuuzoKcW3DfVzaP6VuNg=="],
 
+    "@keepkey/hdwallet-keepkey-nodehid/@keepkey/hdwallet-keepkey/@keepkey/hdwallet-core/@keepkey/proto-tx-builder/@cosmjs/amino/@cosmjs/crypto": ["@cosmjs/crypto@0.29.5", "", { "dependencies": { "@cosmjs/encoding": "^0.29.5", "@cosmjs/math": "^0.29.5", "@cosmjs/utils": "^0.29.5", "@noble/hashes": "^1", "bn.js": "^5.2.0", "elliptic": "^6.5.4", "libsodium-wrappers": "^0.7.6" } }, "sha512-2bKkaLGictaNL0UipQCL6C1afaisv6k8Wr/GCLx9FqiyFkh9ZgRHDyetD64ZsjnWV/N/D44s/esI+k6oPREaiQ=="],
+
+    "@keepkey/hdwallet-keepkey-nodehid/@keepkey/hdwallet-keepkey/@keepkey/hdwallet-core/@keepkey/proto-tx-builder/@cosmjs/amino/@cosmjs/math": ["@cosmjs/math@0.29.5", "", { "dependencies": { "bn.js": "^5.2.0" } }, "sha512-2GjKcv+A9f86MAWYLUkjhw1/WpRl2R1BTb3m9qPG7lzMA7ioYff9jY5SPCfafKdxM4TIQGxXQlYGewQL16O68Q=="],
+
+    "@keepkey/hdwallet-keepkey-nodehid/@keepkey/hdwallet-keepkey/@keepkey/hdwallet-core/@keepkey/proto-tx-builder/@cosmjs/amino/@cosmjs/utils": ["@cosmjs/utils@0.29.5", "", {}, "sha512-m7h+RXDUxOzEOGt4P+3OVPX7PuakZT3GBmaM/Y2u+abN3xZkziykD/NvedYFvvCCdQo714XcGl33bwifS9FZPQ=="],
+
+    "@keepkey/hdwallet-keepkey-nodehid/@keepkey/hdwallet-keepkey/@keepkey/hdwallet-core/@keepkey/proto-tx-builder/@cosmjs/proto-signing/@cosmjs/crypto": ["@cosmjs/crypto@0.29.5", "", { "dependencies": { "@cosmjs/encoding": "^0.29.5", "@cosmjs/math": "^0.29.5", "@cosmjs/utils": "^0.29.5", "@noble/hashes": "^1", "bn.js": "^5.2.0", "elliptic": "^6.5.4", "libsodium-wrappers": "^0.7.6" } }, "sha512-2bKkaLGictaNL0UipQCL6C1afaisv6k8Wr/GCLx9FqiyFkh9ZgRHDyetD64ZsjnWV/N/D44s/esI+k6oPREaiQ=="],
+
+    "@keepkey/hdwallet-keepkey-nodehid/@keepkey/hdwallet-keepkey/@keepkey/hdwallet-core/@keepkey/proto-tx-builder/@cosmjs/proto-signing/@cosmjs/math": ["@cosmjs/math@0.29.5", "", { "dependencies": { "bn.js": "^5.2.0" } }, "sha512-2GjKcv+A9f86MAWYLUkjhw1/WpRl2R1BTb3m9qPG7lzMA7ioYff9jY5SPCfafKdxM4TIQGxXQlYGewQL16O68Q=="],
+
+    "@keepkey/hdwallet-keepkey-nodehid/@keepkey/hdwallet-keepkey/@keepkey/hdwallet-core/@keepkey/proto-tx-builder/@cosmjs/proto-signing/@cosmjs/utils": ["@cosmjs/utils@0.29.5", "", {}, "sha512-m7h+RXDUxOzEOGt4P+3OVPX7PuakZT3GBmaM/Y2u+abN3xZkziykD/NvedYFvvCCdQo714XcGl33bwifS9FZPQ=="],
+
+    "@keepkey/hdwallet-keepkey-nodehid/@keepkey/hdwallet-keepkey/@keepkey/hdwallet-core/@keepkey/proto-tx-builder/@cosmjs/stargate/@cosmjs/math": ["@cosmjs/math@0.29.5", "", { "dependencies": { "bn.js": "^5.2.0" } }, "sha512-2GjKcv+A9f86MAWYLUkjhw1/WpRl2R1BTb3m9qPG7lzMA7ioYff9jY5SPCfafKdxM4TIQGxXQlYGewQL16O68Q=="],
+
+    "@keepkey/hdwallet-keepkey-nodehid/@keepkey/hdwallet-keepkey/@keepkey/hdwallet-core/@keepkey/proto-tx-builder/@cosmjs/stargate/@cosmjs/stream": ["@cosmjs/stream@0.29.5", "", { "dependencies": { "xstream": "^11.14.0" } }, "sha512-TToTDWyH1p05GBtF0Y8jFw2C+4783ueDCmDyxOMM6EU82IqpmIbfwcdMOCAm0JhnyMh+ocdebbFvnX/sGKzRAA=="],
+
+    "@keepkey/hdwallet-keepkey-nodehid/@keepkey/hdwallet-keepkey/@keepkey/hdwallet-core/@keepkey/proto-tx-builder/@cosmjs/stargate/@cosmjs/tendermint-rpc": ["@cosmjs/tendermint-rpc@0.29.5", "", { "dependencies": { "@cosmjs/crypto": "^0.29.5", "@cosmjs/encoding": "^0.29.5", "@cosmjs/json-rpc": "^0.29.5", "@cosmjs/math": "^0.29.5", "@cosmjs/socket": "^0.29.5", "@cosmjs/stream": "^0.29.5", "@cosmjs/utils": "^0.29.5", "axios": "^0.21.2", "readonly-date": "^1.0.0", "xstream": "^11.14.0" } }, "sha512-ar80twieuAxsy0x2za/aO3kBr2DFPAXDmk2ikDbmkda+qqfXgl35l9CVAAjKRqd9d+cRvbQyb5M4wy6XQpEV6w=="],
+
+    "@keepkey/hdwallet-keepkey-nodehid/@keepkey/hdwallet-keepkey/@keepkey/hdwallet-core/@keepkey/proto-tx-builder/@cosmjs/stargate/@cosmjs/utils": ["@cosmjs/utils@0.29.5", "", {}, "sha512-m7h+RXDUxOzEOGt4P+3OVPX7PuakZT3GBmaM/Y2u+abN3xZkziykD/NvedYFvvCCdQo714XcGl33bwifS9FZPQ=="],
+
+    "@keepkey/hdwallet-keepkey-nodehid/@keepkey/hdwallet-keepkey/@keepkey/proto-tx-builder/@cosmjs/stargate/@cosmjs/tendermint-rpc/@cosmjs/crypto": ["@cosmjs/crypto@0.29.5", "", { "dependencies": { "@cosmjs/encoding": "^0.29.5", "@cosmjs/math": "^0.29.5", "@cosmjs/utils": "^0.29.5", "@noble/hashes": "^1", "bn.js": "^5.2.0", "elliptic": "^6.5.4", "libsodium-wrappers": "^0.7.6" } }, "sha512-2bKkaLGictaNL0UipQCL6C1afaisv6k8Wr/GCLx9FqiyFkh9ZgRHDyetD64ZsjnWV/N/D44s/esI+k6oPREaiQ=="],
+
+    "@keepkey/hdwallet-keepkey-nodehid/@keepkey/hdwallet-keepkey/@keepkey/proto-tx-builder/@cosmjs/stargate/@cosmjs/tendermint-rpc/@cosmjs/json-rpc": ["@cosmjs/json-rpc@0.29.5", "", { "dependencies": { "@cosmjs/stream": "^0.29.5", "xstream": "^11.14.0" } }, "sha512-C78+X06l+r9xwdM1yFWIpGl03LhB9NdM1xvZpQHwgCOl0Ir/WV8pw48y3Ez2awAoUBRfTeejPe4KvrE6NoIi/w=="],
+
+    "@keepkey/hdwallet-keepkey-nodehid/@keepkey/hdwallet-keepkey/@keepkey/proto-tx-builder/@cosmjs/stargate/@cosmjs/tendermint-rpc/@cosmjs/socket": ["@cosmjs/socket@0.29.5", "", { "dependencies": { "@cosmjs/stream": "^0.29.5", "isomorphic-ws": "^4.0.1", "ws": "^7", "xstream": "^11.14.0" } }, "sha512-5VYDupIWbIXq3ftPV1LkS5Ya/T7Ol/AzWVhNxZ79hPe/mBfv1bGau/LqIYOm2zxGlgm9hBHOTmWGqNYDwr9LNQ=="],
+
+    "@keepkey/hdwallet-keepkey-nodewebusb/@keepkey/hdwallet-core/@keepkey/proto-tx-builder/@cosmjs/stargate/@cosmjs/tendermint-rpc/@cosmjs/crypto": ["@cosmjs/crypto@0.29.5", "", { "dependencies": { "@cosmjs/encoding": "^0.29.5", "@cosmjs/math": "^0.29.5", "@cosmjs/utils": "^0.29.5", "@noble/hashes": "^1", "bn.js": "^5.2.0", "elliptic": "^6.5.4", "libsodium-wrappers": "^0.7.6" } }, "sha512-2bKkaLGictaNL0UipQCL6C1afaisv6k8Wr/GCLx9FqiyFkh9ZgRHDyetD64ZsjnWV/N/D44s/esI+k6oPREaiQ=="],
+
+    "@keepkey/hdwallet-keepkey-nodewebusb/@keepkey/hdwallet-core/@keepkey/proto-tx-builder/@cosmjs/stargate/@cosmjs/tendermint-rpc/@cosmjs/json-rpc": ["@cosmjs/json-rpc@0.29.5", "", { "dependencies": { "@cosmjs/stream": "^0.29.5", "xstream": "^11.14.0" } }, "sha512-C78+X06l+r9xwdM1yFWIpGl03LhB9NdM1xvZpQHwgCOl0Ir/WV8pw48y3Ez2awAoUBRfTeejPe4KvrE6NoIi/w=="],
+
+    "@keepkey/hdwallet-keepkey-nodewebusb/@keepkey/hdwallet-core/@keepkey/proto-tx-builder/@cosmjs/stargate/@cosmjs/tendermint-rpc/@cosmjs/socket": ["@cosmjs/socket@0.29.5", "", { "dependencies": { "@cosmjs/stream": "^0.29.5", "isomorphic-ws": "^4.0.1", "ws": "^7", "xstream": "^11.14.0" } }, "sha512-5VYDupIWbIXq3ftPV1LkS5Ya/T7Ol/AzWVhNxZ79hPe/mBfv1bGau/LqIYOm2zxGlgm9hBHOTmWGqNYDwr9LNQ=="],
+
+    "@keepkey/hdwallet-keepkey-nodewebusb/@keepkey/hdwallet-keepkey/@keepkey/hdwallet-core/@keepkey/proto-tx-builder/@cosmjs/amino/@cosmjs/crypto": ["@cosmjs/crypto@0.29.5", "", { "dependencies": { "@cosmjs/encoding": "^0.29.5", "@cosmjs/math": "^0.29.5", "@cosmjs/utils": "^0.29.5", "@noble/hashes": "^1", "bn.js": "^5.2.0", "elliptic": "^6.5.4", "libsodium-wrappers": "^0.7.6" } }, "sha512-2bKkaLGictaNL0UipQCL6C1afaisv6k8Wr/GCLx9FqiyFkh9ZgRHDyetD64ZsjnWV/N/D44s/esI+k6oPREaiQ=="],
+
+    "@keepkey/hdwallet-keepkey-nodewebusb/@keepkey/hdwallet-keepkey/@keepkey/hdwallet-core/@keepkey/proto-tx-builder/@cosmjs/amino/@cosmjs/math": ["@cosmjs/math@0.29.5", "", { "dependencies": { "bn.js": "^5.2.0" } }, "sha512-2GjKcv+A9f86MAWYLUkjhw1/WpRl2R1BTb3m9qPG7lzMA7ioYff9jY5SPCfafKdxM4TIQGxXQlYGewQL16O68Q=="],
+
+    "@keepkey/hdwallet-keepkey-nodewebusb/@keepkey/hdwallet-keepkey/@keepkey/hdwallet-core/@keepkey/proto-tx-builder/@cosmjs/amino/@cosmjs/utils": ["@cosmjs/utils@0.29.5", "", {}, "sha512-m7h+RXDUxOzEOGt4P+3OVPX7PuakZT3GBmaM/Y2u+abN3xZkziykD/NvedYFvvCCdQo714XcGl33bwifS9FZPQ=="],
+
+    "@keepkey/hdwallet-keepkey-nodewebusb/@keepkey/hdwallet-keepkey/@keepkey/hdwallet-core/@keepkey/proto-tx-builder/@cosmjs/proto-signing/@cosmjs/crypto": ["@cosmjs/crypto@0.29.5", "", { "dependencies": { "@cosmjs/encoding": "^0.29.5", "@cosmjs/math": "^0.29.5", "@cosmjs/utils": "^0.29.5", "@noble/hashes": "^1", "bn.js": "^5.2.0", "elliptic": "^6.5.4", "libsodium-wrappers": "^0.7.6" } }, "sha512-2bKkaLGictaNL0UipQCL6C1afaisv6k8Wr/GCLx9FqiyFkh9ZgRHDyetD64ZsjnWV/N/D44s/esI+k6oPREaiQ=="],
+
+    "@keepkey/hdwallet-keepkey-nodewebusb/@keepkey/hdwallet-keepkey/@keepkey/hdwallet-core/@keepkey/proto-tx-builder/@cosmjs/proto-signing/@cosmjs/math": ["@cosmjs/math@0.29.5", "", { "dependencies": { "bn.js": "^5.2.0" } }, "sha512-2GjKcv+A9f86MAWYLUkjhw1/WpRl2R1BTb3m9qPG7lzMA7ioYff9jY5SPCfafKdxM4TIQGxXQlYGewQL16O68Q=="],
+
+    "@keepkey/hdwallet-keepkey-nodewebusb/@keepkey/hdwallet-keepkey/@keepkey/hdwallet-core/@keepkey/proto-tx-builder/@cosmjs/proto-signing/@cosmjs/utils": ["@cosmjs/utils@0.29.5", "", {}, "sha512-m7h+RXDUxOzEOGt4P+3OVPX7PuakZT3GBmaM/Y2u+abN3xZkziykD/NvedYFvvCCdQo714XcGl33bwifS9FZPQ=="],
+
+    "@keepkey/hdwallet-keepkey-nodewebusb/@keepkey/hdwallet-keepkey/@keepkey/hdwallet-core/@keepkey/proto-tx-builder/@cosmjs/stargate/@cosmjs/math": ["@cosmjs/math@0.29.5", "", { "dependencies": { "bn.js": "^5.2.0" } }, "sha512-2GjKcv+A9f86MAWYLUkjhw1/WpRl2R1BTb3m9qPG7lzMA7ioYff9jY5SPCfafKdxM4TIQGxXQlYGewQL16O68Q=="],
+
+    "@keepkey/hdwallet-keepkey-nodewebusb/@keepkey/hdwallet-keepkey/@keepkey/hdwallet-core/@keepkey/proto-tx-builder/@cosmjs/stargate/@cosmjs/stream": ["@cosmjs/stream@0.29.5", "", { "dependencies": { "xstream": "^11.14.0" } }, "sha512-TToTDWyH1p05GBtF0Y8jFw2C+4783ueDCmDyxOMM6EU82IqpmIbfwcdMOCAm0JhnyMh+ocdebbFvnX/sGKzRAA=="],
+
+    "@keepkey/hdwallet-keepkey-nodewebusb/@keepkey/hdwallet-keepkey/@keepkey/hdwallet-core/@keepkey/proto-tx-builder/@cosmjs/stargate/@cosmjs/tendermint-rpc": ["@cosmjs/tendermint-rpc@0.29.5", "", { "dependencies": { "@cosmjs/crypto": "^0.29.5", "@cosmjs/encoding": "^0.29.5", "@cosmjs/json-rpc": "^0.29.5", "@cosmjs/math": "^0.29.5", "@cosmjs/socket": "^0.29.5", "@cosmjs/stream": "^0.29.5", "@cosmjs/utils": "^0.29.5", "axios": "^0.21.2", "readonly-date": "^1.0.0", "xstream": "^11.14.0" } }, "sha512-ar80twieuAxsy0x2za/aO3kBr2DFPAXDmk2ikDbmkda+qqfXgl35l9CVAAjKRqd9d+cRvbQyb5M4wy6XQpEV6w=="],
+
+    "@keepkey/hdwallet-keepkey-nodewebusb/@keepkey/hdwallet-keepkey/@keepkey/hdwallet-core/@keepkey/proto-tx-builder/@cosmjs/stargate/@cosmjs/utils": ["@cosmjs/utils@0.29.5", "", {}, "sha512-m7h+RXDUxOzEOGt4P+3OVPX7PuakZT3GBmaM/Y2u+abN3xZkziykD/NvedYFvvCCdQo714XcGl33bwifS9FZPQ=="],
+
+    "@keepkey/hdwallet-keepkey-nodewebusb/@keepkey/hdwallet-keepkey/@keepkey/proto-tx-builder/@cosmjs/stargate/@cosmjs/tendermint-rpc/@cosmjs/crypto": ["@cosmjs/crypto@0.29.5", "", { "dependencies": { "@cosmjs/encoding": "^0.29.5", "@cosmjs/math": "^0.29.5", "@cosmjs/utils": "^0.29.5", "@noble/hashes": "^1", "bn.js": "^5.2.0", "elliptic": "^6.5.4", "libsodium-wrappers": "^0.7.6" } }, "sha512-2bKkaLGictaNL0UipQCL6C1afaisv6k8Wr/GCLx9FqiyFkh9ZgRHDyetD64ZsjnWV/N/D44s/esI+k6oPREaiQ=="],
+
+    "@keepkey/hdwallet-keepkey-nodewebusb/@keepkey/hdwallet-keepkey/@keepkey/proto-tx-builder/@cosmjs/stargate/@cosmjs/tendermint-rpc/@cosmjs/json-rpc": ["@cosmjs/json-rpc@0.29.5", "", { "dependencies": { "@cosmjs/stream": "^0.29.5", "xstream": "^11.14.0" } }, "sha512-C78+X06l+r9xwdM1yFWIpGl03LhB9NdM1xvZpQHwgCOl0Ir/WV8pw48y3Ez2awAoUBRfTeejPe4KvrE6NoIi/w=="],
+
+    "@keepkey/hdwallet-keepkey-nodewebusb/@keepkey/hdwallet-keepkey/@keepkey/proto-tx-builder/@cosmjs/stargate/@cosmjs/tendermint-rpc/@cosmjs/socket": ["@cosmjs/socket@0.29.5", "", { "dependencies": { "@cosmjs/stream": "^0.29.5", "isomorphic-ws": "^4.0.1", "ws": "^7", "xstream": "^11.14.0" } }, "sha512-5VYDupIWbIXq3ftPV1LkS5Ya/T7Ol/AzWVhNxZ79hPe/mBfv1bGau/LqIYOm2zxGlgm9hBHOTmWGqNYDwr9LNQ=="],
+
+    "@keepkey/hdwallet-keepkey/@keepkey/hdwallet-core/@keepkey/proto-tx-builder/@cosmjs/stargate/@cosmjs/tendermint-rpc/@cosmjs/crypto": ["@cosmjs/crypto@0.29.5", "", { "dependencies": { "@cosmjs/encoding": "^0.29.5", "@cosmjs/math": "^0.29.5", "@cosmjs/utils": "^0.29.5", "@noble/hashes": "^1", "bn.js": "^5.2.0", "elliptic": "^6.5.4", "libsodium-wrappers": "^0.7.6" } }, "sha512-2bKkaLGictaNL0UipQCL6C1afaisv6k8Wr/GCLx9FqiyFkh9ZgRHDyetD64ZsjnWV/N/D44s/esI+k6oPREaiQ=="],
+
+    "@keepkey/hdwallet-keepkey/@keepkey/hdwallet-core/@keepkey/proto-tx-builder/@cosmjs/stargate/@cosmjs/tendermint-rpc/@cosmjs/json-rpc": ["@cosmjs/json-rpc@0.29.5", "", { "dependencies": { "@cosmjs/stream": "^0.29.5", "xstream": "^11.14.0" } }, "sha512-C78+X06l+r9xwdM1yFWIpGl03LhB9NdM1xvZpQHwgCOl0Ir/WV8pw48y3Ez2awAoUBRfTeejPe4KvrE6NoIi/w=="],
+
+    "@keepkey/hdwallet-keepkey/@keepkey/hdwallet-core/@keepkey/proto-tx-builder/@cosmjs/stargate/@cosmjs/tendermint-rpc/@cosmjs/socket": ["@cosmjs/socket@0.29.5", "", { "dependencies": { "@cosmjs/stream": "^0.29.5", "isomorphic-ws": "^4.0.1", "ws": "^7", "xstream": "^11.14.0" } }, "sha512-5VYDupIWbIXq3ftPV1LkS5Ya/T7Ol/AzWVhNxZ79hPe/mBfv1bGau/LqIYOm2zxGlgm9hBHOTmWGqNYDwr9LNQ=="],
+
     "@pioneer-platform/pioneer-discovery/ethers/@ethersproject/abi/@ethersproject/hash/@ethersproject/abstract-signer/@ethersproject/abstract-provider": ["@ethersproject/abstract-provider@5.8.0", "", { "dependencies": { "@ethersproject/bignumber": "^5.8.0", "@ethersproject/bytes": "^5.8.0", "@ethersproject/logger": "^5.8.0", "@ethersproject/networks": "^5.8.0", "@ethersproject/properties": "^5.8.0", "@ethersproject/transactions": "^5.8.0", "@ethersproject/web": "^5.8.0" } }, "sha512-wC9SFcmh4UK0oKuLJQItoQdzS/qZ51EJegK6EmAWlh+OptpQ/npECOR3QqECd8iGHC0RJb4WKbVdSfif4ammrg=="],
 
     "@pioneer-platform/pioneer-discovery/ethers/@ethersproject/abstract-provider/@ethersproject/web/@ethersproject/strings/@ethersproject/constants": ["@ethersproject/constants@5.8.0", "", { "dependencies": { "@ethersproject/bignumber": "^5.8.0" } }, "sha512-wigX4lrf5Vu+axVTIvNsuL6YrV4O5AXl5ubcURKMEME5TnWBouUh0CDTWxZ2GpnRn1kcCgE7l8O5+VbV9QTTcg=="],
@@ -3444,6 +3736,18 @@
     "@pioneer-platform/pioneer-discovery/ethers/@ethersproject/wordlists/@ethersproject/strings/@ethersproject/constants/@ethersproject/bignumber": ["@ethersproject/bignumber@5.8.0", "", { "dependencies": { "@ethersproject/bytes": "^5.8.0", "@ethersproject/logger": "^5.8.0", "bn.js": "^5.2.1" } }, "sha512-ZyaT24bHaSeJon2tGPKIiHszWjD/54Sz8t57Toch475lCLljC6MgPmxk7Gtzz+ddNN5LuHea9qhAe0x3D+uYPA=="],
 
     "sane/micromatch/braces/fill-range/is-number/kind-of": ["kind-of@3.2.2", "", { "dependencies": { "is-buffer": "^1.1.5" } }, "sha512-NOW9QQXMoZGg/oqnVNoNTTIFEIid1627WCffUBJEdMxYApq7mNE7CpzucIPc+ZQg25Phej7IJSmX3hO+oblOtQ=="],
+
+    "@keepkey/hdwallet-keepkey-nodehid/@keepkey/hdwallet-keepkey/@keepkey/hdwallet-core/@keepkey/proto-tx-builder/@cosmjs/stargate/@cosmjs/tendermint-rpc/@cosmjs/crypto": ["@cosmjs/crypto@0.29.5", "", { "dependencies": { "@cosmjs/encoding": "^0.29.5", "@cosmjs/math": "^0.29.5", "@cosmjs/utils": "^0.29.5", "@noble/hashes": "^1", "bn.js": "^5.2.0", "elliptic": "^6.5.4", "libsodium-wrappers": "^0.7.6" } }, "sha512-2bKkaLGictaNL0UipQCL6C1afaisv6k8Wr/GCLx9FqiyFkh9ZgRHDyetD64ZsjnWV/N/D44s/esI+k6oPREaiQ=="],
+
+    "@keepkey/hdwallet-keepkey-nodehid/@keepkey/hdwallet-keepkey/@keepkey/hdwallet-core/@keepkey/proto-tx-builder/@cosmjs/stargate/@cosmjs/tendermint-rpc/@cosmjs/json-rpc": ["@cosmjs/json-rpc@0.29.5", "", { "dependencies": { "@cosmjs/stream": "^0.29.5", "xstream": "^11.14.0" } }, "sha512-C78+X06l+r9xwdM1yFWIpGl03LhB9NdM1xvZpQHwgCOl0Ir/WV8pw48y3Ez2awAoUBRfTeejPe4KvrE6NoIi/w=="],
+
+    "@keepkey/hdwallet-keepkey-nodehid/@keepkey/hdwallet-keepkey/@keepkey/hdwallet-core/@keepkey/proto-tx-builder/@cosmjs/stargate/@cosmjs/tendermint-rpc/@cosmjs/socket": ["@cosmjs/socket@0.29.5", "", { "dependencies": { "@cosmjs/stream": "^0.29.5", "isomorphic-ws": "^4.0.1", "ws": "^7", "xstream": "^11.14.0" } }, "sha512-5VYDupIWbIXq3ftPV1LkS5Ya/T7Ol/AzWVhNxZ79hPe/mBfv1bGau/LqIYOm2zxGlgm9hBHOTmWGqNYDwr9LNQ=="],
+
+    "@keepkey/hdwallet-keepkey-nodewebusb/@keepkey/hdwallet-keepkey/@keepkey/hdwallet-core/@keepkey/proto-tx-builder/@cosmjs/stargate/@cosmjs/tendermint-rpc/@cosmjs/crypto": ["@cosmjs/crypto@0.29.5", "", { "dependencies": { "@cosmjs/encoding": "^0.29.5", "@cosmjs/math": "^0.29.5", "@cosmjs/utils": "^0.29.5", "@noble/hashes": "^1", "bn.js": "^5.2.0", "elliptic": "^6.5.4", "libsodium-wrappers": "^0.7.6" } }, "sha512-2bKkaLGictaNL0UipQCL6C1afaisv6k8Wr/GCLx9FqiyFkh9ZgRHDyetD64ZsjnWV/N/D44s/esI+k6oPREaiQ=="],
+
+    "@keepkey/hdwallet-keepkey-nodewebusb/@keepkey/hdwallet-keepkey/@keepkey/hdwallet-core/@keepkey/proto-tx-builder/@cosmjs/stargate/@cosmjs/tendermint-rpc/@cosmjs/json-rpc": ["@cosmjs/json-rpc@0.29.5", "", { "dependencies": { "@cosmjs/stream": "^0.29.5", "xstream": "^11.14.0" } }, "sha512-C78+X06l+r9xwdM1yFWIpGl03LhB9NdM1xvZpQHwgCOl0Ir/WV8pw48y3Ez2awAoUBRfTeejPe4KvrE6NoIi/w=="],
+
+    "@keepkey/hdwallet-keepkey-nodewebusb/@keepkey/hdwallet-keepkey/@keepkey/hdwallet-core/@keepkey/proto-tx-builder/@cosmjs/stargate/@cosmjs/tendermint-rpc/@cosmjs/socket": ["@cosmjs/socket@0.29.5", "", { "dependencies": { "@cosmjs/stream": "^0.29.5", "isomorphic-ws": "^4.0.1", "ws": "^7", "xstream": "^11.14.0" } }, "sha512-5VYDupIWbIXq3ftPV1LkS5Ya/T7Ol/AzWVhNxZ79hPe/mBfv1bGau/LqIYOm2zxGlgm9hBHOTmWGqNYDwr9LNQ=="],
 
     "@pioneer-platform/pioneer-discovery/ethers/@ethersproject/abi/@ethersproject/hash/@ethersproject/abstract-signer/@ethersproject/abstract-provider/@ethersproject/networks": ["@ethersproject/networks@5.8.0", "", { "dependencies": { "@ethersproject/logger": "^5.8.0" } }, "sha512-egPJh3aPVAzbHwq8DD7Po53J4OUSsA1MjQp8Vf/OZPav5rlmWUaFLiq8cvQiGK0Z5K6LYzm29+VA/p4RL1FzNg=="],
 

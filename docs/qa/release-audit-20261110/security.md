@@ -11,8 +11,8 @@ Stable-release context: between v1.6.7 and v1.6.10, `auth.ts` changes only the s
 | Priority | Finding | Baseline | Status |
 | --- | --- | --- | --- |
 | P1 | Monero hidden-wallet monitoring writes hidden identities to persistent storage | New since v1.6.10; feature defaults off | Standard-wallet-only policy implemented; independent review clear |
-| P1 | A WalletConnect approval can cross into a replacement wallet | Inherited from v1.6.10; WalletConnect defaults off | Working fix implemented, awaiting root review |
-| P2 | Cancel during Swap preparation does not prevent its later signing request | Underlying race inherited from v1.6.10; scoped cancellation added since then | Central fix accepted by root; integration pending |
+| P1 | A WalletConnect approval can cross into a replacement wallet | Inherited from v1.6.10; WalletConnect defaults off | Implemented, independently reviewed and integrated in PR #642 |
+| P2 | Cancel during Swap preparation does not prevent its later signing request | Underlying race inherited from v1.6.10; scoped cancellation added since then | Central fix reviewed and integrated in PR #642 |
 
 ### P1 — Monero persists hidden-wallet identities
 

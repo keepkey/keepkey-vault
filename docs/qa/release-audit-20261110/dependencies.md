@@ -165,7 +165,21 @@ file package to registry `@bithighlander/device-protocol@7.20.0`, despite the ro
 override. Temporary-only fresh installs reproduced that resolution drift;
 overrides for both the alias name and the registry target failed to preserve
 the local package. Restoring the one reviewed local-file lock entry passed a
-fresh frozen install.
+minimal fresh frozen probe. The first full integration CI nevertheless failed
+frozen validation because six other file-package entries retained incomplete
+dependency metadata. The minimal probe did not establish full-project readiness.
+
+A clean full-project reproduction with all pinned local package manifests
+expanded that metadata and its nested dependency graph. The repaired lock then
+installed 1,183 packages from empty node_modules for both macOS arm64 and Linux
+x64 dependency selection using Bun 1.3.14, frozen mode and disabled lifecycle
+scripts. Its SHA-256 stayed
+`71db41b5b8addfe995cc3897995e8aa78930ed1c25d7dad10de44f750b4b7c4c`.
+The semantic comparison finds no new registry package/version targets; all four
+SDK protocol paths resolve to the reviewed local source and elliptic remains
+6.6.1. Lifecycle scripts, packaging and platform startup still require exact-head
+CI. Evidence: `/private/tmp/keepkey-full-lock-ci-20261110/summary.json`,
+`semantic-lock-diff.json` and `lock-diff.patch` in the same directory.
 
 The repaired frozen lockfile and
 [device-protocol installation invariant](../../../projects/keepkey-vault/__tests__/device-protocol-install.test.ts)

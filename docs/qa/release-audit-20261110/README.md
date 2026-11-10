@@ -79,12 +79,20 @@ key was approved, and the coordinator verified that no pairing record was saved.
 PR #634 Linux CI passed at `4bbc47982`; macOS crashed in the focus fixture's
 native HTTP harness. The fixture now executes the same production router without
 native HTTP sockets, keeps all twelve assertions and remains red against the old
-focus code. Ten local repeats pass. Exact-head platform CI is running again;
+focus code. Ten local repeats pass. The standalone PR's platform CI is running again;
 the crash persisted without sockets. The final fixture also mocks USB/HID before
 imports and forbids all native addons. It retains every assertion and remains red
 against the old behavior. The final macOS CI result is still pending.
 
-Local detailed results are under `/private/tmp/keepkey-swap-core-final-20261110`,
+PR #642's first integration run, `42868784631`, failed before tests on both
+platforms because Bun rejected incomplete local-package lock metadata. A full
+clean reproduction identified the required graph expansion. The repaired lock
+passes fresh frozen installs for macOS arm64 and Linux x64 dependency selection
+(1,183 packages each, scripts disabled for this install-only check), without
+changing registry versions, local protocol sources or the elliptic 6.6.1 pin.
+Exact-head platform build and smoke checks remain required after this repair.
+
+Local detailed results are under `/private/tmp/keepkey-release-core-20261110`,
 `/private/tmp/keepkey-swap-loading-20261110`, and
 `/private/tmp/keepkey-swap-review-20261110`.
 
@@ -102,6 +110,9 @@ Dependency reproducibility work restores a tracked Vault lockfile and makes CI
 reject a missing lockfile. The only registry-version remediation is elliptic
 6.6.1, replacing the vulnerable nested 6.5.4/6.5.7 copies. Bun 1.3.14's npm-alias
 override issue is addressed with the reviewed local protocol lock entry and a
-regression invariant. Do not regenerate that entry into a registry alias.
+regression invariant. Full fresh-install evidence and the semantic lock diff are
+under `/private/tmp/keepkey-full-lock-ci-20261110`; the first minimal alias probe
+alone did not establish full-project install reproducibility. Do not regenerate
+the reviewed local protocol entries into registry aliases.
 Remaining package advisories and their bounded reachability triage are recorded
 in [dependencies.md](dependencies.md); this is not a clean advisory scan.
