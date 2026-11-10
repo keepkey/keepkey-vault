@@ -21,14 +21,16 @@ beforeAll(() => { db.initDb(); db.storePairing('synthetic-demand', { name: 'QA B
 afterEach(() => { stop?.(); stop = undefined })
 afterAll(() => { db.closeDb(); rmSync(dir, { recursive: true, force: true }) })
 function fixture(initiallyLocked = true) {
- const state = { locked: initiallyLocked, epoch: 0, unlocks: 0, reads: 0, leases: 0, releases: 0, approvals: 0, signs: 0, focus: 0, waitApproval: false }
+ const state = { locked: initiallyLocked, phase: undefined as string | undefined, epoch: 0, unlocks: 0, reads: 0, leases: 0, releases: 0, approvals: 0, signs: 0, focus: 0, waitApproval: false, setupCalls: [] as string[], recoveryOwner: undefined as string | undefined }
  let resolveUnlock: () => void = () => { throw new Error('Unlock was not requested') }
- const features = () => ({ vendor: 'keepkey.com', majorVersion: 7, minorVersion: 17, patchVersion: 0, deviceId: 'synthetic-demand', initialized: true, pinProtection: true, pinCached: !state.locked, policiesList: [] })
- const wallet = { getFeatures: async () => features(), ethGetAddress: async () => { state.reads++; return address }, ethSignMessage: async () => { state.signs++; throw new Error('Real signing forbidden') } }
+ const phase = () => state.phase ?? (state.locked ? 'needs_pin' : 'ready')
+ const features = () => ({ vendor: 'keepkey.com', majorVersion: 7, minorVersion: 17, patchVersion: 0, deviceId: 'synthetic-demand', initialized: phase() !== 'needs_init', pinProtection: true, pinCached: !state.locked, policiesList: [] })
+ const wallet = { getFeatures: async () => features(), ethGetAddress: async () => { state.reads++; return address }, ethSignMessage: async () => { state.signs++; throw new Error('Real signing forbidden') }, reset: async () => { state.setupCalls.push('reset') }, recover: async () => { state.setupCalls.push('recover'); expect(state.recoveryOwner).toBe('synthetic-demand') }, loadDevice: async () => { state.setupCalls.push('load') } }
  const engine: any = Object.assign(new EventEmitter(), { wallet, isEmulator: false, isPassphraseWallet: false, isSyncing: false, wipeInProgress: false, wipeOnReconnect: false, currentSeedEthAddress: address,
-  getDeviceState: () => ({ state: state.locked ? 'needs_pin' : 'ready', deviceId: 'synthetic-demand', firmwareVersion: '7.17.0', capabilities: [] }), getCachedFeaturesSnapshot: features })
+  getDeviceState: () => ({ state: phase(), deviceId: 'synthetic-demand', firmwareVersion: '7.17.0', capabilities: [] }), getCachedFeaturesSnapshot: features,
+  beginRecovery: (owner: string) => { state.recoveryOwner = owner }, endRecovery: () => { state.recoveryOwner = undefined } })
  Object.defineProperty(engine, 'isLocked', { get: () => state.locked })
- const coordinator = new DeviceOperationCoordinator({ snapshot: () => ({ wallet: engine.wallet, deviceId: 'synthetic-demand', seedAddress: address, state: state.locked ? 'needs_pin' : 'ready' }), unlock: signal => {
+ const coordinator = new DeviceOperationCoordinator({ snapshot: () => ({ wallet: engine.wallet, deviceId: 'synthetic-demand', seedAddress: address, state: phase() as any }), unlock: signal => {
   state.unlocks++
   return new Promise<void>((resolve, reject) => {
    const abort = () => reject(Object.assign(new Error('Cancelled'), { status: 499 }))
@@ -50,6 +52,24 @@ function fixture(initiallyLocked = true) {
  return { state, engine, request, unlock: () => resolveUnlock() }
 }
 describe('API availability is separate from device access', () => {
+ test.each(['reset', 'recover', 'load'])('uninitialized device can enter %s without a wallet unlock', async action => {
+  const f = fixture(false); f.state.phase = 'needs_init'
+  expect((await f.request(`/system/initialize/${action}-device`, {})).status).toBe(200)
+  expect(f.state.setupCalls).toEqual([action]); expect(f.state.unlocks).toBe(0); expect(f.state.leases).toBe(0)
+  expect(f.state.recoveryOwner).toBeUndefined()
+ })
+ test.each(['reset', 'recover', 'load'])('initialized locked device retains the unlock gate for %s', async action => {
+  const f = fixture()
+  const pending = f.request(`/system/initialize/${action}-device`, {})
+  await until(() => f.state.unlocks === 1); expect(f.state.setupCalls).toEqual([])
+  f.unlock(); expect((await pending).status).toBe(200)
+  expect(f.state.setupCalls).toEqual([action]); expect(f.state.leases).toBe(1); expect(f.state.releases).toBe(1)
+ })
+ test.each(['wipeInProgress', 'wipeOnReconnect'])('uninitialized setup keeps the %s guard', async guard => {
+  const f = fixture(false); f.state.phase = 'needs_init'; f.engine[guard] = true
+  expect((await f.request('/system/initialize/load-device', {})).status).toBe(409)
+  expect(f.state.setupCalls).toEqual([])
+ })
  test('locked health, pairing and metadata do not unlock', async () => {
   const f = fixture()
   const health = await f.request('/api/health'); expect(health.status).toBe(200); expect(health.data.device_locked).toBe(true); expect(health.data.connected).toBe(true)

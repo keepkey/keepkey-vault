@@ -4912,7 +4912,9 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
 
         if (path === '/system/initialize/reset-device' && method === 'POST') {
           auth.requireAuth(req)
-          const wallet = await requireWallet(engine)
+          // A fresh device has no wallet to unlock. Keep the normal lease/PIN
+          // gate for initialized devices, including ones being reset again.
+          const wallet = await requireWallet(engine, { whileLocked: engine.getDeviceState().state === 'needs_init' })
           const body = await parseRequest(req, S.ResetDeviceRequest)
           await wallet.reset({
             entropy: body.word_count ? ({ 12: 128, 18: 192, 24: 256 } as Record<number, number>)[body.word_count] || 128 : 128,
@@ -4927,7 +4929,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
 
         if (path === '/system/initialize/recover-device' && method === 'POST') {
           const client = auth.requireAuth(req)
-          const wallet = await requireWallet(engine)
+          const wallet = await requireWallet(engine, { whileLocked: engine.getDeviceState().state === 'needs_init' })
           const body = await parseRequest(req, S.RecoverDeviceRequest)
           // beginRecovery sets setupInProgress so syncState()/getFeatures()
           // back off the transport — a concurrent GetFeatures corrupts the
@@ -4952,7 +4954,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
 
         if (path === '/system/initialize/load-device' && method === 'POST') {
           auth.requireAuth(req)
-          const wallet = await requireWallet(engine)
+          const wallet = await requireWallet(engine, { whileLocked: engine.getDeviceState().state === 'needs_init' })
           const body = await parseRequest(req, S.LoadDeviceRequest)
           await wallet.loadDevice(body)
           featuresCache = null

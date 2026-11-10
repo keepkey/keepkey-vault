@@ -33,6 +33,8 @@
       "__tests__/selected-token-balance.test.ts",
       "__tests__/balance-reconciliation.test.ts",
       "__tests__/balance-display-state.test.ts",
+      "__tests__/device-access-error.test.ts",
+      "__tests__/dashboard-device-errors.test.ts",
       "__tests__/btc-portfolio-confidence.test.ts",
       "__tests__/failed-fetch-not-zero.test.ts",
       "__tests__/market-price.test.ts",

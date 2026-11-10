@@ -1,0 +1,96 @@
+{
+  "date": "2026-11-10",
+  "baseline": "09bbd911ebb1a817bafd8475a0453bb523ce65c9",
+  "fixes": [
+    "Coalesce identical passive reads within the verified wallet/epoch/seed scope.",
+    "Keep forced and ordinary balance reads separate while sharing warm cache entries.",
+    "Return warm mutable snapshots as stale only for local pre-dispatch busy/locked acquisition failures.",
+    "Refresh mutable BTC/EVM account lists while unlocked.",
+    "Do not classify precise local device admission failures as balance-server outages.",
+    "Preserve cached amounts, age and genuine provider errors when only a stale snapshot returns.",
+    "Restore fresh-device REST initialization without requiring a nonexistent wallet to unlock; retain initialized-device and wipe guards."
+  ],
+  "validation": {
+    "coreTests": 1505,
+    "coreFailures": 0,
+    "scriptAssertions": 93,
+    "invalidFiles": 0,
+    "previousSourceRegression": {
+      "deviceRpc": {
+        "pass": 27,
+        "fail": 16
+      },
+      "uninitializedRestSetup": {
+        "pass": 0,
+        "fail": 3
+      },
+      "syntheticOnly": true
+    },
+    "frontend": "pass",
+    "backend": "pass",
+    "i18n": "pass",
+    "typecheck": {
+      "previousDiagnostics": 802,
+      "currentDiagnostics": 802,
+      "newDiagnosticsAfterNormalizingLocations": 0
+    },
+    "nativePreview": {
+      "api": "healthy",
+      "connected": true,
+      "ready": true,
+      "deviceLocked": false,
+      "swapPhase": "closed",
+      "existingQaPairing": true
+    },
+    "noLiveSigningBroadcastRecoveryOrResetPerformed": true
+  },
+  "reproduction": {
+    "core": "CORE_QA_EVIDENCE=<output-dir> bun scripts/qa-core-regressions.ts",
+    "focusedDevice": "bun test __tests__/device-operation.test.ts __tests__/device-rpc.test.ts",
+    "focusedRest": "bun test __tests__/rest-demand-unlock.test.ts",
+    "focusedDashboard": "bun test __tests__/device-access-error.test.ts __tests__/dashboard-device-errors.test.ts"
+  },
+  "openPullRequests": [
+    {
+      "number": 633,
+      "headReviewed": "09bbd911ebb1a817bafd8475a0453bb523ce65c9",
+      "outcome": "Account-cache and fresh-setup regressions fixed by this follow-up, together with reported busy/error regression.",
+      "ci": "Full Build workflow excluded because stacked base is not develop/master/release/*; local core suite and builds passed. Retarget after #632 lands and require full CI."
+    },
+    {
+      "number": 632,
+      "headReviewed": "d862cdb3cb023eeba10541dcf37a566ac2cdf056",
+      "severity": "P2",
+      "finding": "New swap labels and high-cost warnings replace existing translated keys with English-only uiText entries. Fourteen other locales fall back to English.",
+      "ci": "Build workflow successful",
+      "recommendation": "Translate the replacement labels before localized release."
+    },
+    {
+      "number": 630,
+      "headReviewed": "e94e37425e48c7960953f3ecd997d1f42aec4e7d",
+      "outcome": "No confirmed production blocker; previous CFBundleVersion review concern fixed.",
+      "ci": "Build workflow successful; 21 cleanup tests and shell syntax check pass",
+      "remaining": "Signed/notarized DMG, cleanup buttons and update continuity need release smoke checks."
+    },
+    {
+      "number": 621,
+      "headReviewed": "6e0a974a84f665679f34ae3ff3bdf1d0be278912",
+      "severity": "P2",
+      "finding": "Exact PR test assumes macOS temporary paths do not canonicalize /var to /private/var; 1 of 7 tests fails with default TMPDIR.",
+      "recommendation": "Production change already in develop. Any master backport should include the realpath fix from 43a5ff1f16558440edb288d296425c599e5aebba and rerun CI.",
+      "ci": "Old run failed before jobs; no current successful end-to-end packaging CI."
+    },
+    {
+      "number": 609,
+      "headReviewed": "219d0cd4c2330daa206b0d63a4dc5519cb49262e",
+      "outcome": "Draft is superseded; exact head is already an ancestor of both develop and master.",
+      "recommendation": "Close rather than merge stale release branch."
+    }
+  ],
+  "limitations": [
+    "Focused Dashboard tests mount the real component in JSDOM with synthetic RPC; no hardware acceptance test or payment was performed.",
+    "Fresh-device setup uses the pre-existing initialization bypass; expanding coordinator ownership for initialization is outside this regression patch.",
+    "Existing typecheck debt remains.",
+    "No other PR was merged, closed or modified."
+  ]
+}
