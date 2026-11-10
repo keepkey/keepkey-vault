@@ -465,27 +465,31 @@ export function AddChainDialog({ onClose, onAdded, existingChainIds = [], turned
 							<Text fontSize="10px" color="kk.textMuted">
 								{total > 0 ? `${page * PAGE_SIZE + 1}–${Math.min((page + 1) * PAGE_SIZE, total)} ${t('addChain.ofChains', { total, defaultValue: `of ${total} chains` })}` : ''}
 							</Text>
-							<Flex align="center" gap="2">
-								<Box
-									as="button"
-									fontSize="xs"
-									color={page > 0 ? "kk.gold" : "kk.textMuted"}
-									cursor={page > 0 ? "pointer" : "default"}
-									opacity={page > 0 ? 1 : 0.4}
-									onClick={() => page > 0 && handlePageChange(page - 1)}
-								>{uiText("Prev")}</Box>
-								<Text fontSize="10px" color="kk.textMuted" fontFamily="mono">
-									{totalPages > 0 ? `${page + 1}/${totalPages}` : '-'}
-								</Text>
-								<Box
-									as="button"
-									fontSize="xs"
-									color={page < totalPages - 1 ? "kk.gold" : "kk.textMuted"}
-									cursor={page < totalPages - 1 ? "pointer" : "default"}
-									opacity={page < totalPages - 1 ? 1 : 0.4}
-									onClick={() => page < totalPages - 1 && handlePageChange(page + 1)}
-								>{uiText("Next")}</Box>
-							</Flex>
+							{/* Paging controls only when there is more than one page: an empty or
+							    single-page result showed a dead "Prev - Next" under "No chains". */}
+							{totalPages > 1 && (
+								<Flex align="center" gap="2">
+									<Box
+										as="button"
+										fontSize="xs"
+										color={page > 0 ? "kk.gold" : "kk.textMuted"}
+										cursor={page > 0 ? "pointer" : "default"}
+										opacity={page > 0 ? 1 : 0.4}
+										onClick={() => page > 0 && handlePageChange(page - 1)}
+									>{uiText("Prev")}</Box>
+									<Text fontSize="10px" color="kk.textMuted" fontFamily="mono">
+										{totalPages > 0 ? `${page + 1}/${totalPages}` : '-'}
+									</Text>
+									<Box
+										as="button"
+										fontSize="xs"
+										color={page < totalPages - 1 ? "kk.gold" : "kk.textMuted"}
+										cursor={page < totalPages - 1 ? "pointer" : "default"}
+										opacity={page < totalPages - 1 ? 1 : 0.4}
+										onClick={() => page < totalPages - 1 && handlePageChange(page + 1)}
+									>{uiText("Next")}</Box>
+								</Flex>
+							)}
 							<Box
 								as="button"
 								fontSize="10px"
