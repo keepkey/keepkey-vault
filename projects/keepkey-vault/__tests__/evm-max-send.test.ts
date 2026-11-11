@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
 import { buildEvmTx } from '../src/bun/txbuilder/evm'
 import { CHAINS } from '../src/shared/chains'
+import { tokenMaxSpendableBaseUnits } from '../src/shared/max-send'
 
 const ethereum = CHAINS.find(c => c.id === 'ethereum')!
 const arbitrum = CHAINS.find(c => c.id === 'arbitrum')!
@@ -19,6 +20,24 @@ let originalFetch: typeof fetch
 // failed estimate falls back to the floor.
 beforeEach(() => { originalFetch = globalThis.fetch; globalThis.fetch = (async () => { throw new Error('offline') }) as typeof fetch })
 afterEach(() => { globalThis.fetch = originalFetch })
+
+describe('ERC-20 max send', () => {
+  const caip = `eip155:1/erc20:${tokenAddress}`
+  // GetTokenBalance answers { data: "<formatted amount>" }; the client puts that
+  // body under .data. Max with no positive frontend amount must read it.
+  test('reads GetTokenBalance when the frontend has no positive amount', async () => {
+    const pioneer = { ...pioneerWithBalance('1'), GetTokenBalance: async () => ({ data: { data: '17500.5' } }) }
+    const result = await buildEvmTx(pioneer, ethereum, { to: toAddress, amount: '0', isMax: true, fromAddress, caip, tokenDecimals: 6, tokenBalance: '0' })
+    // Max keeps the shared one-base-unit precision reserve.
+    expect(BigInt('0x' + String(result.data).slice(-64))).toBe(tokenMaxSpendableBaseUnits('17500.5', 6)!)
+  })
+
+  test('refuses an error body instead of sending its placeholder zero', async () => {
+    const pioneer = { ...pioneerWithBalance('1'), GetTokenBalance: async () => ({ data: { success: false, message: 'Invalid contract address format.', data: '0' } }) }
+    await expect(buildEvmTx(pioneer, ethereum, { to: toAddress, amount: '0', isMax: true, fromAddress, caip, tokenDecimals: 6, tokenBalance: '0' }))
+      .rejects.toThrow('Cannot fetch token balance for max send')
+  })
+})
 
 describe('EVM max send', () => {
   test.each(['base', 'optimism', 'arbitrum'])('%s preserves a sub-gwei quote in signing and fee math', async (id) => {

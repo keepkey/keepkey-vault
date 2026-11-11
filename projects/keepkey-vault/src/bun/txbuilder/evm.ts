@@ -27,6 +27,20 @@ export function parseUnits(amount: string, decimals: number): bigint {
  *  "have 0" — or worse, on the relay path, as "your quote was built for a
  *  different address". Callers catch this and fall through to their own
  *  "unable to verify" error. */
+/** GetTokenBalance answers `{ data: "<formatted amount>" }`, which the client
+ *  puts under `.data`. Its error answer pairs `success: false` with a
+ *  placeholder `data: '0'`, and that must never read as an empty account. */
+export function readPioneerTokenBalance(resp: any, context: string): string {
+  const body = resp?.data
+  if (body == null || body.success === false) {
+    throw new Error(`Pioneer could not read ${context}: ${body?.message || body?.error || 'no response'}`)
+  }
+  const raw = typeof body === 'object' ? body.data : body
+  const value = raw == null ? '' : String(raw).trim()
+  if (!/^\d+(\.\d+)?$/.test(value)) throw new Error(`no token balance in Pioneer response for ${context}`)
+  return value
+}
+
 export function readPioneerBalance(resp: any, context: string): string {
   // Try both field names before giving up — the old `a || b || '0'` chain fell
   // through a blank `nativeBalance` to `balance`, and only the `'0'` tail was
@@ -297,7 +311,7 @@ export async function buildEvmTx(
             address: fromAddress,
             contractAddress,
           })
-          tokBalStr = readPioneerBalance(tokBalResp, `${contractAddress} balance`)
+          tokBalStr = readPioneerTokenBalance(tokBalResp, `${contractAddress} balance`)
           console.log(`${TAG} Fetched token balance from API for max: ${tokBalStr}`)
         } catch (e: any) {
           throw new Error(`Cannot fetch token balance for max send: ${e.message}`)
