@@ -1024,6 +1024,7 @@ function SigningReference({ request }: { request: SigningRequestInfo }) {
 	return <VStack w="100%" gap="3" maxH="42vh" overflowY="auto" textAlign="left" flexShrink={1} minH="0">
 		<Row label={uiText("Account")} value={request.from} />
 		<Row label={uiText("Recipient")} value={request.to} />
+		<SelfTransferNote from={request.from} to={request.to} />
 		<Row label={uiText("Value")} value={request.chain === 'eth' ? evmNativeValue(request.value, request.chainId) ?? request.value : request.value} />
 		{request.method === '/eth/sign-transaction' && <Row label={uiText("Max network fee")} value={evmMaxFee(request.rawRequestBody, request.chainId) ?? undefined} />}
 		{request.erc7730 && request.erc7730Description && <Erc7730Section d={request.erc7730Description} />}
@@ -1038,6 +1039,17 @@ function SigningReference({ request }: { request: SigningRequestInfo }) {
 // ═══════════════════════════════════════════════════════════════════════
 // Main Component
 // ═══════════════════════════════════════════════════════════════════════
+
+/** dApp requests that send to the signing address itself: nothing moves except the fee. */
+function SelfTransferNote({ from, to }: { from?: string; to?: string }) {
+	const { t } = useTranslation('device')
+	if (!from || !to || from.toLowerCase() !== to.toLowerCase()) return null
+	return (
+		<Text fontSize="11px" color="kk.gold" alignSelf="flex-start" role="note">
+			{t('signing.selfTransfer', { defaultValue: 'From and To are the same address: this sends to yourself, and only the network fee is spent.' })}
+		</Text>
+	)
+}
 
 export function SigningApproval({ request, phase, onApprove, onReject, onCancel }: SigningApprovalProps) {
   const uiText = useUiTranslation()
@@ -1546,6 +1558,7 @@ export function SigningApproval({ request, phase, onApprove, onReject, onCancel 
 								<Row label={uiText("Chain")} value={evmChainName ?? request.chain?.toUpperCase()} />
 								<Row label={uiText("From")} value={request.from} />
 								<Row label={uiText("To")} value={request.to} />
+								<SelfTransferNote from={request.from} to={request.to} />
 								<Row label={uiText("Value")} value={request.method === '/eth/sign-transaction'
 									? (evmNativeValue(request.value, request.chainId) ?? request.value) : request.value} />
 								{request.method === '/eth/sign-transaction' && <Row label={uiText("Max network fee")} value={evmMaxFee(request.rawRequestBody, request.chainId) ?? undefined} />}
