@@ -45,7 +45,11 @@ function normalizeItem(value: any): SwapQuoteFeeItem | undefined {
     if (units(value.amountBaseUnits)) { amountBaseUnits = value.amountBaseUnits; amount = human(value.amountBaseUnits, decimals!) }
     else if (decimal(value.amount)) amount = value.amount
   }
-  if ((amount === undefined || Number(amount) === 0) && !(rate && rate > 0)) return undefined
+  if (amount !== undefined && Number(amount) === 0) {
+    amount = undefined
+    amountBaseUnits = undefined
+  }
+  if (amount === undefined && !(rate && rate > 0)) return undefined
   return { kind: value.kind, ...(value.label ? { label: String(value.label).slice(0, 80) } : {}),
     ...(amount !== undefined ? { assetCaip, symbol, decimals, amount, ...(amountBaseUnits ? { amountBaseUnits } : {}) } : {}),
     ...(rate !== undefined ? { bps: rate } : {}),

@@ -3,7 +3,7 @@ import { useUiTranslation } from "../i18n/ui"
 import { firmwareSupportsMonero, MONERO_MIN_FIRMWARE } from "../../shared/firmware-versions"
 import { useState, useEffect, useCallback, useRef } from "react"
 import { useFiat } from "../lib/fiat-context"
-import { Box, Flex, Text, VStack, Button, Input, IconButton } from "@chakra-ui/react"
+import { Box, Flex, Text, VStack, Button, Input, IconButton, StackSeparator } from "@chakra-ui/react"
 import { useTranslation } from "react-i18next"
 import { LanguageSelector } from "../i18n/LanguageSelector"
 import { CurrencySelector } from "./CurrencySelector"
@@ -1048,7 +1048,7 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 							borderColor="rgba(255,255,255,0.06)"
 						>
 							<Flex align="center" gap="3">
-								<Flex align="center" justify="center" w="32px" h="32px" borderRadius="lg" bg="rgba(233,196,106,0.1)">
+								<Flex align="center" justify="center" w="32px" h="32px" flexShrink={0} borderRadius="lg" bg="rgba(233,196,106,0.1)">
 									<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--gold)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
 										<rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
 										<path d="M7 11V7a5 5 0 0 1 10 0v4" />
@@ -1161,7 +1161,7 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 							borderColor="rgba(255,255,255,0.06)"
 						>
 							<Flex align="center" gap="3">
-								<Flex align="center" justify="center" w="32px" h="32px" borderRadius="lg" bg="rgba(233,196,106,0.1)">
+								<Flex align="center" justify="center" w="32px" h="32px" flexShrink={0} borderRadius="lg" bg="rgba(233,196,106,0.1)">
 									<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--gold)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
 										<circle cx="12" cy="12" r="10" />
 										<polyline points="12 6 12 12 16 14" />
@@ -1212,7 +1212,7 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 							borderColor="rgba(255,255,255,0.06)"
 						>
 							<Flex align="center" gap="3">
-								<Flex align="center" justify="center" w="32px" h="32px" borderRadius="lg" bg="rgba(233,196,106,0.1)">
+								<Flex align="center" justify="center" w="32px" h="32px" flexShrink={0} borderRadius="lg" bg="rgba(233,196,106,0.1)">
 									<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--gold)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
 										<path d="M12 2a5 5 0 0 1 5 5v3H7V7a5 5 0 0 1 5-5z" />
 										<rect x="3" y="10" width="18" height="12" rx="2" />
@@ -1239,10 +1239,10 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 						</Flex>
 
 						{/* ── Verify Seed row ────────────────────── */}
-						<Box py="3">
+						<Box py="3" borderBottom="1px solid" borderColor="rgba(255,255,255,0.06)">
 							<Flex align="center" justify="space-between">
 								<Flex align="center" gap="3">
-									<Flex align="center" justify="center" w="32px" h="32px" borderRadius="lg" bg="rgba(233,196,106,0.1)">
+									<Flex align="center" justify="center" w="32px" h="32px" flexShrink={0} borderRadius="lg" bg="rgba(233,196,106,0.1)">
 										<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--gold)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
 											<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
 											<path d="M9 12l2 2 4-4" />
@@ -1301,9 +1301,9 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 						</Box>
 
 						{/* Private Mode toggle */}
-						<Flex justify="space-between" align="center">
+						<Flex justify="space-between" align="center" pt="3">
 							<Flex align="center" gap="3">
-								<Flex align="center" justify="center" w="32px" h="32px" borderRadius="lg" bg="rgba(148,163,184,0.1)">
+								<Flex align="center" justify="center" w="32px" h="32px" flexShrink={0} borderRadius="lg" bg="rgba(148,163,184,0.1)">
 									<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#94A3B8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
 										<path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24" />
 										<line x1="1" y1="1" x2="23" y2="23" />
@@ -1334,7 +1334,7 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 								borderColor="rgba(255,255,255,0.06)"
 							>
 								<Flex align="center" gap="3">
-									<Flex align="center" justify="center" w="32px" h="32px" borderRadius="lg" bg="rgba(245,163,59,0.1)">
+									<Flex align="center" justify="center" w="32px" h="32px" flexShrink={0} borderRadius="lg" bg="rgba(245,163,59,0.1)">
 										<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#F5A33B" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
 											<path d="M12 9v4M12 17h.01" />
 											<path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
@@ -1388,7 +1388,7 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 							{/* REST API server toggle */}
 							<Flex justify="space-between" align="center">
 								<Flex align="center" gap="3">
-									<Flex align="center" justify="center" w="32px" h="32px" borderRadius="lg" bg="rgba(233,196,106,0.1)">
+									<Flex align="center" justify="center" w="32px" h="32px" flexShrink={0} borderRadius="lg" bg="rgba(233,196,106,0.1)">
 										<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--gold)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
 											<path d="M4 11a9 9 0 0 1 9 9" />
 											<path d="M4 4a16 16 0 0 1 16 16" />
@@ -1472,8 +1472,8 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 
 							{/* ── Mobile Pairing ────── */}
 							<Box pt="3" borderTop="1px solid" borderColor="rgba(255,255,255,0.06)">
-								<Flex justify="space-between" align="center">
-									<Box>
+								<Flex justify="space-between" align="center" gap="4">
+									<Box flex="1" minW="0">
 										<Text fontSize="md" color="kk.textPrimary" fontWeight="500">
 											{t("mobilePairing.title")}
 										</Text>
@@ -1490,6 +1490,9 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 										color="kk.gold"
 										fontSize="xs"
 										fontWeight="500"
+										// Keep the label on one line; the description wraps instead.
+										whiteSpace="nowrap"
+										flexShrink={0}
 										cursor={deviceState.state !== "ready" ? "not-allowed" : "pointer"}
 										opacity={deviceState.state !== "ready" ? 0.4 : 1}
 										_hover={deviceState.state === "ready" ? { bg: "rgba(233,196,106,0.22)" } : {}}
@@ -1684,20 +1687,24 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 
 					{/* ── Feature Flags ──────────────────────────────── */}
 					<Section title={uiText("Available features")} category="features" docsHref={DOCS_LINKS.settingsFeatureFlags}>
-						<VStack gap="4" align="stretch">
-              <Flex justify="space-between" align="center" gap="4" pb="4" borderBottom="1px solid" borderColor="kk.border">
+						{/* The separator draws one divider between every rendered row, so
+						    rows that only show on some builds or firmware still get one. */}
+						<VStack gap="4" align="stretch" separator={<StackSeparator borderColor="kk.border" />}>
+              <Flex justify="space-between" align="center" gap="4">
                 <Flex align="center" gap="3" minW="0"><FeatureIcon kind="firmware" /><Box>
                   <Text fontSize="md" color="kk.textPrimary" fontWeight="500">{t("alphaFirmware", { defaultValue: "Alpha Firmware" })}</Text>
                   <Text fontSize="sm" color="kk.textSecondary" mt="0.5">{t("alphaFirmwareDesc", { defaultValue: "Opt in to early firmware releases from the beta channel" })}</Text>
                 </Box></Flex>
                 <Toggle label={t("alphaFirmware")} checked={appSettings.alphaFirmware} onChange={toggleAlphaFirmware} disabled={togglingAlphaFirmware} />
               </Flex>
-              <Flex justify="space-between" align="center" gap="4" pb="4" borderBottom="1px solid" borderColor="kk.border">
+              <Box>
+              <Flex justify="space-between" align="center" gap="4">
                 <Flex align="center" gap="3" minW="0"><FeatureIcon kind="monero" /><Box><Text fontSize="md" fontWeight="500" color="kk.textPrimary">{uiText('Monero (XMR)')}</Text>
                   <Text fontSize="sm" color="kk.textSecondary" mt="0.5">{appSettings.moneroAvailable === false ? uiText('Monero is unavailable in this build.') : !firmwareSupportsMonero(deviceState.firmwareVersion) ? `Needs KeepKey firmware ${MONERO_MIN_FIRMWARE} or newer.` : uiText('Add Monero to your wallet. Manage its node and scan history in Settings → Networks.')}</Text></Box></Flex>
                 <Toggle label={uiText('Monero (XMR)')} checked={appSettings.moneroEnabled} disabled={moneroBusy || appSettings.moneroAvailable === false} onChange={toggleMonero} />
               </Flex>
-              {moneroError && <Text role="alert" fontSize="xs" color="kk.error">{moneroError}</Text>}
+              {moneroError && <Text role="alert" fontSize="xs" color="kk.error" mt="2">{moneroError}</Text>}
+              </Box>
 
 							<Box>
 								<Flex justify="space-between" align="center" gap="4">

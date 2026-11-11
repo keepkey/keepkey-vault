@@ -9,6 +9,7 @@
  */
 import { join, resolve } from 'node:path'
 import { copyFileSync, existsSync, mkdirSync } from 'node:fs'
+import { buildElectrobun } from './build-electrobun'
 
 const env = process.argv[2] || 'stable'
 const scriptsDir = join(import.meta.dir)
@@ -97,31 +98,9 @@ if (process.env.KEEPKEY_INCLUDE_MONERO_EMULATOR === '1') {
   process.exit(1)
 }
 
-const result = Bun.spawnSync(
-  ['electrobun', 'build', `--env=${env}`],
-  {
-    cwd: join(import.meta.dir, '..'),
-    env: {
-      ...process.env,
-      PATH: `${scriptsDir}:${currentPath}`,
-      ...(emulatorSource ? { KEEPKEY_EMULATOR_SOURCE: emulatorSource } : {}),
-      ...signedMoneroSources,
-    },
-    stdout: 'inherit',
-    stderr: 'inherit',
-  }
-)
-
-if (result.exitCode !== 0) process.exit(result.exitCode ?? 1)
-
-// Post-build: patch Bun bundler node:buffer bug in the electrobun output
-const patch = Bun.spawnSync(
-  ['bun', join(scriptsDir, 'patch-bundle.ts')],
-  {
-    cwd: join(import.meta.dir, '..'),
-    stdout: 'inherit',
-    stderr: 'inherit',
-  }
-)
-
-process.exit(patch.exitCode ?? 1)
+buildElectrobun(env, {
+  ...process.env,
+  PATH: `${scriptsDir}:${currentPath}`,
+  ...(emulatorSource ? { KEEPKEY_EMULATOR_SOURCE: emulatorSource } : {}),
+  ...signedMoneroSources,
+})

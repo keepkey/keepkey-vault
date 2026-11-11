@@ -138,4 +138,7 @@ export default {
 	release: {
 		baseUrl: "https://github.com/keepkey/keepkey-vault/releases/latest/download",
 	},
+	scripts: {
+		postBuild: "scripts/patch-bundle.ts",
+	},
 } satisfies ElectrobunConfig;

@@ -21,6 +21,38 @@ beforeEach(() => { originalFetch = globalThis.fetch; globalThis.fetch = (async (
 afterEach(() => { globalThis.fetch = originalFetch })
 
 describe('EVM max send', () => {
+  test.each(['base', 'optimism', 'arbitrum'])('%s preserves a sub-gwei quote in signing and fee math', async (id) => {
+    const chain = CHAINS.find(c => c.id === id)!
+    const pioneer = {
+      ...pioneerWithBalance('1'),
+      GetGasPriceByNetwork: async () => ({ data: { average: '0.006' } }),
+    }
+    const result = await buildEvmTx(pioneer, chain, {
+      to: toAddress, amount: '0', isMax: true, fromAddress,
+    })
+    expect(BigInt(result.gasPrice)).toBe(6_000_000n)
+    const gasFee = BigInt(result.gasLimit) * 6_000_000n
+    const gasReserve = (gasFee * 110n + 99n) / 100n
+    expect(BigInt(result.value)).toBe(1_000_000_000_000_000_000n - gasReserve)
+  })
+
+  test.each(['base', 'optimism', 'arbitrum'])('%s slow preset never bids below the quoted price', async (id) => {
+    const chain = CHAINS.find(c => c.id === id)!
+    const pioneer = {
+      ...pioneerWithBalance('1'),
+      GetGasPriceByNetwork: async () => ({ data: { average: '0.006' } }),
+    }
+    const send = (feeLevel: number) => buildEvmTx(pioneer, chain, { to: toAddress, amount: '0.1', fromAddress, feeLevel })
+    expect(BigInt((await send(1)).gasPrice)).toBe(6_000_000n)
+    expect(BigInt((await send(10)).gasPrice)).toBe(9_000_000n)
+  })
+
+  test('slow preset still discounts above a configured chain minimum', async () => {
+    const pioneer = { ...pioneerWithBalance('1'), GetGasPriceByNetwork: async () => ({ data: { average: '2' } }) }
+    const result = await buildEvmTx(pioneer, ethereum, { to: toAddress, amount: '0.1', fromAddress, feeLevel: 1 })
+    expect(BigInt(result.gasPrice)).toBe(1_600_000_000n)
+  })
+
   test('rejects native max sends that cannot cover the rounded gas reserve', async () => {
     await expect(buildEvmTx(pioneerWithBalance('0.000022'), ethereum, {
       to: toAddress,

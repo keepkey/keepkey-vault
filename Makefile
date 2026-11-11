@@ -281,8 +281,8 @@ build-electrobun-linux-x64-core:
 
 # --- Vault ---
 
-$(VAULT_INSTALL_STAMP): $(PROJECT_DIR)/package.json $(PROJECT_DIR)/scripts/patch-electrobun.sh $(PROTO_BUILD_STAMP) $(HDWALLET_BUILD_STAMP) $(DEVICE_PROTOCOL_BUILD_STAMP) | $(STAMP_DIR)
-	cd $(PROJECT_DIR) && bun install
+$(VAULT_INSTALL_STAMP): $(PROJECT_DIR)/package.json $(PROJECT_DIR)/bun.lock $(PROJECT_DIR)/scripts/patch-electrobun.sh $(PROTO_BUILD_STAMP) $(HDWALLET_BUILD_STAMP) $(DEVICE_PROTOCOL_BUILD_STAMP) | $(STAMP_DIR)
+	cd $(PROJECT_DIR) && bun install --frozen-lockfile
 	@touch $@
 
 install: $(VAULT_INSTALL_STAMP)
@@ -451,6 +451,7 @@ test-i18n:
 	cd $(PROJECT_DIR) && bun scripts/check-i18n.ts && bun test __tests__/i18n-safety.test.ts __tests__/report-fonts.test.ts
 
 test-unit:
+	cd $(PROJECT_DIR) && bun test __tests__/build-electrobun.test.ts
 	cd $(PROJECT_DIR) && bun test __tests__/hyperliquid-identity.test.ts
 	cd $(PROJECT_DIR) && bun test __tests__/receive-payment-uri.test.ts
 	cd $(PROJECT_DIR) && bun test __tests__/swap-row-explorer.test.ts
@@ -476,6 +477,8 @@ test-unit:
 	cd $(PROJECT_DIR) && bun test __tests__/swap-classify.test.ts __tests__/swap-discovery.test.ts __tests__/swap-revert.test.ts __tests__/swap-risk.test.ts __tests__/swap-tracker-guards.test.ts __tests__/swap-warnings.test.ts
 	cd $(PROJECT_DIR) && bun test __tests__/swap-tracking-context.test.ts
 	cd $(PROJECT_DIR) && bun test __tests__/swap-progress-polling.test.ts
+	cd $(PROJECT_DIR) && bun test __tests__/swap-dialog-tracking.test.ts
+	cd $(PROJECT_DIR) && bun test __tests__/swap-execution-service.test.ts
 	cd $(PROJECT_DIR) && bun test __tests__/swap-ui-control.test.ts
 	cd $(PROJECT_DIR) && bun test __tests__/swap-api-assets.test.ts __tests__/swap-quote-lease.test.ts
 	cd $(PROJECT_DIR) && bun test __tests__/swap-rest-approval.test.ts
@@ -1164,7 +1167,7 @@ preflight: submodules
 	fi; \
 	echo ""; \
 	echo "7. VAULT TYPECHECK (differential vs baseline)"; \
-	ts_status=0; ts_output=$$(cd $(PROJECT_DIR) && npx tsc --noEmit --skipLibCheck 2>&1) || ts_status=$$?; \
+	ts_status=0; ts_output=$$(cd $(PROJECT_DIR) && ./node_modules/.bin/tsc --noEmit --skipLibCheck 2>&1) || ts_status=$$?; \
 	errs=$$(echo "$$ts_output" | grep -c "error TS" || true); \
 	global_errs=$$(echo "$$ts_output" | grep -c "^error TS" || true); \
 	base=$$(cat $(PROJECT_DIR)/.typecheck-baseline 2>/dev/null || echo 0); \

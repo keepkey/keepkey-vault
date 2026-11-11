@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { bufferedSwapGasLimit } from '../src/shared/swap-gas'
-import { assertPrebuiltSwapExecution } from '../src/bun/swap-preflight'
+import { assertPrebuiltSwapExecution, assertSwapExecutionService } from '../src/bun/swap-preflight'
 
 const tx = {
   chainId: 1,
@@ -29,6 +29,12 @@ describe('prebuilt swap gas', () => {
 })
 
 describe('swap execution check before signing', () => {
+  test('identifies a missing Pioneer operation before any approval can be requested', () => {
+    expect(() => assertSwapExecutionService('eip155:1', {})).toThrow(/select a compatible server in Settings/i)
+    expect(() => assertSwapExecutionService('eip155:1', { EvmReadRpc: async () => ({}) })).not.toThrow()
+    expect(() => assertSwapExecutionService('https://custom.example/rpc', {})).not.toThrow()
+  })
+
   test('calls the configured service with canonical quantities and final transaction fields', async () => {
     let checked = false
     await assertPrebuiltSwapExecution('eip155:1', tx, async (endpoint, method, params) => {

@@ -147,4 +147,4 @@ try {
 } finally {
   await unmount()
 }
-console.log(JSON.stringify(result))
+console.log('DASHBOARD_DEVICE_ERRORS_RESULT ' + JSON.stringify(result))

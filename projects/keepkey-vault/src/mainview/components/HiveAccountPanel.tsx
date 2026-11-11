@@ -3,6 +3,11 @@ import { useState, useEffect, useRef } from "react"
 import { Box, Flex, Text, Button, Spinner, IconButton, Input } from "@chakra-ui/react"
 import { FaCopy, FaCheck, FaTimes, FaChevronDown, FaChevronUp, FaExternalLinkAlt } from "react-icons/fa"
 import { rpcRequest } from "../lib/rpc"
+import { CHAINS } from "../../shared/chains"
+
+// One explorer for Hive, from the chain config (no hard-coded host).
+const hiveTxUrl = (txid: string) =>
+	(CHAINS.find(c => c.id === "hive")?.explorerTxUrl ?? "https://hivehub.dev/tx/{{txid}}").replace("{{txid}}", txid)
 
 type RoleKeys = { owner: string; active: string; posting: string; memo: string }
 type HiveAccount = { name: string; hive: string; hbd: string; hp?: string; rcPercent?: number }
@@ -288,7 +293,7 @@ function HiveOnboardWizard({ color, activeKey, onCreated }: { color: string; act
 			<Text fontSize="12px" color="var(--text-2)" mt="2" lineHeight="1.5">{uiText("Secured by KeepKey — sponsored by @keepkey, no fee. Loading your account…")}</Text>
 			{created.txid && (
 				<Text fontSize="10px" fontFamily="mono" color="var(--text-3)" mt="2" truncate cursor="pointer"
-					onClick={() => rpcRequest("openUrl", { url: `https://hiveblocks.com/tx/${created.txid}` }).catch(() => {})}>{uiText("tx")}{" "}{created.txid.slice(0, 16)}…
+					onClick={() => rpcRequest("openUrl", { url: hiveTxUrl(created.txid!) }).catch(() => {})}>{uiText("tx")}{" "}{created.txid.slice(0, 16)}…
 				</Text>
 			)}
 			<Button mt="3" size="sm" bg={color} color="white" _hover={{ filter: "brightness(1.1)" }}

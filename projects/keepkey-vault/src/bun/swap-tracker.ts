@@ -787,10 +787,18 @@ async function reregisterIfMissing(swap: PendingSwap): Promise<void> {
  *  timer). Returns the latest in-memory swap state, or null if unknown. */
 export async function refreshSwap(txid: string, deviceId?: string, walletId?: string, rescan = false): Promise<PendingSwap | null> {
   const live = pendingSwaps.get(txid)
-  let swap = live && (walletId ? live.walletId === walletId : !deviceId || live.deviceId === deviceId) ? live : hydrateFromDb(txid, deviceId, walletId)
+  const swap = live && (walletId ? live.walletId === walletId : !deviceId || live.deviceId === deviceId) ? live : hydrateFromDb(txid, deviceId, walletId)
   if (!swap) {
     swapLog(`${TAG} refreshSwap: txid ${txid.slice(0, 10)}... not found in memory or DB`)
     return null
+  }
+
+  const checkedAt = Date.now()
+  let receivedStatus = false
+  const recordStatusCheck = (error?: NonNullable<PendingSwap['statusCheck']>['error']) => {
+    if (!error) receivedStatus = true
+    if ((error && receivedStatus) || (swap.statusCheck && swap.statusCheck.checkedAt > checkedAt)) return
+    swap.statusCheck = { checkedAt, error }
   }
 
   // Relay request-id backfill is two phases, both retry-safe:
@@ -835,6 +843,7 @@ export async function refreshSwap(txid: string, deviceId?: string, walletId?: st
 
     const relayStatus = await fetchRelayExecutionStatus(swap)
     const mappedRelayStatus = mapRelayExecutionStatus(relayStatus?.status)
+    if (mappedRelayStatus) recordStatusCheck()
     const relayChanged = applyRelayExecutionStatus(swap, relayStatus)
     const hasEnoughRelayTerminalData = hasEnoughRelayTerminalMetadata(swap)
     if (
@@ -856,6 +865,7 @@ export async function refreshSwap(txid: string, deviceId?: string, walletId?: st
       )
       if (resp.ok) {
         const data = await resp.json() as any
+        if (typeof data?.status === 'string') recordStatusCheck()
         // A newer poll may have settled this same live object while the
         // request was in flight. Do not repeat its completion event/ledger
         // write using an older response with no received amount.
@@ -923,6 +933,7 @@ export async function refreshSwap(txid: string, deviceId?: string, walletId?: st
     const resp = await withTimeout(pioneer.GetPendingSwap({ txHash: txid, ...(rescan ? { rescan: true } : {}) }), PIONEER_SWAP_TIMEOUT_MS, rescan ? 'GetPendingSwap rescan' : 'GetPendingSwap')
     const remoteSwap = resp?.data || resp
     if (!remoteSwap || remoteSwap.status === 'not_found') {
+      recordStatusCheck('not_found')
       swapLog(`${TAG} refreshSwap ${txid.slice(0, 10)}...: not found in Pioneer yet`)
       // 200-body not_found (some client/server combos). The live pioneer-server
       // instead throws a 404, handled in the catch below — both call the same
@@ -938,6 +949,7 @@ export async function refreshSwap(txid: string, deviceId?: string, walletId?: st
     // swap.txid to match reregisterIfMissing (the txid param may differ in case).
     pioneerRegistrationAttempts.delete(swap.txid)
     applyRemoteSwapData(swap, remoteSwap)
+    recordStatusCheck()
 
     // Pioneer-side relay-id verification. If GetPendingSwap reports our id,
     // mark the txid as Pioneer-verified so the lazy re-registration loop
@@ -987,7 +999,8 @@ export async function refreshSwap(txid: string, deviceId?: string, walletId?: st
     }
 
   } catch (e: any) {
-    if (e.status === 404 || e.statusCode === 404 || e.message?.includes('404')) {
+    if (e?.status === 404 || e?.statusCode === 404 || e?.message?.includes('404')) {
+      recordStatusCheck('not_found')
       // The live pioneer-server returns HTTP 404 for not_found (swagger-client
       // throws on non-2xx, so we land here, not the 200-body branch above). This
       // is the same "no row in Pioneer" condition — re-register, bounded, so a
@@ -996,7 +1009,8 @@ export async function refreshSwap(txid: string, deviceId?: string, walletId?: st
       swapLog(`${TAG} refreshSwap ${txid.slice(0, 10)}...: not found in Pioneer (404)`)
       await reregisterIfMissing(swap)
     } else {
-      console.error(`${TAG} refreshSwap FAILED for ${txid.slice(0, 10)}...: ${e.message}`)
+      recordStatusCheck('unavailable')
+      console.error(`${TAG} refreshSwap FAILED for ${txid.slice(0, 10)}...: ${e?.message || String(e)}`)
     }
   } finally {
     // ── Midgard settlement and refund verification ──
@@ -1006,6 +1020,7 @@ export async function refreshSwap(txid: string, deviceId?: string, walletId?: st
     if (/thor|maya/i.test(`${swap.integration} ${swap.swapper || ''}`)) {
       const midgard = await fetchSwapMidgardActions(txid, /maya/i.test(`${swap.integration} ${swap.swapper || ''}`))
       if (applyClassifiedOutcome(swap, midgard)) {
+        recordStatusCheck()
         const isFinal = swap.status === 'completed' || swap.status === 'failed' || swap.status === 'refunded'
         if (!noPersistSwaps.has(swap.txid)) updateSwapHistoryStatus(swap.txid, swap.status, {
           deviceId: swap.deviceId, walletId: swap.walletId,

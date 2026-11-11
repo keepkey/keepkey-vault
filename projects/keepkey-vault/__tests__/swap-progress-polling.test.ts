@@ -1,6 +1,8 @@
 import { afterEach, expect, mock, test } from 'bun:test'
 const fetchBefore = globalThis.fetch
-afterEach(() => { globalThis.fetch = fetchBefore })
+const pendingStatus = async () => ({ data: { status: 'pending', confirmations: 0 } })
+let getPendingSwap = pendingStatus
+afterEach(() => { globalThis.fetch = fetchBefore; getPendingSwap = pendingStatus })
 const records = new Map<string, any>()
 const ledgerRecords: any[] = []
 mock.module('../src/bun/db', () => ({
@@ -12,7 +14,7 @@ mock.module('../src/bun/db', () => ({
 mock.module('../src/bun/ledger', () => ({ recordSwap: (record: any) => ledgerRecords.push(record) }))
 mock.module('../src/bun/engine-controller', () => ({ withTimeout: async (operation: Promise<any>) => operation }))
 mock.module('../src/bun/pioneer', () => ({ getPioneer: async () => ({
-  GetPendingSwap: async () => ({ data: { status: 'pending', confirmations: 0 } }),
+  GetPendingSwap: () => getPendingSwap(),
   CreatePendingSwap: async () => ({}),
 }) }))
 const { refreshSwap } = await import('../src/bun/swap-tracker')
@@ -58,4 +60,19 @@ test('an older overlapping poll cannot overwrite a verified completed payout', a
   expect(records.get(txid).status).toBe('completed')
   expect(ledgerRecords.filter(record => record.txid === txid)).toHaveLength(1)
   expect(ledgerRecords.find(record => record.txid === txid).toAmount).toBe(5)
+})
+test('a failed status check preserves the swap state and clears after a successful recheck', async () => {
+  const txid = '0x' + 'd'.repeat(64)
+  fixture(txid)
+  const row = records.get(txid)
+  row.integration = 'fixture'
+  row.swapper = 'Fixture'
+  getPendingSwap = async () => { throw new Error('HTTP 503') }
+  const unavailable = await refreshSwap(txid, row.deviceId, undefined, true)
+  expect(unavailable?.status).toBe('pending')
+  expect(unavailable?.statusCheck).toMatchObject({ checkedAt: expect.any(Number), error: 'unavailable' })
+  getPendingSwap = async () => ({ data: { status: 'confirming', confirmations: 2 } })
+  const recovered = await refreshSwap(txid, row.deviceId, undefined, true)
+  expect(recovered?.status).toBe('confirming')
+  expect(recovered?.statusCheck?.error).toBeUndefined()
 })
