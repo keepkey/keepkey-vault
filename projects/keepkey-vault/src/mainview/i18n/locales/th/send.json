@@ -47,6 +47,7 @@
 	"invalidDgbAddress": "ที่อยู่ DigiByte ไม่ถูกต้อง",
 	"invalidEvmAddress": "ที่อยู่ไม่ถูกต้อง — ต้องเป็น 0x ตามด้วยอักขระฐานสิบหก 40 ตัว",
 	"invalidEvmChecksum": "เช็กซัมไม่ตรงกัน — ที่อยู่อาจพิมพ์ผิด โปรดคัดลอกจากต้นทางอีกครั้ง",
+	"invalidChecksum": "ที่อยู่นี้พิมพ์ผิด: เช็กซัมไม่ตรงกัน โปรดคัดลอกจากต้นทางอีกครั้ง",
 	"invalidCosmosPrefix": "คำนำหน้าที่อยู่ไม่ถูกต้องสำหรับเครือข่ายนี้",
 	"invalidCosmosLength": "ความยาวที่อยู่ Cosmos ไม่ถูกต้อง",
 	"invalidCosmosAddress": "ที่อยู่ Cosmos ไม่ถูกต้อง",

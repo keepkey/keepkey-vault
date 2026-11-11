@@ -47,6 +47,7 @@
 	"invalidDgbAddress": "Ungültige DigiByte-Adresse",
 	"invalidEvmAddress": "Ungültige Adresse — muss 0x gefolgt von 40 Hexadezimalzeichen sein",
 	"invalidEvmChecksum": "Prüfsumme stimmt nicht — die Adresse enthält möglicherweise einen Tippfehler. Erneut aus der Quelle kopieren",
+	"invalidChecksum": "Diese Adresse enthält einen Tippfehler: Die Prüfsumme stimmt nicht. Kopieren Sie sie erneut aus der Quelle.",
 	"invalidCosmosPrefix": "Falsches Adresspräfix für dieses Netzwerk",
 	"invalidCosmosLength": "Ungültige Cosmos-Adresslänge",
 	"invalidCosmosAddress": "Ungültige Cosmos-Adresse",

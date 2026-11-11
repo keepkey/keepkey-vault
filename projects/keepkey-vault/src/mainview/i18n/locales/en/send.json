@@ -60,6 +60,7 @@
 	"invalidDgbAddress": "Invalid DigiByte address",
 	"invalidEvmAddress": "Invalid address — must be 0x followed by 40 hex characters",
 	"invalidEvmChecksum": "Checksum mismatch — this address may contain a typo. Copy it again from the source",
+	"invalidChecksum": "This address has a typo: its checksum doesn't match. Copy it again from the source.",
 	"invalidCosmosPrefix": "Wrong address prefix for this network",
 	"invalidCosmosLength": "Invalid Cosmos address length",
 	"invalidCosmosAddress": "Invalid Cosmos address",

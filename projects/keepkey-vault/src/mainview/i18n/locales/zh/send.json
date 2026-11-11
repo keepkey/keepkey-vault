@@ -47,6 +47,7 @@
 	"invalidDgbAddress": "无效的DigiByte地址",
 	"invalidEvmAddress": "无效的地址 — 必须是0x后跟40个十六进制字符",
 	"invalidEvmChecksum": "校验和不匹配 — 地址可能有输入错误。请从来源重新复制",
+	"invalidChecksum": "此地址有输入错误：校验和不匹配。请从来源重新复制。",
 	"invalidCosmosPrefix": "此网络的地址前缀不正确",
 	"invalidCosmosLength": "无效的Cosmos地址长度",
 	"invalidCosmosAddress": "无效的Cosmos地址",

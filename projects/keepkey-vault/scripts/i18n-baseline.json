@@ -790,6 +790,7 @@
     "addressbook:notCosigner": "4fd0a8cda60479f833594b97ded0acb0c6a4abc271a6fc4d1b71fa7eeeff1e81",
     "addressbook:markCosigner": "2e249629db51d80dcbeb77c04df4e02487b54c92156c0f66a24876cf0f21cff1",
     "send:sendingToken": "fe8951e075e9869331b85d540f32e2a0bab483831be7bbea8690ca1b93f4be39",
+    "send:invalidChecksum": "1922748185b8c9122abe9048cdeaa1bda2229aaa8714c088dbaacaff543a63f7",
     "send:available": "e674447337e83c1346f6122ed69f35bf5526e2a11842b2f2b788f3fb67d714ca",
     "send:gas": "e23a445d0fa70aa809addfa60760f564ab40a28474b6b47c22a4f699b512458e",
     "send:recipient": "51fac985e95345d90b3c8a69f5e60003cbbd47a06efdcf0270d76be85b408657",

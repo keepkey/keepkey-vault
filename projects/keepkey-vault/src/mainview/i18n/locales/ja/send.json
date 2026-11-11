@@ -47,6 +47,7 @@
 	"invalidDgbAddress": "無効なDigiByteアドレス",
 	"invalidEvmAddress": "無効なアドレス — 0xの後に40桁の16進数文字が必要です",
 	"invalidEvmChecksum": "チェックサムが一致しません — アドレスに入力ミスがある可能性があります。元の場所からもう一度コピーしてください",
+	"invalidChecksum": "このアドレスには入力ミスがあります。チェックサムが一致しません。元の場所からもう一度コピーしてください。",
 	"invalidCosmosPrefix": "このネットワークのアドレスプレフィックスが間違っています",
 	"invalidCosmosLength": "無効なCosmosアドレスの長さ",
 	"invalidCosmosAddress": "無効なCosmosアドレス",
