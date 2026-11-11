@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test'
 
-test('a resumed swap keeps its broadcast time and check status', () => {
+test('a resumed swap keeps its broadcast time, check status and settlement terms', () => {
   const run = Bun.spawnSync([process.execPath, new URL('./support/swap-dialog-tracking.tsx', import.meta.url).pathname], {
     cwd: new URL('../', import.meta.url).pathname, stdout: 'pipe', stderr: 'pipe', timeout: 60000,
   })
@@ -14,5 +14,6 @@ test('a resumed swap keeps its broadcast time and check status', () => {
     remainingFromBroadcast: true,
     failedCheckShown: true,
     recheckClearsFailure: true,
+    settledAboveMinimum: true,
   })
 })

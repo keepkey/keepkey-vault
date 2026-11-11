@@ -1590,7 +1590,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
 
     setQuote({
       expectedOutput: resumeSwap.expectedOutput,
-      minimumOutput: resumeSwap.expectedOutput,
+      minimumOutput: resumeSwap.minimumOutput ?? '',
       inboundAddress: resumeSwap.inboundAddress,
       router: resumeSwap.router,
       memo: resumeSwap.memo,

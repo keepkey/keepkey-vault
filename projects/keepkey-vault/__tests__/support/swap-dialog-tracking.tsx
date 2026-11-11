@@ -59,6 +59,15 @@ try {
   await settle()
   result.recheckClearsFailure = !!recheck && !text().includes('Status check failed') && text().includes('Last checked')
 
+  // A payout between the quoted minimum and the expected output is a settled swap.
+  await act(async () => { render(null) })
+  await settle()
+  const settled = { ...resumeSwap, txid: '0x' + 'f'.repeat(64), status: 'completed', completedAt: createdAt + 600_000,
+    receivedOutput: '0.00395', payouts: [{ txid: 'a'.repeat(64), amount: '0.00395' }] }
+  refreshReply = async () => settled
+  await act(async () => { render(settled) })
+  await settle()
+  result.settledAboveMinimum = text().includes('Settlement payouts') && !text().includes('Partial payout')
 } finally {
   await act(async () => root.unmount())
 }
