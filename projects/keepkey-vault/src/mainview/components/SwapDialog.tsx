@@ -997,13 +997,14 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
     const destChain = toAsset ? CHAINS.find(c => c.id === toAsset.chain || c.coin === toAsset.chain) : null
     if (destChain) {
       const result = validateAddress(trimmed, destChain)
-      if (!result.valid) return result.error || 'Invalid address format for this chain'
+      // The validator returns a send-namespace i18n key (e.g. invalidChecksum); show its text, not the key.
+      if (!result.valid) return t(result.error || 'invalidAddress', { ns: 'send', defaultValue: 'Invalid address format for this chain' })
     } else {
       if (/\s/.test(trimmed)) return 'Address must not contain spaces'
       if (trimmed.length < 10) return 'Address is too short'
     }
     return ''
-  }, [useCustomAddress, customToAddress, toAsset])
+  }, [useCustomAddress, customToAddress, toAsset, t])
 
   // ── Derived terminal status (must be before effects that depend on them) ──
   const requiresSettlementEvidence = /thor|maya/i.test(`${quote?.integration || ''} ${resumeSwap?.integration || ''} ${liveSwapper || ''}`)
