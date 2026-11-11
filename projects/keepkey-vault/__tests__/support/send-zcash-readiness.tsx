@@ -52,10 +52,14 @@ const { act } = React
 const { createRoot } = await import('react-dom/client')
 const { CHAINS } = await import('../../src/shared/chains')
 const { SendForm } = await import(process.env.SEND_FORM_UNDER_TEST || '../../src/mainview/components/SendForm')
+const { ZCASH_NU7_REFUSALS } = await import('../../src/shared/zcash-nu7')
 const zcash = CHAINS.find(c => c.id === 'zcash')!, ethereum = CHAINS.find(c => c.id === 'ethereum')!
-const notice = 'Zcash sending requires the 7.17 alpha emulator. Hardware support is not available yet.'
 const checking = 'Checking Zcash sending support…'
-const status = (available: boolean, sessionId = 'synthetic-session-A') => ({ available, requiredFirmware: '7.17.0', emulatorOnly: true, alphaOnly: true, sessionId })
+type Refusal = keyof typeof ZCASH_NU7_REFUSALS
+const refused = (refusal: Refusal, sessionId = 'synthetic-session-A') => ({ available: false, refusal, reason: ZCASH_NU7_REFUSALS[refusal], requiredFirmware: '7.16.0', sessionId })
+const status = (available: boolean, sessionId = 'synthetic-session-A', route: 'physical' | 'alpha-emulator' = 'physical') =>
+  available ? { available, route, requiredFirmware: '7.16.0', sessionId } : refused('firmware', sessionId)
+const anyRefusal = () => Object.values(ZCASH_NU7_REFUSALS).some(copy => text().includes(copy))
 const device = (patch = {}) => ({ deviceId: 'synthetic-device', activeTransport: 'emulator', isEmulator: true, firmwareVersion: '7.17.0', state: 'ready', ...patch })
 let root: ReturnType<typeof createRoot>, container: HTMLDivElement, props: any
 const settle = async (ms = 0) => { await act(async () => { await new Promise(resolve => setTimeout(resolve, ms)) }) }
@@ -113,14 +117,22 @@ const toggleAlphaFirmware = new Function('rpcRequest', 'setAppSettings', 'setTog
 
 await mount(); await fill()
 expect(button('buildTransaction').disabled).toBe(true)
-expect(text()).toContain(notice); expect(container.querySelector(`[aria-label="${checking}"]`)).not.toBeNull()
+expect(text()).toContain(checking); expect(container.querySelector(`[aria-label="${checking}"]`)).not.toBeNull()
 expect(calls).toHaveLength(0)
-await resolveStatus(status(false)) // physical 7.16
+await resolveStatus(refused('firmware')) // physical 7.15: the Safe-style update copy
 expect(button('buildTransaction').disabled).toBe(true); expect(container.querySelector(`[aria-label="${checking}"]`)).toBeNull()
-await event('device-state', device({ firmwareVersion: '7.17.0', isEmulator: false, activeTransport: 'hid' }))
-await resolveStatus(status(false)) // physical 7.17 is also deliberately unsupported
-expect(button('buildTransaction').disabled).toBe(true); result.physicalVersions = 2
-await event('emulator-status', { state: 'running' }); await resolveStatus(status(true))
+expect(text()).toContain('Sending ZEC needs KeepKey firmware 7.16 or newer. Update it from Settings (opt in to new firmware).')
+for (const refusal of ['emulator', 'variant', 'builder', 'device'] as const) {
+  await event('device-state', device({ deviceId: `synthetic-${refusal}` })); await resolveStatus(refused(refusal))
+  expect(button('buildTransaction').disabled).toBe(true); expect(text()).toContain(ZCASH_NU7_REFUSALS[refusal])
+}
+result.refusalCopy = 5
+await event('device-state', device({ firmwareVersion: '7.16.0', isEmulator: false, activeTransport: 'hid' }))
+await resolveStatus(status(true)) // physical 7.16
+expect(button('buildTransaction').disabled).toBe(false); expect(anyRefusal()).toBe(false); expect(text()).not.toContain(checking)
+await build(); result.physicalAdmitted = true
+await event('device-state', device()); await event('emulator-status', { state: 'running' })
+await resolveStatus(status(true, 'synthetic-session-A', 'alpha-emulator'))
 expect(button('buildTransaction').disabled).toBe(false); await build(); result.qualifiedEmulator = true
 
 // Pending refresh immediately revokes even a click through an old rendered handler.
@@ -131,7 +143,7 @@ await act(async () => {
 })
 await settle(); expect(calls.filter(c => c.method === 'btcSignTx')).toHaveLength(0)
 expect(button('signOnDevice').disabled).toBe(true); result.immediateRevocation = true
-await resolveStatus(status(false)) // alpha flag off
+await resolveStatus(refused('emulator')) // alpha flag off
 expect(button('signOnDevice')).toBeUndefined(); expect(button('buildTransaction').disabled).toBe(true)
 expect(input('amountPlaceholder').value).toBe('1'); result.alphaDisabled = true
 
@@ -181,7 +193,7 @@ await render({ address: 'other-synthetic-owner' }); await resolveStatus(status(f
 expect(button('buildTransaction').disabled).toBe(true); result.ownerScope = true
 const before = statusCalls.length
 await render({ chain: ethereum, address: '0x' + '11'.repeat(20) }); await fill()
-expect(text()).not.toContain(notice); expect(button('buildTransaction').disabled).toBe(false)
+expect(anyRefusal()).toBe(false); expect(text()).not.toContain(checking); expect(button('buildTransaction').disabled).toBe(false)
 expect(statusCalls.length).toBe(before); result.otherChain = true
 await unmount()
 
@@ -190,8 +202,12 @@ await unmount(); await resolveStatus(status(true), abandoned)
 expect([...listeners.values()].every(set => set.size === 0)).toBe(true); result.unmounted = true
 
 await mount(); await fill(); await act(async () => statusCalls.at(-1)!.reject(new Error('offline status bridge'))); await settle()
-expect(button('buildTransaction').disabled).toBe(true); expect(text()).toContain(notice); result.statusFailure = true
+expect(button('buildTransaction').disabled).toBe(true); expect(text()).toContain(ZCASH_NU7_REFUSALS.device); result.statusFailure = true
 await event('emulator-status', { state: 'running' }); await resolveStatus({ available: true })
+expect(button('buildTransaction').disabled).toBe(true)
+// #643's emulator-only contract carries no route: not an admission.
+await event('emulator-status', { state: 'running' })
+await resolveStatus({ available: true, requiredFirmware: '7.17.0', emulatorOnly: true, alphaOnly: true, sessionId: 'old-contract' })
 expect(button('buildTransaction').disabled).toBe(true); result.malformedStatus = true
 await unmount()
 // Only a successful saved toggle announces a new readiness check. Both ON and

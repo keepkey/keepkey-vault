@@ -717,6 +717,8 @@ async fn handle_build_pczt(state: &mut State, params: &Value) -> Result<Value> {
     let mut lwd_client = scanner::LightwalletClient::connect(None).await?;
     let branch_id = lwd_client.get_consensus_branch_id().await?;
     info!("Using consensus branch ID: 0x{:08x}", branch_id);
+    // NU7: refuse before note selection, the wallet DB or a proof.
+    pczt_builder::require_shielded_branch_supported(branch_id)?;
 
     // Min-confirmations: skip notes mined within the last MIN_CONFIRMATIONS
     // blocks. A note received in the last few blocks can fail the chain's
@@ -856,6 +858,8 @@ async fn handle_build_shield_pczt(state: &mut State, params: &Value) -> Result<V
     let mut lwd_client = scanner::LightwalletClient::connect(None).await?;
     let branch_id = lwd_client.get_consensus_branch_id().await?;
     info!("Using consensus branch ID: 0x{:08x}", branch_id);
+    // NU7: refuse before note selection, the wallet DB or a proof.
+    pczt_builder::require_shielded_branch_supported(branch_id)?;
 
     let db = state.ensure_db()?;
 
@@ -1229,6 +1233,8 @@ async fn handle_build_deshield_pczt(state: &mut State, params: &Value) -> Result
     let mut lwd_client = scanner::LightwalletClient::connect(None).await?;
     let branch_id = lwd_client.get_consensus_branch_id().await?;
     info!("Using consensus branch ID: 0x{:08x}", branch_id);
+    // NU7: refuse before note selection, the wallet DB or a proof.
+    pczt_builder::require_shielded_branch_supported(branch_id)?;
 
     // Min-confirmations gate (see handle_build_pczt for rationale).
     let tip = lwd_client.get_latest_block_height().await?;
@@ -2792,6 +2798,87 @@ mod tests {
                 "{} must be denied before its handler",
                 cmd
             );
+        }
+    }
+
+    /// NU7 (issue #2): shield, unshield and private send must refuse in plain
+    /// language before note, tree or proof work. The client below was never
+    /// connected, so reaching lightwalletd fails with a transport error instead.
+    #[tokio::test]
+    async fn nu7_shielded_builds_refuse_before_any_lightwalletd_call_or_proof() {
+        let fvk = derive_test_fvk(0x42, 0);
+        let (db, _dir) = test_db();
+        let nu7 = zip229::NU7_BRANCH_ID;
+        let p2pkh = format!("76a914{}88ac", "11".repeat(20));
+        let mut client = scanner::LightwalletClient::unconnected_for_tests();
+
+        let shield = pczt_builder::build_shield_pczt(
+            &fvk,
+            vec![pczt_builder::ShieldTransparentInput {
+                txid: "22".repeat(32),
+                vout: 0,
+                value: 200_000,
+                script_pubkey: p2pkh.clone(),
+            }],
+            100_000,
+            15_000,
+            0,
+            nu7,
+            vec![0x8000_002c, 0x8000_0085, 0x8000_0000, 0, 0],
+            &mut client,
+            &db,
+        )
+        .await;
+        let recipient = fvk.address_at(0u32, orchard::keys::Scope::External);
+        let send = pczt_builder::build_pczt(
+            &fvk,
+            vec![],
+            recipient,
+            "u1synthetic",
+            10_000,
+            0,
+            nu7,
+            &mut client,
+            &db,
+            None,
+        )
+        .await;
+        let deshield = pczt_builder::build_deshield_pczt(
+            &fvk,
+            vec![],
+            pczt_builder::DeshieldTransparentOutput {
+                script_pubkey: p2pkh,
+                value: 10_000,
+            },
+            10_000,
+            0,
+            nu7,
+            &mut client,
+            &db,
+        )
+        .await;
+        for message in [
+            shield.err().map(|e| e.to_string()),
+            send.err().map(|e| e.to_string()),
+            deshield.err().map(|e| e.to_string()),
+        ] {
+            assert_eq!(
+                message.as_deref(),
+                Some(pczt_builder::SHIELDED_NU7_REFUSAL)
+            );
+        }
+        assert!(!pczt_builder::SHIELDED_NU7_REFUSAL.contains("0x"));
+    }
+
+    #[test]
+    fn shielded_branch_gate_admits_only_nu6_3_and_never_shows_raw_branch_ids() {
+        pczt_builder::require_shielded_branch_supported(zip229::NU6_3_BRANCH_ID).unwrap();
+        for branch in [0, 0x5437_f330, 0x3751_9621, zip229::NU7_BRANCH_ID, u32::MAX] {
+            let message = pczt_builder::require_shielded_branch_supported(branch)
+                .unwrap_err()
+                .to_string();
+            assert!(!message.contains("0x") && !message.contains("NU6.3 branch"));
+            assert!(message.starts_with("Shielding, unshielding and private sends are not available"));
         }
     }
 }

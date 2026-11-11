@@ -188,6 +188,29 @@ pub struct PcztState {
     pub spent_nullifiers: Vec<[u8; 32]>,
 }
 
+/// Every shielded build on NU7 ends in a device refusal: released 7.16
+/// firmware and the 7.17 alpha admit Ironwood bundles, pool crossing (Orchard
+/// to Ironwood migration) and the Orchard inflow rule only under NU6.3
+/// (firmware audit, 2026-11-10). Refuse in plain language before any proof.
+pub const SHIELDED_NU7_REFUSAL: &str = "Shielding, unshielding and private sends are not available on the Zcash NU7 network upgrade yet. KeepKey firmware needs an update to sign them. Nothing was sent, and your shielded balance is unchanged. Transparent ZEC sends work with firmware 7.16 or newer.";
+const SHIELDED_UNKNOWN_BRANCH_REFUSAL: &str = "Shielding, unshielding and private sends are not available on the current Zcash network upgrade. Update KeepKey Desktop and your KeepKey firmware, then try again. Nothing was sent.";
+
+pub fn require_shielded_branch_supported(branch_id: u32) -> Result<()> {
+    if branch_id == crate::zip229::NU6_3_BRANCH_ID {
+        return Ok(());
+    }
+    // The numeric branch is for logs; the product message stays plain.
+    log::warn!(
+        "Shielded build refused before proof: network branch 0x{:08x}",
+        branch_id
+    );
+    Err(anyhow::anyhow!(if branch_id == crate::zip229::NU7_BRANCH_ID {
+        SHIELDED_NU7_REFUSAL
+    } else {
+        SHIELDED_UNKNOWN_BRANCH_REFUSAL
+    }))
+}
+
 /// Build a PCZT and extract the signing request.
 ///
 /// Returns a PcztState that can be finalized with device signatures.
@@ -204,14 +227,9 @@ pub async fn build_pczt(
     _db: &WalletDb,
     memo: Option<String>,
 ) -> Result<PcztState> {
+    // Before any note, tree or proof work.
+    require_shielded_branch_supported(branch_id)?;
     let mut rng = OsRng;
-    if branch_id != crate::zip229::NU6_3_BRANCH_ID {
-        return Err(anyhow::anyhow!(
-            "Ironwood transactions require NU6.3 branch 0x{:08x}; node reported 0x{:08x}",
-            crate::zip229::NU6_3_BRANCH_ID,
-            branch_id
-        ));
-    }
     if notes
         .iter()
         .any(|note| note.pool != crate::wallet_db::ShieldedPool::Ironwood)
@@ -1426,6 +1444,9 @@ pub async fn build_shield_pczt(
     lwd_client: &mut crate::scanner::LightwalletClient,
     _db: &crate::wallet_db::WalletDb,
 ) -> Result<ShieldPcztState> {
+    // Before the bundle and its proof: firmware refuses other branches only
+    // after the user has waited for both.
+    require_shielded_branch_supported(branch_id)?;
     let mut rng = OsRng;
 
     let total_input: u64 = transparent_inputs.iter().map(|i| i.value).sum();
@@ -2394,14 +2415,9 @@ pub async fn build_deshield_pczt(
     lwd_client: &mut crate::scanner::LightwalletClient,
     _db: &crate::wallet_db::WalletDb,
 ) -> Result<DeshieldPcztState> {
+    // Before any note, tree or proof work.
+    require_shielded_branch_supported(branch_id)?;
     let mut rng = OsRng;
-    if branch_id != crate::zip229::NU6_3_BRANCH_ID {
-        return Err(anyhow::anyhow!(
-            "Ironwood transactions require NU6.3 branch 0x{:08x}; node reported 0x{:08x}",
-            crate::zip229::NU6_3_BRANCH_ID,
-            branch_id
-        ));
-    }
     if notes
         .iter()
         .any(|note| note.pool != crate::wallet_db::ShieldedPool::Ironwood)

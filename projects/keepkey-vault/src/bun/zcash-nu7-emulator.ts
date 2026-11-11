@@ -1,5 +1,5 @@
 import emulatorManifest from '../../emulator-bundle/manifest.json'
-import { zcashNu7SupportError } from '../shared/zcash-nu7'
+import { firmwareAtLeast, ZCASH_NU7_EMULATOR_MIN_FIRMWARE } from '../shared/zcash-nu7'
 
 const QUALIFIED_LIBRARIES = new Set(
   Object.values(emulatorManifest.files).map(file => file.sha256),
@@ -22,5 +22,5 @@ export function isQualifiedNu7AlphaEmulator(wallet: unknown, state: Nu7EmulatorS
     && state.alphaFirmware && emulatorManifest.version === '7.17.0'
     && !!state.librarySha256 && (QUALIFIED_LIBRARIES.has(state.librarySha256)
       || (!!state.reviewedSourceSha256 && QUALIFIED_LIBRARIES.has(state.reviewedSourceSha256)))
-    && !zcashNu7SupportError(state.firmwareVersion, true, true)
+    && firmwareAtLeast(state.firmwareVersion, ZCASH_NU7_EMULATOR_MIN_FIRMWARE)
 }

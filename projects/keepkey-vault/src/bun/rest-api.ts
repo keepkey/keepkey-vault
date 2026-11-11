@@ -34,7 +34,8 @@ import {
   buildShieldedTx, finalizeShieldedTx, broadcastShieldedTx,
   ensureFvkLoaded, displayOrchardAddressOnDevice, sendShielded,
 } from './txbuilder/zcash-shielded'
-import { isSidecarReady, getCachedFvk } from './zcash-sidecar'
+import { isSidecarReady, getCachedFvk, getScanState } from './zcash-sidecar'
+import { zcashShieldedNu7Refusal } from '../shared/zcash-nu7'
 import { readFileSync } from 'fs'
 import { join } from 'path'
 import * as S from './schemas'
@@ -1750,7 +1751,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
         if (method === 'POST' && path === '/utxo/sign-transaction') {
           auth.requireAuth(req)
           if (typeof reqBody?.coin === 'string' && reqBody.coin.trim().toLowerCase() === 'zcash') {
-            return json({ error: 'Zcash signing over REST is not supported. Use KeepKey Vault Desktop with the 7.17 alpha emulator; physical support is not yet available.' }, 501)
+            return json({ error: 'Zcash signing over REST is not supported. Send ZEC from the Send screen in KeepKey Desktop.' }, 501)
           }
         }
 
@@ -5048,6 +5049,14 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
         // All mutating zcash endpoints require firmware support
         if (path.startsWith('/api/zcash/shielded/') && path !== '/api/zcash/shielded/status' && !zcashFwSupported) {
           return json({ error: zcashFwError }, 503)
+        }
+
+        // Ironwood shield/unshield/private send under NU7: refuse before the
+        // device, a viewing-key export or a proof (see zcashShieldedNu7Refusal).
+        if (method === 'POST' && ZCASH_SEND_ROUTES.has(path)) {
+          auth.requireAuth(req)
+          const refusal = zcashShieldedNu7Refusal(getScanState().syncedTo)
+          if (refusal) return json({ error: refusal }, 501)
         }
 
         if (path === '/api/zcash/shielded/init' && method === 'POST') {

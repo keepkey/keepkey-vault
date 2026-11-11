@@ -462,7 +462,7 @@ test-i18n:
 test-unit:
 	cd $(PROJECT_DIR) && bun test __tests__/rest-zcash-admission.test.ts
 	cd $(PROJECT_DIR) && bun test __tests__/broadcast-provider-error.test.ts
-	cd $(PROJECT_DIR) && bun test __tests__/zcash-nu7-admission.test.ts __tests__/zcash-nu7-binary.test.ts __tests__/zcash-tex-admission.test.ts
+	cd $(PROJECT_DIR) && bun test __tests__/zcash-nu7-admission.test.ts __tests__/zcash-shielded-nu7.test.ts __tests__/zcash-nu7-binary.test.ts __tests__/zcash-tex-admission.test.ts
 	cd $(PROJECT_DIR) && bun test __tests__/zcash-nu7-transparent.test.ts
 	cd $(PROJECT_DIR) && bun test __tests__/zcash-transparent-sidecar.test.ts
 	cd $(PROJECT_DIR) && bun test __tests__/send-zcash-readiness.test.ts

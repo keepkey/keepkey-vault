@@ -75,6 +75,7 @@
       "__tests__/rest-zcash-admission.test.ts",
       "__tests__/broadcast-provider-error.test.ts",
       "__tests__/zcash-nu7-admission.test.ts",
+      "__tests__/zcash-shielded-nu7.test.ts",
       "__tests__/zcash-nu7-binary.test.ts",
       "__tests__/zcash-nu7-transparent.test.ts",
       "__tests__/zcash-tex-admission.test.ts",

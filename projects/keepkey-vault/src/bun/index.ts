@@ -274,9 +274,9 @@ import { buildTx, broadcastTx, canonicalizeTronTokenCaip } from "./txbuilder"
 import { signUtxoTx, configureZcashNu7WalletAuthorizer } from './txbuilder/zcash-transparent'
 import { isQualifiedNu7AlphaEmulator } from './zcash-nu7-emulator'
 import { reviewedBundledEmulatorSourceSha256 } from './emulator-signed-provenance'
-import { preflightNu7DeviceRpc, requiresNu7DeviceRpc } from './zcash-nu7-admission'
+import { preflightNu7DeviceRpc } from './zcash-nu7-admission'
 import { requireZcashNu7Builder } from './zcash-nu7-binary'
-import { zcashNu7SupportError } from '../shared/zcash-nu7'
+import { ZCASH_NU7_PHYSICAL_MIN_FIRMWARE, ZCASH_NU7_REFUSALS, zcashNu7Admission, zcashShieldedNu7Refusal, type ZcashNu7Admission } from '../shared/zcash-nu7'
 import { EmulatorTransportDelegate } from './emulator-transport'
 import { buildCosmosStakingTx, buildCosmosNameRegTx } from "./txbuilder/cosmos"
 import { initializeOrchardFromDevice, exportOrchardFvk, scanOrchardNotes, getShieldedBalance, sendShielded, ensureFvkLoaded, displayOrchardAddressOnDevice, setFvkDiskAllowed } from "./txbuilder/zcash-shielded"
@@ -1340,7 +1340,18 @@ function qualifiedNu7Wallet(wallet: unknown): boolean {
 		reviewedSourceSha256: reviewedBundledEmulatorSourceSha256(getLoadedEmulatorLibPath(), getLoadedEmulatorLibrarySha256()),
 	})
 }
-configureZcashNu7WalletAuthorizer(qualifiedNu7Wallet)
+/** Admission from the KeepKey's own Features (transport, version, variant,
+ * mode) and the loaded emulator's verified provenance; never request fields. */
+function zcashNu7AdmissionFor(wallet: unknown): ZcashNu7Admission {
+	if (!wallet || wallet !== engine.wallet) return { refusal: 'device', reason: ZCASH_NU7_REFUSALS.device }
+	const state = engine.getDeviceState()
+	return zcashNu7Admission({
+		transport: state.activeTransport, firmwareVersion: state.firmwareVersion, firmwareVariant: state.firmwareVariant,
+		bootloaderMode: state.bootloaderMode, initialized: state.initialized,
+		qualifiedAlphaEmulator: state.activeTransport === 'emulator' && qualifiedNu7Wallet(wallet),
+	})
+}
+configureZcashNu7WalletAuthorizer(zcashNu7AdmissionFor)
 const nu7WalletSessionIds = new WeakMap<object, number>()
 let nu7WalletSessionCounter = 0
 function nu7WalletSessionId(): string {
@@ -1350,18 +1361,28 @@ function nu7WalletSessionId(): string {
 	return `${owner || 0}:${activitySessionEpoch}:${engine.isEmulator ? getEmulatorInstance() : 0}`
 }
 
+/** Transparent send admission, including this build's verified Nu7 builder. */
+function zcashNu7SendAdmission(): ZcashNu7Admission {
+	const admission = zcashNu7AdmissionFor(engine.wallet)
+	if (!('route' in admission)) return admission
+	const binary = findZcashCliBinary()
+	try {
+		if (!binary) throw new Error('missing')
+		requireZcashNu7Builder(binary)
+	} catch { return { refusal: 'builder', reason: ZCASH_NU7_REFUSALS.builder } }
+	return admission
+}
+
 function getZcashNu7Support() {
-	const firmwareVersion = engine.getDeviceState().firmwareVersion
-	let reason = zcashNu7SupportError(firmwareVersion, true, qualifiedNu7Wallet(engine.wallet))
-	if (!reason) {
-		const binary = findZcashCliBinary()
-		if (!binary) reason = zcashNu7SupportError(firmwareVersion, false, true)
-		else {
-			try { requireZcashNu7Builder(binary) }
-			catch (error) { reason = error instanceof Error ? error.message : 'The Zcash Nu7 transaction builder is unavailable.' }
-		}
-	}
-	return { available: !reason, requiredFirmware: '7.17.0' as const, emulatorOnly: true as const, alphaOnly: true as const, sessionId: nu7WalletSessionId(), ...(reason ? { reason } : {}) }
+	const admission = zcashNu7SendAdmission()
+	return { available: 'route' in admission, requiredFirmware: ZCASH_NU7_PHYSICAL_MIN_FIRMWARE, sessionId: nu7WalletSessionId(), ...admission }
+}
+
+/** Shield, unshield, private send and TEX shield-back all carry Ironwood
+ * bundles. Refuse before any viewing-key export, device prompt or proof. */
+function refuseShieldedUnderNu7(): void {
+	const reason = zcashShieldedNu7Refusal(getScanState().syncedTo)
+	if (reason) throw new Error(reason)
 }
 let addressBookClearsignEnabled = false
 let privateModeEnabled = false
@@ -3632,6 +3653,12 @@ function maybeStartBackgroundWalletVerification(): void {
 async function texRecovery(action: 'complete' | 'shieldBack', index: number): Promise<{ txid: string }> {
 	if (!zcashPrivacyEnabled) throw new Error('Zcash privacy feature is disabled')
 	if (!engine.wallet) throw new Error('No device connected')
+	if (action === 'shieldBack') refuseShieldedUnderNu7()
+	else {
+		// Completing a TEX payment is a transparent NU7 send: same admission.
+		const admission = zcashNu7SendAdmission()
+		if (!('route' in admission)) throw new Error(admission.reason)
+	}
 	if (isZcashSendInFlight()) throw new Error('A Zcash payment is already in progress. Wait for it to finish before recovering a TEX payment.')
 	// Reserve before the first await. Nested TEX stages keep their existing
 	// counters, while a native send cannot replace this operation's PCZT state.
@@ -8179,6 +8206,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				const sessionEpoch = activitySessionEpoch // the wallet session this send belongs to
 				if (!zcashPrivacyEnabled) throw new Error('Zcash privacy feature is disabled')
 				if (!engine.wallet) throw new Error('No device connected')
+				refuseShieldedUnderNu7()
 				const account = (params as any)?.account ?? 0
 				if (account !== 0) throw new Error('Only account 0 is supported; multi-account shielded sends are not implemented')
 				const sendRoute = zcashPrivateSendRoute(params.recipient, params.memo)
@@ -8259,6 +8287,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				const sessionEpoch = activitySessionEpoch // the wallet session this send belongs to
 				if (!zcashPrivacyEnabled) throw new Error('Zcash privacy feature is disabled')
 				if (!engine.wallet) throw new Error('No device connected')
+				refuseShieldedUnderNu7()
 				const account = params.account ?? 0
 				if (account !== 0) throw new Error('Only account 0 is supported; multi-account shielded sends are not implemented')
 				await ensureFvkLoaded(engine.wallet, account)
@@ -8297,6 +8326,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				const sessionEpoch = activitySessionEpoch // the wallet session this send belongs to
 				if (!zcashPrivacyEnabled) throw new Error('Zcash privacy feature is disabled')
 				if (!engine.wallet) throw new Error('No device connected')
+				refuseShieldedUnderNu7()
 				const account = params.account ?? 0
 				if (account !== 0) throw new Error('Only account 0 is supported; multi-account shielded sends are not implemented')
 				await ensureFvkLoaded(engine.wallet, account)
@@ -10445,6 +10475,8 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				const chain = getAllChains().find(c => c.id === params.chainId)
 				if (!chain) throw new Error(`Unknown chain: ${params.chainId}`)
 				if (chain.chainFamily !== 'utxo') throw new Error(`${chain.symbol} can't be swept this way`)
+				// This sweep signs through the legacy serializer, which Zcash no longer accepts.
+				if (chain.id === 'zcash') throw new Error('Zcash cannot be swept this way. Send it from the Zcash asset page instead.')
 				const path = params.addressNList
 				if (!Array.isArray(path) || path.length < 2 || path.length > 10 || path.some(n => !Number.isInteger(n) || n < 0)) {
 					throw new Error('Invalid derivation path')
@@ -11253,12 +11285,7 @@ udevadm trigger --subsystem-match=usb --attr-match=idVendor=2b24 || udevadm trig
 				scope: () => ({ wallet: engine.wallet, epoch: activitySessionEpoch, seed: engine.currentSeedEthAddress }),
 				locked: () => engine.isLocked,
 				run: (action, options) => engine.withDeviceOperation(action, { ...options, rejectIfBusy: true, ...(options.unlock ? { origin: 'desktop' as const } : {}) }),
-				preflight: (method, params) => {
-					if (!requiresNu7DeviceRpc(method, params)) return
-					const qualified = qualifiedNu7Wallet(engine.wallet)
-					preflightNu7DeviceRpc(method, params, engine.getDeviceState().firmwareVersion,
-						qualified && getZcashNu7Support().available, qualified)
-				},
+				preflight: (method, params) => preflightNu7DeviceRpc(method, params, zcashNu7SendAdmission),
 			}))),
 			messages: {},
 	},

@@ -1,12 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { onRpcMessage, rpcRequest } from '../lib/rpc'
+import type { ZcashNu7Refusal } from '../../shared/zcash-nu7'
 
 interface SupportSnapshot {
   scope: string
   revision: number
   pending: boolean
   available: boolean
+  refusal: ZcashNu7Refusal
 }
+
+const REFUSALS = new Set<string>(['firmware', 'emulator', 'variant', 'device', 'builder'])
 
 /** Read host-computed readiness only; never query the device from this hook. */
 export function useZcashNu7Support(enabled: boolean, ownerScope: string) {
@@ -16,7 +20,7 @@ export function useZcashNu7Support(enabled: boolean, ownerScope: string) {
   const previouslyGranted = useRef(false)
   const acceptedSession = useRef<string | null>(null)
   const authority = useRef({ scope, available: false })
-  const [snapshot, setSnapshot] = useState<SupportSnapshot>({ scope: '', revision: 0, pending: true, available: false })
+  const [snapshot, setSnapshot] = useState<SupportSnapshot>({ scope: '', revision: 0, pending: true, available: false, refusal: 'device' })
   if (authority.current.scope !== scope) {
     authority.current = { scope, available: false }
     revision.current++
@@ -31,13 +35,13 @@ export function useZcashNu7Support(enabled: boolean, ownerScope: string) {
     const refresh = () => {
       const request = ++revision.current
       authority.current = { scope, available: false }
-      setSnapshot({ scope, revision: request, pending: true, available: false })
-      void rpcRequest<{ available: boolean; requiredFirmware: string; emulatorOnly: boolean; alphaOnly: boolean; sessionId: string }>('getZcashNu7Support', undefined, 5_000)
+      setSnapshot({ scope, revision: request, pending: true, available: false, refusal: 'device' })
+      void rpcRequest<{ available: boolean; route?: string; refusal?: string; sessionId: string }>('getZcashNu7Support', undefined, 5_000)
         .then(status => {
           if (!active || authority.current.scope !== scope || request !== revision.current) return
-          const available = status?.available === true && status.requiredFirmware === '7.17.0'
-            && status.emulatorOnly === true && status.alphaOnly === true
+          const available = status?.available === true && (status.route === 'physical' || status.route === 'alpha-emulator')
             && typeof status.sessionId === 'string' && status.sessionId.length > 0 && status.sessionId.length <= 256
+          const refusal = (!available && REFUSALS.has(status?.refusal as string) ? status.refusal : 'device') as ZcashNu7Refusal
           if (available) {
             if (acceptedSession.current !== null && acceptedSession.current !== status.sessionId) sessionEpoch.current++
             acceptedSession.current = status.sessionId
@@ -45,14 +49,14 @@ export function useZcashNu7Support(enabled: boolean, ownerScope: string) {
           if (!available && previouslyGranted.current) sessionEpoch.current++
           previouslyGranted.current = available
           authority.current.available = available
-          setSnapshot({ scope, revision: request, pending: false, available })
+          setSnapshot({ scope, revision: request, pending: false, available, refusal })
         })
         .catch(() => {
           if (!active || authority.current.scope !== scope || request !== revision.current) return
           if (previouslyGranted.current) sessionEpoch.current++
           previouslyGranted.current = false
           authority.current.available = false
-          setSnapshot({ scope, revision: request, pending: false, available: false })
+          setSnapshot({ scope, revision: request, pending: false, available: false, refusal: 'device' })
         })
     }
     refresh()
@@ -92,6 +96,8 @@ export function useZcashNu7Support(enabled: boolean, ownerScope: string) {
   return {
     available: !enabled || (currentSnapshot && snapshot.available && authority.current.available),
     pending: enabled && (!currentSnapshot || snapshot.pending),
+    /** Why sending is unavailable, once the current check has answered. */
+    refusal: currentSnapshot ? snapshot.refusal : 'device' as ZcashNu7Refusal,
     sessionEpoch: enabled ? sessionEpoch.current : 0,
     canSend,
   }

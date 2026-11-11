@@ -1,4 +1,9 @@
 {
+  "m1962b644": "El firmware solo para Bitcoin no puede enviar ZEC.",
+  "m334bb07c": "Actualice KeepKey Desktop para enviar ZEC. A esta versión le falta el generador de transacciones de Zcash.",
+  "m3ee85808": "Para enviar ZEC desde el emulador se necesita el emulador alfa 7.17 revisado, con Firmware alfa activado en Configuración.",
+  "m6dbb0d31": "Para enviar ZEC se necesita el firmware de KeepKey 7.16 o posterior. Actualícelo desde Configuración (active el firmware nuevo).",
+  "me2ba2db0": "No se pudo confirmar que este KeepKey pueda enviar ZEC. Vuelva a conectarlo e inténtelo de nuevo.",
   "mfc59bd89": "Comprobando el soporte para enviar Zcash…",
   "m17b11033": "Cargando...",
   "m18743595": "De",
@@ -52,7 +57,6 @@
   "m8dc21305": "Copiado",
   "m8dd31791": "Listo",
   "m8ec1176": "Cadena",
-  "m97422f64": "Para enviar Zcash se requiere el emulador alfa 7.17. El soporte para dispositivos físicos aún no está disponible.",
   "m9dc3aa14": "Agregar",
   "m9dcb6428": "Mientras mantienes presionado, conecta el cable USB",
   "m9eccf29d": "Etiqueta",

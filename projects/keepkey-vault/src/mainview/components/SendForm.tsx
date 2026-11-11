@@ -607,11 +607,16 @@ export function SendForm({ chain, address, balance, balanceLoading = false, toke
 					)}
 				</Flex>
 			</Flex>
-			{/* Native Zcash sending is limited to the reviewed alpha emulator. */}
-			{chain.id === 'zcash' && (
+			{/* The host admits ZEC sends from the KeepKey's own Features; say why not. */}
+			{chain.id === 'zcash' && (zcashSupport.pending || !zcashSupport.available) && (
 				<Flex role="status" align="center" gap="2" px="3" py="2" borderRadius="10px" bg="var(--ink-2)">
 					{zcashSupport.pending && <Spinner size="xs" flexShrink={0} aria-label={uiText("Checking Zcash sending support…")} />}
-					<Text fontSize="xs" color="kk.textMuted">{uiText("Zcash sending requires the 7.17 alpha emulator. Hardware support is not available yet.")}</Text>
+					<Text fontSize="xs" color="kk.textMuted">{zcashSupport.pending ? uiText("Checking Zcash sending support…")
+						: zcashSupport.refusal === 'firmware' ? uiText("Sending ZEC needs KeepKey firmware 7.16 or newer. Update it from Settings (opt in to new firmware).")
+						: zcashSupport.refusal === 'emulator' ? uiText("Sending ZEC from the emulator needs the reviewed 7.17 alpha emulator with Alpha Firmware turned on in Settings.")
+						: zcashSupport.refusal === 'variant' ? uiText("Bitcoin-only firmware cannot send ZEC.")
+						: zcashSupport.refusal === 'builder' ? uiText("Update KeepKey Desktop to send ZEC. This build is missing the Zcash transaction builder.")
+						: uiText("Could not confirm that this KeepKey can send ZEC. Reconnect it and try again.")}</Text>
 				</Flex>
 			)}
 			{/* Gas balance hint for token sends */}

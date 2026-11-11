@@ -1,4 +1,9 @@
 {
+  "m1962b644": "Bitcoin-only-firmware kan geen ZEC verzenden.",
+  "m334bb07c": "Werk KeepKey Desktop bij om ZEC te verzenden. Deze build mist de Zcash-transactiebouwer.",
+  "m3ee85808": "Voor het verzenden van ZEC vanaf de emulator is de gecontroleerde 7.17-alpha-emulator nodig, met Alpha-firmware ingeschakeld in Instellingen.",
+  "m6dbb0d31": "Voor het verzenden van ZEC is KeepKey-firmware 7.16 of nieuwer nodig. Werk deze bij via Instellingen (kies voor nieuwe firmware).",
+  "me2ba2db0": "Kon niet bevestigen dat deze KeepKey ZEC kan verzenden. Sluit hem opnieuw aan en probeer het nog eens.",
   "mfc59bd89": "Ondersteuning voor Zcash-verzending controleren…",
   "m17b11033": "Laden...",
   "m18743595": "Van",
@@ -51,7 +56,6 @@
   "m8dc21305": "Gekopieerd",
   "m8dd31791": "Gereed",
   "m8ec1176": "Netwerk",
-  "m97422f64": "Voor het verzenden van Zcash is de 7.17-alfa-emulator vereist. Hardware wordt nog niet ondersteund.",
   "m9dc3aa14": "Toevoegen",
   "m9dcb6428": "Sluit de USB-kabel aan terwijl je de knop ingedrukt houdt",
   "ma183c9ef": "Bevestigen",

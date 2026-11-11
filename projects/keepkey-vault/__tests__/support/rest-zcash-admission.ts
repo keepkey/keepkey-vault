@@ -16,12 +16,13 @@ globalThis.fetch = (() => { throw new Error('Network requests are forbidden in t
 const db = await import('../../src/bun/db')
 const { AuthStore } = await import('../../src/bun/auth')
 const { startRestApi } = await import('../../src/bun/rest-api')
+const { updateSyncedTo } = await import('../../src/bun/zcash-sidecar')
 db.initDb()
 
 const inputs = [{ addressNList: [0x8000002c, 0x80000000, 0x80000000, 0, 0], txid: '11'.repeat(32), vout: 0, amount: '20000', scriptType: 'p2pkh' }]
 const outputs = [{ address: '1BoatSLRHtKNngkdXEeobR76b53LETtpyT', amount: '10000', scriptType: 'p2pkh' }]
 type Options = { locked?: boolean; wallet?: boolean; approval?: boolean; authenticated?: boolean; allowDevice?: boolean }
-async function request(name: string, body: unknown, options: Options = {}) {
+async function request(name: string, body: unknown, options: Options = {}, path = '/utxo/sign-transaction') {
   let locked = options.locked ?? true
   const counts = { acquisitions: 0, unlocks: 0, approvals: 0, reads: 0, signs: 0, releases: 0 }
   let signedCoin: string | undefined
@@ -54,7 +55,7 @@ async function request(name: string, body: unknown, options: Options = {}) {
     }, '127.0.0.1')
   } finally { Bun.serve = serve }
   try {
-    const input = new Request('http://rest-admission.invalid/utxo/sign-transaction', {
+    const input = new Request(`http://rest-admission.invalid${path}`, {
       method: 'POST', headers: { 'Content-Type': 'application/json', ...(options.authenticated === false ? {} : { Authorization: `Bearer ${apiKey}` }) },
       body: JSON.stringify(body),
     })
@@ -76,5 +77,20 @@ try {
   results.unauthenticated = await request('unauthenticated', zcash, { authenticated: false })
   results.bitcoin = await request('bitcoin', { coin: 'Bitcoin', inputs, outputs }, { allowDevice: true })
   results['bitcoin-default'] = await request('bitcoin-default', { inputs, outputs }, { allowDevice: true })
+  // Shield, unshield and private send on a scanned NU7 chain: refused before
+  // the device, a viewing-key export or a proof. Unknown height: the route
+  // proceeds to the device (this fixture forbids it), so the guard is what blocks.
+  db.setSetting('zcash_privacy_enabled', '1')
+  const shielded = {
+    shield: ['/api/zcash/shielded/shield', { amount: 100_000 }],
+    deshield: ['/api/zcash/shielded/deshield', { recipient: 't1Q6uNJW9nTZTEERQf1yWbRGjAk4zKP6Hc4', amount: 100_000 }],
+    send: ['/api/zcash/shielded/send', { recipient: 'u1synthetic', amount: 100_000 }],
+  } as const
+  for (const [kind, [route, body]] of Object.entries(shielded)) {
+    updateSyncedTo(3_559_307)
+    results[`nu7-${kind}`] = await request(`nu7-${kind}`, body, { locked: false }, route)
+    updateSyncedTo(null as unknown as number)
+    results[`unknown-height-${kind}`] = await request(`unknown-height-${kind}`, body, { locked: false }, route)
+  }
   console.log(JSON.stringify(results))
 } finally { db.closeDb(); rmSync(profile, { recursive: true, force: true }) }

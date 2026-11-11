@@ -50,8 +50,9 @@ describe('transparent Zcash transaction policy', () => {
 			xpub: 'xpub-test',
 		})
 
-		// Modern plans use Rust PCZT construction and live Nu7 branch checks.
-		expect(tx.branchId).toBe(0x77190ad9)
+		// Modern plans use Rust PCZT construction. The branch is chosen at
+		// signing for the node's inclusion height, so the plan carries none.
+		expect(tx).not.toHaveProperty('branchId')
 		expect(tx).toMatchObject({ version: 6, versionGroupId: 0xd884b698, zcashTransparent: true })
 		expect(tx.inputs[0].scriptPubkey).toMatch(/^76a914[0-9a-f]{40}88ac$/)
 		expect(tx.inputs).toHaveLength(1)
@@ -104,8 +105,10 @@ describe('Zcash consensus branch selection', () => {
 		expect(zcashBranchId(1_687_104)).toBe(0xc2d6d0b4) // NU5
 	})
 
-	it('assumes the newest upgrade when no tip is available', () => {
-		// Guessing old is the failure that survives every future activation.
-		expect(zcashBranchId(null)).toBe(0x77190ad9)
+	it('has no fallback: an unknown or pre-NU5 height has no branch', () => {
+		// A guessed branch signs a transaction every node rejects.
+		for (const height of [null, undefined, NaN, 1_687_103, -1, 3_543_405.5]) {
+			expect(() => zcashBranchId(height as any)).toThrow('No Zcash consensus branch')
+		}
 	})
 })

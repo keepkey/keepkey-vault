@@ -62,16 +62,16 @@ const ZCASH_BRANCH_IDS: ReadonlyArray<{ activationHeight: number; branchId: numb
   { activationHeight: 1_687_104, branchId: 0xc2d6d0b4, name: 'NU5' },
 ]
 
-/** Branch ID in force at `tipHeight`.
- *
- *  With no tip (sidecar not running — transparent sends do not require it) we
- *  assume the newest known upgrade is live. Both a too-old and a too-new guess
- *  fail the same way, at broadcast, but guessing old is the failure that
- *  persists silently through every future upgrade. Guessing new self-corrects
- *  the moment the table gains a row. */
-export function zcashBranchId(tipHeight: number | null): number {
-  if (tipHeight == null) return ZCASH_BRANCH_IDS[0].branchId
-  return (ZCASH_BRANCH_IDS.find(u => tipHeight >= u.activationHeight) ?? ZCASH_BRANCH_IDS[0]).branchId
+/** Branch ID in force for a transaction mined at `inclusionHeight` (the
+ *  node's tip + 1). There is no fallback: an unknown height has no branch, and
+ *  a guessed one signs a transaction every node rejects. Transparent signing
+ *  takes the height from the same lightwalletd snapshot as the node's branch
+ *  and requires both to agree with this table. */
+export function zcashBranchId(inclusionHeight: number): number {
+  const upgrade = Number.isSafeInteger(inclusionHeight)
+    ? ZCASH_BRANCH_IDS.find(u => inclusionHeight >= u.activationHeight) : undefined
+  if (!upgrade) throw new Error(`No Zcash consensus branch is known for inclusion height ${inclusionHeight}`)
+  return upgrade.branchId
 }
 
 const btcSelfHostActive = (networkId: string) =>
@@ -886,9 +886,9 @@ export async function buildUtxoTx(
       overwintered: true,
       zcashTransparent: true,
       versionGroupId: ZCASH_V6_VERSION_GROUP_ID,
-      // The modern dispatcher builds/signs/finalizes through Rust PCZT, never
-      // btcSignTx's legacy serializer. Rust rechecks the node's live Nu7 branch.
-      branchId: ZCASH_NU7_BRANCH_ID,
+      // No branch here: it is chosen at signing for the inclusion height, from
+      // the node's snapshot, and passed explicitly to the device. The modern
+      // dispatcher builds/signs/finalizes through Rust PCZT, never btcSignTx.
       expiry: 0,
     } : {}),
     fee: String(fee / 10 ** chain.decimals),

@@ -6,7 +6,7 @@ import { HDKey } from '@scure/bip32'
 // @ts-ignore CJS
 import bs58check from 'bs58check'
 import { configureZcashNu7WalletAuthorizer, signUtxoTx, signZcashTransparentTx, validateZcashTransparentPlan } from '../src/bun/txbuilder/zcash-transparent'
-import { ZCASH_NU7_BRANCH_ID, ZCASH_V6_VERSION_GROUP_ID, zcashNu7SupportError } from '../src/shared/zcash-nu7'
+import { ZCASH_NU7_BRANCH_ID, ZCASH_NU7_REFUSALS, ZCASH_V6_VERSION_GROUP_ID, type ZcashNu7Admission } from '../src/shared/zcash-nu7'
 import { deviceOperationContext } from '../src/bun/device-operation'
 import { buildUtxoTx } from '../src/bun/txbuilder/utxo'
 import rustRequest from '../zcash-cli/tests/fixtures/transparent-nu7-request.json'
@@ -24,7 +24,7 @@ const raw = `0600008098b684d8d90a1977${'00'.repeat(50)}`
 function plan() {
   return {
     coin: 'Zcash', version: 6, zcashTransparent: true, versionGroupId: ZCASH_V6_VERSION_GROUP_ID,
-    branchId: ZCASH_NU7_BRANCH_ID, locktime: 0, expiry: 0,
+    locktime: 0, expiry: 0,
     inputs: [
       { txid: `${'00'.repeat(31)}01`, vout: 2, amount: '60000', addressNList: [...accountPath, 0, 3], scriptType: 'p2pkh', scriptPubkey: scriptAt(0, 3) },
       { txid: `${'ab'.repeat(31)}cd`, vout: 7, amount: '40000', addressNList: [...accountPath, 1, 5], scriptType: 'p2pkh', scriptPubkey: scriptAt(1, 5) },
@@ -35,16 +35,18 @@ function plan() {
     ],
   }
 }
-function fixture() {
+const PHYSICAL: ZcashNu7Admission = { route: 'physical' }
+const ALPHA: ZcashNu7Admission = { route: 'alpha-emulator' }
+function fixture(admitted: ZcashNu7Admission = PHYSICAL, walletFirmware = admitted === ALPHA ? 'v7.17.0' : 'v7.16.0') {
   const calls: string[] = []
-  let authorized = true
+  let authorized = admitted
   let buildParams: any
   let signRequest: any
   let finalParams: any
   let changeBuild = (_: any) => {}
   let afterSign = () => {}
   const wallet = {
-    getFirmwareVersion: async () => { calls.push('firmware'); return 'v7.17.0' },
+    getFirmwareVersion: async () => { calls.push('firmware'); return walletFirmware },
     getPublicKeys: async (paths: any) => { calls.push('keys'); expect(paths).toEqual([{ addressNList: accountPath, coin: 'Zcash', scriptType: 'p2pkh' }]); return [{ xpub: account.publicExtendedKey }] },
     zcashSignPczt: async (request: any) => {
       calls.push('sign'); signRequest = request; afterSign()
@@ -81,9 +83,9 @@ function fixture() {
       return response
     },
   }
-  return { wallet, dependencies, calls, authorize: (v: boolean) => { authorized = v }, alter: (fn: typeof changeBuild) => { changeBuild = fn }, afterSign: (fn: typeof afterSign) => { afterSign = fn }, values: () => ({ buildParams, signRequest, finalParams }) }
+  return { wallet, dependencies, calls, authorize: (v: ZcashNu7Admission) => { authorized = v }, alter: (fn: typeof changeBuild) => { changeBuild = fn }, afterSign: (fn: typeof afterSign) => { afterSign = fn }, values: () => ({ buildParams, signRequest, finalParams }) }
 }
-afterEach(() => configureZcashNu7WalletAuthorizer(() => false))
+afterEach(() => configureZcashNu7WalletAuthorizer(() => ({ refusal: 'device', reason: ZCASH_NU7_REFUSALS.device })))
 
 test('modern send preserves per-input ownership, outpoint byte order, change, fee and one-shot finalization', async () => {
   const f = fixture()
@@ -100,6 +102,27 @@ test('modern send preserves per-input ownership, outpoint byte order, change, fe
     Buffer.from(account.deriveChild(1).deriveChild(5).publicKey!).toString('hex'),
   ])
   expect(f.calls).toEqual(['firmware', 'begin', 'start', 'keys', 'build_transparent_pczt', 'sign', 'finalize_transparent', 'end'])
+})
+
+test('a physical 7.16 KeepKey and the reviewed 7.17 alpha emulator both sign through ZcashSignPCZT with the explicit inclusion-height branch', async () => {
+  for (const admitted of [PHYSICAL, ALPHA]) {
+    const f = fixture(admitted)
+    expect((await signZcashTransparentTx(f.wallet, plan(), f.dependencies)).serializedTx).toBe(raw)
+    const { signRequest } = f.values()
+    // Never left to hdwallet's default (an old branch constant).
+    expect(Object.hasOwn(signRequest, 'branch_id')).toBe(true)
+    expect(signRequest.branch_id).toBe(0x77190ad9)
+    expect(signRequest.header_fields).toEqual({ tx_version: 6, version_group_id: 0xd884b698, lock_time: 0, expiry_height: 0 })
+    expect(signRequest.n_actions).toBe(0)
+    expect(f.calls.filter(c => c === 'sign')).toHaveLength(1)
+  }
+})
+
+test('a caller-supplied branch cannot steer signing: the node height decides', async () => {
+  const f = fixture()
+  await signZcashTransparentTx(f.wallet, { ...plan(), branchId: 0x37a5165b, overwintered: true }, f.dependencies)
+  expect(f.values().signRequest.branch_id).toBe(0x77190ad9)
+  expect(f.values().buildParams).not.toHaveProperty('branch_id')
 })
 
 test('actual mature coin selection preserves a two-input send, unused change path and ZIP-317 fee through signing', async () => {
@@ -124,25 +147,32 @@ test('actual mature coin selection preserves a two-input send, unused change pat
   expect(f.calls.filter(c => c === 'sign')).toHaveLength(1)
 })
 
-test('physical wallets remain blocked even at 7.17 and caller flags cannot authorize them', async () => {
+test('without host admission, request flags cannot authorize any wallet', async () => {
   const f = fixture()
-  await expect(signUtxoTx(f.wallet, { ...plan(), isAlphaEmulator: true })).rejects.toThrow('physical support is not yet available')
+  await expect(signUtxoTx(f.wallet, { ...plan(), isAlphaEmulator: true, firmwareVersion: '7.17.0', route: 'physical' })).rejects.toThrow(ZCASH_NU7_REFUSALS.device)
   expect(f.calls).toEqual([])
-  expect(zcashNu7SupportError('7.17.0', true)).toContain('alpha emulator')
-  expect(zcashNu7SupportError('7.17.0', true, true)).toBeUndefined()
+  for (const refused of [{ refusal: 'firmware', reason: ZCASH_NU7_REFUSALS.firmware }, { refusal: 'emulator', reason: ZCASH_NU7_REFUSALS.emulator }] as const) {
+    const g = fixture(refused)
+    await expect(signZcashTransparentTx(g.wallet, plan(), g.dependencies)).rejects.toThrow(refused.reason)
+    expect(g.calls).toEqual([])
+  }
 })
 
-test('older alpha firmware and missing sidecar fail before public-key or signing calls', async () => {
+test('wallet Features below the route minimum and a missing builder fail before public-key or signing calls', async () => {
+  for (const [admitted, version, reason] of [[PHYSICAL, 'v7.15.0', ZCASH_NU7_REFUSALS.firmware], [ALPHA, 'v7.16.0', ZCASH_NU7_REFUSALS.emulator]] as const) {
+    const f = fixture(admitted, version)
+    await expect(signZcashTransparentTx(f.wallet, plan(), f.dependencies)).rejects.toThrow(reason)
+    expect(f.calls).toEqual(['firmware'])
+  }
   const f = fixture()
-  await expect(signZcashTransparentTx(f.wallet, plan(), { ...f.dependencies, firmwareVersion: '7.16.0' })).rejects.toThrow('7.17.0')
-  await expect(signZcashTransparentTx(f.wallet, plan(), { ...f.dependencies, available: () => false })).rejects.toThrow('transaction builder')
+  await expect(signZcashTransparentTx(f.wallet, plan(), { ...f.dependencies, available: () => false })).rejects.toThrow(ZCASH_NU7_REFUSALS.builder)
   expect(f.calls).toEqual(['firmware'])
 })
 
 test('invalid legacy plans, duplicate inputs, memo and foreign account/change paths cannot reach the device', async () => {
   const f = fixture()
   const variants = [
-    { ...plan(), version: 4 }, { ...plan(), branchId: 0x37a5165b }, { ...plan(), memo: 'payment' },
+    { ...plan(), version: 4 }, { ...plan(), version: 5 }, { ...plan(), memo: 'payment' },
     { ...plan(), inputs: [plan().inputs[0], plan().inputs[0]] },
     { ...plan(), inputs: [{ ...plan().inputs[0], addressNList: [...accountPath, H, 0] }] },
     { ...plan(), outputs: [plan().outputs[0], { ...plan().outputs[1], addressNList: [H + 44, H + 133, H + 1, 1, 8] }] },
@@ -164,6 +194,13 @@ test('input script must match the public child of the fresh device account key',
 
 for (const [name, alter] of Object.entries({
   branch: (r: any) => { r.branch_id = 0x37a5165b },
+  'pre-NU7 height with its own branch': (r: any) => { r.target_height = 3_543_404; r.branch_id = 0x37a5165b },
+  'NU7 branch claimed below activation': (r: any) => { r.target_height = 3_543_404 },
+  'missing inclusion height': (r: any) => { delete r.target_height },
+  'fractional inclusion height': (r: any) => { r.target_height = 3_559_308.5 },
+  'missing branch': (r: any) => { delete r.branch_id },
+  'branch as text': (r: any) => { r.branch_id = '77190ad9' },
+  'unknown future branch': (r: any) => { r.branch_id = 0xffffffff },
   version: (r: any) => { r.header_fields.tx_version = 5 },
   actions: (r: any) => { r.n_actions = 2 },
   recipient: (r: any) => { r.transparent_outputs[0].script_pubkey = scriptAt(0, 1) },
@@ -180,11 +217,13 @@ for (const [name, alter] of Object.entries({
   expect(f.calls).not.toContain('finalize_transparent')
 })
 
-test('retired emulator/session after approval cannot finalize into its replacement', async () => {
-  const f = fixture(); f.afterSign(() => f.authorize(false))
-  await expect(signZcashTransparentTx(f.wallet, plan(), f.dependencies)).rejects.toThrow('alpha emulator')
-  expect(f.calls).not.toContain('finalize_transparent')
-  expect(f.calls.at(-1)).toBe('end')
+test('retired device/session after approval cannot finalize into its replacement', async () => {
+  for (const replacement of [{ refusal: 'device', reason: ZCASH_NU7_REFUSALS.device } as const, ALPHA]) {
+    const f = fixture(); f.afterSign(() => f.authorize(replacement))
+    await expect(signZcashTransparentTx(f.wallet, plan(), f.dependencies)).rejects.toThrow('the connected KeepKey changed')
+    expect(f.calls).not.toContain('finalize_transparent')
+    expect(f.calls.at(-1)).toBe('end')
+  }
 })
 
 test('operation cancellation after sidecar preparation prevents a later signing write', async () => {
@@ -233,4 +272,20 @@ test('the actual Rust IPC snapshot conforms to the host plan policy without JSON
   }
   expect(() => validateZcashTransparentPlan(tx)).not.toThrow()
   expect(() => validateZcashTransparentPlan({ ...tx, version: 4, versionGroupId: 0x892f2085 })).toThrow('legacy')
+})
+
+test('the address-audit sweep refuses Zcash before touching the device (it only knows the legacy serializer)', () => {
+  const path = '../src/bun/index.ts'
+  const source = ts.createSourceFile(path, readFileSync(new URL(path, import.meta.url), 'utf8'), ts.ScriptTarget.Latest, true)
+  let body: ts.Block | undefined
+  const visit = (node: ts.Node) => {
+    if (ts.isPropertyAssignment(node) && ts.isIdentifier(node.name) && node.name.text === 'auditSweepPath'
+      && ts.isArrowFunction(node.initializer) && ts.isBlock(node.initializer.body)) body = node.initializer.body
+    ts.forEachChild(node, visit)
+  }
+  visit(source)
+  const statements = body!.statements.map(s => s.getText(source))
+  const refusal = statements.findIndex(s => s.startsWith("if (chain.id === 'zcash') throw"))
+  expect(refusal).toBeGreaterThan(-1)
+  expect(statements.slice(0, refusal).some(s => /\bawait\b|btcSignTx|deriveAddressParams/.test(s))).toBe(false)
 })

@@ -1,4 +1,9 @@
 {
+  "m1962b644": "Oprogramowanie tylko dla Bitcoina nie może wysyłać ZEC.",
+  "m334bb07c": "Zaktualizuj KeepKey Desktop, aby wysyłać ZEC. W tej wersji brakuje kreatora transakcji Zcash.",
+  "m3ee85808": "Wysyłanie ZEC z emulatora wymaga zweryfikowanego emulatora alfa 7.17 i włączonego Oprogramowania alfa w Ustawieniach.",
+  "m6dbb0d31": "Wysyłanie ZEC wymaga oprogramowania KeepKey 7.16 lub nowszego. Zaktualizuj je w Ustawieniach (włącz nowe oprogramowanie).",
+  "me2ba2db0": "Nie udało się potwierdzić, że ten KeepKey może wysyłać ZEC. Podłącz go ponownie i spróbuj jeszcze raz.",
   "mfc59bd89": "Sprawdzanie obsługi wysyłania Zcash…",
   "m17b11033": "Ładowanie...",
   "m19765a2d": "miejsca dziesiętne",
@@ -51,7 +56,6 @@
   "m8dc21305": "Skopiowano",
   "m8dd31791": "Gotowe",
   "m8ec1176": "Sieć",
-  "m97422f64": "Wysyłanie Zcash wymaga emulatora alfa 7.17. Obsługa urządzeń fizycznych nie jest jeszcze dostępna.",
   "m9dc3aa14": "Dodaj",
   "m9dcb6428": "Trzymając przycisk, podłącz kabel USB",
   "m9eccf29d": "Etykieta",

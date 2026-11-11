@@ -26,7 +26,7 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
     requests: {
       // ── Device lifecycle ──────────────────────────────────────────
       getDeviceState: { params: void; response: DeviceStateInfo }
-      getZcashNu7Support: { params: void; response: { available: boolean; requiredFirmware: '7.17.0'; emulatorOnly: true; alphaOnly: true; sessionId: string; reason?: string } }
+      getZcashNu7Support: { params: void; response: { available: boolean; requiredFirmware: string; sessionId: string; route?: 'physical' | 'alpha-emulator'; refusal?: 'firmware' | 'emulator' | 'variant' | 'device' | 'builder'; reason?: string } }
       retryConnect: { params: void; response: void }
       requestDeviceUnlock: { params: void; response: void }
       startBootloaderUpdate: { params: void; response: void }

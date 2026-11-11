@@ -1,5 +1,6 @@
 import { beforeAll, expect, test } from 'bun:test'
 import { fileURLToPath } from 'node:url'
+import { ZCASH_SHIELDED_NU7_REFUSAL } from '../src/shared/zcash-nu7'
 
 let results: Record<string, any>
 beforeAll(async () => {
@@ -15,8 +16,7 @@ beforeAll(async () => {
 
 test.each(['locked', 'unlocked', 'no-device', 'no-approval-callback', 'forged-modern-plan', 'case-variation', 'incomplete-zcash'])('%s REST Zcash signing rejects before approval or device admission', name => {
   expect(results[name].status).toBe(501)
-  expect(results[name].data.error).toContain('Desktop')
-  expect(results[name].data.error).toContain('7.17 alpha emulator')
+  expect(results[name].data.error).toBe('Zcash signing over REST is not supported. Send ZEC from the Send screen in KeepKey Desktop.')
   expect(results[name].counts).toEqual({ acquisitions: 0, unlocks: 0, approvals: 0, reads: 0, signs: 0, releases: 0 })
 })
 
@@ -30,4 +30,13 @@ test.each(['bitcoin', 'bitcoin-default'])('%s still unlocks, approves and dispat
   expect(results[name].data.serializedTx).toBe('01000000000000000000')
   expect(results[name].counts).toEqual({ acquisitions: 1, unlocks: 1, approvals: 1, reads: 0, signs: 1, releases: 1 })
   expect(results[name].signedCoin).toBe('Bitcoin')
+})
+
+test.each(['shield', 'deshield', 'send'])('REST %s on a scanned NU7 chain is refused in plain language before device, viewing key or proof', kind => {
+  expect(results[`nu7-${kind}`].status).toBe(501)
+  expect(results[`nu7-${kind}`].data.error).toBe(ZCASH_SHIELDED_NU7_REFUSAL)
+  expect(results[`nu7-${kind}`].counts).toEqual({ acquisitions: 0, unlocks: 0, approvals: 0, reads: 0, signs: 0, releases: 0 })
+  // Control: without a known height the same request reaches device admission.
+  expect(results[`unknown-height-${kind}`].counts.acquisitions).toBe(1)
+  expect(results[`unknown-height-${kind}`].data.error).not.toBe(ZCASH_SHIELDED_NU7_REFUSAL)
 })

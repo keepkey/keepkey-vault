@@ -104,6 +104,18 @@ mod transparent_consensus_tests {
     }
 }
 
+#[cfg(test)]
+impl LightwalletClient {
+    /// Never connected: any call fails. Tests use it to prove that a refusal
+    /// happens before the first lightwalletd request.
+    pub fn unconnected_for_tests() -> Self {
+        let channel = Channel::from_static("http://127.0.0.1:9").connect_lazy();
+        Self {
+            client: CompactTxStreamerClient::new(channel),
+        }
+    }
+}
+
 impl LightwalletClient {
     /// Connect to a lightwalletd gRPC server.
     pub async fn connect(server_url: Option<&str>) -> Result<Self> {

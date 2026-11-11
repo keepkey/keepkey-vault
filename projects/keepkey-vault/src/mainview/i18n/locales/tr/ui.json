@@ -1,4 +1,9 @@
 {
+  "m1962b644": "Yalnızca Bitcoin yazılımı ZEC gönderemez.",
+  "m334bb07c": "ZEC göndermek için KeepKey Desktop'ı güncelleyin. Bu sürümde Zcash işlem oluşturucusu eksik.",
+  "m3ee85808": "Emülatörden ZEC göndermek için incelenmiş 7.17 alpha emülatörü ve Ayarlar'da açık Alpha yazılım gerekir.",
+  "m6dbb0d31": "ZEC göndermek için KeepKey yazılımı 7.16 veya üstü gerekir. Ayarlar'dan güncelleyin (yeni yazılımı etkinleştirin).",
+  "me2ba2db0": "Bu KeepKey'in ZEC gönderebildiği doğrulanamadı. Yeniden bağlayıp tekrar deneyin.",
   "mfc59bd89": "Zcash gönderme desteği kontrol ediliyor…",
   "m17b11033": "Yükleniyor...",
   "m19765a2d": "ondalık basamaklar",
@@ -52,7 +57,6 @@
   "m8dc21305": "Kopyalandı",
   "m8dd31791": "Tamam",
   "m8ec1176": "Ağ",
-  "m97422f64": "Zcash göndermek için 7.17 alfa emülatörü gerekir. Fiziksel cihaz desteği henüz mevcut değil.",
   "m9dc3aa14": "Ekle",
   "m9dcb6428": "Düğmeyi basılı tutarken USB kablosunu takın",
   "m9eccf29d": "Etiket",

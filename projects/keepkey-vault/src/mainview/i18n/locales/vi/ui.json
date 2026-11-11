@@ -1,4 +1,9 @@
 {
+  "m1962b644": "Phần mềm chỉ dành cho Bitcoin không thể gửi ZEC.",
+  "m334bb07c": "Hãy cập nhật KeepKey Desktop để gửi ZEC. Bản dựng này thiếu trình tạo giao dịch Zcash.",
+  "m3ee85808": "Gửi ZEC từ trình giả lập cần trình giả lập alpha 7.17 đã được kiểm duyệt và bật Phần mềm Alpha trong Cài đặt.",
+  "m6dbb0d31": "Gửi ZEC cần phần mềm KeepKey 7.16 trở lên. Hãy cập nhật trong Cài đặt (chọn nhận phần mềm mới).",
+  "me2ba2db0": "Không thể xác nhận KeepKey này có thể gửi ZEC. Hãy kết nối lại và thử lại.",
   "mfc59bd89": "Đang kiểm tra hỗ trợ gửi Zcash…",
   "m17b11033": "Đang tải...",
   "m18743595": "Từ",
@@ -55,7 +60,6 @@
   "m8dc21305": "Đã sao chép",
   "m8dd31791": "Xong",
   "m8ec1176": "Mạng",
-  "m97422f64": "Cần trình giả lập alpha 7.17 để gửi Zcash. Chưa hỗ trợ thiết bị phần cứng.",
   "m9dc3aa14": "Thêm",
   "m9dcb6428": "Trong khi giữ nút, cắm cáp USB vào",
   "m9eccf29d": "Nhãn",

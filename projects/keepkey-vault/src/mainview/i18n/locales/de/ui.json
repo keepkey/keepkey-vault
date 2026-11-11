@@ -1,4 +1,9 @@
 {
+  "m1962b644": "Mit reiner Bitcoin-Firmware kann kein ZEC gesendet werden.",
+  "m334bb07c": "Aktualisieren Sie KeepKey Desktop, um ZEC zu senden. In diesem Build fehlt der Zcash-Transaktionsersteller.",
+  "m3ee85808": "Zum Senden von ZEC über den Emulator ist der geprüfte Alpha-Emulator 7.17 erforderlich, mit aktivierter Alpha-Firmware in den Einstellungen.",
+  "m6dbb0d31": "Zum Senden von ZEC ist KeepKey-Firmware 7.16 oder neuer erforderlich. Aktualisieren Sie sie in den Einstellungen (neue Firmware aktivieren).",
+  "me2ba2db0": "Es konnte nicht bestätigt werden, dass dieser KeepKey ZEC senden kann. Verbinden Sie ihn erneut und versuchen Sie es noch einmal.",
   "mfc59bd89": "Zcash-Sendeunterstützung wird geprüft…",
   "m17b11033": "Laden...",
   "m18743595": "Von",
@@ -46,7 +51,6 @@
   "m8dc21305": "Kopiert",
   "m8dd31791": "Fertig",
   "m8ec1176": "Blockchain",
-  "m97422f64": "Für das Senden von Zcash ist der Alpha-Emulator 7.17 erforderlich. Hardware wird noch nicht unterstützt.",
   "m9dc3aa14": "Hinzufügen",
   "m9dcb6428": "Stecken Sie bei gedrücktem Knopf das USB-Kabel ein",
   "m9eccf29d": "Bezeichnung",
