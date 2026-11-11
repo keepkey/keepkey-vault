@@ -8,7 +8,7 @@ beforeAll(() => {
   })
   if (child.exitCode) throw new Error(child.stderr.toString() || child.stdout.toString())
   result = JSON.parse(child.stdout.toString().trim().split('\n').at(-1)!)
-})
+}, 30_000) // the child renders under jsdom and is allowed 30 s; Bun's 5 s hook default failed under load
 
 for (const [name, scheme] of Object.entries({ bitcoin: 'bitcoin', litecoin: 'litecoin', dogecoin: 'dogecoin', dash: 'dash', digibyte: 'digibyte', zcash: 'zcash', bitcoincash: 'bitcoincash' })) {
   test(`${name} receive QR identifies the payment network while display and clipboard keep the address`, () => {
