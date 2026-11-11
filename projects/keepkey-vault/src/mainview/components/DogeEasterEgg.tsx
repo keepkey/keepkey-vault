@@ -109,7 +109,10 @@ export function DogeEasterEgg() {
 		<Box
 			position="fixed"
 			right="24px"
-			bottom="24px"
+			// Sit above the Activity pill (ActivityTracker: bottom 28px, ~32px tall)
+			// instead of on top of it; the pill's translucent fill let the doge
+			// show through and hid the button.
+			bottom="76px"
 			zIndex={50}
 			pointerEvents={leaving ? "none" : "auto"}
 			onAnimationEnd={(e) => {
