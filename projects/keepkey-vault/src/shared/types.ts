@@ -2417,6 +2417,7 @@ export interface PendingSwap {
   trackingMetadataPending?: boolean
   createdAt: number       // unix ms
   updatedAt: number       // unix ms
+  statusCheck?: { checkedAt: number; error?: 'unavailable' | 'not_found' }
   completedAt?: number    // unix ms — when terminal status reached
   estimatedTime: number   // seconds
   error?: string

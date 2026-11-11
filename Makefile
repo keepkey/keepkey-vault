@@ -477,6 +477,7 @@ test-unit:
 	cd $(PROJECT_DIR) && bun test __tests__/swap-classify.test.ts __tests__/swap-discovery.test.ts __tests__/swap-revert.test.ts __tests__/swap-risk.test.ts __tests__/swap-tracker-guards.test.ts __tests__/swap-warnings.test.ts
 	cd $(PROJECT_DIR) && bun test __tests__/swap-tracking-context.test.ts
 	cd $(PROJECT_DIR) && bun test __tests__/swap-progress-polling.test.ts
+	cd $(PROJECT_DIR) && bun test __tests__/swap-dialog-tracking.test.ts
 	cd $(PROJECT_DIR) && bun test __tests__/swap-execution-service.test.ts
 	cd $(PROJECT_DIR) && bun test __tests__/swap-ui-control.test.ts
 	cd $(PROJECT_DIR) && bun test __tests__/swap-api-assets.test.ts __tests__/swap-quote-lease.test.ts
