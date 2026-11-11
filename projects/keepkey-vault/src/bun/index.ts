@@ -239,7 +239,7 @@ process.on('unhandledRejection', (reason) => {
 
 import { EngineController, withTimeout } from "./engine-controller"
 import { gateDeviceRpc } from "./device-rpc"
-import { deviceOperationContext } from './device-operation'
+import { backgroundDeviceRead, deviceOperationContext } from './device-operation'
 import { restRequest } from "./device-gate"
 import { runUsbDiagnostic as runUsbDiagnosticProbe } from "./windows-usb-probe"
 import { startRestApi, clearFeaturesCache, setUiActive, uiHeartbeat, type RestApiCallbacks } from "./rest-api"
@@ -3040,7 +3040,8 @@ const postTxBalances = createPostTxBalanceRefresh({
 	canRefresh: () => !offlineMode && engine.getDeviceState().state === 'ready',
 	refresh: async (params, isCurrent) => {
 		console.log(`[post-tx-balance] Forced refresh: ${params.chainId}`)
-		return getChainBalance(params, isCurrent)
+		// Background: a device that auto-locked stays quiet (no lock screen).
+		return backgroundDeviceRead.run(true, () => getChainBalance(params, isCurrent))
 	},
 	onError: (chainId, error) => console.warn(`[post-tx-balance] ${chainId}:`, error instanceof Error ? error.message : error),
 })
@@ -3134,7 +3135,8 @@ const activeWalletWatches = createActiveWalletWatch({
 		if (sameBalanceRefreshScope(scope, currentBalanceRefreshScope())) await durableWalletMonitor.acknowledge(eventIds)
 	},
 	stop: stopOwnedWalletStream,
-	refresh: (hint, isCurrent) => refreshWatchedChain(hint, {
+	// Background: a device that auto-locked stays quiet (no lock screen).
+	refresh: (hint, isCurrent) => backgroundDeviceRead.run(true, () => refreshWatchedChain(hint, {
 		readBalance: getChainBalance,
 		scanHistory: (chainId, current) => scanOneChain(chainId, true, current),
 		follow: (chainId, txid) => txWatch.watch(chainId, txid),
@@ -3149,7 +3151,7 @@ const activeWalletWatches = createActiveWalletWatch({
 			const chain = getAllChains().find(chain => chain.id === chainId)
 			if (chain) try { rpc.send['tx-push-received']({ chain: chain.caip, networkId: chain.networkId, txid, type: 'activity', balanceRefreshHandled: true }) } catch { /* renderer optional */ }
 		},
-	}, isCurrent),
+	}, isCurrent)),
 	onStatus: status => { try { rpc.send['stream-status'](status) } catch { /* renderer optional */ } },
 	onError: error => console.warn('[wallet-watch] Refresh failed:', error instanceof Error ? error.message : error),
 	onOverflow: omitted => console.warn(`[wallet-watch] ${omitted} entries exceed the active lease limit`),

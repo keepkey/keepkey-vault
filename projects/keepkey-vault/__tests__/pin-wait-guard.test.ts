@@ -30,6 +30,7 @@ mock.module('electrobun/bun', () => ({ Utils: { paths: { userData: '/tmp/kk-pin-
 
 const { DEVICE_AWAITING_INPUT_MESSAGE, awaitingInput, guardInputWait, restRequest } = await import('../src/bun/device-gate')
 const { EngineController } = await import('../src/bun/engine-controller')
+const { backgroundDeviceRead } = await import('../src/bun/device-operation')
 const { wipeOwningDevice, WIPE_AFTER_REPLUG_MESSAGE } = await import('../src/bun/device-wipe')
 
 const T = Messages.MessageType
@@ -292,6 +293,42 @@ describe.each(['7.17', '7.16'] as const)('EngineController on a USB/HID-like tra
     await sleep(20)
     expect(engine.isLocked).toBe(true)
     expect(device.received).toEqual([])
+  })
+
+  // Release 1.6.7 behavior: a device that auto-locks while Vault is open shows no lock
+  // screen; only an action that needs the KeepKey asks for the PIN.
+  const btcXpub = [{ addressNList: [0x8000002c, 0x80000000, 0x80000000], coin: 'Bitcoin', scriptType: 'p2pkh', curve: 'secp256k1' }]
+  test('a background read that finds the device auto-locked opens no lock screen', async () => {
+    const device = new ScriptedKeepKey(fw)
+    const { engine, wallet, transport } = await engineWith(device)
+    ;(engine as any).lastState = 'ready' // the device auto-locked since the last snapshot
+    const prompts: unknown[] = []
+    engine.on('pin-request', prompt => prompts.push(prompt))
+    await expect(backgroundDeviceRead.run(true, () => wallet.getPublicKeys(btcXpub))).rejects.toBeDefined()
+    await until(() => awaitingInput(transport) === null, 'cancelled PIN wait')
+    expect(prompts).toEqual([])
+    expect(engine.getDeviceState().state).toBe('needs_pin')
+    expect(device.received.map(r => r.type)).toEqual([T.MESSAGETYPE_GETPUBLICKEY, T.MESSAGETYPE_CANCEL])
+    // ...until an action needs the KeepKey: then the PIN prompt opens.
+    let dispatched = false
+    const action = engine.withDeviceOperation(async () => { dispatched = true }, { unlock: true })
+    await until(() => prompts.length === 1, 'on-demand PIN prompt')
+    expect(dispatched).toBe(false)
+    await engine.sendPin('1'); await action
+    expect(dispatched).toBe(true)
+    expect(engine.getDeviceState().state).toBe('ready')
+  })
+
+  test('control: the same read outside a background context still opens the PIN prompt', async () => {
+    const device = new ScriptedKeepKey(fw)
+    const { engine, wallet } = await engineWith(device)
+    ;(engine as any).lastState = 'ready'
+    const prompts: unknown[] = []
+    engine.on('pin-request', prompt => prompts.push(prompt))
+    const read = wallet.getPublicKeys(btcXpub).catch(() => null)
+    await until(() => prompts.length === 1, 'PIN prompt')
+    expect(device.received.map(r => r.type)).toEqual([T.MESSAGETYPE_GETPUBLICKEY])
+    await engine.sendPin('1'); await read
   })
 
   test('concurrent explicit unlocks and the unlock button share one wire exchange', async () => {
