@@ -953,16 +953,18 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
   const [liveInboundEffectiveGasPrice, setLiveInboundEffectiveGasPrice] = useState<string | undefined>()
   const [liveInboundConfirmedAt, setLiveInboundConfirmedAt] = useState<number | undefined>()
   const [liveCreatedAt, setLiveCreatedAt] = useState<number | undefined>()
+  const [liveCompletedAt, setLiveCompletedAt] = useState<number | undefined>()
   // Tracker error message + recovery guidance — previously never surfaced in
   // the submitted view (only the title flipped to "Swap failed").
   const [liveError, setLiveError] = useState<string | undefined>()
   const [liveErrorActionable, setLiveErrorActionable] = useState<string | undefined>()
   const [liveErrorElapsedMinutes, setLiveErrorElapsedMinutes] = useState<number | undefined>()
   const [rechecking, setRechecking] = useState(false)
+  const [statusCheck, setStatusCheck] = useState<PendingSwap['statusCheck']>()
 
-  // ── Countdown timer ───────────────────────────────────────────────
-  const [countdown, setCountdown] = useState(0)
-  const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const [trackingNow, setTrackingNow] = useState(Date.now)
+  const elapsedSeconds = liveCreatedAt ? Math.max(0, Math.floor(((liveCompletedAt ?? trackingNow) - liveCreatedAt) / 1000)) : undefined
+  const countdown = elapsedSeconds === undefined ? 0 : Math.max(0, Math.ceil((quote?.estimatedTime ?? 0) - elapsedSeconds))
 
   // ── Before/after balance tracking ─────────────────────────────────
   const [beforeFromBal, setBeforeFromBal] = useState<string | null>(null)
@@ -1015,11 +1017,24 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
   // The swap-update message carries these too, but the snapshot is the backstop
   // for a dialog that mounted after the tracker's last push (resume / late open)
   // and is the only place createdAt (the broadcast anchor) is available.
-  const applyInboundSnap = useCallback((snap: any) => {
+  const updateStatusCheck = useCallback((check: NonNullable<PendingSwap['statusCheck']>) => {
+    setStatusCheck(previous => !previous || check.checkedAt >= previous.checkedAt ? check : previous)
+  }, [])
+
+  const applyInboundSnap = useCallback((snap: PendingSwap | null) => {
     if (!snap) return
     if (snap.status) setLiveStatus(previous => advanceSwapStatus(previous, snap.status))
     if (snap.payouts) setLivePayouts(snap.payouts)
     if (snap.receivedOutput) setLiveReceivedOutput(snap.receivedOutput)
+    if (Number.isFinite(snap.confirmations)) setLiveConfirmations(snap.confirmations)
+    if (snap.outboundConfirmations !== undefined) setLiveOutboundConfirmations(snap.outboundConfirmations)
+    if (snap.outboundRequiredConfirmations !== undefined) setLiveOutboundRequired(snap.outboundRequiredConfirmations)
+    if (isRealHash(snap.outboundTxid)) setLiveOutboundTxid(snap.outboundTxid)
+    if (snap.outboundChainId) setLiveOutboundChainId(snap.outboundChainId)
+    if (snap.refundReason) setLiveRefundReason(snap.refundReason)
+    if (snap.swapper && snap.integration !== 'thorchain' && snap.integration !== 'mayachain') setLiveSwapper(snap.swapper)
+    if (snap.completedAt) setLiveCompletedAt(snap.completedAt)
+    if (snap.statusCheck) updateStatusCheck(snap.statusCheck)
     if (snap.inboundBlockNumber != null && snap.inboundBlockNumber > 0) setLiveInboundBlockNumber(snap.inboundBlockNumber)
     if (snap.inboundBlockHash) setLiveInboundBlockHash(snap.inboundBlockHash)
     if (snap.inboundGasUsed) setLiveInboundGasUsed(snap.inboundGasUsed)
@@ -1029,7 +1044,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
     if (snap.error) setLiveError(snap.error)
     if (snap.errorActionable) setLiveErrorActionable(snap.errorActionable)
     if (snap.errorElapsedMinutes !== undefined && snap.errorElapsedMinutes !== null) setLiveErrorElapsedMinutes(snap.errorElapsedMinutes)
-  }, [])
+  }, [updateStatusCheck])
 
   // ── Listen for swap-update + swap-complete RPC messages ─────────
   useEffect(() => {
@@ -1090,6 +1105,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
     const tick = async () => {
       if (cancelled) return
       let snap: PendingSwap | null = null
+      const checkedAt = Date.now()
       try {
         snap = await rpcRequest<PendingSwap | null>('refreshSwap', { txid })
         // Guard after the await — dialog may have closed or switched txids.
@@ -1099,7 +1115,10 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
         if (snap?.nearTxHash) setLiveNearTxHash(snap.nearTxHash)
         if (snap?.relayRequestId) setLiveRelayRequestId(snap.relayRequestId)
         applyInboundSnap(snap)
-      } catch { /* swap-update push will retry on next tick */ }
+        if (!snap) updateStatusCheck({ checkedAt, error: 'not_found' })
+      } catch {
+        if (!cancelled) updateStatusCheck({ checkedAt, error: 'unavailable' })
+      }
       if (cancelled) return
       const s = advanceSwapStatus(liveStatusRef.current, snap?.status || liveStatusRef.current)
       if (shouldRetryCompletedSwapMetadata(s, snap?.trackingMetadataPending, completedMetadataPolls)) {
@@ -1116,24 +1135,29 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
     }
     tick()
     return () => { cancelled = true; if (timer) clearTimeout(timer) }
-  }, [open, txid, phase])
+  }, [open, txid, phase, applyInboundSnap, updateStatusCheck])
 
   // ── Manual recheck — fires a single immediate poll on demand ──────
   const handleRecheck = useCallback(async () => {
     if (!txid || rechecking) return
     const generation = executionUiGeneration.current
+    const checkedAt = Date.now()
     setRechecking(true)
     try {
       // Manual press forces a Pioneer rescan (?rescan=true) so a failed/stuck
       // swap can be re-derived from chain on demand.
-      const snap = await rpcRequest<any>('refreshSwap', { txid, rescan: true })
+      const snap = await rpcRequest<PendingSwap | null>('refreshSwap', { txid, rescan: true })
       if (generation !== executionUiGeneration.current) return
       if (snap?.nearTxHash) setLiveNearTxHash(snap.nearTxHash)
       if (snap?.relayRequestId) setLiveRelayRequestId(snap.relayRequestId)
       applyInboundSnap(snap)
-    } catch { /* swap-update push covers the failure */ }
-    if (generation === executionUiGeneration.current) setRechecking(false)
-  }, [txid, rechecking, applyInboundSnap])
+      if (!snap) updateStatusCheck({ checkedAt, error: 'not_found' })
+    } catch {
+      if (generation === executionUiGeneration.current) updateStatusCheck({ checkedAt, error: 'unavailable' })
+    } finally {
+      if (generation === executionUiGeneration.current) setRechecking(false)
+    }
+  }, [txid, rechecking, applyInboundSnap, updateStatusCheck])
 
   // When the user switches EVM address in the dialog while a quote is active,
   // discard the stale quote and return to input so a fresh quote is fetched.
@@ -1175,6 +1199,8 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
       setLiveInboundEffectiveGasPrice(undefined)
       setLiveInboundConfirmedAt(undefined)
       setLiveCreatedAt(undefined)
+      setLiveCompletedAt(undefined)
+      setStatusCheck(undefined)
       setLiveError(undefined)
       setLiveErrorActionable(undefined)
       setLiveErrorElapsedMinutes(undefined)
@@ -1182,22 +1208,17 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
       setAfterToBal(null)
       setShowConfetti(false)
       completionFiredRef.current = false
-      setCountdown(0)
-      if (countdownRef.current) { clearInterval(countdownRef.current); countdownRef.current = null }
     }
   }, [phase])
 
-  // Countdown timer — ticks every second from estimatedTime to 0, stops on complete/failed
+  // The broadcast timestamp keeps the estimate consistent across reopens.
   useEffect(() => {
-    if (countdownRef.current) { clearInterval(countdownRef.current); countdownRef.current = null }
-    if (phase === 'submitted' && quote?.estimatedTime && quote.estimatedTime > 0 && !isSwapComplete && !isSwapFailed) {
-      setCountdown(quote.estimatedTime)
-      countdownRef.current = setInterval(() => {
-        setCountdown(prev => prev > 0 ? prev - 1 : 0)
-      }, 1000)
-    }
-    return () => { if (countdownRef.current) { clearInterval(countdownRef.current); countdownRef.current = null } }
-  }, [phase, quote?.estimatedTime, isSwapComplete, isSwapFailed])
+    if (!open || phase !== 'submitted') return
+    setTrackingNow(Date.now())
+    if (isSwapComplete || isSwapFailed) return
+    const timer = setInterval(() => setTrackingNow(Date.now()), 1000)
+    return () => clearInterval(timer)
+  }, [open, phase, isSwapComplete, isSwapFailed])
 
   // Fire confetti + sound + fetch after-balances when swap completes
   useEffect(() => {
@@ -1551,6 +1572,8 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
     if (resumeSwap.inboundEffectiveGasPrice) setLiveInboundEffectiveGasPrice(resumeSwap.inboundEffectiveGasPrice)
     if (resumeSwap.inboundConfirmedAt !== undefined) setLiveInboundConfirmedAt(resumeSwap.inboundConfirmedAt)
     if (resumeSwap.createdAt) setLiveCreatedAt(resumeSwap.createdAt)
+    setLiveCompletedAt(resumeSwap.completedAt)
+    setStatusCheck(resumeSwap.statusCheck)
     if (resumeSwap.error) setLiveError(resumeSwap.error)
     if (resumeSwap.errorActionable) setLiveErrorActionable(resumeSwap.errorActionable)
     if (resumeSwap.errorElapsedMinutes !== undefined) setLiveErrorElapsedMinutes(resumeSwap.errorElapsedMinutes)
@@ -1567,13 +1590,14 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
 
     setQuote({
       expectedOutput: resumeSwap.expectedOutput,
-      minimumOutput: resumeSwap.expectedOutput,
+      minimumOutput: resumeSwap.minimumOutput ?? '',
       inboundAddress: resumeSwap.inboundAddress,
       router: resumeSwap.router,
       memo: resumeSwap.memo,
       fees: { affiliate: '0', outbound: '0', totalBps: 0 },
       estimatedTime: resumeSwap.estimatedTime,
       integration: resumeSwap.integration,
+      swapper: isNativeVaultIntegration ? undefined : resumeSwap.swapper,
       // Preserve real slippage from history; fall back to current setting so
       // the review screen never displays a misleading 0%.
       slippageBps: resumeSwap.slippageBps ?? slippageBps,
@@ -2420,6 +2444,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
 
       if (generation === executionUiGeneration.current) {
         setTxid(result.txid)
+        setLiveCreatedAt(Date.now())
         setPhase('submitted')
       }
       window.dispatchEvent(new CustomEvent('keepkey-swap-executed', {
@@ -3560,20 +3585,22 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                 </Flex>
               </Box>
 
-              {/* Live countdown — only show when not complete */}
-              {!isSwapComplete && !isSwapFailed && (countdown > 0 || (quote?.estimatedTime && quote.estimatedTime > 0)) && (
-                <Flex w="full" justify="center" align="center" gap="3"
+              {(elapsedSeconds !== undefined || statusCheck) && (
+                <Flex w="full" justify="center" align="center" gap="3" flexWrap="wrap"
                   bg="rgba(139,227,196,0.08)" border="1px solid" borderColor="rgba(139,227,196,0.18)"
                   borderRadius="lg" px="4" py="2">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--teal)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" />
-                  </svg>
-                  <Text fontSize="sm" fontFamily="mono" fontWeight="700" color="var(--teal)">
-                    {countdown > 0 ? (
-                      <>{Math.floor(countdown / 60)}:{(countdown % 60).toString().padStart(2, '0')}</>
-                    ) : formatTime(quote?.estimatedTime || 0)}
-                  </Text>
-                  <Text fontSize="10px" color="kk.textMuted">{t("estimatedTime")}</Text>
+                  {elapsedSeconds !== undefined && <Text fontSize="11px" color="kk.textSecondary">
+                    {t("elapsed")} {Math.floor(elapsedSeconds / 60)}:{(elapsedSeconds % 60).toString().padStart(2, '0')}
+                  </Text>}
+                  {!isSwapComplete && !isSwapFailed && countdown > 0 && <Text fontSize="11px" color="kk.textMuted">
+                    {t("estimatedTime")} {Math.floor(countdown / 60)}:{(countdown % 60).toString().padStart(2, '0')}
+                  </Text>}
+                  {statusCheck && <Text fontSize="11px" color="kk.textMuted">
+                    {t("lastChecked")} {new Date(statusCheck.checkedAt).toLocaleTimeString()}
+                  </Text>}
+                  {statusCheck?.error && <Text role="status" fontSize="11px" color="kk.textSecondary">
+                    {t(statusCheck.error === 'not_found' ? "swapStatusNotFound" : "swapStatusCheckFailed")}
+                  </Text>}
                 </Flex>
               )}
 

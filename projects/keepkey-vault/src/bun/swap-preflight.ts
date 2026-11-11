@@ -1,4 +1,12 @@
 import { evmRpc, evmSimulationCall, type EvmSimulationTx } from './evm-effects'
+import { isPioneerEvmSource } from './evm-rpc'
+
+export function assertSwapExecutionService(endpoint: string | undefined, pioneer: { EvmReadRpc?: unknown }) {
+  if (!endpoint) throw new Error('Cannot check swap execution: no EVM service is configured.')
+  if (isPioneerEvmSource(endpoint) && typeof pioneer.EvmReadRpc !== 'function') {
+    throw new Error('The selected Pioneer server lacks EVM execution checks. Select a compatible server in Settings.')
+  }
+}
 
 /** Read-only execution of the exact prepared call, after any approval is mined.
  * Transport errors are failures to check, never permission to spend gas. */

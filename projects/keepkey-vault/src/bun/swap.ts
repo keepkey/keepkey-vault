@@ -21,7 +21,7 @@ import { nameRuntimeProvider, resolveProviderTxMetadata } from './clearsign-prov
 import { evmCallRequiresAdvancedMode } from './evm-signing-policy'
 import { selectSwapRoute, isRelaySolverDeposit } from './swap-route-selection'
 import { resolveSwapEvmSchema } from './swap-evm-review'
-import { assertPrebuiltSwapExecution } from './swap-preflight'
+import { assertPrebuiltSwapExecution, assertSwapExecutionService } from './swap-preflight'
 import { assertNearIntentsPlainDeposit } from './near-intents-deposit'
 import { bufferedSwapGasLimit } from '../shared/swap-gas'
 import { certifiedSolanaProofApplies, findCertifiedSolanaProof } from './solana-certified-registry'
@@ -784,6 +784,10 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
       const result = await buildRelaySwapTx(params, fromChain, fromAddress, getEvmRpcSource, isErc20Source, /* previewMode */ false, certifiedSupported, runtimeGate)
       unsignedTx = result.unsignedTx
       fromAmountBaseUnits = result.fromAmountBaseUnits
+
+      if (String(unsignedTx.data || '').length >= 10) {
+        assertSwapExecutionService(getEvmRpcSource(fromChain), pioneer)
+      }
 
       // Firmware 7.15 recognizes only keys explicitly trusted into a RAM slot.
       // This is never silent: LoadClearsignSigner displays alias + fingerprint

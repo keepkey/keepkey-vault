@@ -37,6 +37,13 @@ describe('quote fee currencies and units', () => {
     const result = parseSwapFeeDisclosure({ fees: { affiliate: '7329702', outbound: '24992500', total_bps: 150 } }, {}, { ...context, integration: 'thorchain', swapper: 'THORChain' })
     expect(result.items.map(item => [item.symbol, item.amount])).toEqual([['USDT', '0.07329702'], ['USDT', '0.249925']])
   })
+  test('a nonzero protocol rate with no usable amount is shown as a rate only', () => {
+    const rune = 'cosmos:thorchain-1/slip44:931'
+    const result = parseSwapFeeDisclosure({ fees: { items: [
+      { kind: 'provider', assetCaip: rune, symbol: 'RUNE', decimals: 8, amountBaseUnits: '0', bps: 39 },
+    ] } }, {}, { ...context, toCaip: rune, integration: 'thorchain' })
+    expect(result.items).toEqual([{ kind: 'provider', bps: 39 }])
+  })
   test('direct Uniswap human output fee is not divided again', () => {
     const result = parseSwapFeeDisclosure({ fees: { affiliate: '1', outbound: '0', total_bps: 30 } }, {}, { ...context, integration: 'uniswap', swapper: 'Uniswap' })
     expect(result.items[0]).toMatchObject({ assetCaip: usdt, symbol: 'USDT', amount: '1' })

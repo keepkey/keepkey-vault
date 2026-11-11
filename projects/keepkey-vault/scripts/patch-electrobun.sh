@@ -43,6 +43,17 @@ patch_files() {
   [ "$found" -gt 0 ] || die "$label: no target file matched ($*). Electrobun changed its package layout."
 }
 
+# --- CLI wrapper: a killed native CLI is a failed build ---
+
+# The package wrapper receives a null exit code when the native CLI is killed
+# by a signal, and `code || 0` turned that into success. A failed native build
+# must propagate through Bun, PowerShell, and make.
+patch_files "CLI signal exit status" \
+  'process.exit(code ?? 1)' \
+  'process.exit(code || 0)' \
+  's/process.exit(code || 0)/process.exit(code ?? 1)/' \
+  "$EBUN/bin/electrobun.cjs"
+
 # --- CLI: quiet zip + bigger buffer (prevents ENOBUFS on the ~50MB app zip) ---
 
 patch_files "zip quiet mode" \

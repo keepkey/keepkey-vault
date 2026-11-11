@@ -186,21 +186,22 @@ export async function buildEvmTx(
     }
   }
 
+  const quotedGasPrice = gasPrice
   if (feeLevel <= 2) gasPrice = gasPrice * 80n / 100n
   else if (feeLevel >= 8) gasPrice = gasPrice * 150n / 100n
 
-  // Enforce 1 gwei floor for known chains — RPC/Pioneer frequently report unrealistically low fees
+  // Preserve quoted sub-gwei gas prices on L2s. Chains without a configured
+  // minimum use the quote itself as the floor: eth_gasPrice is the base fee
+  // plus a small tip, so the slow discount would bid under the base fee
+  // (Arbitrum rejects that transaction; OP Stack chains leave it unmined).
   const MIN_GAS_WEI: Record<number, bigint> = {
     1: BigInt(1e9),      // Ethereum
-    8453: BigInt(1e9),   // Base
-    42161: BigInt(1e9),  // Arbitrum
-    10: BigInt(1e9),     // Optimism
     56: BigInt(3e9),     // BSC
     137: BigInt(30e9),   // Polygon
     43114: BigInt(25e9), // Avalanche
   }
-  const minGas = MIN_GAS_WEI[chainId]
-  if (minGas && gasPrice < minGas) {
+  const minGas = MIN_GAS_WEI[chainId] ?? quotedGasPrice
+  if (gasPrice < minGas) {
     console.log(`${TAG} Gas price ${gasPrice} below floor ${minGas} — using floor`)
     gasPrice = minGas
   }

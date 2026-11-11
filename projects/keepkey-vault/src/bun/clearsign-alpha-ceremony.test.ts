@@ -1,3 +1,4 @@
+import { describe, expect, it } from 'bun:test'
 import { utils as ethersUtils } from 'ethers'
 
 import {
@@ -22,7 +23,7 @@ function bodyHex(overrides: { flags?: number; chain?: number; expiry?: number; d
 }
 
 describe('7.16 alpha certificate ceremony', () => {
-  it.each(CLEARSIGN_EVM_SCOPES)('binds the reviewed EVM certificate to chain %i', (chainId) => {
+  it.each(CLEARSIGN_EVM_SCOPES.map(chainId => [chainId]))('binds the reviewed EVM certificate to chain %i', (chainId) => {
     const request = buildAlphaCertificateBody('KeepKey Alpha 716', 1798675200, chainId, ALPHA_DELEGATE_PUBLIC_KEY)
     const certificate = inspectAlphaCertificateBody(request.signedBodyHex, request.expectedMessageHashHex, 1787500000)
     expect(certificate.chainId).toBe(chainId)
