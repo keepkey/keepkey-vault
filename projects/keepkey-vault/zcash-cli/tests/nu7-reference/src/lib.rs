@@ -156,7 +156,10 @@ mod tests {
 
     #[test]
     fn production_bytes_are_canonical_nu7_and_preserve_every_input_and_output() {
-        let f = fixture();
+        assert_canonical_nu7(&fixture());
+    }
+
+    fn assert_canonical_nu7(f: &Fixture) {
         assert_eq!(f.branch_id, 0x7719_0ad9);
         assert_eq!(f.tx_version, 6);
         assert_eq!(f.version_group_id, 0xd884_b698);
@@ -191,8 +194,31 @@ mod tests {
             f.inputs.len() >= 2,
             "exercise distinct inputs and derivations"
         );
+        assert_sighashes(&f);
+    }
+
+    /// Explicit evidence run, e.g. a transaction Desktop built, the 7.16.0
+    /// emulator signed and the sidecar finalized:
+    /// KEEPKEY_NU7_EVIDENCE=<file> cargo test --locked --manifest-path
+    /// tests/nu7-reference/Cargo.toml -- --ignored external_evidence
+    #[test]
+    #[ignore]
+    fn external_evidence_is_canonical_nu7_with_matching_sighashes() {
+        let path = std::env::var("KEEPKEY_NU7_EVIDENCE").expect("KEEPKEY_NU7_EVIDENCE file");
+        let evidence: Vec<Fixture> =
+            serde_json::from_slice(&std::fs::read(&path).expect("evidence file"))
+                .expect("evidence schema: an array of fixtures");
+        assert!(!evidence.is_empty());
+        for f in &evidence {
+            assert_canonical_nu7(f);
+            assert_sighashes(f);
+        }
+        println!("NU7_EVIDENCE_VERIFIED:{} transactions", evidence.len());
+    }
+
+    fn assert_sighashes(f: &Fixture) {
         assert_eq!(
-            hashes(&f),
+            hashes(f),
             f.inputs
                 .iter()
                 .map(|i| i.sighash.clone())

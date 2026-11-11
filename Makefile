@@ -121,6 +121,14 @@ test-emu-zcash-nu7:
 	@test -n "$(KK_EMU_DYLIB)" || { echo 'Set KK_EMU_DYLIB to the reviewed 7.17 alpha emulator'; exit 1; }
 	cd $(PROJECT_DIR) && VAULT_API_URL=http://127.0.0.1:9 KK_EMU_DYLIB="$(KK_EMU_DYLIB)" bun test tests/emulator/14-zcash-nu7.test.ts
 
+# Desktop's real build/sign/finalize pipeline on released 7.16.0 or the reviewed
+# alpha emulator. Reads the live mainnet lightwalletd tip and branch
+# (GetLightdInfo only); never broadcasts.
+.PHONY: test-emu-zcash-nu7-pipeline
+test-emu-zcash-nu7-pipeline: build-zcash-cli
+	@test -n "$(KK_EMU_DYLIB)" || { echo 'Set KK_EMU_DYLIB to the v7.16.0 CI emulator (keepkey-firmware run 38849341361) or the reviewed alpha emulator'; exit 1; }
+	cd $(PROJECT_DIR) && VAULT_API_URL=http://127.0.0.1:9 KK_EMU_DYLIB="$(KK_EMU_DYLIB)" NU7_EVIDENCE_DIR="$(NU7_EVIDENCE_DIR)" bun test tests/emulator/15-zcash-nu7-pipeline.test.ts
+
 build-zcash-cli-debug:
 	cd $(PROJECT_DIR)/zcash-cli && cargo test
 	cd $(PROJECT_DIR)/zcash-cli && cargo build
