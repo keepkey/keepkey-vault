@@ -5,9 +5,9 @@
  * evidence must never be reported as green.
  */
 import { expect, test } from 'bun:test'
-import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 
 const ROOT = new URL('../../../', import.meta.url).pathname
 const makefile = readFileSync(join(ROOT, 'Makefile'), 'utf8')
@@ -111,11 +111,14 @@ test.each([
   const bin = mkdtempSync(join(tmpdir(), 'preflight-tsc-'))
   try {
     writeFileSync(join(bin, '.typecheck-baseline'), '1')
-    writeFileSync(join(bin, 'npx'), '#!/bin/sh\nprintf "%s\\n" "$TEST_TSC_OUTPUT"\nexit "$TEST_TSC_STATUS"\n')
-    chmodSync(join(bin, 'npx'), 0o755)
+    // The gate runs the project's installed compiler, never one resolved by npx.
+    const tsc = join(bin, 'node_modules', '.bin', 'tsc')
+    mkdirSync(dirname(tsc), { recursive: true })
+    writeFileSync(tsc, '#!/bin/sh\nprintf "%s\\n" "$TEST_TSC_OUTPUT"\nexit "$TEST_TSC_STATUS"\n')
+    chmodSync(tsc, 0o755)
     const script = typecheckSection.replaceAll('$(PROJECT_DIR)', bin)
     const run = Bun.spawnSync(['bash', '-c', `fail=0\n${script}\necho "FAIL=$fail"`], {
-      cwd: ROOT, env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, TEST_TSC_OUTPUT: output, TEST_TSC_STATUS: String(status) },
+      cwd: ROOT, env: { ...process.env, TEST_TSC_OUTPUT: output, TEST_TSC_STATUS: String(status) },
     })
     const out = run.stdout.toString()
     expect(run.exitCode).toBe(0)
