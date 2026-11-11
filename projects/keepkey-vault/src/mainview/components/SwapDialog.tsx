@@ -2812,7 +2812,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
   if (!open) return null
   if (unsupported) {
     return (
-      <Box position="fixed" inset="0" zIndex={Z.dialog} display="flex" alignItems="center" justifyContent="center" onKeyDown={dialogKeys}>
+      <Box position="fixed" inset="0" zIndex={Z.dialog} display="flex" alignItems="flex-start" justifyContent="center" pt="5vh" onKeyDown={dialogKeys}>
         <Box position="absolute" inset="0" bg="rgba(11,11,14,0.28)" backdropFilter="blur(20px) saturate(140%)" onClick={handleClose} data-testid="swap-backdrop" />
         <Box ref={dialogPanel} role="dialog" aria-modal="true" aria-label={t('title')} tabIndex={-1}
           position="relative"
@@ -2843,8 +2843,12 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
     )
   }
 
+  // Top-anchored, not vertically centred: the panel grows as the quote,
+  // warnings and fees arrive, and a centred panel moved up by that much
+  // (Jasper, 1.6.11: 49 px over three steps), so a click aimed at a control
+  // could land on another one. Anchored at 5vh, it only grows downward.
   return (
-    <Box position="fixed" inset="0" zIndex={Z.dialog} display="flex" alignItems="center" justifyContent="center" onKeyDown={dialogKeys}>
+    <Box position="fixed" inset="0" zIndex={Z.dialog} display="flex" alignItems="flex-start" justifyContent="center" pt="5vh" onKeyDown={dialogKeys}>
       <style>{DIALOG_CSS}</style>
       <Box position="absolute" inset="0" bg="rgba(11,11,14,0.28)" backdropFilter="blur(20px) saturate(140%)" onClick={handleClose} data-testid="swap-backdrop" />
       <Box ref={dialogPanel} role="dialog" aria-modal="true" aria-label={t('title')} tabIndex={-1}
@@ -4273,9 +4277,9 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                         {previewLoading && (
                           <Text fontSize="10px" color="kk.textMuted">{uiText("Building transaction preview…")}</Text>
                         )}
-                        {previewError && (
-                          <Text fontSize="10px" color="kk.error">{uiText("Preview failed:")}{" "}{previewError}</Text>
-                        )}
+                        {/* previewError is shown once, in the banner below this card;
+                            repeating it here showed the same error twice when
+                            "Fees & details" was open. */}
                         {previewBuild?.approveTx && (
                           <Box mb="2">
                             <Text fontSize="10px" color="kk.textMuted" mb="1">{uiText("Approve tx (ERC-20 allowance)")}</Text>
