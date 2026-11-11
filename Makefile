@@ -451,6 +451,7 @@ test-i18n:
 	cd $(PROJECT_DIR) && bun scripts/check-i18n.ts && bun test __tests__/i18n-safety.test.ts __tests__/report-fonts.test.ts
 
 test-unit:
+	cd $(PROJECT_DIR) && bun test __tests__/build-electrobun.test.ts
 	cd $(PROJECT_DIR) && bun test __tests__/hyperliquid-identity.test.ts
 	cd $(PROJECT_DIR) && bun test __tests__/receive-payment-uri.test.ts
 	cd $(PROJECT_DIR) && bun test __tests__/swap-row-explorer.test.ts
