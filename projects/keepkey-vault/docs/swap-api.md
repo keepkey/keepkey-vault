@@ -37,8 +37,12 @@ session, and cannot be reused after a device signing attempt or successful
 execution. After a timeout or lost response, reconcile transaction history
 before requesting a new quote. A pre-sign build failure can retry while the
 quote remains fresh. Switching wallet/API sessions or restarting Vault requires
-a new quote. Expiry/session checks run again before every signature, including
-an approval followed by a swap; a lengthy approval can require a new quote.
+a new quote. The session check runs again before every signature. The expiry
+check runs again before the swap signature, but not before an ERC-20 approval:
+an approval carries no rate. If the quote expires while an approval confirms,
+`/execute` fails with "The approval was sent, but the swap quote expired…";
+request a new quote to finish the swap. Once the approval is mined, the new
+quote needs no second approval.
 
 The `/open` and `/set` controls accept picker keys or CAIPs, resolve asset
 definitions on the server and seed the dialog after it mounts. Navigation and

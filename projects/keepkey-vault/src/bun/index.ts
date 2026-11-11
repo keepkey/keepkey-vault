@@ -3868,7 +3868,8 @@ async function headlessExecuteSwap(params: ExecuteSwapParams, pushSubStage: (sta
 	const lease = swapQuoteLeases.claim(params, sessionEpoch)
 	const cachedQuote = lease.quote
 	const execParams = lease.params
-	const beforeSign = () => lease.beforeSign(engine.wallet === wallet ? activitySessionEpoch : -1)
+	// The step names the prompt: an approval carries no rate, the swap needs a fresh quote.
+	const beforeSign = (step: string) => lease.beforeSign(engine.wallet === wallet ? activitySessionEpoch : -1, step)
 	let executionSucceeded = false
 
 	const result = await executeSwap(execParams, {
@@ -3887,7 +3888,7 @@ async function headlessExecuteSwap(params: ExecuteSwapParams, pushSubStage: (sta
 			return []
 		},
 		wrapSign: (fn, details) => {
-			beforeSign()
+			beforeSign(details.operation)
 			return engine.isEmulator ? emuSigningOp(fn, details) : fn()
 		},
 		pushSubStage,
@@ -3901,7 +3902,7 @@ async function headlessExecuteSwap(params: ExecuteSwapParams, pushSubStage: (sta
 			deviceId: () => engine.getDeviceState().deviceId,
 			evmEndpoint: getEvmSimulationEndpoint,
 			solanaEndpoint: () => getSetting('solana_rpc_endpoint') || 'https://api.mainnet-beta.solana.com',
-		}, input, () => { beforeSign(); return sign() }),
+		}, input, () => { beforeSign(input.kind); return sign() }),
 		onClearSignEvent: (event) => recordClearSignEvent({
 			kind: 'transaction',
 			source: 'vault-rpc',
