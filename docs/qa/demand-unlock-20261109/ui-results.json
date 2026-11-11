@@ -1,0 +1,18 @@
+{
+  "checks": {
+    "locked-portfolio-keeps-mounted-normal-device-actions": true,
+    "explicit-unlock-opens-real-device-prompt-and-resumes": true,
+    "cancel-does-not-reopen-an-unasked-pin": true,
+    "wrong-pin-is-visible-and-user-can-retry": true,
+    "cold-locked-start-needs-explicit-unlock": true,
+    "quick-same-id-replug-does-not-inherit-verification": true,
+    "quick-replug-retires-a-live-pin-matrix-before-another-device": true,
+    "different-locked-device-does-not-show-prior-portfolio": true,
+    "seed-purge-invalidates-locked-continuity": true,
+    "hidden-wallet-pin-continuity-ends-at-passphrase-boundary": true,
+    "setup-still-replaces-the-portfolio": true
+  },
+  "failures": [],
+  "browserErrors": [],
+  "syntheticOnly": true
+}

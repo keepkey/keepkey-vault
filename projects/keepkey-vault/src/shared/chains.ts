@@ -1,6 +1,6 @@
 import { Chain, ChainToNetworkId, ChainToCaip, BaseDecimal } from '@pioneer-platform/pioneer-caip'
 import type { BtcScriptType, CustomChain } from './types'
-import { versionCompare } from './firmware-versions'
+import { versionCompare, MONERO_MIN_FIRMWARE } from './firmware-versions'
 
 export interface ChainDef {
   id: string
@@ -10,7 +10,7 @@ export interface ChainDef {
   networkId: string       // CAIP-2 (derived from pioneer-caip)
   caip: string            // CAIP-19 (derived from pioneer-caip)
   decimals: number        // Base decimals (derived from pioneer-caip)
-  chainFamily: 'utxo' | 'evm' | 'cosmos' | 'xrp' | 'solana' | 'zcash-shielded' | 'tron' | 'ton' | 'hive'
+  chainFamily: 'utxo' | 'evm' | 'cosmos' | 'xrp' | 'solana' | 'zcash-shielded' | 'tron' | 'ton' | 'hive' | 'monero'
   color: string
   rpcMethod: string
   signMethod: string
@@ -130,7 +130,7 @@ const CONFIGS: ChainConfig[] = [
     explorerAddressUrl: 'https://etherscan.io/address/{{address}}',
   },
   {
-    id: 'polygon', chain: Chain.Polygon, coin: 'Polygon', symbol: 'MATIC',
+    id: 'polygon', chain: Chain.Polygon, coin: 'Polygon', symbol: 'POL',
     chainFamily: 'evm', color: '#8247E5',
     rpcMethod: 'ethGetAddress', signMethod: 'ethSignTx',
     defaultPath: [0x8000002C, 0x8000003C, 0x80000000, 0, 0], chainId: '137',
@@ -198,12 +198,17 @@ const CONFIGS: ChainConfig[] = [
     chainFamily: 'evm', color: '#1F70FF',
     rpcMethod: 'ethGetAddress', signMethod: 'ethSignTx',
     defaultPath: [0x8000002C, 0x8000003C, 0x80000000, 0, 0], chainId: '143',
+    explorerTxUrl: 'https://monadscan.com/tx/{{txid}}',
+    explorerAddressUrl: 'https://monadscan.com/address/{{address}}',
   },
   {
     id: 'hyperliquid', chain: Chain.Hyperliquid, coin: 'Hyperliquid', symbol: 'HYPE',
     chainFamily: 'evm', color: '#00D084',
     rpcMethod: 'ethGetAddress', signMethod: 'ethSignTx',
-    defaultPath: [0x8000002C, 0x8000003C, 0x80000000, 0, 0], chainId: '2868',
+    // HyperEVM mainnet: https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/hyperevm
+    defaultPath: [0x8000002C, 0x8000003C, 0x80000000, 0, 0], chainId: '999',
+    explorerTxUrl: 'https://hyperevmscan.io/tx/{{txid}}',
+    explorerAddressUrl: 'https://hyperevmscan.io/address/{{address}}',
   },
   {
     id: 'cosmos', chain: Chain.Cosmos, coin: 'Cosmos', symbol: 'ATOM',
@@ -290,7 +295,7 @@ const CONFIGS: ChainConfig[] = [
     chainFamily: 'zcash-shielded', color: '#ECB244',
     rpcMethod: 'zcashGetOrchardFvk', signMethod: 'zcashSignPczt',
     defaultPath: [0x80000020, 0x80000085, 0x80000000], // m/32'/133'/0' (ZIP-32 Orchard)
-    hidden: true, // Shown via Privacy tab on Zcash AssetPage, not as separate Dashboard card
+    hidden: true, // Shielded pool within Zcash's asset page, not a separate Dashboard card
     minFirmware: '7.15.0',
   },
   {
@@ -343,9 +348,22 @@ const CONFIGS: ChainConfig[] = [
     // SLIP-0048 active-role key: m/48'/13'/1'/0'/0' (matches Ledger / Hive Keychain).
     // Was m/44'/1275'/0'/0/0 (v1, BIP-44) — non-interoperable; see hiveRolePath().
     defaultPath: [0x80000030, 0x8000000D, 0x80000001, 0x80000000, 0x80000000],
-    explorerAddressUrl: 'https://hiveblocks.com/@{{address}}',
-    explorerTxUrl: 'https://hiveblocks.com/tx/{{txid}}',
+    // hiveblocks.com started returning 502 (Nov 2026); hivehub.dev uses the same /@account and /tx/<id> paths.
+    explorerAddressUrl: 'https://hivehub.dev/@{{address}}',
+    explorerTxUrl: 'https://hivehub.dev/tx/{{txid}}',
     minFirmware: '7.15.0',  // Hive handler ships in firmware 7.15.0 (alpha), same as Zcash
+  },
+  {
+    // Monero (preview). Balances come from the local watch-only sidecar, not Pioneer, so
+    // hidden keeps it out of every Pioneer/pubkey/swap loop; the Dashboard opts it in when the
+    // Monero setting is on (moneroChainVisible). Receive/Send use the monero* RPCs.
+    id: 'monero', chain: 'XMR' as any, coin: 'Monero', symbol: 'XMR',
+    chainFamily: 'monero', color: '#FF6600',
+    rpcMethod: 'moneroGetAddress', signMethod: 'moneroSend',
+    defaultPath: [0x8000002C, 0x80000080, 0x80000000],
+    explorerTxUrl: 'https://xmrchain.net/tx/{{txid}}',
+    hidden: true,
+    minFirmware: MONERO_MIN_FIRMWARE,
   },
 ]
 
@@ -356,6 +374,7 @@ const CAIP_FALLBACKS: Record<string, string> = {
   TRX: 'tron:27Lqcw/slip44:195',
   TON: 'ton:-239/slip44:607',
   HIVE: 'hive:beeab0de/slip44:1275',
+  XMR: 'monero:418015bb9ae982a1975da7d79277c270/slip44:128',
 }
 const NETWORKID_FALLBACKS: Record<string, string> = {
   GNO: 'eip155:100',
@@ -363,6 +382,7 @@ const NETWORKID_FALLBACKS: Record<string, string> = {
   TRX: 'tron:27Lqcw',
   TON: 'ton:-239',
   HIVE: 'hive:beeab0de',
+  XMR: 'monero:418015bb9ae982a1975da7d79277c270',
 }
 const DECIMAL_FALLBACKS: Record<string, number> = {
   GNO: 18,
@@ -370,14 +390,30 @@ const DECIMAL_FALLBACKS: Record<string, number> = {
   TRX: 6,
   TON: 9,
   HIVE: 3,
+  XMR: 12,
 }
 
-// Derive CAIP identifiers from pioneer-caip — single source of truth
+// The pinned pioneer-caip package incorrectly identifies HYPE as chain 2868.
+// Override its built-in identity, never alias that unrelated chain to HyperEVM.
+const CHAIN_METADATA_OVERRIDES: Partial<Record<string, Pick<ChainDef, 'networkId' | 'caip' | 'decimals'>>> = {
+  [Chain.Hyperliquid]: { networkId: 'eip155:999', caip: 'eip155:999/slip44:60', decimals: 18 },
+}
+
+/** Reject a known mislabeled provider/catalog entry, not unrelated custom
+ * chains using 2868. These inputs are curated discovery metadata only. */
+export function isStaleHyperliquidMetadata(networkId: string, symbol?: string, name?: string): boolean {
+  const [network, asset] = networkId.split('/')
+  return network === 'eip155:2868' && (!asset || asset.startsWith('slip44:'))
+    && (symbol?.toUpperCase() === 'HYPE' || /hyperliquid|hyperevm/i.test(name || ''))
+}
+
+// Derive identifiers from pioneer-caip with reviewed identity corrections.
 export const CHAINS: ChainDef[] = CONFIGS.map(c => ({
   ...c,
   networkId: ChainToNetworkId[c.chain as keyof typeof ChainToNetworkId] || NETWORKID_FALLBACKS[c.chain] || '',
   caip: ChainToCaip[c.chain as keyof typeof ChainToCaip] || CAIP_FALLBACKS[c.chain] || '',
   decimals: BaseDecimal[c.chain as keyof typeof BaseDecimal] ?? DECIMAL_FALLBACKS[c.chain] ?? 8,
+  ...CHAIN_METADATA_OVERRIDES[c.chain],
 }))
 
 /** Display name + native symbol for an EVM chain id ("8453" or 8453), from

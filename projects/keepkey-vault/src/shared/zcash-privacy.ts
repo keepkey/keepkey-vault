@@ -1,4 +1,5 @@
 export type ZcashPrivacyPage = 'send' | 'shield' | 'receive' | 'scan' | 'history'
+export type ZcashPool = 'transparent' | 'shielded'
 
 export interface ZcashShieldedBalance {
   confirmed: number

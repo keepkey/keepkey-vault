@@ -32,7 +32,7 @@ export const ZCASH_V2_CSS = `
 	padding: 4px 4px 24px;
 }
 .zcash-v2 *, .zcash-v2 *::before, .zcash-v2 *::after { box-sizing: border-box; }
-.zcash-v2 button { font-family: inherit; color: inherit; background: none; border: none; cursor: pointer; padding: 0; }
+.zcash-v2 button:not(.chakra-button) { font-family: inherit; color: inherit; background: none; border: none; cursor: pointer; padding: 0; }
 .zcash-v2 button:disabled { opacity: 0.45; cursor: not-allowed; }
 .zcash-v2 input { font-family: inherit; color: inherit; background: none; border: none; outline: none; }
 
@@ -874,6 +874,48 @@ export const ZCASH_V2_CSS = `
 .zcash-v2 .empty-card p { margin: 0 auto; color: var(--zk-fg-dim); font-size: 13px; line-height: 1.55; max-width: 50ch; }
 
 /* ---- responsive ---- */
+.zcash-v2.zcash-embedded {
+	--zk-bg: var(--ink-0);
+	--zk-bg-1: transparent;
+	--zk-bg-2: var(--ink-2);
+	--zk-bg-3: var(--ink-3);
+	--zk-line: var(--line);
+	--zk-line-soft: var(--line);
+	--zk-fg: var(--text-0);
+	--zk-fg-dim: var(--text-2);
+	--zk-fg-mute: var(--text-3);
+	--zk-fg-faint: var(--text-3);
+	--zk-gold: var(--gold);
+	--zk-gold-hi: var(--gold-2);
+	--zk-font-display: var(--font-sans);
+	--zk-font-mono: var(--font-mono);
+	padding: 0;
+	font-family: var(--font-sans);
+}
+.zcash-embedded .form-page.with-aside { grid-template-columns: minmax(0, 1fr); }
+.zcash-embedded .form-page > .card { border: 0; background: transparent; }
+.zcash-embedded .form-page > .card > .card-body { padding: 0; }
+.zcash-embedded .page-head h2 { font-size: 15px; font-weight: 600; }
+.zcash-embedded .page-head p { font-size: 12px; }
+.zcash-embedded .field { background: var(--ink-0); border-radius: 12px; }
+.zcash-embedded .submit { border-radius: 12px; }
+/* Embedded actions must read as enabled: full-strength text and a visible
+   border (the old --text-1 on a 10% border made every action look disabled). */
+.zcash-embedded .chakra-button {
+	color: var(--text-0); border-color: rgba(255,255,255,0.22);
+	padding: 8px 12px; min-height: 32px; border-radius: 10px;
+	font-size: 12px; font-weight: 500; line-height: 1.2;
+}
+.zcash-embedded .chakra-button:hover:not(:disabled) { background: var(--ink-3); border-color: rgba(255,255,255,0.32); }
+/* The one primary receive action: verify the address on the KeepKey screen. */
+.zcash-embedded .chakra-button.zk-primary { color: var(--ink-0); background: var(--gold); border-color: var(--gold); font-weight: 600; }
+.zcash-embedded .chakra-button.zk-primary:hover:not(:disabled) { background: var(--gold-2); border-color: var(--gold-2); }
+.zcash-embedded details.form-aside { display: block; }
+.zcash-embedded details.form-aside > summary { cursor: pointer; font-size: 12px; color: var(--text-2); padding: 8px 0; }
+.zcash-embedded .form-aside .aside-card { margin-top: 8px; }
+.zcash-embedded button:focus-visible, .zcash-embedded summary:focus-visible { outline: 2px solid var(--gold); outline-offset: 3px; }
+.zcash-embedded [hidden] { display: none !important; }
+
 @media (max-width: 1100px) {
 	.zcash-v2 .form-page.with-aside { grid-template-columns: 1fr; }
 	.zcash-v2 .receive-grid { grid-template-columns: 1fr; }

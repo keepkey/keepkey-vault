@@ -16,14 +16,16 @@
  *
  * Talks UDP only (never USB): kkemu on 127.0.0.1:KK_EMU_UDP_PORT, its DebugLink
  * on the next port. Start kkemu from an empty directory (blank flash) with
- * KK_CLEARSIGN_TEST_ROOT set to the fixture's test root:
+ * KK_CLEARSIGN_TEST_ROOT set to the fixture's test root, and give the test the
+ * same root: Desktop trusts an emulator's TEST root only when it is told it.
  *
  *   KEEPKEY_UDP_PORT=13744 KK_CLEARSIGN_TEST_ROOT=<root> kkemu
- *   KK_FORCE_UDP=1 KK_EMU_UDP_PORT=13744 KK_ERC7730_TYPED_FIXTURE=<signed-catalog-4-TEST.json> \
+ *   KK_FORCE_UDP=1 KK_EMU_UDP_PORT=13744 KK_CLEARSIGN_TEST_ROOT=<root> \
+ *     KK_ERC7730_TYPED_FIXTURE=<signed-catalog-4-TEST.json> \
  *     bun test tests/emulator/11-erc7730-typed-717.test.ts
  *
  * The fixture is the issuer's TEST-root dry run of batch 4 (same programs as
- * production, TEST certificates). Skipped unless both variables are set.
+ * production, TEST certificates). Skipped unless all three variables are set.
  */
 import dgram from 'node:dgram'
 import { readFileSync } from 'node:fs'
@@ -33,10 +35,10 @@ import * as core from '@keepkey/hdwallet-core'
 import { Transport, type TransportDelegate } from '@keepkey/hdwallet-keepkey'
 import { TEST_MNEMONIC } from './harness'
 import requestFixture from '../../src/bun/erc7730-typed-data.fixtures.json'
-import { describeErc7730TypedData } from '../../src/bun/erc7730-describe'
 
 const PORT = Number(process.env.KK_EMU_UDP_PORT || 0)
 const CATALOG = process.env.KK_ERC7730_TYPED_FIXTURE
+const TEST_ROOT = /^0[23][0-9a-f]{64}$/.test(process.env.KK_CLEARSIGN_TEST_ROOT ?? '') ? process.env.KK_CLEARSIGN_TEST_ROOT : undefined
 const PATH = [0x8000002c, 0x8000003c, 0x80000000, 0, 0]
 const TYPEHASH = '939c21a48a8dbe3a9a2404a1d46691e4d39f6583d6ec6b35714604c986d80106'
 const PERMIT2 = '0x000000000022d473030f116ddee9f6b43ac78ba3'
@@ -198,7 +200,7 @@ const CASES = [
   },
 ]
 
-const enabled = !!PORT && !!CATALOG
+const enabled = !!PORT && !!CATALOG && !!TEST_ROOT
 let delegate: UdpDelegate | null = null
 let wallet: any = null
 let server: ReturnType<typeof Bun.serve> | null = null
@@ -226,8 +228,9 @@ describe.skipIf(!enabled)('typed-data ERC-7730 through Desktop on a 7.17 emulato
       },
     })
     process.env.CLEARSIGN_SERVICE_URL = `http://127.0.0.1:${server.port}`
-    // As in 09-erc7730: an emulator started with a test root trusts that root.
-    ;(await import('../../src/shared/certified-evm-envelope')).configureProductionRootTrust(() => true)
+    // As Desktop does for an emulator launched with a TEST root its library
+    // reads (index.ts): that root, and only it, verifies certified envelopes.
+    ;(await import('../../src/shared/certified-evm-envelope')).configureProductionRootTrust(() => true, () => TEST_ROOT)
     resolver = await import('../../src/bun/erc7730-resolver')
     preview = await import('../../src/bun/evm-signing-preview')
     resolver.forgetRefusedErc7730Definitions()
@@ -288,14 +291,13 @@ describe.skipIf(!enabled)('typed-data ERC-7730 through Desktop on a 7.17 emulato
       expect(new Set(screens).size).toBe(screens.length)
       for (const label of ['Spender:', 'Amount:', 'Deadline:']) expect(run.screens.some((s) => s.body.startsWith(label))).toBe(true)
       // The card states what the device showed: its intent and each field's
-      // value. The card describes only a production-signed envelope, so read
-      // the production envelope of the same program (the Base request fixture;
-      // the TEST dry run signs identical programs under a TEST root).
-      expect(card.erc7730Description).toBeUndefined()
-      if (chainId !== Number(requestFixture.typedData.domain.chainId)) return
-      const program = (hex: string) => { const b = Buffer.from(hex.replace(/^0x/, ''), 'hex'); return b.subarray(10, 10 + b.readUInt32BE(6)).toString('hex') }
-      expect(program(requestFixture.definition.envelope)).toBe(program(card.erc7730.definitions[0].envelope))
-      const d = describeErc7730TypedData(requestFixture.definition.envelope, c.typedData, firmwareVersion, from)!
+      // value. Desktop trusts the TEST root here, so the card describes the
+      // TEST envelope it attached; on Base that is the production program too.
+      const d = card.erc7730Description
+      if (chainId === Number(requestFixture.typedData.domain.chainId)) {
+        const program = (hex: string) => { const b = Buffer.from(hex.replace(/^0x/, ''), 'hex'); return b.subarray(10, 10 + b.readUInt32BE(6)).toString('hex') }
+        expect(program(requestFixture.definition.envelope)).toBe(program(card.erc7730.definitions[0].envelope))
+      }
       console.log(`  card: ${d?.intent} | ${d?.fields.map((f: any) => `${f.label}: ${f.value.replace(/\n/g, ' / ')}`).join(' | ')}`)
       expect(d?.intent).toBeTruthy()
       expect(run.screens.some((s) => `${s.title} ${s.body}`.includes(d.intent))).toBe(true)

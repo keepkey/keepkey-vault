@@ -1,7 +1,10 @@
+import type { MoneroSendReview, MoneroStatus, EmulatorBuildInfo, EmulatorNextBuild } from './types'
 import type { MultisigPolicyPreview,MultisigCosignerExport,BtcPsbtSigned } from "./multisig-policy"
+import type { PasswordBankView, PasswordBrowserTarget, PasswordRiskKind, PasswordAgentApproval } from './password-bank'
 import type { ElectrobunRPCSchema } from 'electrobun/bun'
 import type { SafeAccount, SafeContext, SafeCreateParams, SafeProposal, SafeTransfer, SafeTxReview, VaultAddParams, VaultAddReview } from './safe-multisig'
 import type { VaultIdentity } from './vault-identity'
+import type { MoneroNodeStatus } from './monero-node'
 import type { VaultPortfolio } from './vault-portfolio'
 import type { VaultAssetRequest, VaultAssetAccount } from './vault-asset-account'
 import type { ZcashShieldedBalance } from './zcash-privacy'
@@ -24,8 +27,9 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       // ── Device lifecycle ──────────────────────────────────────────
       getDeviceState: { params: void; response: DeviceStateInfo }
       retryConnect: { params: void; response: void }
+      requestDeviceUnlock: { params: void; response: void }
       startBootloaderUpdate: { params: void; response: void }
-      startFirmwareUpdate: { params: { variant?: 'multi' | 'bitcoin-only'; acknowledgeWipe?: import('./flash-wipe').WipeReason }; response: void }
+      startFirmwareUpdate: { params: { variant?: 'multi' | 'bitcoin-only'; acknowledgeWipe?: import('./flash-wipe').WipeReason; requireOfficialSignatures?: boolean }; response: void }
       flashFirmware: { params: void; response: void }
       analyzeFirmware: { params: { data: string }; response: FirmwareAnalysis }
       flashCustomFirmware: { params: { data: string }; response: void }
@@ -101,6 +105,7 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       // passphrase prompt is on screen and frees the transport lock so the
       // user can back out of an in-flight signing flow without unplugging.
       cancelDeviceSigning: { params: void; response: { ok: boolean } }
+      cancelForegroundDeviceOperation: { params: void; response: { ok: boolean } }
       // Types defined in types.ts: GetPublicKeysParams, BtcGetAddressParams, EthGetAddressParams, EthSignTxParams, BtcSignTxParams
       getPublicKeys: { params: any; response: any }
 
@@ -325,10 +330,28 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       // ── Window Focus ──────────────────────────────────────────────────
       getWindowFocusState: { params: void; response: { refs: number; alwaysOnTop: boolean } }
       forceReleaseWindowFocus: { params: void; response: void }
-      setWindowAlwaysOnTop: { params: { enabled: boolean }; response: void }
 
       // ── App Settings ──────────────────────────────────────────────────
       getAppSettings: { params: void; response: AppSettings }
+      setPasswordManagerEnabled: { params: { enabled: boolean }; response: AppSettings }
+      passwordBankStatus: { params: void; response: PasswordBankView }
+      passwordBankUnlock: { params: { create?: boolean }; response: PasswordBankView }
+      passwordBankLock: { params: void; response: PasswordBankView }
+      passwordBankGenerate: { params: { count: number; ttlMinutes: number }; response: PasswordBankView }
+      passwordBankAssign: { params: { origin: string; account: string; reviewDays: number }; response: PasswordBankView }
+      passwordBankRehydrate: { params: { id: string; pending?: boolean; ttlMinutes: number }; response: PasswordBankView }
+      passwordBankReveal: { params: { id: string; pending?: boolean }; response: { password: string; expiresAt: number } }
+      passwordBankRotate: { params: { id: string; action: 'prepare' | 'submitted' | 'verify' | 'cancel'; confirmed?: boolean }; response: PasswordBankView }
+      passwordBankSaveBackup: { params: void; response: { filePath: string; revision: number } }
+      passwordBankExport: { params: void; response: { json: string; revision: number } }
+      passwordBankBackupSaved: { params: { revision: number }; response: PasswordBankView }
+      passwordBankImport: { params: { json: string }; response: PasswordBankView }
+      passwordBankBrowserTargets: { params: { id: string }; response: PasswordBrowserTarget[] }
+      passwordBankBrowserFill: { params: { grant: string }; response: { filled: true; submitted: false } }
+      passwordBankBrowserGrant: { params: { id: string; pending?: boolean; browser: string; tabId: number; documentToken: string; ref: string }; response: { grant: string } }
+      passwordBankReportRisk: { params: { id: string; kind: PasswordRiskKind; source: 'user' | 'chrome-password-checkup' }; response: PasswordBankView }
+      passwordAgentApproveFill: { params: { id: string }; response: { id: string; state: string; expiresAt: number; error?: string } }
+      passwordAgentRejectFill: { params: { id: string }; response: void }
       markPassphraseIntroShown: { params: void; response: AppSettings }
       markBtcOnboardingShown: { params: void; response: AppSettings }
       setDisabledNetworks: { params: { chainIds: string[] }; response: AppSettings }
@@ -494,25 +517,45 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       auditInspectPath: { params: { chainId: string; addressNList: number[]; scriptType?: string }; response: AuditInspectResult }
 
       // ── Emulator (macOS only — Keychain-encrypted flash) ────────────
+      moneroGetStatus: { params: Record<string, never>; response: MoneroStatus }
+      moneroConnect: { params: { restoreHeight?: number }; response: MoneroStatus }
+      moneroSuggestRestoreHeight: { params: { daemonUrl?: string }; response: { tipHeight: number; restoreHeight: number; marginBlocks: number } }
+      moneroGetAddress: { params: { showDisplay: boolean; minor?: number }; response: { address: string; network: 'mainnet'; displayed: boolean; minor: number } }
+      moneroSyncKeyImages: { params: Record<string, never>; response: MoneroStatus }
+      moneroPrepareSend: { params: { address: string; amountAtomic?: string; max?: boolean }; response: MoneroSendReview }
+      moneroSend: { params: { prepareId: string }; response: { txid: string } }
+      moneroRetryRelay: { params: undefined; response: { txid: string } }
+      moneroDiscardPending: { params: { confirm: boolean }; response: { outcome: 'discarded' | 'sent' | 'superseded'; txid: string } }
+      setMoneroEnabled: { params: { enabled: boolean }; response: AppSettings }
+      setMoneroNode: { params: { daemonUrl: string; restoreHeight: number; mode?: 'local' | 'remote' }; response: AppSettings }
+      moneroNodeStatus: { params: void; response: MoneroNodeStatus }
+      moneroNodeConfigure: { params: { dataDir: string }; response: MoneroNodeStatus }
+      moneroNodeStart: { params: void; response: MoneroNodeStatus }
+      moneroNodeStop: { params: void; response: MoneroNodeStatus }
       emulatorPair: { params: void; response: EmulatorStatus }
       emulatorInit: { params: { flashName?: string } | void; response: EmulatorStatus }
       emulatorStop: { params: void; response: EmulatorStatus }
       emulatorSave: { params: void; response: void }
       emulatorStatus: { params: void; response: EmulatorStatus }
-      emulatorListBuilds: { params: void; response: { builds: Array<{ id: string; path: string; selected: boolean; version?: string }>; selected: string | null } }
-      emulatorSelectBuild: { params: { id: string }; response: { builds: Array<{ id: string; path: string; selected: boolean; version?: string }>; selected: string } }
-      emulatorActivateBuild: { params: { id: string }; response: { status: EmulatorStatus; flashName: string } }
-      emulatorDeleteFlash: { params: { name: string }; response: EmulatorStatus }
+      emulatorListBuilds: { params: void; response: { builds: EmulatorBuildInfo[]; selected: string | null; next: EmulatorNextBuild } }
+      emulatorSelectBuild: { params: { id: string }; response: { builds: EmulatorBuildInfo[]; selected: string } }
+      /** id null: the bundled (or user-installed) library. */
+      emulatorActivateBuild: { params: { id: string | null }; response: { status: EmulatorStatus; flashName: string } }
+      /** Refuses the running wallet unless stopIfRunning (Settings' "Delete Flash", which says so). */
+      emulatorDeleteFlash: { params: { name: string; stopIfRunning?: boolean }; response: EmulatorStatus }
+      /** Bring the running emulator's window to the front, or reopen it if it was closed. */
+      emulatorShowWindow: { params: void; response: { window: 'focused' | 'reopened' } }
       emulatorListWallets: { params: void; response: EmulatorWalletInfo[] }
       emulatorImportWallet: { params: { name: string; mnemonic: string; label?: string }; response: EmulatorStatus }
-      emulatorSwitchWallet: { params: { name: string }; response: EmulatorStatus }
+      /** buildId: omitted keeps the selected build; null is the bundled library. */
+      emulatorSwitchWallet: { params: { name: string; buildId?: string | null }; response: EmulatorStatus }
       /** Store a content-addressed emulator build, then select it for the next start. */
       emulatorInstallDylib: { params: { data: string }; response: { path: string; size: number; buildId: string; emulatorEnabled: boolean } }
       /** Wipes the active flash and loads a freshly generated mnemonic. */
       emulatorCreateWallet: { params: { wordCount?: 12 | 18 | 24 }; response: { seedDisplayed: true } }
       emulatorGetMnemonic: { params: void; response: string | null }
-      /** Emulator-only: read the saved mnemonic for the active flash, for backup display. */
-      emulatorRevealSeed: { params: void; response: { mnemonic: string; flashName: string } }
+      /** Emulator-only: display live recovery words in its window; no words in the RPC reply. */
+      emulatorRevealSeed: { params: void; response: { seedDisplayed: true; flashName: string } }
       /** Emulator-only: capture the current OLED frame as a PNG on disk (visual proof for automated test drivers). */
       emulatorCaptureFrame: { params: { label?: string; dir?: string } | void; response: { path: string } }
 
@@ -593,6 +636,7 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
         unresolvedFaultCount?: number
       }
       'pair-request': PairingRequestInfo
+      'password-agent-approval': { approval: PasswordAgentApproval | null }
       'pair-dismissed': Record<string, never>
       'signing-request': SigningRequestInfo
       'signing-dismissed': { id: string }

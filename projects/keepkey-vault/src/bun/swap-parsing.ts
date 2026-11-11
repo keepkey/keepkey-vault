@@ -616,6 +616,12 @@ export function parseAssetsResponse(resp: any): SwapAsset[] {
       caip = raw.caip || chainDef.caip
     }
 
+    // A provider's old HYPE metadata must not override the configured mainnet
+    // identity. In particular, chain 2868 is not an alternate name for 999.
+    if (chainDef.id === 'hyperliquid' && (
+      caip.split('/')[0] !== chainDef.networkId || (!isToken && caip !== chainDef.caip)
+    )) continue
+
     assets.push({
       asset: thorAsset,
       chainId: ourChainId,

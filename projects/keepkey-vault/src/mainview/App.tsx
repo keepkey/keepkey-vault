@@ -25,6 +25,7 @@ import { isBitcoinOnlyVariant } from "../shared/flags"
 import { useOnline } from "./hooks/useOnline"
 import { useBtcNodeStatus } from "./hooks/useBtcNodeStatus"
 import { useBtcMultisigEnabled } from "./hooks/useBtcMultisigEnabled"
+import { PasswordAgentApprovalDialog } from './components/PasswordAgentApprovalDialog'
 import { OfflineBanner } from "./components/OfflineBanner"
 import { NodeStatusBar } from "./components/NodeStatusBar"
 import { NodeConnectedDialog } from "./components/NodeConnectedDialog"
@@ -33,7 +34,7 @@ import { NetworkPickerDialog } from "./components/NetworkPickerDialog"
 import { DeviceGrid } from "./components/DeviceGrid"
 import type { VaultIdentity } from "../shared/vault-identity"
 import { VaultIdentityDialog } from "./components/VaultCards"
-import { EmulatorWalletChooser } from "./components/EmulatorWalletChooser"
+import { EmulatorWalletChooser, loadEmulatorFirmware, type EmulatorFirmwareChoices } from "./components/EmulatorWalletChooser"
 import { DeviceClaimedDialog } from "./components/DeviceClaimedDialog"
 import { LinuxUdevWarning } from "./components/LinuxUdevWarning"
 import { WindowsUsbTroubleshooter } from "./components/WindowsUsbTroubleshooter"
@@ -116,6 +117,12 @@ function App() {
 	const [viewingVault, setViewingVault] = useState<VaultIdentity | null>(null)
 	const [vaultDetailsOpen, setVaultDetailsOpen] = useState(false)
 	useEffect(() => onRpcMessage('wallet-data-purged', () => { setViewingVault(null); setVaultDetailsOpen(false) }), [])
+	// Multisig switched off while its tab is open: the tab disappears, so leave it.
+	useEffect(() => {
+		if (multisigEnabled) return
+		if (activeTab === "multisig") setActiveTab("vault")
+		setViewingVault(null); setVaultDetailsOpen(false)
+	}, [activeTab, multisigEnabled])
 	const [paletteOpen, setPaletteOpen] = useState(false)
 	const paletteBalances = useLatestBalances()
 	const [updateDismissed, setUpdateDismissed] = useState(false)
@@ -151,7 +158,8 @@ function App() {
 	// operator in Welcome/Intro when they intend to use an emulator instead.
 	// null = closed. The wallet is always chosen by name; nothing is picked for the user.
 	const [emulatorChoices, setEmulatorChoices] = useState<EmulatorWalletInfo[] | null>(null)
-	const startEmulatorFromSetup = useCallback(async (name: string) => {
+	const [emulatorFirmware, setEmulatorFirmware] = useState<EmulatorFirmwareChoices | null>(null)
+	const startEmulatorFromSetup = useCallback(async (name: string, buildId?: string | null) => {
 		if (startingEmulator) return
 		setStartingEmulator(true)
 		setEmulatorStartError(null)
@@ -161,7 +169,7 @@ function App() {
 				setEmulatorEnabled(settings.emulatorEnabled)
 			}
 			try { await rpcRequest('emulatorPair', undefined, 10000) } catch { /* already paired */ }
-			await rpcRequest('emulatorSwitchWallet', { name }, 30000)
+			await rpcRequest('emulatorSwitchWallet', { name, buildId }, 30000)
 			setEmulatorChoices(null)
 			oobEnteredRef.current = false
 			setSetupInProgress(false)
@@ -308,16 +316,45 @@ function App() {
 
 	// ── PIN overlay ─────────────────────────────────────────────────
 	const [pinRequestType, setPinRequestType] = useState<PinRequestType | null>(null)
-	const [pinDismissed, setPinDismissed] = useState(false)
 	const [pinFailed, setPinFailed] = useState(false)
 	const [pinErrorDetail, setPinErrorDetail] = useState<{ code?: number; message?: string } | null>(null)
 	const [pinRequestSeq, setPinRequestSeq] = useState(0)
-	const pinDismissTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+	const [unlocking, setUnlocking] = useState(false)
+	const [unlockError, setUnlockError] = useState<string | null>(null)
+	const unlockAttempt = useRef(0)
+	const unlockPending = useRef(false)
+	const unlockConnection = useRef({ id: deviceState.deviceId, transport: deviceState.activeTransport })
+	const handleRequestUnlock = useCallback(async () => {
+		if (unlockPending.current) return
+		const attempt = ++unlockAttempt.current
+		unlockPending.current = true
+		setUnlocking(true)
+		setUnlockError(null)
+		try {
+			await rpcRequest("requestDeviceUnlock", undefined, 0)
+		} catch (error: any) {
+			if (unlockAttempt.current === attempt) setUnlockError(error?.message || uiText("Unable to unlock KeepKey"))
+		} finally {
+			if (unlockAttempt.current === attempt) {
+				unlockPending.current = false
+				setUnlocking(false)
+			}
+		}
+	}, [uiText])
+	useEffect(() => {
+		const changed = unlockConnection.current.id !== deviceState.deviceId || unlockConnection.current.transport !== deviceState.activeTransport
+		unlockConnection.current = { id: deviceState.deviceId, transport: deviceState.activeTransport }
+		if (changed || (deviceState.state !== "needs_pin" && deviceState.state !== "needs_passphrase")) {
+			unlockAttempt.current++
+			unlockPending.current = false
+			setUnlocking(false)
+			setUnlockError(null)
+		}
+	}, [deviceState.state, deviceState.deviceId, deviceState.activeTransport])
 
 	useEffect(() => {
 		return onRpcMessage("pin-request", (payload) => {
-			if (pinDismissTimer.current) { clearTimeout(pinDismissTimer.current); pinDismissTimer.current = null }
-			setPinDismissed(false) // new request from device resets dismiss
+			setUnlockError(null)
 			setPinRequestType(payload.type as PinRequestType)
 			setPinRequestSeq((n) => n + 1) // device re-scrambled its matrix — clear partial entry
 		})
@@ -329,43 +366,32 @@ function App() {
 	useEffect(() => {
 		return onRpcMessage("pin-error", (detail) => {
 			setPinErrorDetail(detail ?? null)
+			setUnlockError(detail?.code === 7 ? t("pin.incorrectPin", { ns: "device" }) : detail?.message || uiText("Unable to unlock KeepKey"))
 			setPinFailed(false)
 			// Batch in next tick so React sees the transition
 			queueMicrotask(() => setPinFailed(true))
 		})
-	}, [])
+	}, [t, uiText])
 
 	const handlePinSubmit = useCallback(async (pin: string) => {
 		setPinFailed(false)
 		// Clear the submitted matrix before sending. Firmware can ask for the
 		// next matrix while sendPin is pending; its event must stay visible.
 		setPinRequestType(null)
-		// Temporarily suppress auto-show to prevent flicker while device verifies.
-		// Reset after 5s so the overlay re-appears if PIN was wrong or device still locked.
-		setPinDismissed(true)
-		if (pinDismissTimer.current) clearTimeout(pinDismissTimer.current)
-		pinDismissTimer.current = setTimeout(() => setPinDismissed(false), 5000)
 		try { await rpcRequest("sendPin", { pin }) } catch (e) { console.error("sendPin:", e) }
 	}, [])
 
 	const handlePinCancel = useCallback(() => {
 		setPinRequestType(null)
-		setPinDismissed(true)
 		setPinFailed(false)
-		// Release the firmware's matrix wait as well as dismissing the overlay.
-		if (deviceState.isEmulator) {
-			void rpcRequest("cancelDeviceSigning", undefined, 0).catch((e) => console.error("cancel PIN:", e))
-		}
-		// Allow re-show after 10s even on cancel — device still expects PIN
-		if (pinDismissTimer.current) clearTimeout(pinDismissTimer.current)
-		pinDismissTimer.current = setTimeout(() => setPinDismissed(false), 10000)
-	}, [deviceState.isEmulator])
+		// Dismissing a real prompt also cancels the operation that owns it.
+		void rpcRequest("cancelDeviceSigning", undefined, 0).catch((e) => console.error("cancel PIN:", e))
+	}, [])
 
 	const handlePinWipe = useCallback(async () => {
 		// Errors propagate to PinEntry, which shows them and keeps the overlay open.
 		await rpcRequest("wipeDevice", undefined, 0)
 		setPinRequestType(null)
-		setPinDismissed(true)
 		setPinFailed(false)
 	}, [])
 
@@ -375,7 +401,6 @@ function App() {
 	useEffect(() => {
 		return onRpcMessage("passphrase-request", () => {
 			setPinRequestType(null) // PIN was already handled — dismiss its overlay
-			setPinDismissed(true)   // prevent auto-show effect from re-arming PIN
 			setPassphraseRequested(true)
 		})
 	}, [])
@@ -388,17 +413,32 @@ function App() {
 		// showing "Confirm on your KeepKey" until state transitions to 'ready'.
 	}, [])
 
-	const handlePassphraseCancel = useCallback(() => { setPinRequestType(null); setPassphraseRequested(false) }, [])
+	const handlePassphraseCancel = useCallback(() => {
+		setPinRequestType(null)
+		setPassphraseRequested(false)
+		void rpcRequest("cancelDeviceSigning", undefined, 0).catch((e) => console.error("cancel passphrase:", e))
+	}, [])
 
-	// Auto-show passphrase overlay when device needs passphrase.
-	// Do NOT auto-dismiss here — the dialog must stay visible showing
-	// "Confirm on device" after the user submits until state reaches 'ready'.
-	// Dismissal is handled by the 'ready'/'disconnected' cleanup effect below.
-	useEffect(() => {
-		if (deviceState.state === "needs_passphrase" && !passphraseRequested) {
-			setPassphraseRequested(true)
+	// A rapid disconnect/reconnect can be batched into one React render. Retire
+	// the old prompt as each event arrives, before a new connection's PIN event
+	// can open its own matrix. Never let a PIN typed for one device reach another.
+	const promptConnection = useRef<string | null>(null)
+	useEffect(() => onRpcMessage("device-state", (state) => {
+		const connection = `${state.deviceId || ''}:${state.activeTransport || ''}`
+		const retired = (promptConnection.current !== null && promptConnection.current !== connection) || ["disconnected", "connected_unpaired", "error", "bootloader", "needs_firmware", "needs_init"].includes(state.state)
+		promptConnection.current = connection
+		if (retired) {
+			setPinRequestType(null)
+			setPassphraseRequested(false)
+			setPinFailed(false)
+			unlockAttempt.current++
+			unlockPending.current = false
+			setUnlocking(false)
+			setUnlockError(null)
 		}
-	}, [deviceState.state, passphraseRequested])
+		if (state.state === "needs_passphrase") setPinRequestType(null)
+		if (state.state === "needs_pin") setPassphraseRequested(false)
+	}), [])
 
 	// ── Pairing approval overlay ────────────────────────────────────
 	const [pairRequest, setPairRequest] = useState<PairingRequestInfo | null>(null)
@@ -703,21 +743,14 @@ function App() {
 		setRecoveryError(null)
 	}, [])
 
-	// Auto-show PIN for locked device (only once — respect user dismiss)
-	// Skip auto-show during any firmware operation phase — backend promptPin handles it with a delay
-	useEffect(() => {
-		if (deviceState.state === "needs_pin" && !deviceState.wipePending && !pinRequestType && !pinDismissed && (!deviceState.updatePhase || deviceState.updatePhase === "idle")) {
-			setPinRequestType("current")
-		}
-	}, [deviceState.state, deviceState.updatePhase, deviceState.wipePending, pinRequestType, pinDismissed])
-
+	// PIN/passphrase overlays open only for actual device requests. A locked
+	// device alone leaves the portfolio usable until an operation needs it.
 	// A failed/disconnected transport cannot own a live device prompt.
 	useEffect(() => {
 		if (deviceState.state === "ready" || deviceState.state === "disconnected" || deviceState.state === "error") {
 			setPinRequestType(null)
 			setCharRequest(null)
 			setPassphraseRequested(false)
-			setPinDismissed(false) // reset dismiss on state transitions
 			setPinFailed(false)
 		}
 		// Device re-locked during passphrase flow (auto-lock timer) — dismiss
@@ -900,7 +933,7 @@ function App() {
 
 	const oobLock = !wizardComplete && (setupInProgress || oobEnteredRef.current)
 
-	const phase = resolveAppPhase({ state: deviceState.state, oobLock, isClaimed, firmwareSkipped, wizardComplete, bootloaderIdle })
+	const phase = resolveAppPhase({ state: deviceState.state, oobLock, isClaimed, firmwareSkipped, wizardComplete, bootloaderIdle, lockedPortfolioAvailable: deviceState.lockedPortfolioAvailable })
 
 	// Bun lets a Bitcoin-only saved wallet use the user's own node only while it is on screen.
 	const watchOnlyShown = showWatchOnly(watchOnlyMode, phase)
@@ -928,9 +961,10 @@ function App() {
 		<SigningApproval request={signingRequest} phase={signingPhase} onApprove={handleApproveSign} onReject={handleRejectSign} onCancel={handleCancelSign} />
 	) : null
 
-	const pairingOverlay = pairRequest ? (
-		<PairingApproval request={pairRequest} onApprove={handleApprovePairing} onReject={handleRejectPairing} />
-	) : null
+	const pairingOverlay = <>
+		<PasswordAgentApprovalDialog />
+		{pairRequest && <PairingApproval request={pairRequest} onApprove={handleApprovePairing} onReject={handleRejectPairing} />}
+	</>
 
 	const passphraseOverlay = passphraseRequested ? (
 		<PassphraseEntry onSubmit={handlePassphraseSubmit} onCancel={handlePassphraseCancel} />
@@ -992,20 +1026,31 @@ function App() {
 
 	const incomingTxToast = <IncomingTxToast tx={incomingTx} onDismiss={dismissIncomingTx} />
 
+	const lockedBanner = deviceState.lockedPortfolioAvailable ? (
+		<Flex mx="4" my="2" px="3" py="2" align="center" justify="space-between" gap="3" flexWrap="wrap" border="1px solid" borderColor="kk.border" borderRadius="lg" bg="rgba(233,196,106,0.04)" role="status">
+			<Box>
+				<Text fontSize="xs" color="kk.textSecondary">{uiText("KeepKey locked")}</Text>
+				{unlockError && <Text fontSize="xs" color="kk.error">{unlockError}</Text>}
+			</Box>
+			<Button size="xs" variant="outline" loading={unlocking} loadingText={uiText("Unlocking…")} onClick={handleRequestUnlock}>{t("pin.unlock", { ns: "device" })}</Button>
+		</Flex>
+	) : null
+
 	// Vault scope is independent of any owner's device portfolio. All balances
 	// and actions below remain bound to the vault's exact network and account.
 	if (viewingVault && !setupInProgress) {
 		const exitVault = () => { setViewingVault(null); setVaultDetailsOpen(false) }
 		return <>{resizeHandles}{updateBanner}{firmwareDropZone}{pinOverlay}{passphraseOverlay}{charOverlay}{signingOverlay}{pairingOverlay}
 			<Flex direction="column" h="100vh" color="kk.textPrimary">
-				<TopNav label={viewingVault.name} connected={deviceState.state === 'ready'}
+				<TopNav label={viewingVault.name} connected={deviceState.state === 'ready' || deviceState.lockedPortfolioAvailable}
 					firmwareVersion={deviceState.firmwareVersion} firmwareVerified={deviceState.firmwareVerified}
 					isEmulator={deviceState.isEmulator} onStopEmulator={() => { rpcRequest('emulatorStop').catch(() => {}) }}
 					onSettingsToggle={() => setVaultDetailsOpen(true)} activeTab="vault" onTabChange={() => {}}
-					vaultView onExitToDeviceSelect={exitVault} watchOnly={deviceState.state !== 'ready'}
+					vaultView onExitToDeviceSelect={exitVault} watchOnly={deviceState.state !== 'ready' && !deviceState.lockedPortfolioAvailable}
 					isBitcoinOnly={viewingVault.type === 'bitcoin-multisig'} />
 				<Flex flex="1" direction="column" overflow="auto" pt={NAV_CONTENT_OFFSET} pb="4">
-					<Dashboard vault={viewingVault} watchOnly={deviceState.state !== 'ready'}
+					{lockedBanner}
+					<Dashboard vault={viewingVault} watchOnly={deviceState.state !== 'ready' && !deviceState.lockedPortfolioAvailable}
 							firmwareVersion={deviceState.firmwareVersion} onLoaded={() => {}} onOpenVault={handleOpenVault} />
 				</Flex>
 			</Flex>
@@ -1132,7 +1177,7 @@ function App() {
 						: needsPin && deviceState.wipePending === "confirm" ? t("unplugToCancelWipe", { ns: "nav", defaultValue: "Changed your mind? Unplug your KeepKey to cancel." })
 						: undefined}
 					variant={linuxUdevBlocked ? "error" : needsPin || needsPassphrase || isConnecting ? "connecting" : isError ? "error" : "searching"}
-					childrenReady={linuxUdevBlocked ? true : gridReady}
+					childrenReady={linuxUdevBlocked || needsPin || needsPassphrase ? true : gridReady}
 					onLogoClick={linuxUdevBlocked || needsPin || needsPassphrase ? undefined : () => { rpcRequest("retryConnect").catch(() => {}) }}
 					isBitcoinOnly={splashBitcoinOnly}
 				>
@@ -1141,6 +1186,10 @@ function App() {
 					) : (
 						/* Unified device grid — registered devices + emulator wallets */
 						<>
+							{(needsPin || needsPassphrase) && !deviceState.wipePending && <Box textAlign="center" mb="4">
+								<Button size="sm" bg="kk.gold" color="black" loading={unlocking} loadingText={uiText("Unlocking…")} onClick={handleRequestUnlock}>{t("pin.unlock", { ns: "device" })}</Button>
+								{unlockError && <Text fontSize="xs" color="kk.error" mt="2">{unlockError}</Text>}
+							</Box>}
 							<DeviceGrid
 								onOpenVault={handleOpenVault}
 								onViewPortfolio={(id, label) => { setWatchOnlyDeviceId(id); setWatchOnlyLabel(label); setWatchOnlyMode(true) }}
@@ -1165,9 +1214,13 @@ function App() {
 				{/* Developer-only: shown once the emulator is enabled in Settings. */}
 				{emulatorEnabled && <Box position="fixed" right="24px" bottom="24px" zIndex={1900} textAlign="right">
 					{emulatorStartError && <Text mb="2" maxW="340px" fontSize="12px" color="kk.error">{emulatorStartError}</Text>}
-					{emulatorChoices && <EmulatorWalletChooser wallets={emulatorChoices} onPick={startEmulatorFromSetup} onClose={() => setEmulatorChoices(null)} busy={startingEmulator} error={emulatorStartError} />}
+					{emulatorChoices && <EmulatorWalletChooser wallets={emulatorChoices} firmware={emulatorFirmware} onPick={startEmulatorFromSetup} onClose={() => setEmulatorChoices(null)} busy={startingEmulator} error={emulatorStartError} />}
 					<Button
-						onClick={async () => setEmulatorChoices(await rpcRequest<EmulatorWalletInfo[]>('emulatorListWallets', undefined, 10000).catch(() => []))}
+						onClick={async () => {
+							const [wallets, firmware] = await Promise.all([rpcRequest<EmulatorWalletInfo[]>('emulatorListWallets', undefined, 10000).catch(() => []), loadEmulatorFirmware()])
+							setEmulatorFirmware(firmware)
+							setEmulatorChoices(wallets)
+						}}
 						disabled={startingEmulator}
 						bg="rgba(168,85,247,0.16)"
 						border="1px solid rgba(168,85,247,0.55)"
@@ -1230,7 +1283,7 @@ function App() {
 				/>
 				<TopNav
 					label={deviceState.label}
-					connected={deviceState.state === "ready"}
+					connected={deviceState.state === "ready" || deviceState.lockedPortfolioAvailable}
 					firmwareVersion={deviceState.firmwareVersion}
 					firmwareVerified={deviceState.firmwareVerified}
 					needsFirmwareUpdate={deviceState.needsFirmwareUpdate}
@@ -1254,6 +1307,7 @@ function App() {
 					onReturnToConnected={() => { /* already on connected wallet */ }}
 				/>
 				<Flex flex="1" direction="column" overflow="auto" pt={showBanner ? NAV_CONTENT_OFFSET_WITH_BANNER : NAV_CONTENT_OFFSET} pb={bottomBar ? "38px" : "4"} transition="padding-top 0.2s">
+					{lockedBanner}
 				{/* TopNav offset plus banner height when visible. */}
 					{/* Kept mounted while another tab is open: a remount re-ran the mount
 					    fetch, so coming back from Address Book refreshed balances every

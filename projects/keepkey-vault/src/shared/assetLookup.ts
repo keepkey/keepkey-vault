@@ -10,6 +10,7 @@
  * blocking initial render.
  */
 import offlineAssetIconsJson from './offlineAssetIcons.json'
+import { CHAINS, isStaleHyperliquidMetadata } from './chains'
 
 interface SlimAssetEntry {
   symbol: string
@@ -49,7 +50,20 @@ function getAssetMap(): Record<string, SlimAssetEntry> | null {
   // Kick off lazy load if not started yet
   if (!loadPromise) {
     loadPromise = import('./assetData.json').then((m) => {
-      assetMap = (m.default || m) as Record<string, SlimAssetEntry>
+      assetMap = { ...(m.default || m) } as Record<string, SlimAssetEntry>
+      // Correct only curated native metadata. Never reinterpret the old 2868
+      // HYPE entries as mainnet, and leave custom registrations independent.
+      for (const [caip, entry] of Object.entries(assetMap)) {
+        if (isStaleHyperliquidMetadata(caip, entry.symbol, entry.name)) delete assetMap[caip]
+      }
+      for (const chain of CHAINS.filter(c => ['hyperliquid', 'monad', 'polygon', 'base'].includes(c.id))) {
+        assetMap[chain.caip] = {
+          ...assetMap[chain.caip], symbol: chain.symbol, name: chain.coin,
+          decimals: chain.decimals, color: chain.color, isNative: true, type: 'native',
+          explorerAddressLink: chain.explorerAddressUrl,
+          explorerTxLink: chain.explorerTxUrl,
+        }
+      }
       return assetMap
     }).catch((err) => {
       console.warn('[assetLookup] Failed to load asset data:', err)
@@ -72,9 +86,21 @@ const BITCOIN_SVG =
 /** Shielded ZEC (zZEC) — synthetic asset, never in the CDN catalog: gold shield + Zcash Z. */
 const ZCASH_SHIELDED_SVG =
   `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><path fill="#f4b728" d="M32 4l24 9v17c0 15.5-10.2 25.7-24 30C18.2 55.7 8 45.5 8 30V13z"/><path fill="#fff" d="M21 20h22v6L31 38h12v6H21v-6l12-12H21z"/><rect x="29" y="14" width="6" height="6" fill="#fff"/><rect x="29" y="44" width="6" height="6" fill="#fff"/></svg>`
+/** Monero (XMR) — not in the CDN catalog under our CAIP: orange disc, white M over the grey band. */
+const MONERO_SVG =
+  `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><circle cx="32" cy="32" r="32" fill="#ff6600"/><path fill="#4c4c4c" d="M6.5 42h11V26l14.5 14.5L46.5 26v16h11a30 30 0 0 1-51 0z"/><path fill="#fff" d="M32 6a26 26 0 0 0-25.5 30.9h7.9V18.3L32 35.9l17.6-17.6v18.6h7.9A26 26 0 0 0 32 6z"/></svg>`
+/** Base (eip155:8453) native ETH — the CDN serves Ethereum's diamond for this
+ *  CAIP, so Base read as a second Ethereum. Base's mark is the blue square;
+ *  it is inset on a white disc so the round icon mask doesn't crop it and it
+ *  stays visible on Base's own blue chain-color backdrop. */
+const BASE_SVG =
+  `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><circle cx="32" cy="32" r="32" fill="#fff"/><rect x="14" y="14" width="36" height="36" rx="5" fill="#0000ff"/></svg>`
+export const BASE_NATIVE_CAIP = 'eip155:8453/slip44:60'
 const LOCAL_ICONS: Record<string, string> = {
   'bip122:000000000019d6689c085ae165831e93/slip44:0': `data:image/svg+xml,${encodeURIComponent(BITCOIN_SVG)}`,
+  [BASE_NATIVE_CAIP]: `data:image/svg+xml,${encodeURIComponent(BASE_SVG)}`,
   'bip122:00040fe8ec8471911baa1db1266ea15d/orchard:shielded': `data:image/svg+xml,${encodeURIComponent(ZCASH_SHIELDED_SVG)}`,
+  'monero:418015bb9ae982a1975da7d79277c270/slip44:128': `data:image/svg+xml,${encodeURIComponent(MONERO_SVG)}`,
 }
 const OFFLINE_ASSET_ICONS = offlineAssetIconsJson as Record<string, string>
 

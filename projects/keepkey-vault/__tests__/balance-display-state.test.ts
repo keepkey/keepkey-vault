@@ -90,3 +90,28 @@ describe('balanceDisplayState', () => {
     expect(balanceDisplayState({ hasEntry: false, ...base })).not.toBe('pending')
   })
 })
+
+describe('balanceUnverifiedReason: loading is not "could not reach this chain"', () => {
+  const { balanceUnverifiedReason } = require('../src/shared/balance-display-state')
+  test('no entry yet is missing, not degraded', () => {
+    expect(balanceUnverifiedReason(undefined, 'eip155:1/slip44:60')).toBe('missing')
+  })
+  test('a degraded chain is degraded', () => {
+    expect(balanceUnverifiedReason({ syncState: 'degraded' }, 'eip155:1/slip44:60')).toBe('degraded')
+  })
+  test('a confirmed or stale entry is verified', () => {
+    expect(balanceUnverifiedReason({ syncState: 'confirmed' }, 'eip155:1/slip44:60')).toBeUndefined()
+    expect(balanceUnverifiedReason({ syncState: 'stale' }, 'eip155:1/slip44:60')).toBeUndefined()
+  })
+  test('a token proven over RPC on a degraded chain is verified', () => {
+    expect(balanceUnverifiedReason({ syncState: 'degraded', confirmedAssetCaips: ['eip155:1/erc20:0xdac17f958d2ee523a2206206994597c13d831ec7'] },
+      'eip155:1/erc20:0xdac17f958d2ee523a2206206994597c13d831ec7')).toBeUndefined()
+  })
+  test('the swap dialog says "could not reach" only for degraded, and fetches a missing chain', () => {
+    const src = require('fs').readFileSync(require('path').join(import.meta.dir, '../src/mainview/components/SwapDialog.tsx'), 'utf8')
+    expect(src).toContain('fromBalancePending')
+    expect(src).toContain("fromBalanceReason === 'missing' ? t(\"balanceMissing\"")
+    expect(src).toContain("[sourceKey]: 'pending'")
+    expect(src).toContain('await refreshEvmAddresses()')
+  })
+})

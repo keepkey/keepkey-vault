@@ -23,6 +23,12 @@ import * as path from "path"
 import { createHash, randomUUID } from "crypto"
 import { createSwapQuoteLeases } from './swap-quote-lease'
 import { assessSwapRisk } from '../shared/swap-risk'
+import { PasswordBank } from './password-bank'
+import { passwordDeviceCipher } from './password-device'
+import { savePasswordBackup } from './password-backup'
+import { PasswordBex } from './password-bex'
+import { PasswordAgent } from './password-agent'
+import { callBex, listBrowsers } from './bex-bridge'
 
 /**
  * hdwallet returns signature/pubkey fields as `Uint8Array | string`
@@ -232,9 +238,13 @@ process.on('unhandledRejection', (reason) => {
 })
 
 import { EngineController, withTimeout } from "./engine-controller"
+import { gateDeviceRpc } from "./device-rpc"
+import { deviceOperationContext } from './device-operation'
+import { restRequest } from "./device-gate"
 import { runUsbDiagnostic as runUsbDiagnosticProbe } from "./windows-usb-probe"
 import { startRestApi, clearFeaturesCache, setUiActive, uiHeartbeat, type RestApiCallbacks } from "./rest-api"
-import { portAnswersLikeDesktop, startRestApiOrReport } from "./rest-api-startup"
+import { desktopRestStartDeps, startRestApiOrReport } from "./rest-api-startup"
+import { instanceSocketPath, startupInstanceGate } from "./single-instance"
 import { signSolanaWireTransaction } from "./solana-signing"
 import { AuthStore } from "./auth"
 import { ensurePioneerQueryKeyRegistered, getPioneer, getPioneerApiBase, resetPioneer, setPioneerOffline, DEFAULT_API_BASE, getQueryKey as getPioneerQueryKey } from "./pioneer"
@@ -254,7 +264,7 @@ import { createPioneerServerSwitch } from "./pioneer-server-switch"
 import { startEventStream, stopEventStream, type AddressEntry, type StreamEvent } from "./event-stream"
 import { pioneerSupportsDurableWalletMonitoring } from "../shared/pioneer-event-capabilities"
 import { rebuildActivityHistory, clearHistoryQueryCache } from "./activity-history"
-import { watchOnlyPortfolioKeys, watchOnlyNativeBalances, watchOnlyNodeBalances, portfolioNativeMatch, trackedUtxoScriptPaths } from './watch-only-portfolio'
+import { watchOnlyPortfolioKeys, watchOnlyNativeBalances, watchOnlyNodeBalances, portfolioNativeMatch, confirmedPortfolioNativeMatches, trackedUtxoScriptPaths } from './watch-only-portfolio'
 import { cachedHistoryQueries, watchOnlyWalletScope, watchOnlyBitcoinScope } from './watch-only-history'
 import { createTxWatch, MAX_WATCH_MS, UNSEEN_GIVE_UP_MS } from "./tx-watch"
 import { activityBalanceTarget, createPostTxBalanceRefresh, sameBalanceRefreshScope, type BalanceRefreshScope } from "./post-tx-balance"
@@ -264,8 +274,20 @@ import { buildTx, broadcastTx, canonicalizeTronTokenCaip } from "./txbuilder"
 import { buildCosmosStakingTx, buildCosmosNameRegTx } from "./txbuilder/cosmos"
 import { initializeOrchardFromDevice, exportOrchardFvk, scanOrchardNotes, getShieldedBalance, sendShielded, ensureFvkLoaded, displayOrchardAddressOnDevice, setFvkDiskAllowed } from "./txbuilder/zcash-shielded"
 import { inFlightShielded, type ExpectedShielded } from "../shared/zcash-pending"
+import { setMoneroEmulatorEnabled, listEmulatorBuilds } from "./emulator-library"
+import { createMoneroVault, moneroHiddenWalletStatus } from "./monero-vault"
+import { createMoneroFailoverVault } from "./monero-remote-failover"
+import { assertMoneroStandardWallet, moneroHiddenWallet } from "../shared/monero-wallet-policy"
+import { createMoneroWatchStore } from "./monero-watch-store"
+import { createMoneroDeviceSigner } from "./monero-device-signing"
+import { REVIEWED_MONERO_SIGNING_SHA256 } from "./monero-emulator"
+import { startMoneroSidecar, stopMoneroSidecar, isMoneroSidecarAvailable } from "./monero-sidecar"
+import { createMoneroNodeManager } from './monero-node'
+import { MONERO_LOCAL_URL, moneroNodeMode } from '../shared/monero-node'
+import { checkMoneroNode, storedRestoreHeight, suggestRestoreHeight, validateMoneroNode } from "./monero-settings"
+import { createFilePendingStore } from "./monero-pending"
 import { findZcashCliBinary, isSidecarReady, startSidecar, stopSidecar, wipeSidecarWalletDb, hasFvkLoaded, getCachedFvk, onScanProgress, getScanState, updateSyncedTo, beginZcashSend, endZcashSend, isZcashSendInFlight } from "./zcash-sidecar"
-import { CHAINS, customChainToChainDef, isChainSupported, hiveRolePath, btcTaprootSupported, findChainByNetwork } from "../shared/chains"
+import { CHAINS, customChainToChainDef, isChainSupported, hiveRolePath, btcTaprootSupported, findChainByNetwork, isStaleHyperliquidMetadata } from "../shared/chains"
 import { versionCompare } from "../shared/firmware-versions"
 import { supportsZcashPrivacyBuild } from "./zcash-capability"
 import type { ChainDef } from "../shared/chains"
@@ -320,7 +342,7 @@ import { addClearSignProvider, listClearSignProviders, removeClearSignProvider, 
 import { supportsCertifiedClearSign } from "./solana-certified-policy"
 import { configureProductionRootTrust } from "../shared/certified-evm-envelope"
 import { emulatorClearSignTestRoot } from "./emulator-library"
-import { emulatorReadsClearSignTestRoot } from "./emulator"
+import { emulatorReadsClearSignTestRoot, getLoadedEmulatorLibPath } from "./emulator"
 import { DEFAULT_CLEARSIGN_SERVICE_URL } from "./solana-certified-registry"
 import { createRpcAltFetcher } from "./solana-alt"
 import { createProviderKeySession } from "./clearsign-provider-session"
@@ -341,7 +363,6 @@ import type { VaultRPCSchema } from "../shared/rpc-schema"
 import type { WipeReason } from "../shared/flash-wipe"
 import { collectAndAnalyzeWithGate, MAX_CHUNK_BYTES } from "./rng-audit"
 import { withoutCallerErc7730 } from '../shared/erc7730-support'
-import { newEmulatorWalletNameError } from '../shared/emulatorWallets'
 import { recordReviewCard, recordReviewCardText, reviewTapeRecording } from './test-review-tape'
 import { ADDRESS_BOOK_CERTIFY_UNSUPPORTED, buildCertificationRequest, contactProofAllowed, buildContactProof, contactsFromEntries, CONTACT_DESTINATION, evmRecipient, isAddressBookCertifyUnsupported, signWithContactProofAck, type AddressBookCertification } from "./addressbook-clearsign"
 
@@ -872,6 +893,8 @@ const BUILTIN_EVM_CHAIN_IDS = new Set(
 function parseRawEntry(entry: any): PioneerChainInfo | null {
 	if (!entry.chainId?.startsWith('eip155:')) return null
 	if (!entry.assetId?.endsWith('/slip44:60')) return null
+	if (entry.assetId.split('/')[0] !== entry.chainId) return null
+	if (isStaleHyperliquidMetadata(entry.assetId, entry.symbol, entry.name)) return null
 	const numericId = parseInt(entry.chainId.replace('eip155:', ''), 10)
 	if (isNaN(numericId) || numericId < 1) return null
 	if (BUILTIN_EVM_CHAIN_IDS.has(numericId)) return null
@@ -1022,6 +1045,37 @@ let watchOnlyViewBtcOnly = false
 let pendingPsbt: { id: string; stem: string; analysis: PsbtAnalysis | MultisigAnalysis; deviceId: string; hidden: boolean; epoch: number; wallet: unknown; signing: boolean } | null = null
 let lastSignedPsbtPath: string | null = null
 const multisigFeature = new MultisigFeature(getSetting,setSetting)
+const passwordBank = new PasswordBank({
+	read: getSetting,
+	write: setSetting,
+	replace: (key, value, expected) => {
+		const db = getDb()
+		if (!db) throw new Error('Password-bank storage is unavailable')
+		const result = expected === null
+			? db.run('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO NOTHING', [key, value])
+			: db.run('UPDATE settings SET value = ? WHERE key = ? AND value = ?', [value, key, expected])
+		return result.changes === 1
+	},
+	device: () => {
+		const wallet = engine.wallet as any
+		const state = engine.getDeviceState()
+		if (!wallet || state.state !== 'ready' || typeof wallet.cipherKeyValue !== 'function') throw new Error('Connect and unlock a KeepKey to use the password bank')
+		if (isBitcoinOnlyVariant(state.firmwareVariant)) throw new Error('Password-bank derivation requires multi-chain firmware')
+		return {
+			session: `${activitySessionEpoch}:${state.deviceId}:${engine.isPassphraseWallet}`,
+			cipher: (addressNList, key) => passwordDeviceCipher(wallet, addressNList, key, engine.isEmulator, emuSigningOp),
+		}
+	},
+})
+// Clean expired session secrets even when the password tab is not visible.
+const passwordBex = new PasswordBex(passwordBank, { browsers: listBrowsers, call: (tool, args, browser) => callBex(tool, args, browser, 10000) })
+const passwordAgent = new PasswordAgent(passwordBank, passwordBex, approval => {
+	// The legacy schema declares outgoing events under bun.messages; constrain
+	// this event to that payload despite Electrobun inferring remote messages.
+	const send = rpc.send['password-agent-approval'] as (value: VaultRPCSchema['bun']['messages']['password-agent-approval']) => void
+	try { send({ approval }) } catch { /* native UI not ready; request will expire */ }
+})
+setInterval(() => { if (!passwordBank.view().unlocked) passwordAgent.cancelPending() }, 1000).unref()
 const multisigRegistry = new MultisigRegistry(getSetting, setSetting, () => ({
 	hidden: engine.isPassphraseWallet,
 	epoch: activitySessionEpoch,
@@ -1210,8 +1264,13 @@ const auth = new AuthStore()
 // the awaiting REST callback consumes and deletes it immediately.
 const blindSigningApprovalIds = new Set<string>()
 const pendingSigningApprovalInfo = new Map<string, SigningRequestInfo>()
-async function requestSigningApprovalDecision(id: string) {
-	const approved = await auth.requestSigningApproval(id)
+async function requestSigningApprovalDecision(id: string, signal?: AbortSignal) {
+	const pending = auth.requestSigningApproval(id)
+	const cancel = () => auth.rejectSigningRequest(id)
+	signal?.addEventListener('abort', cancel, { once: true })
+	if (signal?.aborted) cancel()
+	let approved: boolean
+	try { approved = await pending } finally { signal?.removeEventListener('abort', cancel) }
 	const allowBlindSigning = approved && blindSigningApprovalIds.has(id)
 	blindSigningApprovalIds.delete(id)
 	return { approved, allowBlindSigning: allowBlindSigning || undefined }
@@ -1219,6 +1278,11 @@ async function requestSigningApprovalDecision(id: string) {
 // Settings loaded lazily after DB init — defaults used until then
 let restApiEnabled = false
 let walletConnectEnabled = false
+let moneroEnabled = false
+/** Own node is preferred. Existing explicit remote URLs are preserved. */
+const MONERO_DEFAULT_NODE = MONERO_LOCAL_URL
+let moneroWallet: ReturnType<typeof createMoneroVault> | null = null
+let moneroSession: unknown = null
 let zcashPrivacyEnabled = false
 let hiveEnabled = false
 // Networks the user turned off (network picker). Off = not derived, not
@@ -1276,6 +1340,8 @@ function requireOnline(operation: string): void {
 }
 
 function loadSettings() {
+	moneroEnabled = getSetting('monero_enabled') === '1' && isMoneroSidecarAvailable()
+	setMoneroEmulatorEnabled(moneroEnabled)
 	restApiEnabled = getSetting('rest_api_enabled') === '1'
 	walletConnectEnabled = getSetting('walletconnect_enabled') === '1'
 	const storedZcashPrivacyEnabled = getSetting('zcash_privacy_enabled') === '1'
@@ -1412,7 +1478,7 @@ export function resetSwapUiState(): void {
 	swapUiUpdatedAt = Date.now()
 }
 
-// Refcounted setAlwaysOnTop. Multiple sources (WC pair approval, signing
+// Approval-only setAlwaysOnTop. Multiple sources (WC pair approval, signing
 // approval, device pairing approval) can independently want the window
 // elevated; using the raw API per-event drops the window prematurely when
 // any one source dismisses while another is still pending.
@@ -1438,6 +1504,15 @@ function releaseWindowFocus() {
 function getOrCreateWcManager(): WalletConnectManager {
 	if (wcManager) return wcManager
 	wcManager = new WalletConnectManager({
+		getWalletSession: () => {
+			const state = engine.getDeviceState()
+			const seedAddress = engine.currentSeedEthAddress
+			return walletConnectEnabled && engine.wallet && state.state === 'ready' && state.deviceId && seedAddress ? {
+				wallet: engine.wallet, deviceId: state.deviceId,
+				seedAddress, epoch: activitySessionEpoch, hidden: engine.isPassphraseWallet,
+			} : null
+		},
+		runDeviceOperation: action => deviceOperationContext.exit(() => engine.withDeviceOperation(action, { unlock: true, rejectIfBusy: true, origin: 'desktop' })),
 		getEvmAddressInfo: () => {
 			if (isBitcoinOnlyVariant(engine.getDeviceState().firmwareVariant)) return null
 			const sel = evmAddresses.getSelectedAddress()
@@ -1607,6 +1682,8 @@ function getOrCreateWcManager(): WalletConnectManager {
 		// WalletConnect has already matched tx.from to the signing account.
 		addContractFacts: (info) => addContractFacts(info, engine.isPassphraseWallet ? undefined : engine.getDeviceState().deviceId, info.from),
 		requestSigningApproval: async (info) => {
+			const request = deviceOperationContext.getStore()
+			request?.assertCurrent()
 			attachSigningPolicySnapshot(info)
 			attachSafeKnownAddresses(info)
 			await attachSafeCallPreviews(info)
@@ -1616,6 +1693,7 @@ function getOrCreateWcManager(): WalletConnectManager {
 			if (info.method === '/eth/sign-typed-data' && !info.clearSignReport) {
 				info.clearSignReport = (await import('./evm-presign-report')).buildTypedDataReport(info)
 			}
+			request?.assertCurrent()
 			try { rpc.send['signing-request'](info) } catch { /* webview not ready */ }
 			acquireWindowFocus()
 			try {
@@ -1657,6 +1735,15 @@ function getAppSettings() {
 		numberLocale: validNumberLocale(getSetting('number_locale')),
 		walletConnectEnabled,
 		btcMultisigEnabled:multisigFeature.enabled,
+		moneroEnabled,
+		moneroAvailable: isMoneroSidecarAvailable(),
+		moneroDaemonUrl: getSetting('monero_daemon_url') || MONERO_DEFAULT_NODE,
+		moneroNodeMode: moneroNodeMode(getSetting('monero_node_mode'), getSetting('monero_daemon_url')),
+		moneroRestoreHeight: storedRestoreHeight(getSetting('monero_restore_height')),
+		// Pending signed bytes remain on disk across disable/wipe, but a hidden
+		// or disabled view must not hydrate or disclose wallet monitoring records.
+		moneroPendingBroadcasts: moneroEnabled && !moneroHiddenWallet(engine) ? getMoneroWallet().pendingCount() : 0,
+		passwordManagerEnabled: passwordBank.enabled,
 		zcashPrivacyEnabled,
 		hiveEnabled,
 		emulatorEnabled,
@@ -1995,6 +2082,7 @@ async function resolveDeviceSwapAsset(key: string) {
 
 // Callbacks bridge REST → RPC UI
 const restCallbacks: RestApiCallbacks = {
+	passwordAgent,
 	onApiLog: (entry: ApiLogEntry) => {
 		if (entryIsStale(entry)) {
 			console.warn(`[api-log] dropped ${entry.method} ${entry.route}: wallet session changed mid-request`)
@@ -2017,7 +2105,7 @@ const restCallbacks: RestApiCallbacks = {
 		onActivityChanged: () => notifyActivityChanged(),
 		getSessionEpoch: () => activitySessionEpoch,
 		resolveChain: (networkId: string) => findChainByNetwork(networkId, undefined, getAllChains()),
-	onSigningRequest: async (info: SigningRequestInfo) => {
+	onSigningRequest: async (info: SigningRequestInfo, signal?: AbortSignal) => {
 		attachSigningPolicySnapshot(info)
 		attachSafeKnownAddresses(info)
 		await attachSafeCallPreviews(info)
@@ -2040,7 +2128,7 @@ const restCallbacks: RestApiCallbacks = {
 		try { rpc.send['signing-request'](info) } catch { /* webview not ready */ }
 		acquireWindowFocus()
 		try {
-			return await requestSigningApprovalDecision(info.id)
+			return await requestSigningApprovalDecision(info.id, signal)
 		} finally {
 			pendingSigningApprovalInfo.delete(info.id)
 			releaseWindowFocus()
@@ -2103,12 +2191,13 @@ const restCallbacks: RestApiCallbacks = {
 /** Start or stop the REST API server based on the persisted setting */
 async function applyRestApiState(when: 'startup' | 'settings') {
 	if (restApiEnabled && !restServer) {
-		restServer = await startRestApiOrReport(REST_API_PORT, when, {
+		restServer = await startRestApiOrReport(REST_API_PORT, when, desktopRestStartDeps({
 			start: () => startRestApi(engine, auth, REST_API_PORT, restCallbacks),
-			answersLikeDesktop: () => portAnswersLikeDesktop(REST_API_PORT),
-			showError: (dialog) => Utils.showMessageBox({ type: 'error', title: 'KeepKey Desktop', ...dialog }),
+			port: REST_API_PORT,
+			mainWindow: () => _mainWindow,
+			showMessageBox: (dialog) => Utils.showMessageBox(dialog),
 			exit: (code) => process.exit(code),
-		})
+		}))
 		if (restServer) {
 			console.log(`[Vault] REST API started on port ${REST_API_PORT}`)
 		} else {
@@ -2130,6 +2219,22 @@ import type { SwapQuote, SwapQuoteParams, ExecuteSwapParams, SwapResult, SwapSub
 import { isThorchainBankToken, thorchainBankTokenFirmwareOK, THORCHAIN_BANK_TOKEN_MIN_FW } from '../shared/swap-support-matrix'
 const swapQuoteLeases = createSwapQuoteLeases()
 
+// ── Emulator session (start, switch, build change) ───────────────────
+async function emulatorSessionDeps(): Promise<import('./emulator-session').EmulatorSessionDeps> {
+	const emu = await import('./emulator')
+	const { listFlashImages } = await import('./emulator-keychain')
+	const { listEmulatorBuilds } = await import('./emulator-library')
+	const { openEmulatorWindow, closeEmulatorWindow } = await import('./emulator-window')
+	return {
+		getEmulatorStatus: emu.getEmulatorStatus, getActiveFlashName: emu.getActiveFlashName,
+		stopEmulator: emu.stopEmulator, initEmulator: emu.initEmulator,
+		openWindow: openEmulatorWindow, closeWindow: closeEmulatorWindow,
+		connectEmulator: () => engine.connectEmulator(), disconnectEmulator: () => engine.disconnectEmulator(),
+		firmwareVersion: () => engine.getDeviceState().firmwareVersion || undefined,
+		listFlashImages, library: emu.getRuntimeLibrary, builds: () => listEmulatorBuilds(),
+	}
+}
+
 // ── Emulator confirm helper ──────────────────────────────────────────
 // Setup-op confirm (wipe / loadDevice / applySettings): the firmware shows
 // confirmation screens; on the emulator we auto-press through them via the same
@@ -2140,6 +2245,51 @@ const swapQuoteLeases = createSwapQuoteLeases()
 async function emuConfirmOp(fn: () => Promise<any>, _confirmCount = 2): Promise<any> {
 	const { emuGatedConfirm } = await import('./emulator-window')
 	return emuGatedConfirm(fn, engine.emuDelegate, { interactive: false })
+}
+
+// Research signing only runs on a verified signing-enabled emulator build (never in signed releases).
+let moneroSigningBuild: { key: string; signing: boolean } | null = null
+function moneroSigningEmulatorActive(): boolean {
+    const path = engine.isEmulator && moneroEnabled ? getLoadedEmulatorLibPath() : null
+    if (!path) return false
+    if (moneroSigningBuild?.key !== path) moneroSigningBuild = { key: path, signing: listEmulatorBuilds().some(build => build.signingEnabled && build.path === path && REVIEWED_MONERO_SIGNING_SHA256.has(build.id)) }
+    return moneroSigningBuild.signing
+}
+function getMoneroWallet() {
+    if (moneroHiddenWallet(engine)) invalidateMoneroWallet()
+    assertMoneroStandardWallet(engine)
+    if (!moneroWallet) moneroWallet = createMoneroFailoverVault({
+      assertAllowed: () => assertMoneroStandardWallet(engine),
+      create: getConfig => createMoneroVault({
+        engine, confirm: emuSigningOp, signingEmulator: moneroSigningEmulatorActive,
+        watchStore: createMoneroWatchStore({ database: getDb, profile: Utils.paths.userData }),
+        hardwareSigner: createMoneroDeviceSigner(),
+        onTransportFailure: transport => {
+            if (engine.wallet?.transport === transport) return engine.retryConnect()
+        },
+        // Unknown-outcome broadcasts survive a restart (owner-only file beside the app database).
+        pendingStore: createFilePendingStore(path.join(Utils.paths.userData, 'monero')),
+        getConfig,
+      }),
+        getConfig: () => ({ enabled: moneroEnabled, offline: offlineMode,
+            daemonUrl: getSetting('monero_daemon_url') || MONERO_DEFAULT_NODE,
+            restoreHeight: storedRestoreHeight(getSetting('monero_restore_height')) }),
+    })
+    return moneroWallet
+}
+function invalidateMoneroWallet() {
+    moneroWallet?.invalidate()
+    moneroSession = null
+}
+
+const localMoneroNode = createMoneroNodeManager({ stateFile: path.join(Utils.paths.userData, 'monero-node.json') })
+// Adopt only a daemon matching our saved binary/config/directory. Resume a sync
+// on launch only after the user has explicitly pressed Start in Vault.
+async function resumeLocalMoneroNode() {
+    if (offlineMode) { await localMoneroNode.stop(); return }
+    await localMoneroNode.status()
+    if (moneroEnabled && getSetting('monero_node_autostart') === '1'
+        && moneroNodeMode(getSetting('monero_node_mode'), getSetting('monero_daemon_url')) === 'local') await localMoneroNode.start()
 }
 
 // ── Emulator interactive signing helper ─────────────────────────────
@@ -2641,11 +2791,20 @@ async function getChainBalance(params: { chainId: string; forceRefresh?: boolean
 		let selectedPkAddress = ''  // address from selected xpub (BTC) or sole xpub (other UTXO)
 		let fallbackPkAddress = ''  // first Pioneer-returned address from any xpub
 		const evmNativeByPubkey = new Map<string, { balance: number; usd: number }>()
+		const btcResponses = isBtc ? confirmedPortfolioNativeMatches(
+			pubkeys.map(p => ({ ...p, chainId: chain.id, symbol: chain.symbol, networkId: chain.networkId, path: p.path || '', scriptType: p.scriptType || '' })),
+			pureNatives,
+			new Set(),
+		) : null
+		if (btcResponses && !btcResponses.confirmed) {
+			pioneerConfirmed = false
+			syncState = 'degraded'
+		}
 
 		for (const pk of pubkeys) {
 			const sourcePubkey = pk.sourcePubkey || unwrapUtxoDiscoveryKey(pk.pubkey)
 			// Find ONE matching native entry for this requested pubkey (no double-counting)
-			const match = pureNatives.find((d: any) => d.pubkey === pk.pubkey)
+			const match = btcResponses ? btcResponses.matches.get(pk.pubkey) : pureNatives.find((d: any) => d.pubkey === pk.pubkey)
 				|| pureNatives.find((d: any) => d.pubkey === sourcePubkey)
 				|| pureNatives.find((d: any) => d.caip === pk.caip && d.address === pk.pubkey)
 				|| pureNatives.find((d: any) => d.address?.toLowerCase() === pk.pubkey.toLowerCase())
@@ -2668,7 +2827,7 @@ async function getChainBalance(params: { chainId: string; forceRefresh?: boolean
 				if (!isBtc && isUtxo) selectedPkAddress = match.address
 			}
 
-			if (isBtc) {
+			if (isBtc && pioneerConfirmed && match) {
 				const xpubBal = String(match?.balance ?? '0')
 				btcAccounts.updateXpubBalance(sourcePubkey, xpubBal, usd)
 				// PRIVACY: Skip DB write for hidden passphrase wallets.
@@ -2849,7 +3008,7 @@ async function getChainBalance(params: { chainId: string; forceRefresh?: boolean
 		// Sync DB cache so getCachedBalances returns aggregate (not stale single-xpub)
 		try {
 			const devId = engine.getDeviceState().deviceId
-			if (devId && !engine.isPassphraseWallet) {
+			if (devId && !engine.isPassphraseWallet && pioneerConfirmed) {
 				updateCachedBalance(devId, {
 					chainId: 'bitcoin', symbol: 'BTC',
 					balance: btcSet.totalBalance,
@@ -4054,12 +4213,13 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			// contact is recorded (see ui-watchdog.ts).
 			// A Bitcoin-only watch-only wallet on screen is held to the same boundary as a Bitcoin-only device.
 			() => { uiWatchdog.seen(); return isBitcoinOnlyVariant(engine.getDeviceState().firmwareVariant) || watchOnlyViewBtcOnly },
-			{
+			gateDeviceRpc({
 			// ── Device lifecycle ──────────────────────────────────────
 			getDeviceState: async () => engine.getDeviceState(),
 			retryConnect: async () => { await engine.retryConnect() },
+			requestDeviceUnlock: async () => { await engine.requestDeviceUnlock() },
 			startBootloaderUpdate: async () => { requireOnline('bootloader update'); await engine.startBootloaderUpdate() },
-			startFirmwareUpdate: async (params: { variant?: 'multi' | 'bitcoin-only'; acknowledgeWipe?: WipeReason }) => { requireOnline('firmware update'); await engine.startFirmwareUpdate({ variant: params?.variant, acknowledgeWipe: params?.acknowledgeWipe }) },
+			startFirmwareUpdate: async (params: { variant?: 'multi' | 'bitcoin-only'; acknowledgeWipe?: WipeReason; requireOfficialSignatures?: boolean }) => { requireOnline('firmware update'); await engine.startFirmwareUpdate({ variant: params?.variant, acknowledgeWipe: params?.acknowledgeWipe, requireOfficialSignatures: params?.requireOfficialSignatures }) },
 			flashFirmware: async () => { await engine.flashFirmware() },
 			analyzeFirmware: async (params) => {
 				if (params.data.length > 10_000_000) throw new Error('Firmware data too large (max ~7.5MB)')
@@ -4693,6 +4853,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				}
 				return { ok: true as const }
 			},
+			cancelForegroundDeviceOperation: async () => ({ ok: engine.cancelDesktopDeviceOperation() }),
 			cancelDeviceSigning: async () => {
 				// User backed out of an in-flight confirm/PIN/passphrase prompt.
 				// Sends a Cancel message to the device, which dismisses the on-
@@ -4700,7 +4861,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				// signing promise inside hdwallet rejects with a "Cancelled"
 				// error — the swap dialog catches it and resets to 'review'.
 				if (!engine.wallet) return { ok: false }
-				await engine.wallet.cancel().catch(() => {})
+				await engine.cancelDevicePrompt().catch(() => {})
 				return { ok: true }
 			},
 			wipeDevice: async () => {
@@ -6230,6 +6391,11 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						const meta = chunkResults[i].meta
 						if (meta?.degraded || meta?.failures?.length || meta?.staleChains?.length) {
 							for (const p of pubkeyChunks[i].filter(p => utxoChains.some(c => c.id === p.chainId))) failedPubkeySetForDb.add(`${p.caip}:${p.pubkey}`)
+							const bitcoinNetwork = btcChain.caip.split('/')[0].toLowerCase()
+							const bitcoinFault = [...(meta.failures || []), ...(meta.staleChains || [])]
+								.some(fault => String(fault.caip || '').split('/')[0].toLowerCase() === bitcoinNetwork)
+								|| (meta.degraded && !meta.failures?.length && !meta.staleChains?.length)
+							if (bitcoinFault) for (const p of pubkeyChunks[i].filter(p => p.chainId === 'bitcoin')) failedPubkeySetForDb.add(`${p.caip}:${p.pubkey}`)
 						}
 					}
 					console.log(`[getBalances] effectivePubkeys: ${effectivePubkeys.length}/${pubkeys.length} — chains: ${[...new Set(effectivePubkeys.map(p => p.chainId))].join(', ')}`)
@@ -6515,6 +6681,11 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					let btcTotalUsd = 0
 					let btcSelectedAddress = '' // address from the user's selected script type
 					let btcFallbackAddress = '' // first address from any xpub (fallback)
+					const btcResponses = confirmedPortfolioNativeMatches(
+						pubkeys.filter(p => p.chainId === 'bitcoin').map(p => ({ ...p, path: p.path || '', scriptType: p.scriptType || '' })),
+						pureNatives,
+						failedPubkeySetForDb,
+					)
 
 					// Aggregate EVM entries per-chain (sum across address indices)
 					const evmChainAgg = new Map<string, { balance: number; usd: number; address: string; symbol: string }>()
@@ -6531,9 +6702,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						if (entry.chainId === 'bitcoin') {
 							const sourceXpub = entry.sourcePubkey || unwrapUtxoDiscoveryKey(entry.pubkey)
 							// Find the Pioneer response for this xpub
-							const match = pureNatives.find((d: any) => d.pubkey === entry.pubkey)
-								|| pureNatives.find((d: any) => d.pubkey === sourceXpub)
-								|| pureNatives.find((d: any) => d.caip === entry.caip && d.address === entry.pubkey)
+							const match = btcResponses.matches.get(entry.pubkey)
 							console.debug(`[getBalances] BTC match for ${entry.pubkey?.substring(0, 20)}...: ${match ? `balance=${match.balance}, usd=${match.valueUsd}` : 'NO MATCH'}`)
 							const bal = parseFloat(String(match?.balance ?? '0'))
 							const usd = Number(match?.valueUsd ?? 0)
@@ -6548,7 +6717,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 							// PRIVACY: Skip DB write for hidden passphrase wallets.
 							// Skip if this entry came from a failed chunk (don't persist zeros).
 							const xpubBal = String(match?.balance ?? '0')
-							if (!isFailedEntry) {
+							if (match && !isFailedEntry) {
 								btcAccounts.updateXpubBalance(sourceXpub, xpubBal, usd)
 								try {
 									const devId = engine.getDeviceState().deviceId
@@ -6721,7 +6890,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						)
 					)
 					// BTC is aggregated from multiple pubkeys — it's confirmed only if ALL its pubkeys succeeded.
-					const btcConfirmed = btcPubkeyEntries.every(e => !failedPubkeySetForDb.has(`${e.caip}:${e.pubkey}`))
+					const btcConfirmed = btcResponses.confirmed
 					if (btcConfirmed) confirmedChainIds.add('bitcoin')
 					else confirmedChainIds.delete('bitcoin')
 					// Never persist an aggregate we didn't fully validate: like BTC above, a
@@ -6733,14 +6902,14 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					}
 
 					// Mark that Pioneer has responded — prevents getBtcAccounts from re-loading stale DB rows
-					if (btcPubkeyEntries.length > 0) btcAccounts.markPioneerFetched()
+					if (btcConfirmed) btcAccounts.markPioneerFetched()
 
 					{
 						const btcSet = btcAccounts.toAccountSet()
 						try { rpc.send['btc-accounts-update'](btcSet) } catch { /* webview not ready */ }
 						try {
 							const devId = engine.getDeviceState().deviceId
-							if (devId && !engine.isPassphraseWallet && parseFloat(btcSet.totalBalance) >= 0) {
+							if (devId && !engine.isPassphraseWallet && btcConfirmed && parseFloat(btcSet.totalBalance) >= 0) {
 								updateCachedBalance(devId, {
 									chainId: 'bitcoin', symbol: 'BTC',
 									balance: btcSet.totalBalance,
@@ -6774,8 +6943,8 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					try {
 						const deviceId = engine.getDeviceState().deviceId || 'unknown'
 						if (results.length > 0 && !engine.isPassphraseWallet) {
-							setCachedBalances(deviceId, results.filter(r => !utxoChains.some(c => c.id === r.chainId) || confirmedChainIds.has(r.chainId)), confirmedChainIds)
-							rectifyWallet(deviceId, results)
+							setCachedBalances(deviceId, results.filter(r => (r.chainId !== 'bitcoin' && !utxoChains.some(c => c.id === r.chainId)) || confirmedChainIds.has(r.chainId)), confirmedChainIds)
+							rectifyWallet(deviceId, results.filter(r => r.chainId !== 'bitcoin' || btcConfirmed))
 						}
 					} catch { /* never block on cache failure */ }
 
@@ -8377,23 +8546,33 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					_emitWindowFocusChanged()
 				}
 			},
-			setWindowAlwaysOnTop: async (params) => {
-				if (params.enabled) {
-					acquireWindowFocus()
-				} else {
-					// Force-release all refs when manually toggling off
-					if (_alwaysOnTopRefs > 0) {
-						_alwaysOnTopRefs = 0
-						try { mainWindow.setAlwaysOnTop(false) } catch { /* ignore */ }
-						_emitWindowFocusChanged()
-					}
-				}
-			},
-
 			// ── App Settings ─────────────────────────────────────────
 			getAppSettings: async () => {
 				return getAppSettings()
 			},
+			setPasswordManagerEnabled: async (params) => {
+				passwordAgent.cancelPending()
+				passwordBank.setEnabled(params?.enabled)
+				return getAppSettings()
+			},
+			passwordBankStatus: async () => passwordBank.view(),
+			passwordBankUnlock: async (params) => passwordBank.unlock(params?.create === true),
+			passwordBankLock: async () => { passwordAgent.cancelPending(); passwordBank.lock(); return passwordBank.view() },
+			passwordBankGenerate: async (params) => passwordBank.generate(params.count, params.ttlMinutes),
+			passwordBankAssign: async (params) => passwordBank.assign(params.origin, params.account, params.reviewDays),
+			passwordBankRehydrate: async (params) => passwordBank.rehydrate(params.id, params.pending === true, params.ttlMinutes),
+			passwordBankReveal: async (params) => passwordBank.reveal(params.id, params.pending === true),
+			passwordBankRotate: async (params) => passwordBank.rotate(params.id, params.action, params.confirmed === true),
+			passwordBankExport: async () => passwordBank.exportBackup(),
+			passwordBankSaveBackup: async () => savePasswordBackup(passwordBank, path.join(os.homedir(), "Documents", "KeepKey Password Backups")),
+			passwordBankBackupSaved: async (params) => passwordBank.acknowledgeBackup(params.revision),
+			passwordBankImport: async (params) => passwordBank.unlock(false, params.json),
+			passwordBankBrowserTargets: async (params) => passwordBex.discover(params.id),
+			passwordBankBrowserGrant: async (params) => passwordBex.grant(params),
+			passwordBankBrowserFill: async (params) => passwordBex.fill(params.grant),
+			passwordBankReportRisk: async (params) => passwordBank.reportRisk(params.id, params.kind, params.source),
+			passwordAgentApproveFill: async (params) => passwordAgent.approve(params.id),
+			passwordAgentRejectFill: async (params) => { passwordAgent.reject(params.id) },
 			// One-time: mark the passphrase/hidden-wallet intro dialog as seen so it
 			// never shows again (also set when the OOB passphrase card is completed).
 			markPassphraseIntroShown: async () => {
@@ -8440,10 +8619,12 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			},
 			setOfflineMode: async (params) => {
 				if (typeof params.enabled !== 'boolean') throw new Error('Offline mode requires an enabled boolean')
+				if (params.enabled && (await localMoneroNode.stop()).state === 'stopping') throw new Error('The Monero node is flushing its database. Wait for it to stop before enabling offline mode.')
 				if (params.enabled) await revokeKnownWalletMonitoring()
 				setSetting('offline_mode', params.enabled ? '1' : '0')
 				if (getSetting('offline_mode') !== (params.enabled ? '1' : '0')) throw new Error('Could not save offline mode. Try again.')
 				offlineMode = params.enabled
+				if (offlineMode) { invalidateMoneroWallet(); stopMoneroSidecar() }
 				setBtcBackendOffline(offlineMode)
 				setPioneerOffline(offlineMode)
 				setPerfTelemetryOffline(offlineMode)
@@ -8459,6 +8640,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					loadSupportedChains(getPioneerApiBase()).catch(() => { /* static fallback handles it */ })
 					initSwapTrackerIfAllowed().catch((e) => console.warn('[swap-tracker] Reconnect init failed:', e.message || e))
 				}
+                if (!offlineMode && moneroEnabled && !moneroHiddenWallet(engine)) startMoneroSidecar().catch(() => console.warn('[monero] Sidecar could not resume monitoring'))
 				console.log('[settings] Offline (airplane) mode:', params.enabled)
 				return getAppSettings()
 			},
@@ -9163,7 +9345,9 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 
 				return { hits }
 			},
-			getSwapQuote: (params) => headlessSwapQuote(params),
+			getSwapQuote: (params) => params.isMax
+				? engine.withDeviceOperation(() => headlessSwapQuote(params), { unlock: true, rejectIfBusy: true, origin: 'desktop' })
+				: restRequest.run({ whileLocked: false, cachedOnly: true }, () => headlessSwapQuote(params)),
 			executeSwap: (params) => headlessExecuteSwap(params, (stage) => {
 				try { rpc.send["swap-substage"]({ stage }) } catch { /* webview not ready */ }
 			}),
@@ -9978,6 +10162,8 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				const bitcoinOnly = isBitcoinOnlyVariant(engine.getDeviceState().firmwareVariant)
 				const enabledChains = bitcoinOnlyChainList(getAllChains(), bitcoinOnly).filter(c => {
 					if (!isChainSupported(c, fwVersion)) return false
+					// Monero balances come from the watch-only sidecar, not an address audit.
+					if (c.chainFamily === 'monero') return false
 					if ((c.id === 'zcash' || c.id === 'zcash-shielded') && !zcashPrivacyEnabled) return false
 					if (c.id === 'hive' && !hiveEnabled) return false
 					return true
@@ -10290,6 +10476,78 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			// Reads return a safe stopped/empty state so any UI path that still
 			// polls (e.g. during a toggle transition) renders nothing rather than
 			// a toast-worthy error.
+            moneroGetStatus: async () => {
+                if (moneroHiddenWallet(engine)) { invalidateMoneroWallet(); return moneroHiddenWalletStatus(moneroEnabled) }
+                return getMoneroWallet().getStatus()
+            },
+            moneroConnect: async (params) => {
+                assertMoneroStandardWallet(engine)
+                // The scan start chosen on the connect card is saved first, so the wallet scans from it.
+                if (params?.restoreHeight !== undefined) {
+                    const node = validateMoneroNode({ daemonUrl: getSetting('monero_daemon_url') || MONERO_DEFAULT_NODE, restoreHeight: params.restoreHeight })
+                    setSetting('monero_restore_height', String(node.restoreHeight))
+                }
+                return getMoneroWallet().connect({})
+            },
+            moneroSuggestRestoreHeight: async (params) => suggestRestoreHeight(params?.daemonUrl || getSetting('monero_daemon_url') || MONERO_DEFAULT_NODE),
+            moneroGetAddress: async (params) => getMoneroWallet().getAddress(params),
+            moneroSyncKeyImages: async () => getMoneroWallet().syncKeyImages(),
+            moneroPrepareSend: async (params) => getMoneroWallet().prepareSend(params),
+            moneroSend: async (params) => getMoneroWallet().send(params),
+            moneroRetryRelay: async () => getMoneroWallet().retryRelay(),
+            moneroDiscardPending: async (params) => getMoneroWallet().discardPending(params),
+            setMoneroEnabled: async ({ enabled }) => {
+                if (typeof enabled !== 'boolean') throw new Error('Monero requires an enabled boolean')
+                if (enabled && !isMoneroSidecarAvailable()) throw new Error('Monero is unavailable in this build')
+                if (enabled && offlineMode) throw new Error('Turn off offline mode before enabling Monero')
+                if (enabled) { if (!moneroHiddenWallet(engine)) await startMoneroSidecar() }
+                else {
+                    // A research emulator selection stays selected: the next start names it and
+                    // says to turn Monero on, instead of silently running other firmware.
+                    invalidateMoneroWallet(); stopMoneroSidecar(); await localMoneroNode.stop()
+                }
+                moneroEnabled = enabled
+                setMoneroEmulatorEnabled(enabled)
+                setSetting('monero_enabled', enabled ? '1' : '0')
+                return getAppSettings()
+            },
+            setMoneroNode: async (params) => {
+                if (params.mode !== undefined && !['local', 'remote'].includes(params.mode)) throw new Error('Choose a local or remote Monero node')
+                if (params.mode === 'local') params = { ...params, daemonUrl: MONERO_LOCAL_URL }
+                const node = validateMoneroNode(params)
+                if (params.mode === 'remote' || (params.mode === undefined && node.daemonUrl !== MONERO_LOCAL_URL)) {
+                    requireOnline('connecting to a Monero node')
+                    // The explicit offline-chain QA mode is checked again by
+                    // the sidecar. Public remote nodes always need mainnet.
+                    const localQa = process.env.KEEPKEY_MONERO_LOCAL_REGTEST === '1'
+                        && ['localhost', '127.0.0.1', '[::1]'].includes(new URL(node.daemonUrl).hostname)
+                    if (!localQa) await checkMoneroNode(node.daemonUrl)
+                }
+                invalidateMoneroWallet()
+                setSetting('monero_daemon_url', node.daemonUrl)
+                setSetting('monero_restore_height', String(node.restoreHeight))
+                setSetting('monero_node_mode', params.mode ?? (node.daemonUrl === MONERO_LOCAL_URL ? 'local' : 'remote'))
+                if (moneroEnabled && !offlineMode && !moneroHiddenWallet(engine)) await startMoneroSidecar()
+                return getAppSettings()
+            },
+            moneroNodeStatus: async () => localMoneroNode.status(),
+            moneroNodeConfigure: async (params) => {
+                if (typeof params?.dataDir !== 'string') throw new Error('Choose a folder for the Monero blockchain')
+                return localMoneroNode.configure(params.dataDir)
+            },
+            moneroNodeStart: async () => {
+                requireOnline('starting a Monero node')
+                const status = await localMoneroNode.start()
+                setSetting('monero_node_autostart', '1')
+                if (getSetting('monero_daemon_url') !== MONERO_LOCAL_URL) invalidateMoneroWallet()
+                setSetting('monero_node_mode', 'local')
+                setSetting('monero_daemon_url', MONERO_LOCAL_URL)
+                return status
+            },
+            moneroNodeStop: async () => {
+                setSetting('monero_node_autostart', '0')
+                return localMoneroNode.stop()
+            },
 			emulatorPair: async () => {
 				if (!emulatorEnabled) throw new Error('Emulator is disabled')
 				const { pairEmulator, getEmulatorStatus } = await import('./emulator')
@@ -10329,12 +10587,30 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				if (!emulatorEnabled) {
 					return { state: 'stopped' as const, bridgeReady: false, host: 'not loaded', paired: false, platform: process.platform, flashImages: [], storagePath: '' }
 				}
-				const { getEmulatorStatus } = await import('./emulator')
-				return getEmulatorStatus()
+				const { getEmulatorStatus, getActiveFlashName, getLoadedEmulatorLibrary } = await import('./emulator')
+				const status = getEmulatorStatus()
+				if (status.state !== 'running') return status
+				const { runningEmulatorIdentity } = await import('./emulator-session')
+				const { getAllEmulatorWalletMeta } = await import('./db')
+				const flashName = getActiveFlashName()
+				const live = engine.isEmulator ? engine.getDeviceState() : null
+				return { ...status, ...runningEmulatorIdentity({
+					flashName, loaded: getLoadedEmulatorLibrary(), firmwareVersion: live?.firmwareVersion,
+					label: live?.label || getAllEmulatorWalletMeta().find(m => m.name === flashName)?.label,
+				}) }
 			},
 			emulatorListBuilds: async () => {
 				const { listEmulatorBuilds, selectedEmulatorBuild } = await import('./emulator-library')
-				return { builds: listEmulatorBuilds(), selected: selectedEmulatorBuild() }
+				const { getRuntimeLibrary } = await import('./emulator')
+				const { path: _path, ...next } = getRuntimeLibrary()
+				return { builds: listEmulatorBuilds(), selected: selectedEmulatorBuild(), next }
+			},
+			emulatorShowWindow: async () => {
+				if (!emulatorEnabled) throw new Error('Emulator is disabled')
+				const { getEmulatorStatus } = await import('./emulator')
+				if (getEmulatorStatus().state !== 'running') throw new Error('The emulator is not running')
+				const { showEmulatorWindow } = await import('./emulator-window')
+				return { window: showEmulatorWindow() }
 			},
 			emulatorSelectBuild: async (params) => {
 				if (!emulatorEnabled) throw new Error('Emulator is disabled')
@@ -10347,41 +10623,8 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			},
 			emulatorActivateBuild: async (params) => {
 				if (!emulatorEnabled) throw new Error('Emulator is disabled')
-				const { listEmulatorBuilds, selectEmulatorBuild, selectedEmulatorBuild, clearSelectedEmulatorBuild, resolveEmulatorWalletName, selectEmulatorWallet } = await import('./emulator-library')
-				if (!listEmulatorBuilds().some(build => build.id === params.id)) throw new Error('Emulator build is not installed')
-				const { getEmulatorStatus, getActiveFlashName, stopEmulator, initEmulator } = await import('./emulator')
-				const previousBuild = selectedEmulatorBuild()
-				const previousFlash = getEmulatorStatus().state === 'running' ? getActiveFlashName() : null
-				const flashName = resolveEmulatorWalletName({ running: previousFlash, buildId: params.id })
-				const { closeEmulatorWindow, openEmulatorWindow } = await import('./emulator-window')
-				if (previousFlash) {
-					closeEmulatorWindow()
-					engine.disconnectEmulator()
-					stopEmulator()
-				}
-				try {
-					selectEmulatorBuild(params.id)
-					const status = initEmulator(flashName)
-					if (status.state !== 'running') throw new Error(status.error || 'Emulator failed to start')
-					openEmulatorWindow()
-					await engine.connectEmulator()
-					const version = engine.getDeviceState().firmwareVersion
-					const { recordEmulatorBuildVersion } = await import('./emulator-library')
-					if (/^\d+\.\d+\.\d+$/.test(version || '')) recordEmulatorBuildVersion(params.id, version)
-					selectEmulatorWallet(flashName)
-					return { status, flashName }
-				} catch (error) {
-					closeEmulatorWindow()
-					engine.disconnectEmulator()
-					stopEmulator()
-					if (previousBuild) selectEmulatorBuild(previousBuild)
-					else clearSelectedEmulatorBuild()
-					if (previousFlash) {
-						const restored = initEmulator(previousFlash)
-						if (restored.state === 'running') { openEmulatorWindow(); await engine.connectEmulator() }
-					}
-					throw error
-				}
+				const { activateEmulatorBuild } = await import('./emulator-session')
+				return activateEmulatorBuild(await emulatorSessionDeps(), params.id)
 			},
 			emulatorInstallDylib: async (params) => {
 				// Keep user-supplied libraries side by side under their content IDs.
@@ -10437,7 +10680,9 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				const { deleteFlash, getEmulatorStatus, getActiveFlashName, stopEmulator } = await import('./emulator')
 				const { deleteMnemonic } = await import('./emulator-keychain')
 				const { deleteEmulatorWalletMeta, getAllEmulatorWalletMeta, deleteDeviceSnapshot } = await import('./db')
-
+				const { deleteEmulatorWallet } = await import('./emulator-session')
+				const { closeEmulatorWindow } = await import('./emulator-window')
+				const { selectedEmulatorWallet, clearSelectedEmulatorWallet } = await import('./emulator-library')
 				// Look up the deviceId BEFORE deleting metadata so we can purge
 				// all keyed-by-deviceId data (balances, cached_pubkeys, reports,
 				// device_snapshot) — the same set physical forgetDevice purges.
@@ -10445,26 +10690,22 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				// + xpub cache + report rows on disk keyed by an emulator
 				// deviceId that no longer maps to anything.
 				const meta = getAllEmulatorWalletMeta().find(m => m.name === params.name)
-				if (meta?.deviceId) {
-					await revokeKnownWalletMonitoring(meta.deviceId)
-					forgottenMonitorEpochs.set(meta.deviceId, activitySessionEpoch)
-				}
-
-				// If deleting the active wallet, stop it first so shutdown
-				// doesn't re-save the flash we're about to delete
-				if (getEmulatorStatus().state === 'running' && getActiveFlashName() === params.name) {
-					const { closeEmulatorWindow } = await import('./emulator-window')
-					closeEmulatorWindow()
-					engine.disconnectEmulator()
-					stopEmulator()
-				}
-
-				deleteFlash(params.name)
-				deleteMnemonic(params.name)
-				deleteEmulatorWalletMeta(params.name)
-				const { selectedEmulatorWallet, clearSelectedEmulatorWallet } = await import('./emulator-library')
-				if (selectedEmulatorWallet() === params.name) clearSelectedEmulatorWallet()
-				if (meta?.deviceId) deleteDeviceSnapshot(meta.deviceId)
+				await deleteEmulatorWallet({
+					isRunning: (name) => getEmulatorStatus().state === 'running' && getActiveFlashName() === name,
+					prepare: async () => {
+						if (!meta?.deviceId) return
+						await revokeKnownWalletMonitoring(meta.deviceId)
+						forgottenMonitorEpochs.set(meta.deviceId, activitySessionEpoch)
+					},
+					stopRunning: () => { closeEmulatorWindow(); engine.disconnectEmulator(); stopEmulator() },
+					erase: (name) => {
+						deleteFlash(name)
+						deleteMnemonic(name)
+						deleteEmulatorWalletMeta(name)
+						if (selectedEmulatorWallet() === name) clearSelectedEmulatorWallet()
+						if (meta?.deviceId) deleteDeviceSnapshot(meta.deviceId)
+					},
+				}, params)
 				if (meta?.deviceId && engine.getDeviceState().deviceId !== meta.deviceId) bootstrapActiveWalletWatches()
 				return getEmulatorStatus()
 			},
@@ -10473,8 +10714,10 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				const { listFlashImages, hasMnemonic } = await import('./emulator-keychain')
 				const { getActiveFlashName, getEmulatorStatus } = await import('./emulator')
 				const { getAllEmulatorWalletMeta } = await import('./db')
-				const { selectedEmulatorBuild, emulatorBuildFlashName } = await import('./emulator-library')
+				const { selectedEmulatorBuild, emulatorBuildFlashName, selectedEmulatorWallet } = await import('./emulator-library')
 				const selectedBuild = selectedEmulatorBuild()
+				let selectedWallet: string | null = null
+				try { selectedWallet = selectedEmulatorWallet() } catch { /* an invalid saved selection marks nothing */ }
 				const status = getEmulatorStatus()
 				const activeFlash = status.state === 'running' ? getActiveFlashName() : null
 				const metaByName = new Map(getAllEmulatorWalletMeta().map(m => [m.name, m]))
@@ -10487,6 +10730,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						name,
 						hasMnemonic: hasMnemonic(name),
 						isActive: name === activeFlash,
+						isSelected: name === selectedWallet,
 						label: meta?.label || undefined,
 						firmwareVersion: meta?.firmwareVersion || undefined,
 						channel: meta?.channel || undefined,
@@ -10598,60 +10842,19 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			},
 			emulatorSwitchWallet: async (params) => {
 				if (!emulatorEnabled) throw new Error('Emulator is disabled')
-				const { selectEmulatorWallet, selectedEmulatorWallet, selectedEmulatorBuild, emulatorBuildFlashName } = await import('./emulator-library')
-				const { stopEmulator, initEmulator, getEmulatorStatus } = await import('./emulator')
-				const { listFlashImages, validateFlashName } = await import('./emulator-keychain')
-				params = { ...params, name: validateFlashName(params.name) }
-				const saved = listFlashImages()
-				if (!saved.includes(params.name)) {
-					const selectedWallet = selectedEmulatorWallet()
-					if (selectedWallet === params.name) throw new Error(`Saved emulator wallet "${params.name}" is missing. Select an existing wallet.`)
-					const build = selectedEmulatorBuild()
-					const firstUseFallback = !saved.length && !selectedWallet && params.name === (build ? emulatorBuildFlashName(build) : 'default')
-					if (!firstUseFallback) {
-						const problem = newEmulatorWalletNameError(params.name, saved)
-						if (problem) throw new Error(`Cannot create emulator wallet: ${problem}`)
-					}
-				}
-
-				// Stop current emulator if running
-				if (getEmulatorStatus().state === 'running') {
-					const { closeEmulatorWindow } = await import('./emulator-window')
-					closeEmulatorWindow()
-					engine.disconnectEmulator()
-					stopEmulator()
-				}
-
-				// Init with the requested flash name + channel
-				const status = initEmulator(params.name)
-				if (status.state !== 'running') throw new Error(status.error || 'Emulator failed to start')
-
-				// Open window + connect engine (auto-reloads saved mnemonic)
-				const { openEmulatorWindow } = await import('./emulator-window')
-				openEmulatorWindow()
-				await engine.connectEmulator()
-				selectEmulatorWallet(params.name)
-				return getEmulatorStatus()
+				const { startEmulatorWallet } = await import('./emulator-session')
+				return startEmulatorWallet(await emulatorSessionDeps(), { name: params.name, buildId: params.buildId })
 			},
 			emulatorGetMnemonic: async () => {
 				if (!emulatorEnabled) return null
 				return await engine.getEmulatorMnemonic()
 			},
-			// Emulator-only "view seed for backup" — reads the persisted (encrypted)
-			// mnemonic for the active flash rather than a live DebugLink read, since
-			// DebugLink can hang on the dylib path (see raceVerifyMnemonic) and the
-			// saved mnemonic IS the backup of record. Hard-gated on engine.isEmulator
-			// (not just the emulatorEnabled feature flag) so this can never be reached
-			// against real hardware regardless of what the UI does.
-			emulatorRevealSeed: async () => {
-				if (!engine.isEmulator) throw new Error('Seed reveal is emulator-only')
-				const { loadMnemonic } = await import('./emulator-keychain')
-				const { getActiveFlashName } = await import('./emulator')
-				const flashName = getActiveFlashName()
-				const mnemonic = loadMnemonic(flashName)
-				if (!mnemonic) throw new Error('No saved seed for this emulator wallet')
-				return { mnemonic, flashName }
-			},
+            // Recovery words go directly to the emulator window, never back to the main UI.
+            emulatorRevealSeed: async () => {
+                const { revealEmulatorSeed } = await import('./emulator-seed-runtime')
+                return revealEmulatorSeed(engine, () => emulatorEnabled)
+            },
+
 			// Grabs whatever is currently on the emulator's OLED and writes it to
 			// disk as a PNG — visual proof for an automated test driver to attach
 			// alongside a txid (e.g. the mainnet test suite). Defaults to
@@ -10996,7 +11199,11 @@ udevadm trigger --subsystem-match=usb --attr-match=idVendor=2b24 || udevadm trig
 			windowGetFrame: async () => { if (!_mainWindow) throw new Error('Window not ready'); return _mainWindow.getFrame() },
 			windowSetPosition: async ({ x, y }) => { _mainWindow?.setPosition(x, y) },
 			windowSetFrame: async ({ x, y, width, height }) => { _mainWindow?.setFrame(x, y, width, height) },
-			})),
+			}, {
+				scope: () => ({ wallet: engine.wallet, epoch: activitySessionEpoch, seed: engine.currentSeedEthAddress }),
+				locked: () => engine.isLocked,
+				run: (action, options) => engine.withDeviceOperation(action, { ...options, rejectIfBusy: true, ...(options.unlock ? { origin: 'desktop' as const } : {}) }),
+			}))),
 			messages: {},
 	},
 })
@@ -11044,9 +11251,14 @@ function startPioneerSocketIfAllowed(): void {
 
 // Push engine events to WebView
 engine.on('state-change', (state) => {
+	if (state.state !== 'ready' || moneroSession !== engine.wallet || moneroHiddenWallet(engine)) {
+		invalidateMoneroWallet()
+		moneroSession = state.state === 'ready' && !moneroHiddenWallet(engine) ? engine.wallet : null
+	}
 	try { rpc.send['device-state'](state) } catch { /* webview not ready yet */ }
 	// The Studio provider key belongs to the device it was derived with.
 	providerKeySession.onDeviceState(state)
+	if (state.state === 'disconnected' || state.state === 'bootloader' || state.state === 'error') passwordBank.lock()
 	const bitcoinOnly = isBitcoinOnlyVariant(state.firmwareVariant)
 	// Scope the self-host node to the connected device: only a btc-only device may
 	// use the (global) persisted node. A multichain device — which can't even see
@@ -11249,6 +11461,7 @@ engine.on('seed-changed', ({ deviceId, oldAddress, newAddress }) => {
 	safeMultisig.clear()
 	vaultImporter.clear()
 	sessionVaults = undefined
+	invalidateMoneroWallet()
 	console.warn(`[Vault] SEED CHANGED on ${deviceId}: ${oldAddress?.slice(0, 10)} → ${newAddress?.slice(0, 10)}`)
 	resetSeedManagers()
 	clearSessionActivity()
@@ -11454,8 +11667,26 @@ ApplicationMenu.setApplicationMenu([
 }
 updateApplicationMenu()
 
-perf('creating BrowserWindow')
+// One Desktop per identifier and channel, settled before any window exists. A
+// second copy used to open its window and then block in the port-in-use alert:
+// a UI with no backend. Dev, stable and other channels still run side by side.
 let _mainWindow: BrowserWindow | null = null
+const appInfo = await Updater.getLocalInfo()
+const instanceClaim = await startupInstanceGate({
+	path: instanceSocketPath(os.homedir(), appInfo.identifier, appInfo.channel),
+	version: pkg.version,
+	onFocusRequest: () => {
+		const window = _mainWindow
+		if (!window) return
+		if (window.isMinimized()) window.unminimize()
+		window.activate()
+	},
+	showDialog: (dialog) => Utils.showMessageBox({ type: 'warning', title: 'KeepKey Desktop', ...dialog, buttons: ['OK'] }),
+	notify: (text) => Utils.showNotification({ title: 'KeepKey Desktop', body: text }),
+	exit: (code) => process.exit(code),
+})
+
+perf('creating BrowserWindow')
 const mainWindow = new BrowserWindow({
 	title: `KeepKey Vault v${pkg.version}`,
 	url,
@@ -11537,6 +11768,7 @@ perf('window created, starting deferred init')
 deferredInit()
 auth.reloadPairings()
 loadSettings()
+void resumeLocalMoneroNode().catch(error => console.warn('[monero-node]', error.message))
 await applyRestApiState('startup')
 if (!restApiEnabled) console.log('[Vault] REST API disabled by user setting')
 perf('REST API applied, starting engine')
@@ -11572,6 +11804,36 @@ setTimeout(() => {
 		import('./swap-tracker').then(({ cleanupStalePendingSwaps }) => cleanupStalePendingSwaps()).catch(() => {})
 	}, 60 * 60 * 1000)
 }, 5_000)
+
+// The DMG renamed keepkey-vault.app to "KeepKey Vault.app"; offer once to
+// trash an old copy left beside the new one. Deferred so it doesn't land on
+// top of the first window paint.
+if (process.platform === 'darwin') {
+	setTimeout(() => {
+		import('./legacy-app-cleanup').then(({ offerLegacyAppCleanup }) => offerLegacyAppCleanup({
+			platform: process.platform,
+			execPath: process.execPath,
+			homeDir: os.homedir(),
+			exists: p => fs.existsSync(p),
+			realpath: p => fs.realpathSync(p),
+			bundleIdentifier: appPath => {
+				const r = Bun.spawnSync(['/usr/bin/plutil', '-extract', 'CFBundleIdentifier', 'raw', '-o', '-', path.join(appPath, 'Contents', 'Info.plist')])
+				return r.exitCode === 0 ? r.stdout.toString().trim() : null
+			},
+			bundleVersion: appPath => {
+				const r = Bun.spawnSync(['/usr/bin/plutil', '-extract', 'CFBundleVersion', 'raw', '-o', '-', path.join(appPath, 'Contents', 'Info.plist')])
+				return r.exitCode === 0 ? r.stdout.toString().trim() : null
+			},
+			getSetting,
+			setSetting,
+			ask: async dialog => (await Utils.showMessageBox({ title: 'KeepKey Vault', ...dialog })).response,
+			moveToTrash: p => Utils.moveToTrash(p),
+			log: msg => console.log(msg),
+		})).then(result => {
+			if (result !== 'none-found' && result !== 'not-applicable') console.log(`[legacy-app] ${result}`)
+		}).catch((e: any) => console.warn('[legacy-app] cleanup failed:', e.message))
+	}, 3_000)
+}
 
 // Zcash sidecar is started eagerly at the end of boot (see bottom of file)
 
@@ -11739,6 +12001,13 @@ let quitting = false
 function cleanupAndQuit() {
 	if (quitting) return
 	quitting = true
+	// Hand off first: a copy launched while this one cleans up (cleanup can block the
+	// event loop for seconds) then takes the instance and the REST port at once.
+	instanceClaim?.release()
+	restServer?.stop()
+	restServer = null
+	stopMoneroSidecar()
+	localMoneroNode.shutdown()
 	// Zero the Studio provider key: the window (and its close effect) is going away.
 	try { providerKeySession.clear() } catch { /* nothing to zero */ }
 
@@ -11770,7 +12039,6 @@ function cleanupAndQuit() {
 	postTxBalances.clear()
 	stopActiveWalletWatches()
 	engine.stop()
-	restServer?.stop()
 	Utils.quit()
 }
 
@@ -11803,4 +12071,7 @@ if (zcashPrivacyEnabled) {
 }
 
 perf('boot complete')
+if (moneroEnabled && !offlineMode && !moneroHiddenWallet(engine)) {
+    startMoneroSidecar().catch(error => console.error('[monero] Sidecar startup failed:', error.message))
+}
 console.log("KeepKey Vault started!")

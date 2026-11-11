@@ -3,8 +3,9 @@
 # this Vault checkout. The universal binary is required because CI derives the
 # Intel app from the arm64 app archive after Electrobun packaging.
 set -euo pipefail
-# ClearSign alpha root public key (firmware clearsign_root.c; Desktop ALPHA_ROOT_PUBLIC_KEY).
-CLEARSIGN_ALPHA_ROOT_PUBKEY=02de9231b2094433235532fb1932e324a2c7304195e12e610c675cccbbd606dae7
+# ClearSign root public key the firmware compiles in: since 7.16 the production
+# root (firmware clearsign_root.c; Desktop PRODUCTION_ROOT_PUBLIC_KEY).
+CLEARSIGN_ROOT_PUBKEY=027c1fde75db6c36393e095e0dc5ab9a5bcf1ae9eb92b5d36e212a2bf7f8a6e321
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 FW_DIR="$REPO_ROOT/modules/keepkey-firmware"
@@ -101,11 +102,11 @@ build_arch() {
     --target kkemulator_dylib -j"$CPU_COUNT"
   test -f "$build_dir/lib/libkkemu.dylib" || {
     echo "ERROR: $arch libkkemu.dylib missing"; exit 1; }
-  # Check the artifact, not a build option: 7.16 compiles the alpha root into
+  # Check the artifact, not a build option: 7.16 compiles the production root into
   # every build with no flag (KK_CLEARSIGN_ALPHA_ROOT was removed), so only the
   # public key's bytes in the library prove it is there.
-  xxd -p "$build_dir/lib/libkkemu.dylib" | tr -d '\n' | grep -q "$CLEARSIGN_ALPHA_ROOT_PUBKEY" || {
-    echo "ERROR: $arch emulator does not contain the ClearSign alpha root"; exit 1; }
+  xxd -p "$build_dir/lib/libkkemu.dylib" | tr -d '\n' | grep -q "$CLEARSIGN_ROOT_PUBKEY" || {
+    echo "ERROR: $arch emulator does not contain the ClearSign root"; exit 1; }
   minos="$(otool -l "$build_dir/lib/libkkemu.dylib" | awk '
     $1 == "cmd" { command = $2 }
     (command == "LC_BUILD_VERSION" && $1 == "minos") ||
@@ -152,4 +153,4 @@ done
 echo "=== SUCCESS: staged $STAGE_DIR/libkkemu.dylib ==="
 echo "    Architectures: $archs"
 echo "    ABI: ${#required_symbols[@]} required exports present"
-echo "    ClearSign alpha root: ON"
+echo "    ClearSign root: $CLEARSIGN_ROOT_PUBKEY"

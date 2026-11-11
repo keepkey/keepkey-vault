@@ -3,6 +3,7 @@ import { useUiTranslation } from "../i18n/ui"
 import {useBtcMultisigEnabled} from "../hooks/useBtcMultisigEnabled"
 import { useState, useEffect, useCallback, useRef } from "react"
 import { Box, Flex, Text, Button, Spinner, Textarea } from "@chakra-ui/react"
+import { actionToneProps } from "./ui/ActionButton"
 import { base64, hex } from "@scure/base"
 import { BitcoinQrDialog } from "./BitcoinQrDialog"
 import { rpcRequest } from "../lib/rpc"
@@ -172,8 +173,9 @@ export function PsbtSignDialog() {
 
 	if (phase === "idle") return null
 
-	const goldButton = { size: "sm", bg: "kk.gold", color: "black", fontWeight: "600", px: "4", py: "2", _hover: { bg: "kk.goldHover" } } as const
-	const plainButton = { size: "sm", variant: "outline", color: "kk.textSecondary", borderColor: "kk.border", px: "4", py: "2" } as const
+	// Shared primary/neutral variants (components/ui/ActionButton.tsx, theme.ts button recipe).
+	const goldButton = { size: "sm" as const, ...actionToneProps("primary") }
+	const plainButton = { size: "sm", variant: "outline" } as const
 	const warnings: string[] = []
 	if (review) {
 		const f = review.flags

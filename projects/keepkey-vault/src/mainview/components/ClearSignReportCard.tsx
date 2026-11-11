@@ -1,3 +1,4 @@
+import { DocsLink } from './DocsLink'
 import { useUiTranslation } from "../i18n/ui"
 import { Flex, Text } from '@chakra-ui/react'
 import { runtimeProviderLine, type ClearSignReport, type ContractRating } from '../../shared/clearsign-report'
@@ -35,22 +36,24 @@ const RISK_COLOR: Record<ContractRating['riskLevel'], string> = {
   low: 'var(--teal)', medium: 'var(--gold)', high: 'var(--rose)', critical: 'var(--rose)',
 }
 
-/** A human auditor's opinion of the contract. Separate from clearsign: this
- * app checks the signature; the KeepKey never sees or verifies it. */
+/** Hosted assessment, kept distinct from the device's cryptographic checks. */
 function ContractRatingView({ rating }: { rating: ContractRating }) {
   const uiText = useUiTranslation()
 
   const color = RISK_COLOR[rating.riskLevel]
   return <Flex direction="column" gap="1" mt="1" pt="1.5" borderTop="1px solid rgba(255,255,255,0.12)" data-contract-risk={rating.riskLevel}>
     <Flex justify="space-between" align="center" gap="2">
-      <Text fontSize="xs" fontWeight="800" color="white">{uiText("Auditor rating")}</Text>
+      <Text fontSize="xs" fontWeight="800" color="white">{uiText("Contract audit assessment")}</Text>
       <Text fontSize="2xs" fontWeight="800" color={color} textTransform="uppercase">{rating.riskLevel}{" "}{uiText("risk")}</Text>
     </Flex>
     {rating.riskReasons.map((reason, index) => <Text key={`reason:${index}`} fontSize="2xs" color={color}>• {reason}</Text>)}
     {rating.findings.map((finding, index) => <Text key={`finding:${index}`} fontSize="2xs" color="kk.textSecondary">
-      <Text as="span" fontWeight="700" color={finding.severity === 'high' || finding.severity === 'critical' ? 'var(--rose)' : 'white'}>{finding.severity}: {finding.title}.</Text> {finding.detail}
+      <Text as="span" fontWeight="700" color={finding.severity === 'high' || finding.severity === 'critical' ? 'var(--rose)' : 'white'}>{finding.severity}: {finding.title}.</Text> {finding.detail}{finding.reference && <> {uiText("Reference:")} {finding.reference}</>}
     </Text>)}
-    <Text fontSize="2xs" color="kk.textMuted">{uiText("A human opinion of this contract, checked by this app — not by your KeepKey.")}{!rating.raterPinned && uiText(" The rater is not yet pinned in this Vault.")}
+    <Text fontSize="2xs" color="kk.textMuted">
+      {uiText("Submitted by")} {rating.rater} · {new Date(rating.ratedAt).toISOString().slice(0, 10)}. {uiText("Author attribution is supplied by the publisher.")}{" "}
+      {uiText("This assessment is an opinion; clear-signing verification is shown separately.")}
     </Text>
+    <DocsLink href={rating.reportUrl} label={uiText("More info")} color="var(--teal)" />
   </Flex>
 }

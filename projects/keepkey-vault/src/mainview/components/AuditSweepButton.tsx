@@ -8,6 +8,7 @@ import { useUiTranslation } from "../i18n/ui"
  */
 import { useState } from "react"
 import { Box, Flex, Text, Button, Spinner } from "@chakra-ui/react"
+import { actionToneProps } from "./ui/ActionButton"
 import { rpcRequest } from "../lib/rpc"
 
 function fmtSats(sats: number): string {
@@ -78,7 +79,7 @@ export function AuditSweepButton({ chainId, addressNList, scriptType, address, o
     <Box mt="2" pt="2" borderTop="1px solid" borderColor="rgba(233,196,106,0.2)">
       {phase === 'idle' || phase === 'quoting' ? (
         <Flex align="center" gap="3" wrap="wrap">
-          <Button size="2xs" bg="var(--gold)" color="var(--ink-0)" fontWeight="700" _hover={{ bg: 'var(--gold-2)' }}
+          <Button {...actionToneProps("primary")} size="2xs"
             loading={phase === 'quoting'} onClick={getQuote}>{uiText("Sweep to main wallet")}</Button>
           <Text fontSize="11px" color="var(--text-3)">{uiText("moves these funds to your standard address")}</Text>
         </Flex>
@@ -94,7 +95,7 @@ export function AuditSweepButton({ chainId, addressNList, scriptType, address, o
             <Flex align="center" gap="2"><Spinner size="xs" color="var(--gold)" /><Text fontSize="12px" color="var(--gold)">{uiText("Confirm on your KeepKey…")}</Text></Flex>
           ) : (
             <Flex gap="2">
-              <Button size="2xs" bg="var(--gold)" color="var(--ink-0)" fontWeight="700" _hover={{ bg: 'var(--gold-2)' }} onClick={sweep}>{uiText("Confirm sweep")}</Button>
+              <Button {...actionToneProps("primary")} size="2xs" onClick={sweep}>{uiText("Confirm sweep")}</Button>
               <Button size="2xs" variant="outline" borderColor="var(--line-2)" color="var(--text-2)" onClick={() => { setPhase('idle'); setQuote(null) }}>{uiText("Cancel")}</Button>
             </Flex>
           )}

@@ -370,8 +370,8 @@ console.log(`[prune-bundle] node_modules: ${(sizeBefore / 1024).toFixed(1)}MB â†
 
 // Patch node:buffer bug â€” Bun bundler compiles `export * from 'node:buffer'`
 // to `__reExport(exports, node_buffer)` but never defines `node_buffer`.
-// Electrobun creates the tar.zst BEFORE patch-bundle.ts runs on _build/,
-// so the archive always has the unpatched file. Fix it here after extracting.
+// patch-bundle.ts runs as Electrobun's postBuild hook, before the tar.zst is
+// created. Check again here for an archive built without that hook.
 const bunIndexPath = join(appPath, 'Contents', 'Resources', 'app', 'bun', 'index.js')
 if (existsSync(bunIndexPath)) {
   const { readFileSync: readF, writeFileSync: writeF } = await import('node:fs')

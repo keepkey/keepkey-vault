@@ -14,12 +14,19 @@ import { join, dirname } from 'node:path'
 const SCRIPT = join(import.meta.dir, '..', 'scripts', 'patch-electrobun.sh')
 
 const CLI = 'src/cli/index.ts'
+const WRAPPER = 'bin/electrobun.cjs'
 const RPC = 'dist/api/shared/rpc.ts'
 const PRELOAD = 'dist/api/bun/preload/.generated/compiled.ts'
 
 // Minimal stand-ins carrying only the upstream text each patch anchors to.
 // compiled.ts embeds the preload as an escaped string, hence the literal \".
 const FIXTURES: Record<string, string> = {
+  // The package wrapper's exit handler, with node standing in for the native CLI.
+  [WRAPPER]: [
+    "const { spawn } = require('node:child_process');",
+    "const child = spawn(process.execPath, ['-e', process.argv[2]]);",
+    "child.on('exit', (code) => { process.exit(code || 0); });",
+  ].join('\n'),
   [CLI]: [
     'const cmd = `zip -y -r -9 ${escapePathForTerminal(zipPath)}`;',
     'execSync(cmd, {',
@@ -63,8 +70,22 @@ describe('patch-electrobun.sh', () => {
       expect(r.code).toBe(0)
       expect(r.read(CLI)).toContain('zip -y -r -q -9')
       expect(r.read(CLI)).toContain('maxBuffer: 50 * 1024 * 1024')
+      expect(r.read(WRAPPER)).toContain('process.exit(code ?? 1)')
       expect(r.read(RPC)).toContain('kkDeviceErrorText')
       expect(r.read(PRELOAD)).toContain('__ebInitEncRetry')
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  test('preserves an exit error and fails if the native CLI is killed', () => {
+    const root = makeTree()
+    try {
+      expect(runPatch(root).code).toBe(0)
+      const wrapper = join(root, 'node_modules', 'electrobun', WRAPPER)
+      expect(Bun.spawnSync(['node', wrapper, 'process.exit(0)']).exitCode).toBe(0)
+      expect(Bun.spawnSync(['node', wrapper, 'process.exit(23)']).exitCode).toBe(23)
+      expect(Bun.spawnSync(['node', wrapper, 'process.kill(process.pid, "SIGKILL")']).exitCode).not.toBe(0)
     } finally {
       rmSync(root, { recursive: true, force: true })
     }
@@ -89,6 +110,8 @@ describe('patch-electrobun.sh', () => {
     ['rpc.ts is missing entirely', { [RPC]: null }],
     ['preload compiled.ts is missing entirely', { [PRELOAD]: null }],
     ['the CLI is missing entirely', { [CLI]: null }],
+    ['the CLI wrapper is missing entirely', { [WRAPPER]: null }],
+    ['the CLI wrapper exit anchor changed upstream', { [WRAPPER]: "child.on('exit', (code) => process.exit(code));" }],
     ['the rpc.ts anchor changed upstream', { [RPC]: 'if (!(error instanceof Error)) rethrow(error);' }],
     ['the zip anchor changed upstream', { [CLI]: 'const cmd = `zip -r -9 ${zipPath}`;' }],
     ['the preload anchor changed upstream', { [PRELOAD]: 'await initEncryption();' }],

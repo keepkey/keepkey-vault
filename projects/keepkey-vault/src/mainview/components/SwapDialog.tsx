@@ -21,26 +21,27 @@ import type { ChainDef } from "../../shared/chains"
 import { nativeMaxSpendableAmount, normalizeDecimals, tokenMaxSpendableAmount } from "../../shared/max-send"
 import { getAssetIcon } from "../../shared/assetLookup"
 import { validateAddress } from "../../shared/address-validation"
-import { isBalanceUnverified } from "../../shared/balance-display-state"
+import { balanceUnverifiedReason, isBalanceUnverified } from "../../shared/balance-display-state"
+import { isLocalDeviceAccessError } from "../../shared/device-access-error"
 import { mergeTrustedBalanceSnapshot } from "../../shared/balance-reconciliation"
 import type { SwapAsset, SwapQuote, ChainBalance, CustomToken, SwapStatusUpdate, SwapTrackingStatus, PendingSwap, SwapUiState, SwapUiCommand, SwapHealth } from "../../shared/types"
 import { SOLANA_BLIND_SIGNING_REQUIRED } from "../../shared/types"
 import { Z } from "../lib/z-index"
 import { providerTrackerUrl } from "../lib/trackers"
 import { ProviderBadge, ProverChip, resolveProvider } from "./ProviderBadge"
-import { getSwapperAnimation } from "../lib/swapper-animations"
 import { assessSwapRisk } from "../../shared/swap-risk"
 import { swapHealthSummary, swapProviderPresentation, swapHealthQuoteExplanation } from "../../shared/swap-health"
 import { knownSpenderName } from "../../shared/evm-known-spenders"
 import { isSwapFullySettled, payoutReachesMinimum } from "../../shared/swap-settlement"
 import { SwapRiskReview } from "./SwapRiskReview"
-import { computeDustWarning, shouldWarnHighSlippage, computeEffectiveSlippageBps, isSmallSwapQuoteWarning } from "../../shared/swap-warnings"
+import { shouldWarnHighSlippage, computeEffectiveSlippageBps, isSmallSwapQuoteWarning } from "../../shared/swap-warnings"
 import { useEvmAddresses } from "../hooks/useEvmAddresses"
 import { useDeviceState } from "../hooks/useDeviceState"
 import { ClearSignReportCard } from "./ClearSignReportCard"
 import { namedProviderLine, swapReportNeedsAttention } from "../../shared/clearsign-report"
 import { versionCompare } from "../../shared/firmware-versions"
 import { scopeSwapBalances, swapAccountAmount } from "../../shared/swap-account-balances"
+import { sameSwapAsset, swapNetworkIdentity } from "../../shared/swap-network-identity"
 import { AssetPickerDialog } from "./AssetPickerDialog"
 import { DocsLink } from "./DocsLink"
 import { DOCS_LINKS, watch } from "../../shared/docs-links"
@@ -58,6 +59,7 @@ import {
   parseCustomSlippagePercent,
 } from "../../shared/slippage"
 import { KeepKeyDevice, RouteMap, SpinningDevice } from "./v3"
+import { getSwapperAnimation } from "../lib/swapper-animations"
 import calculatingGif from "../assets/swap/calculating.gif"
 import shiftingGif from "../assets/swap/shifting.gif"
 import completedGif from "../assets/swap/completed.gif"
@@ -302,7 +304,7 @@ function ellipsizeMiddle(value: unknown, start = 10, end = 8): string {
 function ReviewRow({ label, children, accent = false }: { label: ReactNode; children: ReactNode; accent?: boolean }) {
   return (
     <Flex justify="space-between" align="flex-start" gap="3">
-      <Text fontSize="11px" color="kk.textMuted" flexShrink={0}>{label}</Text>
+      <Text fontSize="11px" color="kk.textMuted" maxW="50%">{label}</Text>
       <Text
         fontSize="11px"
         fontFamily="mono"
@@ -780,28 +782,41 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
   const uiText = useUiTranslation()
 
   const { t } = useTranslation("swap")
-  const { fmtCompact, symbol: fiatSymbol, locale } = useFiat()
-  const { evmAddresses } = useEvmAddresses()
+  const { fmt, fmtCompact, symbol: fiatSymbol, locale } = useFiat()
   const { firmwareVersion } = useDeviceState()
   // Local EVM address selection — scoped to this dialog so switching here doesn't
   // mutate the global selected index in AssetPage. null = use global selectedIndex.
   const [evmAddressIndexOverride, setEvmAddressIndexOverride] = useState<number | null>(null)
-  const effectiveEvmIndex = evmAddressIndexOverride ?? evmAddresses.selectedIndex
-  const signingAccount = evmAddresses.addresses.find(a => a.addressIndex === effectiveEvmIndex)
 
   // ── State ─────────────────────────────────────────────────────────
+  // A retained dialog can show another receipt while an older execution is
+  // still running. Its completion belongs to that execution, not the new view.
+  // Hiding a busy dialog keeps its context so it can finish while hidden.
+  const executionUiGeneration = useRef(0)
+  useEffect(() => () => { executionUiGeneration.current++ }, [])
   const [phase, setPhase] = useState<SwapPhase>('input')
   const [assets, setAssets] = useState<SwapAsset[]>([])
   const [loadingAssets, setLoadingAssets] = useState(true)
   const [assetLoadError, setAssetLoadError] = useState<string | null>(null)
   const [balances, setBalances] = useState<ChainBalance[]>([])
   const [loadingBalances, setLoadingBalances] = useState(false)
+  const [balanceInitialLoaded, setBalanceInitialLoaded] = useState(false)
+  const [balanceReloadEpoch, setBalanceReloadEpoch] = useState(0)
+  const [sourceBalanceReads, setSourceBalanceReads] = useState<Record<string, 'pending' | 'settled' | 'blocked'>>({})
+  const swapOpenGeneration = useRef(0)
+  const balancePushRevision = useRef(0)
+  const chainBalancePushRevision = useRef(new Map<string, number>())
   // User-added custom tokens, refetched whenever the asset picker opens so a
   // freshly-added contract shows up on the next open without restarting.
   const [customTokens, setCustomTokens] = useState<CustomToken[]>([])
 
   const [fromAsset, setFromAsset] = useState<SwapAsset | null>(null)
   const [toAsset, setToAsset] = useState<SwapAsset | null>(null)
+  const evmEnabled = open && (fromAsset?.chainFamily === 'evm' || toAsset?.chainFamily === 'evm'
+    || (!fromAsset && (initialFromAsset?.chainFamily === 'evm' || chain?.chainFamily === 'evm')))
+  const { evmAddresses, initialLoaded: evmInitialLoaded, refresh: refreshEvmAddresses } = useEvmAddresses(evmEnabled)
+  const effectiveEvmIndex = evmAddressIndexOverride ?? evmAddresses.selectedIndex
+  const signingAccount = evmAddresses.addresses.find(a => a.addressIndex === effectiveEvmIndex)
   useEffect(() => { onOutputAssetChange?.(toAsset?.chainId ?? null) }, [toAsset?.chainId, onOutputAssetChange])
   // Which side opened the asset picker — null when closed. Single shared
   // AssetPickerDialog rendered at modal-over-modal z-index for both sides.
@@ -938,16 +953,18 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
   const [liveInboundEffectiveGasPrice, setLiveInboundEffectiveGasPrice] = useState<string | undefined>()
   const [liveInboundConfirmedAt, setLiveInboundConfirmedAt] = useState<number | undefined>()
   const [liveCreatedAt, setLiveCreatedAt] = useState<number | undefined>()
+  const [liveCompletedAt, setLiveCompletedAt] = useState<number | undefined>()
   // Tracker error message + recovery guidance — previously never surfaced in
   // the submitted view (only the title flipped to "Swap failed").
   const [liveError, setLiveError] = useState<string | undefined>()
   const [liveErrorActionable, setLiveErrorActionable] = useState<string | undefined>()
   const [liveErrorElapsedMinutes, setLiveErrorElapsedMinutes] = useState<number | undefined>()
   const [rechecking, setRechecking] = useState(false)
+  const [statusCheck, setStatusCheck] = useState<PendingSwap['statusCheck']>()
 
-  // ── Countdown timer ───────────────────────────────────────────────
-  const [countdown, setCountdown] = useState(0)
-  const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const [trackingNow, setTrackingNow] = useState(Date.now)
+  const elapsedSeconds = liveCreatedAt ? Math.max(0, Math.floor(((liveCompletedAt ?? trackingNow) - liveCreatedAt) / 1000)) : undefined
+  const countdown = elapsedSeconds === undefined ? 0 : Math.max(0, Math.ceil((quote?.estimatedTime ?? 0) - elapsedSeconds))
 
   // ── Before/after balance tracking ─────────────────────────────────
   const [beforeFromBal, setBeforeFromBal] = useState<string | null>(null)
@@ -1000,11 +1017,24 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
   // The swap-update message carries these too, but the snapshot is the backstop
   // for a dialog that mounted after the tracker's last push (resume / late open)
   // and is the only place createdAt (the broadcast anchor) is available.
-  const applyInboundSnap = useCallback((snap: any) => {
+  const updateStatusCheck = useCallback((check: NonNullable<PendingSwap['statusCheck']>) => {
+    setStatusCheck(previous => !previous || check.checkedAt >= previous.checkedAt ? check : previous)
+  }, [])
+
+  const applyInboundSnap = useCallback((snap: PendingSwap | null) => {
     if (!snap) return
     if (snap.status) setLiveStatus(previous => advanceSwapStatus(previous, snap.status))
     if (snap.payouts) setLivePayouts(snap.payouts)
     if (snap.receivedOutput) setLiveReceivedOutput(snap.receivedOutput)
+    if (Number.isFinite(snap.confirmations)) setLiveConfirmations(snap.confirmations)
+    if (snap.outboundConfirmations !== undefined) setLiveOutboundConfirmations(snap.outboundConfirmations)
+    if (snap.outboundRequiredConfirmations !== undefined) setLiveOutboundRequired(snap.outboundRequiredConfirmations)
+    if (isRealHash(snap.outboundTxid)) setLiveOutboundTxid(snap.outboundTxid)
+    if (snap.outboundChainId) setLiveOutboundChainId(snap.outboundChainId)
+    if (snap.refundReason) setLiveRefundReason(snap.refundReason)
+    if (snap.swapper && snap.integration !== 'thorchain' && snap.integration !== 'mayachain') setLiveSwapper(snap.swapper)
+    if (snap.completedAt) setLiveCompletedAt(snap.completedAt)
+    if (snap.statusCheck) updateStatusCheck(snap.statusCheck)
     if (snap.inboundBlockNumber != null && snap.inboundBlockNumber > 0) setLiveInboundBlockNumber(snap.inboundBlockNumber)
     if (snap.inboundBlockHash) setLiveInboundBlockHash(snap.inboundBlockHash)
     if (snap.inboundGasUsed) setLiveInboundGasUsed(snap.inboundGasUsed)
@@ -1014,7 +1044,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
     if (snap.error) setLiveError(snap.error)
     if (snap.errorActionable) setLiveErrorActionable(snap.errorActionable)
     if (snap.errorElapsedMinutes !== undefined && snap.errorElapsedMinutes !== null) setLiveErrorElapsedMinutes(snap.errorElapsedMinutes)
-  }, [])
+  }, [updateStatusCheck])
 
   // ── Listen for swap-update + swap-complete RPC messages ─────────
   useEffect(() => {
@@ -1059,7 +1089,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
   // reaches a terminal state, when the user closes the dialog, or when the
   // phase moves away.
   //
-  // NOTE: deps are deliberately [txid, phase] — NOT liveStatus. Including
+  // NOTE: deps are deliberately [open, txid, phase] — NOT liveStatus. Including
   // liveStatus here causes a runaway loop: every status push from the
   // tracker re-runs the effect, the cleanup cancels the in-flight tick,
   // a new tick fires immediately, hits Pioneer/Midgard, gets a different
@@ -1068,13 +1098,14 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
   const liveStatusRef = useRef(liveStatus)
   useEffect(() => { liveStatusRef.current = liveStatus }, [liveStatus])
   useEffect(() => {
-    if (!txid || phase !== 'submitted') return
+    if (!open || !txid || phase !== 'submitted') return
     let cancelled = false
     let timer: ReturnType<typeof setTimeout> | null = null
     let completedMetadataPolls = 0
     const tick = async () => {
       if (cancelled) return
       let snap: PendingSwap | null = null
+      const checkedAt = Date.now()
       try {
         snap = await rpcRequest<PendingSwap | null>('refreshSwap', { txid })
         // Guard after the await — dialog may have closed or switched txids.
@@ -1084,7 +1115,10 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
         if (snap?.nearTxHash) setLiveNearTxHash(snap.nearTxHash)
         if (snap?.relayRequestId) setLiveRelayRequestId(snap.relayRequestId)
         applyInboundSnap(snap)
-      } catch { /* swap-update push will retry on next tick */ }
+        if (!snap) updateStatusCheck({ checkedAt, error: 'not_found' })
+      } catch {
+        if (!cancelled) updateStatusCheck({ checkedAt, error: 'unavailable' })
+      }
       if (cancelled) return
       const s = advanceSwapStatus(liveStatusRef.current, snap?.status || liveStatusRef.current)
       if (shouldRetryCompletedSwapMetadata(s, snap?.trackingMetadataPending, completedMetadataPolls)) {
@@ -1101,22 +1135,29 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
     }
     tick()
     return () => { cancelled = true; if (timer) clearTimeout(timer) }
-  }, [txid, phase])
+  }, [open, txid, phase, applyInboundSnap, updateStatusCheck])
 
   // ── Manual recheck — fires a single immediate poll on demand ──────
   const handleRecheck = useCallback(async () => {
     if (!txid || rechecking) return
+    const generation = executionUiGeneration.current
+    const checkedAt = Date.now()
     setRechecking(true)
     try {
       // Manual press forces a Pioneer rescan (?rescan=true) so a failed/stuck
       // swap can be re-derived from chain on demand.
-      const snap = await rpcRequest<any>('refreshSwap', { txid, rescan: true })
+      const snap = await rpcRequest<PendingSwap | null>('refreshSwap', { txid, rescan: true })
+      if (generation !== executionUiGeneration.current) return
       if (snap?.nearTxHash) setLiveNearTxHash(snap.nearTxHash)
       if (snap?.relayRequestId) setLiveRelayRequestId(snap.relayRequestId)
       applyInboundSnap(snap)
-    } catch { /* swap-update push covers the failure */ }
-    setRechecking(false)
-  }, [txid, rechecking, applyInboundSnap])
+      if (!snap) updateStatusCheck({ checkedAt, error: 'not_found' })
+    } catch {
+      if (generation === executionUiGeneration.current) updateStatusCheck({ checkedAt, error: 'unavailable' })
+    } finally {
+      if (generation === executionUiGeneration.current) setRechecking(false)
+    }
+  }, [txid, rechecking, applyInboundSnap, updateStatusCheck])
 
   // When the user switches EVM address in the dialog while a quote is active,
   // discard the stale quote and return to input so a fresh quote is fetched.
@@ -1158,6 +1199,8 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
       setLiveInboundEffectiveGasPrice(undefined)
       setLiveInboundConfirmedAt(undefined)
       setLiveCreatedAt(undefined)
+      setLiveCompletedAt(undefined)
+      setStatusCheck(undefined)
       setLiveError(undefined)
       setLiveErrorActionable(undefined)
       setLiveErrorElapsedMinutes(undefined)
@@ -1165,30 +1208,26 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
       setAfterToBal(null)
       setShowConfetti(false)
       completionFiredRef.current = false
-      setCountdown(0)
-      if (countdownRef.current) { clearInterval(countdownRef.current); countdownRef.current = null }
     }
   }, [phase])
 
-  // Countdown timer — ticks every second from estimatedTime to 0, stops on complete/failed
+  // The broadcast timestamp keeps the estimate consistent across reopens.
   useEffect(() => {
-    if (countdownRef.current) { clearInterval(countdownRef.current); countdownRef.current = null }
-    if (phase === 'submitted' && quote?.estimatedTime && quote.estimatedTime > 0 && !isSwapComplete && !isSwapFailed) {
-      setCountdown(quote.estimatedTime)
-      countdownRef.current = setInterval(() => {
-        setCountdown(prev => prev > 0 ? prev - 1 : 0)
-      }, 1000)
-    }
-    return () => { if (countdownRef.current) { clearInterval(countdownRef.current); countdownRef.current = null } }
-  }, [phase, quote?.estimatedTime, isSwapComplete, isSwapFailed])
+    if (!open || phase !== 'submitted') return
+    setTrackingNow(Date.now())
+    if (isSwapComplete || isSwapFailed) return
+    const timer = setInterval(() => setTrackingNow(Date.now()), 1000)
+    return () => clearInterval(timer)
+  }, [open, phase, isSwapComplete, isSwapFailed])
 
   // Fire confetti + sound + fetch after-balances when swap completes
   useEffect(() => {
     if (!isSwapComplete || completionFiredRef.current) return
+    const generation = executionUiGeneration.current
     completionFiredRef.current = true
     setShowConfetti(true)
     playCompletionSound()
-    setTimeout(() => setShowConfetti(false), 1500)
+    setTimeout(() => { if (generation === executionUiGeneration.current) setShowConfetti(false) }, 1500)
     // Fetch updated balances to show before/after diff
     const swapDestCaip = toAsset?.chainFamily === 'evm' && toAsset.contractAddress ? toAsset.caip : undefined
     rpcRequest<ChainBalance[]>(
@@ -1197,6 +1236,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
       120000,
     )
       .then((result) => {
+        if (generation !== executionUiGeneration.current) return
         if (!result || !fromAsset || !toAsset) return
         const fromCb = result.find(b => b.chainId === fromAsset.chainId)
         const toCb = result.find(b => b.chainId === toAsset.chainId)
@@ -1253,30 +1293,53 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
   // for hidden wallets and non-EVM fromAddress never resolves (it reads
   // balances.find()?.address). getBalances derives addresses live from the
   // device and persists nothing for hidden wallets.
+  const mergeBalanceRead = useCallback((rows: ChainBalance[], requestedRevision: number) => {
+    setBalances(previous => {
+      const next = new Map(previous.map(row => [row.chainId, row]))
+      for (const row of rows) {
+        if ((chainBalancePushRevision.current.get(row.chainId) ?? 0) > requestedRevision) continue
+        const current = next.get(row.chainId)
+        if (current?.updatedAt && row.updatedAt && current.updatedAt > row.updatedAt) continue
+        const merged = mergeTrustedBalanceSnapshot(current, row, false)
+        if (merged) next.set(row.chainId, merged)
+      }
+      return [...next.values()]
+    })
+  }, [])
   useEffect(() => {
     if (!open) {
       setLoadingBalances(false)
+      setBalanceInitialLoaded(false)
       return
     }
     let cancelled = false
+    const generation = swapOpenGeneration.current
+    const requestedRevision = balancePushRevision.current
     setLoadingBalances(true)
+    setBalanceInitialLoaded(false)
     rpcRequest<{ balances: ChainBalance[]; updatedAt: number } | null>('getCachedBalances', undefined, 5000)
-      .then((result) => {
-        if (cancelled) return
+      .catch(() => null) // A cache miss/failure still gets one live read.
+      .then(async (result) => {
+        if (cancelled || generation !== swapOpenGeneration.current) return
         if (result?.balances?.length) {
-          setBalances(result.balances)
-          setLoadingBalances(false)
+          mergeBalanceRead(result.balances, requestedRevision)
           return
         }
-        return rpcRequest<ChainBalance[]>('getBalances', undefined, 120000)
-          .then((live) => {
-            if (!cancelled && Array.isArray(live)) setBalances(live)
-          })
-          .finally(() => { if (!cancelled) setLoadingBalances(false) })
+        const live = await rpcRequest<ChainBalance[]>('getBalances', undefined, 120000)
+        if (cancelled || generation !== swapOpenGeneration.current) return
+        if (Array.isArray(live)) mergeBalanceRead(live, requestedRevision)
+        // EVM spendable values are owner-scoped. An aggregate portfolio reply
+        // does not mean its separately-delivered owner snapshot is ready yet.
+        await refreshEvmAddresses()
       })
-      .catch(() => { if (!cancelled) setLoadingBalances(false) })
+      .catch(() => {})
+      .finally(() => {
+        if (cancelled || generation !== swapOpenGeneration.current) return
+        setLoadingBalances(false)
+        setBalanceInitialLoaded(true)
+      })
     return () => { cancelled = true }
-  }, [open])
+  }, [open, balanceReloadEpoch, mergeBalanceRead, refreshEvmAddresses])
 
   // ── Live balance sync — keep sendMax math current ──────────────────
   // Dashboard subscribes to balance-updated; SwapDialog must too, or
@@ -1284,6 +1347,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
   useEffect(() => {
     if (!open) return
     return onRpcMessage('balance-updated', (updated: ChainBalance) => {
+      chainBalancePushRevision.current.set(updated.chainId, ++balancePushRevision.current)
       setBalances(prev => {
         const idx = prev.findIndex(b => b.chainId === updated.chainId)
         if (idx === -1) return [...prev, updated]
@@ -1293,6 +1357,16 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
       })
     })
   }, [open])
+
+  useEffect(() => onRpcMessage('wallet-data-purged', () => {
+    swapOpenGeneration.current++
+    balancePushRevision.current++
+    chainBalancePushRevision.current.clear()
+    setBalances([])
+    setSourceBalanceReads({})
+    setBalanceInitialLoaded(false)
+    setBalanceReloadEpoch(epoch => epoch + 1)
+  }), [])
 
   // ── Load user-added custom tokens ─────────────────────────────────
   // Refetch each time the picker is opened so a token added in the previous
@@ -1437,6 +1511,11 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
   useEffect(() => {
     if (!open || !resumeSwap || hasResumedRef.current === resumeSwap.txid) return
     hasResumedRef.current = resumeSwap.txid
+    executionUiGeneration.current++
+    setRefreshingQuote(false)
+    setManualQuoting(false)
+    setEnablingBlindSign(false)
+    setRechecking(false)
 
     // Build SwapAsset objects from PendingSwap data, resolving chain metadata from CHAINS.
     // CAIPs are persisted on the swap row so we can resolve asset logos here without
@@ -1493,6 +1572,8 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
     if (resumeSwap.inboundEffectiveGasPrice) setLiveInboundEffectiveGasPrice(resumeSwap.inboundEffectiveGasPrice)
     if (resumeSwap.inboundConfirmedAt !== undefined) setLiveInboundConfirmedAt(resumeSwap.inboundConfirmedAt)
     if (resumeSwap.createdAt) setLiveCreatedAt(resumeSwap.createdAt)
+    setLiveCompletedAt(resumeSwap.completedAt)
+    setStatusCheck(resumeSwap.statusCheck)
     if (resumeSwap.error) setLiveError(resumeSwap.error)
     if (resumeSwap.errorActionable) setLiveErrorActionable(resumeSwap.errorActionable)
     if (resumeSwap.errorElapsedMinutes !== undefined) setLiveErrorElapsedMinutes(resumeSwap.errorElapsedMinutes)
@@ -1509,13 +1590,14 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
 
     setQuote({
       expectedOutput: resumeSwap.expectedOutput,
-      minimumOutput: resumeSwap.expectedOutput,
+      minimumOutput: resumeSwap.minimumOutput ?? '',
       inboundAddress: resumeSwap.inboundAddress,
       router: resumeSwap.router,
       memo: resumeSwap.memo,
       fees: { affiliate: '0', outbound: '0', totalBps: 0 },
       estimatedTime: resumeSwap.estimatedTime,
       integration: resumeSwap.integration,
+      swapper: isNativeVaultIntegration ? undefined : resumeSwap.swapper,
       // Preserve real slippage from history; fall back to current setting so
       // the review screen never displays a misleading 0%.
       slippageBps: resumeSwap.slippageBps ?? slippageBps,
@@ -1530,14 +1612,62 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
     assets.filter(a => a.chainFamily === 'evm').map(a => a.chainId)), [balances, balance, evmAddresses, effectiveEvmIndex, assets])
   const fromBalanceEntry = useMemo(() => fromAsset ? accountBalances.find(b => b.chainId === fromAsset.chainId) : undefined,
     [fromAsset, accountBalances])
+  const fromBalance = useMemo(() => fromAsset ? swapAccountAmount(fromBalanceEntry, fromAsset) : null,
+    [fromAsset, fromBalanceEntry])
 
   /* Confidence in the ASSET being swapped. A token proven directly over RPC
    * keeps its real figure even while its parent chain is degraded — exactly
    * what mergeTrustedBalanceSnapshot merges through. */
   const fromBalanceUnverified = useMemo(
-    () => !!fromAsset && isBalanceUnverified(fromBalanceEntry, fromAsset.caip),
-    [fromAsset, fromBalanceEntry],
+    () => !!fromAsset && fromBalance === null,
+    [fromAsset, fromBalance],
   )
+  /* 'missing' = no answer for this chain yet; only 'degraded' means the refresh failed. */
+  const fromBalanceReason = useMemo(
+    () => fromAsset ? balanceUnverifiedReason(fromBalanceEntry, fromAsset.caip) ?? (fromBalance === null ? 'missing' : undefined) : undefined,
+    [fromAsset, fromBalanceEntry, fromBalance],
+  )
+
+  /* A cached snapshot can lack the chain being swapped from (it was not in the
+   * last refresh). Fetch live once per chain instead of waiting on another screen
+   * to push it; after that settles, a still-missing chain is reported as such. */
+  const sourceBalanceKey = fromAsset
+    ? `${fromAsset.chainId}:${fromAsset.caip || fromAsset.asset}:${fromAsset.chainFamily === 'evm' ? effectiveEvmIndex : 'native'}`
+    : ''
+  const sourceBalanceRead = sourceBalanceReads[sourceBalanceKey]
+  // A new selection is pending on its FIRST paint, before its effect can start.
+  // Keep that state until both the portfolio read and EVM owner snapshot settle.
+  const fromBalancePending = fromBalanceUnverified && (!balanceInitialLoaded || loadingBalances
+    || (fromAsset?.chainFamily === 'evm' && !evmInitialLoaded) || !sourceBalanceRead || sourceBalanceRead === 'pending')
+  useEffect(() => {
+    if (!open) { swapOpenGeneration.current++; setSourceBalanceReads({}) }
+  }, [open])
+  useEffect(() => {
+    if (!open || !fromAsset || !fromBalanceUnverified || !balanceInitialLoaded || loadingBalances
+      || (fromAsset.chainFamily === 'evm' && !evmInitialLoaded) || sourceBalanceRead) return
+    const sourceKey = sourceBalanceKey
+    const generation = swapOpenGeneration.current
+    const requestedRevision = balancePushRevision.current
+    let outcome: 'settled' | 'blocked' = 'settled'
+    setSourceBalanceReads(previous => ({ ...previous, [sourceKey]: 'pending' }))
+    setLoadingBalances(true)
+    rpcRequest<ChainBalance[]>('getBalances', undefined, 120000)
+      .then(async live => {
+        if (generation !== swapOpenGeneration.current) return
+        if (Array.isArray(live) && live.length > 0 && live.every(row => row.syncState === 'stale')) outcome = 'blocked'
+        if (Array.isArray(live)) mergeBalanceRead(live, requestedRevision)
+        await refreshEvmAddresses()
+      })
+      .catch(error => { if (isLocalDeviceAccessError(error)) outcome = 'blocked' })
+      .finally(() => {
+        if (generation !== swapOpenGeneration.current) return
+        setSourceBalanceReads(previous => ({ ...previous, [sourceKey]: outcome }))
+        setLoadingBalances(false)
+      })
+    // No effect cleanup: completing a different selection cannot cancel the
+    // active read. Only close/purge retire its generation and discard replies.
+  }, [open, fromAsset, fromBalanceUnverified, balanceInitialLoaded, loadingBalances, evmInitialLoaded,
+    sourceBalanceRead, sourceBalanceKey, mergeBalanceRead, refreshEvmAddresses])
 
   /* Confidence in the chain's NATIVE balance, which is a different question:
    * a directly-confirmed SPL token says nothing about the SOL that pays for
@@ -1547,9 +1677,6 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
     if (!fromAsset) return false
     return isBalanceUnverified(fromBalanceEntry, CHAINS.find(c => c.id === fromAsset.chainId)?.caip)
   }, [fromAsset, fromBalanceEntry])
-
-  const fromBalance = useMemo(() => fromAsset ? swapAccountAmount(fromBalanceEntry, fromAsset) : null,
-    [fromAsset, fromBalanceEntry])
 
   /* Native account-model MAX fee reservation — frontend pre-clamps the balance
    * by a conservative fee reserve so the displayed, quoted, and submitted
@@ -1827,15 +1954,20 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
   // frontend reserve safeMax == balance, so this never fires beyond exceedsBalance.
   const safeMaxAmountNum = fromAsset && fromBalance ? parseFloat(maxSpendableAmount(fromAsset, fromBalance, 'safe')) : 0
   const exceedsSafeMax = !isMax && !exceedsBalance && !isNaN(amountNum) && amountNum > 0 && Number.isFinite(safeMaxAmountNum) && safeMaxAmountNum > 0 && amountNum > safeMaxAmountNum
-  const sameAsset = fromAsset && toAsset && fromAsset.asset === toAsset.asset
+  const fromNetwork = fromAsset ? swapNetworkIdentity(fromAsset) : null
+  const toNetwork = toAsset ? swapNetworkIdentity(toAsset) : null
+  const networkMismatch = !!(fromNetwork?.conflict || toNetwork?.conflict)
+  const sameAsset = !!(fromAsset && toAsset && sameSwapAsset(fromAsset, toAsset))
 
   const fromAddress = useMemo(() => {
     if (!fromAsset) return ''
     // EVM: always derive from the effective address index so fromAddress,
     // fromBalance, and fromEvmAddressIndex are always in sync.
-    if (fromAsset.chainFamily === 'evm' && evmAddresses.addresses.length > 0) {
+    if (fromAsset.chainFamily === 'evm') {
       const selectedAddr = evmAddresses.addresses.find(a => a.addressIndex === effectiveEvmIndex)
-      if (selectedAddr?.address) return selectedAddr.address
+      // An aggregate/prop address cannot identify this signing account. Wait
+      // for its owner snapshot rather than quote owner N with index zero.
+      return selectedAddr?.address || ''
     }
     // Non-EVM: prefer the prop address when chain matches (AssetPage already derived it)
     if (address && chain && fromAsset.chainId === chain.id) return address
@@ -1858,9 +1990,9 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
     // cache is empty (e.g. balance server unavailable). Without this fallback,
     // toAddress was '' until a balance-updated event happened to stream the dest
     // chain — leaving canQuote false and the receive panel a silent dead-end.
-    if (toAsset.chainFamily === 'evm' && evmAddresses.addresses.length > 0) {
+    if (toAsset.chainFamily === 'evm') {
       const selectedAddr = evmAddresses.addresses.find(a => a.addressIndex === effectiveEvmIndex)
-      if (selectedAddr?.address) return selectedAddr.address
+      return selectedAddr?.address || ''
     }
     const cb = balances.find(b => b.chainId === toAsset.chainId)
     return cb?.address || ''
@@ -1931,7 +2063,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
   // resolver to populate a real receive address.
   const toAddressIsXpub = !!toAddress && !useCustomAddress && XPUB_RE.test(toAddress)
 
-  const canQuote = !!(fromAsset && toAsset && !sameAsset && validAmount && fromAddress && toAddress && !toAddressIsXpub && !exceedsBalance && !exceedsSafeMax && !customAddressError)
+  const canQuote = !!(fromAsset && toAsset && !networkMismatch && !sameAsset && validAmount && fromAddress && toAddress && !toAddressIsXpub && !exceedsBalance && !exceedsSafeMax && !customAddressError)
 
   // Human reason a quote can't fire right now, but ONLY for the cases that
   // otherwise render nothing — a missing send/receive address. Conditions that
@@ -1939,12 +2071,14 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
   // address, max-insufficient, invalid amount) are excluded so we don't double
   // up. Non-null ⇒ we're in a silent dead-end the user can recover from.
   const quoteBlockReason = useMemo(() => {
-    if (!fromAsset || !toAsset || sameAsset || !validAmount) return null
+    if (!fromAsset || !toAsset) return null
+    if (networkMismatch) return uiText("The asset and network do not match. Select the asset again.")
+    if (sameAsset || !validAmount) return null
     if (exceedsBalance || exceedsSafeMax || customAddressError) return null
     if (!fromAddress) return t("resolvingSendAddress", "Preparing your {{symbol}} send address…", { symbol: fromAsset.symbol })
     if (!toAddress && !toAddressIsXpub) return t("resolvingReceiveAddress", "Preparing your {{symbol}} receive address…", { symbol: toAsset.symbol })
     return null
-  }, [fromAsset, toAsset, sameAsset, validAmount, exceedsBalance, exceedsSafeMax, customAddressError, fromAddress, toAddress, toAddressIsXpub, t])
+  }, [fromAsset, toAsset, networkMismatch, sameAsset, validAmount, exceedsBalance, exceedsSafeMax, customAddressError, fromAddress, toAddress, toAddressIsXpub, t, uiText])
 
   // A missing DESTINATION address is the dead-end the manual button can fix by
   // deriving on demand. A missing SOURCE address is a transient that the quote
@@ -1966,6 +2100,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
   // address exists.
   const handleManualQuote = useCallback(async () => {
     if (manualQuoting || !toAsset) return
+    const generation = executionUiGeneration.current
     const requestedChainId = toAsset.chainId
     setManualQuoting(true)
     setError(null)
@@ -1979,19 +2114,21 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
           if (toChain.scriptType) params.scriptType = toChain.scriptType
           const result = await rpcRequest<any>(toChain.rpcMethod, params, 60000)
           // Output asset switched mid-RPC → this address is for the wrong chain.
-          if (toAssetChainIdRef.current !== requestedChainId) return
+          if (generation !== executionUiGeneration.current || toAssetChainIdRef.current !== requestedChainId) return
           const addr = typeof result === 'string' ? result : (result?.address || '')
           if (addr) setResolvedToAddress(addr)
         }
         const cached = await rpcRequest<{ balances: ChainBalance[] } | null>('getCachedBalances', undefined, 8000).catch(() => null)
-        if (toAssetChainIdRef.current !== requestedChainId) return
+        if (generation !== executionUiGeneration.current || toAssetChainIdRef.current !== requestedChainId) return
         if (cached?.balances) setBalances(cached.balances)
       }
     } catch (e: any) {
-      if (toAssetChainIdRef.current === requestedChainId) setError(e?.message || t("errorQuote"))
+      if (generation === executionUiGeneration.current && toAssetChainIdRef.current === requestedChainId) setError(e?.message || t("errorQuote"))
     } finally {
-      setManualQuoting(false)
-      setRequoteTick(tick => tick + 1)
+      if (generation === executionUiGeneration.current) {
+        setManualQuoting(false)
+        setRequoteTick(tick => tick + 1)
+      }
     }
   }, [manualQuoting, toAsset, toAddress, useCustomAddress, t])
 
@@ -2044,14 +2181,14 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
   const riskAcknowledged = riskAcceptedKey === riskKey
   const riskLocked = swapRisk.blocked || (swapRisk.requiresAcknowledgment && !riskAcknowledged)
   const riskPanel = quote && toAsset ? <SwapRiskReview risk={swapRisk}
-    expected={formatBalance(quote.expectedOutput)} minimum={formatBalance(quote.minimumOutput)} symbol={toAsset.symbol}
-    minimumSource={quote.minimumOutputSource} acknowledged={riskAcknowledged}
+    acknowledged={riskAcknowledged}
     onAcknowledge={accepted => setRiskAcceptedKey(accepted ? riskKey : '')} /> : null
 
   const auditPayloadReady = !!previewBuild?.unsignedTx
   const previewBalanceBlocked = !!previewBuild?.balance && !previewBuild.balance.sufficient
   const reviewConfirmLocked =
     phase === 'review' && (
+      networkMismatch ||
       riskLocked ||
       refreshingQuote ||
       previewLoading ||
@@ -2060,6 +2197,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
       previewBalanceBlocked
     )
   const reviewConfirmLockLabel =
+    networkMismatch ? uiText("The asset and network do not match. Select the asset again.") :
     swapRisk.blocked ? "Route exceeds cost limit" :
     riskLocked ? "Review and acknowledge trade cost" :
     refreshingQuote ? t("refreshingQuote", "Refreshing quote...") :
@@ -2082,6 +2220,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
     if (quoteTimerRef.current) clearTimeout(quoteTimerRef.current)
     setQuote(null)
     const version = ++quoteVersionRef.current
+    const generation = executionUiGeneration.current
 
     if (!canQuote) {
       if (phase === 'quoting') setPhase('input')
@@ -2116,12 +2255,12 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
           isMax: sendIsMax,
           fromEvmAddressIndex: fromAsset!.chainFamily === 'evm' ? effectiveEvmIndex : undefined,
         }, 60000)
-        if (version !== quoteVersionRef.current) return
+        if (generation !== executionUiGeneration.current || version !== quoteVersionRef.current) return
         setQuote(result)
         setQuoteFetchedAt(Date.now())
         setPhase('input')
       } catch (e: any) {
-        if (version !== quoteVersionRef.current) return
+        if (generation !== executionUiGeneration.current || version !== quoteVersionRef.current) return
         const msg = e.message || ''
         // Parse common DEX node errors into user-friendly messages
         if (/not enough asset to pay for fees/i.test(msg)) {
@@ -2157,7 +2296,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
     return () => {
       if (quoteTimerRef.current) clearTimeout(quoteTimerRef.current)
     }
-  }, [fromAsset?.caip, toAsset?.caip, sendAmount, sendIsMax, fromAddress, toAddress, exceedsBalance, fromBalance, slippageBps, requoteTick, destAddressError, toAddressIsXpub, effectiveEvmIndex])
+  }, [fromAsset?.caip, toAsset?.caip, networkMismatch, sendAmount, sendIsMax, fromAddress, toAddress, exceedsBalance, fromBalance, slippageBps, requoteTick, destAddressError, toAddressIsXpub, effectiveEvmIndex])
 
   // ── Flip ──────────────────────────────────────────────────────────
   const handleFlip = useCallback(() => {
@@ -2174,6 +2313,9 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
   }, [fromAsset, toAsset])
 
   const handleBackToInput = useCallback(() => {
+    executionUiGeneration.current++
+    setRefreshingQuote(false)
+    setManualQuoting(false)
     setQuote(null)
     setPhase('input')
     setError(null)
@@ -2184,6 +2326,8 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
   // ── Execute swap ──────────────────────────────────────────────────
   const handleExecuteSwap = useCallback(async () => {
     if (!quote || !fromAsset || !toAsset) return
+    if (networkMismatch) { setError(uiText("The asset and network do not match. Select the asset again.")); return }
+    const generation = executionUiGeneration.current
     if (riskLocked) { setError(swapRisk.blocked ? 'This route exceeds the 5% cost limit for trades of $1,000 or more.' : 'Review and acknowledge the trade cost before signing.'); return }
     if (phase === 'review') {
       if (previewLoading) {
@@ -2221,6 +2365,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
           fromEvmAddressIndex: fromAsset.chainFamily === 'evm' ? effectiveEvmIndex : undefined,
         }, 60000)
         // Block on >1% output drop — quote degraded, user should re-review
+        if (generation !== executionUiGeneration.current) return
         const oldOut = parseFloat(quote.expectedOutput || '0')
         const newOut = parseFloat(refreshed.expectedOutput || '0')
         if (oldOut > 0 && newOut > 0 && (oldOut - newOut) / oldOut > 0.01) {
@@ -2239,6 +2384,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
         setError(t("quoteRefreshedReviewPayload", "Quote refreshed. Review the rebuilt payload before confirming."))
         return
       } catch (e: any) {
+        if (generation !== executionUiGeneration.current) return
         setRefreshingQuote(false)
         setError(`Failed to refresh stale quote: ${e?.message || 'unknown error'}`)
         return
@@ -2296,8 +2442,11 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
         runtimeProvider: previewBuild?.runtimeProvider ?? null,
       }, 600000)
 
-      setTxid(result.txid)
-      setPhase('submitted')
+      if (generation === executionUiGeneration.current) {
+        setTxid(result.txid)
+        setLiveCreatedAt(Date.now())
+        setPhase('submitted')
+      }
       window.dispatchEvent(new CustomEvent('keepkey-swap-executed', {
         detail: {
           txid: result.txid,
@@ -2314,6 +2463,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
         },
       }))
     } catch (e: any) {
+      if (generation !== executionUiGeneration.current) return
       const raw = e?.message || ''
       // This exact Relay payload has no signed ClearSign descriptor and needs
       // route-specific, one-request opaque consent.
@@ -2376,10 +2526,14 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
       // Require a fresh quote and review before another execute request.
       setQuoteFetchedAt(0)
     }
-  }, [quote, quoteFetchedAt, fromAsset, toAsset, sendAmount, sendIsMax, fromBalance, fromAddress, toAddress, slippageBps, balances, phase, previewLoading, previewError, previewBuild, useCustomAddress, riskLocked, riskAcknowledged, swapRisk.blocked, swapRisk.quoteMaxAgeMs, effectiveEvmIndex])
+  }, [quote, quoteFetchedAt, fromAsset, toAsset, sendAmount, sendIsMax, fromBalance, fromAddress, toAddress, slippageBps, balances, phase, previewLoading, previewError, previewBuild, useCustomAddress, networkMismatch, uiText, riskLocked, riskAcknowledged, swapRisk.blocked, swapRisk.quoteMaxAgeMs, effectiveEvmIndex])
 
   // ── Reset ─────────────────────────────────────────────────────────
   const reset = useCallback(() => {
+    executionUiGeneration.current++
+    setRefreshingQuote(false)
+    setManualQuoting(false)
+    setRechecking(false)
     setPhase('input')
     setFromAsset(null)
     setToAsset(null)
@@ -2409,10 +2563,10 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
   }, [])
 
   const handleClose = useCallback(() => {
-    if (phase === 'signing' || phase === 'broadcasting' || phase === 'approving') return
     onClose()
-    // Reset state after close animation
-    setTimeout(reset, 200)
+    // Closing hides the view. Bun owns execution, its lease and saved receipt.
+    // Do not reset state still used by a pending execution callback.
+    if (!['signing', 'broadcasting', 'approving'].includes(phase)) reset()
   }, [phase, onClose, reset])
 
   // Cancel a confirm-on-device prompt and back out to review. Sends a Cancel
@@ -2422,9 +2576,11 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
   // already on its way to the network and there's no unwind.
   const handleCancelSigning = useCallback(async () => {
     if (phase !== 'signing' && phase !== 'approving') return
-    try { await rpcRequest<{ ok: boolean }>('cancelDeviceSigning', undefined, 5000) } catch (e: any) {
-      console.warn('[SwapDialog] cancelDeviceSigning failed:', e?.message || e)
+    const generation = executionUiGeneration.current
+    try { await rpcRequest<{ ok: boolean }>('cancelForegroundDeviceOperation', undefined, 5000) } catch (e: any) {
+      console.warn('[SwapDialog] cancelForegroundDeviceOperation failed:', e?.message || e)
     }
+    if (generation !== executionUiGeneration.current) return
     setPhase('review')
     setQuoteFetchedAt(0)
     setError(t('swapCancelled', 'Swap cancelled — confirm again or change inputs'))
@@ -2435,6 +2591,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
   // the policy is on. It is session state on 7.15+: the device disarms it when
   // it locks or is unplugged, so the user may be asked again.
   const handleEnableBlindSigning = useCallback(async () => {
+    const generation = executionUiGeneration.current
     setEnablingBlindSign(true)
     setBlindSignError(null)
     try {
@@ -2444,6 +2601,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
       // leaving the policy ON while the UI claims it failed.
       await rpcRequest('applyPolicy', { policyName: 'AdvancedMode', enabled: true }, 0)
     } catch (e: any) {
+      if (generation !== executionUiGeneration.current) return
       const msg = e?.message || ''
       setBlindSignError(/cancel|denied|rejected/i.test(msg)
         ? t('blindSignDeclined', 'Declined on device — blind signing was not enabled.')
@@ -2451,6 +2609,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
       setEnablingBlindSign(false)
       return
     }
+    if (generation !== executionUiGeneration.current) return
     setError(null)
     setPhase('review')
     setEnablingBlindSign(false)
@@ -2513,10 +2672,12 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
     rpcFire('publishSwapUiState', snapshot)
   }, [open, phase, busy, sentAmount, fromAsset?.asset, toAsset?.asset, amount, fiatAmount, inputMode, isMax, slippageBps, fromAddress, toAddress, useCustomAddress, customToAddress, quote, previewBuild, error, txid, liveStatus, liveConfirmations, liveOutboundConfirmations, liveOutboundRequired, liveOutboundTxid, liveRelayRequestId, liveRefundReason])
 
-  // Reset the cached snapshot to 'closed' when the dialog unmounts so a stale
-  // open state doesn't outlive the user closing the dialog.
+  // Retained tracker dialogs also close without unmounting. Hidden instances
+  // that never opened must not overwrite another dialog's active snapshot.
   useEffect(() => {
+    if (!open) return
     return () => {
+      lastPublishedRef.current = ''
       rpcFire('publishSwapUiState', {
         phase: 'closed', fromAsset: null, toAsset: null, amount: '', fiatAmount: '',
         inputMode: 'crypto', isMax: false, slippageBps: 100,
@@ -2527,7 +2688,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
         outboundTxid: null, relayRequestId: null, refundReason: null,
       } satisfies SwapUiState)
     }
-  }, [])
+  }, [open])
 
   // ── Listen for swap-cmd messages (REST → UI control) ───────────────
   // 'open' is handled by SwapRpcMount before we mount; here we just treat
@@ -2551,7 +2712,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
       // Recheck in the mounted dialog as well: signing may begin between the
       // REST snapshot check and delivery of this command to the renderer.
       if (blocksSwapUiCommand(phase, cmd.kind)) return
-      if (cmd.kind === 'close') { onClose(); return }
+      if (cmd.kind === 'close') { handleClose(); return }
       if (cmd.kind === 'requote') { setRequoteTick(t => t + 1); return }
       if (cmd.kind === 'advance') {
         // input → review (UI navigation only; signing still requires user button press)
@@ -2573,6 +2734,11 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
         return
       }
       // Both 'open' and 'set' carry the same partial-update fields below.
+      if (!['fromAsset', 'toAsset', 'amount', 'isMax', 'inputMode', 'useCustomAddress', 'customToAddress', 'slippageBps']
+        .some(key => Object.prototype.hasOwnProperty.call(cmd, key))) return
+      // Even an idempotent edit must restart a quote invalidated by the new
+      // context; merely bumping its generation could leave it quoting forever.
+      handleBackToInput()
       const fields = cmd
       if ('fromAsset' in fields && fields.fromAsset !== undefined) {
         const a = fields.fromAssetDefinition || findAssetByKey(fields.fromAsset)
@@ -2597,7 +2763,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
       if ('slippageBps' in fields && fields.slippageBps !== undefined) setSlippageBps(fields.slippageBps)
     }
     return onRpcMessage('swap-cmd', apply)
-  }, [open, assets, onClose, setSlippageBps, phase, quote, fromAsset, toAsset, handleExecuteSwap, findAssetByKey, previewBuild, previewError, previewLoading])
+  }, [open, assets, handleClose, handleBackToInput, setSlippageBps, phase, quote, fromAsset, toAsset, handleExecuteSwap, findAssetByKey, previewBuild, previewError, previewLoading])
 
   // Drain any seed keys that arrived before the asset list finished loading.
   // Without this, REST `/swap/open` silently lost fromAsset/toAsset on first
@@ -2614,12 +2780,41 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
     }
   }, [assets, findAssetByKey])
 
+  const dialogPanel = useRef<HTMLDivElement>(null)
+  const unsupported = !!(chain && !resumeSwap && !loadingAssets && assets.length > 0 && !swappableChainIds.has(chain.id))
+  useEffect(() => {
+    if (!open) return
+    const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    const panel = dialogPanel.current
+    return () => {
+      const focused = document.activeElement
+      if (opener?.isConnected && (focused === document.body || (focused && panel?.contains(focused)))) opener.focus()
+    }
+  }, [open])
+  useEffect(() => { if (open) dialogPanel.current?.focus() }, [open, unsupported])
+  const dialogKeys = (event: React.KeyboardEvent) => {
+    // The picker, health details and device overlays own their own focus/keys.
+    if (event.defaultPrevented || pickerSide !== null) return
+    if (event.key === 'Escape') {
+      event.preventDefault(); event.stopPropagation()
+      if (healthDialogOpen) setHealthDialogOpen(false)
+      else if (quoteDetailsOpen) setQuoteDetailsOpen(false)
+      else if (customSlippageOpen) setCustomSlippageOpen(false)
+      else handleClose()
+    }
+    if (event.key !== 'Tab' || healthDialogOpen || quoteDetailsOpen) return
+    const nodes = [...(dialogPanel.current?.querySelectorAll<HTMLElement>('button:not(:disabled),input:not(:disabled),select:not(:disabled),a[href],[tabindex="0"]') || [])].filter(n => n.offsetParent !== null && n.getClientRects().length)
+    const first = nodes[0], last = nodes[nodes.length - 1]
+    if (event.shiftKey && (document.activeElement === first || document.activeElement === dialogPanel.current)) { event.preventDefault(); last?.focus() }
+    else if (!event.shiftKey && (document.activeElement === last || document.activeElement === dialogPanel.current)) { event.preventDefault(); first?.focus() }
+  }
+
   if (!open) return null
-  if (chain && !resumeSwap && !loadingAssets && assets.length > 0 && !swappableChainIds.has(chain.id)) {
+  if (unsupported) {
     return (
-      <Box position="fixed" inset="0" zIndex={Z.dialog} display="flex" alignItems="center" justifyContent="center">
-        <Box position="absolute" inset="0" bg="rgba(11,11,14,0.28)" backdropFilter="blur(20px) saturate(140%)" />
-        <Box
+      <Box position="fixed" inset="0" zIndex={Z.dialog} display="flex" alignItems="flex-start" justifyContent="center" pt="5vh" onKeyDown={dialogKeys}>
+        <Box position="absolute" inset="0" bg="rgba(11,11,14,0.28)" backdropFilter="blur(20px) saturate(140%)" onClick={handleClose} data-testid="swap-backdrop" />
+        <Box ref={dialogPanel} role="dialog" aria-modal="true" aria-label={t('title')} tabIndex={-1}
           position="relative"
           borderRadius="22px"
           border="1px solid rgba(255,255,255,0.10)"
@@ -2638,7 +2833,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
           {/* No provider badge: the swappable-asset list is a union across
               providers (THORChain, Maya, Relay, …), so a missing asset is not
               any single provider's limitation. */}
-          <Text fontSize="sm" color="kk.textMuted">{t("notSupported", { coin: chain.coin })}</Text>
+          <Text fontSize="sm" color="kk.textMuted">{t("notSupported", { coin: chain?.coin })}</Text>
           <Text fontSize="xs" color="kk.textMuted" mt="2" opacity={0.75}>
             {t("notSupportedHint", "Routes come from our swap providers and change over time — this asset may become available later.")}
           </Text>
@@ -2648,11 +2843,15 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
     )
   }
 
+  // Top-anchored, not vertically centred: the panel grows as the quote,
+  // warnings and fees arrive, and a centred panel moved up by that much
+  // (Jasper, 1.6.11: 49 px over three steps), so a click aimed at a control
+  // could land on another one. Anchored at 5vh, it only grows downward.
   return (
-    <Box position="fixed" inset="0" zIndex={Z.dialog} display="flex" alignItems="center" justifyContent="center">
+    <Box position="fixed" inset="0" zIndex={Z.dialog} display="flex" alignItems="flex-start" justifyContent="center" pt="5vh" onKeyDown={dialogKeys}>
       <style>{DIALOG_CSS}</style>
-      <Box position="absolute" inset="0" bg="rgba(11,11,14,0.28)" backdropFilter="blur(20px) saturate(140%)" />
-      <Box
+      <Box position="absolute" inset="0" bg="rgba(11,11,14,0.28)" backdropFilter="blur(20px) saturate(140%)" onClick={handleClose} data-testid="swap-backdrop" />
+      <Box ref={dialogPanel} role="dialog" aria-modal="true" aria-label={t('title')} tabIndex={-1}
         position="relative"
         borderRadius="22px"
         border="1px solid rgba(255,255,255,0.10)"
@@ -2673,7 +2872,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
       >
         {/* ── Header ──────────────────────────────────────────────── */}
         <Flex px="5" py="2.5" borderBottom="1px solid" borderColor="kk.border" align="center" justify="space-between"
-          bg="transparent">
+          position="sticky" top="0" zIndex="2" bg="kk.cardBg">
           <HStack gap="2.5" align="center">
             <ProviderBadge swapper={quote?.swapper || liveSwapper || quote?.integration} size={22} variant="compact" />
             <Text fontSize="sm" fontWeight="700" color="kk.textPrimary" letterSpacing="-0.01em">
@@ -2721,12 +2920,14 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
               )
             })()}
           </HStack>
-          <HStack gap="3" align="center">
+          <HStack gap={{ base: "1", md: "3" }} align="center">
             <DocsLink href={DOCS_LINKS.swap} />
-            <DocsLink href={watch('course-07-swap')} label={uiText("Watch video")} />
-            {!busy && (
-              <Button size="xs" variant="ghost" color="kk.textMuted" px="1" minW="auto" _hover={{ color: "kk.textPrimary" }} onClick={handleClose}>{uiText("&times;")}</Button>
-            )}
+            <DocsLink href={watch('course-07-swap')} label={uiText("Watch video")} display={{ base: "none", sm: "inline-flex" }} />
+            <Button size="sm" variant="ghost" color="kk.textSecondary" w="36px" h="36px" minW="36px" p="0" flexShrink={0}
+              aria-label={uiText('Close swap')} title={busy ? uiText('Closing this view does not cancel the swap. Track it in Activity.') : uiText('Close swap')}
+              _hover={{ color: 'kk.textPrimary', bg: 'whiteAlpha.100' }} onClick={handleClose}>
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18" /></svg>
+            </Button>
           </HStack>
         </Flex>
 
@@ -3388,20 +3589,22 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                 </Flex>
               </Box>
 
-              {/* Live countdown — only show when not complete */}
-              {!isSwapComplete && !isSwapFailed && (countdown > 0 || (quote?.estimatedTime && quote.estimatedTime > 0)) && (
-                <Flex w="full" justify="center" align="center" gap="3"
+              {(elapsedSeconds !== undefined || statusCheck) && (
+                <Flex w="full" justify="center" align="center" gap="3" flexWrap="wrap"
                   bg="rgba(139,227,196,0.08)" border="1px solid" borderColor="rgba(139,227,196,0.18)"
                   borderRadius="lg" px="4" py="2">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--teal)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" />
-                  </svg>
-                  <Text fontSize="sm" fontFamily="mono" fontWeight="700" color="var(--teal)">
-                    {countdown > 0 ? (
-                      <>{Math.floor(countdown / 60)}:{(countdown % 60).toString().padStart(2, '0')}</>
-                    ) : formatTime(quote?.estimatedTime || 0)}
-                  </Text>
-                  <Text fontSize="10px" color="kk.textMuted">{t("estimatedTime")}</Text>
+                  {elapsedSeconds !== undefined && <Text fontSize="11px" color="kk.textSecondary">
+                    {t("elapsed")} {Math.floor(elapsedSeconds / 60)}:{(elapsedSeconds % 60).toString().padStart(2, '0')}
+                  </Text>}
+                  {!isSwapComplete && !isSwapFailed && countdown > 0 && <Text fontSize="11px" color="kk.textMuted">
+                    {t("estimatedTime")} {Math.floor(countdown / 60)}:{(countdown % 60).toString().padStart(2, '0')}
+                  </Text>}
+                  {statusCheck && <Text fontSize="11px" color="kk.textMuted">
+                    {t("lastChecked")} {new Date(statusCheck.checkedAt).toLocaleTimeString()}
+                  </Text>}
+                  {statusCheck?.error && <Text role="status" fontSize="11px" color="kk.textSecondary">
+                    {t(statusCheck.error === 'not_found' ? "swapStatusNotFound" : "swapStatusCheckFailed")}
+                  </Text>}
                 </Flex>
               )}
 
@@ -3419,7 +3622,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                     <Text fontSize="xs" color="kk.textMuted">{fmtCompact(parseFloat(displayAmount) * fromPriceUsd)}</Text>
                   )}
                 </VStack>
-                <Text color="var(--gold)" fontSize="md" fontWeight="700">{uiText("&rarr;")}</Text>
+                <Text color="var(--gold)" fontSize="md" fontWeight="700">{uiText("→")}</Text>
                 <VStack gap="0.5">
                   <HStack gap="3">
                     <Box style={{ animation: 'kkLogoGlow 3s ease-in-out infinite' }}>
@@ -3586,7 +3789,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                           <Text fontSize="11px" fontFamily="mono" color="kk.textMuted">
                             {beforeFromBal ? formatBalance(beforeFromBal) : '-'}
                           </Text>
-                          <Text fontSize="10px" color="kk.textMuted">{uiText("&rarr;")}</Text>
+                          <Text fontSize="10px" color="kk.textMuted">{uiText("→")}</Text>
                           <Text fontSize="11px" fontFamily="mono" color={afterFromBal ? 'var(--gold)' : 'kk.textMuted'}>
                             {afterFromBal ? formatBalance(afterFromBal) : '...'}
                           </Text>
@@ -3614,7 +3817,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                           <Text fontSize="11px" fontFamily="mono" color="kk.textMuted">
                             {beforeToBal ? formatBalance(beforeToBal) : '-'}
                           </Text>
-                          <Text fontSize="10px" color="kk.textMuted">{uiText("&rarr;")}</Text>
+                          <Text fontSize="10px" color="kk.textMuted">{uiText("→")}</Text>
                           <Text fontSize="11px" fontFamily="mono" color={afterToBal ? 'var(--teal)' : 'kk.textMuted'}>
                             {afterToBal ? <GreenCountUp value={afterToBal} color="var(--teal)" /> : '...'}
                           </Text>
@@ -3661,6 +3864,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
               instead of competing with the device illustration. */}
           {busy && fromAsset && toAsset && (
             <VStack gap="6" py="6" align="center" position="relative" style={{ animation: 'kkSwapFadeIn 0.3s ease-out' }}>
+              <Text fontSize="xs" color="kk.textSecondary">{uiText('Closing this view does not cancel the swap. Track it in Activity.')}</Text>
               {/* Cancel/X — only meaningful while the device is awaiting a
                   button press (signing/approving). Once the user has confirmed
                   on device and we're broadcasting, the tx is already going
@@ -3915,28 +4119,45 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
           {/* ── REVIEW (confirm quote) ──────────────────────────── */}
           {phase === 'review' && quote && fromAsset && toAsset && !busy && (
             <VStack gap="2" style={{ animation: 'kkSwapFadeIn 0.2s ease-out' }}>
-              {/* Combined send/receive — single tight card with from → to */}
-              <Box w="full" bg="rgba(255,255,255,0.03)" border="1px solid" borderColor="kk.border" borderRadius="xl" p="3">
-                <Flex align="center" gap="3">
-                  <AssetIcon caip={fromAsset.caip} iconUrl={fromAsset.icon} chainCaip={chainBadgeCaip(fromAsset)} size={40} alt={fromAsset.symbol} />
+              {/* One quote-bound summary: fiat and costs share the risk snapshot. */}
+              <Box w="full" bg="rgba(255,255,255,0.03)" border="1px solid" borderColor="kk.border" borderRadius="xl" p="4" data-trade-summary>
+                <Flex align="center" justify="space-between" gap="2" mb="4">
+                  <Text fontSize="10px" color="kk.textMuted">{t("route", "Route")}</Text>
+                  <Box maxW="70%">
+                    <ProviderBadge swapper={quote.swapper} integration={quote.integration} size={16} variant="row" />
+                  </Box>
+                </Flex>
+                <Box data-trade-route-map>
+                  <RouteMap
+                    from={{ iconUrl: fromAsset.icon, caip: fromAsset.caip, chainCaip: fromNetwork?.chainCaip, color: fromNetwork?.color, glyph: fromAsset.symbol.slice(0, 1) }}
+                    to={{ iconUrl: toAsset.icon, caip: toAsset.caip, chainCaip: toNetwork?.chainCaip, color: toNetwork?.color, glyph: toAsset.symbol.slice(0, 1) }}
+                    integration={quote.swapper || quote.integration || resolveProvider(quote.swapper || quote.integration).label}
+                    showIntegrationLabel={false}
+                    centerImageUrl={getSwapperAnimation(quote.swapper, quote.integration)}
+                  />
+                </Box>
+                <Flex align="center" gap="2">
+                  <AssetIcon caip={fromAsset.caip} iconUrl={fromAsset.icon} chainCaip={chainBadgeCaip(fromAsset)} size={32} alt={fromAsset.symbol} />
                   <Box flex="1" minW="0">
-                    <Text fontSize="sm" fontWeight="700" color="kk.textPrimary" truncate>{displayAmount} {fromAsset.symbol}</Text>
-                    {hasFromPrice && (
-                      <Text fontSize="10px" fontFamily="mono" color="kk.textMuted">{fmtCompact(parseFloat(displayAmount) * fromPriceUsd)}</Text>
+                    <Text fontSize="10px" color="kk.textMuted">{uiText("You send")}</Text>
+                    <Text fontSize="sm" fontWeight="700" color="kk.textPrimary" wordBreak="break-word">{displayAmount} {fromAsset.symbol}</Text>
+                    <Text fontSize="11px" color="kk.textSecondary" data-trade-from-network>{fromNetwork?.name}</Text>
+                    <Text fontSize="10px" fontFamily="mono" color="kk.textMuted" wordBreak="break-all">{fromNetwork?.networkId}</Text>
+                    {swapRisk.inputUsd !== undefined && (
+                      <Text fontSize="11px" fontFamily="mono" color="kk.textMuted" data-trade-input-fiat>{fmt(swapRisk.inputUsd)}</Text>
                     )}
                   </Box>
-                  <Box color="var(--gold)" flexShrink={0}>
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                      <line x1="5" y1="12" x2="19" y2="12" /><polyline points="12 5 19 12 12 19" />
-                    </svg>
-                  </Box>
+                  <Box color="var(--gold)" flexShrink={0} aria-hidden="true">→</Box>
                   <Box flex="1" minW="0" textAlign="right">
-                    <Text fontSize="sm" fontWeight="700" color="var(--teal)" truncate>~<GreenCountUp value={quote.expectedOutput} color="var(--teal)" suffix={` ${toAsset.symbol}`} /></Text>
-                    {hasToPrice && (
-                      <Text fontSize="10px" fontFamily="mono" color="kk.textMuted">{fmtCompact(parseFloat(quote.expectedOutput) * toPriceUsd)}</Text>
+                    <Text fontSize="10px" color="kk.textMuted">{uiText("Expected receive")}</Text>
+                    <Text fontSize="sm" fontWeight="700" color="var(--teal)" wordBreak="break-word">{formatBalance(quote.expectedOutput)} {toAsset.symbol}</Text>
+                    <Text fontSize="11px" color="kk.textSecondary" data-trade-to-network>{toNetwork?.name}</Text>
+                    <Text fontSize="10px" fontFamily="mono" color="kk.textMuted" wordBreak="break-all">{toNetwork?.networkId}</Text>
+                    {swapRisk.expectedUsd !== undefined && (
+                      <Text fontSize="11px" fontFamily="mono" color="kk.textMuted" data-trade-output-fiat>{fmt(swapRisk.expectedUsd)}</Text>
                     )}
                   </Box>
-                  <AssetIcon caip={toAsset.caip} iconUrl={toAsset.icon} chainCaip={chainBadgeCaip(toAsset)} size={40} alt={toAsset.symbol} />
+                  <AssetIcon caip={toAsset.caip} iconUrl={toAsset.icon} chainCaip={chainBadgeCaip(toAsset)} size={32} alt={toAsset.symbol} />
                 </Flex>
                 {isFeeReservedNativeMax && fromAsset && nativeMaxReserveDisplay && (
                   <Text fontSize="10px" color="var(--gold)" mt="1.5">
@@ -3948,6 +4169,18 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                     })}
                   </Text>
                 )}
+                <VStack gap="2" align="stretch" mt="4" pt="3" borderTop="1px solid" borderColor="kk.border">
+                  <ReviewRow label={quote.minimumOutputSource === 'estimate' ? uiText("Estimated minimum") : uiText("Minimum receive")} accent>
+                    {formatBalance(quote.minimumOutput)} {toAsset.symbol}{swapRisk.minimumUsd !== undefined ? ` (${fmt(swapRisk.minimumUsd)})` : ''}
+                  </ReviewRow>
+                  <ReviewRow label={uiText("Estimated swap cost")}>
+                    <span data-trade-cost>{swapRisk.expectedLossPct !== undefined
+                      ? `${swapRisk.expectedLossUsd !== undefined ? `${fmt(swapRisk.expectedLossUsd)} · ` : ''}${swapRisk.expectedLossPct.toFixed(2)}%`
+                      : uiText("Price data unavailable")}</span>
+                  </ReviewRow>
+                  <ReviewRow label={uiText("Source network fee")}>{uiText("Paid separately")}</ReviewRow>
+                  <ReviewRow label={uiText("Estimated time")}>{formatTime(quote.estimatedTime)}</ReviewRow>
+                </VStack>
               </Box>
 
               {/* Our own swap is assumed clear: the report shows only when it is
@@ -3961,125 +4194,66 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                 return line ? <Text fontSize="2xs" color="kk.textSecondary" data-clearsign-provider>{line}</Text> : null
               })()}
 
-              {/* Animated route map — gold dot travels from-token →
-                  integration → to-token. Shows the actual swap topology
-                  (not just a pill). Integration label uses Pioneer's
-                  authoritative swapper name when available. */}
-              {(() => {
-                const info = resolveProvider(quote.swapper || quote.integration)
-                const integrationName = quote.swapper || quote.integration || info.name
-                const fromColor = CHAINS.find(c => c.id === fromAsset.chainId)?.color
-                const toColor   = CHAINS.find(c => c.id === toAsset.chainId)?.color
-                return (
-                  <Box w="full" bg="rgba(255,255,255,0.03)" border="1px solid" borderColor="kk.border" borderRadius="xl" px="3" py="3">
-                    <Flex align="center" justify="space-between" mb="1.5" px="1">
-                      <Text fontSize="10px" color="kk.textMuted" letterSpacing="0.04em" textTransform="uppercase">
-                        {t("route", "Route")}
-                      </Text>
-                      <ProviderBadge swapper={quote.swapper} integration={quote.integration} size={16} variant="compact" />
-                    </Flex>
-                    <RouteMap
-                      from={{ iconUrl: fromAsset.icon, color: fromColor, glyph: fromAsset.symbol.slice(0, 1) }}
-                      to={{ iconUrl: toAsset.icon, color: toColor, glyph: toAsset.symbol.slice(0, 1) }}
-                      integration={typeof integrationName === 'string' ? integrationName : undefined}
-                      centerImageUrl={getSwapperAnimation(quote.swapper, quote.integration)}
-                    />
-                  </Box>
-                )
-              })()}
-
-              {/* Key quote numbers — always visible, condensed */}
               {quote.executionMode === 'relay-solver-deposit' && (
                 <Text fontSize="11px" color="kk.textSecondary" role="note">
                   {t('relayDepositReview', 'Relay executes the swap after your deposit; destination terms are shown in this app.')}
                 </Text>
               )}
-              <Box w="full" bg="rgba(255,255,255,0.02)" border="1px solid" borderColor="kk.border" borderRadius="lg" px="3" py="2">
-                <VStack gap="1" align="stretch">
-                  <ReviewRow label={t("rate")}>
-                    1 {fromAsset.symbol} = {formatBalance((parseFloat(quote.expectedOutput) / parseFloat(displayAmount || '1')).toString())} {toAsset.symbol}
-                  </ReviewRow>
-                  <ReviewRow label={t("expectedAfterFees", "Expected after fees")}>
-                    {formatBalance(quote.expectedOutput)} {toAsset.symbol}{hasToPrice && !toPriceIsDerived ? ` (${fmtCompact(parseFloat(quote.expectedOutput) * toPriceUsd)})` : ''}
-                  </ReviewRow>
-                  <ReviewRow label={t("minimumAfterFeesSlippage", "Minimum receive after fees/slippage")} accent>
-                    {formatBalance(quote.minimumOutput)} {toAsset.symbol}{hasToPrice && !toPriceIsDerived ? ` (${fmtCompact(parseFloat(quote.minimumOutput) * toPriceUsd)})` : ''}
-                  </ReviewRow>
-                  <QuoteFeeRows fees={quote.fees} />
-                  <ReviewRow label={t("slippageTolerance", "Slippage tolerance")}>
-                    {(slippageBps / 100).toFixed(2)}{uiText("% max")}</ReviewRow>
-                  <ReviewRow label={t("quoteSlippage", "Quote slippage")}>
-                    {quote.quotedSlippageBps != null ? `${(quote.quotedSlippageBps / 100).toFixed(2)}%` : t("notProvided", "Not provided")}
-                  </ReviewRow>
-                  <ReviewRow label={t("estimatedTime")}>
-                    {formatTime(quote.estimatedTime)}
-                  </ReviewRow>
-                </VStack>
-              </Box>
 
-              {fromAsset.chainFamily === 'evm' && (
-                <Box as="details" className="kk-acc" w="full" bg="rgba(255,255,255,0.02)" border="1px solid" borderColor={auditPayloadReady ? "rgba(139,227,196,0.22)" : "rgba(233,196,106,0.28)"} borderRadius="lg" overflow="hidden">
-                  <Box as="summary" px="3" py="2"
-                    display="flex" alignItems="center" justifyContent="space-between" gap="2"
-                    _hover={{ bg: "rgba(255,255,255,0.03)" }} style={{ transition: 'background 120ms ease-out' }}>
-                    <Text fontSize="11px" fontWeight="700" color="kk.textPrimary">
-                      {t("evmSummary", "EVM summary")}
-                    </Text>
-                    <Flex align="center" gap="2" color="kk.textMuted">
-                      <Text fontSize="10px" fontFamily="mono" color={auditPayloadReady ? "var(--teal)" : "var(--gold)"}>
-                        {previewLoading
-                          ? t("payloadBuilding", "building payload")
-                          : previewError
-                            ? t("payloadFailed", "payload failed")
-                            : auditPayloadReady
-                              ? t("payloadReady", "payload ready")
-                              : t("payloadRequiredShort", "payload required")}
-                      </Text>
-                      <svg className="kk-acc-chev" width="14" height="14" viewBox="0 0 16 16" fill="none">
-                        <path d="M4 6l4 4 4-4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
-                      </svg>
-                    </Flex>
-                  </Box>
-                  <Box className="kk-acc-body" px="3" pt="1" pb="2">
-                  <VStack gap="2" align="stretch">
-                    {previewLoading && (
-                      <Text fontSize="10px" color="kk.textMuted">{t("buildingPayloadDetail", "Building the exact transaction payload for review...")}</Text>
-                    )}
-                    {previewError && (
-                      <Text fontSize="10px" color="kk.error">{t("previewFailed", "Build preview failed")}: {previewError}</Text>
-                    )}
-                    {previewBuild?.approveTx && (
-                      <EvmTxSummaryCard
-                        title={t("approvalTx", "Approval transaction")}
-                        tx={previewBuild.approveTx}
-                        chain={fromChainDef}
-                        asset={fromAsset}
-                        isApproval
-                      />
-                    )}
-                    {previewBuild?.unsignedTx && (
-                      <EvmTxSummaryCard
-                        title={previewBuild.approveTx ? t("swapTxAfterApproval", "Swap transaction after approval") : t("swapTx", "Swap transaction")}
-                        tx={previewBuild.unsignedTx}
-                        chain={fromChainDef}
-                        asset={fromAsset}
-                      />
-                    )}
-                  </VStack>
-                  </Box>
-                </Box>
-              )}
-
-              {/* Collapsible details: vault/router/memo + hdwallet payload audit */}
               <Box w="full">
                 <Button size="xs" variant="ghost" color="kk.textMuted" w="full"
+                  aria-expanded={showDetails} aria-controls="swap-fees-details"
                   onClick={() => setShowDetails(!showDetails)}
                   _hover={{ color: "kk.textSecondary" }}>
-                  {showDetails ? t("hideDetails", "Hide details") : t("showDetails", "Show details")}
+                  {uiText("Fees & details")}{" "}{showDetails ? '⌃' : '⌄'}
                 </Button>
                 {showDetails && (
-                  <Box bg="rgba(0,0,0,0.3)" borderRadius="md" p="2" mt="1">
-                    <VStack gap="1.5" align="stretch">
+                  <Box id="swap-fees-details" bg="rgba(0,0,0,0.3)" borderRadius="md" p="3" mt="1">
+                    <VStack gap="2" align="stretch">
+                      <ReviewRow label={`${t("from")} · CAIP-19`}><span data-trade-from-caip>{fromNetwork?.assetCaip || '—'}</span></ReviewRow>
+                      <ReviewRow label={`${t("to")} · CAIP-19`}><span data-trade-to-caip>{toNetwork?.assetCaip || '—'}</span></ReviewRow>
+                      <ReviewRow label={t("rate")}>
+                        1 {fromAsset.symbol} = {formatBalance((parseFloat(quote.expectedOutput) / parseFloat(displayAmount || '1')).toString())} {toAsset.symbol}
+                      </ReviewRow>
+                      <QuoteFeeRows fees={quote.fees} />
+                      <ReviewRow label={t("slippageTolerance", "Slippage tolerance")}>
+                        {(slippageBps / 100).toFixed(2)}{uiText("% max")}
+                      </ReviewRow>
+                      {quote.quotedSlippageBps != null && (
+                        <ReviewRow label={t("quoteSlippage", "Quote slippage")}>{(quote.quotedSlippageBps / 100).toFixed(2)}%</ReviewRow>
+                      )}
+                      <ReviewRow label={uiText("Minimum source")}>
+                        {quote.minimumOutputSource === 'memo' ? uiText("Transaction memo") : quote.minimumOutputSource === 'estimate' ? uiText("Estimate") : uiText("Provider quote")}
+                      </ReviewRow>
+                      {swapRisk.minimumLossPct !== undefined && (
+                        <ReviewRow label={uiText("Value difference at minimum")}>
+                          {swapRisk.minimumLossUsd !== undefined ? `${fmt(swapRisk.minimumLossUsd)} · ` : ''}{swapRisk.minimumLossPct.toFixed(2)}%
+                        </ReviewRow>
+                      )}
+                      <Text fontSize="10px" color="kk.textMuted">
+                        {uiText("Swap cost compares the quoted input and output values, including the rate and route fees. The source network fee is separate. Minimum receive is an execution limit, not a guaranteed refund.")}
+                      </Text>
+                      {fromAsset.chainFamily === 'evm' && (
+                        <VStack gap="2" align="stretch">
+                          {previewBuild?.approveTx && (
+                            <EvmTxSummaryCard
+                              title={t("approvalTx", "Approval transaction")}
+                              tx={previewBuild.approveTx}
+                              chain={fromChainDef}
+                              asset={fromAsset}
+                              isApproval
+                            />
+                          )}
+                          {previewBuild?.unsignedTx && (
+                            <EvmTxSummaryCard
+                              title={previewBuild.approveTx ? t("swapTxAfterApproval", "Swap transaction after approval") : t("swapTx", "Swap transaction")}
+                              tx={previewBuild.unsignedTx}
+                              chain={fromChainDef}
+                              asset={fromAsset}
+                            />
+                          )}
+                        </VStack>
+                      )}
                       {quote.router && fromAsset.chainFamily === 'evm' && (
                         <Flex justify="space-between" align="flex-start" gap="2">
                           <Text fontSize="10px" color="kk.textMuted" flexShrink={0}>{t("routerContract")}</Text>
@@ -4103,9 +4277,9 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                         {previewLoading && (
                           <Text fontSize="10px" color="kk.textMuted">{uiText("Building transaction preview…")}</Text>
                         )}
-                        {previewError && (
-                          <Text fontSize="10px" color="kk.error">{uiText("Preview failed:")}{" "}{previewError}</Text>
-                        )}
+                        {/* previewError is shown once, in the banner below this card;
+                            repeating it here showed the same error twice when
+                            "Fees & details" was open. */}
                         {previewBuild?.approveTx && (
                           <Box mb="2">
                             <Text fontSize="10px" color="kk.textMuted" mb="1">{uiText("Approve tx (ERC-20 allowance)")}</Text>
@@ -4239,37 +4413,6 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
 
               {riskPanel}
 
-              {/* Dust-fee warning — protocol fees + spread eat too much of the swap.
-                  THORChain has fixed ~$1.20 BTC outbound fee that crushes small swaps:
-                  $2 in → $1.78 out is 11% loss. Tier the warning so users understand:
-                  >DUST_FEE_WARNING_PCT = strongly recommend bigger amount;
-                  >DUST_FEE_SEVERE_PCT  = "you're throwing money away".
-                  Computed from displayed in/out USD values, not just quote.fees.totalBps,
-                  so msg.value EVM fees and spread are captured. */}
-              {(() => {
-                const dust = computeDustWarning({
-                  inAmount: parseFloat(quotedSendAmount) || 0,
-                  outAmount: parseFloat(quote.expectedOutput || '0') || 0,
-                  fromPriceUsd,
-                  toPriceUsd: toPriceIsDerived ? 0 : toPriceUsd,
-                })
-                if (!dust) return null
-                const { severe, lossPct, inUsd, lostUsd, recommendedMinUsd } = dust
-                return (
-                  <Flex align="center" gap="2"
-                    bg={severe ? "rgba(224,140,123,0.12)" : "rgba(251,146,60,0.08)"}
-                    border="1px solid"
-                    borderColor={severe ? "rgba(255,23,68,0.4)" : "rgba(251,146,60,0.3)"}
-                    px="3" py="2" borderRadius="lg" w="full">
-                    <Text fontSize="10px" color={severe ? "kk.error" : "var(--gold)"} lineHeight="1.4">
-                      {severe
-                        ? t("dustFeeSevere", "⚠️ FEES EAT {{pct}}% OF THIS SWAP — you'd lose ${{lostUsd}} of your ${{inUsd}} input. THORChain has a fixed ~$1.20 outbound fee on BTC; small swaps are uneconomic. Strongly recommend ${{minUsd}}+ for this pair, or pick a different route.", { pct: lossPct.toFixed(0), lostUsd: lostUsd.toFixed(2), inUsd: inUsd.toFixed(2), minUsd: recommendedMinUsd })
-                        : t("dustFeeHigh", "Heads up — fees + spread will cost {{pct}}% of this swap (~${{lostUsd}} of ${{inUsd}}). For small amounts the fixed protocol fee dominates. Larger swaps get a better rate.", { pct: lossPct.toFixed(0), lostUsd: lostUsd.toFixed(2), inUsd: inUsd.toFixed(2) })}
-                    </Text>
-                  </Flex>
-                )
-              })()}
-
               {/* Firmware 7.15+ parses native TRX and TRC-20 transfers from the
                   signed raw_data. Only older firmware gets the legacy generic
                   warning; TRON as the destination never affects source signing. */}
@@ -4280,12 +4423,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                     {t("tronLegacySigningWarning", "Firmware before 7.15 may show a generic Tron prompt. Update firmware for native TRX and TRC-20 ClearSign details, or verify the complete payload above before approving.")}
                   </Text>
                 </Flex>
-              ) : (
-                <Flex align="center" gap="2" bg="rgba(35,220,200,0.04)" px="3" py="1.5" borderRadius="lg" w="full">
-                  <ShieldIcon />
-                  <Text fontSize="10px" color="var(--teal)">{t("verifyOnDevice")}</Text>
-                </Flex>
-              )}
+              ) : null}
 
               {error && (
                 <Box bg={errorIsWarning ? "rgba(251,146,60,0.08)" : "rgba(224,140,123,0.10)"} border="1px solid" borderColor={errorIsWarning ? "rgba(251,146,60,0.3)" : "kk.error"} borderRadius="lg" px="3" py="2" w="full">
@@ -4298,9 +4436,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                 </Box>
               )}
 
-              {/* Safety note — "Address will be verified on your KeepKey
-                  device." Per handoff design, this primes the user for the
-                  confirm-on-device step before they sign. */}
+              {/* A single device prompt; route-specific warnings remain above. */}
               <Flex
                 w="full"
                 align="center"
@@ -4317,7 +4453,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                   </svg>
                 </Box>
                 <Text fontSize="11px" color="var(--text-1)" letterSpacing="-0.005em">
-                  {t("addressVerifiedOnDevice", "Address will be verified on your KeepKey device.")}
+                  {uiText("Review and approve on KeepKey")}
                 </Text>
               </Flex>
 
@@ -4405,9 +4541,12 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                       <Flex justify="space-between" align="center" mb="2">
                         <VStack gap="0" align="flex-start">
                           <Text fontSize="9px" color="kk.textMuted" fontWeight="600" textTransform="uppercase" letterSpacing="0.05em">{isZcashSource ? t("zcashTransparentAvailable") : t("available")}</Text>
-                          <Text fontSize="xs" fontFamily="mono" color="kk.textSecondary" fontWeight="600">
-                            {fromBalance ? `${formatBalance(fromBalance)} ${fromAsset.symbol}` : '\u2014'}
-                          </Text>
+                          <Flex align="center" gap="1.5" minH="20px" aria-busy={fromBalancePending}>
+                            <Text fontSize="xs" fontFamily="mono" color="kk.textSecondary" fontWeight="600">
+                              {fromBalance !== null ? `${formatBalance(fromBalance)} ${fromAsset.symbol}` : '\u2014'}
+                            </Text>
+                            {(fromBalancePending || loadingBalances) && <Spinner size="xs" color="kk.gold" aria-label={t('loadingBalances')} />}
+                          </Flex>
                           {fromBalance && hasFromPrice && (
                             <Text fontSize="11px" color="kk.textSecondary" fontWeight="500">{fmtCompact(parseFloat(fromBalance) * fromPriceUsd)}</Text>
                           )}
@@ -4460,7 +4599,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                             borderRadius="md"
                             _hover={{ bg: isMax ? "kk.goldHover" : "rgba(233,196,106,0.1)" }}
                             onClick={() => { setIsMax(true); setMaxReserveMode('safe'); setAmount(""); setFiatAmount("") }}
-                            disabled={busy}
+                            disabled={busy || fromBalance === null}
                           >
                             {t("max")}
                           </Button>
@@ -4544,14 +4683,28 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                       {exceedsBalance && (
                         <Text fontSize="10px" color="kk.error" mt="1" fontWeight="600">{t("insufficientBalance")}</Text>
                       )}
-                      {fromBalanceUnverified && fromAsset && (
-                        <Text fontSize="10px" color="kk.gold" mt="1" fontWeight="600">
-                          {t("balanceUnverified", {
+                      <Box minH="30px" mt="1" role="status" aria-live="polite">
+                      {fromBalanceUnverified && fromAsset && (fromBalancePending ? (
+                        <Text fontSize="10px" color="kk.textMuted" fontWeight="600">
+                          {t("balanceLoading", {
+                            defaultValue: "Loading {{symbol}} balance… MAX is available once it arrives.",
+                            symbol: fromAsset.symbol,
+                          })}
+                        </Text>
+                      ) : sourceBalanceRead === 'blocked' ? (
+                        <Text fontSize="10px" color="kk.textMuted">{uiText('Balance unverified')}</Text>
+                      ) : (
+                        <Text fontSize="10px" color="kk.gold" fontWeight="600">
+                          {fromBalanceReason === 'missing' ? t("balanceMissing", {
+                            defaultValue: "{{symbol}} balance was not returned by the last refresh, so MAX is unavailable. Enter an amount, or refresh and try again.",
+                            symbol: fromAsset.symbol,
+                          }) : t("balanceUnverified", {
                             defaultValue: "{{symbol}} balance unavailable — the last refresh could not reach this chain, so MAX is unavailable. Enter an amount, or refresh and try again.",
                             symbol: fromAsset.symbol,
                           })}
                         </Text>
-                      )}
+                      ))}
+                      </Box>
                       {exceedsSafeMax && fromAsset && (
                         <Text fontSize="10px" color="kk.gold" mt="1" fontWeight="600">
                           {t("exceedsSafeMax", {
@@ -5106,7 +5259,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                   {healthRefreshing ? '↻' : '↺'}
                 </Button>
                 <Button size="xs" variant="ghost" color="kk.textMuted" px="1" minW="auto"
-                  _hover={{ color: 'kk.textPrimary' }} onClick={() => setHealthDialogOpen(false)}>{uiText("&times;")}</Button>
+                  _hover={{ color: 'kk.textPrimary' }} onClick={() => setHealthDialogOpen(false)}>{uiText("×")}</Button>
               </HStack>
             </Flex>
 

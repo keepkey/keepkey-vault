@@ -1,5 +1,6 @@
 import type { ElectrobunConfig } from "electrobun";
 import { existsSync } from "node:fs";
+import { isAbsolute, relative } from 'node:path';
 import pkg from "./package.json";
 
 const isWindows = process.platform === "win32";
@@ -16,6 +17,39 @@ const emulatorSource = process.env.KEEPKEY_EMULATOR_SOURCE || certifiedEmulatorS
 const emulatorCopy = emulatorSource && existsSync(emulatorSource)
 	? { [emulatorSource]: `emulator/${emulatorSource.split('/').pop()}` }
 	: {};
+
+const moneroPlatform = `${process.platform}-${process.arch}`;
+const moneroSidecar = isWindows ? "monero-cli.exe" : "monero-cli";
+const moneroRpc = isWindows ? "monero-wallet-rpc.exe" : "monero-wallet-rpc";
+const moneroVendor = `monero-cli/vendor/${moneroPlatform}`;
+// Electrobun resolves copy keys relative to the project, even for absolute inputs.
+const toolSource = (path: string) => isAbsolute(path) ? relative(process.cwd(), path) : path;
+const moneroCliSource = toolSource(process.env.KEEPKEY_MONERO_CLI_SOURCE || `monero-cli/dist/${moneroSidecar}`);
+const moneroRpcSource = toolSource(process.env.KEEPKEY_MONERO_RPC_SOURCE || `${moneroVendor}/${moneroRpc}`);
+const moneroMetadataSource = toolSource(process.env.KEEPKEY_MONERO_METADATA_SOURCE || `${moneroVendor}/monero-tools.json`);
+const moneroDaemon = isWindows ? 'monerod.exe' : 'monerod';
+const moneroDaemonSource = toolSource(process.env.KEEPKEY_MONERO_DAEMON_SOURCE || `${moneroVendor}/${moneroDaemon}`);
+const moneroCopy = existsSync(moneroCliSource) && existsSync(moneroRpcSource)
+    ? { [moneroCliSource]: moneroSidecar,
+        [moneroRpcSource]: `monero-tools/${moneroRpc}`,
+        [moneroMetadataSource]: "monero-tools/monero-tools.json",
+        ...(existsSync(moneroDaemonSource) ? { [moneroDaemonSource]: `monero-tools/${moneroDaemon}` } : {}),
+        [`${moneroVendor}/LICENSE`]: "monero-tools/LICENSE" } : {};
+// Development-only research artifacts (build-signed.ts refuses this flag): the receive-only and/or
+// signing emulator builds, and the research signing adapter pinned in monero-tools.json.
+const includeMoneroResearch = process.env.KEEPKEY_INCLUDE_MONERO_EMULATOR === '1';
+const moneroDeviceCopy = includeMoneroResearch && existsSync('monero-device-bundle/libmonero_device_proof.dylib') && existsSync('monero-device-bundle/libmonero_core_verify.dylib')
+    ? { 'monero-device-bundle': 'monero-device' } : {};
+const moneroEmulatorCopy = {
+    ...(includeMoneroResearch && existsSync("monero-emulator-bundle/libkkemu-monero.dylib")
+        ? { "monero-emulator-bundle/manifest.json": "monero-emulator/manifest.json",
+            "monero-emulator-bundle/libkkemu-monero.dylib": "monero-emulator/libkkemu-monero.dylib" } : {}),
+    ...(includeMoneroResearch && existsSync("monero-emulator-bundle/libkkemu-monero-signing.dylib")
+        ? { "monero-emulator-bundle/signing-manifest.json": "monero-emulator/signing-manifest.json",
+            "monero-emulator-bundle/libkkemu-monero-signing.dylib": "monero-emulator/libkkemu-monero-signing.dylib" } : {}),
+    ...(includeMoneroResearch && existsSync(`${moneroVendor}/monero-host-adapter`)
+        ? { [`${moneroVendor}/monero-host-adapter`]: "monero-tools/monero-host-adapter" } : {}),
+};
 
 export default {
 	app: {
@@ -65,6 +99,9 @@ export default {
 			// Release builds preflight this file before Electrobun runs. Keeping the
 			// config conditional preserves emulator-free developer builds on Linux.
 			...emulatorCopy,
+			...moneroCopy,
+			...moneroEmulatorCopy,
+			...moneroDeviceCopy,
 			// Zcash privacy engine sidecar (Rust binary -- .exe on Windows)
 			[isWindows ? "zcash-cli/target/release/zcash-cli.exe" : "zcash-cli/target/release/zcash-cli"]: isWindows ? "zcash-cli.exe" : "zcash-cli",
 		},
@@ -73,6 +110,8 @@ export default {
 			icons: "icon.iconset",
 			codesign: process.env.CI !== 'true',
 			notarize: process.env.CI !== 'true',
+			// CI ships the Intel update archive and discards the ARM disk image.
+			createDmg: process.env.CI !== 'true',
 			entitlements: {
 				"com.apple.security.cs.allow-jit": true,
 				"com.apple.security.cs.allow-unsigned-executable-memory": true,
@@ -98,5 +137,8 @@ export default {
 	},
 	release: {
 		baseUrl: "https://github.com/keepkey/keepkey-vault/releases/latest/download",
+	},
+	scripts: {
+		postBuild: "scripts/patch-bundle.ts",
 	},
 } satisfies ElectrobunConfig;

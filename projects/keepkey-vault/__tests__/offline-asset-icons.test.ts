@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import { readFile, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import manifestJson from '../src/shared/offlineAssetIcons.json'
-import { getAssetIcon, isBundledAssetIcon } from '../src/shared/assetLookup'
+import { BASE_NATIVE_CAIP, caipToIcon, getAssetIcon, isBundledAssetIcon } from '../src/shared/assetLookup'
 
 const manifest = manifestJson as Record<string, string>
 const iconDir = join(import.meta.dir, '../src/mainview/public/assets/token-icons')
@@ -17,6 +17,15 @@ describe('offline asset icon pack', () => {
     expect(manifest[SOL_USDC]).toBeTruthy()
     expect(manifest[TRON_USDT]).toBeTruthy()
     expect(isBundledAssetIcon(getAssetIcon(SOL_USDT))).toBe(true)
+  })
+
+  test('Base native ETH has its own bundled mark, not the Ethereum diamond', () => {
+    const base = getAssetIcon(BASE_NATIVE_CAIP)
+    const ethereum = getAssetIcon('eip155:1/slip44:60')
+    expect(isBundledAssetIcon(base)).toBe(true)
+    expect(base).not.toBe(ethereum)
+    expect(caipToIcon(BASE_NATIVE_CAIP)).toBe(base)
+    expect(decodeURIComponent(base)).toContain('#0000ff')
   })
 
   test('every manifest target is a bounded raster file', async () => {

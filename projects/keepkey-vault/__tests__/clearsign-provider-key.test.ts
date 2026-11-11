@@ -21,6 +21,7 @@ import { mnemonicToSeedSync } from 'bip39'
 import { utils as ethersUtils } from 'ethers'
 import * as providerKeyModule from '../src/shared/clearsign-provider-key'
 import { createProviderKeySession } from '../src/bun/clearsign-provider-session'
+import ts from 'typescript'
 
 const { deriveProviderKey, providerFingerprint, validateProviderCeremony } = providerKeyModule
 
@@ -245,8 +246,18 @@ describe('provider key session', () => {
     const index = readFileSync(join(SRC, 'bun/index.ts'), 'utf8')
     const quit = index.slice(index.indexOf('function cleanupAndQuit() {'))
     expect(quit.slice(0, quit.indexOf('stopEmulator'))).toContain('providerKeySession.clear()')
-    const stateChange = index.slice(index.indexOf("engine.on('state-change', (state) => {"))
-    expect(stateChange.slice(0, 400)).toContain('providerKeySession.onDeviceState(state)')
+    const source = ts.createSourceFile('index.ts', index, ts.ScriptTarget.Latest, true)
+    const stateListeners: string[] = []
+    const visit = (node: ts.Node) => {
+      if (ts.isCallExpression(node) && node.expression.getText(source) === 'engine.on'
+        && ts.isStringLiteral(node.arguments[0]) && node.arguments[0].text === 'state-change'
+        && node.arguments[1] && ts.isArrowFunction(node.arguments[1])) {
+        stateListeners.push(node.arguments[1].body.getText(source))
+      }
+      ts.forEachChild(node, visit)
+    }
+    visit(source)
+    expect(stateListeners.some(body => body.includes('providerKeySession.onDeviceState(state)'))).toBe(true)
     expect(index).toContain('createProviderKeySession(requireClearsignAdvancedMode, undefined, () => engine.getDeviceState().deviceId)')
     for (const handler of ['clearsignBuildEvmSchema', 'clearsignExportProviderBundle', 'clearsignImportProviderBundle']) {
       const body = index.slice(index.indexOf(`${handler}: async`))

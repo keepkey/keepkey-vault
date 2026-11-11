@@ -30,12 +30,14 @@ import { simulateSolanaEffects } from './solana-effects'
 import { buildClearSignReport, solanaDecodedReportFindings } from '../shared/clearsign-report'
 import { uniswapReportFindingsWithState } from './uniswap-report'
 import { classifyEffectExposure, observeEvmCall, observeEvmTypedData, observeMalformedSolanaTransaction, observeSigningInfo, observeSolanaTransaction } from './clearsign-observation'
-import { resolveEvmSchema, type SignedEvmSchema } from './evm-schema-registry'
+import { measureLiveDeployment, resolveEvmSchema, type SignedEvmSchema } from './evm-schema-registry'
+import { findContractRating } from './clearsign-review'
 import { nameRuntimeProvider, resolveProviderTxMetadata } from './clearsign-providers'
 import { trustRuntimeSigner, type RuntimeEvmSigner } from './evm-runtime-metadata'
 import { supportsCertifiedClearSign } from './solana-certified-policy'
 import { decodeEIP712 } from './eip712-decoder'
 import { deviceErrorMessage } from '../shared/device-error'
+import { DeviceOperationError, deviceOperationContext } from './device-operation'
 
 function base64ToBase58(base64: string): string {
   return bs58.encode(Buffer.from(base64, 'base64'))
@@ -169,7 +171,19 @@ export interface WcPairApprovalInfo {
   methods: string[]
 }
 
+export interface WcWalletSession {
+  wallet: unknown
+  deviceId?: string
+  seedAddress: string | null
+  epoch: number
+  hidden: boolean
+}
+
 export interface WcCallbacks {
+  /** The live wallet behind a request/card. Null also retires disabled WC work. */
+  getWalletSession?: () => WcWalletSession | null
+  /** Serialize device calls after approval without queuing an invisible job. */
+  runDeviceOperation?: <T>(action: () => Promise<T>) => Promise<T>
   /** Get the current EVM address (checksummed) and its derivation index. Null if not ready. */
   getEvmAddressInfo: () => { address: string; addressIndex: number } | null
   /** Lazy-derive the EVM address if not yet initialized. Called from the
@@ -247,9 +261,72 @@ export class WalletConnectManager {
   private callbacks: WcCallbacks
   private initPromise: Promise<void> | null = null
   private pendingPairApprovals = new Map<string, { resolve: (ok: boolean) => void; timer: ReturnType<typeof setTimeout> }>()
+  private requestGeneration = 0
+  private revokedTopics = new Set<string>()
 
   constructor(callbacks: WcCallbacks) {
-    this.callbacks = callbacks
+    const deviceCall = <T extends (...args: any[]) => Promise<any>>(callback: T): T => ((...args: Parameters<T>) => {
+      const request = deviceOperationContext.getStore()
+      request?.assertCurrent()
+      const run = () => {
+        const operation = deviceOperationContext.getStore()
+        const assertCurrent = () => { request?.assertCurrent(); operation?.assertCurrent() }
+        assertCurrent()
+        return deviceOperationContext.run({ assertCurrent }, async () => {
+          const result = await callback(...args)
+          assertCurrent()
+          return result
+        })
+      }
+      return callbacks.runDeviceOperation ? callbacks.runDeviceOperation(run) : run()
+    }) as T
+    this.callbacks = {
+      ...callbacks,
+      ensureEvmAddressInfo: deviceCall(callbacks.ensureEvmAddressInfo),
+      getCosmosAccountInfo: deviceCall(callbacks.getCosmosAccountInfo),
+      getSolanaAccountInfo: deviceCall(callbacks.getSolanaAccountInfo),
+      loadClearsignSigner: deviceCall(callbacks.loadClearsignSigner),
+      ethSignTx: deviceCall(callbacks.ethSignTx),
+      ethSignMessage: deviceCall(callbacks.ethSignMessage),
+      ethSignTypedData: deviceCall(callbacks.ethSignTypedData),
+      cosmosSignAmino: deviceCall(callbacks.cosmosSignAmino),
+      solanaSignMessageRaw: deviceCall(callbacks.solanaSignMessageRaw),
+      solanaSignTransactionRaw: deviceCall(callbacks.solanaSignTransactionRaw),
+    }
+  }
+
+  private async inWalletSession<T>(action: () => Promise<T>, assertSession?: () => void): Promise<T> {
+    const generation = this.requestGeneration
+    const session = this.callbacks.getWalletSession?.()
+    const expected = session ? { ...session } : null
+    if (this.callbacks.getWalletSession && !expected) {
+      throw new DeviceOperationError(409, 'Connect and unlock KeepKey, wait for wallet verification, then retry WalletConnect.')
+    }
+    const parent = deviceOperationContext.getStore()
+    const assertCurrent = () => {
+      parent?.assertCurrent()
+      assertSession?.()
+      const current = this.callbacks.getWalletSession?.()
+      if (generation !== this.requestGeneration || (this.callbacks.getWalletSession && (!expected || !current
+        || expected.wallet !== current.wallet || expected.deviceId !== current.deviceId
+        || expected.seedAddress !== current.seedAddress || expected.epoch !== current.epoch || expected.hidden !== current.hidden))) {
+        throw new DeviceOperationError(409, 'The WalletConnect wallet session changed. Start the request again with the current wallet.')
+      }
+    }
+    assertCurrent()
+    return deviceOperationContext.run({ assertCurrent }, async () => {
+      const result = await action()
+      assertCurrent()
+      return result
+    })
+  }
+
+  private async requestSigningApproval(info: SigningRequestInfo): Promise<boolean> {
+    const request = deviceOperationContext.getStore()
+    request?.assertCurrent()
+    const approved = await this.callbacks.requestSigningApproval(info)
+    request?.assertCurrent()
+    return approved
   }
 
   /** Wait for the user to approve/reject a pending pair proposal. */
@@ -331,6 +408,9 @@ export class WalletConnectManager {
   }
 
   async disconnectSession(topic: string): Promise<void> {
+    // Revoke local permission before the SDK waits on its relay/network work.
+    // A disconnected crypto topic is never admitted again by this manager.
+    this.revokedTopics.add(topic)
     if (!this.web3wallet) return
     await this.web3wallet.disconnectSession({
       topic,
@@ -340,6 +420,7 @@ export class WalletConnectManager {
   }
 
   async destroy(): Promise<void> {
+    this.requestGeneration++
     // Drain pending pair approvals so acquireWindowFocus refcount is balanced.
     // If we skip this, disabling WC while a pair prompt is open leaks _alwaysOnTopRefs.
     for (const [id, entry] of this.pendingPairApprovals) {
@@ -368,7 +449,8 @@ export class WalletConnectManager {
     const w = this.web3wallet!
     w.on('session_proposal', this.onSessionProposal)
     w.on('session_request', this.onSessionRequest)
-    w.on('session_delete', () => {
+    w.on('session_delete', ({ topic }) => {
+      this.revokedTopics.add(topic)
       this.callbacks.onSessionsChanged(this.getSessions())
     })
   }
@@ -382,6 +464,14 @@ export class WalletConnectManager {
   private onSessionProposal = async (
     proposal: Web3WalletTypes.SessionProposal
   ) => {
+    try { await this.inWalletSession(() => this.approveSessionProposal(proposal)) }
+    catch (error: any) {
+      this.callbacks.log(`[WC] Pairing wallet changed: ${error?.message || error}`)
+      try { await this.web3wallet?.rejectSession({ id: proposal.id, reason: getSdkError('USER_REJECTED') }) } catch { /* best effort */ }
+    }
+  }
+
+  private async approveSessionProposal(proposal: Web3WalletTypes.SessionProposal) {
     // Inspect the proposal up front so we only resolve accounts for the
     // namespaces the dApp actually asks for. A required namespace must
     // resolve; an optional namespace silently falls out if it doesn't.
@@ -448,6 +538,7 @@ export class WalletConnectManager {
     }
 
     // Ask the user to approve the pair before establishing the session.
+    deviceOperationContext.getStore()?.assertCurrent()
     const meta = proposal.params.proposer.metadata
     const proposedChains = Object.values(proposal.params.requiredNamespaces ?? {})
       .flatMap(ns => ns.chains ?? [])
@@ -473,6 +564,7 @@ export class WalletConnectManager {
       return
     }
 
+    deviceOperationContext.getStore()?.assertCurrent()
     try {
       const supportedNamespaces: Parameters<typeof buildApprovedNamespaces>[0]['supportedNamespaces'] = {}
       if (evmInfo) {
@@ -535,25 +627,26 @@ export class WalletConnectManager {
     const { request, chainId } = params
     const { method } = request
 
-    const sessions = this.web3wallet!.getActiveSessions()
+    const client = this.web3wallet
+    if (!client) return
+    const sessions = client.getActiveSessions()
     const session = sessions[topic]
     const appName = session?.peer.metadata.name ?? 'Unknown dApp'
 
     this.callbacks.log(`[WC] Request: ${method} from ${appName}`)
 
     try {
-      const result = await this.handleRequest(method, request.params, chainId, appName)
-      await this.web3wallet!.respondSessionRequest({
+      const result = await this.handleRequest(method, request.params, chainId, appName, topic)
+      await client.respondSessionRequest({
         topic,
         response: formatJsonRpcResult(id, result),
       })
     } catch (e: any) {
       this.callbacks.log(`[WC] Request failed: ${e.message}`)
       const code = e.message?.includes('rejected') ? 4001 : 5000
-      await this.web3wallet!.respondSessionRequest({
-        topic,
-        response: formatJsonRpcError(id, { code, message: e.message }),
-      })
+      try {
+        await client.respondSessionRequest({ topic, response: formatJsonRpcError(id, { code, message: e.message }) })
+      } catch { /* A deleted/disconnected session may no longer accept a reply. */ }
     }
   }
 
@@ -564,7 +657,19 @@ export class WalletConnectManager {
     params: any,
     chainId: string,
     appName: string,
+    topic?: string,
   ): Promise<any> {
+    const assertSession = topic !== undefined ? () => {
+      const session = this.web3wallet?.getActiveSessions()[topic]
+      if (this.revokedTopics.has(topic) || !session || !Number.isFinite(session.expiry) || session.expiry <= Date.now() / 1000) {
+        this.revokedTopics.add(topic)
+        throw new DeviceOperationError(409, 'The WalletConnect session was disconnected or expired. Pair again before requesting a signature.')
+      }
+    } : undefined
+    return this.inWalletSession(() => this.routeRequest(method, params, chainId, appName), assertSession)
+  }
+
+  private async routeRequest(method: string, params: any, chainId: string, appName: string): Promise<any> {
     // Cosmos namespace
     if (chainId.startsWith('cosmos:')) {
       return this.handleCosmosRequest(method, params, chainId, appName)
@@ -754,7 +859,7 @@ export class WalletConnectManager {
         const observationId = this.recordSolanaObservation(signingInfo, transaction)
         const approvalStartedAt = Date.now()
         let approved: boolean
-        try { approved = await this.callbacks.requestSigningApproval(signingInfo) }
+        try { approved = await this.requestSigningApproval(signingInfo) }
         catch (error) {
           if (observationId) this.callbacks.finalizeClearSignObservation(observationId, 'failed', 'approval-ui')
           this.callbacks.dismissSigning(signingId)
@@ -803,7 +908,7 @@ export class WalletConnectManager {
         const observationId = this.recordSolanaObservation(signingInfo, transaction)
         const approvalStartedAt = Date.now()
         let approved: boolean
-        try { approved = await this.callbacks.requestSigningApproval(signingInfo) }
+        try { approved = await this.requestSigningApproval(signingInfo) }
         catch (error) {
           if (observationId) this.callbacks.finalizeClearSignObservation(observationId, 'failed', 'approval-ui')
           this.callbacks.dismissSigning(signingId)
@@ -850,13 +955,15 @@ export class WalletConnectManager {
     const observationId = draft ? this.callbacks.recordClearSignObservation(draft) : undefined
     const approvalStartedAt = Date.now()
     let approved: boolean
-    try { approved = await this.callbacks.requestSigningApproval(signingInfo) }
+    try { approved = await this.requestSigningApproval(signingInfo) }
     catch (error) {
       if (observationId) this.callbacks.finalizeClearSignObservation(observationId, 'failed', 'approval-ui')
+      this.callbacks.dismissSigning(signingInfo.id)
       throw error
     }
     if (!approved) {
       if (observationId) this.callbacks.finalizeClearSignObservation(observationId, Date.now() - approvalStartedAt >= 119_000 ? 'timed-out' : 'rejected')
+      this.callbacks.dismissSigning(signingInfo.id)
       throw new Error('User rejected signing')
     }
     try {
@@ -994,13 +1101,15 @@ export class WalletConnectManager {
     }))
     const approvalStartedAt = Date.now()
     let approved: boolean
-    try { approved = await this.callbacks.requestSigningApproval(signingInfo) }
+    try { approved = await this.requestSigningApproval(signingInfo) }
     catch (error) {
       if (observationId) this.callbacks.finalizeClearSignObservation(observationId, 'failed', 'approval-ui')
+      this.callbacks.dismissSigning(signingId)
       throw error
     }
     if (!approved) {
       if (observationId) this.callbacks.finalizeClearSignObservation(observationId, Date.now() - approvalStartedAt >= 119_000 ? 'timed-out' : 'rejected')
+      this.callbacks.dismissSigning(signingId)
       throw new Error('User rejected signing')
     }
 
@@ -1096,6 +1205,7 @@ export class WalletConnectManager {
         simulation,
         hostFindings: universalRouterFindings.findings,
         hostLimitations: universalRouterFindings.limitations,
+        rating: await findContractRating(effectiveChainId, String(tx.to || ''), measureLiveDeployment),
       })
     }
     await contractFacts
@@ -1127,7 +1237,7 @@ export class WalletConnectManager {
     const observationId = this.callbacks.recordClearSignObservation(observation)
     const approvalStartedAt = Date.now()
     let approved: boolean
-    try { approved = await this.callbacks.requestSigningApproval(signingInfo) }
+    try { approved = await this.requestSigningApproval(signingInfo) }
     catch (error) {
       if (observationId) this.callbacks.finalizeClearSignObservation(observationId, 'failed', 'approval-ui')
       this.callbacks.dismissSigning(signingId)
@@ -1237,7 +1347,7 @@ export class WalletConnectManager {
         if (observationId) this.callbacks.refuseClearSignObservationDefinition?.(observationId)
         this.callbacks.dismissSigning(cardId)
         cardId = again.id
-        if (!await this.callbacks.requestSigningApproval(again)) {
+        if (!await this.requestSigningApproval(again)) {
           if (observationId) this.callbacks.finalizeClearSignObservation(observationId, 'rejected')
           throw new Error('User rejected signing')
         }

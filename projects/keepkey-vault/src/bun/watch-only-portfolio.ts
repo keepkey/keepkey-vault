@@ -97,6 +97,25 @@ export function portfolioNativeMatch(entries: any[], key: PortfolioKey) {
   })
 }
 
+/** A successful HTTP response is not evidence for an omitted account. Match
+ * every requested owner/network, including script-qualified BTC query keys,
+ * before allowing an aggregate to replace its last confirmed value. */
+export function confirmedPortfolioNativeMatches(pubkeys: PortfolioKey[], entries: any[], failed: ReadonlySet<string>) {
+  const matches = new Map<string, any>()
+  for (const key of pubkeys) {
+    if (failed.has(`${key.caip}:${key.pubkey}`)) continue
+    const match = portfolioNativeMatch(entries, key)
+    const text = match?.balance == null ? '' : String(match.balance).trim()
+    const amount = Number(text), usd = Number(match?.valueUsd ?? 0)
+    if (!match || !/^(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/.test(text)
+      || !Number.isFinite(amount) || amount < 0 || !Number.isFinite(usd) || usd < 0
+      || match.degraded === true || match.verified === false || match.isStale === true
+      || match.syncState === 'degraded' || match.syncState === 'stale') continue
+    matches.set(key.pubkey, match)
+  }
+  return { matches, confirmed: pubkeys.length > 0 && pubkeys.every(key => matches.has(key.pubkey)) }
+}
+
 export function watchOnlyNativeBalances(pubkeys: PortfolioKey[], entries: any[], failed: Set<string>) {
   const totals = new Map<string, ChainBalance>()
   for (const p of pubkeys) {

@@ -580,6 +580,73 @@ export interface ClearSignProtectionCaseStudy {
   checkedAt: number
 }
 
+export interface MoneroTransaction {
+  txid: string
+  amountAtomic: string
+  confirmations: number
+  locked: boolean
+  height?: number
+  type?: 'in' | 'pool'
+}
+
+export interface MoneroConnectionInfo {
+  sessionId?: number
+  preferredNode: string
+  activeNode: string
+  automaticFailover: boolean
+  state: 'idle' | 'checking' | 'switching' | 'scanning' | 'connected' | 'failed' | 'waiting'
+  retryAt?: string
+  pausedForTransaction?: boolean
+  attempts: Array<{ url: string; state: 'untested' | 'checking' | 'responding' | 'failed'; checkedAt?: string; lastResponseAt?: string; retryAt?: string; error?: string; height?: number; latencyMs?: number }>
+}
+
+export interface MoneroStatus {
+  connection?: MoneroConnectionInfo
+  available: boolean
+  network: 'mainnet'
+  address: string
+  balanceAtomic: string
+  unlockedBalanceAtomic: string
+  walletHeight: number
+  transactions: MoneroTransaction[]
+  monitorReady: boolean
+  /** What the balance means now: unknown (not connected), scanning, current, or the last update (node down). */
+  syncState: 'not-connected' | 'scanning' | 'ready' | 'unreachable'
+  connectionPhase?: 'device' | 'wallet'
+  restoreHeight?: number
+  daemonHeight?: number
+  emulatorReady?: boolean
+  updatedAt?: string
+  error?: string
+  canSend: boolean
+  /** The first unmet send gate: signing emulator build, adapter, wallet sync, key images. */
+  sendBlocked?: 'unrelayed' | 'emulator' | 'firmware' | 'adapter' | 'syncing' | 'key-images'
+  /** Signed transaction whose broadcast outcome is unknown; only a retry of it is allowed. */
+  unrelayedTxid?: string
+  keyImagesSynced?: boolean
+  /** Key images were synced, but outputs arrived since: sync again before sending. */
+  keyImagesStale?: boolean
+  /** The node's last answer about the pending tx: it does not have it; discardable only if its inputs are unspent. */
+  unrelayedCheck?: { state: 'unknown'; discardable: boolean; checkedAt: string; relayNode?: string; checkedNode: string }
+  /** A discarded tx that another node could still mine: the next send must reuse one of its inputs. */
+  discardedTxid?: string
+  spendStateKnown: boolean
+}
+
+/** What the KeepKey will show for a prepared Monero send, in device order. */
+export interface MoneroSendReview {
+  prepareId: string
+  /** Prepared with Max: the whole unlocked balance minus the fee and one atomic unit of change. */
+  max?: boolean
+  recipient: string
+  amountAtomic: string
+  feeAtomic: string
+  changeAtomic: string
+  totalAtomic: string
+  inputCount: number
+  outputs: Array<{ role: 'recipient' | 'change'; address: string; amountAtomic: string }>
+}
+
 export interface FirmwareProgress {
   stage?: import('./firmware-progress').FirmwareProgressStage
   percent: number
@@ -1557,6 +1624,7 @@ export interface ClearSignProviderInput {
 
 // Application-level settings (persisted in SQLite)
 export interface AppSettings {
+  passwordManagerEnabled?: boolean // experimental password bank; runtime, default OFF
   appLanguage?: string          // shared with native menus and dialogs
   restApiEnabled: boolean        // controls entire REST API server on/off
   pioneerApiBase: string         // current Pioneer API base URL
@@ -1566,6 +1634,12 @@ export interface AppSettings {
   numberLocale: string           // number formatting locale (default 'en-US')
   btcMultisigEnabled: boolean    // runtime feature flag: Bitcoin multisig co-signing (default OFF)
   walletConnectEnabled: boolean   // feature flag: WalletConnect dApp support (default OFF)
+  moneroAvailable?: boolean      // optional compatibility field; build contains a runnable sidecar
+  moneroEnabled: boolean         // experimental XMR sidecar and wallet surface (default OFF)
+  moneroDaemonUrl: string        // public HTTPS Monero daemon, or loopback local daemon
+  moneroNodeMode?: 'local' | 'remote'
+  moneroRestoreHeight: number    // earliest block to scan; zero (also unset/legacy) scans from genesis
+  moneroPendingBroadcasts?: number  // signed XMR sends whose broadcast is unresolved (kept across off/wipe)
   zcashPrivacyEnabled: boolean   // read-only capability: auto-ON when firmware >= 7.15.0 and this build includes zcash-cli
   hiveEnabled: boolean           // read-only capability: Hive blockchain — auto-ON when firmware >= 7.15.0
   emulatorEnabled: boolean       // feature flag: macOS emulator surface (default OFF — dev-only)
@@ -1609,6 +1683,35 @@ export interface EmulatorStatus {
   platform: string                // 'darwin' for macOS
   flashImages: string[]           // available encrypted flash images
   storagePath: string             // ~/.keepkey/emulator/
+  /** While running: the saved wallet it loaded, and its device label when known. */
+  wallet?: { name: string; label?: string }
+  /** While running: the firmware build it loaded. */
+  build?: EmulatorRunningBuild
+}
+
+/** An emulator firmware build. id null: the bundled (or user-installed) library. */
+export interface EmulatorRunningBuild {
+  id: string | null
+  version?: string
+  label?: string
+  research?: boolean
+}
+
+/** An installed or bundled-research emulator build the start screen can pick. */
+export interface EmulatorBuildInfo {
+  id: string
+  path: string
+  selected: boolean
+  version?: string
+  label?: string
+  research?: boolean
+  monero?: boolean
+  signingEnabled?: boolean
+}
+
+/** What the next emulator start loads, or why it can't (naming the build). */
+export interface EmulatorNextBuild extends EmulatorRunningBuild {
+  problem: string | null
 }
 
 /** Info about a single emulator wallet profile (flash image + optional seed). */
@@ -1630,6 +1733,8 @@ export interface EmulatorWalletInfo {
   lastUsed?: number
   /** First Ethereum account (m/44'/60'/0'/0/0), cached from the last connect. */
   ethAddress?: string
+  /** The saved selection: the wallet the next start opens unless another is picked. */
+  isSelected?: boolean
 }
 
 /** Persisted device snapshot — one per device_id, stored in SQLite. */
@@ -2312,6 +2417,7 @@ export interface PendingSwap {
   trackingMetadataPending?: boolean
   createdAt: number       // unix ms
   updatedAt: number       // unix ms
+  statusCheck?: { checkedAt: number; error?: 'unavailable' | 'not_found' }
   completedAt?: number    // unix ms — when terminal status reached
   estimatedTime: number   // seconds
   error?: string

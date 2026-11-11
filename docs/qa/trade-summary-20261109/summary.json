@@ -1,0 +1,233 @@
+{
+  "checks": {
+    "normal-summary-single-values-and-device-notice": true,
+    "fees-and-details-collapsed-until-requested": true,
+    "summary-uses-one-backend-pricing-snapshot": true,
+    "estimated-minimum-is-qualified": true,
+    "reported-slippage-only-shown-in-details": true,
+    "large-trade-acknowledgment-visible-and-required": true,
+    "excessive-cost-route-stays-blocked": true,
+    "unknown-value-acknowledgment-remains-visible": true,
+    "native-same-asset-warning-without-fiat-keeps-known-percentage": true,
+    "small-trade-cost-warning-is-visible-with-details-closed": true,
+    "mobile-summary-fits-and-close-remains-reachable": true,
+    "back-and-close-without-signing": true
+  },
+  "failures": [],
+  "browserErrors": [],
+  "quoteReplies": [
+    {
+      "scenario": "normal",
+      "amount": "0.1",
+      "risk": {
+        "tier": "small",
+        "inputUsd": 250,
+        "expectedUsd": 248.75,
+        "minimumUsd": 246.2625,
+        "expectedLossUsd": 1.25,
+        "minimumLossUsd": 3.7375000000000114,
+        "expectedLossPct": 0.5,
+        "minimumLossPct": 1.4950000000000045,
+        "allowancePct": 1.0000000000000009,
+        "blocked": false,
+        "warning": false,
+        "requiresAcknowledgment": false,
+        "quoteMaxAgeMs": 60000
+      }
+    },
+    {
+      "scenario": "snapshot",
+      "amount": "0.1",
+      "risk": {
+        "tier": "small",
+        "inputUsd": 251.37,
+        "expectedUsd": 248.74875,
+        "minimumUsd": 246.2612625,
+        "expectedLossUsd": 2.6212500000000034,
+        "minimumLossUsd": 5.108737500000018,
+        "expectedLossPct": 1.0427855352667397,
+        "minimumLossPct": 2.032357679914078,
+        "allowancePct": 1.0000000000000009,
+        "blocked": false,
+        "warning": false,
+        "requiresAcknowledgment": false,
+        "quoteMaxAgeMs": 60000
+      }
+    },
+    {
+      "scenario": "estimated",
+      "amount": "0.1",
+      "risk": {
+        "tier": "small",
+        "inputUsd": 250,
+        "expectedUsd": 248.75,
+        "minimumUsd": 246.2625,
+        "expectedLossUsd": 1.25,
+        "minimumLossUsd": 3.7375000000000114,
+        "expectedLossPct": 0.5,
+        "minimumLossPct": 1.4950000000000045,
+        "allowancePct": 1.0000000000000009,
+        "blocked": false,
+        "warning": false,
+        "requiresAcknowledgment": false,
+        "quoteMaxAgeMs": 60000
+      }
+    },
+    {
+      "scenario": "reported-slippage",
+      "amount": "0.1",
+      "risk": {
+        "tier": "small",
+        "inputUsd": 250,
+        "expectedUsd": 248.75,
+        "minimumUsd": 246.2625,
+        "expectedLossUsd": 1.25,
+        "minimumLossUsd": 3.7375000000000114,
+        "expectedLossPct": 0.5,
+        "minimumLossPct": 1.4950000000000045,
+        "allowancePct": 1.0000000000000009,
+        "blocked": false,
+        "warning": false,
+        "requiresAcknowledgment": false,
+        "quoteMaxAgeMs": 60000
+      }
+    },
+    {
+      "scenario": "ack",
+      "amount": "1",
+      "risk": {
+        "tier": "large",
+        "inputUsd": 2500,
+        "expectedUsd": 2475,
+        "minimumUsd": 2450.25,
+        "expectedLossUsd": 25,
+        "minimumLossUsd": 49.75,
+        "expectedLossPct": 1,
+        "minimumLossPct": 1.9900000000000002,
+        "allowancePct": 1.0000000000000009,
+        "blocked": false,
+        "warning": true,
+        "requiresAcknowledgment": true,
+        "quoteMaxAgeMs": 30000
+      }
+    },
+    {
+      "scenario": "blocked",
+      "amount": "1",
+      "risk": {
+        "tier": "large",
+        "inputUsd": 2500,
+        "expectedUsd": 2375,
+        "minimumUsd": 2351.25,
+        "expectedLossUsd": 125,
+        "minimumLossUsd": 148.75,
+        "expectedLossPct": 5,
+        "minimumLossPct": 5.949999999999999,
+        "allowancePct": 1.0000000000000009,
+        "blocked": true,
+        "warning": true,
+        "requiresAcknowledgment": false,
+        "quoteMaxAgeMs": 30000
+      }
+    },
+    {
+      "scenario": "unknown",
+      "amount": "0.1",
+      "risk": {
+        "tier": "unknown",
+        "blocked": false,
+        "warning": false,
+        "requiresAcknowledgment": true,
+        "quoteMaxAgeMs": 30000,
+        "allowancePct": 1
+      }
+    },
+    {
+      "scenario": "no-fiat-native",
+      "amount": "0.1",
+      "risk": {
+        "tier": "unknown",
+        "blocked": false,
+        "warning": true,
+        "requiresAcknowledgment": true,
+        "expectedLossPct": 15,
+        "minimumLossPct": 15.85,
+        "allowancePct": 1,
+        "quoteMaxAgeMs": 30000
+      }
+    },
+    {
+      "scenario": "small-warning",
+      "amount": "0.1",
+      "risk": {
+        "tier": "small",
+        "inputUsd": 250,
+        "expectedUsd": 212.5,
+        "minimumUsd": 210.375,
+        "expectedLossUsd": 37.5,
+        "minimumLossUsd": 39.625,
+        "expectedLossPct": 15,
+        "minimumLossPct": 15.85,
+        "allowancePct": 1.0000000000000009,
+        "blocked": false,
+        "warning": true,
+        "requiresAcknowledgment": false,
+        "quoteMaxAgeMs": 60000
+      }
+    },
+    {
+      "scenario": "normal",
+      "amount": "0.1",
+      "risk": {
+        "tier": "small",
+        "inputUsd": 250,
+        "expectedUsd": 248.75,
+        "minimumUsd": 246.2625,
+        "expectedLossUsd": 1.25,
+        "minimumLossUsd": 3.7375000000000114,
+        "expectedLossPct": 0.5,
+        "minimumLossPct": 1.4950000000000045,
+        "allowancePct": 1.0000000000000009,
+        "blocked": false,
+        "warning": false,
+        "requiresAcknowledgment": false,
+        "quoteMaxAgeMs": 60000
+      }
+    },
+    {
+      "scenario": "normal",
+      "amount": "0.1",
+      "risk": {
+        "tier": "small",
+        "inputUsd": 250,
+        "expectedUsd": 248.75,
+        "minimumUsd": 246.2625,
+        "expectedLossUsd": 1.25,
+        "minimumLossUsd": 3.7375000000000114,
+        "expectedLossPct": 0.5,
+        "minimumLossPct": 1.4950000000000045,
+        "allowancePct": 1.0000000000000009,
+        "blocked": false,
+        "warning": false,
+        "requiresAcknowledgment": false,
+        "quoteMaxAgeMs": 60000
+      }
+    }
+  ],
+  "realTransactions": false,
+  "fixtureOnly": true,
+  "validation": {
+    "focusedUnitTests": 196,
+    "frontendBuild": "pass",
+    "i18n": "pass",
+    "typescriptDiagnostics": 802,
+    "previousTypeScriptDiagnostics": 803,
+    "newTypeScriptFileCodePairs": 0,
+    "previewFrontendHashesMatch": true,
+    "providerReleaseHandoff": "Reviewed separately; default-provider cutover remains pending."
+  },
+  "reproduction": {
+    "fixture": "CORE_QA_PORT=5204 bun __tests__/fixtures/core-regression/server.ts",
+    "browser": "CORE_QA_PORT=5204 CORE_QA_EVIDENCE=<output-dir> PLAYWRIGHT_MODULE=<playwright-module> PLAYWRIGHT_TEST_MODULE=<playwright-test-module> CHROME_EXECUTABLE=<chrome-path> node __tests__/fixtures/core-regression/swap-review-smoke.mjs"
+  }
+}

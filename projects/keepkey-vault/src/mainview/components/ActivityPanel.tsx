@@ -326,7 +326,7 @@ export function TxDetailDialog({ detail, onClose, nativePrices }: { detail: TxDe
               )}
               {a.source === 'api' && <Box px="2" py="0.5" borderRadius="md" fontSize="xs" fontWeight="600" bg="rgba(130,71,229,0.15)" color="#8247E5">API</Box>}
             </HStack>
-            <Text as="button" fontSize="lg" color="kk.textMuted" _hover={{ color: 'kk.textPrimary' }} onClick={onClose}>{uiText("&times;")}</Text>
+            <Text as="button" fontSize="lg" color="kk.textMuted" _hover={{ color: 'kk.textPrimary' }} onClick={onClose}>{uiText("×")}</Text>
           </Flex>
 
           {/* Body */}
@@ -447,10 +447,10 @@ export function TxDetailDialog({ detail, onClose, nativePrices }: { detail: TxDe
         <Flex px="5" py="3" borderBottom="1px solid" borderColor="kk.border" align="center" justify="space-between">
           <HStack gap="2">
             <Box px="2" py="0.5" borderRadius="md" fontSize="xs" fontWeight="700" bg="rgba(233,196,106,0.15)" color="var(--gold)">{uiText("Swap")}</Box>
-            <Text fontSize="sm" fontWeight="600" color="kk.textPrimary">{s.fromSymbol}{" "}{uiText("&rarr;")}{" "}{s.toSymbol}</Text>
+            <Text fontSize="sm" fontWeight="600" color="kk.textPrimary">{s.fromSymbol}{" "}{uiText("→")}{" "}{s.toSymbol}</Text>
             <SwapStatusBadge status={displayStatus} />
           </HStack>
-          <Text as="button" fontSize="lg" color="kk.textMuted" _hover={{ color: 'kk.textPrimary' }} onClick={onClose}>{uiText("&times;")}</Text>
+          <Text as="button" fontSize="lg" color="kk.textMuted" _hover={{ color: 'kk.textPrimary' }} onClick={onClose}>{uiText("×")}</Text>
         </Flex>
 
         {/* Body */}
@@ -684,7 +684,10 @@ export function SwapRow({ swap, onSelect }: { swap: PendingSwap; onSelect: (s: P
   const displayStatus = swap.status === 'completed' && !settlementVerified ? 'output_confirming' : swap.status
   const [copied, setCopied] = useState(false)
   const handleCopy = (text: string) => { navigator.clipboard.writeText(text); setCopied(true); setTimeout(() => setCopied(false), 1500) }
-  const explorerUrl = getExplorerUrl(swap.fromSymbol, swap.txid)
+  // Tickers are not network identities (ETH and USDC exist on many chains).
+  // Persisted swaps carry the Vault source-chain ID; unknown/legacy identities
+  // stay unlinked rather than opening an unrelated chain's explorer.
+  const explorerUrl = swap.fromChainId && swap.txid ? getExplorerTxUrl(swap.fromChainId, swap.txid) : null
   const amountLine = swap.fromAmount
     ? `${swap.fromAmount} ${swap.fromSymbol}${swap.expectedOutput ? ` \u2192 ${swap.expectedOutput} ${swap.toSymbol}` : ''}`
     : null
@@ -983,7 +986,7 @@ export function ActivityPanel({ open, onClose, activities, pendingSwaps, onRefre
                 </svg>
               </Text>
             )}
-            <Text as="button" fontSize="sm" color="whiteAlpha.500" _hover={{ color: "white" }} onClick={onClose} fontWeight="600">{uiText("&times;")}</Text>
+            <Text as="button" fontSize="sm" color="whiteAlpha.500" _hover={{ color: "white" }} onClick={onClose} fontWeight="600">{uiText("×")}</Text>
           </HStack>
         </Flex>
 

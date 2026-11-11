@@ -519,15 +519,19 @@ describe('canonicalizeChainCaip2 / canonicalizeCaip', () => {
     expect(canonicalizeChainCaip2('tron:27lqcw')).toBe('tron:0x2b6653dc')
   })
 
-  test('Hyperliquid is intentionally NOT aliased', () => {
-    // The 2868 vs 999 mismatch between vault CHAINS and chainID.network
-    // is unresolved. Aliasing 2868→999 would let the picker show Hyperliquid
-    // as swappable, but vault's ChainDef sits at 2868 (with a non-mainnet
-    // chainId) so click would silently fail in the synthesizer. Until the
-    // upstream is reconciled, both encodings pass through and Hyperliquid
-    // shows in the picker as unsupported_chain with a clear reason.
+  test('HyperEVM mainnet resolves only at 999; unrelated 2868 is not aliased', () => {
     expect(canonicalizeChainCaip2('eip155:2868')).toBe('eip155:2868')
     expect(canonicalizeChainCaip2('eip155:999')).toBe('eip155:999')
+    expect(chainMetaForCaip2('eip155:999')).toMatchObject({
+      vaultChainId: 'hyperliquid', nativeCaip: 'eip155:999/slip44:60',
+    })
+    expect(chainMetaForCaip2('eip155:2868')).toBeNull()
+    expect(synthesizeSwapAsset(entry({
+      caip: 'eip155:999/slip44:60', symbol: 'HYPE', name: 'Hyperliquid',
+    }))).toMatchObject({ chainId: 'hyperliquid', caip: 'eip155:999/slip44:60' })
+    expect(synthesizeSwapAsset(entry({
+      caip: 'eip155:2868/slip44:60', symbol: 'HYPE', name: 'Hyperliquid',
+    }))).toBeNull()
   })
 
   test('canonical encodings pass through unchanged', () => {

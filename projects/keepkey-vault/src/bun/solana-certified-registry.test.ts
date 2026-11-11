@@ -169,7 +169,9 @@ describe('REST /solana/sign-transaction wiring', () => {
     // AdvancedMode comes only from the firmware predicate, judged on the
     // certified envelope when one routes (solana-certified-routing.test.ts).
     expect(preview).not.toContain('requiresAdvancedMode = true')
-    expect(rest.indexOf('applyRestSolanaSigningGates(')).toBeLessThan(rest.indexOf('callbacks.onSigningRequest(signingInfo)'))
+    const approvalStart = rest.indexOf('callbacks.onSigningRequest(signingInfo, req.signal)')
+    expect(approvalStart).toBeGreaterThan(0)
+    expect(rest.indexOf('applyRestSolanaSigningGates(')).toBeLessThan(approvalStart)
 
     const handlerStart = rest.indexOf("if (path === '/solana/sign-transaction' && method === 'POST') {")
     const handler = rest.slice(handlerStart, rest.indexOf('// ── SOLANA MESSAGE SIGNING', handlerStart))

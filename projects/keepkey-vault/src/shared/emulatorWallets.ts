@@ -23,3 +23,12 @@ export function emulatorWalletDetail(w: EmulatorWalletInfo, now = Date.now()): s
     hours === undefined ? '' : hours < 1 ? 'used this hour' : hours < 48 ? `used ${hours}h ago` : `used ${Math.floor(hours / 24)}d ago`,
   ].filter(Boolean).join(' · ')
 }
+
+/** How an emulator firmware build is named everywhere: version, then what it is.
+ *  "v7.17.0 · Monero signing (research)", "v7.16.0 · build 249bcff13435". */
+export function emulatorBuildTitle(build: { id?: string | null; version?: string; label?: string }): string {
+  const version = build.version ? `v${build.version}` : ''
+  if (!build.id) return [version, 'bundled emulator'].filter(Boolean).join(' · ')
+  const what = build.label || `build ${build.id.slice(0, 12)}`
+  return version ? `${version} · ${what}` : `Unverified ${what}`
+}

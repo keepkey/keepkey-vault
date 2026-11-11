@@ -1,0 +1,24 @@
+<!doctype html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Locked portfolio synthetic QA</title></head><body style="background:#0b0b0e;color:#f5f4ef"><div id="root"></div><script>
+window.__portfolioRenders=0;window.__deviceAction=0;window.__calls=[];
+window.__device={state:new URLSearchParams(location.search).get('initial')||'ready',activeTransport:'webusb',deviceId:'synthetic-a',initialized:true,bootloaderMode:false,updatePhase:'idle',needsInit:false,needsFirmwareUpdate:false,needsBootloaderUpdate:false,isOob:false,isEmulator:false,isHiddenWallet:false,firmwareVersion:'7.17.0',label:'Synthetic wallet',pinPromptOpen:false};
+window.__push=(id,payload)=>window.__electrobun.receiveMessageFromBun({type:'message',id,payload});
+window.__setDevice=(change)=>{window.__device={...window.__device,...change};window.__push('device-state',window.__device)};
+let unlockPacket=null;
+const reply=(packet,payload)=>window.__electrobun.receiveMessageFromBun({type:'response',id:packet.id,success:true,payload});
+window.__electrobunBunBridge={postMessage:async(raw)=>{
+const p=JSON.parse(raw);window.__calls.push({method:p.method,pinLength:p.method==='sendPin'?p.params.pin.length:undefined});
+let value;
+switch(p.method){
+case'getDeviceState':value=window.__device;break;
+case'getAppVersion':value={version:'synthetic',channel:'dev'};break;
+case'getAppSettings':value={restApiEnabled:true,walletConnectEnabled:false,emulatorEnabled:false,hiveEnabled:false,offlineMode:false,btcOnboardingShown:true,btcNodeEnabled:false,networksChosen:true,disabledNetworks:[],zcashPrivacyEnabled:false};break;
+case'getUpdateInfo':value=null;break;
+case'checkWatchOnlyCache':value={available:false};break;
+case'getCustomChains':case'getSessionActivity':case'getPendingSwaps':value=[];break;
+case'requestDeviceUnlock':unlockPacket=p;window.__setDevice({state:'needs_pin',pinPromptOpen:true});window.__push('pin-request',{type:'current'});return;
+case'sendPin':if(window.__wrongPin){window.__wrongPin=false;window.__setDevice({state:'needs_pin',pinPromptOpen:false});window.__push('pin-error',{code:7,message:'Incorrect PIN'});if(unlockPacket){window.__electrobun.receiveMessageFromBun({type:'response',id:unlockPacket.id,success:false,error:'Incorrect PIN'});unlockPacket=null;}}else{window.__setDevice({state:'ready',pinPromptOpen:false});if(unlockPacket){reply(unlockPacket);unlockPacket=null;}}break;
+case'cancelDeviceSigning':window.__setDevice({state:'needs_pin',pinPromptOpen:false});if(unlockPacket){window.__electrobun.receiveMessageFromBun({type:'response',id:unlockPacket.id,success:false,error:'Action cancelled'});unlockPacket=null;}break;
+}
+queueMicrotask(()=>reply(p,value));
+}};
+</script><script type="module" src="/entry.tsx"></script></body></html>

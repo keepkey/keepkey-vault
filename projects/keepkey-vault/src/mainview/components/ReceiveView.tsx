@@ -10,7 +10,7 @@ import { PathEditDialog } from "./PathEditDialog"
 import { DocsLink } from "./DocsLink"
 import { DOCS_LINKS, watch } from "../../shared/docs-links"
 import type { ChainDef } from "../../shared/chains"
-import { evmAssetReceiveUri } from '../../shared/vault-asset-account'
+import { receivePaymentUri } from '../../shared/receive-payment-uri'
 
 const MAX_NEW_ADDRESSES_PER_SESSION = 10
 
@@ -39,6 +39,10 @@ interface ReceiveViewProps {
 	watchOnly?: boolean
 	/** Watch-only with a connected KeepKey that holds this wallet: verify-on-device goes through this. */
 	onShowOnDevice?: () => Promise<void>
+	/** False for chains whose firmware fixes the account path (Monero): no path editor. */
+	pathEditable?: boolean
+	/** Account and network identifiers are available separately for simplified asset flows. */
+	showDetails?: boolean
 }
 
 /** Eyebrow + ink-0 mono block + copy chip on the right.
@@ -154,7 +158,7 @@ function PillToggle<T extends string | number>({
 export function ReceiveView({
 	chain, address, assetCaip, loading, error, currentPath, onDerive, scriptType, xpub,
 	isBtc, btcChangeIndex = 0, btcAddressIndex = 0, btcAddressWarning, onBtcChangeIndex, onBtcAddressIndex,
-	isTon, tonBounceable = false, onTonBounceableChange, watchOnly = false, onShowOnDevice,
+	isTon, tonBounceable = false, onTonBounceableChange, watchOnly = false, onShowOnDevice, pathEditable = true, showDetails = true,
 }: ReceiveViewProps) {
   const uiText = useUiTranslation()
 
@@ -268,15 +272,9 @@ export function ReceiveView({
 		)
 	}
 
-	// EIP-681 URI for EVM chains so mobile wallets (Rainbow, etc.) auto-detect send
-	let evmRequest: string | undefined
-	try { if (chain.chainFamily === 'evm') evmRequest = evmAssetReceiveUri(chain.networkId,assetCaip || chain.caip,address!) }
+	let qrContent: string
+	try { qrContent = receivePaymentUri(chain, address!, assetCaip || chain.caip) }
 	catch { return <Text role="alert" color="red.300">{uiText("The receive asset and account network do not match. Select the asset again.")}</Text> }
-	const qrContent = evmRequest
-		? evmRequest
-		: chain.chainFamily === 'solana'
-			? `solana:${address!}`
-			: address!
 	const qrSvg = generateQRSvg(qrContent, 4, 2)
 	const remaining = MAX_NEW_ADDRESSES_PER_SESSION - newAddressCount
 
@@ -299,7 +297,7 @@ export function ReceiveView({
 							w="100%"
 							h="100%"
 							dangerouslySetInnerHTML={{ __html: qrSvg }}
-							sx={{ '& svg': { width: '100%', height: '100%', display: 'block' } }}
+							css={{ '& svg': { width: '100%', height: '100%', display: 'block' } }}
 						/>
 					</Box>
 					{/* Verify-on-device requires the device — in watch-only only via onShowOnDevice (matching KeepKey). */}
@@ -455,7 +453,8 @@ export function ReceiveView({
 						<CopyableField label={t("extendedPublicKey")} value={xpub} />
 					)}
 
-					{/* Derivation path */}
+					{/* Derivation path and network identifiers */}
+					{showDetails && <Box data-receive-technical="">
 					<Box>
 						<Text fontSize="10px" color="var(--text-3)" textTransform="uppercase" letterSpacing="0.18em" fontWeight="500" mb="2">
 							{t("path")}
@@ -465,7 +464,7 @@ export function ReceiveView({
 								{pathToString(currentPath)}
 							</Text>
 							{/* Editing the path re-derives on the device — hidden in watch-only. */}
-							{!watchOnly && (
+							{!watchOnly && pathEditable && (
 							<Box
 								as="button"
 								className="electrobun-webkit-app-region-no-drag"
@@ -524,6 +523,7 @@ export function ReceiveView({
 							</Text>
 						)}
 					</Flex>
+					</Box>}
 				</Flex>
 			</Flex>
 

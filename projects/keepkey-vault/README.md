@@ -57,11 +57,16 @@ tar --use-compress-program=unzstd -xf stable-linux-x64-keepkey-vault.tar.zst
 
 ### Common runtime dependencies
 
-The `.deb` declares these as `Depends`. For `.AppImage` and `.tar.zst`, install them manually if missing:
+The `.deb` declares these as `Depends`, so apt installs them for you. The `.AppImage` bundles the tray stack (Ayatana AppIndicator + dbusmenu) but still needs GTK 3 and WebKitGTK 4.1 from the system — WebKitGTK is too large and too host-coupled (helper subprocesses, GStreamer, Mesa) to bundle, which is also why Tauri-style apps keep it a system dependency. If it is missing, the AppImage shows a dialog naming the exact package for your distro.
 
-- `libgtk-3-0`
-- `libwebkit2gtk-4.1-0` (or `libwebkit2gtk-4.0-37` on Ubuntu 22.04)
-- `libayatana-appindicator3-1` (or `libappindicator3-1`)
+For `.AppImage` and `.tar.zst`, install manually if missing:
+
+- Debian/Ubuntu: `sudo apt install libgtk-3-0 libwebkit2gtk-4.1-0` (plus `libayatana-appindicator3-1` for `.tar.zst`)
+- Fedora/RHEL: `sudo dnf install gtk3 webkit2gtk4.1` (plus `libayatana-appindicator-gtk3` for `.tar.zst`)
+- openSUSE: `sudo zypper install libwebkit2gtk-4_1-0` (plus `libayatana-appindicator3-1` for `.tar.zst`)
+- Arch: `sudo pacman -S webkit2gtk-4.1` (plus `libayatana-appindicator` for `.tar.zst`)
+
+WebKitGTK is preinstalled on GNOME-based systems; KDE and minimal installs (e.g. Fedora KDE) usually need it installed.
 
 ## Getting Started
 

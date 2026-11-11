@@ -59,14 +59,11 @@ export interface AvailabilityAssessment {
  *  single-source. Adding to this map both fixes matrix lookups AND the picker's
  *  duplicate-row dedupe in one edit.
  *
- *  Note on Hyperliquid: pioneer-discovery and vault's CHAINS table agree on
- *  `eip155:2868` but the actual Hyperliquid mainnet chainId per chainID.network
- *  is 999. Relay routes 999. We previously aliased 2868→999 here, but vault's
- *  ChainDef doesn't have a 999 entry, so any picker click would silently fail
- *  (synthesizeSwapAsset returned null). Until vault's CHAINS table is
- *  reconciled, Hyperliquid is intentionally absent from RELAY_CHAINS /
- *  SHAPESHIFT_CHAINS — picker shows it as unsupported_chain with a clear
- *  reason rather than letting it look swappable and break on click. */
+ *  HyperEVM mainnet is `eip155:999`. The bundled catalog's old 2868 HYPE
+ *  metadata is discarded, not aliased: 2868 is an unrelated EVM chain.
+ *  Correcting identity does not establish provider support; HyperEVM stays
+ *  outside the static support sets until coverage is independently verified.
+ *  Dynamic provider coverage may enable the correctly identified 999 asset. */
 export const CHAIN_CAIP2_ALIASES: Record<string, string> = {
   // alternate → canonical
   'tron:27Lqcw': 'tron:0x2b6653dc',
@@ -153,7 +150,7 @@ const RELAY_CHAINS = new Set<string>([
   'eip155:80094',      // Berachain
   'eip155:81457',      // Blast
   'eip155:534352',     // Scroll
-  // Hyperliquid (eip155:999) is omitted — see CHAIN_CAIP2_ALIASES note above.
+  // HyperEVM (eip155:999) awaits verified provider coverage, not an ID alias.
 ])
 
 /** 0x — single-chain EVM aggregator. */

@@ -10,6 +10,8 @@
  *   bun → webview:  executeJavascript → window.handlePacket(...)
  *   webview → bun:  fetch('http://localhost:EMU_BRIDGE_PORT/_emu/confirm')
  */
+import { randomUUID } from 'node:crypto'
+import { recoverEmulatorView } from './emulator-view-recovery'
 import { BrowserView, BrowserWindow, type RPCSchema } from 'electrobun/bun'
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs'
 import { join } from 'path'
@@ -131,6 +133,8 @@ let pendingCapture: {
  * crashes the WebContent process (EXC_BREAKPOINT in WebPageProxy launch).
  */
 let viewReady = false
+let activeViewLoad = ''
+let stopViewRecovery: (() => void) | null = null
 // Close events and bridge requests can arrive after a replacement window opens.
 // Each window owns its callbacks; an old one must never mutate the new display.
 let windowGeneration = 0
@@ -172,9 +176,16 @@ function startBridge(generation: number): number {
       }
 
       if (url.pathname === '/_emu/ready' && req.method === 'POST') {
-        viewReady = true
-        console.log(`${TAG} Bridge: webview signaled ready`)
-        return new Response('ok', { headers: { 'Access-Control-Allow-Origin': '*' } })
+        return req.json().then((body: any) => {
+          // An older HTML attempt may finish after a retry has begun loading.
+          // Never inject JS into the replacement until its own script is ready.
+          if (generation !== windowGeneration || body.loadId !== activeViewLoad) return new Response('stale load', { status: 410, headers: { 'Access-Control-Allow-Origin': '*' } })
+          viewReady = true
+          stopViewRecovery?.(); stopViewRecovery = null
+          console.log(`${TAG} Bridge: webview signaled ready`)
+          if (openPinPrompt) sendToWindow('pin-request', { type: openPinPrompt })
+          return new Response('ok', { headers: { 'Access-Control-Allow-Origin': '*' } })
+        })
       }
 
       if (url.pathname === '/_emu/seed-ack' && req.method === 'POST') {
@@ -240,6 +251,11 @@ const emuRpc = BrowserView.defineRPC<EmulatorWindowRPC>({
 // ── Window state ────────────────────────────────────────────────────────
 
 let emuWindow: BrowserWindow<typeof emuRpc> | null = null
+/** The PIN prompt the device has open, if any: a reopened window shows it again. */
+let openPinPrompt: PinRequestType | null = null
+/** The screen the device was on when the user closed the window while it ran.
+ *  An idle firmware (a PIN grid waiting) draws no new frame for a reopened window. */
+let retainedFrame: Uint8Array | null = null
 
 // ── Window lifecycle ────────────────────────────────────────────────────
 
@@ -256,13 +272,20 @@ export function openEmulatorWindow(): void {
   const saved = loadWindowState()
   console.log(`${TAG} Opening emulator window at (${saved.x}, ${saved.y}) ${saved.width}x${saved.height}`)
 
+  const nextHTML = () => { activeViewLoad = randomUUID(); return buildEmulatorHTML(port, activeViewLoad) }
   const window = new BrowserWindow({
     title: `KeepKey Emulator: ${getActiveFlashName()}`,
-    html: buildEmulatorHTML(port),
+    html: nextHTML(),
     rpc: emuRpc,
     frame: { width: saved.width, height: saved.height, x: saved.x, y: saved.y },
   })
   emuWindow = window
+  stopViewRecovery = recoverEmulatorView({
+    needsLoad: () => emuWindow === window && !viewReady,
+    reload: () => { console.warn(`${TAG} Retrying initial display load`); window.webview.loadHTML(nextHTML()) },
+    onError: () => console.warn(`${TAG} Initial display reload failed`),
+  })
+  if (retainedFrame) { playbackQueue.push(retainedFrame); retainedFrame = null }
 
   window.on('close', () => {
     if (emuWindow !== window) return
@@ -271,7 +294,10 @@ export function openEmulatorWindow(): void {
       if (frame) saveWindowState(frame)
     } catch {}
 
+    stopViewRecovery?.(); stopViewRecovery = null
     console.log(`${TAG} Emulator window closed`)
+    // The emulator keeps running: keep its screen for the EMU badge's reopen.
+    retainedFrame = latestFrame
     emuWindow = null
     viewReady = false
     windowGeneration++
@@ -294,6 +320,10 @@ export function openEmulatorWindow(): void {
 }
 
 export function closeEmulatorWindow(): void {
+  stopViewRecovery?.(); stopViewRecovery = null
+  // Called when the emulator stops or switches: its screen and prompt go with it.
+  retainedFrame = null
+  openPinPrompt = null
   if (!emuWindow) return
   const window = emuWindow
   // Retire this owner before close(): Electrobun can deliver the close event
@@ -321,6 +351,20 @@ export function closeEmulatorWindow(): void {
 
 export function isEmulatorWindowOpen(): boolean {
   return emuWindow !== null
+}
+
+/** The EMU badge: bring the running emulator's window to the front (restoring
+ *  it if minimized), or reopen it if the user closed it. */
+export function showEmulatorWindow(): 'focused' | 'reopened' {
+  if (emuWindow) {
+    try {
+      if (emuWindow.isMinimized()) emuWindow.unminimize()
+      emuWindow.activate()
+    } catch (e: any) { console.warn(`${TAG} activate failed:`, e?.message) }
+    return 'focused'
+  }
+  openEmulatorWindow()
+  return 'reopened'
 }
 
 // ── Send to webview (bun → webview via executeJavascript) ───────────────
@@ -354,7 +398,8 @@ function sendToWindow(messageName: string, payload: any): boolean {
 
 // ── Seed word display ───────────────────────────────────────────────────
 
-export async function displaySeedWords(mnemonic: string): Promise<void> {
+export async function displaySeedWords(mnemonic: string, flashName?: string): Promise<void> {
+  if (pendingSeedAck) throw new Error('An emulator recovery phrase is already displayed')
   const words = mnemonic.trim().split(/\s+/)
 
   if (!emuWindow) {
@@ -381,6 +426,7 @@ export async function displaySeedWords(mnemonic: string): Promise<void> {
 
   try { emuWindow!.focus() } catch {}
 
+  if (pendingSeedAck) throw new Error('An emulator recovery phrase is already displayed')
   return new Promise<void>((resolve, reject) => {
     pendingSeedAck = { resolve, reject }
 
@@ -388,7 +434,7 @@ export async function displaySeedWords(mnemonic: string): Promise<void> {
     // not ready, executeJavascript threw). Without this check, the pending
     // ack stays installed and the RPC hangs forever waiting for an "I've
     // recorded my words" click on a webview that never got the request.
-    const delivered = sendToWindow('seed-display', { words }) && sendToWindow('emu-state', { state: 'seed-display' })
+    const delivered = sendToWindow('seed-display', { words, flashName }) && sendToWindow('emu-state', { state: 'seed-display' })
     if (!delivered) {
       pendingSeedAck = null
       reject(new Error('Failed to deliver seed display to emulator webview'))
@@ -524,11 +570,13 @@ function sendDismiss(): void {
 
 /** Update instructions without exposing or copying the firmware's PIN grid. */
 export function displayPinPrompt(type: PinRequestType): void {
+  openPinPrompt = type
   sendToWindow('pin-request', { type })
 }
 
 /** The device stopped asking (PIN sent or refused): drop the stale instructions. */
 export function clearPinPrompt(): void {
+  openPinPrompt = null
   sendToWindow('confirm-dismiss', {})
 }
 
@@ -717,7 +765,7 @@ export async function emuInteractiveConfirm(
 
 // ── Inline HTML ─────────────────────────────────────────────────────────
 
-function buildEmulatorHTML(bridgePort: number): string {
+function buildEmulatorHTML(bridgePort: number, loadId: string): string {
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -887,7 +935,7 @@ function buildEmulatorHTML(bridgePort: number): string {
 
 <script>
 (function() {
-  var BRIDGE = 'http://localhost:${bridgePort}';
+  var BRIDGE = 'http://127.0.0.1:${bridgePort}';
   var oled = document.getElementById('oled');
   var buttons = document.getElementById('buttons');
   var confirmBtn = document.getElementById('confirmBtn');
@@ -1015,6 +1063,7 @@ function buildEmulatorHTML(bridgePort: number): string {
 
   function onSeedDisplay(data) {
     var words = data.words || [];
+    document.querySelector('.seed-title').textContent = data.flashName ? 'Recovery phrase — ' + data.flashName : 'Recovery Phrase';
     seedGrid.innerHTML = '';
     words.forEach(function(word, i) {
       var el = document.createElement('div');
@@ -1081,7 +1130,7 @@ function buildEmulatorHTML(bridgePort: number): string {
   // Tell bun the WebView is ready to receive executeJavascript packets.
   // Without this, display-update polls fire before window.handlePacket is
   // defined and crash the WKWebView process (EXC_BREAKPOINT in WebKit).
-  postBridge('/_emu/ready', {});
+  postBridge('/_emu/ready', { loadId: '${loadId}' });
 })();
 </script>
 </body>

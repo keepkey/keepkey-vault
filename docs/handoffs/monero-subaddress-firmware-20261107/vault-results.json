@@ -1,0 +1,42 @@
+{
+  "candidateEmulatorPublicFixture": true,
+  "physicalDeviceAccessed": false,
+  "protocol": [
+    65002,
+    65003
+  ],
+  "outputBindingsVerified": true,
+  "coreSignatureAndBulletproofVerified": true,
+  "tamperedSignatureRejected": true,
+  "buttons": 9,
+  "seconds": 0.7331939169998805,
+  "broadcast": false,
+  "date": "2026-11-07",
+  "affectedTests": {
+    "passed": 193,
+    "failed": 0,
+    "files": 15
+  },
+  "i18nSafetyTests": 6,
+  "nativeSecureStorageDisposableProbePassed": true,
+  "typecheck": {
+    "baselineDiagnostics": 803,
+    "currentDiagnostics": 803,
+    "newNormalizedDiagnostics": 0
+  },
+  "physicalBalanceVerifiedXmr": "0.08465305",
+  "physicalSigningTested": false,
+  "realPaymentBroadcast": false,
+  "packagedDevelopmentCommit": "719e8c712",
+  "packagedCandidateToolsReady": true,
+  "physicalSendTabNoEmulatorBlocker": true,
+  "actualEncryptedMonitoringStored": true,
+  "freshProcessActualViewKeyReopened": true,
+  "liveRemoteReconnectUsingSavedAccess": true,
+  "currentRemoteNode": "https://node.sethforprivacy.com",
+  "currentWalletState": "scanning",
+  "verifiedBalanceObservedBeforeRebuild": true,
+  "liveKeyImageCachePopulated": false,
+  "passwordManagerLiveBoundaryChecks": 8,
+  "ssdNodeResumed": true
+}

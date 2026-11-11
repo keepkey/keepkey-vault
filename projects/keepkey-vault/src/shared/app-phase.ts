@@ -4,6 +4,30 @@
  */
 export type AppPhase = "splash" | "claimed" | "setup" | "ready" | "leave-bootloader"
 
+/** RAM-only continuity of a wallet already opened on this connection. Device id
+ * alone is insufficient: disconnects, setup and passphrase changes end it. */
+export interface LivePortfolioSession {
+  deviceId: string
+  transport: string
+  hidden: boolean
+}
+
+export function retainLivePortfolioSession(previous: LivePortfolioSession | null, device: {
+  state: string
+  deviceId?: string
+  activeTransport: string | null
+  isHiddenWallet?: boolean
+  initialized: boolean
+  wipePending?: string
+}): LivePortfolioSession | null {
+  if (!device.initialized || !device.deviceId || !device.activeTransport || device.wipePending) return null
+  const current = { deviceId: device.deviceId, transport: device.activeTransport, hidden: !!device.isHiddenWallet }
+  if (device.state === 'ready') return current
+  if (device.state === 'needs_pin' && previous?.deviceId === current.deviceId
+    && previous.transport === current.transport && previous.hidden === current.hidden) return previous
+  return null
+}
+
 export function resolveAppPhase(p: {
   state: string
   /** Wizard must stay mounted: setup in progress, or the device entered OOB this session. */
@@ -13,6 +37,8 @@ export function resolveAppPhase(p: {
   wizardComplete: boolean
   /** In bootloader mode with nothing to install: the user only has to replug. */
   bootloaderIdle?: boolean
+  /** The same live wallet reached ready before this PIN lock. Never persisted. */
+  lockedPortfolioAvailable?: boolean
 }): AppPhase {
   // oobLock takes priority — during OOB, transient claim errors are expected
   // (device reboots, brief LIBUSB_ERROR_ACCESS). Don't unmount the wizard.
@@ -26,6 +52,7 @@ export function resolveAppPhase(p: {
   if (p.state === "bootloader" && p.bootloaderIdle) return "leave-bootloader"
   if (!p.wizardComplete && ["bootloader", "needs_firmware", "needs_init"].includes(p.state)) return "setup"
   if (p.state === "ready") return "ready"
+  if (p.state === "needs_pin" && p.lockedPortfolioAvailable) return "ready"
   return "splash"
 }
 

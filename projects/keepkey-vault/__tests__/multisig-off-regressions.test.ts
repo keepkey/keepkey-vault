@@ -23,3 +23,22 @@ describe('Multisig off never breaks ordinary sends or contacts', () => {
     expect(handler).not.toMatch(/^\s*await listRegisteredVaults\(\)\s*$/m)
   })
 })
+
+// 1.6.10 on hardware: toggling Multisig on did not show the Ethereum Multisig pill.
+describe('the Multisig toggle takes effect without a remount', () => {
+  const asset = read('src/mainview/components/AssetPage.tsx')
+  const app = read('src/mainview/App.tsx')
+  test('Safe chains are refetched when the flag turns on (the gate answers [] while off)', () => {
+    const effect = asset.slice(asset.indexOf("rpcRequest<number[]>('safeChains'") - 200, asset.indexOf("rpcRequest<number[]>('safeChains'") + 200)
+    expect(effect).toContain("!multisigEnabled) return")
+    expect(effect).toContain('[chain.chainFamily, multisigEnabled]')
+  })
+  test('AssetPage reads the flag from one place', () => {
+    expect(asset).not.toContain('setBtcMultisigEnabled')
+  })
+  test('turning it off leaves the open Multisig panel, tab and vault view', () => {
+    expect(asset).toContain('if (view === "multisig" && !multisigEnabled) setView("receive")')
+    expect(app).toContain('if (activeTab === "multisig") setActiveTab("vault")')
+    expect(app).toMatch(/if \(multisigEnabled\) return[\s\S]{0,120}setViewingVault\(null\)/)
+  })
+})

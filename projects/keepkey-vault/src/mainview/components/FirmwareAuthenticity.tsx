@@ -21,7 +21,7 @@ import { useUiTranslation } from "../i18n/ui"
  */
 import type { ComponentProps, ReactNode } from "react"
 import { Box, Button, Flex, HStack, SimpleGrid, Text, VStack } from "@chakra-ui/react"
-import { FaCheck, FaChevronRight, FaKey, FaShieldAlt } from "react-icons/fa"
+import { FaCheck, FaChevronRight, FaDownload, FaKey, FaShieldAlt } from "react-icons/fa"
 import { rpcRequest } from "../lib/rpc"
 import { authenticityVerdict } from "../../shared/firmware-authenticity"
 
@@ -100,6 +100,7 @@ export function FirmwareAuthenticity({
 	installFirmware,
 	installBootloader,
 	onContinue,
+	onInstallOfficialFirmware,
 	continueDisabled,
 	holdsWallet,
 }: {
@@ -113,6 +114,7 @@ export function FirmwareAuthenticity({
 	installFirmware?: { version: string; signed: boolean }
 	installBootloader?: { version: string; signed: boolean }
 	onContinue: () => void
+	onInstallOfficialFirmware?: () => void
 	continueDisabled?: boolean
 	/** A returning owner's KeepKey: this screen must not read as new-device setup. */
 	holdsWallet?: boolean
@@ -121,6 +123,7 @@ export function FirmwareAuthenticity({
 
 	const verdict = authenticityVerdict(firmwareHash, firmwareVerified, bootloaderVerified)
 	const passed = verdict === "verified" || verdict === "genuine"
+	const showOfficialInstall = verdict === "unrecognized" && !!onInstallOfficialFirmware
 
 	const headline = passed
 		? "Genuine KeepKey"
@@ -257,13 +260,28 @@ export function FirmwareAuthenticity({
 				</VStack>
 			</Box>
 
-			<Button w="100%" maxW="360px" size="md" bg={GOLD} color="black" fontWeight="700"
-				_hover={{ opacity: 0.9 }} _active={{ transform: "scale(0.98)" }} disabled={continueDisabled} onClick={onContinue}>
-				<Flex gap={2} align="center" justify="center">
-					<Text>{verdict === "unrecognized" ? uiText("Continue with this build") : verdict === "unreported" ? uiText("Continue to update") : passed && !holdsWallet ? uiText("Set up my KeepKey") : uiText("Continue")}</Text>
-					<FaChevronRight size={10} />
-				</Flex>
-			</Button>
+			<Flex w="100%" gap={3} justify="center" align="stretch" direction={{ base: "column", md: "row" }}>
+				{showOfficialInstall && (
+					<Button px={4} size="md" bg={GOLD} color="black" fontWeight="700"
+						_hover={{ opacity: 0.9 }} _active={{ transform: "scale(0.98)" }}
+						disabled={continueDisabled} onClick={onInstallOfficialFirmware}>
+						<FaDownload size={14} aria-hidden="true" />
+						{uiText("Install official firmware")}
+					</Button>
+				)}
+				<Button w={{ base: "100%", md: showOfficialInstall ? "auto" : "100%" }}
+					maxW={showOfficialInstall ? { md: "360px" } : "360px"} px={4} size="md"
+					bg={showOfficialInstall ? "transparent" : GOLD}
+					color={showOfficialInstall ? GOLD : "black"}
+					borderWidth={showOfficialInstall ? "1px" : "0"}
+					borderColor={GOLD} fontWeight="700"
+					_hover={{ opacity: 0.9 }} _active={{ transform: "scale(0.98)" }} disabled={continueDisabled} onClick={onContinue}>
+					<Flex gap={2} align="center" justify="center">
+						<Text>{verdict === "unrecognized" ? uiText("Continue with this build") : verdict === "unreported" ? uiText("Continue to update") : passed && !holdsWallet ? uiText("Set up my KeepKey") : uiText("Continue")}</Text>
+						<FaChevronRight size={10} />
+					</Flex>
+				</Button>
+			</Flex>
 		</VStack>
 	)
 }

@@ -1,0 +1,28 @@
+{
+  "date": "2026-11-09",
+  "change": "Isolate asynchronous swap updates from newer retained receipts",
+  "checks": {
+    "retained-dialog-closes-and-reopens-state-mirror": true,
+    "closing-swap-does-not-steal-higher-overlay-focus": true,
+    "pending-execution-close-retains-backend-receipt-and-event": true,
+    "retained-pending-execution-reopens-submitted-receipt": true,
+    "old-execution-success-keeps-newly-resumed-receipt": true,
+    "old-execution-failure-keeps-newly-resumed-receipt": true,
+    "old-execution-blind-signing-refusal-keeps-newly-resumed-receipt": true,
+    "old-execution-device-policy-refusal-keeps-newly-resumed-receipt": true,
+    "idempotent-input-edit-does-not-strand-quote-generation": true
+  },
+  "browserErrors": [],
+  "failures": [],
+  "previousComponentFailingChecks": [
+    "old-execution-success-keeps-newly-resumed-receipt",
+    "old-execution-failure-keeps-newly-resumed-receipt",
+    "old-execution-blind-signing-refusal-keeps-newly-resumed-receipt",
+    "old-execution-device-policy-refusal-keeps-newly-resumed-receipt",
+    "browser-runtime"
+  ],
+  "ciUnitTargetPassed": true,
+  "realSignatures": 0,
+  "realBroadcasts": 0,
+  "optionalFeaturesEnabled": false
+}

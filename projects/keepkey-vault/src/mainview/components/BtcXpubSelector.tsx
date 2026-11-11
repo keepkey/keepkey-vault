@@ -1,6 +1,7 @@
 import { useUiTranslation } from "../i18n/ui"
 import { useEffect, useRef, useState } from "react"
 import { Box, Flex, Text, Button } from "@chakra-ui/react"
+import { actionToneProps } from "./ui/ActionButton"
 import { FaPlus, FaCheck, FaChevronDown, FaTimes, FaExclamationTriangle } from "react-icons/fa"
 import { useTranslation } from "react-i18next"
 import { BTC_SCRIPT_TYPES, btcScriptTypeConfig } from "../../shared/chains"
@@ -260,7 +261,7 @@ function BitcoinScriptTypeDialog({ onClose }: { onClose: () => void }) {
 
         <Text mt="4" fontSize="10px" color="kk.textMuted" lineHeight="1.5">{uiText("Input sizes are typical spending estimates, not quoted transaction fees. Your final fee also depends on the number and type of inputs and outputs, transaction structure, and the current fee rate.")}</Text>
         <Flex justify="flex-end" mt="5">
-          <Button size="sm" bg="kk.gold" color="black" _hover={{ bg: 'kk.goldHover' }} onClick={onClose}>{uiText("Got it")}</Button>
+          <Button {...actionToneProps("primary")} size="sm" onClick={onClose}>{uiText("Got it")}</Button>
         </Flex>
       </Box>
     </Box>

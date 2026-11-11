@@ -1,0 +1,12 @@
+{
+  "lockButtonHostsBothTools": true,
+  "narrowVaultFits": true,
+  "escapeRestoresLockFocus": true,
+  "noPasswordTopBarTab": true,
+  "liveEnableWithoutReload": true,
+  "bankGenerateAssign": true,
+  "guidedRotationRequiresBackupAndVerification": true,
+  "liveDisableWithoutReload": true,
+  "pageErrors": [],
+  "screenshot": "./password-mvp-ui.png"
+}

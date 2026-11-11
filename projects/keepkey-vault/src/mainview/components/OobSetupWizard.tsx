@@ -46,6 +46,12 @@ function forgetCoinChoice() {
 
 // ── Design tokens ───────────────────────────────────────────────────────────
 const HIGHLIGHT = 'green.500'
+// Step indicator: green means done, so the step in progress uses the gold
+// action accent. Otherwise a finished step and the current one look the same
+// (two green indicators during a firmware update).
+const STEP_DONE = 'green.500'
+const STEP_CURRENT = 'var(--gold)'
+const STEP_TODO = 'gray.600'
 
 // ── Animations ──────────────────────────────────────────────────────────────
 const ANIMATIONS_CSS = `
@@ -182,6 +188,9 @@ export function OobSetupWizard({ onComplete: onCompleteProp, onWalletCreated, on
   // Where "Change" on the bootloader/firmware page came from; the coin-choice
   // page returns there instead of going on to the tutorial.
   const [coinReturnStep, setCoinReturnStep] = useState<WizardStep | null>(null)
+  // An explicit reinstall must remain available even when a custom build's
+  // version is the same as, or newer than, the official release.
+  const [officialFirmwareRequested, setOfficialFirmwareRequested] = useState(false)
   // Wipe/lock acknowledgement for the official install (see installWipeReason).
   const [installWipeAcknowledged, setInstallWipeAcknowledged] = useState(false)
   const [setupType, setSetupType] = useState<'create' | 'recover' | null>(null)
@@ -351,7 +360,7 @@ export function OobSetupWizard({ onComplete: onCompleteProp, onWalletCreated, on
   // A current multi-chain device the user switched to Bitcoin-only ("Go
   // Bitcoin-only" on the wallet page) still needs the install.
   const switchingToBitcoinOnly = coinMode === 'bitcoin-only' && deviceStatus.installedBitcoinOnly === false
-  const needsFirmware = deviceStatus.needsFirmwareUpdate || switchingToBitcoinOnly
+  const needsFirmware = officialFirmwareRequested || deviceStatus.needsFirmwareUpdate || switchingToBitcoinOnly
   // A wiped multi-chain KeepKey never sees the setup choice (its firmware is
   // current), so the wallet page offers it. No wallet, nothing lost.
   const offerBitcoinOnly = BITCOIN_ONLY_ONBOARDING && !!deviceStatus.latestFirmwareBitcoinOnly
@@ -1286,18 +1295,18 @@ export function OobSetupWizard({ onComplete: onCompleteProp, onWalletCreated, on
                     w={7}
                     h={7}
                     borderRadius="full"
-                    bg={completed ? 'green.500' : current ? HIGHLIGHT : 'gray.600'}
+                    bg={completed ? STEP_DONE : current ? STEP_CURRENT : STEP_TODO}
                     display="flex"
                     alignItems="center"
                     justifyContent="center"
                     transition="all 0.3s"
                     flexShrink={0}
-                    boxShadow={current ? '0 0 0 3px rgba(72, 187, 120, 0.25)' : 'none'}
+                    boxShadow={current ? '0 0 0 3px rgba(233, 196, 106, 0.25)' : 'none'}
                   >
                     {completed ? (
                       <FaCheckCircle color="white" size={12} />
                     ) : (
-                      <Text color="white" fontSize="xs" fontWeight="bold">
+                      <Text color={current ? 'var(--ink-0)' : 'white'} fontSize="xs" fontWeight="bold">
                         {vs.number}
                       </Text>
                     )}
@@ -1306,7 +1315,7 @@ export function OobSetupWizard({ onComplete: onCompleteProp, onWalletCreated, on
                     ml={1.5}
                     fontSize="xs"
                     fontWeight={current ? '700' : '500'}
-                    color={completed ? 'green.500' : current ? HIGHLIGHT : 'gray.400'}
+                    color={completed ? STEP_DONE : current ? STEP_CURRENT : 'gray.400'}
                     whiteSpace="nowrap"
                     overflow="hidden"
                     textOverflow="ellipsis"
@@ -1317,7 +1326,7 @@ export function OobSetupWizard({ onComplete: onCompleteProp, onWalletCreated, on
                     <Box
                       w={6}
                       h="2px"
-                      bg={completed ? 'green.500' : current ? HIGHLIGHT : 'gray.600'}
+                      bg={completed ? STEP_DONE : STEP_TODO}
                       ml={1.5}
                       flexShrink={0}
                     />
@@ -1355,6 +1364,19 @@ export function OobSetupWizard({ onComplete: onCompleteProp, onWalletCreated, on
                 continueDisabled={!hasFeatures}
                 holdsWallet={everSeenInitializedRef.current || lastAppModeInitializedRef.current === true}
                 onContinue={() => setStep(stepAfterAuthenticity({ showPicker: showCoinPicker, hasFeatures }))}
+                onInstallOfficialFirmware={() => {
+                  if (!hasFeatures) return
+                  setOfficialFirmwareRequested(true)
+                  setBackupConfirmed(false)
+                  setInstallWipeAcknowledged(false)
+                  const target = needsBootloader ? 'bootloader' : 'firmware'
+                  if (showCoinPicker) {
+                    setCoinReturnStep(target)
+                    setStep('coin-choice')
+                  } else {
+                    setStep(target)
+                  }
+                }}
               />
             )}
 
@@ -1503,7 +1525,7 @@ export function OobSetupWizard({ onComplete: onCompleteProp, onWalletCreated, on
                                 : t('bootloader.outdated')}
                             </Text>
                           </VStack>
-                          <Text color="kk.textMuted">{uiText("&rarr;")}</Text>
+                          <Text color="kk.textMuted">{uiText("→")}</Text>
                           <VStack gap={0.5} align="end">
                             <Text fontSize="2xs" color="kk.textSecondary" textTransform="uppercase">{t('bootloader.latest')}</Text>
                             <Text fontSize="sm" color="var(--teal)" fontWeight="bold">
@@ -1583,7 +1605,7 @@ export function OobSetupWizard({ onComplete: onCompleteProp, onWalletCreated, on
                                 : t('bootloader.outdated')}
                             </Text>
                           </VStack>
-                          <Text color="kk.textMuted">{uiText("&rarr;")}</Text>
+                          <Text color="kk.textMuted">{uiText("→")}</Text>
                           <VStack gap={0.5} align="end">
                             <Text fontSize="2xs" color="kk.textSecondary" textTransform="uppercase">{t('bootloader.latest')}</Text>
                             <Text fontSize="sm" color="var(--teal)" fontWeight="bold">
@@ -1735,7 +1757,7 @@ export function OobSetupWizard({ onComplete: onCompleteProp, onWalletCreated, on
                               v{deviceStatus.firmwareVersion || '?'}
                             </Text>
                           </VStack>
-                          <Text color="kk.textMuted">{uiText("&rarr;")}</Text>
+                          <Text color="kk.textMuted">{uiText("→")}</Text>
                           <VStack gap={0.5} align="end">
                             <Text fontSize="2xs" color="kk.textSecondary" textTransform="uppercase">{t('bootloader.latest')}</Text>
                             <Text fontSize="sm" color="var(--teal)" fontWeight="bold">
@@ -1835,7 +1857,7 @@ export function OobSetupWizard({ onComplete: onCompleteProp, onWalletCreated, on
                             </Box>
                           )}
                         </VStack>
-                        <Text color="kk.textMuted" fontSize="lg">{uiText("&rarr;")}</Text>
+                        <Text color="kk.textMuted" fontSize="lg">{uiText("→")}</Text>
                         <VStack gap={0.5} align="end">
                           <Text fontSize="xs" color="kk.textSecondary" textTransform="uppercase" fontWeight="600">{t('bootloader.latest')}</Text>
                           <Text fontSize="md" color="var(--teal)" fontWeight="bold">
@@ -1855,10 +1877,15 @@ export function OobSetupWizard({ onComplete: onCompleteProp, onWalletCreated, on
                 {/* In bootloader — show firmware install options (user must click) */}
                 {updateState === 'idle' && inBootloader && !isRebooting && customFwPhase === 'idle' && (
                   <>
-                    <FaCheckCircle color="var(--teal)" size={24} />
-                    <Text fontSize="sm" fontWeight="bold" color="var(--teal)" textAlign="center">
-                      {t('firmware.bootloaderReadyForFirmware')}
-                    </Text>
+                    {/* Device status, not a second success check: the step
+                        indicator above is the one "done/current" signal. */}
+                    <Flex role="status" align="center" gap={2} alignSelf="center" maxW="100%"
+                      px={3} py={1.5} borderRadius="full" bg="var(--ink-2)" border="1px solid var(--line-2)">
+                      <Box w="7px" h="7px" borderRadius="full" bg="var(--teal)" flexShrink={0} />
+                      <Text fontSize="xs" color="kk.textSecondary">
+                        {t('firmware.bootloaderReadyForFirmware')}
+                      </Text>
+                    </Flex>
 
                     {/* Upgrade preview — show new features coming with this firmware */}
                     {installVersion && (
@@ -1903,7 +1930,7 @@ export function OobSetupWizard({ onComplete: onCompleteProp, onWalletCreated, on
                         if (!coinMode) return
                         // The reason the user acknowledged: the engine refuses
                         // if its own plan has a different one by now.
-                        startFirmwareUpdate({ variant: coinMode, acknowledgeWipe: installWipeAcknowledged ? installWipeReason : undefined })
+                        startFirmwareUpdate({ variant: coinMode, acknowledgeWipe: installWipeAcknowledged ? installWipeReason : undefined, requireOfficialSignatures: officialFirmwareRequested })
                       }}
                       disabled={!coinMode || !installVersion || (installWipeReason ? !installWipeAcknowledged : backupBlocked)}
                     >

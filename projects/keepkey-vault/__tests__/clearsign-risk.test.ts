@@ -308,15 +308,15 @@ describe('assessSigningRisk — EVM', () => {
     expect(r.level).toBe('high')
   })
 
-  const reviewed = (riskLevel: string, raterPinned = false) => ({ clearSignReport: { rating: {
-    riskLevel, riskReasons: ['a single key controls upgrades, deposits, minting (delay 10d)'], findings: [], raterPinned,
+  const reviewed = (riskLevel: string) => ({ clearSignReport: { rating: {
+    riskLevel, riskReasons: ['a single key controls upgrades, deposits, minting (delay 10d)'], findings: [], source: 'hosted-assessment',
   } } } as unknown as Partial<SigningRequestInfo>)
 
-  test('a verified contract rating raises the level (MDM CapitalManager.deposit: high)', () => {
+  test('a hosted contract audit assessment raises the level (MDM CapitalManager.deposit: high)', () => {
     const deposit = '0x47e7ef24' + word(0n) + word(100n)
     const r = tx(deposit, { to: '0x6b6c05ee7f49d00e63e74a9426d74ef9614f6a0f', chainId: 8453, deviceClearSigns: true, ...reviewed('high') })
     expect(r.level).toBe('high')
-    expect(r.reasons[0].text).toBe('An auditor rates this contract high risk: a single key controls upgrades, deposits, minting (delay 10d). The rater is not yet pinned in this Vault.')
+    expect(r.reasons[0].text).toBe('Publisher-hosted assessment rates this contract high risk: a single key controls upgrades, deposits, minting (delay 10d). Submitter attribution is supplied by the publisher.')
   })
 
   test('three-level verdict: what the KeepKey shows is green, an unknown call is red', () => {
@@ -326,8 +326,17 @@ describe('assessSigningRisk — EVM', () => {
     expect(tx('0xdeadbeef' + word(1n), { to: '0x1111111111111111111111111111111111111111', chainId: 1 }).tier).toBe('red')
   })
 
+  test('hosted assessments use publisher wording without auditor pinning claims', () => {
+    const deposit = '0x47e7ef24' + word(0n) + word(100n)
+    const hosted = { clearSignReport: { rating: { riskLevel: 'high', source: 'hosted-assessment',
+      riskReasons: ['Single-key control'], findings: [] } } } as unknown as Partial<SigningRequestInfo>
+    const r = tx(deposit, { to: '0x6b6c05ee7f49d00e63e74a9426d74ef9614f6a0f', chainId: 8453,
+      deviceClearSigns: true, ...hosted })
+    expect(r.reasons[0].text).toBe('Publisher-hosted assessment rates this contract high risk: Single-key control. Submitter attribution is supplied by the publisher.')
+  })
+
   test('a low-risk rating never lowers a critical payload', () => {
-    const r = tx('0x095ea7b3' + SPENDER + word((1n << 256n) - 1n), reviewed('low', true))
+    const r = tx('0x095ea7b3' + SPENDER + word((1n << 256n) - 1n), reviewed('low'))
     expect(r.level).toBe('critical')
   })
 })
@@ -694,12 +703,15 @@ describe('message verdicts', () => {
   test('a WalletConnect personal_sign SIWE login gets the same green verdict as REST', async () => {
     const siwe = `app.uniswap.org wants you to sign in with your Ethereum account:\n${USER}\n\nSign in to Uniswap\n\nURI: https://app.uniswap.org\nVersion: 1\nChain ID: 1\nNonce: abcdef12345\nIssued At: 2026-10-16T00:00:00.000Z`
     let seen: SigningRequestInfo | undefined
+    const dismissed: string[] = []
     const wc = new WalletConnectManager({
       getEvmAddressInfo: () => ({ address: USER }),
       recordClearSignObservation: () => undefined,
       requestSigningApproval: async (info: SigningRequestInfo) => { seen = info; return false },
+      dismissSigning: (id: string) => { dismissed.push(id) },
     } as any)
     await expect((wc as any).signMessage(hex(siwe), [], 'Uniswap', 1)).rejects.toThrow('User rejected signing')
+    expect(dismissed).toEqual([seen!.id])
     // index.ts attachSigningPolicySnapshot adds the firmware version before the overlay assesses it.
     const r = assessSigningRisk({ ...seen!, firmwareVersion: '7.16.0' })!
     expect(r.tier).toBe('green')

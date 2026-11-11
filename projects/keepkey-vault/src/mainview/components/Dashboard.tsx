@@ -6,17 +6,20 @@ import { useTranslation } from "react-i18next"
 import { CHAINS, customChainToChainDef, isChainSupported, type ChainDef } from "../../shared/chains"
 import { isBitcoinOnlyVariant } from "../../shared/flags"
 import { balanceDisplayState } from "../../shared/balance-display-state"
+import { isLocalDeviceAccessError } from "../../shared/device-access-error"
 import { versionCompare } from "../../shared/firmware-versions"
 import { formatBalance, hasNonZeroBalance } from "../lib/formatting"
 import { AnimatedUsd } from "./AnimatedUsd"
 import { getAssetIcon, registerCustomAsset } from "../../shared/assetLookup"
+import { moneroChainVisible } from "../../shared/monero-asset"
+import { MoneroChainRow } from "./MoneroAssetSections"
 import { AssetPage } from "./AssetPage"
 import { ActivityPage } from "./ActivityPage"
 import { DonutChart, SelectedSlice, type DonutChartItem } from "./DonutChart"
 import { AddChainDialog } from "./AddChainDialog"
 import { ReportDialog } from "./ReportDialog"
 import { AuditDialog } from "./AuditDialog"
-import { Bip85VaultDialog } from "./Bip85VaultDialog"
+import { VaultToolsButton } from "./VaultToolsButton"
 import { PassphraseIntroDialog } from "./PassphraseIntroDialog"
 import { DogeEasterEgg } from "./DogeEasterEgg"
 import { HeatmapView, buildAllChainsTiles, buildChainDetailTiles } from "./HeatmapView"
@@ -676,6 +679,8 @@ function ChainDetailOrbital({
 interface PioneerError {
 	message: string
 	url: string
+	status?: number
+	statusCode?: number
 }
 
 // Soft fault: balances were returned but some chains are degraded (fresh fetch
@@ -905,8 +910,8 @@ function PersonalDashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSetti
 	const [showAddChain, setShowAddChain] = useState(false)
 	const [showReports, setShowReports] = useState(false)
 	const [showAudit, setShowAudit] = useState(false)
-	const [showBip85, setShowBip85] = useState(false)
 	const [zcashEnabled, setZcashEnabled] = useState(false)
+	const [moneroEnabled, setMoneroEnabled] = useState(false)
 	const [hiveEnabled, setHiveEnabled] = useState(false)
 	// Networks turned off in the network picker: not loaded, not shown, not totalled.
 	const [disabledNetworks, setDisabledNetworks] = useState<string[]>([])
@@ -942,6 +947,11 @@ function PersonalDashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSetti
 	// Used by full refreshes to skip chains that received a fresher per-chain update while
 	// the bulk request was in-flight (prevents old getBalances response from overwriting newer data).
 	const chainLastUpdatedRef = useRef(new Map<string, number>())
+	// Cache reads may return after a newer balance read, push, or wallet purge.
+	// Use revisions rather than wall time so same-millisecond updates still win.
+	const balanceSnapshotRevisionRef = useRef(0)
+	const chainSnapshotRevisionRef = useRef(new Map<string, number>())
+	const cacheScopeRevisionRef = useRef(0)
 
 	// Capture a destination baseline as soon as a swap is broadcast. This must
 	// happen before any post-transaction portfolio refresh can replace the
@@ -1007,7 +1017,17 @@ function PersonalDashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSetti
 		setPioneerError(null)
 	}, [])
 
+	// A previous device-admission failure may have been shown as an outage.
+	// Remove only that local error; a real provider failure must stay visible.
+	const clearLocalPioneerError = useCallback(() => {
+		setPioneerError(current => isLocalDeviceAccessError(current) ? null : current)
+	}, [])
+
 	const stagePioneerError = useCallback((error: PioneerError) => {
+		if (isLocalDeviceAccessError(error)) {
+			clearLocalPioneerError()
+			return
+		}
 		if (!hasUsableBalanceSnapshot) {
 			pioneerErrorFirstSeenRef.current = Date.now()
 			if (pioneerErrorTimerRef.current) {
@@ -1029,7 +1049,7 @@ function PersonalDashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSetti
 				setPioneerError(error)
 			}, PIONEER_ERROR_GRACE_MS - elapsed)
 		}
-	}, [hasUsableBalanceSnapshot])
+	}, [hasUsableBalanceSnapshot, clearLocalPioneerError])
 
 	useEffect(() => {
 		return () => {
@@ -1089,6 +1109,7 @@ function PersonalDashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSetti
 		rpcRequest<AppSettings>('getAppSettings', undefined, 5000)
 			.then(s => {
 				setZcashEnabled(s.zcashPrivacyEnabled)
+				setMoneroEnabled(s.moneroEnabled)
 				setHiveEnabled(s.hiveEnabled)
 				setDisabledNetworks(s.disabledNetworks)
 				setPassphraseIntroSeen(s.passphraseIntroShown)
@@ -1111,6 +1132,10 @@ function PersonalDashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSetti
 	useEffect(() => {
 		return onRpcMessage("pioneer-error", (payload) => {
 			const p = payload as PioneerError & Partial<PortfolioFault> & { severity?: 'error' | 'warning' | 'none' }
+			if (isLocalDeviceAccessError(p)) {
+				clearLocalPioneerError()
+				return
+			}
 			if (p.severity === 'none') {
 				setPortfolioFault(null)
 				return
@@ -1132,9 +1157,9 @@ function PersonalDashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSetti
 			// payload (e.g. a {code, message} JSON-RPC error) would crash the tree.
 			const message = typeof p.message === 'string' ? p.message : JSON.stringify(p.message)
 			if (typeof p.message !== 'string') console.error('[Dashboard] pioneer-error carried non-string message:', p.message)
-			stagePioneerError({ message, url: p.url })
+			stagePioneerError({ message, url: p.url, status: p.status, statusCode: p.statusCode })
 		})
-	}, [stagePioneerError])
+	}, [stagePioneerError, clearLocalPioneerError])
 
 	// Load custom chains on mount and register their explorer links
 	useEffect(() => {
@@ -1159,6 +1184,8 @@ function PersonalDashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSetti
 	// When forceRefresh (e.g. new seed after OOB setup), skip stale cache entirely.
 	useEffect(() => {
 		let cancelled = false
+		const cacheScope = cacheScopeRevisionRef.current
+		const requestedSnapshotRevision = balanceSnapshotRevisionRef.current
 
 		async function loadCached() {
 			let needsAutoRefresh = false
@@ -1171,6 +1198,7 @@ function PersonalDashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSetti
 						for (const b of result) map.set(b.chainId, b)
 						setBalances(map)
 						// Cached rows: show the oldest row's age, never present them as current.
+						clearLocalPioneerError()
 						const ages = result.map(b => b.updatedAt || 0).filter(Boolean)
 						setCacheUpdatedAt(ages.length ? Math.min(...ages) : null)
 					}
@@ -1183,11 +1211,19 @@ function PersonalDashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSetti
 			if (!forceRefresh) {
 				try {
 					const cached = await rpcRequest<{ balances: ChainBalance[]; updatedAt: number; staleReasons?: string[] } | null>('getCachedBalances', undefined, 3000)
-					if (!cancelled && cached && cached.balances.length > 0) {
-						const map = new Map<string, ChainBalance>()
-						for (const b of cached.balances) map.set(b.chainId, b)
-						setBalances(map)
+					if (!cancelled && cacheScope === cacheScopeRevisionRef.current && cached && cached.balances.length > 0) {
+						setBalances(current => {
+							const map = new Map(current)
+							for (const b of cached.balances) {
+								if ((chainSnapshotRevisionRef.current.get(b.chainId) ?? 0) > requestedSnapshotRevision) continue
+								const merged = mergeTrustedBalanceSnapshot(map.get(b.chainId), b, false)
+								if (merged) map.set(b.chainId, merged)
+							}
+							balancesRef.current = map
+							return map
+						})
 						setCacheUpdatedAt(cached.updatedAt)
+						clearLocalPioneerError()
 						console.log(`[Dashboard] Cache hit: ${cached.balances.length} chains, $${cached.balances.reduce((s, b) => s + (b.balanceUsd || 0), 0).toFixed(2)}, age: ${formatTimeAgo(cached.updatedAt, t)}`)
 						if (cached.staleReasons && cached.staleReasons.length > 0) {
 							console.log(`[Dashboard] Cache incomplete (${cached.staleReasons.join(', ')}) — will auto-refresh`)
@@ -1304,7 +1340,7 @@ function PersonalDashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSetti
 			} catch (e: any) {
 				const message = e?.message || 'Unable to refresh balances'
 				console.warn('[Dashboard] refreshWatchOnlyBalances failed:', message)
-				stagePioneerError({ message, url: 'the configured balance server' })
+				stagePioneerError({ message, url: 'the configured balance server', status: e?.status, statusCode: e?.statusCode })
 			} finally {
 				loadingBalancesRef.current = false
 				setLoadingBalances(false)
@@ -1351,20 +1387,32 @@ function PersonalDashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSetti
 							b,
 							protectedChains.has(b.chainId),
 						)
-						if (merged) map.set(b.chainId, merged)
+						if (merged) {
+							map.set(b.chainId, merged)
+							if (b.syncState !== 'stale' && b.syncState !== 'degraded') {
+								chainSnapshotRevisionRef.current.set(b.chainId, ++balanceSnapshotRevisionRef.current)
+							}
+						}
 					}
 					balancesRef.current = map
 					return map
 				})
-				setCacheUpdatedAt(Date.now())
-				setHasEverRefreshed(true)
-				clearPioneerError()
+				if (result.some(b => b.syncState !== 'stale' && b.syncState !== 'degraded')) {
+					setCacheUpdatedAt(Date.now())
+					setHasEverRefreshed(true)
+					clearPioneerError()
+				} else {
+					// Device contention can return the scoped RAM snapshot. It is
+					// useful data, but neither a new balance check nor proof that a
+					// previous provider failure recovered.
+					clearLocalPioneerError()
+				}
 			}
 		} catch (e: any) {
 			if (gen === refreshGenRef.current) {
 				const message = e?.message || 'Unable to refresh balances'
 				console.warn('[Dashboard] getBalances failed:', message)
-				stagePioneerError({ message, url: 'the configured balance server' })
+				stagePioneerError({ message, url: 'the configured balance server', status: e?.status, statusCode: e?.statusCode })
 			}
 		}
 
@@ -1372,7 +1420,7 @@ function PersonalDashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSetti
 			loadingBalancesRef.current = false
 			setLoadingBalances(false)
 		}
-	}, [watchOnly, watchOnlyDeviceId, clearPioneerError, stagePioneerError, commitBalanceReconciliations, reloadVaultPortfolios])
+	}, [watchOnly, watchOnlyDeviceId, clearPioneerError, clearLocalPioneerError, stagePioneerError, commitBalanceReconciliations, reloadVaultPortfolios])
 
 	// Phase 2 trigger — window focus: catch long idle periods. If the last live
 	// fetch is older than 5 min, force-refresh on return to the window.
@@ -1570,6 +1618,7 @@ function PersonalDashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSetti
 		return onRpcMessage("balance-updated", (updated: ChainBalance) => {
 			const receivedAt = Date.now()
 			chainLastUpdatedRef.current.set(updated.chainId, receivedAt)
+			chainSnapshotRevisionRef.current.set(updated.chainId, ++balanceSnapshotRevisionRef.current)
 			const reconciled = observeBalanceRefresh(balanceReconciliationsRef.current, [updated])
 			const protectedChains = protectedBalanceChainIds(reconciled)
 			commitBalanceReconciliations(reconciled)
@@ -1592,9 +1641,10 @@ function PersonalDashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSetti
 				balancesRef.current = next
 				return next
 			})
-			setCacheUpdatedAt(receivedAt)
+			if (updated.syncState !== 'stale' && updated.syncState !== 'degraded') setCacheUpdatedAt(receivedAt)
+			clearLocalPioneerError()
 		})
-	}, [commitBalanceReconciliations])
+	}, [commitBalanceReconciliations, clearLocalPioneerError])
 
 	// Seed-staleness purge: the backend detected the wallet data belonged to a
 	// DIFFERENT seed than the device (passphrase toggle, hidden↔standard
@@ -1604,6 +1654,8 @@ function PersonalDashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSetti
 	useEffect(() => {
 		return onRpcMessage("wallet-data-purged", ({ reason }: { reason: string }) => {
 			console.warn(`[Dashboard] Wallet data purged (${reason}) — clearing displayed balances`)
+			cacheScopeRevisionRef.current++
+			chainSnapshotRevisionRef.current.clear()
 			chainLastUpdatedRef.current.clear()
 			commitBalanceReconciliations([])
 			externalDestinationTxidsRef.current.clear()
@@ -1854,6 +1906,12 @@ function PersonalDashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSetti
 		return !c.hidden
 	}), [allChains, btcOnly, firmwareVersion, zcashEnabled, hiveEnabled, disabledNetworks])
 
+	// XMR: a row in the chain list (setting + firmware 7.17+), opening the standard asset page.
+	// Its balance comes from the local watch wallet and has no fiat price, so it stays out of
+	// visibleChains, whose fiat totals, charts and sync states all come from Pioneer.
+	const moneroChain = useMemo(() => moneroChainVisible({ settingEnabled: moneroEnabled, firmwareVersion, watchOnly, bitcoinOnly: btcOnly })
+		&& !disabledNetworks.includes('monero') ? CHAINS.find(c => c.id === 'monero') : undefined, [moneroEnabled, firmwareVersion, watchOnly, btcOnly, disabledNetworks])
+
 	// Built-in networks the user turned off: offered back in the Add network dialog.
 	const turnedOffChains = useMemo(() => btcOnly ? [] : allChains.filter(c =>
 		disabledNetworks.includes(c.id) && !c.hidden && isChainSupported(c, firmwareVersion)
@@ -1935,7 +1993,7 @@ function PersonalDashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSetti
 		if (btc) {
 			return (
 				<AssetPageErrorBoundary onBack={() => {}} chainName={btc.coin}>
-					<AssetPage chain={btc} balance={balances.get('bitcoin')} onBack={() => {}} hideBack firmwareVersion={firmwareVersion} onViewActivity={handleViewActivity} watchOnly={watchOnly} watchOnlyDeviceId={watchOnlyDeviceId} isHiddenWallet={isHiddenWallet} />
+					<AssetPage chain={btc} balance={balances.get('bitcoin')} balanceLoading={loadingBalances || !initialLoaded} onBack={() => {}} hideBack firmwareVersion={firmwareVersion} onViewActivity={handleViewActivity} watchOnly={watchOnly} watchOnlyDeviceId={watchOnlyDeviceId} isHiddenWallet={isHiddenWallet} />
 				</AssetPageErrorBoundary>
 			)
 		}
@@ -1947,7 +2005,7 @@ function PersonalDashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSetti
 			<AssetPageErrorBoundary onBack={() => setSelectedChain(null)} chainName={selectedChain.coin}>
 				{/* key: remount on chain switch — AssetPage's mount-only effects (address
 				    derive, initial view) must not leak chain A state into chain B */}
-				<AssetPage key={selectedChain.id} chain={selectedChain} balance={bal} onBack={() => { setSelectedChain(null); setSelectedChainAction(undefined); setSelectedChainInitialToken(undefined) }} firmwareVersion={firmwareVersion} initialAction={selectedChainAction} initialToken={selectedChainInitialToken} onViewActivity={handleViewActivity} watchOnly={watchOnly} watchOnlyDeviceId={watchOnlyDeviceId} isHiddenWallet={isHiddenWallet} />
+				<AssetPage key={selectedChain.id} chain={selectedChain} balance={bal} balanceLoading={loadingBalances || !initialLoaded} onBack={() => { setSelectedChain(null); setSelectedChainAction(undefined); setSelectedChainInitialToken(undefined) }} firmwareVersion={firmwareVersion} initialAction={selectedChainAction} initialToken={selectedChainInitialToken} onViewActivity={handleViewActivity} watchOnly={watchOnly} watchOnlyDeviceId={watchOnlyDeviceId} isHiddenWallet={isHiddenWallet} />
 			</AssetPageErrorBoundary>
 		)
 	}
@@ -2035,19 +2093,23 @@ function PersonalDashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSetti
 								) : anyChainPending ? (
 									<Spinner size="xs" color="kk.gold" mt="1" />
 								) : (
-									<Text
-										fontSize="14px"
-										color="var(--text-1)"
-										fontWeight="500"
-										lineHeight="1.3"
-										letterSpacing="-0.01em"
-										title={anyChainUnknown ? "At least this much — one or more chains could not be reached, so their balances are missing from the total" : undefined}
-									>
-										{privateModeEnabled
-											? "••••••"
-											: `${anyChainUnknown ? '≥ ' : ''}$${totalUsd.toLocaleString(getNumberLocale(), { maximumFractionDigits: 2 })}`}
-									</Text>
+									<Flex align="center" gap="1.5">
+										<Text
+											fontSize="14px"
+											color="var(--text-1)"
+											fontWeight="500"
+											lineHeight="1.3"
+											letterSpacing="-0.01em"
+											title={anyChainUnknown ? "At least this much — one or more chains could not be reached, so their balances are missing from the total" : undefined}
+										>
+											{privateModeEnabled
+												? "••••••"
+												: `${anyChainUnknown ? '≥ ' : ''}$${totalUsd.toLocaleString(getNumberLocale(), { maximumFractionDigits: 2 })}`}
+										</Text>
+										{loadingBalances && <Spinner size="xs" color="kk.gold" aria-label={uiText("Refreshing balance")} title={uiText("Refreshing balance")} />}
+									</Flex>
 								)}
+								{moneroChain && <Text data-monero-total-note="" fontSize="10px" color="var(--text-3)" lineHeight="1.2">{uiText("XMR not included")}</Text>}
 							</Box>
 						</Flex>
 					</Box>
@@ -2066,6 +2128,9 @@ function PersonalDashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSetti
 						})
 						const pending = displayState === 'pending'
 						const unknown = displayState === 'unknown'
+						// Cached figures remain visible while the bulk request checks
+						// them again. Confidence and refresh activity are separate.
+						const refreshing = loadingBalances && displayState === 'known'
 						const clean = cleanBalanceUsd.get(chain.id)
 						const balNum = parseFloat(bal?.balance || '0')
 						const usdNum = clean?.usd || 0
@@ -2139,10 +2204,13 @@ function PersonalDashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSetti
 								_hover={{ bg: "kk.cardBg", borderColor: `${chain.color}50` }}
 								cursor="pointer"
 								transition="all 0.15s"
-								opacity={hasBalance || pending || unknown ? 1 : 0.55}
+								opacity={hasBalance || pending || unknown || refreshing ? 1 : 0.55}
 							>
 								<Flex align="center" gap="3">
-									<Image src={getAssetIcon(chain.caip)} alt={chain.symbol} w="32px" h="32px" borderRadius="full" flexShrink={0} bg={chain.color} />
+									{/* Neutral backdrop, like the orbit and centre icons. Several logos cut their mark out as
+									    transparency (Optimism's "OP", Hive) or draw it in the brand colour (BNB), so a
+									    chain.color backdrop filled the mark in and left a plain coloured disc. */}
+									<Image src={getAssetIcon(chain.caip)} alt={chain.symbol} w="32px" h="32px" borderRadius="full" flexShrink={0} bg="var(--ink-2)" boxShadow="0 0 0 1px var(--line)" />
 									<Box flex="1" minW="0">
 										<Flex align="baseline" justify="space-between" gap="2">
 											<Text fontSize="14px" fontWeight="600" color="var(--text-0)" lineHeight="1.2" truncate>
@@ -2170,9 +2238,12 @@ function PersonalDashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSetti
 													{`— ${chain.symbol}`}
 												</Text>
 											) : (
-												<Text fontSize="12px" color="var(--text-2)" lineHeight="1.3" truncate>
-													{`${formatBalance(String(balNum + shielded.amount + shielded.pending))} ${chain.symbol}`}
-												</Text>
+												<Flex align="center" gap="1.5" minW={0}>
+													<Text fontSize="12px" color="var(--text-2)" lineHeight="1.3" truncate>
+														{`${formatBalance(String(balNum + shielded.amount + shielded.pending))} ${chain.symbol}`}
+													</Text>
+													{refreshing && <Spinner size="xs" color="kk.gold" flexShrink={0} aria-label={uiText("Refreshing balance")} title={uiText("Refreshing balance")} />}
+												</Flex>
 											)}
 											{lowGas && (
 												<Flex
@@ -2260,6 +2331,8 @@ function PersonalDashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSetti
 							</Fragment>
 						)
 					})}
+
+					{moneroChain && <MoneroChainRow chain={moneroChain} iconSrc={getAssetIcon(moneroChain.caip)} privateMode={privateModeEnabled} onOpen={() => openChainPage(moneroChain)} />}
 
 					{/* Add network — turns a network back on that the network picker
 					    turned off, or adds a custom EVM network (by chainId / RPC, or
@@ -3183,11 +3256,6 @@ function PersonalDashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSetti
 												<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#60a5fa" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><polyline points="17 1 21 5 17 9" /><path d="M3 11V9a4 4 0 0 1 4-4h14" /><polyline points="7 23 3 19 7 15" /><path d="M21 13v2a4 4 0 0 1-4 4H3" /></svg>
 											) },
 										] : []),
-										...(!watchOnly && dchain.id === 'zcash' && zcashEnabled ? [{
-											id: 'privacy' as const, label: 'Privacy', color: '#a78bfa', bg: 'rgba(167,139,250,0.12)', icon: (
-												<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#a78bfa" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" /></svg>
-											),
-										}] : []),
 									]).map((p) => (
 										<Box
 											key={p.id}
@@ -3414,9 +3482,6 @@ function PersonalDashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSetti
 				/>
 			)}
 
-			{showBip85 && (
-				<Bip85VaultDialog onClose={() => setShowBip85(false)} />
-			)}
 
 			{/* One-time passphrase/hidden-wallet intro — shown the first time a user
 			    reaches the dashboard, then persisted so it never reappears. Skipped
@@ -3430,43 +3495,11 @@ function PersonalDashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSetti
 				/>
 			)}
 
-			{/* BIP-85 Seed Vault — firmware >= 7.16.0. Stacked above the Activity
-			    pill (ActivityTracker, fixed bottom-right) so the two never overlap. */}
-			{!watchOnly && firmwareVersion && versionCompare(firmwareVersion, '7.16.0') >= 0 && (
-				<Box
-					as="button"
-					position="fixed"
-					bottom="76px"
-					right="28px"
-					w="52px"
-					h="52px"
-					borderRadius="full"
-					bg="rgba(233,196,106,0.22)"
-					border="1.5px solid"
-					borderColor="rgba(233,196,106,0.7)"
-					boxShadow="0 0 16px rgba(233,196,106,0.25)"
-					display="flex"
-					alignItems="center"
-					justifyContent="center"
-					cursor="pointer"
-					transition="all 0.2s"
-					_hover={{
-						bg: "rgba(233,196,106,0.32)",
-						borderColor: "kk.gold",
-						transform: "scale(1.08)",
-						boxShadow: "0 0 24px rgba(233,196,106,0.4)",
-					}}
-					_active={{ transform: "scale(0.95)" }}
-					onClick={() => setShowBip85(true)}
-					zIndex={10}
-					title={uiText("BIP-85 Seed Vault")}
-				>
-					<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--gold)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-						<rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
-						<path d="M7 11V7a5 5 0 0 1 10 0v4" />
-					</svg>
-				</Box>
-			)}
+			{/* One lock button for password and seed tools. */}
+			{!watchOnly && firmwareVersion && <VaultToolsButton
+				seedVaultAvailable={versionCompare(firmwareVersion, '7.16.0') >= 0}
+				passwordsAvailable={!btcOnly} />}
+
 			</Flex>
 		</Flex>
 	)

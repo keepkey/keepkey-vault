@@ -73,11 +73,13 @@ export function NetworkPickerDialog({ chains, initialDisabled, onDone, onCancel 
 					</Box>
 				</Box>
 
-				<Flex justify="flex-end" gap="2" mt="4">
+				{/* Explicit px: the app's unlayered `* { padding: 0 }` reset beats
+				    Chakra's layered button recipe, so recipe padding never applies. */}
+				<Flex justify="flex-end" gap="2" mt="5">
 					{onCancel
-						? <Button size="xs" variant="ghost" color="kk.textSecondary" onClick={onCancel}>{uiText("Cancel")}</Button>
-						: <Button size="xs" variant="ghost" color="kk.textSecondary" onClick={() => onDone([])}>{uiText("Keep all on")}</Button>}
-					<Button size="xs" bg="kk.gold" color="black" fontWeight="700" _hover={{ opacity: 0.9 }}
+						? <Button size="sm" px="3" variant="ghost" color="kk.textSecondary" onClick={onCancel}>{uiText("Cancel")}</Button>
+						: <Button size="sm" px="3" variant="ghost" color="kk.textSecondary" onClick={() => onDone([])}>{uiText("Keep all on")}</Button>}
+					<Button size="sm" px="5" bg="kk.gold" color="black" fontWeight="700" _hover={{ opacity: 0.9 }}
 						onClick={() => onDone([...off])}>
 						{onCancel ? uiText("Save") : uiText("Continue")}
 					</Button>

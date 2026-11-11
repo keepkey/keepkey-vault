@@ -12,5 +12,5 @@ test('the emulator PIN instructions clear once the device stops asking', () => {
   expect(win.slice(win.indexOf('export function clearPinPrompt'), win.indexOf('export function clearPinPrompt') + 120)).toContain("sendToWindow('confirm-dismiss', {})")
   // the engine closes the prompt when the PIN is sent and when the device refuses it
   const engine = readFileSync(join(import.meta.dir, '../src/bun/engine-controller.ts'), 'utf8')
-  expect(engine.slice(engine.indexOf('async sendPin('), engine.indexOf('async sendPin(') + 300)).toContain('this.setPinPromptOpen(false)')
+  expect(engine.slice(engine.indexOf('async sendPin('), engine.indexOf('async sendPin(') + 500)).toContain('this.setPinPromptOpen(false)')
 })

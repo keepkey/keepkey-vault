@@ -11,13 +11,16 @@ import { BITCOIN_QR_SCAN_EVENT } from "./BitcoinQrImport"
  * can tell at a glance which wallets have signing live and which are cached.
  */
 import { useState, useEffect, useCallback } from "react"
-import { Box, Flex, Text, Image, Button } from "@chakra-ui/react"
+import { Box, Flex, Text, Image } from "@chakra-ui/react"
 import kkIcon from "../assets/icon.png"
 import { rpcRequest, onRpcMessage } from "../lib/rpc"
+import { retryOnTimeout } from "../lib/retry-on-timeout"
 import type { RegisteredDevice, EmulatorStatus, EmulatorWalletInfo } from "../../shared/types"
 import { emulatorWalletDetail } from "../../shared/emulatorWallets"
-import { EmulatorWalletChooser } from "./EmulatorWalletChooser"
+import { EmulatorWalletChooser, loadEmulatorFirmware, type EmulatorFirmwareChoices } from "./EmulatorWalletChooser"
+import { useEmulatorNames } from "./EmulatorIdentity"
 import { WalletTile as DeviceCard, WalletTileCta as CardCta } from "./WalletTile"
+import { ActionButton } from "./ui/ActionButton"
 import { useSavedVaults, VaultTile, VaultLinkChips } from "./VaultCards"
 import type { VaultIdentity } from "../../shared/vault-identity"
 import { useVaultPortfolios } from "../hooks/useVaultPortfolios"
@@ -54,7 +57,10 @@ export function DeviceGrid({ onViewPortfolio, onOpenVault, onReady, emulatorEnab
 	const [loading, setLoading] = useState<string | null>(null)
 	const [confirmForget, setConfirmForget] = useState<string | null>(null)
 	const [pickingSeed, setPickingSeed] = useState(false)
+	const [emuFirmware, setEmuFirmware] = useState<EmulatorFirmwareChoices | null>(null)
+	const { buildTitle, walletTitle } = useEmulatorNames()
 	const [error, setError] = useState<string | null>(null)
+	const [slow, setSlow] = useState(false)
 	const [showValues, setShowValues] = useState(false)
 	const [revealed, setRevealed] = useState(hasRevealedOnce)
 
@@ -67,7 +73,8 @@ export function DeviceGrid({ onViewPortfolio, onOpenVault, onReady, emulatorEnab
 	const refresh = useCallback(async () => {
 		try {
 			const [devs, status, wallets] = await Promise.all([
-				rpcRequest<RegisteredDevice[]>("getRegisteredDevices", undefined, 5000),
+				// Busy at startup (heavy first load) is not an error: wait longer before saying so.
+				retryOnTimeout(ms => rpcRequest<RegisteredDevice[]>("getRegisteredDevices", undefined, ms), undefined, () => setSlow(true)),
 				emulatorEnabled
 					? rpcRequest<EmulatorStatus>("emulatorStatus", undefined, 5000).catch(() => null)
 					: Promise.resolve(null),
@@ -81,7 +88,7 @@ export function DeviceGrid({ onViewPortfolio, onOpenVault, onReady, emulatorEnab
 			setError(null)
 		} catch (e: any) {
 			setError(e?.message || String(e))
-		}
+		} finally { setSlow(false) }
 	}, [emulatorEnabled])
 
 	useEffect(() => {
@@ -117,14 +124,14 @@ export function DeviceGrid({ onViewPortfolio, onOpenVault, onReady, emulatorEnab
 		setConfirmForget(null)
 	}, [refresh])
 
-	const handleStartEmu = useCallback(async (name: string) => {
+	const handleStartEmu = useCallback(async (name: string, buildId?: string | null) => {
 		setLoading(`emu:${name}`)
 		setError(null)
 		try {
 			// Never dead-click: the backend throws on failure, but even if a path
 			// resolves with a non-running status (or nothing), surface it rather
 			// than silently reverting to the Start card.
-			const status = await rpcRequest<EmulatorStatus>("emulatorSwitchWallet", { name }, 20000)
+			const status = await rpcRequest<EmulatorStatus>("emulatorSwitchWallet", { name, buildId }, 30000)
 			if (!status || status.state !== "running") {
 				throw new Error(status?.error || "Emulator did not start (no error reported)")
 			}
@@ -221,11 +228,15 @@ export function DeviceGrid({ onViewPortfolio, onOpenVault, onReady, emulatorEnab
 				</Text>
 			</Flex>
 
+			{slow && !error && (
+				<Text mb="3" fontSize="11px" color="var(--text-2)" role="status">{uiText("KeepKey Desktop is busy starting up — still loading your wallets…")}</Text>
+			)}
 			{/* Error banner */}
 			{(error || vaultError) && (
-				<Box mb="3" px="3" py="2" bg="rgba(224,140,123,0.12)" border="1px solid" borderColor="rgba(224,140,123,0.32)" borderRadius="lg">
-					<Text fontSize="11px" color="var(--rose)" wordBreak="break-all">{error || vaultError}</Text>
-				</Box>
+				<Flex mb="3" px="3" py="2" gap="3" align="center" bg="rgba(224,140,123,0.12)" border="1px solid" borderColor="rgba(224,140,123,0.32)" borderRadius="lg">
+					<Text flex="1" fontSize="11px" color="var(--rose)" wordBreak="break-all">{error || vaultError}</Text>
+					{error && <ActionButton tone="rose" size="xs" onClick={() => { void refresh() }}>{uiText("Retry")}</ActionButton>}
+				</Flex>
 			)}
 
 			{/* Empty-state hero — when there's nothing registered yet */}
@@ -280,7 +291,7 @@ export function DeviceGrid({ onViewPortfolio, onOpenVault, onReady, emulatorEnab
 										<SmallCircleBtn color="var(--text-3)" label="N" onClick={() => setConfirmForget(null)} />
 									</Flex>
 								) : (
-									<SmallCircleBtn color="var(--text-3)" label={uiText("&times;")} onClick={() => setConfirmForget(d.deviceId)} />
+									<SmallCircleBtn color="var(--text-3)" label={uiText("×")} onClick={() => setConfirmForget(d.deviceId)} />
 								)}
 							</Flex>
 
@@ -329,9 +340,12 @@ export function DeviceGrid({ onViewPortfolio, onOpenVault, onReady, emulatorEnab
 								<Flex align="center" gap="2.5" mb="2.5">
 									<EmulatorIcon active={!!running} />
 									<Box flex="1" minW="0">
-										<Text fontSize="14px" fontWeight="500" fontFamily={running ? "mono" : undefined} color={running ? "var(--teal)" : "var(--text-0)"} truncate lineHeight="1.2">
-											{running ? running.name : uiText("KeepKey Emulator")}
+										<Text fontSize="14px" fontWeight="500" color={running ? "var(--teal)" : "var(--text-0)"} truncate lineHeight="1.2">
+											{running ? walletTitle(running) : uiText("KeepKey Emulator")}
 										</Text>
+										{running && emuStatus?.build && (
+											<Text fontSize="10px" color="var(--text-2)" lineHeight="1.35" truncate>{buildTitle(emuStatus.build)}</Text>
+										)}
 										<Text fontSize="10px" color="var(--text-3)" lineHeight="1.35">
 											{running ? emulatorWalletDetail(running) : `${emuWallets.length} saved seed${emuWallets.length === 1 ? "" : "s"}`}
 										</Text>
@@ -345,7 +359,7 @@ export function DeviceGrid({ onViewPortfolio, onOpenVault, onReady, emulatorEnab
 										<CardCta tone="rose" onClick={handleStopEmu} loading={loading === "emu:__stop"}>{uiText("Stop emulator")}</CardCta>
 									</Box>
 								)}
-								<CardCta tone="teal" onClick={() => { setError(null); setPickingSeed(true) }}>
+								<CardCta tone="teal" onClick={async () => { setError(null); setEmuFirmware(await loadEmulatorFirmware()); setPickingSeed(true) }}>
 									{running ? uiText("Switch seed…") : uiText("Start emulator…")}
 								</CardCta>
 							</DeviceCard>
@@ -357,10 +371,11 @@ export function DeviceGrid({ onViewPortfolio, onOpenVault, onReady, emulatorEnab
 			{pickingSeed && (
 				<EmulatorWalletChooser
 					wallets={emuWallets}
+					firmware={emuFirmware}
 					busy={!!loading}
 					error={error}
 					onClose={() => setPickingSeed(false)}
-					onPick={async (name) => { if (await handleStartEmu(name)) setPickingSeed(false) }}
+					onPick={async (name, buildId) => { if (await handleStartEmu(name, buildId)) setPickingSeed(false) }}
 					onDelete={handleDeleteEmu}
 				/>
 			)}
@@ -372,23 +387,20 @@ export function DeviceGrid({ onViewPortfolio, onOpenVault, onReady, emulatorEnab
                 onOpenVault(vault)
             }} />}
 
-            {/* Watch-only import for a machine that never saw the KeepKey */}
-			<Flex justify="center" mt="4" gap="2" wrap="wrap">
-				{multisigEnabled && <Button size="sm" variant="outline" color="var(--gold)" onClick={() => setAddingVault(true)}>{uiText("＋ Add vault")}</Button>}
-				<Box
-					as="button"
-					onClick={() => window.dispatchEvent(new Event(WATCH_ONLY_IMPORT_EVENT))}
-					px="3" py="1.5" borderRadius="10px" fontSize="11px" fontWeight="600" letterSpacing="0.04em"
-					color="var(--gold)" bg="rgba(233,196,106,0.10)" border="1px solid rgba(233,196,106,0.30)"
-					cursor="pointer" _hover={{ bg: "rgba(233,196,106,0.20)" }}
-				>{uiText("Import watch-only (Electrum file or xpub)")}</Box>
-				<Button size="sm" variant="outline" color="var(--gold)" onClick={() => window.dispatchEvent(new Event(BITCOIN_QR_SCAN_EVENT))}>{uiText("Scan Bitcoin QR")}</Button>
+            {/* Watch-only import for a machine that never saw the KeepKey.
+                One shared button style and size for every action in this row. */}
+			<Flex justify="center" align="center" mt="5" gap="2" wrap="wrap">
+				{multisigEnabled && <ActionButton tone="gold" size="sm" onClick={() => setAddingVault(true)}>{uiText("＋ Add vault")}</ActionButton>}
+				<ActionButton tone="gold" size="sm" onClick={() => window.dispatchEvent(new Event(WATCH_ONLY_IMPORT_EVENT))}>
+					{uiText("Import watch-only (Electrum file or xpub)")}
+				</ActionButton>
+				<ActionButton tone="gold" size="sm" onClick={() => window.dispatchEvent(new Event(BITCOIN_QR_SCAN_EVENT))}>{uiText("Scan Bitcoin QR")}</ActionButton>
 			</Flex>
 
 			{/* Grand total + eyeball toggle */}
 			{(grandTotal > 0 || vaultTotalPartial || portfolios.length > 0) && (
 				<Flex justify="center" align="center" gap="2" mt="5">
-					<Text fontSize="11px" color="var(--text-3)" letterSpacing="0.04em">{uiText("Wallets and included vaults:")}<Text as="span" fontWeight="600" color={showValues ? "var(--text-1)" : "var(--text-3)"} fontFamily="mono">
+					<Text fontSize="11px" color="var(--text-3)" letterSpacing="0.04em">{uiText("Wallets and included vaults:")}{" "}<Text as="span" fontWeight="600" color={showValues ? "var(--text-1)" : "var(--text-3)"} fontFamily="mono">
 							{showValues ? `${vaultTotalPartial ? '≥ ' : ''}$${formatUsd(grandTotal)}` : '$ ••••'}
 						</Text>
 					</Text>

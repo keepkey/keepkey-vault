@@ -3,6 +3,8 @@ dist/
 build/
 artifacts/
 bun.lock
+# The Desktop release must resolve the same audited dependency graph in CI.
+!/projects/keepkey-vault/bun.lock
 *.log
 .DS_Store
 .idea/
@@ -59,3 +61,6 @@ rmdir-result.txt
 /firmware-7.15.0-2676ec4-full/
 /bun
 /docs/clearsign-ecosystem/assets.jsonl
+
+# Pinned host libraries for unsigned Monero hardware research builds.
+/projects/keepkey-vault/monero-device-bundle/

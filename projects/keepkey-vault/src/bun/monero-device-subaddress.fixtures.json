@@ -1,0 +1,875 @@
+{
+  "publicFixturesOnly": true,
+  "cases": [
+    {
+      "name": "v2-standard-network0",
+      "adapterPlan": {
+        "status": "pass",
+        "network": 0,
+        "fee": "20000000",
+        "inputs": [
+          {
+            "amount": "7000000000000",
+            "real_member": 7,
+            "output_index": 0,
+            "subaddress_major": 0,
+            "subaddress_minor": 0,
+            "tx_public_key": "111657cb6786dcf6e8ee44137c9cac490284d6ef02f66525cba3e30e7e242bc7",
+            "mask": "3dbebce6f8d78fccd94c5773b9c0e6d7e85598149dae13c5b509a51455d61a0b",
+            "additional_tx_public_keys": [],
+            "ring": [
+              {
+                "global_index": "1000",
+                "public_key": "99467391255d70cee604d5ce07914d93abb8449b78f57c66176dab784f33304f",
+                "commitment": "b8c563f4d17a9105e4281b5b5488d355a377293987a97324f54faea7468014ad"
+              },
+              {
+                "global_index": "1002",
+                "public_key": "13156e671ad87914a49e6da7669f7e22cd23733f6ef286348d193c9ca32ff89a",
+                "commitment": "502818b2cf7ac5b233d3a3640904cfc08884355b2eb09f3d9568e97f6ab03f7e"
+              },
+              {
+                "global_index": "1004",
+                "public_key": "3c811e5d159516fead58cabda41fa7a411c5822c2a2bc2ccd7e7f234edfa1287",
+                "commitment": "8ff954b6a20d159862aec488bb1ae766e188a31f69fb8caa432ce5ee6911d8c3"
+              },
+              {
+                "global_index": "1006",
+                "public_key": "05afdf880aa3af9b7d8304e713f22451f8ed1b45185d762a80dfb58f274ac889",
+                "commitment": "6ac2d14f3bfb904a86adbd91f696b14ba2c3841af4c191aa39a243d4bfde6136"
+              },
+              {
+                "global_index": "1008",
+                "public_key": "d0216727a41a0de04c92ff45c0d9e2039c0cab5c94ee35ef39ece771844cd748",
+                "commitment": "98f7d9675f5d812fc5491e055e6d1fcabec0a1d1fcb6fb6b65e58b6fe3212546"
+              },
+              {
+                "global_index": "1010",
+                "public_key": "19521e60d80c7f7ed0436e35ce1ccf441a797fd3845c8aa06f7b88da43912809",
+                "commitment": "a30ee4382c7ad93de086a51f3b01985fecf4e6dd88d50ed6c9340456fbe9220b"
+              },
+              {
+                "global_index": "1012",
+                "public_key": "e1f6f8d1057288fd2de556a932bef590aea54d7a6731eb59266754a3020bb86a",
+                "commitment": "55d2198b96f131b281ebefffd6e9ad2e4b514e9be647a66fa93b5e301038b2cb"
+              },
+              {
+                "global_index": "1014",
+                "public_key": "b8f5fbec490beea3bff47e60cd9b8ec582bc2ef5e745990ba62f7142a4c41f17",
+                "commitment": "8d182f7b1363124930c237cea9b06ecc1762c095414badab113f385a8d806a67"
+              },
+              {
+                "global_index": "1016",
+                "public_key": "00240518da7b9d8c52a3a76fc8e6fc90bfeb0b0ecb66bb5a284b5a9db44713e9",
+                "commitment": "89b0a30bfbab87fbe9622bd429a01d1959bd798bee0fbc1f11148eb021a07f7f"
+              },
+              {
+                "global_index": "1018",
+                "public_key": "7af8a9beb6ed0156df9cc94cf4efddf32e28b1d224c2e0e972281fcd672a2883",
+                "commitment": "bcae8eb4f34d28454efa7fa7cde00f175a82b7d1a462285489d6808bbada2a58"
+              },
+              {
+                "global_index": "1020",
+                "public_key": "d58370f7488f14707251d8f7beead391a1d92008f680e2b7b07e58dc7d8dbd63",
+                "commitment": "d8ba3a5c706e69cea21f0a6cc526f1b32906d452e2bd1a97479fc21d16454bbe"
+              },
+              {
+                "global_index": "1022",
+                "public_key": "17e8203756f6e4bead75ce715784bc3c42154ed84ace0c090471dfe61bc8a53d",
+                "commitment": "b4a262dc4155ab6c1e6f8c7f593815e6e473cf73d6450dd65680ce080eb17c05"
+              },
+              {
+                "global_index": "1024",
+                "public_key": "24759bd11fa829ad99341b4a43bc2e7c98edf355af3fc9514cf313869be38544",
+                "commitment": "7634611fe330d26f69bf7f466137ac12f2e26e080adcabbae5e6d2022bd7dcd0"
+              },
+              {
+                "global_index": "1026",
+                "public_key": "dd4a20e02eda0a7d2236ef3e925116cf2e0a55553aa9c00ac0c8ea53fa4e06d8",
+                "commitment": "1dfb4134b6f9b3c0176ea9107305b889fdeaa8385d656353ec8deb50c7717341"
+              },
+              {
+                "global_index": "1028",
+                "public_key": "d3c5ddeaff8646f05976363b395095c0fc7f606d320616b97801faa0118ccbf7",
+                "commitment": "1240f016de25bcf0b97a57026c00cd018f081b9f05fd2751ea8206b298961ae6"
+              },
+              {
+                "global_index": "1030",
+                "public_key": "590272b609b631a21c614aa7afaf17b62607be34b66c815793d9521179b95561",
+                "commitment": "12688e2270121fb265079429bfb41a237eab424ef6a950c52ffa3cda6e44f41d"
+              }
+            ]
+          }
+        ],
+        "outputs": [
+          {
+            "amount": "2000000000000",
+            "address": "4Ahp23WfMrMFK3wYL2hLWQFGt87ZTeRkufS6JoQZu6MEFDokAQeGWmu9MA3GFq1yVLSJQbKJqVAn9F9DLYGpRzRAEXqAXKM",
+            "is_change": false,
+            "change_major": 0,
+            "change_minor": 0
+          },
+          {
+            "amount": "4999980000000",
+            "address": "44jKQv6ZKMd5ecLLmkNJGi7azgSptEq8ki7TFiat1TfLfdDQ1tQ7ZYa3cRh7X2uRwvLDjddWh97ajeyhR2seKSECQeDx1WR",
+            "is_change": true,
+            "change_major": 0,
+            "change_minor": 0
+          }
+        ]
+      },
+      "txKeyHex": "08aeed098b3d8a8ad4015eb94b834286c8d5c1b40a05b5f9076e1f81a4d13500",
+      "additionalTxKeysHex": [],
+      "senderViewKeyHex": "84b0087a63854856686f80596a5a1a6090795b4d1311139173262170d7e7180f",
+      "transactionHex": "020001020010e80702020202020202020202020202020207204b29e6918361e8f253409e4ecf63ad088d307f33600b9437616f5231e8f90200032edd00a5b04454906b46a034fd6c820e815eddc44a3836b716d152546a5d5687630003f18287af48131bb8310094421c9a8e821b0010e90778963def22f197da119969b42101b93e2c493f507fd7e2808748a59c7069daf79e0f825e72568b5a5108f85a56c20680dac409f60566f483c2e0bed7975bec672874c870140553212a432030a5f67aa2e2de608b91267092f3868feaded8d3e967b605138ed71d496c3310a669c1bb25e2fe6d2c187990b15bbc50af5deae0c13c1b4e018e15f27fc8891bb2b6ab242a0ddf49c654192b822810289cc3a6d1d6cb65bdb39c28e18c2b0041abd63b80ee475b772eceb4030662108537f967e7c03b60988e720fe37001d01fce282ba931f14491e37e07b35c8bb30d5fe1d5de2f04d3a29e4abeb1c05f9308782d4deb23cb34b31984201435b4fc27da5e497a956915060d306b6abeb21b06df5194ab5224e8407b05806cb1c6c2b47838cac73325d1c30eac93a2ee274aadc3edd2ed4e0edfa30107d0b659c694c85ea94af6f91e3bfa0407729f5e6334a0d2185026bb3252261f73e0ad50dcce492cabebb7ae268e07ff4b8c8def68c393acef4d61dd512a79bd773432c9d1e4f6213ffd77af47e4b2d034849334b912eb0434f57231b2c2182ef70be6258d55d5a1dc78e8f77459616817e98547be5fc89d3015737bfe75529f587c2bca57822aebb2bffeb16c0de77d718ce77b797b653d624e1098f4dae6ae74736e057ee8bad8890fe8572f1ab3c4ad8dee3c16e78da821060599208b35761b46df3dc3fcbbcc21ada79f165cc420e9abc017e21afe50cc8236fc9e778468471690d7334f3ae5564fde6dedf8d12e9407234245ac44d25b5ebb04f4e62ee34c82bd8b41b9a241d29685a2a9cec62ddbe05e1f77bb33ae9e8d70951ac3c598bcd67317d610fc3f4c831044fcd8afa48bef21189a984b2de2f389f1124d4f5565107d7d1018862419ee006321e27bd1940f226b47f50faacb429d476d5636d8b8396d097da290e6f98a9097c90460af113c53c97d17f80cf18fbaf7ee17af32e0aabd999f93cb3af8077db222144a17740536f1171578984b3c7035f3f7a1cee9b61e1903093f56fbeafd04599a0b986757b7a7bc8f11a3d44720ef29fcba7bf30caee667ef779cc078d3abdc7a491f45afcd01b95270a2f73636a0804ee77eafc3dbb35a927a4b8e4faead17f9e6b7cc0b2bd37063faf50f36b978a9b2fe70628d5ffbf621e01a952d8b9bab2e96071006900140f587c77275414b404e9a79b83ffe45933dd6e1f026a5f57a8cf43d510f6f171bccb1554896f33355e63243c1581f549796fcaea82f5d6c01069b006509562864e326a8ff96cb95aef09aeabb00275417a6e6385e3f159e6fd5e6d06505e56a10724e16a733af5d55f440b1b4fbfa70bb723e77e1a2235dcc5ff2d6da03e781909f9e1cde95d726be160cc8271c7d4dec3d6b2d9b1360c22640bc24e40a53d0deda1c520d2ff28c7ec57d5d16a68b9ddd43e49a9b9d0b157d84f5aaef00df40c690aa17e03156d4a78f7da8fc40928cfc213a452351004a0ee47bb69f09316aeb4c30d67edd6d5dbd5094324084c8b0f3660cd73ba721c25e4bdbac4c0b14e77c861347e5e3d16e29b9d70e6dba47502853f9ac8f1f1b3d17d3bbfbb901d17631166ecd5242fa3fb30420b3933d9e909fc6130ab5f5c9673ddffd4093028396e6932d456a733c2c6efe1ae5951bdef31473e519c49b42b22228fe2bd3041af621366abe8ed9bd625f99264bce7ba5b77a0f0b06db0d3901863382164800d6a7fe65da7dfea4bcf46a44af2e0cfa1ef3413385db4861c0bf4acc17d1b50c38ee80badc39c51349b5eb9a8c62fd481424f0b8ef9d1beca8f5212cbd862d0729589f0a80657542ae76c2d459a3c91422b4b6953c6aa004319950cac1466f08295eeb3f937f4f4d7cc9de6dcbd4502b22a15e00b8c35695c83fff99a6b177b115194a45707a30096022db68cb628454569049e7eb3e744a07a2bc814756e746",
+      "nativePlanSHA256": "d533c3d3aac34173a9ebe689f1e8b1566f3633fdf7f0c163c84754f6888a8bea"
+    },
+    {
+      "name": "v2-single-sub-network0",
+      "adapterPlan": {
+        "status": "pass",
+        "network": 0,
+        "fee": "20000000",
+        "inputs": [
+          {
+            "amount": "7000000000000",
+            "real_member": 7,
+            "output_index": 0,
+            "subaddress_major": 0,
+            "subaddress_minor": 0,
+            "tx_public_key": "111657cb6786dcf6e8ee44137c9cac490284d6ef02f66525cba3e30e7e242bc7",
+            "mask": "3dbebce6f8d78fccd94c5773b9c0e6d7e85598149dae13c5b509a51455d61a0b",
+            "additional_tx_public_keys": [],
+            "ring": [
+              {
+                "global_index": "1000",
+                "public_key": "99467391255d70cee604d5ce07914d93abb8449b78f57c66176dab784f33304f",
+                "commitment": "b8c563f4d17a9105e4281b5b5488d355a377293987a97324f54faea7468014ad"
+              },
+              {
+                "global_index": "1002",
+                "public_key": "13156e671ad87914a49e6da7669f7e22cd23733f6ef286348d193c9ca32ff89a",
+                "commitment": "502818b2cf7ac5b233d3a3640904cfc08884355b2eb09f3d9568e97f6ab03f7e"
+              },
+              {
+                "global_index": "1004",
+                "public_key": "3c811e5d159516fead58cabda41fa7a411c5822c2a2bc2ccd7e7f234edfa1287",
+                "commitment": "8ff954b6a20d159862aec488bb1ae766e188a31f69fb8caa432ce5ee6911d8c3"
+              },
+              {
+                "global_index": "1006",
+                "public_key": "05afdf880aa3af9b7d8304e713f22451f8ed1b45185d762a80dfb58f274ac889",
+                "commitment": "6ac2d14f3bfb904a86adbd91f696b14ba2c3841af4c191aa39a243d4bfde6136"
+              },
+              {
+                "global_index": "1008",
+                "public_key": "d0216727a41a0de04c92ff45c0d9e2039c0cab5c94ee35ef39ece771844cd748",
+                "commitment": "98f7d9675f5d812fc5491e055e6d1fcabec0a1d1fcb6fb6b65e58b6fe3212546"
+              },
+              {
+                "global_index": "1010",
+                "public_key": "19521e60d80c7f7ed0436e35ce1ccf441a797fd3845c8aa06f7b88da43912809",
+                "commitment": "a30ee4382c7ad93de086a51f3b01985fecf4e6dd88d50ed6c9340456fbe9220b"
+              },
+              {
+                "global_index": "1012",
+                "public_key": "e1f6f8d1057288fd2de556a932bef590aea54d7a6731eb59266754a3020bb86a",
+                "commitment": "55d2198b96f131b281ebefffd6e9ad2e4b514e9be647a66fa93b5e301038b2cb"
+              },
+              {
+                "global_index": "1014",
+                "public_key": "b8f5fbec490beea3bff47e60cd9b8ec582bc2ef5e745990ba62f7142a4c41f17",
+                "commitment": "8d182f7b1363124930c237cea9b06ecc1762c095414badab113f385a8d806a67"
+              },
+              {
+                "global_index": "1016",
+                "public_key": "00240518da7b9d8c52a3a76fc8e6fc90bfeb0b0ecb66bb5a284b5a9db44713e9",
+                "commitment": "89b0a30bfbab87fbe9622bd429a01d1959bd798bee0fbc1f11148eb021a07f7f"
+              },
+              {
+                "global_index": "1018",
+                "public_key": "7af8a9beb6ed0156df9cc94cf4efddf32e28b1d224c2e0e972281fcd672a2883",
+                "commitment": "bcae8eb4f34d28454efa7fa7cde00f175a82b7d1a462285489d6808bbada2a58"
+              },
+              {
+                "global_index": "1020",
+                "public_key": "d58370f7488f14707251d8f7beead391a1d92008f680e2b7b07e58dc7d8dbd63",
+                "commitment": "d8ba3a5c706e69cea21f0a6cc526f1b32906d452e2bd1a97479fc21d16454bbe"
+              },
+              {
+                "global_index": "1022",
+                "public_key": "17e8203756f6e4bead75ce715784bc3c42154ed84ace0c090471dfe61bc8a53d",
+                "commitment": "b4a262dc4155ab6c1e6f8c7f593815e6e473cf73d6450dd65680ce080eb17c05"
+              },
+              {
+                "global_index": "1024",
+                "public_key": "24759bd11fa829ad99341b4a43bc2e7c98edf355af3fc9514cf313869be38544",
+                "commitment": "7634611fe330d26f69bf7f466137ac12f2e26e080adcabbae5e6d2022bd7dcd0"
+              },
+              {
+                "global_index": "1026",
+                "public_key": "dd4a20e02eda0a7d2236ef3e925116cf2e0a55553aa9c00ac0c8ea53fa4e06d8",
+                "commitment": "1dfb4134b6f9b3c0176ea9107305b889fdeaa8385d656353ec8deb50c7717341"
+              },
+              {
+                "global_index": "1028",
+                "public_key": "d3c5ddeaff8646f05976363b395095c0fc7f606d320616b97801faa0118ccbf7",
+                "commitment": "1240f016de25bcf0b97a57026c00cd018f081b9f05fd2751ea8206b298961ae6"
+              },
+              {
+                "global_index": "1030",
+                "public_key": "590272b609b631a21c614aa7afaf17b62607be34b66c815793d9521179b95561",
+                "commitment": "12688e2270121fb265079429bfb41a237eab424ef6a950c52ffa3cda6e44f41d"
+              }
+            ]
+          }
+        ],
+        "outputs": [
+          {
+            "amount": "2000000000000",
+            "address": "88kwZaLw7qv9Zc2oPM1rGbdGvFs4iZB7xgV8F2oHu9Mx3zQ28ADWbav9jTZFGZiTaffcWV6etm2oqKPneDQDijn648aaLDW",
+            "is_change": false,
+            "change_major": 0,
+            "change_minor": 0
+          },
+          {
+            "amount": "4999980000000",
+            "address": "44jKQv6ZKMd5ecLLmkNJGi7azgSptEq8ki7TFiat1TfLfdDQ1tQ7ZYa3cRh7X2uRwvLDjddWh97ajeyhR2seKSECQeDx1WR",
+            "is_change": true,
+            "change_major": 0,
+            "change_minor": 0
+          }
+        ]
+      },
+      "txKeyHex": "08aeed098b3d8a8ad4015eb94b834286c8d5c1b40a05b5f9076e1f81a4d13500",
+      "additionalTxKeysHex": [],
+      "senderViewKeyHex": "84b0087a63854856686f80596a5a1a6090795b4d1311139173262170d7e7180f",
+      "transactionHex": "020001020010e80702020202020202020202020202020207204b29e6918361e8f253409e4ecf63ad088d307f33600b9437616f5231e8f9020003c28b1673f7d0d1d5562162149ccfd0ebff87e1ee4a8c88771b861a9c47fe6733c4000319b4873163f05afad3ccda80d2f0751d641be7e7c6e7edb88164abde510193ed0a210198760ec28c579c25be629f23fed2407a7448d4355b7d264e27147ef164728af70680dac409d6a64dc98ecbac1f1c09be0d2c4876dc455bf41e0667611b90aec52229965961fdcd614ab6758836644393112e44452a9fed151c66632105be06662f273f438aca48d67bd96e99dcb30b5d0dfc2caab2012a18d48e1f9bfb97d76294e217b5d783c9fd684389329161e5ab5600cf3c12ac0a2e74feab701dd753f4ee208d212d90fb08cd79a2dee5f8481827a86cad26da2987b6298c8cabb0939e3f9421e422423a0f0d623252c9594a4e47381be08f26fa659fffd5bf35e6502316bab898aeeb771f804c69cfb2a8f4559fdb96a55902da54b2c9a73aa57b48b098c3c52034c6359b4d709d8224eed8464d540b397e086355adcea6af7576cf4e94734cff96be3cae65c863d95a7b0593b498db4a48070761a8dfae10861cd1ff84a394807b3626076c319ba7da89991dd4f40c098ac820d901886b25f8e50f2fb29a7ef83cf10c15f1f2c124a6e9772f929439d7ef293a5497e181ae4ef51133084e7aa3122b7f72008c1a2215fe34d5ca39f4894e500579f8481154e185fd425be00decf25d909a87e02478202bf1989d5823e898480d5c5dfa5af7069129d72869090383d7e36afdc17cc75ed2c4ae8002edf66e72e60a1e3a8c5e6e73e25121dd77ef1c6c1124a0f689e5ec736e93fd76f8e06aac0137db92295d4587047befaa31766ef9722c3b1be4d0b63dab700d14c457cf1b870751e8255e06f5a0c6e0a3cdc632267602c42df85e927821c77ba682acf4f8763211fdc3322aa36428aa508892e609eaa4d0399b4a70c52efb8d40919e80e46fb6805b1b0a7b642f43c5491833debb66f2d380a8a26913686e2d784a670a68acdc515793de0ca522cf814df677c1e38dd8a5f040396eafe19a9b7f623b5756c9a3972836542364500b197552b42663c8519cb95008391a58d44c14f0da87e076bc07eb684d407ed541caf9b07e149d190aa610ceae979e366f9fcae5c51496bdabc68ad6f8377065ccfe0ef6a258c8e04b6de974d501d629a0a9fe06b7cc6f9fc4142685116138b4d8ad372c127f100c93ec208ceaf5fbe8c2941492f00287010150fe17565744514815ea1783d02837f3f501b276a5ee896b18823b46b8f1cc0500a58b83fa0b9fb45c06c5bf4aa5d73ef68d902208b8c2015b2d6ec9fc7b0d0639618843cfa656f5c33b33acfded7feba45bd2c25ad6928f32e6bf13b81f8301c61cb3235baf8dd879c91cf5030013f18c03401273133101e3abeb2e38113b07d91ddb6f07fb876ea59d54bda70f37779c77981e54dcb447299a4f57dc61e30ff51783d5985785f92dc7031f44ea0decfae83f251f69012fb441c24b148e0d04d4d22487db538d1ed9b35a082884f174fbd7d516f9e970477a3d59b866aebe0c67b9f7a9713e38c4a8e8b847c9b523fa2f9b53ac70fcda31cc378af7b8b7c802c40791b5ef5a0fe5f8cb8a49b402dbc6db17f6a9f28099aabb1d523305700f022c050208718ebaeae5448b88e4d17b7ae60ae073e2d06f56bb50fb2b00eef10dc3bf40741e9a1347bf7e659cbad40378587b6111a586fcc96b1a7d040222d6088152cf6633e184ed70c3c8053b24b65f5212d8580e8540b56dd186e3ffd5c80dde34d3a80e63d53b9985f7caa82b619a0eb8fb038f9cbd1577a072f97a928d09e7bcca90d00f860dc97af5060fcf3a72ffcfc0d0ec1b35980a573710844b390b52fb7826f75e5ae20668c2a0f892a631dfd718c6d66e047915e838deec23630183326dd3139b52f7e96e8bb026dfc258a2e4ac34e466e0f850a98c74d7767608b8f0d092977c09d792f02a33075566d4fc47b5bd319e149d32c96518e45e4b4f57a6a0796f64a3443779e357f67d3fb4125844e272e5cf3d187b488259c86fb9",
+      "nativePlanSHA256": "641d27fd2e3fc92da5f351be05deb3e7c2f288b505bf7b90f693613d96b98324"
+    },
+    {
+      "name": "v2-sub-change-network0",
+      "adapterPlan": {
+        "status": "pass",
+        "network": 0,
+        "fee": "20000000",
+        "inputs": [
+          {
+            "amount": "7000000000000",
+            "real_member": 7,
+            "output_index": 0,
+            "subaddress_major": 0,
+            "subaddress_minor": 0,
+            "tx_public_key": "111657cb6786dcf6e8ee44137c9cac490284d6ef02f66525cba3e30e7e242bc7",
+            "mask": "3dbebce6f8d78fccd94c5773b9c0e6d7e85598149dae13c5b509a51455d61a0b",
+            "additional_tx_public_keys": [],
+            "ring": [
+              {
+                "global_index": "1000",
+                "public_key": "99467391255d70cee604d5ce07914d93abb8449b78f57c66176dab784f33304f",
+                "commitment": "b8c563f4d17a9105e4281b5b5488d355a377293987a97324f54faea7468014ad"
+              },
+              {
+                "global_index": "1002",
+                "public_key": "13156e671ad87914a49e6da7669f7e22cd23733f6ef286348d193c9ca32ff89a",
+                "commitment": "502818b2cf7ac5b233d3a3640904cfc08884355b2eb09f3d9568e97f6ab03f7e"
+              },
+              {
+                "global_index": "1004",
+                "public_key": "3c811e5d159516fead58cabda41fa7a411c5822c2a2bc2ccd7e7f234edfa1287",
+                "commitment": "8ff954b6a20d159862aec488bb1ae766e188a31f69fb8caa432ce5ee6911d8c3"
+              },
+              {
+                "global_index": "1006",
+                "public_key": "05afdf880aa3af9b7d8304e713f22451f8ed1b45185d762a80dfb58f274ac889",
+                "commitment": "6ac2d14f3bfb904a86adbd91f696b14ba2c3841af4c191aa39a243d4bfde6136"
+              },
+              {
+                "global_index": "1008",
+                "public_key": "d0216727a41a0de04c92ff45c0d9e2039c0cab5c94ee35ef39ece771844cd748",
+                "commitment": "98f7d9675f5d812fc5491e055e6d1fcabec0a1d1fcb6fb6b65e58b6fe3212546"
+              },
+              {
+                "global_index": "1010",
+                "public_key": "19521e60d80c7f7ed0436e35ce1ccf441a797fd3845c8aa06f7b88da43912809",
+                "commitment": "a30ee4382c7ad93de086a51f3b01985fecf4e6dd88d50ed6c9340456fbe9220b"
+              },
+              {
+                "global_index": "1012",
+                "public_key": "e1f6f8d1057288fd2de556a932bef590aea54d7a6731eb59266754a3020bb86a",
+                "commitment": "55d2198b96f131b281ebefffd6e9ad2e4b514e9be647a66fa93b5e301038b2cb"
+              },
+              {
+                "global_index": "1014",
+                "public_key": "b8f5fbec490beea3bff47e60cd9b8ec582bc2ef5e745990ba62f7142a4c41f17",
+                "commitment": "8d182f7b1363124930c237cea9b06ecc1762c095414badab113f385a8d806a67"
+              },
+              {
+                "global_index": "1016",
+                "public_key": "00240518da7b9d8c52a3a76fc8e6fc90bfeb0b0ecb66bb5a284b5a9db44713e9",
+                "commitment": "89b0a30bfbab87fbe9622bd429a01d1959bd798bee0fbc1f11148eb021a07f7f"
+              },
+              {
+                "global_index": "1018",
+                "public_key": "7af8a9beb6ed0156df9cc94cf4efddf32e28b1d224c2e0e972281fcd672a2883",
+                "commitment": "bcae8eb4f34d28454efa7fa7cde00f175a82b7d1a462285489d6808bbada2a58"
+              },
+              {
+                "global_index": "1020",
+                "public_key": "d58370f7488f14707251d8f7beead391a1d92008f680e2b7b07e58dc7d8dbd63",
+                "commitment": "d8ba3a5c706e69cea21f0a6cc526f1b32906d452e2bd1a97479fc21d16454bbe"
+              },
+              {
+                "global_index": "1022",
+                "public_key": "17e8203756f6e4bead75ce715784bc3c42154ed84ace0c090471dfe61bc8a53d",
+                "commitment": "b4a262dc4155ab6c1e6f8c7f593815e6e473cf73d6450dd65680ce080eb17c05"
+              },
+              {
+                "global_index": "1024",
+                "public_key": "24759bd11fa829ad99341b4a43bc2e7c98edf355af3fc9514cf313869be38544",
+                "commitment": "7634611fe330d26f69bf7f466137ac12f2e26e080adcabbae5e6d2022bd7dcd0"
+              },
+              {
+                "global_index": "1026",
+                "public_key": "dd4a20e02eda0a7d2236ef3e925116cf2e0a55553aa9c00ac0c8ea53fa4e06d8",
+                "commitment": "1dfb4134b6f9b3c0176ea9107305b889fdeaa8385d656353ec8deb50c7717341"
+              },
+              {
+                "global_index": "1028",
+                "public_key": "d3c5ddeaff8646f05976363b395095c0fc7f606d320616b97801faa0118ccbf7",
+                "commitment": "1240f016de25bcf0b97a57026c00cd018f081b9f05fd2751ea8206b298961ae6"
+              },
+              {
+                "global_index": "1030",
+                "public_key": "590272b609b631a21c614aa7afaf17b62607be34b66c815793d9521179b95561",
+                "commitment": "12688e2270121fb265079429bfb41a237eab424ef6a950c52ffa3cda6e44f41d"
+              }
+            ]
+          }
+        ],
+        "outputs": [
+          {
+            "amount": "2000000000000",
+            "address": "4Ahp23WfMrMFK3wYL2hLWQFGt87ZTeRkufS6JoQZu6MEFDokAQeGWmu9MA3GFq1yVLSJQbKJqVAn9F9DLYGpRzRAEXqAXKM",
+            "is_change": false,
+            "change_major": 0,
+            "change_minor": 0
+          },
+          {
+            "amount": "4999980000000",
+            "address": "89gMN28NBgi2ZCi11YyfaxW9rHCEKk9UddQVCDAkvL5rUxxKqNLXdTAS5bCkmSNogncXiihL8RFmKJhgcmFqmakNK5cvKyq",
+            "is_change": true,
+            "change_major": 1,
+            "change_minor": 0
+          }
+        ]
+      },
+      "txKeyHex": "08aeed098b3d8a8ad4015eb94b834286c8d5c1b40a05b5f9076e1f81a4d13500",
+      "additionalTxKeysHex": [],
+      "senderViewKeyHex": "84b0087a63854856686f80596a5a1a6090795b4d1311139173262170d7e7180f",
+      "transactionHex": "020001020010e80702020202020202020202020202020207204b29e6918361e8f253409e4ecf63ad088d307f33600b9437616f5231e8f90200032edd00a5b04454906b46a034fd6c820e815eddc44a3836b716d152546a5d56876300037970227568ed93d4bf3d54fbdd3156f7e1ebc9ff84ff62ad8e6070387c8f04e9b42101b93e2c493f507fd7e2808748a59c7069daf79e0f825e72568b5a5108f85a56c20680dac409f60566f483c2e0bed7975bec672874c870140553212a432030a5f67aa2e2de608b91267092f3868feaded8d3e967b605138ed71d496c3310a669c1bb25e2fe6d2c187990b15bbc50af5deae0c13c1b4e01417e17ff3e6c0f0d942d3ed5bf14368ae0ee551fe0aa985c118c3f80089671d0d6a56679dc0a34098020c9083d618a1cfbb009a560a322dcae31fde4bc745bac203d92d34d6b549aba39bf25796696f93057c55067bad9f647a56974b8285e357a60a1a56b9967550fb3dc4feea1c8ca50aef64f32e9c90a4771327bcc019c009609a0a66a098cc0c51acd4f76dc7da649c19ae604801caf5803a92e30672503d1b57400c79effe16e61c96e2e02c733d00beb348a4ba0baca2dce3bd6ccbb00070861d06063330e19191721d5bc846156b0bc925e0a0e94dfa08fd6b57b9d27d91f027413bec2b8d6a6024569d7dc0aa14410e8f3be3cf9ecd6ddbf4760ac6ec2d0bc5e59dc2fb95dd3ad5bcd62dc8fa63e56cf2531f79c0b94a01322108983eb86e630d85595a863c670141511bf4d52bbefa7b09547293aac63a14dc3a39270b80df5118459446d1e547be0e4cc2a479fdbd795f5d079429d8e25c0054e210a445330e5928b13a99675632af87d91359225afa348199a8e2b01e812b6f8436629901ec954082a33dc30c684eb87a189b7b301c25c6135a0bc2bf1668b18f7e307db4f04d3d4f698abb7b71ba9742d94ad6998ec56a4c9ce727f8808c8fa0fa13cb026435ddd1ed9ae3a4c06a9a023d72f36daaaf67d1310dbe350b40007542e2e6f5d23eb016ff485bec8386c85c294ce8a0f8edcea50b0d466afd305b86fae1318a421cbbbc92fc65eca5e469b05c0221659388ff0eb99225ba1b920b1a2f9b92129dfffad356f121a97bafb31f84fc7616d9310ac7cc91bfb41fe40b243e36a0121163087750e808a0f320c7df110753302916f476a82ab9bfa85704a85bc48c092e75f136fa49747de4124ab36d8e4613430e02e752afd1bafe3b9599b7458d75d07445205c9665a1e0c844682f98d185ae38878975d5efb4ccfc1782c9c0b1aad3bd2992db74bd9c6976a942247d9c0d0e29f36d2705053cec12766d7550b4b7fe1d51ab742c8839980de22f09f1c77a32d2a33cd3802c5a726053181380135a9dbce82224ca9fbe407581cfd22c6c50e4f1c18b8a10f5a70906b7ba3d00cddf164ee5115666a1ce80c794ead2374fb654a60d12360dd87373e42f12c2803d12186809b4f2d5932d4870e318508595374a6007be3dbb2d9b96e3e6448130c4af81d5b8e46e56443f384225943466fd800d5e6c2abaa5a0570a05ef8778c0071c8fe66f51d02e4014c4f2a6ad65b88ecd3c83d8e9df288d643f09bb2045a057a19ca9835e5a3a0649b73a23af0bd3fb77cd7ddfa5f49c3793b3411c86e040a4000c79863e46733000078e2da8a2e62c5465c8adab9ae737fce201399b9ca0e91d50b2a52db5e55b5570ea3e7b3dd7973519ac1963156c035cb7825ad164a05d9502ff8ee2478f00a7b621b55a4cd6b4024e39e09754090ba6c58e572d38a096b2f056b5c60fd8570aeef11e07be92f7639d174273676ce78e25f348391c804099b60ce63dac23139ffb47dd14e3ee78aac022aec6cf555adfe66246015b608a2a8038f7dfdc447e0e2a9f91975e4f4cf43c5a479894846f694a86968a1390a7f6c289ef24bc239d7c2d842e45069fe7b68ea82883fb3beab5fa1dad98b64039b72b8f0e10d2c2e67d5dbc62e2766a9c62a8fa82ea5f2cb1cd58c8a228bbf0a295eeb3f937f4f4d7cc9de6dcbd4502b22a15e00b8c35695c83fff99a6b177b115194a45707a30096022db68cb628454569049e7eb3e744a07a2bc814756e746",
+      "nativePlanSHA256": "837e4a5e0f09867cf77bc6147296c0c60694f6b2f208b0593c560d42c2229113"
+    },
+    {
+      "name": "v2-mixed-network0",
+      "adapterPlan": {
+        "status": "pass",
+        "network": 0,
+        "fee": "20000000",
+        "inputs": [
+          {
+            "amount": "7000000000000",
+            "real_member": 7,
+            "output_index": 0,
+            "subaddress_major": 0,
+            "subaddress_minor": 0,
+            "tx_public_key": "111657cb6786dcf6e8ee44137c9cac490284d6ef02f66525cba3e30e7e242bc7",
+            "mask": "3dbebce6f8d78fccd94c5773b9c0e6d7e85598149dae13c5b509a51455d61a0b",
+            "additional_tx_public_keys": [],
+            "ring": [
+              {
+                "global_index": "1000",
+                "public_key": "99467391255d70cee604d5ce07914d93abb8449b78f57c66176dab784f33304f",
+                "commitment": "b8c563f4d17a9105e4281b5b5488d355a377293987a97324f54faea7468014ad"
+              },
+              {
+                "global_index": "1002",
+                "public_key": "13156e671ad87914a49e6da7669f7e22cd23733f6ef286348d193c9ca32ff89a",
+                "commitment": "502818b2cf7ac5b233d3a3640904cfc08884355b2eb09f3d9568e97f6ab03f7e"
+              },
+              {
+                "global_index": "1004",
+                "public_key": "3c811e5d159516fead58cabda41fa7a411c5822c2a2bc2ccd7e7f234edfa1287",
+                "commitment": "8ff954b6a20d159862aec488bb1ae766e188a31f69fb8caa432ce5ee6911d8c3"
+              },
+              {
+                "global_index": "1006",
+                "public_key": "05afdf880aa3af9b7d8304e713f22451f8ed1b45185d762a80dfb58f274ac889",
+                "commitment": "6ac2d14f3bfb904a86adbd91f696b14ba2c3841af4c191aa39a243d4bfde6136"
+              },
+              {
+                "global_index": "1008",
+                "public_key": "d0216727a41a0de04c92ff45c0d9e2039c0cab5c94ee35ef39ece771844cd748",
+                "commitment": "98f7d9675f5d812fc5491e055e6d1fcabec0a1d1fcb6fb6b65e58b6fe3212546"
+              },
+              {
+                "global_index": "1010",
+                "public_key": "19521e60d80c7f7ed0436e35ce1ccf441a797fd3845c8aa06f7b88da43912809",
+                "commitment": "a30ee4382c7ad93de086a51f3b01985fecf4e6dd88d50ed6c9340456fbe9220b"
+              },
+              {
+                "global_index": "1012",
+                "public_key": "e1f6f8d1057288fd2de556a932bef590aea54d7a6731eb59266754a3020bb86a",
+                "commitment": "55d2198b96f131b281ebefffd6e9ad2e4b514e9be647a66fa93b5e301038b2cb"
+              },
+              {
+                "global_index": "1014",
+                "public_key": "b8f5fbec490beea3bff47e60cd9b8ec582bc2ef5e745990ba62f7142a4c41f17",
+                "commitment": "8d182f7b1363124930c237cea9b06ecc1762c095414badab113f385a8d806a67"
+              },
+              {
+                "global_index": "1016",
+                "public_key": "00240518da7b9d8c52a3a76fc8e6fc90bfeb0b0ecb66bb5a284b5a9db44713e9",
+                "commitment": "89b0a30bfbab87fbe9622bd429a01d1959bd798bee0fbc1f11148eb021a07f7f"
+              },
+              {
+                "global_index": "1018",
+                "public_key": "7af8a9beb6ed0156df9cc94cf4efddf32e28b1d224c2e0e972281fcd672a2883",
+                "commitment": "bcae8eb4f34d28454efa7fa7cde00f175a82b7d1a462285489d6808bbada2a58"
+              },
+              {
+                "global_index": "1020",
+                "public_key": "d58370f7488f14707251d8f7beead391a1d92008f680e2b7b07e58dc7d8dbd63",
+                "commitment": "d8ba3a5c706e69cea21f0a6cc526f1b32906d452e2bd1a97479fc21d16454bbe"
+              },
+              {
+                "global_index": "1022",
+                "public_key": "17e8203756f6e4bead75ce715784bc3c42154ed84ace0c090471dfe61bc8a53d",
+                "commitment": "b4a262dc4155ab6c1e6f8c7f593815e6e473cf73d6450dd65680ce080eb17c05"
+              },
+              {
+                "global_index": "1024",
+                "public_key": "24759bd11fa829ad99341b4a43bc2e7c98edf355af3fc9514cf313869be38544",
+                "commitment": "7634611fe330d26f69bf7f466137ac12f2e26e080adcabbae5e6d2022bd7dcd0"
+              },
+              {
+                "global_index": "1026",
+                "public_key": "dd4a20e02eda0a7d2236ef3e925116cf2e0a55553aa9c00ac0c8ea53fa4e06d8",
+                "commitment": "1dfb4134b6f9b3c0176ea9107305b889fdeaa8385d656353ec8deb50c7717341"
+              },
+              {
+                "global_index": "1028",
+                "public_key": "d3c5ddeaff8646f05976363b395095c0fc7f606d320616b97801faa0118ccbf7",
+                "commitment": "1240f016de25bcf0b97a57026c00cd018f081b9f05fd2751ea8206b298961ae6"
+              },
+              {
+                "global_index": "1030",
+                "public_key": "590272b609b631a21c614aa7afaf17b62607be34b66c815793d9521179b95561",
+                "commitment": "12688e2270121fb265079429bfb41a237eab424ef6a950c52ffa3cda6e44f41d"
+              }
+            ]
+          }
+        ],
+        "outputs": [
+          {
+            "amount": "2000000000000",
+            "address": "84JQzHWT7SjgNhmiYDb7bh9R894vS4m8VUvQib2W9s4e8CEUTg97NdoiLjP9oUBwcLJreYA2ZKdQP1mFw4EzfNALHJbCDyq",
+            "is_change": false,
+            "change_major": 0,
+            "change_minor": 0
+          },
+          {
+            "amount": "4999980000000",
+            "address": "4Ahp23WfMrMFK3wYL2hLWQFGt87ZTeRkufS6JoQZu6MEFDokAQeGWmu9MA3GFq1yVLSJQbKJqVAn9F9DLYGpRzRAEXqAXKM",
+            "is_change": false,
+            "change_major": 0,
+            "change_minor": 0
+          }
+        ]
+      },
+      "txKeyHex": "08aeed098b3d8a8ad4015eb94b834286c8d5c1b40a05b5f9076e1f81a4d13500",
+      "additionalTxKeysHex": [
+        "5008dcaeda2bfcfedc70489606afddd7247702cd3878afbff985947ddf41cf02",
+        "5ec95d2e9b70d018c81722f964007a38ee9d42a8a5ce7d81d8f01bf999c11c0c"
+      ],
+      "senderViewKeyHex": "84b0087a63854856686f80596a5a1a6090795b4d1311139173262170d7e7180f",
+      "transactionHex": "020001020010e80702020202020202020202020202020207204b29e6918361e8f253409e4ecf63ad088d307f33600b9437616f5231e8f90200039daec061a9e2be434af6a7dfa712fcf37a07d1d1fcccdf6cd0893a85dd1410324400033050184178e54d3c9f586e4f715a4ccd6693cae87916e002bc42405ebf4e17cf7d6301b93e2c493f507fd7e2808748a59c7069daf79e0f825e72568b5a5108f85a56c20402755794e9985163c723d8c9f6067244822cbdc438eaed7b8690dd4a2c514947596d1e8bf59752a6825b78848d6d87bb32aaac824545d4477314c1b2dfba5f61430680dac409171c59890a76f7a3ba27ef380fac3a22831f70756ea2e0a4c55221b4f1bbf72a37f9835fc57911da48354f729577a1bfc226c4ee622a3165fec4a7bbaf788b9626bd402ca131c325a201515c35ab925201e2c73c9e4375e0be28e8c3ceff6625df71161faf684fb89090b52e1411086db85cc4f230b8aa330ddf37f2cf3e1fb65d08b7e0a7e713634448e2736c90d31e9e0954f0839a667f901f4fe75aec6b48b58d31e8748d60fdf8cddaaa20509a2919078101fe7ce0d9f0b4f9c286cae9d822c265cf97b8712047799b34e8373c7f0d13dbbf757471f184b99cdc161f20a4e211e28870590d02fc9768672dcf48df0a8e9469428514e98c6ad0b3cd021bff19355c4efcbaa3cfe52f205513fe21150107b8429c3c515bad740395ce5a3db9235b12579546160d472b2559d303d25f86a0251cd8df2dd129305d6c7f3633fb01df240f6015befb8f9c5963b835ccd2796cd22199f774fd8d380514d2769f553b750e8eaa8d1e52686566b97766527b3af8a429fcbcb0c384b1576f5217271137b78f4fa2d8720b8ad3ab85088e18b8e9fca628936ab043224d9fe553c096baa087b96914c38759418f5a380caff7e4ab5f55e7cf5dccd587644a10a36551b41b281e4bdba78614649cf760718897431b98c6a183e6e5b0fb1aa60d341f0aab7f5610781f41b52dea85eb7d78eaac0bc40a0721033a8da2cb14abde876c6b5e416488e965e3bd12cc0dc6d399e77fed8c47c02c552f9614188990977010670369a968820ca389f3b320f6e43f723d40174b41a2305bd48803d10848cc9eca3a675dd1a978a9b77d288e54681451e59ca9cd961e32587c1895d7014779168daaceb6f5d550d1e2048b2ec0b0d442a987ee49126a546cc859c8dbce98d8c6ff2576cf1e728ef0985ad7bbdf9652459f6f80bd8ca15f87234bb42d429cded4b4482718338069735a3a5698f6e19bdca4b3a6e22f013a0838efcdd13bf7b617b7d4aa68f9426969d05da15260ef8a79ed0a5793ec6037a349e897b2e7775f2da3fd13045dc6a7e2f12d4f99fe997e94cb62a804049457c6e333d9b5f55eac70d943f11662a00428ac2bd418f11317648bed01390510f2495429442ffc1eefe6a1e3f413a0ec41b1ff38d0d61a02c09103c04ce50e0bb332b6959f337d4f33548f9bde74430700e9d3097b8a2447224d6a4ab68b053fb55f21ad2e97b5e97b54e8015bac87593653c5ac291aec77c21d29cd4ebb0f30335767a6d21900759d857c7d56e4e0fe60051dd98b9ae8b3900a073a92fc0380542862dc28968696bcff8c2662e12ff8130731b124015d889eb712171c140c42545d1085ddb08aaf58778cb1494021a812bf5dbc2578e8b23377ed25bdc50a1f334d16e8777f1497ee74179c0fb23b3c12903e5ec2934a581075c5bf829c0316740c29ae30b3dfa346655c9fcae5c7891c71f76d1053115e807e2c575ffc07940d5c9d8b533bc04382e274a24b981d428fddc41aca323e5175c445489c00014d1be32ac084462ef0a9583096f87745014ee8da7deb72b76f431b2f73ca5407becf56ac1cf62b89934fc8fb6ee393a43fa2f2ae83bcfac4e7240b17768f3106146ea39c08569aaf16651eb82100df92cc24ab02715e108cd8fab98540e79c0b4ec54e50d9c51ef366531c4ef67c8277705b9833f3898deb9429bfb84a079b0e8450fd00c2abd52cc9957ee346095f790f543e673214532dad2a2aa30d314c056600eb92cc1e465b5220ea6be15af89b1be61a93ffa88892a0a79947cdfe4a0dcac77f51c78e63c81c7af964eb5a5361588de7e3873b75f5918d35da731e3bdaba0bac7e36b3e4dd48479725caf964b7bdf1e78ce2fa002809020dcce7a137ec",
+      "nativePlanSHA256": "e6e3af4aed8a41b807982d94cb6bec7c3bb9670089cb670e2009b9e98ab1c78e"
+    },
+    {
+      "name": "v2-two-subs-network0",
+      "adapterPlan": {
+        "status": "pass",
+        "network": 0,
+        "fee": "20000000",
+        "inputs": [
+          {
+            "amount": "7000000000000",
+            "real_member": 7,
+            "output_index": 0,
+            "subaddress_major": 0,
+            "subaddress_minor": 0,
+            "tx_public_key": "111657cb6786dcf6e8ee44137c9cac490284d6ef02f66525cba3e30e7e242bc7",
+            "mask": "3dbebce6f8d78fccd94c5773b9c0e6d7e85598149dae13c5b509a51455d61a0b",
+            "additional_tx_public_keys": [],
+            "ring": [
+              {
+                "global_index": "1000",
+                "public_key": "99467391255d70cee604d5ce07914d93abb8449b78f57c66176dab784f33304f",
+                "commitment": "b8c563f4d17a9105e4281b5b5488d355a377293987a97324f54faea7468014ad"
+              },
+              {
+                "global_index": "1002",
+                "public_key": "13156e671ad87914a49e6da7669f7e22cd23733f6ef286348d193c9ca32ff89a",
+                "commitment": "502818b2cf7ac5b233d3a3640904cfc08884355b2eb09f3d9568e97f6ab03f7e"
+              },
+              {
+                "global_index": "1004",
+                "public_key": "3c811e5d159516fead58cabda41fa7a411c5822c2a2bc2ccd7e7f234edfa1287",
+                "commitment": "8ff954b6a20d159862aec488bb1ae766e188a31f69fb8caa432ce5ee6911d8c3"
+              },
+              {
+                "global_index": "1006",
+                "public_key": "05afdf880aa3af9b7d8304e713f22451f8ed1b45185d762a80dfb58f274ac889",
+                "commitment": "6ac2d14f3bfb904a86adbd91f696b14ba2c3841af4c191aa39a243d4bfde6136"
+              },
+              {
+                "global_index": "1008",
+                "public_key": "d0216727a41a0de04c92ff45c0d9e2039c0cab5c94ee35ef39ece771844cd748",
+                "commitment": "98f7d9675f5d812fc5491e055e6d1fcabec0a1d1fcb6fb6b65e58b6fe3212546"
+              },
+              {
+                "global_index": "1010",
+                "public_key": "19521e60d80c7f7ed0436e35ce1ccf441a797fd3845c8aa06f7b88da43912809",
+                "commitment": "a30ee4382c7ad93de086a51f3b01985fecf4e6dd88d50ed6c9340456fbe9220b"
+              },
+              {
+                "global_index": "1012",
+                "public_key": "e1f6f8d1057288fd2de556a932bef590aea54d7a6731eb59266754a3020bb86a",
+                "commitment": "55d2198b96f131b281ebefffd6e9ad2e4b514e9be647a66fa93b5e301038b2cb"
+              },
+              {
+                "global_index": "1014",
+                "public_key": "b8f5fbec490beea3bff47e60cd9b8ec582bc2ef5e745990ba62f7142a4c41f17",
+                "commitment": "8d182f7b1363124930c237cea9b06ecc1762c095414badab113f385a8d806a67"
+              },
+              {
+                "global_index": "1016",
+                "public_key": "00240518da7b9d8c52a3a76fc8e6fc90bfeb0b0ecb66bb5a284b5a9db44713e9",
+                "commitment": "89b0a30bfbab87fbe9622bd429a01d1959bd798bee0fbc1f11148eb021a07f7f"
+              },
+              {
+                "global_index": "1018",
+                "public_key": "7af8a9beb6ed0156df9cc94cf4efddf32e28b1d224c2e0e972281fcd672a2883",
+                "commitment": "bcae8eb4f34d28454efa7fa7cde00f175a82b7d1a462285489d6808bbada2a58"
+              },
+              {
+                "global_index": "1020",
+                "public_key": "d58370f7488f14707251d8f7beead391a1d92008f680e2b7b07e58dc7d8dbd63",
+                "commitment": "d8ba3a5c706e69cea21f0a6cc526f1b32906d452e2bd1a97479fc21d16454bbe"
+              },
+              {
+                "global_index": "1022",
+                "public_key": "17e8203756f6e4bead75ce715784bc3c42154ed84ace0c090471dfe61bc8a53d",
+                "commitment": "b4a262dc4155ab6c1e6f8c7f593815e6e473cf73d6450dd65680ce080eb17c05"
+              },
+              {
+                "global_index": "1024",
+                "public_key": "24759bd11fa829ad99341b4a43bc2e7c98edf355af3fc9514cf313869be38544",
+                "commitment": "7634611fe330d26f69bf7f466137ac12f2e26e080adcabbae5e6d2022bd7dcd0"
+              },
+              {
+                "global_index": "1026",
+                "public_key": "dd4a20e02eda0a7d2236ef3e925116cf2e0a55553aa9c00ac0c8ea53fa4e06d8",
+                "commitment": "1dfb4134b6f9b3c0176ea9107305b889fdeaa8385d656353ec8deb50c7717341"
+              },
+              {
+                "global_index": "1028",
+                "public_key": "d3c5ddeaff8646f05976363b395095c0fc7f606d320616b97801faa0118ccbf7",
+                "commitment": "1240f016de25bcf0b97a57026c00cd018f081b9f05fd2751ea8206b298961ae6"
+              },
+              {
+                "global_index": "1030",
+                "public_key": "590272b609b631a21c614aa7afaf17b62607be34b66c815793d9521179b95561",
+                "commitment": "12688e2270121fb265079429bfb41a237eab424ef6a950c52ffa3cda6e44f41d"
+              }
+            ]
+          }
+        ],
+        "outputs": [
+          {
+            "amount": "2000000000000",
+            "address": "84JQzHWT7SjgNhmiYDb7bh9R894vS4m8VUvQib2W9s4e8CEUTg97NdoiLjP9oUBwcLJreYA2ZKdQP1mFw4EzfNALHJbCDyq",
+            "is_change": false,
+            "change_major": 0,
+            "change_minor": 0
+          },
+          {
+            "amount": "4999980000000",
+            "address": "86qvtSoL7EtZkLeLmFzTrifZX3Hn6vZfU6RTgAMMmWYs8q31MTMNvjWCbcASVV2iQWVxZjxFXcBKRDR17JSkuZWuHw2cQEC",
+            "is_change": false,
+            "change_major": 0,
+            "change_minor": 0
+          }
+        ]
+      },
+      "txKeyHex": "08aeed098b3d8a8ad4015eb94b834286c8d5c1b40a05b5f9076e1f81a4d13500",
+      "additionalTxKeysHex": [
+        "5008dcaeda2bfcfedc70489606afddd7247702cd3878afbff985947ddf41cf02",
+        "5ec95d2e9b70d018c81722f964007a38ee9d42a8a5ce7d81d8f01bf999c11c0c"
+      ],
+      "senderViewKeyHex": "84b0087a63854856686f80596a5a1a6090795b4d1311139173262170d7e7180f",
+      "transactionHex": "020001020010e80702020202020202020202020202020207204b29e6918361e8f253409e4ecf63ad088d307f33600b9437616f5231e8f90200039daec061a9e2be434af6a7dfa712fcf37a07d1d1fcccdf6cd0893a85dd141032440003fcba02ed4db745acd83131c39510617eeac45ac3fa545baf283684804ac29cec7b6301b93e2c493f507fd7e2808748a59c7069daf79e0f825e72568b5a5108f85a56c20402755794e9985163c723d8c9f6067244822cbdc438eaed7b8690dd4a2c51494759aaf765ec5a5d9e1ef3fc049d13b351e95c5ab83bf8ea1645cf00490c99e45b660680dac409171c59890a76f7a3ca6444a871b4b251831f70756ea2e0a4c55221b4f1bbf72a37f9835fc57911da48354f729577a1bfc5bca70627fc6fa1fbc215a2e4d7186b569009c7eb811f15ec1483101decf8b60196ec7a7462cb74af6512ed2c297e6ef16d91a4770d0050e404de9cb37cc5a6116198b4e3919504027043cce4562389d1d14d660de425ae9689024785842fbe8d5fa02d8eed25161ebaa89401ed83ad15997f4eccca62a92e90d1f5c85810641e8a3c1cec98930846c3dbf9ad1f7a5b3cf8471d28e36c40fa81ee91c119342d0eea393f6d35f36b09b3289c222f8b48dc6e94bb3c842e19d7b445acf923e8c7071316ac383e53ea93eba407a4a8bb93342f4478788933ad297065da87bb22b20507907ac23e5f32771b6733c010a8e742bd30f9907c73a4575f07af72aaf357b0f7033e696c28b54768599c92a1e0463f16455be66f719aa5abc75399a1d5297aa3b9036b532b7884e624df36e41ad5407092d1afede29d50efd1f3430de9f77a7a1a8917d4719a5cdfa252e979c12ac1b27ac793509949bf90a4af83ea1cf3a82b3f1cd128dd2fdb386569f5dec2482d5f200e6c4ee74b2cf9ec46eeefa42dec62f4fdfe39311f04012ad8bd45b136b4cc63013af20436ef6224cf44cd7e8cfb9748e38aa93e4bea016e602b50892d4d12b0333cfed15312727932d1c8e160b2db0727edd4ccd00c1a5132738d65086f3bfaee90dc6e855d66a6232b2d7b23a7be93a9d65fe8c72b4e8195c5f0ab62c90f61915a35236ca141fbdab397d5d7b9042e924847aeebbb3eaba54c27c351e9e73aaabc5e2fa4b9d27b5339e87890be337ad53552e331b8f1ffc8ec6c6f73deb259f80c3e3c2ac7a9848f6adfa5f88f4533b0e2f14a0b08d592f86e67ce0865dd280d7054f7adba7f55aab037e93f3a4f8fd4a2f5a3a5f92422bcda225e420bcd0ffbae942105d5580242098a95c4bf659473fd238bfa50b76884088392077df8c2daaa66f2b6e7fa559046440889f9c1009436559e35823599f8f5b5547afe4693b47f4f6341812e3ccc580e78def7640b5b05e79c8587342c2bbc8441aae94761f79485319828b6fdd199368512c27d0065edcbb13f4954ba0566fc33bec5bba57bfeec9c8dc97fc045839561e5d2450fe783ffb92056c295aeb37bdce93f62bba3b3f6ffdf8a9214d88a9849cbf76902554e8b054288bee1d28d143b18f2439f0c2142e3aeccdcc850528f1b85d8c8037f44e4545004bb4036a4ff46bf6da083de451843ff0fd2f413cc7bb2f1c6ac0b0c19a7fc0be9ab3f949606b8fca17fcc432ecc2b118abac6d744c8eb34ec650e85e77adfe9c717fd3f3376ef31cecf68269c831a58bdc4e554417c58b4829e0a371dc10a94e0f5a17812a6171d996d0429c9d3d5c0ebe23b9a6f1a3f3119c30b3d0f525fcfc01ac16b70f6a890ce87d7ddd5fc89f7cb53dc59b9a603f638ee078ef20ac6fd66e7b41b56978b29235f1ba83e4ca23b687eb23d49d09d3357f40007a93307338c529cd89b4ee910bdc7842a9586487b119b3006bd68de15192d03886e041c7b7a8d2c6aa85267b758dfe724ea1f4ef2474148c0057fa99b99240a1f333b0666b233fbe504d67ebc5e2f7627cee99ed2edc019501883faea3cb30691060a0f6ff0b05ce1f309ba6c794e075c9805bbeef1eacd4dbecd239a55da076d58c0476721417af8c00dbb9068a07deaff64efed2e27235ac48ac44b69d10f627fe8d9a37b97c1d100e49165598fe2178f328320341de42207380aefe3a607848a17442a99f03e03810baf9cf59a176d23417d191868a99c9ed2f71bdda22dbbe8a2614f3b11ebdb783c3359c7ce31aaa50771c87e9abe0acb948f639255e8",
+      "nativePlanSHA256": "fde080d6a68f2dbfefb7056dbdbee15a696601864618515b5deade38abdc0d2b"
+    },
+    {
+      "name": "reuse-mixed",
+      "adapterPlan": {
+        "status": "pass",
+        "network": 0,
+        "fee": "20000000",
+        "inputs": [
+          {
+            "amount": "2000000000000",
+            "real_member": 7,
+            "output_index": 0,
+            "subaddress_major": 0,
+            "subaddress_minor": 1,
+            "tx_public_key": "b93e2c493f507fd7e2808748a59c7069daf79e0f825e72568b5a5108f85a56c2",
+            "mask": "2f49a5a4eb01eed865437193bac4383cefcef40449af0fd407212ed365ab2c0b",
+            "additional_tx_public_keys": [
+              "755794e9985163c723d8c9f6067244822cbdc438eaed7b8690dd4a2c51494759",
+              "6d1e8bf59752a6825b78848d6d87bb32aaac824545d4477314c1b2dfba5f6143"
+            ],
+            "ring": [
+              {
+                "global_index": "1000",
+                "public_key": "99467391255d70cee604d5ce07914d93abb8449b78f57c66176dab784f33304f",
+                "commitment": "b8c563f4d17a9105e4281b5b5488d355a377293987a97324f54faea7468014ad"
+              },
+              {
+                "global_index": "1002",
+                "public_key": "13156e671ad87914a49e6da7669f7e22cd23733f6ef286348d193c9ca32ff89a",
+                "commitment": "502818b2cf7ac5b233d3a3640904cfc08884355b2eb09f3d9568e97f6ab03f7e"
+              },
+              {
+                "global_index": "1004",
+                "public_key": "3c811e5d159516fead58cabda41fa7a411c5822c2a2bc2ccd7e7f234edfa1287",
+                "commitment": "8ff954b6a20d159862aec488bb1ae766e188a31f69fb8caa432ce5ee6911d8c3"
+              },
+              {
+                "global_index": "1006",
+                "public_key": "05afdf880aa3af9b7d8304e713f22451f8ed1b45185d762a80dfb58f274ac889",
+                "commitment": "6ac2d14f3bfb904a86adbd91f696b14ba2c3841af4c191aa39a243d4bfde6136"
+              },
+              {
+                "global_index": "1008",
+                "public_key": "d0216727a41a0de04c92ff45c0d9e2039c0cab5c94ee35ef39ece771844cd748",
+                "commitment": "98f7d9675f5d812fc5491e055e6d1fcabec0a1d1fcb6fb6b65e58b6fe3212546"
+              },
+              {
+                "global_index": "1010",
+                "public_key": "19521e60d80c7f7ed0436e35ce1ccf441a797fd3845c8aa06f7b88da43912809",
+                "commitment": "a30ee4382c7ad93de086a51f3b01985fecf4e6dd88d50ed6c9340456fbe9220b"
+              },
+              {
+                "global_index": "1012",
+                "public_key": "e1f6f8d1057288fd2de556a932bef590aea54d7a6731eb59266754a3020bb86a",
+                "commitment": "55d2198b96f131b281ebefffd6e9ad2e4b514e9be647a66fa93b5e301038b2cb"
+              },
+              {
+                "global_index": "1014",
+                "public_key": "9daec061a9e2be434af6a7dfa712fcf37a07d1d1fcccdf6cd0893a85dd141032",
+                "commitment": "831f70756ea2e0a4c55221b4f1bbf72a37f9835fc57911da48354f729577a1bf"
+              },
+              {
+                "global_index": "1016",
+                "public_key": "00240518da7b9d8c52a3a76fc8e6fc90bfeb0b0ecb66bb5a284b5a9db44713e9",
+                "commitment": "89b0a30bfbab87fbe9622bd429a01d1959bd798bee0fbc1f11148eb021a07f7f"
+              },
+              {
+                "global_index": "1018",
+                "public_key": "7af8a9beb6ed0156df9cc94cf4efddf32e28b1d224c2e0e972281fcd672a2883",
+                "commitment": "bcae8eb4f34d28454efa7fa7cde00f175a82b7d1a462285489d6808bbada2a58"
+              },
+              {
+                "global_index": "1020",
+                "public_key": "d58370f7488f14707251d8f7beead391a1d92008f680e2b7b07e58dc7d8dbd63",
+                "commitment": "d8ba3a5c706e69cea21f0a6cc526f1b32906d452e2bd1a97479fc21d16454bbe"
+              },
+              {
+                "global_index": "1022",
+                "public_key": "17e8203756f6e4bead75ce715784bc3c42154ed84ace0c090471dfe61bc8a53d",
+                "commitment": "b4a262dc4155ab6c1e6f8c7f593815e6e473cf73d6450dd65680ce080eb17c05"
+              },
+              {
+                "global_index": "1024",
+                "public_key": "24759bd11fa829ad99341b4a43bc2e7c98edf355af3fc9514cf313869be38544",
+                "commitment": "7634611fe330d26f69bf7f466137ac12f2e26e080adcabbae5e6d2022bd7dcd0"
+              },
+              {
+                "global_index": "1026",
+                "public_key": "dd4a20e02eda0a7d2236ef3e925116cf2e0a55553aa9c00ac0c8ea53fa4e06d8",
+                "commitment": "1dfb4134b6f9b3c0176ea9107305b889fdeaa8385d656353ec8deb50c7717341"
+              },
+              {
+                "global_index": "1028",
+                "public_key": "d3c5ddeaff8646f05976363b395095c0fc7f606d320616b97801faa0118ccbf7",
+                "commitment": "1240f016de25bcf0b97a57026c00cd018f081b9f05fd2751ea8206b298961ae6"
+              },
+              {
+                "global_index": "1030",
+                "public_key": "590272b609b631a21c614aa7afaf17b62607be34b66c815793d9521179b95561",
+                "commitment": "12688e2270121fb265079429bfb41a237eab424ef6a950c52ffa3cda6e44f41d"
+              }
+            ]
+          }
+        ],
+        "outputs": [
+          {
+            "amount": "666666666666",
+            "address": "4Ahp23WfMrMFK3wYL2hLWQFGt87ZTeRkufS6JoQZu6MEFDokAQeGWmu9MA3GFq1yVLSJQbKJqVAn9F9DLYGpRzRAEXqAXKM",
+            "is_change": false,
+            "change_major": 0,
+            "change_minor": 0
+          },
+          {
+            "amount": "1333313333334",
+            "address": "44jKQv6ZKMd5ecLLmkNJGi7azgSptEq8ki7TFiat1TfLfdDQ1tQ7ZYa3cRh7X2uRwvLDjddWh97ajeyhR2seKSECQeDx1WR",
+            "is_change": true,
+            "change_major": 0,
+            "change_minor": 0
+          }
+        ]
+      },
+      "txKeyHex": "08aeed098b3d8a8ad4015eb94b834286c8d5c1b40a05b5f9076e1f81a4d13500",
+      "additionalTxKeysHex": [],
+      "senderViewKeyHex": "84b0087a63854856686f80596a5a1a6090795b4d1311139173262170d7e7180f",
+      "transactionHex": "020001020010e807020202020202020202020202020202961122b56c978df9394d3eb3ac9cc60be6c8c0c44143ec0c245d04722bfe69220200032edd00a5b04454906b46a034fd6c820e815eddc44a3836b716d152546a5d5687630003f18287af48131bb8310094421c9a8e821b0010e90778963def22f197da119969b42101b93e2c493f507fd7e2808748a59c7069daf79e0f825e72568b5a5108f85a56c20680dac4095c2f4265c9c3e0be815cf9a5dd2d74c82b5507ec176cab5dfc25acbf520ca869a8487ae6804518a942cbc53e7500011ede1c98da6994c84d5f0e6f2dbb70e928d9f77a16a2db3087d746cd395908fcad01508346074e3e67bb205e474db9f436c1ed9b43d7d318f35e271a3dc14771785f10e1354a10cdce4a6c05dddd7008cfe99eae1c437261ab085e6c344b08a18804ee88b97326710ec43bf2789ce0f3ead217e2bc6e7c3e2dfd6692d19267d875962c83b7f95334bc6f6ca621a996933db8ab03be4b0496ecd2fa609e6757fb2a0e8030fec61893b5df239cf8d539ee147a60e675ca3be6c56034f488c98922e60b1a1163833bdef68d30fcff03090c313ede4fd0fb80e73d0f6396754ce395180307e9493ffcc6e92c72f0d35bf42184dd37b7777fa96c2b2cb09bc2b28afedd022180a84b2e57cb37f2537eb309868a665207b2a24eeda9d913fb0221c34d777474cf5824f3a4e6d10f2f17547057f40f1560208b9a3bf3fcb028647fbadee5e3c65751d1256e3bb0e61949f74f10a83c3c3a264384a8e4dafd5df2ee9b1fe3067772758e40891c4729a5b42cac29e9d39e4b99364b4bc8ff9a7023fece09d3f273f86d676fddd7e35e7fc6901d91a642afef2cfa9d858edfb128417602e9ffc10e32208ac251b23b090a0c6d069bba36e44b54209671d49d82951ccadb8cbac90d070c75dec99fddfb07c705f16281e4bd942382acf14d849f1d664eec7080293fa1f50d198d1d9747f36715d4250d66febc834d371d31a565a2360ddfa57220a139d45bdf7fb4c54f0c798cc0964a9e9c476d2aee0e16c8b6a017eff6719a3ef645d8cbc6676f0ce36ded4ed732c2e7ef074aed44c251abe18b372ac4cb36ea31b12feba0d22fe5cee0652da5844fbd3e9db4409ee7ac1d96bdc68e80d60fb9b84c29bf772ae07820b53954932f474ff64b0b21b4ab03b756f3bee4e8fb297ad28f75868eee37ae6b10da8822f86fd893dddfb4628d054229e64c88a04adaa356867253600e3390edc4135463cc72d1deb18d8231ee9db0d7618ae14341b0e5e20307c5cbac74abc4a69706493bbef8e81cb2df21396876a70680b4374d82ef4902280b11d23b3bdaeb35c30a8ca94b6916545c9898f72ba37fa7352a66b7824604a8e9ee34305ad22d2bfe6a9e35d14a42d99ce6303d8bf570ec56859fd4924c0b41f9b9f02e6dfc2686533c8c70fff669566572e1f9ae7b91c849fecbd07040072cd7b685d39de70a5004d54b576a59efa4312af3103ef7bf871ea1916dd5940c103dcca17ac2eece14e2e36fe80a15b32964e3e7b3431208fd1de8ad6ded180997efd1422f343d545c6b2f6ba563a38df8311f66bab30fde13bcd969100d120ecd038628f8df1cf216db43036ce3ceda85123d4562e2374cc36e0935b8ee940f63badb7e5d69144de229dedc9f4a5c1cdaf2832584c78d03035f948a2ce10b0002aac7e6347f3198393978c9158eb06fe5fa618d610a3772dc21a7c84d9794047d68e18c3471148ede2f3535e0967b9408c8425cc9b8e4ad849ee5739e367504ff72779c8a6af7274175719fafeba5fe277e22210ee0d5842c2482246567800a2d2ef29229b990f2b62948968f6e5e254329497cc38d0fde2e9057b885e31901278d516c4baa135f0c9f1cd413d15c08a4c18f1859678fc19a376ace9e2b7509bc93e791fd37131d3a6c4ee0d408ee95c9b9ba97f72fd35c6e1ae509a54bef07300361607614a6271178c43129110724b1e843f609f5e7c4979a73082e7ba307d87d4ebaf03e41f1f52c379fec38ccd6795ea508160bbeb2aeb8e0fd3675ddbfd3b32b8380c193731ef3e9fe8d2fc40b24cfabaccf9ce8a207ee2e0f6bb93f04",
+      "nativePlanSHA256": "4663416e2895c1da80ac05b3aa69863142fbe741e38c7d1fcbd88b625bf10e8b"
+    },
+    {
+      "name": "feather-public-offline-binding-only",
+      "adapterPlan": {
+        "status": "pass",
+        "network": 0,
+        "fee": "20000000",
+        "inputs": [
+          {
+            "amount": "7000000000000",
+            "real_member": 7,
+            "output_index": 0,
+            "subaddress_major": 0,
+            "subaddress_minor": 0,
+            "tx_public_key": "111657cb6786dcf6e8ee44137c9cac490284d6ef02f66525cba3e30e7e242bc7",
+            "mask": "3dbebce6f8d78fccd94c5773b9c0e6d7e85598149dae13c5b509a51455d61a0b",
+            "additional_tx_public_keys": [],
+            "ring": [
+              {
+                "global_index": "1000",
+                "public_key": "99467391255d70cee604d5ce07914d93abb8449b78f57c66176dab784f33304f",
+                "commitment": "b8c563f4d17a9105e4281b5b5488d355a377293987a97324f54faea7468014ad"
+              },
+              {
+                "global_index": "1002",
+                "public_key": "13156e671ad87914a49e6da7669f7e22cd23733f6ef286348d193c9ca32ff89a",
+                "commitment": "502818b2cf7ac5b233d3a3640904cfc08884355b2eb09f3d9568e97f6ab03f7e"
+              },
+              {
+                "global_index": "1004",
+                "public_key": "3c811e5d159516fead58cabda41fa7a411c5822c2a2bc2ccd7e7f234edfa1287",
+                "commitment": "8ff954b6a20d159862aec488bb1ae766e188a31f69fb8caa432ce5ee6911d8c3"
+              },
+              {
+                "global_index": "1006",
+                "public_key": "05afdf880aa3af9b7d8304e713f22451f8ed1b45185d762a80dfb58f274ac889",
+                "commitment": "6ac2d14f3bfb904a86adbd91f696b14ba2c3841af4c191aa39a243d4bfde6136"
+              },
+              {
+                "global_index": "1008",
+                "public_key": "d0216727a41a0de04c92ff45c0d9e2039c0cab5c94ee35ef39ece771844cd748",
+                "commitment": "98f7d9675f5d812fc5491e055e6d1fcabec0a1d1fcb6fb6b65e58b6fe3212546"
+              },
+              {
+                "global_index": "1010",
+                "public_key": "19521e60d80c7f7ed0436e35ce1ccf441a797fd3845c8aa06f7b88da43912809",
+                "commitment": "a30ee4382c7ad93de086a51f3b01985fecf4e6dd88d50ed6c9340456fbe9220b"
+              },
+              {
+                "global_index": "1012",
+                "public_key": "e1f6f8d1057288fd2de556a932bef590aea54d7a6731eb59266754a3020bb86a",
+                "commitment": "55d2198b96f131b281ebefffd6e9ad2e4b514e9be647a66fa93b5e301038b2cb"
+              },
+              {
+                "global_index": "1014",
+                "public_key": "b8f5fbec490beea3bff47e60cd9b8ec582bc2ef5e745990ba62f7142a4c41f17",
+                "commitment": "8d182f7b1363124930c237cea9b06ecc1762c095414badab113f385a8d806a67"
+              },
+              {
+                "global_index": "1016",
+                "public_key": "00240518da7b9d8c52a3a76fc8e6fc90bfeb0b0ecb66bb5a284b5a9db44713e9",
+                "commitment": "89b0a30bfbab87fbe9622bd429a01d1959bd798bee0fbc1f11148eb021a07f7f"
+              },
+              {
+                "global_index": "1018",
+                "public_key": "7af8a9beb6ed0156df9cc94cf4efddf32e28b1d224c2e0e972281fcd672a2883",
+                "commitment": "bcae8eb4f34d28454efa7fa7cde00f175a82b7d1a462285489d6808bbada2a58"
+              },
+              {
+                "global_index": "1020",
+                "public_key": "d58370f7488f14707251d8f7beead391a1d92008f680e2b7b07e58dc7d8dbd63",
+                "commitment": "d8ba3a5c706e69cea21f0a6cc526f1b32906d452e2bd1a97479fc21d16454bbe"
+              },
+              {
+                "global_index": "1022",
+                "public_key": "17e8203756f6e4bead75ce715784bc3c42154ed84ace0c090471dfe61bc8a53d",
+                "commitment": "b4a262dc4155ab6c1e6f8c7f593815e6e473cf73d6450dd65680ce080eb17c05"
+              },
+              {
+                "global_index": "1024",
+                "public_key": "24759bd11fa829ad99341b4a43bc2e7c98edf355af3fc9514cf313869be38544",
+                "commitment": "7634611fe330d26f69bf7f466137ac12f2e26e080adcabbae5e6d2022bd7dcd0"
+              },
+              {
+                "global_index": "1026",
+                "public_key": "dd4a20e02eda0a7d2236ef3e925116cf2e0a55553aa9c00ac0c8ea53fa4e06d8",
+                "commitment": "1dfb4134b6f9b3c0176ea9107305b889fdeaa8385d656353ec8deb50c7717341"
+              },
+              {
+                "global_index": "1028",
+                "public_key": "d3c5ddeaff8646f05976363b395095c0fc7f606d320616b97801faa0118ccbf7",
+                "commitment": "1240f016de25bcf0b97a57026c00cd018f081b9f05fd2751ea8206b298961ae6"
+              },
+              {
+                "global_index": "1030",
+                "public_key": "590272b609b631a21c614aa7afaf17b62607be34b66c815793d9521179b95561",
+                "commitment": "12688e2270121fb265079429bfb41a237eab424ef6a950c52ffa3cda6e44f41d"
+              }
+            ]
+          }
+        ],
+        "outputs": [
+          {
+            "amount": "1000000000",
+            "address": "86jm8LffqcZ2hZHb6KqibUZRmfG6puiFhTD8YahevKN1F68yVT5nVHCFtweBUn17fVafbimZgWckYccjuXuxisLsSa5HF5X",
+            "is_change": false,
+            "change_major": 0,
+            "change_minor": 0
+          },
+          {
+            "amount": "6998980000000",
+            "address": "44jKQv6ZKMd5ecLLmkNJGi7azgSptEq8ki7TFiat1TfLfdDQ1tQ7ZYa3cRh7X2uRwvLDjddWh97ajeyhR2seKSECQeDx1WR",
+            "is_change": true,
+            "change_major": 0,
+            "change_minor": 0
+          }
+        ]
+      },
+      "txKeyHex": "08aeed098b3d8a8ad4015eb94b834286c8d5c1b40a05b5f9076e1f81a4d13500",
+      "additionalTxKeysHex": [],
+      "senderViewKeyHex": "84b0087a63854856686f80596a5a1a6090795b4d1311139173262170d7e7180f",
+      "transactionHex": "020001020010e80702020202020202020202020202020207204b29e6918361e8f253409e4ecf63ad088d307f33600b9437616f5231e8f902000352d128aec9d26ed9cc76bbf007a3109efa3a9637cfb34bc32544ca057e9b8ff05e00039bb773e6554dd7f38853f2008b1e0b7fc4f56f75e3ac2dc3b291149a60a7917b5e210154536fd16af66e700ae2d09d2b4d694610c3c6f57c51654fe55a5bf00f11a3830680dac4099cde7b01bb77d1ae8efe8f8bdea391e6516ff8a518d15483b821611ca6d99230250c9253f00c93569c96bf4787f692828a67d703619a7d1ff01c3683ff7ea21580911768562923f9b4a13ce2dd0caceb01dadca946a7467df5a37dc933fa27ee77c0ab99a74ec264eda658b551941f02db01a3542b7c7604ad2396e63cf194faf2ea64d246fc92a247660324b6dd9357f9f8f615fda8c4ce83a096f57bbdb4e18f16810e4b77901e323801a7e84dd526f8a67344837dec21e3dfba12e0b79f056af5900b5c32459f6876608a4e6f7bbf0d580b8f61295f5030da69f272cee6950e55382900adcaeef5194282870279e009bea144f2864effba8d919eefc3d798b70429d1d67b134933083ec75edb0b3802076a2e788c771c79f2d1c95eaeb586af016475b45369754c8c84d908c32d3c21bff9bde9a7f654af1e016a92f1dd91edfe4a803a438af49f8e27b3a089a248b8e70479548e4574e15ec8a08731d0b7668c0639ff41d5e3825458b58653755d9b388ec5d59d145c3a76be1ea20e49895d076f374bd85ff4548fcecd5af2d7f77615eba2d80b507411ad58fc4345b0227f64c70d34ac6464fe35f971c3b322455915d2dfa77ffa04a417eda7180a476176135494c16aec74314c17d2f6c98421904ecd301463d7fa1d9bc7fee4ebc4e4af1c38f0cddfd8968b64e6e63779ca90b39d0772fab26cecb9772c4150bf1ae8b09754e793a948180810abd93344e763766ceb7400d1ba5a3987c72022a5c5498785da2922bb7264f3148fab182a45ea169b280e31a7ce8c60c282aa437b54b261d4bf466cc040872118326c490c9545f450277ce86165940fdaf1810fb50be9abd39670e07a63632a261c00745162d9ecf4d67d3dd48cfb1547ebb877e37ece5149a7c3b2523fad67e905d1d417d19d131ac86813ed9d022f9027c6ce44efcfb1536e7700f50a8100cdb8e38d101503126af9f951df5a67790e764ad0ec1bdda204bbff93fd7a1533975f9222c8a8ac048ea014bd56b5c65fe954bc4d7feac257c0f90030b5712882a7536592436d13a84008a694f3210f0fdefaa2d7c307bd752d1bdcb0d546b67f80a674e5dfed05f2ad02c03d01f6980208ecf332268084c65aadf14dd8be3b6e8ac0f732e8edf3de0e0cf5bbb68f1fc2b6da88658331b464d71df574eaa1b3ed22760c07c27a910fec04acebb25ab7a45ca2ce8fed3d726077911af20c0ae54c899b4bd8873b9da4310df2827388889eefa78a697ed19a51bef59f4dad83910e1859e9a08f31aee13607d9c54fcc1a1801669bada06227e55d9172ef066b87dd04445aee52e1f45415085a426185c3d47126e519ca7684c7dac044e24fe08f4f107689e0ee3b9511640f62ff92a3ee0bfc6ef531fc1a61df522fa67c58dd0a7d54a6c1c34dc5d78f180463e06b20b4c91be5f05bb39bc8ef40e4235bf4976b6e565ad61b5cfd7c39fd08c8066c5601ddd340d4b042ea34939b1ff81aa2514b8acf98ccee388d4c8d00070af3a4a082a9f958dd7a05428b17c1495fa7197e6925049df5c548a4f1fca206195f904d5098298db256ec7faa4a37e735b29581bcaa04e3be689837d27fcb0fe7fe60a68d523431452274ef7e67dc62e30b69d115238ae0d3656026e324640e38ce4c99d2044a1526b19192cbcc91fc802f462ab2b93555001525cdfda1e30f017c3b0ed2ad3c3ec944e5710db787fcf70b30439cb5ae2c39de70322679a10abe1544a4c94a59b8c8c27851870a786f74a03c36b41812463a4d0893926c28097724cdbe22d71f383a3786533c685237d18dc041c931abe9af9c7e443595d0445a1df0e6faea001746671ad7002e882fbc6cdc770e2e92df86d4204f42ba9a2c",
+      "nativePlanSHA256": "87e2ef122cbf83f77013fa97c51fcd6f88088f2c5a9e132a5f750c39a2f0fc04"
+    }
+  ]
+}

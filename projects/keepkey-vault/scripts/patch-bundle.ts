@@ -2,17 +2,18 @@
 /**
  * Patches the Electrobun build output to fix Bun bundler bugs.
  *
- * Must run AFTER `bunx electrobun build`.
+ * Electrobun runs this after bundling and before hashing/signing the app.
  *
  * Bug: `export * from 'node:buffer'` in @swagger-api/apidom-reference gets
  * compiled to `__reExport(exports_protocol_import, node_buffer)` but
  * `node_buffer` is never defined. We inject the missing require().
  */
 import { readFileSync, writeFileSync, existsSync, readdirSync } from 'fs'
-import { join } from 'path'
+import { join, resolve } from 'path'
 
 const projectRoot = join(import.meta.dir, '..')
-const buildDir = join(projectRoot, '_build')
+const hookBuildDir = process.env.ELECTROBUN_BUILD_DIR
+const buildDir = resolve(projectRoot, process.argv[2] ?? hookBuildDir ?? '_build')
 
 // Find the electrobun build output index.js by scanning _build/ recursively.
 // Electrobun uses platform names that differ from Node (macos vs darwin, win vs win32)
@@ -35,6 +36,9 @@ function findBunIndexFiles(dir: string): string[] {
   return results
 }
 const candidates = findBunIndexFiles(buildDir)
+if (hookBuildDir && candidates.length === 0) {
+  throw new Error(`Electrobun did not bundle its backend in ${buildDir}`)
+}
 
 let patched = false
 for (const candidate of candidates) {

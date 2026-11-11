@@ -138,6 +138,9 @@
 	"stageOutput": "Output Transaction",
 	"confirmations": "confirmations",
 	"outputConfirmations": "Output Confirmations",
+	"lastChecked": "Last checked",
+	"swapStatusNotFound": "Swap status is not available yet",
+	"swapStatusCheckFailed": "Status check failed",
 	"elapsed": "Elapsed",
 	"estimated": "Est.",
 	"dismiss": "Dismiss",
@@ -237,5 +240,7 @@
 	"lowGasTitle": "Low {{symbol}} for network fees",
 	"lowGasSwapBody": "Sending {{token}} costs {{symbol}} in network fees — this swap will likely fail to broadcast. Deposit {{symbol}} to your {{coin}} address first. You have {{balance}} {{symbol}}.",
 	"readyForQuote": "Ready to fetch a fresh quote.",
-	"loadingBalances": "Checking your KeepKey balances..."
+	"loadingBalances": "Checking your KeepKey balances...",
+	"balanceLoading": "Loading {{symbol}} balance… MAX is available once it arrives.",
+	"balanceMissing": "{{symbol}} balance was not returned by the last refresh, so MAX is unavailable. Enter an amount, or refresh and try again."
 }
