@@ -1,6 +1,6 @@
 import { useUiTranslation } from "./i18n/ui"
 import { useState, useEffect, useCallback, useRef } from "react"
-import { resolveAppPhase, showWatchOnly } from "../shared/app-phase"
+import { autoUnlockKey, resolveAppPhase, showWatchOnly } from "../shared/app-phase"
 import { Box, Flex, Text, Button } from "@chakra-ui/react"
 import { useTranslation } from "react-i18next"
 import { PinEntry } from "./components/device/PinEntry"
@@ -954,6 +954,19 @@ function App() {
 		rpcRequest("logOnboarding", { event: `phase=${phase} state=${deviceState.state} wizardComplete=${wizardComplete} setupInProgress=${setupInProgress} oobEntered=${oobEnteredRef.current} firmwareSkipped=${firmwareSkipped}` }).catch(() => {})
 	}, [phase, deviceState.state, wizardComplete, setupInProgress, firmwareSkipped])
 
+	// Plugged in locked: open the PIN prompt right away. The Unlock button only
+	// returns when that attempt ends without unlocking (cancelled or failed).
+	const autoUnlock = autoUnlockKey({ phase, state: deviceState.state, deviceId: deviceState.deviceId, activeTransport: deviceState.activeTransport, wipePending: deviceState.wipePending })
+	const [autoUnlockTried, setAutoUnlockTried] = useState<string | null>(null)
+	useEffect(() => {
+		// A replug, or a later lock after this one unlocked, asks again. A cancel does not.
+		if (deviceState.state === "disconnected" || deviceState.state === "ready") { setAutoUnlockTried(null); return }
+		if (!autoUnlock || autoUnlockTried === autoUnlock) return
+		setAutoUnlockTried(autoUnlock)
+		void handleRequestUnlock()
+	}, [autoUnlock, autoUnlockTried, deviceState.state, handleRequestUnlock])
+	const showUnlockButton = !unlocking && (!autoUnlock || autoUnlockTried === autoUnlock)
+
 	// ── Overlays (render above everything) ──────────────────────────
 	// PIN is highest priority (z-index 2010) — must show above signing
 	// approval so users can unlock a PIN-locked device during API signing.
@@ -1186,7 +1199,7 @@ function App() {
 					) : (
 						/* Unified device grid — registered devices + emulator wallets */
 						<>
-							{(needsPin || needsPassphrase) && !deviceState.wipePending && <Box textAlign="center" mb="4">
+							{(needsPin || needsPassphrase) && !deviceState.wipePending && showUnlockButton && <Box textAlign="center" mb="4">
 								<Button size="sm" bg="kk.gold" color="black" loading={unlocking} loadingText={uiText("Unlocking…")} onClick={handleRequestUnlock}>{t("pin.unlock", { ns: "device" })}</Button>
 								{unlockError && <Text fontSize="xs" color="kk.error" mt="2">{unlockError}</Text>}
 							</Box>}
