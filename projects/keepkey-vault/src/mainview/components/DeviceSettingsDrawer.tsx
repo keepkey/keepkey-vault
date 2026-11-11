@@ -1472,8 +1472,8 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 
 							{/* ── Mobile Pairing ────── */}
 							<Box pt="3" borderTop="1px solid" borderColor="rgba(255,255,255,0.06)">
-								<Flex justify="space-between" align="center">
-									<Box>
+								<Flex justify="space-between" align="center" gap="4">
+									<Box flex="1" minW="0">
 										<Text fontSize="md" color="kk.textPrimary" fontWeight="500">
 											{t("mobilePairing.title")}
 										</Text>
@@ -1490,6 +1490,9 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 										color="kk.gold"
 										fontSize="xs"
 										fontWeight="500"
+										// Keep the label on one line; the description wraps instead.
+										whiteSpace="nowrap"
+										flexShrink={0}
 										cursor={deviceState.state !== "ready" ? "not-allowed" : "pointer"}
 										opacity={deviceState.state !== "ready" ? 0.4 : 1}
 										_hover={deviceState.state === "ready" ? { bg: "rgba(233,196,106,0.22)" } : {}}
