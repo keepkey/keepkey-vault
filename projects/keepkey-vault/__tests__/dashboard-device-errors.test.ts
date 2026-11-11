@@ -4,8 +4,12 @@ test('Dashboard retains balances for local device failures and still reports pro
   const run = Bun.spawnSync([process.execPath, new URL('./support/dashboard-device-errors.tsx', import.meta.url).pathname], {
     cwd: new URL('../', import.meta.url).pathname, stdout: 'pipe', stderr: 'pipe', timeout: 30000,
   })
-  if (run.exitCode) throw new Error(run.stderr.toString() || run.stdout.toString())
-  const result = JSON.parse(run.stdout.toString().trim().split('\n').at(-1)!)
+  const stdout = run.stdout.toString()
+  if (run.exitCode !== 0) throw new Error(run.stderr.toString() || stdout)
+  const marker = 'DASHBOARD_DEVICE_ERRORS_RESULT '
+  const records = stdout.split(/\r?\n/).filter(line => line.startsWith(marker))
+  if (records.length !== 1) throw new Error(`Expected one dashboard fixture result, received ${records.length}\n${stdout}`)
+  const result = JSON.parse(records[0].slice(marker.length))
   expect(result.cachedBusy).toEqual({ outage: false, balance: true, refreshing: false })
   expect(result.cachedLocked).toEqual({ outage: false, balance: true, refreshing: false })
   expect(result.cachedCacheMiss).toEqual({ outage: false, balance: true, refreshing: false })
