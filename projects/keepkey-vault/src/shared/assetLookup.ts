@@ -120,11 +120,19 @@ export function isBundledAssetIcon(url: string | undefined): boolean {
  *  Bundled LOCAL_ICONS win — several components call this directly rather
  *  than through getAssetIcon, and synthetic CAIPs (shielded ZEC) plus
  *  offline-critical ones (BTC) must resolve at every call site. */
+/** CAIPs whose CDN image is still stored under an older id. HyperEVM moved from
+ *  the pinned catalog's wrong chain 2868 to 999 (see chains.ts), but the CDN only
+ *  has the HYPE logo under 2868, so 999 returned 403 and the alt text showed. */
+export const ICON_CAIP_ALIASES: Record<string, string> = {
+  'eip155:999/slip44:60': 'eip155:2868/slip44:60',
+}
+
 export function caipToIcon(caip: string): string {
   if (LOCAL_ICONS[caip]) return LOCAL_ICONS[caip]
   const bundled = bundledIconForCaip(caip)
   if (bundled) return bundled
-  return `https://api.keepkey.info/coins/${btoa(caip).replace(/=+$/, '')}.png`
+  const cdnCaip = ICON_CAIP_ALIASES[caip] || caip
+  return `https://api.keepkey.info/coins/${btoa(cdnCaip).replace(/=+$/, '')}.png`
 }
 
 /** Look up a full asset entry by CAIP */
