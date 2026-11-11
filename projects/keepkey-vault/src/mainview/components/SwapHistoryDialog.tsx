@@ -14,6 +14,7 @@ import { Z } from "../lib/z-index"
 import { getExplorerTxUrl, getExplorerBlockUrl } from "../../shared/chains"
 import type { PendingSwap, SwapStatusUpdate, SwapHistoryRecord, SwapHistoryStats, SwapTrackingStatus } from "../../shared/types"
 import { ProviderBadge } from "./ProviderBadge"
+import { formatEvmFeePaid } from "../lib/evm-fee-display"
 
 const ExternalLinkIcon = () => (
   <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
@@ -400,12 +401,7 @@ function HistoryCard({ record, onResume }: { record: SwapHistoryRecord; onResume
             {record.inboundGasUsed && record.fromCaip?.startsWith('eip155:') && (
               <DetailRow
                 label={uiText("Gas Used")}
-                value={(() => {
-                  const used = Number(record.inboundGasUsed)
-                  const usedStr = Number.isFinite(used) ? used.toLocaleString(getNumberLocale()) : record.inboundGasUsed!
-                  const gwei = record.inboundEffectiveGasPrice ? Number(record.inboundEffectiveGasPrice) / 1e9 : NaN
-                  return Number.isFinite(gwei) ? `${usedStr} gas · ${gwei.toFixed(2)} gwei` : `${usedStr} gas`
-                })()}
+                value={formatEvmFeePaid(record.inboundGasUsed, record.inboundEffectiveGasPrice || undefined, record.fromCaip, getNumberLocale())}
               />
             )}
             {/* Inbound block # — best-effort; clickable on EVM/UTXO explorers. */}

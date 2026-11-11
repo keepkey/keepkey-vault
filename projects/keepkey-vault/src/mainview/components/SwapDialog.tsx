@@ -12,6 +12,7 @@ import { Box, Flex, Text, VStack, Button, Input, Image, HStack, Spinner } from "
 import CountUp from "react-countup"
 import { rpcRequest, rpcFire, onRpcMessage } from "../lib/rpc"
 import { formatBalance } from "../lib/formatting"
+import { formatEvmFeePaid } from "../lib/evm-fee-display"
 import { isTokenCaip } from "../lib/asset-utils"
 import { useFiat } from "../lib/fiat-context"
 import { normalizeAmountInput, decimalAmount } from '../../shared/locale'
@@ -3212,12 +3213,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                               {t("gas", "Gas")}
                             </Text>
                             <Text fontFamily="mono" fontSize="11.5px" color="kk.textSecondary" flex="1">
-                              {(() => {
-                                const used = Number(liveInboundGasUsed)
-                                const usedStr = Number.isFinite(used) ? used.toLocaleString(getNumberLocale()) : liveInboundGasUsed
-                                const gwei = liveInboundEffectiveGasPrice ? Number(liveInboundEffectiveGasPrice) / 1e9 : NaN
-                                return Number.isFinite(gwei) ? `${usedStr} gas · ${gwei.toFixed(2)} gwei` : `${usedStr} gas`
-                              })()}
+                              {formatEvmFeePaid(liveInboundGasUsed, liveInboundEffectiveGasPrice || undefined, fromAsset.caip, getNumberLocale())}
                             </Text>
                           </Flex>
                         )}

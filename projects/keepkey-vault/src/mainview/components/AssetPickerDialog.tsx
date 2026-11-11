@@ -29,6 +29,7 @@ import { CHAINS } from "../../shared/chains"
 import { Z } from "../lib/z-index"
 import { useFiat } from "../lib/fiat-context"
 import { isSymbolSquatter } from "../../shared/symbolSquatter"
+import { formatBalance } from "../lib/formatting"
 // ── constants ──────────────────────────────────────────────────────────────
 
 const PAGE_SIZE = 20
@@ -442,7 +443,7 @@ function HeldTile({ entry: e, onSelect, fmtCompact, privateModeEnabled }: {
           {chainName}
         </Text>
         <Text fontSize="14px" fontWeight="600" fontVariantNumeric="tabular-nums" mt="1.5" letterSpacing="-0.01em">
-          {e.balance!.amount}
+          {formatBalance(e.balance!.amount)}
         </Text>
         <Text fontSize="11px" fontWeight="500" color="kk.textSecondary" fontVariantNumeric="tabular-nums">{privateModeEnabled ? "••••••" : fmtCompact(e.balance!.usd)}</Text>
         {/* Full CAIP */}
@@ -946,7 +947,7 @@ function AssetListRow({ entry: e, onSelect, onUnavailable }: {
           )}
           {e.balance && (
             <Box bg="rgba(139,227,196,0.12)" color="var(--teal)" px="1.5" py="0.5"
-              borderRadius="4px" fontSize="9px" fontWeight="600" letterSpacing="0.04em">{uiText("HELD ·")}{" "}{e.balance.amount}
+              borderRadius="4px" fontSize="9px" fontWeight="600" letterSpacing="0.04em">{uiText("HELD ·")}{" "}{formatBalance(e.balance.amount)}
             </Box>
           )}
           {!e.balance && isTryQuote && (
@@ -974,7 +975,7 @@ function AssetListRow({ entry: e, onSelect, onUnavailable }: {
       <Flex direction="column" align="flex-end" gap="1" flexShrink={0}>
         {e.balance && (
           <Text fontSize="11px" fontVariantNumeric="tabular-nums" color="kk.textSecondary">
-            {e.balance.amount}
+            {formatBalance(e.balance.amount)}
           </Text>
         )}
         <ProviderDots providers={e.availability.providers} />
