@@ -9,6 +9,7 @@ import type { ChainDef } from '../../shared/chains'
 import { evmAddressPath } from '../../shared/chains'
 import { tokenMaxSpendableBaseUnits } from '../../shared/max-send'
 import { ARBITRUM_ONE_RPC, estimateGas, getEvmGasPrice, getEvmNonce, getEvmBalance } from '../evm-rpc'
+import { validateAddress } from '../../shared/address-validation'
 
 const TAG = '[txbuilder:evm]'
 
@@ -124,6 +125,11 @@ export async function buildEvmTx(
   params: BuildEvmParams,
 ) {
   const { to, memo, feeLevel = 5, isMax = false, fromAddress, caip, tokenBalance, tokenDecimals: frontendDecimals, rpcUrl, addressIndex, gasPriceGwei: gasPriceGweiOverride, gasLimit: gasLimitOverrideStr } = params
+  // A mixed-case recipient must match its EIP-55 checksum: one wrong letter is a
+  // typo that would otherwise sign a send to an address nobody controls.
+  if (validateAddress(to, chain).error === 'invalidChecksum') {
+    throw new Error('Recipient address checksum is invalid (EIP-55). Check the address for a typo.')
+  }
   const amountNum = parseFloat(params.amount)
   const chainId = parseInt(chain.chainId || '1', 10)
   const isErc20 = !!(caip && caip.includes('erc20'))
