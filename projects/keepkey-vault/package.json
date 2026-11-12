@@ -1,6 +1,6 @@
 {
   "name": "keepkey-vault",
-  "version": "1.6.11",
+  "version": "1.6.12",
   "description": "KeepKey Vault - Desktop hardware wallet management powered by Electrobun",
   "scripts": {
     "i18n:check": "bun scripts/check-i18n.ts",
