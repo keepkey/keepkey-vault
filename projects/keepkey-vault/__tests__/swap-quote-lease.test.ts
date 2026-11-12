@@ -79,6 +79,33 @@ test('expiry and session are checked at claim AND immediately before a signature
     expect(() => leases.claim(execution, expired ? 7 : 8)).toThrow(expired ? /expired/ : /session changed/)
   }
 })
+test('an approval carries no rate: it signs on an aged quote, the swap after it does not', () => {
+  const { leases, execution, tick } = setup()
+  const claim = leases.claim(execution, 7)
+  tick(60_000)
+  // wrapSign operations and protectSign kinds of the approval path (relay and router).
+  for (const step of ['loadClearsignSigner', 'erc20Approve', 'approval']) claim.beforeSign(7, step)
+  expect(() => claim.beforeSign(7, 'swap')).toThrow(/^The approval was sent, but the swap quote expired/)
+  expect(() => claim.beforeSign(7)).toThrow(/quote expired/)
+  expect(() => claim.beforeSign(7, 'someFutureStep')).toThrow(/quote expired/) // unknown steps stay quote-bound
+  claim.finish(false)
+})
+test('a rate-free step still needs the same session and consumes the quote', () => {
+  const { leases, execution } = setup()
+  const claim = leases.claim(execution, 7)
+  expect(() => claim.beforeSign(8, 'erc20Approve')).toThrow(/session changed/)
+  claim.beforeSign(7, 'erc20Approve')
+  claim.finish(false)
+  expect(() => leases.claim(execution, 7)).toThrow(/already used/)
+})
+test('without an approval the expired swap keeps its plain message', () => {
+  const { leases, execution, tick } = setup()
+  const claim = leases.claim(execution, 7)
+  claim.beforeSign(7, 'loadClearsignSigner') // signer trust is not an approval
+  tick(60_000)
+  expect(() => claim.beforeSign(7, 'swap')).toThrow(/^Swap quote has expired\. Review a new quote before signing\.$/)
+  claim.finish(false)
+})
 test('provider expiry may shorten but never extend Vault age limits', () => {
   const { leases, execution, tick, issued } = setup({ expiry: 1010 })
   expect(issued.quoteExpiresAt).toBe(1_010_000)

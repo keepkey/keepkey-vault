@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { isLocalDeviceAccessError } from '../src/shared/device-access-error'
+import { isDeviceBusyError, isLocalDeviceAccessError, retryWhileDeviceBusy } from '../src/shared/device-access-error'
 
 describe('local device admission errors', () => {
   const busy = 'KeepKey is busy with another request. Wait for it to finish, then try again.'
@@ -46,5 +46,41 @@ describe('local device admission errors', () => {
     undefined,
   ])('keeps provider and unrecognized failures visible: %j', error => {
     expect(isLocalDeviceAccessError(error)).toBe(false)
+  })
+})
+
+describe('waiting out a KeepKey held by another request', () => {
+  const busy = 'KeepKey is busy with another request. Wait for it to finish, then try again.'
+  const queueFull = 'Too many pending KeepKey requests. Wait for the current request to finish.'
+  test('only the two refused-before-dispatch contention messages count as busy', () => {
+    for (const message of [busy, queueFull]) {
+      expect(isDeviceBusyError(new Error(message))).toBe(true)
+      expect(isDeviceBusyError(message)).toBe(true)
+    }
+    // Needs the user (PIN, setup, wipe) or is not contention at all: never retried.
+    for (const message of ['KeepKey is locked. Unlock it before requesting new device data.', 'KeepKey is busy with device setup.',
+      'Timed out waiting for the KeepKey request. Try again.', 'No device connected', `Provider returned an error: ${busy}`, 'Swap quote has expired. Review a new quote before signing.'])
+      expect(isDeviceBusyError(new Error(message))).toBe(false)
+    expect(isDeviceBusyError(null)).toBe(false)
+  })
+
+  test('retries a busy refusal until the KeepKey is free', async () => {
+    let calls = 0
+    const value = await retryWhileDeviceBusy(async () => { if (++calls < 3) throw new Error(busy); return 'built' }, () => true, 1)
+    expect(value).toBe('built')
+    expect(calls).toBe(3)
+  })
+
+  test('any other failure surfaces at once', async () => {
+    let calls = 0
+    await expect(retryWhileDeviceBusy(async () => { calls++; throw new Error('Insufficient balance') }, () => true, 1)).rejects.toThrow('Insufficient balance')
+    expect(calls).toBe(1)
+  })
+
+  test('a caller that moved on stops the wait without running again', async () => {
+    let calls = 0, current = true
+    const waiting = retryWhileDeviceBusy(async () => { calls++; current = false; throw new Error(busy) }, () => current, 1)
+    await expect(waiting).rejects.toThrow(busy)
+    expect(calls).toBe(1)
   })
 })
