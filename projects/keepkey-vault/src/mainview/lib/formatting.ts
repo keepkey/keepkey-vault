@@ -21,7 +21,8 @@ export function formatBalance(val: string, locale = getNumberLocale()): string {
 	if (isNaN(num) || num === 0) return '0'
 	const abs = Math.abs(num)
 	const resolvedLocale = validNumberLocale(locale)
-	if (abs < 0.000001) return num.toLocaleString(resolvedLocale, { notation: 'scientific', maximumFractionDigits: 2 })
+	// Dust is a real holding: two significant digits as a plain decimal, never "1E-8".
+	if (abs < 0.000001) return num.toLocaleString(resolvedLocale, { maximumSignificantDigits: 2 })
 	const decimals = abs < 1 ? 6 : abs < 1000 ? 4 : 2
 	return num.toLocaleString(resolvedLocale, { minimumFractionDigits: abs < 1000 ? decimals : 0, maximumFractionDigits: decimals })
 }

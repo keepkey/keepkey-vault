@@ -7,7 +7,7 @@
  * Run: bun test __tests__/app-phase.test.ts
  */
 import { describe, expect, test } from 'bun:test'
-import { resolveAppPhase, retainLivePortfolioSession, showWatchOnly } from '../src/shared/app-phase'
+import { autoUnlockKey, resolveAppPhase, retainLivePortfolioSession, showWatchOnly } from '../src/shared/app-phase'
 
 const base = { state: 'disconnected', oobLock: false, isClaimed: false, firmwareSkipped: false, wizardComplete: false }
 
@@ -112,5 +112,25 @@ describe('browsing an already opened wallet while its device is locked', () => {
       expect(resolveAppPhase({ ...retained, state })).toBe('splash')
     }
     expect(resolveAppPhase({ ...retained, state: 'needs_init' })).toBe('setup')
+  })
+})
+
+describe('a KeepKey plugged in locked unlocks without a click', () => {
+  const locked = { phase: 'splash' as const, state: 'needs_pin', deviceId: 'KK1', activeTransport: 'webusb' }
+  test('the PIN and then the passphrase prompt open on their own, once per connection', () => {
+    expect(autoUnlockKey(locked)).toBe('KK1:webusb')
+    expect(autoUnlockKey({ ...locked, state: 'needs_passphrase' })).toBe('KK1:webusb')
+    expect(autoUnlockKey({ ...locked, activeTransport: 'hid' })).toBe('KK1:hid') // a new connection asks again
+  })
+  test('never over a pending wipe, setup, or a portfolio the device locked while open', () => {
+    expect(autoUnlockKey({ ...locked, wipePending: 'confirm' })).toBeNull()
+    expect(autoUnlockKey({ ...locked, wipePending: 'replug' })).toBeNull()
+    expect(autoUnlockKey({ ...locked, phase: 'setup' })).toBeNull()
+    expect(autoUnlockKey({ ...locked, phase: 'ready' })).toBeNull() // auto-lock timer: the banner offers Unlock
+  })
+  test('only a locked device that is fully identified', () => {
+    for (const state of ['disconnected', 'connected_unpaired', 'ready', 'error', 'needs_init']) expect(autoUnlockKey({ ...locked, state })).toBeNull()
+    expect(autoUnlockKey({ ...locked, deviceId: undefined })).toBeNull()
+    expect(autoUnlockKey({ ...locked, activeTransport: null })).toBeNull()
   })
 })

@@ -10,6 +10,11 @@ export const deviceOperationContext = new AsyncLocalStorage<{
   admitted?: boolean
 }>()
 
+/** Reads nobody asked for (wallet watch, post-tx refresh, passive views). One that finds
+ * the device auto-locked must not open the PIN prompt: the device stays quietly locked
+ * until an action the user starts needs it, as in release 1.6.7. */
+export const backgroundDeviceRead = new AsyncLocalStorage<true>()
+
 export interface DeviceOperationSnapshot {
   wallet: unknown | null
   deviceId?: string
