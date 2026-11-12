@@ -148,3 +148,23 @@ describe('EVM max send', () => {
     expect(BigInt(result.gasLimit)).toBe(100_000n)
   })
 })
+
+describe('EVM recipient', () => {
+  const base = CHAINS.find(c => c.id === 'base')!
+  // A pasted address keeps its spaces and validation trims them, so the build
+  // must sign the trimmed address too; hdwallet refuses any other byte.
+  test('builds the trimmed address the form validated', async () => {
+    const native = await buildEvmTx(pioneerWithBalance('1'), base, { to: `  ${toAddress} `, amount: '0.001', fromAddress })
+    expect(native.to).toBe(toAddress)
+    const token = await buildEvmTx(pioneerWithBalance('1'), base, {
+      to: ` ${toAddress} `, amount: '1', fromAddress, caip: `eip155:8453/erc20:${tokenAddress}`, tokenDecimals: 6, tokenBalance: '5',
+    })
+    expect(String(token.data).slice(10, 74)).toBe(toAddress.toLowerCase().slice(2).padStart(64, '0'))
+  })
+
+  test('refuses an ENS name or a malformed address before review', async () => {
+    for (const to of ['vitalik.eth', `${toAddress}0`, '']) {
+      await expect(buildEvmTx(pioneerWithBalance('1'), base, { to, amount: '0.001', fromAddress })).rejects.toThrow('Enter a full 0x recipient address')
+    }
+  })
+})
