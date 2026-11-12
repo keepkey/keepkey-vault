@@ -64,3 +64,12 @@ export function resolveAppPhase(p: {
 export function showWatchOnly(watchOnlyMode: boolean, phase: AppPhase): boolean {
   return watchOnlyMode && phase !== "setup"
 }
+
+/** A KeepKey plugged in locked opens its own PIN (then passphrase) prompt, once
+ * per connection. Not over a pending wipe or setup, and not over a portfolio the
+ * device's auto-lock locked while open: that keeps its explicit Unlock. */
+export function autoUnlockKey(p: { phase: AppPhase; state: string; deviceId?: string; activeTransport: string | null; wipePending?: string }): string | null {
+  if (p.phase !== 'splash' || p.wipePending || !p.deviceId || !p.activeTransport) return null
+  if (p.state !== 'needs_pin' && p.state !== 'needs_passphrase') return null
+  return `${p.deviceId}:${p.activeTransport}`
+}

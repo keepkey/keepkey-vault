@@ -22,7 +22,7 @@ import type { DeviceFailure } from './device-refusal'
 import { flushRingBuffers, getActiveFlashName, getEmulatorStatus } from './emulator'
 import { wipeOwningDevice, WIPE_BUSY_MESSAGE, WIPE_REPLUG_PENDING_MESSAGE, type WipeHost } from './device-wipe'
 import { awaitingInput, DEVICE_NOT_ASKING_MESSAGE, gateRestWrites, guardInputWait, restRequest } from './device-gate'
-import { DeviceOperationCoordinator, deviceOperationContext, type DeviceOperationOptions } from './device-operation'
+import { DeviceOperationCoordinator, backgroundDeviceRead, deviceOperationContext, type DeviceOperationOptions } from './device-operation'
 
 const KEEPKEY_VENDOR_ID = 0x2B24 // 11044
 // Firmware manifest lives in keepkey-vault (migrated from keepkey-desktop, which is now stale).
@@ -434,6 +434,15 @@ export class EngineController extends EventEmitter {
       const matrixType = ev?.message?.type ?? ev?.proto?.getType?.()
       const type: PinRequestType = matrixType === 2 ? 'new-first' : matrixType === 3 ? 'new-second' : 'current'
       console.log(`[Engine] PIN_REQUEST → type=${type} (count=${this.pinRequestCount}, setup=${this.setupInProgress})`)
+      // A background read found the device auto-locked: no lock screen. Cancel the
+      // device's matrix and remember the lock; the next action the user starts unlocks
+      // on demand (unlockForOperation) and that is when the PIN prompt opens.
+      if (backgroundDeviceRead.getStore() && !this.promptPinActive && !this.setupInProgress && !this.verifyInProgress) {
+        console.log('[Engine] PIN_REQUEST from a background read: staying locked until an action needs the KeepKey')
+        if (this.lastState === 'ready') this.updateState('needs_pin')
+        void this.cancelDevicePrompt().catch(() => {})
+        return
+      }
       // A request found the device locked (auto-lock, clear-session): from here Desktop's
       // prompt owns the unlock, and other REST requests are refused (device-gate.ts).
       if (this.lastState === 'ready' && !this.setupInProgress && !this.verifyInProgress) this.updateState('needs_pin')

@@ -58,21 +58,30 @@ try {
   await expect(unlock()).toBeEnabled(); await unlock().click(); await expect(pin()).toBeVisible()
   await submitPin(); await expect(pin()).toHaveCount(0); await expect(page.getByTestId('portfolio')).toBeVisible()
  })
- await check('cold-locked-start-needs-explicit-unlock', async () => {
+ await check('cold-locked-start-opens-pin-without-a-click', async () => {
   await load('needs_pin'); await expect(page.getByTestId('portfolio')).toHaveCount(0)
-  await expect(pin()).toHaveCount(0); await expect(unlock()).toBeVisible()
-  assert(!(await calls()).some(c => c.method === 'requestDeviceUnlock'))
-  await unlock().click(); await expect(pin()).toBeVisible()
+  await expect(pin()).toBeVisible(); await expect(page.getByTestId('splash').getByRole('button', { name: 'Unlock', exact: true })).toHaveCount(0)
+  assert.equal((await calls()).filter(c => c.method === 'requestDeviceUnlock').length, 1)
+ })
+ await check('cancelled-auto-unlock-offers-unlock-and-never-reopens', async () => {
+  await pin().getByRole('button', { name: 'Cancel', exact: true }).click()
+  await expect(pin()).toHaveCount(0); await expect(page.getByTestId('splash').getByRole('button', { name: 'Unlock', exact: true })).toBeEnabled()
+  await page.waitForTimeout(400); await expect(pin()).toHaveCount(0)
+  assert.equal((await calls()).filter(c => c.method === 'requestDeviceUnlock').length, 1)
+  await page.getByTestId('splash').getByRole('button', { name: 'Unlock', exact: true }).click(); await expect(pin()).toBeVisible()
  })
  await check('quick-same-id-replug-does-not-inherit-verification', async () => {
   await load(); await page.evaluate(() => { window.__setDevice({ state: 'disconnected' }); window.__setDevice({ state: 'needs_pin' }) })
   await expect(page.getByTestId('portfolio')).toHaveCount(0); await expect(page.getByTestId('splash')).toBeVisible()
-  await expect(unlock()).toBeVisible(); await expect(pin()).toHaveCount(0)
+  await expect(pin()).toBeVisible() // the replugged connection asks for its own PIN
+  assert.equal((await calls()).filter(c => c.method === 'requestDeviceUnlock').length, 1)
  })
  await check('quick-replug-retires-a-live-pin-matrix-before-another-device', async () => {
   await load(); await push({ state: 'needs_pin' }); await unlock().click(); await expect(pin()).toBeVisible()
   await page.evaluate(() => { window.__setDevice({ state: 'disconnected', pinPromptOpen: false }); window.__setDevice({ state: 'needs_pin', pinPromptOpen: false }) })
-  await expect(pin()).toHaveCount(0); await expect(page.getByTestId('splash')).toBeVisible(); await expect(unlock()).toBeEnabled()
+  // The old matrix is retired; the new connection opens exactly one fresh prompt.
+  await expect(page.getByTestId('splash')).toBeVisible(); await expect(pin()).toBeVisible()
+  assert.equal((await calls()).filter(c => c.method === 'requestDeviceUnlock').length, 2)
  })
  await check('different-locked-device-does-not-show-prior-portfolio', async () => {
   await load(); await push({ state: 'needs_pin', deviceId: 'synthetic-b' })

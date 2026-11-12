@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import type { ChainBalance, TokenBalance } from '../src/shared/types'
-import { reconcileSelectedToken, type SelectedTokenState } from '../src/shared/selected-token-balance'
+import { DIRECT_TOKEN_PROOF_MAX_AGE_MS, reconcileSelectedToken, type DirectTokenProof, type SelectedTokenState } from '../src/shared/selected-token-balance'
 import { isBalanceUnverified } from '../src/shared/balance-display-state'
 
 const owner = '0x1111111111111111111111111111111111111111'
@@ -106,5 +106,61 @@ describe('selected token live balance', () => {
   test('preserves state reference after an unchanged live result', () => {
     const first = reconcileSelectedToken(selected(), context, balance('25')).selection
     expect(reconcileSelectedToken(first, context, balance('25')).selection).toBe(first)
+  })
+})
+
+// The selected token's own balanceOf, read on chain for one owner. It is the
+// only way a token can be trusted while its chain's portfolio is degraded,
+// e.g. when the token-discovery provider is down (Zapper 525, 2026-11-11).
+describe('on-chain proof for the selected token', () => {
+  const verifiedAt = 1_000_000
+  const now = verifiedAt + 5_000
+  const proof = (overrides: Partial<DirectTokenProof> = {}): DirectTokenProof =>
+    ({ chainId: 'ethereum', owner, caip, balance: '17500.5', verifiedAt, ...overrides })
+
+  test('a fresh proof for this owner verifies the token while the chain is degraded', () => {
+    const result = reconcileSelectedToken(selected(), context, balance('100', { syncState: 'degraded' }), proof(), now)
+    expect(result.unverified).toBe(false)
+    expect(result.selection!.token.balance).toBe('17500.5')
+    expect(result.selection!.token.balanceUsd).toBe(17500.5)
+    expect(result.selection!.ownerAddress).toBe(owner)
+  })
+
+  test('the proof also covers an owner whose portfolio never loaded or went stale', () => {
+    expect(reconcileSelectedToken(selected(), context, undefined, proof(), now).unverified).toBe(false)
+    expect(reconcileSelectedToken(selected(), context, balance('1', { syncState: 'stale' }), proof(), now).unverified).toBe(false)
+  })
+
+  test('a proven zero is a verified zero', () => {
+    const result = reconcileSelectedToken(selected(), context, balance('100', { syncState: 'degraded' }), proof({ balance: '0' }), now)
+    expect(result.unverified).toBe(false)
+    expect(result.selection!.token.balance).toBe('0')
+    expect(result.selection!.token.balanceUsd).toBe(0)
+  })
+
+  test('owner matching ignores EVM address case', () => {
+    const result = reconcileSelectedToken(selected(), context, balance('1', { syncState: 'degraded' }), proof({ owner: owner.toUpperCase().replace('0X', '0x') }), now)
+    expect(result.unverified).toBe(false)
+  })
+
+  test('a proof for another owner, chain or token, or an old or future one, is ignored', () => {
+    const degraded = balance('100', { syncState: 'degraded' })
+    for (const bad of [
+      proof({ owner: other }),
+      proof({ chainId: 'base' }),
+      proof({ caip: 'eip155:1/erc20:0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48' }),
+      proof({ verifiedAt: now - DIRECT_TOKEN_PROOF_MAX_AGE_MS - 1 }),
+      proof({ verifiedAt: now + 1 }),
+    ]) {
+      const result = reconcileSelectedToken(selected(), context, degraded, bad, now)
+      expect(result.unverified).toBe(true)
+      expect(result.selection!.token.balance).toBe('100')
+    }
+  })
+
+  test('a trusted portfolio still wins over a proof', () => {
+    const result = reconcileSelectedToken(selected(), context, balance('42'), proof(), now)
+    expect(result.unverified).toBe(false)
+    expect(result.selection!.token.balance).toBe('42')
   })
 })

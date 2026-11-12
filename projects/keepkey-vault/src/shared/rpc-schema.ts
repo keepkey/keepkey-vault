@@ -173,6 +173,7 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       /** forceRefresh defaults to TRUE (user-clicked refresh / tx pushes must bypass
        *  Pioneer's cache). Pass false only when Pioneer's cache is known-fresh. */
       getBalance: { params: { chainId: string; forceRefresh?: boolean }; response: ChainBalance }
+      verifyTokenBalance: { params: { chainId: string; owner: string; caip: string }; response: { balance: string } }
       buildTx: { params: BuildTxParams; response: BuildTxResult }
       // `to`/`amount`/`symbol`/`caip`/`fromAddress` populate the Address Book
       // (R3/R4/R7). `fromAddress` is also required when broadcasting a custom

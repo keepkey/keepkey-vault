@@ -24,3 +24,28 @@ export function isLocalDeviceAccessError(error: unknown): boolean {
     || matches(409, /^KeepKey is not ready for wallet operations\. Finish device setup or reconnect it\.$/)
     || matches(503, /^No device connected$/)
 }
+
+const BUSY_MESSAGES = new Set([
+  'KeepKey is busy with another request. Wait for it to finish, then try again.',
+  'Too many pending KeepKey requests. Wait for the current request to finish.',
+])
+
+/** Another request holds the KeepKey. Both gates refuse before anything reaches
+ * the device, so the same request can run again once it is free. */
+export function isDeviceBusyError(error: unknown): boolean {
+  const message = typeof error === 'string' ? error : (error as { message?: unknown } | null)?.message
+  return typeof message === 'string' && BUSY_MESSAGES.has(message.trim())
+}
+
+/** Desktop device actions are refused, not queued, while the KeepKey is held
+ * (device-operation.ts). Wait for it instead of reporting that contention. */
+export async function retryWhileDeviceBusy<T>(run: () => Promise<T>, isCurrent: () => boolean, delayMs = 500): Promise<T> {
+  for (;;) {
+    try { return await run() } catch (error) {
+      if (!isDeviceBusyError(error)) throw error
+      await new Promise(resolve => setTimeout(resolve, delayMs))
+      // ponytail: no attempt cap; the caller's isCurrent() (closed, inputs changed, Cancel) ends the wait.
+      if (!isCurrent()) throw error
+    }
+  }
+}

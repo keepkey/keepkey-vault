@@ -22,7 +22,7 @@ import { nativeMaxSpendableAmount, normalizeDecimals, tokenMaxSpendableAmount } 
 import { getAssetIcon } from "../../shared/assetLookup"
 import { validateAddress } from "../../shared/address-validation"
 import { balanceUnverifiedReason, isBalanceUnverified } from "../../shared/balance-display-state"
-import { isLocalDeviceAccessError } from "../../shared/device-access-error"
+import { isDeviceBusyError, isLocalDeviceAccessError, retryWhileDeviceBusy } from "../../shared/device-access-error"
 import { mergeTrustedBalanceSnapshot } from "../../shared/balance-reconciliation"
 import type { SwapAsset, SwapQuote, ChainBalance, CustomToken, SwapStatusUpdate, SwapTrackingStatus, PendingSwap, SwapUiState, SwapUiCommand, SwapHealth } from "../../shared/types"
 import { SOLANA_BLIND_SIGNING_REQUIRED } from "../../shared/types"
@@ -793,6 +793,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
   // still running. Its completion belongs to that execution, not the new view.
   // Hiding a busy dialog keeps its context so it can finish while hidden.
   const executionUiGeneration = useRef(0)
+  const executeAttempt = useRef(0)
   useEffect(() => () => { executionUiGeneration.current++ }, [])
   const [phase, setPhase] = useState<SwapPhase>('input')
   const [assets, setAssets] = useState<SwapAsset[]>([])
@@ -2027,7 +2028,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
           coin: toChain.coin,
         }
         if (toChain.scriptType) params.scriptType = toChain.scriptType
-        const result = await rpcRequest<any>(toChain.rpcMethod, params, 60000)
+        const result = await retryWhileDeviceBusy(() => rpcRequest<any>(toChain.rpcMethod, params, 60000), () => !cancelled)
         if (cancelled) return
         const addr = typeof result === 'string' ? result : (result?.address || '')
         if (addr) setResolvedToAddress(addr)
@@ -2112,7 +2113,8 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
         if (toChain && toChain.chainFamily !== 'evm') {
           const params: any = { addressNList: toChain.defaultPath, showDisplay: false, coin: toChain.coin }
           if (toChain.scriptType) params.scriptType = toChain.scriptType
-          const result = await rpcRequest<any>(toChain.rpcMethod, params, 60000)
+          const result = await retryWhileDeviceBusy(() => rpcRequest<any>(toChain.rpcMethod, params, 60000),
+            () => generation === executionUiGeneration.current && toAssetChainIdRef.current === requestedChainId)
           // Output asset switched mid-RPC → this address is for the wrong chain.
           if (generation !== executionUiGeneration.current || toAssetChainIdRef.current !== requestedChainId) return
           const addr = typeof result === 'string' ? result : (result?.address || '')
@@ -2137,13 +2139,16 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
   // clicking Confirm. Build inputs (gas/nonce) may shift slightly between
   // preview and the real execute build; that's expected.
   useEffect(() => {
-    if (phase !== 'review' || !quote || !fromAsset || !toAsset) {
+    // Never build a payload for a quote that is being replaced.
+    if (phase !== 'review' || !quote || !fromAsset || !toAsset || refreshingQuote) {
       setPreviewBuild(null); setPreviewError(null); setPreviewLoading(false)
       return
     }
     let cancelled = false
     setPreviewLoading(true); setPreviewError(null); setPreviewBuild(null)
-    rpcRequest<SwapPreviewBuild>('previewSwapBuild', {
+    // A busy KeepKey (often this effect's previous build, still running after a
+    // balance tick re-fired it) is waited out behind the loading state, not shown.
+    retryWhileDeviceBusy(() => rpcRequest<SwapPreviewBuild>('previewSwapBuild', {
       fromChainId: fromAsset.chainId,
       toChainId: toAsset.chainId,
       fromCaip: fromAsset.caip!,
@@ -2164,10 +2169,10 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
       // Token sources Pioneer's available-assets doesn't pre-list (e.g. SPL
       // USDT) have no decimals lookup backend-side — carry the picker's value.
       tokenDecimals: isTokenCaip(fromAsset.caip!) ? normalizeDecimals(fromAsset.decimals) ?? undefined : undefined,
-    }).then((res) => { if (!cancelled) { setPreviewBuild(res); setPreviewLoading(false) } })
+    }), () => !cancelled).then((res) => { if (!cancelled) { setPreviewBuild(res); setPreviewLoading(false) } })
       .catch((e: any) => { if (!cancelled) { setPreviewError(e?.message || 'Preview failed'); setPreviewLoading(false) } })
     return () => { cancelled = true }
-  }, [phase, quote, fromAsset, toAsset, sendAmount, sendIsMax, fromBalance, fromAddress, toAddress, effectiveEvmIndex])
+  }, [phase, quote, fromAsset, toAsset, sendAmount, sendIsMax, fromBalance, fromAddress, toAddress, effectiveEvmIndex, refreshingQuote])
 
   const swapRisk = quote?.risk ?? assessSwapRisk({
     inputAmount: Number(quote?.netFromAmount ?? sendAmount), expectedAmount: Number(quote?.expectedOutput),
@@ -2245,7 +2250,8 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
         if (!fromAsset!.caip || !toAsset!.caip) {
           throw new Error('Selected assets are missing CAIP — pick again from the asset picker')
         }
-        const result = await rpcRequest<SwapQuote>('getSwapQuote', {
+        // MAX quotes read the device; wait out another request holding it.
+        const result = await retryWhileDeviceBusy(() => rpcRequest<SwapQuote>('getSwapQuote', {
           fromCaip: fromAsset!.caip,
           toCaip: toAsset!.caip,
           amount: sendAmount,
@@ -2254,7 +2260,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
           slippageBps,
           isMax: sendIsMax,
           fromEvmAddressIndex: fromAsset!.chainFamily === 'evm' ? effectiveEvmIndex : undefined,
-        }, 60000)
+        }, 60000), () => generation === executionUiGeneration.current && version === quoteVersionRef.current)
         if (generation !== executionUiGeneration.current || version !== quoteVersionRef.current) return
         setQuote(result)
         setQuoteFetchedAt(Date.now())
@@ -2349,47 +2355,44 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
     }
     const isErc20 = fromAsset.chainFamily === 'evm' && !!fromAsset.contractAddress
 
-    // Refresh stale quote (>60s old) before signing — protects against price drift
-    // between when the user first saw the quote and when they actually confirm.
-    let liveQuote: SwapQuote = quote
-    const age = Date.now() - (quoteFetchedAt || 0)
-    if (age > swapRisk.quoteMaxAgeMs || (quote.quoteExpiresAt != null && Date.now() >= quote.quoteExpiresAt)) {
+    // Replace an aged quote for one more review — protects against price drift
+    // between when the user saw the numbers and when the swap is signed.
+    const refreshForReview = async () => {
       setRefreshingQuote(true)
       try {
-        const refreshed = await rpcRequest<SwapQuote>('getSwapQuote', {
+        const refreshed = await retryWhileDeviceBusy(() => rpcRequest<SwapQuote>('getSwapQuote', {
           fromCaip: fromAsset.caip!,
           toCaip: toAsset.caip!,
           amount: sendAmount,
           fromAddress, toAddress, slippageBps,
           isMax: sendIsMax,
           fromEvmAddressIndex: fromAsset.chainFamily === 'evm' ? effectiveEvmIndex : undefined,
-        }, 60000)
-        // Block on >1% output drop — quote degraded, user should re-review
+        }, 60000), () => generation === executionUiGeneration.current)
         if (generation !== executionUiGeneration.current) return
+        // Call out a >1% output drop — quote degraded, user should re-review the numbers
         const oldOut = parseFloat(quote.expectedOutput || '0')
         const newOut = parseFloat(refreshed.expectedOutput || '0')
-        if (oldOut > 0 && newOut > 0 && (oldOut - newOut) / oldOut > 0.01) {
-          const dropPct = (((oldOut - newOut) / oldOut) * 100).toFixed(2)
-          console.warn(`[swap] Quote refreshed: output ${oldOut} → ${newOut} (-${dropPct}%) — aborting for re-review`)
-          setQuote(refreshed)
-          setQuoteFetchedAt(Date.now())
-          setRefreshingQuote(false)
-          setError(t("quoteShiftedReReview", "Quote refreshed and dropped {{pct}}% — please review the new numbers and confirm again", { pct: dropPct }))
-          return
-        }
+        const dropped = oldOut > 0 && newOut > 0 && (oldOut - newOut) / oldOut > 0.01
+        const dropPct = (((oldOut - newOut) / oldOut) * 100).toFixed(2)
+        if (dropped) console.warn(`[swap] Quote refreshed: output ${oldOut} → ${newOut} (-${dropPct}%) — aborting for re-review`)
         setQuote(refreshed)
         setQuoteFetchedAt(Date.now())
-        setRefreshingQuote(false)
         setPreviewBuild(null)
-        setError(t("quoteRefreshedReviewPayload", "Quote refreshed. Review the rebuilt payload before confirming."))
-        return
+        setError(dropped
+          ? t("quoteShiftedReReview", "Quote refreshed and dropped {{pct}}% — please review the new numbers and confirm again", { pct: dropPct })
+          : t("quoteRefreshedReviewPayload", "Quote refreshed. Review the rebuilt payload before confirming."))
       } catch (e: any) {
         if (generation !== executionUiGeneration.current) return
-        setRefreshingQuote(false)
         setError(`Failed to refresh stale quote: ${e?.message || 'unknown error'}`)
-        return
+      } finally {
+        if (generation === executionUiGeneration.current) setRefreshingQuote(false)
       }
-      setRefreshingQuote(false)
+    }
+    let liveQuote: SwapQuote = quote
+    const age = Date.now() - (quoteFetchedAt || 0)
+    if (age > swapRisk.quoteMaxAgeMs || (quote.quoteExpiresAt != null && Date.now() >= quote.quoteExpiresAt)) {
+      await refreshForReview()
+      return
     }
 
     setPhase(isErc20 ? 'approving' : 'signing')
@@ -2413,8 +2416,11 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
       setBeforeToBal('0')
     }
 
+    // A busy refusal happens before dispatch (no quote claimed, nothing signed):
+    // wait for the KeepKey. Cancel (handleCancelSigning) ends the wait.
+    const attempt = ++executeAttempt.current
     try {
-      const result = await rpcRequest<{ txid: string; approvalTxid?: string }>('executeSwap', {
+      const result = await retryWhileDeviceBusy(() => rpcRequest<{ txid: string; approvalTxid?: string }>('executeSwap', {
         quoteId: liveQuote.quoteId,
         riskAcknowledged,
         fromChainId: fromAsset.chainId,
@@ -2440,7 +2446,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
         tokenDecimals: isTokenCaip(fromAsset.caip!) ? normalizeDecimals(fromAsset.decimals) ?? undefined : undefined,
         // A provider description only from the one this preview card named.
         runtimeProvider: previewBuild?.runtimeProvider ?? null,
-      }, 600000)
+      }, 600000), () => generation === executionUiGeneration.current && attempt === executeAttempt.current)
 
       if (generation === executionUiGeneration.current) {
         setTxid(result.txid)
@@ -2464,7 +2470,16 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
       }))
     } catch (e: any) {
       if (generation !== executionUiGeneration.current) return
+      // Cancelled while waiting for a busy KeepKey: handleCancelSigning owns the dialog.
+      if (attempt !== executeAttempt.current && isDeviceBusyError(e)) return
       const raw = e?.message || ''
+      // The quote aged out before the swap signature (an approval before it carries
+      // no rate and still signs): fetch a fresh quote for one more review.
+      if (/quote (?:has )?expired/i.test(raw)) {
+        setPhase('review')
+        await refreshForReview()
+        return
+      }
       // This exact Relay payload has no signed ClearSign descriptor and needs
       // route-specific, one-request opaque consent.
       if (raw.includes(SOLANA_BLIND_SIGNING_REQUIRED)) {
@@ -2576,6 +2591,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
   // already on its way to the network and there's no unwind.
   const handleCancelSigning = useCallback(async () => {
     if (phase !== 'signing' && phase !== 'approving') return
+    executeAttempt.current++ // stops a wait for a busy KeepKey before it dispatches
     const generation = executionUiGeneration.current
     try { await rpcRequest<{ ok: boolean }>('cancelForegroundDeviceOperation', undefined, 5000) } catch (e: any) {
       console.warn('[SwapDialog] cancelForegroundDeviceOperation failed:', e?.message || e)

@@ -239,7 +239,7 @@ process.on('unhandledRejection', (reason) => {
 
 import { EngineController, withTimeout } from "./engine-controller"
 import { gateDeviceRpc } from "./device-rpc"
-import { deviceOperationContext } from './device-operation'
+import { backgroundDeviceRead, deviceOperationContext } from './device-operation'
 import { restRequest } from "./device-gate"
 import { runUsbDiagnostic as runUsbDiagnosticProbe } from "./windows-usb-probe"
 import { startRestApi, clearFeaturesCache, setUiActive, uiHeartbeat, type RestApiCallbacks } from "./rest-api"
@@ -272,6 +272,7 @@ import { getRequiredConfs } from "../shared/confirmations"
 import { addSessionActivity, getSessionActivity, clearSessionActivity } from "./session-activity"
 import { buildTx, broadcastTx, canonicalizeTronTokenCaip } from "./txbuilder"
 import { buildCosmosStakingTx, buildCosmosNameRegTx } from "./txbuilder/cosmos"
+import { readPioneerTokenBalance } from "./txbuilder/evm"
 import { initializeOrchardFromDevice, exportOrchardFvk, scanOrchardNotes, getShieldedBalance, sendShielded, ensureFvkLoaded, displayOrchardAddressOnDevice, setFvkDiskAllowed } from "./txbuilder/zcash-shielded"
 import { inFlightShielded, type ExpectedShielded } from "../shared/zcash-pending"
 import { setMoneroEmulatorEnabled, listEmulatorBuilds } from "./emulator-library"
@@ -3039,7 +3040,8 @@ const postTxBalances = createPostTxBalanceRefresh({
 	canRefresh: () => !offlineMode && engine.getDeviceState().state === 'ready',
 	refresh: async (params, isCurrent) => {
 		console.log(`[post-tx-balance] Forced refresh: ${params.chainId}`)
-		return getChainBalance(params, isCurrent)
+		// Background: a device that auto-locked stays quiet (no lock screen).
+		return backgroundDeviceRead.run(true, () => getChainBalance(params, isCurrent))
 	},
 	onError: (chainId, error) => console.warn(`[post-tx-balance] ${chainId}:`, error instanceof Error ? error.message : error),
 })
@@ -3133,7 +3135,8 @@ const activeWalletWatches = createActiveWalletWatch({
 		if (sameBalanceRefreshScope(scope, currentBalanceRefreshScope())) await durableWalletMonitor.acknowledge(eventIds)
 	},
 	stop: stopOwnedWalletStream,
-	refresh: (hint, isCurrent) => refreshWatchedChain(hint, {
+	// Background: a device that auto-locked stays quiet (no lock screen).
+	refresh: (hint, isCurrent) => backgroundDeviceRead.run(true, () => refreshWatchedChain(hint, {
 		readBalance: getChainBalance,
 		scanHistory: (chainId, current) => scanOneChain(chainId, true, current),
 		follow: (chainId, txid) => txWatch.watch(chainId, txid),
@@ -3148,7 +3151,7 @@ const activeWalletWatches = createActiveWalletWatch({
 			const chain = getAllChains().find(chain => chain.id === chainId)
 			if (chain) try { rpc.send['tx-push-received']({ chain: chain.caip, networkId: chain.networkId, txid, type: 'activity', balanceRefreshHandled: true }) } catch { /* renderer optional */ }
 		},
-	}, isCurrent),
+	}, isCurrent)),
 	onStatus: status => { try { rpc.send['stream-status'](status) } catch { /* renderer optional */ } },
 	onError: error => console.warn('[wallet-watch] Refresh failed:', error instanceof Error ? error.message : error),
 	onOverflow: omitted => console.warn(`[wallet-watch] ${omitted} entries exceed the active lease limit`),
@@ -3868,7 +3871,8 @@ async function headlessExecuteSwap(params: ExecuteSwapParams, pushSubStage: (sta
 	const lease = swapQuoteLeases.claim(params, sessionEpoch)
 	const cachedQuote = lease.quote
 	const execParams = lease.params
-	const beforeSign = () => lease.beforeSign(engine.wallet === wallet ? activitySessionEpoch : -1)
+	// The step names the prompt: an approval carries no rate, the swap needs a fresh quote.
+	const beforeSign = (step: string) => lease.beforeSign(engine.wallet === wallet ? activitySessionEpoch : -1, step)
 	let executionSucceeded = false
 
 	const result = await executeSwap(execParams, {
@@ -3887,7 +3891,7 @@ async function headlessExecuteSwap(params: ExecuteSwapParams, pushSubStage: (sta
 			return []
 		},
 		wrapSign: (fn, details) => {
-			beforeSign()
+			beforeSign(details.operation)
 			return engine.isEmulator ? emuSigningOp(fn, details) : fn()
 		},
 		pushSubStage,
@@ -3901,7 +3905,7 @@ async function headlessExecuteSwap(params: ExecuteSwapParams, pushSubStage: (sta
 			deviceId: () => engine.getDeviceState().deviceId,
 			evmEndpoint: getEvmSimulationEndpoint,
 			solanaEndpoint: () => getSetting('solana_rpc_endpoint') || 'https://api.mainnet-beta.solana.com',
-		}, input, () => { beforeSign(); return sign() }),
+		}, input, () => { beforeSign(input.kind); return sign() }),
 		onClearSignEvent: (event) => recordClearSignEvent({
 			kind: 'transaction',
 			source: 'vault-rpc',
@@ -7022,6 +7026,21 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			},
 
 			getBalance: getChainBalance,
+
+			// One token's balanceOf for one owner, read on chain through Pioneer's
+			// node-backed GetTokenBalance. The asset page uses it while the chain's
+			// portfolio is degraded (e.g. token discovery down).
+			verifyTokenBalance: async ({ chainId, owner, caip }) => {
+				requireOnline('check token balance')
+				const chain = getAllChains().find(c => c.id === chainId)
+				if (!chain || chain.chainFamily !== 'evm' || !chain.networkId) throw new Error('On-chain token balance checks are only available for EVM chains')
+				const match = /^(eip155:\d+)\/erc20:(0x[0-9a-fA-F]{40})$/.exec(caip)
+				if (!match || match[1].toLowerCase() !== chain.networkId.toLowerCase()) throw new Error('This token does not belong to this chain')
+				if (!/^0x[0-9a-fA-F]{40}$/.test(owner)) throw new Error('Invalid owner address')
+				const pioneer = await getPioneer()
+				const resp = await pioneer.GetTokenBalance({ networkId: chain.networkId, address: owner, contractAddress: match[2] })
+				return { balance: readPioneerTokenBalance(resp, `${caip} balance`) }
+			},
 
 			buildTx: async (params) => {
 				console.debug(`[buildTx] isMax=${params.isMax} chainId=${params.chainId}`)

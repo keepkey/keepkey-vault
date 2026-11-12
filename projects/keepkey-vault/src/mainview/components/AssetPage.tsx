@@ -51,7 +51,7 @@ import { WatchOnlyExportDialog } from "./WatchOnlyExportDialog"
 import { CreatePsbtPanel } from "./CreatePsbtPanel"
 import { detectSpamToken, categorizeTokens, type SpamResult } from "../../shared/spamFilter"
 import { createLatestReceiveRequest, selectedReceiveScriptType } from "../../shared/receive-request"
-import { reconcileSelectedToken, type SelectedTokenState } from "../../shared/selected-token-balance"
+import { DIRECT_TOKEN_PROOF_MAX_AGE_MS, reconcileSelectedToken, type DirectTokenProof, type SelectedTokenState } from "../../shared/selected-token-balance"
 import { BASE_NETWORK, BITCOIN_NETWORK, type VaultIdentity } from '../../shared/vault-identity'
 import { VaultAccountSelector } from './VaultAccountSelector'
 import { VaultAssetAccount } from './VaultAssetAccount'
@@ -285,11 +285,37 @@ function PersonalAssetPage({ chain, balance, balanceLoading = false, onBack, fir
 	// The aggregate balance prop can contain tokens summed across EVM owners.
 	// It must never fill an absent selected-owner cache or prove token absence.
 	const selectedTokenBalanceSource = isEvm && !watchOnly && !selectedEvmChainBalance ? undefined : activeBalance
+	// While the portfolio can't vouch for the selected token (token discovery
+	// down, stale cache), read its balance straight from the chain for the
+	// selected owner. See DirectTokenProof.
+	const [tokenProof, setTokenProof] = useState<DirectTokenProof | null>(null)
 	const tokenReconciliation = reconcileSelectedToken(selectedTokenState, {
 		chainId: chain.id, chainCaip: chain.caip, ownerAddress: selectedTokenOwner,
-	}, selectedTokenBalanceSource)
+	}, selectedTokenBalanceSource, tokenProof)
 	const selectedToken = tokenReconciliation.selection?.token ?? null
 	const selectedTokenUnverified = tokenReconciliation.unverified
+	const tokenProofKey = isEvm && !watchOnly && selectedTokenUnverified && selectedTokenOwner
+		&& selectedToken && /\/erc20:0x[0-9a-f]{40}$/i.test(selectedToken.caip)
+		? `${chain.id}|${selectedTokenOwner}|${selectedToken.caip}|${refreshNonce}` : null
+	useEffect(() => {
+		if (!tokenProofKey) return
+		const [chainId, owner, caip] = tokenProofKey.split('|')
+		let cancelled = false
+		rpcRequest<{ balance: string }>("verifyTokenBalance", { chainId, owner, caip }, 30000)
+			.then(({ balance }) => { if (!cancelled) setTokenProof({ chainId, owner, caip, balance, verifiedAt: Date.now() }) })
+			.catch(e => console.warn(`[AssetPage] on-chain balance check failed for ${caip}:`, e))
+		return () => { cancelled = true }
+	}, [tokenProofKey])
+	// Re-read after a minute, and after any balance update for this chain, so a
+	// send never leaves an old amount on screen.
+	useEffect(() => {
+		if (!tokenProof) return
+		const timer = setTimeout(() => setTokenProof(null), DIRECT_TOKEN_PROOF_MAX_AGE_MS)
+		return () => clearTimeout(timer)
+	}, [tokenProof])
+	useEffect(() => onRpcMessage("balance-updated", (updated: ChainBalance) => {
+		if (updated.chainId === chain.id) setTokenProof(null)
+	}), [chain.id])
 	const vaultAssetCaip = vaultSelection?.assetCaip || selectedToken?.caip || chain.caip
 	const setSelectedToken = (token: TokenBalance | null) => {
 		if (chain.id === 'zcash' && token?.type === 'shielded') {

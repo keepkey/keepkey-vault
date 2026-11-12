@@ -44,7 +44,11 @@ describe('financial locale boundaries', () => {
     expect(formatBalance('0.1234','de-DE')).toBe('0,123400')
     expect(formatBalance('12.34','de-DE')).toBe('12,3400')
     expect(formatBalance('1234.56','de-DE')).toBe('1.234,56')
-    expect(formatBalance('1e-8','de-DE')).toBe(new Intl.NumberFormat('de-DE',{notation:'scientific',maximumFractionDigits:2}).format(1e-8))
+    // Dust is a real amount: a plain decimal, never an exponent ("1E-8").
+    expect(formatBalance('1e-8','de-DE')).toBe('0,00000001')
+    expect(formatBalance('0.000000010000000000','en-US')).toBe('0.00000001')
+    expect(formatBalance('0.00000012345','en-US')).toBe('0.00000012')
+    expect(formatBalance('0.0000000000000000012','en-US')).toBe('0.0000000000000000012')
     expect(validNumberLocale('../../invalid')).toBe('en-US')
   })
 })

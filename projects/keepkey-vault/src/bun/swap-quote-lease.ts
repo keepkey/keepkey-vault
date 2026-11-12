@@ -10,11 +10,17 @@ const assetKey = (value: string) => {
 const stable = (value: any): string => JSON.stringify(value, (_key, row) => row && typeof row === 'object' && !Array.isArray(row)
   ? Object.fromEntries(Object.entries(row).filter(([, v]) => v !== undefined).sort(([a], [b]) => a.localeCompare(b))) : row)
 const routeFields = ['memo', 'inboundAddress', 'router', 'expiry', 'expectedOutput', 'integration', 'swapper', 'relayTx'] as const
+/** Device prompts that carry no rate (swap.ts wrapSign operations / protectSign
+ * kinds): the ERC-20 approval and the ClearSign signer trust before it. Any
+ * other step, including one added later, stays bound to the quote's age. */
+const APPROVAL_STEPS = new Set(['approval', 'erc20Approve'])
+const RATE_FREE_STEPS = new Set([...APPROVAL_STEPS, 'loadClearsignSigner'])
 
 /** Wallet-session-local, immutable, bounded quotes. Claim synchronously before
- * any await, and recheck immediately before each device signature. Pre-sign
- * build failures can retry; an attempted signature consumes the quote even if
- * the device or broadcast response is lost. */
+ * any await, and recheck immediately before each device signature: the session
+ * always, the age only for quote-bound steps. Pre-sign build failures can
+ * retry; an attempted signature consumes the quote even if the device or
+ * broadcast response is lost. */
 export function createSwapQuoteLeases(now = Date.now, id = () => crypto.randomUUID()) {
   type Entry = { params: SwapQuoteParams; quote: SwapQuote; from: SwapAsset; to: SwapAsset; session: number; consumed: boolean }
   const entries = new Map<string, Entry>()
@@ -39,9 +45,13 @@ export function createSwapQuoteLeases(now = Date.now, id = () => crypto.randomUU
   function claim(input: ExecuteSwapParams, session: number) {
     const row = input.quoteId ? entries.get(input.quoteId) : undefined
     if (!row) throw new Error('A fresh Vault quoteId is required. Get a new quote before executing.')
-    const fresh = (currentSession: number) => {
+    let attempted = false, approved = false
+    const fresh = (currentSession: number, quoteBound = true) => {
       if (currentSession !== row.session) throw new Error('Wallet or API session changed. Get a new quote.')
-      if (now() >= row.quote.quoteExpiresAt!) throw new Error('Swap quote has expired. Review a new quote before signing.')
+      // Reaching the swap after an approval step means that approval was broadcast.
+      if (quoteBound && now() >= row.quote.quoteExpiresAt!) throw new Error(approved
+        ? 'The approval was sent, but the swap quote expired while it confirmed. Get a new quote to finish the swap.'
+        : 'Swap quote has expired. Review a new quote before signing.')
     }
     fresh(session)
     if (row.consumed) throw new Error('This swap quote was already used. Check transaction history before retrying.')
@@ -65,14 +75,18 @@ export function createSwapQuoteLeases(now = Date.now, id = () => crypto.randomUU
     if (quote.risk!.blocked) throw new Error('This route exceeds the 5% cost limit for trades of $1,000 or more.')
     if (quote.risk!.requiresAcknowledgment && input.riskAcknowledged !== true) throw new Error('Review and acknowledge the cost risk for this quote before signing.')
     active = input.quoteId
-    let attempted = false
     return {
       quote: structuredClone(quote),
       params: structuredClone({ ...input, ...Object.fromEntries(routeFields.map(key => [key, quote[key]])), fromCaip: params.fromCaip, toCaip: params.toCaip, amount: quote.netFromAmount ?? params.amount,
         isMax: quote.netFromAmount ? false : params.isMax, feeLevel: params.feeLevel ?? 5,
         fromAddressOverride: params.fromAddress, toAddressOverride: params.toAddress,
         tokenDecimals: from.decimals }) as ExecuteSwapParams,
-      beforeSign(currentSession: number) { fresh(currentSession); attempted = true },
+      /** `step` is the wrapSign operation or protectSign kind about to prompt the device. */
+      beforeSign(currentSession: number, step = 'swap') {
+        fresh(currentSession, !RATE_FREE_STEPS.has(step))
+        attempted = true
+        approved ||= APPROVAL_STEPS.has(step)
+      },
       finish(succeeded: boolean) { row.consumed ||= attempted || succeeded; if (active === input.quoteId) active = undefined },
     }
   }
