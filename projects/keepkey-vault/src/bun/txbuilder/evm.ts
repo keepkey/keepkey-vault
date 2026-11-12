@@ -137,7 +137,12 @@ export async function buildEvmTx(
   chain: ChainDef,
   params: BuildEvmParams,
 ) {
-  const { to, memo, feeLevel = 5, isMax = false, fromAddress, caip, tokenBalance, tokenDecimals: frontendDecimals, rpcUrl, addressIndex, gasPriceGwei: gasPriceGweiOverride, gasLimit: gasLimitOverrideStr } = params
+  const { memo, feeLevel = 5, isMax = false, fromAddress, caip, tokenBalance, tokenDecimals: frontendDecimals, rpcUrl, addressIndex, gasPriceGwei: gasPriceGweiOverride, gasLimit: gasLimitOverrideStr } = params
+  // Address validation trims, so a pasted " 0x…" passes review; hdwallet then
+  // refuses the untrimmed string at signing ("invalid hexadecimal string").
+  // Build exactly the address that was validated, and refuse anything else here.
+  const to = String(params.to ?? '').trim()
+  if (!/^0x[0-9a-fA-F]{40}$/.test(to)) throw new Error('Enter a full 0x recipient address (40 hex characters). ENS names are not supported yet.')
   const amountNum = parseFloat(params.amount)
   const chainId = parseInt(chain.chainId || '1', 10)
   const isErc20 = !!(caip && caip.includes('erc20'))

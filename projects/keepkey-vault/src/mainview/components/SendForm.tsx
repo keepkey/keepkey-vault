@@ -372,7 +372,7 @@ export function SendForm({ chain, address, balance, balanceLoading = false, toke
 		try {
 			const result = await rpcRequest<BuildTxResult>('buildTx', {
 				chainId: chain.id,
-				to: recipient,
+				to: recipient.trim(),
 				amount: isMax ? '0' : canonicalAmount!,
 				memo: memo || undefined,
 				feeLevel,
