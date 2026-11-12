@@ -46,6 +46,7 @@
 	"invalidZecAddress": "Недействительный адрес Zcash — должен начинаться с t1 или t3",
 	"invalidDgbAddress": "Недействительный адрес DigiByte",
 	"invalidEvmAddress": "Недействительный адрес — должен быть 0x и 40 шестнадцатеричных символов",
+	"invalidEvmChecksum": "Контрольная сумма не совпадает — в адресе может быть опечатка. Скопируйте его из источника ещё раз",
 	"invalidCosmosPrefix": "Неверный префикс адреса для этой сети",
 	"invalidCosmosLength": "Недействительная длина адреса Cosmos",
 	"invalidCosmosAddress": "Недействительный адрес Cosmos",

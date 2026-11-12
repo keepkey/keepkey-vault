@@ -55,6 +55,7 @@
 	"invalidZecAddress": "Invalid Zcash transparent address — must start with t1 or t3. For shielded (u1/zs1), use the Privacy tab.",
 	"invalidDgbAddress": "Invalid DigiByte address",
 	"invalidEvmAddress": "Invalid address — must be 0x followed by 40 hex characters",
+	"invalidEvmChecksum": "Checksum mismatch — this address may contain a typo. Copy it again from the source",
 	"invalidCosmosPrefix": "Wrong address prefix for this network",
 	"invalidCosmosLength": "Invalid Cosmos address length",
 	"invalidCosmosAddress": "Invalid Cosmos address",

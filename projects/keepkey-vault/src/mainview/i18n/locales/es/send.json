@@ -46,6 +46,7 @@
 	"invalidZecAddress": "Dirección Zcash inválida — debe comenzar con t1 o t3",
 	"invalidDgbAddress": "Dirección DigiByte inválida",
 	"invalidEvmAddress": "Dirección inválida — debe ser 0x seguido de 40 caracteres hexadecimales",
+	"invalidEvmChecksum": "La suma de verificación no coincide — la dirección puede contener un error de escritura. Vuelva a copiarla desde el origen",
 	"invalidCosmosPrefix": "Prefijo de dirección incorrecto para esta red",
 	"invalidCosmosLength": "Longitud de dirección Cosmos inválida",
 	"invalidCosmosAddress": "Dirección Cosmos inválida",
