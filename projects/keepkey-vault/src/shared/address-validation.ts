@@ -1,9 +1,11 @@
 /**
  * Per-chain address format validation.
- * Lightweight format checks — no external dependencies, no checksum verification.
+ * Lightweight format checks. EVM addresses also verify their EIP-55 checksum;
+ * other families check format only.
  * Catches obvious typos and cross-chain address mistakes before hitting the network.
  */
 import type { ChainDef } from './chains'
+import { eip55 } from './safe-tx'
 
 const BASE58 = /^[123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz]+$/
 const HEX40 = /^0x[0-9a-fA-F]{40}$/
@@ -96,8 +98,17 @@ function validateUtxoAddress(addr: string, chain: ChainDef): ValidationResult {
 
 // ── EVM ─────────────────────────────────────────────────────────────────
 
+/** A 0x address whose letters, when mixed-case, match their EIP-55 checksum.
+ *  All-lower or all-upper carries no checksum; a mixed-case typo would send to
+ *  an address nobody controls. */
+export function isEvmAddress(addr: string): boolean {
+  if (!HEX40.test(addr)) return false
+  const hex = addr.slice(2)
+  return hex === hex.toLowerCase() || hex === hex.toUpperCase() || eip55(addr) === addr
+}
+
 function validateEvmAddress(addr: string): ValidationResult {
-  if (HEX40.test(addr)) return OK
+  if (HEX40.test(addr)) return isEvmAddress(addr) ? OK : fail('invalidEvmChecksum')
   // ENS names — let them through (resolver handles it)
   if (addr.endsWith('.eth') && addr.length >= 7) return OK
   return fail('invalidEvmAddress')

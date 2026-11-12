@@ -46,6 +46,7 @@
 	"invalidZecAddress": "Adresse Zcash invalide — doit commencer par t1 ou t3",
 	"invalidDgbAddress": "Adresse DigiByte invalide",
 	"invalidEvmAddress": "Adresse invalide — doit être 0x suivi de 40 caractères hexadécimaux",
+	"invalidEvmChecksum": "Somme de contrôle incorrecte — l'adresse contient peut-être une faute de frappe. Recopiez-la depuis la source",
 	"invalidCosmosPrefix": "Préfixe d'adresse incorrect pour ce réseau",
 	"invalidCosmosLength": "Longueur d'adresse Cosmos invalide",
 	"invalidCosmosAddress": "Adresse Cosmos invalide",

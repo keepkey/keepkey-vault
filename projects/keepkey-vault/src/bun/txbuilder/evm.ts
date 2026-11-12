@@ -8,6 +8,7 @@
 import type { ChainDef } from '../../shared/chains'
 import { evmAddressPath } from '../../shared/chains'
 import { tokenMaxSpendableBaseUnits } from '../../shared/max-send'
+import { isEvmAddress } from '../../shared/address-validation'
 import { ARBITRUM_ONE_RPC, estimateGas, getEvmGasPrice, getEvmNonce, getEvmBalance } from '../evm-rpc'
 
 const TAG = '[txbuilder:evm]'
@@ -143,6 +144,7 @@ export async function buildEvmTx(
   // Build exactly the address that was validated, and refuse anything else here.
   const to = String(params.to ?? '').trim()
   if (!/^0x[0-9a-fA-F]{40}$/.test(to)) throw new Error('Enter a full 0x recipient address (40 hex characters). ENS names are not supported yet.')
+  if (!isEvmAddress(to)) throw new Error('Recipient checksum mismatch — the address may contain a typo. Copy it again from the source.')
   const amountNum = parseFloat(params.amount)
   const chainId = parseInt(chain.chainId || '1', 10)
   const isErc20 = !!(caip && caip.includes('erc20'))

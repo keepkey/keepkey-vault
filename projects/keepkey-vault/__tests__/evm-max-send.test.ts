@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
 import { buildEvmTx } from '../src/bun/txbuilder/evm'
 import { CHAINS } from '../src/shared/chains'
 import { tokenMaxSpendableBaseUnits } from '../src/shared/max-send'
+import { validateAddress } from '../src/shared/address-validation'
 
 const ethereum = CHAINS.find(c => c.id === 'ethereum')!
 const arbitrum = CHAINS.find(c => c.id === 'arbitrum')!
@@ -166,5 +167,35 @@ describe('EVM recipient', () => {
     for (const to of ['vitalik.eth', `${toAddress}0`, '']) {
       await expect(buildEvmTx(pioneerWithBalance('1'), base, { to, amount: '0.001', fromAddress })).rejects.toThrow('Enter a full 0x recipient address')
     }
+  })
+})
+
+describe('EVM address checksum (EIP-55)', () => {
+  const base = CHAINS.find(c => c.id === 'base')!
+  const valid = (a: string) => validateAddress(a, base)
+  // Vectors from the EIP-55 specification, plus a real address in this wallet's address book.
+  const vectors = ['0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed', '0xfB6916095ca1df60bB79Ce92cE3Ea74c37c5d359',
+    '0xdbF03B407c01E7cD3CBea99509d93f8DDDC8C6FB', '0xD1220A0cf47c7B9Be7A2E6BA89F429762e7b9aDb', '0x2A862D4a2852E3a29A5177d319e026adF2E7A073']
+
+  test('accepts checksummed, all-lowercase and all-uppercase addresses', () => {
+    for (const a of vectors) {
+      expect(valid(a)).toEqual({ valid: true })
+      expect(valid(a.toLowerCase())).toEqual({ valid: true })
+      expect(valid('0x' + a.slice(2).toUpperCase())).toEqual({ valid: true })
+      expect(valid(` ${a}\n`)).toEqual({ valid: true })
+    }
+  })
+
+  test('refuses a mixed-case address whose checksum does not match', () => {
+    const flipped = '0x2A862D4a2852E3a29A5177d319e026adf2E7A073' // one letter's case changed
+    const typo = '0x2A862D4a2852E3a29A5177d319e026adF2E7A074' // last digit mistyped
+    for (const a of [flipped, typo]) expect(valid(a)).toEqual({ valid: false, error: 'invalidEvmChecksum' })
+  })
+
+  test('the builder refuses it too, for callers that skip the form', async () => {
+    await expect(buildEvmTx(pioneerWithBalance('1'), base, { to: '0x2A862D4a2852E3a29A5177d319e026adf2E7A073', amount: '0.001', fromAddress }))
+      .rejects.toThrow('checksum mismatch')
+    const ok = await buildEvmTx(pioneerWithBalance('1'), base, { to: vectors[4], amount: '0.001', fromAddress })
+    expect(ok.to).toBe(vectors[4])
   })
 })

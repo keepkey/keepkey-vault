@@ -46,6 +46,7 @@
 	"invalidZecAddress": "Địa chỉ Zcash không hợp lệ — phải bắt đầu bằng t1 hoặc t3",
 	"invalidDgbAddress": "Địa chỉ DigiByte không hợp lệ",
 	"invalidEvmAddress": "Địa chỉ không hợp lệ — phải là 0x theo sau bởi 40 ký tự thập lục phân",
+	"invalidEvmChecksum": "Mã kiểm tra không khớp — địa chỉ có thể bị gõ sai. Hãy sao chép lại từ nguồn",
 	"invalidCosmosPrefix": "Tiền tố địa chỉ sai cho mạng này",
 	"invalidCosmosLength": "Độ dài địa chỉ Cosmos không hợp lệ",
 	"invalidCosmosAddress": "Địa chỉ Cosmos không hợp lệ",
