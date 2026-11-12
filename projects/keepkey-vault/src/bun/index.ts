@@ -272,6 +272,7 @@ import { getRequiredConfs } from "../shared/confirmations"
 import { addSessionActivity, getSessionActivity, clearSessionActivity } from "./session-activity"
 import { buildTx, broadcastTx, canonicalizeTronTokenCaip } from "./txbuilder"
 import { buildCosmosStakingTx, buildCosmosNameRegTx } from "./txbuilder/cosmos"
+import { readPioneerTokenBalance } from "./txbuilder/evm"
 import { initializeOrchardFromDevice, exportOrchardFvk, scanOrchardNotes, getShieldedBalance, sendShielded, ensureFvkLoaded, displayOrchardAddressOnDevice, setFvkDiskAllowed } from "./txbuilder/zcash-shielded"
 import { inFlightShielded, type ExpectedShielded } from "../shared/zcash-pending"
 import { setMoneroEmulatorEnabled, listEmulatorBuilds } from "./emulator-library"
@@ -7022,6 +7023,21 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			},
 
 			getBalance: getChainBalance,
+
+			// One token's balanceOf for one owner, read on chain through Pioneer's
+			// node-backed GetTokenBalance. The asset page uses it while the chain's
+			// portfolio is degraded (e.g. token discovery down).
+			verifyTokenBalance: async ({ chainId, owner, caip }) => {
+				requireOnline('check token balance')
+				const chain = getAllChains().find(c => c.id === chainId)
+				if (!chain || chain.chainFamily !== 'evm' || !chain.networkId) throw new Error('On-chain token balance checks are only available for EVM chains')
+				const match = /^(eip155:\d+)\/erc20:(0x[0-9a-fA-F]{40})$/.exec(caip)
+				if (!match || match[1].toLowerCase() !== chain.networkId.toLowerCase()) throw new Error('This token does not belong to this chain')
+				if (!/^0x[0-9a-fA-F]{40}$/.test(owner)) throw new Error('Invalid owner address')
+				const pioneer = await getPioneer()
+				const resp = await pioneer.GetTokenBalance({ networkId: chain.networkId, address: owner, contractAddress: match[2] })
+				return { balance: readPioneerTokenBalance(resp, `${caip} balance`) }
+			},
 
 			buildTx: async (params) => {
 				console.debug(`[buildTx] isMax=${params.isMax} chainId=${params.chainId}`)

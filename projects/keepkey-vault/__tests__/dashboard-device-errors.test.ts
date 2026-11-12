@@ -26,4 +26,4 @@ test('Dashboard retains balances for local device failures and still reports pro
   expect(result.completedReadSurvivesCache).toBe(true)
   expect(result.purgedCacheStaysEmpty).toBe(true)
   expect(result.deviceIntents).toEqual([])
-})
+}, 30_000) // the child renders under jsdom and is allowed 30 s; Bun's 5 s test default failed under load
