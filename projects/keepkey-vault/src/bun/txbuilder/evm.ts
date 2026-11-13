@@ -16,8 +16,16 @@ const TAG = '[txbuilder:evm]'
 /** String-based decimal→BigInt to avoid floating-point precision loss */
 export function parseUnits(amount: string, decimals: number): bigint {
   const [whole = '0', frac = ''] = amount.split('.')
+  if (frac.length > decimals) throw new Error(`Too many decimal places: max ${decimals}`)
   const padded = (frac + '0'.repeat(decimals)).slice(0, decimals)
   return BigInt(whole + padded)
+}
+
+/** Sanity bound for a user-typed gas price against the network quote.
+ *  ponytail: quote/2 approximates the base fee (eth_gasPrice = base + tip). */
+export function checkCustomGasPrice(custom: bigint, network: bigint): void {
+  if (custom > network * 10n) throw new Error(`Gas price is more than 10x the network price (${Number(network) / 1e9} gwei)`)
+  if (custom < network / 2n) throw new Error(`Gas price is below the network base fee (~${Number(network) / 1e9} gwei) — the transaction would never confirm`)
 }
 
 /** Pull a balance string out of a Pioneer balance response, or throw.
@@ -234,6 +242,7 @@ export async function buildEvmTx(
     const gwei = parseFloat(gasPriceGweiOverride)
     if (isFinite(gwei) && gwei > 0) {
       gasPrice = BigInt(Math.round(gwei * 1e9))
+      checkCustomGasPrice(gasPrice, quotedGasPrice)
       console.log(`${TAG} Custom gas price: ${gwei} gwei (${gasPrice} wei)`)
     }
   }
