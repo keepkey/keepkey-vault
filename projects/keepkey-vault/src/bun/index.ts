@@ -1211,6 +1211,7 @@ async function initSwapTrackerIfAllowed(): Promise<void> {
 			else if (msg === 'swap-complete') rpc.send['swap-complete'](data)
 			else console.error(`[swap-tracker] Unknown message: ${msg}`)
 			if (msg === 'swap-update' || msg === 'swap-complete') notifyActivityChanged()
+			if (msg === 'swap-complete') refreshSwapSettlementBalance(data)
 		} catch (e: any) {
 			console.warn(`[swap-tracker] Failed to send '${msg}':`, e.message)
 		}
@@ -3046,6 +3047,15 @@ const postTxBalances = createPostTxBalanceRefresh({
 	onError: (chainId, error) => console.warn(`[post-tx-balance] ${chainId}:`, error instanceof Error ? error.message : error),
 })
 
+// Audit v4 H2: the broadcast refresh covers only the source chain. A settled
+// swap pays out on another chain (or refunds to the source) — refresh that too.
+function refreshSwapSettlementBalance(swap: any): void {
+	const scope = currentBalanceRefreshScope()
+	if (!scope || (swap?.walletId && swap.walletId !== scope.walletId)) return
+	const chainId = swap?.status === 'refunded' ? swap.fromChainId : swap?.status === 'completed' ? swap.toChainId : undefined
+	if (chainId) postTxBalances.request(chainId, swap.outboundTxid)
+}
+
 function isWalletWatchChainEnabled(chainId: string): boolean {
 	const chain = getAllChains().find(c => c.id === chainId)
 	const state = engine.getDeviceState()
@@ -3862,6 +3872,7 @@ async function headlessExecuteSwap(params: ExecuteSwapParams, pushSubStage: (sta
 				else console.error(`[swap-tracker] Unknown message: ${msg}`)
 				// swap_history status/output moved — activity rows show it
 				if (msg === 'swap-update' || msg === 'swap-complete') notifyActivityChanged()
+				if (msg === 'swap-complete') refreshSwapSettlementBalance(data)
 			} catch (e: any) {
 				console.warn(`[swap-tracker] Failed to send '${msg}':`, e.message)
 			}
