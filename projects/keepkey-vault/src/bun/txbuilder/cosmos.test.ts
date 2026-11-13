@@ -32,6 +32,7 @@ async function main() {
   const rune = await buildCosmosTx(pioneer, THOR, { to: FROM, amount: '1.5', fromAddress: FROM })
   eq('RUNE denom stays native', sendMsg(rune).value.amount[0].denom, 'rune')
   eq('RUNE amount base units', sendMsg(rune).value.amount[0].amount, '150000000')
+  eq('RUNE review fee is the 0.02 native fee, not fee.amount 0', rune.fee, '0.02')
 
   // TCY — denom from caip, fee still rune
   const tcy = await buildCosmosTx(pioneer, THOR, { to: FROM, amount: '2', fromAddress: FROM, caip: 'cosmos:thorchain-mainnet-v1/denom:tcy' })
