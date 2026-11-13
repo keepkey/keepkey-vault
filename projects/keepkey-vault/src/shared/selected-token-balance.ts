@@ -88,3 +88,35 @@ export function reconcileSelectedToken(
     unverified: false,
   }
 }
+
+/** The chain's native balance read on chain for the selected owner (audit v4
+ *  H4). Like DirectTokenProof, it vouches only for the native coin while the
+ *  chain's portfolio is degraded, so Send/Swap/MAX keep working. */
+export interface DirectNativeProof {
+  chainId: string
+  owner: string
+  balance: string
+  verifiedAt: number
+}
+
+export function applyNativeProof(
+  balance: ChainBalance | undefined,
+  chainCaip: string,
+  proof: DirectNativeProof | null | undefined,
+  now = Date.now(),
+): ChainBalance | undefined {
+  if (!balance || !proof || !isBalanceUnverified(balance, chainCaip)) return balance
+  if (proof.chainId !== balance.chainId || !balance.address || proof.owner.toLowerCase() !== balance.address.toLowerCase()) return balance
+  if (proof.verifiedAt > now || now - proof.verifiedAt > DIRECT_TOKEN_PROOF_MAX_AGE_MS) return balance
+  const oldAmount = Number(balance.balance)
+  const oldNativeUsd = balance.nativeBalanceUsd ?? 0
+  const price = oldAmount > 0 ? oldNativeUsd / oldAmount : 0
+  const nativeBalanceUsd = Number(proof.balance) * price
+  return {
+    ...balance,
+    balance: proof.balance,
+    nativeBalanceUsd,
+    balanceUsd: (balance.balanceUsd ?? 0) - oldNativeUsd + nativeBalanceUsd,
+    confirmedAssetCaips: [...(balance.confirmedAssetCaips ?? []), chainCaip],
+  }
+}

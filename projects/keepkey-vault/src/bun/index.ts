@@ -7034,9 +7034,16 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				requireOnline('check token balance')
 				const chain = getAllChains().find(c => c.id === chainId)
 				if (!chain || chain.chainFamily !== 'evm' || !chain.networkId) throw new Error('On-chain token balance checks are only available for EVM chains')
+				if (!/^0x[0-9a-fA-F]{40}$/.test(owner)) throw new Error('Invalid owner address')
+				// The chain's native coin (audit v4 H4): eth_getBalance through our own nodes.
+				if (caip.toLowerCase() === chain.caip.toLowerCase()) {
+					const wei = await getEvmBalance(chain.networkId, owner)
+					const whole = (wei / 10n ** 18n).toString()
+					const frac = (wei % 10n ** 18n).toString().padStart(18, '0').replace(/0+$/, '')
+					return { balance: frac ? `${whole}.${frac}` : whole }
+				}
 				const match = /^(eip155:\d+)\/erc20:(0x[0-9a-fA-F]{40})$/.exec(caip)
 				if (!match || match[1].toLowerCase() !== chain.networkId.toLowerCase()) throw new Error('This token does not belong to this chain')
-				if (!/^0x[0-9a-fA-F]{40}$/.test(owner)) throw new Error('Invalid owner address')
 				const pioneer = await getPioneer()
 				const resp = await pioneer.GetTokenBalance({ networkId: chain.networkId, address: owner, contractAddress: match[2] })
 				return { balance: readPioneerTokenBalance(resp, `${caip} balance`) }
