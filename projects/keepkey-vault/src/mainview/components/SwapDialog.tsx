@@ -135,6 +135,7 @@ function nativeMaxFeeReserve(asset: SwapAsset, mode: NativeMaxReserveMode = 'saf
   if (asset.contractAddress) return 0
   if (asset.chainFamily === 'tron') return NATIVE_TRON_FEE_RESERVE
   if (asset.chainFamily === 'solana') return NATIVE_SOLANA_FEE_RESERVE
+  if (asset.chainId === 'thorchain') return 0.022 // 0.02 RUNE network fee × 1.1, like evm.ts isMax
   if (asset.chainFamily !== 'evm') return 0
   const chainDef = CHAINS.find(c => c.id === asset.chainId)
   const reserveKey = chainDef?.networkId ?? asset.chainId

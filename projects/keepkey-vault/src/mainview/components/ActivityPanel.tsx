@@ -1,5 +1,6 @@
 import i18n from '../i18n'
 import { getNumberLocale } from "../lib/number-locale"
+import { formatBalance } from "../lib/formatting"
 import { useUiTranslation } from "../i18n/ui"
 /**
  * ActivityPanel — drawer showing recent transaction activity per network.
@@ -182,7 +183,7 @@ function formatNativeValue(raw: string | undefined, chainDef: { decimals: number
   if (!raw) return null
   const amount = source === 'scan' && chainDef
     ? formatBaseUnits(raw, chainDef.decimals)
-    : raw
+    : /e/i.test(raw) ? formatBalance(raw) : raw // never "1.26e-7"
   if (!amount) return null
   const usd = priceUsd ? formatUsd((numericDisplayValue(amount) ?? 0) * priceUsd) : null
   return { amount, usd }

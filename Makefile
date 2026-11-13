@@ -452,6 +452,7 @@ test-i18n:
 
 test-unit:
 	cd $(PROJECT_DIR) && bun test __tests__/build-electrobun.test.ts
+	cd $(PROJECT_DIR) && bun test src/bun/txbuilder/evm-units.test.ts
 	cd $(PROJECT_DIR) && bun test __tests__/hyperliquid-identity.test.ts
 	cd $(PROJECT_DIR) && bun test __tests__/receive-payment-uri.test.ts
 	cd $(PROJECT_DIR) && bun test __tests__/swap-row-explorer.test.ts
