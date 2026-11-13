@@ -1727,12 +1727,19 @@ function PersonalDashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSetti
 		const selected = evmAddressSet.addresses.find(a => a.addressIndex === evmAddressSet.selectedIndex)
 		const cb = selected?.chainBalances?.[chainId]
 		if (!cb || !selected) return agg
+		// Price the native coin with the aggregate's price: the price refresh
+		// only rewrites `balances`, so the per-address USD went stale and the
+		// center card disagreed with the sidebar (audit v4 H14).
+		const aggBal = parseFloat(agg?.balance || '0')
+		const price = aggBal > 0 && agg?.nativeBalanceUsd != null ? agg.nativeBalanceUsd / aggBal : undefined
+		const nativeBalanceUsd = price !== undefined ? parseFloat(cb.balance || '0') * price : cb.nativeBalanceUsd
+		const balanceUsd = price !== undefined ? (cb.balanceUsd || 0) - (cb.nativeBalanceUsd || 0) + (nativeBalanceUsd || 0) : cb.balanceUsd
 		return {
 			chainId,
 			symbol: agg?.symbol || chain.symbol,
 			balance: cb.balance,
-			balanceUsd: cb.balanceUsd,
-			nativeBalanceUsd: cb.nativeBalanceUsd,
+			balanceUsd,
+			nativeBalanceUsd,
 			address: selected.address,
 			tokens: cb.tokens,
 			defiPositions: cb.defiPositions,
