@@ -45,7 +45,9 @@ function forgetCoinChoice() {
 }
 
 // ── Design tokens ───────────────────────────────────────────────────────────
-const HIGHLIGHT = 'green.500'
+// Primary accent for the wizard: the app-wide gold. Green stays reserved for
+// "done" (STEP_DONE) and verified states.
+const HIGHLIGHT = 'var(--gold)'
 // Step indicator: green means done, so the step in progress uses the gold
 // action accent. Otherwise a finished step and the current one look the same
 // (two green indicators during a firmware update).
@@ -1274,7 +1276,7 @@ export function OobSetupWizard({ onComplete: onCompleteProp, onWalletCreated, on
           <Box h="4px" bg="kk.cardBg" borderRadius="full" overflow="hidden">
             <Box
               h="100%"
-              bg={progressPercent > 0 ? 'green.500' : HIGHLIGHT}
+              bg={HIGHLIGHT}
               borderRadius="full"
               transition="width 0.3s, background-color 0.3s"
               w={`${progressPercent}%`}
@@ -2585,7 +2587,7 @@ export function OobSetupWizard({ onComplete: onCompleteProp, onWalletCreated, on
                     bg="kk.cardBg"
                     transition="all 0.2s"
                     _hover={{
-                      borderColor: 'green.500',
+                      borderColor: HIGHLIGHT,
                       transform: 'translateY(-1px)',
                     }}
                   >
@@ -2638,10 +2640,10 @@ export function OobSetupWizard({ onComplete: onCompleteProp, onWalletCreated, on
                                   fontWeight="600"
                                   cursor="pointer"
                                   bg={wordCount === wc ? HIGHLIGHT : 'gray.600'}
-                                  color={wordCount === wc ? 'white' : 'gray.400'}
+                                  color={wordCount === wc ? 'var(--ink-0)' : 'gray.400'}
                                   borderWidth="1px"
                                   borderColor={wordCount === wc ? HIGHLIGHT : 'transparent'}
-                                  _hover={{ bg: wordCount === wc ? 'green.600' : 'gray.500' }}
+                                  _hover={{ bg: wordCount === wc ? 'var(--gold-2)' : 'gray.500' }}
                                   transition="all 0.15s"
                                   onClick={(e: React.MouseEvent) => {
                                     e.stopPropagation()
@@ -2909,7 +2911,7 @@ export function OobSetupWizard({ onComplete: onCompleteProp, onWalletCreated, on
                     )}
 
                     {!isEmulator && (
-                      <Box w="100%" p={3} bg="rgba(139,227,196,0.10)" borderRadius="lg" borderWidth="2px" borderColor={HIGHLIGHT}>
+                      <Box w="100%" p={3} bg="rgba(139,227,196,0.10)" borderRadius="lg" borderWidth="2px" borderColor="rgba(139,227,196,0.45)">
                         <HStack gap={2} justify="center">
                           <FaExclamationTriangle color="var(--teal)" size={14} />
                           <Text fontSize="xs" color="green.200" fontWeight="bold">
@@ -2986,7 +2988,7 @@ export function OobSetupWizard({ onComplete: onCompleteProp, onWalletCreated, on
                   disabled={applyingLabel}
                   _disabled={{ opacity: 0.6, cursor: 'not-allowed' }}
                   _hover={{ borderColor: 'gray.500' }}
-                  _focus={{ borderColor: 'green.500', boxShadow: '0 0 0 1px green.500' }}
+                  _focus={{ borderColor: HIGHLIGHT, boxShadow: '0 0 0 1px var(--gold)' }}
                   onKeyDown={(e: React.KeyboardEvent) => {
                     if (e.key === 'Enter' && deviceLabel.trim() && !applyingLabel) {
                       handleApplyLabel()
@@ -3733,8 +3735,8 @@ export function OobSetupWizard({ onComplete: onCompleteProp, onWalletCreated, on
                 w="100%"
                 size="sm"
                 bg={HIGHLIGHT}
-                color="white"
-                _hover={{ bg: 'green.600' }}
+                color="var(--ink-0)"
+                _hover={{ bg: 'var(--gold-2)' }}
                 onClick={() => setShowReadMore(false)}
               >
                 {t('welcome.gotIt')}
