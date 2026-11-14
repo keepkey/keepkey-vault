@@ -64,6 +64,7 @@ import {
 	type BalanceReconciliation,
 	type SwapExecutionBalanceDetail,
 } from "../../shared/balance-reconciliation"
+import { ownerUsdAtAggregatePrice, selectedOwnerBalance } from "../lib/effective-balance"
 import { playChaChing } from "../lib/sounds"
 
 /** Error boundary wrapping AssetPage — ensures user can always go back to Dashboard */
@@ -1646,6 +1647,19 @@ function PersonalDashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSetti
 		})
 	}, [commitBalanceReconciliations, clearLocalPioneerError])
 
+	// A broadcast or swap settlement made this chain's figure out of date: it
+	// stays shown, but no longer as synced, until a confirmed read replaces it (audit v4 H3).
+	useEffect(() => onRpcMessage("balance-stale", ({ chainId }: { chainId: string }) => {
+		setBalances(prev => {
+			const row = prev.get(chainId)
+			if (!row || row.syncState === 'stale' || row.syncState === 'degraded') return prev
+			const next = new Map(prev)
+			next.set(chainId, { ...row, syncState: 'stale' })
+			balancesRef.current = next
+			return next
+		})
+	}), [])
+
 	// Seed-staleness purge: the backend detected the wallet data belonged to a
 	// DIFFERENT seed than the device (passphrase toggle, hidden↔standard
 	// transition, cached-passphrase reconnect) and dropped it. Clear the
@@ -1725,19 +1739,8 @@ function PersonalDashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSetti
 		const chain = allChains.find(c => c.id === chainId)
 		if (!chain || chain.chainFamily !== 'evm') return agg
 		const selected = evmAddressSet.addresses.find(a => a.addressIndex === evmAddressSet.selectedIndex)
-		const cb = selected?.chainBalances?.[chainId]
-		if (!cb || !selected) return agg
-		return {
-			chainId,
-			symbol: agg?.symbol || chain.symbol,
-			balance: cb.balance,
-			balanceUsd: cb.balanceUsd,
-			nativeBalanceUsd: cb.nativeBalanceUsd,
-			address: selected.address,
-			tokens: cb.tokens,
-			defiPositions: cb.defiPositions,
-			updatedAt: agg?.updatedAt,
-		}
+		if (!selected) return agg
+		return selectedOwnerBalance(agg, selected.chainBalances?.[chainId], selected.address, evmAddressSet.addresses.length === 1)
 	}, [balances, allChains, evmAddressSet])
 
 	// Warm the browser-level image cache + hold live Image references so chain
@@ -2175,7 +2178,7 @@ function PersonalDashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSetti
 										key: `evm-${addr.addressIndex}`,
 										index: addr.addressIndex,
 										balance: parseFloat(addr.chainBalances?.[chain.id]?.balance || '0'),
-										balanceUsd: addr.chainBalances?.[chain.id]?.balanceUsd || 0,
+										balanceUsd: (addr.chainBalances?.[chain.id] ? ownerUsdAtAggregatePrice(balances.get(chain.id), addr.chainBalances[chain.id]!).balanceUsd : 0) || 0,
 										isSelected: evmSelectedIndex === addr.addressIndex,
 										address: addr.address,
 										onSelect: () => evmSelectIndex(addr.addressIndex),

@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import type { ChainBalance, TokenBalance } from '../src/shared/types'
-import { DIRECT_TOKEN_PROOF_MAX_AGE_MS, reconcileSelectedToken, type DirectTokenProof, type SelectedTokenState } from '../src/shared/selected-token-balance'
+import { DIRECT_TOKEN_PROOF_MAX_AGE_MS, applyNativeProof, reconcileSelectedToken, type DirectNativeProof, type DirectTokenProof, type SelectedTokenState } from '../src/shared/selected-token-balance'
 import { isBalanceUnverified } from '../src/shared/balance-display-state'
 
 const owner = '0x1111111111111111111111111111111111111111'
@@ -162,5 +162,27 @@ describe('on-chain proof for the selected token', () => {
     const result = reconcileSelectedToken(selected(), context, balance('42'), proof(), now)
     expect(result.unverified).toBe(false)
     expect(result.selection!.token.balance).toBe('42')
+  })
+})
+
+describe('native balance proof while degraded (audit v4 H4)', () => {
+  const native = 'eip155:1/slip44:60'
+  const degraded = () => balance(undefined, { syncState: 'degraded', balance: '0.002', nativeBalanceUsd: 6, balanceUsd: 10 })
+  const proof = (o: Partial<DirectNativeProof> = {}): DirectNativeProof => ({ chainId: 'ethereum', owner: owner.toUpperCase().replace('0X', '0x'), balance: '0.003', verifiedAt: 1000, ...o })
+  test('a fresh proof for the owner verifies the native coin', () => {
+    const b = applyNativeProof(degraded(), native, proof(), 2000)!
+    expect(isBalanceUnverified(b, native)).toBe(false)
+    expect(b.balance).toBe('0.003')
+    expect(b.nativeBalanceUsd).toBeCloseTo(9)
+    expect(b.balanceUsd).toBeCloseTo(13)
+  })
+  test('wrong owner, wrong chain or stale proof changes nothing', () => {
+    for (const p of [proof({ owner: other }), proof({ chainId: 'base' }), proof({ verifiedAt: 1000 - DIRECT_TOKEN_PROOF_MAX_AGE_MS - 1 })]) {
+      expect(isBalanceUnverified(applyNativeProof(degraded(), native, p, 1000), native)).toBe(true)
+    }
+  })
+  test('a trusted portfolio wins over the proof', () => {
+    const b = balance(undefined)
+    expect(applyNativeProof(b, native, proof(), 2000)).toBe(b)
   })
 })

@@ -80,6 +80,21 @@ function maxFeeReserveBase(chain: ChainDef, adjustedTxFeeBase: bigint): bigint {
   return cost * MAX_FEE_RESERVE_MULTIPLIER
 }
 
+/** Fee the user actually pays, in display units. THOR/Maya put '0' in
+ *  `fee.amount` and charge FEES[chain] at the bank layer — showing fee.amount
+ *  there reported "Taxa 0 RUNE" while 0.02 RUNE left the account. */
+export function displayFee(chain: ChainDef, fee: { amount: { amount: string }[] }): string {
+  const txFee = Number(fee.amount[0]?.amount || 0) / 10 ** chain.decimals
+  return String(Math.max(txFee, FEES[chain.id] || 0))
+}
+
+/** THOR/Maya native fee in base units, for history rows whose fee is the tx's
+ *  auth fee ('0'). Other chains pay the auth fee, so they get undefined. */
+export function nativeTxFeeBaseUnits(chain: ChainDef): string | undefined {
+  if (chain.id !== 'thorchain' && chain.id !== 'mayachain') return undefined
+  return String(Math.round(FEES[chain.id] * 10 ** chain.decimals))
+}
+
 // Chain-specific msg types (MsgSend)
 const MSG_SEND_TYPES: Record<string, string> = {
   thorchain: 'thorchain/MsgSend',
@@ -178,7 +193,7 @@ export async function buildCosmosTx(
   if (!chain.chainId) throw new Error(`Missing chainId for Cosmos chain: ${chain.id}`)
   const chain_id = chain.chainId
 
-  const feeInDisplay = String(Number(fee.amount[0]?.amount || 0) / 10 ** chain.decimals)
+  const feeInDisplay = displayFee(chain, fee)
 
   // 3. Compute amount in base units (integer math to avoid float precision loss)
   let baseAmount: bigint
@@ -304,7 +319,7 @@ export async function buildCosmosStakingTx(
   console.log(`${TAG} account_number=${account_number}, sequence=${sequence}`)
 
   const fee = FEE_TEMPLATES[chain.id] || FEE_TEMPLATES.cosmos
-  const feeInDisplay = String(Number(fee.amount[0]?.amount || 0) / 10 ** chain.decimals)
+  const feeInDisplay = displayFee(chain, fee)
 
   let baseAmount: bigint
   if (isMax) {

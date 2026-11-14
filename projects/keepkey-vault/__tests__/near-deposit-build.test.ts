@@ -26,9 +26,9 @@ test('an expired EVM router deadline is refused instead of silently extended', a
   const ctx: any = { wallet: {}, getAllChains: () => CHAINS, getEvmRpcSource: () => { throw new Error('No network request expected') },
     pushSubStage: () => {}, wrapSign: async () => { signs++; throw new Error('No device request expected') } }
   const params: ExecuteSwapParams = { fromChainId: 'ethereum', toChainId: 'ripple', fromCaip: 'eip155:1/slip44:60',
-    toCaip: CHAINS.find(c => c.id === 'ripple')!.caip, amount: '0.003', memo: '=:XRP.XRP:rRecipient',
+    toCaip: CHAINS.find(c => c.id === 'ripple')!.caip, amount: '0.003', memo: '=:XRP.XRP:rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh',
     inboundAddress: '0xVault', router: '0xRouter', expectedOutput: '6', expiry: Math.floor(Date.now() / 1000) - 1,
-    fromAddressOverride: '0xSender', toAddressOverride: 'rRecipient' }
+    fromAddressOverride: '0xSender', toAddressOverride: 'rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh' }
   await expect(executeSwap(params, ctx)).rejects.toThrow(/expired/)
   expect(signs).toBe(0)
 })
@@ -50,7 +50,7 @@ for (const source of sources) test(`NEAR ${source.kind} plain deposit reaches it
   const params: ExecuteSwapParams = { fromCaip: source.caip, toCaip: 'eip155:1/slip44:60', fromChainId: source.chain, toChainId: 'ethereum',
     amount: source.amount, expectedOutput: quote.expectedOutput, inboundAddress: quote.inboundAddress, memo: quote.memo,
     integration: quote.integration, swapper: quote.swapper, relayTx: quote.relayTx, tokenDecimals: source.decimals,
-    fromAddressOverride: source.sender || 'source-wallet', toAddressOverride: '0xrecipient',
+    fromAddressOverride: source.sender || 'source-wallet', toAddressOverride: '0x1111111111111111111111111111111111111111',
   }
   let signingBoundary = false
   const ctx: any = { wallet: {}, getAllChains: () => CHAINS, getEvmRpcSource: () => { throw new Error('EVM builder must never run') },
@@ -98,7 +98,7 @@ for (const source of sources) test(`NEAR ${source.kind} plain deposit reaches it
 test('unsupported non-EVM prebuilt transactions stop before the EVM builder or device', async () => {
   const params: ExecuteSwapParams = { fromCaip: CHAINS.find(chain => chain.id === 'ripple')!.caip, toCaip: 'eip155:1/slip44:60',
     fromChainId: 'ripple', toChainId: 'ethereum', amount: '10', expectedOutput: '0.01', inboundAddress: '', memo: '',
-    fromAddressOverride: 'source-wallet', toAddressOverride: '0xrecipient', relayTx: { to: 'rDeposit', data: '0x12345678', value: '0', chainId: 0 },
+    fromAddressOverride: 'source-wallet', toAddressOverride: '0x1111111111111111111111111111111111111111', relayTx: { to: 'rDeposit', data: '0x12345678', value: '0', chainId: 0 },
   }
   const ctx: any = { wallet: {}, getAllChains: () => CHAINS, getEvmRpcSource: () => { throw new Error('EVM builder must never run') }, pushSubStage: () => {}, wrapSign: async () => { throw new Error('Device must never run') } }
   await expect(previewSwapBuild(params, ctx)).rejects.toThrow('Unsupported prebuilt swap transaction for Ripple')

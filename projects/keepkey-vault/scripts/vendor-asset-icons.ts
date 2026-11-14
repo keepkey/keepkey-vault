@@ -131,6 +131,13 @@ for (const caip of ALWAYS_INCLUDE_CAIPS) {
   const fallbackUrl = fallbackIconByCoingeckoId.get(coingeckoMapping[caip])
   if (fallbackUrl) selected.push({ caip, url: fallbackUrl })
 }
+// HyperEVM's corrected CAIP (eip155:999) has no CDN image yet; vendor the logo
+// the CDN still stores under the catalog's old id (2868). Keep in sync with
+// ICON_CAIP_ALIASES in src/shared/assetLookup.ts.
+const HYPEREVM_CAIP = 'eip155:999/slip44:60'
+if (!selected.some(item => item.caip === HYPEREVM_CAIP)) {
+  selected.push({ caip: HYPEREVM_CAIP, url: `https://api.keepkey.info/coins/${btoa('eip155:2868/slip44:60').replace(/=+$/, '')}.png` })
+}
 selected.sort((a, b) => a.caip.localeCompare(b.caip))
 
 await mkdir(outputDir, { recursive: true })

@@ -12,7 +12,7 @@ const dir = mkdtempSync(join(tmpdir(), 'vault-signed-tx-review-'))
 mock.module('electrobun/main', () => ({ Utils: { paths: { userData: dir } } }))
 mock.module('electrobun/main/utils', () => ({ paths: { userData: dir } }))
 const db = await import('./db')
-const { evmTxid, signedTxReview, recordSignedEvmTx, tokenMoves, txDetails, walletBook, lookupEvmTx } = await import('./signed-tx-review')
+const { evmTxid, signedTxActivityTxid, signedTxReview, recordSignedEvmTx, tokenMoves, txDetails, walletBook, lookupEvmTx } = await import('./signed-tx-review')
 
 beforeAll(() => db.initDb())
 afterAll(() => { db.closeDb(); rmSync(dir, { recursive: true, force: true }) })
@@ -45,6 +45,18 @@ describe('evmTxid', () => {
       expect(parsed.type ?? 0).toBe(tx.type)
       expect(evmTxid(serialized)).toBe(parsed.hash!.toLowerCase())
     }
+  })
+})
+
+describe('signedTxActivityTxid (audit v4 H15)', () => {
+  const serialized = '0xf86c098504a817c800825208943535353535353535353535353535353535353535880de0b6b3a76400008025a028ef61340bd939bc2195fe537567866003e1a15d3c71ff63e1590620aa636276a067cbe9d8997f761aecb703304b3800ccf555c9f3dc64214b297fb1966a3b6d83'
+  test('a REST EVM signature is logged under the txid it will broadcast as, so a later broadcast or scan merges with it', () => {
+    expect(signedTxActivityTxid('/eth/sign-transaction', { serialized })).toBe('0x33469b22e9f636356c4160a87eb19df52b7412e8eac32a4a55ffe88ea8350788')
+  })
+  test('messages and unparseable responses carry no txid', () => {
+    expect(signedTxActivityTxid('/eth/sign', { signature: '0x' + '11'.repeat(65) })).toBeUndefined()
+    expect(signedTxActivityTxid('/eth/sign-transaction', { serialized: 'not-hex' })).toBeUndefined()
+    expect(signedTxActivityTxid('/eth/sign-transaction', {})).toBeUndefined()
   })
 })
 

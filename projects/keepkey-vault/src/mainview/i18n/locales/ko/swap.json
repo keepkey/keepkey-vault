@@ -205,5 +205,14 @@
 	"deviceBlindSignCaveat": "블라인드 서명은 KeepKey가 잠기거나 연결이 해제될 때까지 이 스왑뿐 아니라 KeepKey를 사용하는 모든 앱에 적용됩니다. 활성화된 동안 이 앱도 해당 거래 전에 이 화면을 표시하지 않습니다. 기기에서 확인하고 PIN을 다시 입력해야 합니다.",
 	"solanaOutflowDrain": "경고: 이 작업으로 지갑이 비게 됩니다. 의도한 경우가 아니라면 서명하지 마세요.",
 	"solanaOutflowCaveat": "이 컴퓨터에서 Solana 노드로 시뮬레이션했습니다. KeepKey는 이 수치를 확인할 수 없습니다.",
-	"deviceBlindSignEnable": "블라인드 서명 켜기"
+	"deviceBlindSignEnable": "블라인드 서명 켜기",
+	"reviewRecipient": "받는 사람",
+	"customRecipientNotKeepKey": "사용자 지정 받는 사람 — 내 KeepKey가 아닙니다",
+	"customAddressOwn": "내 KeepKey 주소입니다",
+	"relayDepositRecipient": "Relay 주문은 {{address}}(으)로 지급됩니다. KeepKey는 입금만 서명하며, 지급은 이후 Relay가 처리합니다.",
+	"relayRecipientMismatchButton": "Relay 주문이 다른 주소로 지급합니다",
+	"relayRecipientMismatch": "Relay 주문이 표시된 받는 사람에게 지급하지 않습니다. 진행하지 말고 새 견적을 받으세요.",
+	"highSlippageConfirmButton": "높은 슬리피지 확인",
+	"highSlippageConfirmRequired": "서명하기 전에 높은 슬리피지 허용 범위를 확인하세요.",
+	"highSlippageConfirm": "{{pct}}% 슬리피지 허용 범위를 수락합니다: 견적보다 최대 {{pct}}% 적게 받을 수 있습니다."
 }

@@ -520,6 +520,10 @@ export interface BuildEntriesInput {
 
 /** Build the unified, sorted asset list. Async to allow lazy import of
  *  pioneer-discovery's 30k JSON. */
+/** Native-asset symbol per built-in chain CAIP (e.g. eip155:42161/slip44:60 → ETH). */
+const BUILT_IN_NATIVE_SYMBOL = new Map(
+  CHAINS.filter(c => c.caip && /\/slip44:/.test(c.caip)).map(c => [canonicalizeCaip(c.caip), c.symbol] as const))
+
 export async function buildAssetEntries(input: BuildEntriesInput): Promise<AssetEntry[]> {
   const discovery = await getDiscoveryMap()
   const swappableByCaip = new Map<string, SwapAsset>()
@@ -577,6 +581,11 @@ export async function buildAssetEntries(input: BuildEntriesInput): Promise<Asset
     seen.add(caip)
     const swappable = swappableByCaip.get(caip) ?? swappableByCaip.get(rawCaip)
     const balance = balanceByCaip.get(caip) ?? balanceByCaip.get(rawCaip)
+    // The discovery catalog names some L2 gas assets after the chain's token
+    // (Arbitrum native ETH as "ARB", Optimism "OP", Base "BASE"). For a built-in
+    // chain's native CAIP the chain table is authoritative, so a user picking
+    // "ARB" never receives ETH (the real ARB is the ERC-20 on Arbitrum).
+    const nativeSymbol = BUILT_IN_NATIVE_SYMBOL.get(caip)
     const availability = assessWithFirmware(caip, input.firmwareVersion)
     // CAIP namespace is the source of truth — `/slip44:` is native, anything
     // under `/erc20:` `/bep20:` or `/token:` is a token. Discovery's own
@@ -585,7 +594,7 @@ export async function buildAssetEntries(input: BuildEntriesInput): Promise<Asset
     const isNative = !isToken
     entries.push({
       caip,
-      symbol: raw.symbol,
+      symbol: nativeSymbol ?? raw.symbol,
       name: raw.name || raw.symbol,
       chainId: canonicalizeChainCaip2(raw.chainId),
       decimals: raw.decimals,
@@ -733,4 +742,23 @@ export function searchEntries(index: SearchIndex, query: string): AssetEntry[] {
   }
   matched.sort((a, b) => (a.score - b.score) || (a.idx - b.idx))
   return matched.map(m => index.entries[m.idx])
+}
+
+/**
+ * The TO picker's first-step search. A network tile matches on its name, its
+ * family or its coin's ticker, and assets match on symbol or name whenever
+ * there is a query — so "eth" lists the Ethereum, Base and Arbitrum tiles and
+ * native ETH on each, not only the Ethereum tile (audit v4 V17).
+ */
+export function searchPickerNetworks<C extends { name: string; family: string; nativeCaip?: string }>(
+  chains: C[], entries: AssetEntry[], query: string, excludeCaip?: string,
+): { chains: C[]; assets: AssetEntry[] } {
+  const q = query.trim().toLowerCase()
+  if (!q) return { chains, assets: [] }
+  const tickers = new Map(entries.map(e => [canonicalizeCaip(e.caip), e.symbol.toLowerCase()]))
+  return {
+    chains: chains.filter(c => c.name.toLowerCase().includes(q) || c.family.toLowerCase().includes(q)
+      || (!!c.nativeCaip && tickers.get(canonicalizeCaip(c.nativeCaip)) === q)),
+    assets: entries.filter(e => e.caip !== excludeCaip && `${e.symbol} ${e.name}`.toLowerCase().includes(q)),
+  }
 }

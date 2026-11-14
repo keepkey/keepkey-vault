@@ -7,6 +7,6 @@ test('SendForm fences retired RPCs, preserves same-owner drafts, and distinguish
   if (run.exitCode) throw new Error(run.stderr.toString() || run.stdout.toString())
   expect(JSON.parse(run.stdout.toString().trim().split('\n').at(-1)!)).toEqual({
     senderReadiness: true, retiredBuild: true, editedBuild: true, identities: 6, retiredSignature: true, signingIdentities: 2,
-    snapshot: true, unmounted: true, pendingBalance: true,
+    snapshot: true, deviceWait: true, unmounted: true, pendingBalance: true,
   })
 }, 35000)

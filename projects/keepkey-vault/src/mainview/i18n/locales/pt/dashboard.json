@@ -37,5 +37,18 @@
 	"loadingPrices": "Buscando os preços mais recentes",
 	"tokensCount": "+{{count}} tokens",
 	"dismiss": "Dispensar",
-	"tokensCount_many": "+{{count}} tokens"
+	"tokensCount_many": "+{{count}} tokens",
+	"addEvmChain": "Adicionar rede EVM",
+	"addNetwork": "Adicionar rede",
+	"degradedTitle": "Alguns saldos estão dessincronizados",
+	"degradedDesc": "Ainda sincronizando: {{chains}}. Eles serão atualizados quando a sincronização terminar.",
+	"degradedReach": "Ainda sincronizando:",
+	"degradedTail": "Eles serão atualizados quando a sincronização terminar.",
+	"staleTitle": "Alguns saldos estão dessincronizados",
+	"staleDesc": "Alguns saldos foram sincronizados pela última vez {{ago}}.",
+	"syncNow": "Sincronizar agora",
+	"swapBalanceSyncTitle": "Troca concluída — sincronizando saldo de {{symbol}}",
+	"swapBalanceSyncDesc": "Seus últimos saldos verificados continuam visíveis até que os novos fundos sejam confirmados de forma independente.",
+	"swapBalanceUnconfirmedTitle": "Ainda não foi possível confirmar seu saldo de {{symbol}}",
+	"swapBalanceUnconfirmedDesc": "A troca foi concluída on-chain. Seu serviço de saldo ainda não informou os novos fundos — consulte o explorador de blocos se eles não aparecerem em breve."
 }

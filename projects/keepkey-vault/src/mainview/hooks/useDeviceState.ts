@@ -33,8 +33,8 @@ export function useDeviceState() {
       receivedPush = true
       receive(payload)
     })
+    // A purge carries no device state: it must not end the resync below.
     const unsubscribePurge = onRpcMessage('wallet-data-purged', () => {
-      receivedPush = true
       setSnapshot(previous => ({ ...previous, portfolio: null }))
     })
 
@@ -55,9 +55,21 @@ export function useDeviceState() {
       })
     }
     fetchInitial(1)
+    // A push sent before the webview listens is lost (Windows WebView2 at
+    // launch): a KeepKey plugged in locked before launch then sat on
+    // "searching" until a click. Re-sync until the first push arrives.
+    // ponytail: 2s poll for 30s, bounded; a ready-handshake would replace it.
+    let resyncs = 0
+    const resync = setInterval(() => {
+      if (cancelled || receivedPush || ++resyncs > 15) { clearInterval(resync); return }
+      rpcRequest<DeviceStateInfo>('getDeviceState').then((state) => {
+        if (!cancelled && !receivedPush) receive(state)
+      }).catch(() => {})
+    }, 2000)
 
     return () => {
       cancelled = true
+      clearInterval(resync)
       if (retryTimer) clearTimeout(retryTimer)
       unsubscribe()
       unsubscribePurge()

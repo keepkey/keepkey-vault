@@ -48,3 +48,22 @@ export function shouldRetryCompletedSwapMetadata(
 ): boolean {
   return status === 'completed' && metadataPending === true && attempts < maxAttempts
 }
+
+export interface ThornodeSettlement { completed: boolean; outboundTxid?: string; outboundAmount?: string }
+
+/** Read THORNode /thorchain/tx/status/{hash}. Its out_txs often lead with the
+ * RUNE affiliate leg, whose id is always all-zero (THOR-native sends have no
+ * hash) — so match the leg paid to the swap destination instead of taking [0]. */
+export function settlementFromThornodeStatus(status: any, destination: string): ThornodeSettlement {
+  const legs: any[] = Array.isArray(status?.out_txs) ? status.out_txs : []
+  const dest = destination.trim().toLowerCase()
+  const toDest = legs.filter(o => typeof o?.to_address === 'string' && o.to_address.toLowerCase() === dest)
+  const real = toDest.find(o => !isPlaceholderOutboundTxHash(o.id))
+  // THOR-native payouts never get a hash; the settled leg itself is the evidence.
+  const leg = real || toDest.find(o => o.chain === 'THOR')
+  const completed = !!leg && status?.stages?.swap_finalised?.completed === true
+    && status?.stages?.outbound_signed?.completed !== false
+  if (!completed) return { completed: false }
+  const amount = leg.coins?.[0]?.amount
+  return { completed, ...(real ? { outboundTxid: real.id } : {}), ...(/^\d+$/.test(amount || '') ? { outboundAmount: amount } : {}) }
+}

@@ -205,5 +205,14 @@
 	"deviceBlindSignCaveat": "La signature à l’aveugle reste activée jusqu’au verrouillage ou au débranchement du KeepKey, pour toutes les applications qui l’utilisent, pas seulement cet échange. Tant qu’elle est activée, cette application cesse aussi d’afficher cet écran avant ces transactions. L’appareil vous demande de confirmer et de saisir à nouveau votre code PIN.",
 	"solanaOutflowDrain": "Attention : cela vide votre portefeuille. Ne signez que si c’est bien votre intention.",
 	"solanaOutflowCaveat": "Simulation effectuée avec un nœud Solana depuis cet ordinateur. Votre KeepKey ne peut pas confirmer ces chiffres.",
-	"deviceBlindSignEnable": "Activer la signature à l’aveugle"
+	"deviceBlindSignEnable": "Activer la signature à l’aveugle",
+	"reviewRecipient": "Destinataire",
+	"customRecipientNotKeepKey": "Destinataire personnalisé — pas votre KeepKey",
+	"customAddressOwn": "C'est votre propre adresse KeepKey",
+	"relayDepositRecipient": "L'ordre Relay verse les fonds à {{address}}. Votre KeepKey signe uniquement le dépôt ; Relay effectue le versement ensuite.",
+	"relayRecipientMismatchButton": "L'ordre Relay paie une autre adresse",
+	"relayRecipientMismatch": "L'ordre Relay ne paie pas le destinataire affiché. Ne continuez pas — demandez un nouveau devis.",
+	"highSlippageConfirmButton": "Confirmez le glissement élevé",
+	"highSlippageConfirmRequired": "Confirmez la tolérance de glissement élevée avant de signer.",
+	"highSlippageConfirm": "J'accepte une tolérance de glissement de {{pct}}% : je peux recevoir jusqu'à {{pct}}% de moins que le devis."
 }

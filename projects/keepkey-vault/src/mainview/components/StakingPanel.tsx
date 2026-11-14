@@ -11,6 +11,7 @@ import { rpcRequest } from "../lib/rpc"
 import { useFiat } from "../lib/fiat-context"
 import { Z } from "../lib/z-index"
 import { describeSigningError } from "../lib/signing-errors"
+import { cancelDeviceSigning, signOnDevice } from "../lib/device-signing"
 
 interface StakingPanelProps {
 	chain: ChainDef
@@ -59,7 +60,7 @@ interface DelegateDialogProps {
 function DelegateDialog({ isOpen, onClose, chain, availableBalance, rewardAmount, rewardUsd, onSuccess, watchOnly }: DelegateDialogProps) {
   const uiText = useUiTranslation()
 
-	const { t } = useTranslation("staking")
+	const { t, i18n } = useTranslation("staking")
 	const { fmtCompact, locale } = useFiat()
 	const [validatorAddress, setValidatorAddress] = useState("")
 	const [amount, setAmount] = useState("")
@@ -96,7 +97,7 @@ function DelegateDialog({ isOpen, onClose, chain, availableBalance, rewardAmount
 		setSignTimeout(null)
 	}, [isOpen])
 
-	const canonicalAmount = normalizeAmountInput(amount, locale)
+	const canonicalAmount = normalizeAmountInput(amount, locale, i18n.language)
 	const numericAmount = canonicalAmount === null ? NaN : Number(canonicalAmount)
 	const canBuild = isValidValidator && (
 		isMax
@@ -137,7 +138,8 @@ function DelegateDialog({ isOpen, onClose, chain, availableBalance, rewardAmount
 		}, 120000)
 		setSignTimeout(timeout)
 		try {
-			const result = await rpcRequest(chain.signMethod as any, buildResult.unsignedTx, 120000)
+			const result = await signOnDevice(chain.signMethod, buildResult.unsignedTx)
+			setError(null) // the "still waiting" notice, if the user took a while
 			setSignedTx(result)
 			setPhase("signed")
 		} catch (e: any) {
@@ -313,7 +315,7 @@ function DelegateDialog({ isOpen, onClose, chain, availableBalance, rewardAmount
 									value={isMax ? 'MAX' : amount}
 									disabled={isMax}
 									onChange={(e) => {
-										const sanitized = normalizeAmountInput(e.target.value, locale) ?? e.target.value
+										const sanitized = normalizeAmountInput(e.target.value, locale, i18n.language) ?? e.target.value
 										setIsMax(false)
 										setAmount(sanitized)
 									}}
@@ -435,7 +437,7 @@ function DelegateDialog({ isOpen, onClose, chain, availableBalance, rewardAmount
 				)}
 
 				<Flex justify="flex-end" gap="2" mt="4">
-					<Button size="sm" variant="ghost" color="kk.textSecondary" px="4" py="2" onClick={onClose}>
+					<Button size="sm" variant="ghost" color="kk.textSecondary" px="4" py="2" onClick={phase === "signing" ? cancelDeviceSigning : onClose}>
 						{phase === "broadcast" ? t('done', { ns: 'common' }) : t('cancel', { ns: 'common' })}
 					</Button>
 					{phase === "input" && (
@@ -478,7 +480,7 @@ interface UndelegateDialogProps {
 
 function UndelegateDialog({ isOpen, onClose, chain, delegations, onSuccess, watchOnly }: UndelegateDialogProps) {
   const { locale } = useFiat()
-	const { t } = useTranslation("staking")
+	const { t, i18n } = useTranslation("staking")
 	const [selected, setSelected] = useState("")
 	const [amount, setAmount] = useState("")
 	const [memo, setMemo] = useState(t('defaultUndelegationMemo'))
@@ -512,7 +514,7 @@ function UndelegateDialog({ isOpen, onClose, chain, delegations, onSuccess, watc
 		setSignTimeout(null)
 	}, [isOpen])
 
-	const canonicalAmount = normalizeAmountInput(amount, locale)
+	const canonicalAmount = normalizeAmountInput(amount, locale, i18n.language)
 	const numericAmount = canonicalAmount === null ? NaN : Number(canonicalAmount)
 	const canBuild = selectedPosition && Number.isFinite(numericAmount) && numericAmount > 0 && numericAmount <= Number(selectedPosition.balance || '0')
 
@@ -548,7 +550,8 @@ function UndelegateDialog({ isOpen, onClose, chain, delegations, onSuccess, watc
 		}, 120000)
 		setSignTimeout(timeout)
 		try {
-			const result = await rpcRequest(chain.signMethod as any, buildResult.unsignedTx, 120000)
+			const result = await signOnDevice(chain.signMethod, buildResult.unsignedTx)
+			setError(null) // the "still waiting" notice, if the user took a while
 			setSignedTx(result)
 			setPhase("signed")
 		} catch (e: any) {
@@ -649,7 +652,7 @@ function UndelegateDialog({ isOpen, onClose, chain, delegations, onSuccess, watc
                   aria-invalid={amount !== "" && canonicalAmount === null || undefined}
 										value={amount}
 										onChange={(e) => {
-											const sanitized = normalizeAmountInput(e.target.value, locale) ?? e.target.value
+											const sanitized = normalizeAmountInput(e.target.value, locale, i18n.language) ?? e.target.value
 											setAmount(sanitized)
 										}}
 										bg="kk.bg"
@@ -775,7 +778,7 @@ function UndelegateDialog({ isOpen, onClose, chain, delegations, onSuccess, watc
 				)}
 
 				<Flex justify="flex-end" gap="2" mt="4">
-					<Button size="sm" variant="ghost" color="kk.textSecondary" px="4" py="2" onClick={onClose}>
+					<Button size="sm" variant="ghost" color="kk.textSecondary" px="4" py="2" onClick={phase === "signing" ? cancelDeviceSigning : onClose}>
 						{phase === "broadcast" ? t('done', { ns: 'common' }) : t('cancel', { ns: 'common' })}
 					</Button>
 					{phase === "input" && (

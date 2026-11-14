@@ -196,6 +196,7 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 	const [togglingPrivateMode, setTogglingPrivateMode] = useState(false)
 	const [checkingUpdate, setCheckingUpdate] = useState(false)
 	const [updateMessage, setUpdateMessage] = useState("")
+	const [updateCheckFailed, setUpdateCheckFailed] = useState(false)
 	const [newServerUrl, setNewServerUrl] = useState("")
 	const [newServerLabel, setNewServerLabel] = useState("")
 	const [addingServer, setAddingServer] = useState(false)
@@ -563,22 +564,30 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 
 	const updateMsgTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
+	// The result stays on screen until the next check. It used to clear after
+	// 4 s, and a check against GitHub can take up to 15 s, so it was easy to see
+	// nothing at all. A failed check (the backend returns updateAvailable:false
+	// plus `error`) is reported as a failure, not as "on the latest version".
 	const handleCheckForUpdate = useCallback(async () => {
 		if (!onCheckForUpdate) return
 		setCheckingUpdate(true)
 		setUpdateMessage("")
+		setUpdateCheckFailed(false)
 		if (updateMsgTimerRef.current) clearTimeout(updateMsgTimerRef.current)
 		try {
 			const info = await onCheckForUpdate()
 			if (info?.updateAvailable) {
 				setUpdateMessage(t("versionAvailable", { version: info.version }))
+			} else if (info?.error) {
+				setUpdateCheckFailed(true)
+				// The backend error already reads "Update check failed: <reason>".
+				setUpdateMessage(String(info.error))
 			} else {
 				setUpdateMessage(t("onLatestVersion"))
-				updateMsgTimerRef.current = setTimeout(() => setUpdateMessage(""), 4000)
 			}
 		} catch (e: any) {
-			setUpdateMessage(e.message || t("checkFailed"))
-			updateMsgTimerRef.current = setTimeout(() => setUpdateMessage(""), 4000)
+			setUpdateCheckFailed(true)
+			setUpdateMessage(e?.message ? `${t("checkFailed")}: ${e.message}` : t("checkFailed"))
 		}
 		setCheckingUpdate(false)
 	}, [onCheckForUpdate])
@@ -1535,8 +1544,11 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 										{checkingUpdate ? t("checking") : t("checkForUpdates")}
 									</Box>
 								</Flex>
-								{updateMessage && (
-									<Text fontSize="sm" color={updatePhase === "error" ? "kk.error" : updatePhase === "available" || updatePhase === "ready" ? "kk.gold" : "kk.textSecondary"} mt="1">
+								{checkingUpdate && (
+									<Text fontSize="sm" color="kk.textSecondary" mt="1" role="status">{t("checking")}</Text>
+								)}
+								{!checkingUpdate && updateMessage && (
+									<Text fontSize="sm" color={updateCheckFailed || updatePhase === "error" ? "kk.error" : updatePhase === "available" || updatePhase === "ready" ? "kk.gold" : "kk.textSecondary"} mt="1" role="status">
 										{updateMessage}
 									</Text>
 								)}

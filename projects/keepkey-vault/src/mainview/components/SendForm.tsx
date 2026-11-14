@@ -6,6 +6,7 @@ import { rpcRequest } from "../lib/rpc"
 import { playSent } from "../lib/sounds"
 import { formatBalance } from "../lib/formatting"
 import { describeSigningError } from "../lib/signing-errors"
+import { cancelDeviceSigning, signOnDevice } from "../lib/device-signing"
 import { useFiat } from "../lib/fiat-context"
 import { getAsset } from "../../shared/assetLookup"
 import { QrScannerOverlay } from "./QrScannerOverlay"
@@ -17,9 +18,11 @@ import { DOCS_LINKS, watch } from "../../shared/docs-links"
 import { caipToNetworkId, isTokenCaip } from "../../shared/chains"
 import type { ChainDef } from "../../shared/chains"
 import type { ChainBalance, TokenBalance, BuildTxResult, BroadcastResult, AddressBookEntry } from "../../shared/types"
-import { validateAddress } from "../../shared/address-validation"
+import { validateAddress, isBurnAddress, knownTokenContract } from "../../shared/address-validation"
 import { balanceUnverifiedReason, isBalanceUnverified } from "../../shared/balance-display-state"
 import { normalizeAmountInput, decimalAmount } from '../../shared/locale'
+import { baseUnitsToDecimalString } from '../../shared/max-send'
+import { describeGasPriceError, networkGasPriceGwei } from '../../shared/gas-price-errors'
 
 type SendPhase = 'input' | 'built' | 'signed' | 'broadcast'
 
@@ -86,7 +89,7 @@ interface SendFormProps {
 export function SendForm({ chain, address, balance, balanceLoading = false, token, tokenBalanceUnverified, onClearToken, xpubOverride, scriptTypeOverride, evmAddressIndex }: SendFormProps) {
   const uiText = useUiTranslation()
 
-	const { t } = useTranslation("send")
+	const { t, i18n } = useTranslation("send")
 	const { fmt, fmtCompact, locale } = useFiat()
 	const [recipient, setRecipient] = useState("")
 	const [amount, setAmount] = useState("")
@@ -99,6 +102,7 @@ export function SendForm({ chain, address, balance, balanceLoading = false, toke
 	const [customGasPrice, setCustomGasPrice] = useState("")     // EVM gas price (gwei)
 	const [customGasLimit, setCustomGasLimit] = useState("")     // EVM gas limit (units, optional)
 	const [customSatPerVByte, setCustomSatPerVByte] = useState("") // UTXO fee rate (sat/vByte)
+	const [networkGasPrice, setNetworkGasPrice] = useState<string | null>(null) // gwei quote shown in Custom
 
 	const [phase, setPhase] = useState<SendPhase>('input')
 	const [loading, setLoading] = useState(false)
@@ -136,6 +140,8 @@ export function SendForm({ chain, address, balance, balanceLoading = false, toke
 		memo, isMax, feeLevel, feeMode, customGasPrice, customGasLimit, customSatPerVByte])
 	const requestKeyRef = useRef(requestKey)
 	const operationGeneration = useRef(0)
+	// Set synchronously: a second Broadcast click before React commits `disabled` is ignored (V12).
+	const broadcasting = useRef(false)
 	const mounted = useRef(true)
 	if (requestKeyRef.current !== requestKey) {
 		requestKeyRef.current = requestKey
@@ -190,6 +196,17 @@ export function SendForm({ chain, address, balance, balanceLoading = false, toke
 		setCustomSatPerVByte("")
 	}, [chain.chainFamily, tokenCaip])
 
+	// Custom EVM gas: show the network's own price, which an empty field also uses.
+	useEffect(() => {
+		setNetworkGasPrice(null)
+		if (feeMode !== 'custom' || chain.chainFamily !== 'evm') return
+		let alive = true
+		rpcRequest<{ gasPrice?: unknown }>('getFees', { chainId: chain.id }, 15000)
+			.then(r => { if (alive) setNetworkGasPrice(networkGasPriceGwei(r?.gasPrice)) })
+			.catch(() => { /* placeholder stays "auto"; the builder still checks the price */ })
+		return () => { alive = false }
+	}, [feeMode, chain.id, chain.chainFamily])
+
 	// Derived display values — token mode vs native mode
 	const isTokenSend = !!token && isTokenCaip(token.caip)
 	const displaySymbol = isTokenSend ? token!.symbol : chain.symbol
@@ -218,10 +235,10 @@ export function SendForm({ chain, address, balance, balanceLoading = false, toke
 	const activeCaip = isTokenSend && token?.caip ? token.caip : chain.caip
 
 	// Basic client-side validation
-	const canonicalAmount = normalizeAmountInput(amount, locale)
+	const canonicalAmount = normalizeAmountInput(amount, locale, i18n.language)
 	const amountNum = canonicalAmount === null ? NaN : Number(canonicalAmount)
 	const enteredAmount = inputMode === 'usd' ? usdAmount : amount
-	const invalidAmountInput = !isMax && enteredAmount !== '' && normalizeAmountInput(enteredAmount, locale) === null
+	const invalidAmountInput = !isMax && enteredAmount !== '' && normalizeAmountInput(enteredAmount, locale, i18n.language) === null
 	const balanceNum = parseFloat(displayBalance)
 	const exceedsBalance = !isMax && !isNaN(amountNum) && amountNum > 0 && balanceNum > 0 && amountNum > balanceNum
 
@@ -243,7 +260,7 @@ export function SendForm({ chain, address, balance, balanceLoading = false, toke
 	// Bidirectional conversion: crypto → USD
 	const handleCryptoChange = useCallback((v: string) => {
 		setIsMax(false)
-		const canonical = normalizeAmountInput(v, locale)
+		const canonical = normalizeAmountInput(v, locale, i18n.language)
 		setAmount(canonical ?? v)
 		if (hasPrice && v) {
 			const n = canonical === null ? NaN : Number(canonical)
@@ -252,12 +269,12 @@ export function SendForm({ chain, address, balance, balanceLoading = false, toke
 		} else {
 			setUsdAmount("")
 		}
-	}, [hasPrice, pricePerUnit, locale])
+	}, [hasPrice, pricePerUnit, locale, i18n.language])
 
 	// Bidirectional conversion: USD → crypto
 	const handleUsdChange = useCallback((v: string) => {
 		setIsMax(false)
-		const canonical = normalizeAmountInput(v, locale)
+		const canonical = normalizeAmountInput(v, locale, i18n.language)
 		setUsdAmount(canonical ?? v)
 		if (hasPrice && v) {
 			const n = canonical === null ? NaN : Number(canonical)
@@ -270,7 +287,7 @@ export function SendForm({ chain, address, balance, balanceLoading = false, toke
 		} else {
 			setAmount("")
 		}
-	}, [hasPrice, pricePerUnit, locale])
+	}, [hasPrice, pricePerUnit, locale, i18n.language])
 
 	// Swap input mode
 	const toggleInputMode = useCallback(() => {
@@ -285,13 +302,24 @@ export function SendForm({ chain, address, balance, balanceLoading = false, toke
 		return n * pricePerUnit
 	}, [canonicalAmount, hasPrice, pricePerUnit, isMax])
 
-	// MAX on a Bitcoin-style chain: the amount actually sent, read from the built
-	// transaction's recipient output, so the review matches what the device shows.
+	// MAX: the amount actually sent, read from the built transaction (Bitcoin-style
+	// recipient output, EVM value or ERC-20 transfer amount), so the review matches
+	// what the device shows.
 	const maxSentAmount = useMemo(() => {
-		if (!isMax || chain.chainFamily !== 'utxo') return null
-		const out = buildResult?.unsignedTx?.outputs?.find((o: any) => o.addressType === 'spend' && o.address === recipient)
-		return out ? (Number(out.amount) / 10 ** chain.decimals).toFixed(chain.decimals) : null
-	}, [isMax, chain.chainFamily, chain.decimals, buildResult, recipient])
+		if (!isMax) return null
+		const tx = buildResult?.unsignedTx
+		if (chain.chainFamily === 'utxo') {
+			const out = tx?.outputs?.find((o: any) => o.addressType === 'spend' && o.address === recipient)
+			return out ? (Number(out.amount) / 10 ** chain.decimals).toFixed(chain.decimals) : null
+		}
+		if (chain.chainFamily !== 'evm' || !tx) return null
+		try {
+			if (!isTokenSend) return tx.value ? baseUnitsToDecimalString(BigInt(tx.value), chain.decimals) : null
+			const data = String(tx.data || '')
+			return /^0xa9059cbb[0-9a-f]{128}$/i.test(data) && token?.decimals != null
+				? baseUnitsToDecimalString(BigInt('0x' + data.slice(74)), token.decimals) : null
+		} catch { return null }
+	}, [isMax, chain.chainFamily, chain.decimals, buildResult, recipient, isTokenSend, token?.decimals])
 
 	const addressValidation = useMemo(() => {
 		if (!recipient) return null
@@ -302,9 +330,37 @@ export function SendForm({ chain, address, balance, balanceLoading = false, toke
 	// its logo) or a new external address (offer to save). Debounced; clears on every
 	// edit so we never show stale info while the next lookup resolves.
 	const addressValid = addressValidation?.valid === true
+	// Self-send: the recipient is this account's own sending address (EVM compares
+	// case-insensitively). It builds and signs fine, so warn and require an explicit
+	// confirmation; only the network fee would leave the wallet.
+	const sameAddress = useCallback((a: string, b: string | null | undefined) =>
+		!!b && (chain.chainFamily === 'evm' ? a.toLowerCase() === b.toLowerCase() : a === b), [chain.chainFamily])
+	const isSelfSend = addressValid && sameAddress(recipient.trim(), address)
+	const [selfSendConfirmed, setSelfSendConfirmed] = useState(false)
+	// Read by the recipient-lookup effect without adding to its dependency list.
+	const isOwnSendingAddressRef = useRef((a: string) => sameAddress(a, address))
+	isOwnSendingAddressRef.current = (a: string) => sameAddress(a, address)
+	// Zero/burn and token-contract recipients: funds sent there are lost. The token's
+	// own contract is refused outright; the others need an explicit acknowledgement.
+	const recipientRisk = useMemo(() => {
+		if (!addressValid) return null
+		const addr = recipient.trim()
+		if (isBurnAddress(addr)) return { kind: 'burn' as const }
+		if (chain.chainFamily !== 'evm') return null
+		const sentContract = isTokenSend ? (token?.contractAddress || token?.caip.split(':').pop() || '') : ''
+		if (sentContract.toLowerCase() === addr.toLowerCase()) return { kind: 'sentToken' as const }
+		const known = knownTokenContract(addr, chain)
+		return known ? { kind: 'tokenContract' as const, token: known.symbol } : null
+	}, [addressValid, recipient, chain, isTokenSend, token?.contractAddress, token?.caip])
+	const recipientNeedsAck = recipientRisk?.kind === 'burn' || recipientRisk?.kind === 'tokenContract'
+	const [riskConfirmed, setRiskConfirmed] = useState(false)
+	const [recipientIsContract, setRecipientIsContract] = useState(false)
+	const evmChainId = chain.chainFamily === 'evm' ? chain.id : null
+	useEffect(() => { setSelfSendConfirmed(false); setRiskConfirmed(false) }, [recipient, address])
 	useEffect(() => {
 		setMatchedContact(null)
 		setAddressIsNew(false)
+		setRecipientIsContract(false)
 		setVaultDestinationError('')
 		setCheckingVaultDestination(false)
 		const addr = recipient.trim()
@@ -319,8 +375,16 @@ export function SendForm({ chain, address, balance, balanceLoading = false, toke
 						if (!alive) return
 						if (entry) {
 							setMatchedContact(entry)
+						} else if (isOwnSendingAddressRef.current(addr)) {
+							// Our own sending address is not a "new external address" to save.
+						} else if (isBurnAddress(addr)) {
+							// Never offer to save a burn address; the warning above covers it.
 						} else {
 							setAddressIsNew(true)
+							// A contract is not necessarily a wallet: note it (best-effort, no verdict on failure).
+							if (evmChainId) rpcRequest<boolean>('isEvmContract', { chainId: evmChainId, address: addr }, 15000)
+								.then(isContract => { if (alive) setRecipientIsContract(isContract === true) })
+								.catch(() => {})
 							// Auto-prompt to save — once per distinct new address.
 							if (promptedAddressRef.current !== addr) {
 								promptedAddressRef.current = addr
@@ -333,7 +397,7 @@ export function SendForm({ chain, address, balance, balanceLoading = false, toke
 				.finally(() => { if (alive) setCheckingVaultDestination(false) })
 		}, 300)
 		return () => { alive = false; clearTimeout(handle) }
-	}, [recipient, activeCaip, addressValid, vaultDestinationRetry])
+	}, [recipient, activeCaip, addressValid, vaultDestinationRetry, evmChainId])
 
 	const handleBuild = useCallback(async () => {
 		if (!senderReady) return
@@ -345,14 +409,19 @@ export function SendForm({ chain, address, balance, balanceLoading = false, toke
 		if (checkingVaultDestination || vaultDestinationError) { setError(vaultDestinationError || 'Checking vault destination…'); return }
 		if (addressValidation && !addressValidation.valid) { setError(t(addressValidation.error!)); return }
 		if (exceedsBalance) { setError(t("exceedsBalanceShort")); return }
+		const assetDecimals = isTokenSend ? token?.decimals : chain.decimals
+		if (!isMax && canonicalAmount && assetDecimals != null && (canonicalAmount.split('.')[1]?.length ?? 0) > assetDecimals) {
+			setError(t('tooManyDecimals', { symbol: displaySymbol, decimals: assetDecimals })); return
+		}
 
 		// Custom fee validation — only the field(s) relevant to this chain family.
 		const useCustom = feeMode === 'custom' && supportsCustomFee
-		const gasPrice = normalizeAmountInput(customGasPrice, locale)
-		const satRate = normalizeAmountInput(customSatPerVByte, locale)
+		const gasPrice = normalizeAmountInput(customGasPrice, locale, i18n.language)
+		const satRate = normalizeAmountInput(customSatPerVByte, locale, i18n.language)
 		if (useCustom && chain.chainFamily === 'evm') {
 			const gwei = gasPrice === null ? NaN : Number(gasPrice)
-			if (!customGasPrice || !isFinite(gwei) || gwei <= 0) { setError(t("invalidGasPrice")); return }
+			// Empty = the network quote shown as the placeholder.
+			if (customGasPrice.trim() && (!isFinite(gwei) || gwei <= 0)) { setError(t("invalidGasPrice")); return }
 			if (customGasLimit && (!/^\d+$/.test(customGasLimit.trim()) || parseInt(customGasLimit, 10) < 21000)) { setError(t("invalidGasLimit")); return }
 		}
 		if (useCustom && chain.chainFamily === 'utxo') {
@@ -375,7 +444,8 @@ export function SendForm({ chain, address, balance, balanceLoading = false, toke
 				to: recipient.trim(),
 				amount: isMax ? '0' : canonicalAmount!,
 				memo: memo || undefined,
-				feeLevel,
+				// Custom EVM gas is checked against (and an empty field uses) the average quote.
+				feeLevel: useCustom && chain.chainFamily === 'evm' ? 3 : feeLevel,
 				isMax,
 				caip: isTokenSend ? token!.caip : undefined,
 				nativeBalance: !isTokenSend ? balance?.balance : undefined,
@@ -384,7 +454,7 @@ export function SendForm({ chain, address, balance, balanceLoading = false, toke
 				xpubOverride: xpubOverride || undefined,
 				scriptTypeOverride: scriptTypeOverride || undefined,
 				evmAddressIndex: evmAddressIndex,
-				gasPriceGwei: useCustom && chain.chainFamily === 'evm' ? gasPrice! : undefined,
+				gasPriceGwei: useCustom && chain.chainFamily === 'evm' && customGasPrice.trim() ? gasPrice! : undefined,
 				gasLimit: useCustom && chain.chainFamily === 'evm' && customGasLimit ? customGasLimit : undefined,
 				satPerVByte: useCustom && chain.chainFamily === 'utxo' ? Number(satRate) : undefined,
 			}, 60000)
@@ -394,11 +464,11 @@ export function SendForm({ chain, address, balance, balanceLoading = false, toke
 			setBuildResult(result)
 			setPhase('built')
 		} catch (e: any) {
-			if (operationIsCurrent(generation)) setError(e.message || t("failedToBuild"))
+			if (operationIsCurrent(generation)) setError(describeGasPriceError(e.message || '', t) || e.message || t("failedToBuild"))
 		} finally {
 			if (operationIsCurrent(generation)) setLoading(false)
 		}
-	}, [chain, recipient, amount, canonicalAmount, amountNum, invalidAmountInput, locale, t, memo, feeLevel, feeMode, supportsCustomFee, customGasPrice, customGasLimit, customSatPerVByte, isMax, addressValidation, exceedsBalance, isTokenSend, token, balance?.balance, xpubOverride, scriptTypeOverride, evmAddressIndex, checkingVaultDestination, vaultDestinationError, requestKey, displaySymbol, displayBalance, activeCaip, address, balanceLoading, activeAssetUnverified, senderReady])
+	}, [chain, recipient, amount, canonicalAmount, amountNum, invalidAmountInput, locale, i18n.language, t, memo, feeLevel, feeMode, supportsCustomFee, customGasPrice, customGasLimit, customSatPerVByte, isMax, addressValidation, exceedsBalance, isTokenSend, token, balance?.balance, xpubOverride, scriptTypeOverride, evmAddressIndex, checkingVaultDestination, vaultDestinationError, requestKey, displaySymbol, displayBalance, activeCaip, address, balanceLoading, activeAssetUnverified, senderReady])
 
 	const handleSign = useCallback(async () => {
 		if (!senderReady || !buildResult || !currentSigningContext) return
@@ -408,7 +478,7 @@ export function SendForm({ chain, address, balance, balanceLoading = false, toke
 		setError(null)
 
 		try {
-			const result = await rpcRequest(context.signMethod, buildResult.unsignedTx, 120000)
+			const result = await signOnDevice(context.signMethod, buildResult.unsignedTx)
 			if (!operationIsCurrent(generation)) return
 			setSignedTx(result)
 			setPhase('signed')
@@ -420,7 +490,8 @@ export function SendForm({ chain, address, balance, balanceLoading = false, toke
 	}, [buildResult, currentSigningContext, t, senderReady])
 
 	const handleBroadcast = useCallback(async () => {
-		if (!signedTx || !currentSigningContext) return
+		if (!signedTx || !currentSigningContext || broadcasting.current) return
+		broadcasting.current = true
 		const context = currentSigningContext
 		const generation = ++operationGeneration.current
 		setLoading(true)
@@ -431,6 +502,8 @@ export function SendForm({ chain, address, balance, balanceLoading = false, toke
 		let sendAmount: string | undefined
 		if (!context.isMax) {
 			sendAmount = context.amount || undefined
+		} else if (maxSentAmount) {
+			sendAmount = maxSentAmount
 		} else if (context.isTokenSend) {
 			sendAmount = context.displayBalance || undefined
 		} else {
@@ -458,9 +531,10 @@ export function SendForm({ chain, address, balance, balanceLoading = false, toke
 		} catch (e: any) {
 			if (operationIsCurrent(generation)) setError(e.message || t("broadcastFailed"))
 		} finally {
+			broadcasting.current = false
 			if (operationIsCurrent(generation)) setLoading(false)
 		}
-	}, [signedTx, buildResult, currentSigningContext, t])
+	}, [signedTx, buildResult, currentSigningContext, maxSentAmount, t])
 
 	const edit = useCallback(() => {
 		operationGeneration.current++
@@ -552,6 +626,14 @@ export function SendForm({ chain, address, balance, balanceLoading = false, toke
 	}, [txid])
 
 	const needsMemo = !isTokenSend && (chain.chainFamily === 'cosmos' || chain.chainFamily === 'xrp')
+
+	// Fee > 25% of what is sent. Token amounts are in other units, so compare in USD
+	// (only when both prices are known; never claim it without them).
+	const reviewAmount = currentSigningContext?.isMax ? maxSentAmount : currentSigningContext?.amount
+	const nativeUnitPrice = balance?.nativeBalanceUsd && parseFloat(balance.balance) > 0 ? balance.nativeBalanceUsd / parseFloat(balance.balance) : 0
+	const feeOverQuarter = !!buildResult && !!currentSigningContext && !!reviewAmount && (currentSigningContext.isTokenSend
+		? nativeUnitPrice > 0 && (token?.priceUsd ?? 0) > 0 && Number(buildResult.fee) * nativeUnitPrice > Number(reviewAmount) * token!.priceUsd * 0.25
+		: Number(buildResult.fee) > Number(reviewAmount) * 0.25)
 
 	return (
 		<VStack gap="4" align="stretch" py="2" px="2">
@@ -713,6 +795,43 @@ export function SendForm({ chain, address, balance, balanceLoading = false, toke
 								</Text>
 								{matchedContact.vault && <Text fontSize="10px" color="kk.gold">{uiText("Vault ·")}{" "}{matchedContact.networkId} · {matchedContact.vault.threshold}{" "}{uiText("of")}{" "}{matchedContact.vault.cosigners.length}</Text>}
 							</Flex>
+						)}
+						{isSelfSend && (
+							<Box mt="2" p="3" borderRadius="10px" bg="rgba(233,196,106,0.08)" border="1px solid rgba(233,196,106,0.35)" role="alert">
+								<Text fontSize="12px" fontWeight="700" color="kk.gold">{t("selfSendTitle", { defaultValue: "This is your own address" })}</Text>
+								<Text fontSize="11px" color="kk.textSecondary" mt="1" lineHeight="1.5">
+									{t("selfSendBody", { symbol: displaySymbol, defaultValue: "This sends {{symbol}} from this account back to the same address. Nothing arrives anywhere new, and you still pay the network fee." })}
+								</Text>
+								<Flex as="label" align="center" gap="2" mt="2" cursor="pointer">
+									<input type="checkbox" checked={selfSendConfirmed} onChange={e => setSelfSendConfirmed(e.target.checked)} style={{ accentColor: 'var(--gold)' }} />
+									<Text fontSize="11px" color="kk.textPrimary">{t("selfSendConfirm", { defaultValue: "I understand, send to my own address anyway" })}</Text>
+								</Flex>
+							</Box>
+						)}
+						{recipientRisk?.kind === 'sentToken' && (
+							<Text fontSize="11px" color="kk.error" mt="1" role="alert">{t("recipientIsSentToken", { symbol: displaySymbol })}</Text>
+						)}
+						{recipientNeedsAck && (
+							<Box mt="2" p="3" borderRadius="10px" bg="rgba(224,140,123,0.10)" border="1px solid rgba(224,140,123,0.35)" role="alert">
+								<Text fontSize="12px" fontWeight="700" color="kk.error">
+									{recipientRisk?.kind === 'burn' ? t("recipientBurnTitle") : t("recipientTokenContractTitle", { token: recipientRisk?.kind === 'tokenContract' ? recipientRisk.token : '' })}
+								</Text>
+								<Text fontSize="11px" color="kk.textSecondary" mt="1" lineHeight="1.5">
+									{recipientRisk?.kind === 'burn' ? t("recipientBurnBody") : t("recipientTokenContractBody")}
+								</Text>
+								<Flex as="label" align="center" gap="2" mt="2" cursor="pointer">
+									<input type="checkbox" checked={riskConfirmed} onChange={e => setRiskConfirmed(e.target.checked)} style={{ accentColor: 'var(--rose)' }} />
+									<Text fontSize="11px" color="kk.textPrimary">{recipientRisk?.kind === 'burn' ? t("recipientBurnConfirm") : t("recipientTokenContractConfirm")}</Text>
+								</Flex>
+							</Box>
+						)}
+						{recipientIsContract && !recipientRisk && (
+							<Text fontSize="11px" color="kk.gold" mt="1.5">{t("recipientContractNote", { symbol: displaySymbol })}</Text>
+						)}
+						{!isSelfSend && matchedContact?.kind === "own" && (
+							<Text fontSize="11px" color="kk.textSecondary" mt="1.5">
+								{t("ownWalletNote", { defaultValue: "This address belongs to your wallet. You are moving funds between your own accounts." })}
+							</Text>
 						)}
 						{/* R5: new external address — flag it + offer to save (opens dialog). */}
 						{addressIsNew && !matchedContact && (
@@ -877,7 +996,7 @@ export function SendForm({ chain, address, balance, balanceLoading = false, toke
 										<Input
 											size="xs" value={customGasPrice}
 											onChange={(e) => setCustomGasPrice(e.target.value)}
-											placeholder="20" inputMode="decimal"
+											placeholder={networkGasPrice ?? t("gasPriceAuto")} inputMode="decimal"
 											bg="var(--ink-3)" border="1px solid var(--line)" borderRadius="10px"
 										/>
 									</Box>
@@ -919,6 +1038,12 @@ export function SendForm({ chain, address, balance, balanceLoading = false, toke
 						<Text fontSize="xs" color="kk.error">{t("exceedsBalance", { balance: formatBalance(displayBalance), symbol: displaySymbol })}</Text>
 					)}
 
+					{/* Self-send and burn/contract recipients: Build waits for the explicit confirmation above. */}
+					{(isSelfSend && !selfSendConfirmed) || (recipientNeedsAck && !riskConfirmed) ? (
+						<Button w="full" px="4" py="2" borderRadius="12px" bg="var(--gold)" color="var(--ink-0)" fontWeight="600" disabled>
+							{t("buildTransaction")}
+						</Button>
+					) : (
 					<Button
 						size="sm"
 						bg="var(--gold)"
@@ -927,12 +1052,13 @@ export function SendForm({ chain, address, balance, balanceLoading = false, toke
 						borderRadius="12px"
 						_hover={{ bg: "var(--gold-2)" }}
 						onClick={handleBuild}
-						disabled={loading || !senderReady || (isMax && balanceLoading && activeAssetUnverified) || invalidAmountInput || checkingVaultDestination || !!vaultDestinationError || !recipient || (!amount && !isMax) || (addressValidation != null && !addressValidation.valid)}
+						disabled={loading || !senderReady || (isMax && balanceLoading && activeAssetUnverified) || invalidAmountInput || checkingVaultDestination || !!vaultDestinationError || !recipient || (!amount && !isMax) || (addressValidation != null && !addressValidation.valid) || recipientRisk?.kind === 'sentToken'}
 						px="4" py="2"
 						w="full"
 					>
 						{loading ? t("buildingTransaction") : t("buildTransaction")}
 					</Button>
+					)}
 				</>
 			)}
 
@@ -964,6 +1090,9 @@ export function SendForm({ chain, address, balance, balanceLoading = false, toke
 								)}
 							</Flex>
 						</Flex>
+						{feeOverQuarter && (
+							<Text fontSize="xs" color="kk.error" mt="1">{t('feeOverQuarter')}</Text>
+						)}
 					</Box>
 
 					{/* Debug: hdwallet payload */}
@@ -983,6 +1112,16 @@ export function SendForm({ chain, address, balance, balanceLoading = false, toke
 							</Box>
 						)}
 					</Box>
+
+					{loading && (
+						<Flex align="center" justify="space-between" gap="3" bg="rgba(233,196,106,0.06)" border="1px solid rgba(233,196,106,0.22)" borderRadius="14px" p="3" role="status">
+							<Box>
+								<Text fontSize="xs" color="kk.textPrimary" fontWeight="600">{t("waitingForKeepKey")}</Text>
+								<Text fontSize="xs" color="kk.textMuted">{t("waitingForKeepKeyHint")}</Text>
+							</Box>
+							<Button size="xs" variant="outline" onClick={cancelDeviceSigning}>{t("cancel", { ns: "common" })}</Button>
+						</Flex>
+					)}
 
 					<Flex gap="2">
 						<Button

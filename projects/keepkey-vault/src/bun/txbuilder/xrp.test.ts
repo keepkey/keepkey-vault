@@ -41,7 +41,43 @@ describe('XRP transaction builder', () => {
       to: 'rInboundVault', amount: '1', fromAddress: 'rSender', memo: '=:ETH.ETH:0x1234',
     })
     expect(tx.tx.value.memo).toBe('=:ETH.ETH:0x1234')
-    expect(tx.payment.destinationTag).toBe('0')
+    // A routing memo is not a destination tag: no tag is sent at all.
+    expect('destinationTag' in tx.payment).toBe(false)
+  })
+
+  test('an empty or blank tag field sends NO destination tag (never a silent tag 0)', async () => {
+    const chain = CHAINS.find((candidate) => candidate.id === 'ripple')!
+    for (const memo of [undefined, '', '   ']) {
+      const tx = await buildXrpTx(pioneer, chain, { to: 'rRecipient', amount: '1', fromAddress: 'rSender', memo })
+      expect('destinationTag' in tx.payment).toBe(false)
+      expect(tx.payment.destinationTag).toBeUndefined()
+    }
+  })
+
+  test('a non-numeric tag is rejected before signing instead of becoming a memo plus tag 0', async () => {
+    const chain = CHAINS.find((candidate) => candidate.id === 'ripple')!
+    for (const memo of ['Tag: 104857', '104857abc', 'abc', '10 4857', '-5', '1.5']) {
+      await expect(buildXrpTx(pioneer, chain, { to: 'rRecipient', amount: '1', fromAddress: 'rSender', memo }))
+        .rejects.toThrow(/whole number/)
+    }
+  })
+
+  test('THORChain long-form routing memos stay memos', async () => {
+    const chain = CHAINS.find((candidate) => candidate.id === 'ripple')!
+    for (const memo of ['SWAP:ETH.ETH:0x1234', 's:BTC.BTC:bc1q', 'a:XRP.XRP']) {
+      const tx = await buildXrpTx(pioneer, chain, { to: 'rInboundVault', amount: '1', fromAddress: 'rSender', memo })
+      expect(tx.tx.value.memo).toBe(memo)
+      expect('destinationTag' in tx.payment).toBe(false)
+    }
+  })
+
+  test('tag range: 0 and 4294967295 are valid, 4294967296 is rejected, padding is trimmed', async () => {
+    const chain = CHAINS.find((candidate) => candidate.id === 'ripple')!
+    const build = (memo: string) => buildXrpTx(pioneer, chain, { to: 'rRecipient', amount: '1', fromAddress: 'rSender', memo })
+    expect((await build('0')).payment.destinationTag).toBe('0')
+    expect((await build('4294967295')).payment.destinationTag).toBe('4294967295')
+    expect((await build(' 104857 ')).payment.destinationTag).toBe('104857')
+    await expect(build('4294967296')).rejects.toThrow(/0-4294967295/)
   })
 
   test('continues to support numeric destination tags', async () => {

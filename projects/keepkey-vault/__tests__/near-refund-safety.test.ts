@@ -45,7 +45,7 @@ function oneClick(status: number, body: any) {
   }) as typeof fetch
   return calls
 }
-const RECIPIENT = '0x000000000000000000000000000000000000dEaD'
+const RECIPIENT = '0x2222222222222222222222222222222222222222' // not a burn address: swap.ts refuses those
 const intent = (refundTo: string, depositMemo?: string | null) => ({
   status: 'PENDING_DEPOSIT',
   quoteResponse: {

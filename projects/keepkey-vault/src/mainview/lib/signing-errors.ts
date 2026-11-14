@@ -13,10 +13,19 @@
 // preserves the underlying detail but still appends a reconnect hint, since
 // reconnecting is always a safe recovery step for a hardware signer.
 
-type Translate = (key: string, opts?: { defaultValue?: string }) => string
+type Translate = (key: string, opts?: { defaultValue?: string; ns?: string }) => string
 
 // User cancelled / rejected on the device — not a failure, don't nag them.
 const CANCEL_PATTERNS = [/cancel/i, /reject/i, /denied/i]
+
+// The device refused the recipient it was asked to sign for (e.g. firmware
+// "Invalid THORChain recipient address"). Reconnecting won't help: the address
+// has to be fixed.
+const ADDRESS_PATTERNS = [/invalid\b[\w\s-]*\b(recipient|destination address)\b/i]
+
+// The webview stopped waiting for its own RPC reply. The KeepKey may still be
+// showing its confirm screen, so this is not a dead device.
+const CLIENT_TIMEOUT = /^RPC request timed out/i
 
 // Device is unreachable or in a bad/stale session (transport/USB/timeout/etc).
 const DEVICE_PATTERNS = [
@@ -45,6 +54,20 @@ export function describeSigningError(e: unknown, t: Translate): string {
 
 	if (CANCEL_PATTERNS.some(r => r.test(raw))) {
 		return t('signingCancelled', { defaultValue: 'Transaction cancelled on your KeepKey.' })
+	}
+
+	if (ADDRESS_PATTERNS.some(r => r.test(raw))) {
+		return t('signingInvalidAddress', {
+			ns: 'send',
+			defaultValue: 'Your KeepKey rejected the recipient address. Check the address and try again.',
+		})
+	}
+
+	if (CLIENT_TIMEOUT.test(raw)) {
+		return t('signingNoAnswer', {
+			ns: 'send',
+			defaultValue: 'No answer from your KeepKey yet. Check its screen: confirm or cancel there, then try again.',
+		})
 	}
 
 	if (DEVICE_PATTERNS.some(r => r.test(raw))) {

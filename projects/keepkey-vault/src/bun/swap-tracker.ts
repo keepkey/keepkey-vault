@@ -28,10 +28,11 @@ import { insertSwapHistory, updateSwapHistoryStatus, getSwapHistory, getSwapHist
 import { recordSwap } from './ledger'
 import { assetData as discoveryAssetData } from '@pioneer-platform/pioneer-discovery'
 import { VAULT_CHAIN_TO_THOR } from '../shared/swap-discovery'
+import { CHAINS } from '../shared/chains'
 import { extractRelayRequestId } from '../shared/relay-utils'
 import { isRelaySolverDeposit } from './swap-route-selection'
 import { classifySwapOutcome, type MidgardActionsResponse } from './swap/classify'
-import { selectOutboundTxid } from '../shared/swap-tracker-guards'
+import { selectOutboundTxid, settlementFromThornodeStatus } from '../shared/swap-tracker-guards'
 import { baseUnitsToDecimalString } from '../shared/max-send'
 import { payoutBelowMinimum } from '../shared/swap-settlement'
 import { buildPioneerSwapRegistration } from '../shared/swap-registration'
@@ -43,9 +44,11 @@ import { classifyNearIntentsStatus } from '../shared/near-intents-status'
  *
  *  Falls back to a CAIP-derived hint for assets pioneer-discovery doesn't
  *  know — better than crashing or silently writing empty strings. */
-function resolveDisplayFromCaip(caip: string): { symbol: string; name: string; asset: string } {
+export function resolveDisplayFromCaip(caip: string): { symbol: string; name: string; asset: string } {
   const entry = (discoveryAssetData as Record<string, { symbol?: string; name?: string; chainId?: string }>)[caip]
-  const symbol = entry?.symbol || caip.split('/').pop()?.split(':').pop()?.slice(0, 12).toUpperCase() || 'UNKNOWN'
+  // A built-in chain's native coin uses the chain's symbol: discovery calls Base's ETH "BASE" (V16).
+  const native = /\/slip44:/.test(caip) ? CHAINS.find(c => c.caip.toLowerCase() === caip.toLowerCase()) : undefined
+  const symbol = native?.symbol || entry?.symbol || caip.split('/').pop()?.split(':').pop()?.slice(0, 12).toUpperCase() || 'UNKNOWN'
   const name = entry?.name || symbol
   // THORChain-style display string (CHAIN.SYMBOL[-CONTRACT]). Used only for
   // log lines + history rows; vault never parses this back to identify.
@@ -199,6 +202,7 @@ function rehydrateActiveSwaps(deviceId?: string, walletId?: string): void {
           expectedOutput: r.quotedOutput,
           minimumOutput: r.minimumOutput,
           receivedOutput: r.receivedOutput,
+          payouts: r.payouts,
           memo: r.memo,
           inboundAddress: r.inboundAddress,
           router: r.router,
@@ -502,7 +506,7 @@ function applyRemoteSwapData(swap: PendingSwap, remoteSwap: any): void {
   // Malformed provider rows have been seen carrying an all-zero outbound hash
   // (paired with a bogus received amount) — treat the hash as not-yet-known
   // and don't trust the received amount from the same response.
-  if (outboundHashIsPlaceholder) {
+  if (outboundHashIsPlaceholder && !swap.outboundTxid) {
     console.warn(`${TAG} Ignoring placeholder all-zero outbound hash for ${swap.txid.slice(0, 10)}... — treating outbound as not yet known`)
   }
   // Once a provider has admitted its terminal metadata is a placeholder, keep
@@ -510,7 +514,7 @@ function applyRemoteSwapData(swap: PendingSwap, remoteSwap: any): void {
   // that omit the field entirely and lets the UI perform bounded repair polls.
   const nextTrackingMetadataPending = newStatus === 'failed' || newStatus === 'refunded'
     ? false
-    : outboundTxid
+    : (outboundTxid || swap.outboundTxid)
       ? false
       : outboundHashIsPlaceholder
         ? true
@@ -710,6 +714,7 @@ function readSwapFromDb(txid: string, deviceId?: string, walletId?: string): Pen
     expectedOutput: r.quotedOutput,
     minimumOutput: r.minimumOutput,
     receivedOutput: r.receivedOutput,
+    payouts: r.payouts,
     memo: r.memo, inboundAddress: r.inboundAddress, router: r.router,
     integration: r.integration, swapper: r.swapper,
     status: r.status, confirmations: inferConfirmationsFromStatus(r.status),
@@ -1026,12 +1031,18 @@ export async function refreshSwap(txid: string, deviceId?: string, walletId?: st
           deviceId: swap.deviceId, walletId: swap.walletId,
           outboundTxid: swap.outboundTxid,
           receivedOutput: swap.status === 'completed' ? swap.receivedOutput : undefined,
+          payouts: swap.payouts,
           outboundChainId: swap.outboundChainId,
           refundReason: swap.refundReason,
           error: swap.error,
           completedAt: isFinal ? Date.now() : undefined,
         })
         pushUpdate(swap)
+      }
+      // Midgard can lag or be unreachable; THORNode's tx status is the source
+      // Pioneer reads, so settle from it directly (audit v4 H8).
+      if (!isTerminalSwapStatus(swap.status) && !/maya/i.test(`${swap.integration} ${swap.swapper || ''}`)) {
+        await applyThornodeSettlement(swap)
       }
     }
 
@@ -1057,6 +1068,37 @@ async function fetchSwapMidgardActions(txid: string, maya = true): Promise<Midga
     console.warn(`${TAG} Midgard fetch failed for ${txid.slice(0, 10)}...: ${e?.message || e}`)
     return null
   }
+}
+
+async function applyThornodeSettlement(swap: PendingSwap): Promise<void> {
+  const destination = (swap.memo || '').split(':')[2]
+  if (!destination) return
+  let status: any = null
+  try {
+    const resp = await fetch(`https://gateway.liquify.com/chain/thorchain_api/thorchain/tx/status/${swap.txid.replace(/^0x/i, '').toUpperCase()}`,
+      { signal: AbortSignal.timeout(10_000) })
+    if (resp.ok) status = await resp.json()
+  } catch (e: any) {
+    console.warn(`${TAG} THORNode status failed for ${swap.txid.slice(0, 10)}...: ${e?.message || e}`)
+  }
+  const settled = settlementFromThornodeStatus(status, destination)
+  if (!settled.completed || isTerminalSwapStatus(swap.status)) return
+  if (settled.outboundAmount && payoutBelowMinimum(settled.outboundAmount, swap.minimumOutput || '0')) return
+  swap.status = 'completed'
+  swap.trackingMetadataPending = false
+  swap.completedAt = swap.updatedAt = Date.now()
+  if (settled.outboundTxid) swap.outboundTxid = settled.outboundTxid
+  if (settled.outboundAmount) {
+    swap.receivedOutput = baseUnitsToDecimalString(BigInt(settled.outboundAmount), 8)
+    swap.payouts = [{ txid: settled.outboundTxid || swap.txid, amount: swap.receivedOutput, asset: (swap.memo.split(':')[1] || ''), address: destination }]
+  }
+  swapLog(`${TAG} THORNode settled ${swap.txid.slice(0, 10)}... outTxid=${swap.outboundTxid || 'native'}`)
+  if (!noPersistSwaps.has(swap.txid)) updateSwapHistoryStatus(swap.txid, 'completed', {
+    deviceId: swap.deviceId, walletId: swap.walletId, outboundTxid: swap.outboundTxid,
+    receivedOutput: swap.receivedOutput, payouts: swap.payouts, completedAt: swap.completedAt,
+  })
+  pushUpdate(swap)
+  pushComplete(swap)
 }
 
 function applyClassifiedOutcome(swap: PendingSwap, midgard: MidgardActionsResponse | null): boolean {

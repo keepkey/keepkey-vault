@@ -193,6 +193,8 @@ export class EngineController extends EventEmitter {
   /** The device sent PinMatrixRequest and no PIN or answer has followed. Before that, after
    *  wrong PINs, it is counting down and reads no USB: a PIN typed then is lost. */
   private pinPromptOpen = false
+  /** The matrix type of the open PIN prompt, to replay it (requestDeviceUnlock). */
+  private lastPinRequestType: PinRequestType | null = null
   /** Emulator reconnects after a PIN wait outlived hdwallet's deadline, since the user last
    *  entered a PIN or (re)started the emulator. One is allowed; then the user is told. */
   private emulatorUnlockReconnects = 0
@@ -293,6 +295,10 @@ export class EngineController extends EventEmitter {
   /** An explicit unlock click joins the existing prompt; it never queues a
    * second GetPublicKey behind an operation already waiting for its PIN. */
   async requestDeviceUnlock(): Promise<void> {
+    // The device already waits on its PIN matrix (a REST call at launch can start
+    // it before the webview listens): send the prompt again, the first push may
+    // have been lost and the user would see no PIN pad (audit v4 H8).
+    this.replayPinPrompt()
     if (this.pinUnlock?.wallet === this.wallet) { await this.pinUnlock.promise; return }
     if (awaitingInput(this.wallet?.transport)) return
     await this.withDeviceOperation(async () => {}, { unlock: true })
@@ -452,6 +458,7 @@ export class EngineController extends EventEmitter {
         this.emit('state-change', this.getDeviceState())
       }
       this.setPinPromptOpen(true)
+      this.lastPinRequestType = type
       this.emit('pin-request', { type })
     })
 
@@ -529,6 +536,11 @@ export class EngineController extends EventEmitter {
         this.emit('character-request', this.lastCharacterRequest)
       }
     })
+  }
+
+  /** Send the open PIN prompt again (see requestDeviceUnlock). */
+  private replayPinPrompt(): void {
+    if (this.pinPromptOpen && this.lastPinRequestType) this.emit('pin-request', { type: this.lastPinRequestType })
   }
 
   // ── Lifecycle ──────────────────────────────────────────────────────────

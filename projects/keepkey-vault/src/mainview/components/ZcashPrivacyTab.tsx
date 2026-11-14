@@ -180,7 +180,7 @@ export function ZcashPrivacyTab({ initialPage, initialSection, embedded = false,
 } = {}) {
   const uiText = useUiTranslation()
 
-	const { t } = useTranslation(["asset", "addressbook", "common"])
+	const { t, i18n } = useTranslation(["asset", "addressbook", "common"])
 	const { locale: fiatLocale } = useFiat()
 
 	useEffect(() => { ensureStylesInjected() }, [])
@@ -242,11 +242,11 @@ export function ZcashPrivacyTab({ initialPage, initialSection, embedded = false,
 			if (price > 0) setZecPrice(price)
 		}).catch(() => { /* no price: ZEC entry only */ })
 	}, [])
-	const numericAmount = Number(normalizeAmountInput(amount, fiatLocale) ?? NaN)
+	const numericAmount = Number(normalizeAmountInput(amount, fiatLocale, i18n.language) ?? NaN)
 	const usdShown = usdText ?? (zecPrice > 0 && numericAmount > 0 ? (numericAmount * zecPrice).toFixed(2) : "")
-	const setZecAmount = (v: string) => { setAmount(normalizeAmountInput(v, fiatLocale) ?? v); setUsdText(null) }
+	const setZecAmount = (v: string) => { setAmount(normalizeAmountInput(v, fiatLocale, i18n.language) ?? v); setUsdText(null) }
 	const setUsdAmount = (v: string) => {
-		const canonical = normalizeAmountInput(v, fiatLocale)
+		const canonical = normalizeAmountInput(v, fiatLocale, i18n.language)
 		setUsdText(canonical ?? v)
 		const n = canonical === null ? NaN : Number(canonical)
 		setAmount(zecPrice > 0 && n > 0 ? (n / zecPrice).toFixed(8).replace(/\.?0+$/, "") : "")
@@ -639,7 +639,7 @@ export function ZcashPrivacyTab({ initialPage, initialSection, embedded = false,
 			setScanResult(e.message || "Scan failed"); setScanState("idle"); setNeedsScan(true); setScanError(e.message || 'Scan failed')
 		}
 		setScanInFlight(false)
-	}, [refreshBalance, loadTransactions, fiatLocale])
+	}, [refreshBalance, loadTransactions, fiatLocale, i18n.language])
 
 	const handleBackfillMemos = useCallback(async () => {
 		setBackfilling(true); setBackfillResult(null)
@@ -656,7 +656,7 @@ export function ZcashPrivacyTab({ initialPage, initialSection, embedded = false,
 	}, [t, loadTransactions])
 
 	const parseZatoshis = (input: string): number => {
-    const s = normalizeAmountInput(input, fiatLocale)
+    const s = normalizeAmountInput(input, fiatLocale, i18n.language)
     if (s === null) throw new Error(t("invalidAmount", { ns: "send", defaultValue: "Enter an ungrouped decimal amount, for example 1.5. Thousands separators are not accepted." }))
 		// Strict shape — reject "1.2.3", "abc", "" and >8 fractional digits up
 		// front so silent truncation can't fund a different amount than the
@@ -713,7 +713,7 @@ export function ZcashPrivacyTab({ initialPage, initialSection, embedded = false,
 		} catch (e: any) { setSendError(e.message || "Send failed") }
 		setSending(false); setSendStep(null); setSendBatch(null)
 		refreshTexPending()
-	}, [recipient, amount, memo, recipientValidation, refreshBalance, refreshTexPending, fiatLocale, t])
+	}, [recipient, amount, memo, recipientValidation, refreshBalance, refreshTexPending, fiatLocale, i18n.language, t])
 
 	const handleShield = useCallback(async () => {
 		if (!shieldAmount) return
@@ -726,7 +726,7 @@ export function ZcashPrivacyTab({ initialPage, initialSection, embedded = false,
 			refreshBalance(); refreshTransparentBalance()
 		} catch (e: any) { setShieldError(e.message || "Shield failed") }
 		setShielding(false); setShieldStep(null); setShieldBatch(null)
-	}, [shieldAmount, refreshBalance, refreshTransparentBalance, fiatLocale, t])
+	}, [shieldAmount, refreshBalance, refreshTransparentBalance, fiatLocale, i18n.language, t])
 
 	const handleDeshield = useCallback(async () => {
 		if (!deshieldRecipient || !deshieldAmount) return
@@ -747,7 +747,7 @@ export function ZcashPrivacyTab({ initialPage, initialSection, embedded = false,
 			refreshBalance(); refreshTransparentBalance()
 		} catch (e: any) { setDeshieldError(e.message || "Deshield failed") }
 		setDeshielding(false); setDeshieldStep(null); setDeshieldBatch(null)
-	}, [deshieldRecipient, deshieldAmount, deshieldRecipientValidation, refreshBalance, refreshTransparentBalance, fiatLocale, t])
+	}, [deshieldRecipient, deshieldAmount, deshieldRecipientValidation, refreshBalance, refreshTransparentBalance, fiatLocale, i18n.language, t])
 
 	const copyAddress = useCallback(() => {
 		if (!orchardAddress) return

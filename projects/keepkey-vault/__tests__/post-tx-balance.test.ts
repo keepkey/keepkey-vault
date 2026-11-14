@@ -91,3 +91,35 @@ test('errors and a temporarily locked device consume a bounded retry budget', as
   expect(h.errors).toHaveLength(3)
   expect(await h.tick()).toBeNull()
 })
+
+// Audit v4 H9: a broadcast scheduled from inside a Desktop device operation
+// leaked that finished operation's fence into the refresh, so the first device
+// read threw "The KeepKey wallet changed" and the balance never refreshed.
+test('refresh does not inherit the broadcasting device operation or REST request', async () => {
+  const { deviceOperationContext } = await import('../src/bun/device-operation')
+  const { restRequest } = await import('../src/bun/device-gate')
+  const seen: unknown[] = []
+  const scope = { epoch: 1, deviceId: 'd', walletId: 'w', wallet: {} }
+  const worker = createPostTxBalanceRefresh({
+    getScope: () => scope, canRefresh: () => true,
+    refresh: async () => { seen.push(deviceOperationContext.getStore(), restRequest.getStore()) },
+  })
+  restRequest.run({} as any, () => deviceOperationContext.run({ assertCurrent: () => { throw new Error('The KeepKey wallet changed') } },
+    () => worker.activity(broadcast, CHAINS)))
+  await new Promise(resolve => setTimeout(resolve, 10))
+  worker.clear()
+  expect(seen.length).toBe(2)
+  expect(seen).toStrictEqual([undefined, undefined])
+})
+
+test('every broadcast or settlement marks its chain in the requesting wallet before any read (audit v4 H3)', async () => {
+  const marked: Array<[string, string]> = []
+  let scope: BalanceRefreshScope | null = { epoch: 1, deviceId: 'device-A', walletId: 'wallet-A', wallet: {} }
+  const worker = createPostTxBalanceRefresh({ getScope: () => scope, canRefresh: () => true, refresh: async () => {},
+    onTx: (s, chainId) => marked.push([s.deviceId, chainId]), setTimer: () => 0, clearTimer: () => {} })
+  worker.activity(broadcast, CHAINS)
+  worker.request('base', '0xsettled')
+  scope = null
+  worker.request('ethereum')
+  expect(marked).toEqual([['device-A', 'litecoin'], ['device-A', 'base']])
+})

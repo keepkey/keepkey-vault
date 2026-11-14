@@ -5,6 +5,10 @@ import {
   MIN_SLIPPAGE_BPS,
   normalizeSlippageBps,
   parseCustomSlippagePercent,
+  PERSIST_MAX_SLIPPAGE_BPS,
+  CONFIRM_SLIPPAGE_BPS,
+  SLIPPAGE_PRESETS_BPS,
+  slippageAfterSwap,
 } from './slippage'
 
 describe('slippage policy', () => {
@@ -25,5 +29,18 @@ describe('slippage policy', () => {
     expect(parseCustomSlippagePercent('not-a-number').ok).toBe(false)
     expect(parseCustomSlippagePercent('0').ok).toBe(false)
     expect(parseCustomSlippagePercent('50.01').ok).toBe(false)
+  })
+})
+
+describe('slippage memory (audit v4 V1)', () => {
+  test('only tolerances up to 3% are remembered, and a confirmation is needed above 5%', () => {
+    expect(PERSIST_MAX_SLIPPAGE_BPS).toBe(300)
+    expect(CONFIRM_SLIPPAGE_BPS).toBe(500)
+  })
+
+  test('a preset survives a swap; a custom tolerance returns to the default', () => {
+    for (const preset of SLIPPAGE_PRESETS_BPS) expect(slippageAfterSwap(preset)).toBe(preset)
+    expect(slippageAfterSwap(250)).toBe(DEFAULT_SLIPPAGE_BPS)
+    expect(slippageAfterSwap(3000)).toBe(DEFAULT_SLIPPAGE_BPS)
   })
 })
