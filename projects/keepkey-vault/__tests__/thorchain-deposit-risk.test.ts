@@ -18,7 +18,8 @@ import fixtures from './fixtures/thorchain/router-deposits.json'
 import natives from './fixtures/thorchain/native-deposits.json'
 
 const dir = mkdtempSync(join(tmpdir(), 'vault-thor-deposit-'))
-mock.module('electrobun/bun', () => ({ Utils: { paths: { userData: dir } } }))
+mock.module('electrobun/main', () => ({ Utils: { paths: { userData: dir } } }))
+mock.module('electrobun/main/utils', () => ({ paths: { userData: dir } }))
 const db = await import('../src/bun/db')
 const { applyEvmTxPreview } = await import('../src/bun/evm-signing-preview')
 const { addThorDepositFacts, checkThorVault, VAULT_SOURCES } = await import('../src/bun/thor-vaults')

@@ -5,7 +5,8 @@ import {tmpdir} from 'node:os'
 import {join} from 'node:path'
 mock.module('@keepkey/hdwallet-keepkey-nodehid',()=>({HIDKeepKeyAdapter:class{}}))
 const dir=mkdtempSync(join(tmpdir(),'vault-multisig-feature-'))
-mock.module('electrobun/bun',()=>({Utils:{paths:{userData:dir}}}))
+mock.module('electrobun/main',()=>({Utils:{paths:{userData:dir}}}))
+mock.module('electrobun/main/utils', () => ({paths:{userData:dir}}))
 const db=await import('../db')
 const {startRestApi}=await import('../rest-api')
 db.initDb()

@@ -17,7 +17,8 @@ const pioneer = {
   GetAccountInfo: async (params: any) => { builds.push({ kind: 'xrp', params }); return { data: { Sequence: 42, ledger_index_current: 100, Balance: '100000000' } } },
 }
 mock.module('../src/bun/pioneer', () => ({ getPioneer: async () => pioneer, getPioneerApiBase: () => 'https://fixture.invalid', getQueryKey: () => 'fixture' }))
-mock.module('electrobun/bun', () => ({ Utils: { paths: { userData: '/private/tmp/vault-near-build-test' } } }))
+mock.module('electrobun/main', () => ({ Utils: { paths: { userData: '/private/tmp/vault-near-build-test' } } }))
+mock.module('electrobun/main/utils', () => ({ paths: { userData: '/private/tmp/vault-near-build-test' } }))
 const { previewSwapBuild, executeSwap } = await import('../src/bun/swap')
 
 test('an expired EVM router deadline is refused instead of silently extended', async () => {

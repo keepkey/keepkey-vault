@@ -14,7 +14,8 @@ const basePioneer = {
 }
 let pioneer: Record<string, unknown> = basePioneer
 mock.module('../src/bun/pioneer', () => ({ getPioneer: async () => pioneer, getPioneerApiBase: () => 'https://fixture.invalid', getQueryKey: () => 'fixture' }))
-mock.module('electrobun/bun', () => ({ Utils: { paths: { userData: '/private/tmp/vault-swap-execution-service-test' } } }))
+mock.module('electrobun/main', () => ({ Utils: { paths: { userData: '/private/tmp/vault-swap-execution-service-test' } } }))
+mock.module('electrobun/main/utils', () => ({ paths: { userData: '/private/tmp/vault-swap-execution-service-test' } }))
 const { executeSwap } = await import('../src/bun/swap')
 
 const originalFetch = globalThis.fetch

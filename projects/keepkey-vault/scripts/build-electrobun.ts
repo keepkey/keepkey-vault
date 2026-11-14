@@ -25,7 +25,7 @@ export function buildElectrobun(channel: string, env = process.env) {
   ]
   const before = outputs.map(path => statSync(path, { bigint: true, throwIfNoEntry: false }))
 
-  const build = Bun.spawnSync(['electrobun', 'build', `--env=${channel}`], {
+  const build = Bun.spawnSync(['hutch', 'electrobun', 'build', `--env=${channel}`], {
     cwd: project, env, stdout: 'inherit', stderr: 'inherit',
   })
   if (build.exitCode !== 0) process.exit(build.exitCode ?? 1)

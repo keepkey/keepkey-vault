@@ -31,7 +31,7 @@ Bun.serve = ((options: any) => {
   return { port: 41000 + bridges.length, stop() { bridge.stopped = true } }
 }) as typeof Bun.serve
 
-mock.module('electrobun/bun', () => ({ BrowserWindow: FakeWindow, BrowserView: { defineRPC: () => ({}) } }))
+mock.module('electrobun/main', () => ({ BrowserWindow: FakeWindow, BrowserView: { defineRPC: () => ({}) } }))
 mock.module('os', () => ({ homedir: () => stateDir }))
 mock.module('../emulator', () => ({
   getActiveFlashName: () => 'fixture-wallet',

@@ -14,7 +14,8 @@ import { join } from 'node:path'
 
 mock.module('@keepkey/hdwallet-keepkey-nodehid', () => ({ HIDKeepKeyAdapter: class {} }))
 const dir = mkdtempSync(join(tmpdir(), 'vault-test-servers-loopback-'))
-mock.module('electrobun/bun', () => ({ Utils: { paths: { userData: dir } } }))
+mock.module('electrobun/main', () => ({ Utils: { paths: { userData: dir } } }))
+mock.module('electrobun/main/utils', () => ({ paths: { userData: dir } }))
 const { startRestApi, restApiLoopbackHosts } = await import('../src/bun/rest-api')
 const { portAnswersLikeDesktop, startRestApiOrReport } = await import('../src/bun/rest-api-startup')
 

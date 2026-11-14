@@ -10,11 +10,11 @@ test.skipIf(process.platform === 'win32')('requires fresh app or release outputs
     mkdirSync(join(root, 'bin'))
     writeFileSync(join(root, 'package.json'), JSON.stringify({ name: 'keepkey-vault', version: '1.6.11' }))
     copyFileSync(join(import.meta.dir, '../scripts/build-electrobun.ts'), join(root, 'scripts/build-electrobun.ts'))
-    writeFileSync(join(root, 'bin/electrobun'), `#!/usr/bin/env bun
+    writeFileSync(join(root, 'bin/hutch'), `#!/usr/bin/env bun
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 const os = process.platform === 'darwin' ? 'macos' : process.platform
-const channel = process.argv[3].split('=')[1]
+const channel = process.argv[4].split('=')[1]
 const prefix = channel + '-' + os + '-' + process.arch
 const mode = process.env.KEEPKEY_BUILD_FIXTURE
 const write = (path, contents) => { mkdirSync(dirname(path), { recursive: true }); writeFileSync(path, contents) }

@@ -5,7 +5,8 @@ import { join } from 'node:path'
 import type { SwapHistoryRecord } from '../src/shared/types'
 
 const dir = mkdtempSync(join(tmpdir(), 'vault-swap-context-'))
-mock.module('electrobun/bun', () => ({ Utils: { paths: { userData: dir } } }))
+mock.module('electrobun/main', () => ({ Utils: { paths: { userData: dir } } }))
+mock.module('electrobun/main/utils', () => ({ paths: { userData: dir } }))
 const db = await import('../src/bun/db')
 beforeAll(() => db.initDb())
 afterAll(() => { db.closeDb(); rmSync(dir, { recursive: true, force: true }) })

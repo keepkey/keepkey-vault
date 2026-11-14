@@ -208,7 +208,7 @@ try {
   console.warn(`[Boot] Failed to dump boot environment: ${err?.message || err}`)
 }
 
-import Electrobun, { BrowserView, BrowserWindow, Updater, Utils, ApplicationMenu } from "electrobun/bun"
+import Electrobun, { BrowserView, BrowserWindow, Updater, Utils, ApplicationMenu } from "electrobun/main"
 import { backendText } from './i18n'
 import { supportedLanguage } from '../mainview/i18n/languages'
 import { validNumberLocale } from '../shared/locale'
@@ -4208,10 +4208,9 @@ const vaultImporter = new VaultImportService({
 const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 	maxRequestTime: 1_800_000, // 30 minutes — generous for device-interactive ops, but not infinite
 	handlers: {
-		// NOTE: device Failures are plain objects, not Errors. Electrobun's
-		// dispatcher drops non-Error throws without sending a response (see
-		// scripts/patch-electrobun.sh, which normalizes them), so handlers here
-		// may throw device failures without hanging the renderer.
+		// NOTE: device Failures are plain objects, not Errors. Our Electrobun fork
+		// answers non-Error throws with their text (keepkey/electrobun 9d2751eb),
+		// so handlers here may throw device failures without hanging the renderer.
 		requests: gateMultisigRpc(() => multisigFeature.enabled, enforceBitcoinOnlyRpcBoundary(
 			// Runs ahead of every UI request, so it is also where the UI's first
 			// contact is recorded (see ui-watchdog.ts).

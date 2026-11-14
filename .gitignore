@@ -64,3 +64,6 @@ rmdir-result.txt
 
 # Pinned host libraries for unsigned Monero hardware research builds.
 /projects/keepkey-vault/monero-device-bundle/
+
+# Electrobun 2.x (Hutch) devkit projection and state
+.hutch/

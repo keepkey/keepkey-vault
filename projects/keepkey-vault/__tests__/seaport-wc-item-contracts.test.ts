@@ -23,7 +23,8 @@ import { trustTestRoot } from './support/clearsign-test-root'
 
 mock.module('@keepkey/hdwallet-keepkey-nodehid', () => ({ HIDKeepKeyAdapter: class {} }))
 const dir = mkdtempSync(join(tmpdir(), 'vault-seaport-wc-'))
-mock.module('electrobun/bun', () => ({ Utils: { paths: { userData: dir } } }))
+mock.module('electrobun/main', () => ({ Utils: { paths: { userData: dir } } }))
+mock.module('electrobun/main/utils', () => ({ paths: { userData: dir } }))
 const db = await import('../src/bun/db')
 const { WalletConnectManager } = await import('../src/bun/walletconnect')
 const { forgetRefusedErc7730Definitions } = await import('../src/bun/erc7730-resolver')

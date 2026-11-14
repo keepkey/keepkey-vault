@@ -19,7 +19,8 @@ import { ERC7730_FIXTURE_ROOT_PUBLIC_KEY, trustTestRoot } from '../../__tests__/
 // REST server only needs the engine object this test passes in.
 mock.module('@keepkey/hdwallet-keepkey-nodehid', () => ({ HIDKeepKeyAdapter: class {} }))
 const dir = mkdtempSync(join(tmpdir(), 'vault-erc7730-rest-'))
-mock.module('electrobun/bun', () => ({ Utils: { paths: { userData: dir } } }))
+mock.module('electrobun/main', () => ({ Utils: { paths: { userData: dir } } }))
+mock.module('electrobun/main/utils', () => ({ paths: { userData: dir } }))
 const db = await import('./db')
 const { forgetRefusedErc7730Definitions } = await import('./erc7730-resolver')
 const { startRestApi } = await import('./rest-api')

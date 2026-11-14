@@ -1,7 +1,7 @@
 import type { MoneroSendReview, MoneroStatus, EmulatorBuildInfo, EmulatorNextBuild } from './types'
 import type { MultisigPolicyPreview,MultisigCosignerExport,BtcPsbtSigned } from "./multisig-policy"
 import type { PasswordBankView, PasswordBrowserTarget, PasswordRiskKind, PasswordAgentApproval } from './password-bank'
-import type { ElectrobunRPCSchema } from 'electrobun/bun'
+import type { ElectrobunRPCSchema } from 'electrobun/main'
 import type { SafeAccount, SafeContext, SafeCreateParams, SafeProposal, SafeTransfer, SafeTxReview, VaultAddParams, VaultAddReview } from './safe-multisig'
 import type { VaultIdentity } from './vault-identity'
 import type { MoneroNodeStatus } from './monero-node'

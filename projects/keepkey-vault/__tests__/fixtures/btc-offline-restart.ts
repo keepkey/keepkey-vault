@@ -16,7 +16,8 @@ import type { BtcBackend } from '../../src/bun/btc-backend/types'
 import { CHAINS } from '../../src/shared/chains'
 
 const [dir, phase] = process.argv.slice(2)
-mock.module('electrobun/bun', () => ({ Utils: { paths: { userData: join(dir, 'online-profile') } } }))
+mock.module('electrobun/main', () => ({ Utils: { paths: { userData: join(dir, 'online-profile') } } }))
+mock.module('electrobun/main/utils', () => ({ paths: { userData: join(dir, 'online-profile') } }))
 const db = await import('../../src/bun/db')
 const file = (name: string) => join(dir, name)
 const master = () => HDKey.fromMasterSeed(new Uint8Array(mnemonicToSeedSync('abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about')))

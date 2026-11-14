@@ -12,7 +12,7 @@
  */
 import { randomUUID } from 'node:crypto'
 import { recoverEmulatorView } from './emulator-view-recovery'
-import { BrowserView, BrowserWindow, type RPCSchema } from 'electrobun/bun'
+import { BrowserView, BrowserWindow, type RPCSchema } from 'electrobun/main'
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs'
 import { join } from 'path'
 import { homedir } from 'os'

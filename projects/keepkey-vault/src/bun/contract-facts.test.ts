@@ -7,7 +7,8 @@ import { join } from 'node:path'
 import type { SigningRequestInfo } from '../shared/types'
 
 const dir = mkdtempSync(join(tmpdir(), 'vault-contract-facts-'))
-mock.module('electrobun/bun', () => ({ Utils: { paths: { userData: dir } } }))
+mock.module('electrobun/main', () => ({ Utils: { paths: { userData: dir } } }))
+mock.module('electrobun/main/utils', () => ({ paths: { userData: dir } }))
 const db = await import('./db')
 const { addContractFacts } = await import('./contract-facts')
 

@@ -17,7 +17,8 @@ const pioneer = {
   } }] }),
 }
 mock.module('../src/bun/pioneer', () => ({ getPioneer: async () => pioneer, getPioneerApiBase: () => 'https://fixture.invalid', getQueryKey: () => 'fixture' }))
-mock.module('electrobun/bun', () => ({ Utils: { paths: { userData: '/private/tmp/vault-near-refund-test' } } }))
+mock.module('electrobun/main', () => ({ Utils: { paths: { userData: '/private/tmp/vault-near-refund-test' } } }))
+mock.module('electrobun/main/utils', () => ({ paths: { userData: '/private/tmp/vault-near-refund-test' } }))
 mock.module('../src/bun/txbuilder', () => ({
   normalizeBchAddress: (address: string) => address,
   // A sentinel makes reaching the builder visible without ever constructing,

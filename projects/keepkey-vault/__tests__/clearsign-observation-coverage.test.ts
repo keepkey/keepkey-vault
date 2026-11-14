@@ -15,7 +15,8 @@ import fx from './fixtures/clearsign-observation/real-requests.json'
 
 mock.module('@keepkey/hdwallet-keepkey-nodehid', () => ({ HIDKeepKeyAdapter: class {} }))
 const dir = mkdtempSync(join(tmpdir(), 'vault-cs-observation-'))
-mock.module('electrobun/bun', () => ({ Utils: { paths: { userData: dir } } }))
+mock.module('electrobun/main', () => ({ Utils: { paths: { userData: dir } } }))
+mock.module('electrobun/main/utils', () => ({ paths: { userData: dir } }))
 const db = await import('../src/bun/db')
 const { protectSwapSignature, evmShownNatively, solanaShownNatively, recordVaultRpcEvmCall, recordVaultRpcSolanaTransaction, observeVaultRpcSignature } = await import('../src/bun/clearsign-native')
 const { ActionCancelled } = await import('@keepkey/hdwallet-core')

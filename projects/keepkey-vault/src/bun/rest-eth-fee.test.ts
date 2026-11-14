@@ -16,7 +16,8 @@ import { BigNumber, Wallet, utils } from 'ethers'
 
 mock.module('@keepkey/hdwallet-keepkey-nodehid', () => ({ HIDKeepKeyAdapter: class {} }))
 const dir = mkdtempSync(join(tmpdir(), 'vault-rest-eth-fee-'))
-mock.module('electrobun/bun', () => ({ Utils: { paths: { userData: dir } } }))
+mock.module('electrobun/main', () => ({ Utils: { paths: { userData: dir } } }))
+mock.module('electrobun/main/utils', () => ({ paths: { userData: dir } }))
 const db = await import('./db')
 let gasPriceAnswer: () => any
 const gasPriceAsked: string[] = []

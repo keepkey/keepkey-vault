@@ -13,7 +13,8 @@ import { mnemonicToSeedSync } from 'bip39'
 import { formatPath, toSlip132 } from './btc-psbt/codec'
 
 const dir = mkdtempSync(join(tmpdir(), 'vault-master-fp-'))
-mock.module('electrobun/bun', () => ({ Utils: { paths: { userData: dir } } }))
+mock.module('electrobun/main', () => ({ Utils: { paths: { userData: dir } } }))
+mock.module('electrobun/main/utils', () => ({ paths: { userData: dir } }))
 const db = await import('./db')
 const { BtcAccountManager } = await import('./btc-accounts')
 db.initDb()

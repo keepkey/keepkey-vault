@@ -13,7 +13,8 @@ import fixture from './erc7730-typed-data.fixtures.json'
 
 mock.module('@keepkey/hdwallet-keepkey-nodehid', () => ({ HIDKeepKeyAdapter: class {} }))
 const dir = mkdtempSync(join(tmpdir(), 'vault-erc7730-typed-rest-'))
-mock.module('electrobun/bun', () => ({ Utils: { paths: { userData: dir } } }))
+mock.module('electrobun/main', () => ({ Utils: { paths: { userData: dir } } }))
+mock.module('electrobun/main/utils', () => ({ paths: { userData: dir } }))
 const db = await import('./db')
 const { forgetRefusedErc7730Definitions } = await import('./erc7730-resolver')
 const { startRestApi } = await import('./rest-api')

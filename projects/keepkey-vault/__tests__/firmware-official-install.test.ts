@@ -9,7 +9,8 @@ import { join } from 'node:path'
 mock.module('@keepkey/hdwallet-keepkey-nodehid', () => ({ HIDKeepKeyAdapter: { useKeyring: () => ({}) } }))
 mock.module('@keepkey/hdwallet-keepkey-nodewebusb', () => ({ NodeWebUSBKeepKeyAdapter: { useKeyring: () => ({}) } }))
 mock.module('usb', () => ({ usb: new EventEmitter() }))
-mock.module('electrobun/bun', () => ({ Utils: { paths: { userData: '/tmp/kk-official-install-test-unused' } } }))
+mock.module('electrobun/main', () => ({ Utils: { paths: { userData: '/tmp/kk-official-install-test-unused' } } }))
+mock.module('electrobun/main/utils', () => ({ paths: { userData: '/tmp/kk-official-install-test-unused' } }))
 
 const { EngineController } = await import('../src/bun/engine-controller')
 

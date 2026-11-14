@@ -26,7 +26,8 @@ import { Transport, create, type TransportDelegate } from '@keepkey/hdwallet-kee
 mock.module('@keepkey/hdwallet-keepkey-nodehid', () => ({ HIDKeepKeyAdapter: { useKeyring: () => ({}) } }))
 mock.module('@keepkey/hdwallet-keepkey-nodewebusb', () => ({ NodeWebUSBKeepKeyAdapter: { useKeyring: () => ({}) } }))
 mock.module('usb', () => ({ usb: new EventEmitter() }))
-mock.module('electrobun/bun', () => ({ Utils: { paths: { userData: '/tmp/kk-pin-wait-guard-unused' } } }))
+mock.module('electrobun/main', () => ({ Utils: { paths: { userData: '/tmp/kk-pin-wait-guard-unused' } } }))
+mock.module('electrobun/main/utils', () => ({ paths: { userData: '/tmp/kk-pin-wait-guard-unused' } }))
 
 const { DEVICE_AWAITING_INPUT_MESSAGE, awaitingInput, guardInputWait, restRequest } = await import('../src/bun/device-gate')
 const { EngineController } = await import('../src/bun/engine-controller')

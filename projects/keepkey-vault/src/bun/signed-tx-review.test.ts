@@ -9,7 +9,8 @@ import { assessSigningRisk } from '../shared/clearsign-risk'
 import { decodeCalldata } from './calldata-decoder'
 
 const dir = mkdtempSync(join(tmpdir(), 'vault-signed-tx-review-'))
-mock.module('electrobun/bun', () => ({ Utils: { paths: { userData: dir } } }))
+mock.module('electrobun/main', () => ({ Utils: { paths: { userData: dir } } }))
+mock.module('electrobun/main/utils', () => ({ paths: { userData: dir } }))
 const db = await import('./db')
 const { evmTxid, signedTxReview, recordSignedEvmTx, tokenMoves, txDetails, walletBook, lookupEvmTx } = await import('./signed-tx-review')
 

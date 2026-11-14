@@ -7,7 +7,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 const profile = mkdtempSync(join(tmpdir(), 'vault-window-focus-'))
-mock.module('electrobun/bun', () => ({ Utils: { paths: { userData: profile } } }))
+mock.module('electrobun/main', () => ({ Utils: { paths: { userData: profile } } }))
+mock.module('electrobun/main/utils', () => ({ paths: { userData: profile } }))
 mock.module('@keepkey/hdwallet-keepkey-nodehid', () => ({ HIDKeepKeyAdapter: class {} }))
 mock.module('@keepkey/hdwallet-keepkey-nodewebusb', () => ({ NodeWebUSBKeepKeyAdapter: class {} }))
 mock.module('usb', () => ({ usb: Object.assign(new EventEmitter(), { getDeviceList: () => [] }) }))

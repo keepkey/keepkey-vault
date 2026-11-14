@@ -73,7 +73,8 @@ mock.module('../src/bun/emulator', () => ({
 mock.module('@keepkey/hdwallet-keepkey-nodehid', () => ({ HIDKeepKeyAdapter: { useKeyring: () => ({}) } }))
 mock.module('@keepkey/hdwallet-keepkey-nodewebusb', () => ({ NodeWebUSBKeepKeyAdapter: { useKeyring: () => ({}) } }))
 mock.module('usb', () => ({ usb: new EventEmitter() }))
-mock.module('electrobun/bun', () => ({ Utils: { paths: { userData: '/tmp/kk-emulator-countdown-unused' } } }))
+mock.module('electrobun/main', () => ({ Utils: { paths: { userData: '/tmp/kk-emulator-countdown-unused' } } }))
+mock.module('electrobun/main/utils', () => ({ paths: { userData: '/tmp/kk-emulator-countdown-unused' } }))
 const { EmulatorTransportDelegate } = await import('../src/bun/emulator-transport')
 const { EngineController } = await import('../src/bun/engine-controller')
 

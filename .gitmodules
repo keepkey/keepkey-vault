@@ -14,5 +14,5 @@
 	url = https://github.com/keepkey/device-protocol
 [submodule "modules/electrobun"]
 	path = modules/electrobun
-	url = https://github.com/BitHighlander/electrobun.git
-	branch = keepkey/launcher-env-uaf-fix
+	url = https://github.com/keepkey/electrobun.git
+	branch = keepkey/2.x

@@ -3,7 +3,8 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 const dir = mkdtempSync(join(tmpdir(), 'vault-db-test-'))
-mock.module('electrobun/bun', () => ({ Utils: { paths: { userData: dir } } }))
+mock.module('electrobun/main', () => ({ Utils: { paths: { userData: dir } } }))
+mock.module('electrobun/main/utils', () => ({ paths: { userData: dir } }))
 const { initDb, getDb, saveCachedPubkey, getCachedPubkeys, setCachedBalances, getCachedBalances, updateCachedBalance } = await import('../../src/bun/db')
 initDb()
 if (!getDb()) throw new Error('database initialization failed')

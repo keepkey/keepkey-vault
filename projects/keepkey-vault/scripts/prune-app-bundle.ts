@@ -389,32 +389,9 @@ if (existsSync(bunIndexPath)) {
   }
 }
 
-// Prove the node_modules patches from scripts/patch-electrobun.sh actually made it
-// into the shipped bundle. They are applied to node_modules/electrobun/dist/api at
-// install time, but the platform tarball unpacked during `electrobun build` ALSO
-// ships an api/ (dist-macos-arm64/api) that postinstall never sees. Today the build
-// bundles the shared, patched copy — if that preference ever flips, the app silently
-// loses both fixes: device errors stop producing a response packet and hang the
-// renderer, and a lost crypto.subtle race leaves a blank window. Cheap to assert here,
-// expensive to discover in the wild.
-if (existsSync(bunIndexPath)) {
-  const bundled = readFileSync(bunIndexPath, 'utf8')
-  const required = [
-    ['kkDeviceErrorText', 'rpc.ts device-error normalization'],
-    ['__ebInitEncRetry', 'preload initEncryption retry'],
-  ] as const
-  const missing = required.filter(([marker]) => !bundled.includes(marker))
-  if (missing.length > 0) {
-    for (const [marker, label] of missing) {
-      console.error(`[prune-bundle] ERROR: ${label} (${marker}) missing from the bundled app.`)
-    }
-    console.error('[prune-bundle] Electrobun is bundling an api/ that patch-electrobun.sh did not')
-    console.error('[prune-bundle] patch — likely dist-<os>-<arch>/api from the core tarball, which is')
-    console.error('[prune-bundle] downloaded after postinstall. Fix before shipping.')
-    process.exit(1)
-  }
-  console.log('[prune-bundle] Verified electrobun patches present in bundle')
-}
+// Electrobun 2.x: the RPC device-error response and the preload crypto.subtle wait are
+// fixed in our fork's source (keepkey/electrobun keepkey/2.x 9d2751eb, 96586066), so the
+// old node_modules patches and their bundle markers are gone.
 
 // Give NSCameraUsageDescription real copy. The camera entitlement in
 // electrobun.config.ts must be `true` (a string value lands in entitlements.plist

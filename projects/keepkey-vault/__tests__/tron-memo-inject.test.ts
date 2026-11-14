@@ -12,7 +12,8 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 const profile = mkdtempSync(join(tmpdir(), 'vault-tron-memo-'))
-mock.module('electrobun/bun', () => ({ Utils: { paths: { userData: profile } } }))
+mock.module('electrobun/main', () => ({ Utils: { paths: { userData: profile } } }))
+mock.module('electrobun/main/utils', () => ({ paths: { userData: profile } }))
 afterAll(() => rmSync(profile, { recursive: true, force: true }))
 const { injectTronMemo } = await import('../src/bun/txbuilder')
 import protobuf from 'protobufjs/light'

@@ -6,7 +6,8 @@ import pkg from "./package.json";
 const isWindows = process.platform === "win32";
 const isMac = process.platform === "darwin";
 const arch = process.arch; // 'arm64' or 'x64'
-if (isMac) console.log(`[electrobun] Building for macOS ${arch}`);
+// Hutch evaluates this file and reads the result from stdout, so log to stderr only.
+if (isMac) console.error(`[electrobun] Building for macOS ${arch}`);
 const certifiedEmulatorSource = isWindows
 	? "emulator-bundle/libkkemu.dll"
 	: isMac ? "emulator-bundle/libkkemu.dylib" : null;
@@ -60,13 +61,8 @@ export default {
 	},
 	build: {
 		buildFolder: "_build",
-		// Pin Bun to a non-AVX-safe baseline build. Electrobun 1.13.1 defaults to
-		// Bun 1.3.9, which sits inside an upstream non-AVX regression window. 1.3.14
-		// is the first version combining baseline WebKit + the JSC AVX-gating fix.
-		// On Windows this override always fetches bun-windows-x64-baseline.zip.
-		// Pairs with the -mcpu=baseline wrapper build (scripts/build-windows-production.ps1).
-		// See docs/windows-non-avx-launcher-crash.md §5.
-		bunVersion: "1.3.14",
+		// Electrobun 2.x: the fork's devkit selects the bundled Bun (1.4.4); bunVersion is gone.
+		mainProcess: "bun",
 		bun: {
 			// Point at the pre-bundled backend from scripts/bundle-backend.ts.
 			// It already inlines ALL deps (@keepkey/*, ethers, protobuf, swagger, etc.)

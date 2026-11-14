@@ -10,7 +10,8 @@ import { Transport, create, type TransportDelegate } from '@keepkey/hdwallet-kee
 mock.module('@keepkey/hdwallet-keepkey-nodehid', () => ({ HIDKeepKeyAdapter: { useKeyring: () => ({}) } }))
 mock.module('@keepkey/hdwallet-keepkey-nodewebusb', () => ({ NodeWebUSBKeepKeyAdapter: { useKeyring: () => ({}) } }))
 mock.module('usb', () => ({ usb: new EventEmitter() }))
-mock.module('electrobun/bun', () => ({ Utils: { paths: { userData: '/tmp/kk-desktop-cancellation-unused' } } }))
+mock.module('electrobun/main', () => ({ Utils: { paths: { userData: '/tmp/kk-desktop-cancellation-unused' } } }))
+mock.module('electrobun/main/utils', () => ({ paths: { userData: '/tmp/kk-desktop-cancellation-unused' } }))
 const { EngineController } = await import('../src/bun/engine-controller')
 const { restRequest } = await import('../src/bun/device-gate')
 

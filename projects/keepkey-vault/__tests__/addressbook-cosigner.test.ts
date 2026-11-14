@@ -17,7 +17,8 @@ old.run(`INSERT INTO addressbook (id, wallet_id, device_id, kind, network_id, ch
   VALUES ('old', 'w', 'd', 'external', 'eip155:8453', 'base', '0x1a6aae5495962c8f04f4a069a4cf59006416c541', 'Aurelian', 1, 1, 1)`)
 old.close()
 
-mock.module('electrobun/bun', () => ({ Utils: { paths: { userData: dir } } }))
+mock.module('electrobun/main', () => ({ Utils: { paths: { userData: dir } } }))
+mock.module('electrobun/main/utils', () => ({ paths: { userData: dir } }))
 const db = await import('../src/bun/db')
 const entry = (id: string) => db.getAddressBookList({}).find(e => e.id === id)!
 const add = (address: string, extra: { label?: string; cosigner?: boolean; networkId?: string; chainId?: string; walletId?: string } = {}) => db.addExternalEntry({

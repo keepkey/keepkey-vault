@@ -7,7 +7,9 @@
 import { Database } from 'bun:sqlite'
 import { migratePublicKeyCache } from './public-key-cache-migration'
 import { DEFAULT_PIONEER_API_BASE, resolvePioneerApiBase } from '../shared/pioneer-server'
-import { Utils } from 'electrobun/bun'
+// The utils entry, not the package index: the index creates native windows on import,
+// which throws anywhere outside a running app (unit tests import this module).
+import * as Utils from 'electrobun/main/utils'
 import { join, dirname } from 'node:path'
 import { mkdirSync, unlinkSync, existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { createHash, randomUUID } from 'crypto'
