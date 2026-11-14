@@ -191,6 +191,7 @@ function PersonalAssetPage({ chain, balance, balanceLoading = false, onBack, fir
 			// 90s: backend budget is 60s of Pioneer time plus device derivation —
 			// the 30s rpc default made slow forced refreshes fail invisibly.
 			const refreshed = await rpcRequest<ChainBalance>("getBalance", { chainId: chain.id }, 90000)
+			if (refreshed.txPending) return // the last tx has not landed yet: "Cached", not a failure (H3)
 			if (refreshed.syncState === 'degraded' || refreshed.syncState === 'stale') {
 				throw new Error('Balance could not be verified. Showing the last known balance when available.')
 			}
@@ -210,6 +211,9 @@ function PersonalAssetPage({ chain, balance, balanceLoading = false, onBack, fir
 	useEffect(() => {
 		return onRpcMessage("balance-updated", (updated: ChainBalance) => {
 			if (updated.chainId !== chain.id) return
+			// A read that started before the last tx could land is not a failure:
+			// the row stays "Cached" until a later read includes the tx (H3).
+			if (updated.txPending) return
 			if (updated.syncState === 'degraded' || updated.syncState === 'stale') {
 				setRefreshError('Balance could not be verified. Showing the last known balance when available.')
 			} else { setRefreshError(null); setLastSyncedAt(new Date()) }

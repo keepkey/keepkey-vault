@@ -51,5 +51,10 @@ const result: Record<string, unknown> = {}
 try {
   result.confirmed = await chip({ ...row, syncState: 'confirmed' })
   result.olderThanLastTx = await chip({ ...row, syncState: 'stale' })
+  // A post-tx read that started before the tx could land is pushed as stale +
+  // txPending: the page stays "Cached", it is not a failed refresh.
+  await act(async () => { for (const cb of listeners.get('balance-updated') || []) cb({ ...row, syncState: 'stale', txPending: true }) })
+  await settle()
+  result.txPendingPush = { cached: (container.textContent || '').includes('Cached'), failed: /refresh failed/i.test(container.textContent || '') }
 } finally { await act(async () => root.unmount()); container.remove(); dom.window.close() }
 console.log(JSON.stringify(result))

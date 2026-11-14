@@ -8,5 +8,6 @@ test('a cached balance older than the chain\'s last tx reads "Cached", never "Sy
   expect(JSON.parse(run.stdout.toString().trim().split('\n').at(-1)!)).toEqual({
     confirmed: { synced: true, cached: false },
     olderThanLastTx: { synced: false, cached: true },
+    txPendingPush: { cached: true, failed: false },
   })
 }, 35000)

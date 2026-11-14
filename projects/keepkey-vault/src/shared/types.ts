@@ -755,6 +755,8 @@ export interface ChainBalance {
    * during post-transaction reconciliation.
    */
   syncState?: 'confirmed' | 'stale' | 'degraded'
+  /** Stale only because the read started before this chain's last tx could land (H3). */
+  txPending?: boolean
   /** Assets verified directly against a chain RPC during this refresh. */
   confirmedAssetCaips?: string[]
   /** Per-xpub split of `balance` for multi-xpub UTXO chains (LTC/DOGE/…). Absent when not live-fetched. */

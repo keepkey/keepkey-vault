@@ -15,7 +15,7 @@
 // what code executed, at the cost of a per-call sync. The throughput hit is
 // negligible for our log volume (~10–100 lines/sec at peak boot).
 import { withPermit2SpenderName } from './permit2-spender-name'
-import { ownerPortfolioConfidence, portfolioBalanceSyncState } from '../shared/balance-display-state'
+import { ownerPortfolioConfidence, portfolioBalanceSyncState, portfolioFaultChainIds } from '../shared/balance-display-state'
 import { sendZcashByRoute, zcashPrivateSendRoute } from '../shared/zcash-privacy'
 import * as fs from "fs"
 import * as os from "os"
@@ -2997,7 +2997,12 @@ async function getChainBalance(params: { chainId: string; forceRefresh?: boolean
 			// force only when Pioneer confirmed (non-degraded) the value — then a
 			// genuine zero / unpriced balance must overwrite the stale cache row
 			// (same rule as getBalances' confirmedChainIds).
-			updateCachedBalance(deviceId, result, pioneerConfirmed)
+			// Still older than this chain's last tx (read started too soon after
+			// it): say so instead of "confirmed" (H3).
+			if (updateCachedBalance(deviceId, result, pioneerConfirmed, balanceReadStartedAt) && result.syncState === 'confirmed') {
+				result.syncState = 'stale'
+				result.txPending = true
+			}
 			rectifyWallet(deviceId, [result])
 		}
 	} catch { /* never block on cache failure */ }
@@ -5963,6 +5968,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			// ── Pioneer integration (batch portfolio API) ────────────────
 			getBalances: async ({ forceRefresh = false, swapDestCaips = [] }: { forceRefresh?: boolean; swapDestCaips?: string[] } = {}) => {
 				if (!engine.wallet) throw new Error('No device connected')
+				const readStartedAt = Date.now()
 				const requestServer = getPioneerApiBase()
 				const requestEpoch = activitySessionEpoch
 				const assertServerCurrent = () => {
@@ -6979,7 +6985,14 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					try {
 						const deviceId = engine.getDeviceState().deviceId || 'unknown'
 						if (results.length > 0 && !engine.isPassphraseWallet) {
-							setCachedBalances(deviceId, results.filter(r => (r.chainId !== 'bitcoin' && !utxoChains.some(c => c.id === r.chainId)) || confirmedChainIds.has(r.chainId)), confirmedChainIds)
+							// A chain Pioneer itself reports failed or stale is not confirmed for
+							// the cache: a forced write would clear its pending tx mark (H3).
+							const faulted = portfolioFaultChainIds(portfolioMeta, caip => {
+								const prefix = (caip.split('/')[0] || '').toLowerCase()
+								return networkToChain.get(prefix) ?? allChains.find(c => c.networkId?.toLowerCase() === prefix)?.id
+							})
+							const cacheConfirmed = new Set([...confirmedChainIds].filter(id => !faulted.has(id)))
+							setCachedBalances(deviceId, results.filter(r => (r.chainId !== 'bitcoin' && !utxoChains.some(c => c.id === r.chainId)) || cacheConfirmed.has(r.chainId)), cacheConfirmed, readStartedAt)
 							rectifyWallet(deviceId, results.filter(r => r.chainId !== 'bitcoin' || btcConfirmed))
 						}
 					} catch { /* never block on cache failure */ }

@@ -746,10 +746,16 @@ export function getCachedBalances(deviceId: string): { balances: ChainBalance[];
   }
 }
 
+/** A confirmed read clears a chain's tx mark only if it started this long after
+ *  the tx: a read right after a broadcast (THORChain includes it a block later)
+ *  can still return the pre-tx balance as "confirmed" (audit v4 H3). */
+export const TX_SETTLE_MS = 15_000
+const TX_AFTER_CLEAR = `tx_after = CASE WHEN tx_after IS NOT NULL AND ? < tx_after + ${TX_SETTLE_MS} THEN tx_after ELSE NULL END`
+
 // confirmedChainIds: chains where Pioneer returned a real response (even if balance=0).
 // Confirmed entries write unconditionally — a genuine zero overwrites a stale non-zero.
 // Unconfirmed entries (Pioneer failed/timed out for that chunk) keep the existing cached value.
-export function setCachedBalances(deviceId: string, balances: ChainBalance[], confirmedChainIds?: Set<string>) {
+export function setCachedBalances(deviceId: string, balances: ChainBalance[], confirmedChainIds?: Set<string>, readStartedAt = Date.now()) {
   try {
     if (!db) return
     const now = Date.now()
@@ -780,7 +786,7 @@ export function setCachedBalances(deviceId: string, balances: ChainBalance[], co
          defi_positions_json = excluded.defi_positions_json,
          breakdown_json = COALESCE(excluded.breakdown_json, breakdown_json),
          updated_at  = excluded.updated_at,
-         tx_after    = NULL`
+         ${TX_AFTER_CLEAR}`
     )
     const tx = db.transaction(() => {
       for (const b of balances) {
@@ -788,7 +794,7 @@ export function setCachedBalances(deviceId: string, balances: ChainBalance[], co
         const defiJson = b.defiPositions && b.defiPositions.length > 0 ? JSON.stringify(b.defiPositions) : null
         const args = [deviceId, b.chainId, b.symbol, b.balance, b.balanceUsd, b.address, tokensJson, defiJson, b.breakdown ? JSON.stringify(b.breakdown) : null, now] as const
         if (confirmedChainIds?.has(b.chainId)) {
-          stmtForced.run(...args)
+          stmtForced.run(...args, readStartedAt)
         } else {
           stmtGuarded.run(...args)
         }
@@ -801,10 +807,11 @@ export function setCachedBalances(deviceId: string, balances: ChainBalance[], co
 }
 
 /** Update a single chain's cached balance.
- *  Pass force=true when Pioneer confirmed the value — allows genuine zeros to overwrite stale data. */
-export function updateCachedBalance(deviceId: string, balance: ChainBalance, force?: boolean) {
+ *  Pass force=true when Pioneer confirmed the value — allows genuine zeros to overwrite stale data.
+ *  Returns true when the row still predates a tx (see TX_SETTLE_MS). */
+export function updateCachedBalance(deviceId: string, balance: ChainBalance, force?: boolean, readStartedAt = Date.now()): boolean {
   try {
-    if (!db) return
+    if (!db) return false
     const tokensJson = balance.tokens && balance.tokens.length > 0 ? JSON.stringify(balance.tokens) : null
     const defiJson = balance.defiPositions && balance.defiPositions.length > 0 ? JSON.stringify(balance.defiPositions) : null
     if (force) {
@@ -820,8 +827,8 @@ export function updateCachedBalance(deviceId: string, balance: ChainBalance, for
            defi_positions_json = excluded.defi_positions_json,
            breakdown_json = COALESCE(excluded.breakdown_json, breakdown_json),
            updated_at  = excluded.updated_at,
-           tx_after    = NULL`,
-        [deviceId, balance.chainId, balance.symbol, balance.balance, balance.balanceUsd, balance.address, tokensJson, defiJson, balance.breakdown ? JSON.stringify(balance.breakdown) : null, Date.now()]
+           ${TX_AFTER_CLEAR}`,
+        [deviceId, balance.chainId, balance.symbol, balance.balance, balance.balanceUsd, balance.address, tokensJson, defiJson, balance.breakdown ? JSON.stringify(balance.breakdown) : null, Date.now(), readStartedAt]
       )
     } else {
       db.run(
@@ -839,8 +846,11 @@ export function updateCachedBalance(deviceId: string, balance: ChainBalance, for
         [deviceId, balance.chainId, balance.symbol, balance.balance, balance.balanceUsd, balance.address, tokensJson, defiJson, balance.breakdown ? JSON.stringify(balance.breakdown) : null, Date.now()]
       )
     }
+    const marked = db.query('SELECT tx_after FROM balances WHERE device_id = ? AND chain_id = ?').get(deviceId, balance.chainId) as { tx_after: number | null } | null
+    return marked?.tx_after != null
   } catch (e: any) {
     console.warn('[db] updateCachedBalance failed:', e.message)
+    return false
   }
 }
 
