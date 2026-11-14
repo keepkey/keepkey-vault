@@ -15,7 +15,7 @@
 // what code executed, at the cost of a per-call sync. The throughput hit is
 // negligible for our log volume (~10–100 lines/sec at peak boot).
 import { withPermit2SpenderName } from './permit2-spender-name'
-import { ownerPortfolioConfidence, portfolioBalanceSyncState } from '../shared/balance-display-state'
+import { ownerPortfolioConfidence, portfolioBalanceSyncState, portfolioFaultChainIds } from '../shared/balance-display-state'
 import { sendZcashByRoute, zcashPrivateSendRoute } from '../shared/zcash-privacy'
 import * as fs from "fs"
 import * as os from "os"
@@ -23,6 +23,8 @@ import * as path from "path"
 import { createHash, randomUUID } from "crypto"
 import { createSwapQuoteLeases } from './swap-quote-lease'
 import { assessSwapRisk } from '../shared/swap-risk'
+import { validateContactOnNetwork } from '../shared/address-validation'
+import { singleFlight } from './single-flight'
 import { PasswordBank } from './password-bank'
 import { passwordDeviceCipher } from './password-device'
 import { savePasswordBackup } from './password-backup'
@@ -93,6 +95,7 @@ function addressBookCertifyUnsupported(): boolean {
 }
 
 const AUTHENTICATOR_SLOT_COUNT = 10
+const broadcastOnce = singleFlight<{ txid: string; addressBookEntryId?: string; recipientUnsaved?: boolean }>()
 
 function normalizeAuthenticatorLabel(value: unknown, field: string): string {
 	const normalized = String(value || '').trim()
@@ -318,7 +321,7 @@ import { getEvmSimulationEndpoint, getEvmSimulationRpcUrls } from "./evm-simulat
 import { addContractFacts } from "./contract-facts"
 import { attachSafeCallPreviews } from "./evm-signing-preview"
 import { attachSafeMessagePreimage } from "./safe-message-preimage"
-import { initDb, getDb, factoryResetDb, getCustomTokens, addCustomToken as dbAddCustomToken, removeCustomToken as dbRemoveCustomToken, setCustomTokenIcon as dbSetCustomTokenIcon, getCustomChains, addCustomChainDb, removeCustomChainDb, getSetting, setSetting, setTokenVisibility as dbSetTokenVisibility, removeTokenVisibility as dbRemoveTokenVisibility, getAllTokenVisibility, insertApiLog, getApiLogs, clearApiLogs, setCachedBalances, getCachedBalances, updateCachedBalance, clearBalances, deleteCachedChainBalance, saveCachedPubkey, getLatestDeviceSnapshot, getCachedPubkeys, saveReport, getReportsList, getReportById, deleteReport, reportExists, getSwapHistory, getSwapHistoryStats, getSwapHistoryByTxid, getBip85Seeds, saveBip85Seed, deleteBip85Seed, clearCachedPubkeys, getRecentActivityFromLog, getPioneerServers, addPioneerServerDb, removePioneerServerDb, syncOwnAddressBook, recordOutbound, getAddressBookList, updateAddressBookEntry, deleteAddressBookEntry, getAddressBookHistory, getDeviceLabelMap, getBalancesForOwnSeed, addExternalEntry, matchAddressBook, insertClearSignEvent, getClearSignEvents, insertClearSignObservation, finalizeClearSignObservation, authenticateClearSignObservation, refuseClearSignObservationDefinition, getClearSignCoverageSummary, getClearSignAuditJobs, enqueueClearSignAuditDemand, getSignedTxReview, setDeviceMasterFingerprint, getDeviceSnapshotById, getAllDeviceSnapshots, saveImportedWatchOnlyWallet, setImportedWalletVerified } from "./db"
+import { initDb, getDb, factoryResetDb, getCustomTokens, addCustomToken as dbAddCustomToken, removeCustomToken as dbRemoveCustomToken, setCustomTokenIcon as dbSetCustomTokenIcon, getCustomChains, addCustomChainDb, removeCustomChainDb, getSetting, setSetting, setTokenVisibility as dbSetTokenVisibility, removeTokenVisibility as dbRemoveTokenVisibility, getAllTokenVisibility, insertApiLog, getApiLogs, clearApiLogs, setCachedBalances, getCachedBalances, updateCachedBalance, markBalanceTx, clearBalances, deleteCachedChainBalance, saveCachedPubkey, getLatestDeviceSnapshot, getCachedPubkeys, saveReport, getReportsList, getReportById, deleteReport, reportExists, getSwapHistory, getSwapHistoryStats, getSwapHistoryByTxid, getBip85Seeds, saveBip85Seed, deleteBip85Seed, clearCachedPubkeys, getRecentActivityFromLog, dismissActivity, getPioneerServers, addPioneerServerDb, removePioneerServerDb, syncOwnAddressBook, recordOutbound, getAddressBookList, updateAddressBookEntry, deleteAddressBookEntry, getAddressBookHistory, getDeviceLabelMap, getBalancesForOwnSeed, addExternalEntry, matchAddressBook, insertClearSignEvent, getClearSignEvents, insertClearSignObservation, finalizeClearSignObservation, authenticateClearSignObservation, refuseClearSignObservationDefinition, getClearSignCoverageSummary, getClearSignAuditJobs, enqueueClearSignAuditDemand, getSignedTxReview, setDeviceMasterFingerprint, getDeviceSnapshotById, getAllDeviceSnapshots, saveImportedWatchOnlyWallet, setImportedWalletVerified } from "./db"
 import { lookupEvmTx, recordSignedEvmTx, txDetails, walletBook } from "./signed-tx-review"
 import { getCentralAssetAuditHistory, getCentralClearSignStatus, getCentralContractAudit, submitCentralAssetReview, submitCentralContractReview } from './clearsign-central-client'
 import { buildCentralAssetReview, buildCentralContractReview } from './clearsign-central-review'
@@ -348,7 +351,7 @@ import { DEFAULT_CLEARSIGN_SERVICE_URL } from "./solana-certified-registry"
 import { createRpcAltFetcher } from "./solana-alt"
 import { createProviderKeySession } from "./clearsign-provider-session"
 import { buildProviderBundle, buildStudioEvmSchema, parseProviderBundle, providerBundleFileName, uniqueFilePath } from "./clearsign-studio-evm"
-import { getTokenMetadata, broadcastEvmTx, verifyEvmSigner, ethCall, ethGetCode, getEvmGasPrice, getEvmNonce, getEvmBalance, waitForTxReceipt } from "./evm-rpc"
+import { getTokenMetadata, broadcastEvmTx, verifyEvmSigner, ethCall, ethGetCode, hasContractCode, getEvmGasPrice, getEvmNonce, getEvmBalance, waitForTxReceipt } from "./evm-rpc"
 import { evmSourceForChain, pioneerEvmRpc } from "./pioneer-evm"
 import { SafeMultisigService, inspectBaseSafe } from './safe-multisig'
 import { VaultImportService } from './vault-import'
@@ -2994,7 +2997,12 @@ async function getChainBalance(params: { chainId: string; forceRefresh?: boolean
 			// force only when Pioneer confirmed (non-degraded) the value — then a
 			// genuine zero / unpriced balance must overwrite the stale cache row
 			// (same rule as getBalances' confirmedChainIds).
-			updateCachedBalance(deviceId, result, pioneerConfirmed)
+			// Still older than this chain's last tx (read started too soon after
+			// it): say so instead of "confirmed" (H3).
+			if (updateCachedBalance(deviceId, result, pioneerConfirmed, balanceReadStartedAt) && result.syncState === 'confirmed') {
+				result.syncState = 'stale'
+				result.txPending = true
+			}
 			rectifyWallet(deviceId, [result])
 		}
 	} catch { /* never block on cache failure */ }
@@ -3045,15 +3053,33 @@ const postTxBalances = createPostTxBalanceRefresh({
 		return backgroundDeviceRead.run(true, () => getChainBalance(params, isCurrent))
 	},
 	onError: (chainId, error) => console.warn(`[post-tx-balance] ${chainId}:`, error instanceof Error ? error.message : error),
+	onTx: (scope, chainId) => {
+		// The cached figure predates this tx until a confirmed read replaces it,
+		// in this session and after a relaunch (audit v4 H3).
+		if (!engine.isPassphraseWallet) markBalanceTx(scope.deviceId, chainId)
+		if (getAllChains().find(c => c.id === chainId)?.chainFamily === 'evm') {
+			evmAddresses.markChainStale(chainId)
+			try { rpc.send['evm-addresses-update'](evmAddresses.toAddressSet()) } catch { /* webview not ready */ }
+		}
+		try { rpc.send['balance-stale']({ chainId }) } catch { /* webview not ready */ }
+	},
 })
 
 // Audit v4 H2: the broadcast refresh covers only the source chain. A settled
 // swap pays out on another chain (or refunds to the source) — refresh that too.
+// A swap that settles before the wallet is ready (tracker resumed at launch)
+// waits here for its wallet instead of being dropped (audit v4 H3).
+const pendingSettlementRefreshes: any[] = []
 function refreshSwapSettlementBalance(swap: any): void {
 	const scope = currentBalanceRefreshScope()
-	if (!scope || (swap?.walletId && swap.walletId !== scope.walletId)) return
+	if (!scope) { if (swap?.walletId && pendingSettlementRefreshes.length < 50) pendingSettlementRefreshes.push(swap); return }
+	if (swap?.walletId && swap.walletId !== scope.walletId) return
 	const chainId = swap?.status === 'refunded' ? swap.fromChainId : swap?.status === 'completed' ? swap.toChainId : undefined
 	if (chainId) postTxBalances.request(chainId, swap.outboundTxid)
+}
+function flushPendingSettlementRefreshes(): void {
+	if (!currentBalanceRefreshScope()) return
+	for (const swap of pendingSettlementRefreshes.splice(0)) refreshSwapSettlementBalance(swap)
 }
 
 function isWalletWatchChainEnabled(chainId: string): boolean {
@@ -5942,6 +5968,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			// ── Pioneer integration (batch portfolio API) ────────────────
 			getBalances: async ({ forceRefresh = false, swapDestCaips = [] }: { forceRefresh?: boolean; swapDestCaips?: string[] } = {}) => {
 				if (!engine.wallet) throw new Error('No device connected')
+				const readStartedAt = Date.now()
 				const requestServer = getPioneerApiBase()
 				const requestEpoch = activitySessionEpoch
 				const assertServerCurrent = () => {
@@ -6958,7 +6985,14 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					try {
 						const deviceId = engine.getDeviceState().deviceId || 'unknown'
 						if (results.length > 0 && !engine.isPassphraseWallet) {
-							setCachedBalances(deviceId, results.filter(r => (r.chainId !== 'bitcoin' && !utxoChains.some(c => c.id === r.chainId)) || confirmedChainIds.has(r.chainId)), confirmedChainIds)
+							// A chain Pioneer itself reports failed or stale is not confirmed for
+							// the cache: a forced write would clear its pending tx mark (H3).
+							const faulted = portfolioFaultChainIds(portfolioMeta, caip => {
+								const prefix = (caip.split('/')[0] || '').toLowerCase()
+								return networkToChain.get(prefix) ?? allChains.find(c => c.networkId?.toLowerCase() === prefix)?.id
+							})
+							const cacheConfirmed = new Set([...confirmedChainIds].filter(id => !faulted.has(id)))
+							setCachedBalances(deviceId, results.filter(r => (r.chainId !== 'bitcoin' && !utxoChains.some(c => c.id === r.chainId)) || cacheConfirmed.has(r.chainId)), cacheConfirmed, readStartedAt)
 							rectifyWallet(deviceId, results.filter(r => r.chainId !== 'bitcoin' || btcConfirmed))
 						}
 					} catch { /* never block on cache failure */ }
@@ -7282,7 +7316,9 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				return { unsignedTx: result.unsignedTx, fee: result.fee }
 			},
 
-			broadcastTx: async (params) => {
+			// The same signed tx sent again while its broadcast is in flight joins it:
+			// one broadcast, one activity row, one address-book entry (V12).
+			broadcastTx: (params) => broadcastOnce(JSON.stringify(params.signedTx ?? null), async () => {
 				const sessionEpoch = activitySessionEpoch // the wallet session this send belongs to
 				requireOnline('broadcast transaction')
 				if (!params.signedTx) throw new Error('Missing signedTx payload')
@@ -7367,7 +7403,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				}
 
 				return { ...result, addressBookEntryId: abEntry?.entryId, recipientUnsaved: abEntry?.unsaved }
-			},
+			}),
 
 			getMarketData: async (params) => {
 				requireOnline('market data')
@@ -7395,12 +7431,25 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						PIONEER_TIMEOUT_MS, 'GetFeeRateByNetwork')
 					return { feeRate: resp?.data, unit: 'sat/byte' }
 				} else if (chain.chainFamily === 'evm') {
+					// Same quote source buildEvmTx uses: custom chains ask their own RPC.
+					const rpcUrl = chain.id.startsWith('evm-custom-') ? getEvmRpcSource(chain) : undefined
+					if (rpcUrl) return { gasPrice: String(Number(await getEvmGasPrice(rpcUrl)) / 1e9), unit: 'gwei' }
 					const pioneer = await getPioneer()
 					const resp = await withTimeout(pioneer.GetGasPriceByNetwork({ networkId: chain.networkId }), PIONEER_TIMEOUT_MS, 'GetGasPriceByNetwork')
 					return { gasPrice: resp?.data, unit: 'gwei' }
 				} else {
 					return { fee: 'fixed', note: 'Cosmos/XRP chains use fixed fees' }
 				}
+			},
+
+			// Send form: is this recipient a contract (not a plain wallet)?
+			isEvmContract: async (params) => {
+				requireOnline('contract check')
+				const chain = getAllChains().find(c => c.id === params.chainId)
+				if (!chain || chain.chainFamily !== 'evm') throw new Error(`Not an EVM chain: ${params.chainId}`)
+				const source = getEvmRpcSource(chain)
+				if (!source) throw new Error(`No RPC configured for ${chain.coin}`)
+				return hasContractCode(await ethGetCode(source, params.address))
 			},
 
 			// ── DeFi positions (Zerion) ───────────────────────────────
@@ -8970,8 +9019,13 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				if (!scope) return null
 				// The scope names the hidden wallet's address; a Safe co-signer must not tie it to disk.
 				if (params.cosigner && engine.isPassphraseWallet) throw new Error('Co-signers cannot be saved while a passphrase wallet is open')
-				const chain = getAllChains().find(c => c.networkId === params.networkId)
+				const sameNetwork = getAllChains().filter(c => c.networkId === params.networkId)
+				const chain = sameNetwork[0]
 				if (!chain) { console.warn('[addressbook] addAddressBook: unknown networkId', params.networkId); return null }
+				// Same refusals as the Add address dialog: bad format/checksum, .eth, zero/burn, own wallet.
+				// zcash and zcash-shielded share a networkId: a u1/zs1 contact is checked as shielded.
+				const contactCheck = validateContactOnNetwork(params.address, sameNetwork, matchAddressBook(chain.networkId, params.address, chain.chainFamily))
+				if (!contactCheck.valid) throw new Error(`Address not saved (${contactCheck.error}): ${params.address}`)
 				// Stored lowercase, a mistyped mixed-case address would lose its checksum and later pass as an owner.
 				if (params.cosigner && chain.chainFamily === 'evm') {
 					const { ethers } = await import('ethers')
@@ -9608,7 +9662,8 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					toCaip,
 					fromAmount: record?.fromAmount ?? live?.fromAmount,
 					expectedOutput: record?.quotedOutput ?? live?.expectedOutput,
-					payouts: live?.payouts,
+					payouts: live?.payouts ?? record?.payouts,
+					minimumOutput: record?.minimumOutput ?? live?.minimumOutput,
 					receivedOutput: live?.receivedOutput ?? record?.receivedOutput,
 					memo: record?.memo ?? live?.memo,
 					inboundAddress: record?.inboundAddress ?? live?.inboundAddress,
@@ -9790,8 +9845,10 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				console.log(`[activity] Scanned ${chain.symbol}${engine.isPassphraseWallet ? ' (hidden session, RAM only)' : ''}: ${txs} txs, ${added} new, ${updated} updated`)
 				return { count: added }
 			},
-			dismissActivity: async (_params) => {
-				// No-op: api_log entries are audit records, not dismissible
+			dismissActivity: async (params) => {
+				// Only an unsent signature is hidden; the api_log row stays for the audit log.
+				const scope = engine.isPassphraseWallet ? null : getWalletDbScope()
+				if (scope && dismissActivity(params.id, scope.deviceId, scope.walletId)) notifyActivityChanged()
 			},
 			clearRecentActivity: async () => {
 				// No-op: api_log entries are audit records
@@ -9831,6 +9888,9 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				if (missingChains.length > 0) {
 					staleReasons.push(`missing_chains:${missingChains.map(c => c.id).join(',')}`)
 				}
+				// Broadcast or swap settlement after the cached row (audit v4 H3).
+				const txAfterCache = result.balances.filter(b => b.syncState === 'stale').map(b => b.chainId)
+				if (txAfterCache.length > 0) staleReasons.push(`tx_after_cache:${txAfterCache.join(',')}`)
 				console.log(`[cache-health] ${result.balances.length} cached chains, ${supportedChains.length} supported, ${missingChains.length} missing`)
 
 				// Missing BTC xpub balances: BTC has a cached aggregate but no per-xpub breakdown
@@ -11489,6 +11549,7 @@ engine.on('state-change', (state) => {
 engine.on('wallet-scope-ready', ({ deviceId, seedAddress }) => {
 	console.log(`[Vault] Wallet scope ready on ${deviceId}: ${seedAddress?.slice(0, 10)}...`)
 	flushPendingScopedApiLogs()
+	flushPendingSettlementRefreshes()
 	bootstrapActiveWalletWatches()
 })
 // Seed changed — different mnemonic loaded on the same hardware.

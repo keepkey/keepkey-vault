@@ -89,5 +89,6 @@
   "showFiltered": "Hiện {{count}} token đã lọc",
   "invalidAddress": "Địa chỉ không hợp lệ",
   "defiSymbol": "Ký hiệu",
-  "multisig": "Đa chữ ký"
+  "multisig": "Đa chữ ký",
+  "cached": "Đã lưu đệm"
 }

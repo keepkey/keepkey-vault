@@ -3,6 +3,7 @@ import { buildEvmTx } from '../src/bun/txbuilder/evm'
 import { CHAINS } from '../src/shared/chains'
 import { tokenMaxSpendableBaseUnits } from '../src/shared/max-send'
 import { validateAddress } from '../src/shared/address-validation'
+import { GAS_PRICE_ERROR } from '../src/shared/gas-price-errors'
 
 const ethereum = CHAINS.find(c => c.id === 'ethereum')!
 const arbitrum = CHAINS.find(c => c.id === 'arbitrum')!
@@ -68,9 +69,27 @@ describe('EVM max send', () => {
   })
 
   test('slow preset still discounts above a configured chain minimum', async () => {
-    const pioneer = { ...pioneerWithBalance('1'), GetGasPriceByNetwork: async () => ({ data: { average: '2' } }) }
-    const result = await buildEvmTx(pioneer, ethereum, { to: toAddress, amount: '0.1', fromAddress, feeLevel: 1 })
-    expect(BigInt(result.gasPrice)).toBe(1_600_000_000n)
+    const polygon = CHAINS.find(c => c.id === 'polygon')!
+    const pioneer = { ...pioneerWithBalance('1'), GetGasPriceByNetwork: async () => ({ data: { average: '40' } }) }
+    const result = await buildEvmTx(pioneer, polygon, { to: toAddress, amount: '0.1', fromAddress, feeLevel: 1 })
+    expect(BigInt(result.gasPrice)).toBe(32_000_000_000n)
+  })
+
+  // H6: Ethereum signs the live network price, not a 1 gwei floor.
+  test('ethereum mainnet keeps a sub-gwei quote for every preset', async () => {
+    const pioneer = { ...pioneerWithBalance('1'), GetGasPriceByNetwork: async () => ({ data: { slow: '0.075', average: '0.075', fastest: '0.075' } }) }
+    const send = (feeLevel: number) => buildEvmTx(pioneer, ethereum, { to: toAddress, amount: '0.1', fromAddress, feeLevel })
+    expect((await send(3)).gasPrice).toBe('0x047868c0') // 75,000,000 wei
+    expect(BigInt((await send(1)).gasPrice)).toBe(75_000_000n) // never under the quote
+    expect(BigInt((await send(10)).gasPrice)).toBe(112_500_000n)
+  })
+
+  // H6: the custom bound and the default preset agree on the same quote.
+  test('ethereum custom price is checked against the same live quote the preset signs', async () => {
+    const pioneer = { ...pioneerWithBalance('1'), GetGasPriceByNetwork: async () => ({ data: { average: '0.075' } }) }
+    const ok = await buildEvmTx(pioneer, ethereum, { to: toAddress, amount: '0.1', fromAddress, gasPriceGwei: '0.1' })
+    expect(BigInt(ok.gasPrice)).toBe(100_000_000n)
+    await expect(buildEvmTx(pioneer, ethereum, { to: toAddress, amount: '0.1', fromAddress, gasPriceGwei: '1' })).rejects.toThrow(GAS_PRICE_ERROR.tooHigh)
   })
 
   test('rejects native max sends that cannot cover the rounded gas reserve', async () => {
@@ -197,5 +216,30 @@ describe('EVM address checksum (EIP-55)', () => {
       .rejects.toThrow('checksum mismatch')
     const ok = await buildEvmTx(pioneerWithBalance('1'), base, { to: vectors[4], amount: '0.001', fromAddress })
     expect(ok.to).toBe(vectors[4])
+  })
+})
+
+describe('custom gas price without a network quote (H2)', () => {
+  const base = CHAINS.find(c => c.id === 'base')!
+  // The 2 gwei fallback is ~300x Base's real price, so it cannot bound anything.
+  test('refuses a custom price when the quote lookup failed', async () => {
+    const pioneer = { ...pioneerWithBalance('1'), GetGasPriceByNetwork: async () => { throw new Error('offline') } }
+    await expect(buildEvmTx(pioneer, base, { to: toAddress, amount: '0.001', fromAddress, gasPriceGwei: '20' })).rejects.toThrow(GAS_PRICE_ERROR.quoteUnavailable)
+  })
+  test('refuses a custom price when the quote has no price field', async () => {
+    const pioneer = { ...pioneerWithBalance('1'), GetGasPriceByNetwork: async () => ({ data: {} }) }
+    await expect(buildEvmTx(pioneer, base, { to: toAddress, amount: '0.001', fromAddress, gasPriceGwei: '20' })).rejects.toThrow(GAS_PRICE_ERROR.quoteUnavailable)
+  })
+  test('exactly 10x the live quote is refused', async () => {
+    const pioneer = { ...pioneerWithBalance('1'), GetGasPriceByNetwork: async () => ({ data: { average: '2' } }) }
+    await expect(buildEvmTx(pioneer, base, { to: toAddress, amount: '0.001', fromAddress, gasPriceGwei: '20' })).rejects.toThrow(GAS_PRICE_ERROR.tooHigh)
+  })
+})
+
+describe('ERC-20 recipient is the token contract (V7)', () => {
+  test('the builder refuses to send a token to its own contract', async () => {
+    const caip = `eip155:1/erc20:${tokenAddress}`
+    await expect(buildEvmTx(pioneerWithBalance('1'), ethereum, { to: tokenAddress, amount: '1', fromAddress, caip, tokenDecimals: 6, tokenBalance: '5' }))
+      .rejects.toThrow('token contract')
   })
 })

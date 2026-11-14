@@ -28,6 +28,7 @@ import { insertSwapHistory, updateSwapHistoryStatus, getSwapHistory, getSwapHist
 import { recordSwap } from './ledger'
 import { assetData as discoveryAssetData } from '@pioneer-platform/pioneer-discovery'
 import { VAULT_CHAIN_TO_THOR } from '../shared/swap-discovery'
+import { CHAINS } from '../shared/chains'
 import { extractRelayRequestId } from '../shared/relay-utils'
 import { isRelaySolverDeposit } from './swap-route-selection'
 import { classifySwapOutcome, type MidgardActionsResponse } from './swap/classify'
@@ -43,9 +44,11 @@ import { classifyNearIntentsStatus } from '../shared/near-intents-status'
  *
  *  Falls back to a CAIP-derived hint for assets pioneer-discovery doesn't
  *  know — better than crashing or silently writing empty strings. */
-function resolveDisplayFromCaip(caip: string): { symbol: string; name: string; asset: string } {
+export function resolveDisplayFromCaip(caip: string): { symbol: string; name: string; asset: string } {
   const entry = (discoveryAssetData as Record<string, { symbol?: string; name?: string; chainId?: string }>)[caip]
-  const symbol = entry?.symbol || caip.split('/').pop()?.split(':').pop()?.slice(0, 12).toUpperCase() || 'UNKNOWN'
+  // A built-in chain's native coin uses the chain's symbol: discovery calls Base's ETH "BASE" (V16).
+  const native = /\/slip44:/.test(caip) ? CHAINS.find(c => c.caip.toLowerCase() === caip.toLowerCase()) : undefined
+  const symbol = native?.symbol || entry?.symbol || caip.split('/').pop()?.split(':').pop()?.slice(0, 12).toUpperCase() || 'UNKNOWN'
   const name = entry?.name || symbol
   // THORChain-style display string (CHAIN.SYMBOL[-CONTRACT]). Used only for
   // log lines + history rows; vault never parses this back to identify.
@@ -199,6 +202,7 @@ function rehydrateActiveSwaps(deviceId?: string, walletId?: string): void {
           expectedOutput: r.quotedOutput,
           minimumOutput: r.minimumOutput,
           receivedOutput: r.receivedOutput,
+          payouts: r.payouts,
           memo: r.memo,
           inboundAddress: r.inboundAddress,
           router: r.router,
@@ -710,6 +714,7 @@ function readSwapFromDb(txid: string, deviceId?: string, walletId?: string): Pen
     expectedOutput: r.quotedOutput,
     minimumOutput: r.minimumOutput,
     receivedOutput: r.receivedOutput,
+    payouts: r.payouts,
     memo: r.memo, inboundAddress: r.inboundAddress, router: r.router,
     integration: r.integration, swapper: r.swapper,
     status: r.status, confirmations: inferConfirmationsFromStatus(r.status),
@@ -1026,6 +1031,7 @@ export async function refreshSwap(txid: string, deviceId?: string, walletId?: st
           deviceId: swap.deviceId, walletId: swap.walletId,
           outboundTxid: swap.outboundTxid,
           receivedOutput: swap.status === 'completed' ? swap.receivedOutput : undefined,
+          payouts: swap.payouts,
           outboundChainId: swap.outboundChainId,
           refundReason: swap.refundReason,
           error: swap.error,
@@ -1089,7 +1095,7 @@ async function applyThornodeSettlement(swap: PendingSwap): Promise<void> {
   swapLog(`${TAG} THORNode settled ${swap.txid.slice(0, 10)}... outTxid=${swap.outboundTxid || 'native'}`)
   if (!noPersistSwaps.has(swap.txid)) updateSwapHistoryStatus(swap.txid, 'completed', {
     deviceId: swap.deviceId, walletId: swap.walletId, outboundTxid: swap.outboundTxid,
-    receivedOutput: swap.receivedOutput, completedAt: swap.completedAt,
+    receivedOutput: swap.receivedOutput, payouts: swap.payouts, completedAt: swap.completedAt,
   })
   pushUpdate(swap)
   pushComplete(swap)

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { assessSwapRisk, thorMemoMinimum } from '../src/shared/swap-risk'
+import { assessSwapRisk, thorMemoDestination, thorMemoMinimum } from '../src/shared/swap-risk'
 
 const assess = (value: number, expected = 99, minimum = 97) => assessSwapRisk({ inputAmount: 100, expectedAmount: expected, minimumAmount: minimum, fromPriceUsd: value / 100, toPriceUsd: 0, sameAssetUnits: true })
 
@@ -41,5 +41,18 @@ describe('trade value policy', () => {
     expect(thorMemoMinimum('=:ETH.ETH:dest:NaN')).toBeUndefined()
     expect(thorMemoMinimum('cf:swap')).toBeUndefined()
     expect(thorMemoMinimum('=:ETH.ETH:dest:1e8:keep:30:aggregator')).toBeUndefined()
+  })
+})
+
+describe('thorMemoDestination (who a THOR/Maya swap memo pays)', () => {
+  test('reads the destination of every swap memo spelling, including aggregator and refund forms', () => {
+    expect(thorMemoDestination('=:ETH.ETH:0xAbC:0/1/0:kk:0')).toBe('0xAbC')
+    expect(thorMemoDestination('SWAP:BTC.BTC:bc1qdest')).toBe('bc1qdest')
+    expect(thorMemoDestination('s:e:0xdest:1/3/0:kk:30:0xagg:0xtoken:1')).toBe('0xdest')
+    expect(thorMemoDestination('=:BTC.BTC:bc1qdest/bc1qrefund:0')).toBe('bc1qdest')
+  })
+  test('is undefined for memos that are not swaps', () => {
+    expect(thorMemoDestination('+:BTC.BTC')).toBeUndefined()
+    expect(thorMemoDestination('')).toBeUndefined()
   })
 })

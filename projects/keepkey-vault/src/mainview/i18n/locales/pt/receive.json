@@ -14,6 +14,10 @@
 	"deriveAddress": "Derivar endereço",
 	"account": "Conta {{index}}",
 	"btcAccountType": {
-		"learnMore": "Saiba mais"
-	}
+		"learnMore": "Saiba mais",
+		"recommendation": "Na dúvida? Use Native SegWit (bc1…) — tem as menores taxas e é aceito por todas as carteiras e corretoras modernas.",
+		"hide": "Ocultar",
+		"explainer": "Os três guardam bitcoin real da mesma frase de recuperação — são formatos de endereço diferentes, não carteiras diferentes, e alternar entre eles nunca coloca fundos em risco. Native SegWit (bc1…) é o mais barato para gastar. SegWit (3…) é um meio-termo para serviços antigos que rejeitam endereços bc1. Legacy (1…) é o formato original: funciona em todo lugar, mas cobra as maiores taxas. Se você está recebendo de um serviço que rejeita seu endereço, escolha o formato que ele aceita — suas moedas continuam acessíveis nos três."
+	},
+	"watchOnlyNoAddress": "Nenhum endereço em cache. Conecte seu dispositivo para ver os endereços de recebimento."
 }

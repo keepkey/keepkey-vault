@@ -26,6 +26,16 @@ export function portfolioBalanceSyncState(meta?: {
   return 'confirmed'
 }
 
+/** Chains a portfolio response itself reports failed or stale. Their rows are
+ *  not confirmed for the cache, so they never clear a pending tx mark (H3). */
+export function portfolioFaultChainIds(
+  meta: { failures?: readonly { caip: string }[]; staleChains?: readonly { caip: string }[] } | null | undefined,
+  chainIdForCaip: (caip: string) => string | undefined,
+): Set<string> {
+  const ids = [...(meta?.failures || []), ...(meta?.staleChains || [])].map(f => chainIdForCaip(f.caip))
+  return new Set(ids.filter((id): id is string => !!id))
+}
+
 /** A chain total cannot attest to one account's missing token. Require a
  * matching native owner row and a complete, fresh response for that owner. */
 export function ownerPortfolioConfidence(entries: any[], owner: string, nativeCaip: string, meta?: Parameters<typeof portfolioBalanceSyncState>[0], now = Date.now()) {

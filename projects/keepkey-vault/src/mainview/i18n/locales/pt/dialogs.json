@@ -36,7 +36,11 @@
 		"ofChains": "de {{total}} redes",
 		"online": "online",
 		"selected": "SELECIONADA",
-		"symbolHeader": "Símbolo"
+		"symbolHeader": "Símbolo",
+		"addNetworkTitle": "Adicionar rede",
+		"turnedOffTitle": "Redes desativadas",
+		"turnOn": "Ativar",
+		"customTitle": "Redes EVM personalizadas"
 	},
 	"addToken": {
 		"title": "Adicionar token personalizado",

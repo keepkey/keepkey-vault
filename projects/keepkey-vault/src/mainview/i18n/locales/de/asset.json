@@ -89,5 +89,6 @@
   "showFiltered": "{{count}} gefilterten Token anzeigen",
   "invalidAddress": "Ungültige Adresse",
   "defiNetwork": "Netzwerk",
-  "multisig": "Multisig"
+  "multisig": "Multisig",
+  "cached": "Zwischengespeichert"
 }

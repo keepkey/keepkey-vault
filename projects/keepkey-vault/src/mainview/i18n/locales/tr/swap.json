@@ -205,5 +205,14 @@
 	"deviceBlindSignCaveat": "Kör imzalama, KeepKey kilitlenene veya bağlantısı kesilene kadar yalnızca bu takas için değil, onu kullanan tüm uygulamalar için açık kalır. Açıkken bu uygulama da bu tür işlemlerden önce bu ekranı göstermeyi bırakır. Cihaz onay vermenizi ve PIN kodunuzu yeniden girmenizi ister.",
 	"solanaOutflowDrain": "Uyarı: Bu, cüzdanınızı boşaltır. Amacınız bu değilse imzalamayın.",
 	"solanaOutflowCaveat": "Bu bilgisayardan bir Solana düğümüyle simüle edildi. KeepKey bu değerleri doğrulayamaz.",
-	"deviceBlindSignEnable": "Kör imzalamayı aç"
+	"deviceBlindSignEnable": "Kör imzalamayı aç",
+	"reviewRecipient": "Alıcı",
+	"customRecipientNotKeepKey": "Özel alıcı — KeepKey'iniz değil",
+	"customAddressOwn": "Bu, kendi KeepKey adresiniz",
+	"relayDepositRecipient": "Relay emri {{address}} adresine ödeme yapar. KeepKey'iniz yalnızca yatırma işlemini imzalar; ödemeyi ardından Relay yapar.",
+	"relayRecipientMismatchButton": "Relay emri başka bir adrese ödüyor",
+	"relayRecipientMismatch": "Relay emri gösterilen alıcıya ödeme yapmıyor. Devam etmeyin — yeni bir teklif alın.",
+	"highSlippageConfirmButton": "Yüksek kaymayı onaylayın",
+	"highSlippageConfirmRequired": "İmzalamadan önce yüksek kayma toleransını onaylayın.",
+	"highSlippageConfirm": "%{{pct}} kayma toleransını kabul ediyorum: teklif edilenden %{{pct}} daha az alabilirim."
 }

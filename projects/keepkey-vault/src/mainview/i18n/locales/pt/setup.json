@@ -10,7 +10,11 @@
 		"initLabel": "Nomeie seu dispositivo",
 		"complete": "Configuração concluída!",
 		"verifySeed": "Verificar sua frase de recuperação",
-		"securityTips": "Dicas de segurança"
+		"securityTips": "Dicas de segurança",
+		"updateDone": "Atualização concluída",
+		"createBriefing": "Antes de criar uma carteira",
+		"secRandomness": "Verificar a aleatoriedade do dispositivo",
+		"secDice": "Adicionar seus próprios lançamentos de dado"
 	},
 	"visibleSteps": {
 		"bootloader": "Bootloader",
@@ -65,7 +69,12 @@
 		"bootloaderDetected": "Modo Bootloader detectado",
 		"deviceReadyForUpdate": "Seu KeepKey está no modo bootloader e pronto para atualização.",
 		"updateBootloaderTo": "Atualizar Bootloader para v{{version}}",
-		"doNotHoldButton": "NÃO mantenha o botão pressionado ao reconectar. Apenas conecte normalmente. Manter o botão pressionado colocará o dispositivo de volta no modo bootloader."
+		"doNotHoldButton": "NÃO mantenha o botão pressionado ao reconectar. Apenas conecte normalmente. Manter o botão pressionado colocará o dispositivo de volta no modo bootloader.",
+		"followDeviceTitle": "Siga as instruções na sua KeepKey",
+		"followDeviceBody": "Sua KeepKey conclui a atualização sozinha e depois a tela pede para você desconectá-la e conectá-la novamente. Faça isso quando ela pedir, não antes: desconectar durante a atualização pode deixá-la inutilizável.",
+		"reconnectNoButton": "Ao conectá-la novamente, não segure o botão: isso a coloca de volta no modo bootloader.",
+		"manualReconnectIfAsked": "1. Se sua KeepKey estiver pedindo para ser reconectada, desconecte-a",
+		"keepPluggedUntilAsked": "Mantenha sua KeepKey conectada até a tela pedir para desconectá-la. Desconectar antes disso pode deixá-la inutilizável."
 	},
 	"firmware": {
 		"title": "Atualização de Firmware",
@@ -138,7 +147,14 @@
 			"unknownBody": "No modo bootloader, não é possível identificar o firmware instalado. Instalar o firmware {{variant}} pode apagar todas as chaves e configurações, por exemplo ao trocar de variante ou substituir firmware não oficial ou mais recente. Se este KeepKey contém uma carteira, tenha a frase de recuperação em mãos. Um KeepKey novo não tem carteira a perder.",
 			"noFirmwareBody": "Este KeepKey não tem firmware instalado, por exemplo após uma atualização interrompida. Se continha uma carteira, instalar firmware a apagará e será preciso restaurá-la com a frase de recuperação.",
 			"unsignedBody": "Este KeepKey usa firmware que não é uma versão oficial da KeepKey. Instalar firmware oficial apagará todas as chaves e configurações."
-		}
+		},
+		"whyUpdate": "As atualizações corrigem problemas de segurança e adicionam suporte a novas moedas e recursos.",
+		"skipForNow": "Pular por enquanto",
+		"backupConfirm": "Tenho minha frase de recuperação anotada. Se a atualização for interrompida, a carteira desta KeepKey será apagada e só poderá ser restaurada com ela.",
+		"slowUpdate": "Está demorando? Continue esperando, mantenha sua KeepKey conectada e verifique se a tela pede alguma confirmação. Desconectar antes do fim da atualização apaga a carteira do dispositivo — você precisaria da sua frase de recuperação para restaurá-la.",
+		"skipIsSafe": "Pular é seguro. Nada muda no seu dispositivo — sua carteira, seus fundos e sua frase de recuperação continuam exatamente como estão, e você pode atualizar quando quiser.",
+		"factoryFirmware": "Firmware de fábrica",
+		"installVariantFirmware": "Instalar firmware {{variant}} v{{version}}"
 	},
 	"initChoose": {
 		"title": "Configure sua carteira",
@@ -153,7 +169,15 @@
 		"words": "palavras",
 		"entropyNote": "O padrão base do Bitcoin é de 128 bits (12 palavras). Seeds de 256 bits são suportadas, mas não recomendadas.",
 		"learnMore": "Saiba mais",
-		"howManyWords": "Quantas palavras há na sua seed?"
+		"howManyWords": "Quantas palavras há na sua seed?",
+		"testRngTitle": "Verifique este dispositivo antes (opcional)",
+		"testRngBody": "Execute um teste de integridade do gerador de números aleatórios que vai criar sua semente. Disponível somente antes da configuração.",
+		"testRngAction": "Executar teste",
+		"wipeConfirmTitle": "Este dispositivo já tem uma carteira",
+		"wipeConfirmBody": "Criar uma nova carteira substitui a que está neste dispositivo. Tudo o que a carteira atual contém só pode ser recuperado pela frase de recuperação dela. Se você estava apenas atualizando o firmware, não precisa fazer isso — volte.",
+		"wipeConfirmCancel": "Voltar",
+		"wipeConfirmProceed": "Substituir carteira",
+		"checking": "Lendo sua KeepKey…"
 	},
 	"initProgress": {
 		"creatingWallet": "Criando carteira...",
@@ -168,7 +192,12 @@
 		"writeDownDetail": "Quando sua frase de recuperação aparecer na tela do dispositivo, escreva cada palavra em papel antes de continuar. Guarde a frase em segurança; você precisa dela para recuperar sua carteira.",
 		"deviceLost": "Dispositivo desconectado. Conecte-o novamente para continuar, ou volte para tentar de novo.",
 		"goBack": "Voltar",
-		"backToChoose": "Voltar"
+		"backToChoose": "Voltar",
+		"pinMismatchTitle": "Os dois PINs não coincidem",
+		"createCancelledTitle": "A configuração foi interrompida no dispositivo",
+		"pinMismatchDetail": "Você digita o novo PIN duas vezes no teclado embaralhado. A segunda digitação é proposital: ela prova que você leu a cifra corretamente, para que você não fique preso a um PIN que nunca quis. As duas digitações saíram diferentes, então nada foi salvo — nem PIN, nem carteira.",
+		"createCancelledDetail": "O dispositivo informou que a ação foi cancelada antes do fim da configuração. Nada foi salvo — nem PIN, nem carteira.",
+		"tryPinAgain": "Tentar novamente"
 	},
 	"initLabel": {
 		"walletCreated": "Carteira criada!",
@@ -176,7 +205,8 @@
 		"giveAName": "Dê ao seu KeepKey um nome amigável para identificá-lo facilmente",
 		"placeholder": "Meu KeepKey",
 		"setDeviceName": "Definir nome do dispositivo",
-		"skipForNow": "Pular por agora"
+		"skipForNow": "Pular por agora",
+		"writeDownReminder": "Confirme que sua frase de recuperação está anotada em papel antes de continuar — essas palavras não serão mostradas novamente."
 	},
 	"complete": {
 		"walletCreated": "Carteira criada!",
@@ -236,7 +266,10 @@
 			},
 			"hiddenWallets": {
 				"title": "Carteiras ocultas (avançado)",
-				"body": "A passphrase cria uma carteira oculta separada a partir da mesma seed. Se ativada, você DEVE lembrá-la: uma passphrase errada abre outra carteira vazia, não um erro."
+				"body": "A passphrase cria uma carteira oculta separada a partir da mesma seed. Se ativada, você DEVE lembrá-la: uma passphrase errada abre outra carteira vazia, não um erro.",
+				"toggleLabel": "Ativar proteção por passphrase",
+				"settingsHint": "Você pode ativar ou desativar isso a qualquer momento nas Configurações.",
+				"gotIt": "Entendi"
 			}
 		},
 		"actions": {
@@ -252,14 +285,63 @@
 		}
 	},
 	"updateDone": {
-		"continue": "Continuar"
+		"continue": "Continuar",
+		"title": "Firmware atualizado",
+		"reassure": "A atualização terminou e sua carteira continua na sua KeepKey — você não precisa restaurar nada. Uma atualização só preserva a frase de recuperação quando é concluída, por isso tenha sempre sua frase de recuperação anotada antes de atualizar e nunca desconecte sua KeepKey durante uma atualização.",
+		"empty": "Sua KeepKey não tem nenhuma carteira. Se ela tinha uma antes desta atualização, restaure-a com sua frase de recuperação."
 	},
 	"coinMode": {
-		"change": "Alterar"
+		"change": "Alterar",
+		"btcTitle": "Somente Bitcoin",
+		"btcLine1": "Somente Bitcoin",
+		"btcLine2": "Código menor, superfície de ataque menor",
+		"btcLine3": "Menos partes móveis",
+		"multiTitle": "Multi-chain",
+		"multiLine1": "Bitcoin, Ethereum, Solana e muito mais",
+		"multiLine2": "Trocas e dapps",
+		"pageTitle": "Escolha o firmware da sua KeepKey",
+		"pageSubtitle": "Ele define quais moedas esta KeepKey pode usar.",
+		"unknownInstalled": "O KeepKey Desktop não consegue identificar qual firmware está nesta KeepKey. Escolha o que você quer instalar.",
+		"pageWarning": "Sem volta: esta KeepKey só vai guardar Bitcoin. Voltar para Multi-chain significa limpá-la e restaurar a partir da sua frase de recuperação.",
+		"pageExistingWallet": "Suas outras moedas continuam seguras na sua frase de recuperação.",
+		"chooseFirst": "Escolha Somente Bitcoin ou Multi-chain",
+		"continueWith": "Continuar com {{variant}}",
+		"installingBtc": "Firmware somente Bitcoin",
+		"installingMulti": "Firmware multi-chain",
+		"choose": "Escolher",
+		"goBitcoinOnly": "Mudar para somente Bitcoin"
 	},
 	"security": {
 		"dice": {
-			"can": "Você insere {{rollCount}} lançamentos com o botão do dispositivo; eles nunca passam por este computador."
+			"can": "Você insere {{rollCount}} lançamentos com o botão do dispositivo; eles nunca passam por este computador.",
+			"title": "Adicionar seus próprios lançamentos de dado",
+			"lead": "Jogue um dado físico e digite os resultados no próprio dispositivo. Eles são misturados à semente junto com a aleatoriedade do próprio dispositivo, então a carteira não depende só do gerador.",
+			"can2": "Nem um gerador defeituoso consegue, sozinho, tornar a semente adivinhável.",
+			"cannot": "Leva alguns minutos. Se pular, o dispositivo fornece toda a aleatoriedade.",
+			"action": "Usar meus dados",
+			"skip": "Pular — somente aleatoriedade do dispositivo"
+		},
+		"randomness": {
+			"title": "Verificar a aleatoriedade do dispositivo",
+			"lead": "Toda carteira começa com aleatoriedade. Se o gerador estiver com defeito, todas as chaves que ele cria podem ser previstas. Esta auditoria verifica se ele se comporta como aleatoriedade real — antes de você confiar seu dinheiro a ele.",
+			"can": "Detecta um gerador travado, repetitivo ou visivelmente enviesado.",
+			"cannot": "Não prova que a aleatoriedade é imprevisível — nenhum teste de saída consegue.",
+			"more": "Para mais garantia, adicione seus próprios dados na próxima etapa.",
+			"action": "Executar a auditoria",
+			"skip": "Pular — confiar no dispositivo",
+			"failedTitle": "Não use este dispositivo",
+			"failedLead": "A auditoria de aleatoriedade encontrou uma saída que este dispositivo nunca deveria produzir. Todas as chaves que ele gera podem ser previsíveis, por isso a criação de carteira está bloqueada. Execute a auditoria novamente para confirmar e entre em contato com support@keepkey.com se ela falhar de novo.",
+			"rerun": "Executar a auditoria novamente"
 		}
+	},
+	"btcOnlyLock": {
+		"title": "Ainda há uma carteira somente Bitcoin nesta KeepKey",
+		"hidden": "Esta KeepKey ainda guarda a carteira somente Bitcoin que tinha antes da instalação do firmware multi-chain. O firmware multi-chain mantém essa carteira oculta e bloqueada, então não é possível configurar uma nova carteira por cima dela.",
+		"lastChance": "Esta é sua última chance de recuperá-la deste dispositivo: reinstale o firmware somente Bitcoin e a carteira será desbloqueada novamente.",
+		"wipeMeans": "Limpar e continuar com a configuração multi-chain apaga permanentemente a carteira somente Bitcoin desta KeepKey. Depois disso, a frase de recuperação em papel dela é a única forma de restaurá-la, e manter esse backup seguro é responsabilidade sua.",
+		"acknowledge": "Entendo que a carteira somente Bitcoin será apagada desta KeepKey e tenho a frase de recuperação dela em papel.",
+		"reinstall": "Reinstalar firmware somente Bitcoin",
+		"wiping": "Confirme na sua KeepKey…",
+		"wipe": "Limpar e continuar"
 	}
 }

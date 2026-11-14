@@ -90,5 +90,6 @@
   "invalidAddress": "Ongeldig adres",
   "defiNetwork": "Netwerk",
   "defiSymbol": "Symbool",
-  "multisig": "Multisig"
+  "multisig": "Multisig",
+  "cached": "In cache"
 }

@@ -28,7 +28,7 @@ const card = { bg: "rgba(255,255,255,0.03)", borderRadius: "lg", border: "1px so
  */
 export function CreatePsbtPanel({ deviceId }: { deviceId?: string }) {
   const uiText = useUiTranslation()
-  const { t } = useTranslation('send')
+  const { t, i18n } = useTranslation('send')
 
 	const [info, setInfo] = useState<BtcWatchOnlyAccounts | null>(null)
 	const [account, setAccount] = useState(0)
@@ -61,7 +61,7 @@ export function CreatePsbtPanel({ deviceId }: { deviceId?: string }) {
 	const handleCreate = useCallback(async () => {
 		const a = info?.accounts[account]
 		if (!a) return
-    const canonicalAmount = normalizeAmountInput(amount, getNumberLocale())
+    const canonicalAmount = normalizeAmountInput(amount, getNumberLocale(), i18n.language)
     if (!isMax && (canonicalAmount === null || !Number.isFinite(Number(canonicalAmount)) || Number(canonicalAmount) <= 0)) {
       setError(t('invalidAmount')); return
     }
@@ -81,7 +81,7 @@ export function CreatePsbtPanel({ deviceId }: { deviceId?: string }) {
 		} finally {
 			if (walletEpoch.current === epoch) setBusy(false)
 		}
-	}, [info, account, deviceId, to, amount, isMax, feeLevel, t, uiText])
+	}, [info, account, deviceId, to, amount, isMax, feeLevel, t, i18n.language, uiText])
 
 	// Shared primary/neutral variants (components/ui/ActionButton.tsx, theme.ts button recipe).
 	const goldButton = { size: "sm" as const, ...actionToneProps("primary") }
@@ -123,7 +123,7 @@ export function CreatePsbtPanel({ deviceId }: { deviceId?: string }) {
 					</Text>
 					<Input value={to} onChange={(e) => setTo(e.target.value)} placeholder={uiText("Recipient Bitcoin address (bc1..., 1..., 3...)")} fontFamily="mono" fontSize="xs" disabled={busy} />
 					<Flex gap="2" align="center">
-						<Input value={isMax ? "" : amount} inputMode="decimal" onChange={(e) => setAmount(normalizeAmountInput(e.target.value, getNumberLocale()) ?? e.target.value)} placeholder={isMax ? "Everything in this account, minus the fee" : "Amount in BTC"} fontSize="xs" disabled={busy || isMax} />
+						<Input value={isMax ? "" : amount} inputMode="decimal" onChange={(e) => setAmount(normalizeAmountInput(e.target.value, getNumberLocale(), i18n.language) ?? e.target.value)} placeholder={isMax ? "Everything in this account, minus the fee" : "Amount in BTC"} fontSize="xs" disabled={busy || isMax} />
 						<Box {...pick(isMax)} onClick={() => !busy && setIsMax(!isMax)} whiteSpace="nowrap">{uiText("Send max")}</Box>
 					</Flex>
 					<Flex gap="2" align="center" wrap="wrap">

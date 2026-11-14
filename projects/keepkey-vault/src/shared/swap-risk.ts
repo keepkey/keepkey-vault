@@ -12,6 +12,14 @@ export function thorMemoMinimum(memo: string): number | undefined {
   return Number.isFinite(n) && n >= 0 ? n : undefined
 }
 
+/** Who a simple THOR/Maya swap memo (`=:ASSET:DEST:…`, aggregator forms too)
+ *  pays out to; a `DEST/REFUND` pair names DEST. Undefined for non-swap memos. */
+export function thorMemoDestination(memo: string): string | undefined {
+  const fields = memo.split(':')
+  if (!/^(=|s|swap)$/i.test(fields[0])) return undefined
+  return fields[2]?.split('/')[0] || undefined
+}
+
 export function assessSwapRisk(input: {
   inputAmount: number; expectedAmount: number; minimumAmount: number
   fromPriceUsd: number; toPriceUsd: number; sameAssetUnits: boolean

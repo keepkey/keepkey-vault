@@ -190,6 +190,14 @@ export class EvmAddressManager extends EventEmitter {
     }
   }
 
+  /** A tx touched this chain: every owner's figure now predates it (audit v4 H3). */
+  markChainStale(chainId: string): void {
+    for (const a of this.addresses) {
+      const cb = a.chainBalances?.[chainId]
+      if (cb && cb.syncState !== 'degraded') a.chainBalances = { ...a.chainBalances, [chainId]: { ...cb, syncState: 'stale', confirmedAssetCaips: [] } }
+    }
+  }
+
   /** Reset all address balances to 0 (call before portfolio refresh). */
   resetBalances(chainId?: string, readStartedAt?: number): void {
     for (const a of this.addresses) {

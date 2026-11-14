@@ -205,5 +205,14 @@
 	"deviceBlindSignCaveat": "盲签会保持开启，直到KeepKey锁定或断开连接，并对所有使用它的应用生效，而不仅限于本次兑换。开启期间，此应用也不再在此类交易前显示此页面。设备会要求您确认并重新输入PIN码。",
 	"solanaOutflowDrain": "警告：这将清空您的钱包。除非这正是您的意图，否则请勿签名。",
 	"solanaOutflowCaveat": "通过此计算机连接Solana节点进行模拟。您的KeepKey无法确认这些数值。",
-	"deviceBlindSignEnable": "开启盲签"
+	"deviceBlindSignEnable": "开启盲签",
+	"reviewRecipient": "收款人",
+	"customRecipientNotKeepKey": "自定义收款人 — 不是您的 KeepKey",
+	"customAddressOwn": "这是您自己的 KeepKey 地址",
+	"relayDepositRecipient": "该 Relay 订单将付款至 {{address}}。您的 KeepKey 只签署存入交易；随后由 Relay 付款。",
+	"relayRecipientMismatchButton": "Relay 订单付款至其他地址",
+	"relayRecipientMismatch": "Relay 订单不会付款给显示的收款人。请勿继续——请获取新报价。",
+	"highSlippageConfirmButton": "确认高滑点",
+	"highSlippageConfirmRequired": "签名前请确认较高的滑点容忍度。",
+	"highSlippageConfirm": "我接受 {{pct}}% 的滑点容忍度：我收到的金额可能比报价最多少 {{pct}}%。"
 }

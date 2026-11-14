@@ -8,6 +8,7 @@ import type { BuildTxResult, BroadcastResult, NameInfo, NameQuote } from "../../
 import { rpcRequest } from "../lib/rpc"
 import { Z } from "../lib/z-index"
 import { describeSigningError } from "../lib/signing-errors"
+import { cancelDeviceSigning, signOnDevice } from "../lib/device-signing"
 
 interface NameRegistrationPanelProps {
 	chain: ChainDef
@@ -148,7 +149,7 @@ export function NameRegistrationPanel({ chain, address, availableBalance, watchO
 		setPhase("signing")
 		setSignStart(Date.now())
 		try {
-			const result = await rpcRequest(chain.signMethod as any, buildResult.unsignedTx, 120000)
+			const result = await signOnDevice(chain.signMethod, buildResult.unsignedTx)
 			setSignedTx(result)
 			setPhase("signed")
 		} catch (e: any) {
@@ -368,7 +369,7 @@ export function NameRegistrationPanel({ chain, address, availableBalance, watchO
 						{t("done", { ns: "common" })}
 					</Button>
 				) : phase !== "input" ? (
-					<Button size="sm" variant="ghost" color="kk.textSecondary" px="4" py="2" onClick={resetFlow}>
+					<Button size="sm" variant="ghost" color="kk.textSecondary" px="4" py="2" onClick={phase === "signing" ? cancelDeviceSigning : resetFlow}>
 						{t("cancel", { ns: "common" })}
 					</Button>
 				) : null}

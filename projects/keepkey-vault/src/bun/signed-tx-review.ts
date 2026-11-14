@@ -20,6 +20,13 @@ import { findEvmNameRecord } from './evm-certified-schema'
 /** The broadcast txid: keccak256 of the signed RLP (legacy) or typed envelope. */
 export const evmTxid = (serialized: string) => utils.keccak256(serialized).toLowerCase()
 
+/** The txid a REST signing response will be broadcast under, when Desktop can
+ *  know it (EVM). Logged on the sign row so a later broadcast or scan merges. */
+export function signedTxActivityTxid(path: string, data: any): string | undefined {
+  if (path !== '/eth/sign-transaction' || typeof data?.serialized !== 'string') return undefined
+  try { return evmTxid(data.serialized) } catch { return undefined }
+}
+
 const knownMethod = (d?: CalldataDecodedInfo | null) =>
   d?.method && !/^Unknown \(|^\(runtime signer\)$/.test(d.method) ? d.method : undefined
 

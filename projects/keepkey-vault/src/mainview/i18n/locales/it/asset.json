@@ -93,5 +93,6 @@
   "tokenCount_many": "{{count}} token",
   "showFiltered_many": "Mostra {{count}} token filtrati",
   "hideFiltered_many": "Nascondi {{count}} token filtrati",
-  "multisig": "Multifirma"
+  "multisig": "Multifirma",
+  "cached": "In cache"
 }

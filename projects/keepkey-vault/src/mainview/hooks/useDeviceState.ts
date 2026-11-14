@@ -33,8 +33,8 @@ export function useDeviceState() {
       receivedPush = true
       receive(payload)
     })
+    // A purge carries no device state: it must not end the resync below.
     const unsubscribePurge = onRpcMessage('wallet-data-purged', () => {
-      receivedPush = true
       setSnapshot(previous => ({ ...previous, portfolio: null }))
     })
 
