@@ -78,5 +78,5 @@
 	"recipientContractNote": "Bu adres bir akıllı sözleşme. {{symbol}} alabildiğinden emin olun: işleyemeyen bir sözleşmeye gönderilen fonlar kaybolabilir.",
 	"customGasPriceTooHigh": "Gas fiyatı ağ fiyatının ({{gwei}} gwei) 10 katı veya daha fazlası. Düşürün ya da hazır bir ayar kullanın.",
 	"customGasPriceTooLow": "Gas fiyatı ağın temel ücretinin (~{{gwei}} gwei) altında. İşlem asla onaylanmaz.",
-	"customGasPriceUnavailable": "Ağ gas fiyatı yüklenemedi, bu yüzden özel gas fiyatı kontrol edilemiyor. Tekrar deneyin ya da hazır bir ayar kullanın."
+	"gasPriceUnavailable": "Ağ gas fiyatı yüklenemedi, bu yüzden Desktop ücret tahmin etmeyecek. Birazdan tekrar deneyin."
 }

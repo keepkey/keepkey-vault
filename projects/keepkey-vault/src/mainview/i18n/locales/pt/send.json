@@ -78,7 +78,7 @@
 	"recipientContractNote": "Este endereço é um contrato inteligente. Confirme que ele pode receber {{symbol}}: fundos enviados a um contrato que não sabe tratá-los podem ser perdidos.",
 	"customGasPriceTooHigh": "O preço do gas é 10x ou mais o preço da rede ({{gwei}} gwei). Reduza-o ou use uma predefinição.",
 	"customGasPriceTooLow": "O preço do gas está abaixo da taxa base da rede (~{{gwei}} gwei). A transação nunca seria confirmada.",
-	"customGasPriceUnavailable": "Não foi possível carregar o preço do gas da rede, então um preço personalizado não pode ser verificado. Tente novamente ou use uma predefinição.",
+	"gasPriceUnavailable": "Não foi possível carregar o preço do gas da rede, então o Desktop não vai adivinhar uma taxa. Tente novamente em instantes.",
 	"selfSendTitle": "Este é o seu próprio endereço",
 	"selfSendBody": "Isto envia {{symbol}} desta conta de volta para o mesmo endereço. Nada chega a um lugar novo, e você ainda paga a taxa de rede.",
 	"selfSendConfirm": "Entendi, enviar para meu próprio endereço mesmo assim",

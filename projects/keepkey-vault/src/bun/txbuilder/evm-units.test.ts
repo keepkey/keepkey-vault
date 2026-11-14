@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test'
-import { parseUnits, checkCustomGasPrice } from './evm'
+import { parseUnits, checkCustomGasPrice, buildEvmTx } from './evm'
+import { CHAINS } from '../../shared/chains'
 import { describeGasPriceError, GAS_PRICE_ERROR, networkGasPriceGwei } from '../../shared/gas-price-errors'
 import { hasContractCode } from '../evm-rpc'
 
@@ -44,7 +45,7 @@ describe('networkGasPriceGwei (H2 placeholder)', () => {
   })
   test('the quote-unavailable refusal is translated too', () => {
     const t = (key: string) => key
-    expect(describeGasPriceError(`${GAS_PRICE_ERROR.quoteUnavailable}, so a custom gas price cannot be checked.`, t)).toBe('customGasPriceUnavailable')
+    expect(describeGasPriceError(`${GAS_PRICE_ERROR.quoteUnavailable}, so Desktop will not guess a fee.`, t)).toBe('gasPriceUnavailable')
   })
 })
 
@@ -53,5 +54,25 @@ describe('hasContractCode (V7 contract recipient)', () => {
   test('no code is a wallet', () => { for (const c of ['0x', '0x0', '', '0x00']) expect(hasContractCode(c)).toBe(false) })
   test('an EIP-7702 delegated account is still a wallet', () => {
     expect(hasContractCode('0xef0100' + '63c0c19a282a1b52b07dd5a65b58948a07dae32b')).toBe(false)
+  })
+})
+
+describe('no gas quote, no transaction (H2: the 2 gwei guess is never signed)', () => {
+  const base = CHAINS.find(c => c.id === 'base')!
+  const to = '0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed'
+  // Pioneer is never reached for a nonce or balance: the gas quote fails first.
+  const failing = (gas: () => Promise<any>) => ({
+    GetGasPriceByNetwork: gas,
+    GetNonceByNetwork: async () => { throw new Error('nonce must not be asked for') },
+  })
+  const build = (pioneer: any, extra: Record<string, unknown> = {}) =>
+    buildEvmTx(pioneer, base, { to, amount: '0.001', fromAddress: to, feeLevel: 5, ...extra } as any)
+  test('a preset send refuses when Pioneer has no gas price', async () => {
+    await expect(build(failing(async () => { throw new Error('timeout') }))).rejects.toThrow(GAS_PRICE_ERROR.quoteUnavailable)
+    await expect(build(failing(async () => ({ data: { average: 'NaN' } })))).rejects.toThrow(GAS_PRICE_ERROR.quoteUnavailable)
+    await expect(build(failing(async () => ({ data: '0' })), { feeLevel: 1 })).rejects.toThrow(GAS_PRICE_ERROR.quoteUnavailable)
+  })
+  test('a custom gas price refuses too: there is nothing to bound it with', async () => {
+    await expect(build(failing(async () => { throw new Error('timeout') }), { gasPriceGwei: '20' })).rejects.toThrow(GAS_PRICE_ERROR.quoteUnavailable)
   })
 })

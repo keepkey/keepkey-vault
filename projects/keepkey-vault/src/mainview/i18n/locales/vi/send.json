@@ -78,5 +78,5 @@
 	"recipientContractNote": "Địa chỉ này là một hợp đồng thông minh. Hãy chắc chắn nó nhận được {{symbol}}: tiền gửi đến hợp đồng không xử lý được có thể bị mất.",
 	"customGasPriceTooHigh": "Giá gas gấp 10 lần trở lên so với giá mạng ({{gwei}} gwei). Hãy giảm xuống hoặc dùng mức đặt sẵn.",
 	"customGasPriceTooLow": "Giá gas thấp hơn phí cơ bản của mạng (~{{gwei}} gwei). Giao dịch sẽ không bao giờ được xác nhận.",
-	"customGasPriceUnavailable": "Không tải được giá gas của mạng nên không thể kiểm tra giá gas tùy chỉnh. Hãy thử lại hoặc dùng mức đặt sẵn."
+	"gasPriceUnavailable": "Không tải được giá gas của mạng nên Desktop sẽ không đoán phí. Hãy thử lại sau giây lát."
 }

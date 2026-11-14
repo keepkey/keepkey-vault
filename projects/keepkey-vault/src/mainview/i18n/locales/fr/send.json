@@ -78,5 +78,5 @@
 	"recipientContractNote": "Cette adresse est un contrat intelligent. Vérifiez qu'il peut recevoir des {{symbol}} : les fonds envoyés à un contrat qui ne sait pas les gérer peuvent être perdus.",
 	"customGasPriceTooHigh": "Le prix du gaz est 10 fois ou plus le prix du réseau ({{gwei}} gwei). Baissez-le ou utilisez un préréglage.",
 	"customGasPriceTooLow": "Le prix du gaz est inférieur aux frais de base du réseau (~{{gwei}} gwei). La transaction ne serait jamais confirmée.",
-	"customGasPriceUnavailable": "Le prix du gaz du réseau n'a pas pu être chargé, un prix personnalisé ne peut donc pas être vérifié. Réessayez ou utilisez un préréglage."
+	"gasPriceUnavailable": "Le prix du gaz du réseau n'a pas pu être chargé, Desktop ne devinera donc pas les frais. Réessayez dans un instant."
 }

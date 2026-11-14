@@ -78,5 +78,5 @@
 	"recipientContractNote": "Diese Adresse ist ein Smart Contract. Stelle sicher, dass er {{symbol}} empfangen kann: An einen Vertrag gesendete Mittel, die er nicht verarbeiten kann, können verloren gehen.",
 	"customGasPriceTooHigh": "Der Gaspreis ist das 10-Fache oder mehr des Netzwerkpreises ({{gwei}} gwei). Senke ihn oder nutze eine Voreinstellung.",
 	"customGasPriceTooLow": "Der Gaspreis liegt unter der Basisgebühr des Netzwerks (~{{gwei}} gwei). Die Transaktion würde nie bestätigt.",
-	"customGasPriceUnavailable": "Der Gaspreis des Netzwerks konnte nicht geladen werden, daher kann ein eigener Gaspreis nicht geprüft werden. Versuche es erneut oder nutze eine Voreinstellung."
+	"gasPriceUnavailable": "Der Gaspreis des Netzwerks konnte nicht geladen werden, daher schätzt Desktop keine Gebühr. Versuche es gleich noch einmal."
 }

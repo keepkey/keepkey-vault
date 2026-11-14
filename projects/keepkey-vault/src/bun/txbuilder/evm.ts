@@ -187,16 +187,16 @@ export async function buildEvmTx(
   // 1. Gas price (shared for native + ERC-20)
   console.log(`${TAG} Fetching gas price for ${chain.coin}...`)
   let gasPrice: bigint
-  // The 2 gwei default is a guess, not a quote: it can bound nothing.
-  let quoteIsFallback = false
+  // No quote is never replaced by a guess (a 2 gwei default was ~300x the Base
+  // price): without the network price there is no fee to sign or bound.
+  const noQuote = () => new Error(`${GAS_PRICE_ERROR.quoteUnavailable}, so Desktop will not guess a fee. Try again in a moment.`)
   if (rpcUrl) {
     // Direct RPC path — custom chains bypass Pioneer
     try {
       gasPrice = await getEvmGasPrice(rpcUrl)
     } catch {
-      gasPrice = BigInt(2e9)
-      quoteIsFallback = true
-      console.warn(`${TAG} Direct RPC gas price failed, using 2 gwei default`)
+      console.warn(`${TAG} Direct RPC gas price failed`)
+      throw noQuote()
     }
   } else {
     try {
@@ -213,12 +213,11 @@ export async function buildEvmTx(
       } else {
         gasPriceGwei = parseFloat(data)
       }
-      if (isNaN(gasPriceGwei) || gasPriceGwei <= 0) { gasPriceGwei = 2; quoteIsFallback = true }
+      if (!(gasPriceGwei > 0)) throw new Error(`no gas price in Pioneer response: ${JSON.stringify(data)}`)
       gasPrice = BigInt(Math.round(gasPriceGwei * 1e9))
-    } catch {
-      gasPrice = BigInt(2e9) // fallback 2 gwei
-      quoteIsFallback = true
-      console.warn(`${TAG} Gas price API failed, using 2 gwei default`)
+    } catch (e: any) {
+      console.warn(`${TAG} Gas price API failed: ${e?.message}`)
+      throw noQuote()
     }
   }
 
@@ -248,7 +247,6 @@ export async function buildEvmTx(
   if (gasPriceGweiOverride) {
     const gwei = parseFloat(gasPriceGweiOverride)
     if (isFinite(gwei) && gwei > 0) {
-      if (quoteIsFallback) throw new Error(`${GAS_PRICE_ERROR.quoteUnavailable}, so a custom gas price cannot be checked. Try again, or use a preset.`)
       gasPrice = BigInt(Math.round(gwei * 1e9))
       checkCustomGasPrice(gasPrice, quotedGasPrice)
       console.log(`${TAG} Custom gas price: ${gwei} gwei (${gasPrice} wei)`)

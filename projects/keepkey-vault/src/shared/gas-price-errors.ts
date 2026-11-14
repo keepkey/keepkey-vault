@@ -1,4 +1,4 @@
-/** Custom gas-price bound errors: thrown in English by the EVM builder, shown translated by the UI. */
+/** Gas-price errors: thrown in English by the EVM builder, shown translated by the UI. */
 import { decimalAmount } from './locale'
 export const GAS_PRICE_ERROR = {
   tooHigh: 'Gas price is 10x or more the network price',
@@ -9,7 +9,7 @@ export const GAS_PRICE_ERROR = {
 const KEYS: Record<keyof typeof GAS_PRICE_ERROR, string> = {
   tooHigh: 'customGasPriceTooHigh',
   tooLow: 'customGasPriceTooLow',
-  quoteUnavailable: 'customGasPriceUnavailable',
+  quoteUnavailable: 'gasPriceUnavailable',
 }
 
 /** The send-namespace message for a builder gas-price error, or null for any other error. */

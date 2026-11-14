@@ -78,5 +78,5 @@
 	"recipientContractNote": "이 주소는 스마트 컨트랙트입니다. {{symbol}}을(를) 받을 수 있는지 확인하세요. 처리할 수 없는 컨트랙트로 보낸 자금은 사라질 수 있습니다.",
 	"customGasPriceTooHigh": "가스 가격이 네트워크 가격({{gwei}} gwei)의 10배 이상입니다. 낮추거나 프리셋을 사용하세요.",
 	"customGasPriceTooLow": "가스 가격이 네트워크 기본 수수료(약 {{gwei}} gwei)보다 낮습니다. 트랜잭션이 확인되지 않습니다.",
-	"customGasPriceUnavailable": "네트워크 가스 가격을 불러오지 못해 사용자 지정 가스 가격을 확인할 수 없습니다. 다시 시도하거나 프리셋을 사용하세요."
+	"gasPriceUnavailable": "네트워크 가스 가격을 불러오지 못해 Desktop이 수수료를 추측하지 않습니다. 잠시 후 다시 시도하세요."
 }

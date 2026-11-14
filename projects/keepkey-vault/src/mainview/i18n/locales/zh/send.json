@@ -78,5 +78,5 @@
 	"recipientContractNote": "此地址是智能合约。请确认它可以接收 {{symbol}}：发送到无法处理它的合约的资金可能会丢失。",
 	"customGasPriceTooHigh": "Gas 价格是网络价格（{{gwei}} gwei）的 10 倍或以上。请调低或使用预设。",
 	"customGasPriceTooLow": "Gas 价格低于网络基础费用（约 {{gwei}} gwei）。该交易永远不会被确认。",
-	"customGasPriceUnavailable": "无法加载网络 Gas 价格，因此无法检查自定义 Gas 价格。请重试或使用预设。"
+	"gasPriceUnavailable": "无法加载网络 Gas 价格，因此 Desktop 不会猜测手续费。请稍后重试。"
 }

@@ -78,5 +78,5 @@
 	"recipientContractNote": "Dit adres is een smart contract. Controleer of het {{symbol}} kan ontvangen: tegoeden naar een contract dat ze niet kan verwerken, kunnen verloren gaan.",
 	"customGasPriceTooHigh": "De gasprijs is 10x of meer de netwerkprijs ({{gwei}} gwei). Verlaag hem of gebruik een voorinstelling.",
 	"customGasPriceTooLow": "De gasprijs ligt onder de basisvergoeding van het netwerk (~{{gwei}} gwei). De transactie zou nooit worden bevestigd.",
-	"customGasPriceUnavailable": "De gasprijs van het netwerk kon niet worden geladen, dus een eigen gasprijs kan niet worden gecontroleerd. Probeer het opnieuw of gebruik een voorinstelling."
+	"gasPriceUnavailable": "De gasprijs van het netwerk kon niet worden geladen, dus Desktop gaat geen kosten gokken. Probeer het zo opnieuw."
 }

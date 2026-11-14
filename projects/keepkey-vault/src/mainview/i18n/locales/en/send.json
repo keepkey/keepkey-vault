@@ -92,5 +92,5 @@
 	"recipientContractNote": "This address is a smart contract. Make sure it can receive {{symbol}}: funds sent to a contract that cannot handle them may be lost.",
 	"customGasPriceTooHigh": "Gas price is 10x or more the network price ({{gwei}} gwei). Lower it or use a preset.",
 	"customGasPriceTooLow": "Gas price is below the network base fee (~{{gwei}} gwei). The transaction would never confirm.",
-	"customGasPriceUnavailable": "The network gas price could not be loaded, so a custom gas price cannot be checked. Try again, or use a preset."
+	"gasPriceUnavailable": "The network gas price could not be loaded, so Desktop will not guess a fee. Try again in a moment."
 }
