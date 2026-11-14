@@ -56,5 +56,8 @@
 	"invalidTonAddress": "유효하지 않은 TON 주소",
 	"invalidZcashShieldedAddress": "유효하지 않은 보호 주소 — u1로 시작해야 합니다",
 	"feeCustom": "사용자 지정",
-	"invalidAmount": "천 단위 구분 기호 없이 소수 금액을 입력하세요. 예: 1.5."
+	"invalidAmount": "천 단위 구분 기호 없이 소수 금액을 입력하세요. 예: 1.5.",
+	"tooManyDecimals": "소수 자릿수가 너무 많습니다: {{symbol}}은(는) {{decimals}}자리까지 지원",
+	"feeOverQuarter": "수수료가 보내는 금액의 25%를 넘습니다. 가스 가격을 확인하세요.",
+	"gasPriceAuto": "자동"
 }

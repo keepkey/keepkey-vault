@@ -56,5 +56,8 @@
 	"invalidTonAddress": "Indirizzo TON non valido",
 	"invalidZcashShieldedAddress": "Indirizzo protetto non valido — deve iniziare con u1",
 	"feeCustom": "Personalizzato",
-	"invalidAmount": "Inserisci un importo decimale senza separatori delle migliaia, ad esempio 1,5."
+	"invalidAmount": "Inserisci un importo decimale senza separatori delle migliaia, ad esempio 1,5.",
+	"tooManyDecimals": "Troppi decimali: {{symbol}} ne supporta {{decimals}}",
+	"feeOverQuarter": "La commissione supera il 25% dell'importo inviato. Controlla il prezzo del gas.",
+	"gasPriceAuto": "auto"
 }

@@ -56,5 +56,8 @@
 	"invalidTonAddress": "Ungültige TON-Adresse",
 	"invalidZcashShieldedAddress": "Ungültige geschützte Adresse — muss mit u1 beginnen",
 	"feeCustom": "Eigene",
-	"invalidAmount": "Gib einen Dezimalbetrag ohne Tausendertrennzeichen ein, zum Beispiel 1,5."
+	"invalidAmount": "Gib einen Dezimalbetrag ohne Tausendertrennzeichen ein, zum Beispiel 1,5.",
+	"tooManyDecimals": "Zu viele Nachkommastellen: {{symbol}} unterstützt {{decimals}}",
+	"feeOverQuarter": "Die Gebühr beträgt mehr als 25 % des gesendeten Betrags. Prüfe den Gaspreis.",
+	"gasPriceAuto": "auto"
 }

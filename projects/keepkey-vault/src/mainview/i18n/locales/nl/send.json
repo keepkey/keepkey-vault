@@ -56,5 +56,8 @@
 	"invalidTonAddress": "Ongeldig TON-adres",
 	"invalidZcashShieldedAddress": "Ongeldig beschermd adres — moet beginnen met u1",
 	"feeCustom": "Aangepast",
-	"invalidAmount": "Voer een decimaal bedrag in zonder scheidingstekens voor duizendtallen, bijvoorbeeld 1,5."
+	"invalidAmount": "Voer een decimaal bedrag in zonder scheidingstekens voor duizendtallen, bijvoorbeeld 1,5.",
+	"tooManyDecimals": "Te veel decimalen: {{symbol}} ondersteunt er {{decimals}}",
+	"feeOverQuarter": "De kosten zijn meer dan 25% van het bedrag dat je verstuurt. Controleer de gasprijs.",
+	"gasPriceAuto": "auto"
 }

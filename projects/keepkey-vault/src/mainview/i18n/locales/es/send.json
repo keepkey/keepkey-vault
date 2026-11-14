@@ -56,5 +56,8 @@
 	"invalidTonAddress": "Dirección TON inválida",
 	"invalidZcashShieldedAddress": "Dirección protegida inválida — debe comenzar con u1",
 	"feeCustom": "Personalizado",
-	"invalidAmount": "Introduce un importe decimal sin separadores de miles, por ejemplo 1,5."
+	"invalidAmount": "Introduce un importe decimal sin separadores de miles, por ejemplo 1,5.",
+	"tooManyDecimals": "Demasiados decimales: {{symbol}} admite {{decimals}}",
+	"feeOverQuarter": "La comisión supera el 25 % del importe que envías. Revisa el precio del gas.",
+	"gasPriceAuto": "auto"
 }

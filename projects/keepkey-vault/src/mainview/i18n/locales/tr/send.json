@@ -56,5 +56,8 @@
 	"invalidTonAddress": "Geçersiz TON adresi",
 	"invalidZcashShieldedAddress": "Geçersiz korumalı adres — u1 ile başlamalıdır",
 	"feeCustom": "Özel",
-	"invalidAmount": "Binlik ayırıcı kullanmadan ondalık bir tutar girin, örneğin 1,5."
+	"invalidAmount": "Binlik ayırıcı kullanmadan ondalık bir tutar girin, örneğin 1,5.",
+	"tooManyDecimals": "Çok fazla ondalık basamak: {{symbol}} en fazla {{decimals}} destekler",
+	"feeOverQuarter": "Ücret, gönderdiğiniz tutarın %25'inden fazla. Gaz fiyatını kontrol edin.",
+	"gasPriceAuto": "otomatik"
 }

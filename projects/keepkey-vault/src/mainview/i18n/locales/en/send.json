@@ -66,5 +66,8 @@
 	"invalidZcashShieldedAddress": "Invalid Zcash address — must start with u1 (unified), zs1 (Sapling), t1, or t3",
 	"invalidAmount": "Enter an ungrouped decimal amount, for example 1.5. Thousands separators are not accepted.",
 	"balance": "Balance",
-	"switchAmountUnit": "Tap to switch between USD and native amount"
+	"switchAmountUnit": "Tap to switch between USD and native amount",
+	"tooManyDecimals": "Too many decimal places: {{symbol}} supports {{decimals}}",
+	"feeOverQuarter": "Fee is more than 25% of the amount you are sending. Check the gas price.",
+	"gasPriceAuto": "auto"
 }

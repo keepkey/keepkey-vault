@@ -347,7 +347,7 @@ export function SendForm({ chain, address, balance, balanceLoading = false, toke
 		if (exceedsBalance) { setError(t("exceedsBalanceShort")); return }
 		const assetDecimals = isTokenSend ? token?.decimals : chain.decimals
 		if (!isMax && canonicalAmount && assetDecimals != null && (canonicalAmount.split('.')[1]?.length ?? 0) > assetDecimals) {
-			setError(`Too many decimal places: ${displaySymbol} supports ${assetDecimals}`); return
+			setError(t('tooManyDecimals', { symbol: displaySymbol, decimals: assetDecimals })); return
 		}
 
 		// Custom fee validation — only the field(s) relevant to this chain family.
@@ -881,7 +881,7 @@ export function SendForm({ chain, address, balance, balanceLoading = false, toke
 										<Input
 											size="xs" value={customGasPrice}
 											onChange={(e) => setCustomGasPrice(e.target.value)}
-											placeholder="auto" inputMode="decimal"
+											placeholder={t("gasPriceAuto")} inputMode="decimal"
 											bg="var(--ink-3)" border="1px solid var(--line)" borderRadius="10px"
 										/>
 									</Box>
@@ -969,7 +969,7 @@ export function SendForm({ chain, address, balance, balanceLoading = false, toke
 							</Flex>
 						</Flex>
 						{!currentSigningContext.isMax && !isTokenSend && Number(buildResult.fee) > Number(currentSigningContext.amount) * 0.25 && (
-							<Text fontSize="xs" color="kk.error" mt="1">Fee is more than 25% of the amount you are sending. Check the gas price.</Text>
+							<Text fontSize="xs" color="kk.error" mt="1">{t('feeOverQuarter')}</Text>
 						)}
 					</Box>
 
