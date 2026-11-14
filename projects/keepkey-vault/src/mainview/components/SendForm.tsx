@@ -78,15 +78,13 @@ interface SendFormProps {
 	/** A balance lookup is pending; retain known amounts while it refreshes. */
 	balanceLoading?: boolean
 	token?: TokenBalance | null
-	/** Confidence in the selected owner's token; independent of native gas. */
-	tokenBalanceUnverified?: boolean
 	onClearToken?: () => void
 	xpubOverride?: string         // BTC multi-account: use this xpub for buildTx
 	scriptTypeOverride?: string   // BTC multi-account: use this scriptType for buildTx
 	evmAddressIndex?: number      // EVM multi-address: derivation index for buildTx
 }
 
-export function SendForm({ chain, address, balance, balanceLoading = false, token, tokenBalanceUnverified, onClearToken, xpubOverride, scriptTypeOverride, evmAddressIndex }: SendFormProps) {
+export function SendForm({ chain, address, balance, balanceLoading = false, token, onClearToken, xpubOverride, scriptTypeOverride, evmAddressIndex }: SendFormProps) {
   const uiText = useUiTranslation()
 
 	const { t, i18n } = useTranslation("send")
@@ -213,11 +211,10 @@ export function SendForm({ chain, address, balance, balanceLoading = false, toke
 	const displayBalance = isTokenSend ? token!.balance : (balance?.balance || '0')
 	// No entry, or the chain's fetch failed: `displayBalance` is a placeholder
 	// zero, not a figure. Every readout below has to say "we don't know" rather
-	// than "you have none" — the second is a claim we cannot back. Token sends
-	// pass their caip so a token the backend proved directly over RPC keeps its
-	// real figure even while its parent chain is degraded.
-	const activeAssetUnverified = isTokenSend && tokenBalanceUnverified !== undefined
-		? tokenBalanceUnverified : isBalanceUnverified(balance, isTokenSend ? token?.caip : chain.caip)
+	// than "you have none" — the second is a claim we cannot back.
+	// A selected token always carries its last-known amount: show it. Max reads it
+	// fresh when the tx is built (txbuilder/evm.ts).
+	const activeAssetUnverified = !isTokenSend && isBalanceUnverified(balance, chain.caip)
 	// Confidence in the chain's NATIVE balance — a separate question, because
 	// the gas warning below is about the coin that pays the fee, not the asset
 	// being sent. A directly-confirmed token cleared the shared flag and let the
@@ -240,7 +237,9 @@ export function SendForm({ chain, address, balance, balanceLoading = false, toke
 	const enteredAmount = inputMode === 'usd' ? usdAmount : amount
 	const invalidAmountInput = !isMax && enteredAmount !== '' && normalizeAmountInput(enteredAmount, locale, i18n.language) === null
 	const balanceNum = parseFloat(displayBalance)
-	const exceedsBalance = !isMax && !isNaN(amountNum) && amountNum > 0 && balanceNum > 0 && amountNum > balanceNum
+	// EVM: the builder re-reads the balance at send and refuses only if the amount
+	// is more than that fresh figure; the cached figure on screen never blocks.
+	const exceedsBalance = chain.chainFamily !== 'evm' && !isMax && !isNaN(amountNum) && amountNum > 0 && balanceNum > 0 && amountNum > balanceNum
 
 	// Derive per-unit USD price from available balance data
 	// NOTE: balance.balanceUsd includes token USD — use nativeBalanceUsd for native price

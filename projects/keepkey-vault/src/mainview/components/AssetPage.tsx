@@ -52,7 +52,7 @@ import { WatchOnlyExportDialog } from "./WatchOnlyExportDialog"
 import { CreatePsbtPanel } from "./CreatePsbtPanel"
 import { detectSpamToken, categorizeTokens, type SpamResult } from "../../shared/spamFilter"
 import { createLatestReceiveRequest, selectedReceiveScriptType } from "../../shared/receive-request"
-import { DIRECT_TOKEN_PROOF_MAX_AGE_MS, applyNativeProof, reconcileSelectedToken, type DirectNativeProof, type DirectTokenProof, type SelectedTokenState } from "../../shared/selected-token-balance"
+import { DIRECT_TOKEN_PROOF_MAX_AGE_MS, applyNativeProof, reconcileSelectedToken, type DirectNativeProof, type SelectedTokenState } from "../../shared/selected-token-balance"
 import { BASE_NETWORK, BITCOIN_NETWORK, type VaultIdentity } from '../../shared/vault-identity'
 import { VaultAccountSelector } from './VaultAccountSelector'
 import { VaultAssetAccount } from './VaultAssetAccount'
@@ -321,37 +321,12 @@ function PersonalAssetPage({ chain, balance, balanceLoading = false, onBack, fir
 	// The aggregate balance prop can contain tokens summed across EVM owners.
 	// It must never fill an absent selected-owner cache or prove token absence.
 	const selectedTokenBalanceSource = isEvm && !watchOnly && !selectedEvmChainBalance ? undefined : activeBalance
-	// While the portfolio can't vouch for the selected token (token discovery
-	// down, stale cache), read its balance straight from the chain for the
-	// selected owner. See DirectTokenProof.
-	const [tokenProof, setTokenProof] = useState<DirectTokenProof | null>(null)
+	// ponytail: the page shows the last-known token balance and never waits on the
+	// network; the send path reads it fresh (txbuilder/evm.ts Max).
 	const tokenReconciliation = reconcileSelectedToken(selectedTokenState, {
 		chainId: chain.id, chainCaip: chain.caip, ownerAddress: selectedTokenOwner,
-	}, selectedTokenBalanceSource, tokenProof)
+	}, selectedTokenBalanceSource)
 	const selectedToken = tokenReconciliation.selection?.token ?? null
-	const selectedTokenUnverified = tokenReconciliation.unverified
-	const tokenProofKey = isEvm && !watchOnly && selectedTokenUnverified && selectedTokenOwner
-		&& selectedToken && /\/erc20:0x[0-9a-f]{40}$/i.test(selectedToken.caip)
-		? `${chain.id}|${selectedTokenOwner}|${selectedToken.caip}|${refreshNonce}` : null
-	useEffect(() => {
-		if (!tokenProofKey) return
-		const [chainId, owner, caip] = tokenProofKey.split('|')
-		let cancelled = false
-		rpcRequest<{ balance: string }>("verifyTokenBalance", { chainId, owner, caip }, 30000)
-			.then(({ balance }) => { if (!cancelled) setTokenProof({ chainId, owner, caip, balance, verifiedAt: Date.now() }) })
-			.catch(e => console.warn(`[AssetPage] on-chain balance check failed for ${caip}:`, e))
-		return () => { cancelled = true }
-	}, [tokenProofKey])
-	// Re-read after a minute, and after any balance update for this chain, so a
-	// send never leaves an old amount on screen.
-	useEffect(() => {
-		if (!tokenProof) return
-		const timer = setTimeout(() => setTokenProof(null), DIRECT_TOKEN_PROOF_MAX_AGE_MS)
-		return () => clearTimeout(timer)
-	}, [tokenProof])
-	useEffect(() => onRpcMessage("balance-updated", (updated: ChainBalance) => {
-		if (updated.chainId === chain.id) setTokenProof(null)
-	}), [chain.id])
 	const vaultAssetCaip = vaultSelection?.assetCaip || selectedToken?.caip || chain.caip
 	const setSelectedToken = (token: TokenBalance | null) => {
 		if (chain.id === 'zcash' && token?.type === 'shielded') {
@@ -436,6 +411,7 @@ function PersonalAssetPage({ chain, balance, balanceLoading = false, onBack, fir
 			setLoading(false)
 			return
 		}
+		const dbAddress = chain.chainFamily !== 'utxo' && balance?.address || null
 		await addressRequests.run(async () => {
 			const params: any = {
 				addressNList: usePath,
@@ -448,12 +424,14 @@ function PersonalAssetPage({ chain, balance, balanceLoading = false, onBack, fir
 			const result = await rpcRequest(chain.rpcMethod, params, 60000)
 			return typeof result === "string" ? result : result?.address || String(result)
 		}, {
-			pending: () => { setLoading(true); setDeriveError(null); setAddress(null) },
+			// The DB address stays on screen while the device answers or can't
+			// (locked). UTXO rows can hold an xpub, never shown as an address.
+			pending: () => { setLoading(!dbAddress); setDeriveError(null); setAddress(dbAddress) },
 			resolved: setAddress,
 			rejected: (e: any) => {
 				console.error(`${chain.coin} address:`, e)
-				setDeriveError(e.message || 'Address derivation failed')
-				setAddress(null)
+				setDeriveError(dbAddress ? null : e.message || 'Address derivation failed')
+				setAddress(dbAddress)
 			},
 			settled: () => setLoading(false),
 		})
@@ -1281,14 +1259,13 @@ function PersonalAssetPage({ chain, balance, balanceLoading = false, onBack, fir
 					{isZcash ? null : selectedToken ? (
 						<Flex direction="column" align="flex-end" gap="1" flexShrink={0} display={{ base: "none", sm: "flex" }}>
 							<Text fontFamily="mono" fontSize={{ base: "16px", md: "20px" }} fontWeight="500" color="var(--text-0)" letterSpacing="0.01em" lineHeight="1.2">
-								{selectedTokenUnverified ? '—' : formatBalance(selectedToken.balance)}
+								{formatBalance(selectedToken.balance)}
 								<Box as="span" color="var(--text-3)" ml="1.5" fontSize={{ base: "13px", md: "15px" }}>{selectedToken.symbol}</Box>
 							</Text>
-							{selectedTokenUnverified && <Text fontSize="11px" color="var(--gold)" title={`Last known: ${formatBalance(selectedToken.balance)} ${selectedToken.symbol}`}>{uiText("Balance unverified")}</Text>}
-							{!selectedTokenUnverified && selectedToken.balanceUsd > 0 && (
+							{selectedToken.balanceUsd > 0 && (
 								<Text fontSize="12px" fontFamily="mono" color="var(--text-2)">≈ {fmtCompact(selectedToken.balanceUsd)}</Text>
 							)}
-							{!selectedTokenUnverified && selectedToken.priceUsd > 0 && (
+							{selectedToken.priceUsd > 0 && (
 								<Text fontSize="10px" fontFamily="mono" color="var(--text-3)">
 									${selectedToken.priceUsd.toLocaleString(getNumberLocale(), { maximumFractionDigits: 6 })} / {selectedToken.symbol}
 								</Text>
@@ -1399,11 +1376,10 @@ function PersonalAssetPage({ chain, balance, balanceLoading = false, onBack, fir
 				{isZcash ? null : selectedToken ? (
 					<Flex display={{ base: "flex", sm: "none" }} align="baseline" justify="space-between" mb="4" gap="3">
 						<Text fontFamily="mono" fontSize="18px" fontWeight="500" color="var(--text-0)" letterSpacing="0.01em">
-							{selectedTokenUnverified ? '—' : formatBalance(selectedToken.balance)}
+							{formatBalance(selectedToken.balance)}
 							<Box as="span" color="var(--text-3)" ml="1.5" fontSize="13px">{selectedToken.symbol}</Box>
 						</Text>
-						{selectedTokenUnverified && <Text fontSize="11px" color="var(--gold)" title={`Last known: ${formatBalance(selectedToken.balance)} ${selectedToken.symbol}`}>{uiText("Balance unverified")}</Text>}
-						{!selectedTokenUnverified && selectedToken.balanceUsd > 0 && (
+						{selectedToken.balanceUsd > 0 && (
 							<Text fontSize="13px" fontFamily="mono" color="var(--text-2)">≈ {fmtCompact(selectedToken.balanceUsd)}</Text>
 						)}
 					</Flex>
@@ -1577,7 +1553,6 @@ function PersonalAssetPage({ chain, balance, balanceLoading = false, onBack, fir
 								nativeBalanceUsd: btcSelected.xpubData.balanceUsd,
 							} : activeBalance}
 							token={selectedToken}
-							tokenBalanceUnverified={selectedTokenUnverified}
 							onClearToken={() => setSelectedToken(null)}
 							xpubOverride={isBtc ? btcSelected?.xpubData?.xpub : undefined}
 							scriptTypeOverride={isBtc ? btcSelected?.scriptType : undefined}

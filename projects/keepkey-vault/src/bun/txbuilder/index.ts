@@ -238,7 +238,6 @@ export async function buildTx(
         isMax: params.isMax,
         fromAddress: params.fromAddress,
         caip: params.caip,
-        tokenBalance: params.tokenBalance,
         tokenDecimals: params.tokenDecimals,
         rpcUrl: params.rpcUrl,
         addressIndex: params.evmAddressIndex,

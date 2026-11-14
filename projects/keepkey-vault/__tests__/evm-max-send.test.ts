@@ -15,6 +15,7 @@ const pioneerWithBalance = (balance: string) => ({
   GetGasPriceByNetwork: async () => ({ data: '1' }),
   GetNonceByNetwork: async () => ({ data: { nonce: 7 } }),
   GetBalanceAddressByNetwork: async () => ({ data: { balance } }),
+  GetTokenBalance: async () => ({ data: '1000' }),
 })
 
 let originalFetch: typeof fetch
@@ -29,15 +30,15 @@ describe('ERC-20 max send', () => {
   // body under .data. Max with no positive frontend amount must read it.
   test('reads GetTokenBalance when the frontend has no positive amount', async () => {
     const pioneer = { ...pioneerWithBalance('1'), GetTokenBalance: async () => ({ data: { data: '17500.5' } }) }
-    const result = await buildEvmTx(pioneer, ethereum, { to: toAddress, amount: '0', isMax: true, fromAddress, caip, tokenDecimals: 6, tokenBalance: '0' })
+    const result = await buildEvmTx(pioneer, ethereum, { to: toAddress, amount: '0', isMax: true, fromAddress, caip, tokenDecimals: 6 })
     // Max keeps the shared one-base-unit precision reserve.
     expect(BigInt('0x' + String(result.data).slice(-64))).toBe(tokenMaxSpendableBaseUnits('17500.5', 6)!)
   })
 
   test('refuses an error body instead of sending its placeholder zero', async () => {
     const pioneer = { ...pioneerWithBalance('1'), GetTokenBalance: async () => ({ data: { success: false, message: 'Invalid contract address format.', data: '0' } }) }
-    await expect(buildEvmTx(pioneer, ethereum, { to: toAddress, amount: '0', isMax: true, fromAddress, caip, tokenDecimals: 6, tokenBalance: '0' }))
-      .rejects.toThrow('Cannot fetch token balance for max send')
+    await expect(buildEvmTx(pioneer, ethereum, { to: toAddress, amount: '0', isMax: true, fromAddress, caip, tokenDecimals: 6 }))
+      .rejects.toThrow('Cannot verify token balance before sending')
   })
 })
 
@@ -118,13 +119,13 @@ describe('EVM max send', () => {
   })
 
   test('ERC-20 max reserves one display quantum before encoding transfer amount', async () => {
-    const result = await buildEvmTx(pioneerWithBalance('1'), ethereum, {
+    const pioneer = { ...pioneerWithBalance('1'), GetTokenBalance: async () => ({ data: '27.49591932' }) }
+    const result = await buildEvmTx(pioneer, ethereum, {
       to: toAddress,
       amount: '0',
       isMax: true,
       fromAddress,
       caip: `eip155:1/erc20:${tokenAddress}`,
-      tokenBalance: '27.49591932',
       tokenDecimals: 18,
     })
 
@@ -177,7 +178,7 @@ describe('EVM recipient', () => {
     const native = await buildEvmTx(pioneerWithBalance('1'), base, { to: `  ${toAddress} `, amount: '0.001', fromAddress })
     expect(native.to).toBe(toAddress)
     const token = await buildEvmTx(pioneerWithBalance('1'), base, {
-      to: ` ${toAddress} `, amount: '1', fromAddress, caip: `eip155:8453/erc20:${tokenAddress}`, tokenDecimals: 6, tokenBalance: '5',
+      to: ` ${toAddress} `, amount: '1', fromAddress, caip: `eip155:8453/erc20:${tokenAddress}`, tokenDecimals: 6,
     })
     expect(String(token.data).slice(10, 74)).toBe(toAddress.toLowerCase().slice(2).padStart(64, '0'))
   })
@@ -239,7 +240,7 @@ describe('custom gas price without a network quote (H2)', () => {
 describe('ERC-20 recipient is the token contract (V7)', () => {
   test('the builder refuses to send a token to its own contract', async () => {
     const caip = `eip155:1/erc20:${tokenAddress}`
-    await expect(buildEvmTx(pioneerWithBalance('1'), ethereum, { to: tokenAddress, amount: '1', fromAddress, caip, tokenDecimals: 6, tokenBalance: '5' }))
+    await expect(buildEvmTx(pioneerWithBalance('1'), ethereum, { to: tokenAddress, amount: '1', fromAddress, caip, tokenDecimals: 6 }))
       .rejects.toThrow('token contract')
   })
 })
