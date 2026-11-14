@@ -836,12 +836,31 @@ jobs:
             projects/keepkey-vault/artifacts/*
           retention-days: 30
 
+  device-protocol-lib:
+    # device-protocol's protoc plugins don't run on Windows; the Windows box
+    # copies lib/ from another machine, so this check does the same.
+    name: device-protocol lib/ (for the Windows check)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: git submodule update --init modules/device-protocol
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - run: make device-protocol-build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: device-protocol-lib
+          path: modules/device-protocol/lib
+          retention-days: 3
+
   windows-unsigned:
     # Runs scripts/build-windows-production.ps1 -SkipSign, as the Windows box
     # does minus signing, so a broken Windows build shows up before the box.
     # Not a dependency of the release job: the shipped installer is built and
     # signed on the Windows box.
     name: Windows x64 (unsigned build check)
+    needs: device-protocol-lib
     runs-on: windows-2022
     timeout-minutes: 150
     permissions:
@@ -894,19 +913,19 @@ jobs:
           if (-not $dll) { throw "no DLL in the artifact matches manifest sha256 $want" }
           Copy-Item $dll.FullName projects/keepkey-vault/emulator-bundle/libkkemu.dll
 
-      - name: Build modules (hdwallet, proto-tx-builder, device-protocol lib/)
+      - name: Download device-protocol lib/
+        uses: actions/download-artifact@v4
+        with:
+          name: device-protocol-lib
+          path: modules/device-protocol/lib
+
+      - name: Build modules (hdwallet, proto-tx-builder)
         shell: bash
         run: |
           set -euo pipefail
           (cd modules/hdwallet && yarn install --frozen-lockfile && yarn tsc --build)
           (cd modules/proto-tx-builder && git submodule update --init osmosis-frontend && yarn install --frozen-lockfile && npx tsc -p . && test -f dist/index.js)
           # Same as the Makefile's device-protocol stamp: force protobufjs's pbjs.
-          # device-protocol's npm scripts are POSIX shell; cmd.exe can't run them.
-          export npm_config_script_shell='C:\Program Files\Git\bin\bash.exe'
-          cd modules/device-protocol && npm install
-          cp node_modules/protobufjs/bin/pbjs node_modules/.bin/pbjs
-          npm run build
-          test -f lib/messages_pb.js
 
       - name: Build (unsigned)
         shell: pwsh
