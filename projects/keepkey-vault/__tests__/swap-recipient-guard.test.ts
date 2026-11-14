@@ -10,13 +10,13 @@ const REQUEST_ID = '0x' + 'ab'.repeat(32)
 const depositNative = (requestId = REQUEST_ID) => '0x49290c1c' + SENDER.slice(2).toLowerCase().padStart(64, '0') + requestId.slice(2)
 
 let quotes = 0
-let relay: { requestId?: string; recipient?: string; data?: string } = {}
+let relay: { requestId?: string; recipient?: string; data?: string; integration?: string } = {}
 const pioneer = {
   GetAvailableAssets: async () => ({ data: [] }),
   // The shape api.keepkey.info returns for a Relay route (raw = Relay's own /quote body).
   Quote: async (params: any) => {
     quotes++
-    return [{ integration: 'relay', quote: {
+    return [{ integration: relay.integration ?? 'relay', quote: {
       source: 'relay', swapper: 'relay', amountOut: 0.0099, amountOutMin: 0.0098, buyAmount: 0.0099,
       txs: [{ type: 'EVM', chain: 'eip155:8453', txParams: {
         to: '0x4cd00e387622c35bddb9b4c962c136462338bc31', data: relay.data ?? depositNative(), value: '10000000000000000',
@@ -80,4 +80,51 @@ test('the Relay order checked must be the order the deposit calldata funds', asy
   await expect(quote(RECIPIENT)).rejects.toThrow(/different Relay order/)
   relay = { recipient: RECIPIENT }
   await expect(quote(RECIPIENT)).rejects.toThrow(/different Relay order/)
+})
+
+test('a ShapeShift route that Relay fills is not held to a Relay /quote body it does not carry', async () => {
+  // ShapeShift's Relay sub-route has no Relay /quote body in raw, so there is no
+  // order to check. Refusing it broke every ShapeShift-via-Relay swap.
+  relay = { integration: 'shapeshiftSwap' }
+  const result = await quote(RECIPIENT)
+  expect(result.relayOrder).toBeUndefined()
+  expect(result.relayTx?.data).toBe(depositNative())
+})
+
+test('a recipient that is not a valid address for the destination network is refused before Pioneer is asked (V3)', async () => {
+  quotes = 0
+  relay = { requestId: REQUEST_ID, recipient: RECIPIENT }
+  // EIP-55 checksum mismatch (one mistyped case), a .eth name, and a BTC address for an EVM output.
+  for (const bad of ['0x5aaeb6053F3E94C9b9A09f33669435E7Ef1BeAed', 'vitalik.eth', 'bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4']) {
+    await expect(quote(bad)).rejects.toThrow(/not a valid address/i)
+  }
+  expect(quotes).toBe(0)
+  // All-lowercase EVM addresses carry no checksum and stay valid.
+  await expect(quote(RECIPIENT)).resolves.toBeDefined()
+})
+
+test('executeSwap refuses an invalid recipient override too (V3)', async () => {
+  const run = executeSwap({
+    fromChainId: 'base', toChainId: 'arbitrum', fromCaip: 'eip155:8453/slip44:60', toCaip: 'eip155:42161/slip44:60',
+    amount: '0.01', memo: '', inboundAddress: '', expectedOutput: '0.0099',
+    fromAddressOverride: SENDER, toAddressOverride: '0x5aaeb6053F3E94C9b9A09f33669435E7Ef1BeAed',
+  } as any, {
+    wallet: {}, getAllChains: () => CHAINS, getEvmRpcSource: () => undefined,
+    getBtcXpub: () => undefined, getAllBtcXpubs: () => [], wrapSign: (sign: any) => sign(), pushSubStage: () => {},
+  } as any)
+  await expect(run).rejects.toThrow(/not a valid address/i)
+})
+
+test('a THOR/Maya memo that pays someone other than the recipient is refused, from any source family', async () => {
+  const run = (memo: string) => executeSwap({
+    fromChainId: 'base', toChainId: 'ethereum', fromCaip: 'eip155:8453/slip44:60', toCaip: 'eip155:1/slip44:60',
+    amount: '0.01', memo, inboundAddress: '0x3333333333333333333333333333333333333333', router: '0x4444444444444444444444444444444444444444',
+    expectedOutput: '0.0099', integration: 'thorchain', fromAddressOverride: SENDER, toAddressOverride: RECIPIENT,
+  } as any, {
+    wallet: {}, getAllChains: () => CHAINS, getEvmRpcSource: () => { throw new Error('fixture: past the memo check') },
+    getBtcXpub: () => undefined, getAllBtcXpubs: () => [], wrapSign: (sign: any) => sign(), pushSubStage: () => {},
+  } as any)
+  await expect(run('=:ETH.ETH:0x2222222222222222222222222222222222222222:0/1/0:kk:30')).rejects.toThrow(/memo pays out to 0x2222/)
+  // The entered recipient (any case) passes the memo check and goes on to build.
+  await expect(run(`=:ETH.ETH:${RECIPIENT.toUpperCase().replace('0X', '0x')}:0/1/0:kk:30`)).rejects.not.toThrow(/memo pays out/)
 })

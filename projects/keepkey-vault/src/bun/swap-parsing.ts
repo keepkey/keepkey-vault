@@ -527,8 +527,9 @@ function parseSingleQuote(
     ? (txParams.senderAddress as string | undefined) || quote.meta?.refundTo || undefined
     : undefined
 
-  // Relay's /quote body (raw) names the order and its payout address.
-  const relayOrder = /relay/i.test(`${integration} ${swapper ?? ''}`) && swapper !== 'NEAR Intents' ? {
+  // Relay's /quote body (raw) names the order and its payout address. Only a
+  // direct Relay quote carries that body; ShapeShift's Relay sub-route does not.
+  const relayOrder = /^relay$/i.test(String(integration ?? '')) ? {
     requestId: typeof raw.requestId === 'string' ? raw.requestId : typeof quote.relayRequestId === 'string' ? quote.relayRequestId : undefined,
     recipient: typeof raw.details?.recipient === 'string' ? raw.details.recipient : undefined,
   } : undefined
