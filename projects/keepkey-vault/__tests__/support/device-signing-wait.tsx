@@ -15,7 +15,7 @@ const element = (tag: string) => (props: any) => {
 }
 mock.module('@chakra-ui/react', () => ({ Box: element('div'), Flex: element('div'), Text: element('span'), VStack: element('div'),
   HStack: element('div'), Button: element('button'), IconButton: element('button'), Input: element('input'), Spinner: element('span'), Badge: element('span') }))
-mock.module('react-i18next', () => ({ useTranslation: () => ({ t: translate }) }))
+mock.module('react-i18next', () => ({ useTranslation: () => ({ t: translate, i18n: { language: 'en' } }) }))
 mock.module('../../src/mainview/i18n/ui', () => ({ useUiTranslation: () => translate }))
 mock.module('../../src/mainview/lib/fiat-context', () => ({ useFiat: () => ({ locale: 'en-US', fmt: String, fmtCompact: String }) }))
 mock.module('../../src/mainview/lib/signing-errors', () => ({ describeSigningError: (error: Error) => error.message }))
