@@ -179,13 +179,15 @@ function numericDisplayValue(display: string | null): number | null {
   return Number.isFinite(n) ? n : null
 }
 
-function formatNativeValue(raw: string | undefined, chainDef: { decimals: number; symbol: string } | undefined, source: string, priceUsd?: number) {
+export function formatNativeValue(raw: string | undefined, chainDef: { decimals: number; symbol: string } | undefined, source: string, priceUsd?: number) {
   if (!raw) return null
   const amount = source === 'scan' && chainDef
     ? formatBaseUnits(raw, chainDef.decimals)
     : /e/i.test(raw) ? formatBalance(raw) : raw // never "1.26e-7"
   if (!amount) return null
-  const usd = priceUsd ? formatUsd((numericDisplayValue(amount) ?? 0) * priceUsd) : null
+  // Price the raw number: the locale-formatted display ("0,00000013") is not parseable.
+  const n = source === 'scan' && chainDef ? numericDisplayValue(amount) : Number(raw)
+  const usd = priceUsd ? formatUsd((Number.isFinite(n) ? n! : 0) * priceUsd) : null
   return { amount, usd }
 }
 

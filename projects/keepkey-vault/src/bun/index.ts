@@ -349,7 +349,7 @@ import { DEFAULT_CLEARSIGN_SERVICE_URL } from "./solana-certified-registry"
 import { createRpcAltFetcher } from "./solana-alt"
 import { createProviderKeySession } from "./clearsign-provider-session"
 import { buildProviderBundle, buildStudioEvmSchema, parseProviderBundle, providerBundleFileName, uniqueFilePath } from "./clearsign-studio-evm"
-import { getTokenMetadata, broadcastEvmTx, verifyEvmSigner, ethCall, ethGetCode, getEvmGasPrice, getEvmNonce, getEvmBalance, waitForTxReceipt } from "./evm-rpc"
+import { getTokenMetadata, broadcastEvmTx, verifyEvmSigner, ethCall, ethGetCode, hasContractCode, getEvmGasPrice, getEvmNonce, getEvmBalance, waitForTxReceipt } from "./evm-rpc"
 import { evmSourceForChain, pioneerEvmRpc } from "./pioneer-evm"
 import { SafeMultisigService, inspectBaseSafe } from './safe-multisig'
 import { VaultImportService } from './vault-import'
@@ -7396,12 +7396,25 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						PIONEER_TIMEOUT_MS, 'GetFeeRateByNetwork')
 					return { feeRate: resp?.data, unit: 'sat/byte' }
 				} else if (chain.chainFamily === 'evm') {
+					// Same quote source buildEvmTx uses: custom chains ask their own RPC.
+					const rpcUrl = chain.id.startsWith('evm-custom-') ? getEvmRpcSource(chain) : undefined
+					if (rpcUrl) return { gasPrice: String(Number(await getEvmGasPrice(rpcUrl)) / 1e9), unit: 'gwei' }
 					const pioneer = await getPioneer()
 					const resp = await withTimeout(pioneer.GetGasPriceByNetwork({ networkId: chain.networkId }), PIONEER_TIMEOUT_MS, 'GetGasPriceByNetwork')
 					return { gasPrice: resp?.data, unit: 'gwei' }
 				} else {
 					return { fee: 'fixed', note: 'Cosmos/XRP chains use fixed fees' }
 				}
+			},
+
+			// Send form: is this recipient a contract (not a plain wallet)?
+			isEvmContract: async (params) => {
+				requireOnline('contract check')
+				const chain = getAllChains().find(c => c.id === params.chainId)
+				if (!chain || chain.chainFamily !== 'evm') throw new Error(`Not an EVM chain: ${params.chainId}`)
+				const source = getEvmRpcSource(chain)
+				if (!source) throw new Error(`No RPC configured for ${chain.coin}`)
+				return hasContractCode(await ethGetCode(source, params.address))
 			},
 
 			// ── DeFi positions (Zerion) ───────────────────────────────

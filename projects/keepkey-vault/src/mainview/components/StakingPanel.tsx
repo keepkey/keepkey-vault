@@ -59,7 +59,7 @@ interface DelegateDialogProps {
 function DelegateDialog({ isOpen, onClose, chain, availableBalance, rewardAmount, rewardUsd, onSuccess, watchOnly }: DelegateDialogProps) {
   const uiText = useUiTranslation()
 
-	const { t } = useTranslation("staking")
+	const { t, i18n } = useTranslation("staking")
 	const { fmtCompact, locale } = useFiat()
 	const [validatorAddress, setValidatorAddress] = useState("")
 	const [amount, setAmount] = useState("")
@@ -96,7 +96,7 @@ function DelegateDialog({ isOpen, onClose, chain, availableBalance, rewardAmount
 		setSignTimeout(null)
 	}, [isOpen])
 
-	const canonicalAmount = normalizeAmountInput(amount, locale)
+	const canonicalAmount = normalizeAmountInput(amount, locale, i18n.language)
 	const numericAmount = canonicalAmount === null ? NaN : Number(canonicalAmount)
 	const canBuild = isValidValidator && (
 		isMax
@@ -313,7 +313,7 @@ function DelegateDialog({ isOpen, onClose, chain, availableBalance, rewardAmount
 									value={isMax ? 'MAX' : amount}
 									disabled={isMax}
 									onChange={(e) => {
-										const sanitized = normalizeAmountInput(e.target.value, locale) ?? e.target.value
+										const sanitized = normalizeAmountInput(e.target.value, locale, i18n.language) ?? e.target.value
 										setIsMax(false)
 										setAmount(sanitized)
 									}}
@@ -478,7 +478,7 @@ interface UndelegateDialogProps {
 
 function UndelegateDialog({ isOpen, onClose, chain, delegations, onSuccess, watchOnly }: UndelegateDialogProps) {
   const { locale } = useFiat()
-	const { t } = useTranslation("staking")
+	const { t, i18n } = useTranslation("staking")
 	const [selected, setSelected] = useState("")
 	const [amount, setAmount] = useState("")
 	const [memo, setMemo] = useState(t('defaultUndelegationMemo'))
@@ -512,7 +512,7 @@ function UndelegateDialog({ isOpen, onClose, chain, delegations, onSuccess, watc
 		setSignTimeout(null)
 	}, [isOpen])
 
-	const canonicalAmount = normalizeAmountInput(amount, locale)
+	const canonicalAmount = normalizeAmountInput(amount, locale, i18n.language)
 	const numericAmount = canonicalAmount === null ? NaN : Number(canonicalAmount)
 	const canBuild = selectedPosition && Number.isFinite(numericAmount) && numericAmount > 0 && numericAmount <= Number(selectedPosition.balance || '0')
 
@@ -649,7 +649,7 @@ function UndelegateDialog({ isOpen, onClose, chain, delegations, onSuccess, watc
                   aria-invalid={amount !== "" && canonicalAmount === null || undefined}
 										value={amount}
 										onChange={(e) => {
-											const sanitized = normalizeAmountInput(e.target.value, locale) ?? e.target.value
+											const sanitized = normalizeAmountInput(e.target.value, locale, i18n.language) ?? e.target.value
 											setAmount(sanitized)
 										}}
 										bg="kk.bg"

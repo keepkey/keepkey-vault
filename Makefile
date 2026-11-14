@@ -503,6 +503,8 @@ test-unit:
 	cd $(PROJECT_DIR) && bun test __tests__/evm-addresses-loading.test.ts
 	cd $(PROJECT_DIR) && bun test __tests__/asset-page-loading.test.ts
 	cd $(PROJECT_DIR) && bun test __tests__/send-form-requests.test.ts
+	cd $(PROJECT_DIR) && bun test __tests__/send-form-safety.test.ts
+	cd $(PROJECT_DIR) && bun test __tests__/activity-fee-usd.test.ts
 	cd $(PROJECT_DIR) && bun test __tests__/route-map.test.ts
 	cd $(PROJECT_DIR) && bun test __tests__/swap-network-identity.test.ts
 	cd $(PROJECT_DIR) && bun test __tests__/single-instance.test.ts __tests__/emulator-build-unavailable.test.ts __tests__/emulator-session.test.ts __tests__/emulator-selection-ui.test.ts

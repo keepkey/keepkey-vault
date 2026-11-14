@@ -78,5 +78,16 @@
 	"switchAmountUnit": "Tap to switch between USD and native amount",
 	"tooManyDecimals": "Too many decimal places: {{symbol}} supports {{decimals}}",
 	"feeOverQuarter": "Fee is more than 25% of the amount you are sending. Check the gas price.",
-	"gasPriceAuto": "auto"
+	"gasPriceAuto": "auto",
+	"recipientIsSentToken": "This is the {{symbol}} token contract itself, not a wallet. Tokens sent to it are lost. Paste the recipient's wallet address.",
+	"recipientBurnTitle": "This is a burn address",
+	"recipientBurnBody": "No one holds the key to this address. Anything sent here is destroyed and can never be recovered.",
+	"recipientBurnConfirm": "I understand, destroy these funds",
+	"recipientTokenContractTitle": "This is the {{token}} token contract",
+	"recipientTokenContractBody": "A token contract is not a wallet. Funds sent here are almost always lost.",
+	"recipientTokenContractConfirm": "I understand, send to the contract anyway",
+	"recipientContractNote": "This address is a smart contract. Make sure it can receive {{symbol}}: funds sent to a contract that cannot handle them may be lost.",
+	"customGasPriceTooHigh": "Gas price is 10x or more the network price ({{gwei}} gwei). Lower it or use a preset.",
+	"customGasPriceTooLow": "Gas price is below the network base fee (~{{gwei}} gwei). The transaction would never confirm.",
+	"customGasPriceUnavailable": "The network gas price could not be loaded, so a custom gas price cannot be checked. Try again, or use a preset."
 }

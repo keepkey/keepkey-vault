@@ -64,5 +64,16 @@
 	"invalidAmount": "Nhập số tiền thập phân không có dấu phân cách hàng nghìn, ví dụ 1,5.",
 	"tooManyDecimals": "Quá nhiều chữ số thập phân: {{symbol}} hỗ trợ {{decimals}}",
 	"feeOverQuarter": "Phí vượt quá 25% số tiền bạn gửi. Hãy kiểm tra giá gas.",
-	"gasPriceAuto": "tự động"
+	"gasPriceAuto": "tự động",
+	"recipientIsSentToken": "Đây chính là hợp đồng của token {{symbol}}, không phải ví. Token gửi đến đây sẽ bị mất. Hãy dán địa chỉ ví của người nhận.",
+	"recipientBurnTitle": "Đây là địa chỉ đốt",
+	"recipientBurnBody": "Không ai giữ khóa của địa chỉ này. Mọi thứ gửi đến đây đều bị tiêu hủy và không bao giờ lấy lại được.",
+	"recipientBurnConfirm": "Tôi hiểu, tiêu hủy số tiền này",
+	"recipientTokenContractTitle": "Đây là hợp đồng token {{token}}",
+	"recipientTokenContractBody": "Hợp đồng token không phải là ví. Tiền gửi đến đây gần như luôn bị mất.",
+	"recipientTokenContractConfirm": "Tôi hiểu, vẫn gửi đến hợp đồng",
+	"recipientContractNote": "Địa chỉ này là một hợp đồng thông minh. Hãy chắc chắn nó nhận được {{symbol}}: tiền gửi đến hợp đồng không xử lý được có thể bị mất.",
+	"customGasPriceTooHigh": "Giá gas gấp 10 lần trở lên so với giá mạng ({{gwei}} gwei). Hãy giảm xuống hoặc dùng mức đặt sẵn.",
+	"customGasPriceTooLow": "Giá gas thấp hơn phí cơ bản của mạng (~{{gwei}} gwei). Giao dịch sẽ không bao giờ được xác nhận.",
+	"customGasPriceUnavailable": "Không tải được giá gas của mạng nên không thể kiểm tra giá gas tùy chỉnh. Hãy thử lại hoặc dùng mức đặt sẵn."
 }

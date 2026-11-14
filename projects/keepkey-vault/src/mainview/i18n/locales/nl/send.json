@@ -64,5 +64,16 @@
 	"invalidAmount": "Voer een decimaal bedrag in zonder scheidingstekens voor duizendtallen, bijvoorbeeld 1,5.",
 	"tooManyDecimals": "Te veel decimalen: {{symbol}} ondersteunt er {{decimals}}",
 	"feeOverQuarter": "De kosten zijn meer dan 25% van het bedrag dat je verstuurt. Controleer de gasprijs.",
-	"gasPriceAuto": "auto"
+	"gasPriceAuto": "auto",
+	"recipientIsSentToken": "Dit is het {{symbol}}-tokencontract zelf, geen wallet. Tokens die hierheen worden gestuurd, gaan verloren. Plak het walletadres van de ontvanger.",
+	"recipientBurnTitle": "Dit is een burn-adres",
+	"recipientBurnBody": "Niemand heeft de sleutel van dit adres. Alles wat hierheen wordt gestuurd, wordt vernietigd en kan nooit worden teruggehaald.",
+	"recipientBurnConfirm": "Ik begrijp het, vernietig deze tegoeden",
+	"recipientTokenContractTitle": "Dit is het {{token}}-tokencontract",
+	"recipientTokenContractBody": "Een tokencontract is geen wallet. Tegoeden die hierheen worden gestuurd, gaan bijna altijd verloren.",
+	"recipientTokenContractConfirm": "Ik begrijp het, toch naar het contract sturen",
+	"recipientContractNote": "Dit adres is een smart contract. Controleer of het {{symbol}} kan ontvangen: tegoeden naar een contract dat ze niet kan verwerken, kunnen verloren gaan.",
+	"customGasPriceTooHigh": "De gasprijs is 10x of meer de netwerkprijs ({{gwei}} gwei). Verlaag hem of gebruik een voorinstelling.",
+	"customGasPriceTooLow": "De gasprijs ligt onder de basisvergoeding van het netwerk (~{{gwei}} gwei). De transactie zou nooit worden bevestigd.",
+	"customGasPriceUnavailable": "De gasprijs van het netwerk kon niet worden geladen, dus een eigen gasprijs kan niet worden gecontroleerd. Probeer het opnieuw of gebruik een voorinstelling."
 }

@@ -64,5 +64,16 @@
 	"invalidAmount": "Gib einen Dezimalbetrag ohne Tausendertrennzeichen ein, zum Beispiel 1,5.",
 	"tooManyDecimals": "Zu viele Nachkommastellen: {{symbol}} unterstützt {{decimals}}",
 	"feeOverQuarter": "Die Gebühr beträgt mehr als 25 % des gesendeten Betrags. Prüfe den Gaspreis.",
-	"gasPriceAuto": "auto"
+	"gasPriceAuto": "auto",
+	"recipientIsSentToken": "Das ist der {{symbol}}-Token-Vertrag selbst, keine Wallet. Dorthin gesendete Token sind verloren. Füge die Wallet-Adresse des Empfängers ein.",
+	"recipientBurnTitle": "Das ist eine Burn-Adresse",
+	"recipientBurnBody": "Niemand besitzt den Schlüssel zu dieser Adresse. Alles, was hierher gesendet wird, wird vernichtet und kann nie wiederhergestellt werden.",
+	"recipientBurnConfirm": "Ich verstehe, diese Mittel vernichten",
+	"recipientTokenContractTitle": "Das ist der {{token}}-Token-Vertrag",
+	"recipientTokenContractBody": "Ein Token-Vertrag ist keine Wallet. Hierher gesendete Mittel sind fast immer verloren.",
+	"recipientTokenContractConfirm": "Ich verstehe, trotzdem an den Vertrag senden",
+	"recipientContractNote": "Diese Adresse ist ein Smart Contract. Stelle sicher, dass er {{symbol}} empfangen kann: An einen Vertrag gesendete Mittel, die er nicht verarbeiten kann, können verloren gehen.",
+	"customGasPriceTooHigh": "Der Gaspreis ist das 10-Fache oder mehr des Netzwerkpreises ({{gwei}} gwei). Senke ihn oder nutze eine Voreinstellung.",
+	"customGasPriceTooLow": "Der Gaspreis liegt unter der Basisgebühr des Netzwerks (~{{gwei}} gwei). Die Transaktion würde nie bestätigt.",
+	"customGasPriceUnavailable": "Der Gaspreis des Netzwerks konnte nicht geladen werden, daher kann ein eigener Gaspreis nicht geprüft werden. Versuche es erneut oder nutze eine Voreinstellung."
 }

@@ -9,6 +9,8 @@ import type { ChainDef } from '../../shared/chains'
 import { evmAddressPath } from '../../shared/chains'
 import { tokenMaxSpendableBaseUnits } from '../../shared/max-send'
 import { isEvmAddress } from '../../shared/address-validation'
+import { GAS_PRICE_ERROR } from '../../shared/gas-price-errors'
+import { decimalAmount } from '../../shared/locale'
 import { ARBITRUM_ONE_RPC, estimateGas, getEvmGasPrice, getEvmNonce, getEvmBalance } from '../evm-rpc'
 
 const TAG = '[txbuilder:evm]'
@@ -24,8 +26,9 @@ export function parseUnits(amount: string, decimals: number): bigint {
 /** Sanity bound for a user-typed gas price against the network quote.
  *  ponytail: quote/2 approximates the base fee (eth_gasPrice = base + tip). */
 export function checkCustomGasPrice(custom: bigint, network: bigint): void {
-  if (custom > network * 10n) throw new Error(`Gas price is more than 10x the network price (${Number(network) / 1e9} gwei)`)
-  if (custom < network / 2n) throw new Error(`Gas price is below the network base fee (~${Number(network) / 1e9} gwei) — the transaction would never confirm`)
+  const gwei = decimalAmount(Number(network) / 1e9)
+  if (custom >= network * 10n) throw new Error(`${GAS_PRICE_ERROR.tooHigh} (${gwei} gwei)`)
+  if (custom < network / 2n) throw new Error(`${GAS_PRICE_ERROR.tooLow} (~${gwei} gwei) — the transaction would never confirm`)
 }
 
 /** Pull a balance string out of a Pioneer balance response, or throw.
@@ -184,12 +187,15 @@ export async function buildEvmTx(
   // 1. Gas price (shared for native + ERC-20)
   console.log(`${TAG} Fetching gas price for ${chain.coin}...`)
   let gasPrice: bigint
+  // The 2 gwei default is a guess, not a quote: it can bound nothing.
+  let quoteIsFallback = false
   if (rpcUrl) {
     // Direct RPC path — custom chains bypass Pioneer
     try {
       gasPrice = await getEvmGasPrice(rpcUrl)
     } catch {
       gasPrice = BigInt(2e9)
+      quoteIsFallback = true
       console.warn(`${TAG} Direct RPC gas price failed, using 2 gwei default`)
     }
   } else {
@@ -200,17 +206,18 @@ export async function buildEvmTx(
       let gasPriceGwei: number
       if (data && typeof data === 'object' && !Array.isArray(data)) {
         gasPriceGwei = feeLevel <= 2
-          ? parseFloat(data.slow || data.average || '2')
+          ? parseFloat(data.slow || data.average)
           : feeLevel >= 8
-            ? parseFloat(data.fastest || data.fast || data.average || '2')
-            : parseFloat(data.average || data.fast || '2')
+            ? parseFloat(data.fastest || data.fast || data.average)
+            : parseFloat(data.average || data.fast)
       } else {
-        gasPriceGwei = parseFloat(data || '2')
+        gasPriceGwei = parseFloat(data)
       }
-      if (isNaN(gasPriceGwei) || gasPriceGwei <= 0) gasPriceGwei = 2
+      if (isNaN(gasPriceGwei) || gasPriceGwei <= 0) { gasPriceGwei = 2; quoteIsFallback = true }
       gasPrice = BigInt(Math.round(gasPriceGwei * 1e9))
     } catch {
       gasPrice = BigInt(2e9) // fallback 2 gwei
+      quoteIsFallback = true
       console.warn(`${TAG} Gas price API failed, using 2 gwei default`)
     }
   }
@@ -223,8 +230,8 @@ export async function buildEvmTx(
   // minimum use the quote itself as the floor: eth_gasPrice is the base fee
   // plus a small tip, so the slow discount would bid under the base fee
   // (Arbitrum rejects that transaction; OP Stack chains leave it unmined).
+  // Ethereum has no floor: it signs the live quote (often well under 1 gwei).
   const MIN_GAS_WEI: Record<number, bigint> = {
-    1: BigInt(1e9),      // Ethereum
     56: BigInt(3e9),     // BSC
     137: BigInt(30e9),   // Polygon
     43114: BigInt(25e9), // Avalanche
@@ -241,6 +248,7 @@ export async function buildEvmTx(
   if (gasPriceGweiOverride) {
     const gwei = parseFloat(gasPriceGweiOverride)
     if (isFinite(gwei) && gwei > 0) {
+      if (quoteIsFallback) throw new Error(`${GAS_PRICE_ERROR.quoteUnavailable}, so a custom gas price cannot be checked. Try again, or use a preset.`)
       gasPrice = BigInt(Math.round(gwei * 1e9))
       checkCustomGasPrice(gasPrice, quotedGasPrice)
       console.log(`${TAG} Custom gas price: ${gwei} gwei (${gasPrice} wei)`)
@@ -289,6 +297,9 @@ export async function buildEvmTx(
   // ── ERC-20 token transfer ───────────────────────────────────────────
   if (isErc20) {
     const contractAddress = extractContractFromCaip(caip!)
+    if (to.toLowerCase() === contractAddress.toLowerCase()) {
+      throw new Error('Recipient is the token contract itself, not a wallet — tokens sent there are lost. Use the recipient\'s wallet address.')
+    }
 
     // Use frontend-provided decimals when available, otherwise fetch from API
     let tokenDecimals: number

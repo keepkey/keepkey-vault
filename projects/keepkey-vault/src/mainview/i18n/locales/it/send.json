@@ -64,5 +64,16 @@
 	"invalidAmount": "Inserisci un importo decimale senza separatori delle migliaia, ad esempio 1,5.",
 	"tooManyDecimals": "Troppi decimali: {{symbol}} ne supporta {{decimals}}",
 	"feeOverQuarter": "La commissione supera il 25% dell'importo inviato. Controlla il prezzo del gas.",
-	"gasPriceAuto": "auto"
+	"gasPriceAuto": "auto",
+	"recipientIsSentToken": "Questo è il contratto stesso del token {{symbol}}, non un wallet. I token inviati qui vanno persi. Incolla l'indirizzo del wallet del destinatario.",
+	"recipientBurnTitle": "Questo è un indirizzo di burn",
+	"recipientBurnBody": "Nessuno possiede la chiave di questo indirizzo. Tutto ciò che viene inviato qui viene distrutto e non potrà mai essere recuperato.",
+	"recipientBurnConfirm": "Ho capito, distruggi questi fondi",
+	"recipientTokenContractTitle": "Questo è il contratto del token {{token}}",
+	"recipientTokenContractBody": "Un contratto di token non è un wallet. I fondi inviati qui vanno quasi sempre persi.",
+	"recipientTokenContractConfirm": "Ho capito, invia comunque al contratto",
+	"recipientContractNote": "Questo indirizzo è uno smart contract. Assicurati che possa ricevere {{symbol}}: i fondi inviati a un contratto che non li gestisce possono andare persi.",
+	"customGasPriceTooHigh": "Il prezzo del gas è 10 volte o più il prezzo della rete ({{gwei}} gwei). Abbassalo o usa un'impostazione predefinita.",
+	"customGasPriceTooLow": "Il prezzo del gas è inferiore alla commissione base della rete (~{{gwei}} gwei). La transazione non verrebbe mai confermata.",
+	"customGasPriceUnavailable": "Impossibile caricare il prezzo del gas della rete, quindi non è possibile verificare un prezzo personalizzato. Riprova o usa un'impostazione predefinita."
 }
