@@ -784,7 +784,7 @@ interface SwapDialogProps {
 export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap, onOutputAssetChange, initialFromCaip, initialFromAsset }: SwapDialogProps) {
   const uiText = useUiTranslation()
 
-  const { t } = useTranslation("swap")
+  const { t, i18n } = useTranslation("swap")
   const { fmt, fmtCompact, symbol: fiatSymbol, locale } = useFiat()
   const { firmwareVersion } = useDeviceState()
   // Local EVM address selection — scoped to this dialog so switching here doesn't
@@ -1730,11 +1730,11 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
    * all other MAX sends, isMax remains true so the backend's chain-aware fee
    * math runs. */
   const sendAmount = useMemo(() => {
-    if (!isMax) return normalizeAmountInput(amount, locale) ?? ''
+    if (!isMax) return normalizeAmountInput(amount, locale, i18n.language) ?? ''
     // `|| '0'` here meant an unverifiable balance submitted a 0-amount MAX swap.
     // Empty instead: no amount, so nothing downstream quotes or signs one.
     return nativeFeeReservedMaxAmount ?? tokenPrecisionReservedMaxAmount ?? (fromBalance ?? '')
-  }, [isMax, amount, locale, nativeFeeReservedMaxAmount, tokenPrecisionReservedMaxAmount, fromBalance])
+  }, [isMax, amount, locale, i18n.language, nativeFeeReservedMaxAmount, tokenPrecisionReservedMaxAmount, fromBalance])
 
   const sendIsMax = isMax && nativeFeeReservedMaxAmount === null && tokenPrecisionReservedMaxAmount === null
   const quotedSendAmount = quote?.netFromAmount ?? sendAmount
@@ -1868,7 +1868,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
 
   // Bidirectional conversion: crypto → fiat
   const handleCryptoChange = useCallback((v: string) => {
-    const canonical = normalizeAmountInput(v, locale)
+    const canonical = normalizeAmountInput(v, locale, i18n.language)
     setAmount(canonical ?? v)
     setIsMax(false)
     setMaxReserveMode('safe')
@@ -1879,7 +1879,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
     } else {
       setFiatAmount("")
     }
-  }, [hasFromPrice, fromPriceUsd, locale])
+  }, [hasFromPrice, fromPriceUsd, locale, i18n.language])
 
   // ── Auto-default amount to ~$100 or max if balance < $100 ────────
   // Skip when an amount or MAX is already set: it may have come from REST seed,
@@ -1916,7 +1916,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
 
   // Bidirectional conversion: fiat → crypto
   const handleFiatChange = useCallback((v: string) => {
-    const canonical = normalizeAmountInput(v, locale)
+    const canonical = normalizeAmountInput(v, locale, i18n.language)
     setFiatAmount(canonical ?? v)
     setIsMax(false)
     setMaxReserveMode('safe')
@@ -1931,7 +1931,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
     } else {
       setAmount("")
     }
-  }, [hasFromPrice, fromPriceUsd, locale])
+  }, [hasFromPrice, fromPriceUsd, locale, i18n.language])
 
   const toggleInputMode = useCallback(() => {
     setInputMode(prev => prev === 'crypto' ? 'fiat' : 'crypto')
@@ -1948,7 +1948,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
     return n * fromPriceUsd
   }, [quotedSendAmount, hasFromPrice, fromPriceUsd])
 
-  const canonicalAmount = normalizeAmountInput(amount, locale)
+  const canonicalAmount = normalizeAmountInput(amount, locale, i18n.language)
   const amountNum = canonicalAmount === null ? NaN : Number(canonicalAmount)
   const balanceNum = fromBalance ? parseFloat(fromBalance) : 0
   const exceedsBalance = !isMax && !isNaN(amountNum) && amountNum > 0 && balanceNum > 0 && amountNum > balanceNum
@@ -2059,7 +2059,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
 
   const maxAmountReady = isMax && !isNaN(parseFloat(sendAmount)) && parseFloat(sendAmount) > 0
   const enteredAmount = inputMode === 'fiat' ? fiatAmount : amount
-  const invalidAmountInput = !isMax && enteredAmount !== '' && normalizeAmountInput(enteredAmount, locale) === null
+  const invalidAmountInput = !isMax && enteredAmount !== '' && normalizeAmountInput(enteredAmount, locale, i18n.language) === null
   const manualAmountReady = !invalidAmountInput && canonicalAmount !== null && Number.isFinite(amountNum) && amountNum > 0
   const validAmount = isMax ? (maxAmountReady && !nativeMaxInsufficient && !tokenMaxInsufficient) : manualAmountReady
   // SAFETY: never quote with an xpub as the destination. Pioneer will accept

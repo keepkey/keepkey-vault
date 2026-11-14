@@ -31,6 +31,13 @@ describe('financial locale boundaries', () => {
       for (const input of ['1.234,56','1,234.56','1 234','1\u202f234,56','1e3','0x10','Infinity','1xyz','-1','1..2','1,,2']) expect(normalizeAmountInput(input,locale)).toBeNull()
     }
     expect(normalizeAmountInput('1,5','en-US')).toBeNull()
+    // V9: a comma-decimal UI language accepts the comma its hints ask for, even
+    // while the separate number format is still the en-US default.
+    expect(normalizeAmountInput('0,0001','en-US','pt')).toBe('0.0001')
+    expect(normalizeAmountInput('1,5','en-US','de')).toBe('1.5')
+    expect(normalizeAmountInput('1.5','en-US','pt')).toBe('1.5')
+    expect(normalizeAmountInput('1,5','en-US','en')).toBeNull()
+    for (const input of ['1.234,56','1,234.56','1,,2']) expect(normalizeAmountInput(input,'en-US','pt')).toBeNull()
     expect(normalizeAmountInput('')).toBeNull()
     expect(normalizeAmountInput('.')).toBeNull()
   })

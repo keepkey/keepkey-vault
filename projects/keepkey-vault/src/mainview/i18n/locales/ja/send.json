@@ -64,5 +64,16 @@
 	"invalidAmount": "桁区切りのない小数を入力してください。例：1.5。",
 	"tooManyDecimals": "小数点以下の桁数が多すぎます: {{symbol}} は {{decimals}} 桁まで対応",
 	"feeOverQuarter": "手数料が送金額の25%を超えています。ガス価格を確認してください。",
-	"gasPriceAuto": "自動"
+	"gasPriceAuto": "自動",
+	"recipientIsSentToken": "これは{{symbol}}トークンのコントラクトそのもので、ウォレットではありません。ここに送ったトークンは失われます。受取人のウォレットアドレスを貼り付けてください。",
+	"recipientBurnTitle": "これはバーンアドレスです",
+	"recipientBurnBody": "このアドレスの鍵は誰も持っていません。ここに送ったものは破棄され、二度と取り戻せません。",
+	"recipientBurnConfirm": "理解しました。この資金を破棄します",
+	"recipientTokenContractTitle": "これは{{token}}トークンのコントラクトです",
+	"recipientTokenContractBody": "トークンコントラクトはウォレットではありません。ここに送った資金はほぼ確実に失われます。",
+	"recipientTokenContractConfirm": "理解しました。それでもコントラクトに送ります",
+	"recipientContractNote": "このアドレスはスマートコントラクトです。{{symbol}}を受け取れることを確認してください。対応していないコントラクトに送った資金は失われる場合があります。",
+	"customGasPriceTooHigh": "ガス価格がネットワーク価格（{{gwei}} gwei）の10倍以上です。下げるか、プリセットを使ってください。",
+	"customGasPriceTooLow": "ガス価格がネットワークの基本手数料（約{{gwei}} gwei）を下回っています。このトランザクションは承認されません。",
+	"customGasPriceUnavailable": "ネットワークのガス価格を読み込めなかったため、カスタムのガス価格を確認できません。もう一度試すか、プリセットを使ってください。"
 }

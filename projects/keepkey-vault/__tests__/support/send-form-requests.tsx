@@ -15,14 +15,15 @@ const element = (tag: string) => (props: any) => {
 }
 mock.module('@chakra-ui/react', () => ({ Box: element('div'), Flex: element('div'), Text: element('span'),
   VStack: element('div'), Button: element('button'), Input: element('input'), Spinner: element('span') }))
-mock.module('react-i18next', () => ({ useTranslation: () => ({ t: translate }) }))
+mock.module('react-i18next', () => ({ useTranslation: () => ({ t: translate, i18n: { language: 'en' } }) }))
 mock.module('../../src/mainview/i18n/ui', () => ({ useUiTranslation: () => translate }))
 mock.module('../../src/mainview/lib/fiat-context', () => ({ useFiat: () => ({ locale: 'en-US', fmt: String, fmtCompact: String }) }))
 mock.module('../../src/mainview/lib/formatting', () => ({ formatBalance: String }))
 mock.module('../../src/mainview/lib/signing-errors', () => ({ describeSigningError: (error: Error) => error.message }))
 mock.module('../../src/mainview/lib/sounds', () => ({ playSent() {} }))
 mock.module('../../src/shared/assetLookup', () => ({ getAsset: () => null }))
-mock.module('../../src/shared/address-validation', () => ({ validateAddress: () => ({ valid: true }) }))
+const { isBurnAddress, knownTokenContract } = await import('../../src/shared/address-validation')
+mock.module('../../src/shared/address-validation', () => ({ validateAddress: () => ({ valid: true }), isBurnAddress, knownTokenContract }))
 mock.module('../../src/mainview/components/QrScannerOverlay', () => ({ QrScannerOverlay: () => null }))
 mock.module('../../src/mainview/components/AddressBookPicker', () => ({ AddressBookPicker: () => null }))
 mock.module('../../src/mainview/components/AddressIdenticon', () => ({ AddressIdenticon: () => null }))

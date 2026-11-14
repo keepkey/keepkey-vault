@@ -64,5 +64,16 @@
 	"invalidAmount": "Saisissez un montant décimal sans séparateurs de milliers, par exemple 1,5.",
 	"tooManyDecimals": "Trop de décimales : {{symbol}} en accepte {{decimals}}",
 	"feeOverQuarter": "Les frais dépassent 25 % du montant envoyé. Vérifiez le prix du gaz.",
-	"gasPriceAuto": "auto"
+	"gasPriceAuto": "auto",
+	"recipientIsSentToken": "Il s'agit du contrat du jeton {{symbol}} lui-même, pas d'un portefeuille. Les jetons envoyés à cette adresse sont perdus. Collez l'adresse du portefeuille du destinataire.",
+	"recipientBurnTitle": "Ceci est une adresse de destruction",
+	"recipientBurnBody": "Personne ne détient la clé de cette adresse. Tout ce qui y est envoyé est détruit et ne pourra jamais être récupéré.",
+	"recipientBurnConfirm": "Je comprends, détruire ces fonds",
+	"recipientTokenContractTitle": "Ceci est le contrat du jeton {{token}}",
+	"recipientTokenContractBody": "Un contrat de jeton n'est pas un portefeuille. Les fonds envoyés ici sont presque toujours perdus.",
+	"recipientTokenContractConfirm": "Je comprends, envoyer quand même au contrat",
+	"recipientContractNote": "Cette adresse est un contrat intelligent. Vérifiez qu'il peut recevoir des {{symbol}} : les fonds envoyés à un contrat qui ne sait pas les gérer peuvent être perdus.",
+	"customGasPriceTooHigh": "Le prix du gaz est 10 fois ou plus le prix du réseau ({{gwei}} gwei). Baissez-le ou utilisez un préréglage.",
+	"customGasPriceTooLow": "Le prix du gaz est inférieur aux frais de base du réseau (~{{gwei}} gwei). La transaction ne serait jamais confirmée.",
+	"customGasPriceUnavailable": "Le prix du gaz du réseau n'a pas pu être chargé, un prix personnalisé ne peut donc pas être vérifié. Réessayez ou utilisez un préréglage."
 }

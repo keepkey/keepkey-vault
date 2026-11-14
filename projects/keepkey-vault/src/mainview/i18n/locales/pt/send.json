@@ -64,5 +64,16 @@
 	"invalidAmount": "Digite um valor decimal sem separadores de milhares, por exemplo 1,5.",
 	"tooManyDecimals": "Casas decimais demais: {{symbol}} aceita {{decimals}}",
 	"feeOverQuarter": "A taxa é maior que 25% do valor enviado. Verifique o preço do gas.",
-	"gasPriceAuto": "auto"
+	"gasPriceAuto": "auto",
+	"recipientIsSentToken": "Este é o próprio contrato do token {{symbol}}, não uma carteira. Tokens enviados para ele são perdidos. Cole o endereço da carteira do destinatário.",
+	"recipientBurnTitle": "Este é um endereço de queima",
+	"recipientBurnBody": "Ninguém tem a chave deste endereço. Tudo o que for enviado para cá é destruído e nunca poderá ser recuperado.",
+	"recipientBurnConfirm": "Entendo, destruir estes fundos",
+	"recipientTokenContractTitle": "Este é o contrato do token {{token}}",
+	"recipientTokenContractBody": "Um contrato de token não é uma carteira. Fundos enviados para cá quase sempre são perdidos.",
+	"recipientTokenContractConfirm": "Entendo, enviar para o contrato mesmo assim",
+	"recipientContractNote": "Este endereço é um contrato inteligente. Confirme que ele pode receber {{symbol}}: fundos enviados a um contrato que não sabe tratá-los podem ser perdidos.",
+	"customGasPriceTooHigh": "O preço do gas é 10x ou mais o preço da rede ({{gwei}} gwei). Reduza-o ou use uma predefinição.",
+	"customGasPriceTooLow": "O preço do gas está abaixo da taxa base da rede (~{{gwei}} gwei). A transação nunca seria confirmada.",
+	"customGasPriceUnavailable": "Não foi possível carregar o preço do gas da rede, então um preço personalizado não pode ser verificado. Tente novamente ou use uma predefinição."
 }

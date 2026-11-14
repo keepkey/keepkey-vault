@@ -64,5 +64,16 @@
 	"invalidAmount": "Binlik ayırıcı kullanmadan ondalık bir tutar girin, örneğin 1,5.",
 	"tooManyDecimals": "Çok fazla ondalık basamak: {{symbol}} en fazla {{decimals}} destekler",
 	"feeOverQuarter": "Ücret, gönderdiğiniz tutarın %25'inden fazla. Gaz fiyatını kontrol edin.",
-	"gasPriceAuto": "otomatik"
+	"gasPriceAuto": "otomatik",
+	"recipientIsSentToken": "Bu bir cüzdan değil, {{symbol}} token sözleşmesinin kendisi. Buraya gönderilen tokenler kaybolur. Alıcının cüzdan adresini yapıştırın.",
+	"recipientBurnTitle": "Bu bir yakma adresi",
+	"recipientBurnBody": "Bu adresin anahtarı kimsede yok. Buraya gönderilen her şey yok edilir ve asla geri alınamaz.",
+	"recipientBurnConfirm": "Anlıyorum, bu fonları yok et",
+	"recipientTokenContractTitle": "Bu {{token}} token sözleşmesi",
+	"recipientTokenContractBody": "Token sözleşmesi bir cüzdan değildir. Buraya gönderilen fonlar neredeyse her zaman kaybolur.",
+	"recipientTokenContractConfirm": "Anlıyorum, yine de sözleşmeye gönder",
+	"recipientContractNote": "Bu adres bir akıllı sözleşme. {{symbol}} alabildiğinden emin olun: işleyemeyen bir sözleşmeye gönderilen fonlar kaybolabilir.",
+	"customGasPriceTooHigh": "Gas fiyatı ağ fiyatının ({{gwei}} gwei) 10 katı veya daha fazlası. Düşürün ya da hazır bir ayar kullanın.",
+	"customGasPriceTooLow": "Gas fiyatı ağın temel ücretinin (~{{gwei}} gwei) altında. İşlem asla onaylanmaz.",
+	"customGasPriceUnavailable": "Ağ gas fiyatı yüklenemedi, bu yüzden özel gas fiyatı kontrol edilemiyor. Tekrar deneyin ya da hazır bir ayar kullanın."
 }

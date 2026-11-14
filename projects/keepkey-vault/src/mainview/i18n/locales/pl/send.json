@@ -64,5 +64,16 @@
 	"invalidAmount": "Wpisz kwotę dziesiętną bez separatorów tysięcy, na przykład 1,5.",
 	"tooManyDecimals": "Za dużo miejsc po przecinku: {{symbol}} obsługuje {{decimals}}",
 	"feeOverQuarter": "Opłata przekracza 25% wysyłanej kwoty. Sprawdź cenę gazu.",
-	"gasPriceAuto": "auto"
+	"gasPriceAuto": "auto",
+	"recipientIsSentToken": "To jest sam kontrakt tokena {{symbol}}, a nie portfel. Wysłane do niego tokeny przepadną. Wklej adres portfela odbiorcy.",
+	"recipientBurnTitle": "To jest adres spalania",
+	"recipientBurnBody": "Nikt nie ma klucza do tego adresu. Wszystko, co tu wyślesz, zostanie zniszczone i nigdy nie da się tego odzyskać.",
+	"recipientBurnConfirm": "Rozumiem, zniszcz te środki",
+	"recipientTokenContractTitle": "To jest kontrakt tokena {{token}}",
+	"recipientTokenContractBody": "Kontrakt tokena nie jest portfelem. Wysłane tu środki prawie zawsze przepadają.",
+	"recipientTokenContractConfirm": "Rozumiem, mimo to wyślij do kontraktu",
+	"recipientContractNote": "Ten adres to inteligentny kontrakt. Upewnij się, że może odbierać {{symbol}}: środki wysłane do kontraktu, który ich nie obsługuje, mogą przepaść.",
+	"customGasPriceTooHigh": "Cena gazu jest co najmniej 10 razy wyższa od ceny sieci ({{gwei}} gwei). Obniż ją lub użyj ustawienia wstępnego.",
+	"customGasPriceTooLow": "Cena gazu jest niższa od opłaty bazowej sieci (~{{gwei}} gwei). Transakcja nigdy nie zostałaby potwierdzona.",
+	"customGasPriceUnavailable": "Nie udało się wczytać ceny gazu w sieci, więc nie można sprawdzić własnej ceny gazu. Spróbuj ponownie lub użyj ustawienia wstępnego."
 }

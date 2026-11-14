@@ -17,6 +17,13 @@ export async function ethGetCode(rpcUrl: string, address: string): Promise<strin
   return (await ethRpc(rpcUrl, 'eth_getCode', [address, 'latest'])) || '0x'
 }
 
+/** Deployed contract code. An EIP-7702 delegation (0xef0100 + address) is still a user's wallet. */
+export function hasContractCode(code: string): boolean {
+  const hex = String(code || '').toLowerCase()
+  if (!/^0x[0-9a-f]*$/.test(hex) || /^0x0*$/.test(hex)) return false
+  return !/^0xef0100[0-9a-f]{40}$/.test(hex)
+}
+
 async function ethRpc(rpcUrl: string, method: string, params: any[]): Promise<any> {
   if (isPioneerEvmSource(rpcUrl)) {
     const { getPioneer } = await import('./pioneer')

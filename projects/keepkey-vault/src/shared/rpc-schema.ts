@@ -196,6 +196,7 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
 
       getMarketData: { params: { caips: string[] }; response: any }
       getFees: { params: { chainId: string }; response: any }
+      isEvmContract: { params: { chainId: string; address: string }; response: boolean }
 
       // ── Bitcoin multi-account ─────────────────────────────────────────
       getBtcAccounts: { params: void; response: BtcAccountSet }
