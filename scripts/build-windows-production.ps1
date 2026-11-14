@@ -667,14 +667,23 @@ if (-not $SkipBuild) {
 Write-Success "Verified bundled Windows emulator: $BundledEmulatorDll"
 
 # Hutch supplies bin\bun.exe. Only the pinned baseline build may ship: an AVX
-# build crashes at launch on CPUs without AVX.
+# build crashes at launch on CPUs without AVX. Hutch embeds the app icon into
+# the copy it ships, so its hash never matches; check the toolchain copy Hutch
+# took it from, then that the shipped one is that Bun plus an icon.
 $BunExe = Join-Path $BuildDir "bin\bun.exe"
 if (-not (Test-Path $BunExe)) { throw "Release gate failed: $BunExe missing" }
-$bunHash = (Get-FileHash $BunExe -Algorithm SHA256).Hash.ToLower()
-if ($bunHash -ne $ExpectedBunExeSha256) {
-    throw "Release gate failed: bin\bun.exe is $bunHash, not the pinned Bun 1.4.4 Windows x64 baseline build ($ExpectedBunExeSha256)"
+$HutchHomeDir = if ($env:HUTCH_HOME) { $env:HUTCH_HOME } else { Join-Path $HOME ".hutch" }
+$ToolchainBun = Join-Path $HutchHomeDir "toolchains\bun\1.4.4\windows-x64\bun.exe"
+if (-not (Test-Path $ToolchainBun)) { throw "Release gate failed: Hutch's Bun 1.4.4 toolchain is missing at $ToolchainBun" }
+$toolchainHash = (Get-FileHash $ToolchainBun -Algorithm SHA256).Hash.ToLower()
+if ($toolchainHash -ne $ExpectedBunExeSha256) {
+    throw "Release gate failed: Hutch's Bun toolchain ($ToolchainBun) is $toolchainHash, not the pinned Bun 1.4.4 Windows x64 baseline build ($ExpectedBunExeSha256)"
 }
-Write-Success "Verified bin\bun.exe is Bun 1.4.4 baseline"
+$shippedVersion = (& $BunExe --version | Out-String).Trim()
+if ($shippedVersion -ne "1.4.4") { throw "Release gate failed: bin\bun.exe reports '$shippedVersion', not 1.4.4" }
+$sizeDelta = [Math]::Abs((Get-Item $BunExe).Length - (Get-Item $ToolchainBun).Length)
+if ($sizeDelta -gt 1MB) { throw "Release gate failed: bin\bun.exe differs from Hutch's Bun toolchain by $sizeDelta bytes, more than an icon" }
+Write-Success "Verified bin\bun.exe is the pinned Bun 1.4.4 baseline (plus app icon, +$sizeDelta bytes)"
 
 # ============================================================================
 # Sign Executables and DLLs
