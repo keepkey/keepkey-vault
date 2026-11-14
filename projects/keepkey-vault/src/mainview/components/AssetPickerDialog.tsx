@@ -1400,7 +1400,7 @@ export function AssetPickerDialog({
   return (
     <Box position="fixed" inset="0" zIndex={Z.assetPicker}
       display="flex" alignItems="center" justifyContent="center"
-      bg="rgba(11,11,14,0.28)"
+      bg="rgba(11,11,14,0.72)"
       backdropFilter="blur(20px) saturate(140%)"
       onClick={onClose}>
       <Box
@@ -1413,8 +1413,8 @@ export function AssetPickerDialog({
         fontFamily="'Geist Mono', ui-monospace, monospace"
         onClick={(e) => e.stopPropagation()}
         style={{
-          background:
-            "linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.015)), rgba(16,16,21,0.78)",
+          backgroundColor: "rgba(16,16,21,0.97)",
+          backgroundImage: "linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.015))",
           backdropFilter: "blur(32px) saturate(160%)",
           WebkitBackdropFilter: "blur(32px) saturate(160%)",
           boxShadow:

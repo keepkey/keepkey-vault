@@ -216,7 +216,6 @@
 	"youReceived": "You received",
 	"sent": "Sent",
 	"gas": "Gas",
-	"relayDepositReview": "Relay executes the swap after your deposit; destination terms are shown in this app.",
 	"quotedFeeRate": "Quoted fee rate",
 	"notProvided": "Not provided",
 	"affiliateFee": "Affiliate fee",
@@ -242,5 +241,14 @@
 	"readyForQuote": "Ready to fetch a fresh quote.",
 	"loadingBalances": "Checking your KeepKey balances...",
 	"balanceLoading": "Loading {{symbol}} balance… MAX is available once it arrives.",
-	"balanceMissing": "{{symbol}} balance was not returned by the last refresh, so MAX is unavailable. Enter an amount, or refresh and try again."
+	"balanceMissing": "{{symbol}} balance was not returned by the last refresh, so MAX is unavailable. Enter an amount, or refresh and try again.",
+	"reviewRecipient": "Recipient",
+	"customRecipientNotKeepKey": "Custom recipient — not your KeepKey",
+	"customAddressOwn": "This is your own KeepKey address",
+	"relayDepositRecipient": "The Relay order pays out to {{address}}. Your KeepKey signs only the deposit; Relay pays out afterwards.",
+	"relayRecipientMismatchButton": "Relay order pays another address",
+	"relayRecipientMismatch": "Relay's order does not pay the recipient shown. Do not proceed — get a new quote.",
+	"highSlippageConfirmButton": "Confirm the high slippage",
+	"highSlippageConfirmRequired": "Confirm the high slippage tolerance before signing.",
+	"highSlippageConfirm": "I accept a slippage tolerance of {{pct}}%: I may receive up to {{pct}}% less than quoted."
 }

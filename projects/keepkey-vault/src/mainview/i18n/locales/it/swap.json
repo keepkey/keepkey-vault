@@ -205,5 +205,14 @@
 	"deviceBlindSignCaveat": "La firma alla cieca rimane attiva fino al blocco o alla disconnessione del KeepKey, per tutte le app che lo usano, non solo per questo scambio. Mentre è attiva, anche questa app smette di mostrare questa schermata prima di tali transazioni. Il dispositivo richiede conferma e l’inserimento nuovamente del PIN.",
 	"solanaOutflowDrain": "Attenzione: questo svuota il portafoglio. Non firmare a meno che sia ciò che intendi fare.",
 	"solanaOutflowCaveat": "Simulato con un nodo Solana da questo computer. Il tuo KeepKey non può confermare queste cifre.",
-	"deviceBlindSignEnable": "Attiva la firma alla cieca"
+	"deviceBlindSignEnable": "Attiva la firma alla cieca",
+	"reviewRecipient": "Destinatario",
+	"customRecipientNotKeepKey": "Destinatario personalizzato — non è il tuo KeepKey",
+	"customAddressOwn": "Questo è il tuo indirizzo KeepKey",
+	"relayDepositRecipient": "L'ordine Relay paga a {{address}}. Il tuo KeepKey firma solo il deposito; Relay paga in seguito.",
+	"relayRecipientMismatchButton": "L'ordine Relay paga un altro indirizzo",
+	"relayRecipientMismatch": "L'ordine Relay non paga il destinatario mostrato. Non procedere: richiedi una nuova quotazione.",
+	"highSlippageConfirmButton": "Conferma lo slippage elevato",
+	"highSlippageConfirmRequired": "Conferma la tolleranza di slippage elevata prima di firmare.",
+	"highSlippageConfirm": "Accetto una tolleranza di slippage del {{pct}}%: potrei ricevere fino al {{pct}}% in meno rispetto alla quotazione."
 }
