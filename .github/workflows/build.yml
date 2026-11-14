@@ -144,7 +144,7 @@ jobs:
           while IFS= read -r -d '' f; do
             [ "$(head -c 4 "$f" | xxd -p)" = 7f454c46 ] || continue
             [ "$(basename "$f")" != libwebgpu_dawn.so ] || continue
-            max=$(strings "$f" | grep -oE 'GLIBC_[0-9]+\.[0-9]+' | sed 's/^GLIBC_//' | sort -V | tail -1)
+            max=$(strings "$f" | { grep -oE 'GLIBC_[0-9]+\.[0-9]+' || true; } | sed 's/^GLIBC_//' | sort -V | tail -1)
             rel="${f#"$RUNNER_TEMP"/devkit/}"
             echo "  $rel: GLIBC_${max:-none}"
             if [ -n "$max" ] && [ "$(printf '%s\n2.35\n' "$max" | sort -V | tail -1)" != 2.35 ]; then
@@ -621,7 +621,7 @@ jobs:
           # floor (2.35; the "Audit Linux glibc footprint" step runs before this
           # one and does not see these files).
           while IFS= read -r -d '' so; do
-            max=$(strings "$so" | grep -oE 'GLIBC_[0-9]+\.[0-9]+' | sed 's/^GLIBC_//' | sort -V | tail -1)
+            max=$(strings "$so" | { grep -oE 'GLIBC_[0-9]+\.[0-9]+' || true; } | sed 's/^GLIBC_//' | sort -V | tail -1)
             echo "  $(basename "$so") needs GLIBC_${max:-none}"
             if [ -n "$max" ] && [ "$(printf '%s\n2.35\n' "$max" | sort -V | tail -1)" != "2.35" ]; then
               echo "::error::$(basename "$so") requires GLIBC_$max, above the 2.35 floor"
