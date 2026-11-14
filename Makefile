@@ -493,6 +493,8 @@ test-unit:
 	cd $(PROJECT_DIR) && bun test __tests__/receive-request.test.ts
 	cd $(PROJECT_DIR) && bun test __tests__/post-tx-balance.test.ts
 	cd $(PROJECT_DIR) && bun test __tests__/swap-payouts-persist.test.ts
+	cd $(PROJECT_DIR) && bun test __tests__/swap-native-symbol.test.ts __tests__/swap-history-native-symbol.test.ts
+	cd $(PROJECT_DIR) && bun test __tests__/swap-tracker-display.test.ts
 	cd $(PROJECT_DIR) && bun test __tests__/activity-not-sent.test.ts __tests__/activity-not-sent-ui.test.ts
 	cd $(PROJECT_DIR) && bun test __tests__/thor-maya-history-fee.test.ts
 	cd $(PROJECT_DIR) && bun test src/mainview/lib/effective-balance.test.ts

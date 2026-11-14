@@ -7,6 +7,7 @@
 import { Database } from 'bun:sqlite'
 import { migratePublicKeyCache } from './public-key-cache-migration'
 import { DEFAULT_PIONEER_API_BASE, resolvePioneerApiBase } from '../shared/pioneer-server'
+import { CHAINS } from '../shared/chains'
 import { Utils } from 'electrobun/bun'
 import { join, dirname } from 'node:path'
 import { mkdirSync, unlinkSync, existsSync, readFileSync, writeFileSync } from 'node:fs'
@@ -2841,6 +2842,11 @@ export function getSwapHistoryStats(deviceId?: string, walletId?: string): SwapH
   }
 }
 
+/** A built-in chain's native coin reads as the chain's symbol; rows saved before
+ *  V16 stored discovery's "BASE"/"ARB"/"OP" for L2 ETH. */
+const nativeSymbol = (caip: string | null) => caip && /\/slip44:/.test(caip)
+  ? CHAINS.find(c => c.caip.toLowerCase() === caip.toLowerCase())?.symbol : undefined
+
 function mapSwapRow(r: any): SwapHistoryRecord {
   return {
     id: r.id,
@@ -2849,8 +2855,8 @@ function mapSwapRow(r: any): SwapHistoryRecord {
     txid: r.txid,
     fromAsset: r.from_asset,
     toAsset: r.to_asset,
-    fromSymbol: r.from_symbol,
-    toSymbol: r.to_symbol,
+    fromSymbol: nativeSymbol(r.from_caip) ?? r.from_symbol,
+    toSymbol: nativeSymbol(r.to_caip) ?? r.to_symbol,
     fromChainId: r.from_chain_id,
     toChainId: r.to_chain_id,
     fromCaip: r.from_caip || undefined,
