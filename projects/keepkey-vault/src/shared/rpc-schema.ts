@@ -680,6 +680,8 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       'swap-cmd': SwapUiCommand
       'scan-progress': { percent: number; scannedHeight: number; tipHeight: number; blocksPerSec: number; etaSeconds: number }
       'balance-updated': ChainBalance
+      /** A broadcast or swap settlement made this chain's shown balance out of date. */
+      'balance-stale': { chainId: string }
       /** A scheduled post-tx Orchard rescan finished (shield/deshield/z2z).
        *  Frontend should re-pull the zcash chain balance so the dashboard
        *  reconciles spent notes / new outputs without user action. */

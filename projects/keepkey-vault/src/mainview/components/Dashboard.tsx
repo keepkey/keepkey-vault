@@ -1647,6 +1647,19 @@ function PersonalDashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSetti
 		})
 	}, [commitBalanceReconciliations, clearLocalPioneerError])
 
+	// A broadcast or swap settlement made this chain's figure out of date: it
+	// stays shown, but no longer as synced, until a confirmed read replaces it (audit v4 H3).
+	useEffect(() => onRpcMessage("balance-stale", ({ chainId }: { chainId: string }) => {
+		setBalances(prev => {
+			const row = prev.get(chainId)
+			if (!row || row.syncState === 'stale' || row.syncState === 'degraded') return prev
+			const next = new Map(prev)
+			next.set(chainId, { ...row, syncState: 'stale' })
+			balancesRef.current = next
+			return next
+		})
+	}), [])
+
 	// Seed-staleness purge: the backend detected the wallet data belonged to a
 	// DIFFERENT seed than the device (passphrase toggle, hidden↔standard
 	// transition, cached-passphrase reconnect) and dropped it. Clear the
@@ -1727,7 +1740,7 @@ function PersonalDashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSetti
 		if (!chain || chain.chainFamily !== 'evm') return agg
 		const selected = evmAddressSet.addresses.find(a => a.addressIndex === evmAddressSet.selectedIndex)
 		if (!selected) return agg
-		return selectedOwnerBalance(agg, selected.chainBalances?.[chainId], selected.address)
+		return selectedOwnerBalance(agg, selected.chainBalances?.[chainId], selected.address, evmAddressSet.addresses.length === 1)
 	}, [balances, allChains, evmAddressSet])
 
 	// Warm the browser-level image cache + hold live Image references so chain

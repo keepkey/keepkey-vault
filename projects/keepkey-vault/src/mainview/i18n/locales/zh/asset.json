@@ -90,5 +90,6 @@
   "invalidAddress": "地址无效",
   "defiNetwork": "网络",
   "defiSymbol": "符号",
-  "multisig": "多签"
+  "multisig": "多签",
+  "cached": "缓存"
 }

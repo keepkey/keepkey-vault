@@ -1213,8 +1213,9 @@ function PersonalAssetPage({ chain, balance, balanceLoading = false, onBack, fir
 											<Spinner size="xs" color="var(--gold)" aria-label={uiText("Refreshing balance")} />
 											<Text fontSize="10px" fontFamily="mono">{uiText("Refreshing balance")}</Text>
 										</Flex>
-										) : watchOnly && activeBalance?.syncState === "stale" ? (
-											// Watch-only cache: never "Synced". Say it is cached and how old it is.
+										) : activeBalance?.syncState === "stale" ? (
+											// Cache (watch-only, or older than this chain's last tx): never "Synced".
+											// Say it is cached and how old it is (audit v4 H3).
 											<Flex align="center" gap="1" color="var(--gold)" className="v3-glass-chip" px="2" py="0.5"
 												title={activeBalance.updatedAt ? `Cached ${new Date(activeBalance.updatedAt).toLocaleString(getNumberLocale())}` : undefined}>
 												<Box w="6px" h="6px" borderRadius="full" bg="var(--gold)" />

@@ -90,6 +90,9 @@ export function initDb() {
       )
     `)
     migratePublicKeyCache(db, 'balances')
+    // Set when the chain broadcasts or settles a swap after this row was cached;
+    // cleared only by a confirmed write (audit v4 H3).
+    try { db.exec('ALTER TABLE balances ADD COLUMN tx_after INTEGER') } catch { /* already exists */ }
 
     // Migration: add defi_positions_json for existing installs that
     // predate the GetPortfolioBalances includeDefi merge.
@@ -702,8 +705,8 @@ export function getCachedBalances(deviceId: string): { balances: ChainBalance[];
   try {
     if (!db) return null
     const rows = db.query(
-      'SELECT chain_id, symbol, balance, balance_usd, address, tokens_json, defi_positions_json, breakdown_json, updated_at FROM balances WHERE device_id = ?'
-    ).all(deviceId) as Array<{ chain_id: string; symbol: string; balance: string; balance_usd: number; address: string; tokens_json: string | null; defi_positions_json: string | null; breakdown_json: string | null; updated_at: number }>
+      'SELECT chain_id, symbol, balance, balance_usd, address, tokens_json, defi_positions_json, breakdown_json, updated_at, tx_after FROM balances WHERE device_id = ?'
+    ).all(deviceId) as Array<{ chain_id: string; symbol: string; balance: string; balance_usd: number; address: string; tokens_json: string | null; defi_positions_json: string | null; breakdown_json: string | null; updated_at: number; tx_after: number | null }>
     if (!rows || rows.length === 0) return null
     let maxUpdatedAt = 0
     const balances = rows.map(r => {
@@ -716,6 +719,8 @@ export function getCachedBalances(deviceId: string): { balances: ChainBalance[];
         address: r.address,
         updatedAt: r.updated_at,
       }
+      // A broadcast after this row: the figure predates it, so never "synced".
+      if (r.tx_after != null) entry.syncState = 'stale'
       if (r.tokens_json) {
         try { entry.tokens = JSON.parse(r.tokens_json) } catch { /* corrupt JSON, skip tokens */ }
       }
@@ -773,7 +778,8 @@ export function setCachedBalances(deviceId: string, balances: ChainBalance[], co
          tokens_json = excluded.tokens_json,
          defi_positions_json = excluded.defi_positions_json,
          breakdown_json = COALESCE(excluded.breakdown_json, breakdown_json),
-         updated_at  = excluded.updated_at`
+         updated_at  = excluded.updated_at,
+         tx_after    = NULL`
     )
     const tx = db.transaction(() => {
       for (const b of balances) {
@@ -812,7 +818,8 @@ export function updateCachedBalance(deviceId: string, balance: ChainBalance, for
            tokens_json = excluded.tokens_json,
            defi_positions_json = excluded.defi_positions_json,
            breakdown_json = COALESCE(excluded.breakdown_json, breakdown_json),
-           updated_at  = excluded.updated_at`,
+           updated_at  = excluded.updated_at,
+           tx_after    = NULL`,
         [deviceId, balance.chainId, balance.symbol, balance.balance, balance.balanceUsd, balance.address, tokensJson, defiJson, balance.breakdown ? JSON.stringify(balance.breakdown) : null, Date.now()]
       )
     } else {
@@ -833,6 +840,16 @@ export function updateCachedBalance(deviceId: string, balance: ChainBalance, for
     }
   } catch (e: any) {
     console.warn('[db] updateCachedBalance failed:', e.message)
+  }
+}
+
+/** A broadcast or swap settlement touched this chain: its cached row now predates it. */
+export function markBalanceTx(deviceId: string, chainId: string, at = Date.now()) {
+  try {
+    if (!db) return
+    db.run('UPDATE balances SET tx_after = ? WHERE device_id = ? AND chain_id = ?', [at, deviceId, chainId])
+  } catch (e: any) {
+    console.warn('[db] markBalanceTx failed:', e.message)
   }
 }
 
