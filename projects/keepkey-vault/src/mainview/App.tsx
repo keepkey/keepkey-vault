@@ -4,7 +4,6 @@ import { autoUnlockKey, resolveAppPhase, showWatchOnly, unlockErrorText, watchOn
 import { Box, Flex, Text, Button } from "@chakra-ui/react"
 import { useTranslation } from "react-i18next"
 import { PinEntry } from "./components/device/PinEntry"
-import { LockedPortfolioBanner } from "./components/LockedPortfolioBanner"
 import { PassphraseEntry } from "./components/device/PassphraseEntry"
 import { RecoveryWordEntry } from "./components/device/RecoveryWordEntry"
 import { PairingApproval } from "./components/device/PairingApproval"
@@ -37,7 +36,7 @@ import { DeviceGrid } from "./components/DeviceGrid"
 import type { VaultIdentity } from "../shared/vault-identity"
 import { VaultIdentityDialog } from "./components/VaultCards"
 import { EmulatorWalletChooser, loadEmulatorFirmware, type EmulatorFirmwareChoices } from "./components/EmulatorWalletChooser"
-import { DeviceClaimedDialog } from "./components/DeviceClaimedDialog"
+import { DeviceErrorDialog } from "./components/DeviceErrorDialog"
 import { LinuxUdevWarning } from "./components/LinuxUdevWarning"
 import { WindowsUsbTroubleshooter } from "./components/WindowsUsbTroubleshooter"
 import { IS_WINDOWS } from "./lib/platform"
@@ -1055,9 +1054,9 @@ function App() {
 
 	const incomingTxToast = <IncomingTxToast tx={incomingTx} onDismiss={dismissIncomingTx} />
 
-	const lockedBanner = deviceState.lockedPortfolioAvailable ? (
-		<LockedPortfolioBanner unlocking={unlocking} unlockError={unlockError} onUnlock={handleRequestUnlock} />
-	) : null
+	// Locked: a lock in the header status line, click to unlock (no banner).
+	const lockProps = deviceState.lockedPortfolioAvailable
+		? { locked: true, unlocking, unlockError, onUnlock: handleRequestUnlock } : {}
 
 	// Vault scope is independent of any owner's device portfolio. All balances
 	// and actions below remain bound to the vault's exact network and account.
@@ -1065,14 +1064,13 @@ function App() {
 		const exitVault = () => { setViewingVault(null); setVaultDetailsOpen(false) }
 		return <>{resizeHandles}{updateBanner}{firmwareDropZone}{pinOverlay}{passphraseOverlay}{charOverlay}{signingOverlay}{pairingOverlay}
 			<Flex direction="column" h="100vh" color="kk.textPrimary">
-				<TopNav label={viewingVault.name} connected={deviceState.state === 'ready' || deviceState.lockedPortfolioAvailable}
+				<TopNav {...lockProps} label={viewingVault.name} connected={deviceState.state === 'ready' || deviceState.lockedPortfolioAvailable}
 					firmwareVersion={deviceState.firmwareVersion} firmwareVerified={deviceState.firmwareVerified}
 					isEmulator={deviceState.isEmulator} onStopEmulator={() => { rpcRequest('emulatorStop').catch(() => {}) }}
 					onSettingsToggle={() => setVaultDetailsOpen(true)} activeTab="vault" onTabChange={() => {}}
 					vaultView onExitToDeviceSelect={exitVault} watchOnly={deviceState.state !== 'ready' && !deviceState.lockedPortfolioAvailable}
 					isBitcoinOnly={viewingVault.type === 'bitcoin-multisig'} />
 				<Flex flex="1" direction="column" overflow="auto" pt={NAV_CONTENT_OFFSET} pb="4">
-					{lockedBanner}
 					<Dashboard vault={viewingVault} watchOnly={deviceState.state !== 'ready' && !deviceState.lockedPortfolioAvailable}
 							firmwareVersion={deviceState.firmwareVersion} onLoaded={() => {}} onOpenVault={handleOpenVault} />
 				</Flex>
@@ -1146,10 +1144,14 @@ function App() {
 	const bottomBar = offline || showNodeBar
 
 	if (phase === "claimed") {
+		const kind = usbConnectionErrorKind(deviceState.error)
 		return (
 			<>{splashNav}{resizeHandles}{updateBanner}{firmwareDropZone}{signingOverlay}{pairingOverlay}{passphraseOverlay}{charOverlay}{pinOverlay}
-				<SplashScreen statusText={t("keepkeyDetected", { ns: "nav" })} variant="claimed" isBitcoinOnly={splashBitcoinOnly}>
-					<DeviceClaimedDialog error={deviceState.error || t("claimed.defaultError", { ns: "device" })} />
+				<SplashScreen statusText="" variant="claimed" childrenReady isBitcoinOnly={splashBitcoinOnly}>
+					<DeviceErrorDialog
+						title={t(DEVICE_ERROR_COPY[kind].status, { ns: "nav", defaultValue: DEVICE_ERROR_DEFAULTS[kind].status })}
+						hint={t(DEVICE_ERROR_COPY[kind].hint, { ns: "nav", defaultValue: DEVICE_ERROR_DEFAULTS[kind].hint })}
+						code={deviceState.error} onRetry={() => { rpcRequest("retryConnect").catch(() => {}) }} />
 				</SplashScreen>
 			</>
 		)
@@ -1194,16 +1196,15 @@ function App() {
 						: needsPin ? t("unlockYourKeepKey", { ns: "nav" })
 						: needsPassphrase ? t("passphraseRequired", { ns: "nav" })
 						: isConnecting ? t("keepkeyDetectedConnecting", { ns: "nav" })
-						: isError ? t(DEVICE_ERROR_COPY[errorKind].status, { ns: "nav", defaultValue: DEVICE_ERROR_DEFAULTS[errorKind].status })
+						: isError ? "" // the DeviceErrorDialog below carries the reason
 						: t("searchingForKeepKey", { ns: "nav" })
 					}
-					hintText={isError ? t(DEVICE_ERROR_COPY[errorKind].hint, { ns: "nav", defaultValue: DEVICE_ERROR_DEFAULTS[errorKind].hint })
+					hintText={isError ? undefined
 						// The device has no reject button on this screen: unplugging is the way out.
 						: needsPin && deviceState.wipePending === "confirm" ? t("unplugToCancelWipe", { ns: "nav", defaultValue: "Changed your mind? Unplug your KeepKey to cancel." })
 						: undefined}
-					detailText={isError && !linuxUdevBlocked && deviceState.error ? t("deviceErrorDetail", { ns: "nav", defaultValue: "Error code: {{code}}", code: deviceState.error }) : undefined}
 					variant={linuxUdevBlocked ? "error" : needsPin || needsPassphrase || isConnecting ? "connecting" : isError ? "error" : "searching"}
-					childrenReady={linuxUdevBlocked || needsPin || needsPassphrase ? true : gridReady}
+					childrenReady={linuxUdevBlocked || needsPin || needsPassphrase || isError ? true : gridReady}
 					onLogoClick={linuxUdevBlocked || needsPin || needsPassphrase ? undefined : () => { rpcRequest("retryConnect").catch(() => {}) }}
 					isBitcoinOnly={splashBitcoinOnly}
 				>
@@ -1216,6 +1217,10 @@ function App() {
 								<Button size="sm" bg="kk.gold" color="black" loading={unlocking} loadingText={uiText("Unlocking…")} onClick={handleRequestUnlock}>{t("pin.unlock", { ns: "device" })}</Button>
 								{unlockError && <Text fontSize="xs" color="kk.error" mt="2">{unlockError}</Text>}
 							</Box>}
+							{isError && <DeviceErrorDialog
+								title={t(DEVICE_ERROR_COPY[errorKind].status, { ns: "nav", defaultValue: DEVICE_ERROR_DEFAULTS[errorKind].status })}
+								hint={t(DEVICE_ERROR_COPY[errorKind].hint, { ns: "nav", defaultValue: DEVICE_ERROR_DEFAULTS[errorKind].hint })}
+								code={deviceState.error} onRetry={() => { rpcRequest("retryConnect").catch(() => {}) }} />}
 							<DeviceGrid
 								onOpenVault={handleOpenVault}
 								onViewPortfolio={(id, label) => { setWatchOnlyDeviceId(id); setWatchOnlyLabel(label); setWatchOnlyMode(true) }}
@@ -1308,6 +1313,7 @@ function App() {
 					}}
 				/>
 				<TopNav
+					{...lockProps}
 					label={deviceState.label}
 					connected={deviceState.state === "ready" || deviceState.lockedPortfolioAvailable}
 					firmwareVersion={deviceState.firmwareVersion}
@@ -1333,7 +1339,6 @@ function App() {
 					onReturnToConnected={() => { /* already on connected wallet */ }}
 				/>
 				<Flex flex="1" direction="column" overflow="auto" pt={showBanner ? NAV_CONTENT_OFFSET_WITH_BANNER : NAV_CONTENT_OFFSET} pb={bottomBar ? "38px" : "4"} transition="padding-top 0.2s">
-					{lockedBanner}
 				{/* TopNav offset plus banner height when visible. */}
 					{/* Kept mounted while another tab is open: a remount re-ran the mount
 					    fetch, so coming back from Address Book refreshed balances every

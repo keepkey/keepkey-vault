@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { isDeviceBusyError, isLocalDeviceAccessError, retryWhileDeviceBusy } from '../src/shared/device-access-error'
+import { isDeviceBusyError, isLocalDeviceAccessError, retryWhileDeviceBusy, withUnlockRetry } from '../src/shared/device-access-error'
 
 describe('local device admission errors', () => {
   const busy = 'KeepKey is busy with another request. Wait for it to finish, then try again.'
@@ -82,5 +82,31 @@ describe('waiting out a KeepKey held by another request', () => {
     const waiting = retryWhileDeviceBusy(async () => { calls++; current = false; throw new Error(busy) }, () => current, 1)
     await expect(waiting).rejects.toThrow(busy)
     expect(calls).toBe(1)
+  })
+})
+
+describe('a locked KeepKey opens the PIN dialog instead of an error', () => {
+  const locked = () => Promise.reject(new Error('Unlock KeepKey to load this account'))
+  test('unlocks once, then the request runs again and its answer is returned', async () => {
+    let unlocks = 0, calls = 0
+    const unlock = async () => { unlocks++ }
+    const run = () => (++calls === 1 ? locked() : Promise.resolve('0xabc'))
+    expect(await withUnlockRetry(run, unlock)).toBe('0xabc')
+    expect([unlocks, calls]).toEqual([1, 2])
+  })
+  test('requests failing together share one dialog', async () => {
+    let unlocks = 0
+    let release!: () => void
+    const unlock = () => { unlocks++; return new Promise<void>(r => { release = r }) }
+    const run = (() => { let n = 0; return () => (++n <= 2 ? locked() : Promise.resolve('ok')) })()
+    const both = Promise.all([withUnlockRetry(run, unlock), withUnlockRetry(run, unlock)])
+    await new Promise(r => setTimeout(r, 0)); release()
+    expect(await both).toEqual(['ok', 'ok'])
+    expect(unlocks).toBe(1)
+  })
+  test('other errors pass through without a dialog', async () => {
+    let unlocks = 0
+    await expect(withUnlockRetry(() => Promise.reject(new Error('No device connected')), async () => { unlocks++ })).rejects.toThrow('No device connected')
+    expect(unlocks).toBe(0)
   })
 })
