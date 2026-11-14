@@ -894,6 +894,18 @@ jobs:
           if (-not $dll) { throw "no DLL in the artifact matches manifest sha256 $want" }
           Copy-Item $dll.FullName projects/keepkey-vault/emulator-bundle/libkkemu.dll
 
+      - name: Build modules (hdwallet, proto-tx-builder, device-protocol lib/)
+        shell: bash
+        run: |
+          set -euo pipefail
+          (cd modules/hdwallet && yarn install --frozen-lockfile && yarn tsc --build)
+          (cd modules/proto-tx-builder && git submodule update --init osmosis-frontend && yarn install --frozen-lockfile && npx tsc -p . && test -f dist/index.js)
+          # Same as the Makefile's device-protocol stamp: force protobufjs's pbjs.
+          cd modules/device-protocol && npm install
+          cp node_modules/protobufjs/bin/pbjs node_modules/.bin/pbjs
+          npm run build
+          test -f lib/messages_pb.js
+
       - name: Build (unsigned)
         shell: pwsh
         run: |
