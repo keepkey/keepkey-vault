@@ -24,6 +24,7 @@ import { createHash, randomUUID } from "crypto"
 import { createSwapQuoteLeases } from './swap-quote-lease'
 import { assessSwapRisk } from '../shared/swap-risk'
 import { validateContactOnNetwork } from '../shared/address-validation'
+import { singleFlight } from './single-flight'
 import { PasswordBank } from './password-bank'
 import { passwordDeviceCipher } from './password-device'
 import { savePasswordBackup } from './password-backup'
@@ -94,6 +95,7 @@ function addressBookCertifyUnsupported(): boolean {
 }
 
 const AUTHENTICATOR_SLOT_COUNT = 10
+const broadcastOnce = singleFlight<{ txid: string; addressBookEntryId?: string; recipientUnsaved?: boolean }>()
 
 function normalizeAuthenticatorLabel(value: unknown, field: string): string {
 	const normalized = String(value || '').trim()
@@ -7301,7 +7303,9 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				return { unsignedTx: result.unsignedTx, fee: result.fee }
 			},
 
-			broadcastTx: async (params) => {
+			// The same signed tx sent again while its broadcast is in flight joins it:
+			// one broadcast, one activity row, one address-book entry (V12).
+			broadcastTx: (params) => broadcastOnce(JSON.stringify(params.signedTx ?? null), async () => {
 				const sessionEpoch = activitySessionEpoch // the wallet session this send belongs to
 				requireOnline('broadcast transaction')
 				if (!params.signedTx) throw new Error('Missing signedTx payload')
@@ -7386,7 +7390,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				}
 
 				return { ...result, addressBookEntryId: abEntry?.entryId, recipientUnsaved: abEntry?.unsaved }
-			},
+			}),
 
 			getMarketData: async (params) => {
 				requireOnline('market data')

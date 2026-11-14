@@ -140,6 +140,8 @@ export function SendForm({ chain, address, balance, balanceLoading = false, toke
 		memo, isMax, feeLevel, feeMode, customGasPrice, customGasLimit, customSatPerVByte])
 	const requestKeyRef = useRef(requestKey)
 	const operationGeneration = useRef(0)
+	// Set synchronously: a second Broadcast click before React commits `disabled` is ignored (V12).
+	const broadcasting = useRef(false)
 	const mounted = useRef(true)
 	if (requestKeyRef.current !== requestKey) {
 		requestKeyRef.current = requestKey
@@ -488,7 +490,8 @@ export function SendForm({ chain, address, balance, balanceLoading = false, toke
 	}, [buildResult, currentSigningContext, t, senderReady])
 
 	const handleBroadcast = useCallback(async () => {
-		if (!signedTx || !currentSigningContext) return
+		if (!signedTx || !currentSigningContext || broadcasting.current) return
+		broadcasting.current = true
 		const context = currentSigningContext
 		const generation = ++operationGeneration.current
 		setLoading(true)
@@ -528,6 +531,7 @@ export function SendForm({ chain, address, balance, balanceLoading = false, toke
 		} catch (e: any) {
 			if (operationIsCurrent(generation)) setError(e.message || t("broadcastFailed"))
 		} finally {
+			broadcasting.current = false
 			if (operationIsCurrent(generation)) setLoading(false)
 		}
 	}, [signedTx, buildResult, currentSigningContext, maxSentAmount, t])

@@ -154,14 +154,13 @@ await mount(); await fill(recipient, '0,5'); expect(text()).toContain('invalidAm
 await unmount()
 summary.commaDecimal = true
 
-// V12: a double-click on Broadcast. A browser delivers the two clicks as separate
-// tasks, so React commits `disabled` in between: exactly one broadcast goes out.
+// V12: a double-click on Broadcast. Both clicks land before React commits
+// `disabled` (same task): the handler's own latch lets exactly one broadcast out.
 await mount(); await fill(); await click('buildTransaction'); await complete(calls.at(-1)!, built('0.0001'))
 await click('signOnDevice'); await complete(calls.at(-1)!, 'signed')
 ;(globalThis as any).IS_REACT_ACT_ENVIRONMENT = false
 const broadcastButton = button('broadcastTransaction')
 dispatchClick(broadcastButton)
-await new Promise(resolve => setTimeout(resolve, 0))
 dispatchClick(broadcastButton)
 await new Promise(resolve => setTimeout(resolve, 0))
 ;(globalThis as any).IS_REACT_ACT_ENVIRONMENT = true

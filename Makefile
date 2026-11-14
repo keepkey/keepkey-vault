@@ -511,6 +511,7 @@ test-unit:
 	cd $(PROJECT_DIR) && bun test __tests__/asset-page-loading.test.ts
 	cd $(PROJECT_DIR) && bun test __tests__/send-form-requests.test.ts
 	cd $(PROJECT_DIR) && bun test __tests__/send-form-safety.test.ts
+	cd $(PROJECT_DIR) && bun test src/bun/single-flight.test.ts
 	cd $(PROJECT_DIR) && bun test __tests__/activity-fee-usd.test.ts
 	cd $(PROJECT_DIR) && bun test __tests__/device-signing-wait.test.ts
 	cd $(PROJECT_DIR) && bun test __tests__/lock-controls.test.tsx
