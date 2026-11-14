@@ -593,6 +593,11 @@ function rmTreeSafe(p: string) {
 // that root moves, the post-strip MAX_PATH assertion below surfaces the mismatch.
 const STAGE_PREFIX_LEN = 'C:\\tmp\\kk\\Resources\\app\\node_modules\\'.length
 const STAGE_BUDGET = 248 // collapse only what would overflow, with margin under 260
+// Linux: Hutch packs the app with ustar tar, which refuses names over 256 bytes
+// ("keepkey-vault/Resources/app/node_modules/<rel>"). The Windows budget above is
+// stricter, so the same collapse keeps Linux under its limit.
+const LINUX_ARCHIVE_PREFIX_LEN = 'keepkey-vault/Resources/app/node_modules/'.length
+const COLLAPSE_LONG_PATHS = process.platform === 'win32' || process.platform === 'linux'
 
 // Longest staged path any file under `dir` would occupy once staged for Inno.
 function subtreeMaxStagedLen(dir: string): number {
@@ -621,7 +626,7 @@ function subtreeMaxStagedLen(dir: string): number {
 // byte-for-byte as the working build had them, and we touch only the genuine
 // MAX_PATH offenders (pioneer-discovery's deep ethers/@ethersproject re-nesting).
 function shouldCollapseNested(pkgPath: string, nestedVer: string, topVer: string): boolean {
-  if (process.platform !== 'win32') return nestedVer === topVer
+  if (!COLLAPSE_LONG_PATHS) return nestedVer === topVer
   return topLevelSupersedes(nestedVer, topVer) && subtreeMaxStagedLen(pkgPath) > STAGE_BUDGET
 }
 
@@ -657,7 +662,7 @@ function stripDuplicateNestedNodeModules(dirPath: string) {
                   // Recurse INTO the kept package (Windows): a version-differing dep
                   // (e.g. ethers@5.7.2) can re-nest its own deep semver-superseded
                   // dups that overflow MAX_PATH; reach and collapse just those.
-                  if (process.platform === 'win32') stripDuplicateNestedNodeModules(scopedPath)
+                  if (COLLAPSE_LONG_PATHS) stripDuplicateNestedNodeModules(scopedPath)
                 }
               }
               // Remove the scope dir if empty
@@ -675,7 +680,7 @@ function stripDuplicateNestedNodeModules(dirPath: string) {
                 if (nestedVer !== topVer) console.log(`  Keeping nested: ${pkg.name}@${nestedVer} (top-level: ${topVer})`)
                 // Recurse into the kept package (Windows) to collapse its own deep
                 // semver-superseded dups (MAX_PATH offenders).
-                if (process.platform === 'win32') stripDuplicateNestedNodeModules(nestedPkgPath)
+                if (COLLAPSE_LONG_PATHS) stripDuplicateNestedNodeModules(nestedPkgPath)
               }
             }
           }
@@ -716,6 +721,13 @@ if (process.platform === 'win32') {
       `after nested dedupe. A deep nested tree could not be collapsed (likely a 0.x or cross-major ` +
       `dup that must stay nested). Inno Setup would fail to package it; resolve the offending dep tree.`
     )
+  }
+}
+if (process.platform === 'linux') {
+  const deepest = subtreeMaxStagedLen(nmDest) - STAGE_PREFIX_LEN + LINUX_ARCHIVE_PREFIX_LEN
+  console.log(`[collect-externals] Linux: deepest archive path = ${deepest} chars (tar limit 256)`)
+  if (deepest > 256) {
+    throw new Error(`[collect-externals] An archive path is ${deepest} chars, over the 256 Hutch's tar accepts, after nested dedupe; resolve the offending dep tree.`)
   }
 }
 let strippedSize = 0
