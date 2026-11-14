@@ -199,6 +199,7 @@ function rehydrateActiveSwaps(deviceId?: string, walletId?: string): void {
           expectedOutput: r.quotedOutput,
           minimumOutput: r.minimumOutput,
           receivedOutput: r.receivedOutput,
+          payouts: r.payouts,
           memo: r.memo,
           inboundAddress: r.inboundAddress,
           router: r.router,
@@ -710,6 +711,7 @@ function readSwapFromDb(txid: string, deviceId?: string, walletId?: string): Pen
     expectedOutput: r.quotedOutput,
     minimumOutput: r.minimumOutput,
     receivedOutput: r.receivedOutput,
+    payouts: r.payouts,
     memo: r.memo, inboundAddress: r.inboundAddress, router: r.router,
     integration: r.integration, swapper: r.swapper,
     status: r.status, confirmations: inferConfirmationsFromStatus(r.status),
@@ -1026,6 +1028,7 @@ export async function refreshSwap(txid: string, deviceId?: string, walletId?: st
           deviceId: swap.deviceId, walletId: swap.walletId,
           outboundTxid: swap.outboundTxid,
           receivedOutput: swap.status === 'completed' ? swap.receivedOutput : undefined,
+          payouts: swap.payouts,
           outboundChainId: swap.outboundChainId,
           refundReason: swap.refundReason,
           error: swap.error,
@@ -1089,7 +1092,7 @@ async function applyThornodeSettlement(swap: PendingSwap): Promise<void> {
   swapLog(`${TAG} THORNode settled ${swap.txid.slice(0, 10)}... outTxid=${swap.outboundTxid || 'native'}`)
   if (!noPersistSwaps.has(swap.txid)) updateSwapHistoryStatus(swap.txid, 'completed', {
     deviceId: swap.deviceId, walletId: swap.walletId, outboundTxid: swap.outboundTxid,
-    receivedOutput: swap.receivedOutput, completedAt: swap.completedAt,
+    receivedOutput: swap.receivedOutput, payouts: swap.payouts, completedAt: swap.completedAt,
   })
   pushUpdate(swap)
   pushComplete(swap)

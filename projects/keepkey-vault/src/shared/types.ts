@@ -2564,6 +2564,8 @@ export interface SwapHistoryRecord {
   inboundConfirmedAt?: number
   errorActionable?: string
   errorElapsedMinutes?: number
+  /** THOR/Maya settlement legs; the proof a completed swap paid out. */
+  payouts?: PendingSwap['payouts']
 }
 
 /** Filter params for getSwapHistory RPC */

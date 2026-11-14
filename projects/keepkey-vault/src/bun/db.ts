@@ -365,6 +365,8 @@ export function initDb() {
       try { db.exec(`ALTER TABLE swap_history ADD COLUMN ${col}`) } catch { /* already exists */ }
     }
     try { db.exec(`ALTER TABLE swap_history ADD COLUMN near_tx_hash TEXT`) } catch { /* already exists */ }
+    // Settlement legs (THOR/Maya): without them a completed swap reads back as unverified after a restart.
+    try { db.exec(`ALTER TABLE swap_history ADD COLUMN payouts_json TEXT`) } catch { /* already exists */ }
     // Inbound (input tx) on-chain location + timing from Pioneer's swap record
     // (blockchainTxData + confirmedAt + structured error). All best-effort; the
     // UI renders each conditionally. gas_used/effective_gas_price are EVM-only
@@ -2634,6 +2636,7 @@ export function updateSwapHistoryStatus(
     inboundConfirmedAt?: number
     errorActionable?: string
     errorElapsedMinutes?: number
+    payouts?: SwapHistoryRecord['payouts']
   }
 ) {
   try {
@@ -2659,6 +2662,7 @@ export function updateSwapHistoryStatus(
     if (extra?.nearTxHash) setClauses.push({ col: 'near_tx_hash', value: extra.nearTxHash })
     if (extra?.error) setClauses.push({ col: 'error', value: extra.error })
     if (extra?.receivedOutput) setClauses.push({ col: 'received_output', value: extra.receivedOutput })
+    if (extra?.payouts?.length) setClauses.push({ col: 'payouts_json', value: JSON.stringify(extra.payouts) })
     // Inbound block + timing + structured-error fields — only written when the
     // poll actually carries them (undefined → column unchanged), so a later
     // rescan that drops blockHash can't null out a value an earlier poll set.
@@ -2832,6 +2836,7 @@ function mapSwapRow(r: any): SwapHistoryRecord {
     inboundConfirmedAt: r.inbound_confirmed_at ?? undefined,
     errorActionable: r.error_actionable || undefined,
     errorElapsedMinutes: r.error_elapsed_minutes ?? undefined,
+    payouts: r.payouts_json ? JSON.parse(r.payouts_json) : undefined,
   }
 }
 
