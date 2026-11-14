@@ -750,8 +750,6 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 				w={{ base: "100vw", md: "760px" }}
 				maxW="100vw"
 				bg="kk.bg"
-				fontFamily="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif"
-				css={{ '& button, & select': { fontFamily: 'inherit' } }}
 				borderLeft="1px solid"
 				borderColor="kk.border"
 				zIndex={Z.drawerPanel}
