@@ -4,6 +4,7 @@ import { autoUnlockKey, resolveAppPhase, showWatchOnly, unlockErrorText, watchOn
 import { Box, Flex, Text, Button } from "@chakra-ui/react"
 import { useTranslation } from "react-i18next"
 import { PinEntry } from "./components/device/PinEntry"
+import { LockedPortfolioBanner } from "./components/LockedPortfolioBanner"
 import { PassphraseEntry } from "./components/device/PassphraseEntry"
 import { RecoveryWordEntry } from "./components/device/RecoveryWordEntry"
 import { PairingApproval } from "./components/device/PairingApproval"
@@ -1055,13 +1056,7 @@ function App() {
 	const incomingTxToast = <IncomingTxToast tx={incomingTx} onDismiss={dismissIncomingTx} />
 
 	const lockedBanner = deviceState.lockedPortfolioAvailable ? (
-		<Flex mx="4" my="2" px="3" py="2" align="center" justify="space-between" gap="3" flexWrap="wrap" border="1px solid" borderColor="kk.border" borderRadius="lg" bg="rgba(233,196,106,0.04)" role="status">
-			<Box>
-				<Text fontSize="xs" color="kk.textSecondary">{uiText("KeepKey locked")}</Text>
-				{unlockError && <Text fontSize="xs" color="kk.error">{unlockError}</Text>}
-			</Box>
-			<Button size="xs" variant="outline" loading={unlocking} loadingText={uiText("Unlocking…")} onClick={handleRequestUnlock}>{t("pin.unlock", { ns: "device" })}</Button>
-		</Flex>
+		<LockedPortfolioBanner unlocking={unlocking} unlockError={unlockError} onUnlock={handleRequestUnlock} />
 	) : null
 
 	// Vault scope is independent of any owner's device portfolio. All balances
