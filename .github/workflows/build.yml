@@ -50,10 +50,12 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # Xcode 26: Xcode 16.4's ld fails to link the fork's native wrapper
+          # for the 13.0 target ("___dso_handle does not have address").
           - platform: macos-arm64
-            runner: macos-15
+            runner: macos-26
           - platform: macos-x64
-            runner: macos-15-intel
+            runner: macos-26-intel
           - platform: linux-x64
             runner: ubuntu-22.04
     steps:
