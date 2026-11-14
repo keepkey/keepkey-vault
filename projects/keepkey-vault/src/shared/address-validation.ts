@@ -350,6 +350,15 @@ export function validateContactAddress(address: string, chain: ChainDef, existin
   return OK
 }
 
+/**
+ * validateContactAddress across every chain that shares one networkId (zcash
+ * and zcash-shielded do): valid on any of them is a valid contact.
+ */
+export function validateContactOnNetwork(address: string, chains: ChainDef[], existing?: { kind: string } | null): ValidationResult {
+  const fits = chains.find(c => validateAddress(address, c).valid) ?? chains[0]
+  return fits ? validateContactAddress(address, fits, existing) : fail('invalidAddress')
+}
+
 /** Two spellings of one address: hex and bech32 ignore case, base58 does not; BCH's cashaddr prefix is optional. */
 export function sameAddress(a: string | null | undefined, b: string | null | undefined): boolean {
   const bare = (v: string) => /^bitcoincash:/i.test(v) ? v.slice('bitcoincash:'.length) : v

@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { bech32 } from '@scure/base'
-import { isBurnAddress, knownTokenContract, validateAddress, validateContactAddress } from '../src/shared/address-validation'
+import { isBurnAddress, knownTokenContract, validateAddress, validateContactAddress, validateContactOnNetwork } from '../src/shared/address-validation'
 import { CHAINS } from '../src/shared/chains'
 
 const chain = (id: string) => {
@@ -79,5 +79,19 @@ describe('validateContactAddress (address book save)', () => {
     expect(validateContactAddress(addr, base, { kind: 'own' })).toEqual({ valid: false, error: 'contactIsOwnAddress' })
     expect(validateContactAddress(addr, base, { kind: 'external' })).toEqual({ valid: true })
     expect(validateContactAddress(addr, base)).toEqual({ valid: true })
+  })
+})
+
+describe('validateContactOnNetwork (zcash and zcash-shielded share one networkId)', () => {
+  const zcashNetwork = CHAINS.filter(c => c.networkId === chain('zcash').networkId)
+  // A Sapling-format address: bech32 'zs' with a 43-byte payload.
+  const sapling = bech32.encode('zs', bech32.toWords(new Uint8Array(43).fill(7)), 90)
+  test('a shielded recipient saved from the Zcash privacy tab is accepted', () => {
+    expect(zcashNetwork.map(c => c.id).sort()).toEqual(['zcash', 'zcash-shielded'])
+    expect(validateContactOnNetwork(sapling, zcashNetwork)).toEqual({ valid: true })
+  })
+  test('a bad address is still refused, and own addresses still are', () => {
+    expect(validateContactOnNetwork('zs1notanaddress', zcashNetwork).valid).toBe(false)
+    expect(validateContactOnNetwork(sapling, zcashNetwork, { kind: 'own' })).toEqual({ valid: false, error: 'contactIsOwnAddress' })
   })
 })
