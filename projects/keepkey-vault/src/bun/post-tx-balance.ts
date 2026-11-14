@@ -38,6 +38,8 @@ type Deps = {
   /** This reader also pushes the trusted balance, without a renderer RPC round trip. */
   refresh: (params: { chainId: string; forceRefresh: true }, isCurrent: () => boolean) => Promise<unknown>
   onError?: (chainId: string, error: unknown) => void
+  /** The chain's cached balance now predates a tx: never show it as synced (audit v4 H3). */
+  onTx?: (scope: BalanceRefreshScope, chainId: string) => void
   setTimer?: (run: () => void, ms: number) => unknown
   clearTimer?: (timer: unknown) => void
 }
@@ -87,6 +89,7 @@ export function createPostTxBalanceRefresh(deps: Deps) {
   function request(chainId: string, txid?: string, attempt = 0) {
     const scope = deps.getScope()
     if (!scope) return
+    deps.onTx?.(scope, chainId)
     const previous = jobs.get(chainId)
     if (previous) cancel(previous)
     const job: Job = { chainId, txid, scope, attempt }

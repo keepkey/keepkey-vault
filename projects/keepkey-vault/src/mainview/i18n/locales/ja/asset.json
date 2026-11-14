@@ -90,5 +90,6 @@
   "invalidAddress": "無効なアドレス",
   "defiNetwork": "ネットワーク",
   "defiSymbol": "シンボル",
-  "multisig": "マルチシグ"
+  "multisig": "マルチシグ",
+  "cached": "キャッシュ"
 }

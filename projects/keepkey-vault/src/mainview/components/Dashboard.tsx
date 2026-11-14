@@ -64,6 +64,7 @@ import {
 	type BalanceReconciliation,
 	type SwapExecutionBalanceDetail,
 } from "../../shared/balance-reconciliation"
+import { selectedOwnerBalance } from "../lib/effective-balance"
 import { playChaChing } from "../lib/sounds"
 
 /** Error boundary wrapping AssetPage — ensures user can always go back to Dashboard */
@@ -1646,6 +1647,19 @@ function PersonalDashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSetti
 		})
 	}, [commitBalanceReconciliations, clearLocalPioneerError])
 
+	// A broadcast or swap settlement made this chain's figure out of date: it
+	// stays shown, but no longer as synced, until a confirmed read replaces it (audit v4 H3).
+	useEffect(() => onRpcMessage("balance-stale", ({ chainId }: { chainId: string }) => {
+		setBalances(prev => {
+			const row = prev.get(chainId)
+			if (!row || row.syncState === 'stale' || row.syncState === 'degraded') return prev
+			const next = new Map(prev)
+			next.set(chainId, { ...row, syncState: 'stale' })
+			balancesRef.current = next
+			return next
+		})
+	}), [])
+
 	// Seed-staleness purge: the backend detected the wallet data belonged to a
 	// DIFFERENT seed than the device (passphrase toggle, hidden↔standard
 	// transition, cached-passphrase reconnect) and dropped it. Clear the
@@ -1725,26 +1739,8 @@ function PersonalDashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSetti
 		const chain = allChains.find(c => c.id === chainId)
 		if (!chain || chain.chainFamily !== 'evm') return agg
 		const selected = evmAddressSet.addresses.find(a => a.addressIndex === evmAddressSet.selectedIndex)
-		const cb = selected?.chainBalances?.[chainId]
-		if (!cb || !selected) return agg
-		// Price the native coin with the aggregate's price: the price refresh
-		// only rewrites `balances`, so the per-address USD went stale and the
-		// center card disagreed with the sidebar (audit v4 H14).
-		const aggBal = parseFloat(agg?.balance || '0')
-		const price = aggBal > 0 && agg?.nativeBalanceUsd != null ? agg.nativeBalanceUsd / aggBal : undefined
-		const nativeBalanceUsd = price !== undefined ? parseFloat(cb.balance || '0') * price : cb.nativeBalanceUsd
-		const balanceUsd = price !== undefined ? (cb.balanceUsd || 0) - (cb.nativeBalanceUsd || 0) + (nativeBalanceUsd || 0) : cb.balanceUsd
-		return {
-			chainId,
-			symbol: agg?.symbol || chain.symbol,
-			balance: cb.balance,
-			balanceUsd,
-			nativeBalanceUsd,
-			address: selected.address,
-			tokens: cb.tokens,
-			defiPositions: cb.defiPositions,
-			updatedAt: agg?.updatedAt,
-		}
+		if (!selected) return agg
+		return selectedOwnerBalance(agg, selected.chainBalances?.[chainId], selected.address, evmAddressSet.addresses.length === 1)
 	}, [balances, allChains, evmAddressSet])
 
 	// Warm the browser-level image cache + hold live Image references so chain

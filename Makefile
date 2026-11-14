@@ -492,6 +492,13 @@ test-unit:
 	cd $(PROJECT_DIR) && bun test __tests__/near-refund-safety.test.ts
 	cd $(PROJECT_DIR) && bun test __tests__/receive-request.test.ts
 	cd $(PROJECT_DIR) && bun test __tests__/post-tx-balance.test.ts
+	cd $(PROJECT_DIR) && bun test __tests__/swap-payouts-persist.test.ts
+	cd $(PROJECT_DIR) && bun test __tests__/activity-not-sent.test.ts __tests__/activity-not-sent-ui.test.ts
+	cd $(PROJECT_DIR) && bun test __tests__/thor-maya-history-fee.test.ts
+	cd $(PROJECT_DIR) && bun test src/mainview/lib/effective-balance.test.ts
+	cd $(PROJECT_DIR) && bun test __tests__/balance-tx-mark.test.ts
+	cd $(PROJECT_DIR) && bun test __tests__/asset-page-synced.test.ts
+	cd $(PROJECT_DIR) && bun test __tests__/app-view-only-locked.test.ts
 	cd $(PROJECT_DIR) && bun test __tests__/active-wallet-watch.test.ts __tests__/durable-wallet-monitor.test.ts __tests__/wallet-monitor-registry.test.ts __tests__/pioneer-event-capabilities.test.ts __tests__/event-stream-client.test.ts __tests__/pioneer-socket-client.test.ts
 	cd $(PROJECT_DIR) && bun test __tests__/pioneer-server.test.ts __tests__/pioneer-server-switch.test.ts
 	cd $(PROJECT_DIR) && bun test __tests__/pioneer-client-transition-isolated.test.ts

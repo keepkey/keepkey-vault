@@ -131,5 +131,8 @@
   "m934a6f3d": "De wisselkosten vergelijken de geoffreerde invoer- en uitvoerwaarden, inclusief de koers en routekosten. De netwerkkosten van de bronketen worden apart betaald. Het minimaal te ontvangen bedrag is een uitvoeringsgrens, geen gegarandeerde terugbetaling.",
   "m981df2e2": "Controleer en keur goed op KeepKey",
   "m53c7aeaa": "Ik accepteer de geschatte wisselkosten van {{cost}} en een waardeverschil van {{loss}} bij het minimaal te ontvangen bedrag. De netwerkkosten van de bronketen worden apart betaald.",
-  "m310febeb": "Hoge wisselkosten: {{cost}}, exclusief de netwerkkosten van de bronketen."
+  "m310febeb": "Hoge wisselkosten: {{cost}}, exclusief de netwerkkosten van de bronketen.",
+  "m1ea76214": "Niet verzonden",
+  "m1e706c21": "Verwijderen",
+  "mad64040d": "Desktop heeft deze ondertekende transactie nooit zien uitzenden. Verwijder hem als hij nooit is verzonden."
 }

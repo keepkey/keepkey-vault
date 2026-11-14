@@ -95,5 +95,6 @@
   "showFiltered_many": "Pokaż {{count}} odfiltrowanych tokenów",
   "hideFiltered_few": "Ukryj {{count}} odfiltrowane tokeny",
   "hideFiltered_many": "Ukryj {{count}} odfiltrowanych tokenów",
-  "multisig": "Multisig"
+  "multisig": "Multisig",
+  "cached": "Z pamięci podręcznej"
 }

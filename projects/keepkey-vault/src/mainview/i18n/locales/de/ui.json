@@ -126,5 +126,8 @@
   "m934a6f3d": "Die Swap-Kosten vergleichen die angebotenen Eingangs- und Ausgangswerte einschließlich Wechselkurs und Routengebühren. Die Gebühr des Ausgangsnetzwerks fällt separat an. Der Mindestbetrag beim Empfang ist eine Ausführungsgrenze, keine garantierte Rückerstattung.",
   "m981df2e2": "Auf KeepKey prüfen und bestätigen",
   "m53c7aeaa": "Ich akzeptiere die geschätzten Swap-Kosten von {{cost}} und eine Wertdifferenz von {{loss}} beim Mindestbetrag. Die Gebühr des Ausgangsnetzwerks fällt separat an.",
-  "m310febeb": "Hohe Swap-Kosten: {{cost}}, ohne die Gebühr des Ausgangsnetzwerks."
+  "m310febeb": "Hohe Swap-Kosten: {{cost}}, ohne die Gebühr des Ausgangsnetzwerks.",
+  "m1ea76214": "Nicht gesendet",
+  "m1e706c21": "Verwerfen",
+  "mad64040d": "Desktop hat nie gesehen, dass diese signierte Transaktion gesendet wurde. Verwerfen Sie sie, wenn sie nie gesendet wurde."
 }

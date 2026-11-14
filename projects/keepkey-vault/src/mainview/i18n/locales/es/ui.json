@@ -136,5 +136,8 @@
   "m934a6f3d": "El costo del intercambio compara los valores cotizados de entrada y salida, incluidos el tipo de cambio y las comisiones de la ruta. La comisión de la red de origen es independiente. La recepción mínima es un límite de ejecución, no un reembolso garantizado.",
   "m981df2e2": "Revisa y aprueba en KeepKey",
   "m53c7aeaa": "Acepto el costo estimado del intercambio de {{cost}} y una diferencia de valor de {{loss}} con la recepción mínima. La comisión de la red de origen es independiente.",
-  "m310febeb": "Costo de intercambio elevado: {{cost}}, sin incluir la comisión de la red de origen."
+  "m310febeb": "Costo de intercambio elevado: {{cost}}, sin incluir la comisión de la red de origen.",
+  "m1ea76214": "No enviada",
+  "m1e706c21": "Descartar",
+  "mad64040d": "Desktop nunca vio que esta transacción firmada se enviara. Descártala si nunca se envió."
 }

@@ -1499,7 +1499,6 @@
     "addressbook:saving": "es,fr,de,ja,zh,ko,pt,ru,it,pl,nl,th,tr,vi",
     "appstore:academyDescription": "es,fr,de,ja,zh,ko,pt,ru,it,pl,nl,th,tr,vi",
     "appstore:academyName": "es,fr,de,ja,zh,ko,pt,ru,it,pl,nl,th,tr,vi",
-    "asset:cached": "es,fr,de,ja,zh,ko,pt,ru,it,pl,nl,th,tr,vi",
     "asset:createPsbt": "es,fr,de,ja,zh,ko,pt,ru,it,pl,nl,th,tr,vi",
     "asset:defiAmountUnavailable": "es,fr,de,ja,zh,ko,ru,it,pl,nl,th,tr,vi",
     "asset:defiContract": "es,fr,de,ja,zh,ko,ru,it,pl,nl,th,tr,vi",

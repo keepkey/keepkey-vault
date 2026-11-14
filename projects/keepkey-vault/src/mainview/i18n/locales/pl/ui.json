@@ -135,5 +135,8 @@
   "m934a6f3d": "Koszt wymiany porównuje podane w ofercie wartości wejściową i wyjściową, uwzględniając kurs i opłaty trasy. Opłata sieci źródłowej jest oddzielna. Minimalna kwota odbioru to limit realizacji, a nie gwarantowany zwrot.",
   "m981df2e2": "Sprawdź i zatwierdź na KeepKey",
   "m53c7aeaa": "Akceptuję szacowany koszt wymiany {{cost}} oraz różnicę wartości {{loss}} przy minimalnej kwocie odbioru. Opłata sieci źródłowej jest oddzielna.",
-  "m310febeb": "Wysoki koszt wymiany: {{cost}}, bez opłaty sieci źródłowej."
+  "m310febeb": "Wysoki koszt wymiany: {{cost}}, bez opłaty sieci źródłowej.",
+  "m1ea76214": "Nie wysłano",
+  "m1e706c21": "Odrzuć",
+  "mad64040d": "Desktop nie widział rozgłoszenia tej podpisanej transakcji. Odrzuć ją, jeśli nigdy nie została wysłana."
 }

@@ -90,5 +90,6 @@
   "invalidAddress": "Geçersiz adres",
   "defiNetwork": "Ağ",
   "defiSymbol": "Sembol",
-  "multisig": "Çoklu imza"
+  "multisig": "Çoklu imza",
+  "cached": "Önbellekte"
 }

@@ -2568,6 +2568,8 @@ export interface SwapHistoryRecord {
   inboundConfirmedAt?: number
   errorActionable?: string
   errorElapsedMinutes?: number
+  /** THOR/Maya settlement legs; the proof a completed swap paid out. */
+  payouts?: PendingSwap['payouts']
 }
 
 /** Filter params for getSwapHistory RPC */
@@ -2668,7 +2670,8 @@ export interface RecentActivity {
   amount?: string
   asset?: string             // token symbol if different from chain native
   appName?: string           // for API-originating activities
-  status: 'signed' | 'broadcast' | 'completed' | 'refunded' | 'failed'
+  /** not_sent: a signed tx Desktop never saw broadcast within a day (it can be discarded). */
+  status: 'signed' | 'not_sent' | 'broadcast' | 'completed' | 'refunded' | 'failed'
   swapStatus?: SwapTrackingStatus  // detailed swap lifecycle status (only for type === 'swap')
   // ── Swap-only output side (only set when type === 'swap') ──
   outAmount?: string         // received_output if completed, else quoted_output

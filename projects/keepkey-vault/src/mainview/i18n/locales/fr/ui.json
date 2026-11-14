@@ -130,5 +130,8 @@
   "m934a6f3d": "Le coût de l’échange compare les valeurs d’entrée et de sortie du devis, y compris le taux et les frais de l’itinéraire. Les frais du réseau d’origine sont distincts. Le montant minimum reçu est une limite d’exécution, pas un remboursement garanti.",
   "m981df2e2": "Vérifiez et approuvez sur KeepKey",
   "m53c7aeaa": "J’accepte le coût estimé de l’échange de {{cost}} et un écart de valeur de {{loss}} au montant minimum reçu. Les frais du réseau d’origine sont distincts.",
-  "m310febeb": "Coût d’échange élevé : {{cost}}, hors frais du réseau d’origine."
+  "m310febeb": "Coût d’échange élevé : {{cost}}, hors frais du réseau d’origine.",
+  "m1ea76214": "Non envoyée",
+  "m1e706c21": "Supprimer",
+  "mad64040d": "Desktop n'a jamais vu cette transaction signée être diffusée. Supprimez-la si elle n'a jamais été envoyée."
 }

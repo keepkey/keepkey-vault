@@ -319,7 +319,7 @@ import { getEvmSimulationEndpoint, getEvmSimulationRpcUrls } from "./evm-simulat
 import { addContractFacts } from "./contract-facts"
 import { attachSafeCallPreviews } from "./evm-signing-preview"
 import { attachSafeMessagePreimage } from "./safe-message-preimage"
-import { initDb, getDb, factoryResetDb, getCustomTokens, addCustomToken as dbAddCustomToken, removeCustomToken as dbRemoveCustomToken, setCustomTokenIcon as dbSetCustomTokenIcon, getCustomChains, addCustomChainDb, removeCustomChainDb, getSetting, setSetting, setTokenVisibility as dbSetTokenVisibility, removeTokenVisibility as dbRemoveTokenVisibility, getAllTokenVisibility, insertApiLog, getApiLogs, clearApiLogs, setCachedBalances, getCachedBalances, updateCachedBalance, clearBalances, deleteCachedChainBalance, saveCachedPubkey, getLatestDeviceSnapshot, getCachedPubkeys, saveReport, getReportsList, getReportById, deleteReport, reportExists, getSwapHistory, getSwapHistoryStats, getSwapHistoryByTxid, getBip85Seeds, saveBip85Seed, deleteBip85Seed, clearCachedPubkeys, getRecentActivityFromLog, getPioneerServers, addPioneerServerDb, removePioneerServerDb, syncOwnAddressBook, recordOutbound, getAddressBookList, updateAddressBookEntry, deleteAddressBookEntry, getAddressBookHistory, getDeviceLabelMap, getBalancesForOwnSeed, addExternalEntry, matchAddressBook, insertClearSignEvent, getClearSignEvents, insertClearSignObservation, finalizeClearSignObservation, authenticateClearSignObservation, refuseClearSignObservationDefinition, getClearSignCoverageSummary, getClearSignAuditJobs, enqueueClearSignAuditDemand, getSignedTxReview, setDeviceMasterFingerprint, getDeviceSnapshotById, getAllDeviceSnapshots, saveImportedWatchOnlyWallet, setImportedWalletVerified } from "./db"
+import { initDb, getDb, factoryResetDb, getCustomTokens, addCustomToken as dbAddCustomToken, removeCustomToken as dbRemoveCustomToken, setCustomTokenIcon as dbSetCustomTokenIcon, getCustomChains, addCustomChainDb, removeCustomChainDb, getSetting, setSetting, setTokenVisibility as dbSetTokenVisibility, removeTokenVisibility as dbRemoveTokenVisibility, getAllTokenVisibility, insertApiLog, getApiLogs, clearApiLogs, setCachedBalances, getCachedBalances, updateCachedBalance, markBalanceTx, clearBalances, deleteCachedChainBalance, saveCachedPubkey, getLatestDeviceSnapshot, getCachedPubkeys, saveReport, getReportsList, getReportById, deleteReport, reportExists, getSwapHistory, getSwapHistoryStats, getSwapHistoryByTxid, getBip85Seeds, saveBip85Seed, deleteBip85Seed, clearCachedPubkeys, getRecentActivityFromLog, dismissActivity, getPioneerServers, addPioneerServerDb, removePioneerServerDb, syncOwnAddressBook, recordOutbound, getAddressBookList, updateAddressBookEntry, deleteAddressBookEntry, getAddressBookHistory, getDeviceLabelMap, getBalancesForOwnSeed, addExternalEntry, matchAddressBook, insertClearSignEvent, getClearSignEvents, insertClearSignObservation, finalizeClearSignObservation, authenticateClearSignObservation, refuseClearSignObservationDefinition, getClearSignCoverageSummary, getClearSignAuditJobs, enqueueClearSignAuditDemand, getSignedTxReview, setDeviceMasterFingerprint, getDeviceSnapshotById, getAllDeviceSnapshots, saveImportedWatchOnlyWallet, setImportedWalletVerified } from "./db"
 import { lookupEvmTx, recordSignedEvmTx, txDetails, walletBook } from "./signed-tx-review"
 import { getCentralAssetAuditHistory, getCentralClearSignStatus, getCentralContractAudit, submitCentralAssetReview, submitCentralContractReview } from './clearsign-central-client'
 import { buildCentralAssetReview, buildCentralContractReview } from './clearsign-central-review'
@@ -3046,15 +3046,33 @@ const postTxBalances = createPostTxBalanceRefresh({
 		return backgroundDeviceRead.run(true, () => getChainBalance(params, isCurrent))
 	},
 	onError: (chainId, error) => console.warn(`[post-tx-balance] ${chainId}:`, error instanceof Error ? error.message : error),
+	onTx: (scope, chainId) => {
+		// The cached figure predates this tx until a confirmed read replaces it,
+		// in this session and after a relaunch (audit v4 H3).
+		if (!engine.isPassphraseWallet) markBalanceTx(scope.deviceId, chainId)
+		if (getAllChains().find(c => c.id === chainId)?.chainFamily === 'evm') {
+			evmAddresses.markChainStale(chainId)
+			try { rpc.send['evm-addresses-update'](evmAddresses.toAddressSet()) } catch { /* webview not ready */ }
+		}
+		try { rpc.send['balance-stale']({ chainId }) } catch { /* webview not ready */ }
+	},
 })
 
 // Audit v4 H2: the broadcast refresh covers only the source chain. A settled
 // swap pays out on another chain (or refunds to the source) — refresh that too.
+// A swap that settles before the wallet is ready (tracker resumed at launch)
+// waits here for its wallet instead of being dropped (audit v4 H3).
+const pendingSettlementRefreshes: any[] = []
 function refreshSwapSettlementBalance(swap: any): void {
 	const scope = currentBalanceRefreshScope()
-	if (!scope || (swap?.walletId && swap.walletId !== scope.walletId)) return
+	if (!scope) { if (swap?.walletId && pendingSettlementRefreshes.length < 50) pendingSettlementRefreshes.push(swap); return }
+	if (swap?.walletId && swap.walletId !== scope.walletId) return
 	const chainId = swap?.status === 'refunded' ? swap.fromChainId : swap?.status === 'completed' ? swap.toChainId : undefined
 	if (chainId) postTxBalances.request(chainId, swap.outboundTxid)
+}
+function flushPendingSettlementRefreshes(): void {
+	if (!currentBalanceRefreshScope()) return
+	for (const swap of pendingSettlementRefreshes.splice(0)) refreshSwapSettlementBalance(swap)
 }
 
 function isWalletWatchChainEnabled(chainId: string): boolean {
@@ -9625,7 +9643,8 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					toCaip,
 					fromAmount: record?.fromAmount ?? live?.fromAmount,
 					expectedOutput: record?.quotedOutput ?? live?.expectedOutput,
-					payouts: live?.payouts,
+					payouts: live?.payouts ?? record?.payouts,
+					minimumOutput: record?.minimumOutput ?? live?.minimumOutput,
 					receivedOutput: live?.receivedOutput ?? record?.receivedOutput,
 					memo: record?.memo ?? live?.memo,
 					inboundAddress: record?.inboundAddress ?? live?.inboundAddress,
@@ -9807,8 +9826,10 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				console.log(`[activity] Scanned ${chain.symbol}${engine.isPassphraseWallet ? ' (hidden session, RAM only)' : ''}: ${txs} txs, ${added} new, ${updated} updated`)
 				return { count: added }
 			},
-			dismissActivity: async (_params) => {
-				// No-op: api_log entries are audit records, not dismissible
+			dismissActivity: async (params) => {
+				// Only an unsent signature is hidden; the api_log row stays for the audit log.
+				const scope = engine.isPassphraseWallet ? null : getWalletDbScope()
+				if (scope && dismissActivity(params.id, scope.deviceId, scope.walletId)) notifyActivityChanged()
 			},
 			clearRecentActivity: async () => {
 				// No-op: api_log entries are audit records
@@ -9848,6 +9869,9 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				if (missingChains.length > 0) {
 					staleReasons.push(`missing_chains:${missingChains.map(c => c.id).join(',')}`)
 				}
+				// Broadcast or swap settlement after the cached row (audit v4 H3).
+				const txAfterCache = result.balances.filter(b => b.syncState === 'stale').map(b => b.chainId)
+				if (txAfterCache.length > 0) staleReasons.push(`tx_after_cache:${txAfterCache.join(',')}`)
 				console.log(`[cache-health] ${result.balances.length} cached chains, ${supportedChains.length} supported, ${missingChains.length} missing`)
 
 				// Missing BTC xpub balances: BTC has a cached aggregate but no per-xpub breakdown
@@ -11506,6 +11530,7 @@ engine.on('state-change', (state) => {
 engine.on('wallet-scope-ready', ({ deviceId, seedAddress }) => {
 	console.log(`[Vault] Wallet scope ready on ${deviceId}: ${seedAddress?.slice(0, 10)}...`)
 	flushPendingScopedApiLogs()
+	flushPendingSettlementRefreshes()
 	bootstrapActiveWalletWatches()
 })
 // Seed changed — different mnemonic loaded on the same hardware.
