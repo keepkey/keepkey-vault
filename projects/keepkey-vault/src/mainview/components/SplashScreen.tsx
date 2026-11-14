@@ -146,6 +146,7 @@ export function SplashScreen({ statusText, hintText, detailText, children, varia
         textAlign="center"
         px={3}
       >
+        {statusText && (
         <Box
           display="inline-flex"
           px="3.5"
@@ -165,6 +166,7 @@ export function SplashScreen({ statusText, hintText, detailText, children, varia
             {(variant === 'searching' || variant === 'connecting') && <EllipsisDots interval={300} />}
           </Flex>
         </Box>
+        )}
         {hintText && (
           <Text fontSize="11px" color="var(--text-3)" mt={2.5} maxW="340px" textAlign="center" mx="auto" letterSpacing="-0.005em">
             {hintText}

@@ -1,4 +1,4 @@
-// Lock controls on the dashboard (audit v4 V18, V19). Chakra is replaced by plain
+// Lock controls on the dashboard: the header padlock (V19) and the vault button. Chakra is replaced by plain
 // elements that keep the styling props, so the test reads what the user would see.
 import { describe, expect, mock, test } from 'bun:test'
 import * as React from 'react'
@@ -13,31 +13,29 @@ mock.module('../src/mainview/hooks/usePasswordManagerEnabled', () => ({ usePassw
 mock.module('../src/mainview/components/Bip85VaultDialog', () => ({ Bip85VaultDialog: () => null }))
 mock.module('../src/mainview/components/PasswordBankView', () => ({ PasswordBankView: () => null }))
 
-describe('locked-portfolio banner (V19)', () => {
-  test('Unlock is the primary action, not the smallest outline button', async () => {
-    const { LockedPortfolioBanner } = await import('../src/mainview/components/LockedPortfolioBanner')
-    const html = renderToStaticMarkup(<LockedPortfolioBanner unlocking={false} unlockError={null} onUnlock={() => {}} />)
-    const unlock = html.match(/<button[^>]*>pin\.unlock<\/button>/)?.[0]
-    expect(unlock).toBeDefined()
-    expect(unlock).toContain('data-variant="solid"')
-    expect(unlock).toContain('data-size="sm"')
-    expect(unlock).toContain('data-bg="var(--gold)"')
-    expect(html).toContain('KeepKey locked')
+describe('locked KeepKey: a padlock in the header, no banner', () => {
+  const render = async (unlockError: string | null) => {
+    const { HeaderLock } = await import('../src/mainview/components/HeaderLock')
+    return renderToStaticMarkup(<HeaderLock unlocking={false} unlockError={unlockError} onUnlock={() => {}} />)
+  }
+  test('draws a padlock labelled KeepKey locked', async () => {
+    const html = await render(null)
+    expect(html).toContain('M7 11V7a5 5 0 0 1 10 0v4') // padlock shackle
+    expect(html).toContain('aria-label="KeepKey locked"')
   })
-  test('shows the unlock error under the label', async () => {
-    const { LockedPortfolioBanner } = await import('../src/mainview/components/LockedPortfolioBanner')
-    expect(renderToStaticMarkup(<LockedPortfolioBanner unlocking={false} unlockError="Invalid PIN" onUnlock={() => {}} />)).toContain('Invalid PIN')
+  test('an unlock error shows on the padlock', async () => {
+    expect(await render('Invalid PIN')).toContain('title="Invalid PIN"')
   })
 })
 
-describe('vault tools button (V18)', () => {
-  // It opens passwords and the seed vault; it locks nothing, so it must not draw a padlock.
-  test('the button that opens the vault does not look like a lock', async () => {
+describe('vault tools button', () => {
+  // Owner 11-14: the button that opens passwords and the seed vault draws a padlock.
+  test('the vault button draws a padlock', async () => {
     const { VaultToolsButton } = await import('../src/mainview/components/VaultToolsButton')
     const html = renderToStaticMarkup(<VaultToolsButton seedVaultAvailable />)
     const icon = html.match(/<svg[\s\S]*?<\/svg>/)?.[0]
     expect(icon).toBeDefined()
-    expect(icon).not.toContain('M7 11V7a5 5 0 0 1 10 0v4') // padlock shackle
+    expect(icon).toContain('M7 11V7a5 5 0 0 1 10 0v4') // padlock shackle
     expect(html).toContain('aria-label="Passwords and seed vault"')
   })
 })

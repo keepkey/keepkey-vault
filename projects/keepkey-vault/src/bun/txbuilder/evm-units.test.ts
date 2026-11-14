@@ -76,3 +76,33 @@ describe('no gas quote, no transaction (H2: the 2 gwei guess is never signed)', 
     await expect(build(failing(async () => { throw new Error('timeout') }), { gasPriceGwei: '20' })).rejects.toThrow(GAS_PRICE_ERROR.quoteUnavailable)
   })
 })
+
+describe('token Max is verified at send, never from the page cache', () => {
+  const base = CHAINS.find(c => c.id === 'base')!
+  const owner = '0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed'
+  const usdc = 'eip155:8453/erc20:0x833589fcd6edb6e08f4c7c32d4f71b54bda02913'
+  const pioneer = {
+    GetGasPriceByNetwork: async () => ({ data: { average: '0.01' } }),
+    GetNonceByNetwork: async () => ({ data: { nonce: 7 } }),
+    GetBalanceAddressByNetwork: async () => ({ data: { balance: '0.01' } }),
+    GetTokenBalance: async () => ({ data: '80.923336' }),
+  }
+  test('a stale cached balance on screen does not set the amount', async () => {
+    const tx: any = await buildEvmTx(pioneer as any, base, {
+      to: '0x0000000000000000000000000000000000001234', amount: '0', isMax: true, fromAddress: owner, feeLevel: 5,
+      caip: usdc, tokenDecimals: 6, tokenBalance: '280.923336',
+    } as any)
+    // transfer(to, amount): the last 32 bytes are the amount in base units.
+    expect(BigInt('0x' + tx.data.slice(-64))).toBe(80923335n) // 80.923336 on chain, less the 1-unit Max reserve
+  })
+  const send = (amount: string) => buildEvmTx(pioneer as any, base, {
+    to: '0x0000000000000000000000000000000000001234', amount, fromAddress: owner, feeLevel: 5, caip: usdc, tokenDecimals: 6,
+  } as any)
+  test('a send above the balance read at send time is refused', async () => {
+    await expect(send('100')).rejects.toThrow('Insufficient balance: 80.923336 available, 100 requested')
+  })
+  test('a send within it builds', async () => {
+    const tx: any = await send('50')
+    expect(BigInt('0x' + tx.data.slice(-64))).toBe(50000000n)
+  })
+})

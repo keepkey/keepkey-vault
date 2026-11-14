@@ -14,6 +14,12 @@ describe('usbConnectionErrorKind', () => {
     for (const raw of ['LIBUSB_ERROR_TIMEOUT', 'LIBUSB_ERROR_PIPE', 'LIBUSB_ERROR_IO', 'transfer timed out'])
       expect(usbConnectionErrorKind(raw)).toBe('not-responding')
   })
+  test("the engine's own give-up and stuck messages mean it stopped responding", () => {
+    for (const raw of [
+      'Could not connect to KeepKey after multiple attempts. Unplug and re-plug the device, or click the logo to retry.',
+      'Your KeepKey is not responding. Unplug it and plug it back in.',
+    ]) expect(usbConnectionErrorKind(raw)).toBe('not-responding')
+  })
   test('anything else stays unknown, including empty input', () => {
     expect(usbConnectionErrorKind('Firmware returned an unexpected message')).toBe('unknown')
     expect(usbConnectionErrorKind(null)).toBe('unknown')

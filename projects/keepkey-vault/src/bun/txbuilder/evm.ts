@@ -136,7 +136,6 @@ export interface BuildEvmParams {
   isMax?: boolean
   fromAddress: string
   caip?: string     // Token CAIP-19 — triggers ERC-20 mode when contains 'erc20'
-  tokenBalance?: string  // human-readable token balance from frontend
   tokenDecimals?: number // token decimals from frontend
   rpcUrl?: string   // Direct RPC URL — bypasses Pioneer for custom chains
   addressIndex?: number  // EVM multi-address: derivation index (default 0)
@@ -149,7 +148,7 @@ export async function buildEvmTx(
   chain: ChainDef,
   params: BuildEvmParams,
 ) {
-  const { memo, feeLevel = 5, isMax = false, fromAddress, caip, tokenBalance, tokenDecimals: frontendDecimals, rpcUrl, addressIndex, gasPriceGwei: gasPriceGweiOverride, gasLimit: gasLimitOverrideStr } = params
+  const { memo, feeLevel = 5, isMax = false, fromAddress, caip, tokenDecimals: frontendDecimals, rpcUrl, addressIndex, gasPriceGwei: gasPriceGweiOverride, gasLimit: gasLimitOverrideStr } = params
   // Address validation trims, so a pasted " 0x…" passes review; hdwallet then
   // refuses the untrimmed string at signing ("invalid hexadecimal string").
   // Build exactly the address that was validated, and refuse anything else here.
@@ -323,30 +322,28 @@ export async function buildEvmTx(
     // Compute token amount in base units
     let amountBaseUnits: bigint
 
+    // Read at send time, never the page's cached figure: the page shows the
+    // last-known balance without waiting on the network, so it can be stale.
+    let tokBalStr: string
+    try {
+      const tokBalResp = await pioneer.GetTokenBalance({
+        networkId: chain.networkId,
+        address: fromAddress,
+        contractAddress,
+      })
+      tokBalStr = readPioneerTokenBalance(tokBalResp, `${contractAddress} balance`)
+      console.log(`${TAG} Token balance at send: ${tokBalStr}`)
+    } catch (e: any) {
+      throw new Error(`Cannot verify token balance before sending: ${e.message}`)
+    }
+    const available = parseUnits(tokBalStr, tokenDecimals)
     if (isMax) {
-      // Prefer frontend-provided balance (already displayed to user) over re-fetching
-      let tokBalStr: string
-      if (tokenBalance && parseFloat(tokenBalance) > 0) {
-        tokBalStr = tokenBalance
-        console.log(`${TAG} Using frontend token balance for max: ${tokBalStr}`)
-      } else {
-        try {
-          const tokBalResp = await pioneer.GetTokenBalance({
-            networkId: chain.networkId,
-            address: fromAddress,
-            contractAddress,
-          })
-          tokBalStr = readPioneerTokenBalance(tokBalResp, `${contractAddress} balance`)
-          console.log(`${TAG} Fetched token balance from API for max: ${tokBalStr}`)
-        } catch (e: any) {
-          throw new Error(`Cannot fetch token balance for max send: ${e.message}`)
-        }
-      }
       amountBaseUnits = tokenMaxSpendableBaseUnits(tokBalStr, tokenDecimals) ?? 0n
       if (amountBaseUnits <= 0n) throw new Error('Token balance is zero')
     } else {
       if (isNaN(amountNum) || amountNum <= 0) throw new Error('Invalid token amount')
       amountBaseUnits = parseUnits(String(params.amount), tokenDecimals)
+      if (amountBaseUnits > available) throw new Error(`Insufficient balance: ${tokBalStr} available, ${params.amount} requested`)
     }
 
     console.log(`${TAG} ERC-20 transfer: ${amountBaseUnits} base units → ${contractAddress}`)

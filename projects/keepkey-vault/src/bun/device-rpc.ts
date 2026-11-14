@@ -38,15 +38,18 @@ export function gateDeviceRpc<T extends Record<string, any>>(handlers: T, deps: 
       const balanceRead = BALANCE_READS.has(name)
       const mutableRead = balanceRead || MANAGER_READS.has(name)
       const publicRead = PUBLIC_READS.has(name) || balanceRead
-      const params = args[0] as { showDisplay?: boolean; show_display?: boolean; paths?: Array<{ showDisplay?: boolean; show_display?: boolean }>; chainId?: string; forceRefresh?: boolean } | undefined
+      const params = args[0] as { showDisplay?: boolean; show_display?: boolean; paths?: Array<{ showDisplay?: boolean; show_display?: boolean }>; chainId?: string; forceRefresh?: boolean; userInitiated?: boolean } | undefined
       const display = params?.showDisplay === true || params?.show_display === true
         || (name === 'getPublicKeys' && Array.isArray(params?.paths) && params.paths.some(path => path?.showDisplay === true || path?.show_display === true))
       const key = name === 'getBalance' ? `${name}:${params?.chainId}`
-        : name === 'getBalances' ? `${name}:${JSON.stringify(Object.fromEntries(Object.entries(params ?? {}).filter(([key]) => key !== 'forceRefresh')))}`
+        : name === 'getBalances' ? `${name}:${JSON.stringify(Object.fromEntries(Object.entries(params ?? {}).filter(([key]) => key !== 'forceRefresh' && key !== 'userInitiated')))}`
         : `${name}:${JSON.stringify(args)}`
       const locked = deps.locked()
       const passive = publicRead && !display
-      if (passive && cache.has(key) && (!mutableRead || locked)) {
+      // A refresh the user pressed is never answered from cache: busy is waited
+      // out by the caller, locked opens the PIN dialog (rpc.ts withUnlockRetry).
+      const pressed = balanceRead && params?.userInitiated === true
+      if (passive && !pressed && cache.has(key) && (!mutableRead || locked)) {
         return cachedResult(key, mutableRead)
       }
       if (passive && locked) throw new DeviceOperationError(423, 'Unlock KeepKey to load this account')
@@ -66,7 +69,7 @@ export function gateDeviceRpc<T extends Record<string, any>>(handlers: T, deps: 
           // admitted provider/device read must remain visible and never cache.
           const unavailable = failure?.status === 423
             || (failure?.status === 409 && /^KeepKey is busy\b/.test(failure.message ?? ''))
-          if (passive && mutableRead && !dispatched && unavailable && cache.has(key)) return cachedResult(key, true)
+          if (passive && !pressed && mutableRead && !dispatched && unavailable && cache.has(key)) return cachedResult(key, true)
           throw error
         }
         if (!same(current, deps.scope())) throw changed()

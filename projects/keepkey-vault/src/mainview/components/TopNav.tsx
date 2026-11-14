@@ -1,4 +1,5 @@
 import { useUiTranslation } from "../i18n/ui"
+import { HeaderLock } from "./HeaderLock"
 import { useRef, useState } from "react"
 import { Flex, Text, Box, Image, IconButton, HStack } from "@chakra-ui/react"
 import { useTranslation } from "react-i18next"
@@ -46,6 +47,11 @@ interface TopNavProps {
 	onWatchWallet?: (deviceId: string, label: string) => void
 	onReturnToConnected?: () => void
 	vaultView?: boolean
+	/** KeepKey auto-locked with the portfolio still on screen: lock icon, click to unlock. */
+	locked?: boolean
+	unlocking?: boolean
+	unlockError?: string | null
+	onUnlock?: () => void
 }
 
 const NAV_BG = "rgba(11,11,14,0.92)"
@@ -168,6 +174,10 @@ export function TopNav({
 	onWatchWallet,
 	onReturnToConnected,
 	vaultView = false,
+	locked = false,
+	unlocking = false,
+	unlockError = null,
+	onUnlock,
 }: TopNavProps) {
 	const multisigEnabled = useBtcMultisigEnabled()
   const uiText = useUiTranslation()
@@ -357,6 +367,7 @@ export function TopNav({
 					{!watchOnly && firmwareVersion ? (
 						<Flex align="center" gap="1" mt="1px" lineHeight="1">
 							<Box w="5px" h="5px" borderRadius="full" bg={dotColor} />
+							{locked && <HeaderLock unlocking={unlocking} unlockError={unlockError} onUnlock={onUnlock} />}
 							{firmwareVerified === false ? (
 								<>
 									<ConstructionIcon />
@@ -382,6 +393,7 @@ export function TopNav({
 					) : !watchOnly ? (
 						<Flex align="center" gap="1" mt="1px" lineHeight="1">
 							<Box w="5px" h="5px" borderRadius="full" bg={dotColor} />
+							{locked && <HeaderLock unlocking={unlocking} unlockError={unlockError} onUnlock={onUnlock} />}
 							<Text fontSize="10px" color="var(--text-3)" fontFamily={FONT_MONO} letterSpacing="0.02em">
 								{connected ? uiText("connected") : uiText("offline")}
 							</Text>

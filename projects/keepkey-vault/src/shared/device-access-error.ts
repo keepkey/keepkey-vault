@@ -49,3 +49,20 @@ export async function retryWhileDeviceBusy<T>(run: () => Promise<T>, isCurrent: 
     }
   }
 }
+
+/** A read the backend refused only because the KeepKey is locked (device-rpc.ts). */
+const UNLOCK_NEEDED = /unlock KeepKey to load this account$/i
+
+let unlockInFlight: Promise<void> | null = null
+
+/** Never show "Unlock KeepKey to load this account": open the PIN dialog right
+ * away (one dialog for every request that hit the lock), then run the request again. */
+export async function withUnlockRetry<T>(run: () => Promise<T>, unlock: () => Promise<void>): Promise<T> {
+  try { return await run() } catch (error) {
+    const message = typeof error === 'string' ? error : (error as { message?: unknown } | null)?.message
+    if (typeof message !== 'string' || !UNLOCK_NEEDED.test(message.trim())) throw error
+    unlockInFlight ??= unlock().finally(() => { unlockInFlight = null })
+    await unlockInFlight
+    return run()
+  }
+}
