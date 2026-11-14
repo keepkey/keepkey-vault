@@ -836,6 +836,79 @@ jobs:
             projects/keepkey-vault/artifacts/*
           retention-days: 30
 
+  windows-unsigned:
+    # Runs scripts/build-windows-production.ps1 -SkipSign, as the Windows box
+    # does minus signing, so a broken Windows build shows up before the box.
+    # Not a dependency of the release job: the shipped installer is built and
+    # signed on the Windows box.
+    name: Windows x64 (unsigned build check)
+    runs-on: windows-2022
+    timeout-minutes: 150
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Init required submodules
+        run: git submodule update --init modules/hdwallet modules/proto-tx-builder modules/device-protocol modules/electrobun
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install Yarn, Inno Setup and protoc
+        run: |
+          npm install -g yarn
+          choco install innosetup protoc -y --no-progress
+
+      - name: Install pinned Hutch
+        shell: pwsh
+        run: |
+          ./scripts/hutch-windows.ps1 -Install
+          if ($LASTEXITCODE -ne 0) { throw "hutch install failed" }
+          "$HOME\.hutch\bin" | Out-File -FilePath $env:GITHUB_PATH -Append
+
+      - name: Download certified emulator 7.17 artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ env.EMU_SOURCE_ARTIFACT }}
+          path: .certified-emulator-${{ env.EMU_RELEASE_VERSION }}
+          github-token: ${{ github.token }}
+          repository: keepkey/keepkey-vault
+          run-id: ${{ env.EMU_SOURCE_RUN_ID }}
+
+      - name: Stage certified emulator DLL
+        shell: pwsh
+        run: |
+          $want = (Get-Content projects/keepkey-vault/emulator-bundle/manifest.json | ConvertFrom-Json).files.'libkkemu.dll'.sha256
+          $dll = Get-ChildItem -Recurse ".certified-emulator-$env:EMU_RELEASE_VERSION" -Filter *.dll |
+            Where-Object { (Get-FileHash -Algorithm SHA256 $_.FullName).Hash.ToLowerInvariant() -eq $want } | Select-Object -First 1
+          if (-not $dll) { throw "no DLL in the artifact matches manifest sha256 $want" }
+          Copy-Item $dll.FullName projects/keepkey-vault/emulator-bundle/libkkemu.dll
+
+      - name: Build (unsigned)
+        shell: pwsh
+        run: |
+          ./scripts/build-windows-production.ps1 -SkipSign
+          if ($LASTEXITCODE -ne 0) { throw "build-windows-production.ps1 failed ($LASTEXITCODE)" }
+
+      - name: Upload Windows build
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: keepkey-vault-windows-unsigned
+          path: release-windows/*
+          if-no-files-found: warn
+          retention-days: 7
+
   intel-smoke:
     name: Intel macOS packaged-app smoke test
     needs: build
