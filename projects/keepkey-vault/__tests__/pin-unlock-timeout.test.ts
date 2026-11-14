@@ -43,6 +43,20 @@ describe('requestUnlock', () => {
     }
   })
 
+  // A cancelled PIN entry is the user's choice (audit v4 V8): a 499 cancel with
+  // words, not hdwallet's raw Failure object that rendered as "[object Object]".
+  test('a cancelled PIN entry (Failure code 6) rejects as a readable 499 cancel', async () => {
+    const failure = { message_enum: 3, message_type: 'Failure', message: { code: 6, message: 'PIN Cancelled' } }
+    const error = await requestUnlock({ call: async () => { throw failure } }).then(() => null, e => e)
+    expect(error).toBeInstanceOf(Error)
+    expect(error).toMatchObject({ status: 499, message: 'PIN entry cancelled' })
+  })
+
+  test('other unlock failures pass through unchanged (a wrong PIN still retries on code 7)', async () => {
+    const wrongPin = { message_enum: 3, message_type: 'Failure', message: { code: 7, message: 'Invalid PIN' } }
+    await expect(requestUnlock({ call: async () => { throw wrongPin } })).rejects.toBe(wrongPin)
+  })
+
   test("recognises hdwallet's TransportTimeoutError", () => {
     expect(isTransportTimeout(new TransportTimeoutError('device response', 5000))).toBe(true)
     expect(isTransportTimeout(new Error('Invalid PIN'))).toBe(false)

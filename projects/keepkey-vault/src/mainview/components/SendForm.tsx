@@ -6,6 +6,7 @@ import { rpcRequest } from "../lib/rpc"
 import { playSent } from "../lib/sounds"
 import { formatBalance } from "../lib/formatting"
 import { describeSigningError } from "../lib/signing-errors"
+import { cancelDeviceSigning, signOnDevice } from "../lib/device-signing"
 import { useFiat } from "../lib/fiat-context"
 import { getAsset } from "../../shared/assetLookup"
 import { QrScannerOverlay } from "./QrScannerOverlay"
@@ -475,7 +476,7 @@ export function SendForm({ chain, address, balance, balanceLoading = false, toke
 		setError(null)
 
 		try {
-			const result = await rpcRequest(context.signMethod, buildResult.unsignedTx, 120000)
+			const result = await signOnDevice(context.signMethod, buildResult.unsignedTx)
 			if (!operationIsCurrent(generation)) return
 			setSignedTx(result)
 			setPhase('signed')
@@ -1107,6 +1108,16 @@ export function SendForm({ chain, address, balance, balanceLoading = false, toke
 							</Box>
 						)}
 					</Box>
+
+					{loading && (
+						<Flex align="center" justify="space-between" gap="3" bg="rgba(233,196,106,0.06)" border="1px solid rgba(233,196,106,0.22)" borderRadius="14px" p="3" role="status">
+							<Box>
+								<Text fontSize="xs" color="kk.textPrimary" fontWeight="600">{t("waitingForKeepKey")}</Text>
+								<Text fontSize="xs" color="kk.textMuted">{t("waitingForKeepKeyHint")}</Text>
+							</Box>
+							<Button size="xs" variant="outline" onClick={cancelDeviceSigning}>{t("cancel", { ns: "common" })}</Button>
+						</Flex>
+					)}
 
 					<Flex gap="2">
 						<Button

@@ -32,6 +32,15 @@ export interface DeviceOperationOptions {
   origin?: 'desktop'
 }
 
+/** hdwallet throws a device Failure as the raw event ({ message: { code, message } }).
+ * Keep its words; String() of it is "[object Object]". */
+function failureText(error: any): string {
+  return typeof error === 'string' ? error
+    : typeof error?.message === 'string' ? error.message
+    : typeof error?.message?.message === 'string' ? error.message.message
+    : String(error)
+}
+
 export class DeviceOperationError extends Error {
   constructor(readonly status: number, message: string) { super(message) }
 }
@@ -192,7 +201,7 @@ export class DeviceOperationCoordinator {
           this.pump()
         })
       } catch (error) {
-        this.reject(entry, error instanceof Error ? error : new Error(String(error)))
+        this.reject(entry, error instanceof Error ? error : new Error(failureText(error)))
       } finally {
         // A granted lease stays owned until the caller's finally. A cancelled
         // unlock is held until its real promise settles; no request overtakes it.

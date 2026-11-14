@@ -561,7 +561,7 @@ describe.each(['7.17', '7.16'] as const)('EngineController on a USB/HID-like tra
     const queued = wallet.getFeatures() // waits on hdwallet's call lock behind the PIN request
     transport.userActionRequired = false // what any completed call (a DebugLink read) leaves behind
     await engine.cancelDevicePrompt()
-    expect((await unlock)?.message?.code).toBe(6)
+    expect(await unlock).toMatchObject({ status: 499, message: 'PIN entry cancelled' }) // the device's PinCancelled
     await queued
     expect(device.received.map(r => [r.type, r.wait])).toEqual([
       [T.MESSAGETYPE_GETPUBLICKEY, null], [T.MESSAGETYPE_CANCEL, 'pin'], [T.MESSAGETYPE_GETFEATURES, null],

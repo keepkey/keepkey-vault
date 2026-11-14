@@ -23,6 +23,12 @@ describe('describeSigningError', () => {
 		expect(describeSigningError(new Error('Failure_Other'), t)).toBe('Failure_Other\n\nsigningReconnectHint')
 	})
 
+	test('a client-side RPC timeout is not reported as a dead KeepKey', () => {
+		// The device can still be showing its confirm screen: no unplug/restart advice.
+		const out = describeSigningError(new Error('RPC request timed out: ethSignTx'), t)
+		expect(out).toBe('signingNoAnswer')
+	})
+
 	test('device and cancel classes are unchanged', () => {
 		expect(describeSigningError(new Error('LIBUSB_ERROR_PIPE'), t)).toBe('signingDeviceLost')
 		expect(describeSigningError(new Error('Action cancelled by user'), t)).toBe('signingCancelled')
