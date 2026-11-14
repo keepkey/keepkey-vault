@@ -49,6 +49,7 @@ import {
   bitcoinOnlyRejection,
 } from './bitcoin-only-boundary'
 import { handleV2DataRoute } from './rest-pioneer'
+import { toTxBuildResponse, validateTxBuildRequest } from './rest-tx-build'
 import { createSignedTxRegistry } from './signed-tx-registry'
 import { handleSwapRoute } from './rest-swap'
 import { handleSweepRoute } from './rest-sweep'
@@ -163,6 +164,9 @@ export interface RestApiCallbacks {
   /** Headless swap execute — signs on the device, broadcasts, registers tracking.
    *  Used by POST /api/v2/swap/execute. Device still gates the signature. */
   executeSwapHeadless?: (params: import('../shared/types').ExecuteSwapParams) => Promise<import('../shared/types').SwapResult>
+  /** Build a native send for POST /api/v2/tx/build with the same body the RPC
+   *  buildTx runs (buildTxForCurrentWallet). Desktop derives the sender. */
+  buildTxHeadless?: (request: import('./rest-tx-build').TxBuildHeadlessRequest) => Promise<import('../shared/types').BuildTxResult>
   /** Validate saved quote terms before opening the REST approval card. The
    * executor revalidates after human approval and before each signature. */
   validateSwapExecutionHeadless?: (params: import('../shared/types').ExecuteSwapParams) => import('../shared/types').ExecuteSwapParams
@@ -5295,6 +5299,33 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           if (resp) return resp
         }
 
+        // ── Extension tx build: Desktop builds, servers only supply data ──
+        // Answers with the body for an existing sign route; signing still goes
+        // through that route's approval card and the device.
+        if (path === '/api/v2/tx/build' && method === 'POST') {
+          auth.requireAuth(req)
+          if (getSetting('offline_mode') === '1') throw new HttpError(503, 'OFFLINE: transaction build is disabled in offline mode')
+          // Deriving the sender reads the device (no button press), so only a deliberate send may.
+          if (req.headers.get('X-KeepKey-Device-Access') !== 'foreground') requestContext.cachedOnly = true
+          if (!callbacks?.buildTxHeadless) throw new HttpError(503, 'Transaction build is not wired')
+          let body
+          try { body = await parseRequest(req, S.TxBuildRequest) }
+          catch (e: any) { throw new HttpError(400, e.message, { code: 'INVALID_REQUEST' }) }
+          const { chain, request } = validateTxBuildRequest(body, CHAINS)
+          await requireWallet(engine)
+          let built
+          try { built = await callbacks.buildTxHeadless(request) }
+          catch (e: any) {
+            if (e instanceof HttpError || e instanceof WalletSessionChangedError) throw e
+            // Never pass e.status through: pioneer-client errors carry the upstream HTTP status.
+            throw new HttpError(422, deviceErrorMessage(e), { code: 'BUILD_FAILED' })
+          }
+          const out = toTxBuildResponse(chain, built, request)
+          // The amino sign routes resolve the signer's path from this registry.
+          if (chain.chainFamily === 'cosmos') auth.saveAccount(built.unsignedTx.signerAddress, built.unsignedTx.addressNList)
+          return json(out)
+        }
+
         // ── REST v2 data routes (balances, market, UTXOs, etc.) ──
         if (path.startsWith('/api/v2/') && !path.startsWith('/api/v2/devices') && !path.startsWith('/api/v2/sweep/') && !path.startsWith('/api/v2/swap')) {
           if (getSetting('offline_mode') === '1' && isOfflineNetworkRoute(path, method)) {
@@ -5331,6 +5362,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
         if (typeof err?.status === 'number') {
           const payload: Record<string, unknown> = { error: err.message }
           if (err.details && typeof err.details === 'object') payload.details = err.details
+          if (typeof err.details?.code === 'string') payload.code = err.details.code
           return json(payload, err.status)
         }
         // Extract firmware Failure message if present (hdwallet wraps them)
