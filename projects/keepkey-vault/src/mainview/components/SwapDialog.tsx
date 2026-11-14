@@ -21,7 +21,7 @@ import { CHAINS, getExplorerTxUrl, getExplorerBlockUrl } from "../../shared/chai
 import type { ChainDef } from "../../shared/chains"
 import { nativeMaxSpendableAmount, normalizeDecimals, tokenMaxSpendableAmount } from "../../shared/max-send"
 import { getAssetIcon } from "../../shared/assetLookup"
-import { validateAddress } from "../../shared/address-validation"
+import { isBurnAddress, sameAddress, validateAddress } from "../../shared/address-validation"
 import { balanceUnverifiedReason, isBalanceUnverified } from "../../shared/balance-display-state"
 import { isDeviceBusyError, isLocalDeviceAccessError, retryWhileDeviceBusy } from "../../shared/device-access-error"
 import { mergeTrustedBalanceSnapshot } from "../../shared/balance-reconciliation"
@@ -42,6 +42,7 @@ import { ClearSignReportCard } from "./ClearSignReportCard"
 import { namedProviderLine, swapReportNeedsAttention } from "../../shared/clearsign-report"
 import { versionCompare } from "../../shared/firmware-versions"
 import { scopeSwapBalances, swapAccountAmount } from "../../shared/swap-account-balances"
+import { applyNativeProof, DIRECT_TOKEN_PROOF_MAX_AGE_MS, type DirectNativeProof } from "../../shared/selected-token-balance"
 import { sameSwapAsset, swapNetworkIdentity } from "../../shared/swap-network-identity"
 import { AssetPickerDialog } from "./AssetPickerDialog"
 import { DocsLink } from "./DocsLink"
@@ -56,8 +57,11 @@ import {
   MAX_SLIPPAGE_BPS,
   MIN_SLIPPAGE_BPS,
   SLIPPAGE_PRESETS_BPS,
+  PERSIST_MAX_SLIPPAGE_BPS,
+  CONFIRM_SLIPPAGE_BPS,
   normalizeSlippageBps,
   parseCustomSlippagePercent,
+  slippageAfterSwap,
 } from "../../shared/slippage"
 import { KeepKeyDevice, RouteMap, SpinningDevice } from "./v3"
 import { getSwapperAnimation } from "../lib/swapper-animations"
@@ -874,21 +878,25 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
   // the 'requote' RPC command — re-quoting on input changes is automatic).
   const [requoteTick, setRequoteTick] = useState(0)
 
-  // Slippage tolerance in bps. Persisted across sessions in localStorage.
-  // Allowed range: 10..5000 (0.1%..50%). Reject 0 — silent zero-slippage
-  // ships swaps with no protection and routinely loses funds on volatile pairs.
+  // Slippage tolerance in bps. Allowed range: 10..5000 (0.1%..50%). Reject 0 —
+  // silent zero-slippage ships swaps with no protection and routinely loses
+  // funds on volatile pairs. Only tolerances up to 3% persist across sessions:
+  // a loose one is for this swap only (audit v4 V1).
   const [slippageBps, setSlippageBpsState] = useState<number>(() => {
     try {
       const raw = localStorage.getItem('swap.slippageBps')
       const n = raw ? parseInt(raw, 10) : NaN
-      if (Number.isFinite(n) && n >= MIN_SLIPPAGE_BPS && n <= MAX_SLIPPAGE_BPS) return n
+      if (Number.isFinite(n) && n >= MIN_SLIPPAGE_BPS && n <= Math.min(MAX_SLIPPAGE_BPS, PERSIST_MAX_SLIPPAGE_BPS)) return n
     } catch { /* localStorage unavailable */ }
     return DEFAULT_SLIPPAGE_BPS
   })
   const setSlippageBps = useCallback((bps: number) => {
     const clamped = normalizeSlippageBps(bps)
     setSlippageBpsState(clamped)
-    try { localStorage.setItem('swap.slippageBps', String(clamped)) } catch { /* ignore */ }
+    try {
+      if (clamped <= PERSIST_MAX_SLIPPAGE_BPS) localStorage.setItem('swap.slippageBps', String(clamped))
+      else localStorage.removeItem('swap.slippageBps')
+    } catch { /* ignore */ }
   }, [])
   const [customSlippageOpen, setCustomSlippageOpen] = useState(false)
   const [customSlippageInput, setCustomSlippageInput] = useState(() => (slippageBps / 100).toString())
@@ -1007,6 +1015,8 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
       if (/\s/.test(trimmed)) return 'Address must not contain spaces'
       if (trimmed.length < 10) return 'Address is too short'
     }
+    // Funds paid to a zero/burn address are gone (audit v4 H1).
+    if (isBurnAddress(trimmed)) return t('burnAddress', { ns: 'send' })
     return ''
   }, [useCustomAddress, customToAddress, toAsset, t])
 
@@ -1612,9 +1622,33 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
 
   // ── Derived values ────────────────────────────────────────────────
   const isZcashSource = fromAsset?.chainId === 'zcash' && !fromAsset.contractAddress
+  // While Pioneer's portfolio is degraded, read the native coin on chain for
+  // each signing account, as AssetPage does (audit v4 H7), so MAX and the
+  // account list show a real figure. Proofs are re-read before they expire.
+  const [nativeProofs, setNativeProofs] = useState<Record<string, DirectNativeProof>>({})
+  const [nativeProofEpoch, setNativeProofEpoch] = useState(0)
+  const nativeChainCaip = fromAsset?.chainFamily === 'evm' && !fromAsset.contractAddress && !(fromAsset.caip && isTokenCaip(fromAsset.caip))
+    ? CHAINS.find(c => c.id === fromAsset.chainId)?.caip : undefined
+  const nativeProofOwners = useMemo(() => !fromAsset || !nativeChainCaip ? '' : evmAddresses.addresses
+    .filter(a => isBalanceUnverified(scopeSwapBalances([], undefined, evmAddresses, a.addressIndex).find(b => b.chainId === fromAsset.chainId), nativeChainCaip))
+    .map(a => a.address).join(','), [fromAsset, nativeChainCaip, evmAddresses])
+  useEffect(() => {
+    if (!fromAsset || !nativeChainCaip || !nativeProofOwners) return
+    let cancelled = false
+    const chainId = fromAsset.chainId
+    for (const owner of nativeProofOwners.split(',')) {
+      rpcRequest<{ balance: string }>('verifyTokenBalance', { chainId, owner, caip: nativeChainCaip }, 30000)
+        .then(({ balance }) => { if (!cancelled) setNativeProofs(p => ({ ...p, [`${chainId}|${owner.toLowerCase()}`]: { chainId, owner, balance, verifiedAt: Date.now() } })) })
+        .catch(e => console.warn(`[SwapDialog] on-chain native balance check failed for ${chainId}:`, e))
+    }
+    const timer = setTimeout(() => setNativeProofEpoch(n => n + 1), DIRECT_TOKEN_PROOF_MAX_AGE_MS / 2)
+    return () => { cancelled = true; clearTimeout(timer) }
+  }, [fromAsset?.chainId, nativeChainCaip, nativeProofOwners, nativeProofEpoch])
+  const withNativeProof = useCallback((row: ChainBalance | undefined) => row && nativeChainCaip
+    ? applyNativeProof(row, nativeChainCaip, nativeProofs[`${row.chainId}|${row.address?.toLowerCase()}`]) : row, [nativeChainCaip, nativeProofs])
   // EVM amounts, picker tiles and confidence use one selected-owner snapshot.
   const accountBalances = useMemo(() => scopeSwapBalances(balances, balance, evmAddresses, effectiveEvmIndex,
-    assets.filter(a => a.chainFamily === 'evm').map(a => a.chainId)), [balances, balance, evmAddresses, effectiveEvmIndex, assets])
+    assets.filter(a => a.chainFamily === 'evm').map(a => a.chainId)).map(b => withNativeProof(b)!), [balances, balance, evmAddresses, effectiveEvmIndex, assets, withNativeProof])
   const fromBalanceEntry = useMemo(() => fromAsset ? accountBalances.find(b => b.chainId === fromAsset.chainId) : undefined,
     [fromAsset, accountBalances])
   const fromBalance = useMemo(() => fromAsset ? swapAccountAmount(fromBalanceEntry, fromAsset) : null,
@@ -2052,6 +2086,11 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
     if (useCustomAddress && customToAddress.trim()) return customToAddress.trim()
     return keepKeyToAddress
   }, [useCustomAddress, customToAddress, keepKeyToAddress])
+  // One of this wallet's own addresses pasted as the custom recipient is not
+  // an external payout (audit v4 V6); anything else is flagged in review (H1).
+  const customIsOwn = useCustomAddress && !!customToAddress.trim() && (sameAddress(customToAddress, keepKeyToAddress)
+    || (toAsset?.chainFamily === 'evm' && evmAddresses.addresses.some(a => sameAddress(customToAddress, a.address))))
+  const externalRecipient = useCustomAddress && !!customToAddress.trim() && !customIsOwn
 
   const fromChainDef = useMemo(() => (
     fromAsset ? CHAINS.find(c => c.id === fromAsset.chainId) : undefined
@@ -2189,6 +2228,13 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
   const riskKey = JSON.stringify({ open, quote, quoteFetchedAt, from: fromAsset?.caip, to: toAsset?.caip, sendAmount, slippageBps, swapRisk })
   const riskAcknowledged = riskAcceptedKey === riskKey
   const riskLocked = swapRisk.blocked || (swapRisk.requiresAcknowledgment && !riskAcknowledged)
+  // Relay's order must pay the recipient being reviewed (Bun checks this too).
+  const relayRecipientMismatch = !!quote?.relayOrder && !sameAddress(quote.relayOrderRecipient, toAddress)
+  // A tolerance above 5% is signed only after an explicit confirmation for this quote (audit v4 V1).
+  const slippageNeedsConfirm = !!quote && computeEffectiveSlippageBps(quote.slippageBps, slippageBps) > CONFIRM_SLIPPAGE_BPS
+  const slippageKey = JSON.stringify({ open, quoteId: quote?.quoteId, quoteFetchedAt, slippageBps })
+  const [slippageAcceptedKey, setSlippageAcceptedKey] = useState('')
+  const slippageLocked = slippageNeedsConfirm && slippageAcceptedKey !== slippageKey
   const riskPanel = quote && toAsset ? <SwapRiskReview risk={swapRisk}
     acknowledged={riskAcknowledged}
     onAcknowledge={accepted => setRiskAcceptedKey(accepted ? riskKey : '')} /> : null
@@ -2199,6 +2245,8 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
     phase === 'review' && (
       networkMismatch ||
       riskLocked ||
+      relayRecipientMismatch ||
+      slippageLocked ||
       refreshingQuote ||
       previewLoading ||
       !!previewError ||
@@ -2209,6 +2257,8 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
     networkMismatch ? uiText("The asset and network do not match. Select the asset again.") :
     swapRisk.blocked ? "Route exceeds cost limit" :
     riskLocked ? "Review and acknowledge trade cost" :
+    relayRecipientMismatch ? t("relayRecipientMismatchButton", "Relay order pays another address") :
+    slippageLocked ? t("highSlippageConfirmButton", "Confirm the high slippage") :
     refreshingQuote ? t("refreshingQuote", "Refreshing quote...") :
     previewLoading ? t("buildingPayload", "Building payload...") :
     previewError ? t("payloadUnavailableButton", "Payload unavailable") :
@@ -2339,6 +2389,8 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
     if (networkMismatch) { setError(uiText("The asset and network do not match. Select the asset again.")); return }
     const generation = executionUiGeneration.current
     if (riskLocked) { setError(swapRisk.blocked ? 'This route exceeds the 5% cost limit for trades of $1,000 or more.' : 'Review and acknowledge the trade cost before signing.'); return }
+    if (relayRecipientMismatch) { setError(t("relayRecipientMismatch", "Relay's order does not pay the recipient shown. Do not proceed — get a new quote.")); return }
+    if (slippageLocked) { setError(t("highSlippageConfirmRequired", "Confirm the high slippage tolerance before signing.")); return }
     if (phase === 'review') {
       if (previewLoading) {
         setError(t("payloadStillBuilding", "Transaction payload is still building. Review it before confirming."))
@@ -2457,6 +2509,8 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
         setLiveCreatedAt(Date.now())
         setPhase('submitted')
       }
+      // A custom tolerance is for one swap; presets stay (audit v4 V1).
+      setSlippageBps(slippageAfterSwap(slippageBps))
       window.dispatchEvent(new CustomEvent('keepkey-swap-executed', {
         detail: {
           txid: result.txid,
@@ -2545,7 +2599,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
       // Require a fresh quote and review before another execute request.
       setQuoteFetchedAt(0)
     }
-  }, [quote, quoteFetchedAt, fromAsset, toAsset, sendAmount, sendIsMax, fromBalance, fromAddress, toAddress, slippageBps, balances, phase, previewLoading, previewError, previewBuild, useCustomAddress, networkMismatch, uiText, riskLocked, riskAcknowledged, swapRisk.blocked, swapRisk.quoteMaxAgeMs, effectiveEvmIndex])
+  }, [quote, quoteFetchedAt, fromAsset, toAsset, sendAmount, sendIsMax, fromBalance, fromAddress, toAddress, slippageBps, balances, phase, previewLoading, previewError, previewBuild, useCustomAddress, networkMismatch, uiText, riskLocked, riskAcknowledged, swapRisk.blocked, swapRisk.quoteMaxAgeMs, effectiveEvmIndex, relayRecipientMismatch, slippageLocked, setSlippageBps])
 
   // ── Reset ─────────────────────────────────────────────────────────
   const reset = useCallback(() => {
@@ -2833,7 +2887,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
   if (unsupported) {
     return (
       <Box position="fixed" inset="0" zIndex={Z.dialog} display="flex" alignItems="flex-start" justifyContent="center" pt="5vh" onKeyDown={dialogKeys}>
-        <Box position="absolute" inset="0" bg="rgba(11,11,14,0.28)" backdropFilter="blur(20px) saturate(140%)" onClick={handleClose} data-testid="swap-backdrop" />
+        <Box position="absolute" inset="0" bg="rgba(11,11,14,0.72)" backdropFilter="blur(20px) saturate(140%)" onClick={handleClose} data-testid="swap-backdrop" />
         <Box ref={dialogPanel} role="dialog" aria-modal="true" aria-label={t('title')} tabIndex={-1}
           position="relative"
           borderRadius="22px"
@@ -2843,8 +2897,8 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
           maxW="90vw"
           textAlign="center"
           style={{
-            background:
-              "linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.015)), rgba(16,16,21,0.78)",
+            backgroundColor: "rgba(16,16,21,0.97)",
+            backgroundImage: "linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.015))",
             backdropFilter: "blur(32px) saturate(160%)",
             WebkitBackdropFilter: "blur(32px) saturate(160%)",
             boxShadow: "0 0 0 1px rgba(255,255,255,0.06), 0 24px 60px -16px rgba(0,0,0,0.8), 0 4px 12px -4px rgba(0,0,0,0.5)",
@@ -2870,8 +2924,8 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
   return (
     <Box position="fixed" inset="0" zIndex={Z.dialog} display="flex" alignItems="flex-start" justifyContent="center" pt="5vh" onKeyDown={dialogKeys}>
       <style>{DIALOG_CSS}</style>
-      <Box position="absolute" inset="0" bg="rgba(11,11,14,0.28)" backdropFilter="blur(20px) saturate(140%)" onClick={handleClose} data-testid="swap-backdrop" />
-      <Box ref={dialogPanel} role="dialog" aria-modal="true" aria-label={t('title')} tabIndex={-1}
+      <Box position="absolute" inset="0" bg="rgba(11,11,14,0.72)" backdropFilter="blur(20px) saturate(140%)" onClick={handleClose} data-testid="swap-backdrop" />
+      <Box ref={dialogPanel} role="dialog" aria-modal="true" aria-label={t('title')} tabIndex={-1} data-swap-panel
         position="relative"
         borderRadius="22px"
         border="1px solid rgba(255,255,255,0.10)"
@@ -2882,8 +2936,8 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
         onClick={(e) => e.stopPropagation()}
         style={{
           animation: 'kkSwapFadeIn 0.2s ease-out',
-          background:
-            "linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.015)), rgba(16,16,21,0.78)",
+          backgroundColor: "rgba(16,16,21,0.97)",
+          backgroundImage: "linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.015))",
           backdropFilter: "blur(32px) saturate(160%)",
           WebkitBackdropFilter: "blur(32px) saturate(160%)",
           boxShadow:
@@ -4174,6 +4228,17 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                   </Box>
                   <AssetIcon caip={toAsset.caip} iconUrl={toAsset.icon} chainCaip={chainBadgeCaip(toAsset)} size={32} alt={toAsset.symbol} />
                 </Flex>
+                {/* Where the output goes, in full, for every route (audit v4 H1). */}
+                <Box mt="3" px="3" py="2" borderRadius="lg" border="1px solid"
+                  borderColor={externalRecipient ? "kk.error" : "kk.border"}
+                  bg={externalRecipient ? "rgba(224,140,123,0.10)" : "transparent"}
+                  data-trade-recipient data-custom-recipient={externalRecipient ? 'true' : 'false'}>
+                  <Text fontSize="10px" color={externalRecipient ? "kk.error" : "kk.textMuted"}>{t("reviewRecipient", "Recipient")}</Text>
+                  <Text fontSize="11px" fontFamily="mono" color={externalRecipient ? "kk.error" : "kk.textPrimary"} wordBreak="break-all">{toAddress}</Text>
+                  {externalRecipient && (
+                    <Text fontSize="10px" fontWeight="700" color="kk.error" mt="0.5">{t("customRecipientNotKeepKey", "Custom recipient — not your KeepKey")}</Text>
+                  )}
+                </Box>
                 {isFeeReservedNativeMax && fromAsset && nativeMaxReserveDisplay && (
                   <Text fontSize="10px" color="var(--gold)" mt="1.5">
                     {t("sendMaxGasReserveNote", {
@@ -4209,9 +4274,9 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                 return line ? <Text fontSize="2xs" color="kk.textSecondary" data-clearsign-provider>{line}</Text> : null
               })()}
 
-              {quote.executionMode === 'relay-solver-deposit' && (
+              {quote.executionMode === 'relay-solver-deposit' && quote.relayOrderRecipient && (
                 <Text fontSize="11px" color="kk.textSecondary" role="note">
-                  {t('relayDepositReview', 'Relay executes the swap after your deposit; destination terms are shown in this app.')}
+                  {t('relayDepositRecipient', 'The Relay order pays out to {{address}}. Your KeepKey signs only the deposit; Relay pays out afterwards.', { address: quote.relayOrderRecipient })}
                 </Text>
               )}
 
@@ -4413,11 +4478,17 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                   Use max(quote, user) so a tight market quote doesn't hide a loose
                   user tolerance — the user's setting is the one that bounds risk. */}
               {shouldWarnHighSlippage(quote.slippageBps, slippageBps) && (
-                <Flex align="center" gap="2" bg="rgba(251,146,60,0.08)" border="1px solid" borderColor="rgba(251,146,60,0.3)" px="3" py="1.5" borderRadius="lg" w="full">
+                <Box bg="rgba(251,146,60,0.08)" border="1px solid" borderColor="rgba(251,146,60,0.3)" px="3" py="1.5" borderRadius="lg" w="full">
                   <Text fontSize="10px" color="var(--gold)">
                     {t("highSlippageWarning", "Slippage tolerance is high ({{pct}}%). You may receive less than expected. Consider lowering tolerance for small spreads.", { pct: (computeEffectiveSlippageBps(quote.slippageBps, slippageBps) / 100).toFixed(1) })}
                   </Text>
-                </Flex>
+                  {slippageNeedsConfirm && (
+                    <label data-high-slippage-ack style={{ display: 'flex', alignItems: 'flex-start', gap: 8, marginTop: 6, fontSize: 11, cursor: 'pointer', color: 'var(--gold)' }}>
+                      <input type="checkbox" checked={!slippageLocked} onChange={event => setSlippageAcceptedKey(event.target.checked ? slippageKey : '')} />
+                      <span>{t("highSlippageConfirm", "I accept a slippage tolerance of {{pct}}%: I may receive up to {{pct}}% less than quoted.", { pct: (computeEffectiveSlippageBps(quote.slippageBps, slippageBps) / 100).toFixed(1) })}</span>
+                    </label>
+                  )}
+                </Box>
               )}
 
               {/* quote.warning is not shown: it is THORNode's note to API
@@ -4629,7 +4700,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                               style={{width:'100%',padding:'8px',borderRadius:6,border:'1px solid var(--line-2)',background:'var(--ink-1)',color:'var(--text-0)',fontSize:11}}>
                               {evmAddresses.addresses.map(a => {
                                 const own = accountBalances.find(b => b.chainId === fromAsset.chainId && b.address.toLowerCase() === a.address.toLowerCase())
-                                  || scopeSwapBalances([], undefined, evmAddresses, a.addressIndex).find(b => b.chainId === fromAsset.chainId)
+                                  || withNativeProof(scopeSwapBalances([], undefined, evmAddresses, a.addressIndex).find(b => b.chainId === fromAsset.chainId))
                                 const amount = swapAccountAmount(own, fromAsset)
                                 return <option key={a.addressIndex} value={a.addressIndex}>{uiText('Account')} #{a.addressIndex} · {amount === null ? uiText('Balance unverified') : `${formatBalance(amount)} ${fromAsset.symbol}`}</option>
                               })}
@@ -4977,7 +5048,13 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                               <Text fontSize="9px" color="var(--teal)" fontWeight="600">{t("keepKeyAddress")}</Text>
                             </>
                           )}
-                          {useCustomAddress && (
+                          {useCustomAddress && customIsOwn && (
+                            <>
+                              <ShieldIcon />
+                              <Text fontSize="9px" color="var(--teal)" fontWeight="600">{t("customAddressOwn", "This is your own KeepKey address")}</Text>
+                            </>
+                          )}
+                          {useCustomAddress && !customIsOwn && (
                             <Text fontSize="9px" color="var(--gold)" fontWeight="600">{t("customAddressWarning")}</Text>
                           )}
                         </HStack>
@@ -5243,7 +5320,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
         <Box
           position="fixed" inset="0" zIndex={Z.assetPicker}
           display="flex" alignItems="center" justifyContent="center"
-          bg="rgba(11,11,14,0.28)"
+          bg="rgba(11,11,14,0.72)"
           backdropFilter="blur(20px) saturate(140%)"
           onClick={() => setHealthDialogOpen(false)}
         >
@@ -5256,8 +5333,8 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
             onClick={e => e.stopPropagation()}
             style={{
               animation: 'kkSwapFadeIn 0.15s ease-out',
-              background:
-                "linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.015)), rgba(16,16,21,0.78)",
+              backgroundColor: "rgba(16,16,21,0.97)",
+              backgroundImage: "linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.015))",
               backdropFilter: "blur(32px) saturate(160%)",
               WebkitBackdropFilter: "blur(32px) saturate(160%)",
               boxShadow:
@@ -5380,9 +5457,9 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                       style={{ background: 'none', border: 'none' }}>×</Box>
                   </Flex>
                   <VStack gap="0" align="stretch" px="4" py="3">
-                    {quote.executionMode === 'relay-solver-deposit' && (
+                    {quote.executionMode === 'relay-solver-deposit' && quote.relayOrderRecipient && (
                       <Text fontSize="11px" color="kk.textSecondary" mb="2" role="note">
-                        {t('relayDepositReview', 'Relay executes the swap after your deposit; destination terms are shown in this app.')}
+                        {t('relayDepositRecipient', 'The Relay order pays out to {{address}}. Your KeepKey signs only the deposit; Relay pays out afterwards.', { address: quote.relayOrderRecipient })}
                       </Text>
                     )}
                     <ReviewRow label={t("rate")}>

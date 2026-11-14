@@ -2241,6 +2241,10 @@ export interface SwapQuote {
   relayTx?: RelayTxParams    // pre-built tx for relay/bridge integrations (skips memo+router flow)
   /** Inferred from the source transaction, not a provider's review claim. */
   executionMode?: 'relay-solver-deposit'
+  /** Relay routes: Relay's quote names this payout address for the order. */
+  relayOrder?: { requestId?: string; recipient?: string }
+  /** Relay routes: the order's payout address, checked equal to the entered recipient. */
+  relayOrderRecipient?: string
   minAmountIn?: string       // minimum sell amount for this route (human-readable, in sell asset units)
   /** Actual send amount after MAX fee/reserve deduction (UTXO or XRP).
    *  When set, the tracker must record this instead of the original params.amount. */

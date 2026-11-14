@@ -21,6 +21,7 @@ import {
   assessWithFirmware,
   isGasAsset,
   ellipsizeCaip,
+  searchPickerNetworks,
   type AssetEntry,
 } from "../../shared/swap-discovery"
 import { rpcRequest } from "../lib/rpc"
@@ -512,15 +513,15 @@ function ChainStep({ chainInfos, entries, search, onSearchChange, onPickChain, o
   const uiText = useUiTranslation()
 
   const q = search.trim().toLowerCase()
-  const available   = chainInfos.filter(c => c.isAvailable && (!q || c.name.toLowerCase().includes(q) || c.family.toLowerCase().includes(q)))
-  const unavailable = chainInfos.filter(c => !c.isAvailable && (!q || c.name.toLowerCase().includes(q) || c.family.toLowerCase().includes(q)))
+  // Networks match on name, family or coin ticker; tokens are listed for any query.
+  const { chains: matchedChains, assets: matchedAssets } = useMemo(
+    () => searchPickerNetworks(chainInfos, entries, q, excludeCaip), [chainInfos, entries, q, excludeCaip])
+  const available   = matchedChains.filter(c => c.isAvailable)
+  const unavailable = matchedChains.filter(c => !c.isAvailable)
 
-  // When no networks match the query, fall back to token search
   const noNetworkMatches = q.length > 0 && available.length === 0 && unavailable.length === 0
   const tokenFallback = useMemo(() => {
-    if (!noNetworkMatches) return []
-    return entries
-      .filter(e => e.caip !== excludeCaip && `${e.symbol} ${e.name}`.toLowerCase().includes(q))
+    return [...matchedAssets]
       .sort((a, b) => {
         const aSel = isRowSelectable(a) ? 1 : 0
         const bSel = isRowSelectable(b) ? 1 : 0
@@ -528,7 +529,7 @@ function ChainStep({ chainInfos, entries, search, onSearchChange, onPickChain, o
         return (b.balance?.usd ?? 0) - (a.balance?.usd ?? 0)
       })
       .slice(0, 30)
-  }, [noNetworkMatches, entries, q, excludeCaip])
+  }, [matchedAssets])
 
   return (
     <>
@@ -563,8 +564,8 @@ function ChainStep({ chainInfos, entries, search, onSearchChange, onPickChain, o
           </>
         )}
 
-        {/* Token fallback — shown when no networks match but tokens do */}
-        {noNetworkMatches && tokenFallback.length > 0 && (
+        {/* Token results — every asset matching the query, under any network tiles */}
+        {tokenFallback.length > 0 && (
           <>
             <Flex align="center" gap="2" mb="3" mt="1">
               <Box w="12px" h="2px" bg="#9F8CE0" borderRadius="1px" />
@@ -1400,7 +1401,7 @@ export function AssetPickerDialog({
   return (
     <Box position="fixed" inset="0" zIndex={Z.assetPicker}
       display="flex" alignItems="center" justifyContent="center"
-      bg="rgba(11,11,14,0.28)"
+      bg="rgba(11,11,14,0.72)"
       backdropFilter="blur(20px) saturate(140%)"
       onClick={onClose}>
       <Box
@@ -1413,8 +1414,8 @@ export function AssetPickerDialog({
         fontFamily="'Geist Mono', ui-monospace, monospace"
         onClick={(e) => e.stopPropagation()}
         style={{
-          background:
-            "linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.015)), rgba(16,16,21,0.78)",
+          backgroundColor: "rgba(16,16,21,0.97)",
+          backgroundImage: "linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.015))",
           backdropFilter: "blur(32px) saturate(160%)",
           WebkitBackdropFilter: "blur(32px) saturate(160%)",
           boxShadow:

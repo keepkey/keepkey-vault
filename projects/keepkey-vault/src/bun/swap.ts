@@ -33,12 +33,14 @@ import { encodeDepositWithExpiry, encodeApprove, parseUnits, toHex, readPioneerB
 import { getEvmGasPrice, getEvmFeeData, getEvmNonce, getEvmBalance, getErc20Allowance, getErc20Balance, getErc20Decimals, broadcastEvmTx, EvmSignerVerificationError, waitForTxReceipt, estimateGas, isPioneerEvmSource } from './evm-rpc'
 import * as txb from './txbuilder'
 import { normalizeBchAddress } from './txbuilder'
+import { isBurnAddress } from '../shared/address-validation'
 // Re-export pure parsing functions (used by tests + this module)
 // assetToCaip is exported for backwards-compat (legacy code that hydrates old
 // history rows without CAIP). The swap quote/execute path no longer uses it —
 // vault is CAIP-native end-to-end.
 export { parseAssetsResponse, parseQuoteResponse, assetToCaip } from './swap-parsing'
 import {
+  assertRelayOrderRecipient,
   assertSwapMemoFitsSource,
   parseQuoteResponse,
   parseAssetsResponse,
@@ -308,6 +310,12 @@ export async function getSwapAssets(): Promise<SwapAsset[]> {
 
 // ── Quote fetching via Pioneer ──────────────────────────────────────
 
+function assertNotBurnRecipient(address: string | undefined): void {
+  if (address && isBurnAddress(address)) {
+    throw new Error(`Swap recipient ${address.trim()} is a burn address: funds sent there can never be recovered. Enter a different recipient.`)
+  }
+}
+
 /** Fetch a swap quote from Pioneer (aggregated across DEXes) */
 export async function getSwapQuote(params: SwapQuoteParams, device: {
   firmwareVersion?: string; capabilities?: readonly number[]
@@ -328,6 +336,9 @@ export async function getSwapQuote(params: SwapQuoteParams, device: {
   const slippageBps = params.slippageBps == null
     ? DEFAULT_SLIPPAGE_BPS
     : normalizeSlippageBps(params.slippageBps)
+  // Funds paid to a zero/burn address are gone (audit v4 H1). The dialog
+  // refuses these too; this is the boundary REST and RPC callers share.
+  assertNotBurnRecipient(params.toAddress)
 
   const pioneer = await getPioneer()
 
@@ -410,6 +421,7 @@ export async function getSwapQuote(params: SwapQuoteParams, device: {
     })
   }
   if (isRelaySolverDeposit(result)) result.executionMode = 'relay-solver-deposit'
+  if (result.relayOrder) result.relayOrderRecipient = assertRelayOrderRecipient(result, recipientAddress)
   // Surface the underlying protocol when the integration is an aggregator
   // (e.g. ShapeShift → Relay/Thorchain/0x). Falls back to integration name.
   const route = result.swapper && result.swapper.toLowerCase() !== (result.integration || '').toLowerCase()
@@ -694,6 +706,7 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
     toAddress = typeof toAddrResult === 'string' ? toAddrResult : toAddrResult?.address
   }
   if (!toAddress) throw new Error('Could not derive destination address')
+  assertNotBurnRecipient(toAddress)
 
   // REST/RPC execution can be called without first fetching a quote, and a
   // registered channel can expire or receive a deposit after quote time.

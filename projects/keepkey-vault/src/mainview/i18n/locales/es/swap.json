@@ -205,5 +205,14 @@
 	"deviceBlindSignCaveat": "La firma a ciegas permanece activada hasta que el KeepKey se bloquea o se desconecta, para todas las aplicaciones que lo usan, no solo este intercambio. Mientras está activada, esta aplicación también deja de mostrar esta pantalla antes de dichas transacciones. El dispositivo te pide confirmar y volver a introducir tu PIN.",
 	"solanaOutflowDrain": "Advertencia: esto deja tu cartera vacía. No firmes a menos que esa sea tu intención.",
 	"solanaOutflowCaveat": "Simulado con un nodo de Solana desde este ordenador. Tu KeepKey no puede confirmar estas cifras.",
-	"deviceBlindSignEnable": "Activar firma a ciegas"
+	"deviceBlindSignEnable": "Activar firma a ciegas",
+	"reviewRecipient": "Destinatario",
+	"customRecipientNotKeepKey": "Destinatario personalizado — no es tu KeepKey",
+	"customAddressOwn": "Esta es tu propia dirección de KeepKey",
+	"relayDepositRecipient": "La orden de Relay paga a {{address}}. Tu KeepKey solo firma el depósito; Relay paga después.",
+	"relayRecipientMismatchButton": "La orden de Relay paga a otra dirección",
+	"relayRecipientMismatch": "La orden de Relay no paga al destinatario mostrado. No continúes: obtén una nueva cotización.",
+	"highSlippageConfirmButton": "Confirma el deslizamiento alto",
+	"highSlippageConfirmRequired": "Confirma la tolerancia de deslizamiento alta antes de firmar.",
+	"highSlippageConfirm": "Acepto una tolerancia de deslizamiento del {{pct}}%: puedo recibir hasta un {{pct}}% menos de lo cotizado."
 }

@@ -11,6 +11,8 @@ import type { SwapAsset, SwapQuote, RelayTxParams } from '../shared/types'
 import { COIN_MAP_LONG } from '@pioneer-platform/pioneer-coins'
 import { parseSwapFeeDisclosure } from './swap-fees'
 import { isPlainSwapDeposit } from '../shared/swap-deposit-routing'
+import { extractRelayRequestId } from '../shared/relay-utils'
+import { sameAddress } from '../shared/address-validation'
 
 const TAG = '[swap]'
 
@@ -525,6 +527,12 @@ function parseSingleQuote(
     ? (txParams.senderAddress as string | undefined) || quote.meta?.refundTo || undefined
     : undefined
 
+  // Relay's /quote body (raw) names the order and its payout address.
+  const relayOrder = /relay/i.test(`${integration} ${swapper ?? ''}`) && swapper !== 'NEAR Intents' ? {
+    requestId: typeof raw.requestId === 'string' ? raw.requestId : typeof quote.relayRequestId === 'string' ? quote.relayRequestId : undefined,
+    recipient: typeof raw.details?.recipient === 'string' ? raw.details.recipient : undefined,
+  } : undefined
+
   const nearIntentsTracking = swapper === 'NEAR Intents' ? {
     depositAddress: nearIntentsDepositAddress,
     refundTo: nearIntentsRefundTo,
@@ -560,6 +568,7 @@ function parseSingleQuote(
     integration,
     swapper,
     relayTx,
+    ...(relayOrder ? { relayOrder } : {}),
     minAmountIn,
     nearIntentsDepositAddress,
     nearIntentsRefundTo,
@@ -773,4 +782,23 @@ export function nearIntentsDepositFindings(
   if (!(deadline > (expected.now ?? Date.now()))) danger('NEAR_INTENTS_QUOTE_EXPIRED',
     `This quote's deposit deadline (${String(request.deadline)}) has passed or cannot be read. Get a new quote.`)
   return { findings, limitations }
+}
+
+/**
+ * A Relay order must pay the recipient the user entered (audit v4 H1). Relay's
+ * public API has no pre-deposit lookup of an order's recipient (requests/v2 is
+ * empty until the deposit lands; v3 needs an API key), so the source is Relay's
+ * own /quote body, bound to the deposit calldata by its request id. Returns the
+ * order's recipient; throws when it differs, is missing, or names another order.
+ */
+export function assertRelayOrderRecipient(quote: SwapQuote, recipient: string): string {
+  const order = quote.relayOrder
+  const funded = extractRelayRequestId(quote.relayTx?.data)
+  if (funded && funded !== order?.requestId?.toLowerCase()) {
+    throw new Error('This Relay quote describes a different Relay order than the deposit it asks you to sign. Do not proceed — get a new quote.')
+  }
+  const theirs = order?.recipient?.trim()
+  if (!theirs) throw new Error('Relay did not say who this order pays out to, so Desktop cannot check the recipient. Do not proceed — get a new quote.')
+  if (!sameAddress(theirs, recipient)) throw new Error(`Relay's order pays out to ${theirs}, which is not the recipient you entered (${recipient}). Do not proceed.`)
+  return theirs
 }

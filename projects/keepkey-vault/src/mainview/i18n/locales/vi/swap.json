@@ -205,5 +205,14 @@
 	"deviceBlindSignCaveat": "Ký mù vẫn được bật cho đến khi KeepKey bị khóa hoặc ngắt kết nối, áp dụng cho mọi ứng dụng sử dụng thiết bị, không chỉ giao dịch hoán đổi này. Khi bật, ứng dụng này cũng không hiển thị màn hình này trước những giao dịch đó nữa. Thiết bị yêu cầu bạn xác nhận và nhập lại mã PIN.",
 	"solanaOutflowDrain": "Cảnh báo: thao tác này sẽ làm rỗng ví của bạn. Đừng ký trừ khi đó là điều bạn muốn.",
 	"solanaOutflowCaveat": "Được mô phỏng với một nút Solana từ máy tính này. KeepKey không thể xác nhận các số liệu này.",
-	"deviceBlindSignEnable": "Bật ký mù"
+	"deviceBlindSignEnable": "Bật ký mù",
+	"reviewRecipient": "Người nhận",
+	"customRecipientNotKeepKey": "Người nhận tùy chỉnh — không phải KeepKey của bạn",
+	"customAddressOwn": "Đây là địa chỉ KeepKey của chính bạn",
+	"relayDepositRecipient": "Lệnh Relay sẽ thanh toán cho {{address}}. KeepKey của bạn chỉ ký giao dịch nạp; Relay thanh toán sau đó.",
+	"relayRecipientMismatchButton": "Lệnh Relay trả cho địa chỉ khác",
+	"relayRecipientMismatch": "Lệnh Relay không thanh toán cho người nhận được hiển thị. Đừng tiếp tục — hãy lấy báo giá mới.",
+	"highSlippageConfirmButton": "Xác nhận trượt giá cao",
+	"highSlippageConfirmRequired": "Xác nhận dung sai trượt giá cao trước khi ký.",
+	"highSlippageConfirm": "Tôi chấp nhận dung sai trượt giá {{pct}}%: tôi có thể nhận ít hơn tối đa {{pct}}% so với báo giá."
 }

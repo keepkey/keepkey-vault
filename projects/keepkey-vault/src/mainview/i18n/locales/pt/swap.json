@@ -205,5 +205,14 @@
 	"deviceBlindSignCaveat": "A assinatura às cegas permanece ativada até o KeepKey ser bloqueado ou desconectado, para todos os aplicativos que o usam, não apenas esta troca. Enquanto estiver ativada, este aplicativo também deixa de mostrar esta tela antes dessas transações. O dispositivo pede confirmação e a digitação do PIN novamente.",
 	"solanaOutflowDrain": "Aviso: isso deixa sua carteira vazia. Não assine a menos que seja essa a sua intenção.",
 	"solanaOutflowCaveat": "Simulado com um nó Solana a partir deste computador. Seu KeepKey não pode confirmar esses valores.",
-	"deviceBlindSignEnable": "Ativar assinatura às cegas"
+	"deviceBlindSignEnable": "Ativar assinatura às cegas",
+	"reviewRecipient": "Destinatário",
+	"customRecipientNotKeepKey": "Destinatário personalizado — não é o seu KeepKey",
+	"customAddressOwn": "Este é o seu próprio endereço KeepKey",
+	"relayDepositRecipient": "A ordem da Relay paga para {{address}}. O seu KeepKey assina apenas o depósito; a Relay faz o pagamento depois.",
+	"relayRecipientMismatchButton": "A ordem da Relay paga outro endereço",
+	"relayRecipientMismatch": "A ordem da Relay não paga o destinatário mostrado. Não continue — obtenha uma nova cotação.",
+	"highSlippageConfirmButton": "Confirme o slippage alto",
+	"highSlippageConfirmRequired": "Confirme a tolerância de slippage alta antes de assinar.",
+	"highSlippageConfirm": "Aceito uma tolerância de slippage de {{pct}}%: posso receber até {{pct}}% menos do que o cotado."
 }
