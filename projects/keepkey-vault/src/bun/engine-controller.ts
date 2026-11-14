@@ -298,7 +298,7 @@ export class EngineController extends EventEmitter {
     // The device already waits on its PIN matrix (a REST call at launch can start
     // it before the webview listens): send the prompt again, the first push may
     // have been lost and the user would see no PIN pad (audit v4 H8).
-    if (this.pinPromptOpen && this.lastPinRequestType) this.emit('pin-request', { type: this.lastPinRequestType })
+    this.replayPinPrompt()
     if (this.pinUnlock?.wallet === this.wallet) { await this.pinUnlock.promise; return }
     if (awaitingInput(this.wallet?.transport)) return
     await this.withDeviceOperation(async () => {}, { unlock: true })
@@ -536,6 +536,11 @@ export class EngineController extends EventEmitter {
         this.emit('character-request', this.lastCharacterRequest)
       }
     })
+  }
+
+  /** Send the open PIN prompt again (see requestDeviceUnlock). */
+  private replayPinPrompt(): void {
+    if (this.pinPromptOpen && this.lastPinRequestType) this.emit('pin-request', { type: this.lastPinRequestType })
   }
 
   // ── Lifecycle ──────────────────────────────────────────────────────────
