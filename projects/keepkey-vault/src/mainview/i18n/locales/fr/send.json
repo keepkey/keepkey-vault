@@ -48,6 +48,7 @@
 	"invalidEvmAddress": "Adresse invalide — doit être 0x suivi de 40 caractères hexadécimaux",
 	"invalidEvmChecksum": "Somme de contrôle incorrecte — l'adresse contient peut-être une faute de frappe. Recopiez-la depuis la source",
 	"invalidChecksum": "Cette adresse contient une faute de frappe : sa somme de contrôle ne correspond pas. Recopiez-la depuis la source.",
+	"signingInvalidAddress": "Votre KeepKey a refusé l'adresse du destinataire. Vérifiez l'adresse et réessayez.",
 	"invalidCosmosPrefix": "Préfixe d'adresse incorrect pour ce réseau",
 	"invalidCosmosLength": "Longueur d'adresse Cosmos invalide",
 	"invalidCosmosAddress": "Adresse Cosmos invalide",

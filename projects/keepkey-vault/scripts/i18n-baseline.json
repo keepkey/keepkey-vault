@@ -1468,7 +1468,8 @@
     "nav:deviceErrorNotResponding": "78cd27780164a894f8fefde01a58110e7562edf7b0fce232da94524c531fe93d",
     "nav:deviceErrorNotRespondingHint": "fb083b248bd6c6cd034ecd3022e84e3962cd7ea7dcfbf989a6660db2a4ede68a",
     "nav:deviceErrorUnknown": "8fa76411982761756a7f7fa91d410abbde52c96020e9003fffae63ce32115e2f",
-    "nav:deviceErrorDetail": "27d5fc51e2844ae0595872e1d03e510023742fa4621b71a9987bc3344303cdaa"
+    "nav:deviceErrorDetail": "27d5fc51e2844ae0595872e1d03e510023742fa4621b71a9987bc3344303cdaa",
+    "send:signingInvalidAddress": "f78df932d259c093006e428bd5da3cdd979a63b989eea6a43e2d7288ed8f426f"
   },
   "rawUi": [
     "components/ApiAuditLog.tsx:m17059795",

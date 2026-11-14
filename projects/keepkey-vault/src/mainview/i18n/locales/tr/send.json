@@ -48,6 +48,7 @@
 	"invalidEvmAddress": "Geçersiz adres — 0x ve ardından 40 onaltılık karakter olmalıdır",
 	"invalidEvmChecksum": "Sağlama toplamı eşleşmiyor — adreste yazım hatası olabilir. Kaynaktan yeniden kopyalayın",
 	"invalidChecksum": "Bu adreste yazım hatası var: sağlama toplamı eşleşmiyor. Kaynaktan yeniden kopyalayın.",
+	"signingInvalidAddress": "KeepKey'iniz alıcı adresini reddetti. Adresi kontrol edip yeniden deneyin.",
 	"invalidCosmosPrefix": "Bu ağ için yanlış adres öneki",
 	"invalidCosmosLength": "Geçersiz Cosmos adres uzunluğu",
 	"invalidCosmosAddress": "Geçersiz Cosmos adresi",

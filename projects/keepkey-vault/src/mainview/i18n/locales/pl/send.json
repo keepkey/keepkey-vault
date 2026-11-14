@@ -48,6 +48,7 @@
 	"invalidEvmAddress": "Nieprawidłowy adres — musi być 0x i 40 znaków szesnastkowych",
 	"invalidEvmChecksum": "Suma kontrolna się nie zgadza — adres może zawierać literówkę. Skopiuj go ponownie ze źródła",
 	"invalidChecksum": "Ten adres zawiera literówkę: suma kontrolna się nie zgadza. Skopiuj go ponownie ze źródła.",
+	"signingInvalidAddress": "KeepKey odrzucił adres odbiorcy. Sprawdź adres i spróbuj ponownie.",
 	"invalidCosmosPrefix": "Nieprawidłowy prefiks adresu dla tej sieci",
 	"invalidCosmosLength": "Nieprawidłowa długość adresu Cosmos",
 	"invalidCosmosAddress": "Nieprawidłowy adres Cosmos",
