@@ -15,7 +15,12 @@
 		"wipeDevice": "Limpar dispositivo",
 		"wiping": "Limpando...",
 		"incorrectPin": "PIN incorreto",
-		"tryAgainDescription": "Verifique a tela do seu KeepKey e tente novamente"
+		"tryAgainDescription": "Verifique a tela do seu KeepKey e tente novamente",
+		"waitingForDevice": "Aguardando sua KeepKey. Depois de PINs incorretos, ela faz você esperar antes de pedir novamente; o teclado é ativado quando isso acontecer.",
+		"setupStep": "Etapa {{step}} de 2",
+		"howPinWorks": "Como funciona a digitação do PIN",
+		"wipeConfirmOnDevice": "Pressione e segure o botão da sua KeepKey para confirmar a limpeza.",
+		"wipeFailed": "Falha na limpeza: {{error}}. Desconecte e reconecte sua KeepKey e tente novamente."
 	},
 	"passphrase": {
 		"title": "Inserir frase-senha",
@@ -105,7 +110,41 @@
 		"solanaDecodeFailedDescription": "O Vault não conseguiu decodificar esta transação Solana para visualização. Aprovar assinará uma mensagem opaca — verifique os detalhes na tela do seu KeepKey antes de confirmar.",
 		"solanaDecodeFailedTitle": "Assinatura clara indisponível",
 		"solanaTx": "Transação Solana",
-		"solanaUnknownProgram": "Contém instruções de programas que o Vault não consegue assinar de forma clara."
+		"solanaUnknownProgram": "Contém instruções de programas que o Vault não consegue assinar de forma clara.",
+		"dataHex": "Hex",
+		"dataDecoded": "Decodificado",
+		"dataNotDecodable": "O payload não é calldata hexadecimal válido — mostrando o valor bruto.",
+		"selector": "Seletor",
+		"asAddress": "ender.",
+		"asUint": "uint",
+		"trailing": "extra",
+		"methodTronSignMessage": "Assinar mensagem Tron",
+		"methodTronSignTypedHash": "Assinar hash tipado Tron (TIP-712)",
+		"methodTonSignMessage": "Assinar mensagem TON",
+		"methodSolanaSignOffchainMessage": "Mensagem off-chain Solana",
+		"methodSwapExecute": "Troca — Assinar e transmitir",
+		"acrossKnownContract": "Across SpokePool · contrato conhecido",
+		"knownNotOnFirmwareTitle": "Conhecido, mas ainda não exibido nesta KeepKey",
+		"solanaBlindSignAllowedOnce": "Assinatura cega permitida para esta solicitação",
+		"solanaBlindSignConsentTitle": "Transação Solana opaca",
+		"solanaBlindSignConsentDescription": "O KeepKey Desktop e o dispositivo não conseguem verificar totalmente esta transação. Continue somente se você confia no app solicitante e verificou o payload de forma independente. Esta permissão vale uma única vez.",
+		"allowBlindSigningOnce": "Permitir uma vez",
+		"reviewQueued": "Solicitado. Os revisores da KeepKey vão auditar este contrato; depois de publicado, as próximas assinaturas mostrarão uma descrição revisada e uma classificação de risco.",
+		"reviewOffer": "A KeepKey ainda não revisou este contrato. Você pode pedir uma revisão. Somente o endereço do contrato, o seletor da função e o tamanho da chamada são enviados — não o seu endereço nem os valores.",
+		"requestReview": "Enviar à KeepKey para revisão",
+		"requestReviewTip": "A KeepKey revisa envios do ClearSign para contratos de terceiros. Depois que um contrato é revisado, sua KeepKey mostra o que cada chamada faz em vez de assinar às cegas.",
+		"riskWhatItDoes": "O que esta assinatura faz:",
+		"riskFootnote": "Verificado neste computador. A tela da sua KeepKey tem a palavra final.",
+		"solanaCertifiedProgram": "Decodificado pela sua KeepKey a partir de um esquema certificado pela KeepKey:",
+		"compareDigests": "Se sua KeepKey exibir digests de hash, compare os valores completos abaixo antes de aprovar.",
+		"digestsUnavailable": "A comparação de digests não está disponível para esta solicitação.",
+		"advancedModeDeclined": "Recusado na sua KeepKey. O Modo avançado continua desativado.",
+		"advancedModeConfirmOnDevice": "Confirme na sua KeepKey e depois digite o PIN novamente",
+		"firmwareCannotSign": "O firmware desta KeepKey não consegue assinar isto",
+		"turnOnAdvancedMode": "Ativar o Modo avançado",
+		"allowBlindSigningOnceFirst": "Escolha Permitir uma vez para aprovar",
+		"advancedModeScopeHint": "O Modo avançado fica ativo até sua KeepKey bloquear ou ser desconectada, para todos os apps que a utilizam.",
+		"selfTransfer": "Origem e destino são o mesmo endereço: isto envia para você mesmo, e apenas a taxa de rede é gasta."
 	},
 	"claimed": {
 		"title": "Dispositivo em uso",
@@ -150,6 +189,7 @@
 		"tryAgain": "Tentar novamente",
 		"wordNotFoundTitle": "Palavra não reconhecida",
 		"wordNotFoundMessage": "Os caracteres inseridos não correspondem a uma palavra semente BIP39 válida. Verifique as letras embaralhadas na tela do seu KeepKey.",
-		"wordNotFoundRestarting": "Reiniciando da palavra 1 — insira suas palavras novamente..."
+		"wordNotFoundRestarting": "Reiniciando da palavra 1 — insira suas palavras novamente...",
+		"previousWord": "← Voltar para a palavra {{n}}"
 	}
 }
