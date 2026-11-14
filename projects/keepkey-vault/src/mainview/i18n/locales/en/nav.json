@@ -39,5 +39,13 @@
 	"offlineBannerAirplane": "Offline mode on — no network. Device, addresses, receiving & PSBT signing (drop a PSBT here) work; balances, history & sending are paused.",
 	"offlineBannerNoNet": "No network — Vault is offline. Device, addresses, receiving & PSBT signing (drop a PSBT here) still work; balances, history & sending are paused.",
 	"offlineHint": "No network — Vault is offline. Device, addresses, and signing still work.",
-	"offline": "Offline"
+	"offline": "Offline",
+	"deviceErrorInUse": "Another app is using your KeepKey",
+	"deviceErrorInUseHint": "Close other wallet apps or browser tabs connected to it, then unplug and replug your KeepKey.",
+	"deviceErrorDisconnected": "Your KeepKey was disconnected",
+	"deviceErrorDisconnectedHint": "Plug it back in. If it keeps dropping, try another cable or USB port.",
+	"deviceErrorNotResponding": "Your KeepKey stopped responding",
+	"deviceErrorNotRespondingHint": "Unplug and replug your KeepKey. If it happens again, try another cable or USB port.",
+	"deviceErrorUnknown": "Can't connect to your KeepKey",
+	"deviceErrorDetail": "Error code: {{code}}"
 }

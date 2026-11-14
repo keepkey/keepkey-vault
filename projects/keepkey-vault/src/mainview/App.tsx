@@ -31,6 +31,7 @@ import { NodeStatusBar } from "./components/NodeStatusBar"
 import { NodeConnectedDialog } from "./components/NodeConnectedDialog"
 import { BitcoinOnlyOnboardingDialog } from "./components/BitcoinOnlyOnboardingDialog"
 import { NetworkPickerDialog } from "./components/NetworkPickerDialog"
+import { usbConnectionErrorKind, type UsbConnectionErrorKind } from "../shared/usb-connection-error"
 import { DeviceGrid } from "./components/DeviceGrid"
 import type { VaultIdentity } from "../shared/vault-identity"
 import { VaultIdentityDialog } from "./components/VaultCards"
@@ -65,6 +66,20 @@ import type { PinRequestType, PairingRequestInfo, SigningRequestInfo, ApiLogEntr
 type SigningPhase = "approve" | "sending-payload" | "device-confirm"
 
 const SIGNING_PAYLOAD_MIN_MS = 15000
+
+// Splash copy for a device error: the reason in plain words, then what to do.
+const DEVICE_ERROR_COPY: Record<UsbConnectionErrorKind, { status: string; hint: string }> = {
+	"in-use": { status: "deviceErrorInUse", hint: "deviceErrorInUseHint" },
+	disconnected: { status: "deviceErrorDisconnected", hint: "deviceErrorDisconnectedHint" },
+	"not-responding": { status: "deviceErrorNotResponding", hint: "deviceErrorNotRespondingHint" },
+	unknown: { status: "deviceErrorUnknown", hint: "tryUnplugging" },
+}
+const DEVICE_ERROR_DEFAULTS: Record<UsbConnectionErrorKind, { status: string; hint: string }> = {
+	"in-use": { status: "Another app is using your KeepKey", hint: "Close other wallet apps or browser tabs connected to it, then unplug and replug your KeepKey." },
+	disconnected: { status: "Your KeepKey was disconnected", hint: "Plug it back in. If it keeps dropping, try another cable or USB port." },
+	"not-responding": { status: "Your KeepKey stopped responding", hint: "Unplug and replug your KeepKey. If it happens again, try another cable or USB port." },
+	unknown: { status: "Can't connect to your KeepKey", hint: "Try unplugging and replugging your KeepKey." },
+}
 
 function App() {
   const uiText = useUiTranslation()
@@ -1172,6 +1187,8 @@ function App() {
 		const needsPin = deviceState.state === "needs_pin"
 		const needsPassphrase = deviceState.state === "needs_passphrase"
 		const linuxUdevBlocked = !!deviceState.linuxUdevPermissionDenied
+		// Plain reason + what to do; the raw libusb/WebUSB text stays as a small detail line.
+		const errorKind = usbConnectionErrorKind(deviceState.error)
 		return (
 			<>{splashNav}{resizeHandles}{updateBanner}{firmwareDropZone}{signingOverlay}{pairingOverlay}{passphraseOverlay}{charOverlay}{pinOverlay}
 				<SplashScreen
@@ -1182,13 +1199,14 @@ function App() {
 						: needsPin ? t("unlockYourKeepKey", { ns: "nav" })
 						: needsPassphrase ? t("passphraseRequired", { ns: "nav" })
 						: isConnecting ? t("keepkeyDetectedConnecting", { ns: "nav" })
-						: isError ? t("errorWithMessage", { ns: "nav", error: deviceState.error || "Unknown" })
+						: isError ? t(DEVICE_ERROR_COPY[errorKind].status, { ns: "nav", defaultValue: DEVICE_ERROR_DEFAULTS[errorKind].status })
 						: t("searchingForKeepKey", { ns: "nav" })
 					}
-					hintText={isError ? t("tryUnplugging", { ns: "nav" })
+					hintText={isError ? t(DEVICE_ERROR_COPY[errorKind].hint, { ns: "nav", defaultValue: DEVICE_ERROR_DEFAULTS[errorKind].hint })
 						// The device has no reject button on this screen: unplugging is the way out.
 						: needsPin && deviceState.wipePending === "confirm" ? t("unplugToCancelWipe", { ns: "nav", defaultValue: "Changed your mind? Unplug your KeepKey to cancel." })
 						: undefined}
+					detailText={isError && !linuxUdevBlocked && deviceState.error ? t("deviceErrorDetail", { ns: "nav", defaultValue: "Error code: {{code}}", code: deviceState.error }) : undefined}
 					variant={linuxUdevBlocked ? "error" : needsPin || needsPassphrase || isConnecting ? "connecting" : isError ? "error" : "searching"}
 					childrenReady={linuxUdevBlocked || needsPin || needsPassphrase ? true : gridReady}
 					onLogoClick={linuxUdevBlocked || needsPin || needsPassphrase ? undefined : () => { rpcRequest("retryConnect").catch(() => {}) }}
