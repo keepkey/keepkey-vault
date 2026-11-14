@@ -901,6 +901,8 @@ jobs:
           (cd modules/hdwallet && yarn install --frozen-lockfile && yarn tsc --build)
           (cd modules/proto-tx-builder && git submodule update --init osmosis-frontend && yarn install --frozen-lockfile && npx tsc -p . && test -f dist/index.js)
           # Same as the Makefile's device-protocol stamp: force protobufjs's pbjs.
+          # device-protocol's npm scripts are POSIX shell; cmd.exe can't run them.
+          export npm_config_script_shell='C:\Program Files\Git\bin\bash.exe'
           cd modules/device-protocol && npm install
           cp node_modules/protobufjs/bin/pbjs node_modules/.bin/pbjs
           npm run build
