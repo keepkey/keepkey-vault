@@ -116,11 +116,13 @@ try {
     bun scripts/collect-externals.ts
     if ($LASTEXITCODE -ne 0) { throw "collect-externals failed" }
 
-    bunx electrobun build
-    # electrobun build may warn about rcedit/zcash-cli — non-fatal
-
-    bun scripts/patch-bundle.ts
-    if ($LASTEXITCODE -ne 0) { throw "patch-bundle failed" }
+    # Electrobun 2.x: Hutch builds the app (and runs scripts/patch-bundle.ts as
+    # its postBuild hook) against the devkit in HUTCH_ELECTROBUN_DEVKIT_ROOT.
+    if (-not $env:HUTCH_ELECTROBUN_DEVKIT_ROOT) {
+        $env:HUTCH_ELECTROBUN_DEVKIT_ROOT = (Resolve-Path (Join-Path $PSScriptRoot "..\..\..\modules\electrobun\package\dist")).Path
+    }
+    bun scripts/build-electrobun.ts dev
+    if ($LASTEXITCODE -ne 0) { throw "hutch electrobun build failed" }
 
     Write-Success "Build complete"
 

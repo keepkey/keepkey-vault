@@ -104,22 +104,19 @@ $PackageJson = Get-Content (Join-Path $ProjectDir "package.json") | ConvertFrom-
 $Version = $PackageJson.version
 $AppName = "KeepKey Vault"
 
-# ----------------------------------------------------------------------------
-# Ensure GNU tar wins over System32 bsdtar.
-#
-# Electrobun's CLI bootstrap (node_modules/electrobun/bin/electrobun.cjs) extracts
-# its downloaded core with `tar --force-local -xzf` (the --force-local is added on
-# Windows by scripts/patch-electrobun.sh so tar does not treat the "C:" in the cache
-# path as a remote host). That flag is GNU-tar-only; Windows' built-in System32 tar
-# is bsdtar, which rejects it ("Option --force-local is not supported") and aborts
-# the build. Git for Windows ships GNU tar at %ProgramFiles%\Git\usr\bin\tar.exe, so
-# prepend that directory to PATH. It contains no link.exe/cl.exe, so MSVC native
-# builds (usb, node-hid, cargo C deps) are unaffected.
-# ----------------------------------------------------------------------------
-$GitUsrBin = Join-Path $env:ProgramFiles "Git\usr\bin"
-if ((Test-Path (Join-Path $GitUsrBin "tar.exe")) -and ($env:Path -notlike "*$GitUsrBin*")) {
-    $env:Path = "$GitUsrBin;$env:Path"
+# Electrobun 2.x is built by Hutch (https://hutch.blackboard.sh). Its installer
+# puts the command in %USERPROFILE%\.hutch\bin without touching PATH.
+$HutchBin = Join-Path $HOME ".hutch\bin"
+if ((Test-Path $HutchBin) -and ($env:Path -notlike "*$HutchBin*")) {
+    $env:Path = "$HutchBin;$env:Path"
 }
+# Bun 1.4.4 for Windows x64 as Hutch packs it. Both official assets
+# (bun-windows-x64.zip and bun-windows-x64-baseline.zip) carry this exact
+# bun.exe, a baseline build that runs on CPUs without AVX (N5030 crash class).
+$ExpectedBunExeSha256 = "cb1d8e6564e655e49d30cead359750a1cbbd12f42651caa4b62244d7bd93c244"
+# rcedit 2.0.0 (electron/rcedit), formerly installed through electrobun@1.x.
+$RceditUrl = "https://github.com/electron/rcedit/releases/download/v2.0.0/rcedit-x64.exe"
+$RceditSha256 = "3e7801db1a5edbec91b49a24a094aad776cb4515488ea5a4ca2289c400eade2a"
 
 # ============================================================================
 # Helper Functions
@@ -359,7 +356,9 @@ Write-Success "Inno Setup found: $ISCC"
 Assert-Command "git"
 Assert-Command "bun"
 Assert-Command "yarn"
-Write-Success "Build tools available (git, bun, yarn)"
+Assert-Command "node"
+Assert-Command "hutch"
+Write-Success "Build tools available (git, bun, yarn, node, hutch)"
 
 if (-not $SkipBuild) {
     if (-not (Test-Path $EmulatorDllSource)) {
@@ -405,7 +404,25 @@ if (-not $SkipBuild) {
     git submodule update --init modules/hdwallet
     git submodule update --init modules/proto-tx-builder
     git submodule update --init modules/device-protocol
+    git submodule update --init modules/electrobun
     Pop-Location
+
+    # Electrobun 2.x devkit from our fork (modules/electrobun, keepkey/2.x), the
+    # same release flavour the Makefile builds. Hutch packs it into the app via
+    # HUTCH_ELECTROBUN_DEVKIT_ROOT. A devkit built elsewhere for win-x64 can be
+    # supplied by setting HUTCH_ELECTROBUN_DEVKIT_ROOT before running this script.
+    if (-not $env:HUTCH_ELECTROBUN_DEVKIT_ROOT) {
+        Write-Step "Building Electrobun devkit (modules/electrobun)"
+        Push-Location (Join-Path $RepoRoot "modules\electrobun\package")
+        hutch run install
+        if ($LASTEXITCODE -ne 0) { throw "hutch run install failed for the Electrobun fork (exit $LASTEXITCODE)" }
+        hutch run build:release
+        if ($LASTEXITCODE -ne 0) { throw "Electrobun devkit build failed (exit $LASTEXITCODE)" }
+        Pop-Location
+        $env:HUTCH_ELECTROBUN_DEVKIT_ROOT = Join-Path $RepoRoot "modules\electrobun\package\dist"
+    }
+    node (Join-Path $RepoRoot "scripts\verify-electrobun-devkit.mjs") $env:HUTCH_ELECTROBUN_DEVKIT_ROOT
+    if ($LASTEXITCODE -ne 0) { throw "Electrobun devkit at $env:HUTCH_ELECTROBUN_DEVKIT_ROOT is not the pinned win-x64 build" }
 
     Write-Step "Checking device-protocol (protobuf lib)"
     Push-Location (Join-Path $RepoRoot "modules\device-protocol")
@@ -517,6 +534,12 @@ if (-not $SkipBuild) {
         }
     }
     Write-Host "  Hydrated and verified $($localPackages.Count) pinned local packages"
+
+    # Project the devkit's SDK into .hutch\devkit (tsconfig and `electrobun/*`
+    # imports resolve through it).
+    Remove-Item -Recurse -Force -ErrorAction SilentlyContinue ".hutch\devkit", ".hutch\devkit.lock"
+    hutch electrobun sync
+    if ($LASTEXITCODE -ne 0) { throw "hutch electrobun sync failed (exit $LASTEXITCODE)" }
     Pop-Location
 
     Write-Step "Building zcash-cli sidecar (Rust)"
@@ -624,6 +647,16 @@ if (-not $SkipBuild) {
 }
 Write-Success "Verified bundled Windows emulator: $BundledEmulatorDll"
 
+# Hutch supplies bin\bun.exe. Only the pinned baseline build may ship: an AVX
+# build crashes at launch on CPUs without AVX.
+$BunExe = Join-Path $BuildDir "bin\bun.exe"
+if (-not (Test-Path $BunExe)) { throw "Release gate failed: $BunExe missing" }
+$bunHash = (Get-FileHash $BunExe -Algorithm SHA256).Hash.ToLower()
+if ($bunHash -ne $ExpectedBunExeSha256) {
+    throw "Release gate failed: bin\bun.exe is $bunHash, not the pinned Bun 1.4.4 Windows x64 baseline build ($ExpectedBunExeSha256)"
+}
+Write-Success "Verified bin\bun.exe is Bun 1.4.4 baseline"
+
 # ============================================================================
 # Sign Executables and DLLs
 # ============================================================================
@@ -642,6 +675,15 @@ $resourcesDir = Join-Path $BuildDir "Resources"
 $filesToSign += Get-ChildItem -Path $resourcesDir -Filter "*.exe" -Recurse -ErrorAction SilentlyContinue
 $filesToSign += Get-ChildItem -Path $resourcesDir -Filter "*.node" -Recurse -ErrorAction SilentlyContinue
 $filesToSign += Get-ChildItem -Path $resourcesDir -Filter "*.dll" -Recurse -ErrorAction SilentlyContinue
+
+# Extensionless PE files (Electrobun 2.x's update manager, Resources\uninstall):
+# found by MZ header, so no unsigned PE ships whatever it is named.
+foreach ($candidate in Get-ChildItem -Path $resourcesDir -File -Recurse -ErrorAction SilentlyContinue | Where-Object { $_.Extension -eq "" }) {
+    $head = [byte[]]::new(2)
+    $stream = [System.IO.File]::OpenRead($candidate.FullName)
+    try { $read = $stream.Read($head, 0, 2) } finally { $stream.Dispose() }
+    if ($read -eq 2 -and $head[0] -eq 0x4D -and $head[1] -eq 0x5A) { $filesToSign += $candidate }
+}
 
 # Also sign the wrapper exe
 $wrapperFile = Join-Path $BuildDir "KeepKeyVault.exe"
@@ -679,12 +721,15 @@ if ($failedCount -gt 0 -and -not $AllowSignFailures -and -not $SkipSign) {
 
 Write-Step "Preparing app icon"
 
-$IconPng = Join-Path $BuildDir "Resources\app.ico"  # Actually a PNG despite extension
+# Build the ICO from the config's win.icon source; Electrobun 2.x no longer
+# leaves a renamed PNG at Resources\app.ico.
+$IconSourcePng = Join-Path $ProjectDir "icon.png"
+$IconPng = Join-Path $BuildDir "Resources\app.ico"  # runtime WM_SETICON fallback path
 $IconIco = Join-Path $BuildDir "Resources\app-real.ico"
 
 if (-not (Test-Path $IconIco)) {
     Add-Type -AssemblyName System.Drawing
-    $png = [System.Drawing.Image]::FromFile($IconPng)
+    $png = [System.Drawing.Image]::FromFile($IconSourcePng)
 
     $sizes = @(16, 32, 48, 256)
     $imageData = @()
@@ -813,8 +858,8 @@ if ((Test-Path $WrapperExe) -and $SkipBuild) {
 }
 
 # Copy DPI-awareness manifest next to wrapper EXE
-# Windows auto-loads <exename>.exe.manifest for per-monitor DPI scaling.
-# Without this, WebView2 renders at 96 DPI and the OS bitmap-scales it -- blurry text/UI.
+# Windows auto-loads <exename>.exe.manifest for per-monitor DPI scaling of the
+# splash. WebView2 lives in bun.exe, which Electrobun 2.x makes per-monitor aware.
 $ManifestSrc = Join-Path $ScriptDir "KeepKeyVault.exe.manifest"
 $ManifestDst = Join-Path $BuildDir "KeepKeyVault.exe.manifest"
 if (Test-Path $ManifestSrc) {
@@ -822,35 +867,29 @@ if (Test-Path $ManifestSrc) {
     Write-Success "DPI manifest copied"
 }
 
-# Embed KeepKey icon into all EXEs
-# Electrobun's rcedit call fails (ENOENT -- hardcoded CI path), so we do it ourselves.
+# Embed the KeepKey icon into the wrapper EXE users launch (Hutch embeds
+# build.win.icon into launcher.exe itself).
 #
 # ORDER MATTERS: rcedit must run BEFORE signing, OR the affected EXEs must be
 # re-signed AFTER rcedit. rcedit modifies the .rsrc section via the Windows
 # BeginUpdateResource API which invalidates Authenticode signatures
 # (https://learn.microsoft.com/windows/win32/api/winbase/nf-winbase-beginupdateresourcea).
-# The bulk sign loop above runs before the wrapper EXE exists, and we touch
-# launcher.exe here too -- so both get re-signed in the next step.
-$RceditExe = Join-Path $ProjectDir "node_modules\rcedit\bin\rcedit-x64.exe"
+# The bulk sign loop above runs before the wrapper EXE exists, so it gets
+# signed in the next step.
+$RceditExe = Join-Path $ProjectDir "_build\rcedit-x64.exe"
+if (-not ((Test-Path $RceditExe) -and ((Get-FileHash $RceditExe -Algorithm SHA256).Hash.ToLower() -eq $RceditSha256))) {
+    Invoke-WebRequest -Uri $RceditUrl -OutFile $RceditExe -UseBasicParsing
+    $rceditHash = (Get-FileHash $RceditExe -Algorithm SHA256).Hash.ToLower()
+    if ($rceditHash -ne $RceditSha256) { Remove-Item $RceditExe -Force; throw "rcedit download hash $rceditHash does not match the pinned $RceditSha256" }
+}
+if (-not (Test-Path $IconIco)) { throw "App icon missing: $IconIco" }
 $rceditTouched = @()
-if ((Test-Path $IconIco) -and (Test-Path $RceditExe)) {
-    # Skip bun.exe -- rcedit on 113MB binary can corrupt it; bun runs headless anyway
-    $exesToIcon = @($WrapperExe, (Join-Path $BuildDir "bin\launcher.exe"))
-    foreach ($exePath in $exesToIcon) {
-        if (Test-Path $exePath) {
-            $exeName = Split-Path $exePath -Leaf
-            Write-Host "    Embedding icon into $exeName..." -ForegroundColor Gray
-            & $RceditExe $exePath --set-icon $IconIco
-            if ($LASTEXITCODE -eq 0) {
-                Write-Success "Icon embedded into $exeName"
-                $rceditTouched += $exePath
-            } else {
-                Write-Warning "Failed to embed icon into $exeName"
-            }
-        }
-    }
-} elseif (-not (Test-Path $RceditExe)) {
-    Write-Warning "rcedit not found - EXEs will use default icon"
+if (Test-Path $WrapperExe) {
+    Write-Host "    Embedding icon into KeepKeyVault.exe..." -ForegroundColor Gray
+    & $RceditExe $WrapperExe --set-icon $IconIco
+    if ($LASTEXITCODE -ne 0) { throw "rcedit failed to embed the icon into KeepKeyVault.exe (exit $LASTEXITCODE)" }
+    Write-Success "Icon embedded into KeepKeyVault.exe"
+    $rceditTouched += $WrapperExe
 }
 
 # Re-sign EXEs whose .rsrc was modified by rcedit (signatures invalidated above).

@@ -194,6 +194,27 @@ if ($bunExe) {
     Write-Host "         winget install Oven-sh.Bun" -ForegroundColor DarkGray
 }
 
+# Hutch (Electrobun 2.x toolchain)
+$hutchExe = (Get-Command hutch -ErrorAction SilentlyContinue).Source
+if (-not $hutchExe -and (Test-Path "$HOME\.hutch\bin\hutch.exe")) { $hutchExe = "$HOME\.hutch\bin\hutch.exe" }
+if ($hutchExe) {
+    $hutchVer = (& $hutchExe --version 2>&1 | Out-String).Trim()
+    if ($hutchVer -match '0\.29\.0') { Pass "Hutch: $hutchVer (at $hutchExe)" } else { Fail "Hutch $hutchVer at $hutchExe (hutch.config.ts pins 0.29.0)" }
+} else {
+    Fail "Hutch not found (Electrobun 2.x builds through it)"
+    Write-Host "         irm https://hutch.blackboard.sh/hutch/install.ps1 | iex   (then pin 0.29.0)" -ForegroundColor DarkGray
+}
+
+# Visual Studio C++ build tools (the Electrobun devkit build compiles native code with MSVC)
+$vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+$vcInstall = if (Test-Path $vswhere) { & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath } else { $null }
+if ($vcInstall) {
+    Pass "MSVC build tools: $vcInstall"
+} else {
+    Fail "Visual Studio C++ build tools not found (needed to build the Electrobun devkit)"
+    Write-Host "         winget install Microsoft.VisualStudio.2022.BuildTools --override \"--add Microsoft.VisualStudio.Workload.VCTools --includeRecommended\"" -ForegroundColor DarkGray
+}
+
 # Yarn
 $yarnExe = (Get-Command yarn -ErrorAction SilentlyContinue).Source
 if ($yarnExe) {
