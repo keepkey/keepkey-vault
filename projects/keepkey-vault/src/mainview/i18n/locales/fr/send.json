@@ -47,6 +47,8 @@
 	"invalidDgbAddress": "Adresse DigiByte invalide",
 	"invalidEvmAddress": "Adresse invalide — doit être 0x suivi de 40 caractères hexadécimaux",
 	"ensNotSupported": "Les noms ENS ne sont pas encore pris en charge — collez l'adresse 0x",
+	"burnAddress": "Ceci est une adresse de destruction — tout ce qui y est envoyé est perdu pour toujours",
+	"contactIsOwnAddress": "Ceci est l'une des adresses de votre propre portefeuille — elle figure déjà dans votre carnet d'adresses",
 	"invalidEvmChecksum": "Somme de contrôle incorrecte — l'adresse contient peut-être une faute de frappe. Recopiez-la depuis la source",
 	"invalidChecksum": "Cette adresse contient une faute de frappe : sa somme de contrôle ne correspond pas. Recopiez-la depuis la source.",
 	"signingInvalidAddress": "Votre KeepKey a refusé l'adresse du destinataire. Vérifiez l'adresse et réessayez.",

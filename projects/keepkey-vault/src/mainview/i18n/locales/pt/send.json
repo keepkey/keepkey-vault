@@ -47,6 +47,8 @@
 	"invalidDgbAddress": "Endereço DigiByte inválido",
 	"invalidEvmAddress": "Endereço inválido — deve ser 0x seguido de 40 caracteres hexadecimais",
 	"ensNotSupported": "Nomes ENS ainda não são suportados — cole o endereço 0x",
+	"burnAddress": "Este é um endereço de queima — tudo o que for enviado para cá será perdido para sempre",
+	"contactIsOwnAddress": "Este é um dos endereços da sua própria carteira — ele já está no seu catálogo de endereços",
 	"invalidEvmChecksum": "Soma de verificação não confere — o endereço pode conter um erro de digitação. Copie-o novamente da origem",
 	"invalidChecksum": "Este endereço tem um erro de digitação: a soma de verificação não confere. Copie-o novamente da origem.",
 	"signingInvalidAddress": "Sua KeepKey recusou o endereço do destinatário. Verifique o endereço e tente novamente.",

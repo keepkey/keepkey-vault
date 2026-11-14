@@ -47,6 +47,8 @@
 	"invalidDgbAddress": "无效的DigiByte地址",
 	"invalidEvmAddress": "无效的地址 — 必须是0x后跟40个十六进制字符",
 	"ensNotSupported": "暂不支持 ENS 名称 — 请粘贴 0x 地址",
+	"burnAddress": "这是一个销毁地址 — 发送到这里的资产将永久丢失",
+	"contactIsOwnAddress": "这是您自己的钱包地址之一 — 它已在您的地址簿中",
 	"invalidEvmChecksum": "校验和不匹配 — 地址可能有输入错误。请从来源重新复制",
 	"invalidChecksum": "此地址有输入错误：校验和不匹配。请从来源重新复制。",
 	"signingInvalidAddress": "您的 KeepKey 拒绝了收款地址。请检查地址后重试。",

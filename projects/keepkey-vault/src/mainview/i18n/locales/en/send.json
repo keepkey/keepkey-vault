@@ -60,6 +60,8 @@
 	"invalidDgbAddress": "Invalid DigiByte address",
 	"invalidEvmAddress": "Invalid address — must be 0x followed by 40 hex characters",
 	"ensNotSupported": "ENS names aren't supported yet — paste the 0x address",
+	"burnAddress": "This is a burn address — anything sent here is lost forever",
+	"contactIsOwnAddress": "This is one of your own wallet addresses — it's already in your address book",
 	"invalidEvmChecksum": "Checksum mismatch — this address may contain a typo. Copy it again from the source",
 	"invalidChecksum": "This address has a typo: its checksum doesn't match. Copy it again from the source.",
 	"signingInvalidAddress": "Your KeepKey rejected the recipient address. Check the address and try again.",

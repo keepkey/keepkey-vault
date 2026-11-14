@@ -1,11 +1,11 @@
-import { useState, useMemo } from "react"
+import { useState, useMemo, useEffect } from "react"
 import { useDeviceState } from "../hooks/useDeviceState"
 import { Box, Flex, Text, Input, Button } from "@chakra-ui/react"
 import { useTranslation } from "react-i18next"
 import { rpcRequest } from "../lib/rpc"
 import { Z } from "../lib/z-index"
 import { CHAINS } from "../../shared/chains"
-import { validateAddress } from "../../shared/address-validation"
+import { validateContactAddress } from "../../shared/address-validation"
 import { AssetIcon } from "./AssetIcon"
 import type { AddressBookEntry } from "../../shared/types"
 
@@ -26,9 +26,23 @@ export function AddAddressDialog({ onClose, onAdded }: { onClose: () => void; on
   const [error, setError] = useState<string | null>(null)
 
   const chain = useMemo(() => NETWORKS.find(c => c.id === chainId), [chainId])
+  const [ownMatch, setOwnMatch] = useState(false)
+  const formatValid = !!chain && !!address.trim() && validateContactAddress(address, chain).valid
+  // Flag the wallet's own addresses: they are already in the book as "own".
+  useEffect(() => {
+    setOwnMatch(false)
+    if (!chain || !formatValid) return
+    let alive = true
+    const handle = setTimeout(() => {
+      rpcRequest<AddressBookEntry | null>("matchAddress", { networkId: chain.networkId, address: address.trim() }, 5000)
+        .then(entry => { if (alive) setOwnMatch(entry?.kind === "own") })
+        .catch(() => { /* best-effort; addAddressBook refuses own addresses too */ })
+    }, 300)
+    return () => { alive = false; clearTimeout(handle) }
+  }, [address, chain, formatValid])
   const validation = useMemo(
-    () => (address.trim() && chain ? validateAddress(address, chain) : null),
-    [address, chain],
+    () => (address.trim() && chain ? validateContactAddress(address, chain, ownMatch ? { kind: "own" } : null) : null),
+    [address, chain, ownMatch],
   )
   const canSave = !!chain && !!address.trim() && validation?.valid === true && !saving
 
@@ -46,7 +60,7 @@ export function AddAddressDialog({ onClose, onAdded }: { onClose: () => void; on
         networkId: chain.networkId,
         address: address.trim(),
         label: label.trim() || undefined,
-        ...(cosigner && chain.chainFamily === "evm" ? { cosigner: true } : {}),
+        ...(cosigner && chain.chainFamily === "evm" && validation?.valid ? { cosigner: true } : {}),
       }, 8000)
       if (entry) onAdded?.(entry)
       onClose()
@@ -124,7 +138,7 @@ export function AddAddressDialog({ onClose, onAdded }: { onClose: () => void; on
                  placeholder={t("labelPlaceholder", { defaultValue: "Label (e.g. Alice)" })}
                  size="sm" bg="var(--ink-0)" border="1px solid var(--line)" color="var(--text-0)"
                  onKeyDown={(e) => { if (e.key === "Enter" && canSave) handleAdd() }} />
-          {chain?.chainFamily === "evm" && !isHiddenWallet && (
+          {chain?.chainFamily === "evm" && !isHiddenWallet && validation?.valid && (
             <Flex as="label" gap="2" align="center" mt="2" fontSize="11px" color="var(--text-2)" cursor="pointer">
               <input type="checkbox" checked={cosigner} onChange={(e) => setCosigner(e.target.checked)} />
               {t("cosignerOption", { defaultValue: "Safe co-signer: offer it first when creating a multisig" })}

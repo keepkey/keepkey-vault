@@ -321,7 +321,7 @@ export function isBurnAddress(address: string): boolean {
   if (bech) {
     // Segwit programs carry a witness-version word first.
     const words = ['bc', 'ltc', 'dgb'].includes(bech.prefix) ? bech.words.slice(1) : bech.words
-    return allZero(bech32.fromWordsUnsafe(words))
+    return allZero(bech32.fromWordsUnsafe(words) || null)
   }
   try {
     const raw = base58.decode(addr)
@@ -336,4 +336,16 @@ export function knownTokenContract(address: string, chain: ChainDef): { symbol: 
   if (chain.chainFamily !== 'evm' || !HEX40.test(addr)) return undefined
   const chainId = Number(chain.chainId)
   return Number.isFinite(chainId) ? evmTokenIdentity(chainId, addr) : undefined
+}
+
+/**
+ * Address-book save check: the send validator, then refuse zero/burn addresses
+ * and one of the wallet's own addresses (`existing` is the matchAddress result).
+ */
+export function validateContactAddress(address: string, chain: ChainDef, existing?: { kind: string } | null): ValidationResult {
+  const check = validateAddress(address, chain)
+  if (!check.valid) return check
+  if (isBurnAddress(address)) return fail('burnAddress')
+  if (existing?.kind === 'own') return fail('contactIsOwnAddress')
+  return OK
 }

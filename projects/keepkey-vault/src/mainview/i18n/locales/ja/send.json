@@ -47,6 +47,8 @@
 	"invalidDgbAddress": "無効なDigiByteアドレス",
 	"invalidEvmAddress": "無効なアドレス — 0xの後に40桁の16進数文字が必要です",
 	"ensNotSupported": "ENS 名にはまだ対応していません — 0x アドレスを貼り付けてください",
+	"burnAddress": "これはバーンアドレスです — ここに送ったものは永久に失われます",
+	"contactIsOwnAddress": "これはご自身のウォレットのアドレスです — すでにアドレス帳に登録されています",
 	"invalidEvmChecksum": "チェックサムが一致しません — アドレスに入力ミスがある可能性があります。元の場所からもう一度コピーしてください",
 	"invalidChecksum": "このアドレスには入力ミスがあります。チェックサムが一致しません。元の場所からもう一度コピーしてください。",
 	"signingInvalidAddress": "KeepKey が受取人アドレスを拒否しました。アドレスを確認してもう一度お試しください。",

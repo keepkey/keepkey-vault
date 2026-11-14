@@ -47,6 +47,8 @@
 	"invalidDgbAddress": "Ungültige DigiByte-Adresse",
 	"invalidEvmAddress": "Ungültige Adresse — muss 0x gefolgt von 40 Hexadezimalzeichen sein",
 	"ensNotSupported": "ENS-Namen werden noch nicht unterstützt — fügen Sie die 0x-Adresse ein",
+	"burnAddress": "Dies ist eine Burn-Adresse — alles, was hierher gesendet wird, ist für immer verloren",
+	"contactIsOwnAddress": "Dies ist eine Ihrer eigenen Wallet-Adressen — sie ist bereits in Ihrem Adressbuch",
 	"invalidEvmChecksum": "Prüfsumme stimmt nicht — die Adresse enthält möglicherweise einen Tippfehler. Erneut aus der Quelle kopieren",
 	"invalidChecksum": "Diese Adresse enthält einen Tippfehler: Die Prüfsumme stimmt nicht. Kopieren Sie sie erneut aus der Quelle.",
 	"signingInvalidAddress": "Ihr KeepKey hat die Empfängeradresse abgelehnt. Prüfen Sie die Adresse und versuchen Sie es erneut.",

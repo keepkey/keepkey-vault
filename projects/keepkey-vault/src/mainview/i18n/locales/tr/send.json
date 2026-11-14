@@ -47,6 +47,8 @@
 	"invalidDgbAddress": "Geçersiz DigiByte adresi",
 	"invalidEvmAddress": "Geçersiz adres — 0x ve ardından 40 onaltılık karakter olmalıdır",
 	"ensNotSupported": "ENS adları henüz desteklenmiyor — 0x adresini yapıştırın",
+	"burnAddress": "Bu bir yakma adresi — buraya gönderilen her şey sonsuza dek kaybolur",
+	"contactIsOwnAddress": "Bu, kendi cüzdan adreslerinizden biri — zaten adres defterinizde",
 	"invalidEvmChecksum": "Sağlama toplamı eşleşmiyor — adreste yazım hatası olabilir. Kaynaktan yeniden kopyalayın",
 	"invalidChecksum": "Bu adreste yazım hatası var: sağlama toplamı eşleşmiyor. Kaynaktan yeniden kopyalayın.",
 	"signingInvalidAddress": "KeepKey'iniz alıcı adresini reddetti. Adresi kontrol edip yeniden deneyin.",

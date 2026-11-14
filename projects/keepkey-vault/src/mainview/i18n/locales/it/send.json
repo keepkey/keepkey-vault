@@ -47,6 +47,8 @@
 	"invalidDgbAddress": "Indirizzo DigiByte non valido",
 	"invalidEvmAddress": "Indirizzo non valido — deve essere 0x seguito da 40 caratteri esadecimali",
 	"ensNotSupported": "I nomi ENS non sono ancora supportati — incolla l'indirizzo 0x",
+	"burnAddress": "Questo è un indirizzo di burn — tutto ciò che viene inviato qui va perso per sempre",
+	"contactIsOwnAddress": "Questo è uno degli indirizzi del tuo wallet — è già nella tua rubrica",
 	"invalidEvmChecksum": "Checksum non corrispondente — l'indirizzo potrebbe contenere un errore di battitura. Ricopialo dalla fonte",
 	"invalidChecksum": "Questo indirizzo contiene un errore di battitura: il checksum non corrisponde. Ricopialo dalla fonte.",
 	"signingInvalidAddress": "Il tuo KeepKey ha rifiutato l'indirizzo del destinatario. Controlla l'indirizzo e riprova.",

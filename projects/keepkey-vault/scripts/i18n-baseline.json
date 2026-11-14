@@ -1470,7 +1470,9 @@
     "nav:deviceErrorUnknown": "8fa76411982761756a7f7fa91d410abbde52c96020e9003fffae63ce32115e2f",
     "nav:deviceErrorDetail": "27d5fc51e2844ae0595872e1d03e510023742fa4621b71a9987bc3344303cdaa",
     "send:signingInvalidAddress": "f78df932d259c093006e428bd5da3cdd979a63b989eea6a43e2d7288ed8f426f",
-    "send:ensNotSupported": "88738c2ed51bc0927e0186adfde4ed8bcc43c2aa9dccf5ed18bbc330ed07723c"
+    "send:ensNotSupported": "88738c2ed51bc0927e0186adfde4ed8bcc43c2aa9dccf5ed18bbc330ed07723c",
+    "send:burnAddress": "4f9bdaa879b2757269f20cd1a585643dec28802b70abbc73f127fc46842c0cc1",
+    "send:contactIsOwnAddress": "18c1e161bac2c64120a91b979083bfe3760c17f3fa7e7626993ff3065348a38c"
   },
   "rawUi": [
     "components/ApiAuditLog.tsx:m17059795",

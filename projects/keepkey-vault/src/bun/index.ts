@@ -23,6 +23,7 @@ import * as path from "path"
 import { createHash, randomUUID } from "crypto"
 import { createSwapQuoteLeases } from './swap-quote-lease'
 import { assessSwapRisk } from '../shared/swap-risk'
+import { validateContactAddress } from '../shared/address-validation'
 import { PasswordBank } from './password-bank'
 import { passwordDeviceCipher } from './password-device'
 import { savePasswordBackup } from './password-backup'
@@ -8972,6 +8973,9 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				if (params.cosigner && engine.isPassphraseWallet) throw new Error('Co-signers cannot be saved while a passphrase wallet is open')
 				const chain = getAllChains().find(c => c.networkId === params.networkId)
 				if (!chain) { console.warn('[addressbook] addAddressBook: unknown networkId', params.networkId); return null }
+				// Same refusals as the Add address dialog: bad format/checksum, .eth, zero/burn, own wallet.
+				const contactCheck = validateContactAddress(params.address, chain, matchAddressBook(chain.networkId, params.address, chain.chainFamily))
+				if (!contactCheck.valid) throw new Error(`Address not saved (${contactCheck.error}): ${params.address}`)
 				// Stored lowercase, a mistyped mixed-case address would lose its checksum and later pass as an owner.
 				if (params.cosigner && chain.chainFamily === 'evm') {
 					const { ethers } = await import('ethers')

@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { bech32 } from '@scure/base'
-import { isBurnAddress, knownTokenContract, validateAddress } from '../src/shared/address-validation'
+import { isBurnAddress, knownTokenContract, validateAddress, validateContactAddress } from '../src/shared/address-validation'
 import { CHAINS } from '../src/shared/chains'
 
 const chain = (id: string) => {
@@ -60,5 +60,24 @@ describe('ENS names', () => {
   // No resolver exists: a .eth name must not look like a valid recipient.
   test.each(['vitalik.eth', 'VITALIK.ETH', 'sub.name.eth'])('%s is refused with ensNotSupported', (name) => {
     for (const id of ['ethereum', 'base']) expect(validateAddress(name, chain(id))).toEqual({ valid: false, error: 'ensNotSupported' })
+  })
+})
+
+describe('validateContactAddress (address book save)', () => {
+  const base = chain('base')
+  test('uses the send validator: bad checksum and .eth are refused', () => {
+    expect(validateContactAddress('0x5aaeb6053F3E94C9b9A09f33669435E7Ef1BeAed', base)).toEqual({ valid: false, error: 'invalidEvmChecksum' })
+    expect(validateContactAddress('vitalik.eth', base)).toEqual({ valid: false, error: 'ensNotSupported' })
+  })
+  test('refuses zero and burn addresses', () => {
+    expect(validateContactAddress('0x0000000000000000000000000000000000000000', base)).toEqual({ valid: false, error: 'burnAddress' })
+    expect(validateContactAddress('0x000000000000000000000000000000000000dEaD', base)).toEqual({ valid: false, error: 'burnAddress' })
+    expect(validateContactAddress('1111111111111111111114oLvT2', chain('bitcoin'))).toEqual({ valid: false, error: 'burnAddress' })
+  })
+  test("refuses one of the wallet's own addresses", () => {
+    const addr = '0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed'
+    expect(validateContactAddress(addr, base, { kind: 'own' })).toEqual({ valid: false, error: 'contactIsOwnAddress' })
+    expect(validateContactAddress(addr, base, { kind: 'external' })).toEqual({ valid: true })
+    expect(validateContactAddress(addr, base)).toEqual({ valid: true })
   })
 })
