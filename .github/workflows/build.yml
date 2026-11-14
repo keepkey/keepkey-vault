@@ -19,25 +19,43 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  BUN_VERSION: '1.3.14'
+  # The Bun Hutch packs into the app (fork devkit toolchains.bun). Host scripts
+  # and tests run on the same version users run.
+  BUN_VERSION: '1.4.4'
   NODE_VERSION: '20'
+  MACOS_DEPLOYMENT_TARGET: '13.0'
   EMU_RELEASE_VERSION: '7.17.0'
   EMU_SOURCE_RUN_ID: '42312167033'
   EMU_SOURCE_SHA: 'c19a995b4045704494959f7885fc3ade63c32a19'
   EMU_SOURCE_ARTIFACT: 'certified-emulator-7.17.0-macos13-c19a995b4045704494959f7885fc3ade63c32a19'
 
 jobs:
-  # Electrobun's Linux core (libNativeWrapper.so et al.), built from the pinned
-  # modules/electrobun on ubuntu-22.04 for a glibc 2.35 floor. Handed to the
-  # Linux build as a workflow artifact — never published as a release: a core
-  # release on this repo once became "Latest" and hijacked keepkey.com downloads.
-  linux-core:
-    name: Electrobun Linux core
-    runs-on: ubuntu-22.04
-    # Least privilege: it only checks out, builds and uploads an artifact.
+  # Electrobun 2.x devkit (launcher, core, native wrapper, update manager and
+  # helpers) built from the pinned modules/electrobun (keepkey/electrobun
+  # keepkey/2.x). Hutch packs it into the app via HUTCH_ELECTROBUN_DEVKIT_ROOT.
+  # Each platform builds natively: Electrobun 2.x refuses to cross-compile macOS.
+  #   macOS: 13.0 floor (ELECTROBUN_MACOS_DEPLOYMENT_TARGET + rebuilt helpers).
+  #   Linux: ubuntu-22.04 for a glibc 2.35 floor. Hutch itself needs glibc 2.38,
+  #          so this leg runs the fork's build with plain Bun.
+  # Handed to the build job as a workflow artifact — never published as a
+  # release: a core release on this repo once became "Latest" and hijacked
+  # keepkey.com downloads. Its name must never match keepkey-vault-*.
+  devkit:
+    name: Electrobun devkit (${{ matrix.platform }})
+    runs-on: ${{ matrix.runner }}
     permissions:
       contents: read
-    timeout-minutes: 60
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-arm64
+            runner: macos-15
+          - platform: macos-x64
+            runner: macos-15-intel
+          - platform: linux-x64
+            runner: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
       - run: git submodule update --init modules/electrobun
@@ -46,56 +64,132 @@ jobs:
       - id: cache
         uses: actions/cache@v4
         with:
-          path: artifacts/electrobun-core-linux-x64.tar.gz
-          key: electrobun-linux-core-${{ steps.pin.outputs.sha }}-${{ hashFiles('scripts/build-electrobun-linux-x64-core.sh') }}
+          path: electrobun-devkit-${{ matrix.platform }}.tar.gz
+          key: electrobun-devkit-${{ matrix.platform }}-${{ steps.pin.outputs.sha }}-macos${{ env.MACOS_DEPLOYMENT_TARGET }}-${{ hashFiles('scripts/build-electrobun-macos-helpers.sh', 'scripts/verify-electrobun-devkit.mjs', '.github/actions/install-hutch/action.yml') }}
+
+      - if: steps.cache.outputs.cache-hit != 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
       - if: steps.cache.outputs.cache-hit != 'true'
         uses: oven-sh/setup-bun@v2
         with:
           bun-version: ${{ env.BUN_VERSION }}
-      - if: steps.cache.outputs.cache-hit != 'true'
-        run: ./scripts/build-electrobun-linux-x64-core.sh
-      # Every function electrobun's runtime binds must be exported by the .so we
-      # ship. A v1.13.1 core under the 1.18.1 runtime lacked 33 of them, and
-      # Linux crashed at startup (bridge.requestHost).
-      - name: Core exports every symbol the runtime binds
+
+      - name: Install Hutch (macOS)
+        if: steps.cache.outputs.cache-hit != 'true' && runner.os == 'macOS'
+        uses: ./.github/actions/install-hutch
+      - name: Build macOS devkit (${{ env.MACOS_DEPLOYMENT_TARGET }} floor)
+        if: steps.cache.outputs.cache-hit != 'true' && runner.os == 'macOS'
+        shell: bash
         run: |
           set -euo pipefail
-          mkdir -p "$RUNNER_TEMP/core" && tar xzf artifacts/electrobun-core-linux-x64.tar.gz -C "$RUNNER_TEMP/core"
-          awk '/return dlopen\(nativeWrapperPath, \{/{f=1;next} f&&/^\t\t\}\);/{exit} f&&/^\t\t\t[A-Za-z_][A-Za-z0-9_]*: \{/{sub(/^\t+/,"");sub(/:.*/,"");print}' \
-            modules/electrobun/package/src/bun/proc/native.ts | sort -u > "$RUNNER_TEMP/need.txt"
-          [ "$(wc -l < "$RUNNER_TEMP/need.txt")" -gt 50 ] || { echo "::error::could not read the symbol list from native.ts"; exit 1; }
-          nm -D --defined-only "$RUNNER_TEMP/core/libNativeWrapper.so" | awk '{print $NF}' | sort -u > "$RUNNER_TEMP/have.txt"
-          missing=$(comm -23 "$RUNNER_TEMP/need.txt" "$RUNNER_TEMP/have.txt")
-          [ -z "$missing" ] || { echo "::error::libNativeWrapper.so is missing: $missing"; exit 1; }
-          echo "All $(wc -l < "$RUNNER_TEMP/need.txt") runtime symbols exported"
+          make electrobun-macos-helpers electrobun-devkit MACOS_DEPLOYMENT_TARGET="$MACOS_DEPLOYMENT_TARGET"
+          # Vault bundles neither CEF nor WGPU.
+          tar czf "electrobun-devkit-${{ matrix.platform }}.tar.gz" -C modules/electrobun/package/dist --exclude ./cef .
+
+      - name: Build Linux devkit (glibc 2.35)
+        if: steps.cache.outputs.cache-hit != 'true' && runner.os == 'Linux'
+        shell: bash
+        working-directory: modules/electrobun/package
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev \
+            libpipewire-0.3-dev build-essential cmake pkg-config
+          npm ci
+          # HUTCH_BINARY=bun: the fork's scripts run their Bun steps through Hutch
+          # by default; plain Bun is the same runtime without Hutch's glibc 2.38.
+          export HUTCH_BINARY=bun
+          # Source-level ABI contract: the symbols the TypeScript runtime, the core
+          # and the SDKs bind are the ones the native wrappers define.
+          node scripts/run-bun-test.js src/shared/native-symbol-contract.test.ts
+          # The fork's release packaging: build.ts --release --core-only, then its
+          # ELF/manifest verifiers; writes electrobun-core-linux-x64.tar.gz (no CEF).
+          node scripts/package-release.js
+          mv electrobun-core-linux-x64.tar.gz "$GITHUB_WORKSPACE/electrobun-devkit-${{ matrix.platform }}.tar.gz"
+
+      - name: Verify devkit
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/devkit"
+          tar xzf "electrobun-devkit-${{ matrix.platform }}.tar.gz" -C "$RUNNER_TEMP/devkit"
+          node scripts/verify-electrobun-devkit.mjs "$RUNNER_TEMP/devkit"
+          shasum -a 256 "electrobun-devkit-${{ matrix.platform }}.tar.gz"
+
+      # Every ELF that can ship must sit at the 2.35 floor. libwebgpu_dawn.so is
+      # a prebuilt (glibc 2.38) the devkit carries for WGPU apps; Vault does not
+      # bundle WGPU, and the app's own glibc audit fails if it ever ships.
+      - name: Audit devkit glibc footprint (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          fail=0
+          while IFS= read -r -d '' f; do
+            [ "$(head -c 4 "$f" | xxd -p)" = 7f454c46 ] || continue
+            [ "$(basename "$f")" != libwebgpu_dawn.so ] || continue
+            max=$(strings "$f" | grep -oE 'GLIBC_[0-9]+\.[0-9]+' | sed 's/^GLIBC_//' | sort -V | tail -1)
+            rel="${f#"$RUNNER_TEMP"/devkit/}"
+            echo "  $rel: GLIBC_${max:-none}"
+            if [ -n "$max" ] && [ "$(printf '%s\n2.35\n' "$max" | sort -V | tail -1)" != 2.35 ]; then
+              echo "::error::$rel requires GLIBC_$max (floor 2.35)"; fail=1
+            fi
+          done < <(find "$RUNNER_TEMP/devkit" -type f -print0)
+          exit $fail
+
       - uses: actions/upload-artifact@v4
         with:
-          name: electrobun-core-linux-x64
-          path: artifacts/electrobun-core-linux-x64.tar.gz
+          name: electrobun-devkit-${{ matrix.platform }}
+          path: electrobun-devkit-${{ matrix.platform }}.tar.gz
           if-no-files-found: error
+          retention-days: 14
 
   build:
     name: Build (${{ matrix.name }})
-    needs: linux-core
+    needs: devkit
+    # Each leg needs only its own devkit (the download fails if it is missing),
+    # so one platform's devkit failure does not hide the others' results. The
+    # release job still requires every job to succeed.
+    if: ${{ !cancelled() }}
     runs-on: ${{ matrix.runner }}
     permissions:
       actions: read
       contents: read
     continue-on-error: ${{ matrix.experimental || false }}
-    timeout-minutes: 45
+    timeout-minutes: 60
 
     strategy:
       fail-fast: false
       matrix:
         include:
+          # Hutch needs glibc 2.38+; the app's ELFs come from the 22.04 devkit.
           - name: Linux x64
-            runner: ubuntu-latest
+            runner: ubuntu-24.04
+            devkit: linux-x64
             artifact-suffix: linux-x64
+            tests: true
 
-          - name: macOS
+          # Apple Silicon is built and signed locally (make build-signed); this
+          # leg tests and audits the same build and ships nothing.
+          - name: macOS arm64
             runner: macos-15
-            artifact-suffix: macos
+            devkit: macos-arm64
+            artifact-suffix: macos-arm64
             expected-arch: arm64
+            tests: true
+
+          # Intel, built natively. make sign-release-intel signs its tar.zst.
+          - name: macOS x64
+            runner: macos-15-intel
+            devkit: macos-x64
+            artifact-suffix: macos-x64
+            expected-arch: x86_64
+            tests: false
+
+    env:
+      HUTCH_ELECTROBUN_DEVKIT_ROOT: ${{ github.workspace }}/.electrobun-devkit
 
     steps:
       - name: Checkout
@@ -118,11 +212,28 @@ jobs:
       - name: Install Yarn
         run: npm install -g yarn
 
+      - name: Install Hutch
+        uses: ./.github/actions/install-hutch
+
+      - name: Download Electrobun devkit
+        uses: actions/download-artifact@v4
+        with:
+          name: electrobun-devkit-${{ matrix.devkit }}
+          path: ${{ runner.temp }}/electrobun-devkit
+
+      - name: Extract and verify Electrobun devkit
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$HUTCH_ELECTROBUN_DEVKIT_ROOT"
+          tar xzf "$RUNNER_TEMP/electrobun-devkit/electrobun-devkit-${{ matrix.devkit }}.tar.gz" -C "$HUTCH_ELECTROBUN_DEVKIT_ROOT"
+          node scripts/verify-electrobun-devkit.mjs "$HUTCH_ELECTROBUN_DEVKIT_ROOT"
+
       - name: Cache proto-tx-builder
         uses: actions/cache@v4
         with:
           path: modules/proto-tx-builder/node_modules
-          key: proto-tx-builder-${{ runner.os }}-${{ hashFiles('modules/proto-tx-builder/package.json', 'modules/proto-tx-builder/yarn.lock') }}
+          key: proto-tx-builder-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('modules/proto-tx-builder/package.json', 'modules/proto-tx-builder/yarn.lock') }}
 
       - name: Cache hdwallet
         uses: actions/cache@v4
@@ -130,16 +241,16 @@ jobs:
           path: |
             modules/hdwallet/node_modules
             modules/hdwallet/packages/*/dist
-          key: hdwallet-${{ runner.os }}-${{ hashFiles('modules/hdwallet/yarn.lock') }}
+          key: hdwallet-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('modules/hdwallet/yarn.lock') }}
 
       - name: Cache vault node_modules
         uses: actions/cache@v4
         with:
           path: projects/keepkey-vault/node_modules
-          key: vault-${{ runner.os }}-${{ hashFiles('projects/keepkey-vault/package.json', 'projects/keepkey-vault/bun.lock') }}
+          key: vault-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('projects/keepkey-vault/package.json', 'projects/keepkey-vault/bun.lock') }}
 
-      - name: Cache Rust/Cargo (macOS)
-        if: runner.os == 'macOS'
+      - name: Cache Rust/Cargo (macOS arm64)
+        if: matrix.expected-arch == 'arm64'
         uses: actions/cache@v4
         with:
           path: |
@@ -165,18 +276,23 @@ jobs:
         shell: bash
         run: make device-protocol-build
 
-      - name: Install vault dependencies
+      - name: Install vault dependencies and project the devkit
         # --frozen-lockfile: install exactly what bun.lock pins. Without it, bun
         # floats caret ranges to latest — e.g. @pioneer-platform/pioneer-discovery
         # ^10.0.9 → 10.2.0, which added a strict exports map that blocks the raw
         # `lib/chains.json` subpath import and breaks the vite build.
+        # `hutch electrobun sync` projects the devkit's SDK into .hutch/devkit,
+        # which tsconfig and every `electrobun/*` import resolve through.
         run: |
           cd projects/keepkey-vault
           test -f bun.lock || { echo "::error::The audited Vault dependency lockfile is missing"; exit 1; }
           bun install --frozen-lockfile
+          rm -rf .hutch/devkit .hutch/devkit.lock
+          hutch electrobun sync
         shell: bash
 
       - name: Run Vault unit and submodule-contract tests
+        if: matrix.tests
         # Must run after building the pinned modules. The suite imports critical
         # hdwallet wire translators directly, so an incompatible gitlink fails
         # here instead of producing a package with missing account controls.
@@ -184,6 +300,7 @@ jobs:
         shell: bash
 
       - name: Validate localization and financial locale boundaries
+        if: matrix.tests
         shell: bash
         run: |
           cd projects/keepkey-vault
@@ -209,7 +326,7 @@ jobs:
           bun src/bun/pioneer-guard.test.ts
 
       - name: Install native build tools (macOS)
-        if: runner.os == 'macOS'
+        if: matrix.expected-arch == 'arm64'
         # Protoc is required by the Rust Zcash sidecar. The certified emulator
         # is downloaded as an immutable artifact and is never rebuilt here.
         run: brew install protobuf
@@ -232,7 +349,7 @@ jobs:
       # The emulator Desktop ships must draw the PIN grid and end every PIN
       # wait; the 7.17 alpha certified before firmware #1042 did neither.
       - name: Test PIN entry on the certified emulator
-        if: runner.os == 'macOS'
+        if: runner.os == 'macOS' && matrix.tests
         run: make test-emu-pin KK_EMU_DYLIB="$PWD/projects/keepkey-vault/emulator-bundle/libkkemu.dylib"
         shell: bash
 
@@ -240,8 +357,10 @@ jobs:
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y fakeroot lintian dpkg-dev
 
-      - name: Build zcash-cli sidecar (macOS)
-        if: runner.os == 'macOS'
+      # Apple Silicon only: Intel does not support the shielded sidecar, so the
+      # Intel app ships without it and Vault keeps the privacy capability off.
+      - name: Build zcash-cli sidecar (macOS arm64)
+        if: matrix.expected-arch == 'arm64'
         shell: bash
         run: |
           echo "=== Building zcash-cli for $(uname -m) ==="
@@ -265,6 +384,12 @@ jobs:
         run: cd projects/keepkey-vault && bun run build:stable
         shell: bash
 
+      # Hutch packed exactly this archive and its update manifests; postBuild
+      # pruning and the camera copy must be in it, and nothing may rewrite it.
+      - name: Verify release bundle
+        run: cd projects/keepkey-vault && bun scripts/verify-release-bundle.ts stable
+        shell: bash
+
       - name: Smoke-test packaged Monero tools without developer overrides
         shell: bash
         run: |
@@ -281,276 +406,70 @@ jobs:
           bun monero-cli/package-smoke.ts --app-dir="$MONERO_APP_DIR"
 
       - name: Stage Windows emulator build input
-        if: runner.os == 'macOS'
+        if: matrix.expected-arch == 'arm64'
         run: |
           cp projects/keepkey-vault/emulator-bundle/libkkemu.dll \
             projects/keepkey-vault/artifacts/emulator-build-input-libkkemu-7.17.0-win-x64.dll
           shasum -a 256 projects/keepkey-vault/artifacts/emulator-build-input-libkkemu-7.17.0-win-x64.dll
         shell: bash
 
-      - name: Prune app bundle
-        run: cd projects/keepkey-vault && bun scripts/prune-app-bundle.ts
-        shell: bash
-
-      - name: Verify binary architecture (macOS)
+      - name: Verify architecture, deployment target and packaged Bun (macOS)
         if: runner.os == 'macOS'
         shell: bash
         run: |
+          set -euo pipefail
           EXPECTED="${{ matrix.expected-arch }}"
-          echo "=== Verifying macOS binary architecture (expecting $EXPECTED) ==="
-
-          TAR_ZST=$(find projects/keepkey-vault/artifacts -name "*.app.tar.zst" | head -1)
-          if [ -z "$TAR_ZST" ]; then echo "::error::No .app.tar.zst found"; exit 1; fi
-
+          make verify-arch EXPECTED_ARCH="$EXPECTED"
+          SUFFIX=$([ "$EXPECTED" = x86_64 ] && echo x64 || echo arm64)
+          TAR_ZST="projects/keepkey-vault/artifacts/stable-macos-$SUFFIX-keepkey-vault.app.tar.zst"
           WORK=$(mktemp -d)
           trap 'rm -rf "$WORK"' EXIT
-
           zstd -d "$TAR_ZST" -o "$WORK/app.tar" --force
-          LAUNCHER=$(tar tf "$WORK/app.tar" | grep "MacOS/launcher$" | head -1)
-          BUN_BIN=$(tar tf "$WORK/app.tar" | grep "MacOS/bun$" | head -1)
-
-          if [ -z "$LAUNCHER" ]; then echo "::error::No launcher binary found in archive"; exit 1; fi
-          tar xf "$WORK/app.tar" -C "$WORK/" "$LAUNCHER"
-          if [ -n "$BUN_BIN" ]; then tar xf "$WORK/app.tar" -C "$WORK/" "$BUN_BIN"; fi
-
-          echo "Checking binaries:"
-          for BIN in "$WORK/$LAUNCHER" "$WORK/$BUN_BIN"; do
-            [ -f "$BIN" ] || continue
-            ACTUAL=$(lipo -archs "$BIN" 2>/dev/null)
-            NAME=$(basename "$BIN")
-            echo "  $NAME: $ACTUAL"
-            if [ "$ACTUAL" != "$EXPECTED" ]; then
-              echo "::error::Architecture mismatch! $NAME is $ACTUAL but expected $EXPECTED"
-              exit 1
-            fi
-          done
-
-          # Also verify node-hid prebuild matches
-          HID_DIR=$(tar tf "$WORK/app.tar" | grep "node-hid/prebuilds/HID-darwin" | head -1)
-          if [ -n "$HID_DIR" ]; then
-            echo "  node-hid prebuild dir: $(dirname $HID_DIR | xargs basename)"
-          fi
-
-          echo "Architecture verified: $EXPECTED"
-
-      # Note: we intentionally do NOT create an arm64 DMG in CI. arm64 builds
-      # are produced locally via `make build-signed` (signed + notarized).
-      # CI only ships the Intel x86_64 DMG. A native Intel GitHub runner smoke-tests it below.
-
-      - name: Create x86_64 variant (macOS)
-        if: runner.os == 'macOS'
-        shell: bash
-        run: |
-          echo "=== Creating x86_64 variant from ARM64 build ==="
-
-          # Download the immutable x64 Electrobun core from keepkey/electrobun releases.
-          # Built from pinned upstream source on a native Intel GitHub runner.
-          # Targets macOS 13.0+, Bun 1.3.13, adhoc-signed binaries.
-          #
-          # IMPORTANT: When bumping modules/electrobun, rebuild + republish the x64 core:
-          #   make publish-electrobun-x64-core
-          # Then update X64_CORE_TAG below to match ELECTROBUN_X64_TAG in the Makefile.
-          X64_CORE_TAG="electrobun-x64-core-v7"
-          X64_CORE_SHA256="73c7d38fcba32c2383b7f9e0f7c6c1f598730e358784cf65272d07f02c96ad4b"
-
-          # Warn if the submodule was bumped but the x64 core tag wasn't updated.
-          # The release description includes the submodule version it was built from.
-          SUBMOD_VER=$(cd modules/electrobun && git describe --tags --always 2>/dev/null || git rev-parse --short HEAD)
-          echo "Electrobun submodule: $SUBMOD_VER, x64 core tag: $X64_CORE_TAG"
-          RELEASE_NOTES=$(gh release view "$X64_CORE_TAG" --repo keepkey/electrobun --json body --jq '.body' 2>/dev/null || echo "")
-          if [ -n "$RELEASE_NOTES" ] && ! echo "$RELEASE_NOTES" | grep -q "$SUBMOD_VER"; then
-            echo "::warning::x64 core ($X64_CORE_TAG) may not match submodule ($SUBMOD_VER). Run 'make publish-electrobun-x64-core' and update X64_CORE_TAG."
-          fi
-
-          echo "Downloading Electrobun x64 core from keepkey/electrobun @ $X64_CORE_TAG..."
-          curl -fsSL "https://github.com/keepkey/electrobun/releases/download/${X64_CORE_TAG}/electrobun-core-darwin-x64.tar.gz" \
-            -o /tmp/electrobun-core-x64.tar.gz
-          echo "${X64_CORE_SHA256}  /tmp/electrobun-core-x64.tar.gz" | shasum -a 256 -c -
-          mkdir -p /tmp/electrobun-x64
-          tar xzf /tmp/electrobun-core-x64.tar.gz -C /tmp/electrobun-x64/
-
-          # Find the directory containing the x64 binaries (handles nested or flat tar structure)
-          X64_BIN_DIR=$(find /tmp/electrobun-x64 -name "launcher" -type f -exec dirname {} \; | head -1)
-          if [ -z "$X64_BIN_DIR" ]; then echo "::error::No launcher found in electrobun-core-x64"; exit 1; fi
-          echo "x64 binaries at: $X64_BIN_DIR"
-          ls "$X64_BIN_DIR/"
-
-          # Find the ARM64 tar.zst
-          ARM64_TAR=$(find projects/keepkey-vault/artifacts -name "*.app.tar.zst" | head -1)
-          if [ -z "$ARM64_TAR" ]; then echo "::error::No ARM64 tar.zst found"; exit 1; fi
-          echo "Source: $ARM64_TAR"
-
-          # Extract the ARM64 .app
-          WORK=$(mktemp -d)
-          zstd -d "$ARM64_TAR" -o "$WORK/app.tar" --force
           tar xf "$WORK/app.tar" -C "$WORK/"
-          rm "$WORK/app.tar"
-
           APP=$(find "$WORK" -name "*.app" -maxdepth 1 | head -1)
-          if [ -z "$APP" ]; then echo "::error::No .app found after extraction"; exit 1; fi
-
-          # Monero ships a matching worker and official wallet RPC on Intel.
-          (
-            cd projects/keepkey-vault
-            python3 monero-cli/prepare.py --platform darwin-x64
-            bun monero-cli/build.ts --platform=darwin-x64
-          )
-          cp projects/keepkey-vault/monero-cli/dist/monero-cli "$APP/Contents/Resources/app/monero-cli"
-          cp projects/keepkey-vault/monero-cli/vendor/darwin-x64/monero-wallet-rpc "$APP/Contents/Resources/app/monero-tools/monero-wallet-rpc"
-          cp projects/keepkey-vault/monero-cli/vendor/darwin-x64/monerod "$APP/Contents/Resources/app/monero-tools/monerod"
-          cp projects/keepkey-vault/monero-cli/vendor/darwin-x64/monero-tools.json "$APP/Contents/Resources/app/monero-tools/monero-tools.json"
-          cp projects/keepkey-vault/monero-cli/vendor/darwin-x64/LICENSE "$APP/Contents/Resources/app/monero-tools/LICENSE"
-          test "$(lipo -archs "$APP/Contents/Resources/app/monero-cli")" = x86_64
-          test "$(lipo -archs "$APP/Contents/Resources/app/monero-tools/monero-wallet-rpc")" = x86_64
-          test "$(lipo -archs "$APP/Contents/Resources/app/monero-tools/monerod")" = x86_64
-
-          # Swap Electrobun runtime binaries with x64 versions
-          echo "Swapping Electrobun binaries for x86_64..."
-          for BIN in launcher bun libNativeWrapper.dylib libasar.dylib extractor zig-asar zig-zstd bsdiff bspatch; do
-            SRC="$X64_BIN_DIR/$BIN"
-            DEST=$(find "$APP" -name "$BIN" -type f | head -1)
-            if [ -f "$SRC" ] && [ -n "$DEST" ]; then
-              cp "$SRC" "$DEST"
-              ARCH=$(lipo -archs "$DEST" 2>/dev/null || echo "non-macho")
-              echo "  $BIN: $ARCH"
-            elif [ -f "$SRC" ]; then
-              echo "  $BIN: not found in .app (skipping)"
-            fi
-          done
-
-          # The ARM64 release must contain the shielded sidecar. Intel does not
-          # support it yet, so the x64 derivative removes it and Vault gates the
-          # privacy capability on the binary being present at runtime.
-          ZCASH_DEST=$(find "$APP" -name "zcash-cli" -type f | head -1)
-          if [ -z "$ZCASH_DEST" ]; then
-            echo "::error::ARM64 source app is missing zcash-cli"
-            exit 1
-          fi
-          ZCASH_ARCH=$(lipo -archs "$ZCASH_DEST" 2>/dev/null || echo "non-macho")
-          echo "  zcash-cli source: $ZCASH_ARCH"
-          if [[ "$ZCASH_ARCH" != *"arm64"* ]]; then
-            echo "::error::ARM64 source app contains incompatible zcash-cli ($ZCASH_ARCH)"
-            exit 1
-          fi
-          rm "$ZCASH_DEST"
-          echo "  zcash-cli: removed (Intel not supported; privacy capability will stay disabled)"
-
-          # The certified emulator is universal and audited for macOS 13. Keep
-          # it in the Intel derivative so both macOS release archives satisfy
-          # the bundled-emulator release SOP.
-          EMULATOR_DEST=$(find "$APP/Contents/Resources/app/emulator" -name 'libkkemu.dylib' -type f | head -1)
-          if [ -z "$EMULATOR_DEST" ]; then
-            echo "::error::Intel derivative is missing certified libkkemu.dylib"
-            exit 1
-          fi
-          echo "  libkkemu.dylib: retained (certified macOS 13 universal artifact)"
-
-          # Audit every executable/native module, its deployment target, and
-          # the required x64 node-hid runtime before this artifact can ship.
-          ./scripts/audit-macos-bundle.sh "$APP" x86_64 13.0
-
-          # Verify libNativeWrapper has no resign-swizzle (macOS 12 crash fix)
-          NATIVE_LIB=$(find "$APP" -name "libNativeWrapper.dylib" | head -1)
-          if [ -n "$NATIVE_LIB" ] && nm "$NATIVE_LIB" 2>/dev/null | grep -q "resignKeyWindow"; then
+          test -n "$APP"
+          # Every Mach-O (launcher, core, native wrapper, update manager, helpers,
+          # native modules, sidecars): this architecture, macOS 13.0 or older.
+          ./scripts/audit-macos-bundle.sh "$APP" "$EXPECTED" "$MACOS_DEPLOYMENT_TARGET"
+          # Regression guard from the macOS 12 crash: no resign-swizzle.
+          if nm "$APP/Contents/MacOS/libNativeWrapper.dylib" 2>/dev/null | grep -q "resignKeyWindow"; then
             echo "::error::libNativeWrapper.dylib contains resign-swizzle symbols (will crash on macOS 12)"
             exit 1
           fi
-          echo "  libNativeWrapper: no resign-swizzle (macOS 12 safe)"
+          BUN_REPORTED=$("$APP/Contents/MacOS/bun" --version)
+          [ "$BUN_REPORTED" = "$BUN_VERSION" ] || { echo "::error::packaged Bun is $BUN_REPORTED, expected $BUN_VERSION"; exit 1; }
+          echo "Packaged Bun $BUN_REPORTED"
 
-          # Re-pack as x64 tar.zst
-          X64_TAR="projects/keepkey-vault/artifacts/stable-macos-x64-keepkey-vault.app.tar.zst"
-          (cd "$WORK" && tar cf - "$(basename "$APP")") | zstd -o "$X64_TAR" --force
-          echo "Created: $X64_TAR ($(du -h "$X64_TAR" | cut -f1))"
-
-          # Cleanup
-          rm -rf "$WORK" /tmp/electrobun-x64 /tmp/electrobun-core-x64.tar.gz
-
-      # Note: we intentionally do NOT create an unsigned x86_64 DMG in CI.
-      # sign-release-intel downloads the x64 tar.zst, signs it, and builds
-      # the DMG from the signed tar.zst. Shipping an unsigned DMG just
-      # risks clobbering the signed DMG on a CI re-run.
-
-      - name: Remove arm64 macOS artifacts (CI ships x64 only)
+      - name: Keep only shippable macOS artifacts
         if: runner.os == 'macOS'
-        shell: bash
-        run: |
-          # arm64 macOS is built+signed locally via `make build-signed`.
-          # Delete all arm64 artifacts so CI doesn't upload them to the release
-          # and clobber the locally-signed versions.
-          cd projects/keepkey-vault/artifacts
-          echo "=== Before cleanup ==="
-          ls -la
-          rm -f KeepKey-Vault-*-arm64.dmg
-          rm -f stable-macos-arm64-keepkey-vault.app.tar.zst
-          rm -f stable-macos-arm64-keepkey-vault.dmg
-          rm -f stable-macos-arm64-update.json
-          rm -f stable-macos-arm64-*.patch
-          echo "=== After cleanup ==="
-          ls -la
-
-      - name: Download Electrobun Linux core
-        if: runner.os == 'Linux'
-        uses: actions/download-artifact@v4
-        with:
-          name: electrobun-core-linux-x64
-          path: ${{ runner.temp }}/electrobun-core
-
-      - name: Substitute Electrobun Linux core (lower glibc floor)
-        if: runner.os == 'Linux'
         shell: bash
         run: |
           set -euo pipefail
           cd projects/keepkey-vault/artifacts
-          TAR_ZST=$(ls stable-linux-x64-keepkey-vault.tar.zst 2>/dev/null | head -1)
-          [ -n "$TAR_ZST" ] || { echo "::error::No Linux tar.zst to patch"; exit 1; }
-
-          # Built from the pinned modules/electrobun by the linux-core job.
-          CORE_TGZ="${{ runner.temp }}/electrobun-core/electrobun-core-linux-x64.tar.gz"
-          echo "Fetched $(du -h "$CORE_TGZ" | cut -f1) of Electrobun Linux core"
-
-          WORK=$(mktemp -d)
-          trap 'rm -rf "$WORK" "$CORE_TGZ"' EXIT
-          zstd -d "$TAR_ZST" -o "$WORK/app.tar" --force
-          tar xf "$WORK/app.tar" -C "$WORK/"
-          APP_DIR=$(find "$WORK" -maxdepth 1 -type d -name "keepkey-vault" | head -1)
-          [ -n "$APP_DIR" ] || { echo "::error::no keepkey-vault dir in tar.zst"; exit 1; }
-
-          BIN_DIR="$APP_DIR/bin"
-          [ -d "$BIN_DIR" ] || { echo "::error::no bin/ dir at $BIN_DIR"; exit 1; }
-
-          # Extract core tarball into a staging dir so we can preview what's there.
-          STAGE="$WORK/core"
-          mkdir -p "$STAGE"
-          tar xzf "$CORE_TGZ" -C "$STAGE"
-          echo "Core tarball contents:"
-          ls -la "$STAGE"
-
-          # Substitute every file from the core into bin/ (overwrite). Preserve
-          # mode + ownership of the original layout. Files we expect:
-          #   launcher, extractor, libNativeWrapper.so, libNativeWrapper_cef.so,
-          #   libasar.so, (optionally) bun
-          for src in "$STAGE"/*; do
-            name=$(basename "$src")
-            dst="$BIN_DIR/$name"
-            if [ -e "$dst" ]; then
-              echo "  replace bin/$name"
-            else
-              echo "  add     bin/$name"
-            fi
-            install -m 0755 "$src" "$dst"
-          done
-
-          # Repack tar.zst — same name, original location.
-          (cd "$WORK" && tar cf "$WORK/app.tar" "$(basename "$APP_DIR")")
-          zstd -19 -o "$TAR_ZST" --force "$WORK/app.tar"
-          echo "Repacked $TAR_ZST ($(du -h "$TAR_ZST" | cut -f1))"
+          echo "=== Before cleanup ==="
+          ls -la
+          if [ "${{ matrix.expected-arch }}" = arm64 ]; then
+            # arm64 macOS is built+signed locally via `make build-signed`. Ship
+            # nothing arm64 from CI, whatever Hutch names it, so CI never
+            # clobbers the locally signed files on the draft release.
+            rm -rf -- *arm64*
+          else
+            # make sign-release-intel re-signs and re-packs this archive, so
+            # update manifests describing these unsigned bytes must not ship.
+            rm -f -- stable-macos-x64-update.json stable-macos-x64-update-v2.json stable-macos-x64-*.patch *.dmg
+            test -f stable-macos-x64-keepkey-vault.app.tar.zst
+          fi
+          echo "=== After cleanup ==="
+          ls -la
+          if [ -n "$(find . -maxdepth 1 -iname '*arm64*')" ]; then echo "::error::arm64 artifacts must not leave CI"; exit 1; fi
+          if [ -n "$(find . -maxdepth 1 \( -name '*.json' -o -name '*.patch' -o -name '*.dmg' \))" ]; then echo "::error::unexpected macOS artifact"; exit 1; fi
 
       - name: Audit Linux glibc footprint
         if: runner.os == 'Linux'
         env:
           # Highest GLIBC_ symbol allowed in any ELF inside the bundle.
-          # 2.35 = ubuntu-22.04 floor, reached via our self-built Electrobun
-          #        core (linux-core job, from the pinned submodule) substituted in above.
+          # 2.35 = ubuntu-22.04 floor, reached via our Electrobun devkit built
+          #        on ubuntu-22.04 (devkit job, from the pinned submodule).
           #        Covers Debian 12, Ubuntu 22.04 LTS, RHEL/Rocky 9, Mint 21,
           #        Pop!_OS 22.04.
           LINUX_GLIBC_FLOOR: '2.35'
@@ -663,11 +582,10 @@ jobs:
           cp -r "$APP_DIR"/* "$APPDIR/usr/bin/"
 
           # Bundle the tray stack (Ayatana AppIndicator + dbusmenu): small,
-          # self-contained, and absent on default Fedora KDE / minimal installs,
-          # where the AppImage refused to start. It goes next to
-          # libNativeWrapper.so in usr/bin/bin — NOT usr/lib: the Electrobun
-          # launcher replaces the child's LD_LIBRARY_PATH with that one
-          # directory, so it is the only place a bundled library is found.
+          # self-contained, and absent on default Fedora KDE / minimal installs.
+          # It goes next to libNativeWrapper.so in usr/bin/bin: the Electrobun
+          # launcher puts that directory first on LD_LIBRARY_PATH, and the
+          # native wrapper dlopens AppIndicator when the tray is created.
           # WebKitGTK stays a system dependency — too big and too coupled to the
           # host (helper subprocesses, GStreamer, Mesa) to bundle; AppRun still
           # checks for it and names the package. The .so files come from Ubuntu
@@ -907,6 +825,7 @@ jobs:
   intel-smoke:
     name: Intel macOS packaged-app smoke test
     needs: build
+    if: ${{ !cancelled() }}
     runs-on: macos-15-intel
     timeout-minutes: 15
     permissions:
@@ -917,10 +836,10 @@ jobs:
       - name: Checkout audit tooling
         uses: actions/checkout@v4
 
-      - name: Download assembled macOS artifacts
+      - name: Download assembled Intel artifacts
         uses: actions/download-artifact@v4
         with:
-          name: keepkey-vault-macos-${{ github.sha }}
+          name: keepkey-vault-macos-x64-${{ github.sha }}
           path: artifacts
 
       - name: Extract Intel application
@@ -939,6 +858,15 @@ jobs:
 
       - name: Audit complete Intel bundle
         run: ./scripts/audit-macos-bundle.sh "$APP" x86_64 13.0
+
+      - name: Electrobun runtime is Intel
+        shell: bash
+        run: |
+          set -euo pipefail
+          for bin in launcher bun libElectrobunCore.dylib libNativeWrapper.dylib; do
+            test "$(lipo -archs "$APP/Contents/MacOS/$bin")" = x86_64
+          done
+          test "$(lipo -archs "$APP/Contents/Resources/uninstall")" = x86_64
 
       - name: Load packaged node-hid with packaged Bun
         shell: bash
@@ -983,7 +911,10 @@ jobs:
   release:
     name: Create Draft Release
     needs: [build, intel-smoke]
-    if: success() && (startsWith(github.ref, 'refs/tags/v') || startsWith(github.ref, 'refs/heads/release/') || github.event_name == 'workflow_dispatch')
+    # Releases come only from v* tags or release/* branches (pushed or
+    # dispatched). A dispatch on any other branch builds and tests without
+    # creating a draft release.
+    if: success() && (startsWith(github.ref, 'refs/tags/v') || startsWith(github.ref, 'refs/heads/release/'))
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -1004,7 +935,7 @@ jobs:
 
       # Only the app's build artifacts. Everything downloaded here is uploaded to
       # the release (artifacts/**/*), so a job-to-job hand-off artifact such as
-      # electrobun-core-linux-x64 must never match: it once shipped as a release
+      # electrobun-devkit-* must never match: a core artifact once shipped as a release
       # asset because this step downloaded every artifact in the run.
       - name: Download release artifacts
         uses: actions/download-artifact@v4
@@ -1022,7 +953,7 @@ jobs:
           # Remove per-platform checksum files (will regenerate combined)
           rm -f SHA256SUMS-*.txt SHA256SUMS.txt
           # Generate checksums for release-worthy files only
-          shasum -a 256 *.dmg *.AppImage *.deb *.exe *.tar.zst 2>/dev/null > SHA256SUMS.txt || true
+          shasum -a 256 *.dmg *.AppImage *.deb *.exe *.tar.zst *.tar.gz 2>/dev/null > SHA256SUMS.txt || true
           echo "=== Release checksums ==="
           cat SHA256SUMS.txt
 

@@ -49,7 +49,7 @@ jobs:
 
       - name: Initialize pinned firmware inputs
         run: |
-          git submodule update --init modules/keepkey-firmware modules/electrobun
+          git submodule update --init modules/keepkey-firmware
           git -C modules/keepkey-firmware submodule update --init \
             code-signing-keys deps/crypto/trezor-firmware deps/device-protocol \
             deps/googletest deps/python-keepkey deps/qrenc/QR-Code-generator \
@@ -75,16 +75,6 @@ jobs:
           EMU_PYTHON: python
           MACOS_TARGET: '13.0'
         run: make build-emulator-release
-
-      - name: Build macOS 13 ARM64 Electrobun core
-        env:
-          MACOS_TARGET: '13.0'
-        run: |
-          cd modules/electrobun/package
-          bun install
-          bun build.ts
-          cd ../../..
-          make build-electrobun-arm64-core
 
       - name: Audit release libraries
         run: |
@@ -112,8 +102,7 @@ jobs:
             projects/keepkey-vault/emulator-bundle/libkkemu.dll
 
       # Never certify an emulator that cannot take a PIN: Desktop's PIN suites
-      # run against the library about to be uploaded. Set up after the
-      # Electrobun core build so that build keeps its own Bun.
+      # run against the library about to be uploaded.
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
@@ -144,4 +133,3 @@ jobs:
           path: |
             projects/keepkey-vault/emulator-bundle/libkkemu.dylib
             projects/keepkey-vault/emulator-bundle/libkkemu.dll
-            artifacts/electrobun-core-darwin-arm64.tar.gz

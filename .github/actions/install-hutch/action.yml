@@ -1,0 +1,36 @@
+name: Install Hutch (pinned)
+description: >
+  Install Hutch 0.29.0 (the version projects/keepkey-vault/hutch.config.ts names)
+  from a checksum-verified installer, and require the installed archive to be the
+  exact build pinned here. Bump every value together when moving Hutch.
+
+runs:
+  using: composite
+  steps:
+    - name: Install Hutch 0.29.0
+      shell: bash
+      env:
+        HUTCH_VERSION: '0.29.0'
+        HUTCH_REVISION: a2c9255ed54f93225814d7d7cf04ad5a613e44eb
+        # sha256 of https://hutch.blackboard.sh/hutch/install.sh as reviewed.
+        HUTCH_INSTALLER_SHA256: ac0ad498dfb09d2bc80fc9a6a0254c183cd0f125c83dce32defff65a1cf793e7
+      run: |
+        set -euo pipefail
+        case "$(uname -s)-$(uname -m)" in
+          Darwin-arm64) platform=macos-arm64; archive_sha=f081abca6d08d9d862577e77365f3cb5437e65858ca45a27173505e4e2345994 ;;
+          Darwin-x86_64) platform=macos-x64; archive_sha=a8d0b5c9a330f02b9fe11222dadd1a4590f7d6f77e3f8f301fc9b5c360528b65 ;;
+          Linux-x86_64) platform=linux-x64; archive_sha=4aa3c5c7fa24898d8227b087dd393eb2a1463658f0d87e23a72cfe611af83b75 ;;
+          *) echo "::error::no pinned Hutch build for $(uname -s)-$(uname -m)"; exit 1 ;;
+        esac
+        installer="$RUNNER_TEMP/install-hutch.sh"
+        curl --proto '=https' --tlsv1.2 --fail --silent --show-error --location \
+          https://hutch.blackboard.sh/hutch/install.sh --output "$installer"
+        echo "$HUTCH_INSTALLER_SHA256  $installer" | shasum -a 256 -c -
+        sh "$installer" --version "$HUTCH_VERSION" --no-modify-path
+        # The installer checks the archive against the server's manifest; also
+        # require the build we reviewed.
+        installed="$HOME/.hutch/releases/hutch/$HUTCH_VERSION/$HUTCH_REVISION/$platform/.dash-installed"
+        test "$(cat "$installed")" = "$archive_sha" || {
+          echo "::error::Hutch $HUTCH_VERSION $platform archive is not the pinned build"; exit 1; }
+        echo "$HOME/.hutch/bin" >> "$GITHUB_PATH"
+        "$HOME/.hutch/bin/hutch" --version | tee /dev/stderr | grep -F "$HUTCH_VERSION" >/dev/null
