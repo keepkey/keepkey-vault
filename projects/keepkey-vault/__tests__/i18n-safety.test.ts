@@ -38,6 +38,11 @@ describe('financial locale boundaries', () => {
     expect(normalizeAmountInput('1.5','en-US','pt')).toBe('1.5')
     expect(normalizeAmountInput('1,5','en-US','en')).toBeNull()
     for (const input of ['1.234,56','1,234.56','1,,2']) expect(normalizeAmountInput(input,'en-US','pt')).toBeNull()
+    // The en-US number format shows "1,234.56": a comma before exactly three
+    // digits may be grouping, so it is refused rather than read as 1.234.
+    for (const input of ['1,234','1,000','12,500']) expect(normalizeAmountInput(input,'en-US','de')).toBeNull()
+    expect(normalizeAmountInput('1,2345','en-US','de')).toBe('1.2345')
+    expect(normalizeAmountInput('1,234','de-DE','de')).toBe('1.234')
     expect(normalizeAmountInput('')).toBeNull()
     expect(normalizeAmountInput('.')).toBeNull()
   })

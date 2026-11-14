@@ -24,6 +24,9 @@ export function normalizeAmountInput(value: string, locale = 'en-US', language?:
   const commaDecimal = decimalSeparator(locale) === ',' || (!!language && decimalSeparator(language) === ',')
   if (commaDecimal && input.includes(',')) {
     if (input.includes('.')) return null
+    // Only the UI language reads the comma as decimal: the number format still
+    // groups with it ("1,234.56"), so "1,234" is ambiguous and refused.
+    if (decimalSeparator(locale) !== ',' && /^\d+,\d{3}$/.test(input)) return null
     input = input.replace(',', '.')
   }
   if (!/^(?:\d+(?:\.\d*)?|\.\d+)$/.test(input)) return null
