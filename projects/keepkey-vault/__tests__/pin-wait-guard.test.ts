@@ -343,6 +343,25 @@ describe.each(['7.17', '7.16'] as const)('EngineController on a USB/HID-like tra
     expect(device.received.filter(r => r.type === T.MESSAGETYPE_GETPUBLICKEY)).toHaveLength(1)
   })
 
+  // Audit v4 H8: a REST call at launch can open the PIN wait before the webview
+  // listens, so its pin-request push is lost. The UI's unlock request must get
+  // the prompt again, not silently join the wait.
+  test('the unlock request replays a PIN prompt the webview missed', async () => {
+    const device = new ScriptedKeepKey(fw)
+    const { engine, transport } = await engineWith(device)
+    const first = engine.promptPin()
+    await until(() => awaitingInput(transport) === 'pin', 'PIN request')
+    const prompts: unknown[] = []
+    engine.on('pin-request', prompt => prompts.push(prompt))
+    const manual = engine.requestDeviceUnlock()
+    await until(() => prompts.length === 1, 'replayed PIN prompt')
+    expect(prompts).toEqual([{ type: 'current' }])
+    expect(device.received.filter(r => r.type === T.MESSAGETYPE_GETPUBLICKEY)).toHaveLength(1)
+    await engine.sendPin('1')
+    await Promise.all([first, manual])
+    expect(engine.getDeviceState().state).toBe('ready')
+  })
+
   test('a foreground REST request unlocks as Desktop, then resumes in its original context', async () => {
     const device = new ScriptedKeepKey(fw)
     const { engine, transport } = await engineWith(device)
