@@ -8,6 +8,8 @@ import type { ChainDef } from '../../shared/chains'
 
 const TAG = '[txbuilder:xrp]'
 export const XRP_FEE_DROPS = 1000n
+/** Cross-chain routing memos (THORChain / Maya): short and long forms, e.g. "=:ETH.ETH:0x…", "SWAP:…", "s:…". */
+const XRP_SWAP_MEMO = /^(?:[=+\-~]|swap|s|add|a|withdraw|wd)?:/i
 const uint = (value: unknown, label: string): bigint => {
   if (!/^\d+$/.test(String(value))) throw new Error(`Invalid XRP ${label}`)
   return BigInt(String(value))
@@ -64,24 +66,24 @@ export async function buildXrpTx(
   const sequence = String(accountInfo.Sequence || '0')
   const ledgerIndexCurrent = parseInt(accountInfo.ledger_index_current || '0')
 
-  // 2. Handle memo vs destination tag
+  // 2. Destination tag vs routing memo.
+  //   - empty            → no tag at all (never a silent tag 0: exchanges credit by tag)
+  //   - whole number     → destination tag (0–4294967295)
+  //   - swap routing memo (THORChain/Maya "=:…", "SWAP:…", …) → memo data, no tag
+  //   - anything else    → rejected: "Tag: 104857" used to become a memo AND send tag 0
   let destinationTag: string | undefined
   let memoData: string | undefined
 
-  if (memo && memo.trim()) {
-    const trimmed = memo.trim()
-    // THORChain/swap memos (e.g. "=:ETH.ETH:0x...") are always memo data, never a destination tag.
-    // Only treat as destination tag if purely numeric AND not a swap routing memo.
-    const isSwapMemo = /^[=+\-~]?:/.test(trimmed)
-    if (!isSwapMemo && /^\d+$/.test(trimmed)) {
-      const tagNum = parseInt(trimmed, 10)
-      if (tagNum >= 0 && tagNum <= 4294967295) {
-        destinationTag = String(tagNum)
-      } else {
-        throw new Error(`XRP destination tag must be 0-4294967295, got: ${memo}`)
-      }
-    } else {
+  const trimmed = memo.trim()
+  if (trimmed) {
+    if (XRP_SWAP_MEMO.test(trimmed)) {
       memoData = trimmed
+    } else if (/^\d+$/.test(trimmed) && BigInt(trimmed) <= 4294967295n) {
+      destinationTag = BigInt(trimmed).toString()
+    } else if (/^\d+$/.test(trimmed)) {
+      throw new Error(`XRP destination tag must be 0-4294967295, got: ${trimmed}`)
+    } else {
+      throw new Error('XRP destination tag must be a whole number (0-4294967295). Remove any text, then try again.')
     }
   }
 
@@ -121,10 +123,11 @@ export async function buildXrpTx(
     },
   }
 
-  const payment = {
+  // Omit destinationTag when there is none: the signer only sets a tag when it is defined.
+  const payment: { amount: string; destination: string; destinationTag?: string } = {
     amount: String(drops),
     destination: to,
-    destinationTag: destinationTag || '0',
+    ...(destinationTag !== undefined ? { destinationTag } : {}),
   }
 
   return {
