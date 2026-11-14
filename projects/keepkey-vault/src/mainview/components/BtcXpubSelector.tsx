@@ -11,6 +11,10 @@ import { DocsLink } from "./DocsLink"
 import { DOCS_LINKS, watch } from "../../shared/docs-links"
 import type { BtcAccountSet, BtcScriptType } from "../../shared/types"
 
+/** "zpub6rFR7y…GutZYs" → head…tail, so long keys stay recognisable in narrow cards. */
+const middleEllipsis = (value: string, head = 6, tail = 4) =>
+  value.length > head + tail + 1 ? `${value.slice(0, head)}…${value.slice(-tail)}` : value
+
 interface BtcXpubSelectorProps {
   btcAccounts: BtcAccountSet
   onSelectXpub: (accountIndex: number, scriptType: BtcScriptType) => void
@@ -114,8 +118,10 @@ export function BtcXpubSelector({ btcAccounts, onSelectXpub, onAddAccount, addin
                 <Text fontSize="11px" fontWeight="600" color={isSelected ? "kk.gold" : "kk.textPrimary"} lineHeight="1.2">
                   {st.label}
                 </Text>
-                <Text fontSize="10px" fontFamily="mono" color="kk.textMuted" lineHeight="1.2">
-                  {st.addressPrefix}...
+                {/* The account's extended key, middle-ellipsized so each card is identifiable
+                    (a bare "bc1..." read as a truncated address). Full key in the tooltip. */}
+                <Text fontSize="10px" fontFamily="mono" color="kk.textMuted" lineHeight="1.2" title={xpubData.xpub}>
+                  {middleEllipsis(xpubData.xpub)}
                 </Text>
                 {xpubData && (
                   <Text fontSize="10px" fontFamily="mono" color={hasBtcBalance ? "white" : "kk.textMuted"} fontWeight="500" lineHeight="1.2">
