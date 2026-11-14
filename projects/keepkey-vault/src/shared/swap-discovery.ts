@@ -743,3 +743,22 @@ export function searchEntries(index: SearchIndex, query: string): AssetEntry[] {
   matched.sort((a, b) => (a.score - b.score) || (a.idx - b.idx))
   return matched.map(m => index.entries[m.idx])
 }
+
+/**
+ * The TO picker's first-step search. A network tile matches on its name, its
+ * family or its coin's ticker, and assets match on symbol or name whenever
+ * there is a query — so "eth" lists the Ethereum, Base and Arbitrum tiles and
+ * native ETH on each, not only the Ethereum tile (audit v4 V17).
+ */
+export function searchPickerNetworks<C extends { name: string; family: string; nativeCaip?: string }>(
+  chains: C[], entries: AssetEntry[], query: string, excludeCaip?: string,
+): { chains: C[]; assets: AssetEntry[] } {
+  const q = query.trim().toLowerCase()
+  if (!q) return { chains, assets: [] }
+  const tickers = new Map(entries.map(e => [canonicalizeCaip(e.caip), e.symbol.toLowerCase()]))
+  return {
+    chains: chains.filter(c => c.name.toLowerCase().includes(q) || c.family.toLowerCase().includes(q)
+      || (!!c.nativeCaip && tickers.get(canonicalizeCaip(c.nativeCaip)) === q)),
+    assets: entries.filter(e => e.caip !== excludeCaip && `${e.symbol} ${e.name}`.toLowerCase().includes(q)),
+  }
+}
