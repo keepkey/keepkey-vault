@@ -859,7 +859,7 @@ export function StakingPanel({ chain, address, availableBalance, watchOnly }: St
 					<Box as={FaCoins} color="kk.gold" />
 					<Text fontSize="sm" fontWeight="600" color="kk.textPrimary">{t('title')}</Text>
 					{totalUsd > 0 && (
-						<Badge colorScheme="yellow" variant="subtle">{fmtCompact(totalUsd)}</Badge>
+						<Badge colorPalette="yellow" variant="subtle">{fmtCompact(totalUsd)}</Badge>
 					)}
 				</HStack>
 				<IconButton
@@ -936,7 +936,7 @@ export function StakingPanel({ chain, address, availableBalance, watchOnly }: St
 										<VStack align="start" gap="0">
 											<HStack gap="2">
 												<Badge
-													colorScheme={pos.type === 'delegation' ? 'blue' : pos.type === 'reward' ? 'green' : 'yellow'}
+													colorPalette={pos.type === 'delegation' ? 'blue' : pos.type === 'reward' ? 'green' : 'yellow'}
 													variant="subtle"
 													fontSize="10px"
 												>

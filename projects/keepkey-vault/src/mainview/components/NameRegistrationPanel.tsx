@@ -227,9 +227,9 @@ export function NameRegistrationPanel({ chain, address, availableBalance, watchO
 								checking ? (
 									<HStack gap="1"><Spinner size="xs" color="kk.gold" /><Text fontSize="10px" color="kk.textMuted">{t("checking")}</Text></HStack>
 								) : isAvailable ? (
-									<Badge colorScheme="green" variant="subtle" fontSize="10px">{t("available")}</Badge>
+									<Badge colorPalette="green" variant="subtle" fontSize="10px">{t("available")}</Badge>
 								) : nameInfo?.found ? (
-									<Badge colorScheme="red" variant="subtle" fontSize="10px">{t("taken")}</Badge>
+									<Badge colorPalette="red" variant="subtle" fontSize="10px">{t("taken")}</Badge>
 								) : null
 							)}
 						</Flex>
