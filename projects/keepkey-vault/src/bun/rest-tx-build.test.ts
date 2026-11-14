@@ -6,6 +6,7 @@
  * so nothing Desktop built is silently dropped before the device signs it.
  */
 import { afterEach, describe, expect, test } from 'bun:test'
+import { validateAddress } from '../shared/address-validation'
 import { CHAINS } from '../shared/chains'
 import type { BtcAccountSet } from '../shared/types'
 import * as S from './schemas'
@@ -34,11 +35,13 @@ const cosmosPioneer = {
 const xrpPioneer = {
   GetAccountInfo: async () => ({ data: { Sequence: 7, ledger_index_current: 900, Balance: '5000000', OwnerCount: 0 } }),
 }
+// Checksum-valid addresses from the repo's real fixtures (cosmos-amino-real.json,
+// failed-fetch-not-zero, native-deposits.json): validateAddress checks bech32.
 const SIGNERS: Record<string, string> = {
-  cosmos: 'cosmos1g9el7lzjwh9yun2c4jjzhy09j98vkhfxa4ww3e',
-  osmosis: 'osmo1g9el7lzjwh9yun2c4jjzhy09j98vkhfxl5mmyl',
+  cosmos: 'cosmos1rgf4z0qljnsaq2tt5dzr058snqahfkha797w54',
+  osmosis: 'osmo1rgf4z0qljnsaq2tt5dzr058snqahfkhak7d7z8',
   thorchain: 'thor1g9el7lzjwh9yun2c4jjzhy09j98vkhfxfhgnzx',
-  mayachain: 'maya1g9el7lzjwh9yun2c4jjzhy09j98vkhfxh5zv2m',
+  mayachain: 'maya13d4tzmehhmt4r8w9s4n0g0lw7h3ggpyv95f55k',
 }
 const BTC_TO = 'bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4'
 const BCH_LEGACY = '1BpEi6DfDAUFd7GtittLSdBeYJvcoaVggu'
@@ -275,6 +278,15 @@ describe('validateTxBuildRequest', () => {
         expect(e.details?.code).toBe('INVALID_ADDRESS')
         expect(e.message).toBe(`Invalid ${chain(id).symbol} address`)
       }
+    }
+  })
+
+  test('a well-formed burn (all-zero payload) recipient is INVALID_ADDRESS: funds sent there are gone', () => {
+    // Each is checksum-valid for its chain (address-recipient-checks vectors); only the burn check refuses it.
+    for (const [id, to] of [['bitcoin', '1111111111111111111114oLvT2'], ['ripple', 'rrrrrrrrrrrrrrrrrrrrrhoLvTp'],
+      ['ripple', 'rrrrrrrrrrrrrrrrrrrrBZbvji'], ['cosmos', 'cosmos1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqnrql8a']]) {
+      expect(validateAddress(to, chain(id)).valid).toBe(true)
+      expect(code(() => validateTxBuildRequest(req(id, { to }), CHAINS))).toBe('INVALID_ADDRESS')
     }
   })
 

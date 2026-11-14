@@ -23,7 +23,7 @@ const { txBuildAccountPath } = await import('../src/bun/rest-tx-build')
 
 const KEY = 'tx-build-pairing'
 const chain = (id: string) => CHAINS.find(c => c.id === id)!
-const COSMOS_SIGNER = 'cosmos1g9el7lzjwh9yun2c4jjzhy09j98vkhfxa4ww3e'
+const COSMOS_SIGNER = 'cosmos1rgf4z0qljnsaq2tt5dzr058snqahfkha797w54'
 const COSMOS_TO = 'cosmos1qyqszqgpqyqszqgpqyqszqgpqyqszqgpjnp7du'
 const BTC_TO = 'bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4'
 const XRP_TO = 'rPT1Sjq2YGrBMTttX4GZHjKu9dyfzbpAYe'

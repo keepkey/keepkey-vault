@@ -9,7 +9,7 @@
  */
 import { HttpError } from './auth'
 import { utxoAccountScriptPaths } from './chain-scan'
-import { validateAddress } from '../shared/address-validation'
+import { isBurnAddress, validateAddress } from '../shared/address-validation'
 import { baseUnitsToDecimalString } from '../shared/max-send'
 import type { ChainDef } from '../shared/chains'
 import type { BtcAccountSet, BtcXpub, BuildTxResult } from '../shared/types'
@@ -89,6 +89,7 @@ export function validateTxBuildRequest(
 
   const to = body.to.trim()
   if (!validateAddress(to, chain).valid) throw refuse('INVALID_ADDRESS', `Invalid ${chain.symbol} address`)
+  if (isBurnAddress(to)) throw refuse('INVALID_ADDRESS', `${to} is a burn address: ${chain.symbol} sent there can never be spent`)
 
   const isMax = body.isMax === true
   let amount: string | undefined
