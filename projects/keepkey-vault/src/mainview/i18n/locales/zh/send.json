@@ -46,6 +46,7 @@
 	"invalidZecAddress": "无效的Zcash地址 — 必须以t1或t3开头",
 	"invalidDgbAddress": "无效的DigiByte地址",
 	"invalidEvmAddress": "无效的地址 — 必须是0x后跟40个十六进制字符",
+	"ensNotSupported": "暂不支持 ENS 名称 — 请粘贴 0x 地址",
 	"invalidEvmChecksum": "校验和不匹配 — 地址可能有输入错误。请从来源重新复制",
 	"invalidChecksum": "此地址有输入错误：校验和不匹配。请从来源重新复制。",
 	"signingInvalidAddress": "您的 KeepKey 拒绝了收款地址。请检查地址后重试。",

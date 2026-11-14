@@ -46,6 +46,7 @@
 	"invalidZecAddress": "Dirección Zcash inválida — debe comenzar con t1 o t3",
 	"invalidDgbAddress": "Dirección DigiByte inválida",
 	"invalidEvmAddress": "Dirección inválida — debe ser 0x seguido de 40 caracteres hexadecimales",
+	"ensNotSupported": "Los nombres ENS aún no son compatibles — pegue la dirección 0x",
 	"invalidEvmChecksum": "La suma de verificación no coincide — la dirección puede contener un error de escritura. Vuelva a copiarla desde el origen",
 	"invalidChecksum": "Esta dirección tiene un error de escritura: su suma de verificación no coincide. Vuelva a copiarla desde el origen.",
 	"signingInvalidAddress": "Su KeepKey rechazó la dirección del destinatario. Revise la dirección e inténtelo de nuevo.",

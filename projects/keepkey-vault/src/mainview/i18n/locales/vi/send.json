@@ -46,6 +46,7 @@
 	"invalidZecAddress": "Địa chỉ Zcash không hợp lệ — phải bắt đầu bằng t1 hoặc t3",
 	"invalidDgbAddress": "Địa chỉ DigiByte không hợp lệ",
 	"invalidEvmAddress": "Địa chỉ không hợp lệ — phải là 0x theo sau bởi 40 ký tự thập lục phân",
+	"ensNotSupported": "Chưa hỗ trợ tên ENS — hãy dán địa chỉ 0x",
 	"invalidEvmChecksum": "Mã kiểm tra không khớp — địa chỉ có thể bị gõ sai. Hãy sao chép lại từ nguồn",
 	"invalidChecksum": "Địa chỉ này bị gõ sai: mã kiểm tra không khớp. Hãy sao chép lại từ nguồn.",
 	"signingInvalidAddress": "KeepKey của bạn đã từ chối địa chỉ người nhận. Hãy kiểm tra địa chỉ rồi thử lại.",

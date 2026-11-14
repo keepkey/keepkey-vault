@@ -192,8 +192,8 @@ export function isEvmAddress(addr: string): boolean {
 
 function validateEvmAddress(addr: string): ValidationResult {
   if (HEX40.test(addr)) return isEvmAddress(addr) ? OK : fail('invalidEvmChecksum')
-  // ENS names — let them through (resolver handles it)
-  if (addr.endsWith('.eth') && addr.length >= 7) return OK
+  // No ENS resolver exists yet: a name must not pass as a recipient.
+  if (/\.eth$/i.test(addr)) return fail('ensNotSupported')
   return fail('invalidEvmAddress')
 }
 

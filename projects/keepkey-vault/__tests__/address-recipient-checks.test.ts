@@ -55,3 +55,10 @@ describe('knownTokenContract', () => {
     expect(knownTokenContract('1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa', chain('bitcoin'))).toBeUndefined()
   })
 })
+
+describe('ENS names', () => {
+  // No resolver exists: a .eth name must not look like a valid recipient.
+  test.each(['vitalik.eth', 'VITALIK.ETH', 'sub.name.eth'])('%s is refused with ensNotSupported', (name) => {
+    for (const id of ['ethereum', 'base']) expect(validateAddress(name, chain(id))).toEqual({ valid: false, error: 'ensNotSupported' })
+  })
+})

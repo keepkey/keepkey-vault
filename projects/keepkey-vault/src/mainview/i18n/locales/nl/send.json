@@ -46,6 +46,7 @@
 	"invalidZecAddress": "Ongeldig Zcash-adres — moet beginnen met t1 of t3",
 	"invalidDgbAddress": "Ongeldig DigiByte-adres",
 	"invalidEvmAddress": "Ongeldig adres — moet 0x gevolgd door 40 hexadecimale tekens zijn",
+	"ensNotSupported": "ENS-namen worden nog niet ondersteund — plak het 0x-adres",
 	"invalidEvmChecksum": "Checksum klopt niet — het adres bevat mogelijk een typefout. Kopieer het opnieuw vanuit de bron",
 	"invalidChecksum": "Dit adres bevat een typefout: de checksum klopt niet. Kopieer het opnieuw vanuit de bron.",
 	"signingInvalidAddress": "Je KeepKey heeft het ontvangstadres geweigerd. Controleer het adres en probeer het opnieuw.",

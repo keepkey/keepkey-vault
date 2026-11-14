@@ -46,6 +46,7 @@
 	"invalidZecAddress": "Nieprawidłowy adres Zcash — musi zaczynać się od t1 lub t3",
 	"invalidDgbAddress": "Nieprawidłowy adres DigiByte",
 	"invalidEvmAddress": "Nieprawidłowy adres — musi być 0x i 40 znaków szesnastkowych",
+	"ensNotSupported": "Nazwy ENS nie są jeszcze obsługiwane — wklej adres 0x",
 	"invalidEvmChecksum": "Suma kontrolna się nie zgadza — adres może zawierać literówkę. Skopiuj go ponownie ze źródła",
 	"invalidChecksum": "Ten adres zawiera literówkę: suma kontrolna się nie zgadza. Skopiuj go ponownie ze źródła.",
 	"signingInvalidAddress": "KeepKey odrzucił adres odbiorcy. Sprawdź adres i spróbuj ponownie.",
