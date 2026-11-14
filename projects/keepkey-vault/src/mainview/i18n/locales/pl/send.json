@@ -56,5 +56,8 @@
 	"invalidTonAddress": "Nieprawidłowy adres TON",
 	"invalidZcashShieldedAddress": "Nieprawidłowy adres chroniony — musi zaczynać się od u1",
 	"feeCustom": "Własny",
-	"invalidAmount": "Wpisz kwotę dziesiętną bez separatorów tysięcy, na przykład 1,5."
+	"invalidAmount": "Wpisz kwotę dziesiętną bez separatorów tysięcy, na przykład 1,5.",
+	"tooManyDecimals": "Za dużo miejsc po przecinku: {{symbol}} obsługuje {{decimals}}",
+	"feeOverQuarter": "Opłata przekracza 25% wysyłanej kwoty. Sprawdź cenę gazu.",
+	"gasPriceAuto": "auto"
 }

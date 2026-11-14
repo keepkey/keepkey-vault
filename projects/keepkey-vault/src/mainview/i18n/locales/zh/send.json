@@ -56,5 +56,8 @@
 	"invalidTonAddress": "无效的TON地址",
 	"invalidZcashShieldedAddress": "无效的隐蔽地址 — 必须以u1开头",
 	"feeCustom": "自定义",
-	"invalidAmount": "请输入不含千位分隔符的小数金额，例如1.5。"
+	"invalidAmount": "请输入不含千位分隔符的小数金额，例如1.5。",
+	"tooManyDecimals": "小数位数过多：{{symbol}} 最多支持 {{decimals}} 位",
+	"feeOverQuarter": "手续费超过发送金额的 25%。请检查 Gas 价格。",
+	"gasPriceAuto": "自动"
 }

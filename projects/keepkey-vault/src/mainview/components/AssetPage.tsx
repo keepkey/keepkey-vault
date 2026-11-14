@@ -51,7 +51,7 @@ import { WatchOnlyExportDialog } from "./WatchOnlyExportDialog"
 import { CreatePsbtPanel } from "./CreatePsbtPanel"
 import { detectSpamToken, categorizeTokens, type SpamResult } from "../../shared/spamFilter"
 import { createLatestReceiveRequest, selectedReceiveScriptType } from "../../shared/receive-request"
-import { DIRECT_TOKEN_PROOF_MAX_AGE_MS, reconcileSelectedToken, type DirectTokenProof, type SelectedTokenState } from "../../shared/selected-token-balance"
+import { DIRECT_TOKEN_PROOF_MAX_AGE_MS, applyNativeProof, reconcileSelectedToken, type DirectNativeProof, type DirectTokenProof, type SelectedTokenState } from "../../shared/selected-token-balance"
 import { BASE_NETWORK, BITCOIN_NETWORK, type VaultIdentity } from '../../shared/vault-identity'
 import { VaultAccountSelector } from './VaultAccountSelector'
 import { VaultAssetAccount } from './VaultAssetAccount'
@@ -264,7 +264,7 @@ function PersonalAssetPage({ chain, balance, balanceLoading = false, onBack, fir
 		? evmAddresses.addresses.find(a => a.addressIndex === evmAddresses.selectedIndex)
 		: undefined
 	const selectedEvmChainBalance = selectedEvmAddress?.chainBalances?.[chain.id]
-	const activeBalance: ChainBalance | undefined = isEvm && !watchOnly
+	const portfolioBalance: ChainBalance | undefined = isEvm && !watchOnly
 		? selectedEvmAddress && selectedEvmChainBalance ? {
 			chainId: chain.id,
 			symbol: chain.symbol,
@@ -279,6 +279,29 @@ function PersonalAssetPage({ chain, balance, balanceLoading = false, onBack, fir
 			confirmedAssetCaips: selectedEvmChainBalance.confirmedAssetCaips,
 		} : undefined
 		: balance
+	// While the portfolio can't vouch for the native coin (provider outage), read
+	// it on chain for the selected owner, like the token proof below (audit v4 H4).
+	const [nativeProof, setNativeProof] = useState<DirectNativeProof | null>(null)
+	const activeBalance = applyNativeProof(portfolioBalance, chain.caip, nativeProof)
+	const nativeProofKey = isEvm && !watchOnly && portfolioBalance?.address && isBalanceUnverified(portfolioBalance, chain.caip)
+		? `${chain.id}|${portfolioBalance.address}|${refreshNonce}` : null
+	useEffect(() => {
+		if (!nativeProofKey) return
+		const [chainId, owner] = nativeProofKey.split('|')
+		let cancelled = false
+		rpcRequest<{ balance: string }>("verifyTokenBalance", { chainId, owner, caip: chain.caip }, 30000)
+			.then(({ balance }) => { if (!cancelled) setNativeProof({ chainId, owner, balance, verifiedAt: Date.now() }) })
+			.catch(e => console.warn(`[AssetPage] on-chain native balance check failed for ${chainId}:`, e))
+		return () => { cancelled = true }
+	}, [nativeProofKey, chain.caip])
+	useEffect(() => {
+		if (!nativeProof) return
+		const timer = setTimeout(() => setNativeProof(null), DIRECT_TOKEN_PROOF_MAX_AGE_MS)
+		return () => clearTimeout(timer)
+	}, [nativeProof])
+	useEffect(() => onRpcMessage("balance-updated", (updated: ChainBalance) => {
+		if (updated.chainId === chain.id) setNativeProof(null)
+	}), [chain.id])
 	const balanceReadPending = balanceLoading || refreshing || (isEvm && !watchOnly && !evmInitialLoaded)
 	const headerBalanceKnown = !isBalanceUnverified(activeBalance, chain.caip)
 	const selectedTokenOwner = isEvm && !watchOnly ? selectedEvmAddress?.address : activeBalance?.address || address

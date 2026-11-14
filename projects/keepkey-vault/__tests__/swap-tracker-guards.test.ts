@@ -4,6 +4,7 @@ import {
   selectOutboundTxid,
   shouldRetryCompletedSwapMetadata,
   retainSwapProgress,
+  settlementFromThornodeStatus,
 } from '../src/shared/swap-tracker-guards'
 import { advanceSwapStatus } from '../src/shared/relay-status'
 import type { SwapTrackingStatus } from '../src/shared/types'
@@ -60,5 +61,26 @@ describe('completed metadata retry guard', () => {
     expect(shouldRetryCompletedSwapMetadata('completed', true, 6)).toBe(false)
     expect(shouldRetryCompletedSwapMetadata('completed', false, 0)).toBe(false)
     expect(shouldRetryCompletedSwapMetadata('confirming', true, 0)).toBe(false)
+  })
+})
+
+// Audit v4 H8: THORNode lists the RUNE affiliate leg first with an all-zero id.
+// Pioneer surfaces that placeholder as the outbound hash forever.
+import thornodeStatus from './fixtures/thornode/rune-to-base-eth-status.json'
+describe('THORNode status settles a swap whose first out_tx is the zero-id affiliate leg', () => {
+  const dest = '0x73171652773bF2b8EB389eAF608125F98e90E0b7'
+  test('picks the real outbound to the destination and reports completion', () => {
+    expect(settlementFromThornodeStatus(thornodeStatus, dest)).toEqual({
+      completed: true,
+      outboundTxid: '7EFAF203DB9B91926B194116C2B1F0B91689D9AA8C9AFB5A700E5EDC7E1A963A',
+      outboundAmount: '29880',
+    })
+  })
+  test('not complete while the outbound is unsigned', () => {
+    const pending = { ...thornodeStatus, stages: { ...thornodeStatus.stages, outbound_signed: { completed: false } }, out_txs: [thornodeStatus.out_txs[0]] }
+    expect(settlementFromThornodeStatus(pending, dest).completed).toBe(false)
+  })
+  test('null on garbage', () => {
+    expect(settlementFromThornodeStatus(null, dest).completed).toBe(false)
   })
 })

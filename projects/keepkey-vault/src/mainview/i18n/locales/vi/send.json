@@ -56,5 +56,8 @@
 	"invalidTonAddress": "Địa chỉ TON không hợp lệ",
 	"invalidZcashShieldedAddress": "Địa chỉ được bảo vệ không hợp lệ — phải bắt đầu bằng u1",
 	"feeCustom": "Tùy chỉnh",
-	"invalidAmount": "Nhập số tiền thập phân không có dấu phân cách hàng nghìn, ví dụ 1,5."
+	"invalidAmount": "Nhập số tiền thập phân không có dấu phân cách hàng nghìn, ví dụ 1,5.",
+	"tooManyDecimals": "Quá nhiều chữ số thập phân: {{symbol}} hỗ trợ {{decimals}}",
+	"feeOverQuarter": "Phí vượt quá 25% số tiền bạn gửi. Hãy kiểm tra giá gas.",
+	"gasPriceAuto": "tự động"
 }

@@ -56,5 +56,8 @@
 	"invalidTonAddress": "Endereço TON inválido",
 	"invalidZcashShieldedAddress": "Endereço protegido inválido — deve começar com u1",
 	"feeCustom": "Personalizado",
-	"invalidAmount": "Digite um valor decimal sem separadores de milhares, por exemplo 1,5."
+	"invalidAmount": "Digite um valor decimal sem separadores de milhares, por exemplo 1,5.",
+	"tooManyDecimals": "Casas decimais demais: {{symbol}} aceita {{decimals}}",
+	"feeOverQuarter": "A taxa é maior que 25% do valor enviado. Verifique o preço do gas.",
+	"gasPriceAuto": "auto"
 }

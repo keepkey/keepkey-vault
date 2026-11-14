@@ -1,0 +1,98 @@
+{
+  "tx": {
+    "id": "947E343CF5284A1F79BF3A6367C8FCE313C6E888867253EB020264BBE6086CAA",
+    "chain": "THOR",
+    "from_address": "thor1ngzez8d2ygmpe4tut6t32gxyp8dzcewyjc43le",
+    "to_address": "thor1g98cy3n9mmjrpn0sxmn63lztelera37n8n67c0",
+    "coins": [
+      {
+        "asset": "THOR.RUNE",
+        "amount": "150000000"
+      }
+    ],
+    "gas": null,
+    "memo": "=:BASE.ETH:0x73171652773bF2b8EB389eAF608125F98e90E0b7:28983:keep:30"
+  },
+  "planned_out_txs": [
+    {
+      "chain": "BASE",
+      "to_address": "0x73171652773bF2b8EB389eAF608125F98e90E0b7",
+      "coin": {
+        "asset": "BASE.ETH",
+        "amount": "29880"
+      },
+      "refund": false
+    },
+    {
+      "chain": "THOR",
+      "to_address": "thor14jutklw4xaawvx0p90m45nur64mmhjz3me9q6q",
+      "coin": {
+        "asset": "THOR.RUNE",
+        "amount": "450406"
+      },
+      "refund": false
+    }
+  ],
+  "out_txs": [
+    {
+      "id": "0000000000000000000000000000000000000000000000000000000000000000",
+      "chain": "THOR",
+      "from_address": "thor1g98cy3n9mmjrpn0sxmn63lztelera37n8n67c0",
+      "to_address": "thor14jutklw4xaawvx0p90m45nur64mmhjz3me9q6q",
+      "coins": [
+        {
+          "asset": "THOR.RUNE",
+          "amount": "450406"
+        }
+      ],
+      "gas": [
+        {
+          "asset": "THOR.RUNE",
+          "amount": "2000000"
+        }
+      ],
+      "memo": "OUT:947E343CF5284A1F79BF3A6367C8FCE313C6E888867253EB020264BBE6086CAA"
+    },
+    {
+      "id": "7EFAF203DB9B91926B194116C2B1F0B91689D9AA8C9AFB5A700E5EDC7E1A963A",
+      "chain": "BASE",
+      "from_address": "0x4d39d5c55cfeb48f44d680fcac20493635dafdee",
+      "to_address": "0x73171652773bF2b8EB389eAF608125F98e90E0b7",
+      "coins": [
+        {
+          "asset": "BASE.ETH",
+          "amount": "29880"
+        }
+      ],
+      "gas": [
+        {
+          "asset": "BASE.ETH",
+          "amount": "379"
+        }
+      ],
+      "memo": "OUT:947E343CF5284A1F79BF3A6367C8FCE313C6E888867253EB020264BBE6086CAA"
+    }
+  ],
+  "stages": {
+    "inbound_observed": {
+      "final_count": 0,
+      "completed": true
+    },
+    "inbound_confirmation_counted": {
+      "remaining_confirmation_seconds": 0,
+      "completed": true
+    },
+    "inbound_finalised": {
+      "completed": true
+    },
+    "swap_status": {
+      "pending": false
+    },
+    "swap_finalised": {
+      "completed": true
+    },
+    "outbound_signed": {
+      "completed": true
+    }
+  }
+}

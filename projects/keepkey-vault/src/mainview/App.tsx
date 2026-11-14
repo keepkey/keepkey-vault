@@ -1,6 +1,6 @@
 import { useUiTranslation } from "./i18n/ui"
 import { useState, useEffect, useCallback, useRef } from "react"
-import { autoUnlockKey, resolveAppPhase, showWatchOnly } from "../shared/app-phase"
+import { autoUnlockKey, resolveAppPhase, showWatchOnly, watchOnlyEndsForDevice } from "../shared/app-phase"
 import { Box, Flex, Text, Button } from "@chakra-ui/react"
 import { useTranslation } from "react-i18next"
 import { PinEntry } from "./components/device/PinEntry"
@@ -794,7 +794,7 @@ function App() {
 		if (!watchOnlyMode || !watchOnlyDeviceId) { setWatchOnlyMode(false); return }
 		// A device's own snapshot matches by id, known before unlock.
 		if (!watchOnlyDeviceId.startsWith("wo:")) {
-			if (deviceState.deviceId === watchOnlyDeviceId) exit()
+			if (deviceState.deviceId === watchOnlyDeviceId) { if (watchOnlyEndsForDevice(watchOnlyDeviceId, deviceState)) exit() }
 			else if (deviceState.deviceId) setWatchOnlyOtherDevice("other")
 			return
 		}
@@ -956,7 +956,7 @@ function App() {
 
 	// Plugged in locked: open the PIN prompt right away. The Unlock button only
 	// returns when that attempt ends without unlocking (cancelled or failed).
-	const autoUnlock = autoUnlockKey({ phase, state: deviceState.state, deviceId: deviceState.deviceId, activeTransport: deviceState.activeTransport, wipePending: deviceState.wipePending })
+	const autoUnlock = watchOnlyMode ? null : autoUnlockKey({ phase, state: deviceState.state, deviceId: deviceState.deviceId, activeTransport: deviceState.activeTransport, wipePending: deviceState.wipePending })
 	const [autoUnlockTried, setAutoUnlockTried] = useState<string | null>(null)
 	useEffect(() => {
 		// A replug, or a later lock after this one unlocked, asks again. A cancel does not.

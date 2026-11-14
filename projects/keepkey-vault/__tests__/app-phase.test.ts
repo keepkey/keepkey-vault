@@ -7,7 +7,7 @@
  * Run: bun test __tests__/app-phase.test.ts
  */
 import { describe, expect, test } from 'bun:test'
-import { autoUnlockKey, resolveAppPhase, retainLivePortfolioSession, showWatchOnly } from '../src/shared/app-phase'
+import { autoUnlockKey, resolveAppPhase, retainLivePortfolioSession, showWatchOnly, watchOnlyEndsForDevice } from '../src/shared/app-phase'
 
 const base = { state: 'disconnected', oobLock: false, isClaimed: false, firmwareSkipped: false, wizardComplete: false }
 
@@ -132,5 +132,16 @@ describe('a KeepKey plugged in locked unlocks without a click', () => {
     for (const state of ['disconnected', 'connected_unpaired', 'ready', 'error', 'needs_init']) expect(autoUnlockKey({ ...locked, state })).toBeNull()
     expect(autoUnlockKey({ ...locked, deviceId: undefined })).toBeNull()
     expect(autoUnlockKey({ ...locked, activeTransport: null })).toBeNull()
+  })
+})
+
+describe('view-only with the same KeepKey plugged in (audit v4 H3)', () => {
+  test('locked device keeps its view-only wallet open', () => {
+    expect(watchOnlyEndsForDevice('dev1', { state: 'needs_pin', deviceId: 'dev1' })).toBe(false)
+    expect(watchOnlyEndsForDevice('dev1', { state: 'needs_passphrase', deviceId: 'dev1' })).toBe(false)
+  })
+  test('unlocked device takes over', () => {
+    expect(watchOnlyEndsForDevice('dev1', { state: 'ready', deviceId: 'dev1' })).toBe(true)
+    expect(watchOnlyEndsForDevice('dev1', { state: 'ready', deviceId: 'dev2' })).toBe(false)
   })
 })

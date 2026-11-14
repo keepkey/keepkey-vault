@@ -56,5 +56,8 @@
 	"invalidTonAddress": "Adresse TON invalide",
 	"invalidZcashShieldedAddress": "Adresse protégée invalide — doit commencer par u1",
 	"feeCustom": "Personnalisé",
-	"invalidAmount": "Saisissez un montant décimal sans séparateurs de milliers, par exemple 1,5."
+	"invalidAmount": "Saisissez un montant décimal sans séparateurs de milliers, par exemple 1,5.",
+	"tooManyDecimals": "Trop de décimales : {{symbol}} en accepte {{decimals}}",
+	"feeOverQuarter": "Les frais dépassent 25 % du montant envoyé. Vérifiez le prix du gaz.",
+	"gasPriceAuto": "auto"
 }

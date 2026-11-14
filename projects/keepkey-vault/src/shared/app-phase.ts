@@ -73,3 +73,10 @@ export function autoUnlockKey(p: { phase: AppPhase; state: string; deviceId?: st
   if (p.state !== 'needs_pin' && p.state !== 'needs_passphrase') return null
   return `${p.deviceId}:${p.activeTransport}`
 }
+
+/** The connected KeepKey ends watch-only of its own snapshot only once it is
+ * unlocked. While it is locked, "Open view-only" keeps the cached wallet open
+ * (#633); exiting there dropped the user back on the PIN screen. */
+export function watchOnlyEndsForDevice(watchedId: string, device: { state: string; deviceId?: string }): boolean {
+  return device.deviceId === watchedId && device.state === 'ready'
+}

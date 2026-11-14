@@ -56,5 +56,8 @@
 	"invalidTonAddress": "無効なTONアドレス",
 	"invalidZcashShieldedAddress": "無効なシールドアドレス — u1で始まる必要があります",
 	"feeCustom": "カスタム",
-	"invalidAmount": "桁区切りのない小数を入力してください。例：1.5。"
+	"invalidAmount": "桁区切りのない小数を入力してください。例：1.5。",
+	"tooManyDecimals": "小数点以下の桁数が多すぎます: {{symbol}} は {{decimals}} 桁まで対応",
+	"feeOverQuarter": "手数料が送金額の25%を超えています。ガス価格を確認してください。",
+	"gasPriceAuto": "自動"
 }

@@ -345,6 +345,10 @@ export function SendForm({ chain, address, balance, balanceLoading = false, toke
 		if (checkingVaultDestination || vaultDestinationError) { setError(vaultDestinationError || 'Checking vault destination…'); return }
 		if (addressValidation && !addressValidation.valid) { setError(t(addressValidation.error!)); return }
 		if (exceedsBalance) { setError(t("exceedsBalanceShort")); return }
+		const assetDecimals = isTokenSend ? token?.decimals : chain.decimals
+		if (!isMax && canonicalAmount && assetDecimals != null && (canonicalAmount.split('.')[1]?.length ?? 0) > assetDecimals) {
+			setError(t('tooManyDecimals', { symbol: displaySymbol, decimals: assetDecimals })); return
+		}
 
 		// Custom fee validation — only the field(s) relevant to this chain family.
 		const useCustom = feeMode === 'custom' && supportsCustomFee
@@ -877,7 +881,7 @@ export function SendForm({ chain, address, balance, balanceLoading = false, toke
 										<Input
 											size="xs" value={customGasPrice}
 											onChange={(e) => setCustomGasPrice(e.target.value)}
-											placeholder="20" inputMode="decimal"
+											placeholder={t("gasPriceAuto")} inputMode="decimal"
 											bg="var(--ink-3)" border="1px solid var(--line)" borderRadius="10px"
 										/>
 									</Box>
@@ -964,6 +968,9 @@ export function SendForm({ chain, address, balance, balanceLoading = false, toke
 								)}
 							</Flex>
 						</Flex>
+						{!currentSigningContext.isMax && !isTokenSend && Number(buildResult.fee) > Number(currentSigningContext.amount) * 0.25 && (
+							<Text fontSize="xs" color="kk.error" mt="1">{t('feeOverQuarter')}</Text>
+						)}
 					</Box>
 
 					{/* Debug: hdwallet payload */}

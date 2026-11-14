@@ -31,7 +31,7 @@ import { VAULT_CHAIN_TO_THOR } from '../shared/swap-discovery'
 import { extractRelayRequestId } from '../shared/relay-utils'
 import { isRelaySolverDeposit } from './swap-route-selection'
 import { classifySwapOutcome, type MidgardActionsResponse } from './swap/classify'
-import { selectOutboundTxid } from '../shared/swap-tracker-guards'
+import { selectOutboundTxid, settlementFromThornodeStatus } from '../shared/swap-tracker-guards'
 import { baseUnitsToDecimalString } from '../shared/max-send'
 import { payoutBelowMinimum } from '../shared/swap-settlement'
 import { buildPioneerSwapRegistration } from '../shared/swap-registration'
@@ -502,7 +502,7 @@ function applyRemoteSwapData(swap: PendingSwap, remoteSwap: any): void {
   // Malformed provider rows have been seen carrying an all-zero outbound hash
   // (paired with a bogus received amount) — treat the hash as not-yet-known
   // and don't trust the received amount from the same response.
-  if (outboundHashIsPlaceholder) {
+  if (outboundHashIsPlaceholder && !swap.outboundTxid) {
     console.warn(`${TAG} Ignoring placeholder all-zero outbound hash for ${swap.txid.slice(0, 10)}... — treating outbound as not yet known`)
   }
   // Once a provider has admitted its terminal metadata is a placeholder, keep
@@ -510,7 +510,7 @@ function applyRemoteSwapData(swap: PendingSwap, remoteSwap: any): void {
   // that omit the field entirely and lets the UI perform bounded repair polls.
   const nextTrackingMetadataPending = newStatus === 'failed' || newStatus === 'refunded'
     ? false
-    : outboundTxid
+    : (outboundTxid || swap.outboundTxid)
       ? false
       : outboundHashIsPlaceholder
         ? true
@@ -1033,6 +1033,11 @@ export async function refreshSwap(txid: string, deviceId?: string, walletId?: st
         })
         pushUpdate(swap)
       }
+      // Midgard can lag or be unreachable; THORNode's tx status is the source
+      // Pioneer reads, so settle from it directly (audit v4 H8).
+      if (!isTerminalSwapStatus(swap.status) && !/maya/i.test(`${swap.integration} ${swap.swapper || ''}`)) {
+        await applyThornodeSettlement(swap)
+      }
     }
 
   }
@@ -1057,6 +1062,37 @@ async function fetchSwapMidgardActions(txid: string, maya = true): Promise<Midga
     console.warn(`${TAG} Midgard fetch failed for ${txid.slice(0, 10)}...: ${e?.message || e}`)
     return null
   }
+}
+
+async function applyThornodeSettlement(swap: PendingSwap): Promise<void> {
+  const destination = (swap.memo || '').split(':')[2]
+  if (!destination) return
+  let status: any = null
+  try {
+    const resp = await fetch(`https://gateway.liquify.com/chain/thorchain_api/thorchain/tx/status/${swap.txid.replace(/^0x/i, '').toUpperCase()}`,
+      { signal: AbortSignal.timeout(10_000) })
+    if (resp.ok) status = await resp.json()
+  } catch (e: any) {
+    console.warn(`${TAG} THORNode status failed for ${swap.txid.slice(0, 10)}...: ${e?.message || e}`)
+  }
+  const settled = settlementFromThornodeStatus(status, destination)
+  if (!settled.completed || isTerminalSwapStatus(swap.status)) return
+  if (settled.outboundAmount && payoutBelowMinimum(settled.outboundAmount, swap.minimumOutput || '0')) return
+  swap.status = 'completed'
+  swap.trackingMetadataPending = false
+  swap.completedAt = swap.updatedAt = Date.now()
+  if (settled.outboundTxid) swap.outboundTxid = settled.outboundTxid
+  if (settled.outboundAmount) {
+    swap.receivedOutput = baseUnitsToDecimalString(BigInt(settled.outboundAmount), 8)
+    swap.payouts = [{ txid: settled.outboundTxid || swap.txid, amount: swap.receivedOutput, asset: (swap.memo.split(':')[1] || ''), address: destination }]
+  }
+  swapLog(`${TAG} THORNode settled ${swap.txid.slice(0, 10)}... outTxid=${swap.outboundTxid || 'native'}`)
+  if (!noPersistSwaps.has(swap.txid)) updateSwapHistoryStatus(swap.txid, 'completed', {
+    deviceId: swap.deviceId, walletId: swap.walletId, outboundTxid: swap.outboundTxid,
+    receivedOutput: swap.receivedOutput, completedAt: swap.completedAt,
+  })
+  pushUpdate(swap)
+  pushComplete(swap)
 }
 
 function applyClassifiedOutcome(swap: PendingSwap, midgard: MidgardActionsResponse | null): boolean {
