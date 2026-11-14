@@ -1,6 +1,6 @@
 import { useUiTranslation } from "./i18n/ui"
 import { useState, useEffect, useCallback, useRef } from "react"
-import { autoUnlockKey, resolveAppPhase, showWatchOnly, watchOnlyEndsForDevice } from "../shared/app-phase"
+import { autoUnlockKey, resolveAppPhase, showWatchOnly, unlockErrorText, watchOnlyEndsForDevice } from "../shared/app-phase"
 import { Box, Flex, Text, Button } from "@chakra-ui/react"
 import { useTranslation } from "react-i18next"
 import { PinEntry } from "./components/device/PinEntry"
@@ -348,7 +348,7 @@ function App() {
 		try {
 			await rpcRequest("requestDeviceUnlock", undefined, 0)
 		} catch (error: any) {
-			if (unlockAttempt.current === attempt) setUnlockError(error?.message || uiText("Unable to unlock KeepKey"))
+			if (unlockAttempt.current === attempt) setUnlockError(unlockErrorText(error, uiText("Unable to unlock KeepKey")))
 		} finally {
 			if (unlockAttempt.current === attempt) {
 				unlockPending.current = false

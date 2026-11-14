@@ -210,6 +210,17 @@ describe('intentional device operations', () => {
     expect(unlocks).toBe(0)
   })
 
+  // hdwallet throws the decoded Failure event itself, not an Error (audit v4 V8).
+  test('a device Failure object from the unlock keeps its text', async () => {
+    const f = fixture(); f.snapshot.state = 'needs_pin'
+    const pending = f.coordinator.acquire({ unlock: true })
+    await tick()
+    f.unlock.reject({ message_enum: 3, message_type: 'Failure', message: { code: 6, message: 'PIN Cancelled' } })
+    const error = await pending.then(() => null, e => e)
+    expect(error).toBeInstanceOf(Error)
+    expect(error.message).toBe('PIN Cancelled')
+  })
+
   test('a passive lease detects an unobserved auto-lock without asking for a PIN', async () => {
     let probes = 0, unlocks = 0
     const wallet = {}
