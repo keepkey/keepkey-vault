@@ -1,6 +1,8 @@
 import type { ExecuteSwapParams, SwapAsset, SwapQuote, SwapQuoteParams } from '../shared/types'
 import type { SwapRisk } from '../shared/swap-risk'
 import { canonicalizeCaip } from '../shared/swap-discovery'
+import { CONFIRM_SLIPPAGE_BPS } from '../shared/slippage'
+import { computeEffectiveSlippageBps } from '../shared/swap-warnings'
 
 const assetKey = (value: string) => {
   const key = canonicalizeCaip(value)
@@ -74,6 +76,10 @@ export function createSwapQuoteLeases(now = Date.now, id = () => crypto.randomUU
     for (const key of routeFields) same(key, quote[key], input[key])
     if (quote.risk!.blocked) throw new Error('This route exceeds the 5% cost limit for trades of $1,000 or more.')
     if (quote.risk!.requiresAcknowledgment && input.riskAcknowledged !== true) throw new Error('Review and acknowledge the cost risk for this quote before signing.')
+    // The dialog's high-slippage checkbox, enforced here so REST callers meet it too (audit v4 V1).
+    if (computeEffectiveSlippageBps(quote.slippageBps, params.slippageBps ?? 0) > CONFIRM_SLIPPAGE_BPS && input.slippageAcknowledged !== true) {
+      throw new Error(`Slippage tolerance above ${CONFIRM_SLIPPAGE_BPS / 100}% must be acknowledged (slippageAcknowledged) before signing.`)
+    }
     active = input.quoteId
     return {
       quote: structuredClone(quote),

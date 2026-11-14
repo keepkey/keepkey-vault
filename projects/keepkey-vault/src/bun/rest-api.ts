@@ -104,7 +104,7 @@ import { supportsCertifiedClearSign } from './solana-certified-policy'
 import { measureLiveDeployment, resolveEvmSchema } from './evm-schema-registry'
 import { findContractRating } from './clearsign-review'
 import { formatFeatures } from './features-format'
-import { recordSignedEvmTx } from './signed-tx-review'
+import { recordSignedEvmTx, signedTxActivityTxid } from './signed-tx-review'
 
 export interface EmuSigningDetails {
   operation: string
@@ -1329,7 +1329,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
         let resolvedActivity = activity
         if (!resolvedActivity && method === 'POST' && SIGNING_ROUTES.has(path) && status >= 200 && status < 300) {
           const chainForRoute = ROUTE_TO_CHAIN[path.split('/')[1]]
-          if (chainForRoute) resolvedActivity = { chain: chainForRoute, activityType: 'sign' }
+          if (chainForRoute) resolvedActivity = { chain: chainForRoute, activityType: 'sign', txid: signedTxActivityTxid(path, data) }
         }
         if (method === 'POST' && SIGNING_ROUTES.has(path) && status >= 200 && status < 300) signedTxs.remember(data, sessionEpoch)
         // A signing route answers 2xx only with the device's signature.

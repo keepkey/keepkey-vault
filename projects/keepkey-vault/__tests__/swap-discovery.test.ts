@@ -28,6 +28,7 @@ import {
   isJunkEntry,
   assessWithFirmware,
   ellipsizeCaip,
+  searchPickerNetworks,
   type AssetEntry,
 } from '../src/shared/swap-discovery'
 
@@ -691,5 +692,35 @@ describe('pickerTier / bucketFor — firmware-gated assets sink and are not sele
     const heldGated = { ...gated, balance: { amount: '1.0', usd: 100 } }
     expect(bucketFor(heldGated)).toBe(0)
     expect(pickerTier(heldGated)).toBe(0)
+  })
+})
+
+describe('searchPickerNetworks (audit v4 V17)', () => {
+  const nets = [
+    { name: 'Ethereum', family: 'EVM', nativeCaip: 'eip155:1/slip44:60' },
+    { name: 'Base', family: 'EVM', nativeCaip: 'eip155:8453/slip44:60' },
+    { name: 'Arbitrum', family: 'EVM', nativeCaip: 'eip155:42161/slip44:60' },
+    { name: 'Bitcoin', family: 'UTXO', nativeCaip: 'bip122:000000000019d6689c085ae165831e93/slip44:0' },
+  ]
+  const entries = [
+    entry({ caip: 'eip155:1/slip44:60', symbol: 'ETH', name: 'Ethereum' }),
+    entry({ caip: 'eip155:8453/slip44:60', symbol: 'ETH', name: 'Ethereum' }),
+    entry({ caip: 'eip155:42161/slip44:60', symbol: 'ETH', name: 'Ethereum' }),
+    entry({ caip: 'eip155:42161/erc20:0x82af49447d8a07e3bd95bd0d56f35241523fbab1', symbol: 'WETH', name: 'Wrapped Ether' }),
+    entry({ caip: 'bip122:000000000019d6689c085ae165831e93/slip44:0', symbol: 'BTC', name: 'Bitcoin' }),
+  ]
+
+  test("'eth' lists every chain whose coin is ETH, and ETH on each L2, not only the Ethereum tile", () => {
+    const { chains, assets } = searchPickerNetworks(nets, entries, 'eth')
+    expect(chains.map(c => c.name)).toEqual(['Ethereum', 'Base', 'Arbitrum'])
+    expect(assets.map(a => a.caip)).toEqual([
+      'eip155:1/slip44:60', 'eip155:8453/slip44:60', 'eip155:42161/slip44:60',
+      'eip155:42161/erc20:0x82af49447d8a07e3bd95bd0d56f35241523fbab1',
+    ])
+  })
+
+  test('the excluded asset is never offered; an empty query lists every network and no assets', () => {
+    expect(searchPickerNetworks(nets, entries, 'ETH', 'eip155:8453/slip44:60').assets.map(a => a.caip)).not.toContain('eip155:8453/slip44:60')
+    expect(searchPickerNetworks(nets, entries, '  ')).toEqual({ chains: nets, assets: [] })
   })
 })

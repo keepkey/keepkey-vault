@@ -6,7 +6,7 @@ import { Z } from '../lib/z-index'
 import { Bip85VaultDialog } from './Bip85VaultDialog'
 import { PasswordBankView } from './PasswordBankView'
 
-/** One lock entry for password and seed tools; feature switches never add
+/** One entry for password and seed tools; feature switches never add
  * another global navigation tab. */
 export function VaultToolsButton({ seedVaultAvailable, passwordsAvailable = true }: {
   seedVaultAvailable: boolean; passwordsAvailable?: boolean
@@ -48,7 +48,8 @@ export function VaultToolsButton({ seedVaultAvailable, passwordsAvailable = true
       title={passwords ? uiText('Passwords and seed vault') : uiText('BIP-85 Seed Vault')}
       onClick={() => { setSection(passwords ? 'passwords' : 'seeds'); setOpen(true) }}>
       <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--gold)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <rect x="3" y="11" width="18" height="11" rx="2" ry="2" /><path d="M7 11V7a5 5 0 0 1 10 0v4" />
+        {/* A safe, not a padlock: this opens the vault tools and locks nothing. */}
+        <rect x="3" y="3" width="18" height="18" rx="2" /><circle cx="12" cy="12" r="3" /><path d="M12 9V7M12 17v-2M9 12H7M17 12h-2" />
       </svg>
     </Button>
     {open && <>

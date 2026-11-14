@@ -12,7 +12,7 @@
  * Run: bun test __tests__/balance-display-state.test.ts
  */
 import { describe, test, expect } from 'bun:test'
-import { balanceDisplayState, portfolioBalanceSyncState } from '../src/shared/balance-display-state'
+import { balanceDisplayState, portfolioBalanceSyncState, portfolioFaultChainIds } from '../src/shared/balance-display-state'
 import { mergeTrustedBalanceSnapshot } from '../src/shared/balance-reconciliation'
 
 const base = { loadingBalances: false, initialLoaded: true }
@@ -113,5 +113,17 @@ describe('balanceUnverifiedReason: loading is not "could not reach this chain"',
     expect(src).toContain("fromBalanceReason === 'missing' ? t(\"balanceMissing\"")
     expect(src).toContain("[sourceKey]: 'pending'")
     expect(src).toContain('await refreshEvmAddresses()')
+  })
+})
+
+describe('portfolioFaultChainIds (audit v4 H3)', () => {
+  test('chains the response itself calls failed or stale are not confirmed for the cache', () => {
+    const chainFor = (caip: string) => ({ 'eip155:8453': 'base', 'cosmos:thorchain-mainnet-v1': 'thorchain' } as Record<string, string>)[caip.split('/')[0].toLowerCase()]
+    const ids = portfolioFaultChainIds({
+      failures: [{ caip: 'eip155:8453/slip44:60' }],
+      staleChains: [{ caip: 'cosmos:thorchain-mainnet-v1/slip44:931' }, { caip: 'unknown:1/slip44:1' }],
+    }, chainFor)
+    expect([...ids].sort()).toEqual(['base', 'thorchain'])
+    expect(portfolioFaultChainIds(undefined, chainFor).size).toBe(0)
   })
 })

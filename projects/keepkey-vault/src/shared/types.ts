@@ -755,6 +755,8 @@ export interface ChainBalance {
    * during post-transaction reconciliation.
    */
   syncState?: 'confirmed' | 'stale' | 'degraded'
+  /** Stale only because the read started before this chain's last tx could land (H3). */
+  txPending?: boolean
   /** Assets verified directly against a chain RPC during this refresh. */
   confirmedAssetCaips?: string[]
   /** Per-xpub split of `balance` for multi-xpub UTXO chains (LTC/DOGE/…). Absent when not live-fetched. */
@@ -2241,6 +2243,10 @@ export interface SwapQuote {
   relayTx?: RelayTxParams    // pre-built tx for relay/bridge integrations (skips memo+router flow)
   /** Inferred from the source transaction, not a provider's review claim. */
   executionMode?: 'relay-solver-deposit'
+  /** Relay routes: Relay's quote names this payout address for the order. */
+  relayOrder?: { requestId?: string; recipient?: string }
+  /** Relay routes: the order's payout address, checked equal to the entered recipient. */
+  relayOrderRecipient?: string
   minAmountIn?: string       // minimum sell amount for this route (human-readable, in sell asset units)
   /** Actual send amount after MAX fee/reserve deduction (UTXO or XRP).
    *  When set, the tracker must record this instead of the original params.amount. */
@@ -2284,6 +2290,8 @@ export interface SwapQuoteParams {
 export interface ExecuteSwapParams {
   quoteId?: string
   riskAcknowledged?: boolean
+  /** Required when the effective slippage exceeds CONFIRM_SLIPPAGE_BPS. */
+  slippageAcknowledged?: boolean
   fromChainId: string             // our chain id (resolves to ChainDef for signing)
   toChainId: string               // our chain id
   fromCaip: string                // CAIP-19 — primary identifier
@@ -2564,6 +2572,8 @@ export interface SwapHistoryRecord {
   inboundConfirmedAt?: number
   errorActionable?: string
   errorElapsedMinutes?: number
+  /** THOR/Maya settlement legs; the proof a completed swap paid out. */
+  payouts?: PendingSwap['payouts']
 }
 
 /** Filter params for getSwapHistory RPC */
@@ -2664,7 +2674,8 @@ export interface RecentActivity {
   amount?: string
   asset?: string             // token symbol if different from chain native
   appName?: string           // for API-originating activities
-  status: 'signed' | 'broadcast' | 'completed' | 'refunded' | 'failed'
+  /** not_sent: a signed tx Desktop never saw broadcast within a day (it can be discarded). */
+  status: 'signed' | 'not_sent' | 'broadcast' | 'completed' | 'refunded' | 'failed'
   swapStatus?: SwapTrackingStatus  // detailed swap lifecycle status (only for type === 'swap')
   // ── Swap-only output side (only set when type === 'swap') ──
   outAmount?: string         // received_output if completed, else quoted_output

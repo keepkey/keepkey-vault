@@ -14,12 +14,19 @@ function human(value: string, decimals: number): string {
   if (!decimals) return padded
   return `${padded.slice(0, -decimals)}.${padded.slice(-decimals)}`.replace(/\.?0+$/, '') || '0'
 }
+/** A built-in chain's native coin (assetData names Base's ETH "BASE", Arbitrum's "ARB"): V16. */
+const nativeChain = (caip: string) => /\/slip44:/.test(caip) ? CHAINS.find(chain => chain.caip.toLowerCase() === caip.toLowerCase()) : undefined
 function metadata(caip: string): { symbol: string; decimals: number } | undefined {
+  const native = nativeChain(caip)
+  if (native) return { symbol: native.symbol, decimals: native.decimals }
   const asset = assets[caip] || assets[caip.toLowerCase()]
   if (asset?.symbol && Number.isInteger(asset.decimals)) return { symbol: asset.symbol, decimals: asset.decimals! }
   const chain = CHAINS.find(chain => chain.caip.toLowerCase() === caip.toLowerCase())
   return chain ? { symbol: chain.symbol, decimals: chain.decimals } : undefined
 }
+/** Display symbol for a CAIP from the bundled catalog (or the chain's native coin). */
+export const assetSymbol = (caip: string): string | undefined => metadata(caip)?.symbol
+
 function currencyMeta(currency: any): { assetCaip: string; symbol: string; decimals: number } | undefined {
   if (!currency || typeof currency.symbol !== 'string' || !Number.isInteger(currency.decimals)) return undefined
   let caip = currency.assetCaip || currency.assetId || currency.caip
@@ -39,7 +46,7 @@ function normalizeItem(value: any): SwapQuoteFeeItem | undefined {
   const assetCaip = typeof value.assetCaip === 'string' && value.assetCaip.includes('/') ? value.assetCaip : undefined
   const known = assetCaip ? metadata(assetCaip) : undefined
   const decimals = Number.isInteger(value.decimals) ? value.decimals : known?.decimals
-  const symbol = typeof value.symbol === 'string' && value.symbol.length <= 32 ? value.symbol : known?.symbol
+  const symbol = (assetCaip && nativeChain(assetCaip)?.symbol) || (typeof value.symbol === 'string' && value.symbol.length <= 32 ? value.symbol : known?.symbol)
   let amount: string | undefined, amountBaseUnits: string | undefined
   if (assetCaip && symbol && Number.isInteger(decimals) && decimals! >= 0 && decimals! <= 255) {
     if (units(value.amountBaseUnits)) { amountBaseUnits = value.amountBaseUnits; amount = human(value.amountBaseUnits, decimals!) }

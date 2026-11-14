@@ -205,5 +205,14 @@
 	"deviceBlindSignCaveat": "Blind ondertekenen blijft ingeschakeld totdat de KeepKey wordt vergrendeld of losgekoppeld, voor alle apps die hem gebruiken, niet alleen deze swap. Zolang het is ingeschakeld, toont deze app dit scherm ook niet meer vóór dergelijke transacties. Het apparaat vraagt je om te bevestigen en je pincode opnieuw in te voeren.",
 	"solanaOutflowDrain": "Waarschuwing: hierdoor wordt je wallet geleegd. Onderteken alleen als dat je bedoeling is.",
 	"solanaOutflowCaveat": "Vanaf deze computer gesimuleerd met een Solana-node. Je KeepKey kan deze cijfers niet bevestigen.",
-	"deviceBlindSignEnable": "Blind ondertekenen inschakelen"
+	"deviceBlindSignEnable": "Blind ondertekenen inschakelen",
+	"reviewRecipient": "Ontvanger",
+	"customRecipientNotKeepKey": "Aangepaste ontvanger — niet je KeepKey",
+	"customAddressOwn": "Dit is je eigen KeepKey-adres",
+	"relayDepositRecipient": "De Relay-order betaalt uit aan {{address}}. Je KeepKey ondertekent alleen de storting; Relay betaalt daarna uit.",
+	"relayRecipientMismatchButton": "Relay-order betaalt een ander adres",
+	"relayRecipientMismatch": "De Relay-order betaalt niet aan de getoonde ontvanger. Ga niet verder — vraag een nieuwe offerte op.",
+	"highSlippageConfirmButton": "Bevestig de hoge slippage",
+	"highSlippageConfirmRequired": "Bevestig de hoge slippagetolerantie voordat je ondertekent.",
+	"highSlippageConfirm": "Ik accepteer een slippagetolerantie van {{pct}}%: ik ontvang mogelijk tot {{pct}}% minder dan geoffreerd."
 }

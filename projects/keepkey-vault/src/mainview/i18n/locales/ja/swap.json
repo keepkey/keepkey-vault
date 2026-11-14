@@ -205,5 +205,14 @@
 	"deviceBlindSignCaveat": "ブラインド署名はKeepKeyがロックされるか接続解除されるまで、このスワップだけでなく、KeepKeyを使うすべてのアプリで有効です。有効な間、このアプリも該当する取引の前にこの画面を表示しなくなります。デバイスでの確認とPINの再入力が必要です。",
 	"solanaOutflowDrain": "警告：ウォレットが空になります。意図した場合以外は署名しないでください。",
 	"solanaOutflowCaveat": "このコンピューターからSolanaノードでシミュレーションしました。KeepKeyはこれらの数値を確認できません。",
-	"deviceBlindSignEnable": "ブラインド署名を有効にする"
+	"deviceBlindSignEnable": "ブラインド署名を有効にする",
+	"reviewRecipient": "受取人",
+	"customRecipientNotKeepKey": "カスタム受取人 — お使いのKeepKeyではありません",
+	"customAddressOwn": "これはお使いのKeepKeyのアドレスです",
+	"relayDepositRecipient": "Relayの注文は{{address}}に支払われます。KeepKeyが署名するのは入金のみで、支払いはその後Relayが行います。",
+	"relayRecipientMismatchButton": "Relayの注文は別のアドレスに支払います",
+	"relayRecipientMismatch": "Relayの注文は表示された受取人に支払いません。続行せず、新しい見積もりを取得してください。",
+	"highSlippageConfirmButton": "高いスリッページを確認",
+	"highSlippageConfirmRequired": "署名する前に、高いスリッページ許容度を確認してください。",
+	"highSlippageConfirm": "{{pct}}%のスリッページ許容度を受け入れます：見積もりより最大{{pct}}%少なく受け取る可能性があります。"
 }

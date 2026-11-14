@@ -15,14 +15,15 @@ const element = (tag: string) => (props: any) => {
 }
 mock.module('@chakra-ui/react', () => ({ Box: element('div'), Flex: element('div'), Text: element('span'),
   VStack: element('div'), Button: element('button'), Input: element('input'), Spinner: element('span') }))
-mock.module('react-i18next', () => ({ useTranslation: () => ({ t: translate }) }))
+mock.module('react-i18next', () => ({ useTranslation: () => ({ t: translate, i18n: { language: 'en' } }) }))
 mock.module('../../src/mainview/i18n/ui', () => ({ useUiTranslation: () => translate }))
 mock.module('../../src/mainview/lib/fiat-context', () => ({ useFiat: () => ({ locale: 'en-US', fmt: String, fmtCompact: String }) }))
 mock.module('../../src/mainview/lib/formatting', () => ({ formatBalance: String }))
 mock.module('../../src/mainview/lib/signing-errors', () => ({ describeSigningError: (error: Error) => error.message }))
 mock.module('../../src/mainview/lib/sounds', () => ({ playSent() {} }))
 mock.module('../../src/shared/assetLookup', () => ({ getAsset: () => null }))
-mock.module('../../src/shared/address-validation', () => ({ validateAddress: () => ({ valid: true }) }))
+const { isBurnAddress, knownTokenContract } = await import('../../src/shared/address-validation')
+mock.module('../../src/shared/address-validation', () => ({ validateAddress: () => ({ valid: true }), isBurnAddress, knownTokenContract }))
 mock.module('../../src/mainview/components/QrScannerOverlay', () => ({ QrScannerOverlay: () => null }))
 mock.module('../../src/mainview/components/AddressBookPicker', () => ({ AddressBookPicker: () => null }))
 mock.module('../../src/mainview/components/AddressIdenticon', () => ({ AddressIdenticon: () => null }))
@@ -34,12 +35,19 @@ function deferred() {
   const promise = new Promise((yes, no) => { resolve = yes; reject = no })
   return { promise, resolve, reject }
 }
-const calls: Array<{ method: string; params: any; pending: ReturnType<typeof deferred> }> = []
-mock.module('../../src/mainview/lib/rpc', () => ({ rpcRequest: async (method: string, params: any) => {
+const calls: Array<{ method: string; params: any; timeout?: number; pending: ReturnType<typeof deferred> }> = []
+mock.module('../../src/mainview/lib/rpc', () => ({ rpcRequest: async (method: string, params: any, timeout?: number) => {
   if (method === 'checkVaultDestination') return undefined
   if (method === 'matchAddress') return { address: params.address, kind: 'external', label: 'Known test recipient' }
+  if (method === 'cancelForegroundDeviceOperation') {
+    // Bun aborts the Desktop operation; the waiting sign rejects with its 499.
+    const sign = calls.findLast(call => call.method === 'ethSignTx')
+    calls.push({ method, params, timeout, pending: deferred() })
+    sign?.pending.reject(new Error('KeepKey request cancelled'))
+    return { ok: true }
+  }
   if (!['buildTx', 'ethSignTx', 'broadcastTx'].includes(method)) throw new Error(`Unexpected RPC: ${method}`)
-  const pending = deferred(); calls.push({ method, params, pending }); return pending.promise
+  const pending = deferred(); calls.push({ method, params, timeout, pending }); return pending.promise
 } }))
 globalThis.fetch = (() => { throw new Error('Network forbidden in SendForm fixture') }) as typeof fetch
 const { act } = React
@@ -162,6 +170,19 @@ await render({ balance: { ...balance, balance: '20', balanceUsd: 20000 } }); exp
 await click('broadcastTransaction'); const broadcast = calls.at(-1)!
 expect(broadcast.params).toMatchObject({ to: recipient, amount: '9', fromAddress: owner, chainId: 'ethereum' })
 await complete(broadcast, { txid: 'synthetic-transaction-id' }); summary.snapshot = true
+await unmount()
+
+// Signing waits on the KeepKey's button with no client timeout, says so, and
+// its Cancel sends Cancel to the device instead of leaving it waiting.
+await mount(); await fill(); await click('buildTransaction'); await complete(calls.at(-1)!)
+await click('signOnDevice'); const waiting = calls.at(-1)!
+expect(waiting.method).toBe('ethSignTx'); expect(waiting.timeout).toBe(0)
+expect(text()).toContain('waitingForKeepKey')
+await click('cancel')
+expect(calls.at(-1)!.method).toBe('cancelForegroundDeviceOperation'); await settle()
+expect(text()).toContain('KeepKey request cancelled'); expect(text()).not.toContain('waitingForKeepKey')
+expect(button('signOnDevice').disabled).toBe(false)
+summary.deviceWait = true
 await unmount()
 
 await mount(); await fill(); await click('buildTransaction'); const abandoned = calls.at(-1)!

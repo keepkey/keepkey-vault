@@ -149,5 +149,9 @@
 		"retry": "Tentar novamente",
 		"regenerate": "Novo código"
 	},
-	"restartToUpdate": "Reiniciar e instalar"
+	"restartToUpdate": "Reiniciar e instalar",
+	"autoLock": "Bloqueio automático",
+	"autoLockHint": "Tempo ocioso antes de o dispositivo pedir o PIN novamente. Desconectar sempre bloqueia na hora.",
+	"offlineMode": "Modo offline",
+	"offlineModeDescription": "Modo avião — sem rede. Dispositivo, endereços e assinatura continuam funcionando; saldos, histórico e transmissão ficam desativados."
 }

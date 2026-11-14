@@ -9,17 +9,24 @@ export function validNumberLocale(value: unknown): string {
   return 'en-US'
 }
 
+const decimalSeparator = (locale: string) =>
+  new Intl.NumberFormat(validNumberLocale(locale)).formatToParts(1.1).find(p => p.type === 'decimal')?.value
+
 /**
  * Amount fields accept ungrouped decimals, never a numeric prefix. Keep values
  * as strings so long cryptocurrency amounts are not rounded by Number parsing.
- * A locale's comma decimal separator is accepted alongside canonical ASCII dot.
+ * A comma decimal separator is accepted alongside canonical ASCII dot when the
+ * number locale or the UI language (whose hints show "1,5") uses one.
  * Grouping, mixed separators, exponents, signs and non-finite values are rejected.
  */
-export function normalizeAmountInput(value: string, locale = 'en-US'): string | null {
+export function normalizeAmountInput(value: string, locale = 'en-US', language?: string): string | null {
   let input = value.trim()
-  const decimal = new Intl.NumberFormat(validNumberLocale(locale)).formatToParts(1.1).find(p => p.type === 'decimal')?.value
-  if (decimal === ',' && input.includes(',')) {
+  const commaDecimal = decimalSeparator(locale) === ',' || (!!language && decimalSeparator(language) === ',')
+  if (commaDecimal && input.includes(',')) {
     if (input.includes('.')) return null
+    // Only the UI language reads the comma as decimal: the number format still
+    // groups with it ("1,234.56"), so "1,234" is ambiguous and refused.
+    if (decimalSeparator(locale) !== ',' && /^\d+,\d{3}$/.test(input)) return null
     input = input.replace(',', '.')
   }
   if (!/^(?:\d+(?:\.\d*)?|\.\d+)$/.test(input)) return null

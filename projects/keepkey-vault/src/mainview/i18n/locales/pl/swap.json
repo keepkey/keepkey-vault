@@ -205,5 +205,14 @@
 	"deviceBlindSignCaveat": "Podpisywanie w ciemno pozostaje włączone do zablokowania lub odłączenia KeepKey, dla wszystkich korzystających z niego aplikacji, nie tylko tej wymiany. Gdy jest włączone, ta aplikacja również przestaje wyświetlać ten ekran przed takimi transakcjami. Urządzenie prosi o potwierdzenie i ponowne wpisanie kodu PIN.",
 	"solanaOutflowDrain": "Uwaga: to opróżni Twój portfel. Nie podpisuj, chyba że właśnie to zamierzasz zrobić.",
 	"solanaOutflowCaveat": "Symulacja z węzłem Solana z tego komputera. KeepKey nie może potwierdzić tych wartości.",
-	"deviceBlindSignEnable": "Włącz podpisywanie w ciemno"
+	"deviceBlindSignEnable": "Włącz podpisywanie w ciemno",
+	"reviewRecipient": "Odbiorca",
+	"customRecipientNotKeepKey": "Własny odbiorca — to nie Twój KeepKey",
+	"customAddressOwn": "To Twój własny adres KeepKey",
+	"relayDepositRecipient": "Zlecenie Relay wypłaca środki na {{address}}. Twój KeepKey podpisuje tylko wpłatę; Relay wypłaca je później.",
+	"relayRecipientMismatchButton": "Zlecenie Relay płaci na inny adres",
+	"relayRecipientMismatch": "Zlecenie Relay nie płaci wskazanemu odbiorcy. Nie kontynuuj — pobierz nową wycenę.",
+	"highSlippageConfirmButton": "Potwierdź wysoki poślizg",
+	"highSlippageConfirmRequired": "Potwierdź wysoką tolerancję poślizgu przed podpisaniem.",
+	"highSlippageConfirm": "Akceptuję tolerancję poślizgu {{pct}}%: mogę otrzymać do {{pct}}% mniej niż w wycenie."
 }

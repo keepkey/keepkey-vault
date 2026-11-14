@@ -45,5 +45,13 @@
 	"cosigner": "Cossignatário",
 	"cosignerOption": "Cossignatário Safe: oferecer primeiro ao criar uma multiassinatura",
 	"markCosigner": "Marcar como cossignatário Safe",
-	"notCosigner": "Não é cossignatário"
+	"notCosigner": "Não é cossignatário",
+	"saveAddressTitle": "Novo endereço externo",
+	"fundsLeavingWarning": "Confira o endereço com atenção — fundos enviados não podem ser revertidos",
+	"saveAddressPrompt": "Salvar este endereço no seu catálogo de endereços?",
+	"newAddressBadge": "Novo endereço",
+	"notNow": "Agora não",
+	"saving": "Salvando…",
+	"savedToBook": "Salvo no catálogo de endereços",
+	"addedOn": "Adicionado em {{date}}"
 }

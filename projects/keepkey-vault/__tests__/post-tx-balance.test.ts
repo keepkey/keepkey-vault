@@ -111,3 +111,15 @@ test('refresh does not inherit the broadcasting device operation or REST request
   expect(seen.length).toBe(2)
   expect(seen).toStrictEqual([undefined, undefined])
 })
+
+test('every broadcast or settlement marks its chain in the requesting wallet before any read (audit v4 H3)', async () => {
+  const marked: Array<[string, string]> = []
+  let scope: BalanceRefreshScope | null = { epoch: 1, deviceId: 'device-A', walletId: 'wallet-A', wallet: {} }
+  const worker = createPostTxBalanceRefresh({ getScope: () => scope, canRefresh: () => true, refresh: async () => {},
+    onTx: (s, chainId) => marked.push([s.deviceId, chainId]), setTimer: () => 0, clearTimer: () => {} })
+  worker.activity(broadcast, CHAINS)
+  worker.request('base', '0xsettled')
+  scope = null
+  worker.request('ethereum')
+  expect(marked).toEqual([['device-A', 'litecoin'], ['device-A', 'base']])
+})

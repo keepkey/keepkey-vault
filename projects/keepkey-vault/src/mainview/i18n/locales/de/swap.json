@@ -205,5 +205,14 @@
 	"deviceBlindSignCaveat": "Blindes Signieren bleibt bis zum Sperren oder Trennen des KeepKey für alle Apps aktiviert, die ihn verwenden, nicht nur für diesen Tausch. Solange es aktiviert ist, zeigt diese App diesen Bildschirm vor solchen Transaktionen ebenfalls nicht mehr an. Das Gerät fordert dich zur Bestätigung und zur erneuten PIN-Eingabe auf.",
 	"solanaOutflowDrain": "Warnung: Dadurch wird dein Wallet geleert. Signiere nur, wenn du das beabsichtigst.",
 	"solanaOutflowCaveat": "Von diesem Computer aus mit einem Solana-Knoten simuliert. Dein KeepKey kann diese Zahlen nicht bestätigen.",
-	"deviceBlindSignEnable": "Blindes Signieren einschalten"
+	"deviceBlindSignEnable": "Blindes Signieren einschalten",
+	"reviewRecipient": "Empfänger",
+	"customRecipientNotKeepKey": "Benutzerdefinierter Empfänger — nicht dein KeepKey",
+	"customAddressOwn": "Das ist deine eigene KeepKey-Adresse",
+	"relayDepositRecipient": "Die Relay-Order zahlt an {{address}} aus. Dein KeepKey signiert nur die Einzahlung; Relay zahlt danach aus.",
+	"relayRecipientMismatchButton": "Relay-Order zahlt an eine andere Adresse",
+	"relayRecipientMismatch": "Die Relay-Order zahlt nicht an den angezeigten Empfänger. Nicht fortfahren — hol dir ein neues Angebot.",
+	"highSlippageConfirmButton": "Hohe Slippage bestätigen",
+	"highSlippageConfirmRequired": "Bestätige die hohe Slippage-Toleranz vor dem Signieren.",
+	"highSlippageConfirm": "Ich akzeptiere eine Slippage-Toleranz von {{pct}}%: Ich erhalte möglicherweise bis zu {{pct}}% weniger als angeboten."
 }

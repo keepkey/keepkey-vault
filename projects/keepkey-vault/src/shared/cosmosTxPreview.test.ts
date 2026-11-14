@@ -58,3 +58,14 @@ test('other routes and empty documents give nothing', () => {
   expect(cosmosTxPreview('/eth/sign-transaction', doc({}))).toBeUndefined()
   expect(cosmosTxPreview('/cosmos/sign-amino', { signDoc: { msgs: [] } })).toBeUndefined()
 })
+
+test('THORChain and Maya show the network fee they charge, not the signed 0 (H10)', () => {
+  const feeOf = (route: string, fee: any) => cosmosTxPreview(route, doc({ type: 'thorchain/MsgSend', value: {} }, { fee }))!.fee
+  for (const fee of [{ amount: [], gas: '500000000' }, { amount: [{ denom: 'rune', amount: '0' }], gas: '0' }]) {
+    expect(feeOf('/thorchain/sign-amino-transfer', fee)).toBe('0.02 RUNE (2000000 rune), charged by THORChain on top of the amount')
+  }
+  expect(feeOf('/mayachain/sign-amino-transfer', { amount: [] })).toBe('0.2 CACAO (2000000000 cacao), charged by Maya on top of the amount')
+  // A non-zero signed fee is still shown as signed; other chains are unchanged.
+  expect(feeOf('/thorchain/sign-amino-transfer', { amount: [{ denom: 'rune', amount: '3000000' }] })).toBe('0.03 RUNE (3000000 rune)')
+  expect(feeOf('/osmosis/sign-amino', { amount: [] })).toBeUndefined()
+})

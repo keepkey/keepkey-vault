@@ -80,3 +80,11 @@ export function autoUnlockKey(p: { phase: AppPhase; state: string; deviceId?: st
 export function watchOnlyEndsForDevice(watchedId: string, device: { state: string; deviceId?: string }): boolean {
   return device.deviceId === watchedId && device.state === 'ready'
 }
+
+/** Text under the Unlock button. Backing out of the PIN entry (a 499 cancel) is
+ * the user's choice, not an error to show. */
+export function unlockErrorText(error: unknown, fallback: string): string | null {
+  const message = typeof (error as any)?.message === 'string' ? (error as any).message : ''
+  if ((error as any)?.status === 499 || /\bcancel/i.test(message)) return null
+  return message || fallback
+}

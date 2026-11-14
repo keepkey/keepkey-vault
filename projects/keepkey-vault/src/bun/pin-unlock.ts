@@ -17,6 +17,7 @@
 import * as core from '@keepkey/hdwallet-core'
 import * as Messages from '@keepkey/device-protocol/lib/messages_pb'
 import * as Types from '@keepkey/device-protocol/lib/types_pb'
+import { DeviceOperationError } from './device-operation'
 
 export const UNLOCK_ADDRESS_N = [0x8000002C, 0x80000000, 0x80000000] // m/44'/0'/0'
 
@@ -41,7 +42,15 @@ export async function requestUnlock(transport: CallTransport, msgTimeout = core.
   gpk.setShowDisplay(false)
   gpk.setEcdsaCurveName('secp256k1')
   gpk.setScriptType(Types.InputScriptType.SPENDADDRESS)
-  await transport.call(Messages.MessageType.MESSAGETYPE_GETPUBLICKEY, gpk, { msgTimeout })
+  try {
+    await transport.call(Messages.MessageType.MESSAGETYPE_GETPUBLICKEY, gpk, { msgTimeout })
+  } catch (err: any) {
+    // hdwallet throws the raw Failure event for PinCancelled; the user backed out.
+    if ((err?.message?.code ?? err?.code) === Types.FailureType.FAILURE_PINCANCELLED) {
+      throw new DeviceOperationError(499, 'PIN entry cancelled')
+    }
+    throw err
+  }
 }
 
 export function isTransportTimeout(err: unknown): boolean {

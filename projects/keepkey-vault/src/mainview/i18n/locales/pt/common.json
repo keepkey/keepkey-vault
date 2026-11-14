@@ -24,7 +24,9 @@
 		"onChain": "{{chain}} · atualizando saldo",
 		"refreshing": "Atualizando saldo",
 		"title": "Pagamento recebido",
-		"activityOnChain": "{{chain}} · saldo atualizado"
+		"activityOnChain": "{{chain}} · saldo atualizado",
+		"activityRefreshed": "Saldo atualizado",
+		"activityTitle": "Atividade da carteira"
 	},
 	"language": "Idioma",
 	"currency": "Moeda",

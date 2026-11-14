@@ -7,6 +7,7 @@
 import { Database } from 'bun:sqlite'
 import { migratePublicKeyCache } from './public-key-cache-migration'
 import { DEFAULT_PIONEER_API_BASE, resolvePioneerApiBase } from '../shared/pioneer-server'
+import { CHAINS } from '../shared/chains'
 import { Utils } from 'electrobun/bun'
 import { join, dirname } from 'node:path'
 import { mkdirSync, unlinkSync, existsSync, readFileSync, writeFileSync } from 'node:fs'
@@ -90,6 +91,9 @@ export function initDb() {
       )
     `)
     migratePublicKeyCache(db, 'balances')
+    // Set when the chain broadcasts or settles a swap after this row was cached;
+    // cleared only by a confirmed write (audit v4 H3).
+    try { db.exec('ALTER TABLE balances ADD COLUMN tx_after INTEGER') } catch { /* already exists */ }
 
     // Migration: add defi_positions_json for existing installs that
     // predate the GetPortfolioBalances includeDefi merge.
@@ -336,7 +340,7 @@ export function initDb() {
       try { db.exec(`ALTER TABLE custom_chains ADD COLUMN ${col}`) } catch { /* already exists */ }
     }
     // Activity tracking columns on api_log (sign/broadcast ops)
-    for (const col of ['txid TEXT', 'chain TEXT', 'activity_type TEXT', 'device_id TEXT', 'wallet_id TEXT']) {
+    for (const col of ['txid TEXT', 'chain TEXT', 'activity_type TEXT', 'device_id TEXT', 'wallet_id TEXT', 'dismissed INTEGER']) {
       try { db.exec(`ALTER TABLE api_log ADD COLUMN ${col}`) } catch { /* already exists */ }
     }
     try { db.exec(`ALTER TABLE swap_history ADD COLUMN device_id TEXT`) } catch { /* already exists */ }
@@ -365,6 +369,8 @@ export function initDb() {
       try { db.exec(`ALTER TABLE swap_history ADD COLUMN ${col}`) } catch { /* already exists */ }
     }
     try { db.exec(`ALTER TABLE swap_history ADD COLUMN near_tx_hash TEXT`) } catch { /* already exists */ }
+    // Settlement legs (THOR/Maya): without them a completed swap reads back as unverified after a restart.
+    try { db.exec(`ALTER TABLE swap_history ADD COLUMN payouts_json TEXT`) } catch { /* already exists */ }
     // Inbound (input tx) on-chain location + timing from Pioneer's swap record
     // (blockchainTxData + confirmedAt + structured error). All best-effort; the
     // UI renders each conditionally. gas_used/effective_gas_price are EVM-only
@@ -700,8 +706,8 @@ export function getCachedBalances(deviceId: string): { balances: ChainBalance[];
   try {
     if (!db) return null
     const rows = db.query(
-      'SELECT chain_id, symbol, balance, balance_usd, address, tokens_json, defi_positions_json, breakdown_json, updated_at FROM balances WHERE device_id = ?'
-    ).all(deviceId) as Array<{ chain_id: string; symbol: string; balance: string; balance_usd: number; address: string; tokens_json: string | null; defi_positions_json: string | null; breakdown_json: string | null; updated_at: number }>
+      'SELECT chain_id, symbol, balance, balance_usd, address, tokens_json, defi_positions_json, breakdown_json, updated_at, tx_after FROM balances WHERE device_id = ?'
+    ).all(deviceId) as Array<{ chain_id: string; symbol: string; balance: string; balance_usd: number; address: string; tokens_json: string | null; defi_positions_json: string | null; breakdown_json: string | null; updated_at: number; tx_after: number | null }>
     if (!rows || rows.length === 0) return null
     let maxUpdatedAt = 0
     const balances = rows.map(r => {
@@ -714,6 +720,8 @@ export function getCachedBalances(deviceId: string): { balances: ChainBalance[];
         address: r.address,
         updatedAt: r.updated_at,
       }
+      // A broadcast after this row: the figure predates it, so never "synced".
+      if (r.tx_after != null) entry.syncState = 'stale'
       if (r.tokens_json) {
         try { entry.tokens = JSON.parse(r.tokens_json) } catch { /* corrupt JSON, skip tokens */ }
       }
@@ -738,10 +746,16 @@ export function getCachedBalances(deviceId: string): { balances: ChainBalance[];
   }
 }
 
+/** A confirmed read clears a chain's tx mark only if it started this long after
+ *  the tx: a read right after a broadcast (THORChain includes it a block later)
+ *  can still return the pre-tx balance as "confirmed" (audit v4 H3). */
+export const TX_SETTLE_MS = 15_000
+const TX_AFTER_CLEAR = `tx_after = CASE WHEN tx_after IS NOT NULL AND ? < tx_after + ${TX_SETTLE_MS} THEN tx_after ELSE NULL END`
+
 // confirmedChainIds: chains where Pioneer returned a real response (even if balance=0).
 // Confirmed entries write unconditionally — a genuine zero overwrites a stale non-zero.
 // Unconfirmed entries (Pioneer failed/timed out for that chunk) keep the existing cached value.
-export function setCachedBalances(deviceId: string, balances: ChainBalance[], confirmedChainIds?: Set<string>) {
+export function setCachedBalances(deviceId: string, balances: ChainBalance[], confirmedChainIds?: Set<string>, readStartedAt = Date.now()) {
   try {
     if (!db) return
     const now = Date.now()
@@ -771,7 +785,8 @@ export function setCachedBalances(deviceId: string, balances: ChainBalance[], co
          tokens_json = excluded.tokens_json,
          defi_positions_json = excluded.defi_positions_json,
          breakdown_json = COALESCE(excluded.breakdown_json, breakdown_json),
-         updated_at  = excluded.updated_at`
+         updated_at  = excluded.updated_at,
+         ${TX_AFTER_CLEAR}`
     )
     const tx = db.transaction(() => {
       for (const b of balances) {
@@ -779,7 +794,7 @@ export function setCachedBalances(deviceId: string, balances: ChainBalance[], co
         const defiJson = b.defiPositions && b.defiPositions.length > 0 ? JSON.stringify(b.defiPositions) : null
         const args = [deviceId, b.chainId, b.symbol, b.balance, b.balanceUsd, b.address, tokensJson, defiJson, b.breakdown ? JSON.stringify(b.breakdown) : null, now] as const
         if (confirmedChainIds?.has(b.chainId)) {
-          stmtForced.run(...args)
+          stmtForced.run(...args, readStartedAt)
         } else {
           stmtGuarded.run(...args)
         }
@@ -792,10 +807,11 @@ export function setCachedBalances(deviceId: string, balances: ChainBalance[], co
 }
 
 /** Update a single chain's cached balance.
- *  Pass force=true when Pioneer confirmed the value — allows genuine zeros to overwrite stale data. */
-export function updateCachedBalance(deviceId: string, balance: ChainBalance, force?: boolean) {
+ *  Pass force=true when Pioneer confirmed the value — allows genuine zeros to overwrite stale data.
+ *  Returns true when the row still predates a tx (see TX_SETTLE_MS). */
+export function updateCachedBalance(deviceId: string, balance: ChainBalance, force?: boolean, readStartedAt = Date.now()): boolean {
   try {
-    if (!db) return
+    if (!db) return false
     const tokensJson = balance.tokens && balance.tokens.length > 0 ? JSON.stringify(balance.tokens) : null
     const defiJson = balance.defiPositions && balance.defiPositions.length > 0 ? JSON.stringify(balance.defiPositions) : null
     if (force) {
@@ -810,8 +826,9 @@ export function updateCachedBalance(deviceId: string, balance: ChainBalance, for
            tokens_json = excluded.tokens_json,
            defi_positions_json = excluded.defi_positions_json,
            breakdown_json = COALESCE(excluded.breakdown_json, breakdown_json),
-           updated_at  = excluded.updated_at`,
-        [deviceId, balance.chainId, balance.symbol, balance.balance, balance.balanceUsd, balance.address, tokensJson, defiJson, balance.breakdown ? JSON.stringify(balance.breakdown) : null, Date.now()]
+           updated_at  = excluded.updated_at,
+           ${TX_AFTER_CLEAR}`,
+        [deviceId, balance.chainId, balance.symbol, balance.balance, balance.balanceUsd, balance.address, tokensJson, defiJson, balance.breakdown ? JSON.stringify(balance.breakdown) : null, Date.now(), readStartedAt]
       )
     } else {
       db.run(
@@ -829,8 +846,21 @@ export function updateCachedBalance(deviceId: string, balance: ChainBalance, for
         [deviceId, balance.chainId, balance.symbol, balance.balance, balance.balanceUsd, balance.address, tokensJson, defiJson, balance.breakdown ? JSON.stringify(balance.breakdown) : null, Date.now()]
       )
     }
+    const marked = db.query('SELECT tx_after FROM balances WHERE device_id = ? AND chain_id = ?').get(deviceId, balance.chainId) as { tx_after: number | null } | null
+    return marked?.tx_after != null
   } catch (e: any) {
     console.warn('[db] updateCachedBalance failed:', e.message)
+    return false
+  }
+}
+
+/** A broadcast or swap settlement touched this chain: its cached row now predates it. */
+export function markBalanceTx(deviceId: string, chainId: string, at = Date.now()) {
+  try {
+    if (!db) return
+    db.run('UPDATE balances SET tx_after = ? WHERE device_id = ? AND chain_id = ?', [at, deviceId, chainId])
+  } catch (e: any) {
+    console.warn('[db] markBalanceTx failed:', e.message)
   }
 }
 
@@ -2028,6 +2058,11 @@ const VALID_ACTIVITY_TYPES = new Set(['send', 'receive', 'swap', 'sign', 'messag
 // amount + recipient) and overlay only the on-chain truth the primary can't know
 // (confirmations / block height / counterparty) from the scan row.
 export function mergeTxRows(a: RecentActivity, b: RecentActivity): RecentActivity {
+  // A bare signature is superseded by any record of the broadcast itself.
+  if (isUnsentSignature(a) !== isUnsentSignature(b)) {
+    const [sent, signed] = isUnsentSignature(a) ? [b, a] : [a, b]
+    return { ...sent, appName: sent.appName ?? signed.appName }
+  }
   const primary = a.source !== 'scan' ? a : b.source !== 'scan' ? b : a
   const secondary = primary === a ? b : a
   // A REST broadcast logs no amount (the client sends only the raw tx). Then the
@@ -2045,13 +2080,42 @@ export function mergeTxRows(a: RecentActivity, b: RecentActivity): RecentActivit
   }
 }
 
+const isUnsentSignature = (a: RecentActivity) => a.status === 'signed' || a.status === 'not_sent'
+// Routes whose signature is a transaction to broadcast (not a message or typed data).
+const TX_SIGN_ROUTE = /\/sign-(transaction|transfer|operations|amino[\w-]*)$/
+// Only a signed tx logged under its txid can be matched to its broadcast; one
+// without (REST utxo/cosmos/solana … today) is never claimed "not sent".
+const canBeNotSent = (route: string, txid: string | null) => !!txid && TX_SIGN_ROUTE.test(route)
+/** A signed tx Desktop has not seen broadcast after this long is shown as "Not sent". */
+export const SIGNED_TX_EXPIRY_MS = 24 * 60 * 60 * 1000
+
+/** Hide an unsent signature from activity (audit H15). The api_log row stays
+ *  for the audit log; only sign-only rows of this wallet can be discarded. */
+export function dismissActivity(id: string, deviceId?: string, walletId?: string): boolean {
+  try {
+    if (!db || (!deviceId && !walletId)) return false
+    const scope = walletId ? 'wallet_id = ?' : 'device_id = ?'
+    const row = db.query(`SELECT txid, route FROM api_log WHERE id = ? AND ${scope} AND method <> 'SCAN' AND activity_type = 'sign'`)
+      .get(Number(id), walletId || deviceId!) as { txid: string | null; route: string } | null
+    if (!row || !canBeNotSent(row.route, row.txid)) return false
+    // Signed, then broadcast: the broadcast is real activity, not a stale signature.
+    if (row.txid && db.query(`SELECT 1 FROM api_log WHERE txid = ? AND ${scope} AND (method = 'SCAN' OR activity_type <> 'sign') LIMIT 1`)
+      .get(row.txid, walletId || deviceId!)) return false
+    db.run('UPDATE api_log SET dismissed = 1 WHERE id = ?', [Number(id)])
+    return true
+  } catch (e: any) {
+    console.warn('[db] dismissActivity failed:', e.message)
+    return false
+  }
+}
+
 export function getRecentActivityFromLog(limit?: number, chainFilter?: string, deviceId?: string, walletId?: string): RecentActivity[] {
   try {
     if (!db) return []
 
     // Build query with optional chain filter
     let logSql = `SELECT id, device_id, wallet_id, txid, chain, activity_type, app_name, timestamp, route, method, response_body
-       FROM api_log WHERE activity_type IS NOT NULL`
+       FROM api_log WHERE activity_type IS NOT NULL AND dismissed IS NOT 1`
     const logParams: any[] = []
     if (walletId) {
       logSql += ` AND wallet_id = ?`
@@ -2096,7 +2160,8 @@ export function getRecentActivityFromLog(limit?: number, chainFilter?: string, d
         type: (VALID_ACTIVITY_TYPES.has(r.activity_type) ? (r.activity_type === 'broadcast' ? 'send' : r.activity_type) : 'sign') as ActivityType,
         source: isScan ? 'scan' : (r.method === 'RPC' ? 'app' : 'api') as ActivitySource,
         appName: r.method === 'RPC' ? undefined : (isScan ? undefined : r.app_name),
-        status: isScan ? 'broadcast' : (['broadcast', 'swap', 'shield', 'unshield'].includes(r.activity_type) ? 'broadcast' : 'signed'),
+        status: isScan ? 'broadcast' : (['broadcast', 'swap', 'shield', 'unshield'].includes(r.activity_type) ? 'broadcast'
+          : canBeNotSent(r.route, r.txid) && Date.now() - r.timestamp > SIGNED_TX_EXPIRY_MS ? 'not_sent' : 'signed'),
         createdAt: r.timestamp,
         confirmations: meta?.confirmations ?? undefined,
         blockHeight: meta?.blockHeight ?? undefined,
@@ -2634,6 +2699,7 @@ export function updateSwapHistoryStatus(
     inboundConfirmedAt?: number
     errorActionable?: string
     errorElapsedMinutes?: number
+    payouts?: SwapHistoryRecord['payouts']
   }
 ) {
   try {
@@ -2659,6 +2725,7 @@ export function updateSwapHistoryStatus(
     if (extra?.nearTxHash) setClauses.push({ col: 'near_tx_hash', value: extra.nearTxHash })
     if (extra?.error) setClauses.push({ col: 'error', value: extra.error })
     if (extra?.receivedOutput) setClauses.push({ col: 'received_output', value: extra.receivedOutput })
+    if (extra?.payouts?.length) setClauses.push({ col: 'payouts_json', value: JSON.stringify(extra.payouts) })
     // Inbound block + timing + structured-error fields — only written when the
     // poll actually carries them (undefined → column unchanged), so a later
     // rescan that drops blockHash can't null out a value an earlier poll set.
@@ -2785,6 +2852,11 @@ export function getSwapHistoryStats(deviceId?: string, walletId?: string): SwapH
   }
 }
 
+/** A built-in chain's native coin reads as the chain's symbol; rows saved before
+ *  V16 stored discovery's "BASE"/"ARB"/"OP" for L2 ETH. */
+const nativeSymbol = (caip: string | null) => caip && /\/slip44:/.test(caip)
+  ? CHAINS.find(c => c.caip.toLowerCase() === caip.toLowerCase())?.symbol : undefined
+
 function mapSwapRow(r: any): SwapHistoryRecord {
   return {
     id: r.id,
@@ -2793,8 +2865,8 @@ function mapSwapRow(r: any): SwapHistoryRecord {
     txid: r.txid,
     fromAsset: r.from_asset,
     toAsset: r.to_asset,
-    fromSymbol: r.from_symbol,
-    toSymbol: r.to_symbol,
+    fromSymbol: nativeSymbol(r.from_caip) ?? r.from_symbol,
+    toSymbol: nativeSymbol(r.to_caip) ?? r.to_symbol,
     fromChainId: r.from_chain_id,
     toChainId: r.to_chain_id,
     fromCaip: r.from_caip || undefined,
@@ -2832,6 +2904,7 @@ function mapSwapRow(r: any): SwapHistoryRecord {
     inboundConfirmedAt: r.inbound_confirmed_at ?? undefined,
     errorActionable: r.error_actionable || undefined,
     errorElapsedMinutes: r.error_elapsed_minutes ?? undefined,
+    payouts: r.payouts_json ? JSON.parse(r.payouts_json) : undefined,
   }
 }
 
