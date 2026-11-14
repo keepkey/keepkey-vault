@@ -480,6 +480,7 @@ test-unit:
 	cd $(PROJECT_DIR) && bun test __tests__/swap-progress-polling.test.ts
 	cd $(PROJECT_DIR) && bun test __tests__/swap-dialog-tracking.test.ts
 	cd $(PROJECT_DIR) && bun test __tests__/swap-dialog-device-wait.test.ts
+	cd $(PROJECT_DIR) && bun test __tests__/swap-recipient-guard.test.ts
 	cd $(PROJECT_DIR) && bun test __tests__/swap-execution-service.test.ts
 	cd $(PROJECT_DIR) && bun test __tests__/swap-ui-control.test.ts
 	cd $(PROJECT_DIR) && bun test __tests__/swap-api-assets.test.ts __tests__/swap-quote-lease.test.ts

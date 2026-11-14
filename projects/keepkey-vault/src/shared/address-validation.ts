@@ -349,3 +349,12 @@ export function validateContactAddress(address: string, chain: ChainDef, existin
   if (existing?.kind === 'own') return fail('contactIsOwnAddress')
   return OK
 }
+
+/** Two spellings of one address: hex and bech32 ignore case, base58 does not; BCH's cashaddr prefix is optional. */
+export function sameAddress(a: string | null | undefined, b: string | null | undefined): boolean {
+  const bare = (v: string) => /^bitcoincash:/i.test(v) ? v.slice('bitcoincash:'.length) : v
+  const x = bare(a?.trim() || ''), y = bare(b?.trim() || '')
+  if (!x || !y) return false
+  const caseless = (v: string) => /^0x[0-9a-f]+$/i.test(v) || /^[a-z]{1,83}1[02-9ac-hj-np-z]+$/i.test(v)
+  return caseless(x) && caseless(y) ? x.toLowerCase() === y.toLowerCase() : x === y
+}
