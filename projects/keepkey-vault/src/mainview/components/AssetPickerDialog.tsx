@@ -116,9 +116,9 @@ function ProviderDots({ providers }: { providers: string[] }) {
 
 // ── gas / token classifier badge ────────────────────────────────────────────
 
-/** Small pill marking an asset as the chain's GAS (native) asset or a TOKEN.
- *  Gas assets get a gold pill so they read as "this pays for gas / is the
- *  chain's own coin" and never get confused with a same-symbol token. */
+/** Small pill marking an asset as the chain's NATIVE coin or a TOKEN. Native
+ *  coins get a gold pill so they never get confused with a same-symbol token.
+ *  (Labelled "NATIVE", not "GAS": BTC and other UTXO coins have no gas.) */
 function GasTokenBadge({ entry }: { entry: AssetEntry }) {
   const gas = isGasAsset(entry)
   return (
@@ -127,7 +127,7 @@ function GasTokenBadge({ entry }: { entry: AssetEntry }) {
       color={gas ? "var(--gold)" : "kk.textMuted"}
       px="1.5" py="0.5" borderRadius="4px" fontSize="9px" fontWeight="700"
       letterSpacing="0.06em" flexShrink={0}>
-      {gas ? "GAS" : "TOKEN"}
+      {gas ? "NATIVE" : "TOKEN"}
     </Box>
   )
 }
