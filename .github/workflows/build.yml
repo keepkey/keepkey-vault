@@ -927,6 +927,15 @@ jobs:
           (cd modules/proto-tx-builder && git submodule update --init osmosis-frontend && yarn install --frozen-lockfile && npx tsc -p . && test -f dist/index.js)
           # Same as the Makefile's device-protocol stamp: force protobufjs's pbjs.
 
+      - name: Install Zig 0.15.1 (wrapper EXE, as on the Windows box)
+        shell: pwsh
+        run: |
+          $dir = "$env:USERPROFILE\tools"
+          New-Item -ItemType Directory -Force $dir | Out-Null
+          curl.exe -fsSL -o "$dir\zig.zip" https://ziglang.org/download/0.15.1/zig-x86_64-windows-0.15.1.zip
+          tar -xf "$dir\zig.zip" -C $dir
+          & "$dir\zig-x86_64-windows-0.15.1\zig.exe" version
+
       - name: Build (unsigned)
         shell: pwsh
         run: |
