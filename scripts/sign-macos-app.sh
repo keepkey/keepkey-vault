@@ -116,12 +116,18 @@ fi
 
 # --- 2. All Mach-O in MacOS/ — WITH entitlements ---
 echo "  Signing MacOS/ binaries with entitlements..."
+# Libraries first: Electrobun 2.x's launcher links libNativeWrapper.dylib, and
+# codesign refuses a binary whose nested code is unsigned (CI's Intel app ships
+# them unsigned; arm64 only passed because Electrobun had signed them already).
 if [ -d "$MACOS_DIR" ]; then
-  for f in "$MACOS_DIR"/*; do
-    [ -f "$f" ] || continue
-    file -b "$f" 2>/dev/null | grep -q "Mach-O" || continue
-    echo "    $(basename "$f") (+ entitlements)"
-    sign_file "$f" --entitlements "$ENTITLEMENTS"
+  for pass in dylib exe; do
+    for f in "$MACOS_DIR"/*; do
+      [ -f "$f" ] || continue
+      case "$f" in *.dylib) [ "$pass" = dylib ] || continue ;; *) [ "$pass" = exe ] || continue ;; esac
+      file -b "$f" 2>/dev/null | grep -q "Mach-O" || continue
+      echo "    $(basename "$f") (+ entitlements)"
+      sign_file "$f" --entitlements "$ENTITLEMENTS"
+    done
   done
 fi
 
