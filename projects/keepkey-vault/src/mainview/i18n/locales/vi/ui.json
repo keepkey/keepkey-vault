@@ -141,5 +141,8 @@
   "m934a6f3d": "Chi phí đổi so sánh giá trị đầu vào và đầu ra trong báo giá, bao gồm tỷ giá và phí tuyến. Phí mạng nguồn được tính riêng. Số tiền nhận tối thiểu là giới hạn thực hiện, không phải khoản hoàn tiền được bảo đảm.",
   "m981df2e2": "Kiểm tra và phê duyệt trên KeepKey",
   "m53c7aeaa": "Tôi chấp nhận chi phí đổi ước tính {{cost}} và chênh lệch giá trị {{loss}} tại mức nhận tối thiểu. Phí mạng nguồn được tính riêng.",
-  "m310febeb": "Chi phí đổi cao: {{cost}}, chưa bao gồm phí mạng nguồn."
+  "m310febeb": "Chi phí đổi cao: {{cost}}, chưa bao gồm phí mạng nguồn.",
+  "m1ea76214": "Chưa gửi",
+  "m1e706c21": "Loại bỏ",
+  "mad64040d": "Desktop chưa từng thấy giao dịch đã ký này được phát đi. Hãy loại bỏ nếu nó chưa từng được gửi."
 }

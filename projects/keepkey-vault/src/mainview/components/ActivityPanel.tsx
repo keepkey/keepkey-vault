@@ -51,6 +51,7 @@ const TYPE_CONFIG: Record<string, { label: string; color: string }> = {
 const STATUS_CONFIG: Record<string, { label: string; color: string }> = {
   broadcast: { label: 'Broadcast', color: '#8be3c4' },
   signed: { label: 'Signed', color: '#e9c46a' },
+  not_sent: { label: 'Not sent', color: '#e08c7b' },
   completed: { label: 'Completed', color: '#8be3c4' },
   refunded: { label: 'Refunded', color: '#e9c46a' },
   failed: { label: 'Failed', color: '#e08c7b' },
@@ -86,6 +87,12 @@ function SwapStatusBadge({ status }: { status?: SwapTrackingStatus | string }) {
   )
 }
 
+
+/** A signed tx Desktop never saw broadcast (audit H15). */
+function NotSentBadge() {
+  const uiText = useUiTranslation()
+  return <Text fontSize="9px" color={STATUS_CONFIG.not_sent.color} fontWeight="600">{uiText("Not sent")}</Text>
+}
 
 /** Confirmation badge: red = unconfirmed, yellow = partial, green = confirmed */
 function ConfBadge({ confirmations, chain }: { confirmations?: number; chain: string }) {
@@ -323,7 +330,7 @@ export function TxDetailDialog({ detail, onClose, nativePrices }: { detail: TxDe
               {a.type === 'swap' && a.swapStatus ? (
                 <SwapStatusBadge status={a.swapStatus} />
               ) : (
-                <Box px="2" py="0.5" borderRadius="md" fontSize="xs" fontWeight="600" bg={`${statusConf.color}22`} color={statusConf.color}>{statusConf.label}</Box>
+                <Box px="2" py="0.5" borderRadius="md" fontSize="xs" fontWeight="600" bg={`${statusConf.color}22`} color={statusConf.color}>{uiText(statusConf.label)}</Box>
               )}
               {a.source === 'api' && <Box px="2" py="0.5" borderRadius="md" fontSize="xs" fontWeight="600" bg="rgba(130,71,229,0.15)" color="#8247E5">API</Box>}
             </HStack>
@@ -415,6 +422,15 @@ export function TxDetailDialog({ detail, onClose, nativePrices }: { detail: TxDe
 
             {/* Below the button, so it does not move when this loads. */}
             {a.txid && chainDef?.chainFamily === 'evm' && <TxDetailsSection networkId={chainDef.networkId} txid={a.txid} />}
+
+            {/* A signature Desktop never saw broadcast can be discarded; the audit log keeps it. */}
+            {a.type === 'sign' && a.source !== 'scan' && (a.status === 'signed' || a.status === 'not_sent') && (
+              <Flex mt="3" gap="3" align="center" justify="space-between">
+                <Text fontSize="10px" color="kk.textMuted">{uiText("Desktop never saw this signed transaction broadcast. Discard it if it was never sent.")}</Text>
+                <Text as="button" fontSize="xs" fontWeight="600" color={STATUS_CONFIG.not_sent.color} flexShrink={0}
+                  onClick={() => { rpcRequest('dismissActivity', { id: a.id }).then(onClose).catch(() => {}) }}>{uiText("Discard")}</Text>
+              </Flex>
+            )}
           </VStack>
         </Box>
       </Box>
@@ -576,7 +592,7 @@ export function ActivityRow({ activity, onSelect, nativePrices }: { activity: Re
         <VStack gap="0.5" align="flex-end" flexShrink={0}>
           {activity.type === 'swap' && activity.swapStatus ? (
             <SwapStatusBadge status={activity.swapStatus} />
-          ) : (
+          ) : activity.status === 'not_sent' ? <NotSentBadge /> : (
             <ConfBadge confirmations={activity.confirmations} chain={chainSymbol} />
           )}
           <Text fontSize="2xs" color="whiteAlpha.300">{timeAgo(activity.createdAt)}</Text>
@@ -640,7 +656,7 @@ export function ActivityTableRow({ activity, onSelect, nativePrices }: { activit
       <Box flexShrink={0} w="90px" display="flex" justifyContent="flex-end">
         {activity.type === 'swap' && activity.swapStatus ? (
           <SwapStatusBadge status={activity.swapStatus} />
-        ) : (
+        ) : activity.status === 'not_sent' ? <NotSentBadge /> : (
           <ConfBadge confirmations={activity.confirmations} chain={chainSymbol} />
         )}
       </Box>

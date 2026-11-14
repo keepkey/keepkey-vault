@@ -135,5 +135,8 @@
   "m934a6f3d": "Il costo dello scambio confronta i valori in entrata e in uscita del preventivo, inclusi il tasso e le commissioni del percorso. La commissione della rete di origine è separata. La ricezione minima è un limite di esecuzione, non un rimborso garantito.",
   "m981df2e2": "Controlla e approva su KeepKey",
   "m53c7aeaa": "Accetto il costo stimato dello scambio di {{cost}} e una differenza di valore di {{loss}} alla ricezione minima. La commissione della rete di origine è separata.",
-  "m310febeb": "Costo dello scambio elevato: {{cost}}, esclusa la commissione della rete di origine."
+  "m310febeb": "Costo dello scambio elevato: {{cost}}, esclusa la commissione della rete di origine.",
+  "m1ea76214": "Non inviata",
+  "m1e706c21": "Scarta",
+  "mad64040d": "Desktop non ha mai visto trasmettere questa transazione firmata. Scartala se non è mai stata inviata."
 }

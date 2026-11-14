@@ -2327,5 +2327,8 @@
   "m310febeb": "High swap cost: {{cost}}, excluding the source network fee.",
   "m2541ef4d": "Unable to unlock KeepKey",
   "m9ad5be83": "KeepKey locked",
-  "m16909797": "Unlocking…"
+  "m16909797": "Unlocking…",
+  "m1ea76214": "Not sent",
+  "m1e706c21": "Discard",
+  "mad64040d": "Desktop never saw this signed transaction broadcast. Discard it if it was never sent."
 }

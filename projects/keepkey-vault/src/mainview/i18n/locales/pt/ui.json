@@ -137,5 +137,8 @@
   "m934a6f3d": "O custo da troca compara os valores cotados de entrada e saída, incluindo a taxa de câmbio e as taxas da rota. A taxa da rede de origem é separada. O recebimento mínimo é um limite de execução, não um reembolso garantido.",
   "m981df2e2": "Revise e aprove no KeepKey",
   "m53c7aeaa": "Aceito o custo estimado da troca de {{cost}} e uma diferença de valor de {{loss}} no recebimento mínimo. A taxa da rede de origem é separada.",
-  "m310febeb": "Custo da troca elevado: {{cost}}, sem incluir a taxa da rede de origem."
+  "m310febeb": "Custo da troca elevado: {{cost}}, sem incluir a taxa da rede de origem.",
+  "m1ea76214": "Não enviada",
+  "m1e706c21": "Descartar",
+  "mad64040d": "O Desktop nunca viu esta transação assinada ser transmitida. Descarte-a se ela nunca foi enviada."
 }

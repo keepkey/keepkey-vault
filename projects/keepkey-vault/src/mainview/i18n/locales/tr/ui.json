@@ -138,5 +138,8 @@
   "m934a6f3d": "Takas maliyeti, kur ve rota ücretleri dahil olmak üzere teklifteki giriş ve çıkış değerlerini karşılaştırır. Kaynak ağ ücreti ayrıdır. Alınacak asgari tutar bir yürütme sınırıdır; garantili bir geri ödeme değildir.",
   "m981df2e2": "KeepKey üzerinde inceleyip onaylayın",
   "m53c7aeaa": "{{cost}} tahmini takas maliyetini ve alınacak asgari tutarda {{loss}} değer farkını kabul ediyorum. Kaynak ağ ücreti ayrıdır.",
-  "m310febeb": "Yüksek takas maliyeti: {{cost}}, kaynak ağ ücreti hariç."
+  "m310febeb": "Yüksek takas maliyeti: {{cost}}, kaynak ağ ücreti hariç.",
+  "m1ea76214": "Gönderilmedi",
+  "m1e706c21": "Kaldır",
+  "mad64040d": "Desktop bu imzalı işlemin yayınlandığını hiç görmedi. Hiç gönderilmediyse kaldırın."
 }

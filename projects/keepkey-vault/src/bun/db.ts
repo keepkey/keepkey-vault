@@ -336,7 +336,7 @@ export function initDb() {
       try { db.exec(`ALTER TABLE custom_chains ADD COLUMN ${col}`) } catch { /* already exists */ }
     }
     // Activity tracking columns on api_log (sign/broadcast ops)
-    for (const col of ['txid TEXT', 'chain TEXT', 'activity_type TEXT', 'device_id TEXT', 'wallet_id TEXT']) {
+    for (const col of ['txid TEXT', 'chain TEXT', 'activity_type TEXT', 'device_id TEXT', 'wallet_id TEXT', 'dismissed INTEGER']) {
       try { db.exec(`ALTER TABLE api_log ADD COLUMN ${col}`) } catch { /* already exists */ }
     }
     try { db.exec(`ALTER TABLE swap_history ADD COLUMN device_id TEXT`) } catch { /* already exists */ }
@@ -2030,6 +2030,11 @@ const VALID_ACTIVITY_TYPES = new Set(['send', 'receive', 'swap', 'sign', 'messag
 // amount + recipient) and overlay only the on-chain truth the primary can't know
 // (confirmations / block height / counterparty) from the scan row.
 export function mergeTxRows(a: RecentActivity, b: RecentActivity): RecentActivity {
+  // A bare signature is superseded by any record of the broadcast itself.
+  if (isUnsentSignature(a) !== isUnsentSignature(b)) {
+    const [sent, signed] = isUnsentSignature(a) ? [b, a] : [a, b]
+    return { ...sent, appName: sent.appName ?? signed.appName }
+  }
   const primary = a.source !== 'scan' ? a : b.source !== 'scan' ? b : a
   const secondary = primary === a ? b : a
   // A REST broadcast logs no amount (the client sends only the raw tx). Then the
@@ -2047,13 +2052,39 @@ export function mergeTxRows(a: RecentActivity, b: RecentActivity): RecentActivit
   }
 }
 
+const isUnsentSignature = (a: RecentActivity) => a.status === 'signed' || a.status === 'not_sent'
+// Routes whose signature is a transaction to broadcast (not a message or typed data).
+const TX_SIGN_ROUTE = /\/sign-(transaction|transfer|operations|amino[\w-]*)$/
+/** A signed tx Desktop has not seen broadcast after this long is shown as "Not sent". */
+export const SIGNED_TX_EXPIRY_MS = 24 * 60 * 60 * 1000
+
+/** Hide an unsent signature from activity (audit H15). The api_log row stays
+ *  for the audit log; only sign-only rows of this wallet can be discarded. */
+export function dismissActivity(id: string, deviceId?: string, walletId?: string): boolean {
+  try {
+    if (!db || (!deviceId && !walletId)) return false
+    const scope = walletId ? 'wallet_id = ?' : 'device_id = ?'
+    const row = db.query(`SELECT txid FROM api_log WHERE id = ? AND ${scope} AND method <> 'SCAN' AND activity_type = 'sign'`)
+      .get(Number(id), walletId || deviceId!) as { txid: string | null } | null
+    if (!row) return false
+    // Signed, then broadcast: the broadcast is real activity, not a stale signature.
+    if (row.txid && db.query(`SELECT 1 FROM api_log WHERE txid = ? AND ${scope} AND (method = 'SCAN' OR activity_type <> 'sign') LIMIT 1`)
+      .get(row.txid, walletId || deviceId!)) return false
+    db.run('UPDATE api_log SET dismissed = 1 WHERE id = ?', [Number(id)])
+    return true
+  } catch (e: any) {
+    console.warn('[db] dismissActivity failed:', e.message)
+    return false
+  }
+}
+
 export function getRecentActivityFromLog(limit?: number, chainFilter?: string, deviceId?: string, walletId?: string): RecentActivity[] {
   try {
     if (!db) return []
 
     // Build query with optional chain filter
     let logSql = `SELECT id, device_id, wallet_id, txid, chain, activity_type, app_name, timestamp, route, method, response_body
-       FROM api_log WHERE activity_type IS NOT NULL`
+       FROM api_log WHERE activity_type IS NOT NULL AND dismissed IS NOT 1`
     const logParams: any[] = []
     if (walletId) {
       logSql += ` AND wallet_id = ?`
@@ -2098,7 +2129,8 @@ export function getRecentActivityFromLog(limit?: number, chainFilter?: string, d
         type: (VALID_ACTIVITY_TYPES.has(r.activity_type) ? (r.activity_type === 'broadcast' ? 'send' : r.activity_type) : 'sign') as ActivityType,
         source: isScan ? 'scan' : (r.method === 'RPC' ? 'app' : 'api') as ActivitySource,
         appName: r.method === 'RPC' ? undefined : (isScan ? undefined : r.app_name),
-        status: isScan ? 'broadcast' : (['broadcast', 'swap', 'shield', 'unshield'].includes(r.activity_type) ? 'broadcast' : 'signed'),
+        status: isScan ? 'broadcast' : (['broadcast', 'swap', 'shield', 'unshield'].includes(r.activity_type) ? 'broadcast'
+          : TX_SIGN_ROUTE.test(r.route) && Date.now() - r.timestamp > SIGNED_TX_EXPIRY_MS ? 'not_sent' : 'signed'),
         createdAt: r.timestamp,
         confirmations: meta?.confirmations ?? undefined,
         blockHeight: meta?.blockHeight ?? undefined,
