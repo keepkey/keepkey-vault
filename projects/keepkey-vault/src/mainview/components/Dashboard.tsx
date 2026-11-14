@@ -6,7 +6,7 @@ import { useTranslation } from "react-i18next"
 import { CHAINS, customChainToChainDef, isChainSupported, type ChainDef } from "../../shared/chains"
 import { isBitcoinOnlyVariant } from "../../shared/flags"
 import { balanceDisplayState } from "../../shared/balance-display-state"
-import { isLocalDeviceAccessError } from "../../shared/device-access-error"
+import { isLocalDeviceAccessError, retryWhileDeviceBusy } from "../../shared/device-access-error"
 import { versionCompare } from "../../shared/firmware-versions"
 import { formatBalance, hasNonZeroBalance } from "../lib/formatting"
 import { AnimatedUsd } from "./AnimatedUsd"
@@ -1311,7 +1311,7 @@ function PersonalDashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSetti
 	// forceRefresh=true bypasses Pioneer's balance cache — only pass it on explicit user action
 	// swapDestCaips: CAIP-19 ids of just-received swap outputs — forwarded so the
 	// backend can verify token balances directly while portfolio indexers catch up.
-	const refreshBalances = useCallback(async (forceRefresh = false, swapDestCaips: string[] = []) => {
+	const refreshBalances = useCallback(async (forceRefresh = false, swapDestCaips: string[] = [], userInitiated = false) => {
 		if (forceRefresh) void reloadVaultPortfolios(true)
 		// Watch-only: no device, so re-fetch from Pioneer using cached addresses.
 		if (watchOnly) {
@@ -1359,7 +1359,11 @@ function PersonalDashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSetti
 		setLoadingBalances(true)
 
 		try {
-			const result = await rpcRequest<ChainBalance[]>('getBalances', swapDestCaips.length ? { forceRefresh, swapDestCaips } : { forceRefresh }, 200000)
+			const params = { forceRefresh, ...(swapDestCaips.length ? { swapDestCaips } : {}), ...(userInitiated ? { userInitiated } : {}) }
+			const read = () => rpcRequest<ChainBalance[]>('getBalances', params, 200000)
+			// A pressed refresh really scans: it waits out a busy KeepKey quietly
+			// instead of returning at once with nothing new (owner rule: busy = wait).
+			const result = userInitiated ? await retryWhileDeviceBusy(read, () => gen === refreshGenRef.current) : await read()
 			if (result && gen === refreshGenRef.current) {
 				const tokenTotal = result.reduce((n, b) => n + (b.tokens?.length || 0), 0)
 				const balTotal = result.reduce((n, b) => n + (b.balanceUsd || 0), 0)
@@ -2432,7 +2436,7 @@ function PersonalDashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSetti
 							color: "white",
 							bg: "rgba(233,196,106,0.12)",
 						}}
-						onClick={loadingBalances ? undefined : () => refreshBalances(true)}
+						onClick={loadingBalances ? undefined : () => refreshBalances(true, [], true)}
 						css={isStale && !loadingBalances ? { animation: "pulseGold 2s ease-in-out infinite" } : undefined}
 					>
 						<Flex align="center" gap="1.5">
@@ -2463,30 +2467,29 @@ function PersonalDashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSetti
 					</Box>
 
 					{/* SSE stream status dot */}
-					{streamStatus !== null && (
+					{/* Only the live state is shown: polling is a normal fallback, not an alarm. */}
+					{streamStatus?.connected && (
 						<Flex
 							align="center"
 							gap="1"
 							px="2"
 							py="1"
 							borderRadius="full"
-							bg={streamStatus.connected ? "rgba(80,200,120,0.08)" : "rgba(255,100,100,0.08)"}
+							bg="rgba(80,200,120,0.08)"
 							border="1px solid"
-							borderColor={streamStatus.connected ? "rgba(80,200,120,0.22)" : "rgba(255,100,100,0.18)"}
-							title={streamStatus.connected
-								? `Live: watching ${streamStatus.watching} address${streamStatus.watching !== 1 ? 'es' : ''}`
-								: 'Event stream disconnected — using polling'}
+							borderColor="rgba(80,200,120,0.22)"
+							title={`Live: watching ${streamStatus.watching} address${streamStatus.watching !== 1 ? 'es' : ''}`}
 							cursor="default"
 							flexShrink={0}
 						>
 							<Box
 								w="6px" h="6px" borderRadius="full" flexShrink={0}
-								bg={streamStatus.connected ? "rgb(80,200,120)" : "rgb(200,80,80)"}
-								style={streamStatus.connected ? { animation: "pulseTeal 2s ease-in-out infinite" } : undefined}
+								bg="rgb(80,200,120)"
+								style={{ animation: "pulseTeal 2s ease-in-out infinite" }}
 							/>
 							<Text fontSize="9px" fontWeight="700" letterSpacing="0.04em"
-								color={streamStatus.connected ? "rgb(80,200,120)" : "rgb(200,80,80)"}>
-								{streamStatus.connected ? "LIVE" : "POLL"}
+								color="rgb(80,200,120)">
+								LIVE
 							</Text>
 						</Flex>
 					)}
@@ -2730,7 +2733,7 @@ function PersonalDashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSetti
 								_hover={{ color: "white" }}
 								onClick={() => {
 									clearPioneerError()
-									refreshBalances(true)
+									refreshBalances(true, [], true)
 								}}
 							>
 								{t("retry")}
@@ -2809,7 +2812,7 @@ function PersonalDashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSetti
 								borderRadius="md"
 								cursor="pointer"
 								_hover={{ bg: "rgba(34,197,94,0.35)" }}
-								onClick={() => refreshBalances(true)}
+								onClick={() => refreshBalances(true, [], true)}
 							>
 								{t("syncNow")}
 							</Box>
@@ -3394,7 +3397,7 @@ function PersonalDashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSetti
 						boxShadow: "0 0 24px rgba(233,196,106,0.5), 0 0 48px rgba(233,196,106,0.2)",
 					}}
 					_active={{ transform: "scale(0.98)", transition: "transform 0.1s" }}
-					onClick={() => refreshBalances(true)}
+					onClick={() => refreshBalances(true, [], true)}
 				>
 					<Flex align="center" justify="center" gap="3">
 						<Box

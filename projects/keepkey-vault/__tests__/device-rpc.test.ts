@@ -238,6 +238,19 @@ describe('passive read contention', () => {
     expect(observed).toEqual([false, true])
   })
 
+  test('a refresh the user pressed never answers from cache: busy waits, locked asks to unlock', async () => {
+    const f = fixture({ getBalances: async (_params?: unknown) => [{ chainId: 'bitcoin', balance: '1', syncState: 'confirmed' }] })
+    await f.rpc.getBalances({ forceRefresh: false })
+    await f.rpc.getBalances({ forceRefresh: true, userInitiated: true }) // a press that succeeded
+    f.state.busy = true
+    await expect(f.rpc.getBalances({ forceRefresh: true, userInitiated: true })).rejects.toThrow('KeepKey is busy')
+    f.state.busy = false
+    f.state.locked = true
+    await expect(f.rpc.getBalances({ forceRefresh: true, userInitiated: true })).rejects.toThrow('Unlock KeepKey to load this account')
+    // Polls keep the warm cache either way.
+    expect(await f.rpc.getBalances({ forceRefresh: true })).toEqual([{ chainId: 'bitcoin', balance: '1', syncState: 'stale' }])
+  })
+
   test('a forced refresh blocked by an ordinary poll returns the shared warm cache explicitly as stale', async () => {
     const normalResult = deferred<Array<{ chainId: string; balance: string; syncState: string }>>()
     const scope = { wallet: {}, epoch: 1, seed: 'standard' }
