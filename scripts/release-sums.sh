@@ -8,10 +8,22 @@
 # `make sign-release-intel` runs this; run it again after the Windows installer
 # is uploaded.
 #
-# usage: [DRY_RUN=1] scripts/release-sums.sh <tag> [owner/repo]
+# It uploads only into a draft. The one published-release use, adding the
+# Windows installer's line after publishing, needs ALLOW_PUBLISHED=1.
+#
+# usage: [DRY_RUN=1] [ALLOW_PUBLISHED=1] scripts/release-sums.sh <tag> [owner/repo]
 set -euo pipefail
 TAG=$1
 REPO=${2:-keepkey/keepkey-vault}
+
+# Drafts have no tag yet, so find the release by tag_name in the list.
+DRAFT=$(gh api "repos/$REPO/releases" --paginate --jq ".[] | select(.tag_name==\"$TAG\") | .draft")
+if [ "$DRAFT" != true ] && [ -z "${DRY_RUN:-}" ] && [ -z "${ALLOW_PUBLISHED:-}" ]; then
+  echo "ERROR: $TAG on $REPO is missing or not a draft; refusing to replace its checksum files."
+  echo "If the release is published and only the Windows installer was added, rerun with ALLOW_PUBLISHED=1."
+  exit 1
+fi
+
 WORK=$(mktemp -d)
 trap 'rm -rf "$WORK"' EXIT
 

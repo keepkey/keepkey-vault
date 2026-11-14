@@ -71,7 +71,9 @@ jobs:
         uses: actions/cache@v4
         with:
           path: electrobun-devkit-${{ matrix.platform }}.tar.gz
-          key: electrobun-devkit-${{ matrix.platform }}-${{ steps.pin.outputs.sha }}-macos${{ env.MACOS_DEPLOYMENT_TARGET }}-${{ hashFiles('scripts/build-electrobun-macos-helpers.sh', 'scripts/verify-electrobun-devkit.mjs', '.github/actions/install-hutch/action.yml') }}
+          # The recipes are part of the key: the macOS one is the Makefile's devkit
+          # stamp rule, the Linux one is inline below (with the toolchain env).
+          key: electrobun-devkit-${{ matrix.platform }}-${{ matrix.runner }}-${{ steps.pin.outputs.sha }}-macos${{ env.MACOS_DEPLOYMENT_TARGET }}-${{ hashFiles('Makefile', '.github/workflows/build.yml', 'scripts/build-electrobun-macos-helpers.sh', 'scripts/verify-electrobun-devkit.mjs', '.github/actions/install-hutch/action.yml') }}
 
       - if: steps.cache.outputs.cache-hit != 'true'
         uses: actions/setup-node@v4
@@ -92,6 +94,7 @@ jobs:
         run: |
           set -euo pipefail
           make electrobun-macos-helpers electrobun-devkit MACOS_DEPLOYMENT_TARGET="$MACOS_DEPLOYMENT_TARGET"
+          node scripts/verify-electrobun-devkit.mjs --release modules/electrobun/package/dist
           # Vault bundles neither CEF nor WGPU.
           tar czf "electrobun-devkit-${{ matrix.platform }}.tar.gz" -C modules/electrobun/package/dist --exclude ./cef .
 
@@ -114,7 +117,11 @@ jobs:
           # The fork's release packaging: build.ts --release --core-only, then its
           # ELF/manifest verifiers; writes electrobun-core-linux-x64.tar.gz (no CEF).
           node scripts/package-release.js
-          mv electrobun-core-linux-x64.tar.gz "$GITHUB_WORKSPACE/electrobun-devkit-${{ matrix.platform }}.tar.gz"
+          # Record the fork commit it was built from, as make electrobun-devkit does.
+          mkdir "$RUNNER_TEMP/linux-devkit"
+          tar xzf electrobun-core-linux-x64.tar.gz -C "$RUNNER_TEMP/linux-devkit"
+          node "$GITHUB_WORKSPACE/scripts/verify-electrobun-devkit.mjs" --record --release "$RUNNER_TEMP/linux-devkit"
+          tar czf "$GITHUB_WORKSPACE/electrobun-devkit-${{ matrix.platform }}.tar.gz" -C "$RUNNER_TEMP/linux-devkit" .
 
       - name: Verify devkit
         shell: bash

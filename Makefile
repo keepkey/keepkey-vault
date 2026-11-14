@@ -19,11 +19,13 @@ ZCASH_CLI_STAMP := $(STAMP_DIR)/zcash-cli.stamp
 # HUTCH_ELECTROBUN_DEVKIT_ROOT makes Hutch use it instead of downloading upstream's.
 # CI builds the devkit in its own job (Linux on ubuntu-22.04) and passes it in:
 #   make install ELECTROBUN_DEVKIT_PREBUILT=1 HUTCH_ELECTROBUN_DEVKIT_ROOT=/abs/devkit
-# The devkit is rebuilt whenever the fork commit, the macOS floor or that mode changes.
+# Without PREBUILT the root must be the devkit built here; release builds refuse PREBUILT.
+# The devkit is rebuilt whenever the fork commit, the macOS floor, that mode or the root changes.
+ELECTROBUN_DEVKIT_BUILT := $(abspath modules/electrobun/package/dist)
 ELECTROBUN_DEVKIT_STAMP := $(STAMP_DIR)/electrobun-devkit.stamp
 ELECTROBUN_DEVKIT_KEYFILE := $(STAMP_DIR)/electrobun-devkit.key
-ELECTROBUN_DEVKIT_KEY = release macos=$(MACOS_DEPLOYMENT_TARGET) fork=$(shell git -C modules/electrobun rev-parse HEAD 2>/dev/null) prebuilt=$(ELECTROBUN_DEVKIT_PREBUILT)
-HUTCH_ELECTROBUN_DEVKIT_ROOT ?= $(abspath modules/electrobun/package/dist)
+ELECTROBUN_DEVKIT_KEY = release macos=$(MACOS_DEPLOYMENT_TARGET) fork=$(shell git -C modules/electrobun rev-parse HEAD 2>/dev/null) prebuilt=$(ELECTROBUN_DEVKIT_PREBUILT) root=$(HUTCH_ELECTROBUN_DEVKIT_ROOT)
+HUTCH_ELECTROBUN_DEVKIT_ROOT ?= $(ELECTROBUN_DEVKIT_BUILT)
 export HUTCH_ELECTROBUN_DEVKIT_ROOT
 export PATH := $(HOME)/.hutch/bin:$(PATH)
 # Hutch's per-platform names: artifacts/stable-<os>-<arch>-keepkey-vault.app.tar.zst
@@ -36,7 +38,7 @@ include .env
 export ELECTROBUN_DEVELOPER_ID ELECTROBUN_TEAMID ELECTROBUN_APPLEID ELECTROBUN_APPLEIDPASS
 endif
 
-.PHONY: FORCE electrobun-devkit electrobun-macos-helpers verify-bundle release-sums monero-cli monero-emulator monero-emulator-signing monero-adapter firmware-token-table-717 clearsign-worker-test sync-asset-data clearsign-worker-rehearsal-guard clearsign-worker-rehearsal-deploy install dev dev-hmr build build-stable build-canary build-signed dmg clean help vault sign-check notary-check verify verify-entitlements publish release upload-dmg upload-all-dmgs sign-release sign-release-intel verify-arch audit-macos-bundle submodules modules-install modules-build device-protocol-build modules-clean audit build-zcash-cli build-zcash-cli-debug build-zcash-cli-intel test test-unit test-rest test-sign-gating test-zcash-cli test-emu test-emu-erc7730 test-emu-erc7730-717 test-emu-solana-lut test-emu-erc7730-typed test-emu-pin build-intel build-signed-intel preflight build-emulator build-emulator-windows build-emulator-macos-release build-emulator-release clean-emulator test-emu-python i18n-extract i18n-sync i18n-baseline test-i18n
+.PHONY: FORCE electrobun-devkit electrobun-macos-helpers release-devkit-guard verify-bundle release-sums monero-cli monero-emulator monero-emulator-signing monero-adapter firmware-token-table-717 clearsign-worker-test sync-asset-data clearsign-worker-rehearsal-guard clearsign-worker-rehearsal-deploy install dev dev-hmr build build-stable build-canary build-signed dmg clean help vault sign-check notary-check verify verify-entitlements publish release upload-dmg upload-all-dmgs sign-release sign-release-intel verify-arch audit-macos-bundle submodules modules-install modules-build device-protocol-build modules-clean audit build-zcash-cli build-zcash-cli-debug build-zcash-cli-intel test test-unit test-rest test-sign-gating test-zcash-cli test-emu test-emu-erc7730 test-emu-erc7730-717 test-emu-solana-lut test-emu-erc7730-typed test-emu-pin build-intel build-signed-intel preflight build-emulator build-emulator-windows build-emulator-macos-release build-emulator-release clean-emulator test-emu-python i18n-extract i18n-sync i18n-baseline test-i18n
 
 # --- Submodules (auto-init on fresh worktrees/clones) ---
 
@@ -229,11 +231,17 @@ $(ELECTROBUN_DEVKIT_KEYFILE): FORCE | $(STAMP_DIR)
 
 $(ELECTROBUN_DEVKIT_STAMP): $(SUBMODULES_STAMP) $(ELECTROBUN_DEVKIT_KEYFILE) | $(STAMP_DIR)
 ifndef ELECTROBUN_DEVKIT_PREBUILT
+	@# A root left exported in the shell would make Hutch pack some other devkit.
+	@test "$(HUTCH_ELECTROBUN_DEVKIT_ROOT)" = "$(ELECTROBUN_DEVKIT_BUILT)" || { \
+		echo "ERROR: HUTCH_ELECTROBUN_DEVKIT_ROOT=$(HUTCH_ELECTROBUN_DEVKIT_ROOT), but this builds the devkit into"; \
+		echo "  $(ELECTROBUN_DEVKIT_BUILT). Unset it, or pass ELECTROBUN_DEVKIT_PREBUILT=1 to use a devkit built elsewhere."; exit 1; }
 	@command -v hutch >/dev/null || (echo "ERROR: Hutch not installed (~/.hutch/bin/hutch). See modules/electrobun docs/guides/hutch."; exit 1)
 	cd modules/electrobun/package && hutch run install && \
 		ELECTROBUN_MACOS_DEPLOYMENT_TARGET=$(MACOS_DEPLOYMENT_TARGET) hutch run build:release
-endif
+	node scripts/verify-electrobun-devkit.mjs --record "$(HUTCH_ELECTROBUN_DEVKIT_ROOT)"
+else
 	node scripts/verify-electrobun-devkit.mjs "$(HUTCH_ELECTROBUN_DEVKIT_ROOT)"
+endif
 	@touch $@
 
 electrobun-devkit: $(ELECTROBUN_DEVKIT_STAMP)
@@ -243,6 +251,12 @@ electrobun-devkit: $(ELECTROBUN_DEVKIT_STAMP)
 electrobun-macos-helpers: $(SUBMODULES_STAMP)
 	./scripts/build-electrobun-macos-helpers.sh $(MACOS_DEPLOYMENT_TARGET)
 	@rm -f $(ELECTROBUN_DEVKIT_STAMP)
+
+# Release builds pack only the devkit built here from the pinned fork.
+release-devkit-guard:
+	@test -z "$(ELECTROBUN_DEVKIT_PREBUILT)" || { echo "ERROR: release builds build their own devkit; unset ELECTROBUN_DEVKIT_PREBUILT."; exit 1; }
+	@test "$(HUTCH_ELECTROBUN_DEVKIT_ROOT)" = "$(ELECTROBUN_DEVKIT_BUILT)" || { \
+		echo "ERROR: HUTCH_ELECTROBUN_DEVKIT_ROOT=$(HUTCH_ELECTROBUN_DEVKIT_ROOT); release builds use only $(ELECTROBUN_DEVKIT_BUILT). Unset it."; exit 1; }
 
 FORCE:
 
@@ -310,11 +324,13 @@ verify-bundle:
 #    breaking every Cosmos tx with "createFeegrantAminoConverters is not a function".)
 #    Clearing the stamps forces modules-build from the pinned source before the vault install copies it.
 # Nothing rewrites the archive after Hutch packs it: its update-v2.json pins the tar bytes.
-build-signed: notary-check
+build-signed: notary-check release-devkit-guard
 	@rm -f $(ZCASH_CLI_STAMP) $(PROTO_BUILD_STAMP) $(HDWALLET_BUILD_STAMP) $(DEVICE_PROTOCOL_BUILD_STAMP)
 	@node scripts/verify-certified-emulator.mjs
 	$(MAKE) electrobun-macos-helpers
 	$(MAKE) build-stable audit
+	@# The devkit Hutch packed: the pinned fork commit, built from a clean tree.
+	node scripts/verify-electrobun-devkit.mjs --release "$(HUTCH_ELECTROBUN_DEVKIT_ROOT)"
 	$(MAKE) verify-bundle VERIFY_SIGNED=1
 	$(MAKE) dmg
 	@echo ""
@@ -324,14 +340,19 @@ build-signed: notary-check
 
 # Create the DMG from the fully extracted app (installs to /Applications as a
 # plain app; full updates go through its bundled Resources/uninstall manager).
-dmg: verify-arch
+dmg: verify-arch release-devkit-guard
 	@echo "Creating DMG from tar.zst artifact..."
 	@# set -e: a failed sign, verify, notarize or staple step must stop the recipe.
+	@# The DMG is built in a temp dir and reaches artifacts/ only once stapled, so a
+	@# failed notarization never leaves a signed-but-unnotarized DMG to upload.
 	@set -e; \
 	TAR_ZST=$(PROJECT_DIR)/artifacts/stable-macos-$(ELECTROBUN_ARCH)-keepkey-vault.app.tar.zst; \
 	if [ ! -f "$$TAR_ZST" ]; then echo "ERROR: $$TAR_ZST not found"; exit 1; fi; \
+	DMG_FINAL="$$(pwd)/$(PROJECT_DIR)/artifacts/$(DMG_NAME)"; \
+	rm -f "$$DMG_FINAL"; \
 	STAGING=$$(mktemp -d); \
-	trap 'rm -rf "$$STAGING"' EXIT; \
+	DMG_DIR=$$(mktemp -d); \
+	trap 'rm -rf "$$STAGING" "$$DMG_DIR"' EXIT; \
 	echo "Extracting app from $$TAR_ZST..."; \
 	zstd -d "$$TAR_ZST" -o "$$STAGING/app.tar" --force; \
 	tar xf "$$STAGING/app.tar" -C "$$STAGING/"; \
@@ -341,7 +362,7 @@ dmg: verify-arch
 	echo "Verifying extracted app..."; \
 	./scripts/audit-macos-bundle.sh "$$APP" "$(ARCH)" "$(MACOS_DEPLOYMENT_TARGET)"; \
 	codesign --verify --deep --strict "$$APP" || { echo "ERROR: codesign verification failed"; exit 1; }; \
-	DMG_OUT="$$(pwd)/$(PROJECT_DIR)/artifacts/$(DMG_NAME)"; \
+	DMG_OUT="$$DMG_DIR/$(DMG_NAME)"; \
 	echo "Creating DMG..."; \
 	./scripts/create-macos-dmg.sh "$$STAGING" "$$DMG_OUT" || exit 1; \
 	echo "Signing DMG..."; \
@@ -357,7 +378,8 @@ dmg: verify-arch
 	xcrun stapler validate "$$DMG_OUT"; \
 	codesign --verify --verbose=2 "$$DMG_OUT"; \
 	spctl --assess --type open --context context:primary-signature --verbose=4 "$$DMG_OUT"; \
-	echo "DMG ready: $$DMG_OUT"
+	mv "$$DMG_OUT" "$$DMG_FINAL"; \
+	echo "DMG ready: $$DMG_FINAL"
 
 # 7.17's token table (src/bun/firmware-token-table-717.json), generated the way
 # fork alpha's lib/firmware/CMakeLists.txt builds it. FW_SRC = a keepkey-firmware
@@ -419,6 +441,7 @@ test-i18n:
 
 test-unit:
 	cd $(PROJECT_DIR) && bun test __tests__/build-electrobun.test.ts
+	cd $(PROJECT_DIR) && bun test __tests__/electrobun-fixes.test.ts
 	cd $(PROJECT_DIR) && bun test __tests__/hyperliquid-identity.test.ts
 	cd $(PROJECT_DIR) && bun test __tests__/receive-payment-uri.test.ts
 	cd $(PROJECT_DIR) && bun test __tests__/swap-row-explorer.test.ts
@@ -768,19 +791,27 @@ publish:
 	@echo "Artifacts:"
 	@ls -lh $(PROJECT_DIR)/artifacts/$(DMG_NAME) 2>/dev/null || echo "No DMG found. Run 'make build-signed' first."
 
+# Uploads replace assets (--clobber), so they only ever go into a draft release.
+# A published release keeps the bytes (and SHA256SUMS) users already have.
+REQUIRE_DRAFT = @test "$$(gh release view v$(VERSION) --repo $(GITHUB_REPO) --json isDraft --jq .isDraft 2>/dev/null)" = true || \
+	{ echo "ERROR: no draft release v$(VERSION) on $(GITHUB_REPO) (missing, or already published)."; \
+	  echo "Push to a release/* branch or v* tag for CI to create the draft, or run 'make release'."; exit 1; }
+
 # Upload signed macOS DMG to existing CI-created draft release
 upload-dmg: sign-check
 	@echo "Uploading signed DMG to draft release v$(VERSION)..."
 	@test -f $(PROJECT_DIR)/artifacts/$(DMG_NAME) || (echo "ERROR: DMG not found. Run 'make build-signed' first." && exit 1)
 	@echo "Checking for existing draft release v$(VERSION)..."
-	@gh release view v$(VERSION) --repo $(GITHUB_REPO) >/dev/null 2>&1 || \
-		(echo "ERROR: No release v$(VERSION) found. Wait for CI to create the draft, or run 'make release' to create one." && exit 1)
+	$(REQUIRE_DRAFT)
+	@# Nothing is uploaded until all of it checks out: the archive and both
+	@# manifests agree (update-v2.json pins the tar bytes), and the DMG is
+	@# notarized, stapled and carries the same app as the archive.
+	cd $(PROJECT_DIR) && bun scripts/verify-release-bundle.ts stable --signed
+	./scripts/verify-macos-dmg.sh $(PROJECT_DIR)/artifacts/$(DMG_NAME) $(PROJECT_DIR)/artifacts/stable-macos-$(ELECTROBUN_ARCH)-keepkey-vault.app.tar.zst
 	gh release upload v$(VERSION) \
 		--repo $(GITHUB_REPO) \
 		--clobber \
 		$(PROJECT_DIR)/artifacts/$(DMG_NAME)
-	@# The archive and both manifests go together: update-v2.json pins the tar bytes.
-	cd $(PROJECT_DIR) && bun scripts/verify-release-bundle.ts stable --signed
 	gh release upload v$(VERSION) --repo $(GITHUB_REPO) --clobber $(MACOS_UPDATE_FILES)
 	@echo "DMG uploaded to https://github.com/$(GITHUB_REPO)/releases/tag/v$(VERSION)"
 
@@ -809,10 +840,7 @@ release: sign-check build-signed
 sign-release: notary-check
 	@echo "=== Signing macOS release v$(VERSION) ==="
 	@# Verify draft release exists before doing any work
-	@gh release view v$(VERSION) --repo $(GITHUB_REPO) >/dev/null 2>&1 || \
-		(echo "ERROR: No release v$(VERSION) found." && \
-		 echo "Create one by pushing to a release/* branch or v* tag, or run:" && \
-		 echo "  gh workflow run build.yml --repo $(GITHUB_REPO)" && exit 1)
+	$(REQUIRE_DRAFT)
 	@# Clean stale artifacts from previous runs to prevent uploading old files
 	@rm -f $(PROJECT_DIR)/artifacts/KeepKey-Vault-$(VERSION)-*.dmg
 	@rm -f $(PROJECT_DIR)/artifacts/stable-macos-*-keepkey-vault.app.tar.zst
@@ -883,8 +911,7 @@ sign-release: notary-check
 # Usage: make sign-release-intel
 sign-release-intel: notary-check
 	@echo "=== Signing macOS Intel release v$(VERSION) ==="
-	@gh release view v$(VERSION) --repo $(GITHUB_REPO) >/dev/null 2>&1 || \
-		(echo "ERROR: No release v$(VERSION) found." && exit 1)
+	$(REQUIRE_DRAFT)
 	@# Clean stale x64 artifacts only (preserve arm64 from local build-signed)
 	@rm -f $(PROJECT_DIR)/artifacts/KeepKey-Vault-$(VERSION)-x86_64.dmg
 	@rm -f $(PROJECT_DIR)/artifacts/stable-macos-x64-keepkey-vault.app.tar.zst
@@ -1007,6 +1034,7 @@ verify-entitlements:
 # Upload all signed DMGs to the draft release
 upload-all-dmgs: sign-check
 	@echo "Uploading all signed DMGs for v$(VERSION)..."
+	$(REQUIRE_DRAFT)
 	@FOUND=0; \
 	for DMG in $(PROJECT_DIR)/artifacts/KeepKey-Vault-$(VERSION)-*.dmg; do \
 		[ -f "$$DMG" ] || continue; \

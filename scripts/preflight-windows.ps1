@@ -194,15 +194,17 @@ if ($bunExe) {
     Write-Host "         winget install Oven-sh.Bun" -ForegroundColor DarkGray
 }
 
-# Hutch (Electrobun 2.x toolchain)
+# Hutch (Electrobun 2.x toolchain): the pinned build, byte for byte
+. (Join-Path $PSScriptRoot "hutch-windows.ps1")
+$hutchProblem = Test-PinnedHutch
 $hutchExe = (Get-Command hutch -ErrorAction SilentlyContinue).Source
-if (-not $hutchExe -and (Test-Path "$HOME\.hutch\bin\hutch.exe")) { $hutchExe = "$HOME\.hutch\bin\hutch.exe" }
-if ($hutchExe) {
-    $hutchVer = (& $hutchExe --version 2>&1 | Out-String).Trim()
-    if ($hutchVer -match '0\.29\.0') { Pass "Hutch: $hutchVer (at $hutchExe)" } else { Fail "Hutch $hutchVer at $hutchExe (hutch.config.ts pins 0.29.0)" }
+if ($hutchProblem) {
+    Fail "Hutch: $hutchProblem"
+    Write-Host "         powershell -ExecutionPolicy Bypass -File scripts\hutch-windows.ps1 -Install" -ForegroundColor DarkGray
+} elseif ($hutchExe -and ((Resolve-Path $hutchExe).Path -ne (Resolve-Path (Join-Path $HutchHome "bin\hutch.exe")).Path)) {
+    Fail "Hutch on PATH is $hutchExe, not the pinned $HutchHome\bin\hutch.exe"
 } else {
-    Fail "Hutch not found (Electrobun 2.x builds through it)"
-    Write-Host "         irm https://hutch.blackboard.sh/hutch/install.ps1 | iex   (then pin 0.29.0)" -ForegroundColor DarkGray
+    Pass "Hutch: $HutchVersion ($HutchRevision) at $HutchHome\bin\hutch.exe"
 }
 
 # Visual Studio C++ build tools (the Electrobun devkit build compiles native code with MSVC)

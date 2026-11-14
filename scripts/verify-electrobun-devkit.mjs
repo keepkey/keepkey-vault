@@ -1,15 +1,32 @@
 #!/usr/bin/env node
 // Refuse an Electrobun devkit that is not our fork's pinned version for this host,
-// before Hutch is pointed at it (HUTCH_ELECTROBUN_DEVKIT_ROOT).
-// Usage: node scripts/verify-electrobun-devkit.mjs <devkit-dir>
-import { existsSync, readFileSync } from "node:fs";
+// before Hutch is pointed at it (HUTCH_ELECTROBUN_DEVKIT_ROOT). native-devkit.json
+// carries only a version string, so the build that made the devkit records the
+// fork commit next to it, and this must equal the modules/electrobun pin.
+// Usage: node scripts/verify-electrobun-devkit.mjs [--record] [--release] <devkit-dir>
+//   --record   write the record from modules/electrobun (run right after building)
+//   --release  also refuse a devkit built from a fork tree with local changes
+import { execFileSync } from "node:child_process";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 
-const root = process.argv[2];
-if (!root) throw new Error("usage: verify-electrobun-devkit.mjs <devkit-dir>");
+const args = process.argv.slice(2);
+const root = args.find((a) => !a.startsWith("--"));
+if (!root) throw new Error("usage: verify-electrobun-devkit.mjs [--record] [--release] <devkit-dir>");
 const manifestPath = join(root, "native-devkit.json");
 if (!existsSync(manifestPath)) throw new Error(`${manifestPath} missing: no Electrobun devkit at ${root}`);
 const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+
+const fork = fileURLToPath(new URL("../modules/electrobun", import.meta.url));
+const git = (...a) => execFileSync("git", ["-C", fork, ...a], { encoding: "utf8" }).trim();
+const pin = git("rev-parse", "HEAD");
+const sourcePath = join(root, "keepkey-devkit-source.json");
+if (args.includes("--record")) {
+	const changes = git("status", "--porcelain");
+	writeFileSync(sourcePath, `${JSON.stringify({ commit: pin, dirty: changes !== "", changes: changes ? changes.split("\n") : [] }, null, "\t")}\n`);
+}
+const source = existsSync(sourcePath) ? JSON.parse(readFileSync(sourcePath, "utf8")) : null;
 
 const hutchConfig = readFileSync(new URL("../projects/keepkey-vault/hutch.config.ts", import.meta.url), "utf8");
 const pinned = hutchConfig.match(/electrobun:\s*\{\s*version:\s*"([^"]+)"/)?.[1];
@@ -27,8 +44,15 @@ for (const [key, file] of Object.entries(manifest.layout?.runtime ?? {})) {
 	if (key.startsWith("wgpu") || key === "nativeWrapperCef") continue;
 	for (const f of [file].flat()) if (!existsSync(join(root, f))) problems.push(`runtime.${key} ${f} missing`);
 }
+if (!source) problems.push(`${sourcePath} missing: no record of the fork commit this devkit was built from`);
+else {
+	if (source.commit !== pin) problems.push(`built from fork ${source.commit}, modules/electrobun is pinned at ${pin}`);
+	if (source.dirty && args.includes("--release")) {
+		problems.push(`built from a fork tree with local changes:\n    ${source.changes.join("\n    ")}`);
+	}
+}
 if (problems.length) {
 	console.error(`ERROR: Electrobun devkit at ${root} is unusable:\n  ${problems.join("\n  ")}`);
 	process.exit(1);
 }
-console.log(`Electrobun devkit ${pinned} ${os}-${process.arch} at ${root}`);
+console.log(`Electrobun devkit ${pinned} ${os}-${process.arch} fork ${pin}${source.dirty ? " (local changes)" : ""} at ${root}`);

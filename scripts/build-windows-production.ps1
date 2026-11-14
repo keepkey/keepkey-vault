@@ -358,7 +358,16 @@ Assert-Command "bun"
 Assert-Command "yarn"
 Assert-Command "node"
 Assert-Command "hutch"
-Write-Success "Build tools available (git, bun, yarn, node, hutch)"
+# Hutch builds the devkit and packs the app that gets signed: only the pinned build.
+. (Join-Path $PSScriptRoot "hutch-windows.ps1")
+$hutchProblem = Test-PinnedHutch
+if ($hutchProblem) {
+    throw "Hutch: $hutchProblem. Install the pinned build: powershell -ExecutionPolicy Bypass -File scripts\hutch-windows.ps1 -Install"
+}
+if ((Resolve-Path (Get-Command hutch).Source).Path -ne (Resolve-Path (Join-Path $HutchHome "bin\hutch.exe")).Path) {
+    throw "Hutch on PATH is $((Get-Command hutch).Source), not the pinned $HutchHome\bin\hutch.exe"
+}
+Write-Success "Build tools available (git, bun, yarn, node, hutch $HutchVersion pinned)"
 
 if (-not $SkipBuild) {
     if (-not (Test-Path $EmulatorDllSource)) {
@@ -411,6 +420,8 @@ if (-not $SkipBuild) {
     # same release flavour the Makefile builds. Hutch packs it into the app via
     # HUTCH_ELECTROBUN_DEVKIT_ROOT. A devkit built elsewhere for win-x64 can be
     # supplied by setting HUTCH_ELECTROBUN_DEVKIT_ROOT before running this script.
+    # Either way the devkit must record the pinned fork commit, built from a clean tree.
+    $devkitRecord = @()
     if (-not $env:HUTCH_ELECTROBUN_DEVKIT_ROOT) {
         Write-Step "Building Electrobun devkit (modules/electrobun)"
         Push-Location (Join-Path $RepoRoot "modules\electrobun\package")
@@ -420,8 +431,9 @@ if (-not $SkipBuild) {
         if ($LASTEXITCODE -ne 0) { throw "Electrobun devkit build failed (exit $LASTEXITCODE)" }
         Pop-Location
         $env:HUTCH_ELECTROBUN_DEVKIT_ROOT = Join-Path $RepoRoot "modules\electrobun\package\dist"
+        $devkitRecord = @("--record")
     }
-    node (Join-Path $RepoRoot "scripts\verify-electrobun-devkit.mjs") $env:HUTCH_ELECTROBUN_DEVKIT_ROOT
+    node (Join-Path $RepoRoot "scripts\verify-electrobun-devkit.mjs") @devkitRecord --release $env:HUTCH_ELECTROBUN_DEVKIT_ROOT
     if ($LASTEXITCODE -ne 0) { throw "Electrobun devkit at $env:HUTCH_ELECTROBUN_DEVKIT_ROOT is not the pinned win-x64 build" }
 
     Write-Step "Checking device-protocol (protobuf lib)"
@@ -638,6 +650,9 @@ if (-not (Test-Path $ExtModulesDir)) {
 if (-not (Test-Path $BundledEmulatorDll)) {
     throw "Release gate failed: Electrobun did not bundle the 7.17 emulator at $BundledEmulatorDll"
 }
+# The RPC and preload fixes live only in our Electrobun fork; 1.x refused to package without them.
+bun (Join-Path $ProjectDir "scripts\electrobun-fixes.ts") (Join-Path $BuildDir "Resources")
+if ($LASTEXITCODE -ne 0) { throw "Release gate failed: the app lacks the Electrobun fork's RPC/preload fixes" }
 if (-not $SkipBuild) {
     $sourceHash = (Get-FileHash $EmulatorDllSource -Algorithm SHA256).Hash
     $bundleHash = (Get-FileHash $BundledEmulatorDll -Algorithm SHA256).Hash

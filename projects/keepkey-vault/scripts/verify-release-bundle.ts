@@ -13,6 +13,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import pkg from '../package.json'
 import { CAMERA_REASON, cameraUsageDescription, pruneAppNodeModules } from './app-bundle'
+import { electrobunFixProblems } from './electrobun-fixes'
 
 const args = process.argv.slice(2)
 const channel = args.find(a => !a.startsWith('--')) ?? 'stable'
@@ -66,9 +67,18 @@ try {
     fail(`unexpected delta patch ${stray}: Vault does not publish patches (release.generatePatch is false)`)
   }
 
+  if (run(['tar', 'xf', tar, '-C', work]).code !== 0) throw new Error('tar could not extract the archive')
+  rmSync(tar)
+
+  // Every OS: the RPC and preload fixes live only in our Electrobun fork.
+  const backend = [...new Bun.Glob('**/Resources/app/bun/index.js').scanSync({ cwd: work, onlyFiles: true })][0]
+  if (!backend) fail('archive has no Resources/app/bun/index.js')
+  else {
+    const fixProblems = electrobunFixProblems(join(work, backend, '..', '..', '..'))
+    fixProblems.length === 0 ? ok('Electrobun fork fixes (RPC non-Error reply, preload crypto.subtle wait)') : fixProblems.forEach(fail)
+  }
+
   if (os === 'macos') {
-    if (run(['tar', 'xf', tar, '-C', work]).code !== 0) throw new Error('tar could not extract the archive')
-    rmSync(tar)
     const app = join(work, bundleName)
     if (!existsSync(app)) throw new Error(`archive has no ${bundleName}`)
     const resources = join(app, 'Contents', 'Resources')
