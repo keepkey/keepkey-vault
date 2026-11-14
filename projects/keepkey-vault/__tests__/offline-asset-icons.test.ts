@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import { readFile, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import manifestJson from '../src/shared/offlineAssetIcons.json'
-import { BASE_NATIVE_CAIP, caipToIcon, getAssetIcon, isBundledAssetIcon } from '../src/shared/assetLookup'
+import { BASE_NATIVE_CAIP, ICON_CAIP_ALIASES, caipToIcon, getAssetIcon, isBundledAssetIcon } from '../src/shared/assetLookup'
 
 const manifest = manifestJson as Record<string, string>
 const iconDir = join(import.meta.dir, '../src/mainview/public/assets/token-icons')
@@ -26,6 +26,13 @@ describe('offline asset icon pack', () => {
     expect(base).not.toBe(ethereum)
     expect(caipToIcon(BASE_NATIVE_CAIP)).toBe(base)
     expect(decodeURIComponent(base)).toContain('#0000ff')
+  })
+
+  test('HyperEVM (eip155:999) has a bundled icon; the CDN only stores it under 2868', () => {
+    const hype = 'eip155:999/slip44:60'
+    expect(manifest[hype]).toBeTruthy()
+    expect(isBundledAssetIcon(caipToIcon(hype))).toBe(true)
+    expect(ICON_CAIP_ALIASES[hype]).toBe('eip155:2868/slip44:60')
   })
 
   test('every manifest target is a bounded raster file', async () => {
