@@ -426,7 +426,7 @@ export function TxDetailDialog({ detail, onClose, nativePrices }: { detail: TxDe
             {a.txid && chainDef?.chainFamily === 'evm' && <TxDetailsSection networkId={chainDef.networkId} txid={a.txid} />}
 
             {/* A signature Desktop never saw broadcast can be discarded; the audit log keeps it. */}
-            {a.type === 'sign' && a.source !== 'scan' && (a.status === 'signed' || a.status === 'not_sent') && (
+            {a.type === 'sign' && a.source !== 'scan' && a.status === 'not_sent' && (
               <Flex mt="3" gap="3" align="center" justify="space-between">
                 <Text fontSize="10px" color="kk.textMuted">{uiText("Desktop never saw this signed transaction broadcast. Discard it if it was never sent.")}</Text>
                 <Text as="button" fontSize="xs" fontWeight="600" color={STATUS_CONFIG.not_sent.color} flexShrink={0}

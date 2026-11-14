@@ -2072,6 +2072,9 @@ export function mergeTxRows(a: RecentActivity, b: RecentActivity): RecentActivit
 const isUnsentSignature = (a: RecentActivity) => a.status === 'signed' || a.status === 'not_sent'
 // Routes whose signature is a transaction to broadcast (not a message or typed data).
 const TX_SIGN_ROUTE = /\/sign-(transaction|transfer|operations|amino[\w-]*)$/
+// Only a signed tx logged under its txid can be matched to its broadcast; one
+// without (REST utxo/cosmos/solana … today) is never claimed "not sent".
+const canBeNotSent = (route: string, txid: string | null) => !!txid && TX_SIGN_ROUTE.test(route)
 /** A signed tx Desktop has not seen broadcast after this long is shown as "Not sent". */
 export const SIGNED_TX_EXPIRY_MS = 24 * 60 * 60 * 1000
 
@@ -2081,9 +2084,9 @@ export function dismissActivity(id: string, deviceId?: string, walletId?: string
   try {
     if (!db || (!deviceId && !walletId)) return false
     const scope = walletId ? 'wallet_id = ?' : 'device_id = ?'
-    const row = db.query(`SELECT txid FROM api_log WHERE id = ? AND ${scope} AND method <> 'SCAN' AND activity_type = 'sign'`)
-      .get(Number(id), walletId || deviceId!) as { txid: string | null } | null
-    if (!row) return false
+    const row = db.query(`SELECT txid, route FROM api_log WHERE id = ? AND ${scope} AND method <> 'SCAN' AND activity_type = 'sign'`)
+      .get(Number(id), walletId || deviceId!) as { txid: string | null; route: string } | null
+    if (!row || !canBeNotSent(row.route, row.txid)) return false
     // Signed, then broadcast: the broadcast is real activity, not a stale signature.
     if (row.txid && db.query(`SELECT 1 FROM api_log WHERE txid = ? AND ${scope} AND (method = 'SCAN' OR activity_type <> 'sign') LIMIT 1`)
       .get(row.txid, walletId || deviceId!)) return false
@@ -2147,7 +2150,7 @@ export function getRecentActivityFromLog(limit?: number, chainFilter?: string, d
         source: isScan ? 'scan' : (r.method === 'RPC' ? 'app' : 'api') as ActivitySource,
         appName: r.method === 'RPC' ? undefined : (isScan ? undefined : r.app_name),
         status: isScan ? 'broadcast' : (['broadcast', 'swap', 'shield', 'unshield'].includes(r.activity_type) ? 'broadcast'
-          : TX_SIGN_ROUTE.test(r.route) && Date.now() - r.timestamp > SIGNED_TX_EXPIRY_MS ? 'not_sent' : 'signed'),
+          : canBeNotSent(r.route, r.txid) && Date.now() - r.timestamp > SIGNED_TX_EXPIRY_MS ? 'not_sent' : 'signed'),
         createdAt: r.timestamp,
         confirmations: meta?.confirmations ?? undefined,
         blockHeight: meta?.blockHeight ?? undefined,

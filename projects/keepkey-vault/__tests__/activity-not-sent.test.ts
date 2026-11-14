@@ -20,8 +20,8 @@ const rows = () => db.getRecentActivityFromLog(undefined, undefined, wallet.devi
 const byApp = (route: string) => rows().find(r => r.appName === route)
 
 test('a signed tx Desktop never saw broadcast reads "not sent" once it is a day old', () => {
-  log('/eth/sign-transaction', 11 * DAY, { appName: 'old-sign' })
-  log('/eth/sign-transaction', 60 * 60 * 1000, { appName: 'fresh-sign' })
+  log('/eth/sign-transaction', 11 * DAY, { appName: 'old-sign', txid: '0x' + '01'.repeat(32) })
+  log('/eth/sign-transaction', 60 * 60 * 1000, { appName: 'fresh-sign', txid: '0x' + '02'.repeat(32) })
   expect(byApp('old-sign')?.status).toBe('not_sent')
   expect(byApp('fresh-sign')?.status).toBe('signed')
 })
@@ -31,6 +31,21 @@ test('a signed message is never "not sent": nothing is broadcast for it', () => 
   log('/eth/sign-typed-data', 11 * DAY, { appName: 'old-typed' })
   expect(byApp('old-message')?.status).toBe('signed')
   expect(byApp('old-typed')?.status).toBe('signed')
+})
+
+test('a signed tx logged without a txid is never "not sent": Desktop cannot match it to its broadcast', () => {
+  // REST /utxo, /cosmos, /solana … sign rows carry no txid, so a scan of the
+  // broadcast tx never merges with them; they stay a neutral "Signed".
+  log('/utxo/sign-transaction', 11 * DAY, { appName: 'old-utxo', chain: 'BTC' })
+  log('/thorchain/sign-amino-transfer', 11 * DAY, { appName: 'old-amino', chain: 'RUNE' })
+  expect(byApp('old-utxo')?.status).toBe('signed')
+  expect(byApp('old-amino')?.status).toBe('signed')
+  expect(db.dismissActivity(byApp('old-utxo')!.id, wallet.deviceId, wallet.walletId)).toBe(false)
+})
+
+test('a signed message cannot be discarded: it is an audit record, not an unsent tx', () => {
+  expect(db.dismissActivity(byApp('old-message')!.id, wallet.deviceId, wallet.walletId)).toBe(false)
+  expect(byApp('old-message')).toBeDefined()
 })
 
 test('a signed tx later seen on chain under its txid is one broadcast row, not a stale signature', () => {
