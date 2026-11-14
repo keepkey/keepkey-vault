@@ -121,6 +121,7 @@ export function bitcoinOnlyRejection(
   if (path === '/api/v2/portfolio/balances') unavailable = unavailablePubkeyAsset(body?.pubkeys)
   if (path === '/api/v2/market/info') unavailable = unavailableAsset(body?.caips)
   if (path === '/api/v2/tx/history') unavailable = unavailablePubkeyAsset(body?.queries)
+  if (path === '/api/v2/tx/build') unavailable = unavailableAsset([body?.caip])
   if (unavailable !== undefined) {
     return `asset ${String(unavailable)} is not available on bitcoin-only firmware`
   }

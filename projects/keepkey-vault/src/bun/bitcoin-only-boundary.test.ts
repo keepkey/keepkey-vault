@@ -124,6 +124,11 @@ describe('Bitcoin-only REST boundary', () => {
     expect(bitcoinOnlyRejection('POST', '/api/v2/tx/history', {
       queries: [{ caip: ethAsset }],
     })).not.toBeNull()
+    // Extension tx build: only the Bitcoin asset may be built on BTC-only firmware.
+    expect(bitcoinOnlyRejection('POST', '/api/v2/tx/build', {
+      caip: 'bip122:12a765e31ffd4059bada1e25190f6e98/slip44:2', to: 'ltc1q', amount: '1',
+    })).not.toBeNull()
+    expect(bitcoinOnlyRejection('POST', '/api/v2/tx/build', { caip: btcAsset, to: 'bc1q', amount: '1' })).toBeNull()
 
     for (const path of [
       '/api/v2/utxo/unspent', '/api/v2/utxo/pubkey-info',
