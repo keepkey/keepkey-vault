@@ -9,6 +9,7 @@ import { useUiTranslation } from "../i18n/ui"
 import { useState, useEffect, useMemo, useCallback, type ReactNode } from "react"
 import { Box, Flex, Text, Input, Spinner } from "@chakra-ui/react"
 import { useTranslation } from "react-i18next"
+import { swapPickerConfirmLabel, swapPickerHeading } from "../lib/swap-copy"
 import { AssetIcon } from "./AssetIcon"
 import type { SwapAsset, ChainBalance, CustomToken } from "../../shared/types"
 import {
@@ -1275,7 +1276,7 @@ function ConfirmStep({ entry, side, onConfirm, onBack }: {
           _hover={{ bg: "rgba(255,255,255,0.08)" }} onClick={onBack}>{uiText("Back")}</Box>
         <Box as="button" flex="1" px="4" py="2.5" bg="var(--gold)" color="#0b0b0e"
           borderRadius="10px" fontSize="12px" fontWeight="700" border="none" cursor="pointer"
-          fontFamily="inherit" _hover={{ filter: "brightness(1.08)" }} onClick={onConfirm}>{uiText("Use")}{" "}{entry.symbol}{" "}{uiText("on")}{" "}{chainName}{" "}{uiText("as")}{" "}{side === "from" ? uiText("input") : uiText("output")}
+          fontFamily="inherit" _hover={{ filter: "brightness(1.08)" }} onClick={onConfirm}>{swapPickerConfirmLabel(side, entry.symbol, chainName, uiText)}
         </Box>
       </Flex>
     </>
@@ -1386,17 +1387,8 @@ export function AssetPickerDialog({
 
   if (!open) return null
 
-  // Title
-  const title = confirmEntry ? "Confirm your selection"
-    : side === "from" ? "Select asset to swap from"
-    : unavailEntry  ? "Route unavailable"
-    : toChain       ? `Assets on ${networkDisplayName(toChain)}`
-    :                 "Select destination network"
-
-  const stepLabel = confirmEntry ? `Review the ${side === "from" ? "input" : "output"} before continuing`
-    : side === "from" ? "Step 1 of 2 — pick what you're swapping"
-    : toChain       ? `Step 2 of 2 — pick an asset on ${networkDisplayName(toChain)}`
-    :                 "Step 2 of 2 — choose destination network"
+  const { title, stepLabel } = swapPickerHeading({ side, confirm: !!confirmEntry, unavailable: !!unavailEntry,
+    network: toChain ? networkDisplayName(toChain) : undefined }, uiText)
 
   return (
     <Box position="fixed" inset="0" zIndex={Z.assetPicker}

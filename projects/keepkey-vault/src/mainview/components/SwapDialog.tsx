@@ -1,5 +1,6 @@
 import { getNumberLocale } from "../lib/number-locale"
 import { useUiTranslation } from "../i18n/ui"
+import { swapFeeLabel } from "../lib/swap-copy"
 /**
  * SwapDialog — Full-screen dialog for the swap flow.
  *
@@ -327,13 +328,14 @@ function ReviewRow({ label, children, accent = false }: { label: ReactNode; chil
 
 function QuoteFeeRows({ fees }: { fees: SwapQuote['fees'] }) {
   const { t } = useTranslation('swap')
+  const uiText = useUiTranslation()
   return <>
     <ReviewRow label={t('quotedFeeRate', 'Quoted fee rate')}>
       {fees.reportedTotalBps != null ? `${(fees.reportedTotalBps / 100).toFixed(2)}%` : t('notProvided', 'Not provided')}
     </ReviewRow>
     {(fees.items || []).map((fee, index) => <ReviewRow key={`${fee.kind}:${fee.recipient || fee.assetCaip || ''}:${index}`} label={
       <span title={fee.recipient ? `Fee recipient: ${fee.recipient}` : fee.assetCaip}>
-        {fee.label || (fee.kind === 'affiliate' ? t('affiliateFee', 'Affiliate fee') : fee.kind === 'network' ? t('networkFee', 'Network fee') : t('providerFee', 'Provider fee'))}
+        {fee.label ? swapFeeLabel(fee.label, uiText) : (fee.kind === 'affiliate' ? t('affiliateFee', 'Affiliate fee') : fee.kind === 'network' ? t('networkFee', 'Network fee') : t('providerFee', 'Provider fee'))}
         {fee.recipient ? ` · ${ellipsizeMiddle(fee.recipient, 6, 4)}` : ''}
       </span>
     }>
