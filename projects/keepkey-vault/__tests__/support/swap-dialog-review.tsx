@@ -135,6 +135,13 @@ try {
     result[`burnRefused_${burn.slice(-4)}`] = !calls.some(c => c.method === 'getSwapQuote' && c.params.toAddress === burn) && /burn address/i.test(text())
   }
 
+  // V3: a mis-cased (mistyped) EVM custom recipient is refused with the translated checksum text.
+  const badChecksum = '0x5aaeb6053F3E94C9b9A09f33669435E7Ef1BeAed'
+  await toInput({ useCustomAddress: true, customToAddress: badChecksum })
+  await settle(400)
+  result.badChecksumRefused = !calls.some(c => c.method === 'getSwapQuote' && c.params.toAddress === badChecksum)
+    && text().includes('Checksum mismatch') && !text().includes('invalidEvmChecksum')
+
   // H1: own-address review shows the full recipient, not as custom.
   await toReview()
   result.ownRecipientRowShown = !!recipientRow() && (recipientRow()!.textContent || '').includes(owner) && recipientRow()!.getAttribute('data-custom-recipient') === 'false'
@@ -177,6 +184,8 @@ try {
   await click(ack)
   await click(confirmButton())
   await until(() => count('executeSwap') > executesBeforeSlippage, 'the swap after confirming slippage')
+  // Bun enforces the same confirmation (swap-quote-lease): the dialog must say it was given.
+  result.slippageAckSent = calls.filter(c => c.method === 'executeSwap').at(-1)?.params?.slippageAcknowledged === true
   await settle(200)
   result.customSlippageResetAfterSwap = state?.slippageBps === 100 && localStorage.getItem('swap.slippageBps') !== '600'
 

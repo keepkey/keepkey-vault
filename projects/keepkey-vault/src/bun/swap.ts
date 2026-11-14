@@ -33,7 +33,8 @@ import { encodeDepositWithExpiry, encodeApprove, parseUnits, toHex, readPioneerB
 import { getEvmGasPrice, getEvmFeeData, getEvmNonce, getEvmBalance, getErc20Allowance, getErc20Balance, getErc20Decimals, broadcastEvmTx, EvmSignerVerificationError, waitForTxReceipt, estimateGas, isPioneerEvmSource } from './evm-rpc'
 import * as txb from './txbuilder'
 import { normalizeBchAddress } from './txbuilder'
-import { isBurnAddress } from '../shared/address-validation'
+import { isBurnAddress, sameAddress, validateAddress } from '../shared/address-validation'
+import { thorMemoDestination } from '../shared/swap-risk'
 // Re-export pure parsing functions (used by tests + this module)
 // assetToCaip is exported for backwards-compat (legacy code that hydrates old
 // history rows without CAIP). The swap quote/execute path no longer uses it —
@@ -316,6 +317,18 @@ function assertNotBurnRecipient(address: string | undefined): void {
   }
 }
 
+/** The recipient must be an address of the destination network (audit v4 V3):
+ *  a mistyped EIP-55 checksum or a .eth name never reaches Pioneer or the signer.
+ *  Chains sharing a networkId (zcash/zcash-shielded) accept either format. */
+function assertRecipientFormat(address: string | undefined, toCaip: string | undefined): void {
+  const networkId = toCaip?.split('/')[0]
+  if (!address || !networkId) return
+  const chains: ChainDef[] = CHAINS.filter(c => c.networkId === networkId)
+  if (!chains.length && networkId.startsWith('eip155:')) chains.push({ chainFamily: 'evm' } as ChainDef)
+  if (!chains.length || chains.some(c => validateAddress(address, c).valid)) return
+  throw new Error(`Swap recipient ${address.trim()} is not a valid address for this network (${validateAddress(address, chains[0]).error}). Copy it again from the source.`)
+}
+
 /** Fetch a swap quote from Pioneer (aggregated across DEXes) */
 export async function getSwapQuote(params: SwapQuoteParams, device: {
   firmwareVersion?: string; capabilities?: readonly number[]
@@ -339,6 +352,7 @@ export async function getSwapQuote(params: SwapQuoteParams, device: {
   // Funds paid to a zero/burn address are gone (audit v4 H1). The dialog
   // refuses these too; this is the boundary REST and RPC callers share.
   assertNotBurnRecipient(params.toAddress)
+  assertRecipientFormat(params.toAddress, params.toCaip)
 
   const pioneer = await getPioneer()
 
@@ -726,6 +740,8 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
     })
   }
 
+  assertRecipientFormat(toAddress, toChain.networkId)
+
   // SAFETY: Reject memos containing extended pubkeys — these are never valid destinations
   // and indicate the quote was fetched with an unresolved xpub address.
   // Covers: xpub/ypub/zpub (BTC), dgub (DOGE), Ltub/Mtub (LTC), drkp/drks (DASH), tpub (testnet)
@@ -733,11 +749,11 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
     throw new Error('Swap memo contains an extended pubkey instead of a destination address — aborting to protect funds')
   }
 
-  // Validate the memo contains our destination address (only for UTXO/Cosmos — EVM memos use shorthand/aggregator formats)
-  // Normalize BCH CashAddr: strip "bitcoincash:" prefix for comparison — THORChain memos use short form
-  const toAddrNorm = toAddress.startsWith('bitcoincash:') ? toAddress.slice('bitcoincash:'.length) : toAddress
-  if (params.memo && fromChain.chainFamily !== 'evm' && !params.memo.toLowerCase().includes(toAddrNorm.toLowerCase())) {
-    console.warn(`${TAG} WARNING: Swap memo does not contain derived destination address. Memo may use a different format.`)
+  // A swap memo must pay the recipient (any source family, EVM included): the
+  // protocol pays whoever the memo names. sameAddress drops BCH's cashaddr prefix.
+  const memoDestination = params.memo ? thorMemoDestination(params.memo) : undefined
+  if (memoDestination !== undefined && !sameAddress(memoDestination, toAddress)) {
+    throw new Error(`This swap's memo pays out to ${memoDestination}, which is not the recipient ${toAddress}. Do not proceed — get a new quote.`)
   }
 
   // 2. Validate required fields

@@ -1006,7 +1006,8 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
     const trimmed = customToAddress.trim()
     if (trimmed.length === 0) return 'Address is required'
     // Use chain-aware format validation when destination chain is known
-    const destChain = toAsset ? CHAINS.find(c => c.id === toAsset.chain || c.coin === toAsset.chain) : null
+    // SwapAsset names its chain by chainId (there is no `chain` field).
+    const destChain = toAsset ? CHAINS.find(c => c.id === toAsset.chainId) : null
     if (destChain) {
       const result = validateAddress(trimmed, destChain)
       // The validator returns a send-namespace i18n key (e.g. invalidChecksum); show its text, not the key.
@@ -2479,6 +2480,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
       const result = await retryWhileDeviceBusy(() => rpcRequest<{ txid: string; approvalTxid?: string }>('executeSwap', {
         quoteId: liveQuote.quoteId,
         riskAcknowledged,
+        slippageAcknowledged: slippageNeedsConfirm && !slippageLocked,
         fromChainId: fromAsset.chainId,
         toChainId: toAsset.chainId,
         fromCaip: fromAsset.caip!,
@@ -2599,7 +2601,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
       // Require a fresh quote and review before another execute request.
       setQuoteFetchedAt(0)
     }
-  }, [quote, quoteFetchedAt, fromAsset, toAsset, sendAmount, sendIsMax, fromBalance, fromAddress, toAddress, slippageBps, balances, phase, previewLoading, previewError, previewBuild, useCustomAddress, networkMismatch, uiText, riskLocked, riskAcknowledged, swapRisk.blocked, swapRisk.quoteMaxAgeMs, effectiveEvmIndex, relayRecipientMismatch, slippageLocked, setSlippageBps])
+  }, [quote, quoteFetchedAt, fromAsset, toAsset, sendAmount, sendIsMax, fromBalance, fromAddress, toAddress, slippageBps, balances, phase, previewLoading, previewError, previewBuild, useCustomAddress, networkMismatch, uiText, riskLocked, riskAcknowledged, swapRisk.blocked, swapRisk.quoteMaxAgeMs, effectiveEvmIndex, relayRecipientMismatch, slippageLocked, slippageNeedsConfirm, setSlippageBps])
 
   // ── Reset ─────────────────────────────────────────────────────────
   const reset = useCallback(() => {

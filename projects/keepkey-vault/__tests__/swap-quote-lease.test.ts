@@ -139,3 +139,17 @@ test('MAX sends the exact fee-reserved quote amount, never recalculates a partia
   expect(claim.params.toAddressOverride).toBe('recipient')
   claim.finish(false)
 })
+
+test('a tolerance above 5% needs an explicit slippage acknowledgment, from the dialog and REST alike (V1)', () => {
+  // A $6 trade is the "small" tier: no cost acknowledgment is required, yet 50% slippage still is.
+  const high = setup({}, {}, { slippageBps: 5000 })
+  expect(high.risk.requiresAcknowledgment).toBe(false)
+  expect(() => high.leases.claim(high.execution, 7)).toThrow(/slippage/i)
+  high.leases.claim({ ...high.execution, slippageAcknowledged: true }, 7).finish(false)
+  // The provider's own quoted slippage counts too.
+  const quoted = setup({ slippageBps: 900 })
+  expect(() => quoted.leases.claim(quoted.execution, 7)).toThrow(/slippage/i)
+  // Exactly 5% and below need nothing extra.
+  const edge = setup({}, {}, { slippageBps: 500 })
+  edge.leases.claim(edge.execution, 7).finish(false)
+})

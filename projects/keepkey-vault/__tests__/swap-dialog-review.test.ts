@@ -17,6 +17,7 @@ test('swap review names the recipient, refuses burn addresses and gates high sli
     accountOptionsShowOnChainBalance: true,
     burnRefused_0000: true,
     burnRefused_dEaD: true,
+    badChecksumRefused: true,
     ownRecipientRowShown: true,
     relayCopyTruthful: true,
     customRecipientRowShown: true,
@@ -26,6 +27,7 @@ test('swap review names the recipient, refuses burn addresses and gates high sli
     highSlippageNotPersisted: true,
     lowSlippagePersisted: true,
     highSlippageNeedsConfirm: true,
+    slippageAckSent: true,
     customSlippageResetAfterSwap: true,
     outputSwitchClearsError: true,
   })

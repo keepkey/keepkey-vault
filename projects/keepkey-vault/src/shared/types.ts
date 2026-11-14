@@ -2288,6 +2288,8 @@ export interface SwapQuoteParams {
 export interface ExecuteSwapParams {
   quoteId?: string
   riskAcknowledged?: boolean
+  /** Required when the effective slippage exceeds CONFIRM_SLIPPAGE_BPS. */
+  slippageAcknowledged?: boolean
   fromChainId: string             // our chain id (resolves to ChainDef for signing)
   toChainId: string               // our chain id
   fromCaip: string                // CAIP-19 — primary identifier

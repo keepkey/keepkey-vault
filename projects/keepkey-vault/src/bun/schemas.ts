@@ -836,6 +836,7 @@ export const SwapQuoteHeadlessRequest = z.object({
 export const SwapExecuteHeadlessRequest = z.object({
   quoteId: z.string().min(1),
   riskAcknowledged: z.boolean().optional(),
+  slippageAcknowledged: z.boolean().optional(),
   fromChainId: z.string(),
   toChainId: z.string(),
   fromCaip: z.string(),
