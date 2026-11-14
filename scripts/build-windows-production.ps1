@@ -427,7 +427,11 @@ if (-not $SkipBuild) {
         Push-Location (Join-Path $RepoRoot "modules\electrobun\package")
         hutch run install
         if ($LASTEXITCODE -ne 0) { throw "hutch run install failed for the Electrobun fork (exit $LASTEXITCODE)" }
-        hutch run build:release
+        # Core-only, as the Linux devkit job builds it: the full build also vendors
+        # Rust, Go and Odin (unused by Desktop), which hang or fail on Windows.
+        # The first run downloads and unpacks CEF (166 MB .tar.bz2); Windows tar is
+        # slow at that (45+ minutes on a CI runner). Later runs reuse vendors\cef.
+        hutch build.ts --release --core-only
         if ($LASTEXITCODE -ne 0) { throw "Electrobun devkit build failed (exit $LASTEXITCODE)" }
         Pop-Location
         $env:HUTCH_ELECTROBUN_DEVKIT_ROOT = Join-Path $RepoRoot "modules\electrobun\package\dist"
