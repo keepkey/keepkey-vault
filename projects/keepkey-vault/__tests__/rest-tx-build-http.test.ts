@@ -135,6 +135,16 @@ describe('POST /api/v2/tx/build', () => {
     expect(r.body.code).toBe('BUILD_FAILED')
   })
 
+  test('an upstream HTTP error from a data fetch is 422 BUILD_FAILED, never its own status', async () => {
+    // swagger-client (pioneer-client) throws Error(statusText) with .status = upstream status.
+    for (const status of [404, 401, 502]) {
+      const r = await call(atom, { hook: async () => { throw Object.assign(new Error('Not Found'), { status }) } })
+      expect(r.status).toBe(422)
+      expect(r.body.error).toBe('Not Found')
+      expect(r.body.code).toBe('BUILD_FAILED')
+    }
+  })
+
   test('cosmos: 200 with a sign body /cosmos/sign-amino accepts, and the signer is registered', async () => {
     const r = await call(atom)
     expect(r.status).toBe(200)

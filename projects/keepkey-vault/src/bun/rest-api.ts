@@ -5317,8 +5317,8 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           try { built = await callbacks.buildTxHeadless(request) }
           catch (e: any) {
             if (e instanceof HttpError || e instanceof WalletSessionChangedError) throw e
-            throw new HttpError(typeof e?.status === 'number' ? e.status : 422, deviceErrorMessage(e),
-              typeof e?.status === 'number' ? undefined : { code: 'BUILD_FAILED' })
+            // Never pass e.status through: pioneer-client errors carry the upstream HTTP status.
+            throw new HttpError(422, deviceErrorMessage(e), { code: 'BUILD_FAILED' })
           }
           const out = toTxBuildResponse(chain, built)
           // The amino sign routes resolve the signer's path from this registry.
