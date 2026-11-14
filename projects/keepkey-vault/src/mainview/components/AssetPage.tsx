@@ -44,6 +44,7 @@ import { UtxoAccountSelector } from "./UtxoAccountSelector"
 import { EvmAddressSelector } from "./EvmAddressSelector"
 import { useBtcAccounts } from "../hooks/useBtcAccounts"
 import { isBalanceUnverified } from "../../shared/balance-display-state"
+import { ownerUsdAtAggregatePrice } from "../lib/effective-balance"
 import { useEvmAddresses } from "../hooks/useEvmAddresses"
 import { AddTokenDialog } from "./AddTokenDialog"
 import { PSBT_PASTE_EVENT } from "./PsbtSignDialog"
@@ -198,6 +199,7 @@ function PersonalAssetPage({ chain, balance, balanceLoading = false, onBack, fir
 		} catch (e) {
 			console.warn(`[AssetPage] refresh ${chain.id} failed:`, e)
 			setRefreshError(e instanceof Error ? e.message : String(e))
+			setNativeProofEpoch(n => n + 1)
 		} finally {
 			setRefreshing(false)
 		}
@@ -269,8 +271,8 @@ function PersonalAssetPage({ chain, balance, balanceLoading = false, onBack, fir
 			chainId: chain.id,
 			symbol: chain.symbol,
 			balance: selectedEvmChainBalance.balance,
-			balanceUsd: selectedEvmChainBalance.balanceUsd,
-			nativeBalanceUsd: selectedEvmChainBalance.nativeBalanceUsd,
+			// Priced like the sidebar (the `balance` aggregate), not the owner row's older price (H18).
+			...ownerUsdAtAggregatePrice(balance, selectedEvmChainBalance),
 			address: selectedEvmAddress.address,
 			tokens: selectedEvmChainBalance.tokens,
 			defiPositions: selectedEvmChainBalance.defiPositions,
@@ -282,9 +284,13 @@ function PersonalAssetPage({ chain, balance, balanceLoading = false, onBack, fir
 	// While the portfolio can't vouch for the native coin (provider outage), read
 	// it on chain for the selected owner, like the token proof below (audit v4 H4).
 	const [nativeProof, setNativeProof] = useState<DirectNativeProof | null>(null)
+	// Re-read before the proof expires, after every push for this chain and after
+	// a refresh that came back degraded: the page never falls back to "—" while
+	// the outage lasts (audit v4 H7; SwapDialog does the same).
+	const [nativeProofEpoch, setNativeProofEpoch] = useState(0)
 	const activeBalance = applyNativeProof(portfolioBalance, chain.caip, nativeProof)
 	const nativeProofKey = isEvm && !watchOnly && portfolioBalance?.address && isBalanceUnverified(portfolioBalance, chain.caip)
-		? `${chain.id}|${portfolioBalance.address}|${refreshNonce}` : null
+		? `${chain.id}|${portfolioBalance.address}|${refreshNonce}|${nativeProofEpoch}` : null
 	useEffect(() => {
 		if (!nativeProofKey) return
 		const [chainId, owner] = nativeProofKey.split('|')
@@ -292,7 +298,8 @@ function PersonalAssetPage({ chain, balance, balanceLoading = false, onBack, fir
 		rpcRequest<{ balance: string }>("verifyTokenBalance", { chainId, owner, caip: chain.caip }, 30000)
 			.then(({ balance }) => { if (!cancelled) setNativeProof({ chainId, owner, balance, verifiedAt: Date.now() }) })
 			.catch(e => console.warn(`[AssetPage] on-chain native balance check failed for ${chainId}:`, e))
-		return () => { cancelled = true }
+		const timer = setTimeout(() => setNativeProofEpoch(n => n + 1), DIRECT_TOKEN_PROOF_MAX_AGE_MS / 2)
+		return () => { cancelled = true; clearTimeout(timer) }
 	}, [nativeProofKey, chain.caip])
 	useEffect(() => {
 		if (!nativeProof) return
@@ -300,7 +307,9 @@ function PersonalAssetPage({ chain, balance, balanceLoading = false, onBack, fir
 		return () => clearTimeout(timer)
 	}, [nativeProof])
 	useEffect(() => onRpcMessage("balance-updated", (updated: ChainBalance) => {
-		if (updated.chainId === chain.id) setNativeProof(null)
+		if (updated.chainId !== chain.id) return
+		setNativeProof(null)
+		setNativeProofEpoch(n => n + 1)
 	}), [chain.id])
 	const balanceReadPending = balanceLoading || refreshing || (isEvm && !watchOnly && !evmInitialLoaded)
 	const headerBalanceKnown = !isBalanceUnverified(activeBalance, chain.caip)
@@ -371,7 +380,7 @@ function PersonalAssetPage({ chain, balance, balanceLoading = false, onBack, fir
 		? evmAddressesWithChainBalance.reduce((sum, a) => sum + parseFloat(a.chainBalances![chain.id]!.balance), 0)
 		: 0
 	const evmTotalChainUsd = showEvmMultiTotal
-		? evmAddressesWithChainBalance.reduce((sum, a) => sum + (a.chainBalances![chain.id]!.balanceUsd || 0), 0)
+		? evmAddressesWithChainBalance.reduce((sum, a) => sum + (ownerUsdAtAggregatePrice(balance, a.chainBalances![chain.id]!).balanceUsd || 0), 0)
 		: 0
 
 	// BTC address index state: change (0=receive, 1=change) and address index

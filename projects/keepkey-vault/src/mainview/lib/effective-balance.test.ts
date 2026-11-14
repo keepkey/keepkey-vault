@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { selectedOwnerBalance } from './effective-balance'
+import { ownerUsdAtAggregatePrice, selectedOwnerBalance } from './effective-balance'
 import type { ChainBalance, EvmAddressChainBalance } from '../../shared/types'
 
 const OWNER = '0x1111111111111111111111111111111111111111'
@@ -32,4 +32,11 @@ test('with several owners the card stays on the selected owner; without an aggre
   expect(selectedOwnerBalance(agg, stale, OWNER, false)!.balance).toBe('0.5')
   expect(selectedOwnerBalance(undefined, owner(), OWNER, true)).toMatchObject({ balance: '0.001134', balanceUsd: 3.2, address: OWNER })
   expect(selectedOwnerBalance(agg, undefined, OWNER, true)).toBe(agg)
+})
+
+test('sidebar per-account rows and the chain page total use the sidebar price too (audit v4 H18)', () => {
+  expect(ownerUsdAtAggregatePrice(agg, owner()).balanceUsd).toBeCloseTo(3.402, 9)
+  expect(ownerUsdAtAggregatePrice(agg, owner({ balance: '0.002268', balanceUsd: 16.4, nativeBalanceUsd: 6.4 })).balanceUsd).toBeCloseTo(16.804, 9)
+  // No aggregate price: the owner's own figure, never an invented one.
+  expect(ownerUsdAtAggregatePrice(undefined, owner())).toEqual({ balanceUsd: 3.2, nativeBalanceUsd: 3.2 })
 })

@@ -64,7 +64,7 @@ import {
 	type BalanceReconciliation,
 	type SwapExecutionBalanceDetail,
 } from "../../shared/balance-reconciliation"
-import { selectedOwnerBalance } from "../lib/effective-balance"
+import { ownerUsdAtAggregatePrice, selectedOwnerBalance } from "../lib/effective-balance"
 import { playChaChing } from "../lib/sounds"
 
 /** Error boundary wrapping AssetPage — ensures user can always go back to Dashboard */
@@ -2178,7 +2178,7 @@ function PersonalDashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSetti
 										key: `evm-${addr.addressIndex}`,
 										index: addr.addressIndex,
 										balance: parseFloat(addr.chainBalances?.[chain.id]?.balance || '0'),
-										balanceUsd: addr.chainBalances?.[chain.id]?.balanceUsd || 0,
+										balanceUsd: (addr.chainBalances?.[chain.id] ? ownerUsdAtAggregatePrice(balances.get(chain.id), addr.chainBalances[chain.id]!).balanceUsd : 0) || 0,
 										isSelected: evmSelectedIndex === addr.addressIndex,
 										address: addr.address,
 										onSelect: () => evmSelectIndex(addr.addressIndex),
