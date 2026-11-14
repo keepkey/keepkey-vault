@@ -12,7 +12,7 @@ import { utxoAccountScriptPaths } from './chain-scan'
 import { isBurnAddress, validateAddress } from '../shared/address-validation'
 import { baseUnitsToDecimalString } from '../shared/max-send'
 import type { ChainDef } from '../shared/chains'
-import type { BtcAccountSet, BtcXpub, BuildTxResult } from '../shared/types'
+import type { BtcAccountSet, BtcXpub, BuildTxParams, BuildTxResult } from '../shared/types'
 
 /** Native assets the extension may send; value = Desktop chain.id. */
 export const TX_BUILD_CAIPS = {
@@ -193,6 +193,23 @@ export function toTxBuildResponse(
       ...(u.payment.destinationTag !== undefined ? { destinationTag: u.payment.destinationTag } : {}),
     },
   }
+}
+
+/** The buildTxForCurrentWallet params for a validated request. A named script
+ *  type on any UTXO chain (Bitcoin included) is account N derived on the device
+ *  from its account path, so it need not be one Desktop already tracks. Without
+ *  one, Bitcoin spends the xpub Desktop holds for that account. */
+export function txBuildParams(r: TxBuildHeadlessRequest, chain: ChainDef, btcAccounts: BtcAccountSet): BuildTxParams {
+  const p: BuildTxParams = { chainId: r.chainId, to: r.to, amount: r.isMax ? '0' : r.amount!, isMax: r.isMax, memo: r.memo, feeLevel: 3 }
+  if (r.scriptType) {
+    const accountPath = txBuildAccountPath(chain, r.scriptType, r.accountIndex)
+    if (!accountPath) throw refuse('SCRIPT_TYPE_UNSUPPORTED', `${r.chainId} cannot be sent from a ${r.scriptType} account`)
+    p.scriptTypeOverride = r.scriptType
+    p.accountPath = accountPath
+  } else if (r.chainId === 'bitcoin') {
+    p.xpubOverride = btcXpubForAccount(btcAccounts, r.accountIndex).xpub
+  }
+  return p
 }
 
 /** Desktop's BTC account N in the named script type, or (none named) the one

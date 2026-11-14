@@ -11,7 +11,7 @@ import { CHAINS } from '../shared/chains'
 import type { BtcAccountSet } from '../shared/types'
 import * as S from './schemas'
 import { buildTx } from './txbuilder'
-import { TX_BUILD_CAIPS, btcXpubForAccount, toTxBuildResponse, txBuildAccountPath, validateTxBuildRequest } from './rest-tx-build'
+import { TX_BUILD_CAIPS, btcXpubForAccount, toTxBuildResponse, txBuildAccountPath, txBuildParams, validateTxBuildRequest } from './rest-tx-build'
 
 const chain = (id: string) => CHAINS.find(c => c.id === id)!
 const caipOf = (id: string) => chain(id).caip
@@ -180,6 +180,32 @@ describe('toTxBuildResponse: the named UTXO account', () => {
     expect(() => toTxBuildResponse(c, mixed, { scriptType: 'p2wpkh', accountIndex: 0 })).toThrow()
   })
 
+  // Each guard leg on its own: the first leg (an input) is correct, so only
+  // that leg's comparison can refuse the build.
+  const refused = (fn: () => unknown) => {
+    try { fn(); throw new Error('accepted') } catch (e: any) {
+      expect(e.status).toBe(422)
+      expect(e.details?.code).toBe('BUILD_FAILED')
+    }
+  }
+
+  test('change output on another account path than the inputs: 422 BUILD_FAILED', async () => {
+    const { c, built } = await buildAccount('litecoin', LTC_TO, 'p2wpkh', 1, "m/84'/2'/0'/0/0")
+    const u = built.unsignedTx
+    const requested = { scriptType: 'p2wpkh', accountIndex: 1 } as const
+    expect(toTxBuildResponse(c, built, requested).summary.accountIndex).toBe(1)
+    const strayChange = { ...built, unsignedTx: { ...u, outputs: u.outputs.map((o: any) =>
+      o.addressType === 'change' ? { ...o, addressNList: [H + 84, H + 2, H, 1, 0] } : o) } }
+    refused(() => toTxBuildResponse(c, strayChange, requested))
+  })
+
+  test('an input whose scriptType differs (same account path): 422 BUILD_FAILED', async () => {
+    const { c, built } = await buildAccount('litecoin', LTC_TO, 'p2wpkh', 1, "m/84'/2'/0'/0/0")
+    const u = built.unsignedTx
+    const mixedType = { ...built, unsignedTx: { ...u, inputs: [...u.inputs, { ...u.inputs[0], vout: 1, scriptType: 'p2sh-p2wpkh' }] } }
+    refused(() => toTxBuildResponse(c, mixedType, { scriptType: 'p2wpkh', accountIndex: 1 }))
+  })
+
   test('MAX from a named account: no change output, the inputs still name the account', async () => {
     const { c, built } = await buildAccount('litecoin', LTC_TO, 'p2sh-p2wpkh', 1, "m/49'/2'/0'/0/0", true)
     const out = toTxBuildResponse(c, built, { scriptType: 'p2sh-p2wpkh', accountIndex: 1 })
@@ -319,7 +345,7 @@ describe('validateTxBuildRequest', () => {
     expect(validateTxBuildRequest(req('bitcoin', { to: BTC_TO, accountIndex: 3 }), CHAINS).request.accountIndex).toBe(3)
     for (const [id, scriptType] of [['litecoin', 'p2wpkh'], ['dogecoin', 'p2pkh'], ['dash', 'p2pkh'], ['bitcoincash', 'p2pkh'], ['bitcoin', 'p2sh-p2wpkh']]) {
       const { request } = validateTxBuildRequest(req(id, { to: VALID_TO[id], accountIndex: 2, scriptType }), CHAINS)
-      expect(request).toStrictEqual({ chainId: id, to: VALID_TO[id], amount: '1', isMax: false, memo: undefined, accountIndex: 2, scriptType })
+      expect(request).toStrictEqual({ chainId: id, to: VALID_TO[id], amount: '1', isMax: false, memo: undefined, accountIndex: 2, scriptType: scriptType as any })
     }
   })
 
@@ -360,6 +386,68 @@ describe('txBuildAccountPath', () => {
     expect(txBuildAccountPath(chain('litecoin'), 'p2tr', 0)).toBeUndefined()
     expect(txBuildAccountPath(chain('dogecoin'), 'p2wpkh', 0)).toBeUndefined()
     expect(txBuildAccountPath(chain('cosmos'), 'p2pkh', 0)).toBeUndefined()
+  })
+})
+
+describe('txBuildParams: what buildTxHeadless hands buildTxForCurrentWallet', () => {
+  const H = 0x80000000
+  // A fresh install: Desktop has derived Bitcoin account 0 only.
+  const fresh: BtcAccountSet = {
+    accounts: [{ accountIndex: 0, totalBalanceUsd: 0, xpubs: [['p2pkh', 44], ['p2sh-p2wpkh', 49], ['p2wpkh', 84]].map(([scriptType, purpose]) => ({
+      scriptType: scriptType as any, purpose: purpose as number, path: [H + (purpose as number), H, H],
+      xpub: `xpub-0-${scriptType}`, xpubPrefix: 'xpub' as const, balance: '0', balanceUsd: 0,
+    })) }],
+    totalBalanceUsd: 0, totalBalance: '0', selectedXpub: { accountIndex: 0, scriptType: 'p2wpkh' },
+  }
+  const headless = (id: string, extra: Record<string, unknown>) => validateTxBuildRequest(req(id, { to: VALID_TO[id], ...extra }), CHAINS)
+
+  test('BTC without a script type: unchanged, the xpub Desktop already holds for that account', () => {
+    const { chain: c, request } = headless('bitcoin', {})
+    expect(txBuildParams(request, c, fresh)).toStrictEqual({
+      chainId: 'bitcoin', to: BTC_TO, amount: '1', isMax: false, memo: undefined, feeLevel: 3, xpubOverride: 'xpub-0-p2wpkh',
+    })
+    const named = headless('bitcoin', { accountIndex: 1 })
+    expect(code(() => txBuildParams(named.request, named.chain, fresh))).toBe('ACCOUNT_NOT_FOUND')
+  })
+
+  for (const k of [
+    { scriptType: 'p2pkh', accountIndex: 3, path: [H + 44, H, H + 3], utxoPath: "m/44'/0'/0'/0/2" },
+    { scriptType: 'p2wpkh', accountIndex: 1, path: [H + 84, H, H + 1], utxoPath: "m/84'/0'/0'/0/0" },
+  ]) {
+    test(`BTC ${k.scriptType} account ${k.accountIndex} on a fresh install: derived on the device from its account path, built from that account`, async () => {
+      const { chain: c, request } = headless('bitcoin', { scriptType: k.scriptType, accountIndex: k.accountIndex })
+      const params = txBuildParams(request, c, fresh)
+      expect(params).toStrictEqual({
+        chainId: 'bitcoin', to: BTC_TO, amount: '1', isMax: false, memo: undefined, feeLevel: 3,
+        scriptTypeOverride: k.scriptType, accountPath: k.path,
+      })
+      // The builder, fed these params plus the xpub the device returns for that path.
+      const built = await buildTx(utxoPioneer(utxo(k.utxoPath, '500000000')), c, { ...params, xpub: `xpub-device-${k.accountIndex}` })
+      const out = toTxBuildResponse(c, built, request)
+      expect(out.summary.scriptType).toBe(k.scriptType)
+      expect(out.summary.accountIndex).toBe(k.accountIndex)
+      for (const leg of [...(out.signBody as any).inputs, ...(out.signBody as any).outputs.filter((o: any) => o.addressType === 'change')]) {
+        expect(leg.addressNList.slice(0, 3)).toEqual(k.path)
+      }
+    })
+  }
+
+  test('other UTXO chains with a script type: the same account-path branch', () => {
+    const { chain: c, request } = headless('litecoin', { scriptType: 'p2sh-p2wpkh', accountIndex: 2 })
+    const params = txBuildParams(request, c, fresh)
+    expect(params.accountPath).toEqual([H + 49, H + 2, H + 2])
+    expect(params.scriptTypeOverride).toBe('p2sh-p2wpkh')
+    expect(params.xpubOverride).toBeUndefined()
+  })
+
+  test('buildTxForCurrentWallet spends a named BTC account path on the device, not a BtcAccountManager xpub', () => {
+    const src = require('fs').readFileSync(require('path').join(import.meta.dir, 'index.ts'), 'utf8') as string
+    const fn = src.slice(src.indexOf('async function buildTxForCurrentWallet('))
+    const btcBranch = fn.indexOf("} else if (chain.id === 'bitcoin' && !params.accountPath) {")
+    const pathBranch = fn.indexOf('} else if (params.accountPath) {')
+    expect(btcBranch).toBeGreaterThan(0)
+    expect(pathBranch).toBeGreaterThan(btcBranch)
+    expect(src).toContain('buildTxForCurrentWallet(txBuildParams(')
   })
 })
 
