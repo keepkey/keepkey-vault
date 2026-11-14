@@ -43,11 +43,16 @@ function coin(chain: string, c: any): string | undefined {
 
 /** hdwallet sends only the first fee amount and the firmware signs it in the
  * chain's own coin, so that is the only fee this card can state as fact. */
+/** THORChain/Maya sign a '0' fee and charge their native tx fee at the bank
+ *  layer (txbuilder/cosmos.ts FEES), in base units. */
+const BANK_FEE: Record<string, string> = { thorchain: '2000000', mayachain: '2000000000' }
+
 function feeRow(chain: string, fee: any): string | undefined {
   const first = Array.isArray(fee?.amount) ? fee.amount[0] : undefined
   const amount = digits(first?.amount)
-  if (amount === undefined) return undefined
   const native = NATIVE[chain].denoms[0]
+  if (BANK_FEE[chain] && (amount === undefined || amount === '0')) return `${format(chain, BANK_FEE[chain], native)}, charged by ${CHAINS[chain]} on top of the amount`
+  if (amount === undefined) return undefined
   if (first.denom === native) return format(chain, amount, native)
   return `${amount} ${String(first.denom)} requested; your KeepKey shows the fee it signs`
 }
