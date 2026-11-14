@@ -302,6 +302,17 @@ export function SendForm({ chain, address, balance, balanceLoading = false, toke
 	// its logo) or a new external address (offer to save). Debounced; clears on every
 	// edit so we never show stale info while the next lookup resolves.
 	const addressValid = addressValidation?.valid === true
+	// Self-send: the recipient is this account's own sending address (EVM compares
+	// case-insensitively). It builds and signs fine, so warn and require an explicit
+	// confirmation; only the network fee would leave the wallet.
+	const sameAddress = useCallback((a: string, b: string | null | undefined) =>
+		!!b && (chain.chainFamily === 'evm' ? a.toLowerCase() === b.toLowerCase() : a === b), [chain.chainFamily])
+	const isSelfSend = addressValid && sameAddress(recipient.trim(), address)
+	const [selfSendConfirmed, setSelfSendConfirmed] = useState(false)
+	// Read by the recipient-lookup effect without adding to its dependency list.
+	const isOwnSendingAddressRef = useRef((a: string) => sameAddress(a, address))
+	isOwnSendingAddressRef.current = (a: string) => sameAddress(a, address)
+	useEffect(() => { setSelfSendConfirmed(false) }, [recipient, address])
 	useEffect(() => {
 		setMatchedContact(null)
 		setAddressIsNew(false)
@@ -319,6 +330,8 @@ export function SendForm({ chain, address, balance, balanceLoading = false, toke
 						if (!alive) return
 						if (entry) {
 							setMatchedContact(entry)
+						} else if (isOwnSendingAddressRef.current(addr)) {
+							// Our own sending address is not a "new external address" to save.
 						} else {
 							setAddressIsNew(true)
 							// Auto-prompt to save — once per distinct new address.
@@ -718,6 +731,23 @@ export function SendForm({ chain, address, balance, balanceLoading = false, toke
 								{matchedContact.vault && <Text fontSize="10px" color="kk.gold">{uiText("Vault ·")}{" "}{matchedContact.networkId} · {matchedContact.vault.threshold}{" "}{uiText("of")}{" "}{matchedContact.vault.cosigners.length}</Text>}
 							</Flex>
 						)}
+						{isSelfSend && (
+							<Box mt="2" p="3" borderRadius="10px" bg="rgba(233,196,106,0.08)" border="1px solid rgba(233,196,106,0.35)" role="alert">
+								<Text fontSize="12px" fontWeight="700" color="kk.gold">{t("selfSendTitle", { defaultValue: "This is your own address" })}</Text>
+								<Text fontSize="11px" color="kk.textSecondary" mt="1" lineHeight="1.5">
+									{t("selfSendBody", { symbol: displaySymbol, defaultValue: "This sends {{symbol}} from this account back to the same address. Nothing arrives anywhere new, and you still pay the network fee." })}
+								</Text>
+								<Flex as="label" align="center" gap="2" mt="2" cursor="pointer">
+									<input type="checkbox" checked={selfSendConfirmed} onChange={e => setSelfSendConfirmed(e.target.checked)} style={{ accentColor: 'var(--gold)' }} />
+									<Text fontSize="11px" color="kk.textPrimary">{t("selfSendConfirm", { defaultValue: "I understand, send to my own address anyway" })}</Text>
+								</Flex>
+							</Box>
+						)}
+						{!isSelfSend && matchedContact?.kind === "own" && (
+							<Text fontSize="11px" color="kk.textSecondary" mt="1.5">
+								{t("ownWalletNote", { defaultValue: "This address belongs to your wallet. You are moving funds between your own accounts." })}
+							</Text>
+						)}
 						{/* R5: new external address — flag it + offer to save (opens dialog). */}
 						{addressIsNew && !matchedContact && (
 							<Flex align="center" gap="2" mt="1.5" px="2" py="1" w="fit-content" bg="rgba(224,140,123,0.08)" border="1px solid rgba(224,140,123,0.28)" borderRadius="999px">
@@ -923,6 +953,12 @@ export function SendForm({ chain, address, balance, balanceLoading = false, toke
 						<Text fontSize="xs" color="kk.error">{t("exceedsBalance", { balance: formatBalance(displayBalance), symbol: displaySymbol })}</Text>
 					)}
 
+					{/* Self-send: Build waits for the explicit confirmation above. */}
+					{isSelfSend && !selfSendConfirmed ? (
+						<Button w="full" px="4" py="2" borderRadius="12px" bg="var(--gold)" color="var(--ink-0)" fontWeight="600" disabled>
+							{t("buildTransaction")}
+						</Button>
+					) : (
 					<Button
 						size="sm"
 						bg="var(--gold)"
@@ -937,6 +973,7 @@ export function SendForm({ chain, address, balance, balanceLoading = false, toke
 					>
 						{loading ? t("buildingTransaction") : t("buildTransaction")}
 					</Button>
+					)}
 				</>
 			)}
 

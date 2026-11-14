@@ -143,7 +143,8 @@
 		"firmwareCannotSign": "This KeepKey firmware cannot sign this",
 		"turnOnAdvancedMode": "Turn on Advanced Mode",
 		"allowBlindSigningOnceFirst": "Choose Allow once to approve",
-		"advancedModeScopeHint": "Advanced Mode stays on until your KeepKey locks or is unplugged, for every app that uses it."
+		"advancedModeScopeHint": "Advanced Mode stays on until your KeepKey locks or is unplugged, for every app that uses it.",
+		"selfTransfer": "From and To are the same address: this sends to yourself, and only the network fee is spent."
 	},
 	"recovery": {
 		"title": "Recover Your Wallet",
