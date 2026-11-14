@@ -10,6 +10,7 @@ import { base58, base58xrp, bech32, bech32m, createBase58check } from '@scure/ba
 import { sha256 } from '@noble/hashes/sha2'
 import type { ChainDef } from './chains'
 import { eip55 } from './safe-tx'
+import { evmTokenIdentity } from './evm-contract-identity'
 
 interface ValidationResult {
   valid: boolean
@@ -278,4 +279,61 @@ function validateZcashShieldedAddress(addr: string): ValidationResult {
   // Transparent fallback (some wallets send from shielded tab to transparent)
   if (/^t[13]/.test(addr)) return result(isBase58Hash(addr, [[0x1c, 0xb8], [0x1c, 0xbd]]), 'invalidZcashShieldedAddress')
   return fail('invalidZcashShieldedAddress')
+}
+
+// ── Recipient risk (no network calls) ───────────────────────────────────
+
+const EVM_BURN = new Set([
+  '0x0000000000000000000000000000000000000000',
+  '0x000000000000000000000000000000000000dead',
+  '0xdead000000000000000000000000000000000000',
+  '0xdead000000000000000042069420694206942069',
+])
+// Well-known sinks that are not an all-zero payload.
+const NAMED_BURN = new Set([
+  '1nc1nerator11111111111111111111111111111111', // Solana incinerator
+  'rrrrrrrrrrrrrrrrrrrrBZbvji', // XRP ACCOUNT_ONE
+])
+
+const allZero = (bytes: Uint8Array | null | undefined, skip = 0) =>
+  !!bytes && bytes.length > skip && bytes.slice(skip).every(b => b === 0)
+
+/**
+ * A zero or burn address on any chain: funds sent there are gone. Chain-agnostic:
+ * EVM zero/dead sinks, and any base58check / XRP / bech32 / Solana address whose
+ * payload is all zeros (e.g. BTC 1111111111111111111114oLvT2, Tron T9yD14Nj…).
+ */
+export function isBurnAddress(address: string): boolean {
+  const addr = address.trim()
+  if (!addr) return false
+  if (HEX40.test(addr)) return EVM_BURN.has(addr.toLowerCase())
+  if (NAMED_BURN.has(addr)) return true
+  const b58 = base58checkPayload(addr)
+  if (b58) return allZero(b58, b58.length - 20) // version byte(s) + 20-byte hash
+  if (addr.startsWith('r')) {
+    try {
+      const raw = base58xrp.decode(addr)
+      if (raw.length === 25) return allZero(raw.slice(0, 21))
+    } catch { /* not XRP */ }
+  }
+  const lower = addr.toLowerCase()
+  const bech = lower.includes('1') ? bech32.decodeUnsafe(lower) || bech32m.decodeUnsafe(lower) : undefined
+  if (bech) {
+    // Segwit programs carry a witness-version word first.
+    const words = ['bc', 'ltc', 'dgb'].includes(bech.prefix) ? bech.words.slice(1) : bech.words
+    return allZero(bech32.fromWordsUnsafe(words))
+  }
+  try {
+    const raw = base58.decode(addr)
+    if (raw.length === 32) return allZero(raw) // Solana system program 1111…1
+  } catch { /* not base58 */ }
+  return false
+}
+
+/** The token whose contract this EVM address is, from the bundled catalog (never a network lookup). */
+export function knownTokenContract(address: string, chain: ChainDef): { symbol: string; decimals: number } | undefined {
+  const addr = address.trim()
+  if (chain.chainFamily !== 'evm' || !HEX40.test(addr)) return undefined
+  const chainId = Number(chain.chainId)
+  return Number.isFinite(chainId) ? evmTokenIdentity(chainId, addr) : undefined
 }
