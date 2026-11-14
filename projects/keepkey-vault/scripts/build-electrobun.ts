@@ -19,9 +19,11 @@ export function buildElectrobun(channel: string, env = process.env) {
   const app = os === 'macos' ? join(bundle, 'Contents') : bundle
   const resources = join(app, 'Resources')
   // Electrobun replaces the release app directory with a compressed archive.
+  // 2.x clients read -update-v2.json first; it pins the archive's tar bytes.
   const outputs = channel === 'dev' ? [join(resources, 'version.json')] : [
     join(project, 'artifacts', `${prefix}-update.json`),
     join(project, 'artifacts', `${prefix}-${bundleName}.tar.zst`),
+    join(project, 'artifacts', `${prefix}-update-v2.json`),
   ]
   const before = outputs.map(path => statSync(path, { bigint: true, throwIfNoEntry: false }))
 

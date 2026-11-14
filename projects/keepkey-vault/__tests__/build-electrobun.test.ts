@@ -27,6 +27,7 @@ if (channel === 'dev') {
   write(join(app, os === 'macos' ? 'MacOS/launcher' : 'bin/launcher'), 'fixture launcher')
 } else {
   write(join('artifacts', prefix + '-update.json'), JSON.stringify({ version, hash: 'test', platform: os, arch: process.arch }))
+  if (mode !== 'missing-v2') write(join('artifacts', prefix + '-update-v2.json'), JSON.stringify({ version, hash: 'test', platform: os, arch: process.arch }))
   if (mode !== 'missing-archive') {
     write(join('artifacts', prefix + '-keepkey-vault' + (os === 'macos' ? '.app' : '') + '.tar.zst'), 'fixture archive')
   }
@@ -51,6 +52,9 @@ if (channel === 'dev') {
     const incomplete = run('stable', 'missing-archive')
     expect(incomplete.exitCode).not.toBe(0)
     expect(incomplete.stderr.toString()).toContain('.tar.zst')
+    const noV2 = run('stable', 'missing-v2')
+    expect(noV2.exitCode).not.toBe(0)
+    expect(noV2.stderr.toString()).toContain('-update-v2.json')
   } finally {
     rmSync(root, { recursive: true, force: true })
   }

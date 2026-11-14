@@ -1,12 +1,17 @@
 import type { ElectrobunConfig } from "electrobun";
-import { existsSync } from "node:fs";
-import { isAbsolute, relative } from 'node:path';
+import { existsSync as existsFromCwd } from "node:fs";
+import { dirname, isAbsolute, join, relative } from 'node:path';
+import { fileURLToPath } from "node:url";
 import pkg from "./package.json";
 
 const isWindows = process.platform === "win32";
 const isMac = process.platform === "darwin";
 const arch = process.arch; // 'arm64' or 'x64'
 // Hutch evaluates this file and reads the result from stdout, so log to stderr only.
+// It also runs it from a scratch directory (.cottontail-tmp/electrobun/<pid>), while
+// copy sources resolve against the project: check paths against this file's folder.
+const projectDir = dirname(fileURLToPath(import.meta.url));
+const existsSync = (path: string) => existsFromCwd(isAbsolute(path) ? path : join(projectDir, path));
 if (isMac) console.error(`[electrobun] Building for macOS ${arch}`);
 const certifiedEmulatorSource = isWindows
 	? "emulator-bundle/libkkemu.dll"
@@ -24,7 +29,7 @@ const moneroSidecar = isWindows ? "monero-cli.exe" : "monero-cli";
 const moneroRpc = isWindows ? "monero-wallet-rpc.exe" : "monero-wallet-rpc";
 const moneroVendor = `monero-cli/vendor/${moneroPlatform}`;
 // Electrobun resolves copy keys relative to the project, even for absolute inputs.
-const toolSource = (path: string) => isAbsolute(path) ? relative(process.cwd(), path) : path;
+const toolSource = (path: string) => isAbsolute(path) ? relative(projectDir, path) : path;
 const moneroCliSource = toolSource(process.env.KEEPKEY_MONERO_CLI_SOURCE || `monero-cli/dist/${moneroSidecar}`);
 const moneroRpcSource = toolSource(process.env.KEEPKEY_MONERO_RPC_SOURCE || `${moneroVendor}/${moneroRpc}`);
 const moneroMetadataSource = toolSource(process.env.KEEPKEY_MONERO_METADATA_SOURCE || `${moneroVendor}/monero-tools.json`);
@@ -51,6 +56,9 @@ const moneroEmulatorCopy = {
     ...(includeMoneroResearch && existsSync(`${moneroVendor}/monero-host-adapter`)
         ? { [`${moneroVendor}/monero-host-adapter`]: "monero-tools/monero-host-adapter" } : {}),
 };
+
+const zcashSource = isWindows ? "zcash-cli/target/release/zcash-cli.exe" : "zcash-cli/target/release/zcash-cli";
+const zcashCopy = existsSync(zcashSource) ? { [zcashSource]: isWindows ? "zcash-cli.exe" : "zcash-cli" } : {};
 
 export default {
 	app: {
@@ -98,16 +106,20 @@ export default {
 			...moneroCopy,
 			...moneroEmulatorCopy,
 			...moneroDeviceCopy,
-			// Zcash privacy engine sidecar (Rust binary -- .exe on Windows)
-			[isWindows ? "zcash-cli/target/release/zcash-cli.exe" : "zcash-cli/target/release/zcash-cli"]: isWindows ? "zcash-cli.exe" : "zcash-cli",
+			// Zcash privacy engine sidecar (Rust binary -- .exe on Windows). Only Apple
+			// Silicon builds it; Vault disables the privacy capability when it is absent,
+			// and scripts/verify-release-bundle.ts requires it in the arm64 release.
+			...zcashCopy,
 		},
 		mac: {
 			bundleCEF: false,
 			icons: "icon.iconset",
 			codesign: process.env.CI !== 'true',
-			notarize: process.env.CI !== 'true',
-			// CI ships the Intel update archive and discards the ARM disk image.
-			createDmg: process.env.CI !== 'true',
+			// `make dmg` builds, signs and notarizes the shipped disk image from this
+			// app; notarizing the image covers the app inside it. Hutch's own wrapper
+			// DMG and app submission would only add Apple round trips.
+			notarize: false,
+			createDmg: false,
 			entitlements: {
 				"com.apple.security.cs.allow-jit": true,
 				"com.apple.security.cs.allow-unsigned-executable-memory": true,
@@ -118,7 +130,7 @@ export default {
 				// kills the process if Info.plist has no NSCameraUsageDescription.
 				// Must stay `true`: Electrobun writes a string value straight into
 				// entitlements.plist as <string>, which codesign rejects here. The
-				// human-readable prompt copy is set in scripts/prune-app-bundle.ts.
+				// human-readable prompt copy is set in scripts/patch-bundle.ts.
 				"com.apple.security.device.camera": true,
 			},
 		},
@@ -133,6 +145,9 @@ export default {
 	},
 	release: {
 		baseUrl: "https://github.com/keepkey/keepkey-vault/releases/latest/download",
+		// Hutch would otherwise download the current Latest (a 1.x release) during
+		// every stable build and diff against it. Vault does not publish patches.
+		generatePatch: false,
 	},
 	scripts: {
 		postBuild: "scripts/patch-bundle.ts",

@@ -2,17 +2,17 @@
 # AppImage entry point (copied to AppDir/AppRun by the Linux packaging step).
 #
 # An AppImage cannot declare package dependencies the way the .deb does, so a
-# system without WebKitGTK 4.1 or Ayatana AppIndicator used to fail inside the
-# app: the native layer did not load and the user got a JavaScript stack trace
-# ("null is not an object (evaluating 'bridge.requestHost')"). Check the
-# libraries the native layer links against first and name the packages.
+# system without WebKitGTK 4.1 used to fail inside the app: the native layer did
+# not load and the user got a JavaScript stack trace ("null is not an object
+# (evaluating 'bridge.requestHost')"). Check the libraries the native layer
+# links against first and name the packages.
 #
 # The AppImage bundles the tray stack (Ayatana AppIndicator + dbusmenu) next to
-# libNativeWrapper.so in usr/bin/bin — NOT usr/lib: the Electrobun launcher
-# replaces the child's LD_LIBRARY_PATH with that one directory, so it is the
-# only place a bundled library is guaranteed to be found. Normally only
-# WebKitGTK can be missing — it is too big and too coupled to the host (helper
-# subprocesses, GStreamer, Mesa) to bundle.
+# libNativeWrapper.so in usr/bin/bin. The Electrobun 2.x launcher puts that
+# directory first on LD_LIBRARY_PATH, and the native wrapper dlopens
+# AppIndicator when the tray is created (without it the app runs trayless).
+# Normally only WebKitGTK can be missing — it is too big and too coupled to the
+# host (helper subprocesses, GStreamer, Mesa) to bundle.
 SELF=$(readlink -f "$0")
 HERE=${SELF%/*}
 BIN="$HERE/usr/bin/bin"

@@ -78,12 +78,15 @@ $minos_values
 EOF
   fi
 done < <(
-  # Executable code lives in MacOS and Frameworks; Resources contributes native
-  # addons and shared libraries. Avoid running `file` over every JS/JSON asset.
+  # Executable code lives in MacOS and Frameworks. Resources holds native addons
+  # and libraries plus extensionless executables (the Electrobun 2.x update
+  # manager Resources/uninstall, zcash-cli, Monero helpers); any of those must be
+  # executable to run, so audit every executable file there as well. This avoids
+  # running `file` over every JS/JSON asset.
   [ ! -d "$APP_PATH/Contents/MacOS" ] || find "$APP_PATH/Contents/MacOS" -type f -print0
   [ ! -d "$APP_PATH/Contents/Frameworks" ] || find "$APP_PATH/Contents/Frameworks" -type f -print0
   [ ! -d "$APP_PATH/Contents/Resources" ] || find "$APP_PATH/Contents/Resources" -type f \
-    \( -name '*.node' -o -name '*.dylib' -o -name '*.so' \) -print0
+    \( -name '*.node' -o -name '*.dylib' -o -name '*.so' -o -perm -u+x \) -print0
 )
 
 if [ "$count" -eq 0 ]; then

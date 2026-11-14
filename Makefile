@@ -15,11 +15,19 @@ PROTO_BUILD_INPUTS := $(shell find modules/proto-tx-builder/src -type f \( -name
 DEVICE_PROTOCOL_BUILD_STAMP := $(STAMP_DIR)/device-protocol-build.stamp
 DEVICE_PROTOCOL_INPUTS := $(shell find modules/device-protocol -maxdepth 1 -name '*.proto' -o -name 'package.json' 2>/dev/null)
 ZCASH_CLI_STAMP := $(STAMP_DIR)/zcash-cli.stamp
-# Electrobun 2.x: our fork (modules/electrobun, keepkey/2.x) built as a local Hutch devkit.
+# Electrobun 2.x: our fork (modules/electrobun, keepkey/2.x) built as a Hutch devkit.
 # HUTCH_ELECTROBUN_DEVKIT_ROOT makes Hutch use it instead of downloading upstream's.
+# CI builds the devkit in its own job (Linux on ubuntu-22.04) and passes it in:
+#   make install ELECTROBUN_DEVKIT_PREBUILT=1 HUTCH_ELECTROBUN_DEVKIT_ROOT=/abs/devkit
+# The devkit is rebuilt whenever the fork commit, the macOS floor or that mode changes.
 ELECTROBUN_DEVKIT_STAMP := $(STAMP_DIR)/electrobun-devkit.stamp
-export HUTCH_ELECTROBUN_DEVKIT_ROOT := $(abspath modules/electrobun/package/dist)
+ELECTROBUN_DEVKIT_KEYFILE := $(STAMP_DIR)/electrobun-devkit.key
+ELECTROBUN_DEVKIT_KEY = release macos=$(MACOS_DEPLOYMENT_TARGET) fork=$(shell git -C modules/electrobun rev-parse HEAD 2>/dev/null) prebuilt=$(ELECTROBUN_DEVKIT_PREBUILT)
+HUTCH_ELECTROBUN_DEVKIT_ROOT ?= $(abspath modules/electrobun/package/dist)
+export HUTCH_ELECTROBUN_DEVKIT_ROOT
 export PATH := $(HOME)/.hutch/bin:$(PATH)
+# Hutch's per-platform names: artifacts/stable-<os>-<arch>-keepkey-vault.app.tar.zst
+ELECTROBUN_ARCH := $(if $(filter x86_64,$(ARCH)),x64,$(ARCH))
 ZCASH_CLI_SOURCES := $(shell find $(PROJECT_DIR)/zcash-cli/src -name '*.rs' 2>/dev/null) $(PROJECT_DIR)/zcash-cli/Cargo.toml
 
 # Auto-load .env if present (only export signing-related vars to sub-processes)
@@ -28,7 +36,7 @@ include .env
 export ELECTROBUN_DEVELOPER_ID ELECTROBUN_TEAMID ELECTROBUN_APPLEID ELECTROBUN_APPLEIDPASS
 endif
 
-.PHONY: release-sums monero-cli monero-emulator monero-emulator-signing monero-adapter firmware-token-table-717 clearsign-worker-test sync-asset-data clearsign-worker-rehearsal-guard clearsign-worker-rehearsal-deploy install dev dev-hmr build build-stable build-canary build-signed patch-arm64-release-tar prune-bundle dmg clean help vault sign-check notary-check verify verify-entitlements publish release upload-dmg upload-all-dmgs sign-release sign-release-intel verify-arch audit-macos-bundle submodules modules-install modules-build device-protocol-build modules-clean audit build-zcash-cli build-zcash-cli-debug build-zcash-cli-intel test test-unit test-rest test-sign-gating test-zcash-cli test-emu test-emu-erc7730 test-emu-erc7730-717 test-emu-solana-lut test-emu-erc7730-typed test-emu-pin build-intel build-signed-intel build-electrobun-x64-core build-electrobun-arm64-core prepare-electrobun-arm64-core publish-electrobun-x64-core build-electrobun-linux-x64-core preflight build-emulator build-emulator-windows build-emulator-macos-release build-emulator-release clean-emulator test-emu-python i18n-extract i18n-sync i18n-baseline test-i18n
+.PHONY: FORCE electrobun-devkit electrobun-macos-helpers verify-bundle release-sums monero-cli monero-emulator monero-emulator-signing monero-adapter firmware-token-table-717 clearsign-worker-test sync-asset-data clearsign-worker-rehearsal-guard clearsign-worker-rehearsal-deploy install dev dev-hmr build build-stable build-canary build-signed dmg clean help vault sign-check notary-check verify verify-entitlements publish release upload-dmg upload-all-dmgs sign-release sign-release-intel verify-arch audit-macos-bundle submodules modules-install modules-build device-protocol-build modules-clean audit build-zcash-cli build-zcash-cli-debug build-zcash-cli-intel test test-unit test-rest test-sign-gating test-zcash-cli test-emu test-emu-erc7730 test-emu-erc7730-717 test-emu-solana-lut test-emu-erc7730-typed test-emu-pin build-intel build-signed-intel preflight build-emulator build-emulator-windows build-emulator-macos-release build-emulator-release clean-emulator test-emu-python i18n-extract i18n-sync i18n-baseline test-i18n
 
 # --- Submodules (auto-init on fresh worktrees/clones) ---
 
@@ -145,8 +153,8 @@ EXPECTED_ARCH ?= $(ARCH)
 
 verify-arch:
 	@echo "Verifying artifact architecture (expecting $(EXPECTED_ARCH))..."
-	@TAR_ZST=$$(find $(PROJECT_DIR)/artifacts -name "*.app.tar.zst" | head -1); \
-	if [ -z "$$TAR_ZST" ]; then echo "ERROR: No .app.tar.zst found in artifacts/"; exit 1; fi; \
+	@TAR_ZST=$(PROJECT_DIR)/artifacts/stable-macos-$(if $(filter x86_64,$(EXPECTED_ARCH)),x64,$(EXPECTED_ARCH))-keepkey-vault.app.tar.zst; \
+	if [ ! -f "$$TAR_ZST" ]; then echo "ERROR: $$TAR_ZST not found"; exit 1; fi; \
 	TMPDIR=$$(mktemp -d); \
 	trap 'rm -rf "$$TMPDIR"' EXIT; \
 	zstd -d "$$TAR_ZST" -o "$$TMPDIR/app.tar" --force 2>/dev/null; \
@@ -170,11 +178,9 @@ verify-arch:
 	if [ "$$FAIL" = "1" ]; then \
 		echo ""; \
 		echo "The artifact contains binaries for the wrong architecture."; \
-		echo "Use CI macOS runners for correct architecture builds:"; \
-		echo "  macos-13 → x86_64 (Intel)"; \
-		echo "  macos-14 → arm64  (Apple Silicon)"; \
-		echo ""; \
-		echo "To sign CI-built artifacts locally: make sign-release"; \
+		echo "Electrobun 2.x builds only for the host architecture:"; \
+		echo "  Intel (x86_64): native Intel CI runner (macos-15-intel), then make sign-release-intel"; \
+		echo "  Apple Silicon (arm64): make build-signed on an Apple Silicon Mac"; \
 		exit 1; \
 	fi; \
 	echo "Architecture verified: $(EXPECTED_ARCH)"
@@ -186,10 +192,10 @@ audit-macos-bundle:
 	./scripts/audit-macos-bundle.sh "$(APP)" "$(EXPECTED_ARCH)" "$(MACOS_DEPLOYMENT_TARGET)"
 
 # --- Intel Mac Build (DEPRECATED) ---
-# WARNING: arch -x86_64 does NOT make Bun/Electrobun produce x86_64 output.
-# Bun is ARM64-only — the resulting binary will STILL be ARM64 regardless.
-# Use CI (macos-13 runner) for real Intel builds, then sign locally with:
-#   make sign-release
+# WARNING: arch -x86_64 does NOT make Bun/Electrobun produce x86_64 output, and
+# Electrobun 2.x refuses to cross-compile macOS. CI builds Intel natively on
+# macos-15-intel; sign that artifact locally with:
+#   make sign-release-intel
 INTEL_DMG_NAME := KeepKey-Vault-$(VERSION)-x86_64.dmg
 
 build-intel:
@@ -213,90 +219,38 @@ build-signed-intel:
 	@echo ""
 	@exit 1
 
-# --- Electrobun x64 Core (macOS 13+, pinned fork) ---
-# Cross-compiles Electrobun core binaries for Intel Mac from ARM64.
-# Uses the release-pinned BitHighlander/electrobun branch. Targets macOS 13.0+.
-# Produces: artifacts/electrobun-core-darwin-x64.tar.gz
-# Prerequisites: run `cd modules/electrobun/package && bun install && bun build.ts` once to vendor deps.
-#
-# IMPORTANT: After bumping the electrobun submodule, rebuild + republish:
-#   make publish-electrobun-x64-core
-# Then update X64_CORE_TAG in .github/workflows/build.yml to match.
+# --- Electrobun 2.x devkit ---
+# Release flavour (zig ReleaseSmall) with the macOS floor, for every build: dev
+# runs the same natives that ship. ELECTROBUN_MACOS_DEPLOYMENT_TARGET reaches the
+# launcher, core, native wrapper and update manager; the three prebuilt helpers
+# it downloads are macOS 14 unless electrobun-macos-helpers replaced them.
+$(ELECTROBUN_DEVKIT_KEYFILE): FORCE | $(STAMP_DIR)
+	@echo '$(ELECTROBUN_DEVKIT_KEY)' | cmp -s - $@ || echo '$(ELECTROBUN_DEVKIT_KEY)' > $@
 
-ELECTROBUN_X64_REPO ?= keepkey/electrobun
-# Tag format: electrobun-x64-core-vN — increment N when rebuilding
-ELECTROBUN_X64_TAG ?= electrobun-x64-core-v7
+$(ELECTROBUN_DEVKIT_STAMP): $(SUBMODULES_STAMP) $(ELECTROBUN_DEVKIT_KEYFILE) | $(STAMP_DIR)
+ifndef ELECTROBUN_DEVKIT_PREBUILT
+	@command -v hutch >/dev/null || (echo "ERROR: Hutch not installed (~/.hutch/bin/hutch). See modules/electrobun docs/guides/hutch."; exit 1)
+	cd modules/electrobun/package && hutch run install && \
+		ELECTROBUN_MACOS_DEPLOYMENT_TARGET=$(MACOS_DEPLOYMENT_TARGET) hutch run build:release
+endif
+	node scripts/verify-electrobun-devkit.mjs "$(HUTCH_ELECTROBUN_DEVKIT_ROOT)"
+	@touch $@
 
-build-electrobun-x64-core:
-	@echo "Cross-compiling Electrobun x64 core from the pinned source..."
-	./scripts/build-electrobun-x64-core.sh
+electrobun-devkit: $(ELECTROBUN_DEVKIT_STAMP)
 
-# Rebuild ARM helpers with an explicit macOS 13 floor. Upstream release
-# binaries otherwise inherit the build host's deployment target.
-build-electrobun-arm64-core:
-	@echo "Building Electrobun arm64 core from pinned source for macOS $(MACOS_DEPLOYMENT_TARGET)+..."
-	MACOS_TARGET=$(MACOS_DEPLOYMENT_TARGET) ./scripts/build-electrobun-arm64-core.sh
+# Rebuild libasar/zig-zstd/bspatch for the macOS floor into the fork's vendors/,
+# then force the devkit to rebuild with them. Release builds run this first.
+electrobun-macos-helpers: $(SUBMODULES_STAMP)
+	./scripts/build-electrobun-macos-helpers.sh $(MACOS_DEPLOYMENT_TARGET)
+	@rm -f $(ELECTROBUN_DEVKIT_STAMP)
 
-prepare-electrobun-arm64-core: install
-	@echo "Downloading certified macOS 13-compatible Electrobun arm64 core..."
-	@RUN_ID=$$(node -p "require('./$(PROJECT_DIR)/emulator-bundle/manifest.json').source.runId"); \
-	ARTIFACT=$$(node -p "require('./$(PROJECT_DIR)/emulator-bundle/manifest.json').source.artifactName"); \
-	CORE_PATH=$$(node -p "require('./$(PROJECT_DIR)/emulator-bundle/manifest.json').source.armCorePath"); \
-	CORE_SHA=$$(node -p "require('./$(PROJECT_DIR)/emulator-bundle/manifest.json').source.armCoreSha256"); \
-	WORK=$$(mktemp -d); \
-	trap 'rm -rf "$$WORK"' EXIT; \
-	gh run download "$$RUN_ID" --repo $(GITHUB_REPO) --name "$$ARTIFACT" --dir "$$WORK"; \
-	test -f "$$WORK/$$CORE_PATH" || \
-		{ echo "ERROR: certified artifact lacks ARM64 Electrobun core"; exit 1; }; \
-	ACTUAL_SHA=$$(shasum -a 256 "$$WORK/$$CORE_PATH" | awk '{print $$1}'); \
-	test "$$ACTUAL_SHA" = "$$CORE_SHA" || \
-		{ echo "ERROR: certified ARM64 Electrobun core hash mismatch"; exit 1; }; \
-	mkdir -p $(PROJECT_DIR)/node_modules/electrobun/dist-macos-arm64; \
-	tar xzf "$$WORK/$$CORE_PATH" \
-		-C $(PROJECT_DIR)/node_modules/electrobun/dist-macos-arm64
-
-publish-electrobun-x64-core: build-electrobun-x64-core
-	@test -f artifacts/electrobun-core-darwin-x64.tar.gz || (echo "ERROR: tarball not found"; exit 1)
-	@SUBMOD_VER=$$(cd modules/electrobun && git describe --tags --always 2>/dev/null || git rev-parse --short HEAD); \
-	echo "Publishing Electrobun x64 core to $(ELECTROBUN_X64_REPO) (submodule: $$SUBMOD_VER)..."; \
-	if gh release view $(ELECTROBUN_X64_TAG) --repo $(ELECTROBUN_X64_REPO) >/dev/null 2>&1; then \
-		echo "ERROR: immutable core tag $(ELECTROBUN_X64_TAG) already exists."; \
-		echo "Choose a new ELECTROBUN_X64_TAG; production core assets are never overwritten."; \
-		exit 1; \
-	fi; \
-	gh release create $(ELECTROBUN_X64_TAG) --repo $(ELECTROBUN_X64_REPO) \
-			--title "Electrobun x64 Core (macOS 13.0+, pinned $$SUBMOD_VER)" \
-			--notes "Cross-compiled Electrobun core for macOS 13.0+ Intel. Built from the release-pinned BitHighlander/electrobun commit $$SUBMOD_VER. Bun 1.3.13. Adhoc-signed." \
-			artifacts/electrobun-core-darwin-x64.tar.gz; \
-	echo "Published: https://github.com/$(ELECTROBUN_X64_REPO)/releases/tag/$(ELECTROBUN_X64_TAG)"; \
-	echo ""; \
-	echo "NEXT: Update .github/workflows/build.yml X64_CORE_TAG to $(ELECTROBUN_X64_TAG)"
-
-# --- Electrobun Linux x64 Core (glibc 2.35 floor) ---
-# Builds Electrobun's libNativeWrapper.so + friends on Ubuntu 22.04 so the
-# resulting Linux Vault bundle works on Debian 12, Ubuntu 22.04, RHEL 9, etc.
-# Upstream's prebuilt core ships against glibc 2.38, which excludes those.
-#
-# Local invocation only works on an actual Ubuntu 22.04 host. CI builds it in
-# the linux-core job of build.yml; it is never published as a release.
-
-build-electrobun-linux-x64-core:
-	@echo "Building Electrobun Linux x64 core from the pinned submodule (must run on ubuntu-22.04)..."
-	./scripts/build-electrobun-linux-x64-core.sh
+FORCE:
 
 # --- Vault ---
 
 $(VAULT_INSTALL_STAMP): $(PROJECT_DIR)/package.json $(PROJECT_DIR)/bun.lock $(PROJECT_DIR)/hutch.config.ts $(ELECTROBUN_DEVKIT_STAMP) $(PROTO_BUILD_STAMP) $(HDWALLET_BUILD_STAMP) $(DEVICE_PROTOCOL_BUILD_STAMP) | $(STAMP_DIR)
 	cd $(PROJECT_DIR) && bun install --frozen-lockfile
 	cd $(PROJECT_DIR) && rm -rf .hutch/devkit .hutch/devkit.lock && hutch electrobun sync
-	@touch $@
-
-# ponytail: keyed on the fork's package.json (its version moves with every fork release);
-# `rm .make/electrobun-devkit.stamp` to force a rebuild between version bumps.
-$(ELECTROBUN_DEVKIT_STAMP): $(SUBMODULES_STAMP) modules/electrobun/package/package.json | $(STAMP_DIR)
-	@command -v hutch >/dev/null || (echo "ERROR: Hutch not installed (~/.hutch/bin/hutch). See modules/electrobun docs/guides/hutch."; exit 1)
-	cd modules/electrobun/package && hutch run install && hutch run build:dev
-	@test -f $(HUTCH_ELECTROBUN_DEVKIT_ROOT)/native-devkit.json || (echo "ERROR: devkit build produced no native-devkit.json"; exit 1)
 	@touch $@
 
 install: $(VAULT_INSTALL_STAMP)
@@ -337,11 +291,15 @@ build-stable: install build-zcash-cli
 build-canary: install
 	cd $(PROJECT_DIR) && bun run build:canary
 
-# Prune the app bundle after Electrobun build (strips nested node_modules, .d.ts, etc.)
-prune-bundle:
-	cd $(PROJECT_DIR) && bun scripts/prune-app-bundle.ts
+# Read-only gate on the archive Hutch packed: update manifests match its bytes,
+# postBuild pruning and camera copy reached it, emulator universal, zcash-cli per
+# arch. Pruning itself runs in Hutch's postBuild hook (scripts/patch-bundle.ts).
+# Add VERIFY_SIGNED=1 to also require the Developer ID signature and entitlements.
+verify-bundle:
+	cd $(PROJECT_DIR) && bun scripts/verify-release-bundle.ts stable $(if $(VERIFY_SIGNED),--signed)
 
-# Full signed build: electrobun build → audit → prune → extract from tar → create DMG → sign + notarize + staple
+# Full signed build: helpers for the macOS floor → devkit → hutch build (prune in
+# postBuild, Developer ID signing) → verify archive → DMG → sign + notarize + staple.
 # Force-clear stamps so the release always rebuilds from the pinned source:
 #  - zcash-cli: so it gets re-signed with Developer ID (stamp may be stale from an unsigned build)
 #  - module build stamps: the proto-tx-builder / hdwallet / device-protocol dist/ output is
@@ -351,33 +309,27 @@ prune-bundle:
 #    (This shipped the @cosmjs/stargate Freegrant/Feegrant fallback as a pre-fix build in v1.4.6/1.4.7,
 #    breaking every Cosmos tx with "createFeegrantAminoConverters is not a function".)
 #    Clearing the stamps forces modules-build from the pinned source before the vault install copies it.
+# Nothing rewrites the archive after Hutch packs it: its update-v2.json pins the tar bytes.
 build-signed: notary-check
 	@rm -f $(ZCASH_CLI_STAMP) $(PROTO_BUILD_STAMP) $(HDWALLET_BUILD_STAMP) $(DEVICE_PROTOCOL_BUILD_STAMP)
 	@node scripts/verify-certified-emulator.mjs
-	$(MAKE) prepare-electrobun-arm64-core
-	$(MAKE) build-stable audit prune-bundle
-	# Electrobun refreshes its downloaded core while packaging, so apply the
-	# certified macOS 13 helpers to the assembled app and re-sign it afterward.
-	$(MAKE) prepare-electrobun-arm64-core patch-arm64-release-tar dmg
+	$(MAKE) electrobun-macos-helpers
+	$(MAKE) build-stable audit
+	$(MAKE) verify-bundle VERIFY_SIGNED=1
+	$(MAKE) dmg
 	@echo ""
 	@echo "=== Build complete ==="
 	@echo "DMG: $(PROJECT_DIR)/artifacts/$(DMG_NAME)"
 	@ls -lh $(PROJECT_DIR)/artifacts/$(DMG_NAME)
 
-patch-arm64-release-tar: sign-check
-	./scripts/patch-arm64-release-tar.sh \
-		"$(PROJECT_DIR)/artifacts/stable-macos-arm64-keepkey-vault.app.tar.zst" \
-		"$(PROJECT_DIR)/node_modules/electrobun/dist-macos-arm64" \
-		"$(PROJECT_DIR)/entitlements.plist" \
-		"$(MACOS_DEPLOYMENT_TARGET)"
-
-# Create a proper DMG from the fully-extracted app (workaround for Electrobun self-extractor bug)
+# Create the DMG from the fully extracted app (installs to /Applications as a
+# plain app; full updates go through its bundled Resources/uninstall manager).
 dmg: verify-arch
 	@echo "Creating DMG from tar.zst artifact..."
 	@# set -e: a failed sign, verify, notarize or staple step must stop the recipe.
 	@set -e; \
-	TAR_ZST=$$(find $(PROJECT_DIR)/artifacts -name "*.app.tar.zst" | head -1); \
-	if [ -z "$$TAR_ZST" ]; then echo "ERROR: No .app.tar.zst found in artifacts/"; exit 1; fi; \
+	TAR_ZST=$(PROJECT_DIR)/artifacts/stable-macos-$(ELECTROBUN_ARCH)-keepkey-vault.app.tar.zst; \
+	if [ ! -f "$$TAR_ZST" ]; then echo "ERROR: $$TAR_ZST not found"; exit 1; fi; \
 	STAGING=$$(mktemp -d); \
 	trap 'rm -rf "$$STAGING"' EXIT; \
 	echo "Extracting app from $$TAR_ZST..."; \
@@ -387,6 +339,7 @@ dmg: verify-arch
 	APP=$$(find "$$STAGING" -name "*.app" -maxdepth 1 | head -1); \
 	if [ -z "$$APP" ]; then echo "ERROR: No .app found after extraction"; exit 1; fi; \
 	echo "Verifying extracted app..."; \
+	./scripts/audit-macos-bundle.sh "$$APP" "$(ARCH)" "$(MACOS_DEPLOYMENT_TARGET)"; \
 	codesign --verify --deep --strict "$$APP" || { echo "ERROR: codesign verification failed"; exit 1; }; \
 	DMG_OUT="$$(pwd)/$(PROJECT_DIR)/artifacts/$(DMG_NAME)"; \
 	echo "Creating DMG..."; \
@@ -808,6 +761,8 @@ verify:
 # --- Publishing ---
 
 GITHUB_REPO ?= keepkey/keepkey-vault
+# Auto-update files of the local (arm64) build, exactly as Hutch named them.
+MACOS_UPDATE_FILES = $(addprefix $(PROJECT_DIR)/artifacts/stable-macos-$(ELECTROBUN_ARCH)-,keepkey-vault.app.tar.zst update.json update-v2.json)
 
 publish:
 	@echo "Artifacts:"
@@ -824,28 +779,22 @@ upload-dmg: sign-check
 		--repo $(GITHUB_REPO) \
 		--clobber \
 		$(PROJECT_DIR)/artifacts/$(DMG_NAME)
-	@UPDATE_JSON=$$(ls $(PROJECT_DIR)/artifacts/stable-*-update.json 2>/dev/null | head -1); \
-	TAR_ZST=$$(ls $(PROJECT_DIR)/artifacts/stable-*-keepkey-vault.app.tar.zst 2>/dev/null | head -1); \
-	if [ -n "$$UPDATE_JSON" ]; then gh release upload v$(VERSION) --repo $(GITHUB_REPO) --clobber "$$UPDATE_JSON"; fi; \
-	if [ -n "$$TAR_ZST" ]; then gh release upload v$(VERSION) --repo $(GITHUB_REPO) --clobber "$$TAR_ZST"; fi
+	@# The archive and both manifests go together: update-v2.json pins the tar bytes.
+	cd $(PROJECT_DIR) && bun scripts/verify-release-bundle.ts stable --signed
+	gh release upload v$(VERSION) --repo $(GITHUB_REPO) --clobber $(MACOS_UPDATE_FILES)
 	@echo "DMG uploaded to https://github.com/$(GITHUB_REPO)/releases/tag/v$(VERSION)"
 
 # Full release: build signed + create new GitHub release (if CI hasn't already)
 release: sign-check build-signed
 	@echo "Creating GitHub release v$(VERSION)..."
 	@test -f $(PROJECT_DIR)/artifacts/$(DMG_NAME) || (echo "ERROR: DMG not found: $(DMG_NAME)" && exit 1)
-	@UPDATE_JSON=$$(ls $(PROJECT_DIR)/artifacts/stable-*-update.json 2>/dev/null | head -1); \
-	TAR_ZST=$$(ls $(PROJECT_DIR)/artifacts/stable-*-keepkey-vault.app.tar.zst 2>/dev/null | head -1); \
-	if [ -z "$$UPDATE_JSON" ] || [ -z "$$TAR_ZST" ]; then \
-		echo "WARNING: Missing update artifacts (update.json or tar.zst) — release will not support auto-updates"; \
-	fi; \
 	gh release create v$(VERSION) \
 		--repo $(GITHUB_REPO) \
 		--title "KeepKey Desktop v$(VERSION)" \
 		--draft \
 		--generate-notes \
 		$(PROJECT_DIR)/artifacts/$(DMG_NAME) \
-		$$UPDATE_JSON $$TAR_ZST
+		$(MACOS_UPDATE_FILES)
 	@echo "Draft release v$(VERSION) created in $(GITHUB_REPO)"
 
 # Sign CI-built macOS artifacts and upload to draft release.
@@ -1076,9 +1025,11 @@ help:
 	@echo "  make dev            - Build and run in dev mode"
 	@echo "  make dev-hmr        - Dev mode with Vite HMR"
 	@echo "  make build          - Development build (no signing)"
-	@echo "  make build-stable   - Production build (signs + notarizes via Electrobun)"
-	@echo "  make build-signed   - Full pipeline: build → audit → prune → DMG → sign → notarize"
-	@echo "  make prune-bundle   - Prune app bundle (strip nested deps, .d.ts, etc.)"
+	@echo "  make build-stable   - Production build (Hutch signs locally; CI=true builds unsigned)"
+	@echo "  make build-signed   - Full pipeline: helpers → devkit → build → verify → DMG → sign → notarize"
+	@echo "  make verify-bundle  - Read-only checks on the packed release archive"
+	@echo "  make electrobun-devkit        - Build the Electrobun devkit from modules/electrobun"
+	@echo "  make electrobun-macos-helpers - Rebuild Electrobun's libasar/zig-zstd/bspatch for the macOS floor"
 	@echo "  make dmg            - Create DMG from existing build artifacts"
 	@echo "  make modules-build  - Build hdwallet + proto-tx-builder from source"
 	@echo "  make modules-clean  - Clean module build artifacts"
@@ -1087,8 +1038,6 @@ help:
 	@echo "  make sign-release   - Download CI artifacts, sign + repack, upload DMGs + auto-update tar.zst"
 	@echo "  make upload-all-dmgs - Upload all signed DMGs to draft release"
 	@echo "  make build-zcash-cli      - Test + build Zcash CLI sidecar (release)"
-	@echo "  make build-electrobun-x64-core  - Cross-compile Electrobun core for Intel Mac (macOS 13+)"
-	@echo "  make publish-electrobun-x64-core - Build + publish x64 core release"
 	@echo "  make build-zcash-cli-intel - Cross-compile Zcash CLI for Intel Mac"
 	@echo "  make build-zcash-cli-debug - Test + build Zcash CLI sidecar (debug)"
 	@echo "  make test-zcash-cli       - Run Zcash CLI unit tests only"
@@ -1136,7 +1085,7 @@ preflight: submodules
 	else echo "   ❌ certified emulator artifacts missing or invalid — run scripts/stage-certified-emulator.sh <artifact-dir>"; fail=1; fi; \
 	echo ""; \
 	echo "3. CANONICAL BRANCHES"; \
-	for spec in "modules/hdwallet|https://github.com/keepkey/hdwallet|master" "modules/proto-tx-builder|https://github.com/BitHighlander/proto-tx-builder|main" "modules/device-protocol|https://github.com/keepkey/device-protocol|master" "modules/electrobun|https://github.com/BitHighlander/electrobun|keepkey/launcher-env-uaf-fix"; do \
+	for spec in "modules/hdwallet|https://github.com/keepkey/hdwallet|master" "modules/proto-tx-builder|https://github.com/BitHighlander/proto-tx-builder|main" "modules/device-protocol|https://github.com/keepkey/device-protocol|master" "modules/electrobun|https://github.com/keepkey/electrobun|keepkey/2.x"; do \
 		mod=$$(echo "$$spec" | cut -d'|' -f1); url=$$(echo "$$spec" | cut -d'|' -f2); br=$$(echo "$$spec" | cut -d'|' -f3); \
 		tip=$$(git -C "$$mod" fetch -q "$$url" "$$br" 2>/dev/null && git -C "$$mod" rev-parse FETCH_HEAD); \
 		behind=$$( [ -n "$$tip" ] && git -C "$$mod" rev-list --count HEAD.."$$tip" || echo "?"); \
@@ -1145,7 +1094,7 @@ preflight: submodules
 	done; \
 	echo ""; \
 	echo "4. CI STATUS (checks pinned commit, falls back to fork repo for cross-fork PRs)"; \
-	for pair in "modules/hdwallet|keepkey/hdwallet|BitHighlander/hdwallet" "modules/proto-tx-builder|BitHighlander/proto-tx-builder|BitHighlander/proto-tx-builder" "modules/device-protocol|keepkey/device-protocol|keepkey/device-protocol" "modules/electrobun|BitHighlander/electrobun|BitHighlander/electrobun"; do \
+	for pair in "modules/hdwallet|keepkey/hdwallet|BitHighlander/hdwallet" "modules/proto-tx-builder|BitHighlander/proto-tx-builder|BitHighlander/proto-tx-builder" "modules/device-protocol|keepkey/device-protocol|keepkey/device-protocol" "modules/electrobun|keepkey/electrobun|keepkey/electrobun"; do \
 		mod=$$(echo "$$pair" | cut -d'|' -f1); \
 		repo=$$(echo "$$pair" | cut -d'|' -f2); \
 		fork=$$(echo "$$pair" | cut -d'|' -f3); \

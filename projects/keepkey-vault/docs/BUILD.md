@@ -4,7 +4,7 @@
 
 KeepKey Vault is built with [Electrobun](https://electrobun.dev) — a desktop framework using Bun as the main process and the system WebView for the UI. The build pipeline produces a signed, notarized macOS DMG.
 
-**Architecture**: Vite (frontend) → Bun.build (backend) → collect-externals (native deps) → Electrobun (packaging) → prune-app-bundle (post-build dedup) → DMG (distribution)
+**Architecture**: Vite (frontend) → Bun.build (backend) → collect-externals (native deps) → Electrobun 2.x via Hutch (packaging; `scripts/patch-bundle.ts` prunes in postBuild) → verify-release-bundle (read-only gate) → DMG (distribution)
 
 ## Quick Start
 
@@ -52,9 +52,11 @@ These are referenced as `file:` dependencies in `package.json`.
 
 > **CRITICAL**: hdwallet must be on `master` (or `vault-v1` branch) which has the lodash/rxjs removal commit (`179c5668`). Without this, the build scripts correctly strip lodash/rxjs but the code still imports them → runtime crash.
 
-### Stage 2: Vault Install (`bun install`)
+### Stage 2: Vault Install (`make install`)
 
-Installs all dependencies. The `postinstall` hook runs `scripts/patch-electrobun.sh` to patch Electrobun's zip handling (see [ENOBUFS Workaround](#enobufs-workaround)).
+Builds the Electrobun devkit from `modules/electrobun` (Hutch, release flavour,
+macOS floor from `MACOS_DEPLOYMENT_TARGET`), runs `bun install --frozen-lockfile`,
+then `hutch electrobun sync` to project the devkit SDK into `.hutch/devkit`.
 
 ### Stage 3: Vite Build (`vite build`)
 
@@ -87,39 +89,38 @@ Native addons and protobuf packages can't be bundled by Bun — they're marked `
 
 ### Stage 5: Electrobun Build (`bun scripts/build-signed.ts stable`)
 
-Runs `electrobun build --env=stable` with a custom `scripts/zip` shim on PATH.
+Runs `hutch electrobun build --env=stable` against our fork's devkit
+(`HUTCH_ELECTROBUN_DEVKIT_ROOT`, built by `make electrobun-devkit`).
 
-Electrobun:
-1. Bundles the Bun backend (`src/bun/index.ts` → single JS file)
-2. Copies files specified in `electrobun.config.ts` `build.copy`:
-   - `dist/index.html` → `views/mainview/index.html`
-   - `dist/assets` → `views/mainview/assets`
-   - `build/_ext_modules` → `node_modules`
-3. Code-signs all Mach-O binaries in the `.app` bundle
-4. Notarizes the `.app` with Apple
-5. Produces a `.app.tar.zst` artifact in `artifacts/`
+Hutch:
+1. Bundles the Bun backend
+2. Copies files specified in `electrobun.config.ts` `build.copy`
+3. Runs the `postBuild` hook, `scripts/patch-bundle.ts`: node_buffer patch,
+   real `NSCameraUsageDescription` copy, and (stable/canary) node_modules pruning
+   with the same version-aware rules as collect-externals
+4. Code-signs the nested Mach-O files and the `.app` (local builds; entitlements
+   come from `build.mac.entitlements`)
+5. Packs `artifacts/stable-macos-<arch>-keepkey-vault.app.tar.zst` with
+   `stable-macos-<arch>-update.json` and `-update-v2.json`. The v2 manifest pins
+   the sha256 and size of the uncompressed tar, so nothing may rewrite the
+   archive afterwards.
 
-### Stage 6: Prune App Bundle (`make prune-bundle`)
+### Stage 6: Verify the archive (`make verify-bundle`)
 
-`scripts/prune-app-bundle.ts` operates on the final `.app.tar.zst` — a second pass that catches anything collect-externals missed:
-
-1. Extracts the tar.zst → temporary `.app` directory
-2. **Version-aware nested dedup** (same logic as collect-externals): only removes nested deps whose version matches top-level
-3. Prunes `.d.ts`, `.ts`, `.map`, `README`, `CHANGELOG`, `LICENSE` files
-4. Strips known large directories (protobufjs, ethers, libsodium ESM, etc.)
-5. Re-signs all native `.node` binaries
-6. **Re-signs Electrobun runtime binaries explicitly** — `bun` and `launcher` get `entitlements.plist` before the bundle wrapper is signed
-7. **Re-signs the `.app` bundle wrapper** — final outer signature, without `--deep`, so nested runtime entitlements are preserved
-7. Repackages into tar.zst
+`scripts/verify-release-bundle.ts` is read-only: both manifests match the archive
+bytes, pruning and the camera copy reached it, the update manager
+(`Resources/uninstall`) is present, the emulator is universal, zcash-cli is arm64
+(absent on Intel). `VERIFY_SIGNED=1` also requires a valid signature, `allow-jit`
+on `launcher` and `bun`, and the camera entitlement on the app.
 
 > **CRITICAL**: `bun` itself must carry the JIT entitlements. Signing only the outer `.app` is not sufficient for the macOS 12/Intel crash path.
 
 ### Stage 7: DMG Creation (`make dmg`)
 
-Creates a distributable DMG from the pruned app:
+Creates a distributable DMG from the packed app:
 
 1. Extracts `.app` from the `.app.tar.zst` archive
-2. Verifies codesign on extracted app
+2. Audits every Mach-O (architecture, macOS 13.0 floor) and verifies codesign
 3. Builds the DMG with `scripts/create-macos-dmg.sh` (also used by `make sign-release`): renames the bundle to `KeepKey Vault.app`, adds the `Applications` link, has Finder save the window layout (app on the left, `Applications` on the right), then compresses to UDZO. The first run from a new terminal app asks for permission to control Finder.
 4. Signs the DMG
 5. Notarizes the DMG with Apple
@@ -133,14 +134,13 @@ Creates a distributable DMG from the pruned app:
 
 ### What Gets Signed and When
 
-The build has **three signing passes** to satisfy Apple notarization:
+Signing passes:
 
 | Pass | Script | What | Why |
 |------|--------|------|-----|
 | 1 | `collect-externals.ts` | All `.node`, `.dylib`, `.so`, extensionless Mach-O binaries in `build/_ext_modules/` | Native addons must be signed before Electrobun packages them |
-| 2 | `prune-app-bundle.ts` | All native add-ons in the extracted `.app` | Re-sign after pruning modifies the bundle |
-| 3 | `prune-app-bundle.ts` | `Contents/MacOS/launcher` and `Contents/MacOS/bun` with `entitlements.plist` | Bun runtime needs JIT entitlements on the binary itself |
-| 4 | `prune-app-bundle.ts` | The outer `.app` bundle | Final wrapper signature without clobbering nested entitlements |
+| 2 | Hutch (`hutch electrobun build`) | Nested Mach-O files, then the `.app`, after the postBuild prune | One signature over the final bytes; nothing re-signs after Hutch packs the archive |
+| 3 | `scripts/sign-macos-app.sh` | Intel CI archive only (`make sign-release-intel`) | CI builds unsigned; this signs addons, helpers, `Resources/uninstall`, `MacOS/*` with `entitlements.plist`, then the `.app` |
 
 ### Entitlements (`entitlements.plist`)
 
@@ -224,15 +224,6 @@ make upload-dmg      # Upload DMG to CI's draft release
 
 ## Known Workarounds
 
-### ENOBUFS Workaround
-
-Electrobun's compiled Zig CLI invokes `zip` via Bun's `execSync` with a 1MB `maxBuffer`. With ~5700+ files, zip output exceeds this buffer → `ENOBUFS`.
-
-**Two-layer fix**:
-1. **`scripts/zip`** — Shim that adds `-q` (quiet) to suppress per-file output
-2. **`scripts/build-signed.ts`** — Prepends `scripts/` to PATH so the shim is found before `/usr/bin/zip`
-3. **`scripts/patch-electrobun.sh`** — Patches Electrobun's CLI source to add `-q` and increase `maxBuffer` to 50MB (runs as `postinstall`)
-
 ### Vite `base: './'`
 
 Electrobun serves WebView content via `views://` protocol. Vite's default `base: '/'` generates absolute paths (`/assets/index.js`) which resolve to `views://assets/` instead of `views://mainview/assets/`. Setting `base: './'` fixes this.
@@ -241,7 +232,7 @@ Electrobun serves WebView content via `views://` protocol. Vite's default `base:
 
 **Problem (v1.0.0)**: Blind stripping of ALL nested `node_modules/` killed `@noble/hashes@1.4.0` (required by `ethereum-cryptography@2.2.1`), while top-level had `@noble/hashes@1.8.0` with incompatible API changes. App crashed silently inside Electrobun's Worker before any window opened.
 
-**Fix**: Both `collect-externals.ts` and `prune-app-bundle.ts` now compare `package.json` versions:
+**Fix**: Both `collect-externals.ts` and `scripts/app-bundle.ts` (the postBuild prune) now compare `package.json` versions:
 - Same version as top-level → safe to remove (duplicate)
 - Different version → MUST keep (parent needs this specific version)
 
@@ -252,13 +243,6 @@ See [retro-noble-hashes-breakage.md](retro-noble-hashes-breakage.md) for the ful
 `collect-externals.ts` maintains a blocklist of ~100 dev-time packages (jest, babel, istanbul, ts-proto, etc.) that get pulled into the dependency tree via `file:` resolution of hdwallet/proto-tx-builder. Without the blocklist these add ~50MB of test infrastructure to the production bundle.
 
 ## Troubleshooting
-
-### Build fails with ENOBUFS
-The zip shim isn't being used. Verify:
-```bash
-which zip  # Should show scripts/zip during build
-cat scripts/zip  # Should contain: exec /usr/bin/zip -q "$@"
-```
 
 ### Notarization fails with "unsigned binary"
 A nested `node_modules/` or banned package contains an unsigned Mach-O binary:
@@ -274,7 +258,7 @@ Missing JIT entitlement. Verify:
 ```bash
 codesign -d --entitlements :- /path/to/KeepKey\ Vault.app
 ```
-Should show `com.apple.security.cs.allow-jit`. If missing, check that `prune-app-bundle.ts` applies `entitlements.plist`.
+Should show `com.apple.security.cs.allow-jit`. If missing, check `build.mac.entitlements` in `electrobun.config.ts` (Hutch-signed builds) or `entitlements.plist` (`scripts/sign-macos-app.sh`).
 
 ### UI doesn't render (blank window)
 Check `vite.config.ts` has `base: './'`. Verify in `dist/index.html` that asset paths are relative (`./assets/...`), not absolute (`/assets/...`).
@@ -319,10 +303,9 @@ projects/keepkey-vault/
   entitlements.plist          # macOS entitlements (JIT, unsigned memory, dyld, library validation)
   scripts/
     collect-externals.ts     # Native module collector + pruner + signer (DEV_BLOCKLIST, version-aware dedup)
-    prune-app-bundle.ts      # Post-build pruner on .app.tar.zst (version-aware dedup + entitlements re-sign)
-    build-signed.ts          # Electrobun build wrapper with zip shim
-    patch-electrobun.sh      # Patches Electrobun CLI for large bundles
-    zip                      # Quiet zip shim (prevents ENOBUFS)
+    patch-bundle.ts          # Hutch postBuild hook: node_buffer patch, camera copy, prune (scripts/app-bundle.ts)
+    verify-release-bundle.ts # Read-only gate on the packed archive and its update manifests
+    build-signed.ts          # Release wrapper: emulator/Monero preflight + signed helper copies
     audit-deps.ts            # Dependency audit + SBOM generator
   artifacts/                 # Build output (gitignored)
     KeepKey-Vault-*.dmg      # Signed, notarized DMG

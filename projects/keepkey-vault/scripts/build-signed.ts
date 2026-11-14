@@ -1,19 +1,14 @@
 #!/usr/bin/env bun
 /**
- * Wrapper around `electrobun build` that puts a quiet-zip shim on PATH.
- * This prevents ENOBUFS when the app bundle has many files (native node_modules).
- *
- * Electrobun's compiled Zig CLI uses Bun's execSync (1MB maxBuffer)
- * to run `zip -y -r -9 ...` which overflows when there are 13K+ files.
- * Our shim at scripts/zip adds -q (quiet) to suppress per-file output.
+ * Release wrapper around `hutch electrobun build` (stable/canary): refuses to
+ * package without the certified emulator or a complete Monero sidecar, and on
+ * local macOS builds stages Developer ID signed copies of those helpers first.
  */
 import { join, resolve } from 'node:path'
 import { copyFileSync, existsSync, mkdirSync } from 'node:fs'
 import { buildElectrobun } from './build-electrobun'
 
 const env = process.argv[2] || 'stable'
-const scriptsDir = join(import.meta.dir)
-const currentPath = process.env.PATH || ''
 let emulatorSource: string | undefined
 
 // Stable/canary packages for supported emulator hosts must never silently ship
@@ -63,8 +58,8 @@ if ((process.env.KEEPKEY_REQUIRE_MONERO_SIDECAR === '1' || presentMoneroInputs.l
   process.exit(1)
 }
 
-// Electrobun signs/notarizes before the later release re-signing pass. Stage
-// Developer ID signed copies of both extensionless helpers first; changing the
+// Hutch signs the assembled app with the Developer ID. Stage signed copies of
+// the extensionless helpers first; changing the
 // official RPC signature changes its bytes, so update only the copied receipt.
 // The prepared vendor inputs remain immutable and the outer app seals metadata.
 let signedMoneroSources: Record<string, string> = {}
@@ -100,7 +95,6 @@ if (process.env.KEEPKEY_INCLUDE_MONERO_EMULATOR === '1') {
 
 buildElectrobun(env, {
   ...process.env,
-  PATH: `${scriptsDir}:${currentPath}`,
   ...(emulatorSource ? { KEEPKEY_EMULATOR_SOURCE: emulatorSource } : {}),
   ...signedMoneroSources,
 })

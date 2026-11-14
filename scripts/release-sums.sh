@@ -19,7 +19,9 @@ trap 'rm -rf "$WORK"' EXIT
 gh api "repos/$REPO/releases" --paginate \
   --jq ".[] | select(.tag_name==\"$TAG\") | .assets[] | \"\(.digest // \"\" | sub(\"sha256:\";\"\"))  \(.name)\"" \
   > "$WORK/digests"
-NAMES=$(awk '{print $2}' "$WORK/digests" | grep -E '\.(dmg|exe|AppImage|deb)$|^stable-.*\.(tar\.zst|tar\.gz)$' | sort)
+# Electrobun 2.x names stable installers without the channel prefix
+# (linux-x64-keepkey-vault-Setup.tar.gz); update manifests are metadata, not listed.
+NAMES=$(awk '{print $2}' "$WORK/digests" | grep -E '\.(dmg|exe|AppImage|deb)$|^stable-.*\.(tar\.zst|tar\.gz)$|-Setup\.tar\.gz$' | sort)
 test -n "$NAMES" || { echo "ERROR: no shippable assets on $TAG"; exit 1; }
 
 for name in $NAMES; do

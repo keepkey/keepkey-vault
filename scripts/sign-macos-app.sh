@@ -17,6 +17,7 @@ set -euo pipefail
 #   1. Native addons (.node, .dylib, .so) in Resources/ — no entitlements
 #      Monero helpers in Resources/app/ — worker WITH entitlements; RPC without
 #      Record the modified RPC checksum before the outer application signature
+#      Other executable Mach-O in Resources/ (update manager, zcash-cli) — none
 #   2. All Mach-O binaries in MacOS/ — each WITH entitlements
 #   3. The .app bundle itself — WITH entitlements
 #   4. Verify signature
@@ -98,6 +99,19 @@ if [ -n "$MONERO_SIGN_RECEIPT_DIR" ]; then
     python3 "$SIGNING_SCRIPTS_DIR/monero-signing-metadata.py" record --field daemon \
       --rpc "$MONERO_DAEMON" --metadata "$MONERO_METADATA" --receipt "$MONERO_SIGN_RECEIPT_DIR/daemon.json"
   fi
+fi
+
+# Every other executable Mach-O in Resources: the Electrobun 2.x update manager
+# (Resources/uninstall), zcash-cli on Apple Silicon. Native helpers, no entitlements.
+if [ -d "$RESOURCES_DIR" ]; then
+  while IFS= read -r -d '' f; do
+    case "$f" in
+      *.node|*.dylib|*.so|"$MONERO_WORKER"|"$MONERO_RPC"|"$MONERO_DAEMON") continue ;;
+    esac
+    file -b "$f" 2>/dev/null | grep -q 'Mach-O' || continue
+    echo "    ${f#"$RESOURCES_DIR"/}"
+    sign_file "$f"
+  done < <(find "$RESOURCES_DIR" -type f -perm -u+x -print0 2>/dev/null)
 fi
 
 # --- 2. All Mach-O in MacOS/ — WITH entitlements ---
