@@ -52,6 +52,19 @@ clone() { # repo version commit
 
 clone zig-asar "$ASAR_VERSION" "$ASAR_COMMIT"
 (cd "$work/zig-asar" && "$ZIG" build -Doptimize=ReleaseFast -Dcpu=baseline -Dtarget="$ZIG_TARGET")
+# As zig-asar's own release does: Zig's Mach-O linker exports ___dso_handle,
+# which breaks Apple ld links against libasar.dylib (libNativeWrapper:
+# "fixup error ... ___dso_handle does not have address"). Re-link from the
+# static archive with the C API as the only exports.
+(cd "$work/zig-asar" && clang -dynamiclib -arch "$(uname -m)" -mmacosx-version-min="$TARGET" \
+  -o zig-out/lib/libasar.dylib \
+  -Wl,-force_load,zig-out/lib/libasar-static.a \
+  -exported_symbols_list scripts/asar-exported-symbols.txt \
+  -Wl,-headerpad,0x1000 \
+  -install_name @rpath/libasar.dylib)
+if nm -gU "$work/zig-asar/zig-out/lib/libasar.dylib" | grep -q dso_handle; then
+  echo "ERROR: libasar.dylib still exports ___dso_handle"; exit 1
+fi
 clone zig-zstd "$ZSTD_VERSION" "$ZSTD_COMMIT"
 (cd "$work/zig-zstd" && node scripts/setup.js && "$ZIG" build -Doptimize=ReleaseFast -Dcpu=baseline -Dtarget="$ZIG_TARGET")
 clone zig-bsdiff "$BSDIFF_VERSION" "$BSDIFF_COMMIT"
