@@ -23,6 +23,10 @@ const CANCEL_PATTERNS = [/cancel/i, /reject/i, /denied/i]
 // has to be fixed.
 const ADDRESS_PATTERNS = [/invalid\b[\w\s-]*\b(recipient|destination address)\b/i]
 
+// The webview stopped waiting for its own RPC reply. The KeepKey may still be
+// showing its confirm screen, so this is not a dead device.
+const CLIENT_TIMEOUT = /^RPC request timed out/i
+
 // Device is unreachable or in a bad/stale session (transport/USB/timeout/etc).
 const DEVICE_PATTERNS = [
 	/disconnect/i,
@@ -56,6 +60,13 @@ export function describeSigningError(e: unknown, t: Translate): string {
 		return t('signingInvalidAddress', {
 			ns: 'send',
 			defaultValue: 'Your KeepKey rejected the recipient address. Check the address and try again.',
+		})
+	}
+
+	if (CLIENT_TIMEOUT.test(raw)) {
+		return t('signingNoAnswer', {
+			ns: 'send',
+			defaultValue: 'No answer from your KeepKey yet. Check its screen: confirm or cancel there, then try again.',
 		})
 	}
 

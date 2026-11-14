@@ -11,6 +11,7 @@ import { rpcRequest } from "../lib/rpc"
 import { useFiat } from "../lib/fiat-context"
 import { Z } from "../lib/z-index"
 import { describeSigningError } from "../lib/signing-errors"
+import { cancelDeviceSigning, signOnDevice } from "../lib/device-signing"
 
 interface StakingPanelProps {
 	chain: ChainDef
@@ -137,7 +138,8 @@ function DelegateDialog({ isOpen, onClose, chain, availableBalance, rewardAmount
 		}, 120000)
 		setSignTimeout(timeout)
 		try {
-			const result = await rpcRequest(chain.signMethod as any, buildResult.unsignedTx, 120000)
+			const result = await signOnDevice(chain.signMethod, buildResult.unsignedTx)
+			setError(null) // the "still waiting" notice, if the user took a while
 			setSignedTx(result)
 			setPhase("signed")
 		} catch (e: any) {
@@ -435,7 +437,7 @@ function DelegateDialog({ isOpen, onClose, chain, availableBalance, rewardAmount
 				)}
 
 				<Flex justify="flex-end" gap="2" mt="4">
-					<Button size="sm" variant="ghost" color="kk.textSecondary" px="4" py="2" onClick={onClose}>
+					<Button size="sm" variant="ghost" color="kk.textSecondary" px="4" py="2" onClick={phase === "signing" ? cancelDeviceSigning : onClose}>
 						{phase === "broadcast" ? t('done', { ns: 'common' }) : t('cancel', { ns: 'common' })}
 					</Button>
 					{phase === "input" && (
@@ -548,7 +550,8 @@ function UndelegateDialog({ isOpen, onClose, chain, delegations, onSuccess, watc
 		}, 120000)
 		setSignTimeout(timeout)
 		try {
-			const result = await rpcRequest(chain.signMethod as any, buildResult.unsignedTx, 120000)
+			const result = await signOnDevice(chain.signMethod, buildResult.unsignedTx)
+			setError(null) // the "still waiting" notice, if the user took a while
 			setSignedTx(result)
 			setPhase("signed")
 		} catch (e: any) {
@@ -775,7 +778,7 @@ function UndelegateDialog({ isOpen, onClose, chain, delegations, onSuccess, watc
 				)}
 
 				<Flex justify="flex-end" gap="2" mt="4">
-					<Button size="sm" variant="ghost" color="kk.textSecondary" px="4" py="2" onClick={onClose}>
+					<Button size="sm" variant="ghost" color="kk.textSecondary" px="4" py="2" onClick={phase === "signing" ? cancelDeviceSigning : onClose}>
 						{phase === "broadcast" ? t('done', { ns: 'common' }) : t('cancel', { ns: 'common' })}
 					</Button>
 					{phase === "input" && (

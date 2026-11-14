@@ -34,12 +34,19 @@ function deferred() {
   const promise = new Promise((yes, no) => { resolve = yes; reject = no })
   return { promise, resolve, reject }
 }
-const calls: Array<{ method: string; params: any; pending: ReturnType<typeof deferred> }> = []
-mock.module('../../src/mainview/lib/rpc', () => ({ rpcRequest: async (method: string, params: any) => {
+const calls: Array<{ method: string; params: any; timeout?: number; pending: ReturnType<typeof deferred> }> = []
+mock.module('../../src/mainview/lib/rpc', () => ({ rpcRequest: async (method: string, params: any, timeout?: number) => {
   if (method === 'checkVaultDestination') return undefined
   if (method === 'matchAddress') return { address: params.address, kind: 'external', label: 'Known test recipient' }
+  if (method === 'cancelForegroundDeviceOperation') {
+    // Bun aborts the Desktop operation; the waiting sign rejects with its 499.
+    const sign = calls.findLast(call => call.method === 'ethSignTx')
+    calls.push({ method, params, timeout, pending: deferred() })
+    sign?.pending.reject(new Error('KeepKey request cancelled'))
+    return { ok: true }
+  }
   if (!['buildTx', 'ethSignTx', 'broadcastTx'].includes(method)) throw new Error(`Unexpected RPC: ${method}`)
-  const pending = deferred(); calls.push({ method, params, pending }); return pending.promise
+  const pending = deferred(); calls.push({ method, params, timeout, pending }); return pending.promise
 } }))
 globalThis.fetch = (() => { throw new Error('Network forbidden in SendForm fixture') }) as typeof fetch
 const { act } = React
@@ -162,6 +169,19 @@ await render({ balance: { ...balance, balance: '20', balanceUsd: 20000 } }); exp
 await click('broadcastTransaction'); const broadcast = calls.at(-1)!
 expect(broadcast.params).toMatchObject({ to: recipient, amount: '9', fromAddress: owner, chainId: 'ethereum' })
 await complete(broadcast, { txid: 'synthetic-transaction-id' }); summary.snapshot = true
+await unmount()
+
+// Signing waits on the KeepKey's button with no client timeout, says so, and
+// its Cancel sends Cancel to the device instead of leaving it waiting.
+await mount(); await fill(); await click('buildTransaction'); await complete(calls.at(-1)!)
+await click('signOnDevice'); const waiting = calls.at(-1)!
+expect(waiting.method).toBe('ethSignTx'); expect(waiting.timeout).toBe(0)
+expect(text()).toContain('waitingForKeepKey')
+await click('cancel')
+expect(calls.at(-1)!.method).toBe('cancelForegroundDeviceOperation'); await settle()
+expect(text()).toContain('KeepKey request cancelled'); expect(text()).not.toContain('waitingForKeepKey')
+expect(button('signOnDevice').disabled).toBe(false)
+summary.deviceWait = true
 await unmount()
 
 await mount(); await fill(); await click('buildTransaction'); const abandoned = calls.at(-1)!
