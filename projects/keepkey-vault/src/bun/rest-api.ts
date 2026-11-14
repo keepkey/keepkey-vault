@@ -5320,7 +5320,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             // Never pass e.status through: pioneer-client errors carry the upstream HTTP status.
             throw new HttpError(422, deviceErrorMessage(e), { code: 'BUILD_FAILED' })
           }
-          const out = toTxBuildResponse(chain, built)
+          const out = toTxBuildResponse(chain, built, request)
           // The amino sign routes resolve the signer's path from this registry.
           if (chain.chainFamily === 'cosmos') auth.saveAccount(built.unsignedTx.signerAddress, built.unsignedTx.addressNList)
           return json(out)

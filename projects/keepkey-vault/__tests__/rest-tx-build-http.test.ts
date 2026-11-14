@@ -19,6 +19,7 @@ const { startRestApi } = await import('../src/bun/rest-api')
 const { buildTx } = await import('../src/bun/txbuilder')
 const { CHAINS } = await import('../src/shared/chains')
 const S = await import('../src/bun/schemas')
+const { txBuildAccountPath } = await import('../src/bun/rest-tx-build')
 
 const KEY = 'tx-build-pairing'
 const chain = (id: string) => CHAINS.find(c => c.id === id)!
@@ -26,6 +27,13 @@ const COSMOS_SIGNER = 'cosmos1g9el7lzjwh9yun2c4jjzhy09j98vkhfxa4ww3e'
 const COSMOS_TO = 'cosmos1qyqszqgpqyqszqgpqyqszqgpqyqszqgpjnp7du'
 const BTC_TO = 'bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4'
 const XRP_TO = 'rPT1Sjq2YGrBMTttX4GZHjKu9dyfzbpAYe'
+const LTC_TO = 'ltc1qw508d6qejxtdg4y5r3zarvary0c5xw7kgmn4n9'
+const H = 0x80000000
+const utxoSource = (path: string) => ({
+  ListUnspent: async () => ({ data: [{ txid: 'c00b24b617db136acba4d831e31727319e6917123934f9f8b5253c7f0e89a5b6', vout: 0, value: '50000000', path, hex: '00' }] }),
+  GetFeeRateByNetwork: async () => ({ data: { slow: 1, average: 2, fast: 5 } }),
+  GetPubkeyInfo: async () => ({ data: [] }),
+})
 
 // Fixture data sources, the same shapes the builder suites use.
 const PIONEER: Record<string, any> = {
@@ -37,6 +45,12 @@ const PIONEER: Record<string, any> = {
   cosmos: { GetAccountInfo: async () => ({ data: { account: { account_number: '17', sequence: '2' } } }) },
   ripple: { GetAccountInfo: async () => ({ data: { Sequence: 7, ledger_index_current: 900, Balance: '5000000' } }) },
 }
+/** A named UTXO account: what buildTxHeadless + buildTxForCurrentWallet hand the
+ *  builder (one device-derived xpub, its script type, its account path). */
+const namedAccountBuild = (r: any) => buildTx(utxoSource("m/49'/2'/0'/0/0"), chain(r.chainId), {
+  chainId: r.chainId, to: r.to, amount: r.isMax ? '0' : r.amount, isMax: r.isMax, feeLevel: 3,
+  xpub: 'xpub-fixture', scriptTypeOverride: r.scriptType, accountPath: txBuildAccountPath(chain(r.chainId), r.scriptType, r.accountIndex),
+})
 /** What buildTxForCurrentWallet does after deriving the sender. */
 const realBuild = (r: any) => buildTx(PIONEER[r.chainId], chain(r.chainId), {
   chainId: r.chainId, to: r.to, amount: r.isMax ? '0' : r.amount, isMax: r.isMax, memo: r.memo, feeLevel: 3,
@@ -162,6 +176,49 @@ describe('POST /api/v2/tx/build', () => {
     expect(S.UtxoSignTransactionRequest.parse(r.body.signBody)).toStrictEqual(r.body.signBody)
     expect(r.body.summary.amount).toBe('0.001')
     expect(r.body.summary.symbol).toBe('BTC')
+  })
+
+  test('litecoin: the named account (scriptType + accountIndex) reaches the builder and is what gets built', async () => {
+    const r = await call({ caip: chain('litecoin').caip, to: LTC_TO, amount: '0.001', scriptType: 'p2sh-p2wpkh', accountIndex: 1 }, { hook: namedAccountBuild })
+    expect(r.status).toBe(200)
+    expect(r.received).toEqual([{ chainId: 'litecoin', to: LTC_TO, amount: '0.001', isMax: false, memo: undefined, accountIndex: 1, scriptType: 'p2sh-p2wpkh' }])
+    expect(S.UtxoSignTransactionRequest.parse(r.body.signBody)).toStrictEqual(r.body.signBody)
+    const change = r.body.signBody.outputs.find((o: any) => o.addressType === 'change')
+    expect(change.scriptType).toBe('p2sh-p2wpkh')
+    expect(change.addressNList.slice(0, 4)).toEqual([H + 49, H + 2, H + 1, 1])
+    for (const input of r.body.signBody.inputs) expect(input.addressNList.slice(0, 3)).toEqual([H + 49, H + 2, H + 1])
+    expect(r.body.summary).toMatchObject({ to: LTC_TO, amount: '0.001', symbol: 'LTC', scriptType: 'p2sh-p2wpkh', accountIndex: 1 })
+  })
+
+  test('a build that does not spend the named account is 422 BUILD_FAILED, never returned', async () => {
+    // Hook spends account 0 while the extension asked for account 1.
+    const r = await call({ caip: chain('litecoin').caip, to: LTC_TO, amount: '0.001', scriptType: 'p2sh-p2wpkh', accountIndex: 1 },
+      { hook: (q: any) => namedAccountBuild({ ...q, accountIndex: 0 }) })
+    expect(r.status).toBe(422)
+    expect(r.body.code).toBe('BUILD_FAILED')
+    expect(r.body.signBody).toBeUndefined()
+  })
+
+  test('a script type Desktop does not spend for that chain is 400 SCRIPT_TYPE_UNSUPPORTED before anything is built', async () => {
+    for (const body of [
+      { caip: chain('dogecoin').caip, to: 'DH5yaieqoZN36fDVciNyRueRGvGLR3mr7L', amount: '2', scriptType: 'p2wpkh' },
+      { caip: chain('litecoin').caip, to: LTC_TO, amount: '1', scriptType: 'p2tr' },
+      { caip: chain('bitcoin').caip, to: BTC_TO, amount: '1', scriptType: 'p2wsh' },
+      { ...atom, scriptType: 'p2pkh' },
+    ]) {
+      const r = await call(body)
+      expect(r.status).toBe(400)
+      expect(r.body.code).toBe('SCRIPT_TYPE_UNSUPPORTED')
+      expect(r.received).toEqual([])
+    }
+  })
+
+  test('an ACCOUNT_NOT_FOUND from Desktop is the client\'s 400, with its code', async () => {
+    const { HttpError } = await import('../src/bun/auth')
+    const r = await call({ caip: chain('bitcoin').caip, to: BTC_TO, amount: '0.001', scriptType: 'p2wpkh', accountIndex: 7 },
+      { hook: async () => { throw new HttpError(400, 'KeepKey Desktop has no Bitcoin account 7', { code: 'ACCOUNT_NOT_FOUND' }) } })
+    expect(r.status).toBe(400)
+    expect(r.body.code).toBe('ACCOUNT_NOT_FOUND')
   })
 
   test('xrp: 200 with a body /xrp/sign-transaction accepts unchanged, tag in the summary', async () => {

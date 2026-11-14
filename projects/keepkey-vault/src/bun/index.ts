@@ -247,7 +247,7 @@ import { desktopRestStartDeps, startRestApiOrReport } from "./rest-api-startup"
 import { instanceSocketPath, startupInstanceGate } from "./single-instance"
 import { signSolanaWireTransaction } from "./solana-signing"
 import { AuthStore, HttpError } from "./auth"
-import { btcXpubForAccount } from "./rest-tx-build"
+import { btcXpubForAccount, txBuildAccountPath } from "./rest-tx-build"
 import { ensurePioneerQueryKeyRegistered, getPioneer, getPioneerApiBase, resetPioneer, setPioneerOffline, DEFAULT_API_BASE, getQueryKey as getPioneerQueryKey } from "./pioneer"
 import { setBtcBackendOffline, setBtcNodeConfig, setBtcNodeDeviceEligible, setBtcNodeWatchOnlyEligible, isBtcNodeActive, getBtcBackend, getWatchOnlyBtcBackend, getPsbtBroadcastRoute, broadcastBtcTx } from "./btc-backend"
 import { isBitcoinOnlyVariant } from "../shared/flags"
@@ -2170,14 +2170,20 @@ const restCallbacks: RestApiCallbacks = {
 	getSwapQuoteHeadless: (params) => headlessSwapQuote(params),
 	executeSwapHeadless: (params) => headlessExecuteSwap(params, () => { /* headless: no WebView substage */ }),
 	// Extension sends (POST /api/v2/tx/build): the in-app send's own build. The
-	// sender is always Desktop's: a BTC account N resolves to an xpub Desktop
-	// already owns, so a client can never name someone else's keys.
+	// sender is always Desktop's: the client only names (accountIndex, scriptType)
+	// of the user's own accounts. A BTC account resolves to an xpub Desktop
+	// already owns; another UTXO account is derived on the device by
+	// buildTxForCurrentWallet from its account path. Never a client key.
 	buildTxHeadless: async (r) => {
 		const p: BuildTxParams = { chainId: r.chainId, to: r.to, amount: r.isMax ? '0' : r.amount!, isMax: r.isMax, memo: r.memo, feeLevel: 3 }
 		if (r.chainId === 'bitcoin') {
-			const xp = btcXpubForAccount(btcAccounts.toAccountSet(), r.accountIndex)
-			if (!xp) throw new HttpError(400, `KeepKey Desktop has no Bitcoin account ${r.accountIndex}`, { code: 'ACCOUNT_NOT_FOUND' })
-			p.xpubOverride = xp.xpub
+			p.xpubOverride = btcXpubForAccount(btcAccounts.toAccountSet(), r.accountIndex, r.scriptType).xpub
+		} else if (r.scriptType) {
+			const chain = getAllChains().find(c => c.id === r.chainId)
+			const accountPath = chain && txBuildAccountPath(chain, r.scriptType, r.accountIndex)
+			if (!accountPath) throw new HttpError(400, `${r.chainId} cannot be sent from a ${r.scriptType} account`, { code: 'SCRIPT_TYPE_UNSUPPORTED' })
+			p.scriptTypeOverride = r.scriptType
+			p.accountPath = accountPath
 		}
 		return buildTxForCurrentWallet(p)
 	},
@@ -4328,6 +4334,16 @@ async function buildTxForCurrentWallet(params: BuildTxParams): Promise<BuildTxRe
 			}])
 			xpub = xpubResult?.[0]?.xpub
 		}
+	} else if (params.accountPath) {
+		// One named non-BTC UTXO account (extension tx/build): derive exactly that
+		// xpub on the device and spend only it. Inputs and change stay on
+		// accountPath + scriptTypeOverride; no aggregation across accounts.
+		const xpubResult = await wallet.getPublicKeys([{
+			addressNList: params.accountPath, coin: chain.coin,
+			scriptType: params.scriptTypeOverride || chain.scriptType || 'p2pkh', curve: 'secp256k1',
+		}])
+		xpub = xpubResult?.[0]?.xpub
+		if (!xpub) throw new Error(`Could not read the ${chain.symbol} account from the device`)
 	} else {
 		// Non-BTC UTXO: derive all applicable script-type xpubs so buildUtxoTx
 		// can aggregate UTXOs from any address type (mirrors BTC multi-xpub logic).

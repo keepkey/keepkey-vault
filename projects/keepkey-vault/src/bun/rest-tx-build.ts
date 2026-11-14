@@ -8,6 +8,7 @@
  * supply data. Pure: no device, no network.
  */
 import { HttpError } from './auth'
+import { utxoAccountScriptPaths } from './chain-scan'
 import { validateAddress } from '../shared/address-validation'
 import { baseUnitsToDecimalString } from '../shared/max-send'
 import type { ChainDef } from '../shared/chains'
@@ -33,7 +34,12 @@ export type TxBuildSignRoute =
   | '/thorchain/sign-amino-transfer' | '/mayachain/sign-amino-transfer'
   | '/xrp/sign-transaction'
 
-/** Exactly what reaches buildTxHeadless. Nothing else from the client does. */
+export type TxBuildScriptType = 'p2pkh' | 'p2sh-p2wpkh' | 'p2wpkh' | 'p2tr'
+const PURPOSE: Record<TxBuildScriptType, number> = { p2pkh: 44, 'p2sh-p2wpkh': 49, p2wpkh: 84, p2tr: 86 }
+
+/** Exactly what reaches buildTxHeadless. Nothing else from the client does.
+ *  scriptType (UTXO only) names which of the user's own accounts to spend;
+ *  Desktop derives that account itself. Absent = Desktop's own choice. */
 export interface TxBuildHeadlessRequest {
   chainId: string
   to: string
@@ -41,12 +47,27 @@ export interface TxBuildHeadlessRequest {
   isMax: boolean
   memo: string | undefined
   accountIndex: number
+  scriptType?: TxBuildScriptType
 }
 
 export interface TxBuildResponse {
   signRoute: TxBuildSignRoute
   signBody: Record<string, unknown>
-  summary: { to: string; amount: string; fee: string; symbol: string; memo?: string; destinationTag?: string }
+  summary: {
+    to: string; amount: string; fee: string; symbol: string; memo?: string; destinationTag?: string
+    /** UTXO: the one account every input and the change belong to, as built. */
+    scriptType?: string; accountIndex?: number
+  }
+}
+
+/** Account path [purpose', coin', account'] Desktop derives for this script
+ *  type on this chain, or undefined when Desktop does not spend that type there.
+ *  Purpose-matched entries of the scan Desktop runs for its own balances. */
+export function txBuildAccountPath(chain: ChainDef, scriptType: string, accountIndex: number): number[] | undefined {
+  if (chain.chainFamily !== 'utxo' || !(scriptType in PURPOSE)) return undefined
+  const purpose = PURPOSE[scriptType as TxBuildScriptType] + 0x80000000
+  return utxoAccountScriptPaths(chain, accountIndex, true)
+    .find(e => e.scriptType === scriptType && e.path[0] === purpose)?.path
 }
 
 const COSMOS_SIGN_ROUTES: Record<string, TxBuildSignRoute> = {
@@ -59,7 +80,7 @@ const COSMOS_SIGN_ROUTES: Record<string, TxBuildSignRoute> = {
 const refuse = (code: string, message: string) => new HttpError(400, message, { code })
 
 export function validateTxBuildRequest(
-  body: { caip: string; to: string; amount?: string; isMax?: boolean; memo?: string; accountIndex?: number },
+  body: { caip: string; to: string; amount?: string; isMax?: boolean; memo?: string; accountIndex?: number; scriptType?: string },
   chains: ChainDef[],
 ): { chain: ChainDef; request: TxBuildHeadlessRequest } {
   const chainId = (TX_BUILD_CAIPS as Record<string, string>)[body.caip]
@@ -86,16 +107,43 @@ export function validateTxBuildRequest(
     throw refuse('MEMO_UNSUPPORTED', `Memos are not supported for ${chain.symbol} sends from the extension`)
   }
 
+  const scriptType = body.scriptType
+  if (scriptType !== undefined && !txBuildAccountPath(chain, scriptType, 0)) {
+    throw refuse('SCRIPT_TYPE_UNSUPPORTED', `${chain.symbol} cannot be sent from a ${scriptType || 'blank'} account`)
+  }
+
+  // Without a script type, non-BTC UTXO sends spend all account-0 types at once,
+  // so only a named account can be account N.
   const accountIndex = body.accountIndex ?? 0
-  if (accountIndex > 0 && chain.id !== 'bitcoin') {
+  if (accountIndex > 0 && chain.id !== 'bitcoin' && scriptType === undefined) {
     throw refuse('ACCOUNT_UNSUPPORTED', `Only account 0 can send ${chain.symbol} from the extension`)
   }
 
-  return { chain, request: { chainId: chain.id, to, amount, isMax, memo, accountIndex } }
+  const request: TxBuildHeadlessRequest = { chainId: chain.id, to, amount, isMax, memo, accountIndex }
+  if (scriptType !== undefined) request.scriptType = scriptType as TxBuildScriptType
+  return { chain, request }
 }
 
-/** Map a built unsignedTx to the sign route that accepts it unchanged. */
-export function toTxBuildResponse(chain: ChainDef, built: BuildTxResult): TxBuildResponse {
+/** The single account (script type + account path) that every input and every
+ *  change output of a UTXO build belongs to; undefined when they differ. */
+function builtUtxoAccount(u: any): { scriptType: string; path: number[] } | undefined {
+  const legs = [...u.inputs, ...u.outputs.filter((o: any) => o.addressType === 'change')]
+  const first = legs[0]
+  if (!Array.isArray(first?.addressNList) || first.addressNList.length < 3) return undefined
+  const path: number[] = first.addressNList.slice(0, 3)
+  const same = legs.every((l: any) => l.scriptType === first.scriptType && Array.isArray(l.addressNList)
+    && l.addressNList.length >= 3 && path.every((n, i) => l.addressNList[i] === n))
+  return same ? { scriptType: first.scriptType, path } : undefined
+}
+
+/** Map a built unsignedTx to the sign route that accepts it unchanged. When the
+ *  request named a UTXO account, a build that spends anything else (or sends
+ *  change elsewhere) is refused rather than returned. */
+export function toTxBuildResponse(
+  chain: ChainDef,
+  built: BuildTxResult,
+  requested?: Pick<TxBuildHeadlessRequest, 'scriptType' | 'accountIndex'>,
+): TxBuildResponse {
   const u = built.unsignedTx
   const display = (base: string) => baseUnitsToDecimalString(BigInt(base), chain.decimals)
   const base = { fee: built.fee, symbol: chain.symbol }
@@ -103,10 +151,20 @@ export function toTxBuildResponse(chain: ChainDef, built: BuildTxResult): TxBuil
   if (chain.chainFamily === 'utxo') {
     const spends = u.outputs.filter((o: any) => o.addressType === 'spend')
     if (spends.length !== 1) throw new HttpError(422, `Unexpected ${chain.symbol} build: ${spends.length} recipient outputs`, { code: 'BUILD_FAILED' })
+    const account = builtUtxoAccount(u)
+    if (requested?.scriptType) {
+      const want = txBuildAccountPath(chain, requested.scriptType, requested.accountIndex)
+      if (!want || account?.scriptType !== requested.scriptType || !want.every((n, i) => account.path[i] === n)) {
+        throw new HttpError(422, `KeepKey Desktop did not build this ${chain.symbol} send from the selected account. Nothing was signed.`, { code: 'BUILD_FAILED' })
+      }
+    }
     return {
       signRoute: '/utxo/sign-transaction',
       signBody: { coin: u.coin, inputs: u.inputs, outputs: u.outputs, version: u.version, locktime: u.locktime },
-      summary: { to: spends[0].address, amount: display(spends[0].amount), ...base },
+      summary: {
+        to: spends[0].address, amount: display(spends[0].amount), ...base,
+        ...(account ? { scriptType: account.scriptType, accountIndex: account.path[2] - 0x80000000 } : {}),
+      },
     }
   }
 
@@ -136,8 +194,13 @@ export function toTxBuildResponse(chain: ChainDef, built: BuildTxResult): TxBuil
   }
 }
 
-/** Desktop's BTC account N, in the script type Desktop has selected. */
-export function btcXpubForAccount(set: BtcAccountSet, accountIndex: number): BtcXpub | undefined {
-  const scriptType = set.selectedXpub?.scriptType ?? 'p2wpkh'
-  return set.accounts.find(a => a.accountIndex === accountIndex)?.xpubs.find(x => x.scriptType === scriptType)
+/** Desktop's BTC account N in the named script type, or (none named) the one
+ *  Desktop has selected. Only xpubs Desktop derived from the device qualify. */
+export function btcXpubForAccount(set: BtcAccountSet, accountIndex: number, scriptType?: TxBuildScriptType): BtcXpub {
+  const account = set.accounts.find(a => a.accountIndex === accountIndex)
+  if (!account) throw refuse('ACCOUNT_NOT_FOUND', `KeepKey Desktop has no Bitcoin account ${accountIndex}`)
+  const type = scriptType ?? set.selectedXpub?.scriptType ?? 'p2wpkh'
+  const xpub = account.xpubs.find(x => x.scriptType === type)
+  if (!xpub) throw refuse('SCRIPT_TYPE_UNSUPPORTED', `This KeepKey has no ${type} Bitcoin account ${accountIndex}`)
+  return xpub
 }

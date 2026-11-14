@@ -149,8 +149,9 @@ export const UtxoSignTransactionRequest = z.object({
 }).strip()
 
 /** POST /api/v2/tx/build — browser extension asks Desktop to build a native send.
- *  Only these six fields reach the builder; xpubs, fee levels and swap flags a
- *  client sends are stripped. */
+ *  Only these fields reach the builder; xpubs, fee levels and swap flags a
+ *  client sends are stripped. scriptType names one of the user's own UTXO
+ *  accounts (validated per chain: unknown → 400 SCRIPT_TYPE_UNSUPPORTED). */
 export const TxBuildRequest = z.object({
   caip: z.string().min(1),
   to: z.string().min(1),
@@ -158,6 +159,7 @@ export const TxBuildRequest = z.object({
   isMax: z.boolean().optional(),
   memo: z.string().max(256).optional(),
   accountIndex: z.number().int().min(0).optional(),
+  scriptType: z.string().max(32).optional(),
 }).strip()
 
 /** Cosmos-family amino signDoc */

@@ -4827,7 +4827,17 @@
                   "accountIndex": {
                     "type": "integer",
                     "minimum": 0,
-                    "description": "Bitcoin account N; other chains accept only 0"
+                    "description": "Account N. Bitcoin: any account added in Desktop. Other UTXO chains: any N when scriptType is given, else only 0. Non-UTXO chains: only 0."
+                  },
+                  "scriptType": {
+                    "type": "string",
+                    "enum": [
+                      "p2pkh",
+                      "p2sh-p2wpkh",
+                      "p2wpkh",
+                      "p2tr"
+                    ],
+                    "description": "UTXO only: spend exactly the user's (accountIndex, scriptType) account, derived by Desktop on the device; change returns to that account. BTC: p2pkh, p2sh-p2wpkh, p2wpkh, p2tr (Taproot only when the firmware supports it). LTC: p2pkh, p2sh-p2wpkh, p2wpkh. BCH, DOGE, DASH: p2pkh. Anything else is 400 SCRIPT_TYPE_UNSUPPORTED. Absent: Desktop's own choice (BTC: the script type selected in Desktop; other UTXO chains: all account-0 types)."
                   }
                 },
                 "required": [
@@ -4885,6 +4895,14 @@
                         "destinationTag": {
                           "type": "string",
                           "description": "XRP only"
+                        },
+                        "scriptType": {
+                          "type": "string",
+                          "description": "UTXO only: script type of the one account every input and the change belong to, as built. Absent when the build spans accounts."
+                        },
+                        "accountIndex": {
+                          "type": "integer",
+                          "description": "UTXO only: index of that account, as built. Absent when the build spans accounts."
                         }
                       }
                     }
@@ -4894,7 +4912,7 @@
             }
           },
           "400": {
-            "description": "INVALID_REQUEST, UNSUPPORTED_ASSET, INVALID_ADDRESS, INVALID_AMOUNT, MEMO_UNSUPPORTED, ACCOUNT_UNSUPPORTED or ACCOUNT_NOT_FOUND"
+            "description": "INVALID_REQUEST, UNSUPPORTED_ASSET, INVALID_ADDRESS, INVALID_AMOUNT, MEMO_UNSUPPORTED, SCRIPT_TYPE_UNSUPPORTED, ACCOUNT_UNSUPPORTED or ACCOUNT_NOT_FOUND"
           },
           "401": {
             "description": "Missing or invalid pairing key"
@@ -4903,7 +4921,7 @@
             "description": "Wipe in progress, or the wallet changed during the request"
           },
           "422": {
-            "description": "BUILD_FAILED: the builder or a safety check refused (insufficient funds, data fetch failed, ...)"
+            "description": "BUILD_FAILED: the builder or a safety check refused (insufficient funds, data fetch failed, the build did not spend exactly the named account, ...)"
           },
           "423": {
             "description": "Device locked, or no foreground device access (DEVICE_ACCESS_REQUIRED)"
