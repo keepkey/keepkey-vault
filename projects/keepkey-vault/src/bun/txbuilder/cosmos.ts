@@ -88,6 +88,13 @@ export function displayFee(chain: ChainDef, fee: { amount: { amount: string }[] 
   return String(Math.max(txFee, FEES[chain.id] || 0))
 }
 
+/** THOR/Maya native fee in base units, for history rows whose fee is the tx's
+ *  auth fee ('0'). Other chains pay the auth fee, so they get undefined. */
+export function nativeTxFeeBaseUnits(chain: ChainDef): string | undefined {
+  if (chain.id !== 'thorchain' && chain.id !== 'mayachain') return undefined
+  return String(Math.round(FEES[chain.id] * 10 ** chain.decimals))
+}
+
 // Chain-specific msg types (MsgSend)
 const MSG_SEND_TYPES: Record<string, string> = {
   thorchain: 'thorchain/MsgSend',
