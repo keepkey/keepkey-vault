@@ -4790,6 +4790,141 @@
         "tags": ["Health"]
       }
     },
+    "/api/v2/tx/build": {
+      "post": {
+        "operationId": "tx_build",
+        "summary": "Build a native send locally (browser extension)",
+        "description": "KeepKey Desktop builds the unsigned transaction with its own builders: it derives the sender on the device (no button press), reads UTXOs, account info and fee rates from its data sources, and picks change and fee. Servers only supply data, never the transaction. The response is the exact body for an existing sign route, which still shows its approval card and asks the device. Requires `X-KeepKey-Device-Access: foreground`. Error bodies are `{ error, code? }`.",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "caip": {
+                    "type": "string",
+                    "description": "Native asset CAIP-19: BTC, BCH, LTC, DOGE, DASH, ATOM, OSMO, RUNE, CACAO or XRP"
+                  },
+                  "to": {
+                    "type": "string",
+                    "description": "Recipient address, validated for the asset's chain"
+                  },
+                  "amount": {
+                    "type": "string",
+                    "description": "Display-unit decimal (e.g. \"0.0123\"), at most the chain's decimals; required unless isMax"
+                  },
+                  "isMax": {
+                    "type": "boolean",
+                    "description": "Send the full spendable balance; amount is ignored"
+                  },
+                  "memo": {
+                    "type": "string",
+                    "maxLength": 256,
+                    "description": "Cosmos-family tx memo; XRP destination tag (digits). Refused on UTXO chains."
+                  },
+                  "accountIndex": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "description": "Bitcoin account N; other chains accept only 0"
+                  }
+                },
+                "required": [
+                  "caip",
+                  "to"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Ok",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "signRoute": {
+                      "type": "string",
+                      "enum": [
+                        "/utxo/sign-transaction",
+                        "/cosmos/sign-amino",
+                        "/osmosis/sign-amino",
+                        "/thorchain/sign-amino-transfer",
+                        "/mayachain/sign-amino-transfer",
+                        "/xrp/sign-transaction"
+                      ]
+                    },
+                    "signBody": {
+                      "type": "object",
+                      "description": "POST this unchanged to signRoute"
+                    },
+                    "summary": {
+                      "type": "object",
+                      "properties": {
+                        "to": {
+                          "type": "string",
+                          "description": "Recipient as built (BCH in cashaddr form)"
+                        },
+                        "amount": {
+                          "type": "string",
+                          "description": "Display units, read from the built transaction"
+                        },
+                        "fee": {
+                          "type": "string",
+                          "description": "Display units"
+                        },
+                        "symbol": {
+                          "type": "string"
+                        },
+                        "memo": {
+                          "type": "string"
+                        },
+                        "destinationTag": {
+                          "type": "string",
+                          "description": "XRP only"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "INVALID_REQUEST, UNSUPPORTED_ASSET, INVALID_ADDRESS, INVALID_AMOUNT, MEMO_UNSUPPORTED, ACCOUNT_UNSUPPORTED or ACCOUNT_NOT_FOUND"
+          },
+          "401": {
+            "description": "Missing or invalid pairing key"
+          },
+          "409": {
+            "description": "Wipe in progress, or the wallet changed during the request"
+          },
+          "422": {
+            "description": "BUILD_FAILED: the builder or a safety check refused (insufficient funds, data fetch failed, ...)"
+          },
+          "423": {
+            "description": "Device locked, or no foreground device access (DEVICE_ACCESS_REQUIRED)"
+          },
+          "501": {
+            "description": "Asset not available on bitcoin-only firmware"
+          },
+          "503": {
+            "description": "Offline mode"
+          }
+        },
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "tags": [
+          "Transactions"
+        ]
+      }
+    },
     "/api/v2/devices": {
       "get": {
         "operationId": "V2ListDevices",

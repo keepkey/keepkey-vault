@@ -246,7 +246,8 @@ import { startRestApi, clearFeaturesCache, setUiActive, uiHeartbeat, type RestAp
 import { desktopRestStartDeps, startRestApiOrReport } from "./rest-api-startup"
 import { instanceSocketPath, startupInstanceGate } from "./single-instance"
 import { signSolanaWireTransaction } from "./solana-signing"
-import { AuthStore } from "./auth"
+import { AuthStore, HttpError } from "./auth"
+import { btcXpubForAccount } from "./rest-tx-build"
 import { ensurePioneerQueryKeyRegistered, getPioneer, getPioneerApiBase, resetPioneer, setPioneerOffline, DEFAULT_API_BASE, getQueryKey as getPioneerQueryKey } from "./pioneer"
 import { setBtcBackendOffline, setBtcNodeConfig, setBtcNodeDeviceEligible, setBtcNodeWatchOnlyEligible, isBtcNodeActive, getBtcBackend, getWatchOnlyBtcBackend, getPsbtBroadcastRoute, broadcastBtcTx } from "./btc-backend"
 import { isBitcoinOnlyVariant } from "../shared/flags"
@@ -2168,6 +2169,18 @@ const restCallbacks: RestApiCallbacks = {
 	// the loop. The device still gates every signature. NOOP substage push.
 	getSwapQuoteHeadless: (params) => headlessSwapQuote(params),
 	executeSwapHeadless: (params) => headlessExecuteSwap(params, () => { /* headless: no WebView substage */ }),
+	// Extension sends (POST /api/v2/tx/build): the in-app send's own build. The
+	// sender is always Desktop's: a BTC account N resolves to an xpub Desktop
+	// already owns, so a client can never name someone else's keys.
+	buildTxHeadless: async (r) => {
+		const p: BuildTxParams = { chainId: r.chainId, to: r.to, amount: r.isMax ? '0' : r.amount!, isMax: r.isMax, memo: r.memo, feeLevel: 3 }
+		if (r.chainId === 'bitcoin') {
+			const xp = btcXpubForAccount(btcAccounts.toAccountSet(), r.accountIndex)
+			if (!xp) throw new HttpError(400, `KeepKey Desktop has no Bitcoin account ${r.accountIndex}`, { code: 'ACCOUNT_NOT_FOUND' })
+			p.xpubOverride = xp.xpub
+		}
+		return buildTxForCurrentWallet(p)
+	},
 	zcashSchedulePostTxRescans: () => schedulePostZcashTxRescans(),
 	zcashPreSendGate: async (account: number) => {
 		// Same fail-closed preflight the RPC send path runs: prove the FVK belongs
@@ -2217,7 +2230,7 @@ async function applyRestApiState(when: 'startup' | 'settings') {
 // REST API started in deferredInit() after DB is ready
 
 // ── Wallet-session quote authorization and tracker data ──────────────
-import type { SwapQuote, SwapQuoteParams, ExecuteSwapParams, SwapResult, SwapSubStage } from '../shared/types'
+import type { SwapQuote, SwapQuoteParams, ExecuteSwapParams, SwapResult, SwapSubStage, BuildTxParams, BuildTxResult } from '../shared/types'
 import { isThorchainBankToken, thorchainBankTokenFirmwareOK, THORCHAIN_BANK_TOKEN_MIN_FW } from '../shared/swap-support-matrix'
 const swapQuoteLeases = createSwapQuoteLeases()
 
@@ -4215,6 +4228,231 @@ const vaultImporter = new VaultImportService({
 		notifyVaultsChanged()
 	},
 })
+
+/** The RPC buildTx body, shared with REST POST /api/v2/tx/build so the two
+ *  can never drift: every pre-build check (online, known-vault destination,
+ *  THOR bank-token firmware gate, seed staleness) and the sender derivation. */
+async function buildTxForCurrentWallet(params: BuildTxParams): Promise<BuildTxResult> {
+	console.debug(`[buildTx] isMax=${params.isMax} chainId=${params.chainId}`)
+	if (!engine.wallet) throw new Error('No device connected')
+	requireOnline('build transaction')
+	const chain = getAllChains().find(c => c.id === params.chainId)
+	if (!chain) throw new Error(`Unknown chain: ${params.chainId}`)
+	await verifyKnownVaultDestination(chain.networkId, params.to, params.caip || chain.caip)
+
+	// Firmware gate (fund safety): a THORChain/Maya bank-token send is a
+	// MsgSend whose `denom` field is only honored from 7.15.0. On older
+	// firmware the field is ignored and the tx signs as RUNE — refuse to
+	// build it rather than sign the wrong asset. Covers TCY/RUJI sends and
+	// swaps (both pass the bank-token caip). Native RUNE/ATOM are unaffected.
+	if (params.caip && isThorchainBankToken(params.caip)) {
+		const fw = engine.getDeviceState().firmwareVersion
+		if (!thorchainBankTokenFirmwareOK(params.caip, fw)) {
+			throw new Error(`This asset requires KeepKey firmware ${THORCHAIN_BANK_TOKEN_MIN_FW}+ (device has ${fw || 'unknown'}). Update your firmware to send or swap TCY / RUJI.`)
+		}
+	}
+
+	const bitcoinSelfHost = chain.id === 'bitcoin' && getBtcBackend().kind !== 'pioneer'
+	const pioneer = bitcoinSelfHost ? {} : await getPioneer()
+
+	// Seed-staleness boundary on the SIGNING path. params (xpubOverride,
+	// evmAddressIndex, amount, recipient) were prepared against the UI's
+	// wallet view; if the device seed has since changed, those inputs
+	// belong to a different wallet. Abort rather than build a tx from
+	// stale context — the purge clears the managers + notifies the
+	// frontend, which refreshes so the user can re-initiate cleanly.
+	if ((await ensureManagersForSeed('buildTx')).purged) {
+		throw new Error('Wallet changed since this transaction was prepared. Balances were refreshed — please review and try again.')
+	}
+
+	// For chains that need fromAddress or xpub, derive them
+	const wallet = engine.wallet as any
+	let fromAddress: string | undefined
+	let xpub: string | undefined
+	let allXpubs: Array<{ xpub: string; scriptType: string; accountPath: number[] }> | undefined
+
+	if (chain.chainFamily === 'evm') {
+		// EVM multi-address: use evmAddressIndex or selected index
+		const idx = params.evmAddressIndex ?? evmAddresses.getSelectedAddress()?.addressIndex ?? 0
+		const addrPath = evmAddressPath(idx)
+		// Try cached address first (avoids device call)
+		const cached = evmAddresses.toAddressSet().addresses.find(a => a.addressIndex === idx)
+		if (cached) {
+			fromAddress = cached.address
+		} else {
+			const addrResult = await wallet.ethGetAddress({ addressNList: addrPath, showDisplay: false, coin: 'Ethereum' })
+			fromAddress = typeof addrResult === 'string' ? addrResult : addrResult?.address
+		}
+	} else if (chain.chainFamily !== 'utxo') {
+		const addrParams: any = {
+			addressNList: chain.defaultPath,
+			showDisplay: false,
+			coin: chain.coin,
+		}
+		if (chain.scriptType) addrParams.scriptType = chain.scriptType
+		if (chain.chainFamily === 'ton') addrParams.bounceable = false
+		const walletMethod = chain.id === 'ripple' ? 'rippleGetAddress' : chain.rpcMethod
+		console.debug(`[buildTx] Deriving ${chain.coin} address`)
+		const addrResult = await wallet[walletMethod](addrParams)
+		fromAddress = typeof addrResult === 'string' ? addrResult : addrResult?.address || addrResult?.publicKey
+		console.debug(`[buildTx] Derived ${chain.coin} address OK`)
+	} else if (chain.id === 'bitcoin') {
+		// BTC multi-account: resolve xpub, scriptType, and accountPath from the
+		// override string itself (not from getSelectedXpub(), which can drift
+		// between render and RPC handling). Finding 5 fix.
+		const resolvedXpub = params.xpubOverride || btcAccounts.getSelectedXpub()?.xpub
+		console.log(`[buildTx] BTC xpub: override=${params.xpubOverride?.slice(0,12)} selected=${btcAccounts.getSelectedXpub()?.xpub?.slice(0,12)} resolved=${resolvedXpub?.slice(0,12)} scriptType=${btcAccounts.getSelectedXpub()?.scriptType}`)
+		xpub = resolvedXpub
+		// Look up the BtcXpub entry that owns this xpub string for scriptType + path
+		let matchedXpubEntry: { scriptType: string; path: number[] } | undefined
+		if (resolvedXpub) {
+			for (const account of btcAccounts.toAccountSet().accounts) {
+				for (const xp of account.xpubs) {
+					if (xp.xpub === resolvedXpub) {
+						matchedXpubEntry = { scriptType: xp.scriptType, path: xp.path }
+						break
+					}
+				}
+				if (matchedXpubEntry) break
+			}
+		}
+		if (matchedXpubEntry) {
+			if (!params.scriptTypeOverride) params = { ...params, scriptTypeOverride: matchedXpubEntry.scriptType }
+			params = { ...params, accountPath: matchedXpubEntry.path }
+		}
+		if (!xpub) {
+			// Fallback: derive from default path
+			const xpubResult = await wallet.getPublicKeys([{
+				addressNList: chain.defaultPath.slice(0, 3),
+				coin: chain.coin, scriptType: chain.scriptType, curve: 'secp256k1',
+			}])
+			xpub = xpubResult?.[0]?.xpub
+		}
+	} else {
+		// Non-BTC UTXO: derive all applicable script-type xpubs so buildUtxoTx
+		// can aggregate UTXOs from any address type (mirrors BTC multi-xpub logic).
+		// Shared helper — includes the chain's own receive convention (LTC hands
+		// out p2wpkh on the 44' branch), which the standard trio misses.
+		const scriptTypes = utxoAccountScriptPaths(chain, 0)
+
+		const pubKeyPaths = scriptTypes.map(st => ({
+			addressNList: st.path,
+			coin: chain.coin,
+			scriptType: st.scriptType,
+			curve: 'secp256k1',
+		}))
+		const pubKeyResults = await wallet.getPublicKeys(pubKeyPaths)
+
+		const derivedXpubs: Array<{ xpub: string; scriptType: string; accountPath: number[] }> = []
+		for (let i = 0; i < scriptTypes.length; i++) {
+			const xp = pubKeyResults?.[i]?.xpub
+			if (xp) {
+				derivedXpubs.push({
+					xpub: xp,
+					scriptType: scriptTypes[i].scriptType,
+					accountPath: pubKeyPaths[i].addressNList,
+				})
+			}
+		}
+		// Aggregate device-cached account-1+ xpubs (persisted by the audit
+		// "track" action, addUtxoAccount) so those tracked funds are actually
+		// SPENDABLE, not just displayed. Each row carries its own account-level
+		// path (parsed from the path column) so per-input signing derives the
+		// correct key for account > 0. Device-scoped, never written for
+		// passphrase wallets; dedup by xpub against the account-0 set above.
+		const utxoDevId = engine.getDeviceState().deviceId
+		if (utxoDevId && !engine.isPassphraseWallet) {
+			const seen = new Set(derivedXpubs.map(x => x.xpub))
+			for (const pk of getCachedPubkeys(utxoDevId)) {
+				if (pk.chainId !== chain.id || !pk.xpub || seen.has(pk.xpub)) continue
+				const acctPath = parseBip32Path(pk.path)
+				if (!acctPath || acctPath.length !== 3) continue
+				derivedXpubs.push({ xpub: pk.xpub, scriptType: pk.scriptType || chain.scriptType || 'p2pkh', accountPath: acctPath })
+				seen.add(pk.xpub)
+			}
+		}
+		if (derivedXpubs.length > 0) {
+			xpub = derivedXpubs[0].xpub
+			// Use multi-xpub aggregation for 2+ xpubs OR whenever any xpub is
+			// account > 0. The single-xpub path ignores per-xpub accountPath, so a
+			// lone account-N xpub (e.g. account-0 derivation returned nothing but a
+			// tracked account-1 row exists) would otherwise sign with blockbook's
+			// account-0 path — a wrong key. Aggregation tags each input with its
+			// source account path, so account-N always signs with the account-N key.
+			if (derivedXpubs.length > 1 || derivedXpubs.some(x => x.accountPath[2] !== 0x80000000)) {
+				allXpubs = derivedXpubs
+			}
+		}
+	}
+
+	const rpcUrl = chain.id.startsWith('evm-custom-') ? getEvmRpcSource(chain) : undefined
+	const evmIdx = chain.chainFamily === 'evm' ? (params.evmAddressIndex ?? evmAddresses.getSelectedAddress()?.addressIndex ?? 0) : undefined
+
+	// TON: derive Ed25519 public key for wallet deployment (StateInit)
+	let publicKeyHex: string | undefined
+	if (chain.chainFamily === 'ton') {
+		try {
+			// Bypass hdwallet's getPublicKeys() — it forces a BTC scriptType which
+			// firmware rejects for ed25519. Call transport.call() directly instead.
+			const Messages = await import('@keepkey/device-protocol/lib/messages_pb')
+			const gpk = new Messages.GetPublicKey()
+			gpk.setAddressNList(chain.defaultPath)
+			gpk.setEcdsaCurveName('ed25519')
+			gpk.setShowDisplay(false)
+			const resp = await wallet.transport.call(
+				Messages.MessageType.MESSAGETYPE_GETPUBLICKEY,
+				gpk,
+				{ msgTimeout: 10000 }
+			)
+			const pubKeyProto = resp.proto as any
+			// Try node.publicKey first (raw bytes), fall back to xpub decode
+			const node = pubKeyProto.getNode?.()
+			const rawKey = node?.getPublicKey_asU8?.()
+			if (rawKey && (rawKey.length === 32 || rawKey.length === 33)) {
+				// ed25519 node key is 33 bytes: 0x00 prefix + 32-byte key
+				const keyBytes = rawKey.length === 33 && rawKey[0] === 0x00 ? rawKey.subarray(1) : rawKey.length === 32 ? rawKey : null
+				if (!keyBytes || keyBytes.length !== 32) throw new Error(`Unexpected ed25519 key length: ${rawKey.length}`)
+				publicKeyHex = Buffer.from(keyBytes).toString('hex')
+			} else {
+				// Fallback: decode xpub to extract raw key
+				const xpubStr = pubKeyProto.getXpub?.()
+				if (xpubStr) {
+					const bs58check = require('bs58check')
+					const decoded: Buffer = bs58check.decode(xpubStr)
+					if (decoded.length >= 78 && decoded[45] === 0x00) {
+						publicKeyHex = Buffer.from(decoded.subarray(46, 78)).toString('hex')
+					}
+				}
+			}
+			if (publicKeyHex) {
+				console.debug(`[buildTx] TON ed25519 pubkey derived`)
+				// Compute the correct v4r2 wallet address from the public key.
+				// The firmware may derive a wrong address (sha256(pubkey) instead of
+				// sha256(stateInit)), so always use our vault-computed address.
+				const { tonV4R2Address } = await import('./txbuilder/ton')
+				fromAddress = tonV4R2Address(publicKeyHex)
+				console.debug(`[buildTx] TON v4r2 address derived`)
+			} else {
+				console.warn(`[buildTx] TON: GetPublicKey returned no usable key`)
+			}
+		} catch (e: any) {
+			console.warn(`[buildTx] TON public key derivation failed:`, e.message)
+		}
+	}
+
+	const result = await buildTx(pioneer, chain, {
+		...params,
+		fromAddress,
+		xpub,
+		allXpubs: allXpubs?.length ? allXpubs : undefined,
+		rpcUrl,
+		evmAddressIndex: evmIdx,
+		publicKeyHex,
+		pioneerBaseUrl: getPioneerApiBase(),
+	})
+
+	return { unsignedTx: result.unsignedTx, fee: result.fee }
+}
 
 const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 	maxRequestTime: 1_800_000, // 30 minutes — generous for device-interactive ops, but not infinite
@@ -7060,227 +7298,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				return { balance: readPioneerTokenBalance(resp, `${caip} balance`) }
 			},
 
-			buildTx: async (params) => {
-				console.debug(`[buildTx] isMax=${params.isMax} chainId=${params.chainId}`)
-				if (!engine.wallet) throw new Error('No device connected')
-				requireOnline('build transaction')
-				const chain = getAllChains().find(c => c.id === params.chainId)
-				if (!chain) throw new Error(`Unknown chain: ${params.chainId}`)
-				await verifyKnownVaultDestination(chain.networkId, params.to, params.caip || chain.caip)
-
-				// Firmware gate (fund safety): a THORChain/Maya bank-token send is a
-				// MsgSend whose `denom` field is only honored from 7.15.0. On older
-				// firmware the field is ignored and the tx signs as RUNE — refuse to
-				// build it rather than sign the wrong asset. Covers TCY/RUJI sends and
-				// swaps (both pass the bank-token caip). Native RUNE/ATOM are unaffected.
-				if (params.caip && isThorchainBankToken(params.caip)) {
-					const fw = engine.getDeviceState().firmwareVersion
-					if (!thorchainBankTokenFirmwareOK(params.caip, fw)) {
-						throw new Error(`This asset requires KeepKey firmware ${THORCHAIN_BANK_TOKEN_MIN_FW}+ (device has ${fw || 'unknown'}). Update your firmware to send or swap TCY / RUJI.`)
-					}
-				}
-
-				const bitcoinSelfHost = chain.id === 'bitcoin' && getBtcBackend().kind !== 'pioneer'
-				const pioneer = bitcoinSelfHost ? {} : await getPioneer()
-
-				// Seed-staleness boundary on the SIGNING path. params (xpubOverride,
-				// evmAddressIndex, amount, recipient) were prepared against the UI's
-				// wallet view; if the device seed has since changed, those inputs
-				// belong to a different wallet. Abort rather than build a tx from
-				// stale context — the purge clears the managers + notifies the
-				// frontend, which refreshes so the user can re-initiate cleanly.
-				if ((await ensureManagersForSeed('buildTx')).purged) {
-					throw new Error('Wallet changed since this transaction was prepared. Balances were refreshed — please review and try again.')
-				}
-
-				// For chains that need fromAddress or xpub, derive them
-				const wallet = engine.wallet as any
-				let fromAddress: string | undefined
-				let xpub: string | undefined
-				let allXpubs: Array<{ xpub: string; scriptType: string; accountPath: number[] }> | undefined
-
-				if (chain.chainFamily === 'evm') {
-					// EVM multi-address: use evmAddressIndex or selected index
-					const idx = params.evmAddressIndex ?? evmAddresses.getSelectedAddress()?.addressIndex ?? 0
-					const addrPath = evmAddressPath(idx)
-					// Try cached address first (avoids device call)
-					const cached = evmAddresses.toAddressSet().addresses.find(a => a.addressIndex === idx)
-					if (cached) {
-						fromAddress = cached.address
-					} else {
-						const addrResult = await wallet.ethGetAddress({ addressNList: addrPath, showDisplay: false, coin: 'Ethereum' })
-						fromAddress = typeof addrResult === 'string' ? addrResult : addrResult?.address
-					}
-				} else if (chain.chainFamily !== 'utxo') {
-					const addrParams: any = {
-						addressNList: chain.defaultPath,
-						showDisplay: false,
-						coin: chain.coin,
-					}
-					if (chain.scriptType) addrParams.scriptType = chain.scriptType
-					if (chain.chainFamily === 'ton') addrParams.bounceable = false
-					const walletMethod = chain.id === 'ripple' ? 'rippleGetAddress' : chain.rpcMethod
-					console.debug(`[buildTx] Deriving ${chain.coin} address`)
-					const addrResult = await wallet[walletMethod](addrParams)
-					fromAddress = typeof addrResult === 'string' ? addrResult : addrResult?.address || addrResult?.publicKey
-					console.debug(`[buildTx] Derived ${chain.coin} address OK`)
-				} else if (chain.id === 'bitcoin') {
-					// BTC multi-account: resolve xpub, scriptType, and accountPath from the
-					// override string itself (not from getSelectedXpub(), which can drift
-					// between render and RPC handling). Finding 5 fix.
-					const resolvedXpub = params.xpubOverride || btcAccounts.getSelectedXpub()?.xpub
-					console.log(`[buildTx] BTC xpub: override=${params.xpubOverride?.slice(0,12)} selected=${btcAccounts.getSelectedXpub()?.xpub?.slice(0,12)} resolved=${resolvedXpub?.slice(0,12)} scriptType=${btcAccounts.getSelectedXpub()?.scriptType}`)
-					xpub = resolvedXpub
-					// Look up the BtcXpub entry that owns this xpub string for scriptType + path
-					let matchedXpubEntry: { scriptType: string; path: number[] } | undefined
-					if (resolvedXpub) {
-						for (const account of btcAccounts.toAccountSet().accounts) {
-							for (const xp of account.xpubs) {
-								if (xp.xpub === resolvedXpub) {
-									matchedXpubEntry = { scriptType: xp.scriptType, path: xp.path }
-									break
-								}
-							}
-							if (matchedXpubEntry) break
-						}
-					}
-					if (matchedXpubEntry) {
-						if (!params.scriptTypeOverride) params = { ...params, scriptTypeOverride: matchedXpubEntry.scriptType }
-						params = { ...params, accountPath: matchedXpubEntry.path }
-					}
-					if (!xpub) {
-						// Fallback: derive from default path
-						const xpubResult = await wallet.getPublicKeys([{
-							addressNList: chain.defaultPath.slice(0, 3),
-							coin: chain.coin, scriptType: chain.scriptType, curve: 'secp256k1',
-						}])
-						xpub = xpubResult?.[0]?.xpub
-					}
-				} else {
-					// Non-BTC UTXO: derive all applicable script-type xpubs so buildUtxoTx
-					// can aggregate UTXOs from any address type (mirrors BTC multi-xpub logic).
-					// Shared helper — includes the chain's own receive convention (LTC hands
-					// out p2wpkh on the 44' branch), which the standard trio misses.
-					const scriptTypes = utxoAccountScriptPaths(chain, 0)
-
-					const pubKeyPaths = scriptTypes.map(st => ({
-						addressNList: st.path,
-						coin: chain.coin,
-						scriptType: st.scriptType,
-						curve: 'secp256k1',
-					}))
-					const pubKeyResults = await wallet.getPublicKeys(pubKeyPaths)
-
-					const derivedXpubs: Array<{ xpub: string; scriptType: string; accountPath: number[] }> = []
-					for (let i = 0; i < scriptTypes.length; i++) {
-						const xp = pubKeyResults?.[i]?.xpub
-						if (xp) {
-							derivedXpubs.push({
-								xpub: xp,
-								scriptType: scriptTypes[i].scriptType,
-								accountPath: pubKeyPaths[i].addressNList,
-							})
-						}
-					}
-					// Aggregate device-cached account-1+ xpubs (persisted by the audit
-					// "track" action, addUtxoAccount) so those tracked funds are actually
-					// SPENDABLE, not just displayed. Each row carries its own account-level
-					// path (parsed from the path column) so per-input signing derives the
-					// correct key for account > 0. Device-scoped, never written for
-					// passphrase wallets; dedup by xpub against the account-0 set above.
-					const utxoDevId = engine.getDeviceState().deviceId
-					if (utxoDevId && !engine.isPassphraseWallet) {
-						const seen = new Set(derivedXpubs.map(x => x.xpub))
-						for (const pk of getCachedPubkeys(utxoDevId)) {
-							if (pk.chainId !== chain.id || !pk.xpub || seen.has(pk.xpub)) continue
-							const acctPath = parseBip32Path(pk.path)
-							if (!acctPath || acctPath.length !== 3) continue
-							derivedXpubs.push({ xpub: pk.xpub, scriptType: pk.scriptType || chain.scriptType || 'p2pkh', accountPath: acctPath })
-							seen.add(pk.xpub)
-						}
-					}
-					if (derivedXpubs.length > 0) {
-						xpub = derivedXpubs[0].xpub
-						// Use multi-xpub aggregation for 2+ xpubs OR whenever any xpub is
-						// account > 0. The single-xpub path ignores per-xpub accountPath, so a
-						// lone account-N xpub (e.g. account-0 derivation returned nothing but a
-						// tracked account-1 row exists) would otherwise sign with blockbook's
-						// account-0 path — a wrong key. Aggregation tags each input with its
-						// source account path, so account-N always signs with the account-N key.
-						if (derivedXpubs.length > 1 || derivedXpubs.some(x => x.accountPath[2] !== 0x80000000)) {
-							allXpubs = derivedXpubs
-						}
-					}
-				}
-
-				const rpcUrl = chain.id.startsWith('evm-custom-') ? getEvmRpcSource(chain) : undefined
-				const evmIdx = chain.chainFamily === 'evm' ? (params.evmAddressIndex ?? evmAddresses.getSelectedAddress()?.addressIndex ?? 0) : undefined
-
-				// TON: derive Ed25519 public key for wallet deployment (StateInit)
-				let publicKeyHex: string | undefined
-				if (chain.chainFamily === 'ton') {
-					try {
-						// Bypass hdwallet's getPublicKeys() — it forces a BTC scriptType which
-						// firmware rejects for ed25519. Call transport.call() directly instead.
-						const Messages = await import('@keepkey/device-protocol/lib/messages_pb')
-						const gpk = new Messages.GetPublicKey()
-						gpk.setAddressNList(chain.defaultPath)
-						gpk.setEcdsaCurveName('ed25519')
-						gpk.setShowDisplay(false)
-						const resp = await wallet.transport.call(
-							Messages.MessageType.MESSAGETYPE_GETPUBLICKEY,
-							gpk,
-							{ msgTimeout: 10000 }
-						)
-						const pubKeyProto = resp.proto as any
-						// Try node.publicKey first (raw bytes), fall back to xpub decode
-						const node = pubKeyProto.getNode?.()
-						const rawKey = node?.getPublicKey_asU8?.()
-						if (rawKey && (rawKey.length === 32 || rawKey.length === 33)) {
-							// ed25519 node key is 33 bytes: 0x00 prefix + 32-byte key
-							const keyBytes = rawKey.length === 33 && rawKey[0] === 0x00 ? rawKey.subarray(1) : rawKey.length === 32 ? rawKey : null
-							if (!keyBytes || keyBytes.length !== 32) throw new Error(`Unexpected ed25519 key length: ${rawKey.length}`)
-							publicKeyHex = Buffer.from(keyBytes).toString('hex')
-						} else {
-							// Fallback: decode xpub to extract raw key
-							const xpubStr = pubKeyProto.getXpub?.()
-							if (xpubStr) {
-								const bs58check = require('bs58check')
-								const decoded: Buffer = bs58check.decode(xpubStr)
-								if (decoded.length >= 78 && decoded[45] === 0x00) {
-									publicKeyHex = Buffer.from(decoded.subarray(46, 78)).toString('hex')
-								}
-							}
-						}
-						if (publicKeyHex) {
-							console.debug(`[buildTx] TON ed25519 pubkey derived`)
-							// Compute the correct v4r2 wallet address from the public key.
-							// The firmware may derive a wrong address (sha256(pubkey) instead of
-							// sha256(stateInit)), so always use our vault-computed address.
-							const { tonV4R2Address } = await import('./txbuilder/ton')
-							fromAddress = tonV4R2Address(publicKeyHex)
-							console.debug(`[buildTx] TON v4r2 address derived`)
-						} else {
-							console.warn(`[buildTx] TON: GetPublicKey returned no usable key`)
-						}
-					} catch (e: any) {
-						console.warn(`[buildTx] TON public key derivation failed:`, e.message)
-					}
-				}
-
-				const result = await buildTx(pioneer, chain, {
-					...params,
-					fromAddress,
-					xpub,
-					allXpubs: allXpubs?.length ? allXpubs : undefined,
-					rpcUrl,
-					evmAddressIndex: evmIdx,
-					publicKeyHex,
-					pioneerBaseUrl: getPioneerApiBase(),
-				})
-
-				return { unsignedTx: result.unsignedTx, fee: result.fee }
-			},
+			buildTx: (params) => buildTxForCurrentWallet(params),
 
 			broadcastTx: async (params) => {
 				const sessionEpoch = activitySessionEpoch // the wallet session this send belongs to
