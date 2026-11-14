@@ -10,7 +10,7 @@ const REQUEST_ID = '0x' + 'ab'.repeat(32)
 const depositNative = (requestId = REQUEST_ID) => '0x49290c1c' + SENDER.slice(2).toLowerCase().padStart(64, '0') + requestId.slice(2)
 
 let quotes = 0
-let relay: { requestId?: string; recipient?: string; data?: string; integration?: string } = {}
+let relay: { requestId?: string; recipient?: string; data?: string; integration?: string; totalBps?: number } = {}
 const pioneer = {
   GetAvailableAssets: async () => ({ data: [] }),
   // The shape api.keepkey.info returns for a Relay route (raw = Relay's own /quote body).
@@ -23,6 +23,7 @@ const pioneer = {
         gasLimit: '32713', chainId: 8453, recipientAddress: '0x4cd00e387622c35bddb9b4c962c136462338bc31', senderAddress: params.senderAddress, amount: params.sellAmount,
       } }],
       relayRequestId: relay.requestId,
+      ...(relay.totalBps === undefined ? {} : { fees: { total_bps: relay.totalBps } }),
       raw: { requestId: relay.requestId, details: { sender: params.senderAddress, ...(relay.recipient === undefined ? {} : { recipient: relay.recipient }) } },
     } }]
   },
@@ -127,4 +128,11 @@ test('a THOR/Maya memo that pays someone other than the recipient is refused, fr
   await expect(run('=:ETH.ETH:0x2222222222222222222222222222222222222222:0/1/0:kk:30')).rejects.toThrow(/memo pays out to 0x2222/)
   // The entered recipient (any case) passes the memo check and goes on to build.
   await expect(run(`=:ETH.ETH:${RECIPIENT.toUpperCase().replace('0X', '0x')}:0/1/0:kk:30`)).rejects.not.toThrow(/memo pays out/)
+})
+
+test('the fee-gate refusal names the pair and route it was quoted for (V14)', async () => {
+  // Switching the output re-quotes; an identical message would read as the old error.
+  relay = { requestId: REQUEST_ID, recipient: RECIPIENT, totalBps: 2079 }
+  await expect(quote(RECIPIENT)).rejects.toThrow(/^Swap amount too low: quoted fees for ETH → ETH via relay \(20\.79%\)/)
+  relay = { requestId: REQUEST_ID, recipient: RECIPIENT }
 })

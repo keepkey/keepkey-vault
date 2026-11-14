@@ -35,6 +35,7 @@ import * as txb from './txbuilder'
 import { normalizeBchAddress } from './txbuilder'
 import { isBurnAddress, sameAddress, validateAddress } from '../shared/address-validation'
 import { thorMemoDestination } from '../shared/swap-risk'
+import { assetSymbol } from './swap-fees'
 // Re-export pure parsing functions (used by tests + this module)
 // assetToCaip is exported for backwards-compat (legacy code that hydrates old
 // history rows without CAIP). The swap quote/execute path no longer uses it —
@@ -455,7 +456,10 @@ export async function getSwapQuote(params: SwapQuoteParams, device: {
   const feeBps = Number(result.fees?.totalBps) || 0
   if (feeBps >= slippageBps) {
     throw new Error(
-      `Swap amount too low: quoted fees (${(feeBps / 100).toFixed(2)}%) meet or exceed the ` +
+      // Names the pair and route: after switching the output, the new pair's
+      // refusal must not read as the old one still on screen (V14).
+      `Swap amount too low: quoted fees for ${assetSymbol(params.fromCaip) ?? params.fromCaip} → ${assetSymbol(params.toCaip) ?? params.toCaip} ` +
+      `via ${result.swapper || result.integration} (${(feeBps / 100).toFixed(2)}%) meet or exceed the ` +
       `slippage allowance (${(slippageBps / 100).toFixed(2)}%), so the protocol would refund ` +
       `this swap on-chain — minus another network fee. Increase the amount or choose Custom ` +
       `slippage above ${(feeBps / 100).toFixed(2)}%.`

@@ -24,6 +24,9 @@ function metadata(caip: string): { symbol: string; decimals: number } | undefine
   const chain = CHAINS.find(chain => chain.caip.toLowerCase() === caip.toLowerCase())
   return chain ? { symbol: chain.symbol, decimals: chain.decimals } : undefined
 }
+/** Display symbol for a CAIP from the bundled catalog (or the chain's native coin). */
+export const assetSymbol = (caip: string): string | undefined => metadata(caip)?.symbol
+
 function currencyMeta(currency: any): { assetCaip: string; symbol: string; decimals: number } | undefined {
   if (!currency || typeof currency.symbol !== 'string' || !Number.isInteger(currency.decimals)) return undefined
   let caip = currency.assetCaip || currency.assetId || currency.caip
