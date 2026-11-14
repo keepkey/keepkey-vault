@@ -140,7 +140,8 @@ export default {
 		},
 		win: {
 			bundleCEF: false,
-			icon: "icon.png",
+			// Hutch refuses Windows PNG icons over 256x256 (PngTooLarge); icon.png is 512.
+			icon: "icon.iconset/icon_256x256.png",
 		},
 	},
 	release: {
