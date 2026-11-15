@@ -76,19 +76,40 @@ function rejectAllPending(reason: string) {
   pendingRequests.clear()
 }
 
+/** Electrobun 2.x delivers Bun's replies by calling receiveMessageFromHost in
+ *  the page (on Windows, every reply arrives this way, never on the socket).
+ *  Until a receiver is registered, the preload queues them in
+ *  __electrobunPendingHostMessages. Register both the 2.x and 1.x names,
+ *  whatever transport sends, then drain the queue. */
+function registerHostReceiver(w: any) {
+  w.__electrobun = w.__electrobun || {}
+  const receive = (msg: any) => {
+    try {
+      handlePacket(typeof msg === 'string' ? JSON.parse(msg) : msg)
+    } catch (err) {
+      console.error('[rpc] Failed to handle host message:', err)
+    }
+  }
+  w.__electrobun.receiveMessageFromHost = receive
+  w.__electrobun.receiveMessageFromBun = receive
+  const queued = w.__electrobunPendingHostMessages
+  if (Array.isArray(queued) && queued.length) {
+    w.__electrobunPendingHostMessages = []
+    for (const msg of queued) receive(msg)
+  }
+}
+
 // Initialize transport — connect to Electrobun's WebSocket or fall back
 function initTransport() {
   const w = window as any
 
   // Check if Electrobun preload has injected globals
-  if (w.__electrobunRpcSocketPort && w.__electrobunWebviewId) {
+  if ((w.__electrobunHostSocketPort ?? w.__electrobunRpcSocketPort) && w.__electrobunWebviewId) {
+    registerHostReceiver(w)
     connectWebSocket(w)
   } else if (w.__electrobunBunBridge) {
     // Fallback: postMessage bridge (used when socket unavailable)
-    w.__electrobun = w.__electrobun || {}
-    w.__electrobun.receiveMessageFromBun = (msg: any) => {
-      handlePacket(msg)
-    }
+    registerHostReceiver(w)
 
     sendPacket = (packet: RPCPacket) => {
       w.__electrobunBunBridge?.postMessage(JSON.stringify(packet))
@@ -101,10 +122,11 @@ function initTransport() {
 }
 
 function connectWebSocket(w: any) {
-  const port = w.__electrobunRpcSocketPort
+  const port = w.__electrobunHostSocketPort ?? w.__electrobunRpcSocketPort
   const webviewId = w.__electrobunWebviewId
 
-  const socket = new WebSocket(`ws://localhost:${port}/socket?webviewId=${webviewId}`)
+  // 127.0.0.1, as Electrobun's own client: "localhost" can resolve to ::1 first.
+  const socket = new WebSocket(`ws://127.0.0.1:${port}/socket?webviewId=${webviewId}`)
 
   socket.addEventListener('message', async (event) => {
     try {
