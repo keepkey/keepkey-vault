@@ -152,6 +152,7 @@ export function reviewPlan(plan: MoneroPlan, intent: {
 
 export interface ParsedMoneroTransaction {
   hash: string
+  prefixHash: string
   fee: bigint
   outputCount: number
   outputData: Uint8Array
@@ -212,7 +213,7 @@ export function parseSignedTransaction(blob: Uint8Array): ParsedMoneroTransactio
   take(inputCount * 18 * 32 + inputCount * 32)
   if (offset !== blob.length) bad()
   const hash = keccak_256(concat([keccak_256(blob.subarray(0, prefixEnd)), keccak_256(blob.subarray(prefixEnd, baseEnd)), keccak_256(blob.subarray(baseEnd))]))
-  return { hash: hex(hash), fee, outputCount, inputs, outputData, extra, encryptedAmounts, commitments }
+  return { hash: hex(hash), prefixHash: hex(keccak_256(blob.subarray(0, prefixEnd))), fee, outputCount, inputs, outputData, extra, encryptedAmounts, commitments }
 }
 
 /** The signed bytes must spend exactly the reviewed inputs, with the reviewed rings, outputs and fee. */
