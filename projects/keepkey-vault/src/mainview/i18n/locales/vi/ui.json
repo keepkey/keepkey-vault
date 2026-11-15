@@ -172,5 +172,16 @@
   "m4dd9a00a": "Phí ShapeShift",
   "me6273384": "Phí nhà cung cấp",
   "meba56b2": "Số dư đã lưu vẫn khả dụng. Các bản cập nhật tự động không sử dụng thêm yêu cầu khám phá.",
-  "m61271e4e": "Tiến trình đồng bộ ví Monero"
+  "m61271e4e": "Tiến trình đồng bộ ví Monero",
+  "m59f8c115": "Ký Monero yêu cầu đúng hai đầu ra: một cho người nhận và một cho tiền thừa.",
+  "m9a3621f6": "Ký Monero yêu cầu kích thước vòng là 16 cho mỗi đầu vào.",
+  "m3a045821": "Kế hoạch Monero này vượt quá giới hạn ký được hỗ trợ. Chưa ký bất kỳ nội dung nào.",
+  "mbe695868": "KeepKey trả về dữ liệu ký Monero dạng luồng không hợp lệ. Chưa gửi bất kỳ nội dung nào.",
+  "m284ac162": "Mã băm tiền tố Monero đã ghép khác với thiết bị. Chưa gửi bất kỳ nội dung nào.",
+  "m4b83ff07": "Xác thực chữ ký Monero thất bại. Chưa gửi bất kỳ nội dung nào.",
+  "m11ff474a": "Trình xác minh Monero Core được ghim không khả dụng trong bản dựng này. Chưa ký bất kỳ nội dung nào.",
+  "m2dd4bc7f": "Giao dịch Monero không vượt qua xác minh Core độc lập. Chưa gửi bất kỳ nội dung nào.",
+  "mcd7dd06b": "KeepKey đang tạo bằng chứng cho giao dịch Monero…",
+  "m54d7603c": "Đang ký giao dịch Monero…",
+  "m58c4188c": "Ký Monero yêu cầu KeepKey có khả năng monero-signing."
 }

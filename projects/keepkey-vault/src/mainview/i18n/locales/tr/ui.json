@@ -169,5 +169,16 @@
   "m4dd9a00a": "ShapeShift ücreti",
   "me6273384": "Sağlayıcı ücreti",
   "meba56b2": "Önbellekteki bakiyeler kullanılabilir durumda kalır. Otomatik güncellemeler ek keşif isteği tüketmez.",
-  "m61271e4e": "Monero cüzdanı eşitleme ilerlemesi"
+  "m61271e4e": "Monero cüzdanı eşitleme ilerlemesi",
+  "m59f8c115": "Monero imzası tam iki çıktı gerektirir: bir alıcı ve bir para üstü çıktısı.",
+  "m9a3621f6": "Monero imzası her girdi için 16 boyutunda halka gerektirir.",
+  "m3a045821": "Bu Monero planı desteklenen imza sınırlarını aşıyor. Hiçbir şey imzalanmadı.",
+  "mbe695868": "KeepKey geçersiz akışlı Monero imza verileri döndürdü. Hiçbir şey gönderilmedi.",
+  "m284ac162": "Birleştirilen Monero önek özeti cihazdakiyle eşleşmiyor. Hiçbir şey gönderilmedi.",
+  "m4b83ff07": "Bir Monero imzasının kimlik doğrulaması başarısız oldu. Hiçbir şey gönderilmedi.",
+  "m11ff474a": "Sabitlenmiş Monero Core doğrulayıcısı bu derlemede kullanılamıyor. Hiçbir şey imzalanmadı.",
+  "m2dd4bc7f": "Monero işlemi bağımsız Core doğrulamasından geçemedi. Hiçbir şey gönderilmedi.",
+  "mcd7dd06b": "KeepKey Monero işleminin kanıtını oluşturuyor…",
+  "m54d7603c": "Monero işlemi imzalanıyor…",
+  "m58c4188c": "Monero imzası KeepKey üzerinde monero-signing yeteneği gerektirir."
 }

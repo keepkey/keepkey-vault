@@ -699,6 +699,8 @@ interface DashboardProps {
 	/** When in watchOnly mode, load cached data for this specific device (defaults to latest) */
 	watchOnlyDeviceId?: string
 	onOpenSettings?: () => void
+	capabilities?: readonly number[]
+	isEmulator?: boolean
 	firmwareVersion?: string
 	/** Device firmware variant — when bitcoin-only, the chain list is restricted to Bitcoin */
 	firmwareVariant?: string
@@ -838,7 +840,7 @@ function VaultPortfolioDashboard({ vault, onLoaded, watchOnly, firmwareVersion }
 	</Flex>
 }
 
-function PersonalDashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettings, firmwareVersion, firmwareVariant, forceRefresh, onForceRefreshConsumed, isHiddenWallet, knownEmpty, onOpenVault }: DashboardProps) {
+function PersonalDashboard({ capabilities, isEmulator, onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettings, firmwareVersion, firmwareVariant, forceRefresh, onForceRefreshConsumed, isHiddenWallet, knownEmpty, onOpenVault }: DashboardProps) {
     const providerUsage=useProviderUsage()
   const uiText = useUiTranslation()
 	const { portfolios: vaultPortfolios, loading: vaultsLoading, error: vaultsError, reload: reloadVaultPortfolios, setIncluded: setVaultIncluded } = useVaultPortfolios({ bitcoinOnly: isBitcoinOnlyVariant(firmwareVariant) })
@@ -1916,11 +1918,11 @@ function PersonalDashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSetti
 		})
 	}, [balanceErrorNotice?.key])
 
-	// XMR: a row in the chain list (setting + firmware 7.17+), opening the standard asset page.
+	// XMR: a row in the chain list (setting + device capability), opening the standard asset page.
 	// Its balance comes from the local watch wallet and has no fiat price, so it stays out of
 	// visibleChains, whose fiat totals, charts and sync states all come from Pioneer.
-	const moneroChain = useMemo(() => moneroChainVisible({ settingEnabled: moneroEnabled, firmwareVersion, watchOnly, bitcoinOnly: btcOnly })
-		&& !disabledNetworks.includes('monero') ? CHAINS.find(c => c.id === 'monero') : undefined, [moneroEnabled, firmwareVersion, watchOnly, btcOnly, disabledNetworks])
+	const moneroChain = useMemo(() => moneroChainVisible({ settingEnabled: moneroEnabled, capabilities, isEmulator, watchOnly, bitcoinOnly: btcOnly })
+		&& !disabledNetworks.includes('monero') ? CHAINS.find(c => c.id === 'monero') : undefined, [moneroEnabled, capabilities, isEmulator, watchOnly, btcOnly, disabledNetworks])
 
 	// Built-in networks the user turned off: offered back in the Add network dialog.
 	const turnedOffChains = useMemo(() => btcOnly ? [] : allChains.filter(c =>

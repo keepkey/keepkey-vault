@@ -601,6 +601,7 @@ export interface MoneroConnectionInfo {
 }
 
 export interface MoneroStatus {
+  signingPhase?: 'review' | 'inputs' | 'outputs' | 'proving' | 'signing' | 'verifying'
   connection?: MoneroConnectionInfo
   available: boolean
   network: 'mainnet'

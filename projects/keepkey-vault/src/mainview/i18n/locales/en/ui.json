@@ -2358,5 +2358,16 @@
   "m4dd9a00a": "ShapeShift fee",
   "me6273384": "Provider fee",
   "meba56b2": "Cached balances remain available. Automatic updates will not spend additional discovery requests.",
-  "m61271e4e": "Monero wallet sync progress"
+  "m61271e4e": "Monero wallet sync progress",
+  "m59f8c115": "Monero signing requires exactly two outputs: one recipient and one change output.",
+  "m9a3621f6": "Monero signing requires a ring size of 16 for every input.",
+  "m3a045821": "This Monero plan is outside the supported signing limits. Nothing was signed.",
+  "mbe695868": "The KeepKey returned invalid streamed Monero signing data. Nothing was sent.",
+  "m284ac162": "The assembled Monero prefix hash differs from the device. Nothing was sent.",
+  "m4b83ff07": "A Monero signature failed authentication. Nothing was sent.",
+  "m11ff474a": "The pinned Monero Core verifier is unavailable in this build. Nothing was signed.",
+  "m2dd4bc7f": "The Monero transaction failed independent Core verification. Nothing was sent.",
+  "mcd7dd06b": "KeepKey is proving the Monero transaction…",
+  "m54d7603c": "Signing Monero transaction…",
+  "m58c4188c": "Monero signing requires the monero-signing capability on KeepKey."
 }

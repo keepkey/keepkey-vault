@@ -56,8 +56,9 @@ const moneroCopy = existsSync(moneroCliSource) && existsSync(moneroRpcSource)
 // Development-only research artifacts (build-signed.ts refuses this flag): the receive-only and/or
 // signing emulator builds. The verified host adapter is packaged separately for normal receive access.
 const includeMoneroResearch = process.env.KEEPKEY_INCLUDE_MONERO_EMULATOR === '1';
-const moneroDeviceCopy = includeMoneroResearch && existsSync('monero-device-bundle/libmonero_device_proof.dylib') && existsSync('monero-device-bundle/libmonero_core_verify.dylib')
-    ? { 'monero-device-bundle': 'monero-device' } : {};
+// Capability signing uses the independently hash-checked Core verifier, without a host prover.
+const moneroDeviceCopy = existsSync('monero-device-bundle/libmonero_core_verify.dylib')
+    ? { 'monero-device-bundle/libmonero_core_verify.dylib': 'monero-device/libmonero_core_verify.dylib' } : {};
 const moneroEmulatorCopy = {
     ...(includeMoneroResearch && existsSync("monero-emulator-bundle/libkkemu-monero.dylib")
         ? { "monero-emulator-bundle/manifest.json": "monero-emulator/manifest.json",

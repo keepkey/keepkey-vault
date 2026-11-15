@@ -76,8 +76,9 @@ async function type(input: Element | null, value: string) {
 }
 /** The page state hook, held by a tiny host so a section renders as AssetPage renders it. */
 const { useMoneroStatus } = await import('../../src/mainview/hooks/useMoneroStatus')
-function Host({ Section, client, extra }: any) {
+function Host({ Section, client, extra, onState }: any) {
   const state = useMoneroStatus(true, client)
+  onState?.(state)
   return React.createElement(Section, { monero: state, client, chain: monero, privateMode: false, ...extra })
 }
 
@@ -303,6 +304,21 @@ for (const [name, overrides, Section] of [
   out.maxPrepare = client.calls.filter(c => c[0] === 'prepare').at(-1)
   out.syncPrepareOrder = client.calls.filter(c => c[0] === 'sync' || c[0] === 'prepare').map(c => c[0])
   out.reviewAmount = text(q(container, '[data-monero-review-amount]'))
+  await unmount()
+}
+{
+  const client = fakeClient(connected({ canSend: true, keyImagesSynced: true, spendStateKnown: true, sendBlocked: undefined }))
+  let state: any, finish: ((value: {txid: string}) => void) | undefined
+  client.send = () => new Promise(resolve => { finish = resolve })
+  const { container, unmount } = await render(React.createElement(Host, { Section: MoneroSendSection, client, onState: (next: any) => { state=next } }))
+  await type(q(container, '[data-monero-send-address]'), RECIPIENT)
+  await click(q(container, '[data-monero-max]'))
+  await click(q(container, '[data-monero-review-send]'))
+  await click(q(container, '[data-monero-confirm-send]'))
+  await act(async () => state.setStatus(connected({ signingPhase: 'proving', canSend: false, keyImagesSynced: true, spendStateKnown: true })))
+  out.provingText = text(q(container, '[data-monero-confirm-send]'))
+  out.provingRecipient = text(q(container, '[data-monero-send-review]')).includes(RECIPIENT)
+  await act(async () => { finish!({txid: 'cd'.repeat(32)}) })
   await unmount()
 }
 {

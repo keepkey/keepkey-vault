@@ -244,3 +244,9 @@ test('failover rechecks known outputs automatically and preserves a declined dev
  expect(ui.reverifiedAfterFailover).toBe(2)
  expect(ui.declinedAcrossFailover).toBe(1)
 })
+
+
+test('streamed proving progress is shown while keeping the full recipient visible', () => {
+ expect(ui.provingText).toBe('KeepKey is proving the Monero transaction…')
+ expect(ui.provingRecipient).toBe(true)
+})

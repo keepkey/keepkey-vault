@@ -1345,7 +1345,7 @@ function App() {
 					    time (always for passphrase wallets, which keep no cache). Only
 					    the refresh button fetches. */}
 					<Flex flex="1" direction="column" display={activeTab === "vault" ? "flex" : "none"}>
-						<Dashboard onLoaded={handlePortfolioLoaded} onOpenVault={handleOpenVault} onOpenSettings={() => setSettingsOpen(true)} firmwareVersion={deviceState.firmwareVersion} firmwareVariant={deviceState.firmwareVariant} forceRefresh={wizardComplete} onForceRefreshConsumed={() => setWizardComplete(false)} isHiddenWallet={deviceState.isHiddenWallet} knownEmpty={freshWallet} />
+						<Dashboard capabilities={deviceState.capabilities} isEmulator={deviceState.isEmulator} onLoaded={handlePortfolioLoaded} onOpenVault={handleOpenVault} onOpenSettings={() => setSettingsOpen(true)} firmwareVersion={deviceState.firmwareVersion} firmwareVariant={deviceState.firmwareVariant} forceRefresh={wizardComplete} onForceRefreshConsumed={() => setWizardComplete(false)} isHiddenWallet={deviceState.isHiddenWallet} knownEmpty={freshWallet} />
 					</Flex>
 					{activeTab === "explore" && <AppStore onOpenApp={handleOpenApp} onOpenKeepKey={handleOpenKeepKey} />}
 					{activeTab === "addresses" && <AddressBookView />}

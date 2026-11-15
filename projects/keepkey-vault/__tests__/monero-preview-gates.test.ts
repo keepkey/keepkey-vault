@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { createHash } from 'node:crypto'
 import { tmpdir } from 'node:os'
 import { join } from 'path'
-import { firmwareSupportsMonero, MONERO_MIN_FIRMWARE } from '../src/shared/firmware-versions'
+import { supportsMoneroSigning } from '../src/shared/monero-capability'
 import { CHAINS, isChainSupported } from '../src/shared/chains'
 import { bitcoinOnlyRpcRejection } from '../src/bun/bitcoin-only-boundary'
 import ts from 'typescript'
@@ -104,23 +104,23 @@ describe('Monero preview gates', () => {
 		expect(fixture.settings().moneroPendingBroadcasts).toBe(3)
 		expect(fixture.counts()).toEqual({ walletReads: 1, constructions: 0 })
 	})
-	test('firmware 7.17.0 or newer only', () => {
-		expect(firmwareSupportsMonero('7.17.0')).toBe(true)
-		expect(firmwareSupportsMonero('7.18.1')).toBe(true)
-		expect(firmwareSupportsMonero('7.16.0')).toBe(false)
-		expect(firmwareSupportsMonero(undefined)).toBe(false)
+	test('monero-signing capability only', () => {
+		expect(supportsMoneroSigning([31])).toBe(true)
+		expect(supportsMoneroSigning([30])).toBe(false)
+		expect(supportsMoneroSigning(undefined)).toBe(false)
 	})
 
 	test('XMR is a chain-list row opening the standard asset page; the separate tab, panel and button are gone', () => {
 		const monero = CHAINS.find(c => c.id === 'monero')!
-		expect(monero).toMatchObject({ chainFamily: 'monero', symbol: 'XMR', decimals: 12, hidden: true, minFirmware: MONERO_MIN_FIRMWARE })
-		expect(isChainSupported(monero, '7.16.0')).toBe(false)
+		expect(monero).toMatchObject({ chainFamily: 'monero', symbol: 'XMR', decimals: 12, hidden: true })
+		expect(monero.minFirmware).toBeUndefined() // visibility uses Features.capabilities
+		expect(isChainSupported(monero, '7.16.0')).toBe(true)
 		expect(existsSync(join(import.meta.dir, '..', 'src/mainview/components/MoneroPanel.tsx'))).toBe(false)
 		expect(src('src/mainview/components/TopNav.tsx')).not.toContain('"monero"')
 		expect(src('src/mainview/App.tsx')).not.toMatch(/Monero/)
 		const dashboard = src('src/mainview/components/Dashboard.tsx')
 		expect(dashboard).not.toContain('onOpenMonero')
-		expect(dashboard).toContain('moneroChainVisible({ settingEnabled: moneroEnabled, firmwareVersion, watchOnly, bitcoinOnly: btcOnly })')
+		expect(dashboard).toContain('moneroChainVisible({ settingEnabled: moneroEnabled, capabilities, isEmulator, watchOnly, bitcoinOnly: btcOnly })')
 		expect(dashboard).toContain('<MoneroChainRow chain={moneroChain}')
 		expect(dashboard).toContain('onOpen={() => openChainPage(moneroChain)}')
 		const page = src('src/mainview/components/AssetPage.tsx')

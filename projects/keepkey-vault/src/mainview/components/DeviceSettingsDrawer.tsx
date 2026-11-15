@@ -1,6 +1,6 @@
 import { SettingsLayout, useSettingsCategory, type SettingsCategory } from "./SettingsLayout"
 import { useUiTranslation } from "../i18n/ui"
-import { firmwareSupportsMonero, MONERO_MIN_FIRMWARE } from "../../shared/firmware-versions"
+import { supportsMoneroSigning } from "../../shared/monero-capability"
 import { useState, useEffect, useCallback, useRef } from "react"
 import { useFiat } from "../lib/fiat-context"
 import { Box, Flex, Text, VStack, Button, Input, IconButton, StackSeparator } from "@chakra-ui/react"
@@ -1711,7 +1711,7 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
               <Box>
               <Flex justify="space-between" align="center" gap="4">
                 <Flex align="center" gap="3" minW="0"><FeatureIcon kind="monero" /><Box><Text fontSize="md" fontWeight="500" color="kk.textPrimary">{uiText('Monero (XMR)')}</Text>
-                  <Text fontSize="sm" color="kk.textSecondary" mt="0.5">{appSettings.moneroAvailable === false ? uiText('Monero is unavailable in this build.') : !firmwareSupportsMonero(deviceState.firmwareVersion) ? `Needs KeepKey firmware ${MONERO_MIN_FIRMWARE} or newer.` : uiText('Add Monero to your wallet. Manage its node and scan history in Settings → Networks.')}</Text></Box></Flex>
+                  <Text fontSize="sm" color="kk.textSecondary" mt="0.5">{appSettings.moneroAvailable === false ? uiText('Monero is unavailable in this build.') : !supportsMoneroSigning(deviceState.capabilities) && !deviceState.isEmulator ? uiText("Monero signing requires the monero-signing capability on KeepKey.") : uiText('Add Monero to your wallet. Manage its node and scan history in Settings → Networks.')}</Text></Box></Flex>
                 <Toggle label={uiText('Monero (XMR)')} checked={appSettings.moneroEnabled} disabled={moneroBusy || appSettings.moneroAvailable === false} onChange={toggleMonero} />
               </Flex>
               {moneroError && <Text role="alert" fontSize="xs" color="kk.error" mt="2">{moneroError}</Text>}

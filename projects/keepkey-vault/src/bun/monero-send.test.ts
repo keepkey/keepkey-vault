@@ -11,10 +11,11 @@ import { checkRelayResponse, parseExactJson, validateKeyImageImport, validateOut
 import { relayRawTransaction } from '../../monero-cli/src/wallet'
 import { DigestWalletRpc } from '../../monero-cli/src/digest'
 import { checkSignedTransaction, concat, keyImageInitRequest, lengthField, openKeyImage, parseFields, parseSignedTransaction, reviewPlan,
-  signRequest, transferDetails, varint } from './monero-wire'
+  signRequest, transferDetails, varint, bytesField } from './monero-wire'
 import { createMoneroVault, type MoneroWatchSidecar } from './monero-vault'
 import { MONERO_STANDARD_WALLET_REQUIRED } from '../shared/monero-wallet-policy'
-import { MONERO_DEVICE_SUBADDRESS_CANDIDATE_SHA256, type MoneroDeviceSigner } from './monero-device-signing'
+import type { MoneroCoreVerifier } from './monero-device-signing'
+import streamFixtures from './monero-stream.fixtures.json'
 import { createFilePendingStore, type MoneroPendingStore } from './monero-pending'
 import { formatXmrAtomic, moneroAddressKind, parseXmrAmount } from '../shared/monero-address'
 
@@ -269,6 +270,9 @@ function reports(type: number, body: Uint8Array = new Uint8Array()): Uint8Array[
 const ENC_KEY = new Uint8Array(32).fill(9)
 
 class Emulator {
+  streamFixture: typeof streamFixtures.cases[number] | null = null
+  streamPosition = 0
+  streamHook: ((type: number) => Promise<void>) | null = null
   onButtonRequest: (() => void) | null = null
   queue: Uint8Array[] = []
   pending: Array<[number, Uint8Array]> = []
@@ -285,12 +289,19 @@ class Emulator {
   onReviewScreen: (() => void) | null = null
   private respond(messages: Array<[number, Uint8Array]>) {
     const [first, ...rest] = messages
-    this.queue.push(...reports(first[0], first[1]))
+    const type = this.streamFixture ? ({541:1801,543:1803,531:1805,533:1807,535:1809}[first[0]] ?? first[0]) : first[0]
+    this.queue.push(...reports(type, first[1]))
     if (first[0] === 26) this.pending = rest
   }
   publicOnly = false
   private handle(type: number, body: Uint8Array) {
     this.received.push({ type, body })
+    if (type >= 1810 && type <= 1824 && this.streamFixture) {
+      const c = this.streamFixture, index = this.streamPosition++
+      expect({id:type, hex:hex(body)}).toEqual(c.requests[index])
+      const reply: [number,Uint8Array] = [c.responses[index].id, unhex(c.responses[index].hex)]
+      return this.respond(type === 1810 ? [[26,new Uint8Array()],reply] : [reply])
+    }
     // Independent public firmware fixture; pending ButtonAck replies keep their mapped IDs.
     const publicProtocol = type >= 1800 && type <= 1809
     if (this.publicOnly && [540, 542, 530, 532, 534].includes(type)) return this.respond([[3, new Uint8Array([8, 1])]])
@@ -310,7 +321,7 @@ class Emulator {
       // Key image per output: the fixture's for the fixture output, a derived one for synthetic outputs.
       const outKeys = parseFields(body).get(1)!.map(record => hex(parseFields(record as Uint8Array).get(1)![0] as Uint8Array))
       return this.respond([[replyType(533), concat(outKeys.map((outKey, i) => {
-        const image = outKey === fixtures.cases.base.adapterOutputs.outputs[0].out_key ? images[0] : hex(keccak_256(unhex(outKey)))
+        const image = this.keyImageOverride || outKey === fixtures.cases.base.adapterOutputs.outputs[0].out_key ? images[0] : hex(keccak_256(unhex(outKey)))
         const iv = new Uint8Array(12).fill(i + 1), plain = concat([unhex(image), new Uint8Array(64).fill(5)])
         return lengthField(1, concat([lengthField(1, iv), lengthField(3, chacha20poly1305(ENC_KEY, iv).encrypt(plain))]))
       }))]])
@@ -330,6 +341,7 @@ class Emulator {
     } else this.partial.data.push(...report.subarray(1))
     if (this.partial.data.length >= this.partial.length) {
       const { type, length, data } = this.partial; this.partial = null
+      if (this.streamHook) await this.streamHook(type)
       this.handle(type, Uint8Array.from(data.slice(0, length)))
     }
   }
@@ -341,7 +353,7 @@ class Emulator {
   }
 }
 
-function bridge(options: { signing?: boolean; sendReady?: boolean; monitorReady?: boolean; pendingStore?: MoneroPendingStore; watchStore?: MoneroWatchStore; hardwareSigner?: MoneroDeviceSigner } = {}) {
+function bridge(options: { signing?: boolean; sendReady?: boolean; monitorReady?: boolean; pendingStore?: MoneroPendingStore; watchStore?: MoneroWatchStore; coreVerifier?: MoneroCoreVerifier } = {}) {
   const delegate = new Emulator()
   const calls: Record<string, any[]> = { imports: [], transfers: [], relays: [], refreshes: [], lookups: [] }
   // What the node says about a txid (/get_transactions + /is_key_image_spent).
@@ -374,7 +386,7 @@ function bridge(options: { signing?: boolean; sendReady?: boolean; monitorReady?
     async refreshMoneroWatch() { calls.refreshes.push(true) },
   }
   const transport = { delegate, lockDuring: <T,>(operation: () => Promise<T>) => operation() }
-  const state: { state: string; deviceId: string; activeTransport: string; isHiddenWallet: boolean; firmwareVersion: string } = { state: 'ready', deviceId: 'PUBLIC-EMULATOR', activeTransport: 'emulator', isHiddenWallet: false, firmwareVersion: '7.17.0' }
+  const state: { state: string; deviceId: string; activeTransport: string; isHiddenWallet: boolean; firmwareVersion: string; capabilities?: number[]; firmwareHash?: string } = { state: 'ready', deviceId: 'PUBLIC-EMULATOR', activeTransport: 'emulator', isHiddenWallet: false, firmwareVersion: '7.17.0' }
   const config: { enabled: boolean; offline: boolean; daemonUrl: string; restoreHeight: number } = { enabled: true, offline: false, daemonUrl: 'http://127.0.0.1:18081', restoreHeight: 0 }
   const engine = { isEmulator: true, wallet: { transport }, emuDelegate: delegate, currentSeedEthAddress: null as string | null, getDeviceState: () => ({ ...state }) }
   const confirmed: any[] = []
@@ -383,7 +395,7 @@ function bridge(options: { signing?: boolean; sendReady?: boolean; monitorReady?
     try { return await operation() } finally { delegate.onButtonRequest = null }
   }
   const api = createMoneroVault({ engine, confirm, sidecar, signingEmulator: () => options.signing !== false,
-    getConfig: () => ({ ...config }), pendingStore: options.pendingStore, watchStore: options.watchStore, hardwareSigner: options.hardwareSigner })
+    getConfig: () => ({ ...config }), pendingStore: options.pendingStore, watchStore: options.watchStore, coreVerifier: options.coreVerifier })
   return { api, delegate, calls, confirmed, engine, state, config, wallet,
     setDraft(next: typeof draft) { draft = next }, setRelayError(error: Error | null) { relayError = error },
     setTransferError(error: Error | null) { transferError = error }, setLookup(next: typeof lookup) { lookup = next }, setOutputs(next: typeof outputs) { outputs = next } }
@@ -998,75 +1010,87 @@ test('saved image proofs recheck known outputs after reconnect without hardware;
 })
 
 
-test('physical candidate uses 65002/65003 and independent verification before relay; no emulator confirmation wrapper',async()=>{
- let verified=0,disposed=0
- const hardwareSigner:MoneroDeviceSigner={available:()=>true,prepare:async()=>({payload:new Uint8Array([1]),verify:()=>{verified++;return true},dispose:()=>{disposed++}})}
- const b=bridge({hardwareSigner});b.engine.isEmulator=false;b.state.activeTransport='hid'
- await b.api.connect();await b.api.syncKeyImages()
- expect((await b.api.getStatus()).canSend).toBe(true)
- const review=await b.api.prepareSend({address:RECIPIENT,amountAtomic:'2000000000000'})
- await b.api.send({prepareId:review.prepareId})
- expect(sentTypes(b)).toContain(65002);expect(sentTypes(b)).not.toContain(65000)
- expect(verified).toBe(1);expect(disposed).toBe(1);expect(b.confirmed).toHaveLength(0)
- expect(b.calls.relays).toHaveLength(1)
-})
-
-test('a failed hardware output/proof verification never persists or relays a payment',async()=>{
- let disposed=false
- const hardwareSigner:MoneroDeviceSigner={available:()=>true,prepare:async()=>({payload:new Uint8Array([1]),verify:()=>false,dispose:()=>{disposed=true}})}
- const b=bridge({hardwareSigner});b.engine.isEmulator=false;b.state.activeTransport='hid'
- await b.api.connect();await b.api.syncKeyImages()
- const review=await b.api.prepareSend({address:RECIPIENT,amountAtomic:'2000000000000'})
- await expect(b.api.send({prepareId:review.prepareId})).rejects.toThrow('independent output')
- expect(b.calls.relays).toHaveLength(0);expect(b.api.pendingCount()).toBe(0);expect(disposed).toBe(true)
-})
-
-test('unsupported physical firmware gets a hardware-specific blocker',async()=>{
- const b=bridge();b.engine.isEmulator=false;b.state.activeTransport='hid'
- await b.api.connect();expect((await b.api.getStatus()).sendBlocked).toBe('firmware')
- await expect(b.api.prepareSend({address:RECIPIENT,amountAtomic:'2000000000000'})).rejects.toThrow('hardware signing')
- expect(b.calls.transfers).toHaveLength(0)
-})
-
-
-test('subaddress hardware send uses the exact image, scoped monitoring credential, and device protocol',async()=>{
- const record=JSON.parse(readFileSync(join(import.meta.dir,'monero-device-subaddress.fixtures.json'),'utf8')).cases.find((c:any)=>c.name==='v2-single-sub-network0')
- const p=validatePlan(record.adapterPlan),db=new Database(':memory:')
- const store=createMoneroWatchStore({database:()=>db,profile:'subaddress-test',key:async()=>new Uint8Array(32).fill(9)})
- let monitoring:Uint8Array|null=null
- const hardwareSigner:MoneroDeviceSigner={available:hash=>hash===MONERO_DEVICE_SUBADDRESS_CANDIDATE_SHA256,prepare:async(actual,context)=>{
-  expect(actual).toEqual(p);expect(context?.firmwareHash).toBe(MONERO_DEVICE_SUBADDRESS_CANDIDATE_SHA256)
-  expect(context?.viewKey?.length).toBe(32);expect(context!.viewKey!.some(b=>b!==0)).toBe(true)
-  monitoring=context!.viewKey!
-  return {payload:new Uint8Array([1]),verify:()=>true,dispose(){}}
+// The stream envelopes below are reconstructed from unchanged firmware Core vectors.
+function streamBridge(verify = true) {
+ let verified = 0, disposed = 0
+ const coreVerifier: MoneroCoreVerifier = { available: () => true, prepare: actual => {
+  expect(actual).toEqual(streamFixtures.cases[0].plan as MoneroPlan)
+  return { verify: blob => { verified++; expect(hex(blob)).toBe(streamFixtures.cases[0].transactionHex); return verify }, dispose: () => { disposed++ } }
  }}
- const b=bridge({watchStore:store,hardwareSigner});b.engine.isEmulator=false;b.state.activeTransport='hid'
- ;(b.state as any).firmwareHash=MONERO_DEVICE_SUBADDRESS_CANDIDATE_SHA256
- b.engine.currentSeedEthAddress='0x'+'a'.repeat(40)
- try{
-  b.delegate.keyImageOverride=parseSignedTransaction(unhex(record.transactionHex)).inputs[0].keyImage
-  await b.api.connect();await b.api.syncKeyImages()
-  b.setDraft(()=>({feeAtomic:p.feeAtomic,amountAtomic:p.outputs[0].amountAtomic,plan:p}))
-  b.delegate.signedBlob=unhex(record.transactionHex);b.delegate.signedHash=unhex(parseSignedTransaction(b.delegate.signedBlob).hash)
-  const review=await b.api.prepareSend({address:p.outputs[0].address,amountAtomic:p.outputs[0].amountAtomic})
-  await b.api.send({prepareId:review.prepareId})
-  expect(sentTypes(b)).toContain(65002);expect(sentTypes(b)).not.toContain(65000)
-  expect(b.calls.relays).toHaveLength(1);expect(b.confirmed).toHaveLength(0)
-  expect(monitoring!.every(b=>b===0)).toBe(true)
- }finally{db.close()}
+ const b = bridge({ coreVerifier }), c = structuredClone(streamFixtures.cases[0]), p = c.plan
+ b.engine.isEmulator = false; b.state.activeTransport = 'hid'; b.state.capabilities = [31]
+ b.delegate.streamFixture = c; b.delegate.address = p.outputs.find(o => o.isChange)!.address
+ b.delegate.keyImageOverride = parseSignedTransaction(unhex(c.transactionHex)).inputs[0].keyImage
+ b.setOutputs(() => p.inputs.map((i,index) => ({transferIndex:index,amountAtomic:i.amountAtomic,globalIndex:i.ring[i.realMember].globalIndex,outKey:i.ring[i.realMember].publicKey,txPublicKey:i.txPublicKey,additionalTxPublicKeys:i.additionalTxPublicKeys,outputIndex:i.outputIndex,subaddressMajor:i.subaddressMajor,subaddressMinor:i.subaddressMinor})))
+ b.setDraft(() => ({ feeAtomic:p.feeAtomic, amountAtomic:p.outputs.find(o => !o.isChange)!.amountAtomic, plan:structuredClone(p) as MoneroPlan }))
+ return { ...b, c, p, counts: () => ({verified,disposed}) }
+}
+async function prepareStream(b: ReturnType<typeof streamBridge>) {
+ await b.api.connect(); await b.api.syncKeyImages()
+ const output=b.p.outputs.find(o=>!o.isChange)!
+ return b.api.prepareSend({address:output.address,amountAtomic:output.amountAtomic})
+}
+
+test('capability hardware streams 1810..1825 and verifies before relay without an emulator wrapper',async()=>{
+ const b=streamBridge(); b.state.firmwareVersion='0.0.0'; b.state.firmwareHash='unrecognized'
+ const review=await prepareStream(b)
+ let proving: string|undefined
+ b.delegate.streamHook=async type=>{ if(type===1818 && b.delegate.streamPosition===5) proving=(await b.api.getStatus()).signingPhase }
+ await b.api.send({prepareId:review.prepareId})
+ expect(sentTypes(b)).toContain(1810); expect(sentTypes(b)).toContain(1824)
+ expect(sentTypes(b)).not.toContain(65002); expect(sentTypes(b)).not.toContain(65000)
+ expect(sentTypes(b).filter(id=>id>=1800&&id<=1809)).toEqual([1800,1802,1804,1806,1808])
+ expect(b.counts()).toEqual({verified:1,disposed:1}); expect(b.confirmed).toHaveLength(0)
+ expect(b.calls.relays).toHaveLength(1); expect(proving).toBe('proving')
+ expect((await b.api.getStatus()).signingPhase).toBeUndefined()
 })
 
-test('standard hardware sends do not reopen an unnecessary private monitoring credential',async()=>{
- const db=new Database(':memory:');let loads=0
- const inner=createMoneroWatchStore({database:()=>db,profile:'standard-test',key:async()=>new Uint8Array(32).fill(9)})
- const store={...inner,async loadWatch(){loads++;throw new Error('locked test keystore')}}
- const hardwareSigner:MoneroDeviceSigner={available:()=>true,prepare:async(_plan,context)=>{expect(context?.viewKey).toBeNull();return {payload:new Uint8Array([1]),verify:()=>true,dispose(){}}}}
- const b=bridge({watchStore:store,hardwareSigner});b.engine.isEmulator=false;b.state.activeTransport='hid';b.engine.currentSeedEthAddress='0x'+'b'.repeat(40)
- try{
-  await b.api.connect();await b.api.syncKeyImages();const before=loads
-  const review=await b.api.prepareSend({address:RECIPIENT,amountAtomic:'2000000000000'})
-  await b.api.send({prepareId:review.prepareId});expect(loads).toBe(before);expect(b.calls.relays).toHaveLength(1)
- }finally{db.close()}
+test('Core verification failure prevents persistence and relay',async()=>{
+ const b=streamBridge(false),review=await prepareStream(b)
+ await expect(b.api.send({prepareId:review.prepareId})).rejects.toThrow('independent Core')
+ expect(b.calls.relays).toHaveLength(0);expect(b.api.pendingCount()).toBe(0)
+ expect(b.counts()).toEqual({verified:1,disposed:1})
+ expect((await b.api.getStatus()).signingPhase).toBeUndefined()
+})
+
+test('a missing capability refuses physical connection without research fallback',async()=>{
+ const b=bridge();b.engine.isEmulator=false;b.state.activeTransport='hid'
+ b.state.firmwareHash='123af6de3b5ddbc1eeb94568825d1bb8107079bc9100ac67f9f6162ca34e2f83'
+ await expect(b.api.connect()).rejects.toThrow('hardware signing')
+ expect(sentTypes(b)).toEqual([]);expect(b.calls.transfers).toHaveLength(0)
+})
+
+test('removing the capability after review invalidates the send before device I/O',async()=>{
+ const b=streamBridge(), review=await prepareStream(b), before=sentTypes(b).length
+ b.state.capabilities=[]
+ await expect(b.api.send({prepareId:review.prepareId})).rejects.toThrow('changed')
+ expect(sentTypes(b).length).toBe(before);expect(b.calls.relays).toHaveLength(0)
+})
+
+
+test('a streamed prefix mismatch ends the session and never persists or relays',async()=>{
+ const b=streamBridge(), review=await prepareStream(b)
+ const ack=b.c.responses.find(r=>r.id===1821)!, bytes=unhex(ack.hex)
+ bytesField(parseFields(bytes),2)[0]^=1;ack.hex=hex(bytes)
+ await expect(b.api.send({prepareId:review.prepareId})).rejects.toThrow('prefix hash')
+ expect(sentTypes(b)).not.toContain(1822);expect(sentTypes(b)).not.toContain(1824)
+ expect(sentTypes(b).at(-1)).toBe(20)
+ expect(b.calls.relays).toHaveLength(0);expect(b.api.pendingCount()).toBe(0)
+ expect(b.counts()).toEqual({verified:0,disposed:1})
+})
+
+test('streamed plans outside output or ring limits fail prepare before device review',async()=>{
+ for(const badShape of ['outputs','ring']) {
+  const b=streamBridge()
+  await b.api.connect();await b.api.syncKeyImages()
+  const plan=structuredClone(b.p) as MoneroPlan,recipient=plan.outputs.find(o=>!o.isChange)!
+  if(badShape==='outputs')plan.outputs.push({...recipient})
+  else plan.inputs[0].ring.pop()
+  b.setDraft(()=>({feeAtomic:plan.feeAtomic,amountAtomic:recipient.amountAtomic,plan}))
+  const before=sentTypes(b).length
+  await expect(b.api.prepareSend({address:recipient.address,amountAtomic:recipient.amountAtomic})).rejects.toThrow(badShape==='outputs'?'exactly two':'ring size of 16')
+  expect(sentTypes(b).length).toBe(before);expect(b.calls.relays).toHaveLength(0)
+ }
 })
 
 test('public firmware uses 1800..1809 for monitoring and key images while unqualified signing stays blocked', async () => {

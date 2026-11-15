@@ -166,5 +166,16 @@
   "m4dd9a00a": "Commissione ShapeShift",
   "me6273384": "Commissione del fornitore",
   "meba56b2": "I saldi memorizzati restano disponibili. Gli aggiornamenti automatici non consumano ulteriori richieste di rilevamento.",
-  "m61271e4e": "Avanzamento della sincronizzazione del portafoglio Monero"
+  "m61271e4e": "Avanzamento della sincronizzazione del portafoglio Monero",
+  "m59f8c115": "La firma Monero richiede esattamente due output: un destinatario e uno di resto.",
+  "m9a3621f6": "La firma Monero richiede un anello di 16 membri per ogni input.",
+  "m3a045821": "Questo piano Monero supera i limiti di firma supportati. Non è stato firmato nulla.",
+  "mbe695868": "KeepKey ha restituito dati non validi per la firma Monero a fasi. Non è stato inviato nulla.",
+  "m284ac162": "L’hash del prefisso Monero assemblato è diverso da quello del dispositivo. Non è stato inviato nulla.",
+  "m4b83ff07": "L’autenticazione di una firma Monero non è riuscita. Non è stato inviato nulla.",
+  "m11ff474a": "Il verificatore Monero Core fissato non è disponibile in questa build. Non è stato firmato nulla.",
+  "m2dd4bc7f": "La transazione Monero non ha superato la verifica indipendente di Core. Non è stato inviato nulla.",
+  "mcd7dd06b": "KeepKey sta generando la prova della transazione Monero…",
+  "m54d7603c": "Firma della transazione Monero…",
+  "m58c4188c": "La firma Monero richiede la funzionalità monero-signing su KeepKey."
 }

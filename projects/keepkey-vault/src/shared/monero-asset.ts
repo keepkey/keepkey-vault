@@ -1,14 +1,14 @@
 /** What the Monero asset row and page show, as pure decisions (the components only translate them).
  *  The rule throughout: a balance that is not known is "—", never 0. */
 import type { MoneroStatus } from './types'
-import { firmwareSupportsMonero } from './firmware-versions'
+import { supportsMoneroSigning } from './monero-capability'
 import { moneroAddressKind, parseXmrAmount } from './monero-address'
 
 const ATOMIC_UNITS = 1_000_000_000_000n
 
-/** The XMR row is shown with the Monero setting on and firmware 7.17+, on a connected (not saved) multi-coin wallet. */
-export function moneroChainVisible(input: { settingEnabled: boolean; firmwareVersion?: string; watchOnly?: boolean; bitcoinOnly?: boolean }): boolean {
-  return input.settingEnabled && firmwareSupportsMonero(input.firmwareVersion) && !input.watchOnly && !input.bitcoinOnly
+/** Connected capability firmware or the legacy emulator; the backend separately authenticates research signing builds. */
+export function moneroChainVisible(input: { settingEnabled: boolean; capabilities?: readonly number[]; isEmulator?: boolean; watchOnly?: boolean; bitcoinOnly?: boolean }): boolean {
+  return input.settingEnabled && (supportsMoneroSigning(input.capabilities) || input.isEmulator === true) && !input.watchOnly && !input.bitcoinOnly
 }
 
 /** All twelve decimals, never through Number. */

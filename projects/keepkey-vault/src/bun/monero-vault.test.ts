@@ -73,7 +73,7 @@ function fixture(emulator = false, replyMs?: { device: number; human: number }, 
   let locked = false, reviews = 0, configures = 0, starts = 0, stops = 0
   let configuredKey: Uint8Array | null = null
   let configuredOptions: Record<string, unknown> | null = null
-  const state = { state: 'ready', deviceId: 'PUBLIC-DEVICE-A', activeTransport: emulator ? 'emulator' : 'hid', isHiddenWallet: false, firmwareVersion: '7.17.0', firmwareHash: undefined as string | undefined }
+  const state = { state: 'ready', deviceId: 'PUBLIC-DEVICE-A', activeTransport: emulator ? 'emulator' : 'hid', isHiddenWallet: false, firmwareVersion: '7.17.0', firmwareHash: undefined as string | undefined, capabilities: emulator ? [] : [31] }
   const config = { enabled: true, offline: false, daemonUrl: 'https://node.example', restoreHeight: 100 }
   const status = { network: 'mainnet' as const, address: ADDRESS, balanceAtomic: '84653050000', unlockedBalanceAtomic: '84653050000',
     walletHeight: 120, transactions: [{ txid: 'ab'.repeat(32), amountAtomic: '84653050000', confirmations: 12, locked: false, height: 108, type: 'in' }],
@@ -246,9 +246,9 @@ test('unexpected PIN challenge is cancelled and never answered by the raw bridge
   expect(f.counts().configures).toBe(0)
 })
 
-test('firmware older than 7.17.0 refuses connect before any USB traffic', async () => {
-  const f = fixture(); f.state.firmwareVersion = '7.16.0'
-  await expect(f.api.connect()).rejects.toThrow('7.17.0')
+test('missing capability refuses physical connect before any USB traffic', async () => {
+  const f = fixture(); f.state.capabilities = []
+  await expect(f.api.connect()).rejects.toThrow('hardware signing')
   expect(f.delegate.sent).toHaveLength(0)
   expect(f.counts().configures).toBe(0)
 })
@@ -513,4 +513,10 @@ test('malformed, duplicate or absent firmware failure codes never expose the dev
     expect(f.counts().configures).toBe(0)
     expect(f.delegate.consumed.every(report => report.every(byte => byte === 0))).toBe(true)
   }
+})
+
+test('capability firmware connects independently of version or build hash', async () => {
+  const f = fixture(); f.state.firmwareVersion = '7.16.0'
+  await f.api.connect()
+  expect(f.delegate.sent.map(x => x.type)).toEqual([1800, 1802, 27])
 })

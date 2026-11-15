@@ -299,7 +299,7 @@ import { createMoneroVault, moneroHiddenWalletStatus } from "./monero-vault"
 import { createMoneroFailoverVault } from "./monero-remote-failover"
 import { assertMoneroStandardWallet, moneroHiddenWallet } from "../shared/monero-wallet-policy"
 import { createMoneroWatchStore } from "./monero-watch-store"
-import { createMoneroDeviceSigner } from "./monero-device-signing"
+import { createMoneroCoreVerifier } from "./monero-device-signing"
 import { REVIEWED_MONERO_SIGNING_SHA256 } from "./monero-emulator"
 import { startMoneroSidecar, stopMoneroSidecar, isMoneroSidecarAvailable } from "./monero-sidecar"
 import { createMoneroNodeManager } from './monero-node'
@@ -2355,7 +2355,8 @@ function getMoneroWallet() {
       create: getConfig => createMoneroVault({
         engine, confirm: emuSigningOp, signingEmulator: moneroSigningEmulatorActive,
         watchStore: createMoneroWatchStore({ database: getDb, profile: Utils.paths.userData }),
-        hardwareSigner: createMoneroDeviceSigner(),
+        coreVerifier: createMoneroCoreVerifier({ text: source => backendText(getSetting('app_language'), source) }),
+        text: source => backendText(getSetting('app_language'), source),
         onTransportFailure: transport => {
             if (engine.wallet?.transport === transport) return engine.retryConnect()
         },

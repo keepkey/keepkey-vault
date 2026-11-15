@@ -2358,5 +2358,16 @@
   "m4dd9a00a": "Taxa da ShapeShift",
   "me6273384": "Taxa do provedor",
   "meba56b2": "Os saldos em cache continuam disponíveis. As atualizações automáticas não consomem solicitações adicionais de descoberta.",
-  "m61271e4e": "Progresso da sincronização da carteira Monero"
+  "m61271e4e": "Progresso da sincronização da carteira Monero",
+  "m59f8c115": "A assinatura Monero exige exatamente duas saídas: uma para o destinatário e uma de troco.",
+  "m9a3621f6": "A assinatura Monero exige um anel de 16 membros para cada entrada.",
+  "m3a045821": "Este plano Monero excede os limites de assinatura suportados. Nada foi assinado.",
+  "mbe695868": "O KeepKey devolveu dados inválidos de assinatura Monero por etapas. Nada foi enviado.",
+  "m284ac162": "O hash do prefixo Monero montado difere do dispositivo. Nada foi enviado.",
+  "m4b83ff07": "Uma assinatura Monero falhou na autenticação. Nada foi enviado.",
+  "m11ff474a": "O verificador Monero Core fixado não está disponível nesta compilação. Nada foi assinado.",
+  "m2dd4bc7f": "A transação Monero falhou na verificação independente do Core. Nada foi enviado.",
+  "mcd7dd06b": "O KeepKey está gerando a prova da transação Monero…",
+  "m54d7603c": "Assinando a transação Monero…",
+  "m58c4188c": "A assinatura Monero exige a capacidade monero-signing no KeepKey."
 }

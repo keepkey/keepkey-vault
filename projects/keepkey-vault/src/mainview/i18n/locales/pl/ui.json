@@ -166,5 +166,16 @@
   "m4dd9a00a": "Opłata ShapeShift",
   "me6273384": "Opłata dostawcy",
   "meba56b2": "Zapisane salda pozostają dostępne. Automatyczne aktualizacje nie zużywają dodatkowych żądań wykrywania.",
-  "m61271e4e": "Postęp synchronizacji portfela Monero"
+  "m61271e4e": "Postęp synchronizacji portfela Monero",
+  "m59f8c115": "Podpis Monero wymaga dokładnie dwóch wyjść: odbiorcy i reszty.",
+  "m9a3621f6": "Podpis Monero wymaga pierścienia o rozmiarze 16 dla każdego wejścia.",
+  "m3a045821": "Ten plan Monero przekracza obsługiwane limity podpisu. Niczego nie podpisano.",
+  "mbe695868": "KeepKey zwrócił nieprawidłowe dane strumieniowego podpisu Monero. Niczego nie wysłano.",
+  "m284ac162": "Skrót prefiksu złożonej transakcji Monero różni się od wartości urządzenia. Niczego nie wysłano.",
+  "m4b83ff07": "Uwierzytelnienie podpisu Monero nie powiodło się. Niczego nie wysłano.",
+  "m11ff474a": "Przypięty weryfikator Monero Core jest niedostępny w tej kompilacji. Niczego nie podpisano.",
+  "m2dd4bc7f": "Transakcja Monero nie przeszła niezależnej weryfikacji Core. Niczego nie wysłano.",
+  "mcd7dd06b": "KeepKey generuje dowód transakcji Monero…",
+  "m54d7603c": "Podpisywanie transakcji Monero…",
+  "m58c4188c": "Podpis Monero wymaga funkcji monero-signing w KeepKey."
 }

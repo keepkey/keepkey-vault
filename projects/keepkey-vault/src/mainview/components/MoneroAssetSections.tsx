@@ -441,7 +441,7 @@ export function MoneroSendSection({ monero, client, privateMode = false }: { mon
 							</Flex>
 							<Flex gap="3">
 								<Button data-monero-confirm-send="" size="sm" onClick={() => { void confirm() }} disabled={!!busy} className="electrobun-webkit-app-region-no-drag">
-									{busy === "confirm" ? <Spinner size="xs" /> : <FaCheck />}{busy === "confirm" ? uiText("Confirm on KeepKey…") : uiText("Confirm on KeepKey")}
+									{busy === "confirm" ? <Spinner size="xs" /> : <FaCheck />}{busy === "confirm" ? (wallet.signingPhase === "proving" ? uiText("KeepKey is proving the Monero transaction…") : wallet.signingPhase === "signing" || wallet.signingPhase === "verifying" ? uiText("Signing Monero transaction…") : uiText("Confirm on KeepKey…")) : uiText("Confirm on KeepKey")}
 								</Button>
 								<Button size="sm" variant="ghost" onClick={() => setReview(null)} disabled={!!busy} className="electrobun-webkit-app-region-no-drag">{uiText("Cancel")}</Button>
 							</Flex>

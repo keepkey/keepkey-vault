@@ -10,14 +10,15 @@ const status = (over: Partial<MoneroStatus> = {}): MoneroStatus => ({ available:
   balanceAtomic: '84653050000', unlockedBalanceAtomic: '80000000000', walletHeight: 3_300_000, transactions: [], monitorReady: true,
   syncState: 'ready', canSend: false, spendStateKnown: false, daemonHeight: 3_300_000, restoreHeight: 3_200_000, updatedAt: '2026-11-06T12:00:00.000Z', ...over })
 
-describe('C1: the XMR row is gated exactly as the old tab', () => {
-  test('setting AND firmware 7.17+, on a connected multi-coin wallet', () => {
-    expect(moneroChainVisible({ settingEnabled: true, firmwareVersion: '7.17.0' })).toBe(true)
-    expect(moneroChainVisible({ settingEnabled: false, firmwareVersion: '7.17.0' })).toBe(false)
-    expect(moneroChainVisible({ settingEnabled: true, firmwareVersion: '7.16.0' })).toBe(false)
+describe('C1: the XMR row uses device capabilities', () => {
+  test('setting AND monero-signing capability, on a connected multi-coin wallet', () => {
+    expect(moneroChainVisible({ settingEnabled: true, capabilities: [31] })).toBe(true)
+    expect(moneroChainVisible({ settingEnabled: false, capabilities: [31] })).toBe(false)
+    expect(moneroChainVisible({ settingEnabled: true, capabilities: [30] })).toBe(false)
     expect(moneroChainVisible({ settingEnabled: true })).toBe(false)
-    expect(moneroChainVisible({ settingEnabled: true, firmwareVersion: '7.17.0', watchOnly: true })).toBe(false)
-    expect(moneroChainVisible({ settingEnabled: true, firmwareVersion: '7.17.0', bitcoinOnly: true })).toBe(false)
+    expect(moneroChainVisible({ settingEnabled: true, isEmulator: true })).toBe(true)
+    expect(moneroChainVisible({ settingEnabled: true, capabilities: [31], watchOnly: true })).toBe(false)
+    expect(moneroChainVisible({ settingEnabled: true, capabilities: [31], bitcoinOnly: true })).toBe(false)
   })
 })
 

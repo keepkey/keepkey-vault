@@ -315,6 +315,6 @@ export function versionCompare(a: string, b: string): number {
   return 0
 }
 
-/** Monero (preview) needs the setting AND this firmware or newer (7.17 = alpha line). */
+/** Monero receiving preview requires the setting and firmware 7.17 or newer. Signing additionally requires its device capability. */
 export const MONERO_MIN_FIRMWARE = '7.17.0'
 export const firmwareSupportsMonero = (version?: string | null): boolean => !!version && versionCompare(version, MONERO_MIN_FIRMWARE) >= 0
