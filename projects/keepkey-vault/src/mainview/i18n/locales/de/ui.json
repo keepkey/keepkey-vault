@@ -152,5 +152,6 @@
   "m55e84e5d": "0x-Gebühr",
   "m108a3db9": "Partnergebühr",
   "m4dd9a00a": "ShapeShift-Gebühr",
-  "me6273384": "Anbietergebühr"
+  "me6273384": "Anbietergebühr",
+  "meba56b2": "Zwischengespeicherte Kontostände bleiben verfügbar. Automatische Aktualisierungen verbrauchen keine zusätzlichen Abrufe zur Token-Erkennung."
 }

@@ -37,5 +37,12 @@
 	"loadingPrices": "Obteniendo los últimos precios",
 	"tokensCount": "+{{count}} tokens",
 	"dismiss": "Descartar",
-	"tokensCount_many": "+{{count}} tokens"
+	"tokensCount_many": "+{{count}} tokens",
+	"syncStage_preparing": "Preparando cartera",
+	"syncStage_addresses": "Leyendo direcciones del dispositivo",
+	"syncStage_balances": "Consultando saldos",
+	"syncStage_finalizing": "Actualizando cartera",
+	"syncProgressCounts": "{{completed}}/{{total}} · {{percent}}% · {{seconds}}s",
+	"syncProgressElapsed": "{{seconds}}s transcurridos",
+	"syncFailedChecks": "{{failed}} comprobaciones no disponibles"
 }

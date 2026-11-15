@@ -90,5 +90,7 @@
   "invalidAddress": "Ungültige Adresse",
   "defiNetwork": "Netzwerk",
   "multisig": "Multisig",
-  "cached": "Zwischengespeichert"
+  "cached": "Zwischengespeichert",
+  "defiManagePosition": "Auf {{protocol}} verwalten",
+  "defiFindPool": "Diesen Pool auf {{protocol}} finden"
 }

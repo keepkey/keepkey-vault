@@ -94,5 +94,7 @@
   "showFiltered_many": "Mostra {{count}} token filtrati",
   "hideFiltered_many": "Nascondi {{count}} token filtrati",
   "multisig": "Multifirma",
-  "cached": "In cache"
+  "cached": "In cache",
+  "defiManagePosition": "Gestisci su {{protocol}}",
+  "defiFindPool": "Trova questo pool su {{protocol}}"
 }

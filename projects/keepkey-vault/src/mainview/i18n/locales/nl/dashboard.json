@@ -36,5 +36,12 @@
 	"loadingSync": "Saldo's synchroniseren over netwerken",
 	"loadingPrices": "Nieuwste prijzen ophalen",
 	"tokensCount": "+{{count}} tokens",
-	"dismiss": "Sluiten"
+	"dismiss": "Sluiten",
+	"syncStage_preparing": "Wallet voorbereiden",
+	"syncStage_addresses": "Apparaatadressen lezen",
+	"syncStage_balances": "Saldoaanvragen controleren",
+	"syncStage_finalizing": "Portfolio bijwerken",
+	"syncProgressCounts": "{{completed}}/{{total}} · {{percent}}% · {{seconds}}s",
+	"syncProgressElapsed": "{{seconds}}s verstreken",
+	"syncFailedChecks": "{{failed}} controles niet beschikbaar"
 }

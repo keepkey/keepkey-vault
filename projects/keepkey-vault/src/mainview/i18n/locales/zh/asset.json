@@ -91,5 +91,7 @@
   "defiNetwork": "网络",
   "defiSymbol": "符号",
   "multisig": "多签",
-  "cached": "缓存"
+  "cached": "缓存",
+  "defiManagePosition": "在 {{protocol}} 上管理",
+  "defiFindPool": "在 {{protocol}} 上查找此池"
 }

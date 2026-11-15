@@ -50,5 +50,12 @@
 	"swapBalanceSyncTitle": "Troca concluída — sincronizando saldo de {{symbol}}",
 	"swapBalanceSyncDesc": "Seus últimos saldos verificados continuam visíveis até que os novos fundos sejam confirmados de forma independente.",
 	"swapBalanceUnconfirmedTitle": "Ainda não foi possível confirmar seu saldo de {{symbol}}",
-	"swapBalanceUnconfirmedDesc": "A troca foi concluída on-chain. Seu serviço de saldo ainda não informou os novos fundos — consulte o explorador de blocos se eles não aparecerem em breve."
+	"swapBalanceUnconfirmedDesc": "A troca foi concluída on-chain. Seu serviço de saldo ainda não informou os novos fundos — consulte o explorador de blocos se eles não aparecerem em breve.",
+	"syncStage_preparing": "Preparando carteira",
+	"syncStage_addresses": "Lendo endereços do dispositivo",
+	"syncStage_balances": "Consultando saldos",
+	"syncStage_finalizing": "Atualizando portfólio",
+	"syncProgressCounts": "{{completed}}/{{total}} · {{percent}}% · {{seconds}}s",
+	"syncProgressElapsed": "{{seconds}}s decorridos",
+	"syncFailedChecks": "{{failed}} verificações indisponíveis"
 }

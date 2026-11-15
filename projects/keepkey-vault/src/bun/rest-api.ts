@@ -131,6 +131,7 @@ export interface SigningApprovalDecision {
 export type RestActivityTag = { txid?: string; chain?: string; activityType?: string; meta?: Record<string, unknown> }
 
 export interface RestApiCallbacks {
+  getSyncDiagnostics?: () => unknown
   passwordAgent?: PasswordAgent
   onApiLog: (entry: ApiLogEntry) => void
   /** Activity rows changed outside onApiLog (e.g. a REST history rebuild). */
@@ -1624,10 +1625,11 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
         // ═══════════════════════════════════════════════════════════════
         if ((path === '/api/health' || path === '/api/v1/health') && method === 'GET') {
           const ds = engine.getDeviceState()
+          const diagnostics = callbacks?.getSyncDiagnostics?.() as {balanceSync?: {status?: string}} | undefined
           return json({
             ready: ds.state === 'ready',
             status: 'healthy',
-            syncing: engine.isSyncing,
+            syncing: engine.isSyncing || diagnostics?.balanceSync?.status === 'running',
             apiVersion: 2,
             supportedChains: CHAINS.filter(c => isChainSupported(c, ds.firmwareVersion) && (c.id !== 'hive' || getSetting('hive_enabled') === '1') && c.chainFamily !== 'monero').map(c => c.networkId),
             device_connected: engine.wallet !== null,
@@ -1640,6 +1642,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             // SDK skips batch call entirely when cached_pubkeys === 0.
             cached_pubkeys: engine.wallet ? Math.max(pubkeyCache.size, 1) : 0,
             frontload_progress: { status: 'complete', can_operate_offline: false },
+            sync_diagnostics: diagnostics,
           })
         }
 

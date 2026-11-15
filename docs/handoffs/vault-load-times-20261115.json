@@ -1,0 +1,73 @@
+{
+  "selectedApi": "https://api-blue.keepkey.info",
+  "scope": "Measured backend refreshes; no addresses or amounts recorded. Percentage is share of measured elapsed time, not data freshness.",
+  "runs": [
+    {
+      "utxoPaths": 9,
+      "deviceUtxoMs": 5208,
+      "nonEvmMs": 2850,
+      "requestCount": 55,
+      "apiStartedAt": "2026-11-15T17:15:06.972Z",
+      "apiFinishedAt": "2026-11-15T17:15:17.913Z",
+      "chains": 27,
+      "tokens": 14,
+      "totalMs": 19359,
+      "portfolioMs": 10941,
+      "portfolioTimePercent": 56.5
+    },
+    {
+      "utxoPaths": 9,
+      "deviceUtxoMs": 6580,
+      "nonEvmMs": 5432,
+      "requestCount": 55,
+      "apiStartedAt": "2026-11-15T17:15:41.131Z",
+      "apiFinishedAt": "2026-11-15T17:15:51.012Z",
+      "chains": 27,
+      "tokens": 14,
+      "totalMs": 22672,
+      "portfolioMs": 9881,
+      "portfolioTimePercent": 43.6
+    },
+    {
+      "utxoPaths": 9,
+      "deviceUtxoMs": 3353,
+      "nonEvmMs": 3950,
+      "requestCount": 55,
+      "apiStartedAt": "2026-11-15T17:17:05.645Z",
+      "apiFinishedAt": "2026-11-15T17:17:16.286Z",
+      "chains": 27,
+      "tokens": 14,
+      "totalMs": 18311,
+      "portfolioMs": 10641,
+      "portfolioTimePercent": 58.1
+    },
+    {
+      "utxoPaths": 8,
+      "deviceUtxoMs": 7611,
+      "nonEvmMs": 4062,
+      "requestCount": 32,
+      "apiStartedAt": "2026-11-15T22:59:19.892Z",
+      "apiFinishedAt": "2026-11-15T22:59:28.349Z",
+      "chains": 26,
+      "tokens": 5,
+      "totalMs": 20952,
+      "portfolioMs": 8457,
+      "portfolioTimePercent": 40.4
+    },
+    {
+      "utxoPaths": 8,
+      "deviceUtxoMs": 5138,
+      "nonEvmMs": 4196,
+      "requestCount": 32,
+      "apiStartedAt": "2026-11-15T23:09:00.096Z",
+      "apiFinishedAt": "2026-11-15T23:09:19.797Z",
+      "chains": 26,
+      "tokens": 5,
+      "totalMs": 29834,
+      "portfolioMs": 19701,
+      "portfolioTimePercent": 66.0
+    }
+  ],
+  "connectivityFix": "Edge reachability, two consecutive failed probes, one probe in flight; RPC timeout retains prior state.",
+  "diagnostics": "GET http://127.0.0.1:1646/api/health includes sync_diagnostics; UI shows per-stage completed work and elapsed time."
+}

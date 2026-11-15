@@ -28,7 +28,7 @@ function eq(label: string, got: unknown, want: unknown) {
 const sendMsg = (r: any) => r.tx.msg[0]
 
 async function main() {
-  globalThis.fetch = (async () => Response.json({ balances: [{ denom: 'rune', amount: '100000000000' }, { denom: 'tcy', amount: '20000000000' }, { denom: 'x/ruji', amount: '100000000' }] })) as typeof fetch
+  globalThis.fetch = (async () => Response.json({ balances: [{ denom: 'rune', amount: '100000000000' }, { denom: 'tcy', amount: '20000000000' }, { denom: 'x/ruji', amount: '100000000' }] })) as unknown as typeof fetch
   // Native RUNE — denom must stay "rune", type MsgSend, 1.5 → 150000000
   const rune = await buildCosmosTx(pioneer, THOR, { to: FROM, amount: '1.5', fromAddress: FROM })
   eq('RUNE denom stays native', sendMsg(rune).value.amount[0].denom, 'rune')

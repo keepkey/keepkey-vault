@@ -91,5 +91,7 @@
   "defiNetwork": "Netwerk",
   "defiSymbol": "Symbool",
   "multisig": "Multisig",
-  "cached": "In cache"
+  "cached": "In cache",
+  "defiManagePosition": "Beheren op {{protocol}}",
+  "defiFindPool": "Deze pool zoeken op {{protocol}}"
 }

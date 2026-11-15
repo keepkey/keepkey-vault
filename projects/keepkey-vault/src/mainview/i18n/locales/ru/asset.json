@@ -97,5 +97,7 @@
   "hideFiltered_few": "Скрыть {{count}} отфильтрованных токена",
   "hideFiltered_many": "Скрыть {{count}} отфильтрованных токенов",
   "multisig": "Мультиподпись",
-  "cached": "Из кэша"
+  "cached": "Из кэша",
+  "defiManagePosition": "Управлять на {{protocol}}",
+  "defiFindPool": "Найти этот пул на {{protocol}}"
 }

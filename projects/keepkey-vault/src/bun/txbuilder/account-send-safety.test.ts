@@ -9,7 +9,7 @@ const chain = (id = 'cosmos', denom = 'uatom', decimals = 6) => ({ id, denom, de
 const pioneer = { GetAccountInfo: async () => ({ data: { account: { account_number: '1', sequence: '0' } } }) }
 const send = (amount: string, extra = {}) => buildCosmosTx(pioneer, chain(), { to: 'cosmos1recipient', fromAddress: 'cosmos1sender', amount, feeLevel: 3, ...extra })
 const balances = (coins: Record<string, string>) => {
-  globalThis.fetch = (async () => Response.json({ balances: Object.entries(coins).map(([denom, amount]) => ({ denom, amount })) })) as typeof fetch
+  globalThis.fetch = (async () => Response.json({ balances: Object.entries(coins).map(([denom, amount]) => ({ denom, amount })) })) as unknown as typeof fetch
 }
 
 describe('account send affordability', () => {
@@ -27,15 +27,15 @@ describe('account send affordability', () => {
     balances({})
     await expect(send('0.001')).rejects.toThrow(/Insufficient/)
     for (const body of [{}, { balances: [{ denom: 'uatom', amount: '-1' }] }, { balances: [], pagination: { next_key: 'more' } }]) {
-      globalThis.fetch = (async () => Response.json(body)) as typeof fetch
+      globalThis.fetch = (async () => Response.json(body)) as unknown as typeof fetch
       await expect(send('0.001')).rejects.toThrow(/Unable to verify/)
     }
-    globalThis.fetch = (async () => { throw new Error('offline') }) as typeof fetch
+    globalThis.fetch = (async () => { throw new Error('offline') }) as unknown as typeof fetch
     await expect(send('0.001')).rejects.toThrow(/Unable to verify/)
   })
   test('retries reads on another endpoint without accepting a cached figure', async () => {
     let calls = 0
-    globalThis.fetch = (async () => ++calls === 1 ? new Response('', { status: 503 }) : Response.json({ balances: [{ denom: 'uatom', amount: '8500' }] })) as typeof fetch
+    globalThis.fetch = (async () => ++calls === 1 ? new Response('', { status: 503 }) : Response.json({ balances: [{ denom: 'uatom', amount: '8500' }] })) as unknown as typeof fetch
     expect((await send('0.001')).fee).toBe('0.0075')
     expect(calls).toBe(2)
   })
@@ -56,7 +56,7 @@ describe('account send affordability', () => {
     balances({ token: '999999', uatom: '7500' })
     await expect(send('1', token)).rejects.toThrow(/token balance/)
     balances({ token: '1000000', uatom: '7500' })
-    expect((await send('1', token)).tx.msg[0].value.amount[0].denom).toBe('token')
+    expect((await send('1', token)).tx.msg[0].value).toMatchObject({ amount: [{ denom: 'token' }] })
   })
   test('staking reserves liquid fees; undelegation does not charge liquid principal', async () => {
     balances({ uatom: '6000' })
@@ -72,7 +72,7 @@ describe('account send affordability', () => {
     await expect(buildCosmosNameRegTx(p, chain('thorchain', 'rune', 8), { name: 'test', years: 1, fromAddress: 'sender' })).rejects.toThrow(/Insufficient/)
   })
   test('XRP ordinary send preserves owner reserves and requires complete account data', async () => {
-    globalThis.fetch = (async () => Response.json({ result: { state: { validated_ledger: { reserve_base: 1000000, reserve_inc: 200000 } } } })) as typeof fetch
+    globalThis.fetch = (async () => Response.json({ result: { state: { validated_ledger: { reserve_base: 1000000, reserve_inc: 200000 } } } })) as unknown as typeof fetch
     const p = (data: any) => ({ GetAccountInfo: async () => ({ data }) })
     const params = { amount: '3.4', to: 'rRecipient', fromAddress: 'rSender' }
     await expect(buildXrpTx(p({ Balance: '5000000', OwnerCount: 3 }), chain('ripple'), params)).rejects.toThrow(/reserve/)
@@ -84,7 +84,7 @@ describe('account send affordability', () => {
 describe('execution result, after broadcast acceptance', () => {
   const txid = 'A'.repeat(64)
   const check = (body: any, family = 'cosmos') => {
-    globalThis.fetch = (async () => Response.json(body)) as typeof fetch
+    globalThis.fetch = (async () => Response.json(body)) as unknown as typeof fetch
     return confirmAccountTx({ id: family === 'cosmos' ? 'cosmos' : 'ripple', chainFamily: family as any }, txid, { attempts: 1 })
   }
   test('ATOM included code 5 is failure, with fee warning and txid', async () => {
@@ -101,7 +101,7 @@ describe('execution result, after broadcast acceptance', () => {
   })
   test('pending or unreachable means unknown, never completed, and checks never POST a broadcast', async () => {
     let calls = 0
-    globalThis.fetch = (async (_url: any, options: any) => { calls++; expect(options.method).toBeUndefined(); return new Response('', { status: 404 }) }) as typeof fetch
+    globalThis.fetch = (async (_url: any, options: any) => { calls++; expect(options.method).toBeUndefined(); return new Response('', { status: 404 }) }) as unknown as typeof fetch
     await expect(confirmAccountTx(chain(), txid, { attempts: 1 })).rejects.toThrow(txid)
     expect(calls).toBe(2)
   })

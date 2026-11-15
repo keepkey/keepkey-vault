@@ -3,7 +3,7 @@ import { CHAINS } from '../../shared/chains'
 import { buildXrpTx, getXrpMaxAmount } from './xrp'
 const originalFetch = globalThis.fetch
 afterEach(() => { globalThis.fetch = originalFetch })
-beforeEach(() => { globalThis.fetch = (async () => Response.json({ result: { state: { validated_ledger: { reserve_base: 1000000, reserve_inc: 200000 } } } })) as typeof fetch })
+beforeEach(() => { globalThis.fetch = (async () => Response.json({ result: { state: { validated_ledger: { reserve_base: 1000000, reserve_inc: 200000 } } } })) as unknown as typeof fetch })
 
 const pioneer = {
   GetAccountInfo: async () => ({ data: { Sequence: 7, ledger_index_current: 900, Balance: '5000000', OwnerCount: 0 } }),

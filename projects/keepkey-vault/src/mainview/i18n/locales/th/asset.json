@@ -91,5 +91,7 @@
   "defiNetwork": "เครือข่าย",
   "defiSymbol": "สัญลักษณ์",
   "multisig": "มัลติซิก",
-  "cached": "แคช"
+  "cached": "แคช",
+  "defiManagePosition": "จัดการบน {{protocol}}",
+  "defiFindPool": "ค้นหาพูลนี้บน {{protocol}}"
 }

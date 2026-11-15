@@ -35,5 +35,12 @@
 	"loadingConnect": "Verbindung zu Ihrem KeepKey wird hergestellt",
 	"loadingSync": "Guthaben werden über alle Blockchains synchronisiert",
 	"loadingPrices": "Aktuelle Kurse werden abgerufen",
-	"tokensCount": "+{{count}} Token"
+	"tokensCount": "+{{count}} Token",
+	"syncStage_preparing": "Wallet wird vorbereitet",
+	"syncStage_addresses": "Geräteadressen werden gelesen",
+	"syncStage_balances": "Kontostände werden geprüft",
+	"syncStage_finalizing": "Portfolio wird aktualisiert",
+	"syncProgressCounts": "{{completed}}/{{total}} · {{percent}}% · {{seconds}}s",
+	"syncProgressElapsed": "{{seconds}}s vergangen",
+	"syncFailedChecks": "{{failed}} Prüfungen nicht verfügbar"
 }

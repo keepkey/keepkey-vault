@@ -14,7 +14,7 @@ const pioneer = {
   GetAvailableAssets: async () => ({ data: [] }),
   BuildSolanaTransfer: async (params: any) => { builds.push({ kind: 'sol', params }); return { data: { serialized: 'fixture-native-sol' } } },
   BuildSolanaTransferToken: async (params: any) => { builds.push({ kind: 'spl', params }); return { data: { serialized: 'fixture-spl' } } },
-  GetAccountInfo: async (params: any) => { builds.push({ kind: 'xrp', params }); return { data: { Sequence: 42, ledger_index_current: 100, Balance: '100000000' } } },
+  GetAccountInfo: async (params: any) => { builds.push({ kind: 'xrp', params }); return { data: { Sequence: 42, ledger_index_current: 100, Balance: '100000000', OwnerCount: 0 } } },
 }
 mock.module('../src/bun/pioneer', () => ({ getPioneer: async () => pioneer, getPioneerApiBase: () => 'https://fixture.invalid', getQueryKey: () => 'fixture' }))
 mock.module('electrobun/main', () => ({ Utils: { paths: { userData: '/private/tmp/vault-near-build-test' } } }))
@@ -62,6 +62,9 @@ for (const source of sources) test(`NEAR ${source.kind} plain deposit reaches it
   let statusReads = 0
   globalThis.fetch = (async (input: any, init?: RequestInit) => {
     const url = new URL(typeof input === 'string' ? input : input.url)
+    if (source.chain === 'ripple' && ['s1.ripple.com', 's2.ripple.com'].includes(url.hostname)) {
+      return Response.json({ result: { state: { validated_ledger: { reserve_base: 1000000, reserve_inc: 200000 } } } })
+    }
     if (url.origin === 'https://1click.chaindefuser.com' && url.pathname === '/v0/status') {
       expect(url.searchParams.get('depositAddress')).toBe(source.deposit)
       statusReads++

@@ -24,7 +24,7 @@ export function hasContractCode(code: string): boolean {
   return !/^0xef0100[0-9a-f]{40}$/.test(hex)
 }
 
-async function ethRpc(rpcUrl: string, method: string, params: any[]): Promise<any> {
+export async function ethRpc(rpcUrl: string, method: string, params: any[]): Promise<any> {
   if (isPioneerEvmSource(rpcUrl)) {
     const { getPioneer } = await import('./pioneer')
     try {

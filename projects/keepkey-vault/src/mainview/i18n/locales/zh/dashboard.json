@@ -35,5 +35,12 @@
 	"loadingConnect": "正在连接您的 KeepKey",
 	"loadingSync": "正在同步各链余额",
 	"loadingPrices": "正在获取最新价格",
-	"tokensCount": "+{{count}} 个代币"
+	"tokensCount": "+{{count}} 个代币",
+	"syncStage_preparing": "正在准备钱包",
+	"syncStage_addresses": "正在读取设备地址",
+	"syncStage_balances": "正在检查余额请求",
+	"syncStage_finalizing": "正在更新资产组合",
+	"syncProgressCounts": "{{completed}}/{{total}} · {{percent}}% · {{seconds}}秒",
+	"syncProgressElapsed": "已用时 {{seconds}}秒",
+	"syncFailedChecks": "{{failed}}项检查不可用"
 }

@@ -91,5 +91,7 @@
   "defiNetwork": "네트워크",
   "defiSymbol": "심볼",
   "multisig": "멀티시그",
-  "cached": "캐시됨"
+  "cached": "캐시됨",
+  "defiManagePosition": "{{protocol}}에서 관리",
+  "defiFindPool": "{{protocol}}에서 이 풀 찾기"
 }

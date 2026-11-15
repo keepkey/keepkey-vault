@@ -36,5 +36,12 @@
 	"loadingSync": "チェーン間で残高を同期中",
 	"loadingPrices": "最新の価格を取得中",
 	"tokensCount": "+{{count}} トークン",
-	"dismiss": "閉じる"
+	"dismiss": "閉じる",
+	"syncStage_preparing": "ウォレットを準備中",
+	"syncStage_addresses": "デバイスのアドレスを読み取り中",
+	"syncStage_balances": "残高を確認中",
+	"syncStage_finalizing": "ポートフォリオを更新中",
+	"syncProgressCounts": "{{completed}}/{{total}} · {{percent}}% · {{seconds}}秒",
+	"syncProgressElapsed": "{{seconds}}秒経過",
+	"syncFailedChecks": "{{failed}}件の確認が利用できません"
 }

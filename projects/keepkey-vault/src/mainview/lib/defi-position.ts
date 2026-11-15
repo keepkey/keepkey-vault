@@ -7,6 +7,10 @@ export function defiPositionName(position: DefiPosition): string {
 
 // Only known protocol destinations; never construct a domain from API labels.
 const PROTOCOL_URLS: Record<string, string> = {
+  aerodrome: 'https://aerodrome.finance/dash',
+  'aerodrome-finance': 'https://aerodrome.finance/dash',
+  'aerodrome-v2': 'https://aerodrome.finance/dash',
+  'aerodrome-slipstream': 'https://aerodrome.finance/dash',
   aave: 'https://app.aave.com',
   'aave-v2': 'https://app.aave.com',
   'aave-v3': 'https://app.aave.com',
@@ -45,4 +49,31 @@ export function defiExplorerUrl(
       c.id === network || c.coin.toLowerCase() === network || c.networkId === network
     ))
   return chain?.explorerAddressUrl?.replace('{{address}}', address)
+}
+
+
+/** Destinations come from the protocol registry, never from untrusted API URLs.
+ * Aerodrome route contract verified against its official app on 2026-11-15. */
+export function defiManagementLinks(position: Pick<DefiPosition, 'protocol' | 'displayName' | 'network' | 'networkId' | 'tokens'>): {
+  url: string; protocol: string; poolUrl?: string
+} | undefined {
+  const id = position.protocol?.trim().toLowerCase()
+  const url = defiProtocolUrl(id || null)
+  if (!url) return undefined
+  if (id?.startsWith('aerodrome')) {
+    const base = position.networkId ? position.networkId === 'eip155:8453'
+      : ['base', 'eip155:8453'].includes(position.network.toLowerCase())
+    if (!base) return undefined
+    const tokens = [...new Set((position.tokens || [])
+      .filter(token => token.networkId === 'eip155:8453' && /^0x[0-9a-f]{40}$/i.test(token.address) && !isNativeDefiToken(token.address))
+      .map(token => token.address.toLowerCase()))]
+    // A single underlying coin is not an LP pool identifier. A known pair can
+    // narrow the pool list; type/factory/NFT ids would be needed for /deposit.
+    const poolUrl = tokens.length === 2 ? `https://aerodrome.finance/pools?${new URLSearchParams({
+      token0: tokens[0], token1: tokens[1], chain: '8453', chain0: '8453', chain1: '8453',
+    }).toString()}` : undefined
+    return { url, protocol: 'Aerodrome', poolUrl }
+  }
+  const names: Record<string, string> = { aave: 'Aave', uniswap: 'Uniswap', lido: 'Lido', curve: 'Curve', yearn: 'Yearn' }
+  return { url, protocol: names[id!.split('-')[0]] || position.displayName || position.protocol! }
 }

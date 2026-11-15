@@ -4,7 +4,7 @@
  * returns real builder output (txbuilder buildTx with fixture Pioneer objects),
  * the same thing index.ts's buildTxForCurrentWallet returns.
  */
-import { afterAll, afterEach, beforeAll, describe, expect, mock, test } from 'bun:test'
+import { beforeEach, afterAll, afterEach, beforeAll, describe, expect, mock, test } from 'bun:test'
 import { EventEmitter } from 'node:events'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -43,7 +43,7 @@ const PIONEER: Record<string, any> = {
     GetPubkeyInfo: async () => ({ data: [] }),
   },
   cosmos: { GetAccountInfo: async () => ({ data: { account: { account_number: '17', sequence: '2' } } }) },
-  ripple: { GetAccountInfo: async () => ({ data: { Sequence: 7, ledger_index_current: 900, Balance: '5000000' } }) },
+  ripple: { GetAccountInfo: async () => ({ data: { Sequence: 7, ledger_index_current: 900, Balance: '5000000', OwnerCount: 0 } }) },
 }
 /** A named UTXO account: what buildTxHeadless + buildTxForCurrentWallet hand the
  *  builder (one device-derived xpub, its script type, its account path). */
@@ -57,8 +57,16 @@ const realBuild = (r: any) => buildTx(PIONEER[r.chainId], chain(r.chainId), {
   ...(r.chainId === 'bitcoin' ? { xpub: 'zpub-fixture', accountPath: [0x80000054, 0x80000000, 0x80000000] } : { fromAddress: r.chainId === 'cosmos' ? COSMOS_SIGNER : 'rSender' }),
 })
 
+const originalFetch = globalThis.fetch
+beforeEach(() => { globalThis.fetch = (async (input: any, init: any) => {
+ const url = typeof input === 'string' ? input : input.url || String(input);
+ if (url.startsWith('http://127.0.0.1:')) return originalFetch(input, init);
+ if (url.includes('/spendable_balances/')) return Response.json({ balances: [{denom:'uatom',amount:'100000000'}] });
+ if (url.includes('ripple.com')) return Response.json({ result: { state: { validated_ledger: {reserve_base:1000000,reserve_inc:200000} } } });
+ throw Error('Unexpected external test request: '+url);
+}) as unknown as typeof fetch })
 beforeAll(() => { db.initDb(); db.storePairing(KEY, { name: 'QA BEX', url: 'chrome-extension://qa', imageUrl: '', addedOn: Date.now(), lastUsedOn: Date.now() }) })
-afterEach(() => { db.setSetting('offline_mode', '0') })
+afterEach(() => { globalThis.fetch = originalFetch; db.setSetting('offline_mode', '0') })
 afterAll(() => { db.closeDb(); rmSync(dir, { recursive: true, force: true }) })
 
 async function call(body: unknown, options: { auth?: boolean; access?: string | null; locked?: boolean; hook?: (r: any) => Promise<any> } = {}) {

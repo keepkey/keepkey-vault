@@ -2353,5 +2353,6 @@
   "m55e84e5d": "0x fee",
   "m108a3db9": "Partner fee",
   "m4dd9a00a": "ShapeShift fee",
-  "me6273384": "Provider fee"
+  "me6273384": "Provider fee",
+  "meba56b2": "Cached balances remain available. Automatic updates will not spend additional discovery requests."
 }

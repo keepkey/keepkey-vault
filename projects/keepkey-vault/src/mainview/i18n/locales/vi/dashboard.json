@@ -36,5 +36,12 @@
 	"loadingSync": "Đang đồng bộ số dư trên các mạng",
 	"loadingPrices": "Đang lấy giá mới nhất",
 	"tokensCount": "+{{count}} token",
-	"dismiss": "Bỏ qua"
+	"dismiss": "Bỏ qua",
+	"syncStage_preparing": "Đang chuẩn bị ví",
+	"syncStage_addresses": "Đang đọc địa chỉ thiết bị",
+	"syncStage_balances": "Đang kiểm tra số dư",
+	"syncStage_finalizing": "Đang cập nhật danh mục",
+	"syncProgressCounts": "{{completed}}/{{total}} · {{percent}}% · {{seconds}}giây",
+	"syncProgressElapsed": "Đã qua {{seconds}}giây",
+	"syncFailedChecks": "Không thể kiểm tra {{failed}} mục"
 }
