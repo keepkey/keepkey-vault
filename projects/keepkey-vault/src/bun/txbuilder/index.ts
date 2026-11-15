@@ -6,6 +6,7 @@ import type { BuildTxParams } from '../../shared/types'
 import { decimalToBaseUnitsStrict, tokenMaxSpendableAmount, tokenMaxSpendableBaseUnits } from '../../shared/max-send'
 import { buildUtxoTx, type BuildUtxoParams, type XpubInfo } from './utxo'
 import { buildEvmTx, type BuildEvmParams } from './evm'
+import { confirmAccountTx } from './confirm-account-tx'
 import { buildCosmosTx, type BuildCosmosParams } from './cosmos'
 import { buildXrpTx, type BuildXrpParams } from './xrp'
 import { sendShielded, type ShieldedSendParams } from './zcash-shielded'
@@ -967,7 +968,7 @@ export async function broadcastTx(
 
   // Tendermint: detect on-chain broadcast failure even if txid is present
   const txResponse = data?.results?.raw?.tx_response
-  if (txResponse && typeof txResponse.code === 'number' && txResponse.code !== 0) {
+  if (txResponse && txResponse.code != null && String(txResponse.code) !== '0') {
     const rawLog = txResponse.raw_log || 'Broadcast failed'
     throw new Error(`Broadcast rejected: ${rawLog}`)
   }
@@ -980,10 +981,11 @@ export async function broadcastTx(
     throw new Error(`Broadcast rejected: ${errMsg}`)
   }
 
-  if (data?.txid) return { txid: data.txid }
-  if (data?.tx_hash) return { txid: data.tx_hash }
-  if (data?.hash) return { txid: data.hash }
-  if (typeof data === 'string' && data.length >= 32) return { txid: data }
+  const txid = data?.txid || data?.tx_hash || data?.hash || (typeof data === 'string' && data.length >= 32 ? data : undefined)
+  if (txid) {
+    await confirmAccountTx(chain, txid)
+    return { txid }
+  }
 
   // If we get here, the response is unexpected — don't pretend it's a txid
   console.error(`[broadcast] Unexpected response:`, JSON.stringify(data).slice(0, 500))

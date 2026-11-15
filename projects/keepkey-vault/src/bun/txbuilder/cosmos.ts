@@ -6,6 +6,8 @@
  * Returns object ready for hdwallet's cosmosSignTx / thorchainSignTx / etc.
  */
 import type { ChainDef } from '../../shared/chains'
+import { decimalToBaseUnitsStrict } from '../../shared/max-send'
+import { getCosmosSpendable } from './cosmos-spendable'
 
 const TAG = '[txbuilder:cosmos]'
 
@@ -30,10 +32,7 @@ export function readCosmosBalance(resp: any, context: string): string {
 
 /** Convert a decimal string (e.g. "1.5") to base units using integer math only. */
 function toBaseUnits(displayAmount: string, decimals: number): bigint {
-  const parts = displayAmount.split('.')
-  const whole = parts[0] || '0'
-  const frac = (parts[1] || '').slice(0, decimals).padEnd(decimals, '0')
-  return BigInt(whole) * 10n ** BigInt(decimals) + BigInt(frac)
+  return decimalToBaseUnitsStrict(displayAmount, decimals)
 }
 
 // Native transaction fee reserved on a MAX send/deposit (in display units).
@@ -198,35 +197,25 @@ export async function buildCosmosTx(
   // 3. Compute amount in base units (integer math to avoid float precision loss)
   let baseAmount: bigint
 
+  // A portfolio balance may be stale or include locked coins. Verify both
+  // the transfer denom and native fee against one live spendable snapshot.
+  const spendable = await getCosmosSpendable(chain.id, fromAddress)
+  const nativeDenom = chain.denom || chain.symbol.toLowerCase()
+  const nativeBalance = spendable.get(nativeDenom) ?? 0n
+  const tokenBalance = spendable.get(denom) ?? 0n
+  const feeBase = toBaseUnits(feeInDisplay, chain.decimals)
   if (isMax) {
-    if (isToken) {
-      // Token MAX: send the whole token balance. The native fee is paid from the
-      // chain's native coin (rune), a separate balance — so no reserve here.
-      // Trust the frontend's balance only when it is an actual figure. `??`
-      // let a displayed '0' win outright — and '0' is exactly what the UI holds
-      // for a chain whose balance fetch failed, so the guard below was skipped
-      // by the one input most likely to be wrong. buildEvmTx and the Solana
-      // path both gate on `> 0` and re-fetch otherwise; match them.
-      const balStr = params.tokenBalance && parseFloat(params.tokenBalance) > 0
-        ? params.tokenBalance
-        : readCosmosBalance(
-          await pioneer.GetPortfolioBalances({ pubkeys: [{ caip: params.caip, pubkey: fromAddress }] }, { forceRefresh: true }),
-          `${chain.coin} token`,
-        )
-      baseAmount = toBaseUnits(String(balStr), amountDecimals)
-    } else {
-      const balResp = await pioneer.GetPortfolioBalances({ pubkeys: [{ caip: chain.caip, pubkey: fromAddress }] }, { forceRefresh: true })
-      const balStr = readCosmosBalance(balResp, chain.coin)
-      const balBase = toBaseUnits(balStr, chain.decimals)
-      const feeBase = maxFeeReserveBase(chain, BigInt(fee.amount[0]?.amount || '0'))
-      baseAmount = balBase - feeBase
-      if (baseAmount < 0n) baseAmount = 0n
-    }
+    baseAmount = isToken ? tokenBalance
+      : nativeBalance - maxFeeReserveBase(chain, BigInt(fee.amount[0]?.amount || '0'))
   } else {
     baseAmount = toBaseUnits(params.amount, amountDecimals)
   }
-
-  if (baseAmount <= 0n) throw new Error('Amount must be greater than zero')
+  if (baseAmount <= 0n) throw new Error('Insufficient spendable balance: amount must be greater than zero after fees')
+  if (isToken && baseAmount > tokenBalance) throw new Error('Insufficient spendable token balance')
+  const nativeRequired = feeBase + (denom === nativeDenom ? baseAmount : 0n)
+  if (nativeRequired > nativeBalance) {
+    throw new Error(`Insufficient ${chain.symbol} spendable balance for amount and transaction fee`)
+  }
 
   // Determine message type: MsgDeposit for THORChain/Maya swaps (explicit flag), MsgSend otherwise
   // NOTE: Do NOT infer from !!memo — normal sends with memos (e.g. exchange deposits) must use MsgSend
@@ -321,22 +310,16 @@ export async function buildCosmosStakingTx(
   const fee = FEE_TEMPLATES[chain.id] || FEE_TEMPLATES.cosmos
   const feeInDisplay = displayFee(chain, fee)
 
-  let baseAmount: bigint
-  if (isMax) {
-    // Delegate all available balance minus the network fee (matches buildCosmosTx send-max)
-    const balResp = await pioneer.GetPortfolioBalances({ pubkeys: [{ caip: chain.caip, pubkey: fromAddress }] }, { forceRefresh: true })
-    const balStr = readCosmosBalance(balResp, chain.coin)
-    const balBase = toBaseUnits(balStr, chain.decimals)
-    // Same headroom rationale as buildCosmosTx (see maxFeeReserveBase). This
-    // builder doesn't apply a feeLevel multiplier, so fee.amount is the actual
-    // fee paid.
-    const feeBase = maxFeeReserveBase(chain, BigInt(fee.amount[0]?.amount || '0'))
-    baseAmount = balBase - feeBase
-    if (baseAmount < 0n) baseAmount = 0n
-  } else {
-    baseAmount = toBaseUnits(params.amount, chain.decimals)
-  }
+  const spendable = await getCosmosSpendable(chain.id, fromAddress)
+  const balance = spendable.get(denom) ?? 0n
+  const feeBase = toBaseUnits(feeInDisplay, chain.decimals)
+  if (isMax && type === 'undelegate') throw new Error('Enter the delegated amount to undelegate')
+  const baseAmount = isMax ? balance - maxFeeReserveBase(chain, BigInt(fee.amount[0]?.amount || '0'))
+    : toBaseUnits(params.amount, chain.decimals)
   if (baseAmount <= 0n) throw new Error('Amount must be greater than zero')
+  if (feeBase + (type === 'delegate' ? baseAmount : 0n) > balance) {
+    throw new Error(`Insufficient ${chain.symbol} spendable balance for staking and transaction fee`)
+  }
   if (!chain.chainId) throw new Error(`Missing chainId for Cosmos chain: ${chain.id}`)
   const chain_id = chain.chainId
 
@@ -439,6 +422,11 @@ export async function buildCosmosNameRegTx(
   // layer (the FEES table). Report that as the display fee — the deposit amount
   // is the full registration cost, so the account also needs this fee on top.
   const feeInDisplay = String(FEES[chain.id] ?? Number(fee.amount[0]?.amount || 0) / 10 ** chain.decimals)
+
+  const spendable = await getCosmosSpendable(chain.id, fromAddress)
+  if (baseAmount + toBaseUnits(feeInDisplay, chain.decimals) > (spendable.get(chain.denom || chain.symbol.toLowerCase()) ?? 0n)) {
+    throw new Error(`Insufficient ${chain.symbol} spendable balance for registration and transaction fee`)
+  }
 
   // 3. Build the `~:` memo: ~:name:chain:address  (owner defaults to signer).
   const memoChain = NAME_MEMO_CHAIN[chain.id]!

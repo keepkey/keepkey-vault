@@ -33,7 +33,7 @@ async function maxDrops(account: any): Promise<bigint> {
       if (error instanceof Error && error.message.startsWith('Insufficient XRP')) throw error
     }
   }
-  throw new Error('Cannot verify XRP account reserves for MAX. No transaction was built.')
+  throw new Error('Cannot verify XRP account reserves. No transaction was built.')
 }
 
 export async function getXrpMaxAmount(pioneer: any, address: string): Promise<string> {
@@ -98,7 +98,9 @@ export async function buildXrpTx(
   }
 
   if (drops <= 0n) throw new Error('Amount must be greater than zero')
-  if (accountInfo.Balance != null && drops + XRP_FEE_DROPS > uint(accountInfo.Balance, 'balance')) throw new Error('Insufficient XRP for amount and transaction fee')
+  // Ordinary payments must preserve reserves just like MAX. Missing account
+  // balance/owner data fails closed in maxDrops instead of skipping the guard.
+  if (!isMax && drops > await maxDrops(accountInfo)) throw new Error('Insufficient XRP after account reserve and transaction fee')
 
   // 4. Build unsigned tx
   const msg = {

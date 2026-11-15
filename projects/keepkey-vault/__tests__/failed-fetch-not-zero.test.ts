@@ -20,7 +20,7 @@
  *
  * Run: bun test __tests__/failed-fetch-not-zero.test.ts
  */
-import { describe, test, expect } from 'bun:test'
+import { afterEach, describe, test, expect } from 'bun:test'
 import { buildCosmosTx, readCosmosBalance } from '../src/bun/txbuilder/cosmos'
 import { buildUtxoTx, estimateUtxoFee } from '../src/bun/txbuilder/utxo'
 import { isBalanceUnverified, selectBalanceEntry } from '../src/shared/balance-display-state'
@@ -78,27 +78,19 @@ const tokenMax = (pioneer: any, tokenBalance?: string) => buildCosmosTx(pioneer,
   to: THOR_FROM, amount: '0', fromAddress: THOR_FROM, isMax: true, caip: TCY_CAIP, tokenBalance,
 } as any)
 
-describe('buildCosmosTx token MAX with a frontend balance', () => {
-  test('a frontend "0" does not win over the fetch — that is the degraded value', async () => {
-    // What the send form holds for a chain whose fetch failed. `??` treated the
-    // string '0' as a supplied balance, so readCosmosBalance never ran and the
-    // user got "Amount must be greater than zero" on a funded account.
-    const err = await tokenMax(cosmosPioneer([]), '0').catch((e: Error) => e)
-    expect(err.message).toContain('Unable to verify')
-    expect(err.message).not.toContain('greater than zero')
+describe('buildCosmosTx token MAX requires live spendable data', () => {
+  const originalFetch = globalThis.fetch
+  afterEach(() => { globalThis.fetch = originalFetch })
+  test('missing live data fails closed even with a cached token balance', async () => {
+    globalThis.fetch = (async () => Response.json({})) as typeof fetch
+    await expect(tokenMax(cosmosPioneer([]), '12.5')).rejects.toThrow('Unable to verify')
   })
-
-  test('a frontend "0" falls through to a balance the server can confirm', async () => {
-    const tx = await tokenMax(cosmosPioneer([{ balance: '50' }]), '0')
-    expect(tx.tx.msg[0].value.amount[0].amount).toBe('5000000000')
-  })
-
-  test('a real frontend balance is still trusted (no extra round trip)', async () => {
-    const tx = await tokenMax({
-      GetAccountInfo: async () => ({ data: { account: { account_number: '17', sequence: '2' } } }),
-      GetPortfolioBalances: async () => { throw new Error('must not be called') },
-    }, '12.5')
-    expect(tx.tx.msg[0].value.amount[0].amount).toBe('1250000000')
+  test('uses chain spendable tokens instead of a stale frontend zero or positive balance', async () => {
+    globalThis.fetch = (async () => Response.json({ balances: [{ denom: 'rune', amount: '100000000' }, { denom: 'tcy', amount: '5000000000' }] })) as typeof fetch
+    for (const cached of ['0', '12.5']) {
+      const tx = await tokenMax(cosmosPioneer([]), cached)
+      expect(tx.tx.msg[0].value.amount[0].amount).toBe('5000000000')
+    }
   })
 })
 

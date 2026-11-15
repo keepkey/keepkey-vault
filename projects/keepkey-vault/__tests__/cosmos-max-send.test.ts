@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test'
+import { afterEach, describe, expect, test } from 'bun:test'
 import { buildCosmosTx } from '../src/bun/txbuilder/cosmos'
 import { CHAINS } from '../src/shared/chains'
 
@@ -11,7 +11,16 @@ const thor = CHAINS.find(c => c.id === 'thorchain')!
 const mayaAddress = 'maya13d4tzmehhmt4r8w9s4n0g0lw7h3ggpyv95f55k'
 const thorAddress = 'thor1qg5lz2j4xqy2k0n4h8p9d7v3c6m8t0r5w2e1a3'
 
+const originalFetch = globalThis.fetch
+afterEach(() => { globalThis.fetch = originalFetch })
 function mockPioneer(balance: string) {
+  globalThis.fetch = (async (url: any) => {
+    const maya = String(url).includes('mayachain')
+    const thor = String(url).includes('thornode')
+    const decimals = maya ? 10 : thor ? 8 : 6
+    const [whole, fraction = ''] = balance.split('.')
+    return Response.json({ balances: [{ denom: maya ? 'cacao' : thor ? 'rune' : 'uatom', amount: whole + fraction.padEnd(decimals, '0') }] })
+  }) as typeof fetch
   return {
     GetAccountInfo: async () => ({
       data: { account: { account_number: '123', sequence: '4' } },

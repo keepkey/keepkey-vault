@@ -1,11 +1,12 @@
-import { afterEach, describe, expect, test } from 'bun:test'
+import { beforeEach, afterEach, describe, expect, test } from 'bun:test'
 import { CHAINS } from '../../shared/chains'
 import { buildXrpTx, getXrpMaxAmount } from './xrp'
 const originalFetch = globalThis.fetch
 afterEach(() => { globalThis.fetch = originalFetch })
+beforeEach(() => { globalThis.fetch = (async () => Response.json({ result: { state: { validated_ledger: { reserve_base: 1000000, reserve_inc: 200000 } } } })) as typeof fetch })
 
 const pioneer = {
-  GetAccountInfo: async () => ({ data: { Sequence: 7, ledger_index_current: 900, Balance: '5000000' } }),
+  GetAccountInfo: async () => ({ data: { Sequence: 7, ledger_index_current: 900, Balance: '5000000', OwnerCount: 0 } }),
 }
 
 describe('XRP transaction builder', () => {
@@ -21,7 +22,7 @@ describe('XRP transaction builder', () => {
     globalThis.fetch = (async () => Response.json({ result: {} })) as unknown as typeof fetch
     const p = { GetAccountInfo: async () => ({ data: { Balance: '5000000', OwnerCount: 0 } }) }
     await expect(getXrpMaxAmount(p, 'rSender')).rejects.toThrow(/Cannot verify XRP account reserves/)
-    await expect(getXrpMaxAmount(pioneer, 'rSender')).rejects.toThrow(/owner count/)
+    await expect(getXrpMaxAmount({ GetAccountInfo: async () => ({ data: { Balance: '5000000' } }) }, 'rSender')).rejects.toThrow(/owner count/)
   })
   test('MAX does not round a balance larger than Number.MAX_SAFE_INTEGER', async () => {
     globalThis.fetch = (async () => Response.json({ result: { state: { validated_ledger: { reserve_base: 1000000, reserve_inc: 200000 } } } })) as unknown as typeof fetch
