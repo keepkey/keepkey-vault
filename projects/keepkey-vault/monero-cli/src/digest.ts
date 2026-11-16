@@ -30,6 +30,31 @@ export function parseDigest(value: string): Record<string, string> {
   return fields
 }
 
+/** Core offers MD5 and MD5-sess in separate WWW-Authenticate fields. Some
+ * HTTP clients combine those fields; commas inside quoted parameters must
+ * remain part of the challenge rather than becoming header boundaries. */
+function supportedDigest(challenges: string[]): Record<string, string> {
+  for (const value of challenges) {
+    if (value.length > 8192) continue
+    const parts: string[] = []
+    let start = 0, quoted = false, escaped = false
+    for (let i = 0; i < value.length; i++) {
+      const char = value[i]
+      if (escaped) { escaped = false; continue }
+      if (quoted && char === '\\') { escaped = true; continue }
+      if (char === '"') { quoted = !quoted; continue }
+      if (!quoted && char === ',' && /^\s*Digest\s+/i.test(value.slice(i + 1))) {
+        parts.push(value.slice(start, i).trim()); start = i + 1
+      }
+    }
+    parts.push(value.slice(start).trim())
+    for (const part of parts) {
+      try { return parseDigest(part) } catch { /* Try another offered challenge. */ }
+    }
+  }
+  throw new Error('Invalid local wallet RPC authentication')
+}
+
 export class DigestWalletRpc {
   private agent = new Agent({ keepAlive: true, maxSockets: 1, maxFreeSockets: 1 })
   private challenge: Record<string, string> | null = null
@@ -49,7 +74,7 @@ export class DigestWalletRpc {
     return `Digest username=${quoted(this.username)}, realm=${quoted(c.realm)}, nonce=${quoted(c.nonce)}, uri="/json_rpc", response="${response}", algorithm=${c.algorithm || 'MD5'}, qop=auth, nc=${nc}, cnonce="${cnonce}"${c.opaque ? `, opaque=${quoted(c.opaque)}` : ''}`
   }
 
-  private exchange(body: string, timeout: number): Promise<{ status: number; challenge?: string; body: string }> {
+  private exchange(body: string, timeout: number): Promise<{ status: number; challenge?: string; challenges?: string[]; body: string }> {
     return new Promise((resolve, reject) => {
       const authorization = this.authorization()
       const req = request({ host: '127.0.0.1', port: this.port, method: 'POST', path: '/json_rpc', agent: this.agent,
@@ -60,9 +85,17 @@ export class DigestWalletRpc {
           if (length > MAX_BODY) { response.destroy(new Error('Monero wallet RPC response exceeds its bound')); return }
           chunks.push(new Uint8Array(chunk))
         })
-        response.on('end', () => resolve({ status: response.statusCode ?? 0,
-          challenge: typeof response.headers['www-authenticate'] === 'string' ? response.headers['www-authenticate'] : undefined,
-          body: Buffer.concat(chunks).toString('utf8') }))
+        response.on('end', () => {
+          const challenges: string[] = []
+          for (let i = 0; i < response.rawHeaders.length; i += 2) {
+            if (response.rawHeaders[i].toLowerCase() === 'www-authenticate') challenges.push(response.rawHeaders[i + 1])
+          }
+          if (!challenges.length) {
+            const header = response.headers['www-authenticate']
+            if (typeof header === 'string') challenges.push(header)
+          }
+          resolve({ status: response.statusCode ?? 0, challenges, body: Buffer.concat(chunks).toString('utf8') })
+        })
         response.on('error', () => reject(new Error('Monero wallet RPC response failed')))
       })
       // Core nonces belong to the TCP connection. Renegotiate on an actual
@@ -88,8 +121,8 @@ export class DigestWalletRpc {
       (_, value) => typeof value === 'bigint' ? `\u0000u64:${value}` : value).replace(/"\\u0000u64:([0-9]+)"/g, '$1')
     for (let attempt = 0; attempt < 3; attempt++) {
       const response = await this.exchange(body, timeout)
-      if (response.status === 401 && response.challenge) {
-        this.challenge = parseDigest(response.challenge); this.count = 0; continue
+      if (response.status === 401 && (response.challenges?.length || response.challenge)) {
+        this.challenge = supportedDigest(response.challenges?.length ? response.challenges : [response.challenge!]); this.count = 0; continue
       }
       if (response.status !== 200) throw new Error('The local Monero wallet RPC is unavailable')
       const value = parseExactJson(response.body)

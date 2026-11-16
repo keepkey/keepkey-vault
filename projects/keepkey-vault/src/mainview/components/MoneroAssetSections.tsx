@@ -13,7 +13,7 @@ import type { MoneroClient } from "../lib/monero-client"
 import { openMoneroWallet, prepareMoneroSend, verifyMoneroBalance } from "../lib/monero-flow"
 import { useMoneroStatus, type MoneroStatusState } from "../hooks/useMoneroStatus"
 import { useMoneroBalanceVerification } from "../hooks/useMoneroBalanceVerification"
-import { MoneroConnectionDetails } from "./MoneroConnectionInfo"
+import { MoneroConnectionDetails, moneroWalletOpenError } from "./MoneroConnectionInfo"
 import { ReceiveView } from "./ReceiveView"
 import { MONERO_STANDARD_WALLET_REQUIRED } from "../../shared/monero-wallet-policy"
 
@@ -155,25 +155,28 @@ export function MoneroConnectCard({ client, monero }: { client: MoneroClient; mo
 		return () => window.removeEventListener('keepkey-settings-changed', changed)
 	}, [connect, connecting])
 	const openingWallet = connecting && monero.status?.connectionPhase === 'wallet'
-	const checkingNode = ['checking','switching','waiting'].includes(monero.status?.connection?.state ?? '')
+	const checkingNode = ['checking','switching'].includes(monero.status?.connection?.state ?? '')
+	const remoteWaiting = monero.status?.connection?.state === 'waiting'
+	const walletOpenError = moneroWalletOpenError(monero.status)
 	if (hiddenWalletBlocked) return <Box data-monero-connect="" py="4" maxW="520px">
 		<Text role="alert" color="var(--rose)" fontSize="13px">{uiText(MONERO_STANDARD_WALLET_REQUIRED)}</Text>
 	</Box>
 	return (
 		<Box data-monero-connect="" py="4" maxW="520px">
 			<MoneroConnectionDetails status={monero.status} />
-			<Flex align="center" gap="2" mb="2" role="status">
-				{!error && <Spinner size="sm" />}
-				<Text fontSize="15px" color="var(--text-0)" fontWeight="500">{checkingNode ? uiText("Connecting to a remote node") : error ? uiText("Monero couldn't open") : nodeWaiting ? uiText('Waiting for your node') : openingWallet ? uiText('Opening Monero wallet') : uiText("Confirm on KeepKey")}</Text>
+			<Flex data-monero-connect-status="" align="center" gap="2" mb="2" role="status">
+				{!error && !remoteWaiting && !walletOpenError && <Spinner size="sm" />}
+				<Text fontSize="15px" color="var(--text-0)" fontWeight="500">{checkingNode ? uiText("Connecting to a remote node") : remoteWaiting ? uiText('Node unreachable') : error || walletOpenError ? uiText("Monero couldn't open") : nodeWaiting ? uiText('Waiting for your node') : openingWallet ? uiText('Opening Monero wallet') : uiText("Confirm on KeepKey")}</Text>
 			</Flex>
-			<Text fontSize="13px" color="var(--text-2)">{checkingNode ? uiText("Vault is checking remote nodes and will reconnect using your saved monitoring access.") : nodeWaiting ? uiText('Your wallet will connect when your node is fully synced. You can follow its progress above.') : openingWallet ? uiText('KeepKey approved access. Preparing your local watch wallet; no further device confirmation is needed.') : error ? uiText('Access did not finish. Try again to reconnect your wallet.') : uiText("Approve access on your KeepKey to see your Monero balance and receive payments.")}</Text>
-			{error && <><Text role="alert" color="var(--rose)" fontSize="13px" mt="3">{error}</Text><Button data-monero-connect-button="" mt="3" size="sm" disabled={connecting} onClick={() => { void connect() }}>{uiText("Try again")}</Button></>}
+			<Text role={walletOpenError ? "alert" : undefined} fontSize="13px" color="var(--text-2)">{walletOpenError || (checkingNode ? uiText("Vault is checking remote nodes and will reconnect using your saved monitoring access.") : remoteWaiting ? uiText('No remote node is responding. Automatic retry is scheduled.') : nodeWaiting ? uiText('Your wallet will connect when your node is fully synced. You can follow its progress above.') : openingWallet ? uiText('KeepKey approved access. Preparing your local watch wallet; no further device confirmation is needed.') : error ? uiText('Access did not finish. Try again to reconnect your wallet.') : uiText("Approve access on your KeepKey to see your Monero balance and receive payments."))}</Text>
+			{error && !walletOpenError && <Text role="alert" color="var(--rose)" fontSize="13px" mt="3">{error}</Text>}
+			{(error || walletOpenError) && <Button data-monero-connect-button="" mt="3" size="sm" disabled={connecting} onClick={() => { void connect() }}>{uiText("Try again")}</Button>}
 			<details data-monero-connection-details="" style={{ marginTop: 20, color: "var(--text-3)", fontSize: 12 }}>
 				<summary style={{ cursor: "pointer" }}>{uiText("Connection details")}</summary>
 				<Text mt="2">{uiText("KeepKey shares a view key with the local wallet to find incoming payments. Spending still requires confirmation on KeepKey.")}</Text>
-				<Text mt="2" wordBreak="break-all">{uiText("Node")}: {settings?.moneroDaemonUrl ?? "—"}</Text>
+				<Text mt="2" wordBreak="break-all">{uiText("Preferred node")}: {monero.status?.connection?.preferredNode ?? settings?.moneroDaemonUrl ?? "—"}</Text>
 				<Text>{uiText("Scan start block")}: {settings?.moneroRestoreHeight ?? "—"}</Text>
-				<Text mt="2">{uiText("The full history is scanned unless you have chosen a later start. Change the node or wallet history in Settings → Networks.")}</Text>
+				<Text mt="2">{(settings?.moneroRestoreHeight ?? 0) > 0 ? uiText("Earlier payments may be missing. Check the wallet history start in Settings → Networks if this wallet is older.") : uiText("The full history is scanned unless you have chosen a later start. Change the node or wallet history in Settings → Networks.")}</Text>
 			</details>
 		</Box>
 	)

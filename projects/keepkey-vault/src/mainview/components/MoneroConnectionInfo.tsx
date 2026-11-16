@@ -3,19 +3,26 @@ import type { MoneroStatus } from '../../shared/types'
 import { useUiTranslation } from '../i18n/ui'
 import { getNumberLocale } from '../lib/number-locale'
 
+export function moneroWalletOpenError(status:MoneroStatus|null):string|undefined {
+ return status?.connection?.state==='failed'&&status.connection.attempts.some(node=>node.state==='responding')?status.error:undefined
+}
+
 /** Public connection diagnostics only. No view key, credentials or protocol details. */
 export function MoneroConnectionDetails({status}:{status:MoneroStatus|null}) {
  const uiText=useUiTranslation(),info=status?.connection
  if(!info)return null
  const current=info.attempts.find(node=>node.url===info.activeNode)
+ const connected=info.state==='connected'||info.state==='scanning'
+ const walletOpenError=moneroWalletOpenError(status)
  const time=(value:string)=>new Date(value).toLocaleTimeString(getNumberLocale())
  const state=info.state==='checking'?uiText('Checking remote node…'):info.state==='switching'?uiText('Trying another remote node…')
   :info.state==='waiting'?uiText('No remote node is responding. Automatic retry is scheduled.')
-  :info.state==='failed'?uiText('The current node did not respond.')
+  :info.state==='failed'?(walletOpenError||uiText('The current node did not respond.'))
   :info.state==='connected'?uiText('Wallet synced'):info.state==='scanning'?uiText('Node connected; scanning wallet history.'):null
  return <Box data-monero-connection-info="" fontSize="12px" color="var(--text-2)" mb="3">
   {state&&<Text role="status">{state}</Text>}
-  <Text>{uiText('Active node')}: {info.activeNode}</Text>
+  {connected&&<Text>{uiText('Active node')}: {info.activeNode}</Text>}
+  {(!connected||info.preferredNode!==info.activeNode)&&<Text>{uiText('Preferred node')}: {info.preferredNode}</Text>}
   {info.automaticFailover&&<Text>{uiText('Automatic remote failover is on.')}</Text>}
   {info.retryAt&&<Text>{uiText('Next retry')}: {time(info.retryAt)}</Text>}
   {info.pausedForTransaction&&<Text>{uiText('Automatic node changes are paused while a transaction review or broadcast is pending.')}</Text>}

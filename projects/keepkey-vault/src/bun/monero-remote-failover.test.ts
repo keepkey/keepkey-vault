@@ -24,6 +24,7 @@ function fixture(){
   } as unknown as ReturnType<typeof createMoneroVault>},
  })
  return {api,status,config,calls,failed,advance:(ms:number)=>{clock+=ms},cancel:()=>{connectError=Error('The KeepKey rejected or cancelled the Monero request')},
+  failOpen:(message:string)=>{connectError=Error(message)},recover:()=>{connectError=null},
   hide:()=>{hidden=true},beforeCheck:(hook:()=>void|Promise<void>)=>{beforeCheck=hook}}
 }
 test('an unreachable preset fails over before asking the device, with visible reason and active node',async()=>{
@@ -68,6 +69,67 @@ test('exhausted nodes use a bounded cooldown instead of a tight retry loop',asyn
  f.advance(29_000);let status=await f.api.getStatus();await tick()
  expect(f.calls.check).toHaveLength(2);expect(status.connection!.state).toBe('waiting');expect(status.connection!.retryAt).toBeDefined()
  f.advance(2000);await f.api.getStatus();await tick();expect(f.calls.check).toHaveLength(4)
+})
+
+test('responding nodes retain their health observations when local wallet setup fails, with a bounded retry',async()=>{
+ const f=fixture();f.failOpen('The watch-only Monero operation could not complete')
+ await expect(f.api.connect()).rejects.toThrow('node responded, but Vault could not open the local watch wallet')
+ let status=await f.api.getStatus()
+ expect(status.connection).toMatchObject({state:'failed',retryAt:new Date(130_000).toISOString()})
+ expect(status.error).toContain('Vault will try again automatically')
+ expect(status.error).not.toContain('No remote Monero node responded')
+ for(const attempt of status.connection!.attempts){
+  expect(attempt).toMatchObject({state:'responding',height:200,checkedAt:new Date(100_000).toISOString(),lastResponseAt:new Date(100_000).toISOString(),latencyMs:0})
+  expect(attempt.error).toContain('could not open the local watch wallet')
+ }
+ expect(f.calls.connect).toHaveLength(2)
+ // A local monitor error must not overwrite the independent daemon probe result.
+ f.status.syncState='unreachable';f.advance(29_000);status=await f.api.getStatus();await tick()
+ expect(f.calls.connect).toHaveLength(2)
+ expect(status.connection!.attempts.every(node=>node.state==='responding')).toBe(true)
+ expect(status.connection!.state).toBe('failed')
+ f.advance(2000);await f.api.getStatus();await tick()
+ expect(f.calls.check).toHaveLength(4);expect(f.calls.connect).toHaveLength(4)
+ expect(f.calls.sign).toBe(0);expect(f.calls.relay).toBe(0)
+})
+
+test('one responding node and one offline node reports wallet setup failure rather than a total outage',async()=>{
+ const f=fixture();f.failed.add(fallback);f.failOpen('The private Monero wallet RPC did not start')
+ await expect(f.api.connect()).rejects.toThrow('node responded')
+ const status=await f.api.getStatus()
+ expect(status.connection!.attempts[0]).toMatchObject({state:'responding',height:200})
+ expect(status.connection!.attempts[1]).toMatchObject({state:'failed',error:'The node did not respond within 10 seconds.'})
+ expect(status.error).toContain('could not open the local watch wallet')
+})
+
+test('a successful retry clears the wallet setup diagnostic',async()=>{
+ const f=fixture();f.failOpen('The Monero watch wallet could not be opened')
+ await expect(f.api.connect()).rejects.toThrow('node responded')
+ f.recover();f.advance(31_000);await f.api.getStatus();await tick()
+ const status=await f.api.getStatus()
+ expect(status.connection).toMatchObject({state:'connected'})
+ expect(status.connection!.retryAt).toBeUndefined();expect(status.error).toBeUndefined()
+ expect(status.connection!.attempts.find(node=>node.url===status.connection!.activeNode)?.error).toBeUndefined()
+})
+
+test('wallet setup failure during a pending broadcast preserves the responding node without switching or retrying',async()=>{
+ const f=fixture();f.status.unrelayedTxid='previous-broadcast';f.failOpen('The Monero watch wallet could not be opened')
+ await expect(f.api.connect()).rejects.toThrow('Automatic node changes are paused')
+ let status=await f.api.getStatus()
+ expect(status.connection).toMatchObject({state:'failed',pausedForTransaction:true})
+ expect(status.connection!.retryAt).toBeUndefined()
+ expect(status.connection!.attempts[0]).toMatchObject({state:'responding',height:200})
+ f.advance(60_000);status=await f.api.getStatus();await tick()
+ expect(f.calls.check).toEqual([primary]);expect(f.calls.connect).toEqual([primary])
+ expect(status.error).toContain('Automatic node changes are paused')
+})
+
+for(const message of ['LIBUSB_ERROR_ACCESS','The KeepKey rejected the Monero request','The KeepKey cancelled the Monero request'])test(`${message} does not trigger failover or automatic device approval`,async()=>{
+ const f=fixture();f.failOpen(message)
+ await expect(f.api.connect()).rejects.toThrow(message)
+ f.advance(60_000);await f.api.getStatus();await tick()
+ expect(f.calls.check).toEqual([primary]);expect(f.calls.connect).toEqual([primary])
+ expect((await f.api.getStatus()).connection!.retryAt).toBeUndefined()
 })
 
 

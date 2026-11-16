@@ -162,11 +162,50 @@ for (const blocker of ['emulator', 'adapter']) {
 
 test('remote failover shows the active node, failures and last successful response in collapsed details',()=>{
  expect(ui.connectionDiagnostics.text).toContain('Active node: https://second.example')
+ expect(ui.connectionDiagnostics.text).toContain('Preferred node: https://first.example')
  expect(ui.connectionDiagnostics.text).toContain('Automatic remote failover is on.')
  expect(ui.connectionDiagnostics.text).toContain('The node did not respond within 10 seconds.')
  expect(ui.connectionDiagnostics.text).toContain('Last successful node response')
  expect(ui.connectionDiagnostics.text).toContain('120 ms')
  expect(ui.connectionDiagnostics.detailsClosed).toBe(true)
+})
+
+test('failed or still-checking nodes are not described as active, and saved preference is labelled consistently',()=>{
+ for(const state of ['waiting','failed','checking']){
+  expect(ui[`connection_${state}`].info).not.toContain('Active node:')
+  expect(ui[`connection_${state}`].info).toContain('Preferred node: https://first.example')
+  expect(ui[`connection_${state}`].details).toContain('Preferred node: https://first.example')
+  expect(ui[`connection_${state}`].details).not.toContain('Preferred node: https://second.example')
+ }
+})
+
+test('scheduled retry is idle rather than a spinning connection or device approval, and a later scan start warns about history',()=>{
+ const waiting=ui.connection_waiting
+ expect(waiting.headline).toBe('Node unreachable')
+ expect(waiting.spinner).toBe(false)
+ expect(waiting.text).toContain('Automatic retry is scheduled.')
+ expect(waiting.text).not.toContain('Confirm on KeepKey')
+ expect(waiting.text).not.toContain('Vault is checking remote nodes')
+ expect(waiting.details).toContain('Scan start block: 3799129')
+ expect(waiting.details).toContain('Earlier payments may be missing.')
+ expect(ui.connection_checking.headline).toBe('Connecting to a remote node')
+ expect(ui.connection_checking.spinner).toBe(true)
+})
+
+test('a responding node with failed local wallet setup reports the wallet error without a false outage or device prompt',()=>{
+ const failed=ui.walletOpenFailure
+ expect(failed.headline).toBe("Monero couldn't open")
+ expect(failed.spinner).toBe(false)
+ expect(failed.info).toContain('node responded, but Vault could not open the local watch wallet')
+ expect(failed.info).toContain('Responding')
+ expect(failed.info).toContain('Last successful node response')
+ expect(failed.info).toContain('Next retry:')
+ expect(failed.alerts.some((message:string)=>message.includes('could not open the local watch wallet'))).toBe(true)
+ expect(failed.text).not.toContain('The current node did not respond.')
+ expect(failed.text).not.toContain('No remote node is responding.')
+ expect(failed.text).not.toContain('Confirm on KeepKey')
+ expect(failed.text).not.toContain('Vault is checking remote nodes')
+ expect(ui.connection_failed.info).toContain('The current node did not respond.')
 })
 
 

@@ -32,9 +32,10 @@ export function createMoneroFailoverVault({create,getConfig,checkNode=checkMoner
  let state:MoneroConnectionInfo['state']='idle'
  let attempts:MoneroConnectionInfo['attempts']=[]
  let lastStatus:MoneroVaultStatus|null=null
+ let walletOpenError:string|undefined
  function pool(){
   const config=getConfig(),next=JSON.stringify([config.enabled,config.offline,config.daemonUrl,config.restoreHeight])
-  if(next!==key){key=next;generation++;urls=moneroFailoverCandidates(config.daemonUrl);active=urls[0];preparedUntil=0;lastStatus=null;attempts=urls.map(url=>({url,state:'untested'}));nextRetry=0;lastProbe=0;state='idle'}
+  if(next!==key){key=next;generation++;urls=moneroFailoverCandidates(config.daemonUrl);active=urls[0];preparedUntil=0;lastStatus=null;walletOpenError=undefined;attempts=urls.map(url=>({url,state:'untested'}));nextRetry=0;lastProbe=0;state='idle'}
   return config
  }
  const vault=create(()=>{const config=pool();return {...config,daemonUrl:active||config.daemonUrl}})
@@ -43,6 +44,7 @@ export function createMoneroFailoverVault({create,getConfig,checkNode=checkMoner
   attempts:attempts.map(item=>({...item})),...(nextRetry?{retryAt:new Date(nextRetry).toISOString()}:{}),
   ...(preparedUntil>now()||vault.pendingCount()>0||lastStatus?.unrelayedTxid?{pausedForTransaction:true}:{})})
  const decorate=(status:MoneroVaultStatus,waiting=!!connecting):MoneroVaultStatus=>({...status,connection:info(),
+  ...(walletOpenError?{error:walletOpenError}:{}),
   ...(waiting&&status.available?{monitorReady:false,canSend:false,syncState:'scanning' as const}: {})})
  const success=(url:string,height?:number,latencyMs?:number)=>Object.assign(entry(url),{state:'responding',checkedAt:new Date(now()).toISOString(),lastResponseAt:new Date(now()).toISOString(),error:undefined,retryAt:undefined,...(height===undefined?{}:{height}),...(latencyMs===undefined?{}:{latencyMs})})
  const failure=(url:string,error:unknown)=>Object.assign(entry(url),{state:'failed',checkedAt:new Date(now()).toISOString(),error:publicReason(error),retryAt:new Date(now()+retryMs).toISOString()})
@@ -54,6 +56,7 @@ export function createMoneroFailoverVault({create,getConfig,checkNode=checkMoner
   const config=pool();const current=generation
   if (!config.enabled || config.offline) { requested=false; return vault.connect(options) }
   requested=true
+  walletOpenError=undefined
   const work=(async()=>{
    inFlight++
    try {
@@ -63,15 +66,18 @@ export function createMoneroFailoverVault({create,getConfig,checkNode=checkMoner
     }
     const paused=vault.pendingCount()>0||preparedUntil>now()
     const order=(paused?[active]:[active,...urls.filter(url=>url!==active)]).filter(url=>force||eligible(url))
+    let walletSetupFailed=false
     for(const url of order){
      assertAllowed()
      if(current!==generation)throw Error('The Monero connection changed')
      state=url===active?'checking':'switching';entry(url).state='checking'
+     let nodeResponded=false
      try {
       const began=now(),health=await checkNode(url)
       assertAllowed()
       if(current!==generation)throw Error('The Monero connection changed')
       success(url,health.height,Math.max(0,now()-began));state='idle'
+      nodeResponded=true
       if(url!==active){vault.invalidate();active=url}
       const status=await vault.connect(options)
       if(current!==generation)throw Error('The Monero connection changed')
@@ -81,11 +87,23 @@ export function createMoneroFailoverVault({create,getConfig,checkNode=checkMoner
       if(current!==generation)throw error
       assertAllowed()
       // A device refusal/cancellation or USB fault must never trigger another consent prompt.
-      if(entry(url).state==='responding'&&!nodeError(error)){requested=false;state='failed';throw error}
-      failure(url,error)
+      if(nodeResponded){
+       if(!nodeError(error)){requested=false;state='failed';nextRetry=0;throw error}
+       // The daemon answered successfully. Local wallet setup failing afterward
+       // must not erase that observation or claim every remote node was down.
+       walletSetupFailed=true
+       Object.assign(entry(url),{error:'The node responded, but Vault could not open the local watch wallet.',retryAt:new Date(now()+retryMs).toISOString()})
+      }else failure(url,error)
      }
     }
     state=urls.length>1&&!paused?'waiting':'failed';nextRetry=urls.length>1&&!paused?now()+retryMs:0
+    if(walletSetupFailed){
+     state='failed'
+     walletOpenError=paused
+      ?'The node responded, but Vault could not open the local watch wallet. Automatic node changes are paused while a transaction is pending.'
+      :'A remote Monero node responded, but Vault could not open the local watch wallet. Vault will try again automatically.'
+     throw Error(walletOpenError)
+    }
     if(paused)throw Error('The current node is unavailable. Automatic node changes are paused while a transaction is pending.')
     throw Error(urls.length>1?'No remote Monero node responded. Vault will try again automatically.':'The selected Monero node did not respond. Check its address or choose another node.')
    }finally{inFlight--}
@@ -109,7 +127,7 @@ export function createMoneroFailoverVault({create,getConfig,checkNode=checkMoner
   })()
   probing=work;void work.finally(()=>{if(probing===work)probing=null}).catch(()=>{})
  }
- function invalidate(){generation++;key='';requested=false;preparedUntil=0;nextRetry=0;lastStatus=null;state='idle';vault.invalidate()}
+ function invalidate(){generation++;key='';requested=false;preparedUntil=0;nextRetry=0;lastStatus=null;walletOpenError=undefined;state='idle';vault.invalidate()}
  return {...vault,
   connect:options=>connect(options),
   invalidate,stop:invalidate,
@@ -121,7 +139,8 @@ export function createMoneroFailoverVault({create,getConfig,checkNode=checkMoner
    lastStatus=status
    if(requested&&config.enabled&&!config.offline&&status.deviceReady&&urls.length>1){
     if(!connecting){
-     if(status.syncState==='unreachable'){if(entry(active).state!=='failed')failure(active,Error(status.error||'Monero node unavailable'));state='failed';backgroundConnect()}
+     if(walletOpenError)backgroundConnect()
+     else if(status.syncState==='unreachable'){if(entry(active).state!=='failed')failure(active,Error(status.error||'Monero node unavailable'));state='failed';backgroundConnect()}
      else if(!status.available&&now()>=nextRetry)backgroundConnect()
      else if(status.available){if(state==='scanning'&&status.monitorReady)state='connected';probe()}
     }

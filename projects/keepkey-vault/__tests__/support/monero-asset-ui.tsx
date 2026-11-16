@@ -197,6 +197,37 @@ for(const cancel of [false,true]) {
  await unmount()
 }
 
+// Failed/paused discovery must not call an attempted node active or imply work is still running.
+for (const state of ['waiting', 'failed', 'checking']) {
+ const client=fakeClient({...notConnected,connection:{preferredNode:'https://first.example',activeNode:'https://second.example',automaticFailover:true,state,
+  retryAt:state==='waiting'?'2026-11-08T12:01:00Z':undefined,attempts:[{url:'https://first.example',state:'failed'},{url:'https://second.example',state:state==='checking'?'checking':'failed'}]}},3799129)
+ client.holdConnect=true
+ const {container,unmount}=await render(<Host Section={MoneroReceiveSection} client={client} />)
+ out[`connection_${state}`]={
+  text:text(q(container,'[data-monero-connect]')),
+  info:text(q(container,'[data-monero-connection-info]')),
+  details:text(q(container,'[data-monero-connection-details]')),
+  headline:text(q(container,'[data-monero-connect-status]')),
+  spinner:!!q(container,'[data-monero-connect-status] .chakra-spinner'),
+ }
+ await unmount()
+ client.releaseConnect()
+}
+
+// A healthy daemon can answer even when opening the local watch wallet fails.
+{
+ const error='A remote Monero node responded, but Vault could not open the local watch wallet. Vault will try again automatically.'
+ const client=fakeClient({...notConnected,error,connection:{preferredNode:'https://first.example',activeNode:'https://second.example',automaticFailover:true,state:'failed',
+  retryAt:'2026-11-08T12:01:00Z',attempts:[{url:'https://second.example',state:'responding',height:3801979,lastResponseAt:'2026-11-08T12:00:10Z'}]}})
+ client.holdConnect=true
+ const {container,unmount}=await render(<Host Section={MoneroReceiveSection} client={client} />)
+ out.walletOpenFailure={text:text(q(container,'[data-monero-connect]')),info:text(q(container,'[data-monero-connection-info]')),
+  headline:text(q(container,'[data-monero-connect-status]')),spinner:!!q(container,'[data-monero-connect-status] .chakra-spinner'),
+  alerts:[...container.querySelectorAll('[role="alert"]')].map(text)}
+ await unmount()
+ client.releaseConnect()
+}
+
 // ── A guessed scan start never reads as complete; an old figure carries its time ──
 {
   const { container, unmount } = await render(React.createElement(Host, { Section: MoneroReceiveSection, client: fakeClient(connected({ restoreHeight: 3_294_960, updatedAt: new Date().toISOString() })) }))
