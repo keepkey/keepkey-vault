@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Preserve the prepared RPC checksum across macOS native code signing.
+"""Preserve prepared Monero helper checksums across macOS native code signing.
 
 Preparation authenticates the official archive. This helper checks the staged
 copy against its existing receipt, records the hash before signing, then updates
@@ -17,6 +17,10 @@ import shutil
 import stat
 import subprocess
 import tempfile
+
+HOST_ADAPTER_MANIFEST = json.loads((Path(__file__).resolve().parent.parent /
+    "projects/keepkey-vault/monero-cli/host-adapter-manifest.json").read_text())
+HELPER_FIELDS = ("walletRpc", "daemon", "hostAdapter")
 
 
 class ReceiptError(RuntimeError):
@@ -73,10 +77,16 @@ def write_json(path, value, mode):
 def verify_before_signing(rpc, metadata, receipt, field="walletRpc"):
     regular_file(rpc)
     value = read_json(metadata)
-    require(field in ("walletRpc", "daemon"), "Invalid Monero helper field")
+    require(field in HELPER_FIELDS, "Invalid Monero helper field")
     before = checksum(value.get(field + "Sha256"))
     require(sha256(rpc) == before, "Staged Monero wallet RPC does not match its prepared receipt")
     raw = checksum(value.get(field + "RawSha256", before))
+    if field == "hostAdapter":
+        artifact = HOST_ADAPTER_MANIFEST["files"].get(value.get("platform"))
+        require(artifact and value.get("version") == HOST_ADAPTER_MANIFEST["moneroVersion"]
+                and raw == artifact["sha256"], "Monero host adapter has no reviewed raw provenance")
+        if before == raw:
+            require(rpc.stat().st_size == artifact["size"], "Monero host adapter size differs")
     write_json(receipt, {"rpc": str(rpc.resolve()), "metadata": str(metadata.resolve()),
                         "metadataSha256": sha256(metadata), "beforeSha256": before,
                         "rawSha256": raw, "field": field}, 0o600)
@@ -85,7 +95,7 @@ def verify_before_signing(rpc, metadata, receipt, field="walletRpc"):
 def record_after_signing(rpc, metadata, receipt, field="walletRpc"):
     regular_file(rpc)
     before = read_json(receipt)
-    require(field in ("walletRpc", "daemon") and before.get("field", "walletRpc") == field,
+    require(field in HELPER_FIELDS and before.get("field", "walletRpc") == field,
             "Monero signing receipt belongs to another helper")
     require(before.get("rpc") == str(rpc.resolve()) and before.get("metadata") == str(metadata.resolve()),
             "Monero signing receipt belongs to different inputs")
@@ -100,7 +110,7 @@ def record_after_signing(rpc, metadata, receipt, field="walletRpc"):
     receipt.unlink()
 
 
-def stage_signed_copies(worker, rpc, metadata, output, entitlements, identity, run=subprocess.run, daemon=None):
+def stage_signed_copies(worker, rpc, metadata, output, entitlements, identity, run=subprocess.run, daemon=None, adapter=None):
     """Sign disposable inputs before Electrobun's own app signing/notarization."""
     for source in (worker, rpc, metadata, entitlements):
         regular_file(source)
@@ -121,6 +131,20 @@ def stage_signed_copies(worker, rpc, metadata, output, entitlements, identity, r
         require(sha256(daemon) == checksum(read_json(metadata).get("daemonSha256")),
                 "Staged Monero node does not match its prepared receipt")
         shutil.copy2(daemon, signed_daemon)
+    if adapter:
+        regular_file(adapter)
+        signed_adapter = output / "monero-host-adapter"
+        require(not signed_adapter.is_symlink() and signed_adapter.resolve() != adapter.resolve(),
+                "Monero signing must use disposable copies")
+        # Check provenance before the first signing command, not after another
+        # helper has already been signed. This input must be the reviewed raw copy.
+        value = read_json(metadata)
+        artifact = HOST_ADAPTER_MANIFEST["files"].get(value.get("platform"))
+        require(artifact and value.get("version") == HOST_ADAPTER_MANIFEST["moneroVersion"]
+                and sha256(adapter) == artifact["sha256"]
+                and value.get("hostAdapterSha256") == artifact["sha256"]
+                and adapter.stat().st_size == artifact["size"], "Monero staging requires the reviewed raw host adapter")
+        shutil.copy2(adapter, signed_adapter)
     receipt = output / ".monero-pre-sign.json"
     verify_before_signing(signed_rpc, signed_metadata, receipt)
     command = ["codesign", "--force", "--verbose", "--timestamp", "--options", "runtime", "--sign", identity]
@@ -133,6 +157,11 @@ def stage_signed_copies(worker, rpc, metadata, output, entitlements, identity, r
         run(command + [str(signed_daemon)], check=True)
         run(["codesign", "--verify", "--strict", str(signed_daemon)], check=True)
         record_after_signing(signed_daemon, signed_metadata, receipt, "daemon")
+    if adapter:
+        verify_before_signing(signed_adapter, signed_metadata, receipt, "hostAdapter")
+        run(command + [str(signed_adapter)], check=True)
+        run(["codesign", "--verify", "--strict", str(signed_adapter)], check=True)
+        record_after_signing(signed_adapter, signed_metadata, receipt, "hostAdapter")
 
 
 def main():
@@ -146,13 +175,14 @@ def main():
     parser.add_argument("--entitlements", type=Path)
     parser.add_argument("--identity")
     parser.add_argument("--daemon", type=Path)
-    parser.add_argument("--field", choices=("walletRpc", "daemon"), default="walletRpc")
+    parser.add_argument("--adapter", type=Path)
+    parser.add_argument("--field", choices=HELPER_FIELDS, default="walletRpc")
     args = parser.parse_args()
     try:
         if args.operation == "stage":
             require(args.worker and args.output and args.entitlements and args.identity,
                     "Monero staging requires worker, output, entitlements and identity")
-            stage_signed_copies(args.worker, args.rpc, args.metadata, args.output, args.entitlements, args.identity, daemon=args.daemon)
+            stage_signed_copies(args.worker, args.rpc, args.metadata, args.output, args.entitlements, args.identity, daemon=args.daemon, adapter=args.adapter)
         else:
             require(args.receipt, "Monero signing receipt is required")
             operation = verify_before_signing if args.operation == "verify" else record_after_signing

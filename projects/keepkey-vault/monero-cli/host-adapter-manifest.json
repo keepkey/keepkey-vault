@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "protocol": "keepkey-monero-wallet-export-v1",
+  "moneroVersion": "0.18.5.4",
+  "scope": "Read-only decoding of authenticated wallet output exports and unsigned transaction sets; no device transport, transaction signing, or relay",
+  "source": {
+    "repository": "https://github.com/BitHighlander/keepkey-firmware",
+    "commit": "97236a794c5953dfcb892578ec464992f962a493",
+    "path": "tools/monero-feasibility/host-adapter.cpp",
+    "sha256": "3219809c6b800b496d848bb5b57814f22b74fc920723f71903cd92a8578063e6",
+    "validationReportSha256": "9ec6828c514e002c19a0a4c3227d65a94ec451c4f5e705fd341ad7586f795545"
+  },
+  "files": {
+    "darwin-arm64": {
+      "filename": "monero-host-adapter",
+      "sha256": "8569f6afd4f62c750b96c6b567c258efaed02209a9af8feb2a6c548b17de8b59",
+      "size": 10281424
+    }
+  }
+}

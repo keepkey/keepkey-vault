@@ -47,7 +47,51 @@ The asset page shows incoming payments, received/unlocked/locked amounts, confir
 
 ## Research send (signing emulator only)
 
-Sending is offered only when the running emulator is a verified `Monero signing (research)` build and the worker finds `monero-host-adapter` beside the wallet RPC, pinned by `hostAdapterSha256` in `monero-tools.json`. Stage them with `make monero-emulator-signing SOURCE=...` (requires a reviewed `monero-emulator-bundle/signing-manifest.json`, file `libkkemu-monero-signing.dylib`, capabilities `address`, `watch-key`, `key-image`, `sign`) and `make monero-adapter SOURCE=... SHA256=...`. Both are development artifacts: only `KEEPKEY_INCLUDE_MONERO_EMULATOR=1` copies them and signed release builds refuse that flag.
+Sending is offered only when the running emulator is a verified `Monero signing (research)` build and the worker finds the verified host adapter beside wallet RPC. Stage the emulator with `make monero-emulator-signing SOURCE=...` (requires a reviewed `monero-emulator-bundle/signing-manifest.json`, file `libkkemu-monero-signing.dylib`, capabilities `address`, `watch-key`, `key-image`, `sign`). The research emulator remains development-only: `KEEPKEY_INCLUDE_MONERO_EMULATOR=1` copies it, and signed release builds refuse that flag.
+
+### Read-only host adapter
+
+`monero-host-adapter` decodes authenticated Core wallet exports for key-image sync
+and unsigned transaction review. It does not contact a node, access a device, sign,
+or relay. It is packaged independently of the research emulator flag, so public
+firmware key-image monitoring does not depend on selecting an old research build.
+
+`host-adapter-manifest.json` records the reviewed artifact, source commit, source
+hash and validation receipt. The currently qualified artifact is macOS ARM64,
+SHA-256 `8569f6afd4f62c750b96c6b567c258efaed02209a9af8feb2a6c548b17de8b59`.
+Supply that provided artifact explicitly; no developer-machine path or runtime
+download is used:
+
+```sh
+bun scripts/stage-monero-adapter.ts --source /path/to/monero-host-adapter --require
+# Or set KEEPKEY_MONERO_HOST_ADAPTER_SOURCE to the reviewed artifact in a build job.
+bun scripts/stage-monero-adapter.ts --if-available
+bun test monero-cli/src/host-adapter.test.ts
+```
+
+Optional staging tolerates an absent artifact or an unqualified platform; an
+explicit source or corrupt staged artifact fails. Use `--require` when qualifying
+an app that must provide key-image decoding. Raw staging checks the exact reviewed
+size and bytes; runtime additionally checks `hostAdapterSha256` in wallet-tools
+metadata. macOS signing preserves the raw pin as `hostAdapterRawSha256` and updates
+the runtime hash in disposable copies before the outer app signature seals them.
+These metadata fields are not an independent signature; explicit developer tool
+overrides remain trusted development inputs.
+
+The upstream source and Core build recipe are
+[`host-adapter.cpp`, `prepare_core.py`, and `build_host.py` at the manifest commit](https://github.com/BitHighlander/keepkey-firmware/tree/97236a794c5953dfcb892578ec464992f962a493/tools/monero-feasibility).
+The reviewed artifact links only system libraries. A rebuild with another compiler
+or dependency set must receive its own artifact review and manifest pin; matching
+the version label does not qualify different bytes. Native public-fixture tests
+run whenever the reviewed adapter is staged, or via the explicit
+`KEEPKEY_TEST_MONERO_HOST_ADAPTER` test input. Unsupported platforms remain gated.
+
+Installing this decoder does not enable unsupported firmware signing. Public
+7.17 firmware at `66df3e24ce5a90dac790e89cc031d3cec82e9d15` uses the streamed
+1810–1825 signing protocol. Vault's research 65000/65001 and separately pinned
+device candidates do not implement that public protocol. The certified bundled
+7.17 emulator also has no Monero commands. Public firmware signing remains blocked
+until the compatible host flow and artifact are independently qualified.
 
 The flow follows the firmware research host runner: wallet `export_outputs`, adapter `outputs`, device key-image sync (530..535) and wallet `import_key_images`; then wallet `transfer` (unsigned set), adapter `plan`, a plan-versus-request check (one recipient, exact amount, wallet fee, change only to this wallet, inputs only from synced outputs), research signing (65000/65001) on the emulator, a check of the signed bytes (hash, fee, rings, key images), and `/send_raw_transaction` to the configured daemon over the same pinned HTTPS or loopback HTTP. The view key reaches the adapter only on stdin. Integrated addresses and payment IDs are refused.
 

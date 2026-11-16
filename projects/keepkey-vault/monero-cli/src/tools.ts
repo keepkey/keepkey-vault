@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 import { readFile, lstat } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
 import { MONERO_VERSION, parseExactJson } from './protocol'
+import { verifiedHostAdapterIn } from './host-adapter'
 
 let versionProbe: ReturnType<typeof Bun.spawn> | null = null
 export function stopToolVersionProbe(): void {
@@ -48,16 +49,9 @@ export async function verifiedWalletRpc(): Promise<string> {
   throw new Error('Verified Monero wallet RPC is unavailable; prepare the pinned host tools during the build')
 }
 
-/** Research signing adapter beside the verified wallet RPC, pinned by `hostAdapterSha256` in the same metadata. */
+/** Read-only wallet-export decoder beside the verified RPC; never a grant of firmware signing support. */
 export async function verifiedHostAdapter(walletRpc: string): Promise<string | null> {
-  try {
-    const directory = dirname(walletRpc)
-    const info = JSON.parse(await readFile(join(directory, 'monero-tools.json'), 'utf8'))
-    if (typeof info.hostAdapterSha256 !== 'string' || !/^[0-9a-f]{64}$/.test(info.hostAdapterSha256)) return null
-    const binary = join(directory, process.platform === 'win32' ? 'monero-host-adapter.exe' : 'monero-host-adapter'), file = await lstat(binary)
-    if (!file.isFile() || file.isSymbolicLink() || file.size > 256 * 1024 * 1024 || (process.platform !== 'win32' && (file.mode & 0o022))) return null
-    return createHash('sha256').update(new Uint8Array(await readFile(binary))).digest('hex') === info.hostAdapterSha256 ? binary : null
-  } catch { return null }
+  return verifiedHostAdapterIn(dirname(walletRpc))
 }
 
 /** One JSON request on stdin, one bounded JSON reply on stdout. Credentials never reach argv; stderr is discarded. */
