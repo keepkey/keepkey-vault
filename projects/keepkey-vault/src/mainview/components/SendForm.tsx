@@ -26,6 +26,17 @@ import { describeGasPriceError, networkGasPriceGwei } from '../../shared/gas-pri
 
 type SendPhase = 'input' | 'built' | 'signed' | 'broadcast'
 
+/** EIP-681 `value=` is an integer amount in wei (scientific notation allowed). Returns whole coins, or null. */
+function eip681ValueToAmount(value: string | null, decimals: number): string | null {
+	const m = value?.trim().match(/^(\d+)(?:\.(\d+))?(?:e(\d+))?$/i)
+	if (!m) return null
+	const [, whole, fraction = '', exponent = '0'] = m
+	const shift = Number(exponent)
+	if (fraction.length > shift) return null // a fraction of a wei is not a valid value
+	const wei = BigInt(whole + fraction + '0'.repeat(shift - fraction.length))
+	return wei > 0n ? baseUnitsToDecimalString(wei, decimals) : null
+}
+
 interface SigningContext {
 	requestKey: string
 	chainId: string
@@ -590,14 +601,19 @@ export function SendForm({ chain, address, balance, balanceLoading = false, toke
 			params = new URLSearchParams(addr.slice(qIdx + 1))
 			addr = addr.slice(0, qIdx)
 		}
+		// EIP-681 may pin a chain id: ethereum:0xabc…@1
+		if (schemeMatch && /^ethereum$/i.test(schemeMatch[1])) addr = addr.replace(/@\d+$/, '')
 		setRecipient(addr)
 		if (params) {
-			const amt = params.get('amount') || params.get('value')
+			// BIP-21 amount= is in coins. EIP-681 value= is in wei and only prices the native coin.
+			const amt = params.get('amount') || (chain.chainFamily === 'evm' && !isTokenSend ? eip681ValueToAmount(params.get('value'), chain.decimals) : null)
+			// Show the scanned amount in crypto; in USD mode the field kept showing the old dollar figure.
+			if (amt) { setInputMode('crypto'); setUsdAmount(hasPrice && Number(amt) > 0 ? (Number(amt) * pricePerUnit).toFixed(2) : '') }
 			if (amt) { setAmount(amt); setIsMax(false) }
 			const m = params.get('memo') || params.get('dt') || params.get('label')
 			if (m) setMemo(m)
 		}
-	}, [])
+	}, [chain.chainFamily, chain.decimals, isTokenSend, hasPrice, pricePerUnit])
 
 	// Build explorer URL from assetData
 	const explorerUrl = useMemo(() => {
