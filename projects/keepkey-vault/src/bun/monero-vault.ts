@@ -1,6 +1,6 @@
 /** Monero receiving bridge. Only an explicitly approved device view key reaches the local sidecar. */
 import type { MoneroConnectionInfo } from '../shared/types'
-import { createHash, randomBytes } from 'node:crypto'
+import { createHash, randomBytes, randomInt } from 'node:crypto'
 import type { MoneroCoreVerifier } from './monero-device-signing'
 import { checkStreamSigningBounds, signMoneroStream, supportsMoneroSigning, STREAM_ERRORS, type MoneroSigningPhase, type MoneroText } from './monero-stream-signer'
 import { MONERO_DEVICE_CANDIDATE_SHA256, MONERO_DEVICE_SUBADDRESS_CANDIDATE_SHA256 } from './monero-device-signing'
@@ -759,6 +759,11 @@ export function createMoneroVault({ engine, confirm, getConfig, sidecar = manage
           throw new MoneroError(`The transaction you discarded (${guard.txid}) could still be mined from another node's pool. Until its inputs are spent, a new send must spend at least one of them, so both cannot be mined; this send would use other funds, so it was not built. Send an amount that needs those funds (Max does), or wait until it settles`)
         }
         if (current.streamed) checkStreamSigningBounds(draft.plan, text)
+        // Choose the review order once; the stored plan drives every signing step.
+        for (let i = draft.plan.outputs.length - 1; i > 0; i--) {
+          const j = randomInt(i + 1)
+          ;[draft.plan.outputs[i], draft.plan.outputs[j]] = [draft.plan.outputs[j], draft.plan.outputs[i]]
+        }
         const review = reviewPlan(draft.plan, { address, amountAtomic: amount.toString(), walletAddress: binding.address,
           walletFeeAtomic: draft.feeAtomic, walletAmountAtomic: draft.amountAtomic, owned: keyImages.owned })
         prepared = { id: randomBytes(16).toString('hex'), key: current.key, generation, expires: Date.now() + PREPARED_LIFETIME_MS, draft, review }

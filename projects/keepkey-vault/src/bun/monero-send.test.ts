@@ -421,7 +421,9 @@ describe('Desktop Monero send bridge', () => {
     const result = await b.api.send({ prepareId: review.prepareId })
     expect(result).toEqual({ txid: referenceHash('base') })
     const request = b.delegate.received.find(message => message.type === 65000)!
-    expect(hex(request.body)).toBe(fixtures.cases.base.signRequestHex)
+    const expected = planOf('base')
+    expected.outputs.sort((a, b) => review.outputs.findIndex(o => o.address === a.address) - review.outputs.findIndex(o => o.address === b.address))
+    expect(hex(request.body)).toBe(hex(signRequest(expected)))
     expect(sentTypes(b).slice(-4)).toEqual([65000, 27, 27, 27])
     expect(b.confirmed.at(-1)).toEqual({ operation: 'moneroSend', chain: 'Monero', to: RECIPIENT, value: '2.000000000000 XMR', fee: '0.000020000000 XMR' })
     expect(b.calls.relays).toEqual([{ txHex: fixtures.cases.base.signedTransaction.hex }])
@@ -683,7 +685,7 @@ describe('C3: send edge cases', () => {
 
   test('subaddress recipients are prepared; integrated addresses are refused with the reason', async () => {
     const b = await ready()
-    expect((await b.api.prepareSend({ address: SUBADDRESS, amountAtomic: '2000000000000' })).outputs[0]).toEqual({ role: 'recipient', address: SUBADDRESS, amountAtomic: '2000000000000' })
+    expect((await b.api.prepareSend({ address: SUBADDRESS, amountAtomic: '2000000000000' })).outputs.find(o => o.role === 'recipient')).toEqual({ role: 'recipient', address: SUBADDRESS, amountAtomic: '2000000000000' })
     const integrated = '4LL9oSLmtpccfufTMvppY6JwXNouMBzSkbLYfpAV5Usx3skxNgYeYTRj5UzqtReoS44qo9mtmXCqY45DJ852K5Jv2bYXZKKQePHES9khPK'
     expect(moneroAddressKind(integrated)).toBe('integrated')
     await expect(b.api.prepareSend({ address: integrated, amountAtomic: '1' })).rejects.toThrow('Integrated addresses are not supported')
@@ -1028,7 +1030,12 @@ function streamBridge(verify = true) {
 async function prepareStream(b: ReturnType<typeof streamBridge>) {
  await b.api.connect(); await b.api.syncKeyImages()
  const output=b.p.outputs.find(o=>!o.isChange)!
- return b.api.prepareSend({address:output.address,amountAtomic:output.amountAtomic})
+ // Public replay vectors have one fixed output order. Prepare until that order is selected.
+ for (let attempt = 0; attempt < 128; attempt++) {
+  const review = await b.api.prepareSend({address:output.address,amountAtomic:output.amountAtomic})
+  if (review.outputs[0].address === b.p.outputs[0].address) return review
+ }
+ throw Error('fixture output order never selected')
 }
 
 test('capability hardware streams 1810..1825 and verifies before relay without an emulator wrapper',async()=>{
@@ -1103,4 +1110,23 @@ test('public firmware uses 1800..1809 for monitoring and key images while unqual
   await expect(b.api.prepareSend({ address: RECIPIENT, amountAtomic: '2000000000000' })).rejects.toThrow('hardware signing')
   expect(b.calls.transfers).toHaveLength(0); expect(b.calls.relays).toHaveLength(0)
   expect(b.confirmed).toHaveLength(0)
+})
+
+
+test('prepare cryptographically selects both output orders and review order survives signing unchanged', async () => {
+ const b = streamBridge()
+ await b.api.connect(); await b.api.syncKeyImages()
+ const recipient = b.p.outputs.find(o => !o.isChange)!
+ const orders = new Set<string>()
+ for (let run = 0; run < 128; run++) {
+  const review = await b.api.prepareSend({address:recipient.address,amountAtomic:recipient.amountAtomic})
+  orders.add(review.outputs.map(o => o.role).join(','))
+ }
+ expect([...orders].sort()).toEqual(['change,recipient', 'recipient,change'])
+ const review = await prepareStream(b)
+ await b.api.send({prepareId:review.prepareId})
+ // Emulator asserts Init and each output/MAC request against the independent fixture;
+ // Core preparation asserts the stored plan, and verification checks the assembled bytes.
+ expect(review.outputs.map(o => o.address)).toEqual(b.p.outputs.map(o => o.address))
+ expect(b.counts()).toEqual({verified:1,disposed:1})
 })
