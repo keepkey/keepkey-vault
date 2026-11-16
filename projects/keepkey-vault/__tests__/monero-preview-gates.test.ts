@@ -1,5 +1,7 @@
-import { describe, expect, test } from 'bun:test'
-import { existsSync, readFileSync } from 'fs'
+import { afterEach, describe, expect, test } from 'bun:test'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs'
+import { createHash } from 'node:crypto'
+import { tmpdir } from 'node:os'
 import { join } from 'path'
 import { firmwareSupportsMonero, MONERO_MIN_FIRMWARE } from '../src/shared/firmware-versions'
 import { CHAINS, isChainSupported } from '../src/shared/chains'
@@ -37,6 +39,56 @@ function moneroSettingsFixture(enabled: boolean, hidden: boolean) {
   const evaluate = (text: string) => runInNewContext(ts.transpileModule(text, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText, context)
   return { settings: () => evaluate(`${named('getAppSettings')}\ngetAppSettings()`),
     construct: () => evaluate(`${named('getMoneroWallet')}\ngetMoneroWallet()`), counts: () => ({ walletReads, constructions }) }
+}
+
+const packagingDirectories: string[] = []
+afterEach(() => { for (const directory of packagingDirectories.splice(0)) rmSync(directory, { recursive: true, force: true }) })
+
+/** Run the actual config and adapter verifier against public synthetic bytes.
+ * Only the compiled review manifest is substituted; neither guard is mocked. */
+async function moneroPackagingFixture() {
+  const directory = mkdtempSync(join(tmpdir(), 'monero-preview-package-'))
+  packagingDirectories.push(directory)
+  const vendor = 'monero-cli/vendor/darwin-arm64'
+  const adapter = Buffer.from('PUBLIC SYNTHETIC READ-ONLY DECODER')
+  const sha256 = createHash('sha256').update(new Uint8Array(adapter)).digest('hex')
+  const manifest = { schemaVersion: 1, protocol: 'keepkey-monero-wallet-export-v1', moneroVersion: '0.18.5.4',
+    files: { 'darwin-arm64': { filename: 'monero-host-adapter', sha256, size: adapter.length } } }
+  const write = (path: string, bytes: string | Buffer) => {
+    mkdirSync(join(directory, path, '..'), { recursive: true })
+    writeFileSync(join(directory, path), bytes, { mode: 0o755 })
+  }
+  write('monero-cli/dist/monero-cli', 'synthetic worker')
+  write(`${vendor}/monero-wallet-rpc`, 'synthetic wallet RPC')
+  write(`${vendor}/LICENSE`, 'synthetic license')
+  write(`${vendor}/monero-host-adapter`, adapter)
+  const metadata = (hash = sha256) => write(`${vendor}/monero-tools.json`, JSON.stringify({
+    version: '0.18.5.4', platform: 'darwin-arm64', hostAdapterSha256: hash,
+  }))
+  metadata()
+  for (const path of ['monero-device-bundle/libmonero_device_proof.dylib', 'monero-device-bundle/libmonero_core_verify.dylib',
+    'monero-emulator-bundle/libkkemu-monero.dylib', 'monero-emulator-bundle/libkkemu-monero-signing.dylib',
+    'monero-emulator-bundle/manifest.json', 'monero-emulator-bundle/signing-manifest.json']) write(path, 'synthetic research fixture')
+  const entry = join(directory, 'entry.ts')
+  writeFileSync(entry, `import config from ${JSON.stringify(join(import.meta.dir, '../electrobun.config.ts'))}; console.log(JSON.stringify(config.build.copy))`)
+  const built = await Bun.build({ entrypoints: [entry], target: 'bun', outdir: directory, naming: 'config.mjs',
+    define: { 'process.platform': '"darwin"', 'process.arch': '"arm64"' },
+    plugins: [{ name: 'public-adapter-review-pin', setup(build) {
+      build.onResolve({ filter: /host-adapter-manifest\.json$/ }, () => ({ path: 'reviewed-pin', namespace: 'public-adapter-review-pin' }))
+      build.onLoad({ filter: /.*/, namespace: 'public-adapter-review-pin' }, () => ({ loader: 'json', contents: JSON.stringify(manifest) }))
+    } }],
+  })
+  if (!built.success) throw new Error(built.logs.join('\n'))
+  return { corruptReceipt: () => metadata('00'.repeat(32)), run: (research: boolean) => {
+    const env = { ...process.env, KEEPKEY_INCLUDE_MONERO_EMULATOR: research ? '1' : '0' }
+    for (const key of ['KEEPKEY_MONERO_CLI_SOURCE', 'KEEPKEY_MONERO_RPC_SOURCE', 'KEEPKEY_MONERO_METADATA_SOURCE',
+      'KEEPKEY_MONERO_ADAPTER_SOURCE', 'KEEPKEY_MONERO_DAEMON_SOURCE', 'KEEPKEY_EMULATOR_SOURCE',
+      'KEEPKEY_EMULATOR_RECEIPT_SOURCE', 'KEEPKEY_ZCASH_CLI_SOURCE']) delete env[key]
+    const result = Bun.spawnSync([process.execPath, join(directory, 'config.mjs')], {
+      cwd: directory, env, stdout: 'pipe', stderr: 'pipe', timeout: 5_000,
+    })
+    return { code: result.exitCode, error: result.stderr.toString(), copy: result.exitCode === 0 ? JSON.parse(result.stdout.toString()) as Record<string, string> : {} }
+  } }
 }
 
 describe('Monero preview gates', () => {
@@ -87,14 +139,28 @@ describe('Monero preview gates', () => {
 		expect(src('src/bun/index.ts')).not.toContain('if (listEmulatorBuilds().find(build => build.selected)?.research) clearSelectedEmulatorBuild()')
 	})
 
-	test('research signing artifacts are copied only by the dev-only flag that signed releases refuse', () => {
+	test('verified read-only adapters ship by default while research libraries require the dev-only flag', async () => {
 		expect(src('scripts/build-signed.ts')).toContain("if (process.env.KEEPKEY_INCLUDE_MONERO_EMULATOR === '1') {")
-		const config = src('electrobun.config.ts')
-		expect(config).toContain("const includeMoneroResearch = process.env.KEEPKEY_INCLUDE_MONERO_EMULATOR === '1';")
-		for (const artifact of ['libkkemu-monero-signing.dylib', 'monero-host-adapter']) {
-			const lines = config.split('\n').filter(line => line.includes(artifact) && line.includes('existsSync'))
-			expect(lines.length).toBeGreaterThan(0)
-			for (const line of lines) expect(line).toContain('includeMoneroResearch &&')
+		const fixture = await moneroPackagingFixture()
+		for (const research of [false, true]) {
+			const result = fixture.run(research)
+			if (result.code) throw new Error(result.error)
+			expect(result.copy['monero-cli/vendor/darwin-arm64/monero-host-adapter']).toBe('monero-tools/monero-host-adapter')
+			for (const [source, destination] of [
+				['monero-device-bundle', 'monero-device'],
+				['monero-emulator-bundle/libkkemu-monero.dylib', 'monero-emulator/libkkemu-monero.dylib'],
+				['monero-emulator-bundle/libkkemu-monero-signing.dylib', 'monero-emulator/libkkemu-monero-signing.dylib'],
+			]) expect(result.copy[source]).toBe(research ? destination : undefined)
+		}
+	})
+
+	test('neither normal nor research packaging can copy a read-only adapter with a mismatched receipt', async () => {
+		const fixture = await moneroPackagingFixture()
+		fixture.corruptReceipt()
+		for (const research of [false, true]) {
+			const result = fixture.run(research)
+			expect(result.code).not.toBe(0)
+			expect(result.error).toContain('The Monero host adapter does not match its reviewed metadata')
 		}
 	})
 
