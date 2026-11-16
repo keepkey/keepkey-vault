@@ -2244,7 +2244,13 @@ export interface SwapQuote {
   /** Inferred from the source transaction, not a provider's review claim. */
   executionMode?: 'relay-solver-deposit'
   /** Relay routes: Relay's quote names this payout address for the order. */
-  relayOrder?: { requestId?: string; recipient?: string }
+  relayOrder?: {
+    requestId?: string
+    recipient?: string
+    /** Relay's own source transaction. Its deposit id can differ from the
+     * status API requestId; bind the complete transaction instead. */
+    deposit?: Pick<RelayTxParams, 'to' | 'data' | 'value' | 'chainId'> | null
+  }
   /** Relay routes: the order's payout address, checked equal to the entered recipient. */
   relayOrderRecipient?: string
   minAmountIn?: string       // minimum sell amount for this route (human-readable, in sell asset units)

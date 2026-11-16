@@ -29,7 +29,7 @@ const pioneer = {
   },
 }
 mock.module('../src/bun/pioneer', () => ({ getPioneer: async () => pioneer, getPioneerApiBase: () => 'https://fixture.invalid', getQueryKey: () => 'fixture' }))
-mock.module('electrobun/bun', () => ({ Utils: { paths: { userData: '/private/tmp/vault-swap-recipient-test' } } }))
+mock.module('electrobun/main/utils', () => ({ paths: { userData: '/private/tmp/vault-swap-recipient-test' } }))
 mock.module('../src/bun/txbuilder', () => ({
   normalizeBchAddress: (address: string) => address,
   buildTx: async () => { throw new Error('fixture builder reached') },

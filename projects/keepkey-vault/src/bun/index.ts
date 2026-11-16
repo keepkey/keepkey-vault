@@ -4016,6 +4016,7 @@ async function headlessExecuteSwap(params: ExecuteSwapParams, pushSubStage: (sta
 			slippageBps: cachedQuote?.requestedSlippageBps ?? 100,
 			integration: cachedQuote?.integration || 'thorchain',
 			swapper: cachedQuote?.swapper,
+			relayOrder: cachedQuote?.relayOrder,
 			nearIntentsDepositAddress: cachedQuote?.nearIntentsDepositAddress,
 			nearIntentsTracking: cachedQuote?.nearIntentsTracking,
 		}, { skipPersist: engine.isPassphraseWallet || !scope, deviceId: scope?.deviceId, walletId: scope?.walletId })

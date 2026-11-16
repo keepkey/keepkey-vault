@@ -308,7 +308,8 @@ export function trackSwap(
   // Relay deposits embed the request id as the trailing bytes32 of the
   // prebuilt calldata. Extract once at sign-time so the resume path / tracker
   // link doesn't need a round-trip to api.relay.link for new swaps.
-  const relayRequestId = extractRelayRequestId(params.relayTx?.data)
+  const relayRequestId = /^0x[0-9a-f]{64}$/i.test(quote.relayOrder?.requestId || '')
+    ? quote.relayOrder!.requestId : extractRelayRequestId(params.relayTx?.data)
   const trackingContext = result.fromAddress && result.toAddress ? {
     fromAddress: result.fromAddress, toAddress: result.toAddress,
     fromAmountBaseUnits: result.fromAmountBaseUnits || (params.fromCaip.startsWith('eip155:') && params.fromCaip.includes('/slip44:') ? params.relayTx?.value : undefined),
