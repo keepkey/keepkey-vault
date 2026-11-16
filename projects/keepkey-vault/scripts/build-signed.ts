@@ -137,7 +137,7 @@ const buildEnvironment = {
   ...signedMoneroSources,
 }
 
-// Hutch signs every native helper twice. Preserve only the exact, pre-signed
+// Hutch force-re-signs native code. Preserve only the exact, pre-signed
 // bytes whose checksums our runtime receipts record; it still signs all other
 // native code and the outer app itself, then packs its own update artifacts.
 const projectRoot = resolve(import.meta.dir, '..')
