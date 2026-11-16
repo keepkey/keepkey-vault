@@ -355,7 +355,11 @@ export function validateContactAddress(address: string, chain: ChainDef, existin
  * and zcash-shielded do): valid on any of them is a valid contact.
  */
 export function validateContactOnNetwork(address: string, chains: ChainDef[], existing?: { kind: string } | null): ValidationResult {
-  const fits = chains.find(c => validateAddress(address, c).valid) ?? chains[0]
+  // When none fits, prefer a chain that recognised the format and saw a typo, so a
+  // mistyped zs1… reports the checksum instead of the transparent-only message.
+  const fits = chains.find(c => validateAddress(address, c).valid)
+    ?? chains.find(c => validateAddress(address, c).error === 'invalidChecksum')
+    ?? chains[0]
   return fits ? validateContactAddress(address, fits, existing) : fail('invalidAddress')
 }
 
