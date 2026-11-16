@@ -2965,7 +2965,7 @@ function PersonalDashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSetti
 													<Text fontSize="28px" fontWeight="600" fontFamily="mono" color="var(--text-1)" lineHeight="1.1">
 														{privateModeEnabled ? "••••" : "$0.00"}
 													</Text>
-													<Text fontSize="13px" color="var(--text-3)" mt="1">{uiText("No")}{" "}{dchain.coin}{" "}{uiText("balance yet")}</Text>
+													<Text fontSize="13px" color="var(--text-3)" mt="1">{uiText("No {{chain}} balance yet", { chain: dchain.coin })}</Text>
 												</>
 											)}
 										</Box>
