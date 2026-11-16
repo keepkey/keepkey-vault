@@ -463,6 +463,8 @@ test-unit:
 	cd $(PROJECT_DIR) && bun test __tests__/provider-refresh.test.ts __tests__/evm-confirmation-watch.test.ts __tests__/connectivity.test.ts __tests__/cosmos-max-send.test.ts src/bun/txbuilder/account-send-safety.test.ts
 	cd $(PROJECT_DIR) && bun test __tests__/build-electrobun.test.ts
 	cd $(PROJECT_DIR) && bun test __tests__/offline-asset-icons.test.ts
+	cd $(PROJECT_DIR) && bun test __tests__/add-address-dialog-zcash.test.ts
+	cd $(PROJECT_DIR) && bun test __tests__/ton-address-checksum.test.ts __tests__/address-unsupported-formats.test.ts __tests__/empty-balance-i18n.test.ts
 	cd $(PROJECT_DIR) && bun test __tests__/electrobun-fixes.test.ts
 	cd $(PROJECT_DIR) && bun test src/bun/txbuilder/evm-units.test.ts
 	cd $(PROJECT_DIR) && bun test __tests__/hyperliquid-identity.test.ts
