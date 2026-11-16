@@ -18,7 +18,7 @@ import { DOCS_LINKS, watch } from "../../shared/docs-links"
 import { caipToNetworkId, isTokenCaip } from "../../shared/chains"
 import type { ChainDef } from "../../shared/chains"
 import type { ChainBalance, TokenBalance, BuildTxResult, BroadcastResult, AddressBookEntry } from "../../shared/types"
-import { validateAddress, isBurnAddress, knownTokenContract } from "../../shared/address-validation"
+import { validateAddress, isBurnAddress, knownTokenContract, sameAddress as isSameAddress } from "../../shared/address-validation"
 import { balanceUnverifiedReason, isBalanceUnverified } from "../../shared/balance-display-state"
 import { normalizeAmountInput, decimalAmount } from '../../shared/locale'
 import { baseUnitsToDecimalString } from '../../shared/max-send'
@@ -329,11 +329,11 @@ export function SendForm({ chain, address, balance, balanceLoading = false, toke
 	// its logo) or a new external address (offer to save). Debounced; clears on every
 	// edit so we never show stale info while the next lookup resolves.
 	const addressValid = addressValidation?.valid === true
-	// Self-send: the recipient is this account's own sending address (EVM compares
-	// case-insensitively). It builds and signs fine, so warn and require an explicit
-	// confirmation; only the network fee would leave the wallet.
-	const sameAddress = useCallback((a: string, b: string | null | undefined) =>
-		!!b && (chain.chainFamily === 'evm' ? a.toLowerCase() === b.toLowerCase() : a === b), [chain.chainFamily])
+	// Self-send: the recipient is this account's own sending address. It builds and signs
+	// fine, so warn and require an explicit confirmation; only the network fee would leave
+	// the wallet. The shared comparison ignores case for hex and bech32 (BC1Q… is bc1q…)
+	// and the bitcoincash: prefix.
+	const sameAddress = isSameAddress
 	const isSelfSend = addressValid && sameAddress(recipient.trim(), address)
 	const [selfSendConfirmed, setSelfSendConfirmed] = useState(false)
 	// Read by the recipient-lookup effect without adding to its dependency list.
