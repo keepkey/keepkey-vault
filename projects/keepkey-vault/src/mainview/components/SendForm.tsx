@@ -20,7 +20,7 @@ import type { ChainDef } from "../../shared/chains"
 import type { ChainBalance, TokenBalance, BuildTxResult, BroadcastResult, AddressBookEntry } from "../../shared/types"
 import { validateAddress, isBurnAddress, knownTokenContract } from "../../shared/address-validation"
 import { balanceUnverifiedReason, isBalanceUnverified } from "../../shared/balance-display-state"
-import { normalizeAmountInput, decimalAmount } from '../../shared/locale'
+import { normalizeAmountInput, decimalAmount, truncateDecimals } from '../../shared/locale'
 import { baseUnitsToDecimalString } from '../../shared/max-send'
 import { describeGasPriceError, networkGasPriceGwei } from '../../shared/gas-price-errors'
 
@@ -278,15 +278,17 @@ export function SendForm({ chain, address, balance, balanceLoading = false, toke
 		if (hasPrice && v) {
 			const n = canonical === null ? NaN : Number(canonical)
 			if (!isNaN(n)) {
+				// Round down to the asset's decimals: the user typed dollars, not those digits.
 				const crypto = n / pricePerUnit
-				setAmount(decimalAmount(crypto))
+				const decimals = (isTokenSend ? token?.decimals : chain.decimals) ?? 8
+				setAmount(truncateDecimals(decimalAmount(crypto), decimals))
 			} else {
 				setAmount("")
 			}
 		} else {
 			setAmount("")
 		}
-	}, [hasPrice, pricePerUnit, locale, i18n.language])
+	}, [hasPrice, pricePerUnit, locale, i18n.language, isTokenSend, token?.decimals, chain.decimals])
 
 	// Swap input mode
 	const toggleInputMode = useCallback(() => {

@@ -41,3 +41,13 @@ export function decimalAmount(value: number, significantDigits = 8): string {
     ? { useGrouping: false, maximumSignificantDigits: significantDigits }
     : { useGrouping: false, maximumFractionDigits: significantDigits })
 }
+
+/**
+ * Cut a plain decimal string down to `decimals` fraction digits, rounding down,
+ * so a converted amount never carries more precision than the asset allows.
+ */
+export function truncateDecimals(value: string, decimals: number): string {
+  const [whole, fraction = ''] = value.split('.')
+  const kept = fraction.slice(0, Math.max(0, decimals)).replace(/0+$/, '')
+  return kept ? `${whole}.${kept}` : whole
+}
