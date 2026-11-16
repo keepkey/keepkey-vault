@@ -594,7 +594,10 @@ export function SendForm({ chain, address, balance, balanceLoading = false, toke
 		if (params) {
 			const amt = params.get('amount') || params.get('value')
 			if (amt) { setAmount(amt); setIsMax(false) }
-			const m = params.get('memo') || params.get('dt') || params.get('label')
+			// label= is the payee's name, never a memo. XRP takes its destination tag from dt= only;
+			// other chains take memo= (a dt= there is ignored).
+			const isXrp = /^(?:xrp|xrpl|ripple)$/i.test(schemeMatch?.[1] ?? '') || /^r[1-9A-HJ-NP-Za-km-z]{24,34}$/.test(addr)
+			const m = isXrp ? params.get('dt') : params.get('memo')
 			if (m) setMemo(m)
 		}
 	}, [])
