@@ -41,8 +41,15 @@ export interface FirmwareVersionInfo {
 export const FIRMWARE_VERSION_MAP: FirmwareVersionInfo[] = [
   {
     version: '7.17.0',
-    headline: 'DigiByte Taproot and DigiDollar foundation',
+    headline: 'Monero support and DigiByte Taproot',
     features: [
+      {
+        title: 'Monero Support',
+        description: 'Adds Monero (XMR) address generation and wallet monitoring with device-approved view-key access. Enable Monero in Settings to get started.',
+        chains: ['monero'],
+        color: '#FF6600',
+        icon: 'chain',
+      },
       {
         title: 'DigiDollar Support',
         description: 'Adds the DigiByte Taproot signing foundation required for DigiDollar. DigiDollar accounts remain gated until transaction construction, indexing, and script-path redemption pass release acceptance.',
