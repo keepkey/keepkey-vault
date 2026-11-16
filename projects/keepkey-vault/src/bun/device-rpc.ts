@@ -7,7 +7,7 @@ const MANAGER_READS = new Set(['getBtcAccounts', 'getEvmAddresses'])
 const DEVICE_ACTIONS = new Set(['btcSignTx', 'btcPsbtSign', 'ethSignTx', 'ethSignMessage', 'ethSignTypedData',
   'cosmosSignTx', 'thorchainSignTx', 'mayachainSignTx', 'osmosisSignTx', 'xrpSignTx', 'solanaSignTx',
   'solanaSignMessage', 'solanaSignOffchainMessage', 'tronSignTx', 'tronSignMessage', 'tronSignTypedHash', 'tonSignTx', 'tonSignMessage', 'hiveSignTx',
-  'addBtcAccount', 'addEvmAddressIndex', 'addUtxoAccount', 'buildTx', 'previewSwapBuild', 'executeSwap', 'btcWatchOnlyShowAddress'])
+  'addBtcAccount', 'addEvmAddressIndex', 'addUtxoAccount', 'buildTx', 'previewSwapBuild', 'executeSwap', 'auditSweepPath', 'btcWatchOnlyShowAddress'])
 interface Scope { wallet: unknown; epoch: number; seed: string | null }
 const same = (a: Scope, b: Scope) => a.wallet === b.wallet && a.epoch === b.epoch && a.seed === b.seed
 

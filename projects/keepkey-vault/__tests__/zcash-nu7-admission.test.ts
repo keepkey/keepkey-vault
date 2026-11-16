@@ -28,6 +28,7 @@ describe('Nu7 admission precedes device acquisition', () => {
     ['btcSignTx', { coin: 'Zcash' }],
     ['executeSwap', { quote: { fromChainId: 'zcash' } }],
     ['previewSwapBuild', { fromChainId: 'zcash' }],
+    ['auditSweepPath', { chainId: 'zcash' }],
   ] as const
   for (const [method, params] of requests) test(`${method} cannot request a PIN or use forged renderer emulator flags`, async () => {
     let acquisitions = 0, dispatched = 0
@@ -53,5 +54,19 @@ describe('Nu7 admission precedes device acquisition', () => {
     expect(await rpc.btcSignTx({ coin: 'Bitcoin' })).toBe('ok')
     expect(await rpc.getBalance({ chainId: 'zcash' })).toEqual({ balance: '1' })
     expect(acquisitions).toBe(3)
+  })
+
+  test('even a qualified emulator cannot use the legacy audit sweep builder; other UTXO sweeps still enter', async () => {
+    let acquisitions = 0, derives = 0, network = 0, approvals = 0
+    const rpc = gateDeviceRpc({ auditSweepPath: async () => { derives++; network++; approvals++; return 'swept' } }, {
+      scope: () => ({ wallet, epoch: 1, seed: null }), locked: () => false,
+      run: async action => { acquisitions++; return action() },
+      preflight: (name, data) => preflightNu7DeviceRpc(name, data, '7.17.0', true, true),
+    })
+    await expect(rpc.auditSweepPath({ chainId: 'zcash', dryRun: true })).rejects.toThrow('audit sweeps are unavailable')
+    await expect(rpc.auditSweepPath({ chainId: 'zcash', dryRun: false })).rejects.toThrow('audit sweeps are unavailable')
+    expect({ acquisitions, derives, network, approvals }).toEqual({ acquisitions: 0, derives: 0, network: 0, approvals: 0 })
+    expect(await rpc.auditSweepPath({ chainId: 'litecoin' })).toBe('swept')
+    expect({ acquisitions, derives, network, approvals }).toEqual({ acquisitions: 1, derives: 1, network: 1, approvals: 1 })
   })
 })

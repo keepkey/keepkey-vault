@@ -283,7 +283,7 @@ import { buildTx, broadcastTx, canonicalizeTronTokenCaip } from "./txbuilder"
 import { signUtxoTx, configureZcashNu7WalletAuthorizer } from './txbuilder/zcash-transparent'
 import { isQualifiedNu7AlphaEmulator } from './zcash-nu7-emulator'
 import { reviewedBundledEmulatorSourceSha256 } from './emulator-signed-provenance'
-import { preflightNu7DeviceRpc, requiresNu7DeviceRpc } from './zcash-nu7-admission'
+import { preflightNu7DeviceRpc, requiresNu7DeviceRpc, rejectUnsupportedZcashSweep } from './zcash-nu7-admission'
 import { requireZcashNu7Builder } from './zcash-nu7-binary'
 import { zcashNu7SupportError } from '../shared/zcash-nu7'
 import { EmulatorTransportDelegate } from './emulator-transport'
@@ -10610,6 +10610,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			// Signs with the exact found path — no xpub/account machinery, nothing
 			// persisted (hidden-wallet safe). Two-step: dryRun quotes, then signs.
 			auditSweepPath: async (params) => {
+					rejectUnsupportedZcashSweep(params?.chainId)
 				if (!engine.wallet) throw new Error('No device connected')
 				if (engine.getDeviceState().state !== 'ready') throw new Error('Device not ready')
 				const chain = getAllChains().find(c => c.id === params.chainId)

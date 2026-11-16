@@ -1754,6 +1754,26 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           }
         }
 
+        let validatedSwapPreview: import('../shared/types').ExecuteSwapParams | undefined
+        if (method === 'POST' && path === '/api/v2/swap/execute') {
+          auth.requireAuth(req)
+          // Preserve the existing empty-probe response while moving quote
+          // admission ahead of wallet acquisition, including headless setups.
+          const requiredAny = requiredSigningFields(path)!
+          if (!reqBody || typeof reqBody !== 'object') return json({ error: 'Empty or invalid signing payload' }, 400)
+          if (!requiredAny.some(key => reqBody[key] !== undefined)) return json({ error: `Missing signing payload — expected one of: ${requiredAny.join(', ')}` }, 400)
+          const swapBody = await parseRequest(req.clone(), S.SwapExecuteHeadlessRequest)
+          if (!callbacks?.validateSwapExecutionHeadless) return json({ error: 'Swap quote validation unavailable' }, 503)
+          try { validatedSwapPreview = callbacks.validateSwapExecutionHeadless(swapBody as any) }
+          catch (error: any) { return json({ error: 'Swap quote rejected', details: error.message }, 409) }
+          // A claimed quote supplies the canonical source chain. Block selling
+          // ZEC before device acquisition or host approval; receiving ZEC stays
+          // available. Nu7's qualified emulator send flow is Desktop-only.
+          if (validatedSwapPreview.fromChainId === 'zcash') {
+            return json({ error: 'Zcash swap signing over REST is not supported. Use KeepKey Vault Desktop with the 7.17 alpha emulator; physical support is not yet available.' }, 501)
+          }
+        }
+
         // REST's UTXO schema carries only the legacy transaction format. Nu7
         // plans must use Desktop's validated transparent flow; reject before
         // requireWallet can acquire a lease, unlock, or open host approval.
@@ -1806,14 +1826,6 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           }
 
           await requireWallet(engine)
-
-          let validatedSwapPreview: import('../shared/types').ExecuteSwapParams | undefined
-          if (path === '/api/v2/swap/execute') {
-            const swapBody = await parseRequest(req.clone(), S.SwapExecuteHeadlessRequest)
-            if (!callbacks.validateSwapExecutionHeadless) return json({ error: 'Swap quote validation unavailable' }, 503)
-            try { validatedSwapPreview = callbacks.validateSwapExecutionHeadless(swapBody as any) }
-            catch (error: any) { return json({ error: 'Swap quote rejected', details: error.message }, 409) }
-          }
 
           const { appName } = resolveAppInfo()
           const id = crypto.randomUUID()

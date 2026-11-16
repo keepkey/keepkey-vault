@@ -4,6 +4,9 @@ import { EventEmitter } from 'node:events'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { createSwapQuoteLeases } from '../../src/bun/swap-quote-lease'
+import { assessSwapRisk } from '../../src/shared/swap-risk'
+import type { ExecuteSwapParams, SwapAsset, SwapQuote } from '../../src/shared/types'
 
 const profile = mkdtempSync(join(tmpdir(), 'rest-zcash-admission-'))
 mock.module('electrobun/main/utils', () => ({ paths: { userData: profile } }))
@@ -23,7 +26,8 @@ db.initDb()
 
 const inputs = [{ addressNList: [0x8000002c, 0x80000000, 0x80000000, 0, 0], txid: '11'.repeat(32), vout: 0, amount: '20000', scriptType: 'p2pkh' }]
 const outputs = [{ address: '1BoatSLRHtKNngkdXEeobR76b53LETtpyT', amount: '10000', scriptType: 'p2pkh' }]
-type Options = { locked?: boolean; wallet?: boolean; approval?: boolean; authenticated?: boolean; allowDevice?: boolean }
+type Options = { locked?: boolean; wallet?: boolean; approval?: boolean; authenticated?: boolean; allowDevice?: boolean;
+  path?: string; validateSwap?: (params: ExecuteSwapParams) => ExecuteSwapParams }
 async function request(name: string, body: unknown, options: Options = {}) {
   let locked = options.locked ?? true
   const counts = { acquisitions: 0, unlocks: 0, approvals: 0, reads: 0, signs: 0, releases: 0 }
@@ -54,16 +58,36 @@ async function request(name: string, body: unknown, options: Options = {}) {
   try {
     server = startRestApi(engine, auth, 0, { onApiLog() {}, getSessionEpoch: () => 0,
       ...(options.approval === false ? {} : { onSigningRequest: async () => { counts.approvals++; return { approved: true } }, onSigningDismissed() {} }),
+      ...(options.validateSwap ? { validateSwapExecutionHeadless: options.validateSwap,
+        executeSwapHeadless: async () => { counts.signs++; return { txid: '11'.repeat(32) } } } : {}),
     }, '127.0.0.1')
   } finally { Bun.serve = serve }
   try {
-    const input = new Request('http://rest-admission.invalid/utxo/sign-transaction', {
+    const input = new Request('http://rest-admission.invalid' + (options.path ?? '/utxo/sign-transaction'), {
       method: 'POST', headers: { 'Content-Type': 'application/json', ...(options.authenticated === false ? {} : { Authorization: `Bearer ${apiKey}` }) },
       body: JSON.stringify(body),
     })
     const response = await route!(input, fakeServer)
     return { status: response.status, data: JSON.parse(await response.text()), counts, signedCoin }
   } finally { server!.stop() }
+}
+
+/** Actual immutable quote claims identify the source; renderer labels alone are not authority. */
+function swap(fromChainId: 'zcash' | 'bitcoin', toChainId: 'zcash' | 'bitcoin', change: Record<string, unknown> = {}) {
+  const caips = { bitcoin: 'bip122:000000000019d6689c085ae165831e93/slip44:0', zcash: 'bip122:00040fe8ec8471911baa1db1266ea15d/slip44:133' }
+  const leases = createSwapQuoteLeases(() => 1_000_000)
+  const input = { fromCaip: caips[fromChainId], toCaip: caips[toChainId], amount: '0.01',
+    fromAddress: 'public-fixture-source', toAddress: 'public-fixture-destination', isMax: false }
+  const quote: SwapQuote = { expectedOutput: '0.01', minimumOutput: '0.0099', memo: '', inboundAddress: 'public-fixture-deposit',
+    fees: { affiliate: '0', outbound: '0', totalBps: 0 }, estimatedTime: 60, slippageBps: 100, integration: 'nearIntents', swapper: 'NEAR Intents' }
+  const risk = assessSwapRisk({ inputAmount: 0.01, expectedAmount: 0.01, minimumAmount: 0.0099, fromPriceUsd: 1, toPriceUsd: 1, sameAssetUnits: false })
+  const issued = leases.issue(input, quote, { chainId: fromChainId, decimals: 8 } as SwapAsset,
+    { chainId: toChainId, decimals: 8 } as SwapAsset, 0, risk)
+  const body = { quoteId: issued.quoteId, fromChainId, toChainId, fromCaip: input.fromCaip, toCaip: input.toCaip,
+    amount: input.amount, isMax: false, memo: quote.memo, inboundAddress: quote.inboundAddress,
+    expectedOutput: quote.expectedOutput, integration: quote.integration, swapper: quote.swapper, ...change }
+  const validateSwap = (params: ExecuteSwapParams) => { const lease = leases.claim(params, 0); lease.finish(false); return lease.params }
+  return { body, validateSwap, path: '/api/v2/swap/execute' }
 }
 
 try {
@@ -79,6 +103,20 @@ try {
   results.unauthenticated = await request('unauthenticated', zcash, { authenticated: false })
   results.bitcoin = await request('bitcoin', { coin: 'Bitcoin', inputs, outputs }, { allowDevice: true })
   results['bitcoin-default'] = await request('bitcoin-default', { inputs, outputs }, { allowDevice: true })
+  for (const [name, options] of Object.entries({ 'swap-zcash-locked': {}, 'swap-zcash-unlocked': { locked: false },
+    'swap-zcash-no-device': { wallet: false }, 'swap-zcash-no-approval-callback': { approval: false },
+    'swap-zcash-unauthenticated': { authenticated: false } })) {
+    const fixture = swap('zcash', 'bitcoin')
+    results[name] = await request(name, fixture.body, { ...fixture, ...options })
+  }
+  for (const [name, change] of Object.entries({ 'swap-forged-source-chain': { fromChainId: 'bitcoin' },
+    'swap-forged-source-caip': { fromCaip: 'bip122:000000000019d6689c085ae165831e93/slip44:0' } })) {
+    const fixture = swap('zcash', 'bitcoin', change)
+    results[name] = await request(name, fixture.body, fixture)
+  }
+  const incoming = swap('bitcoin', 'zcash')
+  results['swap-bitcoin-to-zcash'] = await request('swap-bitcoin-to-zcash', incoming.body, { ...incoming, allowDevice: true })
+  results['swap-empty-probe'] = await request('swap-empty-probe', {}, incoming)
   console.log(JSON.stringify(results))
 } finally { db.closeDb(); rmSync(profile, { recursive: true, force: true }) }
 // Imported production modules may retain background handles; all requests and
