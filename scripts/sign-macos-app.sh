@@ -116,12 +116,17 @@ fi
 
 # --- 2. All Mach-O in MacOS/ — WITH entitlements ---
 echo "  Signing MacOS/ binaries with entitlements..."
+# Libraries must be signed before the launcher that loads them. Intel CI
+# bundles contain unsigned libraries, unlike a locally signed arm64 build.
 if [ -d "$MACOS_DIR" ]; then
-  for f in "$MACOS_DIR"/*; do
-    [ -f "$f" ] || continue
-    file -b "$f" 2>/dev/null | grep -q "Mach-O" || continue
-    echo "    $(basename "$f") (+ entitlements)"
-    sign_file "$f" --entitlements "$ENTITLEMENTS"
+  for pass in dylib exe; do
+    for f in "$MACOS_DIR"/*; do
+      [ -f "$f" ] || continue
+      case "$f" in *.dylib) [ "$pass" = dylib ] || continue ;; *) [ "$pass" = exe ] || continue ;; esac
+      file -b "$f" 2>/dev/null | grep -q "Mach-O" || continue
+      echo "    $(basename "$f") (+ entitlements)"
+      sign_file "$f" --entitlements "$ENTITLEMENTS"
+    done
   done
 fi
 
