@@ -18,7 +18,7 @@ import { DOCS_LINKS, watch } from "../../shared/docs-links"
 import { caipToNetworkId, isTokenCaip } from "../../shared/chains"
 import type { ChainDef } from "../../shared/chains"
 import type { ChainBalance, TokenBalance, BuildTxResult, BroadcastResult, AddressBookEntry } from "../../shared/types"
-import { validateAddress, isBurnAddress, knownTokenContract } from "../../shared/address-validation"
+import { validateAddress, isBurnAddress, knownTokenContract, sameAddress as isSameAddress } from "../../shared/address-validation"
 import { balanceUnverifiedReason, isBalanceUnverified } from "../../shared/balance-display-state"
 import { normalizeAmountInput, decimalAmount } from '../../shared/locale'
 import { baseUnitsToDecimalString } from '../../shared/max-send'
@@ -308,7 +308,7 @@ export function SendForm({ chain, address, balance, balanceLoading = false, toke
 		if (!isMax) return null
 		const tx = buildResult?.unsignedTx
 		if (chain.chainFamily === 'utxo') {
-			const out = tx?.outputs?.find((o: any) => o.addressType === 'spend' && o.address === recipient)
+			const out = tx?.outputs?.find((o: any) => o.addressType === 'spend' && isSameAddress(o.address, recipient))
 			return out ? (Number(out.amount) / 10 ** chain.decimals).toFixed(chain.decimals) : null
 		}
 		if (chain.chainFamily !== 'evm' || !tx) return null
