@@ -80,9 +80,11 @@ getAssetMap()
 /** Bundled (offline-safe) icons for primary assets whose logo must never break —
  *  the remote CDN is unreachable in offline/airplane mode. Inline SVG data URIs
  *  so there's no asset-file/bundler coupling and no network fetch.
- *  Bitcoin first (btc-only wallets live and die on this one). */
+ *  Bitcoin first (btc-only wallets live and die on this one). Its mark is the
+ *  official public-domain Bitcoin logo (bitcoin.org / Wikimedia "Bitcoin.svg"),
+ *  not a hand-drawn approximation. */
 const BITCOIN_SVG =
-  `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><circle cx="32" cy="32" r="32" fill="#f7931a"/><path fill="#fff" d="M46.1 27.9c.6-4.2-2.6-6.5-7-8l1.4-5.7-3.5-.9-1.4 5.6c-.9-.2-1.9-.4-2.8-.6l1.4-5.7-3.5-.9-1.4 5.7c-.7-.2-1.4-.3-2.1-.5l-4.8-1.2-.9 3.7s2.6.6 2.5.6c1.4.4 1.7 1.3 1.6 2l-3.8 15.2c-.2.4-.6 1-1.5.8 0 .1-2.6-.6-2.6-.6l-1.7 4 4.5 1.1c.8.2 1.7.4 2.5.7l-1.4 5.7 3.5.9 1.4-5.7c.9.3 1.9.5 2.8.7l-1.4 5.7 3.5.9 1.4-5.7c5.9 1.1 10.4.7 12.2-4.7 1.5-4.3-.1-6.8-3.2-8.4 2.3-.5 4-2 4.5-5.1zM38.3 43c-1 4.3-8.2 2-10.6 1.4l1.9-7.6c2.3.6 9.8 1.7 8.7 6.2zm1-15.3c-1 3.9-6.9 1.9-8.9 1.4l1.7-6.9c2 .5 8.1 1.4 7.2 5.5z"/></svg>`
+  `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><path fill="#f7931a" d="M63.04 39.741c-4.274 17.143-21.638 27.575-38.783 23.301C7.12 58.768-3.313 41.404.962 24.262 5.234 7.117 22.597-3.317 39.737.957c17.144 4.274 27.576 21.64 23.302 38.784z"/><path fill="#fff" d="M46.11 27.441c.636-4.258-2.606-6.547-7.039-8.074l1.438-5.768-3.512-.875-1.4 5.616c-.922-.23-1.87-.447-2.812-.662l1.41-5.653-3.509-.875-1.439 5.766c-.764-.174-1.514-.346-2.242-.527l.004-.018-4.842-1.209-.934 3.75s2.605.597 2.55.634c1.422.355 1.68 1.296 1.636 2.042l-1.638 6.571c.098.025.225.061.365.117l-.37-.092-2.297 9.205c-.174.432-.615 1.08-1.609.834.035.051-2.552-.637-2.552-.637l-1.743 4.019 4.569 1.139c.85.213 1.683.436 2.503.646l-1.453 5.834 3.507.875 1.439-5.772c.958.26 1.888.5 2.798.726l-1.434 5.745 3.511.875 1.453-5.823c5.987 1.133 10.489.676 12.384-4.739 1.527-4.36-.076-6.875-3.226-8.515 2.294-.529 4.022-2.038 4.483-5.155zM38.087 38.69c-1.085 4.36-8.426 2.003-10.806 1.412l1.928-7.729c2.38.594 10.012 1.77 8.878 6.317zm1.086-11.312c-.99 3.966-7.1 1.951-9.082 1.457l1.748-7.01c1.982.494 8.315 1.416 7.334 5.553z"/></svg>`
 /** Shielded ZEC (zZEC) — synthetic asset, never in the CDN catalog: gold shield + Zcash Z. */
 const ZCASH_SHIELDED_SVG =
   `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><path fill="#f4b728" d="M32 4l24 9v17c0 15.5-10.2 25.7-24 30C18.2 55.7 8 45.5 8 30V13z"/><path fill="#fff" d="M21 20h22v6L31 38h12v6H21v-6l12-12H21z"/><rect x="29" y="14" width="6" height="6" fill="#fff"/><rect x="29" y="44" width="6" height="6" fill="#fff"/></svg>`
