@@ -142,6 +142,10 @@ export function makeBlockbookBackend(cfg: BlockbookConfig): BtcBackend {
       try { return (await bbFetch(cfg, `/api/v2/tx-specific/${txid}`))?.hex } catch { return undefined }
     },
 
+    async txDetail({ txid }) {
+      return bbFetch(cfg, `/api/v2/tx/${encodeURIComponent(txid)}`)
+    },
+
     async transactionHistory({ xpub, scriptType }) {
       const key = utxoDiscoveryKey(xpub, scriptType)
       const transactions: BtcHistoryTx[] = []

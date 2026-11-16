@@ -65,6 +65,18 @@ export const PioneerBackend: BtcBackend = {
     return extractRawTxHex(resp)
   },
 
+  async txDetail({ network, txid }) {
+    const pioneer = await getPioneerClient()
+    const lookup = pioneer.LookupUtxoTx || pioneer.UtxoLookup
+    if (typeof lookup !== 'function') throw new Error('Pioneer client has no UTXO transaction lookup operation')
+    const resp = await lookup.call(pioneer, { networkId: network, txid })
+    assertPioneerSuccess(resp, 'LookupUtxoTx')
+    const outer = resp?.data ?? resp
+    const tx = outer?.data ?? outer
+    if (!Array.isArray(tx?.vin) || !Array.isArray(tx?.vout)) throw new Error(`LookupUtxoTx returned no vin/vout for ${txid}`)
+    return tx
+  },
+
   async addressIndices({ network, xpub, scriptType }) {
     const pioneer = await getPioneerClient()
     const resp = await pioneer.GetPubkeyInfo({ network, xpub: utxoDiscoveryKey(xpub, scriptType) })

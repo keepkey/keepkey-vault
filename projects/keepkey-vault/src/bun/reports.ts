@@ -8,7 +8,7 @@
  *   4. Cached Pubkeys / XPUBs (from cached_pubkeys DB)
  *   5. Token Details (per-chain)
  *   6. BTC Detailed Report (from Pioneer server)
- *   7. Address Flow Analysis (computed from BTC TX data)
+ *   7. Address Flow Analysis (computed from per-tx inputs/outputs, see report-btc-flow.ts)
  */
 
 import type { ReportData, ReportSection, ChainBalance } from '../shared/types'
@@ -18,6 +18,7 @@ import { CHAINS } from '../shared/chains'
 import { utxoDiscoveryKey } from './btc-backend/types'
 import { getBtcBackend } from './btc-backend'
 import { createReportFonts, reportText as sanitize } from './report-fonts'
+import { buildFlowTx, withRunningBalance, flowTotals, describeOwnPath, type BtcFlowTx } from './report-btc-flow'
 
 const BTC_NETWORK_ID = CHAINS.find(c => c.id === 'bitcoin')!.networkId
 
@@ -107,6 +108,12 @@ async function fetchTxHistory(xpub: string, caip: string, scriptType?: string): 
 	}
 
 	return []
+}
+
+async function fetchTxDetail(txid: string): Promise<any> {
+	const backend = getBtcBackend()
+	if (!backend.txDetail) throw new Error(`${backend.kind} does not provide transaction details`)
+	return backend.txDetail({ network: BTC_NETWORK_ID, txid })
 }
 
 // ── Section Builders ─────────────────────────────────────────────────
@@ -269,22 +276,10 @@ interface BtcReportXpub {
 	usedAddresses: Array<{ name: string; path: string; transfers: number }>
 }
 
-interface BtcTx {
-	txid: string
-	direction: string  // 'sent' | 'received'
-	blockHeight: number
-	timestamp: number
-	confirmations: number
-	from: string[]
-	to: string[]
-	value: number      // satoshis
-	fee: number        // satoshis
-	status: string
-}
-
 async function buildBtcSections(
 	btcXpubs: Array<{ xpub: string; scriptType: string; path: number[] }>,
 	onProgress?: (msg: string, pct: number) => void,
+	headline: string[] = [],
 ): Promise<ReportSection[]> {
 	const sections: ReportSection[] = []
 
@@ -300,7 +295,7 @@ async function buildBtcSections(
 			xpubInfos.push({
 				xpub: x.xpub,
 				scriptType: x.scriptType,
-				label: `${x.scriptType}`,
+				label: x.path.length >= 3 ? `${x.scriptType} account ${x.path[2] & 0x7FFFFFFF}` : x.scriptType,
 				balance: safeRoundSats(info.balance),
 				totalReceived: safeRoundSats(info.totalReceived),
 				totalSent: safeRoundSats(info.totalSent),
@@ -326,8 +321,8 @@ async function buildBtcSections(
 		type: 'summary',
 		data: [
 			`Total Balance: ${(totalBalSats / 1e8).toFixed(8)} BTC`,
-			`Total Received: ${(totalRecvSats / 1e8).toFixed(8)} BTC`,
-			`Total Sent: ${(totalSentSats / 1e8).toFixed(8)} BTC`,
+			`Address Activity In (includes your own change): ${(totalRecvSats / 1e8).toFixed(8)} BTC`,
+			`Address Activity Out (includes your own change): ${(totalSentSats / 1e8).toFixed(8)} BTC`,
 			`Total Transactions: ${totalTxCount}`,
 			`XPUBs Queried: ${xpubInfos.length}`,
 		],
@@ -339,10 +334,10 @@ async function buildBtcSections(
 			title: 'XPUB Summaries',
 			type: 'table',
 			data: {
-				headers: ['Script Type', 'XPUB', 'Balance (BTC)', 'Received', 'Sent', 'TXs', 'Addrs'],
-				widths: ['8%', '42%', '12%', '12%', '12%', '7%', '7%'],
+				headers: ['Account', 'XPUB', 'Balance (BTC)', 'Received', 'Sent', 'TXs', 'Addrs'],
+				widths: ['12%', '38%', '12%', '12%', '12%', '7%', '7%'],
 				rows: xpubInfos.map(x => [
-					x.scriptType,
+					x.label,
 					x.xpub,
 					(x.balance / 1e8).toFixed(8),
 					(x.totalReceived / 1e8).toFixed(8),
@@ -354,223 +349,191 @@ async function buildBtcSections(
 		})
 	}
 
-	// Used addresses per xpub
+	// Used addresses per xpub — these are the wallet's own addresses for the flow analysis.
+	const own = new Map<string, string>()
 	for (const x of xpubInfos) {
+		for (const a of x.usedAddresses) if (a.name && a.path) own.set(a.name, a.path)
 		if (x.usedAddresses.length > 0) {
 			sections.push({
 				title: `${x.label} -- Used Addresses (${x.usedAddresses.length})`,
 				type: 'table',
 				data: {
-					headers: ['Address', 'Path', 'Transfers'],
-					widths: ['50%', '30%', '20%'],
-					rows: x.usedAddresses.map(a => [a.name, a.path, a.transfers.toString()]),
+					headers: ['Address', 'Path', 'Role', 'Transfers'],
+					widths: ['42%', '22%', '26%', '10%'],
+					rows: x.usedAddresses.map(a => [a.name, a.path, describeOwnPath(a.path), a.transfers.toString()]),
 				},
 			})
 		}
 	}
 
-	// 2. Fetch transaction history
+	// 2. Transaction ids (from history), then the full inputs/outputs of each.
 	onProgress?.('Fetching BTC transaction history...', 40)
-	const allTxs: BtcTx[] = []
-	const seenTxids = new Set<string>()
-
+	const txids = new Set<string>()
 	for (const x of btcXpubs) {
 		if (!x.xpub) continue
+		if (xpubInfos.find(i => i.xpub === x.xpub)?.txCount === 0) continue
 		try {
 			const txs = await fetchTxHistory(x.xpub, BTC_CAIP, x.scriptType)
-			for (const tx of txs) {
-				if (!seenTxids.has(tx.txid)) {
-					seenTxids.add(tx.txid)
-					allTxs.push({
-						txid: tx.txid,
-						direction: tx.direction || 'unknown',
-						blockHeight: tx.blockHeight || 0,
-						timestamp: tx.timestamp || 0,
-						confirmations: tx.confirmations || 0,
-						from: tx.from || [],
-						to: tx.to || [],
-						value: Math.round(Number(tx.value || 0)),
-						fee: Math.round(Number(tx.fee || 0)),
-						status: tx.status || 'confirmed',
-					})
-				}
-			}
-			console.log(`[Report] TxHistory ${x.scriptType}: ${txs.length} txs (${allTxs.length} unique total)`)
+			for (const tx of txs) if (tx?.txid) txids.add(String(tx.txid))
+			console.log(`[Report] TxHistory ${x.scriptType}: ${txs.length} txs (${txids.size} unique total)`)
 		} catch (e: any) {
 			console.warn(`[Report] TxHistory failed for ${x.scriptType}:`, e.message)
 		}
 	}
 
-	// Sort newest first
-	allTxs.sort((a, b) => b.blockHeight - a.blockHeight)
+	const ids = [...txids]
+	const flows: BtcFlowTx[] = []
+	const missing: string[] = []
+	for (let i = 0; i < ids.length; i += 5) { // ponytail: 5 lookups at a time; raise if large wallets are slow
+		const batch = ids.slice(i, i + 5)
+		const got = await Promise.allSettled(batch.map(fetchTxDetail))
+		got.forEach((g, j) => g.status === 'fulfilled' ? flows.push(buildFlowTx(g.value, own)) : missing.push(batch[j]))
+		onProgress?.(`Loading transaction details ${Math.min(i + 5, ids.length)}/${ids.length}...`, 40 + Math.round(20 * Math.min(i + 5, ids.length) / ids.length))
+	}
+	if (missing.length) console.warn(`[Report] ${missing.length} tx details failed to load`)
 
 	onProgress?.('Building transaction sections...', 60)
-
-	// Transaction History table
-	if (allTxs.length > 0) {
-		const rows = allTxs.map((tx, idx) => {
-			const date = tx.timestamp
-				? new Date(tx.timestamp * 1000).toISOString().replace('T', ' ').substring(0, 19)
-				: 'Pending'
-			return [
-				(idx + 1).toString(),
-				tx.direction.toUpperCase(),
-				tx.txid,
-				tx.blockHeight.toString(),
-				date,
-				(tx.value / 1e8).toFixed(8),
-				(tx.fee / 1e8).toFixed(8),
-			]
-		})
-
-		sections.push({
-			title: `${SECTION_TITLES.TX_HISTORY} (${allTxs.length})`,
-			type: 'table',
-			data: {
-				headers: ['#', 'Dir', 'TXID', 'Block', 'Date', 'Value (BTC)', 'Fee (BTC)'],
-				widths: ['5%', '8%', '17%', '10%', '20%', '20%', '20%'],
-				rows,
-			},
-		})
-
-		// Transaction Statistics
-		const blocks = allTxs.map(t => t.blockHeight).filter(b => b > 0)
-		const totalValueIn = allTxs.filter(t => t.direction === 'received').reduce((s, t) => s + t.value, 0)
-		const totalValueOut = allTxs.filter(t => t.direction === 'sent').reduce((s, t) => s + t.value, 0)
-		const totalFees = allTxs.reduce((s, t) => s + t.fee, 0)
-
-		sections.push({
-			title: 'Transaction Statistics',
-			type: 'summary',
-			data: [
-				`Total Transactions: ${allTxs.length}`,
-				`Received: ${allTxs.filter(t => t.direction === 'received').length} txs (${(totalValueIn / 1e8).toFixed(8)} BTC)`,
-				`Sent: ${allTxs.filter(t => t.direction === 'sent').length} txs (${(totalValueOut / 1e8).toFixed(8)} BTC)`,
-				`Total Fees Paid: ${(totalFees / 1e8).toFixed(8)} BTC`,
-				blocks.length > 0 ? `Block Range: ${Math.min(...blocks)} - ${Math.max(...blocks)}` : '',
-			].filter(Boolean),
-		})
-
-		// Per-transaction details as a single table (capped at 50 rows)
-		const MAX_TX_DETAILS = 50
-		const detailTxs = allTxs.slice(0, MAX_TX_DETAILS)
-		if (detailTxs.length > 0) {
-			sections.push({
-				title: `${SECTION_TITLES.TX_DETAILS} (${Math.min(allTxs.length, MAX_TX_DETAILS)}${allTxs.length > MAX_TX_DETAILS ? ` of ${allTxs.length}` : ''})`,
-				type: 'table',
-				data: {
-					headers: ['TXID', 'Dir', 'Block', 'Date', 'Value (BTC)', 'Fee (BTC)', 'From', 'To'],
-					widths: ['14%', '6%', '8%', '14%', '12%', '10%', '18%', '18%'],
-					rows: detailTxs.map(tx => {
-						const date = tx.timestamp
-							? new Date(tx.timestamp * 1000).toISOString().replace('T', ' ').substring(0, 19)
-							: 'Pending'
-						return [
-							tx.txid,
-							tx.direction.toUpperCase(),
-							tx.blockHeight.toString(),
-							date,
-							(tx.value / 1e8).toFixed(8),
-							(tx.fee / 1e8).toFixed(8),
-							tx.from.slice(0, 3).join(', ') || 'N/A',
-							tx.to.slice(0, 3).join(', ') || 'N/A',
-						]
-					}),
-				},
-			})
-		}
-
-		if (allTxs.length > MAX_TX_DETAILS) {
-			sections.push({ title: 'Note', type: 'text', data: `Showing ${MAX_TX_DETAILS} of ${allTxs.length} transactions.` })
-		}
-	} else {
+	if (ids.length === 0) {
 		sections.push({ title: SECTION_TITLES.TX_HISTORY, type: 'text', data: 'No transactions found' })
+		return sections
 	}
 
-	// 3. Address flow analysis from tx data
+	const sorted = withRunningBalance(flows)
+	const t = flowTotals(sorted)
+	const btc = (sats: number) => (sats / 1e8).toFixed(8)
+	const signed = (sats: number) => `${sats > 0 ? '+' : sats < 0 ? '-' : ''}${btc(Math.abs(sats))}`
+	const date = (ts: number) => ts ? new Date(ts * 1000).toISOString().replace('T', ' ').substring(0, 19) : 'Pending'
+	const count = (dir: string) => sorted.filter(f => f.dir === dir).length
+	const matches = missing.length === 0 && t.computedBalance === totalBalSats
+	const partial = missing.length ? ' (incomplete)' : ''
+	headline.push(
+		`BTC In from others${partial}: ${btc(t.received)} BTC`,
+		`BTC Out to others${partial}: ${btc(t.sent)} BTC`,
+		`BTC Fees Paid${partial}: ${btc(t.fees)} BTC`,
+		`BTC Balance: ${btc(totalBalSats)} BTC`,
+	)
+
+	sections.push({
+		title: 'How to Read the Bitcoin Section',
+		type: 'text',
+		data: 'Amounts are what moved into or out of THIS wallet. One Bitcoin transaction often has several outputs. ' +
+			'When someone pays you, their wallet usually sends its own leftover (change) back to itself in the same transaction. ' +
+			'Those outputs are marked NOT YOURS below and are never counted as yours. When you send, your leftover comes back to one ' +
+			'of your own change addresses (marked YOURS - change). The running balance column shows what the wallet held after each transaction.',
+	})
+
+	sections.push({
+		title: 'BTC Money Flow',
+		type: 'summary',
+		data: [
+			`Received from others: ${btc(t.received)} BTC (${count('received')} transactions)`,
+			`Sent to others (including swaps): ${btc(t.sent)} BTC (${count('sent')} transactions)`,
+			`Network fees you paid: ${btc(t.fees)} BTC`,
+			`Moves between your own addresses: ${t.internal}`,
+			`Balance from history (received - sent - fees): ${btc(t.computedBalance)} BTC`,
+			`Balance reported by the blockchain indexer: ${btc(totalBalSats)} BTC - ${matches ? 'MATCHES' : `DOES NOT MATCH${missing.length ? ` (${missing.length} transactions could not be loaded)` : ''}`}`,
+			`Highest balance ever held: ${btc(t.peak.sats)} BTC${t.peak.timestamp ? ` (${date(t.peak.timestamp)})` : ''}`,
+		],
+	})
+
+	// Column order of TX_HISTORY and TX_DETAILS is read positionally by tax-export.ts — append only.
+	sections.push({
+		title: `${SECTION_TITLES.TX_HISTORY} (${sorted.length})`,
+		type: 'table',
+		data: {
+			headers: ['#', 'Dir', 'TXID', 'Block', 'Date', 'Amount (BTC)', 'Fee (BTC)', 'Balance After', 'What Happened'],
+			widths: ['4%', '7%', '17%', '6%', '12%', '10%', '9%', '10%', '25%'],
+			rows: sorted.map((f, i) => [
+				(i + 1).toString(), f.dir.toUpperCase(), f.txid, f.blockHeight.toString(), date(f.timestamp),
+				btc(f.amount), f.dir === 'received' ? '-' : btc(f.fee), btc(f.balanceAfter), f.label,
+			]),
+		},
+	})
+
+	const list = (a: string[]) => a.length > 3 ? `${a.slice(0, 3).join(', ')} +${a.length - 3} more` : (a.join(', ') || 'N/A')
+	sections.push({
+		title: `${SECTION_TITLES.TX_DETAILS} (${sorted.length})`,
+		type: 'table',
+		data: {
+			headers: ['TXID', 'Dir', 'Block', 'Date', 'Amount (BTC)', 'Fee (BTC)', 'From', 'To', 'What Happened'],
+			widths: ['14%', '6%', '6%', '11%', '9%', '8%', '15%', '15%', '16%'],
+			rows: sorted.map(f => [
+				f.txid, f.dir.toUpperCase(), f.blockHeight.toString(), date(f.timestamp),
+				btc(f.amount), f.dir === 'received' ? '-' : btc(f.fee), list(f.from), list(f.to), f.label,
+			]),
+		},
+	})
+
+	// Every input and output, flagged. Newest 50 — a long history would be hundreds of pages.
+	const MAX_FLOWS = 50
+	const shown = sorted.slice(-MAX_FLOWS).reverse()
+	sections.push({
+		title: `Transaction Flows - Inputs and Outputs (${shown.length}${sorted.length > MAX_FLOWS ? ` newest of ${sorted.length}` : ''})`,
+		type: 'text',
+		data: 'Each transaction below lists every input and output. YOURS = an address of this wallet. NOT YOURS = belongs to someone else and is not counted.',
+	})
+	for (const f of shown) {
+		sections.push({
+			title: `${date(f.timestamp)} | ${f.label} | ${signed(f.net)} BTC | tx ${f.txid.slice(0, 8)}`,
+			type: 'table',
+			data: {
+				headers: ['In/Out', 'Address', 'Amount (BTC)', 'Whose'],
+				widths: ['7%', '43%', '13%', '37%'],
+				rows: f.rows.map(r => [r.side, r.address, r.address === 'OP_RETURN' ? '-' : btc(r.sats), r.whose]),
+			},
+		})
+	}
+
+	if (missing.length) {
+		sections.push({
+			title: `Transactions Not Loaded (${missing.length})`,
+			type: 'table',
+			data: { headers: ['TXID'], widths: ['100%'], rows: missing.map(id => [id]) },
+		})
+	}
+
+	// 3. Address flow analysis
 	onProgress?.('Computing address flow...', 70)
-	sections.push(...buildAddressFlowFromTxs(allTxs))
+	sections.push(...buildAddressFlow(sorted))
 
 	return sections
 }
 
 // ── Address Flow Analysis ────────────────────────────────────────────
 
-function buildAddressFlowFromTxs(txs: BtcTx[]): ReportSection[] {
-	const sections: ReportSection[] = []
-
-	// Collect unique external addresses we sent to / received from
-	const sentToMap = new Map<string, { amount: number; count: number }>()
-	const recvFromMap = new Map<string, { amount: number; count: number }>()
-
-	for (const tx of txs) {
-		if (tx.direction === 'sent') {
-			for (const addr of tx.to) {
-				const e = sentToMap.get(addr) || { amount: 0, count: 0 }
-				e.amount += tx.value
-				e.count += 1
-				sentToMap.set(addr, e)
-			}
-		} else if (tx.direction === 'received') {
-			for (const addr of tx.from) {
-				const e = recvFromMap.get(addr) || { amount: 0, count: 0 }
-				e.amount += tx.value
-				e.count += 1
-				recvFromMap.set(addr, e)
-			}
-		}
+function buildAddressFlow(flows: BtcFlowTx[]): ReportSection[] {
+	const sentTo = new Map<string, { amount: number; count: number }>()
+	const recvFrom = new Map<string, { amount: number; count: number }>()
+	const add = (m: typeof sentTo, k: string, sats: number) => {
+		const e = m.get(k) || { amount: 0, count: 0 }
+		e.amount += sats; e.count++; m.set(k, e)
 	}
+	for (const f of flows) {
+		if (f.dir === 'sent') for (const r of f.rows) if (r.side === 'OUT' && r.whose.startsWith('Paid to')) add(sentTo, r.address, r.sats)
+		if (f.dir === 'received') add(recvFrom, [...new Set(f.from)].join(', ') || '(unknown)', f.amount)
+	}
+	const rank = (m: typeof sentTo) => [...m].sort((a, b) => b[1].amount - a[1].amount)
+	const sum = (m: typeof sentTo) => [...m.values()].reduce((s, e) => s + e.amount, 0)
+	const table = (title: string, m: typeof sentTo): ReportSection => ({
+		title: `${title} (${m.size})`,
+		type: 'table',
+		data: {
+			headers: ['#', 'Address', 'Amount (BTC)', 'TX Count'],
+			widths: ['6%', '54%', '25%', '15%'],
+			rows: rank(m).slice(0, 100).map(([a, e], i) => [(i + 1).toString(), a, (e.amount / 1e8).toFixed(8), e.count.toString()]),
+		},
+	})
 
-	const sentTo = Array.from(sentToMap.entries())
-		.map(([addr, d]) => ({ address: addr, amount: d.amount, count: d.count }))
-		.sort((a, b) => b.amount - a.amount)
-
-	const recvFrom = Array.from(recvFromMap.entries())
-		.map(([addr, d]) => ({ address: addr, amount: d.amount, count: d.count }))
-		.sort((a, b) => b.amount - a.amount)
-
-	const totalSent = sentTo.reduce((s, a) => s + a.amount, 0)
-	const totalRecv = recvFrom.reduce((s, a) => s + a.amount, 0)
-
-	sections.push({
+	const sections: ReportSection[] = [{
 		title: '7. Address Flow Analysis',
 		type: 'summary',
 		data: [
-			`BTC Sent to: ${(totalSent / 1e8).toFixed(8)} BTC (${sentTo.length} unique addresses)`,
-			`BTC Received from: ${(totalRecv / 1e8).toFixed(8)} BTC (${recvFrom.length} unique addresses)`,
+			`BTC Sent to: ${(sum(sentTo) / 1e8).toFixed(8)} BTC (${sentTo.size} unique addresses)`,
+			`BTC Received from: ${(sum(recvFrom) / 1e8).toFixed(8)} BTC (${recvFrom.size} unique senders)`,
 		],
-	})
-
-	if (sentTo.length > 0) {
-		sections.push({
-			title: `Sent To (${sentTo.length})`,
-			type: 'table',
-			data: {
-				headers: ['#', 'Address', 'Amount (BTC)', 'TX Count'],
-				widths: ['6%', '54%', '25%', '15%'],
-				rows: sentTo.slice(0, 100).map((a, i) => [
-					(i + 1).toString(), a.address,
-					(a.amount / 1e8).toFixed(8), a.count.toString(),
-				]),
-			},
-		})
-	}
-
-	if (recvFrom.length > 0) {
-		sections.push({
-			title: `Received From (${recvFrom.length})`,
-			type: 'table',
-			data: {
-				headers: ['#', 'Address', 'Amount (BTC)', 'TX Count'],
-				widths: ['6%', '54%', '25%', '15%'],
-				rows: recvFrom.slice(0, 100).map((a, i) => [
-					(i + 1).toString(), a.address,
-					(a.amount / 1e8).toFixed(8), a.count.toString(),
-				]),
-			},
-		})
-	}
-
+	}]
+	if (sentTo.size) sections.push(table('Sent To', sentTo))
+	if (recvFrom.size) sections.push(table('Received From', recvFrom))
 	return sections
 }
 
@@ -649,8 +612,9 @@ export async function generateReport(opts: GenerateReportOptions): Promise<Repor
 	// 1. Device Information
 	sections.push(buildDeviceFeaturesSection())
 
-	// 2. Portfolio Overview (now includes corrected BTC balance)
-	sections.push(buildPortfolioOverviewSection(balances))
+	// 2. Portfolio Overview (now includes corrected BTC balance; BTC in/out headline added below)
+	const overview = buildPortfolioOverviewSection(balances) as { data: string[] }
+	sections.push(overview as ReportSection)
 
 	// 3. Chain Balances (now includes corrected BTC balance)
 	sections.push(buildChainBalancesSection(balances))
@@ -670,8 +634,10 @@ export async function generateReport(opts: GenerateReportOptions): Promise<Repor
 	console.log(`[reports] BTC section check: btcXpubs=${btcXpubs?.length ?? 0}`)
 	if (btcXpubs && btcXpubs.length > 0) {
 		try {
-			const btcSections = await buildBtcSections(btcXpubs, onProgress)
+			const headline: string[] = []
+			const btcSections = await buildBtcSections(btcXpubs, onProgress, headline)
 			sections.push(...btcSections)
+			overview.data.unshift(...headline) // first row of the page-1 dashboard
 			onProgress?.('BTC report complete', 80)
 		} catch (e: any) {
 			console.warn('[reports] BTC report failed:', e.message)
@@ -983,26 +949,30 @@ export async function reportToPdfBuffer(data: ReportData): Promise<Buffer> {
 
 	// ── Dashboard Summary Stats ──
 	if (overviewSection && Array.isArray(overviewSection.data)) {
-		needSpace(100)
-		y -= 10
-		page.drawRectangle({
-			x: MARGIN_LEFT, y: y - 70,
-			width: contentW, height: 70,
-			color: rgb(0.96, 0.96, 0.96),
-		})
-		// Render overview items in a row
+		// Overview items in rows of 4 (BTC in/out/fees/balance first when present)
 		const items = overviewSection.data.filter((s: string) => typeof s === 'string')
-		const colW = contentW / Math.min(items.length, 4)
-		let statX = MARGIN_LEFT + 15
-		for (let i = 0; i < Math.min(items.length, 4); i++) {
-			const parts = String(items[i]).split(':')
-			const label = sanitize(parts[0]?.trim() || '')
-			const value = sanitize(parts.slice(1).join(':').trim() || '')
-			safeDrawText(label, statX, y - 22, font, 9, MUTED_COLOR)
-			safeDrawText(value, statX, y - 40, bold, 13, { r: 0.15, g: 0.15, b: 0.15 })
-			statX += colW
+		for (let r = 0; r < items.length; r += 4) {
+			const row = items.slice(r, r + 4)
+			needSpace(100)
+			y -= 10
+			page.drawRectangle({
+				x: MARGIN_LEFT, y: y - 70,
+				width: contentW, height: 70,
+				color: rgb(0.96, 0.96, 0.96),
+			})
+			const colW = contentW / 4
+			let statX = MARGIN_LEFT + 15
+			for (const item of row) {
+				const parts = String(item).split(':')
+				const label = sanitize(parts[0]?.trim() || '')
+				const value = sanitize(parts.slice(1).join(':').trim() || '')
+				safeDrawText(label, statX, y - 22, font, 9, MUTED_COLOR)
+				safeDrawText(value, statX, y - 40, bold, 13, { r: 0.15, g: 0.15, b: 0.15 })
+				statX += colW
+			}
+			y -= 80
 		}
-		y -= 90
+		y -= 10
 	}
 
 	// Page 1 footer

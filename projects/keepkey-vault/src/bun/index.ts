@@ -335,6 +335,7 @@ import { getConfiguredReviewerIdentity, signCentralReview } from './clearsign-re
 import type { OwnAddressSeed } from "./db"
 import { rectifyWallet, getLedgerSummary, getLedgerJournals } from "./ledger"
 import { generateReport, reportToPdfBuffer, reportToCsv } from "./reports"
+import bs58 from "bs58"
 import { startAudit, startBtcScan, getAudit, getAuditBtcRaw, getAuditEntry, dismissAudit, markAuditsStale, type AuditDeps } from "./audit-engine"
 import { chainSupportsDeepScan, chainSupportsLevelScan, chainLevelPath, deriveAddressParams, extractAddress, parseNativeScanResult, parseEvmScanResult, supportsDgbTaproot, utxoAccountScriptPaths, explorerAddressUrl, pathToBip32, parseBip32Path } from "./chain-scan"
 import { btcPairingEntries, utxoPairingEntries, evmPairingEntries, type UtxoXpub } from "./pairing-pubkeys"
@@ -9241,21 +9242,21 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					}
 					console.log(`[generateReport] btcXpubs from BtcAccountManager: ${btcXpubs.length}`)
 				}
-				// Fallback: check cached_pubkeys DB for BTC xpubs
-				if (!btcXpubs || btcXpubs.length === 0) {
-					const cachedPks = getCachedPubkeys(deviceId)
-					const btcPks = cachedPks.filter(p => p.chainId === 'bitcoin' && p.xpub)
-					if (btcPks.length > 0) {
-						btcXpubs = btcPks.map(p => ({
-							xpub: p.xpub,
-							scriptType: p.scriptType || 'p2wpkh',
-							path: p.path ? p.path.split('/').filter(Boolean).map(s => parseInt(s.replace("'", ''), 10)) : [],
-						}))
-						console.log(`[generateReport] btcXpubs from cached_pubkeys DB: ${btcXpubs.length}`)
-					} else {
-						console.warn('[generateReport] No BTC xpubs found anywhere — BTC sections will be skipped')
-					}
+				// Add every BTC xpub this device has cached (accounts added in earlier
+				// sessions), so the report covers the whole wallet, not just the
+				// accounts loaded right now.
+				const PURPOSE: Record<string, number> = { p2pkh: 44, 'p2sh-p2wpkh': 49, p2wpkh: 84, p2tr: 86 }
+				// The cache only holds the no-passphrase wallet — never mix it into a passphrase wallet's report.
+				const cachedBtc = engine.isPassphraseWallet ? [] : getCachedPubkeys(deviceId).filter(p => p.chainId === 'bitcoin' && p.xpub && PURPOSE[p.scriptType])
+				btcXpubs = btcXpubs || []
+				for (const p of cachedBtc) {
+					if (btcXpubs.some(x => x.xpub === p.xpub && x.scriptType === p.scriptType)) continue
+					let account = 0
+					try { const b = bs58.decode(p.xpub); account = new DataView(b.buffer, b.byteOffset).getUint32(9) & 0x7FFFFFFF } catch {}
+					btcXpubs.push({ xpub: p.xpub, scriptType: p.scriptType, path: [PURPOSE[p.scriptType] | 0x80000000, 0x80000000, account | 0x80000000] })
 				}
+				console.log(`[generateReport] btcXpubs total (loaded + cached): ${btcXpubs.length}`)
+				if (btcXpubs.length === 0) console.warn('[generateReport] No BTC xpubs found anywhere — BTC sections will be skipped')
 
 				const deviceLabel = engine.getDeviceState().label || 'KeepKey'
 
