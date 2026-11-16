@@ -59,6 +59,8 @@
 	"invalidCosmosLength": "Longitud de dirección Cosmos inválida",
 	"invalidCosmosAddress": "Dirección Cosmos inválida",
 	"invalidXrpAddress": "Dirección XRP inválida — debe comenzar con r",
+	"xrpXAddressNotSupported": "Las direcciones X aún no son compatibles. Usa la dirección clásica que empieza por r e introduce la etiqueta de destino por separado.",
+	"zcashTexNotSupported": "Las direcciones TEX (tex1…) aún no se pueden pagar desde esta pantalla.",
 	"invalidSolanaAddress": "Dirección Solana inválida — debe tener 32-44 caracteres base58",
 	"invalidTronAddress": "Dirección Tron inválida — debe comenzar con T (34 caracteres)",
 	"invalidTonAddress": "Dirección TON inválida",

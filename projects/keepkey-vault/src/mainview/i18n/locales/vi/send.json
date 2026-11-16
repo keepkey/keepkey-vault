@@ -59,6 +59,8 @@
 	"invalidCosmosLength": "Độ dài địa chỉ Cosmos không hợp lệ",
 	"invalidCosmosAddress": "Địa chỉ Cosmos không hợp lệ",
 	"invalidXrpAddress": "Địa chỉ XRP không hợp lệ — phải bắt đầu bằng r",
+	"xrpXAddressNotSupported": "Địa chỉ X chưa được hỗ trợ. Hãy dùng địa chỉ cổ điển bắt đầu bằng r và nhập thẻ đích riêng.",
+	"zcashTexNotSupported": "Chưa thể thanh toán tới địa chỉ TEX (tex1…) từ màn hình này.",
 	"invalidSolanaAddress": "Địa chỉ Solana không hợp lệ — phải có 32-44 ký tự base58",
 	"invalidTronAddress": "Địa chỉ Tron không hợp lệ — phải bắt đầu bằng T (34 ký tự)",
 	"invalidTonAddress": "Địa chỉ TON không hợp lệ",

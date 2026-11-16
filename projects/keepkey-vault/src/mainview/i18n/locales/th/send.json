@@ -59,6 +59,8 @@
 	"invalidCosmosLength": "ความยาวที่อยู่ Cosmos ไม่ถูกต้อง",
 	"invalidCosmosAddress": "ที่อยู่ Cosmos ไม่ถูกต้อง",
 	"invalidXrpAddress": "ที่อยู่ XRP ไม่ถูกต้อง — ต้องเริ่มต้นด้วย r",
+	"xrpXAddressNotSupported": "ยังไม่รองรับที่อยู่แบบ X ใช้ที่อยู่แบบคลาสสิกที่ขึ้นต้นด้วย r และกรอกแท็กปลายทางแยกต่างหาก",
+	"zcashTexNotSupported": "ยังไม่สามารถชำระไปยังที่อยู่ TEX (tex1…) จากหน้าจอนี้ได้",
 	"invalidSolanaAddress": "ที่อยู่ Solana ไม่ถูกต้อง — ต้องมี 32-44 อักขระ base58",
 	"invalidTronAddress": "ที่อยู่ Tron ไม่ถูกต้อง — ต้องเริ่มต้นด้วย T (34 อักขระ)",
 	"invalidTonAddress": "ที่อยู่ TON ไม่ถูกต้อง",
