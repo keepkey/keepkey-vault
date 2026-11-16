@@ -288,7 +288,7 @@ const CONFIGS: ChainConfig[] = [
     defaultPath: [0x8000002C, 0x80000085, 0x80000000, 0, 0], scriptType: 'p2pkh',
     explorerTxUrl: 'https://blockchair.com/zcash/transaction/{{txid}}',
     explorerAddressUrl: 'https://blockchair.com/zcash/address/{{address}}',
-    minFirmware: '7.15.0',
+    minFirmware: '7.17.0',
   },
   {
     id: 'zcash-shielded', chain: Chain.Zcash, coin: 'Zcash', symbol: 'ZEC',
@@ -296,7 +296,7 @@ const CONFIGS: ChainConfig[] = [
     rpcMethod: 'zcashGetOrchardFvk', signMethod: 'zcashSignPczt',
     defaultPath: [0x80000020, 0x80000085, 0x80000000], // m/32'/133'/0' (ZIP-32 Orchard)
     hidden: true, // Shielded pool within Zcash's asset page, not a separate Dashboard card
-    minFirmware: '7.15.0',
+    minFirmware: '7.17.0',
   },
   {
     id: 'digibyte', chain: Chain.Digibyte, coin: 'DigiByte', symbol: 'DGB',
@@ -351,7 +351,7 @@ const CONFIGS: ChainConfig[] = [
     // hiveblocks.com started returning 502 (Nov 2026); hivehub.dev uses the same /@account and /tx/<id> paths.
     explorerAddressUrl: 'https://hivehub.dev/@{{address}}',
     explorerTxUrl: 'https://hivehub.dev/tx/{{txid}}',
-    minFirmware: '7.15.0',  // Hive handler ships in firmware 7.15.0 (alpha), same as Zcash
+    minFirmware: '7.15.0',  // Hive handler ships in firmware 7.15.0 (alpha)
   },
   {
     // Monero (preview). Balances come from the local watch-only sidecar, not Pioneer, so

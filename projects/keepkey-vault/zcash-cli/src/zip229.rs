@@ -11,6 +11,9 @@ use crate::zip244::{self, TransparentInput, TransparentOutput};
 
 pub const NU6_3_BRANCH_ID: u32 = 0x37A5165B;
 pub const NU6_3_ACTIVATION_HEIGHT: u64 = 3_428_143;
+/// ZIP 259: the v6 format is unchanged at NU7, but signatures bind this branch.
+pub const NU7_BRANCH_ID: u32 = 0x77190AD9;
+pub const NU7_ACTIVATION_HEIGHT: u64 = 3_543_405;
 pub const TX_VERSION: u32 = 6 | (1 << 31);
 pub const VERSION_GROUP_ID: u32 = 0xD884B698;
 

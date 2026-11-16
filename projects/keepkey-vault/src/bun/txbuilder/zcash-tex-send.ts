@@ -186,6 +186,7 @@ export async function payTex(wallet: any, index: number, opts?: TexOpts): Promis
 		const signatures = opts?.signWrap ? await opts.signWrap(signFn) : await signFn()
 		const transparentSigs: string[] = (signatures as any)?._transparentSignatures ?? []
 		const { raw_tx, txid } = await sendCommand("finalize_transparent", {
+			request_id: build.request_id,
 			transparent_signatures: transparentSigs,
 			compressed_pubkey: eph.pubkey,
 		})

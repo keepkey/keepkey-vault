@@ -14,6 +14,7 @@ import { join } from 'node:path'
 import pkg from '../package.json'
 import { CAMERA_REASON, cameraUsageDescription, pruneAppNodeModules } from './app-bundle'
 import { electrobunFixProblems } from './electrobun-fixes'
+import { nu7ReleaseAssetProblems } from './nu7-release-assets'
 
 const args = process.argv.slice(2)
 const channel = args.find(a => !a.startsWith('--')) ?? 'stable'
@@ -82,6 +83,10 @@ try {
     const app = join(work, bundleName)
     if (!existsSync(app)) throw new Error(`archive has no ${bundleName}`)
     const resources = join(app, 'Contents', 'Resources')
+    // Authenticate metadata before accepting any post-sign emulator receipt.
+    const outerVerify = signed ? run(['codesign', '--verify', '--deep', '--strict', app]) : null
+    const nu7Problems = nu7ReleaseAssetProblems(join(resources, 'app'), arch, outerVerify?.code === 0)
+    nu7Problems.length === 0 ? ok('Nu7 emulator provenance and paired transaction builder') : nu7Problems.forEach(fail)
 
     const camera = cameraUsageDescription(app)
     camera === CAMERA_REASON ? ok('camera usage description') : fail(`NSCameraUsageDescription is ${JSON.stringify(camera)}`)
@@ -113,7 +118,7 @@ try {
     leftover === 0 ? ok('node_modules already pruned') : fail(`${leftover} prunable node_modules entries reached the archive; postBuild pruning did not run`)
 
     if (signed) {
-      const verify = run(['codesign', '--verify', '--deep', '--strict', app])
+      const verify = outerVerify!
       verify.code === 0 ? ok('codesign --verify --deep --strict') : fail(`codesign verify failed: ${verify.out.trim()}`)
       const entitlements = (path: string) => run(['codesign', '-d', '--entitlements', ':-', path]).out
       for (const bin of ['launcher', 'bun']) {

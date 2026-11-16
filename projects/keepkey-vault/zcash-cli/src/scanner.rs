@@ -49,6 +49,61 @@ pub struct LightwalletClient {
     client: CompactTxStreamerClient<Channel>,
 }
 
+fn transparent_consensus_context(info: &proto::LightdInfo) -> Result<(u32, u64)> {
+    if info.chain_name != "main" {
+        return Err(anyhow::anyhow!(
+            "Transparent signing requires a mainnet lightwalletd"
+        ));
+    }
+    let branch_id = u32::from_str_radix(info.consensus_branch_id.trim_start_matches("0x"), 16)
+        .context("Invalid consensus branch ID")?;
+    let target_height = info
+        .block_height
+        .checked_add(1)
+        .ok_or_else(|| anyhow::anyhow!("Invalid lightwalletd block height"))?;
+    crate::pczt_builder::validate_transparent_branch(branch_id, target_height)?;
+    Ok((branch_id, target_height))
+}
+
+#[cfg(test)]
+mod transparent_consensus_tests {
+    use super::*;
+
+    #[test]
+    fn mainnet_branch_and_next_inclusion_height_must_agree() {
+        let mut info = proto::LightdInfo {
+            chain_name: "main".into(),
+            consensus_branch_id: "77190ad9".into(),
+            block_height: 3_543_405,
+            ..Default::default()
+        };
+        assert_eq!(
+            transparent_consensus_context(&info).unwrap(),
+            (0x77190ad9, 3_543_406)
+        );
+        info.consensus_branch_id = "37a5165b".into();
+        assert!(transparent_consensus_context(&info).is_err());
+        info.block_height = 3_543_403;
+        assert_eq!(
+            transparent_consensus_context(&info).unwrap(),
+            (0x37a5165b, 3_543_404)
+        );
+        info.block_height = 3_543_404; // do not sign just across activation with the old branch
+        assert!(transparent_consensus_context(&info).is_err());
+        info.consensus_branch_id = "77190ad9".into();
+        info.chain_name = "test".into();
+        assert!(transparent_consensus_context(&info).is_err());
+        info.chain_name = "main".into();
+        info.block_height = u64::MAX;
+        assert!(transparent_consensus_context(&info).is_err());
+        info.block_height = 3_543_405;
+        info.consensus_branch_id = "not hex".into();
+        assert!(transparent_consensus_context(&info).is_err());
+        info.consensus_branch_id = "ffffffff".into();
+        assert!(transparent_consensus_context(&info).is_err());
+    }
+}
+
 impl LightwalletClient {
     /// Connect to a lightwalletd gRPC server.
     pub async fn connect(server_url: Option<&str>) -> Result<Self> {
@@ -120,6 +175,18 @@ impl LightwalletClient {
 
         info!("Current consensus branch ID: 0x{:08x}", branch_id);
         Ok(branch_id)
+    }
+
+    /// One snapshot for transparent signing: never combine one node's branch
+    /// with a different node/tip, or sign against an unverified network.
+    pub async fn get_transparent_consensus_context(&mut self) -> Result<(u32, u64)> {
+        let info = self
+            .client
+            .get_lightd_info(proto::Empty {})
+            .await
+            .context("GetLightdInfo failed")?
+            .into_inner();
+        transparent_consensus_context(&info)
     }
 
     /// Get the current chain tip height.

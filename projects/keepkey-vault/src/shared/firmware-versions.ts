@@ -41,13 +41,20 @@ export interface FirmwareVersionInfo {
 export const FIRMWARE_VERSION_MAP: FirmwareVersionInfo[] = [
   {
     version: '7.17.0',
-    headline: 'Monero support and DigiByte Taproot',
+    headline: 'Monero, Zcash Nu7 and DigiByte Taproot',
     features: [
       {
         title: 'Monero Support',
         description: 'Adds Monero (XMR) address generation and wallet monitoring with device-approved view-key access. Enable Monero in Settings to get started.',
         chains: ['monero'],
         color: '#FF6600',
+        icon: 'chain',
+      },
+      {
+        title: 'Zcash Support',
+        description: 'Zcash Nu7 transparent signing on the reviewed 7.17 alpha emulator. Physical-device and private-pool sends are not yet qualified in Vault.',
+        chains: ['zcash'],
+        color: '#ECB244',
         icon: 'chain',
       },
       {
@@ -62,15 +69,8 @@ export const FIRMWARE_VERSION_MAP: FirmwareVersionInfo[] = [
   },
   {
     version: '7.15.0',
-    headline: 'Zcash privacy and EVM transaction insight',
+    headline: 'EVM transaction insight and Hive support',
     features: [
-      {
-        title: 'Zcash Support',
-        description: 'Transparent and shielded Zcash transactions with on-device signing.',
-        chains: ['zcash'],
-        color: '#ECB244',
-        icon: 'chain',
-      },
       {
         // Not cosmetic and not optional: on 7.14.1 and earlier, EIP-1559
         // transactions on any chain with chainId >= 256 hash only the low byte

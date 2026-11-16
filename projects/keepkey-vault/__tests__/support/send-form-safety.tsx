@@ -37,7 +37,7 @@ function deferred() {
 const contracts = new Set<string>()
 const calls: Array<{ method: string; params: any; pending: ReturnType<typeof deferred> }> = []
 const lookups: string[] = []
-mock.module('../../src/mainview/lib/rpc', () => ({ rpcRequest: async (method: string, params: any) => {
+mock.module('../../src/mainview/lib/rpc', () => ({ onRpcMessage: () => () => {}, rpcRequest: async (method: string, params: any) => {
   lookups.push(method)
   if (method === 'checkVaultDestination') return undefined
   if (method === 'matchAddress') return null // every test recipient is new
