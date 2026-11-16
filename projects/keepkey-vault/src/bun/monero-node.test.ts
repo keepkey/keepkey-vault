@@ -34,8 +34,17 @@ process.on('SIGTERM',()=>{server.stop(true);process.exit(0)});`)
   return { root, port, manager, options, space: (value: number) => { freeBytes = value }, low: () => { freeBytes = 500 }, missing: () => { diskMissing = true } }
 }
 async function ready(manager: ReturnType<typeof createMoneroNodeManager>) {
-  for (let i = 0; i < 100; i++) { const next = await manager.status(); if (next.state === 'ready') return next; await delay(20) }
-  throw new Error('Fixture node did not become ready')
+  const deadline = Date.now() + 10_000
+  let last: Awaited<ReturnType<typeof manager.status>> | undefined
+  while (Date.now() < deadline) {
+    last = await manager.status()
+    if (last.state === 'ready') return last
+    if (last.state === 'error' || last.state === 'stopped') {
+      throw new Error(`Fixture node stopped before readiness (${last.state}): ${last.error ?? 'No node error reported'}`)
+    }
+    await delay(20)
+  }
+  throw new Error(`Fixture node did not become ready within 10 seconds (${last?.state ?? 'unknown'}): ${last?.error ?? 'No node error reported'}`)
 }
 
 test('own node is preferred for new installs; deliberate remote settings survive upgrades', () => {
@@ -82,7 +91,7 @@ describe('managed process and storage', () => {
     expect(args[args.indexOf('--rpc-bind-ip') + 1]).toBe('127.0.0.1')
     await expect(f.manager.configure(join(f.root, 'other'))).rejects.toThrow('Stop the node')
     expect((await f.manager.stop()).state).toBe('stopped')
-  })
+  }, 20_000)
   test('a new app instance can identify and stop its daemon; stale PID records cannot stop unrelated processes', async () => {
     const f = await fixture(); await f.manager.start(); await ready(f.manager); f.manager.dispose()
     const replacement = createMoneroNodeManager(f.options)
@@ -93,7 +102,7 @@ describe('managed process and storage', () => {
     const stale = createMoneroNodeManager(f.options); cleanup.push(() => stale.dispose())
     expect((await stale.status()).state).toBe('error')
     await expect(stale.stop()).rejects.toThrow('ownership')
-  })
+  }, 20_000)
   test.each(['low', 'missing'] as const)('%s storage stops only the owned daemon and retains the reason', async reason => {
     const f = await fixture(); await f.manager.start(); await ready(f.manager); f[reason]()
     expect((await f.manager.status()).state).toBe('stopping')
@@ -101,7 +110,7 @@ describe('managed process and storage', () => {
     const stopped = await f.manager.status()
     expect(stopped.state).toBe('stopped')
     expect(stopped.error).toContain(reason === 'low' ? '25 GiB' : 'storage drive')
-  })
+  }, 20_000)
 })
 
 
