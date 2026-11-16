@@ -4,7 +4,7 @@
  * checksum is verified here: EIP-55 (mixed-case EVM, error 'invalidEvmChecksum'), base58check
  * (BTC/LTC/DOGE/DASH/DGB/BCH-legacy/Zcash-t/Tron), XRP's base58check,
  * bech32 / bech32m (BIP-173 / BIP-350 segwit, Cosmos, Zcash shielded) and
- * Bitcoin Cash cashaddr. Solana has no checksum: it must decode to 32 bytes.
+ * Bitcoin Cash cashaddr and TON's CRC16-XMODEM. Solana has no checksum: it must decode to 32 bytes.
  */
 import { base58, base58xrp, bech32, bech32m, createBase58check } from '@scure/base'
 import { sha256 } from '@noble/hashes/sha2'
@@ -252,13 +252,36 @@ function validateTronAddress(addr: string): ValidationResult {
 
 // ── TON ─────────────────────────────────────────────────────────────────
 
+/** CRC16-XMODEM (poly 0x1021, init 0), the checksum of TON user-friendly addresses. */
+function crc16Xmodem(bytes: Uint8Array): number {
+  let crc = 0
+  for (const b of bytes) {
+    crc ^= b << 8
+    for (let i = 0; i < 8; i++) crc = crc & 0x8000 ? ((crc << 1) ^ 0x1021) & 0xffff : (crc << 1) & 0xffff
+  }
+  return crc
+}
+
+/** TON user-friendly address bytes (base64 or base64url, 48 chars), or null when it isn't base64. */
+function tonFriendlyBytes(addr: string): Uint8Array | null {
+  if (!/^[A-Za-z0-9+/_-]{48}$/.test(addr)) return null
+  try {
+    const bin = atob(addr.replace(/-/g, '+').replace(/_/g, '/'))
+    return Uint8Array.from(bin, ch => ch.charCodeAt(0))
+  } catch { return null }
+}
+
 function validateTonAddress(addr: string): ValidationResult {
-  // Raw: 0:hex (66 chars), User-friendly: EQ/UQ + base64 (48 chars), or raw hex
+  // Raw form: workchain 0 + 32-byte account hash in hex. It carries no checksum.
   if (/^0:[0-9a-fA-F]{64}$/.test(addr)) return OK
-  if ((addr.startsWith('EQ') || addr.startsWith('UQ')) && addr.length === 48) return OK
-  // Newer formats
-  if (/^[A-Za-z0-9_-]{46,48}$/.test(addr)) return OK
-  return fail('invalidTonAddress')
+  // User-friendly form: 36 bytes = tag (0x11 bounceable / 0x51 non-bounceable),
+  // workchain (0x00 basechain / 0xff masterchain), 32-byte hash, CRC16-XMODEM of
+  // the first 34 bytes (big-endian). Testnet tags (0x80 set) are not mainnet addresses.
+  const bytes = tonFriendlyBytes(addr)
+  if (!bytes || bytes.length !== 36) return fail('invalidTonAddress')
+  if ((bytes[0] !== 0x11 && bytes[0] !== 0x51) || (bytes[1] !== 0x00 && bytes[1] !== 0xff)) return fail('invalidTonAddress')
+  const crc = crc16Xmodem(bytes.subarray(0, 34))
+  return bytes[34] === crc >> 8 && bytes[35] === (crc & 0xff) ? OK : BAD_CHECKSUM
 }
 
 // ── Zcash shielded ──────────────────────────────────────────────────────
