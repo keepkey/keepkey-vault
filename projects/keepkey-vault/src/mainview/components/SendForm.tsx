@@ -335,7 +335,11 @@ export function SendForm({ chain, address, balance, balanceLoading = false, toke
 	const sameAddress = useCallback((a: string, b: string | null | undefined) =>
 		!!b && (chain.chainFamily === 'evm' ? a.toLowerCase() === b.toLowerCase() : a === b), [chain.chainFamily])
 	const isSelfSend = addressValid && sameAddress(recipient.trim(), address)
-	const [selfSendConfirmed, setSelfSendConfirmed] = useState(false)
+	// Confirmations count only for the exact sender and recipient they were given for, in the
+	// same render (a reset effect left one stale render in which Build still went through).
+	const confirmationKey = `${address ?? ''}\n${recipient}`
+	const [selfSendConfirmedFor, setSelfSendConfirmedFor] = useState<string | null>(null)
+	const selfSendConfirmed = selfSendConfirmedFor === confirmationKey
 	// Read by the recipient-lookup effect without adding to its dependency list.
 	const isOwnSendingAddressRef = useRef((a: string) => sameAddress(a, address))
 	isOwnSendingAddressRef.current = (a: string) => sameAddress(a, address)
@@ -352,10 +356,10 @@ export function SendForm({ chain, address, balance, balanceLoading = false, toke
 		return known ? { kind: 'tokenContract' as const, token: known.symbol } : null
 	}, [addressValid, recipient, chain, isTokenSend, token?.contractAddress, token?.caip])
 	const recipientNeedsAck = recipientRisk?.kind === 'burn' || recipientRisk?.kind === 'tokenContract'
-	const [riskConfirmed, setRiskConfirmed] = useState(false)
+	const [riskConfirmedFor, setRiskConfirmedFor] = useState<string | null>(null)
+	const riskConfirmed = riskConfirmedFor === confirmationKey
 	const [recipientIsContract, setRecipientIsContract] = useState(false)
 	const evmChainId = chain.chainFamily === 'evm' ? chain.id : null
-	useEffect(() => { setSelfSendConfirmed(false); setRiskConfirmed(false) }, [recipient, address])
 	useEffect(() => {
 		setMatchedContact(null)
 		setAddressIsNew(false)
@@ -400,6 +404,8 @@ export function SendForm({ chain, address, balance, balanceLoading = false, toke
 
 	const handleBuild = useCallback(async () => {
 		if (!senderReady) return
+		// Not only the disabled button: Build never runs past an unconfirmed warning.
+		if ((isSelfSend && !selfSendConfirmed) || (recipientNeedsAck && !riskConfirmed)) return
 		if (!recipient || (!amount && !isMax)) return
 		if (isMax && balanceLoading && activeAssetUnverified) return
 		if (!isMax && (invalidAmountInput || canonicalAmount === null || !Number.isFinite(amountNum) || amountNum <= 0)) {
@@ -467,7 +473,7 @@ export function SendForm({ chain, address, balance, balanceLoading = false, toke
 		} finally {
 			if (operationIsCurrent(generation)) setLoading(false)
 		}
-	}, [chain, recipient, amount, canonicalAmount, amountNum, invalidAmountInput, locale, i18n.language, t, memo, feeLevel, feeMode, supportsCustomFee, customGasPrice, customGasLimit, customSatPerVByte, isMax, addressValidation, exceedsBalance, isTokenSend, token, balance?.balance, xpubOverride, scriptTypeOverride, evmAddressIndex, checkingVaultDestination, vaultDestinationError, requestKey, displaySymbol, displayBalance, activeCaip, address, balanceLoading, activeAssetUnverified, senderReady])
+	}, [chain, recipient, amount, canonicalAmount, amountNum, invalidAmountInput, locale, i18n.language, t, memo, feeLevel, feeMode, supportsCustomFee, customGasPrice, customGasLimit, customSatPerVByte, isMax, addressValidation, exceedsBalance, isTokenSend, token, balance?.balance, xpubOverride, scriptTypeOverride, evmAddressIndex, checkingVaultDestination, vaultDestinationError, requestKey, displaySymbol, displayBalance, activeCaip, address, balanceLoading, activeAssetUnverified, senderReady, isSelfSend, selfSendConfirmed, recipientNeedsAck, riskConfirmed])
 
 	const handleSign = useCallback(async () => {
 		if (!senderReady || !buildResult || !currentSigningContext) return
@@ -802,7 +808,7 @@ export function SendForm({ chain, address, balance, balanceLoading = false, toke
 									{t("selfSendBody", { symbol: displaySymbol, defaultValue: "This sends {{symbol}} from this account back to the same address. Nothing arrives anywhere new, and you still pay the network fee." })}
 								</Text>
 								<Flex as="label" align="center" gap="2" mt="2" cursor="pointer">
-									<input type="checkbox" checked={selfSendConfirmed} onChange={e => setSelfSendConfirmed(e.target.checked)} style={{ accentColor: 'var(--gold)' }} />
+									<input type="checkbox" checked={selfSendConfirmed} onChange={e => setSelfSendConfirmedFor(e.target.checked ? confirmationKey : null)} style={{ accentColor: 'var(--gold)' }} />
 									<Text fontSize="11px" color="kk.textPrimary">{t("selfSendConfirm", { defaultValue: "I understand, send to my own address anyway" })}</Text>
 								</Flex>
 							</Box>
@@ -819,7 +825,7 @@ export function SendForm({ chain, address, balance, balanceLoading = false, toke
 									{recipientRisk?.kind === 'burn' ? t("recipientBurnBody") : t("recipientTokenContractBody")}
 								</Text>
 								<Flex as="label" align="center" gap="2" mt="2" cursor="pointer">
-									<input type="checkbox" checked={riskConfirmed} onChange={e => setRiskConfirmed(e.target.checked)} style={{ accentColor: 'var(--rose)' }} />
+									<input type="checkbox" checked={riskConfirmed} onChange={e => setRiskConfirmedFor(e.target.checked ? confirmationKey : null)} style={{ accentColor: 'var(--rose)' }} />
 									<Text fontSize="11px" color="kk.textPrimary">{recipientRisk?.kind === 'burn' ? t("recipientBurnConfirm") : t("recipientTokenContractConfirm")}</Text>
 								</Flex>
 							</Box>
