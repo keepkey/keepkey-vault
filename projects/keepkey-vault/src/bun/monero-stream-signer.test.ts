@@ -1,4 +1,10 @@
+import sweepFixtures from './monero-stream-sweep.fixtures.json'
+import { backendText } from './i18n'
+import { SUPPORTED_LANGUAGES } from '../mainview/i18n/languages'
 import { expect, test } from 'bun:test'
+import { ed25519 } from '@noble/curves/ed25519'
+import { verifyMoneroTransactionKeys } from './monero-transaction-keys'
+import { moneroDestinationAddressKeys } from '../shared/monero-address'
 import { keccak_256 } from '@noble/hashes/sha3'
 import { readFileSync } from 'node:fs'
 import type { MoneroPlan } from '../../monero-cli/src/protocol'
@@ -170,8 +176,8 @@ const nativeDirectory = process.env.MONERO_CORE_VERIFY_DIR
 const verifier = createMoneroCoreVerifier({ directory: nativeDirectory ?? '/private/tmp/no-monero-verifier' })
 test.skipIf(!nativeDirectory)('pinned native Core verifier accepts firmware vectors and rejects a corrupted signature', () => {
   expect(verifier.available()).toBe(true)
-  for (const c of cases) {
-    const prepared = verifier.prepare(c.plan)
+  for (const c of [...cases, ...sweepFixtures.cases]) {
+    const prepared = verifier.prepare(c.plan as MoneroPlan)
     try {
       const blob = unhex(c.transactionHex)
       expect(prepared.verify(blob)).toBe(true)
@@ -179,4 +185,85 @@ test.skipIf(!nativeDirectory)('pinned native Core verifier accepts firmware vect
       expect(prepared.verify(blob)).toBe(false)
     } finally { prepared.dispose() }
   }
+})
+
+
+test('Final releases verified standard and subaddress payment keys and scrubs reply buffers', async () => {
+ for (const c of cases) {
+  const r = replay(c), signed = await signMoneroStream(c.plan, r.exchange)
+  const expected = hex(bytesField(parseFields(unhex(c.responses.at(-1)!.hex)), 2))
+  expect(signed.transactionKeys).toEqual({txKey:expected,additionalTxKeys:[]})
+  expect(r.consumed.every(b => b.every(v => v === 0))).toBe(true)
+ }
+})
+
+test('missing, duplicate, noncanonical or mismatched Final payment keys fail closed', async () => {
+ const L = (1n << 252n) + 27742317777372353535851937790883648493n
+ const scalar = (n: bigint) => Uint8Array.from({length:32}, (_,i) => Number(n >> BigInt(i * 8) & 255n))
+ for (const key of [new Uint8Array(31), scalar(0n), scalar(L), scalar(1n)]) {
+  const r = replay(cases[0], (id, body) => id === 1825 ? concat([lengthField(1, bytesField(parseFields(body), 1)), lengthField(2, key)]) : body)
+  await expect(signMoneroStream(cases[0].plan, r.exchange)).rejects.toThrow()
+ }
+ for (const extra of [new Uint8Array(), lengthField(2, scalar(1n)), lengthField(3, scalar(1n))]) {
+  const r = replay(cases[0], (id, body) => id === 1825 ? extra.length ? concat([body, extra]) : lengthField(1, bytesField(parseFields(body), 1)) : body)
+  await expect(signMoneroStream(cases[0].plan, r.exchange)).rejects.toThrow()
+ }
+})
+
+test('mixed subaddress and dummy outputs bind additional payment keys in output order', () => {
+ const plan = structuredClone(cases[1].plan)
+ for (const o of plan.outputs) o.isChange = false
+ const scalar = (n: number) => new Uint8Array([n, ...Array(31).fill(0)])
+ const key = scalar(7), additional = [scalar(8), scalar(9)]
+ const publicKeys = plan.outputs.map((o,i) => {
+  const keys = moneroDestinationAddressKeys(o.address)!
+  const base = keys.kind === 'subaddress' ? ed25519.ExtendedPoint.fromHex(keys.spend) : ed25519.ExtendedPoint.BASE
+  return base.multiply(BigInt(8+i)).toRawBytes()
+ })
+ const extra = concat([new Uint8Array([1]),ed25519.ExtendedPoint.BASE.multiply(7n).toRawBytes(),new Uint8Array([4,2]),...publicKeys,new Uint8Array([2,9,1]),new Uint8Array(8)])
+ expect(verifyMoneroTransactionKeys(plan, extra, key, additional).additionalTxKeys).toEqual(additional.map(hex))
+ expect(() => verifyMoneroTransactionKeys(plan, extra, key, [...additional].reverse())).toThrow()
+ expect(() => verifyMoneroTransactionKeys(plan, extra, key, [])).toThrow()
+ expect(() => verifyMoneroTransactionKeys(plan, concat([extra,new Uint8Array([0])]), key, additional)).toThrow()
+})
+
+
+test('nonzero unlock time fails locally before Init, in every supported language', async () => {
+ const source = 'Monero unlock time must be zero. Nothing was signed.'
+ for (const language of SUPPORTED_LANGUAGES) {
+  const translated = backendText(language, source)
+  if (language !== 'en') expect(translated).not.toBe(source)
+  for (const unlockTime of ['1', '3000000', '18446744073709551615']) {
+   const plan = {...structuredClone(cases[0].plan), unlockTime}
+   let calls = 0
+   await expect(signMoneroStream(plan, async () => {calls++; throw Error('must not exchange')}, {text:s=>backendText(language,s)})).rejects.toThrow(translated)
+   expect(calls).toBe(0)
+  }
+ }
+})
+
+test('send-max standard/subaddress sweeps in both orders preserve the zero output through assembly', async () => {
+ for (const c of sweepFixtures.cases) {
+  const r = replay(c as typeof cases[0]), signed = await signMoneroStream(c.plan as MoneroPlan, r.exchange)
+  expect(hex(signed.blob)).toBe(c.transactionHex)
+  const data = parseFields(bytesField(parseFields(unhex(c.requests[0].hex)),3))
+  expect(data.has(2)).toBe(false) // no change_dts
+  expect(c.plan.outputs.find(o=>o.amountAtomic==='0')).toBeDefined()
+  expect(signed.transactionKeys.additionalTxKeys).toHaveLength(c.name.startsWith('sweep-1') ? 2 : 0)
+ }
+})
+
+test('full message hash, ecdh or proof corruption aborts before signatures', async () => {
+ for (const mutation of ['message','ecdh','proof']) {
+  const r = replay(cases[0], (id,body) => {
+   const fields = parseFields(body)
+   if (mutation==='message' && id===1821) bytesField(fields,5)[0]^=1
+   if (mutation==='ecdh' && id===1819) bytesField(fields,3)[0]^=1
+   if (mutation==='proof' && id===1819 && fields.has(4)) bytesField(fields,4)[0]^=1
+   return body
+  })
+  await expect(signMoneroStream(cases[0].plan,r.exchange)).rejects.toThrow('message hash')
+  expect(r.ids.at(-1)).toBe(1820)
+  expect(r.ids).not.toContain(1822); expect(r.ids).not.toContain(1824)
+ }
 })

@@ -2369,5 +2369,9 @@
   "m2dd4bc7f": "A transação Monero falhou na verificação independente do Core. Nada foi enviado.",
   "mcd7dd06b": "O KeepKey está gerando a prova da transação Monero…",
   "m54d7603c": "Assinando a transação Monero…",
-  "m58c4188c": "A assinatura Monero exige a capacidade monero-signing no KeepKey."
+  "m58c4188c": "A assinatura Monero exige a capacidade monero-signing no KeepKey.",
+  "mc5261239": "A assinatura Monero exige exatamente duas saídas: um destinatário e troco ou uma saída de valor zero.",
+  "mdf50d016": "O tempo de desbloqueio Monero deve ser zero. Nada foi assinado.",
+  "md377a3ed": "O hash da mensagem Monero montada difere do dispositivo. Nada foi enviado.",
+  "m6647c94f": "A chave da transação Monero não corresponde à transação assinada. Nada foi enviado."
 }

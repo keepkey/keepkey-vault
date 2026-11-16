@@ -90,6 +90,7 @@ export function openKeyImage(key: Uint8Array, iv: Uint8Array, blob: Uint8Array):
 // ── Research signing (65000/65001) ──
 
 export function signRequest(plan: MoneroPlan): Uint8Array {
+  if (plan.unlockTime !== undefined && plan.unlockTime !== '0') throw new MoneroError('Monero unlock time must be zero. Nothing was signed.')
   const source = (input: MoneroPlan['inputs'][number]) => concat([numberField(1, BigInt(input.amountAtomic)), numberField(2, input.realMember),
     numberField(3, input.outputIndex), numberField(4, input.subaddressMajor), numberField(5, input.subaddressMinor),
     lengthField(6, unhex(input.txPublicKey)), lengthField(7, unhex(input.mask)),
@@ -122,8 +123,10 @@ export function reviewPlan(plan: MoneroPlan, intent: {
   owned: Map<string, { amountAtomic: string; keyImage: string }>
 }): MoneroSendReview {
   const fail = (why: string) => { throw new MoneroError(`The prepared Monero transaction does not match your request: ${why}`) }
+  if (plan.unlockTime !== undefined && plan.unlockTime !== '0') fail('unlock time must be zero')
   if (plan.network !== 0) fail('network')
-  const recipients = plan.outputs.filter(output => !output.isChange), change = plan.outputs.filter(output => output.isChange)
+  const recipients = plan.outputs.filter(output => !output.isChange && output.amountAtomic !== '0'), change = plan.outputs.filter(output => output.isChange)
+  if (plan.outputs.length !== 2) fail('outputs')
   if (recipients.length !== 1 || recipients[0].address !== intent.address) fail('recipient')
   if (recipients[0].amountAtomic !== intent.amountAtomic || intent.walletAmountAtomic !== intent.amountAtomic) fail('amount')
   if (change.length > 1 || change.some(output => output.address !== intent.walletAddress || output.changeMajor || output.changeMinor)) fail('change')

@@ -82,6 +82,25 @@ def address(spend,view,sub=False):
         out+=s.rjust(sizes[len(block)],'1')
     return out
 
+def payment_keys(name, data, own):
+    # Public abandon-account0 fixture scalar from monero_core_vectors.h.
+    spend = bytes.fromhex('8f2d521d4334f4d5d174c47aacb346e7633516416fae089d74ecfd0c389a6b08')
+    change_index = next((j for j, d in enumerate(data.outputs)
+                         if data.HasField('change_dts') and d.spend_public_key == own[:32]
+                         and d.view_public_key == own[32:] and d.amount == data.change_dts.amount), 2)
+    transcript = b'KKXMR-init-v1'.ljust(16, b'\0')
+    transcript += struct.pack('<11I', 0x8000002c, 0x80000080, 0x80000000,
+                              0, data.account, data.num_inputs, 16, 16, 4, change_index, 0)
+    transcript += struct.pack('<3Q', data.fee, 0, data.change_dts.amount) + bytes(8)
+    for d in data.outputs:
+        transcript += struct.pack('<Q', d.amount) + d.spend_public_key + d.view_public_key + bytes([d.is_subaddress])
+    transcript += own
+    rng = keccak(b'KKXMR-test-rng-v1' + name.encode().ljust(32, b'\0') + bytes(4))
+    master = keccak(b'KKXMR-K'.ljust(32, b'\0') + struct.pack('<I', 32) + spend + struct.pack('<I', 32) + keccak(transcript) + rng)
+    def key(label, index):
+        return (int.from_bytes(keccak(label.encode().ljust(16, b'\0') + master + struct.pack('<I', index)), 'little') % L).to_bytes(32, 'little')
+    return key('KKXMR-r', 0), [key('KKXMR-ra', j) for j in range(2)]
+
 class Reader:
     def __init__(self,data): self.data=data; self.pos=0
     def take(self,n):
@@ -97,7 +116,7 @@ class Reader:
             shift+=7
     def vector(self): return self.take(self.var())
 
-def main(records,proto):
+def main(records,proto,output=None):
     with tempfile.TemporaryDirectory() as tmp:
         descriptor=Path(tmp)/'schema.pb'
         subprocess.run(['protoc','-I',proto,'--descriptor_set_out='+str(descriptor),str(Path(proto)/'messages-monero.proto')],check=True)
@@ -119,8 +138,10 @@ def main(records,proto):
             rings.append(ring)
         recipients=[dict(amount=r.num(8),viewSecret=r.take(32),spend=r.take(32)) for _ in range(2)]
         r.take(40) # payment-id metadata; not needed for these non-integrated fixtures
-        if not valid or name not in ('1in-2out-standard','2in-2out-subaddress'): continue
-        assert keccak(tx).hex()=={'1in-2out-standard':'111b9c0c892a73bc30edf364c0e5a6d5299adcd5bc93ecb72f0dd1126d1470c0','2in-2out-subaddress':'4aa189518e5073ea5832547cfb435024ae198f8250259863538182e0d6ce259b'}[name]
+        selected = ('sweep-0-0','sweep-0-1','sweep-1-0','sweep-1-1') if output else ('1in-2out-standard','2in-2out-subaddress')
+        if not valid or name not in selected: continue
+        sweep = name.startswith('sweep-')
+        if not sweep: assert keccak(tx).hex()=={'1in-2out-standard':'111b9c0c892a73bc30edf364c0e5a6d5299adcd5bc93ecb72f0dd1126d1470c0','2in-2out-subaddress':'4aa189518e5073ea5832547cfb435024ae198f8250259863538182e0d6ce259b'}[name]
         t=Reader(tx); assert t.var()==2 and t.var()==0 and t.var()==count
         vinis=[]
         for _ in range(count):
@@ -134,7 +155,11 @@ def main(records,proto):
         assert t.var()==1
         proof=t.take(642); clsags=[t.take(576) for _ in range(count)]; pseudos=[t.take(32) for _ in range(count)]; assert t.pos==len(tx)
         change_index=1 if count==1 else 0
-        own=recipients[change_index]; own_spend=unpack(own['spend'])
+        own=recipients[change_index]
+        if sweep:
+            spend = bytes.fromhex('8f2d521d4334f4d5d174c47aacb346e7633516416fae089d74ecfd0c389a6b08')
+            own = dict(spend=pack(mul(BASE,int.from_bytes(spend,'little'))),viewSecret=(int.from_bytes(keccak(spend),'little')%L).to_bytes(32,'little'))
+        own_spend=unpack(own['spend'])
         # Restore plan order from ring global indices (tag 1; or tags 2,3).
         sorted_to_orig=[(int(ring[0]['globalIndex'])-1000000)//100000-1-(count==2) for ring in rings]
         inputs=[None]*count
@@ -157,14 +182,14 @@ def main(records,proto):
             inputs[orig]=dict(amountAtomic=str(amount),realMember=real,outputIndex=tag%3,subaddressMajor=0,subaddressMinor=minor,txPublicKey=txpub.hex(),mask=mask.hex(),additionalTxPublicKeys=[pack(R).hex()] if additional else [],ring=rings[sorted_idx])
         outputs=[]; destinations=[]
         for j,o in enumerate(recipients):
-            sub=count==2 and j!=change_index
+            sub=(name.startswith('sweep-1-') and o['amount'] > 0) if sweep else count==2 and j!=change_index
             view=pack(mul(unpack(o['spend']) if sub else BASE,int.from_bytes(o['viewSecret'],'little')))
-            outputs.append(dict(amountAtomic=str(o['amount']),address=address(o['spend'],view,sub),isChange=j==change_index,changeMajor=0,changeMinor=0))
+            outputs.append(dict(amountAtomic=str(o['amount']),address=address(o['spend'],view,sub),isChange=not sweep and j==change_index,changeMajor=0,changeMinor=0))
             destinations.append(pb.MoneroTxDestination(amount=o['amount'],spend_public_key=o['spend'],view_public_key=view,is_subaddress=sub,is_integrated=False))
         change=destinations[change_index]
         data=pb.MoneroTxData(num_inputs=count,ring_size=16,fee=fee,account=0,unlock_time=0,hard_fork=16,bp_version=4)
         data.outputs.extend(destinations)
-        data.change_dts.CopyFrom(pb.MoneroTxChange(amount=change.amount,spend_public_key=change.spend_public_key,view_public_key=change.view_public_key,major=0,minor=0))
+        if not sweep: data.change_dts.CopyFrom(pb.MoneroTxChange(amount=change.amount,spend_public_key=change.spend_public_key,view_public_key=change.view_public_key,major=0,minor=0))
         requests=[]; responses=[]
         emit=lambda m:m.SerializeToString().hex()
         def pair(id,req,res): requests.append(dict(id=id,hex=emit(req))); responses.append(dict(id=id+1,hex=emit(res)))
@@ -186,10 +211,19 @@ def main(records,proto):
         for k,orig in enumerate(sorted_to_orig):
             a=acks[orig]
             pair(1822,pb.MoneroTxSignInputRequest(src=sources[orig],vini=a.vini,vini_hmac=a.vini_hmac,pseudo_out=a.pseudo_out,pseudo_out_hmac=a.pseudo_out_hmac,orig_idx=orig),pb.MoneroTxSignInputAck(clsag_enc=ChaCha20Poly1305(opening).encrypt(struct.pack('<I',k)+bytes(8),clsags[k],None),pseudo_out=pseudos[k]))
-        pair(1824,pb.MoneroTxFinalRequest(),pb.MoneroTxFinalAck(opening_key=opening))
+        own_keys = own['spend'] + pack(mul(BASE,int.from_bytes(own['viewSecret'],'little')))
+        tx_key, additional = payment_keys(name, data, own_keys)
+        nonchange = next(d for j,d in enumerate(destinations) if j != change_index)
+        public_base = unpack(nonchange.spend_public_key) if not sweep and nonchange.is_subaddress else BASE
+        assert pack(mul(public_base, int.from_bytes(tx_key, 'little'))) == extra[1:33]
+        if extra[33:35] != bytes([4,2]): additional = []
+        for j,key in enumerate(additional):
+            base = unpack(destinations[j].spend_public_key) if destinations[j].is_subaddress else BASE
+            assert pack(mul(base,int.from_bytes(key,'little'))) == extra[35+j*32:67+j*32]
+        pair(1824,pb.MoneroTxFinalRequest(),pb.MoneroTxFinalAck(opening_key=opening,tx_key=tx_key,additional_tx_keys=additional))
         cases.append(dict(name=name,plan=dict(network=0,feeAtomic=str(fee),inputs=inputs,outputs=outputs),requests=requests,responses=responses,transactionHex=tx.hex(),prefixHash=prefix_hash.hex(),transactionKeccak=keccak(tx).hex()))
-    out=Path(__file__).resolve().parents[1]/'src/bun/monero-stream.fixtures.json'
-    out.write_text(json.dumps(dict(source='717-xmr-s2/unittests/firmware/monero_tx.cpp; monero_tx_vectors.h; Core v0.18.5.4',recordsSha256=hashlib.sha256(raw).hexdigest(),envelopes='protoc encoding of public vector pieces; test MACs and re-sealed CLSAGs; not captured device messages',cases=cases),indent=2)+'\n')
+    out=Path(output) if output else Path(__file__).resolve().parents[1]/'src/bun/monero-stream.fixtures.json'
+    out.write_text(json.dumps(dict(source='monero_tx.cpp; monero_tx_vectors.h; Core v0.18.5.4',recordsSha256=hashlib.sha256(raw).hexdigest(),envelopes='protoc encoding of public vector pieces; test MACs and re-sealed CLSAGs; not captured device messages',cases=cases),indent=2)+'\n')
     print(f'Wrote {len(cases)} Core-verified assembly fixtures')
 
 if __name__=='__main__': main(*sys.argv[1:])

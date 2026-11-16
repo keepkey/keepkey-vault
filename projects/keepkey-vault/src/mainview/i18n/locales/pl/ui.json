@@ -177,5 +177,9 @@
   "m2dd4bc7f": "Transakcja Monero nie przeszła niezależnej weryfikacji Core. Niczego nie wysłano.",
   "mcd7dd06b": "KeepKey generuje dowód transakcji Monero…",
   "m54d7603c": "Podpisywanie transakcji Monero…",
-  "m58c4188c": "Podpis Monero wymaga funkcji monero-signing w KeepKey."
+  "m58c4188c": "Podpis Monero wymaga funkcji monero-signing w KeepKey.",
+  "mc5261239": "Podpisywanie Monero wymaga dokładnie dwóch wyjść: odbiorcy i reszty lub wyjścia o zerowej kwocie.",
+  "mdf50d016": "Czas odblokowania Monero musi wynosić zero. Niczego nie podpisano.",
+  "md377a3ed": "Skrót złożonej wiadomości Monero różni się od skrótu urządzenia. Niczego nie wysłano.",
+  "m6647c94f": "Klucz transakcji Monero nie pasuje do podpisanej transakcji. Niczego nie wysłano."
 }

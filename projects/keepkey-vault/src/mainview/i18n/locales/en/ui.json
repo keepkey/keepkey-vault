@@ -2369,5 +2369,9 @@
   "m2dd4bc7f": "The Monero transaction failed independent Core verification. Nothing was sent.",
   "mcd7dd06b": "KeepKey is proving the Monero transaction…",
   "m54d7603c": "Signing Monero transaction…",
-  "m58c4188c": "Monero signing requires the monero-signing capability on KeepKey."
+  "m58c4188c": "Monero signing requires the monero-signing capability on KeepKey.",
+  "mc5261239": "Monero signing requires exactly two outputs: a recipient and change or a zero-amount output.",
+  "mdf50d016": "Monero unlock time must be zero. Nothing was signed.",
+  "md377a3ed": "The assembled Monero message hash differs from the device. Nothing was sent.",
+  "m6647c94f": "The Monero transaction key does not match the signed transaction. Nothing was sent."
 }

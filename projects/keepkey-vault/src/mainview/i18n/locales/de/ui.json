@@ -168,5 +168,9 @@
   "m2dd4bc7f": "Die unabhängige Core-Prüfung der Monero-Transaktion ist fehlgeschlagen. Es wurde nichts gesendet.",
   "mcd7dd06b": "KeepKey erstellt den Beweis für die Monero-Transaktion…",
   "m54d7603c": "Monero-Transaktion wird signiert…",
-  "m58c4188c": "Die Monero-Signierung erfordert die Fähigkeit monero-signing auf KeepKey."
+  "m58c4188c": "Die Monero-Signierung erfordert die Fähigkeit monero-signing auf KeepKey.",
+  "mc5261239": "Die Monero-Signierung erfordert genau zwei Ausgänge: einen Empfänger und Wechselgeld oder einen Ausgang mit Betrag null.",
+  "mdf50d016": "Die Monero-Entsperrzeit muss null sein. Es wurde nichts signiert.",
+  "md377a3ed": "Der Hash der zusammengesetzten Monero-Nachricht weicht vom Gerät ab. Es wurde nichts gesendet.",
+  "m6647c94f": "Der Monero-Transaktionsschlüssel passt nicht zur signierten Transaktion. Es wurde nichts gesendet."
 }

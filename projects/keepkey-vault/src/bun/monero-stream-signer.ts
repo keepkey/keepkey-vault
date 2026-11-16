@@ -1,4 +1,5 @@
-/** Firmware messages-monero.proto, 1800..1825. Only public transaction pieces and session MACs leave the device. */
+/** Firmware messages-monero.proto, 1800..1825. Final releases payment-proof keys; wallet keys stay on device. */
+import { verifyMoneroTransactionKeys, type MoneroTransactionKeys } from './monero-transaction-keys'
 import { chacha20poly1305 } from '@noble/ciphers/chacha'
 import { keccak_256 } from '@noble/hashes/sha3'
 import type { MoneroPlan } from '../../monero-cli/src/protocol'
@@ -14,7 +15,9 @@ const same = (a: Uint8Array, b: Uint8Array) => a.length === b.length && a.every(
 const empty = () => new Uint8Array()
 
 export const STREAM_ERRORS = {
-  outputs: 'Monero signing requires exactly two outputs: one recipient and one change output.',
+  outputs: 'Monero signing requires exactly two outputs: a recipient and change or a zero-amount output.',
+  unlock: 'Monero unlock time must be zero. Nothing was signed.',
+  message: 'The assembled Monero message hash differs from the device. Nothing was sent.',
   ring: 'Monero signing requires a ring size of 16 for every input.',
   plan: 'This Monero plan is outside the supported signing limits. Nothing was signed.',
   response: 'The KeepKey returned invalid streamed Monero signing data. Nothing was sent.',
@@ -27,19 +30,22 @@ export const STREAM_ERRORS = {
 /** Check before Init. Desktop retains its adapter/parser/pinned Core ABI limit of four inputs (firmware supports 64). */
 export function checkStreamSigningBounds(plan: MoneroPlan, text: MoneroText = s => s): void {
   const fail = () => { throw new MoneroError(text(STREAM_ERRORS.plan)) }
-  if (plan.outputs.length !== 2 || plan.outputs.filter(o => o.isChange).length !== 1) throw new MoneroError(text(STREAM_ERRORS.outputs))
+  if (plan.unlockTime !== undefined && plan.unlockTime !== '0') throw new MoneroError(text(STREAM_ERRORS.unlock))
+  if (plan.outputs.length !== 2 || plan.outputs.filter(o => o.isChange).length > 1) throw new MoneroError(text(STREAM_ERRORS.outputs))
   if (plan.inputs.some(i => i.ring.length !== 16)) throw new MoneroError(text(STREAM_ERRORS.ring))
   if (plan.network !== 0 || plan.inputs.length < 1 || plan.inputs.length > 4) fail()
   const u32 = (v: number) => Number.isSafeInteger(v) && v >= 0 && v <= 0xffffffff
   const atomic = (v: string) => /^(0|[1-9][0-9]{0,19})$/.test(v) && BigInt(v) <= MAX_UINT64
   const key = (v: string) => /^[0-9a-f]{64}$/.test(v)
-  const change = plan.outputs.find(o => o.isChange)!
-  if (!u32(change.changeMajor) || change.changeMinor !== 0 || !atomic(plan.feeAtomic)) fail()
+  const change = plan.outputs.find(o => o.isChange)
+  const account = change?.changeMajor ?? plan.inputs[0].subaddressMajor
+  if (!u32(account) || (change && change.changeMinor !== 0) || !atomic(plan.feeAtomic)) fail()
+  if (!change && (plan.outputs.filter(o => o.amountAtomic === '0').length !== 1 || account !== 0)) fail()
   let totalIn = 0n, totalOut = 0n
   const realKeys = new Set<string>()
   for (const i of plan.inputs) {
     if (!u32(i.realMember) || i.realMember >= 16 || !u32(i.outputIndex) || !u32(i.subaddressMajor) || !u32(i.subaddressMinor) ||
-        i.subaddressMajor !== change.changeMajor || !atomic(i.amountAtomic) || !key(i.txPublicKey) || !key(i.mask) ||
+        i.subaddressMajor !== account || !atomic(i.amountAtomic) || !key(i.txPublicKey) || !key(i.mask) ||
         i.additionalTxPublicKeys.length > 16 || i.additionalTxPublicKeys.some(k => !key(k)) ||
         (i.additionalTxPublicKeys.length > 0 && i.outputIndex >= i.additionalTxPublicKeys.length)) fail()
     let previous = -1n
@@ -74,11 +80,12 @@ export function streamSource(input: MoneroPlan['inputs'][number]): Uint8Array {
 
 export function streamInitRequest(plan: MoneroPlan, text?: MoneroText): Uint8Array {
   checkStreamSigningBounds(plan, text)
-  const change = plan.outputs.find(o => o.isChange)!, keys = moneroDestinationAddressKeys(change.address)!
+  const change = plan.outputs.find(o => o.isChange), keys = change ? moneroDestinationAddressKeys(change.address)! : null
+  const account = change?.changeMajor ?? plan.inputs[0].subaddressMajor
   const data = concat([...plan.outputs.map(o => lengthField(1, streamDestination(o))),
-    lengthField(2, concat([numberField(1, BigInt(change.amountAtomic)), lengthField(2, keys.spend), lengthField(3, keys.view),
-      numberField(4, change.changeMajor), numberField(5, 0)])),
-    numberField(3, plan.inputs.length), numberField(4, 16), numberField(5, BigInt(plan.feeAtomic)), numberField(6, change.changeMajor),
+    ...(change && keys ? [lengthField(2, concat([numberField(1, BigInt(change.amountAtomic)), lengthField(2, keys.spend), lengthField(3, keys.view),
+      numberField(4, change.changeMajor), numberField(5, 0)]))] : []),
+    numberField(3, plan.inputs.length), numberField(4, 16), numberField(5, BigInt(plan.feeAtomic)), numberField(6, account),
     numberField(8, 0), numberField(9, 16), numberField(10, 4)])
   return concat([...MONERO_PATH.map(p => numberField(1, p)), numberField(2, plan.network), lengthField(3, data)])
 }
@@ -116,7 +123,7 @@ export function assembleStreamTransaction(inputs: InputAck[], outputs: OutputAck
 
 /** The caller holds one transport lock across the entire flow and handles ButtonRequest/Failure/cancellation. No step is retried. */
 export async function signMoneroStream(plan: MoneroPlan, exchange: (request: number, response: number, payload: Uint8Array, review: boolean) => Promise<Uint8Array>,
-  options: { onProgress?: (phase: MoneroSigningPhase) => void; text?: MoneroText } = {}): Promise<{ blob: Uint8Array; hash: string; prefixHash: string }> {
+  options: { onProgress?: (phase: MoneroSigningPhase) => void; text?: MoneroText } = {}): Promise<{ blob: Uint8Array; hash: string; prefixHash: string; transactionKeys: MoneroTransactionKeys }> {
   const text = options.text ?? (s => s)
   const init = streamInitRequest(plan, text) // refuse unsupported plans before any device I/O
   const bad = (): never => { throw new MoneroError(text(STREAM_ERRORS.response)) }
@@ -170,11 +177,17 @@ export async function signMoneroStream(plan: MoneroPlan, exchange: (request: num
   const f = await request(1820)
   if (f.size !== 5) bad()
   const all = { extra: bytes(f, 1), prefixHash: bytes(f, 2, 32), fee: num(f, 3), rctType: num(f, 4), message: bytes(f, 5, 32) }
-  if (all.extra.length !== 44 || all.extra[0] !== 1 || all.extra[33] !== 2 || all.extra[34] !== 9 || all.extra[35] !== 1 ||
+  if (![33, 44, 99, 110].includes(all.extra.length) || all.extra[0] !== 1 ||
       all.fee !== BigInt(plan.feeAtomic) || all.rctType !== 6n) bad()
   // Check the prefix before requesting signatures, and again on the assembled blob before relay.
   const prefix = concat([varint(2n), varint(0n), varint(BigInt(inputs.length)), ...inputs.map(i => i.vini), varint(2n), ...outputs.map(o => o.txOut), varint(BigInt(all.extra.length)), all.extra])
   if (!same(keccak_256(prefix), all.prefixHash)) throw new MoneroError(text(STREAM_ERRORS.prefix))
+  const base = concat([new Uint8Array([6]), varint(all.fee), ...outputs.map(o => o.ecdh), ...outputs.map(o => o.outPk.subarray(32))])
+  const proof = outputs[1].proof!
+  // Core hashes BP+ keys, omitting the two vector-length bytes (7 rounds for two outputs).
+  if (proof[192] !== 7 || proof[417] !== 7) bad()
+  const message = keccak_256(concat([all.prefixHash, keccak_256(base), keccak_256(concat([proof.subarray(0, 192), proof.subarray(193, 417), proof.subarray(418)]))]))
+  if (!same(message, all.message)) throw new MoneroError(text(STREAM_ERRORS.message))
   progress('signing')
   for (const input of inputs) {
     const f = await request(1822, concat([lengthField(1, streamSource(plan.inputs[input.origIdx])), lengthField(2, input.vini),
@@ -184,9 +197,12 @@ export async function signMoneroStream(plan: MoneroPlan, exchange: (request: num
   }
   const final = await request(1824)
   try {
-    if (final.size !== 1) bad()
+    if (final.size < 2 || final.size > 3 || [...final.keys()].some(n => ![1, 2, 3].includes(n))) bad()
     const key = bytes(final, 1, 32)
+    const additional = (final.get(3) ?? []).map(value => { if (!(value instanceof Uint8Array)) return bad(); return value })
     progress('verifying')
-    return assembleStreamTransaction(inputs, outputs, all, signs, key, text)
+    const assembled = assembleStreamTransaction(inputs, outputs, all, signs, key, text)
+    const transactionKeys = verifyMoneroTransactionKeys(plan, parseSignedTransaction(assembled.blob).extra, bytes(final, 2, 32), additional, text)
+    return { ...assembled, transactionKeys }
   } finally { for (const values of final.values()) for (const value of values) if (value instanceof Uint8Array) value.fill(0) }
 }

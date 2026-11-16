@@ -180,5 +180,9 @@
   "m2dd4bc7f": "Monero işlemi bağımsız Core doğrulamasından geçemedi. Hiçbir şey gönderilmedi.",
   "mcd7dd06b": "KeepKey Monero işleminin kanıtını oluşturuyor…",
   "m54d7603c": "Monero işlemi imzalanıyor…",
-  "m58c4188c": "Monero imzası KeepKey üzerinde monero-signing yeteneği gerektirir."
+  "m58c4188c": "Monero imzası KeepKey üzerinde monero-signing yeteneği gerektirir.",
+  "mc5261239": "Monero imzası tam olarak iki çıktı gerektirir: bir alıcı ve para üstü veya sıfır tutarlı bir çıktı.",
+  "mdf50d016": "Monero kilit açma süresi sıfır olmalıdır. Hiçbir şey imzalanmadı.",
+  "md377a3ed": "Oluşturulan Monero mesajının özeti cihazdakiyle farklı. Hiçbir şey gönderilmedi.",
+  "m6647c94f": "Monero işlem anahtarı imzalanan işlemle eşleşmiyor. Hiçbir şey gönderilmedi."
 }

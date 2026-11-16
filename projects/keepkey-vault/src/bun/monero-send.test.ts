@@ -16,6 +16,7 @@ import { createMoneroVault, type MoneroWatchSidecar } from './monero-vault'
 import { MONERO_STANDARD_WALLET_REQUIRED } from '../shared/monero-wallet-policy'
 import type { MoneroCoreVerifier } from './monero-device-signing'
 import streamFixtures from './monero-stream.fixtures.json'
+import sweepFixtures from './monero-stream-sweep.fixtures.json'
 import { createFilePendingStore, type MoneroPendingStore } from './monero-pending'
 import { formatXmrAtomic, moneroAddressKind, parseXmrAmount } from '../shared/monero-address'
 
@@ -143,7 +144,8 @@ describe('sidecar protocol validation', () => {
     expect(variant(v => { v.inputs[0].ring[3].global_index = v.inputs[0].ring[2].global_index })).toThrow('increase')
     expect(variant(v => { v.inputs = Array(5).fill(v.inputs[0]) })).toThrow()
     expect(variant(v => v.outputs.pop())).toThrow()
-    expect(variant(v => { v.outputs[0].amount = '0' })).toThrow()
+    const zero = structuredClone(good); zero.outputs[1].amount = '0'; zero.outputs[1].is_change = false
+    expect(validatePlan(zero).outputs[1].amountAtomic).toBe('0')
     expect(variant(v => { v.outputs[0].address = v.outputs[0].address + 'xxxxxxxxxxx' })).toThrow()
     expect(variant(v => { v.network = '1' })).toThrow()
     expect(variant(v => { v.spendkey = 'never' })).toThrow()
@@ -599,9 +601,9 @@ describe('C3: send edge cases', () => {
     expect(b.calls.transfers).toHaveLength(0)
   })
 
-  test('exactly the balance minus the fee (zero change) is explained, never signed; balance minus less than the fee is short', async () => {
+  test('a legacy wallet builder refusal of zero change is surfaced; an insufficient fee reserve is short', async () => {
     const b = await ready()
-    await expect(b.api.prepareSend({ address: RECIPIENT, amountAtomic: (UNLOCKED - FEE).toString() })).rejects.toThrow('leaves no change output')
+    await expect(b.api.prepareSend({ address: RECIPIENT, amountAtomic: (UNLOCKED - FEE).toString() })).rejects.toThrow('The watch wallet cannot build this transaction')
     await expect(b.api.prepareSend({ address: RECIPIENT, amountAtomic: (UNLOCKED - 1n).toString() })).rejects.toThrow('Not enough unlocked XMR for this amount plus the 0.000020000000 XMR network fee')
     expect(signs(b)).toBe(0)
   })
@@ -857,6 +859,36 @@ describe('C3: a pending broadcast is settled by asking the node, never left bloc
     expect((await b.api.getStatus()).unrelayedTxid).toBeUndefined()
   })
 
+  test('lost acceptance on node A survives node B retry refusal, restart and guarded abandonment', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'kk-monero-retry-'))
+    const store = createFilePendingStore(dir)
+    const first = await ready({ pendingStore: store })
+    first.config.daemonUrl = 'https://node-a.example:18081'
+    // Changing the node requires reconnecting and syncing again.
+    await first.api.connect(); await first.api.syncKeyImages()
+    first.setRelayError(new Error('ETIMEDOUT'))
+    const review = await first.api.prepareSend({address:RECIPIENT,amountAtomic:'2000000000000'})
+    await expect(first.api.send({prepareId:review.prepareId})).rejects.toThrow('broadcast result is unknown')
+    const original = store.load()[0]
+    const second = bridge({ pendingStore: store })
+    second.config.daemonUrl = 'https://node-b.example:18081'
+    await second.api.connect()
+    second.setRelayError(new Error('The daemon rejected the transaction: fee too low'))
+    await expect(second.api.retryRelay()).rejects.toThrow('fee too low')
+    expect(second.api.pendingCount()).toBe(1)
+    expect(store.load()).toEqual([original])
+    expect(second.calls.relays).toEqual([{txHex:original.txHex}])
+    expect((await second.api.getStatus()).sendBlocked).toBe('unrelayed')
+    const restarted = bridge({pendingStore:createFilePendingStore(dir)})
+    await restarted.api.connect()
+    expect(restarted.api.pendingCount()).toBe(1)
+    await restarted.api.discardPending({confirm:true})
+    expect(store.load()).toEqual([])
+    expect(store.loadGuards!()[0]).toMatchObject({txid:original.txid,keyImages:[keyImage]})
+    const abandoned = bridge({pendingStore:createFilePendingStore(dir)})
+    expect((await abandoned.api.connect()).discardedTxid).toBe(original.txid)
+  })
+
   test('a retry that gets "Not relayed" (the node already has it) looks it up and settles as sent', async () => {
     const { b, sending } = await pendingSend(new Error('ETIMEDOUT'))
     await expect(sending).rejects.toThrow('broadcast result is unknown')
@@ -1013,15 +1045,15 @@ test('saved image proofs recheck known outputs after reconnect without hardware;
 
 
 // The stream envelopes below are reconstructed from unchanged firmware Core vectors.
-function streamBridge(verify = true) {
+function streamBridge(verify = true, pendingStore?: MoneroPendingStore, fixture = streamFixtures.cases[0]) {
  let verified = 0, disposed = 0
  const coreVerifier: MoneroCoreVerifier = { available: () => true, prepare: actual => {
-  expect(actual).toEqual(streamFixtures.cases[0].plan as MoneroPlan)
-  return { verify: blob => { verified++; expect(hex(blob)).toBe(streamFixtures.cases[0].transactionHex); return verify }, dispose: () => { disposed++ } }
+  expect(actual).toEqual(fixture.plan as MoneroPlan)
+  return { verify: blob => { verified++; expect(hex(blob)).toBe(fixture.transactionHex); return verify }, dispose: () => { disposed++ } }
  }}
- const b = bridge({ coreVerifier }), c = structuredClone(streamFixtures.cases[0]), p = c.plan
+ const b = bridge({ coreVerifier, pendingStore }), c = structuredClone(fixture), p = c.plan
  b.engine.isEmulator = false; b.state.activeTransport = 'hid'; b.state.capabilities = [31]
- b.delegate.streamFixture = c; b.delegate.address = p.outputs.find(o => o.isChange)!.address
+ b.delegate.streamFixture = c; b.delegate.address = streamFixtures.cases[0].plan.outputs.find(o => o.isChange)!.address
  b.delegate.keyImageOverride = parseSignedTransaction(unhex(c.transactionHex)).inputs[0].keyImage
  b.setOutputs(() => p.inputs.map((i,index) => ({transferIndex:index,amountAtomic:i.amountAtomic,globalIndex:i.ring[i.realMember].globalIndex,outKey:i.ring[i.realMember].publicKey,txPublicKey:i.txPublicKey,additionalTxPublicKeys:i.additionalTxPublicKeys,outputIndex:i.outputIndex,subaddressMajor:i.subaddressMajor,subaddressMinor:i.subaddressMinor})))
  b.setDraft(() => ({ feeAtomic:p.feeAtomic, amountAtomic:p.outputs.find(o => !o.isChange)!.amountAtomic, plan:structuredClone(p) as MoneroPlan }))
@@ -1129,4 +1161,89 @@ test('prepare cryptographically selects both output orders and review order surv
  // Core preparation asserts the stored plan, and verification checks the assembled bytes.
  expect(review.outputs.map(o => o.address)).toEqual(b.p.outputs.map(o => o.address))
  expect(b.counts()).toEqual({verified:1,disposed:1})
+})
+
+
+test('payment keys survive pending retry, successful relay and restart in owner-only storage', async () => {
+ const dir = mkdtempSync(join(tmpdir(), 'kk-monero-payment-keys-'))
+ const store = createFilePendingStore(dir), b = streamBridge(true, store)
+ const review = await prepareStream(b)
+ b.setRelayError(new Error('ETIMEDOUT'))
+ await expect(b.api.send({prepareId:review.prepareId})).rejects.toThrow('broadcast result is unknown')
+ const record = store.load()[0], expected = {txKey:hex(bytesField(parseFields(unhex(b.c.responses.at(-1)!.hex)),2)),additionalTxKeys:[]}
+ expect(record.transactionKeys).toEqual(expected)
+ expect(b.api.getTransactionKey(record.txid)).toEqual(expected)
+ expect(statSync(join(dir,'monero-pending-broadcast.json')).mode & 0o777).toBe(0o600)
+ b.setRelayError(null)
+ await b.api.retryRelay()
+ expect(b.api.pendingCount()).toBe(0)
+ expect(store.loadSent!()[0].transactionKeys).toEqual(expected)
+ expect(statSync(join(dir,'monero-sent-transactions.json')).mode & 0o777).toBe(0o600)
+ const next = streamBridge(true,createFilePendingStore(dir))
+ await next.api.connect()
+ expect(next.api.getTransactionKey(record.txid)).toEqual(expected)
+ expect(next.api.getTransactionKey('00'.repeat(32))).toBeNull()
+ next.state.deviceId = 'another-device'
+ await next.api.connect()
+ expect(next.api.getTransactionKey(record.txid)).toBeNull()
+})
+
+
+test('Desktop Max reviews and signs a no-change plan without altering its zero output', async () => {
+ for (const fixture of sweepFixtures.cases) {
+  const dir = mkdtempSync(join(tmpdir(),'kk-monero-sweep-keys-')), store = createFilePendingStore(dir)
+  const b = streamBridge(true, store, fixture)
+  b.wallet.balanceAtomic = b.wallet.unlockedBalanceAtomic = b.p.inputs[0].amountAtomic
+  await b.api.connect(); await b.api.syncKeyImages()
+  const recipient = b.p.outputs.find(o=>o.amountAtomic!=='0')!
+  const sweep = structuredClone(b.p) as MoneroPlan
+  const probe = structuredClone(streamFixtures.cases[0].plan) as MoneroPlan
+  b.setDraft(input => {
+   const plan = input.amountAtomic===recipient.amountAtomic ? structuredClone(sweep) : structuredClone(probe)
+   return {feeAtomic:plan.feeAtomic,amountAtomic:input.amountAtomic,plan}
+  })
+  let review
+  for (let n=0;n<128;n++) {
+   review = await b.api.prepareSend({address:recipient.address,max:true})
+   if (review.outputs[0].address===sweep.outputs[0].address) break
+  }
+  expect(review!.amountAtomic).toBe(recipient.amountAtomic)
+  expect(review!.changeAtomic).toBe('0')
+  expect(review!.outputs.map(o=>o.amountAtomic)).toEqual(sweep.outputs.map(o=>o.amountAtomic))
+  await b.api.send({prepareId:review!.prepareId})
+  expect(b.calls.relays[0].txHex).toBe(fixture.transactionHex)
+  const stored = createFilePendingStore(dir).loadSent!()[0]
+  const expectedKeys = parseFields(unhex(fixture.responses.at(-1)!.hex))
+  expect(stored.transactionKeys).toEqual({txKey:hex(bytesField(expectedKeys,2)),additionalTxKeys:(expectedKeys.get(3)??[]).map(k=>hex(k as Uint8Array))})
+  expect(b.api.getTransactionKey(stored.txid)).toEqual(stored.transactionKeys)
+ }
+})
+
+test('review permits only one paid recipient and one zero dummy without change', () => {
+ const plan = structuredClone(sweepFixtures.cases[0].plan) as MoneroPlan
+ const recipient = plan.outputs.find(o=>o.amountAtomic!=='0')!
+ const owned = new Map(plan.inputs.map(i=>[i.ring[i.realMember].publicKey,{amountAtomic:i.amountAtomic,keyImage:'00'.repeat(32)}]))
+ const requested = {address:recipient.address,amountAtomic:recipient.amountAtomic,walletAddress:WALLET,walletFeeAtomic:plan.feeAtomic,walletAmountAtomic:recipient.amountAtomic,owned}
+ expect(reviewPlan(plan,requested).changeAtomic).toBe('0')
+ const dummy = plan.outputs.find(o=>o.amountAtomic==='0')!
+ dummy.amountAtomic='1'
+ expect(()=>reviewPlan(plan,requested)).toThrow('recipient')
+})
+
+test('adapter unlock time reaches localized preflight without being silently dropped', () => {
+ const raw = structuredClone(fixtures.cases.base.adapterPlan)
+ expect(validatePlan({...raw,unlock_time:'3000000'}).unlockTime).toBe('3000000')
+ expect(validatePlan({...raw,unlock_time:'0'}).unlockTime).toBe('0')
+})
+
+
+test('a payment-proof archive failure keeps the recoverable pending record', async () => {
+ const dir = mkdtempSync(join(tmpdir(), 'kk-monero-proof-save-'))
+ const store = createFilePendingStore(dir)
+ const b = streamBridge(true, {...store,saveSent(){throw Error('disk full')}})
+ const review = await prepareStream(b)
+ await expect(b.api.send({prepareId:review.prepareId})).rejects.toThrow('transaction remains pending')
+ expect(b.calls.relays).toHaveLength(1)
+ expect(b.api.pendingCount()).toBe(1)
+ expect(store.load()[0].transactionKeys).toBeDefined()
 })

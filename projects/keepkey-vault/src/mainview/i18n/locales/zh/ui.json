@@ -181,5 +181,9 @@
   "m2dd4bc7f": "Monero 交易未通过独立的 Core 验证。未发送任何内容。",
   "mcd7dd06b": "KeepKey 正在生成 Monero 交易证明…",
   "m54d7603c": "正在签署 Monero 交易…",
-  "m58c4188c": "Monero 签名需要 KeepKey 具备 monero-signing 功能。"
+  "m58c4188c": "Monero 签名需要 KeepKey 具备 monero-signing 功能。",
+  "mc5261239": "Monero 签名要求恰好两个输出：一个收款人和找零或一个零金额输出。",
+  "mdf50d016": "Monero 解锁时间必须为零。未签署任何内容。",
+  "md377a3ed": "组装的 Monero 消息哈希与设备不一致。未发送任何内容。",
+  "m6647c94f": "Monero 交易密钥与已签名的交易不匹配。未发送任何内容。"
 }

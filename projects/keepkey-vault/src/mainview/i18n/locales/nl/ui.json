@@ -173,5 +173,9 @@
   "m2dd4bc7f": "De Monero-transactie heeft de onafhankelijke Core-verificatie niet doorstaan. Er is niets verzonden.",
   "mcd7dd06b": "KeepKey genereert het bewijs voor de Monero-transactie…",
   "m54d7603c": "Monero-transactie ondertekenen…",
-  "m58c4188c": "Monero-ondertekening vereist de mogelijkheid monero-signing op KeepKey."
+  "m58c4188c": "Monero-ondertekening vereist de mogelijkheid monero-signing op KeepKey.",
+  "mc5261239": "Monero-ondertekening vereist precies twee outputs: een ontvanger en wisselgeld of een output met bedrag nul.",
+  "mdf50d016": "De ontgrendeltijd van Monero moet nul zijn. Er is niets ondertekend.",
+  "md377a3ed": "De hash van het samengestelde Monero-bericht wijkt af van het apparaat. Er is niets verzonden.",
+  "m6647c94f": "De Monero-transactiesleutel komt niet overeen met de ondertekende transactie. Er is niets verzonden."
 }

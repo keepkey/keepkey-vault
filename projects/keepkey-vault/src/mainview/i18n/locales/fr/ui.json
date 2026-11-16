@@ -172,5 +172,9 @@
   "m2dd4bc7f": "La transaction Monero a échoué à la vérification indépendante de Core. Rien n’a été envoyé.",
   "mcd7dd06b": "KeepKey génère la preuve de la transaction Monero…",
   "m54d7603c": "Signature de la transaction Monero…",
-  "m58c4188c": "La signature Monero exige la capacité monero-signing sur KeepKey."
+  "m58c4188c": "La signature Monero exige la capacité monero-signing sur KeepKey.",
+  "mc5261239": "La signature Monero exige exactement deux sorties : un destinataire et la monnaie ou une sortie de montant nul.",
+  "mdf50d016": "Le délai de déverrouillage Monero doit être nul. Rien n’a été signé.",
+  "md377a3ed": "Le hachage du message Monero assemblé diffère de celui de l’appareil. Rien n’a été envoyé.",
+  "m6647c94f": "La clé de transaction Monero ne correspond pas à la transaction signée. Rien n’a été envoyé."
 }

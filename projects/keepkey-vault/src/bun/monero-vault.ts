@@ -41,7 +41,6 @@ const BLOCKER_MESSAGES: Record<MoneroSendBlocker, string> = {
 }
 export const KEY_IMAGES_STALE = 'New XMR arrived since the last key-image sync, so the wallet cannot yet tell which outputs are spent. Sync key images on KeepKey again before sending'
 export const SELF_SEND = "This is this wallet's own main address, which also receives the change, so it cannot be the recipient too. To move XMR within this wallet, send it to one of its subaddresses"
-export const ZERO_CHANGE = "This amount is your whole spendable balance minus the fee, which leaves no change output, and KeepKey's Monero preview cannot sign a transaction without one. Use Max instead: it keeps 0.000000000001 XMR as change"
 const NOT_ENOUGH = 'Not enough unlocked XMR for this amount and fee'
 export const SUPERSEDED = 'The inputs of the pending transaction were spent by a different transaction, so it can never be sent. It was not sent, and nothing more will be sent from it'
 
@@ -256,6 +255,7 @@ export function createMoneroVault({ engine, confirm, getConfig, sidecar = manage
   // Signed txs whose broadcast outcome is unknown, per wallet, persisted. Kept across reconnects and
   // restarts so a retry re-sends these exact bytes instead of building a second, different payment.
   const pending = new Map<string, MoneroPendingBroadcast>()
+  const sent = new Map<string, MoneroPendingBroadcast>()
   const persistPending = () => { assertMoneroStandardWallet(engine); pendingStore.save([...pending.values()]) }
   /** The node's answer for each wallet's pending tx (this run only). */
   const checks = new Map<string, PendingCheck>()
@@ -265,6 +265,7 @@ export function createMoneroVault({ engine, confirm, getConfig, sidecar = manage
   const loadPersistence = () => {
     assertMoneroStandardWallet(engine)
     if (persistenceLoaded) return
+    for (const record of pendingStore.loadSent?.() ?? []) sent.set(`${record.wallet}:${record.txid}`, record)
     persistenceLoaded = true
     try { for (const record of pendingStore.load()) pending.set(record.wallet, record) }
     catch { console.warn('[monero] Could not read pending broadcasts') }
@@ -412,6 +413,16 @@ export function createMoneroVault({ engine, confirm, getConfig, sidecar = manage
   }
   const settlePending = (wallet: string) => {
     assertMoneroStandardWallet(engine)
+    const record = pending.get(wallet)
+    if (record?.transactionKeys) {
+      const id = `${wallet}:${record.txid}`, previous = sent.get(id)
+      sent.set(id, record)
+      try { pendingStore.saveSent?.([...sent.values()]) }
+      catch {
+        if (previous) sent.set(id, previous); else sent.delete(id)
+        throw new MoneroError('The Monero payment-proof record could not be saved; the transaction remains pending')
+      }
+    }
     pending.delete(wallet); checks.delete(wallet)
     try { persistPending() } catch { console.warn('[monero] Could not clear a pending broadcast record') }
   }
@@ -435,7 +446,7 @@ export function createMoneroVault({ engine, confirm, getConfig, sidecar = manage
     return 'unknown'
   }
   const unknownOutcome = (record: MoneroPendingBroadcast) => new MoneroError(`The broadcast result is unknown for transaction ${record.txid}: the node does not have it yet. Check it on a block explorer; Retry broadcast resends this same transaction`)
-  /** Broadcast the pending bytes once. Only an explicit rejection means nothing was sent; any other failure,
+  /** Broadcast the pending bytes once. Only a first-attempt explicit rejection means nothing was sent; any other failure,
    *  including the "Not relayed" a node answers for a tx it already has, is settled by looking the txid up. */
   const relayPending = async (wallet: string, retry: boolean) => {
     assertMoneroStandardWallet(engine)
@@ -453,8 +464,11 @@ export function createMoneroVault({ engine, confirm, getConfig, sidecar = manage
       const message = error instanceof Error ? error.message : ''
       // "double spend": these inputs are spent, by this tx (then it was sent) or by another one; ask the node which.
       if (message === 'The daemon rejected the transaction: double spend') return outcome()
-      // Any other explicit rejection flag: the node refused these bytes and sent nothing.
-      if (message.startsWith('The daemon rejected the transaction')) { settlePending(wallet); throw error }
+      // A retry refusal says nothing about an earlier attempt on another node.
+      if (message.startsWith('The daemon rejected the transaction')) {
+        if (!retry) settlePending(wallet)
+        throw error
+      }
       return outcome()
     }
     assertMoneroStandardWallet(engine)
@@ -680,7 +694,7 @@ export function createMoneroVault({ engine, confirm, getConfig, sidecar = manage
       return getStatus()
     },
     /** Build with the watch wallet, decode with the adapter, and refuse anything but the user's payment plus own change.
-     *  `max` sends the whole unlocked balance minus the fee and one atomic unit, which stays as the change output. */
+     *  Capability firmware supports zero-change Max; the research signer retains one atomic unit. */
     async prepareSend(params: { address?: unknown; amountAtomic?: unknown; max?: unknown } = {}): Promise<MoneroSendReview & { prepareId: string; max: boolean }> {
       assertMoneroStandardWallet(engine)
       const { address, amountAtomic, max = false } = params ?? {}
@@ -731,13 +745,14 @@ export function createMoneroVault({ engine, confirm, getConfig, sidecar = manage
           const fee = await wholeBalanceFee()
           // More inputs than the probe used cost more: widen the reserve, then tighten to the fee actually charged.
           let found: { amount: bigint; draft: MoneroTransferDraft } | null = null
-          for (const reserve of [fee + 1n, fee * 2n + 1n, fee * 4n + 1n]) {
+          const keepChange = current.streamed ? 0n : 1n
+          for (const reserve of [fee + keepChange, fee * 2n + keepChange, fee * 4n + keepChange]) {
             if (unlocked <= reserve) break
             try { found = { amount: unlocked - reserve, draft: await build(unlocked - reserve) }; break }
             catch (error) { if (!notEnough(error)) throw error }
           }
           if (!found) throw new MoneroError('KeepKey could not build a send of the whole balance; enter a slightly smaller amount')
-          const exact = unlocked - BigInt(found.draft.feeAtomic) - 1n
+          const exact = unlocked - BigInt(found.draft.feeAtomic) - keepChange
           if (exact > found.amount) { try { found = { amount: exact, draft: await build(exact) } } catch (error) { if (!notEnough(error)) throw error } }
           ;({ amount, draft } = found)
         } else {
@@ -745,10 +760,9 @@ export function createMoneroVault({ engine, confirm, getConfig, sidecar = manage
           if (amount > unlocked) {
             throw new MoneroError(`This is more than your unlocked balance (${formatXmrAtomic(unlocked)})${locked > 0n ? `; ${formatXmrAtomic(locked)} is still locked until it has 10 confirmations` : ''}`)
           }
-          // Within a fee of the whole balance the wallet cannot leave change: explain it instead of a wallet error.
+          // Check the fee budget for amounts near the whole balance.
           if (amount > unlocked - MAX_FEE_ATOMIC) {
             const fee = await wholeBalanceFee()
-            if (amount + fee === unlocked) throw new MoneroError(ZERO_CHANGE)
             if (amount + fee > unlocked) throw new MoneroError(`Not enough unlocked XMR for this amount plus the ${formatXmrAtomic(fee)} network fee. Use Max to send the most you can`)
           }
           draft = await build(amount)
@@ -758,6 +772,7 @@ export function createMoneroVault({ engine, confirm, getConfig, sidecar = manage
         if (guardActive && guard && !draft.plan.inputs.some(input => guard.keyImages.includes(keyImages.owned.get(input.ring[input.realMember].publicKey)!.keyImage))) {
           throw new MoneroError(`The transaction you discarded (${guard.txid}) could still be mined from another node's pool. Until its inputs are spent, a new send must spend at least one of them, so both cannot be mined; this send would use other funds, so it was not built. Send an amount that needs those funds (Max does), or wait until it settles`)
         }
+        if (draft.plan.unlockTime !== undefined && draft.plan.unlockTime !== '0') throw new MoneroError(text(STREAM_ERRORS.unlock))
         if (current.streamed) checkStreamSigningBounds(draft.plan, text)
         // Choose the review order once; the stored plan drives every signing step.
         for (let i = draft.plan.outputs.length - 1; i > 0; i--) {
@@ -822,7 +837,8 @@ export function createMoneroVault({ engine, confirm, getConfig, sidecar = manage
         // These inputs are now spent: another send needs a fresh key-image sync.
         synced = null
         // Saved before the broadcast, so an outcome lost to a crash or restart still blocks a second payment.
-        pending.set(wallet, { wallet, txid: parsed.hash, txHex: Buffer.from(signed.blob).toString('hex'), createdAt: new Date().toISOString(), node: current.config.daemonUrl })
+        pending.set(wallet, { wallet, txid: parsed.hash, txHex: Buffer.from(signed.blob).toString('hex'), createdAt: new Date().toISOString(), node: current.config.daemonUrl,
+          ...('transactionKeys' in signed ? {transactionKeys:signed.transactionKeys} : {}) })
         try { persistPending() }
         catch { pending.delete(wallet); throw new MoneroError('The signed transaction could not be saved for recovery, so it was not broadcast. Nothing was sent') }
         await relayPending(wallet, false)
@@ -840,6 +856,14 @@ export function createMoneroVault({ engine, confirm, getConfig, sidecar = manage
       try { await relayPending(wallet, true); return { txid: record.txid } }
       catch (error) { throw publicError(error, 'Unable to broadcast the Monero transaction') }
       finally { busy = false }
+    },
+    /** Backend-only payment-proof lookup, scoped to the connected wallet. No frontend RPC. */
+    getTransactionKey(txid: string) {
+      assertMoneroStandardWallet(engine)
+      const current = requireReady(), binding = bindingFor(current), wallet = walletKey(current, binding.address)
+      loadPersistence()
+      const record = pending.get(wallet)?.txid === txid ? pending.get(wallet) : sent.get(`${wallet}:${txid}`)
+      return record?.transactionKeys ? {txKey:record.transactionKeys.txKey, additionalTxKeys:[...record.transactionKeys.additionalTxKeys]} : null
     },
     /** Unresolved unknown-outcome sends on record, for every wallet. */
     pendingCount: () => { assertMoneroStandardWallet(engine); if (getConfig().enabled) loadPersistence(); return pending.size },
