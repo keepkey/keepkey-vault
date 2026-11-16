@@ -17,6 +17,7 @@ set -euo pipefail
 #   1. Native addons (.node, .dylib, .so) in Resources/ — no entitlements
 #      Monero helpers in Resources/app/ — worker WITH entitlements; RPC without
 #      Record the modified RPC checksum before the outer application signature
+#      Zcash helper — verify the staged pair, sign, then refresh its manifest
 #      Other executable Mach-O in Resources/ (update manager, zcash-cli) — none
 #   2. All Mach-O binaries in MacOS/ — each WITH entitlements
 #   3. The .app bundle itself — WITH entitlements
@@ -45,6 +46,10 @@ MONERO_RPC="$RESOURCES_DIR/app/monero-tools/monero-wallet-rpc"
 MONERO_DAEMON="$RESOURCES_DIR/app/monero-tools/monerod"
 MONERO_METADATA="$RESOURCES_DIR/app/monero-tools/monero-tools.json"
 MONERO_WORKER="$RESOURCES_DIR/app/monero-cli"
+MONERO_ADAPTER="$RESOURCES_DIR/app/monero-tools/monero-host-adapter"
+ZCASH_WORKER="$RESOURCES_DIR/app/zcash-cli"
+EMULATOR_LIBRARY="$RESOURCES_DIR/app/emulator/libkkemu.dylib"
+EMULATOR_REVIEWED_SOURCE_SHA=""
 MONERO_SIGN_RECEIPT_DIR=""
 trap 'if [ -n "$MONERO_SIGN_RECEIPT_DIR" ]; then rm -rf "$MONERO_SIGN_RECEIPT_DIR"; fi' EXIT
 
@@ -56,7 +61,7 @@ sign_file() {
 # Authenticate the staged RPC against its prepared metadata before signing can
 # change its bytes. Raw archive authentication belongs to the preparation step;
 # the final app signature seals this receipt and the post-sign runtime checksum.
-if [ -e "$MONERO_RPC" ] || [ -e "$MONERO_METADATA" ] || [ -e "$MONERO_WORKER" ]; then
+if [ -e "$MONERO_RPC" ] || [ -e "$MONERO_METADATA" ] || [ -e "$MONERO_WORKER" ] || [ -e "$MONERO_ADAPTER" ]; then
   [ -f "$MONERO_RPC" ] && [ -f "$MONERO_METADATA" ] && [ -f "$MONERO_WORKER" ] || {
     echo "ERROR: incomplete bundled Monero tools"; exit 1;
   }
@@ -66,11 +71,29 @@ if [ -e "$MONERO_RPC" ] || [ -e "$MONERO_METADATA" ] || [ -e "$MONERO_WORKER" ];
   MONERO_SIGN_RECEIPT_DIR="$(mktemp -d)"
   python3 "$SIGNING_SCRIPTS_DIR/monero-signing-metadata.py" verify \
     --rpc "$MONERO_RPC" --metadata "$MONERO_METADATA" --receipt "$MONERO_SIGN_RECEIPT_DIR/receipt.json"
+  if [ -e "$MONERO_ADAPTER" ]; then
+    file -b "$MONERO_ADAPTER" | grep -q 'Mach-O' || { echo "ERROR: Monero adapter is not a Mach-O binary"; exit 1; }
+    python3 "$SIGNING_SCRIPTS_DIR/monero-signing-metadata.py" verify --field hostAdapter \
+      --rpc "$MONERO_ADAPTER" --metadata "$MONERO_METADATA" --receipt "$MONERO_SIGN_RECEIPT_DIR/adapter.json"
+  fi
   if [ -e "$MONERO_DAEMON" ]; then
     file -b "$MONERO_DAEMON" | grep -q 'Mach-O' || { echo "ERROR: Monero node is not a Mach-O binary"; exit 1; }
     python3 "$SIGNING_SCRIPTS_DIR/monero-signing-metadata.py" verify --field daemon \
       --rpc "$MONERO_DAEMON" --metadata "$MONERO_METADATA" --receipt "$MONERO_SIGN_RECEIPT_DIR/daemon.json"
   fi
+fi
+
+if [ -f "$ZCASH_WORKER" ]; then
+  "${BUN_EXECUTABLE:-bun}" "$SIGNING_SCRIPTS_DIR/../projects/keepkey-vault/scripts/write-zcash-nu7-manifest.ts" --verify "$ZCASH_WORKER"
+fi
+
+if [ -f "$EMULATOR_LIBRARY" ]; then
+  EMULATOR_VERIFY_MODE="--verify"
+  if [ -f "$RESOURCES_DIR/app/emulator/nu7-emulator-receipt.json" ]; then
+    codesign --verify --deep --strict "$APP_PATH"
+    EMULATOR_VERIFY_MODE="--verify-sealed"
+  fi
+  EMULATOR_REVIEWED_SOURCE_SHA=$("${BUN_EXECUTABLE:-bun}" "$SIGNING_SCRIPTS_DIR/../projects/keepkey-vault/scripts/write-emulator-signing-receipt.ts" "$EMULATOR_VERIFY_MODE" "$EMULATOR_LIBRARY")
 fi
 
 # --- 1. Native addons in Resources/ (no entitlements) ---
@@ -101,12 +124,21 @@ if [ -n "$MONERO_SIGN_RECEIPT_DIR" ]; then
   fi
 fi
 
+if [ -n "$MONERO_SIGN_RECEIPT_DIR" ] && [ -e "$MONERO_ADAPTER" ]; then
+  python3 "$SIGNING_SCRIPTS_DIR/monero-signing-metadata.py" verify --field hostAdapter \
+    --rpc "$MONERO_ADAPTER" --metadata "$MONERO_METADATA" --receipt "$MONERO_SIGN_RECEIPT_DIR/adapter.json"
+  sign_file "$MONERO_ADAPTER"
+  codesign --verify --strict "$MONERO_ADAPTER"
+  python3 "$SIGNING_SCRIPTS_DIR/monero-signing-metadata.py" record --field hostAdapter \
+    --rpc "$MONERO_ADAPTER" --metadata "$MONERO_METADATA" --receipt "$MONERO_SIGN_RECEIPT_DIR/adapter.json"
+fi
+
 # Every other executable Mach-O in Resources: the Electrobun 2.x update manager
 # (Resources/uninstall), zcash-cli on Apple Silicon. Native helpers, no entitlements.
 if [ -d "$RESOURCES_DIR" ]; then
   while IFS= read -r -d '' f; do
     case "$f" in
-      *.node|*.dylib|*.so|"$MONERO_WORKER"|"$MONERO_RPC"|"$MONERO_DAEMON") continue ;;
+      *.node|*.dylib|*.so|"$MONERO_WORKER"|"$MONERO_RPC"|"$MONERO_DAEMON"|"$MONERO_ADAPTER"|"$ZCASH_WORKER") continue ;;
     esac
     file -b "$f" 2>/dev/null | grep -q 'Mach-O' || continue
     echo "    ${f#"$RESOURCES_DIR"/}"
@@ -115,6 +147,12 @@ if [ -d "$RESOURCES_DIR" ]; then
 fi
 
 # --- 2. All Mach-O in MacOS/ — WITH entitlements ---
+if [ -f "$ZCASH_WORKER" ]; then
+  echo "  Signing Zcash helper and recording the final runtime checksum..."
+  sign_file "$ZCASH_WORKER"
+  "${BUN_EXECUTABLE:-bun}" "$SIGNING_SCRIPTS_DIR/../projects/keepkey-vault/scripts/write-zcash-nu7-manifest.ts" "$ZCASH_WORKER"
+fi
+
 echo "  Signing MacOS/ binaries with entitlements..."
 # Libraries must be signed before the launcher that loads them. Intel CI
 # bundles contain unsigned libraries, unlike a locally signed arm64 build.
@@ -131,6 +169,9 @@ if [ -d "$MACOS_DIR" ]; then
 fi
 
 # --- 3. Sign .app bundle ---
+if [ -n "$EMULATOR_REVIEWED_SOURCE_SHA" ]; then
+  "${BUN_EXECUTABLE:-bun}" "$SIGNING_SCRIPTS_DIR/../projects/keepkey-vault/scripts/write-emulator-signing-receipt.ts" --record "$EMULATOR_LIBRARY" "$EMULATOR_REVIEWED_SOURCE_SHA"
+fi
 echo "  Signing .app bundle..."
 sign_file "$APP_PATH" --entitlements "$ENTITLEMENTS"
 

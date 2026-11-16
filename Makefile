@@ -30,7 +30,7 @@ export HUTCH_ELECTROBUN_DEVKIT_ROOT
 export PATH := $(HOME)/.hutch/bin:$(PATH)
 # Hutch's per-platform names: artifacts/stable-<os>-<arch>-keepkey-vault.app.tar.zst
 ELECTROBUN_ARCH := $(if $(filter x86_64,$(ARCH)),x64,$(ARCH))
-ZCASH_CLI_SOURCES := $(shell find $(PROJECT_DIR)/zcash-cli/src -name '*.rs' 2>/dev/null) $(PROJECT_DIR)/zcash-cli/Cargo.toml
+ZCASH_CLI_SOURCES := $(shell find $(PROJECT_DIR)/zcash-cli/src -name '*.rs' 2>/dev/null) $(PROJECT_DIR)/zcash-cli/Cargo.toml $(PROJECT_DIR)/zcash-cli/Cargo.lock $(PROJECT_DIR)/scripts/write-zcash-nu7-manifest.ts $(PROJECT_DIR)/src/bun/zcash-nu7-binary.ts
 
 # Auto-load .env if present (only export signing-related vars to sub-processes)
 ifneq (,$(wildcard .env))
@@ -120,18 +120,27 @@ ifdef ELECTROBUN_DEVELOPER_ID
 		--options runtime \
 		$(PROJECT_DIR)/zcash-cli/target/release/zcash-cli
 endif
+	cd $(PROJECT_DIR) && bun scripts/write-zcash-nu7-manifest.ts zcash-cli/target/release/zcash-cli
 	@touch $@
 
 build-zcash-cli: $(ZCASH_CLI_STAMP)
+	cd $(PROJECT_DIR) && bun scripts/write-zcash-nu7-manifest.ts zcash-cli/target/release/zcash-cli
 	@echo "zcash-cli ready for Electrobun packaging:"
 	@ls -lh $(PROJECT_DIR)/zcash-cli/target/release/zcash-cli
 
 test-zcash-cli:
 	cd $(PROJECT_DIR)/zcash-cli && cargo test
+	cd $(PROJECT_DIR)/zcash-cli && cargo test --locked --manifest-path tests/nu7-reference/Cargo.toml
+
+.PHONY: test-emu-zcash-nu7
+test-emu-zcash-nu7:
+	@test -n "$(KK_EMU_DYLIB)" || { echo 'Set KK_EMU_DYLIB to the reviewed 7.17 alpha emulator'; exit 1; }
+	cd $(PROJECT_DIR) && VAULT_API_URL=http://127.0.0.1:9 KK_EMU_DYLIB="$(KK_EMU_DYLIB)" bun test tests/emulator/14-zcash-nu7.test.ts
 
 build-zcash-cli-debug:
 	cd $(PROJECT_DIR)/zcash-cli && cargo test
 	cd $(PROJECT_DIR)/zcash-cli && cargo build
+	cd $(PROJECT_DIR) && bun scripts/write-zcash-nu7-manifest.ts zcash-cli/target/debug/zcash-cli
 
 # Cross-compile zcash-cli for Intel Mac from Apple Silicon
 build-zcash-cli-intel:
@@ -144,6 +153,7 @@ ifdef ELECTROBUN_DEVELOPER_ID
 		--options runtime \
 		$(PROJECT_DIR)/zcash-cli/target/x86_64-apple-darwin/release/zcash-cli
 endif
+	cd $(PROJECT_DIR) && bun scripts/write-zcash-nu7-manifest.ts zcash-cli/target/x86_64-apple-darwin/release/zcash-cli
 	@echo "=== Intel zcash-cli ready at $(PROJECT_DIR)/zcash-cli/target/x86_64-apple-darwin/release/zcash-cli ==="
 
 # --- Architecture Verification ---
@@ -269,11 +279,11 @@ $(VAULT_INSTALL_STAMP): $(PROJECT_DIR)/package.json $(PROJECT_DIR)/bun.lock $(PR
 
 install: $(VAULT_INSTALL_STAMP)
 
-vault: install $(ZCASH_CLI_STAMP) dev
+vault: install build-zcash-cli dev
 
 # Monero (preview): verified monero-wallet-rpc + sidecar worker; stage a tested research emulator dylib.
 monero-cli: install
-	cd $(PROJECT_DIR) && { [ -n "$$(ls -A monero-cli/vendor 2>/dev/null)" ] || bun run monero:prepare; } && bun run monero:build
+	cd $(PROJECT_DIR) && { [ -n "$$(ls -A monero-cli/vendor 2>/dev/null)" ] || bun run monero:prepare; } && bun scripts/stage-monero-adapter.ts --if-available && bun run monero:build
 
 monero-emulator: install
 	@test -n "$(SOURCE)" || (echo "usage: make monero-emulator SOURCE=/path/to/libkkemu.dylib" && exit 1)
@@ -288,10 +298,10 @@ monero-adapter: install
 	@test -n "$(SOURCE)" -a -n "$(SHA256)" || (echo "usage: make monero-adapter SOURCE=/path/to/monero-host-adapter SHA256=reviewed-sha256" && exit 1)
 	cd $(PROJECT_DIR) && bun scripts/stage-monero-adapter.ts --source "$(SOURCE)" --sha256 "$(SHA256)"
 
-dev: install $(ZCASH_CLI_STAMP)
+dev: install build-zcash-cli
 	cd $(PROJECT_DIR) && bun run dev
 
-dev-hmr: install $(ZCASH_CLI_STAMP)
+dev-hmr: install build-zcash-cli
 	-lsof -ti :5177 | xargs kill -9 2>/dev/null || true
 	-pkill -f "electrobun dev" 2>/dev/null || true
 	cd $(PROJECT_DIR) && bun run dev:hmr
@@ -302,7 +312,7 @@ build: install build-zcash-cli
 build-stable: install build-zcash-cli
 	cd $(PROJECT_DIR) && bun run build:stable
 
-build-canary: install
+build-canary: install build-zcash-cli
 	cd $(PROJECT_DIR) && bun run build:canary
 
 # Read-only gate on the archive Hutch packed: update manifests match its bytes,
@@ -440,8 +450,19 @@ test-i18n:
 	cd $(PROJECT_DIR) && bun scripts/check-i18n.ts && bun test __tests__/i18n-safety.test.ts __tests__/report-fonts.test.ts
 
 test-unit:
+	cd $(PROJECT_DIR) && bun test __tests__/rest-zcash-admission.test.ts
+	cd $(PROJECT_DIR) && bun test __tests__/broadcast-provider-error.test.ts
+	cd $(PROJECT_DIR) && bun test __tests__/zcash-nu7-admission.test.ts __tests__/zcash-nu7-binary.test.ts __tests__/zcash-tex-admission.test.ts
+	cd $(PROJECT_DIR) && bun test __tests__/zcash-nu7-transparent.test.ts
+	cd $(PROJECT_DIR) && bun test __tests__/zcash-transparent-sidecar.test.ts
+	cd $(PROJECT_DIR) && bun test __tests__/send-zcash-readiness.test.ts
+	cd $(PROJECT_DIR) && bun test __tests__/zcash-nu7-packaging.test.ts
+	cd $(PROJECT_DIR) && bun test __tests__/emulator-signing-receipt.test.ts
+	cd $(PROJECT_DIR) && bun test __tests__/nu7-release-assets.test.ts __tests__/macos-signing-shim.test.ts
+	cd $(PROJECT_DIR) && bun test __tests__/release-artifact-isolation.test.ts
 	cd $(PROJECT_DIR) && bun test __tests__/provider-refresh.test.ts __tests__/evm-confirmation-watch.test.ts __tests__/connectivity.test.ts __tests__/cosmos-max-send.test.ts src/bun/txbuilder/account-send-safety.test.ts
 	cd $(PROJECT_DIR) && bun test __tests__/build-electrobun.test.ts
+	cd $(PROJECT_DIR) && bun test __tests__/offline-asset-icons.test.ts
 	cd $(PROJECT_DIR) && bun test __tests__/electrobun-fixes.test.ts
 	cd $(PROJECT_DIR) && bun test src/bun/txbuilder/evm-units.test.ts
 	cd $(PROJECT_DIR) && bun test __tests__/hyperliquid-identity.test.ts
