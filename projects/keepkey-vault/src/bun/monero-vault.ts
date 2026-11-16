@@ -33,7 +33,7 @@ const BLOCKER_MESSAGES: Record<MoneroSendBlocker, string> = {
   unrelayed: 'A signed transaction may already be broadcast: retry broadcasting that same transaction first',
   firmware: 'Monero hardware signing is not available for this firmware in this build',
   emulator: 'Sending needs the Monero signing (research) emulator build',
-  adapter: 'The Monero signing adapter is not installed in this build',
+  adapter: 'This Vault build is missing required Monero wallet tools',
   syncing: 'Wait for the watch wallet to finish syncing',
   'key-images': 'Sync key images on KeepKey before sending',
 }

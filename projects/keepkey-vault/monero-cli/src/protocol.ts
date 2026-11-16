@@ -136,7 +136,8 @@ const SEND_ADDRESS = /^[48][123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrst
 
 /** Fixed, credential-free diagnostics the worker may forward verbatim. */
 export const PUBLIC_ERRORS = [
-  'The Monero signing adapter is not installed',
+  'This Vault build is missing the Monero tools needed to verify your balance',
+  'This Vault build is missing the Monero tools needed to build a transaction',
   'This preview syncs at most 64 wallet outputs',
   'Not enough unlocked XMR for this amount and fee',
   'The watch wallet cannot build this transaction',

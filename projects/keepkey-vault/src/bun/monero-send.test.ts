@@ -425,7 +425,7 @@ describe('Desktop Monero send bridge', () => {
     const noAdapter = bridge({ sendReady: false })
     await noAdapter.api.connect()
     expect((await noAdapter.api.getStatus()).sendBlocked).toBe('adapter')
-    await expect(noAdapter.api.prepareSend({ address: RECIPIENT, amountAtomic: '1' })).rejects.toThrow('adapter')
+    await expect(noAdapter.api.prepareSend({ address: RECIPIENT, amountAtomic: '1' })).rejects.toThrow('missing required Monero wallet tools')
     expect(noAdapter.calls.transfers).toHaveLength(0)
     const scanning = bridge({ monitorReady: false })
     await scanning.api.connect()

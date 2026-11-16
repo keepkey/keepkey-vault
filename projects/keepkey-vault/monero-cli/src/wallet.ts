@@ -270,7 +270,9 @@ export class MoneroWatchService {
 
   /** The view key is read back from this worker's own watch wallet and goes to the adapter only over stdin. */
   private async adapterRequest(session: Session, op: 'outputs' | 'plan', outputsHex: string, unsignedTxset?: string): Promise<any> {
-    if (!this.adapter) throw new PublicError('The Monero signing adapter is not installed')
+    if (!this.adapter) throw new PublicError(op === 'outputs'
+      ? 'This Vault build is missing the Monero tools needed to verify your balance'
+      : 'This Vault build is missing the Monero tools needed to build a transaction')
     const key = await session.rpc.call('query_key', { key_type: 'view_key' })
     const request: Record<string, string> = { op, address: session.address, view_key: typeof key.key === 'string' ? key.key : '',
       outputs_data_hex: outputsHex, ...(unsignedTxset ? { unsigned_txset: unsignedTxset } : {}) }
@@ -316,7 +318,7 @@ export class MoneroWatchService {
   /** Watch-only `transfer` yields an unsigned set; the adapter decodes it against a fresh export. Nothing is relayed. */
   async createTransfer(input: unknown): Promise<{ feeAtomic: string; amountAtomic: string; plan: unknown }> {
     const request = validateTransferRequest(input), session = this.current()
-    if (!this.adapter) throw new PublicError('The Monero signing adapter is not installed')
+    if (!this.adapter) throw new PublicError('This Vault build is missing the Monero tools needed to build a transaction')
     if (!session.sendable) throw new PublicError('The Monero daemon is unavailable')
     let created: any
     try {
