@@ -165,6 +165,8 @@ export interface RestApiCallbacks {
   /** Headless swap execute — signs on the device, broadcasts, registers tracking.
    *  Used by POST /api/v2/swap/execute. Device still gates the signature. */
   executeSwapHeadless?: (params: import('../shared/types').ExecuteSwapParams) => Promise<import('../shared/types').SwapResult>
+  /** Demand-only provider status refresh for a previously scoped swap. */
+  refreshSwapStatus?: (txid: string, scope: { deviceId: string; walletId: string }, rescan: boolean) => Promise<import('../shared/types').PendingSwap | null>
   /** Build a native send for POST /api/v2/tx/build with the same body the RPC
    *  buildTx runs (buildTxForCurrentWallet). Desktop derives the sender. */
   buildTxHeadless?: (request: import('./rest-tx-build').TxBuildHeadlessRequest) => Promise<import('../shared/types').BuildTxResult>
@@ -1185,6 +1187,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
   // What this vault signed over REST, per wallet session — /api/v2/tx/broadcast
   // lists only those as activity (see signed-tx-registry.ts).
   const signedTxs = createSignedTxRegistry()
+  const swapStatusReads = new Map<string, Promise<import('../shared/types').PendingSwap | null>>()
   const getWalletDbScope = (): { deviceId: string; walletId: string } | null => {
     const deviceId = engine.getDeviceState().deviceId
     if (!deviceId) return null
@@ -4753,6 +4756,25 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           if (!tail) return json({ error: 'Invalid txid' }, 400)
           const record = getSwapHistoryByTxid(tail, scope.deviceId, scope.walletId)
           if (!record) return json({ error: 'Not found' }, 404)
+          const query = new URL(req.url).searchParams
+          if (query.get('refresh') === 'true') {
+            if (!callbacks?.refreshSwapStatus) return json({ error: 'Live swap refresh is not available on this Desktop. Update KeepKey Desktop.' }, 503)
+            const epoch = callbacks.getSessionEpoch?.()
+            const key = JSON.stringify([scope.walletId, epoch, tail])
+            let pending = swapStatusReads.get(key)
+            if (!pending) {
+              pending = callbacks.refreshSwapStatus(tail, scope, query.get('rescan') === 'true')
+                .finally(() => { swapStatusReads.delete(key) })
+              swapStatusReads.set(key, pending)
+            }
+            const live = await pending
+            const current = getWalletDbScope()
+            if (engine.isPassphraseWallet || current?.walletId !== scope.walletId || current?.deviceId !== scope.deviceId
+              || callbacks.getSessionEpoch?.() !== epoch) return json({ error: 'Not found' }, 404)
+            const updated = getSwapHistoryByTxid(tail, scope.deviceId, scope.walletId)
+            if (!updated) return json({ error: 'Not found' }, 404)
+            return json({ ...updated, statusCheck: live?.statusCheck ?? { checkedAt: Date.now(), error: 'unavailable' } })
+          }
           return json(record)
         }
 

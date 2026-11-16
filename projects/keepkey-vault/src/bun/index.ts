@@ -2186,6 +2186,11 @@ const restCallbacks: RestApiCallbacks = {
 	// the loop. The device still gates every signature. NOOP substage push.
 	getSwapQuoteHeadless: (params) => headlessSwapQuote(params),
 	executeSwapHeadless: (params) => headlessExecuteSwap(params, () => { /* headless: no WebView substage */ }),
+	refreshSwapStatus: async (txid, scope, rescan) => {
+		requireOnline('swap refresh')
+		const { refreshSwap } = await import('./swap-tracker')
+		return refreshSwap(txid, scope.deviceId, scope.walletId, rescan)
+	},
 	// Extension sends (POST /api/v2/tx/build): the in-app send's own build. The
 	// sender is always Desktop's: the client only names (accountIndex, scriptType)
 	// of the user's own accounts. A named UTXO account (BTC included) is derived
