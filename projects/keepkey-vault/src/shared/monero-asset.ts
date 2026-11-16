@@ -30,7 +30,7 @@ export interface MoneroBalanceView {
   balanceAtomic: string | null
   unlockedAtomic: string | null
   lockedAtomic: string | null
-  /** 0..1 while scanning, when the wallet has scanned some blocks toward a known tip. */
+  /** 0..<1 while scanning toward a valid tip; caught-up-but-not-ready remains indeterminate. */
   progress?: number
   walletHeight?: number
   daemonHeight?: number
@@ -45,6 +45,18 @@ export interface MoneroBalanceView {
 
 /** The watch wallet refreshes every 15 s; older than this, a figure is labelled with its time. */
 export const STALE_AFTER_MS = 120_000
+
+/** Wallet scanning covers the selected history range, not all blocks since genesis.
+ * A zero/unreported height, invalid range, or a caught-up wallet still waiting
+ * for its ready status cannot support a remaining-work percentage. */
+export function moneroWalletScanProgress({ walletHeight, daemonHeight, restoreHeight = 0 }: {
+  walletHeight?: number; daemonHeight?: number; restoreHeight?: number
+}): number | undefined {
+  if (typeof walletHeight !== 'number' || !Number.isSafeInteger(walletHeight) || walletHeight <= 0 ||
+      typeof daemonHeight !== 'number' || !Number.isSafeInteger(daemonHeight) || daemonHeight <= 0 ||
+      !Number.isSafeInteger(restoreHeight) || restoreHeight < 0 || daemonHeight <= restoreHeight || walletHeight >= daemonHeight) return undefined
+  return Math.max(0, (walletHeight - restoreHeight) / (daemonHeight - restoreHeight))
+}
 
 /**
  * - not connected / loading: "—";
@@ -62,11 +74,7 @@ export function moneroBalanceView(status: MoneroStatus | null, refreshError?: st
   const caughtUp = scanned && status.daemonHeight !== undefined && status.walletHeight >= status.daemonHeight
   const showBalance = scanned && (state === 'ready' || state === 'unreachable' || caughtUp)
   const balance = BigInt(status.balanceAtomic), unlocked = BigInt(status.unlockedBalanceAtomic)
-  let progress: number | undefined
-  if (state === 'scanning' && scanned && status.daemonHeight !== undefined) {
-    const start = status.restoreHeight ?? 0, span = status.daemonHeight - start
-    progress = span > 0 ? Math.min(1, Math.max(0, (status.walletHeight - start) / span)) : 1
-  }
+  const progress = state === 'scanning' ? moneroWalletScanProgress(heights) : undefined
   return {
     state, ...heights, ...(progress === undefined ? {} : { progress }), ...(status.updatedAt ? { updatedAt: status.updatedAt } : {}),
     balanceAtomic: showBalance ? balance.toString() : null,

@@ -74,11 +74,33 @@ export function MoneroHeaderBalance({ view, privateMode }: { view: MoneroBalance
 	)
 }
 
-/** One line under the balance that says what it means right now. */
+/** A measured scan percentage only exists when the wallet and node reported valid heights. */
+function MoneroSyncProgress({ view }: { view: MoneroBalanceView }) {
+	const uiText = useUiTranslation()
+	if (view.state !== 'scanning') return null
+	const percent = view.progress === undefined ? undefined : view.progress * 100
+	const height = (value?: number) => typeof value === 'number' && Number.isSafeInteger(value) && value > 0
+		? value.toLocaleString(getNumberLocale()) : uiText('Not reported yet')
+	return <Box data-monero-sync-progress="" mt="3">
+		<Text data-monero-sync-percent="" fontSize="12px" color="var(--gold)" mb="1">
+			{percent === undefined ? uiText('Syncing') : uiText('Syncing {{percent}}%', { percent: Math.floor(percent) })}
+		</Text>
+		<progress role="progressbar" aria-label={uiText('Monero wallet sync progress')} max={100} aria-valuemin={0} aria-valuemax={100}
+			{...(percent === undefined ? {} : { value: percent, 'aria-valuenow': percent })}
+			style={{ width: '100%', height: 8, accentColor: '#FF6600' }} />
+		<Flex gap="3" justify="space-between" wrap="wrap" mt="1" fontSize="11px" color="var(--text-2)">
+			<Text data-monero-wallet-height="">{uiText('Wallet scan height')}: {height(view.walletHeight)}</Text>
+			<Text data-monero-target-height="">{uiText('Node height (reported)')}: {height(view.daemonHeight)}</Text>
+			{(view.restoreHeight ?? 0) > 0 && <Text data-monero-scan-start="">{uiText('Scan start block')}: {height(view.restoreHeight)}</Text>}
+		</Flex>
+	</Box>
+}
+
+/** The balance meaning and measured scan progress, without treating a partial scan as a balance. */
 function MoneroBalanceNote({ view }: { view: MoneroBalanceView }) {
 	const uiText = useUiTranslation()
 	if (view.state === "scanning") {
-		return <Text data-monero-note="scanning" fontSize="12px" color="var(--text-2)">{uiText("Syncing your Monero wallet. Your balance appears when it is ready.")}</Text>
+		return <Box><Text data-monero-note="scanning" fontSize="12px" color="var(--text-2)">{uiText("Syncing your Monero wallet. Your balance appears when it is ready.")}</Text><MoneroSyncProgress view={view} /></Box>
 	}
 	if (view.state === "unreachable") {
 		return <Text data-monero-note="unreachable" role="alert" fontSize="12px" color="var(--gold)">{view.balanceAtomic === null
@@ -322,6 +344,7 @@ export function MoneroSendSection({ monero, client, privateMode = false }: { mon
 	return (
 		<Box data-monero-send="">
 			<MoneroConnectionDetails status={monero.status} />
+			{view.state === 'scanning' && <Box mb="4"><MoneroBalanceNote view={view} /></Box>}
 			{verification.busy && <Text role="status" fontSize="12px" mb="3">{uiText("Checking your balance on KeepKey…")}</Text>}
 			{verification.error && <Box role="alert" mb="3"><Text fontSize="12px" color="var(--rose)">{verification.error}</Text><Button size="xs" mt="2" onClick={() => { void verification.retry() }}>{uiText("Try again")}</Button></Box>}
 			{wallet.unrelayedTxid && (

@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import type { MoneroStatus } from './types'
-import { formatXmrShort, moneroBalanceView, moneroChainVisible, moneroSendInputProblems } from './monero-asset'
+import { formatXmrShort, moneroBalanceView, moneroChainVisible, moneroSendInputProblems, moneroWalletScanProgress } from './monero-asset'
 
 const WALLET = '44jKQv6ZKMd5ecLLmkNJGi7azgSptEq8ki7TFiat1TfLfdDQ1tQ7ZYa3cRh7X2uRwvLDjddWh97ajeyhR2seKSECQeDx1WR'
 const RECIPIENT = '4Ahp23WfMrMFK3wYL2hLWQFGt87ZTeRkufS6JoQZu6MEFDokAQeGWmu9MA3GFq1yVLSJQbKJqVAn9F9DLYGpRzRAEXqAXKM'
@@ -54,6 +54,32 @@ describe('C2: never a fake 0', () => {
     expect(formatXmrShort('84653050000')).toBe('0.08465305')
     expect(formatXmrShort('1')).toBe('0.000000000001')
     expect(formatXmrShort('2000000000000')).toBe('2.0')
+  })
+})
+
+describe('wallet scan progress counts the selected block range', () => {
+  test('a saved start is the baseline, and a changing observed target changes the measured fraction', () => {
+    expect(moneroWalletScanProgress({ walletHeight: 3_250_000, daemonHeight: 3_300_000, restoreHeight: 3_200_000 })).toBe(0.5)
+    expect(moneroWalletScanProgress({ walletHeight: 100, daemonHeight: 200 })).toBe(0.5)
+    expect(moneroWalletScanProgress({ walletHeight: 3_250_000, daemonHeight: 3_400_000, restoreHeight: 3_200_000 })).toBe(0.25)
+    expect(moneroWalletScanProgress({ walletHeight: 3_199_000, daemonHeight: 3_300_000, restoreHeight: 3_200_000 })).toBe(0)
+  })
+  test('zero or unreported wallet height and invalid targets/ranges never manufacture a percentage', () => {
+    const valid = { walletHeight: 3_250_000, daemonHeight: 3_300_000, restoreHeight: 3_200_000 }
+    for (const value of [0, undefined, NaN, Infinity, -1, 1.5, Number.MAX_SAFE_INTEGER + 1]) {
+      expect(moneroWalletScanProgress({ ...valid, walletHeight: value })).toBeUndefined()
+      expect(moneroWalletScanProgress({ ...valid, daemonHeight: value })).toBeUndefined()
+    }
+    for (const restoreHeight of [-1, 0.5, NaN, Infinity, 3_300_000, 3_300_001]) {
+      expect(moneroWalletScanProgress({ ...valid, restoreHeight })).toBeUndefined()
+    }
+  })
+  test('a scan is not presented as complete until the wallet reports ready', () => {
+    for (const walletHeight of [3_300_000, 3_300_001]) {
+      expect(moneroBalanceView(status({ syncState: 'scanning', monitorReady: false, walletHeight })).progress).toBeUndefined()
+    }
+    expect(moneroBalanceView(status()).progress).toBeUndefined()
+    expect(moneroBalanceView(status({ syncState: 'unreachable' })).progress).toBeUndefined()
   })
 })
 

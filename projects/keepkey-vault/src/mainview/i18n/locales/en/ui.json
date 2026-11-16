@@ -2354,5 +2354,6 @@
   "m108a3db9": "Partner fee",
   "m4dd9a00a": "ShapeShift fee",
   "me6273384": "Provider fee",
-  "meba56b2": "Cached balances remain available. Automatic updates will not spend additional discovery requests."
+  "meba56b2": "Cached balances remain available. Automatic updates will not spend additional discovery requests.",
+  "m61271e4e": "Monero wallet sync progress"
 }

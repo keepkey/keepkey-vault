@@ -253,6 +253,37 @@ for (const state of ['waiting', 'failed', 'checking']) {
   await unmount()
 }
 
+// Wallet progress is based on reported heights, including the saved history start.
+for (const [name, overrides, Section] of [
+  ['known', {}, MoneroReceiveSection],
+  ['zeroWallet', { walletHeight: 0 }, MoneroReceiveSection],
+  ['unknownTarget', { daemonHeight: undefined }, MoneroReceiveSection],
+  ['invalidRange', { daemonHeight: 3_200_000 }, MoneroReceiveSection],
+  ['caughtUp', { walletHeight: 3_300_000 }, MoneroReceiveSection],
+  ['ready', { syncState: 'ready', monitorReady: true, keyImagesSynced: true, spendStateKnown: true }, MoneroReceiveSection],
+  ['unreachable', { syncState: 'unreachable' }, MoneroReceiveSection],
+  ['send', { sendBlocked: 'syncing' }, MoneroSendSection],
+] as const) {
+  const current=connected({syncState:'scanning',monitorReady:false,walletHeight:3_250_000,daemonHeight:3_300_000,restoreHeight:3_200_000,...overrides})
+  const {container,unmount}=await render(<Host Section={Section} client={fakeClient(current)} />)
+  const progress=q(container,'[data-monero-sync-progress] progress')
+  out[`walletScan_${name}`]={present:!!progress,value:progress?.getAttribute('value'),ariaNow:progress?.getAttribute('aria-valuenow'),role:progress?.getAttribute('role'),label:progress?.getAttribute('aria-label'),
+    text:text(q(container,'[data-monero-sync-progress]')),stateText:text(q(container,'[data-monero-note]'))}
+  await unmount()
+}
+{
+  const current=connected({syncState:'scanning',monitorReady:false,walletHeight:3_250_000,daemonHeight:3_300_000,restoreHeight:3_200_000})
+  const client=fakeClient(current)
+  let update!:(status:any)=>void
+  function ProgressHost(){const state=useMoneroStatus(true,client);update=state.setStatus;return <MoneroReceiveSection monero={state} client={client} chain={monero} privateMode={false}/>}
+  const {container,unmount}=await render(<ProgressHost />)
+  const initial=!!q(container,'[data-monero-sync-progress]')
+  const ready=connected({syncState:'ready',monitorReady:true,keyImagesSynced:true,spendStateKnown:true,walletHeight:3_300_000,daemonHeight:3_300_000,restoreHeight:3_200_000})
+  client.set(ready);await act(async()=>{update(ready)})
+  out.walletScanCompleted={initial,remaining:!!q(container,'[data-monero-sync-progress]')}
+  await unmount()
+}
+
 // ── Send: key-image gate, form checks, Max, unknown broadcast ──
 {
   const client = fakeClient(connected())

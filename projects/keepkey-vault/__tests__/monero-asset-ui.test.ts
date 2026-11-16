@@ -97,6 +97,37 @@ describe('C2: balance states on the page', () => {
   })
 })
 
+test('wallet scanning shows accessible measured progress from the saved start on Receive and Send',()=>{
+ for(const name of ['known','send']){
+  const scan=ui[`walletScan_${name}`]
+  expect(scan).toMatchObject({present:true,role:'progressbar',value:'50',ariaNow:'50',label:'Monero wallet sync progress'})
+  expect(scan.text).toContain('Syncing 50%')
+  expect(scan.text).toContain('Wallet scan height: 3,250,000')
+  expect(scan.text).toContain('Node height (reported): 3,300,000')
+  expect(scan.text).toContain('Scan start block: 3,200,000')
+ }
+})
+
+test('unknown heights, invalid ranges and a caught-up wallet not yet ready use an honest indeterminate bar',()=>{
+ for(const name of ['zeroWallet','unknownTarget','invalidRange','caughtUp']){
+  const scan=ui[`walletScan_${name}`]
+  expect(scan.present).toBe(true)
+  expect(scan.value).toBeNull();expect(scan.ariaNow).toBeNull()
+  expect(scan.text).not.toMatch(/\d+%/)
+  expect(scan.stateText).toContain('Syncing your Monero wallet')
+  expect(scan.stateText).not.toContain("can't be reached")
+ }
+ expect(ui.walletScan_zeroWallet.text).toContain('Wallet scan height: Not reported yet')
+ expect(ui.walletScan_unknownTarget.text).toContain('Node height (reported): Not reported yet')
+})
+
+test('the scan bar disappears when ready and is not shown for an unreachable node',()=>{
+ expect(ui.walletScan_ready.present).toBe(false)
+ expect(ui.walletScan_unreachable.present).toBe(false)
+ expect(ui.walletScan_unreachable.stateText).toContain("The Monero node can't be reached")
+ expect(ui.walletScanCompleted).toEqual({initial:true,remaining:false})
+})
+
 describe('Receive: subaddresses come from the device and verify on it', () => {
   test('stepping to #1 reads it from KeepKey and shows it; Verify shows it on the device', () => {
     expect(ui.subaddressShown).toBe('Subaddress #1')
