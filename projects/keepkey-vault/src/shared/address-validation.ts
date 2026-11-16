@@ -129,9 +129,17 @@ function validateUtxoAddress(addr: string, chain: ChainDef): ValidationResult {
       // X… 0x4c, P2SH 7… 0x10
       return result(isBase58Hash(addr, [[0x4c], [0x10]]), 'invalidDashAddress')
 
-    case 'zcash':
+    case 'zcash': {
+      // ZIP-320 TEX (tex1…, bech32m over a 20-byte hash). This transparent send
+      // can't pay one yet: say so instead of reporting a checksum typo.
+      if (/^tex1/i.test(addr)) {
+        const tex = bech32Payload(addr, 'tex', bech32m)
+        if (tex === 'checksum') return BAD_CHECKSUM
+        return fail(tex && tex.length === 20 ? 'zcashTexNotSupported' : 'invalidZecAddress')
+      }
       // Transparent t1… (0x1cb8) and t3… (0x1cbd)
       return result(isBase58Hash(addr, [[0x1c, 0xb8], [0x1c, 0xbd]]), 'invalidZecAddress')
+    }
 
     case 'digibyte':
       if (/^dgb1/i.test(addr)) return result(segwitCheck(addr, 'dgb'), 'invalidDgbAddress')
@@ -225,7 +233,25 @@ function validateCosmosAddress(addr: string, chain: ChainDef): ValidationResult 
 
 // ── XRP ─────────────────────────────────────────────────────────────────
 
+/** True for an XRP X-address (XLS-5d: account + destination tag in one string). */
+function isXrpXAddress(addr: string): boolean {
+  if (!/^[XT]/.test(addr)) return false
+  let raw: Uint8Array
+  try { raw = base58xrp.decode(addr) } catch { return false }
+  // 2-byte prefix (0x0544 mainnet, 0x0493 testnet) + 20-byte account + flag byte
+  // + 8-byte tag + 4-byte double-SHA256 checksum.
+  if (raw.length !== 35) return false
+  const mainnet = raw[0] === 0x05 && raw[1] === 0x44
+  const testnet = raw[0] === 0x04 && raw[1] === 0x93
+  if (!mainnet && !testnet) return false
+  const check = sha256(sha256(raw.slice(0, 31)))
+  return check.slice(0, 4).every((b, i) => b === raw[31 + i])
+}
+
 function validateXrpAddress(addr: string): ValidationResult {
+  // Sending to an X-address would drop its embedded destination tag, so refuse it
+  // with a clear message rather than calling it invalid.
+  if (isXrpXAddress(addr)) return fail('xrpXAddressNotSupported')
   if (!addr.startsWith('r')) return fail('invalidXrpAddress')
   let raw: Uint8Array
   try { raw = base58xrp.decode(addr) } catch { return fail('invalidXrpAddress') }

@@ -59,6 +59,8 @@
 	"invalidCosmosLength": "无效的Cosmos地址长度",
 	"invalidCosmosAddress": "无效的Cosmos地址",
 	"invalidXrpAddress": "无效的XRP地址 — 必须以r开头",
+	"xrpXAddressNotSupported": "暂不支持 X 地址。请使用以 r 开头的经典地址，并单独填写目标标签。",
+	"zcashTexNotSupported": "暂时无法在此页面向 TEX 地址（tex1…）付款。请使用 Zcash 隐私标签页。",
 	"invalidSolanaAddress": "无效的Solana地址 — 必须是32-44个base58字符",
 	"invalidTronAddress": "无效的Tron地址 — 必须以T开头（34个字符）",
 	"invalidTonAddress": "无效的TON地址",

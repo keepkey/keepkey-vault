@@ -59,6 +59,8 @@
 	"invalidCosmosLength": "Недействительная длина адреса Cosmos",
 	"invalidCosmosAddress": "Недействительный адрес Cosmos",
 	"invalidXrpAddress": "Недействительный адрес XRP — должен начинаться с r",
+	"xrpXAddressNotSupported": "X-адреса пока не поддерживаются. Используйте классический адрес, начинающийся с r, и укажите тег назначения отдельно.",
+	"zcashTexNotSupported": "На TEX-адреса (tex1…) пока нельзя отправлять с этого экрана. Используйте вкладку конфиденциальности Zcash.",
 	"invalidSolanaAddress": "Недействительный адрес Solana — должен содержать 32-44 символа base58",
 	"invalidTronAddress": "Недействительный адрес Tron — должен начинаться с T (34 символа)",
 	"invalidTonAddress": "Недействительный адрес TON",

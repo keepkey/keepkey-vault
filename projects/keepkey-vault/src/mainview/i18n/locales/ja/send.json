@@ -59,6 +59,8 @@
 	"invalidCosmosLength": "無効なCosmosアドレスの長さ",
 	"invalidCosmosAddress": "無効なCosmosアドレス",
 	"invalidXrpAddress": "無効なXRPアドレス — rで始まる必要があります",
+	"xrpXAddressNotSupported": "Xアドレスにはまだ対応していません。rで始まる通常のアドレスを使い、宛先タグは別に入力してください。",
+	"zcashTexNotSupported": "TEXアドレス（tex1…）にはこの画面からはまだ送金できません。Zcashのプライバシータブを使ってください。",
 	"invalidSolanaAddress": "無効なSolanaアドレス — 32-44文字のbase58である必要があります",
 	"invalidTronAddress": "無効なTronアドレス — Tで始まる必要があります（34文字）",
 	"invalidTonAddress": "無効なTONアドレス",
