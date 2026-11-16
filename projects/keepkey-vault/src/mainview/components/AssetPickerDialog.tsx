@@ -1307,7 +1307,7 @@ export function AssetPickerDialog({
 
   const { fmtCompact, privateModeEnabled } = useFiat()
   // Connected device's firmware version — gates chains whose `minFirmware` the
-  // device can't meet (e.g. ZEC needs 7.15.0). Undefined until the first device-
+  // device can't meet (e.g. ZEC needs 7.17.0). Undefined until the first device-
   // state fetch resolves, which fails closed (firmware-restricted chains hidden).
   const { firmwareVersion } = useDeviceState()
 

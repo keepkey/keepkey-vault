@@ -4818,7 +4818,8 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           const slash = caip.indexOf('/')
           const chainCaip2 = slash >= 0 ? caip.slice(0, slash) : caip
           // Mirror the picker: gate by the connected device's firmware so e.g.
-          // ZEC reports `unsupported_firmware` below 7.15.0 instead of swappable.
+          // ZEC reports `unsupported_firmware` below 7.17.0. Passing this
+          // picker gate does not qualify the device for Nu7 signing.
           return json({
             caip,
             chainCaip2,

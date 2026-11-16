@@ -1771,8 +1771,8 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 								/>
 							</Flex>}
 
-							{/* Zcash + Hive have no toggles — both turn on automatically on
-							    firmware >= 7.15.0 (derived in bun/index.ts on device ready).
+							{/* Zcash + Hive have no toggles — derived in bun/index.ts on device ready.
+							    Zcash requires firmware >= 7.17.0 and its sidecar; Hive requires >= 7.15.0.
 							    BIP-85 likewise: the Dashboard shows it on firmware >= 7.16.0. */}
 
 							{/* Emulator toggle — dev tool, default off. Supported on macOS

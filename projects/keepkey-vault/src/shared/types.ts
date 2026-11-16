@@ -1642,7 +1642,7 @@ export interface AppSettings {
   moneroNodeMode?: 'local' | 'remote'
   moneroRestoreHeight: number    // earliest block to scan; zero (also unset/legacy) scans from genesis
   moneroPendingBroadcasts?: number  // signed XMR sends whose broadcast is unresolved (kept across off/wipe)
-  zcashPrivacyEnabled: boolean   // read-only capability: auto-ON when firmware >= 7.15.0 and this build includes zcash-cli
+  zcashPrivacyEnabled: boolean   // read-only capability: auto-ON when firmware >= 7.17.0 and this build includes zcash-cli
   hiveEnabled: boolean           // read-only capability: Hive blockchain — auto-ON when firmware >= 7.15.0
   emulatorEnabled: boolean       // feature flag: macOS emulator surface (default OFF — dev-only)
   offlineMode: boolean           // airplane mode: zero outbound network; BTC data ops throw OFFLINE (default OFF)

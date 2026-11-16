@@ -285,7 +285,7 @@ import { isQualifiedNu7AlphaEmulator } from './zcash-nu7-emulator'
 import { reviewedBundledEmulatorSourceSha256 } from './emulator-signed-provenance'
 import { preflightNu7DeviceRpc, requiresNu7DeviceRpc, rejectUnsupportedZcashSweep } from './zcash-nu7-admission'
 import { requireZcashNu7Builder } from './zcash-nu7-binary'
-import { zcashNu7SupportError } from '../shared/zcash-nu7'
+import { zcashNu7SupportError, ZCASH_NU7_MIN_FIRMWARE } from '../shared/zcash-nu7'
 import { EmulatorTransportDelegate } from './emulator-transport'
 import { buildCosmosStakingTx, buildCosmosNameRegTx } from "./txbuilder/cosmos"
 import { readPioneerTokenBalance } from "./txbuilder/evm"
@@ -2113,9 +2113,9 @@ function flushPendingScopedApiLogs() {
 	}
 }
 
-// Swap assets the connected device can actually sign — Pioneer's swappable
+// Swap assets meeting the device's minimum firmware — Pioneer's swappable
 // list minus any chain whose minFirmware the device doesn't meet (e.g. ZEC on
-// firmware < 7.15.0). Single source shared by the RPC handler and the REST
+// firmware < 7.17.0). Nu7 signing qualification is checked separately. Single source shared by the RPC handler and the REST
 // callback so both surfaces gate identically.
 async function deviceSwapAssets() {
 	const { getSwapAssets } = await import('./swap')
@@ -8424,8 +8424,9 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				await ensureZcashDeviceMatch(account, true)
 				await ensureZcashScanFresh()
 				// Transparent shielding uses standard ECDSA (secp256k1) for transparent inputs
-				// + Orchard RedPallas for the shielded output. The ECDSA part works on any
-				// firmware; the Orchard part needs >= 7.15.0 (checked by zcashShieldedInit).
+				// + Orchard RedPallas for the shielded output. Zcash capability requires
+				// firmware >= 7.17.0 and the sidecar; private-pool Nu7 sends retain
+				// separate consensus-branch qualification guards.
 				const zcashDef = CHAINS.find(c => c.id === 'zcash-shielded')
 				if (!zcashDef) {
 					throw new Error('Zcash shielded chain definition not found')
@@ -11560,17 +11561,18 @@ engine.on('state-change', (state) => {
 	// Auto-disable advanced features if firmware doesn't support them
 	if (state.state === 'ready') {
 		const fw = state.firmwareVersion
-		// Zcash + Hive are capabilities, not user toggles. Both require firmware
-		// >= 7.15.0; Zcash privacy additionally requires the native sidecar to be
-		// present in this app build. The setting row mirrors the derived value so
+		// Zcash + Hive are capabilities, not user toggles. Zcash requires firmware
+		// >= 7.17.0; Hive requires >= 7.15.0. Zcash also needs its native sidecar
+		// in this app build. The setting row mirrors the derived value so
 		// the getSetting() gates in rest-api.ts read the same answer.
 		const has715 = !bitcoinOnly && !!fw && versionCompare(fw, '7.15.0') >= 0
+		const hasZcashFirmware = !bitcoinOnly && !!fw && versionCompare(fw, ZCASH_NU7_MIN_FIRMWARE) >= 0
 		const zcashSidecarBinary = findZcashCliBinary()
-		const hasZcashPrivacy = has715 && supportsZcashPrivacyBuild(fw, zcashSidecarBinary)
+		const hasZcashPrivacy = hasZcashFirmware && supportsZcashPrivacyBuild(fw, zcashSidecarBinary)
 		if (zcashPrivacyEnabled !== hasZcashPrivacy) {
 			zcashPrivacyEnabled = hasZcashPrivacy
 			setSetting('zcash_privacy_enabled', hasZcashPrivacy ? '1' : '0')
-			const reason = !has715
+			const reason = !hasZcashFirmware
 				? `firmware ${fw || 'unknown'}`
 				: 'compatible zcash-cli sidecar missing from this build'
 			console.log(`[settings] Zcash privacy auto-${hasZcashPrivacy ? 'enabled' : 'disabled'} — ${reason}`)

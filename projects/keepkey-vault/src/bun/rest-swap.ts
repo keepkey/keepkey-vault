@@ -60,7 +60,8 @@ export async function handleSwapRoute(
     if (path === '/api/v2/swap/assets' && method === 'GET') {
       auth.requireAuth(req)
       // Firmware-filtered so REST clients never see assets the connected
-      // device can't sign (e.g. ZEC below 7.15.0) — mirrors the RPC + picker.
+      // device's minimum firmware excludes (e.g. ZEC below 7.17.0), matching
+      // RPC and picker. Nu7 signer qualification is checked separately.
       const assets = await resolveDeviceSwapAssets(callbacks)
       return json({ data: assets })
     }
