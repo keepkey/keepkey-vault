@@ -35,6 +35,30 @@ describe('offline asset icon pack', () => {
     expect(ICON_CAIP_ALIASES[hype]).toBe('eip155:2868/slip44:60')
   })
 
+  test('dashboard chains use their official inline SVG logos: offline, 64x64, no scripts or external refs', () => {
+    const chains = {
+      ethereum: 'eip155:1/slip44:60',
+      arbitrum: 'eip155:42161/slip44:60',
+      optimism: 'eip155:10/slip44:60',
+      polygon: 'eip155:137/slip44:60',
+      base: BASE_NATIVE_CAIP,
+      thorchain: 'cosmos:thorchain-mainnet-v1/slip44:931',
+      dogecoin: 'bip122:00000000001a91e3dace36e2be3bf030/slip44:3',
+    }
+    const seen = new Set<string>()
+    for (const [name, caip] of Object.entries(chains)) {
+      const icon = getAssetIcon(caip)
+      expect(icon.startsWith('data:image/svg+xml,'), name).toBe(true)
+      expect(caipToIcon(caip), name).toBe(icon)
+      const svg = decodeURIComponent(icon.slice('data:image/svg+xml,'.length))
+      expect(svg.startsWith('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">'), name).toBe(true)
+      expect(svg, name).not.toMatch(/<script|href=|<foreignObject|\son[a-z]+=/i)
+      expect(svg.replace('http://www.w3.org/2000/svg', ''), name).not.toMatch(/https?:\/\//)
+      seen.add(icon)
+    }
+    expect(seen.size).toBe(Object.keys(chains).length)
+  })
+
   test('every manifest target is a bounded raster file', async () => {
     for (const filename of new Set(Object.values(manifest))) {
       expect(filename).toMatch(/^[a-f0-9]{24}\.(png|jpg|webp|gif)$/)

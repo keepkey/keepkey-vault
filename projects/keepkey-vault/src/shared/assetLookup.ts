@@ -11,6 +11,7 @@
  */
 import offlineAssetIconsJson from './offlineAssetIcons.json'
 import { CHAINS, isStaleHyperliquidMetadata } from './chains'
+import { ARBITRUM_SVG, BASE_SVG, DOGECOIN_SVG, ETHEREUM_SVG, OPTIMISM_SVG, POLYGON_SVG, THORCHAIN_SVG } from './chainLogos'
 
 interface SlimAssetEntry {
   symbol: string
@@ -90,15 +91,18 @@ const ZCASH_SHIELDED_SVG =
 const MONERO_SVG =
   `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><circle cx="32" cy="32" r="32" fill="#ff6600"/><path fill="#4c4c4c" d="M6.5 42h11V26l14.5 14.5L46.5 26v16h11a30 30 0 0 1-51 0z"/><path fill="#fff" d="M32 6a26 26 0 0 0-25.5 30.9h7.9V18.3L32 35.9l17.6-17.6v18.6h7.9A26 26 0 0 0 32 6z"/></svg>`
 /** Base (eip155:8453) native ETH — the CDN serves Ethereum's diamond for this
- *  CAIP, so Base read as a second Ethereum. Base's mark is the blue square;
- *  it is inset on a white disc so the round icon mask doesn't crop it and it
- *  stays visible on Base's own blue chain-color backdrop. */
-const BASE_SVG =
-  `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><circle cx="32" cy="32" r="32" fill="#fff"/><rect x="14" y="14" width="36" height="36" rx="5" fill="#0000ff"/></svg>`
+ *  CAIP, so Base read as a second Ethereum; BASE_SVG (chainLogos.ts) is Base's own square. */
 export const BASE_NATIVE_CAIP = 'eip155:8453/slip44:60'
 const LOCAL_ICONS: Record<string, string> = {
   'bip122:000000000019d6689c085ae165831e93/slip44:0': `data:image/svg+xml,${encodeURIComponent(BITCOIN_SVG)}`,
   [BASE_NATIVE_CAIP]: `data:image/svg+xml,${encodeURIComponent(BASE_SVG)}`,
+  // Official vectors for the dashboard chains whose CDN/bundled PNGs were blurry or cropped (see chainLogos.ts).
+  'eip155:1/slip44:60': `data:image/svg+xml,${encodeURIComponent(ETHEREUM_SVG)}`,
+  'eip155:42161/slip44:60': `data:image/svg+xml,${encodeURIComponent(ARBITRUM_SVG)}`,
+  'eip155:10/slip44:60': `data:image/svg+xml,${encodeURIComponent(OPTIMISM_SVG)}`,
+  'eip155:137/slip44:60': `data:image/svg+xml,${encodeURIComponent(POLYGON_SVG)}`,
+  'cosmos:thorchain-mainnet-v1/slip44:931': `data:image/svg+xml,${encodeURIComponent(THORCHAIN_SVG)}`,
+  'bip122:00000000001a91e3dace36e2be3bf030/slip44:3': `data:image/svg+xml,${encodeURIComponent(DOGECOIN_SVG)}`,
   'bip122:00040fe8ec8471911baa1db1266ea15d/orchard:shielded': `data:image/svg+xml,${encodeURIComponent(ZCASH_SHIELDED_SVG)}`,
   'monero:418015bb9ae982a1975da7d79277c270/slip44:128': `data:image/svg+xml,${encodeURIComponent(MONERO_SVG)}`,
 }
