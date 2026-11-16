@@ -1,7 +1,7 @@
 /** Monero receiving bridge. Only an explicitly approved device view key reaches the local sidecar. */
 import type { MoneroConnectionInfo } from '../shared/types'
 import { createHash, randomBytes } from 'node:crypto'
-import { moneroDeviceNeedsMonitoringKey, moneroDeviceConstructionVersion, checkDeviceSigningBounds, type MoneroDeviceSigner } from './monero-device-signing'
+import { MONERO_DEVICE_CANDIDATE_SHA256, MONERO_DEVICE_SUBADDRESS_CANDIDATE_SHA256, moneroDeviceNeedsMonitoringKey, moneroDeviceConstructionVersion, checkDeviceSigningBounds, type MoneroDeviceSigner } from './monero-device-signing'
 import type { MoneroWatchStore } from './monero-watch-store'
 import * as managedSidecar from './monero-sidecar'
 import type { MoneroOutputRecord, MoneroTransferDraft } from './monero-sidecar'
@@ -16,6 +16,13 @@ import { MAX_FEE_ATOMIC, MAX_SIGNED_RESPONSE, MAX_UINT64, MONERO_PATH as PATH, M
   type MoneroSendReview } from './monero-wire'
 
 export type { MoneroSendReview } from './monero-wire'
+// Public IDs from device-protocol at alpha 66df3e24c. Pinned research artifacts
+// predate that allocation; never probe/fallback after a rejected device request.
+const FIRMWARE_WATCH = { getAddress: 1800, address: 1801, getWatchKey: 1802, watchKey: 1803,
+  imageInit: 1804, imageInitAck: 1805, imageStep: 1806, imageStepAck: 1807, imageFinal: 1808, imageFinalAck: 1809 }
+const RESEARCH_WATCH = { getAddress: 540, address: 541, getWatchKey: 542, watchKey: 543,
+  imageInit: 530, imageInitAck: 531, imageStep: 532, imageStepAck: 533, imageFinal: 534, imageFinalAck: 535 }
+const RESEARCH_FIRMWARE = new Set([MONERO_DEVICE_CANDIDATE_SHA256, MONERO_DEVICE_SUBADDRESS_CANDIDATE_SHA256])
 const MAX_RESPONSE = 4096
 const PRIMARY_ADDRESS = /^4[123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz]{94}$/
 const PREPARED_LIFETIME_MS = 10 * 60 * 1000
@@ -114,7 +121,7 @@ export interface MoneroWatchSidecar {
 }
 type Owned = Map<string, { amountAtomic: string; keyImage: string }>
 type Prepared = { id: string; key: string; generation: number; expires: number; draft: MoneroTransferDraft; review: MoneroSendReview }
-type Snapshot = { key: string; deviceId: string; wallet: NonNullable<Engine['wallet']>; transport: Transport; config: MoneroVaultConfig; emulator: boolean; watchScope: string | null }
+type Snapshot = { messages: typeof FIRMWARE_WATCH; key: string; deviceId: string; wallet: NonNullable<Engine['wallet']>; transport: Transport; config: MoneroVaultConfig; emulator: boolean; watchScope: string | null }
 type Synced = { key: string; generation: number; owned: Owned; txids: Set<string>; balanceAtomic: bigint }
 type PendingCheck = { state: 'unknown'; discardable: boolean; checkedAt: string; relayNode?: string; checkedNode: string }
 type Message = { type: number; body: Uint8Array }
@@ -144,6 +151,28 @@ function publicError(error: unknown, fallback: string): MoneroError {
   if (error instanceof MoneroError) return error
   if (error instanceof MoneroWalletPolicyError) return new MoneroError(error.message)
   return new MoneroError(error instanceof Error && (PUBLIC_ERRORS as readonly string[]).includes(error.message) ? error.message : fallback)
+}
+/** Interpret only the numeric Failure code. Firmware text may contain private request details. */
+function deviceFailure(body: Uint8Array, request: number): MoneroError {
+  let code: bigint | undefined
+  try {
+    const values = parseFields(body).get(1)
+    if (values?.length === 1 && typeof values[0] === 'bigint') code = values[0]
+  } catch { /* Malformed Failure remains a fixed, scrubbed diagnostic. */ }
+  const messages: Record<string, string> = {
+    '1': `The KeepKey firmware does not recognize Monero request ${request}; update Vault and firmware together`,
+    '2': 'The KeepKey expected a button acknowledgement for the Monero request',
+    '3': 'The KeepKey received an invalid Monero request; update Vault and firmware together',
+    '4': 'The KeepKey cancelled the Monero request',
+    '5': 'Unlock the KeepKey wallet first, then connect Monero again',
+    '6': 'KeepKey PIN entry was cancelled; unlock the wallet and try Monero again',
+    '7': 'The KeepKey PIN was invalid; unlock the wallet and try Monero again',
+    '11': 'The KeepKey wallet is not initialized',
+    '99': 'The KeepKey reported a firmware error during the Monero request',
+  }
+  return new MoneroError(messages[String(code)] ?? (code === undefined
+    ? 'The KeepKey rejected the Monero request without a valid failure code'
+    : `The KeepKey rejected the Monero request (firmware failure code ${code})`))
 }
 function decodeAddress(bytes: Uint8Array, minor = 0): string { return checkedAddress(new TextDecoder('utf-8', { fatal: true }).decode(bytes), minor) }
 async function writeMessage(delegate: Delegate, type: number, payload: Uint8Array = new Uint8Array()): Promise<void> {
@@ -258,7 +287,8 @@ export function createMoneroVault({ engine, confirm, getConfig, sidecar = manage
       engine.currentSeedEthAddress, config.daemonUrl, config.restoreHeight])
     const seed = engine.currentSeedEthAddress?.toLowerCase()
     const watchScope = seed && /^0x[0-9a-f]{40}$/.test(seed) ? JSON.stringify(['mainnet', PATH, state.deviceId, seed, !!state.isHiddenWallet]) : null
-    return { key, deviceId: state.deviceId, wallet, transport, config: { ...config }, emulator: engine.isEmulator, watchScope }
+    const messages = engine.isEmulator || RESEARCH_FIRMWARE.has(state.firmwareHash ?? '') ? RESEARCH_WATCH : FIRMWARE_WATCH
+    return { messages, key, deviceId: state.deviceId, wallet, transport, config: { ...config }, emulator: engine.isEmulator, watchScope }
   }
   const matches = (expected: Snapshot): boolean => {
     try { const current = snapshot(); return !!current && current.key === expected.key && current.wallet === expected.wallet && current.transport === expected.transport } catch { return false }
@@ -305,7 +335,7 @@ export function createMoneroVault({ engine, confirm, getConfig, sidecar = manage
           const cancelled = await readBounded(delegate, replyMs.device); cancelled.body.fill(0)
           throw new MoneroError('Unlock the KeepKey wallet first, then connect Monero again')
         }
-        if (response.type === 3) throw new MoneroError('The KeepKey rejected or cancelled the Monero request')
+        if (response.type === 3) throw deviceFailure(response.body, request)
         if (response.type !== responseType) throw new MoneroError('The KeepKey firmware does not support this Monero operation')
         transferred = true
         return response.body
@@ -325,7 +355,7 @@ export function createMoneroVault({ engine, confirm, getConfig, sidecar = manage
   }
   const actualAddress = async (current: Snapshot, generation: number, display: boolean, minor = 0) => {
     const request = concat([...PATH.map(part => numberField(1, part)), numberField(2, Number(display)), numberField(3, 0), numberField(4, 0), numberField(5, minor)])
-    const body = await receive(current, generation, 540, 541, request, display)
+    const body = await receive(current, generation, current.messages.getAddress, current.messages.address, request, display)
     try { const fields = parseFields(body); if (fields.size !== 1) throw new MoneroError('Invalid Monero address response'); return decodeAddress(bytesField(fields, 1), minor) } finally { body.fill(0) }
   }
   const statusFrom = (value: unknown, current: Snapshot, expectedAddress: string): MoneroVaultStatus => {
@@ -496,7 +526,7 @@ export function createMoneroVault({ engine, confirm, getConfig, sidecar = manage
               } catch { check(current, generation) } // Locked/missing OS storage falls back to device consent.
             }
             const request = concat([...PATH.map(part => numberField(1, part)), numberField(2, 0)])
-            const body = await receive(current, generation, 542, 543, request, true)
+            const body = await receive(current, generation, current.messages.getWatchKey, current.messages.watchKey, request, true)
             try {
               const fields = parseFields(body)
               if (fields.size !== 2 || decodeAddress(bytesField(fields, 2)) !== address) throw new MoneroError('The approved Monero view key belongs to a different wallet')
@@ -568,7 +598,7 @@ export function createMoneroVault({ engine, confirm, getConfig, sidecar = manage
         })
       } finally { busy = false }
     },
-    /** Device key images (530..535) for every wallet output, imported so the watch wallet knows which outputs are spent. */
+    /** Device key images (1804..1809 on public firmware; 530..535 on research artifacts) for every wallet output, imported so the watch wallet knows which outputs are spent. */
     async syncKeyImages(): Promise<MoneroVaultStatus> {
       assertMoneroStandardWallet(engine)
       if (busy) throw new MoneroError('A Monero device request is already in progress')
@@ -595,11 +625,11 @@ export function createMoneroVault({ engine, confirm, getConfig, sidecar = manage
         const proofs = savedProofs?.length === outputs.length ? savedProofs : await deviceOperation(current, async () => {
           const opened: Array<{ keyImage: string; signature: string }> = []
           for (const session of sessions) {
-            (await receive(current, generation, 530, 531, keyImageInitRequest(session), true)).fill(0)
+            (await receive(current, generation, current.messages.imageInit, current.messages.imageInitAck, keyImageInitRequest(session), true)).fill(0)
             const sealed: Array<{ iv: Uint8Array; blob: Uint8Array }> = []
             for (let start = 0; start < session.length; start += 4) {
               const batch = session.slice(start, start + 4)
-              const body = await receive(current, generation, 532, 533, concat(batch.map(output => lengthField(1, transferDetails(output)))), false)
+              const body = await receive(current, generation, current.messages.imageStep, current.messages.imageStepAck, concat(batch.map(output => lengthField(1, transferDetails(output)))), false)
               try {
                 const fields = parseFields(body), records = fields.get(1) ?? []
                 if (fields.size !== 1 || records.length !== batch.length) throw new MoneroError('Invalid Monero key-image response')
@@ -610,7 +640,7 @@ export function createMoneroVault({ engine, confirm, getConfig, sidecar = manage
                 }
               } finally { body.fill(0) }
             }
-            const final = await receive(current, generation, 534, 535, new Uint8Array(), false)
+            const final = await receive(current, generation, current.messages.imageFinal, current.messages.imageFinalAck, new Uint8Array(), false)
             try {
               const fields = parseFields(final)
               if (fields.size !== 1) throw new MoneroError('Invalid Monero key-image response')

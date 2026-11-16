@@ -288,28 +288,34 @@ class Emulator {
     this.queue.push(...reports(first[0], first[1]))
     if (first[0] === 26) this.pending = rest
   }
+  publicOnly = false
   private handle(type: number, body: Uint8Array) {
     this.received.push({ type, body })
+    // Independent public firmware fixture; pending ButtonAck replies keep their mapped IDs.
+    const publicProtocol = type >= 1800 && type <= 1809
+    if (this.publicOnly && [540, 542, 530, 532, 534].includes(type)) return this.respond([[3, new Uint8Array([8, 1])]])
+    const replyType = (id: number) => publicProtocol ? ({ 541: 1801, 543: 1803, 531: 1805, 533: 1807, 535: 1809 } as Record<number, number>)[id] : id
+    if (publicProtocol) type = ({ 1800: 540, 1802: 542, 1804: 530, 1806: 532, 1808: 534 } as Record<number, number>)[type]
     const images = this.keyImageOverride?[this.keyImageOverride]:fixtures.cases.base.signedTransaction.keyImages as string[]
     if (type === 27) { if (this.pending[0]?.[0] === 26 || (this.pending[0]?.[0] === 65001 || this.pending[0]?.[0] === 65003)) this.onReviewScreen?.(); return this.respond(this.pending) }
     if (type === 20) return this.respond([[3, new Uint8Array([8, 4])]])
     if (this.pinLocked && (type === 540 || type === 542 || type === 530 || (type === 65000 || type === 65002))) return this.respond([[18, new Uint8Array([8, 1])]])
     if (type === 540) {
       const minor = Number(parseFields(body).get(5)?.[0] ?? 0n)
-      return this.respond([[541, lengthField(1, new TextEncoder().encode(minor ? SUBADDRESS : this.address))]])
+      return this.respond([[replyType(541), lengthField(1, new TextEncoder().encode(minor ? SUBADDRESS : this.address))]])
     }
-    if (type === 542) return this.respond([[26, new Uint8Array()], [543, concat([lengthField(1, new Uint8Array(32).fill(7)), lengthField(2, new TextEncoder().encode(this.address))])]])
-    if (type === 530) return this.respond([[26, new Uint8Array()], [531, new Uint8Array()]])
+    if (type === 542) return this.respond([[26, new Uint8Array()], [replyType(543), concat([lengthField(1, new Uint8Array(32).fill(7)), lengthField(2, new TextEncoder().encode(this.address))])]])
+    if (type === 530) return this.respond([[26, new Uint8Array()], [replyType(531), new Uint8Array()]])
     if (type === 532) {
       // Key image per output: the fixture's for the fixture output, a derived one for synthetic outputs.
       const outKeys = parseFields(body).get(1)!.map(record => hex(parseFields(record as Uint8Array).get(1)![0] as Uint8Array))
-      return this.respond([[533, concat(outKeys.map((outKey, i) => {
+      return this.respond([[replyType(533), concat(outKeys.map((outKey, i) => {
         const image = outKey === fixtures.cases.base.adapterOutputs.outputs[0].out_key ? images[0] : hex(keccak_256(unhex(outKey)))
         const iv = new Uint8Array(12).fill(i + 1), plain = concat([unhex(image), new Uint8Array(64).fill(5)])
         return lengthField(1, concat([lengthField(1, iv), lengthField(3, chacha20poly1305(ENC_KEY, iv).encrypt(plain))]))
       }))]])
     }
-    if (type === 534) return this.respond([[535, lengthField(1, ENC_KEY.slice())]])
+    if (type === 534) return this.respond([[replyType(535), lengthField(1, ENC_KEY.slice())]])
     if (type === 65000 || type === 65002) {
       const screens: Array<[number, Uint8Array]> = Array.from({ length: this.reviewScreens }, () => [26, new Uint8Array()])
       // Each ButtonRequest waits for its own ButtonAck before the next message.
@@ -1061,4 +1067,16 @@ test('standard hardware sends do not reopen an unnecessary private monitoring cr
   const review=await b.api.prepareSend({address:RECIPIENT,amountAtomic:'2000000000000'})
   await b.api.send({prepareId:review.prepareId});expect(loads).toBe(before);expect(b.calls.relays).toHaveLength(1)
  }finally{db.close()}
+})
+
+test('public firmware uses 1800..1809 for monitoring and key images while unqualified signing stays blocked', async () => {
+  const b = bridge(); b.engine.isEmulator = false; b.state.activeTransport = 'hid'; b.delegate.publicOnly = true
+  ;(b.state as any).firmwareHash = 'a0275ca76568ace103cbb2daa069f76b0d8d7b5005a3419548a578018eda1808'
+  await b.api.connect(); await b.api.syncKeyImages()
+  expect(sentTypes(b)).toEqual([1800, 1802, 27, 1804, 27, 1806, 1808])
+  expect(b.calls.imports).toHaveLength(1)
+  expect(await b.api.getStatus()).toMatchObject({ keyImagesSynced: true, spendStateKnown: true, canSend: false, sendBlocked: 'firmware' })
+  await expect(b.api.prepareSend({ address: RECIPIENT, amountAtomic: '2000000000000' })).rejects.toThrow('hardware signing')
+  expect(b.calls.transfers).toHaveLength(0); expect(b.calls.relays).toHaveLength(0)
+  expect(b.confirmed).toHaveLength(0)
 })

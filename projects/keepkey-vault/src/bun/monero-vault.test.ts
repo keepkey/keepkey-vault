@@ -22,6 +22,11 @@ function reports(type: number, body: Uint8Array = new Uint8Array()): Uint8Array[
   return result
 }
 class Device {
+  constructor(public research = false) {}
+  failureCode = 1
+  failureBody: Uint8Array | null = null
+  watchScreens = 1
+  private approvalsLeft = 0
   onButtonRequest: (() => void) | null = null
   sent: Array<{ type: number; report: Uint8Array; debug: boolean }> = []
   consumed: Uint8Array[] = []
@@ -34,16 +39,19 @@ class Device {
   watchReadHook: (() => void) | null = null
   async writeChunk(report: Uint8Array, debug = false) {
     const type = (report[3] << 8) | report[4]
+    const [address, addressReply, watch, watchReply] = this.research ? [540, 541, 542, 543] : [1800, 1801, 1802, 1803]
     this.sent.push({ type, report: report.slice(), debug })
-    if (type === 540) {
-      if (this.unsupported) this.queue.push(...reports(3, new Uint8Array([8, 1])))
+    if (type === address) {
+      if (this.unsupported) this.queue.push(...reports(3, this.failureBody ?? combine(new Uint8Array([8, this.failureCode]), text(2, "DO-NOT-EXPOSE firmware detail"))))
       else if (this.pinChallenge) this.queue.push(...reports(18, new Uint8Array([8, 1])))
-      else if (report[28] === 1) { this.pending = 541; this.queue.push(...reports(26)) }
-      else this.queue.push(...reports(541, this.addressBody))
-    } else if (type === 542) { this.pending = 543; this.queue.push(...reports(26)) }
+      else if (report[28] === 1) { this.pending = addressReply; this.queue.push(...reports(26)) }
+      else this.queue.push(...reports(addressReply, this.addressBody))
+    } else if (type === watch) { this.pending = watchReply; this.approvalsLeft = this.watchScreens - 1; this.queue.push(...reports(26)) }
     else if (type === 27) {
-      this.queue.push(...reports(this.pending, this.pending === 543 ? this.watchBody : this.addressBody)); this.pending = 0
+      if (this.approvalsLeft-- > 0) { this.queue.push(...reports(26)); return }
+      this.queue.push(...reports(this.pending, this.pending === watchReply ? this.watchBody : this.addressBody)); this.pending = 0
     } else if (type === 20) { this.queue.push(...reports(3, new Uint8Array([8, 4]))); this.pending = 0 }
+    else this.queue.push(...reports(3, new Uint8Array([8, 1])))
   }
   silent = false
   disconnects = 0
@@ -56,16 +64,16 @@ class Device {
     this.consumed.push(report)
     const type = report[1] === 35 && report[2] === 35 ? (report[3] << 8) | report[4] : -1
     if (type === 26) this.onButtonRequest?.()
-    if (type === 543) this.watchReadHook?.()
+    if (type === (this.research ? 543 : 1803)) this.watchReadHook?.()
     return report
   }
 }
 function fixture(emulator = false, replyMs?: { device: number; human: number }, watchStore?: MoneroWatchStore, onTransportFailure?: (transport: unknown) => void) {
-  const delegate = new Device()
+  const delegate = new Device(emulator)
   let locked = false, reviews = 0, configures = 0, starts = 0, stops = 0
   let configuredKey: Uint8Array | null = null
   let configuredOptions: Record<string, unknown> | null = null
-  const state = { state: 'ready', deviceId: 'PUBLIC-DEVICE-A', activeTransport: emulator ? 'emulator' : 'hid', isHiddenWallet: false, firmwareVersion: '7.17.0' }
+  const state = { state: 'ready', deviceId: 'PUBLIC-DEVICE-A', activeTransport: emulator ? 'emulator' : 'hid', isHiddenWallet: false, firmwareVersion: '7.17.0', firmwareHash: undefined as string | undefined }
   const config = { enabled: true, offline: false, daemonUrl: 'https://node.example', restoreHeight: 100 }
   const status = { network: 'mainnet' as const, address: ADDRESS, balanceAtomic: '84653050000', unlockedBalanceAtomic: '84653050000',
     walletHeight: 120, transactions: [{ txid: 'ab'.repeat(32), amountAtomic: '84653050000', confirmations: 12, locked: false, height: 108, type: 'in' }],
@@ -109,13 +117,13 @@ test('status alone cannot export keys, start a sidecar or prompt the device', as
   expect(f.delegate.sent).toHaveLength(0)
 })
 
-test('physical connection uses real 540 then explicitly approved 542 and ACKs without debug decisions', async () => {
+test('physical connection uses firmware 1800 then explicitly approved 1802 and ACKs without debug decisions', async () => {
   const f = fixture(), value = await f.api.connect()
   expect(value.address).toBe(ADDRESS)
   expect(value.monitorReady).toBe(true)
   expect(value.canSend).toBe(false)
   expect(value.spendStateKnown).toBe(false)
-  expect(f.delegate.sent.map(item => item.type)).toEqual([540, 542, 27])
+  expect(f.delegate.sent.map(item => item.type)).toEqual([1800, 1802, 27])
   expect(f.delegate.sent.every(item => !item.debug)).toBe(true)
   expect(f.counts()).toMatchObject({ reviews: 0, configures: 1, starts: 1 })
   expect(f.options()).toMatchObject({ address: ADDRESS, network: 'mainnet', daemonUrl: f.config.daemonUrl, restoreHeight: 100 })
@@ -234,7 +242,7 @@ test('disabled, offline, locked and insecure node configurations refuse connect 
 test('unexpected PIN challenge is cancelled and never answered by the raw bridge', async () => {
   const f = fixture(); f.delegate.pinChallenge = true
   await expect(f.api.connect()).rejects.toThrow('Unlock')
-  expect(f.delegate.sent.map(item => item.type)).toEqual([540, 20])
+  expect(f.delegate.sent.map(item => item.type)).toEqual([1800, 20])
   expect(f.counts().configures).toBe(0)
 })
 
@@ -247,8 +255,8 @@ test('firmware older than 7.17.0 refuses connect before any USB traffic', async 
 
 test('unsupported device firmware fails without a static address or a view-key request', async () => {
   const f = fixture(); f.delegate.unsupported = true
-  await expect(f.api.connect()).rejects.toThrow('rejected')
-  expect(f.delegate.sent.map(item => item.type)).toEqual([540])
+  await expect(f.api.connect()).rejects.toThrow('does not recognize Monero request 1800')
+  expect(f.delegate.sent.map(item => item.type)).toEqual([1800])
   expect(f.counts().configures).toBe(0)
   expect((await f.api.getStatus()).available).toBe(false)
 })
@@ -311,19 +319,19 @@ test('saved physical monitoring access reconnects without exporting the view key
  f.engine.currentSeedEthAddress='0x'+'a'.repeat(40)
  try {
   await f.api.connect()
-  expect(f.delegate.sent.filter(x=>x.type===542)).toHaveLength(1)
+  expect(f.delegate.sent.filter(x=>x.type===1802)).toHaveLength(1)
   f.api.invalidate();f.delegate.sent=[]
   await f.api.connect()
-  expect(f.delegate.sent.map(x=>x.type)).toEqual([540])
+  expect(f.delegate.sent.map(x=>x.type)).toEqual([1800])
   expect([...f.key()!]).toEqual(Array(32).fill(0))
   f.delegate.sent=[]
   await f.api.getAddress({showDisplay:false})
   expect(f.delegate.sent).toHaveLength(0)
   await f.api.getAddress({showDisplay:true})
-  expect(f.delegate.sent.map(x=>x.type)).toEqual([540,27])
+  expect(f.delegate.sent.map(x=>x.type)).toEqual([1800,27])
   f.engine.currentSeedEthAddress='0x'+'b'.repeat(40);f.api.invalidate();f.delegate.sent=[]
   await f.api.connect()
-  expect(f.delegate.sent.some(x=>x.type===542)).toBe(true)
+  expect(f.delegate.sent.some(x=>x.type===1802)).toBe(true)
  }finally{db.close()}
 })
 
@@ -331,7 +339,7 @@ test('missing seed identity never reads or writes saved monitoring access',async
  const db=new Database(':memory:')
  const store=createMoneroWatchStore({database:()=>db,profile:'test',key:async()=>{throw Error('must not access OS store')}})
  const f=fixture(false,undefined,store)
- try {await f.api.connect();f.api.invalidate();await f.api.connect();expect(f.delegate.sent.filter(x=>x.type===542)).toHaveLength(2)}
+ try {await f.api.connect();f.api.invalidate();await f.api.connect();expect(f.delegate.sent.filter(x=>x.type===1802)).toHaveLength(2)}
  finally{db.close()}
 })
 
@@ -360,8 +368,8 @@ test('LIBUSB_ERROR_NOT_FOUND requests a fresh transport without replaying the fa
 
 test('a normal cancelled Monero approval does not trigger transport recovery',async()=>{
  let recovered=0
- const f=fixture(false,undefined,undefined,()=>{recovered++});f.delegate.unsupported=true
- await expect(f.api.connect()).rejects.toThrow('rejected or cancelled')
+ const f=fixture(false,undefined,undefined,()=>{recovered++});f.delegate.unsupported=true;f.delegate.failureCode=4
+ await expect(f.api.connect()).rejects.toThrow('cancelled the Monero request')
  expect(recovered).toBe(0)
 })
 
@@ -376,7 +384,7 @@ test('approved monitoring access survives an unreachable node, so another node n
   await expect(f.api.connect()).rejects.toThrow()
   f.sidecar.configureMoneroWatch=configure;f.config.daemonUrl='https://other.example';f.delegate.sent=[]
   await f.api.connect()
-  expect(f.delegate.sent.map(x=>x.type)).toEqual([540])
+  expect(f.delegate.sent.map(x=>x.type)).toEqual([1800])
  }finally{db.close()}
 })
 
@@ -465,4 +473,44 @@ test('a hidden connect does not create the monitoring table or request an OS sto
     expect(db.query("SELECT count(*) AS count FROM sqlite_master WHERE name='monero_watch_cache'").get()).toEqual({ count: 0 })
     expect(f.delegate.sent).toHaveLength(0)
   } finally { api.stop(); db.close() }
+})
+
+// Numeric IDs are independently copied from device-protocol at firmware 66df3e24c.
+test('alpha firmware view export acknowledges both consent screens, without a debug decision', async () => {
+  const f = fixture(); f.delegate.watchScreens = 2
+  await f.api.connect()
+  expect(f.delegate.sent.map(x => x.type)).toEqual([1800, 1802, 27, 27])
+  expect(f.delegate.sent.every(x => !x.debug)).toBe(true)
+})
+
+test('firmware failure codes distinguish unsupported requests, cancellation and locked wallets without leaking detail', async () => {
+  for (const [code, expected] of [[1, 'does not recognize Monero request 1800'], [3, 'invalid Monero request'],
+    [4, 'cancelled the Monero request'], [5, 'Unlock the KeepKey'], [6, 'PIN entry was cancelled'],
+    [7, 'PIN was invalid'], [11, 'not initialized'], [99, 'firmware error'], [90, 'failure code 90']] as const) {
+    const f = fixture(); f.delegate.unsupported = true; f.delegate.failureCode = code
+    const error = await f.api.connect().catch(error => error)
+    expect(error.message).toContain(expected)
+    expect(error.message).not.toContain('DO-NOT-EXPOSE')
+    expect(f.counts().configures).toBe(0)
+    expect(f.delegate.sent).toHaveLength(1)
+    expect(f.delegate.consumed.every(report => report.every(byte => byte === 0))).toBe(true)
+  }
+})
+
+test('only the two pinned physical research images retain the old watch protocol', async () => {
+  for (const hash of ['9bc7798fb71a744c23a81cb7987645b7b5418d16fd035acc00770d57d4ae4928',
+    '123af6de3b5ddbc1eeb94568825d1bb8107079bc9100ac67f9f6162ca34e2f83']) {
+    const f = fixture(); f.state.firmwareHash = hash; f.delegate.research = true
+    await f.api.connect()
+    expect(f.delegate.sent.map(x => x.type)).toEqual([540, 542, 27])
+  }
+})
+
+test('malformed, duplicate or absent firmware failure codes never expose the device message', async () => {
+  for (const body of [text(2, 'DO-NOT-EXPOSE'), combine(new Uint8Array([8, 1, 8, 4]), text(2, 'DO-NOT-EXPOSE')), new Uint8Array([8, 128])]) {
+    const f = fixture(); f.delegate.unsupported = true; f.delegate.failureBody = body
+    await expect(f.api.connect()).rejects.toThrow('without a valid failure code')
+    expect(f.counts().configures).toBe(0)
+    expect(f.delegate.consumed.every(report => report.every(byte => byte === 0))).toBe(true)
+  }
 })
