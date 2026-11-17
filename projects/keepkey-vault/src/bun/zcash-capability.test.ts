@@ -13,11 +13,12 @@ describe('Zcash release capability', () => {
 		expect(supportsZcashPrivacyBuild('7.17.0', '/app/zcash-cli')).toBe(true)
 		expect(supportsZcashPrivacyBuild('7.17.0', undefined)).toBe(false)
 	})
-	test('the 7.17 upgrade advertises Zcash with the actual emulator-only sending boundary', () => {
+	test('the 7.17 upgrade advertises alpha transparent signing without claiming private-pool support', () => {
 		for (const id of ['zcash', 'zcash-shielded']) expect(CHAINS.find(chain => chain.id === id)?.minFirmware).toBe('7.17.0')
 		const zcash = getUpgradeFeatures('7.16.0', '7.17.0').find(feature => feature.chains?.includes('zcash'))
 		expect(zcash?.description).toContain('reviewed 7.17 alpha emulator')
-		expect(zcash?.description).toContain('Physical-device and private-pool sends are not yet qualified')
+		expect(zcash?.description).toContain('supported physical alpha firmware')
+		expect(zcash?.description).toContain('Private-pool sends remain unqualified')
 		expect(getVersionInfo('7.15.0')?.features.some(feature => feature.chains?.includes('zcash'))).toBe(false)
 	})
 })

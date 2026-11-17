@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test'
 
-test('actual Zcash send UI uses scoped host readiness and never authorizes physical or disabled-alpha sending', () => {
+test('Zcash send UI admits host-qualified signers and revokes retired or disabled sessions', () => {
   const run = Bun.spawnSync([process.execPath, new URL('./support/send-zcash-readiness.tsx', import.meta.url).pathname], {
     cwd: new URL('../', import.meta.url).pathname, stdout: 'pipe', stderr: 'pipe', timeout: 30_000,
   })
@@ -9,6 +9,8 @@ test('actual Zcash send UI uses scoped host readiness and never authorizes physi
     physicalVersions: 2, qualifiedEmulator: true, alphaDisabled: true, staleStatus: true,
     immediateRevocation: true, unlockPreservesReview: true, retiredSigning: true,
     ownerScope: true, otherChain: true, unmounted: true, statusFailure: true,
-    malformedStatus: true, firstDevicePush: true, settingsPending: true, settingsFailure: true, settingsSaved: true, broadcasts: 0,
+    malformedStatus: true, firstDevicePush: true, settingsPending: true, settingsFailure: true, settingsSaved: true,
+    qualifiedPhysical: true, physicalUnlockPreservesReview: true, physicalHashRevocation: true,
+    physicalSessionRevocation: true, physicalTransportRevocation: true, malformedPhysicalStatus: true, explicitEmulator: true, broadcasts: 0,
   })
 }, 35_000)

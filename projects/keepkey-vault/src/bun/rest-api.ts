@@ -1768,9 +1768,9 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           catch (error: any) { return json({ error: 'Swap quote rejected', details: error.message }, 409) }
           // A claimed quote supplies the canonical source chain. Block selling
           // ZEC before device acquisition or host approval; receiving ZEC stays
-          // available. Nu7's qualified emulator send flow is Desktop-only.
+          // available. Nu7's validated transparent send flow is Desktop-only.
           if (validatedSwapPreview.fromChainId === 'zcash') {
-            return json({ error: 'Zcash swap signing over REST is not supported. Use KeepKey Vault Desktop with the 7.17 alpha emulator; physical support is not yet available.' }, 501)
+            return json({ error: 'Zcash swap signing over REST is not supported. Use KeepKey Vault Desktop with the reviewed 7.17 alpha emulator or supported physical alpha firmware.' }, 501)
           }
         }
 
@@ -1780,7 +1780,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
         if (method === 'POST' && path === '/utxo/sign-transaction') {
           auth.requireAuth(req)
           if (typeof reqBody?.coin === 'string' && reqBody.coin.trim().toLowerCase() === 'zcash') {
-            return json({ error: 'Zcash signing over REST is not supported. Use KeepKey Vault Desktop with the 7.17 alpha emulator; physical support is not yet available.' }, 501)
+            return json({ error: 'Zcash signing over REST is not supported. Use KeepKey Vault Desktop with the reviewed 7.17 alpha emulator or supported physical alpha firmware.' }, 501)
           }
         }
 

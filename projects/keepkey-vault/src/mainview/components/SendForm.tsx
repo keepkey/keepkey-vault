@@ -696,11 +696,11 @@ export function SendForm({ chain, address, balance, balanceLoading = false, toke
 					)}
 				</Flex>
 			</Flex>
-			{/* Native Zcash sending is limited to the reviewed alpha emulator. */}
-			{chain.id === 'zcash' && (
+			{/* Host readiness binds the current signer and Nu7 builder. */}
+			{chain.id === 'zcash' && !zcashSupport.available && (zcashSupport.pending || zcashSupport.reason) && (
 				<Flex role="status" align="center" gap="2" px="3" py="2" borderRadius="10px" bg="var(--ink-2)">
 					{zcashSupport.pending && <Spinner size="xs" flexShrink={0} aria-label={uiText("Checking Zcash sending support…")} />}
-					<Text fontSize="xs" color="kk.textMuted">{uiText("Zcash sending requires the 7.17 alpha emulator. Hardware support is not available yet.")}</Text>
+					<Text fontSize="xs" color="kk.textMuted">{zcashSupport.pending ? uiText("Checking Zcash sending support…") : zcashSupport.reason}</Text>
 				</Flex>
 			)}
 			{/* Gas balance hint for token sends */}

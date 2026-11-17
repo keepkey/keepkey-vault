@@ -6,7 +6,7 @@ import { isDeepStrictEqual } from 'node:util'
 import { HDKey } from '@scure/bip32'
 // @ts-ignore CJS dependency, also used by the ordinary UTXO builder.
 import bs58check from 'bs58check'
-import { assertZcashNu7Support, ZCASH_NU7_ACTIVATION_HEIGHT, ZCASH_NU7_BRANCH_ID, ZCASH_V6_VERSION_GROUP_ID } from '../../shared/zcash-nu7'
+import { assertZcashNu7Support, ZCASH_NU7_ACTIVATION_HEIGHT, ZCASH_NU7_BRANCH_ID, ZCASH_NU7_UNSUPPORTED_MESSAGE, ZCASH_V6_VERSION_GROUP_ID } from '../../shared/zcash-nu7'
 import { deviceOperationContext } from '../device-operation'
 import { decodeTexAddress, isTexAddress, p2pkhScript } from './zcash-tex'
 
@@ -16,9 +16,13 @@ const EMPTY_BUNDLE_META = { flags: 0, value_balance: 0, anchor: '00'.repeat(32) 
 const fail = (message: string): never => { throw new Error(`Zcash Nu7: ${message}`) }
 const current = () => deviceOperationContext.getStore()?.assertCurrent()
 let walletAuthorizer: (wallet: unknown) => boolean = () => false
+let walletSessionId: (() => string) | undefined
 /** Set only by the native host, using its active wallet/transport and loaded
  * reviewed alpha-firmware provenance. Caller transaction fields are ignored. */
-export function configureZcashNu7WalletAuthorizer(authorize: (wallet: unknown) => boolean): void { walletAuthorizer = authorize }
+export function configureZcashNu7WalletAuthorizer(authorize: (wallet: unknown) => boolean, sessionId?: () => string): void {
+  walletAuthorizer = authorize
+  walletSessionId = sessionId
+}
 const equal = isDeepStrictEqual
 const hex = (value: unknown, bytes: number) => typeof value === 'string' && new RegExp(`^[0-9a-f]{${bytes * 2}}$`, 'i').test(value)
 const pathValid = (p: unknown): p is number[] => Array.isArray(p) && p.length === 5
@@ -90,6 +94,7 @@ export function validateZcashTransparentPlan(tx: any): void {
 
 export interface ZcashTransparentDependencies {
   authorizeWallet?: (wallet: unknown) => boolean
+  sessionId?: () => string
   firmwareVersion?: string
   available?: () => boolean
   start?: () => Promise<void>
@@ -103,9 +108,12 @@ export async function signZcashTransparentTx(wallet: any, unsignedTx: any, depen
   const tx = structuredClone(unsignedTx)
   validateZcashTransparentPlan(tx)
   const authorize = dependencies.authorizeWallet ?? walletAuthorizer
+  const sessionId = dependencies.sessionId ?? walletSessionId
+  const session = sessionId?.()
   const assertSession = () => {
     current()
-    if (!authorize(wallet)) fail('sending requires the 7.17 alpha emulator; physical support is not yet available')
+    if (sessionId && sessionId() !== session) fail('the wallet session changed; rebuild this send in the current wallet')
+    if (!authorize(wallet)) fail(ZCASH_NU7_UNSUPPORTED_MESSAGE)
   }
   assertSession()
   const firmwareVersion = dependencies.firmwareVersion ?? await wallet.getFirmwareVersion?.()

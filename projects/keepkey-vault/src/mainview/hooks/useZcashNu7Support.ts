@@ -6,7 +6,20 @@ interface SupportSnapshot {
   revision: number
   pending: boolean
   available: boolean
+  reason?: string
 }
+
+interface HostSupport {
+  available: boolean
+  requiredFirmware: string
+  emulatorOnly: boolean
+  alphaOnly: boolean
+  signerKind?: 'alpha-emulator' | 'physical-alpha' | null
+  sessionId: string
+  reason?: string
+}
+
+const supportReason = (reason: unknown): string | undefined => typeof reason === 'string' && reason.trim() ? reason : undefined
 
 /** Read host-computed readiness only; never query the device from this hook. */
 export function useZcashNu7Support(enabled: boolean, ownerScope: string) {
@@ -32,11 +45,16 @@ export function useZcashNu7Support(enabled: boolean, ownerScope: string) {
       const request = ++revision.current
       authority.current = { scope, available: false }
       setSnapshot({ scope, revision: request, pending: true, available: false })
-      void rpcRequest<{ available: boolean; requiredFirmware: string; emulatorOnly: boolean; alphaOnly: boolean; sessionId: string }>('getZcashNu7Support', undefined, 5_000)
+      void rpcRequest<HostSupport>('getZcashNu7Support', undefined, 5_000)
         .then(status => {
           if (!active || authority.current.scope !== scope || request !== revision.current) return
+          const explicitSigner = status?.emulatorOnly === false
+            && (status.signerKind === 'alpha-emulator' || status.signerKind === 'physical-alpha')
+          // Older hosts could authorize only their reviewed alpha emulator.
+          const legacyEmulator = status?.emulatorOnly === true
+            && (status.signerKind == null || status.signerKind === 'alpha-emulator')
           const available = status?.available === true && status.requiredFirmware === '7.17.0'
-            && status.emulatorOnly === true && status.alphaOnly === true
+            && (explicitSigner || legacyEmulator) && status.alphaOnly === true
             && typeof status.sessionId === 'string' && status.sessionId.length > 0 && status.sessionId.length <= 256
           if (available) {
             if (acceptedSession.current !== null && acceptedSession.current !== status.sessionId) sessionEpoch.current++
@@ -45,14 +63,14 @@ export function useZcashNu7Support(enabled: boolean, ownerScope: string) {
           if (!available && previouslyGranted.current) sessionEpoch.current++
           previouslyGranted.current = available
           authority.current.available = available
-          setSnapshot({ scope, revision: request, pending: false, available })
+          setSnapshot({ scope, revision: request, pending: false, available, reason: available ? undefined : supportReason(status?.reason) })
         })
-        .catch(() => {
+        .catch((error: unknown) => {
           if (!active || authority.current.scope !== scope || request !== revision.current) return
           if (previouslyGranted.current) sessionEpoch.current++
           previouslyGranted.current = false
           authority.current.available = false
-          setSnapshot({ scope, revision: request, pending: false, available: false })
+          setSnapshot({ scope, revision: request, pending: false, available: false, reason: supportReason(error instanceof Error ? error.message : undefined) })
         })
     }
     refresh()
@@ -92,6 +110,7 @@ export function useZcashNu7Support(enabled: boolean, ownerScope: string) {
   return {
     available: !enabled || (currentSnapshot && snapshot.available && authority.current.available),
     pending: enabled && (!currentSnapshot || snapshot.pending),
+    reason: enabled && currentSnapshot ? snapshot.reason : undefined,
     sessionEpoch: enabled ? sessionEpoch.current : 0,
     canSend,
   }

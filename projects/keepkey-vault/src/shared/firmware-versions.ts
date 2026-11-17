@@ -52,7 +52,7 @@ export const FIRMWARE_VERSION_MAP: FirmwareVersionInfo[] = [
       },
       {
         title: 'Zcash Support',
-        description: 'Zcash Nu7 transparent signing on the reviewed 7.17 alpha emulator. Physical-device and private-pool sends are not yet qualified in Vault.',
+        description: 'Zcash Nu7 transparent signing on the reviewed 7.17 alpha emulator and supported physical alpha firmware. Private-pool sends remain unqualified in Vault.',
         chains: ['zcash'],
         color: '#ECB244',
         icon: 'chain',

@@ -54,9 +54,11 @@ const { createRoot } = await import('react-dom/client')
 const { CHAINS } = await import('../../src/shared/chains')
 const { SendForm } = await import(process.env.SEND_FORM_UNDER_TEST || '../../src/mainview/components/SendForm')
 const zcash = CHAINS.find(c => c.id === 'zcash')!, ethereum = CHAINS.find(c => c.id === 'ethereum')!
-const notice = 'Zcash sending requires the 7.17 alpha emulator. Hardware support is not available yet.'
+const notice = 'Synthetic host: this signer is not qualified for Zcash.'
 const checking = 'Checking Zcash sending support…'
-const status = (available: boolean, sessionId = 'synthetic-session-A') => ({ available, requiredFirmware: '7.17.0', emulatorOnly: true, alphaOnly: true, sessionId })
+const status = (available: boolean, sessionId = 'synthetic-session-A') => ({ available, requiredFirmware: '7.17.0', emulatorOnly: true, alphaOnly: true, sessionId, ...(!available ? { reason: notice } : {}) })
+const physicalStatus = (available: boolean, sessionId = 'physical-session-A', reason = notice) => ({ available, requiredFirmware: '7.17.0', emulatorOnly: false, alphaOnly: true, signerKind: 'physical-alpha', sessionId, ...(!available ? { reason } : {}) })
+const physicalDevice = (patch = {}) => device({ deviceId: 'synthetic-physical-device', activeTransport: 'hid', isEmulator: false, firmwareHash: '11'.repeat(32), ...patch })
 const device = (patch = {}) => ({ deviceId: 'synthetic-device', activeTransport: 'emulator', isEmulator: true, firmwareVersion: '7.17.0', state: 'ready', ...patch })
 let root: ReturnType<typeof createRoot>, container: HTMLDivElement, props: any
 const settle = async (ms = 0) => { await act(async () => { await new Promise(resolve => setTimeout(resolve, ms)) }) }
@@ -114,12 +116,12 @@ const toggleAlphaFirmware = new Function('rpcRequest', 'setAppSettings', 'setTog
 
 await mount(); await fill()
 expect(button('buildTransaction').disabled).toBe(true)
-expect(text()).toContain(notice); expect(container.querySelector(`[aria-label="${checking}"]`)).not.toBeNull()
+expect(text()).toContain(checking); expect(container.querySelector(`[aria-label="${checking}"]`)).not.toBeNull()
 expect(calls).toHaveLength(0)
 await resolveStatus(status(false)) // physical 7.16
-expect(button('buildTransaction').disabled).toBe(true); expect(container.querySelector(`[aria-label="${checking}"]`)).toBeNull()
+expect(button('buildTransaction').disabled).toBe(true); expect(text()).toContain(notice); expect(container.querySelector(`[aria-label="${checking}"]`)).toBeNull()
 await event('device-state', device({ firmwareVersion: '7.17.0', isEmulator: false, activeTransport: 'hid' }))
-await resolveStatus(status(false)) // physical 7.17 is also deliberately unsupported
+await resolveStatus(status(false)) // A version alone does not qualify physical firmware.
 expect(button('buildTransaction').disabled).toBe(true); result.physicalVersions = 2
 await event('emulator-status', { state: 'running' }); await resolveStatus(status(true))
 expect(button('buildTransaction').disabled).toBe(false); await build(); result.qualifiedEmulator = true
@@ -191,7 +193,7 @@ await unmount(); await resolveStatus(status(true), abandoned)
 expect([...listeners.values()].every(set => set.size === 0)).toBe(true); result.unmounted = true
 
 await mount(); await fill(); await act(async () => statusCalls.at(-1)!.reject(new Error('offline status bridge'))); await settle()
-expect(button('buildTransaction').disabled).toBe(true); expect(text()).toContain(notice); result.statusFailure = true
+expect(button('buildTransaction').disabled).toBe(true); expect(text()).toContain('offline status bridge'); result.statusFailure = true
 await event('emulator-status', { state: 'running' }); await resolveStatus({ available: true })
 expect(button('buildTransaction').disabled).toBe(true); result.malformedStatus = true
 await unmount()
@@ -228,6 +230,61 @@ expect(calls.filter(call => call.method === 'btcSignTx')).toHaveLength(0)
 await resolveStatus(status(false)); expect(button('buildTransaction').disabled).toBe(true)
 expect(toggling).toEqual([true, false, true, false, true, false]); result.settingsSaved = true
 window.removeEventListener('keepkey-settings-changed', countSettings)
+await unmount()
+
+// A physical candidate is admitted only by the explicit host signer contract.
+await mount(); await fill()
+await event('device-state', physicalDevice()); await resolveStatus(physicalStatus(true))
+expect(button('buildTransaction').disabled).toBe(false)
+expect(container.querySelector('[role="status"]')).toBeNull()
+expect(text()).not.toContain('Hardware support is not available yet.')
+await build(); result.qualifiedPhysical = true
+
+// Ordinary PIN transitions keep a valid review for this same physical session.
+await event('device-state', physicalDevice({ state: 'locked', pinPromptOpen: true })); await resolveStatus(physicalStatus(true))
+expect(button('signOnDevice').disabled).toBe(false)
+await event('device-state', physicalDevice({ state: 'ready', pinPromptOpen: false })); await resolveStatus(physicalStatus(true))
+expect(button('signOnDevice').disabled).toBe(false); result.physicalUnlockPreservesReview = true
+
+// Hash changes revoke the old handler before the next React commit.
+const oldPhysicalSign = button('signOnDevice')
+await act(async () => {
+  emit('device-state', physicalDevice({ firmwareHash: '22'.repeat(32) }))
+  oldPhysicalSign.dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
+})
+await settle(); expect(calls.filter(call => call.method === 'btcSignTx')).toHaveLength(0)
+await resolveStatus(physicalStatus(false, 'physical-session-A', 'Synthetic host: unrecognized firmware hash.'))
+expect(button('buildTransaction').disabled).toBe(true)
+expect(text()).toContain('Synthetic host: unrecognized firmware hash.')
+expect(input('amountPlaceholder').value).toBe('1'); result.physicalHashRevocation = true
+
+await event('device-state', physicalDevice({ deviceId: 'synthetic-physical-device-B' })); await resolveStatus(physicalStatus(true, 'physical-session-B'))
+await build(); await click('signOnDevice'); const oldPhysicalSession = calls.at(-1)!
+await event('device-state', physicalDevice({ deviceId: 'synthetic-physical-device-C' })); await resolveStatus(physicalStatus(true, 'physical-session-C'))
+await act(async () => oldPhysicalSession.pending.resolve('retired synthetic physical signature')); await settle()
+expect(text()).not.toContain('transactionSigned'); expect(button('broadcastTransaction')).toBeUndefined()
+expect(button('buildTransaction').disabled).toBe(false); result.physicalSessionRevocation = true
+
+await build(); const beforeTransport = calls.filter(call => call.method === 'btcSignTx').length
+const transportSign = button('signOnDevice')
+await act(async () => {
+  emit('device-state', physicalDevice({ deviceId: 'synthetic-physical-device-C', activeTransport: 'tcp', isEmulator: true }))
+  transportSign.dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
+})
+await settle(); expect(calls.filter(call => call.method === 'btcSignTx')).toHaveLength(beforeTransport)
+await resolveStatus(physicalStatus(false, 'retired-physical-session'))
+expect(button('buildTransaction').disabled).toBe(true); result.physicalTransportRevocation = true
+
+for (const patch of [{ signerKind: null }, { signerKind: 'unrecognized' }, { signerKind: 'physical-alpha', emulatorOnly: true }, { alphaOnly: false }]) {
+  await act(async () => window.dispatchEvent(new window.Event('keepkey-settings-changed'))); await settle()
+  await resolveStatus({ ...physicalStatus(true), ...patch })
+  expect(button('buildTransaction').disabled).toBe(true)
+}
+result.malformedPhysicalStatus = true
+// The explicit new emulator mode remains compatible with the host's broader policy.
+await act(async () => window.dispatchEvent(new window.Event('keepkey-settings-changed'))); await settle()
+await resolveStatus({ ...physicalStatus(true, 'explicit-emulator-session'), signerKind: 'alpha-emulator' })
+expect(button('buildTransaction').disabled).toBe(false); result.explicitEmulator = true
 await unmount()
 result.broadcasts = broadcasts
 console.log(JSON.stringify(result))

@@ -10,14 +10,14 @@ export function requiresNu7DeviceRpc(method: string, params: unknown): boolean {
 
 /** The audit sweep builder only supports the legacy Bitcoin-style format. */
 export function rejectUnsupportedZcashSweep(chainId: unknown): void {
-  if (chainId === 'zcash') throw new Error('Zcash audit sweeps are unavailable. Use the Nu7 Send flow with the 7.17 alpha emulator.')
+  if (chainId === 'zcash') throw new Error('Zcash audit sweeps are unavailable. Use the Nu7 Send flow with the reviewed 7.17 alpha emulator or supported physical alpha firmware.')
 }
 
 /** Check before acquiring a device lease or asking for a PIN. */
 export function preflightNu7DeviceRpc(
   method: string, params: unknown, firmwareVersion: string | undefined,
-  builderAvailable: boolean, qualifiedAlphaEmulator: boolean,
+  builderAvailable: boolean, admittedAlphaWallet: boolean,
 ): void {
   if (method === 'auditSweepPath') rejectUnsupportedZcashSweep((params as Record<string, unknown> | null)?.chainId)
-  if (requiresNu7DeviceRpc(method, params)) assertZcashNu7Support(firmwareVersion, builderAvailable, qualifiedAlphaEmulator)
+  if (requiresNu7DeviceRpc(method, params)) assertZcashNu7Support(firmwareVersion, builderAvailable, admittedAlphaWallet)
 }

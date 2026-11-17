@@ -5,8 +5,14 @@
 PR #643 is adapted onto the current 1.7 develop implementation, preserving native
 send safety, Cosmos/XRP chain-result confirmation, gateway caching and Monero fixes.
 Zcash capability metadata now starts at firmware **7.17.0**. Nu7 transparent signing
-is qualified only on the reviewed alpha emulator. Physical 7.17 devices and
-private-pool sends remain unqualified; a version string does not authorize them.
+retains the reviewed alpha emulator and now admits the specific physical alpha
+image from firmware source `66df3e24ce5a90dac790e89cc031d3cec82e9d15` for the
+operator's live hardware testing. Its full-image SHA256 is
+`a0275ca76568ace103cbb2daa069f76b0d8d7b5005a3419548a578018eda1808`.
+The hash and linked PCZT handlers were checked against the local image and ARM
+map. This is an explicit alpha admission, not a claim of completed physical
+transaction or mined-chain qualification. Other physical builds and private-pool
+sends remain unqualified; a version string does not authorize them.
 Receiving and balance monitoring remain available on supported builds.
 
 The latest checked-in certified emulator pin was verified against canonical
@@ -33,9 +39,15 @@ than changing a version field on the old serializer. Production Rust dependencie
 and their lockfile remain unchanged; a separate locked reference crate verifies
 bytes and input signature hashes using Nu7-aware upstream libraries.
 
-The backend binds authorization to the current wallet, actual emulator transport,
-running instance, alpha opt-in and reviewed loaded library digest. Request flags,
-semver alone and imported firmware metadata confer no trust. Unsupported Desktop
+The backend binds emulator authorization to the current wallet, actual emulator
+transport, running instance, alpha opt-in and reviewed loaded library digest.
+Physical alpha admission binds the current wallet, actual HID/WebUSB transport,
+initialized non-bootloader state and exact device-reported image hash. The
+firmware picker opt-in is not needed for a physical image already installed.
+Signing rechecks its wallet/session token after every awaited step, including
+PIN transitions and approval; device, seed, transport or firmware changes revoke
+the previous request. Request flags, semver alone and imported firmware metadata
+confer no trust. Unsupported Desktop
 requests fail before device acquisition/PIN. Legacy REST Zcash signing fails
 before approval; Desktop owns the supported Nu7 transparent flow.
 
@@ -49,8 +61,9 @@ serialization cannot accidentally handle a modern Zcash plan.
 
 Supported scope is mainnet P2PKH inputs, 1–8 inputs and outputs, one BIP44 account,
 and P2PKH/P2SH or TEX recipients. Memos/OP_RETURN are rejected, so memo-dependent
-swap routes are unqualified. Private-pool and physical-device support are separate
-qualification work. Structured provider rejections preserve a bounded reason;
+swap routes are unqualified. Private-pool and physical release qualification remain
+separate work; the pinned physical alpha is available for live operator testing.
+Structured provider rejections preserve a bounded reason;
 broadcast still makes one call to the selected provider.
 
 A new transparent-only sidecar process opens no wallet profile or viewing key;

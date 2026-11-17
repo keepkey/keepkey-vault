@@ -284,6 +284,7 @@ import { addSessionActivity, getSessionActivity, clearSessionActivity } from "./
 import { buildTx, broadcastTx, canonicalizeTronTokenCaip } from "./txbuilder"
 import { signUtxoTx, configureZcashNu7WalletAuthorizer } from './txbuilder/zcash-transparent'
 import { isQualifiedNu7AlphaEmulator } from './zcash-nu7-emulator'
+import { isAdmittedNu7PhysicalAlpha } from './zcash-nu7-physical'
 import { reviewedBundledEmulatorSourceSha256 } from './emulator-signed-provenance'
 import { preflightNu7DeviceRpc, requiresNu7DeviceRpc, rejectUnsupportedZcashSweep } from './zcash-nu7-admission'
 import { requireZcashNu7Builder } from './zcash-nu7-binary'
@@ -1353,30 +1354,40 @@ let zcashPurgeInFlight: Promise<void> | null = null
 let emulatorEnabled = false
 let preReleaseUpdates = false
 let alphaFirmware = false
-function qualifiedNu7Wallet(wallet: unknown): boolean {
+function nu7WalletSignerKind(wallet: unknown): 'alpha-emulator' | 'physical-alpha' | null {
+	const device = engine.getDeviceState()
+	if (isAdmittedNu7PhysicalAlpha(wallet, {
+		...device, wallet: engine.wallet, isEmulator: engine.isEmulator || device.isEmulator,
+	})) return 'physical-alpha'
 	return isQualifiedNu7AlphaEmulator(wallet, {
 		wallet: engine.wallet,
 		isEmulator: engine.isEmulator && engine.emuDelegate instanceof EmulatorTransportDelegate,
 		running: getEmulatorInstance() > 0,
 		alphaFirmware,
-		firmwareVersion: engine.getDeviceState().firmwareVersion,
+		firmwareVersion: device.firmwareVersion,
 		librarySha256: getLoadedEmulatorLibrarySha256(),
 		reviewedSourceSha256: reviewedBundledEmulatorSourceSha256(getLoadedEmulatorLibPath(), getLoadedEmulatorLibrarySha256()),
-	})
+	}) ? 'alpha-emulator' : null
 }
-configureZcashNu7WalletAuthorizer(qualifiedNu7Wallet)
+function qualifiedNu7Wallet(wallet: unknown): boolean { return nu7WalletSignerKind(wallet) !== null }
+configureZcashNu7WalletAuthorizer(qualifiedNu7Wallet, nu7WalletSessionId)
 const nu7WalletSessionIds = new WeakMap<object, number>()
 let nu7WalletSessionCounter = 0
 function nu7WalletSessionId(): string {
 	const wallet = engine.wallet
 	let owner = wallet ? nu7WalletSessionIds.get(wallet) : 0
 	if (wallet && !owner) { owner = ++nu7WalletSessionCounter; nu7WalletSessionIds.set(wallet, owner) }
-	return `${owner || 0}:${activitySessionEpoch}:${engine.isEmulator ? getEmulatorInstance() : 0}`
+	const device = engine.getDeviceState()
+	return createHash('sha256').update(JSON.stringify([
+		owner || 0, activitySessionEpoch, device.deviceId, device.activeTransport,
+		device.firmwareVersion, device.firmwareHash, engine.isEmulator ? getEmulatorInstance() : 0,
+	])).digest('hex')
 }
 
 function getZcashNu7Support() {
 	const firmwareVersion = engine.getDeviceState().firmwareVersion
-	let reason = zcashNu7SupportError(firmwareVersion, true, qualifiedNu7Wallet(engine.wallet))
+	const signerKind = nu7WalletSignerKind(engine.wallet)
+	let reason = zcashNu7SupportError(firmwareVersion, true, signerKind !== null)
 	if (!reason) {
 		const binary = findZcashCliBinary()
 		if (!binary) reason = zcashNu7SupportError(firmwareVersion, false, true)
@@ -1385,7 +1396,7 @@ function getZcashNu7Support() {
 			catch (error) { reason = error instanceof Error ? error.message : 'The Zcash Nu7 transaction builder is unavailable.' }
 		}
 	}
-	return { available: !reason, requiredFirmware: '7.17.0' as const, emulatorOnly: true as const, alphaOnly: true as const, sessionId: nu7WalletSessionId(), ...(reason ? { reason } : {}) }
+	return { available: !reason, requiredFirmware: '7.17.0' as const, emulatorOnly: false, alphaOnly: true as const, signerKind, sessionId: nu7WalletSessionId(), ...(reason ? { reason } : {}) }
 }
 let addressBookClearsignEnabled = false
 let privateModeEnabled = false
