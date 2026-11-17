@@ -56,7 +56,15 @@ export function parseSendQr(data: string, chain: ChainDef, isTokenSend = false):
   const separator = payload.indexOf('?')
   let recipient = separator < 0 ? payload : payload.slice(0, separator)
   const params = new URLSearchParams(separator < 0 ? '' : payload.slice(separator + 1))
-  for (const key of params.keys()) if (key.startsWith('req-')) return null
+  for (const key of params.keys()) {
+    if (key.startsWith('req-')) return null
+    // An unsupported mint/asset selection cannot be dropped while interpreting
+    // its amount as the selected native coin (or a different selected token).
+    if (['spl-token', 'jetton', 'asset', 'assetid', 'token', 'tokenaddress', 'contractaddress', 'contract', 'currency', 'issuer', 'denom'].includes(key.toLowerCase())) return null
+    // Without a function path, EIP-681 still must not turn typed contract args
+    // or calldata into an ordinary native payment to the contract address.
+    if (scheme === 'ethereum' && !['value', 'amount', 'label', 'message', 'gas', 'gasLimit', 'gasPrice'].includes(key)) return null
+  }
   for (const key of ['amount', 'value', 'memo', 'dt']) if (params.getAll(key).length > 1) return null
 
   if (scheme === 'ethereum') {

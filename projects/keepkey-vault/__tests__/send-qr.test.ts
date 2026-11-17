@@ -57,6 +57,20 @@ describe('selected network and amount binding', () => {
     expect(parseSendQr(`ethereum:${eth}@1?value=2.014e18`, ethereum, true)).toEqual({ recipient: eth, memo: '' })
     expect(parseSendQr(`ethereum:${eth}/transfer?address=${eth}&uint256=1`, ethereum, true)).toBeNull()
   })
+  test('typed Ethereum arguments and calldata cannot become ordinary native payments', () => {
+    for (const query of [`address=${eth}&uint256=1`, 'data=0xa9059cbb', 'uint256=1']) {
+      for (const token of [false, true]) expect(parseSendQr(`ethereum:${eth}?${query}`, ethereum, token)).toBeNull()
+    }
+  })
+  test('unsupported asset bindings never price a token quantity as native coins', () => {
+    const solana = chain('solana'), address = '11111111111111111111111111111111'
+    expect(parseSendQr(`solana:${address}?amount=1`, solana)?.amount).toBe('1')
+    for (const token of [false, true]) {
+      expect(parseSendQr(`solana:${address}?amount=1&spl-token=EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v`, solana, token)).toBeNull()
+      expect(parseSendQr(`ethereum:${eth}?amount=1&token=${eth}`, ethereum, token)).toBeNull()
+      expect(parseSendQr(`cosmos:${atom}?amount=1&denom=uusdc`, cosmos, token)).toBeNull()
+    }
+  })
   test('unreadable, incomplete and oversized scans do not create partial drafts', () => {
     for (const data of ['', 'ethereum:', `${eth}\0?value=1`, eth + 'x'.repeat(4096)]) expect(parseSendQr(data, ethereum)).toBeNull()
   })
