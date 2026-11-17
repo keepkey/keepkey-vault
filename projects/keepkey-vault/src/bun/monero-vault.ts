@@ -1,5 +1,5 @@
 /** Monero receiving bridge. Only an explicitly approved device view key reaches the local sidecar. */
-import type { MoneroConnectionInfo } from '../shared/types'
+import type { MoneroCachedBalance, MoneroConnectionInfo } from '../shared/types'
 import { createHash, randomBytes, randomInt } from 'node:crypto'
 import type { MoneroCoreVerifier } from './monero-device-signing'
 import { checkStreamSigningBounds, signMoneroStream, streamNeedsMonitoringKey, validateStreamMonitoringKey, supportsMoneroSigning, STREAM_ERRORS, type MoneroSigningPhase, type MoneroText } from './monero-stream-signer'
@@ -51,6 +51,7 @@ export interface MoneroVaultConfig {
   restoreHeight: number
 }
 export interface MoneroVaultStatus {
+  cachedBalance?: MoneroCachedBalance
   connection?: MoneroConnectionInfo
   available: boolean
   enabled: boolean
@@ -253,6 +254,10 @@ export function createMoneroVault({ engine, confirm, getConfig, sidecar = manage
   let activeDelegate: Delegate | null = null
   let bound: { snapshot: Snapshot; address: string } | null = null
   let lastGood: MoneroVaultStatus | null = null
+  let cachedBalance: { scope: string; value: MoneroCachedBalance } | null = null
+  let loadedBalanceScope: string | null = null
+  let balanceWrite: Promise<unknown> = Promise.resolve()
+  let loadingBalance: { scope: string; promise: Promise<MoneroCachedBalance | null> } | null = null
   let synced: Synced | null = null
   let prepared: Prepared | null = null
   // Signed txs whose broadcast outcome is unknown, per wallet, persisted. Kept across reconnects and
@@ -278,6 +283,45 @@ export function createMoneroVault({ engine, confirm, getConfig, sidecar = manage
   const persistGuards = () => { assertMoneroStandardWallet(engine); pendingStore.saveGuards?.([...guards.values()]) }
   const clearGuard = (wallet: string) => { assertMoneroStandardWallet(engine); guards.delete(wallet); try { persistGuards() } catch { console.warn('[monero] Could not clear a discard guard') } }
   const walletKey = (current: Snapshot, address: string) => `${current.deviceId}:${address}`
+  /** A cached amount belongs to the current standard seed and device, independent of node/scan settings. */
+  const balanceScope = (): string | null => {
+    if (moneroHiddenWallet(engine) || !getConfig().enabled || !engine.wallet) return null
+    const state = engine.getDeviceState(), seed = engine.currentSeedEthAddress?.toLowerCase()
+    if (!state.deviceId || !['ready', 'needs_pin'].includes(state.state) || !seed || !/^0x[0-9a-f]{40}$/.test(seed)) return null
+    return JSON.stringify(['mainnet', PATH, state.deviceId, seed, false])
+  }
+  const withCachedBalance = async (status: MoneroVaultStatus): Promise<MoneroVaultStatus> => {
+    const scope = balanceScope(), generation = epoch
+    if (!scope) return status
+    if (loadedBalanceScope !== scope && watchStore?.loadBalance) {
+      try {
+        if (loadingBalance?.scope !== scope) loadingBalance = {scope, promise: watchStore.loadBalance(scope)}
+        const value = await loadingBalance.promise
+        if (epoch !== generation || balanceScope() !== scope) return empty(!!getConfig().enabled, false)
+        loadedBalanceScope = scope
+        // A concurrently observed live balance takes precedence over an older disk read.
+        if (value && (cachedBalance?.scope !== scope || Date.parse(value.updatedAt) > Date.parse(cachedBalance.value.updatedAt))) cachedBalance = {scope,value}
+      } catch { /* Secure storage unavailable: keep any current amount; never substitute plaintext. */ }
+      finally { if (loadingBalance?.scope === scope) loadingBalance = null }
+    }
+    if (epoch !== generation || balanceScope() !== scope) return empty(!!getConfig().enabled, false)
+    return cachedBalance?.scope === scope ? {...status, cachedBalance: {...cachedBalance.value}} : status
+  }
+  const rememberBalance = (current: Snapshot, status: MoneroVaultStatus) => {
+    if (!status.monitorReady || !status.updatedAt || status.walletHeight <= 0 || !current.watchScope || balanceScope() !== current.watchScope) return
+    // A failed/locked read cannot authorize replacing a stronger snapshot that
+    // may already be on disk. Retry loading it on the next status observation.
+    if (watchStore?.loadBalance && loadedBalanceScope !== current.watchScope) return
+    const value: MoneroCachedBalance = {balanceAtomic:status.balanceAtomic,unlockedBalanceAtomic:status.unlockedBalanceAtomic,
+      walletHeight:status.walletHeight,updatedAt:status.updatedAt,spendStateKnown:status.spendStateKnown}
+    if (cachedBalance?.scope === current.watchScope && cachedBalance.value.spendStateKnown && !status.spendStateKnown && status.balanceAtomic !== '0') return
+    if (cachedBalance?.scope === current.watchScope && Date.parse(value.updatedAt) < Date.parse(cachedBalance.value.updatedAt)) return
+    if (cachedBalance?.scope === current.watchScope && JSON.stringify(cachedBalance.value) === JSON.stringify(value)) return
+    cachedBalance = {scope:current.watchScope,value}; loadedBalanceScope = current.watchScope
+    // Display snapshots are independent of transaction authorization. OS storage failure must not block a live wallet.
+    const scope = current.watchScope, address = status.address
+    balanceWrite = balanceWrite.then(() => watchStore?.saveBalance?.(scope, address, value)).catch(() => {console.warn('[monero] Last known balance could not be saved securely')})
+  }
   const snapshot = (): Snapshot | null => {
     assertMoneroStandardWallet(engine)
     const config = getConfig(), state = engine.getDeviceState(), wallet = engine.wallet
@@ -488,13 +532,19 @@ export function createMoneroVault({ engine, confirm, getConfig, sidecar = manage
     settlePending(wallet)
     void sidecar.refreshMoneroWatch?.().catch(() => {})
   }
-  const withSendState = (status: MoneroVaultStatus, current: Snapshot): MoneroVaultStatus => {
+  const withSendState = async (status: MoneroVaultStatus, current: Snapshot, generation: number): Promise<MoneroVaultStatus> => {
+    // Load before considering this observation for persistence: connect may
+    // finish before the first startup poll or while that poll is still reading.
+    await withCachedBalance(status)
+    check(current, generation)
     const blocker = sendBlocker(current, status), images = keyImagesFor(current)
     const stale = !!images && keyImagesStale(images, status), keyImagesSynced = !!images && !stale, record = pendingFor(current)
-    return { ...status, signingReady: !signingBlocker(current), transactions: status.transactions.map(tx => ({ ...tx })), canSend: !blocker && !signingPhase, ...(signingPhase ? { signingPhase } : {}), keyImagesSynced, spendStateKnown: keyImagesSynced,
+    const result: MoneroVaultStatus = { ...status, signingReady: !signingBlocker(current), transactions: status.transactions.map(tx => ({ ...tx })), canSend: !blocker && !signingPhase, ...(signingPhase ? { signingPhase } : {}), keyImagesSynced, spendStateKnown: keyImagesSynced,
       ...(stale ? { keyImagesStale: true } : {}), ...(blocker ? { sendBlocked: blocker } : {}), ...(record ? { unrelayedTxid: record.txid } : {}),
       ...(record && checks.get(record.wallet) ? { unrelayedCheck: { ...checks.get(record.wallet)! } } : {}),
       ...(bound && guards.get(walletKey(current, bound.address)) ? { discardedTxid: guards.get(walletKey(current, bound.address))!.txid } : {}) }
+    rememberBalance(current,result)
+    return cachedBalance?.scope === current.watchScope ? {...result,cachedBalance:{...cachedBalance.value}} : result
   }
   /** Before connecting (e.g. after a restart) a pending broadcast from this device is still named. */
   const withPendingHint = (status: MoneroVaultStatus): MoneroVaultStatus => {
@@ -511,11 +561,11 @@ export function createMoneroVault({ engine, confirm, getConfig, sidecar = manage
   const getStatus = async (): Promise<MoneroVaultStatus> => {
     if (moneroHiddenWallet(engine)) { stop(); return moneroHiddenWalletStatus(!!getConfig().enabled) }
     let current: Snapshot | null
-    try { current = snapshot() } catch { stop(); return empty(!!getConfig().enabled, false, 'The Monero configuration or device transport is unavailable') }
-    if (!current) { stop(); const config = getConfig(); return empty(config.enabled, false, config.offline ? 'Monero is unavailable in offline mode' : undefined) }
+    try { current = snapshot() } catch { stop(); return withCachedBalance(empty(!!getConfig().enabled, false, 'The Monero configuration or device transport is unavailable')) }
+    if (!current) { stop(); const config = getConfig(); return withCachedBalance(empty(config.enabled, false, config.offline ? 'Monero is unavailable in offline mode' : undefined)) }
     loadPersistence()
-    if (!bound) return withPendingHint({ ...empty(true, true), signingReady: !signingBlocker(current), ...(signingBlocker(current) ? { sendBlocked: signingBlocker(current) } : {}), restoreHeight: current.config.restoreHeight, ...(connectionPhase ? { connectionPhase } : {}) })
-    if (bound.snapshot.key !== current.key || bound.snapshot.wallet !== current.wallet || bound.snapshot.transport !== current.transport) { stop(); return withPendingHint(empty(true, true)) }
+    if (!bound) return withCachedBalance(withPendingHint({ ...empty(true, true), signingReady: !signingBlocker(current), ...(signingBlocker(current) ? { sendBlocked: signingBlocker(current) } : {}), restoreHeight: current.config.restoreHeight, ...(connectionPhase ? { connectionPhase } : {}) }))
+    if (bound.snapshot.key !== current.key || bound.snapshot.wallet !== current.wallet || bound.snapshot.transport !== current.transport) { stop(); return withCachedBalance(withPendingHint(empty(true, true))) }
     const authorized = bound, generation = epoch
     try {
       const value = await sidecar.getMoneroWalletStatus(); check(current, generation)
@@ -524,11 +574,11 @@ export function createMoneroVault({ engine, confirm, getConfig, sidecar = manage
         return empty(true, true, 'The Monero monitor wallet changed; connect again')
       }
       lastGood = statusFrom(value, current, authorized.address)
-      return withSendState(lastGood, current)
+      return await withSendState(lastGood, current, generation)
     } catch {
       if (moneroHiddenWallet(engine)) { stop(); return moneroHiddenWalletStatus(!!getConfig().enabled) }
       if (!matches(current) || epoch !== generation) { stop(); return empty(!!getConfig().enabled, false) }
-      if (lastGood) return withSendState({ ...lastGood, monitorReady: false, syncState: 'unreachable', error: 'The Monero monitor is temporarily unavailable; showing the last wallet update' }, current)
+      if (lastGood) return withSendState({ ...lastGood, monitorReady: false, syncState: 'unreachable', error: 'The Monero monitor is temporarily unavailable; showing the last wallet update' }, current, generation)
       throw new MoneroError('The Monero watch wallet status is unavailable')
     }
   }
@@ -536,6 +586,7 @@ export function createMoneroVault({ engine, confirm, getConfig, sidecar = manage
     stop,
     invalidate: stop,
     getStatus,
+    flushBalanceCache: () => balanceWrite,
     async connect({ showDisplay = false }: { showDisplay?: boolean } = {}): Promise<MoneroVaultStatus> {
       assertMoneroStandardWallet(engine)
       if (typeof showDisplay !== 'boolean') throw new MoneroError('Invalid Monero address display option')
@@ -597,7 +648,7 @@ export function createMoneroVault({ engine, confirm, getConfig, sidecar = manage
         bound = { snapshot: current, address }; lastGood = status
         // A pending broadcast (e.g. from before a restart) is looked up once: settled if the node has it.
         if (pending.has(walletKey(current, address))) await resolvePending(walletKey(current, address))
-        return withSendState(status, current)
+        return await withSendState(status, current, generation)
       } catch (error) {
         stop()
         // Never forward arbitrary subprocess/transport diagnostics that might contain credentials;

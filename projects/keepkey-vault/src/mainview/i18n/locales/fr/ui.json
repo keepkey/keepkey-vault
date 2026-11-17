@@ -179,5 +179,7 @@
   "m6647c94f": "La clé de transaction Monero ne correspond pas à la transaction signée. Rien n’a été envoyé.",
   "m1010f0b": "La signature Monero est indisponible. Mettez à jour KeepKey Desktop et le micrologiciel, puis reconnectez-vous.",
   "m2c78dc79": "Les sorties Monero signées ne correspondent pas au destinataire, au montant et à la monnaie approuvés. Rien n’a été envoyé.",
-  "ma59e78f": "Reconnectez le suivi Monero pour autoriser la dérivation de la monnaie avec les sous-adresses"
+  "ma59e78f": "Reconnectez le suivi Monero pour autoriser la dérivation de la monnaie avec les sous-adresses",
+  "m1e4706cc": "Dernier solde connu · {{time}}",
+  "mc72d771e": "Mise à jour de votre portefeuille Monero. Le dernier solde connu est affiché."
 }

@@ -185,5 +185,7 @@
   "m6647c94f": "La clave de transacción Monero no coincide con la transacción firmada. No se ha enviado nada.",
   "m1010f0b": "La firma de Monero no está disponible. Actualiza KeepKey Desktop y el firmware y vuelve a conectar.",
   "m2c78dc79": "Las salidas Monero firmadas no coinciden con el destinatario, el importe y el cambio aprobados. No se envió nada.",
-  "ma59e78f": "Vuelve a conectar la supervisión de Monero para autorizar la derivación del cambio con subdirecciones"
+  "ma59e78f": "Vuelve a conectar la supervisión de Monero para autorizar la derivación del cambio con subdirecciones",
+  "m1e4706cc": "Último saldo conocido · {{time}}",
+  "mc72d771e": "Actualizando tu cartera Monero. Se muestra el último saldo conocido."
 }

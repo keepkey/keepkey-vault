@@ -47,3 +47,31 @@ test('cached receive addresses and signed image proofs stay bound to their walle
   expect(await f.store.loadImages('seed-B',ADDRESS,'outputs-A')).toBeNull()
  } finally {f.db.close()}
 })
+
+test('balance observations survive restart encrypted, retain source time and replace nonzero with authoritative zero', async () => {
+ const f=fixture(),balance={balanceAtomic:'84653050000',unlockedBalanceAtomic:'84653050000',walletHeight:120,updatedAt:'2026-01-01T12:00:00.000Z',spendStateKnown:true}
+ try {
+  await f.store.saveBalance!('seed-A',ADDRESS,balance)
+  expect(await createMoneroWatchStore(f.options).loadBalance!('seed-A')).toEqual(balance)
+  expect(await f.store.loadBalance!('seed-B')).toBeNull()
+  const row=f.db.query("SELECT ciphertext FROM monero_watch_cache WHERE kind='balance-v1'").get() as {ciphertext:Uint8Array}
+  expect(new TextDecoder().decode(row.ciphertext)).not.toContain(balance.balanceAtomic)
+  const zero={...balance,balanceAtomic:'0',unlockedBalanceAtomic:'0',walletHeight:121,updatedAt:'2026-01-01T12:02:00.000Z'}
+  await f.store.saveBalance!('seed-A',ADDRESS,zero)
+  expect(await createMoneroWatchStore(f.options).loadBalance!('seed-A')).toEqual(zero)
+  f.db.query("UPDATE monero_watch_cache SET scope='seed-B' WHERE kind='balance-v1'").run()
+  await expect(f.store.loadBalance!('seed-B')).rejects.toThrow('could not be opened')
+ } finally {f.db.close()}
+})
+test('balance cache refuses invalid amounts, unbound primary identities and a plaintext fallback', async () => {
+ const f=fixture(),balance={balanceAtomic:'12',unlockedBalanceAtomic:'7',walletHeight:120,updatedAt:'2026-01-01T12:00:00.000Z',spendStateKnown:false}
+ try {
+  for(const bad of [{balanceAtomic:'-1'},{unlockedBalanceAtomic:'13'},{balanceAtomic:'18446744073709551616'},{walletHeight:0},{updatedAt:'bad'},{updatedAt:'9999-01-01T00:00:00Z'}]) {
+   await expect(f.store.saveBalance!('seed-A',ADDRESS,{...balance,...bad})).rejects.toThrow('Invalid')
+  }
+  await expect(f.store.saveBalance!('seed-A','not-an-address',balance)).rejects.toThrow('Invalid')
+  f.lock()
+  await expect(f.store.saveBalance!('seed-A',ADDRESS,balance)).rejects.toThrow('saved securely')
+  expect(f.db.query("SELECT count(*) AS n FROM sqlite_master WHERE name='monero_watch_cache'").get()).toEqual({n:0})
+ } finally {f.db.close()}
+})

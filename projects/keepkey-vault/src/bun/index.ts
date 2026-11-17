@@ -12370,8 +12370,16 @@ function cleanupAndQuit() {
 	try { setUiActive(false, null) } catch {}
 	postTxBalances.clear()
 	stopActiveWalletWatches()
-	engine.stop()
-	Utils.quit()
+	// Let an already queued encrypted balance observation reach disk on normal
+	// close/reopen, while the existing force-exit timer still bounds cleanup.
+	void (async () => {
+		let timer: ReturnType<typeof setTimeout> | undefined
+		try {
+			await Promise.race([moneroWallet?.flushBalanceCache() ?? Promise.resolve(),
+				new Promise<void>(resolve => { timer = setTimeout(resolve, 1500) })])
+		} catch { /* Secure-storage failure must not prevent quitting. */ }
+		finally { clearTimeout(timer); engine.stop(); Utils.quit() }
+	})()
 }
 
 // Quit the app when the main window is closed

@@ -28,6 +28,8 @@ const notConnected = { signingReady: true, available: false, network: 'mainnet',
 const connected = (over: Record<string, unknown> = {}) => ({ ...notConnected, available: true, address: WALLET, balanceAtomic: '84653050000',
   unlockedBalanceAtomic: '84653050000', walletHeight: 3_300_000, daemonHeight: 3_300_000, restoreHeight: 0, monitorReady: true, syncState: 'ready',
   updatedAt: new Date().toISOString(), sendBlocked: 'key-images', ...over })
+const cachedBalance = { balanceAtomic: '84653050000', unlockedBalanceAtomic: '80000000000', walletHeight: 3_300_000,
+  updatedAt: '2026-11-06T12:00:00.000Z', spendStateKnown: true }
 
 function fakeClient(initial: any, settingsHeight = 0) {
   const calls: any[] = []
@@ -84,6 +86,98 @@ function Host({ Section, client, extra, onState }: any) {
 
 const out: Record<string, unknown> = {}
 
+// Saved balances survive a new UI instance without granting receiving or spending access.
+const { moneroBalanceView } = await import('../../src/shared/monero-asset')
+for (const [name, status] of [
+  ['startup', { ...notConnected, cachedBalance }],
+  ['scanning', connected({ syncState: 'scanning', walletHeight: 3_250_000, restoreHeight: 3_200_000, monitorReady: false, balanceAtomic: '1', cachedBalance })],
+  ['offline', { ...notConnected, syncState: 'unreachable', cachedBalance }],
+  ['savedZero', { ...notConnected, cachedBalance: { ...cachedBalance, balanceAtomic: '0', unlockedBalanceAtomic: '0' } }],
+  ['currentZero', connected({ balanceAtomic: '0', unlockedBalanceAtomic: '0', cachedBalance })],
+] as const) {
+  const row = await render(<MoneroChainRow chain={monero} iconSrc="" privateMode={false} onOpen={() => {}} client={fakeClient(status)} />)
+  out[`cachedRow_${name}`] = { balance: text(q(row.container, '[data-monero-row-balance]')), source: text(q(row.container, '[data-monero-last-known]')),
+    state: text(q(row.container, '[data-monero-row-state]')) }
+  await row.unmount()
+  const header = await render(<MoneroHeaderBalance view={moneroBalanceView(status as any)} privateMode={false} />)
+  out[`cachedHeader_${name}`] = { balance: text(q(header.container, '[data-monero-header-balance]')), source: text(q(header.container, '[data-monero-last-known]')) }
+  await header.unmount()
+}
+for (const privateMode of [false, true]) {
+  const client = fakeClient({ ...notConnected, cachedBalance })
+  client.holdConnect = true
+  const { container, unmount } = await render(<Host Section={MoneroReceiveSection} client={client} extra={{ privateMode }} />)
+  out[`cachedConnect_${privateMode}`] = { balance: text(q(container, '[data-monero-cached-balance]')), source: text(q(container, '[data-monero-last-known]')),
+    receiveAddress: text(container).includes(WALLET), addressOptions: !!q(container, '[data-monero-subaddress]'),
+    signing: client.calls.filter(call => call[0] === 'sync' || call[0] === 'prepare').length }
+  await unmount()
+  client.releaseConnect()
+}
+
+// Device and wallet changes revoke an old snapshot before any asynchronous new reply.
+{
+  const { dispatchLocalRpcMessage } = await import('../../src/mainview/lib/rpc')
+  const client = fakeClient({ ...notConnected, cachedBalance })
+  let state: any
+  function BalanceHost() {
+    state = useMoneroStatus(true, client)
+    return <MoneroHeaderBalance view={moneroBalanceView(state.status)} privateMode={false} />
+  }
+  const { container, unmount } = await render(<BalanceHost />)
+  const balance = () => text(q(container, '[data-monero-header-balance]'))
+  const device = { state: 'ready', deviceId: 'wallet-a', activeTransport: 'hid', isHiddenWallet: false, firmwareHash: 'firmware' }
+  await act(async () => { dispatchLocalRpcMessage('device-state', device) })
+  const pending: Array<(status: any) => void> = []
+  let statusReads = 0
+  client.getStatus = async () => { statusReads++; return new Promise(resolve => pending.push(resolve)) }
+  await act(async () => { dispatchLocalRpcMessage('device-state', { ...device, label: 'Renamed KeepKey', battery: 90 }) })
+  out.cachedOwnerBenign = { balance: balance(), reads: statusReads }
+  await act(async () => { void state.refresh() })
+  await act(async () => { dispatchLocalRpcMessage('device-state', { state: 'disconnected', activeTransport: null }) })
+  out.cachedOwnerDisconnected = balance()
+  await act(async () => { pending[0]({ ...notConnected, cachedBalance }) })
+  out.cachedOwnerOldReply = balance()
+  await act(async () => { pending[1](notConnected) })
+  await act(async () => { dispatchLocalRpcMessage('device-state', { ...device, deviceId: 'wallet-b' }) })
+  out.cachedOwnerReconnect = balance()
+  await act(async () => { pending[2]({ ...notConnected, cachedBalance: { ...cachedBalance, balanceAtomic: '90000000000' } }) })
+  out.cachedOwnerNewReply = balance()
+  await act(async () => { dispatchLocalRpcMessage('device-state', { ...device, deviceId: 'wallet-b', isHiddenWallet: true }) })
+  out.cachedOwnerHidden = balance()
+  await act(async () => { pending[3](notConnected) })
+  await act(async () => { void state.refresh() })
+  await act(async () => { pending[4]({ ...notConnected, cachedBalance }) })
+  await act(async () => { dispatchLocalRpcMessage('wallet-data-purged', {}) })
+  out.cachedOwnerPurged = balance()
+  await act(async () => { pending[5](notConnected) })
+  await unmount()
+}
+
+// Action replies can outlive the wallet that started them. They must not restore its funds or address.
+for (const action of ['connect', 'sync']) {
+  const { dispatchLocalRpcMessage } = await import('../../src/mainview/lib/rpc')
+  const oldWallet = connected({ spendStateKnown: true, keyImagesSynced: true })
+  const client = fakeClient(action === 'connect' ? { ...notConnected, cachedBalance } : oldWallet)
+  let release: (status: any) => void = () => { throw new Error('The held action did not start') }
+  const heldAction = async () => { client.calls.push([action]); return new Promise<any>(resolve => { release = resolve }) }
+  if (action === 'connect') client.connect = heldAction
+  else client.syncKeyImages = heldAction
+  function ActionPage({ monero: state }: any) {
+    return <><MoneroHeaderBalance view={moneroBalanceView(state.status)} privateMode={false} />
+      <MoneroReceiveSection monero={state} client={client} chain={monero} privateMode={false} />
+      {action === 'sync' && <MoneroSendSection monero={state} client={client} />}</>
+  }
+  const { container, unmount } = await render(<Host Section={ActionPage} client={client} />)
+  if (action === 'sync') await click(q(container, '[data-monero-sync-key-images]'))
+  client.set({ ...notConnected, signingReady: false })
+  await act(async () => { dispatchLocalRpcMessage('wallet-data-purged', {}) })
+  await act(async () => { release(oldWallet) })
+  out[`lateAction_${action}`] = { balance: text(q(container, '[data-monero-header-balance]')),
+    receiveAddress: text(container).includes(WALLET), addressOptions: !!q(container, '[data-monero-subaddress]'),
+    sendForm: !!q(container, '[data-monero-send-address]'), actions: client.calls.filter(call => call[0] === action).length }
+  await unmount()
+}
+
 // Hidden-wallet status is actionable and cannot start the automatic connect flow.
 {
   const { MONERO_STANDARD_WALLET_REQUIRED } = await import('../../src/shared/monero-wallet-policy')
@@ -95,7 +189,6 @@ const out: Record<string, unknown> = {}
 }
 
 // A view-only total can include spent change; it must not look like verified balance.
-const { moneroBalanceView } = await import('../../src/shared/monero-asset')
 for (const [name, verified, privateMode] of [['headerUnverified', false, false], ['headerVerified', true, false], ['headerPrivate', true, true]] as const) {
   const {container, unmount} = await render(React.createElement(MoneroHeaderBalance, {view:moneroBalanceView(connected({spendStateKnown:verified})),privateMode}))
   out[name] = text(q(container,'[data-monero-header-balance]'))
@@ -318,7 +411,8 @@ for (const [name, overrides, Section] of [
   await click(q(container, '[data-monero-max]'))
   await click(q(container, '[data-monero-review-send]'))
   await click(q(container, '[data-monero-confirm-send]'))
-  await act(async () => state.setStatus(connected({ signingPhase: 'proving', canSend: false, keyImagesSynced: true, spendStateKnown: true })))
+  client.set(connected({ signingPhase: 'proving', canSend: false, keyImagesSynced: true, spendStateKnown: true }))
+  await act(async () => { await state.refresh() })
   out.provingText = text(q(container, '[data-monero-confirm-send]'))
   out.provingRecipient = text(q(container, '[data-monero-send-review]')).includes(RECIPIENT)
   await act(async () => { finish!({txid: 'cd'.repeat(32)}) })
@@ -400,10 +494,11 @@ for (const signingReady of [false, undefined]) {
 // Readiness changing after an address was shown removes the QR and subaddress controls.
 {
  const client=fakeClient(connected({spendStateKnown:true,keyImagesSynced:true}))
- let update!:(status:any)=>void
- const {container,unmount}=await render(<Host Section={MoneroReceiveSection} client={client} onState={(state:any)=>{update=state.setStatus}} />)
+ let state:any
+ const {container,unmount}=await render(<Host Section={MoneroReceiveSection} client={client} onState={(next:any)=>{state=next}} />)
  const before=!!q(container,'[data-monero-subaddress]')
- await act(async()=>{update(connected({signingReady:false,sendBlocked:'adapter',spendStateKnown:true,keyImagesSynced:true}))})
+ client.set(connected({signingReady:false,sendBlocked:'adapter',spendStateKnown:true,keyImagesSynced:true}))
+ await act(async()=>{await state.refresh()})
  out.readinessRevoked={before,addressOptions:!!q(container,'[data-monero-subaddress]'),address:text(container).includes(WALLET),balance:text(q(container,'[data-monero-balance]'))}
  await unmount()
 }

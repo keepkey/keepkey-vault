@@ -57,7 +57,8 @@ export async function verifyDaemon(origin: string, minimumHeight: number): Promi
       (!info.synchronized && !(loopback && info.offline === true)) || unsigned(info.height) < minimumHeight) {
     throw new PublicError('The selected Monero node is not synchronized on mainnet')
   }
-  return { height: unsigned(info.height), fingerprint, synchronized: info.synchronized === true, regtest, offline: info.offline === true }
+  return { height: unsigned(info.height), fingerprint,
+    synchronized: info.synchronized === true && info.busy_syncing !== true && info.offline !== true, regtest, offline: info.offline === true }
 }
 
 /** wallet-rpc refuses import_key_images without a trusted daemon. As in Monero's own default, only a loopback daemon is trusted. */
@@ -88,10 +89,11 @@ interface Session {
   restoreHeight: number
   daemonUrl: string
   daemonSynchronized: boolean
+  regtest?: boolean
   /** An offline daemon cannot broadcast; sending needs a live one (local regtest excepted). */
   sendable: boolean
   daemonFingerprint?: string
-  /** The node's own height (/get_height, pinned), polled independently of the wallet refresh: the scan target. */
+  /** The node's own height (get_info, pinned), polled independently of the wallet refresh: the scan target. */
   daemonHeight: number
   /** When the node last answered that poll. */
   nodeAnsweredAt: number
@@ -107,7 +109,7 @@ export async function initializeWatchRpc(rpc: Pick<DigestWalletRpc, 'call'>,
   try {
     // Core's idle auto-refresh can start as soon as generate_from_keys returns and
     // monopolize its RPC thread before get_address/query_key. Disable it while
-    // there is no wallet yet; this service explicitly schedules refresh below.
+    // there is no wallet yet; enable bounded automatic scanning after verification.
     await rpc.call('auto_refresh', { enable: false })
     await rpc.call('generate_from_keys', { filename: 'watch', address: config.address,
       viewkey: config.viewKey, spendkey: '', password, restore_height: config.restoreHeight, language: 'English' }, 30000)
@@ -116,11 +118,17 @@ export async function initializeWatchRpc(rpc: Pick<DigestWalletRpc, 'call'>,
   if (actual.address !== config.address) throw new Error('The Monero watch wallet does not match the device')
   try { await rpc.call('query_key', { key_type: 'spend_key' }); throw new Error('The Monero sidecar unexpectedly has a spend key') }
   catch (error) { if (!(error instanceof RpcFailure) || error.code !== -29) throw error }
+  // Core 0.18.5.4 auto-refresh scans bounded 256-block chunks and yields the
+  // RPC thread between batches. Explicit refresh() scans to the tip in one
+  // call, blocking height/balance reads for an entire initial history scan.
+  // Enable bounded scanning only after both identity checks have completed.
+  await rpc.call('auto_refresh', { enable: true, period: 1 })
 }
 
 export class MoneroWatchService {
   private session: Session | null = null
   private refreshPromise: Promise<MoneroWalletStatus> | null = null
+  private nodeProbe: { session: Session; promise: Promise<void> } | null = null
   private timer: ReturnType<typeof setInterval> | null = null
   private generation = 0
   private pending: { directory: string; proc: ReturnType<typeof Bun.spawn> } | null = null
@@ -165,7 +173,7 @@ export class MoneroWatchService {
       const status: MoneroWalletStatus = { network: 'mainnet', address: config.address, balanceAtomic: '0', unlockedBalanceAtomic: '0',
         walletHeight: 0, transactions: [], monitorReady: false, updatedAt: new Date().toISOString(), canSend: false, daemonHeight: daemon.height }
       const session: Session = { directory, address: config.address, restoreHeight: config.restoreHeight, daemonUrl: config.daemonUrl,
-        daemonSynchronized: daemon.synchronized, sendable: daemon.regtest || (daemon.synchronized && !daemon.offline), daemonFingerprint: daemon.fingerprint,
+        daemonSynchronized: daemon.synchronized || daemon.regtest, regtest: daemon.regtest, sendable: daemon.regtest || (daemon.synchronized && !daemon.offline), daemonFingerprint: daemon.fingerprint,
         daemonHeight: daemon.height, nodeAnsweredAt: Date.now(), proc, rpc, status }
       this.session = session
       this.pending = null
@@ -203,7 +211,8 @@ export class MoneroWatchService {
     if (!session) return Promise.reject(new Error('Connect a Monero watch wallet first'))
     const operation = (async () => {
       try {
-        await session.rpc.call('refresh', {}, 300000)
+        // Core's bounded automatic scanner runs independently; never queue a
+        // full-chain refresh ahead of these progress/balance observations.
         const height = unsigned((await session.rpc.call('get_height')).height)
         const balances = await session.rpc.call('get_balance', { account_index: 0 })
         const transfers = await session.rpc.call('get_transfers', { in: true, pool: true, out: false,
@@ -220,7 +229,8 @@ export class MoneroWatchService {
         }).sort((a, b) => b.height - a.height)
         const status: MoneroWalletStatus = { network: 'mainnet', address: session.address, balanceAtomic: balance, unlockedBalanceAtomic: unlocked,
           walletHeight: height, transactions: transactions.slice(0, 100), transactionsTruncated: transactions.length > 100,
-          monitorReady: session.daemonSynchronized && height >= session.restoreHeight, updatedAt: new Date().toISOString(), canSend: false,
+          monitorReady: session.daemonSynchronized && Date.now() - session.nodeAnsweredAt <= NODE_ANSWER_WINDOW_MS
+            && height >= Math.max(session.restoreHeight, session.daemonHeight), updatedAt: new Date().toISOString(), canSend: false,
           daemonHeight: session.daemonHeight }
         if (this.session !== session) throw new Error('The Monero wallet changed during refresh')
         session.status = status
@@ -237,18 +247,38 @@ export class MoneroWatchService {
     return operation
   }
 
-  /** The node's height straight from the node (its pinned TLS identity), on the same 15 s beat as the wallet
-   *  refresh but outside the wallet-RPC queue, so a node that stops answering shows even during a long scan. */
-  async probeNode(session: Session): Promise<void> {
-    try {
-      const height = await nodeHeight(session.daemonUrl, session.daemonFingerprint)
-      if (this.session !== session) return
-      session.daemonHeight = height; session.nodeAnsweredAt = Date.now()
-      session.status = { ...session.status, daemonHeight: height,
-        ...(session.status.error === WATCH_NODE_UNREACHABLE ? { error: undefined } : {}) }
-    } catch {
-      if (this.session === session) session.status = { ...session.status, monitorReady: false, error: WATCH_NODE_UNREACHABLE }
-    }
+  /** Probe outside wallet RPC so scanner load cannot hide node availability.
+   * Re-read synchronization as well as height: the node may recover after
+   * configuration or become unsynchronized while the wallet is open. */
+  probeNode(session: Session): Promise<void> {
+    if (this.nodeProbe?.session === session) return this.nodeProbe.promise
+    const work = (async () => {
+      try {
+        const node = await nodeSyncStatus(session.daemonUrl, session.daemonFingerprint, session.regtest)
+        if (this.session !== session) return
+        session.daemonHeight = node.height; session.nodeAnsweredAt = Date.now()
+        session.daemonSynchronized = node.synchronized
+        session.sendable = node.sendable
+        const observed = Date.parse(session.status.updatedAt)
+        const current = Number.isFinite(observed) && Date.now() - observed <= 120_000
+        // A node probe can revoke readiness, but only a successful wallet
+        // snapshot may grant it. In particular, a recent cached snapshot must
+        // not hide a wallet RPC failure or a stopped local wallet process.
+        const ready = session.status.monitorReady && current && node.synchronized
+          && session.status.walletHeight >= Math.max(session.restoreHeight, node.height)
+        session.status = { ...session.status, daemonHeight: node.height, monitorReady: ready,
+          ...(!node.synchronized ? { error: WATCH_NODE_UNREACHABLE } :
+            session.status.error === WATCH_NODE_UNREACHABLE || (ready && session.status.error === WATCH_SCANNING) ? { error: undefined } : {}) }
+      } catch {
+        if (this.session === session) {
+          session.daemonSynchronized = false; session.sendable = false
+          session.status = { ...session.status, monitorReady: false, error: WATCH_NODE_UNREACHABLE }
+        }
+      }
+    })()
+    this.nodeProbe = { session, promise: work }
+    void work.finally(() => { if (this.nodeProbe?.promise === work) this.nodeProbe = null }).catch(() => {})
+    return work
   }
 
   /** Is this transaction in the node's pool or a block, and are its inputs spent? (No wallet state is changed.) */
@@ -347,7 +377,7 @@ export class MoneroWatchService {
     ++this.generation
     if (this.timer) clearInterval(this.timer)
     this.timer = null
-    const session = this.session; this.session = null; this.refreshPromise = null
+    const session = this.session; this.session = null; this.refreshPromise = null; this.nodeProbe = null
     const pending = this.pending; this.pending = null
     if (pending) {
       if (pending.proc.exitCode === null) pending.proc.kill()
@@ -420,4 +450,16 @@ export async function nodeHeight(origin: string, fingerprint: string | undefined
   const value = await daemonRequest(origin, fingerprint, '/get_height', {}, fetcher, 15000) as any
   if (value?.status !== 'OK' || !Number.isSafeInteger(value.height) || value.height < 1) throw new PublicError('The daemon reply could not be read')
   return value.height
+}
+
+/** A responding height alone does not prove the daemon is synchronized. */
+export async function nodeSyncStatus(origin: string, fingerprint: string | undefined, regtest = false, fetcher: Fetcher = fetch as any): Promise<{ height: number; synchronized: boolean; sendable: boolean }> {
+  const reply = await daemonRequest(origin, fingerprint, '/json_rpc', { jsonrpc: '2.0', id: 'watch-probe', method: 'get_info' }, fetcher, 15000) as any
+  const info = reply?.result
+  const loopback = ['localhost', '127.0.0.1', '[::1]'].includes(new URL(origin).hostname)
+  const localRegtest = regtest && loopback && new URL(origin).protocol === 'http:' && info?.nettype === 'fakechain' && info.offline === true
+  if (!info || info.status !== 'OK' || (!localRegtest && info.nettype !== 'mainnet') || info.testnet || info.stagenet ||
+      !Number.isSafeInteger(info.height) || info.height < 1) throw new PublicError('The daemon reply could not be read')
+  const synchronized = localRegtest || (info.synchronized === true && info.busy_syncing !== true && info.offline !== true)
+  return { height: info.height, synchronized, sendable: localRegtest || synchronized }
 }

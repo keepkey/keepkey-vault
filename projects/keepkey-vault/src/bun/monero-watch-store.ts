@@ -4,17 +4,30 @@ const asBytes = (value: { buffer: ArrayBufferLike; byteOffset: number; byteLengt
 const concat = (...parts: Uint8Array[]) => { const out=new Uint8Array(parts.reduce((n,p)=>n+p.length,0));let offset=0;for(const part of parts){out.set(part,offset);offset+=part.length}return out }
 const encode = (value: string) => new TextEncoder().encode(value)
 const decode = (value: Uint8Array) => new TextDecoder().decode(value)
+import type { MoneroCachedBalance } from '../shared/types'
 import type { Database } from 'bun:sqlite'
 import { moneroAddressKind } from '../shared/monero-address'
 
 export type MoneroImageProof = { keyImage: string; signature: string }
 export interface MoneroWatchStore {
+  loadBalance?(scope: string): Promise<MoneroCachedBalance | null>
+  saveBalance?(scope: string, primary: string, balance: MoneroCachedBalance): Promise<void>
   loadWatch(scope: string, address: string): Promise<Uint8Array | null>
   saveWatch(scope: string, address: string, viewKey: Uint8Array): Promise<void>
   loadAddress(scope: string, primary: string, minor: number): Promise<string | null>
   saveAddress(scope: string, primary: string, minor: number, address: string): Promise<void>
   loadImages(scope: string, primary: string, outputs: string): Promise<MoneroImageProof[] | null>
   saveImages(scope: string, primary: string, outputs: string, proofs: MoneroImageProof[]): Promise<void>
+}
+
+function validBalance(value: unknown): value is MoneroCachedBalance {
+  const v = value as MoneroCachedBalance
+  const amount = (s: unknown) => typeof s === 'string' && /^(0|[1-9][0-9]{0,19})$/.test(s) && BigInt(s) <= 18446744073709551615n
+  return !!v && typeof v === 'object' && !Array.isArray(v) &&
+    Object.keys(v).length === 5 && amount(v.balanceAtomic) && amount(v.unlockedBalanceAtomic) &&
+    BigInt(v.unlockedBalanceAtomic) <= BigInt(v.balanceAtomic) &&
+    Number.isSafeInteger(v.walletHeight) && v.walletHeight > 0 && typeof v.spendStateKnown === 'boolean' &&
+    typeof v.updatedAt === 'string' && Number.isFinite(Date.parse(v.updatedAt)) && Date.parse(v.updatedAt) <= Date.now() + 30000
 }
 
 export function createMoneroWatchStore({ database, profile, key = async (create: boolean) => {
@@ -70,6 +83,19 @@ export function createMoneroWatchStore({ database, profile, key = async (create:
   }
   const proofsValid = (value: unknown): value is MoneroImageProof[] => Array.isArray(value) && value.length <= 4096 && value.every(p => p && /^[0-9a-f]{64}$/.test(p.keyImage) && /^[0-9a-f]{128}$/.test(p.signature))
   return {
+    async loadBalance(scope) {
+      const rows = db().query("SELECT address FROM monero_watch_cache WHERE scope=? AND kind='balance-v1' LIMIT 2").all(scope) as Array<{address:string}>
+      if (rows.length !== 1 || moneroAddressKind(rows[0].address) !== 'standard') return null
+      const plain = await load(scope, rows[0].address, 'balance-v1')
+      if (!plain) return null
+      try { const value: unknown = JSON.parse(decode(plain)); return validBalance(value) ? value : null }
+      finally { plain.fill(0) }
+    },
+    async saveBalance(scope, primary, balance) {
+      if (moneroAddressKind(primary) !== 'standard' || !validBalance(balance)) throw new Error('Invalid Monero balance snapshot')
+      const plain = encode(JSON.stringify(balance))
+      try { await save(scope, primary, 'balance-v1', plain) } finally { plain.fill(0) }
+    },
     async loadWatch(scope,address) {
       const value = await load(scope,address,'view-key')
       if (!value) return null

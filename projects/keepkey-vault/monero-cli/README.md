@@ -105,3 +105,19 @@ bun monero-cli/smoke.ts --daemon-bin=/path/to/verified/monerod --daemon-sha256=V
 ```
 
 See the [official Wallet RPC documentation](https://docs.getmonero.org/rpc-library/wallet-rpc/) and [official signed downloads](https://www.getmonero.org/downloads/).
+
+## Startup balance and sync progress
+
+The backend saves the last completed Monero balance observation in the encrypted
+monitoring store, scoped to the connected standard seed and device. Reopening the
+app, reconnecting, changing nodes or scanning again can show that balance with its
+original observation time. A fresh spend-verified balance or completed zero
+replaces it. A saved display value never authorizes spending, claims current sync, or
+unlocks receive controls. Hidden wallets and a different seed/device cannot read
+another wallet's snapshot.
+
+Wallet RPC scans in its bounded background auto-refresh loop after identity and
+view-only checks complete. Status polling reads the current height and balance
+without repeatedly starting an unbounded full-history refresh. Synced requires
+catching up to the current responding, synchronized daemon. A temporary wallet
+RPC delay does not by itself discard the scan or switch nodes.

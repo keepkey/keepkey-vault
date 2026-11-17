@@ -2376,5 +2376,7 @@
   "m6647c94f": "A chave da transação Monero não corresponde à transação assinada. Nada foi enviado.",
   "m1010f0b": "A assinatura Monero não está disponível. Atualize o KeepKey Desktop e o firmware e reconecte.",
   "m2c78dc79": "As saídas Monero assinadas não correspondem ao destinatário, valor e troco aprovados. Nada foi enviado.",
-  "ma59e78f": "Reconecte o monitoramento Monero para autorizar a derivação do troco em transações com subendereços"
+  "ma59e78f": "Reconecte o monitoramento Monero para autorizar a derivação do troco em transações com subendereços",
+  "m1e4706cc": "Último saldo conhecido · {{time}}",
+  "mc72d771e": "Atualizando sua carteira Monero. Exibindo o último saldo conhecido."
 }

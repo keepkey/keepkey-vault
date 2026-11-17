@@ -592,3 +592,92 @@ test('an unconnected healthy signer cannot expose a deposit address before compl
   expect(f.delegate.sent).toHaveLength(0)
   expect(f.counts()).toMatchObject({ starts: 0, configures: 0 })
 })
+
+const CACHE_SEED='0x'+'11'.repeat(20)
+const CACHE_SCOPE=JSON.stringify(['mainnet',[0x8000002c,0x80000080,0x80000000],'PUBLIC-DEVICE-A',CACHE_SEED,false])
+const SAVED_BALANCE={balanceAtomic:'84653050000',unlockedBalanceAtomic:'84653050000',walletHeight:120,updatedAt:'2026-01-01T12:00:00.000Z',spendStateKnown:true}
+function balanceStore(snapshot=SAVED_BALANCE) {
+ let saved={...snapshot},loads=0,writes=0
+ const store:MoneroWatchStore={async loadWatch(){return null},async saveWatch(){},async loadAddress(){return null},async saveAddress(){},async loadImages(){return null},async saveImages(){},
+  async loadBalance(scope){loads++;return scope===CACHE_SCOPE?{...saved}:null},async saveBalance(scope,_primary,value){if(scope!==CACHE_SCOPE)throw Error('wrong wallet');writes++;saved={...value}}}
+ return {store,counts:()=>({loads,writes}),saved:()=>({...saved})}
+}
+test('startup and offline polling restore the wallet-scoped balance without device I/O or spend authority',async()=>{
+ const cache=balanceStore(),f=fixture(false,undefined,cache.store);f.engine.currentSeedEthAddress=CACHE_SEED
+ const status=await f.api.getStatus()
+ expect(status).toMatchObject({available:false,canSend:false,monitorReady:false,cachedBalance:SAVED_BALANCE})
+ expect(f.delegate.sent).toHaveLength(0);expect(f.counts().starts).toBe(0)
+ f.config.offline=true
+ expect(await f.api.getStatus()).toMatchObject({canSend:false,cachedBalance:SAVED_BALANCE})
+ expect(cache.counts().writes).toBe(0)
+ f.state.isHiddenWallet=true
+ expect((await f.api.getStatus()).cachedBalance).toBeUndefined()
+ f.state.isHiddenWallet=false;f.engine.currentSeedEthAddress='0x'+'22'.repeat(20)
+ expect((await f.api.getStatus()).cachedBalance).toBeUndefined()
+ f.engine.currentSeedEthAddress=CACHE_SEED
+ expect((await f.api.getStatus()).cachedBalance).toEqual(SAVED_BALANCE)
+ f.config.enabled=false
+ expect((await f.api.getStatus()).cachedBalance).toBeUndefined()
+})
+test('scanning retains the prior snapshot and a fresh complete zero replaces it across a vault restart',async()=>{
+ const cache=balanceStore(),f=fixture(false,undefined,cache.store);f.engine.currentSeedEthAddress=CACHE_SEED
+ await f.api.getStatus();f.status.monitorReady=false;f.status.walletHeight=0;f.status.balanceAtomic='0';f.status.unlockedBalanceAtomic='0'
+ expect(await f.api.connect()).toMatchObject({monitorReady:false,cachedBalance:SAVED_BALANCE})
+ expect(cache.counts().writes).toBe(0)
+ f.status.monitorReady=true;f.status.walletHeight=200;f.status.updatedAt=new Date().toISOString()
+ const current=await f.api.getStatus()
+ expect(current.cachedBalance).toMatchObject({balanceAtomic:'0',walletHeight:200,updatedAt:f.status.updatedAt})
+ await f.api.flushBalanceCache()
+ expect(cache.counts().writes).toBe(1)
+ const restarted=fixture(false,undefined,cache.store);restarted.engine.currentSeedEthAddress=CACHE_SEED
+ expect((await restarted.api.getStatus()).cachedBalance).toEqual(current.cachedBalance!)
+ expect(restarted.delegate.sent).toHaveLength(0)
+})
+test('a cached read resolving after a hidden-wallet switch cannot reveal the old balance',async()=>{
+ const cache=balanceStore();let resolve!:(v:typeof SAVED_BALANCE)=>void
+ cache.store.loadBalance=async()=>new Promise(r=>{resolve=r})
+ const f=fixture(false,undefined,cache.store);f.engine.currentSeedEthAddress=CACHE_SEED
+ const pending=f.api.getStatus();f.state.isHiddenWallet=true;resolve(SAVED_BALANCE)
+ expect((await pending).cachedBalance).toBeUndefined()
+ expect(f.delegate.sent).toHaveLength(0)
+})
+
+test('an unverified received total cannot replace a previously spend-known cache and normal close can flush the last zero',async()=>{
+ const cache=balanceStore(),f=fixture(false,undefined,cache.store);f.engine.currentSeedEthAddress=CACHE_SEED
+ await f.api.getStatus();f.status.balanceAtomic='99999999999';f.status.unlockedBalanceAtomic='99999999999'
+ expect((await f.api.connect()).cachedBalance).toEqual(SAVED_BALANCE)
+ await f.api.flushBalanceCache();expect(cache.counts().writes).toBe(0)
+ f.status.balanceAtomic='0';f.status.unlockedBalanceAtomic='0';f.status.updatedAt=new Date().toISOString()
+ await f.api.getStatus();await f.api.flushBalanceCache()
+ expect(cache.saved().balanceAtomic).toBe('0')
+})
+
+test('connecting before the first status poll preserves the spend-known snapshot already on disk',async()=>{
+ const cache=balanceStore(),f=fixture(false,undefined,cache.store);f.engine.currentSeedEthAddress=CACHE_SEED
+ f.status.balanceAtomic='99999999999';f.status.unlockedBalanceAtomic='99999999999'
+ expect((await f.api.connect()).cachedBalance).toEqual(SAVED_BALANCE)
+ await f.api.flushBalanceCache()
+ expect(cache.counts()).toEqual({loads:1,writes:0});expect(cache.saved()).toEqual(SAVED_BALANCE)
+})
+
+test('connecting during a delayed startup read waits before replacing the saved spend-known balance',async()=>{
+ const cache=balanceStore();let resolve!:(v:typeof SAVED_BALANCE)=>void
+ cache.store.loadBalance=async()=>new Promise(r=>{resolve=r})
+ const f=fixture(false,undefined,cache.store);f.engine.currentSeedEthAddress=CACHE_SEED
+ f.status.balanceAtomic='99999999999';f.status.unlockedBalanceAtomic='99999999999'
+ const startup=f.api.getStatus(),connecting=f.api.connect()
+ while(f.counts().configures===0)await new Promise(r=>setTimeout(r,0))
+ expect(cache.counts().writes).toBe(0)
+ resolve(SAVED_BALANCE)
+ expect((await startup).cachedBalance).toBeUndefined()
+ expect((await connecting).cachedBalance).toEqual(SAVED_BALANCE)
+ await f.api.flushBalanceCache();expect(cache.counts().writes).toBe(0)
+})
+
+test('an unreadable startup snapshot is not overwritten if secure storage later permits writes',async()=>{
+ const cache=balanceStore();cache.store.loadBalance=async()=>{throw Error('locked')}
+ const f=fixture(false,undefined,cache.store);f.engine.currentSeedEthAddress=CACHE_SEED
+ expect((await f.api.connect()).cachedBalance).toBeUndefined()
+ await f.api.flushBalanceCache();expect(cache.counts().writes).toBe(0)
+ expect(cache.saved()).toEqual(SAVED_BALANCE)
+})

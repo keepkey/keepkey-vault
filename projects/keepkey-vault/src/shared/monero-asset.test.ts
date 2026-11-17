@@ -58,6 +58,43 @@ describe('C2: never a fake 0', () => {
   })
 })
 
+describe('wallet-scoped saved XMR balance', () => {
+  const cachedBalance = { balanceAtomic: '84653050000', unlockedBalanceAtomic: '80000000000', walletHeight: 3_300_000,
+    updatedAt: '2026-11-06T12:00:00.000Z', spendStateKnown: true }
+  test('startup restores only the saved total and source time, never spendability', () => {
+    expect(moneroBalanceView(status({ available: false, syncState: 'not-connected', walletHeight: 0, balanceAtomic: '0', unlockedBalanceAtomic: '0', cachedBalance })))
+      .toMatchObject({ state: 'not-connected', balanceAtomic: '84653050000', unlockedAtomic: null, lockedAtomic: null,
+        updatedAt: cachedBalance.updatedAt, stale: true, spendVerified: false, lastKnown: true })
+  })
+  test('partial scans and offline reads preserve the saved total instead of showing a partial or fake zero', () => {
+    expect(moneroBalanceView(status({ syncState: 'scanning', walletHeight: 3_250_000, balanceAtomic: '1', monitorReady: false, cachedBalance })))
+      .toMatchObject({ state: 'scanning', balanceAtomic: cachedBalance.balanceAtomic, progress: 0.5, lastKnown: true, spendVerified: false })
+    expect(moneroBalanceView(status({ available: false, syncState: 'unreachable', walletHeight: 0, balanceAtomic: '0', cachedBalance })))
+      .toMatchObject({ state: 'unreachable', balanceAtomic: cachedBalance.balanceAtomic, updatedAt: cachedBalance.updatedAt, lastKnown: true, spendVerified: false })
+    expect(moneroBalanceView(status({ cachedBalance }), 'timeout')).toMatchObject({ state: 'unreachable', balanceAtomic: cachedBalance.balanceAtomic, lastKnown: true })
+  })
+  test('a current verified observation and a fully scanned zero replace an older saved amount', () => {
+    const fresh = moneroBalanceView(status({ balanceAtomic: '90000000000', unlockedBalanceAtomic: '85000000000', spendStateKnown: true, cachedBalance }))
+    expect(fresh).toMatchObject({ state: 'ready', balanceAtomic: '90000000000', unlockedAtomic: '85000000000', spendVerified: true })
+    expect(fresh.lastKnown).not.toBe(true)
+    const zero = moneroBalanceView(status({ balanceAtomic: '0', unlockedBalanceAtomic: '0', spendStateKnown: false, cachedBalance }))
+    expect(zero).toMatchObject({ state: 'ready', balanceAtomic: '0', unlockedAtomic: '0', spendVerified: false })
+    expect(zero.lastKnown).not.toBe(true)
+  })
+  test('a new view-only received total cannot inflate a prior spend-verified saved balance', () => {
+    const verified = { ...cachedBalance, balanceAtomic: '500000000000', unlockedBalanceAtomic: '500000000000' }
+    expect(moneroBalanceView(status({ balanceAtomic: '1000000000000', unlockedBalanceAtomic: '1000000000000', spendStateKnown: false, cachedBalance: verified })))
+      .toMatchObject({ state: 'ready', balanceAtomic: '500000000000', unlockedAtomic: null, lockedAtomic: null,
+        updatedAt: verified.updatedAt, lastKnown: true, spendVerified: false })
+  })
+  test('a saved zero remains a dated snapshot; a wallet without a snapshot inherits no amount', () => {
+    expect(moneroBalanceView(status({ available: false, cachedBalance: { ...cachedBalance, balanceAtomic: '0', unlockedBalanceAtomic: '0' } })))
+      .toMatchObject({ balanceAtomic: '0', unlockedAtomic: null, spendVerified: false, lastKnown: true, stale: true })
+    expect(moneroBalanceView(status({ available: false, cachedBalance: undefined })))
+      .toMatchObject({ balanceAtomic: null, unlockedAtomic: null, spendVerified: false, stale: false })
+  })
+})
+
 describe('wallet scan progress counts the selected block range', () => {
   test('a saved start is the baseline, and a changing observed target changes the measured fraction', () => {
     expect(moneroWalletScanProgress({ walletHeight: 3_250_000, daemonHeight: 3_300_000, restoreHeight: 3_200_000 })).toBe(0.5)

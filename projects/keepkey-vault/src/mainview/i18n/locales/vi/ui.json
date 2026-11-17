@@ -190,5 +190,7 @@
   "m6647c94f": "Khóa giao dịch Monero không khớp với giao dịch đã ký. Chưa gửi gì.",
   "m1010f0b": "Không thể ký giao dịch Monero. Hãy cập nhật KeepKey Desktop và firmware rồi kết nối lại.",
   "m2c78dc79": "Các đầu ra Monero đã ký không khớp với người nhận, số tiền và tiền thừa đã được duyệt. Chưa gửi gì cả.",
-  "ma59e78f": "Kết nối lại tính năng theo dõi Monero để cho phép tạo tiền thừa cho giao dịch dùng địa chỉ phụ"
+  "ma59e78f": "Kết nối lại tính năng theo dõi Monero để cho phép tạo tiền thừa cho giao dịch dùng địa chỉ phụ",
+  "m1e4706cc": "Số dư được biết gần nhất · {{time}}",
+  "mc72d771e": "Đang cập nhật ví Monero của bạn. Hiển thị số dư được biết gần nhất."
 }

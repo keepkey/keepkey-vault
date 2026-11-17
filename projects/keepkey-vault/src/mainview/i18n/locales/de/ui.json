@@ -175,5 +175,7 @@
   "m6647c94f": "Der Monero-Transaktionsschlüssel passt nicht zur signierten Transaktion. Es wurde nichts gesendet.",
   "m1010f0b": "Monero-Signierung ist nicht verfügbar. Aktualisiere KeepKey Desktop und die Firmware und verbinde dein Gerät erneut.",
   "m2c78dc79": "Die signierten Monero-Ausgänge stimmen nicht mit dem bestätigten Empfänger, Betrag und Wechselgeld überein. Es wurde nichts gesendet.",
-  "ma59e78f": "Verbinde die Monero-Überwachung erneut, um die Wechselgeldableitung bei Unteradressen zu autorisieren"
+  "ma59e78f": "Verbinde die Monero-Überwachung erneut, um die Wechselgeldableitung bei Unteradressen zu autorisieren",
+  "m1e4706cc": "Zuletzt bekannter Kontostand · {{time}}",
+  "mc72d771e": "Deine Monero-Wallet wird aktualisiert. Der zuletzt bekannte Kontostand wird angezeigt."
 }

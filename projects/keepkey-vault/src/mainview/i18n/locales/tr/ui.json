@@ -187,5 +187,7 @@
   "m6647c94f": "Monero işlem anahtarı imzalanan işlemle eşleşmiyor. Hiçbir şey gönderilmedi.",
   "m1010f0b": "Monero imzalama kullanılamıyor. KeepKey Desktop ve cihaz yazılımını güncelleyip yeniden bağlanın.",
   "m2c78dc79": "İmzalanan Monero çıktıları onaylanan alıcı, tutar ve para üstüyle eşleşmiyor. Hiçbir şey gönderilmedi.",
-  "ma59e78f": "Alt adresli işlemlerin para üstü türetimini yetkilendirmek için Monero izlemeyi yeniden bağlayın"
+  "ma59e78f": "Alt adresli işlemlerin para üstü türetimini yetkilendirmek için Monero izlemeyi yeniden bağlayın",
+  "m1e4706cc": "Bilinen son bakiye · {{time}}",
+  "mc72d771e": "Monero cüzdanınız güncelleniyor. Bilinen son bakiye gösteriliyor."
 }

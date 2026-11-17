@@ -35,8 +35,8 @@ test('an unreachable preset fails over before asking the device, with visible re
  expect(status.connection!.attempts[0]).toMatchObject({state:'failed',error:'The node did not respond within 10 seconds.'})
  expect(status.monitorReady).toBe(true)
 })
-test('a failed monitoring connection switches nodes without signing or relaying anything',async()=>{
- const f=fixture();await f.api.connect();f.status.syncState='unreachable';f.status.monitorReady=false
+test('an independently failed daemon switches nodes without signing or relaying anything',async()=>{
+ const f=fixture();await f.api.connect();f.failed.add(primary);f.status.syncState='unreachable';f.status.monitorReady=false;f.advance(15_000)
  await f.api.getStatus();await tick()
  expect(f.calls.connect).toEqual([primary,fallback]);expect((await f.api.getStatus()).connection!.activeNode).toBe(fallback)
  expect(f.calls.sign).toBe(0);expect(f.calls.relay).toBe(0)
@@ -177,4 +177,19 @@ test('an existing standard monitor is invalidated on hidden transition without a
  const status=await f.api.getStatus();await tick()
  expect(status).toMatchObject({available:false,address:'',error:MONERO_STANDARD_WALLET_REQUIRED})
  expect(f.calls.check).toEqual([primary]);expect(f.calls.connect).toEqual([primary])
+})
+
+test('a slow wallet scan on a responding daemon is never restarted through another node',async()=>{
+ const f=fixture();await f.api.connect()
+ f.status.syncState='unreachable';f.status.monitorReady=false;f.status.error='The Monero watch wallet could not refresh'
+ for(let poll=0;poll<8;poll++){
+  f.advance(15_000);await f.api.getStatus();await tick()
+ }
+ expect(f.calls.connect).toEqual([primary])
+ expect(f.calls.check.every(url=>url===primary)).toBe(true)
+ expect(f.calls.sign).toBe(0);expect(f.calls.relay).toBe(0)
+ f.status.syncState='ready';f.status.monitorReady=true
+ const status=await f.api.getStatus()
+ expect(status.monitorReady).toBe(true)
+ expect(status.connection!.activeNode).toBe(primary)
 })
