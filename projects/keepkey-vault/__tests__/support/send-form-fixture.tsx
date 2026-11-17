@@ -39,9 +39,19 @@ function deferred() {
   return { promise, resolve, reject }
 }
 export const calls: Array<{ method: string; params: any; pending: ReturnType<typeof deferred> }> = []
+export const destinationLookupCalls: string[] = []
+export const destinationLookupErrors: { vault: Error | null; contact: Error | null } = { vault: null, contact: null }
 mock.module('../../src/mainview/lib/rpc', () => ({ onRpcMessage: () => () => {}, rpcRequest: async (method: string, params?: any) => {
-  if (method === 'checkVaultDestination') return undefined
-  if (method === 'matchAddress') return null
+  if (method === 'checkVaultDestination') {
+    destinationLookupCalls.push(method)
+    if (destinationLookupErrors.vault) throw destinationLookupErrors.vault
+    return undefined
+  }
+  if (method === 'matchAddress') {
+    destinationLookupCalls.push(method)
+    if (destinationLookupErrors.contact) throw destinationLookupErrors.contact
+    return null
+  }
   if (method === 'getFees') return { gasPrice: { average: '1', fast: '2' }, unit: 'gwei' }
   if (method === 'isEvmContract') return false
   if (!['buildTx', 'ethSignTx', 'broadcastTx'].includes(method)) throw new Error(`Unexpected RPC: ${method}`)
@@ -60,6 +70,8 @@ export const render = async (patch = {}) => { props = { ...props, ...patch }; aw
 /** Mount with `chain`, `address` and `balance` (balance and balanceUsd strings/numbers). */
 export const mount = async (patch: Record<string, unknown>) => {
   calls.length = 0; qr.onScan = null
+  destinationLookupCalls.length = 0
+  destinationLookupErrors.vault = null; destinationLookupErrors.contact = null
   container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container)
   props = { evmAddressIndex: 0, ...patch }; await render()
 }

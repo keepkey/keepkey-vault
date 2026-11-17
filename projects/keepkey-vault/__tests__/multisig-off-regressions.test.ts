@@ -5,13 +5,52 @@ import { join } from 'node:path'
 // Review of #618: three vault paths reached users with Multisig OFF.
 const read = (p: string) => readFileSync(join(import.meta.dir, '..', p), 'utf8')
 const index = read('src/bun/index.ts')
-const send = read('src/mainview/components/SendForm.tsx')
 
 describe('Multisig off never breaks ordinary sends or contacts', () => {
   test('a contact-lookup failure cannot become a vault-destination error that disables Send', () => {
-    const chain = send.slice(send.indexOf('"matchAddress"'), send.indexOf('setVaultDestinationError(e.message'))
-    expect(chain).toContain('.catch(() => { /* contact detection is best-effort; never block sending */ }))')
-  })
+    // Isolate the mounted form's module mocks from the rest of the unit suite.
+    // The shared fixture forbids network, device, wallet and unexpected RPCs.
+    const fixture = new URL('./support/send-form-fixture.tsx', import.meta.url).pathname
+    const source = `
+      import { expect } from 'bun:test'
+      const form = await import(${JSON.stringify(fixture)})
+      const chain = form.chainById('ethereum')
+      const owner = '0x' + '11'.repeat(20), recipient = '0x' + '33'.repeat(20)
+      const props = { chain, address: owner, balance: { chainId: chain.id,
+        balance: '10', balanceUsd: 100, nativeBalanceUsd: 100, address: owner, syncState: 'confirmed' } }
+
+      await form.mount(props)
+      form.destinationLookupErrors.contact = new Error('Contact database unavailable')
+      await form.setRecipient(recipient)
+      await form.setInput('amountPlaceholder', '1')
+      expect(form.destinationLookupCalls).toEqual(['checkVaultDestination', 'matchAddress'])
+      expect(form.text()).not.toContain('Contact database unavailable')
+      expect(form.button('buildTransaction').disabled).toBe(false)
+      await form.click('buildTransaction')
+      expect(form.calls).toHaveLength(1)
+      expect(form.lastBuild().params).toMatchObject({ chainId: 'ethereum', to: recipient, amount: '1' })
+      await form.unmount()
+
+      // A real vault-verification failure must still block both UI and handler.
+      await form.mount(props)
+      form.destinationLookupErrors.vault = new Error('Vault destination is forbidden')
+      await form.setRecipient(recipient)
+      await form.setInput('amountPlaceholder', '1')
+      expect(form.destinationLookupCalls).toEqual(['checkVaultDestination'])
+      expect(form.text()).toContain('Vault destination is forbidden')
+      expect(form.button('buildTransaction').disabled).toBe(true)
+      await form.directBuild()
+      expect(form.calls).toHaveLength(0)
+      await form.unmount()
+      console.log(JSON.stringify({ contactFailureBuilds: 1, vaultFailureBuilds: 0 }))
+    `
+    const run = Bun.spawnSync([process.execPath, '--eval', source], {
+      cwd: new URL('../', import.meta.url).pathname, stdout: 'pipe', stderr: 'pipe', timeout: 30000,
+    })
+    if (run.exitCode) throw new Error(run.stderr.toString() || run.stdout.toString())
+    expect(JSON.parse(run.stdout.toString().trim().split('\n').at(-1)!))
+      .toEqual({ contactFailureBuilds: 1, vaultFailureBuilds: 0 })
+  }, 35000)
   test('sends still work without the database (no saved vaults to protect)', () => {
     const fn = index.slice(index.indexOf('function registeredVaults()'), index.indexOf('function vaultAddressEntries('))
     expect(fn).toContain('(getDb() ? vaultBook().list().map(e => e.vault!) : [])')
