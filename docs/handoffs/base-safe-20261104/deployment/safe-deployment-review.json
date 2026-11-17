@@ -1,0 +1,107 @@
+{
+  "status": "prepared; unsigned and not deployed",
+  "chainId": 8453,
+  "network": "Base",
+  "safeVersion": "1.4.1",
+  "safeAddress": "0x57c193Ea42ae3992D1350099670D672c4dA4f9D9",
+  "owners": [
+    "0x6C3D4902D23D0D9708EFC0977Fa4Da3c33Bd385f",
+    "0x909Ef6B32DfDc12CA86aA710b54c991af3C5F82E"
+  ],
+  "threshold": 2,
+  "keepkeyOwner": "0x909Ef6B32DfDc12CA86aA710b54c991af3C5F82E",
+  "saltNonce": "2026110401",
+  "setup": {
+    "delegatecallTarget": "0x0000000000000000000000000000000000000000",
+    "delegatecallData": "0x",
+    "fallbackHandler": "0xfd0732Dc9E303f09fCEf3a7388Ad10A83459Ec99",
+    "paymentToken": "0x0000000000000000000000000000000000000000",
+    "payment": "0",
+    "paymentReceiver": "0x0000000000000000000000000000000000000000",
+    "modules": [],
+    "guard": "0x0000000000000000000000000000000000000000"
+  },
+  "verification": {
+    "blockNumber": "0x330a9a4",
+    "blockHash": "0xd16d22d0e146ce1eb20cbfc3e8ab396a60bdcfcda96a85bd4680d9a98af2684e",
+    "simulatedAddress": "0x57c193Ea42ae3992D1350099670D672c4dA4f9D9",
+    "source": "safe-global/safe-deployments@685f22be940739259cfc4148db3df7048f39a4e8",
+    "sourceUrl": "https://github.com/safe-global/safe-deployments/tree/685f22be940739259cfc4148db3df7048f39a4e8/src/assets/v1.4.1",
+    "deployments": {
+      "safe_proxy_factory": {
+        "address": "0x4e1DCf7AD4e460CfD30791CCC4F9c8a4f820ec67",
+        "codeHash": "0x50c3cdc4074750a7a974204a716c999edd37482f907608d960b2b025ee0b3317",
+        "evidence": [
+          {
+            "endpoint": "https://mainnet.base.org",
+            "blockNumber": "0x330a9a4",
+            "codeHash": "0x50c3cdc4074750a7a974204a716c999edd37482f907608d960b2b025ee0b3317"
+          },
+          {
+            "endpoint": "https://base-rpc.publicnode.com",
+            "blockNumber": "0x330a9a4",
+            "codeHash": "0x50c3cdc4074750a7a974204a716c999edd37482f907608d960b2b025ee0b3317"
+          }
+        ]
+      },
+      "safe_l2": {
+        "address": "0x29fcB43b46531BcA003ddC8FCB67FFE91900C762",
+        "codeHash": "0xb1f926978a0f44a2c0ec8fe822418ae969bd8c3f18d61e5103100339894f81ff",
+        "evidence": [
+          {
+            "endpoint": "https://mainnet.base.org",
+            "blockNumber": "0x330a9a4",
+            "codeHash": "0xb1f926978a0f44a2c0ec8fe822418ae969bd8c3f18d61e5103100339894f81ff"
+          },
+          {
+            "endpoint": "https://base-rpc.publicnode.com",
+            "blockNumber": "0x330a9a4",
+            "codeHash": "0xb1f926978a0f44a2c0ec8fe822418ae969bd8c3f18d61e5103100339894f81ff"
+          }
+        ]
+      },
+      "compatibility_fallback_handler": {
+        "address": "0xfd0732Dc9E303f09fCEf3a7388Ad10A83459Ec99",
+        "codeHash": "0x7c6007a5d711cea8dfd5d91f5940ec29c7f200fe511eb1fc1397b367af3c42f9",
+        "evidence": [
+          {
+            "endpoint": "https://mainnet.base.org",
+            "blockNumber": "0x330a9a4",
+            "codeHash": "0x7c6007a5d711cea8dfd5d91f5940ec29c7f200fe511eb1fc1397b367af3c42f9"
+          },
+          {
+            "endpoint": "https://base-rpc.publicnode.com",
+            "blockNumber": "0x330a9a4",
+            "codeHash": "0x7c6007a5d711cea8dfd5d91f5940ec29c7f200fe511eb1fc1397b367af3c42f9"
+          }
+        ]
+      }
+    }
+  },
+  "feeEstimate": {
+    "gas": "289201",
+    "gasLimit": "347042",
+    "maxFeePerGas": "11000000",
+    "maxPriorityFeePerGas": "1000000",
+    "maximumExecutionFeeEth": "0.000003817462",
+    "excludesBaseL1DataFee": true,
+    "observedBalanceEth": "0.000363214864989956",
+    "refreshBeforeSigning": true
+  },
+  "transaction": {
+    "from": "0x909Ef6B32DfDc12CA86aA710b54c991af3C5F82E",
+    "to": "0x4e1DCf7AD4e460CfD30791CCC4F9c8a4f820ec67",
+    "value": "0x0",
+    "data": "0x1688f0b900000000000000000000000029fcb43b46531bca003ddc8fcb67ffe91900c76200000000000000000000000000000000000000000000000000000000000000600000000000000000000000000000000000000000000000000000000078c3fdc10000000000000000000000000000000000000000000000000000000000000184b63e800d0000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000160000000000000000000000000fd0732dc9e303f09fcef3a7388ad10a83459ec9900000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000020000000000000000000000006c3d4902d23d0d9708efc0977fa4da3c33bd385f000000000000000000000000909ef6b32dfdc12ca86aa710b54c991af3c5f82e000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+    "chainId": 8453,
+    "nonce": "0x3d",
+    "gasLimit": "0x054ba2",
+    "maxFeePerGas": "0xa7d8c0",
+    "maxPriorityFeePerGas": "0x0f4240",
+    "type": 2
+  },
+  "afterDeployment": [
+    "Verify proxy implementation, both owners, threshold 2, handler, empty modules, and no guard on Base.",
+    "Activate only the signed metadata for this exact chain and Safe address."
+  ]
+}

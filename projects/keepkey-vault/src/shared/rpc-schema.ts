@@ -466,12 +466,13 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       matchAddress: { params: { networkId: string; address: string }; response: AddressBookEntry | null }
       // Manually add (or relabel) an external contact. networkId picks the chain;
       // the address is normalized + the row scoped to the current wallet.
-      addAddressBook: { params: { networkId: string; address: string; label?: string; cosigner?: boolean }; response: AddressBookEntry | null }
+      resolveAddressBookEns: { params: { networkId: string; name: string }; response: import('./ens').ResolvedEnsContact }
+      addAddressBook: { params: { networkId: string; address: string; label?: string; cosigner?: boolean; expectedAddress?: string }; response: AddressBookEntry | null }
       updateAddressBook: { params: { id: string; label?: string; note?: string; cosigner?: boolean }; response: boolean }
       deleteAddressBook: { params: { id: string }; response: void }
       getAddressBookHistory: { params: { entryId: string }; response: AddressBookTx[] }
       certifyAddressBook: { params: { only?: { network: string; address: string }[] } | void; response: { revision: number; count: number; root: string; fingerprint: string } }
-      previewAddressBookCertification: { params: void; response: { label: string; network: string; address: string }[] }
+      previewAddressBookCertification: { params: void; response: import('./types').AddressBookCertificationPreview }
 
       // ── Recent Activity ──────────────────────────────────────────────────
       // limit omitted = every row for the wallet (the activity list shows full history)

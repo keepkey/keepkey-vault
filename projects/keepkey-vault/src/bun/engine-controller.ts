@@ -834,7 +834,7 @@ export class EngineController extends EventEmitter {
    */
   private mergeManifests(bundled: FirmwareManifest | null, remote: FirmwareManifest | null): FirmwareManifest | null {
     const merged = mergeManifests(bundled, remote)
-    if (merged && bundled && remote) console.log(`[Engine] Merged manifest: latest=${merged.latest.firmware.version} beta=${merged.beta.firmware.version} btc=${merged.latest.firmwareBitcoinOnly?.version ?? '(none)'}`)
+    if (merged && bundled && remote) console.log(`[Engine] Merged manifest: latest=${merged.latest.firmware.version} beta=${merged.beta?.firmware.version ?? '(none)'} btc=${merged.latest.firmwareBitcoinOnly?.version ?? '(none)'}`)
     return merged
   }
 

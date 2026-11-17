@@ -45,5 +45,8 @@
 	"cosigner": "Mitunterzeichner",
 	"cosignerOption": "Safe-Mitunterzeichner: beim Erstellen einer Multisig zuerst anbieten",
 	"markCosigner": "Als Safe-Mitunterzeichner markieren",
-	"notCosigner": "Kein Mitunterzeichner"
+	"notCosigner": "Kein Mitunterzeichner",
+	"addressOrEns": "Adresse oder ENS-Name",
+	"ensResolving": "ENS-Name wird aufgelöst…",
+	"certificationExcluded": "Diese Kontakte können nicht zertifiziert werden:"
 }

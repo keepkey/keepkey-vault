@@ -1,0 +1,337 @@
+{
+  "checked_at": "2026-11-15T22:08:38.914Z",
+  "verdict": {
+    "api.keepkey.info_gateway": "confirmed",
+    "paid_zerion_automatic_refresh_protection": "verified for bounded live probe and focused tests",
+    "cache_correctness_and_performance": "needs fixes before release confidence"
+  },
+  "deployed_revision": "e9b7e12e5f9b147501cd058fdf458fc3ce678882",
+  "repository": "/Users/highlander/WebstormProjects/keepkey-stack/projects/keepkey-gateway",
+  "working_copy_note": "The supplied master checkout is bff70f2 with substantial uncommitted changes. Verification used a separate detached worktree of the observed live revision at /private/tmp/keepkey-gateway-verify-20261115. No supplied source files were changed.",
+  "routing": {
+    "health": {
+      "api.keepkey.info": "gateway e9b7e12",
+      "api-blue.keepkey.info": "same revision",
+      "oracles.cc": "same revision"
+    },
+    "registered_usage_and_portfolio": "HTTP 200, x-kk-served-by gateway",
+    "unregistered_provider_usage": "HTTP 401, x-kk-served-by green (gateway auth failure falls back)",
+    "spec": "deployed code intentionally serves the legacy superset from green",
+    "fallback_statuses": [
+      401,
+      404,
+      405
+    ],
+    "scaling": "The .info takeover path explicitly uses PIONEER_CONTAINER MAIN_INSTANCE_ID rather than serveProd; main instance has a ten-minute sleep timeout. Pool availability does not establish .info scaling."
+  },
+  "quota": {
+    "before_and_after": [
+      {
+        "kind": "minute",
+        "before": 0,
+        "after": 0
+      },
+      {
+        "kind": "day",
+        "before": 571,
+        "after": 571
+      },
+      {
+        "kind": "month",
+        "before": 1916,
+        "after": 1916
+      }
+    ],
+    "limits": {
+      "minute": 120,
+      "day": 10000,
+      "month": 250000
+    },
+    "state": "normal",
+    "interpretation": "Application physical-request reservations for Zerion, not provider billing credits or an invoice total. Other providers such as NOWNodes/CoinGecko were not proven to have equivalent budget enforcement.",
+    "enforcement": "Reservation before network fetch; shared UTC windows, failures remain charged, database reservation failures block paid discovery. Background and realtime paid Zerion transport is refused."
+  },
+  "live_probe": {
+    "checkedAt": "2026-11-15T22:08:38.914Z",
+    "origin": "https://api.keepkey.info",
+    "probe": "One temporary client registration, three cache-only native portfolios and one cache-only history. No forced paid discovery, watch registration, signing or broadcast.",
+    "results": [
+      {
+        "path": "/api/v1/provider/usage",
+        "status": 200,
+        "servedBy": "gateway",
+        "elapsedMs": 1677,
+        "cacheControl": "no-store",
+        "phase": "before",
+        "usage": {
+          "provider": "zerion",
+          "state": "normal",
+          "windows": [
+            {
+              "kind": "minute",
+              "limit": 120,
+              "used": 0
+            },
+            {
+              "kind": "day",
+              "limit": 10000,
+              "used": 571
+            },
+            {
+              "kind": "month",
+              "limit": 250000,
+              "used": 1916
+            }
+          ]
+        }
+      },
+      {
+        "path": "/api/v1/portfolio/balances",
+        "status": 200,
+        "servedBy": "gateway",
+        "elapsedMs": 4415,
+        "cacheControl": "no-store",
+        "phase": "automatic-0",
+        "meta": {
+          "traceId": "b8babc02-9861-49c6-a2ca-0915df585462",
+          "serverMs": 3045.4,
+          "degraded": true,
+          "degradedCount": 1,
+          "failures": [
+            {
+              "caip": "eip155:1/slip44:60",
+              "reason": "Token discovery unavailable; last known balances must be retained"
+            }
+          ],
+          "staleChains": [
+            "eip155:1"
+          ]
+        },
+        "snapshot": {
+          "at": "2026-11-15T22:08:19.467Z",
+          "heights": {}
+        },
+        "balances": [
+          {
+            "caip": "eip155:1/slip44:60",
+            "dataSource": "nownodes",
+            "fetchedAt": 1794780499467,
+            "isStale": false,
+            "degraded": false,
+            "verified": true
+          }
+        ]
+      },
+      {
+        "path": "/api/v1/portfolio/balances",
+        "status": 200,
+        "servedBy": "gateway",
+        "elapsedMs": 1320,
+        "cacheControl": "no-store",
+        "phase": "automatic-1",
+        "meta": {
+          "traceId": "1ac2b5e5-6956-4980-a10e-9da3da815ebd",
+          "serverMs": 339.08,
+          "degraded": true,
+          "degradedCount": 1,
+          "failures": [
+            {
+              "caip": "eip155:1/slip44:60",
+              "reason": "Token discovery unavailable; last known balances must be retained"
+            }
+          ],
+          "staleChains": [
+            "eip155:1"
+          ]
+        },
+        "snapshot": {
+          "at": "2026-11-15T22:08:23.400Z",
+          "heights": {}
+        },
+        "balances": [
+          {
+            "caip": "eip155:1/slip44:60",
+            "dataSource": "nownodes",
+            "fetchedAt": 1794780503400,
+            "isStale": false,
+            "degraded": false,
+            "verified": true
+          }
+        ]
+      },
+      {
+        "path": "/api/v1/portfolio/balances?forceRefresh=true",
+        "status": 200,
+        "servedBy": "gateway",
+        "elapsedMs": 1927,
+        "cacheControl": "no-store",
+        "phase": "automatic-force",
+        "meta": {
+          "traceId": "ea5f0a9e-88d5-4788-aac4-e59ff798c1aa",
+          "serverMs": 1000.73,
+          "degraded": true,
+          "degradedCount": 1,
+          "failures": [
+            {
+              "caip": "eip155:1/slip44:60",
+              "reason": "Token discovery unavailable; last known balances must be retained"
+            }
+          ],
+          "staleChains": [
+            "eip155:1"
+          ]
+        },
+        "snapshot": {
+          "at": "2026-11-15T22:08:24.753Z",
+          "heights": {}
+        },
+        "balances": [
+          {
+            "caip": "eip155:1/slip44:60",
+            "dataSource": "nownodes",
+            "fetchedAt": 1794780504753,
+            "isStale": false,
+            "degraded": false,
+            "verified": true
+          }
+        ]
+      },
+      {
+        "path": "/api/v1/tx/history?forceRefresh=true",
+        "status": 409,
+        "servedBy": "gateway",
+        "elapsedMs": 1146,
+        "cacheControl": null,
+        "phase": "automatic-history"
+      },
+      {
+        "path": "/api/v1/provider/usage",
+        "status": 200,
+        "servedBy": "gateway",
+        "elapsedMs": 352,
+        "cacheControl": "no-store",
+        "phase": "after",
+        "usage": {
+          "provider": "zerion",
+          "state": "normal",
+          "windows": [
+            {
+              "kind": "minute",
+              "limit": 120,
+              "used": 0
+            },
+            {
+              "kind": "day",
+              "limit": 10000,
+              "used": 571
+            },
+            {
+              "kind": "month",
+              "limit": 250000,
+              "used": 1916
+            }
+          ]
+        }
+      }
+    ],
+    "budgetDelta": [
+      {
+        "kind": "minute",
+        "before": 0,
+        "after": 0
+      },
+      {
+        "kind": "day",
+        "before": 571,
+        "after": 571
+      },
+      {
+        "kind": "month",
+        "before": 1916,
+        "after": 1916
+      }
+    ]
+  },
+  "focused_unit_tests": {
+    "passed": 55,
+    "failed": 0,
+    "files": 8,
+    "log": "/private/tmp/keepkey-gateway-cache-tests-20261115.log"
+  },
+  "local_postgres_integration": {
+    "passed": 7,
+    "failed": 0,
+    "groups": [
+      "shared provider quota across two gateway instances, including daily exhaustion and seed ledger",
+      "single-connection cache and nested locks without deadlock",
+      "persistent counters across multiple processes and repeat flushes without double counting"
+    ],
+    "isolation": "Disposable localhost-only Postgres 16 container and dedicated gateway_verify_test database; container stopped and automatically removed afterward. No production database connection."
+  },
+  "reproduced_cache_findings": {
+    "sourceRevision": "e9b7e12e5f9b147501cd058fdf458fc3ce678882",
+    "scope": "Controlled local fixtures using deployed DemandCache; not a live traffic measurement",
+    "persistentAge": {
+      "persistentFreshUntil": 100,
+      "readAt": 150,
+      "returned": "old",
+      "upstreamLoads": 0,
+      "retainedBeyondOriginalFreshness": true
+    },
+    "crossInstanceForcedRefresh": {
+      "requests": 2,
+      "upstreamLoads": 2,
+      "results": [
+        "fresh-1",
+        "fresh-2"
+      ],
+      "duplicatesPhysicalReads": true
+    }
+  },
+  "remaining_work": [
+    {
+      "priority": 0,
+      "item": "Preserve original observation time and cache provenance through DemandCache, portfolio responses and Vault. Do not mark stale fallback as verified at response time.",
+      "evidence": "DemandCache returns value without timestamp; portfolio.ts sets fetchedAt at request start, including cached multichain and native results."
+    },
+    {
+      "priority": 0,
+      "item": "Preserve remaining persistent TTL when populating L1; do not restart the freshness window.",
+      "evidence": {
+        "persistentFreshUntil": 100,
+        "readAt": 150,
+        "returned": "old",
+        "upstreamLoads": 0,
+        "retainedBeyondOriginalFreshness": true
+      }
+    },
+    {
+      "priority": 1,
+      "item": "Coalesce same-key forced refreshes across processes, while preserving the semantics of explicit on-chain refresh. A distributed lock alone serializes duplicates.",
+      "evidence": {
+        "requests": 2,
+        "upstreamLoads": 2,
+        "results": [
+          "fresh-1",
+          "fresh-2"
+        ],
+        "duplicatesPhysicalReads": true
+      },
+      "scope": "Reproduction used DemandCache; the Zerion forced wallet/history paths also skip the after-lock cache check. Live probe did not force paid Zerion discovery."
+    },
+    {
+      "priority": 1,
+      "item": "Measure and address time spent in DB/cache and slow upstream reads. Ordinary stale fallback currently waits for loader failure; keep any stale-first display separate from send verification.",
+      "evidence": "Sample portfolio timings were 4415, 1320, and 1927ms; source server timings were 3045.4, 339.08, and 1000.73ms. Three samples are not a percentile benchmark."
+    },
+    {
+      "priority": 1,
+      "item": "Review production warm-floor and pool integration for api.keepkey.info; currently it bypasses serveProd."
+    },
+    {
+      "priority": 1,
+      "item": "Audit legacy fallback traffic and older clients lacking refresh intent; legacy/manual/on-demand requests remain eligible for paid discovery within budgets. Verify selected endpoint and key registration on the actual Vault release."
+    }
+  ],
+  "operations": "Two temporary diagnostic API client registrations were created across the probe attempts; no watches or durable monitoring were registered. The first probe stopped at the expected cache-miss 409; the second recorded it correctly and completed. No paid discovery was requested. No signing, transaction broadcast, source deployment, credential rotation, DNS edit, tag move or release promotion occurred."
+}

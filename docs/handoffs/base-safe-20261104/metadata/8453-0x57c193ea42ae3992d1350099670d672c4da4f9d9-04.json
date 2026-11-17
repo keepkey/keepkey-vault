@@ -1,0 +1,16 @@
+{
+  "display": {
+    "formats": {
+      "changeThreshold(uint256 threshold)": {
+        "intent": "Change Safe threshold",
+        "fields": [
+          {
+            "path": "threshold",
+            "label": "Required signatures",
+            "format": "raw"
+          }
+        ]
+      }
+    }
+  }
+}

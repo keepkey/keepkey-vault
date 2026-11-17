@@ -1,0 +1,54 @@
+Prepared Base Safe and ClearSign metadata
+
+Safe (predicted, not deployed): 0x57c193Ea42ae3992D1350099670D672c4dA4f9D9
+Owners:
+  0x6C3D4902D23D0D9708EFC0977Fa4Da3c33Bd385f
+  0x909Ef6B32DfDc12CA86aA710b54c991af3C5F82E (connected KeepKey)
+Threshold: 2 of 2
+Network: Base, chain 8453
+Safe implementation: standard SafeL2 1.4.1
+
+Deployment review: deployment/safe-deployment-review.json
+Unsigned issuer input: metadata/catalog-unsigned.json
+Metadata descriptions and compiled programs: metadata/*.json, metadata/*.c773
+Issuer approval printout: metadata/issuer-review.txt
+
+Catalog fingerprint:
+  7ee1e87b5389b93eb3e5f24bff5f082ed34e933a993acf5cf104b1e79fa9eba1
+
+The bundle contains the Safe EIP-712 owner approval, eight Safe settings
+functions, and the native Base USDC transfer. It authorizes descriptions,
+not wallet transactions. Other tokens and protocols need their own definitions.
+The Base USDC definition uses the signed unit formatter (USDC, six decimals)
+and explicitly shows "unit set by signer" plus the raw amount. Its address
+comes from Circle's official contract list; symbol and decimals were checked
+on Base. It does not depend on a firmware token-table entry.
+
+Signing ceremony:
+1. Transfer the unsigned catalog to the established offline review machine.
+2. Use the resident issuer fingerprint tool and a validator built with the
+   Safe typed-call extension. Compare the fingerprint and every leaf with
+   the reviewed source descriptors before bringing the printout to the issuer.
+3. Sign the single Base-scoped catalog root with the established issuer,
+   existing public issuer certificates and existing append-only ledger.
+   Compare the physical issuer screens against the offline printout.
+4. Verify the returned signed catalog against the production ClearSign root
+   and this fingerprint before importing or serving any envelope.
+
+The resident fingerprint tool prints a legacy "7.16 verifier" label. The
+validator used for this new bundle is a development 7.17 build with capability
+28 (SAFE_TYPED_CALLS), not stock 7.16. Its checksum is recorded in verification.json.
+Stock 7.16 rejects the new typed embedded-call program.
+
+Before wallet use:
+- The connected owner KeepKey reports firmware 7.16.0. New on-device Safe
+  inner-call review requires updated firmware with capability 28 and the
+  corresponding Vault changes. No firmware was flashed during preparation.
+- Review deployment/safe-deployment-review.json before authorizing deployment.
+  Its nonce and fee estimates must be refreshed. Its value is zero; only the
+  deployment fee is paid. The estimate excludes Base's L1 data fee.
+- After deployment, verify implementation, both owners, threshold, handler,
+  empty modules and absent guard on Base before activating the metadata.
+
+No production metadata signature, Safe deployment, broadcast or service
+publication has occurred in this preparation.

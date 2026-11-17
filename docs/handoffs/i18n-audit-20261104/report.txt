@@ -1,0 +1,253 @@
+KeepKey Vault translation and multilingual systems audit
+Date: 2026-11-04
+Version: 1.6.9
+HEAD: ff0d71229ee874e0d96b2057d694de1b8aaea1e4
+Source: current working tree, including existing modified and untracked features.
+All source references below are relative to projects/keepkey-vault/.
+
+Conclusion
+
+The i18next foundation and English fallback work, but the app is only partially
+localized. Catalog parity alone would substantially overstate coverage: many
+complete flows and critical warnings bypass the catalogs. Two adjacent financial
+localization defects deserve first priority: non-USD currency relabeling without
+conversion, and silent truncation of comma-decimal input in USD amount entry.
+
+Scope and method
+
+Inspected 448 non-test TypeScript/TSX source files, including all 127 TSX files,
+all 240 locale JSON files (15 languages x 16 namespaces), the HTML entry point,
+native application menus/dialogs, backend progress/errors, report/PDF generation,
+language persistence, regional formatting, and build/CI configuration.
+Inspected the SDK's language field as device metadata; it is not an app locale.
+Vendored framework examples, external dapps, and bundled device firmware are
+outside host-app localization coverage. This does not certify device translations.
+
+Automated checks: JSON parsing, duplicate properties, flattened key parity,
+empty/non-string values, interpolation token parity, locale plural categories,
+lexically bound translation calls, literal JSX text/attributes, regional format
+calls, and backend message fields. Followed up with manual call-path inspection.
+Ran isolated i18next/formatting reproductions against the installed libraries and
+a production Vite frontend build into /private/tmp/keepkey-i18n-audit-20261104-dist.
+No app behavior or translation files were changed.
+
+Coverage inventory
+
+Language       Keys present / English keys     Missing    Catalog parity
+English        1292 / 1292                     0          100.0%
+Portuguese     1172 / 1292                     120        90.7%
+German         1150 / 1292                     142        89.0%
+Spanish        1150 / 1292                     142        89.0%
+French         1150 / 1292                     142        89.0%
+Italian        1150 / 1292                     142        89.0%
+Japanese       1150 / 1292                     142        89.0%
+Korean         1150 / 1292                     142        89.0%
+Dutch          1150 / 1292                     142        89.0%
+Polish         1150 / 1292                     142        89.0%
+Russian        1150 / 1292                     142        89.0%
+Thai           1150 / 1292                     142        89.0%
+Turkish        1150 / 1292                     142        89.0%
+Vietnamese     1150 / 1292                     142        89.0%
+Chinese        1150 / 1292                     142        89.0%
+
+1,966 missing locale/key pairs overall. These percentages measure the existing
+English catalog only, excluding English text absent from catalogs and missing
+language-specific plural categories. They are not whole-app translation rates.
+
+The static pass resolved 1,325 literal translation call sites. At 152 sites,
+covering 141 distinct keys, the key is absent even from English; all those sites
+provide defaults. Another 18 bound calls use dynamic keys, and 64 calls through
+an unresolved t identifier (mostly passed translator functions) need separate
+resolution. Missing-key counts are therefore a lower bound.
+
+2,257 literal JSX text/attribute candidates occur across the UI, and 328 literal
+backend message/title/label/etc. candidates occur outside mainview. Brands, units,
+technical labels, feature-gated code and potentially unused components are
+included: these are review inventories, not counts of confirmed defects.
+61 TSX files have such candidates and no locally resolved translator calls.
+
+Findings, ordered by priority
+
+1. HIGH: The currency setting relabels USD values without conversion.
+   Evidence: src/mainview/lib/fiat-context.tsx:90, src/shared/fiat.ts:42,
+   src/mainview/components/AnimatedUsd.tsx:28,
+   src/mainview/components/AssetPage.tsx:833,
+   src/mainview/components/SwapDialog.tsx:3471.
+   formatFiat defaults conversionRate to 1, and the provider never supplies a
+   different rate. AnimatedUsd directly formats its USD input in the selected
+   currency too. Reproduction: a USD input of 100 displays as $100.00, EUR100.00,
+   BRL100.00 or JPY100 depending on selection. No exchange-rate service or rate
+   wiring was found in these paths. Portfolio values and swap estimates can
+   therefore misstate financial value. Other dashboard paths still display USD,
+   so screens can also disagree about the chosen currency.
+   Fix: either keep values explicitly in USD or introduce a shared conversion
+   layer with rate provenance, age and unavailable-state handling before format.
+
+2. HIGH: Comma-decimal USD entry silently changes the interpreted amount.
+   Evidence: src/mainview/components/SendForm.tsx:181, :194, :639.
+   The visible text input accepts arbitrary strings; handleUsdChange applies
+   parseFloat and converts the prefix into a valid dot-decimal crypto amount.
+   Reproduction of that arithmetic: input '1,5' at USD100 per coin produces
+   0.010000000 coins, rather than interpreting 1.5 USD. '0,5' becomes zero;
+   '1.234,56' becomes 1.234. This happens despite offering comma-decimal regional
+   number formats. Native amount parsing has related prefix parsing, though
+   downstream builders may reject the original native string.
+   Fix: define accepted amount syntax explicitly; normalize supported localized
+   input before arithmetic, or reject it clearly. Do not silently parse a prefix.
+   Verify the amount displayed for confirmation equals the canonical amount sent.
+
+3. HIGH: Critical signing and destructive-operation warnings remain English.
+   Evidence: src/mainview/components/device/SigningApproval.tsx:558,
+   src/mainview/components/ClearSignReportCard.tsx:16,
+   src/mainview/components/OobSetupWizard.tsx:442,
+   src/mainview/components/SwapDialog.tsx:3905, :3941.
+   Examples include minimum-output risk, simulation findings, firmware wipe and
+   wallet lock acknowledgments, and the scope of globally enabled blind signing.
+   Several are raw JSX; others have inline defaults but no English catalog entry,
+   making them unavailable to translators in every language. Backend ClearSign
+   findings and limitations are rendered as message strings without localization.
+   Fix: extract and review these first. Use stable finding/error identifiers plus
+   parameters for app-owned text. Preserve third-party signed descriptions and
+   raw diagnostics as source content, with translated surrounding explanations.
+
+4. MEDIUM: Entire workflows lack localization, beyond catalog-key gaps.
+   Examples: SafeMultisigView (161 literal candidates), FirmwareDropZone (127),
+   ClearSignStudio (251), ActivityPanel (62), PsbtSignDialog (54), SweepDialog (50),
+   MultisigPolicyDialog (40), WatchOnlyImportDialog (32), and CurrencySelector.
+   These modules have no locally resolved translation calls. Device setup and
+   settings mix translated text with substantial English-only sections.
+   Fix: assign namespaces/owners by workflow; translate complete user journeys,
+   including empty/loading/error states, tooltips and accessibility labels.
+
+5. MEDIUM: Regional formatting preferences are applied inconsistently.
+   Evidence: src/mainview/lib/formatting.ts:16,
+   src/mainview/components/ActivityPage.tsx:41,
+   src/mainview/components/ActivityPanel.tsx:116, :215,
+   src/mainview/components/Dashboard.tsx:1997,
+   src/mainview/components/SendForm.tsx:492.
+   formatBalance honors its optional locale only for amounts >=1000, and common
+   callers omit it. With de-DE explicitly supplied, '12.34' formats as '12.3400',
+   while '1234.56' formats as '1.234,56'. Dates often pin en-US or use the system
+   locale, relative times contain English 'ago', and many displays hardcode '$'.
+   CurrencySelector also falls back to displaying the US locale label when the
+   actual chosen currency locale (e.g. de-CH or ko-KR) is absent from its six-item
+   list. The actual formatter still receives that other locale.
+   Fix: use common number/date/relative-time formatters driven by the explicit
+   regional preference, and show the actual chosen regional setting accurately.
+   Keeping interface language and regional preference independent is reasonable.
+
+6. MEDIUM: Plural catalogs do not cover each language's required forms.
+   Evidence: src/mainview/i18n/locales/ru/asset.json:9,
+   src/mainview/i18n/locales/pl/asset.json:10,
+   src/mainview/components/AssetPage.tsx:1552,
+   src/mainview/components/Dashboard.tsx:3077.
+   Russian and Polish lack _few/_many across four plural families. Actual calls
+   to showFiltered at count 2/5 use the unsuffixed singular translation. The
+   tokenCount family falls back to English ('2 tokens') in isolated reproduction;
+   current dashboard tokensCount instead uses its unsuffixed local fallback and
+   loses the correct few form. Other locales lack _many for large-number rules.
+   Fix: generate required plural suffixes from Intl.PluralRules for each language;
+   review the resulting grammar with language speakers, and remove obsolete base
+   keys where they hide missing plural forms. Include counts 0,1,2,5,21 and large
+   counts in validation; matching English's suffix set is insufficient.
+
+7. MEDIUM: Native UI, progress/error messages and reports bypass language choice.
+   Evidence: src/bun/rest-api-startup.ts:35, src/bun/index.ts:11154,
+   src/bun/engine-controller.ts:1795,
+   src/mainview/components/FirmwareDropZone.tsx:933,
+   src/mainview/components/OobSetupWizard.tsx:2196,
+   src/mainview/main.tsx:36, src/bun/reports.ts:697.
+   App language is localStorage-only; backend AppSettings carries numberLocale
+   but no application locale. Backend firmware-progress messages are displayed
+   directly, native explicit menu labels/dialog text are English, report prose
+   and dates are English, and the root crash boundary is English.
+   Fix: provide native/backend access to the app locale where necessary; prefer
+   structured progress/error codes translated at the presentation boundary.
+   OS-provided menu role labels may already localize with the OS independently.
+
+8. MEDIUM: PDF export corrupts non-Latin names and text.
+   Evidence: src/bun/reports.ts:695, :772, :793, :895, :1076.
+   sanitize replaces characters outside ASCII/Latin-1 with '?', and exports embed
+   Helvetica StandardFonts. User device names, report headings and table values
+   containing Chinese/Japanese/Korean, Cyrillic or Thai therefore lose characters.
+   This affects user data even before report prose is translated.
+   Fix: embed appropriate Unicode fonts and preserve original strings, with font
+   fallback/coverage verification for every supported script.
+
+9. MEDIUM: Document language does not follow the selected UI language.
+   Evidence: src/mainview/index.html:2, src/mainview/i18n/index.ts:111.
+   The document remains lang='en'; the languageChanged handler only persists a
+   string. Assistive technology receives English language metadata for translated
+   content. Both language pickers also compare raw i18n.language against base
+   codes, so a saved regional code such as pt-BR can show English in the picker
+   while i18next resolves Portuguese resources.
+   Fix: update document.lang on initialization and changes; normalize supported
+   language tags and use resolved language consistently in picker state.
+
+10. LOW: Locale configuration and catalog maintenance lack enforceable checks.
+    Evidence: src/mainview/i18n/index.ts:24, :29, :62,
+    src/mainview/i18n/LanguageSelector.tsx:7,
+    src/mainview/i18n/locales/en/swap.json:218, .github/workflows/build.yml.
+    Supported languages are duplicated between detection and selector; saved
+    values bypass validation and i18next has no supportedLngs restriction. Browser
+    detection keeps only the first language's base code, so Chinese script/region
+    preferences are collapsed, and navigator.languages is ignored. If reading
+    localStorage throws, browser detection is skipped too. English swap.json
+    declares exceedsSafeMax twice (currently the same text; later edits can diverge).
+    No dedicated catalog, fallback, plural, pseudo-localization or language-switch
+    checks were found in source tests or CI. The build succeeds with these gaps.
+    Fix: centralize locale metadata and validate saved preferences; add catalog
+    integrity and fallback/plural checks to CI, then visual language-switch smoke
+    coverage with long text and CJK/Thai scripts.
+
+Additional maintenance observation
+
+English swap blindSignBody/blindSignCaveat/blindSignTitle/blindSignEnable describe
+one-time approval, while Spanish and Portuguese catalog entries describe global
+Advanced Mode. These particular display keys are not referenced by the current
+SwapDialog screen; its live warnings use solanaOpaque*/deviceBlindSign* keys and
+English fallbacks. Treat the disagreement as stale catalog debt, not proof that
+the live screen currently displays those contradictory localized statements.
+Remove unused keys or retranslate them before reuse. Semantic drift cannot be
+detected by key/interpolation parity alone.
+
+What passed
+
+All 240 catalogs parse; all 16 namespace files exist in every language. No empty
+values, non-string leaf values, extra translated keys, or interpolation token
+mismatches were found against the parsed English catalogs. English is bundled
+synchronously, non-English resources are lazy loaded, English fallback works in
+the isolated calls, and interpolation escaping is disabled appropriately for
+ordinary React text rendering (React performs escaping).
+
+The production frontend build passed and emitted 14 non-English locale bundles.
+Warnings included English resources being both statically/dynamically imported
+and large existing chunks. This build does not typecheck, launch the desktop
+runtime, verify resource recovery after chunk-load failure, or establish visual
+layout quality. useSuspense=false permits fallback English while resources load;
+language switching/failure recovery still needs desktop runtime verification.
+
+Suggested execution order
+
+First: correct currency semantics and amount input handling; translate all live
+signing, wipe, backup/recovery and blind-signing acknowledgments.
+Next: move inline defaults into English catalogs, close the 1,966 locale gaps,
+finish unlocalized workflows and structured backend presentation text.
+Then: unify regional formatting, complete plurals, preserve Unicode in exports,
+fix language metadata/selection and install maintenance checks.
+
+Artifacts and reproduction
+
+results.json: complete per-locale missing-key lists, plural gaps, untranslated
+text candidates with source line references, unresolved/dynamic translation
+calls, backend text and formatting inventories.
+runtime-results.json: actual outputs from installed i18next and production
+formatting helpers; amount-entry arithmetic reproduction is identified as such.
+audit.mjs and runtime-probes.ts: rerunnable from the repository root:
+  node docs/handoffs/i18n-audit-20261104/audit.mjs
+  bun docs/handoffs/i18n-audit-20261104/runtime-probes.ts
+
+Limits: no full desktop/device session, native-dialog language switching, visual
+clipping/font rendering, exhaustive dynamic-key resolution, external dapp
+translation or native-speaker linguistic sign-off was performed. Existing user
+changes were left intact; only this audit artifact directory was added.

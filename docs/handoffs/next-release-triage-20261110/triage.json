@@ -1,0 +1,117 @@
+{
+  "date": "2026-11-10",
+  "reviewed_develop": "ea4eda5a0705d308c68d4d10eb20b3f7066e7d18",
+  "scope": "Release triage and source/service checks; no production changes or live wallet operations.",
+  "items": [
+    {
+      "number": 1,
+      "priority": "release blocker",
+      "owner": "Vault + SDK + device QA",
+      "next_action": "Qualify transparent NU7 sends through the existing 7.16 PCZT endpoint. PR #643 remains emulator-only and does not resolve physical sends. Reject unsupported flows before PIN/device approval.",
+      "evidence": "Prior exact-release audit verified 12 NU7 transparent signatures on unchanged 7.16 signing source; physical device and funded-node qualification are outstanding."
+    },
+    {
+      "number": 2,
+      "priority": "release requirement: fix or disable early",
+      "owner": "Firmware + sidecar + Vault",
+      "next_action": "Treat Ironwood as a separate capability. Admit NU7 in reviewed firmware branch guards for full support; until qualified, refuse before proof generation and explain the requirement.",
+      "evidence": "The 7.16 Ironwood/migration branch guards reject NU7. The reported UI error needs correlated device/sidecar logs; it is not evidence that a v4 builder caused shielding failure."
+    },
+    {
+      "number": 3,
+      "priority": "next release, paired client/server fix",
+      "owner": "Pioneer operations + Vault",
+      "next_action": "Repair dead endpoints and HTTP/JSON handling. Stop retries for deterministic consensus rejection; bounded failover for transient transport errors. Return concise reason with expandable node details.",
+      "evidence": "Develop invokes Pioneer.Broadcast once; reported multi-node retry policy may be server-side. PR #643 adds selected-provider structured rejection reporting but does not establish node health."
+    },
+    {
+      "number": 4,
+      "priority": "release blocker",
+      "owner": "Pioneer API + deployment QA",
+      "next_action": "Deploy EvmReadRpc and exercise exact prepared transaction eth_call on intended networks. Keep pre-sign failure closed. Do not bypass the check or introduce an unreviewed public RPC fallback.",
+      "evidence": "Live https://api.keepkey.info/spec/swagger.json was fetched: 155 advertised operations, no EvmReadRpc. Local adapter intentionally requires that operation for arbitrary eth_call."
+    },
+    {
+      "number": 5,
+      "priority": "next release; fee floor fix first",
+      "owner": "Vault transaction builder + firmware QA",
+      "next_action": "Remove unjustified L2 gas floors; preserve sub-gwei prices and estimate fees per chain. Qualify EIP-1559 separately against supported device firmware and displayed amounts; avoid blocking the narrow floor correction on an all-chain migration.",
+      "evidence": "Current develop retains 1 gwei floors for Base, Arbitrum and Optimism, and the legacy gasPrice builder. The reported 166x is a point-in-time ratio, not a constant."
+    },
+    {
+      "number": 6,
+      "priority": "split: expiry re-test, tracking open",
+      "owner": "Vault swaps + UI",
+      "next_action": "Re-test stale quote rejection on the exact packaged candidate. Track countdown reset, swallowed manual-check errors, last-checked time and persisted route context separately.",
+      "evidence": "Backend leases enforce 30-60s maximum age and provider expiry, and recheck before signatures. 30 quote tests pass. Manual Recheck catches errors silently; countdown falls back to original estimate after zero. Existing tracking guards do not prove end-to-end tracker recovery."
+    },
+    {
+      "number": 7,
+      "priority": "next release if small; otherwise follow-up",
+      "owner": "Vault quote normalization + UI",
+      "next_action": "Render unknown USD/fee as unavailable, not zero; preserve precision for small fees and use a single immutable quote snapshot across form, review and confirmation. Distinguish expected output from minimum output.",
+      "evidence": "Provided screenshots/numbers are not sufficient to decide whether 1.6810 vs 1.6826 is wrong data or expected/minimum semantics. No new live THORChain quote was requested."
+    },
+    {
+      "number": 8,
+      "priority": "follow-up; not release blocker",
+      "owner": "CDN/Pioneer assets",
+      "next_action": "Repair denied assets and measure coverage using the same sample. Retain a deterministic bundled/letter fallback.",
+      "evidence": "27/300 is 9% of the sampled assets, not proof that 9% of the full catalog fails. #642 explicitly leaves server-logo coverage unresolved. No new CDN sample was run."
+    },
+    {
+      "number": 9,
+      "priority": "mandatory candidate re-test; blocker if balances stay wrong",
+      "owner": "Portfolio/cache + Pioneer operations + UI",
+      "next_action": "Re-test 1.6.11 cold start, post-send balances, account switch and outage/recovery. Distinguish stale cached balances from verified zero and ensure sync settles or shows a specific failure.",
+      "evidence": "PR #642 merged late-cache safety fixes but does not prove live Pioneer freshness. Live wallets and balances were not accessed during this review."
+    },
+    {
+      "number": 10,
+      "priority": "release blocker; fix first",
+      "owner": "Build/release + Electrobun",
+      "next_action": "Propagate child exit code AND signal failure, require CLI/core presence, verify package/build artifact version and source identity, then test a fresh install with supported signing.",
+      "evidence": "Installed Electrobun wrapper uses child.on(exit, code => process.exit(code || 0)); a signal yields null and becomes success. Existing patch tests pass but do not cover native signature failures or stale app output."
+    },
+    {
+      "number": 11,
+      "priority": "release gate requirement; fresh-install re-test",
+      "owner": "Dependency/build CI",
+      "next_action": "Make typecheck execute after a fresh frozen install, resolve the minimatch stub deterministically, retain an explicit diagnostic baseline and reject new diagnostics or compiler startup failure. Do not require eliminating all historical errors in this patch release.",
+      "evidence": "Installed candidate-compatible checkout completed tsc and returned 799 diagnostics; TS2688 was not reproduced. Current lockfile still includes @types/minimatch 6.0.0, so clean-install behavior remains to verify."
+    },
+    {
+      "number": 12,
+      "priority": "next release, small test-only fix",
+      "owner": "Test infrastructure",
+      "next_action": "Give child fixtures a dedicated result record/IPC channel instead of parsing the last stdout line; isolate ports and profiles, bound waits, then rerun the real batch under load without weakening assertions.",
+      "evidence": "Current dashboard-device-errors.test.ts parses stdout.trim().split(newline).at(-1). The user-supplied intermittent race is consistent with this source. No 10-run flake reproduction was attempted."
+    }
+  ],
+  "pull_requests": {
+    "642": "merged; 1.6.11 audit/cache/UI integration",
+    "643": "open; transparent NU7 limited to reviewed 7.17 alpha emulator"
+  },
+  "verification": {
+    "focused_tests_passed": 64,
+    "focused_tests_failed": 0,
+    "tested_areas": [
+      "quote leases",
+      "Pioneer EVM adapter",
+      "swap preflight",
+      "swap tracker guards",
+      "Electrobun text patches"
+    ],
+    "test_environment": "Selected test/source files matched current develop by SHA256; tests executed in the existing populated review checkout with Bun 1.3.9. This is not packaged-app/platform qualification.",
+    "typecheck_diagnostics": 799,
+    "TS2688_reproduced": false,
+    "live_pioneer_EvmReadRpc_advertised": false
+  },
+  "limits": [
+    "No physical device qualification or payment broadcast.",
+    "No live balances/account profile accessed.",
+    "No fresh dependency installation or signed package build.",
+    "No new CDN coverage sample or live THORChain route.",
+    "Pioneer schema absence establishes missing client capability, not successful/failed RPC execution on an advertised route."
+  ]
+}

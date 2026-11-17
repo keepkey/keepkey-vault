@@ -45,5 +45,8 @@
 	"cosigner": "Ortak imzacı",
 	"cosignerOption": "Safe ortak imzacısı: çoklu imza oluştururken önce bunu öner",
 	"markCosigner": "Safe ortak imzacısı olarak işaretle",
-	"notCosigner": "Ortak imzacı değil"
+	"notCosigner": "Ortak imzacı değil",
+	"addressOrEns": "Adres veya ENS adı",
+	"ensResolving": "ENS adı aranıyor…",
+	"certificationExcluded": "Bu kişiler sertifikalandırılamıyor:"
 }

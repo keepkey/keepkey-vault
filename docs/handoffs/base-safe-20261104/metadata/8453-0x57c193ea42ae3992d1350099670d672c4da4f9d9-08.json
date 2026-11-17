@@ -1,0 +1,16 @@
+{
+  "display": {
+    "formats": {
+      "setFallbackHandler(address handler)": {
+        "intent": "Set Safe fallback handler",
+        "fields": [
+          {
+            "path": "handler",
+            "label": "Handler",
+            "format": "addressName"
+          }
+        ]
+      }
+    }
+  }
+}

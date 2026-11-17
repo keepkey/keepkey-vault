@@ -1,0 +1,21 @@
+{
+  "display": {
+    "formats": {
+      "addOwnerWithThreshold(address owner,uint256 threshold)": {
+        "intent": "Add Safe owner",
+        "fields": [
+          {
+            "path": "owner",
+            "label": "New owner",
+            "format": "addressName"
+          },
+          {
+            "path": "threshold",
+            "label": "Required signatures",
+            "format": "raw"
+          }
+        ]
+      }
+    }
+  }
+}

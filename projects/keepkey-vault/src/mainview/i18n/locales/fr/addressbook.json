@@ -45,5 +45,8 @@
 	"cosigner": "Cosignataire",
 	"cosignerOption": "Cosignataire Safe : le proposer en premier lors de la création d'une multisignature",
 	"markCosigner": "Marquer comme cosignataire Safe",
-	"notCosigner": "Pas cosignataire"
+	"notCosigner": "Pas cosignataire",
+	"addressOrEns": "Adresse ou nom ENS",
+	"ensResolving": "Recherche du nom ENS…",
+	"certificationExcluded": "Ces contacts ne peuvent pas être certifiés :"
 }

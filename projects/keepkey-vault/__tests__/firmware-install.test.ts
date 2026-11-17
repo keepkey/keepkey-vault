@@ -49,18 +49,13 @@ describe('bundled manifest', () => {
   test('multi-chain latest is 7.14.2, bitcoin-only is 7.14.3', () => {
     expect(LATEST_MULTI).toBe('7.14.2')
     expect(LATEST_BTC).toBe('7.14.3')
-    expect(latestFor(manifest.beta, true)).toBe('7.14.3')
   })
 
-  test('the beta channel offers signed 7.16.0 to multi-chain devices only', () => {
-    const beta = latestFor(manifest.beta, false)!
-    expect(beta).toBe('7.16.0')
-    const installed = inFirmware('7.14.2', false)
-    expect(needs(installed, false, manifest.beta, beta)).toBe(true)
-    expect(planInstall({ installed, channel: manifest.beta, fallbackMulti: beta })).toMatchObject({ ok: true, bitcoinOnly: false, version: '7.16.0', wipeReason: undefined })
-    // Bitcoin-only stays on 7.14.3 whichever channel is selected.
-    expect(needs(inFirmware('7.14.3', true), false, manifest.beta, beta)).toBe(false)
-    // Back on the default channel, a 7.16.0 device is not offered 7.14.2.
+  test('the alpha channel is empty after withdrawing the failed 7.16.0 preview', () => {
+    expect(manifest.beta).toBeUndefined()
+    expect(latestFor(manifest.beta, false)).toBeUndefined()
+    expect(latestFor(manifest.beta, true)).toBeUndefined()
+    // With no alpha offering, a device already on 7.16.0 is not downgraded.
     expect(needs(inFirmware('7.16.0', false), false)).toBe(false)
   })
 })
@@ -259,6 +254,19 @@ describe('mergeManifests keeps the bitcoin-only build', () => {
     const remote = m(entry('v7.10.0'))
     expect(mergeManifests(manifest, remote)!.latest.firmwareBitcoinOnly).toEqual(channel.firmwareBitcoinOnly)
     expect(mergeManifests(manifest, null)).toBe(manifest)
+  })
+
+  test('a missing or stale beta cannot recreate an empty alpha channel', () => {
+    const stable = { ...m(entry('v7.14.2', 'v7.14.3')), beta: undefined }
+    expect(mergeManifests(stable, { ...stable })!.beta).toBeUndefined()
+    expect(mergeManifests(stable, m(entry('v7.14.1')))!.beta).toBeUndefined()
+    expect(mergeManifests(stable, m(entry('v7.14.2')))!.beta).toBeUndefined()
+  })
+
+  test('a future published alpha remains available without bundling a preview', () => {
+    const stable = { ...m(entry('v7.14.2', 'v7.14.3')), beta: undefined }
+    const merged = mergeManifests(stable, { ...stable, beta: entry('v7.17.0') })!
+    expect(merged.beta?.firmware.version).toBe('v7.17.0')
   })
 })
 

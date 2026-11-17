@@ -21,7 +21,7 @@ mock.module('electrobun/main', () => ({ Utils: { paths: { userData: dir } } }))
 mock.module('electrobun/main/utils', () => ({ paths: { userData: dir } }))
 const db = await import('../src/bun/db')
 const entry = (id: string) => db.getAddressBookList({}).find(e => e.id === id)!
-const add = (address: string, extra: { label?: string; cosigner?: boolean; networkId?: string; chainId?: string; walletId?: string } = {}) => db.addExternalEntry({
+const add = (address: string, extra: { label?: string; ensName?: string; cosigner?: boolean; networkId?: string; chainId?: string; walletId?: string } = {}) => db.addExternalEntry({
   walletId: 'w', deviceId: 'd', networkId: 'eip155:8453', chainId: 'base', chainFamily: 'evm', address, ...extra,
 })!
 
@@ -86,5 +86,53 @@ describe('address book co-signer flag', () => {
     expect(entry(theirs.id).cosigner).toBe(true) // unmarking in one wallet does not clear another's
     // still one flag per address across EVM networks within a wallet
     expect(add(addr, { walletId: 'other', networkId: 'eip155:1', chainId: 'ethereum' }).cosigner).toBe(true)
+  })
+})
+
+describe('ENS contact storage', () => {
+  test('stores the resolved address, ENS label and provenance across rename and re-save', () => {
+    const address = '0x4444444444444444444444444444444444444444'
+    const e = add(address, { label: 'Ignored label', ensName: 'alice.eth' })
+    expect(e.address).toBe(address)
+    expect(e.label).toBe('alice.eth')
+    expect(e.ensName).toBe('alice.eth')
+    expect(e.isEns).toBe(true)
+    expect(add(address).label).toBe('alice.eth')
+    db.updateAddressBookEntry(e.id, null, { label: 'Alice savings' })
+    expect(db.getAddressBookList({ search: 'alice.eth' }).map(e => e.id)).toContain(e.id)
+    expect(add(address, { cosigner: true }).ensName).toBe('alice.eth')
+  })
+
+  test('does not store an unresolved name as an EVM address', () => {
+    expect(add('unresolved.eth', { label: 'unresolved.eth' })).toBeNull()
+  })
+
+  test('repairs a legacy row in place and preserves history', () => {
+    const database = db.getDb()!
+    database.run(`INSERT INTO addressbook (id,wallet_id,device_id,kind,network_id,chain_id,address,label,saved_at,created_at,updated_at)
+      VALUES ('legacy-ens','legacy-wallet','d','external','eip155:8453','base','bob.eth','Bob',1,1,1)`)
+    db.recordOutbound({ walletId: 'legacy-wallet', deviceId: 'd', networkId: 'eip155:8453', chainId: 'base', chainFamily: 'evm',
+      toAddress: 'bob.eth', caip: 'eip155:8453/slip44:60', txid: 'legacy-tx' })
+    const legacy = entry('legacy-ens')
+    expect(db.resolveStoredEnsContact(legacy, { ensName: 'bob.eth', address: '0x' + '5'.repeat(40) })).toBe(true)
+    expect(entry('legacy-ens')).toMatchObject({ address: '0x' + '5'.repeat(40), label: 'bob.eth', ensName: 'bob.eth', isEns: true, savedAt: 1 })
+    expect(db.getAddressBookHistory('legacy-ens', null).map(t => t.txid)).toEqual(['legacy-tx'])
+    expect(db.resolveStoredEnsContact(legacy, { ensName: 'bob.eth', address: '0x' + '6'.repeat(40) })).toBe(false)
+  })
+
+  test('merges a legacy name into an existing address only within its wallet', () => {
+    const address = '0x' + '7'.repeat(40)
+    const target = add(address, { walletId: 'merge-wallet', label: 'Existing', cosigner: true })
+    const other = add(address, { walletId: 'another-wallet', label: 'Other wallet' })
+    db.getDb()!.run(`INSERT INTO addressbook (id,wallet_id,device_id,kind,network_id,chain_id,address,label,saved_at,created_at,updated_at)
+      VALUES ('merge-ens','merge-wallet','d','external','eip155:8453','base','carol.eth','Carol',1,1,1)`)
+    db.recordOutbound({ walletId: 'merge-wallet', deviceId: 'd', networkId: 'eip155:8453', chainId: 'base', chainFamily: 'evm',
+      toAddress: 'carol.eth', caip: 'eip155:8453/slip44:60', txid: 'merged-tx' })
+    expect(db.resolveStoredEnsContact(entry('merge-ens'), { ensName: 'carol.eth', address })).toBe(true)
+    expect(entry(target.id)).toMatchObject({ address, label: 'carol.eth', isEns: true, cosigner: true })
+    expect(db.getAddressBookHistory(target.id, null).map(t => t.txid)).toEqual(['merged-tx'])
+    expect(entry('merge-ens')).toBeUndefined()
+    expect(entry(other.id).label).toBe('Other wallet')
+    expect(entry(other.id).isEns).toBeUndefined()
   })
 })

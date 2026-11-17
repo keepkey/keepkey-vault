@@ -1,0 +1,74 @@
+{
+  "sources": [
+    {
+      "path": "projects/keepkey-vault/src/mainview/theme.ts",
+      "currentSha256": "85f4ca1c7f5e1ddd44ca7032058a5eae0ea81ad1f24dcab05c938480712a2d2a",
+      "captureSha256": "85f4ca1c7f5e1ddd44ca7032058a5eae0ea81ad1f24dcab05c938480712a2d2a"
+    },
+    {
+      "path": "projects/keepkey-vault/src/mainview/index.css",
+      "currentSha256": "6b9893c8c920628a22a83d4a557e658a418e9c5135a5d3be83074018621706cf",
+      "captureSha256": "6b9893c8c920628a22a83d4a557e658a418e9c5135a5d3be83074018621706cf"
+    },
+    {
+      "path": "projects/keepkey-vault/src/mainview/styles/tokens.css",
+      "currentSha256": "79fc8f140fb683630bd198055b9229aa6d7e9a240b65377a57af295139acac1f",
+      "captureSha256": "79fc8f140fb683630bd198055b9229aa6d7e9a240b65377a57af295139acac1f"
+    },
+    {
+      "path": "projects/keepkey-vault/src/mainview/main.tsx",
+      "currentSha256": "88fccc26b5dd10664ffe94cc56d96a8fd4767ceb954edce33510b5044baa70ce",
+      "captureSha256": "88fccc26b5dd10664ffe94cc56d96a8fd4767ceb954edce33510b5044baa70ce"
+    },
+    {
+      "path": "projects/keepkey-vault/src/mainview/App.tsx",
+      "currentSha256": "dda51a0e5d47b138ecff74acbe6b84d48a5ba60d629ed51c51548e863e246122",
+      "captureSha256": "29c4fbd9736f941aa9cc6df88d0cd38a0a3734abacc13541fd1e9a6ed79d2fdb"
+    },
+    {
+      "path": "projects/keepkey-vault/src/mainview/components/TopNav.tsx",
+      "currentSha256": "d49e20f1c03f9fd43e7ff714cedc16ab1c383d9cda2190afb85316970f88a703",
+      "captureSha256": "99e6c0bc89e1f999edadf8c82a280459d48732c0322bac7201eedfa5924fd760"
+    },
+    {
+      "path": "projects/keepkey-vault/src/mainview/components/DeviceGrid.tsx",
+      "currentSha256": "a05af1e715800e776d2e7874451a7993899aed301517a210cc2ea92a01bd3f3d",
+      "captureSha256": "a05af1e715800e776d2e7874451a7993899aed301517a210cc2ea92a01bd3f3d"
+    },
+    {
+      "path": "projects/keepkey-vault/src/mainview/components/WalletTile.tsx",
+      "currentSha256": "2dd0a0db155f10a57d6c5b2906a792f1d41590c1b0e4e84f4e64e5a0e9b4409f",
+      "captureSha256": "2dd0a0db155f10a57d6c5b2906a792f1d41590c1b0e4e84f4e64e5a0e9b4409f"
+    },
+    {
+      "path": "projects/keepkey-vault/src/mainview/components/EmulatorWalletChooser.tsx",
+      "currentSha256": "15660db129ab98d8122676cd2e057b5fa942f2a1f9e3c136be40a40155b9c186",
+      "captureSha256": "15660db129ab98d8122676cd2e057b5fa942f2a1f9e3c136be40a40155b9c186"
+    },
+    {
+      "path": "projects/keepkey-vault/src/mainview/components/DeviceSettingsDrawer.tsx",
+      "currentSha256": "edd0a73a62fa2bb5ab49465b687096e7a1338adc868924724ffbbc8a649b07e9",
+      "captureSha256": "e9331d8a96443fe0250d713f2a2a5c9fb0ce2cbbd7365b82c076f5eb41833e29"
+    },
+    {
+      "path": "projects/keepkey-vault/src/mainview/components/OobSetupWizard.tsx",
+      "currentSha256": "8f3406c8595e1ff6364f1c77c84c301d3b4fe6c4272e715fa2bbf77b552f2535",
+      "captureSha256": "8f3406c8595e1ff6364f1c77c84c301d3b4fe6c4272e715fa2bbf77b552f2535"
+    },
+    {
+      "path": "projects/keepkey-vault/src/mainview/components/ReceiveView.tsx",
+      "currentSha256": "42a5b1b06993ba6a5cd6219c6840456a039b3c38f7ddea0a43fe9a29c9793b63",
+      "captureSha256": "42a5b1b06993ba6a5cd6219c6840456a039b3c38f7ddea0a43fe9a29c9793b63"
+    },
+    {
+      "path": "projects/keepkey-vault/src/mainview/components/device/SigningApproval.tsx",
+      "currentSha256": "ceb1bd29807cdf04b9c1ad8d97154e9f46a9de67f7d087a99c4574491bc38111",
+      "captureSha256": "ceb1bd29807cdf04b9c1ad8d97154e9f46a9de67f7d087a99c4574491bc38111"
+    },
+    {
+      "path": "projects/keepkey-vault/src/mainview/components/device/PinEntry.tsx",
+      "currentSha256": "07ab511bd5b9cb2a443bc89b4cea21749f58cdc36240cb117500efe8cc741f4c",
+      "captureSha256": "07ab511bd5b9cb2a443bc89b4cea21749f58cdc36240cb117500efe8cc741f4c"
+    }
+  ]
+}

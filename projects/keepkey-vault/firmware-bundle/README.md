@@ -12,7 +12,6 @@ firmware-bundle/
 ├── v7.14.1/firmware.keepkey.bin
 ├── v7.14.2/firmware.keepkey.bin
 ├── v7.14.3/firmware.keepkey.bitcoin-only.bin   # Bitcoin-only build (releases.json firmwareBitcoinOnly)
-├── v7.16.0/firmware.keepkey.bin                # Pre-release, beta channel only
 └── bl_v2.1.4/blupdater.bin
 ```
 
@@ -20,7 +19,7 @@ firmware-bundle/
 
 - **Stronger chain of custody**: Apple-notarized DMG → firmware inside the signed bundle. Tampering with any bundled binary breaks the DMG signature. Stronger than downloading + hash-checking at runtime (which trusts a JSON file on GitHub).
 - **Offline installs**: Users on air-gapped machines can flash without network access.
-- **Alpha channel**: Ships 7.16.0 (signed pre-release) inside the app — alpha testers flip the Settings toggle, no remote manifest update required.
+- **Alpha channel**: Empty. The failed 7.16.0 preview has been withdrawn and its binary is no longer bundled.
 
 ## Runtime behavior
 
@@ -28,7 +27,7 @@ At startup, `EngineController.fetchFirmwareManifest()`:
 
 1. Loads `releases.json` from this directory (bundled, always works)
 2. Fetches `https://raw.githubusercontent.com/keepkey/keepkey-vault/master/firmware/releases.json`
-3. **Merges**: for each channel (latest, beta), picks the entry with the higher version
+3. **Merges**: picks the newer published entry for each channel. An absent alpha channel stays absent; a stale beta older than stable is not offered.
 4. When downloading: if the selected version's `.bin` exists here, reads from disk; else fetches over HTTPS
 5. Hash verification runs against the manifest hash regardless of source
 

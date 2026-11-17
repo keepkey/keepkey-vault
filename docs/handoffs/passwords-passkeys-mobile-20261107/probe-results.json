@@ -1,0 +1,44 @@
+{
+  "relay": {
+    "codeUsesMathRandom": true,
+    "controlledRandomProduces": "AAAAAAAA",
+    "secondConsumptionReturns": 404,
+    "newServiceLosesOutstandingCode": true,
+    "note": "Controlled PRNG dependency check, not a production token prediction attack. 404 follows the route mapping for null."
+  },
+  "scanner": {
+    "arbitraryHttpsOriginAccepted": true,
+    "explicitHttpAcceptedByJs": true,
+    "note": "OS transport policy can still reject HTTP."
+  },
+  "webview": {
+    "injectedScriptWritesAtForeignOrigin": true,
+    "explicitNavigationGuardPresent": false,
+    "unpairDoesNotClearWebStorageInHandler": true,
+    "note": "JS harness proves the missing script guard; physical iOS/Android navigation and persistence need device reproduction."
+  },
+  "desktopPrototype": {
+    "dbKekDecryptsCredential": true,
+    "uvFlagSetWithoutPinOrBiometricsInEngine": true,
+    "signatureBytes": 64,
+    "signatureEncoding": "raw P-256 r||s rather than WebAuthn ES256 DER",
+    "syntheticClientOrigin": "https://example.invalid",
+    "note": "UI approval is outside the engine. This does not claim a callback bypass in the running app."
+  },
+  "bex": {
+    "passwordValueReturnedInSnapshot": true,
+    "typedTextPassedToOverlayAndPanelLog": true,
+    "note": "Original snapshot logic with mocked element discovery. No actual browser or real password used."
+  },
+  "passwordBank": {
+    "publishedBip85PasswordVectorMatches": true,
+    "firmwarePasswordCommandImplemented": false
+  },
+  "sourceSha256": {
+    "relay": "9f7de9a0ce3082c35a472c7ea2edfbf4ad6934477e65422cb9a1a4eca0965ef9",
+    "scanner": "a8bb03bd00b0b00bebc4a8f3d6af7017dab00f4163b42f872c18e2118c9ae5fc",
+    "webview": "df967a4e34c33e32854a78f39887bbb635b938277b289be74e559f060e58504f",
+    "desktopPrototype": "4a7d9c81de1d331ccd13ad9f175e27ef5b5b989bdbc13f6d716f76a89105a61e",
+    "bexAgentDom": "b18499b6b4b598d669cfd3b52d29d331aab778d33755fbaac2b98aab72e2fd81"
+  }
+}
