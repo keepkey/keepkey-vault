@@ -1,0 +1,21 @@
+{
+  "display": {
+    "formats": {
+      "disableModule(address prevModule,address module)": {
+        "intent": "Disable Safe module",
+        "fields": [
+          {
+            "path": "prevModule",
+            "label": "Previous module",
+            "format": "addressName"
+          },
+          {
+            "path": "module",
+            "label": "Module",
+            "format": "addressName"
+          }
+        ]
+      }
+    }
+  }
+}

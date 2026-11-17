@@ -1,0 +1,26 @@
+{
+  "display": {
+    "formats": {
+      "swapOwner(address prevOwner,address oldOwner,address newOwner)": {
+        "intent": "Replace Safe owner",
+        "fields": [
+          {
+            "path": "prevOwner",
+            "label": "Previous owner",
+            "format": "addressName"
+          },
+          {
+            "path": "oldOwner",
+            "label": "Old owner",
+            "format": "addressName"
+          },
+          {
+            "path": "newOwner",
+            "label": "New owner",
+            "format": "addressName"
+          }
+        ]
+      }
+    }
+  }
+}

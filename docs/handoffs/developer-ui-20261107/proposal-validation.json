@@ -1,0 +1,17 @@
+{
+  "checkedAt": "2026-11-07T20:48:38.068Z",
+  "scope": "Standalone design proposal, not the Vault application or firmware",
+  "checks": [
+    "10 evidence cases",
+    "all images decode",
+    "no horizontal overflow at 1024/1280/1440 CSS px",
+    "four view switches",
+    "local start/stop and new-profile examples",
+    "request dialog keeps Tab focus",
+    "confirmation controls remain inside active dialog",
+    "Escape closes dialogs",
+    "settings categories",
+    "evidence image viewer"
+  ],
+  "browserErrors": []
+}

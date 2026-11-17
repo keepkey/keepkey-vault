@@ -1,0 +1,130 @@
+{
+  "status": "ready for operator metadata signing; Safe deployment prepared only",
+  "safeAddress": "0x57c193Ea42ae3992D1350099670D672c4dA4f9D9",
+  "chainId": 8453,
+  "metadata": {
+    "programCount": 10,
+    "catalogFingerprint": "7ee1e87b5389b93eb3e5f24bff5f082ed34e933a993acf5cf104b1e79fa9eba1",
+    "catalogSigningDigest": "fbefa4a84f31743eb0ee16db8937005c00240614a3992135a610279b30b767d4",
+    "signaturesProduced": false,
+    "servicePublished": false
+  },
+  "deployment": {
+    "signed": false,
+    "broadcast": false,
+    "predictedAddressMatchedEthCall": true,
+    "factorySingletonAndHandlerCodeHashesCheckedOnTwoRpcs": true
+  },
+  "firmware": {
+    "version": "development 7.17.0 with SAFE_TYPED_CALLS capability 28",
+    "baselineCommit": "296aa1e2c8a84078a70361b3c59bbfff5ecb9d5e",
+    "connectedOwnerVersion": "7.16.0",
+    "connectedOwnerRequiresUpdate": true,
+    "physicalDeviceFlashed": false,
+    "unsignedBinarySha256": "21f316417b02078ded0e716589c90decf5875c6eff7fd647c7f3b7e0d6e04c3b",
+    "unsignedBinaryLocalPath": "/tmp/kk-safe-clearsign-arm/bin/firmware.keepkey.bin",
+    "validatorSha256": "66a899af762c023ce3bf4737c6a48326a5ac25a7cfcbbd16bd9c00a6803eea3a",
+    "validatorLabelNote": "Resident issuer printout says 7.16 verifier; this validator is built from the new 7.17 source recorded here."
+  },
+  "validation": {
+    "firmwareRegressionPassed": 211,
+    "latestFirmwareFocusedPassed": 78,
+    "baseCertifiedEmulatorPassed": 11,
+    "baseEmulatorAdvancedMode": false,
+    "emulatorRoot": "throwaway TEST root only",
+    "vaultFocusedPassed": 135,
+    "vaultRestAndSupportPassed": 30,
+    "metadataProgramsAccepted": 10,
+    "sramReserveBytes": 19552,
+    "minimumReserveBytes": 16384,
+    "largestStackFrameBytes": 7664,
+    "typescript": {
+      "status": "existing repository errors; no new diagnostic kinds",
+      "baselineErrors": 817,
+      "currentErrors": 813,
+      "addedDiagnosticKinds": []
+    }
+  },
+  "usdcEvidence": {
+    "officialSource": "https://developers.circle.com/stablecoins/usdc-contract-addresses",
+    "contract": "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+    "decimals": 6,
+    "onChainResponses": [
+      {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "result": "0x0000000000000000000000000000000000000000000000000000000000000006"
+      },
+      {
+        "jsonrpc": "2.0",
+        "id": 2,
+        "result": "0x000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000000045553444300000000000000000000000000000000000000000000000000000000"
+      }
+    ],
+    "liveCatalogResponseBeforePreparation": {
+      "classification": "OPAQUE",
+      "code": "NOT_IN_SIGNED_CATALOG",
+      "error": "this description is not in the signed catalog"
+    }
+  },
+  "sourceFileSha256": {
+    "modules/keepkey-firmware/include/keepkey/firmware/safe_batch.h": "0c17c770e8dd9b9e9ac935c948005771094e63b5c7f5fddb85be13ea25eccfce",
+    "modules/keepkey-firmware/include/keepkey/firmware/erc7730_workflow.h": "6ac5623d0408f7eb8ddfbd74fad677ab907d27411aca168f83a7abec962f2cad",
+    "modules/keepkey-firmware/include/keepkey/firmware/eip712_stream.h": "bb4e648b1205e46c17b85d55e9758cca0d13a368a8d00f4df7e33fadda38d834",
+    "modules/keepkey-firmware/lib/firmware/safe_batch.c": "a1c0219f045bd5c28b91644392de417dd08823ef9d2b657193cc9acb28c754d2",
+    "modules/keepkey-firmware/lib/firmware/erc7730_workflow.c": "782ae3a15823e97de2cd50591d7f0a7fb6a587972f6334834733153edb0a09cb",
+    "modules/keepkey-firmware/lib/firmware/eip712_stream.c": "23dbe4242ceb1b7c2a417eef175aba90414b69b14fd71816b2f921e9f2584c6d",
+    "modules/keepkey-firmware/lib/firmware/erc7730_catalog.c": "42d81d4e83c645af3545a3ec3e8e13df764101cf880e6c567c40cfbb87c82e32",
+    "modules/keepkey-firmware/lib/firmware/fsm_msg_ethereum.h": "985388000bafc7ef15f56db2ac7a2508e63567eb3f15b8c07c942c26e959229b",
+    "modules/keepkey-firmware/lib/firmware/fsm_msg_common.h": "261df33797cc4f38e4e17985aad2fa73c5fa371f8dbdf8139d36be35d9ded09b",
+    "modules/keepkey-firmware/unittests/firmware/safe_batch.cpp": "6149e7195cedc2c5becabfba078d843f892797d6bfb73381772fd67fb2d6dc5a",
+    "modules/keepkey-firmware/deps/python-keepkey/keepkeylib/erc7730_compiler.py": "dfd2b084f266477889392a9097c275d794111afafec648e49e17c56d776619a1",
+    "modules/keepkey-firmware/deps/python-keepkey/tests/test_msg_ethereum_erc7730_safe.py": "57dcbd995130fd63c7a026bc893e14f436f77cb2a5152f89fdfafb7e786aaa4f",
+    "modules/device-protocol/messages.proto": "6b4b94c82eeca3568440c643e7b12e1746c626201554e2a0b45a2ea16280ece9",
+    "modules/keepkey-firmware/deps/device-protocol/messages.proto": "6b4b94c82eeca3568440c643e7b12e1746c626201554e2a0b45a2ea16280ece9",
+    "modules/keepkey-firmware/deps/python-keepkey/device-protocol/messages.proto": "6b4b94c82eeca3568440c643e7b12e1746c626201554e2a0b45a2ea16280ece9",
+    "projects/keepkey-vault/src/bun/erc7730-describe.ts": "2814097a2ed3834a7d701dd437bf17dcb8d0619295abda9e24bea710e1ae5bb0",
+    "projects/keepkey-vault/src/bun/erc7730-resolver.ts": "c2e64f944e88e1209725acd0d0c0fd1992ee41545819aec20781191e1c4cb0dd",
+    "projects/keepkey-vault/src/bun/evm-signing-preview.ts": "cbf390be2ee87194c21d622150cd845c8432437da03d321358eaafe62a6a8e62",
+    "projects/keepkey-vault/src/shared/erc7730-support.ts": "0dc8a05e740334e6b34ffa6382b74a58bb6890e831817477aa016accb0ad09af",
+    "projects/keepkey-vault/src/shared/clearsign-risk.ts": "a24da175d97b26ff2368694d15754f672aacc3408a69071f592cdcf2b717a580",
+    "projects/keepkey-vault/src/bun/erc7730-safe.test.ts": "598ec9017b12fddf43628a4d2d7559f17189527a4b1642fdc3bf1f6ee79d41d3",
+    "projects/keepkey-vault/src/bun/erc7730-safe.fixtures.json": "80e3ce197bdf0520908795b32c1ec4efe0330923eac4a4dd0087ea0c170fae23",
+    "projects/keepkey-vault/scripts/prepare-base-safe.ts": "73f3bca078f7096f7d38e27874969fe75e9aeeadfe362a35e5009fceff4423db",
+    "projects/keepkey-vault/scripts/prepare-safe-clearsign.py": "c1dea483928f58db4edba8630fb7cf6689ed428f83e771425aa7c6ceeaad45dc"
+  },
+  "bundleFileSha256": {
+    "deployment/safe-deployment-review.json": "2b1daf185dbc6524aec5a5d70eb95fb0dd872578f446ead01debb8dbe554c4ce",
+    "deployment/setup-calldata.hex": "f9af50902fe72613d78e1ee9fb70a41f61211dce749d3e79bf1e65b280e4f1c7",
+    "metadata/8453-0x57c193ea42ae3992d1350099670d672c4da4f9d9-00.c773": "7092a81196c5a1294ef6a3f42eeaad33d493d075c294e777170f9b0a1ac80fdd",
+    "metadata/8453-0x57c193ea42ae3992d1350099670d672c4da4f9d9-00.json": "7bfeb48da4d43ead534a44ab7fa1d83e299a1a42f577fe1857cad14c274821a5",
+    "metadata/8453-0x57c193ea42ae3992d1350099670d672c4da4f9d9-01.c773": "8a38701e40a4502880d136aa97a04c8acec45b5a34f4f21606176cae9853a056",
+    "metadata/8453-0x57c193ea42ae3992d1350099670d672c4da4f9d9-01.json": "873e2cb6ebc53922f3194564c34ffee3bb6e3bb78b5e148d828739dd05a9a19c",
+    "metadata/8453-0x57c193ea42ae3992d1350099670d672c4da4f9d9-02.c773": "3c848bb4aff5a0ff1abd2264d1d3bb9083f9384bf6e59f1be4f49f5cbce8790a",
+    "metadata/8453-0x57c193ea42ae3992d1350099670d672c4da4f9d9-02.json": "4e5a56ed39f7e3150f5bfb8bf7d83e9d3f4adbfb1211e383e45edaf551e5f4ac",
+    "metadata/8453-0x57c193ea42ae3992d1350099670d672c4da4f9d9-03.c773": "8f3e5eca984780bf2df8c80c9ab1d8e4e806da2e52dcc4ffde74b4b44e6395c6",
+    "metadata/8453-0x57c193ea42ae3992d1350099670d672c4da4f9d9-03.json": "b1eb35c3f0cbfe8d04bf8c1bcdcc62272afe7a382676aae76746312fdb7803f9",
+    "metadata/8453-0x57c193ea42ae3992d1350099670d672c4da4f9d9-04.c773": "8cf0e57a4a7981d4dc529c7c5dfbb7961ba0090bf16f14a4b3c72e8612218aab",
+    "metadata/8453-0x57c193ea42ae3992d1350099670d672c4da4f9d9-04.json": "0a254f2eb7953ce4cd07cf351f73c489a760f63dfeb77769e8e88661a61b79f4",
+    "metadata/8453-0x57c193ea42ae3992d1350099670d672c4da4f9d9-05.c773": "7d8dc97e9a2059a8274c9ded4854060c63e72e8d06d10564aed8a6b9ae11a511",
+    "metadata/8453-0x57c193ea42ae3992d1350099670d672c4da4f9d9-05.json": "ba9674dd6f8620dd6beb67de93b3e149cd7755a0b8091cdbdd5202c79443e1b6",
+    "metadata/8453-0x57c193ea42ae3992d1350099670d672c4da4f9d9-06.c773": "01de05a404f7d1af41c023c4c36591767bb53010c12f49457117eaf2e965d230",
+    "metadata/8453-0x57c193ea42ae3992d1350099670d672c4da4f9d9-06.json": "81bc89e14b60ff4ce202629b64467e5256ba8420c1e84a525a2190bd31662e04",
+    "metadata/8453-0x57c193ea42ae3992d1350099670d672c4da4f9d9-07.c773": "ab3049a2e2250d79a6ca0059ecec6f5b9aae9111f3c6f42820c1f09b7958b430",
+    "metadata/8453-0x57c193ea42ae3992d1350099670d672c4da4f9d9-07.json": "230227a1e05b389c5f27a70dad1d7c7b64093606503c1f32f2b5c805ff3065e8",
+    "metadata/8453-0x57c193ea42ae3992d1350099670d672c4da4f9d9-08.c773": "f2488ebf3ae8615b125b92b950dc4e8956dae6f14d1bc1d498c895367b68968d",
+    "metadata/8453-0x57c193ea42ae3992d1350099670d672c4da4f9d9-08.json": "b32fe3c5fca40886f74bf2d1fdc8507ba5a433d57008628ba317a016eb93978f",
+    "metadata/8453-0x57c193ea42ae3992d1350099670d672c4da4f9d9-09.c773": "d4935d3bdf54d0bf4b4e427455b6a5e7be3bba2769dc2bfae392c698a8db4ad9",
+    "metadata/8453-0x57c193ea42ae3992d1350099670d672c4da4f9d9-09.json": "33d2a339b6409aa7bdb7457904872fcc1db676672d4a66bae9d63dad5a2added",
+    "metadata/catalog-unsigned.json": "e70df35e58b64f6e1ab1c35d45d765f3142af78fc31f4c99fa83d063053d0fe5",
+    "metadata/issuer-review.txt": "a04f3ac19058878763624769e4f8ba2f9a4948fc45ae8c65847716fb33223fb3",
+    "metadata/review.json": "8ba45e84c4548774b16c0931486c50e9030c3af803dd04a6dbdbe584f100afa0",
+    "next-steps.txt": "ccb4aa540714bdea7b1e61b949e2981af422e969971f985938cada7e67950a2f",
+    "validation/base-certified-emulator.txt": "cb84ee3af9047aced5818bda0c00c7047125907c3c19be18558ec34de5b0e70f",
+    "validation/firmware-latest.txt": "7cfe72398d8db585ddfefc9608a40ff6ab70820ce86d780f1318b3dde25d87ff",
+    "validation/firmware-regression.txt": "5740dd796266c31e1312da2a16deae78c69411eeb73fa9f875f84e7e28a7d6e5",
+    "validation/sram.txt": "21e9ed134d39c72d9a87991b504321f7c77a5785d27a92a281c8854b90225105",
+    "validation/vault-focused.txt": "9ceb72a9c7618b55ae385e453116ff9f8cf643319f535560d714b302efb43eb7",
+    "validation/vault-rest.txt": "737ec012be8ed3a33a6d698c3d55e14c9366828e4d8f2c75d6c0a4703e4ecf93"
+  }
+}

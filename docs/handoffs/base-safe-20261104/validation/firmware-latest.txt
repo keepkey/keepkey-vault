@@ -1,0 +1,12 @@
+[----------] 3 tests from SafeBatch
+[ RUN      ] SafeBatch.LocatesEachCallAcrossEveryChunkBoundary
+[       OK ] SafeBatch.LocatesEachCallAcrossEveryChunkBoundary (0 ms)
+[ RUN      ] SafeBatch.RefusesDelegatecallsEvenAfterTheSelectedCall
+[       OK ] SafeBatch.RefusesDelegatecallsEvenAfterTheSelectedCall (0 ms)
+[ RUN      ] SafeBatch.RefusesTruncationTrailingBytesDirtyPaddingAndHugeLengths
+[       OK ] SafeBatch.RefusesTruncationTrailingBytesDirtyPaddingAndHugeLengths (1 ms)
+[----------] 3 tests from SafeBatch (1 ms total)
+
+[----------] Global test environment tear-down
+[==========] 78 tests from 3 test cases ran. (434 ms total)
+[  PASSED  ] 78 tests.

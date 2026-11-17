@@ -1,0 +1,622 @@
+{
+  "scope": "Isolated calls to installed i18next with all catalogs preloaded, and production formatting helpers; does not exercise Vite lazy-loading or the UI. USD input check reproduces the handler arithmetic.",
+  "languageChecks": [
+    {
+      "lang": "pl",
+      "cancel": "Anuluj",
+      "customFee": "Set a low fee and the transaction may take a long time or get stuck.",
+      "missingWarning": "This will wipe the device",
+      "plurals": [
+        {
+          "count": 1,
+          "category": "one",
+          "asset": "1 token",
+          "showFiltered": "Pokaż 1 odfiltrowany token",
+          "dashboard": "+1 token"
+        },
+        {
+          "count": 2,
+          "category": "few",
+          "asset": "2 tokens",
+          "showFiltered": "Pokaż 2 odfiltrowany token",
+          "dashboard": "+2 tokenów"
+        },
+        {
+          "count": 5,
+          "category": "many",
+          "asset": "5 tokens",
+          "showFiltered": "Pokaż 5 odfiltrowany token",
+          "dashboard": "+5 tokenów"
+        },
+        {
+          "count": 21,
+          "category": "many",
+          "asset": "21 tokens",
+          "showFiltered": "Pokaż 21 odfiltrowany token",
+          "dashboard": "+21 tokenów"
+        }
+      ],
+      "storedBlindSignCaveat": "Podpisywanie na ślepo oznacza, że urządzenie pokazuje ogólny komunikat zamiast zdekodowanych szczegółów. Kontynuuj tylko dla wymian zainicjowanych tutaj. Możesz to ponownie wyłączyć w Ustawienia urządzenia → Polityka podpisywania."
+    },
+    {
+      "lang": "vi",
+      "cancel": "Hủy",
+      "customFee": "Set a low fee and the transaction may take a long time or get stuck.",
+      "missingWarning": "This will wipe the device",
+      "plurals": [
+        {
+          "count": 1,
+          "category": "other",
+          "asset": "1 token",
+          "showFiltered": "Hiện 1 token đã lọc",
+          "dashboard": "+1 token"
+        },
+        {
+          "count": 2,
+          "category": "other",
+          "asset": "2 token",
+          "showFiltered": "Hiện 2 token đã lọc",
+          "dashboard": "+2 token"
+        },
+        {
+          "count": 5,
+          "category": "other",
+          "asset": "5 token",
+          "showFiltered": "Hiện 5 token đã lọc",
+          "dashboard": "+5 token"
+        },
+        {
+          "count": 21,
+          "category": "other",
+          "asset": "21 token",
+          "showFiltered": "Hiện 21 token đã lọc",
+          "dashboard": "+21 token"
+        }
+      ],
+      "storedBlindSignCaveat": "Ký mù nghĩa là thiết bị hiển thị lời nhắc chung chung thay vì chi tiết đã giải mã. Chỉ tiếp tục với các giao dịch đổi bạn khởi tạo tại đây. Bạn có thể tắt lại trong Cài đặt thiết bị → Chính sách ký."
+    },
+    {
+      "lang": "ja",
+      "cancel": "キャンセル",
+      "customFee": "Set a low fee and the transaction may take a long time or get stuck.",
+      "missingWarning": "This will wipe the device",
+      "plurals": [
+        {
+          "count": 1,
+          "category": "other",
+          "asset": "1 トークン",
+          "showFiltered": "1 件のフィルタ済みトークンを表示",
+          "dashboard": "+1 トークン"
+        },
+        {
+          "count": 2,
+          "category": "other",
+          "asset": "2 トークン",
+          "showFiltered": "2 件のフィルタ済みトークンを表示",
+          "dashboard": "+2 トークン"
+        },
+        {
+          "count": 5,
+          "category": "other",
+          "asset": "5 トークン",
+          "showFiltered": "5 件のフィルタ済みトークンを表示",
+          "dashboard": "+5 トークン"
+        },
+        {
+          "count": 21,
+          "category": "other",
+          "asset": "21 トークン",
+          "showFiltered": "21 件のフィルタ済みトークンを表示",
+          "dashboard": "+21 トークン"
+        }
+      ],
+      "storedBlindSignCaveat": "ブラインド署名では、デバイスは解読された詳細ではなく汎用的なプロンプトを表示します。ここで開始したスワップのみ続行してください。デバイス設定 → 署名ポリシーから再び無効にできます。"
+    },
+    {
+      "lang": "it",
+      "cancel": "Annulla",
+      "customFee": "Set a low fee and the transaction may take a long time or get stuck.",
+      "missingWarning": "This will wipe the device",
+      "plurals": [
+        {
+          "count": 1,
+          "category": "one",
+          "asset": "1 token",
+          "showFiltered": "Mostra 1 token filtrato",
+          "dashboard": "+1 token"
+        },
+        {
+          "count": 2,
+          "category": "other",
+          "asset": "2 token",
+          "showFiltered": "Mostra 2 token filtrati",
+          "dashboard": "+2 token"
+        },
+        {
+          "count": 5,
+          "category": "other",
+          "asset": "5 token",
+          "showFiltered": "Mostra 5 token filtrati",
+          "dashboard": "+5 token"
+        },
+        {
+          "count": 21,
+          "category": "other",
+          "asset": "21 token",
+          "showFiltered": "Mostra 21 token filtrati",
+          "dashboard": "+21 token"
+        }
+      ],
+      "storedBlindSignCaveat": "La firma alla cieca significa che il dispositivo mostra un messaggio generico invece dei dettagli decodificati. Procedi solo per scambi avviati qui. Puoi disattivarla di nuovo in Impostazioni dispositivo → Criteri di firma."
+    },
+    {
+      "lang": "ru",
+      "cancel": "Отмена",
+      "customFee": "Set a low fee and the transaction may take a long time or get stuck.",
+      "missingWarning": "This will wipe the device",
+      "plurals": [
+        {
+          "count": 1,
+          "category": "one",
+          "asset": "1 токен",
+          "showFiltered": "Показать 1 отфильтрованный токен",
+          "dashboard": "+1 токен"
+        },
+        {
+          "count": 2,
+          "category": "few",
+          "asset": "2 tokens",
+          "showFiltered": "Показать 2 отфильтрованный токен",
+          "dashboard": "+2 токенов"
+        },
+        {
+          "count": 5,
+          "category": "many",
+          "asset": "5 tokens",
+          "showFiltered": "Показать 5 отфильтрованный токен",
+          "dashboard": "+5 токенов"
+        },
+        {
+          "count": 21,
+          "category": "one",
+          "asset": "21 токен",
+          "showFiltered": "Показать 21 отфильтрованный токен",
+          "dashboard": "+21 токен"
+        }
+      ],
+      "storedBlindSignCaveat": "Слепое подписание означает, что устройство показывает общий запрос вместо декодированных деталей. Продолжайте только для обменов, начатых здесь. Вы можете снова отключить это в «Настройки устройства» → «Политика подписания»."
+    },
+    {
+      "lang": "pt",
+      "cancel": "Cancelar",
+      "customFee": "Set a low fee and the transaction may take a long time or get stuck.",
+      "missingWarning": "This will wipe the device",
+      "plurals": [
+        {
+          "count": 1,
+          "category": "one",
+          "asset": "1 token",
+          "showFiltered": "Mostrar 1 token filtrado",
+          "dashboard": "+1 token"
+        },
+        {
+          "count": 2,
+          "category": "other",
+          "asset": "2 tokens",
+          "showFiltered": "Mostrar 2 tokens filtrados",
+          "dashboard": "+2 tokens"
+        },
+        {
+          "count": 5,
+          "category": "other",
+          "asset": "5 tokens",
+          "showFiltered": "Mostrar 5 tokens filtrados",
+          "dashboard": "+5 tokens"
+        },
+        {
+          "count": 21,
+          "category": "other",
+          "asset": "21 tokens",
+          "showFiltered": "Mostrar 21 tokens filtrados",
+          "dashboard": "+21 tokens"
+        }
+      ],
+      "storedBlindSignCaveat": "A assinatura às cegas significa que o dispositivo mostra um aviso genérico em vez de detalhes decodificados. Prossiga apenas com trocas que você iniciou aqui. Você pode desativá-la novamente em Configurações do Dispositivo → Política de Assinatura."
+    },
+    {
+      "lang": "zh",
+      "cancel": "取消",
+      "customFee": "Set a low fee and the transaction may take a long time or get stuck.",
+      "missingWarning": "This will wipe the device",
+      "plurals": [
+        {
+          "count": 1,
+          "category": "other",
+          "asset": "1 个代币",
+          "showFiltered": "显示 1 个已过滤代币",
+          "dashboard": "+1 个代币"
+        },
+        {
+          "count": 2,
+          "category": "other",
+          "asset": "2 个代币",
+          "showFiltered": "显示 2 个已过滤代币",
+          "dashboard": "+2 个代币"
+        },
+        {
+          "count": 5,
+          "category": "other",
+          "asset": "5 个代币",
+          "showFiltered": "显示 5 个已过滤代币",
+          "dashboard": "+5 个代币"
+        },
+        {
+          "count": 21,
+          "category": "other",
+          "asset": "21 个代币",
+          "showFiltered": "显示 21 个已过滤代币",
+          "dashboard": "+21 个代币"
+        }
+      ],
+      "storedBlindSignCaveat": "盲签意味着设备显示通用提示，而非解码后的详情。仅对您在此发起的兑换继续操作。您可以在设备设置 → 签名策略中将其重新关闭。"
+    },
+    {
+      "lang": "nl",
+      "cancel": "Annuleren",
+      "customFee": "Set a low fee and the transaction may take a long time or get stuck.",
+      "missingWarning": "This will wipe the device",
+      "plurals": [
+        {
+          "count": 1,
+          "category": "one",
+          "asset": "1 token",
+          "showFiltered": "Toon 1 gefilterde token",
+          "dashboard": "+1 token"
+        },
+        {
+          "count": 2,
+          "category": "other",
+          "asset": "2 tokens",
+          "showFiltered": "Toon 2 gefilterde tokens",
+          "dashboard": "+2 tokens"
+        },
+        {
+          "count": 5,
+          "category": "other",
+          "asset": "5 tokens",
+          "showFiltered": "Toon 5 gefilterde tokens",
+          "dashboard": "+5 tokens"
+        },
+        {
+          "count": 21,
+          "category": "other",
+          "asset": "21 tokens",
+          "showFiltered": "Toon 21 gefilterde tokens",
+          "dashboard": "+21 tokens"
+        }
+      ],
+      "storedBlindSignCaveat": "Blind ondertekenen betekent dat het apparaat een algemene melding toont in plaats van gedecodeerde details. Ga alleen verder voor ruilen die je hier hebt gestart. Je kunt het weer uitschakelen via Apparaatinstellingen → Ondertekeningsbeleid."
+    },
+    {
+      "lang": "de",
+      "cancel": "Abbrechen",
+      "customFee": "Set a low fee and the transaction may take a long time or get stuck.",
+      "missingWarning": "This will wipe the device",
+      "plurals": [
+        {
+          "count": 1,
+          "category": "one",
+          "asset": "1 Token",
+          "showFiltered": "1 gefilterten Token anzeigen",
+          "dashboard": "+1 Token"
+        },
+        {
+          "count": 2,
+          "category": "other",
+          "asset": "2 Token",
+          "showFiltered": "2 gefilterte Token anzeigen",
+          "dashboard": "+2 Token"
+        },
+        {
+          "count": 5,
+          "category": "other",
+          "asset": "5 Token",
+          "showFiltered": "5 gefilterte Token anzeigen",
+          "dashboard": "+5 Token"
+        },
+        {
+          "count": 21,
+          "category": "other",
+          "asset": "21 Token",
+          "showFiltered": "21 gefilterte Token anzeigen",
+          "dashboard": "+21 Token"
+        }
+      ],
+      "storedBlindSignCaveat": "Blind-Signieren bedeutet, dass das Gerät eine generische Aufforderung anstelle dekodierter Details anzeigt. Fahren Sie nur bei Swaps fort, die Sie hier gestartet haben. Sie können es in Geräteeinstellungen → Signierrichtlinie wieder deaktivieren."
+    },
+    {
+      "lang": "ko",
+      "cancel": "취소",
+      "customFee": "Set a low fee and the transaction may take a long time or get stuck.",
+      "missingWarning": "This will wipe the device",
+      "plurals": [
+        {
+          "count": 1,
+          "category": "other",
+          "asset": "1개 토큰",
+          "showFiltered": "필터링된 토큰 1개 표시",
+          "dashboard": "+1개 토큰"
+        },
+        {
+          "count": 2,
+          "category": "other",
+          "asset": "2개 토큰",
+          "showFiltered": "필터링된 토큰 2개 표시",
+          "dashboard": "+2개 토큰"
+        },
+        {
+          "count": 5,
+          "category": "other",
+          "asset": "5개 토큰",
+          "showFiltered": "필터링된 토큰 5개 표시",
+          "dashboard": "+5개 토큰"
+        },
+        {
+          "count": 21,
+          "category": "other",
+          "asset": "21개 토큰",
+          "showFiltered": "필터링된 토큰 21개 표시",
+          "dashboard": "+21개 토큰"
+        }
+      ],
+      "storedBlindSignCaveat": "블라인드 서명은 기기가 해독된 세부 정보 대신 일반 프롬프트를 표시함을 의미합니다. 여기서 직접 시작한 스왑에 대해서만 진행하세요. 기기 설정 → 서명 정책에서 다시 끌 수 있습니다."
+    },
+    {
+      "lang": "fr",
+      "cancel": "Annuler",
+      "customFee": "Set a low fee and the transaction may take a long time or get stuck.",
+      "missingWarning": "This will wipe the device",
+      "plurals": [
+        {
+          "count": 1,
+          "category": "one",
+          "asset": "1 jeton",
+          "showFiltered": "Afficher 1 jeton filtré",
+          "dashboard": "+1 jeton"
+        },
+        {
+          "count": 2,
+          "category": "other",
+          "asset": "2 jetons",
+          "showFiltered": "Afficher 2 jetons filtrés",
+          "dashboard": "+2 jetons"
+        },
+        {
+          "count": 5,
+          "category": "other",
+          "asset": "5 jetons",
+          "showFiltered": "Afficher 5 jetons filtrés",
+          "dashboard": "+5 jetons"
+        },
+        {
+          "count": 21,
+          "category": "other",
+          "asset": "21 jetons",
+          "showFiltered": "Afficher 21 jetons filtrés",
+          "dashboard": "+21 jetons"
+        }
+      ],
+      "storedBlindSignCaveat": "La signature à l'aveugle signifie que l'appareil affiche une invite générique au lieu des détails décodés. Ne continuez que pour les échanges que vous avez initiés ici. Vous pouvez la désactiver à nouveau dans Paramètres de l'appareil → Politique de signature."
+    },
+    {
+      "lang": "es",
+      "cancel": "Cancelar",
+      "customFee": "Set a low fee and the transaction may take a long time or get stuck.",
+      "missingWarning": "This will wipe the device",
+      "plurals": [
+        {
+          "count": 1,
+          "category": "one",
+          "asset": "1 token",
+          "showFiltered": "Mostrar 1 token filtrado",
+          "dashboard": "+1 token"
+        },
+        {
+          "count": 2,
+          "category": "other",
+          "asset": "2 tokens",
+          "showFiltered": "Mostrar 2 tokens filtrados",
+          "dashboard": "+2 tokens"
+        },
+        {
+          "count": 5,
+          "category": "other",
+          "asset": "5 tokens",
+          "showFiltered": "Mostrar 5 tokens filtrados",
+          "dashboard": "+5 tokens"
+        },
+        {
+          "count": 21,
+          "category": "other",
+          "asset": "21 tokens",
+          "showFiltered": "Mostrar 21 tokens filtrados",
+          "dashboard": "+21 tokens"
+        }
+      ],
+      "storedBlindSignCaveat": "La firma a ciegas significa que el dispositivo muestra un aviso genérico en lugar de los detalles decodificados. Procede solo con intercambios que iniciaste aquí. Puedes volver a desactivarlo en Configuración del dispositivo → Política de firma."
+    },
+    {
+      "lang": "en",
+      "cancel": "Cancel",
+      "customFee": "Set a low fee and the transaction may take a long time or get stuck.",
+      "missingWarning": "This will wipe the device",
+      "plurals": [
+        {
+          "count": 1,
+          "category": "one",
+          "asset": "1 token",
+          "showFiltered": "Show 1 filtered token",
+          "dashboard": "+1 token"
+        },
+        {
+          "count": 2,
+          "category": "other",
+          "asset": "2 tokens",
+          "showFiltered": "Show 2 filtered tokens",
+          "dashboard": "+2 tokens"
+        },
+        {
+          "count": 5,
+          "category": "other",
+          "asset": "5 tokens",
+          "showFiltered": "Show 5 filtered tokens",
+          "dashboard": "+5 tokens"
+        },
+        {
+          "count": 21,
+          "category": "other",
+          "asset": "21 tokens",
+          "showFiltered": "Show 21 filtered tokens",
+          "dashboard": "+21 tokens"
+        }
+      ],
+      "storedBlindSignCaveat": "Blind signing means the device shows a generic prompt instead of authenticated swap details. This approval applies only to this transaction and does not enable global Advanced Mode. Confirm only the swap you reviewed here."
+    },
+    {
+      "lang": "th",
+      "cancel": "ยกเลิก",
+      "customFee": "Set a low fee and the transaction may take a long time or get stuck.",
+      "missingWarning": "This will wipe the device",
+      "plurals": [
+        {
+          "count": 1,
+          "category": "other",
+          "asset": "1 โทเค็น",
+          "showFiltered": "แสดง 1 โทเค็นที่ถูกกรอง",
+          "dashboard": "+1 โทเค็น"
+        },
+        {
+          "count": 2,
+          "category": "other",
+          "asset": "2 โทเค็น",
+          "showFiltered": "แสดง 2 โทเค็นที่ถูกกรอง",
+          "dashboard": "+2 โทเค็น"
+        },
+        {
+          "count": 5,
+          "category": "other",
+          "asset": "5 โทเค็น",
+          "showFiltered": "แสดง 5 โทเค็นที่ถูกกรอง",
+          "dashboard": "+5 โทเค็น"
+        },
+        {
+          "count": 21,
+          "category": "other",
+          "asset": "21 โทเค็น",
+          "showFiltered": "แสดง 21 โทเค็นที่ถูกกรอง",
+          "dashboard": "+21 โทเค็น"
+        }
+      ],
+      "storedBlindSignCaveat": "การลงนามแบบปิดตาหมายความว่าอุปกรณ์จะแสดงข้อความทั่วไปแทนรายละเอียดที่ถอดรหัสแล้ว ดำเนินการต่อเฉพาะการแลกเปลี่ยนที่คุณเริ่มที่นี่เท่านั้น คุณสามารถปิดได้อีกครั้งใน การตั้งค่าอุปกรณ์ → นโยบายการลงนาม"
+    },
+    {
+      "lang": "tr",
+      "cancel": "İptal",
+      "customFee": "Set a low fee and the transaction may take a long time or get stuck.",
+      "missingWarning": "This will wipe the device",
+      "plurals": [
+        {
+          "count": 1,
+          "category": "one",
+          "asset": "1 token",
+          "showFiltered": "1 filtrelenmiş tokeni göster",
+          "dashboard": "+1 token"
+        },
+        {
+          "count": 2,
+          "category": "other",
+          "asset": "2 token",
+          "showFiltered": "2 filtrelenmiş tokeni göster",
+          "dashboard": "+2 token"
+        },
+        {
+          "count": 5,
+          "category": "other",
+          "asset": "5 token",
+          "showFiltered": "5 filtrelenmiş tokeni göster",
+          "dashboard": "+5 token"
+        },
+        {
+          "count": 21,
+          "category": "other",
+          "asset": "21 token",
+          "showFiltered": "21 filtrelenmiş tokeni göster",
+          "dashboard": "+21 token"
+        }
+      ],
+      "storedBlindSignCaveat": "Kör imzalama, cihazın çözümlenmiş ayrıntılar yerine genel bir istem göstermesi anlamına gelir. Yalnızca burada başlattığınız takaslar için devam edin. Cihaz Ayarları → İmzalama Politikası bölümünden tekrar kapatabilirsiniz."
+    }
+  ],
+  "currencyChecks": [
+    {
+      "inputUsd": 100,
+      "currency": "USD",
+      "output": "$100.00"
+    },
+    {
+      "inputUsd": 100,
+      "currency": "EUR",
+      "output": "€100.00"
+    },
+    {
+      "inputUsd": 100,
+      "currency": "BRL",
+      "output": "R$100.00"
+    },
+    {
+      "inputUsd": 100,
+      "currency": "JPY",
+      "output": "¥100"
+    }
+  ],
+  "balanceChecks": [
+    {
+      "value": "0.1234",
+      "locale": "de-DE",
+      "output": "0.123400"
+    },
+    {
+      "value": "12.34",
+      "locale": "de-DE",
+      "output": "12.3400"
+    },
+    {
+      "value": "1234.56",
+      "locale": "de-DE",
+      "output": "1.234,56"
+    }
+  ],
+  "inputChecks": [
+    {
+      "input": "0,5",
+      "parseFloat": 0
+    },
+    {
+      "input": "1,5",
+      "parseFloat": 1
+    },
+    {
+      "input": "1.234,56",
+      "parseFloat": 1.234
+    },
+    {
+      "input": "1 234,56",
+      "parseFloat": 1
+    }
+  ],
+  "usdInputCheck": {
+    "input": "1,5",
+    "pricePerUnitUsd": 100,
+    "cryptoAmountFromSendFormHandler": "0.010000000"
+  }
+}
