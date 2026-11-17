@@ -1,4 +1,7 @@
 {
+	"degradedTitle": "一部の残高を更新できませんでした",
+	"degradedReach": "更新できませんでした：",
+	"degradedTail": "利用可能な場合は、最後に確認された残高を表示します。",
 	"supportedChains": "対応チェーン",
 	"refreshBalances": "残高を更新",
 	"connectDeviceToRefresh": "更新するにはデバイスを接続してください",

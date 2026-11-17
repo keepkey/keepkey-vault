@@ -1,4 +1,7 @@
 {
+	"degradedTitle": "Non è stato possibile aggiornare alcuni saldi",
+	"degradedReach": "Impossibile aggiornare:",
+	"degradedTail": "Vengono mostrati gli ultimi saldi noti, se disponibili.",
 	"supportedChains": "Catene supportate",
 	"refreshBalances": "Aggiorna saldi",
 	"connectDeviceToRefresh": "Collega il dispositivo per aggiornare",

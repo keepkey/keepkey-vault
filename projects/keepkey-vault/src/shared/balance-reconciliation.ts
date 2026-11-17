@@ -203,9 +203,11 @@ export function observeBalanceRefresh(
     const assetDirectlyConfirmed = !!balance?.confirmedAssetCaips?.some(
       (caip) => normalizeAssetCaip(caip) === wantedCaip,
     )
+    const observedAt = balance?.updatedAt
+    const currentObservation = observedAt === undefined || (Number.isFinite(observedAt) && observedAt > 0 && observedAt >= record.startedAt)
     const reliable = balance && (
       assetDirectlyConfirmed
-      || (balance.syncState !== 'degraded' && balance.syncState !== 'stale')
+      || (currentObservation && balance.syncState !== 'degraded' && balance.syncState !== 'stale')
     )
     const observedAmount = reliable
       ? balanceAmountForAsset(balance, record.assetCaip)
@@ -250,6 +252,12 @@ export function shouldReplaceBalanceSnapshot(
 ): boolean {
   if (!existing) return true
   if (protectedByReconciliation) return false
+  // A late cached reply must not replace a newer observation. Undefined keeps
+  // legacy callers compatible; explicit zero means the source age is unknown.
+  if (incoming.updatedAt !== undefined) {
+    if (!Number.isFinite(incoming.updatedAt) || incoming.updatedAt <= 0) return false
+    if (Number.isFinite(existing.updatedAt) && existing.updatedAt! > 0 && incoming.updatedAt < existing.updatedAt!) return false
+  }
   return incoming.syncState !== 'degraded' && incoming.syncState !== 'stale'
 }
 

@@ -222,6 +222,59 @@ describe('post-swap balance reconciliation', () => {
     expect(shouldReplaceBalanceSnapshot(undefined, solanaBalance(undefined, 'degraded'), false)).toBe(true)
   })
 
+  test('a late older or explicitly unknown observation cannot replace newer displayed balances', () => {
+    const trusted = { ...solanaBalance('10'), updatedAt: 2_000 }
+    for (const updatedAt of [1_000, 0, -1, NaN, Infinity]) {
+      const incoming = { ...solanaBalance('0'), balance: '0', balanceUsd: 0, updatedAt }
+      expect(shouldReplaceBalanceSnapshot(trusted, incoming, false)).toBe(false)
+      expect(mergeTrustedBalanceSnapshot(trusted, incoming, false)).toBe(trusted)
+    }
+    expect(shouldReplaceBalanceSnapshot(trusted, { ...solanaBalance('11'), updatedAt: 2_001 }, false)).toBe(true)
+    expect(shouldReplaceBalanceSnapshot(trusted, { ...solanaBalance('11'), updatedAt: 2_000 }, false)).toBe(true)
+    expect(shouldReplaceBalanceSnapshot(trusted, solanaBalance('11'), false)).toBe(true)
+  })
+
+  test('pre-swap and unknown-age snapshots cannot prove an output increase without proof of the target asset', () => {
+    const record = beginSwapBalanceReconciliation({ txid: 'tx-aged-output', fromChainId: 'bitcoin', toChainId: 'solana',
+      toCaip: SOL_USDT, fromSymbol: 'BTC', toSymbol: 'USDT' }, new Map([['solana', solanaBalance('4')]]), 2_000)!
+    for (const updatedAt of [1_999, 0, -1, NaN, Infinity]) {
+      for (const confirmedAssetCaips of [undefined, ['solana:mainnet/slip44:501'], ['eip155:1/slip44:60']]) {
+        const incoming = { ...solanaBalance('14'), updatedAt, confirmedAssetCaips }
+        const waiting = observeBalanceRefresh([record], [incoming], 2_500)
+        expect(waiting[0].observed).toBe(false)
+        expect(protectedBalanceChainIds(waiting).has('solana')).toBe(true)
+      }
+    }
+    for (const updatedAt of [undefined, 2_000, 2_001]) {
+      expect(observeBalanceRefresh([record], [{ ...solanaBalance('14'), updatedAt }], 2_500)[0].observed).toBe(true)
+    }
+  })
+
+  test('a direct target-token proof can observe an increase despite an older or unknown native cache age', () => {
+    const record = beginSwapBalanceReconciliation({ txid: 'tx-fresh-token-old-native', fromChainId: 'bitcoin', toChainId: 'solana',
+      toCaip: SOL_USDT, fromSymbol: 'BTC', toSymbol: 'USDT' }, new Map([['solana', solanaBalance('4')]]), 2_000)!
+    for (const updatedAt of [0, 1_999]) {
+      for (const syncState of ['stale', 'degraded'] as const) {
+        const incoming = { ...solanaBalance('14', syncState), updatedAt, confirmedAssetCaips: [SOL_USDT] }
+        const observed = observeBalanceRefresh([record], [incoming], 2_500)
+        expect(observed[0].observed).toBe(true)
+        expect(protectedBalanceChainIds(observed).has('solana')).toBe(false)
+      }
+    }
+  })
+
+  test('a rejected chain observation can still merge an independently confirmed token without replacing native balance or age', () => {
+    const trusted = { ...solanaBalance(), updatedAt: 2_000 }
+    const incoming = { ...solanaBalance('14', 'stale'), balance: '0', balanceUsd: 14, updatedAt: 1_000,
+      confirmedAssetCaips: [SOL_USDT] }
+    const merged = mergeTrustedBalanceSnapshot(trusted, incoming, false)!
+    expect(merged.balance).toBe(trusted.balance)
+    expect(merged.updatedAt).toBe(2_000)
+    expect(merged.tokens?.[0].balance).toBe('14')
+    expect(merged.confirmedAssetCaips).toEqual([SOL_USDT])
+    expect(mergeTrustedBalanceSnapshot(trusted, incoming, true)).toBe(trusted)
+  })
+
   test('merges only a directly confirmed token from an otherwise stale chain row', () => {
     const trusted = solanaBalance()
     trusted.tokens = [{

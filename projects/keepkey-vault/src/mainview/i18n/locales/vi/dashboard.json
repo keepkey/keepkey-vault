@@ -1,4 +1,7 @@
 {
+	"degradedTitle": "Không thể làm mới một số số dư",
+	"degradedReach": "Không thể làm mới:",
+	"degradedTail": "Hiển thị số dư đã biết gần nhất nếu có.",
 	"supportedChains": "Các mạng được hỗ trợ",
 	"refreshBalances": "Làm mới số dư",
 	"connectDeviceToRefresh": "Kết nối thiết bị để làm mới",

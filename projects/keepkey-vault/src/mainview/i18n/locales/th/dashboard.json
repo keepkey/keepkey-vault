@@ -1,4 +1,7 @@
 {
+	"degradedTitle": "ไม่สามารถอัปเดตยอดคงเหลือบางรายการได้",
+	"degradedReach": "ไม่สามารถอัปเดต:",
+	"degradedTail": "แสดงยอดคงเหลือล่าสุดที่ทราบหากมีข้อมูล",
 	"supportedChains": "เครือข่ายที่รองรับ",
 	"refreshBalances": "รีเฟรชยอดคงเหลือ",
 	"connectDeviceToRefresh": "เชื่อมต่ออุปกรณ์เพื่อรีเฟรช",

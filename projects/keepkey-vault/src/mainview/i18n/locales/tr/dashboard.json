@@ -1,4 +1,7 @@
 {
+	"degradedTitle": "Bazı bakiyeler yenilenemedi",
+	"degradedReach": "Yenilenemedi:",
+	"degradedTail": "Varsa son bilinen bakiyeler gösterilir.",
 	"supportedChains": "Desteklenen ağlar",
 	"refreshBalances": "Bakiyeleri yenile",
 	"connectDeviceToRefresh": "Yenilemek için cihazı bağlayın",

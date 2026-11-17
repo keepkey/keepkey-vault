@@ -1,4 +1,7 @@
 {
+	"degradedTitle": "Certains soldes n’ont pas pu être actualisés",
+	"degradedReach": "Actualisation impossible :",
+	"degradedTail": "Les derniers soldes connus sont affichés lorsqu’ils sont disponibles.",
 	"supportedChains": "Chaînes prises en charge",
 	"refreshBalances": "Rafraîchir les soldes",
 	"connectDeviceToRefresh": "Connectez l'appareil pour rafraîchir",

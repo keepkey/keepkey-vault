@@ -1,4 +1,7 @@
 {
+	"degradedTitle": "Sommige saldi konden niet worden vernieuwd",
+	"degradedReach": "Vernieuwen mislukt:",
+	"degradedTail": "De laatst bekende saldi worden getoond wanneer beschikbaar.",
 	"supportedChains": "Ondersteunde netwerken",
 	"refreshBalances": "Saldo's vernieuwen",
 	"connectDeviceToRefresh": "Sluit apparaat aan om te vernieuwen",

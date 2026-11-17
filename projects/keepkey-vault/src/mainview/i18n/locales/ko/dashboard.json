@@ -1,4 +1,7 @@
 {
+	"degradedTitle": "일부 잔액을 새로고침하지 못했습니다",
+	"degradedReach": "새로고침 실패:",
+	"degradedTail": "확인된 마지막 잔액이 있으면 표시합니다.",
 	"supportedChains": "지원 체인",
 	"refreshBalances": "잔액 새로고침",
 	"connectDeviceToRefresh": "새로고침하려면 기기를 연결하세요",

@@ -1,4 +1,7 @@
 {
+	"degradedTitle": "Nie udało się odświeżyć niektórych sald",
+	"degradedReach": "Nie udało się odświeżyć:",
+	"degradedTail": "Ostatnie znane salda są wyświetlane, jeśli są dostępne.",
 	"supportedChains": "Obsługiwane sieci",
 	"refreshBalances": "Odśwież salda",
 	"connectDeviceToRefresh": "Podłącz urządzenie, aby odświeżyć",

@@ -748,7 +748,7 @@ export interface ChainBalance {
    * can double-count until the server provides a position type.
    */
   defiPositions?: DefiPosition[]
-  updatedAt?: number    // unix ms — when this chain's balance was last confirmed non-zero from Pioneer
+  updatedAt?: number    // unix ms of the last balance observation, including a confirmed zero; never cache receipt time
   /**
    * Confidence of the current refresh result. Degraded/stale rows are useful
    * for disclosure, but must not replace a last-known-good balance snapshot

@@ -1,4 +1,7 @@
 {
+	"degradedTitle": "Einige Guthaben konnten nicht aktualisiert werden",
+	"degradedReach": "Aktualisierung fehlgeschlagen:",
+	"degradedTail": "Die zuletzt bekannten Guthaben werden angezeigt, sofern verfügbar.",
 	"supportedChains": "Unterstützte Blockchains",
 	"refreshBalances": "Guthaben aktualisieren",
 	"connectDeviceToRefresh": "Gerät verbinden zum Aktualisieren",

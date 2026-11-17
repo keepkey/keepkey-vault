@@ -629,7 +629,7 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
 'update-status': UpdateStatus
       // severity defaults to 'error' (hard failure — server unreachable). 'warning'
       // carries soft fault info (some chains degraded/stale, data still shown);
-      // 'none' clears any soft-fault banner after a clean fetch.
+      // 'none' clears faults only for checkedChainIds after a clean fetch.
       'pioneer-error': {
         message: string
         url: string
@@ -642,6 +642,12 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
         degradedChainIds?: string[]
         staleChainIds?: string[]
         unresolvedFaultCount?: number
+        /** Chains covered by this response, so a single-chain recovery cannot clear unrelated errors. */
+        checkedChainIds?: string[]
+        /** A complete report for the current portfolio, including unmapped errors. */
+        fullSnapshot?: boolean
+        /** Unmapped actual errors; unresolvedFaultCount also includes ordinary stale metadata. */
+        unresolvedErrorCount?: number
       }
       'pair-request': PairingRequestInfo
       'password-agent-approval': { approval: PasswordAgentApproval | null }

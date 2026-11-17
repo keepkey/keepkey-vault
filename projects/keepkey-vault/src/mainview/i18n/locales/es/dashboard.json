@@ -1,4 +1,7 @@
 {
+	"degradedTitle": "No se pudieron actualizar algunos saldos",
+	"degradedReach": "No se pudo actualizar:",
+	"degradedTail": "Se muestran los últimos saldos conocidos cuando están disponibles.",
 	"supportedChains": "Cadenas compatibles",
 	"refreshBalances": "Actualizar saldos",
 	"connectDeviceToRefresh": "Conecta el dispositivo para actualizar",

@@ -10,6 +10,7 @@ import { EventEmitter } from 'events'
 import { getSetting, setSetting } from './db'
 import { evmAddressPath } from '../shared/chains'
 import { OwnerBalanceWatermarks, resetOwnerChainBalances } from '../shared/evm-owner-balance'
+import { paidProviderRefreshOptions, type ProviderRefreshReason } from '../shared/provider-refresh'
 import type { EvmTrackedAddress, EvmAddressSet, EvmAddressChainBalance } from '../shared/types'
 
 // Moved to shared/chains.ts (pure, test-importable) — re-exported so existing
@@ -220,6 +221,7 @@ export class EvmAddressManager extends EventEmitter {
     pioneer: any,
     evmChains: Array<{ caip: string; id: string; symbol: string; networkId: string }>,
     maxIndex = 9,
+    refreshReason: ProviderRefreshReason = 'automatic',
   ): Promise<{ discovered: number[] }> {
     if (this.discoveryDone) return { discovered: [] }
     const discovered: number[] = []
@@ -239,12 +241,11 @@ export class EvmAddressManager extends EventEmitter {
         if (!address) continue
       } catch { continue }
 
-      // Check if any EVM chain has a balance for this address. Soft read: a
-      // never-queried key is a cache miss and gets fetched fresh anyway, so
-      // discovery doesn't need to bypass Pioneer's cache.
+      // Background discovery must not turn an unknown key into paid provider
+      // work. Only the initiating wallet-open/manual action can authorize it.
       const pubkeys = evmChains.map(c => ({ caip: c.caip, pubkey: address }))
       try {
-        const resp = await pioneer.GetPortfolioBalances({ pubkeys })
+        const resp = await pioneer.GetPortfolioBalances({ pubkeys, ...paidProviderRefreshOptions(refreshReason) })
         succeeded++
         const balances = resp?.data?.balances || resp?.data || []
         const hasBalance = (Array.isArray(balances) ? balances : []).some(

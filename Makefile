@@ -517,6 +517,8 @@ test-unit:
 	cd $(PROJECT_DIR) && bun test __tests__/thor-maya-history-fee.test.ts
 	cd $(PROJECT_DIR) && bun test src/mainview/lib/effective-balance.test.ts
 	cd $(PROJECT_DIR) && bun test __tests__/balance-tx-mark.test.ts
+	cd $(PROJECT_DIR) && bun test __tests__/balance-cache-policy.test.ts __tests__/balance-observation.test.ts __tests__/dashboard-balance-policy.test.ts __tests__/evm-autodiscovery-policy.test.ts __tests__/wallet-watch-cache-integration.test.ts
+	cd $(PROJECT_DIR) && bun test __tests__/dashboard-balance-ui.test.ts
 	cd $(PROJECT_DIR) && bun test __tests__/asset-page-synced.test.ts
 	cd $(PROJECT_DIR) && bun test __tests__/asset-page-native-proof.test.ts
 	cd $(PROJECT_DIR) && bun test __tests__/app-view-only-locked.test.ts

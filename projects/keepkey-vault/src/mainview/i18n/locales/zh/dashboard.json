@@ -1,4 +1,7 @@
 {
+	"degradedTitle": "部分余额无法刷新",
+	"degradedReach": "无法刷新：",
+	"degradedTail": "如有数据，将显示上次已知的余额。",
 	"supportedChains": "支持的链",
 	"refreshBalances": "刷新余额",
 	"connectDeviceToRefresh": "连接设备以刷新",
