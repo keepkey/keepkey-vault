@@ -379,7 +379,7 @@ import { SafeMultisigService, inspectBaseSafe } from './safe-multisig'
 import { VaultImportService } from './vault-import'
 import { VaultPortfolioService } from './vault-portfolio'
 import { requireVaultAsset, assertVaultControlSnapshot, type VaultAssetRequest, type VaultAssetAccount } from '../shared/vault-asset-account'
-import { linkedVaultIds } from '../shared/vault-wallet-links'
+import { linkedVaultIds, vaultsForWallet, type VaultWalletKey } from '../shared/vault-wallet-links'
 import { utils as evmUtils } from 'ethers'
 import { VaultAddressBook, certifiableAddressBookEntries } from './vault-addressbook'
 import { assertVaultDestination, safeVaultIdentity, bitcoinVaultIdentity, type VaultIdentity } from '../shared/vault-identity'
@@ -2081,6 +2081,7 @@ async function ensureManagersForSeed(source: string): Promise<{ truth: string | 
  *  successful (re)initialize so reconcileSeedManagers' stamp check is armed. */
 function stampManagers(truth: string | null | undefined): void {
 	if (truth) managersSeedOwner = truth.toLowerCase()
+	notifyVaultWalletMembership()
 }
 
 /** Seed own-wallet Address Book entries for EVERY known device from the persisted
@@ -4243,10 +4244,33 @@ function registeredVaults() {
 	const all = [...(engine.isPassphraseWallet && sessionVaults?.key === safeSessionKey() ? sessionVaults.vaults : []), ...(getDb() ? vaultBook().list().map(e => e.vault!) : [])]
 	return all.filter((v, i) => all.findIndex(other => other.id === v.id) === i)
 }
+function activeVaultWalletKeys(): VaultWalletKey[] {
+	const seed = engine.currentSeedEthAddress?.toLowerCase()
+	if (!engine.wallet || engine.getDeviceState().state !== 'ready' || !seed) return []
+	const keys: VaultWalletKey[] = /^0x[0-9a-f]{40}$/.test(seed) ? [{ family: 'evm', address: seed, xpub: '' }] : []
+	// Account managers can survive an asynchronous wallet transition. Only use
+	// their keys when their derivation stamp belongs to this verified live seed.
+	if (managersSeedOwner === seed) {
+		keys.push(...evmAddresses.toAddressSet().addresses.map(a => ({ family: 'evm' as const, address: a.address, xpub: '' })))
+		keys.push(...btcAccounts.toAccountSet().accounts.flatMap(a => a.xpubs.map(x => ({ family: 'bitcoin' as const, address: '', xpub: x.xpub }))))
+	}
+	return keys
+}
+function walletRegisteredVaults() {
+	return vaultsForWallet(registeredVaults(), activeVaultWalletKeys())
+}
+let publishedVaultWalletKeys = ''
+function notifyVaultWalletMembership() {
+	const key = `${safeSessionKey()}:${JSON.stringify(activeVaultWalletKeys())}`
+	if (key === publishedVaultWalletKeys) return
+	publishedVaultWalletKeys = key
+	notifyVaultsChanged()
+}
 function vaultAddressEntries(networkId?: string) {
-	const rows = vaultBook().list(networkId)
+	const keys = activeVaultWalletKeys()
+	const rows = vaultBook().listForWallet(keys, networkId)
 	if (engine.isPassphraseWallet && sessionVaults?.key === safeSessionKey()) {
-		for (const v of sessionVaults.vaults) if (!networkId || v.networkId === networkId) {
+		for (const v of vaultsForWallet(sessionVaults.vaults, keys)) if (!networkId || v.networkId === networkId) {
 			rows.unshift({ id: `session-vault:${v.id}`, walletId: 'session', deviceId: engine.getDeviceState().deviceId || '', kind: 'external',
 				networkId: v.networkId, chainId: v.chainId, address: v.address, label: v.name, vault: v, savedAt: Date.now(), createdAt: Date.now(), updatedAt: Date.now() })
 		}
@@ -4279,7 +4303,7 @@ async function verifyKnownEvmVaultTransfer(params: any) {
 	}
 }
 function vaultCertificationEntries() {
-	return certifiableAddressBookEntries(vaultBook().list(), getAddressBookList({ kind: 'external', savedOnly: true }))
+	return certifiableAddressBookEntries(vaultAddressEntries(), getAddressBookList({ kind: 'external', savedOnly: true }))
 }
 const repairEnsContactsOnce = singleFlight<void>()
 async function repairSavedEnsContacts(): Promise<void> {
@@ -4310,8 +4334,10 @@ async function listRegisteredVaults() {
 	}
 	if (epoch !== activitySessionEpoch) throw new Error('Wallet changed while loading vaults')
 	const saved = engine.isPassphraseWallet && sessionVaults?.key === safeSessionKey() ? sessionVaults.vaults : vaultBook().list().map(e => e.vault!)
-	const all = [...safes, ...bitcoin, ...saved].filter(v => !isBitcoinOnlyVariant(engine.getDeviceState().firmwareVariant) && !watchOnlyViewBtcOnly || v.type === 'bitcoin-multisig')
-	const vaults = all.filter((v, i) => all.findIndex(other => other.id === v.id) === i)
+	// The book has already resolved cross-wallet copies by their latest review.
+	// A session's older Safe store must not restore a removed signer.
+	const all = [...saved, ...safes, ...bitcoin].filter(v => !isBitcoinOnlyVariant(engine.getDeviceState().firmwareVariant) && !watchOnlyViewBtcOnly || v.type === 'bitcoin-multisig')
+	const vaults = vaultsForWallet(all.filter((v, i) => all.findIndex(other => other.id === v.id) === i), activeVaultWalletKeys())
 	sessionVaults = { key: safeSessionKey(), vaults }
 	return vaults
 }
@@ -4329,7 +4355,7 @@ async function readConfiguredSafeRpc(method: string, params: any[]) {
 async function readVaultAssetAccount(request: VaultAssetRequest): Promise<VaultAssetAccount> {
 	const epoch = activitySessionEpoch
 	if ((isBitcoinOnlyVariant(engine.getDeviceState().firmwareVariant) || watchOnlyViewBtcOnly) && request.networkId !== 'bip122:000000000019d6689c085ae165831e93') throw new Error('This vault network is unavailable on Bitcoin-only firmware')
-	const identity = requireVaultAsset(registeredVaults(), request)
+	const identity = requireVaultAsset(walletRegisteredVaults(), request)
 	if (identity.type === 'bitcoin-multisig') {
 		const record = savedMultisigPolicies().find(r => parseMultisigPolicy(r.descriptor).id === identity.policyId)
 		if (!record) throw new Error('Re-import and verify this Bitcoin vault policy first')
@@ -4340,13 +4366,14 @@ async function readVaultAssetAccount(request: VaultAssetRequest): Promise<VaultA
 	}
 	const account = await inspectBaseSafe(readConfiguredSafeRpc, identity.address, identity.name)
 	if (epoch !== activitySessionEpoch) throw new Error('Wallet changed. Select the vault account again.')
+	requireVaultAsset(walletRegisteredVaults(), request)
 	assertVaultControlSnapshot(identity, account)
 	account.reviewedAt = identity.reviewedAt
 	const verified = requireVaultAsset([safeVaultIdentity(account, identity.sessionOnly)], request)
 	return { identity: verified, assetCaip: request.assetCaip, safe: account }
 }
 const vaultPortfolios = new VaultPortfolioService({
-	scope: () => ({ key: safeSessionKey(), hidden: engine.isPassphraseWallet }),
+	scope: () => ({ key: `${safeSessionKey()}:${JSON.stringify(activeVaultWalletKeys())}`, hidden: engine.isPassphraseWallet }),
 	list: () => {
 		if (!engine.isPassphraseWallet) syncBitcoinVaultBook()
 		const bitcoinOnly = isBitcoinOnlyVariant(engine.getDeviceState().firmwareVariant) || watchOnlyViewBtcOnly
@@ -11688,6 +11715,7 @@ engine.on('state-change', (state) => {
 	if (state.state === 'ready') {
 		reconcileSeedManagers(engine.currentSeedEthAddress, 'device-ready')
 	}
+	notifyVaultWalletMembership()
 	// Replay any WC deep link that was queued while no device was connected.
 	// Without this, a deep link delivered before the device was ready would
 	// sit in pendingDeepLinkUri until the next mount of WalletConnectPanel.
@@ -11915,6 +11943,7 @@ engine.on('reset-error', (err) => {
 
 // BtcAccountManager change events → push to WebView
 btcAccounts.on('change', (set) => {
+	notifyVaultWalletMembership()
 	try { rpc.send['btc-accounts-update'](set) } catch { /* webview not ready yet */ }
 	// PRIVACY: hidden-wallet sessions persist nothing (engine-controller snapshot rule).
 	const deviceId = engine.getDeviceState().deviceId
@@ -11939,6 +11968,7 @@ btcAccounts.on('change', (set) => {
 
 // EvmAddressManager change events → push to WebView
 evmAddresses.on('change', (set: EvmAddressSet) => {
+	notifyVaultWalletMembership()
 	try { rpc.send['evm-addresses-update'](set) } catch { /* webview not ready yet */ }
 })
 

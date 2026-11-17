@@ -14,16 +14,18 @@ export function AddVaultDialog({
   bitcoinOnly,
   onClose,
   onAdded,
+  initialVault,
 }: {
   bitcoinOnly: boolean;
   onClose: () => void;
   onAdded: (vault: VaultIdentity) => void;
+  initialVault?: VaultIdentity;
 }) {
   const uiText = useUiTranslation();
   const formId = useId();
   const [network, setNetwork] = useState(bitcoinOnly ? "bitcoin" : "base");
-  const [address, setAddress] = useState("");
-  const [name, setName] = useState("Shared vault");
+  const [address, setAddress] = useState(initialVault?.address || "");
+  const [name, setName] = useState(initialVault?.name || "Shared vault");
   const [rpcUrl, setRpcUrl] = useState("https://mainnet.base.org");
   const [review, setReview] = useState<VaultAddReview>();
   const [busy, setBusy] = useState("");

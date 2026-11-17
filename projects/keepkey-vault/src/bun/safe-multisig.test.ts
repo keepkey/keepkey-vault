@@ -28,6 +28,7 @@ function harness(hidden = false) {
   let badCode = false
   let sends = 0
   let owners = [owner.address, coowner.address]
+  let connectedOwner = owner.address
   let holdCode: (() => Promise<void>) | undefined
   let executionSignatures = ''
   const controlBlocks: string[] = []
@@ -100,7 +101,7 @@ function harness(hidden = false) {
     session: async () => ({
       key,
       scope: 'wallet-a',
-      owner: owner.address,
+      owner: connectedOwner,
       sessionOnly: hidden,
       nestedClearSign: true,
     }),
@@ -131,6 +132,7 @@ function harness(hidden = false) {
     setOwners: (v: string[]) => {
       owners = v
     },
+    setConnectedOwner: (value: string) => { connectedOwner = value; key = `owner:${value}` },
     hold: (fn: () => Promise<void>) => {
       holdCode = fn
     },
@@ -287,6 +289,16 @@ describe('Base Safe account and transaction boundary', () => {
     h.setKey('next-hidden-wallet')
     expect((await h.service.list()).accounts).toHaveLength(0)
     expect((await h.service.list()).proposals).toHaveLength(0)
+  })
+  test('a saved Safe and its proposals are not listed for an unrelated connected owner', async () => {
+    const h = await imported()
+    await propose(h)
+    h.setConnectedOwner(outsider.address)
+    expect((await h.service.list()).accounts).toEqual([])
+    expect((await h.service.list()).proposals).toEqual([])
+    h.setConnectedOwner(coowner.address)
+    expect((await h.service.list()).accounts).toHaveLength(1)
+    expect((await h.service.list()).proposals).toHaveLength(1)
   })
   test('an asynchronous wallet switch prevents persistence', async () => {
     const h = harness()

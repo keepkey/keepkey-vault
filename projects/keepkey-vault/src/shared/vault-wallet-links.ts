@@ -6,6 +6,18 @@ export interface VaultWalletKey {
   xpub: string;
 }
 
+/** A saved contract or device label does not establish wallet membership. */
+export function vaultHasCosigner(vault: VaultIdentity, keys: VaultWalletKey[]): boolean {
+  return vault.cosigners.some((c) => vault.type === 'safe'
+    ? !!c.address && /^0x[0-9a-f]{40}$/i.test(c.address) && keys.some(k =>
+      k.family === 'evm' && /^0x[0-9a-f]{40}$/i.test(k.address) && k.address.toLowerCase() === c.address!.toLowerCase())
+    : !!c.xpub && keys.some(k => k.family === 'bitcoin' && k.xpub === c.xpub))
+}
+
+export function vaultsForWallet(vaults: VaultIdentity[], keys: VaultWalletKey[]): VaultIdentity[] {
+  return vaults.filter(vault => vaultHasCosigner(vault, keys))
+}
+
 /** Display-only relationships from cached public keys. A device name, database
  * scope or fingerprint alone is never evidence that a wallet is a cosigner. */
 export function linkedVaultIds(
@@ -15,19 +27,7 @@ export function linkedVaultIds(
   return vaults
     .filter(
       (v) =>
-        !v.sessionOnly &&
-        v.cosigners.some((c) =>
-          v.type === "safe"
-            ? !!c.address &&
-              /^0x[0-9a-f]{40}$/i.test(c.address) &&
-              keys.some(
-                (k) =>
-                  k.family === "evm" &&
-                  k.address.toLowerCase() === c.address!.toLowerCase()
-              )
-            : !!c.xpub &&
-              keys.some((k) => k.family === "bitcoin" && k.xpub === c.xpub)
-        )
+        !v.sessionOnly && vaultHasCosigner(v, keys)
     )
     .map((v) => v.id);
 }

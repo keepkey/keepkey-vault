@@ -4,6 +4,7 @@ import {
   requireVaultAsset,
   vaultAssetReceiveUri,
   evmAssetReceiveUri,
+  assertVaultControlSnapshot,
 } from "../shared/vault-asset-account";
 import {
   BASE_NETWORK,
@@ -36,6 +37,12 @@ const request = {
   assetCaip: BASE_ETH_CAIP,
 };
 describe("Vault asset source identity", () => {
+  test('adding a fifth signer requires review even when the address and threshold are unchanged', () => {
+    const four = { ...account, owners: [1, 2, 3, 4].map(n => '0x' + String(n).repeat(40)) }
+    const five = { ...four, owners: [...four.owners, '0x' + '5'.repeat(40)] }
+    expect(() => assertVaultControlSnapshot(safeVaultIdentity(four, false), five)).toThrow('saved 2 of 4 signers; on-chain 2 of 5')
+    expect(() => assertVaultControlSnapshot(safeVaultIdentity(five, false), five)).not.toThrow()
+  })
   test("personal-wallet token receive keeps the selected asset when switching back from a vault", () => {
     const owner = account.owners[0];
     expect(evmAssetReceiveUri(BASE_NETWORK, BASE_USDC_CAIP, owner)).toBe(

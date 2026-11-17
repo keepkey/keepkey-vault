@@ -325,12 +325,16 @@ export class SafeMultisigService {
   }
   async list(): Promise<SafeContext> {
     const { s, store } = await this.open()
+    const accounts = store.accounts.filter(account => account.owners.some(owner => same(owner, s.owner)))
+    const owned = new Set(accounts.map(account => account.address.toLowerCase()))
     return clone({
       owner: s.owner,
       session: s.key,
       sessionOnly: s.sessionOnly,
       nestedClearSign: s.nestedClearSign,
       ...store,
+      accounts,
+      proposals: store.proposals.filter(proposal => owned.has(proposal.safe.toLowerCase())),
     })
   }
   async inspectAccount(params: { address: string; name: string }) {
