@@ -36,8 +36,8 @@ mock.module('../src/bun/txbuilder', () => ({
 }))
 const { getSwapQuote, executeSwap } = await import('../src/bun/swap')
 
-const quote = (toAddress: string) => getSwapQuote({
-  fromCaip: 'eip155:8453/slip44:60', toCaip: 'eip155:42161/slip44:60', amount: '0.01', fromAddress: SENDER, toAddress,
+const quote = (toAddress: string, toCaip = 'eip155:42161/slip44:60') => getSwapQuote({
+  fromCaip: 'eip155:8453/slip44:60', toCaip, amount: '0.01', fromAddress: SENDER, toAddress,
 })
 
 test('zero and burn recipients are refused before Pioneer is asked', async () => {
@@ -74,6 +74,16 @@ test('a Relay order that pays someone else, or does not say, is refused', async 
   await expect(quote(RECIPIENT)).rejects.toThrow(/Relay.*0x2222222222222222222222222222222222222222.*not the recipient you entered/)
   relay = { requestId: REQUEST_ID }
   await expect(quote(RECIPIENT)).rejects.toThrow(/Relay did not say who this order pays/)
+})
+
+test('the actual quote boundary distinguishes Base58 and bech32 by its destination network', async () => {
+  const address = 'maya1quvzjwjtt3kharaqk8pd8e84qctjsw22wqttrm'
+  relay = { requestId: REQUEST_ID, recipient: address.toUpperCase() }
+  const solana = CHAINS.find(chain => chain.id === 'solana')!
+  await expect(quote(address, solana.caip)).rejects.toThrow(/not the recipient you entered/)
+  expect((await quote(address.toUpperCase(), solana.caip)).relayOrderRecipient).toBe(address.toUpperCase())
+  const maya = CHAINS.find(chain => chain.id === 'mayachain')!
+  expect((await quote(address, maya.caip)).relayOrderRecipient).toBe(address.toUpperCase())
 })
 
 test('the Relay order checked must be the order the deposit calldata funds', async () => {
@@ -135,4 +145,18 @@ test('the fee-gate refusal names the pair and route it was quoted for (V14)', as
   relay = { requestId: REQUEST_ID, recipient: RECIPIENT, totalBps: 2079 }
   await expect(quote(RECIPIENT)).rejects.toThrow(/^Swap amount too low: quoted fees for ETH → ETH via relay \(20\.79%\)/)
   relay = { requestId: REQUEST_ID, recipient: RECIPIENT }
+})
+
+test('a Solana payout memo cannot use a different key that also has a valid bech32 checksum', async () => {
+  const address = 'maya1quvzjwjtt3kharaqk8pd8e84qctjsw22wqttrm'
+  const solana = CHAINS.find(chain => chain.id === 'solana')!
+  await expect(executeSwap({
+    fromChainId: 'base', toChainId: 'solana', fromCaip: 'eip155:8453/slip44:60', toCaip: solana.caip,
+    amount: '0.01', memo: '=:SOL.SOL:' + address.toUpperCase() + ':0/1/0:kk:30',
+    inboundAddress: '0x3333333333333333333333333333333333333333', router: '0x4444444444444444444444444444444444444444',
+    expectedOutput: '0.0099', integration: 'thorchain', fromAddressOverride: SENDER, toAddressOverride: address,
+  } as any, {
+    wallet: {}, getAllChains: () => CHAINS, getEvmRpcSource: () => { throw new Error('fixture: past the memo check') },
+    getBtcXpub: () => undefined, getAllBtcXpubs: () => [], wrapSign: (sign: any) => sign(), pushSubStage: () => {},
+  } as any)).rejects.toThrow(/memo pays out/)
 })

@@ -408,11 +408,29 @@ export function validateContactOnNetwork(address: string, chains: ChainDef[], ex
   return fits ? validateContactAddress(address, fits, existing) : fail('invalidAddress')
 }
 
-/** Two spellings of one address: hex and bech32 ignore case, base58 does not; BCH's cashaddr prefix is optional. */
-export function sameAddress(a: string | null | undefined, b: string | null | undefined): boolean {
-  const bare = (v: string) => /^bitcoincash:/i.test(v) ? v.slice('bitcoincash:'.length) : v
-  const x = bare(a?.trim() || ''), y = bare(b?.trim() || '')
+/** Compare address identities, without replacing recipient validation. Only
+ * checksummed bech32/cashaddr and EVM hex may ignore case. A Base58 address can
+ * resemble a bech32 string, so a shape-only test can equate different wallets.
+ * Raw bech32 also overlaps Base58, so case folding requires a known chain;
+ * unknown networks stay exact except for hex or an explicit BCH namespace. */
+export function sameAddress(a: string | null | undefined, b: string | null | undefined, chain?: Pick<ChainDef, 'id' | 'chainFamily'>): boolean {
+  const x = a?.trim() || '', y = b?.trim() || ''
   if (!x || !y) return false
-  const caseless = (v: string) => /^0x[0-9a-f]+$/i.test(v) || /^[a-z]{1,83}1[02-9ac-hj-np-z]+$/i.test(v)
-  return caseless(x) && caseless(y) ? x.toLowerCase() === y.toLowerCase() : x === y
+  const explicitBch = !chain && (/^bitcoincash:/i.test(x) || /^bitcoincash:/i.test(y))
+  const canonical = (value: string): string => {
+    if ((!chain || chain.chainFamily === 'evm') && HEX40.test(value)) return 'hex:' + value.toLowerCase()
+    if ((chain?.id === 'bitcoincash' || explicitBch) && cashaddrCheck(value) === true) {
+      return 'cashaddr:' + value.toLowerCase().replace(/^bitcoincash:/, '')
+    }
+    const hrp = chain?.chainFamily === 'utxo'
+      ? ({ bitcoin: 'bc', litecoin: 'ltc', digibyte: 'dgb' } as Record<string, string>)[chain.id] : undefined
+    const supportsBech32 = !!chain && (!!hrp || chain.chainFamily === 'cosmos' || chain.chainFamily === 'zcash-shielded')
+    const lower = value.toLowerCase()
+    if (supportsBech32 && (value === lower || value === value.toUpperCase())) {
+      const decoded = bech32.decodeUnsafe(lower, false) || bech32m.decodeUnsafe(lower, false)
+      if (decoded && (!hrp || decoded.prefix === hrp)) return 'bech32:' + lower
+    }
+    return 'exact:' + value
+  }
+  return canonical(x) === canonical(y)
 }

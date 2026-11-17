@@ -5,6 +5,7 @@
  * (no Pioneer client, no DB, no server imports).
  */
 import { CHAINS } from '../shared/chains'
+import type { ChainDef } from '../shared/chains'
 import { thorMemoMinimum } from '../shared/swap-risk'
 import { parseCaip } from '../shared/swap-discovery'
 import type { SwapAsset, SwapQuote, RelayTxParams } from '../shared/types'
@@ -803,14 +804,14 @@ export function nearIntentsDepositFindings(
  * own /quote body, bound to the exact source transaction. Returns the
  * order's recipient; throws when it differs, is missing, or names another order.
  */
-export function assertRelayOrderRecipient(quote: SwapQuote, recipient: string): string {
+export function assertRelayOrderRecipient(quote: SwapQuote, recipient: string, destinationChain?: Pick<ChainDef, 'id' | 'chainFamily'>): string {
   const order = quote.relayOrder
   const funded = extractRelayRequestId(quote.relayTx?.data)
   let matches = true
   if (order?.deposit !== undefined) {
     const deposit = order.deposit, tx = quote.relayTx
     try {
-      matches = !!deposit && !!tx && sameAddress(deposit.to, tx.to)
+      matches = !!deposit && !!tx && sameAddress(deposit.to, tx.to, { id: 'evm', chainFamily: 'evm' })
         && typeof deposit.data === 'string' && deposit.data.toLowerCase() === tx.data.toLowerCase()
         && Number.isSafeInteger(deposit.chainId) && deposit.chainId === tx.chainId
         && typeof deposit.value === 'string' && /^(?:\d+|0x[0-9a-f]+)$/i.test(deposit.value)
@@ -825,6 +826,6 @@ export function assertRelayOrderRecipient(quote: SwapQuote, recipient: string): 
   }
   const theirs = order?.recipient?.trim()
   if (!theirs) throw new Error('Relay did not say who this order pays out to, so Desktop cannot check the recipient. Do not proceed — get a new quote.')
-  if (!sameAddress(theirs, recipient)) throw new Error(`Relay's order pays out to ${theirs}, which is not the recipient you entered (${recipient}). Do not proceed.`)
+  if (!sameAddress(theirs, recipient, destinationChain)) throw new Error(`Relay's order pays out to ${theirs}, which is not the recipient you entered (${recipient}). Do not proceed.`)
   return theirs
 }

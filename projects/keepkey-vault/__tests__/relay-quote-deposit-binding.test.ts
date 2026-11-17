@@ -1,5 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import { parseQuoteResponse, assertRelayOrderRecipient } from '../src/bun/swap-parsing'
+import { CHAINS } from '../src/shared/chains'
+import { validateAddress } from '../src/shared/address-validation'
 
 const sender = '0x1111111111111111111111111111111111111111'
 const recipient = '0x2222222222222222222222222222222222222222'
@@ -38,6 +40,27 @@ describe('Relay tracking id and deposit id are separate', () => {
   test('still refuses a different payout recipient', () => {
     const quote = parse()
     expect(() => assertRelayOrderRecipient(quote, sender)).toThrow(/not the recipient/)
+  })
+  test('a checksummed bech32 spelling cannot hide a different Solana payout key', () => {
+    const address = 'maya1quvzjwjtt3kharaqk8pd8e84qctjsw22wqttrm'
+    const solana = CHAINS.find(chain => chain.id === 'solana')!
+    expect(validateAddress(address, solana).valid).toBe(true)
+    expect(validateAddress(address.toUpperCase(), solana).valid).toBe(true)
+    const r = response()
+    r.quote.raw.details.recipient = address.toUpperCase()
+    const quote = parseQuoteResponse([r], { ...params, toCaip: solana.caip })
+    expect(() => assertRelayOrderRecipient(quote, address, solana)).toThrow(/not the recipient/)
+    expect(() => assertRelayOrderRecipient(quote, address)).toThrow(/not the recipient/)
+    expect(assertRelayOrderRecipient(quote, address.toUpperCase(), solana)).toBe(address.toUpperCase())
+  })
+  test('known Bitcoin destinations retain valid uppercase bech32 equivalence', () => {
+    const address = 'bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq'
+    const bitcoin = CHAINS.find(chain => chain.id === 'bitcoin')!
+    const r = response()
+    r.quote.raw.details.recipient = address.toUpperCase()
+    const quote = parseQuoteResponse([r], { ...params, toCaip: bitcoin.caip })
+    expect(assertRelayOrderRecipient(quote, address, bitcoin)).toBe(address.toUpperCase())
+    expect(() => assertRelayOrderRecipient(quote, address)).toThrow(/not the recipient/)
   })
   test('still refuses missing payout details', () => {
     const r = response()
