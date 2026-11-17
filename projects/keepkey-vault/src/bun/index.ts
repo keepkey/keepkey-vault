@@ -5,6 +5,7 @@ import {readEvmConfirmationRows} from './evm-confirmation-watch'
 import { createWalletHistoryRefreshPolicy, paidProviderRefreshOptions, type ProviderRefreshReason } from '../shared/provider-refresh'
 import { oldestBalanceUpdatedAt } from '../shared/balance-cache-policy'
 import { portfolioObservedAt } from '../shared/balance-observation'
+import { selectDesktopUpdateRelease } from '../shared/desktop-update-release'
 // ── File logger ──────────────────────────────────────────────────────────
 // NOTE: This logger captures runtime errors AFTER the module graph loads.
 // It does NOT catch import-time crashes — static ESM imports (below) are
@@ -11435,9 +11436,7 @@ udevadm trigger --subsystem-match=usb --attr-match=idVendor=2b24 || udevadm trig
 					if (!resp.ok) throw new Error(`GitHub API ${resp.status}`)
 
 					const releases = await resp.json() as Array<{ tag_name: string; prerelease: boolean; draft: boolean }>
-					const candidate = preReleaseUpdates
-						? releases.find(r => !r.draft)
-						: releases.find(r => !r.draft && !r.prerelease)
+					const candidate = selectDesktopUpdateRelease(releases, preReleaseUpdates)
 
 					if (candidate) {
 						const remoteVer = candidate.tag_name.replace(/^v/, '')
@@ -12194,11 +12193,7 @@ Updater.localInfo.channel().then(ch => {
 				}
 
 				const releases = await resp.json() as Array<{ tag_name: string; prerelease: boolean; draft: boolean }>
-				// Pre-release channel: first non-draft release (includes pre-releases)
-				// Standard channel: first non-draft, non-prerelease release
-				const candidate = preReleaseUpdates
-					? releases.find(r => !r.draft)
-					: releases.find(r => !r.draft && !r.prerelease)
+				const candidate = selectDesktopUpdateRelease(releases, preReleaseUpdates)
 
 				if (!candidate) {
 					console.log('[Vault] Background update check: no suitable release found')
