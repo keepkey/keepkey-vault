@@ -68,3 +68,5 @@ rmdir-result.txt
 # Electrobun 2.x (Hutch) devkit projection and state, and its config-evaluation scratch
 .hutch/
 .cottontail-tmp/
+scripts/cdn-icons/.sources-cache.json
+scripts/cdn-icons/__pycache__/

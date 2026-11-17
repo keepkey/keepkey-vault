@@ -1,0 +1,6050 @@
+[
+ {
+  "caip": "cosmos:mayachain-mainnet-v1/slip44:maya",
+  "symbol": "MAYA",
+  "key": "coins/Y29zbW9zOm1heWFjaGFpbi1tYWlubmV0LXYxL3NsaXA0NDptYXlh.png",
+  "source": "generic",
+  "sha256": "bfdba0b5e636a2ae8051f4a90a549577fc98d3a3584be8f3c994cec4ce786199",
+  "bytes": 6177
+ },
+ {
+  "caip": "eip155:1/erc20:0x1df4c6e36d61416813b42fe32724ef11e363eddc",
+  "symbol": "PANDORA/WRAPPED ETHER",
+  "key": "coins/ZWlwMTU1OjEvZXJjMjA6MHgxZGY0YzZlMzZkNjE0MTY4MTNiNDJmZTMyNzI0ZWYxMWUzNjNlZGRj.png",
+  "source": "generic",
+  "sha256": "f5549960ae9d1a2273bd73ef2518b093f18595fe4dd65c5b429de440885ce8d1",
+  "bytes": 5614
+ },
+ {
+  "caip": "eip155:1/erc20:0x2688fc68c4eac90d9e5e1b94776cf14eade8d877",
+  "symbol": "AA_wstETH",
+  "key": "coins/ZWlwMTU1OjEvZXJjMjA6MHgyNjg4ZmM2OGM0ZWFjOTBkOWU1ZTFiOTQ3NzZjZjE0ZWFkZThkODc3.png",
+  "source": "generic",
+  "sha256": "ef3bf4fd92e03d2aa63994d235247c85d60f2cd001c16684955fc84dc00e7f77",
+  "bytes": 6379
+ },
+ {
+  "caip": "eip155:1/erc20:0x28d8a22c6689ac1e2ddc43ca6f85c520457351c1",
+  "symbol": "AA_ampr-LP-ETH",
+  "key": "coins/ZWlwMTU1OjEvZXJjMjA6MHgyOGQ4YTIyYzY2ODlhYzFlMmRkYzQzY2E2Zjg1YzUyMDQ1NzM1MWMx.png",
+  "source": "generic",
+  "sha256": "ef3bf4fd92e03d2aa63994d235247c85d60f2cd001c16684955fc84dc00e7f77",
+  "bytes": 6379
+ },
+ {
+  "caip": "eip155:1/erc20:0x3a52fa30c33caf05faee0f9c5dfe5fd5fe8b3978",
+  "symbol": "BB_wstETH",
+  "key": "coins/ZWlwMTU1OjEvZXJjMjA6MHgzYTUyZmEzMGMzM2NhZjA1ZmFlZTBmOWM1ZGZlNWZkNWZlOGIzOTc4.png",
+  "source": "generic",
+  "sha256": "40c05d25435152cde7699e9e87abca46aa30a46c43cd733448ea140040e2a647",
+  "bytes": 6142
+ },
+ {
+  "caip": "eip155:1/erc20:0x5fa464cefe8901d66c09b85d5fcdc55b3738c688",
+  "symbol": "TOKE/WETH",
+  "key": "coins/ZWlwMTU1OjEvZXJjMjA6MHg1ZmE0NjRjZWZlODkwMWQ2NmMwOWI4NWQ1ZmNkYzU1YjM3MzhjNjg4.png",
+  "source": "generic",
+  "sha256": "3947259da38636368df2db50a36d2d9a7662651dcc7df5ac2157bbe64b927f52",
+  "bytes": 4890
+ },
+ {
+  "caip": "eip155:1/erc20:0x990b3af34ddb502715e1070ce6778d8eb3c8ea82",
+  "symbol": "BB_iETHv2",
+  "key": "coins/ZWlwMTU1OjEvZXJjMjA6MHg5OTBiM2FmMzRkZGI1MDI3MTVlMTA3MGNlNjc3OGQ4ZWIzYzhlYTgy.png",
+  "source": "generic",
+  "sha256": "40c05d25435152cde7699e9e87abca46aa30a46c43cd733448ea140040e2a647",
+  "bytes": 6142
+ },
+ {
+  "caip": "eip155:1/erc20:0xd4e7a6e2d03e4e48dfc27dd3f46df1c176647e38",
+  "symbol": "TOKE/WETH",
+  "key": "coins/ZWlwMTU1OjEvZXJjMjA6MHhkNGU3YTZlMmQwM2U0ZTQ4ZGZjMjdkZDNmNDZkZjFjMTc2NjQ3ZTM4.png",
+  "source": "generic",
+  "sha256": "3947259da38636368df2db50a36d2d9a7662651dcc7df5ac2157bbe64b927f52",
+  "bytes": 4890
+ },
+ {
+  "caip": "eip155:1/erc20:0xdf17c739b666b259da3416d01f0310a6e429f592",
+  "symbol": "AA_iETHv2",
+  "key": "coins/ZWlwMTU1OjEvZXJjMjA6MHhkZjE3YzczOWI2NjZiMjU5ZGEzNDE2ZDAxZjAzMTBhNmU0MjlmNTky.png",
+  "source": "generic",
+  "sha256": "ef3bf4fd92e03d2aa63994d235247c85d60f2cd001c16684955fc84dc00e7f77",
+  "bytes": 6379
+ },
+ {
+  "caip": "eip155:1/erc20:0xefc4f43737fd336fa8a8254454ced1e421804b16",
+  "symbol": "BB_ampr-LP-ETH",
+  "key": "coins/ZWlwMTU1OjEvZXJjMjA6MHhlZmM0ZjQzNzM3ZmQzMzZmYThhODI1NDQ1NGNlZDFlNDIxODA0YjE2.png",
+  "source": "generic",
+  "sha256": "40c05d25435152cde7699e9e87abca46aa30a46c43cd733448ea140040e2a647",
+  "bytes": 6142
+ },
+ {
+  "caip": "eip155:1/erc20:0xfc09c7cfd9c175dd9423ca02ae1249579ab12f12",
+  "symbol": "TOTORO",
+  "key": "coins/ZWlwMTU1OjEvZXJjMjA6MHhmYzA5YzdjZmQ5YzE3NWRkOTQyM2NhMDJhZTEyNDk1NzlhYjEyZjEy.png",
+  "source": "generic",
+  "sha256": "3947259da38636368df2db50a36d2d9a7662651dcc7df5ac2157bbe64b927f52",
+  "bytes": 4890
+ },
+ {
+  "caip": "eip155:1000/slip44:60",
+  "symbol": "GCD",
+  "key": "coins/ZWlwMTU1OjEwMDAvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "455841ae76f1e77bf4376daf27bfff839e7b43ba07a1461ad47c6e301c90998e",
+  "bytes": 7023
+ },
+ {
+  "caip": "eip155:1000000003/slip44:60",
+  "symbol": "dSK",
+  "key": "coins/ZWlwMTU1OjEwMDAwMDAwMDMvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "c04e5052eb67935ffbaeb7dffe14b0227846fbd406c1b4f70450343c9c27741d",
+  "bytes": 6001
+ },
+ {
+  "caip": "eip155:10001/slip44:60",
+  "symbol": "ETHW",
+  "key": "coins/ZWlwMTU1OjEwMDAxL3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "011132e8880d73dbaa4214c18c292c0425b5eb6e9a4071a3224f2e3817af557e",
+  "bytes": 5091
+ },
+ {
+  "caip": "eip155:1001/slip44:60",
+  "symbol": "KAIA",
+  "key": "coins/ZWlwMTU1OjEwMDEvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "92a3107511d7d43aaa5e6c8af8f8e10b0e1b2f9cd648b94dfa75b32b7bab1cfd",
+  "bytes": 6232
+ },
+ {
+  "caip": "eip155:10011/slip44:60",
+  "symbol": "DEF",
+  "key": "coins/ZWlwMTU1OjEwMDExL3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "c04e5052eb67935ffbaeb7dffe14b0227846fbd406c1b4f70450343c9c27741d",
+  "bytes": 6001
+ },
+ {
+  "caip": "eip155:10024/slip44:60",
+  "symbol": "GT",
+  "key": "coins/ZWlwMTU1OjEwMDI0L3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "455841ae76f1e77bf4376daf27bfff839e7b43ba07a1461ad47c6e301c90998e",
+  "bytes": 7023
+ },
+ {
+  "caip": "eip155:1003/slip44:60",
+  "symbol": "TET",
+  "key": "coins/ZWlwMTU1OjEwMDMvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "3947259da38636368df2db50a36d2d9a7662651dcc7df5ac2157bbe64b927f52",
+  "bytes": 4890
+ },
+ {
+  "caip": "eip155:1005/slip44:60",
+  "symbol": "tLEMX",
+  "key": "coins/ZWlwMTU1OjEwMDUvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "3947259da38636368df2db50a36d2d9a7662651dcc7df5ac2157bbe64b927f52",
+  "bytes": 4890
+ },
+ {
+  "caip": "eip155:100501/slip44:60",
+  "symbol": "SK",
+  "key": "coins/ZWlwMTU1OjEwMDUwMS9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "441675b675a3c52735ad71083bad879f23701bca449d57130717d2d4fd40d856",
+  "bytes": 6957
+ },
+ {
+  "caip": "eip155:1006/slip44:60",
+  "symbol": "LEMX",
+  "key": "coins/ZWlwMTU1OjEwMDYvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "789584234c7d05dd2fef9836cc84a8ae4a2ddaafc8dbab5144387ac547e3db88",
+  "bytes": 4798
+ },
+ {
+  "caip": "eip155:10066/slip44:60",
+  "symbol": "CO",
+  "key": "coins/ZWlwMTU1OjEwMDY2L3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "305be7e1d69c4dfa63d9f87d6598eec1ab1f1f1efa90cc75dcd35c3749d466cc",
+  "bytes": 6855
+ },
+ {
+  "caip": "eip155:10067275/slip44:60",
+  "symbol": "TPI",
+  "key": "coins/ZWlwMTU1OjEwMDY3Mjc1L3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "3947259da38636368df2db50a36d2d9a7662651dcc7df5ac2157bbe64b927f52",
+  "bytes": 4890
+ },
+ {
+  "caip": "eip155:1007/slip44:60",
+  "symbol": "NEW",
+  "key": "coins/ZWlwMTU1OjEwMDcvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "fd087da32519d1fdf54252a36b3922b62102ccc61fd16c0e541ec802ab86a660",
+  "bytes": 5763
+ },
+ {
+  "caip": "eip155:1008/slip44:60",
+  "symbol": "EUN",
+  "key": "coins/ZWlwMTU1OjEwMDgvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "011132e8880d73dbaa4214c18c292c0425b5eb6e9a4071a3224f2e3817af557e",
+  "bytes": 5091
+ },
+ {
+  "caip": "eip155:1009/slip44:60",
+  "symbol": "JNFTC",
+  "key": "coins/ZWlwMTU1OjEwMDkvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "5087fb9e19b3dfdb4e9a590623cc37a7620cc16d1887c56b4e8131f09bd46635",
+  "bytes": 5492
+ },
+ {
+  "caip": "eip155:10096/slip44:60",
+  "symbol": "MNV",
+  "key": "coins/ZWlwMTU1OjEwMDk2L3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "bfdba0b5e636a2ae8051f4a90a549577fc98d3a3584be8f3c994cec4ce786199",
+  "bytes": 6177
+ },
+ {
+  "caip": "eip155:101/slip44:60",
+  "symbol": "ETI",
+  "key": "coins/ZWlwMTU1OjEwMS9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "011132e8880d73dbaa4214c18c292c0425b5eb6e9a4071a3224f2e3817af557e",
+  "bytes": 5091
+ },
+ {
+  "caip": "eip155:101003/slip44:60",
+  "symbol": "JUNE",
+  "key": "coins/ZWlwMTU1OjEwMTAwMy9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "5087fb9e19b3dfdb4e9a590623cc37a7620cc16d1887c56b4e8131f09bd46635",
+  "bytes": 5492
+ },
+ {
+  "caip": "eip155:10101/slip44:60",
+  "symbol": "GEN",
+  "key": "coins/ZWlwMTU1OjEwMTAxL3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "455841ae76f1e77bf4376daf27bfff839e7b43ba07a1461ad47c6e301c90998e",
+  "bytes": 7023
+ },
+ {
+  "caip": "eip155:101088/slip44:60",
+  "symbol": "$XTC",
+  "key": "coins/ZWlwMTU1OjEwMTA4OC9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "f9307cba11af367a15e79ba599e9af351e7859df543ac4dce82c126b74a67279",
+  "bytes": 6707
+ },
+ {
+  "caip": "eip155:1012/slip44:60",
+  "symbol": "NEW",
+  "key": "coins/ZWlwMTU1OjEwMTIvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "fd087da32519d1fdf54252a36b3922b62102ccc61fd16c0e541ec802ab86a660",
+  "bytes": 5763
+ },
+ {
+  "caip": "eip155:10120/slip44:60",
+  "symbol": "tOZONE",
+  "key": "coins/ZWlwMTU1OjEwMTIwL3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "3947259da38636368df2db50a36d2d9a7662651dcc7df5ac2157bbe64b927f52",
+  "bytes": 4890
+ },
+ {
+  "caip": "eip155:10121/slip44:60",
+  "symbol": "OZONE",
+  "key": "coins/ZWlwMTU1OjEwMTIxL3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "4f80fa0da96d40f8991f035cc77de73285d69ad9d5aec002ea97ed3e2352ecc0",
+  "bytes": 6899
+ },
+ {
+  "caip": "eip155:10201/slip44:60",
+  "symbol": "PWR",
+  "key": "coins/ZWlwMTU1OjEwMjAxL3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "f5549960ae9d1a2273bd73ef2518b093f18595fe4dd65c5b429de440885ce8d1",
+  "bytes": 5614
+ },
+ {
+  "caip": "eip155:10218/slip44:60",
+  "symbol": "TEA",
+  "key": "coins/ZWlwMTU1OjEwMjE4L3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "3947259da38636368df2db50a36d2d9a7662651dcc7df5ac2157bbe64b927f52",
+  "bytes": 4890
+ },
+ {
+  "caip": "eip155:1022/slip44:60",
+  "symbol": "SKU",
+  "key": "coins/ZWlwMTU1OjEwMjIvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "441675b675a3c52735ad71083bad879f23701bca449d57130717d2d4fd40d856",
+  "bytes": 6957
+ },
+ {
+  "caip": "eip155:1023/slip44:60",
+  "symbol": "CLV",
+  "key": "coins/ZWlwMTU1OjEwMjMvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "305be7e1d69c4dfa63d9f87d6598eec1ab1f1f1efa90cc75dcd35c3749d466cc",
+  "bytes": 6855
+ },
+ {
+  "caip": "eip155:10248/slip44:60",
+  "symbol": "0XT",
+  "key": "coins/ZWlwMTU1OjEwMjQ4L3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "8d7e728a16eee0b21fd8267f37c3da96908cdaf7fd0ab79335f89eb85b223351",
+  "bytes": 6594
+ },
+ {
+  "caip": "eip155:103090/slip44:60",
+  "symbol": "\u25c8",
+  "key": "coins/ZWlwMTU1OjEwMzA5MC9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "bc6e825621e12ea768354e7e18897c6ede1ce705cb7f8feddb9486c1a4a28268",
+  "bytes": 6235
+ },
+ {
+  "caip": "eip155:1031/slip44:60",
+  "symbol": "PRX",
+  "key": "coins/ZWlwMTU1OjEwMzEvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "f5549960ae9d1a2273bd73ef2518b093f18595fe4dd65c5b429de440885ce8d1",
+  "bytes": 5614
+ },
+ {
+  "caip": "eip155:10323/slip44:60",
+  "symbol": "MARS",
+  "key": "coins/ZWlwMTU1OjEwMzIzL3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "bfdba0b5e636a2ae8051f4a90a549577fc98d3a3584be8f3c994cec4ce786199",
+  "bytes": 6177
+ },
+ {
+  "caip": "eip155:104566/slip44:60",
+  "symbol": "CAS",
+  "key": "coins/ZWlwMTU1OjEwNDU2Ni9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "305be7e1d69c4dfa63d9f87d6598eec1ab1f1f1efa90cc75dcd35c3749d466cc",
+  "bytes": 6855
+ },
+ {
+  "caip": "eip155:1079/slip44:60",
+  "symbol": "MNTR",
+  "key": "coins/ZWlwMTU1OjEwNzkvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "bfdba0b5e636a2ae8051f4a90a549577fc98d3a3584be8f3c994cec4ce786199",
+  "bytes": 6177
+ },
+ {
+  "caip": "eip155:1080/slip44:60",
+  "symbol": "MNTR",
+  "key": "coins/ZWlwMTU1OjEwODAvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "bfdba0b5e636a2ae8051f4a90a549577fc98d3a3584be8f3c994cec4ce786199",
+  "bytes": 6177
+ },
+ {
+  "caip": "eip155:108160679/slip44:60",
+  "symbol": "ORAI",
+  "key": "coins/ZWlwMTU1OjEwODE2MDY3OS9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "4f80fa0da96d40f8991f035cc77de73285d69ad9d5aec002ea97ed3e2352ecc0",
+  "bytes": 6899
+ },
+ {
+  "caip": "eip155:10849/slip44:60",
+  "symbol": "L1",
+  "key": "coins/ZWlwMTU1OjEwODQ5L3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "789584234c7d05dd2fef9836cc84a8ae4a2ddaafc8dbab5144387ac547e3db88",
+  "bytes": 4798
+ },
+ {
+  "caip": "eip155:10850/slip44:60",
+  "symbol": "L1ID",
+  "key": "coins/ZWlwMTU1OjEwODUwL3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "789584234c7d05dd2fef9836cc84a8ae4a2ddaafc8dbab5144387ac547e3db88",
+  "bytes": 4798
+ },
+ {
+  "caip": "eip155:10888/slip44:60",
+  "symbol": "tGS",
+  "key": "coins/ZWlwMTU1OjEwODg4L3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "3947259da38636368df2db50a36d2d9a7662651dcc7df5ac2157bbe64b927f52",
+  "bytes": 4890
+ },
+ {
+  "caip": "eip155:1089/slip44:60",
+  "symbol": "HEART",
+  "key": "coins/ZWlwMTU1OjEwODkvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "5a4139be746521fe26dc24a8d3e7be7f8a34c2749682be0ad1343df877c2f9c8",
+  "bytes": 4992
+ },
+ {
+  "caip": "eip155:1099/slip44:60",
+  "symbol": "mc",
+  "key": "coins/ZWlwMTU1OjEwOTkvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "bfdba0b5e636a2ae8051f4a90a549577fc98d3a3584be8f3c994cec4ce786199",
+  "bytes": 6177
+ },
+ {
+  "caip": "eip155:110/slip44:60",
+  "symbol": "XPR",
+  "key": "coins/ZWlwMTU1OjExMC9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "f9307cba11af367a15e79ba599e9af351e7859df543ac4dce82c126b74a67279",
+  "bytes": 6707
+ },
+ {
+  "caip": "eip155:11000/slip44:60",
+  "symbol": "KBC",
+  "key": "coins/ZWlwMTU1OjExMDAwL3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "92a3107511d7d43aaa5e6c8af8f8e10b0e1b2f9cd648b94dfa75b32b7bab1cfd",
+  "bytes": 6232
+ },
+ {
+  "caip": "eip155:1107/slip44:60",
+  "symbol": "BLXQ",
+  "key": "coins/ZWlwMTU1OjExMDcvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "40c05d25435152cde7699e9e87abca46aa30a46c43cd733448ea140040e2a647",
+  "bytes": 6142
+ },
+ {
+  "caip": "eip155:1108/slip44:60",
+  "symbol": "BLXQ",
+  "key": "coins/ZWlwMTU1OjExMDgvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "40c05d25435152cde7699e9e87abca46aa30a46c43cd733448ea140040e2a647",
+  "bytes": 6142
+ },
+ {
+  "caip": "eip155:11100/slip44:60",
+  "symbol": "BOL",
+  "key": "coins/ZWlwMTU1OjExMTAwL3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "40c05d25435152cde7699e9e87abca46aa30a46c43cd733448ea140040e2a647",
+  "bytes": 6142
+ },
+ {
+  "caip": "eip155:1111/slip44:60",
+  "symbol": "WEMIX",
+  "key": "coins/ZWlwMTU1OjExMTEvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "3463d0791dc95458849ad692569bb769feabb7249fa1d88bf58429cf02e7a9ce",
+  "bytes": 7229
+ },
+ {
+  "caip": "eip155:11119/slip44:60",
+  "symbol": "HBIT",
+  "key": "coins/ZWlwMTU1OjExMTE5L3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "5a4139be746521fe26dc24a8d3e7be7f8a34c2749682be0ad1343df877c2f9c8",
+  "bytes": 4992
+ },
+ {
+  "caip": "eip155:1112/slip44:60",
+  "symbol": "tWEMIX",
+  "key": "coins/ZWlwMTU1OjExMTIvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "3947259da38636368df2db50a36d2d9a7662651dcc7df5ac2157bbe64b927f52",
+  "bytes": 4890
+ },
+ {
+  "caip": "eip155:111551119090/slip44:60",
+  "symbol": "TON",
+  "key": "coins/ZWlwMTU1OjExMTU1MTExOTA5MC9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "3947259da38636368df2db50a36d2d9a7662651dcc7df5ac2157bbe64b927f52",
+  "bytes": 4890
+ },
+ {
+  "caip": "eip155:1122334455/slip44:60",
+  "symbol": "IPOS",
+  "key": "coins/ZWlwMTU1OjExMjIzMzQ0NTUvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "0cb9e36780ee0c10a7691f65640b0e131be783436d0279a0e6720c87dc53af3a",
+  "bytes": 4676
+ },
+ {
+  "caip": "eip155:11227/slip44:60",
+  "symbol": "TZW",
+  "key": "coins/ZWlwMTU1OjExMjI3L3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "3947259da38636368df2db50a36d2d9a7662651dcc7df5ac2157bbe64b927f52",
+  "bytes": 4890
+ },
+ {
+  "caip": "eip155:11235/slip44:60",
+  "symbol": "ISLM",
+  "key": "coins/ZWlwMTU1OjExMjM1L3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "0cb9e36780ee0c10a7691f65640b0e131be783436d0279a0e6720c87dc53af3a",
+  "bytes": 4676
+ },
+ {
+  "caip": "eip155:1124/slip44:60",
+  "symbol": "ECM",
+  "key": "coins/ZWlwMTU1OjExMjQvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "011132e8880d73dbaa4214c18c292c0425b5eb6e9a4071a3224f2e3817af557e",
+  "bytes": 5091
+ },
+ {
+  "caip": "eip155:1127469/slip44:60",
+  "symbol": "TILTG",
+  "key": "coins/ZWlwMTU1OjExMjc0Njkvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "3947259da38636368df2db50a36d2d9a7662651dcc7df5ac2157bbe64b927f52",
+  "bytes": 4890
+ },
+ {
+  "caip": "eip155:113/slip44:60",
+  "symbol": "Deh",
+  "key": "coins/ZWlwMTU1OjExMy9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "c04e5052eb67935ffbaeb7dffe14b0227846fbd406c1b4f70450343c9c27741d",
+  "bytes": 6001
+ },
+ {
+  "caip": "eip155:1138/slip44:60",
+  "symbol": "SINSO",
+  "key": "coins/ZWlwMTU1OjExMzgvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "441675b675a3c52735ad71083bad879f23701bca449d57130717d2d4fd40d856",
+  "bytes": 6957
+ },
+ {
+  "caip": "eip155:1139/slip44:60",
+  "symbol": "MATH",
+  "key": "coins/ZWlwMTU1OjExMzkvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "bfdba0b5e636a2ae8051f4a90a549577fc98d3a3584be8f3c994cec4ce786199",
+  "bytes": 6177
+ },
+ {
+  "caip": "eip155:1140/slip44:60",
+  "symbol": "MATH",
+  "key": "coins/ZWlwMTU1OjExNDAvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "bfdba0b5e636a2ae8051f4a90a549577fc98d3a3584be8f3c994cec4ce786199",
+  "bytes": 6177
+ },
+ {
+  "caip": "eip155:11437/slip44:60",
+  "symbol": "SHYFTT",
+  "key": "coins/ZWlwMTU1OjExNDM3L3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "441675b675a3c52735ad71083bad879f23701bca449d57130717d2d4fd40d856",
+  "bytes": 6957
+ },
+ {
+  "caip": "eip155:1146703430/slip44:60",
+  "symbol": "CYB",
+  "key": "coins/ZWlwMTU1OjExNDY3MDM0MzAvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "305be7e1d69c4dfa63d9f87d6598eec1ab1f1f1efa90cc75dcd35c3749d466cc",
+  "bytes": 6855
+ },
+ {
+  "caip": "eip155:1147/slip44:60",
+  "symbol": "FLAG",
+  "key": "coins/ZWlwMTU1OjExNDcvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "ddb64e6c07f18f5b98a56e41d4e47479a2a52b36654b26fcedbb46aac1ea658b",
+  "bytes": 4973
+ },
+ {
+  "caip": "eip155:1149/slip44:60",
+  "symbol": "PLEX",
+  "key": "coins/ZWlwMTU1OjExNDkvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "f5549960ae9d1a2273bd73ef2518b093f18595fe4dd65c5b429de440885ce8d1",
+  "bytes": 5614
+ },
+ {
+  "caip": "eip155:11612/slip44:60",
+  "symbol": "SRDX",
+  "key": "coins/ZWlwMTU1OjExNjEyL3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "441675b675a3c52735ad71083bad879f23701bca449d57130717d2d4fd40d856",
+  "bytes": 6957
+ },
+ {
+  "caip": "eip155:117/slip44:60",
+  "symbol": "UPTICK",
+  "key": "coins/ZWlwMTU1OjExNy9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "ff7ced5bf48fc7724575bd8e41f3d4399f030947e68602e3cb473f767cb6c070",
+  "bytes": 5620
+ },
+ {
+  "caip": "eip155:1170/slip44:60",
+  "symbol": "UOC",
+  "key": "coins/ZWlwMTU1OjExNzAvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "ff7ced5bf48fc7724575bd8e41f3d4399f030947e68602e3cb473f767cb6c070",
+  "bytes": 5620
+ },
+ {
+  "caip": "eip155:1174/slip44:60",
+  "symbol": "LTH",
+  "key": "coins/ZWlwMTU1OjExNzQvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "789584234c7d05dd2fef9836cc84a8ae4a2ddaafc8dbab5144387ac547e3db88",
+  "bytes": 4798
+ },
+ {
+  "caip": "eip155:11822/slip44:60",
+  "symbol": "ART",
+  "key": "coins/ZWlwMTU1OjExODIyL3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "ef3bf4fd92e03d2aa63994d235247c85d60f2cd001c16684955fc84dc00e7f77",
+  "bytes": 6379
+ },
+ {
+  "caip": "eip155:11891/slip44:60",
+  "symbol": "ARIA20",
+  "key": "coins/ZWlwMTU1OjExODkxL3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "ef3bf4fd92e03d2aa63994d235247c85d60f2cd001c16684955fc84dc00e7f77",
+  "bytes": 6379
+ },
+ {
+  "caip": "eip155:12/slip44:60",
+  "symbol": "KAL",
+  "key": "coins/ZWlwMTU1OjEyL3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "92a3107511d7d43aaa5e6c8af8f8e10b0e1b2f9cd648b94dfa75b32b7bab1cfd",
+  "bytes": 6232
+ },
+ {
+  "caip": "eip155:1200/slip44:60",
+  "symbol": "CAI",
+  "key": "coins/ZWlwMTU1OjEyMDAvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "305be7e1d69c4dfa63d9f87d6598eec1ab1f1f1efa90cc75dcd35c3749d466cc",
+  "bytes": 6855
+ },
+ {
+  "caip": "eip155:1201/slip44:60",
+  "symbol": "AVIS",
+  "key": "coins/ZWlwMTU1OjEyMDEvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "ef3bf4fd92e03d2aa63994d235247c85d60f2cd001c16684955fc84dc00e7f77",
+  "bytes": 6379
+ },
+ {
+  "caip": "eip155:1202/slip44:60",
+  "symbol": "WTT",
+  "key": "coins/ZWlwMTU1OjEyMDIvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "3463d0791dc95458849ad692569bb769feabb7249fa1d88bf58429cf02e7a9ce",
+  "bytes": 7229
+ },
+ {
+  "caip": "eip155:12020/slip44:60",
+  "symbol": "ATR",
+  "key": "coins/ZWlwMTU1OjEyMDIwL3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "ef3bf4fd92e03d2aa63994d235247c85d60f2cd001c16684955fc84dc00e7f77",
+  "bytes": 6379
+ },
+ {
+  "caip": "eip155:12020498/slip44:60",
+  "symbol": "LRPO",
+  "key": "coins/ZWlwMTU1OjEyMDIwNDk4L3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "789584234c7d05dd2fef9836cc84a8ae4a2ddaafc8dbab5144387ac547e3db88",
+  "bytes": 4798
+ },
+ {
+  "caip": "eip155:12051/slip44:60",
+  "symbol": "tZERO",
+  "key": "coins/ZWlwMTU1OjEyMDUxL3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "3947259da38636368df2db50a36d2d9a7662651dcc7df5ac2157bbe64b927f52",
+  "bytes": 4890
+ },
+ {
+  "caip": "eip155:12052/slip44:60",
+  "symbol": "ZERO",
+  "key": "coins/ZWlwMTU1OjEyMDUyL3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "fdd25c06f7f4d72de308c4acd22e7f9d9ee6e07644b43eb9ff16213818593eb9",
+  "bytes": 5561
+ },
+ {
+  "caip": "eip155:1209/slip44:60",
+  "symbol": "STC",
+  "key": "coins/ZWlwMTU1OjEyMDkvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "441675b675a3c52735ad71083bad879f23701bca449d57130717d2d4fd40d856",
+  "bytes": 6957
+ },
+ {
+  "caip": "eip155:1210/slip44:60",
+  "symbol": "CAI",
+  "key": "coins/ZWlwMTU1OjEyMTAvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "305be7e1d69c4dfa63d9f87d6598eec1ab1f1f1efa90cc75dcd35c3749d466cc",
+  "bytes": 6855
+ },
+ {
+  "caip": "eip155:121224/slip44:60",
+  "symbol": "FUMA",
+  "key": "coins/ZWlwMTU1OjEyMTIyNC9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "ddb64e6c07f18f5b98a56e41d4e47479a2a52b36654b26fcedbb46aac1ea658b",
+  "bytes": 4973
+ },
+ {
+  "caip": "eip155:1213/slip44:60",
+  "symbol": "POP",
+  "key": "coins/ZWlwMTU1OjEyMTMvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "f5549960ae9d1a2273bd73ef2518b093f18595fe4dd65c5b429de440885ce8d1",
+  "bytes": 5614
+ },
+ {
+  "caip": "eip155:123/slip44:60",
+  "symbol": "SPARK",
+  "key": "coins/ZWlwMTU1OjEyMy9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "441675b675a3c52735ad71083bad879f23701bca449d57130717d2d4fd40d856",
+  "bytes": 6957
+ },
+ {
+  "caip": "eip155:1233/slip44:60",
+  "symbol": "FITO",
+  "key": "coins/ZWlwMTU1OjEyMzMvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "ddb64e6c07f18f5b98a56e41d4e47479a2a52b36654b26fcedbb46aac1ea658b",
+  "bytes": 4973
+ },
+ {
+  "caip": "eip155:123321/slip44:60",
+  "symbol": "GEM",
+  "key": "coins/ZWlwMTU1OjEyMzMyMS9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "455841ae76f1e77bf4376daf27bfff839e7b43ba07a1461ad47c6e301c90998e",
+  "bytes": 7023
+ },
+ {
+  "caip": "eip155:123420000220/slip44:60",
+  "symbol": "tFLT",
+  "key": "coins/ZWlwMTU1OjEyMzQyMDAwMDIyMC9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "3947259da38636368df2db50a36d2d9a7662651dcc7df5ac2157bbe64b927f52",
+  "bytes": 4890
+ },
+ {
+  "caip": "eip155:1235/slip44:60",
+  "symbol": "ITX",
+  "key": "coins/ZWlwMTU1OjEyMzUvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "0cb9e36780ee0c10a7691f65640b0e131be783436d0279a0e6720c87dc53af3a",
+  "bytes": 4676
+ },
+ {
+  "caip": "eip155:12358/slip44:60",
+  "symbol": "GDPR",
+  "key": "coins/ZWlwMTU1OjEyMzU4L3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "455841ae76f1e77bf4376daf27bfff839e7b43ba07a1461ad47c6e301c90998e",
+  "bytes": 7023
+ },
+ {
+  "caip": "eip155:124/slip44:60",
+  "symbol": "DWU",
+  "key": "coins/ZWlwMTU1OjEyNC9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "c04e5052eb67935ffbaeb7dffe14b0227846fbd406c1b4f70450343c9c27741d",
+  "bytes": 6001
+ },
+ {
+  "caip": "eip155:1246/slip44:60",
+  "symbol": "OM",
+  "key": "coins/ZWlwMTU1OjEyNDYvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "4f80fa0da96d40f8991f035cc77de73285d69ad9d5aec002ea97ed3e2352ecc0",
+  "bytes": 6899
+ },
+ {
+  "caip": "eip155:1248/slip44:60",
+  "symbol": "dogeth",
+  "key": "coins/ZWlwMTU1OjEyNDgvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "c04e5052eb67935ffbaeb7dffe14b0227846fbd406c1b4f70450343c9c27741d",
+  "bytes": 6001
+ },
+ {
+  "caip": "eip155:124816/slip44:60",
+  "symbol": "MITO",
+  "key": "coins/ZWlwMTU1OjEyNDgxNi9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "bfdba0b5e636a2ae8051f4a90a549577fc98d3a3584be8f3c994cec4ce786199",
+  "bytes": 6177
+ },
+ {
+  "caip": "eip155:124832/slip44:60",
+  "symbol": "MITO",
+  "key": "coins/ZWlwMTU1OjEyNDgzMi9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "bfdba0b5e636a2ae8051f4a90a549577fc98d3a3584be8f3c994cec4ce786199",
+  "bytes": 6177
+ },
+ {
+  "caip": "eip155:125/slip44:60",
+  "symbol": "OY",
+  "key": "coins/ZWlwMTU1OjEyNS9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "4f80fa0da96d40f8991f035cc77de73285d69ad9d5aec002ea97ed3e2352ecc0",
+  "bytes": 6899
+ },
+ {
+  "caip": "eip155:12553/slip44:60",
+  "symbol": "RSS3",
+  "key": "coins/ZWlwMTU1OjEyNTUzL3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "f2000af02fd183b676de5ade41449391403d4b4018a1d90da700082684b96e98",
+  "bytes": 6048
+ },
+ {
+  "caip": "eip155:1260/slip44:60",
+  "symbol": "ACCES",
+  "key": "coins/ZWlwMTU1OjEyNjAvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "ef3bf4fd92e03d2aa63994d235247c85d60f2cd001c16684955fc84dc00e7f77",
+  "bytes": 6379
+ },
+ {
+  "caip": "eip155:127/slip44:60",
+  "symbol": "FETH",
+  "key": "coins/ZWlwMTU1OjEyNy9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "ddb64e6c07f18f5b98a56e41d4e47479a2a52b36654b26fcedbb46aac1ea658b",
+  "bytes": 4973
+ },
+ {
+  "caip": "eip155:1273227453/slip44:60",
+  "symbol": "sFUEL",
+  "key": "coins/ZWlwMTU1OjEyNzMyMjc0NTMvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "441675b675a3c52735ad71083bad879f23701bca449d57130717d2d4fd40d856",
+  "bytes": 6957
+ },
+ {
+  "caip": "eip155:1280/slip44:60",
+  "symbol": "HO",
+  "key": "coins/ZWlwMTU1OjEyODAvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "5a4139be746521fe26dc24a8d3e7be7f8a34c2749682be0ad1343df877c2f9c8",
+  "bytes": 4992
+ },
+ {
+  "caip": "eip155:12865/slip44:60",
+  "symbol": "LDN",
+  "key": "coins/ZWlwMTU1OjEyODY1L3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "789584234c7d05dd2fef9836cc84a8ae4a2ddaafc8dbab5144387ac547e3db88",
+  "bytes": 4798
+ },
+ {
+  "caip": "eip155:1288/slip44:60",
+  "symbol": "ROC",
+  "key": "coins/ZWlwMTU1OjEyODgvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "f2000af02fd183b676de5ade41449391403d4b4018a1d90da700082684b96e98",
+  "bytes": 6048
+ },
+ {
+  "caip": "eip155:13/slip44:60",
+  "symbol": "sDIODE",
+  "key": "coins/ZWlwMTU1OjEzL3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "441675b675a3c52735ad71083bad879f23701bca449d57130717d2d4fd40d856",
+  "bytes": 6957
+ },
+ {
+  "caip": "eip155:13000/slip44:60",
+  "symbol": "ECG",
+  "key": "coins/ZWlwMTU1OjEzMDAwL3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "011132e8880d73dbaa4214c18c292c0425b5eb6e9a4071a3224f2e3817af557e",
+  "bytes": 5091
+ },
+ {
+  "caip": "eip155:1311/slip44:60",
+  "symbol": "DOS",
+  "key": "coins/ZWlwMTU1OjEzMTEvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "c04e5052eb67935ffbaeb7dffe14b0227846fbd406c1b4f70450343c9c27741d",
+  "bytes": 6001
+ },
+ {
+  "caip": "eip155:1313114/slip44:60",
+  "symbol": "ETHO",
+  "key": "coins/ZWlwMTU1OjEzMTMxMTQvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "011132e8880d73dbaa4214c18c292c0425b5eb6e9a4071a3224f2e3817af557e",
+  "bytes": 5091
+ },
+ {
+  "caip": "eip155:1313500/slip44:60",
+  "symbol": "XERO",
+  "key": "coins/ZWlwMTU1OjEzMTM1MDAvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "f9307cba11af367a15e79ba599e9af351e7859df543ac4dce82c126b74a67279",
+  "bytes": 6707
+ },
+ {
+  "caip": "eip155:1314520/slip44:60",
+  "symbol": "ROON",
+  "key": "coins/ZWlwMTU1OjEzMTQ1MjAvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "f2000af02fd183b676de5ade41449391403d4b4018a1d90da700082684b96e98",
+  "bytes": 6048
+ },
+ {
+  "caip": "eip155:13145201/slip44:60",
+  "symbol": "ROON",
+  "key": "coins/ZWlwMTU1OjEzMTQ1MjAxL3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "f2000af02fd183b676de5ade41449391403d4b4018a1d90da700082684b96e98",
+  "bytes": 6048
+ },
+ {
+  "caip": "eip155:132/slip44:60",
+  "symbol": "NFIC",
+  "key": "coins/ZWlwMTU1OjEzMi9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "fd087da32519d1fdf54252a36b3922b62102ccc61fd16c0e541ec802ab86a660",
+  "bytes": 5763
+ },
+ {
+  "caip": "eip155:1328/slip44:60",
+  "symbol": "SEI",
+  "key": "coins/ZWlwMTU1OjEzMjgvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "441675b675a3c52735ad71083bad879f23701bca449d57130717d2d4fd40d856",
+  "bytes": 6957
+ },
+ {
+  "caip": "eip155:1329/slip44:60",
+  "symbol": "SEI",
+  "key": "coins/ZWlwMTU1OjEzMjkvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "441675b675a3c52735ad71083bad879f23701bca449d57130717d2d4fd40d856",
+  "bytes": 6957
+ },
+ {
+  "caip": "eip155:13371337/slip44:60",
+  "symbol": "TPEP",
+  "key": "coins/ZWlwMTU1OjEzMzcxMzM3L3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "3947259da38636368df2db50a36d2d9a7662651dcc7df5ac2157bbe64b927f52",
+  "bytes": 4890
+ },
+ {
+  "caip": "eip155:13374202/slip44:60",
+  "symbol": "USDe",
+  "key": "coins/ZWlwMTU1OjEzMzc0MjAyL3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "ff7ced5bf48fc7724575bd8e41f3d4399f030947e68602e3cb473f767cb6c070",
+  "bytes": 5620
+ },
+ {
+  "caip": "eip155:1338/slip44:60",
+  "symbol": "ELY",
+  "key": "coins/ZWlwMTU1OjEzMzgvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "011132e8880d73dbaa4214c18c292c0425b5eb6e9a4071a3224f2e3817af557e",
+  "bytes": 5091
+ },
+ {
+  "caip": "eip155:1343/slip44:60",
+  "symbol": "BGAS",
+  "key": "coins/ZWlwMTU1OjEzNDMvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "40c05d25435152cde7699e9e87abca46aa30a46c43cd733448ea140040e2a647",
+  "bytes": 6142
+ },
+ {
+  "caip": "eip155:13441/slip44:60",
+  "symbol": "BRIDGE",
+  "key": "coins/ZWlwMTU1OjEzNDQxL3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "40c05d25435152cde7699e9e87abca46aa30a46c43cd733448ea140040e2a647",
+  "bytes": 6142
+ },
+ {
+  "caip": "eip155:1351057110/slip44:60",
+  "symbol": "sFUEL",
+  "key": "coins/ZWlwMTU1OjEzNTEwNTcxMTAvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "441675b675a3c52735ad71083bad879f23701bca449d57130717d2d4fd40d856",
+  "bytes": 6957
+ },
+ {
+  "caip": "eip155:137/erc20:0x93ef615f1ddd27d0e141ad7192623a5c45e8f200",
+  "symbol": "FOX/WETH",
+  "key": "coins/ZWlwMTU1OjEzNy9lcmMyMDoweDkzZWY2MTVmMWRkZDI3ZDBlMTQxYWQ3MTkyNjIzYTVjNDVlOGYyMDA.png",
+  "source": "generic",
+  "sha256": "ddb64e6c07f18f5b98a56e41d4e47479a2a52b36654b26fcedbb46aac1ea658b",
+  "bytes": 4973
+ },
+ {
+  "caip": "eip155:13746/slip44:60",
+  "symbol": "TG7T",
+  "key": "coins/ZWlwMTU1OjEzNzQ2L3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "3947259da38636368df2db50a36d2d9a7662651dcc7df5ac2157bbe64b927f52",
+  "bytes": 4890
+ },
+ {
+  "caip": "eip155:13812/slip44:60",
+  "symbol": "OPN",
+  "key": "coins/ZWlwMTU1OjEzODEyL3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "4f80fa0da96d40f8991f035cc77de73285d69ad9d5aec002ea97ed3e2352ecc0",
+  "bytes": 6899
+ },
+ {
+  "caip": "eip155:13863860/slip44:60",
+  "symbol": "SIS",
+  "key": "coins/ZWlwMTU1OjEzODYzODYwL3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "441675b675a3c52735ad71083bad879f23701bca449d57130717d2d4fd40d856",
+  "bytes": 6957
+ },
+ {
+  "caip": "eip155:139/slip44:60",
+  "symbol": "WOOC",
+  "key": "coins/ZWlwMTU1OjEzOS9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "3463d0791dc95458849ad692569bb769feabb7249fa1d88bf58429cf02e7a9ce",
+  "bytes": 7229
+ },
+ {
+  "caip": "eip155:14000/slip44:60",
+  "symbol": "ECG",
+  "key": "coins/ZWlwMTU1OjE0MDAwL3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "011132e8880d73dbaa4214c18c292c0425b5eb6e9a4071a3224f2e3817af557e",
+  "bytes": 5091
+ },
+ {
+  "caip": "eip155:142/slip44:60",
+  "symbol": "DAX",
+  "key": "coins/ZWlwMTU1OjE0Mi9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "c04e5052eb67935ffbaeb7dffe14b0227846fbd406c1b4f70450343c9c27741d",
+  "bytes": 6001
+ },
+ {
+  "caip": "eip155:14288640/slip44:60",
+  "symbol": "DEB",
+  "key": "coins/ZWlwMTU1OjE0Mjg4NjQwL3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "c04e5052eb67935ffbaeb7dffe14b0227846fbd406c1b4f70450343c9c27741d",
+  "bytes": 6001
+ },
+ {
+  "caip": "eip155:147/slip44:60",
+  "symbol": "FLAG",
+  "key": "coins/ZWlwMTU1OjE0Ny9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "ddb64e6c07f18f5b98a56e41d4e47479a2a52b36654b26fcedbb46aac1ea658b",
+  "bytes": 4973
+ },
+ {
+  "caip": "eip155:1480/slip44:60",
+  "symbol": "VANA",
+  "key": "coins/ZWlwMTU1OjE0ODAvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "eb734899ac89fdd930d06b589989d748b3b03bd3bece48d10806be94ac65f4cf",
+  "bytes": 6337
+ },
+ {
+  "caip": "eip155:14800/slip44:60",
+  "symbol": "VANA",
+  "key": "coins/ZWlwMTU1OjE0ODAwL3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "eb734899ac89fdd930d06b589989d748b3b03bd3bece48d10806be94ac65f4cf",
+  "bytes": 6337
+ },
+ {
+  "caip": "eip155:14853/slip44:60",
+  "symbol": "eHMND",
+  "key": "coins/ZWlwMTU1OjE0ODUzL3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "011132e8880d73dbaa4214c18c292c0425b5eb6e9a4071a3224f2e3817af557e",
+  "bytes": 5091
+ },
+ {
+  "caip": "eip155:1499/slip44:60",
+  "symbol": "IGC",
+  "key": "coins/ZWlwMTU1OjE0OTkvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "0cb9e36780ee0c10a7691f65640b0e131be783436d0279a0e6720c87dc53af3a",
+  "bytes": 4676
+ },
+ {
+  "caip": "eip155:15/slip44:60",
+  "symbol": "DIODE",
+  "key": "coins/ZWlwMTU1OjE1L3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "c04e5052eb67935ffbaeb7dffe14b0227846fbd406c1b4f70450343c9c27741d",
+  "bytes": 6001
+ },
+ {
+  "caip": "eip155:1506/slip44:60",
+  "symbol": "KSX",
+  "key": "coins/ZWlwMTU1OjE1MDYvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "92a3107511d7d43aaa5e6c8af8f8e10b0e1b2f9cd648b94dfa75b32b7bab1cfd",
+  "bytes": 6232
+ },
+ {
+  "caip": "eip155:1507/slip44:60",
+  "symbol": "KSX",
+  "key": "coins/ZWlwMTU1OjE1MDcvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "92a3107511d7d43aaa5e6c8af8f8e10b0e1b2f9cd648b94dfa75b32b7bab1cfd",
+  "bytes": 6232
+ },
+ {
+  "caip": "eip155:1513/slip44:60",
+  "symbol": "IP",
+  "key": "coins/ZWlwMTU1OjE1MTMvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "0cb9e36780ee0c10a7691f65640b0e131be783436d0279a0e6720c87dc53af3a",
+  "bytes": 4676
+ },
+ {
+  "caip": "eip155:1515/slip44:60",
+  "symbol": "BG",
+  "key": "coins/ZWlwMTU1OjE1MTUvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "40c05d25435152cde7699e9e87abca46aa30a46c43cd733448ea140040e2a647",
+  "bytes": 6142
+ },
+ {
+  "caip": "eip155:1516/slip44:60",
+  "symbol": "IP",
+  "key": "coins/ZWlwMTU1OjE1MTYvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "0cb9e36780ee0c10a7691f65640b0e131be783436d0279a0e6720c87dc53af3a",
+  "bytes": 4676
+ },
+ {
+  "caip": "eip155:152/slip44:60",
+  "symbol": "RBNT",
+  "key": "coins/ZWlwMTU1OjE1Mi9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "f2000af02fd183b676de5ade41449391403d4b4018a1d90da700082684b96e98",
+  "bytes": 6048
+ },
+ {
+  "caip": "eip155:154/slip44:60",
+  "symbol": "RBNT",
+  "key": "coins/ZWlwMTU1OjE1NC9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "f2000af02fd183b676de5ade41449391403d4b4018a1d90da700082684b96e98",
+  "bytes": 6048
+ },
+ {
+  "caip": "eip155:15551/slip44:60",
+  "symbol": "LOOP",
+  "key": "coins/ZWlwMTU1OjE1NTUxL3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "789584234c7d05dd2fef9836cc84a8ae4a2ddaafc8dbab5144387ac547e3db88",
+  "bytes": 4798
+ },
+ {
+  "caip": "eip155:15555/slip44:60",
+  "symbol": "EVM",
+  "key": "coins/ZWlwMTU1OjE1NTU1L3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "011132e8880d73dbaa4214c18c292c0425b5eb6e9a4071a3224f2e3817af557e",
+  "bytes": 5091
+ },
+ {
+  "caip": "eip155:1570/slip44:60",
+  "symbol": "STARX",
+  "key": "coins/ZWlwMTU1OjE1NzAvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "441675b675a3c52735ad71083bad879f23701bca449d57130717d2d4fd40d856",
+  "bytes": 6957
+ },
+ {
+  "caip": "eip155:1578/slip44:60",
+  "symbol": "STARX",
+  "key": "coins/ZWlwMTU1OjE1Nzgvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "441675b675a3c52735ad71083bad879f23701bca449d57130717d2d4fd40d856",
+  "bytes": 6957
+ },
+ {
+  "caip": "eip155:158245/slip44:60",
+  "symbol": "XCOIN",
+  "key": "coins/ZWlwMTU1OjE1ODI0NS9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "f9307cba11af367a15e79ba599e9af351e7859df543ac4dce82c126b74a67279",
+  "bytes": 6707
+ },
+ {
+  "caip": "eip155:158345/slip44:60",
+  "symbol": "XCOIN",
+  "key": "coins/ZWlwMTU1OjE1ODM0NS9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "f9307cba11af367a15e79ba599e9af351e7859df543ac4dce82c126b74a67279",
+  "bytes": 6707
+ },
+ {
+  "caip": "eip155:159/slip44:60",
+  "symbol": "RBAT",
+  "key": "coins/ZWlwMTU1OjE1OS9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "f2000af02fd183b676de5ade41449391403d4b4018a1d90da700082684b96e98",
+  "bytes": 6048
+ },
+ {
+  "caip": "eip155:1597/slip44:60",
+  "symbol": "REACT",
+  "key": "coins/ZWlwMTU1OjE1OTcvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "f2000af02fd183b676de5ade41449391403d4b4018a1d90da700082684b96e98",
+  "bytes": 6048
+ },
+ {
+  "caip": "eip155:160/slip44:60",
+  "symbol": "AMAX",
+  "key": "coins/ZWlwMTU1OjE2MC9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "ef3bf4fd92e03d2aa63994d235247c85d60f2cd001c16684955fc84dc00e7f77",
+  "bytes": 6379
+ },
+ {
+  "caip": "eip155:16000/slip44:60",
+  "symbol": "MTT",
+  "key": "coins/ZWlwMTU1OjE2MDAwL3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "bfdba0b5e636a2ae8051f4a90a549577fc98d3a3584be8f3c994cec4ce786199",
+  "bytes": 6177
+ },
+ {
+  "caip": "eip155:16001/slip44:60",
+  "symbol": "MTTest",
+  "key": "coins/ZWlwMTU1OjE2MDAxL3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "bfdba0b5e636a2ae8051f4a90a549577fc98d3a3584be8f3c994cec4ce786199",
+  "bytes": 6177
+ },
+ {
+  "caip": "eip155:161/slip44:60",
+  "symbol": "AMAX",
+  "key": "coins/ZWlwMTU1OjE2MS9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "ef3bf4fd92e03d2aa63994d235247c85d60f2cd001c16684955fc84dc00e7f77",
+  "bytes": 6379
+ },
+ {
+  "caip": "eip155:161212/slip44:60",
+  "symbol": "PLAY",
+  "key": "coins/ZWlwMTU1OjE2MTIxMi9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "f5549960ae9d1a2273bd73ef2518b093f18595fe4dd65c5b429de440885ce8d1",
+  "bytes": 5614
+ },
+ {
+  "caip": "eip155:1617/slip44:60",
+  "symbol": "ETINS",
+  "key": "coins/ZWlwMTU1OjE2MTcvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "011132e8880d73dbaa4214c18c292c0425b5eb6e9a4071a3224f2e3817af557e",
+  "bytes": 5091
+ },
+ {
+  "caip": "eip155:1618/slip44:60",
+  "symbol": "CATE",
+  "key": "coins/ZWlwMTU1OjE2MTgvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "305be7e1d69c4dfa63d9f87d6598eec1ab1f1f1efa90cc75dcd35c3749d466cc",
+  "bytes": 6855
+ },
+ {
+  "caip": "eip155:162/slip44:60",
+  "symbol": "PHT",
+  "key": "coins/ZWlwMTU1OjE2Mi9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "f5549960ae9d1a2273bd73ef2518b093f18595fe4dd65c5b429de440885ce8d1",
+  "bytes": 5614
+ },
+ {
+  "caip": "eip155:1620/slip44:60",
+  "symbol": "ATH",
+  "key": "coins/ZWlwMTU1OjE2MjAvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "ef3bf4fd92e03d2aa63994d235247c85d60f2cd001c16684955fc84dc00e7f77",
+  "bytes": 6379
+ },
+ {
+  "caip": "eip155:163/slip44:60",
+  "symbol": "PHT",
+  "key": "coins/ZWlwMTU1OjE2My9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "f5549960ae9d1a2273bd73ef2518b093f18595fe4dd65c5b429de440885ce8d1",
+  "bytes": 5614
+ },
+ {
+  "caip": "eip155:16350/slip44:60",
+  "symbol": "INC",
+  "key": "coins/ZWlwMTU1OjE2MzUwL3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "0cb9e36780ee0c10a7691f65640b0e131be783436d0279a0e6720c87dc53af3a",
+  "bytes": 4676
+ },
+ {
+  "caip": "eip155:1637450/slip44:60",
+  "symbol": "tBNB",
+  "key": "coins/ZWlwMTU1OjE2Mzc0NTAvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "3947259da38636368df2db50a36d2d9a7662651dcc7df5ac2157bbe64b927f52",
+  "bytes": 4890
+ },
+ {
+  "caip": "eip155:1657/slip44:60",
+  "symbol": "BTA",
+  "key": "coins/ZWlwMTU1OjE2NTcvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "40c05d25435152cde7699e9e87abca46aa30a46c43cd733448ea140040e2a647",
+  "bytes": 6142
+ },
+ {
+  "caip": "eip155:1662/slip44:60",
+  "symbol": "LCN",
+  "key": "coins/ZWlwMTU1OjE2NjIvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "789584234c7d05dd2fef9836cc84a8ae4a2ddaafc8dbab5144387ac547e3db88",
+  "bytes": 4798
+ },
+ {
+  "caip": "eip155:16658437/slip44:60",
+  "symbol": "TPI",
+  "key": "coins/ZWlwMTU1OjE2NjU4NDM3L3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "3947259da38636368df2db50a36d2d9a7662651dcc7df5ac2157bbe64b927f52",
+  "bytes": 4890
+ },
+ {
+  "caip": "eip155:16688/slip44:60",
+  "symbol": "ERIS",
+  "key": "coins/ZWlwMTU1OjE2Njg4L3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "011132e8880d73dbaa4214c18c292c0425b5eb6e9a4071a3224f2e3817af557e",
+  "bytes": 5091
+ },
+ {
+  "caip": "eip155:17/slip44:60",
+  "symbol": "TFI",
+  "key": "coins/ZWlwMTU1OjE3L3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "3947259da38636368df2db50a36d2d9a7662651dcc7df5ac2157bbe64b927f52",
+  "bytes": 4890
+ },
+ {
+  "caip": "eip155:170/slip44:60",
+  "symbol": "HOO",
+  "key": "coins/ZWlwMTU1OjE3MC9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "5a4139be746521fe26dc24a8d3e7be7f8a34c2749682be0ad1343df877c2f9c8",
+  "bytes": 4992
+ },
+ {
+  "caip": "eip155:1707/slip44:60",
+  "symbol": "JINDA",
+  "key": "coins/ZWlwMTU1OjE3MDcvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "5087fb9e19b3dfdb4e9a590623cc37a7620cc16d1887c56b4e8131f09bd46635",
+  "bytes": 5492
+ },
+ {
+  "caip": "eip155:1708/slip44:60",
+  "symbol": "JINDA",
+  "key": "coins/ZWlwMTU1OjE3MDgvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "5087fb9e19b3dfdb4e9a590623cc37a7620cc16d1887c56b4e8131f09bd46635",
+  "bytes": 5492
+ },
+ {
+  "caip": "eip155:17171/slip44:60",
+  "symbol": "G8C",
+  "key": "coins/ZWlwMTU1OjE3MTcxL3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "455841ae76f1e77bf4376daf27bfff839e7b43ba07a1461ad47c6e301c90998e",
+  "bytes": 7023
+ },
+ {
+  "caip": "eip155:17172/slip44:60",
+  "symbol": "ECLP",
+  "key": "coins/ZWlwMTU1OjE3MTcyL3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "011132e8880d73dbaa4214c18c292c0425b5eb6e9a4071a3224f2e3817af557e",
+  "bytes": 5091
+ },
+ {
+  "caip": "eip155:17180/slip44:60",
+  "symbol": "PLT",
+  "key": "coins/ZWlwMTU1OjE3MTgwL3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "f5549960ae9d1a2273bd73ef2518b093f18595fe4dd65c5b429de440885ce8d1",
+  "bytes": 5614
+ },
+ {
+  "caip": "eip155:172/slip44:60",
+  "symbol": "usd",
+  "key": "coins/ZWlwMTU1OjE3Mi9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "ff7ced5bf48fc7724575bd8e41f3d4399f030947e68602e3cb473f767cb6c070",
+  "bytes": 5620
+ },
+ {
+  "caip": "eip155:1732/slip44:60",
+  "symbol": "FUGA",
+  "key": "coins/ZWlwMTU1OjE3MzIvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "ddb64e6c07f18f5b98a56e41d4e47479a2a52b36654b26fcedbb46aac1ea658b",
+  "bytes": 4973
+ },
+ {
+  "caip": "eip155:1733/slip44:60",
+  "symbol": "FUGA",
+  "key": "coins/ZWlwMTU1OjE3MzMvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "ddb64e6c07f18f5b98a56e41d4e47479a2a52b36654b26fcedbb46aac1ea658b",
+  "bytes": 4973
+ },
+ {
+  "caip": "eip155:1734/slip44:60",
+  "symbol": "FUGA",
+  "key": "coins/ZWlwMTU1OjE3MzQvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "ddb64e6c07f18f5b98a56e41d4e47479a2a52b36654b26fcedbb46aac1ea658b",
+  "bytes": 4973
+ },
+ {
+  "caip": "eip155:176/slip44:60",
+  "symbol": "DCT",
+  "key": "coins/ZWlwMTU1OjE3Ni9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "c04e5052eb67935ffbaeb7dffe14b0227846fbd406c1b4f70450343c9c27741d",
+  "bytes": 6001
+ },
+ {
+  "caip": "eip155:17735/slip44:60",
+  "symbol": "ESPT",
+  "key": "coins/ZWlwMTU1OjE3NzM1L3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "011132e8880d73dbaa4214c18c292c0425b5eb6e9a4071a3224f2e3817af557e",
+  "bytes": 5091
+ },
+ {
+  "caip": "eip155:18/slip44:60",
+  "symbol": "TST",
+  "key": "coins/ZWlwMTU1OjE4L3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "3947259da38636368df2db50a36d2d9a7662651dcc7df5ac2157bbe64b927f52",
+  "bytes": 4890
+ },
+ {
+  "caip": "eip155:180/slip44:60",
+  "symbol": "AME",
+  "key": "coins/ZWlwMTU1OjE4MC9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "ef3bf4fd92e03d2aa63994d235247c85d60f2cd001c16684955fc84dc00e7f77",
+  "bytes": 6379
+ },
+ {
+  "caip": "eip155:18000/slip44:60",
+  "symbol": "ZKST",
+  "key": "coins/ZWlwMTU1OjE4MDAwL3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "fdd25c06f7f4d72de308c4acd22e7f9d9ee6e07644b43eb9ff16213818593eb9",
+  "bytes": 5561
+ },
+ {
+  "caip": "eip155:1804/slip44:60",
+  "symbol": "CRC",
+  "key": "coins/ZWlwMTU1OjE4MDQvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "305be7e1d69c4dfa63d9f87d6598eec1ab1f1f1efa90cc75dcd35c3749d466cc",
+  "bytes": 6855
+ },
+ {
+  "caip": "eip155:18071918/slip44:60",
+  "symbol": "MAND",
+  "key": "coins/ZWlwMTU1OjE4MDcxOTE4L3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "bfdba0b5e636a2ae8051f4a90a549577fc98d3a3584be8f3c994cec4ce786199",
+  "bytes": 6177
+ },
+ {
+  "caip": "eip155:18122/slip44:60",
+  "symbol": "STN",
+  "key": "coins/ZWlwMTU1OjE4MTIyL3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "441675b675a3c52735ad71083bad879f23701bca449d57130717d2d4fd40d856",
+  "bytes": 6957
+ },
+ {
+  "caip": "eip155:18181/slip44:60",
+  "symbol": "G8C",
+  "key": "coins/ZWlwMTU1OjE4MTgxL3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "455841ae76f1e77bf4376daf27bfff839e7b43ba07a1461ad47c6e301c90998e",
+  "bytes": 7023
+ },
+ {
+  "caip": "eip155:1821/slip44:60",
+  "symbol": "RUBY",
+  "key": "coins/ZWlwMTU1OjE4MjEvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "f2000af02fd183b676de5ade41449391403d4b4018a1d90da700082684b96e98",
+  "bytes": 6048
+ },
+ {
+  "caip": "eip155:18289463/slip44:60",
+  "symbol": "ILT",
+  "key": "coins/ZWlwMTU1OjE4Mjg5NDYzL3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "0cb9e36780ee0c10a7691f65640b0e131be783436d0279a0e6720c87dc53af3a",
+  "bytes": 4676
+ },
+ {
+  "caip": "eip155:1829/slip44:60",
+  "symbol": "PBG",
+  "key": "coins/ZWlwMTU1OjE4Mjkvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "f5549960ae9d1a2273bd73ef2518b093f18595fe4dd65c5b429de440885ce8d1",
+  "bytes": 5614
+ },
+ {
+  "caip": "eip155:1853/slip44:60",
+  "symbol": "HO",
+  "key": "coins/ZWlwMTU1OjE4NTMvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "5a4139be746521fe26dc24a8d3e7be7f8a34c2749682be0ad1343df877c2f9c8",
+  "bytes": 4992
+ },
+ {
+  "caip": "eip155:1856/slip44:60",
+  "symbol": "TSF",
+  "key": "coins/ZWlwMTU1OjE4NTYvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "3947259da38636368df2db50a36d2d9a7662651dcc7df5ac2157bbe64b927f52",
+  "bytes": 4890
+ },
+ {
+  "caip": "eip155:188710/slip44:60",
+  "symbol": "BDCC",
+  "key": "coins/ZWlwMTU1OjE4ODcxMC9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "40c05d25435152cde7699e9e87abca46aa30a46c43cd733448ea140040e2a647",
+  "bytes": 6142
+ },
+ {
+  "caip": "eip155:18881/slip44:60",
+  "symbol": "UOS",
+  "key": "coins/ZWlwMTU1OjE4ODgxL3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "ff7ced5bf48fc7724575bd8e41f3d4399f030947e68602e3cb473f767cb6c070",
+  "bytes": 5620
+ },
+ {
+  "caip": "eip155:1898/slip44:60",
+  "symbol": "BOY",
+  "key": "coins/ZWlwMTU1OjE4OTgvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "40c05d25435152cde7699e9e87abca46aa30a46c43cd733448ea140040e2a647",
+  "bytes": 6142
+ },
+ {
+  "caip": "eip155:190/slip44:60",
+  "symbol": "CMD",
+  "key": "coins/ZWlwMTU1OjE5MC9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "305be7e1d69c4dfa63d9f87d6598eec1ab1f1f1efa90cc75dcd35c3749d466cc",
+  "bytes": 6855
+ },
+ {
+  "caip": "eip155:1903648807/slip44:60",
+  "symbol": "GEMU",
+  "key": "coins/ZWlwMTU1OjE5MDM2NDg4MDcvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "455841ae76f1e77bf4376daf27bfff839e7b43ba07a1461ad47c6e301c90998e",
+  "bytes": 7023
+ },
+ {
+  "caip": "eip155:1904/slip44:60",
+  "symbol": "SCN",
+  "key": "coins/ZWlwMTU1OjE5MDQvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "441675b675a3c52735ad71083bad879f23701bca449d57130717d2d4fd40d856",
+  "bytes": 6957
+ },
+ {
+  "caip": "eip155:19077/slip44:60",
+  "symbol": "BCX",
+  "key": "coins/ZWlwMTU1OjE5MDc3L3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "40c05d25435152cde7699e9e87abca46aa30a46c43cd733448ea140040e2a647",
+  "bytes": 6142
+ },
+ {
+  "caip": "eip155:1909/slip44:60",
+  "symbol": "MRK",
+  "key": "coins/ZWlwMTU1OjE5MDkvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "bfdba0b5e636a2ae8051f4a90a549577fc98d3a3584be8f3c994cec4ce786199",
+  "bytes": 6177
+ },
+ {
+  "caip": "eip155:1912/slip44:60",
+  "symbol": "tRUBY",
+  "key": "coins/ZWlwMTU1OjE5MTIvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "3947259da38636368df2db50a36d2d9a7662651dcc7df5ac2157bbe64b927f52",
+  "bytes": 4890
+ },
+ {
+  "caip": "eip155:1918/slip44:60",
+  "symbol": "UPBEth",
+  "key": "coins/ZWlwMTU1OjE5MTgvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "ff7ced5bf48fc7724575bd8e41f3d4399f030947e68602e3cb473f767cb6c070",
+  "bytes": 5620
+ },
+ {
+  "caip": "eip155:19191/slip44:60",
+  "symbol": "BCX",
+  "key": "coins/ZWlwMTU1OjE5MTkxL3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "40c05d25435152cde7699e9e87abca46aa30a46c43cd733448ea140040e2a647",
+  "bytes": 6142
+ },
+ {
+  "caip": "eip155:193/slip44:60",
+  "symbol": "CEM",
+  "key": "coins/ZWlwMTU1OjE5My9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "305be7e1d69c4dfa63d9f87d6598eec1ab1f1f1efa90cc75dcd35c3749d466cc",
+  "bytes": 6855
+ },
+ {
+  "caip": "eip155:1945/slip44:60",
+  "symbol": "ONUS",
+  "key": "coins/ZWlwMTU1OjE5NDUvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "4f80fa0da96d40f8991f035cc77de73285d69ad9d5aec002ea97ed3e2352ecc0",
+  "bytes": 6899
+ },
+ {
+  "caip": "eip155:1967/slip44:60",
+  "symbol": "MTC",
+  "key": "coins/ZWlwMTU1OjE5Njcvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "bfdba0b5e636a2ae8051f4a90a549577fc98d3a3584be8f3c994cec4ce786199",
+  "bytes": 6177
+ },
+ {
+  "caip": "eip155:197/slip44:60",
+  "symbol": "NEUTR",
+  "key": "coins/ZWlwMTU1OjE5Ny9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "fd087da32519d1fdf54252a36b3922b62102ccc61fd16c0e541ec802ab86a660",
+  "bytes": 5763
+ },
+ {
+  "caip": "eip155:1972/slip44:60",
+  "symbol": "REDEV2",
+  "key": "coins/ZWlwMTU1OjE5NzIvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "f2000af02fd183b676de5ade41449391403d4b4018a1d90da700082684b96e98",
+  "bytes": 6048
+ },
+ {
+  "caip": "eip155:1975/slip44:60",
+  "symbol": "ONUS",
+  "key": "coins/ZWlwMTU1OjE5NzUvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "4f80fa0da96d40f8991f035cc77de73285d69ad9d5aec002ea97ed3e2352ecc0",
+  "bytes": 6899
+ },
+ {
+  "caip": "eip155:1984/slip44:60",
+  "symbol": "EUN",
+  "key": "coins/ZWlwMTU1OjE5ODQvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "011132e8880d73dbaa4214c18c292c0425b5eb6e9a4071a3224f2e3817af557e",
+  "bytes": 5091
+ },
+ {
+  "caip": "eip155:19845/slip44:60",
+  "symbol": "BTCIX",
+  "key": "coins/ZWlwMTU1OjE5ODQ1L3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "40c05d25435152cde7699e9e87abca46aa30a46c43cd733448ea140040e2a647",
+  "bytes": 6142
+ },
+ {
+  "caip": "eip155:1985/slip44:60",
+  "symbol": "TUSHY",
+  "key": "coins/ZWlwMTU1OjE5ODUvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "3947259da38636368df2db50a36d2d9a7662651dcc7df5ac2157bbe64b927f52",
+  "bytes": 4890
+ },
+ {
+  "caip": "eip155:19850818/slip44:60",
+  "symbol": "tDBC",
+  "key": "coins/ZWlwMTU1OjE5ODUwODE4L3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "3947259da38636368df2db50a36d2d9a7662651dcc7df5ac2157bbe64b927f52",
+  "bytes": 4890
+ },
+ {
+  "caip": "eip155:1986/slip44:60",
+  "symbol": "TUSHY",
+  "key": "coins/ZWlwMTU1OjE5ODYvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "3947259da38636368df2db50a36d2d9a7662651dcc7df5ac2157bbe64b927f52",
+  "bytes": 4890
+ },
+ {
+  "caip": "eip155:1987/slip44:60",
+  "symbol": "EGEM",
+  "key": "coins/ZWlwMTU1OjE5ODcvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "011132e8880d73dbaa4214c18c292c0425b5eb6e9a4071a3224f2e3817af557e",
+  "bytes": 5091
+ },
+ {
+  "caip": "eip155:198724/slip44:60",
+  "symbol": "EDX",
+  "key": "coins/ZWlwMTU1OjE5ODcyNC9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "011132e8880d73dbaa4214c18c292c0425b5eb6e9a4071a3224f2e3817af557e",
+  "bytes": 5091
+ },
+ {
+  "caip": "eip155:1989/slip44:60",
+  "symbol": "BSW",
+  "key": "coins/ZWlwMTU1OjE5ODkvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "40c05d25435152cde7699e9e87abca46aa30a46c43cd733448ea140040e2a647",
+  "bytes": 6142
+ },
+ {
+  "caip": "eip155:198989/slip44:60",
+  "symbol": "BSW",
+  "key": "coins/ZWlwMTU1OjE5ODk4OS9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "40c05d25435152cde7699e9e87abca46aa30a46c43cd733448ea140040e2a647",
+  "bytes": 6142
+ },
+ {
+  "caip": "eip155:1990/slip44:60",
+  "symbol": "QIE",
+  "key": "coins/ZWlwMTU1OjE5OTAvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "b002b2078f2af84bcbad5c24cb3be7834ba4b71fce84a394783ed3ec683dc6d0",
+  "bytes": 7090
+ },
+ {
+  "caip": "eip155:1997/slip44:60",
+  "symbol": "KYOTO",
+  "key": "coins/ZWlwMTU1OjE5OTcvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "92a3107511d7d43aaa5e6c8af8f8e10b0e1b2f9cd648b94dfa75b32b7bab1cfd",
+  "bytes": 6232
+ },
+ {
+  "caip": "eip155:1998/slip44:60",
+  "symbol": "KYOTO",
+  "key": "coins/ZWlwMTU1OjE5OTgvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "92a3107511d7d43aaa5e6c8af8f8e10b0e1b2f9cd648b94dfa75b32b7bab1cfd",
+  "bytes": 6232
+ },
+ {
+  "caip": "eip155:19991/slip44:60",
+  "symbol": "UOS",
+  "key": "coins/ZWlwMTU1OjE5OTkxL3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "ff7ced5bf48fc7724575bd8e41f3d4399f030947e68602e3cb473f767cb6c070",
+  "bytes": 5620
+ },
+ {
+  "caip": "eip155:200/slip44:60",
+  "symbol": "xDAI",
+  "key": "coins/ZWlwMTU1OjIwMC9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "f9307cba11af367a15e79ba599e9af351e7859df543ac4dce82c126b74a67279",
+  "bytes": 6707
+ },
+ {
+  "caip": "eip155:200000/slip44:60",
+  "symbol": "FAI",
+  "key": "coins/ZWlwMTU1OjIwMDAwMC9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "ddb64e6c07f18f5b98a56e41d4e47479a2a52b36654b26fcedbb46aac1ea658b",
+  "bytes": 4973
+ },
+ {
+  "caip": "eip155:200625/slip44:60",
+  "symbol": "AKA",
+  "key": "coins/ZWlwMTU1OjIwMDYyNS9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "ef3bf4fd92e03d2aa63994d235247c85d60f2cd001c16684955fc84dc00e7f77",
+  "bytes": 6379
+ },
+ {
+  "caip": "eip155:2008/slip44:60",
+  "symbol": "CWN",
+  "key": "coins/ZWlwMTU1OjIwMDgvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "305be7e1d69c4dfa63d9f87d6598eec1ab1f1f1efa90cc75dcd35c3749d466cc",
+  "bytes": 6855
+ },
+ {
+  "caip": "eip155:2009/slip44:60",
+  "symbol": "CWN",
+  "key": "coins/ZWlwMTU1OjIwMDkvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "305be7e1d69c4dfa63d9f87d6598eec1ab1f1f1efa90cc75dcd35c3749d466cc",
+  "bytes": 6855
+ },
+ {
+  "caip": "eip155:201/slip44:60",
+  "symbol": "mc",
+  "key": "coins/ZWlwMTU1OjIwMS9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "bfdba0b5e636a2ae8051f4a90a549577fc98d3a3584be8f3c994cec4ce786199",
+  "bytes": 6177
+ },
+ {
+  "caip": "eip155:2018/slip44:60",
+  "symbol": "USD",
+  "key": "coins/ZWlwMTU1OjIwMTgvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "ff7ced5bf48fc7724575bd8e41f3d4399f030947e68602e3cb473f767cb6c070",
+  "bytes": 5620
+ },
+ {
+  "caip": "eip155:20181205/slip44:60",
+  "symbol": "QKI",
+  "key": "coins/ZWlwMTU1OjIwMTgxMjA1L3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "b002b2078f2af84bcbad5c24cb3be7834ba4b71fce84a394783ed3ec683dc6d0",
+  "bytes": 7090
+ },
+ {
+  "caip": "eip155:2019/slip44:60",
+  "symbol": "USD",
+  "key": "coins/ZWlwMTU1OjIwMTkvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "ff7ced5bf48fc7724575bd8e41f3d4399f030947e68602e3cb473f767cb6c070",
+  "bytes": 5620
+ },
+ {
+  "caip": "eip155:202/slip44:60",
+  "symbol": "EwEth",
+  "key": "coins/ZWlwMTU1OjIwMi9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "011132e8880d73dbaa4214c18c292c0425b5eb6e9a4071a3224f2e3817af557e",
+  "bytes": 5091
+ },
+ {
+  "caip": "eip155:2022/slip44:60",
+  "symbol": "tEDG",
+  "key": "coins/ZWlwMTU1OjIwMjIvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "3947259da38636368df2db50a36d2d9a7662651dcc7df5ac2157bbe64b927f52",
+  "bytes": 4890
+ },
+ {
+  "caip": "eip155:202202/slip44:60",
+  "symbol": "BECX",
+  "key": "coins/ZWlwMTU1OjIwMjIwMi9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "40c05d25435152cde7699e9e87abca46aa30a46c43cd733448ea140040e2a647",
+  "bytes": 6142
+ },
+ {
+  "caip": "eip155:202209/slip44:60",
+  "symbol": "RISK",
+  "key": "coins/ZWlwMTU1OjIwMjIwOS9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "f2000af02fd183b676de5ade41449391403d4b4018a1d90da700082684b96e98",
+  "bytes": 6048
+ },
+ {
+  "caip": "eip155:2022091/slip44:60",
+  "symbol": "RISKT",
+  "key": "coins/ZWlwMTU1OjIwMjIwOTEvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "f2000af02fd183b676de5ade41449391403d4b4018a1d90da700082684b96e98",
+  "bytes": 6048
+ },
+ {
+  "caip": "eip155:202212/slip44:60",
+  "symbol": "XN",
+  "key": "coins/ZWlwMTU1OjIwMjIxMi9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "f9307cba11af367a15e79ba599e9af351e7859df543ac4dce82c126b74a67279",
+  "bytes": 6707
+ },
+ {
+  "caip": "eip155:20241133/slip44:60",
+  "symbol": "sETH",
+  "key": "coins/ZWlwMTU1OjIwMjQxMTMzL3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "441675b675a3c52735ad71083bad879f23701bca449d57130717d2d4fd40d856",
+  "bytes": 6957
+ },
+ {
+  "caip": "eip155:202424/slip44:60",
+  "symbol": "BFIT",
+  "key": "coins/ZWlwMTU1OjIwMjQyNC9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "40c05d25435152cde7699e9e87abca46aa30a46c43cd733448ea140040e2a647",
+  "bytes": 6142
+ },
+ {
+  "caip": "eip155:202506/slip44:60",
+  "symbol": "AUREX",
+  "key": "coins/ZWlwMTU1OjIwMjUwNi9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "ef3bf4fd92e03d2aa63994d235247c85d60f2cd001c16684955fc84dc00e7f77",
+  "bytes": 6379
+ },
+ {
+  "caip": "eip155:2032/slip44:60",
+  "symbol": "NCFG",
+  "key": "coins/ZWlwMTU1OjIwMzIvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "fd087da32519d1fdf54252a36b3922b62102ccc61fd16c0e541ec802ab86a660",
+  "bytes": 5763
+ },
+ {
+  "caip": "eip155:2037/slip44:60",
+  "symbol": "SHRAP",
+  "key": "coins/ZWlwMTU1OjIwMzcvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "441675b675a3c52735ad71083bad879f23701bca449d57130717d2d4fd40d856",
+  "bytes": 6957
+ },
+ {
+  "caip": "eip155:2038/slip44:60",
+  "symbol": "SHRAPG",
+  "key": "coins/ZWlwMTU1OjIwMzgvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "441675b675a3c52735ad71083bad879f23701bca449d57130717d2d4fd40d856",
+  "bytes": 6957
+ },
+ {
+  "caip": "eip155:204005/slip44:60",
+  "symbol": "XN",
+  "key": "coins/ZWlwMTU1OjIwNDAwNS9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "f9307cba11af367a15e79ba599e9af351e7859df543ac4dce82c126b74a67279",
+  "bytes": 6707
+ },
+ {
+  "caip": "eip155:2043/slip44:60",
+  "symbol": "NEURO",
+  "key": "coins/ZWlwMTU1OjIwNDMvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "fd087da32519d1fdf54252a36b3922b62102ccc61fd16c0e541ec802ab86a660",
+  "bytes": 5763
+ },
+ {
+  "caip": "eip155:2044/slip44:60",
+  "symbol": "SHRAPG",
+  "key": "coins/ZWlwMTU1OjIwNDQvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "441675b675a3c52735ad71083bad879f23701bca449d57130717d2d4fd40d856",
+  "bytes": 6957
+ },
+ {
+  "caip": "eip155:2047/slip44:60",
+  "symbol": "STOS",
+  "key": "coins/ZWlwMTU1OjIwNDcvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "441675b675a3c52735ad71083bad879f23701bca449d57130717d2d4fd40d856",
+  "bytes": 6957
+ },
+ {
+  "caip": "eip155:2048/slip44:60",
+  "symbol": "STOS",
+  "key": "coins/ZWlwMTU1OjIwNDgvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "441675b675a3c52735ad71083bad879f23701bca449d57130717d2d4fd40d856",
+  "bytes": 6957
+ },
+ {
+  "caip": "eip155:205/slip44:60",
+  "symbol": "$EKH",
+  "key": "coins/ZWlwMTU1OjIwNS9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "011132e8880d73dbaa4214c18c292c0425b5eb6e9a4071a3224f2e3817af557e",
+  "bytes": 5091
+ },
+ {
+  "caip": "eip155:205205/slip44:60",
+  "symbol": "tSTRAX",
+  "key": "coins/ZWlwMTU1OjIwNTIwNS9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "3947259da38636368df2db50a36d2d9a7662651dcc7df5ac2157bbe64b927f52",
+  "bytes": 4890
+ },
+ {
+  "caip": "eip155:2071/slip44:60",
+  "symbol": "ACCES",
+  "key": "coins/ZWlwMTU1OjIwNzEvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "ef3bf4fd92e03d2aa63994d235247c85d60f2cd001c16684955fc84dc00e7f77",
+  "bytes": 6379
+ },
+ {
+  "caip": "eip155:20729/slip44:60",
+  "symbol": "CLO",
+  "key": "coins/ZWlwMTU1OjIwNzI5L3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "305be7e1d69c4dfa63d9f87d6598eec1ab1f1f1efa90cc75dcd35c3749d466cc",
+  "bytes": 6855
+ },
+ {
+  "caip": "eip155:2077/slip44:60",
+  "symbol": "QKA",
+  "key": "coins/ZWlwMTU1OjIwNzcvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "b002b2078f2af84bcbad5c24cb3be7834ba4b71fce84a394783ed3ec683dc6d0",
+  "bytes": 7090
+ },
+ {
+  "caip": "eip155:208/slip44:60",
+  "symbol": "utx",
+  "key": "coins/ZWlwMTU1OjIwOC9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "ff7ced5bf48fc7724575bd8e41f3d4399f030947e68602e3cb473f767cb6c070",
+  "bytes": 5620
+ },
+ {
+  "caip": "eip155:2099156/slip44:60",
+  "symbol": "PI",
+  "key": "coins/ZWlwMTU1OjIwOTkxNTYvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "f5549960ae9d1a2273bd73ef2518b093f18595fe4dd65c5b429de440885ce8d1",
+  "bytes": 5614
+ },
+ {
+  "caip": "eip155:21/slip44:60",
+  "symbol": "tELA",
+  "key": "coins/ZWlwMTU1OjIxL3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "3947259da38636368df2db50a36d2d9a7662651dcc7df5ac2157bbe64b927f52",
+  "bytes": 4890
+ },
+ {
+  "caip": "eip155:2100/slip44:60",
+  "symbol": "ECO",
+  "key": "coins/ZWlwMTU1OjIxMDAvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "011132e8880d73dbaa4214c18c292c0425b5eb6e9a4071a3224f2e3817af557e",
+  "bytes": 5091
+ },
+ {
+  "caip": "eip155:21000001/slip44:60",
+  "symbol": "BTCN",
+  "key": "coins/ZWlwMTU1OjIxMDAwMDAxL3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "40c05d25435152cde7699e9e87abca46aa30a46c43cd733448ea140040e2a647",
+  "bytes": 6142
+ },
+ {
+  "caip": "eip155:21004/slip44:60",
+  "symbol": "C4EI",
+  "key": "coins/ZWlwMTU1OjIxMDA0L3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "305be7e1d69c4dfa63d9f87d6598eec1ab1f1f1efa90cc75dcd35c3749d466cc",
+  "bytes": 6855
+ },
+ {
+  "caip": "eip155:210049/slip44:60",
+  "symbol": "tGAGI",
+  "key": "coins/ZWlwMTU1OjIxMDA0OS9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "3947259da38636368df2db50a36d2d9a7662651dcc7df5ac2157bbe64b927f52",
+  "bytes": 4890
+ },
+ {
+  "caip": "eip155:2101/slip44:60",
+  "symbol": "ECO",
+  "key": "coins/ZWlwMTU1OjIxMDEvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "011132e8880d73dbaa4214c18c292c0425b5eb6e9a4071a3224f2e3817af557e",
+  "bytes": 5091
+ },
+ {
+  "caip": "eip155:210209/slip44:60",
+  "symbol": "SOR",
+  "key": "coins/ZWlwMTU1OjIxMDIwOS9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "441675b675a3c52735ad71083bad879f23701bca449d57130717d2d4fd40d856",
+  "bytes": 6957
+ },
+ {
+  "caip": "eip155:211/slip44:60",
+  "symbol": "0xF",
+  "key": "coins/ZWlwMTU1OjIxMS9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "8d7e728a16eee0b21fd8267f37c3da96908cdaf7fd0ab79335f89eb85b223351",
+  "bytes": 6594
+ },
+ {
+  "caip": "eip155:21133/slip44:60",
+  "symbol": "AAH",
+  "key": "coins/ZWlwMTU1OjIxMTMzL3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "ef3bf4fd92e03d2aa63994d235247c85d60f2cd001c16684955fc84dc00e7f77",
+  "bytes": 6379
+ },
+ {
+  "caip": "eip155:212/slip44:60",
+  "symbol": "MAPO",
+  "key": "coins/ZWlwMTU1OjIxMi9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "bfdba0b5e636a2ae8051f4a90a549577fc98d3a3584be8f3c994cec4ce786199",
+  "bytes": 6177
+ },
+ {
+  "caip": "eip155:2124/slip44:60",
+  "symbol": "MEU",
+  "key": "coins/ZWlwMTU1OjIxMjQvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "bfdba0b5e636a2ae8051f4a90a549577fc98d3a3584be8f3c994cec4ce786199",
+  "bytes": 6177
+ },
+ {
+  "caip": "eip155:2136/slip44:60",
+  "symbol": "Dolarz",
+  "key": "coins/ZWlwMTU1OjIxMzYvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "c04e5052eb67935ffbaeb7dffe14b0227846fbd406c1b4f70450343c9c27741d",
+  "bytes": 6001
+ },
+ {
+  "caip": "eip155:21363/slip44:60",
+  "symbol": "LETH",
+  "key": "coins/ZWlwMTU1OjIxMzYzL3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "789584234c7d05dd2fef9836cc84a8ae4a2ddaafc8dbab5144387ac547e3db88",
+  "bytes": 4798
+ },
+ {
+  "caip": "eip155:2153/slip44:60",
+  "symbol": "FRA",
+  "key": "coins/ZWlwMTU1OjIxNTMvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "ddb64e6c07f18f5b98a56e41d4e47479a2a52b36654b26fcedbb46aac1ea658b",
+  "bytes": 4973
+ },
+ {
+  "caip": "eip155:2154/slip44:60",
+  "symbol": "FRA",
+  "key": "coins/ZWlwMTU1OjIxNTQvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "ddb64e6c07f18f5b98a56e41d4e47479a2a52b36654b26fcedbb46aac1ea658b",
+  "bytes": 4973
+ },
+ {
+  "caip": "eip155:216/slip44:60",
+  "symbol": "HAPPY",
+  "key": "coins/ZWlwMTU1OjIxNi9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "5a4139be746521fe26dc24a8d3e7be7f8a34c2749682be0ad1343df877c2f9c8",
+  "bytes": 4992
+ },
+ {
+  "caip": "eip155:2162/slip44:60",
+  "symbol": "COIN",
+  "key": "coins/ZWlwMTU1OjIxNjIvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "305be7e1d69c4dfa63d9f87d6598eec1ab1f1f1efa90cc75dcd35c3749d466cc",
+  "bytes": 6855
+ },
+ {
+  "caip": "eip155:2187/slip44:60",
+  "symbol": "G7",
+  "key": "coins/ZWlwMTU1OjIxODcvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "455841ae76f1e77bf4376daf27bfff839e7b43ba07a1461ad47c6e301c90998e",
+  "bytes": 7023
+ },
+ {
+  "caip": "eip155:21912/slip44:60",
+  "symbol": "ONF",
+  "key": "coins/ZWlwMTU1OjIxOTEyL3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "4f80fa0da96d40f8991f035cc77de73285d69ad9d5aec002ea97ed3e2352ecc0",
+  "bytes": 6899
+ },
+ {
+  "caip": "eip155:2202/slip44:60",
+  "symbol": "ABN",
+  "key": "coins/ZWlwMTU1OjIyMDIvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "ef3bf4fd92e03d2aa63994d235247c85d60f2cd001c16684955fc84dc00e7f77",
+  "bytes": 6379
+ },
+ {
+  "caip": "eip155:221/slip44:60",
+  "symbol": "XBE",
+  "key": "coins/ZWlwMTU1OjIyMS9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "f9307cba11af367a15e79ba599e9af351e7859df543ac4dce82c126b74a67279",
+  "bytes": 6707
+ },
+ {
+  "caip": "eip155:2222222/slip44:60",
+  "symbol": "CWEB",
+  "key": "coins/ZWlwMTU1OjIyMjIyMjIvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "305be7e1d69c4dfa63d9f87d6598eec1ab1f1f1efa90cc75dcd35c3749d466cc",
+  "bytes": 6855
+ },
+ {
+  "caip": "eip155:2223/slip44:60",
+  "symbol": "VNDT",
+  "key": "coins/ZWlwMTU1OjIyMjMvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "eb734899ac89fdd930d06b589989d748b3b03bd3bece48d10806be94ac65f4cf",
+  "bytes": 6337
+ },
+ {
+  "caip": "eip155:22324/slip44:60",
+  "symbol": "GOLDX",
+  "key": "coins/ZWlwMTU1OjIyMzI0L3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "455841ae76f1e77bf4376daf27bfff839e7b43ba07a1461ad47c6e301c90998e",
+  "bytes": 7023
+ },
+ {
+  "caip": "eip155:22776/slip44:60",
+  "symbol": "MAPO",
+  "key": "coins/ZWlwMTU1OjIyNzc2L3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "bfdba0b5e636a2ae8051f4a90a549577fc98d3a3584be8f3c994cec4ce786199",
+  "bytes": 6177
+ },
+ {
+  "caip": "eip155:23/slip44:60",
+  "symbol": "tELA",
+  "key": "coins/ZWlwMTU1OjIzL3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "3947259da38636368df2db50a36d2d9a7662651dcc7df5ac2157bbe64b927f52",
+  "bytes": 4890
+ },
+ {
+  "caip": "eip155:230/slip44:60",
+  "symbol": "SDX",
+  "key": "coins/ZWlwMTU1OjIzMC9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "441675b675a3c52735ad71083bad879f23701bca449d57130717d2d4fd40d856",
+  "bytes": 6957
+ },
+ {
+  "caip": "eip155:23006/slip44:60",
+  "symbol": "ABN",
+  "key": "coins/ZWlwMTU1OjIzMDA2L3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "ef3bf4fd92e03d2aa63994d235247c85d60f2cd001c16684955fc84dc00e7f77",
+  "bytes": 6379
+ },
+ {
+  "caip": "eip155:23023/slip44:60",
+  "symbol": "PBLK",
+  "key": "coins/ZWlwMTU1OjIzMDIzL3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "f5549960ae9d1a2273bd73ef2518b093f18595fe4dd65c5b429de440885ce8d1",
+  "bytes": 5614
+ },
+ {
+  "caip": "eip155:2306/slip44:60",
+  "symbol": "ebro",
+  "key": "coins/ZWlwMTU1OjIzMDYvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "011132e8880d73dbaa4214c18c292c0425b5eb6e9a4071a3224f2e3817af557e",
+  "bytes": 5091
+ },
+ {
+  "caip": "eip155:2309/slip44:60",
+  "symbol": "AR\u00c9V",
+  "key": "coins/ZWlwMTU1OjIzMDkvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "ef3bf4fd92e03d2aa63994d235247c85d60f2cd001c16684955fc84dc00e7f77",
+  "bytes": 6379
+ },
+ {
+  "caip": "eip155:2310/slip44:60",
+  "symbol": "CRAT",
+  "key": "coins/ZWlwMTU1OjIzMTAvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "305be7e1d69c4dfa63d9f87d6598eec1ab1f1f1efa90cc75dcd35c3749d466cc",
+  "bytes": 6855
+ },
+ {
+  "caip": "eip155:23118/slip44:60",
+  "symbol": "IDE",
+  "key": "coins/ZWlwMTU1OjIzMTE4L3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "0cb9e36780ee0c10a7691f65640b0e131be783436d0279a0e6720c87dc53af3a",
+  "bytes": 4676
+ },
+ {
+  "caip": "eip155:2331/slip44:60",
+  "symbol": "RSS3",
+  "key": "coins/ZWlwMTU1OjIzMzEvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "f2000af02fd183b676de5ade41449391403d4b4018a1d90da700082684b96e98",
+  "bytes": 6048
+ },
+ {
+  "caip": "eip155:234/slip44:60",
+  "symbol": "JNFTC",
+  "key": "coins/ZWlwMTU1OjIzNC9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "5087fb9e19b3dfdb4e9a590623cc37a7620cc16d1887c56b4e8131f09bd46635",
+  "bytes": 5492
+ },
+ {
+  "caip": "eip155:234666/slip44:60",
+  "symbol": "HYM",
+  "key": "coins/ZWlwMTU1OjIzNDY2Ni9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "5a4139be746521fe26dc24a8d3e7be7f8a34c2749682be0ad1343df877c2f9c8",
+  "bytes": 4992
+ },
+ {
+  "caip": "eip155:2372/slip44:60",
+  "symbol": "BESC",
+  "key": "coins/ZWlwMTU1OjIzNzIvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "40c05d25435152cde7699e9e87abca46aa30a46c43cd733448ea140040e2a647",
+  "bytes": 6142
+ },
+ {
+  "caip": "eip155:238/slip44:60",
+  "symbol": "OWCT",
+  "key": "coins/ZWlwMTU1OjIzOC9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "4f80fa0da96d40f8991f035cc77de73285d69ad9d5aec002ea97ed3e2352ecc0",
+  "bytes": 6899
+ },
+ {
+  "caip": "eip155:240/slip44:60",
+  "symbol": "zkTCRO",
+  "key": "coins/ZWlwMTU1OjI0MC9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "fdd25c06f7f4d72de308c4acd22e7f9d9ee6e07644b43eb9ff16213818593eb9",
+  "bytes": 5561
+ },
+ {
+  "caip": "eip155:240240/slip44:60",
+  "symbol": "STO",
+  "key": "coins/ZWlwMTU1OjI0MDI0MC9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "441675b675a3c52735ad71083bad879f23701bca449d57130717d2d4fd40d856",
+  "bytes": 6957
+ },
+ {
+  "caip": "eip155:240241/slip44:60",
+  "symbol": "STO",
+  "key": "coins/ZWlwMTU1OjI0MDI0MS9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "441675b675a3c52735ad71083bad879f23701bca449d57130717d2d4fd40d856",
+  "bytes": 6957
+ },
+ {
+  "caip": "eip155:241120/slip44:60",
+  "symbol": "tNOM",
+  "key": "coins/ZWlwMTU1OjI0MTEyMC9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "3947259da38636368df2db50a36d2d9a7662651dcc7df5ac2157bbe64b927f52",
+  "bytes": 4890
+ },
+ {
+  "caip": "eip155:24116/slip44:60",
+  "symbol": "STEAMX",
+  "key": "coins/ZWlwMTU1OjI0MTE2L3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "441675b675a3c52735ad71083bad879f23701bca449d57130717d2d4fd40d856",
+  "bytes": 6957
+ },
+ {
+  "caip": "eip155:2415/slip44:60",
+  "symbol": "XODEX",
+  "key": "coins/ZWlwMTU1OjI0MTUvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "f9307cba11af367a15e79ba599e9af351e7859df543ac4dce82c126b74a67279",
+  "bytes": 6707
+ },
+ {
+  "caip": "eip155:2426/slip44:60",
+  "symbol": "STND",
+  "key": "coins/ZWlwMTU1OjI0MjYvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "441675b675a3c52735ad71083bad879f23701bca449d57130717d2d4fd40d856",
+  "bytes": 6957
+ },
+ {
+  "caip": "eip155:24484/slip44:60",
+  "symbol": "WEB",
+  "key": "coins/ZWlwMTU1OjI0NDg0L3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "3463d0791dc95458849ad692569bb769feabb7249fa1d88bf58429cf02e7a9ce",
+  "bytes": 7229
+ },
+ {
+  "caip": "eip155:2458/slip44:60",
+  "symbol": "tHRC",
+  "key": "coins/ZWlwMTU1OjI0NTgvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "3947259da38636368df2db50a36d2d9a7662651dcc7df5ac2157bbe64b927f52",
+  "bytes": 4890
+ },
+ {
+  "caip": "eip155:246529/slip44:60",
+  "symbol": "ATS",
+  "key": "coins/ZWlwMTU1OjI0NjUyOS9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "ef3bf4fd92e03d2aa63994d235247c85d60f2cd001c16684955fc84dc00e7f77",
+  "bytes": 6379
+ },
+ {
+  "caip": "eip155:246785/slip44:60",
+  "symbol": "tATS",
+  "key": "coins/ZWlwMTU1OjI0Njc4NS9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "3947259da38636368df2db50a36d2d9a7662651dcc7df5ac2157bbe64b927f52",
+  "bytes": 4890
+ },
+ {
+  "caip": "eip155:247/slip44:60",
+  "symbol": "CHOO",
+  "key": "coins/ZWlwMTU1OjI0Ny9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "305be7e1d69c4dfa63d9f87d6598eec1ab1f1f1efa90cc75dcd35c3749d466cc",
+  "bytes": 6855
+ },
+ {
+  "caip": "eip155:247253/slip44:60",
+  "symbol": "OAS",
+  "key": "coins/ZWlwMTU1OjI0NzI1My9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "4f80fa0da96d40f8991f035cc77de73285d69ad9d5aec002ea97ed3e2352ecc0",
+  "bytes": 6899
+ },
+ {
+  "caip": "eip155:24734/slip44:60",
+  "symbol": "MINTME",
+  "key": "coins/ZWlwMTU1OjI0NzM0L3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "bfdba0b5e636a2ae8051f4a90a549577fc98d3a3584be8f3c994cec4ce786199",
+  "bytes": 6177
+ },
+ {
+  "caip": "eip155:2478899481/slip44:60",
+  "symbol": "ACME",
+  "key": "coins/ZWlwMTU1OjI0Nzg4OTk0ODEvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "ef3bf4fd92e03d2aa63994d235247c85d60f2cd001c16684955fc84dc00e7f77",
+  "bytes": 6379
+ },
+ {
+  "caip": "eip155:24816/slip44:60",
+  "symbol": "RECALL",
+  "key": "coins/ZWlwMTU1OjI0ODE2L3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "f2000af02fd183b676de5ade41449391403d4b4018a1d90da700082684b96e98",
+  "bytes": 6048
+ },
+ {
+  "caip": "eip155:2481632/slip44:60",
+  "symbol": "RECALL",
+  "key": "coins/ZWlwMTU1OjI0ODE2MzIvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "f2000af02fd183b676de5ade41449391403d4b4018a1d90da700082684b96e98",
+  "bytes": 6048
+ },
+ {
+  "caip": "eip155:251/slip44:60",
+  "symbol": "GLXP",
+  "key": "coins/ZWlwMTU1OjI1MS9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "455841ae76f1e77bf4376daf27bfff839e7b43ba07a1461ad47c6e301c90998e",
+  "bytes": 7023
+ },
+ {
+  "caip": "eip155:252525/slip44:60",
+  "symbol": "tCLT",
+  "key": "coins/ZWlwMTU1OjI1MjUyNS9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "3947259da38636368df2db50a36d2d9a7662651dcc7df5ac2157bbe64b927f52",
+  "bytes": 4890
+ },
+ {
+  "caip": "eip155:253/slip44:60",
+  "symbol": "GLXP",
+  "key": "coins/ZWlwMTU1OjI1My9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "455841ae76f1e77bf4376daf27bfff839e7b43ba07a1461ad47c6e301c90998e",
+  "bytes": 7023
+ },
+ {
+  "caip": "eip155:2559/slip44:60",
+  "symbol": "KTO",
+  "key": "coins/ZWlwMTU1OjI1NTkvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "92a3107511d7d43aaa5e6c8af8f8e10b0e1b2f9cd648b94dfa75b32b7bab1cfd",
+  "bytes": 6232
+ },
+ {
+  "caip": "eip155:256/slip44:60",
+  "symbol": "htt",
+  "key": "coins/ZWlwMTU1OjI1Ni9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "5a4139be746521fe26dc24a8d3e7be7f8a34c2749682be0ad1343df877c2f9c8",
+  "bytes": 4992
+ },
+ {
+  "caip": "eip155:258/slip44:60",
+  "symbol": "SETM",
+  "key": "coins/ZWlwMTU1OjI1OC9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "441675b675a3c52735ad71083bad879f23701bca449d57130717d2d4fd40d856",
+  "bytes": 6957
+ },
+ {
+  "caip": "eip155:25839/slip44:60",
+  "symbol": "tALV",
+  "key": "coins/ZWlwMTU1OjI1ODM5L3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "3947259da38636368df2db50a36d2d9a7662651dcc7df5ac2157bbe64b927f52",
+  "bytes": 4890
+ },
+ {
+  "caip": "eip155:25888/slip44:60",
+  "symbol": "GOLDT",
+  "key": "coins/ZWlwMTU1OjI1ODg4L3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "455841ae76f1e77bf4376daf27bfff839e7b43ba07a1461ad47c6e301c90998e",
+  "bytes": 7023
+ },
+ {
+  "caip": "eip155:26/slip44:60",
+  "symbol": "L1test",
+  "key": "coins/ZWlwMTU1OjI2L3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "789584234c7d05dd2fef9836cc84a8ae4a2ddaafc8dbab5144387ac547e3db88",
+  "bytes": 4798
+ },
+ {
+  "caip": "eip155:26026/slip44:60",
+  "symbol": "tFRM",
+  "key": "coins/ZWlwMTU1OjI2MDI2L3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "3947259da38636368df2db50a36d2d9a7662651dcc7df5ac2157bbe64b927f52",
+  "bytes": 4890
+ },
+ {
+  "caip": "eip155:2606/slip44:60",
+  "symbol": "CRC",
+  "key": "coins/ZWlwMTU1OjI2MDYvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "305be7e1d69c4dfa63d9f87d6598eec1ab1f1f1efa90cc75dcd35c3749d466cc",
+  "bytes": 6855
+ },
+ {
+  "caip": "eip155:2611/slip44:60",
+  "symbol": "REDLC",
+  "key": "coins/ZWlwMTU1OjI2MTEvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "f2000af02fd183b676de5ade41449391403d4b4018a1d90da700082684b96e98",
+  "bytes": 6048
+ },
+ {
+  "caip": "eip155:2611555/slip44:60",
+  "symbol": "DGC",
+  "key": "coins/ZWlwMTU1OjI2MTE1NTUvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "c04e5052eb67935ffbaeb7dffe14b0227846fbd406c1b4f70450343c9c27741d",
+  "bytes": 6001
+ },
+ {
+  "caip": "eip155:2613/slip44:60",
+  "symbol": "EZC",
+  "key": "coins/ZWlwMTU1OjI2MTMvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "011132e8880d73dbaa4214c18c292c0425b5eb6e9a4071a3224f2e3817af557e",
+  "bytes": 5091
+ },
+ {
+  "caip": "eip155:262371/slip44:60",
+  "symbol": "ECLAT",
+  "key": "coins/ZWlwMTU1OjI2MjM3MS9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "011132e8880d73dbaa4214c18c292c0425b5eb6e9a4071a3224f2e3817af557e",
+  "bytes": 5091
+ },
+ {
+  "caip": "eip155:26482/slip44:60",
+  "symbol": "DUCX",
+  "key": "coins/ZWlwMTU1OjI2NDgyL3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "c04e5052eb67935ffbaeb7dffe14b0227846fbd406c1b4f70450343c9c27741d",
+  "bytes": 6001
+ },
+ {
+  "caip": "eip155:26483/slip44:60",
+  "symbol": "DUCX",
+  "key": "coins/ZWlwMTU1OjI2NDgzL3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "c04e5052eb67935ffbaeb7dffe14b0227846fbd406c1b4f70450343c9c27741d",
+  "bytes": 6001
+ },
+ {
+  "caip": "eip155:26600/slip44:60",
+  "symbol": "HTZ",
+  "key": "coins/ZWlwMTU1OjI2NjAwL3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "5a4139be746521fe26dc24a8d3e7be7f8a34c2749682be0ad1343df877c2f9c8",
+  "bytes": 4992
+ },
+ {
+  "caip": "eip155:266256/slip44:60",
+  "symbol": "GZN",
+  "key": "coins/ZWlwMTU1OjI2NjI1Ni9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "455841ae76f1e77bf4376daf27bfff839e7b43ba07a1461ad47c6e301c90998e",
+  "bytes": 7023
+ },
+ {
+  "caip": "eip155:26863/slip44:60",
+  "symbol": "OAC",
+  "key": "coins/ZWlwMTU1OjI2ODYzL3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "4f80fa0da96d40f8991f035cc77de73285d69ad9d5aec002ea97ed3e2352ecc0",
+  "bytes": 6899
+ },
+ {
+  "caip": "eip155:26888/slip44:60",
+  "symbol": "AB",
+  "key": "coins/ZWlwMTU1OjI2ODg4L3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "ef3bf4fd92e03d2aa63994d235247c85d60f2cd001c16684955fc84dc00e7f77",
+  "bytes": 6379
+ },
+ {
+  "caip": "eip155:26988/slip44:60",
+  "symbol": "NEW",
+  "key": "coins/ZWlwMTU1OjI2OTg4L3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "fd087da32519d1fdf54252a36b3922b62102ccc61fd16c0e541ec802ab86a660",
+  "bytes": 5763
+ },
+ {
+  "caip": "eip155:27/slip44:60",
+  "symbol": "SHIB",
+  "key": "coins/ZWlwMTU1OjI3L3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "441675b675a3c52735ad71083bad879f23701bca449d57130717d2d4fd40d856",
+  "bytes": 6957
+ },
+ {
+  "caip": "eip155:27082017/slip44:60",
+  "symbol": "TEXL",
+  "key": "coins/ZWlwMTU1OjI3MDgyMDE3L3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "3947259da38636368df2db50a36d2d9a7662651dcc7df5ac2157bbe64b927f52",
+  "bytes": 4890
+ },
+ {
+  "caip": "eip155:272247/slip44:60",
+  "symbol": "NXY",
+  "key": "coins/ZWlwMTU1OjI3MjI0Ny9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "fd087da32519d1fdf54252a36b3922b62102ccc61fd16c0e541ec802ab86a660",
+  "bytes": 5763
+ },
+ {
+  "caip": "eip155:272520/slip44:60",
+  "symbol": "NXY",
+  "key": "coins/ZWlwMTU1OjI3MjUyMC9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "fd087da32519d1fdf54252a36b3922b62102ccc61fd16c0e541ec802ab86a660",
+  "bytes": 5763
+ },
+ {
+  "caip": "eip155:278/slip44:60",
+  "symbol": "FAI",
+  "key": "coins/ZWlwMTU1OjI3OC9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "ddb64e6c07f18f5b98a56e41d4e47479a2a52b36654b26fcedbb46aac1ea658b",
+  "bytes": 4973
+ },
+ {
+  "caip": "eip155:27827/slip44:60",
+  "symbol": "ZERO",
+  "key": "coins/ZWlwMTU1OjI3ODI3L3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "fdd25c06f7f4d72de308c4acd22e7f9d9ee6e07644b43eb9ff16213818593eb9",
+  "bytes": 5561
+ },
+ {
+  "caip": "eip155:281121/slip44:60",
+  "symbol": "$OC",
+  "key": "coins/ZWlwMTU1OjI4MTEyMS9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "4f80fa0da96d40f8991f035cc77de73285d69ad9d5aec002ea97ed3e2352ecc0",
+  "bytes": 6899
+ },
+ {
+  "caip": "eip155:286022981/slip44:60",
+  "symbol": "IST",
+  "key": "coins/ZWlwMTU1OjI4NjAyMjk4MS9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "0cb9e36780ee0c10a7691f65640b0e131be783436d0279a0e6720c87dc53af3a",
+  "bytes": 4676
+ },
+ {
+  "caip": "eip155:287022981/slip44:60",
+  "symbol": "DNA",
+  "key": "coins/ZWlwMTU1OjI4NzAyMjk4MS9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "c04e5052eb67935ffbaeb7dffe14b0227846fbd406c1b4f70450343c9c27741d",
+  "bytes": 6001
+ },
+ {
+  "caip": "eip155:28802/slip44:60",
+  "symbol": "TCENT",
+  "key": "coins/ZWlwMTU1OjI4ODAyL3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "3947259da38636368df2db50a36d2d9a7662651dcc7df5ac2157bbe64b927f52",
+  "bytes": 4890
+ },
+ {
+  "caip": "eip155:288022981/slip44:60",
+  "symbol": "SLC",
+  "key": "coins/ZWlwMTU1OjI4ODAyMjk4MS9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "441675b675a3c52735ad71083bad879f23701bca449d57130717d2d4fd40d856",
+  "bytes": 6957
+ },
+ {
+  "caip": "eip155:2882/slip44:60",
+  "symbol": "IOTA",
+  "key": "coins/ZWlwMTU1OjI4ODIvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "0cb9e36780ee0c10a7691f65640b0e131be783436d0279a0e6720c87dc53af3a",
+  "bytes": 4676
+ },
+ {
+  "caip": "eip155:28945486/slip44:60",
+  "symbol": "AUX",
+  "key": "coins/ZWlwMTU1OjI4OTQ1NDg2L3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "ef3bf4fd92e03d2aa63994d235247c85d60f2cd001c16684955fc84dc00e7f77",
+  "bytes": 6379
+ },
+ {
+  "caip": "eip155:29/slip44:60",
+  "symbol": "L1",
+  "key": "coins/ZWlwMTU1OjI5L3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "789584234c7d05dd2fef9836cc84a8ae4a2ddaafc8dbab5144387ac547e3db88",
+  "bytes": 4798
+ },
+ {
+  "caip": "eip155:29223/slip44:60",
+  "symbol": "NEXA",
+  "key": "coins/ZWlwMTU1OjI5MjIzL3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "fd087da32519d1fdf54252a36b3922b62102ccc61fd16c0e541ec802ab86a660",
+  "bytes": 5763
+ },
+ {
+  "caip": "eip155:29225/slip44:60",
+  "symbol": "NEXA",
+  "key": "coins/ZWlwMTU1OjI5MjI1L3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "fd087da32519d1fdf54252a36b3922b62102ccc61fd16c0e541ec802ab86a660",
+  "bytes": 5763
+ },
+ {
+  "caip": "eip155:29536/slip44:60",
+  "symbol": "KEC",
+  "key": "coins/ZWlwMTU1OjI5NTM2L3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "92a3107511d7d43aaa5e6c8af8f8e10b0e1b2f9cd648b94dfa75b32b7bab1cfd",
+  "bytes": 6232
+ },
+ {
+  "caip": "eip155:30067/slip44:60",
+  "symbol": "ECE",
+  "key": "coins/ZWlwMTU1OjMwMDY3L3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "011132e8880d73dbaa4214c18c292c0425b5eb6e9a4071a3224f2e3817af557e",
+  "bytes": 5091
+ },
+ {
+  "caip": "eip155:303/slip44:60",
+  "symbol": "tNCN",
+  "key": "coins/ZWlwMTU1OjMwMy9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "3947259da38636368df2db50a36d2d9a7662651dcc7df5ac2157bbe64b927f52",
+  "bytes": 4890
+ },
+ {
+  "caip": "eip155:3031/slip44:60",
+  "symbol": "ORL",
+  "key": "coins/ZWlwMTU1OjMwMzEvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "4f80fa0da96d40f8991f035cc77de73285d69ad9d5aec002ea97ed3e2352ecc0",
+  "bytes": 6899
+ },
+ {
+  "caip": "eip155:308/slip44:60",
+  "symbol": "FTH",
+  "key": "coins/ZWlwMTU1OjMwOC9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "ddb64e6c07f18f5b98a56e41d4e47479a2a52b36654b26fcedbb46aac1ea658b",
+  "bytes": 4973
+ },
+ {
+  "caip": "eip155:3100/slip44:60",
+  "symbol": "IMMU",
+  "key": "coins/ZWlwMTU1OjMxMDAvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "0cb9e36780ee0c10a7691f65640b0e131be783436d0279a0e6720c87dc53af3a",
+  "bytes": 4676
+ },
+ {
+  "caip": "eip155:3102/slip44:60",
+  "symbol": "VFI",
+  "key": "coins/ZWlwMTU1OjMxMDIvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "eb734899ac89fdd930d06b589989d748b3b03bd3bece48d10806be94ac65f4cf",
+  "bytes": 6337
+ },
+ {
+  "caip": "eip155:311/slip44:60",
+  "symbol": "OMAX",
+  "key": "coins/ZWlwMTU1OjMxMS9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "4f80fa0da96d40f8991f035cc77de73285d69ad9d5aec002ea97ed3e2352ecc0",
+  "bytes": 6899
+ },
+ {
+  "caip": "eip155:31102/slip44:60",
+  "symbol": "ESN",
+  "key": "coins/ZWlwMTU1OjMxMTAyL3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "011132e8880d73dbaa4214c18c292c0425b5eb6e9a4071a3224f2e3817af557e",
+  "bytes": 5091
+ },
+ {
+  "caip": "eip155:313/slip44:60",
+  "symbol": "NCN",
+  "key": "coins/ZWlwMTU1OjMxMy9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "fd087da32519d1fdf54252a36b3922b62102ccc61fd16c0e541ec802ab86a660",
+  "bytes": 5763
+ },
+ {
+  "caip": "eip155:32/slip44:60",
+  "symbol": "GooD",
+  "key": "coins/ZWlwMTU1OjMyL3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "455841ae76f1e77bf4376daf27bfff839e7b43ba07a1461ad47c6e301c90998e",
+  "bytes": 7023
+ },
+ {
+  "caip": "eip155:322/slip44:60",
+  "symbol": "tKCS",
+  "key": "coins/ZWlwMTU1OjMyMi9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "3947259da38636368df2db50a36d2d9a7662651dcc7df5ac2157bbe64b927f52",
+  "bytes": 4890
+ },
+ {
+  "caip": "eip155:323/slip44:60",
+  "symbol": "BCX",
+  "key": "coins/ZWlwMTU1OjMyMy9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "40c05d25435152cde7699e9e87abca46aa30a46c43cd733448ea140040e2a647",
+  "bytes": 6142
+ },
+ {
+  "caip": "eip155:32380/slip44:60",
+  "symbol": "PAIX",
+  "key": "coins/ZWlwMTU1OjMyMzgwL3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "f5549960ae9d1a2273bd73ef2518b093f18595fe4dd65c5b429de440885ce8d1",
+  "bytes": 5614
+ },
+ {
+  "caip": "eip155:32382/slip44:60",
+  "symbol": "SANR",
+  "key": "coins/ZWlwMTU1OjMyMzgyL3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "441675b675a3c52735ad71083bad879f23701bca449d57130717d2d4fd40d856",
+  "bytes": 6957
+ },
+ {
+  "caip": "eip155:3269/slip44:60",
+  "symbol": "DUBX",
+  "key": "coins/ZWlwMTU1OjMyNjkvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "c04e5052eb67935ffbaeb7dffe14b0227846fbd406c1b4f70450343c9c27741d",
+  "bytes": 6001
+ },
+ {
+  "caip": "eip155:3270/slip44:60",
+  "symbol": "TDUBX",
+  "key": "coins/ZWlwMTU1OjMyNzAvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "3947259da38636368df2db50a36d2d9a7662651dcc7df5ac2157bbe64b927f52",
+  "bytes": 4890
+ },
+ {
+  "caip": "eip155:33/slip44:60",
+  "symbol": "GooD",
+  "key": "coins/ZWlwMTU1OjMzL3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "455841ae76f1e77bf4376daf27bfff839e7b43ba07a1461ad47c6e301c90998e",
+  "bytes": 7023
+ },
+ {
+  "caip": "eip155:332/slip44:60",
+  "symbol": "OMAX",
+  "key": "coins/ZWlwMTU1OjMzMi9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "4f80fa0da96d40f8991f035cc77de73285d69ad9d5aec002ea97ed3e2352ecc0",
+  "bytes": 6899
+ },
+ {
+  "caip": "eip155:33210/slip44:60",
+  "symbol": "XCLOUD",
+  "key": "coins/ZWlwMTU1OjMzMjEwL3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "f9307cba11af367a15e79ba599e9af351e7859df543ac4dce82c126b74a67279",
+  "bytes": 6707
+ },
+ {
+  "caip": "eip155:333/slip44:60",
+  "symbol": "W3Q",
+  "key": "coins/ZWlwMTU1OjMzMy9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "3463d0791dc95458849ad692569bb769feabb7249fa1d88bf58429cf02e7a9ce",
+  "bytes": 7229
+ },
+ {
+  "caip": "eip155:3331/slip44:60",
+  "symbol": "ZCR",
+  "key": "coins/ZWlwMTU1OjMzMzEvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "fdd25c06f7f4d72de308c4acd22e7f9d9ee6e07644b43eb9ff16213818593eb9",
+  "bytes": 5561
+ },
+ {
+  "caip": "eip155:333331/slip44:60",
+  "symbol": "AVST",
+  "key": "coins/ZWlwMTU1OjMzMzMzMS9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "ef3bf4fd92e03d2aa63994d235247c85d60f2cd001c16684955fc84dc00e7f77",
+  "bytes": 6379
+ },
+ {
+  "caip": "eip155:333333/slip44:60",
+  "symbol": "USNT",
+  "key": "coins/ZWlwMTU1OjMzMzMzMy9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "ff7ced5bf48fc7724575bd8e41f3d4399f030947e68602e3cb473f767cb6c070",
+  "bytes": 5620
+ },
+ {
+  "caip": "eip155:3334/slip44:60",
+  "symbol": "W3Q",
+  "key": "coins/ZWlwMTU1OjMzMzQvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "3463d0791dc95458849ad692569bb769feabb7249fa1d88bf58429cf02e7a9ce",
+  "bytes": 7229
+ },
+ {
+  "caip": "eip155:333666/slip44:60",
+  "symbol": "tOONE",
+  "key": "coins/ZWlwMTU1OjMzMzY2Ni9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "3947259da38636368df2db50a36d2d9a7662651dcc7df5ac2157bbe64b927f52",
+  "bytes": 4890
+ },
+ {
+  "caip": "eip155:333777/slip44:60",
+  "symbol": "tOONE",
+  "key": "coins/ZWlwMTU1OjMzMzc3Ny9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "3947259da38636368df2db50a36d2d9a7662651dcc7df5ac2157bbe64b927f52",
+  "bytes": 4890
+ },
+ {
+  "caip": "eip155:33626250/slip44:60",
+  "symbol": "TEEth",
+  "key": "coins/ZWlwMTU1OjMzNjI2MjUwL3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "3947259da38636368df2db50a36d2d9a7662651dcc7df5ac2157bbe64b927f52",
+  "bytes": 4890
+ },
+ {
+  "caip": "eip155:336655/slip44:60",
+  "symbol": "UBTC",
+  "key": "coins/ZWlwMTU1OjMzNjY1NS9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "ff7ced5bf48fc7724575bd8e41f3d4399f030947e68602e3cb473f767cb6c070",
+  "bytes": 5620
+ },
+ {
+  "caip": "eip155:336666/slip44:60",
+  "symbol": "UBTC",
+  "key": "coins/ZWlwMTU1OjMzNjY2Ni9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "ff7ced5bf48fc7724575bd8e41f3d4399f030947e68602e3cb473f767cb6c070",
+  "bytes": 5620
+ },
+ {
+  "caip": "eip155:33772211/slip44:60",
+  "symbol": "XOC",
+  "key": "coins/ZWlwMTU1OjMzNzcyMjExL3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "f9307cba11af367a15e79ba599e9af351e7859df543ac4dce82c126b74a67279",
+  "bytes": 6707
+ },
+ {
+  "caip": "eip155:338/slip44:60",
+  "symbol": "TCRO",
+  "key": "coins/ZWlwMTU1OjMzOC9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "3947259da38636368df2db50a36d2d9a7662651dcc7df5ac2157bbe64b927f52",
+  "bytes": 4890
+ },
+ {
+  "caip": "eip155:339/slip44:60",
+  "symbol": "DAPP",
+  "key": "coins/ZWlwMTU1OjMzOS9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "c04e5052eb67935ffbaeb7dffe14b0227846fbd406c1b4f70450343c9c27741d",
+  "bytes": 6001
+ },
+ {
+  "caip": "eip155:33999/slip44:60",
+  "symbol": "DAPPST",
+  "key": "coins/ZWlwMTU1OjMzOTk5L3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "c04e5052eb67935ffbaeb7dffe14b0227846fbd406c1b4f70450343c9c27741d",
+  "bytes": 6001
+ },
+ {
+  "caip": "eip155:347/slip44:60",
+  "symbol": "KSS",
+  "key": "coins/ZWlwMTU1OjM0Ny9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "92a3107511d7d43aaa5e6c8af8f8e10b0e1b2f9cd648b94dfa75b32b7bab1cfd",
+  "bytes": 6232
+ },
+ {
+  "caip": "eip155:3490/slip44:60",
+  "symbol": "GTC",
+  "key": "coins/ZWlwMTU1OjM0OTAvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "455841ae76f1e77bf4376daf27bfff839e7b43ba07a1461ad47c6e301c90998e",
+  "bytes": 7023
+ },
+ {
+  "caip": "eip155:34949059/slip44:60",
+  "symbol": "CITRO",
+  "key": "coins/ZWlwMTU1OjM0OTQ5MDU5L3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "305be7e1d69c4dfa63d9f87d6598eec1ab1f1f1efa90cc75dcd35c3749d466cc",
+  "bytes": 6855
+ },
+ {
+  "caip": "eip155:35/slip44:60",
+  "symbol": "TBG",
+  "key": "coins/ZWlwMTU1OjM1L3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "3947259da38636368df2db50a36d2d9a7662651dcc7df5ac2157bbe64b927f52",
+  "bytes": 4890
+ },
+ {
+  "caip": "eip155:3501/slip44:60",
+  "symbol": "JFIN",
+  "key": "coins/ZWlwMTU1OjM1MDEvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "5087fb9e19b3dfdb4e9a590623cc37a7620cc16d1887c56b4e8131f09bd46635",
+  "bytes": 5492
+ },
+ {
+  "caip": "eip155:35011/slip44:60",
+  "symbol": "taro",
+  "key": "coins/ZWlwMTU1OjM1MDExL3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "3947259da38636368df2db50a36d2d9a7662651dcc7df5ac2157bbe64b927f52",
+  "bytes": 4890
+ },
+ {
+  "caip": "eip155:35443/slip44:60",
+  "symbol": "Q",
+  "key": "coins/ZWlwMTU1OjM1NDQzL3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "b002b2078f2af84bcbad5c24cb3be7834ba4b71fce84a394783ed3ec683dc6d0",
+  "bytes": 7090
+ },
+ {
+  "caip": "eip155:355110/slip44:60",
+  "symbol": "BTF",
+  "key": "coins/ZWlwMTU1OjM1NTExMC9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "40c05d25435152cde7699e9e87abca46aa30a46c43cd733448ea140040e2a647",
+  "bytes": 6142
+ },
+ {
+  "caip": "eip155:355113/slip44:60",
+  "symbol": "BTF",
+  "key": "coins/ZWlwMTU1OjM1NTExMy9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "40c05d25435152cde7699e9e87abca46aa30a46c43cd733448ea140040e2a647",
+  "bytes": 6142
+ },
+ {
+  "caip": "eip155:35855456/slip44:60",
+  "symbol": "JOYS",
+  "key": "coins/ZWlwMTU1OjM1ODU1NDU2L3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "5087fb9e19b3dfdb4e9a590623cc37a7620cc16d1887c56b4e8131f09bd46635",
+  "bytes": 5492
+ },
+ {
+  "caip": "eip155:363/slip44:60",
+  "symbol": "TFUEL",
+  "key": "coins/ZWlwMTU1OjM2My9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "3947259da38636368df2db50a36d2d9a7662651dcc7df5ac2157bbe64b927f52",
+  "bytes": 4890
+ },
+ {
+  "caip": "eip155:3630/slip44:60",
+  "symbol": "TYCO",
+  "key": "coins/ZWlwMTU1OjM2MzAvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "3947259da38636368df2db50a36d2d9a7662651dcc7df5ac2157bbe64b927f52",
+  "bytes": 4890
+ },
+ {
+  "caip": "eip155:3639/slip44:60",
+  "symbol": "ISLAMI",
+  "key": "coins/ZWlwMTU1OjM2Mzkvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "0cb9e36780ee0c10a7691f65640b0e131be783436d0279a0e6720c87dc53af3a",
+  "bytes": 4676
+ },
+ {
+  "caip": "eip155:364/slip44:60",
+  "symbol": "TFUEL",
+  "key": "coins/ZWlwMTU1OjM2NC9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "3947259da38636368df2db50a36d2d9a7662651dcc7df5ac2157bbe64b927f52",
+  "bytes": 4890
+ },
+ {
+  "caip": "eip155:3645/slip44:60",
+  "symbol": "ISLAMI",
+  "key": "coins/ZWlwMTU1OjM2NDUvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "0cb9e36780ee0c10a7691f65640b0e131be783436d0279a0e6720c87dc53af3a",
+  "bytes": 4676
+ },
+ {
+  "caip": "eip155:3693/slip44:60",
+  "symbol": "EMPIRE",
+  "key": "coins/ZWlwMTU1OjM2OTMvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "011132e8880d73dbaa4214c18c292c0425b5eb6e9a4071a3224f2e3817af557e",
+  "bytes": 5091
+ },
+ {
+  "caip": "eip155:3698/slip44:60",
+  "symbol": "SPC",
+  "key": "coins/ZWlwMTU1OjM2OTgvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "441675b675a3c52735ad71083bad879f23701bca449d57130717d2d4fd40d856",
+  "bytes": 6957
+ },
+ {
+  "caip": "eip155:3721/slip44:60",
+  "symbol": "XOC",
+  "key": "coins/ZWlwMTU1OjM3MjEvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "f9307cba11af367a15e79ba599e9af351e7859df543ac4dce82c126b74a67279",
+  "bytes": 6707
+ },
+ {
+  "caip": "eip155:373737/slip44:60",
+  "symbol": "HAP",
+  "key": "coins/ZWlwMTU1OjM3MzczNy9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "5a4139be746521fe26dc24a8d3e7be7f8a34c2749682be0ad1343df877c2f9c8",
+  "bytes": 4992
+ },
+ {
+  "caip": "eip155:37714555429/slip44:60",
+  "symbol": "sXAI",
+  "key": "coins/ZWlwMTU1OjM3NzE0NTU1NDI5L3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "441675b675a3c52735ad71083bad879f23701bca449d57130717d2d4fd40d856",
+  "bytes": 6957
+ },
+ {
+  "caip": "eip155:3797/slip44:60",
+  "symbol": "ALV",
+  "key": "coins/ZWlwMTU1OjM3OTcvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "ef3bf4fd92e03d2aa63994d235247c85d60f2cd001c16684955fc84dc00e7f77",
+  "bytes": 6379
+ },
+ {
+  "caip": "eip155:38/slip44:60",
+  "symbol": "VAL",
+  "key": "coins/ZWlwMTU1OjM4L3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "eb734899ac89fdd930d06b589989d748b3b03bd3bece48d10806be94ac65f4cf",
+  "bytes": 6337
+ },
+ {
+  "caip": "eip155:381932/slip44:60",
+  "symbol": "METAL",
+  "key": "coins/ZWlwMTU1OjM4MTkzMi9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "bfdba0b5e636a2ae8051f4a90a549577fc98d3a3584be8f3c994cec4ce786199",
+  "bytes": 6177
+ },
+ {
+  "caip": "eip155:388/slip44:60",
+  "symbol": "zkCRO",
+  "key": "coins/ZWlwMTU1OjM4OC9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "fdd25c06f7f4d72de308c4acd22e7f9d9ee6e07644b43eb9ff16213818593eb9",
+  "bytes": 5561
+ },
+ {
+  "caip": "eip155:3888/slip44:60",
+  "symbol": "KLC",
+  "key": "coins/ZWlwMTU1OjM4ODgvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "92a3107511d7d43aaa5e6c8af8f8e10b0e1b2f9cd648b94dfa75b32b7bab1cfd",
+  "bytes": 6232
+ },
+ {
+  "caip": "eip155:3889/slip44:60",
+  "symbol": "KLC",
+  "key": "coins/ZWlwMTU1OjM4ODkvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "92a3107511d7d43aaa5e6c8af8f8e10b0e1b2f9cd648b94dfa75b32b7bab1cfd",
+  "bytes": 6232
+ },
+ {
+  "caip": "eip155:3912/slip44:60",
+  "symbol": "DRAC",
+  "key": "coins/ZWlwMTU1OjM5MTIvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "c04e5052eb67935ffbaeb7dffe14b0227846fbd406c1b4f70450343c9c27741d",
+  "bytes": 6001
+ },
+ {
+  "caip": "eip155:39656/slip44:60",
+  "symbol": "PRM",
+  "key": "coins/ZWlwMTU1OjM5NjU2L3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "f5549960ae9d1a2273bd73ef2518b093f18595fe4dd65c5b429de440885ce8d1",
+  "bytes": 5614
+ },
+ {
+  "caip": "eip155:3966/slip44:60",
+  "symbol": "DYNO",
+  "key": "coins/ZWlwMTU1OjM5NjYvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "c04e5052eb67935ffbaeb7dffe14b0227846fbd406c1b4f70450343c9c27741d",
+  "bytes": 6001
+ },
+ {
+  "caip": "eip155:3967/slip44:60",
+  "symbol": "tDYNO",
+  "key": "coins/ZWlwMTU1OjM5Njcvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "3947259da38636368df2db50a36d2d9a7662651dcc7df5ac2157bbe64b927f52",
+  "bytes": 4890
+ },
+ {
+  "caip": "eip155:399/slip44:60",
+  "symbol": "USNT",
+  "key": "coins/ZWlwMTU1OjM5OS9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "ff7ced5bf48fc7724575bd8e41f3d4399f030947e68602e3cb473f767cb6c070",
+  "bytes": 5620
+ },
+ {
+  "caip": "eip155:39916801/slip44:60",
+  "symbol": "KOZI",
+  "key": "coins/ZWlwMTU1OjM5OTE2ODAxL3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "92a3107511d7d43aaa5e6c8af8f8e10b0e1b2f9cd648b94dfa75b32b7bab1cfd",
+  "bytes": 6232
+ },
+ {
+  "caip": "eip155:400/slip44:60",
+  "symbol": "HPN",
+  "key": "coins/ZWlwMTU1OjQwMC9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "5a4139be746521fe26dc24a8d3e7be7f8a34c2749682be0ad1343df877c2f9c8",
+  "bytes": 4992
+ },
+ {
+  "caip": "eip155:4001/slip44:60",
+  "symbol": "PERIUM",
+  "key": "coins/ZWlwMTU1OjQwMDEvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "f5549960ae9d1a2273bd73ef2518b093f18595fe4dd65c5b429de440885ce8d1",
+  "bytes": 5614
+ },
+ {
+  "caip": "eip155:4003/slip44:60",
+  "symbol": "XN",
+  "key": "coins/ZWlwMTU1OjQwMDMvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "f9307cba11af367a15e79ba599e9af351e7859df543ac4dce82c126b74a67279",
+  "bytes": 6707
+ },
+ {
+  "caip": "eip155:4096/slip44:60",
+  "symbol": "$BNI",
+  "key": "coins/ZWlwMTU1OjQwOTYvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "40c05d25435152cde7699e9e87abca46aa30a46c43cd733448ea140040e2a647",
+  "bytes": 6142
+ },
+ {
+  "caip": "eip155:41/slip44:60",
+  "symbol": "TLOS",
+  "key": "coins/ZWlwMTU1OjQxL3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "3947259da38636368df2db50a36d2d9a7662651dcc7df5ac2157bbe64b927f52",
+  "bytes": 4890
+ },
+ {
+  "caip": "eip155:4139/slip44:60",
+  "symbol": "HEART",
+  "key": "coins/ZWlwMTU1OjQxMzkvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "5a4139be746521fe26dc24a8d3e7be7f8a34c2749682be0ad1343df877c2f9c8",
+  "bytes": 4992
+ },
+ {
+  "caip": "eip155:4141/slip44:60",
+  "symbol": "TPBX",
+  "key": "coins/ZWlwMTU1OjQxNDEvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "3947259da38636368df2db50a36d2d9a7662651dcc7df5ac2157bbe64b927f52",
+  "bytes": 4890
+ },
+ {
+  "caip": "eip155:41500/slip44:60",
+  "symbol": "OXYN",
+  "key": "coins/ZWlwMTU1OjQxNTAwL3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "4f80fa0da96d40f8991f035cc77de73285d69ad9d5aec002ea97ed3e2352ecc0",
+  "bytes": 6899
+ },
+ {
+  "caip": "eip155:41923/slip44:60",
+  "symbol": "EDU",
+  "key": "coins/ZWlwMTU1OjQxOTIzL3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "011132e8880d73dbaa4214c18c292c0425b5eb6e9a4071a3224f2e3817af557e",
+  "bytes": 5091
+ },
+ {
+  "caip": "eip155:42001/slip44:60",
+  "symbol": "PMON",
+  "key": "coins/ZWlwMTU1OjQyMDAxL3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "f5549960ae9d1a2273bd73ef2518b093f18595fe4dd65c5b429de440885ce8d1",
+  "bytes": 5614
+ },
+ {
+  "caip": "eip155:420042/slip44:60",
+  "symbol": "VSG",
+  "key": "coins/ZWlwMTU1OjQyMDA0Mi9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "eb734899ac89fdd930d06b589989d748b3b03bd3bece48d10806be94ac65f4cf",
+  "bytes": 6337
+ },
+ {
+  "caip": "eip155:420420421/slip44:60",
+  "symbol": "WND",
+  "key": "coins/ZWlwMTU1OjQyMDQyMDQyMS9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "3463d0791dc95458849ad692569bb769feabb7249fa1d88bf58429cf02e7a9ce",
+  "bytes": 7229
+ },
+ {
+  "caip": "eip155:420420422/slip44:60",
+  "symbol": "PAS",
+  "key": "coins/ZWlwMTU1OjQyMDQyMDQyMi9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "f5549960ae9d1a2273bd73ef2518b093f18595fe4dd65c5b429de440885ce8d1",
+  "bytes": 5614
+ },
+ {
+  "caip": "eip155:42069/slip44:60",
+  "symbol": "peggle",
+  "key": "coins/ZWlwMTU1OjQyMDY5L3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "f5549960ae9d1a2273bd73ef2518b093f18595fe4dd65c5b429de440885ce8d1",
+  "bytes": 5614
+ },
+ {
+  "caip": "eip155:4207/slip44:60",
+  "symbol": "EDGEN",
+  "key": "coins/ZWlwMTU1OjQyMDcvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "011132e8880d73dbaa4214c18c292c0425b5eb6e9a4071a3224f2e3817af557e",
+  "bytes": 5091
+ },
+ {
+  "caip": "eip155:42072/slip44:60",
+  "symbol": "AGENT",
+  "key": "coins/ZWlwMTU1OjQyMDcyL3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "ef3bf4fd92e03d2aa63994d235247c85d60f2cd001c16684955fc84dc00e7f77",
+  "bytes": 6379
+ },
+ {
+  "caip": "eip155:42096/slip44:60",
+  "symbol": "HEU",
+  "key": "coins/ZWlwMTU1OjQyMDk2L3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "5a4139be746521fe26dc24a8d3e7be7f8a34c2749682be0ad1343df877c2f9c8",
+  "bytes": 4992
+ },
+ {
+  "caip": "eip155:42161/erc20:0x30b1c88144313d561ae6763d953b68fba1ab78b5",
+  "symbol": "WEETH/WETH-GAUGE",
+  "key": "coins/ZWlwMTU1OjQyMTYxL2VyYzIwOjB4MzBiMWM4ODE0NDMxM2Q1NjFhZTY3NjNkOTUzYjY4ZmJhMWFiNzhiNQ.png",
+  "source": "generic",
+  "sha256": "3463d0791dc95458849ad692569bb769feabb7249fa1d88bf58429cf02e7a9ce",
+  "bytes": 7229
+ },
+ {
+  "caip": "eip155:421613/slip44:60",
+  "symbol": "AGOR",
+  "key": "coins/ZWlwMTU1OjQyMTYxMy9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "ef3bf4fd92e03d2aa63994d235247c85d60f2cd001c16684955fc84dc00e7f77",
+  "bytes": 6379
+ },
+ {
+  "caip": "eip155:4227/slip44:60",
+  "symbol": "HASHD",
+  "key": "coins/ZWlwMTU1OjQyMjcvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "5a4139be746521fe26dc24a8d3e7be7f8a34c2749682be0ad1343df877c2f9c8",
+  "bytes": 4992
+ },
+ {
+  "caip": "eip155:42421/slip44:60",
+  "symbol": "RWA",
+  "key": "coins/ZWlwMTU1OjQyNDIxL3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "f2000af02fd183b676de5ade41449391403d4b4018a1d90da700082684b96e98",
+  "bytes": 6048
+ },
+ {
+  "caip": "eip155:424242/slip44:60",
+  "symbol": "FTN",
+  "key": "coins/ZWlwMTU1OjQyNDI0Mi9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "ddb64e6c07f18f5b98a56e41d4e47479a2a52b36654b26fcedbb46aac1ea658b",
+  "bytes": 4973
+ },
+ {
+  "caip": "eip155:425/slip44:60",
+  "symbol": "STEN",
+  "key": "coins/ZWlwMTU1OjQyNS9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "441675b675a3c52735ad71083bad879f23701bca449d57130717d2d4fd40d856",
+  "bytes": 6957
+ },
+ {
+  "caip": "eip155:427/slip44:60",
+  "symbol": "ZTH",
+  "key": "coins/ZWlwMTU1OjQyNy9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "fdd25c06f7f4d72de308c4acd22e7f9d9ee6e07644b43eb9ff16213818593eb9",
+  "bytes": 5561
+ },
+ {
+  "caip": "eip155:4278608/slip44:60",
+  "symbol": "AIP",
+  "key": "coins/ZWlwMTU1OjQyNzg2MDgvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "ef3bf4fd92e03d2aa63994d235247c85d60f2cd001c16684955fc84dc00e7f77",
+  "bytes": 6379
+ },
+ {
+  "caip": "eip155:43110/slip44:60",
+  "symbol": "ATH",
+  "key": "coins/ZWlwMTU1OjQzMTEwL3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "ef3bf4fd92e03d2aa63994d235247c85d60f2cd001c16684955fc84dc00e7f77",
+  "bytes": 6379
+ },
+ {
+  "caip": "eip155:43214913/slip44:60",
+  "symbol": "MAI",
+  "key": "coins/ZWlwMTU1OjQzMjE0OTEzL3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "bfdba0b5e636a2ae8051f4a90a549577fc98d3a3584be8f3c994cec4ce786199",
+  "bytes": 6177
+ },
+ {
+  "caip": "eip155:444900/slip44:60",
+  "symbol": "tWLK",
+  "key": "coins/ZWlwMTU1OjQ0NDkwMC9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "3947259da38636368df2db50a36d2d9a7662651dcc7df5ac2157bbe64b927f52",
+  "bytes": 4890
+ },
+ {
+  "caip": "eip155:45/slip44:60",
+  "symbol": "ORING",
+  "key": "coins/ZWlwMTU1OjQ1L3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "4f80fa0da96d40f8991f035cc77de73285d69ad9d5aec002ea97ed3e2352ecc0",
+  "bytes": 6899
+ },
+ {
+  "caip": "eip155:45000/slip44:60",
+  "symbol": "TXL",
+  "key": "coins/ZWlwMTU1OjQ1MDAwL3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "3947259da38636368df2db50a36d2d9a7662651dcc7df5ac2157bbe64b927f52",
+  "bytes": 4890
+ },
+ {
+  "caip": "eip155:45003/slip44:60",
+  "symbol": "JUNE",
+  "key": "coins/ZWlwMTU1OjQ1MDAzL3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "5087fb9e19b3dfdb4e9a590623cc37a7620cc16d1887c56b4e8131f09bd46635",
+  "bytes": 5492
+ },
+ {
+  "caip": "eip155:45004/slip44:60",
+  "symbol": "DAI1",
+  "key": "coins/ZWlwMTU1OjQ1MDA0L3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "c04e5052eb67935ffbaeb7dffe14b0227846fbd406c1b4f70450343c9c27741d",
+  "bytes": 6001
+ },
+ {
+  "caip": "eip155:45005/slip44:60",
+  "symbol": "USDT1",
+  "key": "coins/ZWlwMTU1OjQ1MDA1L3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "ff7ced5bf48fc7724575bd8e41f3d4399f030947e68602e3cb473f767cb6c070",
+  "bytes": 5620
+ },
+ {
+  "caip": "eip155:45006/slip44:60",
+  "symbol": "USD1",
+  "key": "coins/ZWlwMTU1OjQ1MDA2L3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "ff7ced5bf48fc7724575bd8e41f3d4399f030947e68602e3cb473f767cb6c070",
+  "bytes": 5620
+ },
+ {
+  "caip": "eip155:45008/slip44:60",
+  "symbol": "GLD1",
+  "key": "coins/ZWlwMTU1OjQ1MDA4L3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "455841ae76f1e77bf4376daf27bfff839e7b43ba07a1461ad47c6e301c90998e",
+  "bytes": 7023
+ },
+ {
+  "caip": "eip155:45009/slip44:60",
+  "symbol": "LTC1",
+  "key": "coins/ZWlwMTU1OjQ1MDA5L3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "789584234c7d05dd2fef9836cc84a8ae4a2ddaafc8dbab5144387ac547e3db88",
+  "bytes": 4798
+ },
+ {
+  "caip": "eip155:45011/slip44:60",
+  "symbol": "EUR1",
+  "key": "coins/ZWlwMTU1OjQ1MDExL3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "011132e8880d73dbaa4214c18c292c0425b5eb6e9a4071a3224f2e3817af557e",
+  "bytes": 5091
+ },
+ {
+  "caip": "eip155:45012/slip44:60",
+  "symbol": "SGD1",
+  "key": "coins/ZWlwMTU1OjQ1MDEyL3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "441675b675a3c52735ad71083bad879f23701bca449d57130717d2d4fd40d856",
+  "bytes": 6957
+ },
+ {
+  "caip": "eip155:45013/slip44:60",
+  "symbol": "BCH1",
+  "key": "coins/ZWlwMTU1OjQ1MDEzL3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "40c05d25435152cde7699e9e87abca46aa30a46c43cd733448ea140040e2a647",
+  "bytes": 6142
+ },
+ {
+  "caip": "eip155:46/slip44:60",
+  "symbol": "RING",
+  "key": "coins/ZWlwMTU1OjQ2L3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "f2000af02fd183b676de5ade41449391403d4b4018a1d90da700082684b96e98",
+  "bytes": 6048
+ },
+ {
+  "caip": "eip155:4646/slip44:60",
+  "symbol": "MST",
+  "key": "coins/ZWlwMTU1OjQ2NDYvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "bfdba0b5e636a2ae8051f4a90a549577fc98d3a3584be8f3c994cec4ce786199",
+  "bytes": 6177
+ },
+ {
+  "caip": "eip155:47/slip44:60",
+  "symbol": "ACRIA",
+  "key": "coins/ZWlwMTU1OjQ3L3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "ef3bf4fd92e03d2aa63994d235247c85d60f2cd001c16684955fc84dc00e7f77",
+  "bytes": 6379
+ },
+ {
+  "caip": "eip155:474142/slip44:60",
+  "symbol": "OPC",
+  "key": "coins/ZWlwMTU1OjQ3NDE0Mi9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "4f80fa0da96d40f8991f035cc77de73285d69ad9d5aec002ea97ed3e2352ecc0",
+  "bytes": 6899
+ },
+ {
+  "caip": "eip155:4786/slip44:60",
+  "symbol": "tEVO",
+  "key": "coins/ZWlwMTU1OjQ3ODYvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "3947259da38636368df2db50a36d2d9a7662651dcc7df5ac2157bbe64b927f52",
+  "bytes": 4890
+ },
+ {
+  "caip": "eip155:486/slip44:60",
+  "symbol": "STND",
+  "key": "coins/ZWlwMTU1OjQ4Ni9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "441675b675a3c52735ad71083bad879f23701bca449d57130717d2d4fd40d856",
+  "bytes": 6957
+ },
+ {
+  "caip": "eip155:486217935/slip44:60",
+  "symbol": "GTH",
+  "key": "coins/ZWlwMTU1OjQ4NjIxNzkzNS9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "455841ae76f1e77bf4376daf27bfff839e7b43ba07a1461ad47c6e301c90998e",
+  "bytes": 7023
+ },
+ {
+  "caip": "eip155:4893/slip44:60",
+  "symbol": "GC",
+  "key": "coins/ZWlwMTU1OjQ4OTMvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "455841ae76f1e77bf4376daf27bfff839e7b43ba07a1461ad47c6e301c90998e",
+  "bytes": 7023
+ },
+ {
+  "caip": "eip155:490092/slip44:60",
+  "symbol": "PMPT",
+  "key": "coins/ZWlwMTU1OjQ5MDA5Mi9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "f5549960ae9d1a2273bd73ef2518b093f18595fe4dd65c5b429de440885ce8d1",
+  "bytes": 5614
+ },
+ {
+  "caip": "eip155:4918/slip44:60",
+  "symbol": "XVM",
+  "key": "coins/ZWlwMTU1OjQ5MTgvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "f9307cba11af367a15e79ba599e9af351e7859df543ac4dce82c126b74a67279",
+  "bytes": 6707
+ },
+ {
+  "caip": "eip155:495/slip44:60",
+  "symbol": "LDS",
+  "key": "coins/ZWlwMTU1OjQ5NS9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "789584234c7d05dd2fef9836cc84a8ae4a2ddaafc8dbab5144387ac547e3db88",
+  "bytes": 4798
+ },
+ {
+  "caip": "eip155:49797/slip44:60",
+  "symbol": "NRG",
+  "key": "coins/ZWlwMTU1OjQ5Nzk3L3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "fd087da32519d1fdf54252a36b3922b62102ccc61fd16c0e541ec802ab86a660",
+  "bytes": 5763
+ },
+ {
+  "caip": "eip155:499/slip44:60",
+  "symbol": "RUPX",
+  "key": "coins/ZWlwMTU1OjQ5OS9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "f2000af02fd183b676de5ade41449391403d4b4018a1d90da700082684b96e98",
+  "bytes": 6048
+ },
+ {
+  "caip": "eip155:50000/slip44:60",
+  "symbol": "CITRO",
+  "key": "coins/ZWlwMTU1OjUwMDAwL3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "305be7e1d69c4dfa63d9f87d6598eec1ab1f1f1efa90cc75dcd35c3749d466cc",
+  "bytes": 6855
+ },
+ {
+  "caip": "eip155:5001/slip44:60",
+  "symbol": "MNT",
+  "key": "coins/ZWlwMTU1OjUwMDEvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "bfdba0b5e636a2ae8051f4a90a549577fc98d3a3584be8f3c994cec4ce786199",
+  "bytes": 6177
+ },
+ {
+  "caip": "eip155:50021/slip44:60",
+  "symbol": "GCD",
+  "key": "coins/ZWlwMTU1OjUwMDIxL3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "455841ae76f1e77bf4376daf27bfff839e7b43ba07a1461ad47c6e301c90998e",
+  "bytes": 7023
+ },
+ {
+  "caip": "eip155:5003/slip44:60",
+  "symbol": "MNT",
+  "key": "coins/ZWlwMTU1OjUwMDMvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "bfdba0b5e636a2ae8051f4a90a549577fc98d3a3584be8f3c994cec4ce786199",
+  "bytes": 6177
+ },
+ {
+  "caip": "eip155:5005/slip44:60",
+  "symbol": "UNIT",
+  "key": "coins/ZWlwMTU1OjUwMDUvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "ff7ced5bf48fc7724575bd8e41f3d4399f030947e68602e3cb473f767cb6c070",
+  "bytes": 5620
+ },
+ {
+  "caip": "eip155:50312/slip44:60",
+  "symbol": "STT",
+  "key": "coins/ZWlwMTU1OjUwMzEyL3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "441675b675a3c52735ad71083bad879f23701bca449d57130717d2d4fd40d856",
+  "bytes": 6957
+ },
+ {
+  "caip": "eip155:50341/slip44:60",
+  "symbol": "RDO",
+  "key": "coins/ZWlwMTU1OjUwMzQxL3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "f2000af02fd183b676de5ade41449391403d4b4018a1d90da700082684b96e98",
+  "bytes": 6048
+ },
+ {
+  "caip": "eip155:50342/slip44:60",
+  "symbol": "RDO",
+  "key": "coins/ZWlwMTU1OjUwMzQyL3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "f2000af02fd183b676de5ade41449391403d4b4018a1d90da700082684b96e98",
+  "bytes": 6048
+ },
+ {
+  "caip": "eip155:50505/slip44:60",
+  "symbol": "STB",
+  "key": "coins/ZWlwMTU1OjUwNTA1L3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "441675b675a3c52735ad71083bad879f23701bca449d57130717d2d4fd40d856",
+  "bytes": 6957
+ },
+ {
+  "caip": "eip155:50888/slip44:60",
+  "symbol": "ERB",
+  "key": "coins/ZWlwMTU1OjUwODg4L3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "011132e8880d73dbaa4214c18c292c0425b5eb6e9a4071a3224f2e3817af557e",
+  "bytes": 5091
+ },
+ {
+  "caip": "eip155:512512/slip44:60",
+  "symbol": "CMP",
+  "key": "coins/ZWlwMTU1OjUxMjUxMi9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "305be7e1d69c4dfa63d9f87d6598eec1ab1f1f1efa90cc75dcd35c3749d466cc",
+  "bytes": 6855
+ },
+ {
+  "caip": "eip155:513/slip44:60",
+  "symbol": "AAC",
+  "key": "coins/ZWlwMTU1OjUxMy9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "ef3bf4fd92e03d2aa63994d235247c85d60f2cd001c16684955fc84dc00e7f77",
+  "bytes": 6379
+ },
+ {
+  "caip": "eip155:513100/slip44:60",
+  "symbol": "ETHF",
+  "key": "coins/ZWlwMTU1OjUxMzEwMC9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "011132e8880d73dbaa4214c18c292c0425b5eb6e9a4071a3224f2e3817af557e",
+  "bytes": 5091
+ },
+ {
+  "caip": "eip155:516/slip44:60",
+  "symbol": "GZN",
+  "key": "coins/ZWlwMTU1OjUxNi9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "455841ae76f1e77bf4376daf27bfff839e7b43ba07a1461ad47c6e301c90998e",
+  "bytes": 7023
+ },
+ {
+  "caip": "eip155:5169/slip44:60",
+  "symbol": "SU",
+  "key": "coins/ZWlwMTU1OjUxNjkvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "441675b675a3c52735ad71083bad879f23701bca449d57130717d2d4fd40d856",
+  "bytes": 6957
+ },
+ {
+  "caip": "eip155:52027071/slip44:60",
+  "symbol": "DTBC",
+  "key": "coins/ZWlwMTU1OjUyMDI3MDcxL3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "c04e5052eb67935ffbaeb7dffe14b0227846fbd406c1b4f70450343c9c27741d",
+  "bytes": 6001
+ },
+ {
+  "caip": "eip155:52027080/slip44:60",
+  "symbol": "tDTBC",
+  "key": "coins/ZWlwMTU1OjUyMDI3MDgwL3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "3947259da38636368df2db50a36d2d9a7662651dcc7df5ac2157bbe64b927f52",
+  "bytes": 4890
+ },
+ {
+  "caip": "eip155:52164803/slip44:60",
+  "symbol": "tFLT",
+  "key": "coins/ZWlwMTU1OjUyMTY0ODAzL3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "3947259da38636368df2db50a36d2d9a7662651dcc7df5ac2157bbe64b927f52",
+  "bytes": 4890
+ },
+ {
+  "caip": "eip155:52225/slip44:60",
+  "symbol": "CCC",
+  "key": "coins/ZWlwMTU1OjUyMjI1L3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "305be7e1d69c4dfa63d9f87d6598eec1ab1f1f1efa90cc75dcd35c3749d466cc",
+  "bytes": 6855
+ },
+ {
+  "caip": "eip155:52226/slip44:60",
+  "symbol": "CCC",
+  "key": "coins/ZWlwMTU1OjUyMjI2L3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "305be7e1d69c4dfa63d9f87d6598eec1ab1f1f1efa90cc75dcd35c3749d466cc",
+  "bytes": 6855
+ },
+ {
+  "caip": "eip155:5234/slip44:60",
+  "symbol": "eHMND",
+  "key": "coins/ZWlwMTU1OjUyMzQvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "011132e8880d73dbaa4214c18c292c0425b5eb6e9a4071a3224f2e3817af557e",
+  "bytes": 5091
+ },
+ {
+  "caip": "eip155:526916/slip44:60",
+  "symbol": "DCT",
+  "key": "coins/ZWlwMTU1OjUyNjkxNi9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "c04e5052eb67935ffbaeb7dffe14b0227846fbd406c1b4f70450343c9c27741d",
+  "bytes": 6001
+ },
+ {
+  "caip": "eip155:53/slip44:60",
+  "symbol": "cett",
+  "key": "coins/ZWlwMTU1OjUzL3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "305be7e1d69c4dfa63d9f87d6598eec1ab1f1f1efa90cc75dcd35c3749d466cc",
+  "bytes": 6855
+ },
+ {
+  "caip": "eip155:530/slip44:60",
+  "symbol": "PUNDAI",
+  "key": "coins/ZWlwMTU1OjUzMC9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "f5549960ae9d1a2273bd73ef2518b093f18595fe4dd65c5b429de440885ce8d1",
+  "bytes": 5614
+ },
+ {
+  "caip": "eip155:531050104/slip44:60",
+  "symbol": "SOPH",
+  "key": "coins/ZWlwMTU1OjUzMTA1MDEwNC9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "441675b675a3c52735ad71083bad879f23701bca449d57130717d2d4fd40d856",
+  "bytes": 6957
+ },
+ {
+  "caip": "eip155:5315/slip44:60",
+  "symbol": "UZMI",
+  "key": "coins/ZWlwMTU1OjUzMTUvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "ff7ced5bf48fc7724575bd8e41f3d4399f030947e68602e3cb473f767cb6c070",
+  "bytes": 5620
+ },
+ {
+  "caip": "eip155:5318008/slip44:60",
+  "symbol": "REACT",
+  "key": "coins/ZWlwMTU1OjUzMTgwMDgvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "f2000af02fd183b676de5ade41449391403d4b4018a1d90da700082684b96e98",
+  "bytes": 6048
+ },
+ {
+  "caip": "eip155:5321/slip44:60",
+  "symbol": "ITX",
+  "key": "coins/ZWlwMTU1OjUzMjEvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "0cb9e36780ee0c10a7691f65640b0e131be783436d0279a0e6720c87dc53af3a",
+  "bytes": 4676
+ },
+ {
+  "caip": "eip155:534/slip44:60",
+  "symbol": "CNDL",
+  "key": "coins/ZWlwMTU1OjUzNC9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "305be7e1d69c4dfa63d9f87d6598eec1ab1f1f1efa90cc75dcd35c3749d466cc",
+  "bytes": 6855
+ },
+ {
+  "caip": "eip155:535037/slip44:60",
+  "symbol": "BESC",
+  "key": "coins/ZWlwMTU1OjUzNTAzNy9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "40c05d25435152cde7699e9e87abca46aa30a46c43cd733448ea140040e2a647",
+  "bytes": 6142
+ },
+ {
+  "caip": "eip155:5353/slip44:60",
+  "symbol": "tTRN",
+  "key": "coins/ZWlwMTU1OjUzNTMvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "3947259da38636368df2db50a36d2d9a7662651dcc7df5ac2157bbe64b927f52",
+  "bytes": 4890
+ },
+ {
+  "caip": "eip155:54170/slip44:60",
+  "symbol": "@G",
+  "key": "coins/ZWlwMTU1OjU0MTcwL3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "455841ae76f1e77bf4376daf27bfff839e7b43ba07a1461ad47c6e301c90998e",
+  "bytes": 7023
+ },
+ {
+  "caip": "eip155:542/slip44:60",
+  "symbol": "PAW",
+  "key": "coins/ZWlwMTU1OjU0Mi9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "f5549960ae9d1a2273bd73ef2518b093f18595fe4dd65c5b429de440885ce8d1",
+  "bytes": 5614
+ },
+ {
+  "caip": "eip155:54211/slip44:60",
+  "symbol": "ISLMT",
+  "key": "coins/ZWlwMTU1OjU0MjExL3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "0cb9e36780ee0c10a7691f65640b0e131be783436d0279a0e6720c87dc53af3a",
+  "bytes": 4676
+ },
+ {
+  "caip": "eip155:5432/slip44:60",
+  "symbol": "YYT",
+  "key": "coins/ZWlwMTU1OjU0MzIvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "0dc510b923e05adb3fa28d8a427d6d671f79d0c2d64f01ae297a824f2e96a489",
+  "bytes": 5879
+ },
+ {
+  "caip": "eip155:5433/slip44:60",
+  "symbol": "IRTA",
+  "key": "coins/ZWlwMTU1OjU0MzMvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "0cb9e36780ee0c10a7691f65640b0e131be783436d0279a0e6720c87dc53af3a",
+  "bytes": 4676
+ },
+ {
+  "caip": "eip155:5439/slip44:60",
+  "symbol": "EGAX",
+  "key": "coins/ZWlwMTU1OjU0Mzkvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "011132e8880d73dbaa4214c18c292c0425b5eb6e9a4071a3224f2e3817af557e",
+  "bytes": 5091
+ },
+ {
+  "caip": "eip155:555/slip44:60",
+  "symbol": "CLASS",
+  "key": "coins/ZWlwMTU1OjU1NS9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "305be7e1d69c4dfa63d9f87d6598eec1ab1f1f1efa90cc75dcd35c3749d466cc",
+  "bytes": 6855
+ },
+ {
+  "caip": "eip155:55551/slip44:60",
+  "symbol": "PTON",
+  "key": "coins/ZWlwMTU1OjU1NTUxL3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "f5549960ae9d1a2273bd73ef2518b093f18595fe4dd65c5b429de440885ce8d1",
+  "bytes": 5614
+ },
+ {
+  "caip": "eip155:55556/slip44:60",
+  "symbol": "tREI",
+  "key": "coins/ZWlwMTU1OjU1NTU2L3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "3947259da38636368df2db50a36d2d9a7662651dcc7df5ac2157bbe64b927f52",
+  "bytes": 4890
+ },
+ {
+  "caip": "eip155:555666/slip44:60",
+  "symbol": "ECLPS",
+  "key": "coins/ZWlwMTU1OjU1NTY2Ni9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "011132e8880d73dbaa4214c18c292c0425b5eb6e9a4071a3224f2e3817af557e",
+  "bytes": 5091
+ },
+ {
+  "caip": "eip155:55614/slip44:60",
+  "symbol": "FLA",
+  "key": "coins/ZWlwMTU1OjU1NjE0L3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "ddb64e6c07f18f5b98a56e41d4e47479a2a52b36654b26fcedbb46aac1ea658b",
+  "bytes": 4973
+ },
+ {
+  "caip": "eip155:558/slip44:60",
+  "symbol": "TAO",
+  "key": "coins/ZWlwMTU1OjU1OC9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "3947259da38636368df2db50a36d2d9a7662651dcc7df5ac2157bbe64b927f52",
+  "bytes": 4890
+ },
+ {
+  "caip": "eip155:56/bep20:0x865331a601f129540b6f70a9fca2ba9dd71de298",
+  "symbol": "PORKE",
+  "key": "coins/ZWlwMTU1OjU2L2JlcDIwOjB4ODY1MzMxYTYwMWYxMjk1NDBiNmY3MGE5ZmNhMmJhOWRkNzFkZTI5OA.png",
+  "source": "generic",
+  "sha256": "f5549960ae9d1a2273bd73ef2518b093f18595fe4dd65c5b429de440885ce8d1",
+  "bytes": 5614
+ },
+ {
+  "caip": "eip155:56/bep20:0xc6759a4fc56b3ce9734035a56b36e8637c45b77e",
+  "symbol": "GRIMACE",
+  "key": "coins/ZWlwMTU1OjU2L2JlcDIwOjB4YzY3NTlhNGZjNTZiM2NlOTczNDAzNWE1NmIzNmU4NjM3YzQ1Yjc3ZQ.png",
+  "source": "generic",
+  "sha256": "455841ae76f1e77bf4376daf27bfff839e7b43ba07a1461ad47c6e301c90998e",
+  "bytes": 7023
+ },
+ {
+  "caip": "eip155:560000/slip44:60",
+  "symbol": "tETH",
+  "key": "coins/ZWlwMTU1OjU2MDAwMC9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "3947259da38636368df2db50a36d2d9a7662651dcc7df5ac2157bbe64b927f52",
+  "bytes": 4890
+ },
+ {
+  "caip": "eip155:5611/slip44:60",
+  "symbol": "tBNB",
+  "key": "coins/ZWlwMTU1OjU2MTEvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "3947259da38636368df2db50a36d2d9a7662651dcc7df5ac2157bbe64b927f52",
+  "bytes": 4890
+ },
+ {
+  "caip": "eip155:5615/slip44:60",
+  "symbol": "tARC",
+  "key": "coins/ZWlwMTU1OjU2MTUvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "3947259da38636368df2db50a36d2d9a7662651dcc7df5ac2157bbe64b927f52",
+  "bytes": 4890
+ },
+ {
+  "caip": "eip155:5616/slip44:60",
+  "symbol": "tARCT",
+  "key": "coins/ZWlwMTU1OjU2MTYvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "3947259da38636368df2db50a36d2d9a7662651dcc7df5ac2157bbe64b927f52",
+  "bytes": 4890
+ },
+ {
+  "caip": "eip155:56288/slip44:60",
+  "symbol": "BOBA",
+  "key": "coins/ZWlwMTU1OjU2Mjg4L3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "40c05d25435152cde7699e9e87abca46aa30a46c43cd733448ea140040e2a647",
+  "bytes": 6142
+ },
+ {
+  "caip": "eip155:56400/slip44:60",
+  "symbol": "ZERO",
+  "key": "coins/ZWlwMTU1OjU2NDAwL3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "fdd25c06f7f4d72de308c4acd22e7f9d9ee6e07644b43eb9ff16213818593eb9",
+  "bytes": 5561
+ },
+ {
+  "caip": "eip155:565/slip44:60",
+  "symbol": "PYRE",
+  "key": "coins/ZWlwMTU1OjU2NS9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "f5549960ae9d1a2273bd73ef2518b093f18595fe4dd65c5b429de440885ce8d1",
+  "bytes": 5614
+ },
+ {
+  "caip": "eip155:5678/slip44:60",
+  "symbol": "TANGO",
+  "key": "coins/ZWlwMTU1OjU2Nzgvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "3947259da38636368df2db50a36d2d9a7662651dcc7df5ac2157bbe64b927f52",
+  "bytes": 4890
+ },
+ {
+  "caip": "eip155:5700/slip44:60",
+  "symbol": "tSYS",
+  "key": "coins/ZWlwMTU1OjU3MDAvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "3947259da38636368df2db50a36d2d9a7662651dcc7df5ac2157bbe64b927f52",
+  "bytes": 4890
+ },
+ {
+  "caip": "eip155:57000/slip44:60",
+  "symbol": "TSYS",
+  "key": "coins/ZWlwMTU1OjU3MDAwL3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "3947259da38636368df2db50a36d2d9a7662651dcc7df5ac2157bbe64b927f52",
+  "bytes": 4890
+ },
+ {
+  "caip": "eip155:57451/slip44:60",
+  "symbol": "SEC",
+  "key": "coins/ZWlwMTU1OjU3NDUxL3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "441675b675a3c52735ad71083bad879f23701bca449d57130717d2d4fd40d856",
+  "bytes": 6957
+ },
+ {
+  "caip": "eip155:5858/slip44:60",
+  "symbol": "CTH",
+  "key": "coins/ZWlwMTU1OjU4NTgvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "305be7e1d69c4dfa63d9f87d6598eec1ab1f1f1efa90cc75dcd35c3749d466cc",
+  "bytes": 6855
+ },
+ {
+  "caip": "eip155:586/slip44:60",
+  "symbol": "CAPY",
+  "key": "coins/ZWlwMTU1OjU4Ni9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "305be7e1d69c4dfa63d9f87d6598eec1ab1f1f1efa90cc75dcd35c3749d466cc",
+  "bytes": 6855
+ },
+ {
+  "caip": "eip155:5869/slip44:60",
+  "symbol": "RBD",
+  "key": "coins/ZWlwMTU1OjU4Njkvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "f2000af02fd183b676de5ade41449391403d4b4018a1d90da700082684b96e98",
+  "bytes": 6048
+ },
+ {
+  "caip": "eip155:595/slip44:60",
+  "symbol": "mACA",
+  "key": "coins/ZWlwMTU1OjU5NS9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "bfdba0b5e636a2ae8051f4a90a549577fc98d3a3584be8f3c994cec4ce786199",
+  "bytes": 6177
+ },
+ {
+  "caip": "eip155:596/slip44:60",
+  "symbol": "KAR",
+  "key": "coins/ZWlwMTU1OjU5Ni9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "92a3107511d7d43aaa5e6c8af8f8e10b0e1b2f9cd648b94dfa75b32b7bab1cfd",
+  "bytes": 6232
+ },
+ {
+  "caip": "eip155:597/slip44:60",
+  "symbol": "ACA",
+  "key": "coins/ZWlwMTU1OjU5Ny9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "ef3bf4fd92e03d2aa63994d235247c85d60f2cd001c16684955fc84dc00e7f77",
+  "bytes": 6379
+ },
+ {
+  "caip": "eip155:59902/slip44:60",
+  "symbol": "tMETIS",
+  "key": "coins/ZWlwMTU1OjU5OTAyL3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "3947259da38636368df2db50a36d2d9a7662651dcc7df5ac2157bbe64b927f52",
+  "bytes": 4890
+ },
+ {
+  "caip": "eip155:600/slip44:60",
+  "symbol": "MESHT",
+  "key": "coins/ZWlwMTU1OjYwMC9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "bfdba0b5e636a2ae8051f4a90a549577fc98d3a3584be8f3c994cec4ce786199",
+  "bytes": 6177
+ },
+ {
+  "caip": "eip155:60000/slip44:60",
+  "symbol": "TKM",
+  "key": "coins/ZWlwMTU1OjYwMDAwL3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "3947259da38636368df2db50a36d2d9a7662651dcc7df5ac2157bbe64b927f52",
+  "bytes": 4890
+ },
+ {
+  "caip": "eip155:60001/slip44:60",
+  "symbol": "TKM",
+  "key": "coins/ZWlwMTU1OjYwMDAxL3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "3947259da38636368df2db50a36d2d9a7662651dcc7df5ac2157bbe64b927f52",
+  "bytes": 4890
+ },
+ {
+  "caip": "eip155:60002/slip44:60",
+  "symbol": "TKM",
+  "key": "coins/ZWlwMTU1OjYwMDAyL3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "3947259da38636368df2db50a36d2d9a7662651dcc7df5ac2157bbe64b927f52",
+  "bytes": 4890
+ },
+ {
+  "caip": "eip155:60103/slip44:60",
+  "symbol": "TKM",
+  "key": "coins/ZWlwMTU1OjYwMTAzL3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "3947259da38636368df2db50a36d2d9a7662651dcc7df5ac2157bbe64b927f52",
+  "bytes": 4890
+ },
+ {
+  "caip": "eip155:6022140761023/slip44:60",
+  "symbol": "MOLE",
+  "key": "coins/ZWlwMTU1OjYwMjIxNDA3NjEwMjMvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "bfdba0b5e636a2ae8051f4a90a549577fc98d3a3584be8f3c994cec4ce786199",
+  "bytes": 6177
+ },
+ {
+  "caip": "eip155:61022448/slip44:60",
+  "symbol": "DKA",
+  "key": "coins/ZWlwMTU1OjYxMDIyNDQ4L3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "c04e5052eb67935ffbaeb7dffe14b0227846fbd406c1b4f70450343c9c27741d",
+  "bytes": 6001
+ },
+ {
+  "caip": "eip155:61166/slip44:60",
+  "symbol": "MAGIC",
+  "key": "coins/ZWlwMTU1OjYxMTY2L3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "bfdba0b5e636a2ae8051f4a90a549577fc98d3a3584be8f3c994cec4ce786199",
+  "bytes": 6177
+ },
+ {
+  "caip": "eip155:612044/slip44:60",
+  "symbol": "tCROSS",
+  "key": "coins/ZWlwMTU1OjYxMjA0NC9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "3947259da38636368df2db50a36d2d9a7662651dcc7df5ac2157bbe64b927f52",
+  "bytes": 4890
+ },
+ {
+  "caip": "eip155:612055/slip44:60",
+  "symbol": "CROSS",
+  "key": "coins/ZWlwMTU1OjYxMjA1NS9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "305be7e1d69c4dfa63d9f87d6598eec1ab1f1f1efa90cc75dcd35c3749d466cc",
+  "bytes": 6855
+ },
+ {
+  "caip": "eip155:614/slip44:60",
+  "symbol": "GLQ",
+  "key": "coins/ZWlwMTU1OjYxNC9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "455841ae76f1e77bf4376daf27bfff839e7b43ba07a1461ad47c6e301c90998e",
+  "bytes": 7023
+ },
+ {
+  "caip": "eip155:61406/slip44:60",
+  "symbol": "KEC",
+  "key": "coins/ZWlwMTU1OjYxNDA2L3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "92a3107511d7d43aaa5e6c8af8f8e10b0e1b2f9cd648b94dfa75b32b7bab1cfd",
+  "bytes": 6232
+ },
+ {
+  "caip": "eip155:61717561/slip44:60",
+  "symbol": "AQUA",
+  "key": "coins/ZWlwMTU1OjYxNzE3NTYxL3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "ef3bf4fd92e03d2aa63994d235247c85d60f2cd001c16684955fc84dc00e7f77",
+  "bytes": 6379
+ },
+ {
+  "caip": "eip155:619/slip44:60",
+  "symbol": "sUSD",
+  "key": "coins/ZWlwMTU1OjYxOS9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "441675b675a3c52735ad71083bad879f23701bca449d57130717d2d4fd40d856",
+  "bytes": 6957
+ },
+ {
+  "caip": "eip155:6231991/slip44:60",
+  "symbol": "HARRY",
+  "key": "coins/ZWlwMTU1OjYyMzE5OTEvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "5a4139be746521fe26dc24a8d3e7be7f8a34c2749682be0ad1343df877c2f9c8",
+  "bytes": 4992
+ },
+ {
+  "caip": "eip155:624/slip44:60",
+  "symbol": "BNRY",
+  "key": "coins/ZWlwMTU1OjYyNC9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "40c05d25435152cde7699e9e87abca46aa30a46c43cd733448ea140040e2a647",
+  "bytes": 6142
+ },
+ {
+  "caip": "eip155:625/slip44:60",
+  "symbol": "BNRY",
+  "key": "coins/ZWlwMTU1OjYyNS9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "40c05d25435152cde7699e9e87abca46aa30a46c43cd733448ea140040e2a647",
+  "bytes": 6142
+ },
+ {
+  "caip": "eip155:6278/slip44:60",
+  "symbol": "STEAMX",
+  "key": "coins/ZWlwMTU1OjYyNzgvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "441675b675a3c52735ad71083bad879f23701bca449d57130717d2d4fd40d856",
+  "bytes": 6957
+ },
+ {
+  "caip": "eip155:62850/slip44:60",
+  "symbol": "SIGMA",
+  "key": "coins/ZWlwMTU1OjYyODUwL3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "441675b675a3c52735ad71083bad879f23701bca449d57130717d2d4fd40d856",
+  "bytes": 6957
+ },
+ {
+  "caip": "eip155:632/slip44:60",
+  "symbol": "NFBC",
+  "key": "coins/ZWlwMTU1OjYzMi9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "fd087da32519d1fdf54252a36b3922b62102ccc61fd16c0e541ec802ab86a660",
+  "bytes": 5763
+ },
+ {
+  "caip": "eip155:6320/slip44:60",
+  "symbol": "NFBCT",
+  "key": "coins/ZWlwMTU1OjYzMjAvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "fd087da32519d1fdf54252a36b3922b62102ccc61fd16c0e541ec802ab86a660",
+  "bytes": 5763
+ },
+ {
+  "caip": "eip155:65/slip44:60",
+  "symbol": "OKT",
+  "key": "coins/ZWlwMTU1OjY1L3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "4f80fa0da96d40f8991f035cc77de73285d69ad9d5aec002ea97ed3e2352ecc0",
+  "bytes": 6899
+ },
+ {
+  "caip": "eip155:65010004/slip44:60",
+  "symbol": "ATN",
+  "key": "coins/ZWlwMTU1OjY1MDEwMDA0L3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "ef3bf4fd92e03d2aa63994d235247c85d60f2cd001c16684955fc84dc00e7f77",
+  "bytes": 6379
+ },
+ {
+  "caip": "eip155:6502/slip44:60",
+  "symbol": "P2P",
+  "key": "coins/ZWlwMTU1OjY1MDIvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "f5549960ae9d1a2273bd73ef2518b093f18595fe4dd65c5b429de440885ce8d1",
+  "bytes": 5614
+ },
+ {
+  "caip": "eip155:65349/slip44:60",
+  "symbol": "CRAT",
+  "key": "coins/ZWlwMTU1OjY1MzQ5L3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "305be7e1d69c4dfa63d9f87d6598eec1ab1f1f1efa90cc75dcd35c3749d466cc",
+  "bytes": 6855
+ },
+ {
+  "caip": "eip155:6550/slip44:60",
+  "symbol": "FLA",
+  "key": "coins/ZWlwMTU1OjY1NTAvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "ddb64e6c07f18f5b98a56e41d4e47479a2a52b36654b26fcedbb46aac1ea658b",
+  "bytes": 4973
+ },
+ {
+  "caip": "eip155:660279/slip44:60",
+  "symbol": "XAI",
+  "key": "coins/ZWlwMTU1OjY2MDI3OS9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "f9307cba11af367a15e79ba599e9af351e7859df543ac4dce82c126b74a67279",
+  "bytes": 6707
+ },
+ {
+  "caip": "eip155:6626/slip44:60",
+  "symbol": "PIX",
+  "key": "coins/ZWlwMTU1OjY2MjYvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "f5549960ae9d1a2273bd73ef2518b093f18595fe4dd65c5b429de440885ce8d1",
+  "bytes": 5614
+ },
+ {
+  "caip": "eip155:666301171999/slip44:60",
+  "symbol": "PDC",
+  "key": "coins/ZWlwMTU1OjY2NjMwMTE3MTk5OS9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "f5549960ae9d1a2273bd73ef2518b093f18595fe4dd65c5b429de440885ce8d1",
+  "bytes": 5614
+ },
+ {
+  "caip": "eip155:666666/slip44:60",
+  "symbol": "VS",
+  "key": "coins/ZWlwMTU1OjY2NjY2Ni9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "eb734899ac89fdd930d06b589989d748b3b03bd3bece48d10806be94ac65f4cf",
+  "bytes": 6337
+ },
+ {
+  "caip": "eip155:66666666/slip44:60",
+  "symbol": "WINR",
+  "key": "coins/ZWlwMTU1OjY2NjY2NjY2L3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "3463d0791dc95458849ad692569bb769feabb7249fa1d88bf58429cf02e7a9ce",
+  "bytes": 7229
+ },
+ {
+  "caip": "eip155:6666689/slip44:60",
+  "symbol": "Ton",
+  "key": "coins/ZWlwMTU1OjY2NjY2ODkvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "3947259da38636368df2db50a36d2d9a7662651dcc7df5ac2157bbe64b927f52",
+  "bytes": 4890
+ },
+ {
+  "caip": "eip155:666888/slip44:60",
+  "symbol": "HLUSD",
+  "key": "coins/ZWlwMTU1OjY2Njg4OC9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "5a4139be746521fe26dc24a8d3e7be7f8a34c2749682be0ad1343df877c2f9c8",
+  "bytes": 4992
+ },
+ {
+  "caip": "eip155:668/slip44:60",
+  "symbol": "JGC",
+  "key": "coins/ZWlwMTU1OjY2OC9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "5087fb9e19b3dfdb4e9a590623cc37a7620cc16d1887c56b4e8131f09bd46635",
+  "bytes": 5492
+ },
+ {
+  "caip": "eip155:6688/slip44:60",
+  "symbol": "ERIS",
+  "key": "coins/ZWlwMTU1OjY2ODgvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "011132e8880d73dbaa4214c18c292c0425b5eb6e9a4071a3224f2e3817af557e",
+  "bytes": 5091
+ },
+ {
+  "caip": "eip155:669/slip44:60",
+  "symbol": "JGCT",
+  "key": "coins/ZWlwMTU1OjY2OS9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "5087fb9e19b3dfdb4e9a590623cc37a7620cc16d1887c56b4e8131f09bd46635",
+  "bytes": 5492
+ },
+ {
+  "caip": "eip155:67/slip44:60",
+  "symbol": "DBM",
+  "key": "coins/ZWlwMTU1OjY3L3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "c04e5052eb67935ffbaeb7dffe14b0227846fbd406c1b4f70450343c9c27741d",
+  "bytes": 6001
+ },
+ {
+  "caip": "eip155:67588/slip44:60",
+  "symbol": "COSMIC",
+  "key": "coins/ZWlwMTU1OjY3NTg4L3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "305be7e1d69c4dfa63d9f87d6598eec1ab1f1f1efa90cc75dcd35c3749d466cc",
+  "bytes": 6855
+ },
+ {
+  "caip": "eip155:68/slip44:60",
+  "symbol": "SOTER",
+  "key": "coins/ZWlwMTU1OjY4L3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "441675b675a3c52735ad71083bad879f23701bca449d57130717d2d4fd40d856",
+  "bytes": 6957
+ },
+ {
+  "caip": "eip155:686/slip44:60",
+  "symbol": "KAR",
+  "key": "coins/ZWlwMTU1OjY4Ni9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "92a3107511d7d43aaa5e6c8af8f8e10b0e1b2f9cd648b94dfa75b32b7bab1cfd",
+  "bytes": 6232
+ },
+ {
+  "caip": "eip155:6880/slip44:60",
+  "symbol": "MTT",
+  "key": "coins/ZWlwMTU1OjY4ODAvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "bfdba0b5e636a2ae8051f4a90a549577fc98d3a3584be8f3c994cec4ce786199",
+  "bytes": 6177
+ },
+ {
+  "caip": "eip155:688688/slip44:60",
+  "symbol": "PHRS",
+  "key": "coins/ZWlwMTU1OjY4ODY4OC9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "f5549960ae9d1a2273bd73ef2518b093f18595fe4dd65c5b429de440885ce8d1",
+  "bytes": 5614
+ },
+ {
+  "caip": "eip155:69420/slip44:60",
+  "symbol": "CTE",
+  "key": "coins/ZWlwMTU1OjY5NDIwL3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "305be7e1d69c4dfa63d9f87d6598eec1ab1f1f1efa90cc75dcd35c3749d466cc",
+  "bytes": 6855
+ },
+ {
+  "caip": "eip155:6969/slip44:60",
+  "symbol": "TOMB",
+  "key": "coins/ZWlwMTU1OjY5Njkvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "3947259da38636368df2db50a36d2d9a7662651dcc7df5ac2157bbe64b927f52",
+  "bytes": 4890
+ },
+ {
+  "caip": "eip155:696969/slip44:60",
+  "symbol": "GAL",
+  "key": "coins/ZWlwMTU1OjY5Njk2OS9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "455841ae76f1e77bf4376daf27bfff839e7b43ba07a1461ad47c6e301c90998e",
+  "bytes": 7023
+ },
+ {
+  "caip": "eip155:6985385/slip44:60",
+  "symbol": "H",
+  "key": "coins/ZWlwMTU1OjY5ODUzODUvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "5a4139be746521fe26dc24a8d3e7be7f8a34c2749682be0ad1343df877c2f9c8",
+  "bytes": 4992
+ },
+ {
+  "caip": "eip155:6999/slip44:60",
+  "symbol": "PSC",
+  "key": "coins/ZWlwMTU1OjY5OTkvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "f5549960ae9d1a2273bd73ef2518b093f18595fe4dd65c5b429de440885ce8d1",
+  "bytes": 5614
+ },
+ {
+  "caip": "eip155:700/slip44:60",
+  "symbol": "SNS",
+  "key": "coins/ZWlwMTU1OjcwMC9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "441675b675a3c52735ad71083bad879f23701bca449d57130717d2d4fd40d856",
+  "bytes": 6957
+ },
+ {
+  "caip": "eip155:70000/slip44:60",
+  "symbol": "TKM",
+  "key": "coins/ZWlwMTU1OjcwMDAwL3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "3947259da38636368df2db50a36d2d9a7662651dcc7df5ac2157bbe64b927f52",
+  "bytes": 4890
+ },
+ {
+  "caip": "eip155:70001/slip44:60",
+  "symbol": "TKM",
+  "key": "coins/ZWlwMTU1OjcwMDAxL3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "3947259da38636368df2db50a36d2d9a7662651dcc7df5ac2157bbe64b927f52",
+  "bytes": 4890
+ },
+ {
+  "caip": "eip155:70002/slip44:60",
+  "symbol": "TKM",
+  "key": "coins/ZWlwMTU1OjcwMDAyL3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "3947259da38636368df2db50a36d2d9a7662651dcc7df5ac2157bbe64b927f52",
+  "bytes": 4890
+ },
+ {
+  "caip": "eip155:701/slip44:60",
+  "symbol": "KRING",
+  "key": "coins/ZWlwMTU1OjcwMS9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "92a3107511d7d43aaa5e6c8af8f8e10b0e1b2f9cd648b94dfa75b32b7bab1cfd",
+  "bytes": 6232
+ },
+ {
+  "caip": "eip155:70103/slip44:60",
+  "symbol": "TKM",
+  "key": "coins/ZWlwMTU1OjcwMTAzL3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "3947259da38636368df2db50a36d2d9a7662651dcc7df5ac2157bbe64b927f52",
+  "bytes": 4890
+ },
+ {
+  "caip": "eip155:706883/slip44:60",
+  "symbol": "FDS",
+  "key": "coins/ZWlwMTU1OjcwNjg4My9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "ddb64e6c07f18f5b98a56e41d4e47479a2a52b36654b26fcedbb46aac1ea658b",
+  "bytes": 4973
+ },
+ {
+  "caip": "eip155:707/slip44:60",
+  "symbol": "BCS",
+  "key": "coins/ZWlwMTU1OjcwNy9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "40c05d25435152cde7699e9e87abca46aa30a46c43cd733448ea140040e2a647",
+  "bytes": 6142
+ },
+ {
+  "caip": "eip155:7077/slip44:60",
+  "symbol": "tPLQ",
+  "key": "coins/ZWlwMTU1OjcwNzcvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "3947259da38636368df2db50a36d2d9a7662651dcc7df5ac2157bbe64b927f52",
+  "bytes": 4890
+ },
+ {
+  "caip": "eip155:708/slip44:60",
+  "symbol": "tBCS",
+  "key": "coins/ZWlwMTU1OjcwOC9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "3947259da38636368df2db50a36d2d9a7662651dcc7df5ac2157bbe64b927f52",
+  "bytes": 4890
+ },
+ {
+  "caip": "eip155:7080969/slip44:60",
+  "symbol": "tHP",
+  "key": "coins/ZWlwMTU1OjcwODA5Njkvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "3947259da38636368df2db50a36d2d9a7662651dcc7df5ac2157bbe64b927f52",
+  "bytes": 4890
+ },
+ {
+  "caip": "eip155:7099/slip44:60",
+  "symbol": "BBN",
+  "key": "coins/ZWlwMTU1OjcwOTkvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "40c05d25435152cde7699e9e87abca46aa30a46c43cd733448ea140040e2a647",
+  "bytes": 6142
+ },
+ {
+  "caip": "eip155:710420/slip44:60",
+  "symbol": "TILT",
+  "key": "coins/ZWlwMTU1OjcxMDQyMC9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "3947259da38636368df2db50a36d2d9a7662651dcc7df5ac2157bbe64b927f52",
+  "bytes": 4890
+ },
+ {
+  "caip": "eip155:7118/slip44:60",
+  "symbol": "HTH",
+  "key": "coins/ZWlwMTU1OjcxMTgvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "5a4139be746521fe26dc24a8d3e7be7f8a34c2749682be0ad1343df877c2f9c8",
+  "bytes": 4992
+ },
+ {
+  "caip": "eip155:7131/slip44:60",
+  "symbol": "VRCN",
+  "key": "coins/ZWlwMTU1OjcxMzEvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "eb734899ac89fdd930d06b589989d748b3b03bd3bece48d10806be94ac65f4cf",
+  "bytes": 6337
+ },
+ {
+  "caip": "eip155:713715/slip44:60",
+  "symbol": "SEI",
+  "key": "coins/ZWlwMTU1OjcxMzcxNS9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "441675b675a3c52735ad71083bad879f23701bca449d57130717d2d4fd40d856",
+  "bytes": 6957
+ },
+ {
+  "caip": "eip155:71401/slip44:60",
+  "symbol": "pCKB",
+  "key": "coins/ZWlwMTU1OjcxNDAxL3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "f5549960ae9d1a2273bd73ef2518b093f18595fe4dd65c5b429de440885ce8d1",
+  "bytes": 5614
+ },
+ {
+  "caip": "eip155:715131/slip44:60",
+  "symbol": "ZTH",
+  "key": "coins/ZWlwMTU1OjcxNTEzMS9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "fdd25c06f7f4d72de308c4acd22e7f9d9ee6e07644b43eb9ff16213818593eb9",
+  "bytes": 5561
+ },
+ {
+  "caip": "eip155:72/slip44:60",
+  "symbol": "DX",
+  "key": "coins/ZWlwMTU1OjcyL3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "c04e5052eb67935ffbaeb7dffe14b0227846fbd406c1b4f70450343c9c27741d",
+  "bytes": 6001
+ },
+ {
+  "caip": "eip155:7208/slip44:60",
+  "symbol": "NXRA",
+  "key": "coins/ZWlwMTU1OjcyMDgvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "fd087da32519d1fdf54252a36b3922b62102ccc61fd16c0e541ec802ab86a660",
+  "bytes": 5763
+ },
+ {
+  "caip": "eip155:72080/slip44:60",
+  "symbol": "tNXRA",
+  "key": "coins/ZWlwMTU1OjcyMDgwL3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "3947259da38636368df2db50a36d2d9a7662651dcc7df5ac2157bbe64b927f52",
+  "bytes": 4890
+ },
+ {
+  "caip": "eip155:721/slip44:60",
+  "symbol": "LYC",
+  "key": "coins/ZWlwMTU1OjcyMS9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "789584234c7d05dd2fef9836cc84a8ae4a2ddaafc8dbab5144387ac547e3db88",
+  "bytes": 4798
+ },
+ {
+  "caip": "eip155:727/slip44:60",
+  "symbol": "BLU",
+  "key": "coins/ZWlwMTU1OjcyNy9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "40c05d25435152cde7699e9e87abca46aa30a46c43cd733448ea140040e2a647",
+  "bytes": 6142
+ },
+ {
+  "caip": "eip155:7331/slip44:60",
+  "symbol": "KLY",
+  "key": "coins/ZWlwMTU1OjczMzEvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "92a3107511d7d43aaa5e6c8af8f8e10b0e1b2f9cd648b94dfa75b32b7bab1cfd",
+  "bytes": 6232
+ },
+ {
+  "caip": "eip155:7341/slip44:60",
+  "symbol": "SHYFT",
+  "key": "coins/ZWlwMTU1OjczNDEvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "441675b675a3c52735ad71083bad879f23701bca449d57130717d2d4fd40d856",
+  "bytes": 6957
+ },
+ {
+  "caip": "eip155:73799/slip44:60",
+  "symbol": "VT",
+  "key": "coins/ZWlwMTU1OjczNzk5L3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "eb734899ac89fdd930d06b589989d748b3b03bd3bece48d10806be94ac65f4cf",
+  "bytes": 6337
+ },
+ {
+  "caip": "eip155:742/slip44:60",
+  "symbol": "SPAY",
+  "key": "coins/ZWlwMTU1Ojc0Mi9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "441675b675a3c52735ad71083bad879f23701bca449d57130717d2d4fd40d856",
+  "bytes": 6957
+ },
+ {
+  "caip": "eip155:7484/slip44:60",
+  "symbol": "RABA",
+  "key": "coins/ZWlwMTU1Ojc0ODQvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "f2000af02fd183b676de5ade41449391403d4b4018a1d90da700082684b96e98",
+  "bytes": 6048
+ },
+ {
+  "caip": "eip155:752025/slip44:60",
+  "symbol": "CAPS",
+  "key": "coins/ZWlwMTU1Ojc1MjAyNS9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "305be7e1d69c4dfa63d9f87d6598eec1ab1f1f1efa90cc75dcd35c3749d466cc",
+  "bytes": 6855
+ },
+ {
+  "caip": "eip155:75338/slip44:60",
+  "symbol": "APPL",
+  "key": "coins/ZWlwMTU1Ojc1MzM4L3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "ef3bf4fd92e03d2aa63994d235247c85d60f2cd001c16684955fc84dc00e7f77",
+  "bytes": 6379
+ },
+ {
+  "caip": "eip155:75512/slip44:60",
+  "symbol": "OAS",
+  "key": "coins/ZWlwMTU1Ojc1NTEyL3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "4f80fa0da96d40f8991f035cc77de73285d69ad9d5aec002ea97ed3e2352ecc0",
+  "bytes": 6899
+ },
+ {
+  "caip": "eip155:75513/slip44:60",
+  "symbol": "OAS",
+  "key": "coins/ZWlwMTU1Ojc1NTEzL3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "4f80fa0da96d40f8991f035cc77de73285d69ad9d5aec002ea97ed3e2352ecc0",
+  "bytes": 6899
+ },
+ {
+  "caip": "eip155:756689/slip44:60",
+  "symbol": "PYZ",
+  "key": "coins/ZWlwMTU1Ojc1NjY4OS9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "f5549960ae9d1a2273bd73ef2518b093f18595fe4dd65c5b429de440885ce8d1",
+  "bytes": 5614
+ },
+ {
+  "caip": "eip155:764984/slip44:60",
+  "symbol": "L1T",
+  "key": "coins/ZWlwMTU1Ojc2NDk4NC9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "789584234c7d05dd2fef9836cc84a8ae4a2ddaafc8dbab5144387ac547e3db88",
+  "bytes": 4798
+ },
+ {
+  "caip": "eip155:767368/slip44:60",
+  "symbol": "L1IDT",
+  "key": "coins/ZWlwMTU1Ojc2NzM2OC9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "789584234c7d05dd2fef9836cc84a8ae4a2ddaafc8dbab5144387ac547e3db88",
+  "bytes": 4798
+ },
+ {
+  "caip": "eip155:77/slip44:60",
+  "symbol": "SPOA",
+  "key": "coins/ZWlwMTU1Ojc3L3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "441675b675a3c52735ad71083bad879f23701bca449d57130717d2d4fd40d856",
+  "bytes": 6957
+ },
+ {
+  "caip": "eip155:7701/slip44:60",
+  "symbol": "CANTO",
+  "key": "coins/ZWlwMTU1Ojc3MDEvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "305be7e1d69c4dfa63d9f87d6598eec1ab1f1f1efa90cc75dcd35c3749d466cc",
+  "bytes": 6855
+ },
+ {
+  "caip": "eip155:776/slip44:60",
+  "symbol": "TOPC",
+  "key": "coins/ZWlwMTU1Ojc3Ni9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "3947259da38636368df2db50a36d2d9a7662651dcc7df5ac2157bbe64b927f52",
+  "bytes": 4890
+ },
+ {
+  "caip": "eip155:77652/slip44:60",
+  "symbol": "CARR",
+  "key": "coins/ZWlwMTU1Ojc3NjUyL3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "305be7e1d69c4dfa63d9f87d6598eec1ab1f1f1efa90cc75dcd35c3749d466cc",
+  "bytes": 6855
+ },
+ {
+  "caip": "eip155:776877/slip44:60",
+  "symbol": "MDM",
+  "key": "coins/ZWlwMTU1Ojc3Njg3Ny9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "bfdba0b5e636a2ae8051f4a90a549577fc98d3a3584be8f3c994cec4ce786199",
+  "bytes": 6177
+ },
+ {
+  "caip": "eip155:777/slip44:60",
+  "symbol": "cTH",
+  "key": "coins/ZWlwMTU1Ojc3Ny9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "305be7e1d69c4dfa63d9f87d6598eec1ab1f1f1efa90cc75dcd35c3749d466cc",
+  "bytes": 6855
+ },
+ {
+  "caip": "eip155:7770/slip44:60",
+  "symbol": "PANDA",
+  "key": "coins/ZWlwMTU1Ojc3NzAvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "f5549960ae9d1a2273bd73ef2518b093f18595fe4dd65c5b429de440885ce8d1",
+  "bytes": 5614
+ },
+ {
+  "caip": "eip155:7771/slip44:60",
+  "symbol": "BROCK",
+  "key": "coins/ZWlwMTU1Ojc3NzEvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "40c05d25435152cde7699e9e87abca46aa30a46c43cd733448ea140040e2a647",
+  "bytes": 6142
+ },
+ {
+  "caip": "eip155:7776/slip44:60",
+  "symbol": "PANDA",
+  "key": "coins/ZWlwMTU1Ojc3NzYvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "f5549960ae9d1a2273bd73ef2518b093f18595fe4dd65c5b429de440885ce8d1",
+  "bytes": 5614
+ },
+ {
+  "caip": "eip155:777888/slip44:60",
+  "symbol": "OONE",
+  "key": "coins/ZWlwMTU1Ojc3Nzg4OC9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "4f80fa0da96d40f8991f035cc77de73285d69ad9d5aec002ea97ed3e2352ecc0",
+  "bytes": 6899
+ },
+ {
+  "caip": "eip155:78/slip44:60",
+  "symbol": "PETH",
+  "key": "coins/ZWlwMTU1Ojc4L3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "f5549960ae9d1a2273bd73ef2518b093f18595fe4dd65c5b429de440885ce8d1",
+  "bytes": 5614
+ },
+ {
+  "caip": "eip155:78110/slip44:60",
+  "symbol": "FIN",
+  "key": "coins/ZWlwMTU1Ojc4MTEwL3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "ddb64e6c07f18f5b98a56e41d4e47479a2a52b36654b26fcedbb46aac1ea658b",
+  "bytes": 4973
+ },
+ {
+  "caip": "eip155:78431/slip44:60",
+  "symbol": "BLT",
+  "key": "coins/ZWlwMTU1Ojc4NDMxL3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "40c05d25435152cde7699e9e87abca46aa30a46c43cd733448ea140040e2a647",
+  "bytes": 6142
+ },
+ {
+  "caip": "eip155:78432/slip44:60",
+  "symbol": "CON",
+  "key": "coins/ZWlwMTU1Ojc4NDMyL3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "305be7e1d69c4dfa63d9f87d6598eec1ab1f1f1efa90cc75dcd35c3749d466cc",
+  "bytes": 6855
+ },
+ {
+  "caip": "eip155:785/slip44:60",
+  "symbol": "THEO",
+  "key": "coins/ZWlwMTU1Ojc4NS9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "3947259da38636368df2db50a36d2d9a7662651dcc7df5ac2157bbe64b927f52",
+  "bytes": 4890
+ },
+ {
+  "caip": "eip155:786786/slip44:60",
+  "symbol": "ZEBRO",
+  "key": "coins/ZWlwMTU1Ojc4Njc4Ni9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "fdd25c06f7f4d72de308c4acd22e7f9d9ee6e07644b43eb9ff16213818593eb9",
+  "bytes": 5561
+ },
+ {
+  "caip": "eip155:787/slip44:60",
+  "symbol": "ACA",
+  "key": "coins/ZWlwMTU1Ojc4Ny9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "ef3bf4fd92e03d2aa63994d235247c85d60f2cd001c16684955fc84dc00e7f77",
+  "bytes": 6379
+ },
+ {
+  "caip": "eip155:7878/slip44:60",
+  "symbol": "TSCAS",
+  "key": "coins/ZWlwMTU1Ojc4Nzgvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "3947259da38636368df2db50a36d2d9a7662651dcc7df5ac2157bbe64b927f52",
+  "bytes": 4890
+ },
+ {
+  "caip": "eip155:7879/slip44:60",
+  "symbol": "tVEX",
+  "key": "coins/ZWlwMTU1Ojc4Nzkvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "3947259da38636368df2db50a36d2d9a7662651dcc7df5ac2157bbe64b927f52",
+  "bytes": 4890
+ },
+ {
+  "caip": "eip155:788/slip44:60",
+  "symbol": "TAero",
+  "key": "coins/ZWlwMTU1Ojc4OC9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "3947259da38636368df2db50a36d2d9a7662651dcc7df5ac2157bbe64b927f52",
+  "bytes": 4890
+ },
+ {
+  "caip": "eip155:7890/slip44:60",
+  "symbol": "PC",
+  "key": "coins/ZWlwMTU1Ojc4OTAvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "f5549960ae9d1a2273bd73ef2518b093f18595fe4dd65c5b429de440885ce8d1",
+  "bytes": 5614
+ },
+ {
+  "caip": "eip155:7895/slip44:60",
+  "symbol": "tARD",
+  "key": "coins/ZWlwMTU1Ojc4OTUvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "3947259da38636368df2db50a36d2d9a7662651dcc7df5ac2157bbe64b927f52",
+  "bytes": 4890
+ },
+ {
+  "caip": "eip155:789789/slip44:60",
+  "symbol": "EMED",
+  "key": "coins/ZWlwMTU1Ojc4OTc4OS9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "011132e8880d73dbaa4214c18c292c0425b5eb6e9a4071a3224f2e3817af557e",
+  "bytes": 5091
+ },
+ {
+  "caip": "eip155:79/slip44:60",
+  "symbol": "ZENITH",
+  "key": "coins/ZWlwMTU1Ojc5L3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "fdd25c06f7f4d72de308c4acd22e7f9d9ee6e07644b43eb9ff16213818593eb9",
+  "bytes": 5561
+ },
+ {
+  "caip": "eip155:7957/slip44:60",
+  "symbol": "tEXOR",
+  "key": "coins/ZWlwMTU1Ojc5NTcvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "3947259da38636368df2db50a36d2d9a7662651dcc7df5ac2157bbe64b927f52",
+  "bytes": 4890
+ },
+ {
+  "caip": "eip155:799/slip44:60",
+  "symbol": "TRUPX",
+  "key": "coins/ZWlwMTU1Ojc5OS9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "3947259da38636368df2db50a36d2d9a7662651dcc7df5ac2157bbe64b927f52",
+  "bytes": 4890
+ },
+ {
+  "caip": "eip155:800001/slip44:60",
+  "symbol": "OCTA",
+  "key": "coins/ZWlwMTU1OjgwMDAwMS9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "4f80fa0da96d40f8991f035cc77de73285d69ad9d5aec002ea97ed3e2352ecc0",
+  "bytes": 6899
+ },
+ {
+  "caip": "eip155:8006/slip44:60",
+  "symbol": "BMN",
+  "key": "coins/ZWlwMTU1OjgwMDYvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "40c05d25435152cde7699e9e87abca46aa30a46c43cd733448ea140040e2a647",
+  "bytes": 6142
+ },
+ {
+  "caip": "eip155:8007736/slip44:60",
+  "symbol": "PI",
+  "key": "coins/ZWlwMTU1OjgwMDc3MzYvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "f5549960ae9d1a2273bd73ef2518b093f18595fe4dd65c5b429de440885ce8d1",
+  "bytes": 5614
+ },
+ {
+  "caip": "eip155:8008135/slip44:60",
+  "symbol": "tFHE",
+  "key": "coins/ZWlwMTU1OjgwMDgxMzUvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "3947259da38636368df2db50a36d2d9a7662651dcc7df5ac2157bbe64b927f52",
+  "bytes": 4890
+ },
+ {
+  "caip": "eip155:8029/slip44:60",
+  "symbol": "MDGLT",
+  "key": "coins/ZWlwMTU1OjgwMjkvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "bfdba0b5e636a2ae8051f4a90a549577fc98d3a3584be8f3c994cec4ce786199",
+  "bytes": 6177
+ },
+ {
+  "caip": "eip155:80451/slip44:60",
+  "symbol": "GRT",
+  "key": "coins/ZWlwMTU1OjgwNDUxL3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "455841ae76f1e77bf4376daf27bfff839e7b43ba07a1461ad47c6e301c90998e",
+  "bytes": 7023
+ },
+ {
+  "caip": "eip155:808080/slip44:60",
+  "symbol": "tBIZT",
+  "key": "coins/ZWlwMTU1OjgwODA4MC9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "3947259da38636368df2db50a36d2d9a7662651dcc7df5ac2157bbe64b927f52",
+  "bytes": 4890
+ },
+ {
+  "caip": "eip155:80931/slip44:60",
+  "symbol": "FORT",
+  "key": "coins/ZWlwMTU1OjgwOTMxL3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "ddb64e6c07f18f5b98a56e41d4e47479a2a52b36654b26fcedbb46aac1ea658b",
+  "bytes": 4973
+ },
+ {
+  "caip": "eip155:8098/slip44:60",
+  "symbol": "SmuX",
+  "key": "coins/ZWlwMTU1OjgwOTgvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "441675b675a3c52735ad71083bad879f23701bca449d57130717d2d4fd40d856",
+  "bytes": 6957
+ },
+ {
+  "caip": "eip155:8099/slip44:60",
+  "symbol": "BBN",
+  "key": "coins/ZWlwMTU1OjgwOTkvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "40c05d25435152cde7699e9e87abca46aa30a46c43cd733448ea140040e2a647",
+  "bytes": 6142
+ },
+ {
+  "caip": "eip155:812397/slip44:60",
+  "symbol": "OAS",
+  "key": "coins/ZWlwMTU1OjgxMjM5Ny9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "4f80fa0da96d40f8991f035cc77de73285d69ad9d5aec002ea97ed3e2352ecc0",
+  "bytes": 6899
+ },
+ {
+  "caip": "eip155:8125/slip44:60",
+  "symbol": "tLRX",
+  "key": "coins/ZWlwMTU1OjgxMjUvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "3947259da38636368df2db50a36d2d9a7662651dcc7df5ac2157bbe64b927f52",
+  "bytes": 4890
+ },
+ {
+  "caip": "eip155:82459/slip44:60",
+  "symbol": "SU",
+  "key": "coins/ZWlwMTU1OjgyNDU5L3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "441675b675a3c52735ad71083bad879f23701bca449d57130717d2d4fd40d856",
+  "bytes": 6957
+ },
+ {
+  "caip": "eip155:8285/slip44:60",
+  "symbol": "KTO",
+  "key": "coins/ZWlwMTU1OjgyODUvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "92a3107511d7d43aaa5e6c8af8f8e10b0e1b2f9cd648b94dfa75b32b7bab1cfd",
+  "bytes": 6232
+ },
+ {
+  "caip": "eip155:83/slip44:60",
+  "symbol": "MTR",
+  "key": "coins/ZWlwMTU1OjgzL3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "bfdba0b5e636a2ae8051f4a90a549577fc98d3a3584be8f3c994cec4ce786199",
+  "bytes": 6177
+ },
+ {
+  "caip": "eip155:83144/slip44:60",
+  "symbol": "KICK",
+  "key": "coins/ZWlwMTU1OjgzMTQ0L3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "92a3107511d7d43aaa5e6c8af8f8e10b0e1b2f9cd648b94dfa75b32b7bab1cfd",
+  "bytes": 6232
+ },
+ {
+  "caip": "eip155:8386/slip44:60",
+  "symbol": "KICK",
+  "key": "coins/ZWlwMTU1OjgzODYvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "92a3107511d7d43aaa5e6c8af8f8e10b0e1b2f9cd648b94dfa75b32b7bab1cfd",
+  "bytes": 6232
+ },
+ {
+  "caip": "eip155:83868/slip44:60",
+  "symbol": "KICK",
+  "key": "coins/ZWlwMTU1OjgzODY4L3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "92a3107511d7d43aaa5e6c8af8f8e10b0e1b2f9cd648b94dfa75b32b7bab1cfd",
+  "bytes": 6232
+ },
+ {
+  "caip": "eip155:839320/slip44:60",
+  "symbol": "PRM",
+  "key": "coins/ZWlwMTU1OjgzOTMyMC9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "f5549960ae9d1a2273bd73ef2518b093f18595fe4dd65c5b429de440885ce8d1",
+  "bytes": 5614
+ },
+ {
+  "caip": "eip155:840000/slip44:60",
+  "symbol": "tBTC",
+  "key": "coins/ZWlwMTU1Ojg0MDAwMC9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "3947259da38636368df2db50a36d2d9a7662651dcc7df5ac2157bbe64b927f52",
+  "bytes": 4890
+ },
+ {
+  "caip": "eip155:843843/slip44:60",
+  "symbol": "GNET",
+  "key": "coins/ZWlwMTU1Ojg0Mzg0My9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "455841ae76f1e77bf4376daf27bfff839e7b43ba07a1461ad47c6e301c90998e",
+  "bytes": 7023
+ },
+ {
+  "caip": "eip155:8453/erc20:0x484c46efdc3f2f9ed6c28ef8a907b0da25245889",
+  "symbol": "TARD",
+  "key": "coins/ZWlwMTU1Ojg0NTMvZXJjMjA6MHg0ODRjNDZlZmRjM2YyZjllZDZjMjhlZjhhOTA3YjBkYTI1MjQ1ODg5.png",
+  "source": "generic",
+  "sha256": "3947259da38636368df2db50a36d2d9a7662651dcc7df5ac2157bbe64b927f52",
+  "bytes": 4890
+ },
+ {
+  "caip": "eip155:8453/erc20:0xacb31d2ee40e81720c6374097d2e1a9a8e3b7806",
+  "symbol": "ESXA",
+  "key": "coins/ZWlwMTU1Ojg0NTMvZXJjMjA6MHhhY2IzMWQyZWU0MGU4MTcyMGM2Mzc0MDk3ZDJlMWE5YThlM2I3ODA2.png",
+  "source": "generic",
+  "sha256": "011132e8880d73dbaa4214c18c292c0425b5eb6e9a4071a3224f2e3817af557e",
+  "bytes": 5091
+ },
+ {
+  "caip": "eip155:8453/erc20:0xc1512b7023a97d54f8dd757b1f84e132297ca0d7",
+  "symbol": "BALL",
+  "key": "coins/ZWlwMTU1Ojg0NTMvZXJjMjA6MHhjMTUxMmI3MDIzYTk3ZDU0ZjhkZDc1N2IxZjg0ZTEzMjI5N2NhMGQ3.png",
+  "source": "generic",
+  "sha256": "40c05d25435152cde7699e9e87abca46aa30a46c43cd733448ea140040e2a647",
+  "bytes": 6142
+ },
+ {
+  "caip": "eip155:846000/slip44:60",
+  "symbol": "APTA",
+  "key": "coins/ZWlwMTU1Ojg0NjAwMC9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "ef3bf4fd92e03d2aa63994d235247c85d60f2cd001c16684955fc84dc00e7f77",
+  "bytes": 6379
+ },
+ {
+  "caip": "eip155:84841/slip44:60",
+  "symbol": "O",
+  "key": "coins/ZWlwMTU1Ojg0ODQxL3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "4f80fa0da96d40f8991f035cc77de73285d69ad9d5aec002ea97ed3e2352ecc0",
+  "bytes": 6899
+ },
+ {
+  "caip": "eip155:85/slip44:60",
+  "symbol": "GT",
+  "key": "coins/ZWlwMTU1Ojg1L3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "455841ae76f1e77bf4376daf27bfff839e7b43ba07a1461ad47c6e301c90998e",
+  "bytes": 7023
+ },
+ {
+  "caip": "eip155:852/slip44:60",
+  "symbol": "HK",
+  "key": "coins/ZWlwMTU1Ojg1Mi9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "5a4139be746521fe26dc24a8d3e7be7f8a34c2749682be0ad1343df877c2f9c8",
+  "bytes": 4992
+ },
+ {
+  "caip": "eip155:85321/slip44:60",
+  "symbol": "GDPR",
+  "key": "coins/ZWlwMTU1Ojg1MzIxL3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "455841ae76f1e77bf4376daf27bfff839e7b43ba07a1461ad47c6e301c90998e",
+  "bytes": 7023
+ },
+ {
+  "caip": "eip155:85449/slip44:60",
+  "symbol": "CYBER",
+  "key": "coins/ZWlwMTU1Ojg1NDQ5L3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "305be7e1d69c4dfa63d9f87d6598eec1ab1f1f1efa90cc75dcd35c3749d466cc",
+  "bytes": 6855
+ },
+ {
+  "caip": "eip155:8545/slip44:60",
+  "symbol": "CKR",
+  "key": "coins/ZWlwMTU1Ojg1NDUvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "305be7e1d69c4dfa63d9f87d6598eec1ab1f1f1efa90cc75dcd35c3749d466cc",
+  "bytes": 6855
+ },
+ {
+  "caip": "eip155:8569/slip44:60",
+  "symbol": "NEWRL",
+  "key": "coins/ZWlwMTU1Ojg1Njkvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "fd087da32519d1fdf54252a36b3922b62102ccc61fd16c0e541ec802ab86a660",
+  "bytes": 5763
+ },
+ {
+  "caip": "eip155:859/slip44:60",
+  "symbol": "ZTH",
+  "key": "coins/ZWlwMTU1Ojg1OS9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "fdd25c06f7f4d72de308c4acd22e7f9d9ee6e07644b43eb9ff16213818593eb9",
+  "bytes": 5561
+ },
+ {
+  "caip": "eip155:86/slip44:60",
+  "symbol": "GT",
+  "key": "coins/ZWlwMTU1Ojg2L3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "455841ae76f1e77bf4376daf27bfff839e7b43ba07a1461ad47c6e301c90998e",
+  "bytes": 7023
+ },
+ {
+  "caip": "eip155:861/slip44:60",
+  "symbol": "ELC",
+  "key": "coins/ZWlwMTU1Ojg2MS9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "011132e8880d73dbaa4214c18c292c0425b5eb6e9a4071a3224f2e3817af557e",
+  "bytes": 5091
+ },
+ {
+  "caip": "eip155:863/slip44:60",
+  "symbol": "USLS",
+  "key": "coins/ZWlwMTU1Ojg2My9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "ff7ced5bf48fc7724575bd8e41f3d4399f030947e68602e3cb473f767cb6c070",
+  "bytes": 5620
+ },
+ {
+  "caip": "eip155:868/slip44:60",
+  "symbol": "FST",
+  "key": "coins/ZWlwMTU1Ojg2OC9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "ddb64e6c07f18f5b98a56e41d4e47479a2a52b36654b26fcedbb46aac1ea658b",
+  "bytes": 4973
+ },
+ {
+  "caip": "eip155:870/slip44:60",
+  "symbol": "AI3",
+  "key": "coins/ZWlwMTU1Ojg3MC9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "ef3bf4fd92e03d2aa63994d235247c85d60f2cd001c16684955fc84dc00e7f77",
+  "bytes": 6379
+ },
+ {
+  "caip": "eip155:871/slip44:60",
+  "symbol": "TELC",
+  "key": "coins/ZWlwMTU1Ojg3MS9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "3947259da38636368df2db50a36d2d9a7662651dcc7df5ac2157bbe64b927f52",
+  "bytes": 4890
+ },
+ {
+  "caip": "eip155:8721/slip44:60",
+  "symbol": "EBC",
+  "key": "coins/ZWlwMTU1Ojg3MjEvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "011132e8880d73dbaa4214c18c292c0425b5eb6e9a4071a3224f2e3817af557e",
+  "bytes": 5091
+ },
+ {
+  "caip": "eip155:8723/slip44:60",
+  "symbol": "OLO",
+  "key": "coins/ZWlwMTU1Ojg3MjMvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "4f80fa0da96d40f8991f035cc77de73285d69ad9d5aec002ea97ed3e2352ecc0",
+  "bytes": 6899
+ },
+ {
+  "caip": "eip155:8724/slip44:60",
+  "symbol": "OLO",
+  "key": "coins/ZWlwMTU1Ojg3MjQvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "4f80fa0da96d40f8991f035cc77de73285d69ad9d5aec002ea97ed3e2352ecc0",
+  "bytes": 6899
+ },
+ {
+  "caip": "eip155:8732/slip44:60",
+  "symbol": "BLN",
+  "key": "coins/ZWlwMTU1Ojg3MzIvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "40c05d25435152cde7699e9e87abca46aa30a46c43cd733448ea140040e2a647",
+  "bytes": 6142
+ },
+ {
+  "caip": "eip155:8738/slip44:60",
+  "symbol": "ALPH",
+  "key": "coins/ZWlwMTU1Ojg3Mzgvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "ef3bf4fd92e03d2aa63994d235247c85d60f2cd001c16684955fc84dc00e7f77",
+  "bytes": 6379
+ },
+ {
+  "caip": "eip155:877/slip44:60",
+  "symbol": "DXT",
+  "key": "coins/ZWlwMTU1Ojg3Ny9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "c04e5052eb67935ffbaeb7dffe14b0227846fbd406c1b4f70450343c9c27741d",
+  "bytes": 6001
+ },
+ {
+  "caip": "eip155:8794598/slip44:60",
+  "symbol": "HAP",
+  "key": "coins/ZWlwMTU1Ojg3OTQ1OTgvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "5a4139be746521fe26dc24a8d3e7be7f8a34c2749682be0ad1343df877c2f9c8",
+  "bytes": 4992
+ },
+ {
+  "caip": "eip155:880/slip44:60",
+  "symbol": "AMBROS",
+  "key": "coins/ZWlwMTU1Ojg4MC9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "ef3bf4fd92e03d2aa63994d235247c85d60f2cd001c16684955fc84dc00e7f77",
+  "bytes": 6379
+ },
+ {
+  "caip": "eip155:8801/slip44:60",
+  "symbol": "OKTO",
+  "key": "coins/ZWlwMTU1Ojg4MDEvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "4f80fa0da96d40f8991f035cc77de73285d69ad9d5aec002ea97ed3e2352ecc0",
+  "bytes": 6899
+ },
+ {
+  "caip": "eip155:88153591557/slip44:60",
+  "symbol": "CGT",
+  "key": "coins/ZWlwMTU1Ojg4MTUzNTkxNTU3L3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "305be7e1d69c4dfa63d9f87d6598eec1ab1f1f1efa90cc75dcd35c3749d466cc",
+  "bytes": 6855
+ },
+ {
+  "caip": "eip155:88800/slip44:60",
+  "symbol": "ZKAS",
+  "key": "coins/ZWlwMTU1Ojg4ODAwL3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "fdd25c06f7f4d72de308c4acd22e7f9d9ee6e07644b43eb9ff16213818593eb9",
+  "bytes": 5561
+ },
+ {
+  "caip": "eip155:88811/slip44:60",
+  "symbol": "UNIT0",
+  "key": "coins/ZWlwMTU1Ojg4ODExL3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "ff7ced5bf48fc7724575bd8e41f3d4399f030947e68602e3cb473f767cb6c070",
+  "bytes": 5620
+ },
+ {
+  "caip": "eip155:88817/slip44:60",
+  "symbol": "UNIT0",
+  "key": "coins/ZWlwMTU1Ojg4ODE3L3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "ff7ced5bf48fc7724575bd8e41f3d4399f030947e68602e3cb473f767cb6c070",
+  "bytes": 5620
+ },
+ {
+  "caip": "eip155:88819/slip44:60",
+  "symbol": "UNIT0",
+  "key": "coins/ZWlwMTU1Ojg4ODE5L3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "ff7ced5bf48fc7724575bd8e41f3d4399f030947e68602e3cb473f767cb6c070",
+  "bytes": 5620
+ },
+ {
+  "caip": "eip155:8886/slip44:60",
+  "symbol": "tAVE",
+  "key": "coins/ZWlwMTU1Ojg4ODYvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "3947259da38636368df2db50a36d2d9a7662651dcc7df5ac2157bbe64b927f52",
+  "bytes": 4890
+ },
+ {
+  "caip": "eip155:888882/slip44:60",
+  "symbol": "REXX",
+  "key": "coins/ZWlwMTU1Ojg4ODg4Mi9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "f2000af02fd183b676de5ade41449391403d4b4018a1d90da700082684b96e98",
+  "bytes": 6048
+ },
+ {
+  "caip": "eip155:888888/slip44:60",
+  "symbol": "VS",
+  "key": "coins/ZWlwMTU1Ojg4ODg4OC9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "eb734899ac89fdd930d06b589989d748b3b03bd3bece48d10806be94ac65f4cf",
+  "bytes": 6337
+ },
+ {
+  "caip": "eip155:8889/slip44:60",
+  "symbol": "VSC",
+  "key": "coins/ZWlwMTU1Ojg4ODkvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "eb734899ac89fdd930d06b589989d748b3b03bd3bece48d10806be94ac65f4cf",
+  "bytes": 6337
+ },
+ {
+  "caip": "eip155:888991/slip44:60",
+  "symbol": "UNITE",
+  "key": "coins/ZWlwMTU1Ojg4ODk5MS9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "ff7ced5bf48fc7724575bd8e41f3d4399f030947e68602e3cb473f767cb6c070",
+  "bytes": 5620
+ },
+ {
+  "caip": "eip155:889910245/slip44:60",
+  "symbol": "PTCE",
+  "key": "coins/ZWlwMTU1Ojg4OTkxMDI0NS9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "f5549960ae9d1a2273bd73ef2518b093f18595fe4dd65c5b429de440885ce8d1",
+  "bytes": 5614
+ },
+ {
+  "caip": "eip155:889910246/slip44:60",
+  "symbol": "PTCE",
+  "key": "coins/ZWlwMTU1Ojg4OTkxMDI0Ni9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "f5549960ae9d1a2273bd73ef2518b093f18595fe4dd65c5b429de440885ce8d1",
+  "bytes": 5614
+ },
+ {
+  "caip": "eip155:89/slip44:60",
+  "symbol": "VIC",
+  "key": "coins/ZWlwMTU1Ojg5L3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "eb734899ac89fdd930d06b589989d748b3b03bd3bece48d10806be94ac65f4cf",
+  "bytes": 6337
+ },
+ {
+  "caip": "eip155:8995/slip44:60",
+  "symbol": "U+25B3",
+  "key": "coins/ZWlwMTU1Ojg5OTUvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "ff7ced5bf48fc7724575bd8e41f3d4399f030947e68602e3cb473f767cb6c070",
+  "bytes": 5620
+ },
+ {
+  "caip": "eip155:900000/slip44:60",
+  "symbol": "POSI",
+  "key": "coins/ZWlwMTU1OjkwMDAwMC9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "f5549960ae9d1a2273bd73ef2518b093f18595fe4dd65c5b429de440885ce8d1",
+  "bytes": 5614
+ },
+ {
+  "caip": "eip155:90001/slip44:60",
+  "symbol": "PUNDAI",
+  "key": "coins/ZWlwMTU1OjkwMDAxL3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "f5549960ae9d1a2273bd73ef2518b093f18595fe4dd65c5b429de440885ce8d1",
+  "bytes": 5614
+ },
+ {
+  "caip": "eip155:90002/slip44:60",
+  "symbol": "USC",
+  "key": "coins/ZWlwMTU1OjkwMDAyL3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "ff7ced5bf48fc7724575bd8e41f3d4399f030947e68602e3cb473f767cb6c070",
+  "bytes": 5620
+ },
+ {
+  "caip": "eip155:90025/slip44:60",
+  "symbol": "AIPAW",
+  "key": "coins/ZWlwMTU1OjkwMDI1L3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "ef3bf4fd92e03d2aa63994d235247c85d60f2cd001c16684955fc84dc00e7f77",
+  "bytes": 6379
+ },
+ {
+  "caip": "eip155:9003/slip44:60",
+  "symbol": "TICS",
+  "key": "coins/ZWlwMTU1OjkwMDMvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "3947259da38636368df2db50a36d2d9a7662651dcc7df5ac2157bbe64b927f52",
+  "bytes": 4890
+ },
+ {
+  "caip": "eip155:90210/slip44:60",
+  "symbol": "BVE",
+  "key": "coins/ZWlwMTU1OjkwMjEwL3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "40c05d25435152cde7699e9e87abca46aa30a46c43cd733448ea140040e2a647",
+  "bytes": 6142
+ },
+ {
+  "caip": "eip155:9029/slip44:60",
+  "symbol": "TICS",
+  "key": "coins/ZWlwMTU1OjkwMjkvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "3947259da38636368df2db50a36d2d9a7662651dcc7df5ac2157bbe64b927f52",
+  "bytes": 4890
+ },
+ {
+  "caip": "eip155:9090/slip44:60",
+  "symbol": "INCO",
+  "key": "coins/ZWlwMTU1OjkwOTAvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "0cb9e36780ee0c10a7691f65640b0e131be783436d0279a0e6720c87dc53af3a",
+  "bytes": 4676
+ },
+ {
+  "caip": "eip155:910/slip44:60",
+  "symbol": "DBONE",
+  "key": "coins/ZWlwMTU1OjkxMC9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "c04e5052eb67935ffbaeb7dffe14b0227846fbd406c1b4f70450343c9c27741d",
+  "bytes": 6001
+ },
+ {
+  "caip": "eip155:9100/slip44:60",
+  "symbol": "GNC",
+  "key": "coins/ZWlwMTU1OjkxMDAvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "455841ae76f1e77bf4376daf27bfff839e7b43ba07a1461ad47c6e301c90998e",
+  "bytes": 7023
+ },
+ {
+  "caip": "eip155:910000/slip44:60",
+  "symbol": "POSI",
+  "key": "coins/ZWlwMTU1OjkxMDAwMC9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "f5549960ae9d1a2273bd73ef2518b093f18595fe4dd65c5b429de440885ce8d1",
+  "bytes": 5614
+ },
+ {
+  "caip": "eip155:9108/slip44:60",
+  "symbol": "SYNC",
+  "key": "coins/ZWlwMTU1OjkxMDgvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "441675b675a3c52735ad71083bad879f23701bca449d57130717d2d4fd40d856",
+  "bytes": 6957
+ },
+ {
+  "caip": "eip155:911/slip44:60",
+  "symbol": "TBTC",
+  "key": "coins/ZWlwMTU1OjkxMS9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "3947259da38636368df2db50a36d2d9a7662651dcc7df5ac2157bbe64b927f52",
+  "bytes": 4890
+ },
+ {
+  "caip": "eip155:918/slip44:60",
+  "symbol": "WSLERF",
+  "key": "coins/ZWlwMTU1OjkxOC9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "3463d0791dc95458849ad692569bb769feabb7249fa1d88bf58429cf02e7a9ce",
+  "bytes": 7229
+ },
+ {
+  "caip": "eip155:920000/slip44:60",
+  "symbol": "POSI",
+  "key": "coins/ZWlwMTU1OjkyMDAwMC9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "f5549960ae9d1a2273bd73ef2518b093f18595fe4dd65c5b429de440885ce8d1",
+  "bytes": 5614
+ },
+ {
+  "caip": "eip155:920001/slip44:60",
+  "symbol": "POSI",
+  "key": "coins/ZWlwMTU1OjkyMDAwMS9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "f5549960ae9d1a2273bd73ef2518b093f18595fe4dd65c5b429de440885ce8d1",
+  "bytes": 5614
+ },
+ {
+  "caip": "eip155:92870/slip44:60",
+  "symbol": "WATR",
+  "key": "coins/ZWlwMTU1OjkyODcwL3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "3463d0791dc95458849ad692569bb769feabb7249fa1d88bf58429cf02e7a9ce",
+  "bytes": 7229
+ },
+ {
+  "caip": "eip155:9302/slip44:60",
+  "symbol": "GNET",
+  "key": "coins/ZWlwMTU1OjkzMDIvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "455841ae76f1e77bf4376daf27bfff839e7b43ba07a1461ad47c6e301c90998e",
+  "bytes": 7023
+ },
+ {
+  "caip": "eip155:9339/slip44:60",
+  "symbol": "DOGS",
+  "key": "coins/ZWlwMTU1OjkzMzkvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "c04e5052eb67935ffbaeb7dffe14b0227846fbd406c1b4f70450343c9c27741d",
+  "bytes": 6001
+ },
+ {
+  "caip": "eip155:93747/slip44:60",
+  "symbol": "SVM",
+  "key": "coins/ZWlwMTU1OjkzNzQ3L3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "441675b675a3c52735ad71083bad879f23701bca449d57130717d2d4fd40d856",
+  "bytes": 6957
+ },
+ {
+  "caip": "eip155:9496/slip44:60",
+  "symbol": "tLOAD",
+  "key": "coins/ZWlwMTU1Ojk0OTYvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "3947259da38636368df2db50a36d2d9a7662651dcc7df5ac2157bbe64b927f52",
+  "bytes": 4890
+ },
+ {
+  "caip": "eip155:9528/slip44:60",
+  "symbol": "QET",
+  "key": "coins/ZWlwMTU1Ojk1Mjgvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "b002b2078f2af84bcbad5c24cb3be7834ba4b71fce84a394783ed3ec683dc6d0",
+  "bytes": 7090
+ },
+ {
+  "caip": "eip155:95432/slip44:60",
+  "symbol": "SRIX",
+  "key": "coins/ZWlwMTU1Ojk1NDMyL3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "441675b675a3c52735ad71083bad879f23701bca449d57130717d2d4fd40d856",
+  "bytes": 6957
+ },
+ {
+  "caip": "eip155:955305/slip44:60",
+  "symbol": "ELV",
+  "key": "coins/ZWlwMTU1Ojk1NTMwNS9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "011132e8880d73dbaa4214c18c292c0425b5eb6e9a4071a3224f2e3817af557e",
+  "bytes": 5091
+ },
+ {
+  "caip": "eip155:97/slip44:60",
+  "symbol": "tBNB",
+  "key": "coins/ZWlwMTU1Ojk3L3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "3947259da38636368df2db50a36d2d9a7662651dcc7df5ac2157bbe64b927f52",
+  "bytes": 4890
+ },
+ {
+  "caip": "eip155:97053/slip44:60",
+  "symbol": "TSC",
+  "key": "coins/ZWlwMTU1Ojk3MDUzL3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "3947259da38636368df2db50a36d2d9a7662651dcc7df5ac2157bbe64b927f52",
+  "bytes": 4890
+ },
+ {
+  "caip": "eip155:97055/slip44:60",
+  "symbol": "TSC",
+  "key": "coins/ZWlwMTU1Ojk3MDU1L3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "3947259da38636368df2db50a36d2d9a7662651dcc7df5ac2157bbe64b927f52",
+  "bytes": 4890
+ },
+ {
+  "caip": "eip155:9728/slip44:60",
+  "symbol": "BOBA",
+  "key": "coins/ZWlwMTU1Ojk3Mjgvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "40c05d25435152cde7699e9e87abca46aa30a46c43cd733448ea140040e2a647",
+  "bytes": 6142
+ },
+ {
+  "caip": "eip155:973/slip44:60",
+  "symbol": "PALM",
+  "key": "coins/ZWlwMTU1Ojk3My9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "f5549960ae9d1a2273bd73ef2518b093f18595fe4dd65c5b429de440885ce8d1",
+  "bytes": 5614
+ },
+ {
+  "caip": "eip155:977/slip44:60",
+  "symbol": "YETI",
+  "key": "coins/ZWlwMTU1Ojk3Ny9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "0dc510b923e05adb3fa28d8a427d6d671f79d0c2d64f01ae297a824f2e96a489",
+  "bytes": 5879
+ },
+ {
+  "caip": "eip155:97766/slip44:60",
+  "symbol": "MBC",
+  "key": "coins/ZWlwMTU1Ojk3NzY2L3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "bfdba0b5e636a2ae8051f4a90a549577fc98d3a3584be8f3c994cec4ce786199",
+  "bytes": 6177
+ },
+ {
+  "caip": "eip155:9788/slip44:60",
+  "symbol": "TABI",
+  "key": "coins/ZWlwMTU1Ojk3ODgvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "3947259da38636368df2db50a36d2d9a7662651dcc7df5ac2157bbe64b927f52",
+  "bytes": 4890
+ },
+ {
+  "caip": "eip155:9789/slip44:60",
+  "symbol": "TABI",
+  "key": "coins/ZWlwMTU1Ojk3ODkvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "3947259da38636368df2db50a36d2d9a7662651dcc7df5ac2157bbe64b927f52",
+  "bytes": 4890
+ },
+ {
+  "caip": "eip155:97912060/slip44:60",
+  "symbol": "CHAD",
+  "key": "coins/ZWlwMTU1Ojk3OTEyMDYwL3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "305be7e1d69c4dfa63d9f87d6598eec1ab1f1f1efa90cc75dcd35c3749d466cc",
+  "bytes": 6855
+ },
+ {
+  "caip": "eip155:9818/slip44:60",
+  "symbol": "tIMP",
+  "key": "coins/ZWlwMTU1Ojk4MTgvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "3947259da38636368df2db50a36d2d9a7662651dcc7df5ac2157bbe64b927f52",
+  "bytes": 4890
+ },
+ {
+  "caip": "eip155:984/slip44:60",
+  "symbol": "OPN",
+  "key": "coins/ZWlwMTU1Ojk4NC9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "4f80fa0da96d40f8991f035cc77de73285d69ad9d5aec002ea97ed3e2352ecc0",
+  "bytes": 6899
+ },
+ {
+  "caip": "eip155:986/slip44:60",
+  "symbol": "LAGO",
+  "key": "coins/ZWlwMTU1Ojk4Ni9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "789584234c7d05dd2fef9836cc84a8ae4a2ddaafc8dbab5144387ac547e3db88",
+  "bytes": 4798
+ },
+ {
+  "caip": "eip155:9876/slip44:60",
+  "symbol": "BNRY",
+  "key": "coins/ZWlwMTU1Ojk4NzYvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "40c05d25435152cde7699e9e87abca46aa30a46c43cd733448ea140040e2a647",
+  "bytes": 6142
+ },
+ {
+  "caip": "eip155:98985/slip44:60",
+  "symbol": "SPN",
+  "key": "coins/ZWlwMTU1Ojk4OTg1L3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "441675b675a3c52735ad71083bad879f23701bca449d57130717d2d4fd40d856",
+  "bytes": 6957
+ },
+ {
+  "caip": "eip155:990/slip44:60",
+  "symbol": "$EL",
+  "key": "coins/ZWlwMTU1Ojk5MC9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "011132e8880d73dbaa4214c18c292c0425b5eb6e9a4071a3224f2e3817af557e",
+  "bytes": 5091
+ },
+ {
+  "caip": "eip155:99099/slip44:60",
+  "symbol": "$EL",
+  "key": "coins/ZWlwMTU1Ojk5MDk5L3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "011132e8880d73dbaa4214c18c292c0425b5eb6e9a4071a3224f2e3817af557e",
+  "bytes": 5091
+ },
+ {
+  "caip": "eip155:99415706/slip44:60",
+  "symbol": "TOYS",
+  "key": "coins/ZWlwMTU1Ojk5NDE1NzA2L3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "3947259da38636368df2db50a36d2d9a7662651dcc7df5ac2157bbe64b927f52",
+  "bytes": 4890
+ },
+ {
+  "caip": "eip155:9966/slip44:60",
+  "symbol": "tUXER",
+  "key": "coins/ZWlwMTU1Ojk5NjYvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "3947259da38636368df2db50a36d2d9a7662651dcc7df5ac2157bbe64b927f52",
+  "bytes": 4890
+ },
+ {
+  "caip": "eip155:9977/slip44:60",
+  "symbol": "tMIND",
+  "key": "coins/ZWlwMTU1Ojk5Nzcvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "3947259da38636368df2db50a36d2d9a7662651dcc7df5ac2157bbe64b927f52",
+  "bytes": 4890
+ },
+ {
+  "caip": "eip155:998/slip44:60",
+  "symbol": "HYPE",
+  "key": "coins/ZWlwMTU1Ojk5OC9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "5a4139be746521fe26dc24a8d3e7be7f8a34c2749682be0ad1343df877c2f9c8",
+  "bytes": 4992
+ },
+ {
+  "caip": "eip155:9982/slip44:60",
+  "symbol": "MFEV",
+  "key": "coins/ZWlwMTU1Ojk5ODIvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "bfdba0b5e636a2ae8051f4a90a549577fc98d3a3584be8f3c994cec4ce786199",
+  "bytes": 6177
+ },
+ {
+  "caip": "eip155:998899/slip44:60",
+  "symbol": "CHAIN",
+  "key": "coins/ZWlwMTU1Ojk5ODg5OS9zbGlwNDQ6NjA.png",
+  "source": "generic",
+  "sha256": "305be7e1d69c4dfa63d9f87d6598eec1ab1f1f1efa90cc75dcd35c3749d466cc",
+  "bytes": 6855
+ },
+ {
+  "caip": "eip155:9996/slip44:60",
+  "symbol": "MIND",
+  "key": "coins/ZWlwMTU1Ojk5OTYvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "bfdba0b5e636a2ae8051f4a90a549577fc98d3a3584be8f3c994cec4ce786199",
+  "bytes": 6177
+ },
+ {
+  "caip": "eip155:9998/slip44:60",
+  "symbol": "ZTC",
+  "key": "coins/ZWlwMTU1Ojk5OTgvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "fdd25c06f7f4d72de308c4acd22e7f9d9ee6e07644b43eb9ff16213818593eb9",
+  "bytes": 5561
+ },
+ {
+  "caip": "eip155:9999/slip44:60",
+  "symbol": "MYN",
+  "key": "coins/ZWlwMTU1Ojk5OTkvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "bfdba0b5e636a2ae8051f4a90a549577fc98d3a3584be8f3c994cec4ce786199",
+  "bytes": 6177
+ },
+ {
+  "caip": "eip155:99998/slip44:60",
+  "symbol": "UBC",
+  "key": "coins/ZWlwMTU1Ojk5OTk4L3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "ff7ced5bf48fc7724575bd8e41f3d4399f030947e68602e3cb473f767cb6c070",
+  "bytes": 5620
+ },
+ {
+  "caip": "eip155:99999/slip44:60",
+  "symbol": "UBC",
+  "key": "coins/ZWlwMTU1Ojk5OTk5L3NsaXA0NDo2MA.png",
+  "source": "generic",
+  "sha256": "ff7ced5bf48fc7724575bd8e41f3d4399f030947e68602e3cb473f767cb6c070",
+  "bytes": 5620
+ },
+ {
+  "caip": "eip155:9999999/slip44:60",
+  "symbol": "FLT",
+  "key": "coins/ZWlwMTU1Ojk5OTk5OTkvc2xpcDQ0OjYw.png",
+  "source": "generic",
+  "sha256": "ddb64e6c07f18f5b98a56e41d4e47479a2a52b36654b26fcedbb46aac1ea658b",
+  "bytes": 4973
+ }
+]

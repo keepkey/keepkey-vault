@@ -1,0 +1,3983 @@
+{
+ "no_source": [
+  {
+   "caip": "cosmos:mayachain-mainnet-v1/slip44:maya",
+   "symbol": "MAYA",
+   "name": "MAYA"
+  },
+  {
+   "caip": "eip155:1/erc20:0x1df4c6e36d61416813b42fe32724ef11e363eddc",
+   "symbol": "PANDORA/WRAPPED ETHER",
+   "name": "Uniswap V3 PANDORA/ETH Pool"
+  },
+  {
+   "caip": "eip155:1/erc20:0x2688fc68c4eac90d9e5e1b94776cf14eade8d877",
+   "symbol": "AA_wstETH",
+   "name": "Lido STETH Senior Tranche"
+  },
+  {
+   "caip": "eip155:1/erc20:0x28d8a22c6689ac1e2ddc43ca6f85c520457351c1",
+   "symbol": "AA_ampr-LP-ETH",
+   "name": "Amphor WSTETH Senior Tranche"
+  },
+  {
+   "caip": "eip155:1/erc20:0x3a52fa30c33caf05faee0f9c5dfe5fd5fe8b3978",
+   "symbol": "BB_wstETH",
+   "name": "Lido STETH Junior Tranche"
+  },
+  {
+   "caip": "eip155:1/erc20:0x5fa464cefe8901d66c09b85d5fcdc55b3738c688",
+   "symbol": "TOKE/WETH",
+   "name": "UniswapV2 TOKE/ETH Pool"
+  },
+  {
+   "caip": "eip155:1/erc20:0x990b3af34ddb502715e1070ce6778d8eb3c8ea82",
+   "symbol": "BB_iETHv2",
+   "name": "Instadapp STETH Junior Tranche"
+  },
+  {
+   "caip": "eip155:1/erc20:0xd4e7a6e2d03e4e48dfc27dd3f46df1c176647e38",
+   "symbol": "TOKE/WETH",
+   "name": "SushiSwap TOKE/ETH Pool"
+  },
+  {
+   "caip": "eip155:1/erc20:0xdf17c739b666b259da3416d01f0310a6e429f592",
+   "symbol": "AA_iETHv2",
+   "name": "Instadapp STETH Senior Tranche"
+  },
+  {
+   "caip": "eip155:1/erc20:0xefc4f43737fd336fa8a8254454ced1e421804b16",
+   "symbol": "BB_ampr-LP-ETH",
+   "name": "Amphor WSTETH Junior Tranche"
+  },
+  {
+   "caip": "eip155:1000/slip44:60",
+   "symbol": "GCD",
+   "name": "GTON Mainnet"
+  },
+  {
+   "caip": "eip155:10001/slip44:60",
+   "symbol": "ETHW",
+   "name": "ETHW-mainnet"
+  },
+  {
+   "caip": "eip155:1001/slip44:60",
+   "symbol": "KAIA",
+   "name": "Kaia Kairos Testnet"
+  },
+  {
+   "caip": "eip155:1003/slip44:60",
+   "symbol": "TET",
+   "name": "Tectum Emission Token"
+  },
+  {
+   "caip": "eip155:1005/slip44:60",
+   "symbol": "tLEMX",
+   "name": "LemonChainTestnet"
+  },
+  {
+   "caip": "eip155:1006/slip44:60",
+   "symbol": "LEMX",
+   "name": "LemonChain"
+  },
+  {
+   "caip": "eip155:10066/slip44:60",
+   "symbol": "CO",
+   "name": "Chain Opera Testnet"
+  },
+  {
+   "caip": "eip155:10067275/slip44:60",
+   "symbol": "TPI",
+   "name": "Plian Testnet Subchain 1"
+  },
+  {
+   "caip": "eip155:1007/slip44:60",
+   "symbol": "NEW",
+   "name": "Newton Testnet"
+  },
+  {
+   "caip": "eip155:1009/slip44:60",
+   "symbol": "JNFTC",
+   "name": "Jumbochain Mainnet"
+  },
+  {
+   "caip": "eip155:10096/slip44:60",
+   "symbol": "MNV",
+   "name": "MetaNova Verse"
+  },
+  {
+   "caip": "eip155:101/slip44:60",
+   "symbol": "ETI",
+   "name": "EtherInc"
+  },
+  {
+   "caip": "eip155:10101/slip44:60",
+   "symbol": "GEN",
+   "name": "Blockchain Genesis Mainnet"
+  },
+  {
+   "caip": "eip155:1012/slip44:60",
+   "symbol": "NEW",
+   "name": "Newton"
+  },
+  {
+   "caip": "eip155:10120/slip44:60",
+   "symbol": "tOZONE",
+   "name": "Ozone Testnet"
+  },
+  {
+   "caip": "eip155:10121/slip44:60",
+   "symbol": "OZONE",
+   "name": "Ozone Mainnet"
+  },
+  {
+   "caip": "eip155:10218/slip44:60",
+   "symbol": "TEA",
+   "name": "Tea Sepolia Testnet"
+  },
+  {
+   "caip": "eip155:1022/slip44:60",
+   "symbol": "SKU",
+   "name": "Sakura"
+  },
+  {
+   "caip": "eip155:1023/slip44:60",
+   "symbol": "CLV",
+   "name": "Clover Testnet"
+  },
+  {
+   "caip": "eip155:10248/slip44:60",
+   "symbol": "0XT",
+   "name": "0XTade"
+  },
+  {
+   "caip": "eip155:1031/slip44:60",
+   "symbol": "PRX",
+   "name": "Proxy Network Testnet"
+  },
+  {
+   "caip": "eip155:10323/slip44:60",
+   "symbol": "MARS",
+   "name": "Mova Beta"
+  },
+  {
+   "caip": "eip155:108160679/slip44:60",
+   "symbol": "ORAI",
+   "name": "Oraichain Mainnet"
+  },
+  {
+   "caip": "eip155:10849/slip44:60",
+   "symbol": "L1",
+   "name": "Lamina1"
+  },
+  {
+   "caip": "eip155:10850/slip44:60",
+   "symbol": "L1ID",
+   "name": "Lamina1 Identity"
+  },
+  {
+   "caip": "eip155:10888/slip44:60",
+   "symbol": "tGS",
+   "name": "GameSwift Chain Testnet"
+  },
+  {
+   "caip": "eip155:1099/slip44:60",
+   "symbol": "mc",
+   "name": "MOAC mainnet"
+  },
+  {
+   "caip": "eip155:110/slip44:60",
+   "symbol": "XPR",
+   "name": "Proton Testnet"
+  },
+  {
+   "caip": "eip155:11000/slip44:60",
+   "symbol": "KBC",
+   "name": "KB Chain"
+  },
+  {
+   "caip": "eip155:1111/slip44:60",
+   "symbol": "WEMIX",
+   "name": "WEMIX3.0 Mainnet"
+  },
+  {
+   "caip": "eip155:11119/slip44:60",
+   "symbol": "HBIT",
+   "name": "HashBit Mainnet"
+  },
+  {
+   "caip": "eip155:1112/slip44:60",
+   "symbol": "tWEMIX",
+   "name": "WEMIX3.0 Testnet"
+  },
+  {
+   "caip": "eip155:111551119090/slip44:60",
+   "symbol": "TON",
+   "name": "Thanos Sepolia"
+  },
+  {
+   "caip": "eip155:1122334455/slip44:60",
+   "symbol": "IPOS",
+   "name": "IPOS Network"
+  },
+  {
+   "caip": "eip155:11227/slip44:60",
+   "symbol": "TZW",
+   "name": "Jiritsu Testnet Subnet"
+  },
+  {
+   "caip": "eip155:11235/slip44:60",
+   "symbol": "ISLM",
+   "name": "Haqq Network"
+  },
+  {
+   "caip": "eip155:1124/slip44:60",
+   "symbol": "ECM",
+   "name": "ECM Chain Testnet"
+  },
+  {
+   "caip": "eip155:1127469/slip44:60",
+   "symbol": "TILTG",
+   "name": "Tiltyard Subnet"
+  },
+  {
+   "caip": "eip155:113/slip44:60",
+   "symbol": "Deh",
+   "name": "Dehvo"
+  },
+  {
+   "caip": "eip155:1139/slip44:60",
+   "symbol": "MATH",
+   "name": "MathChain"
+  },
+  {
+   "caip": "eip155:1140/slip44:60",
+   "symbol": "MATH",
+   "name": "MathChain Testnet"
+  },
+  {
+   "caip": "eip155:1174/slip44:60",
+   "symbol": "LTH",
+   "name": "Litheum Test Network"
+  },
+  {
+   "caip": "eip155:11822/slip44:60",
+   "symbol": "ART",
+   "name": "Artela Testnet"
+  },
+  {
+   "caip": "eip155:11891/slip44:60",
+   "symbol": "ARIA20",
+   "name": "Polygon Supernet Arianee"
+  },
+  {
+   "caip": "eip155:12/slip44:60",
+   "symbol": "KAL",
+   "name": "Metadium Testnet"
+  },
+  {
+   "caip": "eip155:1200/slip44:60",
+   "symbol": "CAI",
+   "name": "Cuckoo Chain"
+  },
+  {
+   "caip": "eip155:1201/slip44:60",
+   "symbol": "AVIS",
+   "name": "Evanesco Testnet"
+  },
+  {
+   "caip": "eip155:1202/slip44:60",
+   "symbol": "WTT",
+   "name": "World Trade Technical Chain Mainnet"
+  },
+  {
+   "caip": "eip155:12020498/slip44:60",
+   "symbol": "LRPO",
+   "name": "Lummio Network"
+  },
+  {
+   "caip": "eip155:12051/slip44:60",
+   "symbol": "tZERO",
+   "name": "Singularity ZERO Testnet"
+  },
+  {
+   "caip": "eip155:12052/slip44:60",
+   "symbol": "ZERO",
+   "name": "Singularity ZERO Mainnet"
+  },
+  {
+   "caip": "eip155:1210/slip44:60",
+   "symbol": "CAI",
+   "name": "Cuckoo Sepolia"
+  },
+  {
+   "caip": "eip155:121224/slip44:60",
+   "symbol": "FUMA",
+   "name": "Fushuma"
+  },
+  {
+   "caip": "eip155:1213/slip44:60",
+   "symbol": "POP",
+   "name": "Popcateum Mainnet"
+  },
+  {
+   "caip": "eip155:123/slip44:60",
+   "symbol": "SPARK",
+   "name": "Fuse Sparknet"
+  },
+  {
+   "caip": "eip155:1233/slip44:60",
+   "symbol": "FITO",
+   "name": "Fitochain"
+  },
+  {
+   "caip": "eip155:123321/slip44:60",
+   "symbol": "GEM",
+   "name": "Gemchain"
+  },
+  {
+   "caip": "eip155:123420000220/slip44:60",
+   "symbol": "tFLT",
+   "name": "Fluence Stage"
+  },
+  {
+   "caip": "eip155:1235/slip44:60",
+   "symbol": "ITX",
+   "name": "ITX Mainnet"
+  },
+  {
+   "caip": "eip155:12358/slip44:60",
+   "symbol": "GDPR",
+   "name": "GDPR Mainnet"
+  },
+  {
+   "caip": "eip155:124/slip44:60",
+   "symbol": "DWU",
+   "name": "Decentralized Web Mainnet"
+  },
+  {
+   "caip": "eip155:1246/slip44:60",
+   "symbol": "OM",
+   "name": "OM Platform Mainnet"
+  },
+  {
+   "caip": "eip155:1248/slip44:60",
+   "symbol": "dogeth",
+   "name": "Dogether Mainnet"
+  },
+  {
+   "caip": "eip155:124816/slip44:60",
+   "symbol": "MITO",
+   "name": "Mitosis"
+  },
+  {
+   "caip": "eip155:124832/slip44:60",
+   "symbol": "MITO",
+   "name": "Mitosis Testnet"
+  },
+  {
+   "caip": "eip155:125/slip44:60",
+   "symbol": "OY",
+   "name": "OYchain Testnet"
+  },
+  {
+   "caip": "eip155:127/slip44:60",
+   "symbol": "FETH",
+   "name": "Factory 127 Mainnet"
+  },
+  {
+   "caip": "eip155:1273227453/slip44:60",
+   "symbol": "sFUEL",
+   "name": "HUMAN Protocol"
+  },
+  {
+   "caip": "eip155:1280/slip44:60",
+   "symbol": "HO",
+   "name": "HALO Mainnet"
+  },
+  {
+   "caip": "eip155:12865/slip44:60",
+   "symbol": "LDN",
+   "name": "Liberland testnet"
+  },
+  {
+   "caip": "eip155:1288/slip44:60",
+   "symbol": "ROC",
+   "name": "Moonrock"
+  },
+  {
+   "caip": "eip155:13/slip44:60",
+   "symbol": "sDIODE",
+   "name": "Diode Testnet Staging"
+  },
+  {
+   "caip": "eip155:13000/slip44:60",
+   "symbol": "ECG",
+   "name": "SPS"
+  },
+  {
+   "caip": "eip155:1311/slip44:60",
+   "symbol": "DOS",
+   "name": "Dos Fuji Subnet"
+  },
+  {
+   "caip": "eip155:1313114/slip44:60",
+   "symbol": "ETHO",
+   "name": "Etho Protocol"
+  },
+  {
+   "caip": "eip155:1313500/slip44:60",
+   "symbol": "XERO",
+   "name": "Xerom"
+  },
+  {
+   "caip": "eip155:1314520/slip44:60",
+   "symbol": "ROON",
+   "name": "RoonChain Mainnet"
+  },
+  {
+   "caip": "eip155:13145201/slip44:60",
+   "symbol": "ROON",
+   "name": "RoonChain Testnet"
+  },
+  {
+   "caip": "eip155:132/slip44:60",
+   "symbol": "NFIC",
+   "name": "Namefi Chain Mainnet"
+  },
+  {
+   "caip": "eip155:13371337/slip44:60",
+   "symbol": "TPEP",
+   "name": "PepChain Churchill"
+  },
+  {
+   "caip": "eip155:13374202/slip44:60",
+   "symbol": "USDe",
+   "name": "Ethereal Testnet"
+  },
+  {
+   "caip": "eip155:1338/slip44:60",
+   "symbol": "ELY",
+   "name": "Elysium Testnet"
+  },
+  {
+   "caip": "eip155:1343/slip44:60",
+   "symbol": "BGAS",
+   "name": "Blitz Subnet"
+  },
+  {
+   "caip": "eip155:13441/slip44:60",
+   "symbol": "BRIDGE",
+   "name": "Bridgeless Mainnet"
+  },
+  {
+   "caip": "eip155:1351057110/slip44:60",
+   "symbol": "sFUEL",
+   "name": "Chaos (SKALE Testnet)"
+  },
+  {
+   "caip": "eip155:137/erc20:0x93ef615f1ddd27d0e141ad7192623a5c45e8f200",
+   "symbol": "FOX/WETH",
+   "name": "SushiSwap FOX/ETH Pool"
+  },
+  {
+   "caip": "eip155:13812/slip44:60",
+   "symbol": "OPN",
+   "name": "Susono"
+  },
+  {
+   "caip": "eip155:13863860/slip44:60",
+   "symbol": "SIS",
+   "name": "Symbiosis"
+  },
+  {
+   "caip": "eip155:14000/slip44:60",
+   "symbol": "ECG",
+   "name": "SPS Testnet"
+  },
+  {
+   "caip": "eip155:142/slip44:60",
+   "symbol": "DAX",
+   "name": "DAX CHAIN"
+  },
+  {
+   "caip": "eip155:14288640/slip44:60",
+   "symbol": "DEB",
+   "name": "Anduschain Mainnet"
+  },
+  {
+   "caip": "eip155:14800/slip44:60",
+   "symbol": "VANA",
+   "name": "Vana Moksha Testnet"
+  },
+  {
+   "caip": "eip155:1506/slip44:60",
+   "symbol": "KSX",
+   "name": "Sherpax Mainnet"
+  },
+  {
+   "caip": "eip155:1507/slip44:60",
+   "symbol": "KSX",
+   "name": "Sherpax Testnet"
+  },
+  {
+   "caip": "eip155:1513/slip44:60",
+   "symbol": "IP",
+   "name": "Story Testnet"
+  },
+  {
+   "caip": "eip155:1515/slip44:60",
+   "symbol": "BG",
+   "name": "Beagle Messaging Chain"
+  },
+  {
+   "caip": "eip155:1516/slip44:60",
+   "symbol": "IP",
+   "name": "Story Odyssey Testnet"
+  },
+  {
+   "caip": "eip155:152/slip44:60",
+   "symbol": "RBNT",
+   "name": "Redbelly Network Devnet"
+  },
+  {
+   "caip": "eip155:154/slip44:60",
+   "symbol": "RBNT",
+   "name": "Redbelly Network TGE"
+  },
+  {
+   "caip": "eip155:15551/slip44:60",
+   "symbol": "LOOP",
+   "name": "LoopNetwork Mainnet"
+  },
+  {
+   "caip": "eip155:15555/slip44:60",
+   "symbol": "EVM",
+   "name": "Trust EVM Testnet"
+  },
+  {
+   "caip": "eip155:1570/slip44:60",
+   "symbol": "STARX",
+   "name": "StarCHAIN Testnet"
+  },
+  {
+   "caip": "eip155:1578/slip44:60",
+   "symbol": "STARX",
+   "name": "StarCHAIN"
+  },
+  {
+   "caip": "eip155:158245/slip44:60",
+   "symbol": "XCOIN",
+   "name": "CryptoX"
+  },
+  {
+   "caip": "eip155:158345/slip44:60",
+   "symbol": "XCOIN",
+   "name": "XCOIN"
+  },
+  {
+   "caip": "eip155:160/slip44:60",
+   "symbol": "AMAX",
+   "name": "Armonia Eva Chain Mainnet"
+  },
+  {
+   "caip": "eip155:16000/slip44:60",
+   "symbol": "MTT",
+   "name": "MetaDot Mainnet"
+  },
+  {
+   "caip": "eip155:16001/slip44:60",
+   "symbol": "MTTest",
+   "name": "MetaDot Testnet"
+  },
+  {
+   "caip": "eip155:161/slip44:60",
+   "symbol": "AMAX",
+   "name": "Armonia Eva Chain Testnet"
+  },
+  {
+   "caip": "eip155:161212/slip44:60",
+   "symbol": "PLAY",
+   "name": "PlayFi Mainnet"
+  },
+  {
+   "caip": "eip155:1617/slip44:60",
+   "symbol": "ETINS",
+   "name": "Ethereum Inscription Mainnet"
+  },
+  {
+   "caip": "eip155:1618/slip44:60",
+   "symbol": "CATE",
+   "name": "Catecoin Chain Mainnet"
+  },
+  {
+   "caip": "eip155:162/slip44:60",
+   "symbol": "PHT",
+   "name": "Lightstreams Testnet"
+  },
+  {
+   "caip": "eip155:1620/slip44:60",
+   "symbol": "ATH",
+   "name": "Atheios"
+  },
+  {
+   "caip": "eip155:163/slip44:60",
+   "symbol": "PHT",
+   "name": "Lightstreams Mainnet"
+  },
+  {
+   "caip": "eip155:16350/slip44:60",
+   "symbol": "INC",
+   "name": "Incentiv Devnet"
+  },
+  {
+   "caip": "eip155:1637450/slip44:60",
+   "symbol": "tBNB",
+   "name": "Xterio Testnet"
+  },
+  {
+   "caip": "eip155:1657/slip44:60",
+   "symbol": "BTA",
+   "name": "Btachain"
+  },
+  {
+   "caip": "eip155:1662/slip44:60",
+   "symbol": "LCN",
+   "name": "Liquichain"
+  },
+  {
+   "caip": "eip155:16658437/slip44:60",
+   "symbol": "TPI",
+   "name": "Plian Testnet Main"
+  },
+  {
+   "caip": "eip155:17/slip44:60",
+   "symbol": "TFI",
+   "name": "ThaiChain 2.0 ThaiFi"
+  },
+  {
+   "caip": "eip155:170/slip44:60",
+   "symbol": "HOO",
+   "name": "HOO Smart Chain Testnet"
+  },
+  {
+   "caip": "eip155:1707/slip44:60",
+   "symbol": "JINDA",
+   "name": "TBSI Mainnet"
+  },
+  {
+   "caip": "eip155:1708/slip44:60",
+   "symbol": "JINDA",
+   "name": "TBSI Testnet"
+  },
+  {
+   "caip": "eip155:17172/slip44:60",
+   "symbol": "ECLP",
+   "name": "Eclipse Subnet"
+  },
+  {
+   "caip": "eip155:172/slip44:60",
+   "symbol": "usd",
+   "name": "Latam-Blockchain Resil Testnet"
+  },
+  {
+   "caip": "eip155:1732/slip44:60",
+   "symbol": "FUGA",
+   "name": "Fuga Mainnet"
+  },
+  {
+   "caip": "eip155:1733/slip44:60",
+   "symbol": "FUGA",
+   "name": "Fuga Testnet"
+  },
+  {
+   "caip": "eip155:1734/slip44:60",
+   "symbol": "FUGA",
+   "name": "Fuga Develop"
+  },
+  {
+   "caip": "eip155:18/slip44:60",
+   "symbol": "TST",
+   "name": "ThunderCore Testnet"
+  },
+  {
+   "caip": "eip155:180/slip44:60",
+   "symbol": "AME",
+   "name": "AME Chain Mainnet"
+  },
+  {
+   "caip": "eip155:18000/slip44:60",
+   "symbol": "ZKST",
+   "name": "Frontier of Dreams Testnet"
+  },
+  {
+   "caip": "eip155:18289463/slip44:60",
+   "symbol": "ILT",
+   "name": "IOLite"
+  },
+  {
+   "caip": "eip155:1829/slip44:60",
+   "symbol": "PBG",
+   "name": "PlayBlock"
+  },
+  {
+   "caip": "eip155:1856/slip44:60",
+   "symbol": "TSF",
+   "name": "Teslafunds"
+  },
+  {
+   "caip": "eip155:188710/slip44:60",
+   "symbol": "BDCC",
+   "name": "Bitica Chain Mainnet"
+  },
+  {
+   "caip": "eip155:1898/slip44:60",
+   "symbol": "BOY",
+   "name": "BON Network"
+  },
+  {
+   "caip": "eip155:190/slip44:60",
+   "symbol": "CMD",
+   "name": "CMDAO BBQ Chain"
+  },
+  {
+   "caip": "eip155:1903648807/slip44:60",
+   "symbol": "GEMU",
+   "name": "Gemuchain Testnet"
+  },
+  {
+   "caip": "eip155:19077/slip44:60",
+   "symbol": "BCX",
+   "name": "BlockX Atlantis Testnet"
+  },
+  {
+   "caip": "eip155:1918/slip44:60",
+   "symbol": "UPBEth",
+   "name": "UPB CRESCDI Testnet"
+  },
+  {
+   "caip": "eip155:19191/slip44:60",
+   "symbol": "BCX",
+   "name": "BlockX Mainnet"
+  },
+  {
+   "caip": "eip155:193/slip44:60",
+   "symbol": "CEM",
+   "name": "Crypto Emergency"
+  },
+  {
+   "caip": "eip155:1945/slip44:60",
+   "symbol": "ONUS",
+   "name": "ONUS Chain Testnet"
+  },
+  {
+   "caip": "eip155:1967/slip44:60",
+   "symbol": "MTC",
+   "name": "Eleanor"
+  },
+  {
+   "caip": "eip155:197/slip44:60",
+   "symbol": "NEUTR",
+   "name": "Neutrinos TestNet"
+  },
+  {
+   "caip": "eip155:1972/slip44:60",
+   "symbol": "REDEV2",
+   "name": "RedeCoin"
+  },
+  {
+   "caip": "eip155:1975/slip44:60",
+   "symbol": "ONUS",
+   "name": "ONUS Chain Mainnet"
+  },
+  {
+   "caip": "eip155:19845/slip44:60",
+   "symbol": "BTCIX",
+   "name": "BTCIX Network"
+  },
+  {
+   "caip": "eip155:1987/slip44:60",
+   "symbol": "EGEM",
+   "name": "EtherGem"
+  },
+  {
+   "caip": "eip155:198724/slip44:60",
+   "symbol": "EDX",
+   "name": "EADX Network"
+  },
+  {
+   "caip": "eip155:1989/slip44:60",
+   "symbol": "BSW",
+   "name": "Lydia Coin"
+  },
+  {
+   "caip": "eip155:198989/slip44:60",
+   "symbol": "BSW",
+   "name": "Lydia Coin Testnet"
+  },
+  {
+   "caip": "eip155:1990/slip44:60",
+   "symbol": "QIE",
+   "name": "QIEMainnet"
+  },
+  {
+   "caip": "eip155:1997/slip44:60",
+   "symbol": "KYOTO",
+   "name": "Kyoto"
+  },
+  {
+   "caip": "eip155:1998/slip44:60",
+   "symbol": "KYOTO",
+   "name": "Kyoto Testnet"
+  },
+  {
+   "caip": "eip155:200/slip44:60",
+   "symbol": "xDAI",
+   "name": "Arbitrum on xDai"
+  },
+  {
+   "caip": "eip155:200000/slip44:60",
+   "symbol": "FAI",
+   "name": "xFair.AI Testnet"
+  },
+  {
+   "caip": "eip155:200625/slip44:60",
+   "symbol": "AKA",
+   "name": "Akroma"
+  },
+  {
+   "caip": "eip155:2008/slip44:60",
+   "symbol": "CWN",
+   "name": "CloudWalk Testnet"
+  },
+  {
+   "caip": "eip155:2009/slip44:60",
+   "symbol": "CWN",
+   "name": "CloudWalk Mainnet"
+  },
+  {
+   "caip": "eip155:201/slip44:60",
+   "symbol": "mc",
+   "name": "MOAC testnet"
+  },
+  {
+   "caip": "eip155:2018/slip44:60",
+   "symbol": "USD",
+   "name": "PublicMint Devnet"
+  },
+  {
+   "caip": "eip155:20181205/slip44:60",
+   "symbol": "QKI",
+   "name": "quarkblockchain"
+  },
+  {
+   "caip": "eip155:2019/slip44:60",
+   "symbol": "USD",
+   "name": "PublicMint Testnet"
+  },
+  {
+   "caip": "eip155:202/slip44:60",
+   "symbol": "EwEth",
+   "name": "Edgeless Testnet"
+  },
+  {
+   "caip": "eip155:2022/slip44:60",
+   "symbol": "tEDG",
+   "name": "Beresheet BereEVM Testnet"
+  },
+  {
+   "caip": "eip155:202202/slip44:60",
+   "symbol": "BECX",
+   "name": "Bethel Sydney"
+  },
+  {
+   "caip": "eip155:202209/slip44:60",
+   "symbol": "RISK",
+   "name": "Alterscope"
+  },
+  {
+   "caip": "eip155:2022091/slip44:60",
+   "symbol": "RISKT",
+   "name": "Alterscope Testnet"
+  },
+  {
+   "caip": "eip155:202212/slip44:60",
+   "symbol": "XN",
+   "name": "X1 Devnet"
+  },
+  {
+   "caip": "eip155:20241133/slip44:60",
+   "symbol": "sETH",
+   "name": "Swan Proxima Testnet"
+  },
+  {
+   "caip": "eip155:202424/slip44:60",
+   "symbol": "BFIT",
+   "name": "Blockfit"
+  },
+  {
+   "caip": "eip155:202506/slip44:60",
+   "symbol": "AUREX",
+   "name": "Aurex Testnet"
+  },
+  {
+   "caip": "eip155:2032/slip44:60",
+   "symbol": "NCFG",
+   "name": "Catalyst"
+  },
+  {
+   "caip": "eip155:2037/slip44:60",
+   "symbol": "SHRAP",
+   "name": "Kiwi Subnet"
+  },
+  {
+   "caip": "eip155:2038/slip44:60",
+   "symbol": "SHRAPG",
+   "name": "Shrapnel Testnet"
+  },
+  {
+   "caip": "eip155:204005/slip44:60",
+   "symbol": "XN",
+   "name": "X1 Network"
+  },
+  {
+   "caip": "eip155:2043/slip44:60",
+   "symbol": "NEURO",
+   "name": "NeuroWeb"
+  },
+  {
+   "caip": "eip155:2044/slip44:60",
+   "symbol": "SHRAPG",
+   "name": "Shrapnel Subnet"
+  },
+  {
+   "caip": "eip155:2047/slip44:60",
+   "symbol": "STOS",
+   "name": "Stratos Testnet"
+  },
+  {
+   "caip": "eip155:2048/slip44:60",
+   "symbol": "STOS",
+   "name": "Stratos"
+  },
+  {
+   "caip": "eip155:205/slip44:60",
+   "symbol": "$EKH",
+   "name": "EKAASH"
+  },
+  {
+   "caip": "eip155:20729/slip44:60",
+   "symbol": "CLO",
+   "name": "Callisto Testnet"
+  },
+  {
+   "caip": "eip155:2077/slip44:60",
+   "symbol": "QKA",
+   "name": "Quokkacoin Mainnet"
+  },
+  {
+   "caip": "eip155:208/slip44:60",
+   "symbol": "utx",
+   "name": "Structx Mainnet"
+  },
+  {
+   "caip": "eip155:2099156/slip44:60",
+   "symbol": "PI",
+   "name": "Plian Mainnet Main"
+  },
+  {
+   "caip": "eip155:21/slip44:60",
+   "symbol": "tELA",
+   "name": "Elastos Smart Chain Testnet"
+  },
+  {
+   "caip": "eip155:2100/slip44:60",
+   "symbol": "ECO",
+   "name": "Ecoball Mainnet"
+  },
+  {
+   "caip": "eip155:21000001/slip44:60",
+   "symbol": "BTCN",
+   "name": "Corn Testnet"
+  },
+  {
+   "caip": "eip155:21004/slip44:60",
+   "symbol": "C4EI",
+   "name": "C4EI"
+  },
+  {
+   "caip": "eip155:210049/slip44:60",
+   "symbol": "tGAGI",
+   "name": "GitAGI Atlas Testnet"
+  },
+  {
+   "caip": "eip155:2101/slip44:60",
+   "symbol": "ECO",
+   "name": "Ecoball Testnet Espuma"
+  },
+  {
+   "caip": "eip155:210209/slip44:60",
+   "symbol": "SOR",
+   "name": "Sorian"
+  },
+  {
+   "caip": "eip155:211/slip44:60",
+   "symbol": "0xF",
+   "name": "Freight Trust Network"
+  },
+  {
+   "caip": "eip155:21133/slip44:60",
+   "symbol": "AAH",
+   "name": "All About Healthy"
+  },
+  {
+   "caip": "eip155:212/slip44:60",
+   "symbol": "MAPO",
+   "name": "MAPO Makalu"
+  },
+  {
+   "caip": "eip155:2124/slip44:60",
+   "symbol": "MEU",
+   "name": "Metaplayerone Dubai Testnet"
+  },
+  {
+   "caip": "eip155:2136/slip44:60",
+   "symbol": "Dolarz",
+   "name": "BigShortBets Testnet"
+  },
+  {
+   "caip": "eip155:2153/slip44:60",
+   "symbol": "FRA",
+   "name": "Findora Testnet"
+  },
+  {
+   "caip": "eip155:2154/slip44:60",
+   "symbol": "FRA",
+   "name": "Findora Forge"
+  },
+  {
+   "caip": "eip155:216/slip44:60",
+   "symbol": "HAPPY",
+   "name": "Happychain Testnet"
+  },
+  {
+   "caip": "eip155:2162/slip44:60",
+   "symbol": "COIN",
+   "name": "Animechain Testnet"
+  },
+  {
+   "caip": "eip155:21912/slip44:60",
+   "symbol": "ONF",
+   "name": "BSL Mainnet"
+  },
+  {
+   "caip": "eip155:221/slip44:60",
+   "symbol": "XBE",
+   "name": "BlockEx Mainnet"
+  },
+  {
+   "caip": "eip155:2222222/slip44:60",
+   "symbol": "CWEB",
+   "name": "Coinweb BNB shard"
+  },
+  {
+   "caip": "eip155:2223/slip44:60",
+   "symbol": "VNDT",
+   "name": "VChain Mainnet"
+  },
+  {
+   "caip": "eip155:22324/slip44:60",
+   "symbol": "GOLDX",
+   "name": "GoldXChain Testnet"
+  },
+  {
+   "caip": "eip155:23/slip44:60",
+   "symbol": "tELA",
+   "name": "ELA-DID-Sidechain Testnet"
+  },
+  {
+   "caip": "eip155:230/slip44:60",
+   "symbol": "SDX",
+   "name": "SwapDEX"
+  },
+  {
+   "caip": "eip155:23023/slip44:60",
+   "symbol": "PBLK",
+   "name": "PremiumBlock"
+  },
+  {
+   "caip": "eip155:2306/slip44:60",
+   "symbol": "ebro",
+   "name": "Ebro Network"
+  },
+  {
+   "caip": "eip155:2309/slip44:60",
+   "symbol": "AR\u00c9V",
+   "name": "Arevia"
+  },
+  {
+   "caip": "eip155:2310/slip44:60",
+   "symbol": "CRAT",
+   "name": "CratD2C"
+  },
+  {
+   "caip": "eip155:234/slip44:60",
+   "symbol": "JNFTC",
+   "name": "ProtoJumbo Testnet"
+  },
+  {
+   "caip": "eip155:234666/slip44:60",
+   "symbol": "HYM",
+   "name": "Haymo Testnet"
+  },
+  {
+   "caip": "eip155:2372/slip44:60",
+   "symbol": "BESC",
+   "name": "BESC HYPERCHAIN"
+  },
+  {
+   "caip": "eip155:240/slip44:60",
+   "symbol": "zkTCRO",
+   "name": "Cronos zkEVM Testnet"
+  },
+  {
+   "caip": "eip155:241120/slip44:60",
+   "symbol": "tNOM",
+   "name": "Anomaly Andromeda Testnet"
+  },
+  {
+   "caip": "eip155:2426/slip44:60",
+   "symbol": "STND",
+   "name": "Standard Testnet"
+  },
+  {
+   "caip": "eip155:24484/slip44:60",
+   "symbol": "WEB",
+   "name": "Webchain"
+  },
+  {
+   "caip": "eip155:246529/slip44:60",
+   "symbol": "ATS",
+   "name": "ARTIS sigma1"
+  },
+  {
+   "caip": "eip155:246785/slip44:60",
+   "symbol": "tATS",
+   "name": "ARTIS Testnet tau1"
+  },
+  {
+   "caip": "eip155:247/slip44:60",
+   "symbol": "CHOO",
+   "name": "ChooChain"
+  },
+  {
+   "caip": "eip155:24734/slip44:60",
+   "symbol": "MINTME",
+   "name": "MintMe.com Coin"
+  },
+  {
+   "caip": "eip155:2478899481/slip44:60",
+   "symbol": "ACME",
+   "name": "Accumulate Kermit"
+  },
+  {
+   "caip": "eip155:24816/slip44:60",
+   "symbol": "RECALL",
+   "name": "Recall"
+  },
+  {
+   "caip": "eip155:2481632/slip44:60",
+   "symbol": "RECALL",
+   "name": "Recall Testnet"
+  },
+  {
+   "caip": "eip155:2559/slip44:60",
+   "symbol": "KTO",
+   "name": "Kortho Mainnet"
+  },
+  {
+   "caip": "eip155:256/slip44:60",
+   "symbol": "htt",
+   "name": "Huobi ECO Chain Testnet"
+  },
+  {
+   "caip": "eip155:258/slip44:60",
+   "symbol": "SETM",
+   "name": "Setheum"
+  },
+  {
+   "caip": "eip155:25839/slip44:60",
+   "symbol": "tALV",
+   "name": "AlveyChain Testnet"
+  },
+  {
+   "caip": "eip155:25888/slip44:60",
+   "symbol": "GOLDT",
+   "name": "Hammer Chain Mainnet"
+  },
+  {
+   "caip": "eip155:26/slip44:60",
+   "symbol": "L1test",
+   "name": "Genesis L1 testnet"
+  },
+  {
+   "caip": "eip155:26026/slip44:60",
+   "symbol": "tFRM",
+   "name": "Ferrum Testnet"
+  },
+  {
+   "caip": "eip155:2611/slip44:60",
+   "symbol": "REDLC",
+   "name": "Redlight Chain Mainnet"
+  },
+  {
+   "caip": "eip155:2611555/slip44:60",
+   "symbol": "DGC",
+   "name": "DPU Chain"
+  },
+  {
+   "caip": "eip155:26482/slip44:60",
+   "symbol": "DUCX",
+   "name": "DucatusX Testnet"
+  },
+  {
+   "caip": "eip155:26483/slip44:60",
+   "symbol": "DUCX",
+   "name": "DucatusX"
+  },
+  {
+   "caip": "eip155:266256/slip44:60",
+   "symbol": "GZN",
+   "name": "Gear Zero Network Testnet"
+  },
+  {
+   "caip": "eip155:26863/slip44:60",
+   "symbol": "OAC",
+   "name": "OasisChain Mainnet"
+  },
+  {
+   "caip": "eip155:26888/slip44:60",
+   "symbol": "AB",
+   "name": "AB Core Testnet"
+  },
+  {
+   "caip": "eip155:26988/slip44:60",
+   "symbol": "NEW",
+   "name": "Newton Finance Testnet"
+  },
+  {
+   "caip": "eip155:27/slip44:60",
+   "symbol": "SHIB",
+   "name": "ShibaChain"
+  },
+  {
+   "caip": "eip155:272247/slip44:60",
+   "symbol": "NXY",
+   "name": "Nxy Area 51"
+  },
+  {
+   "caip": "eip155:272520/slip44:60",
+   "symbol": "NXY",
+   "name": "Nxy Oasis"
+  },
+  {
+   "caip": "eip155:278/slip44:60",
+   "symbol": "FAI",
+   "name": "xFair.AI Mainnet"
+  },
+  {
+   "caip": "eip155:27827/slip44:60",
+   "symbol": "ZERO",
+   "name": "zeroone Mainnet Subnet"
+  },
+  {
+   "caip": "eip155:281121/slip44:60",
+   "symbol": "$OC",
+   "name": "Social Smart Chain Mainnet"
+  },
+  {
+   "caip": "eip155:286022981/slip44:60",
+   "symbol": "IST",
+   "name": "ISTChain Mainnet"
+  },
+  {
+   "caip": "eip155:287022981/slip44:60",
+   "symbol": "DNA",
+   "name": "DNAChain Mainnet"
+  },
+  {
+   "caip": "eip155:28802/slip44:60",
+   "symbol": "TCENT",
+   "name": "Incentiv Testnet"
+  },
+  {
+   "caip": "eip155:288022981/slip44:60",
+   "symbol": "SLC",
+   "name": "SLCChain Mainnet"
+  },
+  {
+   "caip": "eip155:2882/slip44:60",
+   "symbol": "IOTA",
+   "name": "Chips Network"
+  },
+  {
+   "caip": "eip155:28945486/slip44:60",
+   "symbol": "AUX",
+   "name": "Auxilium Network Mainnet"
+  },
+  {
+   "caip": "eip155:29/slip44:60",
+   "symbol": "L1",
+   "name": "Genesis L1"
+  },
+  {
+   "caip": "eip155:29536/slip44:60",
+   "symbol": "KEC",
+   "name": "KaiChain Testnet"
+  },
+  {
+   "caip": "eip155:303/slip44:60",
+   "symbol": "tNCN",
+   "name": "Neurochain Testnet"
+  },
+  {
+   "caip": "eip155:308/slip44:60",
+   "symbol": "FTH",
+   "name": "Furtheon"
+  },
+  {
+   "caip": "eip155:3100/slip44:60",
+   "symbol": "IMMU",
+   "name": "Immu3 EVM"
+  },
+  {
+   "caip": "eip155:3102/slip44:60",
+   "symbol": "VFI",
+   "name": "Vulture EVM Beta"
+  },
+  {
+   "caip": "eip155:31102/slip44:60",
+   "symbol": "ESN",
+   "name": "Ethersocial Network"
+  },
+  {
+   "caip": "eip155:313/slip44:60",
+   "symbol": "NCN",
+   "name": "Neurochain Mainnet"
+  },
+  {
+   "caip": "eip155:32/slip44:60",
+   "symbol": "GooD",
+   "name": "GoodData Testnet"
+  },
+  {
+   "caip": "eip155:322/slip44:60",
+   "symbol": "tKCS",
+   "name": "KCC Testnet"
+  },
+  {
+   "caip": "eip155:323/slip44:60",
+   "symbol": "BCX",
+   "name": "BuyCex Infinity Chain"
+  },
+  {
+   "caip": "eip155:32380/slip44:60",
+   "symbol": "PAIX",
+   "name": "PAIX Development Network"
+  },
+  {
+   "caip": "eip155:3269/slip44:60",
+   "symbol": "DUBX",
+   "name": "Dubxcoin network"
+  },
+  {
+   "caip": "eip155:3270/slip44:60",
+   "symbol": "TDUBX",
+   "name": "Dubxcoin testnet"
+  },
+  {
+   "caip": "eip155:33/slip44:60",
+   "symbol": "GooD",
+   "name": "GoodData Mainnet"
+  },
+  {
+   "caip": "eip155:33210/slip44:60",
+   "symbol": "XCLOUD",
+   "name": "Cloudverse Subnet"
+  },
+  {
+   "caip": "eip155:333/slip44:60",
+   "symbol": "W3Q",
+   "name": "Web3Q Mainnet"
+  },
+  {
+   "caip": "eip155:3334/slip44:60",
+   "symbol": "W3Q",
+   "name": "Web3Q Galileo"
+  },
+  {
+   "caip": "eip155:333666/slip44:60",
+   "symbol": "tOONE",
+   "name": "Oone Chain Testnet"
+  },
+  {
+   "caip": "eip155:333777/slip44:60",
+   "symbol": "tOONE",
+   "name": "Oone Chain Devnet"
+  },
+  {
+   "caip": "eip155:33626250/slip44:60",
+   "symbol": "TEEth",
+   "name": "Toliman Suave Testnet"
+  },
+  {
+   "caip": "eip155:338/slip44:60",
+   "symbol": "TCRO",
+   "name": "Cronos Testnet"
+  },
+  {
+   "caip": "eip155:339/slip44:60",
+   "symbol": "DAPP",
+   "name": "Pencils Protocol"
+  },
+  {
+   "caip": "eip155:33999/slip44:60",
+   "symbol": "DAPPST",
+   "name": "Pencils Protocol Sepolia Testnet"
+  },
+  {
+   "caip": "eip155:347/slip44:60",
+   "symbol": "KSS",
+   "name": "Kross Network Mainnet"
+  },
+  {
+   "caip": "eip155:34949059/slip44:60",
+   "symbol": "CITRO",
+   "name": "citronus-citro"
+  },
+  {
+   "caip": "eip155:35/slip44:60",
+   "symbol": "TBG",
+   "name": "TBWG Chain"
+  },
+  {
+   "caip": "eip155:3501/slip44:60",
+   "symbol": "JFIN",
+   "name": "JFIN Chain"
+  },
+  {
+   "caip": "eip155:35011/slip44:60",
+   "symbol": "taro",
+   "name": "J2O Taro"
+  },
+  {
+   "caip": "eip155:355110/slip44:60",
+   "symbol": "BTF",
+   "name": "Bitfinity Network Mainnet"
+  },
+  {
+   "caip": "eip155:355113/slip44:60",
+   "symbol": "BTF",
+   "name": "Bitfinity Network Testnet"
+  },
+  {
+   "caip": "eip155:35855456/slip44:60",
+   "symbol": "JOYS",
+   "name": "Joys Digital Mainnet"
+  },
+  {
+   "caip": "eip155:363/slip44:60",
+   "symbol": "TFUEL",
+   "name": "Theta Sapphire Testnet"
+  },
+  {
+   "caip": "eip155:3630/slip44:60",
+   "symbol": "TYCO",
+   "name": "Tycooncoin"
+  },
+  {
+   "caip": "eip155:364/slip44:60",
+   "symbol": "TFUEL",
+   "name": "Theta Amber Testnet"
+  },
+  {
+   "caip": "eip155:3693/slip44:60",
+   "symbol": "EMPIRE",
+   "name": "Empire Network"
+  },
+  {
+   "caip": "eip155:37714555429/slip44:60",
+   "symbol": "sXAI",
+   "name": "Xai Testnet v2"
+  },
+  {
+   "caip": "eip155:3797/slip44:60",
+   "symbol": "ALV",
+   "name": "AlveyChain Mainnet"
+  },
+  {
+   "caip": "eip155:38/slip44:60",
+   "symbol": "VAL",
+   "name": "Valorbit"
+  },
+  {
+   "caip": "eip155:381932/slip44:60",
+   "symbol": "METAL",
+   "name": "Metal Tahoe C-Chain"
+  },
+  {
+   "caip": "eip155:388/slip44:60",
+   "symbol": "zkCRO",
+   "name": "Cronos zkEVM Mainnet"
+  },
+  {
+   "caip": "eip155:3966/slip44:60",
+   "symbol": "DYNO",
+   "name": "DYNO Mainnet"
+  },
+  {
+   "caip": "eip155:3967/slip44:60",
+   "symbol": "tDYNO",
+   "name": "DYNO Testnet"
+  },
+  {
+   "caip": "eip155:39916801/slip44:60",
+   "symbol": "KOZI",
+   "name": "Kingdom Chain"
+  },
+  {
+   "caip": "eip155:4003/slip44:60",
+   "symbol": "XN",
+   "name": "X1 Fastnet"
+  },
+  {
+   "caip": "eip155:41/slip44:60",
+   "symbol": "TLOS",
+   "name": "Telos EVM Testnet"
+  },
+  {
+   "caip": "eip155:41500/slip44:60",
+   "symbol": "OXYN",
+   "name": "Opulent-X BETA"
+  },
+  {
+   "caip": "eip155:420420421/slip44:60",
+   "symbol": "WND",
+   "name": "Westend Asset Hub"
+  },
+  {
+   "caip": "eip155:420420422/slip44:60",
+   "symbol": "PAS",
+   "name": "Paseo PassetHub"
+  },
+  {
+   "caip": "eip155:42069/slip44:60",
+   "symbol": "peggle",
+   "name": "pegglecoin"
+  },
+  {
+   "caip": "eip155:42096/slip44:60",
+   "symbol": "HEU",
+   "name": "Heurist Testnet"
+  },
+  {
+   "caip": "eip155:42161/erc20:0x30b1c88144313d561ae6763d953b68fba1ab78b5",
+   "symbol": "WEETH/WETH-GAUGE",
+   "name": "Aura WEETH/WETH Pool"
+  },
+  {
+   "caip": "eip155:421613/slip44:60",
+   "symbol": "AGOR",
+   "name": "Arbitrum Goerli"
+  },
+  {
+   "caip": "eip155:4227/slip44:60",
+   "symbol": "HASHD",
+   "name": "Hashfire Testnet"
+  },
+  {
+   "caip": "eip155:424242/slip44:60",
+   "symbol": "FTN",
+   "name": "Fastex Chain testnet"
+  },
+  {
+   "caip": "eip155:427/slip44:60",
+   "symbol": "ZTH",
+   "name": "Zeeth Chain"
+  },
+  {
+   "caip": "eip155:4278608/slip44:60",
+   "symbol": "AIP",
+   "name": "Arcadia Mainnet"
+  },
+  {
+   "caip": "eip155:43110/slip44:60",
+   "symbol": "ATH",
+   "name": "Athereum"
+  },
+  {
+   "caip": "eip155:43214913/slip44:60",
+   "symbol": "MAI",
+   "name": "maistestsubnet"
+  },
+  {
+   "caip": "eip155:444900/slip44:60",
+   "symbol": "tWLK",
+   "name": "Weelink Testnet"
+  },
+  {
+   "caip": "eip155:45/slip44:60",
+   "symbol": "ORING",
+   "name": "Darwinia Pangoro Testnet"
+  },
+  {
+   "caip": "eip155:46/slip44:60",
+   "symbol": "RING",
+   "name": "Darwinia Network"
+  },
+  {
+   "caip": "eip155:47/slip44:60",
+   "symbol": "ACRIA",
+   "name": "Acria IntelliChain"
+  },
+  {
+   "caip": "eip155:474142/slip44:60",
+   "symbol": "OPC",
+   "name": "OpenChain Mainnet"
+  },
+  {
+   "caip": "eip155:486/slip44:60",
+   "symbol": "STND",
+   "name": "Standard Mainnet"
+  },
+  {
+   "caip": "eip155:486217935/slip44:60",
+   "symbol": "GTH",
+   "name": "Gather Devnet Network"
+  },
+  {
+   "caip": "eip155:490092/slip44:60",
+   "symbol": "PMPT",
+   "name": "PUMPFI CHAIN TESTNET"
+  },
+  {
+   "caip": "eip155:4918/slip44:60",
+   "symbol": "XVM",
+   "name": "Venidium Testnet"
+  },
+  {
+   "caip": "eip155:49797/slip44:60",
+   "symbol": "NRG",
+   "name": "Energi Testnet"
+  },
+  {
+   "caip": "eip155:499/slip44:60",
+   "symbol": "RUPX",
+   "name": "Rupaya"
+  },
+  {
+   "caip": "eip155:5001/slip44:60",
+   "symbol": "MNT",
+   "name": "Mantle Testnet"
+  },
+  {
+   "caip": "eip155:50021/slip44:60",
+   "symbol": "GCD",
+   "name": "GTON Testnet"
+  },
+  {
+   "caip": "eip155:5003/slip44:60",
+   "symbol": "MNT",
+   "name": "Mantle Sepolia Testnet"
+  },
+  {
+   "caip": "eip155:50312/slip44:60",
+   "symbol": "STT",
+   "name": "Somnia Testnet"
+  },
+  {
+   "caip": "eip155:50341/slip44:60",
+   "symbol": "RDO",
+   "name": "Reddio Testnet"
+  },
+  {
+   "caip": "eip155:50342/slip44:60",
+   "symbol": "RDO",
+   "name": "Reddio"
+  },
+  {
+   "caip": "eip155:50505/slip44:60",
+   "symbol": "STB",
+   "name": "STB Testnet"
+  },
+  {
+   "caip": "eip155:512512/slip44:60",
+   "symbol": "CMP",
+   "name": "CMP-Testnet"
+  },
+  {
+   "caip": "eip155:513100/slip44:60",
+   "symbol": "ETHF",
+   "name": "EthereumFair"
+  },
+  {
+   "caip": "eip155:516/slip44:60",
+   "symbol": "GZN",
+   "name": "Gear Zero Network Mainnet"
+  },
+  {
+   "caip": "eip155:5169/slip44:60",
+   "symbol": "SU",
+   "name": "Smart Layer Network"
+  },
+  {
+   "caip": "eip155:52027071/slip44:60",
+   "symbol": "DTBC",
+   "name": "Deviant Token Blockchain"
+  },
+  {
+   "caip": "eip155:52027080/slip44:60",
+   "symbol": "tDTBC",
+   "name": "Deviant Token Blockchain Testnet"
+  },
+  {
+   "caip": "eip155:52164803/slip44:60",
+   "symbol": "tFLT",
+   "name": "Fluence Testnet"
+  },
+  {
+   "caip": "eip155:526916/slip44:60",
+   "symbol": "DCT",
+   "name": "DoCoin Community Chain"
+  },
+  {
+   "caip": "eip155:53/slip44:60",
+   "symbol": "cett",
+   "name": "CoinEx Smart Chain Testnet"
+  },
+  {
+   "caip": "eip155:531050104/slip44:60",
+   "symbol": "SOPH",
+   "name": "Sophon Testnet"
+  },
+  {
+   "caip": "eip155:5315/slip44:60",
+   "symbol": "UZMI",
+   "name": "Uzmi Network Mainnet"
+  },
+  {
+   "caip": "eip155:5321/slip44:60",
+   "symbol": "ITX",
+   "name": "ITX Testnet"
+  },
+  {
+   "caip": "eip155:534/slip44:60",
+   "symbol": "CNDL",
+   "name": "Candle"
+  },
+  {
+   "caip": "eip155:535037/slip44:60",
+   "symbol": "BESC",
+   "name": "BeanEco SmartChain"
+  },
+  {
+   "caip": "eip155:542/slip44:60",
+   "symbol": "PAW",
+   "name": "PAWCHAIN Testnet"
+  },
+  {
+   "caip": "eip155:54211/slip44:60",
+   "symbol": "ISLMT",
+   "name": "Haqq Chain Testnet"
+  },
+  {
+   "caip": "eip155:5432/slip44:60",
+   "symbol": "YYT",
+   "name": "YeYing Network"
+  },
+  {
+   "caip": "eip155:5439/slip44:60",
+   "symbol": "EGAX",
+   "name": "Egochain"
+  },
+  {
+   "caip": "eip155:555/slip44:60",
+   "symbol": "CLASS",
+   "name": "Vela1 Chain Mainnet"
+  },
+  {
+   "caip": "eip155:55551/slip44:60",
+   "symbol": "PTON",
+   "name": "Photon Aurora Testnet"
+  },
+  {
+   "caip": "eip155:555666/slip44:60",
+   "symbol": "ECLPS",
+   "name": "Eclipse Testnet"
+  },
+  {
+   "caip": "eip155:55614/slip44:60",
+   "symbol": "FLA",
+   "name": "Flamma Mainnet"
+  },
+  {
+   "caip": "eip155:558/slip44:60",
+   "symbol": "TAO",
+   "name": "Tao Network"
+  },
+  {
+   "caip": "eip155:56/bep20:0x865331a601f129540b6f70a9fca2ba9dd71de298",
+   "symbol": "PORKE",
+   "name": "PonkeFork"
+  },
+  {
+   "caip": "eip155:560000/slip44:60",
+   "symbol": "tETH",
+   "name": "Hetu Testnet"
+  },
+  {
+   "caip": "eip155:5615/slip44:60",
+   "symbol": "tARC",
+   "name": "Arcturus Testneet"
+  },
+  {
+   "caip": "eip155:5616/slip44:60",
+   "symbol": "tARCT",
+   "name": "Arcturus Chain Testnet"
+  },
+  {
+   "caip": "eip155:56288/slip44:60",
+   "symbol": "BOBA",
+   "name": "Boba BNB Mainnet"
+  },
+  {
+   "caip": "eip155:56400/slip44:60",
+   "symbol": "ZERO",
+   "name": "Testnet Zeroone Subnet"
+  },
+  {
+   "caip": "eip155:565/slip44:60",
+   "symbol": "PYRE",
+   "name": "Prometheuz Testnet"
+  },
+  {
+   "caip": "eip155:5678/slip44:60",
+   "symbol": "TANGO",
+   "name": "Tanssi Demo"
+  },
+  {
+   "caip": "eip155:5700/slip44:60",
+   "symbol": "tSYS",
+   "name": "Syscoin Tanenbaum Testnet"
+  },
+  {
+   "caip": "eip155:57000/slip44:60",
+   "symbol": "TSYS",
+   "name": "Rollux Testnet"
+  },
+  {
+   "caip": "eip155:586/slip44:60",
+   "symbol": "CAPY",
+   "name": "MarketCapy TestNet 1"
+  },
+  {
+   "caip": "eip155:5869/slip44:60",
+   "symbol": "RBD",
+   "name": "Wegochain Rubidium Mainnet"
+  },
+  {
+   "caip": "eip155:595/slip44:60",
+   "symbol": "mACA",
+   "name": "Acala Mandala Testnet TC9"
+  },
+  {
+   "caip": "eip155:596/slip44:60",
+   "symbol": "KAR",
+   "name": "Karura Network Testnet"
+  },
+  {
+   "caip": "eip155:597/slip44:60",
+   "symbol": "ACA",
+   "name": "Acala Network Testnet"
+  },
+  {
+   "caip": "eip155:59902/slip44:60",
+   "symbol": "tMETIS",
+   "name": "Metis Sepolia Testnet"
+  },
+  {
+   "caip": "eip155:600/slip44:60",
+   "symbol": "MESHT",
+   "name": "Meshnyan testnet"
+  },
+  {
+   "caip": "eip155:60000/slip44:60",
+   "symbol": "TKM",
+   "name": "Thinkium Testnet Chain 0"
+  },
+  {
+   "caip": "eip155:60001/slip44:60",
+   "symbol": "TKM",
+   "name": "Thinkium Testnet Chain 1"
+  },
+  {
+   "caip": "eip155:60002/slip44:60",
+   "symbol": "TKM",
+   "name": "Thinkium Testnet Chain 2"
+  },
+  {
+   "caip": "eip155:60103/slip44:60",
+   "symbol": "TKM",
+   "name": "Thinkium Testnet Chain 103"
+  },
+  {
+   "caip": "eip155:6022140761023/slip44:60",
+   "symbol": "MOLE",
+   "name": "Molereum Network"
+  },
+  {
+   "caip": "eip155:61022448/slip44:60",
+   "symbol": "DKA",
+   "name": "dKargo Warehouse Testnet"
+  },
+  {
+   "caip": "eip155:612044/slip44:60",
+   "symbol": "tCROSS",
+   "name": "CROSS Testnet"
+  },
+  {
+   "caip": "eip155:612055/slip44:60",
+   "symbol": "CROSS",
+   "name": "CROSS Mainnet"
+  },
+  {
+   "caip": "eip155:614/slip44:60",
+   "symbol": "GLQ",
+   "name": "Graphlinq Blockchain Mainnet"
+  },
+  {
+   "caip": "eip155:61406/slip44:60",
+   "symbol": "KEC",
+   "name": "KaiChain"
+  },
+  {
+   "caip": "eip155:61717561/slip44:60",
+   "symbol": "AQUA",
+   "name": "Aquachain"
+  },
+  {
+   "caip": "eip155:619/slip44:60",
+   "symbol": "sUSD",
+   "name": "Skynet"
+  },
+  {
+   "caip": "eip155:6231991/slip44:60",
+   "symbol": "HARRY",
+   "name": "Block Chain LOL Berachain Testnet"
+  },
+  {
+   "caip": "eip155:624/slip44:60",
+   "symbol": "BNRY",
+   "name": "Binary Mainnet"
+  },
+  {
+   "caip": "eip155:625/slip44:60",
+   "symbol": "BNRY",
+   "name": "Binary Sepolia"
+  },
+  {
+   "caip": "eip155:62850/slip44:60",
+   "symbol": "SIGMA",
+   "name": "LAOS Sigma Testnet"
+  },
+  {
+   "caip": "eip155:632/slip44:60",
+   "symbol": "NFBC",
+   "name": "NFB Chain"
+  },
+  {
+   "caip": "eip155:6320/slip44:60",
+   "symbol": "NFBCT",
+   "name": "NFB Chain Testnet"
+  },
+  {
+   "caip": "eip155:65/slip44:60",
+   "symbol": "OKT",
+   "name": "OKExChain Testnet"
+  },
+  {
+   "caip": "eip155:65010004/slip44:60",
+   "symbol": "ATN",
+   "name": "Autonity Bakerloo (Nile) Testnet"
+  },
+  {
+   "caip": "eip155:6502/slip44:60",
+   "symbol": "P2P",
+   "name": "Peerpay"
+  },
+  {
+   "caip": "eip155:6550/slip44:60",
+   "symbol": "FLA",
+   "name": "Flamma Testnet"
+  },
+  {
+   "caip": "eip155:660279/slip44:60",
+   "symbol": "XAI",
+   "name": "Xai Mainnet"
+  },
+  {
+   "caip": "eip155:6626/slip44:60",
+   "symbol": "PIX",
+   "name": "Pixie Chain Mainnet"
+  },
+  {
+   "caip": "eip155:666301171999/slip44:60",
+   "symbol": "PDC",
+   "name": "PDC Mainnet"
+  },
+  {
+   "caip": "eip155:666666/slip44:60",
+   "symbol": "VS",
+   "name": "Vision - Vpioneer Test Chain"
+  },
+  {
+   "caip": "eip155:6666689/slip44:60",
+   "symbol": "Ton",
+   "name": "The Ting Blockchain Testnet Explorer"
+  },
+  {
+   "caip": "eip155:668/slip44:60",
+   "symbol": "JGC",
+   "name": "JuncaChain"
+  },
+  {
+   "caip": "eip155:669/slip44:60",
+   "symbol": "JGCT",
+   "name": "JuncaChain testnet"
+  },
+  {
+   "caip": "eip155:67/slip44:60",
+   "symbol": "DBM",
+   "name": "DBChain Testnet"
+  },
+  {
+   "caip": "eip155:67588/slip44:60",
+   "symbol": "COSMIC",
+   "name": "Cosmic Chain"
+  },
+  {
+   "caip": "eip155:68/slip44:60",
+   "symbol": "SOTER",
+   "name": "SoterOne Mainnet"
+  },
+  {
+   "caip": "eip155:686/slip44:60",
+   "symbol": "KAR",
+   "name": "Karura Network"
+  },
+  {
+   "caip": "eip155:688688/slip44:60",
+   "symbol": "PHRS",
+   "name": "Pharos Testnet"
+  },
+  {
+   "caip": "eip155:69420/slip44:60",
+   "symbol": "CTE",
+   "name": "Condrieu"
+  },
+  {
+   "caip": "eip155:6969/slip44:60",
+   "symbol": "TOMB",
+   "name": "Tomb Chain Mainnet"
+  },
+  {
+   "caip": "eip155:696969/slip44:60",
+   "symbol": "GAL",
+   "name": "Galadriel Devnet"
+  },
+  {
+   "caip": "eip155:6985385/slip44:60",
+   "symbol": "H",
+   "name": "Humanity Protocol"
+  },
+  {
+   "caip": "eip155:6999/slip44:60",
+   "symbol": "PSC",
+   "name": "PolySmartChain"
+  },
+  {
+   "caip": "eip155:700/slip44:60",
+   "symbol": "SNS",
+   "name": "Star Social Testnet"
+  },
+  {
+   "caip": "eip155:70000/slip44:60",
+   "symbol": "TKM",
+   "name": "Thinkium Mainnet Chain 0"
+  },
+  {
+   "caip": "eip155:70001/slip44:60",
+   "symbol": "TKM",
+   "name": "Thinkium Mainnet Chain 1"
+  },
+  {
+   "caip": "eip155:70002/slip44:60",
+   "symbol": "TKM",
+   "name": "Thinkium Mainnet Chain 2"
+  },
+  {
+   "caip": "eip155:701/slip44:60",
+   "symbol": "KRING",
+   "name": "Darwinia Koi Testnet"
+  },
+  {
+   "caip": "eip155:70103/slip44:60",
+   "symbol": "TKM",
+   "name": "Thinkium Mainnet Chain 103"
+  },
+  {
+   "caip": "eip155:706883/slip44:60",
+   "symbol": "FDS",
+   "name": "Fidesinnova"
+  },
+  {
+   "caip": "eip155:707/slip44:60",
+   "symbol": "BCS",
+   "name": "BlockChain Station Mainnet"
+  },
+  {
+   "caip": "eip155:708/slip44:60",
+   "symbol": "tBCS",
+   "name": "BlockChain Station Testnet"
+  },
+  {
+   "caip": "eip155:7080969/slip44:60",
+   "symbol": "tHP",
+   "name": "Humanity Protocol testnet"
+  },
+  {
+   "caip": "eip155:7099/slip44:60",
+   "symbol": "BBN",
+   "name": "Bharat Blockchain Network"
+  },
+  {
+   "caip": "eip155:710420/slip44:60",
+   "symbol": "TILT",
+   "name": "Tiltyard Mainnet Subnet"
+  },
+  {
+   "caip": "eip155:7131/slip44:60",
+   "symbol": "VRCN",
+   "name": "VRCN Chain Mainnet"
+  },
+  {
+   "caip": "eip155:71401/slip44:60",
+   "symbol": "pCKB",
+   "name": "Godwoken Testnet v1"
+  },
+  {
+   "caip": "eip155:72/slip44:60",
+   "symbol": "DX",
+   "name": "DxChain Testnet"
+  },
+  {
+   "caip": "eip155:7208/slip44:60",
+   "symbol": "NXRA",
+   "name": "Nexera Mainnet"
+  },
+  {
+   "caip": "eip155:72080/slip44:60",
+   "symbol": "tNXRA",
+   "name": "Nexera Testnet"
+  },
+  {
+   "caip": "eip155:727/slip44:60",
+   "symbol": "BLU",
+   "name": "Blucrates"
+  },
+  {
+   "caip": "eip155:73799/slip44:60",
+   "symbol": "VT",
+   "name": "Energy Web Volta Testnet"
+  },
+  {
+   "caip": "eip155:742/slip44:60",
+   "symbol": "SPAY",
+   "name": "Script Testnet"
+  },
+  {
+   "caip": "eip155:752025/slip44:60",
+   "symbol": "CAPS",
+   "name": "Ternoa"
+  },
+  {
+   "caip": "eip155:75338/slip44:60",
+   "symbol": "APPL",
+   "name": "AppLayer Testnet"
+  },
+  {
+   "caip": "eip155:75512/slip44:60",
+   "symbol": "OAS",
+   "name": "GEEK Verse Mainnet"
+  },
+  {
+   "caip": "eip155:75513/slip44:60",
+   "symbol": "OAS",
+   "name": "GEEK Verse Testnet"
+  },
+  {
+   "caip": "eip155:756689/slip44:60",
+   "symbol": "PYZ",
+   "name": "PAYSCAN CHAIN"
+  },
+  {
+   "caip": "eip155:764984/slip44:60",
+   "symbol": "L1T",
+   "name": "Lamina1 Testnet"
+  },
+  {
+   "caip": "eip155:767368/slip44:60",
+   "symbol": "L1IDT",
+   "name": "Lamina1 Identity Testnet"
+  },
+  {
+   "caip": "eip155:77/slip44:60",
+   "symbol": "SPOA",
+   "name": "POA Network Sokol"
+  },
+  {
+   "caip": "eip155:7701/slip44:60",
+   "symbol": "CANTO",
+   "name": "Canto Tesnet"
+  },
+  {
+   "caip": "eip155:776/slip44:60",
+   "symbol": "TOPC",
+   "name": "OpenChain Testnet"
+  },
+  {
+   "caip": "eip155:77652/slip44:60",
+   "symbol": "CARR",
+   "name": "Carrchain Testnet"
+  },
+  {
+   "caip": "eip155:776877/slip44:60",
+   "symbol": "MDM",
+   "name": "Modularium"
+  },
+  {
+   "caip": "eip155:777/slip44:60",
+   "symbol": "cTH",
+   "name": "cheapETH"
+  },
+  {
+   "caip": "eip155:7770/slip44:60",
+   "symbol": "PANDA",
+   "name": "PandaSea Testnet"
+  },
+  {
+   "caip": "eip155:7776/slip44:60",
+   "symbol": "PANDA",
+   "name": "PandaSea Mainnet"
+  },
+  {
+   "caip": "eip155:777888/slip44:60",
+   "symbol": "OONE",
+   "name": "Oone Chain Mainnet"
+  },
+  {
+   "caip": "eip155:78/slip44:60",
+   "symbol": "PETH",
+   "name": "PrimusChain mainnet"
+  },
+  {
+   "caip": "eip155:78110/slip44:60",
+   "symbol": "FIN",
+   "name": "Firenze test network"
+  },
+  {
+   "caip": "eip155:78431/slip44:60",
+   "symbol": "BLT",
+   "name": "Bulletin Subnet"
+  },
+  {
+   "caip": "eip155:78432/slip44:60",
+   "symbol": "CON",
+   "name": "Conduit Subnet"
+  },
+  {
+   "caip": "eip155:785/slip44:60",
+   "symbol": "THEO",
+   "name": "AUTHEO Testnet"
+  },
+  {
+   "caip": "eip155:787/slip44:60",
+   "symbol": "ACA",
+   "name": "Acala Network"
+  },
+  {
+   "caip": "eip155:7878/slip44:60",
+   "symbol": "TSCAS",
+   "name": "Hazlor Testnet"
+  },
+  {
+   "caip": "eip155:788/slip44:60",
+   "symbol": "TAero",
+   "name": "Aerochain Testnet"
+  },
+  {
+   "caip": "eip155:7890/slip44:60",
+   "symbol": "PC",
+   "name": "Panchain Mainnet"
+  },
+  {
+   "caip": "eip155:789789/slip44:60",
+   "symbol": "EMED",
+   "name": "Emeraldz"
+  },
+  {
+   "caip": "eip155:79/slip44:60",
+   "symbol": "ZENITH",
+   "name": "Zenith Mainnet"
+  },
+  {
+   "caip": "eip155:799/slip44:60",
+   "symbol": "TRUPX",
+   "name": "Rupaya Testnet"
+  },
+  {
+   "caip": "eip155:8006/slip44:60",
+   "symbol": "BMN",
+   "name": "BMN Smart Chain"
+  },
+  {
+   "caip": "eip155:8007736/slip44:60",
+   "symbol": "PI",
+   "name": "Plian Mainnet Subchain 1"
+  },
+  {
+   "caip": "eip155:8008135/slip44:60",
+   "symbol": "tFHE",
+   "name": "Fhenix Helium"
+  },
+  {
+   "caip": "eip155:8029/slip44:60",
+   "symbol": "MDGLT",
+   "name": "MDGL Testnet"
+  },
+  {
+   "caip": "eip155:80451/slip44:60",
+   "symbol": "GRT",
+   "name": "Geo Genesis"
+  },
+  {
+   "caip": "eip155:8098/slip44:60",
+   "symbol": "SmuX",
+   "name": "StreamuX Blockchain"
+  },
+  {
+   "caip": "eip155:8099/slip44:60",
+   "symbol": "BBN",
+   "name": "Bharat Blockchain Network Mainnet"
+  },
+  {
+   "caip": "eip155:8125/slip44:60",
+   "symbol": "tLRX",
+   "name": "Lerax Chain Testnet"
+  },
+  {
+   "caip": "eip155:82459/slip44:60",
+   "symbol": "SU",
+   "name": "Smart Layer Network Testnet"
+  },
+  {
+   "caip": "eip155:8285/slip44:60",
+   "symbol": "KTO",
+   "name": "KorthoTest"
+  },
+  {
+   "caip": "eip155:83/slip44:60",
+   "symbol": "MTR",
+   "name": "Meter Testnet"
+  },
+  {
+   "caip": "eip155:83144/slip44:60",
+   "symbol": "KICK",
+   "name": "Xprotocol Testnet"
+  },
+  {
+   "caip": "eip155:8386/slip44:60",
+   "symbol": "KICK",
+   "name": "XProtocol"
+  },
+  {
+   "caip": "eip155:83868/slip44:60",
+   "symbol": "KICK",
+   "name": "Xprotocol Sepolia"
+  },
+  {
+   "caip": "eip155:840000/slip44:60",
+   "symbol": "tBTC",
+   "name": "RUNEVM Testnet"
+  },
+  {
+   "caip": "eip155:843843/slip44:60",
+   "symbol": "GNET",
+   "name": "Galactica Testnet"
+  },
+  {
+   "caip": "eip155:8453/erc20:0x484c46efdc3f2f9ed6c28ef8a907b0da25245889",
+   "symbol": "TARD",
+   "name": "Basetard"
+  },
+  {
+   "caip": "eip155:8453/erc20:0xacb31d2ee40e81720c6374097d2e1a9a8e3b7806",
+   "symbol": "ESXA",
+   "name": "EstaliaX"
+  },
+  {
+   "caip": "eip155:8453/erc20:0xc1512b7023a97d54f8dd757b1f84e132297ca0d7",
+   "symbol": "BALL",
+   "name": "Ballies"
+  },
+  {
+   "caip": "eip155:846000/slip44:60",
+   "symbol": "APTA",
+   "name": "4GoodNetwork"
+  },
+  {
+   "caip": "eip155:84841/slip44:60",
+   "symbol": "O",
+   "name": "O Chain"
+  },
+  {
+   "caip": "eip155:85/slip44:60",
+   "symbol": "GT",
+   "name": "GateChain Testnet"
+  },
+  {
+   "caip": "eip155:852/slip44:60",
+   "symbol": "HK",
+   "name": "HongKong Mainnet"
+  },
+  {
+   "caip": "eip155:85321/slip44:60",
+   "symbol": "GDPR",
+   "name": "GDPR Testnet"
+  },
+  {
+   "caip": "eip155:85449/slip44:60",
+   "symbol": "CYBER",
+   "name": "CYBERTRUST"
+  },
+  {
+   "caip": "eip155:8545/slip44:60",
+   "symbol": "CKR",
+   "name": "Chakra Testnet"
+  },
+  {
+   "caip": "eip155:8569/slip44:60",
+   "symbol": "NEWRL",
+   "name": "New Reality Blockchain"
+  },
+  {
+   "caip": "eip155:859/slip44:60",
+   "symbol": "ZTH",
+   "name": "Zeeth Chain Dev"
+  },
+  {
+   "caip": "eip155:86/slip44:60",
+   "symbol": "GT",
+   "name": "GateChain Mainnet"
+  },
+  {
+   "caip": "eip155:861/slip44:60",
+   "symbol": "ELC",
+   "name": "Electra Network"
+  },
+  {
+   "caip": "eip155:863/slip44:60",
+   "symbol": "USLS",
+   "name": "Radius Testnet"
+  },
+  {
+   "caip": "eip155:868/slip44:60",
+   "symbol": "FST",
+   "name": "Fantasia Chain Mainnet"
+  },
+  {
+   "caip": "eip155:870/slip44:60",
+   "symbol": "AI3",
+   "name": "Autonomys Mainnet"
+  },
+  {
+   "caip": "eip155:871/slip44:60",
+   "symbol": "TELC",
+   "name": "Electra Test Network"
+  },
+  {
+   "caip": "eip155:8723/slip44:60",
+   "symbol": "OLO",
+   "name": "TOOL Global Mainnet"
+  },
+  {
+   "caip": "eip155:8724/slip44:60",
+   "symbol": "OLO",
+   "name": "TOOL Global Testnet"
+  },
+  {
+   "caip": "eip155:8732/slip44:60",
+   "symbol": "BLN",
+   "name": "Bullions Smart Chain"
+  },
+  {
+   "caip": "eip155:8738/slip44:60",
+   "symbol": "ALPH",
+   "name": "Alph Network"
+  },
+  {
+   "caip": "eip155:877/slip44:60",
+   "symbol": "DXT",
+   "name": "Dexit Network"
+  },
+  {
+   "caip": "eip155:880/slip44:60",
+   "symbol": "AMBROS",
+   "name": "Ambros Chain Mainnet"
+  },
+  {
+   "caip": "eip155:8801/slip44:60",
+   "symbol": "OKTO",
+   "name": "Okto Testnet"
+  },
+  {
+   "caip": "eip155:88153591557/slip44:60",
+   "symbol": "CGT",
+   "name": "Arbitrum Blueberry"
+  },
+  {
+   "caip": "eip155:88800/slip44:60",
+   "symbol": "ZKAS",
+   "name": "ZKasino Mainnet"
+  },
+  {
+   "caip": "eip155:888882/slip44:60",
+   "symbol": "REXX",
+   "name": "REXX Mainnet"
+  },
+  {
+   "caip": "eip155:888888/slip44:60",
+   "symbol": "VS",
+   "name": "Vision - Mainnet"
+  },
+  {
+   "caip": "eip155:8889/slip44:60",
+   "symbol": "VSC",
+   "name": "Vyvo Smart Chain"
+  },
+  {
+   "caip": "eip155:888991/slip44:60",
+   "symbol": "UNITE",
+   "name": "Unite Testnet"
+  },
+  {
+   "caip": "eip155:889910245/slip44:60",
+   "symbol": "PTCE",
+   "name": "PTCESCAN Testnet"
+  },
+  {
+   "caip": "eip155:889910246/slip44:60",
+   "symbol": "PTCE",
+   "name": "PTCESCAN Mainnet"
+  },
+  {
+   "caip": "eip155:89/slip44:60",
+   "symbol": "VIC",
+   "name": "Viction Testnet"
+  },
+  {
+   "caip": "eip155:8995/slip44:60",
+   "symbol": "U+25B3",
+   "name": "bloxberg"
+  },
+  {
+   "caip": "eip155:900000/slip44:60",
+   "symbol": "POSI",
+   "name": "Posichain Mainnet Shard 0"
+  },
+  {
+   "caip": "eip155:90002/slip44:60",
+   "symbol": "USC",
+   "name": "UBIT SMARTCHAIN MAINNET"
+  },
+  {
+   "caip": "eip155:90025/slip44:60",
+   "symbol": "AIPAW",
+   "name": "AIPaw Mainnet"
+  },
+  {
+   "caip": "eip155:90210/slip44:60",
+   "symbol": "BVE",
+   "name": "Beverly Hills"
+  },
+  {
+   "caip": "eip155:9090/slip44:60",
+   "symbol": "INCO",
+   "name": "Inco Gentry Testnet"
+  },
+  {
+   "caip": "eip155:910/slip44:60",
+   "symbol": "DBONE",
+   "name": "DecentraBone Layer1 Testnet"
+  },
+  {
+   "caip": "eip155:9100/slip44:60",
+   "symbol": "GNC",
+   "name": "Genesis Coin"
+  },
+  {
+   "caip": "eip155:910000/slip44:60",
+   "symbol": "POSI",
+   "name": "Posichain Testnet Shard 0"
+  },
+  {
+   "caip": "eip155:9108/slip44:60",
+   "symbol": "SYNC",
+   "name": "Destra Dubai Testnet"
+  },
+  {
+   "caip": "eip155:920000/slip44:60",
+   "symbol": "POSI",
+   "name": "Posichain Devnet Shard 0"
+  },
+  {
+   "caip": "eip155:920001/slip44:60",
+   "symbol": "POSI",
+   "name": "Posichain Devnet Shard 1"
+  },
+  {
+   "caip": "eip155:92870/slip44:60",
+   "symbol": "WATR",
+   "name": "Watr Testnet"
+  },
+  {
+   "caip": "eip155:9302/slip44:60",
+   "symbol": "GNET",
+   "name": "Galactica-Reticulum"
+  },
+  {
+   "caip": "eip155:93747/slip44:60",
+   "symbol": "SVM",
+   "name": "StratoVM Testnet"
+  },
+  {
+   "caip": "eip155:9528/slip44:60",
+   "symbol": "QET",
+   "name": "QEasyWeb3 Testnet"
+  },
+  {
+   "caip": "eip155:95432/slip44:60",
+   "symbol": "SRIX",
+   "name": "SRICHAIN"
+  },
+  {
+   "caip": "eip155:955305/slip44:60",
+   "symbol": "ELV",
+   "name": "Eluvio Content Fabric"
+  },
+  {
+   "caip": "eip155:97/slip44:60",
+   "symbol": "tBNB",
+   "name": "BNB Smart Chain Testnet"
+  },
+  {
+   "caip": "eip155:97053/slip44:60",
+   "symbol": "TSC",
+   "name": "Tetron Testnet Smart Chain"
+  },
+  {
+   "caip": "eip155:97055/slip44:60",
+   "symbol": "TSC",
+   "name": "Tetron Smart Chain"
+  },
+  {
+   "caip": "eip155:9728/slip44:60",
+   "symbol": "BOBA",
+   "name": "Boba BNB Testnet"
+  },
+  {
+   "caip": "eip155:973/slip44:60",
+   "symbol": "PALM",
+   "name": "Palm Smart Chain"
+  },
+  {
+   "caip": "eip155:977/slip44:60",
+   "symbol": "YETI",
+   "name": "Nepal Blockchain Network"
+  },
+  {
+   "caip": "eip155:97766/slip44:60",
+   "symbol": "MBC",
+   "name": "MetaBenz CHAIN"
+  },
+  {
+   "caip": "eip155:9788/slip44:60",
+   "symbol": "TABI",
+   "name": "Tabi Testnetv2"
+  },
+  {
+   "caip": "eip155:9789/slip44:60",
+   "symbol": "TABI",
+   "name": "Tabi Testnet"
+  },
+  {
+   "caip": "eip155:97912060/slip44:60",
+   "symbol": "CHAD",
+   "name": "ChadChain"
+  },
+  {
+   "caip": "eip155:984/slip44:60",
+   "symbol": "OPN",
+   "name": "IOPN Testnet"
+  },
+  {
+   "caip": "eip155:986/slip44:60",
+   "symbol": "LAGO",
+   "name": "LAGOM Mainnet"
+  },
+  {
+   "caip": "eip155:98985/slip44:60",
+   "symbol": "SPN",
+   "name": "Superposition Testnet"
+  },
+  {
+   "caip": "eip155:99415706/slip44:60",
+   "symbol": "TOYS",
+   "name": "Joys Digital TestNet"
+  },
+  {
+   "caip": "eip155:998/slip44:60",
+   "symbol": "HYPE",
+   "name": "Hyperliquid EVM Testnet"
+  },
+  {
+   "caip": "eip155:9982/slip44:60",
+   "symbol": "MFEV",
+   "name": "MFEV CHAIN MAINNET"
+  },
+  {
+   "caip": "eip155:998899/slip44:60",
+   "symbol": "CHAIN",
+   "name": "Supernet Testnet"
+  },
+  {
+   "caip": "eip155:9998/slip44:60",
+   "symbol": "ZTC",
+   "name": "Ztc Mainnet"
+  },
+  {
+   "caip": "eip155:9999/slip44:60",
+   "symbol": "MYN",
+   "name": "myOwn Testnet"
+  },
+  {
+   "caip": "eip155:99998/slip44:60",
+   "symbol": "UBC",
+   "name": "UB Smart Chain(testnet)"
+  },
+  {
+   "caip": "eip155:99999/slip44:60",
+   "symbol": "UBC",
+   "name": "UB Smart Chain"
+  },
+  {
+   "caip": "eip155:9999999/slip44:60",
+   "symbol": "FLT",
+   "name": "Fluence"
+  }
+ ],
+ "download_failed": [
+  {
+   "caip": "eip155:1/erc20:0xfc09c7cfd9c175dd9423ca02ae1249579ab12f12",
+   "source": "geckoterminal",
+   "url": "https://coin-images.coingecko.com/coins/images/20277/small/cLogo.png?1696519683",
+   "error": "https://coin-images.coingecko.com/coins/images/20277/small/cLogo.png?1696519683: HTTP Error 403: Forbidden"
+  },
+  {
+   "caip": "eip155:1000000003/slip44:60",
+   "source": "chainlist:deinfra",
+   "url": "ipfs://bafybeic234jzphpt7pg2jjosi3zohllbjhz6e5gc2snda4uzrmv6cwfbvi",
+   "error": "https://ipfs.filebase.io/ipfs/bafybeic234jzphpt7pg2jjosi3zohllbjhz6e5gc2snda4uzrmv6cwfbvi: HTTP Error 504: Gateway Timeout; https://gateway.pinata.cloud/ipfs/bafybeic234jzphpt7pg2jjosi3zohllbjhz6e5gc2snda4uzrmv6cwfbvi: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/bafybeic234jzphpt7pg2jj"
+  },
+  {
+   "caip": "eip155:10011/slip44:60",
+   "source": "chainlist:deepsafe",
+   "url": "ipfs://QmQJi1wfrLzywtbvNetvc6hV6SL825qvgZSKe3coJv8JNm",
+   "error": "https://ipfs.filebase.io/ipfs/QmQJi1wfrLzywtbvNetvc6hV6SL825qvgZSKe3coJv8JNm: The read operation timed out; https://gateway.pinata.cloud/ipfs/QmQJi1wfrLzywtbvNetvc6hV6SL825qvgZSKe3coJv8JNm: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/QmQJi1wfrLzywtbvNetvc6hV6SL825qvgZSKe3coJv8JNm: HTTP"
+  },
+  {
+   "caip": "eip155:10024/slip44:60",
+   "source": "chainlist:gonchain",
+   "url": "ipfs://QmPtiJGaApbW3ATZhPW3pKJpw3iGVrRGsZLWhrDKF9ZK18",
+   "error": "https://ipfs.filebase.io/ipfs/QmPtiJGaApbW3ATZhPW3pKJpw3iGVrRGsZLWhrDKF9ZK18: The read operation timed out; https://gateway.pinata.cloud/ipfs/QmPtiJGaApbW3ATZhPW3pKJpw3iGVrRGsZLWhrDKF9ZK18: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/QmPtiJGaApbW3ATZhPW3pKJpw3iGVrRGsZLWhrDKF9ZK18: HTTP"
+  },
+  {
+   "caip": "eip155:100501/slip44:60",
+   "source": "chainlist:deinfra",
+   "url": "ipfs://bafybeic234jzphpt7pg2jjosi3zohllbjhz6e5gc2snda4uzrmv6cwfbvi",
+   "error": "https://ipfs.filebase.io/ipfs/bafybeic234jzphpt7pg2jjosi3zohllbjhz6e5gc2snda4uzrmv6cwfbvi: The read operation timed out; https://gateway.pinata.cloud/ipfs/bafybeic234jzphpt7pg2jjosi3zohllbjhz6e5gc2snda4uzrmv6cwfbvi: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/bafybeic234jzphpt7pg2jjosi"
+  },
+  {
+   "caip": "eip155:1008/slip44:60",
+   "source": "chainlist:eurus",
+   "url": "ipfs://QmaGd5L9jGPbfyGXBFhu9gjinWJ66YtNrXq8x6Q98Eep9e",
+   "error": "https://ipfs.filebase.io/ipfs/QmaGd5L9jGPbfyGXBFhu9gjinWJ66YtNrXq8x6Q98Eep9e: The read operation timed out; https://gateway.pinata.cloud/ipfs/QmaGd5L9jGPbfyGXBFhu9gjinWJ66YtNrXq8x6Q98Eep9e: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/QmaGd5L9jGPbfyGXBFhu9gjinWJ66YtNrXq8x6Q98Eep9e: HTTP"
+  },
+  {
+   "caip": "eip155:101003/slip44:60",
+   "source": "chainlist:juneoSocotraTestnet",
+   "url": "ipfs://QmVHCbprTiCen4496EnAKedtJPxYLZXBE1gDusVa23y8kg",
+   "error": "https://ipfs.filebase.io/ipfs/QmVHCbprTiCen4496EnAKedtJPxYLZXBE1gDusVa23y8kg: The read operation timed out; https://gateway.pinata.cloud/ipfs/QmVHCbprTiCen4496EnAKedtJPxYLZXBE1gDusVa23y8kg: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/QmVHCbprTiCen4496EnAKedtJPxYLZXBE1gDusVa23y8kg: HTTP"
+  },
+  {
+   "caip": "eip155:101088/slip44:60",
+   "source": "chainlist:xitcoin",
+   "url": "ipfs://bafkreihijckahzathexwzanldh4u4nm2wwrtus7bmbegmpc7hn4ivo5dn4",
+   "error": "https://ipfs.filebase.io/ipfs/bafkreihijckahzathexwzanldh4u4nm2wwrtus7bmbegmpc7hn4ivo5dn4: The read operation timed out; https://gateway.pinata.cloud/ipfs/bafkreihijckahzathexwzanldh4u4nm2wwrtus7bmbegmpc7hn4ivo5dn4: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/bafkreihijckahzathexwzanld"
+  },
+  {
+   "caip": "eip155:10201/slip44:60",
+   "source": "chainlist:pwr",
+   "url": "ipfs://QmRhQG9TZrXDdbQeTzBmjg3pqgwaD5TKVZj8k4kaz8AoZx",
+   "error": "https://ipfs.filebase.io/ipfs/QmRhQG9TZrXDdbQeTzBmjg3pqgwaD5TKVZj8k4kaz8AoZx: The read operation timed out; https://gateway.pinata.cloud/ipfs/QmRhQG9TZrXDdbQeTzBmjg3pqgwaD5TKVZj8k4kaz8AoZx: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/QmRhQG9TZrXDdbQeTzBmjg3pqgwaD5TKVZj8k4kaz8AoZx: HTTP"
+  },
+  {
+   "caip": "eip155:103090/slip44:60",
+   "source": "chainlist:crystal",
+   "url": "ipfs://Qmbry1Uc6HnXmqFNXW5dFJ7To8EezCCjNr4TqqvAyzXS4h",
+   "error": "https://ipfs.filebase.io/ipfs/Qmbry1Uc6HnXmqFNXW5dFJ7To8EezCCjNr4TqqvAyzXS4h: The read operation timed out; https://gateway.pinata.cloud/ipfs/Qmbry1Uc6HnXmqFNXW5dFJ7To8EezCCjNr4TqqvAyzXS4h: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/Qmbry1Uc6HnXmqFNXW5dFJ7To8EezCCjNr4TqqvAyzXS4h: HTTP"
+  },
+  {
+   "caip": "eip155:104566/slip44:60",
+   "source": "chainlist:kaspaclassic",
+   "url": "ipfs://QmNMuNBwg9opKvsnrDaoYBP743LeddeooQupVYjpBXf7d7",
+   "error": "https://ipfs.filebase.io/ipfs/QmNMuNBwg9opKvsnrDaoYBP743LeddeooQupVYjpBXf7d7: The read operation timed out; https://gateway.pinata.cloud/ipfs/QmNMuNBwg9opKvsnrDaoYBP743LeddeooQupVYjpBXf7d7: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/QmNMuNBwg9opKvsnrDaoYBP743LeddeooQupVYjpBXf7d7: HTTP"
+  },
+  {
+   "caip": "eip155:1079/slip44:60",
+   "source": "chainlist:mintara",
+   "url": "ipfs://bafybeie7jzlzlpz7c3a3oh4x5joej23dj2qf3cexmchjyc72hv3fblcaja",
+   "error": "cannot identify image file <_io.BytesIO object at 0x7efdec7b2c00>"
+  },
+  {
+   "caip": "eip155:1080/slip44:60",
+   "source": "chainlist:mintara",
+   "url": "ipfs://bafybeie7jzlzlpz7c3a3oh4x5joej23dj2qf3cexmchjyc72hv3fblcaja",
+   "error": "cannot identify image file <_io.BytesIO object at 0x7efdec7b2b60>"
+  },
+  {
+   "caip": "eip155:1089/slip44:60",
+   "source": "chainlist:humans-dark",
+   "url": "ipfs://QmX6XuoQDTTjYqAmdNJiieLDZSwHHyUx44yQb4E3tmHmEA",
+   "error": "https://ipfs.filebase.io/ipfs/QmX6XuoQDTTjYqAmdNJiieLDZSwHHyUx44yQb4E3tmHmEA: The read operation timed out; https://gateway.pinata.cloud/ipfs/QmX6XuoQDTTjYqAmdNJiieLDZSwHHyUx44yQb4E3tmHmEA: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/QmX6XuoQDTTjYqAmdNJiieLDZSwHHyUx44yQb4E3tmHmEA: HTTP"
+  },
+  {
+   "caip": "eip155:1107/slip44:60",
+   "source": "chainlist:blxq",
+   "url": "ipfs://QmS9kDKr1rgcz5W55yCQVfFs1vRTCneaLHt1t9cBizpqpH",
+   "error": "https://ipfs.filebase.io/ipfs/QmS9kDKr1rgcz5W55yCQVfFs1vRTCneaLHt1t9cBizpqpH: The read operation timed out; https://gateway.pinata.cloud/ipfs/QmS9kDKr1rgcz5W55yCQVfFs1vRTCneaLHt1t9cBizpqpH: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/QmS9kDKr1rgcz5W55yCQVfFs1vRTCneaLHt1t9cBizpqpH: HTTP"
+  },
+  {
+   "caip": "eip155:1108/slip44:60",
+   "source": "chainlist:blxq",
+   "url": "ipfs://QmS9kDKr1rgcz5W55yCQVfFs1vRTCneaLHt1t9cBizpqpH",
+   "error": "https://ipfs.filebase.io/ipfs/QmS9kDKr1rgcz5W55yCQVfFs1vRTCneaLHt1t9cBizpqpH: HTTP Error 504: Gateway Timeout; https://gateway.pinata.cloud/ipfs/QmS9kDKr1rgcz5W55yCQVfFs1vRTCneaLHt1t9cBizpqpH: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/QmS9kDKr1rgcz5W55yCQVfFs1vRTCneaLHt1t9cBizpqpH: H"
+  },
+  {
+   "caip": "eip155:11100/slip44:60",
+   "source": "chainlist:boolnetwork",
+   "url": "ipfs://QmPVnYRhenXH8X9NF3vy7oU1sHnoBoNU2xDU68uBqWoy3b",
+   "error": "https://ipfs.filebase.io/ipfs/QmPVnYRhenXH8X9NF3vy7oU1sHnoBoNU2xDU68uBqWoy3b: The read operation timed out; https://gateway.pinata.cloud/ipfs/QmPVnYRhenXH8X9NF3vy7oU1sHnoBoNU2xDU68uBqWoy3b: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/QmPVnYRhenXH8X9NF3vy7oU1sHnoBoNU2xDU68uBqWoy3b: HTTP"
+  },
+  {
+   "caip": "eip155:1138/slip44:60",
+   "source": "chainlist:amstar",
+   "url": "ipfs://Qmd4TMQdnYxaUZqnVddh5S37NGH72g2kkK38ccCEgdZz1C",
+   "error": "https://ipfs.filebase.io/ipfs/Qmd4TMQdnYxaUZqnVddh5S37NGH72g2kkK38ccCEgdZz1C: The read operation timed out; https://gateway.pinata.cloud/ipfs/Qmd4TMQdnYxaUZqnVddh5S37NGH72g2kkK38ccCEgdZz1C: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/Qmd4TMQdnYxaUZqnVddh5S37NGH72g2kkK38ccCEgdZz1C: HTTP"
+  },
+  {
+   "caip": "eip155:11437/slip44:60",
+   "source": "chainlist:shyft",
+   "url": "ipfs://QmUkFZC2ZmoYPTKf7AHdjwRPZoV2h1MCuHaGM4iu8SNFpi",
+   "error": "https://ipfs.filebase.io/ipfs/QmUkFZC2ZmoYPTKf7AHdjwRPZoV2h1MCuHaGM4iu8SNFpi: The read operation timed out; https://gateway.pinata.cloud/ipfs/QmUkFZC2ZmoYPTKf7AHdjwRPZoV2h1MCuHaGM4iu8SNFpi: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/QmUkFZC2ZmoYPTKf7AHdjwRPZoV2h1MCuHaGM4iu8SNFpi: HTTP"
+  },
+  {
+   "caip": "eip155:1146703430/slip44:60",
+   "source": "chainlist:cyberdeck",
+   "url": "ipfs://QmTvYMJXeZeWxYPuoQ15mHCS8K5EQzkMMCHQVs3GshooyR",
+   "error": "https://ipfs.filebase.io/ipfs/QmTvYMJXeZeWxYPuoQ15mHCS8K5EQzkMMCHQVs3GshooyR: The read operation timed out; https://gateway.pinata.cloud/ipfs/QmTvYMJXeZeWxYPuoQ15mHCS8K5EQzkMMCHQVs3GshooyR: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/QmTvYMJXeZeWxYPuoQ15mHCS8K5EQzkMMCHQVs3GshooyR: HTTP"
+  },
+  {
+   "caip": "eip155:1147/slip44:60",
+   "source": "chainlist:flag",
+   "url": "ipfs://bafybeibcrxeavdxpwwmj4mc6hhp232nkrfbpvfpngcqux2v5rmoshycj3u",
+   "error": "https://ipfs.filebase.io/ipfs/bafybeibcrxeavdxpwwmj4mc6hhp232nkrfbpvfpngcqux2v5rmoshycj3u: The read operation timed out; https://gateway.pinata.cloud/ipfs/bafybeibcrxeavdxpwwmj4mc6hhp232nkrfbpvfpngcqux2v5rmoshycj3u: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/bafybeibcrxeavdxpwwmj4mc6h"
+  },
+  {
+   "caip": "eip155:1149/slip44:60",
+   "source": "chainlist:plexchain",
+   "url": "ipfs://QmcXzfMNSQ7SZzKemNquVoXyG5ergdqCGeLWjRYETGBTUM",
+   "error": "https://ipfs.filebase.io/ipfs/QmcXzfMNSQ7SZzKemNquVoXyG5ergdqCGeLWjRYETGBTUM: The read operation timed out; https://gateway.pinata.cloud/ipfs/QmcXzfMNSQ7SZzKemNquVoXyG5ergdqCGeLWjRYETGBTUM: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/QmcXzfMNSQ7SZzKemNquVoXyG5ergdqCGeLWjRYETGBTUM: HTTP"
+  },
+  {
+   "caip": "eip155:11612/slip44:60",
+   "source": "chainlist:sardisTestnet",
+   "url": "ipfs://QmdR9QJjQEh1mBnf2WbJfehverxiP5RDPWMtEECbDP2rc3",
+   "error": "https://ipfs.filebase.io/ipfs/QmdR9QJjQEh1mBnf2WbJfehverxiP5RDPWMtEECbDP2rc3: The read operation timed out; https://gateway.pinata.cloud/ipfs/QmdR9QJjQEh1mBnf2WbJfehverxiP5RDPWMtEECbDP2rc3: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/QmdR9QJjQEh1mBnf2WbJfehverxiP5RDPWMtEECbDP2rc3: HTTP"
+  },
+  {
+   "caip": "eip155:117/slip44:60",
+   "source": "chainlist:uptick",
+   "url": "ipfs://QmRGJ6PqYHDTWuUQ6xfnK8S82NzRXiMjTnSGat9qtLuaLP",
+   "error": "https://ipfs.filebase.io/ipfs/QmRGJ6PqYHDTWuUQ6xfnK8S82NzRXiMjTnSGat9qtLuaLP: HTTP Error 504: Gateway Timeout; https://gateway.pinata.cloud/ipfs/QmRGJ6PqYHDTWuUQ6xfnK8S82NzRXiMjTnSGat9qtLuaLP: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/QmRGJ6PqYHDTWuUQ6xfnK8S82NzRXiMjTnSGat9qtLuaLP: H"
+  },
+  {
+   "caip": "eip155:1170/slip44:60",
+   "source": "chainlist:origin",
+   "url": "ipfs://QmRGJ6PqYHDTWuUQ6xfnK8S82NzRXiMjTnSGat9qtLuaLP",
+   "error": "https://ipfs.filebase.io/ipfs/QmRGJ6PqYHDTWuUQ6xfnK8S82NzRXiMjTnSGat9qtLuaLP: The read operation timed out; https://gateway.pinata.cloud/ipfs/QmRGJ6PqYHDTWuUQ6xfnK8S82NzRXiMjTnSGat9qtLuaLP: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/QmRGJ6PqYHDTWuUQ6xfnK8S82NzRXiMjTnSGat9qtLuaLP: HTTP"
+  },
+  {
+   "caip": "eip155:12020/slip44:60",
+   "source": "chainlist:aternos",
+   "url": "ipfs://QmUgfhv3rEsS6t9g6Lsf3TJ1mbnJqBrb8YUFPDiNG59QvT",
+   "error": "https://ipfs.filebase.io/ipfs/QmUgfhv3rEsS6t9g6Lsf3TJ1mbnJqBrb8YUFPDiNG59QvT: The read operation timed out; https://gateway.pinata.cloud/ipfs/QmUgfhv3rEsS6t9g6Lsf3TJ1mbnJqBrb8YUFPDiNG59QvT: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/QmUgfhv3rEsS6t9g6Lsf3TJ1mbnJqBrb8YUFPDiNG59QvT: HTTP"
+  },
+  {
+   "caip": "eip155:1209/slip44:60",
+   "source": "chainlist:SaitaBlockChain(SBC)",
+   "url": "ipfs://QmVFWTqfqnMXbiPKpDFucE9QSQ1SVsUWs4HxBqRGjgQCbu",
+   "error": "https://ipfs.filebase.io/ipfs/QmVFWTqfqnMXbiPKpDFucE9QSQ1SVsUWs4HxBqRGjgQCbu: The read operation timed out; https://gateway.pinata.cloud/ipfs/QmVFWTqfqnMXbiPKpDFucE9QSQ1SVsUWs4HxBqRGjgQCbu: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/QmVFWTqfqnMXbiPKpDFucE9QSQ1SVsUWs4HxBqRGjgQCbu: HTTP"
+  },
+  {
+   "caip": "eip155:12553/slip44:60",
+   "source": "chainlist:rss3",
+   "url": "ipfs://QmZFWYnufi6G2Z54oJ25sx2yf2Skx5tseJHJJa6Hc1G34t",
+   "error": "https://ipfs.filebase.io/ipfs/QmZFWYnufi6G2Z54oJ25sx2yf2Skx5tseJHJJa6Hc1G34t: The read operation timed out; https://gateway.pinata.cloud/ipfs/QmZFWYnufi6G2Z54oJ25sx2yf2Skx5tseJHJJa6Hc1G34t: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/QmZFWYnufi6G2Z54oJ25sx2yf2Skx5tseJHJJa6Hc1G34t: HTTP"
+  },
+  {
+   "caip": "eip155:1260/slip44:60",
+   "source": "chainlist:metacces",
+   "url": "ipfs://QmbpYHpqR68uuJZCwm1CXtN51zi744qWzZ32ob9BKfgFTV",
+   "error": "https://ipfs.filebase.io/ipfs/QmbpYHpqR68uuJZCwm1CXtN51zi744qWzZ32ob9BKfgFTV: The read operation timed out; https://gateway.pinata.cloud/ipfs/QmbpYHpqR68uuJZCwm1CXtN51zi744qWzZ32ob9BKfgFTV: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/QmbpYHpqR68uuJZCwm1CXtN51zi744qWzZ32ob9BKfgFTV: HTTP"
+  },
+  {
+   "caip": "eip155:1328/slip44:60",
+   "source": "chainlist:sei",
+   "url": "ipfs://bafkreidctb56i4l27zl5mcxnm4hrzc2z652enprv7kxiozstw32zhcezym",
+   "error": "https://ipfs.filebase.io/ipfs/bafkreidctb56i4l27zl5mcxnm4hrzc2z652enprv7kxiozstw32zhcezym: The read operation timed out; https://gateway.pinata.cloud/ipfs/bafkreidctb56i4l27zl5mcxnm4hrzc2z652enprv7kxiozstw32zhcezym: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/bafkreidctb56i4l27zl5mcxnm"
+  },
+  {
+   "caip": "eip155:1329/slip44:60",
+   "source": "chainlist:sei",
+   "url": "ipfs://bafkreidctb56i4l27zl5mcxnm4hrzc2z652enprv7kxiozstw32zhcezym",
+   "error": "https://ipfs.filebase.io/ipfs/bafkreidctb56i4l27zl5mcxnm4hrzc2z652enprv7kxiozstw32zhcezym: HTTP Error 504: Gateway Timeout; https://gateway.pinata.cloud/ipfs/bafkreidctb56i4l27zl5mcxnm4hrzc2z652enprv7kxiozstw32zhcezym: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/bafkreidctb56i4l27zl5mc"
+  },
+  {
+   "caip": "eip155:13746/slip44:60",
+   "source": "chainlist:game7testnet",
+   "url": "ipfs://Qmbk23C5vZpGBfq8SuPXR1PrfWER2m8w6LGqBkhXAvxia1",
+   "error": "https://ipfs.filebase.io/ipfs/Qmbk23C5vZpGBfq8SuPXR1PrfWER2m8w6LGqBkhXAvxia1: The read operation timed out; https://gateway.pinata.cloud/ipfs/Qmbk23C5vZpGBfq8SuPXR1PrfWER2m8w6LGqBkhXAvxia1: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/Qmbk23C5vZpGBfq8SuPXR1PrfWER2m8w6LGqBkhXAvxia1: HTTP"
+  },
+  {
+   "caip": "eip155:139/slip44:60",
+   "source": "chainlist:woopchain",
+   "url": "ipfs://Qma7LpnkGjAN1dwL6VTXUYqzySNxjLg4br7J8UE4yZWYec",
+   "error": "https://ipfs.filebase.io/ipfs/Qma7LpnkGjAN1dwL6VTXUYqzySNxjLg4br7J8UE4yZWYec: The read operation timed out; https://gateway.pinata.cloud/ipfs/Qma7LpnkGjAN1dwL6VTXUYqzySNxjLg4br7J8UE4yZWYec: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/Qma7LpnkGjAN1dwL6VTXUYqzySNxjLg4br7J8UE4yZWYec: HTTP"
+  },
+  {
+   "caip": "eip155:147/slip44:60",
+   "source": "chainlist:flag",
+   "url": "ipfs://bafybeibcrxeavdxpwwmj4mc6hhp232nkrfbpvfpngcqux2v5rmoshycj3u",
+   "error": "https://ipfs.filebase.io/ipfs/bafybeibcrxeavdxpwwmj4mc6hhp232nkrfbpvfpngcqux2v5rmoshycj3u: HTTP Error 504: Gateway Timeout; https://gateway.pinata.cloud/ipfs/bafybeibcrxeavdxpwwmj4mc6hhp232nkrfbpvfpngcqux2v5rmoshycj3u: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/bafybeibcrxeavdxpwwmj4m"
+  },
+  {
+   "caip": "eip155:1480/slip44:60",
+   "source": "chainlist:vana",
+   "url": "ipfs://QAZt75XixnEtFzqHTrJa8kJkV4ccXWaXqeMeqM8BcBomQc",
+   "error": "https://ipfs.filebase.io/ipfs/QAZt75XixnEtFzqHTrJa8kJkV4ccXWaXqeMeqM8BcBomQc: HTTP Error 400: Bad Request; https://gateway.pinata.cloud/ipfs/QAZt75XixnEtFzqHTrJa8kJkV4ccXWaXqeMeqM8BcBomQc: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/QAZt75XixnEtFzqHTrJa8kJkV4ccXWaXqeMeqM8BcBomQc: HTTP "
+  },
+  {
+   "caip": "eip155:14853/slip44:60",
+   "source": "chainlist:humanode",
+   "url": "ipfs://bafybeihuskzfwqogwvutaxil6sztmvpiavzbrzwjwpn6w2i4j3jysbybra",
+   "error": "https://ipfs.filebase.io/ipfs/bafybeihuskzfwqogwvutaxil6sztmvpiavzbrzwjwpn6w2i4j3jysbybra: The read operation timed out; https://gateway.pinata.cloud/ipfs/bafybeihuskzfwqogwvutaxil6sztmvpiavzbrzwjwpn6w2i4j3jysbybra: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/bafybeihuskzfwqogwvutaxil6"
+  },
+  {
+   "caip": "eip155:1499/slip44:60",
+   "source": "chainlist:igc-testnet",
+   "url": "ipfs://QmeXuzaYXCDwHgQdpuE9L55JfEChzj11P73Ngrn8vDTE9T",
+   "error": "https://ipfs.filebase.io/ipfs/QmeXuzaYXCDwHgQdpuE9L55JfEChzj11P73Ngrn8vDTE9T: The read operation timed out; https://gateway.pinata.cloud/ipfs/QmeXuzaYXCDwHgQdpuE9L55JfEChzj11P73Ngrn8vDTE9T: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/QmeXuzaYXCDwHgQdpuE9L55JfEChzj11P73Ngrn8vDTE9T: HTTP"
+  },
+  {
+   "caip": "eip155:15/slip44:60",
+   "source": "chainlist:diode",
+   "url": "ipfs://bafkreigsppluw555hxzp43uc7xv6rjodspdij3sqqg2owcdrpilpbqeymm",
+   "error": "https://ipfs.filebase.io/ipfs/bafkreigsppluw555hxzp43uc7xv6rjodspdij3sqqg2owcdrpilpbqeymm: The read operation timed out; https://gateway.pinata.cloud/ipfs/bafkreigsppluw555hxzp43uc7xv6rjodspdij3sqqg2owcdrpilpbqeymm: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/bafkreigsppluw555hxzp43uc7"
+  },
+  {
+   "caip": "eip155:159/slip44:60",
+   "source": "chainlist:roburna",
+   "url": "ipfs://QmTk1uhB9nvnvXifvwEPGFcdgsXRt4EXNjovUGyUmfFRcB",
+   "error": "https://ipfs.filebase.io/ipfs/QmTk1uhB9nvnvXifvwEPGFcdgsXRt4EXNjovUGyUmfFRcB: too large; https://gateway.pinata.cloud/ipfs/QmTk1uhB9nvnvXifvwEPGFcdgsXRt4EXNjovUGyUmfFRcB: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/QmTk1uhB9nvnvXifvwEPGFcdgsXRt4EXNjovUGyUmfFRcB: HTTP Error 429: Too Man"
+  },
+  {
+   "caip": "eip155:1597/slip44:60",
+   "source": "chainlist:reactive",
+   "url": "ipfs://QmaBqYemL6VG5kDEMZqtJZhh6kLn3XqMyxkDpChkPttJ6B",
+   "error": "https://ipfs.filebase.io/ipfs/QmaBqYemL6VG5kDEMZqtJZhh6kLn3XqMyxkDpChkPttJ6B: The read operation timed out; https://gateway.pinata.cloud/ipfs/QmaBqYemL6VG5kDEMZqtJZhh6kLn3XqMyxkDpChkPttJ6B: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/QmaBqYemL6VG5kDEMZqtJZhh6kLn3XqMyxkDpChkPttJ6B: HTTP"
+  },
+  {
+   "caip": "eip155:16688/slip44:60",
+   "source": "chainlist:nyancat",
+   "url": "ipfs://QmRaSx7AX1VDgcqjwLgSDP4WZmKBHPdHhbjkcEEXPA2Fnc",
+   "error": "https://ipfs.filebase.io/ipfs/QmRaSx7AX1VDgcqjwLgSDP4WZmKBHPdHhbjkcEEXPA2Fnc: The read operation timed out; https://gateway.pinata.cloud/ipfs/QmRaSx7AX1VDgcqjwLgSDP4WZmKBHPdHhbjkcEEXPA2Fnc: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/QmRaSx7AX1VDgcqjwLgSDP4WZmKBHPdHhbjkcEEXPA2Fnc: HTTP"
+  },
+  {
+   "caip": "eip155:17171/slip44:60",
+   "source": "chainlist:G8Chain",
+   "url": "ipfs://QmbkCVC5vZpVAfq8SuPXR9PhpTRS2m8w6LGqBkhXAvmie6",
+   "error": "https://ipfs.filebase.io/ipfs/QmbkCVC5vZpVAfq8SuPXR9PhpTRS2m8w6LGqBkhXAvmie6: The read operation timed out; https://gateway.pinata.cloud/ipfs/QmbkCVC5vZpVAfq8SuPXR9PhpTRS2m8w6LGqBkhXAvmie6: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/QmbkCVC5vZpVAfq8SuPXR9PhpTRS2m8w6LGqBkhXAvmie6: HTTP"
+  },
+  {
+   "caip": "eip155:17180/slip44:60",
+   "source": "chainlist:PLT",
+   "url": "ipfs://QmPCEGZD1p1keTT2YfPp725azx1r9Ci41hejeUuGL2whFA",
+   "error": "https://ipfs.filebase.io/ipfs/QmPCEGZD1p1keTT2YfPp725azx1r9Ci41hejeUuGL2whFA: The read operation timed out; https://gateway.pinata.cloud/ipfs/QmPCEGZD1p1keTT2YfPp725azx1r9Ci41hejeUuGL2whFA: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/QmPCEGZD1p1keTT2YfPp725azx1r9Ci41hejeUuGL2whFA: HTTP"
+  },
+  {
+   "caip": "eip155:176/slip44:60",
+   "source": "chainlist:dcchain",
+   "url": "ipfs://QmQsNtUoaKUHWaxFMBuCQwkX9WmKHz7iNotcZTFkWo7Qgt",
+   "error": "https://ipfs.filebase.io/ipfs/QmQsNtUoaKUHWaxFMBuCQwkX9WmKHz7iNotcZTFkWo7Qgt: The read operation timed out; https://gateway.pinata.cloud/ipfs/QmQsNtUoaKUHWaxFMBuCQwkX9WmKHz7iNotcZTFkWo7Qgt: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/QmQsNtUoaKUHWaxFMBuCQwkX9WmKHz7iNotcZTFkWo7Qgt: HTTP"
+  },
+  {
+   "caip": "eip155:17735/slip44:60",
+   "source": "chainlist:esports",
+   "url": "ipfs://QmaNywdCUrHoe3grk3hhHXrsTgc3tHVpt2ZaoRYoNkgEvc",
+   "error": "https://ipfs.filebase.io/ipfs/QmaNywdCUrHoe3grk3hhHXrsTgc3tHVpt2ZaoRYoNkgEvc: The read operation timed out; https://gateway.pinata.cloud/ipfs/QmaNywdCUrHoe3grk3hhHXrsTgc3tHVpt2ZaoRYoNkgEvc: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/QmaNywdCUrHoe3grk3hhHXrsTgc3tHVpt2ZaoRYoNkgEvc: HTTP"
+  },
+  {
+   "caip": "eip155:1804/slip44:60",
+   "source": "chainlist:pocr",
+   "url": "ipfs://QmRLwpq47tyEd3rfK4tKRhbTvyb3fc7PCutExnL1XAb37A",
+   "error": "https://ipfs.filebase.io/ipfs/QmRLwpq47tyEd3rfK4tKRhbTvyb3fc7PCutExnL1XAb37A: The read operation timed out; https://gateway.pinata.cloud/ipfs/QmRLwpq47tyEd3rfK4tKRhbTvyb3fc7PCutExnL1XAb37A: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/QmRLwpq47tyEd3rfK4tKRhbTvyb3fc7PCutExnL1XAb37A: HTTP"
+  },
+  {
+   "caip": "eip155:18071918/slip44:60",
+   "source": "chainlist:mande",
+   "url": "ipfs://QmbySJWaSQxzL3F4zvpKYaNvMjHsX2qUyWTv2kpitq9dW8",
+   "error": "https://ipfs.filebase.io/ipfs/QmbySJWaSQxzL3F4zvpKYaNvMjHsX2qUyWTv2kpitq9dW8: The read operation timed out; https://gateway.pinata.cloud/ipfs/QmbySJWaSQxzL3F4zvpKYaNvMjHsX2qUyWTv2kpitq9dW8: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/QmbySJWaSQxzL3F4zvpKYaNvMjHsX2qUyWTv2kpitq9dW8: HTTP"
+  },
+  {
+   "caip": "eip155:18122/slip44:60",
+   "source": "chainlist:stn",
+   "url": "ipfs://QmRgZVpjik4cH3Sb6wLRpdnfv9kiMEZ8fugfkzTgk3bpRW",
+   "error": "https://ipfs.filebase.io/ipfs/QmRgZVpjik4cH3Sb6wLRpdnfv9kiMEZ8fugfkzTgk3bpRW: The read operation timed out; https://gateway.pinata.cloud/ipfs/QmRgZVpjik4cH3Sb6wLRpdnfv9kiMEZ8fugfkzTgk3bpRW: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/QmRgZVpjik4cH3Sb6wLRpdnfv9kiMEZ8fugfkzTgk3bpRW: HTTP"
+  },
+  {
+   "caip": "eip155:18181/slip44:60",
+   "source": "chainlist:G8Chain",
+   "url": "ipfs://QmbkCVC5vZpVAfq8SuPXR9PhpTRS2m8w6LGqBkhXAvmie6",
+   "error": "https://ipfs.filebase.io/ipfs/QmbkCVC5vZpVAfq8SuPXR9PhpTRS2m8w6LGqBkhXAvmie6: HTTP Error 504: Gateway Timeout; https://gateway.pinata.cloud/ipfs/QmbkCVC5vZpVAfq8SuPXR9PhpTRS2m8w6LGqBkhXAvmie6: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/QmbkCVC5vZpVAfq8SuPXR9PhpTRS2m8w6LGqBkhXAvmie6: H"
+  },
+  {
+   "caip": "eip155:1821/slip44:60",
+   "source": "chainlist:ruby",
+   "url": "ipfs://QmXGJevyPHHKT28hDfsJ9Cq2DQ2bAavdie37MEwFQUVCQz",
+   "error": "https://ipfs.filebase.io/ipfs/QmXGJevyPHHKT28hDfsJ9Cq2DQ2bAavdie37MEwFQUVCQz: The read operation timed out; https://gateway.pinata.cloud/ipfs/QmXGJevyPHHKT28hDfsJ9Cq2DQ2bAavdie37MEwFQUVCQz: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/QmXGJevyPHHKT28hDfsJ9Cq2DQ2bAavdie37MEwFQUVCQz: HTTP"
+  },
+  {
+   "caip": "eip155:1853/slip44:60",
+   "source": "chainlist:highOctane",
+   "url": "ipfs://bafkreibmj6pnsiybggr3koh5hbl2saungutcwbxme6pehteg5kzpzleubu",
+   "error": "https://ipfs.filebase.io/ipfs/bafkreibmj6pnsiybggr3koh5hbl2saungutcwbxme6pehteg5kzpzleubu: The read operation timed out; https://gateway.pinata.cloud/ipfs/bafkreibmj6pnsiybggr3koh5hbl2saungutcwbxme6pehteg5kzpzleubu: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/bafkreibmj6pnsiybggr3koh5h"
+  },
+  {
+   "caip": "eip155:18881/slip44:60",
+   "source": "chainlist:ultra",
+   "url": "ipfs://QmeGtXdTHHMnf6rWUWFcefMGaVp7dJ6SWNgxgbVgm9YHTZ",
+   "error": "https://ipfs.filebase.io/ipfs/QmeGtXdTHHMnf6rWUWFcefMGaVp7dJ6SWNgxgbVgm9YHTZ: The read operation timed out; https://gateway.pinata.cloud/ipfs/QmeGtXdTHHMnf6rWUWFcefMGaVp7dJ6SWNgxgbVgm9YHTZ: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/QmeGtXdTHHMnf6rWUWFcefMGaVp7dJ6SWNgxgbVgm9YHTZ: HTTP"
+  },
+  {
+   "caip": "eip155:1904/slip44:60",
+   "source": "chainlist:scn",
+   "url": "ipfs://QmdW7XfRgeyoaHXEvXp8MaVteonankR32CxhL3K5Yc2uQM",
+   "error": "https://ipfs.filebase.io/ipfs/QmdW7XfRgeyoaHXEvXp8MaVteonankR32CxhL3K5Yc2uQM: The read operation timed out; https://gateway.pinata.cloud/ipfs/QmdW7XfRgeyoaHXEvXp8MaVteonankR32CxhL3K5Yc2uQM: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/QmdW7XfRgeyoaHXEvXp8MaVteonankR32CxhL3K5Yc2uQM: HTTP"
+  },
+  {
+   "caip": "eip155:1909/slip44:60",
+   "source": "chainlist:merklescan",
+   "url": "ipfs://QmZocJpCSLoQqoYFkF1kn7uKDuAiFRNTK8P5PoVeiigDBU",
+   "error": "https://ipfs.filebase.io/ipfs/QmZocJpCSLoQqoYFkF1kn7uKDuAiFRNTK8P5PoVeiigDBU: The read operation timed out; https://gateway.pinata.cloud/ipfs/QmZocJpCSLoQqoYFkF1kn7uKDuAiFRNTK8P5PoVeiigDBU: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/QmZocJpCSLoQqoYFkF1kn7uKDuAiFRNTK8P5PoVeiigDBU: HTTP"
+  },
+  {
+   "caip": "eip155:1912/slip44:60",
+   "source": "chainlist:ruby",
+   "url": "ipfs://QmXGJevyPHHKT28hDfsJ9Cq2DQ2bAavdie37MEwFQUVCQz",
+   "error": "https://ipfs.filebase.io/ipfs/QmXGJevyPHHKT28hDfsJ9Cq2DQ2bAavdie37MEwFQUVCQz: The read operation timed out; https://gateway.pinata.cloud/ipfs/QmXGJevyPHHKT28hDfsJ9Cq2DQ2bAavdie37MEwFQUVCQz: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/QmXGJevyPHHKT28hDfsJ9Cq2DQ2bAavdie37MEwFQUVCQz: HTTP"
+  },
+  {
+   "caip": "eip155:1984/slip44:60",
+   "source": "chainlist:eurus",
+   "url": "ipfs://QmaGd5L9jGPbfyGXBFhu9gjinWJ66YtNrXq8x6Q98Eep9e",
+   "error": "https://ipfs.filebase.io/ipfs/QmaGd5L9jGPbfyGXBFhu9gjinWJ66YtNrXq8x6Q98Eep9e: The read operation timed out; https://gateway.pinata.cloud/ipfs/QmaGd5L9jGPbfyGXBFhu9gjinWJ66YtNrXq8x6Q98Eep9e: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/QmaGd5L9jGPbfyGXBFhu9gjinWJ66YtNrXq8x6Q98Eep9e: HTTP"
+  },
+  {
+   "caip": "eip155:1985/slip44:60",
+   "source": "chainlist:satoshie",
+   "url": "ipfs://QmRHT4o9ihiY6nVkkRdwZjdugbEAQiXrrov3GS9a3GTuL7",
+   "error": "https://ipfs.filebase.io/ipfs/QmRHT4o9ihiY6nVkkRdwZjdugbEAQiXrrov3GS9a3GTuL7: The read operation timed out; https://gateway.pinata.cloud/ipfs/QmRHT4o9ihiY6nVkkRdwZjdugbEAQiXrrov3GS9a3GTuL7: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/QmRHT4o9ihiY6nVkkRdwZjdugbEAQiXrrov3GS9a3GTuL7: HTTP"
+  },
+  {
+   "caip": "eip155:19850818/slip44:60",
+   "source": "chainlist:dbc",
+   "url": "ipfs://QmXxRtZnrvzckKVwbRLpKpP9E9vGgQCUPkLroQDCYTmQdG",
+   "error": "https://ipfs.filebase.io/ipfs/QmXxRtZnrvzckKVwbRLpKpP9E9vGgQCUPkLroQDCYTmQdG: The read operation timed out; https://gateway.pinata.cloud/ipfs/QmXxRtZnrvzckKVwbRLpKpP9E9vGgQCUPkLroQDCYTmQdG: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/QmXxRtZnrvzckKVwbRLpKpP9E9vGgQCUPkLroQDCYTmQdG: HTTP"
+  },
+  {
+   "caip": "eip155:1986/slip44:60",
+   "source": "chainlist:satoshie",
+   "url": "ipfs://QmRHT4o9ihiY6nVkkRdwZjdugbEAQiXrrov3GS9a3GTuL7",
+   "error": "https://ipfs.filebase.io/ipfs/QmRHT4o9ihiY6nVkkRdwZjdugbEAQiXrrov3GS9a3GTuL7: HTTP Error 504: Gateway Timeout; https://gateway.pinata.cloud/ipfs/QmRHT4o9ihiY6nVkkRdwZjdugbEAQiXrrov3GS9a3GTuL7: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/QmRHT4o9ihiY6nVkkRdwZjdugbEAQiXrrov3GS9a3GTuL7: H"
+  },
+  {
+   "caip": "eip155:19991/slip44:60",
+   "source": "chainlist:ultra",
+   "url": "ipfs://QmeGtXdTHHMnf6rWUWFcefMGaVp7dJ6SWNgxgbVgm9YHTZ",
+   "error": "https://ipfs.filebase.io/ipfs/QmeGtXdTHHMnf6rWUWFcefMGaVp7dJ6SWNgxgbVgm9YHTZ: HTTP Error 504: Gateway Timeout; https://gateway.pinata.cloud/ipfs/QmeGtXdTHHMnf6rWUWFcefMGaVp7dJ6SWNgxgbVgm9YHTZ: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/QmeGtXdTHHMnf6rWUWFcefMGaVp7dJ6SWNgxgbVgm9YHTZ: H"
+  },
+  {
+   "caip": "eip155:205205/slip44:60",
+   "source": "chainlist:auroria",
+   "url": "ipfs://QmNuQjnJ1JXkPRDwbFL1oZRpEaPhggPpccteAaxSPYBJJN",
+   "error": "https://ipfs.filebase.io/ipfs/QmNuQjnJ1JXkPRDwbFL1oZRpEaPhggPpccteAaxSPYBJJN: The read operation timed out; https://gateway.pinata.cloud/ipfs/QmNuQjnJ1JXkPRDwbFL1oZRpEaPhggPpccteAaxSPYBJJN: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/QmNuQjnJ1JXkPRDwbFL1oZRpEaPhggPpccteAaxSPYBJJN: HTTP"
+  },
+  {
+   "caip": "eip155:2071/slip44:60",
+   "source": "chainlist:metacces",
+   "url": "ipfs://QmbpYHpqR68uuJZCwm1CXtN51zi744qWzZ32ob9BKfgFTV",
+   "error": "https://ipfs.filebase.io/ipfs/QmbpYHpqR68uuJZCwm1CXtN51zi744qWzZ32ob9BKfgFTV: The read operation timed out; https://gateway.pinata.cloud/ipfs/QmbpYHpqR68uuJZCwm1CXtN51zi744qWzZ32ob9BKfgFTV: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/QmbpYHpqR68uuJZCwm1CXtN51zi744qWzZ32ob9BKfgFTV: HTTP"
+  },
+  {
+   "caip": "eip155:21363/slip44:60",
+   "source": "chainlist:lestnet",
+   "url": "ipfs://bafkreigg4ovuohje6iva42fou7rc7a6fkozvfkg22fhuvhw5oz7vii74ha",
+   "error": "https://ipfs.filebase.io/ipfs/bafkreigg4ovuohje6iva42fou7rc7a6fkozvfkg22fhuvhw5oz7vii74ha: The read operation timed out; https://gateway.pinata.cloud/ipfs/bafkreigg4ovuohje6iva42fou7rc7a6fkozvfkg22fhuvhw5oz7vii74ha: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/bafkreigg4ovuohje6iva42fou"
+  },
+  {
+   "caip": "eip155:2187/slip44:60",
+   "source": "chainlist:game7",
+   "url": "ipfs://Qmbk23C5vXpGBfq8SuPXR1PrfWER2m8w6LGqBkhXAvxia9",
+   "error": "https://ipfs.filebase.io/ipfs/Qmbk23C5vXpGBfq8SuPXR1PrfWER2m8w6LGqBkhXAvxia9: The read operation timed out; https://gateway.pinata.cloud/ipfs/Qmbk23C5vXpGBfq8SuPXR1PrfWER2m8w6LGqBkhXAvxia9: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/Qmbk23C5vXpGBfq8SuPXR1PrfWER2m8w6LGqBkhXAvxia9: HTTP"
+  },
+  {
+   "caip": "eip155:2202/slip44:60",
+   "source": "chainlist:antofy",
+   "url": "ipfs://QmdTfku81ohnG9ECU1Xswmeumt678cBhwHWuFYZ7i1Qsto",
+   "error": "https://ipfs.filebase.io/ipfs/QmdTfku81ohnG9ECU1Xswmeumt678cBhwHWuFYZ7i1Qsto: The read operation timed out; https://gateway.pinata.cloud/ipfs/QmdTfku81ohnG9ECU1Xswmeumt678cBhwHWuFYZ7i1Qsto: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/QmdTfku81ohnG9ECU1Xswmeumt678cBhwHWuFYZ7i1Qsto: HTTP"
+  },
+  {
+   "caip": "eip155:22776/slip44:60",
+   "source": "chainlist:map",
+   "url": "ipfs://QmcLdQ8gM4iHv3CCKA9HuxmzTxY4WhjWtepUVCc3dpzKxD",
+   "error": "https://ipfs.filebase.io/ipfs/QmcLdQ8gM4iHv3CCKA9HuxmzTxY4WhjWtepUVCc3dpzKxD: The read operation timed out; https://gateway.pinata.cloud/ipfs/QmcLdQ8gM4iHv3CCKA9HuxmzTxY4WhjWtepUVCc3dpzKxD: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/QmcLdQ8gM4iHv3CCKA9HuxmzTxY4WhjWtepUVCc3dpzKxD: HTTP"
+  },
+  {
+   "caip": "eip155:23006/slip44:60",
+   "source": "chainlist:antofy",
+   "url": "ipfs://QmdTfku81ohnG9ECU1Xswmeumt678cBhwHWuFYZ7i1Qsto",
+   "error": "https://ipfs.filebase.io/ipfs/QmdTfku81ohnG9ECU1Xswmeumt678cBhwHWuFYZ7i1Qsto: HTTP Error 504: Gateway Timeout; https://gateway.pinata.cloud/ipfs/QmdTfku81ohnG9ECU1Xswmeumt678cBhwHWuFYZ7i1Qsto: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/QmdTfku81ohnG9ECU1Xswmeumt678cBhwHWuFYZ7i1Qsto: H"
+  },
+  {
+   "caip": "eip155:23118/slip44:60",
+   "source": "chainlist:opside",
+   "url": "ipfs://QmeCyZeibUoHNoYGzy1GkzH2uhxyRHKvH51PdaUMer4VTo",
+   "error": "https://ipfs.filebase.io/ipfs/QmeCyZeibUoHNoYGzy1GkzH2uhxyRHKvH51PdaUMer4VTo: The read operation timed out; https://gateway.pinata.cloud/ipfs/QmeCyZeibUoHNoYGzy1GkzH2uhxyRHKvH51PdaUMer4VTo: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/QmeCyZeibUoHNoYGzy1GkzH2uhxyRHKvH51PdaUMer4VTo: HTTP"
+  },
+  {
+   "caip": "eip155:2331/slip44:60",
+   "source": "chainlist:rss3-testnet",
+   "url": "ipfs://QmTE6hnMTQaGU8Fm7nQbeTqQ5Ha3kyLKHR6QTd59prP2mC",
+   "error": "https://ipfs.filebase.io/ipfs/QmTE6hnMTQaGU8Fm7nQbeTqQ5Ha3kyLKHR6QTd59prP2mC: The read operation timed out; https://gateway.pinata.cloud/ipfs/QmTE6hnMTQaGU8Fm7nQbeTqQ5Ha3kyLKHR6QTd59prP2mC: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/QmTE6hnMTQaGU8Fm7nQbeTqQ5Ha3kyLKHR6QTd59prP2mC: HTTP"
+  },
+  {
+   "caip": "eip155:238/slip44:60",
+   "source": "chainlist:blastIcon",
+   "url": "ipfs://QmdHpjiepU2Q4bt4kR48tKHPgaQW57Sb6UVFgLh4MCyg6U",
+   "error": "https://ipfs.filebase.io/ipfs/QmdHpjiepU2Q4bt4kR48tKHPgaQW57Sb6UVFgLh4MCyg6U: The read operation timed out; https://gateway.pinata.cloud/ipfs/QmdHpjiepU2Q4bt4kR48tKHPgaQW57Sb6UVFgLh4MCyg6U: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/QmdHpjiepU2Q4bt4kR48tKHPgaQW57Sb6UVFgLh4MCyg6U: HTTP"
+  },
+  {
+   "caip": "eip155:240240/slip44:60",
+   "source": "chainlist:studio",
+   "url": "ipfs://QmamYSLuQSiAvqfQdejQn2PKXV6ZPQCagpXH5MLRz1GeCf",
+   "error": "https://ipfs.filebase.io/ipfs/QmamYSLuQSiAvqfQdejQn2PKXV6ZPQCagpXH5MLRz1GeCf: The read operation timed out; https://gateway.pinata.cloud/ipfs/QmamYSLuQSiAvqfQdejQn2PKXV6ZPQCagpXH5MLRz1GeCf: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/QmamYSLuQSiAvqfQdejQn2PKXV6ZPQCagpXH5MLRz1GeCf: HTTP"
+  },
+  {
+   "caip": "eip155:240241/slip44:60",
+   "source": "chainlist:studio",
+   "url": "ipfs://QmamYSLuQSiAvqfQdejQn2PKXV6ZPQCagpXH5MLRz1GeCf",
+   "error": "https://ipfs.filebase.io/ipfs/QmamYSLuQSiAvqfQdejQn2PKXV6ZPQCagpXH5MLRz1GeCf: HTTP Error 504: Gateway Timeout; https://gateway.pinata.cloud/ipfs/QmamYSLuQSiAvqfQdejQn2PKXV6ZPQCagpXH5MLRz1GeCf: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/QmamYSLuQSiAvqfQdejQn2PKXV6ZPQCagpXH5MLRz1GeCf: H"
+  },
+  {
+   "caip": "eip155:24116/slip44:60",
+   "source": "chainlist:railsTestnet",
+   "url": "ipfs://QmWsvNvJgnZkiZ1y1VDPfUkSbaWrJVhEMXx7U9vEZx2HZA",
+   "error": "https://ipfs.filebase.io/ipfs/QmWsvNvJgnZkiZ1y1VDPfUkSbaWrJVhEMXx7U9vEZx2HZA: The read operation timed out; https://gateway.pinata.cloud/ipfs/QmWsvNvJgnZkiZ1y1VDPfUkSbaWrJVhEMXx7U9vEZx2HZA: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/QmWsvNvJgnZkiZ1y1VDPfUkSbaWrJVhEMXx7U9vEZx2HZA: HTTP"
+  },
+  {
+   "caip": "eip155:2415/slip44:60",
+   "source": "chainlist:xodex",
+   "url": "ipfs://QmXt49jPfHUmDF4n8TF7ks6txiPztx6qUHanWmHnCoEAhW",
+   "error": "https://ipfs.filebase.io/ipfs/QmXt49jPfHUmDF4n8TF7ks6txiPztx6qUHanWmHnCoEAhW: The read operation timed out; https://gateway.pinata.cloud/ipfs/QmXt49jPfHUmDF4n8TF7ks6txiPztx6qUHanWmHnCoEAhW: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/QmXt49jPfHUmDF4n8TF7ks6txiPztx6qUHanWmHnCoEAhW: HTTP"
+  },
+  {
+   "caip": "eip155:2458/slip44:60",
+   "source": "chainlist:hybrid",
+   "url": "ipfs://QmQDNdhPvCrrijEKC3G9Px5if2CHgdxq7Q2Pg66cy9xwbF",
+   "error": "https://ipfs.filebase.io/ipfs/QmQDNdhPvCrrijEKC3G9Px5if2CHgdxq7Q2Pg66cy9xwbF: The read operation timed out; https://gateway.pinata.cloud/ipfs/QmQDNdhPvCrrijEKC3G9Px5if2CHgdxq7Q2Pg66cy9xwbF: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/QmQDNdhPvCrrijEKC3G9Px5if2CHgdxq7Q2Pg66cy9xwbF: HTTP"
+  },
+  {
+   "caip": "eip155:247253/slip44:60",
+   "source": "chainlist:saakuru",
+   "url": "ipfs://QmduEdtFobPpZWSc45MU6RKxZfTEzLux2z8ikHFhT8usqv",
+   "error": "https://ipfs.filebase.io/ipfs/QmduEdtFobPpZWSc45MU6RKxZfTEzLux2z8ikHFhT8usqv: The read operation timed out; https://gateway.pinata.cloud/ipfs/QmduEdtFobPpZWSc45MU6RKxZfTEzLux2z8ikHFhT8usqv: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/QmduEdtFobPpZWSc45MU6RKxZfTEzLux2z8ikHFhT8usqv: HTTP"
+  },
+  {
+   "caip": "eip155:251/slip44:60",
+   "source": "chainlist:glide",
+   "url": "ipfs://bafkreihxec2ckjvyoh5rhk4j2fvyqquiw5mievvs7up7fl2dfef5d767aa",
+   "error": "https://ipfs.filebase.io/ipfs/bafkreihxec2ckjvyoh5rhk4j2fvyqquiw5mievvs7up7fl2dfef5d767aa: The read operation timed out; https://gateway.pinata.cloud/ipfs/bafkreihxec2ckjvyoh5rhk4j2fvyqquiw5mievvs7up7fl2dfef5d767aa: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/bafkreihxec2ckjvyoh5rhk4j2"
+  },
+  {
+   "caip": "eip155:252525/slip44:60",
+   "source": "chainlist:celestium",
+   "url": "ipfs://QmdoqEVRnp6Z49VTxEjPMRMAfUv1CbN7wbFw5G1S34SqeA",
+   "error": "https://ipfs.filebase.io/ipfs/QmdoqEVRnp6Z49VTxEjPMRMAfUv1CbN7wbFw5G1S34SqeA: The read operation timed out; https://gateway.pinata.cloud/ipfs/QmdoqEVRnp6Z49VTxEjPMRMAfUv1CbN7wbFw5G1S34SqeA: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/QmdoqEVRnp6Z49VTxEjPMRMAfUv1CbN7wbFw5G1S34SqeA: HTTP"
+  },
+  {
+   "caip": "eip155:253/slip44:60",
+   "source": "chainlist:glide",
+   "url": "ipfs://bafkreihxec2ckjvyoh5rhk4j2fvyqquiw5mievvs7up7fl2dfef5d767aa",
+   "error": "https://ipfs.filebase.io/ipfs/bafkreihxec2ckjvyoh5rhk4j2fvyqquiw5mievvs7up7fl2dfef5d767aa: The read operation timed out; https://gateway.pinata.cloud/ipfs/bafkreihxec2ckjvyoh5rhk4j2fvyqquiw5mievvs7up7fl2dfef5d767aa: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/bafkreihxec2ckjvyoh5rhk4j2"
+  },
+  {
+   "caip": "eip155:2606/slip44:60",
+   "source": "chainlist:pocr",
+   "url": "ipfs://QmRLwpq47tyEd3rfK4tKRhbTvyb3fc7PCutExnL1XAb37A",
+   "error": "https://ipfs.filebase.io/ipfs/QmRLwpq47tyEd3rfK4tKRhbTvyb3fc7PCutExnL1XAb37A: The read operation timed out; https://gateway.pinata.cloud/ipfs/QmRLwpq47tyEd3rfK4tKRhbTvyb3fc7PCutExnL1XAb37A: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/QmRLwpq47tyEd3rfK4tKRhbTvyb3fc7PCutExnL1XAb37A: HTTP"
+  },
+  {
+   "caip": "eip155:2613/slip44:60",
+   "source": "chainlist:ezchain",
+   "url": "ipfs://QmPKJbYCFjGmY9X2cA4b9YQjWYHQncmKnFtKyQh9rHkFTb",
+   "error": "https://ipfs.filebase.io/ipfs/QmPKJbYCFjGmY9X2cA4b9YQjWYHQncmKnFtKyQh9rHkFTb: The read operation timed out; https://gateway.pinata.cloud/ipfs/QmPKJbYCFjGmY9X2cA4b9YQjWYHQncmKnFtKyQh9rHkFTb: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/QmPKJbYCFjGmY9X2cA4b9YQjWYHQncmKnFtKyQh9rHkFTb: HTTP"
+  },
+  {
+   "caip": "eip155:262371/slip44:60",
+   "source": "chainlist:eclat",
+   "url": "ipfs://bafybeigpyvnir6awzgeazkk5xdkvexw7w6ww3yxawszue6zms4a5ygdfky",
+   "error": "https://ipfs.filebase.io/ipfs/bafybeigpyvnir6awzgeazkk5xdkvexw7w6ww3yxawszue6zms4a5ygdfky: The read operation timed out; https://gateway.pinata.cloud/ipfs/bafybeigpyvnir6awzgeazkk5xdkvexw7w6ww3yxawszue6zms4a5ygdfky: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/bafybeigpyvnir6awzgeazkk5x"
+  },
+  {
+   "caip": "eip155:26600/slip44:60",
+   "source": "chainlist:hertz-network",
+   "url": "ipfs://Qmf3GYbPXmTDpSP6t7Ug2j5HjEwrY5oGhBDP7d4TQHvGnG",
+   "error": "https://ipfs.filebase.io/ipfs/Qmf3GYbPXmTDpSP6t7Ug2j5HjEwrY5oGhBDP7d4TQHvGnG: The read operation timed out; https://gateway.pinata.cloud/ipfs/Qmf3GYbPXmTDpSP6t7Ug2j5HjEwrY5oGhBDP7d4TQHvGnG: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/Qmf3GYbPXmTDpSP6t7Ug2j5HjEwrY5oGhBDP7d4TQHvGnG: HTTP"
+  },
+  {
+   "caip": "eip155:27082017/slip44:60",
+   "source": "chainlist:exl",
+   "url": "ipfs://QmeooM7QicT1YbgY93XPd5p7JsCjYhN3qjWt68X57g6bVC",
+   "error": "https://ipfs.filebase.io/ipfs/QmeooM7QicT1YbgY93XPd5p7JsCjYhN3qjWt68X57g6bVC: The read operation timed out; https://gateway.pinata.cloud/ipfs/QmeooM7QicT1YbgY93XPd5p7JsCjYhN3qjWt68X57g6bVC: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/QmeooM7QicT1YbgY93XPd5p7JsCjYhN3qjWt68X57g6bVC: HTTP"
+  },
+  {
+   "caip": "eip155:29223/slip44:60",
+   "source": "chainlist:nexameta",
+   "url": "ipfs://bafkreia42ym3rgzo7w5k445nr4wmji4ucxgw4pdhdo5lacczkk2fiahwni",
+   "error": "https://ipfs.filebase.io/ipfs/bafkreia42ym3rgzo7w5k445nr4wmji4ucxgw4pdhdo5lacczkk2fiahwni: The read operation timed out; https://gateway.pinata.cloud/ipfs/bafkreia42ym3rgzo7w5k445nr4wmji4ucxgw4pdhdo5lacczkk2fiahwni: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/bafkreia42ym3rgzo7w5k445nr"
+  },
+  {
+   "caip": "eip155:29225/slip44:60",
+   "source": "chainlist:nexameta",
+   "url": "ipfs://bafkreia42ym3rgzo7w5k445nr4wmji4ucxgw4pdhdo5lacczkk2fiahwni",
+   "error": "https://ipfs.filebase.io/ipfs/bafkreia42ym3rgzo7w5k445nr4wmji4ucxgw4pdhdo5lacczkk2fiahwni: HTTP Error 504: Gateway Timeout; https://gateway.pinata.cloud/ipfs/bafkreia42ym3rgzo7w5k445nr4wmji4ucxgw4pdhdo5lacczkk2fiahwni: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/bafkreia42ym3rgzo7w5k44"
+  },
+  {
+   "caip": "eip155:30067/slip44:60",
+   "source": "chainlist:piecechain",
+   "url": "ipfs://QmWAU39z1kcYshAqkENRH8qUjfR5CJehCxA4GiC33p3HpH",
+   "error": "https://ipfs.filebase.io/ipfs/QmWAU39z1kcYshAqkENRH8qUjfR5CJehCxA4GiC33p3HpH: The read operation timed out; https://gateway.pinata.cloud/ipfs/QmWAU39z1kcYshAqkENRH8qUjfR5CJehCxA4GiC33p3HpH: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/QmWAU39z1kcYshAqkENRH8qUjfR5CJehCxA4GiC33p3HpH: HTTP"
+  },
+  {
+   "caip": "eip155:3031/slip44:60",
+   "source": "chainlist:orl",
+   "url": "ipfs://QmNsuuBBTHErnuFDcdyzaY8CKoVJtobsLJx2WQjaPjcp7g",
+   "error": "https://ipfs.filebase.io/ipfs/QmNsuuBBTHErnuFDcdyzaY8CKoVJtobsLJx2WQjaPjcp7g: The read operation timed out; https://gateway.pinata.cloud/ipfs/QmNsuuBBTHErnuFDcdyzaY8CKoVJtobsLJx2WQjaPjcp7g: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/QmNsuuBBTHErnuFDcdyzaY8CKoVJtobsLJx2WQjaPjcp7g: HTTP"
+  },
+  {
+   "caip": "eip155:311/slip44:60",
+   "source": "chainlist:omaxchain",
+   "url": "ipfs://Qmd7omPxrehSuxHHPMYd5Nr7nfrtjKdRJQEhDLfTb87w8G",
+   "error": "https://ipfs.filebase.io/ipfs/Qmd7omPxrehSuxHHPMYd5Nr7nfrtjKdRJQEhDLfTb87w8G: The read operation timed out; https://gateway.pinata.cloud/ipfs/Qmd7omPxrehSuxHHPMYd5Nr7nfrtjKdRJQEhDLfTb87w8G: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/Qmd7omPxrehSuxHHPMYd5Nr7nfrtjKdRJQEhDLfTb87w8G: HTTP"
+  },
+  {
+   "caip": "eip155:32382/slip44:60",
+   "source": "chainlist:sanrchain",
+   "url": "ipfs://QmPLMg5mYD8XRknvYbDkD2x7FXxYan7MPTeUWZC2CihwDM",
+   "error": "https://ipfs.filebase.io/ipfs/QmPLMg5mYD8XRknvYbDkD2x7FXxYan7MPTeUWZC2CihwDM: The read operation timed out; https://gateway.pinata.cloud/ipfs/QmPLMg5mYD8XRknvYbDkD2x7FXxYan7MPTeUWZC2CihwDM: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/QmPLMg5mYD8XRknvYbDkD2x7FXxYan7MPTeUWZC2CihwDM: HTTP"
+  },
+  {
+   "caip": "eip155:332/slip44:60",
+   "source": "chainlist:omaxchain",
+   "url": "ipfs://Qmd7omPxrehSuxHHPMYd5Nr7nfrtjKdRJQEhDLfTb87w8G",
+   "error": "https://ipfs.filebase.io/ipfs/Qmd7omPxrehSuxHHPMYd5Nr7nfrtjKdRJQEhDLfTb87w8G: HTTP Error 504: Gateway Timeout; https://gateway.pinata.cloud/ipfs/Qmd7omPxrehSuxHHPMYd5Nr7nfrtjKdRJQEhDLfTb87w8G: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/Qmd7omPxrehSuxHHPMYd5Nr7nfrtjKdRJQEhDLfTb87w8G: H"
+  },
+  {
+   "caip": "eip155:3331/slip44:60",
+   "source": "chainlist:zcore",
+   "url": "ipfs://QmQnXu13ym8W1VA3QxocaNVXGAuEPmamSCkS7bBscVk1f4",
+   "error": "https://ipfs.filebase.io/ipfs/QmQnXu13ym8W1VA3QxocaNVXGAuEPmamSCkS7bBscVk1f4: The read operation timed out; https://gateway.pinata.cloud/ipfs/QmQnXu13ym8W1VA3QxocaNVXGAuEPmamSCkS7bBscVk1f4: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/QmQnXu13ym8W1VA3QxocaNVXGAuEPmamSCkS7bBscVk1f4: HTTP"
+  },
+  {
+   "caip": "eip155:333331/slip44:60",
+   "source": "chainlist:aves",
+   "url": "ipfs://QmeKQVv2QneHaaggw2NfpZ7DGMdjVhPywTdse5RzCs4oGn",
+   "error": "https://ipfs.filebase.io/ipfs/QmeKQVv2QneHaaggw2NfpZ7DGMdjVhPywTdse5RzCs4oGn: The read operation timed out; https://gateway.pinata.cloud/ipfs/QmeKQVv2QneHaaggw2NfpZ7DGMdjVhPywTdse5RzCs4oGn: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/QmeKQVv2QneHaaggw2NfpZ7DGMdjVhPywTdse5RzCs4oGn: HTTP"
+  },
+  {
+   "caip": "eip155:333333/slip44:60",
+   "source": "chainlist:nativ3",
+   "url": "ipfs://QmVzJDndPui6qBSeJWe5kMLA56C3KpVhqqqk9xvVKE1DGb",
+   "error": "https://ipfs.filebase.io/ipfs/QmVzJDndPui6qBSeJWe5kMLA56C3KpVhqqqk9xvVKE1DGb: The read operation timed out; https://gateway.pinata.cloud/ipfs/QmVzJDndPui6qBSeJWe5kMLA56C3KpVhqqqk9xvVKE1DGb: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/QmVzJDndPui6qBSeJWe5kMLA56C3KpVhqqqk9xvVKE1DGb: HTTP"
+  },
+  {
+   "caip": "eip155:336655/slip44:60",
+   "source": "chainlist:up",
+   "url": "ipfs://QmNMqcPyQnaaFfUDsmsnu2T6agZfoWij3zFYebCNUPkfAH",
+   "error": "https://ipfs.filebase.io/ipfs/QmNMqcPyQnaaFfUDsmsnu2T6agZfoWij3zFYebCNUPkfAH: The read operation timed out; https://gateway.pinata.cloud/ipfs/QmNMqcPyQnaaFfUDsmsnu2T6agZfoWij3zFYebCNUPkfAH: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/QmNMqcPyQnaaFfUDsmsnu2T6agZfoWij3zFYebCNUPkfAH: HTTP"
+  },
+  {
+   "caip": "eip155:336666/slip44:60",
+   "source": "chainlist:up",
+   "url": "ipfs://QmNMqcPyQnaaFfUDsmsnu2T6agZfoWij3zFYebCNUPkfAH",
+   "error": "https://ipfs.filebase.io/ipfs/QmNMqcPyQnaaFfUDsmsnu2T6agZfoWij3zFYebCNUPkfAH: The read operation timed out; https://gateway.pinata.cloud/ipfs/QmNMqcPyQnaaFfUDsmsnu2T6agZfoWij3zFYebCNUPkfAH: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/QmNMqcPyQnaaFfUDsmsnu2T6agZfoWij3zFYebCNUPkfAH: HTTP"
+  },
+  {
+   "caip": "eip155:33772211/slip44:60",
+   "source": "chainlist:xone_test",
+   "url": "ipfs://QmR3twvfhDES34nLhcVmUbAZpW4eynZoSfA2XpWUBnH7gB",
+   "error": "https://ipfs.filebase.io/ipfs/QmR3twvfhDES34nLhcVmUbAZpW4eynZoSfA2XpWUBnH7gB: The read operation timed out; https://gateway.pinata.cloud/ipfs/QmR3twvfhDES34nLhcVmUbAZpW4eynZoSfA2XpWUBnH7gB: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/QmR3twvfhDES34nLhcVmUbAZpW4eynZoSfA2XpWUBnH7gB: HTTP"
+  },
+  {
+   "caip": "eip155:3490/slip44:60",
+   "source": "chainlist:gtc",
+   "url": "ipfs://bafybeiaaq7gogws6uqcvo6imxbxfgpdhewybh7bxgtfny2i2as5nidbdje",
+   "error": "https://ipfs.filebase.io/ipfs/bafybeiaaq7gogws6uqcvo6imxbxfgpdhewybh7bxgtfny2i2as5nidbdje: The read operation timed out; https://gateway.pinata.cloud/ipfs/bafybeiaaq7gogws6uqcvo6imxbxfgpdhewybh7bxgtfny2i2as5nidbdje: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/bafybeiaaq7gogws6uqcvo6imx"
+  },
+  {
+   "caip": "eip155:35443/slip44:60",
+   "source": "chainlist:q",
+   "url": "ipfs://QmQUQKe8VEtSthhgXnJ3EmEz94YhpVCpUDZAiU9KYyNLya",
+   "error": "https://ipfs.filebase.io/ipfs/QmQUQKe8VEtSthhgXnJ3EmEz94YhpVCpUDZAiU9KYyNLya: The read operation timed out; https://gateway.pinata.cloud/ipfs/QmQUQKe8VEtSthhgXnJ3EmEz94YhpVCpUDZAiU9KYyNLya: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/QmQUQKe8VEtSthhgXnJ3EmEz94YhpVCpUDZAiU9KYyNLya: HTTP"
+  },
+  {
+   "caip": "eip155:3639/slip44:60",
+   "source": "chainlist:iChain",
+   "url": "ipfs://QmcumhDxUyoLTHkcMKgPqkpGnnjwSTqE2KGFnDXXFY8mMo",
+   "error": "https://ipfs.filebase.io/ipfs/QmcumhDxUyoLTHkcMKgPqkpGnnjwSTqE2KGFnDXXFY8mMo: The read operation timed out; https://gateway.pinata.cloud/ipfs/QmcumhDxUyoLTHkcMKgPqkpGnnjwSTqE2KGFnDXXFY8mMo: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/QmcumhDxUyoLTHkcMKgPqkpGnnjwSTqE2KGFnDXXFY8mMo: HTTP"
+  },
+  {
+   "caip": "eip155:3645/slip44:60",
+   "source": "chainlist:iChain",
+   "url": "ipfs://QmcumhDxUyoLTHkcMKgPqkpGnnjwSTqE2KGFnDXXFY8mMo",
+   "error": "https://ipfs.filebase.io/ipfs/QmcumhDxUyoLTHkcMKgPqkpGnnjwSTqE2KGFnDXXFY8mMo: HTTP Error 504: Gateway Timeout; https://gateway.pinata.cloud/ipfs/QmcumhDxUyoLTHkcMKgPqkpGnnjwSTqE2KGFnDXXFY8mMo: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/QmcumhDxUyoLTHkcMKgPqkpGnnjwSTqE2KGFnDXXFY8mMo: H"
+  },
+  {
+   "caip": "eip155:3698/slip44:60",
+   "source": "chainlist:SenjePowers",
+   "url": "ipfs://QmcpyTj4hUyHJZ2VmSdkXFpPpRcNKRP1VxMs7Cp1anymNy",
+   "error": "https://ipfs.filebase.io/ipfs/QmcpyTj4hUyHJZ2VmSdkXFpPpRcNKRP1VxMs7Cp1anymNy: The read operation timed out; https://gateway.pinata.cloud/ipfs/QmcpyTj4hUyHJZ2VmSdkXFpPpRcNKRP1VxMs7Cp1anymNy: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/QmcpyTj4hUyHJZ2VmSdkXFpPpRcNKRP1VxMs7Cp1anymNy: HTTP"
+  },
+  {
+   "caip": "eip155:3721/slip44:60",
+   "source": "chainlist:xone_main",
+   "url": "ipfs://QmR3twvfhDES34nLhcVmUbAZpW4eynZoSfA2XpWUBnH7gB",
+   "error": "https://ipfs.filebase.io/ipfs/QmR3twvfhDES34nLhcVmUbAZpW4eynZoSfA2XpWUBnH7gB: HTTP Error 504: Gateway Timeout; https://gateway.pinata.cloud/ipfs/QmR3twvfhDES34nLhcVmUbAZpW4eynZoSfA2XpWUBnH7gB: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/QmR3twvfhDES34nLhcVmUbAZpW4eynZoSfA2XpWUBnH7gB: H"
+  },
+  {
+   "caip": "eip155:373737/slip44:60",
+   "source": "chainlist:hap",
+   "url": "ipfs://QmQ4V9JC25yUrYk2kFJwmKguSsZBQvtGcg6q9zkDV8mkJW",
+   "error": "https://ipfs.filebase.io/ipfs/QmQ4V9JC25yUrYk2kFJwmKguSsZBQvtGcg6q9zkDV8mkJW: The read operation timed out; https://gateway.pinata.cloud/ipfs/QmQ4V9JC25yUrYk2kFJwmKguSsZBQvtGcg6q9zkDV8mkJW: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/QmQ4V9JC25yUrYk2kFJwmKguSsZBQvtGcg6q9zkDV8mkJW: HTTP"
+  },
+  {
+   "caip": "eip155:3888/slip44:60",
+   "source": "chainlist:kalychain",
+   "url": "ipfs://QmUaXcPewLuQtY5a7xPTzJyVdjkH487VfV7gSR8UXrbxQ3",
+   "error": "https://ipfs.filebase.io/ipfs/QmUaXcPewLuQtY5a7xPTzJyVdjkH487VfV7gSR8UXrbxQ3: The read operation timed out; https://gateway.pinata.cloud/ipfs/QmUaXcPewLuQtY5a7xPTzJyVdjkH487VfV7gSR8UXrbxQ3: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/QmUaXcPewLuQtY5a7xPTzJyVdjkH487VfV7gSR8UXrbxQ3: HTTP"
+  },
+  {
+   "caip": "eip155:3889/slip44:60",
+   "source": "chainlist:kalychain",
+   "url": "ipfs://QmUaXcPewLuQtY5a7xPTzJyVdjkH487VfV7gSR8UXrbxQ3",
+   "error": "https://ipfs.filebase.io/ipfs/QmUaXcPewLuQtY5a7xPTzJyVdjkH487VfV7gSR8UXrbxQ3: HTTP Error 504: Gateway Timeout; https://gateway.pinata.cloud/ipfs/QmUaXcPewLuQtY5a7xPTzJyVdjkH487VfV7gSR8UXrbxQ3: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/QmUaXcPewLuQtY5a7xPTzJyVdjkH487VfV7gSR8UXrbxQ3: H"
+  },
+  {
+   "caip": "eip155:3912/slip44:60",
+   "source": "chainlist:drac",
+   "url": "ipfs://QmXbsQe7QsVFZJZdBmbZVvS6LgX9ZFoaTMBs9MiQXUzJTw",
+   "error": "https://ipfs.filebase.io/ipfs/QmXbsQe7QsVFZJZdBmbZVvS6LgX9ZFoaTMBs9MiQXUzJTw: The read operation timed out; https://gateway.pinata.cloud/ipfs/QmXbsQe7QsVFZJZdBmbZVvS6LgX9ZFoaTMBs9MiQXUzJTw: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/QmXbsQe7QsVFZJZdBmbZVvS6LgX9ZFoaTMBs9MiQXUzJTw: HTTP"
+  },
+  {
+   "caip": "eip155:39656/slip44:60",
+   "source": "chainlist:prmIcon",
+   "url": "ipfs://QmckkDRkuCQWbvhpKGsqa8ajuQvf3W5dekzw5qpiPC6shk",
+   "error": "https://ipfs.filebase.io/ipfs/QmckkDRkuCQWbvhpKGsqa8ajuQvf3W5dekzw5qpiPC6shk: The read operation timed out; https://gateway.pinata.cloud/ipfs/QmckkDRkuCQWbvhpKGsqa8ajuQvf3W5dekzw5qpiPC6shk: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/QmckkDRkuCQWbvhpKGsqa8ajuQvf3W5dekzw5qpiPC6shk: HTTP"
+  },
+  {
+   "caip": "eip155:399/slip44:60",
+   "source": "chainlist:nativ3",
+   "url": "ipfs://QmVzJDndPui6qBSeJWe5kMLA56C3KpVhqqqk9xvVKE1DGb",
+   "error": "https://ipfs.filebase.io/ipfs/QmVzJDndPui6qBSeJWe5kMLA56C3KpVhqqqk9xvVKE1DGb: The read operation timed out; https://gateway.pinata.cloud/ipfs/QmVzJDndPui6qBSeJWe5kMLA56C3KpVhqqqk9xvVKE1DGb: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/QmVzJDndPui6qBSeJWe5kMLA56C3KpVhqqqk9xvVKE1DGb: HTTP"
+  },
+  {
+   "caip": "eip155:400/slip44:60",
+   "source": "chainlist:hyperonchain",
+   "url": "ipfs://QmWxhyxXTEsWH98v7M3ck4ZL1qQoUaHG4HgtgxzD2KJQ5m",
+   "error": "https://ipfs.filebase.io/ipfs/QmWxhyxXTEsWH98v7M3ck4ZL1qQoUaHG4HgtgxzD2KJQ5m: The read operation timed out; https://gateway.pinata.cloud/ipfs/QmWxhyxXTEsWH98v7M3ck4ZL1qQoUaHG4HgtgxzD2KJQ5m: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/QmWxhyxXTEsWH98v7M3ck4ZL1qQoUaHG4HgtgxzD2KJQ5m: HTTP"
+  },
+  {
+   "caip": "eip155:4001/slip44:60",
+   "source": "chainlist:peperium",
+   "url": "ipfs://Qmag2hr5DQghRzKPN3oUFBkjWzqd5CndQzZeb5LfoiMCXf",
+   "error": "https://ipfs.filebase.io/ipfs/Qmag2hr5DQghRzKPN3oUFBkjWzqd5CndQzZeb5LfoiMCXf: The read operation timed out; https://gateway.pinata.cloud/ipfs/Qmag2hr5DQghRzKPN3oUFBkjWzqd5CndQzZeb5LfoiMCXf: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/Qmag2hr5DQghRzKPN3oUFBkjWzqd5CndQzZeb5LfoiMCXf: HTTP"
+  },
+  {
+   "caip": "eip155:4096/slip44:60",
+   "source": "chainlist:bitindiTestnet",
+   "url": "ipfs://QmRAFFPiLiSgjGTs9QaZdnR9fsDgyUdTejwSxcnPXo292s",
+   "error": "https://ipfs.filebase.io/ipfs/QmRAFFPiLiSgjGTs9QaZdnR9fsDgyUdTejwSxcnPXo292s: The read operation timed out; https://gateway.pinata.cloud/ipfs/QmRAFFPiLiSgjGTs9QaZdnR9fsDgyUdTejwSxcnPXo292s: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/QmRAFFPiLiSgjGTs9QaZdnR9fsDgyUdTejwSxcnPXo292s: HTTP"
+  },
+  {
+   "caip": "eip155:4139/slip44:60",
+   "source": "chainlist:humans-dark",
+   "url": "ipfs://QmX6XuoQDTTjYqAmdNJiieLDZSwHHyUx44yQb4E3tmHmEA",
+   "error": "https://ipfs.filebase.io/ipfs/QmX6XuoQDTTjYqAmdNJiieLDZSwHHyUx44yQb4E3tmHmEA: The read operation timed out; https://gateway.pinata.cloud/ipfs/QmX6XuoQDTTjYqAmdNJiieLDZSwHHyUx44yQb4E3tmHmEA: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/QmX6XuoQDTTjYqAmdNJiieLDZSwHHyUx44yQb4E3tmHmEA: HTTP"
+  },
+  {
+   "caip": "eip155:4141/slip44:60",
+   "source": "chainlist:tipboxcoinIcon",
+   "url": "ipfs://QmbiaHnR3fVVofZ7Xq2GYZxwHkLEy3Fh5qDtqnqXD6ACAh",
+   "error": "https://ipfs.filebase.io/ipfs/QmbiaHnR3fVVofZ7Xq2GYZxwHkLEy3Fh5qDtqnqXD6ACAh: The read operation timed out; https://gateway.pinata.cloud/ipfs/QmbiaHnR3fVVofZ7Xq2GYZxwHkLEy3Fh5qDtqnqXD6ACAh: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/QmbiaHnR3fVVofZ7Xq2GYZxwHkLEy3Fh5qDtqnqXD6ACAh: HTTP"
+  },
+  {
+   "caip": "eip155:41923/slip44:60",
+   "source": "chainlist:occ-mainnet",
+   "url": "ipfs://QmAbz7VfGvf6NVHezuBy5HpJTCi1gEshBxxdDdfVXNQ8Bt",
+   "error": "https://ipfs.filebase.io/ipfs/QmAbz7VfGvf6NVHezuBy5HpJTCi1gEshBxxdDdfVXNQ8Bt: HTTP Error 400: Bad Request; https://gateway.pinata.cloud/ipfs/QmAbz7VfGvf6NVHezuBy5HpJTCi1gEshBxxdDdfVXNQ8Bt: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/QmAbz7VfGvf6NVHezuBy5HpJTCi1gEshBxxdDdfVXNQ8Bt: HTTP "
+  },
+  {
+   "caip": "eip155:42001/slip44:60",
+   "source": "chainlist:pmon",
+   "url": "ipfs://QmaEMH8gUpdBuZdMpw2nnZ6tFA8qcRLqVdTtuoTT8U95X6",
+   "error": "https://ipfs.filebase.io/ipfs/QmaEMH8gUpdBuZdMpw2nnZ6tFA8qcRLqVdTtuoTT8U95X6: The read operation timed out; https://gateway.pinata.cloud/ipfs/QmaEMH8gUpdBuZdMpw2nnZ6tFA8qcRLqVdTtuoTT8U95X6: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/QmaEMH8gUpdBuZdMpw2nnZ6tFA8qcRLqVdTtuoTT8U95X6: HTTP"
+  },
+  {
+   "caip": "eip155:420042/slip44:60",
+   "source": "chainlist:vectorsmartgas",
+   "url": "ipfs://QmRRoNvamJavpaFsxS1PPxyxDZ7q8akcdeNrrQXWmg2fux",
+   "error": "https://ipfs.filebase.io/ipfs/QmRRoNvamJavpaFsxS1PPxyxDZ7q8akcdeNrrQXWmg2fux: The read operation timed out; https://gateway.pinata.cloud/ipfs/QmRRoNvamJavpaFsxS1PPxyxDZ7q8akcdeNrrQXWmg2fux: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/QmRRoNvamJavpaFsxS1PPxyxDZ7q8akcdeNrrQXWmg2fux: HTTP"
+  },
+  {
+   "caip": "eip155:4207/slip44:60",
+   "source": "chainlist:edgen",
+   "url": "ipfs://QmVwYkRWgXgoYDPgBFntxWYFquKusuMMVc8TG5hrEVnXLV",
+   "error": "https://ipfs.filebase.io/ipfs/QmVwYkRWgXgoYDPgBFntxWYFquKusuMMVc8TG5hrEVnXLV: The read operation timed out; https://gateway.pinata.cloud/ipfs/QmVwYkRWgXgoYDPgBFntxWYFquKusuMMVc8TG5hrEVnXLV: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/QmVwYkRWgXgoYDPgBFntxWYFquKusuMMVc8TG5hrEVnXLV: HTTP"
+  },
+  {
+   "caip": "eip155:42072/slip44:60",
+   "source": "chainlist:agentLayerIcon",
+   "url": "ipfs://QmSj6SSWmBiRjnjZQPb17kvhGDmB9xAGRkG13RwPuXLTCT",
+   "error": "https://ipfs.filebase.io/ipfs/QmSj6SSWmBiRjnjZQPb17kvhGDmB9xAGRkG13RwPuXLTCT: The read operation timed out; https://gateway.pinata.cloud/ipfs/QmSj6SSWmBiRjnjZQPb17kvhGDmB9xAGRkG13RwPuXLTCT: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/QmSj6SSWmBiRjnjZQPb17kvhGDmB9xAGRkG13RwPuXLTCT: HTTP"
+  },
+  {
+   "caip": "eip155:42421/slip44:60",
+   "source": "chainlist:assetchain",
+   "url": "ipfs://QmXc4bxuyWvQFqjuunXmvZZs1AwGChyY7sGYK6tgCkp3nJ",
+   "error": "https://ipfs.filebase.io/ipfs/QmXc4bxuyWvQFqjuunXmvZZs1AwGChyY7sGYK6tgCkp3nJ: The read operation timed out; https://gateway.pinata.cloud/ipfs/QmXc4bxuyWvQFqjuunXmvZZs1AwGChyY7sGYK6tgCkp3nJ: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/QmXc4bxuyWvQFqjuunXmvZZs1AwGChyY7sGYK6tgCkp3nJ: HTTP"
+  },
+  {
+   "caip": "eip155:425/slip44:60",
+   "source": "chainlist:stenix",
+   "url": "ipfs://QmVM1zLyWDZYyje5qWWfDdve1fmrDm69J9pSKhivb1zkCH",
+   "error": "https://ipfs.filebase.io/ipfs/QmVM1zLyWDZYyje5qWWfDdve1fmrDm69J9pSKhivb1zkCH: The read operation timed out; https://gateway.pinata.cloud/ipfs/QmVM1zLyWDZYyje5qWWfDdve1fmrDm69J9pSKhivb1zkCH: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/QmVM1zLyWDZYyje5qWWfDdve1fmrDm69J9pSKhivb1zkCH: HTTP"
+  },
+  {
+   "caip": "eip155:45000/slip44:60",
+   "source": "chainlist:autobahn",
+   "url": "ipfs://QmZP19pbqTco4vaP9siduLWP8pdYArFK3onfR55tvjr12s",
+   "error": "https://ipfs.filebase.io/ipfs/QmZP19pbqTco4vaP9siduLWP8pdYArFK3onfR55tvjr12s: The read operation timed out; https://gateway.pinata.cloud/ipfs/QmZP19pbqTco4vaP9siduLWP8pdYArFK3onfR55tvjr12s: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/QmZP19pbqTco4vaP9siduLWP8pdYArFK3onfR55tvjr12s: HTTP"
+  },
+  {
+   "caip": "eip155:45003/slip44:60",
+   "source": "chainlist:juneomainnet",
+   "url": "ipfs://QmUXCyNVe6t9MDdWzW95YCLex6iTwG32NYPfR4ZS9r2JTJ",
+   "error": "https://ipfs.filebase.io/ipfs/QmUXCyNVe6t9MDdWzW95YCLex6iTwG32NYPfR4ZS9r2JTJ: The read operation timed out; https://gateway.pinata.cloud/ipfs/QmUXCyNVe6t9MDdWzW95YCLex6iTwG32NYPfR4ZS9r2JTJ: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/QmUXCyNVe6t9MDdWzW95YCLex6iTwG32NYPfR4ZS9r2JTJ: HTTP"
+  },
+  {
+   "caip": "eip155:45004/slip44:60",
+   "source": "chainlist:juneo-dai1",
+   "url": "ipfs://Qmegd2hkWhyKjyUuQQ2vMauaj3N5J89kEPqN6YNT6s64zT",
+   "error": "https://ipfs.filebase.io/ipfs/Qmegd2hkWhyKjyUuQQ2vMauaj3N5J89kEPqN6YNT6s64zT: The read operation timed out; https://gateway.pinata.cloud/ipfs/Qmegd2hkWhyKjyUuQQ2vMauaj3N5J89kEPqN6YNT6s64zT: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/Qmegd2hkWhyKjyUuQQ2vMauaj3N5J89kEPqN6YNT6s64zT: HTTP"
+  },
+  {
+   "caip": "eip155:45005/slip44:60",
+   "source": "chainlist:juneo-usdt1",
+   "url": "ipfs://Qmb7FZMjv6k25vDjNwfpksjsriwrLh7PVsT93eBWzC5pCY",
+   "error": "https://ipfs.filebase.io/ipfs/Qmb7FZMjv6k25vDjNwfpksjsriwrLh7PVsT93eBWzC5pCY: The read operation timed out; https://gateway.pinata.cloud/ipfs/Qmb7FZMjv6k25vDjNwfpksjsriwrLh7PVsT93eBWzC5pCY: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/Qmb7FZMjv6k25vDjNwfpksjsriwrLh7PVsT93eBWzC5pCY: HTTP"
+  },
+  {
+   "caip": "eip155:45006/slip44:60",
+   "source": "chainlist:juneo-usd1",
+   "url": "ipfs://QmTDaiJnZdwDhxLUjtx1qaNJ5VmKdK9xJoqGr7ubV1EXWW",
+   "error": "https://ipfs.filebase.io/ipfs/QmTDaiJnZdwDhxLUjtx1qaNJ5VmKdK9xJoqGr7ubV1EXWW: The read operation timed out; https://gateway.pinata.cloud/ipfs/QmTDaiJnZdwDhxLUjtx1qaNJ5VmKdK9xJoqGr7ubV1EXWW: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/QmTDaiJnZdwDhxLUjtx1qaNJ5VmKdK9xJoqGr7ubV1EXWW: HTTP"
+  },
+  {
+   "caip": "eip155:45008/slip44:60",
+   "source": "chainlist:juneo-gld1",
+   "url": "ipfs://QmQFqkzi97UKJqmC8KRcFieCuC7KXk4G42j7j5PSF4ByWg",
+   "error": "https://ipfs.filebase.io/ipfs/QmQFqkzi97UKJqmC8KRcFieCuC7KXk4G42j7j5PSF4ByWg: The read operation timed out; https://gateway.pinata.cloud/ipfs/QmQFqkzi97UKJqmC8KRcFieCuC7KXk4G42j7j5PSF4ByWg: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/QmQFqkzi97UKJqmC8KRcFieCuC7KXk4G42j7j5PSF4ByWg: HTTP"
+  },
+  {
+   "caip": "eip155:45009/slip44:60",
+   "source": "chainlist:juneo-ltc1",
+   "url": "ipfs://QmYofWFKyp1ewqn1oZgU9csyfxv1D742kMqNkysx7yRzEm",
+   "error": "https://ipfs.filebase.io/ipfs/QmYofWFKyp1ewqn1oZgU9csyfxv1D742kMqNkysx7yRzEm: The read operation timed out; https://gateway.pinata.cloud/ipfs/QmYofWFKyp1ewqn1oZgU9csyfxv1D742kMqNkysx7yRzEm: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/QmYofWFKyp1ewqn1oZgU9csyfxv1D742kMqNkysx7yRzEm: HTTP"
+  },
+  {
+   "caip": "eip155:45011/slip44:60",
+   "source": "chainlist:juneo-eur1",
+   "url": "ipfs://QmexytQkcC8yXzEjv3mbaZyxcy7v8vEEPmii2JZQAyGjqM",
+   "error": "https://ipfs.filebase.io/ipfs/QmexytQkcC8yXzEjv3mbaZyxcy7v8vEEPmii2JZQAyGjqM: The read operation timed out; https://gateway.pinata.cloud/ipfs/QmexytQkcC8yXzEjv3mbaZyxcy7v8vEEPmii2JZQAyGjqM: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/QmexytQkcC8yXzEjv3mbaZyxcy7v8vEEPmii2JZQAyGjqM: HTTP"
+  },
+  {
+   "caip": "eip155:45012/slip44:60",
+   "source": "chainlist:juneo-sgd1",
+   "url": "ipfs://QmatZHCTvWWvgLJRphDGuCUv49mWLB3VM5gzGY4uRkzZbe",
+   "error": "https://ipfs.filebase.io/ipfs/QmatZHCTvWWvgLJRphDGuCUv49mWLB3VM5gzGY4uRkzZbe: The read operation timed out; https://gateway.pinata.cloud/ipfs/QmatZHCTvWWvgLJRphDGuCUv49mWLB3VM5gzGY4uRkzZbe: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/QmatZHCTvWWvgLJRphDGuCUv49mWLB3VM5gzGY4uRkzZbe: HTTP"
+  },
+  {
+   "caip": "eip155:45013/slip44:60",
+   "source": "chainlist:juneo-bch1",
+   "url": "ipfs://QmWCg8qEUtUBWvk7UMJZ7kkqg9SMs63k5Np6hfguZ7btob",
+   "error": "https://ipfs.filebase.io/ipfs/QmWCg8qEUtUBWvk7UMJZ7kkqg9SMs63k5Np6hfguZ7btob: The read operation timed out; https://gateway.pinata.cloud/ipfs/QmWCg8qEUtUBWvk7UMJZ7kkqg9SMs63k5Np6hfguZ7btob: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/QmWCg8qEUtUBWvk7UMJZ7kkqg9SMs63k5Np6hfguZ7btob: HTTP"
+  },
+  {
+   "caip": "eip155:4646/slip44:60",
+   "source": "chainlist:mst",
+   "url": "ipfs://bafkreiepbqd2czcifzkfxk2xjd4nfrlnt5yns3t57umhvhdtpnggn6esym",
+   "error": "https://ipfs.filebase.io/ipfs/bafkreiepbqd2czcifzkfxk2xjd4nfrlnt5yns3t57umhvhdtpnggn6esym: The read operation timed out; https://gateway.pinata.cloud/ipfs/bafkreiepbqd2czcifzkfxk2xjd4nfrlnt5yns3t57umhvhdtpnggn6esym: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/bafkreiepbqd2czcifzkfxk2xj"
+  },
+  {
+   "caip": "eip155:4786/slip44:60",
+   "source": "chainlist:evnode",
+   "url": "ipfs://QmWjBJXdpBzNHtakvEkjKXU5XMJn8JaUTNLfaUt8Y1swPE",
+   "error": "https://ipfs.filebase.io/ipfs/QmWjBJXdpBzNHtakvEkjKXU5XMJn8JaUTNLfaUt8Y1swPE: The read operation timed out; https://gateway.pinata.cloud/ipfs/QmWjBJXdpBzNHtakvEkjKXU5XMJn8JaUTNLfaUt8Y1swPE: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/QmWjBJXdpBzNHtakvEkjKXU5XMJn8JaUTNLfaUt8Y1swPE: HTTP"
+  },
+  {
+   "caip": "eip155:4893/slip44:60",
+   "source": "chainlist:globelchain",
+   "url": "ipfs://QmPRHDsVNpRZ72GoQgDbpa3R4wKENmrXCRNuYJkxocFRDb",
+   "error": "https://ipfs.filebase.io/ipfs/QmPRHDsVNpRZ72GoQgDbpa3R4wKENmrXCRNuYJkxocFRDb: The read operation timed out; https://gateway.pinata.cloud/ipfs/QmPRHDsVNpRZ72GoQgDbpa3R4wKENmrXCRNuYJkxocFRDb: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/QmPRHDsVNpRZ72GoQgDbpa3R4wKENmrXCRNuYJkxocFRDb: HTTP"
+  },
+  {
+   "caip": "eip155:495/slip44:60",
+   "source": "chainlist:landstars",
+   "url": "ipfs://bafkreibjv5chptzvncnfrro7tlx43q4um2tho7kvebdpk6fm765irfle4q",
+   "error": "https://ipfs.filebase.io/ipfs/bafkreibjv5chptzvncnfrro7tlx43q4um2tho7kvebdpk6fm765irfle4q: The read operation timed out; https://gateway.pinata.cloud/ipfs/bafkreibjv5chptzvncnfrro7tlx43q4um2tho7kvebdpk6fm765irfle4q: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/bafkreibjv5chptzvncnfrro7t"
+  },
+  {
+   "caip": "eip155:50000/slip44:60",
+   "source": "chainlist:citro",
+   "url": "ipfs://QmdwQDr6vmBtXmK2TmknkEuZNoaDqTasFdZdu3DRw8b2ws",
+   "error": "https://ipfs.filebase.io/ipfs/QmdwQDr6vmBtXmK2TmknkEuZNoaDqTasFdZdu3DRw8b2ws: The read operation timed out; https://gateway.pinata.cloud/ipfs/QmdwQDr6vmBtXmK2TmknkEuZNoaDqTasFdZdu3DRw8b2ws: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/QmdwQDr6vmBtXmK2TmknkEuZNoaDqTasFdZdu3DRw8b2ws: HTTP"
+  },
+  {
+   "caip": "eip155:5005/slip44:60",
+   "source": "chainlist:treasurenet",
+   "url": "ipfs://QmTcNX8ukHkXiVfVah1W8Sed3vtGN95Sq2QSimfLuHva6B",
+   "error": "https://ipfs.filebase.io/ipfs/QmTcNX8ukHkXiVfVah1W8Sed3vtGN95Sq2QSimfLuHva6B: The read operation timed out; https://gateway.pinata.cloud/ipfs/QmTcNX8ukHkXiVfVah1W8Sed3vtGN95Sq2QSimfLuHva6B: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/QmTcNX8ukHkXiVfVah1W8Sed3vtGN95Sq2QSimfLuHva6B: HTTP"
+  },
+  {
+   "caip": "eip155:50888/slip44:60",
+   "source": "chainlist:erbie",
+   "url": "ipfs://QmfS33Wd4e5pwq4JpNeK3wV1tbPDTakFA6KLxjewHp553z",
+   "error": "https://ipfs.filebase.io/ipfs/QmfS33Wd4e5pwq4JpNeK3wV1tbPDTakFA6KLxjewHp553z: The read operation timed out; https://gateway.pinata.cloud/ipfs/QmfS33Wd4e5pwq4JpNeK3wV1tbPDTakFA6KLxjewHp553z: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/QmfS33Wd4e5pwq4JpNeK3wV1tbPDTakFA6KLxjewHp553z: HTTP"
+  },
+  {
+   "caip": "eip155:513/slip44:60",
+   "source": "chainlist:aac",
+   "url": "ipfs://QmRUrz4dULaoaMpnqd8qXT7ehwz3aaqnYKY4ePsy7isGaF",
+   "error": "https://ipfs.filebase.io/ipfs/QmRUrz4dULaoaMpnqd8qXT7ehwz3aaqnYKY4ePsy7isGaF: The read operation timed out; https://gateway.pinata.cloud/ipfs/QmRUrz4dULaoaMpnqd8qXT7ehwz3aaqnYKY4ePsy7isGaF: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/QmRUrz4dULaoaMpnqd8qXT7ehwz3aaqnYKY4ePsy7isGaF: HTTP"
+  },
+  {
+   "caip": "eip155:52225/slip44:60",
+   "source": "chainlist:cytonic_l1",
+   "url": "ipfs://QmWASoRS8k7YspDLiwz5xfpusBtqHwy5hR5B9NynGx8HGt",
+   "error": "https://ipfs.filebase.io/ipfs/QmWASoRS8k7YspDLiwz5xfpusBtqHwy5hR5B9NynGx8HGt: The read operation timed out; https://gateway.pinata.cloud/ipfs/QmWASoRS8k7YspDLiwz5xfpusBtqHwy5hR5B9NynGx8HGt: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/QmWASoRS8k7YspDLiwz5xfpusBtqHwy5hR5B9NynGx8HGt: HTTP"
+  },
+  {
+   "caip": "eip155:52226/slip44:60",
+   "source": "chainlist:cytonic_l2",
+   "url": "ipfs://QmUetrmaY5KwmRzjgcoZCfqqTaEYSc57V2EVBjFQwpZrE1",
+   "error": "https://ipfs.filebase.io/ipfs/QmUetrmaY5KwmRzjgcoZCfqqTaEYSc57V2EVBjFQwpZrE1: The read operation timed out; https://gateway.pinata.cloud/ipfs/QmUetrmaY5KwmRzjgcoZCfqqTaEYSc57V2EVBjFQwpZrE1: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/QmUetrmaY5KwmRzjgcoZCfqqTaEYSc57V2EVBjFQwpZrE1: HTTP"
+  },
+  {
+   "caip": "eip155:5234/slip44:60",
+   "source": "chainlist:humanode",
+   "url": "ipfs://bafybeihuskzfwqogwvutaxil6sztmvpiavzbrzwjwpn6w2i4j3jysbybra",
+   "error": "https://ipfs.filebase.io/ipfs/bafybeihuskzfwqogwvutaxil6sztmvpiavzbrzwjwpn6w2i4j3jysbybra: The read operation timed out; https://gateway.pinata.cloud/ipfs/bafybeihuskzfwqogwvutaxil6sztmvpiavzbrzwjwpn6w2i4j3jysbybra: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/bafybeihuskzfwqogwvutaxil6"
+  },
+  {
+   "caip": "eip155:530/slip44:60",
+   "source": "chainlist:pundiai",
+   "url": "ipfs://QmUve9vX4k6rtTX5dJZhXTGBGUosFccMZL9E349gdTHNkV",
+   "error": "https://ipfs.filebase.io/ipfs/QmUve9vX4k6rtTX5dJZhXTGBGUosFccMZL9E349gdTHNkV: The read operation timed out; https://gateway.pinata.cloud/ipfs/QmUve9vX4k6rtTX5dJZhXTGBGUosFccMZL9E349gdTHNkV: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/QmUve9vX4k6rtTX5dJZhXTGBGUosFccMZL9E349gdTHNkV: HTTP"
+  },
+  {
+   "caip": "eip155:5318008/slip44:60",
+   "source": "chainlist:reactive",
+   "url": "ipfs://QmaBqYemL6VG5kDEMZqtJZhh6kLn3XqMyxkDpChkPttJ6B",
+   "error": "https://ipfs.filebase.io/ipfs/QmaBqYemL6VG5kDEMZqtJZhh6kLn3XqMyxkDpChkPttJ6B: The read operation timed out; https://gateway.pinata.cloud/ipfs/QmaBqYemL6VG5kDEMZqtJZhh6kLn3XqMyxkDpChkPttJ6B: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/QmaBqYemL6VG5kDEMZqtJZhh6kLn3XqMyxkDpChkPttJ6B: HTTP"
+  },
+  {
+   "caip": "eip155:5353/slip44:60",
+   "source": "chainlist:tritanium",
+   "url": "ipfs://QmRm6gcEPJmU9a86zrmyP7FALTN4Toz9HrnrL2Kwg6FPeh",
+   "error": "https://ipfs.filebase.io/ipfs/QmRm6gcEPJmU9a86zrmyP7FALTN4Toz9HrnrL2Kwg6FPeh: The read operation timed out; https://gateway.pinata.cloud/ipfs/QmRm6gcEPJmU9a86zrmyP7FALTN4Toz9HrnrL2Kwg6FPeh: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/QmRm6gcEPJmU9a86zrmyP7FALTN4Toz9HrnrL2Kwg6FPeh: HTTP"
+  },
+  {
+   "caip": "eip155:54170/slip44:60",
+   "source": "chainlist:graphite",
+   "url": "ipfs://bafkreigzf3eo43njqreysfsnvot3rzdcvj642o4ekjhjla2efyuiy46vmu",
+   "error": "https://ipfs.filebase.io/ipfs/bafkreigzf3eo43njqreysfsnvot3rzdcvj642o4ekjhjla2efyuiy46vmu: The read operation timed out; https://gateway.pinata.cloud/ipfs/bafkreigzf3eo43njqreysfsnvot3rzdcvj642o4ekjhjla2efyuiy46vmu: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/bafkreigzf3eo43njqreysfsnv"
+  },
+  {
+   "caip": "eip155:5433/slip44:60",
+   "source": "chainlist:inertiascan",
+   "url": "ipfs://QmbgWUbQMgc4ASEjN7HcNU7yfgPahYaTeogNLfzvWmcYEJ",
+   "error": "https://ipfs.filebase.io/ipfs/QmbgWUbQMgc4ASEjN7HcNU7yfgPahYaTeogNLfzvWmcYEJ: The read operation timed out; https://gateway.pinata.cloud/ipfs/QmbgWUbQMgc4ASEjN7HcNU7yfgPahYaTeogNLfzvWmcYEJ: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/QmbgWUbQMgc4ASEjN7HcNU7yfgPahYaTeogNLfzvWmcYEJ: HTTP"
+  },
+  {
+   "caip": "eip155:55556/slip44:60",
+   "source": "chainlist:reichain",
+   "url": "ipfs://QmNy5d5knHVjJJS9g4kLsh9i73RTjckpKL6KZvRk6ptbhf",
+   "error": "https://ipfs.filebase.io/ipfs/QmNy5d5knHVjJJS9g4kLsh9i73RTjckpKL6KZvRk6ptbhf: The read operation timed out; https://gateway.pinata.cloud/ipfs/QmNy5d5knHVjJJS9g4kLsh9i73RTjckpKL6KZvRk6ptbhf: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/QmNy5d5knHVjJJS9g4kLsh9i73RTjckpKL6KZvRk6ptbhf: HTTP"
+  },
+  {
+   "caip": "eip155:56/bep20:0xc6759a4fc56b3ce9734035a56b36e8637c45b77e",
+   "source": "geckoterminal",
+   "url": "https://coin-images.coingecko.com/coins/images/24207/small/ustF4Y_V_400x400.jpg?1696523394",
+   "error": "https://coin-images.coingecko.com/coins/images/24207/small/ustF4Y_V_400x400.jpg?1696523394: HTTP Error 403: Forbidden"
+  },
+  {
+   "caip": "eip155:5611/slip44:60",
+   "source": "chainlist:bnbchain",
+   "url": "ipfs://bafybeib75gwytvblyvjpfminitr3i6mpat3a624udfsqsl5nysf5vuuvie",
+   "error": "cannot identify image file <_io.BytesIO object at 0x7efe06d9fc40>"
+  },
+  {
+   "caip": "eip155:57451/slip44:60",
+   "source": "chainlist:coinsec",
+   "url": "ipfs://QmeUyBe58BPndt6SpH9Tn1a8AYpNtHbMVhVyZt8Ppc4HTB",
+   "error": "https://ipfs.filebase.io/ipfs/QmeUyBe58BPndt6SpH9Tn1a8AYpNtHbMVhVyZt8Ppc4HTB: The read operation timed out; https://gateway.pinata.cloud/ipfs/QmeUyBe58BPndt6SpH9Tn1a8AYpNtHbMVhVyZt8Ppc4HTB: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/QmeUyBe58BPndt6SpH9Tn1a8AYpNtHbMVhVyZt8Ppc4HTB: HTTP"
+  },
+  {
+   "caip": "eip155:5858/slip44:60",
+   "source": "chainlist:changchain",
+   "url": "ipfs://QmbEytMCh2xFr7q87HjthX4K2MKmjfHih2mqS42tqTZoMy",
+   "error": "https://ipfs.filebase.io/ipfs/QmbEytMCh2xFr7q87HjthX4K2MKmjfHih2mqS42tqTZoMy: The read operation timed out; https://gateway.pinata.cloud/ipfs/QmbEytMCh2xFr7q87HjthX4K2MKmjfHih2mqS42tqTZoMy: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/QmbEytMCh2xFr7q87HjthX4K2MKmjfHih2mqS42tqTZoMy: HTTP"
+  },
+  {
+   "caip": "eip155:61166/slip44:60",
+   "source": "chainlist:treasure",
+   "url": "ipfs://QmQn3dhxoMDY3R2w9PZtJaVXVh9YtJaozcLesu19B7e1KQ",
+   "error": "https://ipfs.filebase.io/ipfs/QmQn3dhxoMDY3R2w9PZtJaVXVh9YtJaozcLesu19B7e1KQ: The read operation timed out; https://gateway.pinata.cloud/ipfs/QmQn3dhxoMDY3R2w9PZtJaVXVh9YtJaozcLesu19B7e1KQ: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/QmQn3dhxoMDY3R2w9PZtJaVXVh9YtJaozcLesu19B7e1KQ: HTTP"
+  },
+  {
+   "caip": "eip155:6278/slip44:60",
+   "source": "chainlist:rails",
+   "url": "ipfs://QmfDnMYCXc1By1bQ1yiBWVLaYrzdGAXuA8SLTs6yDkLBfM",
+   "error": "https://ipfs.filebase.io/ipfs/QmfDnMYCXc1By1bQ1yiBWVLaYrzdGAXuA8SLTs6yDkLBfM: The read operation timed out; https://gateway.pinata.cloud/ipfs/QmfDnMYCXc1By1bQ1yiBWVLaYrzdGAXuA8SLTs6yDkLBfM: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/QmfDnMYCXc1By1bQ1yiBWVLaYrzdGAXuA8SLTs6yDkLBfM: HTTP"
+  },
+  {
+   "caip": "eip155:65349/slip44:60",
+   "source": "chainlist:cratd2c-testnet",
+   "url": "ipfs://bafkreiczmtj47hwgmmtsy3xylhswu4q6rphpt42hznv37shjiaxsx3uqde",
+   "error": "https://ipfs.filebase.io/ipfs/bafkreiczmtj47hwgmmtsy3xylhswu4q6rphpt42hznv37shjiaxsx3uqde: The read operation timed out; https://gateway.pinata.cloud/ipfs/bafkreiczmtj47hwgmmtsy3xylhswu4q6rphpt42hznv37shjiaxsx3uqde: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/bafkreiczmtj47hwgmmtsy3xyl"
+  },
+  {
+   "caip": "eip155:66666666/slip44:60",
+   "source": "chainlist:winr",
+   "url": "ipfs://QmPL68edFCf9taAKQQu7rt11LrmWh7f7aBQ7ZkuhBKmrUv",
+   "error": "https://ipfs.filebase.io/ipfs/QmPL68edFCf9taAKQQu7rt11LrmWh7f7aBQ7ZkuhBKmrUv: The read operation timed out; https://gateway.pinata.cloud/ipfs/QmPL68edFCf9taAKQQu7rt11LrmWh7f7aBQ7ZkuhBKmrUv: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/QmPL68edFCf9taAKQQu7rt11LrmWh7f7aBQ7ZkuhBKmrUv: HTTP"
+  },
+  {
+   "caip": "eip155:666888/slip44:60",
+   "source": "chainlist:hela",
+   "url": "ipfs://QmQbUVcaxFwY8gqMq1Jeup4NEyivo12QYhbLvVRvgXRBFb",
+   "error": "https://ipfs.filebase.io/ipfs/QmQbUVcaxFwY8gqMq1Jeup4NEyivo12QYhbLvVRvgXRBFb: The read operation timed out; https://gateway.pinata.cloud/ipfs/QmQbUVcaxFwY8gqMq1Jeup4NEyivo12QYhbLvVRvgXRBFb: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/QmQbUVcaxFwY8gqMq1Jeup4NEyivo12QYhbLvVRvgXRBFb: HTTP"
+  },
+  {
+   "caip": "eip155:6688/slip44:60",
+   "source": "chainlist:irishub",
+   "url": "ipfs://QmTKgKs7kJiWDhdjbELE4Y2HVZ36KS4bYkNCbXdsXk66sW",
+   "error": "https://ipfs.filebase.io/ipfs/QmTKgKs7kJiWDhdjbELE4Y2HVZ36KS4bYkNCbXdsXk66sW: The read operation timed out; https://gateway.pinata.cloud/ipfs/QmTKgKs7kJiWDhdjbELE4Y2HVZ36KS4bYkNCbXdsXk66sW: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/QmTKgKs7kJiWDhdjbELE4Y2HVZ36KS4bYkNCbXdsXk66sW: HTTP"
+  },
+  {
+   "caip": "eip155:6880/slip44:60",
+   "source": "chainlist:mttnetwork",
+   "url": "ipfs://bafkreigl72xrnfxf2wbu2l6ul46tmonbmshgfuxmthcax2c6z4sy5bbfga",
+   "error": "https://ipfs.filebase.io/ipfs/bafkreigl72xrnfxf2wbu2l6ul46tmonbmshgfuxmthcax2c6z4sy5bbfga: The read operation timed out; https://gateway.pinata.cloud/ipfs/bafkreigl72xrnfxf2wbu2l6ul46tmonbmshgfuxmthcax2c6z4sy5bbfga: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/bafkreigl72xrnfxf2wbu2l6ul"
+  },
+  {
+   "caip": "eip155:7077/slip44:60",
+   "source": "chainlist:planq",
+   "url": "ipfs://QmWEy9xK5BoqxPuVs7T48WM4exJrxzkEFt45iHcxWqUy8D",
+   "error": "https://ipfs.filebase.io/ipfs/QmWEy9xK5BoqxPuVs7T48WM4exJrxzkEFt45iHcxWqUy8D: The read operation timed out; https://gateway.pinata.cloud/ipfs/QmWEy9xK5BoqxPuVs7T48WM4exJrxzkEFt45iHcxWqUy8D: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/QmWEy9xK5BoqxPuVs7T48WM4exJrxzkEFt45iHcxWqUy8D: HTTP"
+  },
+  {
+   "caip": "eip155:7118/slip44:60",
+   "source": "chainlist:hth",
+   "url": "ipfs://QmNR4Y3cUxefV7KGpGxMkjp5ofeJvbaUkR1GavsmTtK248",
+   "error": "cannot identify image file <_io.BytesIO object at 0x7efe06dd4180>"
+  },
+  {
+   "caip": "eip155:713715/slip44:60",
+   "source": "chainlist:sei",
+   "url": "ipfs://bafkreidctb56i4l27zl5mcxnm4hrzc2z652enprv7kxiozstw32zhcezym",
+   "error": "https://ipfs.filebase.io/ipfs/bafkreidctb56i4l27zl5mcxnm4hrzc2z652enprv7kxiozstw32zhcezym: The read operation timed out; https://gateway.pinata.cloud/ipfs/bafkreidctb56i4l27zl5mcxnm4hrzc2z652enprv7kxiozstw32zhcezym: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/bafkreidctb56i4l27zl5mcxnm"
+  },
+  {
+   "caip": "eip155:715131/slip44:60",
+   "source": "chainlist:zether",
+   "url": "ipfs://QmZwdhRze34c3synJSp6QNv5zSpMiQf7DZS3N16HxGuzGh",
+   "error": "https://ipfs.filebase.io/ipfs/QmZwdhRze34c3synJSp6QNv5zSpMiQf7DZS3N16HxGuzGh: The read operation timed out; https://gateway.pinata.cloud/ipfs/QmZwdhRze34c3synJSp6QNv5zSpMiQf7DZS3N16HxGuzGh: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/QmZwdhRze34c3synJSp6QNv5zSpMiQf7DZS3N16HxGuzGh: HTTP"
+  },
+  {
+   "caip": "eip155:721/slip44:60",
+   "source": "chainlist:lycanchain",
+   "url": "ipfs://QmZsp3gnmHCJPw3qReiqV8P8Ct5Eidib4E5jDNfBUxYEgP",
+   "error": "https://ipfs.filebase.io/ipfs/QmZsp3gnmHCJPw3qReiqV8P8Ct5Eidib4E5jDNfBUxYEgP: The read operation timed out; https://gateway.pinata.cloud/ipfs/QmZsp3gnmHCJPw3qReiqV8P8Ct5Eidib4E5jDNfBUxYEgP: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/QmZsp3gnmHCJPw3qReiqV8P8Ct5Eidib4E5jDNfBUxYEgP: HTTP"
+  },
+  {
+   "caip": "eip155:7331/slip44:60",
+   "source": "chainlist:klyntar",
+   "url": "ipfs://QmaDr9R6dKnZLsogRxojjq4dwXuXcudR8UeTZ8Nq553K4u",
+   "error": "https://ipfs.filebase.io/ipfs/QmaDr9R6dKnZLsogRxojjq4dwXuXcudR8UeTZ8Nq553K4u: The read operation timed out; https://gateway.pinata.cloud/ipfs/QmaDr9R6dKnZLsogRxojjq4dwXuXcudR8UeTZ8Nq553K4u: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/QmaDr9R6dKnZLsogRxojjq4dwXuXcudR8UeTZ8Nq553K4u: HTTP"
+  },
+  {
+   "caip": "eip155:7341/slip44:60",
+   "source": "chainlist:shyft",
+   "url": "ipfs://QmUkFZC2ZmoYPTKf7AHdjwRPZoV2h1MCuHaGM4iu8SNFpi",
+   "error": "https://ipfs.filebase.io/ipfs/QmUkFZC2ZmoYPTKf7AHdjwRPZoV2h1MCuHaGM4iu8SNFpi: The read operation timed out; https://gateway.pinata.cloud/ipfs/QmUkFZC2ZmoYPTKf7AHdjwRPZoV2h1MCuHaGM4iu8SNFpi: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/QmUkFZC2ZmoYPTKf7AHdjwRPZoV2h1MCuHaGM4iu8SNFpi: HTTP"
+  },
+  {
+   "caip": "eip155:7484/slip44:60",
+   "source": "chainlist:raba",
+   "url": "ipfs://QmatP9qMHEYoXqRDyHMTyjYRQa6j6Gk7pmv1QLxQkvpGRP",
+   "error": "https://ipfs.filebase.io/ipfs/QmatP9qMHEYoXqRDyHMTyjYRQa6j6Gk7pmv1QLxQkvpGRP: The read operation timed out; https://gateway.pinata.cloud/ipfs/QmatP9qMHEYoXqRDyHMTyjYRQa6j6Gk7pmv1QLxQkvpGRP: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/QmatP9qMHEYoXqRDyHMTyjYRQa6j6Gk7pmv1QLxQkvpGRP: HTTP"
+  },
+  {
+   "caip": "eip155:7771/slip44:60",
+   "source": "chainlist:bitrock",
+   "url": "ipfs://QmfXZCAh3HWS2bJroUStN9TieL4QA9QArMotie3X4pwBfj",
+   "error": "https://ipfs.filebase.io/ipfs/QmfXZCAh3HWS2bJroUStN9TieL4QA9QArMotie3X4pwBfj: The read operation timed out; https://gateway.pinata.cloud/ipfs/QmfXZCAh3HWS2bJroUStN9TieL4QA9QArMotie3X4pwBfj: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/QmfXZCAh3HWS2bJroUStN9TieL4QA9QArMotie3X4pwBfj: HTTP"
+  },
+  {
+   "caip": "eip155:786786/slip44:60",
+   "source": "chainlist:zebrocoin",
+   "url": "ipfs://bafkreig42tcn5hfgtzszmwvmodsxvtu5frfkgreb23dndle2mywns3xxse",
+   "error": "https://ipfs.filebase.io/ipfs/bafkreig42tcn5hfgtzszmwvmodsxvtu5frfkgreb23dndle2mywns3xxse: The read operation timed out; https://gateway.pinata.cloud/ipfs/bafkreig42tcn5hfgtzszmwvmodsxvtu5frfkgreb23dndle2mywns3xxse: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/bafkreig42tcn5hfgtzszmwvmo"
+  },
+  {
+   "caip": "eip155:7879/slip44:60",
+   "source": "chainlist:vexon",
+   "url": "ipfs://QmVCPcYVXB9ZEAN87LV5RrSBqxoD8zwwgVF6dcVetffSv2",
+   "error": "https://ipfs.filebase.io/ipfs/QmVCPcYVXB9ZEAN87LV5RrSBqxoD8zwwgVF6dcVetffSv2: The read operation timed out; https://gateway.pinata.cloud/ipfs/QmVCPcYVXB9ZEAN87LV5RrSBqxoD8zwwgVF6dcVetffSv2: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/QmVCPcYVXB9ZEAN87LV5RrSBqxoD8zwwgVF6dcVetffSv2: HTTP"
+  },
+  {
+   "caip": "eip155:7895/slip44:60",
+   "source": "chainlist:ard",
+   "url": "ipfs://QmdwifhejRfF8QfyzYrNdFVhfhCR6iuzWMmppK4eL7kttG",
+   "error": "https://ipfs.filebase.io/ipfs/QmdwifhejRfF8QfyzYrNdFVhfhCR6iuzWMmppK4eL7kttG: The read operation timed out; https://gateway.pinata.cloud/ipfs/QmdwifhejRfF8QfyzYrNdFVhfhCR6iuzWMmppK4eL7kttG: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/QmdwifhejRfF8QfyzYrNdFVhfhCR6iuzWMmppK4eL7kttG: HTTP"
+  },
+  {
+   "caip": "eip155:7957/slip44:60",
+   "source": "chainlist:exorium",
+   "url": "ipfs://QmTY2Z7AEEWxmzQyh7DFG8fyR3w6Y166GDJfi6o3xo6GgV",
+   "error": "https://ipfs.filebase.io/ipfs/QmTY2Z7AEEWxmzQyh7DFG8fyR3w6Y166GDJfi6o3xo6GgV: The read operation timed out; https://gateway.pinata.cloud/ipfs/QmTY2Z7AEEWxmzQyh7DFG8fyR3w6Y166GDJfi6o3xo6GgV: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/QmTY2Z7AEEWxmzQyh7DFG8fyR3w6Y166GDJfi6o3xo6GgV: HTTP"
+  },
+  {
+   "caip": "eip155:800001/slip44:60",
+   "source": "chainlist:octaspace",
+   "url": "ipfs://QmVhezQHkqSZ5Tvtsw18giA1yBjV1URSsBQ7HenUh6p6oC",
+   "error": "https://ipfs.filebase.io/ipfs/QmVhezQHkqSZ5Tvtsw18giA1yBjV1URSsBQ7HenUh6p6oC: The read operation timed out; https://gateway.pinata.cloud/ipfs/QmVhezQHkqSZ5Tvtsw18giA1yBjV1URSsBQ7HenUh6p6oC: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/QmVhezQHkqSZ5Tvtsw18giA1yBjV1URSsBQ7HenUh6p6oC: HTTP"
+  },
+  {
+   "caip": "eip155:808080/slip44:60",
+   "source": "chainlist:biz",
+   "url": "ipfs://QmNnaDZRoMz9aoho35TGHBY5zD16P39cgPpw3z3jnkDHHB",
+   "error": "https://ipfs.filebase.io/ipfs/QmNnaDZRoMz9aoho35TGHBY5zD16P39cgPpw3z3jnkDHHB: The read operation timed out; https://gateway.pinata.cloud/ipfs/QmNnaDZRoMz9aoho35TGHBY5zD16P39cgPpw3z3jnkDHHB: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/QmNnaDZRoMz9aoho35TGHBY5zD16P39cgPpw3z3jnkDHHB: HTTP"
+  },
+  {
+   "caip": "eip155:80931/slip44:60",
+   "source": "chainlist:forta-chain",
+   "url": "ipfs://Qmd3KFA5oJbPHCe7rdKdzYBiBPoN8QWxCvU9yqteV3fDCQ",
+   "error": "https://ipfs.filebase.io/ipfs/Qmd3KFA5oJbPHCe7rdKdzYBiBPoN8QWxCvU9yqteV3fDCQ: The read operation timed out; https://gateway.pinata.cloud/ipfs/Qmd3KFA5oJbPHCe7rdKdzYBiBPoN8QWxCvU9yqteV3fDCQ: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/Qmd3KFA5oJbPHCe7rdKdzYBiBPoN8QWxCvU9yqteV3fDCQ: HTTP"
+  },
+  {
+   "caip": "eip155:812397/slip44:60",
+   "source": "chainlist:sg_verse",
+   "url": "ipfs://QmXBm2hTGzFeYT5YYixzRnTdPNWnkNUaT1bBL3LYD4QvUk",
+   "error": "https://ipfs.filebase.io/ipfs/QmXBm2hTGzFeYT5YYixzRnTdPNWnkNUaT1bBL3LYD4QvUk: The read operation timed out; https://gateway.pinata.cloud/ipfs/QmXBm2hTGzFeYT5YYixzRnTdPNWnkNUaT1bBL3LYD4QvUk: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/QmXBm2hTGzFeYT5YYixzRnTdPNWnkNUaT1bBL3LYD4QvUk: HTTP"
+  },
+  {
+   "caip": "eip155:839320/slip44:60",
+   "source": "chainlist:prmIcon",
+   "url": "ipfs://QmckkDRkuCQWbvhpKGsqa8ajuQvf3W5dekzw5qpiPC6shk",
+   "error": "https://ipfs.filebase.io/ipfs/QmckkDRkuCQWbvhpKGsqa8ajuQvf3W5dekzw5qpiPC6shk: The read operation timed out; https://gateway.pinata.cloud/ipfs/QmckkDRkuCQWbvhpKGsqa8ajuQvf3W5dekzw5qpiPC6shk: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/QmckkDRkuCQWbvhpKGsqa8ajuQvf3W5dekzw5qpiPC6shk: HTTP"
+  },
+  {
+   "caip": "eip155:8721/slip44:60",
+   "source": "chainlist:ebc",
+   "url": "ipfs://bafkreietnxqipwdsznuphxeksqkxxcs33ryxseak7mwdi7uvk5sh63n62e",
+   "error": "https://ipfs.filebase.io/ipfs/bafkreietnxqipwdsznuphxeksqkxxcs33ryxseak7mwdi7uvk5sh63n62e: The read operation timed out; https://gateway.pinata.cloud/ipfs/bafkreietnxqipwdsznuphxeksqkxxcs33ryxseak7mwdi7uvk5sh63n62e: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/bafkreietnxqipwdsznuphxeks"
+  },
+  {
+   "caip": "eip155:8794598/slip44:60",
+   "source": "chainlist:hap",
+   "url": "ipfs://QmQ4V9JC25yUrYk2kFJwmKguSsZBQvtGcg6q9zkDV8mkJW",
+   "error": "https://ipfs.filebase.io/ipfs/QmQ4V9JC25yUrYk2kFJwmKguSsZBQvtGcg6q9zkDV8mkJW: The read operation timed out; https://gateway.pinata.cloud/ipfs/QmQ4V9JC25yUrYk2kFJwmKguSsZBQvtGcg6q9zkDV8mkJW: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/QmQ4V9JC25yUrYk2kFJwmKguSsZBQvtGcg6q9zkDV8mkJW: HTTP"
+  },
+  {
+   "caip": "eip155:88811/slip44:60",
+   "source": "chainlist:unitzero",
+   "url": "ipfs://QmRb2rWanyBTKS5KyrmrbXPNy9zovpxfLRxz9FPPiuRgfg",
+   "error": "https://ipfs.filebase.io/ipfs/QmRb2rWanyBTKS5KyrmrbXPNy9zovpxfLRxz9FPPiuRgfg: The read operation timed out; https://gateway.pinata.cloud/ipfs/QmRb2rWanyBTKS5KyrmrbXPNy9zovpxfLRxz9FPPiuRgfg: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/QmRb2rWanyBTKS5KyrmrbXPNy9zovpxfLRxz9FPPiuRgfg: HTTP"
+  },
+  {
+   "caip": "eip155:88817/slip44:60",
+   "source": "chainlist:unitzero",
+   "url": "ipfs://QmRb2rWanyBTKS5KyrmrbXPNy9zovpxfLRxz9FPPiuRgfg",
+   "error": "https://ipfs.filebase.io/ipfs/QmRb2rWanyBTKS5KyrmrbXPNy9zovpxfLRxz9FPPiuRgfg: HTTP Error 504: Gateway Timeout; https://gateway.pinata.cloud/ipfs/QmRb2rWanyBTKS5KyrmrbXPNy9zovpxfLRxz9FPPiuRgfg: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/QmRb2rWanyBTKS5KyrmrbXPNy9zovpxfLRxz9FPPiuRgfg: H"
+  },
+  {
+   "caip": "eip155:88819/slip44:60",
+   "source": "chainlist:unitzero",
+   "url": "ipfs://QmRb2rWanyBTKS5KyrmrbXPNy9zovpxfLRxz9FPPiuRgfg",
+   "error": "https://ipfs.filebase.io/ipfs/QmRb2rWanyBTKS5KyrmrbXPNy9zovpxfLRxz9FPPiuRgfg: HTTP Error 504: Gateway Timeout; https://gateway.pinata.cloud/ipfs/QmRb2rWanyBTKS5KyrmrbXPNy9zovpxfLRxz9FPPiuRgfg: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/QmRb2rWanyBTKS5KyrmrbXPNy9zovpxfLRxz9FPPiuRgfg: H"
+  },
+  {
+   "caip": "eip155:8886/slip44:60",
+   "source": "chainlist:avenium",
+   "url": "ipfs://QmU5yJvjdeVGzNutn2U6wLWfHDGsDafLfZg7HRJ8ji3yfJ",
+   "error": "https://ipfs.filebase.io/ipfs/QmU5yJvjdeVGzNutn2U6wLWfHDGsDafLfZg7HRJ8ji3yfJ: The read operation timed out; https://gateway.pinata.cloud/ipfs/QmU5yJvjdeVGzNutn2U6wLWfHDGsDafLfZg7HRJ8ji3yfJ: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/QmU5yJvjdeVGzNutn2U6wLWfHDGsDafLfZg7HRJ8ji3yfJ: HTTP"
+  },
+  {
+   "caip": "eip155:90001/slip44:60",
+   "source": "chainlist:pundiai",
+   "url": "ipfs://QmUve9vX4k6rtTX5dJZhXTGBGUosFccMZL9E349gdTHNkV",
+   "error": "https://ipfs.filebase.io/ipfs/QmUve9vX4k6rtTX5dJZhXTGBGUosFccMZL9E349gdTHNkV: The read operation timed out; https://gateway.pinata.cloud/ipfs/QmUve9vX4k6rtTX5dJZhXTGBGUosFccMZL9E349gdTHNkV: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/QmUve9vX4k6rtTX5dJZhXTGBGUosFccMZL9E349gdTHNkV: HTTP"
+  },
+  {
+   "caip": "eip155:9003/slip44:60",
+   "source": "chainlist:qubetics",
+   "url": "ipfs://bafkreigsioq2bd4c6slficwtzjq6gbti2c4vhzjlsjtihz2b762j4zjqhy",
+   "error": "https://ipfs.filebase.io/ipfs/bafkreigsioq2bd4c6slficwtzjq6gbti2c4vhzjlsjtihz2b762j4zjqhy: The read operation timed out; https://gateway.pinata.cloud/ipfs/bafkreigsioq2bd4c6slficwtzjq6gbti2c4vhzjlsjtihz2b762j4zjqhy: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/bafkreigsioq2bd4c6slficwtz"
+  },
+  {
+   "caip": "eip155:9029/slip44:60",
+   "source": "chainlist:qubetics",
+   "url": "ipfs://bafkreigsioq2bd4c6slficwtzjq6gbti2c4vhzjlsjtihz2b762j4zjqhy",
+   "error": "https://ipfs.filebase.io/ipfs/bafkreigsioq2bd4c6slficwtzjq6gbti2c4vhzjlsjtihz2b762j4zjqhy: The read operation timed out; https://gateway.pinata.cloud/ipfs/bafkreigsioq2bd4c6slficwtzjq6gbti2c4vhzjlsjtihz2b762j4zjqhy: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/bafkreigsioq2bd4c6slficwtz"
+  },
+  {
+   "caip": "eip155:911/slip44:60",
+   "source": "chainlist:taproot",
+   "url": "ipfs://QmeucqvcreQk8nnSRUiHo3QTvLoYYB7shJTKXj5Tk6BtWi",
+   "error": "https://ipfs.filebase.io/ipfs/QmeucqvcreQk8nnSRUiHo3QTvLoYYB7shJTKXj5Tk6BtWi: The read operation timed out; https://gateway.pinata.cloud/ipfs/QmeucqvcreQk8nnSRUiHo3QTvLoYYB7shJTKXj5Tk6BtWi: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/QmeucqvcreQk8nnSRUiHo3QTvLoYYB7shJTKXj5Tk6BtWi: HTTP"
+  },
+  {
+   "caip": "eip155:918/slip44:60",
+   "source": "chainlist:slerf",
+   "url": "ipfs://QmdDeCjjYSG5FEAxzAuERXnS3AbeZvqSFVTn9x7UbrQeuT",
+   "error": "https://ipfs.filebase.io/ipfs/QmdDeCjjYSG5FEAxzAuERXnS3AbeZvqSFVTn9x7UbrQeuT: The read operation timed out; https://gateway.pinata.cloud/ipfs/QmdDeCjjYSG5FEAxzAuERXnS3AbeZvqSFVTn9x7UbrQeuT: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/QmdDeCjjYSG5FEAxzAuERXnS3AbeZvqSFVTn9x7UbrQeuT: HTTP"
+  },
+  {
+   "caip": "eip155:9339/slip44:60",
+   "source": "chainlist:dogs",
+   "url": "ipfs://QmZCadkExKThak3msvszZjo6UnAbUJKE61dAcg4TixuMC3",
+   "error": "https://ipfs.filebase.io/ipfs/QmZCadkExKThak3msvszZjo6UnAbUJKE61dAcg4TixuMC3: The read operation timed out; https://gateway.pinata.cloud/ipfs/QmZCadkExKThak3msvszZjo6UnAbUJKE61dAcg4TixuMC3: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/QmZCadkExKThak3msvszZjo6UnAbUJKE61dAcg4TixuMC3: HTTP"
+  },
+  {
+   "caip": "eip155:9496/slip44:60",
+   "source": "chainlist:loadnetwork",
+   "url": "ipfs://bafkreidgb2du22hxgj23jhyi2gipiovejn75cp6agmrklhxclu63v5pjxu",
+   "error": "https://ipfs.filebase.io/ipfs/bafkreidgb2du22hxgj23jhyi2gipiovejn75cp6agmrklhxclu63v5pjxu: The read operation timed out; https://gateway.pinata.cloud/ipfs/bafkreidgb2du22hxgj23jhyi2gipiovejn75cp6agmrklhxclu63v5pjxu: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/bafkreidgb2du22hxgj23jhyi2"
+  },
+  {
+   "caip": "eip155:9818/slip44:60",
+   "source": "chainlist:timp",
+   "url": "ipfs://QmcNGLzKyc7Gu2dgpBFF6t3KJwFuKC79D56DW8GTc5DWRw",
+   "error": "https://ipfs.filebase.io/ipfs/QmcNGLzKyc7Gu2dgpBFF6t3KJwFuKC79D56DW8GTc5DWRw: The read operation timed out; https://gateway.pinata.cloud/ipfs/QmcNGLzKyc7Gu2dgpBFF6t3KJwFuKC79D56DW8GTc5DWRw: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/QmcNGLzKyc7Gu2dgpBFF6t3KJwFuKC79D56DW8GTc5DWRw: HTTP"
+  },
+  {
+   "caip": "eip155:9876/slip44:60",
+   "source": "chainlist:binary",
+   "url": "ipfs://bafybeifb4vnpn3jv7cfdlne2dwhe6agdnpgmu46a7nbc5divjuyaznkyay",
+   "error": "https://ipfs.filebase.io/ipfs/bafybeifb4vnpn3jv7cfdlne2dwhe6agdnpgmu46a7nbc5divjuyaznkyay: The read operation timed out; https://gateway.pinata.cloud/ipfs/bafybeifb4vnpn3jv7cfdlne2dwhe6agdnpgmu46a7nbc5divjuyaznkyay: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/bafybeifb4vnpn3jv7cfdlne2d"
+  },
+  {
+   "caip": "eip155:990/slip44:60",
+   "source": "chainlist:eLiberty",
+   "url": "ipfs://Qmcr8US1DZcK3ooiMtE8tEQPgep12abXzxPw1jCkgZhji9",
+   "error": "https://ipfs.filebase.io/ipfs/Qmcr8US1DZcK3ooiMtE8tEQPgep12abXzxPw1jCkgZhji9: The read operation timed out; https://gateway.pinata.cloud/ipfs/Qmcr8US1DZcK3ooiMtE8tEQPgep12abXzxPw1jCkgZhji9: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/Qmcr8US1DZcK3ooiMtE8tEQPgep12abXzxPw1jCkgZhji9: HTTP"
+  },
+  {
+   "caip": "eip155:99099/slip44:60",
+   "source": "chainlist:eLiberty",
+   "url": "ipfs://Qmcr8US1DZcK3ooiMtE8tEQPgep12abXzxPw1jCkgZhji9",
+   "error": "https://ipfs.filebase.io/ipfs/Qmcr8US1DZcK3ooiMtE8tEQPgep12abXzxPw1jCkgZhji9: HTTP Error 504: Gateway Timeout; https://gateway.pinata.cloud/ipfs/Qmcr8US1DZcK3ooiMtE8tEQPgep12abXzxPw1jCkgZhji9: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/Qmcr8US1DZcK3ooiMtE8tEQPgep12abXzxPw1jCkgZhji9: H"
+  },
+  {
+   "caip": "eip155:9966/slip44:60",
+   "source": "chainlist:uxer",
+   "url": "ipfs://QmQurJBRScSDar6oDJ4pAeKKvzHr49KJfS1iuCkbtiNe4x",
+   "error": "https://ipfs.filebase.io/ipfs/QmQurJBRScSDar6oDJ4pAeKKvzHr49KJfS1iuCkbtiNe4x: The read operation timed out; https://gateway.pinata.cloud/ipfs/QmQurJBRScSDar6oDJ4pAeKKvzHr49KJfS1iuCkbtiNe4x: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/QmQurJBRScSDar6oDJ4pAeKKvzHr49KJfS1iuCkbtiNe4x: HTTP"
+  },
+  {
+   "caip": "eip155:9977/slip44:60",
+   "source": "chainlist:mindchain",
+   "url": "ipfs://QmX2b4CzNyrNgy4ERBEteSS9MsuYNVYeq2sSMMiogGjbFP",
+   "error": "https://ipfs.filebase.io/ipfs/QmX2b4CzNyrNgy4ERBEteSS9MsuYNVYeq2sSMMiogGjbFP: The read operation timed out; https://gateway.pinata.cloud/ipfs/QmX2b4CzNyrNgy4ERBEteSS9MsuYNVYeq2sSMMiogGjbFP: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/QmX2b4CzNyrNgy4ERBEteSS9MsuYNVYeq2sSMMiogGjbFP: HTTP"
+  },
+  {
+   "caip": "eip155:9996/slip44:60",
+   "source": "chainlist:mindchain",
+   "url": "ipfs://QmX2b4CzNyrNgy4ERBEteSS9MsuYNVYeq2sSMMiogGjbFP",
+   "error": "https://ipfs.filebase.io/ipfs/QmX2b4CzNyrNgy4ERBEteSS9MsuYNVYeq2sSMMiogGjbFP: HTTP Error 504: Gateway Timeout; https://gateway.pinata.cloud/ipfs/QmX2b4CzNyrNgy4ERBEteSS9MsuYNVYeq2sSMMiogGjbFP: HTTP Error 429: Too Many Requests; https://dweb.link/ipfs/QmX2b4CzNyrNgy4ERBEteSS9MsuYNVYeq2sSMMiogGjbFP: H"
+  }
+ ]
+}
