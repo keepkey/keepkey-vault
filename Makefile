@@ -469,7 +469,7 @@ test-unit:
 	cd $(PROJECT_DIR) && bun test __tests__/send-zcash-readiness.test.ts
 	cd $(PROJECT_DIR) && bun test __tests__/zcash-nu7-packaging.test.ts
 	cd $(PROJECT_DIR) && bun test __tests__/emulator-signing-receipt.test.ts
-	cd $(PROJECT_DIR) && bun test __tests__/nu7-release-assets.test.ts __tests__/macos-signing-shim.test.ts
+	cd $(PROJECT_DIR) && bun test __tests__/nu7-release-assets.test.ts __tests__/monero-release-assets.test.ts __tests__/macos-signing-shim.test.ts
 	cd $(PROJECT_DIR) && bun test __tests__/release-artifact-isolation.test.ts
 	cd $(PROJECT_DIR) && bun test __tests__/provider-refresh.test.ts __tests__/evm-confirmation-watch.test.ts __tests__/connectivity.test.ts __tests__/cosmos-max-send.test.ts src/bun/txbuilder/account-send-safety.test.ts
 	cd $(PROJECT_DIR) && bun test __tests__/build-electrobun.test.ts
