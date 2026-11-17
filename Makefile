@@ -1,4 +1,8 @@
 PROJECT_DIR := projects/keepkey-vault
+# Keep release-only tooling selectable from an isolated Makefile while build
+# inputs, .env and artifacts still resolve against the caller's working tree.
+RELEASE_TOOLING_MAKEFILE ?= $(abspath $(firstword $(MAKEFILE_LIST)))
+MACOS_UPDATE_MANIFEST_SCRIPT ?= $(dir $(RELEASE_TOOLING_MAKEFILE))scripts/regenerate-macos-update-manifests.py
 VERSION := $(shell grep '"version"' $(PROJECT_DIR)/package.json | head -1 | sed 's/.*"version": "\(.*\)".*/\1/')
 ARCH := $(shell uname -m)
 DMG_NAME := KeepKey-Vault-$(VERSION)-$(ARCH).dmg
@@ -907,6 +911,7 @@ sign-release: notary-check
 	@# Clean stale artifacts from previous runs to prevent uploading old files
 	@rm -f $(PROJECT_DIR)/artifacts/KeepKey-Vault-$(VERSION)-*.dmg
 	@rm -f $(PROJECT_DIR)/artifacts/stable-macos-*-keepkey-vault.app.tar.zst
+	@rm -f $(PROJECT_DIR)/artifacts/stable-macos-*-update.json $(PROJECT_DIR)/artifacts/stable-macos-*-update-v2.json
 	@mkdir -p $(PROJECT_DIR)/artifacts/ci-arm64 $(PROJECT_DIR)/artifacts/ci-x64
 	@echo "Downloading CI-built macOS artifacts..."
 	@gh release download v$(VERSION) --repo $(GITHUB_REPO) \
@@ -930,14 +935,16 @@ sign-release: notary-check
 	@# Process arm64
 	@if [ -f $(PROJECT_DIR)/artifacts/ci-arm64/stable-macos-arm64-keepkey-vault.app.tar.zst ]; then \
 		echo "--- Signing arm64 artifact ---"; \
-		$(MAKE) _sign-one-dmg \
+		$(MAKE) -f "$(RELEASE_TOOLING_MAKEFILE)" _sign-one-dmg \
+			RELEASE_TOOLING_MAKEFILE="$(RELEASE_TOOLING_MAKEFILE)" MACOS_UPDATE_MANIFEST_SCRIPT="$(MACOS_UPDATE_MANIFEST_SCRIPT)" \
 			_SRC_TAR="$$(pwd)/$(PROJECT_DIR)/artifacts/ci-arm64/stable-macos-arm64-keepkey-vault.app.tar.zst" \
 			_DMG_ARCH=arm64; \
 	fi
 	@# Process x64
 	@if [ -f $(PROJECT_DIR)/artifacts/ci-x64/stable-macos-x64-keepkey-vault.app.tar.zst ]; then \
 		echo "--- Signing x86_64 artifact ---"; \
-		$(MAKE) _sign-one-dmg \
+		$(MAKE) -f "$(RELEASE_TOOLING_MAKEFILE)" _sign-one-dmg \
+			RELEASE_TOOLING_MAKEFILE="$(RELEASE_TOOLING_MAKEFILE)" MACOS_UPDATE_MANIFEST_SCRIPT="$(MACOS_UPDATE_MANIFEST_SCRIPT)" \
 			_SRC_TAR="$$(pwd)/$(PROJECT_DIR)/artifacts/ci-x64/stable-macos-x64-keepkey-vault.app.tar.zst" \
 			_DMG_ARCH=x86_64; \
 	fi
@@ -953,15 +960,17 @@ sign-release: notary-check
 		exit 1; \
 	fi
 	@echo "=== Uploading signed artifacts ==="
-	@for DMG in $(PROJECT_DIR)/artifacts/KeepKey-Vault-$(VERSION)-*.dmg; do \
+	$(REQUIRE_DRAFT)
+	@set -e; for DMG in $(PROJECT_DIR)/artifacts/KeepKey-Vault-$(VERSION)-*.dmg; do \
 		[ -f "$$DMG" ] || continue; \
 		echo "  Uploading $$(basename $$DMG)..."; \
 		gh release upload v$(VERSION) --repo $(GITHUB_REPO) --clobber "$$DMG"; \
 	done
-	@for TAR in $(PROJECT_DIR)/artifacts/stable-macos-*-keepkey-vault.app.tar.zst; do \
+	@set -e; for TAR in $(PROJECT_DIR)/artifacts/stable-macos-*-keepkey-vault.app.tar.zst; do \
 		[ -f "$$TAR" ] || continue; \
 		echo "  Uploading $$(basename $$TAR) (signed auto-update payload)..."; \
-		gh release upload v$(VERSION) --repo $(GITHUB_REPO) --clobber "$$TAR"; \
+		gh release upload v$(VERSION) --repo $(GITHUB_REPO) --clobber "$$TAR" \
+			"$${TAR%-keepkey-vault.app.tar.zst}-update.json" "$${TAR%-keepkey-vault.app.tar.zst}-update-v2.json"; \
 	done
 	@echo ""
 	@echo "=== Release v$(VERSION) signed and uploaded ==="
@@ -978,6 +987,7 @@ sign-release-intel: notary-check
 	@# Clean stale x64 artifacts only (preserve arm64 from local build-signed)
 	@rm -f $(PROJECT_DIR)/artifacts/KeepKey-Vault-$(VERSION)-x86_64.dmg
 	@rm -f $(PROJECT_DIR)/artifacts/stable-macos-x64-keepkey-vault.app.tar.zst
+	@rm -f $(PROJECT_DIR)/artifacts/stable-macos-x64-update.json $(PROJECT_DIR)/artifacts/stable-macos-x64-update-v2.json
 	@mkdir -p $(PROJECT_DIR)/artifacts/ci-x64
 	@echo "Downloading CI-built x64 artifact..."
 	@gh release download v$(VERSION) --repo $(GITHUB_REPO) \
@@ -985,20 +995,24 @@ sign-release-intel: notary-check
 		--dir $(PROJECT_DIR)/artifacts/ci-x64 --clobber
 	@echo ""
 	@echo "--- Signing x86_64 artifact ---"
-	@$(MAKE) _sign-one-dmg \
+	@$(MAKE) -f "$(RELEASE_TOOLING_MAKEFILE)" _sign-one-dmg \
+		RELEASE_TOOLING_MAKEFILE="$(RELEASE_TOOLING_MAKEFILE)" MACOS_UPDATE_MANIFEST_SCRIPT="$(MACOS_UPDATE_MANIFEST_SCRIPT)" \
 		_SRC_TAR="$$(pwd)/$(PROJECT_DIR)/artifacts/ci-x64/stable-macos-x64-keepkey-vault.app.tar.zst" \
 		_DMG_ARCH=x86_64
 	@echo ""
 	@echo "=== Uploading Intel signed artifacts ==="
+	$(REQUIRE_DRAFT)
 	@gh release upload v$(VERSION) --repo $(GITHUB_REPO) --clobber \
 		$(PROJECT_DIR)/artifacts/KeepKey-Vault-$(VERSION)-x86_64.dmg
 	@gh release upload v$(VERSION) --repo $(GITHUB_REPO) --clobber \
-		$(PROJECT_DIR)/artifacts/stable-macos-x64-keepkey-vault.app.tar.zst
+		$(PROJECT_DIR)/artifacts/stable-macos-x64-keepkey-vault.app.tar.zst \
+		$(PROJECT_DIR)/artifacts/stable-macos-x64-update.json \
+		$(PROJECT_DIR)/artifacts/stable-macos-x64-update-v2.json
 	@echo ""
 	@echo "=== Intel release v$(VERSION) signed and uploaded ==="
 	@rm -rf $(PROJECT_DIR)/artifacts/ci-x64
 	@# CI's SHA256SUMS.txt still lists the unsigned x64 bundle: regenerate it.
-	@$(MAKE) release-sums
+	@$(MAKE) -f "$(RELEASE_TOOLING_MAKEFILE)" release-sums
 
 # Regenerate SHA256SUMS.txt + SHA256SUMS-macos.txt from the release's own bytes,
 # verified against GitHub's digests. Re-run after the Windows installer lands.
@@ -1026,6 +1040,8 @@ _sign-one-dmg:
 	echo "  Re-packing signed app into tar.zst for auto-update..."; \
 	SIGNED_TAR="$$(pwd)/$(PROJECT_DIR)/artifacts/$$(basename $(_SRC_TAR))"; \
 	(cd "$$STAGING" && tar cf - "$$(basename $$APP)") | zstd -o "$$SIGNED_TAR" --force; \
+	python3 "$(MACOS_UPDATE_MANIFEST_SCRIPT)" --archive "$$SIGNED_TAR" --version "$(VERSION)" --channel stable \
+		--arch "$(if $(filter x86_64,$(_DMG_ARCH)),x64,$(_DMG_ARCH))"; \
 	echo "  Signed tar.zst: $$SIGNED_TAR"; \
 	DMG_OUT="$$(pwd)/$(PROJECT_DIR)/artifacts/KeepKey-Vault-$(VERSION)-$(_DMG_ARCH).dmg"; \
 	echo "  Creating DMG..."; \
