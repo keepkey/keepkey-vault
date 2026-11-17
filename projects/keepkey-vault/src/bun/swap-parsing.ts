@@ -14,6 +14,7 @@ import { parseSwapFeeDisclosure } from './swap-fees'
 import { isPlainSwapDeposit } from '../shared/swap-deposit-routing'
 import { extractRelayRequestId } from '../shared/relay-utils'
 import { sameAddress } from '../shared/address-validation'
+import { nativeSwapAssetDecimals } from '../shared/swap-amount'
 
 const TAG = '[swap]'
 
@@ -650,7 +651,7 @@ export function parseAssetsResponse(resp: any): SwapAsset[] {
       symbol: raw.symbol || parsed.symbol,
       name: raw.name || (isToken ? `${parsed.symbol} (${chainDef.coin})` : chainDef.coin),
       chainFamily: chainDef.chainFamily,
-      decimals: raw.decimals ?? chainDef.decimals,
+      decimals: nativeSwapAssetDecimals({ chainId: ourChainId, caip }) ?? raw.decimals ?? chainDef.decimals,
       caip,
       contractAddress: parsed.contractAddress,
       icon: raw.icon || raw.image,
