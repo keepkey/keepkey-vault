@@ -6,7 +6,7 @@ const WALLET = '44jKQv6ZKMd5ecLLmkNJGi7azgSptEq8ki7TFiat1TfLfdDQ1tQ7ZYa3cRh7X2uR
 const RECIPIENT = '4Ahp23WfMrMFK3wYL2hLWQFGt87ZTeRkufS6JoQZu6MEFDokAQeGWmu9MA3GFq1yVLSJQbKJqVAn9F9DLYGpRzRAEXqAXKM'
 const SUBADDRESS = '84AxZu7xYb7fi7hnQrgTBdHFyP2xz6vdrZbLaJxbe73JJTWj6JG4cV8cbNnEhMvvi9PxSHvGnXQiaaLf2HNXJfzFKtWqk3H'
 const INTEGRATED = '4LL9oSLmtpccfufTMvppY6JwXNouMBzSkbLYfpAV5Usx3skxNgYeYTRj5UzqtReoS44qo9mtmXCqY45DJ852K5Jv2bYXZKKQePHES9khPK'
-const status = (over: Partial<MoneroStatus> = {}): MoneroStatus => ({ available: true, network: 'mainnet', address: WALLET,
+const status = (over: Partial<MoneroStatus> = {}): MoneroStatus => ({ signingReady: true, available: true, network: 'mainnet', address: WALLET,
   balanceAtomic: '84653050000', unlockedBalanceAtomic: '80000000000', walletHeight: 3_300_000, transactions: [], monitorReady: true,
   syncState: 'ready', canSend: false, spendStateKnown: false, daemonHeight: 3_300_000, restoreHeight: 3_200_000, updatedAt: '2026-11-06T12:00:00.000Z', ...over })
 

@@ -14,7 +14,7 @@ import { checkSignedTransaction, concat, keyImageInitRequest, lengthField, openK
   signRequest, transferDetails, varint, bytesField } from './monero-wire'
 import { createMoneroVault, type MoneroWatchSidecar } from './monero-vault'
 import { MONERO_STANDARD_WALLET_REQUIRED } from '../shared/monero-wallet-policy'
-import type { MoneroCoreVerifier } from './monero-device-signing'
+import { createMoneroCoreVerifier, type MoneroCoreVerifier } from './monero-device-signing'
 import streamFixtures from './monero-stream.fixtures.json'
 import sweepFixtures from './monero-stream-sweep.fixtures.json'
 import { createFilePendingStore, type MoneroPendingStore } from './monero-pending'
@@ -281,6 +281,8 @@ class Emulator {
   received: Array<{ type: number; body: Uint8Array }> = []
   partial: { type: number; length: number; data: number[] } | null = null
   keyImageOverride:string|null=null
+  keyImageOverrides = new Map<string,string>()
+  watchViewKey = new Uint8Array(32).fill(7)
   signedBlob = blobOf('base')
   signedHash = unhex(referenceHash('base'))
   reviewScreens = 3
@@ -317,13 +319,13 @@ class Emulator {
       const minor = Number(parseFields(body).get(5)?.[0] ?? 0n)
       return this.respond([[replyType(541), lengthField(1, new TextEncoder().encode(minor ? SUBADDRESS : this.address))]])
     }
-    if (type === 542) return this.respond([[26, new Uint8Array()], [replyType(543), concat([lengthField(1, new Uint8Array(32).fill(7)), lengthField(2, new TextEncoder().encode(this.address))])]])
+    if (type === 542) return this.respond([[26, new Uint8Array()], [replyType(543), concat([lengthField(1, this.watchViewKey.slice()), lengthField(2, new TextEncoder().encode(this.address))])]])
     if (type === 530) return this.respond([[26, new Uint8Array()], [replyType(531), new Uint8Array()]])
     if (type === 532) {
       // Key image per output: the fixture's for the fixture output, a derived one for synthetic outputs.
       const outKeys = parseFields(body).get(1)!.map(record => hex(parseFields(record as Uint8Array).get(1)![0] as Uint8Array))
       return this.respond([[replyType(533), concat(outKeys.map((outKey, i) => {
-        const image = this.keyImageOverride || outKey === fixtures.cases.base.adapterOutputs.outputs[0].out_key ? images[0] : hex(keccak_256(unhex(outKey)))
+        const image = this.keyImageOverrides.get(outKey) ?? this.keyImageOverride ?? (outKey === fixtures.cases.base.adapterOutputs.outputs[0].out_key ? images[0] : hex(keccak_256(unhex(outKey))))
         const iv = new Uint8Array(12).fill(i + 1), plain = concat([unhex(image), new Uint8Array(64).fill(5)])
         return lengthField(1, concat([lengthField(1, iv), lengthField(3, chacha20poly1305(ENC_KEY, iv).encrypt(plain))]))
       }))]])
@@ -436,10 +438,10 @@ describe('Desktop Monero send bridge', () => {
 
   test('each gate explains itself and nothing reaches the device or wallet before it is met', async () => {
     const receiveOnly = bridge({ signing: false })
-    await receiveOnly.api.connect()
+    await expect(receiveOnly.api.connect()).rejects.toThrow('signing (research) emulator')
     expect((await receiveOnly.api.getStatus()).sendBlocked).toBe('emulator')
     const noAdapter = bridge({ sendReady: false })
-    await noAdapter.api.connect()
+    await expect(noAdapter.api.connect()).rejects.toThrow('missing required Monero wallet tools')
     expect((await noAdapter.api.getStatus()).sendBlocked).toBe('adapter')
     await expect(noAdapter.api.prepareSend({ address: RECIPIENT, amountAtomic: '1' })).rejects.toThrow('missing required Monero wallet tools')
     expect(noAdapter.calls.transfers).toHaveLength(0)
@@ -1045,19 +1047,27 @@ test('saved image proofs recheck known outputs after reconnect without hardware;
 
 
 // The stream envelopes below are reconstructed from unchanged firmware Core vectors.
-function streamBridge(verify = true, pendingStore?: MoneroPendingStore, fixture = streamFixtures.cases[0]) {
+function streamBridge(verify = true, pendingStore?: MoneroPendingStore, fixture = streamFixtures.cases[0], nativeVerifier?: MoneroCoreVerifier) {
  let verified = 0, disposed = 0
  const coreVerifier: MoneroCoreVerifier = { available: () => true, prepare: actual => {
   expect(actual).toEqual(fixture.plan as MoneroPlan)
-  return { verify: blob => { verified++; expect(hex(blob)).toBe(fixture.transactionHex); return verify }, dispose: () => { disposed++ } }
+  const native = nativeVerifier?.prepare(actual)
+  return { verify: blob => { verified++; expect(hex(blob)).toBe(fixture.transactionHex); return native ? native.verify(blob) : verify }, dispose: () => { disposed++; native?.dispose() } }
  }}
  const b = bridge({ coreVerifier, pendingStore }), c = structuredClone(fixture), p = c.plan
  b.engine.isEmulator = false; b.state.activeTransport = 'hid'; b.state.capabilities = [31]
  b.delegate.streamFixture = c; b.delegate.address = streamFixtures.cases[0].plan.outputs.find(o => o.isChange)!.address
- b.delegate.keyImageOverride = parseSignedTransaction(unhex(c.transactionHex)).inputs[0].keyImage
+ b.delegate.watchViewKey = unhex('84b0087a63854856686f80596a5a1a6090795b4d1311139173262170d7e7180f')
+ const signedInputs = parseSignedTransaction(unhex(c.transactionHex)).inputs
+ for (const input of p.inputs) {
+  const image = signedInputs.find(signed => signed.indices.every((v,i) => v === BigInt(input.ring[i].globalIndex)))!
+  b.delegate.keyImageOverrides.set(input.ring[input.realMember].publicKey, image.keyImage)
+ }
+ b.wallet.balanceAtomic = p.inputs.reduce((n,i) => n + BigInt(i.amountAtomic),0n).toString()
+ b.wallet.unlockedBalanceAtomic = b.wallet.balanceAtomic
  b.setOutputs(() => p.inputs.map((i,index) => ({transferIndex:index,amountAtomic:i.amountAtomic,globalIndex:i.ring[i.realMember].globalIndex,outKey:i.ring[i.realMember].publicKey,txPublicKey:i.txPublicKey,additionalTxPublicKeys:i.additionalTxPublicKeys,outputIndex:i.outputIndex,subaddressMajor:i.subaddressMajor,subaddressMinor:i.subaddressMinor})))
  b.setDraft(() => ({ feeAtomic:p.feeAtomic, amountAtomic:p.outputs.find(o => !o.isChange)!.amountAtomic, plan:structuredClone(p) as MoneroPlan }))
- return { ...b, c, p, counts: () => ({verified,disposed}) }
+ return { ...b, c, p, coreVerifier, counts: () => ({verified,disposed}) }
 }
 async function prepareStream(b: ReturnType<typeof streamBridge>) {
  await b.api.connect(); await b.api.syncKeyImages()
@@ -1092,11 +1102,12 @@ test('Core verification failure prevents persistence and relay',async()=>{
  expect((await b.api.getStatus()).signingPhase).toBeUndefined()
 })
 
-test('a missing capability refuses physical connection without research fallback',async()=>{
+test('a research firmware hash alone cannot enable public hardware signing',async()=>{
  const b=bridge();b.engine.isEmulator=false;b.state.activeTransport='hid'
  b.state.firmwareHash='123af6de3b5ddbc1eeb94568825d1bb8107079bc9100ac67f9f6162ca34e2f83'
  await expect(b.api.connect()).rejects.toThrow('hardware signing')
  expect(sentTypes(b)).toEqual([]);expect(b.calls.transfers).toHaveLength(0)
+ expect(b.calls.relays).toHaveLength(0)
 })
 
 test('removing the capability after review invalidates the send before device I/O',async()=>{
@@ -1132,18 +1143,14 @@ test('streamed plans outside output or ring limits fail prepare before device re
  }
 })
 
-test('public firmware uses 1800..1809 for monitoring and key images while unqualified signing stays blocked', async () => {
+test('unqualified public firmware never offers a receive-only onboarding path', async () => {
   const b = bridge(); b.engine.isEmulator = false; b.state.activeTransport = 'hid'; b.delegate.publicOnly = true
-  ;(b.state as any).firmwareHash = 'a0275ca76568ace103cbb2daa069f76b0d8d7b5005a3419548a578018eda1808'
-  await b.api.connect(); await b.api.syncKeyImages()
-  expect(sentTypes(b)).toEqual([1800, 1802, 27, 1804, 27, 1806, 1808])
-  expect(b.calls.imports).toHaveLength(1)
-  expect(await b.api.getStatus()).toMatchObject({ keyImagesSynced: true, spendStateKnown: true, canSend: false, sendBlocked: 'firmware' })
-  await expect(b.api.prepareSend({ address: RECIPIENT, amountAtomic: '2000000000000' })).rejects.toThrow('hardware signing')
+  b.state.firmwareHash = 'a0275ca76568ace103cbb2daa069f76b0d8d7b5005a3419548a578018eda1808'
+  await expect(b.api.connect()).rejects.toThrow('hardware signing')
+  expect(sentTypes(b)).toEqual([])
+  expect(await b.api.getStatus()).toMatchObject({signingReady:false,sendBlocked:'firmware',address:''})
   expect(b.calls.transfers).toHaveLength(0); expect(b.calls.relays).toHaveLength(0)
-  expect(b.confirmed).toHaveLength(0)
 })
-
 
 test('prepare cryptographically selects both output orders and review order survives signing unchanged', async () => {
  const b = streamBridge()
@@ -1215,7 +1222,7 @@ test('Desktop Max reviews and signs a no-change plan without altering its zero o
   const stored = createFilePendingStore(dir).loadSent!()[0]
   const expectedKeys = parseFields(unhex(fixture.responses.at(-1)!.hex))
   expect(stored.transactionKeys).toEqual({txKey:hex(bytesField(expectedKeys,2)),additionalTxKeys:(expectedKeys.get(3)??[]).map(k=>hex(k as Uint8Array))})
-  expect(b.api.getTransactionKey(stored.txid)).toEqual(stored.transactionKeys)
+  expect(b.api.getTransactionKey(stored.txid)).toEqual(stored.transactionKeys ?? null)
  }
 })
 
@@ -1246,4 +1253,55 @@ test('a payment-proof archive failure keeps the recoverable pending record', asy
  expect(b.calls.relays).toHaveLength(1)
  expect(b.api.pendingCount()).toBe(1)
  expect(store.load()[0].transactionKeys).toBeDefined()
+})
+
+// Native qualification uses public vectors and fixture reports; never a USB device or daemon.
+test.skipIf(!process.env.MONERO_CORE_VERIFY_DIR)('Desktop completes standard and subaddress hardware flows through the actual pinned Core verifier', async () => {
+ const native = createMoneroCoreVerifier({directory:process.env.MONERO_CORE_VERIFY_DIR})
+ expect(native.available()).toBe(true)
+ for (const fixture of streamFixtures.cases) {
+  const b = streamBridge(true, undefined, fixture, native)
+  const review = await prepareStream(b)
+  await b.api.send({prepareId:review.prepareId})
+  expect(b.counts()).toEqual({verified:1,disposed:1})
+  expect(b.calls.relays).toHaveLength(1)
+  expect(b.calls.relays[0].txHex).toBe(fixture.transactionHex)
+ }
+})
+
+
+test('removing the native verifier after review stops before Init and leaves no pending payment', async () => {
+ const b = streamBridge(), review = await prepareStream(b), before = sentTypes(b).length
+ b.coreVerifier.available = () => false
+ await expect(b.api.send({ prepareId: review.prepareId })).rejects.toThrow('Core verifier is unavailable')
+ expect(sentTypes(b)).toHaveLength(before)
+ expect(b.calls.relays).toHaveLength(0)
+ expect(b.api.pendingCount()).toBe(0)
+ expect(b.counts()).toEqual({ verified: 0, disposed: 0 })
+})
+
+test('a wrong monitoring credential on reconnect cannot reuse the retired subaddress signing key', async () => {
+ const b = streamBridge(true, undefined, streamFixtures.cases[1])
+ await prepareStream(b)
+ b.api.invalidate()
+ b.delegate.watchViewKey = new Uint8Array(32).fill(1)
+ await b.api.connect(); await b.api.syncKeyImages()
+ const recipient = b.p.outputs.find(o => !o.isChange)!, before = sentTypes(b).length
+ await expect(b.api.prepareSend({ address: recipient.address, amountAtomic: recipient.amountAtomic })).rejects.toThrow('authorize subaddress change derivation')
+ expect(sentTypes(b)).toHaveLength(before)
+ expect(b.calls.relays).toHaveLength(0)
+ expect(b.api.pendingCount()).toBe(0)
+})
+
+
+test('turning Monero offline during streamed subaddress signing stops before signatures and disposes verification', async () => {
+ const b = streamBridge(true, undefined, streamFixtures.cases[1]), review = await prepareStream(b)
+ b.delegate.streamHook = async type => { if (type === 1818) b.config.offline = true }
+ await expect(b.api.send({ prepareId: review.prepareId })).rejects.toThrow('changed')
+ expect(sentTypes(b)).not.toContain(1822)
+ expect(sentTypes(b)).not.toContain(1824)
+ expect(b.calls.relays).toHaveLength(0)
+ expect(b.api.pendingCount()).toBe(0)
+ expect(b.counts()).toEqual({ verified: 0, disposed: 1 })
+ expect((await b.api.getStatus()).address).toBe('')
 })

@@ -1712,7 +1712,7 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
               <Flex justify="space-between" align="center" gap="4">
                 <Flex align="center" gap="3" minW="0"><FeatureIcon kind="monero" /><Box><Text fontSize="md" fontWeight="500" color="kk.textPrimary">{uiText('Monero (XMR)')}</Text>
                   <Text fontSize="sm" color="kk.textSecondary" mt="0.5">{appSettings.moneroAvailable === false ? uiText('Monero is unavailable in this build.') : !supportsMoneroSigning(deviceState.capabilities) && !deviceState.isEmulator ? uiText("Monero signing requires the monero-signing capability on KeepKey.") : uiText('Add Monero to your wallet. Manage its node and scan history in Settings → Networks.')}</Text></Box></Flex>
-                <Toggle label={uiText('Monero (XMR)')} checked={appSettings.moneroEnabled} disabled={moneroBusy || appSettings.moneroAvailable === false} onChange={toggleMonero} />
+                <Toggle label={uiText('Monero (XMR)')} checked={appSettings.moneroEnabled} disabled={moneroBusy || (!appSettings.moneroEnabled && (appSettings.moneroAvailable === false || (!supportsMoneroSigning(deviceState.capabilities) && !deviceState.isEmulator)))} onChange={toggleMonero} />
               </Flex>
               {moneroError && <Text role="alert" fontSize="xs" color="kk.error" mt="2">{moneroError}</Text>}
               </Box>

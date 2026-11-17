@@ -1,5 +1,7 @@
 /** Firmware messages-monero.proto, 1800..1825. Final releases payment-proof keys; wallet keys stay on device. */
-import { verifyMoneroTransactionKeys, type MoneroTransactionKeys } from './monero-transaction-keys'
+import type { MoneroTransactionKeys } from './monero-transaction-keys'
+import { validateStreamMonitoringKey, verifyStreamOutputBindings } from './monero-stream-output-binding'
+export { streamNeedsMonitoringKey, validateStreamMonitoringKey } from './monero-stream-output-binding'
 import { chacha20poly1305 } from '@noble/ciphers/chacha'
 import { keccak_256 } from '@noble/hashes/sha3'
 import type { MoneroPlan } from '../../monero-cli/src/protocol'
@@ -123,86 +125,92 @@ export function assembleStreamTransaction(inputs: InputAck[], outputs: OutputAck
 
 /** The caller holds one transport lock across the entire flow and handles ButtonRequest/Failure/cancellation. No step is retried. */
 export async function signMoneroStream(plan: MoneroPlan, exchange: (request: number, response: number, payload: Uint8Array, review: boolean) => Promise<Uint8Array>,
-  options: { onProgress?: (phase: MoneroSigningPhase) => void; text?: MoneroText } = {}): Promise<{ blob: Uint8Array; hash: string; prefixHash: string; transactionKeys: MoneroTransactionKeys }> {
+  options: { onProgress?: (phase: MoneroSigningPhase) => void; text?: MoneroText; senderViewKey?: Uint8Array | null } = {}): Promise<{ blob: Uint8Array; hash: string; prefixHash: string; transactionKeys: MoneroTransactionKeys }> {
   const text = options.text ?? (s => s)
   const init = streamInitRequest(plan, text) // refuse unsupported plans before any device I/O
-  const bad = (): never => { throw new MoneroError(text(STREAM_ERRORS.response)) }
-  const request = async (id: number, payload: Uint8Array = empty(), review = false) => {
-    const body = await exchange(id, id + 1, payload, review)
-    try {
-      const fields = parseFields(body)
-      // Copies own their lifetime; the opening key is scrubbed below.
-      return new Map([...fields].map(([k, values]) => [k, values.map(v => v instanceof Uint8Array ? v.slice() : v)]))
-    } finally { body.fill(0) }
-  }
-  const bytes = (fields: ReturnType<typeof parseFields>, n: number, length?: number) => {
-    const b = bytesField(fields, n)
-    if (length !== undefined && b.length !== length) bad()
-    return b
-  }
-  const num = (fields: ReturnType<typeof parseFields>, n: number) => {
-    const v = fields.get(n)
-    if (v?.length !== 1 || typeof v[0] !== 'bigint') return bad()
-    return v[0]
-  }
-  const ackEmpty = async (id: number, payload: Uint8Array = empty()) => { if ((await request(id, payload)).size) bad() }
-  const progress = (phase: MoneroSigningPhase) => options.onProgress?.(phase)
-  progress('review')
-  const start = await request(1810, init, true), macs = start.get(1)
-  if (start.size !== 2 || num(start, 2) !== 0n || macs?.length !== 2 || macs.some(m => !(m instanceof Uint8Array) || m.length !== 32)) bad()
-  const inputs: InputAck[] = [], outputs: OutputAck[] = [], signs: SignAck[] = []
-  progress('inputs')
-  for (const [origIdx, input] of plan.inputs.entries()) {
-    const f = await request(1812, lengthField(1, streamSource(input)))
-    if (f.size !== 4) bad()
-    const vini = bytes(f, 1)
-    // Compare the whole input encoding except the device's key image against the reviewed ring.
-    let previous = 0n
-    const expected = concat([new Uint8Array([2, 0, 16]), ...input.ring.map(r => { const index = BigInt(r.globalIndex), delta = index - previous; previous = index; return varint(delta) })])
-    if (vini.length !== expected.length + 32 || !same(vini.subarray(0, -32), expected)) bad()
-    inputs.push({ origIdx, vini, hmac: bytes(f, 2, 32), pseudoOut: bytes(f, 3, 32), pseudoHmac: bytes(f, 4, 32) })
-  }
-  inputs.sort((a, b) => Buffer.compare(b.vini.subarray(-32), a.vini.subarray(-32)))
-  for (let i = 1; i < inputs.length; i++) if (same(inputs[i - 1].vini.subarray(-32), inputs[i].vini.subarray(-32))) bad()
-  for (const input of inputs) await ackEmpty(1814, concat([lengthField(1, input.vini), lengthField(2, input.hmac), numberField(3, input.origIdx)]))
-  await ackEmpty(1816)
-  for (const [index, output] of plan.outputs.entries()) {
-    progress(index === 1 ? 'proving' : 'outputs')
-    const f = await request(1818, concat([lengthField(1, streamDestination(output)), lengthField(2, macs![index] as Uint8Array)]))
-    if (f.size !== (index === 1 ? 4 : 3)) bad()
-    const txOut = bytes(f, 1, 35), outPk = bytes(f, 2, 64)
-    if (txOut[0] !== 0 || txOut[1] !== 3 || !same(txOut.subarray(2, 34), outPk.subarray(0, 32))) bad()
-    outputs.push({ txOut, outPk, ecdh: bytes(f, 3, 8), ...(index === 1 ? { proof: bytes(f, 4, 642) } : {}) })
-  }
-  const f = await request(1820)
-  if (f.size !== 5) bad()
-  const all = { extra: bytes(f, 1), prefixHash: bytes(f, 2, 32), fee: num(f, 3), rctType: num(f, 4), message: bytes(f, 5, 32) }
-  if (![33, 44, 99, 110].includes(all.extra.length) || all.extra[0] !== 1 ||
-      all.fee !== BigInt(plan.feeAtomic) || all.rctType !== 6n) bad()
-  // Check the prefix before requesting signatures, and again on the assembled blob before relay.
-  const prefix = concat([varint(2n), varint(0n), varint(BigInt(inputs.length)), ...inputs.map(i => i.vini), varint(2n), ...outputs.map(o => o.txOut), varint(BigInt(all.extra.length)), all.extra])
-  if (!same(keccak_256(prefix), all.prefixHash)) throw new MoneroError(text(STREAM_ERRORS.prefix))
-  const base = concat([new Uint8Array([6]), varint(all.fee), ...outputs.map(o => o.ecdh), ...outputs.map(o => o.outPk.subarray(32))])
-  const proof = outputs[1].proof!
-  // Core hashes BP+ keys, omitting the two vector-length bytes (7 rounds for two outputs).
-  if (proof[192] !== 7 || proof[417] !== 7) bad()
-  const message = keccak_256(concat([all.prefixHash, keccak_256(base), keccak_256(concat([proof.subarray(0, 192), proof.subarray(193, 417), proof.subarray(418)]))]))
-  if (!same(message, all.message)) throw new MoneroError(text(STREAM_ERRORS.message))
-  progress('signing')
-  for (const input of inputs) {
-    const f = await request(1822, concat([lengthField(1, streamSource(plan.inputs[input.origIdx])), lengthField(2, input.vini),
-      lengthField(3, input.hmac), lengthField(4, input.pseudoOut), lengthField(5, input.pseudoHmac), numberField(6, input.origIdx)]))
-    if (f.size !== 2) bad()
-    signs.push({ encrypted: bytes(f, 1, 592), pseudoOut: bytes(f, 2, 32) })
-  }
-  const final = await request(1824)
+  const senderViewKey = options.senderViewKey?.slice() ?? null
   try {
-    if (final.size < 2 || final.size > 3 || [...final.keys()].some(n => ![1, 2, 3].includes(n))) bad()
-    const key = bytes(final, 1, 32)
-    const additional = (final.get(3) ?? []).map(value => { if (!(value instanceof Uint8Array)) return bad(); return value })
-    progress('verifying')
-    const assembled = assembleStreamTransaction(inputs, outputs, all, signs, key, text)
-    const transactionKeys = verifyMoneroTransactionKeys(plan, parseSignedTransaction(assembled.blob).extra, bytes(final, 2, 32), additional, text)
-    return { ...assembled, transactionKeys }
-  } finally { for (const values of final.values()) for (const value of values) if (value instanceof Uint8Array) value.fill(0) }
+    validateStreamMonitoringKey(plan, senderViewKey, text)
+    const bad = (): never => { throw new MoneroError(text(STREAM_ERRORS.response)) }
+    const request = async (id: number, payload: Uint8Array = empty(), review = false) => {
+      const body = await exchange(id, id + 1, payload, review)
+      try {
+        const fields = parseFields(body)
+        // Copies own their lifetime; the opening key is scrubbed below.
+        return new Map([...fields].map(([k, values]) => [k, values.map(v => v instanceof Uint8Array ? v.slice() : v)]))
+      } finally { body.fill(0) }
+    }
+    const bytes = (fields: ReturnType<typeof parseFields>, n: number, length?: number) => {
+      const b = bytesField(fields, n)
+      if (length !== undefined && b.length !== length) bad()
+      return b
+    }
+    const num = (fields: ReturnType<typeof parseFields>, n: number) => {
+      const v = fields.get(n)
+      if (v?.length !== 1 || typeof v[0] !== 'bigint') return bad()
+      return v[0]
+    }
+    const ackEmpty = async (id: number, payload: Uint8Array = empty()) => { if ((await request(id, payload)).size) bad() }
+    const progress = (phase: MoneroSigningPhase) => options.onProgress?.(phase)
+    progress('review')
+    const start = await request(1810, init, true), macs = start.get(1)
+    if (start.size !== 2 || num(start, 2) !== 0n || macs?.length !== 2 || macs.some(m => !(m instanceof Uint8Array) || m.length !== 32)) bad()
+    const inputs: InputAck[] = [], outputs: OutputAck[] = [], signs: SignAck[] = []
+    progress('inputs')
+    for (const [origIdx, input] of plan.inputs.entries()) {
+      const f = await request(1812, lengthField(1, streamSource(input)))
+      if (f.size !== 4) bad()
+      const vini = bytes(f, 1)
+      // Compare the whole input encoding except the device's key image against the reviewed ring.
+      let previous = 0n
+      const expected = concat([new Uint8Array([2, 0, 16]), ...input.ring.map(r => { const index = BigInt(r.globalIndex), delta = index - previous; previous = index; return varint(delta) })])
+      if (vini.length !== expected.length + 32 || !same(vini.subarray(0, -32), expected)) bad()
+      inputs.push({ origIdx, vini, hmac: bytes(f, 2, 32), pseudoOut: bytes(f, 3, 32), pseudoHmac: bytes(f, 4, 32) })
+    }
+    inputs.sort((a, b) => Buffer.compare(b.vini.subarray(-32), a.vini.subarray(-32)))
+    for (let i = 1; i < inputs.length; i++) if (same(inputs[i - 1].vini.subarray(-32), inputs[i].vini.subarray(-32))) bad()
+    for (const input of inputs) await ackEmpty(1814, concat([lengthField(1, input.vini), lengthField(2, input.hmac), numberField(3, input.origIdx)]))
+    await ackEmpty(1816)
+    for (const [index, output] of plan.outputs.entries()) {
+      progress(index === 1 ? 'proving' : 'outputs')
+      const f = await request(1818, concat([lengthField(1, streamDestination(output)), lengthField(2, macs![index] as Uint8Array)]))
+      if (f.size !== (index === 1 ? 4 : 3)) bad()
+      const txOut = bytes(f, 1, 35), outPk = bytes(f, 2, 64)
+      if (txOut[0] !== 0 || txOut[1] !== 3 || !same(txOut.subarray(2, 34), outPk.subarray(0, 32))) bad()
+      outputs.push({ txOut, outPk, ecdh: bytes(f, 3, 8), ...(index === 1 ? { proof: bytes(f, 4, 642) } : {}) })
+    }
+    const f = await request(1820)
+    if (f.size !== 5) bad()
+    const all = { extra: bytes(f, 1), prefixHash: bytes(f, 2, 32), fee: num(f, 3), rctType: num(f, 4), message: bytes(f, 5, 32) }
+    if (![33, 44, 99, 110].includes(all.extra.length) || all.extra[0] !== 1 ||
+        all.fee !== BigInt(plan.feeAtomic) || all.rctType !== 6n) bad()
+    // Check the prefix before requesting signatures, and again on the assembled blob before relay.
+    const prefix = concat([varint(2n), varint(0n), varint(BigInt(inputs.length)), ...inputs.map(i => i.vini), varint(2n), ...outputs.map(o => o.txOut), varint(BigInt(all.extra.length)), all.extra])
+    if (!same(keccak_256(prefix), all.prefixHash)) throw new MoneroError(text(STREAM_ERRORS.prefix))
+    const base = concat([new Uint8Array([6]), varint(all.fee), ...outputs.map(o => o.ecdh), ...outputs.map(o => o.outPk.subarray(32))])
+    const proof = outputs[1].proof!
+    // Core hashes BP+ keys, omitting the two vector-length bytes (7 rounds for two outputs).
+    if (proof[192] !== 7 || proof[417] !== 7) bad()
+    const message = keccak_256(concat([all.prefixHash, keccak_256(base), keccak_256(concat([proof.subarray(0, 192), proof.subarray(193, 417), proof.subarray(418)]))]))
+    if (!same(message, all.message)) throw new MoneroError(text(STREAM_ERRORS.message))
+    progress('signing')
+    for (const input of inputs) {
+      const f = await request(1822, concat([lengthField(1, streamSource(plan.inputs[input.origIdx])), lengthField(2, input.vini),
+        lengthField(3, input.hmac), lengthField(4, input.pseudoOut), lengthField(5, input.pseudoHmac), numberField(6, input.origIdx)]))
+      if (f.size !== 2) bad()
+      signs.push({ encrypted: bytes(f, 1, 592), pseudoOut: bytes(f, 2, 32) })
+    }
+    const final = await request(1824)
+    try {
+      if (final.size < 2 || final.size > 3 || [...final.keys()].some(n => ![1, 2, 3].includes(n))) bad()
+      const key = bytes(final, 1, 32)
+      const additional = (final.get(3) ?? []).map(value => { if (!(value instanceof Uint8Array)) return bad(); return value })
+      progress('verifying')
+      const assembled = assembleStreamTransaction(inputs, outputs, all, signs, key, text)
+      try {
+        const transactionKeys = verifyStreamOutputBindings(plan, parseSignedTransaction(assembled.blob), bytes(final, 2, 32), additional, senderViewKey, text)
+        return { ...assembled, transactionKeys }
+      } catch (error) { assembled.blob.fill(0); throw error }
+    } finally { for (const values of final.values()) for (const value of values) if (value instanceof Uint8Array) value.fill(0) }
+  } finally { senderViewKey?.fill(0) }
 }

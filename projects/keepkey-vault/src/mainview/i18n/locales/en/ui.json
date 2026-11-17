@@ -2373,5 +2373,8 @@
   "mc5261239": "Monero signing requires exactly two outputs: a recipient and change or a zero-amount output.",
   "mdf50d016": "Monero unlock time must be zero. Nothing was signed.",
   "md377a3ed": "The assembled Monero message hash differs from the device. Nothing was sent.",
-  "m6647c94f": "The Monero transaction key does not match the signed transaction. Nothing was sent."
+  "m6647c94f": "The Monero transaction key does not match the signed transaction. Nothing was sent.",
+  "m1010f0b": "Monero signing is unavailable. Update KeepKey Desktop and firmware, then reconnect.",
+  "m2c78dc79": "The signed Monero outputs do not match the approved recipient, amount and change. Nothing was sent.",
+  "ma59e78f": "Reconnect Monero monitoring to authorize subaddress change derivation"
 }

@@ -80,6 +80,11 @@ function fixture(emulator = false, replyMs?: { device: number; human: number }, 
     monitorReady: true, updatedAt: new Date().toISOString(), canSend: false as const }
   const sidecar: MoneroWatchSidecar & { failure: boolean } = {
     failure: false,
+    hasMoneroSigningTools: () => true,
+    isMoneroSignerWorkerReady: () => true,
+    isMoneroSendReady: () => true,
+    async createMoneroTransfer() { throw new Error("Watch fixture cannot build transactions") },
+    async relayMoneroTransaction() { throw new Error("Watch fixture cannot broadcast") },
     async startMoneroSidecar() { starts++ },
     stopMoneroSidecar() { stops++ },
     async configureMoneroWatch(options) {
@@ -103,8 +108,9 @@ function fixture(emulator = false, replyMs?: { device: number; human: number }, 
     expect(locked).toBe(true); delegate.onButtonRequest = () => { reviews++ }
     try { return await operation() } finally { delegate.onButtonRequest = null }
   }
-  const api = createMoneroVault({ engine, confirm, getConfig: () => ({ ...config }), sidecar, watchStore, onTransportFailure, ...(replyMs ? { replyMs } : {}) })
-  return { api, delegate, engine, config, state, status, sidecar,
+  const coreVerifier = { available: () => true, prepare: () => { throw new Error("Watch fixture cannot sign") } }
+  const api = createMoneroVault({ engine, confirm, getConfig: () => ({ ...config }), sidecar, watchStore, onTransportFailure, signingEmulator: () => emulator, coreVerifier, ...(replyMs ? { replyMs } : {}) })
+  return { api, delegate, engine, config, state, status, sidecar, coreVerifier,
     counts: () => ({ reviews, configures, starts, stops }), key: () => configuredKey, options: () => configuredOptions }
 }
 
@@ -141,13 +147,14 @@ test('emulator wraps both address display and view export in the interactive con
   expect(f.delegate.sent.some(item => item.debug || item.type === 100)).toBe(false)
 })
 
-test('connection progress moves from device approval to opening the wallet and clears on completion', async () => {
+test('tool validation precedes device consent and connection progress clears on completion', async () => {
   const f = fixture()
   let release!: () => void, started!: () => void
   const waiting = new Promise<void>(resolve => { started = resolve })
   f.sidecar.startMoneroSidecar = async () => { started(); await new Promise<void>(resolve => { release = resolve }) }
   const connection = f.api.connect()
-  expect((await f.api.getStatus()).connectionPhase).toBe('device')
+  expect((await f.api.getStatus()).connectionPhase).toBe('wallet')
+  expect(f.delegate.sent).toHaveLength(0)
   await waiting
   expect((await f.api.getStatus()).connectionPhase).toBe('wallet')
   release()
@@ -246,9 +253,11 @@ test('unexpected PIN challenge is cancelled and never answered by the raw bridge
   expect(f.counts().configures).toBe(0)
 })
 
-test('missing capability refuses physical connect before any USB traffic', async () => {
+test('missing signing capability refuses onboarding before any device traffic', async () => {
   const f = fixture(); f.state.capabilities = []
   await expect(f.api.connect()).rejects.toThrow('hardware signing')
+  await expect(f.api.getAddress()).rejects.toThrow('hardware signing')
+  expect(await f.api.getStatus()).toMatchObject({signingReady:false,sendBlocked:'firmware',address:''})
   expect(f.delegate.sent).toHaveLength(0)
   expect(f.counts().configures).toBe(0)
 })
@@ -416,18 +425,18 @@ for (const identity of ['device-state', 'engine-session'] as const) test(`hidden
   expect(f.counts().configures).toBe(0)
 })
 
-test('a hidden transition during device consent cannot save a watch identity or start its sidecar', async () => {
+test('a hidden transition during device consent cannot save a watch identity or configure a wallet', async () => {
   const f = fixture()
   let saved = 0
   const store: MoneroWatchStore = {
     async loadWatch() { return null }, async saveWatch() { saved++ }, async loadAddress() { return null },
     async saveAddress() { saved++ }, async loadImages() { return null }, async saveImages() { saved++ },
   }
-  const api = createMoneroVault({ engine: f.engine, sidecar: f.sidecar, getConfig: () => ({ ...f.config }), watchStore: store })
+  const api = createMoneroVault({ engine: f.engine, sidecar: f.sidecar, getConfig: () => ({ ...f.config }), watchStore: store, coreVerifier: {available: () => true,prepare: () => {throw Error("fixture cannot sign")}} })
   f.delegate.watchReadHook = () => { f.state.isHiddenWallet = true }
   await expect(api.connect()).rejects.toThrow(MONERO_STANDARD_WALLET_REQUIRED)
   expect(saved).toBe(0)
-  expect(f.counts().starts).toBe(0)
+  expect(f.counts().starts).toBe(1)
   expect(f.counts().configures).toBe(0)
   expect(await api.getStatus()).toMatchObject({ address: '', available: false, error: MONERO_STANDARD_WALLET_REQUIRED })
 })
@@ -497,12 +506,12 @@ test('firmware failure codes distinguish unsupported requests, cancellation and 
   }
 })
 
-test('only the two pinned physical research images retain the old watch protocol', async () => {
+test('research firmware without the signing capability cannot expose deposit addresses', async () => {
   for (const hash of ['9bc7798fb71a744c23a81cb7987645b7b5418d16fd035acc00770d57d4ae4928',
     '123af6de3b5ddbc1eeb94568825d1bb8107079bc9100ac67f9f6162ca34e2f83']) {
-    const f = fixture(); f.state.firmwareHash = hash; f.delegate.research = true
-    await f.api.connect()
-    expect(f.delegate.sent.map(x => x.type)).toEqual([540, 542, 27])
+    const f = fixture(); f.state.firmwareHash = hash; f.state.capabilities = []; f.delegate.research = true
+    await expect(f.api.connect()).rejects.toThrow('hardware signing')
+    expect(f.delegate.sent).toHaveLength(0)
   }
 })
 
@@ -519,4 +528,67 @@ test('capability firmware connects independently of version or build hash', asyn
   const f = fixture(); f.state.firmwareVersion = '7.16.0'
   await f.api.connect()
   expect(f.delegate.sent.map(x => x.type)).toEqual([1800, 1802, 27])
+})
+
+
+test('missing native verifier or wallet tools blocks onboarding and deposit addresses before device traffic', async () => {
+  for (const missing of ['native', 'wallet-tools']) {
+    const f = fixture()
+    if (missing === 'native') f.coreVerifier.available = () => false
+    else f.sidecar.hasMoneroSigningTools = () => false
+    await expect(f.api.connect()).rejects.toThrow('missing required Monero wallet tools')
+    await expect(f.api.getAddress()).rejects.toThrow('missing required Monero wallet tools')
+    expect(f.delegate.sent).toHaveLength(0)
+    expect(f.counts()).toMatchObject({ starts: 0, configures: 0 })
+    expect(await f.api.getStatus()).toMatchObject({ signingReady: false, address: '', sendBlocked: 'adapter' })
+  }
+})
+
+test('worker startup failure cannot expose a deposit address despite valid signing-tool metadata', async () => {
+  const f = fixture()
+  f.sidecar.isMoneroSignerWorkerReady = () => false
+  await expect(f.api.connect()).rejects.toThrow('missing required Monero wallet tools')
+  await expect(f.api.getAddress()).rejects.toThrow()
+  expect(f.delegate.sent).toHaveLength(0)
+  expect(f.counts().configures).toBe(0)
+  expect((await f.api.getStatus()).address).toBe('')
+})
+
+test('signing dependencies are rechecked after worker startup before device key consent', async () => {
+  const f = fixture()
+  f.sidecar.startMoneroSidecar = async () => { f.coreVerifier.available = () => false }
+  await expect(f.api.connect()).rejects.toThrow('missing required Monero wallet tools')
+  expect(f.delegate.sent).toHaveLength(0)
+  expect(f.counts().configures).toBe(0)
+})
+
+test('losing signing dependencies during wallet setup rejects onboarding and wipes approved view bytes', async () => {
+  const f = fixture(), configure = f.sidecar.configureMoneroWatch
+  f.sidecar.configureMoneroWatch = async options => {
+    const status = await configure(options)
+    f.coreVerifier.available = () => false
+    return status
+  }
+  await expect(f.api.connect()).rejects.toThrow('missing required Monero wallet tools')
+  expect(f.key()?.every(byte => byte === 0)).toBe(true)
+  expect(f.delegate.consumed.every(report => report.every(byte => byte === 0))).toBe(true)
+  expect(await f.api.getStatus()).toMatchObject({ signingReady: false, address: '', available: false })
+})
+
+test('a previously connected wallet cannot use cached deposit addresses after the signer worker becomes unavailable', async () => {
+  const f = fixture()
+  await f.api.connect()
+  const before = f.delegate.sent.length
+  f.sidecar.isMoneroSignerWorkerReady = () => false
+  await expect(f.api.getAddress()).rejects.toThrow()
+  expect(f.delegate.sent).toHaveLength(before)
+})
+
+
+test('an unconnected healthy signer cannot expose a deposit address before completing onboarding', async () => {
+  const f = fixture()
+  expect((await f.api.getStatus()).signingReady).toBe(true)
+  await expect(f.api.getAddress()).rejects.toThrow('Connect the Monero watch wallet first')
+  expect(f.delegate.sent).toHaveLength(0)
+  expect(f.counts()).toMatchObject({ starts: 0, configures: 0 })
 })

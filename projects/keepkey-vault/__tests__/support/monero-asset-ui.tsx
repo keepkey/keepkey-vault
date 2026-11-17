@@ -23,7 +23,7 @@ const WALLET = '44jKQv6ZKMd5ecLLmkNJGi7azgSptEq8ki7TFiat1TfLfdDQ1tQ7ZYa3cRh7X2uR
 const SUBADDRESS = '84AxZu7xYb7fi7hnQrgTBdHFyP2xz6vdrZbLaJxbe73JJTWj6JG4cV8cbNnEhMvvi9PxSHvGnXQiaaLf2HNXJfzFKtWqk3H'
 const RECIPIENT = '4Ahp23WfMrMFK3wYL2hLWQFGt87ZTeRkufS6JoQZu6MEFDokAQeGWmu9MA3GFq1yVLSJQbKJqVAn9F9DLYGpRzRAEXqAXKM'
 const monero = CHAINS.find(c => c.id === 'monero')!
-const notConnected = { available: false, network: 'mainnet', address: '', balanceAtomic: '0', unlockedBalanceAtomic: '0', walletHeight: 0, transactions: [],
+const notConnected = { signingReady: true, available: false, network: 'mainnet', address: '', balanceAtomic: '0', unlockedBalanceAtomic: '0', walletHeight: 0, transactions: [],
   monitorReady: false, syncState: 'not-connected', canSend: false, spendStateKnown: false }
 const connected = (over: Record<string, unknown> = {}) => ({ ...notConnected, available: true, address: WALLET, balanceAtomic: '84653050000',
   unlockedBalanceAtomic: '84653050000', walletHeight: 3_300_000, daemonHeight: 3_300_000, restoreHeight: 0, monitorReady: true, syncState: 'ready',
@@ -153,12 +153,12 @@ for (const [name, status] of [['rowNotConnected', notConnected], ['rowReady', co
  await unmount()
 }
 
-// Physical/receive-only wallets still need a spent-output check to show a balance.
-for (const blocker of ['emulator', 'adapter']) {
- const client = fakeClient(connected({canSend:false,sendBlocked:blocker}))
+// Existing funds remain visible when signing setup is unavailable, without offering deposits.
+for (const blocker of ['firmware', 'emulator', 'adapter']) {
+ const client = fakeClient(connected({signingReady:false,canSend:false,sendBlocked:blocker}))
  client.syncKeyImages = async () => {
   client.calls.push(['sync'])
-  const verified = connected({canSend:false,sendBlocked:blocker,keyImagesSynced:true,spendStateKnown:true})
+  const verified = connected({signingReady:false,canSend:false,sendBlocked:blocker,keyImagesSynced:true,spendStateKnown:true})
   client.set(verified)
   return verified
  }
@@ -167,10 +167,13 @@ for (const blocker of ['emulator', 'adapter']) {
   return <><MoneroHeaderBalance view={moneroBalanceView(state.status)} privateMode={false} /><MoneroReceiveSection monero={state} client={client} chain={monero} privateMode={false} /><MoneroSendSection monero={state} client={client} /></>
  }
  const {container,unmount}=await render(<BalanceHost />)
- out[`receiveOnlyBalance_${blocker}`] = {
+ out[`unavailableBalance_${blocker}`] = {
   checks:client.calls.filter(call=>call[0]==='sync').length,
   balance:text(q(container,'[data-monero-header-balance]')),
-  blocked:q(container,'[data-monero-send-blocked]')?.getAttribute('data-monero-send-blocked'),
+  blocked:!!q(container,'[data-monero-signing-unavailable]'),
+  receiveAddress:text(container).includes(WALLET),
+  addressOptions:!!q(container,'[data-monero-subaddress]'),
+  addresses:client.calls.filter(call=>call[0]==='getAddress').length,
   prepared:client.calls.some(call=>call[0]==='prepare'),
  }
  await unmount()
@@ -364,8 +367,8 @@ for (const [name, overrides, Section] of [
   await guarded.unmount()
 }
 {
-  const { container, unmount } = await render(React.createElement(Host, { Section: MoneroSendSection, client: fakeClient(connected({ sendBlocked: 'emulator' })) }))
-  out.receiveOnly = text(q(container, '[data-monero-send-blocked]'))
+  const { container, unmount } = await render(React.createElement(Host, { Section: MoneroSendSection, client: fakeClient(connected({ signingReady: false, sendBlocked: 'emulator' })) }))
+  out.signingUnavailable = text(q(container, '[data-monero-signing-unavailable]'))
   await unmount()
 }
 
@@ -387,4 +390,30 @@ for (const [name, overrides, Section] of [
  out.nodeReadyConnects=client.calls.filter((call:any[])=>call[0]==='connect').length
  await unmount()
 }
+// Missing signing support cannot start device consent or show a deposit address.
+for (const signingReady of [false, undefined]) {
+ const client=fakeClient({...notConnected,signingReady,sendBlocked:'adapter'})
+ const {container,unmount}=await render(<Host Section={MoneroReceiveSection} client={client} />)
+ out[`unavailableConnect_${String(signingReady)}`]={calls:client.calls.length,addressOptions:!!q(container,'[data-monero-subaddress]'),text:text(container)}
+ await unmount()
+}
+// Readiness changing after an address was shown removes the QR and subaddress controls.
+{
+ const client=fakeClient(connected({spendStateKnown:true,keyImagesSynced:true}))
+ let update!:(status:any)=>void
+ const {container,unmount}=await render(<Host Section={MoneroReceiveSection} client={client} onState={(state:any)=>{update=state.setStatus}} />)
+ const before=!!q(container,'[data-monero-subaddress]')
+ await act(async()=>{update(connected({signingReady:false,sendBlocked:'adapter',spendStateKnown:true,keyImagesSynced:true}))})
+ out.readinessRevoked={before,addressOptions:!!q(container,'[data-monero-subaddress]'),address:text(container).includes(WALLET),balance:text(q(container,'[data-monero-balance]'))}
+ await unmount()
+}
+// A previous signed transaction remains retryable even if a new signer is unavailable.
+{
+ const client=fakeClient(connected({signingReady:false,unrelayedTxid:'cd'.repeat(32),sendBlocked:'unrelayed',spendStateKnown:true,keyImagesSynced:true}))
+ const {container,unmount}=await render(<Host Section={MoneroSendSection} client={client} />)
+ await click(q(container,'[data-monero-retry-relay]'))
+ out.recoveryWithoutSigner={retries:client.calls.filter(call=>call[0]==='retry').length,form:!!q(container,'[data-monero-send-address]')}
+ await unmount()
+}
+
 console.log(JSON.stringify(out))

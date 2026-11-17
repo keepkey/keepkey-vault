@@ -543,6 +543,57 @@
       "การลงนาม Monero ต้องมีความสามารถ monero-signing บน KeepKey",
       "Monero imzası KeepKey üzerinde monero-signing yeteneği gerektirir.",
       "Ký Monero yêu cầu KeepKey có khả năng monero-signing."
+    ],
+    "Monero signing is unavailable. Update KeepKey Desktop and firmware, then reconnect.": [
+      "Monero signing is unavailable. Update KeepKey Desktop and firmware, then reconnect.",
+      "La firma de Monero no está disponible. Actualiza KeepKey Desktop y el firmware y vuelve a conectar.",
+      "La signature Monero est indisponible. Mettez à jour KeepKey Desktop et le micrologiciel, puis reconnectez-vous.",
+      "Monero-Signierung ist nicht verfügbar. Aktualisiere KeepKey Desktop und die Firmware und verbinde dein Gerät erneut.",
+      "Moneroの署名を利用できません。KeepKey Desktopとファームウェアを更新してから、再接続してください。",
+      "Monero 签名不可用。请更新 KeepKey Desktop 和固件，然后重新连接。",
+      "Monero 서명을 사용할 수 없습니다. KeepKey Desktop과 펌웨어를 업데이트한 다음 다시 연결하세요.",
+      "A assinatura Monero não está disponível. Atualize o KeepKey Desktop e o firmware e reconecte.",
+      "Подписание Monero недоступно. Обновите KeepKey Desktop и прошивку, затем подключитесь снова.",
+      "La firma Monero non è disponibile. Aggiorna KeepKey Desktop e il firmware, quindi riconnetti.",
+      "Podpisywanie Monero jest niedostępne. Zaktualizuj KeepKey Desktop i oprogramowanie urządzenia, a następnie połącz się ponownie.",
+      "Monero-ondertekening is niet beschikbaar. Werk KeepKey Desktop en de firmware bij en maak opnieuw verbinding.",
+      "ไม่สามารถลงนาม Monero ได้ อัปเดต KeepKey Desktop และเฟิร์มแวร์ แล้วเชื่อมต่อใหม่",
+      "Monero imzalama kullanılamıyor. KeepKey Desktop ve cihaz yazılımını güncelleyip yeniden bağlanın.",
+      "Không thể ký giao dịch Monero. Hãy cập nhật KeepKey Desktop và firmware rồi kết nối lại."
+    ],
+    "The signed Monero outputs do not match the approved recipient, amount and change. Nothing was sent.": [
+      "The signed Monero outputs do not match the approved recipient, amount and change. Nothing was sent.",
+      "Las salidas Monero firmadas no coinciden con el destinatario, el importe y el cambio aprobados. No se envió nada.",
+      "Les sorties Monero signées ne correspondent pas au destinataire, au montant et à la monnaie approuvés. Rien n’a été envoyé.",
+      "Die signierten Monero-Ausgänge stimmen nicht mit dem bestätigten Empfänger, Betrag und Wechselgeld überein. Es wurde nichts gesendet.",
+      "署名済みのMonero出力が、承認した受取人、金額、お釣りと一致しません。何も送信されていません。",
+      "已签名的 Monero 输出与已批准的收款人、金额和找零不符。未发送任何资金。",
+      "서명된 Monero 출력이 승인한 수신자, 금액 및 거스름돈과 일치하지 않습니다. 아무것도 전송되지 않았습니다.",
+      "As saídas Monero assinadas não correspondem ao destinatário, valor e troco aprovados. Nada foi enviado.",
+      "Подписанные выходы Monero не соответствуют одобренным получателю, сумме и сдаче. Ничего не отправлено.",
+      "Gli output Monero firmati non corrispondono al destinatario, all’importo e al resto approvati. Non è stato inviato nulla.",
+      "Podpisane wyjścia Monero nie odpowiadają zatwierdzonemu odbiorcy, kwocie i reszcie. Nic nie zostało wysłane.",
+      "De ondertekende Monero-uitgangen komen niet overeen met de goedgekeurde ontvanger, het bedrag en het wisselgeld. Er is niets verzonden.",
+      "เอาต์พุต Monero ที่ลงนามไม่ตรงกับผู้รับ จำนวนเงิน และเงินทอนที่อนุมัติ ไม่มีการส่งเงินใดๆ",
+      "İmzalanan Monero çıktıları onaylanan alıcı, tutar ve para üstüyle eşleşmiyor. Hiçbir şey gönderilmedi.",
+      "Các đầu ra Monero đã ký không khớp với người nhận, số tiền và tiền thừa đã được duyệt. Chưa gửi gì cả."
+    ],
+    "Reconnect Monero monitoring to authorize subaddress change derivation": [
+      "Reconnect Monero monitoring to authorize subaddress change derivation",
+      "Vuelve a conectar la supervisión de Monero para autorizar la derivación del cambio con subdirecciones",
+      "Reconnectez le suivi Monero pour autoriser la dérivation de la monnaie avec les sous-adresses",
+      "Verbinde die Monero-Überwachung erneut, um die Wechselgeldableitung bei Unteradressen zu autorisieren",
+      "Moneroの監視に再接続して、サブアドレスの取引でお釣りの導出を承認してください",
+      "请重新连接 Monero 监控，以授权子地址交易的找零派生",
+      "Monero 모니터링에 다시 연결하여 하위 주소 거래의 거스름돈 파생을 승인하세요",
+      "Reconecte o monitoramento Monero para autorizar a derivação do troco em transações com subendereços",
+      "Подключите мониторинг Monero заново, чтобы разрешить вывод сдачи для транзакций с субадресами",
+      "Riconnetti il monitoraggio Monero per autorizzare la derivazione del resto nelle transazioni con sottoindirizzi",
+      "Połącz ponownie monitorowanie Monero, aby zatwierdzić wyprowadzenie reszty dla transakcji z podadresami",
+      "Verbind Monero-bewaking opnieuw om de afleiding van wisselgeld bij subadrestransacties toe te staan",
+      "เชื่อมต่อการตรวจสอบ Monero ใหม่เพื่ออนุญาตการสร้างเงินทอนในธุรกรรมที่ใช้ที่อยู่ย่อย",
+      "Alt adresli işlemlerin para üstü türetimini yetkilendirmek için Monero izlemeyi yeniden bağlayın",
+      "Kết nối lại tính năng theo dõi Monero để cho phép tạo tiền thừa cho giao dịch dùng địa chỉ phụ"
     ]
   }
 }

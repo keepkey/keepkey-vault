@@ -1,21 +1,38 @@
-# Monero release packaging gaps
+# Monero signing artifact packaging
 
-Packaging is unchanged by this work. Capability-31 signing still needs these two release fixes. Paths below are relative to the repository root.
+Desktop uses the public streamed firmware protocol (1810–1825) when the connected device reports signing capability31. The complete app flow requires the managed wallet RPC, reviewed plan decoder, and independent Core verifier. The app must not offer a deposit address when the complete signing toolchain is unavailable.
 
-## Plan adapter is omitted
+## Reviewed independent verifier
 
-Evidence: `projects/keepkey-vault/electrobun.config.ts:46` gates research artifacts on `KEEPKEY_INCLUDE_MONERO_EMULATOR`; `:57` gates `monero-host-adapter` on that same flag. `projects/keepkey-vault/scripts/build-signed.ts:91` rejects the flag. The adapter is required for output export (`projects/keepkey-vault/monero-cli/src/wallet.ts:272`) and transfer-plan decoding (`:331`); without it, `sendReady` is false (`:128`) and Desktop blocks sending (`projects/keepkey-vault/src/bun/monero-vault.ts:377`). The Core verifier alone cannot build a plan.
+`projects/keepkey-vault/monero-cli/core-verifier-manifest.json` is the controlling record. The current macOS ARM64 verifier is built from Monero Core0.18.5.4, with a **13.0 deployment target**, and exposes only `monero_core_verify` and `monero_core_plan_size`. Its only dynamic dependencies are Apple's `libc++` and `libSystem`. It contains no wallet-key, device transport, signing, or network entry point. The full plan ABI remains7544 bytes, supporting up to four inputs and two signing outputs.
 
-Proposal: independently bundle a reviewed adapter for each supported platform, with its license and `monero-tools.json` receipt. Pin the approved artifact by SHA-256; preserve the runtime `hostAdapterSha256` check (`projects/keepkey-vault/monero-cli/src/tools.ts:56`). The staging script already verifies a supplied reviewed hash (`projects/keepkey-vault/scripts/stage-monero-adapter.ts:16`).
+The native wrapper is checked in under `projects/keepkey-vault/native/monero-core-verifier/`. Core verification checks canonical transaction serialization, prefix, fee, reviewed rings, sorted key images, CLSAG signatures, and Bulletproof+ proofs. Desktop separately binds the returned output keys, amounts, commitments and payment-proof keys to the reviewed destination plan before relay.
 
-Change `build-signed.ts:53` to require the adapter with the other Monero inputs. Extend its signing/staging call at `:76` and source overrides at `:83` to include the adapter. Extend `scripts/monero-signing-metadata.py:103` to verify its approved raw hash, sign a disposable copy, and record the signed copy's hash in the copied receipt. Keep research emulators excluded. Move the adapter copy out of the research gate in `electrobun.config.ts:57` and consume the staged source override.
+The earlier research verifier linked Homebrew libraries and carried a15.0 floor. It is not the packaged artifact. The new verifier and used Core/Boost/libsodium code are compiled for13.0; changing a Mach-O version field was not used to lower the floor.
 
-## Core verifier is not self-contained
+## Build and stage
 
-Evidence: `projects/keepkey-vault/electrobun.config.ts:48` copies only `libmonero_core_verify.dylib`. Its approved hash is `6f3aac3710a698fdb515860156302592cb0f6fe0c79df3fe69b86d7a97e2484c` (`projects/keepkey-vault/src/bun/monero-device-signing.ts:16`). `available()` checks the file/hash (`:133`, `:136`), while loading happens later (`:144`).
+The build script requires six explicitly supplied archives with SHA256 values recorded in the manifest: Core, RandomX, RapidJSON, SUPERCOP, Boost1.90.0, and libsodium1.0.22. It does not download, sign, access a device, or accept private wallet inputs.
 
-Read-only `shasum` and `otool -L` inspection of that exact artifact at `/Users/highlander/keepkey-toolchain/vault-xmr/projects/keepkey-vault/monero-device-bundle/libmonero_core_verify.dylib` confirmed absolute `/opt/homebrew/opt/` dependencies: hidapi, unbound, libsodium, OpenSSL (ssl/crypto), and Boost (chrono, date_time, program_options, serialization, filesystem, thread). A clean Mac lacks them, so a valid file/hash can still fail at `dlopen`. This matches the supplied review, finding 3.
+```sh
+python3 scripts/build-monero-core-verifier.py \
+  --archive-dir /path/to/pinned-archives \
+  --work-dir /path/to/empty-build-directory \
+  --output /path/to/new/libmonero_core_verify.dylib
+bun projects/keepkey-vault/scripts/stage-monero-core-verifier.ts \
+  --source /path/to/reviewed/libmonero_core_verify.dylib
+```
 
-Proposal: rebuild a self-contained verifier with static third-party dependencies, or bundle the entire transitive dylib closure and relink every non-system load command/install name to bundle-local `@loader_path`/`@rpath` locations. Include dependency licenses. Pin the completed, relinked artifacts by hash, rather than pinning the current developer build.
+The build checks archive pins, exported symbols, deployment target, UUID and system-only dependencies, and records its actual hash and tool inputs. A changed compiler or changed native bytes need a new vector qualification and manifest pin. Staging accepts only the exact reviewed hash, size and regular-file permissions; build labels and adjacent JSON cannot authorize another artifact.
 
-Add verifier/dependency inputs to `build-signed.ts:53`; stage and sign their disposable copies before `buildElectrobun` at `:96`, dependencies first. Add source overrides alongside `:83`, and copy the complete closure in `electrobun.config.ts:48`. Verify approved pre-sign hashes and record final signed hashes in an app-sealed receipt; update the runtime verifier pin/receipt check to authenticate the distributed bytes, since relinking and signing change the current hash. Reject unresolved non-system absolute paths recursively. Qualify the installed, signed bundle on a clean Mac without Homebrew: load the verifier, accept the standard/subaddress/sweep vectors, and reject corrupted signatures. Repeat for every supported architecture; the current loader supports only macOS arm64 (`monero-device-signing.ts:131`).
+## Bundle and signing
+
+The Core verifier is bundled independently of `KEEPKEY_INCLUDE_MONERO_EMULATOR`. The research host prover and research emulators remain excluded from normal builds. The reviewed plan adapter also ships independently of that flag, with its own authenticated raw artifact pin and receipt.
+
+Local Developer ID builds sign a disposable verifier copy, preserving the reviewed raw input. A receipt records the raw pin and the signed bytes' hash. Hutch's signing shim preserves those exact signed bytes, and the final outer app signature seals the receipt. Runtime accepts a changed hash only at the fixed `Resources/app/monero-device/` location after verifying the actual outer app signature. Arbitrary developer directories cannot self-attest with adjacent receipts. Third-party licenses ship beside the verifier.
+
+## Qualification
+
+The actual native verifier accepts the public firmware's standard, subaddress and zero-change sweep vectors and rejects corrupted signatures/proofs. Host tests cover unsupported platforms/OS versions, hash/size mismatches, symlinks and unsafe permissions, signed-copy receipt tampering, and failure before any signing operation. These tests use public fixture bytes; they do not sign with a real device or relay a funded transaction.
+
+The native artifact currently covers macOS ARM64. Other platform artifacts need independent build and runtime qualification. The macOS13 floor is enforced by compilation and dependency audits; a physical macOS13 runtime test remains part of platform qualification. No release was signed or published as part of this app fix.

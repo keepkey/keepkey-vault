@@ -128,6 +128,12 @@ function MoneroAmounts({ view, privateMode }: { view: MoneroBalanceView; private
 	)
 }
 
+/** Missing signing support never becomes an invitation to deposit into a restricted wallet. */
+function MoneroSigningUnavailable() {
+	const uiText = useUiTranslation()
+	return <Text data-monero-signing-unavailable="" role="alert" fontSize="13px" color="var(--text-2)">{uiText("Monero signing is unavailable. Update KeepKey Desktop and firmware, then reconnect.")}</Text>
+}
+
 /** Opening XMR starts the normal device consent. A failed/cancelled attempt waits for Retry. */
 export function MoneroConnectCard({ client, monero }: { client: MoneroClient; monero: MoneroStatusState }) {
 	const uiText = useUiTranslation()
@@ -139,7 +145,7 @@ export function MoneroConnectCard({ client, monero }: { client: MoneroClient; mo
 	const attempted = useRef(false)
 	const mounted = useRef(true)
 	const connect = useCallback(async () => {
-		if (hiddenWalletBlocked) return
+		if (hiddenWalletBlocked || monero.status?.signingReady !== true) return
 		setConnecting(true); setError(null)
 		try {
 			const next = await client.getSettings()
@@ -155,10 +161,10 @@ export function MoneroConnectCard({ client, monero }: { client: MoneroClient; mo
 			if (mounted.current) monero.setStatus(status)
 		} catch (e) { if (mounted.current) setError(errorText(e, "Unable to open Monero. Try again.")) }
 		finally { if (mounted.current) setConnecting(false) }
-	}, [client, monero.setStatus, hiddenWalletBlocked])
+	}, [client, monero.setStatus, hiddenWalletBlocked, monero.status?.signingReady])
 	useEffect(() => {
 		mounted.current = true
-		if (monero.status && !hiddenWalletBlocked && !attempted.current) { attempted.current = true; void connect() }
+		if (monero.status?.signingReady === true && !hiddenWalletBlocked && !attempted.current) { attempted.current = true; void connect() }
 		return () => { mounted.current = false }
 	}, [!!monero.status, connect])
 	useEffect(() => {
@@ -183,6 +189,7 @@ export function MoneroConnectCard({ client, monero }: { client: MoneroClient; mo
 	if (hiddenWalletBlocked) return <Box data-monero-connect="" py="4" maxW="520px">
 		<Text role="alert" color="var(--rose)" fontSize="13px">{uiText(MONERO_STANDARD_WALLET_REQUIRED)}</Text>
 	</Box>
+	if (monero.status && monero.status.signingReady !== true) return <Box data-monero-connect="" py="4" maxW="520px"><MoneroSigningUnavailable /></Box>
 	return (
 		<Box data-monero-connect="" py="4" maxW="520px">
 			<MoneroConnectionDetails status={monero.status} />
@@ -226,7 +233,7 @@ export function MoneroReceiveSection({ chain, monero, client, privateMode }: { c
 		} catch (e) { setError(errorText(e, "Unable to read the subaddress from KeepKey.")) }
 		finally { setLoading(false) }
 	}, [client])
-	useEffect(() => { setVerified(null); setError(null); if (minor > 0 && wallet) void loadSubaddress(minor) }, [minor, primary]) // eslint-disable-line react-hooks/exhaustive-deps
+	useEffect(() => { setVerified(null); setError(null); if (minor > 0 && wallet?.signingReady === true) void loadSubaddress(minor) }, [minor, primary, wallet?.signingReady]) // eslint-disable-line react-hooks/exhaustive-deps
 	if (!wallet) return <MoneroConnectCard client={client} monero={monero} />
 	const showOnDevice = async () => {
 		setError(null); setVerified(null)
@@ -243,6 +250,7 @@ export function MoneroReceiveSection({ chain, monero, client, privateMode }: { c
 			{verification.error && <Box role="alert" mb="3"><Text fontSize="12px" color="var(--rose)">{verification.error}</Text><Button size="xs" mt="2" onClick={() => { void verification.retry() }}>{uiText("Try again")}</Button></Box>}
 			<Box mb="4"><MoneroBalanceNote view={view} /><MoneroFreshness view={view} /></Box>
 			<details style={{ marginBottom: 16, color: "var(--text-3)", fontSize: 12 }}><summary style={{ cursor: "pointer" }}>{uiText("Balance details")}</summary><Box mt="3"><MoneroAmounts view={view} privateMode={privateMode} /></Box></details>
+			{wallet.signingReady === true ? <>
 			<details style={{ marginBottom: 12, color: "var(--text-3)", fontSize: 12 }}><summary style={{ cursor: "pointer" }}>{uiText("Receive address options")}</summary>
 			<Flex align="center" gap="2" mt="2" flexWrap="wrap">
 				<Text fontSize="10px" color="var(--text-3)" textTransform="uppercase" letterSpacing="0.18em">{uiText("Receive to")}</Text>
@@ -256,6 +264,7 @@ export function MoneroReceiveSection({ chain, monero, client, privateMode }: { c
 			{verified && verified === address && <Text mt="2" fontSize="12px" color="var(--teal)" role="status">{uiText("Address confirmed on KeepKey.")}</Text>}
 			{address && error && <Text mt="2" fontSize="12px" color="var(--rose)" role="alert">{error}</Text>}
 			{minor > 0 && <Text mt="2" fontSize="11px" color="var(--text-3)">{uiText("Subaddresses belong to this wallet. Sending XMR to one of them is how you move funds within it.")}</Text>}
+			</> : <MoneroSigningUnavailable />}
 			<Box mt="6">
 				<Text fontSize="11px" color="var(--text-3)" textTransform="uppercase" letterSpacing="0.18em" mb="2">{uiText("Incoming transactions")}</Text>
 				{wallet.transactions.length === 0 ? (
@@ -340,7 +349,7 @@ export function MoneroSendSection({ monero, client, privateMode = false }: { mon
 				: uiText("Discarded. Its funds are spendable again; the next send builds a new transaction."))
 		} finally { setConfirmDiscard(false); void monero.refresh() }
 	})
-	const receiveOnly = wallet.sendBlocked === "emulator" || wallet.sendBlocked === "adapter" || wallet.sendBlocked === "firmware"
+	const signingUnavailable = wallet.signingReady !== true
 	return (
 		<Box data-monero-send="">
 			<MoneroConnectionDetails status={monero.status} />
@@ -379,12 +388,8 @@ export function MoneroSendSection({ monero, client, privateMode = false }: { mon
 					</details>
 				</Box>
 			)}
-			{receiveOnly ? (
-				<Text data-monero-send-blocked={wallet.sendBlocked} fontSize="13px" color="var(--text-2)">{wallet.sendBlocked === "firmware"
-					? uiText("Monero hardware signing is not available for this firmware in this build. Receiving works.")
-					: wallet.sendBlocked === "adapter"
-					? uiText("Sending isn't available: this build has no Monero signing adapter. Receiving works.")
-					: uiText("Sending isn't available: Monero signing needs the signing (research) emulator build. Receiving works.")}</Text>
+			{signingUnavailable ? (
+				<MoneroSigningUnavailable />
 			) : (
 				<>
 					<Text fontSize="15px" color="var(--text-0)" fontWeight="500" mb="3">{uiText("Send XMR")}</Text>

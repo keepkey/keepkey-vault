@@ -182,5 +182,8 @@
   "mc5261239": "La firma de Monero requiere exactamente dos salidas: un destinatario y el cambio o una salida de importe cero.",
   "mdf50d016": "El tiempo de desbloqueo de Monero debe ser cero. No se ha firmado nada.",
   "md377a3ed": "El hash del mensaje Monero ensamblado difiere del dispositivo. No se ha enviado nada.",
-  "m6647c94f": "La clave de transacción Monero no coincide con la transacción firmada. No se ha enviado nada."
+  "m6647c94f": "La clave de transacción Monero no coincide con la transacción firmada. No se ha enviado nada.",
+  "m1010f0b": "La firma de Monero no está disponible. Actualiza KeepKey Desktop y el firmware y vuelve a conectar.",
+  "m2c78dc79": "Las salidas Monero firmadas no coinciden con el destinatario, el importe y el cambio aprobados. No se envió nada.",
+  "ma59e78f": "Vuelve a conectar la supervisión de Monero para autorizar la derivación del cambio con subdirecciones"
 }

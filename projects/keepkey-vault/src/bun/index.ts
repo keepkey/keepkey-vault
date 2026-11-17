@@ -301,7 +301,7 @@ import { assertMoneroStandardWallet, moneroHiddenWallet } from "../shared/monero
 import { createMoneroWatchStore } from "./monero-watch-store"
 import { createMoneroCoreVerifier } from "./monero-device-signing"
 import { REVIEWED_MONERO_SIGNING_SHA256 } from "./monero-emulator"
-import { startMoneroSidecar, stopMoneroSidecar, isMoneroSidecarAvailable } from "./monero-sidecar"
+import { startMoneroSidecar, stopMoneroSidecar, isMoneroSidecarAvailable, hasMoneroSigningTools } from "./monero-sidecar"
 import { createMoneroNodeManager } from './monero-node'
 import { MONERO_LOCAL_URL, moneroNodeMode } from '../shared/monero-node'
 import { checkMoneroNode, storedRestoreHeight, suggestRestoreHeight, validateMoneroNode } from "./monero-settings"
@@ -1812,7 +1812,7 @@ function getAppSettings() {
 		walletConnectEnabled,
 		btcMultisigEnabled:multisigFeature.enabled,
 		moneroEnabled,
-		moneroAvailable: isMoneroSidecarAvailable(),
+		moneroAvailable: isMoneroSidecarAvailable() && hasMoneroSigningTools() && createMoneroCoreVerifier().available(),
 		moneroDaemonUrl: getSetting('monero_daemon_url') || MONERO_DEFAULT_NODE,
 		moneroNodeMode: moneroNodeMode(getSetting('monero_node_mode'), getSetting('monero_daemon_url')),
 		moneroRestoreHeight: storedRestoreHeight(getSetting('monero_restore_height')),

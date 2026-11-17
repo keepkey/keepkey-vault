@@ -601,6 +601,8 @@ export interface MoneroConnectionInfo {
 }
 
 export interface MoneroStatus {
+  /** Full signer and verified tools are available; receive addresses require this. */
+  signingReady?: boolean
   signingPhase?: 'review' | 'inputs' | 'outputs' | 'proving' | 'signing' | 'verifying'
   connection?: MoneroConnectionInfo
   available: boolean

@@ -459,6 +459,7 @@ test-i18n:
 	cd $(PROJECT_DIR) && bun scripts/check-i18n.ts && bun test __tests__/i18n-safety.test.ts __tests__/report-fonts.test.ts
 
 test-unit:
+	cd $(PROJECT_DIR) && bun test src/bun/monero-stream-signer.test.ts __tests__/monero-core-verifier-artifact.test.ts
 	cd $(PROJECT_DIR) && bun test __tests__/rest-zcash-admission.test.ts
 	cd $(PROJECT_DIR) && bun test __tests__/broadcast-provider-error.test.ts
 	cd $(PROJECT_DIR) && bun test __tests__/zcash-nu7-admission.test.ts __tests__/zcash-nu7-binary.test.ts __tests__/zcash-tex-admission.test.ts

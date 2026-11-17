@@ -176,5 +176,8 @@
   "mc5261239": "La signature Monero exige exactement deux sorties : un destinataire et la monnaie ou une sortie de montant nul.",
   "mdf50d016": "Le délai de déverrouillage Monero doit être nul. Rien n’a été signé.",
   "md377a3ed": "Le hachage du message Monero assemblé diffère de celui de l’appareil. Rien n’a été envoyé.",
-  "m6647c94f": "La clé de transaction Monero ne correspond pas à la transaction signée. Rien n’a été envoyé."
+  "m6647c94f": "La clé de transaction Monero ne correspond pas à la transaction signée. Rien n’a été envoyé.",
+  "m1010f0b": "La signature Monero est indisponible. Mettez à jour KeepKey Desktop et le micrologiciel, puis reconnectez-vous.",
+  "m2c78dc79": "Les sorties Monero signées ne correspondent pas au destinataire, au montant et à la monnaie approuvés. Rien n’a été envoyé.",
+  "ma59e78f": "Reconnectez le suivi Monero pour autoriser la dérivation de la monnaie avec les sous-adresses"
 }

@@ -4,18 +4,23 @@ import { SUPPORTED_LANGUAGES } from '../mainview/i18n/languages'
 import { expect, test } from 'bun:test'
 import { ed25519 } from '@noble/curves/ed25519'
 import { verifyMoneroTransactionKeys } from './monero-transaction-keys'
+import { STREAM_MONITORING_KEY_ERROR, STREAM_OUTPUT_BINDING_ERROR, streamNeedsMonitoringKey, validateStreamMonitoringKey,
+  verifyStreamOutputBindings } from './monero-stream-output-binding'
 import { moneroDestinationAddressKeys } from '../shared/monero-address'
 import { keccak_256 } from '@noble/hashes/sha3'
 import { readFileSync } from 'node:fs'
 import type { MoneroPlan } from '../../monero-cli/src/protocol'
 import { bytesField, concat, lengthField, numberField, parseFields, parseSignedTransaction } from './monero-wire'
-import { checkStreamSigningBounds, signMoneroStream, streamDestination, streamInitRequest, streamSource, supportsMoneroSigning, STREAM_ERRORS, type MoneroSigningPhase } from './monero-stream-signer'
+import { checkStreamSigningBounds, signMoneroStream as signMoneroStreamRaw, streamDestination, streamInitRequest, streamSource, supportsMoneroSigning, STREAM_ERRORS, type MoneroSigningPhase } from './monero-stream-signer'
 import { coreNativePlan, createMoneroCoreVerifier } from './monero-device-signing'
 
 const fixtures = JSON.parse(readFileSync(new URL('./monero-stream.fixtures.json', import.meta.url), 'utf8'))
 const cases = fixtures.cases as Array<{ name: string; plan: MoneroPlan; requests: Array<{ id: number; hex: string }>; responses: Array<{ id: number; hex: string }>; transactionHex: string; prefixHash: string; transactionKeccak: string }>
 const unhex = (value: string) => Uint8Array.from(Buffer.from(value, 'hex'))
 const hex = (value: Uint8Array) => Buffer.from(value).toString('hex')
+// Public abandon-account fixture only, independently specified by the firmware vectors.
+const PUBLIC_VIEW = unhex('84b0087a63854856686f80596a5a1a6090795b4d1311139173262170d7e7180f')
+const signMoneroStream: typeof signMoneroStreamRaw = (plan, exchange, options) => signMoneroStreamRaw(plan, exchange, { senderViewKey: PUBLIC_VIEW, ...options })
 
 /** Replay public vector envelopes; no emulator, USB delegate, daemon or balances. */
 function replay(c = cases[0], mutate?: (id: number, body: Uint8Array) => Uint8Array) {
@@ -266,4 +271,77 @@ test('full message hash, ecdh or proof corruption aborts before signatures', asy
   expect(r.ids.at(-1)).toBe(1820)
   expect(r.ids).not.toContain(1822); expect(r.ids).not.toContain(1824)
  }
+})
+
+function finalPaymentKeys(c: typeof cases[0]) {
+  const fields = parseFields(unhex(c.responses.at(-1)!.hex))
+  return { key: bytesField(fields, 2), additional: (fields.get(3) ?? []) as Uint8Array[] }
+}
+
+test('output binding reconstructs every standard, subaddress and sweep output from independent Core vectors', () => {
+  for (const c of [...cases, ...sweepFixtures.cases] as typeof cases) {
+    const parsed = parseSignedTransaction(unhex(c.transactionHex)), keys = finalPaymentKeys(c)
+    expect(verifyStreamOutputBindings(c.plan, parsed, keys.key, keys.additional, PUBLIC_VIEW)).toEqual({
+      txKey: hex(keys.key), additionalTxKeys: keys.additional.map(hex),
+    })
+    expect(streamNeedsMonitoringKey(c.plan)).toBe(c.name === '2in-2out-subaddress')
+  }
+})
+
+test('an otherwise valid signed transaction cannot be substituted for another recipient, amount or output order', () => {
+  for (const c of cases) {
+    // Blob, CLSAGs and Bulletproof+ stay unchanged and valid. Ring/proof-only
+    // verification cannot detect that these plans authorize different payments.
+    const parsed = parseSignedTransaction(unhex(c.transactionHex)), keys = finalPaymentKeys(c)
+    const changes: Array<(plan: MoneroPlan) => void> = [
+      p => { p.outputs.find(o => !o.isChange)!.address = sweepFixtures.cases[0].plan.outputs[1].address },
+      p => { p.outputs.find(o => !o.isChange)!.amountAtomic = (BigInt(p.outputs.find(o => !o.isChange)!.amountAtomic) + 1n).toString() },
+      p => { p.outputs.find(o => o.isChange)!.amountAtomic = (BigInt(p.outputs.find(o => o.isChange)!.amountAtomic) - 1n).toString() },
+      p => { p.outputs.reverse() },
+    ]
+    for (const mutate of changes) {
+      const plan = structuredClone(c.plan); mutate(plan)
+      expect(() => verifyStreamOutputBindings(plan, parsed, keys.key, keys.additional, PUBLIC_VIEW)).toThrow()
+    }
+  }
+})
+
+test('altered output keys, view tags, encrypted amounts and commitments fail independent output binding', () => {
+  for (const c of cases) {
+    const keys = finalPaymentKeys(c)
+    const changes: Array<(parsed: ReturnType<typeof parseSignedTransaction>) => void> = [
+      p => { p.outputData[2] ^= 1 }, p => { p.outputData[34] ^= 1 },
+      p => { p.outputData[35 + 2] ^= 1 }, p => { p.outputData[35 + 34] ^= 1 },
+      p => { p.encryptedAmounts[0] ^= 1 }, p => { p.encryptedAmounts[8] ^= 1 },
+      p => { p.commitments[0] ^= 1 }, p => { p.commitments[32] ^= 1 },
+    ]
+    for (const mutate of changes) {
+      const parsed = parseSignedTransaction(unhex(c.transactionHex)); mutate(parsed)
+      expect(() => verifyStreamOutputBindings(c.plan, parsed, keys.key, keys.additional, PUBLIC_VIEW)).toThrow(STREAM_OUTPUT_BINDING_ERROR)
+    }
+  }
+})
+
+test('subaddress change requires the matching approved monitoring key before any device I/O', async () => {
+  const c = cases[1]
+  expect(() => validateStreamMonitoringKey(c.plan, PUBLIC_VIEW)).not.toThrow()
+  for (const key of [undefined, new Uint8Array(32), new Uint8Array(31), new Uint8Array(32).fill(1)]) {
+    let calls = 0
+    await expect(signMoneroStreamRaw(c.plan, async () => { calls++; throw Error('must not exchange') }, { senderViewKey: key })).rejects.toThrow(STREAM_MONITORING_KEY_ERROR)
+    expect(calls).toBe(0)
+  }
+  // Standard and sweep transactions need no monitoring credential.
+  expect(() => validateStreamMonitoringKey(cases[0].plan)).not.toThrow()
+  for (const c of sweepFixtures.cases) expect(() => validateStreamMonitoringKey(c.plan as MoneroPlan)).not.toThrow()
+})
+
+test('stream signing owns a monitoring-key copy across awaits and leaves the caller buffer intact', async () => {
+  const c = cases[1], caller = PUBLIC_VIEW.slice(), r = replay(c)
+  const signed = await signMoneroStreamRaw(c.plan, async (...args) => {
+    caller.fill(0) // replacing the caller's bytes cannot change the authorization in flight
+    return r.exchange(...args)
+  }, { senderViewKey: caller })
+  expect(hex(signed.blob)).toBe(c.transactionHex)
+  expect(caller.every(v => v === 0)).toBe(true)
+  expect(PUBLIC_VIEW.some(v => v !== 0)).toBe(true)
 })

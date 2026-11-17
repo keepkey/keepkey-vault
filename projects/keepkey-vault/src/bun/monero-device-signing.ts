@@ -8,6 +8,7 @@ import { keccak_256 } from '@noble/hashes/sha3'
 import { moneroStandardAddressKeys, moneroDestinationAddressKeys } from '../shared/monero-address'
 import { validatePlan, type MoneroPlan } from '../../monero-cli/src/protocol'
 import { concat, lengthField, numberField, MoneroError, parseSignedTransaction, signRequest } from './monero-wire'
+import { verifiedMoneroCoreVerifierFile } from './monero-core-verifier-artifact'
 import { checkStreamSigningBounds, STREAM_ERRORS, type MoneroText } from './monero-stream-signer'
 export const MONERO_DEVICE_CANDIDATE_SHA256='9bc7798fb71a744c23a81cb7987645b7b5418d16fd035acc00770d57d4ae4928'
 export const MONERO_DEVICE_SUBADDRESS_CANDIDATE_SHA256='123af6de3b5ddbc1eeb94568825d1bb8107079bc9100ac67f9f6162ca34e2f83'
@@ -130,10 +131,15 @@ export function createMoneroCoreVerifier(options:{directory?:string;text?:Monero
  const library=()=>{
   if(process.platform!=='darwin'||process.arch!=='arm64')return null
   const roots=options.directory?[options.directory]:[resolve(import.meta.dir,'../monero-device'),join(dirname(process.execPath),'monero-device'),resolve(process.cwd(),'monero-device-bundle')]
-  for(const root of roots){const file=join(root,'libmonero_core_verify.dylib');if(checkedLibrary(file,VERIFY_SHA))return file}
+  for(const root of roots){const file=verifiedMoneroCoreVerifierFile(root);if(file)return file}
   return null
  }
- return {available:()=>!!library(),prepare(plan){
+ return {available:()=>{
+  const file=library();if(!file)return false
+  let probe:ReturnType<typeof loadVerifier>|null=null
+  try {probe=loadVerifier(file);return Number(probe.symbols.monero_core_plan_size())===7544}
+  catch{return false}finally{probe?.close()}
+ },prepare(plan){
   checkStreamSigningBounds(plan,text)
   if(plan.inputs.length>4)throw new MoneroError(text(STREAM_ERRORS.plan))
   const file=library();if(!file)throw new MoneroError(text(STREAM_ERRORS.verifier))

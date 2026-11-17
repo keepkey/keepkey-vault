@@ -2373,5 +2373,8 @@
   "mc5261239": "A assinatura Monero exige exatamente duas saídas: um destinatário e troco ou uma saída de valor zero.",
   "mdf50d016": "O tempo de desbloqueio Monero deve ser zero. Nada foi assinado.",
   "md377a3ed": "O hash da mensagem Monero montada difere do dispositivo. Nada foi enviado.",
-  "m6647c94f": "A chave da transação Monero não corresponde à transação assinada. Nada foi enviado."
+  "m6647c94f": "A chave da transação Monero não corresponde à transação assinada. Nada foi enviado.",
+  "m1010f0b": "A assinatura Monero não está disponível. Atualize o KeepKey Desktop e o firmware e reconecte.",
+  "m2c78dc79": "As saídas Monero assinadas não correspondem ao destinatário, valor e troco aprovados. Nada foi enviado.",
+  "ma59e78f": "Reconecte o monitoramento Monero para autorizar a derivação do troco em transações com subendereços"
 }

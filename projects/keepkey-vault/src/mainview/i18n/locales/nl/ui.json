@@ -177,5 +177,8 @@
   "mc5261239": "Monero-ondertekening vereist precies twee outputs: een ontvanger en wisselgeld of een output met bedrag nul.",
   "mdf50d016": "De ontgrendeltijd van Monero moet nul zijn. Er is niets ondertekend.",
   "md377a3ed": "De hash van het samengestelde Monero-bericht wijkt af van het apparaat. Er is niets verzonden.",
-  "m6647c94f": "De Monero-transactiesleutel komt niet overeen met de ondertekende transactie. Er is niets verzonden."
+  "m6647c94f": "De Monero-transactiesleutel komt niet overeen met de ondertekende transactie. Er is niets verzonden.",
+  "m1010f0b": "Monero-ondertekening is niet beschikbaar. Werk KeepKey Desktop en de firmware bij en maak opnieuw verbinding.",
+  "m2c78dc79": "De ondertekende Monero-uitgangen komen niet overeen met de goedgekeurde ontvanger, het bedrag en het wisselgeld. Er is niets verzonden.",
+  "ma59e78f": "Verbind Monero-bewaking opnieuw om de afleiding van wisselgeld bij subadrestransacties toe te staan"
 }

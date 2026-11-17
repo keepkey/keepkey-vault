@@ -2,9 +2,8 @@
 import type { MoneroConnectionInfo } from '../shared/types'
 import { createHash, randomBytes, randomInt } from 'node:crypto'
 import type { MoneroCoreVerifier } from './monero-device-signing'
-import { checkStreamSigningBounds, signMoneroStream, supportsMoneroSigning, STREAM_ERRORS, type MoneroSigningPhase, type MoneroText } from './monero-stream-signer'
+import { checkStreamSigningBounds, signMoneroStream, streamNeedsMonitoringKey, validateStreamMonitoringKey, supportsMoneroSigning, STREAM_ERRORS, type MoneroSigningPhase, type MoneroText } from './monero-stream-signer'
 import { MONERO_DEVICE_CANDIDATE_SHA256, MONERO_DEVICE_SUBADDRESS_CANDIDATE_SHA256 } from './monero-device-signing'
-import { firmwareSupportsMonero, MONERO_MIN_FIRMWARE } from '../shared/firmware-versions'
 import type { MoneroWatchStore } from './monero-watch-store'
 import * as managedSidecar from './monero-sidecar'
 import type { MoneroOutputRecord, MoneroTransferDraft } from './monero-sidecar'
@@ -75,6 +74,7 @@ export interface MoneroVaultStatus {
   emulatorReady: boolean
   updatedAt?: string
   error?: string
+  signingReady?: boolean
   canSend: boolean
   /** The first unmet send gate, when sending is unavailable. */
   sendBlocked?: MoneroSendBlocker
@@ -113,6 +113,8 @@ export interface MoneroWatchSidecar {
   configureMoneroWatch(options: { walletId: string; network: 'mainnet'; address: string; viewKey: Uint8Array; restoreHeight: number; daemonUrl: string }): Promise<unknown>
   getMoneroWalletStatus(): Promise<unknown>
   // Research send path; absent in a watch-only sidecar.
+  hasMoneroSigningTools?(): boolean
+  isMoneroSignerWorkerReady?(): boolean
   isMoneroSendReady?(): boolean
   exportMoneroOutputs?(): Promise<MoneroOutputRecord[]>
   importMoneroKeyImages?(input: { offset: number; signedKeyImages: Array<{ keyImage: string; signature: string }> }): Promise<unknown>
@@ -246,6 +248,7 @@ export function createMoneroVault({ engine, confirm, getConfig, sidecar = manage
 }) {
   let epoch = 0, busy = false
   let signingPhase: MoneroSigningPhase | undefined
+  let signingViewKey: Uint8Array | null = null
   let connectionPhase: 'device' | 'wallet' | undefined
   let activeDelegate: Delegate | null = null
   let bound: { snapshot: Snapshot; address: string } | null = null
@@ -280,7 +283,6 @@ export function createMoneroVault({ engine, confirm, getConfig, sidecar = manage
     const config = getConfig(), state = engine.getDeviceState(), wallet = engine.wallet
     if (!config.enabled || config.offline || state.state !== 'ready' || !wallet || !state.deviceId) return null
     const streamed = supportsMoneroSigning(state.capabilities)
-    if (!streamed && !firmwareSupportsMonero(state.firmwareVersion)) throw new MoneroError(`Monero needs KeepKey firmware ${MONERO_MIN_FIRMWARE} or newer`)
     if (!Number.isSafeInteger(config.restoreHeight) || config.restoreHeight < 0) throw new MoneroError('Invalid Monero restore height')
     let url: URL
     try { url = new URL(config.daemonUrl) } catch { throw new MoneroError('Configure a Monero daemon URL first') }
@@ -303,6 +305,7 @@ export function createMoneroVault({ engine, confirm, getConfig, sidecar = manage
   const stop = () => {
     epoch++; bound = null; lastGood = null; synced = null; prepared = null
     connectionPhase = undefined; signingPhase = undefined
+    signingViewKey?.fill(0); signingViewKey = null
     try { sidecar.stopMoneroSidecar() } catch { /* stop must still invalidate local authorization */ }
     if (activeDelegate) void writeMessage(activeDelegate, 20).catch(() => {})
   }
@@ -401,11 +404,21 @@ export function createMoneroVault({ engine, confirm, getConfig, sidecar = manage
   const keyImagesStale = (images: Synced, status: MoneroVaultStatus) =>
     status.transactions.some(tx => !images.txids.has(tx.txid)) || BigInt(status.balanceAtomic) > images.balanceAtomic
   const pendingFor = (current: Snapshot) => bound ? pending.get(walletKey(current, bound.address)) : undefined
+  /** Signing is a prerequisite for onboarding or exposing a deposit address. */
+  const signingBlocker = (current: Snapshot): 'emulator' | 'firmware' | 'adapter' | undefined => {
+    if (!current.streamed && !(current.emulator && signingEmulator())) return current.emulator ? 'emulator' : 'firmware'
+    if (current.streamed && !coreVerifier?.available()) return 'adapter'
+    if (!(sidecar.hasMoneroSigningTools?.() ?? sidecar.isMoneroSendReady?.()) || !sidecar.createMoneroTransfer || !sidecar.relayMoneroTransaction) return 'adapter'
+  }
+  const requireSigning = (current: Snapshot) => {
+    const blocker = signingBlocker(current)
+    if (blocker) throw new MoneroError(BLOCKER_MESSAGES[blocker])
+  }
   /** Every gate, in the order a user can fix them. Undefined means sending is possible. */
   const sendBlocker = (current: Snapshot, status: MoneroVaultStatus): MoneroSendBlocker | undefined => {
     if (pendingFor(current)) return 'unrelayed'
-    if (!current.streamed && !(current.emulator && signingEmulator())) return current.emulator ? 'emulator' : 'firmware'
-    if (current.streamed && !coreVerifier?.available()) return 'adapter'
+    const unavailable = signingBlocker(current)
+    if (unavailable) return unavailable
     if (!sidecar.isMoneroSendReady?.() || !sidecar.createMoneroTransfer || !sidecar.relayMoneroTransaction) return 'adapter'
     if (!status.monitorReady) return 'syncing'
     const images = keyImagesFor(current)
@@ -478,7 +491,7 @@ export function createMoneroVault({ engine, confirm, getConfig, sidecar = manage
   const withSendState = (status: MoneroVaultStatus, current: Snapshot): MoneroVaultStatus => {
     const blocker = sendBlocker(current, status), images = keyImagesFor(current)
     const stale = !!images && keyImagesStale(images, status), keyImagesSynced = !!images && !stale, record = pendingFor(current)
-    return { ...status, transactions: status.transactions.map(tx => ({ ...tx })), canSend: !blocker && !signingPhase, ...(signingPhase ? { signingPhase } : {}), keyImagesSynced, spendStateKnown: keyImagesSynced,
+    return { ...status, signingReady: !signingBlocker(current), transactions: status.transactions.map(tx => ({ ...tx })), canSend: !blocker && !signingPhase, ...(signingPhase ? { signingPhase } : {}), keyImagesSynced, spendStateKnown: keyImagesSynced,
       ...(stale ? { keyImagesStale: true } : {}), ...(blocker ? { sendBlocked: blocker } : {}), ...(record ? { unrelayedTxid: record.txid } : {}),
       ...(record && checks.get(record.wallet) ? { unrelayedCheck: { ...checks.get(record.wallet)! } } : {}),
       ...(bound && guards.get(walletKey(current, bound.address)) ? { discardedTxid: guards.get(walletKey(current, bound.address))!.txid } : {}) }
@@ -501,7 +514,7 @@ export function createMoneroVault({ engine, confirm, getConfig, sidecar = manage
     try { current = snapshot() } catch { stop(); return empty(!!getConfig().enabled, false, 'The Monero configuration or device transport is unavailable') }
     if (!current) { stop(); const config = getConfig(); return empty(config.enabled, false, config.offline ? 'Monero is unavailable in offline mode' : undefined) }
     loadPersistence()
-    if (!bound) return withPendingHint({ ...empty(true, true), restoreHeight: current.config.restoreHeight, ...(connectionPhase ? { connectionPhase } : {}) })
+    if (!bound) return withPendingHint({ ...empty(true, true), signingReady: !signingBlocker(current), ...(signingBlocker(current) ? { sendBlocked: signingBlocker(current) } : {}), restoreHeight: current.config.restoreHeight, ...(connectionPhase ? { connectionPhase } : {}) })
     if (bound.snapshot.key !== current.key || bound.snapshot.wallet !== current.wallet || bound.snapshot.transport !== current.transport) { stop(); return withPendingHint(empty(true, true)) }
     const authorized = bound, generation = epoch
     try {
@@ -528,10 +541,15 @@ export function createMoneroVault({ engine, confirm, getConfig, sidecar = manage
       if (typeof showDisplay !== 'boolean') throw new MoneroError('Invalid Monero address display option')
       if (busy) throw new MoneroError('A Monero device request is already in progress')
       const current = requireReady()
+      requireSigning(current)
       busy = true; stop(); const generation = epoch
-      connectionPhase = 'device'
+      connectionPhase = 'wallet'
       let viewKey: Uint8Array | null = null
       try {
+        await sidecar.startMoneroSidecar(); check(current, generation)
+        if (!(sidecar.isMoneroSignerWorkerReady?.() ?? sidecar.isMoneroSendReady?.())) throw new MoneroError(BLOCKER_MESSAGES.adapter)
+        requireSigning(current)
+        connectionPhase = 'device'
         const approved = await current.transport.lockDuring(async () => {
           activeDelegate = current.transport.delegate
           const operation = async () => {
@@ -570,11 +588,12 @@ export function createMoneroVault({ engine, confirm, getConfig, sidecar = manage
           check(current,generation)
         }
         connectionPhase = 'wallet'
-        await sidecar.startMoneroSidecar(); check(current, generation)
         const value = await sidecar.configureMoneroWatch({ walletId: `${engine.getDeviceState().deviceId}:${address}`, network: 'mainnet', address,
           viewKey, restoreHeight: current.config.restoreHeight, daemonUrl: current.config.daemonUrl })
-        check(current, generation)
+        check(current, generation); requireSigning(current)
+        if (!(sidecar.isMoneroSignerWorkerReady?.() ?? sidecar.isMoneroSendReady?.())) throw new MoneroError(BLOCKER_MESSAGES.adapter)
         const status = statusFrom(value, current, address)
+        signingViewKey?.fill(0); signingViewKey = viewKey.slice()
         bound = { snapshot: current, address }; lastGood = status
         // A pending broadcast (e.g. from before a restart) is looked up once: settled if the node has it.
         if (pending.has(walletKey(current, address))) await resolvePending(walletKey(current, address))
@@ -592,7 +611,9 @@ export function createMoneroVault({ engine, confirm, getConfig, sidecar = manage
       if (typeof showDisplay !== 'boolean') throw new MoneroError('Invalid Monero address display option')
       if (!Number.isSafeInteger(minor) || minor < 0 || minor > MAX_RECEIVE_SUBADDRESS) throw new MoneroError(`Choose a subaddress from 0 to ${MAX_RECEIVE_SUBADDRESS}`)
       if (busy) throw new MoneroError('A Monero device request is already in progress')
-      const current = requireReady(), generation = epoch; busy = true
+      const current = requireReady(), generation = epoch; requireSigning(current); bindingFor(current)
+      if (!(sidecar.isMoneroSignerWorkerReady?.() ?? sidecar.isMoneroSendReady?.())) throw new MoneroError(BLOCKER_MESSAGES.adapter)
+      busy = true
       try {
         const primary = bound?.snapshot.key === current.key && bound.snapshot.wallet === current.wallet && bound.snapshot.transport === current.transport ? bound.address : undefined
         if (!showDisplay && primary && current.watchScope && watchStore) {
@@ -704,7 +725,8 @@ export function createMoneroVault({ engine, confirm, getConfig, sidecar = manage
       if (typeof max !== 'boolean') throw new MoneroError('Invalid Monero max option')
       if (!max && (typeof amountAtomic !== 'string' || !/^[1-9][0-9]{0,19}$/.test(amountAtomic) || BigInt(amountAtomic) > MAX_UINT64)) throw new MoneroError('Enter a positive XMR amount')
       if (busy) throw new MoneroError('A Monero device request is already in progress')
-      const current = requireReady(), binding = bindingFor(current)
+      const current = requireReady(); requireSigning(current)
+      const binding = bindingFor(current)
       if (address === binding.address) throw new MoneroError(SELF_SEND)
       if (pendingFor(current)) throw new MoneroError(BLOCKER_MESSAGES.unrelayed)
       busy = true; prepared = null
@@ -773,7 +795,7 @@ export function createMoneroVault({ engine, confirm, getConfig, sidecar = manage
           throw new MoneroError(`The transaction you discarded (${guard.txid}) could still be mined from another node's pool. Until its inputs are spent, a new send must spend at least one of them, so both cannot be mined; this send would use other funds, so it was not built. Send an amount that needs those funds (Max does), or wait until it settles`)
         }
         if (draft.plan.unlockTime !== undefined && draft.plan.unlockTime !== '0') throw new MoneroError(text(STREAM_ERRORS.unlock))
-        if (current.streamed) checkStreamSigningBounds(draft.plan, text)
+        if (current.streamed) {checkStreamSigningBounds(draft.plan, text); validateStreamMonitoringKey(draft.plan, signingViewKey, text)}
         // Choose the review order once; the stored plan drives every signing step.
         for (let i = draft.plan.outputs.length - 1; i > 0; i--) {
           const j = randomInt(i + 1)
@@ -802,8 +824,10 @@ export function createMoneroVault({ engine, confirm, getConfig, sidecar = manage
       busy = true
       const { draft, review, generation } = reviewed, wallet = walletKey(current, bound.address)
       let verifier: ReturnType<MoneroCoreVerifier['prepare']> | null = null
+      const senderViewKey = current.streamed && streamNeedsMonitoringKey(draft.plan) ? signingViewKey?.slice() ?? null : null
       try {
         if (current.streamed) {
+          validateStreamMonitoringKey(draft.plan, senderViewKey, text)
           if (!coreVerifier?.available()) throw new MoneroError(text(STREAM_ERRORS.verifier))
           verifier = coreVerifier.prepare(draft.plan)
           check(current, generation)
@@ -813,7 +837,7 @@ export function createMoneroVault({ engine, confirm, getConfig, sidecar = manage
             try {
               return await signMoneroStream(draft.plan,
                 (request, response, payload, review) => receive(current, generation, request, response, payload, review),
-                { text, onProgress: phase => { check(current, generation); signingPhase = phase } })
+                { text, senderViewKey, onProgress: phase => { check(current, generation); signingPhase = phase } })
             } catch (error) {
               // End a still-open session on host validation failure, without replaying any step.
               if (matches(current) && epoch === generation) {
@@ -844,7 +868,7 @@ export function createMoneroVault({ engine, confirm, getConfig, sidecar = manage
         await relayPending(wallet, false)
         return { txid: parsed.hash }
       } catch (error) { throw publicError(error, 'Unable to send the Monero transaction') }
-      finally { verifier?.dispose(); signingPhase = undefined; busy = false }
+      finally { senderViewKey?.fill(0); verifier?.dispose(); signingPhase = undefined; busy = false }
     },
     /** Re-broadcast the same signed bytes after an unknown relay outcome; never builds a new transaction. */
     async retryRelay(): Promise<{ txid: string }> {

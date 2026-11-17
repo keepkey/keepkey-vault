@@ -4,6 +4,7 @@ import { dirname, isAbsolute, join, relative } from 'node:path';
 import { fileURLToPath } from "node:url";
 import pkg from "./package.json";
 import { verifiedHostAdapterFile } from "./monero-cli/src/host-adapter";
+import { checkMoneroCoreVerifierDirectory, moneroCoreVerifierArtifact } from './src/bun/monero-core-verifier-artifact';
 
 const isWindows = process.platform === "win32";
 const isMac = process.platform === "darwin";
@@ -57,8 +58,16 @@ const moneroCopy = existsSync(moneroCliSource) && existsSync(moneroRpcSource)
 // signing emulator builds. The verified host adapter is packaged separately for normal receive access.
 const includeMoneroResearch = process.env.KEEPKEY_INCLUDE_MONERO_EMULATOR === '1';
 // Capability signing uses the independently hash-checked Core verifier, without a host prover.
-const moneroDeviceCopy = existsSync('monero-device-bundle/libmonero_core_verify.dylib')
-    ? { 'monero-device-bundle/libmonero_core_verify.dylib': 'monero-device/libmonero_core_verify.dylib' } : {};
+const verifierArtifact = moneroCoreVerifierArtifact();
+const moneroVerifierSource = toolSource(process.env.KEEPKEY_MONERO_CORE_VERIFIER_SOURCE || 'monero-device-bundle/libmonero_core_verify.dylib');
+const moneroVerifierReceiptSource = process.env.KEEPKEY_MONERO_CORE_VERIFIER_RECEIPT_SOURCE;
+const verifiedCoreVerifier = verifierArtifact && existsSync(moneroVerifierSource)
+    ? checkMoneroCoreVerifierDirectory(dirname(join(projectDir, moneroVerifierSource)), undefined, !!moneroVerifierReceiptSource) : null;
+if (verifierArtifact && existsSync(moneroVerifierSource) && !verifiedCoreVerifier) throw new Error('The Monero Core verifier does not match its reviewed metadata');
+const moneroDeviceCopy = verifiedCoreVerifier
+    ? { [moneroVerifierSource]: 'monero-device/libmonero_core_verify.dylib',
+        'monero-cli/core-verifier-LICENSES.txt': 'monero-device/LICENSES.txt',
+        ...(moneroVerifierReceiptSource ? { [toolSource(moneroVerifierReceiptSource)]: 'monero-device/core-verifier-receipt.json' } : {}) } : {};
 const moneroEmulatorCopy = {
     ...(includeMoneroResearch && existsSync("monero-emulator-bundle/libkkemu-monero.dylib")
         ? { "monero-emulator-bundle/manifest.json": "monero-emulator/manifest.json",

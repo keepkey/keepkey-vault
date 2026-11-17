@@ -174,8 +174,9 @@ describe('C3: Send', () => {
     expect(ui.sameNode).toBe(false)
     expect(ui.discardedNote).toBe('Your discarded send will be checked before another payment.')
   })
-  test('without the signing emulator, Send says receive-only instead of a dead form', () => {
-    expect(ui.receiveOnly).toContain('Receiving works.')
+  test('missing signing infrastructure gives a repair action without a receive-only fallback', () => {
+    expect(ui.signingUnavailable).toContain('Update KeepKey Desktop and firmware, then reconnect.')
+    expect(ui.signingUnavailable).not.toContain('Receiving works')
   })
 })
 
@@ -184,9 +185,9 @@ test('private mode hides the available balance in the send form as well as the h
  expect(ui.sendPrivateText).not.toContain('0.084653050000')
 })
 
-for (const blocker of ['emulator', 'adapter']) {
- test(`a receive-only wallet (${blocker}) verifies its balance without enabling sending`, () => {
-  expect(ui[`receiveOnlyBalance_${blocker}`]).toEqual({checks:1,balance:'0.08465305',blocked:blocker,prepared:false})
+for (const blocker of ['firmware', 'emulator', 'adapter']) {
+ test(`unavailable signing (${blocker}) retains existing funds without offering deposits`, () => {
+  expect(ui[`unavailableBalance_${blocker}`]).toEqual({checks:1,balance:'0.08465305',blocked:true,receiveAddress:false,addressOptions:false,addresses:0,prepared:false})
  })
 }
 
@@ -249,4 +250,20 @@ test('failover rechecks known outputs automatically and preserves a declined dev
 test('streamed proving progress is shown while keeping the full recipient visible', () => {
  expect(ui.provingText).toBe('KeepKey is proving the Monero transaction…')
  expect(ui.provingRecipient).toBe(true)
+})
+
+test('new Monero access requires signing readiness before consent or receive controls',()=>{
+ for(const ready of ['false','undefined']){
+  expect(ui[`unavailableConnect_${ready}`]).toMatchObject({calls:0,addressOptions:false})
+  expect(ui[`unavailableConnect_${ready}`].text).not.toContain('receive payments')
+  expect(ui[`unavailableConnect_${ready}`].text).not.toContain('Confirm on KeepKey')
+ }
+})
+
+test('losing signing readiness revokes the deposit address while retaining funds',()=>{
+ expect(ui.readinessRevoked).toEqual({before:true,addressOptions:false,address:false,balance:'0.084653050000 XMR'})
+})
+
+test('pending transaction recovery remains available without a signer',()=>{
+ expect(ui.recoveryWithoutSigner).toEqual({retries:1,form:false})
 })
