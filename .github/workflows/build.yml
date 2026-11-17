@@ -32,6 +32,7 @@ env:
   EMU_SOURCE_RUN_ID: '42312167033'
   EMU_SOURCE_SHA: 'c19a995b4045704494959f7885fc3ade63c32a19'
   EMU_SOURCE_ARTIFACT: 'certified-emulator-7.17.0-macos13-c19a995b4045704494959f7885fc3ade63c32a19'
+  MONERO_NATIVE_RELEASE_TAG: 'monero-native-20261117'
 
 jobs:
   # Electrobun 2.x devkit (launcher, core, native wrapper, update manager and
@@ -305,6 +306,57 @@ jobs:
           hutch electrobun sync
         shell: bash
 
+      # Packaging contract tests use the certified bytes on Linux and macOS.
+      - name: Download certified emulator 7.17 artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ env.EMU_SOURCE_ARTIFACT }}
+          path: .certified-emulator-${{ env.EMU_RELEASE_VERSION }}
+          github-token: ${{ github.token }}
+          repository: keepkey/keepkey-vault
+          run-id: ${{ env.EMU_SOURCE_RUN_ID }}
+
+      - name: Stage and verify certified emulator 7.17 libraries
+        run: scripts/stage-certified-emulator.sh ".certified-emulator-${EMU_RELEASE_VERSION}"
+        shell: bash
+
+      - name: Prepare pinned Monero wallet tools
+        run: cd projects/keepkey-vault && python3 monero-cli/prepare.py
+        shell: bash
+
+      - name: Download reviewed Monero signing helpers (macOS arm64)
+        if: matrix.expected-arch == 'arm64'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          gh release download "$MONERO_NATIVE_RELEASE_TAG" --repo keepkey/keepkey-vault \
+            --pattern monero-host-adapter --pattern libmonero_core_verify.dylib \
+            --dir .reviewed-monero
+          chmod 755 .reviewed-monero/monero-host-adapter .reviewed-monero/libmonero_core_verify.dylib
+
+      - name: Require reviewed Monero signing helpers (macOS arm64)
+        if: matrix.expected-arch == 'arm64'
+        shell: bash
+        run: |
+          cd projects/keepkey-vault
+          bun scripts/stage-monero-adapter.ts --require --source "$GITHUB_WORKSPACE/.reviewed-monero/monero-host-adapter"
+          # The verifier CLI always requires an explicit, hash-pinned input.
+          bun scripts/stage-monero-core-verifier.ts --source "$GITHUB_WORKSPACE/.reviewed-monero/libmonero_core_verify.dylib"
+          echo "MONERO_CORE_VERIFY_DIR=$PWD/monero-device-bundle" >> "$GITHUB_ENV"
+
+      - name: Stage optional Monero adapter on other platforms
+        if: matrix.expected-arch != 'arm64'
+        run: cd projects/keepkey-vault && bun scripts/stage-monero-adapter.ts --if-available
+        shell: bash
+
+      - name: Verify and build Monero CLI sidecar
+        shell: bash
+        run: |
+          cd projects/keepkey-vault
+          bun run monero:build
+          bun run monero:test
+
       - name: Run Vault unit and submodule-contract tests
         if: matrix.tests
         # Must run after building the pinned modules. The suite imports critical
@@ -345,21 +397,6 @@ jobs:
         # is downloaded as an immutable artifact and is never rebuilt here.
         run: brew install protobuf
 
-      - name: Download certified emulator 7.17 artifact
-        if: runner.os == 'macOS'
-        uses: actions/download-artifact@v4
-        with:
-          name: ${{ env.EMU_SOURCE_ARTIFACT }}
-          path: .certified-emulator-${{ env.EMU_RELEASE_VERSION }}
-          github-token: ${{ github.token }}
-          repository: keepkey/keepkey-vault
-          run-id: ${{ env.EMU_SOURCE_RUN_ID }}
-
-      - name: Stage and verify certified emulator 7.17 libraries
-        if: runner.os == 'macOS'
-        run: scripts/stage-certified-emulator.sh ".certified-emulator-${EMU_RELEASE_VERSION}"
-        shell: bash
-
       # The emulator Desktop ships must draw the PIN grid and end every PIN
       # wait; the 7.17 alpha certified before firmware #1042 did neither.
       - name: Test PIN entry on the certified emulator
@@ -389,15 +426,6 @@ jobs:
           cargo build --release
           bun ../scripts/write-zcash-nu7-manifest.ts target/release/zcash-cli
           file target/release/zcash-cli
-
-      - name: Verify and build Monero CLI sidecar
-        shell: bash
-        run: |
-          cd projects/keepkey-vault
-          python3 monero-cli/prepare.py
-          bun scripts/stage-monero-adapter.ts --if-available
-          bun run monero:build
-          bun run monero:test
 
       - name: Build unsigned app (CI mode)
         env:
@@ -865,9 +893,9 @@ jobs:
   windows-unsigned:
     # Runs scripts/build-windows-production.ps1 -SkipSign, as the Windows box
     # does minus signing, so a broken Windows build shows up before the box.
-    # Not a dependency of the release job: the shipped installer is built and
-    # signed on the Windows box. Its CI artifact must not match the release
-    # job's keepkey-vault-* download pattern.
+    # Its exact-head success gates draft creation; the shipped installer is
+    # still built and signed separately on the Windows box. Its CI artifact
+    # must not match the release job's keepkey-vault-* download pattern.
     name: Windows x64 (unsigned build check)
     needs: device-protocol-lib
     runs-on: windows-2022
@@ -1048,7 +1076,7 @@ jobs:
 
   release:
     name: Create Draft Release
-    needs: [build, intel-smoke]
+    needs: [build, intel-smoke, windows-unsigned]
     # Releases come only from v* tags or release/* branches (pushed or
     # dispatched). A dispatch on any other branch builds and tests without
     # creating a draft release.
