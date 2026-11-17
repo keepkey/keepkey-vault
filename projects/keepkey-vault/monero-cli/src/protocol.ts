@@ -141,6 +141,7 @@ export const PUBLIC_ERRORS = [
   'This preview syncs at most 64 wallet outputs',
   'Not enough unlocked XMR for this amount and fee',
   'The watch wallet cannot build this transaction',
+  'The Monero transaction decoder refused the unsigned transaction',
   'The daemon rejected the transaction: double spend',
   'The daemon rejected the transaction: fee too low',
   'The daemon rejected the transaction',

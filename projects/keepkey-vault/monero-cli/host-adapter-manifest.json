@@ -4,17 +4,57 @@
   "moneroVersion": "0.18.5.4",
   "scope": "Read-only decoding of authenticated wallet output exports and unsigned transaction sets; no device transport, transaction signing, or relay",
   "source": {
-    "repository": "https://github.com/BitHighlander/keepkey-firmware",
-    "commit": "97236a794c5953dfcb892578ec464992f962a493",
-    "path": "tools/monero-feasibility/host-adapter.cpp",
-    "sha256": "3219809c6b800b496d848bb5b57814f22b74fc920723f71903cd92a8578063e6",
-    "validationReportSha256": "9ec6828c514e002c19a0a4c3227d65a94ec451c4f5e705fd341ad7586f795545"
+    "repository": "https://github.com/BitHighlander/keepkey-vault",
+    "path": "projects/keepkey-vault/native/monero-host-adapter/host-adapter.cpp",
+    "sha256": "86e82c7d3fa215eb472c886e97e0e89fc2116801ea4c34fdc58512e6803592f3",
+    "buildScriptPath": "scripts/build-monero-host-adapter.py",
+    "buildScriptSha256": "a36ff71b97daa5ea46970689b9cdaffe3246fd9904bef27a475c0fb7f27e0a8b",
+    "coreCommit": "85f036ba7019cd36f08e8a38a27c37ea7b522618",
+    "archivesSha256": {
+      "monero-core-v0.18.5.4.tar.gz": "a9514399f085a05101c84bf905bc17eae96db2215922f8023b492795259c215f",
+      "monero-randomx.tar.gz": "887513a538044c50ad0fb8a486c584704ddd7d533d9093731dd4dc3109ab16cd",
+      "monero-rapidjson.tar.gz": "44b007d419ac21b6affec58991e865ee572346ead19b73cf1c3e4e11c7a81273",
+      "monero-supercop.tar.gz": "b973b9d8269ec4d97c3c3443f0dad96d09f72b1b30e616e0947557adbdbb03f7",
+      "boost-1.90.0.tar.xz": "9e6bee9ab529fb2b0733049692d57d10a72202af085e553539a05b4204211a6f",
+      "libsodium-1.0.22.tar.gz": "adbdd8f16149e81ac6078a03aca6fc03b592b89ef7b5ed83841c086191be3349",
+      "openssl-3.5.9.tar.gz": "603f5602e2eef00d77fbd429d34dcd5822bb301757a1bc9cdb24c670f1eb859a"
+    },
+    "upstreamBase": {
+      "repository": "https://github.com/BitHighlander/keepkey-firmware",
+      "commit": "97236a794c5953dfcb892578ec464992f962a493",
+      "path": "tools/monero-feasibility/host-adapter.cpp",
+      "sha256": "3219809c6b800b496d848bb5b57814f22b74fc920723f71903cd92a8578063e6",
+      "validationReportSha256": "9ec6828c514e002c19a0a4c3227d65a94ec451c4f5e705fd341ad7586f795545"
+    },
+    "archiveSources": {
+      "openssl-3.5.9.tar.gz": "https://github.com/openssl/openssl/releases/download/openssl-3.5.9/openssl-3.5.9.tar.gz"
+    },
+    "sourceDateEpoch": 1790640000,
+    "noticesPath": "projects/keepkey-vault/monero-cli/host-adapter-LICENSES.txt",
+    "noticesSha256": "bd6f24d7aeacf44fb65c5c498d5c490182de2b09a32c68927c986a88f8efbe01"
   },
   "files": {
     "darwin-arm64": {
       "filename": "monero-host-adapter",
-      "sha256": "8569f6afd4f62c750b96c6b567c258efaed02209a9af8feb2a6c548b17de8b59",
-      "size": 10281424
+      "sha256": "3991ce11ebd69c4f011a28c10a6963a0cb94045a07c5128a0d7866fd9c9b91b9",
+      "size": 10343872,
+      "minimumMacosVersion": "13.0",
+      "dependencies": [
+        "/System/Library/Frameworks/IOKit.framework/Versions/A/IOKit",
+        "/usr/lib/libc++.1.dylib",
+        "/usr/lib/libSystem.B.dylib"
+      ],
+      "minimumDarwinMajor": 22
     }
+  },
+  "qualification": {
+    "usedBoostHeaders": {
+      "count": 3055,
+      "sha256": "ec64be4008f1ea60fbf17fd896c6ee5f110eb99d4a1d0e0c48d9c06e4c7e41bd"
+    },
+    "compiler": "Apple clang version 21.0.0 (clang-2100.0.123.102)",
+    "sdkVersion": "26.4",
+    "buildExecutionScriptSha256": "6acdaa6008f1ec9aa2c9350aa4247a2069b1737b2c2fde781abe2b603830df2a",
+    "buildQualificationScriptSha256": "a36ff71b97daa5ea46970689b9cdaffe3246fd9904bef27a475c0fb7f27e0a8b"
   }
 }

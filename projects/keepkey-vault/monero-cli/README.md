@@ -64,10 +64,11 @@ and unsigned transaction review. It does not contact a node, access a device, si
 or relay. It is packaged independently of the research emulator flag, so public
 firmware key-image monitoring does not depend on selecting an old research build.
 
-`host-adapter-manifest.json` records the reviewed artifact, source commit, source
-hash and validation receipt. The currently qualified artifact is macOS ARM64,
-SHA-256 `8569f6afd4f62c750b96c6b567c258efaed02209a9af8feb2a6c548b17de8b59`.
-Supply that provided artifact explicitly; no developer-machine path or runtime
+`host-adapter-manifest.json` pins the reviewed artifact, repository-local decoder
+source and build script, seven dependency archives, and the original upstream base.
+The currently qualified artifact is macOS ARM64 with a macOS 13.0 deployment
+target; its exact size and SHA-256 are recorded in that manifest.
+Supply that artifact explicitly; no developer-machine path or runtime
 download is used:
 
 ```sh
@@ -86,9 +87,28 @@ the runtime hash in disposable copies before the outer app signature seals them.
 These metadata fields are not an independent signature; explicit developer tool
 overrides remain trusted development inputs.
 
-The upstream source and Core build recipe are
-[`host-adapter.cpp`, `prepare_core.py`, and `build_host.py` at the manifest commit](https://github.com/BitHighlander/keepkey-firmware/tree/97236a794c5953dfcb892578ec464992f962a493/tools/monero-feasibility).
-The reviewed artifact links only system libraries. A rebuild with another compiler
+The decoder source is maintained in
+[`native/monero-host-adapter/host-adapter.cpp`](../native/monero-host-adapter/host-adapter.cpp).
+It accepts Core's zero-change sweep shape only when exactly two outputs contain
+one positive recipient and one standard-address zero-value dummy matching the
+authenticated construction's zero change destination. Dummy outputs retain their
+position and are never classified as wallet change. Positive change still requires
+the recognized wallet subaddress and exact authenticated amount.
+
+From the repository root, rebuild with explicitly supplied pinned archives:
+
+```sh
+python3 scripts/build-monero-host-adapter.py \
+  --archive-dir /path/to/pinned-archives \
+  --work-dir /path/to/new-build-directory \
+  --output /path/to/new/monero-host-adapter
+```
+
+The build script compiles Core and static Boost, OpenSSL and sodium code for macOS 13.0 and
+checks that the final executable links only approved system libraries. It records
+source, compiler, SDK, dependency and artifact evidence in the build directory.
+The bundled `monero-tools/HOST-ADAPTER-LICENSES.txt` preserves the dependency notices.
+A rebuild with another compiler
 or dependency set must receive its own artifact review and manifest pin; matching
 the version label does not qualify different bytes. Native public-fixture tests
 run whenever the reviewed adapter is staged, or via the explicit

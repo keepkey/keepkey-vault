@@ -51,7 +51,8 @@ const moneroCopy = existsSync(moneroCliSource) && existsSync(moneroRpcSource)
     ? { [moneroCliSource]: moneroSidecar,
         [moneroRpcSource]: `monero-tools/${moneroRpc}`,
         [moneroMetadataSource]: "monero-tools/monero-tools.json",
-        ...(verifiedMoneroAdapter ? { [moneroAdapterSource]: "monero-tools/monero-host-adapter" } : {}),
+        ...(verifiedMoneroAdapter ? { [moneroAdapterSource]: "monero-tools/monero-host-adapter",
+            'monero-cli/host-adapter-LICENSES.txt': 'monero-tools/HOST-ADAPTER-LICENSES.txt' } : {}),
         ...(existsSync(moneroDaemonSource) ? { [moneroDaemonSource]: `monero-tools/${moneroDaemon}` } : {}),
         [`${moneroVendor}/LICENSE`]: "monero-tools/LICENSE" } : {};
 // Development-only research artifacts (build-signed.ts refuses this flag): the receive-only and/or

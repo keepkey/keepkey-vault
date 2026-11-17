@@ -355,7 +355,8 @@ export class MoneroWatchService {
       created = await session.rpc.call('transfer', { destinations: [{ address: request.address, amount: BigInt(request.amountAtomic) }],
         account_index: 0, priority: request.priority, ring_size: 16, unlock_time: 0, do_not_relay: true }, 120000)
     } catch (error) {
-      if (error instanceof RpcFailure) throw new PublicError(error.code === -17 ? 'Not enough unlocked XMR for this amount and fee' : 'The watch wallet cannot build this transaction')
+      if (error instanceof RpcFailure) throw new PublicError(error.code === -17 || error.code === -37
+        ? 'Not enough unlocked XMR for this amount and fee' : 'The watch wallet cannot build this transaction')
       throw error
     }
     const unsignedTxset = created.unsigned_txset
