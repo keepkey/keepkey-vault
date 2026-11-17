@@ -18,7 +18,8 @@ mock.module('../../src/mainview/lib/formatting', () => ({ formatBalance: String 
 mock.module('../../src/mainview/lib/signing-errors', () => ({ describeSigningError: (error: Error) => error.message }))
 mock.module('../../src/mainview/lib/sounds', () => ({ playSent() {} }))
 mock.module('../../src/shared/assetLookup', () => ({ getAsset: () => null }))
-mock.module('../../src/shared/address-validation', () => ({ validateAddress: () => ({ valid: true }), knownTokenContract: () => undefined, isBurnAddress: () => false }))
+const { sameAddress } = await import('../../src/shared/address-validation')
+mock.module('../../src/shared/address-validation', () => ({ validateAddress: () => ({ valid: true }), knownTokenContract: () => undefined, isBurnAddress: () => false, sameAddress }))
 for (const name of ['QrScannerOverlay', 'AddressBookPicker', 'AddressIdenticon', 'SaveRecipientDialog', 'DocsLink']) mock.module(`../../src/mainview/components/${name}`, () => ({ [name]: () => null }))
 function deferred() {
   let resolve!: (value: any) => void, reject!: (error: Error) => void
