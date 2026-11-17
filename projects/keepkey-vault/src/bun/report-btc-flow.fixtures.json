@@ -1,0 +1,12 @@
+[
+{"txid":"tx0","blockHeight":498167,"blockTime":1512698088,"fees":"80781","vin":[{"addresses":["ext0"],"value":"158584584"}],"vout":[{"addresses":["ext1"],"value":"157696599"},{"addresses":["own_0_0_0"],"value":"807204"}]},
+{"txid":"tx1","blockHeight":504265,"blockTime":1515982133,"fees":"95340","vin":[{"addresses":["own_0_0_0"],"value":"807204"}],"vout":[{"addresses":["own_1_0_0"],"value":"1000"},{"addresses":["own_0_1_0"],"value":"710864"}]},
+{"txid":"tx2","blockHeight":504267,"blockTime":1515983938,"fees":"81060","vin":[{"addresses":["own_0_1_0"],"value":"710864"}],"vout":[{"addresses":["ext5"],"value":"629804"}]},
+{"txid":"tx3","blockHeight":504336,"blockTime":1516023624,"fees":"94207","vin":[{"addresses":["ext6"],"value":"1764372"}],"vout":[{"addresses":["own_1_0_2"],"value":"1583841"},{"addresses":["ext8"],"value":"86324"}]},
+{"txid":"tx4","blockHeight":504337,"blockTime":1516025368,"fees":"102150","vin":[{"addresses":["own_1_0_2"],"value":"1583841"}],"vout":[{"addresses":["ext5"],"value":"1430941"},{"addresses":["own_1_1_0"],"value":"50750"}]},
+{"txid":"tx5","blockHeight":504380,"blockTime":1516046693,"fees":"94535","vin":[{"addresses":["ext10"],"value":"10000000"}],"vout":[{"addresses":["own_1_0_3"],"value":"1449326"},{"addresses":["ext12"],"value":"8456139"}]},
+{"txid":"tx6","blockHeight":504382,"blockTime":1516047678,"fees":"97610","vin":[{"addresses":["own_1_0_3"],"value":"1449326"}],"vout":[{"addresses":["ext5"],"value":"1289946"},{"addresses":["own_1_1_2"],"value":"61770"}]},
+{"txid":"tx7","blockHeight":974614,"blockTime":1793847223,"fees":"4392","vin":[{"addresses":["own_1_1_2"],"value":"61770"},{"addresses":["own_1_1_0"],"value":"50750"},{"addresses":["own_1_0_0"],"value":"1000"}],"vout":[{"addresses":["ext14"],"value":"109128"},{"addresses":["OP_RETURN (=:ETH.ETH:0xDEST:3632371:keep:30)"],"value":"0"}]},
+{"txid":"tx8","blockHeight":974617,"blockTime":1793849505,"fees":"1176","vin":[{"addresses":["ext14"],"value":"1761537116"},{"addresses":["ext14"],"value":"109128"}],"vout":[{"addresses":["own_1_1_2"],"value":"107522"},{"addresses":["ext14"],"value":"1761537546"},{"addresses":["OP_RETURN (REFUND:TX7)"],"value":"0"}]},
+{"txid":"tx9","blockHeight":974701,"blockTime":1793908633,"fees":"576","vin":[{"addresses":["own_1_1_2"],"value":"107522"}],"vout":[{"addresses":["ext15"],"value":"106946"}]}
+]

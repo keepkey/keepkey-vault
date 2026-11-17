@@ -18,7 +18,7 @@ function Fixture(){
  const [enabled,setEnabled]=useState(true)
  return <Box maxW="1000px" mx="auto" p="4">
   <Flex gap="3" align="center" mb="4"><Text fontSize="12px">Synthetic Zcash UI — no real wallet</Text><Button size="xs" data-testid="toggle-privacy" onClick={async()=>{await rpcRequest('testSetPrivacy',{enabled:!enabled});setEnabled(!enabled);window.dispatchEvent(new Event('keepkey-settings-changed'))}}>Toggle privacy flag</Button></Flex>
-  <AssetPage chain={chain} balance={balance} firmwareVersion={params.has('oldFirmware')?'7.14.0':'7.15.0'} onBack={()=>{}} initialToken={params.has('shielded')?shielded:undefined}
+  <AssetPage chain={chain} balance={balance} firmwareVersion={params.has('oldFirmware')?'7.16.0':'7.17.0'} onBack={()=>{}} initialToken={params.has('shielded')?shielded:undefined}
    initialAction={params.has('legacyPrivacy')?'privacy':params.has('send')?'send':'receive'} watchOnly={params.has('watchOnly')}/>
  </Box>
 }

@@ -11,7 +11,7 @@ import type { RecentActivity } from '../shared/types'
 
 export type TxWatchDeps = {
   /** Rescan one chain from the indexer; resolves to that chain's rows. */
-  scanChain: (chainId: string) => Promise<RecentActivity[]>
+  scanChain: (chainId: string, txids?: string[]) => Promise<RecentActivity[]>
   /** A watched tx just landed in a block — the chain's balance moved. */
   onConfirmed: (chainId: string, txid: string) => void
   requiredConfs: (row: RecentActivity) => number
@@ -85,7 +85,7 @@ export function createTxWatch(deps: TxWatchDeps) {
     const gen = generation
     let rows: RecentActivity[] | null = null
     try {
-      rows = await deps.scanChain(chainId)
+      rows = await deps.scanChain(chainId, [...watched.values()].filter(row=>row.chainId===chainId).map(row=>row.txid))
     } catch (e: any) {
       console.warn(`[tx-watch] ${chainId} rescan failed:`, e?.message || e)
     } finally {

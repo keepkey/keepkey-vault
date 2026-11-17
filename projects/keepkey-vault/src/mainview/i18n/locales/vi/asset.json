@@ -90,5 +90,7 @@
   "invalidAddress": "Địa chỉ không hợp lệ",
   "defiSymbol": "Ký hiệu",
   "multisig": "Đa chữ ký",
-  "cached": "Đã lưu đệm"
+  "cached": "Đã lưu đệm",
+  "defiManagePosition": "Quản lý trên {{protocol}}",
+  "defiFindPool": "Tìm nhóm thanh khoản này trên {{protocol}}"
 }

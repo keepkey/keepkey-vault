@@ -1,6 +1,6 @@
 import { SettingsLayout, useSettingsCategory, type SettingsCategory } from "./SettingsLayout"
 import { useUiTranslation } from "../i18n/ui"
-import { firmwareSupportsMonero, MONERO_MIN_FIRMWARE } from "../../shared/firmware-versions"
+import { supportsMoneroSigning } from "../../shared/monero-capability"
 import { useState, useEffect, useCallback, useRef } from "react"
 import { useFiat } from "../lib/fiat-context"
 import { Box, Flex, Text, VStack, Button, Input, IconButton, StackSeparator } from "@chakra-ui/react"
@@ -541,6 +541,7 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 		try {
 			const result = await rpcRequest<AppSettings>("setAlphaFirmware", { enabled }, 10000)
 			setAppSettings(result)
+			window.dispatchEvent(new Event('keepkey-settings-changed'))
 		} catch (e: any) { console.error("setAlphaFirmware:", e) }
 		setTogglingAlphaFirmware(false)
 	}, [])
@@ -759,8 +760,6 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 				w={{ base: "100vw", md: "760px" }}
 				maxW="100vw"
 				bg="kk.bg"
-				fontFamily="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif"
-				css={{ '& button, & select': { fontFamily: 'inherit' } }}
 				borderLeft="1px solid"
 				borderColor="kk.border"
 				zIndex={Z.drawerPanel}
@@ -1712,8 +1711,8 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
               <Box>
               <Flex justify="space-between" align="center" gap="4">
                 <Flex align="center" gap="3" minW="0"><FeatureIcon kind="monero" /><Box><Text fontSize="md" fontWeight="500" color="kk.textPrimary">{uiText('Monero (XMR)')}</Text>
-                  <Text fontSize="sm" color="kk.textSecondary" mt="0.5">{appSettings.moneroAvailable === false ? uiText('Monero is unavailable in this build.') : !firmwareSupportsMonero(deviceState.firmwareVersion) ? `Needs KeepKey firmware ${MONERO_MIN_FIRMWARE} or newer.` : uiText('Add Monero to your wallet. Manage its node and scan history in Settings → Networks.')}</Text></Box></Flex>
-                <Toggle label={uiText('Monero (XMR)')} checked={appSettings.moneroEnabled} disabled={moneroBusy || appSettings.moneroAvailable === false} onChange={toggleMonero} />
+                  <Text fontSize="sm" color="kk.textSecondary" mt="0.5">{appSettings.moneroAvailable === false ? uiText('Monero is unavailable in this build.') : !supportsMoneroSigning(deviceState.capabilities) && !deviceState.isEmulator ? uiText("Monero signing requires the monero-signing capability on KeepKey.") : uiText('Add Monero to your wallet. Manage its node and scan history in Settings → Networks.')}</Text></Box></Flex>
+                <Toggle label={uiText('Monero (XMR)')} checked={appSettings.moneroEnabled} disabled={moneroBusy || (!appSettings.moneroEnabled && (appSettings.moneroAvailable === false || (!supportsMoneroSigning(deviceState.capabilities) && !deviceState.isEmulator)))} onChange={toggleMonero} />
               </Flex>
               {moneroError && <Text role="alert" fontSize="xs" color="kk.error" mt="2">{moneroError}</Text>}
               </Box>
@@ -1772,8 +1771,8 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 								/>
 							</Flex>}
 
-							{/* Zcash + Hive have no toggles — both turn on automatically on
-							    firmware >= 7.15.0 (derived in bun/index.ts on device ready).
+							{/* Zcash + Hive have no toggles — derived in bun/index.ts on device ready.
+							    Zcash requires firmware >= 7.17.0 and its sidecar; Hive requires >= 7.15.0.
 							    BIP-85 likewise: the Dashboard shows it on firmware >= 7.16.0. */}
 
 							{/* Emulator toggle — dev tool, default off. Supported on macOS

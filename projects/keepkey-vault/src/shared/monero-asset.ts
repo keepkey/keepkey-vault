@@ -1,14 +1,14 @@
 /** What the Monero asset row and page show, as pure decisions (the components only translate them).
  *  The rule throughout: a balance that is not known is "—", never 0. */
 import type { MoneroStatus } from './types'
-import { firmwareSupportsMonero } from './firmware-versions'
+import { supportsMoneroSigning } from './monero-capability'
 import { moneroAddressKind, parseXmrAmount } from './monero-address'
 
 const ATOMIC_UNITS = 1_000_000_000_000n
 
-/** The XMR row is shown with the Monero setting on and firmware 7.17+, on a connected (not saved) multi-coin wallet. */
-export function moneroChainVisible(input: { settingEnabled: boolean; firmwareVersion?: string; watchOnly?: boolean; bitcoinOnly?: boolean }): boolean {
-  return input.settingEnabled && firmwareSupportsMonero(input.firmwareVersion) && !input.watchOnly && !input.bitcoinOnly
+/** Connected capability firmware or the legacy emulator; the backend separately authenticates research signing builds. */
+export function moneroChainVisible(input: { settingEnabled: boolean; capabilities?: readonly number[]; isEmulator?: boolean; watchOnly?: boolean; bitcoinOnly?: boolean }): boolean {
+  return input.settingEnabled && (supportsMoneroSigning(input.capabilities) || input.isEmulator === true) && !input.watchOnly && !input.bitcoinOnly
 }
 
 /** All twelve decimals, never through Number. */
@@ -30,7 +30,7 @@ export interface MoneroBalanceView {
   balanceAtomic: string | null
   unlockedAtomic: string | null
   lockedAtomic: string | null
-  /** 0..1 while scanning, when the wallet has scanned some blocks toward a known tip. */
+  /** 0..<1 while scanning toward a valid tip; caught-up-but-not-ready remains indeterminate. */
   progress?: number
   walletHeight?: number
   daemonHeight?: number
@@ -41,32 +41,51 @@ export interface MoneroBalanceView {
   spendVerified: boolean
   /** A balance is shown but its last refresh is older than STALE_AFTER_MS (or unknown): say when it is from. */
   stale: boolean
+  /** Persisted display snapshot; never proof of current spendability or signing readiness. */
+  lastKnown?: boolean
 }
 
 /** The watch wallet refreshes every 15 s; older than this, a figure is labelled with its time. */
 export const STALE_AFTER_MS = 120_000
 
+/** Wallet scanning covers the selected history range, not all blocks since genesis.
+ * A zero/unreported height, invalid range, or a caught-up wallet still waiting
+ * for its ready status cannot support a remaining-work percentage. */
+export function moneroWalletScanProgress({ walletHeight, daemonHeight, restoreHeight = 0 }: {
+  walletHeight?: number; daemonHeight?: number; restoreHeight?: number
+}): number | undefined {
+  if (typeof walletHeight !== 'number' || !Number.isSafeInteger(walletHeight) || walletHeight <= 0 ||
+      typeof daemonHeight !== 'number' || !Number.isSafeInteger(daemonHeight) || daemonHeight <= 0 ||
+      !Number.isSafeInteger(restoreHeight) || restoreHeight < 0 || daemonHeight <= restoreHeight || walletHeight >= daemonHeight) return undefined
+  return Math.max(0, (walletHeight - restoreHeight) / (daemonHeight - restoreHeight))
+}
+
 /**
- * - not connected / loading: "—";
- * - scanning toward the tip: "—" plus progress (a part-scanned balance is not the balance);
+ * - startup / scanning: the wallet-scoped saved balance when available, otherwise "—";
+ * - partial live scans never overwrite a saved figure;
  * - node or monitor down: the last known balance (or "—" if there never was one), labelled with its time;
  * - ready: the balance, with spendVerified false until key images are synced.
  */
 export function moneroBalanceView(status: MoneroStatus | null, refreshError?: string | null, now = Date.now()): MoneroBalanceView {
   const unknown = (state: MoneroBalanceState): MoneroBalanceView => ({ state, balanceAtomic: null, unlockedAtomic: null, lockedAtomic: null, spendVerified: false, stale: false })
   if (!status) return unknown(refreshError ? 'unreachable' : 'loading')
-  if (!status.available) return unknown('not-connected')
   const heights = { walletHeight: status.walletHeight, daemonHeight: status.daemonHeight, restoreHeight: status.restoreHeight }
-  const scanned = status.walletHeight > 0
-  const state: MoneroBalanceState = refreshError ? 'unreachable' : status.syncState === 'not-connected' ? 'scanning' : status.syncState
+  const scanned = status.available && status.walletHeight > 0
+  const state: MoneroBalanceState = refreshError ? 'unreachable' : !status.available ? status.syncState === 'unreachable' ? 'unreachable' : 'not-connected'
+    : status.syncState === 'not-connected' ? 'scanning' : status.syncState
   const caughtUp = scanned && status.daemonHeight !== undefined && status.walletHeight >= status.daemonHeight
   const showBalance = scanned && (state === 'ready' || state === 'unreachable' || caughtUp)
-  const balance = BigInt(status.balanceAtomic), unlocked = BigInt(status.unlockedBalanceAtomic)
-  let progress: number | undefined
-  if (state === 'scanning' && scanned && status.daemonHeight !== undefined) {
-    const start = status.restoreHeight ?? 0, span = status.daemonHeight - start
-    progress = span > 0 ? Math.min(1, Math.max(0, (status.walletHeight - start) / span)) : 1
+  const progress = state === 'scanning' ? moneroWalletScanProgress(heights) : undefined
+  // A saved observation is shown during startup, incomplete scans and failures.
+  // Only a fresh, authoritative ready result may replace it (including zero).
+  const cached = status.cachedBalance
+  const useCached = cached && !(state === 'ready' && showBalance && (status.spendStateKnown || status.balanceAtomic === '0'))
+  if (useCached) return {
+    state, ...heights, ...(progress === undefined ? {} : { progress }), updatedAt: cached.updatedAt,
+    balanceAtomic: cached.balanceAtomic, unlockedAtomic: null, lockedAtomic: null,
+    spendVerified: false, stale: true, lastKnown: true,
   }
+  const balance = BigInt(status.balanceAtomic), unlocked = BigInt(status.unlockedBalanceAtomic)
   return {
     state, ...heights, ...(progress === undefined ? {} : { progress }), ...(status.updatedAt ? { updatedAt: status.updatedAt } : {}),
     balanceAtomic: showBalance ? balance.toString() : null,

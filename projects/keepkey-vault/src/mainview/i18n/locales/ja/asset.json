@@ -91,5 +91,7 @@
   "defiNetwork": "ネットワーク",
   "defiSymbol": "シンボル",
   "multisig": "マルチシグ",
-  "cached": "キャッシュ"
+  "cached": "キャッシュ",
+  "defiManagePosition": "{{protocol}}で管理",
+  "defiFindPool": "{{protocol}}でこのプールを探す"
 }

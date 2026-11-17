@@ -1,6 +1,7 @@
 /** Managed, watch-only Monero CLI worker. Private IPC payloads are never logged. */
 import { lstatSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
+import { verifiedHostAdapterIn } from '../../monero-cli/src/host-adapter'
 import { MAX_IPC_LINE, MONERO_VERSION, PUBLIC_ERRORS, SIDECAR_VERSION, validateConfiguration, validateKeyImageImport, validateKeyImageResult,
   validateOutputs, validateRelayRequest, validateTransferDraft, validateTransferRequest, validateTxLookup, validateTxLookupRequest, validateWalletStatus,
   type MoneroOutputRecord, type MoneroTxLookup, type MoneroSidecarStatus, type MoneroTransferDraft, type MoneroWalletStatus, type MoneroWatchConfiguration } from '../../monero-cli/src/protocol'
@@ -56,6 +57,18 @@ function workerCommand(): string[] {
 /** Capability check only; does not spawn a process or request wallet keys. */
 export function isMoneroSidecarAvailable(): boolean {
   try { workerCommand(); return true } catch { return false }
+}
+
+/** Device-free readiness: a verified decoder must exist before advertising receive/send.
+ * The worker independently verifies wallet RPC and its version before any device key export. */
+export function hasMoneroSigningTools(): boolean {
+  if (!isMoneroSidecarAvailable()) return false
+  const platform = `${process.platform}-${process.arch}`
+  const roots = process.env.MONERO_TOOLS_DIR ? [resolve(process.env.MONERO_TOOLS_DIR)] : [
+    resolve(import.meta.dir, '../monero-tools'), join(dirname(process.execPath), 'monero-tools'),
+    resolve(import.meta.dir, '../../monero-cli/vendor', platform), resolve(process.cwd(), 'monero-cli/vendor', platform),
+  ]
+  return roots.some(root => !!verifiedHostAdapterIn(root))
 }
 
 export function createMoneroSidecarManager(options: {
@@ -206,6 +219,7 @@ export function createMoneroSidecarManager(options: {
       if (result.address !== walletAddress) throw new Error('The Monero watch wallet identity changed')
       return result
     },
+    signingToolsReady: (): boolean => status.state === 'ready' && status.sendReady === true,
     sendReady: (): boolean => status.state === 'ready' && status.configured && status.sendReady === true,
     async exportOutputs(): Promise<MoneroOutputRecord[]> {
       if (!walletAddress || !status.configured) throw new Error('Connect a Monero watch wallet first')
@@ -240,6 +254,7 @@ export const configureMoneroWatch = manager.configureWatch
 export const getMoneroWalletStatus = manager.getWalletStatus
 export const refreshMoneroWatch = manager.refresh
 export const isMoneroSendReady = manager.sendReady
+export const isMoneroSignerWorkerReady = manager.signingToolsReady
 export const exportMoneroOutputs = manager.exportOutputs
 export const importMoneroKeyImages = manager.importKeyImages
 export const createMoneroTransfer = manager.createTransfer

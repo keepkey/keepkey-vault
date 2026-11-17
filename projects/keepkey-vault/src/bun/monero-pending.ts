@@ -3,6 +3,7 @@
  *  building a second, different payment could pay twice if the first one did reach the network. */
 import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { validTransactionKeys, type MoneroTransactionKeys } from './monero-transaction-keys'
 import { parseSignedTransaction } from './monero-wire'
 
 export interface MoneroPendingBroadcast {
@@ -11,6 +12,7 @@ export interface MoneroPendingBroadcast {
   txid: string
   txHex: string
   createdAt: string
+  transactionKeys?: MoneroTransactionKeys
   /** The node the bytes were relayed to (a later check against another node is said to be one). */
   node?: string
 }
@@ -26,6 +28,8 @@ export interface MoneroDiscardGuard {
 export interface MoneroPendingStore {
   load(): MoneroPendingBroadcast[]
   save(records: MoneroPendingBroadcast[]): void
+  loadSent?(): MoneroPendingBroadcast[]
+  saveSent?(records: MoneroPendingBroadcast[]): void
   loadGuards?(): MoneroDiscardGuard[]
   saveGuards?(guards: MoneroDiscardGuard[]): void
 }
@@ -38,11 +42,13 @@ export function validPendingBroadcast(value: unknown): MoneroPendingBroadcast | 
   const v = value as MoneroPendingBroadcast
   if (!v || typeof v !== 'object' || typeof v.wallet !== 'string' || !WALLET.test(v.wallet) || typeof v.txid !== 'string' ||
       !/^[0-9a-f]{64}$/.test(v.txid) || typeof v.txHex !== 'string' || !/^(?:[0-9a-f]{2}){1,16384}$/.test(v.txHex) ||
-      typeof v.createdAt !== 'string' || !Number.isFinite(Date.parse(v.createdAt)) || (v.node !== undefined && !validNode(v.node))) return null
+      typeof v.createdAt !== 'string' || !Number.isFinite(Date.parse(v.createdAt)) || (v.node !== undefined && !validNode(v.node)) ||
+      (v.transactionKeys !== undefined && !validTransactionKeys(v.transactionKeys))) return null
   try {
     if (parseSignedTransaction(Uint8Array.from(Buffer.from(v.txHex, 'hex'))).hash !== v.txid) return null
   } catch { return null }
-  return { wallet: v.wallet, txid: v.txid, txHex: v.txHex, createdAt: v.createdAt, ...(v.node === undefined ? {} : { node: v.node }) }
+  return { wallet: v.wallet, txid: v.txid, txHex: v.txHex, createdAt: v.createdAt,
+    ...(v.transactionKeys ? {transactionKeys: {txKey:v.transactionKeys.txKey,additionalTxKeys:[...v.transactionKeys.additionalTxKeys]}} : {}), ...(v.node === undefined ? {} : { node: v.node }) }
 }
 const validNode = (node: unknown) => typeof node === 'string' && node.length <= 2048 && /^https?:\/\//.test(node)
 export function validDiscardGuard(value: unknown): MoneroDiscardGuard | null {
@@ -55,7 +61,7 @@ export function validDiscardGuard(value: unknown): MoneroDiscardGuard | null {
 
 /** One owner-only JSON file (directory 0700, file 0600), replaced atomically so a crash never leaves half a record. */
 export function createFilePendingStore(directory: string): MoneroPendingStore {
-  const file = join(directory, 'monero-pending-broadcast.json'), guardFile = join(directory, 'monero-discarded-broadcast.json')
+  const file = join(directory, 'monero-pending-broadcast.json'), guardFile = join(directory, 'monero-discarded-broadcast.json'), sentFile = join(directory, 'monero-sent-transactions.json')
   const write = (target: string, value: unknown) => {
     mkdirSync(directory, { recursive: true, mode: 0o700 })
     chmodSync(directory, 0o700)
@@ -65,6 +71,14 @@ export function createFilePendingStore(directory: string): MoneroPendingStore {
     renameSync(temporary, target)
   }
   return {
+    loadSent() {
+      if (!existsSync(sentFile)) return []
+      try {
+        const parsed = JSON.parse(readFileSync(sentFile, 'utf8'))
+        return (Array.isArray(parsed?.records) ? parsed.records : []).map(validPendingBroadcast).filter((r: MoneroPendingBroadcast | null): r is MoneroPendingBroadcast => !!r)
+      } catch { throw new Error('The Monero payment-proof records could not be read') }
+    },
+    saveSent(records) { write(sentFile, {version:1, records}) },
     loadGuards() {
       if (!existsSync(guardFile)) return []
       try {

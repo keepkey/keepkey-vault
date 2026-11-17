@@ -4,7 +4,7 @@
  * checksum is verified here: EIP-55 (mixed-case EVM, error 'invalidEvmChecksum'), base58check
  * (BTC/LTC/DOGE/DASH/DGB/BCH-legacy/Zcash-t/Tron), XRP's base58check,
  * bech32 / bech32m (BIP-173 / BIP-350 segwit, Cosmos, Zcash shielded) and
- * Bitcoin Cash cashaddr. Solana has no checksum: it must decode to 32 bytes.
+ * Bitcoin Cash cashaddr and TON's CRC16-XMODEM. Solana has no checksum: it must decode to 32 bytes.
  */
 import { base58, base58xrp, bech32, bech32m, createBase58check } from '@scure/base'
 import { sha256 } from '@noble/hashes/sha2'
@@ -129,9 +129,17 @@ function validateUtxoAddress(addr: string, chain: ChainDef): ValidationResult {
       // X… 0x4c, P2SH 7… 0x10
       return result(isBase58Hash(addr, [[0x4c], [0x10]]), 'invalidDashAddress')
 
-    case 'zcash':
+    case 'zcash': {
+      // Recognise valid ZIP-320 TEX addresses without advertising an unqualified
+      // send route or misreporting a supported encoding as a checksum typo.
+      if (/^tex1/i.test(addr)) {
+        const tex = bech32Payload(addr, 'tex', bech32m)
+        if (tex === 'checksum') return BAD_CHECKSUM
+        return fail(tex && tex.length === 20 ? 'zcashTexNotSupported' : 'invalidZecAddress')
+      }
       // Transparent t1… (0x1cb8) and t3… (0x1cbd)
       return result(isBase58Hash(addr, [[0x1c, 0xb8], [0x1c, 0xbd]]), 'invalidZecAddress')
+    }
 
     case 'digibyte':
       if (/^dgb1/i.test(addr)) return result(segwitCheck(addr, 'dgb'), 'invalidDgbAddress')
@@ -225,7 +233,25 @@ function validateCosmosAddress(addr: string, chain: ChainDef): ValidationResult 
 
 // ── XRP ─────────────────────────────────────────────────────────────────
 
+/** XRP X-addresses carry a destination tag that must never be silently dropped. */
+function isXrpXAddress(addr: string): boolean {
+  if (!/^[XT]/.test(addr)) return false
+  let raw: Uint8Array
+  try { raw = base58xrp.decode(addr) } catch { return false }
+  // Prefix + 20-byte account + tag flag + eight tag/reserved bytes + checksum.
+  if (raw.length !== 35) return false
+  const mainnet = raw[0] === 0x05 && raw[1] === 0x44
+  const testnet = raw[0] === 0x04 && raw[1] === 0x93
+  if (!mainnet && !testnet) return false
+  if (raw[22] !== 0 && raw[22] !== 1) return false
+  const reserved = raw.slice(raw[22] === 0 ? 23 : 27, 31)
+  if (reserved.some(byte => byte !== 0)) return false
+  const check = sha256(sha256(raw.slice(0, 31)))
+  return check.slice(0, 4).every((byte, i) => byte === raw[31 + i])
+}
+
 function validateXrpAddress(addr: string): ValidationResult {
+  if (isXrpXAddress(addr)) return fail('xrpXAddressNotSupported')
   if (!addr.startsWith('r')) return fail('invalidXrpAddress')
   let raw: Uint8Array
   try { raw = base58xrp.decode(addr) } catch { return fail('invalidXrpAddress') }
@@ -252,13 +278,34 @@ function validateTronAddress(addr: string): ValidationResult {
 
 // ── TON ─────────────────────────────────────────────────────────────────
 
+/** CRC16-XMODEM (poly 0x1021, init 0), the TON user-friendly checksum. */
+function crc16Xmodem(bytes: Uint8Array): number {
+  let crc = 0
+  for (const byte of bytes) {
+    crc ^= byte << 8
+    for (let i = 0; i < 8; i++) crc = crc & 0x8000 ? ((crc << 1) ^ 0x1021) & 0xffff : (crc << 1) & 0xffff
+  }
+  return crc
+}
+
+function tonFriendlyBytes(addr: string): Uint8Array | null {
+  if (!/^[A-Za-z0-9+/_-]{48}$/.test(addr)) return null
+  try {
+    const decoded = atob(addr.replace(/-/g, '+').replace(/_/g, '/'))
+    return Uint8Array.from(decoded, char => char.charCodeAt(0))
+  } catch { return null }
+}
+
 function validateTonAddress(addr: string): ValidationResult {
-  // Raw: 0:hex (66 chars), User-friendly: EQ/UQ + base64 (48 chars), or raw hex
+  // Raw workchain-0 addresses carry no checksum.
   if (/^0:[0-9a-fA-F]{64}$/.test(addr)) return OK
-  if ((addr.startsWith('EQ') || addr.startsWith('UQ')) && addr.length === 48) return OK
-  // Newer formats
-  if (/^[A-Za-z0-9_-]{46,48}$/.test(addr)) return OK
-  return fail('invalidTonAddress')
+  // Tag, signed workchain, account hash, big-endian CRC. Testnet-only tags
+  // must not become mainnet recipients. The supported workchains are 0 and -1.
+  const bytes = tonFriendlyBytes(addr)
+  if (!bytes || bytes.length !== 36) return fail('invalidTonAddress')
+  if ((bytes[0] !== 0x11 && bytes[0] !== 0x51) || (bytes[1] !== 0x00 && bytes[1] !== 0xff)) return fail('invalidTonAddress')
+  const crc = crc16Xmodem(bytes.subarray(0, 34))
+  return bytes[34] === crc >> 8 && bytes[35] === (crc & 0xff) ? OK : BAD_CHECKSUM
 }
 
 // ── Zcash shielded ──────────────────────────────────────────────────────
@@ -355,15 +402,35 @@ export function validateContactAddress(address: string, chain: ChainDef, existin
  * and zcash-shielded do): valid on any of them is a valid contact.
  */
 export function validateContactOnNetwork(address: string, chains: ChainDef[], existing?: { kind: string } | null): ValidationResult {
-  const fits = chains.find(c => validateAddress(address, c).valid) ?? chains[0]
+  const fits = chains.find(c => validateAddress(address, c).valid)
+    ?? chains.find(c => validateAddress(address, c).error === 'invalidChecksum')
+    ?? chains[0]
   return fits ? validateContactAddress(address, fits, existing) : fail('invalidAddress')
 }
 
-/** Two spellings of one address: hex and bech32 ignore case, base58 does not; BCH's cashaddr prefix is optional. */
-export function sameAddress(a: string | null | undefined, b: string | null | undefined): boolean {
-  const bare = (v: string) => /^bitcoincash:/i.test(v) ? v.slice('bitcoincash:'.length) : v
-  const x = bare(a?.trim() || ''), y = bare(b?.trim() || '')
+/** Compare address identities, without replacing recipient validation. Only
+ * checksummed bech32/cashaddr and EVM hex may ignore case. A Base58 address can
+ * resemble a bech32 string, so a shape-only test can equate different wallets.
+ * Raw bech32 also overlaps Base58, so case folding requires a known chain;
+ * unknown networks stay exact except for hex or an explicit BCH namespace. */
+export function sameAddress(a: string | null | undefined, b: string | null | undefined, chain?: Pick<ChainDef, 'id' | 'chainFamily'>): boolean {
+  const x = a?.trim() || '', y = b?.trim() || ''
   if (!x || !y) return false
-  const caseless = (v: string) => /^0x[0-9a-f]+$/i.test(v) || /^[a-z]{1,83}1[02-9ac-hj-np-z]+$/i.test(v)
-  return caseless(x) && caseless(y) ? x.toLowerCase() === y.toLowerCase() : x === y
+  const explicitBch = !chain && (/^bitcoincash:/i.test(x) || /^bitcoincash:/i.test(y))
+  const canonical = (value: string): string => {
+    if ((!chain || chain.chainFamily === 'evm') && HEX40.test(value)) return 'hex:' + value.toLowerCase()
+    if ((chain?.id === 'bitcoincash' || explicitBch) && cashaddrCheck(value) === true) {
+      return 'cashaddr:' + value.toLowerCase().replace(/^bitcoincash:/, '')
+    }
+    const hrp = chain?.chainFamily === 'utxo'
+      ? ({ bitcoin: 'bc', litecoin: 'ltc', digibyte: 'dgb' } as Record<string, string>)[chain.id] : undefined
+    const supportsBech32 = !!chain && (!!hrp || chain.chainFamily === 'cosmos' || chain.chainFamily === 'zcash-shielded')
+    const lower = value.toLowerCase()
+    if (supportsBech32 && (value === lower || value === value.toUpperCase())) {
+      const decoded = bech32.decodeUnsafe(lower, false) || bech32m.decodeUnsafe(lower, false)
+      if (decoded && (!hrp || decoded.prefix === hrp)) return 'bech32:' + lower
+    }
+    return 'exact:' + value
+  }
+  return canonical(x) === canonical(y)
 }

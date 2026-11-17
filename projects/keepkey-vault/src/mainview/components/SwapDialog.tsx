@@ -16,11 +16,12 @@ import { formatBalance } from "../lib/formatting"
 import { formatEvmFeePaid } from "../lib/evm-fee-display"
 import { isTokenCaip } from "../lib/asset-utils"
 import { useFiat } from "../lib/fiat-context"
-import { normalizeAmountInput, decimalAmount } from '../../shared/locale'
+import { normalizeAmountInput, usdToCryptoAmount } from '../../shared/locale'
+import { canonicalSwapAmount, quantizeComputedSwapAmount, swapAmountExceedsPrecision, swapAssetDecimals } from '../../shared/swap-amount'
 import { AssetIcon } from "./AssetIcon"
 import { CHAINS, getExplorerTxUrl, getExplorerBlockUrl } from "../../shared/chains"
 import type { ChainDef } from "../../shared/chains"
-import { nativeMaxSpendableAmount, normalizeDecimals, tokenMaxSpendableAmount } from "../../shared/max-send"
+import { decimalToBaseUnits, nativeMaxSpendableAmount, normalizeDecimals, tokenMaxSpendableAmount } from "../../shared/max-send"
 import { getAssetIcon } from "../../shared/assetLookup"
 import { isBurnAddress, sameAddress, validateAddress } from "../../shared/address-validation"
 import { balanceUnverifiedReason, isBalanceUnverified } from "../../shared/balance-display-state"
@@ -1735,6 +1736,8 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
     return tokenMaxSpendableAmount(fromBalance, fromAsset.decimals)
   }, [fromAsset, fromBalance])
 
+  const fromAmountDecimals = useMemo(() => fromAsset ? swapAssetDecimals(fromAsset) : null, [fromAsset])
+
   /* Low-gas pre-flight for TOKEN swaps: fees are paid in the source chain's
    * NATIVE asset, so a token swap from a dust-native account is guaranteed to
    * die at broadcast (e.g. TRON "Account resource insufficient error") — after
@@ -1767,11 +1770,15 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
    * all other MAX sends, isMax remains true so the backend's chain-aware fee
    * math runs. */
   const sendAmount = useMemo(() => {
-    if (!isMax) return normalizeAmountInput(amount, locale, i18n.language) ?? ''
+    if (!isMax) {
+      const canonical = normalizeAmountInput(amount, locale, i18n.language)
+      return canonical === null ? '' : canonicalSwapAmount(canonical, fromAmountDecimals) ?? ''
+    }
     // `|| '0'` here meant an unverifiable balance submitted a 0-amount MAX swap.
     // Empty instead: no amount, so nothing downstream quotes or signs one.
-    return nativeFeeReservedMaxAmount ?? tokenPrecisionReservedMaxAmount ?? (fromBalance ?? '')
-  }, [isMax, amount, locale, i18n.language, nativeFeeReservedMaxAmount, tokenPrecisionReservedMaxAmount, fromBalance])
+    const computed = nativeFeeReservedMaxAmount ?? tokenPrecisionReservedMaxAmount ?? fromBalance
+    return computed === null ? '' : quantizeComputedSwapAmount(computed, fromAmountDecimals) ?? ''
+  }, [isMax, amount, locale, i18n.language, nativeFeeReservedMaxAmount, tokenPrecisionReservedMaxAmount, fromBalance, fromAmountDecimals])
 
   const sendIsMax = isMax && nativeFeeReservedMaxAmount === null && tokenPrecisionReservedMaxAmount === null
   const quotedSendAmount = quote?.netFromAmount ?? sendAmount
@@ -1931,25 +1938,26 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
 
     const balNum = parseFloat(fromBalance)
     if (balNum <= 0) return
-    const balUsd = balNum * fromPriceUsd
-
-    const cryptoAmount = 100 / fromPriceUsd
+    if (fromAmountDecimals === null) return
+    const formatted = usdToCryptoAmount('100', fromPriceUsd, fromAmountDecimals)
     // The reserve-aware safe max already subtracts the chain's fee/rent
     // reserve (e.g. 0.01 SOL). A "$100 default" must never exceed it, or the
     // swap drains the reserve and reverts on-chain ("insufficient lamports").
     // When $100-worth meets/exceeds the safe max, fall back to MAX — which
     // clamps to the reserve-aware amount. For chains without a frontend
     // reserve (UTXO/Cosmos/tokens) safeMax == full balance, so this only fires
-    // when balUsd <= 100, identical to the prior behavior.
-    const safeMax = parseFloat(maxSpendableAmount(fromAsset, fromBalance, 'safe'))
-    if (balUsd <= 100 || (Number.isFinite(safeMax) && safeMax > 0 && cryptoAmount >= safeMax)) {
+    // when the balance does not exceed $100 worth at the asset's precision.
+    const safeMax = quantizeComputedSwapAmount(maxSpendableAmount(fromAsset, fromBalance, 'safe'), fromAmountDecimals)
+    const defaultUnits = decimalToBaseUnits(formatted, fromAmountDecimals)
+    const safeMaxUnits = safeMax === null ? null : decimalToBaseUnits(safeMax, fromAmountDecimals)
+    if (defaultUnits === null || safeMaxUnits === null) return
+    if (safeMaxUnits <= defaultUnits) {
       setIsMax(true)
       setMaxReserveMode('safe')
     } else {
-      const formatted = decimalAmount(cryptoAmount, 6)
       handleCryptoChange(formatted)
     }
-  }, [fromAsset, fromPriceUsd, fromBalance, amount, isMax, handleCryptoChange])
+  }, [fromAsset, fromPriceUsd, fromBalance, amount, isMax, handleCryptoChange, fromAmountDecimals])
 
   // Bidirectional conversion: fiat → crypto
   const handleFiatChange = useCallback((v: string) => {
@@ -1958,17 +1966,11 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
     setIsMax(false)
     setMaxReserveMode('safe')
     if (hasFromPrice && v) {
-      const n = canonical === null ? NaN : Number(canonical)
-      if (!isNaN(n)) {
-        const crypto = n / fromPriceUsd
-        setAmount(decimalAmount(crypto))
-      } else {
-        setAmount("")
-      }
+      setAmount(canonical === null || fromAmountDecimals === null ? '' : usdToCryptoAmount(canonical, fromPriceUsd, fromAmountDecimals))
     } else {
       setAmount("")
     }
-  }, [hasFromPrice, fromPriceUsd, locale, i18n.language])
+  }, [hasFromPrice, fromPriceUsd, locale, i18n.language, fromAmountDecimals])
 
   const toggleInputMode = useCallback(() => {
     setInputMode(prev => prev === 'crypto' ? 'fiat' : 'crypto')
@@ -2102,7 +2104,8 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
   const maxAmountReady = isMax && !isNaN(parseFloat(sendAmount)) && parseFloat(sendAmount) > 0
   const enteredAmount = inputMode === 'fiat' ? fiatAmount : amount
   const invalidAmountInput = !isMax && enteredAmount !== '' && normalizeAmountInput(enteredAmount, locale, i18n.language) === null
-  const manualAmountReady = !invalidAmountInput && canonicalAmount !== null && Number.isFinite(amountNum) && amountNum > 0
+  const amountTooPrecise = !isMax && canonicalAmount !== null && swapAmountExceedsPrecision(canonicalAmount, fromAmountDecimals)
+  const manualAmountReady = !invalidAmountInput && !amountTooPrecise && !!sendAmount && canonicalAmount !== null && Number.isFinite(amountNum) && amountNum > 0
   const validAmount = isMax ? (maxAmountReady && !nativeMaxInsufficient && !tokenMaxInsufficient) : manualAmountReady
   // SAFETY: never quote with an xpub as the destination. Pioneer will accept
   // it and substitute a self-derived address, but funds would land at an
@@ -4725,7 +4728,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                           )}
                           <Input
                             inputMode="decimal"
-                            aria-invalid={invalidAmountInput || undefined}
+                            aria-invalid={invalidAmountInput || amountTooPrecise || undefined}
                             value={isMax ? (quotedSendAmount ? formatBalance(quotedSendAmount) : 'MAX') : (inputMode === 'crypto' ? amount : fiatAmount)}
                             onChange={(e) => { if (isMax) { setIsMax(false); setMaxReserveMode('safe') } inputMode === 'crypto' ? handleCryptoChange(e.target.value) : handleFiatChange(e.target.value) }}
                             placeholder={inputMode === 'fiat' ? '0.00' : t("amountPlaceholder")}
@@ -4770,6 +4773,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                         )}
                       </Flex>
                       {invalidAmountInput && <Text fontSize="10px" color="kk.error" mt="1">{t('invalidAmount', { ns: 'send', defaultValue: 'Enter an ungrouped decimal amount, for example 1.5. Thousands separators are not accepted.' })}</Text>}
+                      {amountTooPrecise && fromAsset && <Text fontSize="10px" color="kk.error" mt="1">{t('tooManyDecimals', { ns: 'send', symbol: fromAsset.symbol, decimals: fromAmountDecimals })}</Text>}
                       {exceedsBalance && (
                         <Text fontSize="10px" color="kk.error" mt="1" fontWeight="600">{t("insufficientBalance")}</Text>
                       )}

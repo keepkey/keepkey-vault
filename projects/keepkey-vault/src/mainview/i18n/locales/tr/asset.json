@@ -91,5 +91,7 @@
   "defiNetwork": "Ağ",
   "defiSymbol": "Sembol",
   "multisig": "Çoklu imza",
-  "cached": "Önbellekte"
+  "cached": "Önbellekte",
+  "defiManagePosition": "{{protocol}} üzerinde yönet",
+  "defiFindPool": "Bu havuzu {{protocol}} üzerinde bul"
 }

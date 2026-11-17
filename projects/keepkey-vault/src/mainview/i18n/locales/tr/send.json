@@ -59,6 +59,8 @@
 	"invalidCosmosLength": "Geçersiz Cosmos adres uzunluğu",
 	"invalidCosmosAddress": "Geçersiz Cosmos adresi",
 	"invalidXrpAddress": "Geçersiz XRP adresi — r ile başlamalıdır",
+	"xrpXAddressNotSupported": "X adresleri henüz desteklenmiyor. r ile başlayan klasik adresi kullanın ve hedef etiketini ayrıca girin.",
+	"zcashTexNotSupported": "TEX adreslerine (tex1…) henüz bu ekrandan ödeme yapılamıyor.",
 	"invalidSolanaAddress": "Geçersiz Solana adresi — 32-44 base58 karakter olmalıdır",
 	"invalidTronAddress": "Geçersiz Tron adresi — T ile başlamalıdır (34 karakter)",
 	"invalidTonAddress": "Geçersiz TON adresi",

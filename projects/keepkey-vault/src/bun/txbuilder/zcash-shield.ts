@@ -13,6 +13,7 @@
 import { sendCommand, isSidecarReady, startSidecar, getCachedFvk, getScanState, beginZcashSend, endZcashSend } from "../zcash-sidecar"
 import { initializeOrchardFromDevice } from "./zcash-shielded"
 import { summarizeZcashMaturity, filterSpendableZcashUtxos, zcashUtxoValueZat, ZCASH_MIN_CONFIRMATIONS } from "../../shared/zcash-maturity"
+import { ZCASH_NU7_MIN_FIRMWARE } from '../../shared/zcash-nu7'
 import { maxShieldable, planShieldBatches } from "./zcash-batching"
 
 /** Compute P2PKH scriptPubKey from compressed pubkey hex: OP_DUP OP_HASH160 <20> <HASH160> OP_EQUALVERIFY OP_CHECKSIG */
@@ -435,7 +436,7 @@ export async function signAndBroadcastShield(
 			throw new Error(
 				"Shielding requires firmware with transparent input signing support (ZcashTransparentInput). " +
 				"Your firmware does not implement this message type yet. " +
-				"Please update to firmware >= 7.15.0 when available."
+				`Vault requires firmware >= ${ZCASH_NU7_MIN_FIRMWARE} for Zcash; physical-device shielding is not yet qualified.`
 			)
 		}
 		throw e

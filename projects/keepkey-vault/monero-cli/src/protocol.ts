@@ -136,10 +136,12 @@ const SEND_ADDRESS = /^[48][123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrst
 
 /** Fixed, credential-free diagnostics the worker may forward verbatim. */
 export const PUBLIC_ERRORS = [
-  'The Monero signing adapter is not installed',
+  'This Vault build is missing the Monero tools needed to verify your balance',
+  'This Vault build is missing the Monero tools needed to build a transaction',
   'This preview syncs at most 64 wallet outputs',
   'Not enough unlocked XMR for this amount and fee',
   'The watch wallet cannot build this transaction',
+  'The Monero transaction decoder refused the unsigned transaction',
   'The daemon rejected the transaction: double spend',
   'The daemon rejected the transaction: fee too low',
   'The daemon rejected the transaction',
@@ -162,7 +164,7 @@ export interface MoneroPlanInput {
   ring: Array<{ globalIndex: string; publicKey: string; commitment: string }>
 }
 export interface MoneroPlanOutput { amountAtomic: string; address: string; isChange: boolean; changeMajor: number; changeMinor: number }
-export interface MoneroPlan { network: 0; feeAtomic: string; inputs: MoneroPlanInput[]; outputs: MoneroPlanOutput[] }
+export interface MoneroPlan { unlockTime?: string; network: 0; feeAtomic: string; inputs: MoneroPlanInput[]; outputs: MoneroPlanOutput[] }
 export interface MoneroTransferDraft { feeAtomic: string; amountAtomic: string; plan: MoneroPlan }
 
 function exactKeys(value: any, keys: string[]): boolean {
@@ -203,7 +205,7 @@ export function validateOutputs(value: unknown): MoneroOutputRecord[] {
 /** Adapter `plan` reply (after parseExactJson), within the research signer's bounds. */
 export function validatePlan(value: unknown): MoneroPlan {
   const v = value as any
-  if (!exactKeys(v, ['status', 'network', 'fee', 'inputs', 'outputs']) || v.status !== 'pass' || unsigned(v.network) !== 0 ||
+  if (!exactKeys(v, ['status', 'network', 'fee', 'inputs', 'outputs', ...('unlock_time' in (v ?? {}) ? ['unlock_time'] : [])]) || v.status !== 'pass' || unsigned(v.network) !== 0 ||
       !Array.isArray(v.inputs) || v.inputs.length < 1 || v.inputs.length > 4 ||
       !Array.isArray(v.outputs) || v.outputs.length < 2 || v.outputs.length > 4) throw new Error('Invalid Monero transaction plan')
   const inputs = v.inputs.map((item: any): MoneroPlanInput => {
@@ -226,10 +228,9 @@ export function validatePlan(value: unknown): MoneroPlan {
     if (!exactKeys(item, ['amount', 'address', 'is_change', 'change_major', 'change_minor']) || typeof item.is_change !== 'boolean' ||
         typeof item.address !== 'string' || !SEND_ADDRESS.test(item.address)) throw new Error('Invalid Monero plan output')
     const amountAtomic = atomic(item.amount)
-    if (amountAtomic === '0') throw new Error('Invalid Monero plan output')
     return { amountAtomic, address: item.address, isChange: item.is_change, changeMajor: u32(item.change_major), changeMinor: u32(item.change_minor) }
   })
-  return { network: 0, feeAtomic: atomic(v.fee), inputs, outputs }
+  return { network: 0, feeAtomic: atomic(v.fee), inputs, outputs, ...('unlock_time' in v ? {unlockTime:atomic(v.unlock_time)} : {}) }
 }
 
 export function validateTransferRequest(value: unknown): { address: string; amountAtomic: string; priority: number } {

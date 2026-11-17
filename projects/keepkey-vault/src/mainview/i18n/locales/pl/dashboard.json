@@ -1,4 +1,7 @@
 {
+	"degradedTitle": "Nie udało się odświeżyć niektórych sald",
+	"degradedReach": "Nie udało się odświeżyć:",
+	"degradedTail": "Ostatnie znane salda są wyświetlane, jeśli są dostępne.",
 	"supportedChains": "Obsługiwane sieci",
 	"refreshBalances": "Odśwież salda",
 	"connectDeviceToRefresh": "Podłącz urządzenie, aby odświeżyć",
@@ -38,5 +41,12 @@
 	"tokensCount": "+{{count}} tokenów",
 	"dismiss": "Odrzuć",
 	"tokensCount_few": "+{{count}} tokeny",
-	"tokensCount_many": "+{{count}} tokenów"
+	"tokensCount_many": "+{{count}} tokenów",
+	"syncStage_preparing": "Przygotowywanie portfela",
+	"syncStage_addresses": "Odczytywanie adresów urządzenia",
+	"syncStage_balances": "Sprawdzanie sald",
+	"syncStage_finalizing": "Aktualizowanie portfela",
+	"syncProgressCounts": "{{completed}}/{{total}} · {{percent}}% · {{seconds}}s",
+	"syncProgressElapsed": "Upłynęło {{seconds}}s",
+	"syncFailedChecks": "Niedostępne sprawdzenia: {{failed}}"
 }

@@ -2,6 +2,7 @@ import { assetData } from '@pioneer-platform/pioneer-discovery'
 import { CHAINS, isChainSupported, type ChainDef } from '../shared/chains'
 import { canonicalizeCaip } from '../shared/swap-discovery'
 import type { SwapAsset } from '../shared/types'
+import { nativeSwapAssetDecimals } from '../shared/swap-amount'
 
 export const swapAssetKey = (value: string) => {
   const key = canonicalizeCaip(value)
@@ -18,7 +19,11 @@ export async function resolveSwapAsset(key: string, options: {
   const canonical = swapAssetKey(key)
   const known = options.assets.find(a => a.asset === key || (a.caip && swapAssetKey(a.caip) === canonical))
   const chains = options.chains || CHAINS
-  if (known) return chains.some(c => c.id === known.chainId && isChainSupported(c, options.firmwareVersion)) ? known : null
+  if (known) {
+    if (!chains.some(c => c.id === known.chainId && isChainSupported(c, options.firmwareVersion))) return null
+    const nativeDecimals = nativeSwapAssetDecimals(known, chains)
+    return nativeDecimals === null ? known : { ...known, decimals: nativeDecimals }
+  }
   const slash = canonical.indexOf('/')
   if (slash < 0) return null
   const network = canonical.slice(0, slash), chain = chains.find(c => c.networkId === network)

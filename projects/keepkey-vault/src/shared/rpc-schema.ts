@@ -1,3 +1,4 @@
+import type { SyncProgress } from './sync-progress'
 import type { MoneroSendReview, MoneroStatus, EmulatorBuildInfo, EmulatorNextBuild } from './types'
 import type { MultisigPolicyPreview,MultisigCosignerExport,BtcPsbtSigned } from "./multisig-policy"
 import type { PasswordBankView, PasswordBrowserTarget, PasswordRiskKind, PasswordAgentApproval } from './password-bank'
@@ -6,6 +7,7 @@ import type { SafeAccount, SafeContext, SafeCreateParams, SafeProposal, SafeTran
 import type { VaultIdentity } from './vault-identity'
 import type { MoneroNodeStatus } from './monero-node'
 import type { VaultPortfolio } from './vault-portfolio'
+import type {ProviderRefreshReason,ProviderUsageStatus} from './provider-refresh'
 import type { VaultAssetRequest, VaultAssetAccount } from './vault-asset-account'
 import type { ZcashShieldedBalance } from './zcash-privacy'
 import type { ClearSignReport } from './clearsign-report'
@@ -26,6 +28,7 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
     requests: {
       // ── Device lifecycle ──────────────────────────────────────────
       getDeviceState: { params: void; response: DeviceStateInfo }
+      getZcashNu7Support: { params: void; response: { available: boolean; requiredFirmware: '7.17.0'; emulatorOnly: boolean; alphaOnly: true; signerKind: 'alpha-emulator' | 'physical-alpha' | null; sessionId: string; reason?: string } }
       retryConnect: { params: void; response: void }
       requestDeviceUnlock: { params: void; response: void }
       startBootloaderUpdate: { params: void; response: void }
@@ -169,7 +172,9 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       hiveSignTx: { params: any; response: any }
 
       // ── Pioneer integration ─────────────────────────────────────────
-      getBalances: { params: { forceRefresh?: boolean; swapDestCaips?: string[]; userInitiated?: boolean }; response: ChainBalance[] }
+      getBalances: { params: { forceRefresh?: boolean; swapDestCaips?: string[]; userInitiated?: boolean; refreshReason?: ProviderRefreshReason }; response: ChainBalance[] }
+      getProviderUsage: {params:void;response:ProviderUsageStatus|null}
+      getSyncDiagnostics: {params:void;response:{balanceSync:SyncProgress|null;recentSyncs:SyncProgress[];connectivity:Array<{online:boolean;durationMs:number;checkedAt:number;status?:number;reason?:string}>}}
       /** forceRefresh defaults to TRUE (user-clicked refresh / tx pushes must bypass
        *  Pioneer's cache). Pass false only when Pioneer's cache is known-fresh. */
       getBalance: { params: { chainId: string; forceRefresh?: boolean }; response: ChainBalance }
@@ -368,8 +373,8 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       setBtcNode: { params: { enabled: boolean; type: 'blockbook' | 'core'; url: string; rpcUser?: string; rpcPass?: string }; response: AppSettings }
       testBtcNode: { params: { type: 'blockbook' | 'core'; url: string; rpcUser?: string; rpcPass?: string }; response: { ok: boolean; error?: string; chain?: string; blocks?: number; pruned?: boolean; txindex?: boolean; inSync?: boolean; detectedType?: 'blockbook' | 'core' } }
       getBtcNodeStatus: { params: void; response: { active: boolean; kind?: 'blockbook' | 'core'; ok?: boolean; error?: string; height?: number; headers?: number; syncing?: boolean; progress?: number } }
-      // Zcash + Hive have no setters — both are derived from the connected
-      // device's firmware (>= 7.15.0) in the device-ready handler in bun/index.ts.
+      // Zcash + Hive have no setters — derived on device ready in bun/index.ts.
+      // Zcash requires firmware >= 7.17.0 and its sidecar; Hive requires >= 7.15.0.
       setEmulatorEnabled: { params: { enabled: boolean }; response: AppSettings }
       setPreReleaseUpdates: { params: { enabled: boolean }; response: AppSettings }
       setAlphaFirmware: { params: { enabled: boolean }; response: AppSettings }
@@ -487,7 +492,7 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       checkWatchOnlyCache: { params: void; response: { available: boolean; deviceLabel?: string; lastSynced?: number } }
       watchOnlySetView: { params: { active: boolean; deviceId?: string }; response: { bitcoinOnly: boolean } }
       getWatchOnlyBalances: { params: { deviceId?: string } | void; response: ChainBalance[] | null }
-      refreshWatchOnlyBalances: { params: { deviceId?: string } | void; response: ChainBalance[] | null }
+      refreshWatchOnlyBalances: { params: { deviceId?: string; refreshReason?: ProviderRefreshReason } | void; response: ChainBalance[] | null }
       getWatchOnlyPubkeys: { params: { deviceId?: string } | void; response: Array<{ chainId: string; path: string; xpub: string; address: string }> }
 
       // ── Registered devices (device history) ──────────────────────────
@@ -609,6 +614,7 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       windowSetFrame: { params: { x: number; y: number; width: number; height: number }; response: void }
     }
     messages: {
+      'balance-sync-progress': SyncProgress
       'device-state': DeviceStateInfo
       'firmware-progress': FirmwareProgress
       'rng-audit-progress': { collected: number; total: number }
@@ -623,7 +629,7 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
 'update-status': UpdateStatus
       // severity defaults to 'error' (hard failure — server unreachable). 'warning'
       // carries soft fault info (some chains degraded/stale, data still shown);
-      // 'none' clears any soft-fault banner after a clean fetch.
+      // 'none' clears faults only for checkedChainIds after a clean fetch.
       'pioneer-error': {
         message: string
         url: string
@@ -636,6 +642,12 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
         degradedChainIds?: string[]
         staleChainIds?: string[]
         unresolvedFaultCount?: number
+        /** Chains covered by this response, so a single-chain recovery cannot clear unrelated errors. */
+        checkedChainIds?: string[]
+        /** A complete report for the current portfolio, including unmapped errors. */
+        fullSnapshot?: boolean
+        /** Unmapped actual errors; unresolvedFaultCount also includes ordinary stale metadata. */
+        unresolvedErrorCount?: number
       }
       'pair-request': PairingRequestInfo
       'password-agent-approval': { approval: PasswordAgentApproval | null }

@@ -1,4 +1,5 @@
 import {hasMultisigSigningData,btcMultisigEnabled,BTC_MULTISIG_DISABLED} from './btc-psbt/multisig-feature'
+import { signUtxoTx } from './txbuilder/zcash-transparent'
 import type { EngineController } from './engine-controller'
 import { takeDeviceRefusal } from './device-refusal'
 import { withPermit2SpenderName } from './permit2-spender-name'
@@ -131,6 +132,7 @@ export interface SigningApprovalDecision {
 export type RestActivityTag = { txid?: string; chain?: string; activityType?: string; meta?: Record<string, unknown> }
 
 export interface RestApiCallbacks {
+  getSyncDiagnostics?: () => unknown
   passwordAgent?: PasswordAgent
   onApiLog: (entry: ApiLogEntry) => void
   /** Activity rows changed outside onApiLog (e.g. a REST history rebuild). */
@@ -164,6 +166,8 @@ export interface RestApiCallbacks {
   /** Headless swap execute — signs on the device, broadcasts, registers tracking.
    *  Used by POST /api/v2/swap/execute. Device still gates the signature. */
   executeSwapHeadless?: (params: import('../shared/types').ExecuteSwapParams) => Promise<import('../shared/types').SwapResult>
+  /** Demand-only provider status refresh for a previously scoped swap. */
+  refreshSwapStatus?: (txid: string, scope: { deviceId: string; walletId: string }, rescan: boolean) => Promise<import('../shared/types').PendingSwap | null>
   /** Build a native send for POST /api/v2/tx/build with the same body the RPC
    *  buildTx runs (buildTxForCurrentWallet). Desktop derives the sender. */
   buildTxHeadless?: (request: import('./rest-tx-build').TxBuildHeadlessRequest) => Promise<import('../shared/types').BuildTxResult>
@@ -1184,6 +1188,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
   // What this vault signed over REST, per wallet session — /api/v2/tx/broadcast
   // lists only those as activity (see signed-tx-registry.ts).
   const signedTxs = createSignedTxRegistry()
+  const swapStatusReads = new Map<string, Promise<import('../shared/types').PendingSwap | null>>()
   const getWalletDbScope = (): { deviceId: string; walletId: string } | null => {
     const deviceId = engine.getDeviceState().deviceId
     if (!deviceId) return null
@@ -1624,10 +1629,11 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
         // ═══════════════════════════════════════════════════════════════
         if ((path === '/api/health' || path === '/api/v1/health') && method === 'GET') {
           const ds = engine.getDeviceState()
+          const diagnostics = callbacks?.getSyncDiagnostics?.() as {balanceSync?: {status?: string}} | undefined
           return json({
             ready: ds.state === 'ready',
             status: 'healthy',
-            syncing: engine.isSyncing,
+            syncing: engine.isSyncing || diagnostics?.balanceSync?.status === 'running',
             apiVersion: 2,
             supportedChains: CHAINS.filter(c => isChainSupported(c, ds.firmwareVersion) && (c.id !== 'hive' || getSetting('hive_enabled') === '1') && c.chainFamily !== 'monero').map(c => c.networkId),
             device_connected: engine.wallet !== null,
@@ -1640,6 +1646,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             // SDK skips batch call entirely when cached_pubkeys === 0.
             cached_pubkeys: engine.wallet ? Math.max(pubkeyCache.size, 1) : 0,
             frontload_progress: { status: 'complete', can_operate_offline: false },
+            sync_diagnostics: diagnostics,
           })
         }
 
@@ -1747,6 +1754,36 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           }
         }
 
+        let validatedSwapPreview: import('../shared/types').ExecuteSwapParams | undefined
+        if (method === 'POST' && path === '/api/v2/swap/execute') {
+          auth.requireAuth(req)
+          // Preserve the existing empty-probe response while moving quote
+          // admission ahead of wallet acquisition, including headless setups.
+          const requiredAny = requiredSigningFields(path)!
+          if (!reqBody || typeof reqBody !== 'object') return json({ error: 'Empty or invalid signing payload' }, 400)
+          if (!requiredAny.some(key => reqBody[key] !== undefined)) return json({ error: `Missing signing payload — expected one of: ${requiredAny.join(', ')}` }, 400)
+          const swapBody = await parseRequest(req.clone(), S.SwapExecuteHeadlessRequest)
+          if (!callbacks?.validateSwapExecutionHeadless) return json({ error: 'Swap quote validation unavailable' }, 503)
+          try { validatedSwapPreview = callbacks.validateSwapExecutionHeadless(swapBody as any) }
+          catch (error: any) { return json({ error: 'Swap quote rejected', details: error.message }, 409) }
+          // A claimed quote supplies the canonical source chain. Block selling
+          // ZEC before device acquisition or host approval; receiving ZEC stays
+          // available. Nu7's validated transparent send flow is Desktop-only.
+          if (validatedSwapPreview.fromChainId === 'zcash') {
+            return json({ error: 'Zcash swap signing over REST is not supported. Use KeepKey Vault Desktop with the reviewed 7.17 alpha emulator or supported physical alpha firmware.' }, 501)
+          }
+        }
+
+        // REST's UTXO schema carries only the legacy transaction format. Nu7
+        // plans must use Desktop's validated transparent flow; reject before
+        // requireWallet can acquire a lease, unlock, or open host approval.
+        if (method === 'POST' && path === '/utxo/sign-transaction') {
+          auth.requireAuth(req)
+          if (typeof reqBody?.coin === 'string' && reqBody.coin.trim().toLowerCase() === 'zcash') {
+            return json({ error: 'Zcash signing over REST is not supported. Use KeepKey Vault Desktop with the reviewed 7.17 alpha emulator or supported physical alpha firmware.' }, 501)
+          }
+        }
+
         // ═══════════════════════════════════════════════════════════════
         // SIGNING APPROVAL GATE — auth required, then user must approve
         // ═══════════════════════════════════════════════════════════════
@@ -1789,14 +1826,6 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           }
 
           await requireWallet(engine)
-
-          let validatedSwapPreview: import('../shared/types').ExecuteSwapParams | undefined
-          if (path === '/api/v2/swap/execute') {
-            const swapBody = await parseRequest(req.clone(), S.SwapExecuteHeadlessRequest)
-            if (!callbacks.validateSwapExecutionHeadless) return json({ error: 'Swap quote validation unavailable' }, 503)
-            try { validatedSwapPreview = callbacks.validateSwapExecutionHeadless(swapBody as any) }
-            catch (error: any) { return json({ error: 'Swap quote rejected', details: error.message }, 409) }
-          }
 
           const { appName } = resolveAppInfo()
           const id = crypto.randomUUID()
@@ -3298,7 +3327,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             }
           }
 
-          const result = await emuWrap(() => wallet.btcSignTx({
+          const result = await emuWrap(() => signUtxoTx(wallet, {
             coin,
             inputs: body.inputs,
             outputs: body.outputs,
@@ -3308,7 +3337,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             ...(body.expiry !== undefined ? { expiry: body.expiry } : {}),
             ...(body.versionGroupId !== undefined ? { versionGroupId: body.versionGroupId } : {}),
             ...(body.branchId !== undefined ? { branchId: body.branchId } : {}),
-          }), { operation: 'btcSignTx', chain: coin })
+          }, { firmwareVersion: engine.getDeviceState().firmwareVersion }), { operation: 'btcSignTx', chain: coin })
           // Explicit chain for UTXO — auto-detect defaults to BTC but could be LTC/DOGE/etc
           const coinSymbol = coin === 'Bitcoin' ? 'BTC' : coin === 'Litecoin' ? 'LTC' : coin === 'Dogecoin' ? 'DOGE' : coin === 'Dash' ? 'DASH' : coin === 'BitcoinCash' ? 'BCH' : coin
           return json(validateResponse(result, S.UtxoSignTransactionResponse, path), 200, { chain: coinSymbol, activityType: 'sign' })
@@ -4750,6 +4779,25 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           if (!tail) return json({ error: 'Invalid txid' }, 400)
           const record = getSwapHistoryByTxid(tail, scope.deviceId, scope.walletId)
           if (!record) return json({ error: 'Not found' }, 404)
+          const query = new URL(req.url).searchParams
+          if (query.get('refresh') === 'true') {
+            if (!callbacks?.refreshSwapStatus) return json({ error: 'Live swap refresh is not available on this Desktop. Update KeepKey Desktop.' }, 503)
+            const epoch = callbacks.getSessionEpoch?.()
+            const key = JSON.stringify([scope.walletId, epoch, tail])
+            let pending = swapStatusReads.get(key)
+            if (!pending) {
+              pending = callbacks.refreshSwapStatus(tail, scope, query.get('rescan') === 'true')
+                .finally(() => { swapStatusReads.delete(key) })
+              swapStatusReads.set(key, pending)
+            }
+            const live = await pending
+            const current = getWalletDbScope()
+            if (engine.isPassphraseWallet || current?.walletId !== scope.walletId || current?.deviceId !== scope.deviceId
+              || callbacks.getSessionEpoch?.() !== epoch) return json({ error: 'Not found' }, 404)
+            const updated = getSwapHistoryByTxid(tail, scope.deviceId, scope.walletId)
+            if (!updated) return json({ error: 'Not found' }, 404)
+            return json({ ...updated, statusCheck: live?.statusCheck ?? { checkedAt: Date.now(), error: 'unavailable' } })
+          }
           return json(record)
         }
 
@@ -4770,7 +4818,8 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           const slash = caip.indexOf('/')
           const chainCaip2 = slash >= 0 ? caip.slice(0, slash) : caip
           // Mirror the picker: gate by the connected device's firmware so e.g.
-          // ZEC reports `unsupported_firmware` below 7.15.0 instead of swappable.
+          // ZEC reports `unsupported_firmware` below 7.17.0. Passing this
+          // picker gate does not qualify the device for Nu7 signing.
           return json({
             caip,
             chainCaip2,

@@ -436,7 +436,8 @@ export async function getSwapQuote(params: SwapQuoteParams, device: {
     })
   }
   if (isRelaySolverDeposit(result)) result.executionMode = 'relay-solver-deposit'
-  if (result.relayOrder) result.relayOrderRecipient = assertRelayOrderRecipient(result, recipientAddress)
+  if (result.relayOrder) result.relayOrderRecipient = assertRelayOrderRecipient(result, recipientAddress,
+    CHAINS.find(chain => chain.networkId === buyCaip.split('/')[0]))
   // Surface the underlying protocol when the integration is an aggregator
   // (e.g. ShapeShift → Relay/Thorchain/0x). Falls back to integration name.
   const route = result.swapper && result.swapper.toLowerCase() !== (result.integration || '').toLowerCase()
@@ -756,7 +757,7 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
   // A swap memo must pay the recipient (any source family, EVM included): the
   // protocol pays whoever the memo names. sameAddress drops BCH's cashaddr prefix.
   const memoDestination = params.memo ? thorMemoDestination(params.memo) : undefined
-  if (memoDestination !== undefined && !sameAddress(memoDestination, toAddress)) {
+  if (memoDestination !== undefined && !sameAddress(memoDestination, toAddress, toChain)) {
     throw new Error(`This swap's memo pays out to ${memoDestination}, which is not the recipient ${toAddress}. Do not proceed — get a new quote.`)
   }
 

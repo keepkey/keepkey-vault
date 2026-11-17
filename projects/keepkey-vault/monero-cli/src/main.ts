@@ -3,6 +3,7 @@
 import { MAX_IPC_LINE, MONERO_VERSION, PublicError, SIDECAR_VERSION } from './protocol'
 import { verifiedHostAdapter, verifiedWalletRpc, stopToolVersionProbe } from './tools'
 import { MoneroWatchService } from './wallet'
+import { createMoneroRequestQueue } from './request-queue'
 
 if (process.argv.includes('--version')) {
   process.stdout.write(JSON.stringify({ name: 'keepkey-monero-cli', version: SIDECAR_VERSION, moneroVersion: MONERO_VERSION }) + '\n')
@@ -32,12 +33,10 @@ try {
   process.exit(1)
 }
 
-let queue = Promise.resolve(), buffer = ''
+let buffer = ''
 const decoder = new TextDecoder('utf-8', { fatal: true })
-async function dispatch(raw: string) {
-  let value: any = null
+async function dispatch(value: any) {
   try {
-    value = JSON.parse(raw)
     if (!value || typeof value !== 'object' || Array.isArray(value) ||
         !Number.isSafeInteger(value._req_id) || value._req_id <= 0 ||
         Object.keys(value).some(k => !['cmd', '_req_id', 'params'].includes(k))) throw new Error('request')
@@ -59,9 +58,9 @@ async function dispatch(raw: string) {
       error: error instanceof PublicError ? error.message : 'The watch-only Monero operation could not complete' })
   } finally {
     if (value?.params && typeof value.params === 'object') value.params.viewKey = ''
-    raw = ''
   }
 }
+const queue = createMoneroRequestQueue(dispatch)
 
 try {
   for await (const data of Bun.stdin.stream()) {
@@ -71,15 +70,14 @@ try {
       const line = buffer.slice(0, index); buffer = buffer.slice(index + 1)
       if (Buffer.byteLength(line) > MAX_IPC_LINE) throw new Error('bound')
       if (!line.trim()) continue
+      let value: any = null
+      try { value = JSON.parse(line) } catch { /* dispatch returns a sanitized error */ }
       // Shutdown bypasses any long scan/configuration queue and kills owned RPC.
-      try {
-        const candidate = JSON.parse(line)
-        if (candidate?.cmd === 'quit' && Object.keys(candidate).every(k => ['cmd', '_req_id'].includes(k))) { await quit(); break }
-      } catch { /* dispatch returns a sanitized error */ }
-      queue = queue.then(() => dispatch(line))
+      if (value?.cmd === 'quit' && Object.keys(value).every(k => ['cmd', '_req_id'].includes(k))) { await quit(); break }
+      void queue.submit(value)
     }
     if (Buffer.byteLength(buffer) > MAX_IPC_LINE) throw new Error('bound')
   }
-  await queue
+  await queue.drain()
 } catch { /* Malformed/oversized stdin closes the owned worker safely. */ }
 await quit()

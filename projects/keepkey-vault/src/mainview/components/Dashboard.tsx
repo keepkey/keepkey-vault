@@ -1,3 +1,6 @@
+import { BalanceSyncProgress } from './BalanceSyncProgress'
+import {useProviderUsage} from '../hooks/useProviderUsage'
+import { paidProviderRefreshOptions, type ProviderRefreshReason } from '../../shared/provider-refresh'
 import { getNumberLocale } from "../lib/number-locale"
 import { useUiTranslation } from "../i18n/ui"
 import { Component, Fragment, lazy, Suspense, useState, useEffect, useCallback, useMemo, useRef, type ReactNode, type ErrorInfo } from "react"
@@ -6,6 +9,7 @@ import { useTranslation } from "react-i18next"
 import { CHAINS, customChainToChainDef, isChainSupported, type ChainDef } from "../../shared/chains"
 import { isBitcoinOnlyVariant } from "../../shared/flags"
 import { balanceDisplayState } from "../../shared/balance-display-state"
+import { confirmedDashboardBalance, dashboardBalanceUpdatedAt, dashboardCacheIsQuiet, dashboardErrorNotice, dashboardRefreshIsDue, mergeDashboardPortfolioFault, recoverDashboardPortfolioFault, usableDashboardBalance, type DashboardPortfolioFault } from '../../shared/dashboard-balance-policy'
 import { isLocalDeviceAccessError, retryWhileDeviceBusy } from "../../shared/device-access-error"
 import { versionCompare } from "../../shared/firmware-versions"
 import { formatBalance, hasNonZeroBalance } from "../lib/formatting"
@@ -684,17 +688,8 @@ interface PioneerError {
 	statusCode?: number
 }
 
-// Soft fault: balances were returned but some chains are degraded (fresh fetch
-// failed) or stale (>5min cache). Distinct from PioneerError (hard, server down).
-interface PortfolioFault {
-	degradedChains: string[]
-	staleChains: string[]
-	staleMinutes: number
-	// chainId-granular fault info for the Audit wizard (symbols above drive the banner).
-	degradedChainIds: string[]
-	staleChainIds: string[]
-	unresolvedFaultCount: number
-}
+// Keep stale metadata for Audit; only actual failures produce a notice.
+type PortfolioFault = DashboardPortfolioFault
 
 interface DashboardProps {
 	vault?: VaultIdentity
@@ -704,6 +699,8 @@ interface DashboardProps {
 	/** When in watchOnly mode, load cached data for this specific device (defaults to latest) */
 	watchOnlyDeviceId?: string
 	onOpenSettings?: () => void
+	capabilities?: readonly number[]
+	isEmulator?: boolean
 	firmwareVersion?: string
 	/** Device firmware variant — when bitcoin-only, the chain list is restricted to Bitcoin */
 	firmwareVariant?: string
@@ -737,7 +734,7 @@ function formatTimeAgo(ts: number, t: (key: string, opts?: Record<string, unknow
 export function Dashboard(props: DashboardProps) {
 	return props.vault
 		? <VaultPortfolioDashboard key={props.vault.id} {...props} vault={props.vault} />
-		: <PersonalDashboard {...props} />
+		: <PersonalDashboard key={`${props.watchOnly ? 'watch:' + (props.watchOnlyDeviceId || 'latest') : 'live'}:${props.isHiddenWallet ? 'hidden' : 'standard'}`} {...props} />
 }
 
 function VaultPortfolioDashboard({ vault, onLoaded, watchOnly, firmwareVersion }: DashboardProps & { vault: VaultIdentity }) {
@@ -843,7 +840,8 @@ function VaultPortfolioDashboard({ vault, onLoaded, watchOnly, firmwareVersion }
 	</Flex>
 }
 
-function PersonalDashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettings, firmwareVersion, firmwareVariant, forceRefresh, onForceRefreshConsumed, isHiddenWallet, knownEmpty, onOpenVault }: DashboardProps) {
+function PersonalDashboard({ capabilities, isEmulator, onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettings, firmwareVersion, firmwareVariant, forceRefresh, onForceRefreshConsumed, isHiddenWallet, knownEmpty, onOpenVault }: DashboardProps) {
+    const providerUsage=useProviderUsage()
   const uiText = useUiTranslation()
 	const { portfolios: vaultPortfolios, loading: vaultsLoading, error: vaultsError, reload: reloadVaultPortfolios, setIncluded: setVaultIncluded } = useVaultPortfolios({ bitcoinOnly: isBitcoinOnlyVariant(firmwareVariant) })
 
@@ -923,9 +921,15 @@ function PersonalDashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSetti
 	const [introDismissed, setIntroDismissed] = useState(false)
 	const [pioneerError, setPioneerError] = useState<PioneerError | null>(null)
 	const [portfolioFault, setPortfolioFault] = useState<PortfolioFault | null>(null)
+	const [dismissedBalanceErrors, setDismissedBalanceErrors] = useState<Set<string>>(() => new Set())
 	const [streamStatus, setStreamStatus] = useState<{ connected: boolean; watching: number } | null>(null)
 	const [cacheUpdatedAt, setCacheUpdatedAt] = useState<number | null>(null)
 	const [hasEverRefreshed, setHasEverRefreshed] = useState(false)
+	const [clockNow, setClockNow] = useState(Date.now)
+	const cacheUpdatedAtRef = useRef(cacheUpdatedAt)
+	cacheUpdatedAtRef.current = cacheUpdatedAt
+	const visibleChainIdsRef = useRef<string[]>([])
+	const balanceActivityRef = useRef(new Set<string>())
 	const [visibilityMap, setVisibilityMap] = useState<Record<string, TokenVisibilityStatus>>({})
 	const [activeSwaps, setActiveSwaps] = useState<PendingSwap[]>([])
 	const dismissedSwapTxids = useRef<Set<string>>((() => {
@@ -942,8 +946,6 @@ function PersonalDashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSetti
 	// Seed with mount time so an immediate focus round-trip after loading cached
 	// balances doesn't read as "idle > 5 min" and force a refresh on startup.
 	const lastFetchAttemptRef = useRef(Date.now())
-	const degradedAttemptRef = useRef(0)
-	const degradedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 	// Records when each chain's balance was last set via a single-chain balance-updated event.
 	// Used by full refreshes to skip chains that received a fresher per-chain update while
 	// the bulk request was in-flight (prevents old getBalances response from overwriting newer data).
@@ -1007,7 +1009,14 @@ function PersonalDashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSetti
 
 	const pioneerErrorFirstSeenRef = useRef<number | null>(null)
 	const pioneerErrorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-	const hasUsableBalanceSnapshot = balances.size > 0 || cacheUpdatedAt !== null
+	const hasUsableBalanceSnapshot = [...balances.values()].some(usableDashboardBalance)
+	const recoverBalanceFaults = useCallback((ids: string[]) => {
+		if (ids.length) setPortfolioFault(current => recoverDashboardPortfolioFault(current, ids, [...CHAINS, ...customChainDefs]))
+	}, [customChainDefs])
+	useEffect(() => {
+		const timer = setInterval(() => setClockNow(Date.now()), 60_000)
+		return () => clearInterval(timer)
+	}, [])
 
 	const clearPioneerError = useCallback(() => {
 		pioneerErrorFirstSeenRef.current = null
@@ -1132,24 +1141,17 @@ function PersonalDashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSetti
 	// (some chains degraded/stale, balances still shown → dismissable warning).
 	useEffect(() => {
 		return onRpcMessage("pioneer-error", (payload) => {
-			const p = payload as PioneerError & Partial<PortfolioFault> & { severity?: 'error' | 'warning' | 'none' }
+			const p = payload as PioneerError & Partial<PortfolioFault> & { severity?: 'error' | 'warning' | 'none'; checkedChainIds?: string[]; fullSnapshot?: boolean }
 			if (isLocalDeviceAccessError(p)) {
 				clearLocalPioneerError()
 				return
 			}
 			if (p.severity === 'none') {
-				setPortfolioFault(null)
+				setPortfolioFault(current => mergeDashboardPortfolioFault(current, { ...p, severity: 'none' }, [...CHAINS, ...customChainDefs]))
 				return
 			}
 			if (p.severity === 'warning') {
-				setPortfolioFault({
-					degradedChains: p.degradedChains ?? [],
-					staleChains: p.staleChains ?? [],
-					staleMinutes: p.staleMinutes ?? 0,
-					degradedChainIds: p.degradedChainIds ?? [],
-					staleChainIds: p.staleChainIds ?? [],
-					unresolvedFaultCount: p.unresolvedFaultCount ?? 0,
-				})
+				setPortfolioFault(current => mergeDashboardPortfolioFault(current, { ...p, severity: 'warning' }, [...CHAINS, ...customChainDefs]))
 				return
 			}
 			// Hard error supersedes any soft-fault banner.
@@ -1160,7 +1162,7 @@ function PersonalDashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSetti
 			if (typeof p.message !== 'string') console.error('[Dashboard] pioneer-error carried non-string message:', p.message)
 			stagePioneerError({ message, url: p.url, status: p.status, statusCode: p.statusCode })
 		})
-	}, [stagePioneerError, clearLocalPioneerError])
+	}, [stagePioneerError, clearLocalPioneerError, customChainDefs])
 
 	// Load custom chains on mount and register their explorer links
 	useEffect(() => {
@@ -1190,6 +1192,7 @@ function PersonalDashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSetti
 
 		async function loadCached() {
 			let needsAutoRefresh = false
+			let autoRefreshReason: ProviderRefreshReason = 'wallet-open'
 
 			if (watchOnly) {
 				try {
@@ -1200,8 +1203,7 @@ function PersonalDashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSetti
 						setBalances(map)
 						// Cached rows: show the oldest row's age, never present them as current.
 						clearLocalPioneerError()
-						const ages = result.map(b => b.updatedAt || 0).filter(Boolean)
-						setCacheUpdatedAt(ages.length ? Math.min(...ages) : null)
+						setCacheUpdatedAt(dashboardBalanceUpdatedAt(result))
 					}
 				} catch { /* watch-only cache unavailable */ }
 				if (!cancelled) { setInitialLoaded(true); onLoaded?.() }
@@ -1213,6 +1215,7 @@ function PersonalDashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSetti
 				try {
 					const cached = await rpcRequest<{ balances: ChainBalance[]; updatedAt: number; staleReasons?: string[] } | null>('getCachedBalances', undefined, 3000)
 					if (!cancelled && cacheScope === cacheScopeRevisionRef.current && cached && cached.balances.length > 0) {
+						autoRefreshReason = 'automatic'
 						setBalances(current => {
 							const map = new Map(current)
 							for (const b of cached.balances) {
@@ -1223,13 +1226,17 @@ function PersonalDashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSetti
 							balancesRef.current = map
 							return map
 						})
-						setCacheUpdatedAt(cached.updatedAt)
+						setCacheUpdatedAt(cached.updatedAt > 0 ? cached.updatedAt : null)
+						for (const reason of cached.staleReasons ?? []) {
+							if (reason.startsWith('tx_after_cache:')) for (const id of reason.slice('tx_after_cache:'.length).split(',')) balanceActivityRef.current.add(id)
+						}
 						clearLocalPioneerError()
 						console.log(`[Dashboard] Cache hit: ${cached.balances.length} chains, $${cached.balances.reduce((s, b) => s + (b.balanceUsd || 0), 0).toFixed(2)}, age: ${formatTimeAgo(cached.updatedAt, t)}`)
-						if (cached.staleReasons && cached.staleReasons.length > 0) {
-							console.log(`[Dashboard] Cache incomplete (${cached.staleReasons.join(', ')}) — will auto-refresh`)
-							needsAutoRefresh = true
-						}
+						// Missing structure alone does not invalidate recent figures.
+						// Known activity must still bypass this quiet window, even if its
+						// affected chain has no cached row yet.
+						const hasKnownActivity = cached.staleReasons?.some(reason => reason.startsWith('tx_after_cache:')) ?? false
+						needsAutoRefresh = hasKnownActivity || !dashboardCacheIsQuiet(cached.balances, cached.balances.map(row => row.chainId), cached.updatedAt, balanceActivityRef.current)
 					} else {
 						// Empty cache — passphrase wallets intentionally skip DB writes,
 						// and first-run devices also have no cache. Auto-refresh live.
@@ -1237,7 +1244,8 @@ function PersonalDashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSetti
 						needsAutoRefresh = true
 					}
 				} catch {
-					// Cache unavailable — still trigger a live fetch
+					// A failed cache read cannot establish that this is a new wallet.
+					autoRefreshReason = 'automatic'
 					needsAutoRefresh = true
 				}
 			} else {
@@ -1247,8 +1255,8 @@ function PersonalDashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSetti
 			if (!cancelled) {
 				setInitialLoaded(true)
 				onLoaded?.()
-				// Auto-refresh in background when cache is empty or incomplete
-				if (needsAutoRefresh) refreshBalances()
+				// Only an empty first-wallet cache opts into the wallet-open policy.
+				if (needsAutoRefresh) refreshBalances(false, [], false, autoRefreshReason)
 			}
 		}
 
@@ -1311,15 +1319,16 @@ function PersonalDashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSetti
 	// forceRefresh=true bypasses Pioneer's balance cache — only pass it on explicit user action
 	// swapDestCaips: CAIP-19 ids of just-received swap outputs — forwarded so the
 	// backend can verify token balances directly while portfolio indexers catch up.
-	const refreshBalances = useCallback(async (forceRefresh = false, swapDestCaips: string[] = [], userInitiated = false) => {
-		if (forceRefresh) void reloadVaultPortfolios(true)
+	const refreshBalances = useCallback(async (forceRefresh = false, swapDestCaips: string[] = [], userInitiated = false, refreshReason: ProviderRefreshReason = userInitiated ? 'manual' : 'wallet-open') => {
+		if (paidProviderRefreshOptions(refreshReason).providerRefreshPolicy === 'cache-only' && loadingBalancesRef.current) return
+        if (forceRefresh && paidProviderRefreshOptions(refreshReason).providerRefreshPolicy === 'on-demand') void reloadVaultPortfolios(true)
 		// Watch-only: no device, so re-fetch from Pioneer using cached addresses.
 		if (watchOnly) {
 			if (loadingBalancesRef.current) return
 			loadingBalancesRef.current = true
 			setLoadingBalances(true)
 			try {
-				const result = await rpcRequest<ChainBalance[] | null>('refreshWatchOnlyBalances', watchOnlyDeviceId ? { deviceId: watchOnlyDeviceId } : undefined, 200000)
+				const result = await rpcRequest<ChainBalance[] | null>('refreshWatchOnlyBalances', { ...(watchOnlyDeviceId ? { deviceId: watchOnlyDeviceId } : {}), refreshReason }, 200000)
 				if (result) {
 					setBalances(prev => {
 						const map = new Map(prev)
@@ -1331,12 +1340,12 @@ function PersonalDashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSetti
 					})
 					// A chain that failed comes back as its cached row (syncState 'stale'): keep its age,
 					// and when nothing refreshed say so instead of "just now".
-					const staleAges = result.filter(b => b.syncState === 'stale').map(b => b.updatedAt || 0).filter(Boolean)
-					setCacheUpdatedAt(staleAges.length ? Math.min(...staleAges) : Date.now())
+					setCacheUpdatedAt(dashboardBalanceUpdatedAt(result))
 					setHasEverRefreshed(true)
-					if (result.length && result.every(b => b.syncState === 'stale')) {
-						stagePioneerError({ message: 'Unable to refresh balances; showing cached balances', url: 'the configured balance server' })
-					} else clearPioneerError()
+					const confirmed = result.filter(confirmedDashboardBalance)
+					recoverBalanceFaults(confirmed.map(row => row.chainId))
+					if (confirmed.length) clearPioneerError()
+					else clearLocalPioneerError()
 				}
 			} catch (e: any) {
 				const message = e?.message || 'Unable to refresh balances'
@@ -1359,7 +1368,7 @@ function PersonalDashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSetti
 		setLoadingBalances(true)
 
 		try {
-			const params = { forceRefresh, ...(swapDestCaips.length ? { swapDestCaips } : {}), ...(userInitiated ? { userInitiated } : {}) }
+			const params = { forceRefresh, refreshReason, ...(swapDestCaips.length ? { swapDestCaips } : {}), ...(userInitiated ? { userInitiated } : {}) }
 			const read = () => rpcRequest<ChainBalance[]>('getBalances', params, 200000)
 			// A pressed refresh really scans: it waits out a busy KeepKey quietly
 			// instead of returning at once with nothing new (owner rule: busy = wait).
@@ -1402,8 +1411,12 @@ function PersonalDashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSetti
 					balancesRef.current = map
 					return map
 				})
-				if (result.some(b => b.syncState !== 'stale' && b.syncState !== 'degraded')) {
-					setCacheUpdatedAt(Date.now())
+				const confirmed = result.filter(confirmedDashboardBalance)
+				for (const row of confirmed) balanceActivityRef.current.delete(row.chainId)
+				recoverBalanceFaults(confirmed.map(row => row.chainId))
+				if (confirmed.length) {
+					const updatedAt = dashboardBalanceUpdatedAt(result)
+					if (updatedAt !== null) setCacheUpdatedAt(updatedAt)
 					setHasEverRefreshed(true)
 					clearPioneerError()
 				} else {
@@ -1425,16 +1438,17 @@ function PersonalDashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSetti
 			loadingBalancesRef.current = false
 			setLoadingBalances(false)
 		}
-	}, [watchOnly, watchOnlyDeviceId, clearPioneerError, clearLocalPioneerError, stagePioneerError, commitBalanceReconciliations, reloadVaultPortfolios])
+	}, [watchOnly, watchOnlyDeviceId, clearPioneerError, clearLocalPioneerError, stagePioneerError, commitBalanceReconciliations, reloadVaultPortfolios, recoverBalanceFaults])
 
 	// Phase 2 trigger — window focus: catch long idle periods. If the last live
 	// fetch is older than 5 min, force-refresh on return to the window.
 	useEffect(() => {
 		if (watchOnly) return
 		const onFocus = () => {
+			if (dashboardCacheIsQuiet([...balancesRef.current.values()], visibleChainIdsRef.current, cacheUpdatedAtRef.current, balanceActivityRef.current)) return
 			const AGE_BEFORE_REFETCH_MS = 5 * 60 * 1000
 			if (Date.now() - lastFetchAttemptRef.current > AGE_BEFORE_REFETCH_MS) {
-				refreshBalances(true)
+				refreshBalances(true, [], false, 'focus')
 			}
 		}
 		window.addEventListener('focus', onFocus)
@@ -1444,43 +1458,10 @@ function PersonalDashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSetti
 	// Explicit balance refresh (e.g. right after a self-host node is connected, so
 	// balances re-fetch from the node instead of waiting for the next poll).
 	useEffect(() => {
-		const onRefresh = () => { if (!watchOnly) refreshBalances(true) }
+		const onRefresh = () => { if (!watchOnly) refreshBalances(true, [], false, 'manual') }
 		window.addEventListener('keepkey-refresh-balances', onRefresh)
 		return () => window.removeEventListener('keepkey-refresh-balances', onRefresh)
 	}, [watchOnly, refreshBalances])
-
-	// Phase 2 trigger — degraded-chain background retry with exponential backoff.
-	// Each new fault report (re-)schedules a forced refresh; a clean fetch
-	// (portfolioFault === null) resets the backoff. We refresh the whole portfolio
-	// rather than only degraded chains — at ~5-6s a full refresh is simpler and the
-	// difference is negligible.
-	useEffect(() => {
-		if (degradedTimerRef.current) {
-			clearTimeout(degradedTimerRef.current)
-			degradedTimerRef.current = null
-		}
-		const hasDegraded = (portfolioFault?.degradedChains.length ?? 0) > 0
-		if (watchOnly || !hasDegraded) {
-			degradedAttemptRef.current = 0
-			return
-		}
-		const SCHEDULE = [30_000, 60_000, 120_000, 300_000]
-		const delay = SCHEDULE[Math.min(degradedAttemptRef.current, SCHEDULE.length - 1)]
-		degradedAttemptRef.current += 1
-		degradedTimerRef.current = setTimeout(() => {
-			degradedTimerRef.current = null
-			if (!loadingBalancesRef.current) {
-				console.log('[Dashboard] Retrying degraded chains:', portfolioFault?.degradedChains.join(', '))
-				refreshBalances(true)
-			}
-		}, delay)
-		return () => {
-			if (degradedTimerRef.current) {
-				clearTimeout(degradedTimerRef.current)
-				degradedTimerRef.current = null
-			}
-		}
-	}, [portfolioFault, watchOnly, refreshBalances])
 
 	// Auto-refresh balances when Zcash feature flag is enabled mid-session
 	const prevZcashRef = useRef(zcashEnabled)
@@ -1552,11 +1533,11 @@ function PersonalDashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSetti
 			const reconcileCaip = swap.status === 'refunded' ? swap.fromCaip : swap.toCaip
 			const assets = reconcileCaip ? [reconcileCaip] : []
 			console.log(`[Dashboard] Swap terminal — reconciling ${reconcileCaip || swap.toChainId}`)
-			refreshBalances(true, assets)
+			refreshBalances(true, assets, false, 'swap-reconcile')
 			for (const delay of [30_000, 90_000]) {
 				const timer = setTimeout(() => {
 					timers.delete(timer)
-					refreshBalances(true, assets)
+					refreshBalances(true, assets, false, 'swap-reconcile')
 				}, delay)
 				timers.add(timer)
 			}
@@ -1596,7 +1577,7 @@ function PersonalDashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSetti
 		if (watchOnly || waiting.length === 0) return
 		const timer = setInterval(() => {
 			if (!loadingBalancesRef.current) {
-				refreshBalances(true, waiting.flatMap(item => item.assetCaip ? [item.assetCaip] : []))
+				refreshBalances(true, waiting.flatMap(item => item.assetCaip ? [item.assetCaip] : []), false, 'swap-reconcile')
 			}
 		}, 120_000)
 		return () => clearInterval(timer)
@@ -1646,19 +1627,24 @@ function PersonalDashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSetti
 				balancesRef.current = next
 				return next
 			})
-			if (updated.syncState !== 'stale' && updated.syncState !== 'degraded') setCacheUpdatedAt(receivedAt)
+			if (confirmedDashboardBalance(updated)) {
+				balanceActivityRef.current.delete(updated.chainId)
+				recoverBalanceFaults([updated.chainId])
+				if (updated.updatedAt && updated.updatedAt <= receivedAt) setCacheUpdatedAt(updated.updatedAt)
+			}
 			clearLocalPioneerError()
 		})
-	}, [commitBalanceReconciliations, clearLocalPioneerError])
+	}, [commitBalanceReconciliations, clearLocalPioneerError, recoverBalanceFaults])
 
 	// A broadcast or swap settlement made this chain's figure out of date: it
 	// stays shown, but no longer as synced, until a confirmed read replaces it (audit v4 H3).
 	useEffect(() => onRpcMessage("balance-stale", ({ chainId }: { chainId: string }) => {
+		balanceActivityRef.current.add(chainId)
 		setBalances(prev => {
 			const row = prev.get(chainId)
-			if (!row || row.syncState === 'stale' || row.syncState === 'degraded') return prev
+			if (!row || row.txPending || row.syncState === 'degraded') return prev
 			const next = new Map(prev)
-			next.set(chainId, { ...row, syncState: 'stale' })
+			next.set(chainId, { ...row, syncState: 'stale', txPending: true })
 			balancesRef.current = next
 			return next
 		})
@@ -1675,6 +1661,12 @@ function PersonalDashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSetti
 			cacheScopeRevisionRef.current++
 			chainSnapshotRevisionRef.current.clear()
 			chainLastUpdatedRef.current.clear()
+			balanceActivityRef.current.clear()
+			setPortfolioFault(null)
+			setDismissedBalanceErrors(new Set())
+			setCacheUpdatedAt(null)
+			setHasEverRefreshed(false)
+			clearPioneerError()
 			commitBalanceReconciliations([])
 			externalDestinationTxidsRef.current.clear()
 			completedReconciliationTxidsRef.current.clear()
@@ -1683,9 +1675,9 @@ function PersonalDashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSetti
 			// If a fetch is already in flight it self-heals (the purge ran at its
 			// start, before any derivation) and its result repopulates the cleared
 			// map. Otherwise force-refresh now.
-			if (!loadingBalancesRef.current) refreshBalances(true)
+			if (!loadingBalancesRef.current) refreshBalances(true, [], false, 'wallet-open')
 		})
-	}, [refreshBalances, commitBalanceReconciliations])
+	}, [refreshBalances, commitBalanceReconciliations, clearPioneerError])
 
 	const cleanBalanceUsd = useMemo(() => {
 		const overrides = new Map(
@@ -1912,12 +1904,25 @@ function PersonalDashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSetti
 		if (c.id === 'hive') return hiveEnabled
 		return !c.hidden
 	}), [allChains, btcOnly, firmwareVersion, zcashEnabled, hiveEnabled, disabledNetworks])
+	visibleChainIdsRef.current = visibleChains.map(chain => chain.id)
+	const visibleBalances = visibleChains.map(chain => balances.get(chain.id))
+	const renderNow = Math.max(clockNow, Date.now())
+	const displayedUpdatedAt = dashboardBalanceUpdatedAt(visibleBalances, cacheUpdatedAt, renderNow)
+	const balanceErrorNotice = dashboardErrorNotice(portfolioFault, visibleChainIdsRef.current, allChains)
+	const showBalanceError = !!balanceErrorNotice?.identities.some(identity => !dismissedBalanceErrors.has(identity))
+	useEffect(() => {
+		const active = new Set(balanceErrorNotice?.identities ?? [])
+		setDismissedBalanceErrors(current => {
+			const remaining = new Set([...current].filter(identity => active.has(identity)))
+			return remaining.size === current.size ? current : remaining
+		})
+	}, [balanceErrorNotice?.key])
 
-	// XMR: a row in the chain list (setting + firmware 7.17+), opening the standard asset page.
+	// XMR: a row in the chain list (setting + device capability), opening the standard asset page.
 	// Its balance comes from the local watch wallet and has no fiat price, so it stays out of
 	// visibleChains, whose fiat totals, charts and sync states all come from Pioneer.
-	const moneroChain = useMemo(() => moneroChainVisible({ settingEnabled: moneroEnabled, firmwareVersion, watchOnly, bitcoinOnly: btcOnly })
-		&& !disabledNetworks.includes('monero') ? CHAINS.find(c => c.id === 'monero') : undefined, [moneroEnabled, firmwareVersion, watchOnly, btcOnly, disabledNetworks])
+	const moneroChain = useMemo(() => moneroChainVisible({ settingEnabled: moneroEnabled, capabilities, isEmulator, watchOnly, bitcoinOnly: btcOnly })
+		&& !disabledNetworks.includes('monero') ? CHAINS.find(c => c.id === 'monero') : undefined, [moneroEnabled, capabilities, isEmulator, watchOnly, btcOnly, disabledNetworks])
 
 	// Built-in networks the user turned off: offered back in the Add network dialog.
 	const turnedOffChains = useMemo(() => btcOnly ? [] : allChains.filter(c =>
@@ -1960,13 +1965,7 @@ function PersonalDashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSetti
 	const anyChainUnknown = sidebarChainStates.includes('unknown') || !!vaultsError || vaultPortfolios.some(p =>
 		p.includeInTotal && !disabledNetworks.includes(p.identity.chainId) && p.totalUsd === undefined)
 
-	// Is data stale? (loaded from cache but haven't refreshed yet this session)
-	const isStale = !hasEverRefreshed && !loadingBalances
-
-	// Show big CTA when last check is older than 24 hours
-	const cacheOlderThanDay = !loadingBalances && !watchOnly && initialLoaded && (
-		!cacheUpdatedAt || (Date.now() - cacheUpdatedAt > 86_400_000)
-	)
+	const refreshIsDue = !loadingBalances && dashboardRefreshIsDue(displayedUpdatedAt, renderNow)
 
 	if (showActivityPage) {
 		return (
@@ -2000,6 +1999,7 @@ function PersonalDashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSetti
 		if (btc) {
 			return (
 				<AssetPageErrorBoundary onBack={() => {}} chainName={btc.coin}>
+                    <BalanceSyncProgress loading={loadingBalances} />
 					<AssetPage chain={btc} balance={balances.get('bitcoin')} balanceLoading={loadingBalances || !initialLoaded} onBack={() => {}} hideBack firmwareVersion={firmwareVersion} onViewActivity={handleViewActivity} watchOnly={watchOnly} watchOnlyDeviceId={watchOnlyDeviceId} isHiddenWallet={isHiddenWallet} />
 				</AssetPageErrorBoundary>
 			)
@@ -2010,6 +2010,7 @@ function PersonalDashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSetti
 		const bal = balances.get(selectedChain.id)
 		return (
 			<AssetPageErrorBoundary onBack={() => setSelectedChain(null)} chainName={selectedChain.coin}>
+                <BalanceSyncProgress loading={loadingBalances} />
 				{/* key: remount on chain switch — AssetPage's mount-only effects (address
 				    derive, initial view) must not leak chain A state into chain B */}
 				<AssetPage key={selectedChain.id} chain={selectedChain} balance={bal} balanceLoading={loadingBalances || !initialLoaded} onBack={() => { setSelectedChain(null); setSelectedChainAction(undefined); setSelectedChainInitialToken(undefined) }} firmwareVersion={firmwareVersion} initialAction={selectedChainAction} initialToken={selectedChainInitialToken} onViewActivity={handleViewActivity} watchOnly={watchOnly} watchOnlyDeviceId={watchOnlyDeviceId} isHiddenWallet={isHiddenWallet} />
@@ -2428,6 +2429,7 @@ function PersonalDashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSetti
 						fontSize="11px"
 						fontWeight="600"
 						color={loadingBalances ? "kk.textMuted" : "kk.gold"}
+						data-balance-refresh-due={refreshIsDue ? 'true' : 'false'}
 						bg="transparent"
 						borderRadius="full"
 						cursor={loadingBalances ? "default" : "pointer"}
@@ -2437,7 +2439,7 @@ function PersonalDashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSetti
 							bg: "rgba(233,196,106,0.12)",
 						}}
 						onClick={loadingBalances ? undefined : () => refreshBalances(true, [], true)}
-						css={isStale && !loadingBalances ? { animation: "pulseGold 2s ease-in-out infinite" } : undefined}
+						css={refreshIsDue ? { animation: "pulseGold 2s ease-in-out infinite" } : undefined}
 					>
 						<Flex align="center" gap="1.5">
 							{loadingBalances ? (
@@ -2450,15 +2452,15 @@ function PersonalDashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSetti
 							)}
 							{loadingBalances
 								? t("refreshing")
-								: cacheUpdatedAt
+								: displayedUpdatedAt
 									? <>
 										<Text as="span" color={(() => {
-											const age = Date.now() - cacheUpdatedAt
+											const age = renderNow - displayedUpdatedAt
 											if (age < 3_600_000) return "var(--teal)"
 											if (age < 86_400_000) return "var(--gold)"
 											return "var(--rose)"
 										})()}>
-											{formatTimeAgo(cacheUpdatedAt, t)}
+											{formatTimeAgo(displayedUpdatedAt, t)}
 										</Text>
 										{" · "}{t("refreshBalances")}
 									</>
@@ -2495,6 +2497,8 @@ function PersonalDashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSetti
 					)}
 				</Flex>
 
+			{!watchOnly && <BalanceSyncProgress loading={loadingBalances} />}
+
 			{/* Watch-only banner */}
 			{watchOnly && balances.get('bitcoin')?.fiatValueState && (
 				<Text fontSize="xs" color="var(--gold)" mb="3" role="status">{uiText("Bitcoin balance refreshed from your node.")}{" "}{balances.get('bitcoin')?.fiatValueState === 'stale'
@@ -2519,7 +2523,7 @@ function PersonalDashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSetti
 						<circle cx="12" cy="12" r="3" />
 					</svg>
 					<Text fontSize="xs" color="kk.gold" fontWeight="500">
-						{t("watchOnlyBanner")}{cacheUpdatedAt ? ` · ${t("lastUpdated", { time: new Date(cacheUpdatedAt).toLocaleString(getNumberLocale(), { dateStyle: "medium", timeStyle: "short" }) })}` : ""}
+						{t("watchOnlyBanner")}{displayedUpdatedAt ? ` · ${t("lastUpdated", { time: new Date(displayedUpdatedAt).toLocaleString(getNumberLocale(), { dateStyle: "medium", timeStyle: "short" }) })}` : ""}
 					</Text>
 				</Flex>
 			)}
@@ -2651,7 +2655,13 @@ function PersonalDashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSetti
 				</Box>
 			))}
 
-			{/* Pioneer connection error banner */}
+			{providerUsage && providerUsage.state !== 'normal' && (
+                <Box role="status" mb="3" px="4" py="3" border="1px solid" borderColor="orange.500" borderRadius="md">
+                    <Text fontWeight="600">{uiText(providerUsage.reason === 'upstream' ? 'Token discovery is temporarily unavailable' : providerUsage.state === 'limited' ? 'Balance discovery refresh is temporarily limited' : 'Balance discovery refresh capacity is running low')}</Text>
+                    <Text fontSize="sm" color="kk.textMuted">{uiText('Cached balances remain available. Automatic updates will not spend additional discovery requests.')}</Text>
+                </Box>
+            )}
+            {/* Pioneer connection error banner */}
 			{pioneerError && (
 				<Box
 					mb="3"
@@ -2743,114 +2753,33 @@ function PersonalDashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSetti
 				</Box>
 			)}
 
-			{/* Out-of-sync notice — degraded/stale chains. Informational (green): the
-			    server answered, these chains are just behind. Hidden while a hard
-			    pioneerError banner is showing (that one supersedes). */}
-			{!pioneerError && portfolioFault && (portfolioFault.degradedChains.length > 0 || portfolioFault.staleChains.length > 0) && (
-				<Box
-					mb="3"
-					px="4"
-					py="3"
-					bg="rgba(34,197,94,0.08)"
-					border="1px solid"
-					borderColor="rgba(34,197,94,0.3)"
-					borderRadius="lg"
-				>
+			{/* Cached figures are normal. Only actual read failures need a notice;
+			    raw stale and transaction metadata remain available to Audit. */}
+			{!pioneerError && showBalanceError && balanceErrorNotice && (
+				<Box role="alert" data-balance-error-notice="" mb="3" px="4" py="3"
+					bg="rgba(233,196,106,0.08)" border="1px solid" borderColor="rgba(233,196,106,0.3)" borderRadius="lg">
 					<Flex direction="column" gap="2">
 						<Flex align="center" gap="2">
-							<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#22c55e" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-								<circle cx="12" cy="12" r="10" />
-								<polyline points="12 6 12 12 16 14" />
-							</svg>
-							<Text fontSize="sm" fontWeight="600" color="#22c55e">
-								{portfolioFault.degradedChains.length > 0 ? t("degradedTitle") : t("staleTitle")}
-							</Text>
+							<Text fontSize="sm" fontWeight="600" color="kk.gold">{t("degradedTitle")}</Text>
 							<DocsLink href={DOCS_LINKS.missingCoins} ml="1" />
 							<DocsLink href={watch('course-13-not-showing')} label={uiText("Watch video")} />
 						</Flex>
-						{/* Backend can report degraded and stale chains together; render
-						    both so the stale warning isn't swallowed by the degraded one. */}
-						<Flex direction="column" gap="1">
-							{portfolioFault.degradedChains.length > 0 && (
-								<Flex wrap="wrap" align="center" gap="1.5" fontSize="xs" color="kk.textSecondary" lineHeight="1.4">
-									<Text>{t("degradedReach")}</Text>
-									{(() => {
-										// Show each degraded chain as [icon] SYMBOL so it's obvious which
-										// chain is behind. degradedChainIds map to real chains (icon+symbol);
-										// fall back to the plain symbol list for any fault we couldn't map.
-										const items = portfolioFault.degradedChainIds
-											.map(id => allChains.find(c => c.id === id))
-											.filter((c): c is ChainDef => !!c)
-										if (items.length === 0) return <Text>{portfolioFault.degradedChains.join(", ")}</Text>
-										return items.map(c => (
-											<Flex key={c.id} align="center" gap="1">
-												<Image src={getAssetIcon(c.caip)} alt="" w="14px" h="14px" borderRadius="full" />
-												<Text fontWeight="600">{c.symbol}</Text>
-											</Flex>
-										))
-									})()}
-									<Text>{t("degradedTail")}</Text>
-								</Flex>
-							)}
-							{portfolioFault.staleChains.length > 0 && (
-								<Text fontSize="xs" color="kk.textSecondary" lineHeight="1.4">
-									{t("staleDesc", { ago: formatTimeAgo(Date.now() - portfolioFault.staleMinutes * 60_000, t) })}
-								</Text>
-							)}
+						<Flex wrap="wrap" align="center" gap="1.5" fontSize="xs" color="kk.textSecondary" lineHeight="1.4">
+							<Text>{t("degradedReach")}</Text>
+							{balanceErrorNotice.names.length ? balanceErrorNotice.names.map(name => <Text key={name} fontWeight="600">{name}</Text>) : <Text>{uiText('Balance unavailable')}</Text>}
+							<Text>{t("degradedTail")}</Text>
 						</Flex>
 						<Flex gap="2" mt="1">
-							<Box
-								as="button"
-								px="3"
-								py="1.5"
-								fontSize="xs"
-								fontWeight="600"
-								color="white"
-								bg="rgba(34,197,94,0.2)"
-								border="1px solid"
-								borderColor="#22c55e"
-								borderRadius="md"
-								cursor="pointer"
-								_hover={{ bg: "rgba(34,197,94,0.35)" }}
-								onClick={() => refreshBalances(true, [], true)}
-							>
-								{t("syncNow")}
-							</Box>
-							<Box
-								as="button"
-								px="3"
-								py="1.5"
-								fontSize="xs"
-								fontWeight="600"
-								color="kk.textMuted"
-								bg="transparent"
-								cursor="pointer"
-								_hover={{ color: "white" }}
-								onClick={() => setPortfolioFault(null)}
-							>
-								{t("dismiss")}
-							</Box>
-							<Box
-								as="button"
-								px="3"
-								py="1.5"
-								fontSize="xs"
-								fontWeight="600"
-								color="kk.gold"
-								bg="transparent"
-								cursor="pointer"
-								_hover={{ color: "white" }}
-								onClick={() => setShowAudit(true)}
-							>{uiText("Run audit")}</Box>
+							<Button size="xs" variant="ghost" color="kk.gold" disabled={loadingBalances}
+								onClick={() => refreshBalances(true, [], true)}>{t("retry")}</Button>
+							<Button size="xs" variant="ghost" color="kk.textMuted"
+								onClick={() => setDismissedBalanceErrors(current => new Set([...current, ...balanceErrorNotice.identities]))}>{t("dismiss")}</Button>
+							<Button size="xs" variant="ghost" color="kk.gold" onClick={() => setShowAudit(true)}>{uiText("Run audit")}</Button>
 						</Flex>
 					</Flex>
 				</Box>
 			)}
 
-			{/* Centered hero region — split into a flex-1 "sun" area (vertically
-			    centered) and a fixed-min-height "below" area. The split anchors
-			    the sun and the donut center at the same y-coordinate regardless
-			    of how much below content is rendered. */}
 			<Flex direction="column" w="100%" minH={viewMode === 'heatmap' ? "0" : "auto"}>
 				{/* View picker — top center of the hero area */}
 				<Flex justify="center" pt="2" pb="1">
@@ -2965,7 +2894,7 @@ function PersonalDashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSetti
 													<Text fontSize="28px" fontWeight="600" fontFamily="mono" color="var(--text-1)" lineHeight="1.1">
 														{privateModeEnabled ? "••••" : "$0.00"}
 													</Text>
-													<Text fontSize="13px" color="var(--text-3)" mt="1">{uiText("No")}{" "}{dchain.coin}{" "}{uiText("balance yet")}</Text>
+													<Text fontSize="13px" color="var(--text-3)" mt="1">{uiText("No {{chain}} balance yet", { chain: dchain.coin })}</Text>
 												</>
 											)}
 										</Box>
@@ -3375,61 +3304,6 @@ function PersonalDashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSetti
 			</Flex>
 
 
-			{/* Big glowing CTA when balances haven't been checked in over a day */}
-			{cacheOlderThanDay && (
-				<Box
-					as="button"
-					w="100%"
-					mb="4"
-					px="5"
-					py="4"
-					bg="rgba(233,196,106,0.08)"
-					border="1px solid"
-					borderColor="rgba(233,196,106,0.35)"
-					borderRadius="xl"
-					cursor="pointer"
-					transition="all 0.3s ease-out"
-					css={{ animation: "glowCta 3s ease-in-out infinite" }}
-					_hover={{
-						bg: "rgba(233,196,106,0.15)",
-						borderColor: "kk.gold",
-						transform: "scale(1.02)",
-						boxShadow: "0 0 24px rgba(233,196,106,0.5), 0 0 48px rgba(233,196,106,0.2)",
-					}}
-					_active={{ transform: "scale(0.98)", transition: "transform 0.1s" }}
-					onClick={() => refreshBalances(true, [], true)}
-				>
-					<Flex align="center" justify="center" gap="3">
-						<Box
-							w="40px"
-							h="40px"
-							borderRadius="full"
-							bg="rgba(233,196,106,0.15)"
-							display="flex"
-							alignItems="center"
-							justifyContent="center"
-							flexShrink={0}
-						>
-							<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--gold)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-								<path d="M21 2v6h-6" /><path d="M3 12a9 9 0 0 1 15-6.7L21 8" />
-								<path d="M3 22v-6h6" /><path d="M21 12a9 9 0 0 1-15 6.7L3 16" />
-							</svg>
-						</Box>
-						<Flex direction="column" align="flex-start">
-							<Text fontSize="md" fontWeight="700" color="kk.gold" lineHeight="1.3">
-								{t("staleCtaTitle")}
-							</Text>
-							<Text fontSize="xs" color="kk.textMuted" lineHeight="1.3">
-								{cacheUpdatedAt
-									? t("staleCtaSubtitle", { time: formatTimeAgo(cacheUpdatedAt, t) })
-									: t("lastUpdatedNever")}
-							</Text>
-						</Flex>
-					</Flex>
-				</Box>
-			)}
-
-
 			{drilledChainId === 'dogecoin' && <DogeEasterEgg />}
 
 			{swapDialogChain && (
@@ -3484,7 +3358,7 @@ function PersonalDashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSetti
 						staleChainIds: portfolioFault?.staleChainIds || [],
 						unresolvedFaultCount: portfolioFault?.unresolvedFaultCount || 0,
 					} satisfies AuditPortfolioSnapshot}
-					onRecovered={() => refreshBalances(true)}
+					onRecovered={() => refreshBalances(true, [], false, 'automatic')}
 				/>
 			)}
 

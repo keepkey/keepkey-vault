@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import { readFile, stat } from 'node:fs/promises'
 import { join } from 'node:path'
+import { JSDOM } from 'jsdom'
 import manifestJson from '../src/shared/offlineAssetIcons.json'
 import { BASE_NATIVE_CAIP, ICON_CAIP_ALIASES, caipToIcon, getAssetIcon, isBundledAssetIcon } from '../src/shared/assetLookup'
 
@@ -33,6 +34,44 @@ describe('offline asset icon pack', () => {
     expect(manifest[hype]).toBeTruthy()
     expect(isBundledAssetIcon(caipToIcon(hype))).toBe(true)
     expect(ICON_CAIP_ALIASES[hype]).toBe('eip155:2868/slip44:60')
+  })
+
+  test('dashboard chains use their official inline SVG logos: offline, 64x64, no scripts or external refs', () => {
+    const chains = {
+      ethereum: 'eip155:1/slip44:60',
+      arbitrum: 'eip155:42161/slip44:60',
+      optimism: 'eip155:10/slip44:60',
+      polygon: 'eip155:137/slip44:60',
+      base: BASE_NATIVE_CAIP,
+      thorchain: 'cosmos:thorchain-mainnet-v1/slip44:931',
+      dogecoin: 'bip122:00000000001a91e3dace36e2be3bf030/slip44:3',
+    }
+    const seen = new Set<string>()
+    for (const [name, caip] of Object.entries(chains)) {
+      const icon = getAssetIcon(caip)
+      expect(icon.startsWith('data:image/svg+xml,'), name).toBe(true)
+      expect(caipToIcon(caip), name).toBe(icon)
+      const svg = decodeURIComponent(icon.slice('data:image/svg+xml,'.length))
+      expect(svg.startsWith('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">'), name).toBe(true)
+      expect(svg, name).not.toMatch(/<script|href=|<foreignObject|\son[a-z]+=/i)
+      expect(svg.replace('http://www.w3.org/2000/svg', ''), name).not.toMatch(/https?:\/\//)
+      // Parse each data-URL image as its own SVG document, as <img> does.
+      // IDs may repeat across images; every reference must resolve within
+      // its own document, including references inside a <style> element.
+      const dom = new JSDOM(svg, { contentType: 'image/svg+xml' })
+      try {
+        const elementsWithIds = [...dom.window.document.querySelectorAll('[id]')]
+        const ids = new Set(elementsWithIds.map(element => element.id))
+        expect(ids.size, `${name}: duplicate SVG IDs`).toBe(elementsWithIds.length)
+        for (const reference of svg.matchAll(/url\(\s*['"]?#([^\s)'"\]]+)['"]?\s*\)/g)) {
+          expect(ids.has(reference[1]), `${name}: unresolved SVG fragment #${reference[1]}`).toBe(true)
+        }
+      } finally {
+        dom.window.close()
+      }
+      seen.add(icon)
+    }
+    expect(seen.size).toBe(Object.keys(chains).length)
   })
 
   test('every manifest target is a bounded raster file', async () => {

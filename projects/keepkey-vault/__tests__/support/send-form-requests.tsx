@@ -22,8 +22,8 @@ mock.module('../../src/mainview/lib/formatting', () => ({ formatBalance: String 
 mock.module('../../src/mainview/lib/signing-errors', () => ({ describeSigningError: (error: Error) => error.message }))
 mock.module('../../src/mainview/lib/sounds', () => ({ playSent() {} }))
 mock.module('../../src/shared/assetLookup', () => ({ getAsset: () => null }))
-const { isBurnAddress, knownTokenContract } = await import('../../src/shared/address-validation')
-mock.module('../../src/shared/address-validation', () => ({ validateAddress: () => ({ valid: true }), isBurnAddress, knownTokenContract }))
+const { isBurnAddress, knownTokenContract, sameAddress } = await import('../../src/shared/address-validation')
+mock.module('../../src/shared/address-validation', () => ({ validateAddress: () => ({ valid: true }), isBurnAddress, knownTokenContract, sameAddress }))
 mock.module('../../src/mainview/components/QrScannerOverlay', () => ({ QrScannerOverlay: () => null }))
 mock.module('../../src/mainview/components/AddressBookPicker', () => ({ AddressBookPicker: () => null }))
 mock.module('../../src/mainview/components/AddressIdenticon', () => ({ AddressIdenticon: () => null }))
@@ -36,7 +36,7 @@ function deferred() {
   return { promise, resolve, reject }
 }
 const calls: Array<{ method: string; params: any; timeout?: number; pending: ReturnType<typeof deferred> }> = []
-mock.module('../../src/mainview/lib/rpc', () => ({ rpcRequest: async (method: string, params: any, timeout?: number) => {
+mock.module('../../src/mainview/lib/rpc', () => ({ onRpcMessage: () => () => {}, rpcRequest: async (method: string, params: any, timeout?: number) => {
   if (method === 'checkVaultDestination') return undefined
   if (method === 'matchAddress') return { address: params.address, kind: 'external', label: 'Known test recipient' }
   if (method === 'cancelForegroundDeviceOperation') {
@@ -96,6 +96,10 @@ await render({ balanceLoading: false }) // A failed owner read must stay blocked
 expect(button('buildTransaction').disabled).toBe(true)
 await render({ address: otherOwner, evmAddressIndex: 2, balanceLoading: true })
 expect(input('amountPlaceholder').value).toBe('1'); expect(input('addressPlaceholder').value).toBe(recipient)
+// Resolving a new sender retains the draft, while its destination verification
+// must complete for that owner before Build becomes available.
+expect(button('buildTransaction').disabled).toBe(true)
+await settle(340)
 await click('buildTransaction')
 expect(calls.at(-1)!.params).toMatchObject({ evmAddressIndex: 2, amount: '1' })
 await complete(calls.at(-1)!); expect(button('signOnDevice').disabled).toBe(false)

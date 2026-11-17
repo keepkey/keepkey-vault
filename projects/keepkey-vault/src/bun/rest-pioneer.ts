@@ -6,6 +6,7 @@
  * Pattern: parse body → call backend → return { data: ... }.
  */
 import type { AuthStore } from './auth'
+import { confirmAccountTx } from './txbuilder/confirm-account-tx'
 import { getPioneer } from './pioneer'
 import { parseRequest } from './validate'
 import * as S from './schemas'
@@ -25,7 +26,7 @@ function broadcastTxid(data: any): string | undefined {
   if (typeof data === 'string') return data.length >= 32 ? data : undefined
   if (data.success === false) return undefined
   const code = data.results?.raw?.tx_response?.code
-  if (typeof code === 'number' && code !== 0) return undefined
+  if (code != null && String(code) !== '0') return undefined
   const txid = data.txid || data.tx_hash || data.hash
   return typeof txid === 'string' && txid ? txid : undefined
 }
@@ -136,6 +137,11 @@ export async function handleV2DataRoute(
       // device signed the tx in the current wallet session (hidden-wallet txs
       // must never be attributed to the standard wallet).
       const parsedTxid = broadcastTxid(data)
+      const broadcastChain = resolveChain?.(body.networkId) ?? CHAINS.find(c => c.networkId === body.networkId)
+      if (broadcastChain?.chainFamily === 'cosmos' || broadcastChain?.chainFamily === 'xrp') {
+        if (!parsedTxid) throw new Error('Broadcast rejected or returned no transaction hash')
+        await confirmAccountTx(broadcastChain, parsedTxid)
+      }
       const txid = parsedTxid && signedHereThisSession?.(body.serialized) ? parsedTxid : undefined
       const chain = txid ? (resolveChain?.(body.networkId) ?? CHAINS.find(c => c.networkId === body.networkId)) : undefined
       return json({ data }, 200, txid ? {

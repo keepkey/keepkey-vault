@@ -26,6 +26,7 @@ runs:
         work="$(mktemp -d)"
         archive="$work/hutch.tar.gz"
         curl --proto '=https' --tlsv1.2 --fail --silent --show-error --location \
+          --retry 3 --retry-delay 2 --retry-all-errors --connect-timeout 20 --max-time 180 \
           "https://hutch.blackboard.sh/hutch/builds/$HUTCH_REVISION/$platform/hutch.tar.gz" --output "$archive"
         # Nothing from the archive runs unless it is the build we reviewed.
         echo "$archive_sha  $archive" | shasum -a 256 -c -

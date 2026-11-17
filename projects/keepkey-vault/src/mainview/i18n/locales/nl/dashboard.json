@@ -1,4 +1,7 @@
 {
+	"degradedTitle": "Sommige saldi konden niet worden vernieuwd",
+	"degradedReach": "Vernieuwen mislukt:",
+	"degradedTail": "De laatst bekende saldi worden getoond wanneer beschikbaar.",
 	"supportedChains": "Ondersteunde netwerken",
 	"refreshBalances": "Saldo's vernieuwen",
 	"connectDeviceToRefresh": "Sluit apparaat aan om te vernieuwen",
@@ -36,5 +39,12 @@
 	"loadingSync": "Saldo's synchroniseren over netwerken",
 	"loadingPrices": "Nieuwste prijzen ophalen",
 	"tokensCount": "+{{count}} tokens",
-	"dismiss": "Sluiten"
+	"dismiss": "Sluiten",
+	"syncStage_preparing": "Wallet voorbereiden",
+	"syncStage_addresses": "Apparaatadressen lezen",
+	"syncStage_balances": "Saldoaanvragen controleren",
+	"syncStage_finalizing": "Portfolio bijwerken",
+	"syncProgressCounts": "{{completed}}/{{total}} · {{percent}}% · {{seconds}}s",
+	"syncProgressElapsed": "{{seconds}}s verstreken",
+	"syncFailedChecks": "{{failed}} controles niet beschikbaar"
 }

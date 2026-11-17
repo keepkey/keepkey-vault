@@ -138,5 +138,7 @@
   "createPsbt": "Criar PSBT",
   "watchOnlyNotVerifiedTitle": "Endereços NÃO verificados em uma KeepKey",
   "watchOnlyNotVerifiedBody": "Esta carteira foi importada de uma chave, não lida da sua KeepKey. Se essa chave foi trocada ou digitada errado, as moedas enviadas para cá não são suas. Conecte a KeepKey que a contém para verificar.",
-  "watchOnlyShowUnverified": "Entendi, mostrar o endereço"
+  "watchOnlyShowUnverified": "Entendi, mostrar o endereço",
+  "defiManagePosition": "Gerenciar no {{protocol}}",
+  "defiFindPool": "Encontrar este pool no {{protocol}}"
 }

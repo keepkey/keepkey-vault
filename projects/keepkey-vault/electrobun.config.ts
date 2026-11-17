@@ -3,6 +3,8 @@ import { existsSync as existsFromCwd } from "node:fs";
 import { dirname, isAbsolute, join, relative } from 'node:path';
 import { fileURLToPath } from "node:url";
 import pkg from "./package.json";
+import { verifiedHostAdapterFile } from "./monero-cli/src/host-adapter";
+import { checkMoneroCoreVerifierDirectory, moneroCoreVerifierArtifact } from './src/bun/monero-core-verifier-artifact';
 
 const isWindows = process.platform === "win32";
 const isMac = process.platform === "darwin";
@@ -12,6 +14,8 @@ const arch = process.arch; // 'arm64' or 'x64'
 // copy sources resolve against the project: check paths against this file's folder.
 const projectDir = dirname(fileURLToPath(import.meta.url));
 const existsSync = (path: string) => existsFromCwd(isAbsolute(path) ? path : join(projectDir, path));
+// Hutch resolves copy keys against the project even when the input is absolute.
+const toolSource = (path: string) => isAbsolute(path) ? relative(projectDir, path) : path;
 if (isMac) console.error(`[electrobun] Building for macOS ${arch}`);
 const certifiedEmulatorSource = isWindows
 	? "emulator-bundle/libkkemu.dll"
@@ -19,33 +23,52 @@ const certifiedEmulatorSource = isWindows
 // Local Developer-ID builds stage a signed copy after verifying the immutable
 // certified artifact. CI/unsigned builds continue to embed the certified bytes
 // directly. Keeping the signed copy separate preserves source hash verification.
-const emulatorSource = process.env.KEEPKEY_EMULATOR_SOURCE || certifiedEmulatorSource;
+const selectedEmulatorSource = process.env.KEEPKEY_EMULATOR_SOURCE || certifiedEmulatorSource;
+const emulatorSource = selectedEmulatorSource ? toolSource(selectedEmulatorSource) : null;
 const emulatorCopy = emulatorSource && existsSync(emulatorSource)
-	? { [emulatorSource]: `emulator/${emulatorSource.split('/').pop()}` }
+	? { [emulatorSource]: `emulator/${emulatorSource.split('/').pop()}`,
+		...(process.env.KEEPKEY_EMULATOR_RECEIPT_SOURCE ? {
+			[toolSource(process.env.KEEPKEY_EMULATOR_RECEIPT_SOURCE)]: 'emulator/nu7-emulator-receipt.json',
+		} : {}) }
 	: {};
 
 const moneroPlatform = `${process.platform}-${process.arch}`;
 const moneroSidecar = isWindows ? "monero-cli.exe" : "monero-cli";
 const moneroRpc = isWindows ? "monero-wallet-rpc.exe" : "monero-wallet-rpc";
 const moneroVendor = `monero-cli/vendor/${moneroPlatform}`;
-// Electrobun resolves copy keys relative to the project, even for absolute inputs.
-const toolSource = (path: string) => isAbsolute(path) ? relative(projectDir, path) : path;
+const zcashSidecar = isWindows ? 'zcash-cli.exe' : 'zcash-cli';
+const zcashCliSource = toolSource(process.env.KEEPKEY_ZCASH_CLI_SOURCE || `zcash-cli/target/release/${zcashSidecar}`);
 const moneroCliSource = toolSource(process.env.KEEPKEY_MONERO_CLI_SOURCE || `monero-cli/dist/${moneroSidecar}`);
 const moneroRpcSource = toolSource(process.env.KEEPKEY_MONERO_RPC_SOURCE || `${moneroVendor}/${moneroRpc}`);
 const moneroMetadataSource = toolSource(process.env.KEEPKEY_MONERO_METADATA_SOURCE || `${moneroVendor}/monero-tools.json`);
+const moneroAdapterSource = toolSource(process.env.KEEPKEY_MONERO_ADAPTER_SOURCE || `${moneroVendor}/monero-host-adapter`);
+const verifiedMoneroAdapter = existsSync(moneroAdapterSource)
+    ? verifiedHostAdapterFile(join(projectDir, moneroAdapterSource), join(projectDir, moneroMetadataSource), moneroPlatform) : null;
+if (existsSync(moneroAdapterSource) && !verifiedMoneroAdapter) throw new Error('The Monero host adapter does not match its reviewed metadata');
 const moneroDaemon = isWindows ? 'monerod.exe' : 'monerod';
 const moneroDaemonSource = toolSource(process.env.KEEPKEY_MONERO_DAEMON_SOURCE || `${moneroVendor}/${moneroDaemon}`);
 const moneroCopy = existsSync(moneroCliSource) && existsSync(moneroRpcSource)
     ? { [moneroCliSource]: moneroSidecar,
         [moneroRpcSource]: `monero-tools/${moneroRpc}`,
         [moneroMetadataSource]: "monero-tools/monero-tools.json",
+        ...(verifiedMoneroAdapter ? { [moneroAdapterSource]: "monero-tools/monero-host-adapter",
+            'monero-cli/host-adapter-LICENSES.txt': 'monero-tools/HOST-ADAPTER-LICENSES.txt' } : {}),
         ...(existsSync(moneroDaemonSource) ? { [moneroDaemonSource]: `monero-tools/${moneroDaemon}` } : {}),
         [`${moneroVendor}/LICENSE`]: "monero-tools/LICENSE" } : {};
 // Development-only research artifacts (build-signed.ts refuses this flag): the receive-only and/or
-// signing emulator builds, and the research signing adapter pinned in monero-tools.json.
+// signing emulator builds. The verified host adapter is packaged separately for normal receive access.
 const includeMoneroResearch = process.env.KEEPKEY_INCLUDE_MONERO_EMULATOR === '1';
-const moneroDeviceCopy = includeMoneroResearch && existsSync('monero-device-bundle/libmonero_device_proof.dylib') && existsSync('monero-device-bundle/libmonero_core_verify.dylib')
-    ? { 'monero-device-bundle': 'monero-device' } : {};
+// Capability signing uses the independently hash-checked Core verifier, without a host prover.
+const verifierArtifact = moneroCoreVerifierArtifact();
+const moneroVerifierSource = toolSource(process.env.KEEPKEY_MONERO_CORE_VERIFIER_SOURCE || 'monero-device-bundle/libmonero_core_verify.dylib');
+const moneroVerifierReceiptSource = process.env.KEEPKEY_MONERO_CORE_VERIFIER_RECEIPT_SOURCE;
+const verifiedCoreVerifier = verifierArtifact && existsSync(moneroVerifierSource)
+    ? checkMoneroCoreVerifierDirectory(dirname(join(projectDir, moneroVerifierSource)), undefined, !!moneroVerifierReceiptSource) : null;
+if (verifierArtifact && existsSync(moneroVerifierSource) && !verifiedCoreVerifier) throw new Error('The Monero Core verifier does not match its reviewed metadata');
+const moneroDeviceCopy = verifiedCoreVerifier
+    ? { [moneroVerifierSource]: 'monero-device/libmonero_core_verify.dylib',
+        'monero-cli/core-verifier-LICENSES.txt': 'monero-device/LICENSES.txt',
+        ...(moneroVerifierReceiptSource ? { [toolSource(moneroVerifierReceiptSource)]: 'monero-device/core-verifier-receipt.json' } : {}) } : {};
 const moneroEmulatorCopy = {
     ...(includeMoneroResearch && existsSync("monero-emulator-bundle/libkkemu-monero.dylib")
         ? { "monero-emulator-bundle/manifest.json": "monero-emulator/manifest.json",
@@ -53,12 +76,10 @@ const moneroEmulatorCopy = {
     ...(includeMoneroResearch && existsSync("monero-emulator-bundle/libkkemu-monero-signing.dylib")
         ? { "monero-emulator-bundle/signing-manifest.json": "monero-emulator/signing-manifest.json",
             "monero-emulator-bundle/libkkemu-monero-signing.dylib": "monero-emulator/libkkemu-monero-signing.dylib" } : {}),
-    ...(includeMoneroResearch && existsSync(`${moneroVendor}/monero-host-adapter`)
-        ? { [`${moneroVendor}/monero-host-adapter`]: "monero-tools/monero-host-adapter" } : {}),
 };
 
-const zcashSource = isWindows ? "zcash-cli/target/release/zcash-cli.exe" : "zcash-cli/target/release/zcash-cli";
-const zcashCopy = existsSync(zcashSource) ? { [zcashSource]: isWindows ? "zcash-cli.exe" : "zcash-cli" } : {};
+const zcashCopy = existsSync(zcashCliSource) ? { [zcashCliSource]: zcashSidecar,
+    ...(existsSync(`${zcashCliSource}.nu7.json`) ? { [`${zcashCliSource}.nu7.json`]: `${zcashSidecar}.nu7.json` } : {}) } : {};
 
 export default {
 	app: {
@@ -110,6 +131,7 @@ export default {
 			// Silicon builds it; Vault disables the privacy capability when it is absent,
 			// and scripts/verify-release-bundle.ts requires it in the arm64 release.
 			...zcashCopy,
+
 		},
 		mac: {
 			bundleCEF: false,

@@ -96,5 +96,7 @@
   "hideFiltered_few": "Ukryj {{count}} odfiltrowane tokeny",
   "hideFiltered_many": "Ukryj {{count}} odfiltrowanych tokenów",
   "multisig": "Multisig",
-  "cached": "Z pamięci podręcznej"
+  "cached": "Z pamięci podręcznej",
+  "defiManagePosition": "Zarządzaj w {{protocol}}",
+  "defiFindPool": "Znajdź tę pulę w {{protocol}}"
 }

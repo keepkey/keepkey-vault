@@ -1,6 +1,6 @@
 {
   "name": "keepkey-vault",
-  "version": "1.7.0",
+  "version": "1.7.1",
   "description": "KeepKey Vault - Desktop hardware wallet management powered by Electrobun",
   "scripts": {
     "i18n:check": "bun scripts/check-i18n.ts",
@@ -22,7 +22,7 @@
     "start": "bun run dev",
     "monero:prepare": "python3 monero-cli/prepare.py",
     "monero:build": "bun monero-cli/build.ts",
-    "monero:test": "bun test src/bun/monero-vault.test.ts src/bun/monero-send.test.ts src/bun/monero-sidecar.test.ts src/bun/monero-emulator.test.ts src/bun/monero-settings.test.ts src/bun/emulator-library.test.ts monero-cli/src src/bun/monero-node.test.ts __tests__/monero-node-ui.test.ts src/bun/monero-remote-failover.test.ts src/bun/monero-watch-store.test.ts src/bun/monero-device-signing.test.ts src/bun/monero-device-subaddress.test.ts",
+    "monero:test": "bun test src/bun/monero-stream-signer.test.ts src/bun/monero-vault.test.ts src/bun/monero-send.test.ts src/bun/monero-sidecar.test.ts src/bun/monero-emulator.test.ts src/bun/monero-settings.test.ts src/bun/emulator-library.test.ts monero-cli/src src/bun/monero-node.test.ts __tests__/monero-node-ui.test.ts src/bun/monero-remote-failover.test.ts src/bun/monero-watch-store.test.ts src/bun/monero-device-signing.test.ts src/bun/monero-device-subaddress.test.ts",
     "qa:core": "bun scripts/qa-core-regressions.ts"
   },
   "dependencies": {
@@ -80,7 +80,8 @@
     "concurrently": "^9.1.0",
     "jsdom": "16.7.0",
     "typescript": "5.9.3",
-    "vite": "^6.0.3"
+    "vite": "^6.0.3",
+    "yaml": "1.10.2"
   },
   "trustedDependencies": [
     "protobufjs",

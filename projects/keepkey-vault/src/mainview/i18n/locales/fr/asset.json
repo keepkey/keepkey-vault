@@ -94,5 +94,7 @@
   "showFiltered_many": "Afficher {{count}} jetons filtrés",
   "hideFiltered_many": "Masquer {{count}} jetons filtrés",
   "multisig": "Multisignature",
-  "cached": "En cache"
+  "cached": "En cache",
+  "defiManagePosition": "Gérer sur {{protocol}}",
+  "defiFindPool": "Trouver ce pool sur {{protocol}}"
 }

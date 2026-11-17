@@ -30,7 +30,7 @@ export HUTCH_ELECTROBUN_DEVKIT_ROOT
 export PATH := $(HOME)/.hutch/bin:$(PATH)
 # Hutch's per-platform names: artifacts/stable-<os>-<arch>-keepkey-vault.app.tar.zst
 ELECTROBUN_ARCH := $(if $(filter x86_64,$(ARCH)),x64,$(ARCH))
-ZCASH_CLI_SOURCES := $(shell find $(PROJECT_DIR)/zcash-cli/src -name '*.rs' 2>/dev/null) $(PROJECT_DIR)/zcash-cli/Cargo.toml
+ZCASH_CLI_SOURCES := $(shell find $(PROJECT_DIR)/zcash-cli/src -name '*.rs' 2>/dev/null) $(PROJECT_DIR)/zcash-cli/Cargo.toml $(PROJECT_DIR)/zcash-cli/Cargo.lock $(PROJECT_DIR)/scripts/write-zcash-nu7-manifest.ts $(PROJECT_DIR)/src/bun/zcash-nu7-binary.ts
 
 # Auto-load .env if present (only export signing-related vars to sub-processes)
 ifneq (,$(wildcard .env))
@@ -38,7 +38,7 @@ include .env
 export ELECTROBUN_DEVELOPER_ID ELECTROBUN_TEAMID ELECTROBUN_APPLEID ELECTROBUN_APPLEIDPASS
 endif
 
-.PHONY: FORCE electrobun-devkit electrobun-macos-helpers release-devkit-guard verify-bundle release-sums monero-cli monero-emulator monero-emulator-signing monero-adapter firmware-token-table-717 clearsign-worker-test sync-asset-data clearsign-worker-rehearsal-guard clearsign-worker-rehearsal-deploy install dev dev-hmr build build-stable build-canary build-signed dmg clean help vault sign-check notary-check verify verify-entitlements publish release upload-dmg upload-all-dmgs sign-release sign-release-intel verify-arch audit-macos-bundle submodules modules-install modules-build device-protocol-build modules-clean audit build-zcash-cli build-zcash-cli-debug build-zcash-cli-intel test test-unit test-rest test-sign-gating test-zcash-cli test-emu test-emu-erc7730 test-emu-erc7730-717 test-emu-solana-lut test-emu-erc7730-typed test-emu-pin build-intel build-signed-intel preflight build-emulator build-emulator-windows build-emulator-macos-release build-emulator-release clean-emulator test-emu-python i18n-extract i18n-sync i18n-baseline test-i18n
+.PHONY: FORCE electrobun-devkit electrobun-macos-helpers release-devkit-guard verify-bundle release-sums monero-cli monero-emulator monero-emulator-signing monero-adapter firmware-token-table-717 clearsign-worker-test sync-asset-data clearsign-worker-rehearsal-guard clearsign-worker-rehearsal-deploy install dev dev-hmr build build-stable build-canary build-signed dmg clean help vault sign-check notary-check verify verify-entitlements publish release upload-dmg upload-all-dmgs sign-release sign-release-intel verify-arch audit-macos-bundle submodules modules-install modules-build device-protocol-build modules-clean audit build-zcash-cli build-zcash-cli-debug build-zcash-cli-intel test test-unit test-rest test-sign-gating test-zcash-cli test-emu test-emu-erc7730 test-emu-erc7730-717 test-emu-solana-lut test-emu-erc7730-typed test-emu-pin build-intel build-signed-intel preflight build-emulator build-emulator-windows build-emulator-macos-release build-emulator-release clean-emulator test-emu-python i18n-extract i18n-sync i18n-baseline test-i18n test-monero test-monero-stream typecheck
 
 # --- Submodules (auto-init on fresh worktrees/clones) ---
 
@@ -120,18 +120,27 @@ ifdef ELECTROBUN_DEVELOPER_ID
 		--options runtime \
 		$(PROJECT_DIR)/zcash-cli/target/release/zcash-cli
 endif
+	cd $(PROJECT_DIR) && bun scripts/write-zcash-nu7-manifest.ts zcash-cli/target/release/zcash-cli
 	@touch $@
 
 build-zcash-cli: $(ZCASH_CLI_STAMP)
+	cd $(PROJECT_DIR) && bun scripts/write-zcash-nu7-manifest.ts zcash-cli/target/release/zcash-cli
 	@echo "zcash-cli ready for Electrobun packaging:"
 	@ls -lh $(PROJECT_DIR)/zcash-cli/target/release/zcash-cli
 
 test-zcash-cli:
 	cd $(PROJECT_DIR)/zcash-cli && cargo test
+	cd $(PROJECT_DIR)/zcash-cli && cargo test --locked --manifest-path tests/nu7-reference/Cargo.toml
+
+.PHONY: test-emu-zcash-nu7
+test-emu-zcash-nu7:
+	@test -n "$(KK_EMU_DYLIB)" || { echo 'Set KK_EMU_DYLIB to the reviewed 7.17 alpha emulator'; exit 1; }
+	cd $(PROJECT_DIR) && VAULT_API_URL=http://127.0.0.1:9 KK_EMU_DYLIB="$(KK_EMU_DYLIB)" bun test tests/emulator/14-zcash-nu7.test.ts
 
 build-zcash-cli-debug:
 	cd $(PROJECT_DIR)/zcash-cli && cargo test
 	cd $(PROJECT_DIR)/zcash-cli && cargo build
+	cd $(PROJECT_DIR) && bun scripts/write-zcash-nu7-manifest.ts zcash-cli/target/debug/zcash-cli
 
 # Cross-compile zcash-cli for Intel Mac from Apple Silicon
 build-zcash-cli-intel:
@@ -144,6 +153,7 @@ ifdef ELECTROBUN_DEVELOPER_ID
 		--options runtime \
 		$(PROJECT_DIR)/zcash-cli/target/x86_64-apple-darwin/release/zcash-cli
 endif
+	cd $(PROJECT_DIR) && bun scripts/write-zcash-nu7-manifest.ts zcash-cli/target/x86_64-apple-darwin/release/zcash-cli
 	@echo "=== Intel zcash-cli ready at $(PROJECT_DIR)/zcash-cli/target/x86_64-apple-darwin/release/zcash-cli ==="
 
 # --- Architecture Verification ---
@@ -269,11 +279,11 @@ $(VAULT_INSTALL_STAMP): $(PROJECT_DIR)/package.json $(PROJECT_DIR)/bun.lock $(PR
 
 install: $(VAULT_INSTALL_STAMP)
 
-vault: install $(ZCASH_CLI_STAMP) dev
+vault: install build-zcash-cli dev
 
 # Monero (preview): verified monero-wallet-rpc + sidecar worker; stage a tested research emulator dylib.
 monero-cli: install
-	cd $(PROJECT_DIR) && { [ -n "$$(ls -A monero-cli/vendor 2>/dev/null)" ] || bun run monero:prepare; } && bun run monero:build
+	cd $(PROJECT_DIR) && { [ -n "$$(ls -A monero-cli/vendor 2>/dev/null)" ] || bun run monero:prepare; } && bun scripts/stage-monero-adapter.ts --if-available && bun run monero:build
 
 monero-emulator: install
 	@test -n "$(SOURCE)" || (echo "usage: make monero-emulator SOURCE=/path/to/libkkemu.dylib" && exit 1)
@@ -288,10 +298,10 @@ monero-adapter: install
 	@test -n "$(SOURCE)" -a -n "$(SHA256)" || (echo "usage: make monero-adapter SOURCE=/path/to/monero-host-adapter SHA256=reviewed-sha256" && exit 1)
 	cd $(PROJECT_DIR) && bun scripts/stage-monero-adapter.ts --source "$(SOURCE)" --sha256 "$(SHA256)"
 
-dev: install $(ZCASH_CLI_STAMP)
+dev: install build-zcash-cli
 	cd $(PROJECT_DIR) && bun run dev
 
-dev-hmr: install $(ZCASH_CLI_STAMP)
+dev-hmr: install build-zcash-cli
 	-lsof -ti :5177 | xargs kill -9 2>/dev/null || true
 	-pkill -f "electrobun dev" 2>/dev/null || true
 	cd $(PROJECT_DIR) && bun run dev:hmr
@@ -302,7 +312,7 @@ build: install build-zcash-cli
 build-stable: install build-zcash-cli
 	cd $(PROJECT_DIR) && bun run build:stable
 
-build-canary: install
+build-canary: install build-zcash-cli
 	cd $(PROJECT_DIR) && bun run build:canary
 
 # Read-only gate on the archive Hutch packed: update manifests match its bytes,
@@ -436,11 +446,38 @@ i18n-sync:
 i18n-baseline:
 	cd $(PROJECT_DIR) && bun scripts/check-i18n.ts --write-baseline
 
+typecheck:
+	cd $(PROJECT_DIR) && ./node_modules/.bin/tsc --noEmit --skipLibCheck
+
+test-monero-stream:
+	cd $(PROJECT_DIR) && bun test src/bun/monero-stream-signer.test.ts
+
+test-monero:
+	cd $(PROJECT_DIR) && bun test src/bun/monero-*.test.ts monero-cli/src src/shared/monero-asset.test.ts __tests__/monero-preview-gates.test.ts __tests__/monero-node-ui.test.ts __tests__/monero-asset-ui.test.ts
+
 test-i18n:
 	cd $(PROJECT_DIR) && bun scripts/check-i18n.ts && bun test __tests__/i18n-safety.test.ts __tests__/report-fonts.test.ts
 
 test-unit:
+	cd $(PROJECT_DIR) && bun test src/bun/monero-stream-signer.test.ts __tests__/monero-core-verifier-artifact.test.ts
+	cd $(PROJECT_DIR) && bun test __tests__/rest-zcash-admission.test.ts
+	cd $(PROJECT_DIR) && bun test __tests__/broadcast-provider-error.test.ts
+	cd $(PROJECT_DIR) && bun test __tests__/zcash-nu7-admission.test.ts __tests__/zcash-nu7-binary.test.ts __tests__/zcash-tex-admission.test.ts
+	cd $(PROJECT_DIR) && bun test __tests__/zcash-nu7-physical.test.ts
+	cd $(PROJECT_DIR) && bun test __tests__/zcash-nu7-transparent.test.ts
+	cd $(PROJECT_DIR) && bun test __tests__/zcash-transparent-sidecar.test.ts
+	cd $(PROJECT_DIR) && bun test __tests__/send-zcash-readiness.test.ts
+	cd $(PROJECT_DIR) && bun test __tests__/zcash-nu7-packaging.test.ts
+	cd $(PROJECT_DIR) && bun test __tests__/emulator-signing-receipt.test.ts
+	cd $(PROJECT_DIR) && bun test __tests__/nu7-release-assets.test.ts __tests__/monero-release-assets.test.ts __tests__/macos-signing-shim.test.ts
+	cd $(PROJECT_DIR) && bun test __tests__/release-artifact-isolation.test.ts
+	cd $(PROJECT_DIR) && bun test __tests__/provider-refresh.test.ts __tests__/evm-confirmation-watch.test.ts __tests__/connectivity.test.ts __tests__/cosmos-max-send.test.ts src/bun/txbuilder/account-send-safety.test.ts
 	cd $(PROJECT_DIR) && bun test __tests__/build-electrobun.test.ts
+	cd $(PROJECT_DIR) && bun test __tests__/offline-asset-icons.test.ts
+	cd $(PROJECT_DIR) && bun test __tests__/add-address-dialog-zcash.test.ts
+	cd $(PROJECT_DIR) && bun test __tests__/ton-address-checksum.test.ts __tests__/address-unsupported-formats.test.ts __tests__/empty-balance-i18n.test.ts
+	cd $(PROJECT_DIR) && bun test __tests__/send-qr.test.ts __tests__/same-address-identity.test.ts
+	cd $(PROJECT_DIR) && bun test __tests__/send-form-usd-amount.test.ts __tests__/send-form-qr-amount.test.ts __tests__/send-form-qr-memo.test.ts __tests__/send-form-max-recipient.test.ts __tests__/send-form-self-send-match.test.ts __tests__/send-form-confirm-guard.test.ts
 	cd $(PROJECT_DIR) && bun test __tests__/electrobun-fixes.test.ts
 	cd $(PROJECT_DIR) && bun test src/bun/txbuilder/evm-units.test.ts
 	cd $(PROJECT_DIR) && bun test __tests__/hyperliquid-identity.test.ts
@@ -463,7 +500,7 @@ test-unit:
 	cd $(PROJECT_DIR) && bun test __tests__/rest-demand-unlock.test.ts
 	cd $(PROJECT_DIR) && bun test __tests__/window-approval-focus.test.ts
 	cd $(PROJECT_DIR) && bun test __tests__/device-access-error.test.ts __tests__/dashboard-device-errors.test.ts
-	cd $(PROJECT_DIR) && bun test __tests__/settings-pin-ownership.test.ts __tests__/emulator-pin-prompt.test.ts src/bun/emulator-window-lifecycle.test.ts src/bun/erc7730-safe.test.ts src/bun/safe-multisig.test.ts src/bun/swap-account-balances.test.ts src/bun/vault-addressbook.test.ts src/bun/vault-asset-account.test.ts src/bun/vault-import.test.ts src/bun/vault-portfolio.test.ts src/bun/vault-wallet-links.test.ts
+	cd $(PROJECT_DIR) && bun test __tests__/settings-pin-ownership.test.ts __tests__/emulator-pin-prompt.test.ts src/bun/emulator-window-lifecycle.test.ts src/bun/erc7730-safe.test.ts src/bun/safe-multisig.test.ts src/bun/swap-account-balances.test.ts src/bun/vault-addressbook.test.ts src/bun/vault-asset-account.test.ts src/bun/vault-import.test.ts src/bun/vault-portfolio.test.ts src/bun/vault-wallet-links.test.ts src/bun/report-btc-flow.test.ts
 	cd $(PROJECT_DIR) && bun test __tests__/defi-position-details.test.ts __tests__/retry-on-timeout.test.ts __tests__/swap-health.test.ts __tests__/swap-preflight.test.ts __tests__/swap-route-selection.test.ts __tests__/pioneer-evm.test.ts __tests__/relay-status.test.ts __tests__/zcash-privacy.test.ts
 	cd $(PROJECT_DIR) && bun test __tests__/swap-classify.test.ts __tests__/swap-discovery.test.ts __tests__/swap-revert.test.ts __tests__/swap-risk.test.ts __tests__/swap-tracker-guards.test.ts __tests__/swap-warnings.test.ts src/shared/slippage.test.ts
 	cd $(PROJECT_DIR) && bun test __tests__/swap-tracking-context.test.ts
@@ -471,6 +508,9 @@ test-unit:
 	cd $(PROJECT_DIR) && bun test __tests__/swap-dialog-tracking.test.ts
 	cd $(PROJECT_DIR) && bun test __tests__/swap-dialog-device-wait.test.ts
 	cd $(PROJECT_DIR) && bun test __tests__/swap-dialog-review.test.ts
+	cd $(PROJECT_DIR) && bun test __tests__/swap-amount-precision.test.ts
+	cd $(PROJECT_DIR) && bun test __tests__/zcash-swap-memo.test.ts
+	cd $(PROJECT_DIR) && bun test __tests__/swap-dialog-amount-precision.test.ts
 	cd $(PROJECT_DIR) && bun test __tests__/swap-recipient-guard.test.ts
 	cd $(PROJECT_DIR) && bun test __tests__/swap-execution-service.test.ts
 	cd $(PROJECT_DIR) && bun test __tests__/swap-ui-control.test.ts
@@ -491,6 +531,8 @@ test-unit:
 	cd $(PROJECT_DIR) && bun test __tests__/thor-maya-history-fee.test.ts
 	cd $(PROJECT_DIR) && bun test src/mainview/lib/effective-balance.test.ts
 	cd $(PROJECT_DIR) && bun test __tests__/balance-tx-mark.test.ts
+	cd $(PROJECT_DIR) && bun test __tests__/balance-cache-policy.test.ts __tests__/balance-observation.test.ts __tests__/dashboard-balance-policy.test.ts __tests__/evm-autodiscovery-policy.test.ts __tests__/wallet-watch-cache-integration.test.ts
+	cd $(PROJECT_DIR) && bun test __tests__/dashboard-balance-ui.test.ts
 	cd $(PROJECT_DIR) && bun test __tests__/asset-page-synced.test.ts
 	cd $(PROJECT_DIR) && bun test __tests__/asset-page-native-proof.test.ts
 	cd $(PROJECT_DIR) && bun test __tests__/app-view-only-locked.test.ts

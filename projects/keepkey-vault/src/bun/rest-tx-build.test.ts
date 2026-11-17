@@ -5,7 +5,7 @@
  * matters: the signBody survives the sign route's own zod .strip() unchanged,
  * so nothing Desktop built is silently dropped before the device signs it.
  */
-import { afterEach, describe, expect, test } from 'bun:test'
+import { beforeEach, afterEach, describe, expect, test } from 'bun:test'
 import { validateAddress } from '../shared/address-validation'
 import { CHAINS } from '../shared/chains'
 import type { BtcAccountSet } from '../shared/types'
@@ -16,6 +16,12 @@ import { TX_BUILD_CAIPS, btcXpubForAccount, toTxBuildResponse, txBuildAccountPat
 const chain = (id: string) => CHAINS.find(c => c.id === id)!
 const caipOf = (id: string) => chain(id).caip
 const originalFetch = globalThis.fetch
+beforeEach(() => { globalThis.fetch = (async (input: any) => {
+ const url = String(input);
+ if (url.includes('/spendable_balances/')) return Response.json({ balances: [{denom:'uatom',amount:'100000000'},{denom:'uosmo',amount:'100000000'},{denom:'rune',amount:'10000000000'},{denom:'cacao',amount:'1000000000000'}] });
+ if (url.includes('ripple.com')) return Response.json({ result: { state: { validated_ledger: {reserve_base:1000000,reserve_inc:200000} } } });
+ throw Error('Unexpected external test request: '+url);
+}) as unknown as typeof fetch })
 afterEach(() => { globalThis.fetch = originalFetch })
 
 // ── Fixture builder inputs (same shapes as utxo-taproot / cosmos / xrp suites) ──

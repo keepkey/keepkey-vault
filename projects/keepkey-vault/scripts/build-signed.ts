@@ -7,9 +7,40 @@
 import { join, resolve } from 'node:path'
 import { copyFileSync, existsSync, mkdirSync } from 'node:fs'
 import { buildElectrobun } from './build-electrobun'
+import { writeZcashNu7Manifest } from './write-zcash-nu7-manifest'
+import { verifyEmulatorBeforeSigning, writeEmulatorSigningReceipt } from './write-emulator-signing-receipt'
+import { createMacosSigningShim } from './macos-signing/shim'
+import { stageSignedMoneroCoreVerifier } from './sign-monero-core-verifier'
+import { checkRawMoneroCoreVerifier, moneroCoreVerifierArtifact } from '../src/bun/monero-core-verifier-artifact'
+import pkg from '../package.json'
 
 const env = process.argv[2] || 'stable'
+if (!['stable', 'canary'].includes(env)) throw new Error('Signed builds require the stable or canary channel.')
 let emulatorSource: string | undefined
+let emulatorReceiptSource: string | undefined
+let zcashSource: string | undefined
+let moneroVerifierSources: Record<string, string> = {}
+
+// Record the bytes that will actually ship. Local signing uses disposable
+// copies so the reviewed source inputs retain their original checksums.
+const zcashExecutable = process.platform === 'win32' ? 'zcash-cli.exe' : 'zcash-cli'
+const zcashInput = resolve(import.meta.dir, '..', 'zcash-cli', 'target', 'release', zcashExecutable)
+if (existsSync(zcashInput)) {
+  let manifestBinary = zcashInput
+  if (process.platform === 'darwin' && process.env.CI !== 'true') {
+    const developer = process.env.ELECTROBUN_DEVELOPER_ID
+    const team = process.env.ELECTROBUN_TEAMID
+    if (!developer || !team) throw new Error('Developer ID and Team ID are required for the Zcash helper signature.')
+    zcashSource = join('_build', '_signed_zcash', zcashExecutable)
+    manifestBinary = resolve(import.meta.dir, '..', zcashSource)
+    mkdirSync(resolve(import.meta.dir, '..', '_build', '_signed_zcash'), { recursive: true })
+    copyFileSync(zcashInput, manifestBinary)
+    const signed = Bun.spawnSync(['codesign', '--force', '--verbose', '--timestamp', '--options', 'runtime',
+      '--sign', `Developer ID Application: ${developer} (${team})`, manifestBinary], { stdout: 'inherit', stderr: 'inherit' })
+    if (signed.exitCode !== 0) process.exit(signed.exitCode ?? 1)
+  }
+  writeZcashNu7Manifest(manifestBinary)
+}
 
 // Stable/canary packages for supported emulator hosts must never silently ship
 // without the pinned library. Developer `bun run build` remains optional.
@@ -21,6 +52,8 @@ if (process.platform === 'darwin' || process.platform === 'win32') {
     console.error('[release] Stage the certified emulator artifact with scripts/stage-certified-emulator.sh <artifact-dir>.')
     process.exit(1)
   }
+
+  const reviewedSource = verifyEmulatorBeforeSigning(staged)
 
   // Apple notarization requires every embedded Mach-O to carry a timestamped
   // Developer ID signature. Verify-certified-emulator runs before this wrapper
@@ -42,6 +75,8 @@ if (process.platform === 'darwin' || process.platform === 'win32') {
       '--sign', `Developer ID Application: ${developer} (${team})`, signedCopy,
     ], { stdout: 'inherit', stderr: 'inherit' })
     if (signed.exitCode !== 0) process.exit(signed.exitCode ?? 1)
+    writeEmulatorSigningReceipt(signedCopy, reviewedSource)
+    emulatorReceiptSource = join('_build', '_signed_emulator', 'nu7-emulator-receipt.json')
   }
 }
 
@@ -56,6 +91,22 @@ const hasMoneroInputs = presentMoneroInputs.length === moneroInputs.length
 if ((process.env.KEEPKEY_REQUIRE_MONERO_SIDECAR === '1' || presentMoneroInputs.length > 0) && !hasMoneroInputs) {
   console.error('[release] Missing Monero sidecar input. Run bun run monero:prepare and bun run monero:build.')
   process.exit(1)
+}
+
+// A supported Monero build must contain the complete spend path. The adapter
+// prepares the plan and the independent Core verifier authenticates signatures.
+const verifierArtifact = moneroCoreVerifierArtifact()
+if (hasMoneroInputs && verifierArtifact) {
+  const source = resolve(import.meta.dir, '../monero-device-bundle', verifierArtifact.filename)
+  const adapter = resolve(import.meta.dir, '..', `monero-cli/vendor/${process.platform}-${process.arch}/monero-host-adapter`)
+  if (!existsSync(adapter) || !checkRawMoneroCoreVerifier(source)) throw new Error('Monero signing requires the reviewed plan adapter and Core verifier. Stage both before packaging.')
+  if (process.platform === 'darwin' && process.env.CI !== 'true') {
+    const developer = process.env.ELECTROBUN_DEVELOPER_ID, team = process.env.ELECTROBUN_TEAMID
+    if (!developer || !team) throw new Error('Developer ID and Team ID are required for the Monero verifier signature.')
+    const staged = stageSignedMoneroCoreVerifier({ source, directory: resolve(import.meta.dir, '../_build/_signed_monero_verifier'),
+      identity: `Developer ID Application: ${developer} (${team})` })
+    moneroVerifierSources = { KEEPKEY_MONERO_CORE_VERIFIER_SOURCE: staged.library, KEEPKEY_MONERO_CORE_VERIFIER_RECEIPT_SOURCE: staged.receipt }
+  }
 }
 
 // Hutch signs the assembled app with the Developer ID. Stage signed copies of
@@ -73,10 +124,13 @@ if (hasMoneroInputs && process.platform === 'darwin' && process.env.CI !== 'true
   const project = resolve(import.meta.dir, '..')
   const tools = join(project, 'monero-cli', 'vendor', `${process.platform}-${process.arch}`)
   const output = join(project, '_build', '_signed_monero')
+  const adapterName = 'monero-host-adapter'
+  const adapter = join(tools, adapterName)
   const staged = Bun.spawnSync(['python3', resolve(project, '../../scripts/monero-signing-metadata.py'), 'stage',
     '--worker', join(project, 'monero-cli/dist', moneroExecutable),
     '--rpc', join(tools, moneroRpc), '--metadata', join(tools, 'monero-tools.json'),
     '--daemon', join(tools, moneroDaemon),
+    ...(existsSync(adapter) ? ['--adapter', adapter] : []),
     '--output', output, '--entitlements', join(project, 'entitlements.plist'),
     '--identity', `Developer ID Application: ${developer} (${team})`], { stdout: 'inherit', stderr: 'inherit' })
   if (staged.exitCode !== 0) process.exit(staged.exitCode ?? 1)
@@ -85,6 +139,7 @@ if (hasMoneroInputs && process.platform === 'darwin' && process.env.CI !== 'true
     KEEPKEY_MONERO_RPC_SOURCE: join(output, moneroRpc),
     KEEPKEY_MONERO_METADATA_SOURCE: join(output, 'monero-tools.json'),
     KEEPKEY_MONERO_DAEMON_SOURCE: join(output, moneroDaemon),
+    ...(existsSync(adapter) ? { KEEPKEY_MONERO_ADAPTER_SOURCE: join(output, adapterName) } : {}),
   }
 }
 
@@ -93,8 +148,41 @@ if (process.env.KEEPKEY_INCLUDE_MONERO_EMULATOR === '1') {
   process.exit(1)
 }
 
-buildElectrobun(env, {
+const buildEnvironment = {
   ...process.env,
   ...(emulatorSource ? { KEEPKEY_EMULATOR_SOURCE: emulatorSource } : {}),
+  ...(emulatorReceiptSource ? { KEEPKEY_EMULATOR_RECEIPT_SOURCE: emulatorReceiptSource } : {}),
+  ...(zcashSource ? { KEEPKEY_ZCASH_CLI_SOURCE: zcashSource } : {}),
   ...signedMoneroSources,
+  ...moneroVerifierSources,
+}
+
+// Hutch force-re-signs native code. Preserve only the exact, pre-signed
+// bytes whose checksums our runtime receipts record; it still signs all other
+// native code and the outer app itself, then packs its own update artifacts.
+const projectRoot = resolve(import.meta.dir, '..')
+const helpers: { bundleRelativePath: string; signedSourcePath: string }[] = []
+if (emulatorSource) helpers.push({ bundleRelativePath: 'Contents/Resources/app/emulator/libkkemu.dylib', signedSourcePath: resolve(projectRoot, emulatorSource) })
+if (zcashSource) helpers.push({ bundleRelativePath: 'Contents/Resources/app/zcash-cli', signedSourcePath: resolve(projectRoot, zcashSource) })
+if (moneroVerifierSources.KEEPKEY_MONERO_CORE_VERIFIER_SOURCE) helpers.push({
+  bundleRelativePath: 'Contents/Resources/app/monero-device/libmonero_core_verify.dylib',
+  signedSourcePath: moneroVerifierSources.KEEPKEY_MONERO_CORE_VERIFIER_SOURCE,
 })
+for (const [variable, name] of [
+  ['KEEPKEY_MONERO_RPC_SOURCE', moneroRpc],
+  ['KEEPKEY_MONERO_DAEMON_SOURCE', moneroDaemon],
+  ['KEEPKEY_MONERO_ADAPTER_SOURCE', 'monero-host-adapter'],
+]) {
+  const source = signedMoneroSources[variable]
+  if (source) helpers.push({ bundleRelativePath: `Contents/Resources/app/monero-tools/${name}`, signedSourcePath: source })
+}
+const signing = helpers.length ? createMacosSigningShim({
+  bundlePath: join(projectRoot, '_build', `${env}-macos-${process.arch}`, `${env === 'stable' ? pkg.name : `${pkg.name}-${env}`}.app`),
+  helpers,
+  environment: buildEnvironment,
+}) : null
+try {
+  buildElectrobun(env, signing?.environment ?? buildEnvironment)
+} finally {
+  signing?.cleanup()
+}

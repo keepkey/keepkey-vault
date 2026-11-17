@@ -4,7 +4,7 @@ import { FaExternalLinkAlt, FaTimes } from 'react-icons/fa'
 import { useTranslation } from 'react-i18next'
 import type { DefiPosition } from '../../shared/types'
 import { useFiat } from '../lib/fiat-context'
-import { defiExplorerUrl, defiPositionName, defiProtocolUrl, isNativeDefiToken } from '../lib/defi-position'
+import { defiExplorerUrl, defiPositionName, defiManagementLinks, isNativeDefiToken } from '../lib/defi-position'
 import { rpcRequest } from '../lib/rpc'
 import { Z } from '../lib/z-index'
 
@@ -19,16 +19,20 @@ export function DefiPositionDialog({ position, address, onClose }: Props) {
   const { fmt } = useFiat()
   const [linkError, setLinkError] = useState(false)
   const owner = position.pubkey || address
-  const protocolUrl = defiProtocolUrl(position.protocol)
+  const management = defiManagementLinks(position)
   const ownerUrl = defiExplorerUrl(position, owner)
   const contractUrl = defiExplorerUrl(position, position.appTokenAddress)
+
+  const openExternal = (url: string) => {
+    setLinkError(false)
+    rpcRequest('openUrl', { url }).catch(() => setLinkError(true))
+  }
 
   const externalLink = (url: string, label: string) => (
     <Link href={url} target="_blank" rel="noopener noreferrer" color="kk.gold" fontSize="xs"
       wordBreak="break-all" onClick={(event) => {
         event.preventDefault()
-        setLinkError(false)
-        rpcRequest('openUrl', { url }).catch(() => setLinkError(true))
+        openExternal(url)
       }}>
       {label}<FaExternalLinkAlt size={10} style={{ flexShrink: 0 }} />
     </Link>
@@ -70,6 +74,12 @@ export function DefiPositionDialog({ position, address, onClose }: Props) {
                     {position.balance}{position.symbol ? ` ${position.symbol}` : ''}
                   </Text>}
                 </Box>
+                {management && <Box>
+                  <Button w="full" bg="kk.gold" color="kk.bg" onClick={() => openExternal(management.url)}>
+                    {t('defiManagePosition', { protocol: management.protocol })}<FaExternalLinkAlt size={12} />
+                  </Button>
+                  {management.poolUrl && <Box mt="2">{externalLink(management.poolUrl, t('defiFindPool', { protocol: management.protocol }))}</Box>}
+                </Box>}
                 <Flex gap="5" wrap="wrap">
                   {detail(t('defiProtocol'), position.displayName || position.protocol)}
                   {position.displayName && position.protocol && position.displayName !== position.protocol && detail(t('defiProtocolId'), position.protocol)}
@@ -111,7 +121,6 @@ export function DefiPositionDialog({ position, address, onClose }: Props) {
                     })}
                   </VStack>
                 </Box>}
-                {protocolUrl && externalLink(protocolUrl, t('defiOpenProtocol'))}
                 {linkError && <Text role="alert" fontSize="xs" color="red.300">{t('defiLinkError')}</Text>}
               </VStack>
             </Dialog.Body>

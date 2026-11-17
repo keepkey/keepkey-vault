@@ -9,6 +9,7 @@
 import { Subprocess } from "bun"
 import { join, dirname, resolve } from "path"
 import { existsSync } from "fs"
+import { requireZcashNu7Builder, ZCASH_NU7_BUILDER_CAPABILITY } from './zcash-nu7-binary'
 
 interface IpcResponse {
 	ok: boolean
@@ -26,6 +27,12 @@ let sidecarProc: Subprocess<"pipe", "pipe", "pipe"> | null = null
 let pendingRequests = new Map<number, PendingRequest>()
 let nextReqId = 1
 let ready = false
+let transparentCapability: string | null = null
+let qualifiedBuilderAtLaunch: { path: string; sha256: string } | null = null
+
+function qualifiedBuilder(path: string): { path: string; sha256: string } {
+	return { path, sha256: requireZcashNu7Builder(path) }
+}
 let buffer = ""
 let initPromise: Promise<void> | null = null
 let scanProgressCallback: ((progress: { percent: number; scannedHeight: number; tipHeight: number; blocksPerSec: number; etaSeconds: number }) => void) | null = null
@@ -119,21 +126,37 @@ function getBinaryPath(): string {
  * Start the Zcash sidecar process.
  * Guards against concurrent startup calls.
  */
-export async function startSidecar(): Promise<void> {
+export async function startSidecar(options?: { transparentOnly?: boolean }): Promise<void> {
 	if (sidecarProc && ready) {
+		if (options?.transparentOnly && transparentCapability !== ZCASH_NU7_BUILDER_CAPABILITY) {
+			throw new Error('The running Zcash builder does not support the required transparent mode. Restart the updated Vault before sending ZEC.')
+		}
+		if (options?.transparentOnly) {
+			if (!qualifiedBuilderAtLaunch || qualifiedBuilder(qualifiedBuilderAtLaunch.path).sha256 !== qualifiedBuilderAtLaunch.sha256) {
+				throw new Error('The running Zcash builder has not been qualified for Nu7 transparent sends. Restart the updated Vault before sending ZEC.')
+			}
+		}
 		return
 	}
 	// Prevent concurrent startSidecar() calls
 	if (initPromise) {
-		return initPromise
+		await initPromise
+		return startSidecar(options)
 	}
 
-	initPromise = (async () => {
+	// Publish startup ownership before synchronous preflight can reject. Otherwise
+	// its finally clears null, then assignment retains a rejected promise forever.
+	initPromise = Promise.resolve().then(async () => {
 		try {
 			const binPath = getBinaryPath()
+			// Older CLIs ignore unknown arguments and would open the normal wallet
+			// profile. Verify the reviewed binary before ever launching native mode.
+			let qualified: { path: string; sha256: string } | null = null
+			try { qualified = qualifiedBuilder(binPath) }
+			catch (error) { if (options?.transparentOnly) throw error }
 			console.log(`[zcash-sidecar] Starting: ${binPath}`)
 
-			sidecarProc = Bun.spawn([binPath], {
+			sidecarProc = Bun.spawn([binPath, ...(options?.transparentOnly ? ['--transparent-only'] : [])], {
 				stdin: "pipe",
 				stdout: "pipe",
 				stderr: "pipe",
@@ -142,6 +165,7 @@ export async function startSidecar(): Promise<void> {
 					RUST_LOG: "info",
 				},
 			})
+			qualifiedBuilderAtLaunch = qualified
 
 			// Read stderr for logs (Rust logs go to stderr)
 			readStderr(sidecarProc)
@@ -155,6 +179,11 @@ export async function startSidecar(): Promise<void> {
 
 			if (!readyResponse.ok || !readyResponse.ready) {
 				throw new Error("Sidecar failed to start: " + JSON.stringify(readyResponse))
+			}
+			transparentCapability = readyResponse.transparent_capability ?? null
+			if (options?.transparentOnly && (transparentCapability !== ZCASH_NU7_BUILDER_CAPABILITY || readyResponse.transparent_only !== true)) {
+				stopSidecar()
+				throw new Error('This Zcash builder does not support Nu7 transparent sends. Update Vault before sending ZEC.')
 			}
 
 			ready = true
@@ -177,7 +206,7 @@ export async function startSidecar(): Promise<void> {
 		} finally {
 			initPromise = null
 		}
-	})()
+	})
 
 	return initPromise
 }
@@ -237,6 +266,8 @@ export async function sendCommand(cmd: string, params: Record<string, any> = {},
  */
 export function stopSidecar(): void {
 	ready = false
+	transparentCapability = null
+	qualifiedBuilderAtLaunch = null
 	const procToKill = sidecarProc
 	sidecarProc = null
 	if (procToKill) {
@@ -524,6 +555,8 @@ function readStdout(proc: Subprocess<"pipe", "pipe", "pipe">): void {
 			}
 			pendingRequests.clear()
 			ready = false
+			transparentCapability = null
+			qualifiedBuilderAtLaunch = null
 			sidecarProc = null
 			console.log("[zcash-sidecar] Process exited")
 		} else {

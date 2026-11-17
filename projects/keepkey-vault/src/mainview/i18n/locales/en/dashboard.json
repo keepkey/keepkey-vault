@@ -24,10 +24,10 @@
 	"reports": "Reports",
 	"pioneerOfflineTitle": "Balance server unavailable",
 	"pioneerOfflineDesc": "Unable to refresh balances from {{url}}. Cached balances are kept when available.",
-	"degradedTitle": "Some balances are out of sync",
+	"degradedTitle": "Some balances could not be refreshed",
 	"degradedDesc": "Still syncing: {{chains}}. These will update when the sync finishes.",
-	"degradedReach": "Still syncing:",
-	"degradedTail": "These will update when the sync finishes.",
+	"degradedReach": "Could not refresh:",
+	"degradedTail": "Your last known balances are shown when available.",
 	"staleTitle": "Some balances are out of sync",
 	"staleDesc": "Some balances last synced {{ago}}.",
 	"syncNow": "Sync now",
@@ -49,5 +49,12 @@
 	"swapBalanceSyncTitle": "Swap complete — syncing {{symbol}} balance",
 	"swapBalanceSyncDesc": "Keeping your last verified balances visible until the new funds are independently confirmed.",
 	"swapBalanceUnconfirmedTitle": "Couldn't confirm your {{symbol}} balance yet",
-	"swapBalanceUnconfirmedDesc": "The swap completed on-chain. Your balance service hasn't reported the new funds yet — check the block explorer if it doesn't appear shortly."
+	"swapBalanceUnconfirmedDesc": "The swap completed on-chain. Your balance service hasn't reported the new funds yet — check the block explorer if it doesn't appear shortly.",
+	"syncStage_preparing": "Preparing wallet",
+	"syncStage_addresses": "Reading device addresses",
+	"syncStage_balances": "Checking balance requests",
+	"syncStage_finalizing": "Updating portfolio",
+	"syncProgressCounts": "{{completed}}/{{total}} · {{percent}}% · {{seconds}}s",
+	"syncProgressElapsed": "{{seconds}}s elapsed",
+	"syncFailedChecks": "{{failed}} checks unavailable"
 }

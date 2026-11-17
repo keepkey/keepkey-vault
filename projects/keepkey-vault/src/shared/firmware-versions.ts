@@ -41,8 +41,22 @@ export interface FirmwareVersionInfo {
 export const FIRMWARE_VERSION_MAP: FirmwareVersionInfo[] = [
   {
     version: '7.17.0',
-    headline: 'DigiByte Taproot and DigiDollar foundation',
+    headline: 'Monero, Zcash Nu7 and DigiByte Taproot',
     features: [
+      {
+        title: 'Monero Support',
+        description: 'Adds Monero (XMR) address generation and wallet monitoring with device-approved view-key access. Enable Monero in Settings to get started.',
+        chains: ['monero'],
+        color: '#FF6600',
+        icon: 'chain',
+      },
+      {
+        title: 'Zcash Support',
+        description: 'Zcash Nu7 transparent signing on the reviewed 7.17 alpha emulator and supported physical alpha firmware. Private-pool sends remain unqualified in Vault.',
+        chains: ['zcash'],
+        color: '#ECB244',
+        icon: 'chain',
+      },
       {
         title: 'DigiDollar Support',
         description: 'Adds the DigiByte Taproot signing foundation required for DigiDollar. DigiDollar accounts remain gated until transaction construction, indexing, and script-path redemption pass release acceptance.',
@@ -55,15 +69,8 @@ export const FIRMWARE_VERSION_MAP: FirmwareVersionInfo[] = [
   },
   {
     version: '7.15.0',
-    headline: 'Zcash privacy and EVM transaction insight',
+    headline: 'EVM transaction insight and Hive support',
     features: [
-      {
-        title: 'Zcash Support',
-        description: 'Transparent and shielded Zcash transactions with on-device signing.',
-        chains: ['zcash'],
-        color: '#ECB244',
-        icon: 'chain',
-      },
       {
         // Not cosmetic and not optional: on 7.14.1 and earlier, EIP-1559
         // transactions on any chain with chainId >= 256 hash only the low byte
@@ -308,6 +315,6 @@ export function versionCompare(a: string, b: string): number {
   return 0
 }
 
-/** Monero (preview) needs the setting AND this firmware or newer (7.17 = alpha line). */
+/** Monero receiving preview requires the setting and firmware 7.17 or newer. Signing additionally requires its device capability. */
 export const MONERO_MIN_FIRMWARE = '7.17.0'
 export const firmwareSupportsMonero = (version?: string | null): boolean => !!version && versionCompare(version, MONERO_MIN_FIRMWARE) >= 0

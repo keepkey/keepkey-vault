@@ -1,3 +1,7 @@
+/** Nu7 PCZT output admission supports pay-to-address scripts. Swap routing
+ * instructions require OP_RETURN, which the current hardware path cannot sign. */
+export const ZCASH_SWAP_MEMO_UNSUPPORTED = 'This Zcash swap route requires an on-chain routing memo, which this Vault/firmware combination cannot send. Choose a memo-free route or another source asset.'
+
 /** Source chains whose NEAR Intents deposit is a plain transfer to a registered
  * address. These namespaces have native/token transfer builders; EVM deposits
  * use a prebuilt transaction instead. getSwapQuote verifies the refund address

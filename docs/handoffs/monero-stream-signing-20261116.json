@@ -1,0 +1,55 @@
+{
+  "date": "2026-11-16",
+  "branch": "fix/monero-public-stream-signing",
+  "release": "held by user; do not resume without instruction",
+  "changes": [
+    "Public capability-31 streamed Monero signing (1810\u20131825), with owned-input, exact-payment, output and proof verification before relay.",
+    "Monero onboarding, address derivation and deposit QR require the complete signer; receive-only fallback removed.",
+    "Native verifier rebuilt from pinned sources for macOS13 ARM64, system-only dynamic dependencies, raw and app-sealed signed receipts.",
+    "Pending broadcast recovery and payment-proof key persistence retained; no replacement payment on unknown outcome."
+  ],
+  "artifact": {
+    "sha256": "9313d8265f47bb63ec481cee91f7595adbbead64e6d907207e1640d5104664ef",
+    "platform": "darwin-arm64",
+    "minimumMacos": "13.0",
+    "sourceRecipe": "scripts/build-monero-core-verifier.py",
+    "packagedRawHashVerified": true
+  },
+  "validation": {
+    "logs": {
+      "vault-monero-final-unit.log": {
+        "pass": 3014,
+        "fail": 4,
+        "skip": 8
+      },
+      "vault-monero-remaining-unit.log": {
+        "pass": 1416,
+        "fail": 0,
+        "skip": 0
+      },
+      "vault-monero-fixed-recipe.log": {
+        "pass": 29,
+        "fail": 0,
+        "skip": 0
+      },
+      "vault-monero-packaged-native-final.log": {
+        "pass": 110,
+        "fail": 0,
+        "skip": 0
+      }
+    },
+    "suiteInterpretation": "Initial full suite stopped at four fixture failures. Fixed that recipe (29 tests) and completed every remaining recipe. Effective passing executions = initial passes minus19 superseded partial-recipe passes plus fixed-recipe passes plus remaining passes. Native packaged verification additionally passed with zero skips.",
+    "typecheck": "790 existing diagnostics; no Monero diagnostics; not a clean typecheck",
+    "localDevBuild": "built and restarted; final helper and embedded trust pin match; health checked after restart",
+    "physicalDeviceTransaction": "Not performed",
+    "fundedBroadcast": "Not performed",
+    "macos13Runtime": "Compiled and audited for13; physical macOS13 runtime not exercised",
+    "otherNativePlatforms": "Not qualified; do not expose a receive-only feature on an unsupported build",
+    "effectiveUnitPassingExecutions": 4440
+  },
+  "preserved": [
+    "Pre-existing firmware source checkout and gitlink drift left unchanged.",
+    "Release-prep workflow change and canonical hdwallet checkout remain separate from this Monero fix.",
+    "No version bump, release tag, signing request, release publication or promotion after the release hold."
+  ]
+}

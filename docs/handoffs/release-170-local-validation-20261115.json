@@ -1,0 +1,329 @@
+{
+  "date": "2026-11-15",
+  "release": "1.7.0",
+  "releaseDecision": "hold",
+  "scope": "local fixes only; no release promotion, deployment, DNS or credential changes",
+  "commits": {
+    "vaultSendSafety": "bfdac578e",
+    "vaultConnectivitySyncAndProviderPolicy": "7850a3d1a",
+    "gateway": "2bd0d3b",
+    "extension": "17ab0f5"
+  },
+  "runningBuild": {
+    "version": "1.7.0",
+    "ready": true,
+    "deviceConnected": true,
+    "diagnosticsEnabled": true,
+    "selectedServer": "https://api-blue.keepkey.info",
+    "ui": "http://localhost:5177/"
+  },
+  "validation": {
+    "gateway": {
+      "testsPassed": 320,
+      "testsFailed": 0,
+      "database": "disposable local PostgreSQL; stopped after tests",
+      "typecheck": "passed"
+    },
+    "extension": {
+      "testsPassed": 87,
+      "testsFailed": 0,
+      "installedInBrowser": false
+    },
+    "vault": {
+      "applicationRecipeGroups": "passed; hardware-library group separately passed with bundled Bun 1.4.4 after default Bun 1.2.7 lacked fake timers",
+      "hardwareLibraryTestsPassed": 19,
+      "remainingWorkerAndProvenanceTestsPassed": 54,
+      "scriptSuites": {
+        "bitcoinCoreAssertions": 35,
+        "cosmosTestsPassed": 11,
+        "flagTestsPassed": 7
+      },
+      "backendBundle": "passed",
+      "frontendBuild": "passed",
+      "developmentPackaging": "passed",
+      "i18n": "passed",
+      "typecheck": {
+        "errors": 795,
+        "releaseBaselineErrors": 795,
+        "clean": false,
+        "comparison": "same known baseline diagnostics after normalizing line numbers, added RPC method counts and dependency paths"
+      }
+    }
+  },
+  "measuredRefreshes": [
+    {
+      "elapsedMs": 13894,
+      "status": "complete",
+      "tasks": [
+        {
+          "label": "api-initialization",
+          "stage": "preparing",
+          "durationMs": 0,
+          "units": 1,
+          "failed": 0
+        },
+        {
+          "label": "wallet-identity",
+          "stage": "preparing",
+          "durationMs": 384,
+          "units": 1,
+          "failed": 0
+        },
+        {
+          "label": "utxo-addresses",
+          "stage": "addresses",
+          "durationMs": 3949,
+          "units": 8,
+          "failed": 0
+        },
+        {
+          "label": "cosmos",
+          "stage": "addresses",
+          "durationMs": 782,
+          "units": 1,
+          "failed": 0
+        },
+        {
+          "label": "thorchain",
+          "stage": "addresses",
+          "durationMs": 785,
+          "units": 1,
+          "failed": 0
+        },
+        {
+          "label": "mayachain",
+          "stage": "addresses",
+          "durationMs": 390,
+          "units": 1,
+          "failed": 0
+        },
+        {
+          "label": "osmosis",
+          "stage": "addresses",
+          "durationMs": 390,
+          "units": 1,
+          "failed": 0
+        },
+        {
+          "label": "ripple",
+          "stage": "addresses",
+          "durationMs": 568,
+          "units": 1,
+          "failed": 0
+        },
+        {
+          "label": "solana",
+          "stage": "addresses",
+          "durationMs": 57,
+          "units": 1,
+          "failed": 0
+        },
+        {
+          "label": "tron",
+          "stage": "addresses",
+          "durationMs": 587,
+          "units": 1,
+          "failed": 0
+        },
+        {
+          "label": "ton",
+          "stage": "addresses",
+          "durationMs": 56,
+          "units": 1,
+          "failed": 0
+        },
+        {
+          "label": "hive",
+          "stage": "addresses",
+          "durationMs": 222,
+          "units": 1,
+          "failed": 0
+        },
+        {
+          "label": "batch-1",
+          "stage": "balances",
+          "durationMs": 3213,
+          "units": 8,
+          "failed": 0
+        },
+        {
+          "label": "batch-4",
+          "stage": "balances",
+          "durationMs": 5700,
+          "units": 8,
+          "failed": 0
+        },
+        {
+          "label": "batch-2",
+          "stage": "balances",
+          "durationMs": 5701,
+          "units": 8,
+          "failed": 0
+        },
+        {
+          "label": "batch-3",
+          "stage": "balances",
+          "durationMs": 5701,
+          "units": 8,
+          "failed": 0
+        }
+      ]
+    },
+    {
+      "elapsedMs": 12972,
+      "status": "complete",
+      "tasks": [
+        {
+          "label": "api-initialization",
+          "stage": "preparing",
+          "durationMs": 0,
+          "units": 1,
+          "failed": 0
+        },
+        {
+          "label": "wallet-identity",
+          "stage": "preparing",
+          "durationMs": 392,
+          "units": 1,
+          "failed": 0
+        },
+        {
+          "label": "utxo-addresses",
+          "stage": "addresses",
+          "durationMs": 3164,
+          "units": 8,
+          "failed": 0
+        },
+        {
+          "label": "cosmos",
+          "stage": "addresses",
+          "durationMs": 783,
+          "units": 1,
+          "failed": 0
+        },
+        {
+          "label": "thorchain",
+          "stage": "addresses",
+          "durationMs": 962,
+          "units": 1,
+          "failed": 0
+        },
+        {
+          "label": "mayachain",
+          "stage": "addresses",
+          "durationMs": 391,
+          "units": 1,
+          "failed": 0
+        },
+        {
+          "label": "osmosis",
+          "stage": "addresses",
+          "durationMs": 392,
+          "units": 1,
+          "failed": 0
+        },
+        {
+          "label": "ripple",
+          "stage": "addresses",
+          "durationMs": 567,
+          "units": 1,
+          "failed": 0
+        },
+        {
+          "label": "solana",
+          "stage": "addresses",
+          "durationMs": 627,
+          "units": 1,
+          "failed": 0
+        },
+        {
+          "label": "tron",
+          "stage": "addresses",
+          "durationMs": 983,
+          "units": 1,
+          "failed": 0
+        },
+        {
+          "label": "ton",
+          "stage": "addresses",
+          "durationMs": 57,
+          "units": 1,
+          "failed": 0
+        },
+        {
+          "label": "hive",
+          "stage": "addresses",
+          "durationMs": 221,
+          "units": 1,
+          "failed": 0
+        },
+        {
+          "label": "batch-1",
+          "stage": "balances",
+          "durationMs": 1622,
+          "units": 8,
+          "failed": 0
+        },
+        {
+          "label": "batch-4",
+          "stage": "balances",
+          "durationMs": 4123,
+          "units": 8,
+          "failed": 0
+        },
+        {
+          "label": "batch-2",
+          "stage": "balances",
+          "durationMs": 4419,
+          "units": 8,
+          "failed": 0
+        },
+        {
+          "label": "batch-3",
+          "stage": "balances",
+          "durationMs": 4426,
+          "units": 8,
+          "failed": 0
+        }
+      ]
+    }
+  ],
+  "connectivityBeforeRestart": {
+    "samples": 20,
+    "failures": 0
+  },
+  "interpretation": [
+    "Sync percentages count settled work within each stage; they do not measure balance freshness or estimate remaining time.",
+    "The 13-second observations are individual live refreshes, not a controlled benchmark or gateway-patch performance result.",
+    "Aerodrome opens the official dashboard. The reported position contains only one underlying token, so an exact LP URL cannot be reconstructed.",
+    "Two overlapping startup probes timed out after 8 seconds in the restarted dev app; a later probe recovered in 290 ms. The UI discards old effect results and requires consecutive current-probe failures before showing offline. Further soak testing is still needed."
+  ],
+  "remainingReleaseGates": [
+    "Review and deploy gateway patch separately, then verify actual SDK routes, cache timestamps, cold-start timing and provider usage on the production host.",
+    "Install the patched extension in a local browser and test its success, chain-failure and unknown-confirmation UI end to end.",
+    "Verify fee-consuming failed sends reconcile balances/history and unresolved submissions stay visible without prompting duplicate sends.",
+    "Perform funded, explicitly approved native/token Cosmos, XRP reserve and UTXO device-send tests; automated fixtures do not replace these.",
+    "Collect more per-chain freshness, retry and latency observations; investigate any remaining spinner after the traced balance sync finishes.",
+    "Complete normal signed release artifact and update-path checks before any latest promotion."
+  ],
+  "connectivityAfterRestart": [
+    {
+      "online": false,
+      "reason": "TimeoutError",
+      "durationMs": 8000,
+      "checkedAt": 1794786198732
+    },
+    {
+      "online": false,
+      "reason": "TimeoutError",
+      "durationMs": 8000,
+      "checkedAt": 1794786198733
+    },
+    {
+      "online": true,
+      "status": 404,
+      "durationMs": 290,
+      "checkedAt": 1794786205987
+    }
+  ]
+}

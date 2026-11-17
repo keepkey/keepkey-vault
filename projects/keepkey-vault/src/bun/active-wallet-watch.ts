@@ -1,6 +1,7 @@
 import type { AddressEntry, StreamEvent } from './event-stream'
 import { sameBalanceRefreshScope, type BalanceRefreshScope } from './post-tx-balance'
 import type { ChainBalance, RecentActivity } from '../shared/types'
+import { usableCachedBalance } from '../shared/balance-cache-policy'
 
 export interface OwnedWatch extends AddressEntry {
   chainId: string
@@ -10,9 +11,12 @@ export interface OwnedWatch extends AddressEntry {
   scriptType?: string
 }
 type Hint = { chainId: string; txids: string[]; catchup: boolean; eventIds?: string[] }
-/** A delivered hint is acknowledged only after both fresh reads succeeded. */
+/** Transaction hints require both reads. Ordinary catchup can reuse a recent
+ * balance snapshot while continuing to check history. */
 export async function refreshWatchedChain(hint: Hint, deps: {
   readBalance: (params: { chainId: string; forceRefresh: true }, isCurrent: () => boolean) => Promise<ChainBalance>
+  readCachedBalance?: (chainId: string) => ChainBalance | undefined
+  now?: () => number
   scanHistory: (chainId: string, isCurrent: () => boolean) => Promise<{ rows: RecentActivity[]; error?: unknown }>
   follow: (chainId: string, txid: string) => void
   retry: (chainId: string, txid?: string) => void
@@ -21,21 +25,56 @@ export async function refreshWatchedChain(hint: Hint, deps: {
 }, isCurrent: () => boolean): Promise<void> {
   const assertCurrent = () => { if (!isCurrent()) throw new Error('Wallet watch refresh cancelled') }
   assertCurrent()
-  for (const txid of hint.txids) deps.follow(hint.chainId, txid)
-  const balance = await deps.readBalance({ chainId: hint.chainId, forceRefresh: true }, isCurrent)
-  assertCurrent()
-  if (balance.syncState !== 'confirmed') throw new Error('Wallet watch balance could not be freshly verified')
-  const history = await deps.scanHistory(hint.chainId, isCurrent)
-  assertCurrent()
-  if (history.error || !Array.isArray(history.rows)) throw new Error('Wallet watch history could not be freshly verified')
-  const key = (txid: string) => /^(?:0x)?[0-9a-f]{64}$/i.test(txid) ? txid.replace(/^0x/i, '').toLowerCase() : txid
-  const hinted = new Set(hint.txids.map(key))
-  let received = false
-  for (const row of history.rows) if (row.txid && hinted.has(key(row.txid)) && row.chainId === hint.chainId
-    && row.type === 'receive' && row.nativeReceiveVerified === true) { received = true; deps.onReceive(hint.chainId, row.txid) }
-  if (!hint.catchup) {
-    if (!received) deps.onActivity?.(hint.chainId, hint.txids.at(-1))
-    deps.retry(hint.chainId, hint.txids.at(-1))
+  let retryRequired = !hint.catchup
+  let retryTxid = hint.txids.at(-1)
+  try {
+    for (const txid of hint.txids) deps.follow(hint.chainId, txid)
+    let cached: ChainBalance | undefined
+    if (hint.catchup) {
+      try { cached = deps.readCachedBalance?.(hint.chainId) } catch { /* An unavailable cache cannot authorize skipping the read. */ }
+      // A persisted transaction mark survives restart even when its first
+      // balance read fails before history can supply a transaction id.
+      if (cached?.chainId === hint.chainId && cached.txPending) retryRequired = true
+    }
+    // Reopening or reconnecting does not invalidate a recent known amount. Still
+    // catch history up; a real transaction hint always performs the balance read.
+    const reuseCached = hint.catchup && cached?.chainId === hint.chainId
+      && usableCachedBalance(cached, deps.now?.() ?? Date.now())
+    if (!reuseCached) {
+      const balance = await deps.readBalance({ chainId: hint.chainId, forceRefresh: true }, isCurrent)
+      assertCurrent()
+      if (balance.syncState !== 'confirmed') throw new Error('Wallet watch balance could not be freshly verified')
+    }
+    assertCurrent()
+    const history = await deps.scanHistory(hint.chainId, isCurrent)
+    assertCurrent()
+    if (history.error || !Array.isArray(history.rows)) throw new Error('Wallet watch history could not be freshly verified')
+    // History can reveal a payment missed while the app was closed. That is an
+    // actual chain change, unlike a reconnect, and retires the quiet cached read.
+    const newerActivity = reuseCached ? history.rows.filter(row => row.chainId === hint.chainId && !!row.txid
+      && Number.isFinite(row.createdAt) && row.createdAt > cached!.updatedAt!
+      && ['broadcast', 'completed', 'refunded', 'failed'].includes(row.status)) : []
+    if (newerActivity.length) {
+      const pending = [...new Set(newerActivity.filter(row => row.status === 'broadcast').map(row => row.txid!))]
+      retryTxid = pending.at(-1) ?? newerActivity.at(-1)!.txid
+      retryRequired = true
+      // Confirmation following and bounded retries must survive a failed first
+      // balance read. A retired wallet must never schedule work in its successor.
+      for (const txid of pending) deps.follow(hint.chainId, txid)
+      const balance = await deps.readBalance({ chainId: hint.chainId, forceRefresh: true }, isCurrent)
+      assertCurrent()
+      if (balance.syncState !== 'confirmed') throw new Error('Wallet watch balance could not be freshly verified')
+      retryRequired = pending.length > 0
+      deps.onActivity?.(hint.chainId, newerActivity.at(-1)!.txid)
+    }
+    const key = (txid: string) => /^(?:0x)?[0-9a-f]{64}$/i.test(txid) ? txid.replace(/^0x/i, '').toLowerCase() : txid
+    const hinted = new Set(hint.txids.map(key))
+    let received = false
+    for (const row of history.rows) if (row.txid && hinted.has(key(row.txid)) && row.chainId === hint.chainId
+      && row.type === 'receive' && row.nativeReceiveVerified === true) { received = true; deps.onReceive(hint.chainId, row.txid) }
+    if (!hint.catchup && !received) deps.onActivity?.(hint.chainId, hint.txids.at(-1))
+  } finally {
+    if (retryRequired && isCurrent()) deps.retry(hint.chainId, retryTxid)
   }
 }
 type Deps = {

@@ -1,3 +1,11 @@
+import type { SyncProgress } from '../shared/sync-progress'
+import { probeNetworkReachability } from './network-probe'
+import { createSyncProgressTracker } from './sync-progress'
+import {readEvmConfirmationRows} from './evm-confirmation-watch'
+import { createWalletHistoryRefreshPolicy, paidProviderRefreshOptions, type ProviderRefreshReason } from '../shared/provider-refresh'
+import { oldestBalanceUpdatedAt } from '../shared/balance-cache-policy'
+import { portfolioObservedAt } from '../shared/balance-observation'
+import { selectDesktopUpdateRelease } from '../shared/desktop-update-release'
 // ── File logger ──────────────────────────────────────────────────────────
 // NOTE: This logger captures runtime errors AFTER the module graph loads.
 // It does NOT catch import-time crashes — static ESM imports (below) are
@@ -251,7 +259,7 @@ import { instanceSocketPath, startupInstanceGate } from "./single-instance"
 import { signSolanaWireTransaction } from "./solana-signing"
 import { AuthStore, HttpError } from "./auth"
 import { txBuildParams } from "./rest-tx-build"
-import { ensurePioneerQueryKeyRegistered, getPioneer, getPioneerApiBase, resetPioneer, setPioneerOffline, DEFAULT_API_BASE, getQueryKey as getPioneerQueryKey } from "./pioneer"
+import { ensurePioneerQueryKeyRegistered, getPioneerProviderUsage, getPioneer, getPioneerApiBase, resetPioneer, setPioneerOffline, DEFAULT_API_BASE, getQueryKey as getPioneerQueryKey } from "./pioneer"
 import { setBtcBackendOffline, setBtcNodeConfig, setBtcNodeDeviceEligible, setBtcNodeWatchOnlyEligible, isBtcNodeActive, getBtcBackend, getWatchOnlyBtcBackend, getPsbtBroadcastRoute, broadcastBtcTx } from "./btc-backend"
 import { isBitcoinOnlyVariant } from "../shared/flags"
 import { bitcoinOnlyActivityList, bitcoinOnlyAddressBookHistoryList, bitcoinOnlyBalanceList, bitcoinOnlyChainList, bitcoinOnlyLedgerJournalList, bitcoinOnlyLedgerSummaryList, bitcoinOnlyPendingSigningRejection, bitcoinOnlyReportAllowed, bitcoinOnlyWatchOnlyScope, enforceBitcoinOnlyRpcBoundary } from "./bitcoin-only-boundary"
@@ -275,6 +283,14 @@ import { activityBalanceTarget, createPostTxBalanceRefresh, sameBalanceRefreshSc
 import { getRequiredConfs } from "../shared/confirmations"
 import { addSessionActivity, getSessionActivity, clearSessionActivity } from "./session-activity"
 import { buildTx, broadcastTx, canonicalizeTronTokenCaip } from "./txbuilder"
+import { signUtxoTx, configureZcashNu7WalletAuthorizer } from './txbuilder/zcash-transparent'
+import { isQualifiedNu7AlphaEmulator } from './zcash-nu7-emulator'
+import { isAdmittedNu7PhysicalAlpha } from './zcash-nu7-physical'
+import { reviewedBundledEmulatorSourceSha256 } from './emulator-signed-provenance'
+import { preflightNu7DeviceRpc, requiresNu7DeviceRpc, rejectUnsupportedZcashSweep } from './zcash-nu7-admission'
+import { requireZcashNu7Builder } from './zcash-nu7-binary'
+import { zcashNu7SupportError, ZCASH_NU7_MIN_FIRMWARE } from '../shared/zcash-nu7'
+import { EmulatorTransportDelegate } from './emulator-transport'
 import { buildCosmosStakingTx, buildCosmosNameRegTx } from "./txbuilder/cosmos"
 import { readPioneerTokenBalance } from "./txbuilder/evm"
 import { initializeOrchardFromDevice, exportOrchardFvk, scanOrchardNotes, getShieldedBalance, sendShielded, ensureFvkLoaded, displayOrchardAddressOnDevice, setFvkDiskAllowed } from "./txbuilder/zcash-shielded"
@@ -284,9 +300,9 @@ import { createMoneroVault, moneroHiddenWalletStatus } from "./monero-vault"
 import { createMoneroFailoverVault } from "./monero-remote-failover"
 import { assertMoneroStandardWallet, moneroHiddenWallet } from "../shared/monero-wallet-policy"
 import { createMoneroWatchStore } from "./monero-watch-store"
-import { createMoneroDeviceSigner } from "./monero-device-signing"
+import { createMoneroCoreVerifier } from "./monero-device-signing"
 import { REVIEWED_MONERO_SIGNING_SHA256 } from "./monero-emulator"
-import { startMoneroSidecar, stopMoneroSidecar, isMoneroSidecarAvailable } from "./monero-sidecar"
+import { startMoneroSidecar, stopMoneroSidecar, isMoneroSidecarAvailable, hasMoneroSigningTools } from "./monero-sidecar"
 import { createMoneroNodeManager } from './monero-node'
 import { MONERO_LOCAL_URL, moneroNodeMode } from '../shared/monero-node'
 import { checkMoneroNode, storedRestoreHeight, suggestRestoreHeight, validateMoneroNode } from "./monero-settings"
@@ -330,6 +346,7 @@ import { getConfiguredReviewerIdentity, signCentralReview } from './clearsign-re
 import type { OwnAddressSeed } from "./db"
 import { rectifyWallet, getLedgerSummary, getLedgerJournals } from "./ledger"
 import { generateReport, reportToPdfBuffer, reportToCsv } from "./reports"
+import bs58 from "bs58"
 import { startAudit, startBtcScan, getAudit, getAuditBtcRaw, getAuditEntry, dismissAudit, markAuditsStale, type AuditDeps } from "./audit-engine"
 import { chainSupportsDeepScan, chainSupportsLevelScan, chainLevelPath, deriveAddressParams, extractAddress, parseNativeScanResult, parseEvmScanResult, supportsDgbTaproot, utxoAccountScriptPaths, explorerAddressUrl, pathToBip32, parseBip32Path } from "./chain-scan"
 import { btcPairingEntries, utxoPairingEntries, evmPairingEntries, type UtxoXpub } from "./pairing-pubkeys"
@@ -347,12 +364,12 @@ import { addClearSignProvider, listClearSignProviders, removeClearSignProvider, 
 import { supportsCertifiedClearSign } from "./solana-certified-policy"
 import { configureProductionRootTrust } from "../shared/certified-evm-envelope"
 import { emulatorClearSignTestRoot } from "./emulator-library"
-import { emulatorReadsClearSignTestRoot, getLoadedEmulatorLibPath } from "./emulator"
+import { emulatorReadsClearSignTestRoot, getLoadedEmulatorLibPath, getLoadedEmulatorLibrarySha256, getEmulatorInstance } from "./emulator"
 import { DEFAULT_CLEARSIGN_SERVICE_URL } from "./solana-certified-registry"
 import { createRpcAltFetcher } from "./solana-alt"
 import { createProviderKeySession } from "./clearsign-provider-session"
 import { buildProviderBundle, buildStudioEvmSchema, parseProviderBundle, providerBundleFileName, uniqueFilePath } from "./clearsign-studio-evm"
-import { getTokenMetadata, broadcastEvmTx, verifyEvmSigner, ethCall, ethGetCode, hasContractCode, getEvmGasPrice, getEvmNonce, getEvmBalance, waitForTxReceipt } from "./evm-rpc"
+import { ethRpc, getTokenMetadata, broadcastEvmTx, verifyEvmSigner, ethCall, ethGetCode, hasContractCode, getEvmGasPrice, getEvmNonce, getEvmBalance, waitForTxReceipt } from "./evm-rpc"
 import { evmSourceForChain, pioneerEvmRpc } from "./pioneer-evm"
 import { SafeMultisigService, inspectBaseSafe } from './safe-multisig'
 import { VaultImportService } from './vault-import'
@@ -1046,6 +1063,8 @@ function recordClearSignEvent(
 const btcAccounts = new BtcAccountManager()
 /** A Bitcoin-only saved wallet is on screen in watch-only (watchOnlySetView): the Bitcoin-only RPC boundary applies. */
 let watchOnlyViewBtcOnly = false
+let watchOnlyViewDeviceId: string | null = null
+let watchOnlyViewRevision = 0
 /** The one PSBT under review. btcPsbtSign signs only this, by id, in the wallet session it was checked in. */
 let pendingPsbt: { id: string; stem: string; analysis: PsbtAnalysis | MultisigAnalysis; deviceId: string; hidden: boolean; epoch: number; wallet: unknown; signing: boolean } | null = null
 let lastSignedPsbtPath: string | null = null
@@ -1248,6 +1267,14 @@ function deferredInit() {
 }
 
 /** All chains: built-in + user-added custom chains */
+const walletHistoryRefreshReason=createWalletHistoryRefreshPolicy()
+const balanceSync = createSyncProgressTracker(value => {
+    try { (rpc.send['balance-sync-progress'] as unknown as (progress: SyncProgress) => void)(value) } catch { /* renderer not ready */ }
+    if (value.status !== 'running') console.log('[balance-sync]', JSON.stringify(value))
+})
+const networkProbes: Array<{online:boolean;durationMs:number;checkedAt:number;status?:number;reason?:string}> = []
+
+
 function getAllChains(): ChainDef[] {
 	return [...CHAINS, ...customChainDefs]
 }
@@ -1328,6 +1355,50 @@ let zcashPurgeInFlight: Promise<void> | null = null
 let emulatorEnabled = false
 let preReleaseUpdates = false
 let alphaFirmware = false
+function nu7WalletSignerKind(wallet: unknown): 'alpha-emulator' | 'physical-alpha' | null {
+	const device = engine.getDeviceState()
+	if (isAdmittedNu7PhysicalAlpha(wallet, {
+		...device, wallet: engine.wallet, isEmulator: engine.isEmulator || device.isEmulator,
+	})) return 'physical-alpha'
+	return isQualifiedNu7AlphaEmulator(wallet, {
+		wallet: engine.wallet,
+		isEmulator: engine.isEmulator && engine.emuDelegate instanceof EmulatorTransportDelegate,
+		running: getEmulatorInstance() > 0,
+		alphaFirmware,
+		firmwareVersion: device.firmwareVersion,
+		librarySha256: getLoadedEmulatorLibrarySha256(),
+		reviewedSourceSha256: reviewedBundledEmulatorSourceSha256(getLoadedEmulatorLibPath(), getLoadedEmulatorLibrarySha256()),
+	}) ? 'alpha-emulator' : null
+}
+function qualifiedNu7Wallet(wallet: unknown): boolean { return nu7WalletSignerKind(wallet) !== null }
+configureZcashNu7WalletAuthorizer(qualifiedNu7Wallet, nu7WalletSessionId)
+const nu7WalletSessionIds = new WeakMap<object, number>()
+let nu7WalletSessionCounter = 0
+function nu7WalletSessionId(): string {
+	const wallet = engine.wallet
+	let owner = wallet ? nu7WalletSessionIds.get(wallet) : 0
+	if (wallet && !owner) { owner = ++nu7WalletSessionCounter; nu7WalletSessionIds.set(wallet, owner) }
+	const device = engine.getDeviceState()
+	return createHash('sha256').update(JSON.stringify([
+		owner || 0, activitySessionEpoch, device.deviceId, device.activeTransport,
+		device.firmwareVersion, device.firmwareHash, engine.isEmulator ? getEmulatorInstance() : 0,
+	])).digest('hex')
+}
+
+function getZcashNu7Support() {
+	const firmwareVersion = engine.getDeviceState().firmwareVersion
+	const signerKind = nu7WalletSignerKind(engine.wallet)
+	let reason = zcashNu7SupportError(firmwareVersion, true, signerKind !== null)
+	if (!reason) {
+		const binary = findZcashCliBinary()
+		if (!binary) reason = zcashNu7SupportError(firmwareVersion, false, true)
+		else {
+			try { requireZcashNu7Builder(binary) }
+			catch (error) { reason = error instanceof Error ? error.message : 'The Zcash Nu7 transaction builder is unavailable.' }
+		}
+	}
+	return { available: !reason, requiredFirmware: '7.17.0' as const, emulatorOnly: false, alphaOnly: true as const, signerKind, sessionId: nu7WalletSessionId(), ...(reason ? { reason } : {}) }
+}
 let addressBookClearsignEnabled = false
 let privateModeEnabled = false
 
@@ -1742,7 +1813,7 @@ function getAppSettings() {
 		walletConnectEnabled,
 		btcMultisigEnabled:multisigFeature.enabled,
 		moneroEnabled,
-		moneroAvailable: isMoneroSidecarAvailable(),
+		moneroAvailable: isMoneroSidecarAvailable() && hasMoneroSigningTools() && createMoneroCoreVerifier().available(),
 		moneroDaemonUrl: getSetting('monero_daemon_url') || MONERO_DEFAULT_NODE,
 		moneroNodeMode: moneroNodeMode(getSetting('monero_node_mode'), getSetting('monero_daemon_url')),
 		moneroRestoreHeight: storedRestoreHeight(getSetting('monero_restore_height')),
@@ -2058,9 +2129,9 @@ function flushPendingScopedApiLogs() {
 	}
 }
 
-// Swap assets the connected device can actually sign — Pioneer's swappable
+// Swap assets meeting the device's minimum firmware — Pioneer's swappable
 // list minus any chain whose minFirmware the device doesn't meet (e.g. ZEC on
-// firmware < 7.15.0). Single source shared by the RPC handler and the REST
+// firmware < 7.17.0). Nu7 signing qualification is checked separately. Single source shared by the RPC handler and the REST
 // callback so both surfaces gate identically.
 async function deviceSwapAssets() {
 	const { getSwapAssets } = await import('./swap')
@@ -2154,6 +2225,7 @@ const restCallbacks: RestApiCallbacks = {
 		try { rpc.send['pair-dismissed']({}) } catch { /* webview not ready */ }
 	},
 	getVersion: () => appVersionCache,
+    getSyncDiagnostics: () => ({ balanceSync: balanceSync.snapshot(), recentSyncs: balanceSync.recent(), connectivity: networkProbes.slice(-20) }),
 	emuSigningOp: (fn, details) => emuSigningOp(fn, details),
 	getSwapUiState: () => getSwapUiState(),
 	getDeviceSwapAssets: () => deviceSwapAssets(),
@@ -2172,6 +2244,11 @@ const restCallbacks: RestApiCallbacks = {
 	// the loop. The device still gates every signature. NOOP substage push.
 	getSwapQuoteHeadless: (params) => headlessSwapQuote(params),
 	executeSwapHeadless: (params) => headlessExecuteSwap(params, () => { /* headless: no WebView substage */ }),
+	refreshSwapStatus: async (txid, scope, rescan) => {
+		requireOnline('swap refresh')
+		const { refreshSwap } = await import('./swap-tracker')
+		return refreshSwap(txid, scope.deviceId, scope.walletId, rescan)
+	},
 	// Extension sends (POST /api/v2/tx/build): the in-app send's own build. The
 	// sender is always Desktop's: the client only names (accountIndex, scriptType)
 	// of the user's own accounts. A named UTXO account (BTC included) is derived
@@ -2279,7 +2356,8 @@ function getMoneroWallet() {
       create: getConfig => createMoneroVault({
         engine, confirm: emuSigningOp, signingEmulator: moneroSigningEmulatorActive,
         watchStore: createMoneroWatchStore({ database: getDb, profile: Utils.paths.userData }),
-        hardwareSigner: createMoneroDeviceSigner(),
+        coreVerifier: createMoneroCoreVerifier({ text: source => backendText(getSetting('app_language'), source) }),
+        text: source => backendText(getSetting('app_language'), source),
         onTransportFailure: transport => {
             if (engine.wallet?.transport === transport) return engine.retryConnect()
         },
@@ -2462,8 +2540,13 @@ function notifyActivityChanged(): void {
 
 const chainBalanceReadGenerations = new Map<string, number>()
 
+function sendPortfolioFault(payload: VaultRPCSchema['bun']['messages']['pioneer-error']): void {
+	const send = rpc.send['pioneer-error'] as (value: VaultRPCSchema['bun']['messages']['pioneer-error']) => void
+	send(payload)
+}
+
 /** Fetch one chain for manual refreshes and backend transaction updates. */
-async function getChainBalance(params: { chainId: string; forceRefresh?: boolean }, isCurrent: () => boolean = () => true): Promise<ChainBalance> {
+async function getChainBalance(params: { chainId: string; forceRefresh?: boolean; refreshReason?: ProviderRefreshReason }, isCurrent: () => boolean = () => true): Promise<ChainBalance> {
 	const balanceReadStartedAt = Date.now()
 	const ownerIsCurrent = isCurrent
 	const requestEpoch = activitySessionEpoch
@@ -2484,7 +2567,7 @@ async function getChainBalance(params: { chainId: string; forceRefresh?: boolean
 		const deviceId = engine.getDeviceState().deviceId
 		const cached = !engine.isPassphraseWallet && deviceId ? getCachedBalances(deviceId) : null
 		const balance = cached?.balances.find(balance => balance.chainId === chain.id)
-		return balance ? { ...balance, syncState: 'stale' as const }
+		return balance ? { ...balance, syncState: balance.syncState === 'degraded' ? 'degraded' as const : 'stale' as const }
 			: { chainId: chain.id, symbol: chain.symbol, balance: '0', balanceUsd: 0, address: '', syncState: 'degraded' as const }
 	}
 	// forceRefresh defaults TRUE: single-chain fetches are user-clicked
@@ -2492,6 +2575,7 @@ async function getChainBalance(params: { chainId: string; forceRefresh?: boolean
 	// Pioneer's cache must be bypassed. Callers pass false only when the
 	// cache is known-fresh.
 	const forceRefresh = params.forceRefresh !== false
+    const providerRefresh=paidProviderRefreshOptions(params.refreshReason ?? 'manual')
 	// Chain gating (mirrors getBalances): firmware minimum + feature flags.
 	// Returns the same empty-balance shape as the capability gate below —
 	// throwing here would bounce flows that merely render the page (#310).
@@ -2666,13 +2750,17 @@ async function getChainBalance(params: { chainId: string; forceRefresh?: boolean
 	// cache overwrite below (degraded responses must not clobber the cache).
 	let pioneerConfirmed = false
 	let syncState: ChainBalance['syncState'] = 'degraded'
+	let responseMeta: PortfolioMeta | undefined
+	let sourceObservedAt: number | undefined
 	// Snapshot pre-refresh address from cache so we can preserve it on Pioneer failure (Finding 3)
 	let cachedAddress = ''
+	let cachedBalance: ChainBalance | undefined
 	try {
 		const devId = engine.getDeviceState().deviceId
-		if (devId) {
+		if (devId && !engine.isPassphraseWallet) {
 			const cached = getCachedBalances(devId)
-			cachedAddress = cached?.balances.find(b => b.chainId === chain.id)?.address || ''
+			cachedBalance = cached?.balances.find(b => b.chainId === chain.id)
+			cachedAddress = cachedBalance?.address || ''
 		}
 	} catch { /* cache lookup failed, non-fatal */ }
 
@@ -2729,7 +2817,7 @@ async function getChainBalance(params: { chainId: string; forceRefresh?: boolean
 		} else {
 			try {
 				resp = await withTimeout(
-					pioneer.GetPortfolioBalances(portfolioBody, { forceRefresh }),
+					pioneer.GetPortfolioBalances({ ...portfolioBody, ...providerRefresh }, { forceRefresh }),
 					PIONEER_TIMEOUT_MS,
 					'GetPortfolioBalances'
 				)
@@ -2738,7 +2826,7 @@ async function getChainBalance(params: { chainId: string; forceRefresh?: boolean
 				console.warn(`[getBalance] ${chain.coin}: Pioneer rejected extraContracts; retrying without custom tokens`)
 				resp = await withTimeout(
 					pioneer.GetPortfolioBalances(
-						{ pubkeys: portfolioBody.pubkeys, ...(isEvm ? { includeDefi: true } : {}) },
+						{ pubkeys: portfolioBody.pubkeys, ...(isEvm ? { includeDefi: true } : {}), ...providerRefresh },
 						{ forceRefresh }
 					),
 					PIONEER_TIMEOUT_MS,
@@ -2748,6 +2836,7 @@ async function getChainBalance(params: { chainId: string; forceRefresh?: boolean
 		}
 		assertCurrent()
 		const { entries: allEntries, meta: portfolioMeta, defiPositions: respDefiPositions } = unwrapPortfolioResponse(resp)
+		responseMeta = portfolioMeta ?? undefined
 		const rawDefiPositions: ServerDefiPosition[] = respDefiPositions || []
 		// Degraded = Pioneer's fresh fetch failed and it served last-known
 		// cache. Surface it (same banner channel as getBalances) and treat
@@ -2757,10 +2846,6 @@ async function getChainBalance(params: { chainId: string; forceRefresh?: boolean
 		pioneerConfirmed = syncState === 'confirmed'
 		if (!pioneerConfirmed) {
 			console.warn(`[getBalance] ${chain.coin}: Pioneer served ${syncState} data`)
-			try {
-				const stale = syncState === 'stale'
-				rpc.send['pioneer-error']({ message: '', url: getPioneerApiBase(), severity: 'warning', degradedChains: stale ? [] : [chain.symbol], staleChains: stale ? [chain.symbol] : [], staleMinutes: Math.floor(Math.max(0, ...(portfolioMeta?.staleChains || []).map(s => s.ageMs || 0)) / 60000), degradedChainIds: stale ? [] : [chain.id], staleChainIds: stale ? [chain.id] : [], unresolvedFaultCount: 0 })
-			} catch { /* webview not ready */ }
 		}
 
 		console.log(`[getBalance] ${chain.coin}: ${allEntries.length} entries from ${bitcoinSelfHost ? getBtcBackend().kind : 'Pioneer'} (${pubkeys.length} pubkeys)`)
@@ -2796,6 +2881,13 @@ async function getChainBalance(params: { chainId: string; forceRefresh?: boolean
 
 		if (skippedCrossChain > 0) {
 			console.log(`[getBalance] ${chain.coin}: filtered ${skippedCrossChain} cross-chain entries`)
+		}
+		sourceObservedAt = portfolioObservedAt([...pureNatives, ...tokenEntries], balanceReadStartedAt,
+			bitcoinSelfHost || providerRefresh.providerRefreshPolicy === 'on-demand' ? balanceReadStartedAt : cachedBalance?.updatedAt)
+		if (pioneerConfirmed && !bitcoinSelfHost && providerRefresh.providerRefreshPolicy === 'cache-only'
+			&& portfolioObservedAt([...pureNatives, ...tokenEntries], balanceReadStartedAt) === undefined) {
+			pioneerConfirmed = false
+			syncState = 'stale'
 		}
 
 		// Aggregate natives: iterate REQUESTED pubkeys, match at most one response per
@@ -2941,7 +3033,8 @@ async function getChainBalance(params: { chainId: string; forceRefresh?: boolean
 				const ownerDefi = ownerDefiPositions.get(ownerAddress)
 				const ownerDefiUsd = ownerDefi?.reduce((sum, p) => sum + (p.balanceUsd || 0), 0) || 0
 				evmAddresses.setAddressChainBalance(pk.pubkey, chain.id, {
-					...ownerPortfolioConfidence(allEntries, pk.pubkey, chain.caip, portfolioMeta, balanceReadStartedAt),
+					...ownerPortfolioConfidence(allEntries, pk.pubkey, chain.caip,
+						syncState === 'stale' ? { ...portfolioMeta, staleChains: [{ caip: chain.caip }] } : portfolioMeta, balanceReadStartedAt),
 					chainId: chain.id,
 					symbol: chain.symbol,
 					balance: native.balance > 0 ? native.balance.toFixed(18).replace(/0+$/, '').replace(/\.$/, '') : '0',
@@ -2986,6 +3079,13 @@ async function getChainBalance(params: { chainId: string; forceRefresh?: boolean
 	const tokensUsd = tokens?.reduce((s, t) => s + (t.balanceUsd || 0), 0) || 0
 	const defiUsd = chainDefiPositions?.reduce((s, p) => s + (p.balanceUsd || 0), 0) || 0
 	const nativeBalanceUsd = Number(balanceUsd) - tokensUsd - defiUsd
+	const latestDevice = engine.getDeviceState().deviceId
+	const latestSnapshot = !engine.isPassphraseWallet && latestDevice ? getCachedBalances(latestDevice)?.balances.find(row => row.chainId === chain.id) : undefined
+	if (pioneerConfirmed && latestSnapshot?.updatedAt && (sourceObservedAt ?? 0) < latestSnapshot.updatedAt) {
+		pioneerConfirmed = false
+		syncState = 'stale'
+		cachedBalance = latestSnapshot
+	}
 	const result: ChainBalance = {
 		chainId: chain.id,
 		symbol: chain.symbol,
@@ -2997,6 +3097,7 @@ async function getChainBalance(params: { chainId: string; forceRefresh?: boolean
 		defiPositions: chainDefiPositions,
 		breakdown: utxoBreakdown.length ? utxoBreakdown : undefined,
 		syncState,
+		updatedAt: (pioneerConfirmed ? sourceObservedAt : cachedBalance?.updatedAt) ?? 0,
 	}
 
 	assertCurrent()
@@ -3017,6 +3118,21 @@ async function getChainBalance(params: { chainId: string; forceRefresh?: boolean
 			rectifyWallet(deviceId, [result])
 		}
 	} catch { /* never block on cache failure */ }
+	// Report the final chain result, including missing native/xpub rows detected
+	// after the provider response. A clean single-chain read clears only its own
+	// previous fault, and ordinary stale cache remains available to the Audit.
+	try {
+		const degraded = result.syncState === 'degraded'
+		const stale = result.syncState === 'stale'
+		const ages = (responseMeta?.staleChains || []).map(row => row.ageMs).filter((age): age is number => Number.isFinite(age) && age >= 0)
+		sendPortfolioFault({
+			message: '', url: getPioneerApiBase(), severity: degraded || stale ? 'warning' : 'none',
+			checkedChainIds: [chain.id], degradedChains: degraded ? [chain.symbol] : [], staleChains: stale ? [chain.symbol] : [],
+			degradedChainIds: degraded ? [chain.id] : [], staleChainIds: stale ? [chain.id] : [],
+			unresolvedFaultCount: 0, unresolvedErrorCount: 0,
+			staleMinutes: ages.length ? Math.floor(Math.max(...ages) / 60000) : undefined,
+		})
+	} catch { /* webview not ready */ }
 	try { rpc.send['balance-updated'](result) } catch { /* webview not ready */ }
 	// Push updated EVM per-address balances so address selector stays current
 	if (isEvm) {
@@ -3026,19 +3142,7 @@ async function getChainBalance(params: { chainId: string; forceRefresh?: boolean
 	if (isBtc && btcAccounts.isInitialized && btcAccounts.getAllPubkeyEntries(chain.caip).length > 0) {
 		const btcSet = btcAccounts.toAccountSet()
 		try { rpc.send['btc-accounts-update'](btcSet) } catch { /* webview not ready */ }
-		// Sync DB cache so getCachedBalances returns aggregate (not stale single-xpub)
-		try {
-			const devId = engine.getDeviceState().deviceId
-			if (devId && !engine.isPassphraseWallet && pioneerConfirmed) {
-				updateCachedBalance(devId, {
-					chainId: 'bitcoin', symbol: 'BTC',
-					balance: btcSet.totalBalance,
-					balanceUsd: btcSet.totalBalanceUsd,
-					nativeBalanceUsd: btcSet.totalBalanceUsd,
-					address: result.address || btcAccounts.getSelectedXpub()?.xpub || '',
-				}, pioneerConfirmed)
-			}
-		} catch { /* non-fatal */ }
+		// The validated aggregate was persisted above with its original age.
 	}
 
 	return result
@@ -3061,7 +3165,7 @@ const postTxBalances = createPostTxBalanceRefresh({
 	refresh: async (params, isCurrent) => {
 		console.log(`[post-tx-balance] Forced refresh: ${params.chainId}`)
 		// Background: a device that auto-locked stays quiet (no lock screen).
-		return backgroundDeviceRead.run(true, () => getChainBalance(params, isCurrent))
+		return backgroundDeviceRead.run(true, () => getChainBalance({...params,refreshReason:'automatic'}, isCurrent))
 	},
 	onError: (chainId, error) => console.warn(`[post-tx-balance] ${chainId}:`, error instanceof Error ? error.message : error),
 	onTx: (scope, chainId) => {
@@ -3184,8 +3288,17 @@ const activeWalletWatches = createActiveWalletWatch({
 	stop: stopOwnedWalletStream,
 	// Background: a device that auto-locked stays quiet (no lock screen).
 	refresh: (hint, isCurrent) => backgroundDeviceRead.run(true, () => refreshWatchedChain(hint, {
-		readBalance: getChainBalance,
-		scanHistory: (chainId, current) => scanOneChain(chainId, true, current),
+		readBalance: (params,current) => getChainBalance({...params,refreshReason:'automatic'},current),
+		readCachedBalance: chainId => {
+			const scope = getWalletDbScope()
+			return !engine.isPassphraseWallet && scope ? getCachedBalances(scope.deviceId)?.balances.find(row => row.chainId === chainId) : undefined
+		},
+		scanHistory: (chainId, current) => {
+			const scope = getWalletDbScope()
+			const cached = !engine.isPassphraseWallet && scope ? getCachedBalances(scope.deviceId)?.balances.find(row => row.chainId === chainId) : undefined
+			const reason = cached ? 'automatic' : walletHistoryRefreshReason(`${activitySessionEpoch}:${scope?.walletId || ''}`, getAllChains().find(row => row.id === chainId)?.networkId || '')
+			return scanOneChain(chainId, true, current, reason)
+		},
 		follow: (chainId, txid) => txWatch.watch(chainId, txid),
 		retry: (chainId, txid) => postTxBalances.retry(chainId, txid),
 		onReceive: (chainId, txid) => {
@@ -3349,7 +3462,7 @@ function entryIsStale(entry: ApiLogEntry): boolean {
 
 /** Rescan ONE chain's history. Standard wallets upsert api_log; hidden sessions
 *  fetch live and keep rows in RAM only (zero disk trace). */
-async function scanOneChain(chainId: string, forceRefresh = false, ownerIsCurrent: () => boolean = () => true) {
+async function scanOneChain(chainId: string, forceRefresh = false, ownerIsCurrent: () => boolean = () => true, refreshReason:ProviderRefreshReason='manual') {
 	if (!engine.wallet) throw new Error('No device connected')
 	// Only a settled session scans: while a PIN/passphrase prompt is up, a derive
 	// queues behind it and can come back from a DIFFERENT (hidden) wallet.
@@ -3374,7 +3487,7 @@ async function scanOneChain(chainId: string, forceRefresh = false, ownerIsCurren
 		scope,
 		chains: getAllChains().filter(c => (c.id !== 'hive' || hiveEnabled) && networkOn(c.id)),
 		firmwareVersion: engine.getDeviceState().firmwareVersion,
-		options: { chainId, dryRun: hidden, collectRows: true, forceRefresh },
+		options: { chainId, dryRun: hidden, collectRows: true, forceRefresh, refreshReason },
 		isCurrent,
 	})
 	if (!isCurrent()) return { rows: [], added: 0, txs: 0, updated: 0 }
@@ -3391,7 +3504,24 @@ async function scanOneChain(chainId: string, forceRefresh = false, ownerIsCurren
 // Pioneer's history cache (upserting the activity rows) and resyncs the balance
 // when the tx lands in a block.
 const txWatch = createTxWatch({
-	scanChain: async (chainId) => (await scanOneChain(chainId, true)).rows,
+	scanChain: async (chainId,txids=[]) => {
+        const chain=getAllChains().find(row=>row.id===chainId)
+        if(chain?.chainFamily!=='evm')return (await scanOneChain(chainId,true,()=>true,'automatic')).rows
+        const source=getEvmRpcSource(chain)
+        if(!source)throw Error('EVM confirmation RPC is not configured')
+        const epoch=activitySessionEpoch,scope=getWalletDbScope()
+        const rows=await readEvmConfirmationRows(chain,txids,(method,params)=>ethRpc(source,method,params))
+        if(epoch!==activitySessionEpoch||scope?.walletId!==getWalletDbScope()?.walletId||engine.getDeviceState().state!=='ready')return []
+        if(engine.isPassphraseWallet){
+            const existing=getSessionActivity()
+            for(const row of rows){const prior=existing.find(item=>item.txid===row.txid&&item.chainId===chainId);if(prior)addSessionActivity([{...prior,status:row.status,confirmations:row.confirmations,blockHeight:row.blockHeight}])}
+        }else if(scope){
+            const db = getDb()
+            if (db) for(const row of rows)db.run(`UPDATE api_log SET response_body=json_set(CASE WHEN json_valid(response_body) THEN response_body ELSE '{}' END,'$.status',?,'$.confirmations',?,'$.blockHeight',?) WHERE txid=? AND device_id=? AND wallet_id=? AND chain=?`,[row.status,row.confirmations??0,row.blockHeight??0,row.txid!,scope.deviceId,scope.walletId,chain.symbol])
+        }
+        if(rows.length)notifyActivityChanged()
+        return rows
+    },
 	onConfirmed: (chainId, txid) => postTxBalances.request(chainId, txid),
 	requiredConfs: (row) => getRequiredConfs(row.chain),
 })
@@ -3641,21 +3771,29 @@ function maybeStartBackgroundWalletVerification(): void {
 async function texRecovery(action: 'complete' | 'shieldBack', index: number): Promise<{ txid: string }> {
 	if (!zcashPrivacyEnabled) throw new Error('Zcash privacy feature is disabled')
 	if (!engine.wallet) throw new Error('No device connected')
-	await ensureFvkLoaded(engine.wallet, 0)
-	await ensureZcashDeviceMatch(0, true)
-	const signWrap = engine.isEmulator
-		? <T,>(fn: () => Promise<T>) => emuSigningOp(fn, { operation: 'zcashShieldedSend', chain: 'Zcash' }) as Promise<T>
-		: undefined
-	const onProgress = (step: string, batch?: { index: number; total: number; fee?: number; phase?: string }) => {
-		try { rpc.send['send-progress']({ step, batch }) } catch { /* webview not ready */ }
+	if (isZcashSendInFlight()) throw new Error('A Zcash payment is already in progress. Wait for it to finish before recovering a TEX payment.')
+	// Reserve before the first await. Nested TEX stages keep their existing
+	// counters, while a native send cannot replace this operation's PCZT state.
+	beginZcashSend()
+	try {
+		await ensureFvkLoaded(engine.wallet, 0)
+		await ensureZcashDeviceMatch(0, true)
+		const signWrap = engine.isEmulator
+			? <T,>(fn: () => Promise<T>) => emuSigningOp(fn, { operation: 'zcashShieldedSend', chain: 'Zcash' }) as Promise<T>
+			: undefined
+		const onProgress = (step: string, batch?: { index: number; total: number; fee?: number; phase?: string }) => {
+			try { rpc.send['send-progress']({ step, batch }) } catch { /* webview not ready */ }
+		}
+		const { payTex, shieldBackTex } = await import("./txbuilder/zcash-tex-send")
+		const result = action === 'complete'
+			? await payTex(engine.wallet as any, index, { signWrap, onProgress })
+			: await shieldBackTex(engine.wallet as any, index, { signWrap, onProgress })
+		try { rpc.send['send-progress']({ step: 'complete', detail: result.txid }) } catch { /* webview not ready */ }
+		schedulePostZcashTxRescans()
+		return { txid: result.txid }
+	} finally {
+		endZcashSend()
 	}
-	const { payTex, shieldBackTex } = await import("./txbuilder/zcash-tex-send")
-	const result = action === 'complete'
-		? await payTex(engine.wallet as any, index, { signWrap, onProgress })
-		: await shieldBackTex(engine.wallet as any, index, { signWrap, onProgress })
-	try { rpc.send['send-progress']({ step: 'complete', detail: result.txid }) } catch { /* webview not ready */ }
-	schedulePostZcashTxRescans()
-	return { txid: result.txid }
 }
 
 /** After a private tx broadcasts (shield/deshield/z2z), the wallet DB only
@@ -3984,6 +4122,7 @@ async function headlessExecuteSwap(params: ExecuteSwapParams, pushSubStage: (sta
 			slippageBps: cachedQuote?.requestedSlippageBps ?? 100,
 			integration: cachedQuote?.integration || 'thorchain',
 			swapper: cachedQuote?.swapper,
+			relayOrder: cachedQuote?.relayOrder,
 			nearIntentsDepositAddress: cachedQuote?.nearIntentsDepositAddress,
 			nearIntentsTracking: cachedQuote?.nearIntentsTracking,
 		}, { skipPersist: engine.isPassphraseWallet || !scope, deviceId: scope?.deviceId, walletId: scope?.walletId })
@@ -4502,6 +4641,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			gateDeviceRpc({
 			// ── Device lifecycle ──────────────────────────────────────
 			getDeviceState: async () => engine.getDeviceState(),
+			getZcashNu7Support: async () => getZcashNu7Support(),
 			retryConnect: async () => { await engine.retryConnect() },
 			requestDeviceUnlock: async () => { await engine.requestDeviceUnlock() },
 			startBootloaderUpdate: async () => { requireOnline('bootloader update'); await engine.startBootloaderUpdate() },
@@ -5298,11 +5438,11 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					const fee = sumIn > sumOut ? String(sumIn - sumOut) + unit : undefined
 					const amt = outs[0]?.amount
 					return observedRpcSign('btcSignTx', params, () => emuSigningOp(
-						() => engine.wallet!.btcSignTx(params),
+						() => signUtxoTx(engine.wallet!, params, { firmwareVersion: engine.getDeviceState().firmwareVersion }),
 						{ operation: 'btcSignTx', chain: coin, to: outs[0]?.address, value: amt != null ? String(amt) + unit : undefined, fee },
 					))
 				}
-				return await observedRpcSign('btcSignTx', params, () => engine.wallet!.btcSignTx(params))
+				return await observedRpcSign('btcSignTx', params, () => signUtxoTx(engine.wallet!, params, { firmwareVersion: engine.getDeviceState().firmwareVersion }))
 			},
 			btcMultisigCosigner: async (params) => {
 				const { wallet, assertCurrent } = multisigSession()
@@ -6211,7 +6351,11 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			},
 
 			// ── Pioneer integration (batch portfolio API) ────────────────
-			getBalances: async ({ forceRefresh = false, swapDestCaips = [] }: { forceRefresh?: boolean; swapDestCaips?: string[] } = {}) => {
+            getProviderUsage: async () => getPioneerProviderUsage(),
+            getSyncDiagnostics: async () => ({ balanceSync: balanceSync.snapshot(), recentSyncs: balanceSync.recent(), connectivity: networkProbes.slice(-20) }),
+			getBalances: async ({ forceRefresh = false, swapDestCaips = [], refreshReason }: { forceRefresh?: boolean; swapDestCaips?: string[]; refreshReason?: ProviderRefreshReason } = {}) => {
+                return balanceSync.run(async progress => {
+                const providerRefresh = paidProviderRefreshOptions(refreshReason ?? (forceRefresh ? 'manual' : 'wallet-open'))
 				if (!engine.wallet) throw new Error('No device connected')
 				const readStartedAt = Date.now()
 				const requestServer = getPioneerApiBase()
@@ -6221,6 +6365,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				}
 				assertServerCurrent()
 				if (offlineMode) {
+                    progress.pause()
 					if (engine.isPassphraseWallet) return []
 					const deviceId = engine.getDeviceState().deviceId
 					if (!deviceId) return []
@@ -6235,7 +6380,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				let pioneer: any = null
 				let pioneerInitError: Error | null = null
 				try {
-					pioneer = await getPioneer()
+					pioneer = await progress.task('api-initialization', () => getPioneer())
 				} catch (e: any) {
 					// e.message is not always a string: upstream JSON-RPC/hdwallet failures
 					// carry {code, message} objects, which crash React if rendered raw.
@@ -6264,12 +6409,12 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				const inventoryWallet = engine.wallet
 				// Per-step timings feed the network picker's load estimate (shared/network-load.ts).
 				const loadT0 = Date.now()
-				const { truth: liveSeedIdentity } = await ensureManagersForSeed('getBalances')
+				const { truth: liveSeedIdentity } = await progress.task('wallet-identity', () => ensureManagersForSeed('getBalances'))
 
 				// Initialize BTC multi-account on first balance fetch
 				if (!btcAccounts.isInitialized) {
 					const btcT0 = Date.now()
-					try { await btcAccounts.initialize(wallet); console.log(`[getBalances] timing btc-accounts: ${Date.now() - btcT0}ms`) } catch (e: any) {
+					try { await progress.task('bitcoin-accounts', () => btcAccounts.initialize(wallet)); console.log(`[getBalances] timing btc-accounts: ${Date.now() - btcT0}ms`) } catch (e: any) {
 						console.warn('[getBalances] BTC accounts init failed:', e.message)
 					}
 				}
@@ -6299,16 +6444,17 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						utxoPubKeyPaths.push({ chain: c, scriptType: sp.scriptType, path: sp.path })
 					}
 				}
+                progress.phase('addresses', utxoPubKeyPaths.length + nonUtxoChains.filter(c => c.chainFamily !== 'evm' && !c.hidden).length + (nonUtxoChains.some(c => c.chainFamily === 'evm') && !evmAddresses.isInitialized ? 1 : 0))
 				let xpubResults: any[] = []
 				try {
 					if (utxoPubKeyPaths.length > 0) {
 						const utxoT0 = Date.now()
-						xpubResults = await wallet.getPublicKeys(utxoPubKeyPaths.map(p => ({
+						xpubResults = await progress.task('utxo-addresses', () => wallet.getPublicKeys(utxoPubKeyPaths.map(p => ({
 							addressNList: p.path,
 							coin: p.chain.coin,
 							scriptType: p.scriptType,
 							curve: 'secp256k1',
-						}))) || []
+						}))), utxoPubKeyPaths.length) || []
 						const perChain = new Map<string, number>()
 						for (const p of utxoPubKeyPaths) perChain.set(p.chain.id, (perChain.get(p.chain.id) || 0) + 1)
 						console.log(`[getBalances] timing utxo: ${utxoPubKeyPaths.length} paths in ${Date.now() - utxoT0}ms (${[...perChain].map(([id, n]) => `${id}:${n}`).join(' ')})`)
@@ -6361,7 +6507,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 
 				if (evmChains.length > 0 && !evmAddresses.isInitialized) {
 					const evmT0 = Date.now()
-					try { await evmAddresses.initialize(wallet); console.log(`[getBalances] timing evm: ${Date.now() - evmT0}ms`) } catch (e: any) {
+					try { await progress.task('evm-addresses', () => evmAddresses.initialize(wallet)); console.log(`[getBalances] timing evm: ${Date.now() - evmT0}ms`) } catch (e: any) {
 						console.warn('[getBalances] EVM addresses init failed:', e.message)
 					}
 				}
@@ -6389,7 +6535,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					try {
 						// Shared derive (capability recording + { publicKey } fallback live
 						// inside deriveChainAddress). null = firmware miss or empty result.
-						const address = await deriveChainAddress(wallet, chain)
+						const address = await progress.task(chain.id, () => deriveChainAddress(wallet, chain))
 						const ms = Date.now() - t0
 						if (address) {
 							console.log(`[getBalances] ${chain.id} address derived in ${ms}ms: ${address.substring(0, 20)}... caip=${chain.caip}`)
@@ -6564,14 +6710,15 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					const useNodeForBtc = btcBackend.kind !== 'pioneer' && btcPubkeyEntries.length > 0
 					const pubkeysForPioneer = useNodeForBtc ? pubkeys.filter(p => p.chainId !== 'bitcoin') : pubkeys
 					const pubkeyChunks = chunkArray(pubkeysForPioneer, PIONEER_PORTFOLIO_CHUNK_SIZE)
-					const chunkResults = pubkeyChunks.length === 0 ? [] : await withTimeout(
-						mapWithConcurrency(pubkeyChunks, PIONEER_PORTFOLIO_MAX_CONCURRENCY, async (chunk, i) => {
+					progress.phase('balances', pubkeysForPioneer.length)
+                    const chunkResults = pubkeyChunks.length === 0 ? [] : await withTimeout(
+						mapWithConcurrency(pubkeyChunks, PIONEER_PORTFOLIO_MAX_CONCURRENCY, async (chunk, i) => progress.task(`batch-${i+1}`, async () => {
 							assertServerCurrent()
 							// Opt the dashboard refresh into the server's Zerion DeFi merge. The
 							// gateway serves its PostgreSQL-backed demand cache; misses degrade to
 							// [] without blocking balances. Pre-v1.4
 							// servers ignore the field and return the legacy shape unchanged.
-							const chunkBody: any = { pubkeys: chunk.map(p => ({ caip: p.caip, pubkey: p.pubkey })), includeDefi: true }
+							const chunkBody: any = { pubkeys: chunk.map(p => ({ caip: p.caip, pubkey: p.pubkey })), includeDefi: true, ...providerRefresh }
 							if (extraContracts.length > 0) chunkBody.extraContracts = extraContracts
 							try {
 								let resp: any
@@ -6587,7 +6734,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 									console.warn('[getBalances] Pioneer rejected extraContracts; retrying portfolio chunk without custom tokens')
 									resp = await withTimeout(
 										pioneer.GetPortfolioBalances(
-											{ pubkeys: chunkBody.pubkeys, includeDefi: true },
+											{ pubkeys: chunkBody.pubkeys, includeDefi: true, ...providerRefresh },
 											{ forceRefresh }
 										),
 										PIONEER_PORTFOLIO_CHUNK_TIMEOUT_MS,
@@ -6613,7 +6760,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 									try {
 										assertServerCurrent()
 										const resp = await withTimeout(
-											pioneer.GetPortfolioBalances({ pubkeys: [{ caip: p.caip, pubkey: p.pubkey }], includeDefi: true }, { forceRefresh }),
+											pioneer.GetPortfolioBalances({ pubkeys: [{ caip: p.caip, pubkey: p.pubkey }], includeDefi: true, ...providerRefresh }, { forceRefresh }),
 											PIONEER_PORTFOLIO_CHUNK_TIMEOUT_MS,
 											`GetPortfolioBalances retry ${p.caip}`
 										)
@@ -6633,12 +6780,13 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 									failed,
 								}
 							}
-						}),
+						}, chunk.length, result => result.failed?.length ?? 0)),
 						PIONEER_PORTFOLIO_TOTAL_TIMEOUT_MS,
 						'GetPortfolioBalances chunks'
 					)
 					assertServerCurrent()
-					const failedChunkCount = chunkResults.filter(r => r.error).length
+					progress.phase('finalizing')
+                    const failedChunkCount = chunkResults.filter(r => r.error).length
 					let hadChunkFailures = false
 					// effectivePubkeys: pubkeys whose chunk succeeded — chains from failed chunks show 0
 					let effectivePubkeys = pubkeys
@@ -6803,6 +6951,15 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						console.log(`[getBalances] BTC via self-host node (${btcBackend.kind}): ${btcPubkeyEntries.length} xpub(s), price $${btcPriceUsd}`)
 					}
 					const portfolioMeta = mergeMetas(chunkResults.map(r => r.meta).filter(Boolean) as PortfolioMeta[])
+					// A degraded chunk without mapped failures still represents an error
+					// for its requested chains. It must not become an "all clear".
+					const providerDegradedChainIds = new Set<string>()
+					for (let i = 0; i < chunkResults.length; i++) {
+						const meta = chunkResults[i].meta
+						if (meta?.degraded && !meta.failures?.length) {
+							for (const pubkey of pubkeyChunks[i]) providerDegradedChainIds.add(pubkey.chainId)
+						}
+					}
 
 					// Aggregate server-merged DeFi positions across chunks and group by
 					// chainId. The networkId on each position (eip155:N) maps cleanly
@@ -7028,8 +7185,13 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 							const ownerDefiUsd = ownerDefiPositions?.reduce((sum, p) => sum + (p.balanceUsd || 0), 0) || 0
 							const ownerChunkIndex = pubkeyChunks.findIndex(chunk => chunk.some(p => p.caip === entry.caip && p.pubkey.toLowerCase() === ownerLower))
 							const ownerChunk = chunkResults[ownerChunkIndex]
+							const ownerRows = (ownerChunk?.entries || []).filter((row: any) => String(row.caip || '').split('/')[0].toLowerCase() === entry.caip.split('/')[0].toLowerCase()
+								&& String(row.pubkey || row.address || '').toLowerCase() === ownerLower)
+							const ownerMeta = providerRefresh.providerRefreshPolicy === 'cache-only' && portfolioObservedAt(ownerRows, readStartedAt) === undefined
+								? { ...ownerChunk?.meta, staleChains: [...(ownerChunk?.meta?.staleChains || []), { caip: entry.caip }] }
+								: ownerChunk?.meta
 							evmAddresses.setAddressChainBalance(entry.pubkey, entry.chainId, {
-								...ownerPortfolioConfidence(ownerChunk?.entries || [], entry.pubkey, entry.caip, ownerChunk?.meta, loadT0),
+								...ownerPortfolioConfidence(ownerChunk?.entries || [], entry.pubkey, entry.caip, ownerMeta, loadT0),
 								chainId: entry.chainId,
 								symbol: entry.symbol,
 								balance: bal > 0 ? bal.toFixed(18).replace(/0+$/, '').replace(/\.$/, '') : '0',
@@ -7162,11 +7324,8 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						}
 					}
 
-					// Push updated BTC accounts to frontend and sync DB cache with aggregate total.
-					// The DB entry (used by getCachedBalances → SwapDialog) would otherwise stay
-					// as a single-xpub value; the in-memory manager always has the correct sum.
-					// Use the real address from Pioneer (btcSelectedAddress/btcFallbackAddress) when
-					// available — fall back to xpub only if Pioneer didn't return an address.
+					// Push updated BTC accounts. Persist the validated aggregate only once,
+					// below, after applying the provider faults and original snapshot age.
 					// confirmedChainIds: chains where Pioneer returned a real response (not a failed chunk).
 					// These are allowed to write 0 to the cache — genuine empty balance, not a transient failure.
 					const confirmedChainIds = new Set(
@@ -7187,6 +7346,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					for (const [chainId, agg] of utxoChainAgg) {
 						if (!agg.matched || !agg.allOk || incompleteUtxoDerivation.has(chainId)) confirmedChainIds.delete(chainId)
 					}
+					for (const chainId of providerDegradedChainIds) confirmedChainIds.delete(chainId)
 
 					// Mark that Pioneer has responded — prevents getBtcAccounts from re-loading stale DB rows
 					if (btcConfirmed) btcAccounts.markPioneerFetched()
@@ -7194,25 +7354,13 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					{
 						const btcSet = btcAccounts.toAccountSet()
 						try { rpc.send['btc-accounts-update'](btcSet) } catch { /* webview not ready */ }
-						try {
-							const devId = engine.getDeviceState().deviceId
-							if (devId && !engine.isPassphraseWallet && btcConfirmed && parseFloat(btcSet.totalBalance) >= 0) {
-								updateCachedBalance(devId, {
-									chainId: 'bitcoin', symbol: 'BTC',
-									balance: btcSet.totalBalance,
-									balanceUsd: btcSet.totalBalanceUsd,
-									nativeBalanceUsd: btcSet.totalBalanceUsd,
-									address: btcSelectedAddress || btcFallbackAddress || btcAccounts.getSelectedXpub()?.xpub || '',
-								}, btcConfirmed)
-							}
-						} catch { /* non-fatal */ }
 					}
 					// Push updated EVM addresses to frontend
 					try { rpc.send['evm-addresses-update'](evmAddresses.toAddressSet()) } catch { /* webview not ready */ }
 
 					// Auto-discover EVM addresses with funds (background, non-blocking)
 					if (evmChains.length > 0 && wallet) {
-						evmAddresses.autoDiscover(wallet, pioneer, evmChains).then(({ discovered }) => {
+						evmAddresses.autoDiscover(wallet, pioneer, evmChains, 9, refreshReason ?? (forceRefresh ? 'manual' : 'wallet-open')).then(({ discovered }) => {
 							if (inventoryEpoch !== activitySessionEpoch || inventoryWallet !== engine.wallet) return
 							if (discovered.length) publishWalletWatchPubkeys(evmAddresses.getAllPubkeyEntries(evmChains), currentBalanceRefreshScope())
 							if (discovered.length > 0) {
@@ -7220,6 +7368,30 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 								try { rpc.send['evm-addresses-update'](evmAddresses.toAddressSet()) } catch {}
 							}
 						}).catch(() => {})
+					}
+
+					// A snapshot keeps the age of its last successful observation. A
+					// failed or cached response must not reset it to the receipt time.
+					const faulted = portfolioFaultChainIds(portfolioMeta, caip => {
+						const prefix = (caip.split('/')[0] || '').toLowerCase()
+						return networkToChain.get(prefix) ?? allChains.find(c => c.networkId?.toLowerCase() === prefix)?.id
+					})
+					const cacheConfirmed = new Set([...confirmedChainIds].filter(id => !faulted.has(id)))
+					const unconfirmedObservationChainIds = new Set<string>()
+					const snapshotDevice = engine.getDeviceState().deviceId
+					const previousSnapshots = !engine.isPassphraseWallet && snapshotDevice ? getCachedBalances(snapshotDevice)?.balances : undefined
+					for (const result of results) {
+						const previousAt = previousSnapshots?.find(row => row.chainId === result.chainId)?.updatedAt
+						const chain = allChains.find(chain => chain.id === result.chainId)
+						const rows = allEntries.filter((entry: any) => String(entry.caip || '').split('/')[0].toLowerCase() === chain?.networkId?.toLowerCase()
+							|| (entry.networkId && String(entry.networkId).toLowerCase() === chain?.networkId?.toLowerCase()))
+						const fallback = (useNodeForBtc && result.chainId === 'bitcoin') || providerRefresh.providerRefreshPolicy === 'on-demand' ? readStartedAt : previousAt
+						result.updatedAt = (cacheConfirmed.has(result.chainId) ? portfolioObservedAt(rows, readStartedAt, fallback) : previousAt) ?? 0
+						if (cacheConfirmed.has(result.chainId) && ((previousAt && result.updatedAt < previousAt)
+							|| (!(useNodeForBtc && result.chainId === 'bitcoin') && providerRefresh.providerRefreshPolicy === 'cache-only' && portfolioObservedAt(rows, readStartedAt) === undefined))) {
+							unconfirmedObservationChainIds.add(result.chainId)
+							cacheConfirmed.delete(result.chainId)
+						}
 					}
 
 					// Cache balances (fire-and-forget).
@@ -7232,21 +7404,14 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						if (results.length > 0 && !engine.isPassphraseWallet) {
 							// A chain Pioneer itself reports failed or stale is not confirmed for
 							// the cache: a forced write would clear its pending tx mark (H3).
-							const faulted = portfolioFaultChainIds(portfolioMeta, caip => {
-								const prefix = (caip.split('/')[0] || '').toLowerCase()
-								return networkToChain.get(prefix) ?? allChains.find(c => c.networkId?.toLowerCase() === prefix)?.id
-							})
-							const cacheConfirmed = new Set([...confirmedChainIds].filter(id => !faulted.has(id)))
 							setCachedBalances(deviceId, results.filter(r => (r.chainId !== 'bitcoin' && !utxoChains.some(c => c.id === r.chainId)) || cacheConfirmed.has(r.chainId)), cacheConfirmed, readStartedAt)
 							rectifyWallet(deviceId, results.filter(r => r.chainId !== 'bitcoin' || btcConfirmed))
 						}
 					} catch { /* never block on cache failure */ }
 
 					// ── Fault disclosure ──
-					// Surface degraded (fresh fetch failed) + stale (>5min cache) chains to the
-					// webview through the existing pioneer-error banner channel. severity 'warning'
-					// renders a soft banner (data shown but suspect); 'none' clears it. Hard
-					// failures still throw → severity 'error' in the catch below.
+					// Keep complete trust metadata for Audit. The renderer reserves the
+					// banner for actual failures; ordinary cached/stale data stays quiet.
 					try {
 						const caipToChain = (caip: string) => {
 							const prefix = (caip.split('/')[0] || '').toLowerCase()
@@ -7260,7 +7425,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						}
 						// Chains whose every pubkey landed in a failed chunk (timeout/error) are
 						// degraded from the vault's view even when the server meta is clean.
-						const chunkDegradedIds = [...new Set(pubkeys.map(p => p.chainId))].filter(id => !confirmedChainIds.has(id))
+						const chunkDegradedIds = [...new Set([...pubkeys.map(p => p.chainId), ...providerDegradedChainIds])].filter(id => !confirmedChainIds.has(id))
 						const degradedChains = [...new Set([...chunkDegradedIds.map(chainSymbol), ...portfolioMeta.failures.map(f => caipToName(f.caip))])].filter(Boolean)
 						const staleChains = [...new Set(portfolioMeta.staleChains.map(s => caipToName(s.caip)))].filter(Boolean)
 						// chainId-granular fault sets for the Audit wizard (symbol arrays above
@@ -7268,9 +7433,12 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						// unresolvedFaultCount = faults that couldn't be mapped to a known chain,
 						// so an unmappable fault still forbids a false "all clear".
 						const degradedChainIds = new Set<string>(chunkDegradedIds)
-						const staleChainIds = new Set<string>()
+						const staleChainIds = new Set<string>(unconfirmedObservationChainIds)
+						const pendingTx = !engine.isPassphraseWallet && snapshotDevice ? getCachedBalances(snapshotDevice)?.balances.filter(row => row.txPending) || [] : []
+						for (const row of pendingTx) staleChainIds.add(row.chainId)
 						let unresolvedFaultCount = 0
-						for (const f of portfolioMeta.failures) { const ch = caipToChain(f.caip); if (ch) degradedChainIds.add(ch.id); else unresolvedFaultCount++ }
+						let unresolvedErrorCount = 0
+						for (const f of portfolioMeta.failures) { const ch = caipToChain(f.caip); if (ch) degradedChainIds.add(ch.id); else { unresolvedFaultCount++; unresolvedErrorCount++ } }
 						for (const s of portfolioMeta.staleChains) { const ch = caipToChain(s.caip); if (ch) staleChainIds.add(ch.id); else unresolvedFaultCount++ }
 						for (const result of results) {
 							result.syncState = degradedChainIds.has(result.chainId)
@@ -7278,17 +7446,18 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 								: staleChainIds.has(result.chainId)
 									? 'stale'
 									: 'confirmed'
+							if (pendingTx.some(row => row.chainId === result.chainId)) result.txPending = true
 							const directAssets = directlyConfirmedAssetsByChain.get(result.chainId)
 							if (directAssets?.size) result.confirmedAssetCaips = [...directAssets]
 						}
-						const staleMinutes = portfolioMeta.staleChains.length
-							? Math.floor(Math.max(...portfolioMeta.staleChains.map(s => s.ageMs || 0)) / 60000)
-							: 0
-						if (degradedChains.length > 0 || staleChains.length > 0) {
+						const staleAges = portfolioMeta.staleChains.map(s => s.ageMs).filter(age => Number.isFinite(age) && age >= 0)
+						const staleMinutes = staleAges.length ? Math.floor(Math.max(...staleAges) / 60000) : undefined
+						const checkedChainIds = [...new Set([...pubkeys.map(p => p.chainId), ...results.map(result => result.chainId)])]
+						if (degradedChains.length > 0 || staleChainIds.size > 0 || unresolvedFaultCount > 0) {
 							console.warn(`[getBalances] Fault: degraded=[${degradedChains.join(', ')}] stale=[${staleChains.join(', ')}] (${staleMinutes}m)`)
-							rpc.send['pioneer-error']({ message: '', url: getPioneerApiBase(), severity: 'warning', degradedChains, staleChains, staleMinutes, degradedChainIds: [...degradedChainIds], staleChainIds: [...staleChainIds], unresolvedFaultCount })
+							sendPortfolioFault({ message: '', url: getPioneerApiBase(), severity: 'warning', degradedChains, staleChains, staleMinutes, degradedChainIds: [...degradedChainIds], staleChainIds: [...staleChainIds], unresolvedFaultCount, unresolvedErrorCount, checkedChainIds, fullSnapshot: true })
 						} else {
-							rpc.send['pioneer-error']({ message: '', url: getPioneerApiBase(), severity: 'none' })
+							sendPortfolioFault({ message: '', url: getPioneerApiBase(), severity: 'none', checkedChainIds, fullSnapshot: true })
 						}
 					} catch { /* webview not ready */ }
 				} catch (e: any) {
@@ -7313,6 +7482,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				if (inventoryEpoch === activitySessionEpoch && inventoryWallet === engine.wallet) publishWalletWatchPubkeys(pubkeys, currentBalanceRefreshScope())
 
 				return results
+                })
 			},
 
 			getBalance: getChainBalance,
@@ -8326,8 +8496,9 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				await ensureZcashDeviceMatch(account, true)
 				await ensureZcashScanFresh()
 				// Transparent shielding uses standard ECDSA (secp256k1) for transparent inputs
-				// + Orchard RedPallas for the shielded output. The ECDSA part works on any
-				// firmware; the Orchard part needs >= 7.15.0 (checked by zcashShieldedInit).
+				// + Orchard RedPallas for the shielded output. Zcash capability requires
+				// firmware >= 7.17.0 and the sidecar; private-pool Nu7 sends retain
+				// separate consensus-branch qualification guards.
 				const zcashDef = CHAINS.find(c => c.id === 'zcash-shielded')
 				if (!zcashDef) {
 					throw new Error('Zcash shielded chain definition not found')
@@ -9194,21 +9365,21 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					}
 					console.log(`[generateReport] btcXpubs from BtcAccountManager: ${btcXpubs.length}`)
 				}
-				// Fallback: check cached_pubkeys DB for BTC xpubs
-				if (!btcXpubs || btcXpubs.length === 0) {
-					const cachedPks = getCachedPubkeys(deviceId)
-					const btcPks = cachedPks.filter(p => p.chainId === 'bitcoin' && p.xpub)
-					if (btcPks.length > 0) {
-						btcXpubs = btcPks.map(p => ({
-							xpub: p.xpub,
-							scriptType: p.scriptType || 'p2wpkh',
-							path: p.path ? p.path.split('/').filter(Boolean).map(s => parseInt(s.replace("'", ''), 10)) : [],
-						}))
-						console.log(`[generateReport] btcXpubs from cached_pubkeys DB: ${btcXpubs.length}`)
-					} else {
-						console.warn('[generateReport] No BTC xpubs found anywhere — BTC sections will be skipped')
-					}
+				// Add every BTC xpub this device has cached (accounts added in earlier
+				// sessions), so the report covers the whole wallet, not just the
+				// accounts loaded right now.
+				const PURPOSE: Record<string, number> = { p2pkh: 44, 'p2sh-p2wpkh': 49, p2wpkh: 84, p2tr: 86 }
+				// The cache only holds the no-passphrase wallet — never mix it into a passphrase wallet's report.
+				const cachedBtc = engine.isPassphraseWallet ? [] : getCachedPubkeys(deviceId).filter(p => p.chainId === 'bitcoin' && p.xpub && PURPOSE[p.scriptType])
+				btcXpubs = btcXpubs || []
+				for (const p of cachedBtc) {
+					if (btcXpubs.some(x => x.xpub === p.xpub && x.scriptType === p.scriptType)) continue
+					let account = 0
+					try { const b = bs58.decode(p.xpub); account = new DataView(b.buffer, b.byteOffset).getUint32(9) & 0x7FFFFFFF } catch {}
+					btcXpubs.push({ xpub: p.xpub, scriptType: p.scriptType, path: [PURPOSE[p.scriptType] | 0x80000000, 0x80000000, account | 0x80000000] })
 				}
+				console.log(`[generateReport] btcXpubs total (loaded + cached): ${btcXpubs.length}`)
+				if (btcXpubs.length === 0) console.warn('[generateReport] No BTC xpubs found anywhere — BTC sections will be skipped')
 
 				const deviceLabel = engine.getDeviceState().label || 'KeepKey'
 
@@ -9947,7 +10118,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					if (!networkOn(chain.id)) return false // turned off in the network picker
 					return isChainSupported(chain, fwVersion)
 				})
-				return { balances: filteredBalances, updatedAt: result.updatedAt, staleReasons: staleReasons.length > 0 ? staleReasons : undefined }
+				return { balances: filteredBalances, updatedAt: oldestBalanceUpdatedAt(filteredBalances), staleReasons: staleReasons.length > 0 ? staleReasons : undefined }
 			},
 
 			// ── Watch-only mode ─────────────────────────────────────
@@ -9955,6 +10126,8 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			// user's own node, exactly like a connected Bitcoin-only device.
 			watchOnlySetView: async (params): Promise<{ bitcoinOnly: boolean }> => {
 				const snap = params?.active ? (params.deviceId ? getDeviceSnapshotById(params.deviceId) : getLatestDeviceSnapshot()) : null
+				watchOnlyViewRevision++
+				watchOnlyViewDeviceId = snap?.deviceId ?? null
 				watchOnlyViewBtcOnly = !!snap && bitcoinOnlyWatchOnlyScope(false, snap.featuresJson)
 				setBtcNodeWatchOnlyEligible(watchOnlyViewBtcOnly)
 				return { bitcoinOnly: watchOnlyViewBtcOnly }
@@ -9976,7 +10149,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					snap.featuresJson,
 				)
 				// Cached rows, never live: the UI shows them as cached with their age.
-				return result ? bitcoinOnlyBalanceList(result.balances, bitcoinOnly).map(b => ({ ...b, syncState: 'stale' as const })) : null
+				return result ? bitcoinOnlyBalanceList(result.balances, bitcoinOnly).map(b => ({ ...b, syncState: b.syncState === 'degraded' ? 'degraded' as const : 'stale' as const })) : null
 			},
 			// Re-fetch watch-only balances from the selected backend using public keys reconstructed
 			// from cache — NO device required. Self-contained: deliberately does NOT
@@ -9986,6 +10159,8 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			// read-only snapshot view; do not use this path for signing/sends.
 			refreshWatchOnlyBalances: async (params) => {
 				requireOnline('watch-only balance refresh')
+				const readStartedAt = Date.now()
+				const viewRevision = watchOnlyViewRevision
 				const { getDeviceSnapshotById } = await import('./db')
 				const snap = params?.deviceId
 					? getDeviceSnapshotById(params.deviceId)
@@ -10002,7 +10177,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				const cached = getCachedBalances(deviceId)
 				const cachedBalances = bitcoinOnlyBalanceList(cached?.balances ?? [], snapshotBitcoinOnly)
 				const { pubkeys, incomplete } = watchOnlyPortfolioKeys(allChains, cachedBalances, getCachedPubkeys(deviceId))
-				if (pubkeys.length === 0) return cachedBalances.map(b => ({ ...b, syncState: 'stale' as const }))
+				if (pubkeys.length === 0) return cachedBalances.map(b => ({ ...b, syncState: b.syncState === 'degraded' ? 'degraded' as const : 'stale' as const }))
 
 				// 3. networkId → chainId lookup (non-hidden takes priority)
 				const networkToChain = new Map<string, string>()
@@ -10023,7 +10198,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					mapWithConcurrency(pubkeyChunks, PIONEER_PORTFOLIO_MAX_CONCURRENCY, async (chunk, i) => {
 						try {
 							const resp = await withTimeout(
-								pioneer!.GetPortfolioBalances({ pubkeys: chunk.map(p => ({ caip: p.caip, pubkey: p.pubkey })), includeDefi: true }, { forceRefresh: true }),
+								pioneer!.GetPortfolioBalances({ pubkeys: chunk.map(p => ({ caip: p.caip, pubkey: p.pubkey })), includeDefi: true, ...paidProviderRefreshOptions(params?.refreshReason ?? 'manual') }, { forceRefresh: true }),
 								PIONEER_PORTFOLIO_CHUNK_TIMEOUT_MS,
 								`watch-only chunk ${i + 1}/${pubkeyChunks.length}`
 							)
@@ -10041,8 +10216,10 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				// Chains whose chunk failed must NOT be confirmed below — otherwise a
 				// transient Pioneer error would write a 0 over good cached balances.
 				const failedChainIds = new Set<string>(incomplete)
+				const errorChainIds = new Set<string>()
 				for (let i = 0; i < chunkResults.length; i++) {
 					if (chunkResults[i].failed || chunkResults[i].meta?.degraded || chunkResults[i].meta?.failures?.length || chunkResults[i].meta?.staleChains?.length) for (const p of pubkeyChunks[i]) failedChainIds.add(p.chainId)
+					if (chunkResults[i].failed || chunkResults[i].meta?.degraded || chunkResults[i].meta?.failures?.length) for (const p of pubkeyChunks[i]) errorChainIds.add(p.chainId)
 				}
 				let nodeFiatState: ChainBalance['fiatValueState']
 				if (nodeBtc.length) {
@@ -10059,6 +10236,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					} catch (err: any) {
 						console.warn(`[refreshWatchOnlyBalances] BTC via ${btcBackend.kind} failed:`, err?.message || err)
 						failedChainIds.add('bitcoin')
+						errorChainIds.add('bitcoin')
 					}
 				}
 
@@ -10115,6 +10293,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 
 				// Sum every requested owner once, and attach chain-level tokens/DeFi once.
 				const results = watchOnlyNativeBalances(pubkeys, pureNatives, failedChainIds)
+				const latestCachedBalances = bitcoinOnlyBalanceList(getCachedBalances(deviceId)?.balances ?? cachedBalances, snapshotBitcoinOnly)
 				for (const row of results) {
 					if (row.chainId === 'bitcoin' && nodeBtc.length) row.fiatValueState = nodeFiatState
 					row.tokens = tokensByChainId.get(row.chainId)
@@ -10122,18 +10301,42 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					row.balanceUsd += (row.tokens?.reduce((sum, t) => sum + t.balanceUsd, 0) || 0)
 						+ (row.defiPositions?.reduce((sum, p) => sum + (p.balanceUsd || 0), 0) || 0)
 					row.syncState = 'confirmed'
-					row.updatedAt = Date.now()
+					const chain = allChains.find(chain => chain.id === row.chainId)
+					const rows = allEntries.filter((entry: any) => String(entry.caip || '').split('/')[0].toLowerCase() === chain?.networkId?.toLowerCase()
+						|| (entry.networkId && String(entry.networkId).toLowerCase() === chain?.networkId?.toLowerCase()))
+					const fallback = (row.chainId === 'bitcoin' && nodeBtc.length) || paidProviderRefreshOptions(params?.refreshReason ?? 'manual').providerRefreshPolicy === 'on-demand'
+						? readStartedAt : cachedBalances.find(balance => balance.chainId === row.chainId)?.updatedAt
+					row.updatedAt = portfolioObservedAt(rows, readStartedAt, fallback) ?? 0
+					const previousAt = latestCachedBalances.find(balance => balance.chainId === row.chainId)?.updatedAt
+					if (previousAt && row.updatedAt < previousAt) failedChainIds.add(row.chainId)
+					if (!(row.chainId === 'bitcoin' && nodeBtc.length)
+						&& paidProviderRefreshOptions(params?.refreshReason ?? 'manual').providerRefreshPolicy === 'cache-only'
+						&& portfolioObservedAt(rows, readStartedAt) === undefined) failedChainIds.add(row.chainId)
 				}
 				// Never pass partial positives to the guarded DB upsert: it accepts them.
 				const confirmedResults = results.filter(r => !failedChainIds.has(r.chainId))
-				setCachedBalances(deviceId, confirmedResults, new Set(confirmedResults.map(r => r.chainId)))
+				setCachedBalances(deviceId, confirmedResults, new Set(confirmedResults.map(r => r.chainId)), readStartedAt)
 				for (const row of confirmedResults) {
 					for (const part of row.breakdown || []) {
 						saveCachedPubkey(deviceId, row.chainId, part.path || part.xpub, part.xpub, '', part.scriptType, part.balance, part.balanceUsd, true)
 					}
 				}
-				const merged = new Map<string, ChainBalance>(cachedBalances.map(b => [b.chainId, { ...b, syncState: 'stale' as ChainBalance['syncState'] }]))
+				const merged = new Map<string, ChainBalance>(latestCachedBalances.map(b => [b.chainId, { ...b, syncState: b.syncState === 'degraded' ? 'degraded' as const : 'stale' as const }]))
 				for (const row of confirmedResults) merged.set(row.chainId, row)
+				// A saved-wallet request can finish after switching views. Its cache
+				// belongs to that wallet, but its notice must not reach the new view.
+				if (viewRevision === watchOnlyViewRevision && watchOnlyViewDeviceId === deviceId) {
+					try {
+						const staleChainIds = [...failedChainIds].filter(id => !errorChainIds.has(id))
+						const labels = (ids: Iterable<string>) => [...ids].map(id => allChains.find(chain => chain.id === id)?.symbol || id)
+						sendPortfolioFault({
+							message: '', url: getPioneerApiBase(), severity: failedChainIds.size ? 'warning' : 'none', fullSnapshot: true,
+							checkedChainIds: [...new Set(pubkeys.map(row => row.chainId))],
+							degradedChainIds: [...errorChainIds], degradedChains: labels(errorChainIds),
+							staleChainIds, staleChains: labels(staleChainIds), unresolvedFaultCount: 0, unresolvedErrorCount: 0,
+						})
+					} catch { /* webview not ready */ }
+				}
 				return [...merged.values()]
 			},
 			getWatchOnlyPubkeys: async (params) => {
@@ -10512,6 +10715,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			// Signs with the exact found path — no xpub/account machinery, nothing
 			// persisted (hidden-wallet safe). Two-step: dryRun quotes, then signs.
 			auditSweepPath: async (params) => {
+					rejectUnsupportedZcashSweep(params?.chainId)
 				if (!engine.wallet) throw new Error('No device connected')
 				if (engine.getDeviceState().state !== 'ready') throw new Error('Device not ready')
 				const chain = getAllChains().find(c => c.id === params.chainId)
@@ -11232,9 +11436,7 @@ udevadm trigger --subsystem-match=usb --attr-match=idVendor=2b24 || udevadm trig
 					if (!resp.ok) throw new Error(`GitHub API ${resp.status}`)
 
 					const releases = await resp.json() as Array<{ tag_name: string; prerelease: boolean; draft: boolean }>
-					const candidate = preReleaseUpdates
-						? releases.find(r => !r.draft)
-						: releases.find(r => !r.draft && !r.prerelease)
+					const candidate = selectDesktopUpdateRelease(releases, preReleaseUpdates)
 
 					if (candidate) {
 						const remoteVer = candidate.tag_name.replace(/^v/, '')
@@ -11295,15 +11497,14 @@ udevadm trigger --subsystem-match=usb --attr-match=idVendor=2b24 || udevadm trig
 			// WebView (it stays true after wifi drops). Any HTTP response = online;
 			// a thrown fetch (DNS/socket/timeout) = offline. Skipped by the client
 			// when offline mode is on, so this never fires in airplane mode.
-			pingPioneer: async () => {
-				if (offlineMode) return { online: false }
-				try {
-					await fetch(getPioneerApiBase(), { method: 'HEAD', signal: AbortSignal.timeout(4000) })
-					return { online: true }
-				} catch {
-					return { online: false }
-				}
-			},
+            pingPioneer: async () => {
+                if (offlineMode) return { online: false }
+                const result = await probeNetworkReachability(getPioneerApiBase())
+                networkProbes.push(result); if(networkProbes.length>40)networkProbes.shift()
+                if(!result.online)console.warn('[connectivity]',JSON.stringify(result))
+                return result
+            },
+
 			// ── REST API UI-active gate ───────────────────────────────
 			// The WebView calls uiSetActive(true) on mount and uiSetActive(false)
 			// before unload, plus a periodic heartbeat. Without a fresh heartbeat,
@@ -11325,6 +11526,12 @@ udevadm trigger --subsystem-match=usb --attr-match=idVendor=2b24 || udevadm trig
 				scope: () => ({ wallet: engine.wallet, epoch: activitySessionEpoch, seed: engine.currentSeedEthAddress }),
 				locked: () => engine.isLocked,
 				run: (action, options) => engine.withDeviceOperation(action, { ...options, rejectIfBusy: true, ...(options.unlock ? { origin: 'desktop' as const } : {}) }),
+				preflight: (method, params) => {
+					if (!requiresNu7DeviceRpc(method, params)) return
+					const qualified = qualifiedNu7Wallet(engine.wallet)
+					preflightNu7DeviceRpc(method, params, engine.getDeviceState().firmwareVersion,
+						qualified && getZcashNu7Support().available, qualified)
+				},
 			}))),
 			messages: {},
 	},
@@ -11456,17 +11663,18 @@ engine.on('state-change', (state) => {
 	// Auto-disable advanced features if firmware doesn't support them
 	if (state.state === 'ready') {
 		const fw = state.firmwareVersion
-		// Zcash + Hive are capabilities, not user toggles. Both require firmware
-		// >= 7.15.0; Zcash privacy additionally requires the native sidecar to be
-		// present in this app build. The setting row mirrors the derived value so
+		// Zcash + Hive are capabilities, not user toggles. Zcash requires firmware
+		// >= 7.17.0; Hive requires >= 7.15.0. Zcash also needs its native sidecar
+		// in this app build. The setting row mirrors the derived value so
 		// the getSetting() gates in rest-api.ts read the same answer.
 		const has715 = !bitcoinOnly && !!fw && versionCompare(fw, '7.15.0') >= 0
+		const hasZcashFirmware = !bitcoinOnly && !!fw && versionCompare(fw, ZCASH_NU7_MIN_FIRMWARE) >= 0
 		const zcashSidecarBinary = findZcashCliBinary()
-		const hasZcashPrivacy = has715 && supportsZcashPrivacyBuild(fw, zcashSidecarBinary)
+		const hasZcashPrivacy = hasZcashFirmware && supportsZcashPrivacyBuild(fw, zcashSidecarBinary)
 		if (zcashPrivacyEnabled !== hasZcashPrivacy) {
 			zcashPrivacyEnabled = hasZcashPrivacy
 			setSetting('zcash_privacy_enabled', hasZcashPrivacy ? '1' : '0')
-			const reason = !has715
+			const reason = !hasZcashFirmware
 				? `firmware ${fw || 'unknown'}`
 				: 'compatible zcash-cli sidecar missing from this build'
 			console.log(`[settings] Zcash privacy auto-${hasZcashPrivacy ? 'enabled' : 'disabled'} — ${reason}`)
@@ -11985,11 +12193,7 @@ Updater.localInfo.channel().then(ch => {
 				}
 
 				const releases = await resp.json() as Array<{ tag_name: string; prerelease: boolean; draft: boolean }>
-				// Pre-release channel: first non-draft release (includes pre-releases)
-				// Standard channel: first non-draft, non-prerelease release
-				const candidate = preReleaseUpdates
-					? releases.find(r => !r.draft)
-					: releases.find(r => !r.draft && !r.prerelease)
+				const candidate = selectDesktopUpdateRelease(releases, preReleaseUpdates)
 
 				if (!candidate) {
 					console.log('[Vault] Background update check: no suitable release found')
@@ -12161,8 +12365,16 @@ function cleanupAndQuit() {
 	try { setUiActive(false, null) } catch {}
 	postTxBalances.clear()
 	stopActiveWalletWatches()
-	engine.stop()
-	Utils.quit()
+	// Let an already queued encrypted balance observation reach disk on normal
+	// close/reopen, while the existing force-exit timer still bounds cleanup.
+	void (async () => {
+		let timer: ReturnType<typeof setTimeout> | undefined
+		try {
+			await Promise.race([moneroWallet?.flushBalanceCache() ?? Promise.resolve(),
+				new Promise<void>(resolve => { timer = setTimeout(resolve, 1500) })])
+		} catch { /* Secure-storage failure must not prevent quitting. */ }
+		finally { clearTimeout(timer); engine.stop(); Utils.quit() }
+	})()
 }
 
 // Quit the app when the main window is closed

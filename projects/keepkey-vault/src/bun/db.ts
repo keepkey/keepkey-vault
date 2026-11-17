@@ -22,6 +22,7 @@ import type { SignedTxReview } from '../shared/tx-clearsign'
 import type { VerifiedClearSignArtifact } from './clearsign-artifact-import'
 import { configureClearSignArtifactSnapshots } from './clearsign-artifact-resolver'
 import { configureClearSignProviders, ensureClearSignProviderTable, listClearSignProviders } from './clearsign-providers'
+import { oldestBalanceUpdatedAt } from '../shared/balance-cache-policy'
 
 const SCHEMA_VERSION = '10'
 
@@ -711,9 +712,7 @@ export function getCachedBalances(deviceId: string): { balances: ChainBalance[];
       'SELECT chain_id, symbol, balance, balance_usd, address, tokens_json, defi_positions_json, breakdown_json, updated_at, tx_after FROM balances WHERE device_id = ?'
     ).all(deviceId) as Array<{ chain_id: string; symbol: string; balance: string; balance_usd: number; address: string; tokens_json: string | null; defi_positions_json: string | null; breakdown_json: string | null; updated_at: number; tx_after: number | null }>
     if (!rows || rows.length === 0) return null
-    let maxUpdatedAt = 0
     const balances = rows.map(r => {
-      if (r.updated_at > maxUpdatedAt) maxUpdatedAt = r.updated_at
       const entry: ChainBalance = {
         chainId: r.chain_id,
         symbol: r.symbol,
@@ -723,7 +722,10 @@ export function getCachedBalances(deviceId: string): { balances: ChainBalance[];
         updatedAt: r.updated_at,
       }
       // A broadcast after this row: the figure predates it, so never "synced".
-      if (r.tx_after != null) entry.syncState = 'stale'
+      if (r.tx_after != null) {
+        entry.syncState = 'stale'
+        entry.txPending = true
+      } else if (!(r.updated_at > 0)) entry.syncState = 'degraded'
       if (r.tokens_json) {
         try { entry.tokens = JSON.parse(r.tokens_json) } catch { /* corrupt JSON, skip tokens */ }
       }
@@ -741,7 +743,7 @@ export function getCachedBalances(deviceId: string): { balances: ChainBalance[];
       entry.nativeBalanceUsd = r.balance_usd - tokenUsdTotal - defiUsdTotal
       return entry
     })
-    return { balances, updatedAt: maxUpdatedAt }
+    return { balances, updatedAt: oldestBalanceUpdatedAt(balances) }
   } catch (e: any) {
     console.warn('[db] getCachedBalances failed:', e.message)
     return null
@@ -754,26 +756,30 @@ export function getCachedBalances(deviceId: string): { balances: ChainBalance[];
 export const TX_SETTLE_MS = 15_000
 const TX_AFTER_CLEAR = `tx_after = CASE WHEN tx_after IS NOT NULL AND ? < tx_after + ${TX_SETTLE_MS} THEN tx_after ELSE NULL END`
 
+// Receipt time is not an observation. Cached/failed responses must not make an
+// existing snapshot younger; a confirmed source timestamp also bounds the read
+// used to clear a transaction mark.
+function balanceObservedAt(balance: ChainBalance, confirmed: boolean, readStartedAt: number): number {
+  if (!confirmed) return 0
+  const source = balance.updatedAt
+  if (source === 0) return 0 // Explicitly unknown source age, including cache-only responses.
+  if (typeof source === 'number' && Number.isFinite(source) && source > 0) {
+    return Math.min(source, readStartedAt)
+  }
+  return readStartedAt
+}
+
 // confirmedChainIds: chains where Pioneer returned a real response (even if balance=0).
 // Confirmed entries write unconditionally — a genuine zero overwrites a stale non-zero.
 // Unconfirmed entries (Pioneer failed/timed out for that chunk) keep the existing cached value.
 export function setCachedBalances(deviceId: string, balances: ChainBalance[], confirmedChainIds?: Set<string>, readStartedAt = Date.now()) {
   try {
     if (!db) return
-    const now = Date.now()
-    // Guarded upsert: keep existing non-zero if Pioneer didn't respond for this chain.
+    // A failed read cannot replace any part of an existing trusted snapshot.
     const stmtGuarded = db.prepare(
       `INSERT INTO balances (device_id, chain_id, symbol, balance, balance_usd, address, tokens_json, defi_positions_json, breakdown_json, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-       ON CONFLICT(device_id, chain_id) DO UPDATE SET
-         symbol     = excluded.symbol,
-         address    = CASE WHEN excluded.address != '' THEN excluded.address ELSE address END,
-         balance    = CASE WHEN CAST(excluded.balance_usd AS REAL) > 0 THEN excluded.balance    ELSE balance    END,
-         balance_usd= CASE WHEN CAST(excluded.balance_usd AS REAL) > 0 THEN excluded.balance_usd ELSE balance_usd END,
-         tokens_json= CASE WHEN CAST(excluded.balance_usd AS REAL) > 0 THEN excluded.tokens_json ELSE tokens_json END,
-         defi_positions_json = CASE WHEN CAST(excluded.balance_usd AS REAL) > 0 THEN excluded.defi_positions_json ELSE defi_positions_json END,
-         breakdown_json = CASE WHEN CAST(excluded.balance_usd AS REAL) > 0 THEN COALESCE(excluded.breakdown_json, breakdown_json) ELSE breakdown_json END,
-         updated_at = CASE WHEN CAST(excluded.balance_usd AS REAL) > 0 THEN excluded.updated_at  ELSE updated_at  END`
+       ON CONFLICT(device_id, chain_id) DO NOTHING`
     )
     // Forced upsert: Pioneer confirmed this chain — always write, even if balance=0.
     const stmtForced = db.prepare(
@@ -788,15 +794,18 @@ export function setCachedBalances(deviceId: string, balances: ChainBalance[], co
          defi_positions_json = excluded.defi_positions_json,
          breakdown_json = COALESCE(excluded.breakdown_json, breakdown_json),
          updated_at  = excluded.updated_at,
-         ${TX_AFTER_CLEAR}`
+         ${TX_AFTER_CLEAR}
+       WHERE excluded.updated_at >= balances.updated_at`
     )
     const tx = db.transaction(() => {
       for (const b of balances) {
         const tokensJson = b.tokens && b.tokens.length > 0 ? JSON.stringify(b.tokens) : null
         const defiJson = b.defiPositions && b.defiPositions.length > 0 ? JSON.stringify(b.defiPositions) : null
-        const args = [deviceId, b.chainId, b.symbol, b.balance, b.balanceUsd, b.address, tokensJson, defiJson, b.breakdown ? JSON.stringify(b.breakdown) : null, now] as const
-        if (confirmedChainIds?.has(b.chainId)) {
-          stmtForced.run(...args, readStartedAt)
+        const confirmed = confirmedChainIds?.has(b.chainId) === true
+        const observedAt = balanceObservedAt(b, confirmed, readStartedAt)
+        const args = [deviceId, b.chainId, b.symbol, b.balance, b.balanceUsd, b.address, tokensJson, defiJson, b.breakdown ? JSON.stringify(b.breakdown) : null, observedAt] as const
+        if (confirmed) {
+          stmtForced.run(...args, observedAt)
         } else {
           stmtGuarded.run(...args)
         }
@@ -816,6 +825,7 @@ export function updateCachedBalance(deviceId: string, balance: ChainBalance, for
     if (!db) return false
     const tokensJson = balance.tokens && balance.tokens.length > 0 ? JSON.stringify(balance.tokens) : null
     const defiJson = balance.defiPositions && balance.defiPositions.length > 0 ? JSON.stringify(balance.defiPositions) : null
+    const observedAt = balanceObservedAt(balance, force === true, readStartedAt)
     if (force) {
       db.run(
         `INSERT INTO balances (device_id, chain_id, symbol, balance, balance_usd, address, tokens_json, defi_positions_json, breakdown_json, updated_at)
@@ -829,23 +839,16 @@ export function updateCachedBalance(deviceId: string, balance: ChainBalance, for
            defi_positions_json = excluded.defi_positions_json,
            breakdown_json = COALESCE(excluded.breakdown_json, breakdown_json),
            updated_at  = excluded.updated_at,
-           ${TX_AFTER_CLEAR}`,
-        [deviceId, balance.chainId, balance.symbol, balance.balance, balance.balanceUsd, balance.address, tokensJson, defiJson, balance.breakdown ? JSON.stringify(balance.breakdown) : null, Date.now(), readStartedAt]
+           ${TX_AFTER_CLEAR}
+         WHERE excluded.updated_at >= balances.updated_at`,
+        [deviceId, balance.chainId, balance.symbol, balance.balance, balance.balanceUsd, balance.address, tokensJson, defiJson, balance.breakdown ? JSON.stringify(balance.breakdown) : null, observedAt, observedAt]
       )
     } else {
       db.run(
         `INSERT INTO balances (device_id, chain_id, symbol, balance, balance_usd, address, tokens_json, defi_positions_json, breakdown_json, updated_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-         ON CONFLICT(device_id, chain_id) DO UPDATE SET
-           symbol     = excluded.symbol,
-           address    = CASE WHEN excluded.address != '' THEN excluded.address ELSE address END,
-           balance    = CASE WHEN CAST(excluded.balance_usd AS REAL) > 0 THEN excluded.balance    ELSE balance    END,
-           balance_usd= CASE WHEN CAST(excluded.balance_usd AS REAL) > 0 THEN excluded.balance_usd ELSE balance_usd END,
-           tokens_json= CASE WHEN CAST(excluded.balance_usd AS REAL) > 0 THEN excluded.tokens_json ELSE tokens_json END,
-           defi_positions_json = CASE WHEN CAST(excluded.balance_usd AS REAL) > 0 THEN excluded.defi_positions_json ELSE defi_positions_json END,
-           breakdown_json = CASE WHEN CAST(excluded.balance_usd AS REAL) > 0 THEN COALESCE(excluded.breakdown_json, breakdown_json) ELSE breakdown_json END,
-           updated_at = CASE WHEN CAST(excluded.balance_usd AS REAL) > 0 THEN excluded.updated_at  ELSE updated_at  END`,
-        [deviceId, balance.chainId, balance.symbol, balance.balance, balance.balanceUsd, balance.address, tokensJson, defiJson, balance.breakdown ? JSON.stringify(balance.breakdown) : null, Date.now()]
+         ON CONFLICT(device_id, chain_id) DO NOTHING`,
+        [deviceId, balance.chainId, balance.symbol, balance.balance, balance.balanceUsd, balance.address, tokensJson, defiJson, balance.breakdown ? JSON.stringify(balance.breakdown) : null, observedAt]
       )
     }
     const marked = db.query('SELECT tx_after FROM balances WHERE device_id = ? AND chain_id = ?').get(deviceId, balance.chainId) as { tx_after: number | null } | null

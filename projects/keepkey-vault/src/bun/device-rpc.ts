@@ -7,7 +7,7 @@ const MANAGER_READS = new Set(['getBtcAccounts', 'getEvmAddresses'])
 const DEVICE_ACTIONS = new Set(['btcSignTx', 'btcPsbtSign', 'ethSignTx', 'ethSignMessage', 'ethSignTypedData',
   'cosmosSignTx', 'thorchainSignTx', 'mayachainSignTx', 'osmosisSignTx', 'xrpSignTx', 'solanaSignTx',
   'solanaSignMessage', 'solanaSignOffchainMessage', 'tronSignTx', 'tronSignMessage', 'tronSignTypedHash', 'tonSignTx', 'tonSignMessage', 'hiveSignTx',
-  'addBtcAccount', 'addEvmAddressIndex', 'addUtxoAccount', 'buildTx', 'previewSwapBuild', 'executeSwap', 'btcWatchOnlyShowAddress'])
+  'addBtcAccount', 'addEvmAddressIndex', 'addUtxoAccount', 'buildTx', 'previewSwapBuild', 'executeSwap', 'auditSweepPath', 'btcWatchOnlyShowAddress'])
 interface Scope { wallet: unknown; epoch: number; seed: string | null }
 const same = (a: Scope, b: Scope) => a.wallet === b.wallet && a.epoch === b.epoch && a.seed === b.seed
 
@@ -18,6 +18,7 @@ const same = (a: Scope, b: Scope) => a.wallet === b.wallet && a.epoch === b.epoc
 export function gateDeviceRpc<T extends Record<string, any>>(handlers: T, deps: {
   scope: () => Scope; locked: () => boolean
   run: <R>(action: () => Promise<R>, options: DeviceOperationOptions) => Promise<R>
+  preflight?: (method: string, params: unknown) => void
 }): T {
   let scope = { ...deps.scope() }
   const cache = new Map<string, unknown>()
@@ -33,6 +34,7 @@ export function gateDeviceRpc<T extends Record<string, any>>(handlers: T, deps: 
   return Object.fromEntries(Object.entries(handlers).map(([name, handler]) => {
     if (!PUBLIC_READS.has(name) && !BALANCE_READS.has(name) && !DEVICE_ACTIONS.has(name)) return [name, handler]
     return [name, async (...args: unknown[]) => {
+      if (DEVICE_ACTIONS.has(name)) deps.preflight?.(name, args[0])
       const current = { ...deps.scope() }
       if (!same(scope, current)) { cache.clear(); pendingReads.clear(); scope = current }
       const balanceRead = BALANCE_READS.has(name)

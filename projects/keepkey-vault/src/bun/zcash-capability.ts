@@ -1,10 +1,11 @@
 import { versionCompare } from '../shared/firmware-versions'
+import { ZCASH_NU7_MIN_FIRMWARE } from '../shared/zcash-nu7'
 
-/** Zcash privacy requires both device support and a native sidecar compatible
- * with this app build. Transparent Zcash remains available when this is false. */
+/** Wallet connection/monitoring needs firmware 7.17 and its native sidecar.
+ * Send admission separately checks the qualified Nu7 signer and builder. */
 export function supportsZcashPrivacyBuild(
 	firmwareVersion: string | undefined,
 	sidecarBinary: string | undefined,
 ): boolean {
-	return !!sidecarBinary && !!firmwareVersion && versionCompare(firmwareVersion, '7.15.0') >= 0
+	return !!sidecarBinary && !!firmwareVersion && versionCompare(firmwareVersion, ZCASH_NU7_MIN_FIRMWARE) >= 0
 }

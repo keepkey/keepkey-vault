@@ -1,4 +1,7 @@
 {
+	"degradedTitle": "ไม่สามารถอัปเดตยอดคงเหลือบางรายการได้",
+	"degradedReach": "ไม่สามารถอัปเดต:",
+	"degradedTail": "แสดงยอดคงเหลือล่าสุดที่ทราบหากมีข้อมูล",
 	"supportedChains": "เครือข่ายที่รองรับ",
 	"refreshBalances": "รีเฟรชยอดคงเหลือ",
 	"connectDeviceToRefresh": "เชื่อมต่ออุปกรณ์เพื่อรีเฟรช",
@@ -36,5 +39,12 @@
 	"loadingSync": "กำลังซิงค์ยอดคงเหลือทุกเครือข่าย",
 	"loadingPrices": "กำลังดึงราคาล่าสุด",
 	"tokensCount": "+{{count}} โทเค็น",
-	"dismiss": "ปิดทิ้ง"
+	"dismiss": "ปิดทิ้ง",
+	"syncStage_preparing": "กำลังเตรียมกระเป๋าเงิน",
+	"syncStage_addresses": "กำลังอ่านที่อยู่จากอุปกรณ์",
+	"syncStage_balances": "กำลังตรวจสอบยอดคงเหลือ",
+	"syncStage_finalizing": "กำลังอัปเดตพอร์ตโฟลิโอ",
+	"syncProgressCounts": "{{completed}}/{{total}} · {{percent}}% · {{seconds}}วินาที",
+	"syncProgressElapsed": "ผ่านไป {{seconds}}วินาที",
+	"syncFailedChecks": "ตรวจสอบไม่ได้ {{failed}} รายการ"
 }

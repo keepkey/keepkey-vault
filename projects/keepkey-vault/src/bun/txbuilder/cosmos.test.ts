@@ -28,6 +28,7 @@ function eq(label: string, got: unknown, want: unknown) {
 const sendMsg = (r: any) => r.tx.msg[0]
 
 async function main() {
+  globalThis.fetch = (async () => Response.json({ balances: [{ denom: 'rune', amount: '100000000000' }, { denom: 'tcy', amount: '20000000000' }, { denom: 'x/ruji', amount: '100000000' }] })) as unknown as typeof fetch
   // Native RUNE — denom must stay "rune", type MsgSend, 1.5 → 150000000
   const rune = await buildCosmosTx(pioneer, THOR, { to: FROM, amount: '1.5', fromAddress: FROM })
   eq('RUNE denom stays native', sendMsg(rune).value.amount[0].denom, 'rune')
@@ -46,7 +47,7 @@ async function main() {
 
   // Token MAX — sends full token balance, NO rune fee reserve subtracted
   const max = await buildCosmosTx(pioneer, THOR, { to: FROM, amount: '0', isMax: true, fromAddress: FROM, caip: 'cosmos:thorchain-mainnet-v1/denom:tcy', tokenBalance: '42.5', tokenDecimals: 8 })
-  eq('TCY MAX = full balance, no fee reserve', sendMsg(max).value.amount[0].amount, '4250000000')
+  eq('TCY MAX = full balance, no fee reserve', sendMsg(max).value.amount[0].amount, '20000000000')
 
   // Swap MsgDeposit FROM a bank token — coins asset must be THOR.TCY (not the
   // hardcoded THOR.RUNE) so the network takes TCY, with the swap memo.

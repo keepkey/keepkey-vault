@@ -3,6 +3,8 @@ import { createActiveWalletWatch, ownedWatchKey, refreshWatchedChain, selectOwne
 import type { BalanceRefreshScope } from '../src/bun/post-tx-balance'
 import { utxoAccountScriptPaths } from '../src/bun/chain-scan'
 import { CHAINS } from '../src/shared/chains'
+import type { ChainBalance, RecentActivity } from '../src/shared/types'
+import { BALANCE_CACHE_QUIET_WINDOW_MS } from '../src/shared/balance-cache-policy'
 const ltc = CHAINS.find(chain => chain.id === 'litecoin')!
 const watches = [0, 1].flatMap(account => utxoAccountScriptPaths(ltc, account).map(path => ({ address: `${path.scriptType}-${path.path[0]}-${account}`, networkId: ltc.networkId, chainId: ltc.id, caip: ltc.caip, account: true, path: path.path.join('/') })))
 function harness(refresh?: (hint: any, isCurrent: () => boolean) => Promise<void>) {
@@ -150,4 +152,193 @@ test('foreign replay hints are not accepted and obsolete failed chains do not bl
   expect(watcher.event({ type: 'tx:incoming', data: { watchedAddress: 'foreign', networkId: 'good' } } as any)).toBe(false)
   disabled = true; fail = false; watcher.add([]); timers.shift()!()
   expect(await watcher.flush()).toBe(true); watcher.stop()
+})
+
+const cacheNow = 2 * BALANCE_CACHE_QUIET_WINDOW_MS
+const cachedRow = (patch: Partial<ChainBalance> = {}): ChainBalance => ({
+  chainId: 'litecoin', symbol: 'LTC', address: '', balance: '1', balanceUsd: 10,
+  updatedAt: cacheNow - 60_000, ...patch,
+})
+const activityRow = (patch: Partial<RecentActivity> = {}): RecentActivity => ({
+  id: 'fixture-activity', chainId: 'litecoin', chain: 'LTC', txid: 'fixture-transaction',
+  type: 'send', source: 'scan', status: 'completed', createdAt: cacheNow - 120_000, ...patch,
+})
+function cacheReadHarness(cached: ChainBalance | undefined, rows: RecentActivity[] = []) {
+  const reads: unknown[] = [], order: string[] = [], follows: string[] = [], retries: string[] = [], notices: string[] = []
+  const deps = {
+    now: () => cacheNow,
+    readCachedBalance: (_chainId: string) => cached,
+    readBalance: async (params: { chainId: string; forceRefresh: true }) => {
+      reads.push(params); order.push('balance'); return cachedRow({ syncState: 'confirmed', updatedAt: cacheNow })
+    },
+    scanHistory: async (_chainId: string, _isCurrent: () => boolean) => { order.push('history'); return { rows } },
+    follow: (_chainId: string, txid: string) => { follows.push(txid) },
+    retry: (_chainId: string, txid?: string) => { retries.push(txid ?? '') },
+    onReceive: () => { notices.push('receive') },
+    onActivity: () => { notices.push('activity') },
+  }
+  return { deps, reads, order, follows, retries, notices }
+}
+const catchup = { chainId: 'litecoin', txids: [], catchup: true }
+
+test('reopen catchup retains a recent legacy or zero balance while still catching up history', async () => {
+  for (const balance of ['1', '0']) {
+    const h = cacheReadHarness(cachedRow({ balance }), [activityRow()])
+    await refreshWatchedChain(catchup, h.deps, () => true)
+    expect(h.order).toEqual(['history']); expect(h.reads).toHaveLength(0)
+    expect(h.follows).toEqual([]); expect(h.retries).toEqual([]); expect(h.notices).toEqual([])
+  }
+})
+
+test('unknown, expired, invalidated, degraded or foreign-chain cache never skips the balance read', async () => {
+  for (const cached of [undefined, cachedRow({ updatedAt: undefined }),
+    cachedRow({ updatedAt: cacheNow - BALANCE_CACHE_QUIET_WINDOW_MS }), cachedRow({ syncState: 'stale' }),
+    cachedRow({ syncState: 'degraded' }), cachedRow({ txPending: true }), cachedRow({ balance: 'NaN' }),
+    cachedRow({ chainId: 'bitcoin' })]) {
+    const h = cacheReadHarness(cached)
+    await refreshWatchedChain(catchup, h.deps, () => true)
+    expect(h.order).toEqual(['balance', 'history'])
+    expect(h.reads).toEqual([{ chainId: 'litecoin', forceRefresh: true }])
+  }
+})
+
+test('incoming and confirmed hints refresh even a recent cache and keep their targeted retries', async () => {
+  for (const txid of ['incoming-transaction', 'confirmed-transaction']) {
+    const h = cacheReadHarness(cachedRow())
+    await refreshWatchedChain({ ...catchup, txids: [txid], catchup: false }, h.deps, () => true)
+    expect(h.order).toEqual(['balance', 'history'])
+    expect(h.reads).toEqual([{ chainId: 'litecoin', forceRefresh: true }])
+    expect(h.follows).toEqual([txid]); expect(h.retries).toEqual([txid]); expect(h.notices).toEqual(['activity'])
+  }
+})
+
+test('a real hint coalesced with startup catchup still performs its targeted balance read', async () => {
+  const read = cacheReadHarness(cachedRow())
+  const h = harness((hint, isCurrent) => refreshWatchedChain(hint, read.deps, isCurrent))
+  h.watcher.add(watches); await h.tick()
+  emit(h.leases[0], 'tx:incoming', { address: watches[0].address, networkId: ltc.networkId, txid: 'new-payment', type: 'incoming' })
+  await h.tick()
+  expect(h.refreshed[0].catchup).toBe(false)
+  expect(read.reads).toEqual([{ chainId: 'litecoin', forceRefresh: true }])
+  expect(read.retries).toEqual(['new-payment'])
+  h.watcher.stop()
+})
+
+test('chain activity newer than the cached snapshot refreshes once after history, including failed-fee transactions', async () => {
+  for (const status of ['broadcast', 'completed', 'refunded', 'failed'] as const) {
+    const row = activityRow({ status, createdAt: cacheNow - 1 })
+    const h = cacheReadHarness(cachedRow(), [row, row])
+    await refreshWatchedChain(catchup, h.deps, () => true)
+    expect(h.order).toEqual(['history', 'balance'])
+    expect(h.reads).toEqual([{ chainId: 'litecoin', forceRefresh: true }])
+    expect(h.notices).toEqual(['activity'])
+    expect(h.follows).toEqual(status === 'broadcast' ? [row.txid!] : [])
+    expect(h.retries).toEqual(status === 'broadcast' ? [row.txid!] : [])
+  }
+})
+
+test('old, foreign, sign-only and unidentified history rows cannot invalidate a quiet cache', async () => {
+  const h = cacheReadHarness(cachedRow(), [activityRow(), activityRow({ createdAt: cacheNow - 60_000 }),
+    activityRow({ createdAt: cacheNow, chainId: 'bitcoin' }), activityRow({ createdAt: cacheNow, txid: undefined }),
+    activityRow({ createdAt: NaN }), activityRow({ createdAt: cacheNow, status: 'signed' }),
+    activityRow({ createdAt: cacheNow, status: 'not_sent' })])
+  await refreshWatchedChain(catchup, h.deps, () => true)
+  expect(h.order).toEqual(['history']); expect(h.reads).toEqual([]); expect(h.notices).toEqual([])
+})
+
+test('quiet catchup still rejects failed history and retired wallet scope', async () => {
+  const h = cacheReadHarness(cachedRow())
+  await expect(refreshWatchedChain(catchup, { ...h.deps, scanHistory: async () => ({ rows: [], error: 'history unavailable' }) }, () => true))
+    .rejects.toThrow('history')
+  let current = true
+  await expect(refreshWatchedChain(catchup, { ...h.deps, readCachedBalance: () => { current = false; return cachedRow() } }, () => current))
+    .rejects.toThrow('cancelled')
+  expect(h.order).toEqual([]); expect(h.reads).toEqual([])
+  expect(h.retries).toEqual([])
+})
+
+test('an unavailable cache falls back to the ordinary catchup read instead of hiding history', async () => {
+  const h = cacheReadHarness(cachedRow())
+  await refreshWatchedChain(catchup, { ...h.deps, readCachedBalance: () => { throw new Error('cache unavailable') } }, () => true)
+  expect(h.order).toEqual(['balance', 'history']); expect(h.retries).toEqual([])
+})
+
+test('a stored transaction mark retains one scoped catchup retry when its first balance read fails', async () => {
+  for (const failure of ['throw', 'stale'] as const) {
+    const h = cacheReadHarness(cachedRow({ txPending: true, syncState: 'stale' }))
+    await expect(refreshWatchedChain(catchup, { ...h.deps, readBalance: async () => {
+      if (failure === 'throw') throw new Error('upstream unavailable')
+      return cachedRow({ syncState: 'stale' })
+    } }, () => true)).rejects.toThrow()
+    expect(h.retries).toEqual(['']); expect(h.order).toEqual([]); expect(h.notices).toEqual([])
+  }
+  const expired = cacheReadHarness(cachedRow({ updatedAt: cacheNow - BALANCE_CACHE_QUIET_WINDOW_MS }))
+  await expect(refreshWatchedChain(catchup, { ...expired.deps, readBalance: async () => { throw new Error('upstream unavailable') } }, () => true))
+    .rejects.toThrow('upstream unavailable')
+  expect(expired.retries).toEqual([])
+  let current = true
+  const retired = cacheReadHarness(cachedRow({ txPending: true, syncState: 'stale' }))
+  await expect(refreshWatchedChain(catchup, { ...retired.deps, readBalance: async () => { current = false; throw new Error('retired') } }, () => current))
+    .rejects.toThrow('retired')
+  expect(retired.retries).toEqual([])
+})
+
+test('newer history cannot be acknowledged when its required balance read is unverified', async () => {
+  const h = cacheReadHarness(cachedRow(), [activityRow({ createdAt: cacheNow })])
+  await expect(refreshWatchedChain(catchup, { ...h.deps, readBalance: async () => cachedRow({ syncState: 'stale' }) }, () => true))
+    .rejects.toThrow('freshly verified')
+  expect(h.notices).toEqual([]); expect(h.retries).toEqual(['fixture-transaction'])
+})
+
+test('newer pending history follows confirmation before a failed balance read and keeps its retry', async () => {
+  for (const status of ['broadcast', 'completed', 'failed'] as const) {
+    const h = cacheReadHarness(cachedRow(), [activityRow({ status, createdAt: cacheNow })])
+    await expect(refreshWatchedChain(catchup, { ...h.deps, readBalance: async () => {
+      expect(h.follows).toEqual(status === 'broadcast' ? ['fixture-transaction'] : [])
+      throw new Error('balance unavailable')
+    } }, () => true)).rejects.toThrow('balance unavailable')
+    expect(h.retries).toEqual(['fixture-transaction']); expect(h.notices).toEqual([])
+  }
+})
+
+test('live hints retain retries after balance or history failure, without claiming receipts', async () => {
+  const hint = { ...catchup, catchup: false, txids: ['live-payment'] }
+  for (const stage of ['balance', 'history'] as const) {
+    const h = cacheReadHarness(cachedRow())
+    const deps = stage === 'balance'
+      ? { ...h.deps, readBalance: async () => { throw new Error('upstream failure') } }
+      : { ...h.deps, scanHistory: async () => { throw new Error('upstream failure') } }
+    await expect(refreshWatchedChain(hint, deps, () => true)).rejects.toThrow('upstream failure')
+    expect(h.follows).toEqual(['live-payment']); expect(h.retries).toEqual(['live-payment'])
+    expect(h.notices).toEqual([])
+  }
+})
+
+test('a wallet retired during an activity balance read cannot arm retries for its successor', async () => {
+  for (const catchupOnly of [true, false]) {
+    let current = true
+    const h = cacheReadHarness(cachedRow(), [activityRow({ status: 'broadcast', createdAt: cacheNow })])
+    await expect(refreshWatchedChain({ ...catchup, catchup: catchupOnly, txids: catchupOnly ? [] : ['live-payment'] }, {
+      ...h.deps, readBalance: async () => { current = false; throw new Error('retired') },
+    }, () => current)).rejects.toThrow('retired')
+    expect(h.retries).toEqual([]); expect(h.notices).toEqual([])
+  }
+})
+
+test('a new transaction arriving while quiet catchup history is in flight is drained afterward', async () => {
+  let release!: () => void, first = true
+  const read = cacheReadHarness(cachedRow())
+  const deps = { ...read.deps, scanHistory: async (...args: Parameters<typeof read.deps.scanHistory>) => {
+    if (first) { first = false; await new Promise<void>(resolve => { release = resolve }) }
+    return read.deps.scanHistory(...args)
+  } }
+  const h = harness((hint, isCurrent) => refreshWatchedChain(hint, deps, isCurrent))
+  h.watcher.add(watches); await h.tick(); await h.tick()
+  expect(read.reads).toEqual([])
+  emit(h.leases[0], 'tx:incoming', { address: watches[0].address, networkId: ltc.networkId, txid: 'arrived-during-catchup', type: 'incoming' })
+  await h.tick(); release(); expect(await h.watcher.flush()).toBe(true)
+  expect(h.refreshed.map(hint => hint.catchup)).toEqual([true, false])
+  expect(read.reads).toEqual([{ chainId: 'litecoin', forceRefresh: true }])
+  expect(read.retries).toEqual(['arrived-during-catchup'])
+  h.watcher.stop()
 })

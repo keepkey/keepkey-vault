@@ -417,9 +417,9 @@ function chainDefForCaip(caip: string): ChainDef | undefined {
 /** `assessAvailability` + a device-firmware gate.
  *
  *  A chain can be routable by a swap provider yet require firmware the connected
- *  device doesn't have — e.g. Mayachain pools ZEC, but signing/deriving Zcash
- *  needs firmware ≥ 7.15.0. Without this gate the picker green-lights ZEC on old
- *  firmware and the swap can't actually be honored on-device. Surfaces such
+ *  device doesn't have — e.g. Mayachain pools ZEC, but Vault's Zcash firmware
+ *  floor is 7.17.0. Actual Nu7 signing separately requires a qualified emulator
+ *  and builder. Without this gate the picker offers ZEC on old firmware. Surfaces such
  *  assets as `unsupported_firmware` so the UI dims them with an upgrade hint
  *  instead of offering a swap that will fail at signing.
  *

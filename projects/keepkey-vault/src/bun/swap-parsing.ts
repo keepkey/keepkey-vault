@@ -5,14 +5,16 @@
  * (no Pioneer client, no DB, no server imports).
  */
 import { CHAINS } from '../shared/chains'
+import type { ChainDef } from '../shared/chains'
 import { thorMemoMinimum } from '../shared/swap-risk'
 import { parseCaip } from '../shared/swap-discovery'
 import type { SwapAsset, SwapQuote, RelayTxParams } from '../shared/types'
 import { COIN_MAP_LONG } from '@pioneer-platform/pioneer-coins'
 import { parseSwapFeeDisclosure } from './swap-fees'
-import { isPlainSwapDeposit } from '../shared/swap-deposit-routing'
+import { isPlainSwapDeposit, ZCASH_SWAP_MEMO_UNSUPPORTED } from '../shared/swap-deposit-routing'
 import { extractRelayRequestId } from '../shared/relay-utils'
 import { sameAddress } from '../shared/address-validation'
+import { nativeSwapAssetDecimals } from '../shared/swap-amount'
 
 const TAG = '[swap]'
 
@@ -39,6 +41,9 @@ export const GLOBAL_SWAP_MEMO_MAX_BYTES = 250
 export const UTXO_SWAP_MEMO_MAX_BYTES = 80
 
 export function swapMemoLimitForSource(fromCaip: string): number {
+  // Alpha Zcash's Nu7 PCZT signer rejects OP_RETURN outputs. Filter
+  // these routes before highest-output selection; never strip their memo.
+  if (fromCaip.split('/')[0] === 'bip122:00040fe8ec8471911baa1db1266ea15d') return 0
   return fromCaip.startsWith('bip122:')
     ? UTXO_SWAP_MEMO_MAX_BYTES
     : GLOBAL_SWAP_MEMO_MAX_BYTES
@@ -48,6 +53,7 @@ export function assertSwapMemoFitsSource(memo: string, fromCaip: string): void {
   if (!memo) return
   const byteLength = Buffer.byteLength(memo, 'utf8')
   const limit = swapMemoLimitForSource(fromCaip)
+  if (limit === 0) throw new Error(ZCASH_SWAP_MEMO_UNSUPPORTED)
   if (byteLength <= limit) return
 
   const source = fromCaip.startsWith('bip122:') ? 'UTXO source chain' : 'swap protocol'
@@ -529,9 +535,20 @@ function parseSingleQuote(
 
   // Relay's /quote body (raw) names the order and its payout address. Only a
   // direct Relay quote carries that body; ShapeShift's Relay sub-route does not.
+  const relayDeposits = Array.isArray(raw.steps) ? raw.steps
+    .filter((step: any) => !['approve', 'approval'].includes(String(step.id).toLowerCase()))
+    .flatMap((step: any) => Array.isArray(step.items) ? step.items : [])
+    .map((item: any) => item?.data)
+    .filter((data: any) => typeof data?.to === 'string' && typeof data?.data === 'string') : []
   const relayOrder = /^relay$/i.test(String(integration ?? '')) ? {
     requestId: typeof raw.requestId === 'string' ? raw.requestId : typeof quote.relayRequestId === 'string' ? quote.relayRequestId : undefined,
     recipient: typeof raw.details?.recipient === 'string' ? raw.details.recipient : undefined,
+    // undefined is the legacy shape with no transaction body. A present but
+    // ambiguous body must fail closed, even if its tracking id happens to match.
+    ...(raw.steps === undefined ? {} : { deposit: relayDeposits.length === 1 ? {
+      to: relayDeposits[0].to, data: relayDeposits[0].data,
+      value: relayDeposits[0].value, chainId: relayDeposits[0].chainId,
+    } : null }),
   } : undefined
 
   const nearIntentsTracking = swapper === 'NEAR Intents' ? {
@@ -638,7 +655,7 @@ export function parseAssetsResponse(resp: any): SwapAsset[] {
       symbol: raw.symbol || parsed.symbol,
       name: raw.name || (isToken ? `${parsed.symbol} (${chainDef.coin})` : chainDef.coin),
       chainFamily: chainDef.chainFamily,
-      decimals: raw.decimals ?? chainDef.decimals,
+      decimals: nativeSwapAssetDecimals({ chainId: ourChainId, caip }) ?? raw.decimals ?? chainDef.decimals,
       caip,
       contractAddress: parsed.contractAddress,
       icon: raw.icon || raw.image,
@@ -789,17 +806,31 @@ export function nearIntentsDepositFindings(
  * A Relay order must pay the recipient the user entered (audit v4 H1). Relay's
  * public API has no pre-deposit lookup of an order's recipient (requests/v2 is
  * empty until the deposit lands; v3 needs an API key), so the source is Relay's
- * own /quote body, bound to the deposit calldata by its request id. Returns the
+ * own /quote body, bound to the exact source transaction. Returns the
  * order's recipient; throws when it differs, is missing, or names another order.
  */
-export function assertRelayOrderRecipient(quote: SwapQuote, recipient: string): string {
+export function assertRelayOrderRecipient(quote: SwapQuote, recipient: string, destinationChain?: Pick<ChainDef, 'id' | 'chainFamily'>): string {
   const order = quote.relayOrder
   const funded = extractRelayRequestId(quote.relayTx?.data)
-  if (funded && funded !== order?.requestId?.toLowerCase()) {
+  let matches = true
+  if (order?.deposit !== undefined) {
+    const deposit = order.deposit, tx = quote.relayTx
+    try {
+      matches = !!deposit && !!tx && sameAddress(deposit.to, tx.to, { id: 'evm', chainFamily: 'evm' })
+        && typeof deposit.data === 'string' && deposit.data.toLowerCase() === tx.data.toLowerCase()
+        && Number.isSafeInteger(deposit.chainId) && deposit.chainId === tx.chainId
+        && typeof deposit.value === 'string' && /^(?:\d+|0x[0-9a-f]+)$/i.test(deposit.value)
+        && BigInt(deposit.value) === BigInt(tx.value)
+    } catch { matches = false }
+  } else if (funded) {
+    // Older quote bodies did use the same bytes32 for tracking and deposits.
+    matches = funded === order?.requestId?.toLowerCase()
+  }
+  if (!matches) {
     throw new Error('This Relay quote describes a different Relay order than the deposit it asks you to sign. Do not proceed — get a new quote.')
   }
   const theirs = order?.recipient?.trim()
   if (!theirs) throw new Error('Relay did not say who this order pays out to, so Desktop cannot check the recipient. Do not proceed — get a new quote.')
-  if (!sameAddress(theirs, recipient)) throw new Error(`Relay's order pays out to ${theirs}, which is not the recipient you entered (${recipient}). Do not proceed.`)
+  if (!sameAddress(theirs, recipient, destinationChain)) throw new Error(`Relay's order pays out to ${theirs}, which is not the recipient you entered (${recipient}). Do not proceed.`)
   return theirs
 }

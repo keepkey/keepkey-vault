@@ -7,6 +7,7 @@ import runpy
 import subprocess
 import tempfile
 import unittest
+from unittest import mock
 
 
 SCRIPTS = Path(__file__).resolve().parent
@@ -141,6 +142,70 @@ class MoneroSigningMetadata(unittest.TestCase):
         value = json.loads((output / "monero-tools.json").read_text())
         self.assertEqual(value["daemonRawSha256"], hashlib.sha256(original).hexdigest())
         self.assertEqual(value["daemonSha256"], hashlib.sha256((output / "monerod").read_bytes()).hexdigest())
+
+    def adapter_fixture(self):
+        adapter = self.tools / "monero-host-adapter"
+        adapter.write_bytes(b"PUBLIC-FAKE-READ-ONLY-ADAPTER")
+        artifact = {"filename": adapter.name, "sha256": hashlib.sha256(adapter.read_bytes()).hexdigest(),
+                    "size": adapter.stat().st_size}
+        self.metadata.write_text(json.dumps(dict(self.prepared, hostAdapterSha256=artifact["sha256"])))
+        # Only this isolated helper fixture trusts fake bytes. Production staging
+        # always reads the checked-in reviewed artifact pin; no override is exposed.
+        self.addCleanup(mock.patch.stopall)
+        patch = mock.patch.dict(HELPER["verify_before_signing"].__globals__, {"HOST_ADAPTER_MANIFEST": {
+            "moneroVersion": "0.18.5.4", "files": {"darwin-arm64": artifact}}})
+        patch.start()
+        return adapter, artifact
+
+    def test_adapter_receipt_preserves_reviewed_raw_hash_across_mock_signing(self):
+        adapter, artifact = self.adapter_fixture()
+        HELPER["verify_before_signing"](adapter, self.metadata, self.receipt, "hostAdapter")
+        adapter.write_bytes(adapter.read_bytes() + b"PUBLIC-MOCK-SIGNATURE")
+        HELPER["record_after_signing"](adapter, self.metadata, self.receipt, "hostAdapter")
+        value = json.loads(self.metadata.read_text())
+        self.assertEqual(value["hostAdapterRawSha256"], artifact["sha256"])
+        self.assertEqual(value["hostAdapterSha256"], hashlib.sha256(adapter.read_bytes()).hexdigest())
+        self.assertEqual(value["walletRpcSha256"], self.original)
+        HELPER["verify_before_signing"](adapter, self.metadata, self.receipt, "hostAdapter")
+
+    def test_adapter_metadata_cannot_approve_unreviewed_raw_bytes(self):
+        adapter, _artifact = self.adapter_fixture()
+        adapter.write_bytes(b"PUBLIC-UNREVIEWED-ADAPTER")
+        self.metadata.write_text(json.dumps(dict(self.prepared, hostAdapterSha256=hashlib.sha256(adapter.read_bytes()).hexdigest())))
+        with self.assertRaises(HELPER["ReceiptError"]):
+            HELPER["verify_before_signing"](adapter, self.metadata, self.receipt, "hostAdapter")
+        self.assertFalse(self.receipt.exists())
+
+    def test_adapter_receipt_cannot_be_replayed_as_another_helper(self):
+        adapter, _artifact = self.adapter_fixture()
+        HELPER["verify_before_signing"](adapter, self.metadata, self.receipt, "hostAdapter")
+        with self.assertRaises(HELPER["ReceiptError"]):
+            HELPER["record_after_signing"](adapter, self.metadata, self.receipt, "daemon")
+
+    def test_adapter_staging_uses_disposable_copy_and_records_runtime_hash(self):
+        adapter, artifact = self.adapter_fixture()
+        worker = self.root / "worker"; worker.write_bytes(b"PUBLIC-WORKER")
+        entitlement = self.root / "entitlements.plist"; entitlement.write_text("PUBLIC-ENTITLEMENTS")
+        original = adapter.read_bytes(); output = self.root / "signed"; commands = []
+        def mock_sign(command, check):
+            commands.append(command)
+            if command[1] == "--force":
+                target = Path(command[-1]); target.write_bytes(target.read_bytes() + b"PUBLIC-MOCK-SIGNATURE")
+        HELPER["stage_signed_copies"](worker, self.rpc, self.metadata, output, entitlement, "PUBLIC-IDENTITY", run=mock_sign, adapter=adapter)
+        self.assertEqual(adapter.read_bytes(), original)
+        value = json.loads((output / "monero-tools.json").read_text())
+        self.assertEqual(value["hostAdapterRawSha256"], artifact["sha256"])
+        self.assertEqual(value["hostAdapterSha256"], hashlib.sha256((output / adapter.name).read_bytes()).hexdigest())
+        self.assertEqual(commands[-2][-1], str(output / adapter.name))
+        self.assertEqual(commands[-1][1:3], ["--verify", "--strict"])
+
+    def test_bad_adapter_is_rejected_before_any_mock_signing(self):
+        adapter, _artifact = self.adapter_fixture(); adapter.write_bytes(b"PUBLIC-TAMPERED")
+        worker = self.root / "worker"; worker.write_bytes(b"PUBLIC-WORKER")
+        entitlement = self.root / "entitlements.plist"; entitlement.write_text("PUBLIC-ENTITLEMENTS")
+        with self.assertRaises(HELPER["ReceiptError"]):
+            HELPER["stage_signed_copies"](worker, self.rpc, self.metadata, self.root / "signed", entitlement,
+                "PUBLIC-IDENTITY", run=lambda *args, **kwargs: self.fail("must not sign"), adapter=adapter)
 
     def signing_fixture(self):
         worker = self.tools.parent / "monero-cli"

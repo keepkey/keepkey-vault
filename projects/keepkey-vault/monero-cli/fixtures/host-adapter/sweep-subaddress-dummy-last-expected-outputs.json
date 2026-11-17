@@ -1,0 +1,16 @@
+[
+    {
+        "amount": 6999980000000,
+        "address": "4Ahp23WfMrMFK3wYL2hLWQFGt87ZTeRkufS6JoQZu6MEFDokAQeGWmu9MA3GFq1yVLSJQbKJqVAn9F9DLYGpRzRAEXqAXKM",
+        "is_change": false,
+        "change_major": 0,
+        "change_minor": 0
+    },
+    {
+        "amount": 0,
+        "address": "41kc8R6Camw1KSyQCXduL21jp4LHPaCzqSAiATuAfp8FgzNiXXdSv9scWGacHqGSP114qPcYdAeivWbCntunMU5X9HZZhuq",
+        "is_change": false,
+        "change_major": 0,
+        "change_minor": 0
+    }
+]

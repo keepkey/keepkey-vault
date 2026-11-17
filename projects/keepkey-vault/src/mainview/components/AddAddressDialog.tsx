@@ -5,14 +5,14 @@ import { useTranslation } from "react-i18next"
 import { rpcRequest } from "../lib/rpc"
 import { Z } from "../lib/z-index"
 import { CHAINS } from "../../shared/chains"
-import { validateContactAddress } from "../../shared/address-validation"
+import { validateContactOnNetwork } from "../../shared/address-validation"
 import { AssetIcon } from "./AssetIcon"
 import type { AddressBookEntry } from "../../shared/types"
 
 const NETWORKS = CHAINS.filter(c => !c.hidden)
 
 /** Manually add an external contact: pick a network, paste an address (validated
- *  client-side against that chain), and label it. Saves via the addAddressBook RPC. */
+ *  client-side across that network), and label it. Saves via the addAddressBook RPC. */
 export function AddAddressDialog({ onClose, onAdded }: { onClose: () => void; onAdded?: (e: AddressBookEntry) => void }) {
   const { t } = useTranslation("addressbook")
   const [chainId, setChainId] = useState<string>("")
@@ -26,8 +26,11 @@ export function AddAddressDialog({ onClose, onAdded }: { onClose: () => void; on
   const [error, setError] = useState<string | null>(null)
 
   const chain = useMemo(() => NETWORKS.find(c => c.id === chainId), [chainId])
+  // Hidden chain variants share the same network: Zcash contacts may be
+  // transparent, Sapling or unified. Match addAddressBook's network validation.
+  const networkChains = useMemo(() => chain ? CHAINS.filter(c => c.networkId === chain.networkId) : [], [chain])
   const [ownMatch, setOwnMatch] = useState(false)
-  const formatValid = !!chain && !!address.trim() && validateContactAddress(address, chain).valid
+  const formatValid = !!chain && !!address.trim() && validateContactOnNetwork(address, networkChains).valid
   // Flag the wallet's own addresses: they are already in the book as "own".
   useEffect(() => {
     setOwnMatch(false)
@@ -41,8 +44,8 @@ export function AddAddressDialog({ onClose, onAdded }: { onClose: () => void; on
     return () => { alive = false; clearTimeout(handle) }
   }, [address, chain, formatValid])
   const validation = useMemo(
-    () => (address.trim() && chain ? validateContactAddress(address, chain, ownMatch ? { kind: "own" } : null) : null),
-    [address, chain, ownMatch],
+    () => (address.trim() && chain ? validateContactOnNetwork(address, networkChains, ownMatch ? { kind: "own" } : null) : null),
+    [address, chain, networkChains, ownMatch],
   )
   const canSave = !!chain && !!address.trim() && validation?.valid === true && !saving
 

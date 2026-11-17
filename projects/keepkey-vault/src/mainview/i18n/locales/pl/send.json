@@ -59,6 +59,8 @@
 	"invalidCosmosLength": "Nieprawidłowa długość adresu Cosmos",
 	"invalidCosmosAddress": "Nieprawidłowy adres Cosmos",
 	"invalidXrpAddress": "Nieprawidłowy adres XRP — musi zaczynać się od r",
+	"xrpXAddressNotSupported": "Adresy X nie są jeszcze obsługiwane. Użyj klasycznego adresu zaczynającego się od r i wpisz tag docelowy osobno.",
+	"zcashTexNotSupported": "Na adresy TEX (tex1…) nie można jeszcze płacić z tego ekranu.",
 	"invalidSolanaAddress": "Nieprawidłowy adres Solana — musi mieć 32-44 znaki base58",
 	"invalidTronAddress": "Nieprawidłowy adres Tron — musi zaczynać się od T (34 znaki)",
 	"invalidTonAddress": "Nieprawidłowy adres TON",

@@ -12,6 +12,7 @@
  */
 
 import { sendCommand, isSidecarReady, startSidecar, setCachedFvk, hasFvkLoaded, beginZcashSend, endZcashSend } from "../zcash-sidecar"
+import { ZCASH_NU7_MIN_FIRMWARE } from '../../shared/zcash-nu7'
 import { partialSend, type SplitSendResult } from "./zcash-batching"
 import { getSetting, setSetting } from "../db"
 
@@ -38,7 +39,7 @@ export type DeviceSignWrap = <T>(fn: () => Promise<T>) => Promise<T>
 export async function displayOrchardAddressOnDevice(wallet: any, account: number = 0): Promise<{ address: string }> {
 	if (typeof wallet.zcashDisplayAddress !== "function") {
 		throw new Error(
-			"View on device requires firmware 7.15.0+ with ZcashDisplayAddress and a matching hdwallet wrapper"
+			`View on device requires firmware ${ZCASH_NU7_MIN_FIRMWARE}+ with ZcashDisplayAddress and a matching hdwallet wrapper`
 		)
 	}
 

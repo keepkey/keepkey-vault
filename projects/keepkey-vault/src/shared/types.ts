@@ -600,7 +600,20 @@ export interface MoneroConnectionInfo {
   attempts: Array<{ url: string; state: 'untested' | 'checking' | 'responding' | 'failed'; checkedAt?: string; lastResponseAt?: string; retryAt?: string; error?: string; height?: number; latencyMs?: number }>
 }
 
+/** Display-only prior observation. It never grants live sync, signing, or spendability. */
+export interface MoneroCachedBalance {
+  balanceAtomic: string
+  unlockedBalanceAtomic: string
+  walletHeight: number
+  updatedAt: string
+  spendStateKnown: boolean
+}
+
 export interface MoneroStatus {
+  cachedBalance?: MoneroCachedBalance
+  /** Full signer and verified tools are available; receive addresses require this. */
+  signingReady?: boolean
+  signingPhase?: 'review' | 'inputs' | 'outputs' | 'proving' | 'signing' | 'verifying'
   connection?: MoneroConnectionInfo
   available: boolean
   network: 'mainnet'
@@ -748,7 +761,7 @@ export interface ChainBalance {
    * can double-count until the server provides a position type.
    */
   defiPositions?: DefiPosition[]
-  updatedAt?: number    // unix ms — when this chain's balance was last confirmed non-zero from Pioneer
+  updatedAt?: number    // unix ms of the last balance observation, including a confirmed zero; never cache receipt time
   /**
    * Confidence of the current refresh result. Degraded/stale rows are useful
    * for disclosure, but must not replace a last-known-good balance snapshot
@@ -1642,7 +1655,7 @@ export interface AppSettings {
   moneroNodeMode?: 'local' | 'remote'
   moneroRestoreHeight: number    // earliest block to scan; zero (also unset/legacy) scans from genesis
   moneroPendingBroadcasts?: number  // signed XMR sends whose broadcast is unresolved (kept across off/wipe)
-  zcashPrivacyEnabled: boolean   // read-only capability: auto-ON when firmware >= 7.15.0 and this build includes zcash-cli
+  zcashPrivacyEnabled: boolean   // read-only capability: auto-ON when firmware >= 7.17.0 and this build includes zcash-cli
   hiveEnabled: boolean           // read-only capability: Hive blockchain — auto-ON when firmware >= 7.15.0
   emulatorEnabled: boolean       // feature flag: macOS emulator surface (default OFF — dev-only)
   offlineMode: boolean           // airplane mode: zero outbound network; BTC data ops throw OFFLINE (default OFF)
@@ -2244,7 +2257,13 @@ export interface SwapQuote {
   /** Inferred from the source transaction, not a provider's review claim. */
   executionMode?: 'relay-solver-deposit'
   /** Relay routes: Relay's quote names this payout address for the order. */
-  relayOrder?: { requestId?: string; recipient?: string }
+  relayOrder?: {
+    requestId?: string
+    recipient?: string
+    /** Relay's own source transaction. Its deposit id can differ from the
+     * status API requestId; bind the complete transaction instead. */
+    deposit?: Pick<RelayTxParams, 'to' | 'data' | 'value' | 'chainId'> | null
+  }
   /** Relay routes: the order's payout address, checked equal to the entered recipient. */
   relayOrderRecipient?: string
   minAmountIn?: string       // minimum sell amount for this route (human-readable, in sell asset units)

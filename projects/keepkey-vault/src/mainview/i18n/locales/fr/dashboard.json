@@ -1,4 +1,7 @@
 {
+	"degradedTitle": "Certains soldes n’ont pas pu être actualisés",
+	"degradedReach": "Actualisation impossible :",
+	"degradedTail": "Les derniers soldes connus sont affichés lorsqu’ils sont disponibles.",
 	"supportedChains": "Chaînes prises en charge",
 	"refreshBalances": "Rafraîchir les soldes",
 	"connectDeviceToRefresh": "Connectez l'appareil pour rafraîchir",
@@ -37,5 +40,12 @@
 	"loadingPrices": "Récupération des derniers prix",
 	"tokensCount": "+{{count}} jetons",
 	"dismiss": "Ignorer",
-	"tokensCount_many": "+{{count}} jetons"
+	"tokensCount_many": "+{{count}} jetons",
+	"syncStage_preparing": "Préparation du portefeuille",
+	"syncStage_addresses": "Lecture des adresses de l’appareil",
+	"syncStage_balances": "Vérification des soldes",
+	"syncStage_finalizing": "Mise à jour du portefeuille",
+	"syncProgressCounts": "{{completed}}/{{total}} · {{percent}}% · {{seconds}}s",
+	"syncProgressElapsed": "{{seconds}}s écoulées",
+	"syncFailedChecks": "{{failed}} vérifications indisponibles"
 }

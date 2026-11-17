@@ -72,6 +72,8 @@ export interface BtcBackend {
   feeRate(network: string): Promise<BtcFeeRates>
   broadcast(q: { network: string; rawTxHex: string }): Promise<{ txid: string }>
   rawTxHex(q: { network: string; txid: string }): Promise<string | undefined>
+  /** Decoded tx in Blockbook shape (vin/vout with addresses + sat values) for reports. */
+  txDetail?(q: { network: string; txid: string }): Promise<any>
 
   /** Full account history when the backend indexes addresses (e.g. Blockbook).
    * Bitcoin Core's UTXO-set scan deliberately cannot implement this. */

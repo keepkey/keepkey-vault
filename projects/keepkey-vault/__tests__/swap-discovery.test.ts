@@ -12,6 +12,7 @@
  * Run: bun test __tests__/swap-discovery.test.ts
  */
 import { describe, test, expect } from 'bun:test'
+import { zcashNu7SupportError } from '../src/shared/zcash-nu7'
 import {
   bucketFor,
   compareEntries,
@@ -622,23 +623,25 @@ describe('synthesizeSwapAsset — BEP-20 contract is preserved (regression)', ()
 })
 
 describe('assessWithFirmware — gates provider-routable chains by device firmware', () => {
-  // ZEC native: Mayachain pools it, but Zcash signing/derivation needs fw 7.15.0.
+  // ZEC native: provider routing has a 7.17 firmware floor. Actual Nu7
+  // signing separately requires the reviewed alpha emulator and builder.
   const ZEC = 'bip122:00040fe8ec8471911baa1db1266ea15d/slip44:133'
   // SOL native: routed by THORChain/ShapeShift/ChainFlip, needs fw 7.14.0.
   const SOL = 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp/slip44:501'
   // BTC native: no minFirmware — always swappable.
   const BTC = 'bip122:000000000019d6689c085ae165831e93/slip44:0'
 
-  test('ZEC is swappable only on firmware >= 7.15.0', () => {
-    expect(assessWithFirmware(ZEC, '7.15.0').status).toBe('swappable')
-    expect(assessWithFirmware(ZEC, '7.16.0').status).toBe('swappable')
+  test('ZEC passes the picker firmware gate at 7.17 and later', () => {
+    expect(assessWithFirmware(ZEC, '7.17.0').status).toBe('swappable')
+    expect(assessWithFirmware(ZEC, '7.18.0').status).toBe('swappable')
+    expect(zcashNu7SupportError('7.17.0', true, false)).toContain('alpha emulator')
   })
 
-  test('ZEC is unsupported_firmware on older firmware', () => {
-    const a = assessWithFirmware(ZEC, '7.14.1')
+  test.each(['7.14.1', '7.15.0', '7.16.0', '7.16.99'])('ZEC is unsupported_firmware on %s', firmware => {
+    const a = assessWithFirmware(ZEC, firmware)
     expect(a.status).toBe('unsupported_firmware')
     expect(a.providers).toEqual([])
-    expect(a.reason).toContain('7.15.0')
+    expect(a.reason).toContain('7.17.0')
   })
 
   test('ZEC is gated (fail closed) when firmware version is unknown', () => {

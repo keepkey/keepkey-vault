@@ -31,6 +31,44 @@ test('the main balance is hidden until verified and still respects private mode'
   expect(ui.headerPrivate).toBe('••••••')
 })
 
+test('a saved XMR total is visible at startup, during scanning and offline with its original time', () => {
+  for (const state of ['startup', 'scanning', 'offline']) {
+    expect(ui[`cachedRow_${state}`].balance).toBe('0.08465305 XMR')
+    expect(ui[`cachedHeader_${state}`].balance).toBe('0.08465305')
+    for (const surface of ['Row', 'Header']) {
+      expect(ui[`cached${surface}_${state}`].source).toStartWith('Last known balance · ')
+      expect(ui[`cached${surface}_${state}`].source).toContain('2026')
+    }
+  }
+  expect(ui.cachedRow_scanning.state).toBe('Syncing 50%')
+  expect(ui.cachedRow_offline.state).toBe('Node unreachable')
+})
+
+test('saved zero is labelled as saved; a current scanned zero replaces an older nonzero total', () => {
+  expect(ui.cachedRow_savedZero.balance).toBe('0.0 XMR')
+  expect(ui.cachedRow_savedZero.source).toStartWith('Last known balance · ')
+  expect(ui.cachedHeader_savedZero.balance).toBe('0.0')
+  expect(ui.cachedRow_currentZero).toEqual({ balance: '0.0 XMR', source: '', state: '' })
+  expect(ui.cachedHeader_currentZero).toEqual({ balance: '0.0', source: '' })
+})
+
+test('the startup connection card shows a private-mode-safe saved total without receive or spend controls', () => {
+  expect(ui.cachedConnect_false).toMatchObject({ balance: '0.084653050000 XMR', receiveAddress: false, addressOptions: false, signing: 0 })
+  expect(ui.cachedConnect_false.source).toStartWith('Last known balance · ')
+  expect(ui.cachedConnect_true).toMatchObject({ balance: '••••••', receiveAddress: false, addressOptions: false, signing: 0 })
+})
+
+test('disconnect, wallet changes and purge clear old funds immediately and ignore old status replies', () => {
+  expect(ui.cachedOwnerBenign).toEqual({ balance: '0.08465305', reads: 0 })
+  for (const state of ['Disconnected', 'OldReply', 'Reconnect', 'Hidden', 'Purged']) expect(ui[`cachedOwner${state}`]).toBe('—')
+  expect(ui.cachedOwnerNewReply).toBe('0.09')
+})
+
+test('late connect and key-image verification replies cannot restore funds or deposit controls after a wallet purge', () => {
+  for (const action of ['connect', 'sync']) expect(ui[`lateAction_${action}`]).toEqual({ balance: '—', receiveAddress: false,
+    addressOptions: false, sendForm: false, actions: 1 })
+})
+
 test('local node syncing waits without device prompts or public fallback; a ready node connects automatically', () => {
  expect(ui.nodeWaitCalls).toBe(0)
  expect(ui.nodeWaitText).toContain('Waiting for your node')
@@ -97,6 +135,37 @@ describe('C2: balance states on the page', () => {
   })
 })
 
+test('wallet scanning shows accessible measured progress from the saved start on Receive and Send',()=>{
+ for(const name of ['known','send']){
+  const scan=ui[`walletScan_${name}`]
+  expect(scan).toMatchObject({present:true,role:'progressbar',value:'50',ariaNow:'50',label:'Monero wallet sync progress'})
+  expect(scan.text).toContain('Syncing 50%')
+  expect(scan.text).toContain('Wallet scan height: 3,250,000')
+  expect(scan.text).toContain('Node height (reported): 3,300,000')
+  expect(scan.text).toContain('Scan start block: 3,200,000')
+ }
+})
+
+test('unknown heights, invalid ranges and a caught-up wallet not yet ready use an honest indeterminate bar',()=>{
+ for(const name of ['zeroWallet','unknownTarget','invalidRange','caughtUp']){
+  const scan=ui[`walletScan_${name}`]
+  expect(scan.present).toBe(true)
+  expect(scan.value).toBeNull();expect(scan.ariaNow).toBeNull()
+  expect(scan.text).not.toMatch(/\d+%/)
+  expect(scan.stateText).toContain('Syncing your Monero wallet')
+  expect(scan.stateText).not.toContain("can't be reached")
+ }
+ expect(ui.walletScan_zeroWallet.text).toContain('Wallet scan height: Not reported yet')
+ expect(ui.walletScan_unknownTarget.text).toContain('Node height (reported): Not reported yet')
+})
+
+test('the scan bar disappears when ready and is not shown for an unreachable node',()=>{
+ expect(ui.walletScan_ready.present).toBe(false)
+ expect(ui.walletScan_unreachable.present).toBe(false)
+ expect(ui.walletScan_unreachable.stateText).toContain("The Monero node can't be reached")
+ expect(ui.walletScanCompleted).toEqual({initial:true,remaining:false})
+})
+
 describe('Receive: subaddresses come from the device and verify on it', () => {
   test('stepping to #1 reads it from KeepKey and shows it; Verify shows it on the device', () => {
     expect(ui.subaddressShown).toBe('Subaddress #1')
@@ -143,8 +212,9 @@ describe('C3: Send', () => {
     expect(ui.sameNode).toBe(false)
     expect(ui.discardedNote).toBe('Your discarded send will be checked before another payment.')
   })
-  test('without the signing emulator, Send says receive-only instead of a dead form', () => {
-    expect(ui.receiveOnly).toContain('Receiving works.')
+  test('missing signing infrastructure gives a repair action without a receive-only fallback', () => {
+    expect(ui.signingUnavailable).toContain('Update KeepKey Desktop and firmware, then reconnect.')
+    expect(ui.signingUnavailable).not.toContain('Receiving works')
   })
 })
 
@@ -153,15 +223,16 @@ test('private mode hides the available balance in the send form as well as the h
  expect(ui.sendPrivateText).not.toContain('0.084653050000')
 })
 
-for (const blocker of ['emulator', 'adapter']) {
- test(`a receive-only wallet (${blocker}) verifies its balance without enabling sending`, () => {
-  expect(ui[`receiveOnlyBalance_${blocker}`]).toEqual({checks:1,balance:'0.08465305',blocked:blocker,prepared:false})
+for (const blocker of ['firmware', 'emulator', 'adapter']) {
+ test(`unavailable signing (${blocker}) retains existing funds without offering deposits`, () => {
+  expect(ui[`unavailableBalance_${blocker}`]).toEqual({checks:1,balance:'0.08465305',blocked:true,receiveAddress:false,addressOptions:false,addresses:0,prepared:false})
  })
 }
 
 
 test('remote failover shows the active node, failures and last successful response in collapsed details',()=>{
  expect(ui.connectionDiagnostics.text).toContain('Active node: https://second.example')
+ expect(ui.connectionDiagnostics.text).toContain('Preferred node: https://first.example')
  expect(ui.connectionDiagnostics.text).toContain('Automatic remote failover is on.')
  expect(ui.connectionDiagnostics.text).toContain('The node did not respond within 10 seconds.')
  expect(ui.connectionDiagnostics.text).toContain('Last successful node response')
@@ -169,8 +240,68 @@ test('remote failover shows the active node, failures and last successful respon
  expect(ui.connectionDiagnostics.detailsClosed).toBe(true)
 })
 
+test('failed or still-checking nodes are not described as active, and saved preference is labelled consistently',()=>{
+ for(const state of ['waiting','failed','checking']){
+  expect(ui[`connection_${state}`].info).not.toContain('Active node:')
+  expect(ui[`connection_${state}`].info).toContain('Preferred node: https://first.example')
+  expect(ui[`connection_${state}`].details).toContain('Preferred node: https://first.example')
+  expect(ui[`connection_${state}`].details).not.toContain('Preferred node: https://second.example')
+ }
+})
+
+test('scheduled retry is idle rather than a spinning connection or device approval, and a later scan start warns about history',()=>{
+ const waiting=ui.connection_waiting
+ expect(waiting.headline).toBe('Node unreachable')
+ expect(waiting.spinner).toBe(false)
+ expect(waiting.text).toContain('Automatic retry is scheduled.')
+ expect(waiting.text).not.toContain('Confirm on KeepKey')
+ expect(waiting.text).not.toContain('Vault is checking remote nodes')
+ expect(waiting.details).toContain('Scan start block: 3799129')
+ expect(waiting.details).toContain('Earlier payments may be missing.')
+ expect(ui.connection_checking.headline).toBe('Connecting to a remote node')
+ expect(ui.connection_checking.spinner).toBe(true)
+})
+
+test('a responding node with failed local wallet setup reports the wallet error without a false outage or device prompt',()=>{
+ const failed=ui.walletOpenFailure
+ expect(failed.headline).toBe("Monero couldn't open")
+ expect(failed.spinner).toBe(false)
+ expect(failed.info).toContain('node responded, but Vault could not open the local watch wallet')
+ expect(failed.info).toContain('Responding')
+ expect(failed.info).toContain('Last successful node response')
+ expect(failed.info).toContain('Next retry:')
+ expect(failed.alerts.some((message:string)=>message.includes('could not open the local watch wallet'))).toBe(true)
+ expect(failed.text).not.toContain('The current node did not respond.')
+ expect(failed.text).not.toContain('No remote node is responding.')
+ expect(failed.text).not.toContain('Confirm on KeepKey')
+ expect(failed.text).not.toContain('Vault is checking remote nodes')
+ expect(ui.connection_failed.info).toContain('The current node did not respond.')
+})
+
 
 test('failover rechecks known outputs automatically and preserves a declined device approval',()=>{
  expect(ui.reverifiedAfterFailover).toBe(2)
  expect(ui.declinedAcrossFailover).toBe(1)
+})
+
+
+test('streamed proving progress is shown while keeping the full recipient visible', () => {
+ expect(ui.provingText).toBe('KeepKey is proving the Monero transaction…')
+ expect(ui.provingRecipient).toBe(true)
+})
+
+test('new Monero access requires signing readiness before consent or receive controls',()=>{
+ for(const ready of ['false','undefined']){
+  expect(ui[`unavailableConnect_${ready}`]).toMatchObject({calls:0,addressOptions:false})
+  expect(ui[`unavailableConnect_${ready}`].text).not.toContain('receive payments')
+  expect(ui[`unavailableConnect_${ready}`].text).not.toContain('Confirm on KeepKey')
+ }
+})
+
+test('losing signing readiness revokes the deposit address while retaining funds',()=>{
+ expect(ui.readinessRevoked).toEqual({before:true,addressOptions:false,address:false,balance:'0.084653050000 XMR'})
+})
+
+test('pending transaction recovery remains available without a signer',()=>{
+ expect(ui.recoveryWithoutSigner).toEqual({retries:1,form:false})
 })

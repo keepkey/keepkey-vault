@@ -32,6 +32,7 @@ env:
   EMU_SOURCE_RUN_ID: '42312167033'
   EMU_SOURCE_SHA: 'c19a995b4045704494959f7885fc3ade63c32a19'
   EMU_SOURCE_ARTIFACT: 'certified-emulator-7.17.0-macos13-c19a995b4045704494959f7885fc3ade63c32a19'
+  MONERO_NATIVE_RELEASE_TAG: 'monero-native-20261117'
 
 jobs:
   # Electrobun 2.x devkit (launcher, core, native wrapper, update manager and
@@ -305,6 +306,57 @@ jobs:
           hutch electrobun sync
         shell: bash
 
+      # Packaging contract tests use the certified bytes on Linux and macOS.
+      - name: Download certified emulator 7.17 artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ env.EMU_SOURCE_ARTIFACT }}
+          path: .certified-emulator-${{ env.EMU_RELEASE_VERSION }}
+          github-token: ${{ github.token }}
+          repository: keepkey/keepkey-vault
+          run-id: ${{ env.EMU_SOURCE_RUN_ID }}
+
+      - name: Stage and verify certified emulator 7.17 libraries
+        run: scripts/stage-certified-emulator.sh ".certified-emulator-${EMU_RELEASE_VERSION}"
+        shell: bash
+
+      - name: Prepare pinned Monero wallet tools
+        run: cd projects/keepkey-vault && python3 monero-cli/prepare.py
+        shell: bash
+
+      - name: Download reviewed Monero signing helpers (macOS arm64)
+        if: matrix.expected-arch == 'arm64'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          gh release download "$MONERO_NATIVE_RELEASE_TAG" --repo keepkey/keepkey-vault \
+            --pattern monero-host-adapter --pattern libmonero_core_verify.dylib \
+            --dir .reviewed-monero
+          chmod 755 .reviewed-monero/monero-host-adapter .reviewed-monero/libmonero_core_verify.dylib
+
+      - name: Require reviewed Monero signing helpers (macOS arm64)
+        if: matrix.expected-arch == 'arm64'
+        shell: bash
+        run: |
+          cd projects/keepkey-vault
+          bun scripts/stage-monero-adapter.ts --require --source "$GITHUB_WORKSPACE/.reviewed-monero/monero-host-adapter"
+          # The verifier CLI always requires an explicit, hash-pinned input.
+          bun scripts/stage-monero-core-verifier.ts --source "$GITHUB_WORKSPACE/.reviewed-monero/libmonero_core_verify.dylib"
+          echo "MONERO_CORE_VERIFY_DIR=$PWD/monero-device-bundle" >> "$GITHUB_ENV"
+
+      - name: Stage optional Monero adapter on other platforms
+        if: matrix.expected-arch != 'arm64'
+        run: cd projects/keepkey-vault && bun scripts/stage-monero-adapter.ts --if-available
+        shell: bash
+
+      - name: Verify and build Monero CLI sidecar
+        shell: bash
+        run: |
+          cd projects/keepkey-vault
+          bun run monero:build
+          bun run monero:test
+
       - name: Run Vault unit and submodule-contract tests
         if: matrix.tests
         # Must run after building the pinned modules. The suite imports critical
@@ -345,26 +397,16 @@ jobs:
         # is downloaded as an immutable artifact and is never rebuilt here.
         run: brew install protobuf
 
-      - name: Download certified emulator 7.17 artifact
-        if: runner.os == 'macOS'
-        uses: actions/download-artifact@v4
-        with:
-          name: ${{ env.EMU_SOURCE_ARTIFACT }}
-          path: .certified-emulator-${{ env.EMU_RELEASE_VERSION }}
-          github-token: ${{ github.token }}
-          repository: keepkey/keepkey-vault
-          run-id: ${{ env.EMU_SOURCE_RUN_ID }}
-
-      - name: Stage and verify certified emulator 7.17 libraries
-        if: runner.os == 'macOS'
-        run: scripts/stage-certified-emulator.sh ".certified-emulator-${EMU_RELEASE_VERSION}"
-        shell: bash
-
       # The emulator Desktop ships must draw the PIN grid and end every PIN
       # wait; the 7.17 alpha certified before firmware #1042 did neither.
       - name: Test PIN entry on the certified emulator
         if: runner.os == 'macOS' && matrix.tests
         run: make test-emu-pin KK_EMU_DYLIB="$PWD/projects/keepkey-vault/emulator-bundle/libkkemu.dylib"
+        shell: bash
+
+      - name: Test Nu7 transparent signing on the certified alpha emulator
+        if: runner.os == 'macOS' && matrix.tests
+        run: make test-emu-zcash-nu7 KK_EMU_DYLIB="$PWD/projects/keepkey-vault/emulator-bundle/libkkemu.dylib"
         shell: bash
 
       - name: Install Linux packaging tools
@@ -380,16 +422,10 @@ jobs:
           echo "=== Building zcash-cli for $(uname -m) ==="
           cd projects/keepkey-vault/zcash-cli
           cargo test
+          cargo test --locked --manifest-path tests/nu7-reference/Cargo.toml
           cargo build --release
+          bun ../scripts/write-zcash-nu7-manifest.ts target/release/zcash-cli
           file target/release/zcash-cli
-
-      - name: Verify and build Monero CLI sidecar
-        shell: bash
-        run: |
-          cd projects/keepkey-vault
-          python3 monero-cli/prepare.py
-          bun run monero:build
-          bun run monero:test
 
       - name: Build unsigned app (CI mode)
         env:
@@ -836,6 +872,122 @@ jobs:
             projects/keepkey-vault/artifacts/*
           retention-days: 30
 
+  device-protocol-lib:
+    # device-protocol's protoc plugins don't run on Windows; the Windows box
+    # copies lib/ from another machine, so this check does the same.
+    name: device-protocol lib/ (for the Windows check)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: git submodule update --init modules/device-protocol
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - run: make device-protocol-build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: device-protocol-lib
+          path: modules/device-protocol/lib
+          retention-days: 3
+
+  windows-unsigned:
+    # Runs scripts/build-windows-production.ps1 -SkipSign, as the Windows box
+    # does minus signing, so a broken Windows build shows up before the box.
+    # Its exact-head success gates draft creation; the shipped installer is
+    # still built and signed separately on the Windows box. Its CI artifact
+    # must not match the release job's keepkey-vault-* download pattern.
+    name: Windows x64 (unsigned build check)
+    needs: device-protocol-lib
+    runs-on: windows-2022
+    timeout-minutes: 150
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Init required submodules
+        run: git submodule update --init modules/hdwallet modules/proto-tx-builder modules/device-protocol modules/electrobun
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install Yarn, Inno Setup and protoc
+        run: |
+          npm install -g yarn
+          choco install innosetup protoc -y --no-progress
+
+      - name: Install pinned Hutch
+        shell: pwsh
+        run: |
+          ./scripts/hutch-windows.ps1 -Install
+          if ($LASTEXITCODE -ne 0) { throw "hutch install failed" }
+          "$HOME\.hutch\bin" | Out-File -FilePath $env:GITHUB_PATH -Append
+
+      - name: Download certified emulator 7.17 artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ env.EMU_SOURCE_ARTIFACT }}
+          path: .certified-emulator-${{ env.EMU_RELEASE_VERSION }}
+          github-token: ${{ github.token }}
+          repository: keepkey/keepkey-vault
+          run-id: ${{ env.EMU_SOURCE_RUN_ID }}
+
+      - name: Stage certified emulator DLL
+        shell: pwsh
+        run: |
+          $want = (Get-Content projects/keepkey-vault/emulator-bundle/manifest.json | ConvertFrom-Json).files.'libkkemu.dll'.sha256
+          $dll = Get-ChildItem -Recurse ".certified-emulator-$env:EMU_RELEASE_VERSION" -Filter *.dll |
+            Where-Object { (Get-FileHash -Algorithm SHA256 $_.FullName).Hash.ToLowerInvariant() -eq $want } | Select-Object -First 1
+          if (-not $dll) { throw "no DLL in the artifact matches manifest sha256 $want" }
+          Copy-Item $dll.FullName projects/keepkey-vault/emulator-bundle/libkkemu.dll
+
+      - name: Download device-protocol lib/
+        uses: actions/download-artifact@v4
+        with:
+          name: device-protocol-lib
+          path: modules/device-protocol/lib
+
+      - name: Build modules (hdwallet, proto-tx-builder)
+        shell: bash
+        run: |
+          set -euo pipefail
+          (cd modules/hdwallet && yarn install --frozen-lockfile && yarn tsc --build)
+          (cd modules/proto-tx-builder && git submodule update --init osmosis-frontend && yarn install --frozen-lockfile && npx tsc -p . && test -f dist/index.js)
+          # Same as the Makefile's device-protocol stamp: force protobufjs's pbjs.
+
+      - name: Install Zig 0.15.1 (wrapper EXE, as on the Windows box)
+        shell: pwsh
+        run: |
+          $dir = "$env:USERPROFILE\tools"
+          New-Item -ItemType Directory -Force $dir | Out-Null
+          curl.exe -fsSL -o "$dir\zig.zip" https://ziglang.org/download/0.15.1/zig-x86_64-windows-0.15.1.zip
+          tar -xf "$dir\zig.zip" -C $dir
+          & "$dir\zig-x86_64-windows-0.15.1\zig.exe" version
+
+      - name: Build (unsigned)
+        shell: pwsh
+        run: |
+          ./scripts/build-windows-production.ps1 -SkipSign
+          if ($LASTEXITCODE -ne 0) { throw "build-windows-production.ps1 failed ($LASTEXITCODE)" }
+
+      - name: Upload Windows build
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-windows-unsigned
+          path: release-windows/*
+          if-no-files-found: warn
+          retention-days: 7
+
   intel-smoke:
     name: Intel macOS packaged-app smoke test
     needs: build
@@ -924,7 +1076,7 @@ jobs:
 
   release:
     name: Create Draft Release
-    needs: [build, intel-smoke]
+    needs: [build, intel-smoke, windows-unsigned]
     # Releases come only from v* tags or release/* branches (pushed or
     # dispatched). A dispatch on any other branch builds and tests without
     # creating a draft release.

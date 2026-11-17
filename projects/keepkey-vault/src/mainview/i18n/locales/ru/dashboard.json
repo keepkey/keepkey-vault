@@ -1,4 +1,7 @@
 {
+	"degradedTitle": "Не удалось обновить некоторые балансы",
+	"degradedReach": "Не удалось обновить:",
+	"degradedTail": "Последние известные балансы показаны, если доступны.",
 	"supportedChains": "Поддерживаемые сети",
 	"refreshBalances": "Обновить балансы",
 	"connectDeviceToRefresh": "Подключите устройство для обновления",
@@ -37,5 +40,12 @@
 	"loadingPrices": "Получение актуальных цен",
 	"tokensCount": "+{{count}} токенов",
 	"tokensCount_few": "+{{count}} токена",
-	"tokensCount_many": "+{{count}} токенов"
+	"tokensCount_many": "+{{count}} токенов",
+	"syncStage_preparing": "Подготовка кошелька",
+	"syncStage_addresses": "Чтение адресов устройства",
+	"syncStage_balances": "Проверка балансов",
+	"syncStage_finalizing": "Обновление портфеля",
+	"syncProgressCounts": "{{completed}}/{{total}} · {{percent}}% · {{seconds}}с",
+	"syncProgressElapsed": "Прошло {{seconds}}с",
+	"syncFailedChecks": "Недоступных проверок: {{failed}}"
 }

@@ -1,4 +1,7 @@
 {
+	"degradedTitle": "일부 잔액을 새로고침하지 못했습니다",
+	"degradedReach": "새로고침 실패:",
+	"degradedTail": "확인된 마지막 잔액이 있으면 표시합니다.",
 	"supportedChains": "지원 체인",
 	"refreshBalances": "잔액 새로고침",
 	"connectDeviceToRefresh": "새로고침하려면 기기를 연결하세요",
@@ -36,5 +39,12 @@
 	"loadingSync": "체인 전반의 잔액 동기화 중",
 	"loadingPrices": "최신 시세를 가져오는 중",
 	"tokensCount": "+{{count}}개 토큰",
-	"dismiss": "닫기"
+	"dismiss": "닫기",
+	"syncStage_preparing": "지갑 준비 중",
+	"syncStage_addresses": "기기 주소 읽는 중",
+	"syncStage_balances": "잔액 확인 중",
+	"syncStage_finalizing": "포트폴리오 업데이트 중",
+	"syncProgressCounts": "{{completed}}/{{total}} · {{percent}}% · {{seconds}}초",
+	"syncProgressElapsed": "{{seconds}}초 경과",
+	"syncFailedChecks": "확인 {{failed}}건 사용 불가"
 }
