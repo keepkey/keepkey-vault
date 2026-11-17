@@ -15,6 +15,7 @@ import pkg from '../package.json'
 import { CAMERA_REASON, cameraUsageDescription, pruneAppNodeModules } from './app-bundle'
 import { electrobunFixProblems } from './electrobun-fixes'
 import { nu7ReleaseAssetProblems } from './nu7-release-assets'
+import { moneroReleaseAssetProblems } from './monero-release-assets'
 
 const args = process.argv.slice(2)
 const channel = args.find(a => !a.startsWith('--')) ?? 'stable'
@@ -87,6 +88,8 @@ try {
     const outerVerify = signed ? run(['codesign', '--verify', '--deep', '--strict', app]) : null
     const nu7Problems = nu7ReleaseAssetProblems(join(resources, 'app'), arch, outerVerify?.code === 0)
     nu7Problems.length === 0 ? ok('Nu7 emulator provenance and paired transaction builder') : nu7Problems.forEach(fail)
+    const moneroProblems = moneroReleaseAssetProblems(join(resources, 'app'), `darwin-${arch}`, outerVerify?.code === 0)
+    moneroProblems.length === 0 ? ok('Monero signing artifacts and packaged Bun verifier ABI on qualified platforms') : moneroProblems.forEach(fail)
 
     const camera = cameraUsageDescription(app)
     camera === CAMERA_REASON ? ok('camera usage description') : fail(`NSCameraUsageDescription is ${JSON.stringify(camera)}`)

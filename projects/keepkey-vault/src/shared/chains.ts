@@ -1,6 +1,6 @@
 import { Chain, ChainToNetworkId, ChainToCaip, BaseDecimal } from '@pioneer-platform/pioneer-caip'
 import type { BtcScriptType, CustomChain } from './types'
-import { versionCompare, MONERO_MIN_FIRMWARE } from './firmware-versions'
+import { versionCompare } from './firmware-versions'
 
 export interface ChainDef {
   id: string
@@ -363,7 +363,6 @@ const CONFIGS: ChainConfig[] = [
     defaultPath: [0x8000002C, 0x80000080, 0x80000000],
     explorerTxUrl: 'https://xmrchain.net/tx/{{txid}}',
     hidden: true,
-    minFirmware: MONERO_MIN_FIRMWARE,
   },
 ]
 

@@ -11,7 +11,7 @@ import { parseCaip } from '../shared/swap-discovery'
 import type { SwapAsset, SwapQuote, RelayTxParams } from '../shared/types'
 import { COIN_MAP_LONG } from '@pioneer-platform/pioneer-coins'
 import { parseSwapFeeDisclosure } from './swap-fees'
-import { isPlainSwapDeposit } from '../shared/swap-deposit-routing'
+import { isPlainSwapDeposit, ZCASH_SWAP_MEMO_UNSUPPORTED } from '../shared/swap-deposit-routing'
 import { extractRelayRequestId } from '../shared/relay-utils'
 import { sameAddress } from '../shared/address-validation'
 import { nativeSwapAssetDecimals } from '../shared/swap-amount'
@@ -41,6 +41,9 @@ export const GLOBAL_SWAP_MEMO_MAX_BYTES = 250
 export const UTXO_SWAP_MEMO_MAX_BYTES = 80
 
 export function swapMemoLimitForSource(fromCaip: string): number {
+  // Alpha Zcash's Nu7 PCZT signer rejects OP_RETURN outputs. Filter
+  // these routes before highest-output selection; never strip their memo.
+  if (fromCaip.split('/')[0] === 'bip122:00040fe8ec8471911baa1db1266ea15d') return 0
   return fromCaip.startsWith('bip122:')
     ? UTXO_SWAP_MEMO_MAX_BYTES
     : GLOBAL_SWAP_MEMO_MAX_BYTES
@@ -50,6 +53,7 @@ export function assertSwapMemoFitsSource(memo: string, fromCaip: string): void {
   if (!memo) return
   const byteLength = Buffer.byteLength(memo, 'utf8')
   const limit = swapMemoLimitForSource(fromCaip)
+  if (limit === 0) throw new Error(ZCASH_SWAP_MEMO_UNSUPPORTED)
   if (byteLength <= limit) return
 
   const source = fromCaip.startsWith('bip122:') ? 'UTXO source chain' : 'swap protocol'

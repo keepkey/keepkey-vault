@@ -5,6 +5,7 @@ import {readEvmConfirmationRows} from './evm-confirmation-watch'
 import { createWalletHistoryRefreshPolicy, paidProviderRefreshOptions, type ProviderRefreshReason } from '../shared/provider-refresh'
 import { oldestBalanceUpdatedAt } from '../shared/balance-cache-policy'
 import { portfolioObservedAt } from '../shared/balance-observation'
+import { selectDesktopUpdateRelease } from '../shared/desktop-update-release'
 // ── File logger ──────────────────────────────────────────────────────────
 // NOTE: This logger captures runtime errors AFTER the module graph loads.
 // It does NOT catch import-time crashes — static ESM imports (below) are
@@ -299,9 +300,9 @@ import { createMoneroVault, moneroHiddenWalletStatus } from "./monero-vault"
 import { createMoneroFailoverVault } from "./monero-remote-failover"
 import { assertMoneroStandardWallet, moneroHiddenWallet } from "../shared/monero-wallet-policy"
 import { createMoneroWatchStore } from "./monero-watch-store"
-import { createMoneroDeviceSigner } from "./monero-device-signing"
+import { createMoneroCoreVerifier } from "./monero-device-signing"
 import { REVIEWED_MONERO_SIGNING_SHA256 } from "./monero-emulator"
-import { startMoneroSidecar, stopMoneroSidecar, isMoneroSidecarAvailable } from "./monero-sidecar"
+import { startMoneroSidecar, stopMoneroSidecar, isMoneroSidecarAvailable, hasMoneroSigningTools } from "./monero-sidecar"
 import { createMoneroNodeManager } from './monero-node'
 import { MONERO_LOCAL_URL, moneroNodeMode } from '../shared/monero-node'
 import { checkMoneroNode, storedRestoreHeight, suggestRestoreHeight, validateMoneroNode } from "./monero-settings"
@@ -1812,7 +1813,7 @@ function getAppSettings() {
 		walletConnectEnabled,
 		btcMultisigEnabled:multisigFeature.enabled,
 		moneroEnabled,
-		moneroAvailable: isMoneroSidecarAvailable(),
+		moneroAvailable: isMoneroSidecarAvailable() && hasMoneroSigningTools() && createMoneroCoreVerifier().available(),
 		moneroDaemonUrl: getSetting('monero_daemon_url') || MONERO_DEFAULT_NODE,
 		moneroNodeMode: moneroNodeMode(getSetting('monero_node_mode'), getSetting('monero_daemon_url')),
 		moneroRestoreHeight: storedRestoreHeight(getSetting('monero_restore_height')),
@@ -2355,7 +2356,8 @@ function getMoneroWallet() {
       create: getConfig => createMoneroVault({
         engine, confirm: emuSigningOp, signingEmulator: moneroSigningEmulatorActive,
         watchStore: createMoneroWatchStore({ database: getDb, profile: Utils.paths.userData }),
-        hardwareSigner: createMoneroDeviceSigner(),
+        coreVerifier: createMoneroCoreVerifier({ text: source => backendText(getSetting('app_language'), source) }),
+        text: source => backendText(getSetting('app_language'), source),
         onTransportFailure: transport => {
             if (engine.wallet?.transport === transport) return engine.retryConnect()
         },
@@ -11434,9 +11436,7 @@ udevadm trigger --subsystem-match=usb --attr-match=idVendor=2b24 || udevadm trig
 					if (!resp.ok) throw new Error(`GitHub API ${resp.status}`)
 
 					const releases = await resp.json() as Array<{ tag_name: string; prerelease: boolean; draft: boolean }>
-					const candidate = preReleaseUpdates
-						? releases.find(r => !r.draft)
-						: releases.find(r => !r.draft && !r.prerelease)
+					const candidate = selectDesktopUpdateRelease(releases, preReleaseUpdates)
 
 					if (candidate) {
 						const remoteVer = candidate.tag_name.replace(/^v/, '')
@@ -12193,11 +12193,7 @@ Updater.localInfo.channel().then(ch => {
 				}
 
 				const releases = await resp.json() as Array<{ tag_name: string; prerelease: boolean; draft: boolean }>
-				// Pre-release channel: first non-draft release (includes pre-releases)
-				// Standard channel: first non-draft, non-prerelease release
-				const candidate = preReleaseUpdates
-					? releases.find(r => !r.draft)
-					: releases.find(r => !r.draft && !r.prerelease)
+				const candidate = selectDesktopUpdateRelease(releases, preReleaseUpdates)
 
 				if (!candidate) {
 					console.log('[Vault] Background update check: no suitable release found')
@@ -12369,8 +12365,16 @@ function cleanupAndQuit() {
 	try { setUiActive(false, null) } catch {}
 	postTxBalances.clear()
 	stopActiveWalletWatches()
-	engine.stop()
-	Utils.quit()
+	// Let an already queued encrypted balance observation reach disk on normal
+	// close/reopen, while the existing force-exit timer still bounds cleanup.
+	void (async () => {
+		let timer: ReturnType<typeof setTimeout> | undefined
+		try {
+			await Promise.race([moneroWallet?.flushBalanceCache() ?? Promise.resolve(),
+				new Promise<void>(resolve => { timer = setTimeout(resolve, 1500) })])
+		} catch { /* Secure-storage failure must not prevent quitting. */ }
+		finally { clearTimeout(timer); engine.stop(); Utils.quit() }
+	})()
 }
 
 // Quit the app when the main window is closed

@@ -32,14 +32,14 @@ export function useMoneroStateLabel(view: MoneroBalanceView): string {
 	const uiText = useUiTranslation()
 	if (view.state === "loading") return uiText("Loading…")
 	if (view.state === "not-connected") return uiText("Not connected")
-	if (view.state === "ready") return !view.spendVerified && view.balanceAtomic !== "0" ? uiText("Balance needs verification") : uiText("Synced")
+	if (view.state === "ready") return view.lastKnown || (!view.spendVerified && view.balanceAtomic !== "0") ? uiText("Balance needs verification") : uiText("Synced")
 	if (view.state === "unreachable") return uiText("Node unreachable")
 	return view.progress === undefined ? uiText("Syncing") : uiText("Syncing {{percent}}%", { percent: Math.floor(view.progress * 100) })
 }
 
 export function MoneroStatusChip({ view }: { view: MoneroBalanceView }) {
 	const label = useMoneroStateLabel(view)
-	const verified = view.state === "ready" && (view.spendVerified || view.balanceAtomic === "0")
+	const verified = !view.lastKnown && view.state === "ready" && (view.spendVerified || view.balanceAtomic === "0")
 	const color = verified ? "var(--teal)" : view.state === "unreachable" ? "var(--rose)" : "var(--gold)"
 	return (
 		<Flex data-monero-state={view.state} align="center" gap="1" color={color} className="v3-glass-chip" px="2" py="0.5">
@@ -49,9 +49,10 @@ export function MoneroStatusChip({ view }: { view: MoneroBalanceView }) {
 	)
 }
 
-/** "Last updated <time>" whenever a shown figure is not fresh (the unreachable note already says it). */
+/** Saved snapshots always identify their source time; other stale figures retain the refresh label. */
 function MoneroFreshness({ view }: { view: MoneroBalanceView }) {
 	const uiText = useUiTranslation()
+	if (view.lastKnown) return <Text data-monero-stale="" data-monero-last-known="" fontSize="11px" color="var(--gold)">{uiText("Last known balance · {{time}}", { time: view.updatedAt ? new Date(view.updatedAt).toLocaleString(getNumberLocale()) : "—" })}</Text>
 	if (!view.stale || view.state === "unreachable") return null
 	return <Text data-monero-stale="" fontSize="11px" color="var(--gold)">{uiText("Last updated {{time}}", { time: view.updatedAt ? new Date(view.updatedAt).toLocaleString(getNumberLocale()) : "—" })}</Text>
 }
@@ -59,7 +60,7 @@ function MoneroFreshness({ view }: { view: MoneroBalanceView }) {
 /** Header amount: "—" when unknown; fiat is never shown (no price source), it says "not included". */
 export function MoneroHeaderBalance({ view, privateMode }: { view: MoneroBalanceView; privateMode: boolean }) {
 	const uiText = useUiTranslation()
-	const balance = view.spendVerified || view.balanceAtomic === "0" ? view.balanceAtomic : null
+	const balance = view.lastKnown || view.spendVerified || view.balanceAtomic === "0" ? view.balanceAtomic : null
 	return (
 		<Flex direction="column" align="flex-end" gap="0.5">
 			<Flex align="baseline" gap="1.5">
@@ -100,7 +101,7 @@ function MoneroSyncProgress({ view }: { view: MoneroBalanceView }) {
 function MoneroBalanceNote({ view }: { view: MoneroBalanceView }) {
 	const uiText = useUiTranslation()
 	if (view.state === "scanning") {
-		return <Box><Text data-monero-note="scanning" fontSize="12px" color="var(--text-2)">{uiText("Syncing your Monero wallet. Your balance appears when it is ready.")}</Text><MoneroSyncProgress view={view} /></Box>
+		return <Box><Text data-monero-note="scanning" fontSize="12px" color="var(--text-2)">{view.lastKnown ? uiText("Updating your Monero wallet. Showing the last known balance.") : uiText("Syncing your Monero wallet. Your balance appears when it is ready.")}</Text><MoneroSyncProgress view={view} /></Box>
 	}
 	if (view.state === "unreachable") {
 		return <Text data-monero-note="unreachable" role="alert" fontSize="12px" color="var(--gold)">{view.balanceAtomic === null
@@ -128,10 +129,21 @@ function MoneroAmounts({ view, privateMode }: { view: MoneroBalanceView; private
 	)
 }
 
+/** Missing signing support never becomes an invitation to deposit into a restricted wallet. */
+function MoneroSigningUnavailable() {
+	const uiText = useUiTranslation()
+	return <Text data-monero-signing-unavailable="" role="alert" fontSize="13px" color="var(--text-2)">{uiText("Monero signing is unavailable. Update KeepKey Desktop and firmware, then reconnect.")}</Text>
+}
+
 /** Opening XMR starts the normal device consent. A failed/cancelled attempt waits for Retry. */
-export function MoneroConnectCard({ client, monero }: { client: MoneroClient; monero: MoneroStatusState }) {
+export function MoneroConnectCard({ client, monero, privateMode = false }: { client: MoneroClient; monero: MoneroStatusState; privateMode?: boolean }) {
 	const uiText = useUiTranslation()
 	const hiddenWalletBlocked = monero.status?.error === MONERO_STANDARD_WALLET_REQUIRED
+	const view = useMoneroView(monero)
+	const cachedSummary = view.lastKnown && view.balanceAtomic !== null ? <Box data-monero-cached-summary="" mb="4">
+		<Text data-monero-cached-balance="" fontFamily="mono" fontSize="16px" color="var(--text-0)">{privateMode ? "••••••" : `${formatXmr(view.balanceAtomic)} XMR`}</Text>
+		<MoneroFreshness view={view} />
+	</Box> : null
 	const [settings, setSettings] = useState<{ moneroDaemonUrl: string; moneroRestoreHeight: number } | null>(null)
 	const [connecting, setConnecting] = useState(false)
 	const [nodeWaiting, setNodeWaiting] = useState(false)
@@ -139,7 +151,7 @@ export function MoneroConnectCard({ client, monero }: { client: MoneroClient; mo
 	const attempted = useRef(false)
 	const mounted = useRef(true)
 	const connect = useCallback(async () => {
-		if (hiddenWalletBlocked) return
+		if (hiddenWalletBlocked || monero.status?.signingReady !== true) return
 		setConnecting(true); setError(null)
 		try {
 			const next = await client.getSettings()
@@ -155,10 +167,10 @@ export function MoneroConnectCard({ client, monero }: { client: MoneroClient; mo
 			if (mounted.current) monero.setStatus(status)
 		} catch (e) { if (mounted.current) setError(errorText(e, "Unable to open Monero. Try again.")) }
 		finally { if (mounted.current) setConnecting(false) }
-	}, [client, monero.setStatus, hiddenWalletBlocked])
+	}, [client, monero.setStatus, hiddenWalletBlocked, monero.status?.signingReady])
 	useEffect(() => {
 		mounted.current = true
-		if (monero.status && !hiddenWalletBlocked && !attempted.current) { attempted.current = true; void connect() }
+		if (monero.status?.signingReady === true && !hiddenWalletBlocked && !attempted.current) { attempted.current = true; void connect() }
 		return () => { mounted.current = false }
 	}, [!!monero.status, connect])
 	useEffect(() => {
@@ -183,8 +195,10 @@ export function MoneroConnectCard({ client, monero }: { client: MoneroClient; mo
 	if (hiddenWalletBlocked) return <Box data-monero-connect="" py="4" maxW="520px">
 		<Text role="alert" color="var(--rose)" fontSize="13px">{uiText(MONERO_STANDARD_WALLET_REQUIRED)}</Text>
 	</Box>
+	if (monero.status && monero.status.signingReady !== true) return <Box data-monero-connect="" py="4" maxW="520px">{cachedSummary}<MoneroSigningUnavailable /></Box>
 	return (
 		<Box data-monero-connect="" py="4" maxW="520px">
+			{cachedSummary}
 			<MoneroConnectionDetails status={monero.status} />
 			<Flex data-monero-connect-status="" align="center" gap="2" mb="2" role="status">
 				{!error && !remoteWaiting && !walletOpenError && <Spinner size="sm" />}
@@ -226,8 +240,8 @@ export function MoneroReceiveSection({ chain, monero, client, privateMode }: { c
 		} catch (e) { setError(errorText(e, "Unable to read the subaddress from KeepKey.")) }
 		finally { setLoading(false) }
 	}, [client])
-	useEffect(() => { setVerified(null); setError(null); if (minor > 0 && wallet) void loadSubaddress(minor) }, [minor, primary]) // eslint-disable-line react-hooks/exhaustive-deps
-	if (!wallet) return <MoneroConnectCard client={client} monero={monero} />
+	useEffect(() => { setVerified(null); setError(null); if (minor > 0 && wallet?.signingReady === true) void loadSubaddress(minor) }, [minor, primary, wallet?.signingReady]) // eslint-disable-line react-hooks/exhaustive-deps
+	if (!wallet) return <MoneroConnectCard client={client} monero={monero} privateMode={privateMode} />
 	const showOnDevice = async () => {
 		setError(null); setVerified(null)
 		try {
@@ -243,6 +257,7 @@ export function MoneroReceiveSection({ chain, monero, client, privateMode }: { c
 			{verification.error && <Box role="alert" mb="3"><Text fontSize="12px" color="var(--rose)">{verification.error}</Text><Button size="xs" mt="2" onClick={() => { void verification.retry() }}>{uiText("Try again")}</Button></Box>}
 			<Box mb="4"><MoneroBalanceNote view={view} /><MoneroFreshness view={view} /></Box>
 			<details style={{ marginBottom: 16, color: "var(--text-3)", fontSize: 12 }}><summary style={{ cursor: "pointer" }}>{uiText("Balance details")}</summary><Box mt="3"><MoneroAmounts view={view} privateMode={privateMode} /></Box></details>
+			{wallet.signingReady === true ? <>
 			<details style={{ marginBottom: 12, color: "var(--text-3)", fontSize: 12 }}><summary style={{ cursor: "pointer" }}>{uiText("Receive address options")}</summary>
 			<Flex align="center" gap="2" mt="2" flexWrap="wrap">
 				<Text fontSize="10px" color="var(--text-3)" textTransform="uppercase" letterSpacing="0.18em">{uiText("Receive to")}</Text>
@@ -256,6 +271,7 @@ export function MoneroReceiveSection({ chain, monero, client, privateMode }: { c
 			{verified && verified === address && <Text mt="2" fontSize="12px" color="var(--teal)" role="status">{uiText("Address confirmed on KeepKey.")}</Text>}
 			{address && error && <Text mt="2" fontSize="12px" color="var(--rose)" role="alert">{error}</Text>}
 			{minor > 0 && <Text mt="2" fontSize="11px" color="var(--text-3)">{uiText("Subaddresses belong to this wallet. Sending XMR to one of them is how you move funds within it.")}</Text>}
+			</> : <MoneroSigningUnavailable />}
 			<Box mt="6">
 				<Text fontSize="11px" color="var(--text-3)" textTransform="uppercase" letterSpacing="0.18em" mb="2">{uiText("Incoming transactions")}</Text>
 				{wallet.transactions.length === 0 ? (
@@ -304,7 +320,7 @@ export function MoneroSendSection({ monero, client, privateMode = false }: { mon
 	const [sentTxid, setSentTxid] = useState<string | null>(null)
 	const address = wallet?.address ?? ""
 	useEffect(() => { setReview(null); setError(null); setSentTxid(null) }, [address])
-	if (!wallet) return <MoneroConnectCard client={client} monero={monero} />
+	if (!wallet) return <MoneroConnectCard client={client} monero={monero} privateMode={privateMode} />
 	const problems = moneroSendInputProblems({ address: recipient, amount, max, walletAddress: address, unlockedAtomic: view.spendVerified ? view.unlockedAtomic : null })
 	const ready = !!recipient.trim() && !problems.address && (max || (!!problems.amountAtomic && !problems.amount))
 	const run = async (kind: NonNullable<typeof busy>, action: () => Promise<void>) => {
@@ -340,7 +356,7 @@ export function MoneroSendSection({ monero, client, privateMode = false }: { mon
 				: uiText("Discarded. Its funds are spendable again; the next send builds a new transaction."))
 		} finally { setConfirmDiscard(false); void monero.refresh() }
 	})
-	const receiveOnly = wallet.sendBlocked === "emulator" || wallet.sendBlocked === "adapter" || wallet.sendBlocked === "firmware"
+	const signingUnavailable = wallet.signingReady !== true
 	return (
 		<Box data-monero-send="">
 			<MoneroConnectionDetails status={monero.status} />
@@ -379,12 +395,8 @@ export function MoneroSendSection({ monero, client, privateMode = false }: { mon
 					</details>
 				</Box>
 			)}
-			{receiveOnly ? (
-				<Text data-monero-send-blocked={wallet.sendBlocked} fontSize="13px" color="var(--text-2)">{wallet.sendBlocked === "firmware"
-					? uiText("Monero hardware signing is not available for this firmware in this build. Receiving works.")
-					: wallet.sendBlocked === "adapter"
-					? uiText("Sending isn't available: this build has no Monero signing adapter. Receiving works.")
-					: uiText("Sending isn't available: Monero signing needs the signing (research) emulator build. Receiving works.")}</Text>
+			{signingUnavailable ? (
+				<MoneroSigningUnavailable />
 			) : (
 				<>
 					<Text fontSize="15px" color="var(--text-0)" fontWeight="500" mb="3">{uiText("Send XMR")}</Text>
@@ -441,7 +453,7 @@ export function MoneroSendSection({ monero, client, privateMode = false }: { mon
 							</Flex>
 							<Flex gap="3">
 								<Button data-monero-confirm-send="" size="sm" onClick={() => { void confirm() }} disabled={!!busy} className="electrobun-webkit-app-region-no-drag">
-									{busy === "confirm" ? <Spinner size="xs" /> : <FaCheck />}{busy === "confirm" ? uiText("Confirm on KeepKey…") : uiText("Confirm on KeepKey")}
+									{busy === "confirm" ? <Spinner size="xs" /> : <FaCheck />}{busy === "confirm" ? (wallet.signingPhase === "proving" ? uiText("KeepKey is proving the Monero transaction…") : wallet.signingPhase === "signing" || wallet.signingPhase === "verifying" ? uiText("Signing Monero transaction…") : uiText("Confirm on KeepKey…")) : uiText("Confirm on KeepKey")}
 								</Button>
 								<Button size="sm" variant="ghost" onClick={() => setReview(null)} disabled={!!busy} className="electrobun-webkit-app-region-no-drag">{uiText("Cancel")}</Button>
 							</Flex>
@@ -474,7 +486,7 @@ export function MoneroChainRow({ chain, iconSrc, privateMode, onOpen, client }: 
 	const monero = useMoneroStatus(true, client)
 	const view = useMoneroView(monero)
 	const label = useMoneroStateLabel(view)
-	const balance = view.spendVerified || view.balanceAtomic === "0" ? view.balanceAtomic : null
+	const balance = view.lastKnown || view.spendVerified || view.balanceAtomic === "0" ? view.balanceAtomic : null
 	return (
 		<Box data-monero-row="" as="button" onClick={onOpen} w="100%" textAlign="left" p="2.5" mb="1.5" borderRadius="lg" bg="transparent"
 			border="1px solid transparent" _hover={{ bg: "kk.cardBg", borderColor: `${chain.color}50` }} cursor="pointer" transition="all 0.15s"
@@ -490,8 +502,9 @@ export function MoneroChainRow({ chain, iconSrc, privateMode, onOpen, client }: 
 						<Text data-monero-row-balance="" fontSize="12px" color="var(--text-2)" lineHeight="1.3" truncate>
 							{balance === null ? `— ${chain.symbol}` : privateMode ? "••••" : `${formatXmrShort(balance)} ${chain.symbol}`}
 						</Text>
-						{(view.state !== "ready" || (view.restoreHeight ?? 0) > 0 || balance === null) && <Text data-monero-row-state={view.state} fontSize="10px" color={view.state === "unreachable" ? "var(--gold)" : "var(--text-3)"} flexShrink={0}>{label}</Text>}
+						{(view.lastKnown || view.state !== "ready" || (view.restoreHeight ?? 0) > 0 || balance === null) && <Text data-monero-row-state={view.state} fontSize="10px" color={view.state === "unreachable" ? "var(--gold)" : "var(--text-3)"} flexShrink={0}>{label}</Text>}
 					</Flex>
+					<MoneroFreshness view={view} />
 				</Box>
 			</Flex>
 		</Box>

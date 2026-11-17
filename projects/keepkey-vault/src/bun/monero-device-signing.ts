@@ -8,6 +8,8 @@ import { keccak_256 } from '@noble/hashes/sha3'
 import { moneroStandardAddressKeys, moneroDestinationAddressKeys } from '../shared/monero-address'
 import { validatePlan, type MoneroPlan } from '../../monero-cli/src/protocol'
 import { concat, lengthField, numberField, MoneroError, parseSignedTransaction, signRequest } from './monero-wire'
+import { verifiedMoneroCoreVerifierFile } from './monero-core-verifier-artifact'
+import { checkStreamSigningBounds, STREAM_ERRORS, type MoneroText } from './monero-stream-signer'
 export const MONERO_DEVICE_CANDIDATE_SHA256='9bc7798fb71a744c23a81cb7987645b7b5418d16fd035acc00770d57d4ae4928'
 export const MONERO_DEVICE_SUBADDRESS_CANDIDATE_SHA256='123af6de3b5ddbc1eeb94568825d1bb8107079bc9100ac67f9f6162ca34e2f83'
 export const moneroDeviceConstructionVersion=(hash?:string):1|2=>hash===MONERO_DEVICE_SUBADDRESS_CANDIDATE_SHA256?2:1
@@ -39,15 +41,22 @@ export function checkDeviceSigningBounds(plan:MoneroPlan,version:1|2=1) {
 /** C ABI from the pinned Core verifier; checked against monero_core_plan_size at load. */
 export function deviceNativePlan(plan:MoneroPlan,version:1|2=1):Uint8Array {
  checkDeviceSigningBounds(plan,version)
+ return coreNativePlan(plan)
+}
+/** Existing pinned Core ABI: four sources and four destinations, no transaction secret. */
+export function coreNativePlan(plan:MoneroPlan):Uint8Array {
+ if(plan.inputs.length<1||plan.inputs.length>4||plan.outputs.length<2||plan.outputs.length>4)throw new MoneroError(STREAM_ERRORS.plan)
  const data=new Uint8Array(7544),v=new DataView(data.buffer)
- v.setUint32(0,plan.network,true);v.setUint32(4,1,true);v.setUint32(8,2,true);v.setBigUint64(16,BigInt(plan.feeAtomic),true)
- const input=plan.inputs[0],base=24
+ v.setUint32(0,plan.network,true);v.setUint32(4,plan.inputs.length,true);v.setUint32(8,plan.outputs.length,true);v.setBigUint64(16,BigInt(plan.feeAtomic),true)
+ plan.inputs.forEach((input,index)=>{
+ const base=24+1760*index
  v.setBigUint64(base,BigInt(input.amountAtomic),true)
  for(const [i,n] of [input.realMember,input.outputIndex,input.subaddressMajor,input.subaddressMinor].entries())v.setUint32(base+8+i*4,n,true)
  data.set(unhex(input.txPublicKey),base+24);data.set(unhex(input.mask),base+56)
  v.setUint32(base+88,input.additionalTxPublicKeys.length,true)
  input.additionalTxPublicKeys.forEach((key,i)=>data.set(unhex(key),base+92+i*32))
  input.ring.forEach((r,i)=>{const offset=base+608+i*72;v.setBigUint64(offset,BigInt(r.globalIndex),true);data.set(unhex(r.publicKey),offset+8);data.set(unhex(r.commitment),offset+40)})
+ })
  plan.outputs.forEach((o,i)=>{const offset=7064+i*120;v.setBigUint64(offset,BigInt(o.amountAtomic),true);data.set(text(o.address),offset+8);v.setUint32(offset+104,o.isChange?1:0,true);v.setUint32(offset+108,o.changeMajor,true);v.setUint32(offset+112,o.changeMinor,true)})
  return data
 }
@@ -112,6 +121,42 @@ function checkedLibrary(file:string,hash:string) {
 }
 const loadProver=(file:string)=>dlopen(file,{monero_device_proof:{args:[FFIType.ptr,FFIType.ptr,FFIType.ptr],returns:FFIType.i32},monero_device_output_bindings_v2:{args:[FFIType.ptr,FFIType.ptr,FFIType.ptr,FFIType.u32,FFIType.ptr,FFIType.ptr],returns:FFIType.i32}})
 const loadVerifier=(file:string)=>dlopen(file,{monero_core_verify:{args:[FFIType.ptr,FFIType.ptr,FFIType.u64,FFIType.ptr],returns:FFIType.i32},monero_core_plan_size:{args:[],returns:FFIType.u64}})
+export interface MoneroCoreVerifier {
+ available():boolean
+ prepare(plan:MoneroPlan):{verify(blob:Uint8Array):boolean;dispose():void}
+}
+/** Capability firmware needs only the hash-pinned Core verifier. It never loads the research host prover. */
+export function createMoneroCoreVerifier(options:{directory?:string;text?:MoneroText}={}):MoneroCoreVerifier {
+ const text=options.text??(s=>s)
+ const library=()=>{
+  if(process.platform!=='darwin'||process.arch!=='arm64')return null
+  const roots=options.directory?[options.directory]:[resolve(import.meta.dir,'../monero-device'),join(dirname(process.execPath),'monero-device'),resolve(process.cwd(),'monero-device-bundle')]
+  for(const root of roots){const file=verifiedMoneroCoreVerifierFile(root);if(file)return file}
+  return null
+ }
+ return {available:()=>{
+  const file=library();if(!file)return false
+  let probe:ReturnType<typeof loadVerifier>|null=null
+  try {probe=loadVerifier(file);return Number(probe.symbols.monero_core_plan_size())===7544}
+  catch{return false}finally{probe?.close()}
+ },prepare(plan){
+  checkStreamSigningBounds(plan,text)
+  if(plan.inputs.length>4)throw new MoneroError(text(STREAM_ERRORS.plan))
+  const file=library();if(!file)throw new MoneroError(text(STREAM_ERRORS.verifier))
+  const native=coreNativePlan(plan)
+  let verifier:ReturnType<typeof loadVerifier>|null=null
+  const dispose=()=>{native.fill(0);verifier?.close();verifier=null}
+  try{
+   verifier=loadVerifier(file)
+   if(Number(verifier.symbols.monero_core_plan_size())!==native.length)throw new MoneroError(text(STREAM_ERRORS.verifier))
+   return {dispose,verify(blob){
+    if(!verifier)return false
+    const error=new Uint8Array(192)
+    try{return verifier.symbols.monero_core_verify(ptr(native),ptr(blob),blob.length,ptr(error))===1}finally{error.fill(0)}
+   }}
+  }catch(error){dispose();throw error}
+ }}
+}
 export function createMoneroDeviceSigner(options:{directory?:string}={}):MoneroDeviceSigner {
  function libraries(){
   if(process.platform!=='darwin'||process.arch!=='arm64')return null

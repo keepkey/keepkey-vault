@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import { DigestWalletRpc, RpcFailure } from './digest'
 import { WATCH_NODE_UNREACHABLE, WATCH_SCANNING, parseTxLookup, validateKeyImageImport, validateWalletStatus } from './protocol'
-import { MoneroWatchService, daemonRequest, initializeWatchRpc, lookupTransaction, nodeHeight, refreshFailure, verifyDaemon } from './wallet'
+import { MoneroWatchService, daemonRequest, initializeWatchRpc, lookupTransaction, nodeHeight, nodeSyncStatus, refreshFailure, verifyDaemon } from './wallet'
 
 // Loopback fakes only: no wallet-rpc, daemon or network beyond 127.0.0.1.
 const ADDRESS = '44jKQv6ZKMd5ecLLmkNJGi7azgSptEq8ki7TFiat1TfLfdDQ1tQ7ZYa3cRh7X2uRwvLDjddWh97ajeyhR2seKSECQeDx1WR'
@@ -24,7 +24,8 @@ test('watch creation cannot start an idle scan before wallet identity and spend-
   try {
     await initializeWatchRpc(rpc, config, 'public-fixture')
     expect(scanning).toBe(false)
-    expect(calls).toEqual(['auto_refresh', 'generate_from_keys', 'get_address', 'query_key'])
+    expect(calls).toEqual(['auto_refresh', 'generate_from_keys', 'get_address', 'query_key', 'auto_refresh'])
+    expect(automatic).toBe(true)
     expect(config.viewKey).toBe('')
   } finally { rpc.close(); server.stop(true) }
 })
@@ -103,7 +104,7 @@ describe('the node is asked directly (its own height, the pending tx)', () => {
     await service.probeNode(session)
     expect(session.status).toMatchObject({ monitorReady: false, error: WATCH_NODE_UNREACHABLE, balanceAtomic: '84653050000' })
     // The node back: its own height (not the wallet's) is the target again, and the error clears.
-    const node = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: () => Response.json({ height: 3_300_123, status: 'OK' }) })
+    const node = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: req => new URL(req.url).pathname === '/get_height' ? Response.json({ height: 3_300_123, status: 'OK' }) : Response.json({ result: { nettype: 'mainnet', synchronized: true, offline: false, height: 3_300_123, status: 'OK' } }) })
     try {
       session.daemonUrl = `http://127.0.0.1:${node.port}`
       await service.probeNode(session)

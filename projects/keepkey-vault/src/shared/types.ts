@@ -600,7 +600,20 @@ export interface MoneroConnectionInfo {
   attempts: Array<{ url: string; state: 'untested' | 'checking' | 'responding' | 'failed'; checkedAt?: string; lastResponseAt?: string; retryAt?: string; error?: string; height?: number; latencyMs?: number }>
 }
 
+/** Display-only prior observation. It never grants live sync, signing, or spendability. */
+export interface MoneroCachedBalance {
+  balanceAtomic: string
+  unlockedBalanceAtomic: string
+  walletHeight: number
+  updatedAt: string
+  spendStateKnown: boolean
+}
+
 export interface MoneroStatus {
+  cachedBalance?: MoneroCachedBalance
+  /** Full signer and verified tools are available; receive addresses require this. */
+  signingReady?: boolean
+  signingPhase?: 'review' | 'inputs' | 'outputs' | 'proving' | 'signing' | 'verifying'
   connection?: MoneroConnectionInfo
   available: boolean
   network: 'mainnet'

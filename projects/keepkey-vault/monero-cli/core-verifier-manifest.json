@@ -1,0 +1,41 @@
+{
+  "schemaVersion": 1,
+  "moneroVersion": "0.18.5.4",
+  "abi": "keepkey-monero-core-plan-v1",
+  "scope": "Independent CLSAG and Bulletproof+ transaction verification; only verification and plan-size symbols are exported",
+  "source": {
+    "coreCommit": "85f036ba7019cd36f08e8a38a27c37ea7b522618",
+    "firmwareRepository": "https://github.com/BitHighlander/keepkey-firmware",
+    "bridgePath": "projects/keepkey-vault/native/monero-core-verifier/verify.cpp",
+    "coreTreeSha256": "3836647c504614b548dce8c4a4f4a8293783e4a70981eb695a739d8dcbf60b1c",
+    "archivesSha256": {
+      "monero-core-v0.18.5.4.tar.gz": "a9514399f085a05101c84bf905bc17eae96db2215922f8023b492795259c215f",
+      "monero-randomx.tar.gz": "887513a538044c50ad0fb8a486c584704ddd7d533d9093731dd4dc3109ab16cd",
+      "monero-rapidjson.tar.gz": "44b007d419ac21b6affec58991e865ee572346ead19b73cf1c3e4e11c7a81273",
+      "monero-supercop.tar.gz": "b973b9d8269ec4d97c3c3443f0dad96d09f72b1b30e616e0947557adbdbb03f7",
+      "boost-1.90.0.tar.xz": "9e6bee9ab529fb2b0733049692d57d10a72202af085e553539a05b4204211a6f",
+      "libsodium-1.0.22.tar.gz": "adbdd8f16149e81ac6078a03aca6fc03b592b89ef7b5ed83841c086191be3349"
+    },
+    "bridgeSha256": {
+      "verify.cpp": "f9e00aec59c9375326e0f9ad04f8f7f0d086ee40859dee7bf539198933c06c52",
+      "core-plan.h": "075c9ac0d65159954358a4dd38f3f880f0b82b6974fe066fa2b368de6cae9694"
+    }
+  },
+  "files": {
+    "darwin-arm64": {
+      "filename": "libmonero_core_verify.dylib",
+      "sha256": "9313d8265f47bb63ec481cee91f7595adbbead64e6d907207e1640d5104664ef",
+      "size": 786520,
+      "minimumMacosVersion": "13.0",
+      "minimumDarwinMajor": 22,
+      "exports": [
+        "_monero_core_plan_size",
+        "_monero_core_verify"
+      ],
+      "dependencies": [
+        "/usr/lib/libc++.1.dylib",
+        "/usr/lib/libSystem.B.dylib"
+      ]
+    }
+  }
+}

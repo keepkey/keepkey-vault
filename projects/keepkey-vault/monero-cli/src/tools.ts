@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
 import { readFile, lstat } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
-import { MONERO_VERSION, parseExactJson } from './protocol'
+import { MONERO_VERSION, parseExactJson, PublicError } from './protocol'
 import { verifiedHostAdapterIn } from './host-adapter'
 
 let versionProbe: ReturnType<typeof Bun.spawn> | null = null
@@ -72,5 +72,10 @@ export async function runHostAdapter(binary: string, request: Record<string, str
     const reply = parseExactJson(Buffer.concat(chunks).toString('utf8'))
     if (exit !== 0 || reply?.status !== 'pass') throw new Error('The Monero adapter refused the wallet data')
     return reply
+  } catch (error) {
+    // Return the failing stage without forwarding native diagnostics or wallet
+    // data. Keep it allowlisted through both IPC and the public wallet bridge.
+    if (request.op === 'plan') throw new PublicError('The Monero transaction decoder refused the unsigned transaction')
+    throw error
   } finally { clearTimeout(timeout); request.view_key = '' }
 }

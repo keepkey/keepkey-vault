@@ -169,6 +169,18 @@ describe('research send commands', () => {
     await expect(relay.relay({ txHex: 'aa' })).rejects.toThrow('The daemon rejected the transaction: double spend')
     await expect(relay.relay({ txHex: 'bb' })).rejects.toThrow('The watch-only Monero operation could not complete')
   })
+
+  test('a fixed native preparation failure identifies the decoder without exposing wallet details', async () => {
+    const worker = fakeWorker(), sidecar = manager(worker)
+    await sidecar.configureWatch(config)
+    worker.proc.stdin.write = (value: string) => {
+      const request = JSON.parse(value)
+      if (request.cmd !== 'quit') queueMicrotask(() => worker.send({ ok: false, _req_id: request._req_id,
+        error: 'The Monero transaction decoder refused the unsigned transaction' }))
+    }
+    await expect(sidecar.createTransfer({ address: ADDRESS, amountAtomic: '1', priority: 0 })).rejects.toThrow('The Monero transaction decoder refused the unsigned transaction')
+    expect(sidecar.status().configured).toBe(true)
+  })
 })
 
 describe('exact money and local Digest RPC', () => {

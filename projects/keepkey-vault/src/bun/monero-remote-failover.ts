@@ -140,7 +140,12 @@ export function createMoneroFailoverVault({create,getConfig,checkNode=checkMoner
    if(requested&&config.enabled&&!config.offline&&status.deviceReady&&urls.length>1){
     if(!connecting){
      if(walletOpenError)backgroundConnect()
-     else if(status.syncState==='unreachable'){if(entry(active).state!=='failed')failure(active,Error(status.error||'Monero node unavailable'));state='failed';backgroundConnect()}
+     else if(status.syncState==='unreachable'){
+      // Wallet RPC can time out while Core is scanning a large history. Only
+      // an independent daemon failure authorizes switching nodes; reconnecting
+      // here would discard the temporary wallet and restart that scan forever.
+      probe()
+     }
      else if(!status.available&&now()>=nextRetry)backgroundConnect()
      else if(status.available){if(state==='scanning'&&status.monitorReady)state='connected';probe()}
     }

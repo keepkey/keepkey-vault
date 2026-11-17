@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { createHash } from 'node:crypto'
 import { tmpdir } from 'node:os'
 import { join } from 'path'
-import { firmwareSupportsMonero, MONERO_MIN_FIRMWARE } from '../src/shared/firmware-versions'
+import { supportsMoneroSigning } from '../src/shared/monero-capability'
 import { CHAINS, isChainSupported } from '../src/shared/chains'
 import { bitcoinOnlyRpcRejection } from '../src/bun/bitcoin-only-boundary'
 import ts from 'typescript'
@@ -14,7 +14,7 @@ const src = (path: string) => readFileSync(join(import.meta.dir, '..', path), 'u
 
 /** Evaluate the actual settings/factory functions without importing app startup,
  * opening a profile, constructing a sidecar or contacting any API. */
-function moneroSettingsFixture(enabled: boolean, hidden: boolean) {
+function moneroSettingsFixture(enabled: boolean, hidden: boolean, readiness: { worker?: boolean; tools?: boolean; verifier?: boolean } = {}) {
   const file = ts.createSourceFile('index.ts', process.env.MONERO_SETTINGS_SOURCE
     ? readFileSync(process.env.MONERO_SETTINGS_SOURCE, 'utf8') : src('src/bun/index.ts'), ts.ScriptTarget.Latest, true, ts.ScriptKind.TS)
   const named = (name: string) => {
@@ -28,7 +28,8 @@ function moneroSettingsFixture(enabled: boolean, hidden: boolean) {
     passwordBank: { enabled: true }, zcashPrivacyEnabled: false, hiveEnabled: false, emulatorEnabled: false, offlineMode: false,
     disabledNetworks: [], preReleaseUpdates: false, alphaFirmware: false, addressBookClearsignEnabled: false, privateModeEnabled: false,
     getPioneerServers: () => [], getPioneerApiBase: () => 'https://synthetic.example', getSetting: () => null,
-    supportedLanguage: () => 'en', validNumberLocale: () => 'en-US', isMoneroSidecarAvailable: () => true,
+    supportedLanguage: () => 'en', validNumberLocale: () => 'en-US', isMoneroSidecarAvailable: () => readiness.worker ?? true,
+    hasMoneroSigningTools: () => readiness.tools ?? true, createMoneroCoreVerifier: () => ({ available: () => readiness.verifier ?? true }),
     MONERO_DEFAULT_NODE: 'http://127.0.0.1:18081', moneroNodeMode: () => 'local', storedRestoreHeight: () => 0,
     addressBookCertifyUnsupported: () => false, getEvmSimulationRpcUrls: () => ({}),
     engine: { isPassphraseWallet: hidden, getDeviceState: () => ({ isHiddenWallet: hidden }) },
@@ -46,12 +47,14 @@ afterEach(() => { for (const directory of packagingDirectories.splice(0)) rmSync
 
 /** Run the actual config and adapter verifier against public synthetic bytes.
  * Only the compiled review manifest is substituted; neither guard is mocked. */
-async function moneroPackagingFixture() {
+async function moneroPackagingFixture(arch: 'arm64' | 'x64' = 'arm64') {
   const directory = mkdtempSync(join(tmpdir(), 'monero-preview-package-'))
   packagingDirectories.push(directory)
   const vendor = 'monero-cli/vendor/darwin-arm64'
   const adapter = Buffer.from('PUBLIC SYNTHETIC READ-ONLY DECODER')
   const sha256 = createHash('sha256').update(new Uint8Array(adapter)).digest('hex')
+  const core = Buffer.from('PUBLIC SYNTHETIC CORE VERIFIER')
+  const coreManifest = { files: { 'darwin-arm64': { filename: 'libmonero_core_verify.dylib', sha256: createHash('sha256').update(core).digest('hex'), size: core.length, minimumMacosVersion: '13.0', minimumDarwinMajor: 22 } } }
   const manifest = { schemaVersion: 1, protocol: 'keepkey-monero-wallet-export-v1', moneroVersion: '0.18.5.4',
     files: { 'darwin-arm64': { filename: 'monero-host-adapter', sha256, size: adapter.length } } }
   const write = (path: string, bytes: string | Buffer) => {
@@ -69,11 +72,14 @@ async function moneroPackagingFixture() {
   for (const path of ['monero-device-bundle/libmonero_device_proof.dylib', 'monero-device-bundle/libmonero_core_verify.dylib',
     'monero-emulator-bundle/libkkemu-monero.dylib', 'monero-emulator-bundle/libkkemu-monero-signing.dylib',
     'monero-emulator-bundle/manifest.json', 'monero-emulator-bundle/signing-manifest.json']) write(path, 'synthetic research fixture')
+  write('monero-device-bundle/libmonero_core_verify.dylib', core)
   const entry = join(directory, 'entry.ts')
   writeFileSync(entry, `import config from ${JSON.stringify(join(import.meta.dir, '../electrobun.config.ts'))}; console.log(JSON.stringify(config.build.copy))`)
   const built = await Bun.build({ entrypoints: [entry], target: 'bun', outdir: directory, naming: 'config.mjs',
-    define: { 'process.platform': '"darwin"', 'process.arch': '"arm64"' },
+    define: { 'process.platform': '"darwin"', 'process.arch': JSON.stringify(arch) },
     plugins: [{ name: 'public-adapter-review-pin', setup(build) {
+      build.onResolve({ filter: /core-verifier-manifest\.json$/ }, () => ({ path: 'reviewed-core-pin', namespace: 'public-core-review-pin' }))
+      build.onLoad({ filter: /.*/, namespace: 'public-core-review-pin' }, () => ({ loader: 'json', contents: JSON.stringify(coreManifest) }))
       build.onResolve({ filter: /host-adapter-manifest\.json$/ }, () => ({ path: 'reviewed-pin', namespace: 'public-adapter-review-pin' }))
       build.onLoad({ filter: /.*/, namespace: 'public-adapter-review-pin' }, () => ({ loader: 'json', contents: JSON.stringify(manifest) }))
     } }],
@@ -83,7 +89,7 @@ async function moneroPackagingFixture() {
     const env = { ...process.env, KEEPKEY_INCLUDE_MONERO_EMULATOR: research ? '1' : '0' }
     for (const key of ['KEEPKEY_MONERO_CLI_SOURCE', 'KEEPKEY_MONERO_RPC_SOURCE', 'KEEPKEY_MONERO_METADATA_SOURCE',
       'KEEPKEY_MONERO_ADAPTER_SOURCE', 'KEEPKEY_MONERO_DAEMON_SOURCE', 'KEEPKEY_EMULATOR_SOURCE',
-      'KEEPKEY_EMULATOR_RECEIPT_SOURCE', 'KEEPKEY_ZCASH_CLI_SOURCE']) delete env[key]
+      'KEEPKEY_EMULATOR_RECEIPT_SOURCE', 'KEEPKEY_ZCASH_CLI_SOURCE', 'KEEPKEY_MONERO_CORE_VERIFIER_SOURCE', 'KEEPKEY_MONERO_CORE_VERIFIER_RECEIPT_SOURCE']) delete env[key]
     const result = Bun.spawnSync([process.execPath, join(directory, 'config.mjs')], {
       cwd: directory, env, stdout: 'pipe', stderr: 'pipe', timeout: 5_000,
     })
@@ -104,23 +110,33 @@ describe('Monero preview gates', () => {
 		expect(fixture.settings().moneroPendingBroadcasts).toBe(3)
 		expect(fixture.counts()).toEqual({ walletReads: 1, constructions: 0 })
 	})
-	test('firmware 7.17.0 or newer only', () => {
-		expect(firmwareSupportsMonero('7.17.0')).toBe(true)
-		expect(firmwareSupportsMonero('7.18.1')).toBe(true)
-		expect(firmwareSupportsMonero('7.16.0')).toBe(false)
-		expect(firmwareSupportsMonero(undefined)).toBe(false)
+	for (const readiness of [{ worker: false }, { tools: false }, { verifier: false }, { tools: false, verifier: false }]) {
+		test(`actual settings require the full Monero toolchain (${JSON.stringify(readiness)})`, () => {
+			const fixture = moneroSettingsFixture(true, false, readiness)
+			expect(fixture.settings()).toMatchObject({ moneroAvailable: false, moneroEnabled: true, moneroPendingBroadcasts: 3 })
+			expect(fixture.counts()).toEqual({ walletReads: 1, constructions: 0 })
+		})
+	}
+	test('actual settings offer Monero only when the complete signing toolchain is usable', () => {
+		expect(moneroSettingsFixture(false, false).settings().moneroAvailable).toBe(true)
+	})
+	test('monero-signing capability only', () => {
+		expect(supportsMoneroSigning([31])).toBe(true)
+		expect(supportsMoneroSigning([30])).toBe(false)
+		expect(supportsMoneroSigning(undefined)).toBe(false)
 	})
 
 	test('XMR is a chain-list row opening the standard asset page; the separate tab, panel and button are gone', () => {
 		const monero = CHAINS.find(c => c.id === 'monero')!
-		expect(monero).toMatchObject({ chainFamily: 'monero', symbol: 'XMR', decimals: 12, hidden: true, minFirmware: MONERO_MIN_FIRMWARE })
-		expect(isChainSupported(monero, '7.16.0')).toBe(false)
+		expect(monero).toMatchObject({ chainFamily: 'monero', symbol: 'XMR', decimals: 12, hidden: true })
+		expect(monero.minFirmware).toBeUndefined() // visibility uses Features.capabilities
+		expect(isChainSupported(monero, '7.16.0')).toBe(true)
 		expect(existsSync(join(import.meta.dir, '..', 'src/mainview/components/MoneroPanel.tsx'))).toBe(false)
 		expect(src('src/mainview/components/TopNav.tsx')).not.toContain('"monero"')
 		expect(src('src/mainview/App.tsx')).not.toMatch(/Monero/)
 		const dashboard = src('src/mainview/components/Dashboard.tsx')
 		expect(dashboard).not.toContain('onOpenMonero')
-		expect(dashboard).toContain('moneroChainVisible({ settingEnabled: moneroEnabled, firmwareVersion, watchOnly, bitcoinOnly: btcOnly })')
+		expect(dashboard).toContain('moneroChainVisible({ settingEnabled: moneroEnabled, capabilities, isEmulator, watchOnly, bitcoinOnly: btcOnly })')
 		expect(dashboard).toContain('<MoneroChainRow chain={moneroChain}')
 		expect(dashboard).toContain('onOpen={() => openChainPage(moneroChain)}')
 		const page = src('src/mainview/components/AssetPage.tsx')
@@ -146,8 +162,9 @@ describe('Monero preview gates', () => {
 			const result = fixture.run(research)
 			if (result.code) throw new Error(result.error)
 			expect(result.copy['monero-cli/vendor/darwin-arm64/monero-host-adapter']).toBe('monero-tools/monero-host-adapter')
+			expect(result.copy['monero-device-bundle/libmonero_core_verify.dylib']).toBe('monero-device/libmonero_core_verify.dylib')
+			expect(result.copy['monero-device-bundle/libmonero_device_proof.dylib']).toBeUndefined()
 			for (const [source, destination] of [
-				['monero-device-bundle', 'monero-device'],
 				['monero-emulator-bundle/libkkemu-monero.dylib', 'monero-emulator/libkkemu-monero.dylib'],
 				['monero-emulator-bundle/libkkemu-monero-signing.dylib', 'monero-emulator/libkkemu-monero-signing.dylib'],
 			]) expect(result.copy[source]).toBe(research ? destination : undefined)
@@ -164,9 +181,16 @@ describe('Monero preview gates', () => {
 		}
 	})
 
+	test('an unqualified architecture excludes a staged ARM verifier', async () => {
+		const fixture = await moneroPackagingFixture('x64')
+		const result = fixture.run(false)
+		expect(result.code).toBe(0)
+		expect(result.copy['monero-device-bundle/libmonero_core_verify.dylib']).toBeUndefined()
+	})
+
 	test('the form can collect a payment before automatic verification, and signing still confirms on the device', () => {
 		const sections = src('src/mainview/components/MoneroAssetSections.tsx')
-		expect(sections).toContain('const receiveOnly = wallet.sendBlocked === "emulator" || wallet.sendBlocked === "adapter"')
+		expect(sections).toContain('const signingUnavailable = wallet.signingReady !== true')
 		expect(sections).toContain('{(wallet.canSend || wallet.sendBlocked === "key-images") && !wallet.unrelayedTxid && !review && (')
 		expect(src('src/mainview/lib/monero-client.ts')).toContain('rpcRequest<{ txid: string }>("moneroSend", { prepareId }')
 		expect(src('src/bun/index.ts')).toContain('signingEmulator: moneroSigningEmulatorActive')

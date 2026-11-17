@@ -38,7 +38,7 @@ include .env
 export ELECTROBUN_DEVELOPER_ID ELECTROBUN_TEAMID ELECTROBUN_APPLEID ELECTROBUN_APPLEIDPASS
 endif
 
-.PHONY: FORCE electrobun-devkit electrobun-macos-helpers release-devkit-guard verify-bundle release-sums monero-cli monero-emulator monero-emulator-signing monero-adapter firmware-token-table-717 clearsign-worker-test sync-asset-data clearsign-worker-rehearsal-guard clearsign-worker-rehearsal-deploy install dev dev-hmr build build-stable build-canary build-signed dmg clean help vault sign-check notary-check verify verify-entitlements publish release upload-dmg upload-all-dmgs sign-release sign-release-intel verify-arch audit-macos-bundle submodules modules-install modules-build device-protocol-build modules-clean audit build-zcash-cli build-zcash-cli-debug build-zcash-cli-intel test test-unit test-rest test-sign-gating test-zcash-cli test-emu test-emu-erc7730 test-emu-erc7730-717 test-emu-solana-lut test-emu-erc7730-typed test-emu-pin build-intel build-signed-intel preflight build-emulator build-emulator-windows build-emulator-macos-release build-emulator-release clean-emulator test-emu-python i18n-extract i18n-sync i18n-baseline test-i18n
+.PHONY: FORCE electrobun-devkit electrobun-macos-helpers release-devkit-guard verify-bundle release-sums monero-cli monero-emulator monero-emulator-signing monero-adapter firmware-token-table-717 clearsign-worker-test sync-asset-data clearsign-worker-rehearsal-guard clearsign-worker-rehearsal-deploy install dev dev-hmr build build-stable build-canary build-signed dmg clean help vault sign-check notary-check verify verify-entitlements publish release upload-dmg upload-all-dmgs sign-release sign-release-intel verify-arch audit-macos-bundle submodules modules-install modules-build device-protocol-build modules-clean audit build-zcash-cli build-zcash-cli-debug build-zcash-cli-intel test test-unit test-rest test-sign-gating test-zcash-cli test-emu test-emu-erc7730 test-emu-erc7730-717 test-emu-solana-lut test-emu-erc7730-typed test-emu-pin build-intel build-signed-intel preflight build-emulator build-emulator-windows build-emulator-macos-release build-emulator-release clean-emulator test-emu-python i18n-extract i18n-sync i18n-baseline test-i18n test-monero test-monero-stream typecheck
 
 # --- Submodules (auto-init on fresh worktrees/clones) ---
 
@@ -446,10 +446,20 @@ i18n-sync:
 i18n-baseline:
 	cd $(PROJECT_DIR) && bun scripts/check-i18n.ts --write-baseline
 
+typecheck:
+	cd $(PROJECT_DIR) && ./node_modules/.bin/tsc --noEmit --skipLibCheck
+
+test-monero-stream:
+	cd $(PROJECT_DIR) && bun test src/bun/monero-stream-signer.test.ts
+
+test-monero:
+	cd $(PROJECT_DIR) && bun test src/bun/monero-*.test.ts monero-cli/src src/shared/monero-asset.test.ts __tests__/monero-preview-gates.test.ts __tests__/monero-node-ui.test.ts __tests__/monero-asset-ui.test.ts
+
 test-i18n:
 	cd $(PROJECT_DIR) && bun scripts/check-i18n.ts && bun test __tests__/i18n-safety.test.ts __tests__/report-fonts.test.ts
 
 test-unit:
+	cd $(PROJECT_DIR) && bun test src/bun/monero-stream-signer.test.ts __tests__/monero-core-verifier-artifact.test.ts
 	cd $(PROJECT_DIR) && bun test __tests__/rest-zcash-admission.test.ts
 	cd $(PROJECT_DIR) && bun test __tests__/broadcast-provider-error.test.ts
 	cd $(PROJECT_DIR) && bun test __tests__/zcash-nu7-admission.test.ts __tests__/zcash-nu7-binary.test.ts __tests__/zcash-tex-admission.test.ts
@@ -459,7 +469,7 @@ test-unit:
 	cd $(PROJECT_DIR) && bun test __tests__/send-zcash-readiness.test.ts
 	cd $(PROJECT_DIR) && bun test __tests__/zcash-nu7-packaging.test.ts
 	cd $(PROJECT_DIR) && bun test __tests__/emulator-signing-receipt.test.ts
-	cd $(PROJECT_DIR) && bun test __tests__/nu7-release-assets.test.ts __tests__/macos-signing-shim.test.ts
+	cd $(PROJECT_DIR) && bun test __tests__/nu7-release-assets.test.ts __tests__/monero-release-assets.test.ts __tests__/macos-signing-shim.test.ts
 	cd $(PROJECT_DIR) && bun test __tests__/release-artifact-isolation.test.ts
 	cd $(PROJECT_DIR) && bun test __tests__/provider-refresh.test.ts __tests__/evm-confirmation-watch.test.ts __tests__/connectivity.test.ts __tests__/cosmos-max-send.test.ts src/bun/txbuilder/account-send-safety.test.ts
 	cd $(PROJECT_DIR) && bun test __tests__/build-electrobun.test.ts
@@ -499,6 +509,7 @@ test-unit:
 	cd $(PROJECT_DIR) && bun test __tests__/swap-dialog-device-wait.test.ts
 	cd $(PROJECT_DIR) && bun test __tests__/swap-dialog-review.test.ts
 	cd $(PROJECT_DIR) && bun test __tests__/swap-amount-precision.test.ts
+	cd $(PROJECT_DIR) && bun test __tests__/zcash-swap-memo.test.ts
 	cd $(PROJECT_DIR) && bun test __tests__/swap-dialog-amount-precision.test.ts
 	cd $(PROJECT_DIR) && bun test __tests__/swap-recipient-guard.test.ts
 	cd $(PROJECT_DIR) && bun test __tests__/swap-execution-service.test.ts

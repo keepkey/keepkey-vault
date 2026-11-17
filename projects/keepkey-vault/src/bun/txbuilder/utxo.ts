@@ -12,6 +12,7 @@ import { bech32, bech32m } from '@scure/base'
 // @ts-ignore
 import bs58check from 'bs58check'
 import type { ChainDef } from '../../shared/chains'
+import { ZCASH_SWAP_MEMO_UNSUPPORTED } from '../../shared/swap-deposit-routing'
 import { getBtcBackend } from '../btc-backend'
 import type { BtcBackend } from '../btc-backend'
 import { utxoDiscoveryKey } from '../btc-backend/types'
@@ -439,7 +440,10 @@ export async function buildUtxoTx(
   params: BuildUtxoParams,
 ) {
   const { memo, feeLevel = 5, isMax = false, xpub, allXpubs, scriptTypeOverride, accountPath, satPerVByte, isSwapDeposit = false, strictBackend } = params
-  if (chain.id === 'zcash' && memo?.trim()) throw new Error('Zcash Nu7 transparent sends cannot include a memo in this build. Clear the memo and rebuild.')
+  if (chain.id === 'zcash' && memo?.trim()) {
+    if (isSwapDeposit) throw new Error(ZCASH_SWAP_MEMO_UNSUPPORTED)
+    throw new Error('Zcash Nu7 transparent sends cannot include a memo in this build. Clear the memo and rebuild.')
+  }
   const strict = !!strictBackend
   if (strict && chain.networkId !== BTC_NETWORK_ID) throw new Error(`${TAG} strict build is Bitcoin mainnet only`)
   // Chain tip for ZEC maturity + consensus branch selection; null when the

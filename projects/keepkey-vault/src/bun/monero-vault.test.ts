@@ -73,13 +73,18 @@ function fixture(emulator = false, replyMs?: { device: number; human: number }, 
   let locked = false, reviews = 0, configures = 0, starts = 0, stops = 0
   let configuredKey: Uint8Array | null = null
   let configuredOptions: Record<string, unknown> | null = null
-  const state = { state: 'ready', deviceId: 'PUBLIC-DEVICE-A', activeTransport: emulator ? 'emulator' : 'hid', isHiddenWallet: false, firmwareVersion: '7.17.0', firmwareHash: undefined as string | undefined }
+  const state = { state: 'ready', deviceId: 'PUBLIC-DEVICE-A', activeTransport: emulator ? 'emulator' : 'hid', isHiddenWallet: false, firmwareVersion: '7.17.0', firmwareHash: undefined as string | undefined, capabilities: emulator ? [] : [31] }
   const config = { enabled: true, offline: false, daemonUrl: 'https://node.example', restoreHeight: 100 }
   const status = { network: 'mainnet' as const, address: ADDRESS, balanceAtomic: '84653050000', unlockedBalanceAtomic: '84653050000',
     walletHeight: 120, transactions: [{ txid: 'ab'.repeat(32), amountAtomic: '84653050000', confirmations: 12, locked: false, height: 108, type: 'in' }],
     monitorReady: true, updatedAt: new Date().toISOString(), canSend: false as const }
   const sidecar: MoneroWatchSidecar & { failure: boolean } = {
     failure: false,
+    hasMoneroSigningTools: () => true,
+    isMoneroSignerWorkerReady: () => true,
+    isMoneroSendReady: () => true,
+    async createMoneroTransfer() { throw new Error("Watch fixture cannot build transactions") },
+    async relayMoneroTransaction() { throw new Error("Watch fixture cannot broadcast") },
     async startMoneroSidecar() { starts++ },
     stopMoneroSidecar() { stops++ },
     async configureMoneroWatch(options) {
@@ -103,8 +108,9 @@ function fixture(emulator = false, replyMs?: { device: number; human: number }, 
     expect(locked).toBe(true); delegate.onButtonRequest = () => { reviews++ }
     try { return await operation() } finally { delegate.onButtonRequest = null }
   }
-  const api = createMoneroVault({ engine, confirm, getConfig: () => ({ ...config }), sidecar, watchStore, onTransportFailure, ...(replyMs ? { replyMs } : {}) })
-  return { api, delegate, engine, config, state, status, sidecar,
+  const coreVerifier = { available: () => true, prepare: () => { throw new Error("Watch fixture cannot sign") } }
+  const api = createMoneroVault({ engine, confirm, getConfig: () => ({ ...config }), sidecar, watchStore, onTransportFailure, signingEmulator: () => emulator, coreVerifier, ...(replyMs ? { replyMs } : {}) })
+  return { api, delegate, engine, config, state, status, sidecar, coreVerifier,
     counts: () => ({ reviews, configures, starts, stops }), key: () => configuredKey, options: () => configuredOptions }
 }
 
@@ -141,13 +147,14 @@ test('emulator wraps both address display and view export in the interactive con
   expect(f.delegate.sent.some(item => item.debug || item.type === 100)).toBe(false)
 })
 
-test('connection progress moves from device approval to opening the wallet and clears on completion', async () => {
+test('tool validation precedes device consent and connection progress clears on completion', async () => {
   const f = fixture()
   let release!: () => void, started!: () => void
   const waiting = new Promise<void>(resolve => { started = resolve })
   f.sidecar.startMoneroSidecar = async () => { started(); await new Promise<void>(resolve => { release = resolve }) }
   const connection = f.api.connect()
-  expect((await f.api.getStatus()).connectionPhase).toBe('device')
+  expect((await f.api.getStatus()).connectionPhase).toBe('wallet')
+  expect(f.delegate.sent).toHaveLength(0)
   await waiting
   expect((await f.api.getStatus()).connectionPhase).toBe('wallet')
   release()
@@ -246,9 +253,11 @@ test('unexpected PIN challenge is cancelled and never answered by the raw bridge
   expect(f.counts().configures).toBe(0)
 })
 
-test('firmware older than 7.17.0 refuses connect before any USB traffic', async () => {
-  const f = fixture(); f.state.firmwareVersion = '7.16.0'
-  await expect(f.api.connect()).rejects.toThrow('7.17.0')
+test('missing signing capability refuses onboarding before any device traffic', async () => {
+  const f = fixture(); f.state.capabilities = []
+  await expect(f.api.connect()).rejects.toThrow('hardware signing')
+  await expect(f.api.getAddress()).rejects.toThrow('hardware signing')
+  expect(await f.api.getStatus()).toMatchObject({signingReady:false,sendBlocked:'firmware',address:''})
   expect(f.delegate.sent).toHaveLength(0)
   expect(f.counts().configures).toBe(0)
 })
@@ -416,18 +425,18 @@ for (const identity of ['device-state', 'engine-session'] as const) test(`hidden
   expect(f.counts().configures).toBe(0)
 })
 
-test('a hidden transition during device consent cannot save a watch identity or start its sidecar', async () => {
+test('a hidden transition during device consent cannot save a watch identity or configure a wallet', async () => {
   const f = fixture()
   let saved = 0
   const store: MoneroWatchStore = {
     async loadWatch() { return null }, async saveWatch() { saved++ }, async loadAddress() { return null },
     async saveAddress() { saved++ }, async loadImages() { return null }, async saveImages() { saved++ },
   }
-  const api = createMoneroVault({ engine: f.engine, sidecar: f.sidecar, getConfig: () => ({ ...f.config }), watchStore: store })
+  const api = createMoneroVault({ engine: f.engine, sidecar: f.sidecar, getConfig: () => ({ ...f.config }), watchStore: store, coreVerifier: {available: () => true,prepare: () => {throw Error("fixture cannot sign")}} })
   f.delegate.watchReadHook = () => { f.state.isHiddenWallet = true }
   await expect(api.connect()).rejects.toThrow(MONERO_STANDARD_WALLET_REQUIRED)
   expect(saved).toBe(0)
-  expect(f.counts().starts).toBe(0)
+  expect(f.counts().starts).toBe(1)
   expect(f.counts().configures).toBe(0)
   expect(await api.getStatus()).toMatchObject({ address: '', available: false, error: MONERO_STANDARD_WALLET_REQUIRED })
 })
@@ -497,12 +506,12 @@ test('firmware failure codes distinguish unsupported requests, cancellation and 
   }
 })
 
-test('only the two pinned physical research images retain the old watch protocol', async () => {
+test('research firmware without the signing capability cannot expose deposit addresses', async () => {
   for (const hash of ['9bc7798fb71a744c23a81cb7987645b7b5418d16fd035acc00770d57d4ae4928',
     '123af6de3b5ddbc1eeb94568825d1bb8107079bc9100ac67f9f6162ca34e2f83']) {
-    const f = fixture(); f.state.firmwareHash = hash; f.delegate.research = true
-    await f.api.connect()
-    expect(f.delegate.sent.map(x => x.type)).toEqual([540, 542, 27])
+    const f = fixture(); f.state.firmwareHash = hash; f.state.capabilities = []; f.delegate.research = true
+    await expect(f.api.connect()).rejects.toThrow('hardware signing')
+    expect(f.delegate.sent).toHaveLength(0)
   }
 })
 
@@ -513,4 +522,162 @@ test('malformed, duplicate or absent firmware failure codes never expose the dev
     expect(f.counts().configures).toBe(0)
     expect(f.delegate.consumed.every(report => report.every(byte => byte === 0))).toBe(true)
   }
+})
+
+test('capability firmware connects independently of version or build hash', async () => {
+  const f = fixture(); f.state.firmwareVersion = '7.16.0'
+  await f.api.connect()
+  expect(f.delegate.sent.map(x => x.type)).toEqual([1800, 1802, 27])
+})
+
+
+test('missing native verifier or wallet tools blocks onboarding and deposit addresses before device traffic', async () => {
+  for (const missing of ['native', 'wallet-tools']) {
+    const f = fixture()
+    if (missing === 'native') f.coreVerifier.available = () => false
+    else f.sidecar.hasMoneroSigningTools = () => false
+    await expect(f.api.connect()).rejects.toThrow('missing required Monero wallet tools')
+    await expect(f.api.getAddress()).rejects.toThrow('missing required Monero wallet tools')
+    expect(f.delegate.sent).toHaveLength(0)
+    expect(f.counts()).toMatchObject({ starts: 0, configures: 0 })
+    expect(await f.api.getStatus()).toMatchObject({ signingReady: false, address: '', sendBlocked: 'adapter' })
+  }
+})
+
+test('worker startup failure cannot expose a deposit address despite valid signing-tool metadata', async () => {
+  const f = fixture()
+  f.sidecar.isMoneroSignerWorkerReady = () => false
+  await expect(f.api.connect()).rejects.toThrow('missing required Monero wallet tools')
+  await expect(f.api.getAddress()).rejects.toThrow()
+  expect(f.delegate.sent).toHaveLength(0)
+  expect(f.counts().configures).toBe(0)
+  expect((await f.api.getStatus()).address).toBe('')
+})
+
+test('signing dependencies are rechecked after worker startup before device key consent', async () => {
+  const f = fixture()
+  f.sidecar.startMoneroSidecar = async () => { f.coreVerifier.available = () => false }
+  await expect(f.api.connect()).rejects.toThrow('missing required Monero wallet tools')
+  expect(f.delegate.sent).toHaveLength(0)
+  expect(f.counts().configures).toBe(0)
+})
+
+test('losing signing dependencies during wallet setup rejects onboarding and wipes approved view bytes', async () => {
+  const f = fixture(), configure = f.sidecar.configureMoneroWatch
+  f.sidecar.configureMoneroWatch = async options => {
+    const status = await configure(options)
+    f.coreVerifier.available = () => false
+    return status
+  }
+  await expect(f.api.connect()).rejects.toThrow('missing required Monero wallet tools')
+  expect(f.key()?.every(byte => byte === 0)).toBe(true)
+  expect(f.delegate.consumed.every(report => report.every(byte => byte === 0))).toBe(true)
+  expect(await f.api.getStatus()).toMatchObject({ signingReady: false, address: '', available: false })
+})
+
+test('a previously connected wallet cannot use cached deposit addresses after the signer worker becomes unavailable', async () => {
+  const f = fixture()
+  await f.api.connect()
+  const before = f.delegate.sent.length
+  f.sidecar.isMoneroSignerWorkerReady = () => false
+  await expect(f.api.getAddress()).rejects.toThrow()
+  expect(f.delegate.sent).toHaveLength(before)
+})
+
+
+test('an unconnected healthy signer cannot expose a deposit address before completing onboarding', async () => {
+  const f = fixture()
+  expect((await f.api.getStatus()).signingReady).toBe(true)
+  await expect(f.api.getAddress()).rejects.toThrow('Connect the Monero watch wallet first')
+  expect(f.delegate.sent).toHaveLength(0)
+  expect(f.counts()).toMatchObject({ starts: 0, configures: 0 })
+})
+
+const CACHE_SEED='0x'+'11'.repeat(20)
+const CACHE_SCOPE=JSON.stringify(['mainnet',[0x8000002c,0x80000080,0x80000000],'PUBLIC-DEVICE-A',CACHE_SEED,false])
+const SAVED_BALANCE={balanceAtomic:'84653050000',unlockedBalanceAtomic:'84653050000',walletHeight:120,updatedAt:'2026-01-01T12:00:00.000Z',spendStateKnown:true}
+function balanceStore(snapshot=SAVED_BALANCE) {
+ let saved={...snapshot},loads=0,writes=0
+ const store:MoneroWatchStore={async loadWatch(){return null},async saveWatch(){},async loadAddress(){return null},async saveAddress(){},async loadImages(){return null},async saveImages(){},
+  async loadBalance(scope){loads++;return scope===CACHE_SCOPE?{...saved}:null},async saveBalance(scope,_primary,value){if(scope!==CACHE_SCOPE)throw Error('wrong wallet');writes++;saved={...value}}}
+ return {store,counts:()=>({loads,writes}),saved:()=>({...saved})}
+}
+test('startup and offline polling restore the wallet-scoped balance without device I/O or spend authority',async()=>{
+ const cache=balanceStore(),f=fixture(false,undefined,cache.store);f.engine.currentSeedEthAddress=CACHE_SEED
+ const status=await f.api.getStatus()
+ expect(status).toMatchObject({available:false,canSend:false,monitorReady:false,cachedBalance:SAVED_BALANCE})
+ expect(f.delegate.sent).toHaveLength(0);expect(f.counts().starts).toBe(0)
+ f.config.offline=true
+ expect(await f.api.getStatus()).toMatchObject({canSend:false,cachedBalance:SAVED_BALANCE})
+ expect(cache.counts().writes).toBe(0)
+ f.state.isHiddenWallet=true
+ expect((await f.api.getStatus()).cachedBalance).toBeUndefined()
+ f.state.isHiddenWallet=false;f.engine.currentSeedEthAddress='0x'+'22'.repeat(20)
+ expect((await f.api.getStatus()).cachedBalance).toBeUndefined()
+ f.engine.currentSeedEthAddress=CACHE_SEED
+ expect((await f.api.getStatus()).cachedBalance).toEqual(SAVED_BALANCE)
+ f.config.enabled=false
+ expect((await f.api.getStatus()).cachedBalance).toBeUndefined()
+})
+test('scanning retains the prior snapshot and a fresh complete zero replaces it across a vault restart',async()=>{
+ const cache=balanceStore(),f=fixture(false,undefined,cache.store);f.engine.currentSeedEthAddress=CACHE_SEED
+ await f.api.getStatus();f.status.monitorReady=false;f.status.walletHeight=0;f.status.balanceAtomic='0';f.status.unlockedBalanceAtomic='0'
+ expect(await f.api.connect()).toMatchObject({monitorReady:false,cachedBalance:SAVED_BALANCE})
+ expect(cache.counts().writes).toBe(0)
+ f.status.monitorReady=true;f.status.walletHeight=200;f.status.updatedAt=new Date().toISOString()
+ const current=await f.api.getStatus()
+ expect(current.cachedBalance).toMatchObject({balanceAtomic:'0',walletHeight:200,updatedAt:f.status.updatedAt})
+ await f.api.flushBalanceCache()
+ expect(cache.counts().writes).toBe(1)
+ const restarted=fixture(false,undefined,cache.store);restarted.engine.currentSeedEthAddress=CACHE_SEED
+ expect((await restarted.api.getStatus()).cachedBalance).toEqual(current.cachedBalance!)
+ expect(restarted.delegate.sent).toHaveLength(0)
+})
+test('a cached read resolving after a hidden-wallet switch cannot reveal the old balance',async()=>{
+ const cache=balanceStore();let resolve!:(v:typeof SAVED_BALANCE)=>void
+ cache.store.loadBalance=async()=>new Promise(r=>{resolve=r})
+ const f=fixture(false,undefined,cache.store);f.engine.currentSeedEthAddress=CACHE_SEED
+ const pending=f.api.getStatus();f.state.isHiddenWallet=true;resolve(SAVED_BALANCE)
+ expect((await pending).cachedBalance).toBeUndefined()
+ expect(f.delegate.sent).toHaveLength(0)
+})
+
+test('an unverified received total cannot replace a previously spend-known cache and normal close can flush the last zero',async()=>{
+ const cache=balanceStore(),f=fixture(false,undefined,cache.store);f.engine.currentSeedEthAddress=CACHE_SEED
+ await f.api.getStatus();f.status.balanceAtomic='99999999999';f.status.unlockedBalanceAtomic='99999999999'
+ expect((await f.api.connect()).cachedBalance).toEqual(SAVED_BALANCE)
+ await f.api.flushBalanceCache();expect(cache.counts().writes).toBe(0)
+ f.status.balanceAtomic='0';f.status.unlockedBalanceAtomic='0';f.status.updatedAt=new Date().toISOString()
+ await f.api.getStatus();await f.api.flushBalanceCache()
+ expect(cache.saved().balanceAtomic).toBe('0')
+})
+
+test('connecting before the first status poll preserves the spend-known snapshot already on disk',async()=>{
+ const cache=balanceStore(),f=fixture(false,undefined,cache.store);f.engine.currentSeedEthAddress=CACHE_SEED
+ f.status.balanceAtomic='99999999999';f.status.unlockedBalanceAtomic='99999999999'
+ expect((await f.api.connect()).cachedBalance).toEqual(SAVED_BALANCE)
+ await f.api.flushBalanceCache()
+ expect(cache.counts()).toEqual({loads:1,writes:0});expect(cache.saved()).toEqual(SAVED_BALANCE)
+})
+
+test('connecting during a delayed startup read waits before replacing the saved spend-known balance',async()=>{
+ const cache=balanceStore();let resolve!:(v:typeof SAVED_BALANCE)=>void
+ cache.store.loadBalance=async()=>new Promise(r=>{resolve=r})
+ const f=fixture(false,undefined,cache.store);f.engine.currentSeedEthAddress=CACHE_SEED
+ f.status.balanceAtomic='99999999999';f.status.unlockedBalanceAtomic='99999999999'
+ const startup=f.api.getStatus(),connecting=f.api.connect()
+ while(f.counts().configures===0)await new Promise(r=>setTimeout(r,0))
+ expect(cache.counts().writes).toBe(0)
+ resolve(SAVED_BALANCE)
+ expect((await startup).cachedBalance).toBeUndefined()
+ expect((await connecting).cachedBalance).toEqual(SAVED_BALANCE)
+ await f.api.flushBalanceCache();expect(cache.counts().writes).toBe(0)
+})
+
+test('an unreadable startup snapshot is not overwritten if secure storage later permits writes',async()=>{
+ const cache=balanceStore();cache.store.loadBalance=async()=>{throw Error('locked')}
+ const f=fixture(false,undefined,cache.store);f.engine.currentSeedEthAddress=CACHE_SEED
+ expect((await f.api.connect()).cachedBalance).toBeUndefined()
+ await f.api.flushBalanceCache();expect(cache.counts().writes).toBe(0)
+ expect(cache.saved()).toEqual(SAVED_BALANCE)
 })

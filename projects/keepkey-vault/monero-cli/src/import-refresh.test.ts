@@ -9,8 +9,7 @@ function fixture(){
   status:{network:'mainnet',address:'fixture-address',balanceAtomic:'9000000000000',unlockedBalanceAtomic:'9000000000000',walletHeight:100,transactions:[],monitorReady:true,canSend:false},
   rpc:{call:async(method:string)=>{
    calls.push(method)
-   if(method==='refresh'){if(++refreshes===1)await gate.promise;return {}}
-   if(method==='get_height')return {height:100}
+   if(method==='get_height'){if(++refreshes===1)await gate.promise;return {height:100}}
    if(method==='get_balance')return {balance:refreshes===1?'9000000000000':'7000000000000',unlocked_balance:refreshes===1?'9000000000000':'7000000000000'}
    if(method==='get_transfers')return {in:[],pool:[]}
    if(method==='import_key_images')return {height:100,spent:'2000000000000',unspent:'7000000000000'}
@@ -25,7 +24,7 @@ test('key-image import waits for a new post-import balance, even with a pre-impo
  const imported=service.importKeyImages({offset:0,signedKeyImages:[image]}).finally(()=>{done=true})
  await Bun.sleep(5)
  try{expect(done).toBe(false)}finally{gate.resolve();await old;await imported}
- expect(calls.filter(x=>x==='refresh')).toHaveLength(2)
+ expect(calls.filter(x=>x==='get_height')).toHaveLength(2)
  expect(service.getStatus().balanceAtomic).toBe('7000000000000')
  expect(service.getStatus().unlockedBalanceAtomic).toBe('7000000000000')
 })
@@ -35,5 +34,5 @@ test('an import from a replaced watch wallet cannot refresh the new wallet',asyn
  const imported=service.importKeyImages({offset:0,signedKeyImages:[image]});imported.catch(()=>{})
  await Bun.sleep(5);internal.session={...session,rpc:{call:()=>{throw new Error('Replacement wallet was used')}}};gate.resolve()
  await old;await expect(imported).rejects.toThrow('wallet changed')
- expect(calls.filter(x=>x==='refresh')).toHaveLength(1)
+ expect(calls.filter(x=>x==='get_height')).toHaveLength(1)
 })
