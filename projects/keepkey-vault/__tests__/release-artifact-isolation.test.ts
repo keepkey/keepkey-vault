@@ -13,6 +13,18 @@ interface Job { steps?: Step[] }
 const directories: string[] = []
 afterEach(() => { for (const directory of directories.splice(0)) rmSync(directory, { recursive: true, force: true }) })
 
+test('macOS updater manifests pass the full Python archive regression suite', () => {
+  if (!Bun.which('zstd')) throw new Error('zstd is required to run the macOS updater manifest regressions without skips')
+  const result = Bun.spawnSync(['python3', '-m', 'unittest', 'scripts/test_regenerate_macos_update_manifests.py', '-v'], {
+    cwd: root, env: { ...process.env, PYTHONDONTWRITEBYTECODE: '1' },
+    stdout: 'pipe', stderr: 'pipe', timeout: 60_000, maxBuffer: 1024 * 1024,
+  })
+  const output = result.stdout.toString() + result.stderr.toString()
+  if (result.exitCode !== 0) throw new Error(output || 'The Python macOS updater manifest regressions failed')
+  expect(Number(output.match(/Ran (\d+) tests?/)?.[1])).toBeGreaterThanOrEqual(8)
+  expect(output).not.toMatch(/\bskipped\b/)
+}, 65_000)
+
 test('the actual release download selectors exclude every unsigned Windows CI upload', () => {
   const jobs = Object.values(workflow.jobs) as Job[]
   const unsigned = jobs.filter(job => job.steps?.some(step => step.run?.includes('scripts/build-windows-production.ps1 -SkipSign')))
