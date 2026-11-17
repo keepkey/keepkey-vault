@@ -1,3 +1,5 @@
+import { baseUnitsToDecimalString, normalizeDecimals } from './max-send'
+
 /** Shared locale validation; safe in both the desktop backend and the WebView. */
 export function validNumberLocale(value: unknown): string {
   if (typeof value === 'string' && value.length <= 64) {
@@ -40,4 +42,23 @@ export function decimalAmount(value: number, significantDigits = 8): string {
   return value.toLocaleString('en-US', value < 1
     ? { useGrouping: false, maximumSignificantDigits: significantDigits }
     : { useGrouping: false, maximumFractionDigits: significantDigits })
+}
+
+/** Convert a canonical USD input using the quote, rounding down once to asset units. */
+export function usdToCryptoAmount(value: string, pricePerUnit: number, decimals: number): string {
+  const precision = normalizeDecimals(decimals)
+  if (precision === null || value.length > 512 || !/^\d+(?:\.\d*)?$/.test(value)
+    || !Number.isFinite(pricePerUnit) || pricePerUnit <= 0) return ''
+  // Prices are computed numbers; use their decimal representation rather than
+  // dividing floats or rounding to significant digits before cutting precision.
+  const parts = (decimal: string) => {
+    const match = decimal.match(/^(\d+)(?:\.(\d*))?(?:e([+-]?\d+))?$/i)!
+    const fraction = match[2] ?? ''
+    return { units: BigInt(match[1] + fraction), scale: fraction.length - Number(match[3] ?? 0) }
+  }
+  const usd = parts(value), quote = parts(String(pricePerUnit))
+  const shift = quote.scale + precision - usd.scale
+  const numerator = usd.units * 10n ** BigInt(Math.max(0, shift))
+  const denominator = quote.units * 10n ** BigInt(Math.max(0, -shift))
+  return baseUnitsToDecimalString(numerator / denominator, precision)
 }

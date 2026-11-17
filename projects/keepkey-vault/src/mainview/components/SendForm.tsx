@@ -18,12 +18,13 @@ import { DOCS_LINKS, watch } from "../../shared/docs-links"
 import { caipToNetworkId, isTokenCaip } from "../../shared/chains"
 import type { ChainDef } from "../../shared/chains"
 import type { ChainBalance, TokenBalance, BuildTxResult, BroadcastResult, AddressBookEntry } from "../../shared/types"
-import { validateAddress, isBurnAddress, knownTokenContract } from "../../shared/address-validation"
+import { validateAddress, isBurnAddress, knownTokenContract, sameAddress as isSameAddress } from "../../shared/address-validation"
 import { balanceUnverifiedReason, isBalanceUnverified } from "../../shared/balance-display-state"
-import { normalizeAmountInput, decimalAmount } from '../../shared/locale'
+import { normalizeAmountInput, usdToCryptoAmount } from '../../shared/locale'
 import { baseUnitsToDecimalString } from '../../shared/max-send'
 import { describeGasPriceError, networkGasPriceGwei } from '../../shared/gas-price-errors'
 import { useZcashNu7Support } from '../hooks/useZcashNu7Support'
+import { parseSendQr } from '../../shared/send-qr'
 
 type SendPhase = 'input' | 'built' | 'signed' | 'broadcast'
 
@@ -90,7 +91,13 @@ export function SendForm({ chain, address, balance, balanceLoading = false, toke
 
 	const { t, i18n } = useTranslation("send")
 	const { fmt, fmtCompact, locale } = useFiat()
-	const [recipient, setRecipient] = useState("")
+	const [recipientState, setRecipientState] = useState({ value: '', revision: 0 })
+	const recipient = recipientState.value
+	// A fresh edit or scan retires old confirmations, even when it returns to an
+	// earlier recipient or fills the same address again.
+	const setRecipient = useCallback((value: string) => {
+		setRecipientState(previous => ({ value, revision: previous.revision + 1 }))
+	}, [])
 	const [amount, setAmount] = useState("")
 	const [usdAmount, setUsdAmount] = useState("")
 	const [inputMode, setInputMode] = useState<'crypto' | 'usd'>('crypto')
@@ -119,6 +126,7 @@ export function SendForm({ chain, address, balance, balanceLoading = false, toke
 	const [matchedContact, setMatchedContact] = useState<AddressBookEntry | null>(null)
 	const [vaultDestinationError, setVaultDestinationError] = useState('')
 	const [checkingVaultDestination, setCheckingVaultDestination] = useState(false)
+	const [destinationVerifiedFor, setDestinationVerifiedFor] = useState<string | null>(null)
 	const [vaultDestinationRetry, setVaultDestinationRetry] = useState(0)
 	const [addressIsNew, setAddressIsNew] = useState(false)
 	const [showSaveDialog, setShowSaveDialog] = useState(false)
@@ -136,7 +144,7 @@ export function SendForm({ chain, address, balance, balanceLoading = false, toke
 	const senderReady = chain.chainFamily !== 'evm' || !!address
 	const requestKey = JSON.stringify([chain.id, chain.signMethod, tokenCaip,
 		chain.chainFamily === 'evm' ? owner.toLowerCase() : owner,
-		scriptTypeOverride, evmAddressIndex, recipient, amount, usdAmount, inputMode,
+		scriptTypeOverride, evmAddressIndex, recipient, recipientState.revision, amount, usdAmount, inputMode,
 		memo, isMax, feeLevel, feeMode, customGasPrice, customGasLimit, customSatPerVByte, zcashSupport.sessionEpoch])
 	const requestKeyRef = useRef(requestKey)
 	const operationGeneration = useRef(0)
@@ -278,17 +286,12 @@ export function SendForm({ chain, address, balance, balanceLoading = false, toke
 		const canonical = normalizeAmountInput(v, locale, i18n.language)
 		setUsdAmount(canonical ?? v)
 		if (hasPrice && v) {
-			const n = canonical === null ? NaN : Number(canonical)
-			if (!isNaN(n)) {
-				const crypto = n / pricePerUnit
-				setAmount(decimalAmount(crypto))
-			} else {
-				setAmount("")
-			}
+			const decimals = (isTokenSend ? token?.decimals : chain.decimals) ?? 8
+			setAmount(canonical === null ? '' : usdToCryptoAmount(canonical, pricePerUnit, decimals))
 		} else {
 			setAmount("")
 		}
-	}, [hasPrice, pricePerUnit, locale, i18n.language])
+	}, [hasPrice, pricePerUnit, locale, i18n.language, isTokenSend, token?.decimals, chain.decimals])
 
 	// Swap input mode
 	const toggleInputMode = useCallback(() => {
@@ -310,8 +313,10 @@ export function SendForm({ chain, address, balance, balanceLoading = false, toke
 		if (!isMax) return null
 		const tx = buildResult?.unsignedTx
 		if (chain.chainFamily === 'utxo') {
-			const out = tx?.outputs?.find((o: any) => o.addressType === 'spend' && o.address === recipient)
-			return out ? (Number(out.amount) / 10 ** chain.decimals).toFixed(chain.decimals) : null
+			const out = tx?.outputs?.find((o: any) => o.addressType === 'spend' && isSameAddress(o.address, recipient, chain))
+			if (!out || !/^\d+$/.test(String(out.amount))) return null
+			const [whole, fraction = ''] = baseUnitsToDecimalString(BigInt(out.amount), chain.decimals).split('.')
+			return chain.decimals > 0 ? `${whole}.${fraction.padEnd(chain.decimals, '0')}` : whole
 		}
 		if (chain.chainFamily !== 'evm' || !tx) return null
 		try {
@@ -320,7 +325,7 @@ export function SendForm({ chain, address, balance, balanceLoading = false, toke
 			return /^0xa9059cbb[0-9a-f]{128}$/i.test(data) && token?.decimals != null
 				? baseUnitsToDecimalString(BigInt('0x' + data.slice(74)), token.decimals) : null
 		} catch { return null }
-	}, [isMax, chain.chainFamily, chain.decimals, buildResult, recipient, isTokenSend, token?.decimals])
+	}, [isMax, chain, buildResult, recipient, isTokenSend, token?.decimals])
 
 	const addressValidation = useMemo(() => {
 		if (!recipient) return null
@@ -331,13 +336,20 @@ export function SendForm({ chain, address, balance, balanceLoading = false, toke
 	// its logo) or a new external address (offer to save). Debounced; clears on every
 	// edit so we never show stale info while the next lookup resolves.
 	const addressValid = addressValidation?.valid === true
-	// Self-send: the recipient is this account's own sending address (EVM compares
-	// case-insensitively). It builds and signs fine, so warn and require an explicit
-	// confirmation; only the network fee would leave the wallet.
-	const sameAddress = useCallback((a: string, b: string | null | undefined) =>
-		!!b && (chain.chainFamily === 'evm' ? a.toLowerCase() === b.toLowerCase() : a === b), [chain.chainFamily])
+	const destinationKey = JSON.stringify([activeCaip, owner, recipient.trim(), vaultDestinationRetry])
+	const destinationReady = !addressValid || destinationVerifiedFor === destinationKey
+	// The shared matcher recognizes equivalent validated address encodings.
+	const sameAddress = useCallback((a: string, b: string | null | undefined) => isSameAddress(a, b, chain), [chain])
 	const isSelfSend = addressValid && sameAddress(recipient.trim(), address)
-	const [selfSendConfirmed, setSelfSendConfirmed] = useState(false)
+	const confirmationIdentity = JSON.stringify([chain.id, chain.networkId, activeCaip, owner, address,
+		scriptTypeOverride, evmAddressIndex, zcashSupport.sessionEpoch])
+	const confirmationIdentityRef = useRef({ key: confirmationIdentity, revision: 0 })
+	if (confirmationIdentityRef.current.key !== confirmationIdentity) {
+		confirmationIdentityRef.current = { key: confirmationIdentity, revision: confirmationIdentityRef.current.revision + 1 }
+	}
+	const confirmationKey = JSON.stringify([confirmationIdentity, confirmationIdentityRef.current.revision, recipient, recipientState.revision])
+	const [selfSendConfirmedFor, setSelfSendConfirmedFor] = useState<string | null>(null)
+	const selfSendConfirmed = selfSendConfirmedFor === confirmationKey
 	// Read by the recipient-lookup effect without adding to its dependency list.
 	const isOwnSendingAddressRef = useRef((a: string) => sameAddress(a, address))
 	isOwnSendingAddressRef.current = (a: string) => sameAddress(a, address)
@@ -354,16 +366,17 @@ export function SendForm({ chain, address, balance, balanceLoading = false, toke
 		return known ? { kind: 'tokenContract' as const, token: known.symbol } : null
 	}, [addressValid, recipient, chain, isTokenSend, token?.contractAddress, token?.caip])
 	const recipientNeedsAck = recipientRisk?.kind === 'burn' || recipientRisk?.kind === 'tokenContract'
-	const [riskConfirmed, setRiskConfirmed] = useState(false)
+	const [riskConfirmedFor, setRiskConfirmedFor] = useState<string | null>(null)
+	const riskConfirmed = riskConfirmedFor === confirmationKey
 	const [recipientIsContract, setRecipientIsContract] = useState(false)
 	const evmChainId = chain.chainFamily === 'evm' ? chain.id : null
-	useEffect(() => { setSelfSendConfirmed(false); setRiskConfirmed(false) }, [recipient, address])
 	useEffect(() => {
 		setMatchedContact(null)
 		setAddressIsNew(false)
 		setRecipientIsContract(false)
 		setVaultDestinationError('')
 		setCheckingVaultDestination(false)
+		setDestinationVerifiedFor(null)
 		const addr = recipient.trim()
 		if (!addr || !addressValid) return
 		setCheckingVaultDestination(true)
@@ -371,7 +384,9 @@ export function SendForm({ chain, address, balance, balanceLoading = false, toke
 		const networkId = caipToNetworkId(activeCaip)
 		const handle = setTimeout(() => {
 			rpcRequest('checkVaultDestination', { networkId, address: addr, assetCaip: activeCaip }, 60000)
-				.then(() => rpcRequest<AddressBookEntry | null>("matchAddress", { networkId, address: addr }, 5000)
+				.then(() => {
+					if (alive) setDestinationVerifiedFor(destinationKey)
+					return rpcRequest<AddressBookEntry | null>("matchAddress", { networkId, address: addr }, 5000)
 					.then(entry => {
 						if (!alive) return
 						if (entry) {
@@ -393,21 +408,23 @@ export function SendForm({ chain, address, balance, balanceLoading = false, toke
 							}
 						}
 					})
-					.catch(() => { /* contact detection is best-effort; never block sending */ }))
+					.catch(() => { /* contact detection is best-effort; never block sending */ })
+				})
 				.catch(e => { if (alive) setVaultDestinationError(e.message || 'Could not verify vault destination') })
 				.finally(() => { if (alive) setCheckingVaultDestination(false) })
 		}, 300)
 		return () => { alive = false; clearTimeout(handle) }
-	}, [recipient, activeCaip, addressValid, vaultDestinationRetry, evmChainId])
+	}, [recipient, activeCaip, addressValid, vaultDestinationRetry, evmChainId, destinationKey])
 
 	const handleBuild = useCallback(async () => {
 		if (!senderReady || !zcashSupport.canSend()) return
+		if ((isSelfSend && !selfSendConfirmed) || (recipientNeedsAck && !riskConfirmed) || recipientRisk?.kind === 'sentToken') return
 		if (!recipient || (!amount && !isMax)) return
 		if (isMax && balanceLoading && activeAssetUnverified) return
 		if (!isMax && (invalidAmountInput || canonicalAmount === null || !Number.isFinite(amountNum) || amountNum <= 0)) {
 			setError(t('invalidAmount', { defaultValue: 'Enter an ungrouped decimal amount, for example 1.5. Thousands separators are not accepted.' })); return
 		}
-		if (checkingVaultDestination || vaultDestinationError) { setError(vaultDestinationError || 'Checking vault destination…'); return }
+		if (checkingVaultDestination || !destinationReady || vaultDestinationError) { setError(vaultDestinationError || 'Checking vault destination…'); return }
 		if (addressValidation && !addressValidation.valid) { setError(t(addressValidation.error!)); return }
 		if (exceedsBalance) { setError(t("exceedsBalanceShort")); return }
 		const assetDecimals = isTokenSend ? token?.decimals : chain.decimals
@@ -469,7 +486,7 @@ export function SendForm({ chain, address, balance, balanceLoading = false, toke
 		} finally {
 			if (operationIsCurrent(generation)) setLoading(false)
 		}
-	}, [chain, recipient, amount, canonicalAmount, amountNum, invalidAmountInput, locale, i18n.language, t, memo, feeLevel, feeMode, supportsCustomFee, customGasPrice, customGasLimit, customSatPerVByte, isMax, addressValidation, exceedsBalance, isTokenSend, token, balance?.balance, xpubOverride, scriptTypeOverride, evmAddressIndex, checkingVaultDestination, vaultDestinationError, requestKey, displaySymbol, displayBalance, activeCaip, address, balanceLoading, activeAssetUnverified, senderReady, zcashSupport.canSend])
+	}, [chain, recipient, amount, canonicalAmount, amountNum, invalidAmountInput, locale, i18n.language, t, memo, feeLevel, feeMode, supportsCustomFee, customGasPrice, customGasLimit, customSatPerVByte, isMax, addressValidation, exceedsBalance, isTokenSend, token, balance?.balance, xpubOverride, scriptTypeOverride, evmAddressIndex, checkingVaultDestination, destinationReady, vaultDestinationError, requestKey, displaySymbol, displayBalance, activeCaip, address, balanceLoading, activeAssetUnverified, senderReady, zcashSupport.canSend, isSelfSend, selfSendConfirmed, recipientNeedsAck, riskConfirmed, recipientRisk?.kind])
 
 	const handleSign = useCallback(async () => {
 		if (!senderReady || !zcashSupport.canSend() || !buildResult || !currentSigningContext) return
@@ -578,28 +595,19 @@ export function SendForm({ chain, address, balance, balanceLoading = false, toke
 	// Parse QR scan result — handles plain addresses and BIP-21 / EIP-681 URIs
 	const handleQrScan = useCallback((data: string) => {
 		setShowScanner(false)
-		// Sanitize: trim, strip control chars, limit length
-		const clean = data.trim().replace(/[\x00-\x1f\x7f]/g, '').slice(0, 256)
-		if (!clean) return
-
-		// BIP-21 / EIP-681: scheme:addr?amount=X&label=Y
-		const schemeMatch = clean.match(/^([a-z]+):(.+)/i)
-		let addr = schemeMatch ? schemeMatch[2] : clean
-		// Strip query params, extract amount/memo if present
-		const qIdx = addr.indexOf('?')
-		let params: URLSearchParams | null = null
-		if (qIdx >= 0) {
-			params = new URLSearchParams(addr.slice(qIdx + 1))
-			addr = addr.slice(0, qIdx)
+		const parsed = parseSendQr(data, chain, isTokenSend)
+		if (!parsed) { setError(t('invalidAddress')); return }
+		setRecipient(parsed.recipient)
+		// A label is not an on-chain memo; a new scan also clears a stale tag.
+		setMemo(parsed.memo)
+		if (parsed.amount !== undefined) {
+			setInputMode('crypto')
+			setAmount(parsed.amount)
+			setIsMax(false)
+			const usd = Number(parsed.amount) * pricePerUnit
+			setUsdAmount(hasPrice && Number.isFinite(usd) ? usd.toFixed(2) : '')
 		}
-		setRecipient(addr)
-		if (params) {
-			const amt = params.get('amount') || params.get('value')
-			if (amt) { setAmount(amt); setIsMax(false) }
-			const m = params.get('memo') || params.get('dt') || params.get('label')
-			if (m) setMemo(m)
-		}
-	}, [])
+	}, [chain, isTokenSend, hasPrice, pricePerUnit, t])
 
 	// Build explorer URL from assetData
 	const explorerUrl = useMemo(() => {
@@ -811,7 +819,7 @@ export function SendForm({ chain, address, balance, balanceLoading = false, toke
 									{t("selfSendBody", { symbol: displaySymbol, defaultValue: "This sends {{symbol}} from this account back to the same address. Nothing arrives anywhere new, and you still pay the network fee." })}
 								</Text>
 								<Flex as="label" align="center" gap="2" mt="2" cursor="pointer">
-									<input type="checkbox" checked={selfSendConfirmed} onChange={e => setSelfSendConfirmed(e.target.checked)} style={{ accentColor: 'var(--gold)' }} />
+									<input type="checkbox" checked={selfSendConfirmed} onChange={e => setSelfSendConfirmedFor(e.target.checked ? confirmationKey : null)} style={{ accentColor: 'var(--gold)' }} />
 									<Text fontSize="11px" color="kk.textPrimary">{t("selfSendConfirm", { defaultValue: "I understand, send to my own address anyway" })}</Text>
 								</Flex>
 							</Box>
@@ -828,7 +836,7 @@ export function SendForm({ chain, address, balance, balanceLoading = false, toke
 									{recipientRisk?.kind === 'burn' ? t("recipientBurnBody") : t("recipientTokenContractBody")}
 								</Text>
 								<Flex as="label" align="center" gap="2" mt="2" cursor="pointer">
-									<input type="checkbox" checked={riskConfirmed} onChange={e => setRiskConfirmed(e.target.checked)} style={{ accentColor: 'var(--rose)' }} />
+									<input type="checkbox" checked={riskConfirmed} onChange={e => setRiskConfirmedFor(e.target.checked ? confirmationKey : null)} style={{ accentColor: 'var(--rose)' }} />
 									<Text fontSize="11px" color="kk.textPrimary">{recipientRisk?.kind === 'burn' ? t("recipientBurnConfirm") : t("recipientTokenContractConfirm")}</Text>
 								</Flex>
 							</Box>
@@ -1048,7 +1056,7 @@ export function SendForm({ chain, address, balance, balanceLoading = false, toke
 
 					{/* Self-send and burn/contract recipients: Build waits for the explicit confirmation above. */}
 					{(isSelfSend && !selfSendConfirmed) || (recipientNeedsAck && !riskConfirmed) ? (
-						<Button w="full" px="4" py="2" borderRadius="12px" bg="var(--gold)" color="var(--ink-0)" fontWeight="600" disabled>
+						<Button w="full" px="4" py="2" borderRadius="12px" bg="var(--gold)" color="var(--ink-0)" fontWeight="600" onClick={handleBuild} disabled>
 							{t("buildTransaction")}
 						</Button>
 					) : (
@@ -1060,7 +1068,7 @@ export function SendForm({ chain, address, balance, balanceLoading = false, toke
 						borderRadius="12px"
 						_hover={{ bg: "var(--gold-2)" }}
 						onClick={handleBuild}
-						disabled={loading || !senderReady || !zcashSupport.available || (isMax && balanceLoading && activeAssetUnverified) || invalidAmountInput || checkingVaultDestination || !!vaultDestinationError || !recipient || (!amount && !isMax) || (addressValidation != null && !addressValidation.valid) || recipientRisk?.kind === 'sentToken'}
+						disabled={loading || !senderReady || !zcashSupport.available || (isMax && balanceLoading && activeAssetUnverified) || invalidAmountInput || checkingVaultDestination || !destinationReady || !!vaultDestinationError || !recipient || (!amount && !isMax) || (addressValidation != null && !addressValidation.valid) || recipientRisk?.kind === 'sentToken'}
 						px="4" py="2"
 						w="full"
 					>
