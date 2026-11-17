@@ -465,6 +465,8 @@ test-unit:
 	cd $(PROJECT_DIR) && bun test __tests__/offline-asset-icons.test.ts
 	cd $(PROJECT_DIR) && bun test __tests__/add-address-dialog-zcash.test.ts
 	cd $(PROJECT_DIR) && bun test __tests__/ton-address-checksum.test.ts __tests__/address-unsupported-formats.test.ts __tests__/empty-balance-i18n.test.ts
+	cd $(PROJECT_DIR) && bun test __tests__/send-qr.test.ts __tests__/same-address-identity.test.ts
+	cd $(PROJECT_DIR) && bun test __tests__/send-form-usd-amount.test.ts __tests__/send-form-qr-amount.test.ts __tests__/send-form-qr-memo.test.ts __tests__/send-form-max-recipient.test.ts __tests__/send-form-self-send-match.test.ts __tests__/send-form-confirm-guard.test.ts
 	cd $(PROJECT_DIR) && bun test __tests__/electrobun-fixes.test.ts
 	cd $(PROJECT_DIR) && bun test src/bun/txbuilder/evm-units.test.ts
 	cd $(PROJECT_DIR) && bun test __tests__/hyperliquid-identity.test.ts
