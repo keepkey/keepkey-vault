@@ -73,11 +73,11 @@ def main():
             raise RuntimeError("Release signature does not match pinned signing fingerprint")
         archive = args.archive.resolve() if args.archive else root / archive_name
         if not args.archive:
-            # Retry transient server/transfer failures without changing the
-            # official source or the authenticated hash checked below. Three
+            # Retry failed downloads, including partial transfers (curl exit 18),
+            # without changing the official source or authenticated hash below. Three
             # 160-second attempts plus backoff fit within the process deadline.
             run(["curl", "-fL", "--proto", "=https", "--tlsv1.2", "--connect-timeout", "15", "--max-time", "160",
-                 "--retry", "2", "--retry-delay", "2", "--retry-max-time", "480",
+                 "--retry", "2", "--retry-all-errors", "--retry-delay", "2", "--retry-max-time", "480",
                  "https://downloads.getmonero.org/cli/" + archive_name, "-o", archive], timeout=500)
         if sha(archive) != matches[0]:
             raise RuntimeError("Monero archive does not match authenticated release hash")
