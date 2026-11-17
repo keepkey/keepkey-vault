@@ -4,7 +4,6 @@ import { tmpdir } from 'node:os'
 import { join, relative, resolve } from 'node:path'
 import { writeZcashNu7Manifest } from '../scripts/write-zcash-nu7-manifest'
 import { requireZcashNu7Builder, ZCASH_NU7_BUILDER_CAPABILITY } from '../src/bun/zcash-nu7-binary'
-import config from '../electrobun.config'
 
 const directories: string[] = []
 const temporary = () => { const path = mkdtempSync(join(tmpdir(), 'zcash-nu7-package-')); directories.push(path); return path }
@@ -31,11 +30,29 @@ test('a staged helper is accepted only with its matching post-mutation manifest'
 })
 
 test('the actual Electrobun copy map keeps the manifest next to its selected executable', () => {
+  // CI runs unit tests before native sidecars are built. Exercise the real
+  // config with explicit synthetic inputs instead of relying on local caches.
+  const directory = temporary()
+  const source = join(directory, 'selected-zcash-cli')
+  const project = resolve(import.meta.dir, '..')
+  const readCopy = () => {
+    const run = Bun.spawnSync([process.execPath, '-e', `import config from ${JSON.stringify(join(project, 'electrobun.config.ts'))}; console.log(JSON.stringify(config.build.copy))`], {
+      cwd: directory, env: { ...process.env, KEEPKEY_ZCASH_CLI_SOURCE: source }, stdout: 'pipe', stderr: 'pipe',
+    })
+    if (run.exitCode) throw new Error(run.stderr.toString())
+    return JSON.parse(run.stdout.toString()) as Record<string, string>
+  }
   const executable = process.platform === 'win32' ? 'zcash-cli.exe' : 'zcash-cli'
-  const copy = config.build.copy as Record<string, string>
-  const source = Object.keys(copy).find(key => copy[key] === executable)
-  expect(source).toBeDefined()
-  expect(copy[`${source}.nu7.json`]).toBe(`${executable}.nu7.json`)
+  expect(Object.values(readCopy())).not.toContain(executable)
+  writeFileSync(source, ZCASH_NU7_BUILDER_CAPABILITY)
+  const key = relative(project, source)
+  const unpaired = readCopy()
+  expect(unpaired[key]).toBe(executable)
+  expect(unpaired[`${key}.nu7.json`]).toBeUndefined()
+  writeZcashNu7Manifest(source)
+  const copy = readCopy()
+  expect(copy[key]).toBe(executable)
+  expect(copy[`${key}.nu7.json`]).toBe(`${executable}.nu7.json`)
 })
 
 test('Hutch scratch evaluation preserves absolute staged helper, emulator and receipt sources', () => {
