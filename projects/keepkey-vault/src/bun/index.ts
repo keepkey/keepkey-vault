@@ -32,6 +32,10 @@ import { createHash, randomUUID } from "crypto"
 import { createSwapQuoteLeases } from './swap-quote-lease'
 import { assessSwapRisk } from '../shared/swap-risk'
 import { validateContactOnNetwork } from '../shared/address-validation'
+import { isEnsName } from '../shared/ens'
+import { resolveEnsContact, repairLegacyEnsContacts } from './addressbook-ens'
+import { resolveStoredEnsContact } from './db'
+import { previewCertificationEntries } from './addressbook-clearsign'
 import { singleFlight } from './single-flight'
 import { PasswordBank } from './password-bank'
 import { passwordDeviceCipher } from './password-device'
@@ -1310,7 +1314,7 @@ async function requestSigningApprovalDecision(id: string, signal?: AbortSignal) 
 }
 // Settings loaded lazily after DB init — defaults used until then
 let restApiEnabled = false
-let walletConnectEnabled = false
+let walletConnectEnabled = true
 let moneroEnabled = false
 /** Own node is preferred. Existing explicit remote URLs are preserved. */
 const MONERO_DEFAULT_NODE = MONERO_LOCAL_URL
@@ -1420,7 +1424,7 @@ function loadSettings() {
 	moneroEnabled = getSetting('monero_enabled') === '1' && isMoneroSidecarAvailable()
 	setMoneroEmulatorEnabled(moneroEnabled)
 	restApiEnabled = getSetting('rest_api_enabled') === '1'
-	walletConnectEnabled = getSetting('walletconnect_enabled') === '1'
+	walletConnectEnabled = getSetting('walletconnect_enabled') !== '0'
 	const storedZcashPrivacyEnabled = getSetting('zcash_privacy_enabled') === '1'
 	const zcashSidecarAvailable = !!findZcashCliBinary()
 	zcashPrivacyEnabled = storedZcashPrivacyEnabled && zcashSidecarAvailable
@@ -4276,6 +4280,23 @@ async function verifyKnownEvmVaultTransfer(params: any) {
 }
 function vaultCertificationEntries() {
 	return certifiableAddressBookEntries(vaultBook().list(), getAddressBookList({ kind: 'external', savedOnly: true }))
+}
+const repairEnsContactsOnce = singleFlight<void>()
+async function repairSavedEnsContacts(): Promise<void> {
+	if (offlineMode) return
+	return repairEnsContactsOnce('addressbook-ens', async () => {
+		const changed = await repairLegacyEnsContacts(getAddressBookList({ kind: 'external', savedOnly: true }),
+			(name, network) => withTimeout(resolveEnsContact(name, network), 10000, 'ENS lookup'),
+			(entry, resolved) => {
+				const chains = getAllChains().filter(c => c.networkId === entry.networkId)
+				if (!validateContactOnNetwork(resolved.address, chains, matchAddressBook(entry.networkId, resolved.address, 'evm')).valid) return false
+				return resolveStoredEnsContact(entry, resolved)
+			})
+		if (changed) {
+			invalidateAddressBookCertification()
+			try { rpc.send['addressbook-changed']({}) } catch { /* webview not ready */ }
+		}
+	})
 }
 async function listRegisteredVaults() {
 	const epoch = activitySessionEpoch
@@ -9200,6 +9221,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						if (t) e.address = t
 					}
 				}
+				if (!bitcoinOnly) void repairSavedEnsContacts().catch(error => console.warn('[addressbook] legacy ENS repair failed:', error))
 				const external = getAddressBookList({ kind: 'external', networkId, search, savedOnly: true, chainId: bitcoinOnly ? 'bitcoin' : undefined })
 				// Vault rows only with Multisig on, and never at the cost of the contact list.
 				const vaultRows = multisigFeature.enabled && getDb()
@@ -9208,6 +9230,10 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				const vaults = vaultRows.filter(e => (!bitcoinOnly || e.chainId === 'bitcoin') && (!search || `${e.label} ${e.address}`.toLowerCase().includes(search.toLowerCase())))
 				const vaultIds = new Set(vaults.map(e => `${e.networkId}:${e.address.toLowerCase()}`))
 				return [...own, ...external.filter(e => !vaultIds.has(`${e.networkId}:${e.address.toLowerCase()}`)), ...vaults].map(e => ({ ...e, deviceLabel: labels[e.deviceId] || e.deviceLabel }))
+			},
+			resolveAddressBookEns: async (params) => {
+				requireOnline('ENS lookup')
+				return withTimeout(resolveEnsContact(params.name, params.networkId), 10000, 'ENS lookup')
 			},
 			addAddressBook: async (params) => {
 				// Wallet-agnostic: contacts can be saved from any session (incl. hidden).
@@ -9218,20 +9244,30 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				const sameNetwork = getAllChains().filter(c => c.networkId === params.networkId)
 				const chain = sameNetwork[0]
 				if (!chain) { console.warn('[addressbook] addAddressBook: unknown networkId', params.networkId); return null }
-				// Same refusals as the Add address dialog: bad format/checksum, .eth, zero/burn, own wallet.
+				let address = params.address.trim()
+				let ensName: string | undefined
+				if (isEnsName(address)) {
+					requireOnline('ENS lookup')
+					const resolved = await withTimeout(resolveEnsContact(address, chain.networkId), 10000, 'ENS lookup')
+					if (params.expectedAddress && params.expectedAddress.toLowerCase() !== resolved.address.toLowerCase()) throw new Error('The ENS address changed. Look up the name again before saving.')
+					address = resolved.address
+					ensName = resolved.ensName
+					if (scope.walletId !== getWalletDbScope()?.walletId) throw new Error('Wallet changed during ENS lookup. Add the contact again.')
+				}
+				// Validate the resolved destination as strictly as a pasted address.
 				// zcash and zcash-shielded share a networkId: a u1/zs1 contact is checked as shielded.
-				const contactCheck = validateContactOnNetwork(params.address, sameNetwork, matchAddressBook(chain.networkId, params.address, chain.chainFamily))
-				if (!contactCheck.valid) throw new Error(`Address not saved (${contactCheck.error}): ${params.address}`)
+				const contactCheck = validateContactOnNetwork(address, sameNetwork, matchAddressBook(chain.networkId, address, chain.chainFamily))
+				if (!contactCheck.valid) throw new Error(`Address not saved (${contactCheck.error}): ${address}`)
 				// Stored lowercase, a mistyped mixed-case address would lose its checksum and later pass as an owner.
 				if (params.cosigner && chain.chainFamily === 'evm') {
 					const { ethers } = await import('ethers')
-					if (!ethers.utils.isAddress(params.address)) throw new Error(`Not a valid address (checksum failed): ${params.address}`)
+					if (!ethers.utils.isAddress(address)) throw new Error(`Not a valid address (checksum failed): ${address}`)
 				}
-				const prior = params.cosigner ? matchAddressBook(chain.networkId, params.address, chain.chainFamily) : null
+				const prior = params.cosigner ? matchAddressBook(chain.networkId, address, chain.chainFamily) : null
 				const entry = addExternalEntry({
 					walletId: scope.walletId, deviceId: scope.deviceId,
 					networkId: chain.networkId, chainId: chain.id, chainFamily: chain.chainFamily,
-					address: params.address, label: params.label ?? null, cosigner: params.cosigner,
+					address, label: ensName || params.label || null, ensName, cosigner: params.cosigner,
 				})
 				if (entry) {
 					// Certified contacts are labeled external EVM entries: a co-signer save that keeps the label changes none.
@@ -9262,9 +9298,10 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					isBitcoinOnlyVariant(engine.getDeviceState().firmwareVariant),
 				)
 			},
-			previewAddressBookCertification: async () =>
-				contactsFromEntries(vaultCertificationEntries(), false)
-					.map(c => ({ label: c.label, network: c.network, address: `0x${c.destination}` })),
+			previewAddressBookCertification: async () => {
+				await repairSavedEnsContacts()
+				return previewCertificationEntries(vaultCertificationEntries())
+			},
 			certifyAddressBook: async (params) => {
 				if (!addressBookClearsignEnabled) throw new Error('Address Book ClearSign is not enabled')
 				if (!engine.wallet) throw new Error('No device connected')

@@ -45,5 +45,8 @@
 	"cosigner": "Medeondertekenaar",
 	"cosignerOption": "Safe-medeondertekenaar: als eerste aanbieden bij het maken van een multisig",
 	"markCosigner": "Markeren als Safe-medeondertekenaar",
-	"notCosigner": "Geen medeondertekenaar"
+	"notCosigner": "Geen medeondertekenaar",
+	"addressOrEns": "Adres of ENS-naam",
+	"ensResolving": "ENS-naam opzoeken…",
+	"certificationExcluded": "Deze contacten kunnen niet worden gecertificeerd:"
 }

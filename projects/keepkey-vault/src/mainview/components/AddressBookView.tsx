@@ -18,7 +18,7 @@ import { DocsLink } from "./DocsLink"
 import { DOCS_LINKS } from "../../shared/docs-links"
 import { Z } from "../lib/z-index"
 import { evmChainLabel } from "../../shared/chains"
-import type { AddressBookEntry, AddressBookTx, AppSettings } from "../../shared/types"
+import type { AddressBookEntry, AddressBookTx, AddressBookCertificationPreview, AppSettings } from "../../shared/types"
 import { VaultIdentityBadge, VaultIdentityDetails } from './VaultIdentityBadge'
 
 const chainById = new Map(CHAINS.map(c => [c.id, c]))
@@ -86,12 +86,16 @@ export function AddressBookView() {
 
   // One review of every contact before the device is asked to certify them all.
   const [certifyPreview, setCertifyPreview] = useState<{ label: string; network: string; address: string }[] | null>(null)
+  const [excludedContacts, setExcludedContacts] = useState<AddressBookCertificationPreview['excluded']>([])
   const reviewCertify = useCallback(async () => {
     setCertificationNotice("")
     try {
-      const contacts = await rpcRequest<{ label: string; network: string; address: string }[]>("previewAddressBookCertification", undefined, 5000)
-      if (!contacts.length) setCertificationNotice("Add at least one labeled EVM contact before certifying")
-      else setCertifyPreview(contacts)
+      const preview = await rpcRequest<AddressBookCertificationPreview>("previewAddressBookCertification", undefined, 30000)
+      setExcludedContacts(preview.excluded)
+      if (!preview.contacts.length) setCertificationNotice(preview.excluded.length
+        ? preview.excluded.map(c => `${c.label} (${c.address}): ${c.reason}`).join('; ')
+        : "Add at least one labeled EVM contact before certifying")
+      else setCertifyPreview(preview.contacts)
     } catch (error: any) {
       setCertificationNotice(error?.message || "Could not list the contacts to certify")
     }
@@ -188,7 +192,7 @@ export function AddressBookView() {
     const q = search.trim().toLowerCase()
     return tabRows
       .filter(e => chainFilter === "all" || e.memberChainIds.includes(chainFilter))
-      .filter(e => !q || e.label?.toLowerCase().includes(q) || e.address.toLowerCase().includes(q))
+      .filter(e => !q || e.label?.toLowerCase().includes(q) || e.ensName?.toLowerCase().includes(q) || e.address.toLowerCase().includes(q))
   }, [tabRows, chainFilter, search])
 
   const handleSave = useCallback((ids: string[], label: string) =>
@@ -240,6 +244,10 @@ export function AddressBookView() {
             <Text fontSize="xs" color="var(--text-2)" mb="3" pl="42px">{uiText("Your KeepKey signs this list. Sends to these addresses on these networks then show the name on your KeepKey.")}</Text>
             <Text fontSize="10px" color="var(--text-2)" mb="3">{uiText("Vault certificates cover only the displayed destination label, address and network. Cosigners, thresholds and token support are separate account metadata. Bitcoin vault destinations are not supported by this EVM certificate flow.")}</Text>
             {certifyPreview.length > 16 && <Text fontSize="11px" color="var(--gold)" mb="3">{uiText("Choose at most 16 destinations by removing entries from this review.")}</Text>}
+            {excludedContacts.length > 0 && <Box mb="3">
+              <Text fontSize="11px" color="var(--gold)">{t('certificationExcluded', { defaultValue: 'These contacts cannot be certified:' })}</Text>
+              {excludedContacts.map((c, i) => <Text key={i} fontSize="11px" color="var(--text-2)">{c.label} ({c.address}): {c.reason}</Text>)}
+            </Box>}
             <Flex direction="column" gap="2">
               {certifyPreview.map((c) => {
                 const chain = CHAINS.find(ch => caipToNetworkId(ch.caip) === c.network)
@@ -434,6 +442,7 @@ function Row({ entry, connected, onSave, onRemove, onCosigner }: {
                 </Text>
               </Flex>
             )}
+            {entry.isEns && <Text fontSize="9px" color="var(--teal)" px="1" borderRadius="sm" border="1px solid var(--teal)" title={entry.ensName}>ENS</Text>}
             {entry.cosigner && (
               <Text fontSize="9px" fontWeight="700" color="var(--gold)" textTransform="uppercase" letterSpacing="0.04em" px="1" borderRadius="sm" border="1px solid var(--gold)">
                 {t("cosigner", { defaultValue: "Co-signer" })}

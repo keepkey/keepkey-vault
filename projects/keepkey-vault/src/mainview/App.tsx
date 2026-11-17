@@ -143,7 +143,7 @@ function App() {
 	const [updateDismissed, setUpdateDismissed] = useState(false)
 	const [appVersion, setAppVersion] = useState<{ version: string; channel: string } | null>(null)
 	const [restApiEnabled, setRestApiEnabled] = useState(false)
-	const [walletConnectEnabled, setWalletConnectEnabled] = useState(false)
+	const [walletConnectEnabled, setWalletConnectEnabled] = useState(true)
 	const [hiveEnabled, setHiveEnabled] = useState(false)
 	const [emulatorEnabled, setEmulatorEnabled] = useState(false)
 	const [offlineModeSetting, setOfflineModeSetting] = useState(false)

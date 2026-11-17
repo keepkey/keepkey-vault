@@ -1,27 +1,10 @@
 {
-  "_note": "Firmware manifest bundled with the vault app. Ships inside the signed/notarized DMG — tampering breaks Apple's signature. Used as the guaranteed floor when remote manifest is unavailable. Hash format: header-stripped (tail -c +257) for firmware, full binary for bootloader.",
+  "_note": "Firmware manifest bundled with the vault app. Ships inside the signed/notarized DMG \u2014 tampering breaks Apple's signature. Used as the guaranteed floor when remote manifest is unavailable. Hash format: header-stripped (tail -c +257) for firmware, full binary for bootloader.",
   "latest": {
     "firmware": {
       "version": "v7.14.2",
       "url": "v7.14.2/firmware.keepkey.bin",
       "hash": "45fe90c1dd72df59815475b37404635c5b890b298d74324632383965f533e9fa"
-    },
-    "bootloader": {
-      "version": "v2.1.4",
-      "url": "bl_v2.1.4/blupdater.bin",
-      "hash": "6bb7cfd28262fcd61c450fdc3f6932650bdf16a134ab6c1bc6f90b0d1578e620"
-    },
-    "firmwareBitcoinOnly": {
-      "version": "v7.14.3",
-      "url": "v7.14.3/firmware.keepkey.bitcoin-only.bin",
-      "hash": "4cf84bfe977d00ca18d871791f3308206649c88b681ed9ad09c5081787488f64"
-    }
-  },
-  "beta": {
-    "firmware": {
-      "version": "v7.16.0",
-      "url": "v7.16.0/firmware.keepkey.bin",
-      "hash": "95f5c15218b28dbbcf748127685d52f625e06bb79cd8caf6d553b55f38470dc1"
     },
     "bootloader": {
       "version": "v2.1.4",

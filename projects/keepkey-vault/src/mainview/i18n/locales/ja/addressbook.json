@@ -45,5 +45,8 @@
 	"cosigner": "共同署名者",
 	"cosignerOption": "Safe共同署名者：マルチシグ作成時に最初に表示",
 	"markCosigner": "Safe共同署名者として設定",
-	"notCosigner": "共同署名者ではない"
+	"notCosigner": "共同署名者ではない",
+	"addressOrEns": "アドレスまたはENS名",
+	"ensResolving": "ENS名を検索中…",
+	"certificationExcluded": "次の連絡先は認証できません："
 }

@@ -19,6 +19,10 @@ mock.module('../../src/mainview/components/AssetIcon', () => ({ AssetIcon: () =>
 const OWN = '0x9768236c72F2EddE1A46aff6c1D85f5E252E6183'
 const saved: any[] = []
 mock.module('../../src/mainview/lib/rpc', () => ({ rpcRequest: async (method: string, params: any) => {
+  if (method === 'resolveAddressBookEns') {
+    if (params.name === 'missing.eth') throw new Error('No address is set')
+    return { ensName: params.name.toLowerCase(), address: '0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed' }
+  }
   if (method === 'matchAddress') return params.address.toLowerCase() === OWN.toLowerCase() ? { address: OWN, kind: 'own' } : null
   if (method === 'addAddressBook') { saved.push(params); return { id: 'x', ...params } }
   throw new Error(`Unexpected RPC: ${method}`)
@@ -53,6 +57,7 @@ const out: Record<string, any> = {}
 for (const [name, addr] of [
   ['badChecksum', '0x5aaeb6053F3E94C9b9A09f33669435E7Ef1BeAed'],
   ['ens', 'vitalik.eth'],
+  ['missingEns', 'missing.eth'],
   ['zero', '0x0000000000000000000000000000000000000000'],
   ['burn', '0x000000000000000000000000000000000000dEaD'],
   ['own', OWN],
@@ -60,11 +65,18 @@ for (const [name, addr] of [
 ] as const) {
   await type(addr)
   const s = state()
-  out[name] = { canAdd: s.canAdd, cosigner: s.cosigner, error: ['invalidEvmChecksum', 'ensNotSupported', 'burnAddress', 'contactIsOwnAddress'].find(k => s.text.includes(k)) ?? null }
+  out[name] = { canAdd: s.canAdd, cosigner: s.cosigner, error: ['invalidEvmChecksum', 'No address is set', 'burnAddress', 'contactIsOwnAddress'].find(k => s.text.includes(k)) ?? null }
 }
 await click(buttons().find(b => b.textContent === 'addAddress')!)
 await settle()
 out.saved = saved.map(s => s.address)
+await act(async () => root.render(<AddAddressDialog key="ens" onClose={() => {}} />))
+await click(buttons()[0])
+await click(buttons().find(b => b.textContent?.includes('Base'))!)
+await type('Alice.ETH')
+await click(buttons().find(b => b.textContent === 'addAddress')!)
+await settle()
+out.ensSaved = saved.at(-1)
 await act(async () => root.unmount())
 console.log(JSON.stringify(out))
 process.exit(0)

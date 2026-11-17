@@ -19,6 +19,7 @@ scripts/.icon-cache/
 # Credentials — NEVER commit
 .env
 .env.*
+.enves
 *.p12
 *.cer
 *.key
@@ -26,6 +27,8 @@ scripts/.icon-cache/
 *.mobileprovision
 
 # Build artifacts
+__pycache__/
+*.py[cod]
 _build/
 .make/
 projects/keepkey-vault/_build/

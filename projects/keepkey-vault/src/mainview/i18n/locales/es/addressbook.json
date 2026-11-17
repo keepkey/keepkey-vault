@@ -45,5 +45,8 @@
 	"cosigner": "Cofirmante",
 	"cosignerOption": "Cofirmante de Safe: ofrecerlo primero al crear una multifirma",
 	"markCosigner": "Marcar como cofirmante de Safe",
-	"notCosigner": "No es cofirmante"
+	"notCosigner": "No es cofirmante",
+	"addressOrEns": "Dirección o nombre ENS",
+	"ensResolving": "Buscando el nombre ENS…",
+	"certificationExcluded": "Estos contactos no se pueden certificar:"
 }

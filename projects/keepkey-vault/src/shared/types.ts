@@ -688,7 +688,7 @@ export interface FirmwareManifest {
      *  during onboarding. Absent until a btc-only build is published. */
     firmwareBitcoinOnly?: FirmwareBinaryRef
   }
-  beta: {
+  beta?: {
     firmware: FirmwareBinaryRef
     bootloader: FirmwareBinaryRef
     firmwareBitcoinOnly?: FirmwareBinaryRef
@@ -1002,6 +1002,9 @@ export interface AddressBookEntry {
   chainId: string            // internal chain id, e.g. 'ethereum'
   address: string            // recipient/own address (normalized); xpub for own UTXO rows
   label?: string
+  /** Forward-resolved ENS name; address holds the pinned destination. */
+  ensName?: string
+  isEns?: boolean
   derivationPath?: string    // own rows — label binds to path, survives re-derive
   scriptType?: string        // own UTXO rows (p2pkh|p2sh-p2wpkh|p2wpkh|p2tr)
   addressIndex?: number      // own EVM index / BTC account index
@@ -1012,6 +1015,11 @@ export interface AddressBookEntry {
   lastUsedAt?: number        // latest send to this entry from the Send page (list reads only)
   createdAt: number
   updatedAt: number
+}
+
+export interface AddressBookCertificationPreview {
+  contacts: { label: string; network: string; address: string }[]
+  excluded: { label: string; network: string; address: string; reason: string }[]
 }
 
 export interface AddressBookTx {
@@ -1648,7 +1656,7 @@ export interface AppSettings {
   fiatCurrency: FiatCurrency     // display currency (default 'USD')
   numberLocale: string           // number formatting locale (default 'en-US')
   btcMultisigEnabled: boolean    // runtime feature flag: Bitcoin multisig co-signing (default OFF)
-  walletConnectEnabled: boolean   // feature flag: WalletConnect dApp support (default OFF)
+  walletConnectEnabled: boolean   // WalletConnect connection preference (default ON)
   moneroAvailable?: boolean      // optional compatibility field; build contains a runnable sidecar
   moneroEnabled: boolean         // experimental XMR sidecar and wallet surface (default OFF)
   moneroDaemonUrl: string        // public HTTPS Monero daemon, or loopback local daemon

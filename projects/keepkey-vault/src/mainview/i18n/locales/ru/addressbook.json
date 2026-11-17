@@ -45,5 +45,8 @@
 	"cosigner": "Соподписант",
 	"cosignerOption": "Соподписант Safe: предлагать первым при создании мультиподписи",
 	"markCosigner": "Отметить как соподписанта Safe",
-	"notCosigner": "Не соподписант"
+	"notCosigner": "Не соподписант",
+	"addressOrEns": "Адрес или имя ENS",
+	"ensResolving": "Поиск имени ENS…",
+	"certificationExcluded": "Эти контакты нельзя сертифицировать:"
 }

@@ -1,5 +1,6 @@
 import { createHash } from 'crypto'
-import type { AddressBookEntry } from '../shared/types'
+import type { AddressBookEntry, AddressBookCertificationPreview } from '../shared/types'
+import { isEnsName } from '../shared/ens'
 import { firmwareClearSigns } from './calldata-decoder'
 
 const REQUEST_MAGIC = Buffer.from('KKABREQ1', 'ascii')
@@ -44,8 +45,8 @@ function normalizeContact(contact: CertifiedContact): CertifiedContact {
   const label = contact.label.trim()
   const encoded = Buffer.from(label, 'ascii')
   if (!label || encoded.length > ADDRESS_BOOK_CLEARSIGN_LABEL_MAX || encoded.toString('ascii') !== label ||
-      /[%\x00-\x1f\x7f-\xff]/.test(label)) {
-    throw new Error(`Contact label must be 1-${ADDRESS_BOOK_CLEARSIGN_LABEL_MAX} printable ASCII characters without %`)
+      /[%\x00-\x1f\x7f-\xff]| {2}/.test(label)) {
+    throw new Error(`Contact label must be 1-${ADDRESS_BOOK_CLEARSIGN_LABEL_MAX} printable ASCII characters without % or consecutive spaces`)
   }
   return { network, destinationType: contact.destinationType, destination, label }
 }
@@ -93,6 +94,24 @@ export function contactsFromEntries(entries: AddressBookEntry[], enforceLimit = 
     throw new Error(`Alpha firmware supports at most ${ADDRESS_BOOK_CLEARSIGN_MAX_ENTRIES} certified contacts`)
   }
   return contacts
+}
+
+/** An ineligible saved contact must not prevent reviewing the rest of the book. */
+export function previewCertificationEntries(entries: AddressBookEntry[]): AddressBookCertificationPreview {
+  const eligible: AddressBookEntry[] = []
+  const excluded: AddressBookCertificationPreview['excluded'] = []
+  for (const entry of entries) {
+    if (entry.kind !== 'external' || !entry.label || !entry.networkId.startsWith('eip155:')) continue
+    try {
+      if (isEnsName(entry.address)) throw new Error('ENS name has not resolved to an address')
+      contactsFromEntries([entry], false)
+      eligible.push(entry)
+    } catch (error) {
+      excluded.push({ label: entry.label, network: entry.networkId, address: entry.address,
+        reason: error instanceof Error ? error.message : String(error) })
+    }
+  }
+  return { contacts: contactsFromEntries(eligible, false).map(c => ({ label: c.label, network: c.network, address: `0x${c.destination}` })), excluded }
 }
 
 export function buildCertificationRequest(contacts: CertifiedContact[], revision: number): { payload: Buffer; root: Buffer } {

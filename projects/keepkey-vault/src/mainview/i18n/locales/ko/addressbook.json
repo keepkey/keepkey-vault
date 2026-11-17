@@ -45,5 +45,8 @@
 	"cosigner": "공동 서명자",
 	"cosignerOption": "Safe 공동 서명자: 멀티시그를 만들 때 먼저 제안",
 	"markCosigner": "Safe 공동 서명자로 표시",
-	"notCosigner": "공동 서명자 아님"
+	"notCosigner": "공동 서명자 아님",
+	"addressOrEns": "주소 또는 ENS 이름",
+	"ensResolving": "ENS 이름 조회 중…",
+	"certificationExcluded": "다음 연락처는 인증할 수 없습니다:"
 }

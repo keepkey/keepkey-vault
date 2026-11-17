@@ -45,5 +45,8 @@
 	"cosigner": "Współsygnatariusz",
 	"cosignerOption": "Współsygnatariusz Safe: proponuj go jako pierwszego przy tworzeniu multisig",
 	"markCosigner": "Oznacz jako współsygnatariusza Safe",
-	"notCosigner": "Nie jest współsygnatariuszem"
+	"notCosigner": "Nie jest współsygnatariuszem",
+	"addressOrEns": "Adres lub nazwa ENS",
+	"ensResolving": "Wyszukiwanie nazwy ENS…",
+	"certificationExcluded": "Tych kontaktów nie można certyfikować:"
 }

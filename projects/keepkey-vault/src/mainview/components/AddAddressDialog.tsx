@@ -6,6 +6,7 @@ import { rpcRequest } from "../lib/rpc"
 import { Z } from "../lib/z-index"
 import { CHAINS } from "../../shared/chains"
 import { validateContactOnNetwork } from "../../shared/address-validation"
+import { isEnsName, type ResolvedEnsContact } from '../../shared/ens'
 import { AssetIcon } from "./AssetIcon"
 import type { AddressBookEntry } from "../../shared/types"
 
@@ -26,26 +27,45 @@ export function AddAddressDialog({ onClose, onAdded }: { onClose: () => void; on
   const [error, setError] = useState<string | null>(null)
 
   const chain = useMemo(() => NETWORKS.find(c => c.id === chainId), [chainId])
+  const ensInput = chain?.chainFamily === 'evm' && isEnsName(address)
+  const ensKey = `${chain?.networkId}:${address.trim()}`
+  const [ensLookup, setEnsLookup] = useState<{ key: string; result?: ResolvedEnsContact; error?: string } | null>(null)
+  const resolvedEns = ensInput && ensLookup?.key === ensKey ? ensLookup.result : undefined
+  const ensError = ensInput && ensLookup?.key === ensKey ? ensLookup.error : undefined
+  const checkingEns = ensInput && !resolvedEns && !ensError
+  const contactAddress = ensInput ? resolvedEns?.address || '' : address.trim()
+  const ensLookupFailure = t('addContactFailed', { defaultValue: 'Could not add address' })
+  useEffect(() => {
+    if (!ensInput || !chain) return
+    let alive = true
+    setEnsLookup(null)
+    const timer = setTimeout(() => {
+      rpcRequest<ResolvedEnsContact>('resolveAddressBookEns', { name: address.trim(), networkId: chain.networkId }, 15000)
+        .then(result => { if (alive) setEnsLookup({ key: ensKey, result }) })
+        .catch((error: any) => { if (alive) setEnsLookup({ key: ensKey, error: error?.message || ensLookupFailure }) })
+    }, 300)
+    return () => { alive = false; clearTimeout(timer) }
+  }, [ensInput, ensKey, chain, address, ensLookupFailure])
   // Hidden chain variants share the same network: Zcash contacts may be
   // transparent, Sapling or unified. Match addAddressBook's network validation.
   const networkChains = useMemo(() => chain ? CHAINS.filter(c => c.networkId === chain.networkId) : [], [chain])
   const [ownMatch, setOwnMatch] = useState(false)
-  const formatValid = !!chain && !!address.trim() && validateContactOnNetwork(address, networkChains).valid
+  const formatValid = !!chain && !!contactAddress && validateContactOnNetwork(contactAddress, networkChains).valid
   // Flag the wallet's own addresses: they are already in the book as "own".
   useEffect(() => {
     setOwnMatch(false)
     if (!chain || !formatValid) return
     let alive = true
     const handle = setTimeout(() => {
-      rpcRequest<AddressBookEntry | null>("matchAddress", { networkId: chain.networkId, address: address.trim() }, 5000)
+      rpcRequest<AddressBookEntry | null>("matchAddress", { networkId: chain.networkId, address: contactAddress }, 5000)
         .then(entry => { if (alive) setOwnMatch(entry?.kind === "own") })
         .catch(() => { /* best-effort; addAddressBook refuses own addresses too */ })
     }, 300)
     return () => { alive = false; clearTimeout(handle) }
-  }, [address, chain, formatValid])
+  }, [contactAddress, chain, formatValid])
   const validation = useMemo(
-    () => (address.trim() && chain ? validateContactOnNetwork(address, networkChains, ownMatch ? { kind: "own" } : null) : null),
-    [address, chain, networkChains, ownMatch],
+    () => (contactAddress && chain ? validateContactOnNetwork(contactAddress, networkChains, ownMatch ? { kind: "own" } : null) : null),
+    [contactAddress, chain, networkChains, ownMatch],
   )
   const canSave = !!chain && !!address.trim() && validation?.valid === true && !saving
 
@@ -62,13 +82,15 @@ export function AddAddressDialog({ onClose, onAdded }: { onClose: () => void; on
       const entry = await rpcRequest<AddressBookEntry | null>("addAddressBook", {
         networkId: chain.networkId,
         address: address.trim(),
-        label: label.trim() || undefined,
+        label: resolvedEns?.ensName || label.trim() || undefined,
+        ...(resolvedEns ? { expectedAddress: resolvedEns.address } : {}),
         ...(cosigner && chain.chainFamily === "evm" && validation?.valid ? { cosigner: true } : {}),
-      }, 8000)
-      if (entry) onAdded?.(entry)
+      }, 15000)
+      if (!entry) throw new Error(t('addContactFailed'))
+      onAdded?.(entry)
       onClose()
-    } catch {
-      setError(t("addContactFailed", { defaultValue: "Could not add address" }))
+    } catch (error: any) {
+      setError(error?.message || t("addContactFailed", { defaultValue: "Could not add address" }))
       setSaving(false)
     }
   }
@@ -121,11 +143,14 @@ export function AddAddressDialog({ onClose, onAdded }: { onClose: () => void; on
 
         {/* Address */}
         <Box>
-          <Text fontSize="11px" color="var(--text-2)" mb="1">{t("addressField", { defaultValue: "Address" })}</Text>
+          <Text fontSize="11px" color="var(--text-2)" mb="1">{chain?.chainFamily === 'evm' ? t('addressOrEns', { defaultValue: 'Address or ENS name' }) : t("addressField", { defaultValue: "Address" })}</Text>
           <Input value={address} onChange={(e) => setAddress(e.target.value)}
                  placeholder={chain ? t("addressForNetwork", { defaultValue: "{{symbol}} address", symbol: chain.symbol }) : t("addressField", { defaultValue: "Address" })}
                  size="sm" fontFamily="mono" bg="var(--ink-0)" border="1px solid var(--line)" color="var(--text-0)"
                  wordBreak="break-all" />
+          {checkingEns && <Text fontSize="11px" color="var(--text-2)" mt="1">{t('ensResolving', { defaultValue: 'Looking up ENS name…' })}</Text>}
+          {ensError && <Text fontSize="11px" color="var(--rose)" mt="1">{ensError}</Text>}
+          {resolvedEns && <Text fontSize="11px" color="var(--teal)" fontFamily="mono" wordBreak="break-all" mt="1">{resolvedEns.address}</Text>}
           {validation && !validation.valid && (
             <Text fontSize="11px" color="var(--rose)" mt="1">{t(validation.error!, { ns: "send", defaultValue: "Invalid address" })}</Text>
           )}
@@ -137,7 +162,7 @@ export function AddAddressDialog({ onClose, onAdded }: { onClose: () => void; on
         {/* Label */}
         <Box>
           <Text fontSize="11px" color="var(--text-2)" mb="1">{t("labelOptional", { defaultValue: "Label (optional)" })}</Text>
-          <Input value={label} onChange={(e) => setLabel(e.target.value)} maxLength={100}
+          <Input value={ensInput ? resolvedEns?.ensName || address.trim() : label} disabled={!!ensInput} onChange={(e) => setLabel(e.target.value)} maxLength={100}
                  placeholder={t("labelPlaceholder", { defaultValue: "Label (e.g. Alice)" })}
                  size="sm" bg="var(--ink-0)" border="1px solid var(--line)" color="var(--text-0)"
                  onKeyDown={(e) => { if (e.key === "Enter" && canSave) handleAdd() }} />
