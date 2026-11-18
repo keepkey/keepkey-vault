@@ -2,11 +2,15 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { alphaHead, qualifiedAlpha, firmwareVersion, FIRMWARE_REPOSITORY } from './alpha-emulator-source.mjs'
-import { verifyAlphaReceipt, bundleManifest, REQUIRED_SYMBOLS } from './refresh-alpha-emulator.mjs'
+import { verifyAlphaReceipt, bundleManifest, newestArtifacts, REQUIRED_SYMBOLS } from './refresh-alpha-emulator.mjs'
 
 const sha = 'a'.repeat(40)
 const root = Buffer.from('027c1fde75db6c36393e095e0dc5ab9a5bcf1ae9eb92b5d36e212a2bf7f8a6e321', 'hex')
 const files = { 'libkkemu.dylib': Buffer.concat([root, Buffer.from('mac')]), 'libkkemu.dll': Buffer.concat([root, Buffer.from('win')]) }
+test('artifact intake orders by creation time rather than API order or numeric ID', () => {
+  const old = { id: 200, created_at: '2026-11-18T20:52:42Z' }, current = { id: 100, created_at: '2026-11-18T21:02:23Z' }
+  assert.deepEqual(newestArtifacts([old, current]), [current, old])
+})
 const receipt = () => ({ schema: 1, version: '7.17.0', source: { repository: FIRMWARE_REPOSITORY, branch: 'alpha', commit: sha, runId: 12, runUrl: `https://github.com/${FIRMWARE_REPOSITORY}/actions/runs/12` },
   files: Object.fromEntries(Object.entries(files).map(([name, data]) => [name, { size: data.length, sha256: createHash('sha256').update(data).digest('hex') }])),
   qualification: { macosArchitectures: ['arm64', 'x86_64'], macosMinimum: '13.0', windowsArchitecture: 'x86_64', pinTests: 'passed', clearSignRoot: 'production', reportedFirmwareVersion: '7.17.0' } })

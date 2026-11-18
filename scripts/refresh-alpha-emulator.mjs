@@ -10,6 +10,7 @@ import { alphaHead, qualifiedAlpha, FIRMWARE_REPOSITORY } from './alpha-emulator
 export const REQUIRED_SYMBOLS = ['kkemu_init', 'kkemu_shutdown', 'kkemu_write', 'kkemu_read', 'kkemu_poll', 'kkemu_is_running', 'kkemu_pop_frame', 'kkemu_start', 'kkemu_stop', 'kkemu_lock', 'kkemu_unlock', 'kkemu_trylock']
 const sha256 = data => createHash('sha256').update(data).digest('hex')
 const LIBRARIES = ['libkkemu.dylib', 'libkkemu.dll']
+export const newestArtifacts = artifacts => [...artifacts].sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at))
 
 export function verifyAlphaReceipt(receipt, files, sha) {
   if (receipt.schema !== 1 || !/^[0-9]+\.[0-9]+\.[0-9]+$/.test(receipt.version) || receipt.source?.repository !== FIRMWARE_REPOSITORY ||
@@ -47,7 +48,7 @@ export function refreshAlphaEmulator(repository = 'BitHighlander/keepkey-vault')
   const workflow = api(`repos/${repository}/actions/workflows/build-certified-emulator.yml`)
   const candidates = api(`repos/${repository}/actions/artifacts?name=${name}&per_page=50`).artifacts
   let selected
-  for (const artifact of candidates ?? []) {
+  for (const artifact of newestArtifacts(candidates ?? [])) {
     if (artifact.expired || artifact.name !== name) continue
     const run = api(`repos/${repository}/actions/runs/${artifact.workflow_run.id}`)
     if (run.status === 'completed' && run.conclusion === 'success' && run.workflow_id === workflow.id && run.head_sha === artifact.workflow_run.head_sha) {
