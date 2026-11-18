@@ -143,3 +143,18 @@ make modules-build
 ```
 
 This builds proto-tx-builder (bun + tsc) then hdwallet (yarn install + yarn build).
+
+## License
+
+KeepKey Vault is free and open-source software licensed under the **GNU Lesser
+General Public License, version 3 only** (`LGPL-3.0-only`), matching the firmware's
+default LGPLv3 license. You may redistribute and modify Vault under those terms.
+Vault is distributed without any warranty; see the license texts for details.
+
+This license applies to Vault and the repository's supporting code unless a file
+or component specifies a different license. The [KeepKey SDK](projects/keepkey-sdk/README.md#license)
+retains its MIT license; submodules and third-party components retain their own
+licenses and copyright notices.
+
+The complete terms are in [LICENSE](LICENSE) (LGPLv3) and [COPYING](COPYING)
+(GPLv3, incorporated by LGPLv3). Both texts are included in packaged Vault apps.

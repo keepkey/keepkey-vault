@@ -2,6 +2,13 @@
 
 A fast Electrobun desktop app template with React, Tailwind CSS, and Vite for hot module replacement (HMR).
 
+## License
+
+KeepKey Vault is licensed under the **GNU Lesser General Public License, version 3
+only** (`LGPL-3.0-only`). See [LICENSE](../../LICENSE) for the LGPLv3 terms and
+[COPYING](../../COPYING) for the GPLv3 terms incorporated by LGPLv3. Separately
+licensed components retain their own licenses and copyright notices.
+
 ## Linux support
 
 Vault ships three Linux x86_64 formats with each release: `.AppImage`, `.deb`, and a self-contained `.tar.zst`. ARM64 Linux is not built.

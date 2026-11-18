@@ -2,6 +2,7 @@
   "name": "keepkey-vault",
   "version": "1.7.1",
   "description": "KeepKey Vault - Desktop hardware wallet management powered by Electrobun",
+  "license": "LGPL-3.0-only",
   "scripts": {
     "i18n:check": "bun scripts/check-i18n.ts",
     "i18n:extract": "bun scripts/extract-ui-strings.ts",
