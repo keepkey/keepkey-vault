@@ -14,6 +14,7 @@
 	"deriveAddress": "Adres türet",
 	"account": "Hesap {{index}}",
 	"btcAccountType": {
-		"learnMore": "Daha fazla bilgi"
+		"learnMore": "Daha fazla bilgi",
+		"recommendation": "Emin değil misiniz? Native SegWit (bc1…) kullanın — en düşük ücretlere sahiptir ve tüm modern cüzdanlar ve borsalar tarafından desteklenir."
 	}
 }

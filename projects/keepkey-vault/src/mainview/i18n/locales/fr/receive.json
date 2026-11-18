@@ -14,6 +14,7 @@
 	"deriveAddress": "Dériver l'adresse",
 	"account": "Compte {{index}}",
 	"btcAccountType": {
-		"learnMore": "En savoir plus"
+		"learnMore": "En savoir plus",
+		"recommendation": "Vous hésitez ? Utilisez Native SegWit (bc1…) : les frais sont les plus bas et il est pris en charge par tous les portefeuilles et plateformes d'échange modernes."
 	}
 }

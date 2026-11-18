@@ -14,6 +14,7 @@
 	"deriveAddress": "Dẫn xuất địa chỉ",
 	"account": "Tài khoản {{index}}",
 	"btcAccountType": {
-		"learnMore": "Tìm hiểu thêm"
+		"learnMore": "Tìm hiểu thêm",
+		"recommendation": "Không chắc? Hãy dùng Native SegWit (bc1…) — phí thấp nhất và được mọi ví và sàn giao dịch hiện đại hỗ trợ."
 	}
 }

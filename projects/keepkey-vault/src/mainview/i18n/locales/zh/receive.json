@@ -14,6 +14,7 @@
 	"deriveAddress": "派生地址",
 	"account": "账户 {{index}}",
 	"btcAccountType": {
-		"learnMore": "了解更多"
+		"learnMore": "了解更多",
+		"recommendation": "不确定？请使用 Native SegWit（bc1…）——手续费最低，且所有现代钱包和交易所都支持。"
 	}
 }

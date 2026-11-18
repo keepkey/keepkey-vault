@@ -14,6 +14,7 @@
 	"deriveAddress": "Adresse ableiten",
 	"account": "Konto {{index}}",
 	"btcAccountType": {
-		"learnMore": "Mehr erfahren"
+		"learnMore": "Mehr erfahren",
+		"recommendation": "Unsicher? Verwenden Sie Native SegWit (bc1…) – es hat die niedrigsten Gebühren und wird von jeder modernen Wallet und Börse unterstützt."
 	}
 }

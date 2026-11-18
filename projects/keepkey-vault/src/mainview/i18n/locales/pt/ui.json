@@ -2378,5 +2378,13 @@
   "m2c78dc79": "As saídas Monero assinadas não correspondem ao destinatário, valor e troco aprovados. Nada foi enviado.",
   "ma59e78f": "Reconecte o monitoramento Monero para autorizar a derivação do troco em transações com subendereços",
   "m1e4706cc": "Último saldo conhecido · {{time}}",
-  "mc72d771e": "Atualizando sua carteira Monero. Exibindo o último saldo conhecido."
+  "mc72d771e": "Atualizando sua carteira Monero. Exibindo o último saldo conhecido.",
+  "m3a2e4e15": "UQ (Seguro)",
+  "m599d569a": "EQ (Bounceable)",
+  "mded2a2aa": "Não foi possível codificar o QR",
+  "me39213fb": "Dados demais para um único QR. Escolha UR ou BBQr animado.",
+  "m4862881e": "Quadro {{current}} de {{total}} · Continue escaneando até concluir",
+  "m65451a82": "O QR de transação do Electrum exige uma PSBT ou uma transação",
+  "m1643fcfa": "Grande demais para um QR estático do Electrum; escolha UR ou BBQr animado",
+  "m9a5ef61b": "Quadros BBQr demais"
 }

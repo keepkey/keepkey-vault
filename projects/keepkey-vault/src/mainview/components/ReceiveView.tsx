@@ -432,8 +432,8 @@ export function ReceiveView({
 							<Text fontSize="10px" color="var(--text-3)" textTransform="uppercase" letterSpacing="0.18em" fontWeight="500" mb="2">{uiText("Address Type")}</Text>
 							<PillToggle
 								options={[
-									{ value: 0, label: "UQ (Safe)" },
-									{ value: 1, label: "EQ (Bounceable)" },
+									{ value: 0, label: uiText("UQ (Safe)") },
+									{ value: 1, label: uiText("EQ (Bounceable)") },
 								]}
 								value={tonBounceable ? 1 : 0}
 								onChange={(v) => onTonBounceableChange(v === 1)}
