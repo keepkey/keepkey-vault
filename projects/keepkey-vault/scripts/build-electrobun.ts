@@ -8,6 +8,10 @@ export function buildElectrobun(channel: string, env = process.env) {
   if (!['dev', 'canary', 'stable'].includes(channel)) {
     throw new Error(`Unknown Electrobun build channel: ${channel}`)
   }
+  const emulator = Bun.spawnSync(['node', join(project, '../../scripts/verify-certified-emulator.mjs')], {
+    cwd: project, env, stdout: 'inherit', stderr: 'inherit',
+  })
+  if (emulator.exitCode !== 0) throw new Error('Refresh the certified fork alpha emulator before packaging Vault: make refresh-alpha-emulator')
 
   const os = process.platform === 'darwin' ? 'macos'
     : process.platform === 'win32' ? 'win' : process.platform

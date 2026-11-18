@@ -4,9 +4,12 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 
 test.skipIf(process.platform === 'win32')('requires fresh app or release outputs with the expected version', () => {
-  const root = mkdtempSync(join(tmpdir(), 'keepkey-build-test-'))
+  const repository = mkdtempSync(join(tmpdir(), 'keepkey-build-test-'))
+  const root = join(repository, 'projects/keepkey-vault')
   try {
-    mkdirSync(join(root, 'scripts'))
+    mkdirSync(join(root, 'scripts'), { recursive: true })
+    mkdirSync(join(repository, 'scripts'))
+    writeFileSync(join(repository, 'scripts/verify-certified-emulator.mjs'), `if (process.env.KEEPKEY_BUILD_FIXTURE === 'stale-emulator') throw new Error('stale alpha emulator')`)
     mkdirSync(join(root, 'bin'))
     writeFileSync(join(root, 'package.json'), JSON.stringify({ name: 'keepkey-vault', version: '1.6.11' }))
     copyFileSync(join(import.meta.dir, '../scripts/build-electrobun.ts'), join(root, 'scripts/build-electrobun.ts'))
@@ -42,6 +45,9 @@ if (channel === 'dev') {
       } },
     )
     expect(run('dev', 'valid').exitCode).toBe(0)
+    const staleEmulator = run('dev', 'stale-emulator')
+    expect(staleEmulator.exitCode).not.toBe(0)
+    expect(staleEmulator.stderr.toString()).toContain('Refresh the certified fork alpha emulator before packaging Vault')
     const stale = run('dev', 'noop')
     expect(stale.exitCode).not.toBe(0)
     expect(stale.stderr.toString()).toContain('did not write a fresh build output')
@@ -56,6 +62,6 @@ if (channel === 'dev') {
     expect(noV2.exitCode).not.toBe(0)
     expect(noV2.stderr.toString()).toContain('-update-v2.json')
   } finally {
-    rmSync(root, { recursive: true, force: true })
+    rmSync(repository, { recursive: true, force: true })
   }
 })

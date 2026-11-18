@@ -1162,7 +1162,7 @@ help:
 	@echo "  make preflight      - Pre-release validation (pins, CI, builds, typecheck)"
 	@echo ""
 	@echo "Emulator:"
-	@echo "  make build-emulator-release - Build + audit bundled 7.17 macOS universal and Windows x64 libraries"
+	@echo "  make build-emulator-release - Build + audit latest fork alpha macOS universal and Windows x64 libraries"
 	@echo "  make build-emulator        - Build kkemu+libkkemu from current firmware submodule checkout"
 	@echo "                               and install to ~/.keepkey/emulator/"
 	@echo "  make test-emu-python       - Run python-keepkey UDP tests against the installed kkemu"

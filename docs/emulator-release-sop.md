@@ -110,6 +110,8 @@ Normal local and hosted packaging uses `scripts/refresh-alpha-emulator.mjs`.
 Library files are replaced by rename, preserving any already-loaded inode.
 `make preflight` reruns `scripts/verify-certified-emulator.mjs`, including the
 latest-alpha identity check; it never reads the firmware gitlink.
+The common `buildElectrobun` wrapper also requires this check on dev, canary
+and stable builds, so local packaging cannot silently keep an older default.
 
 Any failure is a hard stop for the Vault release.
 
@@ -147,3 +149,24 @@ or moved aside so the bundled library is necessarily selected:
 User-installed libraries remain a development override only. An override makes
 the release smoke result invalid because it does not exercise the embedded
 artifact.
+
+## Paired signing review
+
+Settings → Security → Signing screen guide opens public examples for message
+signing, EIP-712, Safe, ERC-20 allowances, routed contact names and Bitcoin
+outputs without requesting signatures. Actual signing approvals use the same
+guide. Essentials, Guided and Deep audit control explanation depth; Larger text
+controls readability. Only those display preferences persist. Risk warnings,
+consent, firmware refusal and full device review remain mandatory in every mode.
+
+During emulator confirmation, Vault can enlarge captured OLED pixels in warm
+tones. The read-only frame RPC is bound to the sole active signing request,
+device ID and wallet epoch. It reads captured memory, sends no protocol
+request and cannot advance a screen. Hardware signing uses an explicitly
+labelled app reference: no physical-screen readback or exact page order is
+claimed. Confirmation counts are requests, not page numbers.
+
+This first readability pass changes the app guide, font sizing and animations;
+the physical OLED layout and firmware audit depth still need their own bounded
+firmware contracts and pixel/hardware review. The new explanatory copy uses
+the repository's explicit English-fallback catalog policy pending translation.
