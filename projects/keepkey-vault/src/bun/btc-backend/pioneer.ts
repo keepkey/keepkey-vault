@@ -1,8 +1,8 @@
 /**
  * PioneerBackend — the default BtcBackend. The ONLY file in btc-backend/ allowed
- * to import ../pioneer. Behaviour is byte-identical to the direct Pioneer calls
- * it replaces (see sweep-engine.ts / txbuilder/utxo.ts history). Pure response
- * parsing lives in ./normalize (import-free, unit-tested).
+ * to import ../pioneer. Public BTC transaction details use Bitcoin.com's explorer
+ * with Pioneer fallback. Spending, fee rates, raw transactions and discovery
+ * continue through Pioneer. Pure response parsing lives in ./normalize.
  */
 import type { BtcBackend } from './types'
 import { utxoDiscoveryKey } from './types'
@@ -15,6 +15,7 @@ import {
   extractRawTxHex,
 } from './normalize'
 import { addressIndicesFromTokens } from './address-discovery'
+import { publicBitcoinTxDetail } from '../bitcoin-explorer'
 
 // Keep pure consumers of btc-backend/index.ts (transaction building, path
 // generation, and their unit tests) from eagerly loading the Pioneer → DB →
@@ -66,15 +67,17 @@ export const PioneerBackend: BtcBackend = {
   },
 
   async txDetail({ network, txid }) {
-    const pioneer = await getPioneerClient()
-    const lookup = pioneer.LookupUtxoTx || pioneer.UtxoLookup
-    if (typeof lookup !== 'function') throw new Error('Pioneer client has no UTXO transaction lookup operation')
-    const resp = await lookup.call(pioneer, { networkId: network, txid })
-    assertPioneerSuccess(resp, 'LookupUtxoTx')
-    const outer = resp?.data ?? resp
-    const tx = outer?.data ?? outer
-    if (!Array.isArray(tx?.vin) || !Array.isArray(tx?.vout)) throw new Error(`LookupUtxoTx returned no vin/vout for ${txid}`)
-    return tx
+    return publicBitcoinTxDetail(network, txid, async () => {
+      const pioneer = await getPioneerClient()
+      const lookup = pioneer.LookupUtxoTx || pioneer.UtxoLookup
+      if (typeof lookup !== 'function') throw new Error('Pioneer client has no UTXO transaction lookup operation')
+      const resp = await lookup.call(pioneer, { networkId: network, txid })
+      assertPioneerSuccess(resp, 'LookupUtxoTx')
+      const outer = resp?.data ?? resp
+      const tx = outer?.data ?? outer
+      if (!Array.isArray(tx?.vin) || !Array.isArray(tx?.vout)) throw new Error(`LookupUtxoTx returned no vin/vout for ${txid}`)
+      return tx
+    })
   },
 
   async addressIndices({ network, xpub, scriptType }) {
