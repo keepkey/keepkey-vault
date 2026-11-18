@@ -781,6 +781,40 @@
       "กำลังรอ nonce ก่อนหน้า",
       "Önceki nonce bekleniyor",
       "Đang chờ nonce trước"
+    ],
+    "Bitcoin transaction data": [
+      "Bitcoin transaction data",
+      "Datos de transacciones de Bitcoin",
+      "Données des transactions Bitcoin",
+      "Bitcoin-Transaktionsdaten",
+      "ビットコインの取引データ",
+      "比特币交易数据",
+      "비트코인 거래 데이터",
+      "Dados de transações Bitcoin",
+      "Данные транзакций Bitcoin",
+      "Dati delle transazioni Bitcoin",
+      "Dane transakcji Bitcoin",
+      "Bitcoin-transactiegegevens",
+      "ข้อมูลธุรกรรม Bitcoin",
+      "Bitcoin işlem verileri",
+      "Dữ liệu giao dịch Bitcoin"
+    ],
+    "Bitcoin.com": [
+      "Bitcoin.com",
+      "Bitcoin.com",
+      "Bitcoin.com",
+      "Bitcoin.com",
+      "Bitcoin.com",
+      "Bitcoin.com",
+      "Bitcoin.com",
+      "Bitcoin.com",
+      "Bitcoin.com",
+      "Bitcoin.com",
+      "Bitcoin.com",
+      "Bitcoin.com",
+      "Bitcoin.com",
+      "Bitcoin.com",
+      "Bitcoin.com"
     ]
   }
 }

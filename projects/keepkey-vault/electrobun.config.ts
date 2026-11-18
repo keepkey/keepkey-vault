@@ -124,6 +124,7 @@ export default {
 			// floor when the remote manifest is unreachable. See firmware-bundle/README.md.
 			"firmware-bundle": "firmware-bundle",
 			"src/bun/fonts": "report-fonts",
+			"src/mainview/assets/logo/bitcoin-com.png": "report-assets/bitcoin-com.png",
 			// Release builds preflight this file before Electrobun runs. Keeping the
 			// config conditional preserves emulator-free developer builds on Linux.
 			...emulatorCopy,

@@ -9,6 +9,7 @@ import { DOCS_LINKS } from "../../shared/docs-links"
 import type { ReportMeta } from "../../shared/types"
 
 import keepkeyLogo from "../assets/icon.png"
+import bitcoinComLogo from "../assets/logo/bitcoin-com.png"
 // TODO: CoinTracker and ZenLedger exports hidden until report data is populated
 // import coinTrackerLogo from "../assets/logo/cointracker.png"
 // import zenLedgerLogo from "../assets/logo/zenledger.png"
@@ -168,6 +169,16 @@ export function ReportDialog({ onClose }: ReportDialogProps) {
 					>
 						<Text fontSize="10px" color="kk.gold" lineHeight="1.5">{uiText("Generate a report then export as KeepKey branded PDF or CSV. Reports include device info, chain balances, BTC transaction history, and address flow analysis. Store securely and never share with untrusted parties.")}</Text>
 					</Box>
+
+					<Flex align="center" justify="space-between" gap="3" mb="4" flexWrap="wrap">
+						<Text fontSize="xs" color="kk.textMuted">{uiText("Bitcoin transaction data")}</Text>
+						<Box asChild bg="white" borderRadius="md" px="3" py="2" cursor="pointer">
+							<button type="button" title={uiText("Bitcoin.com")}
+								onClick={() => void rpcRequest("openUrl", { url: "https://www.bitcoin.com/explorer/" }).catch(() => {})}>
+								<Image src={bitcoinComLogo} alt={uiText("Bitcoin.com")} w="128px" h="27px" objectFit="contain" />
+							</button>
+						</Box>
+					</Flex>
 
 					{/* Generate button */}
 					<Box

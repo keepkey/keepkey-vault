@@ -18,6 +18,7 @@ import { CHAINS } from '../shared/chains'
 import { utxoDiscoveryKey } from './btc-backend/types'
 import { getBtcBackend } from './btc-backend'
 import { createReportFonts, reportText as sanitize } from './report-fonts'
+import { embedBitcoinComLogo } from './report-branding'
 import { buildFlowTx, withRunningBalance, flowTotals, describeOwnPath, type BtcFlowTx } from './report-btc-flow'
 
 const BTC_NETWORK_ID = CHAINS.find(c => c.id === 'bitcoin')!.networkId
@@ -750,6 +751,7 @@ export async function reportToPdfBuffer(data: ReportData): Promise<Buffer> {
 	const doc = await PDFDocument.create()
 	const fonts = await createReportFonts(doc, JSON.stringify(data))
 	const { regular: font, bold } = fonts
+	const bitcoinComLogo = await embedBitcoinComLogo(doc)
 
 	// Landscape Letter: 792 x 612
 	const pageW = 792
@@ -761,10 +763,6 @@ export async function reportToPdfBuffer(data: ReportData): Promise<Buffer> {
 	let y = pageH - MARGIN_TOP
 
 	function newPage() {
-		page.drawText(`Page ${pageNum}`, {
-			x: pageW / 2 - 20, y: 25,
-			font, size: 9, color: rgb(MUTED_COLOR.r, MUTED_COLOR.g, MUTED_COLOR.b),
-		})
 		page = doc.addPage([pageW, pageH])
 		pageNum++
 		y = pageH - MARGIN_TOP
@@ -982,12 +980,6 @@ export async function reportToPdfBuffer(data: ReportData): Promise<Buffer> {
 		y -= 10
 	}
 
-	// Page 1 footer
-	page.drawText(`Page ${pageNum}`, {
-		x: pageW / 2 - 20, y: 25,
-		font, size: 9, color: rgb(MUTED_COLOR.r, MUTED_COLOR.g, MUTED_COLOR.b),
-	})
-
 	// ── Page 2+: Detail Sections ─────────────────────────────────
 	newPage()
 
@@ -1101,11 +1093,15 @@ export async function reportToPdfBuffer(data: ReportData): Promise<Buffer> {
 		y -= SECTION_GAP / 2
 	}
 
-	// Footer on last page
-	page.drawText(`Page ${pageNum}`, {
-		x: pageW / 2 - 20, y: 25,
-		font, size: 9, color: rgb(MUTED_COLOR.r, MUTED_COLOR.g, MUTED_COLOR.b),
-	})
+	// Draw every footer once, after pagination is complete.
+	for (const [index, reportPage] of doc.getPages().entries()) {
+		reportPage.drawImage(bitcoinComLogo, { x: MARGIN_LEFT, y: 18, width: 96, height: 96 * bitcoinComLogo.height / bitcoinComLogo.width })
+		reportPage.drawText('Bitcoin transaction data', { x: MARGIN_LEFT + 108, y: 25, font, size: 8, color: rgb(MUTED_COLOR.r, MUTED_COLOR.g, MUTED_COLOR.b) })
+		reportPage.drawText(`Page ${index + 1}`, {
+			x: pageW / 2 - 20, y: 25,
+			font, size: 9, color: rgb(MUTED_COLOR.r, MUTED_COLOR.g, MUTED_COLOR.b),
+		})
+	}
 
 	const bytes = await doc.save()
 	console.log(`[reports] PDF generated: ${bytes.length} bytes, ${pageNum} pages`)
