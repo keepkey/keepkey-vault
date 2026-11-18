@@ -25,5 +25,5 @@
 	"internal": "Mở",
 	"open": "Mở",
 	"safeName": "Safe{Wallet}",
-	"safeDescription": "Tài khoản đa chữ ký dùng chung trên các chuỗi EVM. Kết nối KeepKey của bạn với tư cách chủ sở hữu. Để xem các Safe và kiểm tra giao dịch đang chờ trong Desktop, hãy mở Đa chữ ký trên một tài sản EVM."
+	"safeDescription": "Tài khoản đa chữ ký dùng chung trên các chuỗi EVM. Kết nối KeepKey của bạn với tư cách chủ sở hữu."
 }

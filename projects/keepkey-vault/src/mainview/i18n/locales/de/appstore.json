@@ -25,5 +25,5 @@
 	"internal": "Öffnen",
 	"open": "Öffnen",
 	"safeName": "Safe{Wallet}",
-	"safeDescription": "Gemeinsame Multisig-Konten auf EVM-Chains. Verbinde deinen KeepKey als Eigentümer. Um deine Safes zu sehen und ausstehende Transaktionen in Desktop zu prüfen, öffne Multisig bei einem EVM-Asset."
+	"safeDescription": "Gemeinsame Multisig-Konten auf EVM-Chains. Verbinde deinen KeepKey als Eigentümer."
 }

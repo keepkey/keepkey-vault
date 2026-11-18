@@ -25,5 +25,5 @@
 	"internal": "Otwórz",
 	"open": "Otwórz",
 	"safeName": "Safe{Wallet}",
-	"safeDescription": "Wspólne konta multisig w sieciach EVM. Podłącz KeepKey jako właściciela. Aby zobaczyć swoje Safe i sprawdzić oczekujące transakcje w Desktop, otwórz Multisig przy aktywie EVM."
+	"safeDescription": "Wspólne konta multisig w sieciach EVM. Podłącz KeepKey jako właściciela."
 }

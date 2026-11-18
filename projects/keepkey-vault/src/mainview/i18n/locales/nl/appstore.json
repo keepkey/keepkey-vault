@@ -25,5 +25,5 @@
 	"internal": "Openen",
 	"open": "Openen",
 	"safeName": "Safe{Wallet}",
-	"safeDescription": "Gedeelde multisigaccounts op EVM-chains. Verbind je KeepKey als eigenaar. Open Multisig bij een EVM-asset om je Safes te zien en openstaande transacties in Desktop te controleren."
+	"safeDescription": "Gedeelde multisigaccounts op EVM-chains. Verbind je KeepKey als eigenaar."
 }
