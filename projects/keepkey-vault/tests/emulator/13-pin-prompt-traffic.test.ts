@@ -71,6 +71,7 @@ mock.module('@keepkey/hdwallet-keepkey-nodehid', () => ({HIDKeepKeyAdapter: {use
 mock.module('@keepkey/hdwallet-keepkey-nodewebusb', () => ({NodeWebUSBKeepKeyAdapter: {useKeyring: () => ({})}}))
 mock.module('usb', () => ({usb: new EventEmitter()}))
 mock.module('electrobun/bun', () => ({Utils: {paths: {userData: '/tmp/kk-pin-traffic-test-unused'}}}))
+mock.module('electrobun/main/utils', () => ({ paths: { get userData() { throw new Error('PIN fixture must not open wallet storage') } } }))
 mock.module('../../src/bun/emulator', () => emu)
 mock.module('../../src/bun/emulator-keychain', () => ({hasMnemonic: () => false, loadMnemonic: () => null}))
 

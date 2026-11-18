@@ -27,6 +27,9 @@ mock.module('@keepkey/hdwallet-keepkey-nodehid', () => ({HIDKeepKeyAdapter: {use
 mock.module('@keepkey/hdwallet-keepkey-nodewebusb', () => ({NodeWebUSBKeepKeyAdapter: {useKeyring: () => ({})}}))
 mock.module('usb', () => ({usb: new EventEmitter()}))
 mock.module('electrobun/bun', () => ({Utils: {paths: {userData: '/tmp/kk-pin-test-unused'}}}))
+// db.ts imports the side-effect-free entry directly. A clean certification
+// runner has no native app devkit, and this fixture must never open storage.
+mock.module('electrobun/main/utils', () => ({ paths: { get userData() { throw new Error('PIN fixture must not open wallet storage') } } }))
 // This fixture owns its anonymous FFI flash directly. A fallback through the
 // saved-emulator adapter must fail here instead of consulting the user's home.
 mock.module('../../src/bun/emulator', () => ({
