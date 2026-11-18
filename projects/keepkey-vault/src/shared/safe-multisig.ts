@@ -51,6 +51,13 @@ export interface SafeSyncResult {
   issues: Array<{ hash?: string; nonce?: string; reason: string }>
   serviceError?: string
 }
+export interface SafeDiscoveryResult {
+  session: string
+  owner: string
+  discovered: number
+  issues: Array<{ address: string; reason: string }>
+  serviceError?: string
+}
 export interface SafeContext {
   owner: string
   session: string

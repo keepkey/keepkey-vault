@@ -5,6 +5,13 @@ funding, and execution use real ETH and fees. Owner approvals and queue sharing
 are off-chain. The connected KeepKey pays deployment and execution gas when it
 submits those transactions.
 
+Opening **Multisig** restores saved directory Safes for the connected owner and
+discovers additional Base Safes through Safe's owner API. Discovery verifies
+supported code and current ownership on-chain. **Find my Safes** explicitly
+retries discovery. The view reloads after wallet identity changes, including
+changes on the same device. New discoveries require an owner review; previously
+reviewed Safes retain their review unless their owners or threshold changed.
+
 ## Prepare the owners and deploy
 
 1. Enable **Multisig** in Settings. Open **Multisig → Create a Safe**. If the
@@ -90,3 +97,9 @@ The 2026-11-17 live preflight of the previously saved Safe
 5, nonce 3, and zero remote pending proposals. Its saved four-owner snapshot
 still requires review. This read-only observation does not deploy a practice
 Safe or prove the hardware signing display.
+
+A read-only auto-load check using owner
+`0x909Ef6B32DfDc12CA86aA710b54c991af3C5F82E` restored that directory record despite
+its older per-wallet record being stored under another wallet. Live discovery
+verified 2 of 5 owners, retained the reviewed 4-owner baseline, and marked it for
+review. Test changes stayed in memory; no signing or broadcast was requested.

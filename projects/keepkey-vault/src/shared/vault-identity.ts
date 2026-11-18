@@ -23,6 +23,7 @@ export interface VaultIdentity {
   receiveEnabled: boolean
   fundingBlockedReason?: string
   reviewedAt?: number
+  reviewedConfiguration?: SafeAccount['reviewedConfiguration']
   sessionOnly: boolean
   certificationLabel?: string
   descriptor?: string
@@ -48,6 +49,7 @@ export function safeVaultIdentity(a: SafeAccount, sessionOnly: boolean): VaultId
     ],
     receiveEnabled: a.deployed && !a.configurationChanged,
     ...(a.reviewedAt ? { reviewedAt: a.reviewedAt } : {}),
+    ...(a.reviewedConfiguration ? { reviewedConfiguration: a.reviewedConfiguration } : {}),
     sessionOnly,
     ...(!a.deployed
       ? { fundingBlockedReason: 'Deployment is not confirmed' }
@@ -56,6 +58,22 @@ export function safeVaultIdentity(a: SafeAccount, sessionOnly: boolean): VaultId
       : {}),
     // Firmware v1 certificates attest a destination label + network, not owners.
     certificationLabel: ('Base Safe ' + a.name.replace(/[^\x20-\x7e]|%/g, '').trim()).slice(0, 24),
+  }
+}
+/** Restore public directory metadata without treating discovery as an owner review. */
+export function safeAccountFromVault(vault: VaultIdentity): SafeAccount {
+  if (vault.type !== 'safe' || vault.networkId !== BASE_NETWORK) throw new Error('Expected a Base Safe')
+  const owners = vault.cosigners.map(c => utils.getAddress(c.address || ''))
+  if (!owners.length || new Set(owners).size !== owners.length || !Number.isInteger(vault.threshold)
+    || vault.threshold < 1 || vault.threshold > owners.length) throw new Error('Invalid saved Safe owners')
+  return {
+    address: utils.getAddress(vault.address), name: vault.name, safeVersion: vault.safeVersion || '1.4.1',
+    owners, threshold: vault.threshold, nonce: '0',
+    deployed: vault.receiveEnabled || vault.fundingBlockedReason === 'Owner configuration needs review',
+    reviewedAt: vault.reviewedAt,
+    configurationChanged: vault.fundingBlockedReason === 'Owner configuration needs review' || !vault.reviewedAt || undefined,
+    reviewedConfiguration: vault.reviewedConfiguration || (vault.reviewedAt
+      ? { owners: [...owners], threshold: vault.threshold } : undefined),
   }
 }
 export function bitcoinVaultIdentity(p: MultisigPolicyPreview): VaultIdentity {

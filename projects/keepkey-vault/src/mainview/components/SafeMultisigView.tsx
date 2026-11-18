@@ -1,7 +1,7 @@
 import { useUiTranslation } from "../i18n/ui"
 import { useEffect, useRef, useState } from "react";
 import { utils } from "ethers";
-import { rpcRequest } from "../lib/rpc";
+import { rpcRequest, onRpcMessage } from "../lib/rpc";
 import type {
   SafeAccount,
   SafeContext,
@@ -9,6 +9,7 @@ import type {
   SafeTransfer,
   SafeTxReview,
   SafeSyncResult,
+  SafeDiscoveryResult,
 } from "../../shared/safe-multisig";
 import "./SafeMultisigView.css";
 import {
@@ -165,6 +166,9 @@ export function SafeMultisigView({
   const [ownerPicker, setOwnerPicker] = useState<number>();
   const [syncResult, setSyncResult] = useState<SafeSyncResult>();
   const [syncing, setSyncing] = useState(false);
+  const [discovering, setDiscovering] = useState(false);
+  const [discovery, setDiscovery] = useState<SafeDiscoveryResult>();
+  const discoveryWork = useRef<Promise<void>>();
   const busyRef = useRef(false);
   const syncWork = useRef<Promise<void>>();
   const syncTarget = useRef("");
@@ -235,6 +239,29 @@ export function SafeMultisigView({
     );
     return next;
   };
+  const findSafes = async (force = false) => {
+    if (busyRef.current || discoveryWork.current || !session.current) return;
+    const expectedSession = session.current;
+    setDiscovering(true);
+    const work = (async () => {
+      try {
+        const found = await rpcRequest<SafeDiscoveryResult>("safeDiscover", { force }, 0);
+        if (!alive.current || expectedSession !== session.current || found.session !== expectedSession) return;
+        await load();
+        if (alive.current && expectedSession === session.current) setDiscovery(found);
+      } catch (e) {
+        if (alive.current && expectedSession === session.current)
+          setDiscovery({ session: expectedSession, owner: "", discovered: 0, issues: [], serviceError: e instanceof Error ? e.message : String(e) });
+      } finally {
+        if (alive.current) setDiscovering(false);
+      }
+    })();
+    discoveryWork.current = work;
+    try { await work; } finally {
+      discoveryWork.current = undefined;
+      if (alive.current && session.current && expectedSession !== session.current) void findSafes();
+    }
+  };
   useEffect(() => {
     alive.current = true;
     void load().catch((e) => {
@@ -253,6 +280,37 @@ export function SafeMultisigView({
     };
   }, []);
   useEffect(() => {
+    setDiscovery(undefined);
+    if (context?.session) void findSafes();
+  }, [context?.session]);
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const reload = () => {
+      if (busyRef.current) return;
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        if (!busyRef.current) void load().catch(e => { if (alive.current) setError(e.message); });
+      }, 150);
+    };
+    const reset = () => {
+      session.current = "";
+      setContext(undefined); setReview(undefined); setImportReview(undefined);
+      setMode("home"); setSelected("");
+      setSelectedHash(""); setCompose(false); setOwners([""]); setSaltNonce("");
+      setRecipient(""); setAmount(""); setDiscovery(undefined);
+    };
+    const unsub = [
+      onRpcMessage("vaults-changed", reload),
+      onRpcMessage("wallet-data-purged", () => { reset(); reload(); }),
+      onRpcMessage("device-state", (state: { state: string }) => {
+        if (state.state === "ready") reload(); else reset();
+      }),
+    ];
+    const visible = () => { if (!document.hidden) { reload(); void findSafes(); } };
+    document.addEventListener("visibilitychange", visible);
+    return () => { clearTimeout(timer); unsub.forEach(stop => stop()); document.removeEventListener("visibilitychange", visible); };
+  }, []);
+  useEffect(() => {
     onBusyChange?.(!!busy);
     return () => onBusyChange?.(false);
   }, [busy, onBusyChange]);
@@ -264,6 +322,7 @@ export function SafeMultisigView({
     setNotice("");
     try {
       await syncWork.current;
+      await discoveryWork.current;
       await work();
     } catch (e) {
       if (alive.current) setError(e instanceof Error ? e.message : String(e));
@@ -573,6 +632,10 @@ export function SafeMultisigView({
           {notice}
         </div>
       )}
+      {discovery?.serviceError && <div className="safe-alert safe-warning" role="status">{discovery.serviceError}</div>}
+      {!!discovery?.issues.length && <div className="safe-alert safe-warning" role="status">
+        {discovery.issues.map(issue => <p key={issue.address}><code>{issue.address}</code>{" · "}{issue.reason}</p>)}
+      </div>}
       {busy && (
         <div className="safe-busy" role="status">
           <span className="safe-spinner" />
@@ -596,6 +659,9 @@ export function SafeMultisigView({
               <span className="safe-caption">{uiText("YOUR SAFES")}</span>
               <span>{context.accounts.length.toString().padStart(2, "0")}</span>
             </div>
+            <button className="safe-link" disabled={discovering} onClick={() => void findSafes(true)}>
+              {discovering ? uiText("Finding your Safes on Base…") : uiText("Find my Safes")}
+            </button>
             {context.accounts.map((a) => (
               <button
                 key={a.address}
@@ -1000,10 +1066,12 @@ export function SafeMultisigView({
                     url: `https://app.safe.global/transactions/queue?safe=base:${safe.address}`,
                   })}>{uiText("Open in Safe ↗")}</button>
                   {safe.configurationChanged && (
-                    <div className="safe-alert safe-warning">{uiText("The Safe’s owners or threshold changed. Funding is blocked until you review and accept the new configuration.")}<button
+                    <div className="safe-alert safe-warning">{safe.reviewedAt
+                      ? uiText("The Safe’s owners or threshold changed. Funding is blocked until you review and accept the new configuration.")
+                      : uiText("Check the full vault address, each owner, and the threshold. This configuration becomes the reference for funding checks.")}<button
                         className="safe-button"
                         onClick={() => setImportReview(safe)}
-                      >{uiText("Review changed owners")}</button>
+                      >{safe.reviewedAt ? uiText("Review changed owners") : uiText("Review owners before importing")}</button>
                     </div>
                   )}
                   <div className="safe-metrics">

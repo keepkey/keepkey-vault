@@ -71,6 +71,10 @@ export class SafeTransactionService implements SafeTransactionQueue {
     if (!/^\d+$/.test(nonce)) throw new Error('Invalid Safe nonce')
     return this.all(chainId, `/v2/safes/${utils.getAddress(safe)}/multisig-transactions/?executed=false&nonce__gte=${nonce}&ordering=nonce&limit=20`)
   }
+  async ownedSafes(chainId: number, owner: string): Promise<string[]> {
+    const rows = await this.all(chainId, `/v2/owners/${utils.getAddress(owner)}/safes/`)
+    return [...new Set(rows.map(row => utils.getAddress(row.address)))]
+  }
   async publish(p: SafeProposal, sender: string) {
     const signer = utils.getAddress(sender)
     const signature = p.signatures[signer]

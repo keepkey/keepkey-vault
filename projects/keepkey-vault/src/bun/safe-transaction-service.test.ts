@@ -28,6 +28,11 @@ test('all pages are read inside the configured Base service, with optional beare
   expect(c.calls[0]!.init?.headers).toBeUndefined()
   expect(c.calls.slice(1).every(c => c.init?.redirect === 'error')).toBe(true)
 })
+test('owner discovery uses the v2 owner endpoint, canonicalizes addresses and deduplicates results', async () => {
+  const c = client(() => json({ results: [{ address: safe }, { address: safe.toLowerCase() }], next: null }))
+  expect(await c.service.ownedSafes(8453, sender)).toEqual([safe])
+  expect(c.calls[1]!.url).toBe(`${base}/api/v2/owners/${sender}/safes/`)
+})
 test('cross-service pagination is rejected before credentials or data leave the service', async () => {
   for (const next of ['https://attacker.invalid/api/steal', `${base}/../other/api/steal`, `${base}/api/../../other/api/steal`, 'https://api.safe.global/tx-service/ethereum/api/steal']) {
     const c = client(() => json({ results: [], next }))

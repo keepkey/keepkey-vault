@@ -383,7 +383,7 @@ import { requireVaultAsset, assertVaultControlSnapshot, type VaultAssetRequest, 
 import { linkedVaultIds, vaultsForWallet, type VaultWalletKey } from '../shared/vault-wallet-links'
 import { utils as evmUtils } from 'ethers'
 import { VaultAddressBook, certifiableAddressBookEntries } from './vault-addressbook'
-import { assertVaultDestination, safeVaultIdentity, bitcoinVaultIdentity, type VaultIdentity } from '../shared/vault-identity'
+import { assertVaultDestination, safeVaultIdentity, safeAccountFromVault, bitcoinVaultIdentity, type VaultIdentity } from '../shared/vault-identity'
 import { deviceErrorMessage } from "../shared/device-error"
 import type { BtcBroadcastReview, BtcPsbtReview, BtcWatchOnlyAccounts, BtcWatchOnlyImport, BtcWatchOnlyPsbt, BtcWatchOnlyReceive, ChainBalance, TokenBalance, CustomToken, SigningRequestInfo, ApiLogEntry, PioneerChainInfo, EvmAddressSet, Bip85SeedMeta, StakingPosition, SwapAsset, AuditToken, DefiPosition, RecentActivity, ClearSignEvent, ClearSignSolanaSchemaArtifact } from "../shared/types"
 import type { VaultRPCSchema } from "../shared/rpc-schema"
@@ -4390,6 +4390,8 @@ const vaultPortfolios = new VaultPortfolioService({
 	writeExcluded: ids => setSetting('vault_totals_excluded', JSON.stringify(ids)),
 })
 const safeMultisig = new SafeMultisigService({
+	registeredAccounts: () => registeredVaults().filter(v => v.type === 'safe').map(safeAccountFromVault),
+	discover: owner => { requireOnline('Discover Base Safes'); return safeTransactionService.ownedSafes(8453, owner) },
 	queue: safeTransactionService,
 	currentKey: safeSessionKey,
 	session: async () => {
@@ -7998,6 +8000,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				const ready = !pioneerSource || await getPioneer().then(p => typeof p.EvmReadRpc === 'function').catch(() => false)
 				return { ...context, rpcReady: ready, rpcSource: pioneerSource ? 'Pioneer' : new URL(endpoint).host }
 			},
+			safeDiscover: (params) => safeMultisig.discover(params),
 			safePrepareCreate: (params) => safeMultisig.prepareCreate(params),
 			safeSaveSetup: (params) => safeMultisig.saveSetup(params),
 			safeImport: (params) => safeMultisig.importAccount(params),

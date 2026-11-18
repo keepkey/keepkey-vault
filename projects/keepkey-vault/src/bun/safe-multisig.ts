@@ -16,6 +16,7 @@ import {
   type SafeTransfer,
   type SafeTxReview,
   type SafeSyncResult,
+  type SafeDiscoveryResult,
 } from '../shared/safe-multisig'
 
 const ZERO = '0x0000000000000000000000000000000000000000'
@@ -191,6 +192,8 @@ interface SafeDeps {
   changed?: (session: SafeSession, accounts: SafeAccount[]) => void
   assertDestination?: (networkId: string, address: string, assetCaip: string) => void | Promise<void>
   queue?: SafeTransactionQueue
+  registeredAccounts?: () => SafeAccount[]
+  discover?: (owner: string) => Promise<string[]>
 }
 export async function inspectBaseSafe(
   rpc: (method: string, params: any[]) => Promise<any>,
@@ -253,6 +256,7 @@ export async function inspectBaseSafe(
 }
 export class SafeMultisigService {
   private state?: { session: SafeSession; store: SafeStore }
+  private discovery?: { key: string; at: number; pending: boolean; task: Promise<SafeDiscoveryResult> }
   private reviews = new Map<
     string,
     { session: string; review: SafeTxReview; busy?: boolean; txid?: string }
@@ -264,6 +268,7 @@ export class SafeMultisigService {
   clear() {
     this.state = undefined
     this.reviews.clear()
+    this.discovery = undefined
   }
   private assert(s: SafeSession) {
     if (this.deps.currentKey() !== s.key) throw new Error('Wallet changed. Reopen Multisig and review again.')
@@ -285,7 +290,21 @@ export class SafeMultisigService {
       }
       this.state = { session: s, store }
     }
-    return { s, store: this.state!.store }
+    const store = this.state!.store
+    let restored = false
+    for (const saved of this.deps.registeredAccounts?.() || []) {
+      const old = store.accounts.find(a => same(a.address, saved.address))
+      if (!old && !saved.owners.some(o => same(o, s.owner))) continue
+      const next: SafeAccount = old ? {
+        ...old, ...saved, nonce: old.nonce, balanceEth: old.balanceEth, balanceUsdc: old.balanceUsdc,
+        configurationChanged: saved.configurationChanged || (old.reviewedAt === saved.reviewedAt && old.configurationChanged) || undefined,
+        reviewedConfiguration: old.reviewedAt === saved.reviewedAt
+          ? old.reviewedConfiguration || saved.reviewedConfiguration : saved.reviewedConfiguration,
+      } : clone(saved)
+      if (JSON.stringify(old) !== JSON.stringify(next)) { this.upsert(store, next); restored = true }
+    }
+    if (restored) this.save(s, store)
+    return { s, store }
   }
   private save(s: SafeSession, store: SafeStore) {
     this.assert(s)
@@ -342,6 +361,53 @@ export class SafeMultisigService {
       accounts,
       proposals: store.proposals.filter(proposal => owned.has(proposal.safe.toLowerCase())),
     })
+  }
+  /** Owner-index discovery is a hint; pinned on-chain code and current ownership are authoritative. */
+  async discover(params: { force?: boolean } = {}): Promise<SafeDiscoveryResult> {
+    const { s, store } = await this.open()
+    const cached = this.discovery
+    if (cached?.key === s.key && (cached.pending || !params.force && this.now() - cached.at < 60_000)) {
+      const result = await cached.task
+      this.assert(s)
+      return clone(result)
+    }
+    const entry = { key: s.key, at: this.now(), pending: true, task: undefined as unknown as Promise<SafeDiscoveryResult> }
+    entry.task = (async () => {
+      const result: SafeDiscoveryResult = { session: s.key, owner: s.owner, discovered: 0, issues: [] }
+      try {
+        if (!this.deps.discover) throw new Error('Safe discovery is unavailable')
+        const found = [...new Set((await this.deps.discover(s.owner)).map(address))]
+        this.assert(s)
+        if (found.length > 50) result.serviceError = 'More than 50 Safes found. Import additional addresses explicitly.'
+        for (const candidate of found.slice(0, 50)) {
+          try {
+            const old = store.accounts.find(a => same(a.address, candidate))
+            const fresh = await this.inspect(s, candidate, old?.name || 'Base Safe')
+            if (old) this.preserveReview(fresh, old)
+            else fresh.configurationChanged = true
+            if (!fresh.owners.some(o => same(o, s.owner))) {
+              if (old) { this.upsert(store, fresh); this.save(s, store) }
+              throw new Error('Connected wallet is not a current Safe owner')
+            }
+            this.upsert(store, fresh)
+            this.save(s, store)
+            result.discovered++
+          } catch (e) {
+            this.assert(s)
+            result.issues.push({ address: candidate, reason: e instanceof Error ? e.message : 'Safe verification failed' })
+          }
+        }
+      } catch (e) {
+        this.assert(s)
+        result.serviceError = e instanceof Error ? e.message : 'Safe discovery is unavailable'
+      }
+      this.assert(s)
+      return result
+    })().finally(() => { entry.pending = false })
+    this.discovery = entry
+    const result = await entry.task
+    this.assert(s)
+    return clone(result)
   }
   async inspectAccount(params: { address: string; name: string }) {
     const { s } = await this.open()

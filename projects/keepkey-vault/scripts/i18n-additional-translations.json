@@ -781,6 +781,40 @@
       "กำลังรอ nonce ก่อนหน้า",
       "Önceki nonce bekleniyor",
       "Đang chờ nonce trước"
+    ],
+    "Find my Safes": [
+      "Find my Safes",
+      "Buscar mis Safes",
+      "Trouver mes Safes",
+      "Meine Safes finden",
+      "自分のSafeを検索",
+      "查找我的 Safe",
+      "내 Safe 찾기",
+      "Encontrar meus Safes",
+      "Найти мои Safe",
+      "Trova i miei Safe",
+      "Znajdź moje Safe",
+      "Mijn Safes zoeken",
+      "ค้นหา Safe ของฉัน",
+      "Safe hesaplarımı bul",
+      "Tìm Safe của tôi"
+    ],
+    "Finding your Safes on Base…": [
+      "Finding your Safes on Base…",
+      "Buscando tus Safes en Base…",
+      "Recherche de vos Safes sur Base…",
+      "Deine Safes auf Base werden gesucht…",
+      "Baseで自分のSafeを検索中…",
+      "正在 Base 上查找你的 Safe…",
+      "Base에서 내 Safe 검색 중…",
+      "Buscando seus Safes na Base…",
+      "Поиск ваших Safe в Base…",
+      "Ricerca dei tuoi Safe su Base…",
+      "Wyszukiwanie Twoich Safe w Base…",
+      "Je Safes op Base zoeken…",
+      "กำลังค้นหา Safe ของคุณบน Base…",
+      "Base üzerindeki Safe hesaplarınız aranıyor…",
+      "Đang tìm Safe của bạn trên Base…"
     ]
   }
 }

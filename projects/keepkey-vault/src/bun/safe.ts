@@ -19,8 +19,7 @@ const txServiceAll = (chainId: number, path: string) => safeTransactionService.a
 
 /** Safes on this chain that list `owner` as an owner (discovery only). */
 export async function listOwnedSafes(chainId: number, owner: string): Promise<string[]> {
-  const safes = await txServiceAll(chainId, `/v2/owners/${ethers.utils.getAddress(owner)}/safes/`)
-  return safes.map((s: { address: string }) => ethers.utils.getAddress(s.address))
+  return safeTransactionService.ownedSafes(chainId, owner)
 }
 
 /** The Safe's configuration as the chain reports it. */

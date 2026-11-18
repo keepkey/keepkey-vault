@@ -28,10 +28,11 @@ const proposal = { format: 'keepkey-safe-v1', chainId: 8453, safe, hash: '0x' + 
 let shared = false, webApproved = false, prepared = false
 let polls = 0, executionReviews = 0
 const calls: string[] = []
-mock.module('../../src/mainview/lib/rpc', () => ({ rpcRequest: async (method: string, params: any) => {
+mock.module('../../src/mainview/lib/rpc', () => ({ onRpcMessage: () => () => {}, rpcRequest: async (method: string, params: any) => {
   calls.push(method)
   if (method === 'safeList') return { owner, session: 'practice', sessionOnly: false, nestedClearSign: true, rpcReady: true,
     accounts: [account], proposals: [structuredClone(proposal)] }
+  if (method === 'safeDiscover') return { owner, session: 'practice', discovered: 1, issues: [] }
   if (method === 'getAppSettings') return { evmSimulationRpcUrls: {} }
   if (method === 'safeSync') {
     polls++

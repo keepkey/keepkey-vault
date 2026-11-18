@@ -7,10 +7,11 @@ import {
   describeSafeTransfer,
   validateSafeProposal,
 } from './safe-multisig'
-import { SAFE_USDC, type SafeProposal } from '../shared/safe-multisig'
+import { SAFE_USDC, type SafeProposal, type SafeAccount } from '../shared/safe-multisig'
 import { SAFE_CREATE } from '../shared/safe-deployments'
 import { SAFE_TX_TYPE, safeTxHash } from './safe-core'
 import type { SafeTransactionQueue } from './safe-transaction-service'
+import { safeVaultIdentity, safeAccountFromVault } from '../shared/vault-identity'
 const SAFE_TYPES = { SafeTx: SAFE_TX_TYPE }
 const DEPLOYED = { factory: SAFE_CREATE.factory.address, singleton: SAFE_CREATE.singleton.address, handler: SAFE_CREATE.fallbackHandler.address }
 // Unmodified deployed bytecode from @safe-global/safe-contracts@1.4.1 build artifacts.
@@ -22,7 +23,7 @@ const coowner = new Wallet('0x' + '22'.repeat(32))
 const outsider = new Wallet('0x' + '33'.repeat(32))
 const SAFE = '0x1111111111111111111111111111111111111111'
 const RECIPIENT = '0x2222222222222222222222222222222222222222'
-function harness(hidden = false, queue?: SafeTransactionQueue) {
+function harness(hidden = false, queue?: SafeTransactionQueue, options: { registeredAccounts?: () => SafeAccount[]; discover?: (owner: string) => Promise<string[]>; changed?: (s: unknown, accounts: SafeAccount[]) => void } = {}) {
   let key = 'session-a'
   let now = 1_000_000
   let safeNonce = '0'
@@ -100,6 +101,7 @@ function harness(hidden = false, queue?: SafeTransactionQueue) {
   }
   const service = new SafeMultisigService({
     queue,
+    ...options,
     session: async () => ({
       key,
       scope: 'wallet-a',
@@ -179,6 +181,103 @@ function queueHarness() {
   return { queue, published, setRows: (v: unknown[]) => { rows = v }, fail: () => { error = true },
     hold: (v: () => Promise<void>) => { hold = v } }
 }
+
+describe('saved directory restoration and owner discovery', () => {
+  const snapshot = (): SafeAccount => ({ address: SAFE, name: 'Saved on another wallet',
+    owners: [owner.address, coowner.address], threshold: 2, nonce: '0', deployed: true,
+    safeVersion: '1.4.1', reviewedAt: 1234 })
+  test('restores a reviewed directory Safe into the connected cosigner wallet without another import', async () => {
+    let directory = [safeAccountFromVault(safeVaultIdentity(snapshot(), false))]
+    const h = harness(false, undefined, {
+      registeredAccounts: () => directory,
+      changed: (_s, accounts) => { directory = accounts.map(a => safeAccountFromVault(safeVaultIdentity(a, false))) },
+    })
+    h.writes.set('another-wallet', JSON.stringify({ accounts: [snapshot()], proposals: [] }))
+    const context = await h.service.list()
+    expect(context.accounts).toHaveLength(1)
+    expect(context.accounts[0]).toMatchObject({ address: SAFE, name: snapshot().name, reviewedAt: 1234 })
+    expect(h.writes.has('wallet-a')).toBe(true)
+    expect(h.sends).toBe(0)
+  })
+  test('global records for other owners are not loaded into this wallet', async () => {
+    const h = harness(false, undefined, { registeredAccounts: () => [{ ...snapshot(), owners: [coowner.address, outsider.address] }] })
+    expect((await h.service.list()).accounts).toEqual([])
+    expect(h.writes.size).toBe(0)
+  })
+  test('discovery verifies the on-chain owner and requires review for a newly found Safe', async () => {
+    const h = harness(false, undefined, { discover: async address => { expect(address).toBe(owner.address); return [SAFE] } })
+    expect((await h.service.discover()).discovered).toBe(1)
+    const account = (await h.service.list()).accounts[0]!
+    expect(account).toMatchObject({ address: SAFE, configurationChanged: true, threshold: 2 })
+    expect(account.reviewedAt).toBeUndefined()
+    expect(safeVaultIdentity(account, false).receiveEnabled).toBe(false)
+    await expect(propose(h)).rejects.toThrow('Review and confirm')
+    await h.service.importAccount({ address: SAFE, name: account.name, expectedOwners: account.owners, expectedThreshold: account.threshold })
+    expect((await h.service.list()).accounts[0]!.configurationChanged).toBeUndefined()
+    expect(h.sends).toBe(0)
+  })
+  test('the saved four-versus-five owner case retains the reviewed baseline and appears with a review flag', async () => {
+    const saved = { ...snapshot(), owners: [owner.address, coowner.address, outsider.address, '0x' + '44'.repeat(20)] }
+    let directory = [safeAccountFromVault(safeVaultIdentity(saved, false))]
+    const h = harness(false, undefined, { registeredAccounts: () => directory, discover: async () => [SAFE],
+      changed: (_s, accounts) => { directory = accounts.map(a => safeAccountFromVault(safeVaultIdentity(a, false))) } })
+    h.setOwners([...saved.owners, '0x' + '55'.repeat(20)])
+    await h.service.discover()
+    const account = (await h.service.list()).accounts[0]!
+    expect(account.owners).toHaveLength(5)
+    expect(account.reviewedConfiguration).toEqual({ owners: saved.owners, threshold: 2 })
+    expect(account.reviewedAt).toBe(1234)
+    expect(account.configurationChanged).toBe(true)
+    expect(safeVaultIdentity(account, false).reviewedConfiguration).toEqual(account.reviewedConfiguration)
+  })
+  test('stale local ownership cannot override the directory after an owner is removed', async () => {
+    let directory = [snapshot()]
+    const h = harness(false, undefined, { registeredAccounts: () => directory })
+    await h.service.list()
+    directory = [{ ...snapshot(), owners: [coowner.address, outsider.address], configurationChanged: true }]
+    expect((await h.service.list()).accounts).toEqual([])
+    const stored = JSON.parse(h.writes.get('wallet-a')!).accounts[0]
+    expect(stored.owners).toEqual([coowner.address, outsider.address])
+  })
+  test('an unavailable discovery service preserves DB-loaded accounts and reports the failure', async () => {
+    const h = harness(false, undefined, { registeredAccounts: () => [snapshot()], discover: async () => { throw new Error('Safe HTTP 429') } })
+    expect((await h.service.discover()).serviceError).toBe('Safe HTTP 429')
+    expect((await h.service.list()).accounts).toHaveLength(1)
+  })
+  test('indexer hints cannot import a non-owner Safe or a contract with the wrong bytecode', async () => {
+    const h = harness(false, undefined, { discover: async () => [SAFE] })
+    h.setOwners([coowner.address, outsider.address])
+    expect((await h.service.discover()).issues).toHaveLength(1)
+    expect((await h.service.list()).accounts).toEqual([])
+    h.setOwners([owner.address, coowner.address]); h.setBadCode()
+    expect((await h.service.discover({ force: true })).issues[0]!.reason).toContain('bytecode')
+    expect((await h.service.list()).accounts).toEqual([])
+  })
+  test('duplicate discovery requests share work, cache briefly and allow an explicit refresh', async () => {
+    let calls = 0
+    const h = harness(false, undefined, { discover: async () => { calls++; return [SAFE] } })
+    await Promise.all([h.service.discover(), h.service.discover()])
+    await h.service.discover()
+    expect(calls).toBe(1)
+    await h.service.discover({ force: true })
+    expect(calls).toBe(2)
+  })
+  test('hidden-wallet discovery stays in RAM and a late response cannot cross wallet sessions', async () => {
+    const hidden = harness(true, undefined, { discover: async () => [SAFE] })
+    await hidden.service.discover()
+    expect((await hidden.service.list()).accounts).toHaveLength(1)
+    expect(hidden.writes.size).toBe(0)
+    hidden.setKey('new-hidden-wallet')
+    expect((await hidden.service.list()).accounts).toEqual([])
+    let release!: () => void, started!: () => void
+    const reached = new Promise<void>(resolve => { started = resolve })
+    const h = harness(false, undefined, { discover: async () => { started(); await new Promise<void>(resolve => { release = resolve }); return [SAFE] } })
+    const pending = h.service.discover()
+    await reached; h.setKey('different-wallet'); release()
+    await expect(pending).rejects.toThrow('Wallet changed')
+    expect(h.writes.size).toBe(0)
+  })
+})
 
 describe('Safe web and Vault queue interoperability', () => {
   test('Vault approval is shared, a web personal_sign approval is verified, and execution uses both signatures', async () => {

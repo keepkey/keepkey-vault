@@ -226,6 +226,7 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
 
       // ── EVM multi-address ──────────────────────────────────────────────
       safeList: { params: void; response: SafeContext }
+      safeDiscover: { params: { force?: boolean }; response: import('./safe-multisig').SafeDiscoveryResult }
       listVaults: { params: void; response: VaultIdentity[] }
       listSavedVaults: { params: void; response: VaultIdentity[] }
       getVaultPortfolios: { params: { refresh?: boolean } | void; response: VaultPortfolio[] }

@@ -66,7 +66,7 @@ export const MULTISIG_DISABLED = "Multisig is off. Enable it in Settings → Fea
 const MULTISIG_LISTS = new Set(["safeChains", "listVaults", "listSavedVaults", "getVaultPortfolios"]);
 const MULTISIG_RPC = new Set([
   "safeAddSignature", "safeBroadcast", "safeConfirm", "safeCreate", "safeCreatePlan", "safeImport",
-  "safeImportProposal", "safeInspect", "safeList", "safeMine", "safeOpenVaultAccount", "safePending",
+  "safeImportProposal", "safeInspect", "safeList", "safeDiscover", "safeMine", "safeOpenVaultAccount", "safePending",
   "safePrepareCreate", "safePrepareExecute", "safePropose", "safeRefresh", "safeSync", "safePublish", "safeSaveSetup",
   "safeSigningData", "setVaultTotalInclusion", "vaultAccountGet", "vaultAddConfirm", "vaultAddPreview",
 ]);
