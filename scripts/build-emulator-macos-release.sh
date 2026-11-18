@@ -8,9 +8,9 @@ set -euo pipefail
 CLEARSIGN_ROOT_PUBKEY=027c1fde75db6c36393e095e0dc5ab9a5bcf1ae9eb92b5d36e212a2bf7f8a6e321
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-FW_DIR="$REPO_ROOT/modules/keepkey-firmware"
-STAGE_DIR="$REPO_ROOT/projects/keepkey-vault/emulator-bundle"
-EXPECTED_VERSION="${EMU_EXPECTED_VERSION:-7.17.0}"
+source "$REPO_ROOT/scripts/emulator-source-identity.sh"
+STAGE_DIR="${EMU_STAGE_DIR:-$REPO_ROOT/projects/keepkey-vault/emulator-bundle}"
+EXPECTED_VERSION="${EMU_EXPECTED_VERSION:-}"
 PROTOC_WRAPPER="$REPO_ROOT/scripts/protoc-nanopb-compat.sh"
 PROTOC_VERSION=21.12
 TC_CACHE="$HOME/.keepkey/emulator/.toolchain"
@@ -25,12 +25,8 @@ command -v lipo >/dev/null || { echo "ERROR: lipo is required"; exit 1; }
   echo "ERROR: python-keepkey ethereum-lists submodule is not initialized"; exit 1; }
 
 SOURCE_VERSION="$(awk '$1 == "VERSION" { print $2; exit }' "$FW_DIR/CMakeLists.txt")"
-[ "$SOURCE_VERSION" = "$EXPECTED_VERSION" ] || {
+[ -z "$EXPECTED_VERSION" ] || [ "$SOURCE_VERSION" = "$EXPECTED_VERSION" ] || {
   echo "ERROR: firmware source is $SOURCE_VERSION; release requires $EXPECTED_VERSION"; exit 1; }
-PINNED_SHA="$(git -C "$REPO_ROOT" ls-tree HEAD modules/keepkey-firmware | awk '{print $3}')"
-SOURCE_SHA="$(git -C "$FW_DIR" rev-parse HEAD)"
-[ "$SOURCE_SHA" = "$PINNED_SHA" ] || {
-  echo "ERROR: firmware checkout $SOURCE_SHA does not match Vault gitlink $PINNED_SHA"; exit 1; }
 
 if [ -n "${EMU_PYTHON:-}" ]; then
   PYTHON="$(command -v "$EMU_PYTHON")"

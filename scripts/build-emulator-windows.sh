@@ -20,22 +20,18 @@ set -euo pipefail
 CLEARSIGN_ROOT_PUBKEY=027c1fde75db6c36393e095e0dc5ab9a5bcf1ae9eb92b5d36e212a2bf7f8a6e321
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-FW_DIR="$REPO_ROOT/modules/keepkey-firmware"
+source "$REPO_ROOT/scripts/emulator-source-identity.sh"
 BUILD_DIR="$FW_DIR/build-emu-win"
 TOOLCHAIN_FILE="cmake/toolchains/mingw-w64-x86_64.cmake"
 TC_CACHE="$HOME/.keepkey/emulator/.toolchain"
 PROTOC_VERSION=21.12
-EXPECTED_VERSION="${EMU_EXPECTED_VERSION:-7.17.0}"
-STAGE_DIR="$REPO_ROOT/projects/keepkey-vault/emulator-bundle"
+EXPECTED_VERSION="${EMU_EXPECTED_VERSION:-}"
+STAGE_DIR="${EMU_STAGE_DIR:-$REPO_ROOT/projects/keepkey-vault/emulator-bundle}"
 PROTOC_WRAPPER="$REPO_ROOT/scripts/protoc-nanopb-compat.sh"
 
 SOURCE_VERSION="$(awk '$1 == "VERSION" { print $2; exit }' "$FW_DIR/CMakeLists.txt")"
-[ "$SOURCE_VERSION" = "$EXPECTED_VERSION" ] || {
+[ -z "$EXPECTED_VERSION" ] || [ "$SOURCE_VERSION" = "$EXPECTED_VERSION" ] || {
   echo "ERROR: firmware source is $SOURCE_VERSION; release requires $EXPECTED_VERSION"; exit 1; }
-PINNED_SHA="$(git -C "$REPO_ROOT" ls-tree HEAD modules/keepkey-firmware | awk '{print $3}')"
-SOURCE_SHA="$(git -C "$FW_DIR" rev-parse HEAD)"
-[ "$SOURCE_SHA" = "$PINNED_SHA" ] || {
-  echo "ERROR: firmware checkout $SOURCE_SHA does not match Vault gitlink $PINNED_SHA"; exit 1; }
 
 echo "=== Windows emulator DLL cross-compile ==="
 command -v x86_64-w64-mingw32-gcc >/dev/null 2>&1 || {

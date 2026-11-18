@@ -29,9 +29,7 @@ env:
   NODE_VERSION: '20'
   MACOS_DEPLOYMENT_TARGET: '13.0'
   EMU_RELEASE_VERSION: '7.17.0'
-  EMU_SOURCE_RUN_ID: '42312167033'
-  EMU_SOURCE_SHA: 'c19a995b4045704494959f7885fc3ade63c32a19'
-  EMU_SOURCE_ARTIFACT: 'certified-emulator-7.17.0-macos13-c19a995b4045704494959f7885fc3ade63c32a19'
+  EMU_ARTIFACT_REPOSITORY: 'BitHighlander/keepkey-vault'
   MONERO_NATIVE_RELEASE_TAG: 'monero-native-20261117'
 
 jobs:
@@ -306,18 +304,10 @@ jobs:
           hutch electrobun sync
         shell: bash
 
-      # Packaging contract tests use the certified bytes on Linux and macOS.
-      - name: Download certified emulator 7.17 artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: ${{ env.EMU_SOURCE_ARTIFACT }}
-          path: .certified-emulator-${{ env.EMU_RELEASE_VERSION }}
-          github-token: ${{ github.token }}
-          repository: keepkey/keepkey-vault
-          run-id: ${{ env.EMU_SOURCE_RUN_ID }}
-
-      - name: Stage and verify certified emulator 7.17 libraries
-        run: scripts/stage-certified-emulator.sh ".certified-emulator-${EMU_RELEASE_VERSION}"
+      - name: Refresh the default emulator from current fork alpha
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/refresh-alpha-emulator.mjs
         shell: bash
 
       - name: Prepare pinned Monero wallet tools
@@ -937,23 +927,11 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "hutch install failed" }
           "$HOME\.hutch\bin" | Out-File -FilePath $env:GITHUB_PATH -Append
 
-      - name: Download certified emulator 7.17 artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: ${{ env.EMU_SOURCE_ARTIFACT }}
-          path: .certified-emulator-${{ env.EMU_RELEASE_VERSION }}
-          github-token: ${{ github.token }}
-          repository: keepkey/keepkey-vault
-          run-id: ${{ env.EMU_SOURCE_RUN_ID }}
-
-      - name: Stage certified emulator DLL
+      - name: Refresh the default emulator from current fork alpha
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/refresh-alpha-emulator.mjs
         shell: pwsh
-        run: |
-          $want = (Get-Content projects/keepkey-vault/emulator-bundle/manifest.json | ConvertFrom-Json).files.'libkkemu.dll'.sha256
-          $dll = Get-ChildItem -Recurse ".certified-emulator-$env:EMU_RELEASE_VERSION" -Filter *.dll |
-            Where-Object { (Get-FileHash -Algorithm SHA256 $_.FullName).Hash.ToLowerInvariant() -eq $want } | Select-Object -First 1
-          if (-not $dll) { throw "no DLL in the artifact matches manifest sha256 $want" }
-          Copy-Item $dll.FullName projects/keepkey-vault/emulator-bundle/libkkemu.dll
 
       - name: Download device-protocol lib/
         uses: actions/download-artifact@v4

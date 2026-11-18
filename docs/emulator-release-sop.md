@@ -1,5 +1,11 @@
 # Bundled Emulator Release SOP
 
+Owner policy, 2026-11-18: **the default bundled emulator always comes from the
+latest `alpha` of `BitHighlander/keepkey-firmware`.** Resolve that branch once,
+qualify its exact commit, and record the immutable artifact and library hashes.
+An older certified emulator is not a fallback when the current alpha artifact
+is missing or failed. This policy supersedes the previous fixed-source bundle.
+
 The Vault release carries a certified KeepKey emulator library. Users must not
 need to install `libkkemu` separately. Emulator artifact provenance and package
 contents are blocking Vault release gates.
@@ -33,22 +39,31 @@ marking a release candidate ready.
 
 ## Release identity
 
-For the current Vault release train, the approved emulator release is
-`7.17.0`. The complete artifact set is:
+The emulator version comes from the frozen fork-alpha source (currently
+`7.17.0`). The complete artifact set is:
 
 - `libkkemu.dylib` — universal macOS `arm64` + `x86_64`
 - `libkkemu.dll` — Windows `x86_64`
-- CI handoff name: `emulator-build-input-libkkemu-7.17.0-win-x64.dll`
+- CI handoff: `certified-emulator-alpha-<full firmware SHA>`, containing both
+  libraries and `source-receipt.json` from one successful certification run.
 
-The expected emulator release must be declared by the Vault release branch and
-must agree with the CI artifact name and the runtime version reported by the
-emulator. The firmware submodule version is not a source of truth for this
-decision.
+The source must equal the live fork-alpha head at certification and intake.
+Its firmware CI must have passed on that exact head. If alpha advances during
+either operation, repeat for its new head. The firmware submodule version is
+not a source of truth for this decision.
 
 The controlling machine-readable record is
 `projects/keepkey-vault/emulator-bundle/manifest.json`. It pins the certified
 source run, artifact ID/digest, platform filenames, library hashes,
 architectures, and required ABI symbols.
+Its source record distinguishes the Vault certification commit/run from the
+firmware repository, alpha commit and qualifying firmware CI run.
+
+The `Build Certified Emulator Artifact` workflow builds a fresh independent
+fork-alpha checkout through `scripts/build-alpha-emulator.sh`. Both platform
+builders consume that one frozen checkout. It audits the universal macOS
+13 library, Windows ABI/imports, production ClearSign root and PIN flows before
+uploading the source receipt and both libraries together.
 
 ## Non-negotiable boundary
 
@@ -65,7 +80,12 @@ architectures, and required ABI symbols.
 
 Before packaging:
 
-1. Identify the successful certified emulator-artifact CI run and record its
+1. Run `make refresh-alpha-emulator`. It resolves the current fork-alpha head,
+   requires green exact-head firmware CI, finds a successful certification run
+   for that source, verifies the artifact ZIP digest and both receipt-bound
+   library hashes, then updates the bundle manifest. Missing certification
+   stops the build; run the certification workflow for current alpha first.
+   Identify the successful certified emulator-artifact CI run and record its
    run ID, commit SHA, artifact ID, and artifact digest in the manifest. The
    Vault release commit may be later; the staged bytes must match the immutable
    certified artifact recorded in the release branch.
@@ -86,9 +106,10 @@ Before packaging:
 8. Require CI's ClearSign-root/configuration audit to be green for that exact
    artifact run.
 
-Use `scripts/stage-certified-emulator.sh <downloaded-artifact-dir>` to extract,
-stage, and verify both libraries. `make preflight` reruns
-`scripts/verify-certified-emulator.mjs`; it never reads the firmware gitlink.
+Normal local and hosted packaging uses `scripts/refresh-alpha-emulator.mjs`.
+Library files are replaced by rename, preserving any already-loaded inode.
+`make preflight` reruns `scripts/verify-certified-emulator.mjs`, including the
+latest-alpha identity check; it never reads the firmware gitlink.
 
 Any failure is a hard stop for the Vault release.
 
