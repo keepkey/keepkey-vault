@@ -113,6 +113,9 @@ export default {
 		// Vite builds to dist/, we copy from there
 		// _build/_ext_modules contains ONLY native addons + proto-tx-builder (~23 packages)
 		copy: {
+			// LGPLv3 incorporates GPLv3; ship both license texts on every platform.
+			"../../LICENSE": "LICENSE",
+			"../../COPYING": "COPYING",
 			"dist/index.html": "views/mainview/index.html",
 			"dist/assets": "views/mainview/assets",
 			"_build/_ext_modules": "node_modules",
