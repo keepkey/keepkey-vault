@@ -7,6 +7,8 @@ import { alphaHead, FIRMWARE_REPOSITORY } from './alpha-emulator-source.mjs'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const source = JSON.parse(readFileSync(process.argv[2], 'utf8'))
+const runtime = JSON.parse(readFileSync(process.argv[3], 'utf8'))
+if (runtime.version !== source.version) throw new Error('Emulator Features version differs from frozen firmware source')
 if (source.repository !== FIRMWARE_REPOSITORY || source.branch !== 'alpha' || source.commit !== alphaHead()) {
   throw new Error('Fork alpha moved during certification; rebuild both libraries together')
 }
@@ -19,5 +21,5 @@ for (const name of ['libkkemu.dylib', 'libkkemu.dll']) {
   files[name] = { sha256: createHash('sha256').update(data).digest('hex'), size: data.length }
 }
 const receipt = { schema: 1, version: source.version, source, files,
-  qualification: { macosArchitectures: ['arm64', 'x86_64'], macosMinimum: '13.0', windowsArchitecture: 'x86_64', pinTests: 'passed', clearSignRoot: 'production' } }
+  qualification: { macosArchitectures: ['arm64', 'x86_64'], macosMinimum: '13.0', windowsArchitecture: 'x86_64', pinTests: 'passed', clearSignRoot: 'production', reportedFirmwareVersion: runtime.version } }
 writeFileSync(resolve(root, 'projects/keepkey-vault/emulator-bundle/source-receipt.json'), JSON.stringify(receipt, null, 2) + '\n')

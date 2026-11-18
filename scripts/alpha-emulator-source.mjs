@@ -6,6 +6,11 @@ import { fileURLToPath } from 'node:url'
 
 export const FIRMWARE_REPOSITORY = 'BitHighlander/keepkey-firmware'
 export const FIRMWARE_BRANCH = 'alpha'
+export function firmwareVersion(cmake) {
+  const match = /^\s*project\(\s*KeepKeyFirmware\s+VERSION\s+(\d+\.\d+\.\d+)\s+LANGUAGES\b/m.exec(cmake)
+  if (!match) throw new Error('Alpha source has no KeepKey firmware project version')
+  return match[1]
+}
 export function alphaHead(run = execFileSync) {
   const refs = run('git', ['ls-remote', `https://github.com/${FIRMWARE_REPOSITORY}.git`, 'refs/heads/alpha'], { encoding: 'utf8' }).trim()
   const match = /^([a-f0-9]{40})\s+refs\/heads\/alpha$/.exec(refs)
@@ -41,8 +46,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   git('checkout', '--detach', sha)
   git('submodule', 'update', '--init', '--', 'code-signing-keys', 'deps/crypto/trezor-firmware', 'deps/device-protocol', 'deps/python-keepkey', 'deps/googletest', 'deps/qrenc/QR-Code-generator', 'deps/sca-hardening/SecAESSTM32')
   execFileSync('git', ['-C', resolve(directory, 'deps/python-keepkey'), 'submodule', 'update', '--init', '--', 'device-protocol', 'keepkeylib/eth/ethereum-lists'], { stdio: 'inherit' })
-  source.version = /\bVERSION\s+(\d+\.\d+\.\d+)/.exec(readFileSync(resolve(directory, 'CMakeLists.txt'), 'utf8'))?.[1]
-  if (!source.version) throw new Error('Alpha source has no firmware version')
+  source.version = firmwareVersion(readFileSync(resolve(directory, 'CMakeLists.txt'), 'utf8'))
   writeFileSync(receipt, JSON.stringify(source, null, 2) + '\n')
   console.log(`Alpha emulator source: ${sha}; firmware CI ${source.runId}`)
 }

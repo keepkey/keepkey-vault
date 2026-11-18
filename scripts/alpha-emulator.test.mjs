@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
-import { alphaHead, qualifiedAlpha, FIRMWARE_REPOSITORY } from './alpha-emulator-source.mjs'
+import { alphaHead, qualifiedAlpha, firmwareVersion, FIRMWARE_REPOSITORY } from './alpha-emulator-source.mjs'
 import { verifyAlphaReceipt, bundleManifest, REQUIRED_SYMBOLS } from './refresh-alpha-emulator.mjs'
 
 const sha = 'a'.repeat(40)
@@ -9,7 +9,15 @@ const root = Buffer.from('027c1fde75db6c36393e095e0dc5ab9a5bcf1ae9eb92b5d36e212a
 const files = { 'libkkemu.dylib': Buffer.concat([root, Buffer.from('mac')]), 'libkkemu.dll': Buffer.concat([root, Buffer.from('win')]) }
 const receipt = () => ({ schema: 1, version: '7.17.0', source: { repository: FIRMWARE_REPOSITORY, branch: 'alpha', commit: sha, runId: 12, runUrl: `https://github.com/${FIRMWARE_REPOSITORY}/actions/runs/12` },
   files: Object.fromEntries(Object.entries(files).map(([name, data]) => [name, { size: data.length, sha256: createHash('sha256').update(data).digest('hex') }])),
-  qualification: { macosArchitectures: ['arm64', 'x86_64'], macosMinimum: '13.0', windowsArchitecture: 'x86_64', pinTests: 'passed', clearSignRoot: 'production' } })
+  qualification: { macosArchitectures: ['arm64', 'x86_64'], macosMinimum: '13.0', windowsArchitecture: 'x86_64', pinTests: 'passed', clearSignRoot: 'production', reportedFirmwareVersion: '7.17.0' } })
+
+test('firmware version comes from the named project, never the CMake minimum', () => {
+  const cmake = 'cmake_minimum_required(VERSION 3.7.2)\nproject(\n KeepKeyFirmware\n VERSION 7.17.0\n LANGUAGES C CXX ASM)'
+  assert.equal(firmwareVersion(cmake), '7.17.0')
+  assert.throws(() => firmwareVersion('cmake_minimum_required(VERSION 3.7.2)'))
+  const bad = receipt(); bad.qualification.reportedFirmwareVersion = '3.7.2'
+  assert.throws(() => verifyAlphaReceipt(bad, files, sha), /qualification/)
+})
 
 test('only an exact alpha branch response establishes the default source', () => {
   assert.equal(alphaHead(() => `${sha}\trefs/heads/alpha\n`), sha)

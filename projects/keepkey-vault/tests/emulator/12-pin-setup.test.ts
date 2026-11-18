@@ -10,7 +10,7 @@
 import {afterAll, beforeAll, describe, expect, mock, test} from 'bun:test'
 import {dlopen, FFIType, ptr} from 'bun:ffi'
 import {EventEmitter} from 'node:events'
-import {existsSync} from 'node:fs'
+import {existsSync, writeFileSync} from 'node:fs'
 import * as core from '@keepkey/hdwallet-core'
 import {Transport, create, type TransportDelegate} from '@keepkey/hdwallet-keepkey'
 import * as Messages from '@keepkey/device-protocol/lib/messages_pb'
@@ -219,7 +219,11 @@ beforeAll(async () => {
   await wallet.loadDevice({mnemonic: seed, pin: false, passphrase: false, skipChecksum: false})
   delegate.onButtonRequest = null
   engine = new EngineController()
-  Object.assign(engine, {wallet, activeTransport: 'emulator', cachedFeatures: await wallet.getFeatures()})
+  const features = await wallet.getFeatures()
+  const version = [features.majorVersion, features.minorVersion, features.patchVersion].join('.')
+  if (process.env.KK_EMU_EXPECTED_FIRMWARE_VERSION) expect(version).toBe(process.env.KK_EMU_EXPECTED_FIRMWARE_VERSION)
+  if (process.env.KK_EMU_RUNTIME_RECEIPT) writeFileSync(process.env.KK_EMU_RUNTIME_RECEIPT, JSON.stringify({ version }) + '\n')
+  Object.assign(engine, {wallet, activeTransport: 'emulator', cachedFeatures: features})
   ;(engine as any).attachTransportListeners()
   engine.on('pin-request', ({type}) => pins.push(type))
 })

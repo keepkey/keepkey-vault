@@ -92,10 +92,13 @@ jobs:
           cd projects/keepkey-vault && bun install --frozen-lockfile
 
       - name: Test PIN entry on the library to certify
+        env:
+          KK_EMU_EXPECTED_FIRMWARE_VERSION: ${{ env.EMU_EXPECTED_VERSION }}
+          KK_EMU_RUNTIME_RECEIPT: ${{ runner.temp }}/alpha-emulator-runtime.json
         run: make test-emu-pin KK_EMU_DYLIB="$PWD/projects/keepkey-vault/emulator-bundle/libkkemu.dylib"
 
       - name: Bind qualified libraries to current fork alpha
-        run: node scripts/write-alpha-emulator-receipt.mjs "$EMU_ALPHA_SOURCE_RECEIPT"
+        run: node scripts/write-alpha-emulator-receipt.mjs "$EMU_ALPHA_SOURCE_RECEIPT" "$RUNNER_TEMP/alpha-emulator-runtime.json"
 
       - name: Upload immutable certified artifact
         uses: actions/upload-artifact@v4

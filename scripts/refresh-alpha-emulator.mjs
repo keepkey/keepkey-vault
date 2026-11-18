@@ -17,7 +17,7 @@ export function verifyAlphaReceipt(receipt, files, sha) {
       !Number.isSafeInteger(receipt.source?.runId) || receipt.source.runId <= 0) throw new Error('Artifact does not bind the current fork alpha source')
   const q = receipt.qualification
   if (q?.macosArchitectures?.slice().sort().join(',') !== 'arm64,x86_64' || q.macosMinimum !== '13.0' ||
-      q.windowsArchitecture !== 'x86_64' || q.pinTests !== 'passed' || q.clearSignRoot !== 'production') throw new Error('Incomplete alpha emulator qualification')
+      q.windowsArchitecture !== 'x86_64' || q.pinTests !== 'passed' || q.clearSignRoot !== 'production' || q.reportedFirmwareVersion !== receipt.version) throw new Error('Incomplete alpha emulator qualification')
   for (const name of LIBRARIES) {
     const data = files[name], expected = receipt.files?.[name]
     if (!Buffer.isBuffer(data) || !expected || data.length !== expected.size || sha256(data) !== expected.sha256) throw new Error(`${name} does not match the certified source receipt`)
