@@ -239,6 +239,8 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       safeSaveSetup: { params: { reviewId: string }; response: SafeAccount }
       safeInspect: { params: { address: string; name: string }; response: SafeAccount }
       safeImport: { params: { address: string; name: string; expectedOwners: string[]; expectedThreshold: number }; response: SafeAccount }
+      safeSync: { params: { address: string }; response: import('./safe-multisig').SafeSyncResult }
+      safePublish: { params: { hash: string }; response: { hash: string } }
       safeRefresh: { params: { address: string }; response: SafeAccount }
       safePropose: { params: { safe: string } & SafeTransfer; response: SafeProposal }
       safeImportProposal: { params: { json: string; expectedSafe?: string; expectedAsset?: 'ETH' | 'USDC' }; response: SafeProposal }

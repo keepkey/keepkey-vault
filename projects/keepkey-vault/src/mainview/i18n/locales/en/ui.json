@@ -2378,5 +2378,13 @@
   "m2c78dc79": "The signed Monero outputs do not match the approved recipient, amount and change. Nothing was sent.",
   "ma59e78f": "Reconnect Monero monitoring to authorize subaddress change derivation",
   "m1e4706cc": "Last known balance · {{time}}",
-  "mc72d771e": "Updating your Monero wallet. Showing the last known balance."
+  "mc72d771e": "Updating your Monero wallet. Showing the last known balance.",
+  "m2b7cd429": "Safe queue unavailable",
+  "m647ff91c": "Waiting for earlier nonce",
+  "m7c223073": "Pending proposals",
+  "m13e4fc28": "Open in Safe ↗",
+  "m42425dcb": "Safe queue synced",
+  "m1666f992": "Syncing Safe queue…",
+  "m6dcf416d": "Share with Safe",
+  "m4767b8fb": "Some Safe transactions need review in Safe."
 }

@@ -192,5 +192,13 @@
   "m2c78dc79": "Các đầu ra Monero đã ký không khớp với người nhận, số tiền và tiền thừa đã được duyệt. Chưa gửi gì cả.",
   "ma59e78f": "Kết nối lại tính năng theo dõi Monero để cho phép tạo tiền thừa cho giao dịch dùng địa chỉ phụ",
   "m1e4706cc": "Số dư được biết gần nhất · {{time}}",
-  "mc72d771e": "Đang cập nhật ví Monero của bạn. Hiển thị số dư được biết gần nhất."
+  "mc72d771e": "Đang cập nhật ví Monero của bạn. Hiển thị số dư được biết gần nhất.",
+  "m2b7cd429": "Hàng đợi Safe không khả dụng",
+  "m647ff91c": "Đang chờ nonce trước",
+  "m7c223073": "Đề xuất đang chờ",
+  "m13e4fc28": "Mở trong Safe ↗",
+  "m42425dcb": "Đã đồng bộ hàng đợi Safe",
+  "m1666f992": "Đang đồng bộ hàng đợi Safe…",
+  "m6dcf416d": "Chia sẻ với Safe",
+  "m4767b8fb": "Một số giao dịch Safe cần được kiểm tra trong Safe."
 }

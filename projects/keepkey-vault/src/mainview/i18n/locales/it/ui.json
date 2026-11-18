@@ -186,5 +186,13 @@
   "m2c78dc79": "Gli output Monero firmati non corrispondono al destinatario, all’importo e al resto approvati. Non è stato inviato nulla.",
   "ma59e78f": "Riconnetti il monitoraggio Monero per autorizzare la derivazione del resto nelle transazioni con sottoindirizzi",
   "m1e4706cc": "Ultimo saldo noto · {{time}}",
-  "mc72d771e": "Aggiornamento del portafoglio Monero. È mostrato l’ultimo saldo noto."
+  "mc72d771e": "Aggiornamento del portafoglio Monero. È mostrato l’ultimo saldo noto.",
+  "m2b7cd429": "Coda Safe non disponibile",
+  "m647ff91c": "In attesa del nonce precedente",
+  "m7c223073": "Proposte in attesa",
+  "m13e4fc28": "Apri in Safe ↗",
+  "m42425dcb": "Coda Safe sincronizzata",
+  "m1666f992": "Sincronizzazione della coda Safe…",
+  "m6dcf416d": "Condividi con Safe",
+  "m4767b8fb": "Alcune transazioni Safe richiedono una verifica in Safe."
 }

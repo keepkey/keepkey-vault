@@ -12,7 +12,7 @@
   "m2e0454af": "ID da rede",
   "m2e7e4ae3": "Carregando…",
   "m2e823442": "Receber",
-  "m3256a34c": "Catálogo de endereços",
+  "m3256a34c": "Livro de endereços",
   "m34462": "Inserir manualmente",
   "m35afca3b": "Cancelar",
   "m37298692": "O Monero não está disponível em carteiras ocultas. Mude para sua carteira padrão para usar o Monero.",
@@ -2378,5 +2378,13 @@
   "m2c78dc79": "As saídas Monero assinadas não correspondem ao destinatário, valor e troco aprovados. Nada foi enviado.",
   "ma59e78f": "Reconecte o monitoramento Monero para autorizar a derivação do troco em transações com subendereços",
   "m1e4706cc": "Último saldo conhecido · {{time}}",
-  "mc72d771e": "Atualizando sua carteira Monero. Exibindo o último saldo conhecido."
+  "mc72d771e": "Atualizando sua carteira Monero. Exibindo o último saldo conhecido.",
+  "m2b7cd429": "Fila do Safe indisponível",
+  "m647ff91c": "Aguardando nonce anterior",
+  "m7c223073": "Propostas pendentes",
+  "m13e4fc28": "Abrir no Safe ↗",
+  "m42425dcb": "Fila do Safe sincronizada",
+  "m1666f992": "Sincronizando a fila do Safe…",
+  "m6dcf416d": "Compartilhar com Safe",
+  "m4767b8fb": "Algumas transações do Safe precisam ser revisadas no Safe."
 }

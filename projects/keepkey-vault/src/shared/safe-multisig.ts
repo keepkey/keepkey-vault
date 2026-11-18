@@ -12,6 +12,7 @@ export interface SafeAccount {
   deploymentTx?: string
   saltNonce?: string
   configurationChanged?: boolean
+  reviewedConfiguration?: { owners: string[]; threshold: number }
   reviewedAt?: number
   balanceEth?: string
   balanceUsdc?: string
@@ -41,6 +42,14 @@ export interface SafeTransfer {
   asset: 'ETH' | 'USDC'
   recipient: string
   amount: string
+}
+export interface SafeSyncResult {
+  address: string
+  checkedAt: number
+  pending: number
+  imported: number
+  issues: Array<{ hash?: string; nonce?: string; reason: string }>
+  serviceError?: string
 }
 export interface SafeContext {
   owner: string

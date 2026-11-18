@@ -189,5 +189,13 @@
   "m2c78dc79": "İmzalanan Monero çıktıları onaylanan alıcı, tutar ve para üstüyle eşleşmiyor. Hiçbir şey gönderilmedi.",
   "ma59e78f": "Alt adresli işlemlerin para üstü türetimini yetkilendirmek için Monero izlemeyi yeniden bağlayın",
   "m1e4706cc": "Bilinen son bakiye · {{time}}",
-  "mc72d771e": "Monero cüzdanınız güncelleniyor. Bilinen son bakiye gösteriliyor."
+  "mc72d771e": "Monero cüzdanınız güncelleniyor. Bilinen son bakiye gösteriliyor.",
+  "m2b7cd429": "Safe kuyruğu kullanılamıyor",
+  "m647ff91c": "Önceki nonce bekleniyor",
+  "m7c223073": "Bekleyen teklifler",
+  "m13e4fc28": "Safe’te aç ↗",
+  "m42425dcb": "Safe kuyruğu eşitlendi",
+  "m1666f992": "Safe kuyruğu eşitleniyor…",
+  "m6dcf416d": "Safe ile paylaş",
+  "m4767b8fb": "Bazı Safe işlemlerinin Safe’te incelenmesi gerekiyor."
 }

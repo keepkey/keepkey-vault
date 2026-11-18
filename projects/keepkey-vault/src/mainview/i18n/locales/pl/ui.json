@@ -186,5 +186,13 @@
   "m2c78dc79": "Podpisane wyjścia Monero nie odpowiadają zatwierdzonemu odbiorcy, kwocie i reszcie. Nic nie zostało wysłane.",
   "ma59e78f": "Połącz ponownie monitorowanie Monero, aby zatwierdzić wyprowadzenie reszty dla transakcji z podadresami",
   "m1e4706cc": "Ostatnie znane saldo · {{time}}",
-  "mc72d771e": "Aktualizowanie portfela Monero. Wyświetlane jest ostatnie znane saldo."
+  "mc72d771e": "Aktualizowanie portfela Monero. Wyświetlane jest ostatnie znane saldo.",
+  "m2b7cd429": "Kolejka Safe niedostępna",
+  "m647ff91c": "Oczekiwanie na wcześniejszy nonce",
+  "m7c223073": "Oczekujące propozycje",
+  "m13e4fc28": "Otwórz w Safe ↗",
+  "m42425dcb": "Kolejka Safe zsynchronizowana",
+  "m1666f992": "Synchronizowanie kolejki Safe…",
+  "m6dcf416d": "Udostępnij w Safe",
+  "m4767b8fb": "Niektóre transakcje Safe wymagają sprawdzenia w Safe."
 }

@@ -67,7 +67,7 @@ const MULTISIG_LISTS = new Set(["safeChains", "listVaults", "listSavedVaults", "
 const MULTISIG_RPC = new Set([
   "safeAddSignature", "safeBroadcast", "safeConfirm", "safeCreate", "safeCreatePlan", "safeImport",
   "safeImportProposal", "safeInspect", "safeList", "safeMine", "safeOpenVaultAccount", "safePending",
-  "safePrepareCreate", "safePrepareExecute", "safePropose", "safeRefresh", "safeSaveSetup",
+  "safePrepareCreate", "safePrepareExecute", "safePropose", "safeRefresh", "safeSync", "safePublish", "safeSaveSetup",
   "safeSigningData", "setVaultTotalInclusion", "vaultAccountGet", "vaultAddConfirm", "vaultAddPreview",
 ]);
 export function gateMultisigRpc<T extends Record<string, (...args: any[]) => any>>(enabled: () => boolean, handlers: T): T {

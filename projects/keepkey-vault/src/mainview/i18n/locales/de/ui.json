@@ -177,5 +177,13 @@
   "m2c78dc79": "Die signierten Monero-Ausgänge stimmen nicht mit dem bestätigten Empfänger, Betrag und Wechselgeld überein. Es wurde nichts gesendet.",
   "ma59e78f": "Verbinde die Monero-Überwachung erneut, um die Wechselgeldableitung bei Unteradressen zu autorisieren",
   "m1e4706cc": "Zuletzt bekannter Kontostand · {{time}}",
-  "mc72d771e": "Deine Monero-Wallet wird aktualisiert. Der zuletzt bekannte Kontostand wird angezeigt."
+  "mc72d771e": "Deine Monero-Wallet wird aktualisiert. Der zuletzt bekannte Kontostand wird angezeigt.",
+  "m2b7cd429": "Safe-Warteschlange nicht verfügbar",
+  "m647ff91c": "Warten auf frühere Nonce",
+  "m7c223073": "Ausstehende Vorschläge",
+  "m13e4fc28": "In Safe öffnen ↗",
+  "m42425dcb": "Safe-Warteschlange synchronisiert",
+  "m1666f992": "Safe-Warteschlange wird synchronisiert…",
+  "m6dcf416d": "Mit Safe teilen",
+  "m4767b8fb": "Einige Safe-Transaktionen müssen in Safe geprüft werden."
 }

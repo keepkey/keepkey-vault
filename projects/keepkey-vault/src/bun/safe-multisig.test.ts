@@ -9,7 +9,8 @@ import {
 } from './safe-multisig'
 import { SAFE_USDC, type SafeProposal } from '../shared/safe-multisig'
 import { SAFE_CREATE } from '../shared/safe-deployments'
-import { SAFE_TX_TYPE } from './safe-core'
+import { SAFE_TX_TYPE, safeTxHash } from './safe-core'
+import type { SafeTransactionQueue } from './safe-transaction-service'
 const SAFE_TYPES = { SafeTx: SAFE_TX_TYPE }
 const DEPLOYED = { factory: SAFE_CREATE.factory.address, singleton: SAFE_CREATE.singleton.address, handler: SAFE_CREATE.fallbackHandler.address }
 // Unmodified deployed bytecode from @safe-global/safe-contracts@1.4.1 build artifacts.
@@ -21,7 +22,7 @@ const coowner = new Wallet('0x' + '22'.repeat(32))
 const outsider = new Wallet('0x' + '33'.repeat(32))
 const SAFE = '0x1111111111111111111111111111111111111111'
 const RECIPIENT = '0x2222222222222222222222222222222222222222'
-function harness(hidden = false) {
+function harness(hidden = false, queue?: SafeTransactionQueue) {
   let key = 'session-a'
   let now = 1_000_000
   let safeNonce = '0'
@@ -98,6 +99,7 @@ function harness(hidden = false) {
     throw new Error(`Unexpected RPC ${method}`)
   }
   const service = new SafeMultisigService({
+    queue,
     session: async () => ({
       key,
       scope: 'wallet-a',
@@ -160,6 +162,125 @@ async function propose(h: ReturnType<typeof harness>, asset: 'ETH' | 'USDC' = 'E
 async function sign(p: SafeProposal, wallet: Wallet) {
   return wallet._signTypedData({ chainId: 8453, verifyingContract: p.safe }, SAFE_TYPES, p.transaction)
 }
+
+function remote(p: SafeProposal) {
+  return { ...p.transaction, safe: p.safe, safeTxHash: p.hash, isExecuted: false,
+    confirmations: Object.entries(p.signatures).map(([owner, signature]) => ({ owner, signature })) }
+}
+function queueHarness() {
+  let rows: unknown[] = []
+  let error = false
+  let hold: (() => Promise<void>) | undefined
+  const published: SafeProposal[] = []
+  const queue: SafeTransactionQueue = {
+    pending: async () => { if (hold) await hold(); if (error) throw new Error('Safe HTTP 429'); return rows },
+    publish: async p => { published.push(structuredClone(p)); rows = [remote(p)] },
+  }
+  return { queue, published, setRows: (v: unknown[]) => { rows = v }, fail: () => { error = true },
+    hold: (v: () => Promise<void>) => { hold = v } }
+}
+
+describe('Safe web and Vault queue interoperability', () => {
+  test('Vault approval is shared, a web personal_sign approval is verified, and execution uses both signatures', async () => {
+    const q = queueHarness(), h = await imported(harness(false, q.queue)), p = await propose(h)
+    await expect(h.service.publish({ hash: p.hash })).rejects.toThrow('Approve this proposal')
+    await h.service.addSignature({ hash: p.hash, signature: await sign(p, owner) })
+    await h.service.publish({ hash: p.hash })
+    expect(q.published).toHaveLength(1)
+    const webSignature = await coowner.signMessage(utils.arrayify(p.hash))
+    const safeWebSignature = webSignature.slice(0, -2) + (parseInt(webSignature.slice(-2), 16) + 4).toString(16)
+    q.setRows([remote({ ...q.published[0]!, signatures: { ...q.published[0]!.signatures, [coowner.address]: safeWebSignature } })])
+    const result = await h.service.sync({ address: SAFE })
+    expect(result).toMatchObject({ pending: 1, imported: 1, issues: [] })
+    const merged = (await h.service.list()).proposals[0]!
+    expect(Object.keys(merged.signatures).sort()).toEqual([owner.address, coowner.address].sort())
+    expect(merged.signatures[coowner.address]).toBe(safeWebSignature)
+    const review = await h.service.prepareExecute({ hash: p.hash })
+    expect(review.kind).toBe('execute')
+    expect(utils.arrayify(h.executionSignatures)).toHaveLength(130)
+    expect(h.sends).toBe(0)
+  })
+  test('a web-originated proposal is discovered without a local proposal or file import', async () => {
+    const q = queueHarness(), source = await imported(), p = await propose(source)
+    p.signatures[coowner.address] = await sign(p, coowner)
+    q.setRows([remote(p)])
+    const h = await imported(harness(false, q.queue))
+    expect((await h.service.list()).proposals).toHaveLength(0)
+    expect((await h.service.sync({ address: SAFE })).imported).toBe(1)
+    await h.service.addSignature({ hash: p.hash, signature: await sign(p, owner) })
+    await h.service.publish({ hash: p.hash })
+    expect(Object.keys(q.published[0]!.signatures)).toHaveLength(2)
+    expect(h.sends).toBe(0)
+  })
+  test('forged hashes, other Safes, delegatecalls and invalid confirmations cannot count toward execution', async () => {
+    const q = queueHarness(), source = await imported(), p = await propose(source)
+    const row = remote(p)
+    q.setRows([{ ...row, safeTxHash: '0x' + 'ff'.repeat(32) }, { ...row, safe: RECIPIENT },
+      { ...row, operation: 1 }, { ...row, confirmations: [{ owner: coowner.address, signature: await sign(p, outsider) }] }])
+    const h = await imported(harness(false, q.queue)), result = await h.service.sync({ address: SAFE })
+    expect(result.pending).toBe(4)
+    expect(result.imported).toBe(1)
+    expect(result.issues).toHaveLength(4)
+    expect((await h.service.list()).proposals[0]!.signatures).toEqual({})
+    await expect(h.service.prepareExecute({ hash: p.hash })).rejects.toThrow('Need 2')
+  })
+  test('future nonce proposals are visible but cannot be signed or executed early', async () => {
+    const q = queueHarness(), source = await imported(), p = await propose(source)
+    p.transaction.nonce = '2'
+    p.hash = safeTxHash(8453, SAFE, '1.4.1', p.transaction)
+    q.setRows([remote(p)])
+    const h = await imported(harness(false, q.queue))
+    expect((await h.service.sync({ address: SAFE })).imported).toBe(1)
+    await expect(h.service.signingData({ hash: p.hash })).rejects.toThrow('nonce changed')
+    await expect(h.service.prepareExecute({ hash: p.hash })).rejects.toThrow('nonce changed')
+  })
+  test('automatic observation saves the changed configuration and keeps the reviewed owners until explicit acceptance', async () => {
+    const q = queueHarness(), h = await imported(harness(false, q.queue)), p = await propose(h)
+    h.setOwners([owner.address, coowner.address, outsider.address])
+    await h.service.sync({ address: SAFE })
+    await h.service.sync({ address: SAFE })
+    const account = (await h.service.list()).accounts[0]!
+    expect(account.owners).toHaveLength(3)
+    expect(account.reviewedConfiguration?.owners).toEqual([owner.address, coowner.address])
+    expect(account.configurationChanged).toBe(true)
+    await expect(h.service.signingData({ hash: p.hash })).rejects.toThrow('changed')
+    const reviewed = await h.service.importAccount({ address: SAFE, name: account.name,
+      expectedOwners: account.owners, expectedThreshold: account.threshold })
+    expect(reviewed.configurationChanged).toBeUndefined()
+    expect(reviewed.reviewedConfiguration?.owners).toHaveLength(3)
+    expect(h.writes.size).toBe(1)
+  })
+  test('removing the connected owner retires the Safe and its proposals from the wallet', async () => {
+    const h = await imported(harness(false, queueHarness().queue))
+    await propose(h)
+    h.setOwners([coowner.address, outsider.address])
+    await h.service.sync({ address: SAFE })
+    expect((await h.service.list()).accounts).toEqual([])
+    expect((await h.service.list()).proposals).toEqual([])
+    expect(JSON.parse(h.writes.get('wallet-a')!).accounts[0].owners).toEqual([coowner.address, outsider.address])
+  })
+  test('an API failure preserves local approvals and reports unavailable rather than an empty remote queue', async () => {
+    const q = queueHarness(), h = await imported(harness(false, q.queue)), p = await propose(h)
+    await h.service.addSignature({ hash: p.hash, signature: await sign(p, owner) })
+    q.fail()
+    expect((await h.service.sync({ address: SAFE })).serviceError).toBe('Safe HTTP 429')
+    expect(Object.keys((await h.service.list()).proposals[0]!.signatures)).toEqual([owner.address])
+  })
+  test('a late remote response cannot import into a different wallet session', async () => {
+    const q = queueHarness(), h = await imported(harness(false, q.queue)), p = await propose(h)
+    let release!: () => void, started!: () => void
+    const reached = new Promise<void>(resolve => { started = resolve })
+    q.hold(async () => { started(); await new Promise<void>(resolve => { release = resolve }) })
+    q.setRows([remote(p)])
+    const syncing = h.service.sync({ address: SAFE })
+    await reached
+    const before = h.writes.get('wallet-a')
+    h.setKey('another-wallet')
+    release()
+    await expect(syncing).rejects.toThrow('Wallet changed')
+    expect(h.writes.get('wallet-a')).toBe(before)
+  })
+})
 
 describe('Base Safe account and transaction boundary', () => {
   test('account-scoped proposal import refuses another Safe or another selected asset', async () => {

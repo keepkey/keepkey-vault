@@ -187,5 +187,13 @@
   "m2c78dc79": "Las salidas Monero firmadas no coinciden con el destinatario, el importe y el cambio aprobados. No se envió nada.",
   "ma59e78f": "Vuelve a conectar la supervisión de Monero para autorizar la derivación del cambio con subdirecciones",
   "m1e4706cc": "Último saldo conocido · {{time}}",
-  "mc72d771e": "Actualizando tu cartera Monero. Se muestra el último saldo conocido."
+  "mc72d771e": "Actualizando tu cartera Monero. Se muestra el último saldo conocido.",
+  "m2b7cd429": "Cola de Safe no disponible",
+  "m647ff91c": "Esperando un nonce anterior",
+  "m7c223073": "Propuestas pendientes",
+  "m13e4fc28": "Abrir en Safe ↗",
+  "m42425dcb": "Cola de Safe sincronizada",
+  "m1666f992": "Sincronizando la cola de Safe…",
+  "m6dcf416d": "Compartir con Safe",
+  "m4767b8fb": "Algunas transacciones de Safe deben revisarse en Safe."
 }

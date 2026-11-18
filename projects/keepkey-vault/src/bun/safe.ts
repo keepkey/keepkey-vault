@@ -11,55 +11,11 @@ import { decodeCalldata } from './calldata-decoder'
 import { safeTxHash, checkConfirmation, approvedHashCall, vetSafe, SAFE_READS, decodeSafeRead, type SafeTxFields } from './safe-core'
 import type { SafeInfo, PendingSafeTx } from '../shared/types'
 
-const SAFE_CONFIG_URL = 'https://safe-config.safe.global/api/v1/chains/?limit=200'
-const CONFIG_TTL_MS = 60 * 60 * 1000
+import { safeTransactionService } from './safe-transaction-service'
 
-let chainsCache: { at: number; services: Map<number, string> } | null = null
-
-/** chainId -> Transaction Service base URL, from Safe's own chain config. */
-export async function safeTxServices(): Promise<Map<number, string>> {
-  if (chainsCache && Date.now() - chainsCache.at < CONFIG_TTL_MS) return chainsCache.services
-  const resp = await fetch(SAFE_CONFIG_URL, { signal: AbortSignal.timeout(10_000) })
-  if (!resp.ok) throw new Error(`Safe chain config HTTP ${resp.status}`)
-  const body = await resp.json() as { results?: { chainId: string; transactionService?: string }[] }
-  const services = new Map<number, string>()
-  for (const c of body.results ?? []) {
-    if (c.transactionService && /^https:\/\//.test(c.transactionService)) services.set(Number(c.chainId), c.transactionService.replace(/\/+$/, ''))
-  }
-  chainsCache = { at: Date.now(), services }
-  return services
-}
-
-/** Every page of a list from the Transaction Service, never following a link off its host. */
-async function txServiceAll(chainId: number, path: string): Promise<any[]> {
-  const base = (await safeTxServices()).get(chainId)
-  if (!base) throw new Error(`Safe does not support chain ${chainId}`)
-  const results: any[] = []
-  let url: string | null = `${base}/api${path}`
-  // ponytail: 20-page cap; raise it if a Safe ever has more owners' Safes or pending txs than that.
-  for (let page = 0; url && page < 20; page++) {
-    if (!url.startsWith(`${base}/`)) throw new Error('Safe Transaction Service sent a page link to another host')
-    const resp = await fetch(url, { signal: AbortSignal.timeout(15_000) })
-    if (!resp.ok) throw new Error(`Safe Transaction Service HTTP ${resp.status} for ${path}`)
-    const body = await resp.json() as { results?: any[]; next?: string | null }
-    results.push(...(body.results ?? []))
-    url = body.next ?? null
-  }
-  return results
-}
-
-/** Adds an owner's signature to a proposal on Safe's Transaction Service. */
-export async function postConfirmation(chainId: number, safeTxHash: string, signature: string): Promise<void> {
-  const base = (await safeTxServices()).get(chainId)
-  if (!base) throw new Error(`Safe does not support chain ${chainId}`)
-  const resp = await fetch(`${base}/api/v1/multisig-transactions/${safeTxHash}/confirmations/`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ signature }),
-    signal: AbortSignal.timeout(15_000),
-  })
-  if (!resp.ok) throw new Error(`Safe Transaction Service refused the signature (HTTP ${resp.status}): ${(await resp.text()).slice(0, 200)}`)
-}
+export const safeTxServices = () => safeTransactionService.services()
+export const postConfirmation = (chainId: number, hash: string, signature: string) => safeTransactionService.confirm(chainId, hash, signature)
+const txServiceAll = (chainId: number, path: string) => safeTransactionService.all(chainId, path)
 
 /** Safes on this chain that list `owner` as an owner (discovery only). */
 export async function listOwnedSafes(chainId: number, owner: string): Promise<string[]> {

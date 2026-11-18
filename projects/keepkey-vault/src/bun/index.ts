@@ -376,6 +376,7 @@ import { buildProviderBundle, buildStudioEvmSchema, parseProviderBundle, provide
 import { ethRpc, getTokenMetadata, broadcastEvmTx, verifyEvmSigner, ethCall, ethGetCode, hasContractCode, getEvmGasPrice, getEvmNonce, getEvmBalance, waitForTxReceipt } from "./evm-rpc"
 import { evmSourceForChain, pioneerEvmRpc } from "./pioneer-evm"
 import { SafeMultisigService, inspectBaseSafe } from './safe-multisig'
+import { safeTransactionService } from './safe-transaction-service'
 import { VaultImportService } from './vault-import'
 import { VaultPortfolioService } from './vault-portfolio'
 import { requireVaultAsset, assertVaultControlSnapshot, type VaultAssetRequest, type VaultAssetAccount } from '../shared/vault-asset-account'
@@ -4389,6 +4390,7 @@ const vaultPortfolios = new VaultPortfolioService({
 	writeExcluded: ids => setSetting('vault_totals_excluded', JSON.stringify(ids)),
 })
 const safeMultisig = new SafeMultisigService({
+	queue: safeTransactionService,
 	currentKey: safeSessionKey,
 	session: async () => {
 		const device = engine.getDeviceState()
@@ -8000,6 +8002,8 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			safeSaveSetup: (params) => safeMultisig.saveSetup(params),
 			safeImport: (params) => safeMultisig.importAccount(params),
 			safeInspect: (params) => safeMultisig.inspectAccount(params),
+			safeSync: (params) => safeMultisig.sync(params),
+			safePublish: (params) => safeMultisig.publish(params),
 			safeRefresh: (params) => safeMultisig.refresh(params),
 			safePropose: (params) => safeMultisig.propose(params),
 			safeImportProposal: (params) => safeMultisig.importProposal(params),

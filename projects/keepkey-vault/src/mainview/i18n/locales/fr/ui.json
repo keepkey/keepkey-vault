@@ -13,7 +13,7 @@
   "m2e0454af": "ID de chaîne",
   "m2e7e4ae3": "Chargement…",
   "m2e823442": "Recevoir",
-  "m3256a34c": "Carnet d'adresses",
+  "m3256a34c": "Carnet d’adresses",
   "m34462": "Entrer manuellement",
   "m35afca3b": "Annuler",
   "m37298692": "Monero n’est pas disponible dans les portefeuilles cachés. Passez à votre portefeuille standard pour utiliser Monero.",
@@ -181,5 +181,13 @@
   "m2c78dc79": "Les sorties Monero signées ne correspondent pas au destinataire, au montant et à la monnaie approuvés. Rien n’a été envoyé.",
   "ma59e78f": "Reconnectez le suivi Monero pour autoriser la dérivation de la monnaie avec les sous-adresses",
   "m1e4706cc": "Dernier solde connu · {{time}}",
-  "mc72d771e": "Mise à jour de votre portefeuille Monero. Le dernier solde connu est affiché."
+  "mc72d771e": "Mise à jour de votre portefeuille Monero. Le dernier solde connu est affiché.",
+  "m2b7cd429": "File Safe indisponible",
+  "m647ff91c": "En attente d’un nonce antérieur",
+  "m7c223073": "Propositions en attente",
+  "m13e4fc28": "Ouvrir dans Safe ↗",
+  "m42425dcb": "File Safe synchronisée",
+  "m1666f992": "Synchronisation de la file Safe…",
+  "m6dcf416d": "Partager avec Safe",
+  "m4767b8fb": "Certaines transactions Safe doivent être examinées dans Safe."
 }
