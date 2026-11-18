@@ -23,6 +23,8 @@ import { flushRingBuffers, getActiveFlashName, getEmulatorStatus } from './emula
 import { wipeOwningDevice, WIPE_BUSY_MESSAGE, WIPE_REPLUG_PENDING_MESSAGE, type WipeHost } from './device-wipe'
 import { awaitingInput, DEVICE_NOT_ASKING_MESSAGE, gateRestWrites, guardInputWait, restRequest } from './device-gate'
 import { DeviceOperationCoordinator, backgroundDeviceRead, deviceOperationContext, type DeviceOperationOptions } from './device-operation'
+import { installNativeContactProof } from './native-contact-proof'
+import type { AddressBookCertification } from './addressbook-clearsign'
 
 const KEEPKEY_VENDOR_ID = 0x2B24 // 11044
 // Firmware manifest lives in keepkey-vault (migrated from keepkey-desktop, which is now stale).
@@ -118,6 +120,7 @@ export class EngineController extends EventEmitter {
   // Typed as HDWallet with KeepKey-specific extensions (firmware, PIN, etc.)
   // Cast to `any` when calling KeepKey-only methods not in the HDWallet interface
   wallet: (core.HDWallet & Record<string, any>) | null = null
+  contactProofState?: () => { enabled: boolean; certificate?: AddressBookCertification }
   private activeTransport: ActiveTransport = null
   private updatePhase: UpdatePhase = 'idle'
   // After a firmware/bootloader flash the device must be physically unplugged and
@@ -412,6 +415,11 @@ export class EngineController extends EventEmitter {
 
   private attachTransportListeners() {
     if (!this.wallet?.transport) return
+    installNativeContactProof(this.wallet, () => ({
+      ...(this.contactProofState?.() || { enabled: false }),
+      passphrase: this.isPassphraseWallet,
+      capabilities: this.cachedFeatures?.capabilitiesList,
+    }))
 
     // Clean up any existing listeners to prevent leaks on re-pair
     this.cleanupTransportListeners()

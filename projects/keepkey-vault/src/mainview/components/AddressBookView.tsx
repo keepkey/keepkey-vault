@@ -94,7 +94,7 @@ export function AddressBookView() {
       setExcludedContacts(preview.excluded)
       if (!preview.contacts.length) setCertificationNotice(preview.excluded.length
         ? preview.excluded.map(c => `${c.label} (${c.address}): ${c.reason}`).join('; ')
-        : "Add at least one labeled EVM contact before certifying")
+        : "Add at least one labeled contact supported by the connected firmware before certifying")
       else setCertifyPreview(preview.contacts)
     } catch (error: any) {
       setCertificationNotice(error?.message || "Could not list the contacts to certify")
@@ -242,7 +242,7 @@ export function AddressBookView() {
               </Text>
             </Flex>
             <Text fontSize="xs" color="var(--text-2)" mb="3" pl="42px">{uiText("Your KeepKey signs this list. Sends to these addresses on these networks then show the name on your KeepKey.")}</Text>
-            <Text fontSize="10px" color="var(--text-2)" mb="3">{uiText("Vault certificates cover only the displayed destination label, address and network. Cosigners, thresholds and token support are separate account metadata. Bitcoin vault destinations are not supported by this EVM certificate flow.")}</Text>
+            <Text fontSize="10px" color="var(--text-2)" mb="3">{uiText("Certificates cover the displayed destination label, address and network. The device still shows the full destination for each send. Cosigners, thresholds and token support are separate account metadata.")}</Text>
             {certifyPreview.length > 16 && <Text fontSize="11px" color="var(--gold)" mb="3">{uiText("Choose at most 16 destinations by removing entries from this review.")}</Text>}
             {excludedContacts.length > 0 && <Box mb="3">
               <Text fontSize="11px" color="var(--gold)">{t('certificationExcluded', { defaultValue: 'These contacts cannot be certified:' })}</Text>

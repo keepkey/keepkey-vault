@@ -75,4 +75,18 @@ describe('ENS address-book resolution', () => {
     expect(preview.excluded[0].reason).toContain('ENS name has not resolved')
     expect(buildCertificationRequest(contactsFromEntries([valid]), 1).root).toHaveLength(32)
   })
+
+  test('native account names remain native while unresolved EVM names stay excluded', () => {
+    const hive = { ...entry('hive', 'alice.eth'), networkId: 'hive:beeab0de', label: 'Hive friend' }
+    const solana = { ...entry('sol', 'So11111111111111111111111111111111111111112'), networkId: 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp', label: 'Sol friend' }
+    const preview = previewCertificationEntries([hive, solana, entry('unresolved')], true)
+    expect(preview.contacts).toEqual([
+      { label: 'Hive friend', network: hive.networkId, address: 'alice.eth' },
+      { label: 'Sol friend', network: solana.networkId, address: solana.address },
+    ])
+    expect(preview.excluded).toHaveLength(1)
+    expect(preview.excluded[0].network).toBe('eip155:8453')
+    expect(previewCertificationEntries([hive, solana]).contacts).toEqual([])
+    expect(() => buildCertificationRequest(contactsFromEntries([hive, solana], true, true), 1)).not.toThrow()
+  })
 })

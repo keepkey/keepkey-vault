@@ -90,8 +90,8 @@ function requireAddressBookClearsignFirmware(): void {
 }
 
 /**
- * Certified contacts have no capability flag (firmware #951), and 7.16 test
- * builds with and without it share a version. Rule: offer certification on
+ * Legacy 7.16 test builds with and without firmware #951 share a version.
+ * Native certification separately requires capability 32. Offer EVM certification on
  * >= 7.16.0; the first attempt is the probe. If the device answers the way a
  * build without #951 does (isAddressBookCertifyUnsupported), remember it for
  * this device and this exact firmware image (its hash), so a reflash re-probes.
@@ -391,7 +391,7 @@ import type { WipeReason } from "../shared/flash-wipe"
 import { collectAndAnalyzeWithGate, MAX_CHUNK_BYTES } from "./rng-audit"
 import { withoutCallerErc7730 } from '../shared/erc7730-support'
 import { recordReviewCard, recordReviewCardText, reviewTapeRecording } from './test-review-tape'
-import { ADDRESS_BOOK_CERTIFY_UNSUPPORTED, buildCertificationRequest, contactProofAllowed, buildContactProof, contactsFromEntries, CONTACT_DESTINATION, evmRecipient, isAddressBookCertifyUnsupported, signWithContactProofAck, type AddressBookCertification } from "./addressbook-clearsign"
+import { ADDRESS_BOOK_CERTIFY_UNSUPPORTED, ALL_CHAIN_CONTACT_CAPABILITY, buildCertificationRequest, contactAddress, contactProofAllowed, buildContactProof, contactsFromEntries, CONTACT_DESTINATION, evmRecipient, isAddressBookCertifyUnsupported, signWithContactProofAck, type AddressBookCertification } from "./addressbook-clearsign"
 
 // L3 fix: withTimeout imported from engine-controller (was duplicated here)
 const PIONEER_TIMEOUT_MS = 60_000
@@ -1411,6 +1411,12 @@ function storedAddressBookCertification(): AddressBookCertification | undefined 
 	const raw = getSetting('addressbook_clearsign_certification')
 	if (!raw) return undefined
 	try { return JSON.parse(raw) as AddressBookCertification } catch { return undefined }
+}
+
+engine.contactProofState = () => ({ enabled: addressBookClearsignEnabled, certificate: storedAddressBookCertification() })
+
+function allChainContactsSupported(): boolean {
+	return engine.getDeviceState().capabilities?.includes(ALL_CHAIN_CONTACT_CAPABILITY) === true
 }
 
 function invalidateAddressBookCertification(): void {
@@ -4304,7 +4310,7 @@ async function verifyKnownEvmVaultTransfer(params: any) {
 	}
 }
 function vaultCertificationEntries() {
-	return certifiableAddressBookEntries(vaultAddressEntries(), getAddressBookList({ kind: 'external', savedOnly: true }))
+	return certifiableAddressBookEntries(vaultAddressEntries(), getAddressBookList({ kind: 'external', savedOnly: true }), allChainContactsSupported())
 }
 const repairEnsContactsOnce = singleFlight<void>()
 async function repairSavedEnsContacts(): Promise<void> {
@@ -9334,7 +9340,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			},
 			previewAddressBookCertification: async () => {
 				await repairSavedEnsContacts()
-				return previewCertificationEntries(vaultCertificationEntries())
+				return previewCertificationEntries(vaultCertificationEntries(), allChainContactsSupported())
 			},
 			certifyAddressBook: async (params) => {
 				if (!addressBookClearsignEnabled) throw new Error('Address Book ClearSign is not enabled')
@@ -9343,9 +9349,11 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				if (engine.isPassphraseWallet) throw new Error('Address Book certification is unavailable in a passphrase session')
 				// The review dialog can drop contacts; it can never add one.
 				const only = (params as any)?.only as { network: string; address: string }[] | undefined
-				const keep = only && new Set(only.map(o => `${o.network}|${String(o.address).toLowerCase().replace(/^0x/, '')}`))
-				const contacts = contactsFromEntries(vaultCertificationEntries().filter(e => !keep || keep.has(`${e.networkId}|${e.address.toLowerCase().replace(/^0x/, '')}`)))
-				if (!contacts.length) throw new Error('Add at least one labeled EVM contact before certifying')
+				const keep = only && new Set(only.map(o => `${o.network}|${o.address}`))
+				const contacts = contactsFromEntries(vaultCertificationEntries(), false, allChainContactsSupported())
+					.filter(c => !keep || keep.has(`${c.network}|${contactAddress(c)}`))
+				if (!contacts.length) throw new Error('Add at least one labeled contact on a supported network before certifying')
+				if (contacts.length > 16) throw new Error('Choose at most 16 certified contacts')
 				const revision = Math.max(0, Number(getSetting('addressbook_clearsign_revision') || '0')) + 1
 				if (addressBookCertifyUnsupported()) throw new Error(ADDRESS_BOOK_CERTIFY_UNSUPPORTED)
 				const built = buildCertificationRequest(contacts, revision)
@@ -9353,7 +9361,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				let result: any
 				try {
 					result = engine.isEmulator
-						? await emuSigningOp(attest, { operation: 'clearsignAttestorSign', opLabel: 'Certify address book', chain: 'EVM' })
+						? await emuSigningOp(attest, { operation: 'clearsignAttestorSign', opLabel: 'Certify address book' })
 						: await attest()
 				} catch (error: any) {
 					if (!isAddressBookCertifyUnsupported(deviceErrorMessage(error))) throw error

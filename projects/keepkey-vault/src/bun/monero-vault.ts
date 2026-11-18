@@ -2,6 +2,7 @@
 import type { MoneroCachedBalance, MoneroConnectionInfo } from '../shared/types'
 import { createHash, randomBytes, randomInt } from 'node:crypto'
 import type { MoneroCoreVerifier } from './monero-device-signing'
+import { preloadNativeContactProof } from './native-contact-proof'
 import { checkStreamSigningBounds, signMoneroStream, streamNeedsMonitoringKey, validateStreamMonitoringKey, supportsMoneroSigning, STREAM_ERRORS, type MoneroSigningPhase, type MoneroText } from './monero-stream-signer'
 import { MONERO_DEVICE_CANDIDATE_SHA256, MONERO_DEVICE_SUBADDRESS_CANDIDATE_SHA256 } from './monero-device-signing'
 import type { MoneroWatchStore } from './monero-watch-store'
@@ -886,6 +887,7 @@ export function createMoneroVault({ engine, confirm, getConfig, sidecar = manage
         const signed = await deviceOperation(current, async () => {
           if (current.streamed) {
             try {
+              await preloadNativeContactProof(current.wallet, draft.plan.outputs.map(o => o.address), 'monero')
               return await signMoneroStream(draft.plan,
                 (request, response, payload, review) => receive(current, generation, request, response, payload, review),
                 { text, senderViewKey, onProgress: phase => { check(current, generation); signingPhase = phase } })
