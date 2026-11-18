@@ -482,6 +482,7 @@ function App() {
 	// ── Signing approval overlay ────────────────────────────────────
 	const [signingRequest, setSigningRequest] = useState<SigningRequestInfo | null>(null)
 	const [signingPhase, setSigningPhase] = useState<SigningPhase>('approve')
+	const [deviceReviewPrompts, setDeviceReviewPrompts] = useState(0)
 	const signingRequestRef = useRef<SigningRequestInfo | null>(null)
 	const signingPhaseRef = useRef<SigningPhase>('approve')
 	const signingPayloadStartedAt = useRef<number | null>(null)
@@ -505,6 +506,7 @@ function App() {
 			signingPayloadStartedAt.current = null
 			const request = payload as SigningRequestInfo
 			signingRequestRef.current = request
+			setDeviceReviewPrompts(0)
 			setSigningPhaseTracked('approve')
 			setSigningRequest(request)
 		})
@@ -524,7 +526,9 @@ function App() {
 
 	useEffect(() => {
 		return onRpcMessage("device-button-request", () => {
-			if (!signingRequestRef.current || signingPhaseRef.current !== 'sending-payload') return
+			if (!signingRequestRef.current || signingPhaseRef.current === 'approve') return
+			setDeviceReviewPrompts(count => count + 1)
+			if (signingPhaseRef.current !== 'sending-payload') return
 
 			const startedAt = signingPayloadStartedAt.current ?? Date.now()
 			const elapsedMs = Date.now() - startedAt
@@ -986,7 +990,7 @@ function App() {
 	// PIN is highest priority (z-index 2010) — must show above signing
 	// approval so users can unlock a PIN-locked device during API signing.
 	const signingOverlay = signingRequest ? (
-		<SigningApproval request={signingRequest} phase={signingPhase} onApprove={handleApproveSign} onReject={handleRejectSign} onCancel={handleCancelSign} />
+		<SigningApproval request={signingRequest} phase={signingPhase} devicePrompts={deviceReviewPrompts} onApprove={handleApproveSign} onReject={handleRejectSign} onCancel={handleCancelSign} />
 	) : null
 
 	const pairingOverlay = <>

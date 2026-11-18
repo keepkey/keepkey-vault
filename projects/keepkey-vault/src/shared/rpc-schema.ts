@@ -548,6 +548,8 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       emulatorStop: { params: void; response: EmulatorStatus }
       emulatorSave: { params: void; response: void }
       emulatorStatus: { params: void; response: EmulatorStatus }
+      /** Read-only current frame, only for this sole active emulator signing session. */
+      signingReviewFrame: { params: { signingId: string; deviceId: string }; response: { frame: string; deviceId: string } | null }
       emulatorListBuilds: { params: void; response: { builds: EmulatorBuildInfo[]; selected: string | null; next: EmulatorNextBuild } }
       emulatorSelectBuild: { params: { id: string }; response: { builds: EmulatorBuildInfo[]; selected: string } }
       /** id null: the bundled (or user-installed) library. */

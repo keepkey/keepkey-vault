@@ -17,6 +17,7 @@ import { isBitcoinOnlyVariant } from "../../shared/flags"
 import { SelfHostNodePanel } from "./SelfHostNodePanel"
 import { MoneroNodePanel } from './MoneroNodePanel'
 import { EmulatorBuildOptions, useEmulatorNames } from "./EmulatorIdentity"
+import { SigningReviewOverview } from "./device/SigningReviewOverview"
 import { ClearSignStudio } from "./ClearSignStudio"
 import { ClearSignProvidersPanel } from "./ClearSignProvidersPanel"
 import { RngAuditPanel } from "./RngAuditPanel"
@@ -209,6 +210,7 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 	const [resetConfirm, setResetConfirm] = useState(false)
 	const [resetting, setResetting] = useState(false)
 	const [clearSignStudioOpen, setClearSignStudioOpen] = useState(false)
+	const [signingReviewOpen, setSigningReviewOpen] = useState(false)
 	const [rngAuditOpen, setRngAuditOpen] = useState(false)
 	const [simulationChainId, setSimulationChainId] = useState('1')
 	const [simulationRpcUrl, setSimulationRpcUrl] = useState('')
@@ -1332,6 +1334,11 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 					{/* ── Signing Policy ─────────────────────────────── */}
 					<Section title={t("signingPolicy")} category="security" docsHref={DOCS_LINKS.settingsSigningPolicy}>
 						<VStack gap="4" align="stretch">
+              <Flex align="center" justify="space-between" gap="4" wrap="wrap" py="2">
+                <Box><Text fontSize="md" color="kk.textPrimary" fontWeight="600">{uiText("Signing screen guide")}</Text>
+                  <Text fontSize="sm" color="kk.textSecondary" mt="1">{uiText("Choose your reading detail and preview what to compare on your KeepKey.")}</Text></Box>
+                <Button variant="outline" onClick={() => setSigningReviewOpen(true)}>{uiText("Open screen guide")}</Button>
+              </Flex>
 							{/* Advanced Mode (blind signing) */}
 							<Flex
 								align="center"
@@ -1968,6 +1975,7 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 				</SettingsLayout>
 			</Box>
 			<RngAuditPanel open={rngAuditOpen} onClose={() => setRngAuditOpen(false)} />
+			<SigningReviewOverview open={signingReviewOpen} onClose={() => setSigningReviewOpen(false)} />
 			<ClearSignStudio
 				open={clearSignStudioOpen}
 				onClose={() => setClearSignStudioOpen(false)}

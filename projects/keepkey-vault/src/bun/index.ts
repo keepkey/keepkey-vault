@@ -391,6 +391,7 @@ import type { WipeReason } from "../shared/flash-wipe"
 import { collectAndAnalyzeWithGate, MAX_CHUNK_BYTES } from "./rng-audit"
 import { withoutCallerErc7730 } from '../shared/erc7730-support'
 import { recordReviewCard, recordReviewCardText, reviewTapeRecording } from './test-review-tape'
+import { SigningReviewSessions } from "./signing-review-session"
 import { ADDRESS_BOOK_CERTIFY_UNSUPPORTED, ALL_CHAIN_CONTACT_CAPABILITY, buildCertificationRequest, contactAddress, contactProofAllowed, buildContactProof, contactsFromEntries, CONTACT_DESTINATION, evmRecipient, isAddressBookCertifyUnsupported, signWithContactProofAck, type AddressBookCertification } from "./addressbook-clearsign"
 
 // L3 fix: withTimeout imported from engine-controller (was duplicated here)
@@ -1182,6 +1183,7 @@ function attachSafeKnownAddresses(info: SigningRequestInfo): void {
 }
 
 function attachSigningPolicySnapshot(info: SigningRequestInfo): SigningRequestInfo {
+	info.deviceReview = { emulator: engine.isEmulator, deviceId: engine.getDeviceState().deviceId }
 	const features = engine.getCachedFeaturesSnapshot()
 	if (features) {
 		const policies: any[] = features.policiesList || features.policies || []
@@ -1302,6 +1304,7 @@ const auth = new AuthStore()
 // the awaiting REST callback consumes and deletes it immediately.
 const blindSigningApprovalIds = new Set<string>()
 const pendingSigningApprovalInfo = new Map<string, SigningRequestInfo>()
+const signingReviewSessions = new SigningReviewSessions()
 async function requestSigningApprovalDecision(id: string, signal?: AbortSignal) {
 	const pending = auth.requestSigningApproval(id)
 	const cancel = () => auth.rejectSigningRequest(id)
@@ -2213,17 +2216,24 @@ const restCallbacks: RestApiCallbacks = {
 			console.log(`[REST] Explicit test environment approved host signing gate for ${info.method}`)
 			return { approved: true }
 		}
+		signingReviewSessions.begin(info.id, info.deviceReview?.deviceId, activitySessionEpoch, engine.isEmulator)
 		pendingSigningApprovalInfo.set(info.id, info)
 		try { rpc.send['signing-request'](info) } catch { /* webview not ready */ }
 		acquireWindowFocus()
 		try {
-			return await requestSigningApprovalDecision(info.id, signal)
+			const decision = await requestSigningApprovalDecision(info.id, signal)
+			if (!decision.approved) signingReviewSessions.end(info.id)
+			return decision
+		} catch (error) {
+			signingReviewSessions.end(info.id)
+			throw error
 		} finally {
 			pendingSigningApprovalInfo.delete(info.id)
 			releaseWindowFocus()
 		}
 	},
 	onSigningDismissed: (id: string) => {
+		signingReviewSessions.end(id)
 		try { rpc.send['signing-dismissed']({ id }) } catch { /* webview not ready */ }
 	},
 	// AdvancedMode off over REST ends the Studio provider-key session too.
@@ -10987,6 +10997,14 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				if (!emulatorEnabled) throw new Error('Emulator is disabled')
 				const { saveEmulatorState } = await import('./emulator')
 				await saveEmulatorState()
+			},
+			signingReviewFrame: async (params) => {
+				if (!emulatorEnabled || !engine.isEmulator || params.deviceId !== engine.getDeviceState().deviceId) return null
+				const { signingReviewFrame } = await import('./emulator-window')
+				return signingReviewSessions.read(params.signingId, params.deviceId, activitySessionEpoch, engine.isEmulator, () => {
+					const frame = signingReviewFrame()
+					return frame ? { frame, deviceId: params.deviceId } : null
+				})
 			},
 			emulatorStatus: async () => {
 				if (!emulatorEnabled) {

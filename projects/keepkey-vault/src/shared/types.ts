@@ -1290,6 +1290,9 @@ export interface CalldataDecodedInfo {
 
 export interface SigningRequestInfo {
   id: string
+  /** Backend snapshot for pairing the current emulator's actual captured OLED.
+   * Physical hardware has no screen-readback claim. */
+  deviceReview?: { emulator: boolean; deviceId?: string }
   method: string
   appName: string
   chain?: string

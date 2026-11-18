@@ -21,11 +21,14 @@ import { ClearSignReportCard } from "../ClearSignReportCard"
 import { KeepKeyUILogo } from "../logo/keepkey-ui"
 import { DocsLink } from "../DocsLink"
 import { DOCS_LINKS, watch } from "../../../shared/docs-links"
+import { SigningReviewCompanion } from "./SigningReviewCompanion"
+import { useSigningReviewPreferences } from "../../lib/signing-review-preferences"
 import { namedProviderLine } from "../../../shared/clearsign-report"
 
 interface SigningApprovalProps {
 	request: SigningRequestInfo
 	phase: 'approve' | 'sending-payload' | 'device-confirm'
+	devicePrompts?: number
 	onApprove: (approval?: { allowBlindSigning?: boolean }) => void
 	onReject: () => void
 	onCancel: () => void
@@ -58,22 +61,7 @@ const METHOD_LABEL_KEYS: Record<string, string> = {
 }
 
 const SIGNING_ANIMATIONS = `
-	/* Deliberately restrained: a signing prompt should read as serious, not
-	   alarming. The old 24px/48px throb washed the card edge out and made the
-	   hex payload hard to scan. This keeps a faint gold presence that breathes
-	   instead of pulsing. */
-	@keyframes signingPulseGlow {
-		0%, 100% { box-shadow: 0 0 0 1px rgba(233,196,106,0.10), 0 16px 44px -12px rgba(0,0,0,0.75); }
-		50% { box-shadow: 0 0 10px 1px rgba(233,196,106,0.18), 0 16px 44px -12px rgba(0,0,0,0.75); }
-	}
-	@keyframes signingFlashBorder {
-		0%, 100% { border-color: rgba(233,196,106,0.5); }
-		50% { border-color: rgba(233,196,106,1); }
-	}
-	@keyframes signingBadgePulse {
-		0%, 100% { opacity: 1; transform: scale(1); }
-		50% { opacity: 0.7; transform: scale(1.05); }
-	}
+  @media (prefers-reduced-motion: reduce) { [data-signing-overlay] *, [data-signing-overlay] { animation: none !important; } }
 	@keyframes signingOverlayIn {
 		0% { opacity: 0; }
 		100% { opacity: 1; }
@@ -81,10 +69,6 @@ const SIGNING_ANIMATIONS = `
 	@keyframes signingCardIn {
 		0% { opacity: 0; transform: scale(0.92) translateY(12px); }
 		100% { opacity: 1; transform: scale(1) translateY(0); }
-	}
-	@keyframes warningPulse {
-		0%, 100% { box-shadow: 0 0 8px 2px rgba(245,163,59,0.3); }
-		50% { box-shadow: 0 0 20px 6px rgba(245,163,59,0.5); }
 	}
 `
 
@@ -98,7 +82,7 @@ function Row({ label, value, mono = true }: { label: string; value?: string; mon
 				{label}
 			</Text>
 			<Text
-				fontSize="2xs"
+				fontSize="sm"
 				color="kk.textPrimary"
 				fontFamily={mono ? "mono" : "inherit"}
 				wordBreak="break-all"
@@ -124,7 +108,7 @@ function TrustBadge({ level, hasSigned, schemaOnly, label, t }: { level: 'verifi
 		<Flex
 			align="center" gap="1.5" px="3" py="1" borderRadius="full"
 			bg={cfg.bg} border="1px solid" borderColor={cfg.border}
-			css={level === 'unknown' ? { animation: "warningPulse 2s ease-in-out infinite" } : undefined}
+			css={level === 'unknown' ? { animation: "none" } : undefined}
 		>
 			<Box w="8px" h="8px" borderRadius="full" bg={cfg.color} />
 			<Text fontSize="2xs" fontWeight="600" color={cfg.color}>{cfg.label}</Text>
@@ -1051,8 +1035,10 @@ function SelfTransferNote({ from, to }: { from?: string; to?: string }) {
 	)
 }
 
-export function SigningApproval({ request, phase, onApprove, onReject, onCancel }: SigningApprovalProps) {
+export function SigningApproval({ request, phase, devicePrompts = 0, onApprove, onReject, onCancel }: SigningApprovalProps) {
   const uiText = useUiTranslation()
+  const [reviewPreferences] = useSigningReviewPreferences()
+  const readableDetails = { "& p, & span, & pre": { fontSize: reviewPreferences.largeText ? "16px" : "14px", lineHeight: "1.65" } }
 
 	const { t } = useTranslation("device")
 	const [elapsed, setElapsed] = useState(0)
@@ -1236,22 +1222,22 @@ export function SigningApproval({ request, phase, onApprove, onReject, onCancel 
 	if (phase === 'sending-payload') {
 		return (
 			<Box
-				position="fixed" inset="0" zIndex={Z.overlay + 1}
+				data-signing-overlay position="fixed" inset="0" zIndex={Z.overlay + 1}
 				bg="rgba(0,0,0,0.85)" backdropFilter="blur(8px)"
 				display="flex" alignItems="center" justifyContent="center"
 			>
 				<style>{SIGNING_ANIMATIONS}</style>
 				<VStack
 					bg="kk.cardBg" border="1px solid" borderColor="rgba(233,196,106,0.45)" borderRadius="2xl"
-					p="6" gap="3" maxW="640px" w="90vw" maxH="95vh" overflowY="auto" textAlign="center"
-					css={{ animation: "signingCardIn 0.3s ease-out, signingPulseGlow 4s ease-in-out infinite 0.3s" }}
+					p="6" gap="3" maxW="900px" w="90vw" maxH="95vh" overflowY="auto" textAlign="center"
+					css={{ animation: "signingCardIn 0.18s ease-out" }}
 				>
 					<Flex justify="center">
 						<Box
 							w="64px" h="64px" borderRadius="2xl"
 							bg="rgba(233,196,106,0.15)" border="2px solid" borderColor="kk.gold"
 							display="flex" alignItems="center" justifyContent="center"
-							css={{ animation: "signingBadgePulse 1.5s ease-in-out infinite" }}
+							css={{ animation: "none" }}
 						>
 							<svg width="32" height="32" viewBox="0 0 24 24" fill="none">
 								<rect x="6" y="2" width="12" height="20" rx="2" stroke="var(--gold)" strokeWidth="2" />
@@ -1274,14 +1260,15 @@ export function SigningApproval({ request, phase, onApprove, onReject, onCancel 
 					<Flex gap="2" justify="center" align="center">
 						{[0, 1, 2].map((i) => (
 							<Box key={i} w="8px" h="8px" borderRadius="full" bg="kk.gold"
-								css={{ animation: `signingBadgePulse 1.2s ease-in-out infinite ${i * 0.2}s` }}
+								css={{ animation: "none" }}
 							/>
 						))}
 					</Flex>
 					<Button variant="solid" colorScheme="red" size="lg" width="100%" minH="52px" onClick={onCancel}>
 						{t("signing.cancel", "Cancel")}
 					</Button>
-					<SigningReference request={request} />
+					<Box w="100%" css={readableDetails}><SigningReviewCompanion request={request} phase={phase} devicePrompts={devicePrompts} /></Box>
+					<Box w="100%" css={readableDetails}><SigningReference request={request} /></Box>
 				</VStack>
 			</Box>
 		)
@@ -1291,22 +1278,22 @@ export function SigningApproval({ request, phase, onApprove, onReject, onCancel 
 	if (phase === 'device-confirm') {
 		return (
 			<Box
-				position="fixed" inset="0" zIndex={Z.overlay + 1}
+				data-signing-overlay position="fixed" inset="0" zIndex={Z.overlay + 1}
 				bg="rgba(0,0,0,0.85)" backdropFilter="blur(8px)"
 				display="flex" alignItems="center" justifyContent="center"
 			>
 				<style>{SIGNING_ANIMATIONS}</style>
 				<VStack
 					bg="kk.cardBg" border="1px solid" borderColor="rgba(233,196,106,0.45)" borderRadius="2xl"
-					p="6" gap="3" maxW="640px" w="90vw" maxH="95vh" overflowY="auto" textAlign="center"
-					css={{ animation: "signingCardIn 0.3s ease-out, signingPulseGlow 4s ease-in-out infinite 0.3s" }}
+					p="6" gap="3" maxW="900px" w="90vw" maxH="95vh" overflowY="auto" textAlign="center"
+					css={{ animation: "signingCardIn 0.18s ease-out" }}
 				>
 					<Flex justify="center">
 						<Box
 							w="64px" h="64px" borderRadius="2xl"
 							bg="rgba(233,196,106,0.15)" border="2px solid" borderColor="kk.gold"
 							display="flex" alignItems="center" justifyContent="center"
-							css={{ animation: "signingBadgePulse 1.5s ease-in-out infinite" }}
+							css={{ animation: "none" }}
 						>
 							<svg width="32" height="32" viewBox="0 0 24 24" fill="none">
 								<rect x="6" y="2" width="12" height="20" rx="2" stroke="var(--gold)" strokeWidth="2" />
@@ -1329,14 +1316,15 @@ export function SigningApproval({ request, phase, onApprove, onReject, onCancel 
 					<Flex gap="2" justify="center" align="center">
 						{[0, 1, 2].map((i) => (
 							<Box key={i} w="8px" h="8px" borderRadius="full" bg="kk.gold"
-								css={{ animation: `signingBadgePulse 1.2s ease-in-out infinite ${i * 0.2}s` }}
+								css={{ animation: "none" }}
 							/>
 						))}
 					</Flex>
 					<Button variant="solid" colorScheme="red" size="lg" width="100%" minH="52px" onClick={onCancel}>
 						{t("signing.cancel", "Cancel")}
 					</Button>
-					<SigningReference request={request} />
+					<Box w="100%" css={readableDetails}><SigningReviewCompanion request={request} phase={phase} devicePrompts={devicePrompts} /></Box>
+					<Box w="100%" css={readableDetails}><SigningReference request={request} /></Box>
 				</VStack>
 			</Box>
 		)
@@ -1346,7 +1334,7 @@ export function SigningApproval({ request, phase, onApprove, onReject, onCancel 
 	return (
 		<Box
 			ref={cardRef}
-			position="fixed" inset="0" zIndex={Z.overlay + 1}
+			data-signing-overlay position="fixed" inset="0" zIndex={Z.overlay + 1}
 			bg="rgba(0,0,0,0.85)" backdropFilter="blur(8px)"
 			display="flex" alignItems="center" justifyContent="center"
 			css={{ animation: "signingOverlayIn 0.25s ease-out" }}
@@ -1356,14 +1344,14 @@ export function SigningApproval({ request, phase, onApprove, onReject, onCancel 
 				bg="kk.cardBg" border="1px solid"
 				borderColor={advancedModeBlocked ? "rgba(245,163,59,0.45)" : "rgba(233,196,106,0.45)"}
 				borderRadius="2xl" p="6" gap="3"
-				maxW="640px" w="95vw" maxH="90vh"
-				css={{ animation: "signingCardIn 0.3s ease-out, signingPulseGlow 4s ease-in-out infinite 0.3s" }}
+				maxW="900px" w="95vw" maxH="90vh"
+				css={{ animation: "signingCardIn 0.18s ease-out" }}
 			>
 				{/* ── Header row: badge + app + method + timer + trust ── */}
 				<Flex w="100%" justify="space-between" align="center" flexWrap="wrap" gap="2" flexShrink="0">
 					<Flex align="center" gap="2">
 						<Text fontSize="xs" fontWeight="700" color="kk.gold" textTransform="uppercase" letterSpacing="wider"
-							css={{ animation: "signingBadgePulse 1.5s ease-in-out infinite" }}
+							css={{ animation: "none" }}
 						>
 							{t("signing.actionRequired", "Action Required")}
 						</Text>
@@ -1401,7 +1389,8 @@ export function SigningApproval({ request, phase, onApprove, onReject, onCancel 
 				    calldata blob can never push Approve/Reject out of reach.
 				    minH=0 is required for a flex child to shrink below its
 				    content height and actually scroll. */}
-				<VStack flex="1" minH="0" overflowY="auto" w="100%" gap="3">
+				<VStack flex="1" minH="0" overflowY="auto" w="100%" gap="4" css={readableDetails}>
+				<SigningReviewCompanion request={request} phase="approve" />
 				{/* ── Method ── */}
 				<Text fontSize="sm" fontWeight="600" color="white" alignSelf="flex-start">{methodLabel}</Text>
 				{request.typedDataDecoded && <Row label={uiText("Account")} value={request.from} />}

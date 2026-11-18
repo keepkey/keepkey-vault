@@ -601,6 +601,10 @@ let cachedPopFrames: (() => Uint8Array[]) | null = null
 const playbackQueue: Uint8Array[] = []
 /** Newest frame the firmware drew, whatever the window has played back so far. */
 let latestFrame: Uint8Array | null = null
+/** A read-only copy of the newest captured firmware frame; no USB request. */
+export function signingReviewFrame(): string | null {
+  return latestFrame?.length === 2048 ? Buffer.from(latestFrame).toString('base64') : null
+}
 const PLAYBACK_QUEUE_CAP = 90 // ~6s at 15fps; older frames dropped
 const PLAYBACK_TICK_MS = 66 // ~15fps normal/idle cadence
 const PLAYBACK_TICK_SLOW_MS = 350 // post-approval: linger so confirm screens are readable

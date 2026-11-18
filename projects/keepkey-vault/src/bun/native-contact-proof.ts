@@ -56,7 +56,7 @@ function solanaRecipients(p: any): string[] {
       try { const key = Buffer.from(bs58.decode(owner)); if (key.length === 32) return key } catch { /* hex/base64 below */ }
     }
     return rawBytes(owner)
-  }).filter((b: Buffer | undefined) => b?.length === 32).map((b: Buffer) => bs58.encode(b))
+  }).filter((b: Buffer | undefined): b is Buffer => b?.length === 32).map(b => bs58.encode(b))
   const keys = parsed.staticAccounts, recipients: string[] = []
   for (const ix of parsed.instructions) {
     const program = keys[ix.programIdIndex]
