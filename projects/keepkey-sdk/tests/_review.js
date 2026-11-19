@@ -82,6 +82,7 @@ function runAt(lit, font, x, y, memo) {
 function readScreen(frame) {
   const lit = frameBits(frame)
   const runs = []
+  const digits = []
   for (const font of FONTS) {
     for (let y = 0; y + GLYPH_H <= H; y++) {
       const memo = new Map()
@@ -89,6 +90,7 @@ function readScreen(frame) {
         const run = runAt(lit, font, x, y, memo)
         // One stray glyph-shaped speck is not text.
         if (run.ink >= 6 && run.text.replace(/ /g, '').length >= 2) runs.push({ ...run, x, y })
+        else if (x <= 8 && run.ink >= 6 && /^[0-9]$/.test(run.text)) digits.push({ ...run, x, y })
       }
     }
   }
@@ -105,7 +107,28 @@ function readScreen(frame) {
     if (last && last.y === r.y) last.text += `   ${r.text}`
     else lines.push({ y: r.y, text: r.text })
   }
+  const threshold = lines.findIndex(line => line.text.trim() === 'Threshold:')
+  if (threshold >= 0 && threshold === lines.length - 1) {
+    const digit = digits.filter(d => d.y > lines[threshold].y).sort((a, b) => b.ink - a.ink)[0]
+    if (digit) lines.push({ y: digit.y, text: digit.text })
+  }
   return lines.map((l) => l.text)
+}
+
+function safeCreationScreenProblems(tape) {
+  const screens = tape.filter(entry => entry.screen).map(entry => entry.lines.join(' '))
+  const starts = screens.map((s, i) => /\bCreate Safe\b/i.test(s) ? i : -1).filter(i => i >= 0)
+  if (starts.length !== 2) return ['expected two OLED Create Safe actions']
+  const problems = []
+  for (const [index, start] of starts.entries()) {
+    const pages = screens.slice(start + 1, starts[index + 1] ?? screens.length)
+    const text = pages.join('\n').replace(/\s+/g, '').toLowerCase()
+    for (const expected of ['verifiedbykeepkey', 'setupsafe', 'threshold:2', '0xe4f420a0786451a10bf2fd4702e9b76632c08109',
+      '0x3ef438c34ce51a697a24247fe033c4562c94f0fd']) {
+      if (!text.includes(expected)) problems.push(`Safe creation ${index + 1} OLED missing ${expected}`)
+    }
+  }
+  return problems
 }
 
 // ── Tape ─────────────────────────────────────────────────────────────
@@ -162,13 +185,19 @@ function judge(suite, tape, passed) {
     fs.writeFileSync(file, JSON.stringify(tape, null, 2) + '\n')
   }
   if (!cls) return { verdict: 'UNCLASSIFIED', problems: [`add ${suite} to tests/review/suites.json`] }
+  if (suite === 'fw-717/eip712-chunked.js') {
+    const problems = require('./fw-717/eip712-chunked').chunkedScreens(tape)
+    if (!passed) problems.push('the suite itself failed')
+    return { verdict: problems.length ? 'UNHEALTHY' : 'healthy', problems }
+  }
   if (cls === 'edge-case' || cls === 'no-signing') return { verdict: cls, problems: [] }
   // A risky request must not look healthy; a normal one must.
   const problems = cls === 'must-warn' ? (unhealthy(tape).length ? [] : ['a risky request showed no warning']) : unhealthy(tape)
   // A suite that skips itself, or signs without Desktop asking, proves nothing.
   if (!passed) problems.push('the suite itself failed')
   if (!tape.some((e) => e.card)) problems.push('no Desktop approval card was shown')
-  if (!fs.existsSync(file)) problems.push('no reviewed copy; run with KEEPKEY_REVIEW=record and review it')
+  if (suite === 'multisig/safe-creation.js') problems.push(...safeCreationScreenProblems(tape))
+  else if (!fs.existsSync(file)) problems.push('no reviewed copy; run with KEEPKEY_REVIEW=record and review it')
   else {
     const want = JSON.stringify(JSON.parse(fs.readFileSync(file, 'utf8')))
     if (want !== JSON.stringify(tape)) problems.push(`shown content differs from ${path.relative(path.join(__dirname, '..'), file)}`)
@@ -176,4 +205,4 @@ function judge(suite, tape, passed) {
   return { verdict: problems.length ? 'UNHEALTHY' : cls === 'must-warn' ? 'warned' : 'healthy', problems }
 }
 
-module.exports = { readScreen, takeTape, judge, unhealthy, SUITES }
+module.exports = { readScreen, takeTape, judge, unhealthy, safeCreationScreenProblems, SUITES }

@@ -12,6 +12,25 @@ make test-sdk class=real-world,must-warn   # only the suites that must show some
 
 `recovery/*` wipes the device and runs only with `KEEPKEY_ALLOW_WIPE=1`.
 
+On a disposable Vault emulator with review recording enabled, run
+`KEEPKEY_SDK_SAFE_CREATION=1 make test-sdk filter=multisig/safe-creation`.
+It signs synthetic Safe factory calls on Ethereum and Base with the sentinel
+nonce and checks the signer, the exact transaction bytes, and the OLED's
+nested review of both owners and the threshold. The suite signs locally.
+
+For the bundled 7.17 emulator, run
+`KEEPKEY_SDK_ALPHA=1 make test-sdk filter=fw-717`. The first suite checks the
+firmware version and advertised ClearSign capabilities over REST. The signing
+suite requires capability 26, AdvancedMode off and the emulator review tape.
+It checks two complete EIP-712 signatures and confirms that the OLED shows
+each value's distinct suffix beyond byte 1024. The 7.16 negative control runs
+only when the device reports a capability list without capability 26.
+
+Certified contact enrollment and proof delivery on a Vault send use Desktop
+RPC. Their coverage lives in Vault and firmware tests. Monero device signing,
+passkeys, and offline Zcash Nu7 signing also have device or Desktop entry
+points outside the SDK's REST signing suites.
+
 ## Two things are checked
 
 1. **The request works.** Each suite asserts on what the SDK call returns
