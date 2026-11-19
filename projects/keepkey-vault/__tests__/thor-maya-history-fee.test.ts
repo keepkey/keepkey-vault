@@ -45,11 +45,17 @@ test('a stored THORChain send row with fee 0 reads the 0.02 RUNE native fee', as
     scan('THOR-OLD-SEND', 'send', { chainId: 'thorchain', chainSymbol: 'RUNE', value: '10000000', fee: '0' })
     scan('THOR-OLD-RECEIVE', 'receive', { chainId: 'thorchain', chainSymbol: 'RUNE', value: '10000000', fee: '0' })
     scan('ATOM-SEND', 'send', { chainId: 'cosmos', chainSymbol: 'ATOM', value: '1', fee: '5000' })
+    // A row whose stored meta has no chainId: the chain comes from its scan route.
+    db.insertApiLog({
+      ...wallet, method: 'SCAN', route: 'history/mayachain', timestamp: Date.now(), durationMs: 0, status: 200,
+      appName: 'vault', txid: 'MAYA-NO-CHAINID', chain: 'CACAO', activityType: 'send', responseBody: { value: '1', fee: '0' },
+    } as any)
     const rows = db.getRecentActivityFromLog(undefined, undefined, wallet.deviceId, wallet.walletId)
     const fee = (txid: string) => rows.find(r => r.txid === txid)?.fee
     expect(fee('THOR-OLD-SEND')).toBe('2000000')
     expect(fee('THOR-OLD-RECEIVE')).toBe('0')
     expect(fee('ATOM-SEND')).toBe('5000')
+    expect(fee('MAYA-NO-CHAINID')).toBe('2000000000')
   } finally {
     db.closeDb()
   }

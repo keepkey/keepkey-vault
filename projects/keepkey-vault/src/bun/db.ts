@@ -8,7 +8,7 @@ import { Database } from 'bun:sqlite'
 import { migratePublicKeyCache } from './public-key-cache-migration'
 import { DEFAULT_PIONEER_API_BASE, resolvePioneerApiBase } from '../shared/pioneer-server'
 import { CHAINS } from '../shared/chains'
-import { nativeTxFeeBaseUnits } from './txbuilder/cosmos'
+import { withNativeTxFee } from './txbuilder/cosmos'
 // The utils entry, not the package index: the index creates native windows on import,
 // which throws anywhere outside a running app (unit tests import this module).
 import * as Utils from 'electrobun/main/utils'
@@ -2116,14 +2116,14 @@ export function dismissActivity(id: string, deviceId?: string, walletId?: string
 }
 
 /** Fee for a SCAN row (base units). THOR/Maya rows stored before the history
- *  fix (audit v4 H10) kept the auth fee '0' until a rescan rewrote them; the
- *  network charged its native fee at the bank layer, so read it the same way
- *  normalizeMeta now writes it (audit v6 R6). */
-function scanRowFee(meta: any, activityType: string): string | undefined {
-  const fee = meta?.fee ?? undefined
-  if (activityType !== 'send' || Number(fee) > 0) return fee
-  const chain = meta?.chainId ? CHAINS.find(c => c.id === meta.chainId) : undefined
-  return (chain && nativeTxFeeBaseUnits(chain)) || fee
+ *  fix (audit v4 H10) kept the auth fee '0' until a rescan rewrote them, and a
+ *  send outside the window Pioneer returns is never rescanned. Apply the same
+ *  rule normalizeMeta writes (audit v6 R6). Rows without meta.chainId fall back
+ *  to the scan route (`history/<chainId>`), as the chain filter above does. */
+function scanRowFee(meta: any, activityType: string, route: string | null): string | undefined {
+  const chainId = meta?.chainId ?? route?.match(/^history\/(.+)$/)?.[1]
+  const chain = chainId ? CHAINS.find(c => c.id === chainId) : undefined
+  return withNativeTxFee(meta?.fee ?? undefined, activityType, chain)
 }
 
 export function getRecentActivityFromLog(limit?: number, chainFilter?: string, deviceId?: string, walletId?: string): RecentActivity[] {
@@ -2183,7 +2183,7 @@ export function getRecentActivityFromLog(limit?: number, chainFilter?: string, d
         confirmations: meta?.confirmations ?? undefined,
         blockHeight: meta?.blockHeight ?? undefined,
         amount: meta?.value ?? undefined,
-        fee: isScan ? scanRowFee(meta, r.activity_type) : meta?.fee ?? undefined,
+        fee: isScan ? scanRowFee(meta, r.activity_type, r.route) : meta?.fee ?? undefined,
         to: meta?.to ?? undefined,
         from: meta?.from ?? undefined,
         asset: meta?.asset ?? undefined,

@@ -94,6 +94,15 @@ export function nativeTxFeeBaseUnits(chain: ChainDef): string | undefined {
   return String(Math.round(FEES[chain.id] * 10 ** chain.decimals))
 }
 
+/** Fee of a history row, in base units. THOR/Maya sends record the auth fee
+ *  ('0' or nothing) while the network charges its native fee at the bank layer,
+ *  so such a send gets that fee. Anything else is returned unchanged. Shared by
+ *  the history scan (write) and the activity list (read) so the rule lives once. */
+export function withNativeTxFee(fee: string | undefined, activityType: string, chain: ChainDef | undefined): string | undefined {
+  if (activityType !== 'send' || !chain || Number(fee) > 0) return fee
+  return nativeTxFeeBaseUnits(chain) ?? fee
+}
+
 // Chain-specific msg types (MsgSend)
 const MSG_SEND_TYPES: Record<string, string> = {
   thorchain: 'thorchain/MsgSend',
