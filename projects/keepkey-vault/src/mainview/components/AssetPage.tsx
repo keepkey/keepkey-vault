@@ -1587,6 +1587,8 @@ function PersonalAssetPage({ chain, balance, balanceLoading = false, onBack, fir
 							error={deriveError}
 							currentPath={isBtc && btcSelected && !watchOnly ? btcSelected.fullPath : currentPath}
 							onDerive={deriveAddress}
+							// BTC addresses come from the account/change/index controls, which the device check also uses (audit v6 U1).
+							pathEditable={!isBtc}
 							scriptType={watchOnly && isBtc ? woReceive?.scriptType : effectiveScriptType}
 							xpub={isBtc ? (watchOnly ? woReceive?.xpub : btcSelected?.xpubData?.xpub) : utxoXpub ?? undefined}
 							isBtc={isBtc}
