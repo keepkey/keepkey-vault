@@ -477,7 +477,7 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       // limit omitted = every row for the wallet (the activity list shows full history)
       getRecentActivity: { params: { limit?: number; chainId?: string; watchOnly?: boolean; deviceId?: string } | void; response: RecentActivity[] }
       getWatchOnlyHistoryChains: { params: { deviceId?: string }; response: string[] }
-      scanChainHistory: { params: { chainId: string; watchOnly?: boolean; deviceId?: string }; response: { count: number } }
+      scanChainHistory: { params: { chainId: string; watchOnly?: boolean; deviceId?: string }; response: { count: number; /** Not scanned by design: no history for this chain here. */ skipped?: boolean } }
       // True while the engine's startup/background bulk history scan is in flight,
       // so the activity UI can show "Syncing…" instead of a false "no activity".
       getActivityScanState: { params: void; response: { running: boolean } }

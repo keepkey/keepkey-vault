@@ -48,5 +48,19 @@
 	"syncStage_finalizing": "Aktualizowanie portfela",
 	"syncProgressCounts": "{{completed}}/{{total}} · {{percent}}% · {{seconds}}s",
 	"syncProgressElapsed": "Upłynęło {{seconds}}s",
-	"syncFailedChecks": "Niedostępne sprawdzenia: {{failed}}"
+	"syncFailedChecks": "Niedostępne sprawdzenia: {{failed}}",
+	"rescanNew_one": "+{{count}} transakcja",
+	"rescanNew_few": "+{{count}} transakcje",
+	"rescanNew_many": "+{{count}} transakcji",
+	"rescanNew_other": "+{{count}} transakcji",
+	"rescanUpToDate": "Aktualne",
+	"rescanPartial_one": "Nowe: {{newCount}} · {{count}} sieć z błędem",
+	"rescanPartial_few": "Nowe: {{newCount}} · {{count}} sieci z błędem",
+	"rescanPartial_many": "Nowe: {{newCount}} · {{count}} sieci z błędem",
+	"rescanPartial_other": "Nowe: {{newCount}} · {{count}} sieci z błędem",
+	"rescanNoAddresses": "Brak zapisanych adresów do skanowania",
+	"rescanUnavailable": "Historia nie jest dostępna dla tej sieci",
+	"rescanUnavailableAll": "Brak historii do skanowania w tych sieciach",
+	"rescanFailed": "Skanowanie nie powiodło się",
+	"rescanFailedDetail": "Skanowanie nie powiodło się: {{detail}}"
 }

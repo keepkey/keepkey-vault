@@ -46,5 +46,15 @@
 	"syncStage_finalizing": "Đang cập nhật danh mục",
 	"syncProgressCounts": "{{completed}}/{{total}} · {{percent}}% · {{seconds}}giây",
 	"syncProgressElapsed": "Đã qua {{seconds}}giây",
-	"syncFailedChecks": "Không thể kiểm tra {{failed}} mục"
+	"syncFailedChecks": "Không thể kiểm tra {{failed}} mục",
+	"rescanNew_one": "+{{count}} giao dịch",
+	"rescanNew_other": "+{{count}} giao dịch",
+	"rescanUpToDate": "Đã cập nhật",
+	"rescanPartial_one": "{{newCount}} mới · {{count}} mạng thất bại",
+	"rescanPartial_other": "{{newCount}} mới · {{count}} mạng thất bại",
+	"rescanNoAddresses": "Không có địa chỉ đã lưu để quét",
+	"rescanUnavailable": "Lịch sử không khả dụng cho mạng này",
+	"rescanUnavailableAll": "Không có lịch sử để quét trên các mạng này",
+	"rescanFailed": "Quét thất bại",
+	"rescanFailedDetail": "Quét thất bại: {{detail}}"
 }

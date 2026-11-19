@@ -47,5 +47,17 @@
 	"syncStage_finalizing": "Mise à jour du portefeuille",
 	"syncProgressCounts": "{{completed}}/{{total}} · {{percent}}% · {{seconds}}s",
 	"syncProgressElapsed": "{{seconds}}s écoulées",
-	"syncFailedChecks": "{{failed}} vérifications indisponibles"
+	"syncFailedChecks": "{{failed}} vérifications indisponibles",
+	"rescanNew_one": "+{{count}} transaction",
+	"rescanNew_many": "+{{count}} transactions",
+	"rescanNew_other": "+{{count}} transactions",
+	"rescanUpToDate": "À jour",
+	"rescanPartial_one": "Nouvelles : {{newCount}} · {{count}} réseau en échec",
+	"rescanPartial_many": "Nouvelles : {{newCount}} · {{count}} réseaux en échec",
+	"rescanPartial_other": "Nouvelles : {{newCount}} · {{count}} réseaux en échec",
+	"rescanNoAddresses": "Aucune adresse enregistrée à analyser",
+	"rescanUnavailable": "L'historique n'est pas disponible pour ce réseau",
+	"rescanUnavailableAll": "Aucun historique à analyser sur ces réseaux",
+	"rescanFailed": "Échec de l'analyse",
+	"rescanFailedDetail": "Échec de l'analyse : {{detail}}"
 }

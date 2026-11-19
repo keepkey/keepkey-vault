@@ -2,7 +2,8 @@ import {paidProviderRefreshOptions,type ProviderRefreshReason} from '../shared/p
 import { withTimeout } from './engine-controller'
 import { getPioneer } from './pioneer'
 import { apiLogScanTxidExists, insertApiLog, updateApiLogTxMeta } from './db'
-import { btcTaprootSupported, isChainSupported, type ChainDef } from '../shared/chains'
+import { btcTaprootSupported, type ChainDef } from '../shared/chains'
+import { isHistoryScanChain } from './history-scan-eligibility'
 import { utxoAccountScriptPaths } from './chain-scan'
 import { utxoDiscoveryKey } from './btc-backend/types'
 import { getBtcBackend } from './btc-backend'
@@ -242,9 +243,7 @@ function selectChains(
   const requested = new Set([...(options.chainIds || []), ...(options.chainId ? [options.chainId] : [])])
   return chains
     .filter(chain => requested.size === 0 || requested.has(chain.id) || requested.has(chain.symbol))
-    .filter(chain => options.includeHidden || !chain.hidden)
-    .filter(chain => chain.chainFamily !== 'zcash-shielded' && chain.chainFamily !== 'monero')
-    .filter(chain => isChainSupported(chain, firmwareVersion))
+    .filter(chain => isHistoryScanChain(chain, firmwareVersion, options.includeHidden))
 }
 
 export async function rebuildActivityHistory(params: {

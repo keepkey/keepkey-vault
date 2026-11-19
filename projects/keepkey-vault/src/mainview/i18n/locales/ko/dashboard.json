@@ -46,5 +46,15 @@
 	"syncStage_finalizing": "포트폴리오 업데이트 중",
 	"syncProgressCounts": "{{completed}}/{{total}} · {{percent}}% · {{seconds}}초",
 	"syncProgressElapsed": "{{seconds}}초 경과",
-	"syncFailedChecks": "확인 {{failed}}건 사용 불가"
+	"syncFailedChecks": "확인 {{failed}}건 사용 불가",
+	"rescanNew_one": "+{{count}}건의 거래",
+	"rescanNew_other": "+{{count}}건의 거래",
+	"rescanUpToDate": "최신 상태",
+	"rescanPartial_one": "새 항목 {{newCount}}건 · 네트워크 {{count}}개 실패",
+	"rescanPartial_other": "새 항목 {{newCount}}건 · 네트워크 {{count}}개 실패",
+	"rescanNoAddresses": "스캔할 저장된 주소가 없습니다",
+	"rescanUnavailable": "이 네트워크의 기록을 사용할 수 없습니다",
+	"rescanUnavailableAll": "이 네트워크에는 스캔할 기록이 없습니다",
+	"rescanFailed": "스캔 실패",
+	"rescanFailedDetail": "스캔 실패: {{detail}}"
 }
