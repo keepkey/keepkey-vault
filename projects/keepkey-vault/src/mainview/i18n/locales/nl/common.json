@@ -31,5 +31,8 @@
 	"numberFormat": "Getalnotatie",
 	"usdValues": "Waarden worden in USD weergegeven. Je kunt de regionale getalnotatie hieronder wijzigen.",
 	"somethingWentWrong": "Er is iets misgegaan",
-	"reload": "Opnieuw laden"
+	"reload": "Opnieuw laden",
+	"signingCancelled": "Transactie geannuleerd op je KeepKey.",
+	"signingDeviceLost": "Je KeepKey reageert niet meer. Koppel hem los, sluit hem opnieuw aan, start de app opnieuw en probeer het nog eens — dit is vaak nodig direct na een firmware-update.",
+	"signingReconnectHint": "Lukt het nog steeds niet? Koppel je KeepKey los, sluit hem opnieuw aan, start de app opnieuw en probeer het nog eens."
 }

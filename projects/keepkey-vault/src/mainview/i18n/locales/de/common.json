@@ -31,5 +31,8 @@
 	"numberFormat": "Zahlenformat",
 	"usdValues": "Werte werden in USD angezeigt. Das regionale Zahlenformat kannst du unten ändern.",
 	"somethingWentWrong": "Ein Fehler ist aufgetreten",
-	"reload": "Neu laden"
+	"reload": "Neu laden",
+	"signingCancelled": "Transaktion auf Ihrem KeepKey abgebrochen.",
+	"signingDeviceLost": "Ihr KeepKey reagiert nicht mehr. Trennen Sie ihn, schließen Sie ihn wieder an, starten Sie die App neu und versuchen Sie es erneut — das ist direkt nach einem Firmware-Update oft nötig.",
+	"signingReconnectHint": "Funktioniert es immer noch nicht? Trennen Sie Ihren KeepKey, schließen Sie ihn wieder an, starten Sie die App neu und versuchen Sie es erneut."
 }

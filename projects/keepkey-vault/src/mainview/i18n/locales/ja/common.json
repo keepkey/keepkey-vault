@@ -31,5 +31,8 @@
 	"numberFormat": "数値の形式",
 	"usdValues": "金額はUSDで表示されます。地域の数値形式は以下で変更できます。",
 	"somethingWentWrong": "エラーが発生しました",
-	"reload": "再読み込み"
+	"reload": "再読み込み",
+	"signingCancelled": "KeepKeyで取引がキャンセルされました。",
+	"signingDeviceLost": "KeepKeyが応答しなくなりました。取り外して再接続し、アプリを再起動してからもう一度お試しください。ファームウェア更新の直後によく必要になります。",
+	"signingReconnectHint": "まだ失敗しますか？KeepKeyを取り外して再接続し、アプリを再起動してからもう一度お試しください。"
 }

@@ -31,5 +31,8 @@
 	"numberFormat": "数字格式",
 	"usdValues": "金额以USD显示。您可以在下方更改地区数字格式。",
 	"somethingWentWrong": "发生错误",
-	"reload": "重新加载"
+	"reload": "重新加载",
+	"signingCancelled": "已在 KeepKey 上取消交易。",
+	"signingDeviceLost": "KeepKey 已停止响应。请拔下后重新插入，然后重启应用再试——固件更新后经常需要这样做。",
+	"signingReconnectHint": "仍然失败？请拔下 KeepKey 后重新连接，然后重启应用再试。"
 }
