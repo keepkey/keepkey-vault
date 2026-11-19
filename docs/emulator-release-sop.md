@@ -134,7 +134,7 @@ the emulator.
 
 ## Runtime smoke gate
 
-The macOS build workflow and local signed build run
+The macOS build workflow runs (and `make build-signed SMOKE_PACKAGED_PIN=1` can run)
 `bun scripts/smoke-packaged-pin.ts <archive>` from `projects/keepkey-vault`.
 The test launches the archive's app with a legacy library path present, reads
 all nine digits from its visible emulator canvas, rejects an incorrect PIN, and

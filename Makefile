@@ -346,7 +346,8 @@ build-signed: notary-check release-devkit-guard
 	@# The devkit Hutch packed: the pinned fork commit, built from a clean tree.
 	node scripts/verify-electrobun-devkit.mjs --release "$(HUTCH_ELECTROBUN_DEVKIT_ROOT)"
 	$(MAKE) verify-bundle VERIFY_SIGNED=1
-	cd $(PROJECT_DIR) && bun scripts/smoke-packaged-pin.ts "artifacts/stable-macos-$(ELECTROBUN_ARCH)-keepkey-vault.app.tar.zst"
+	@# Opt-in: make build-signed SMOKE_PACKAGED_PIN=1 (needs a GUI session; CI runs it on every macOS build).
+	$(if $(SMOKE_PACKAGED_PIN),cd $(PROJECT_DIR) && bun scripts/smoke-packaged-pin.ts "artifacts/stable-macos-$(ELECTROBUN_ARCH)-keepkey-vault.app.tar.zst",@echo "Packaged PIN smoke skipped (SMOKE_PACKAGED_PIN=1 to run)")
 	$(MAKE) dmg
 	@echo ""
 	@echo "=== Build complete ==="
