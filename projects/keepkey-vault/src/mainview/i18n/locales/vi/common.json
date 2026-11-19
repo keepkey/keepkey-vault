@@ -31,5 +31,8 @@
 	"numberFormat": "Định dạng số",
 	"usdValues": "Giá trị được hiển thị bằng USD. Bạn có thể đổi định dạng số theo khu vực bên dưới.",
 	"somethingWentWrong": "Đã xảy ra lỗi",
-	"reload": "Tải lại"
+	"reload": "Tải lại",
+	"signingCancelled": "Đã hủy giao dịch trên KeepKey.",
+	"signingDeviceLost": "KeepKey đã ngừng phản hồi. Hãy rút ra, cắm lại, khởi động lại ứng dụng rồi thử lại — việc này thường cần thiết ngay sau khi cập nhật firmware.",
+	"signingReconnectHint": "Vẫn lỗi? Hãy rút KeepKey, kết nối lại, khởi động lại ứng dụng rồi thử lại."
 }
