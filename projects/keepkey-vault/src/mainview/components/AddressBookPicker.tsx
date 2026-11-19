@@ -59,7 +59,7 @@ export function AddressBookPicker({ networkId, chainFamily, assetCaip, entryFilt
       .filter(e => !q || addressBookLabel(e, t)?.toLowerCase().includes(q) || e.address.toLowerCase().includes(q))
       // External contacts first: they are who you pay; own wallets follow.
       .sort((a, b) => Number(b.kind === "external") - Number(a.kind === "external"))
-  }, [entries, networkId, assetCaip, chainFamily, entryFilter, search])
+  }, [entries, networkId, assetCaip, chainFamily, entryFilter, search, t])
 
   return (
     <Box position="fixed" inset="0" zIndex={Z.dialog} display="flex" alignItems="center" justifyContent="center"
