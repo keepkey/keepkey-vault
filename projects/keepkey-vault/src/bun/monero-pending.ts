@@ -1,7 +1,7 @@
 /** Signed Monero transactions whose broadcast outcome is unknown, kept across app restarts.
  *  While one is pending for a wallet, that wallet may only re-broadcast these exact bytes:
  *  building a second, different payment could pay twice if the first one did reach the network. */
-import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs'
+import { chmodSync, constants, copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs'
 import { basename, join } from 'node:path'
 import { randomBytes } from 'node:crypto'
 import { validTransactionKeys, type MoneroTransactionKeys } from './monero-transaction-keys'
@@ -31,6 +31,8 @@ export interface MoneroPendingStore {
   save(records: MoneroPendingBroadcast[]): void
   loadSent?(): MoneroPendingBroadcast[]
   saveSent?(records: MoneroPendingBroadcast[]): void
+  /** True when damaged proof records were kept aside, so a key that is not found may be among them. */
+  hasUnreadableCopies?(): boolean
   loadGuards?(): MoneroDiscardGuard[]
   saveGuards?(guards: MoneroDiscardGuard[]): void
 }
@@ -67,9 +69,15 @@ export function createFilePendingStore(directory: string): MoneroPendingStore {
     mkdirSync(directory, { recursive: true, mode: 0o700 })
     chmodSync(directory, 0o700)
     const temporary = `${target}.${process.pid}.tmp`
-    writeFileSync(temporary, JSON.stringify(value), { mode: 0o600 })
-    chmodSync(temporary, 0o600)
-    renameSync(temporary, target)
+    try {
+      writeFileSync(temporary, JSON.stringify(value), { mode: 0o600 })
+      chmodSync(temporary, 0o600)
+      renameSync(temporary, target)
+    } catch (error) {
+      // The temporary file holds keys too: never leave it behind when the swap fails.
+      try { unlinkSync(temporary) } catch {}
+      throw error
+    }
   }
   return {
     loadSent() {
@@ -77,23 +85,32 @@ export function createFilePendingStore(directory: string): MoneroPendingStore {
       let raw: string
       try { raw = readFileSync(sentFile, 'utf8') } catch { throw new Error('The Monero payment-proof records could not be read') }
       let records: unknown[] | null = null
-      try { const parsed = JSON.parse(raw); if (Array.isArray(parsed?.records)) records = parsed.records } catch {}
+      let version: unknown
+      try { const parsed = JSON.parse(raw); version = parsed?.version; if (Array.isArray(parsed?.records)) records = parsed.records } catch {}
+      // A file from a newer app version is not damaged: never rewrite it (e.g. after a downgrade). Throwing
+      // sends the vault down its conservative path, which writes nothing over the store.
+      if (version !== undefined && version !== 1) throw new Error('The Monero payment-proof records could not be read')
       const valid = (records ?? []).map(validPendingBroadcast).filter((r: MoneroPendingBroadcast | null): r is MoneroPendingBroadcast => !!r)
       if (records && valid.length === records.length) return valid
       // Unparseable, an unknown shape, or records that fail validation: the next save would drop those
-      // keys for good. Keep the original file aside first (audit v6 N2), then continue with what is valid.
-      // Order matters: write the clean file first, then move the original aside, then put the clean one in
-      // place, so a failed step never leaves the valid keys only in the aside copy.
+      // keys for good. Keep a copy of the original aside (audit v6 N2), then continue with what is valid.
+      // The live file never disappears (KEEPKEY-141): the original is COPIED aside, then replaced in one
+      // atomic rename-over by write(). A crash or failure at any step leaves either the original or the
+      // clean file in place, so the keys stay visible on the next start; an interrupted run only adds
+      // another aside copy.
       const unreadable = () => new Error('The Monero payment-proof records could not be read')
       const aside = join(directory, `monero-sent-transactions.unreadable-${Date.now()}-${process.pid}-${randomBytes(4).toString('hex')}.json`)
-      const clean = `${sentFile}.${process.pid}.clean`
-      try { write(clean, { version: 1, records: valid }) } catch { throw unreadable() }
-      try { renameSync(sentFile, aside) } catch { try { unlinkSync(clean) } catch {} throw unreadable() }
-      try { renameSync(clean, sentFile) } catch { try { renameSync(aside, sentFile) } catch {} throw unreadable() }
+      try { copyFileSync(sentFile, aside, constants.COPYFILE_EXCL); chmodSync(aside, 0o600) } catch { throw unreadable() }
+      // On failure the original is still live, so this run's copy is redundant: remove it rather than add
+      // another file of keys on every retry.
+      try { write(sentFile, { version: 1, records: valid }) } catch { try { unlinkSync(aside) } catch {} throw unreadable() }
       console.warn(`[monero] Unreadable payment-proof records were kept aside as ${basename(aside)}`)
       return valid
     },
     saveSent(records) { write(sentFile, {version:1, records}) },
+    hasUnreadableCopies() {
+      try { return readdirSync(directory).some(name => name.startsWith('monero-sent-transactions.unreadable-')) } catch { return false }
+    },
     loadGuards() {
       if (!existsSync(guardFile)) return []
       try {

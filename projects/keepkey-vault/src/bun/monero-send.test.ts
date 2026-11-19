@@ -1291,8 +1291,16 @@ describe('N2: unreadable payment-proof records never block the other guards or g
    const aside = keptAside(dir)
    expect(aside).toHaveLength(1)
    expect(readFileSync(join(dir, aside[0]), 'utf8')).toBe(CORRUPT)
-   expect(statSync(join(dir, aside[0])).mode & 0o777).toBe(0o600)
+   // Owner-only mode is a POSIX check; Windows reports 0o666 for any writable file.
+   if (process.platform !== 'win32') expect(statSync(join(dir, aside[0])).mode & 0o777).toBe(0o600)
    expect(JSON.parse(readFileSync(join(dir, SENT), 'utf8'))).toEqual({ version: 1, records: [] })
+  })
+
+  test('a key that is not found, while damaged records sit aside, is reported as possibly among them', async () => {
+   const dir = withProofFile('kk-monero-n2-aside-', CORRUPT)
+   const b = streamBridge(true, createFilePendingStore(dir))
+   await b.api.connect()
+   expect(() => b.api.getTransactionKey('00'.repeat(32))).toThrow('damaged and kept aside')
   })
 
   test('a send then archives its keys normally, and the old file stays aside', async () => {
@@ -1307,12 +1315,18 @@ describe('N2: unreadable payment-proof records never block the other guards or g
    expect(readFileSync(join(dir, keptAside(dir)[0]), 'utf8')).toBe(CORRUPT)
   })
 
-  test('records that fail validation or an unknown shape are kept aside instead of being dropped on the next save', () => {
-   for (const content of [JSON.stringify({ version: 1, records: [{ wallet: 'x' }] }), JSON.stringify({ version: 2, entries: [] })]) {
+  test('records that fail validation or a missing records list are kept aside instead of being dropped on the next save', () => {
+   for (const content of [JSON.stringify({ version: 1, records: [{ wallet: 'x' }] }), JSON.stringify({ version: 1 })]) {
     const dir = withProofFile('kk-monero-n2-shape-', content)
     expect(createFilePendingStore(dir).loadSent!()).toEqual([])
     expect(readFileSync(join(dir, keptAside(dir)[0]), 'utf8')).toBe(content)
    }
+   // A file from a newer app version is not damaged: it is refused, never rewritten (e.g. after a downgrade).
+   const newer = JSON.stringify({ version: 2, entries: [] })
+   const newerDir = withProofFile('kk-monero-n2-newer-', newer)
+   expect(() => createFilePendingStore(newerDir).loadSent!()).toThrow('could not be read')
+   expect(readFileSync(join(newerDir, SENT), 'utf8')).toBe(newer)
+   expect(keptAside(newerDir)).toEqual([])
    const dir = withProofFile('kk-monero-n2-valid-', JSON.stringify({ version: 1, records: [] }))
    createFilePendingStore(dir).loadSent!()
    expect(keptAside(dir)).toEqual([])
@@ -1358,6 +1372,22 @@ describe('N2: unreadable payment-proof records never block the other guards or g
    expect(saves).toEqual([])
   })
 
+  test('a discard whose proof save fails removes the guard it just wrote', async () => {
+   const dir = mkdtempSync(join(tmpdir(), 'kk-monero-n2-discard-save-'))
+   const first = streamBridge(true, createFilePendingStore(dir))
+   const review = await prepareStream(first)
+   first.setRelayError(new Error('ETIMEDOUT'))
+   await expect(first.api.send({ prepareId: review.prepareId })).rejects.toThrow('broadcast result is unknown')
+
+   const next = streamBridge(true, { ...createFilePendingStore(dir), saveSent: () => { throw new Error('disk full') } })
+   await next.api.connect()
+   next.setLookup({ state: 'unknown', keyImages: ['unspent'] })
+   await expect(next.api.discardPending({ confirm: true })).rejects.toThrow('transaction remains pending')
+   expect(next.api.pendingCount()).toBe(1)
+   expect((await next.api.getStatus()).discardedTxid).toBeUndefined()
+   expect(existsSync(join(dir, 'monero-discarded-broadcast.json'))).toBe(false)
+  })
+
   test('a discard keeps the tx pending with its keys and writes no guard', async () => {
    const dir = mkdtempSync(join(tmpdir(), 'kk-monero-n2-discard-'))
    const first = streamBridge(true, createFilePendingStore(dir))
@@ -1375,7 +1405,7 @@ describe('N2: unreadable payment-proof records never block the other guards or g
    expect(saves).toEqual([])
   })
 
-  test('a superseded tx (another node may still mine it) keeps its keys pending', async () => {
+  test('a superseded tx (its inputs were spent by another tx, so it can never land) settles instead of blocking the wallet', async () => {
    const dir = mkdtempSync(join(tmpdir(), 'kk-monero-n2-superseded-'))
    const first = streamBridge(true, createFilePendingStore(dir))
    const review = await prepareStream(first)
@@ -1386,7 +1416,7 @@ describe('N2: unreadable payment-proof records never block the other guards or g
    const next = streamBridge(true, store)
    next.setLookup({ state: 'unknown', keyImages: ['spent'] })
    await next.api.connect()
-   expect(next.api.pendingCount()).toBe(1)
+   expect(next.api.pendingCount()).toBe(0)
    expect(saves).toEqual([])
   })
 
