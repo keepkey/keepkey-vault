@@ -103,6 +103,14 @@ export function withNativeTxFee(fee: string | undefined, activityType: string, c
   return nativeTxFeeBaseUnits(chain) ?? fee
 }
 
+/** The same rule for a send logged by Vault itself, whose fee is in DISPLAY
+ *  units. Sends made before displayFee charged the native fee logged '0', and
+ *  mergeTxRows keeps that row's fee over the scan row's. */
+export function withNativeTxFeeDisplay(fee: string | undefined, chain: ChainDef | undefined): string | undefined {
+  if (!chain || Number(fee) > 0 || nativeTxFeeBaseUnits(chain) === undefined) return fee
+  return String(FEES[chain.id])
+}
+
 // Chain-specific msg types (MsgSend)
 const MSG_SEND_TYPES: Record<string, string> = {
   thorchain: 'thorchain/MsgSend',

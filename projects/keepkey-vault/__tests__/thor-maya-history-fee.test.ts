@@ -60,3 +60,37 @@ test('a stored THORChain send row with fee 0 reads the 0.02 RUNE native fee', as
     db.closeDb()
   }
 })
+
+// Audit v6 R6, in-app sends: Vault logs its own send as an RPC 'broadcast' row
+// with the fee the Send form showed (display units). Before displayFee charged the
+// native fee that was '0', and mergeTxRows keeps the app row's fee over the scan's.
+test('an older in-app THORChain send with fee 0 reads the 0.02 RUNE native fee', async () => {
+  const db = await import('../src/bun/db')
+  db.initDb()
+  try {
+    const wallet = { deviceId: 'fixture-device-app', walletId: 'fixture-wallet-app' }
+    const app = (txid: string, meta: Record<string, unknown>) => db.insertApiLog({
+      ...wallet, method: 'RPC', route: 'broadcastTx', timestamp: Date.now(), durationMs: 0, status: 200,
+      appName: 'vault', txid, chain: String(meta.chainSymbol), activityType: 'broadcast', responseBody: meta,
+    } as any)
+    app('THOR-APP-OLD', { chainId: 'thorchain', chainSymbol: 'RUNE', value: '0.1', fee: '0', to: 'thor1fixture' })
+    // Its Pioneer scan row for the same tx (base units): merged into one entry.
+    db.insertApiLog({
+      ...wallet, method: 'SCAN', route: 'history/thorchain', timestamp: Date.now(), durationMs: 0, status: 200,
+      appName: 'vault', txid: 'THOR-APP-OLD', chain: 'RUNE', activityType: 'send',
+      responseBody: { chainId: 'thorchain', chainSymbol: 'RUNE', value: '10000000', fee: '0' },
+    } as any)
+    app('MAYA-APP-OLD', { chainId: 'mayachain', chainSymbol: 'CACAO', value: '1', fee: '0' })
+    app('THOR-APP-NEW', { chainId: 'thorchain', chainSymbol: 'RUNE', value: '0.1', fee: '0.02' })
+    app('ATOM-APP', { chainId: 'cosmos', chainSymbol: 'ATOM', value: '1', fee: '0.005' })
+    const rows = db.getRecentActivityFromLog(undefined, undefined, wallet.deviceId, wallet.walletId)
+    const row = (txid: string) => rows.filter(r => r.txid === txid)
+    expect(row('THOR-APP-OLD')).toHaveLength(1)
+    expect(row('THOR-APP-OLD')[0]).toMatchObject({ source: 'app', amount: '0.1', fee: '0.02' })
+    expect(row('MAYA-APP-OLD')[0]?.fee).toBe('0.2')
+    expect(row('THOR-APP-NEW')[0]?.fee).toBe('0.02')
+    expect(row('ATOM-APP')[0]?.fee).toBe('0.005')
+  } finally {
+    db.closeDb()
+  }
+})
