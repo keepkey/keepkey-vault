@@ -540,7 +540,7 @@
   "m3d9f18fa": "Falha na prévia:",
   "m3df275c1": "Concluídas recentemente",
   "m3e154c1b": "Verificado na Base usando",
-  "m3e3b7bb1": "publicando",
+  "m3e3b7bb1": "postagem",
   "m3e3cf313": "kk",
   "m3e5a8ba5": ", 2) troca. A aprovação consome gas mesmo se você cancelar a etapa 2.",
   "m3e6d673e": "Ativar ClearSign",
@@ -963,7 +963,6 @@
   "m6d6a0d62": "Suporta contratos SafeL2 v1.4.1 e v1.5.0 verificados na Base. Use o endereço do contrato Safe. O endereço pessoal de um proprietário não pode ser importado como cofre.",
   "m6d6fd929": "Guia de browser-use",
   "m6d8713": "Leia o dispositivo assinado conectado ou cole uma chave pública comprimida criada em outro lugar.",
-  "m6d8cd466": "Payload hdwallet",
   "m6da63c17": "agora há pouco — então não vamos fingir que está vazio. Vamos ler seu endereço principal diretamente do dispositivo.",
   "m6dcaaab0": "Confirme na KeepKey",
   "m6dd12844": "Reescaneamento completo (~30 min)",
@@ -2406,5 +2405,6 @@
   "m89a779a3": "Não confirmada",
   "m382d99ae": "Confirmada",
   "m72c680c9": "Clique para copiar",
-  "mf52ced61": "Explorador de blocos"
+  "mf52ced61": "Explorador de blocos",
+  "m1e6a213e": "Detalhes técnicos"
 }
