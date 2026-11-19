@@ -208,5 +208,7 @@
   "mcebd7450": "Saldo vernieuwen",
   "m65451a82": "Electrum-transactie-QR vereist een PSBT of transactie",
   "m1643fcfa": "Te groot voor een statische Electrum-QR; kies geanimeerde UR of BBQr",
-  "m9a5ef61b": "Te veel BBQr-frames"
+  "m9a5ef61b": "Te veel BBQr-frames",
+  "m4078a8ec": "QR van de ondertekende transactie",
+  "m9054dd5f": "QR van de ondertekende PSBT"
 }

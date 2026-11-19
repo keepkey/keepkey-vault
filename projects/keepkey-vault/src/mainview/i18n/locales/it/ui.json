@@ -212,5 +212,7 @@
   "mcebd7450": "Aggiornamento del saldo",
   "m65451a82": "Il QR di transazione Electrum richiede una PSBT o una transazione",
   "m1643fcfa": "Troppo grande per un QR statico Electrum; scegli UR o BBQr animato",
-  "m9a5ef61b": "Troppi fotogrammi BBQr"
+  "m9a5ef61b": "Troppi fotogrammi BBQr",
+  "m4078a8ec": "QR della transazione firmata",
+  "m9054dd5f": "QR del PSBT firmato"
 }

@@ -22,6 +22,7 @@ const COPY = [
   'Frame {{current}} of {{total}} · Keep scanning until complete', 'Single QR code',
   'Electrum transaction QR requires a PSBT or transaction',
   'Too large for an Electrum static QR; choose animated UR or BBQr', 'Too many BBQr frames',
+  'Signed PSBT QR', 'Signed transaction QR',
 ]
 
 describe('receive and Bitcoin QR copy (Vault 1.6.7 audit)', () => {
@@ -50,12 +51,16 @@ describe('receive and Bitcoin QR copy (Vault 1.6.7 audit)', () => {
     expect(qr).toContain('uiText("Too much data for one QR. Choose animated UR or BBQr.")')
     expect(qr).toContain('uiText(e.message)')
     expect(qr).not.toMatch(/`Frame \$\{/)
+    // The dialog heading comes from its caller: the signed PSBT/tx titles too.
+    const psbt = source('PsbtSignDialog.tsx')
+    expect(psbt).toContain('uiText("Signed PSBT QR") : uiText("Signed transaction QR")')
+    expect(psbt).not.toMatch(/[?:] "Signed (PSBT|transaction) QR"/)
   })
 
   test('Portuguese renders the frame counter as a sentence', async () => {
     const i18n = i18next.createInstance()
     await i18n.init({ lng: 'pt', resources: { pt: { ui: json('pt', 'ui') } }, interpolation: { escapeValue: false } })
     const key = messageKey('Frame {{current}} of {{total}} · Keep scanning until complete')
-    expect(i18n.t(key, { ns: 'ui', current: 2, total: 5 })).toBe('Quadro 2 de 5 · Continue escaneando até concluir')
+    expect(i18n.t(key, { ns: 'ui', current: 2, total: 5 })).toBe('Parte 2 de 5 · Continue escaneando até concluir')
   })
 })

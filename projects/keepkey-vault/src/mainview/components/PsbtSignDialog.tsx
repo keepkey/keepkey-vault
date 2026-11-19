@@ -191,7 +191,7 @@ export function PsbtSignDialog() {
 
 	return (
 		<>
-			{signed && showQr && <BitcoinQrDialog bytes={showQr === "psbt" ? base64.decode(signed.psbtBase64) : hex.decode(signed.txHex!)} title={showQr === "psbt" ? "Signed PSBT QR" : "Signed transaction QR"} onClose={() => setShowQr(null)} />}
+			{signed && showQr && <BitcoinQrDialog bytes={showQr === "psbt" ? base64.decode(signed.psbtBase64) : hex.decode(signed.txHex!)} title={showQr === "psbt" ? uiText("Signed PSBT QR") : uiText("Signed transaction QR")} onClose={() => setShowQr(null)} />}
 			<Box position="fixed" inset="0" bg="rgba(0,0,0,0.85)" zIndex={Z.dialog}
 				onClick={phase === "signing" || phase === "analyzing" ? undefined : handleDismiss} />
 			<Box

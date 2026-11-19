@@ -215,5 +215,7 @@
   "mcebd7450": "Bakiye yenileniyor",
   "m65451a82": "Electrum işlem QR'ı bir PSBT veya işlem gerektirir",
   "m1643fcfa": "Electrum statik QR için çok büyük; animasyonlu UR veya BBQr seçin",
-  "m9a5ef61b": "Çok fazla BBQr karesi"
+  "m9a5ef61b": "Çok fazla BBQr karesi",
+  "m4078a8ec": "İmzalı işlemin QR'ı",
+  "m9054dd5f": "İmzalı PSBT'nin QR'ı"
 }

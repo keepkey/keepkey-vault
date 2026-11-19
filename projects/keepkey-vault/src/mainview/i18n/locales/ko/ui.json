@@ -215,5 +215,7 @@
   "mcebd7450": "잔액 새로고침 중",
   "m65451a82": "Electrum 트랜잭션 QR에는 PSBT 또는 트랜잭션이 필요합니다",
   "m1643fcfa": "Electrum 정적 QR에 비해 너무 큽니다. 애니메이션 UR 또는 BBQr을 선택하세요",
-  "m9a5ef61b": "BBQr 프레임이 너무 많습니다"
+  "m9a5ef61b": "BBQr 프레임이 너무 많습니다",
+  "m4078a8ec": "서명된 트랜잭션 QR",
+  "m9054dd5f": "서명된 PSBT QR"
 }

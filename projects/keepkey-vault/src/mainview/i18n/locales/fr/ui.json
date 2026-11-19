@@ -207,5 +207,7 @@
   "mcebd7450": "Actualisation du solde",
   "m65451a82": "Le QR de transaction Electrum nécessite une PSBT ou une transaction",
   "m1643fcfa": "Trop volumineux pour un QR statique Electrum ; choisissez UR ou BBQr animé",
-  "m9a5ef61b": "Trop d'images BBQr"
+  "m9a5ef61b": "Trop d'images BBQr",
+  "m4078a8ec": "QR de la transaction signée",
+  "m9054dd5f": "QR du PSBT signé"
 }

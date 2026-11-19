@@ -218,5 +218,7 @@
   "mcebd7450": "Đang làm mới số dư",
   "m65451a82": "QR giao dịch Electrum cần PSBT hoặc giao dịch",
   "m1643fcfa": "Quá lớn cho QR tĩnh của Electrum; hãy chọn UR hoặc BBQr động",
-  "m9a5ef61b": "Quá nhiều khung BBQr"
+  "m9a5ef61b": "Quá nhiều khung BBQr",
+  "m4078a8ec": "QR giao dịch đã ký",
+  "m9054dd5f": "QR PSBT đã ký"
 }

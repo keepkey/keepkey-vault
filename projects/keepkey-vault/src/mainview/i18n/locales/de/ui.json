@@ -203,5 +203,7 @@
   "mcebd7450": "Guthaben wird aktualisiert",
   "m65451a82": "Der Electrum-Transaktions-QR erfordert eine PSBT oder eine Transaktion",
   "m1643fcfa": "Zu groß für einen statischen Electrum-QR; wählen Sie animiertes UR oder BBQr",
-  "m9a5ef61b": "Zu viele BBQr-Bilder"
+  "m9a5ef61b": "Zu viele BBQr-Bilder",
+  "m4078a8ec": "QR der signierten Transaktion",
+  "m9054dd5f": "QR der signierten PSBT"
 }

@@ -216,5 +216,7 @@
   "mcebd7450": "正在刷新余额",
   "m65451a82": "Electrum 交易二维码需要 PSBT 或交易",
   "m1643fcfa": "数据过大，无法生成 Electrum 静态二维码；请选择动态 UR 或 BBQr",
-  "m9a5ef61b": "BBQr 帧数过多"
+  "m9a5ef61b": "BBQr 帧数过多",
+  "m4078a8ec": "已签名交易二维码",
+  "m9054dd5f": "已签名 PSBT 二维码"
 }
