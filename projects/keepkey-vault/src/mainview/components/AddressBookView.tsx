@@ -7,6 +7,7 @@ import { actionToneProps } from "./ui/ActionButton"
 import { useTranslation } from "react-i18next"
 import { rpcRequest } from "../lib/rpc"
 import { CHAINS, getExplorerTxUrl, caipToNetworkId } from "../../shared/chains"
+import { chainsByNetwork } from "../lib/chain-by-network"
 import { isBitcoinOnlyVariant } from "../../shared/flags"
 import { versionCompare } from "../../shared/firmware-versions"
 import { useAddressBook } from "../hooks/useAddressBook"
@@ -22,7 +23,7 @@ import type { AddressBookEntry, AddressBookTx, AppSettings } from "../../shared/
 import { VaultIdentityBadge, VaultIdentityDetails } from './VaultIdentityBadge'
 
 const chainById = new Map(CHAINS.map(c => [c.id, c]))
-const chainByNetwork = new Map(CHAINS.map(c => [c.networkId, c]))
+const chainByNetwork = chainsByNetwork(CHAINS)
 
 const shortDevice = (id?: string) => (id && id.length > 12 ? `${id.slice(0, 6)}…${id.slice(-4)}` : (id || "Wallet"))
 const EXTERNAL_TAB = "__external__"
