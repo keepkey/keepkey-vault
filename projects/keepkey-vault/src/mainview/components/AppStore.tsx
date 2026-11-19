@@ -1,3 +1,4 @@
+import { useState } from "react"
 import { Box, Flex, Text, Grid, Image } from "@chakra-ui/react"
 import { useTranslation } from "react-i18next"
 import supportIcon from "../assets/apps/support.svg"
@@ -28,6 +29,9 @@ interface AppDef {
 	accent?: string
 	/** Opens in the system browser instead of as a dApp (docs, not an app) */
 	external?: boolean
+	/** Transparent mark with no background of its own: drawn inset on the tile so it reads
+	 *  at the same size as the full square app icons. */
+	glyph?: boolean
 }
 
 function useApps(): AppDef[] {
@@ -59,11 +63,12 @@ function useApps(): AppDef[] {
 			url: "https://app.shapeshift.com",
 			enabled: true,
 			accent: "var(--teal)",
+			glyph: true,
 		},
 		{
 			id: "safe",
 			name: t("safeName", { defaultValue: "Safe{Wallet}" }),
-			description: t("safeDescription", { defaultValue: "Shared multisig accounts on EVM chains. Connect your KeepKey as an owner. To see your Safes and check pending transactions in Desktop, open Multisig on an EVM asset." }),
+			description: t("safeDescription", { defaultValue: "Shared multisig accounts on EVM chains. Connect your KeepKey as an owner." }),
 			icon: "https://app.safe.global/favicons/apple-touch-icon.png",
 			url: "https://app.safe.global",
 			enabled: true,
@@ -124,6 +129,7 @@ function useApps(): AppDef[] {
 			url: "https://coincap.io",
 			enabled: true,
 			accent: "var(--teal)",
+			glyph: true,
 		},
 		{
 			id: "venice",
@@ -135,6 +141,46 @@ function useApps(): AppDef[] {
 			accent: "var(--gold)",
 		},
 	]
+}
+
+/** 56px icon tile. Square app icons fill it; transparent marks (`glyph`) sit inside with
+ *  padding. A remote icon that fails to load (offline, moved, blocked) shows the app's first
+ *  letter instead of a broken image. */
+function AppIcon({ app }: { app: AppDef }) {
+	const [failedSrc, setFailedSrc] = useState<string | null>(null)
+	const failed = !app.icon || failedSrc === app.icon
+	return (
+		<Box
+			w="56px"
+			h="56px"
+			flexShrink={0}
+			borderRadius="14px"
+			bg="var(--ink-3)"
+			border="1px solid var(--line-2)"
+			display="grid"
+			placeItems="center"
+			mb="5"
+			overflow="hidden"
+			position="relative"
+		>
+			{failed ? (
+				<Text as="span" aria-hidden="true" fontSize="24px" fontWeight="600" lineHeight="1" color={app.accent ?? "var(--text-1)"}>
+					{app.name.trim().charAt(0).toUpperCase()}
+				</Text>
+			) : (
+				<Image
+					src={app.icon}
+					alt=""
+					w="100%"
+					h="100%"
+					p={app.glyph ? "8px" : "0"}
+					objectFit="contain"
+					draggable={false}
+					onError={() => setFailedSrc(app.icon)}
+				/>
+			)}
+		</Box>
+	)
 }
 
 interface AppStoreProps {
@@ -185,10 +231,17 @@ export function AppStore({ onOpenApp, onOpenKeepKey }: AppStoreProps) {
 
 				<Grid templateColumns={{ base: "1fr", sm: "repeat(auto-fill, minmax(260px, 1fr))" }} gap="4">
 					{APPS.map((app) => (
-						<Box
+						<Flex
 							key={app.id}
 							as="button"
+							type="button"
+							disabled={!app.enabled}
 							className="electrobun-webkit-app-region-no-drag"
+							direction="column"
+							align="stretch"
+							justify="flex-start"
+							h="100%"
+							minW="0"
 							textAlign="left"
 							p="6"
 							bg="linear-gradient(180deg, var(--ink-2), var(--ink-1))"
@@ -197,6 +250,7 @@ export function AppStore({ onOpenApp, onOpenKeepKey }: AppStoreProps) {
 							cursor={app.enabled ? "pointer" : "default"}
 							opacity={app.enabled ? 1 : 0.45}
 							_hover={app.enabled ? { borderColor: "var(--line-2)", transform: "translateY(-2px)" } : {}}
+							_focusVisible={{ outline: "2px solid var(--gold)", outlineOffset: "2px" }}
 							transition="all 0.25s"
 							onClick={() => handleClick(app)}
 							position="relative"
@@ -218,29 +272,10 @@ export function AppStore({ onOpenApp, onOpenKeepKey }: AppStoreProps) {
 								/>
 							)}
 
-							<Box
-								w="56px"
-								h="56px"
-								borderRadius="14px"
-								bg="var(--ink-3)"
-								border="1px solid var(--line-2)"
-								display="grid"
-								placeItems="center"
-								mb="5"
-								overflow="hidden"
-								position="relative"
-							>
-								<Image
-									src={app.icon}
-									alt={app.name}
-									w="100%"
-									h="100%"
-									objectFit="cover"
-								/>
-							</Box>
+							<AppIcon app={app} />
 
 							<Flex align="center" gap="2" mb="1">
-								<Text fontSize="17px" fontWeight="600" color="var(--text-0)" letterSpacing="-0.01em">
+								<Text fontSize="17px" fontWeight="600" color="var(--text-0)" letterSpacing="-0.01em" minW="0" truncate>
 									{app.name}
 								</Text>
 								{app.badge && (
@@ -261,12 +296,12 @@ export function AppStore({ onOpenApp, onOpenKeepKey }: AppStoreProps) {
 									</Text>
 								)}
 							</Flex>
-							<Text fontSize="13px" color="var(--text-2)" mb="6" lineHeight="1.5">
+							<Text fontSize="13px" color="var(--text-2)" mb="6" lineHeight="1.5" lineClamp={3} title={app.description}>
 								{app.description}
 							</Text>
 
 							{app.enabled && (
-								<Flex align="center" gap="1.5" fontSize="12px" color="var(--text-3)">
+								<Flex align="center" gap="1.5" fontSize="12px" color="var(--text-3)" mt="auto">
 									{!app.internal && (
 										<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
 											<path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
@@ -276,7 +311,7 @@ export function AppStore({ onOpenApp, onOpenKeepKey }: AppStoreProps) {
 									<Text as="span">{app.internal ? t("internal", { defaultValue: "Open" }) : t("open", { defaultValue: "Open" })}</Text>
 								</Flex>
 							)}
-						</Box>
+						</Flex>
 					))}
 				</Grid>
 			</Box>
