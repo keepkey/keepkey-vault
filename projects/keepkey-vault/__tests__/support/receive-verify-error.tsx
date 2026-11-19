@@ -20,6 +20,7 @@ const { ChakraProvider, defaultSystem } = await import('@chakra-ui/react')
 const i18n = (await import('../../src/mainview/i18n')).default
 const { CHAINS } = await import('../../src/shared/chains')
 const { ReceiveView } = await import('../../src/mainview/components/ReceiveView')
+const { showWatchOnlyAddress, watchOnlyAddressMismatchMessage } = await import('../../src/shared/watch-only-verify')
 const eth = CHAINS.find(c => c.id === 'ethereum')!
 const a1 = '0x0000000000000000000000000000000000000001'
 const a2 = '0x0000000000000000000000000000000000000002'
@@ -77,5 +78,18 @@ try {
   await render(a1, { onShowOnDevice: () => { throw new Error('Failure_Other') } })
   await click()
   result.syncThrow = state()
+  // Watch-only (AssetPage's handler): a cancel reads like any account's check; a
+  // different address on the device hides the host one instead (KEEPKEY-138).
+  const mismatches: string[] = []
+  const watchOnly = (error: Error) => ({ watchOnly: true, onShowOnDevice: () => showWatchOnlyAddress(async () => { throw error }, m => { mismatches.push(m) }) })
+  await render(a1, watchOnly(new Error('Action cancelled by user')))
+  await click()
+  result.watchOnlyCancelled = { ...state(), mismatches: mismatches.length }
+  await render(a1, watchOnly(new Error('Timed out waiting for the KeepKey request. Try again.')))
+  await click()
+  result.watchOnlyNoAnswer = { ...state(), mismatches: mismatches.length }
+  await render(a1, watchOnly(new Error(watchOnlyAddressMismatchMessage(a2, a1))))
+  await click()
+  result.watchOnlyMismatch = { ...state(), mismatches }
 } finally { await act(async () => root.unmount()); container.remove(); dom.window.close() }
 console.log(JSON.stringify(result))

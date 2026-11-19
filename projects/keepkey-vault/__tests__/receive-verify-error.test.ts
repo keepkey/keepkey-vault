@@ -36,3 +36,18 @@ test('the error clears on retry, on success and when the address changes', () =>
 test('a failure for a previous address is not shown against the current one', () => {
   expect(result.staleReply).toEqual({ alert: null, busy: false })
 })
+
+test('watch-only shows the same explained failure; only an address mismatch hides the address (KEEPKEY-138)', () => {
+  expect(result.watchOnlyCancelled).toEqual({ alert: result.cancelled.alert, busy: false, mismatches: 0 })
+  expect(result.watchOnlyNoAnswer).toEqual({ alert: result.noAnswer.alert, busy: false, mismatches: 0 })
+  expect(result.watchOnlyMismatch.alert).toBeNull()
+  expect(result.watchOnlyMismatch.mismatches).toEqual([
+    'The KeepKey showed 0x0000000000000000000000000000000000000002, not 0x0000000000000000000000000000000000000001. Do not use this address.',
+  ])
+})
+
+test("AssetPage's watch-only check goes through showWatchOnlyAddress", async () => {
+  const source = await Bun.file(fileURLToPath(new URL('../src/mainview/components/AssetPage.tsx', import.meta.url))).text()
+  expect(source).toContain("? () => showWatchOnlyAddress(\n\t\t\t\t\t\t\t\t\t() => rpcRequest('btcWatchOnlyShowAddress'")
+  expect(source).not.toContain("setDeriveError(e?.message || 'Could not show the address on the KeepKey')")
+})
