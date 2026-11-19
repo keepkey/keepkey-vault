@@ -6,7 +6,7 @@
 		"enterDescription": "Usa las posiciones mostradas en tu KeepKey para ingresar tu PIN",
 		"createDescription": "Mira la pantalla de tu KeepKey y toca las posiciones para establecer un nuevo PIN",
 		"confirmDescription": "Ingresa el mismo PIN nuevamente para confirmar",
-		"backspace": "Borrar",
+		"backspace": "Corregir",
 		"unlock": "Desbloquear",
 		"forgotPinWipe": "¿Olvidaste tu PIN? Borrar dispositivo",
 		"wipeWarningTitle": "Borrar tu KeepKey",
