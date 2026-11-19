@@ -35,6 +35,13 @@ function coinAmount(value: string, decimals: number): string | null {
   return units <= UINT256_MAX ? baseUnitsToDecimalString(units, precision) : null
 }
 
+/** TON deep-link amounts are integer nanotons, not whole TON. */
+function tonAmount(value: string, decimals: number): string | null {
+  if (normalizeDecimals(decimals) === null || !/^\d{1,78}$/.test(value)) return null
+  const units = BigInt(value)
+  return units <= UINT256_MAX ? baseUnitsToDecimalString(units, decimals) : null
+}
+
 export interface ScannedPayment {
   recipient: string
   /** Exact native display units. Absent means the QR did not set an amount. */
@@ -52,7 +59,15 @@ export function parseSendQr(data: string, chain: ChainDef, isTokenSend = false):
   const schemeMatch = clean.match(/^([a-z][a-z0-9+.-]*):(.*)$/i)
   const scheme = schemeMatch?.[1].toLowerCase()
   if (scheme && (scheme === 'ethereum' ? chain.chainFamily !== 'evm' : !SCHEMES[chain.id]?.includes(scheme))) return null
-  const payload = schemeMatch ? schemeMatch[2] : clean
+  let payload = schemeMatch ? schemeMatch[2] : clean
+  // TON deep links (docs.ton.org wallet-apps/deep-links) carry the address in the
+  // path, as Vault's own receive QR does: ton://transfer/<address>. Any other
+  // ton:// action is not a payment.
+  if (scheme === 'ton' && payload.startsWith('//')) {
+    const link = payload.match(/^\/\/transfer\/([^/?]+)(\?.*)?$/)
+    if (!link) return null
+    payload = link[1] + (link[2] ?? '')
+  }
   const separator = payload.indexOf('?')
   let recipient = separator < 0 ? payload : payload.slice(0, separator)
   const params = new URLSearchParams(separator < 0 ? '' : payload.slice(separator + 1))
@@ -66,6 +81,9 @@ export function parseSendQr(data: string, chain: ChainDef, isTokenSend = false):
     if (scheme === 'ethereum' && !['value', 'amount', 'label', 'message', 'gas', 'gasLimit', 'gasPrice'].includes(key)) return null
   }
   for (const key of ['amount', 'value', 'memo', 'dt']) if (params.getAll(key).length > 1) return null
+  // A TON comment/payload/StateInit has no field in the send form; dropping it
+  // could lose an exchange deposit comment, so the request fails as a whole.
+  if (scheme === 'ton' && ['text', 'bin', 'init'].some(key => params.getAll(key).some(Boolean))) return null
 
   if (scheme === 'ethereum') {
     // Contract/function requests cannot be reinterpreted as ordinary sends.
@@ -81,7 +99,7 @@ export function parseSendQr(data: string, chain: ChainDef, isTokenSend = false):
   if (!isTokenSend) {
     if (params.has('value') && (scheme !== 'ethereum' || params.has('amount'))) return null
     const requested = params.has('value') ? eip681ValueToAmount(params.get('value')!, chain.decimals)
-      : params.has('amount') ? coinAmount(params.get('amount')!, chain.decimals) : undefined
+      : params.has('amount') ? (scheme === 'ton' ? tonAmount(params.get('amount')!, chain.decimals) : coinAmount(params.get('amount')!, chain.decimals)) : undefined
     if (requested === null) return null
     amount = requested
   }

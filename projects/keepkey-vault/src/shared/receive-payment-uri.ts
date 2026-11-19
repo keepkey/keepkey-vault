@@ -22,6 +22,10 @@ export function receivePaymentUri(
   if (chain.chainFamily === 'evm')
     return evmAssetReceiveUri(chain.networkId, assetCaip, address)
   if (chain.chainFamily === 'solana') return `solana:${address}`
+  // TON transfer deep link (docs.ton.org wallet-apps/deep-links), read by Tonkeeper
+  // and other TON wallets. User-friendly addresses are base64url, safe in a path.
+  if (chain.chainFamily === 'ton') return `ton://transfer/${address}`
+  // Tron and XRP stay raw: neither has a payment URI that wallets agree on.
 
   const scheme = Object.prototype.hasOwnProperty.call(PAYMENT_SCHEMES, chain.id) ? PAYMENT_SCHEMES[chain.id] : undefined
   if (!scheme) return address
