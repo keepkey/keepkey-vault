@@ -15,6 +15,7 @@ import { Z } from "../lib/z-index"
 import { DocsLink } from "./DocsLink"
 import { DOCS_LINKS } from "../../shared/docs-links"
 import { CHAINS, getExplorerTxUrl } from "../../shared/chains"
+import { activityExplorerUrl } from "../lib/activity-explorer"
 import { caipToIcon } from "../../shared/assetLookup"
 import { getRequiredConfs } from "../../shared/confirmations"
 import type { RecentActivity, PendingSwap, ChainBalance, SwapTrackingStatus } from "../../shared/types"
@@ -108,16 +109,6 @@ function ConfBadge({ confirmations, chain }: { confirmations?: number; chain: st
       <Text fontSize="9px" color={color} fontWeight="600">{label}</Text>
     </HStack>
   )
-}
-
-function getExplorerUrl(chainSymbol: string, txid: string): string | null {
-  if (!chainSymbol || !txid) return null
-  const chain = CHAINS.find(c => c.symbol === chainSymbol || c.id === chainSymbol)
-  if (!chain?.explorerTxUrl) return null
-  const normalizedTxid = chain.chainFamily === 'evm'
-    ? (txid.startsWith('0x') ? txid : '0x' + txid)
-    : txid.replace(/^0x/i, '')
-  return chain.explorerTxUrl.replace('{{txid}}', normalizedTxid)
 }
 
 export function truncateTxid(txid: string): string {
@@ -548,7 +539,7 @@ export function ActivityRow({ activity, onSelect, nativePrices }: { activity: Re
     setTimeout(() => setCopied(false), 1500)
   }
 
-  const explorerUrl = activity.txid ? getExplorerUrl(activity.chainId || activity.chain, activity.txid) : null
+  const explorerUrl = activityExplorerUrl(activity.chainId || activity.chain, activity.txid)
 
   const isUnconfirmed = activity.confirmations !== undefined && activity.confirmations === 0
   const chainLabel = `${chainDef?.coin || activity.chain} (${chainSymbol})`
@@ -624,7 +615,7 @@ export function ActivityTableRow({ activity, onSelect, nativePrices }: { activit
   const chainDef = CHAINS.find(c => activity.chainId && c.id === activity.chainId) || CHAINS.find(c => c.symbol === activity.chain || c.id === activity.chain)
   const chainSymbol = chainDef?.symbol || activity.chain
   const nativePrice = chainDef ? nativePrices[chainDef.id] : undefined
-  const explorerUrl = activity.txid ? getExplorerUrl(activity.chainId || activity.chain, activity.txid) : null
+  const explorerUrl = activityExplorerUrl(activity.chainId || activity.chain, activity.txid)
   const nativeAmount = formatNativeValue(activity.amount, chainDef, activity.source, nativePrice)
   const nativeFee = formatNativeValue(activity.fee, chainDef, activity.source, nativePrice)
   const amountLine = activity.type === 'swap' && (activity.amount || activity.outAmount)
