@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import { Database } from 'bun:sqlite'
 import { createMoneroWatchStore, type MoneroWatchStore } from './monero-watch-store'
-import { existsSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { keccak_256 } from '@noble/hashes/sha3'
@@ -1253,6 +1253,158 @@ test('a payment-proof archive failure keeps the recoverable pending record', asy
  expect(b.calls.relays).toHaveLength(1)
  expect(b.api.pendingCount()).toBe(1)
  expect(store.load()[0].transactionKeys).toBeDefined()
+})
+
+describe('N2: unreadable payment-proof records never block the other guards or get overwritten', () => {
+ const SENT = 'monero-sent-transactions.json'
+ const CORRUPT = '{"version":1,"records":[{broken'
+ const withProofFile = (prefix: string, content: string) => {
+  const dir = mkdtempSync(join(tmpdir(), prefix))
+  writeFileSync(join(dir, SENT), content, { mode: 0o600 })
+  return dir
+ }
+ const keptAside = (dir: string) => readdirSync(dir).filter(name => name.startsWith('monero-sent-transactions.unreadable-'))
+ /** A proof store that cannot even be read (I/O error): the vault must not write over it. */
+ const unreadable = (dir: string) => {
+  const saves: unknown[] = []
+  const store: MoneroPendingStore = { ...createFilePendingStore(dir),
+   loadSent: () => { throw new Error('The Monero payment-proof records could not be read') },
+   saveSent: records => { saves.push(records) } }
+  return { store, saves }
+ }
+
+ describe('file store: a corrupt file is kept aside, never overwritten', () => {
+  test('status, pending count and the double-payment block load; the original bytes are preserved', async () => {
+   const dir = mkdtempSync(join(tmpdir(), 'kk-monero-n2-status-'))
+   const first = await ready({ pendingStore: createFilePendingStore(dir) })
+   first.setRelayError(new Error('The Monero daemon is unavailable'))
+   const review = await first.api.prepareSend({ address: RECIPIENT, amountAtomic: '2000000000000' })
+   await expect(first.api.send({ prepareId: review.prepareId })).rejects.toThrow('broadcast result is unknown')
+   writeFileSync(join(dir, SENT), CORRUPT, { mode: 0o600 })
+
+   const restarted = bridge({ pendingStore: createFilePendingStore(dir) })
+   restarted.setDraft(walletDraft)
+   expect((await restarted.api.getStatus()).unrelayedTxid).toBe(referenceHash('base'))
+   expect(restarted.api.pendingCount()).toBe(1)
+   await restarted.api.connect(); await restarted.api.syncKeyImages()
+   await expect(restarted.api.prepareSend({ address: RECIPIENT, amountAtomic: '2000000000000' })).rejects.toThrow('retry broadcasting')
+   const aside = keptAside(dir)
+   expect(aside).toHaveLength(1)
+   expect(readFileSync(join(dir, aside[0]), 'utf8')).toBe(CORRUPT)
+   expect(statSync(join(dir, aside[0])).mode & 0o777).toBe(0o600)
+   expect(JSON.parse(readFileSync(join(dir, SENT), 'utf8'))).toEqual({ version: 1, records: [] })
+  })
+
+  test('a send then archives its keys normally, and the old file stays aside', async () => {
+   const dir = withProofFile('kk-monero-n2-send-', CORRUPT)
+   const b = streamBridge(true, createFilePendingStore(dir))
+   const review = await prepareStream(b)
+   await b.api.send({ prepareId: review.prepareId })
+   expect(b.api.pendingCount()).toBe(0)
+   const archived = createFilePendingStore(dir).loadSent!()
+   expect(archived).toHaveLength(1)
+   expect(b.api.getTransactionKey(archived[0].txid)).toEqual(archived[0].transactionKeys!)
+   expect(readFileSync(join(dir, keptAside(dir)[0]), 'utf8')).toBe(CORRUPT)
+  })
+
+  test('records that fail validation or an unknown shape are kept aside instead of being dropped on the next save', () => {
+   for (const content of [JSON.stringify({ version: 1, records: [{ wallet: 'x' }] }), JSON.stringify({ version: 2, entries: [] })]) {
+    const dir = withProofFile('kk-monero-n2-shape-', content)
+    expect(createFilePendingStore(dir).loadSent!()).toEqual([])
+    expect(readFileSync(join(dir, keptAside(dir)[0]), 'utf8')).toBe(content)
+   }
+   const dir = withProofFile('kk-monero-n2-valid-', JSON.stringify({ version: 1, records: [] }))
+   createFilePendingStore(dir).loadSent!()
+   expect(keptAside(dir)).toEqual([])
+  })
+ })
+
+ describe('a store that cannot be read: nothing is written over it', () => {
+  test('the discard guard still loads and applies', async () => {
+   const dir = mkdtempSync(join(tmpdir(), 'kk-monero-n2-guard-'))
+   const first = streamBridge(true, createFilePendingStore(dir))
+   const review = await prepareStream(first)
+   first.setRelayError(new Error('ETIMEDOUT'))
+   await expect(first.api.send({ prepareId: review.prepareId })).rejects.toThrow('broadcast result is unknown')
+   first.setLookup({ state: 'unknown', keyImages: ['unspent'] })
+   const { txid } = await first.api.discardPending({ confirm: true })
+
+   const next = streamBridge(true, unreadable(dir).store)
+   expect((await next.api.connect()).discardedTxid).toBe(txid)
+  })
+
+  test('a sent tx stays pending with its keys; other keys report the read error instead of "none"', async () => {
+   const dir = mkdtempSync(join(tmpdir(), 'kk-monero-n2-io-'))
+   const { store, saves } = unreadable(dir)
+   const b = streamBridge(true, store)
+   const review = await prepareStream(b)
+   await expect(b.api.send({ prepareId: review.prepareId })).rejects.toThrow('transaction remains pending')
+   expect(b.calls.relays).toHaveLength(1)
+   expect(saves).toEqual([])
+   expect(b.api.pendingCount()).toBe(1)
+   const record = createFilePendingStore(dir).load()[0]
+   expect(b.api.getTransactionKey(record.txid)).toEqual(record.transactionKeys!)
+   expect(() => b.api.getTransactionKey('00'.repeat(32))).toThrow('payment-proof records could not be read')
+  })
+
+  test('a rejected first broadcast still shows the daemon reason and clears the never-sent tx', async () => {
+   const dir = mkdtempSync(join(tmpdir(), 'kk-monero-n2-reject-'))
+   const { store, saves } = unreadable(dir)
+   const b = streamBridge(true, store)
+   const review = await prepareStream(b)
+   b.setRelayError(new Error('The daemon rejected the transaction: fee too low'))
+   await expect(b.api.send({ prepareId: review.prepareId })).rejects.toThrow('fee too low')
+   expect(b.api.pendingCount()).toBe(0)
+   expect(saves).toEqual([])
+  })
+
+  test('a discard keeps the tx pending with its keys and writes no guard', async () => {
+   const dir = mkdtempSync(join(tmpdir(), 'kk-monero-n2-discard-'))
+   const first = streamBridge(true, createFilePendingStore(dir))
+   const review = await prepareStream(first)
+   first.setRelayError(new Error('ETIMEDOUT'))
+   await expect(first.api.send({ prepareId: review.prepareId })).rejects.toThrow('broadcast result is unknown')
+
+   const { store, saves } = unreadable(dir)
+   const next = streamBridge(true, store)
+   await next.api.connect()
+   next.setLookup({ state: 'unknown', keyImages: ['unspent'] })
+   await expect(next.api.discardPending({ confirm: true })).rejects.toThrow('transaction remains pending')
+   expect(next.api.pendingCount()).toBe(1)
+   expect(existsSync(join(dir, 'monero-discarded-broadcast.json'))).toBe(false)
+   expect(saves).toEqual([])
+  })
+
+  test('a superseded tx (another node may still mine it) keeps its keys pending', async () => {
+   const dir = mkdtempSync(join(tmpdir(), 'kk-monero-n2-superseded-'))
+   const first = streamBridge(true, createFilePendingStore(dir))
+   const review = await prepareStream(first)
+   first.setRelayError(new Error('ETIMEDOUT'))
+   await expect(first.api.send({ prepareId: review.prepareId })).rejects.toThrow('broadcast result is unknown')
+
+   const { store, saves } = unreadable(dir)
+   const next = streamBridge(true, store)
+   next.setLookup({ state: 'unknown', keyImages: ['spent'] })
+   await next.api.connect()
+   expect(next.api.pendingCount()).toBe(1)
+   expect(saves).toEqual([])
+  })
+
+  test('connecting works when the node has the pending tx but its proof cannot be archived', async () => {
+   const dir = mkdtempSync(join(tmpdir(), 'kk-monero-n2-connect-'))
+   const first = streamBridge(true, createFilePendingStore(dir))
+   const review = await prepareStream(first)
+   first.setRelayError(new Error('ETIMEDOUT'))
+   await expect(first.api.send({ prepareId: review.prepareId })).rejects.toThrow('broadcast result is unknown')
+
+   const { store, saves } = unreadable(dir)
+   const next = streamBridge(true, store)
+   next.setLookup({ state: 'pool', keyImages: ['pool'] })
+   expect((await next.api.connect()).sendBlocked).toBe('unrelayed')
+   expect(next.api.pendingCount()).toBe(1)
+   expect(saves).toEqual([])
+  })
+ })
 })
 
 // Native qualification uses public vectors and fixture reports; never a USB device or daemon.

@@ -2,7 +2,8 @@
  *  While one is pending for a wallet, that wallet may only re-broadcast these exact bytes:
  *  building a second, different payment could pay twice if the first one did reach the network. */
 import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
+import { randomBytes } from 'node:crypto'
 import { validTransactionKeys, type MoneroTransactionKeys } from './monero-transaction-keys'
 import { parseSignedTransaction } from './monero-wire'
 
@@ -73,10 +74,24 @@ export function createFilePendingStore(directory: string): MoneroPendingStore {
   return {
     loadSent() {
       if (!existsSync(sentFile)) return []
-      try {
-        const parsed = JSON.parse(readFileSync(sentFile, 'utf8'))
-        return (Array.isArray(parsed?.records) ? parsed.records : []).map(validPendingBroadcast).filter((r: MoneroPendingBroadcast | null): r is MoneroPendingBroadcast => !!r)
-      } catch { throw new Error('The Monero payment-proof records could not be read') }
+      let raw: string
+      try { raw = readFileSync(sentFile, 'utf8') } catch { throw new Error('The Monero payment-proof records could not be read') }
+      let records: unknown[] | null = null
+      try { const parsed = JSON.parse(raw); if (Array.isArray(parsed?.records)) records = parsed.records } catch {}
+      const valid = (records ?? []).map(validPendingBroadcast).filter((r: MoneroPendingBroadcast | null): r is MoneroPendingBroadcast => !!r)
+      if (records && valid.length === records.length) return valid
+      // Unparseable, an unknown shape, or records that fail validation: the next save would drop those
+      // keys for good. Keep the original file aside first (audit v6 N2), then continue with what is valid.
+      // Order matters: write the clean file first, then move the original aside, then put the clean one in
+      // place, so a failed step never leaves the valid keys only in the aside copy.
+      const unreadable = () => new Error('The Monero payment-proof records could not be read')
+      const aside = join(directory, `monero-sent-transactions.unreadable-${Date.now()}-${process.pid}-${randomBytes(4).toString('hex')}.json`)
+      const clean = `${sentFile}.${process.pid}.clean`
+      try { write(clean, { version: 1, records: valid }) } catch { throw unreadable() }
+      try { renameSync(sentFile, aside) } catch { try { unlinkSync(clean) } catch {} throw unreadable() }
+      try { renameSync(clean, sentFile) } catch { try { renameSync(aside, sentFile) } catch {} throw unreadable() }
+      console.warn(`[monero] Unreadable payment-proof records were kept aside as ${basename(aside)}`)
+      return valid
     },
     saveSent(records) { write(sentFile, {version:1, records}) },
     loadGuards() {

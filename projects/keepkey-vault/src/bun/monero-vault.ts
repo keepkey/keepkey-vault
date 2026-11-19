@@ -41,6 +41,8 @@ const BLOCKER_MESSAGES: Record<MoneroSendBlocker, string> = {
 export const KEY_IMAGES_STALE = 'New XMR arrived since the last key-image sync, so the wallet cannot yet tell which outputs are spent. Sync key images on KeepKey again before sending'
 export const SELF_SEND = "This is this wallet's own main address, which also receives the change, so it cannot be the recipient too. To move XMR within this wallet, send it to one of its subaddresses"
 const NOT_ENOUGH = 'Not enough unlocked XMR for this amount and fee'
+/** A settled tx whose payment-proof keys could not be archived stays pending (it keeps the keys). */
+export const PROOF_NOT_SAVED = 'The Monero payment-proof record could not be saved; the transaction remains pending'
 export const SUPERSEDED = 'The inputs of the pending transaction were spent by a different transaction, so it can never be sent. It was not sent, and nothing more will be sent from it'
 
 export interface MoneroVaultConfig {
@@ -270,11 +272,26 @@ export function createMoneroVault({ engine, confirm, getConfig, sidecar = manage
   // Discarded txs whose inputs are still unspent, per wallet, persisted (see MoneroDiscardGuard).
   const guards = new Map<string, MoneroDiscardGuard>()
   let persistenceLoaded = false
+  // Payment-proof records load on their own (audit v6 N2): a proof store that cannot be read must not
+  // stop the pending and discard guards below from loading, and must never be overwritten by a partial
+  // list. (The file store keeps an unparseable file aside itself; this covers a store that still throws.)
+  let sentLoaded = false, sentWarned = false
+  const loadSent = (): boolean => {
+    if (sentLoaded) return true
+    try {
+      for (const record of pendingStore.loadSent?.() ?? []) sent.set(`${record.wallet}:${record.txid}`, record)
+      sentLoaded = true
+    } catch {
+      if (!sentWarned) console.warn('[monero] Could not read payment-proof records; the file is left untouched')
+      sentWarned = true
+    }
+    return sentLoaded
+  }
   const loadPersistence = () => {
     assertMoneroStandardWallet(engine)
     if (persistenceLoaded) return
-    for (const record of pendingStore.loadSent?.() ?? []) sent.set(`${record.wallet}:${record.txid}`, record)
     persistenceLoaded = true
+    loadSent()
     try { for (const record of pendingStore.load()) pending.set(record.wallet, record) }
     catch { console.warn('[monero] Could not read pending broadcasts') }
     try { for (const guard of pendingStore.loadGuards?.() ?? []) guards.set(guard.wallet, guard) }
@@ -468,16 +485,24 @@ export function createMoneroVault({ engine, confirm, getConfig, sidecar = manage
     const images = keyImagesFor(current)
     if (!images || keyImagesStale(images, status)) return 'key-images'
   }
-  const settlePending = (wallet: string) => {
+  /** `neverSent`: only for a first broadcast the daemon explicitly rejected. A superseded or discarded tx
+   *  may still be mined from another node, so it keeps its keys like a sent one. */
+  const settlePending = (wallet: string, neverSent = false) => {
     assertMoneroStandardWallet(engine)
     const record = pending.get(wallet)
-    if (record?.transactionKeys) {
+    if (record?.transactionKeys && !loadSent()) {
+      // Saving now would replace the unreadable proof store with this record alone, losing older keys.
+      // The tx stays pending (its keys live in the pending record), as when a proof save fails. Only a tx
+      // the daemon refused outright has nothing to prove, so it settles without archiving.
+      if (!neverSent) throw new MoneroError(PROOF_NOT_SAVED)
+      console.warn('[monero] Settled a rejected transaction without archiving its keys: the proof records are unreadable')
+    } else if (record?.transactionKeys) {
       const id = `${wallet}:${record.txid}`, previous = sent.get(id)
       sent.set(id, record)
       try { pendingStore.saveSent?.([...sent.values()]) }
       catch {
         if (previous) sent.set(id, previous); else sent.delete(id)
-        throw new MoneroError('The Monero payment-proof record could not be saved; the transaction remains pending')
+        throw new MoneroError(PROOF_NOT_SAVED)
       }
     }
     pending.delete(wallet); checks.delete(wallet)
@@ -496,8 +521,13 @@ export function createMoneroVault({ engine, confirm, getConfig, sidecar = manage
     } catch { assertMoneroStandardWallet(engine); checks.delete(wallet); return 'unchecked' }
     assertMoneroStandardWallet(engine)
     if (pending.get(wallet) !== record) return 'unchecked'
-    if (found.state !== 'unknown') { settlePending(wallet); void sidecar.refreshMoneroWatch?.().catch(() => {}); return 'sent' }
-    if (found.keyImages.includes('spent')) { settlePending(wallet); return 'superseded' }
+    if (found.state !== 'unknown') {
+      // The node has it: drop any stale "unknown / discardable" check and refresh the wallet before
+      // archiving, which can fail and keep the record pending.
+      checks.delete(wallet); void sidecar.refreshMoneroWatch?.().catch(() => {})
+      settlePending(wallet); return 'sent'
+    }
+    if (found.keyImages.includes('spent')) { checks.delete(wallet); settlePending(wallet); return 'superseded' }
     checks.set(wallet, { state: 'unknown', discardable: found.keyImages.every(state => state === 'unspent'), checkedAt: new Date().toISOString(),
       ...(record.node ? { relayNode: record.node } : {}), checkedNode: getConfig().daemonUrl })
     return 'unknown'
@@ -523,14 +553,14 @@ export function createMoneroVault({ engine, confirm, getConfig, sidecar = manage
       if (message === 'The daemon rejected the transaction: double spend') return outcome()
       // A retry refusal says nothing about an earlier attempt on another node.
       if (message.startsWith('The daemon rejected the transaction')) {
-        if (!retry) settlePending(wallet)
+        if (!retry) settlePending(wallet, true)
         throw error
       }
       return outcome()
     }
     assertMoneroStandardWallet(engine)
-    settlePending(wallet)
     void sidecar.refreshMoneroWatch?.().catch(() => {})
+    settlePending(wallet)
   }
   const withSendState = async (status: MoneroVaultStatus, current: Snapshot, generation: number): Promise<MoneroVaultStatus> => {
     // Load before considering this observation for persistence: connect may
@@ -647,7 +677,15 @@ export function createMoneroVault({ engine, confirm, getConfig, sidecar = manage
         signingViewKey?.fill(0); signingViewKey = viewKey.slice()
         bound = { snapshot: current, address }; lastGood = status
         // A pending broadcast (e.g. from before a restart) is looked up once: settled if the node has it.
-        if (pending.has(walletKey(current, address))) await resolvePending(walletKey(current, address))
+        // If its proof cannot be archived it simply stays pending, which still blocks a second payment;
+        // connecting must not fail for that (audit v6 N2).
+        if (pending.has(walletKey(current, address))) {
+          try { await resolvePending(walletKey(current, address)) }
+          catch (error) {
+            if (!(error instanceof MoneroError && error.message === PROOF_NOT_SAVED)) throw error
+            console.warn('[monero] The node has the pending transaction, but its payment proof could not be archived; it stays pending')
+          }
+        }
         return await withSendState(status, current, generation)
       } catch (error) {
         stop()
@@ -937,7 +975,10 @@ export function createMoneroVault({ engine, confirm, getConfig, sidecar = manage
       assertMoneroStandardWallet(engine)
       const current = requireReady(), binding = bindingFor(current), wallet = walletKey(current, binding.address)
       loadPersistence()
-      const record = pending.get(wallet)?.txid === txid ? pending.get(wallet) : sent.get(`${wallet}:${txid}`)
+      const inPending = pending.get(wallet)?.txid === txid ? pending.get(wallet) : undefined
+      // Unreadable proofs are an error, not "no key": the key may well be on disk.
+      if (!inPending && !loadSent()) throw new MoneroError('The Monero payment-proof records could not be read')
+      const record = inPending ?? sent.get(`${wallet}:${txid}`)
       return record?.transactionKeys ? {txKey:record.transactionKeys.txKey, additionalTxKeys:[...record.transactionKeys.additionalTxKeys]} : null
     },
     /** Unresolved unknown-outcome sends on record, for every wallet. */
@@ -957,6 +998,8 @@ export function createMoneroVault({ engine, confirm, getConfig, sidecar = manage
         if (result === 'unchecked') throw new MoneroError('The node could not be asked about this transaction, so it was not discarded')
         if (!checks.get(wallet)?.discardable) throw new MoneroError("This transaction's inputs are spent in the node's pool by another transaction. Wait until that settles; it was not discarded")
         // Another node may still hold it: remember its inputs so the next send reuses one (both cannot land).
+        // Its keys must be archivable before anything is written: another node may still mine it.
+        if (record.transactionKeys && !loadSent()) throw new MoneroError(PROOF_NOT_SAVED)
         const keyImages = parseSignedTransaction(Uint8Array.from(Buffer.from(record.txHex, 'hex'))).inputs.map(input => input.keyImage)
         guards.set(wallet, { wallet, txid: record.txid, keyImages, ...(record.node ? { node: record.node } : {}), discardedAt: new Date().toISOString() })
         try { persistGuards() }
