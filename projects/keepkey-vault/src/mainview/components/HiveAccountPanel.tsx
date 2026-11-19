@@ -139,6 +139,7 @@ export function HiveAccountPanel({ activeKey, color, loading, deriveError, onRet
 					{ label: "PeakD", url: `https://peakd.com/@${account.name}` },
 					{ label: "Hive.blog", url: `https://hive.blog/@${account.name}` },
 					{ label: "Ecency", url: `https://ecency.com/@${account.name}` },
+					{ label: "Skatehive", url: `https://skatehive.app/user/${account.name}` },
 				].map(l => (
 					<Button key={l.label} size="xs" variant="outline" gap="1.5" px="2.5" fontWeight="500"
 						aria-label={`Open ${l.label} profile`}
