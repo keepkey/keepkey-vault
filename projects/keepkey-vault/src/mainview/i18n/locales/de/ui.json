@@ -177,5 +177,6 @@
   "m2c78dc79": "Die signierten Monero-Ausgänge stimmen nicht mit dem bestätigten Empfänger, Betrag und Wechselgeld überein. Es wurde nichts gesendet.",
   "ma59e78f": "Verbinde die Monero-Überwachung erneut, um die Wechselgeldableitung bei Unteradressen zu autorisieren",
   "m1e4706cc": "Zuletzt bekannter Kontostand · {{time}}",
-  "mc72d771e": "Deine Monero-Wallet wird aktualisiert. Der zuletzt bekannte Kontostand wird angezeigt."
+  "mc72d771e": "Deine Monero-Wallet wird aktualisiert. Der zuletzt bekannte Kontostand wird angezeigt.",
+  "m1e6a213e": "Technische Details"
 }

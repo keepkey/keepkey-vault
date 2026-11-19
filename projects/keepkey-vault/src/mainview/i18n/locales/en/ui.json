@@ -865,7 +865,6 @@
   "m6d6a0d62": "Supports verified SafeL2 v1.4.1 and v1.5.0 contracts on Base. Use the Safe contract address. An owner’s personal address cannot be imported as a vault.",
   "m6d6fd929": "Browser-use guide",
   "m6d8713": "Read the connected signed device, or paste a compressed public key authored elsewhere.",
-  "m6d8cd466": "Hdwallet payload",
   "m6da63c17": "’s node just now — so we won’t pretend it’s empty. Let’s read your primary address straight from the device.",
   "m6dcaaab0": "Confirm on KeepKey",
   "m6dd12844": "Full rescan (~30 min)",
@@ -2378,5 +2377,6 @@
   "m2c78dc79": "The signed Monero outputs do not match the approved recipient, amount and change. Nothing was sent.",
   "ma59e78f": "Reconnect Monero monitoring to authorize subaddress change derivation",
   "m1e4706cc": "Last known balance · {{time}}",
-  "mc72d771e": "Updating your Monero wallet. Showing the last known balance."
+  "mc72d771e": "Updating your Monero wallet. Showing the last known balance.",
+  "m1e6a213e": "Technical details"
 }

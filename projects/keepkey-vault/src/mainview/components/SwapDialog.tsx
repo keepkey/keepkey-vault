@@ -4380,7 +4380,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                         {previewBuild?.unsignedTx && (
                           <Box>
                             <Text fontSize="10px" color="kk.textMuted" mb="1">
-                              {previewBuild.approveTx ? uiText("Swap tx (sent after approval)") : uiText("Hdwallet payload")}
+                              {previewBuild.approveTx ? uiText("Swap tx (sent after approval)") : uiText("Technical details")}
                             </Text>
                             <Box bg="rgba(0,0,0,0.5)" borderRadius="sm" p="2" maxH="240px" overflow="auto" border="1px solid" borderColor="kk.border">
                               <Text fontSize="10px" fontFamily="mono" color="kk.textSecondary" whiteSpace="pre-wrap" wordBreak="break-all">

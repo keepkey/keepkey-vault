@@ -181,5 +181,6 @@
   "m2c78dc79": "Les sorties Monero signées ne correspondent pas au destinataire, au montant et à la monnaie approuvés. Rien n’a été envoyé.",
   "ma59e78f": "Reconnectez le suivi Monero pour autoriser la dérivation de la monnaie avec les sous-adresses",
   "m1e4706cc": "Dernier solde connu · {{time}}",
-  "mc72d771e": "Mise à jour de votre portefeuille Monero. Le dernier solde connu est affiché."
+  "mc72d771e": "Mise à jour de votre portefeuille Monero. Le dernier solde connu est affiché.",
+  "m1e6a213e": "Détails techniques"
 }

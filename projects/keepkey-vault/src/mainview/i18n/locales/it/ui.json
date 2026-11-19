@@ -186,5 +186,6 @@
   "m2c78dc79": "Gli output Monero firmati non corrispondono al destinatario, all’importo e al resto approvati. Non è stato inviato nulla.",
   "ma59e78f": "Riconnetti il monitoraggio Monero per autorizzare la derivazione del resto nelle transazioni con sottoindirizzi",
   "m1e4706cc": "Ultimo saldo noto · {{time}}",
-  "mc72d771e": "Aggiornamento del portafoglio Monero. È mostrato l’ultimo saldo noto."
+  "mc72d771e": "Aggiornamento del portafoglio Monero. È mostrato l’ultimo saldo noto.",
+  "m1e6a213e": "Dettagli tecnici"
 }
