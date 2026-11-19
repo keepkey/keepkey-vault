@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import { CHAINS } from '../src/shared/chains'
 import { eip681ValueToAmount, parseSendQr } from '../src/shared/send-qr'
+import { receivePaymentUri } from '../src/shared/receive-payment-uri'
 
 const chain = (id: string) => CHAINS.find(c => c.id === id)!
 const ethereum = chain('ethereum'), bitcoin = chain('bitcoin'), xrp = chain('ripple'), cosmos = chain('cosmos')
@@ -92,5 +93,34 @@ describe('memo and XRP destination tag meaning', () => {
   })
   test('unsupported memos cannot become hidden payment data or disappear silently', () => {
     expect(parseSendQr(`bitcoin:${btc}?memo=on-chain-data`, bitcoin)).toBeNull()
+  })
+})
+
+describe('TON deep links', () => {
+  const ton = chain('ton')
+  const uq = 'UQBvW8Z5huBkMJYdnfAEM5JqTNkuWX3diqYENkWsIL0XglxD'
+  const eq = 'EQBvW8Z5huBkMJYdnfAEM5JqTNkuWX3diqYENkWsIL0XggGG'
+  test("Vault's own TON receive QR (ton://transfer/<address>) scans into Send", () => {
+    expect(parseSendQr(`ton://transfer/${uq}`, ton)).toEqual({ recipient: uq, memo: '' })
+    expect(parseSendQr(`ton://transfer/${eq}`, ton)).toEqual({ recipient: eq, memo: '' })
+  })
+  test('the receive QR round-trips through the Send scanner', () => {
+    for (const address of [uq, eq]) expect(parseSendQr(receivePaymentUri(ton, address), ton)?.recipient).toBe(address)
+  })
+  test('amount is in nanotons, never whole TON', () => {
+    expect(parseSendQr(`ton://transfer/${uq}?amount=1000000000`, ton)?.amount).toBe('1')
+    expect(parseSendQr(`ton://transfer/${uq}?amount=1500000`, ton)?.amount).toBe('0.0015')
+    expect(parseSendQr(`ton:${uq}?amount=1000000000`, ton)?.amount).toBe('1')
+  })
+  test.each([
+    `ton://transfer/${uq}?amount=1.5`, `ton://transfer/${uq}?amount=-1`, `ton://transfer/${uq}?amount=1e9`,
+    `ton://transfer/${uq}?text=deposit-42`, `ton://transfer/${uq}?text=&text=deposit-42`,
+    `ton://transfer/${uq}?bin=te6cc`, `ton://transfer/${uq}?init=te6cc`,
+    `ton://transfer/${uq}?jetton=EQAbc`, `ton://transfer/${uq}/extra`, `ton://stake/${uq}`, `ton://transfer/`,
+  ])('%s fails as a whole', data => {
+    expect(parseSendQr(data, ton)).toBeNull()
+  })
+  test('an empty comment is no comment', () => {
+    expect(parseSendQr(`ton://transfer/${uq}?text=`, ton)).toEqual({ recipient: uq, memo: '' })
   })
 })

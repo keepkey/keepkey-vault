@@ -37,7 +37,7 @@ const cases = [
   { name: 'cosmos', chain: 'cosmos', address: 'cosmos1syntheticownwalletaddress' },
   { name: 'thorchain', chain: 'thorchain', address: 'thor1syntheticownwalletaddress' },
   { name: 'hive', chain: 'hive', address: 'STMsyntheticpublickey' },
-  { name: 'ton', chain: 'ton', address: 'UQBvW8Z5huBkMJYdnfAEM5JqTNkuWX3diqYENkWsIL0XggGG' },
+  { name: 'ton', chain: 'ton', address: 'UQBvW8Z5huBkMJYdnfAEM5JqTNkuWX3diqYENkWsIL0XglxD' },
   { name: 'tron', chain: 'tron', address: 'TJRabPrwbZy45sbavfcjinPJC18kjpRTv8' },
 ]
 const result: Record<string, unknown> = {}
