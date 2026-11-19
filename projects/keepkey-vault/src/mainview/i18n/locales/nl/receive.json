@@ -14,6 +14,7 @@
 	"deriveAddress": "Adres afleiden",
 	"account": "Account {{index}}",
 	"btcAccountType": {
-		"learnMore": "Meer informatie"
+		"learnMore": "Meer informatie",
+		"recommendation": "Twijfel je? Gebruik Native SegWit (bc1…) — het heeft de laagste kosten en wordt ondersteund door elke moderne wallet en exchange."
 	}
 }

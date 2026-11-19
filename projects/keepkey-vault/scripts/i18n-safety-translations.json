@@ -19,7 +19,8 @@
     "setup:firmware.installWipe.unknownAck",
     "setup:firmware.installWipe.lockAck",
     "common:incomingTx.activityOnChain",
-    "setup:security.dice.can"
+    "setup:security.dice.can",
+    "receive:btcAccountType.recommendation"
   ],
   "en": [
     "Language",
@@ -41,7 +42,8 @@
     "I understand this may wipe my device and I have my recovery phrase backed up",
     "I understand my wallet will be locked and I have my recovery phrase backed up",
     "{{chain}} · balance refreshed",
-    "You enter {{rollCount}} rolls with the device button — they never touch this computer."
+    "You enter {{rollCount}} rolls with the device button — they never touch this computer.",
+    "Not sure? Use Native SegWit (bc1…) — it has the lowest fees and is supported by every modern wallet and exchange."
   ],
   "es": [
     "Idioma",
@@ -63,7 +65,8 @@
     "Entiendo que esto podría borrar mi dispositivo y tengo una copia de seguridad de mi frase de recuperación",
     "Entiendo que mi cartera se bloqueará y tengo una copia de seguridad de mi frase de recuperación",
     "{{chain}} · saldo actualizado",
-    "Introduces {{rollCount}} tiradas con el botón del dispositivo; nunca pasan por este ordenador."
+    "Introduces {{rollCount}} tiradas con el botón del dispositivo; nunca pasan por este ordenador.",
+    "¿No estás seguro? Usa Native SegWit (bc1…): tiene las comisiones más bajas y lo admiten todas las billeteras y exchanges modernos."
   ],
   "pt": [
     "Idioma",
@@ -85,7 +88,8 @@
     "Entendo que isso pode apagar meu dispositivo e tenho uma cópia de segurança da minha frase de recuperação",
     "Entendo que minha carteira será bloqueada e tenho uma cópia de segurança da minha frase de recuperação",
     "{{chain}} · saldo atualizado",
-    "Você insere {{rollCount}} lançamentos com o botão do dispositivo; eles nunca passam por este computador."
+    "Você insere {{rollCount}} lançamentos com o botão do dispositivo; eles nunca passam por este computador.",
+    "Na dúvida? Use Native SegWit (bc1…) — tem as menores taxas e é aceito por todas as carteiras e corretoras modernas."
   ],
   "fr": [
     "Langue",
@@ -107,7 +111,8 @@
     "Je comprends que cela pourrait effacer mon appareil et j’ai sauvegardé ma phrase de récupération",
     "Je comprends que mon portefeuille sera verrouillé et j’ai sauvegardé ma phrase de récupération",
     "{{chain}} · solde actualisé",
-    "Vous saisissez {{rollCount}} lancers avec le bouton de l’appareil ; ils ne passent jamais par cet ordinateur."
+    "Vous saisissez {{rollCount}} lancers avec le bouton de l’appareil ; ils ne passent jamais par cet ordinateur.",
+    "Vous hésitez ? Utilisez Native SegWit (bc1…) : les frais sont les plus bas et il est pris en charge par tous les portefeuilles et plateformes d'échange modernes."
   ],
   "de": [
     "Sprache",
@@ -129,7 +134,8 @@
     "Ich verstehe, dass mein Gerät gelöscht werden könnte, und habe meine Wiederherstellungsphrase gesichert",
     "Ich verstehe, dass mein Wallet gesperrt wird, und habe meine Wiederherstellungsphrase gesichert",
     "{{chain}} · Guthaben aktualisiert",
-    "Du gibst {{rollCount}} Würfe mit der Gerätetaste ein. Sie gelangen niemals auf diesen Computer."
+    "Du gibst {{rollCount}} Würfe mit der Gerätetaste ein. Sie gelangen niemals auf diesen Computer.",
+    "Unsicher? Verwenden Sie Native SegWit (bc1…) – es hat die niedrigsten Gebühren und wird von jeder modernen Wallet und Börse unterstützt."
   ],
   "it": [
     "Lingua",
@@ -151,7 +157,8 @@
     "Comprendo che questo potrebbe cancellare il dispositivo e ho salvato la frase di recupero",
     "Comprendo che il portafoglio verrà bloccato e ho salvato la frase di recupero",
     "{{chain}} · saldo aggiornato",
-    "Inserisci {{rollCount}} lanci con il pulsante del dispositivo: non passano mai da questo computer."
+    "Inserisci {{rollCount}} lanci con il pulsante del dispositivo: non passano mai da questo computer.",
+    "Non sei sicuro? Usa Native SegWit (bc1…): ha le commissioni più basse ed è supportato da tutti i wallet e gli exchange moderni."
   ],
   "nl": [
     "Taal",
@@ -173,7 +180,8 @@
     "Ik begrijp dat mijn apparaat kan worden gewist en ik heb een back-up van mijn herstelzin",
     "Ik begrijp dat mijn wallet wordt vergrendeld en ik heb een back-up van mijn herstelzin",
     "{{chain}} · saldo bijgewerkt",
-    "Je voert {{rollCount}} worpen in met de knop op het apparaat; ze komen nooit op deze computer terecht."
+    "Je voert {{rollCount}} worpen in met de knop op het apparaat; ze komen nooit op deze computer terecht.",
+    "Twijfel je? Gebruik Native SegWit (bc1…) — het heeft de laagste kosten en wordt ondersteund door elke moderne wallet en exchange."
   ],
   "pl": [
     "Język",
@@ -195,7 +203,8 @@
     "Rozumiem, że urządzenie może zostać wymazane, i mam kopię zapasową frazy odzyskiwania",
     "Rozumiem, że portfel zostanie zablokowany, i mam kopię zapasową frazy odzyskiwania",
     "{{chain}} · saldo odświeżone",
-    "Wprowadzasz wyniki {{rollCount}} rzutów przyciskiem urządzenia; nigdy nie trafiają na ten komputer."
+    "Wprowadzasz wyniki {{rollCount}} rzutów przyciskiem urządzenia; nigdy nie trafiają na ten komputer.",
+    "Nie masz pewności? Użyj Native SegWit (bc1…) — ma najniższe opłaty i obsługuje go każdy nowoczesny portfel i giełda."
   ],
   "ru": [
     "Язык",
@@ -217,7 +226,8 @@
     "Я понимаю, что данные устройства могут быть стёрты, и сохранил резервную копию фразы восстановления",
     "Я понимаю, что кошелёк будет заблокирован, и сохранил резервную копию фразы восстановления",
     "{{chain}} · баланс обновлён",
-    "Вы вводите результаты {{rollCount}} бросков кнопкой устройства — на этот компьютер они не попадают."
+    "Вы вводите результаты {{rollCount}} бросков кнопкой устройства — на этот компьютер они не попадают.",
+    "Не уверены? Используйте Native SegWit (bc1…) — у него самые низкие комиссии, и его поддерживают все современные кошельки и биржи."
   ],
   "ja": [
     "言語",
@@ -239,7 +249,8 @@
     "デバイスのデータが消去される可能性を理解し、リカバリーフレーズをバックアップしました",
     "ウォレットがロックされることを理解し、リカバリーフレーズをバックアップしました",
     "{{chain}} · 残高を更新しました",
-    "{{rollCount}}回の出目をデバイスのボタンで入力します。このコンピューターには一切渡りません。"
+    "{{rollCount}}回の出目をデバイスのボタンで入力します。このコンピューターには一切渡りません。",
+    "迷ったら Native SegWit（bc1…）を使ってください。手数料が最も低く、最新のウォレットや取引所すべてで対応しています。"
   ],
   "zh": [
     "语言",
@@ -261,7 +272,8 @@
     "我理解这可能擦除设备数据，并已备份恢复短语",
     "我理解钱包将被锁定，并已备份恢复短语",
     "{{chain}} · 余额已刷新",
-    "您使用设备按钮输入{{rollCount}}次掷骰结果，这些结果不会传到此计算机。"
+    "您使用设备按钮输入{{rollCount}}次掷骰结果，这些结果不会传到此计算机。",
+    "不确定？请使用 Native SegWit（bc1…）——手续费最低，且所有现代钱包和交易所都支持。"
   ],
   "ko": [
     "언어",
@@ -283,7 +295,8 @@
     "기기 데이터가 삭제될 수 있음을 이해하며 복구 구문을 백업했습니다",
     "지갑이 잠김을 이해하며 복구 구문을 백업했습니다",
     "{{chain}} · 잔액 새로고침 완료",
-    "기기 버튼으로 주사위 결과 {{rollCount}}개를 입력합니다. 이 컴퓨터에는 전혀 전달되지 않습니다."
+    "기기 버튼으로 주사위 결과 {{rollCount}}개를 입력합니다. 이 컴퓨터에는 전혀 전달되지 않습니다.",
+    "잘 모르겠다면 Native SegWit(bc1…)을 사용하세요. 수수료가 가장 낮고 모든 최신 지갑과 거래소에서 지원합니다."
   ],
   "th": [
     "ภาษา",
@@ -305,7 +318,8 @@
     "ฉันเข้าใจว่าข้อมูลอุปกรณ์อาจถูกล้าง และได้สำรองวลีกู้คืนแล้ว",
     "ฉันเข้าใจว่ากระเป๋าเงินจะถูกล็อก และได้สำรองวลีกู้คืนแล้ว",
     "{{chain}} · อัปเดตยอดคงเหลือแล้ว",
-    "คุณป้อนผลการทอย {{rollCount}} ครั้งด้วยปุ่มบนอุปกรณ์ ผลเหล่านี้จะไม่ผ่านคอมพิวเตอร์นี้เลย"
+    "คุณป้อนผลการทอย {{rollCount}} ครั้งด้วยปุ่มบนอุปกรณ์ ผลเหล่านี้จะไม่ผ่านคอมพิวเตอร์นี้เลย",
+    "ไม่แน่ใจใช่ไหม? ใช้ Native SegWit (bc1…) — ค่าธรรมเนียมต่ำที่สุดและรองรับโดยกระเป๋าและกระดานเทรดสมัยใหม่ทั้งหมด"
   ],
   "tr": [
     "Dil",
@@ -327,7 +341,8 @@
     "Bu işlemin cihazımı silebileceğini anlıyorum ve kurtarma ifademi yedekledim",
     "Cüzdanımın kilitleneceğini anlıyorum ve kurtarma ifademi yedekledim",
     "{{chain}} · bakiye yenilendi",
-    "{{rollCount}} atış sonucunu cihazın düğmesiyle girersiniz; bu sonuçlar bu bilgisayara asla ulaşmaz."
+    "{{rollCount}} atış sonucunu cihazın düğmesiyle girersiniz; bu sonuçlar bu bilgisayara asla ulaşmaz.",
+    "Emin değil misiniz? Native SegWit (bc1…) kullanın — en düşük ücretlere sahiptir ve tüm modern cüzdanlar ve borsalar tarafından desteklenir."
   ],
   "vi": [
     "Ngôn ngữ",
@@ -349,6 +364,7 @@
     "Tôi hiểu rằng thao tác này có thể xóa thiết bị và tôi đã sao lưu cụm từ khôi phục",
     "Tôi hiểu rằng ví sẽ bị khóa và tôi đã sao lưu cụm từ khôi phục",
     "{{chain}} · đã cập nhật số dư",
-    "Bạn nhập kết quả {{rollCount}} lần gieo bằng nút trên thiết bị; chúng không bao giờ được chuyển đến máy tính này."
+    "Bạn nhập kết quả {{rollCount}} lần gieo bằng nút trên thiết bị; chúng không bao giờ được chuyển đến máy tính này.",
+    "Không chắc? Hãy dùng Native SegWit (bc1…) — phí thấp nhất và được mọi ví và sàn giao dịch hiện đại hỗ trợ."
   ]
 }

@@ -14,6 +14,7 @@
 	"deriveAddress": "Deriva indirizzo",
 	"account": "Account {{index}}",
 	"btcAccountType": {
-		"learnMore": "Scopri di più"
+		"learnMore": "Scopri di più",
+		"recommendation": "Non sei sicuro? Usa Native SegWit (bc1…): ha le commissioni più basse ed è supportato da tutti i wallet e gli exchange moderni."
 	}
 }

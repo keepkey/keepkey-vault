@@ -17,14 +17,14 @@ export function BitcoinQrDialog({ bytes, title, onClose }: { bytes: Uint8Array; 
   const [copied, setCopied] = useState(false)
   const encoded = useMemo(() => {
     try { return { frames: bitcoinQrFrames(bytes, format, fragmentSize), error: '' } }
-    catch (e: any) { return { frames: [] as string[], error: e?.message || 'Could not encode QR' } }
-  }, [bytes, format, fragmentSize])
+    catch (e: any) { return { frames: [] as string[], error: e?.message ? uiText(e.message) : uiText("Could not encode QR") } }
+  }, [bytes, format, fragmentSize, uiText])
   const frames = encoded.frames
   const frame = frames[index % Math.max(frames.length, 1)]
   const rendered = useMemo(() => {
     try { return { svg: frame ? generateQRSvg(frame) : '', error: '' } }
-    catch { return { svg: '', error: 'Too much data for one QR. Choose animated UR or BBQr.' } }
-  }, [frame])
+    catch { return { svg: '', error: uiText("Too much data for one QR. Choose animated UR or BBQr.") } }
+  }, [frame, uiText])
   useEffect(() => { setIndex(0); setCopied(false) }, [format, fragmentSize, bytes])
   useEffect(() => {
     if (paused || frames.length <= 1) return
@@ -44,7 +44,7 @@ export function BitcoinQrDialog({ bytes, title, onClose }: { bytes: Uint8Array; 
       </Flex>
       {(encoded.error || rendered.error) && <Text color="red.300" maxW="90%" textAlign="center" role="alert">{encoded.error || rendered.error}</Text>}
       {rendered.svg && <Box bg="white" flexShrink={0} w="min(68vh, 85vw, 640px)" aspectRatio={1} css={{ '& svg': { width: '100%', height: '100%', display: 'block' } }} dangerouslySetInnerHTML={{ __html: rendered.svg }} />}
-      <Text color="gray.300" fontSize="sm" textAlign="center" maxW="90%">{frames.length > 1 ? `Frame ${index % frames.length + 1} of ${frames.length} · Keep scanning until complete` : uiText("Single QR code")}</Text>
+      <Text color="gray.300" fontSize="sm" textAlign="center" maxW="90%">{frames.length > 1 ? uiText("Frame {{current}} of {{total}} · Keep scanning until complete", { current: index % frames.length + 1, total: frames.length }) : uiText("Single QR code")}</Text>
       <Text color="gray.400" fontSize="xs" textAlign="center" maxW="90%">{format === 'electrum' ? uiText("Electrum uses a static Base43 QR. Large transactions need animated UR or BBQr.") : uiText("Scan with the receiving wallet. QR transfer works without a network connection.")}{" "}{uiText("Public wallet metadata reveals account activity to its recipient.")}</Text>
       {format !== 'electrum' && <Flex gap="2" wrap="wrap" justify="center">
         <label style={{ color: '#ccc', fontSize: 12 }}>{uiText("Density")}{" "}<select aria-label={uiText("QR density")} value={fragmentSize} onChange={e => setFragmentSize(Number(e.target.value))} style={{ color: '#111', marginLeft: 6 }}>

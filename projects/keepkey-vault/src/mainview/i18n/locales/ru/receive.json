@@ -14,6 +14,7 @@
 	"deriveAddress": "Получить адрес",
 	"account": "Аккаунт {{index}}",
 	"btcAccountType": {
-		"learnMore": "Подробнее"
+		"learnMore": "Подробнее",
+		"recommendation": "Не уверены? Используйте Native SegWit (bc1…) — у него самые низкие комиссии, и его поддерживают все современные кошельки и биржи."
 	}
 }

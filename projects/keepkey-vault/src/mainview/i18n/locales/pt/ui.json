@@ -927,7 +927,7 @@
   "m69cad1e7": "O suporte blindado da KeepKey foi lançado no bloco",
   "m69cc7ddc": ". Tente outro ativo de destino.",
   "m69f6b7ed": "· auditoria",
-  "m6a14f704": "Quadro copiado",
+  "m6a14f704": "Parte copiada",
   "m6a5638eb": "Este é o endereço principal desta carteira. Para mover XMR dentro desta carteira, envie para um dos subendereços dela (aba Receber).",
   "m6a5a2125": "Escanear um caminho personalizado",
   "m6a8d30d": "Blockchain podada",
@@ -2406,5 +2406,14 @@
   "m382d99ae": "Confirmada",
   "m72c680c9": "Clique para copiar",
   "mf52ced61": "Explorador de blocos",
-  "m1e6a213e": "Detalhes técnicos"
+  "m1e6a213e": "Detalhes técnicos",
+  "m6d8cd466": "Payload hdwallet",
+  "m3a2e4e15": "UQ (Seguro)",
+  "m599d569a": "EQ (Bounceable)",
+  "mded2a2aa": "Não foi possível codificar o QR",
+  "me39213fb": "Dados demais para um único QR. Escolha UR ou BBQr animado.",
+  "m4862881e": "Parte {{current}} de {{total}} · Continue escaneando até concluir",
+  "m65451a82": "O QR de transação do Electrum exige uma PSBT ou uma transação",
+  "m1643fcfa": "Grande demais para um QR estático do Electrum; escolha UR ou BBQr animado",
+  "m9a5ef61b": "Partes BBQr demais"
 }

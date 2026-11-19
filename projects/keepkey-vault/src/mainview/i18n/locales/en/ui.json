@@ -2491,5 +2491,14 @@
   "m382d99ae": "Confirmed",
   "m72c680c9": "Click to copy",
   "mf52ced61": "Block explorer",
-  "m1e6a213e": "Technical details"
+  "m1e6a213e": "Technical details",
+  "m6d8cd466": "Hdwallet payload",
+  "m3a2e4e15": "UQ (Safe)",
+  "m599d569a": "EQ (Bounceable)",
+  "mded2a2aa": "Could not encode QR",
+  "me39213fb": "Too much data for one QR. Choose animated UR or BBQr.",
+  "m4862881e": "Frame {{current}} of {{total}} · Keep scanning until complete",
+  "m65451a82": "Electrum transaction QR requires a PSBT or transaction",
+  "m1643fcfa": "Too large for an Electrum static QR; choose animated UR or BBQr",
+  "m9a5ef61b": "Too many BBQr frames"
 }

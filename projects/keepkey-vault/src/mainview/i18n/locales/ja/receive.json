@@ -14,6 +14,7 @@
 	"deriveAddress": "アドレスを導出",
 	"account": "アカウント {{index}}",
 	"btcAccountType": {
-		"learnMore": "詳細を見る"
+		"learnMore": "詳細を見る",
+		"recommendation": "迷ったら Native SegWit（bc1…）を使ってください。手数料が最も低く、最新のウォレットや取引所すべてで対応しています。"
 	}
 }
