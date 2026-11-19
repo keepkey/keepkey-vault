@@ -59,6 +59,7 @@ import { VaultAccountSelector } from './VaultAccountSelector'
 import { VaultAssetAccount } from './VaultAssetAccount'
 import { VaultAssetPage } from './VaultAssetPage'
 import { useBtcMultisigEnabled } from "../hooks/useBtcMultisigEnabled"
+import { showWatchOnlyAddress } from "../../shared/watch-only-verify"
 
 type AssetView = "receive" | "send" | "privacy" | "psbt" | "multisig"
 
@@ -1629,15 +1630,12 @@ function PersonalAssetPage({ chain, balance, balanceLoading = false, onBack, fir
 							onTonBounceableChange={(v) => { setTonBounceable(v); deriveAddress(undefined, v) }}
 							watchOnly={watchOnly}
 							onShowOnDevice={watchOnly && isBtc && woDeviceMatch && woReceive && watchOnlyDeviceId
-								? async () => {
-									try {
-										await rpcRequest('btcWatchOnlyShowAddress', { deviceId: watchOnlyDeviceId, index: woReceive.path[4] }, 120000)
-									} catch (e: any) {
-										// A device that shows another address makes the host one suspect: hide it and say why.
-										setAddress(null)
-										setDeriveError(e?.message || 'Could not show the address on the KeepKey')
-									}
-								}
+								? () => showWatchOnlyAddress(
+									() => rpcRequest('btcWatchOnlyShowAddress', { deviceId: watchOnlyDeviceId, index: woReceive.path[4] }, 120000),
+									// A device that shows another address makes the host one suspect: hide it and say why.
+									// Cancel, timeout or a busy device reach ReceiveView, which says the address was not confirmed.
+									(message) => { setAddress(null); setDeriveError(message) },
+								)
 								: undefined}
 						/>}
 						</>

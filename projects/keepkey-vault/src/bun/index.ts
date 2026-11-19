@@ -2333,6 +2333,7 @@ async function applyRestApiState(when: 'startup' | 'settings') {
 // ── Wallet-session quote authorization and tracker data ──────────────
 import type { SwapQuote, SwapQuoteParams, ExecuteSwapParams, SwapResult, SwapSubStage, BuildTxParams, BuildTxResult } from '../shared/types'
 import { isThorchainBankToken, thorchainBankTokenFirmwareOK, THORCHAIN_BANK_TOKEN_MIN_FW } from '../shared/swap-support-matrix'
+import { watchOnlyAddressMismatchMessage } from '../shared/watch-only-verify'
 const swapQuoteLeases = createSwapQuoteLeases()
 
 // ── Emulator session (start, switch, build change) ───────────────────
@@ -5752,7 +5753,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				const shown = typeof res === 'string' ? res : (res as any)?.address
 				if (shown !== address) {
 					watchOnlyAddressMismatch.add(deviceId)
-					throw new Error(`The KeepKey showed ${shown}, not ${address}. Do not use this address.`)
+					throw new Error(watchOnlyAddressMismatchMessage(String(shown), address))
 				}
 				return { address }
 			},
