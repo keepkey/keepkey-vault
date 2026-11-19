@@ -30,6 +30,7 @@
 	"noMatches": "Ninguna dirección coincide con tu filtro",
 	"unlabeled": "Sin etiqueta",
 	"ownWallet": "Mi billetera",
+	"ownSymbol": "Mi {{symbol}}",
 	"edit": "Editar",
 	"delete": "Eliminar",
 	"view": "Ver",

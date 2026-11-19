@@ -4,6 +4,7 @@ import { useUiTranslation } from "../i18n/ui"
 import type { ReactNode } from "react"
 import { useState, useEffect, useCallback, useRef, useMemo, useId } from "react"
 import { useTranslation } from "react-i18next"
+import { addressBookLabel } from "../lib/addressbook-label"
 import { createPortal } from "react-dom"
 import { Box, Flex, Text, Button, Spinner } from "@chakra-ui/react"
 import { FaShieldAlt } from "react-icons/fa"
@@ -1053,7 +1054,7 @@ export function ZcashPrivacyTab({ initialPage, initialSection, embedded = false,
 										<Flex align="center" gap="2" mt="1.5" px="2" py="1" w="fit-content" bg="rgba(233,196,106,0.06)" border="1px solid rgba(233,196,106,0.22)" borderRadius="999px">
 											<AddressIdenticon seed={matchedContact.kind === "own" ? (matchedContact.deviceId || matchedContact.address) : matchedContact.address} size={16} />
 											<Text fontSize="11px" color="var(--gold)" fontWeight="600" truncate maxW="220px">
-												{matchedContact.label || (matchedContact.kind === "own" ? (matchedContact.deviceLabel || t("ownWallet", { ns: "addressbook" })) : t("unlabeled", { ns: "addressbook" }))}
+												{addressBookLabel(matchedContact, t) || (matchedContact.kind === "own" ? (matchedContact.deviceLabel || t("ownWallet", { ns: "addressbook" })) : t("unlabeled", { ns: "addressbook" }))}
 											</Text>
 											<ZcashKindBadge kind={zcashAddrKind(matchedContact.address)} />
 										</Flex>

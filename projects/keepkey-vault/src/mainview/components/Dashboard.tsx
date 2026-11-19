@@ -3181,14 +3181,14 @@ function PersonalDashboard({ capabilities, isEmulator, onLoaded, watchOnly, watc
 									borderRadius="999px"
 								>
 									{([
-										{ id: 'receive' as const, label: 'Receive', color: '#4ade80', bg: 'rgba(74,222,128,0.12)', icon: (
+										{ id: 'receive' as const, label: uiText('Receive'), color: '#4ade80', bg: 'rgba(74,222,128,0.12)', icon: (
 											<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#4ade80" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19" /><polyline points="5 12 12 19 19 12" /></svg>
 										) },
 										...(!watchOnly ? [
-											{ id: 'send' as const, label: 'Send', color: '#fb923c', bg: 'rgba(251,146,60,0.12)', icon: (
+											{ id: 'send' as const, label: uiText('Send'), color: '#fb923c', bg: 'rgba(251,146,60,0.12)', icon: (
 												<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fb923c" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="19" x2="12" y2="5" /><polyline points="5 12 12 5 19 12" /></svg>
 											) },
-											{ id: 'swap' as const, label: 'Swap', color: '#60a5fa', bg: 'rgba(96,165,250,0.12)', icon: (
+											{ id: 'swap' as const, label: uiText('Swap'), color: '#60a5fa', bg: 'rgba(96,165,250,0.12)', icon: (
 												<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#60a5fa" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><polyline points="17 1 21 5 17 9" /><path d="M3 11V9a4 4 0 0 1 4-4h14" /><polyline points="7 23 3 19 7 15" /><path d="M21 13v2a4 4 0 0 1-4 4H3" /></svg>
 											) },
 										] : []),

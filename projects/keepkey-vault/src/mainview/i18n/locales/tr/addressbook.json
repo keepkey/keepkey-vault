@@ -30,6 +30,7 @@
 	"noMatches": "Filtrenize uyan adres yok",
 	"unlabeled": "Etiketsiz",
 	"ownWallet": "Cüzdanım",
+	"ownSymbol": "{{symbol}} hesabım",
 	"edit": "Düzenle",
 	"delete": "Sil",
 	"view": "Görüntüle",

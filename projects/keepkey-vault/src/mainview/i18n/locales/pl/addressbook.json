@@ -30,6 +30,7 @@
 	"noMatches": "Żaden adres nie pasuje do filtra",
 	"unlabeled": "Bez etykiety",
 	"ownWallet": "Mój portfel",
+	"ownSymbol": "Mój {{symbol}}",
 	"edit": "Edytuj",
 	"delete": "Usuń",
 	"view": "Pokaż",

@@ -1,4 +1,5 @@
 import { useUiTranslation } from "../i18n/ui"
+import { addressBookLabel } from "../lib/addressbook-label"
 import { useState, useEffect, useCallback, useMemo, useRef, Fragment } from "react"
 import { useTranslation } from "react-i18next"
 import { Box, Flex, Text, VStack, Button, Input, Spinner } from "@chakra-ui/react"
@@ -807,7 +808,7 @@ export function SendForm({ chain, address, balance, balanceLoading = false, toke
 							<Flex align="center" gap="2" mt="1.5" px="2" py="1" w="fit-content" bg="rgba(233,196,106,0.06)" border="1px solid rgba(233,196,106,0.22)" borderRadius="999px">
 								<AddressIdenticon seed={matchedContact.kind === "own" ? (matchedContact.deviceId || matchedContact.address) : matchedContact.address} size={16} />
 								<Text fontSize="11px" color="kk.gold" fontWeight="600" truncate maxW="220px">
-									{matchedContact.label || (matchedContact.kind === "own" ? (matchedContact.deviceLabel || t("ownWallet", { ns: "addressbook" })) : t("unlabeled", { ns: "addressbook" }))}
+									{addressBookLabel(matchedContact, t) || (matchedContact.kind === "own" ? (matchedContact.deviceLabel || t("ownWallet", { ns: "addressbook" })) : t("unlabeled", { ns: "addressbook" }))}
 								</Text>
 								{matchedContact.vault && <Text fontSize="10px" color="kk.gold">{uiText("Vault ·")}{" "}{matchedContact.networkId} · {matchedContact.vault.threshold}{" "}{uiText("of")}{" "}{matchedContact.vault.cosigners.length}</Text>}
 							</Flex>

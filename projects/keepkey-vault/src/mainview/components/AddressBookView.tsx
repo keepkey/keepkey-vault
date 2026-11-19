@@ -1,5 +1,6 @@
 import { getNumberLocale } from "../lib/number-locale"
 import { useUiTranslation } from "../i18n/ui"
+import { addressBookLabel } from "../lib/addressbook-label"
 import { useState, useMemo, useCallback, useEffect } from "react"
 import type { ReactNode } from "react"
 import { Box, Flex, Text, Input, Button } from "@chakra-ui/react"
@@ -193,8 +194,8 @@ export function AddressBookView() {
     const q = search.trim().toLowerCase()
     return tabRows
       .filter(e => chainFilter === "all" || e.memberChainIds.includes(chainFilter))
-      .filter(e => !q || e.label?.toLowerCase().includes(q) || e.ensName?.toLowerCase().includes(q) || e.address.toLowerCase().includes(q))
-  }, [tabRows, chainFilter, search])
+      .filter(e => !q || addressBookLabel(e, t)?.toLowerCase().includes(q) || e.ensName?.toLowerCase().includes(q) || e.address.toLowerCase().includes(q))
+  }, [tabRows, chainFilter, search, t])
 
   const handleSave = useCallback((ids: string[], label: string) =>
     Promise.all(ids.map(id => saveLabel(id, label))).then(() => {}), [saveLabel])
@@ -400,7 +401,9 @@ function Row({ entry, connected, onSave, onRemove, onCosigner }: {
   const seed = isOwn ? (entry.deviceId || entry.address) : entry.address
   const [expanded, setExpanded] = useState(false)
   const [editing, setEditing] = useState(false)
-  const [draft, setDraft] = useState(entry.label || "")
+  // The default own label is stored in English ("My RUNE"); edit what is shown.
+  const shownLabel = addressBookLabel(entry, t) || ""
+  const [draft, setDraft] = useState(shownLabel)
   const [history, setHistory] = useState<AddressBookTx[] | null>(null)
 
   const toggle = useCallback(() => {
@@ -430,7 +433,7 @@ function Row({ entry, connected, onSave, onRemove, onCosigner }: {
         <Flex direction="column" minW="0" flex="1" gap="0.5">
           <Flex align="center" gap="1.5">
             <Text fontSize="13px" fontWeight="600" color="var(--text-0)" truncate>
-              {entry.label || t("unlabeled", { defaultValue: "Unlabeled" })}
+              {addressBookLabel(entry, t) || t("unlabeled", { defaultValue: "Unlabeled" })}
             </Text>
             {isVault && <VaultIdentityBadge vault={entry.vault!} />}
             {!isOwn && !isVault && (
@@ -479,16 +482,20 @@ function Row({ entry, connected, onSave, onRemove, onCosigner }: {
                 <Input value={draft} onChange={(e) => setDraft(e.target.value)} size="xs" flex="1"
                        bg="var(--ink-0)" border="1px solid var(--line)" color="var(--text-0)" maxLength={100}
                        placeholder={t("labelPlaceholder", { defaultValue: "Label" })} />
-                <Button {...actionToneProps("primary")} size="xs" onClick={async () => { await onSave(entry.memberIds, draft.trim()); setEditing(false) }}>
+                <Button {...actionToneProps("primary")} size="xs" onClick={async () => {
+                  // Unchanged: keep the stored default so it still follows the language.
+                  if (draft.trim() !== shownLabel) await onSave(entry.memberIds, draft.trim())
+                  setEditing(false)
+                }}>
                   {t("save", { ns: "common", defaultValue: "Save" })}
                 </Button>
-                <Button size="xs" variant="ghost" color="var(--text-2)" onClick={() => { setDraft(entry.label || ""); setEditing(false) }}>
+                <Button size="xs" variant="ghost" color="var(--text-2)" onClick={() => { setDraft(shownLabel); setEditing(false) }}>
                   {t("cancel", { ns: "common", defaultValue: "Cancel" })}
                 </Button>
               </>
             ) : (
               <>
-                <Button size="xs" variant="ghost" color="var(--text-2)" _hover={{ color: "var(--teal)" }} onClick={() => setEditing(true)}>
+                <Button size="xs" variant="ghost" color="var(--text-2)" _hover={{ color: "var(--teal)" }} onClick={() => { setDraft(shownLabel); setEditing(true) }}>
                   {t("edit", { defaultValue: "Edit" })}
                 </Button>
                 {onCosigner && chain?.chainFamily === "evm" && (
