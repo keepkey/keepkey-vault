@@ -37,6 +37,8 @@ const cases = [
   { name: 'cosmos', chain: 'cosmos', address: 'cosmos1syntheticownwalletaddress' },
   { name: 'thorchain', chain: 'thorchain', address: 'thor1syntheticownwalletaddress' },
   { name: 'hive', chain: 'hive', address: 'STMsyntheticpublickey' },
+  { name: 'ton', chain: 'ton', address: 'UQBvW8Z5huBkMJYdnfAEM5JqTNkuWX3diqYENkWsIL0XggGG' },
+  { name: 'tron', chain: 'tron', address: 'TJRabPrwbZy45sbavfcjinPJC18kjpRTv8' },
 ]
 const result: Record<string, unknown> = {}
 for (const value of [...cases, { name: 'evmMismatch', chain: 'ethereum', address: account, assetCaip: 'eip155:8453/slip44:60' }]) {

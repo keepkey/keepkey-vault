@@ -34,11 +34,16 @@ test('EVM native and token requests retain EIP-681 network and contract semantic
 })
 test('Solana keeps its existing scheme and unvetted networks stay raw without invented fields', () => {
   expect(result.solana.qr).toBe(`solana:${result.solana.address}`)
-  for (const name of ['ripple', 'cosmos', 'thorchain', 'hive']) {
+  for (const name of ['ripple', 'tron', 'cosmos', 'thorchain', 'hive']) {
     expect(result[name].qr).toBe(result[name].address)
     expect(result[name].copied).toBe(result[name].address)
   }
   expect(result.deviceCalls).toEqual([])
+})
+test('TON receive QR is a ton://transfer deep link while display and clipboard keep the address', () => {
+  expect(result.ton.qr).toBe(`ton://transfer/${result.ton.address}`)
+  expect(result.ton.displayed).toBe(result.ton.address)
+  expect(result.ton.copied).toBe(result.ton.address)
 })
 test('unrecognized chain identifiers stay raw and invalid EVM requests still fail closed', () => {
   const chain = { id: 'constructor', chainFamily: 'cosmos' as const, networkId: 'cosmos:custom', caip: 'cosmos:custom/slip44:118' }
