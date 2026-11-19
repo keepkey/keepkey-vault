@@ -44,33 +44,50 @@ const DEVICE_PATTERNS = [
 	/failed to (open|claim)|cannot (open|read|claim)/i,
 ]
 
+export type DeviceErrorKind = 'cancelled' | 'invalidAddress' | 'noAnswer' | 'deviceLost' | 'other'
+
+/** Which recovery a device failure needs. Shared by signing and address verification. */
+export function classifyDeviceError(e: unknown): DeviceErrorKind {
+	const raw = deviceErrorText(e)
+	if (CANCEL_PATTERNS.some(r => r.test(raw))) return 'cancelled'
+	if (ADDRESS_PATTERNS.some(r => r.test(raw))) return 'invalidAddress'
+	if (CLIENT_TIMEOUT.test(raw)) return 'noAnswer'
+	if (DEVICE_PATTERNS.some(r => r.test(raw))) return 'deviceLost'
+	return 'other'
+}
+
+export function deviceErrorText(e: unknown): string {
+	return ((e as any)?.message ?? String(e ?? '')).toString().trim()
+}
+
 /**
  * Turn a thrown signing error into a localized, actionable message.
  * Pass the component's `t` so the strings live in i18n (English defaults inline
  * until translated).
  */
 export function describeSigningError(e: unknown, t: Translate): string {
-	const raw = ((e as any)?.message ?? String(e ?? '')).toString().trim()
+	const raw = deviceErrorText(e)
+	const kind = classifyDeviceError(e)
 
-	if (CANCEL_PATTERNS.some(r => r.test(raw))) {
+	if (kind === 'cancelled') {
 		return t('signingCancelled', { defaultValue: 'Transaction cancelled on your KeepKey.' })
 	}
 
-	if (ADDRESS_PATTERNS.some(r => r.test(raw))) {
+	if (kind === 'invalidAddress') {
 		return t('signingInvalidAddress', {
 			ns: 'send',
 			defaultValue: 'Your KeepKey rejected the recipient address. Check the address and try again.',
 		})
 	}
 
-	if (CLIENT_TIMEOUT.test(raw)) {
+	if (kind === 'noAnswer') {
 		return t('signingNoAnswer', {
 			ns: 'send',
 			defaultValue: 'No answer from your KeepKey yet. Check its screen: confirm or cancel there, then try again.',
 		})
 	}
 
-	if (DEVICE_PATTERNS.some(r => r.test(raw))) {
+	if (kind === 'deviceLost') {
 		return t('signingDeviceLost', {
 			defaultValue:
 				'Your KeepKey stopped responding. Unplug it, plug it back in, then restart the app and try again — this is often needed right after a firmware update.',

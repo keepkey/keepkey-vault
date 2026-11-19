@@ -1,5 +1,6 @@
 import { useUiTranslation } from "../i18n/ui"
-import { useState, useCallback } from "react"
+import { useState, useCallback, useEffect, useRef } from "react"
+import { describeVerifyAddressError } from "../lib/verify-address-error"
 import { useTranslation } from "react-i18next"
 import { Box, Text, Flex } from "@chakra-ui/react"
 import { FaCopy, FaCheck, FaEye, FaSpinner, FaPlus, FaMinus } from "react-icons/fa"
@@ -167,26 +168,46 @@ export function ReceiveView({
 	const [pathDialogOpen, setPathDialogOpen] = useState(false)
 	const [newAddressCount, setNewAddressCount] = useState(0)
 
+	// A failed check must say so: an unconfirmed address that looks verified is the risk (audit v6 U3).
+	// The error belongs to the address it was for and is only shown while that address is.
+	const verifyKey = [address, currentPath?.join('/'), chain.id, scriptType, isTon, tonBounceable].join('|')
+	const verifyKeyRef = useRef(verifyKey)
+	verifyKeyRef.current = verifyKey
+	const [verifyError, setVerifyError] = useState<{ key: string; message: string } | null>(null)
+	const shownVerifyError = verifyError?.key === verifyKey ? verifyError.message : null
+	// Moving to another address drops the old failure (it is never shown against the new one, see
+	// shownVerifyError); so does a new derive, e.g. after reconnecting, which re-reads the address.
+	useEffect(() => { setVerifyError(null) }, [verifyKey])
+	useEffect(() => { if (loading) setVerifyError(null) }, [loading])
+
 	const showOnDevice = useCallback(async () => {
+		const key = verifyKeyRef.current
 		setShowing(true)
-		if (onShowOnDevice) {
-			await onShowOnDevice().catch((e: any) => console.error("showOnDevice:", e))
-			setShowing(false)
-			return
-		}
+		setVerifyError(null)
 		try {
-			const params: any = {
-				addressNList: currentPath,
-				showDisplay: true,
-				coin: chain.chainFamily === 'evm' ? 'Ethereum' : chain.coin,
+			if (onShowOnDevice) {
+				await onShowOnDevice()
+			} else {
+				const params: any = {
+					addressNList: currentPath,
+					showDisplay: true,
+					coin: chain.chainFamily === 'evm' ? 'Ethereum' : chain.coin,
+				}
+				const st = scriptType || chain.scriptType
+				if (st) params.scriptType = st
+				if (isTon) params.bounceable = tonBounceable
+				// The user compares the address on the device before confirming; give it the same
+				// time as the watch-only check rather than calling a slow read "no answer".
+				await rpcRequest(chain.rpcMethod, params, 120000)
 			}
-			const st = scriptType || chain.scriptType
-			if (st) params.scriptType = st
-			if (isTon) params.bounceable = tonBounceable
-			await rpcRequest(chain.rpcMethod, params, 60000)
-		} catch (e: any) { console.error("showOnDevice:", e) }
+		} catch (e) {
+			console.error("showOnDevice:", e)
+			// A reply for an address no longer shown is dropped.
+			if (verifyKeyRef.current === key) setVerifyError({ key, message: describeVerifyAddressError(e, t) })
+		}
+		// The device is free again either way.
 		setShowing(false)
-	}, [chain, currentPath, scriptType, isTon, tonBounceable, onShowOnDevice])
+	}, [chain, currentPath, scriptType, isTon, tonBounceable, onShowOnDevice, t])
 
 	const handlePathApply = useCallback((newPath: number[]) => {
 		setPathDialogOpen(false)
@@ -327,6 +348,11 @@ export function ReceiveView({
 						<Box as={showing ? FaSpinner : FaEye} fontSize="11px" style={showing ? { animation: "v3-spin 1s linear infinite" } : undefined} />
 						{showing ? t("checkDevice") : t("verifyOnDevice")}
 					</Box>
+					)}
+					{shownVerifyError && (
+						<Text role="alert" data-verify-error fontSize="11px" color="var(--rose)" maxW="240px" textAlign="center" lineHeight="1.45" letterSpacing="-0.005em">
+							{shownVerifyError}
+						</Text>
 					)}
 				</Flex>
 
