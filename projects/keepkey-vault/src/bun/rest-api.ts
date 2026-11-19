@@ -19,7 +19,7 @@ import { decodeEIP712 } from './eip712-decoder'
 import { addSeaportCreatorFee } from './seaport-creator-fee'
 import { addSeaportItemContracts } from './seaport-item-contracts'
 import { attachErc7730TypedDefinition, evmPriorityFee, evmQuantity, normalizeEvmChainId, recognizedTypedDataSpender, applyTypedDataSigningGate } from './evm-signing-preview'
-import { buildEvmReportForTx, buildTypedDataReport, evmSigningVerdict, prepareEvmTxSigningInfo, withoutErc7730Description } from './evm-presign-report'
+import { buildEvmReportForTx, buildTypedDataReport, evmSigningVerdict, prepareEvmTxSigningInfo, withoutErc7730Description, withoutErc7730TypedDescription } from './evm-presign-report'
 import { describeErc7730Call } from './erc7730-describe'
 import { signWithErc7730Fallback } from './erc7730-resolver'
 import { signTypedDataWithFeatures } from './typed-data-sign'
@@ -3220,22 +3220,35 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             const typedChainId = normalizeEvmChainId(body.typedData?.domain?.chainId)
             const chain = typedChainId ? evmChainLabel(typedChainId)?.name ?? `EVM chain ${typedChainId}` : 'Ethereum'
             let signedParams: any = params
-            const result = await emuWrap(
-              () => signWithErc7730Fallback(params, (p: any) => { signedParams = p; return signTypedDataWithFeatures(wallet, p) }, () => {
-                // The device refused the definition: it streams the document
-                // instead (7.15+ shows every value). Report and record that.
+            const result = await signWithErc7730Fallback(params, (p: any) => {
+              assertSession()
+              signedParams = p
+              return emuWrap(() => signTypedDataWithFeatures(wallet, p), { operation: 'ethSignTypedData', chain })
+            }, async () => {
+              if (body.typedData.primaryType === 'SafeTx') {
+                const again = withoutErc7730TypedDescription(activeSigningInfo!)
+                if (activeSigningId) callbacks!.onSigningDismissed?.(activeSigningId)
+                activeSigningId = again.id
+                activeSigningInfo = again
+                if (activeClearSignObservationId) refuseClearSignObservationDefinition(activeClearSignObservationId, again.clearSignReport?.protectionLevel)
+                const decision = await callbacks!.onSigningRequest(again, req.signal)
+                if (!decision.approved) {
+                  if (activeClearSignObservationId) finalizeClearSignObservation(activeClearSignObservationId, 'rejected', 'user-rejected')
+                  throw new HttpError(403, 'User declined signing without the ClearSign description')
+                }
+              } else {
                 if (activeSigningInfo) {
                   const { erc7730: _refused, erc7730Description: _shown, ...plain } = activeSigningInfo
                   activeSigningInfo = { ...plain, clearSignReport: buildTypedDataReport(plain) }
                 }
                 if (activeClearSignObservationId) refuseClearSignObservationDefinition(activeClearSignObservationId, activeSigningInfo?.clearSignReport?.protectionLevel)
-              }, '[REST] ethSignTypedData'),
-              { operation: 'ethSignTypedData', chain },
-            )
+              }
+            }, '[REST] ethSignTypedData')
             if (activeClearSignObservationId && signedParams.erc7730) authenticateClearSignObservation(activeClearSignObservationId, 'erc7730')
             if (activeClearSignObservationId) finalizeClearSignObservation(activeClearSignObservationId, 'signed')
             return json(result)
           } catch (err: any) {
+            if (err instanceof HttpError) throw err
             // Distinguish user cancellation from actual failures
             const msg = String(err?.message || err || '').toLowerCase()
             if (msg.includes('cancel') || msg.includes('rejected') || msg.includes('denied') || msg.includes('action cancelled')) {

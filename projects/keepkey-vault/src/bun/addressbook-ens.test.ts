@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import { createEnsAddressLookup, resolveEnsContact, repairLegacyEnsContacts } from './addressbook-ens'
 import { encodeAbiParameters, toHex } from 'viem'
 import { mainnet } from 'viem/chains'
-import { previewCertificationEntries, contactsFromEntries, buildCertificationRequest } from './addressbook-clearsign'
+import { previewCertificationEntries, contactsFromEntries, buildCertificationRequest, selectCertificationContacts } from './addressbook-clearsign'
 import type { AddressBookEntry } from '../shared/types'
 
 const address = '0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed'
@@ -74,6 +74,23 @@ describe('ENS address-book resolution', () => {
     expect(preview.excluded).toHaveLength(3)
     expect(preview.excluded[0].reason).toContain('ENS name has not resolved')
     expect(buildCertificationRequest(contactsFromEntries([valid]), 1).root).toHaveLength(32)
+  })
+
+  test('certifies the reviewed selection even when the saved book includes excluded contacts', () => {
+    const selected = { ...entry('selected', address), label: 'Alice' }
+    const omitted = { ...entry('omitted', '0x' + '11'.repeat(20)), label: 'Bob' }
+    const invalid = { ...entry('invalid', '0x' + '22'.repeat(20)), label: '100% excluded' }
+    const entries = [selected, omitted, invalid, entry('unresolved')]
+    const expected = buildCertificationRequest(contactsFromEntries([selected]), 1)
+    for (const allChains of [false, true]) {
+      const preview = previewCertificationEntries(entries, allChains)
+      expect(preview.excluded.map(c => c.label)).toEqual(['100% excluded', 'Old label'])
+      const reviewed = preview.contacts.filter(c => c.label === selected.label)
+      const contacts = selectCertificationContacts(entries, allChains, [...reviewed, ...preview.excluded])
+      expect(contacts.map(c => c.label)).toEqual(['Alice'])
+      expect(buildCertificationRequest(contacts, 1)).toEqual(expected)
+      expect(selectCertificationContacts(entries, allChains, [])).toEqual([])
+    }
   })
 
   test('native account names remain native while unresolved EVM names stay excluded', () => {

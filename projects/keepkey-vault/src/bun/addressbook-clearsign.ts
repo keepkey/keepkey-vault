@@ -88,35 +88,66 @@ function tree(contacts: CertifiedContact[]): Buffer[][] {
   return levels
 }
 
+function contactCandidate(entry: AddressBookEntry, allChains: boolean): entry is AddressBookEntry & { label: string } {
+  return entry.kind === 'external' && !!entry.label && (allChains || entry.networkId.startsWith('eip155:'))
+}
+
+function contactFromEntry(entry: AddressBookEntry & { label: string }): CertifiedContact {
+  const isEvm = entry.networkId.startsWith('eip155:')
+  return normalizeContact({
+    network: entry.networkId,
+    destinationType: isEvm ? CONTACT_DESTINATION.EVM_ADDRESS : CONTACT_DESTINATION.ADDRESS_TEXT,
+    destination: isEvm ? entry.address : Buffer.from(canonicalContactAddress(entry.networkId, entry.address), 'ascii').toString('hex'),
+    label: entry.label,
+  })
+}
+
+function compareContacts(a: CertifiedContact, b: CertifiedContact): number {
+  return a.network.localeCompare(b.network) || a.destinationType - b.destinationType
+    || a.destination.localeCompare(b.destination) || a.label.localeCompare(b.label)
+}
+
 export function contactsFromEntries(entries: AddressBookEntry[], enforceLimit = true, allChains = false): CertifiedContact[] {
   const contacts = entries
-    .filter(entry => entry.kind === 'external' && !!entry.label && (allChains || entry.networkId.startsWith('eip155:')))
-    .map(entry => normalizeContact({ network: entry.networkId,
-      destinationType: entry.networkId.startsWith('eip155:') ? CONTACT_DESTINATION.EVM_ADDRESS : CONTACT_DESTINATION.ADDRESS_TEXT,
-      destination: entry.networkId.startsWith('eip155:') ? entry.address : Buffer.from(canonicalContactAddress(entry.networkId, entry.address), 'ascii').toString('hex'), label: entry.label! }))
-    .sort((a, b) => a.network.localeCompare(b.network) || a.destinationType - b.destinationType || a.destination.localeCompare(b.destination) || a.label.localeCompare(b.label))
+    .filter((entry): entry is AddressBookEntry & { label: string } => contactCandidate(entry, allChains))
+    .map(contactFromEntry)
+    .sort(compareContacts)
   if (enforceLimit && contacts.length > ADDRESS_BOOK_CLEARSIGN_MAX_ENTRIES) {
     throw new Error(`Alpha firmware supports at most ${ADDRESS_BOOK_CLEARSIGN_MAX_ENTRIES} certified contacts`)
   }
   return contacts
 }
 
-/** An ineligible saved contact must not prevent reviewing the rest of the book. */
-export function previewCertificationEntries(entries: AddressBookEntry[], allChains = false): AddressBookCertificationPreview {
-  const eligible: AddressBookEntry[] = []
+function reviewCertificationEntries(entries: AddressBookEntry[], allChains: boolean) {
+  const contacts: CertifiedContact[] = []
   const excluded: AddressBookCertificationPreview['excluded'] = []
   for (const entry of entries) {
-    if (entry.kind !== 'external' || !entry.label || (!allChains && !entry.networkId.startsWith('eip155:'))) continue
+    if (!contactCandidate(entry, allChains)) continue
     try {
       if (entry.networkId.startsWith('eip155:') && isEnsName(entry.address)) throw new Error('ENS name has not resolved to an address')
-      contactsFromEntries([entry], false, allChains)
-      eligible.push(entry)
+      contacts.push(contactFromEntry(entry))
     } catch (error) {
       excluded.push({ label: entry.label, network: entry.networkId, address: entry.address,
         reason: error instanceof Error ? error.message : String(error) })
     }
   }
-  return { contacts: contactsFromEntries(eligible, false, allChains).map(c => ({ label: c.label, network: c.network, address: contactAddress(c) })), excluded }
+  return { contacts: contacts.sort(compareContacts), excluded }
+}
+
+export function previewCertificationEntries(entries: AddressBookEntry[], allChains = false): AddressBookCertificationPreview {
+  const { contacts, excluded } = reviewCertificationEntries(entries, allChains)
+  return { contacts: contacts.map(c => ({ label: c.label, network: c.network, address: contactAddress(c) })), excluded }
+}
+
+export function selectCertificationContacts(
+  entries: AddressBookEntry[],
+  allChains: boolean,
+  only?: { network: string; address: string }[],
+): CertifiedContact[] {
+  const { contacts } = reviewCertificationEntries(entries, allChains)
+  if (!only) return contacts
+  const selected = new Set(only.map(({ network, address }) => `${network}|${address}`))
+  return contacts.filter(c => selected.has(`${c.network}|${contactAddress(c)}`))
 }
 
 /** A TON friendly address contains presentation flags; the signed destination
