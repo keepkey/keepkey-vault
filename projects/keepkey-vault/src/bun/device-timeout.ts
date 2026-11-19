@@ -93,7 +93,7 @@ const PROMPTS = new Set<number>([
   T.MESSAGETYPE_CHARACTERREQUEST, T.MESSAGETYPE_WORDREQUEST,
 ])
 
-function frames(type: number, body: Uint8Array): Uint8Array[] {
+function frames(type: number, body: Uint8Array<ArrayBufferLike>): Uint8Array[] {
   const message = new Uint8Array(8 + body.length)
   const view = new DataView(message.buffer)
   view.setUint8(0, 0x23); view.setUint8(1, 0x23)
@@ -109,7 +109,7 @@ function frames(type: number, body: Uint8Array): Uint8Array[] {
   return out
 }
 
-async function send(delegate: RawDelegate, type: number, body = new Uint8Array()) {
+async function send(delegate: RawDelegate, type: number, body: Uint8Array<ArrayBufferLike> = new Uint8Array()) {
   for (const report of frames(type, body)) await delegate.writeChunk(report, false)
 }
 
