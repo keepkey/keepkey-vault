@@ -231,15 +231,15 @@ export function AppStore({ onOpenApp, onOpenKeepKey }: AppStoreProps) {
 
 				<Grid templateColumns={{ base: "1fr", sm: "repeat(auto-fill, minmax(260px, 1fr))" }} gap="4">
 					{APPS.map((app) => (
-						<Flex
+						<Box
 							key={app.id}
 							as="button"
-							type="button"
-							disabled={!app.enabled}
+							aria-disabled={!app.enabled}
 							className="electrobun-webkit-app-region-no-drag"
-							direction="column"
-							align="stretch"
-							justify="flex-start"
+							display="flex"
+							flexDirection="column"
+							alignItems="stretch"
+							justifyContent="flex-start"
 							h="100%"
 							minW="0"
 							textAlign="left"
@@ -311,7 +311,7 @@ export function AppStore({ onOpenApp, onOpenKeepKey }: AppStoreProps) {
 									<Text as="span">{app.internal ? t("internal", { defaultValue: "Open" }) : t("open", { defaultValue: "Open" })}</Text>
 								</Flex>
 							)}
-						</Flex>
+						</Box>
 					))}
 				</Grid>
 			</Box>
