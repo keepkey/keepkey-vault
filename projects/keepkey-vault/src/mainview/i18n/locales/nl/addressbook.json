@@ -30,6 +30,7 @@
 	"noMatches": "Geen adressen komen overeen met je filter",
 	"unlabeled": "Zonder label",
 	"ownWallet": "Mijn wallet",
+	"ownSymbol": "Mijn {{symbol}}",
 	"edit": "Bewerken",
 	"delete": "Verwijderen",
 	"view": "Bekijken",

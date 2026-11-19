@@ -30,6 +30,7 @@
 	"noMatches": "Keine Adressen entsprechen Ihrem Filter",
 	"unlabeled": "Ohne Bezeichnung",
 	"ownWallet": "Meine Wallet",
+	"ownSymbol": "Mein {{symbol}}",
 	"edit": "Bearbeiten",
 	"delete": "Löschen",
 	"view": "Anzeigen",

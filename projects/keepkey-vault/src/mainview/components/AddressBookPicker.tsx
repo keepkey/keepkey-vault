@@ -1,4 +1,5 @@
 import { useUiTranslation } from "../i18n/ui"
+import { addressBookLabel } from "../lib/addressbook-label"
 import { useState, useEffect, useMemo } from "react"
 import type { ReactNode } from "react"
 import { Box, Flex, Text, Input } from "@chakra-ui/react"
@@ -55,7 +56,7 @@ export function AddressBookPicker({ networkId, chainFamily, assetCaip, entryFilt
       // anything that isn't an extended key is a real send target.
       .filter(e => chainFamily !== "utxo" || e.kind === "external" || !/^[xyz]pub/i.test(e.address))
       .filter(e => !entryFilter || entryFilter(e))
-      .filter(e => !q || e.label?.toLowerCase().includes(q) || e.address.toLowerCase().includes(q))
+      .filter(e => !q || addressBookLabel(e, t)?.toLowerCase().includes(q) || e.address.toLowerCase().includes(q))
       // External contacts first: they are who you pay; own wallets follow.
       .sort((a, b) => Number(b.kind === "external") - Number(a.kind === "external"))
   }, [entries, networkId, assetCaip, chainFamily, entryFilter, search])
@@ -89,7 +90,7 @@ export function AddressBookPicker({ networkId, chainFamily, assetCaip, entryFilt
               <AddressIdenticon seed={e.kind === "own" ? (e.deviceId || e.address) : e.address} size={28} />
               <Flex direction="column" minW="0" flex="1">
                 <Flex align="center" gap="1.5">
-                  <Text fontSize="13px" color="var(--text-0)" truncate>{e.label || t("unlabeled", { defaultValue: "Unlabeled" })}</Text>
+                  <Text fontSize="13px" color="var(--text-0)" truncate>{addressBookLabel(e, t) || t("unlabeled", { defaultValue: "Unlabeled" })}</Text>
                   {e.vault ? <VaultIdentityBadge vault={e.vault} /> : e.kind === "own" ? (
                     <Text fontSize="9px" color="var(--teal)" bg="rgba(139,227,196,0.10)" px="1" borderRadius="sm" flexShrink={0}>
                       {e.deviceLabel || t("ownWallet", { defaultValue: "My wallet" })}

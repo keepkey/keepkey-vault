@@ -30,6 +30,7 @@
 	"noMatches": "没有符合筛选条件的地址",
 	"unlabeled": "无标签",
 	"ownWallet": "我的钱包",
+	"ownSymbol": "我的 {{symbol}}",
 	"edit": "编辑",
 	"delete": "删除",
 	"view": "查看",

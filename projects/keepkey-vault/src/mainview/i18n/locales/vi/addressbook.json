@@ -30,6 +30,7 @@
 	"noMatches": "Không có địa chỉ nào khớp với bộ lọc",
 	"unlabeled": "Chưa có nhãn",
 	"ownWallet": "Ví của tôi",
+	"ownSymbol": "{{symbol}} của tôi",
 	"edit": "Sửa",
 	"delete": "Xóa",
 	"view": "Xem",

@@ -1,5 +1,6 @@
 import { getNumberLocale } from "../lib/number-locale"
 import { useUiTranslation } from "../i18n/ui"
+import { addressBookLabel } from "../lib/addressbook-label"
 import { useState, useMemo, useCallback, useEffect } from "react"
 import type { ReactNode } from "react"
 import { Box, Flex, Text, Input, Button } from "@chakra-ui/react"
@@ -188,7 +189,7 @@ export function AddressBookView() {
     const q = search.trim().toLowerCase()
     return tabRows
       .filter(e => chainFilter === "all" || e.memberChainIds.includes(chainFilter))
-      .filter(e => !q || e.label?.toLowerCase().includes(q) || e.address.toLowerCase().includes(q))
+      .filter(e => !q || addressBookLabel(e, t)?.toLowerCase().includes(q) || e.address.toLowerCase().includes(q))
   }, [tabRows, chainFilter, search])
 
   const handleSave = useCallback((ids: string[], label: string) =>
@@ -421,7 +422,7 @@ function Row({ entry, connected, onSave, onRemove, onCosigner }: {
         <Flex direction="column" minW="0" flex="1" gap="0.5">
           <Flex align="center" gap="1.5">
             <Text fontSize="13px" fontWeight="600" color="var(--text-0)" truncate>
-              {entry.label || t("unlabeled", { defaultValue: "Unlabeled" })}
+              {addressBookLabel(entry, t) || t("unlabeled", { defaultValue: "Unlabeled" })}
             </Text>
             {isVault && <VaultIdentityBadge vault={entry.vault!} />}
             {!isOwn && !isVault && (
