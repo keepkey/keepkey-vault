@@ -1977,6 +1977,7 @@ function PersonalDashboard({ capabilities, isEmulator, onLoaded, watchOnly, watc
 					watchOnlyDeviceId={watchOnlyDeviceId}
 					onBack={() => setShowActivityPage(false)}
 					onResumeSwap={watchOnly ? undefined : (swap) => setActivityResumeSwap(swap)}
+					bitcoinOnly={btcOnly}
 				/>
 				<Suspense fallback={null}>
 					<LazySwapDialog

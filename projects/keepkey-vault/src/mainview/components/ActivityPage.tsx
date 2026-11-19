@@ -8,6 +8,7 @@ import { CHAINS } from "../../shared/chains"
 import { caipToIcon } from "../../shared/assetLookup"
 import type { RecentActivity, PendingSwap, ChainBalance, SwapStatusUpdate } from "../../shared/types"
 import { useRecentActivity } from "../hooks/useRecentActivity"
+import { scanOutcome, summarizeRescan, type RescanSummary } from "../lib/rescan-summary"
 import {
   ActivityRow, SwapRow, TxDetailDialog,
   recentFirst, nativePriceByChain,
@@ -21,6 +22,8 @@ interface ActivityPageProps {
   watchOnlyDeviceId?: string
   onBack?: () => void
   onResumeSwap?: (swap: PendingSwap) => void
+  /** Bitcoin-only firmware: the RPC boundary refuses every other chain, so Rescan all only asks for Bitcoin. */
+  bitcoinOnly?: boolean
 }
 
 const TYPE_COLORS: Record<string, string> = {
@@ -187,7 +190,7 @@ function ChainFilterDropdown({
   )
 }
 
-export function ActivityPage({ defaultChainId, onBack, onResumeSwap, watchOnly = false, watchOnlyDeviceId }: ActivityPageProps) {
+export function ActivityPage({ defaultChainId, onBack, onResumeSwap, watchOnly = false, watchOnlyDeviceId, bitcoinOnly = false }: ActivityPageProps) {
   const uiText = useUiTranslation()
 
   // Every activity row (no cap), kept live by the backend's 'activity-changed' push.
@@ -197,7 +200,7 @@ export function ActivityPage({ defaultChainId, onBack, onResumeSwap, watchOnly =
   const [historyChains, setHistoryChains] = useState<string[]>([])
   const loading = !loaded
   const [scanning, setScanning] = useState(false)
-  const [scanResult, setScanResult] = useState<string | null>(null)
+  const [scanResult, setScanResult] = useState<RescanSummary | null>(null)
   const [selectedDetail, setSelectedDetail] = useState<TxDetail | null>(null)
   const [showReports, setShowReports] = useState(false)
 
@@ -332,27 +335,22 @@ export function ActivityPage({ defaultChainId, onBack, onResumeSwap, watchOnly =
     setScanResult(null)
     try {
       // Monero history lives in its watch wallet (asset page), not Pioneer: never part of Rescan all.
-      const chainsToScan = chainFilter ? [chainFilter] : watchOnly ? historyChains : CHAINS.filter(c => c.chainFamily !== 'monero').map(c => c.id)
-      let failures = 0
-      let lastError = ''
-      let total = 0
+      // Bitcoin-only firmware refuses other chains at the RPC boundary. Otherwise the backend answers
+      // `skipped` for a chain it does not scan here (audit v6 U4).
+      const chainsToScan = chainFilter ? [chainFilter] : watchOnly ? historyChains
+        : CHAINS.filter(c => c.chainFamily !== 'monero' && (!bitcoinOnly || c.id === 'bitcoin')).map(c => c.id)
+      const outcomes = []
       for (const chainId of chainsToScan) {
-        try {
-          const result = await rpcRequest<{ count: number }>('scanChainHistory', { chainId, watchOnly, deviceId: watchOnlyDeviceId }, 60000)
-          total += result?.count || 0
-        } catch (e: any) { failures++; lastError = e?.message || 'Scan failed' }
+        outcomes.push(await scanOutcome(() => rpcRequest<{ count: number; skipped?: boolean }>('scanChainHistory', { chainId, watchOnly, deviceId: watchOnlyDeviceId }, 60000)))
       }
-      if (!chainsToScan.length) throw new Error('No saved addresses to scan')
-      if (failures === chainsToScan.length) throw new Error(lastError)
-      setScanResult(failures ? `${total} new · ${failures} chains failed` : total > 0 ? `+${total} tx${total > 1 ? 's' : ''}` : 'Up to date')
-      fetchActivities()
-    } catch (e: any) {
-      setScanResult(e.message || 'Failed')
+      const summary = summarizeRescan(outcomes, i18n.t, { many: !chainFilter })
+      setScanResult(summary)
+      if (summary.tone !== 'error') fetchActivities()
     } finally {
       scanningRef.current = false
       setScanning(false)
     }
-  }, [chainFilter, fetchActivities, watchOnly, watchOnlyDeviceId, historyChains])
+  }, [chainFilter, fetchActivities, watchOnly, watchOnlyDeviceId, historyChains, bitcoinOnly])
 
   useEffect(() => { setScanResult(null) }, [chainFilter])
 
@@ -478,12 +476,12 @@ export function ActivityPage({ defaultChainId, onBack, onResumeSwap, watchOnly =
         {/* Scan result message */}
         {scanResult && (
           <Flex mb="3" px="4" py="2" borderRadius="var(--r-sm)"
-            bg={scanResult.startsWith('+') ? 'rgba(139,227,196,0.08)' : 'rgba(255,255,255,0.04)'}
+            bg={scanResult.tone === 'new' ? 'rgba(139,227,196,0.08)' : 'rgba(255,255,255,0.04)'}
             border="1px solid"
-            borderColor={scanResult.startsWith('+') ? 'rgba(139,227,196,0.2)' : 'var(--line)'}
+            borderColor={scanResult.tone === 'new' ? 'rgba(139,227,196,0.2)' : 'var(--line)'}
             align="center" gap="2"
           >
-            <Text fontSize="11px" color={scanResult.startsWith('+') ? 'var(--teal)' : 'var(--text-2)'}>{scanResult}</Text>
+            <Text data-rescan-result={scanResult.tone} fontSize="11px" color={scanResult.tone === 'new' ? 'var(--teal)' : 'var(--text-2)'}>{scanResult.text}</Text>
           </Flex>
         )}
 

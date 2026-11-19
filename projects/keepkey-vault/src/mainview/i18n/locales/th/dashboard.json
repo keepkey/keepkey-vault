@@ -46,5 +46,15 @@
 	"syncStage_finalizing": "กำลังอัปเดตพอร์ตโฟลิโอ",
 	"syncProgressCounts": "{{completed}}/{{total}} · {{percent}}% · {{seconds}}วินาที",
 	"syncProgressElapsed": "ผ่านไป {{seconds}}วินาที",
-	"syncFailedChecks": "ตรวจสอบไม่ได้ {{failed}} รายการ"
+	"syncFailedChecks": "ตรวจสอบไม่ได้ {{failed}} รายการ",
+	"rescanNew_one": "+{{count}} ธุรกรรม",
+	"rescanNew_other": "+{{count}} ธุรกรรม",
+	"rescanUpToDate": "เป็นปัจจุบันแล้ว",
+	"rescanPartial_one": "ใหม่ {{newCount}} · ล้มเหลว {{count}} เครือข่าย",
+	"rescanPartial_other": "ใหม่ {{newCount}} · ล้มเหลว {{count}} เครือข่าย",
+	"rescanNoAddresses": "ไม่มีที่อยู่ที่บันทึกไว้ให้สแกน",
+	"rescanUnavailable": "ไม่มีประวัติสำหรับเครือข่ายนี้",
+	"rescanUnavailableAll": "ไม่มีประวัติให้สแกนในเครือข่ายเหล่านี้",
+	"rescanFailed": "สแกนไม่สำเร็จ",
+	"rescanFailedDetail": "สแกนไม่สำเร็จ: {{detail}}"
 }

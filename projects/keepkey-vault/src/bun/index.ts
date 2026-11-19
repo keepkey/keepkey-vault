@@ -280,6 +280,7 @@ import { createPioneerServerSwitch } from "./pioneer-server-switch"
 import { startEventStream, stopEventStream, type AddressEntry, type StreamEvent } from "./event-stream"
 import { pioneerSupportsDurableWalletMonitoring } from "../shared/pioneer-event-capabilities"
 import { rebuildActivityHistory, clearHistoryQueryCache } from "./activity-history"
+import { isHistoryScanChain } from "./history-scan-eligibility"
 import { watchOnlyPortfolioKeys, watchOnlyNativeBalances, watchOnlyNodeBalances, portfolioNativeMatch, confirmedPortfolioNativeMatches, trackedUtxoScriptPaths } from './watch-only-portfolio'
 import { cachedHistoryQueries, watchOnlyWalletScope, watchOnlyBitcoinScope } from './watch-only-history'
 import { createTxWatch, MAX_WATCH_MS, UNSEEN_GIVE_UP_MS } from "./tx-watch"
@@ -10104,6 +10105,8 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					const chains = bitcoinOnlyChainList(getAllChains(), bitcoinOnlyWatchOnlyScope(isBitcoinOnlyVariant(engine.getDeviceState().firmwareVariant), snapshot.featuresJson))
 					const chain = chains.find(c => c.id === params.chainId)
 					if (!chain) throw new Error(`Unsupported chain: ${params.chainId}`)
+					// Same answer as the connected path for a chain the rebuild never scans.
+					if (!isHistoryScanChain(chain, snapshot.firmwareVer, true)) return { count: 0, skipped: true }
 					const queries = cachedHistoryQueries(chain, getCachedBalances(scope.deviceId)?.balances || [], getCachedPubkeys(scope.deviceId))
 					if (!queries.length) throw new Error(`No saved public address for ${chain.symbol}`)
 					const result = await rebuildActivityHistory({
@@ -10122,8 +10125,16 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				const chain = getAllChains().find(c => c.id === params.chainId)
 				if (!chain) throw new Error(`Unknown chain: ${params.chainId}`)
 				if (!engine.wallet) throw new Error('No device connected')
-				if (chain.id === 'bitcoin' && getBtcBackend().kind !== 'pioneer') {
-					throw new Error(`Bitcoin history is unavailable with the ${getBtcBackend().kind} backend; Vault will not fall back to Pioneer.`)
+				// Decide skips only on a settled device: before features load the firmware version is
+				// unknown and every firmware-gated chain would look unsupported.
+				if (engine.getDeviceState().state !== 'ready') throw new Error('Device is not ready')
+				// Same chain set scanOneChain hands the rebuild: a chain outside it is skipped by design
+				// (shielded, Hive off, network off, firmware too old), not a failure (audit v6 U4). So is
+				// Bitcoin on a non-Pioneer backend: Vault never falls back to Pioneer for its history.
+				if ((chain.id === 'hive' && !hiveEnabled) || !networkOn(chain.id)
+					|| !isHistoryScanChain(chain, engine.getDeviceState().firmwareVersion)
+					|| (chain.id === 'bitcoin' && getBtcBackend().kind !== 'pioneer')) {
+					return { count: 0, skipped: true }
 				}
 				// PRIVACY: hidden sessions fetch live and hold rows in RAM only (scanOneChain).
 				const { added, txs, updated } = await scanOneChain(params.chainId)

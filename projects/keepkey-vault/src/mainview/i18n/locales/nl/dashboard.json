@@ -46,5 +46,15 @@
 	"syncStage_finalizing": "Portfolio bijwerken",
 	"syncProgressCounts": "{{completed}}/{{total}} · {{percent}}% · {{seconds}}s",
 	"syncProgressElapsed": "{{seconds}}s verstreken",
-	"syncFailedChecks": "{{failed}} controles niet beschikbaar"
+	"syncFailedChecks": "{{failed}} controles niet beschikbaar",
+	"rescanNew_one": "+{{count}} transactie",
+	"rescanNew_other": "+{{count}} transacties",
+	"rescanUpToDate": "Bijgewerkt",
+	"rescanPartial_one": "{{newCount}} nieuw · {{count}} netwerk mislukt",
+	"rescanPartial_other": "{{newCount}} nieuw · {{count}} netwerken mislukt",
+	"rescanNoAddresses": "Geen opgeslagen adressen om te scannen",
+	"rescanUnavailable": "Geschiedenis is niet beschikbaar voor dit netwerk",
+	"rescanUnavailableAll": "Geen geschiedenis om te scannen op deze netwerken",
+	"rescanFailed": "Scannen mislukt",
+	"rescanFailedDetail": "Scannen mislukt: {{detail}}"
 }

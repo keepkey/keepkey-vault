@@ -47,5 +47,19 @@
 	"syncStage_finalizing": "Обновление портфеля",
 	"syncProgressCounts": "{{completed}}/{{total}} · {{percent}}% · {{seconds}}с",
 	"syncProgressElapsed": "Прошло {{seconds}}с",
-	"syncFailedChecks": "Недоступных проверок: {{failed}}"
+	"syncFailedChecks": "Недоступных проверок: {{failed}}",
+	"rescanNew_one": "+{{count}} транзакция",
+	"rescanNew_few": "+{{count}} транзакции",
+	"rescanNew_many": "+{{count}} транзакций",
+	"rescanNew_other": "+{{count}} транзакции",
+	"rescanUpToDate": "Актуально",
+	"rescanPartial_one": "Новых: {{newCount}} · сбой в {{count}} сети",
+	"rescanPartial_few": "Новых: {{newCount}} · сбой в {{count}} сетях",
+	"rescanPartial_many": "Новых: {{newCount}} · сбой в {{count}} сетях",
+	"rescanPartial_other": "Новых: {{newCount}} · сбой в {{count}} сети",
+	"rescanNoAddresses": "Нет сохранённых адресов для сканирования",
+	"rescanUnavailable": "История для этой сети недоступна",
+	"rescanUnavailableAll": "Нет истории для сканирования в этих сетях",
+	"rescanFailed": "Ошибка сканирования",
+	"rescanFailedDetail": "Ошибка сканирования: {{detail}}"
 }

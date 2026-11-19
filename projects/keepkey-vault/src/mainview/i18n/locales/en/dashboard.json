@@ -56,5 +56,15 @@
 	"syncStage_finalizing": "Updating portfolio",
 	"syncProgressCounts": "{{completed}}/{{total}} · {{percent}}% · {{seconds}}s",
 	"syncProgressElapsed": "{{seconds}}s elapsed",
-	"syncFailedChecks": "{{failed}} checks unavailable"
+	"syncFailedChecks": "{{failed}} checks unavailable",
+	"rescanNew_one": "+{{count}} transaction",
+	"rescanNew_other": "+{{count}} transactions",
+	"rescanUpToDate": "Up to date",
+	"rescanPartial_one": "{{newCount}} new · {{count}} network failed",
+	"rescanPartial_other": "{{newCount}} new · {{count}} networks failed",
+	"rescanNoAddresses": "No saved addresses to scan",
+	"rescanUnavailable": "History is not available for this network",
+	"rescanUnavailableAll": "No history to scan on these networks",
+	"rescanFailed": "Scan failed",
+	"rescanFailedDetail": "Scan failed: {{detail}}"
 }

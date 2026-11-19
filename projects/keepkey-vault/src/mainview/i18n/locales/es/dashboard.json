@@ -47,5 +47,17 @@
 	"syncStage_finalizing": "Actualizando cartera",
 	"syncProgressCounts": "{{completed}}/{{total}} · {{percent}}% · {{seconds}}s",
 	"syncProgressElapsed": "{{seconds}}s transcurridos",
-	"syncFailedChecks": "{{failed}} comprobaciones no disponibles"
+	"syncFailedChecks": "{{failed}} comprobaciones no disponibles",
+	"rescanNew_one": "+{{count}} transacción",
+	"rescanNew_many": "+{{count}} transacciones",
+	"rescanNew_other": "+{{count}} transacciones",
+	"rescanUpToDate": "Al día",
+	"rescanPartial_one": "Nuevas: {{newCount}} · {{count}} red falló",
+	"rescanPartial_many": "Nuevas: {{newCount}} · {{count}} redes fallaron",
+	"rescanPartial_other": "Nuevas: {{newCount}} · {{count}} redes fallaron",
+	"rescanNoAddresses": "No hay direcciones guardadas para escanear",
+	"rescanUnavailable": "El historial no está disponible para esta red",
+	"rescanUnavailableAll": "No hay historial para escanear en estas redes",
+	"rescanFailed": "Error al escanear",
+	"rescanFailedDetail": "Error al escanear: {{detail}}"
 }

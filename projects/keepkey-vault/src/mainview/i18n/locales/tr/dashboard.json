@@ -46,5 +46,15 @@
 	"syncStage_finalizing": "Portföy güncelleniyor",
 	"syncProgressCounts": "{{completed}}/{{total}} · {{percent}}% · {{seconds}}sn",
 	"syncProgressElapsed": "{{seconds}}sn geçti",
-	"syncFailedChecks": "{{failed}} kontrol kullanılamıyor"
+	"syncFailedChecks": "{{failed}} kontrol kullanılamıyor",
+	"rescanNew_one": "+{{count}} işlem",
+	"rescanNew_other": "+{{count}} işlem",
+	"rescanUpToDate": "Güncel",
+	"rescanPartial_one": "{{newCount}} yeni · {{count}} ağ başarısız",
+	"rescanPartial_other": "{{newCount}} yeni · {{count}} ağ başarısız",
+	"rescanNoAddresses": "Taranacak kayıtlı adres yok",
+	"rescanUnavailable": "Bu ağ için geçmiş kullanılamıyor",
+	"rescanUnavailableAll": "Bu ağlarda taranacak geçmiş yok",
+	"rescanFailed": "Tarama başarısız",
+	"rescanFailedDetail": "Tarama başarısız: {{detail}}"
 }

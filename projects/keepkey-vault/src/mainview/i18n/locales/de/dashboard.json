@@ -45,5 +45,15 @@
 	"syncStage_finalizing": "Portfolio wird aktualisiert",
 	"syncProgressCounts": "{{completed}}/{{total}} · {{percent}}% · {{seconds}}s",
 	"syncProgressElapsed": "{{seconds}}s vergangen",
-	"syncFailedChecks": "{{failed}} Prüfungen nicht verfügbar"
+	"syncFailedChecks": "{{failed}} Prüfungen nicht verfügbar",
+	"rescanNew_one": "+{{count}} Transaktion",
+	"rescanNew_other": "+{{count}} Transaktionen",
+	"rescanUpToDate": "Aktuell",
+	"rescanPartial_one": "{{newCount}} neu · {{count}} Netzwerk fehlgeschlagen",
+	"rescanPartial_other": "{{newCount}} neu · {{count}} Netzwerke fehlgeschlagen",
+	"rescanNoAddresses": "Keine gespeicherten Adressen zum Scannen",
+	"rescanUnavailable": "Für dieses Netzwerk ist kein Verlauf verfügbar",
+	"rescanUnavailableAll": "Kein Verlauf zum Scannen in diesen Netzwerken",
+	"rescanFailed": "Scan fehlgeschlagen",
+	"rescanFailedDetail": "Scan fehlgeschlagen: {{detail}}"
 }

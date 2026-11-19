@@ -57,5 +57,17 @@
 	"syncStage_finalizing": "Atualizando portfólio",
 	"syncProgressCounts": "{{completed}}/{{total}} · {{percent}}% · {{seconds}}s",
 	"syncProgressElapsed": "{{seconds}}s decorridos",
-	"syncFailedChecks": "{{failed}} verificações indisponíveis"
+	"syncFailedChecks": "{{failed}} verificações indisponíveis",
+	"rescanNew_one": "+{{count}} transação",
+	"rescanNew_many": "+{{count}} transações",
+	"rescanNew_other": "+{{count}} transações",
+	"rescanUpToDate": "Tudo em dia",
+	"rescanPartial_one": "Novas: {{newCount}} · {{count}} rede falhou",
+	"rescanPartial_many": "Novas: {{newCount}} · {{count}} redes falharam",
+	"rescanPartial_other": "Novas: {{newCount}} · {{count}} redes falharam",
+	"rescanNoAddresses": "Nenhum endereço salvo para escanear",
+	"rescanUnavailable": "Histórico indisponível para esta rede",
+	"rescanUnavailableAll": "Nenhum histórico para escanear nestas redes",
+	"rescanFailed": "Falha ao escanear",
+	"rescanFailedDetail": "Falha ao escanear: {{detail}}"
 }

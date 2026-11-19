@@ -46,5 +46,15 @@
 	"syncStage_finalizing": "ポートフォリオを更新中",
 	"syncProgressCounts": "{{completed}}/{{total}} · {{percent}}% · {{seconds}}秒",
 	"syncProgressElapsed": "{{seconds}}秒経過",
-	"syncFailedChecks": "{{failed}}件の確認が利用できません"
+	"syncFailedChecks": "{{failed}}件の確認が利用できません",
+	"rescanNew_one": "+{{count}} 件の取引",
+	"rescanNew_other": "+{{count}} 件の取引",
+	"rescanUpToDate": "最新です",
+	"rescanPartial_one": "新規 {{newCount}} 件 · {{count}} ネットワークで失敗",
+	"rescanPartial_other": "新規 {{newCount}} 件 · {{count}} ネットワークで失敗",
+	"rescanNoAddresses": "スキャンする保存済みアドレスがありません",
+	"rescanUnavailable": "このネットワークの履歴は利用できません",
+	"rescanUnavailableAll": "これらのネットワークにスキャンできる履歴はありません",
+	"rescanFailed": "スキャンに失敗しました",
+	"rescanFailedDetail": "スキャンに失敗しました: {{detail}}"
 }

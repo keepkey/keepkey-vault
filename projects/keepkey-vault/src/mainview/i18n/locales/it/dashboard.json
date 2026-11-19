@@ -46,5 +46,17 @@
 	"syncStage_finalizing": "Aggiornamento del portafoglio",
 	"syncProgressCounts": "{{completed}}/{{total}} · {{percent}}% · {{seconds}}s",
 	"syncProgressElapsed": "{{seconds}}s trascorsi",
-	"syncFailedChecks": "{{failed}} verifiche non disponibili"
+	"syncFailedChecks": "{{failed}} verifiche non disponibili",
+	"rescanNew_one": "+{{count}} transazione",
+	"rescanNew_many": "+{{count}} transazioni",
+	"rescanNew_other": "+{{count}} transazioni",
+	"rescanUpToDate": "Aggiornato",
+	"rescanPartial_one": "Nuove: {{newCount}} · {{count}} rete non riuscita",
+	"rescanPartial_many": "Nuove: {{newCount}} · {{count}} reti non riuscite",
+	"rescanPartial_other": "Nuove: {{newCount}} · {{count}} reti non riuscite",
+	"rescanNoAddresses": "Nessun indirizzo salvato da scansionare",
+	"rescanUnavailable": "Cronologia non disponibile per questa rete",
+	"rescanUnavailableAll": "Nessuna cronologia da scansionare su queste reti",
+	"rescanFailed": "Scansione non riuscita",
+	"rescanFailedDetail": "Scansione non riuscita: {{detail}}"
 }

@@ -19,6 +19,7 @@ import { caipToIcon } from "../../shared/assetLookup"
 import { getRequiredConfs } from "../../shared/confirmations"
 import type { RecentActivity, PendingSwap, ChainBalance, SwapTrackingStatus } from "../../shared/types"
 import { isSwapFullySettled } from "../../shared/swap-settlement"
+import { scanOutcome, summarizeRescan, type RescanSummary } from "../lib/rescan-summary"
 import type { TxDetailLine } from "../../shared/tx-clearsign"
 
 interface ActivityPanelProps {
@@ -758,7 +759,7 @@ function NetworkSelector({ chainOptions, selectedChain, selectedDef, scanning, s
   selectedChain: string
   selectedDef: ReturnType<typeof CHAINS['find']>
   scanning: boolean
-  scanResult: string | null
+  scanResult: RescanSummary | null
   onSelect: (id: string) => void
   onScan: () => void
 }) {
@@ -814,8 +815,8 @@ function NetworkSelector({ chainOptions, selectedChain, selectedDef, scanning, s
 
       {/* Scan result */}
       {scanResult && (
-        <Text fontSize="2xs" flexShrink={0} color={scanResult.startsWith('+') ? '#23DCC8' : scanResult === 'Up to date' ? 'whiteAlpha.500' : '#E53E3E'}>
-          {scanResult}
+        <Text data-rescan-result={scanResult.tone} fontSize="2xs" flexShrink={0} color={scanResult.tone === 'new' ? '#23DCC8' : scanResult.tone === 'idle' ? 'whiteAlpha.500' : '#E53E3E'}>
+          {scanResult.text}
         </Text>
       )}
 
@@ -881,7 +882,7 @@ export function ActivityPanel({ open, onClose, activities, pendingSwaps, onRefre
   const [tab, setTab] = useState<'activity' | 'swaps'>('activity')
   const [selectedChain, setSelectedChain] = useState<string>('')
   const [scanning, setScanning] = useState(false)
-  const [scanResult, setScanResult] = useState<string | null>(null)
+  const [scanResult, setScanResult] = useState<RescanSummary | null>(null)
   const [availableChains, setAvailableChains] = useState<ChainBalance[]>([])
   const [selectedDetail, setSelectedDetail] = useState<TxDetail | null>(null)
 
@@ -958,11 +959,10 @@ export function ActivityPanel({ open, onClose, activities, pendingSwaps, onRefre
     setScanning(true)
     setScanResult(null)
     try {
-      const result = await rpcRequest<{ count: number }>('scanChainHistory', { chainId: selectedChain }, 60000)
-      setScanResult(result.count > 0 ? `+${result.count} tx${result.count > 1 ? 's' : ''}` : 'Up to date')
-      onRefresh()
-    } catch (e: any) {
-      setScanResult(e.message || 'Failed')
+      const outcome = await scanOutcome(() => rpcRequest<{ count: number; skipped?: boolean }>('scanChainHistory', { chainId: selectedChain }, 60000))
+      const summary = summarizeRescan([outcome], i18n.t)
+      setScanResult(summary)
+      if (summary.tone !== 'error') onRefresh()
     } finally {
       scanningRef.current = false
       setScanning(false)

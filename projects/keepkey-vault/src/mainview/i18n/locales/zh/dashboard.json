@@ -45,5 +45,15 @@
 	"syncStage_finalizing": "正在更新资产组合",
 	"syncProgressCounts": "{{completed}}/{{total}} · {{percent}}% · {{seconds}}秒",
 	"syncProgressElapsed": "已用时 {{seconds}}秒",
-	"syncFailedChecks": "{{failed}}项检查不可用"
+	"syncFailedChecks": "{{failed}}项检查不可用",
+	"rescanNew_one": "+{{count}} 笔交易",
+	"rescanNew_other": "+{{count}} 笔交易",
+	"rescanUpToDate": "已是最新",
+	"rescanPartial_one": "新增 {{newCount}} 笔 · {{count}} 个网络失败",
+	"rescanPartial_other": "新增 {{newCount}} 笔 · {{count}} 个网络失败",
+	"rescanNoAddresses": "没有可扫描的已保存地址",
+	"rescanUnavailable": "此网络的历史记录不可用",
+	"rescanUnavailableAll": "这些网络没有可扫描的历史记录",
+	"rescanFailed": "扫描失败",
+	"rescanFailedDetail": "扫描失败：{{detail}}"
 }
