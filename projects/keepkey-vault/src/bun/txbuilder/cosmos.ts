@@ -42,11 +42,12 @@ function toBaseUnits(displayAmount: string, decimals: number): bigint {
 // NativeTransactionFee is 0.2 CACAO (2000000000 base @ 10 decimals); reserving
 // 0 swept 100% of the balance and every MAX CACAO swap reverted with
 // "insufficient funds". THORChain's native_tx_fee is 0.02 RUNE.
+// Only THOR/Maya belong here: Cosmos Hub and Osmosis pay their fee through the
+// tx's own `fee.amount`, so a floor here overstated it (Osmosis showed and
+// balance-checked 0.035 OSMO while the tx paid 0.01/0.015/0.02).
 const FEES: Record<string, number> = {
   thorchain: 0.02,
   mayachain: 0.2,
-  cosmos: 0.005,
-  osmosis: 0.035,
 }
 
 // A MAX reserves FEE × this multiplier — never the bare fee. Reserving exactly

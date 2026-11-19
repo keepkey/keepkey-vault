@@ -224,7 +224,7 @@ describe('toTxBuildResponse: the named UTXO account', () => {
 describe('toTxBuildResponse: cosmos family', () => {
   const cases = [
     { id: 'cosmos', route: '/cosmos/sign-amino', amount: '1.5', base: '1500000', fee: '0.0075', symbol: 'ATOM' },
-    { id: 'osmosis', route: '/osmosis/sign-amino', amount: '0.000001', base: '1', fee: '0.035', symbol: 'OSMO' },
+    { id: 'osmosis', route: '/osmosis/sign-amino', amount: '0.000001', base: '1', fee: '0.015', symbol: 'OSMO' },
     { id: 'thorchain', route: '/thorchain/sign-amino-transfer', amount: '1.5', base: '150000000', fee: '0.02', symbol: 'RUNE' },
     { id: 'mayachain', route: '/mayachain/sign-amino-transfer', amount: '2.0000000001', base: '20000000001', fee: '0.2', symbol: 'CACAO' },
   ]
