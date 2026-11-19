@@ -35,7 +35,7 @@ import { validateContactOnNetwork } from '../shared/address-validation'
 import { isEnsName } from '../shared/ens'
 import { resolveEnsContact, repairLegacyEnsContacts } from './addressbook-ens'
 import { resolveStoredEnsContact } from './db'
-import { previewCertificationEntries } from './addressbook-clearsign'
+import { previewCertificationEntries, selectCertificationContacts } from './addressbook-clearsign'
 import { singleFlight } from './single-flight'
 import { PasswordBank } from './password-bank'
 import { passwordDeviceCipher } from './password-device'
@@ -341,7 +341,9 @@ import { classifyEffectExposure, observeEvmCall, observeEvmTypedData, observeMal
 import { getClearSignProtectionCaseStudies } from "./clearsign-case-studies"
 import { getEvmSimulationEndpoint, getEvmSimulationRpcUrls } from "./evm-simulation-config"
 import { addContractFacts } from "./contract-facts"
-import { attachSafeCallPreviews } from "./evm-signing-preview"
+import { applyTypedDataSigningGate, attachSafeCallPreviews, normalizeEvmChainId } from "./evm-signing-preview"
+import { decodeEIP712 } from "./eip712-decoder"
+import { withoutErc7730TypedDescription } from "./evm-presign-report"
 import { attachSafeMessagePreimage } from "./safe-message-preimage"
 import { initDb, getDb, factoryResetDb, getCustomTokens, addCustomToken as dbAddCustomToken, removeCustomToken as dbRemoveCustomToken, setCustomTokenIcon as dbSetCustomTokenIcon, getCustomChains, addCustomChainDb, removeCustomChainDb, getSetting, setSetting, setTokenVisibility as dbSetTokenVisibility, removeTokenVisibility as dbRemoveTokenVisibility, getAllTokenVisibility, insertApiLog, getApiLogs, clearApiLogs, setCachedBalances, getCachedBalances, updateCachedBalance, markBalanceTx, clearBalances, deleteCachedChainBalance, saveCachedPubkey, getLatestDeviceSnapshot, getCachedPubkeys, saveReport, getReportsList, getReportById, deleteReport, reportExists, getSwapHistory, getSwapHistoryStats, getSwapHistoryByTxid, getBip85Seeds, saveBip85Seed, deleteBip85Seed, clearCachedPubkeys, getRecentActivityFromLog, dismissActivity, getPioneerServers, addPioneerServerDb, removePioneerServerDb, syncOwnAddressBook, recordOutbound, getAddressBookList, updateAddressBookEntry, deleteAddressBookEntry, getAddressBookHistory, getDeviceLabelMap, getBalancesForOwnSeed, addExternalEntry, matchAddressBook, insertClearSignEvent, getClearSignEvents, insertClearSignObservation, finalizeClearSignObservation, authenticateClearSignObservation, refuseClearSignObservationDefinition, getClearSignCoverageSummary, getClearSignAuditJobs, enqueueClearSignAuditDemand, getSignedTxReview, setDeviceMasterFingerprint, getDeviceSnapshotById, getAllDeviceSnapshots, saveImportedWatchOnlyWallet, setImportedWalletVerified } from "./db"
 import { lookupEvmTx, recordSignedEvmTx, txDetails, walletBook } from "./signed-tx-review"
@@ -393,7 +395,7 @@ import { collectAndAnalyzeWithGate, MAX_CHUNK_BYTES } from "./rng-audit"
 import { withoutCallerErc7730 } from '../shared/erc7730-support'
 import { recordReviewCard, recordReviewCardText, reviewTapeRecording } from './test-review-tape'
 import { SigningReviewSessions } from "./signing-review-session"
-import { ADDRESS_BOOK_CERTIFY_UNSUPPORTED, ALL_CHAIN_CONTACT_CAPABILITY, buildCertificationRequest, contactAddress, contactProofAllowed, buildContactProof, contactsFromEntries, CONTACT_DESTINATION, evmRecipient, isAddressBookCertifyUnsupported, signWithContactProofAck, type AddressBookCertification } from "./addressbook-clearsign"
+import { ADDRESS_BOOK_CERTIFY_UNSUPPORTED, ALL_CHAIN_CONTACT_CAPABILITY, buildCertificationRequest, contactProofAllowed, buildContactProof, CONTACT_DESTINATION, evmRecipient, isAddressBookCertifyUnsupported, signWithContactProofAck, type AddressBookCertification } from "./addressbook-clearsign"
 
 // L3 fix: withTimeout imported from engine-controller (was duplicated here)
 const PIONEER_TIMEOUT_MS = 60_000
@@ -5994,7 +5996,9 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				return await observedRpcSign('ethSignMessage', params, () => engine.wallet!.ethSignMessage(params))
 			},
 			ethSignTypedData: async (rawParams) => {
-				if (!engine.wallet) throw new Error('No device connected')
+				const wallet = engine.wallet
+				if (!wallet) throw new Error('No device connected')
+				const sessionEpoch = activitySessionEpoch
 				// A caller's catalog is always dropped. Desktop attaches its own
 				// typed-data definition only on 7.17+ (supportsErc7730TypedData).
 				const { firmwareVersion, capabilities } = engine.getDeviceState()
@@ -6003,9 +6007,33 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					{ firmwareVersion, capabilities },
 				)
 				let observationId: string | undefined
+				let fallbackCardId: string | undefined
 				let signedParams: any = params
-				const signTyped = () => signWithErc7730Fallback(params, (p: any) => { signedParams = p; return signTypedDataWithFeatures(engine.wallet!, p) }, () => {
+				const signTyped = () => signWithErc7730Fallback(params, (p: any) => {
+					if (engine.wallet !== wallet || activitySessionEpoch !== sessionEpoch) throw new Error('The KeepKey wallet changed. Start again.')
+					signedParams = p
+					const sign = () => signTypedDataWithFeatures(wallet, p)
+					return engine.isEmulator
+						? emuSigningOp(sign, { operation: 'ethSignTypedData', chain: 'Ethereum' })
+						: sign()
+				}, async () => {
 					if (observationId) refuseClearSignObservationDefinition(observationId)
+					if (params.typedData?.primaryType !== 'SafeTx') return
+					const info: SigningRequestInfo = {
+						id: crypto.randomUUID(),
+						method: '/eth/sign-typed-data',
+						appName: 'KeepKey Vault',
+						chain: 'eth',
+						chainId: normalizeEvmChainId(params.typedData.domain?.chainId),
+						typedDataDecoded: decodeEIP712(params.typedData),
+						firmwareVersion,
+					}
+					applyTypedDataSigningGate(info, params.typedData, firmwareVersion)
+					const again = withoutErc7730TypedDescription(info)
+					fallbackCardId = again.id
+					if (!(await restCallbacks.onSigningRequest(again)).approved) {
+						throw new Error('User rejected signing without the ClearSign description')
+					}
 				}, '[ethSignTypedData]')
 				if (!engine.isPassphraseWallet) {
 					const draft = observeEvmTypedData({ typedData: (params as any)?.typedData, hostDecoded: true, ...(params.erc7730 ? { source: 'erc7730' as const } : {}) })
@@ -6013,9 +6041,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					void auditUnknownClearSignShape(draft, { evm: getEvmSimulationEndpoint(Number(draft.shape.chainId || 1)) })
 				}
 				try {
-					const result = engine.isEmulator
-						? await emuSigningOp(signTyped, { operation: 'ethSignTypedData', chain: 'Ethereum' })
-						: await signTyped()
+					const result = await signTyped()
 					if (observationId && signedParams.erc7730) authenticateClearSignObservation(observationId, 'erc7730')
 					if (observationId) finalizeClearSignObservation(observationId, 'signed')
 					return result
@@ -6025,6 +6051,8 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						finalizeClearSignObservation(observationId, rejected ? 'rejected' : 'failed', rejected ? 'user-rejected' : 'device-or-transport')
 					}
 					throw cause
+				} finally {
+					if (fallbackCardId) restCallbacks.onSigningDismissed?.(fallbackCardId)
 				}
 			},
 			ethVerifyMessage: async (params) => {
@@ -9360,10 +9388,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				requireAddressBookClearsignFirmware()
 				if (engine.isPassphraseWallet) throw new Error('Address Book certification is unavailable in a passphrase session')
 				// The review dialog can drop contacts; it can never add one.
-				const only = (params as any)?.only as { network: string; address: string }[] | undefined
-				const keep = only && new Set(only.map(o => `${o.network}|${o.address}`))
-				const contacts = contactsFromEntries(vaultCertificationEntries(), false, allChainContactsSupported())
-					.filter(c => !keep || keep.has(`${c.network}|${contactAddress(c)}`))
+				const contacts = selectCertificationContacts(vaultCertificationEntries(), allChainContactsSupported(), params ? params.only : undefined)
 				if (!contacts.length) throw new Error('Add at least one labeled contact on a supported network before certifying')
 				if (contacts.length > 16) throw new Error('Choose at most 16 certified contacts')
 				const revision = Math.max(0, Number(getSetting('addressbook_clearsign_revision') || '0')) + 1
@@ -12050,7 +12075,10 @@ Updater.onStatusChange(async (entry: any) => {
 })
 
 // ── Window Setup ──────────────────────────────────────────────────────
+const pinSmoke = process.env.KEEPKEY_PACKAGED_PIN_SMOKE ? await import('./packaged-pin-smoke') : null
+const pinSmokeDirectory = pinSmoke?.packagedPinSmokeDirectory()
 async function getMainViewUrl(): Promise<string> {
+	if (pinSmokeDirectory) return "views://mainview/index.html"
 	try {
 		const channel = await Updater.localInfo.channel()
 		if (channel === "dev") {
@@ -12235,6 +12263,13 @@ if (autostartEmulatorFlash) {
 	await engine.connectEmulator()
 	selectEmulatorWallet(flashName)
 	console.log(`[emulator] Auto-started explicit flash ${flashName}`)
+	if (pinSmoke && pinSmokeDirectory) {
+		void pinSmoke.runPackagedPinSmoke(engine, pinSmokeDirectory).then(cleanupAndQuit, error => {
+			console.error('[PIN smoke]', error)
+			process.exitCode = 1
+			cleanupAndQuit()
+		})
+	}
 }
 
 // Age out pending swaps older than 24h — prevents accumulation of test/failed
@@ -12251,7 +12286,7 @@ setTimeout(() => {
 // The DMG renamed keepkey-vault.app to "KeepKey Vault.app"; offer once to
 // trash an old copy left beside the new one. Deferred so it doesn't land on
 // top of the first window paint.
-if (process.platform === 'darwin') {
+if (process.platform === 'darwin' && !pinSmokeDirectory) {
 	setTimeout(() => {
 		import('./legacy-app-cleanup').then(({ offerLegacyAppCleanup }) => offerLegacyAppCleanup({
 			platform: process.platform,
@@ -12355,7 +12390,7 @@ function findMacAppBundlePath(): string | null {
 }
 
 // ── Force keepkey:// protocol registration (override old keepkey-desktop) ──
-if (process.platform === 'darwin') {
+if (process.platform === 'darwin' && !pinSmokeDirectory) {
 	// Re-register this app as the handler for keepkey:// via Launch Services.
 	// When both keepkey-desktop (Electron) and keepkey-vault (Electrobun) are
 	// installed, the last one to register wins. We force it on every launch.
