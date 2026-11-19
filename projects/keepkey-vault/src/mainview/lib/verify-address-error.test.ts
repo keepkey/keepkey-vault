@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { describeVerifyAddressError } from './verify-address-error'
+import { classifyDeviceError, describeSigningError } from './signing-errors'
 
 // Echo the key (and detail) so the test sees which message was chosen.
 const t = (key: string, opts?: Record<string, unknown>) => opts?.detail ? `${key}:${opts.detail}` : key
@@ -26,5 +27,19 @@ describe('describeVerifyAddressError', () => {
 	test('a non-Error rejection still yields a message', () => {
 		expect(describeVerifyAddressError(undefined, t)).toBe('verifyFailed')
 		expect(describeVerifyAddressError('busy', t)).toBe('verifyFailedDetail:busy')
+	})
+})
+
+describe('classifyDeviceError stays in step with describeSigningError', () => {
+	// describeSigningError picks one message key per class; the classifier must agree on every class.
+	const MESSAGE: Record<string, string> = { cancelled: 'signingCancelled', invalidAddress: 'signingInvalidAddress', noAnswer: 'signingNoAnswer', deviceLost: 'signingDeviceLost' }
+	test.each([
+		'Action cancelled by user', 'PIN rejected', 'Invalid THORChain recipient address', 'RPC request timed out: ethSignTx',
+		'LIBUSB_ERROR_PIPE', 'Device not connected', 'Failure_Other', '',
+	])('"%s"', (message) => {
+		const kind = classifyDeviceError(new Error(message))
+		const signing = describeSigningError(new Error(message), (key: string) => key)
+		if (kind === 'other') expect(Object.values(MESSAGE)).not.toContain(signing)
+		else expect(signing).toBe(MESSAGE[kind])
 	})
 })
