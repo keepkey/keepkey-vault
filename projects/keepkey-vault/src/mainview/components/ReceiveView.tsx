@@ -1,5 +1,6 @@
 import { useUiTranslation } from "../i18n/ui"
 import { useState, useCallback } from "react"
+import { MAX_NEW_BTC_ADDRESSES } from "../lib/btc-receive"
 import { useTranslation } from "react-i18next"
 import { Box, Text, Flex } from "@chakra-ui/react"
 import { FaCopy, FaCheck, FaEye, FaSpinner, FaPlus, FaMinus } from "react-icons/fa"
@@ -11,8 +12,6 @@ import { DocsLink } from "./DocsLink"
 import { DOCS_LINKS, watch } from "../../shared/docs-links"
 import type { ChainDef } from "../../shared/chains"
 import { receivePaymentUri } from '../../shared/receive-payment-uri'
-
-const MAX_NEW_ADDRESSES_PER_SESSION = 10
 
 interface ReceiveViewProps {
 	chain: ChainDef
@@ -29,6 +28,8 @@ interface ReceiveViewProps {
 	btcChangeIndex?: 0 | 1
 	btcAddressIndex?: number
 	btcAddressWarning?: string
+	/** Highest index "+" may reach (see btcAddressIndexLimit). Defaults to MAX_NEW_BTC_ADDRESSES past index 0. */
+	btcAddressIndexLimit?: number
 	onBtcChangeIndex?: (v: 0 | 1) => void
 	onBtcAddressIndex?: (v: number) => void
 	// TON bounceable toggle
@@ -157,7 +158,7 @@ function PillToggle<T extends string | number>({
 
 export function ReceiveView({
 	chain, address, assetCaip, loading, error, currentPath, onDerive, scriptType, xpub,
-	isBtc, btcChangeIndex = 0, btcAddressIndex = 0, btcAddressWarning, onBtcChangeIndex, onBtcAddressIndex,
+	isBtc, btcChangeIndex = 0, btcAddressIndex = 0, btcAddressWarning, btcAddressIndexLimit = MAX_NEW_BTC_ADDRESSES, onBtcChangeIndex, onBtcAddressIndex,
 	isTon, tonBounceable = false, onTonBounceableChange, watchOnly = false, onShowOnDevice, pathEditable = true, showDetails = true,
 }: ReceiveViewProps) {
   const uiText = useUiTranslation()
@@ -165,7 +166,6 @@ export function ReceiveView({
 	const { t } = useTranslation("receive")
 	const [showing, setShowing] = useState(false)
 	const [pathDialogOpen, setPathDialogOpen] = useState(false)
-	const [newAddressCount, setNewAddressCount] = useState(0)
 
 	const showOnDevice = useCallback(async () => {
 		setShowing(true)
@@ -194,10 +194,9 @@ export function ReceiveView({
 	}, [onDerive])
 
 	const handleNextAddress = useCallback(() => {
-		if (!onBtcAddressIndex || newAddressCount >= MAX_NEW_ADDRESSES_PER_SESSION) return
+		if (!onBtcAddressIndex || btcAddressIndex >= btcAddressIndexLimit) return
 		onBtcAddressIndex(btcAddressIndex + 1)
-		setNewAddressCount(c => c + 1)
-	}, [onBtcAddressIndex, btcAddressIndex, newAddressCount])
+	}, [onBtcAddressIndex, btcAddressIndex, btcAddressIndexLimit])
 
 	const handlePrevAddress = useCallback(() => {
 		if (!onBtcAddressIndex || btcAddressIndex <= 0) return
@@ -276,7 +275,7 @@ export function ReceiveView({
 	try { qrContent = receivePaymentUri(chain, address!, assetCaip || chain.caip) }
 	catch { return <Text role="alert" color="red.300">{uiText("The receive asset and account network do not match. Select the asset again.")}</Text> }
 	const qrSvg = generateQRSvg(qrContent, 4, 2)
-	const remaining = MAX_NEW_ADDRESSES_PER_SESSION - newAddressCount
+	const remaining = Math.max(0, btcAddressIndexLimit - btcAddressIndex)
 
 	return (
 		<>
