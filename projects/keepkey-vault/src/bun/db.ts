@@ -8,6 +8,7 @@ import { Database } from 'bun:sqlite'
 import { migratePublicKeyCache } from './public-key-cache-migration'
 import { DEFAULT_PIONEER_API_BASE, resolvePioneerApiBase } from '../shared/pioneer-server'
 import { CHAINS } from '../shared/chains'
+import { withNativeTxFee, withNativeTxFeeDisplay } from './txbuilder/cosmos'
 // The utils entry, not the package index: the index creates native windows on import,
 // which throws anywhere outside a running app (unit tests import this module).
 import * as Utils from 'electrobun/main/utils'
@@ -2116,6 +2117,26 @@ export function dismissActivity(id: string, deviceId?: string, walletId?: string
   }
 }
 
+/** Fee for a SCAN row (base units). THOR/Maya rows stored before the history
+ *  fix (audit v4 H10) kept the auth fee '0' until a rescan rewrote them, and a
+ *  send outside the window Pioneer returns is never rescanned. Apply the same
+ *  rule normalizeMeta writes (audit v6 R6). Rows without meta.chainId fall back
+ *  to the scan route (`history/<chainId>`), as the chain filter above does. */
+function scanRowFee(meta: any, activityType: string, route: string | null): string | undefined {
+  const chainId = meta?.chainId ?? route?.match(/^history\/(.+)$/)?.[1]
+  const chain = chainId ? CHAINS.find(c => c.id === chainId) : undefined
+  return withNativeTxFee(meta?.fee ?? undefined, activityType, chain)
+}
+
+/** Fee for a send Vault logged itself (RPC broadcastTx, display units). Its
+ *  fee wins over the scan row's in mergeTxRows, so a THOR/Maya send made before
+ *  the native fee was charged in displayFee still read "fee: 0 RUNE". */
+function appRowFee(meta: any, activityType: string): string | undefined {
+  const fee = meta?.fee ?? undefined
+  if (activityType !== 'broadcast' || !meta?.chainId) return fee
+  return withNativeTxFeeDisplay(fee, CHAINS.find(c => c.id === meta.chainId))
+}
+
 export function getRecentActivityFromLog(limit?: number, chainFilter?: string, deviceId?: string, walletId?: string): RecentActivity[] {
   try {
     if (!db) return []
@@ -2173,7 +2194,7 @@ export function getRecentActivityFromLog(limit?: number, chainFilter?: string, d
         confirmations: meta?.confirmations ?? undefined,
         blockHeight: meta?.blockHeight ?? undefined,
         amount: meta?.value ?? undefined,
-        fee: meta?.fee ?? undefined,
+        fee: isScan ? scanRowFee(meta, r.activity_type, r.route) : appRowFee(meta, r.activity_type),
         to: meta?.to ?? undefined,
         from: meta?.from ?? undefined,
         asset: meta?.asset ?? undefined,

@@ -95,6 +95,23 @@ export function nativeTxFeeBaseUnits(chain: ChainDef): string | undefined {
   return String(Math.round(FEES[chain.id] * 10 ** chain.decimals))
 }
 
+/** Fee of a history row, in base units. THOR/Maya sends record the auth fee
+ *  ('0' or nothing) while the network charges its native fee at the bank layer,
+ *  so such a send gets that fee. Anything else is returned unchanged. Shared by
+ *  the history scan (write) and the activity list (read) so the rule lives once. */
+export function withNativeTxFee(fee: string | undefined, activityType: string, chain: ChainDef | undefined): string | undefined {
+  if (activityType !== 'send' || !chain || Number(fee) > 0) return fee
+  return nativeTxFeeBaseUnits(chain) ?? fee
+}
+
+/** The same rule for a send logged by Vault itself, whose fee is in DISPLAY
+ *  units. Sends made before displayFee charged the native fee logged '0', and
+ *  mergeTxRows keeps that row's fee over the scan row's. */
+export function withNativeTxFeeDisplay(fee: string | undefined, chain: ChainDef | undefined): string | undefined {
+  if (!chain || Number(fee) > 0 || nativeTxFeeBaseUnits(chain) === undefined) return fee
+  return String(FEES[chain.id])
+}
+
 // Chain-specific msg types (MsgSend)
 const MSG_SEND_TYPES: Record<string, string> = {
   thorchain: 'thorchain/MsgSend',
