@@ -17,6 +17,7 @@ import { AssetIcon } from "./AssetIcon"
 import { formatBalance } from "../lib/formatting"
 import { useFiat } from "../lib/fiat-context"
 import { ReceiveView } from "./ReceiveView"
+import { btcAddressIndexLimit } from "../lib/btc-receive"
 import { HiveAccountPanel } from "./HiveAccountPanel"
 import { SendForm } from "./SendForm"
 import { ZcashBalanceSummary } from './ZcashBalanceSummary'
@@ -369,6 +370,12 @@ function PersonalAssetPage({ chain, balance, balanceLoading = false, onBack, fir
 	// Cache backend-reported indices so we don't re-fetch on every toggle.
 	// Core/offline return an explicit unavailable result — never a silent Pioneer fallback.
 	const [btcAddressIndices, setBtcAddressIndices] = useState<BtcAddressIndexResult | null>(null)
+	// True while the shown address is the backend's next unused one for its branch. A balance sync
+	// may then move it forward; once the user steps to another index, syncs leave it alone (audit v6 U2).
+	const btcFollowNextRef = useRef(true)
+	const btcChangeIndexRef = useRef(btcChangeIndex)
+	btcChangeIndexRef.current = btcChangeIndex
+	const btcIndicesKeyRef = useRef<string | null>(null)
 
 	// Derive active BTC script type config and path from selected xpub + change/index
 	const btcSelected = useMemo(() => {
@@ -481,14 +488,22 @@ function PersonalAssetPage({ chain, balance, balanceLoading = false, onBack, fir
 		?.xpubs.find(x => x.scriptType === (selectedBtcScriptType ?? 'p2wpkh'))
 		?.xpub
 	useEffect(() => {
-		if (!isBtc || watchOnly) return
-		setBtcChangeIndex(0)
-		setBtcAddressIndices(null)
+		if (!isBtc || watchOnly) { btcIndicesKeyRef.current = null; return }
+		// A new xpub, script type or account starts over at its next unused receive address.
+		// A balance sync on the same selection only refreshes the cached indices.
+		const key = `${selectedBtcAccountIndex ?? 0}|${selectedBtcScriptType ?? 'p2wpkh'}|${selectedBtcXpub ?? ''}`
+		if (btcIndicesKeyRef.current !== key) {
+			btcIndicesKeyRef.current = key
+			btcFollowNextRef.current = true
+			setBtcChangeIndex(0)
+			setBtcAddressIndices(null)
+		}
 		if (!selectedBtcXpub) return
 		let cancelled = false
 		// Never expose a fallback/stale address while history discovery is in
 		// flight. It could be an already-used address from this or another xpub.
-		setBtcAddressDiscoveryLoading(true)
+		// An address the user picked stays visible: discovery will not replace it.
+		if (btcFollowNextRef.current) setBtcAddressDiscoveryLoading(true)
 		rpcRequest<BtcAddressIndexResult>('getBtcAddressIndices', {
 			xpub: selectedBtcXpub,
 			scriptType: selectedBtcScriptType ?? 'p2wpkh',
@@ -496,7 +511,9 @@ function PersonalAssetPage({ chain, balance, balanceLoading = false, onBack, fir
 			.then((indices) => {
 				if (cancelled) return
 				setBtcAddressIndices(indices)
-				setBtcAddressIndex(indices.receiveIndex)
+				if (btcFollowNextRef.current) {
+					setBtcAddressIndex(btcChangeIndexRef.current === 1 ? indices.changeIndex : indices.receiveIndex)
+				}
 			})
 			.catch(e => console.warn('[AssetPage] getBtcAddressIndices failed:', e.message))
 			.finally(() => { if (!cancelled) setBtcAddressDiscoveryLoading(false) })
@@ -541,6 +558,7 @@ function PersonalAssetPage({ chain, balance, balanceLoading = false, onBack, fir
 
 	// When toggling Receive/Change, set index to the active backend's cached value.
 	const handleBtcChangeIndex = useCallback((v: 0 | 1) => {
+		btcFollowNextRef.current = true
 		setBtcChangeIndex(v)
 		if (btcAddressIndices) {
 			setBtcAddressIndex(v === 0 ? btcAddressIndices.receiveIndex : btcAddressIndices.changeIndex)
@@ -548,6 +566,10 @@ function PersonalAssetPage({ chain, balance, balanceLoading = false, onBack, fir
 			setBtcAddressIndex(0)
 		}
 	}, [btcAddressIndices])
+	const handleBtcAddressIndex = useCallback((index: number) => {
+		btcFollowNextRef.current = false
+		setBtcAddressIndex(index)
+	}, [])
 
 	// When EVM selected index changes, update address from the cached value. When
 	// the cache empties — a device swap resets the backend managers and pushes an
@@ -1594,7 +1616,8 @@ function PersonalAssetPage({ chain, balance, balanceLoading = false, onBack, fir
 							btcAddressIndex={btcAddressIndex}
 							btcAddressWarning={btcAddressIndices?.discoveryAvailable === false ? btcAddressIndices.warning : undefined}
 							onBtcChangeIndex={handleBtcChangeIndex}
-							onBtcAddressIndex={setBtcAddressIndex}
+							onBtcAddressIndex={handleBtcAddressIndex}
+							btcAddressIndexLimit={btcAddressIndexLimit(btcAddressIndices, btcChangeIndex)}
 							isTon={isTon}
 							tonBounceable={tonBounceable}
 							onTonBounceableChange={(v) => { setTonBounceable(v); deriveAddress(undefined, v) }}
