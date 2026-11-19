@@ -38,52 +38,94 @@ CHAINS.forEach(c => { CHAIN_COLORS[c.symbol] = c.color; CHAIN_COLORS[c.id] = c.c
 // Colors are spec-palette hex (not CSS vars) because they're alpha-appended as
 // `${color}22` for badge backgrounds — `var(--x)22` is invalid CSS. Hex maps:
 // rose #e08c7b, teal #8be3c4, gold #e9c46a (see theme.ts).
-const TYPE_CONFIG: Record<string, { label: string; color: string }> = {
-  send: { label: 'Sent', color: '#e08c7b' },
-  receive: { label: 'Received', color: '#8be3c4' },
-  swap: { label: 'Swap', color: '#e9c46a' },
-  sign: { label: 'Signed', color: '#627EEA' },
-  message: { label: 'Message', color: '#8247E5' },
-  approve: { label: 'Approve', color: '#e08c7b' },
-  shield: { label: 'Shield', color: '#6ee787' },
-  unshield: { label: 'Unshield', color: '#e9c46a' },
+const TYPE_CONFIG: Record<string, { color: string }> = {
+  send: { color: '#e08c7b' },
+  receive: { color: '#8be3c4' },
+  swap: { color: '#e9c46a' },
+  sign: { color: '#627EEA' },
+  message: { color: '#8247E5' },
+  approve: { color: '#e08c7b' },
+  shield: { color: '#6ee787' },
+  unshield: { color: '#e9c46a' },
 }
 
-const STATUS_CONFIG: Record<string, { label: string; color: string }> = {
-  broadcast: { label: 'Broadcast', color: '#8be3c4' },
-  signed: { label: 'Signed', color: '#e9c46a' },
-  not_sent: { label: 'Not sent', color: '#e08c7b' },
-  completed: { label: 'Completed', color: '#8be3c4' },
-  refunded: { label: 'Refunded', color: '#e9c46a' },
-  failed: { label: 'Failed', color: '#e08c7b' },
+const STATUS_CONFIG: Record<string, { color: string }> = {
+  broadcast: { color: '#8be3c4' },
+  signed: { color: '#e9c46a' },
+  not_sent: { color: '#e08c7b' },
+  completed: { color: '#8be3c4' },
+  refunded: { color: '#e9c46a' },
+  failed: { color: '#e08c7b' },
 }
 
-// How a record reached us — surfaced in the detail panel so nothing is implicit.
-const SOURCE_LABELS: Record<string, string> = {
-  scan: 'On-chain scan',
-  app: 'In-app',
-  api: 'External app',
+// Labels, translated. Each is a literal uiText("…") call so the i18n extractor and check see it;
+// the configs above only hold colors (audit v6 U6). Source = how a record reached us.
+type UiText = ReturnType<typeof useUiTranslation>
+function typeLabel(type: string, uiText: UiText): string {
+  switch (type) {
+    case 'send': return uiText("Sent")
+    case 'receive': return uiText("Received")
+    case 'swap': return uiText("Swap")
+    case 'message': return uiText("Message")
+    case 'approve': return uiText("Approve")
+    case 'shield': return uiText("Shield")
+    case 'unshield': return uiText("Unshield")
+    default: return uiText("Signed") // same fallback as TYPE_CONFIG.sign
+  }
+}
+function statusLabel(status: string, uiText: UiText): string {
+  switch (status) {
+    case 'broadcast': return uiText("Broadcast")
+    case 'not_sent': return uiText("Not sent")
+    case 'completed': return uiText("Completed")
+    case 'refunded': return uiText("Refunded")
+    case 'failed': return uiText("Failed")
+    default: return uiText("Signed") // same fallback as STATUS_CONFIG.signed
+  }
+}
+function sourceLabel(source: string, uiText: UiText): string {
+  switch (source) {
+    case 'scan': return uiText("On-chain scan")
+    case 'app': return uiText("In-app")
+    case 'api': return uiText("External app")
+    default: return source
+  }
+}
+function swapStatusLabel(status: string, uiText: UiText): string {
+  switch (status) {
+    case 'signing': return uiText("Signing")
+    case 'pending': return uiText("Pending")
+    case 'confirming': return uiText("Confirming")
+    case 'output_detected': return uiText("Output Detected")
+    case 'output_confirming': return uiText("Confirming Output")
+    case 'output_confirmed': return uiText("Output Confirmed")
+    case 'completed': return uiText("Complete")
+    case 'failed': return uiText("Failed")
+    case 'refunded': return uiText("Refunded")
+    default: return status
+  }
 }
 
-const SWAP_STATUS_CONFIG: Record<string, { label: string; color: string; dot?: boolean }> = {
-  signing:             { label: 'Signing',            color: '#627EEA', dot: true },
-  pending:             { label: 'Pending',            color: '#F7931A', dot: true },
-  confirming:          { label: 'Confirming',         color: '#627EEA', dot: true },
-  output_detected:     { label: 'Output Detected',    color: '#23DCC8', dot: true },
-  output_confirming:   { label: 'Confirming Output',  color: '#23DCC8', dot: true },
-  output_confirmed:    { label: 'Output Confirmed',   color: 'var(--teal)' },
-  completed:           { label: 'Complete',            color: 'var(--teal)' },
-  failed:              { label: 'Failed',              color: '#E53E3E' },
-  refunded:            { label: 'Refunded',            color: '#FB923C' },
+const SWAP_STATUS_CONFIG: Record<string, { color: string; dot?: boolean }> = {
+  signing:             { color: '#627EEA', dot: true },
+  pending:             { color: '#F7931A', dot: true },
+  confirming:          { color: '#627EEA', dot: true },
+  output_detected:     { color: '#23DCC8', dot: true },
+  output_confirming:   { color: '#23DCC8', dot: true },
+  output_confirmed:    { color: 'var(--teal)' },
+  completed:           { color: 'var(--teal)' },
+  failed:              { color: '#E53E3E' },
+  refunded:            { color: '#FB923C' },
 }
 
 function SwapStatusBadge({ status }: { status?: SwapTrackingStatus | string }) {
+  const uiText = useUiTranslation()
   if (!status) return null
-  const conf = SWAP_STATUS_CONFIG[status] || { label: status, color: '#627EEA' }
+  const conf = SWAP_STATUS_CONFIG[status] || { color: '#627EEA' }
   return (
     <HStack gap="1" px="1.5" py="0.5" borderRadius="md" bg={`${conf.color}18`}>
       {conf.dot && <Box w="6px" h="6px" borderRadius="full" bg={conf.color} flexShrink={0} style={{ animation: 'kkActivityPulse 2s ease-in-out infinite' }} />}
-      <Text fontSize="2xs" fontWeight="700" color={conf.color}>{conf.label}</Text>
+      <Text fontSize="2xs" fontWeight="700" color={conf.color}>{swapStatusLabel(status, uiText)}</Text>
     </HStack>
   )
 }
@@ -97,12 +139,13 @@ function NotSentBadge() {
 
 /** Confirmation badge: red = unconfirmed, yellow = partial, green = confirmed */
 function ConfBadge({ confirmations, chain }: { confirmations?: number; chain: string }) {
+  const uiText = useUiTranslation()
   if (confirmations === undefined) return null
   const required = getRequiredConfs(chain)
   const isConfirmed = confirmations >= required
   const isUnconfirmed = confirmations === 0
   const color = isUnconfirmed ? '#E53E3E' : isConfirmed ? '#23DCC8' : '#F7931A'
-  const label = isUnconfirmed ? 'Unconfirmed' : isConfirmed ? 'Confirmed' : `${confirmations}/${required}`
+  const label = isUnconfirmed ? uiText("Unconfirmed") : isConfirmed ? uiText("Confirmed") : `${confirmations}/${required}`
   return (
     <HStack gap="1">
       <Box w="6px" h="6px" borderRadius="full" bg={color} flexShrink={0} />
@@ -251,7 +294,7 @@ function CopyableRow({ label, value, explorerUrl }: { label: string; value: stri
       <HStack gap="1" justify="flex-end" minW="0">
         <Text
           fontSize="11px" color="var(--teal)" fontFamily="mono" cursor="pointer" wordBreak="break-all" textAlign="right"
-          _hover={{ opacity: 0.8 }} onClick={handleCopy} title={copied ? 'Copied!' : 'Click to copy'}
+          _hover={{ opacity: 0.8 }} onClick={handleCopy} title={copied ? uiText("Copied!") : uiText("Click to copy")}
         >
           {copied ? uiText("Copied!") : value}
         </Text>
@@ -312,7 +355,7 @@ export function TxDetailDialog({ detail, onClose, nativePrices }: { detail: TxDe
     const verificationLinks = a.txid && chainDef?.id === 'bitcoin' ? [
       { label: 'Mempool.space', url: `https://mempool.space/tx/${a.txid.replace(/^0x/i, '')}` },
       { label: 'Blockchair', url: `https://blockchair.com/bitcoin/transaction/${a.txid.replace(/^0x/i, '')}` },
-    ] : explorerUrl ? [{ label: 'Block explorer', url: explorerUrl }] : []
+    ] : explorerUrl ? [{ label: uiText("Block explorer"), url: explorerUrl }] : []
     const required = getRequiredConfs(chainSymbol)
 
     return (
@@ -329,11 +372,11 @@ export function TxDetailDialog({ detail, onClose, nativePrices }: { detail: TxDe
           <Flex px="5" py="3" borderBottom="1px solid" borderColor="kk.border" align="center" justify="space-between">
             <HStack gap="2" flexWrap="wrap">
 			  <Text fontSize="sm" fontWeight="700" color="kk.textPrimary" mr="1">{uiText("Transaction details")}</Text>
-              <Box px="2" py="0.5" borderRadius="md" fontSize="xs" fontWeight="700" bg={`${typeConf.color}22`} color={typeConf.color}>{typeConf.label}</Box>
+              <Box px="2" py="0.5" borderRadius="md" fontSize="xs" fontWeight="700" bg={`${typeConf.color}22`} color={typeConf.color}>{typeLabel(a.type, uiText)}</Box>
               {a.type === 'swap' && a.swapStatus ? (
                 <SwapStatusBadge status={a.swapStatus} />
               ) : (
-                <Box px="2" py="0.5" borderRadius="md" fontSize="xs" fontWeight="600" bg={`${statusConf.color}22`} color={statusConf.color}>{uiText(statusConf.label)}</Box>
+                <Box px="2" py="0.5" borderRadius="md" fontSize="xs" fontWeight="600" bg={`${statusConf.color}22`} color={statusConf.color}>{statusLabel(a.status, uiText)}</Box>
               )}
               {a.source === 'api' && <Box px="2" py="0.5" borderRadius="md" fontSize="xs" fontWeight="600" bg="rgba(130,71,229,0.15)" color="#8247E5">API</Box>}
             </HStack>
@@ -391,7 +434,7 @@ export function TxDetailDialog({ detail, onClose, nativePrices }: { detail: TxDe
             {a.blockHeight ? <TxDetailRow label={uiText("Block")} value={String(a.blockHeight)} mono /> : null}
 
             {/* Source — how this record reached us (on-chain scan / in-app / external app) */}
-            <TxDetailRow label={uiText("Source")} value={SOURCE_LABELS[a.source] || a.source} />
+            <TxDetailRow label={uiText("Source")} value={sourceLabel(a.source, uiText)} />
 
             {/* App name */}
             {a.appName && <TxDetailRow label={uiText("App")} value={a.appName} />}
@@ -584,7 +627,7 @@ export function ActivityRow({ activity, onSelect, nativePrices }: { activity: Re
           <Box minW="0" flex="1">
             <HStack gap="1.5" minW="0">
               <Text fontSize="xs" fontWeight="700" color="white" truncate>{chainLabel}</Text>
-              <Box px="1.5" py="0.5" borderRadius="sm" fontSize="2xs" lineHeight="1" fontWeight="700" bg={`${typeConf.color}22`} color={typeConf.color} flexShrink={0}>{typeConf.label}</Box>
+              <Box px="1.5" py="0.5" borderRadius="sm" fontSize="2xs" lineHeight="1" fontWeight="700" bg={`${typeConf.color}22`} color={typeConf.color} flexShrink={0}>{typeLabel(activity.type, uiText)}</Box>
               {activity.source === 'api' && (
                 <Box px="1.5" py="0.5" borderRadius="sm" fontSize="2xs" lineHeight="1" fontWeight="700" bg="rgba(130,71,229,0.15)" color="#8247E5" flexShrink={0}>API</Box>
               )}
@@ -603,7 +646,7 @@ export function ActivityRow({ activity, onSelect, nativePrices }: { activity: Re
       </Flex>
       <Flex justify="space-between" align="center" gap="2" mt="1.5">
         {activity.txid ? (
-          <Text flex="1" minW="0" fontSize="2xs" color="whiteAlpha.600" fontFamily="mono" cursor="pointer" truncate _hover={{ color: "var(--teal)" }} onClick={(e) => { e.stopPropagation(); handleCopy(activity.txid!) }} title={copied ? 'Copied!' : 'Click to copy'}>
+          <Text flex="1" minW="0" fontSize="2xs" color="whiteAlpha.600" fontFamily="mono" cursor="pointer" truncate _hover={{ color: "var(--teal)" }} onClick={(e) => { e.stopPropagation(); handleCopy(activity.txid!) }} title={copied ? uiText("Copied!") : uiText("Click to copy")}>
             {copied ? uiText("Copied!") : truncateTxid(activity.txid)}
           </Text>
         ) : (
@@ -651,7 +694,7 @@ export function ActivityTableRow({ activity, onSelect, nativePrices }: { activit
       )}
       <HStack gap="1.5" w="170px" flexShrink={0} minW="0">
         <Text fontSize="xs" fontWeight="600" color="white" truncate>{chainDef?.coin || activity.chain} ({chainSymbol})</Text>
-        <Box px="1.5" py="0.5" borderRadius="sm" fontSize="2xs" lineHeight="1" fontWeight="700" bg={`${typeConf.color}22`} color={typeConf.color} flexShrink={0}>{typeConf.label}</Box>
+        <Box px="1.5" py="0.5" borderRadius="sm" fontSize="2xs" lineHeight="1" fontWeight="700" bg={`${typeConf.color}22`} color={typeConf.color} flexShrink={0}>{typeLabel(activity.type, uiText)}</Box>
       </HStack>
       <Text flex="1" fontSize="xs" color="whiteAlpha.500" truncate minW="0" fontFamily={amountLine && activity.txid && !nativeAmount ? 'mono' : undefined}>
         {amountLine || '—'}
@@ -733,7 +776,7 @@ export function SwapRow({ swap, onSelect }: { swap: PendingSwap; onSelect: (s: P
         </VStack>
       </Flex>
       <Flex justify="space-between" align="center" gap="2" mt="1.5">
-        <Text flex="1" minW="0" fontSize="2xs" color="whiteAlpha.600" fontFamily="mono" cursor="pointer" truncate _hover={{ color: "var(--teal)" }} onClick={(e) => { e.stopPropagation(); handleCopy(swap.txid) }} title={copied ? 'Copied!' : 'Click to copy'}>
+        <Text flex="1" minW="0" fontSize="2xs" color="whiteAlpha.600" fontFamily="mono" cursor="pointer" truncate _hover={{ color: "var(--teal)" }} onClick={(e) => { e.stopPropagation(); handleCopy(swap.txid) }} title={copied ? uiText("Copied!") : uiText("Click to copy")}>
           {copied ? uiText("Copied!") : truncateTxid(swap.txid)}
         </Text>
         <HStack gap="2" flexShrink={0}>

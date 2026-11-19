@@ -2474,5 +2474,22 @@
   "me94074e4": "A public byte reference is not supplied for this request. Compare the signed fields and the device review.",
   "mf92590d1": "Choose your reading detail and preview what to compare on your KeepKey.",
   "mfc148741": "Review every external output, change and the fee without losing context.",
-  "mfd40a6ca": "The connected firmware cannot sign this request. Do not try to approve it through a different review setting."
+  "mfd40a6ca": "The connected firmware cannot sign this request. Do not try to approve it through a different review setting.",
+  "m27c3ab35": "Signed",
+  "mec88aab2": "Completed",
+  "m4360ca3e": "Refunded",
+  "m30454c85": "On-chain scan",
+  "m1d71e958": "In-app",
+  "m55b67d95": "External app",
+  "m1670c554": "Signing",
+  "m3352afdc": "Pending",
+  "m94143289": "Confirming",
+  "m66cc8302": "Output Detected",
+  "mc0a455b6": "Confirming Output",
+  "m87921925": "Output Confirmed",
+  "m628ea1a2": "Complete",
+  "m89a779a3": "Unconfirmed",
+  "m382d99ae": "Confirmed",
+  "m72c680c9": "Click to copy",
+  "mf52ced61": "Block explorer"
 }
