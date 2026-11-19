@@ -51,6 +51,10 @@ const ready = (index: number) => {
   }))
 }
 const pinGrid = new Uint8Array(2048).fill(0x5a)
+const encodedPinGrid = Buffer.from(pinGrid).toString('base64')
+const hasPinFrame = (window: FakeWindow) => window.packets.some(
+  packet => packet.includes('display-update') && packet.includes(encodedPinGrid),
+)
 
 try {
   emulatorWindow.openEmulatorWindow()
@@ -59,7 +63,7 @@ try {
   frames.push(pinGrid)
   emulatorWindow.displayPinPrompt('current')
   await Bun.sleep(150)
-  assert(first.packets.some(p => p.includes('display-update')), 'the open window shows the PIN grid')
+  assert(hasPinFrame(first), 'the open window receives the captured PIN frame')
 
   // Open, maybe behind the main window or minimized: the badge brings it forward, no second window.
   first.minimized = true
@@ -78,7 +82,7 @@ try {
   await Bun.sleep(150)
   // The firmware is idle on the PIN grid: it draws no new frame, so the window
   // must be given the last one, and the instructions for the open prompt.
-  assert(reopened.packets.some(p => p.includes('display-update')), 'the reopened window shows the screen the device is on')
+  assert(hasPinFrame(reopened), 'the reopened window receives the retained PIN frame')
   assert(reopened.packets.some(p => p.includes('pin-request')), 'the reopened window shows the PIN instructions')
 
   // Once the prompt is answered, a reopen does not bring back stale instructions.

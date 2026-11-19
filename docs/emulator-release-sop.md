@@ -29,9 +29,10 @@ with an encrypted flash image named `build-<first 16 hash characters>`. A build
 may use only its own flash through the normal Vault wallet selector. Import a
 test seed into that build's flash if cross-version signing comparisons require
 the same addresses. If startup fails, Vault restores the previous build and
-flash when possible; record any failure before retrying. The legacy
-`~/.keepkey/emulator/libkkemu.*` override and bundled release library still
-work when no development build is selected.
+flash when possible; record any failure before retrying. With no development
+build selected, Vault uses the bundled library. The legacy
+`~/.keepkey/emulator/libkkemu.*` path is a fallback for runs without a bundle.
+To use that library in a packaged build, install and select it in **Change Version…**.
 
 Emulator QA does not satisfy a physical OLED or signed firmware update gate.
 Record the hardware firmware version and test result separately before
@@ -133,12 +134,21 @@ the emulator.
 
 ## Runtime smoke gate
 
-Smoke-test the packaged app with all user-installed emulator overrides removed
-or moved aside so the bundled library is necessarily selected:
+The macOS build workflow and local signed build run
+`bun scripts/smoke-packaged-pin.ts <archive>` from `projects/keepkey-vault`.
+The test launches the archive's app with a legacy library path present, reads
+all nine digits from its visible emulator canvas, rejects an incorrect PIN, and
+unlocks the disposable wallet using the next rendered grid.
+
+Smoke-test the packaged app with the default firmware selected. Leave a legacy
+library at `~/.keepkey/emulator/libkkemu.*` to check that Vault loads the
+packaged library:
 
 - Add an emulator without installing a library and confirm it reports emulator
   release `7.17.0`.
 - Create or recover a wallet and confirm OLED preview updates.
+- Unlock a test wallet with a PIN and confirm all nine OLED digits appear both
+  on the initial prompt and after a wrong PIN.
 - Stop and reopen the emulator; encrypted flash must persist.
 - Run a certified ETH→SOL ClearSign swap with labelled review and no Advanced
   Mode prompt.

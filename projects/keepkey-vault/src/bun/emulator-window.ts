@@ -458,7 +458,7 @@ const CAPTURE_TIMEOUT_MS = 5_000
  * the raw frame ring, so it captures exactly what a human looking at the
  * window would see (including the "no real display yet" idle placeholder).
  */
-export async function captureCurrentFrame(): Promise<string> {
+export async function captureCurrentFrame(requireVisible = false): Promise<string> {
   if (!emuWindow || !viewReady) {
     throw new Error(`Emulator window not ready (emuWindow=${!!emuWindow} viewReady=${viewReady}) — cannot capture`)
   }
@@ -477,7 +477,7 @@ export async function captureCurrentFrame(): Promise<string> {
       resolve: (dataUrl: string) => { clearTimeout(timer); resolve(dataUrl) },
     }
 
-    const delivered = sendToWindow('capture-request', { id })
+    const delivered = sendToWindow('capture-request', { id, requireVisible })
     if (!delivered) {
       clearTimeout(timer)
       pendingCapture = null
@@ -1092,6 +1092,16 @@ function buildEmulatorHTML(bridgePort: number, loadId: string): string {
   }
 
   function onCaptureRequest(data) {
+    if (data.requireVisible) {
+      var bounds = oledCanvas.getBoundingClientRect();
+      var style = window.getComputedStyle(oledCanvas);
+      if (!hasRealDisplay || style.visibility !== 'visible' || style.opacity === '0' ||
+          bounds.width === 0 || bounds.height === 0 ||
+          bounds.top < 0 || bounds.left < 0 || bounds.bottom > window.innerHeight || bounds.right > window.innerWidth) {
+        postBridge('/_emu/capture', { id: data.id, dataUrl: '' });
+        return;
+      }
+    }
     var dataUrl = oledCanvas.toDataURL('image/png');
     postBridge('/_emu/capture', { id: data.id, dataUrl: dataUrl });
   }

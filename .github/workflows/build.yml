@@ -394,6 +394,12 @@ jobs:
         run: make test-emu-pin KK_EMU_DYLIB="$PWD/projects/keepkey-vault/emulator-bundle/libkkemu.dylib"
         shell: bash
 
+      - name: Test PIN display delivery and emulator window reopen
+        if: runner.os == 'macOS' && matrix.tests
+        working-directory: projects/keepkey-vault
+        run: bun test src/bun/emulator-window-lifecycle.test.ts
+        shell: bash
+
       - name: Test Nu7 transparent signing on the certified alpha emulator
         if: runner.os == 'macOS' && matrix.tests
         run: make test-emu-zcash-nu7 KK_EMU_DYLIB="$PWD/projects/keepkey-vault/emulator-bundle/libkkemu.dylib"
@@ -428,6 +434,13 @@ jobs:
       # pruning and the camera copy must be in it, and nothing may rewrite it.
       - name: Verify release bundle
         run: cd projects/keepkey-vault && bun scripts/verify-release-bundle.ts stable
+        shell: bash
+
+      - name: Unlock a disposable wallet in the packaged macOS app
+        if: runner.os == 'macOS'
+        timeout-minutes: 4
+        working-directory: projects/keepkey-vault
+        run: bun scripts/smoke-packaged-pin.ts "artifacts/stable-macos-${{ matrix.expected-arch }}-keepkey-vault.app.tar.zst"
         shell: bash
 
       - name: Smoke-test packaged Monero tools without developer overrides

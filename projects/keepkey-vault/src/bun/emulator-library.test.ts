@@ -23,15 +23,17 @@ describe('emulator release library resolution', () => {
     })).toBe(bundled)
   })
 
-  test('keeps a user-installed library as an explicit override', () => {
-    const override = '/home/test/.keepkey/emulator/libkkemu.dll'
-    expect(resolveEmulatorLibPath({
-      importDir: 'C:/app/Resources/app/bun',
-      cwd: 'C:/app',
+  test('defaults to the packaged library even when a legacy library is present', () => {
+    const legacy = '/home/test/.keepkey/emulator/libkkemu.dll'
+    const bundled = '/app/Resources/app/emulator/libkkemu.dll'
+    const options = {
+      importDir: '/app/Resources/app/bun',
+      cwd: '/app',
       home: '/home/test',
-      platform: 'win32',
-      exists: path => path === override || path.endsWith('/emulator/libkkemu.dll'),
-    })).toBe(override)
+      platform: 'win32' as const,
+    }
+    expect(resolveEmulatorLibPath({ ...options, exists: path => path === legacy || path === bundled })).toBe(bundled)
+    expect(resolveEmulatorLibPath({ ...options, exists: path => path === legacy })).toBe(legacy)
   })
 
   test('selects installed builds by content ID and refuses a missing selected build', () => {
@@ -47,9 +49,12 @@ describe('emulator release library resolution', () => {
       selectEmulatorBuild(second, home)
       expect(emulatorBuildFlashName(second)).toBe(`build-${'b'.repeat(16)}`)
       expect(listEmulatorBuilds('darwin', home).map(b => [b.id, b.selected])).toEqual([[first, false], [second, true]])
-      expect(resolveEmulatorLibPath({ importDir: '/unused', home, platform: 'darwin' })).toBe(secondPath)
+      const bundled = '/app/Resources/app/emulator/libkkemu.dylib'
+      const options = { importDir: '/app/Resources/app/bun', home, platform: 'darwin' as const,
+        exists: (path: string) => path === bundled || existsSync(path) }
+      expect(resolveEmulatorLibPath(options)).toBe(secondPath)
       rmSync(secondPath)
-      expect(resolveEmulatorLibPath({ importDir: '/unused', home, platform: 'darwin' })).toBeNull()
+      expect(resolveEmulatorLibPath(options)).toBeNull()
     } finally { rmSync(home, { recursive: true, force: true }) }
   })
 })

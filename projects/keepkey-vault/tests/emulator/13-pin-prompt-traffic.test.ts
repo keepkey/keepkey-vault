@@ -16,6 +16,7 @@ import {EventEmitter} from 'node:events'
 import {existsSync} from 'node:fs'
 import * as core from '@keepkey/hdwallet-core'
 import * as Messages from '@keepkey/device-protocol/lib/messages_pb'
+import { assertPinDisplay, pinDisplaySymbols } from './pin-display'
 import {EMULATOR_UNLOCK_FIRST_REPLY_MS, EMULATOR_UNLOCK_TIMEOUT_MESSAGE} from '../../src/bun/pin-unlock'
 
 const library = process.env.KK_EMU_DYLIB
@@ -42,6 +43,7 @@ const emu = {
       kkemu_start: {args: [], returns: FFIType.i32},
       kkemu_write: {args: [FFIType.ptr, FFIType.u64, FFIType.i32], returns: FFIType.i32},
       kkemu_read: {args: [FFIType.ptr, FFIType.u64, FFIType.i32], returns: FFIType.i32},
+      ...pinDisplaySymbols,
     })
     if (ffi.symbols.kkemu_init(ptr(flashes.get(name)!), 1 << 20) || ffi.symbols.kkemu_start()) throw new Error('kkemu init')
     instance = ++instances
@@ -202,10 +204,11 @@ function newEngine() {
   logs.length = 0
 }
 
-async function enterPin(pin: string) {
+async function enterPin(pin: string, verifyDisplay = false) {
   await until(() => pins.length > 0, 'PIN request')
   pins.shift()
   const matrix = await pinMatrix()
+  if (verifyDisplay) await assertPinDisplay(ffi, matrix)
   await engine.sendPin(pin.split('').map(d => matrix.indexOf(d) + 1).join(''))
 }
 
@@ -223,16 +226,16 @@ afterEach(async () => {
 afterAll(() => { for (const f of flashes.values()) f.fill(0) })
 
 describe('PIN prompt on real emulator firmware', () => {
-  test('a wrong PIN is refused, the prompt comes back, and the right PIN unlocks', async () => {
+  test('all nine OLED digits are visible for current PIN entry and after a wrong PIN', async () => {
     await makeWallet('wrong', SEED_A, '1234')
     newEngine()
     await connect('wrong')
     expect(state()).toBe('needs_pin')
     const unlock = requestUnlock()
-    await enterPin('1111')
+    await enterPin('1111', true)
     await until(() => pinErrors.length > 0, 'PIN verdict')
     expect(pinErrors[0].code).toBe(7)
-    await enterPin('1234')
+    await enterPin('1234', true)
     await unlock
     await until(() => state() === 'ready', 'unlock')
     expect(unknownMessages()).toEqual([])
