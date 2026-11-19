@@ -418,7 +418,11 @@ function PersonalAssetPage({ chain, balance, balanceLoading = false, onBack, fir
 			setLoading(false)
 			return
 		}
-		const dbAddress = chain.chainFamily !== 'utxo' && balance?.address || null
+		// The saved balance address belongs to the default path only. For an edited
+		// path it is a DIFFERENT address than Verify on device checks, so it must not
+		// stand in while that path derives or when the device can't answer (audit v6 U1).
+		const atDefaultPath = usePath.length === chain.defaultPath.length && usePath.every((n, i) => n === chain.defaultPath[i])
+		const dbAddress = chain.chainFamily !== 'utxo' && atDefaultPath && balance?.address || null
 		await addressRequests.run(async () => {
 			const params: any = {
 				addressNList: usePath,
@@ -1609,6 +1613,8 @@ function PersonalAssetPage({ chain, balance, balanceLoading = false, onBack, fir
 							error={deriveError}
 							currentPath={isBtc && btcSelected && !watchOnly ? btcSelected.fullPath : currentPath}
 							onDerive={deriveAddress}
+							// BTC addresses come from the account/change/index controls, which the device check also uses (audit v6 U1).
+							pathEditable={!isBtc}
 							scriptType={watchOnly && isBtc ? woReceive?.scriptType : effectiveScriptType}
 							xpub={isBtc ? (watchOnly ? woReceive?.xpub : btcSelected?.xpubData?.xpub) : utxoXpub ?? undefined}
 							isBtc={isBtc}
