@@ -91,6 +91,8 @@ export interface MoneroVaultStatus {
   /** The node's last answer about the pending tx: it does not have it; discardable only if its inputs are unspent.
    *  relayNode is where it was sent (when recorded); checkedNode is the node that answered. */
   unrelayedCheck?: { state: 'unknown'; discardable: boolean; checkedAt: string; relayNode?: string; checkedNode: string }
+  /** The node has the pending tx (it was sent), but its payment proof could not be archived, so it stays pending. */
+  unrelayedProofNotSaved?: true
   /** A discarded tx that could still be mined: the next send must reuse one of its inputs. */
   discardedTxid?: string
   /** View-only scanning alone cannot prove whether received outputs were spent. */
@@ -271,6 +273,9 @@ export function createMoneroVault({ engine, confirm, getConfig, sidecar = manage
   const persistPending = () => { assertMoneroStandardWallet(engine); pendingStore.save([...pending.values()]) }
   /** The node's answer for each wallet's pending tx (this run only). */
   const checks = new Map<string, PendingCheck>()
+  /** Wallets whose pending tx the node has (it was sent) but whose payment proof could not be archived, so it stays
+   *  pending (this run only; the next connect finds it again). Shown instead of the generic "being checked" notice. */
+  const proofNotSaved = new Set<string>()
   // Discarded txs whose inputs are still unspent, per wallet, persisted (see MoneroDiscardGuard).
   const guards = new Map<string, MoneroDiscardGuard>()
   let persistenceLoaded = false
@@ -516,7 +521,7 @@ export function createMoneroVault({ engine, confirm, getConfig, sidecar = manage
         console.warn('[monero] Settled a transaction that can never land without archiving its keys: the payment-proof records could not be saved')
       }
     }
-    pending.delete(wallet); checks.delete(wallet)
+    pending.delete(wallet); checks.delete(wallet); proofNotSaved.delete(wallet)
     try { persistPending() } catch { console.warn('[monero] Could not clear a pending broadcast record') }
   }
   /** Settle a tx the node has (or just accepted). It was sent whatever happens next, so a proof that cannot be
@@ -526,6 +531,7 @@ export function createMoneroVault({ engine, confirm, getConfig, sidecar = manage
     try { settlePending(wallet) }
     catch (error) {
       if (!(error instanceof ProofNotSavedError)) throw error
+      proofNotSaved.add(wallet)
       console.warn('[monero] A sent transaction stays pending because its payment proof could not be archived')
     }
   }
@@ -550,6 +556,8 @@ export function createMoneroVault({ engine, confirm, getConfig, sidecar = manage
     }
     // Its inputs were spent on chain by another tx, so it can never land (SUPERSEDED).
     if (found.keyImages.includes('spent')) { checks.delete(wallet); settlePending(wallet, 'superseded'); return 'superseded' }
+    // The node no longer has it, so "it was sent" no longer holds.
+    proofNotSaved.delete(wallet)
     checks.set(wallet, { state: 'unknown', discardable: found.keyImages.every(state => state === 'unspent'), checkedAt: new Date().toISOString(),
       ...(record.node ? { relayNode: record.node } : {}), checkedNode: getConfig().daemonUrl })
     return 'unknown'
@@ -594,6 +602,7 @@ export function createMoneroVault({ engine, confirm, getConfig, sidecar = manage
     const result: MoneroVaultStatus = { ...status, signingReady: !signingBlocker(current), transactions: status.transactions.map(tx => ({ ...tx })), canSend: !blocker && !signingPhase, ...(signingPhase ? { signingPhase } : {}), keyImagesSynced, spendStateKnown: keyImagesSynced,
       ...(stale ? { keyImagesStale: true } : {}), ...(blocker ? { sendBlocked: blocker } : {}), ...(record ? { unrelayedTxid: record.txid } : {}),
       ...(record && checks.get(record.wallet) ? { unrelayedCheck: { ...checks.get(record.wallet)! } } : {}),
+      ...(record && proofNotSaved.has(record.wallet) ? { unrelayedProofNotSaved: true } : {}),
       ...(bound && guards.get(walletKey(current, bound.address)) ? { discardedTxid: guards.get(walletKey(current, bound.address))!.txid } : {}) }
     rememberBalance(current,result)
     return cachedBalance?.scope === current.watchScope ? {...result,cachedBalance:{...cachedBalance.value}} : result
@@ -966,6 +975,7 @@ export function createMoneroVault({ engine, confirm, getConfig, sidecar = manage
         // These inputs are now spent: another send needs a fresh key-image sync.
         synced = null
         // Saved before the broadcast, so an outcome lost to a crash or restart still blocks a second payment.
+        proofNotSaved.delete(wallet)
         pending.set(wallet, { wallet, txid: parsed.hash, txHex: Buffer.from(signed.blob).toString('hex'), createdAt: new Date().toISOString(), node: current.config.daemonUrl,
           ...('transactionKeys' in signed ? {transactionKeys:signed.transactionKeys} : {}) })
         try { persistPending() }

@@ -1444,6 +1444,102 @@ describe('N4: a tx is archived as sent only when it was sent, and an accepted br
    expect(createFilePendingStore(dir).loadSent!().map(record => [record.txid, record.outcome])).toEqual([[txid, undefined]])
   })
  })
+
+ describe('KEEPKEY-143: the status says when a sent tx stays pending only because its proof could not be saved', () => {
+  /** A store whose proof saves fail until `fixed` is set, like a full disk that is then cleared. */
+  const flakyDisk = (store: MoneroPendingStore) => {
+   const disk = { fixed: false }
+   const wrapped: MoneroPendingStore = { ...store, saveSent: records => { if (!disk.fixed) throw new Error('disk full'); store.saveSent!(records) } }
+   return { disk, store: wrapped }
+  }
+
+  test('an accepted send whose proof fails is flagged; freeing the disk and checking again clears it and archives the keys', async () => {
+   const { store } = stored('kk-monero-143-accept-')
+   const flaky = flakyDisk(store), b = streamBridge(true, flaky.store)
+   const review = await prepareStream(b)
+   const { txid } = await b.api.send({ prepareId: review.prepareId })
+   let status = await b.api.getStatus()
+   expect(status).toMatchObject({ unrelayedTxid: txid, unrelayedProofNotSaved: true, sendBlocked: 'unrelayed' })
+   expect(status.unrelayedCheck).toBeUndefined()
+   // Still failing: Check again keeps the flag.
+   b.setLookup({ state: 'pool', keyImages: ['pool'] })
+   expect(await b.api.retryRelay()).toEqual({ txid })
+   expect((await b.api.getStatus()).unrelayedProofNotSaved).toBe(true)
+   // Disk fixed: Check again archives the keys and the notice goes away.
+   flaky.disk.fixed = true
+   expect(await b.api.retryRelay()).toEqual({ txid })
+   status = await b.api.getStatus()
+   expect(status.unrelayedTxid).toBeUndefined()
+   expect(status.unrelayedProofNotSaved).toBeUndefined()
+   expect(store.loadSent!().map(record => record.txid)).toEqual([txid])
+  })
+
+  test('after a restart, connect raises the flag again while saving still fails', async () => {
+   const { dir, store } = stored('kk-monero-143-restart-')
+   const record = await unknownSend(dir)
+   const next = streamBridge(true, failingSave(store))
+   next.setLookup({ state: 'pool', keyImages: ['pool'] })
+   expect(await next.api.connect()).toMatchObject({ unrelayedTxid: record.txid, unrelayedProofNotSaved: true })
+  })
+
+  test('an unreadable proof store raises it too', async () => {
+   const { dir, store } = stored('kk-monero-143-unreadable-')
+   const record = await unknownSend(dir)
+   const next = streamBridge(true, { ...store, loadSent: () => { throw new Error('The Monero payment-proof records could not be read') } })
+   next.setLookup({ state: 'pool', keyImages: ['pool'] })
+   expect(await next.api.connect()).toMatchObject({ unrelayedTxid: record.txid, unrelayedProofNotSaved: true })
+  })
+
+  test('a proof file written by a newer app version (after a downgrade) raises it, since it can never be saved over', async () => {
+   const { dir, store } = stored('kk-monero-143-newer-')
+   const record = await unknownSend(dir)
+   writeFileSync(join(dir, 'monero-sent-transactions.json'), JSON.stringify({ version: 2, records: [] }), { mode: 0o600 })
+   const next = streamBridge(true, store)
+   next.setLookup({ state: 'pool', keyImages: ['pool'] })
+   expect(await next.api.connect()).toMatchObject({ unrelayedTxid: record.txid, unrelayedProofNotSaved: true })
+   expect(JSON.parse(readFileSync(join(dir, 'monero-sent-transactions.json'), 'utf8'))).toEqual({ version: 2, records: [] })
+  })
+
+  test('Discard of a flagged tx reports it as sent and keeps the notice', async () => {
+   const { dir, store } = stored('kk-monero-143-discard-')
+   const record = await unknownSend(dir)
+   const next = streamBridge(true, failingSave(store))
+   next.setLookup({ state: 'pool', keyImages: ['pool'] })
+   await next.api.connect()
+   expect(await next.api.discardPending({ confirm: true })).toEqual({ outcome: 'sent', txid: record.txid })
+   expect(await next.api.getStatus()).toMatchObject({ unrelayedTxid: record.txid, unrelayedProofNotSaved: true })
+  })
+
+  test('a plain unknown outcome is never flagged', async () => {
+   const { dir, store } = stored('kk-monero-143-unknown-')
+   const record = await unknownSend(dir)
+   const next = streamBridge(true, store)
+   const status = await next.api.connect()
+   expect(status.unrelayedTxid).toBe(record.txid)
+   expect(status.unrelayedProofNotSaved).toBeUndefined()
+   expect(status.unrelayedCheck).toMatchObject({ state: 'unknown' })
+  })
+
+  test('if the node later no longer has the tx, the flag goes; a failed lookup keeps the last answer', async () => {
+   const { dir, store } = stored('kk-monero-143-dropped-')
+   const record = await unknownSend(dir)
+   const next = streamBridge(true, failingSave(store))
+   next.setLookup({ state: 'pool', keyImages: ['pool'] })
+   await next.api.connect()
+   // The node cannot be reached at all (lookup and relay fail): the last answer (it was sent) still stands.
+   next.setLookup(new Error('The Monero daemon is unavailable'))
+   next.setRelayError(new Error('ETIMEDOUT'))
+   await expect(next.api.retryRelay()).rejects.toThrow('broadcast result is unknown')
+   expect((await next.api.getStatus()).unrelayedProofNotSaved).toBe(true)
+   // The node now answers that it does not have it: it is no longer known to be sent.
+   next.setLookup({ state: 'unknown', keyImages: ['unspent'] })
+   await expect(next.api.retryRelay()).rejects.toThrow('broadcast result is unknown')
+   const status = await next.api.getStatus()
+   expect(status.unrelayedTxid).toBe(record.txid)
+   expect(status.unrelayedProofNotSaved).toBeUndefined()
+   expect(status.unrelayedCheck).toMatchObject({ state: 'unknown' })
+  })
+ })
 })
 
 describe('N2: unreadable payment-proof records never block the other guards or get overwritten', () => {

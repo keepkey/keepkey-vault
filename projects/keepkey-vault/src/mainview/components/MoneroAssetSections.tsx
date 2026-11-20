@@ -365,7 +365,9 @@ export function MoneroSendSection({ monero, client, privateMode = false }: { mon
 			{verification.error && <Box role="alert" mb="3"><Text fontSize="12px" color="var(--rose)">{verification.error}</Text><Button size="xs" mt="2" onClick={() => { void verification.retry() }}>{uiText("Try again")}</Button></Box>}
 			{wallet.unrelayedTxid && (
 				<Box role="alert" mb="4" {...cardProps} borderColor="var(--gold)">
-					<Text fontSize="13px" color="var(--gold)">{uiText("Your last send is still being checked. New sends are paused. Checking again resends the same transaction and cannot pay twice.")}</Text>
+					{wallet.unrelayedProofNotSaved
+						? <Text data-monero-proof-not-saved="" fontSize="13px" color="var(--gold)">{uiText("Your last transaction was sent, but its payment proof could not be saved, so new sends are paused until the proof is saved. Check free disk space and the app folder's permissions, or update the app if a newer version was used on this computer, then select Check again. Nothing can be paid twice.")}</Text>
+						: <Text fontSize="13px" color="var(--gold)">{uiText("Your last send is still being checked. New sends are paused. Checking again resends the same transaction and cannot pay twice.")}</Text>}
 
 					<Button data-monero-retry-relay="" mt="2" size="xs" variant="outline" onClick={() => { void retry() }} disabled={!!busy} className="electrobun-webkit-app-region-no-drag">{busy === "retry" ? <Spinner size="xs" /> : null}{uiText("Check again")}</Button>
 					<details style={{ marginTop: 12, fontSize: 12, color: "var(--text-3)" }}><summary style={{ cursor: "pointer" }}>{uiText("Recovery details")}</summary>

@@ -196,6 +196,13 @@ describe('C3: Send', () => {
     expect(ui.formWhileUnrelayed).toBe(false)
     expect(ui.retryCalls).toBe(1)
     expect(ui.discardWithoutCheck).toBe(false)
+    expect(ui.proofNoticeWhenUnknown).toBe(false)
+  })
+  test('a sent tx whose payment proof could not be saved says so, and how to fix it, instead of "still being checked"', () => {
+    expect(ui.proofNotSaved).toEqual({
+      text: "Your last transaction was sent, but its payment proof could not be saved, so new sends are paused until the proof is saved. Check free disk space and the app folder's permissions, or update the app if a newer version was used on this computer, then select Check again. Nothing can be paid twice.",
+      generic: false, txid: 'cd'.repeat(32), form: false, discard: false, retryCalls: 1,
+    })
   })
   test('discard is offered only after the node says unknown with unspent inputs, and asks first', () => {
     expect(ui.checkText).toContain('it does not have this transaction, and its inputs are still unspent')

@@ -229,6 +229,7 @@
   "m2768ac54": "Review interval in days",
   "m278a7bec": "· unavailable",
   "m27a29362": "Your last send is still being checked. New sends are paused. Checking again resends the same transaction and cannot pay twice.",
+  "m79fba363": "Your last transaction was sent, but its payment proof could not be saved, so new sends are paused until the proof is saved. Check free disk space and the app folder's permissions, or update the app if a newer version was used on this computer, then select Check again. Nothing can be paid twice.",
   "m27b0bf83": "No held assets match",
   "m27d0660e": "Current password is not cached",
   "m27e0ab76": "Check every owner before deploying. These addresses will control this account.",

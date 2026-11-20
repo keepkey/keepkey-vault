@@ -641,6 +641,8 @@ export interface MoneroStatus {
   keyImagesStale?: boolean
   /** The node's last answer about the pending tx: it does not have it; discardable only if its inputs are unspent. */
   unrelayedCheck?: { state: 'unknown'; discardable: boolean; checkedAt: string; relayNode?: string; checkedNode: string }
+  /** The node has the pending tx (it was sent), but its payment proof could not be saved: new sends stay paused until it is. */
+  unrelayedProofNotSaved?: boolean
   /** A discarded tx that another node could still mine: the next send must reuse one of its inputs. */
   discardedTxid?: string
   spendStateKnown: boolean
