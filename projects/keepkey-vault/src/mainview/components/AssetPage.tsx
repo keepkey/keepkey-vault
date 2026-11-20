@@ -177,7 +177,6 @@ function PersonalAssetPage({ chain, balance, balanceLoading = false, onBack, fir
 	// which Dashboard merges into the `balance` prop — a local snapshot would only
 	// shadow newer push/bulk-refresh data for the rest of the mount.
 	const [refreshing, setRefreshing] = useState(false)
-	const [refreshError, setRefreshError] = useState<string | null>(null)
 	// Last time THIS page saw fresh data for the chain (manual refresh success
 	// or a balance push). Mount-time data is of unknown age, so no stamp then —
 	// the Synced badge only shows a time it can vouch for.
@@ -188,37 +187,29 @@ function PersonalAssetPage({ chain, balance, balanceLoading = false, onBack, fir
 	const handleRefresh = useCallback(async () => {
 		if (isMonero) { setRefreshing(true); try { await monero.refresh() } finally { setRefreshing(false) } return }
 		setRefreshing(true)
-		setRefreshError(null)
 		try {
 			// 90s: backend budget is 60s of Pioneer time plus device derivation —
 			// the 30s rpc default made slow forced refreshes fail invisibly.
 			const refreshed = await rpcRequest<ChainBalance>("getBalance", { chainId: chain.id }, 90000)
 			if (refreshed.txPending) return // the last tx has not landed yet: "Cached", not a failure (H3)
-			if (refreshed.syncState === 'degraded' || refreshed.syncState === 'stale') {
-				throw new Error('Balance could not be verified. Showing the last known balance when available.')
-			}
+			// Not refreshed yet is not an error: the chip shows "Cached · <time>" (or
+			// "Balance unverified") until a read lands. Never cry wolf over a missed read.
+			if (refreshed.syncState === 'degraded' || refreshed.syncState === 'stale') throw new Error(`${chain.id} not refreshed yet`)
 			setRefreshNonce(n => n + 1)
 			setLastSyncedAt(new Date())
 		} catch (e) {
 			console.warn(`[AssetPage] refresh ${chain.id} failed:`, e)
-			setRefreshError(e instanceof Error ? e.message : String(e))
 			setNativeProofEpoch(n => n + 1)
 		} finally {
 			setRefreshing(false)
 		}
 	}, [chain.id, isMonero, monero.refresh])
-	// A fresh balance for this chain (from any refresh path — incl. a backend
-	// getBalance that outlived the 90s rpc timeout above) supersedes the error:
-	// keeping the chip up next to just-updated data would be a false alarm.
+	// A fresh balance for this chain from any refresh path (incl. a backend
+	// getBalance that outlived the 90s rpc timeout above) updates "Synced · <time>".
 	useEffect(() => {
 		return onRpcMessage("balance-updated", (updated: ChainBalance) => {
-			if (updated.chainId !== chain.id) return
-			// A read that started before the last tx could land is not a failure:
-			// the row stays "Cached" until a later read includes the tx (H3).
-			if (updated.txPending) return
-			if (updated.syncState === 'degraded' || updated.syncState === 'stale') {
-				setRefreshError('Balance could not be verified. Showing the last known balance when available.')
-			} else { setRefreshError(null); setLastSyncedAt(new Date()) }
+			if (updated.chainId !== chain.id || updated.txPending) return
+			if (updated.syncState !== 'degraded' && updated.syncState !== 'stale') setLastSyncedAt(new Date())
 		})
 	}, [chain.id])
 
@@ -1221,11 +1212,6 @@ function PersonalAssetPage({ chain, balance, balanceLoading = false, onBack, fir
 										    badge on the right column was removed below). */}
 										{isMonero ? (
 											<MoneroStatusChip view={moneroView} />
-										) : refreshError ? (
-											<Flex align="center" gap="1" color="var(--rose)" className="v3-glass-chip" px="2" py="0.5" title={refreshError} cursor="help">
-												<Box w="6px" h="6px" borderRadius="full" bg="var(--rose)" />
-												<Text fontSize="10px" fontFamily="mono" fontWeight="500" letterSpacing="0.02em">{t("refreshFailed")}</Text>
-											</Flex>
 									) : balanceReadPending ? (
 										<Flex align="center" gap="1.5" minH="20px" color="var(--text-2)" role="status" data-asset-balance-loading>
 											<Spinner size="xs" color="var(--gold)" aria-label={uiText("Refreshing balance")} />

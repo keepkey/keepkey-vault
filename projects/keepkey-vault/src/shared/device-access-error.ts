@@ -50,8 +50,9 @@ export async function retryWhileDeviceBusy<T>(run: () => Promise<T>, isCurrent: 
   }
 }
 
-/** A read the backend refused only because the KeepKey is locked (device-rpc.ts). */
-const UNLOCK_NEEDED = /unlock KeepKey to load this account$/i
+/** A read the backend refused only because the KeepKey is locked (device-rpc.ts,
+ * or device-operation.ts when a passive lease finds a fresh lock). */
+const UNLOCK_NEEDED = /(?:unlock KeepKey to load this account|^KeepKey is locked\. Unlock it before requesting new device data\.)$/i
 
 let unlockInFlight: Promise<void> | null = null
 
