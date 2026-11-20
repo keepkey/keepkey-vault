@@ -3280,6 +3280,17 @@ function PersonalDashboard({ capabilities, isEmulator, onLoaded, watchOnly, watc
 				</Suspense>
 			)}
 
+			{/* An in-flight swap banner reopens its swap here (the Activity page mounts its own). */}
+			{activityResumeSwap && (
+				<Suspense fallback={null}>
+					<LazySwapDialog
+						open={true}
+						onClose={() => setActivityResumeSwap(null)}
+						resumeSwap={activityResumeSwap}
+					/>
+				</Suspense>
+			)}
+
 			{showAddChain && (
 				<AddChainDialog
 					onClose={() => setShowAddChain(false)}
