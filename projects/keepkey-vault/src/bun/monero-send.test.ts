@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test'
+import { describe, expect, spyOn, test } from 'bun:test'
 import { Database } from 'bun:sqlite'
 import { createMoneroWatchStore, type MoneroWatchStore } from './monero-watch-store'
 import { existsSync, mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
@@ -1249,10 +1249,201 @@ test('a payment-proof archive failure keeps the recoverable pending record', asy
  const store = createFilePendingStore(dir)
  const b = streamBridge(true, {...store,saveSent(){throw Error('disk full')}})
  const review = await prepareStream(b)
- await expect(b.api.send({prepareId:review.prepareId})).rejects.toThrow('transaction remains pending')
+ // The node accepted it, so the send succeeded (N4); the keys stay in the pending record.
+ const { txid } = await b.api.send({prepareId:review.prepareId})
  expect(b.calls.relays).toHaveLength(1)
  expect(b.api.pendingCount()).toBe(1)
+ expect(store.load()[0]).toMatchObject({ txid })
  expect(store.load()[0].transactionKeys).toBeDefined()
+})
+
+describe('N4: a tx is archived as sent only when it was sent, and an accepted broadcast is never reported as failed', () => {
+ const SENT = 'monero-sent-transactions.json'
+ const stored = (prefix: string) => {
+  const dir = mkdtempSync(join(tmpdir(), prefix))
+  return { dir, store: createFilePendingStore(dir) }
+ }
+ const failingSave = (store: MoneroPendingStore): MoneroPendingStore => ({ ...store, saveSent: () => { throw new Error('disk full') } })
+ /** A first broadcast whose outcome is unknown, so the tx is pending with its keys on disk. */
+ const unknownSend = async (dir: string) => {
+  const first = streamBridge(true, createFilePendingStore(dir))
+  const review = await prepareStream(first)
+  first.setRelayError(new Error('ETIMEDOUT'))
+  await expect(first.api.send({ prepareId: review.prepareId })).rejects.toThrow('broadcast result is unknown')
+  return createFilePendingStore(dir).load()[0]
+ }
+ /** Warnings logged while `run` runs; they must never carry a txid or key material. */
+ const warnings = async (run: () => Promise<unknown>) => {
+  const logged: string[] = [], warn = spyOn(console, 'warn').mockImplementation((...args: unknown[]) => { logged.push(args.map(String).join(' ')) })
+  try { await run() } finally { warn.mockRestore() }
+  return logged
+ }
+ const leaksNothing = (logged: string[], record: { txid: string; transactionKeys?: { txKey: string } }) => {
+  for (const line of logged) {
+   expect(line).not.toContain(record.txid)
+   expect(line).not.toContain(record.transactionKeys!.txKey)
+  }
+ }
+
+ describe('a tx that never landed is archived labelled, with its keys, never as sent', () => {
+  test('a first broadcast the daemon rejected', async () => {
+   const { dir, store } = stored('kk-monero-n4-reject-')
+   const b = streamBridge(true, store)
+   const review = await prepareStream(b)
+   b.setRelayError(new Error('The daemon rejected the transaction: fee too low'))
+   await expect(b.api.send({ prepareId: review.prepareId })).rejects.toThrow('fee too low')
+   expect(b.api.pendingCount()).toBe(0)
+   const [archived] = store.loadSent!()
+   expect(archived.outcome).toBe('rejected')
+   expect(archived.transactionKeys).toBeDefined()
+   // A node that lied about the rejection cannot cost the payment-proof keys; the label comes with them.
+   expect(b.api.getTransactionKey(archived.txid)).toEqual({ ...archived.transactionKeys!, outcome: 'rejected' })
+   expect(JSON.parse(readFileSync(join(dir, SENT), 'utf8')).records[0].outcome).toBe('rejected')
+  })
+
+  test('a superseded tx (its inputs spent on chain by another tx), settled on connect', async () => {
+   const { dir, store } = stored('kk-monero-n4-superseded-')
+   const record = await unknownSend(dir)
+   const next = streamBridge(true, store)
+   next.setLookup({ state: 'unknown', keyImages: ['spent'] })
+   expect((await next.api.connect()).unrelayedTxid).toBeUndefined()
+   expect(next.api.pendingCount()).toBe(0)
+   expect(store.loadSent!()).toEqual([{ ...record, outcome: 'superseded' }])
+   expect(next.api.getTransactionKey(record.txid)).toEqual({ ...record.transactionKeys!, outcome: 'superseded' })
+  })
+
+  test('"double spend" that the node says another tx made', async () => {
+   const { store } = stored('kk-monero-n4-double-spend-')
+   const b = streamBridge(true, store)
+   const review = await prepareStream(b)
+   b.setRelayError(new Error('The daemon rejected the transaction: double spend'))
+   b.setLookup({ state: 'unknown', keyImages: ['spent'] })
+   await expect(b.api.send({ prepareId: review.prepareId })).rejects.toThrow('can never be sent')
+   expect(b.api.pendingCount()).toBe(0)
+   expect(store.loadSent!().map(record => record.outcome)).toEqual(['superseded'])
+  })
+
+  test('if archiving fails it still settles, with the daemon reason and a warning naming no tx', async () => {
+   const { store } = stored('kk-monero-n4-reject-save-')
+   // Capture the pending record written before the broadcast, to check the warnings against it.
+   const written: Parameters<MoneroPendingStore['save']>[0] = []
+   const b = streamBridge(true, { ...failingSave(store), save: records => { written.push(...records); store.save(records) } })
+   const review = await prepareStream(b)
+   b.setRelayError(new Error('The daemon rejected the transaction: fee too low'))
+   const logged = await warnings(() => expect(b.api.send({ prepareId: review.prepareId })).rejects.toThrow('fee too low'))
+   expect(b.api.pendingCount()).toBe(0)
+   expect(store.load()).toEqual([])
+   expect(logged.some(line => line.includes('can never land without archiving its keys'))).toBe(true)
+   const [record] = written
+   leaksNothing(logged, record)
+   expect(b.api.getTransactionKey(record.txid)).toBeNull()
+  })
+
+  test('a superseded tx whose archive fails does not block connecting or the wallet', async () => {
+   const { dir, store } = stored('kk-monero-n4-superseded-save-')
+   const record = await unknownSend(dir)
+   const next = streamBridge(true, failingSave(store))
+   next.setLookup({ state: 'unknown', keyImages: ['spent'] })
+   const logged = await warnings(async () => { expect((await next.api.connect()).unrelayedTxid).toBeUndefined() })
+   expect(next.api.pendingCount()).toBe(0)
+   leaksNothing(logged, record)
+  })
+ })
+
+ test('a sent tx is archived unlabelled; a discarded one too, since another node may still mine it', async () => {
+  const { store } = stored('kk-monero-n4-sent-')
+  const b = streamBridge(true, store)
+  const review = await prepareStream(b)
+  const { txid } = await b.api.send({ prepareId: review.prepareId })
+  expect(store.loadSent!().map(record => [record.txid, record.outcome])).toEqual([[txid, undefined]])
+
+  const other = stored('kk-monero-n4-discard-')
+  const record = await unknownSend(other.dir)
+  const next = streamBridge(true, other.store)
+  await next.api.connect()
+  next.setLookup({ state: 'unknown', keyImages: ['unspent'] })
+  expect(await next.api.discardPending({ confirm: true })).toEqual({ outcome: 'discarded', txid: record.txid })
+  expect(other.store.loadSent!()).toEqual([record])
+ })
+
+ test('archived labels are validated: an unknown label is kept aside, older unlabelled records still load', async () => {
+  const { dir, store } = stored('kk-monero-n4-labels-')
+  const record = await unknownSend(dir)
+  writeFileSync(join(dir, SENT), JSON.stringify({ version: 1, records: [record] }), { mode: 0o600 })
+  expect(store.loadSent!()).toEqual([record])
+  writeFileSync(join(dir, SENT), JSON.stringify({ version: 1, records: [{ ...record, outcome: 'rejected' }] }), { mode: 0o600 })
+  expect(store.loadSent!()).toEqual([{ ...record, outcome: 'rejected' }])
+  writeFileSync(join(dir, SENT), JSON.stringify({ version: 1, records: [{ ...record, outcome: 'sent' }] }), { mode: 0o600 })
+  const logged = await warnings(async () => { expect(store.loadSent!()).toEqual([]) })
+  expect(readdirSync(dir).some(name => name.startsWith('monero-sent-transactions.unreadable-'))).toBe(true)
+  expect(JSON.parse(readFileSync(join(dir, SENT), 'utf8'))).toEqual({ version: 1, records: [] })
+  leaksNothing(logged, record)
+ })
+
+ describe('the node has the tx but its proof cannot be archived: the send succeeded', () => {
+  test('first broadcast accepted: the txid is returned, the keys stay pending, the warning names no tx', async () => {
+   const { store } = stored('kk-monero-n4-accept-save-')
+   const b = streamBridge(true, failingSave(store))
+   const review = await prepareStream(b)
+   let txid = ''
+   const logged = await warnings(async () => { ({ txid } = await b.api.send({ prepareId: review.prepareId })) })
+   expect(b.calls.relays).toHaveLength(1)
+   expect(b.api.pendingCount()).toBe(1)
+   const [record] = store.load()
+   expect(record.txid).toBe(txid)
+   expect(b.api.getTransactionKey(txid)).toEqual(record.transactionKeys!)
+   expect(logged.some(line => line.includes('stays pending because its payment proof could not be archived'))).toBe(true)
+   leaksNothing(logged, record)
+  })
+
+  test('"double spend" made by this tx: the txid is returned', async () => {
+   const { store } = stored('kk-monero-n4-lookup-save-')
+   const b = streamBridge(true, failingSave(store))
+   const review = await prepareStream(b)
+   b.setRelayError(new Error('The daemon rejected the transaction: double spend'))
+   b.setLookup({ state: 'mined', height: 90, keyImages: ['spent'] })
+   const { txid } = await b.api.send({ prepareId: review.prepareId })
+   expect(store.load()[0]).toMatchObject({ txid })
+   expect(store.load()[0].transactionKeys).toBeDefined()
+  })
+
+  test('Retry broadcast returns the txid without relaying again', async () => {
+   const { dir, store } = stored('kk-monero-n4-retry-save-')
+   const record = await unknownSend(dir)
+   const next = streamBridge(true, failingSave(store))
+   await next.api.connect()
+   next.setLookup({ state: 'pool', keyImages: ['pool'] })
+   expect(await next.api.retryRelay()).toEqual({ txid: record.txid })
+   expect(next.calls.relays).toHaveLength(0)
+   expect(next.api.pendingCount()).toBe(1)
+  })
+
+  test('Discard reports it as sent, writes no guard and keeps it pending', async () => {
+   const { dir, store } = stored('kk-monero-n4-discard-sent-')
+   const record = await unknownSend(dir)
+   const next = streamBridge(true, failingSave(store))
+   await next.api.connect()
+   next.setLookup({ state: 'pool', keyImages: ['pool'] })
+   expect(await next.api.discardPending({ confirm: true })).toEqual({ outcome: 'sent', txid: record.txid })
+   expect(next.api.pendingCount()).toBe(1)
+   expect(existsSync(join(dir, 'monero-discarded-broadcast.json'))).toBe(false)
+   expect(store.load()[0].transactionKeys).toEqual(record.transactionKeys)
+  })
+
+  test('the tx left pending is archived and cleared on the next connect once saving works', async () => {
+   const { dir, store } = stored('kk-monero-n4-recover-')
+   const b = streamBridge(true, failingSave(store))
+   const review = await prepareStream(b)
+   const { txid } = await b.api.send({ prepareId: review.prepareId })
+   expect(b.api.pendingCount()).toBe(1)
+
+   const next = streamBridge(true, createFilePendingStore(dir))
+   next.setLookup({ state: 'pool', keyImages: ['pool'] })
+   expect((await next.api.connect()).unrelayedTxid).toBeUndefined()
+   expect(next.api.pendingCount()).toBe(0)
+   expect(createFilePendingStore(dir).loadSent!().map(record => [record.txid, record.outcome])).toEqual([[txid, undefined]])
+  })
+ })
 })
 
 describe('N2: unreadable payment-proof records never block the other guards or get overwritten', () => {
@@ -1352,11 +1543,13 @@ describe('N2: unreadable payment-proof records never block the other guards or g
    const { store, saves } = unreadable(dir)
    const b = streamBridge(true, store)
    const review = await prepareStream(b)
-   await expect(b.api.send({ prepareId: review.prepareId })).rejects.toThrow('transaction remains pending')
+   // Broadcast succeeded, so the send reports its txid (N4) while the tx keeps its keys pending.
+   const { txid } = await b.api.send({ prepareId: review.prepareId })
    expect(b.calls.relays).toHaveLength(1)
    expect(saves).toEqual([])
    expect(b.api.pendingCount()).toBe(1)
    const record = createFilePendingStore(dir).load()[0]
+   expect(record.txid).toBe(txid)
    expect(b.api.getTransactionKey(record.txid)).toEqual(record.transactionKeys!)
    expect(() => b.api.getTransactionKey('00'.repeat(32))).toThrow('payment-proof records could not be read')
   })

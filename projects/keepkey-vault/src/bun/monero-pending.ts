@@ -17,6 +17,15 @@ export interface MoneroPendingBroadcast {
   /** The node the bytes were relayed to (a later check against another node is said to be one). */
   node?: string
 }
+/** Why a settled tx that never landed still has its keys archived. The node's word that it never will (an explicit
+ *  first-broadcast rejection, or its inputs spent by another tx) cannot be verified and may come from a remote node
+ *  that lies, so the keys are kept, labelled so the tx is never counted as sent (audit v6 N4). */
+export type MoneroUnsentOutcome = 'rejected' | 'superseded'
+/** An archived payment-proof record. No `outcome`: it was sent (the node had it), or discarded while its outcome was
+ *  unknown, since another node may still mine it. Records from before N4 have none either. */
+export interface MoneroSentRecord extends MoneroPendingBroadcast {
+  outcome?: MoneroUnsentOutcome
+}
 /** A pending tx the user discarded. Until its inputs are spent, the wallet's next send must reuse one of
  *  them, so the discarded tx (which another node may still mine) and the new one cannot both land. */
 export interface MoneroDiscardGuard {
@@ -29,8 +38,8 @@ export interface MoneroDiscardGuard {
 export interface MoneroPendingStore {
   load(): MoneroPendingBroadcast[]
   save(records: MoneroPendingBroadcast[]): void
-  loadSent?(): MoneroPendingBroadcast[]
-  saveSent?(records: MoneroPendingBroadcast[]): void
+  loadSent?(): MoneroSentRecord[]
+  saveSent?(records: MoneroSentRecord[]): void
   /** True when damaged proof records were kept aside, so a key that is not found may be among them. */
   hasUnreadableCopies?(): boolean
   loadGuards?(): MoneroDiscardGuard[]
@@ -52,6 +61,14 @@ export function validPendingBroadcast(value: unknown): MoneroPendingBroadcast | 
   } catch { return null }
   return { wallet: v.wallet, txid: v.txid, txHex: v.txHex, createdAt: v.createdAt,
     ...(v.transactionKeys ? {transactionKeys: {txKey:v.transactionKeys.txKey,additionalTxKeys:[...v.transactionKeys.additionalTxKeys]}} : {}), ...(v.node === undefined ? {} : { node: v.node }) }
+}
+/** A pending-broadcast record plus its archive label; an unknown label fails validation (the record is kept aside). */
+export function validSentRecord(value: unknown): MoneroSentRecord | null {
+  const record = validPendingBroadcast(value)
+  if (!record) return null
+  const outcome = (value as MoneroSentRecord).outcome
+  if (outcome === undefined) return record
+  return outcome === 'rejected' || outcome === 'superseded' ? { ...record, outcome } : null
 }
 const validNode = (node: unknown) => typeof node === 'string' && node.length <= 2048 && /^https?:\/\//.test(node)
 export function validDiscardGuard(value: unknown): MoneroDiscardGuard | null {
@@ -90,7 +107,7 @@ export function createFilePendingStore(directory: string): MoneroPendingStore {
       // A file from a newer app version is not damaged: never rewrite it (e.g. after a downgrade). Throwing
       // sends the vault down its conservative path, which writes nothing over the store.
       if (version !== undefined && version !== 1) throw new Error('The Monero payment-proof records could not be read')
-      const valid = (records ?? []).map(validPendingBroadcast).filter((r: MoneroPendingBroadcast | null): r is MoneroPendingBroadcast => !!r)
+      const valid = (records ?? []).map(validSentRecord).filter((r: MoneroSentRecord | null): r is MoneroSentRecord => !!r)
       if (records && valid.length === records.length) return valid
       // Unparseable, an unknown shape, or records that fail validation: the next save would drop those
       // keys for good. Keep a copy of the original aside (audit v6 N2), then continue with what is valid.
