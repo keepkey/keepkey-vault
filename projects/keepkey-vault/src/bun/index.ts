@@ -312,6 +312,7 @@ import { CHAINS, customChainToChainDef, isChainSupported, hiveRolePath, btcTapro
 import { versionCompare } from "../shared/firmware-versions"
 import { supportsZcashPrivacyBuild } from "./zcash-capability"
 import type { ChainDef } from "../shared/chains"
+import { hardenedAccount } from "../shared/bip32-account"
 import { BtcAccountManager } from "./btc-accounts"
 import { alreadySigned, analyze as analyzePsbt, deriveAddress as deriveBtcAddress, feeFromPrevTxs, finalizeSigned, parseForBroadcast, toSignTx, type BtcPsbtScriptType, type PsbtAnalysis } from "./btc-psbt/psbt"
 import { accountPathFromXpub, formatPath, masterFingerprintFromDepth1Xpub, toSlip132, toStandardXpub, writeElectrumWallet } from "./btc-psbt/codec"
@@ -8467,7 +8468,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				if (!engine.wallet) throw new Error('No device connected')
 				const account = params?.account ?? 0
 				const wallet = engine.wallet
-				const path = [0x80000000 + 44, 0x80000000 + 133, 0x80000000 + account, 0, 0]
+				const path = [0x80000000 + 44, 0x80000000 + 133, hardenedAccount(account), 0, 0]
 				const addressResult = await wallet.btcGetAddress({
 					addressNList: path, coin: "Zcash", scriptType: "p2pkh", showDisplay: false,
 				})

@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { MAX_ACCOUNT_INDEX } from '../shared/bip32-account'
 
 // ═══════════════════════════════════════════════════════════════════════
 // Shared primitives
@@ -158,7 +159,7 @@ export const TxBuildRequest = z.object({
   amount: z.string().optional(),
   isMax: z.boolean().optional(),
   memo: z.string().max(256).optional(),
-  accountIndex: z.number().int().min(0).optional(),
+  accountIndex: z.number().int().min(0).max(MAX_ACCOUNT_INDEX).optional(),
   scriptType: z.string().max(32).optional(),
 }).strip()
 
@@ -672,12 +673,12 @@ export const SendCharacterRequest = z.object({
 export const ZcashInitRequest = z.object({
   seed_hex: z.string().optional(),
   from_device: z.boolean().optional(),
-  account: z.number().int().min(0).optional(),
+  account: z.number().int().min(0).max(MAX_ACCOUNT_INDEX).optional(),
 }).passthrough()
 
 /** POST /api/zcash/shielded/display-address */
 export const ZcashDisplayAddressRequest = z.object({
-  account: z.number().int().min(0).optional(),
+  account: z.number().int().min(0).max(MAX_ACCOUNT_INDEX).optional(),
 }).passthrough()
 
 /** POST /api/zcash/shielded/scan */
@@ -692,7 +693,7 @@ export const ZcashScanRequest = z.object({
 export const ZcashBuildRequest = z.object({
   recipient: z.string().min(1),
   amount: z.number().positive().max(2_100_000_000_000_000),
-  account: z.number().int().min(0).optional(),
+  account: z.number().int().min(0).max(MAX_ACCOUNT_INDEX).optional(),
   memo: z.string().optional(),
 }).passthrough()
 
@@ -841,7 +842,7 @@ export const SwapQuoteHeadlessRequest = z.object({
   amount: SwapAmount,
   fromAddress: z.string().min(1),
   toAddress: z.string().min(1),
-  fromEvmAddressIndex: z.number().int().min(0).max(2147483647).optional(),
+  fromEvmAddressIndex: z.number().int().min(0).max(MAX_ACCOUNT_INDEX).optional(),
   slippageBps: z.number().int().min(10).max(5000).optional(),
   isMax: z.boolean().optional(),
   feeLevel: z.number().optional(),
@@ -865,7 +866,7 @@ export const SwapExecuteHeadlessRequest = z.object({
   feeLevel: z.number().optional(),
   fromAddressOverride: z.string().optional(),
   toAddressOverride: z.string().optional(),
-  fromEvmAddressIndex: z.number().int().min(0).max(2147483647).optional(),
+  fromEvmAddressIndex: z.number().int().min(0).max(MAX_ACCOUNT_INDEX).optional(),
   integration: z.string().optional(),
   swapper: z.string().optional(),
   tokenDecimals: z.number().optional(),

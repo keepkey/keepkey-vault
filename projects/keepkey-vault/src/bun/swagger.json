@@ -4827,7 +4827,8 @@
                   "accountIndex": {
                     "type": "integer",
                     "minimum": 0,
-                    "description": "Account N. Bitcoin: any account added in Desktop. Other UTXO chains: any N when scriptType is given, else only 0. Non-UTXO chains: only 0."
+                    "maximum": 2147483647,
+                    "description": "Account N, from 0 to 2147483647 (2^31 - 1); larger is 400 INVALID_REQUEST. Bitcoin: any account added in Desktop. Other UTXO chains: any N when scriptType is given, else only 0. Non-UTXO chains: only 0."
                   },
                   "scriptType": {
                     "type": "string",
