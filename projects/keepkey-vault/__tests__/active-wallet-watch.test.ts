@@ -1,13 +1,15 @@
-import { expect, test } from 'bun:test'
+import { describe, expect, test } from 'bun:test'
 import { createActiveWalletWatch, ownedWatchKey, refreshWatchedChain, selectOwnedWatches, type OwnedWatch } from '../src/bun/active-wallet-watch'
 import type { BalanceRefreshScope } from '../src/bun/post-tx-balance'
 import { utxoAccountScriptPaths } from '../src/bun/chain-scan'
 import { CHAINS } from '../src/shared/chains'
 import type { ChainBalance, RecentActivity } from '../src/shared/types'
 import { BALANCE_CACHE_QUIET_WINDOW_MS } from '../src/shared/balance-cache-policy'
+import { createChainBackoff } from '../src/bun/chain-backoff'
+import { MAX_AUTO_RETRIES } from '../src/bun/active-wallet-watch'
 const ltc = CHAINS.find(chain => chain.id === 'litecoin')!
 const watches = [0, 1].flatMap(account => utxoAccountScriptPaths(ltc, account).map(path => ({ address: `${path.scriptType}-${path.path[0]}-${account}`, networkId: ltc.networkId, chainId: ltc.id, caip: ltc.caip, account: true, path: path.path.join('/') })))
-function harness(refresh?: (hint: any, isCurrent: () => boolean) => Promise<void>) {
+function harness(refresh?: (hint: any, isCurrent: () => boolean) => Promise<void>, extra: Partial<Parameters<typeof createActiveWalletWatch>[0]> = {}) {
   let clock = 0, ready = true
   let scope: BalanceRefreshScope = { epoch: 1, deviceId: 'device', walletId: 'wallet-A', wallet: {} }
   const timers: Array<{ run: () => void; due: number; cleared?: boolean }> = [], leases: any[] = [], refreshed: any[] = [], incoming: any[] = [], statuses: any[] = []
@@ -16,14 +18,14 @@ function harness(refresh?: (hint: any, isCurrent: () => boolean) => Promise<void
     start: (addresses, onEvent, onStatus) => leases.push({ addresses, onEvent, onStatus }), stop: () => { stops++ },
     refresh: async (hint, isCurrent) => { refreshed.push(hint); await refresh?.(hint, isCurrent) },
     onIncoming: (_watch, data) => incoming.push(data), onStatus: value => statuses.push(value), now: () => clock,
-    setTimer: (run, ms) => { const timer = { run, due: clock + ms }; timers.push(timer); return timer }, clearTimer: timer => { (timer as any).cleared = true } })
+    setTimer: (run, ms) => { const timer = { run, due: clock + ms }; timers.push(timer); return timer }, clearTimer: timer => { (timer as any).cleared = true }, ...extra })
   const flush = async () => { for (let i = 0; i < 12; i++) await Promise.resolve() }
   async function tick() {
     const timer = timers.filter(timer => !timer.cleared).sort((a, b) => a.due - b.due)[0]
     if (!timer) return false
     timer.cleared = true; clock = Math.max(clock, timer.due); timer.run(); await flush(); return true
   }
-  return { watcher, tick, flush, leases, refreshed, incoming, statuses, get stops() { return stops }, setReady: (value: boolean) => { ready = value },
+  return { watcher, tick, flush, leases, refreshed, incoming, statuses, get stops() { return stops }, get clock() { return clock }, setReady: (value: boolean) => { ready = value },
     nextWallet: () => { scope = { epoch: scope.epoch + 1, deviceId: 'device', walletId: 'wallet-B', wallet: {} } } }
 }
 const emit = (lease: any, type: string, data: any) => lease.onEvent({ type, data })
@@ -139,19 +141,211 @@ test('unproven native and token activity refreshes without claiming an incoming 
   }, () => true)
   expect(incoming).toEqual([]); expect(activity).toEqual(['litecoin'])
 })
-test('foreign replay hints are not accepted and obsolete failed chains do not block a healthy new lease', async () => {
-  let disabled = false, fail = true
-  const leases: any[] = [], timers: Array<() => void> = []
+test('foreign replay hints are refused; a failing chain waits for its own retry without blocking a healthy one, and disabling it cancels the retry', async () => {
+  let disabled = false
+  const timers: Array<{ run: () => void; ms: number; cleared?: boolean }> = [], calls: string[] = []
   const scope = { epoch: 1, deviceId: 'fixture', walletId: 'fixture', wallet: {} }
+  const next = (ms: number) => { const timer = timers.find(entry => !entry.cleared && entry.ms === ms)!; timer.cleared = true; timer.run() }
   const watcher = createActiveWalletWatch({ getScope: () => scope, canWatch: () => true, isChainEnabled: chain => chain !== 'bad' || !disabled,
-    start: (addresses, onEvent) => leases.push({ addresses, onEvent }), stop: () => {}, setTimer: run => { timers.push(run); return run }, clearTimer: () => {},
-    refresh: async hint => { if (hint.chainId === 'bad' && fail) throw new Error('upstream') } })
+    start: () => {}, stop: () => {}, backoff: createChainBackoff({ jitter: 0 }),
+    setTimer: (run, ms) => { const timer = { run, ms }; timers.push(timer); return timer }, clearTimer: timer => { (timer as any).cleared = true },
+    refresh: async hint => { calls.push(hint.chainId); if (hint.chainId === 'bad') throw new Error('upstream') } })
   watcher.add([{ ...watches[0], chainId: 'bad', networkId: 'bad' }, { ...watches[0], chainId: 'good', networkId: 'good' }])
-  timers.shift()!(); timers.shift()!(); for (let i = 0; i < 10; i++) await Promise.resolve()
-  expect(await watcher.flush()).toBe(false)
+  next(250); next(150); for (let i = 0; i < 10; i++) await Promise.resolve()
+  expect([...calls].sort()).toEqual(['bad', 'good'])
+  // KEEPKEY-109: the failed chain owns a scheduled retry, so it no longer holds back the batch (or the durable replay).
+  expect(await watcher.flush()).toBe(true)
+  const retry = timers.find(entry => entry.ms === 5_000)!
+  expect(retry.cleared).toBeUndefined()
   expect(watcher.event({ type: 'tx:incoming', data: { watchedAddress: 'foreign', networkId: 'good' } } as any)).toBe(false)
-  disabled = true; fail = false; watcher.add([]); timers.shift()!()
-  expect(await watcher.flush()).toBe(true); watcher.stop()
+  disabled = true; watcher.add([]); next(250)
+  expect(retry.cleared).toBe(true)
+  expect(await watcher.flush()).toBe(true); expect(calls).toHaveLength(2); watcher.stop()
+})
+
+describe('KEEPKEY-109: one chain failing (e.g. TRON history 429) backs off alone and never stalls the others', () => {
+  const twoChains = ['a', 'b'].map(chain => ({ ...watches[0], chainId: chain, networkId: chain }))
+  const steady = () => createChainBackoff({ jitter: 0 })
+  const incomingOn = (chain: string, txid: string, eventId?: string) => ({ address: watches[0].address, networkId: chain, txid, type: 'incoming', ...(eventId ? { eventId } : {}) })
+
+  test('the failing chain retries on its own after 5 s, then 15 s; the other chain is untouched; a success resets it', async () => {
+    let failures = 2
+    const retries: Array<[string, number, number]> = []
+    const h = harness(async hint => { if (hint.chainId === 'a' && failures-- > 0) throw new Error('TRON history failed (429)') },
+      { backoff: steady(), onRetryScheduled: (chain, delay, count) => retries.push([chain, delay, count]) })
+    h.watcher.add(twoChains); await h.tick()
+    // Waiting for the batch while it runs: it completes once b is done and a has its retry scheduled.
+    const batch = h.watcher.flush()
+    await h.tick()
+    expect(h.refreshed.map(hint => hint.chainId).sort()).toEqual(['a', 'b'])
+    expect(await batch).toBe(true)
+    expect(retries).toEqual([['a', 5_000, 1]])
+    const failedAt = h.clock
+    await h.tick()
+    expect(h.clock - failedAt).toBe(5_000)
+    expect(h.refreshed.slice(2).map(hint => hint.chainId)).toEqual(['a'])
+    expect(retries.at(-1)).toEqual(['a', 15_000, 2])
+    await h.tick()
+    expect(h.refreshed.slice(3).map(hint => hint.chainId)).toEqual(['a'])
+    expect(retries).toHaveLength(2)
+    expect(await h.tick()).toBe(false)
+    // The success reset it: a later failure starts again from 5 s.
+    failures = 1
+    emit(h.leases[0], 'tx:incoming', incomingOn('a', 'later'))
+    await h.tick()
+    expect(retries.at(-1)).toEqual(['a', 5_000, 1])
+    h.watcher.stop()
+  })
+
+  test('events for a waiting chain join its scheduled retry instead of calling the provider again', async () => {
+    let fail = true
+    const h = harness(async hint => { if (hint.chainId === 'a' && fail) throw new Error('429') }, { backoff: steady() })
+    h.watcher.add(twoChains); await h.tick(); await h.tick(); h.refreshed.length = 0
+    for (const txid of ['t1', 't2', 't3']) emit(h.leases[0], 'tx:incoming', incomingOn('a', txid))
+    emit(h.leases[0], 'tx:incoming', incomingOn('b', 'b1'))
+    await h.tick()
+    expect(h.refreshed).toEqual([{ chainId: 'b', txids: ['b1'], catchup: false }])
+    fail = false; await h.tick()
+    expect(h.refreshed).toEqual([{ chainId: 'b', txids: ['b1'], catchup: false }, { chainId: 'a', txids: ['t1', 't2', 't3'], catchup: false }])
+    h.watcher.stop()
+  })
+
+  test('a hint queued while the chain was running waits for the retry instead of re-running at once', async () => {
+    let release!: () => void, first = true
+    const h = harness(async hint => {
+      if (hint.chainId !== 'a' || !first) return
+      first = false; await new Promise<void>(resolve => { release = resolve }); throw new Error('429')
+    }, { backoff: steady() })
+    h.watcher.add(twoChains); await h.tick(); await h.tick(); h.refreshed.length = 0
+    emit(h.leases[0], 'tx:incoming', incomingOn('a', 'during'))
+    await h.tick()
+    expect(h.refreshed).toEqual([])
+    release(); await h.flush()
+    expect(h.refreshed).toEqual([])
+    await h.tick()
+    expect(h.refreshed).toEqual([{ chainId: 'a', txids: ['during'], catchup: false }])
+    h.watcher.stop()
+  })
+
+  test('a scheduled retry is cancelled on stop and never runs for the next wallet', async () => {
+    const h = harness(async hint => { if (hint.chainId === 'a') throw new Error('429') }, { backoff: steady() })
+    h.watcher.add(twoChains); await h.tick(); await h.tick(); h.refreshed.length = 0
+    h.watcher.stop(); h.nextWallet()
+    expect(await h.tick()).toBe(false)
+    expect(h.refreshed).toEqual([])
+  })
+
+  test('a retry that comes due while the device is locked keeps its hint and runs once the wallet is unlocked', async () => {
+    let fail = true
+    const h = harness(async hint => { if (hint.chainId === 'a' && fail) throw new Error('429') }, { backoff: steady() })
+    h.watcher.add(twoChains); await h.tick(); await h.tick()
+    emit(h.leases[0], 'tx:incoming', incomingOn('a', 'paid-while-waiting', 'evt-1'))
+    h.refreshed.length = 0
+    h.setReady(false); await h.tick()
+    expect(h.refreshed).toEqual([])
+    fail = false; h.setReady(true); h.watcher.resume(); await h.tick(); await h.tick()
+    // The unlock catchup merges with the kept hint: the payment is still a targeted, non-catchup refresh.
+    expect(h.refreshed.filter(hint => hint.chainId === 'a')).toEqual([{ chainId: 'a', txids: ['paid-while-waiting'], catchup: false, eventIds: ['evt-1'] }])
+    h.watcher.stop()
+  })
+
+  test(`after ${MAX_AUTO_RETRIES} automatic retries a broken chain pauses; only new activity on it arms one retry after the longest delay`, async () => {
+    const paused: Array<[string, number]> = [], delays: number[] = []
+    const h = harness(async hint => { if (hint.chainId === 'a') throw new Error('history endpoint down') },
+      { backoff: steady(), onRetryPaused: (chain, failures) => paused.push([chain, failures]), onRetryScheduled: (_chain, delay) => delays.push(delay) })
+    h.watcher.add(twoChains); await h.tick(); await h.tick()
+    for (let i = 0; i < MAX_AUTO_RETRIES; i++) await h.tick()
+    expect(delays).toEqual([5_000, 15_000, 30_000, 60_000, 120_000])
+    expect(h.refreshed.filter(hint => hint.chainId === 'a')).toHaveLength(1 + MAX_AUTO_RETRIES)
+    expect(paused).toEqual([['a', MAX_AUTO_RETRIES + 1]])
+    // Paused: no timer, so nothing polls the broken provider, and the batch is still complete.
+    expect(await h.tick()).toBe(false)
+    expect(await h.watcher.flush()).toBe(true)
+    // Real activity arms exactly one retry, after the longest delay, and duplicates join it.
+    const before = h.clock
+    emit(h.leases[0], 'tx:incoming', incomingOn('a', 'new-payment'))
+    emit(h.leases[0], 'tx:incoming', incomingOn('a', 'another'))
+    expect(delays.at(-1)).toBe(120_000)
+    await h.tick()
+    expect(h.clock - before).toBe(120_000)
+    expect(h.refreshed.filter(hint => hint.chainId === 'a')).toHaveLength(2 + MAX_AUTO_RETRIES)
+    expect(h.refreshed.at(-1)!.txids).toEqual(['new-payment', 'another'])
+    expect(paused.at(-1)).toEqual(['a', MAX_AUTO_RETRIES + 2])
+    expect(await h.tick()).toBe(false)
+    h.watcher.stop()
+  })
+
+  test('a retry that comes due while two other chains are refreshing waits for a free slot', async () => {
+    const finish: Array<() => void> = []
+    let first = true
+    const h = harness(async hint => {
+      if (hint.chainId === 'a' && first) { first = false; throw new Error('429') }
+      if (hint.chainId !== 'a') await new Promise<void>(resolve => finish.push(resolve))
+    }, { backoff: steady() })
+    h.watcher.add(['a', 'b', 'c'].map(chain => ({ ...watches[0], chainId: chain, networkId: chain })))
+    await h.tick(); await h.tick()
+    // a failed at once; b is running and c took the second slot right after.
+    expect(h.refreshed.map(hint => hint.chainId)).toEqual(['a', 'b', 'c'])
+    await h.tick()
+    expect(h.refreshed).toHaveLength(3)
+    finish.shift()!(); await h.flush()
+    expect(h.refreshed.map(hint => hint.chainId)).toEqual(['a', 'b', 'c', 'a'])
+    finish.shift()!(); await h.flush(); h.watcher.stop()
+  })
+
+  test('disabling a waiting chain cancels its retry and its count; enabling it again starts fresh', async () => {
+    let enabled = true, fail = true
+    const delays: number[] = []
+    const h = harness(async hint => { if (hint.chainId === 'a' && fail) throw new Error('429') },
+      { backoff: steady(), isChainEnabled: chain => chain !== 'a' || enabled, onRetryScheduled: (_chain, delay) => delays.push(delay) })
+    h.watcher.add(twoChains); await h.tick(); await h.tick()
+    expect(delays).toEqual([5_000])
+    enabled = false; h.watcher.add(twoChains); await h.tick()
+    expect(await h.tick()).toBe(false)
+    enabled = true; h.watcher.add(twoChains); await h.tick(); await h.tick()
+    expect(delays).toEqual([5_000, 5_000])
+    fail = false; await h.tick()
+    expect(h.refreshed.at(-1)!.chainId).toBe('a')
+    expect(await h.tick()).toBe(false)
+    h.watcher.stop()
+  })
+
+  test('a transaction seen again while waiting counts as the most recent one', async () => {
+    let fail = true
+    const h = harness(async hint => { if (hint.chainId === 'a' && fail) throw new Error('429') }, { backoff: steady() })
+    h.watcher.add(twoChains); await h.tick(); await h.tick(); h.refreshed.length = 0
+    for (const txid of ['t1', 't2', 't1']) emit(h.leases[0], 'tx:incoming', incomingOn('a', txid))
+    fail = false; await h.tick()
+    expect(h.refreshed.at(-1)!.txids).toEqual(['t2', 't1'])
+    h.watcher.stop()
+  })
+
+  test('a chain disabled while its failing refresh runs schedules no retry', async () => {
+    let enabled = true, release!: () => void
+    const scheduled: string[] = []
+    const h = harness(async hint => {
+      if (hint.chainId !== 'a') return
+      await new Promise<void>(resolve => { release = resolve }); throw new Error('429')
+    }, { backoff: steady(), isChainEnabled: chain => chain !== 'a' || enabled, onRetryScheduled: chain => scheduled.push(chain) })
+    h.watcher.add(twoChains); await h.tick(); await h.tick()
+    enabled = false; release(); await h.flush()
+    expect(scheduled).toEqual([])
+    expect(await h.tick()).toBe(false)
+    h.watcher.stop()
+  })
+
+  test('a long outage keeps only the most recent hints for the retry', async () => {
+    let fail = true
+    const h = harness(async hint => { if (hint.chainId === 'a' && fail) throw new Error('429') }, { backoff: steady() })
+    h.watcher.add(twoChains); await h.tick(); await h.tick(); h.refreshed.length = 0
+    for (let i = 0; i < 300; i++) emit(h.leases[0], 'tx:incoming', incomingOn('a', `t${i}`, `e${i}`))
+    fail = false; await h.tick()
+    const retried = h.refreshed.at(-1)
+    expect(h.refreshed).toHaveLength(1)
+    expect(retried.txids).toEqual(Array.from({ length: 32 }, (_, i) => `t${268 + i}`))
+    expect(retried.eventIds).toEqual(Array.from({ length: 256 }, (_, i) => `e${44 + i}`))
+    h.watcher.stop()
+  })
 })
 
 const cacheNow = 2 * BALANCE_CACHE_QUIET_WINDOW_MS
