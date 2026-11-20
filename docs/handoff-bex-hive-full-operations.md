@@ -32,7 +32,12 @@ All on the vault's local REST API, `http://localhost:1646`, bearer-token auth (p
 // request
 {
   "operations": [ ["limit_order_create", { /* op params, see §3 */ }] ],
-  "address_n": [ ... ]   // OPTIONAL — omit and the role is picked from op tier
+  "address_n": [ ... ],  // OPTIONAL — omit and the role is picked from op tier
+  // OPTIONAL exact header — all three or none:
+  "ref_block_num": 4660,
+  "ref_block_prefix": 3735928559,
+  "expiration": "2026-07-20T18:30:00",   // Hive time (UTC) or unix seconds
+  "chain_id": "beeab0de00…"              // OPTIONAL, only with the header; default Hive mainnet
 }
 // response
 {
@@ -40,11 +45,18 @@ All on the vault's local REST API, `http://localhost:1646`, bearer-token auth (p
   "ref_block_num": 12345,
   "ref_block_prefix": 3735928559,
   "expiration": "2026-07-20T18:30:00",   // ISO, derived from the SIGNED header
-  "operations": [ ... ]                  // echoed back
+  "operations": [ ... ],                 // echoed back
+  "serialized_tx": "<hex>",              // the exact bytes sent to the device (digest = sha256(chain_id ‖ these))
+  "chain_id": "beeab0de00…",
+  "header_source": "caller",             // or "pioneer" when the vault fetched the header
+  "address_n": [ ... ],                  // the path that signed
+  "role": "posting"                      // its SLIP-0048 role, or null
 }
 ```
 
-**Broadcast using the returned `ref_block_num` / `ref_block_prefix` / `expiration` verbatim.** The vault fetches the TaPoS header from Pioneer itself and returns the exact values baked into the signed bytes. If you re-fetch your own header or use a different expiration, you reconstruct a *different* transaction and the signature is invalid.
+**Broadcast using the returned `ref_block_num` / `ref_block_prefix` / `expiration` verbatim.** Without a header, the vault fetches the TaPoS header from Pioneer itself and returns the exact values baked into the signed bytes. If you re-fetch your own header or use a different expiration, you reconstruct a *different* transaction and the signature is invalid.
+
+**Exact header.** A wallet forwarding a dApp's transaction sends the dApp's header. The vault then skips Pioneer and signs exactly that header, or answers 400: partial header, `chain_id` without a header, a field out of range, an expiration in the past or more than 3600 s ahead. A header that can never be signed is refused before the approval window opens. One that expires while the user approves is refused, not refreshed. Byte-compare `serialized_tx` with your own serialization before broadcast.
 
 ### `POST /hive/sign-transfer` — dedicated transfer path
 
@@ -130,7 +142,7 @@ All of these are enforced **host-side in the vault** with a readable message bef
 - **Hive is behind a vault setting.** `hive_enabled` must be `1` or every endpoint 403s with `"Hive is disabled"`. Toggle in vault Settings (requires fw ≥ 7.15.0). Quick check: `GET /api/health` → `supportedChains` contains `hive:beeab0de`.
 - **Signing on the emulator is user-gated, always.** `emulator-window.ts` `emuGatedConfirm`: auto-press exists only for setup ops (wipe/load/settings); *"Signing ops are always interactive and must be approved by the user."* Several ops are multi-screen by firmware design — `claim_reward_balance` = 2 screens, `limit_order_create` = 2, `comment_options` = 2 + one per beneficiary + permlink. **Expect to click through each one**; a "hung" request is almost always a confirm frame waiting on you.
 - **⚠ Unresolved: `[Bun.serve]: request timed out after 10 seconds`** was observed against `/hive/sign-operations` while a confirm was pending, even though that path *is* in `SIGNING_ROUTES` and should get `server.timeout(req, 0)` (`rest-api.ts` ~line 1162). Root cause not established. If you see truncated signs on slow/multi-screen confirms, this is the suspect — not your payload. Worth fixing before BEX relies on human-gated confirms.
-- **`/hive/sign-operations` calls live Pioneer** (`/api/v1/hive/tx-params`) on every request. A 502 there is Pioneer, not you.
+- **`/hive/sign-operations` calls live Pioneer** (`/api/v1/hive/tx-params`) on every request that carries no header. A 502 there is Pioneer, not you.
 
 ---
 

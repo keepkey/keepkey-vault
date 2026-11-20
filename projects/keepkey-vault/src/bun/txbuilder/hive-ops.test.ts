@@ -7,7 +7,7 @@
  * against an independent construction, mirroring the pyk test pattern.
  */
 import { describe, expect, test } from 'bun:test'
-import { serializeHiveOpsTx, type HiveOpTuple } from './hive-ops'
+import { serializeHiveOpsTx, exactHiveHeader, parseHiveExpiration, hiveRoleOf, hiveTimeIso, HIVE_MAINNET_CHAIN_ID, type HiveOpTuple } from './hive-ops'
 
 const HEADER = { refBlockNum: 0x1234, refBlockPrefix: 0xdeadbeef, expirationUnix: 0x60000000 }
 
@@ -516,5 +516,112 @@ describe('hived golden vectors', () => {
       '45454d0000d0070000000000000353424400000000c0c62d0000000000' +
       '065645535453000000',
     )
+  })
+})
+
+/**
+ * Caller-supplied header (POST /hive/sign-operations with ref_block_num,
+ * ref_block_prefix, expiration): signed exactly as sent, or refused.
+ * The clock is pinned 60 s before the golden expiration.
+ */
+describe('exact caller header', () => {
+  const EXPIRES = 0x5fffaa40 // 2021-01-14T02:19:44 UTC
+  const NOW = (EXPIRES - 60) * 1000
+  const FIELDS = { ref_block_num: 4660, ref_block_prefix: 0xdeadbeef, expiration: '2021-01-14T02:19:44' }
+  const ORDER: HiveOpTuple = ['limit_order_create', {
+    owner: 'alice', orderid: 42,
+    amount_to_sell: '1.500 HIVE', min_to_receive: '0.400 HBD',
+    fill_or_kill: true, expiration: 0x6553f5b0,
+  }]
+
+  test('no header fields: the Vault fetches its own (unchanged behavior)', () => {
+    expect(exactHiveHeader({}, NOW)).toBeNull()
+  })
+
+  test('a full header passes through unaltered and serializes to the hived golden bytes', () => {
+    const header = exactHiveHeader(FIELDS, NOW)!
+    expect(header).toEqual({ refBlockNum: 4660, refBlockPrefix: 0xdeadbeef, expirationUnix: EXPIRES, chainId: HIVE_MAINNET_CHAIN_ID })
+    const { serializedTx } = serializeHiveOpsTx({ ...header, operations: [ORDER] })
+    // Same bytes hived produced for this header (see 'hived golden vectors').
+    expect(serializedTx.toString('hex')).toBe(
+      '3412efbeadde40aaff5f010505616c6963652a000000dc05000000000000' +
+      '03535445454d00009001000000000000035342440000000001b0f5536500',
+    )
+    // The header is the first 10 bytes, exactly as sent.
+    expect(serializedTx.readUInt16LE(0)).toBe(FIELDS.ref_block_num)
+    expect(serializedTx.readUInt32LE(2)).toBe(FIELDS.ref_block_prefix)
+    expect(serializedTx.readUInt32LE(6)).toBe(EXPIRES)
+    expect(hiveTimeIso(header.expirationUnix)).toBe(FIELDS.expiration)
+  })
+
+  test('expiration as unix seconds, ISO with Z, or ISO with .000 is the same instant', () => {
+    for (const expiration of [EXPIRES, '2021-01-14T02:19:44Z', '2021-01-14T02:19:44.000', '2021-01-14T02:19:44.000Z']) {
+      expect(exactHiveHeader({ ...FIELDS, expiration }, NOW)!.expirationUnix).toBe(EXPIRES)
+    }
+  })
+
+  test('the boundary values of each field are kept, not masked', () => {
+    const h = exactHiveHeader({ ...FIELDS, ref_block_num: 0xffff, ref_block_prefix: 0xffffffff }, NOW)!
+    expect([h.refBlockNum, h.refBlockPrefix]).toEqual([0xffff, 0xffffffff])
+    expect(exactHiveHeader({ ...FIELDS, ref_block_num: 0, ref_block_prefix: 0 }, NOW)!.refBlockNum).toBe(0)
+  })
+
+  test('a caller chain id is used (lowercased); the default is Hive mainnet', () => {
+    const testnet = '18DCF0A285365FC58B71F18B3D3FEC954AA0C141C44E4E5CB4CF777B9EAB274E'
+    expect(exactHiveHeader({ ...FIELDS, chain_id: testnet }, NOW)!.chainId).toBe(testnet.toLowerCase())
+    expect(HIVE_MAINNET_CHAIN_ID).toBe('beeab0de00000000000000000000000000000000000000000000000000000000')
+  })
+
+  test.each([
+    [{ ref_block_num: 1 }, /Partial Hive header.*missing ref_block_prefix, expiration/],
+    [{ ref_block_num: 1, ref_block_prefix: 2 }, /Partial Hive header.*missing expiration/],
+    [{ expiration: '2021-01-14T02:19:44' }, /Partial Hive header.*missing ref_block_num, ref_block_prefix/],
+    [{ chain_id: HIVE_MAINNET_CHAIN_ID }, /chain_id is accepted only with an exact header/],
+  ])('a partial header is refused: %j', (fields, message) => {
+    expect(() => exactHiveHeader(fields, NOW)).toThrow(message)
+  })
+
+  test.each([
+    [{ ref_block_num: 0x10000 }, /ref_block_num must be an integer 0–65535/],
+    [{ ref_block_num: -1 }, /ref_block_num must be an integer 0–65535/],
+    [{ ref_block_num: 1.5 }, /ref_block_num must be an integer/],
+    [{ ref_block_num: '4660' }, /ref_block_num must be an integer/],
+    [{ ref_block_prefix: 0x100000000 }, /ref_block_prefix must be an integer 0–4294967295/],
+    [{ ref_block_prefix: -1 }, /ref_block_prefix must be an integer/],
+    [{ expiration: 2 ** 32 }, /within uint32/],
+    [{ expiration: EXPIRES + 0.5 }, /whole unix seconds/],
+    [{ expiration: '2021-01-14 02:19:44' }, /not a Hive time/],
+    [{ expiration: '2021-01-14T02:19:44+02:00' }, /not a Hive time/],
+    [{ expiration: '2021-01-14T02:19:44.500' }, /not a Hive time/],
+    [{ expiration: '2021-02-30T02:19:44' }, /not a valid date/],
+    [{ chain_id: 'beeab0de' }, /chain_id must be 32 bytes of hex/],
+  ])('an out-of-range or malformed header is refused, never coerced: %j', (override, message) => {
+    expect(() => exactHiveHeader({ ...FIELDS, ...override }, NOW)).toThrow(message)
+  })
+
+  test('an expired header is refused, including one expiring this second', () => {
+    expect(() => exactHiveHeader(FIELDS, EXPIRES * 1000)).toThrow(/Hive header expired at 2021-01-14T02:19:44/)
+    expect(() => exactHiveHeader(FIELDS, (EXPIRES + 3600) * 1000)).toThrow(/expired/)
+  })
+
+  test('a header more than an hour ahead is refused; exactly an hour is accepted', () => {
+    expect(exactHiveHeader(FIELDS, (EXPIRES - 3600) * 1000)!.expirationUnix).toBe(EXPIRES)
+    expect(() => exactHiveHeader(FIELDS, (EXPIRES - 3601) * 1000)).toThrow(/expires 3601s from now; a node accepts at most 3600s/)
+  })
+
+  test('parseHiveExpiration refuses non-time types', () => {
+    expect(() => parseHiveExpiration(null)).toThrow(/Hive time string or unix seconds/)
+    expect(() => parseHiveExpiration({})).toThrow(/Hive time string or unix seconds/)
+  })
+
+  test('hiveRoleOf names SLIP-0048 roles and nothing else', () => {
+    const H = 0x80000000
+    expect(hiveRoleOf([H + 48, H + 13, H + 4, H, H])).toBe('posting')
+    expect(hiveRoleOf([H + 48, H + 13, H + 1, H + 2, H])).toBe('active')
+    expect(hiveRoleOf([H + 48, H + 13, H + 3, H, H])).toBe('memo')
+    expect(hiveRoleOf([H + 48, H + 13, H + 0, H, H])).toBe('owner')
+    expect(hiveRoleOf([H + 48, H + 13, H + 2, H, H])).toBeNull()
+    expect(hiveRoleOf([H + 44, H + 13, H + 4, H, H])).toBeNull()
+    expect(hiveRoleOf([H + 48, H + 13, H + 4, 0, H])).toBeNull()
   })
 })

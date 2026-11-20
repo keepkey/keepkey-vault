@@ -16,6 +16,7 @@ import type {
   BtcSignTxParams,
   CosmosAminoSignParams,
   HiveSignOperationsParams,
+  HiveSignedOperations,
   HiveSignTransferParams,
   HiveSignMessageParams,
   XrpSignTxParams,
@@ -477,7 +478,7 @@ export class KeepKeySdk {
      * Sign 1–4 Hive operations against the device clear-sign op table.
      * Requires the vault's `hive_enabled` setting and firmware >= 7.15.0.
      */
-    hiveSignOperations: (params: HiveSignOperationsParams): Promise<SignedTx> =>
+    hiveSignOperations: (params: HiveSignOperationsParams): Promise<HiveSignedOperations> =>
       this.client.post('/hive/sign-operations', params, this.client.signingTimeoutMs),
 
     /** Sign a Hive transfer op (dedicated path — caller supplies the TaPoS header). */

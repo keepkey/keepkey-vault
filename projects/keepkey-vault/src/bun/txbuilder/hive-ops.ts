@@ -491,3 +491,115 @@ export function serializeHiveOpsTx(params: {
   if (serializedTx.length > 2048) throw new Error('Serialized Hive tx exceeds 2048 bytes')
   return { serializedTx, tier: tiers.values().next().value as 'posting' | 'active' }
 }
+
+// ── Caller-supplied transaction header ──────────────────────────────
+//
+// A wallet that forwards a dApp's transaction (Skate Wallet) must sign the
+// dApp's own TaPoS header, then byte-compare what was signed against its own
+// serialization before broadcast. So the header is taken exactly as sent or
+// refused: never clamped, rounded, refreshed or re-fetched.
+
+/** Hive mainnet chain id (beeab0de…), the firmware's default. */
+export const HIVE_MAINNET_CHAIN_ID = 'beeab0de' + '0'.repeat(56)
+/** hived HIVE_MAX_TIME_UNTIL_EXPIRATION: a node rejects anything later than this. */
+export const HIVE_MAX_EXPIRATION_SECONDS = 3600
+
+export interface HiveTxHeader {
+  refBlockNum: number
+  refBlockPrefix: number
+  expirationUnix: number
+  chainId: string
+}
+
+export interface HiveHeaderFields {
+  ref_block_num?: unknown
+  ref_block_prefix?: unknown
+  expiration?: unknown
+  chain_id?: unknown
+}
+
+const HEADER_KEYS = ['ref_block_num', 'ref_block_prefix', 'expiration'] as const
+// Hive's own form is "2026-11-20T12:00:00" (UTC, no zone); a trailing Z or
+// milliseconds are accepted as long as they add nothing (.000).
+const HIVE_ISO = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.0{1,3})?Z?$/
+
+/** Expiration as unix seconds, from Hive ISO (UTC) or an integer. Throws rather than guess. */
+export function parseHiveExpiration(value: unknown): number {
+  if (typeof value === 'number') {
+    if (!Number.isInteger(value) || value < 0 || value > 0xffffffff) {
+      throw new Error(`expiration must be whole unix seconds within uint32 (got ${value})`)
+    }
+    return value
+  }
+  if (typeof value === 'string') {
+    const m = HIVE_ISO.exec(value)
+    if (!m) throw new Error(`expiration "${value}" is not a Hive time (YYYY-MM-DDTHH:MM:SS, UTC) or unix seconds`)
+    const [y, mo, d, h, mi, s] = m.slice(1).map(Number)
+    const ms = Date.UTC(y, mo - 1, d, h, mi, s)
+    const back = new Date(ms)
+    // Date.UTC rolls 2026-02-30 over to March: refuse instead of signing another time.
+    if (back.getUTCFullYear() !== y || back.getUTCMonth() !== mo - 1 || back.getUTCDate() !== d
+      || back.getUTCHours() !== h || back.getUTCMinutes() !== mi || back.getUTCSeconds() !== s) {
+      throw new Error(`expiration "${value}" is not a valid date`)
+    }
+    return parseHiveExpiration(ms / 1000)
+  }
+  throw new Error('expiration must be a Hive time string or unix seconds')
+}
+
+/** The Hive form of a unix time: what a node and dhive print. */
+export function hiveTimeIso(unix: number): string {
+  return new Date(unix * 1000).toISOString().replace(/\.\d{3}Z$/, '')
+}
+
+/**
+ * The caller's exact header, or null when the caller sent none (the Vault then
+ * fetches one). A partial header, a chain id without a header, or a header that
+ * a node would reject (out of range, expired, more than an hour ahead) throws.
+ */
+export function exactHiveHeader(fields: HiveHeaderFields, nowMs = Date.now()): HiveTxHeader | null {
+  const present = HEADER_KEYS.filter(k => fields[k] !== undefined && fields[k] !== null)
+  if (present.length === 0) {
+    if (fields.chain_id !== undefined && fields.chain_id !== null) {
+      throw new Error('chain_id is accepted only with an exact header (ref_block_num, ref_block_prefix, expiration)')
+    }
+    return null
+  }
+  if (present.length < HEADER_KEYS.length) {
+    const missing = HEADER_KEYS.filter(k => !present.includes(k))
+    throw new Error(`Partial Hive header: send ref_block_num, ref_block_prefix and expiration together, or none (missing ${missing.join(', ')})`)
+  }
+  const { ref_block_num: num, ref_block_prefix: prefix } = fields
+  if (typeof num !== 'number' || !Number.isInteger(num) || num < 0 || num > 0xffff) {
+    throw new Error(`ref_block_num must be an integer 0–65535 (got ${JSON.stringify(num)})`)
+  }
+  if (typeof prefix !== 'number' || !Number.isInteger(prefix) || prefix < 0 || prefix > 0xffffffff) {
+    throw new Error(`ref_block_prefix must be an integer 0–4294967295 (got ${JSON.stringify(prefix)})`)
+  }
+  const expirationUnix = parseHiveExpiration(fields.expiration)
+  const now = Math.floor(nowMs / 1000)
+  if (expirationUnix <= now) {
+    throw new Error(`Hive header expired at ${hiveTimeIso(expirationUnix)} (now ${hiveTimeIso(now)}): build the transaction again`)
+  }
+  if (expirationUnix - now > HIVE_MAX_EXPIRATION_SECONDS) {
+    throw new Error(`Hive header expires ${expirationUnix - now}s from now; a node accepts at most ${HIVE_MAX_EXPIRATION_SECONDS}s`)
+  }
+  let chainId = HIVE_MAINNET_CHAIN_ID
+  if (fields.chain_id !== undefined && fields.chain_id !== null) {
+    if (typeof fields.chain_id !== 'string' || !/^[0-9a-fA-F]{64}$/.test(fields.chain_id)) {
+      throw new Error('chain_id must be 32 bytes of hex (64 characters)')
+    }
+    chainId = fields.chain_id.toLowerCase()
+  }
+  return { refBlockNum: num, refBlockPrefix: prefix, expirationUnix, chainId }
+}
+
+const HIVE_ROLE_NAMES: Record<number, 'owner' | 'active' | 'memo' | 'posting'> = { 0: 'owner', 1: 'active', 3: 'memo', 4: 'posting' }
+
+/** The SLIP-0048 role of m/48'/13'/role'/account'/0', or null for any other path. */
+export function hiveRoleOf(addressNList: number[]): 'owner' | 'active' | 'memo' | 'posting' | null {
+  const H = 0x80000000
+  if (addressNList.length !== 5 || addressNList[0] !== H + 48 || addressNList[1] !== H + 13
+    || addressNList[3] < H || addressNList[4] !== H) return null
+  return HIVE_ROLE_NAMES[addressNList[2] - H] ?? null
+}

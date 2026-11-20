@@ -306,6 +306,17 @@ export const HiveSignOperationsRequest = z.object({
   addressNList: z.array(z.number().int()).optional(),
   /** condenser-style tuples: [["vote", {...}], ...] — max 4, single tier */
   operations: z.array(z.tuple([z.string(), z.record(z.string(), z.any())])).min(1).max(4),
+  /**
+   * Optional exact TaPoS header. Send all three or none: with them the Vault
+   * signs exactly this header (no Pioneer fetch) or refuses it; never alters it.
+   * Bounds and expiry are checked in txbuilder/hive-ops.ts exactHiveHeader.
+   */
+  ref_block_num: z.number().int().min(0).max(0xffff).optional(),
+  ref_block_prefix: z.number().int().min(0).max(0xffffffff).optional(),
+  /** Hive time "YYYY-MM-DDTHH:MM:SS" (UTC) or unix seconds */
+  expiration: z.union([z.number().int().min(0).max(0xffffffff), z.string().min(1).max(32)]).optional(),
+  /** 32-byte chain id hex; only with an exact header. Default: Hive mainnet (beeab0de…) */
+  chain_id: z.string().regex(/^[0-9a-fA-F]{64}$/).optional(),
 }).strip()
 
 /** POST /hive/sign-transfer — Graphene transfer op, serialized + signed on-device (fw 7.15.0+) */
