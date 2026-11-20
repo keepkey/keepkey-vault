@@ -195,6 +195,9 @@ export interface RestApiCallbacks {
   setPioneerApiBase?: (url: string) => Promise<any>
 }
 
+/** A Host header naming this machine's loopback, with an optional port (the API listens on loopback only). */
+const LOOPBACK_HOST = /^(?:localhost|127\.0\.0\.1|\[::1\])(?::\d{1,5})?$/i
+
 function corsHeaders(_req?: Request): Record<string, string> {
   // Use '*' — bearer-token auth model (not cookie-based), so wildcard is safe
   // and prevents browsers from ever sending credentials via CORS.
@@ -1630,7 +1633,18 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
         if ((path === '/api/health' || path === '/api/v1/health') && method === 'GET') {
           const ds = engine.getDeviceState()
           const diagnostics = callbacks?.getSyncDiagnostics?.() as {balanceSync?: {status?: string}} | undefined
-          return json({
+          // CORS is '*', so any website can read this route. The documented public fields stay public; the sync
+          // diagnostics (which chains are syncing, timings, failures, connectivity probes) go only to a paired key
+          // or to a local tool such as `curl` (audit v6 N5). A local tool is a loopback request that carries neither
+          // Origin nor Sec-Fetch-Site (page scripts cannot remove them; modern browsers send one on every fetch, as
+          // the password API relies on) and names a loopback Host, so a DNS-rebound site, whose Host is its own
+          // name, never qualifies. A missing or bad key just omits them: reachability probes send no key.
+          const token = auth.extractBearerToken(req)
+          const ip = server.requestIP(req)?.address
+          const localTool = ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(ip || '') && LOOPBACK_HOST.test(req.headers.get('host') || '') &&
+            !req.headers.has('origin') && !req.headers.has('sec-fetch-site')
+          const paired = !!token && !!auth.validate(token)
+          const response = json({
             ready: ds.state === 'ready',
             status: 'healthy',
             syncing: engine.isSyncing || diagnostics?.balanceSync?.status === 'running',
@@ -1646,8 +1660,12 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             // SDK skips batch call entirely when cached_pubkeys === 0.
             cached_pubkeys: engine.wallet ? Math.max(pubkeyCache.size, 1) : 0,
             frontload_progress: { status: 'complete', can_operate_offline: false },
-            sync_diagnostics: diagnostics,
+            ...(paired || localTool ? { sync_diagnostics: diagnostics } : {}),
           })
+          // The body depends on who asks: never let a cache hand one caller's answer to another.
+          response.headers.set('Cache-Control', 'no-store')
+          response.headers.append('Vary', 'Authorization, Host, Origin, Sec-Fetch-Site')
+          return response
         }
 
         if (path === '/api/v1/health/fast' && method === 'GET') {
