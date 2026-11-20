@@ -169,11 +169,16 @@ SHA-256, and result. Signing and testing must refer to the same hash.
 8. Test the public prerelease downloads, including a version-pinned website
    download for every platform. Windows must be one click from the downloaded
    EXE; archive extraction is not an acceptable release flow.
-9. After the recorded platform gates pass, promote the immutable release with
-   `gh release edit v<VERSION> --repo keepkey/keepkey-vault --prerelease=false --latest`.
-   Do not rebuild or replace assets during promotion.
+9. After the recorded platform gates pass, rewrite the release notes for stable
+   users, then promote the immutable release with the notes in the same command:
+   `gh release edit v<VERSION> --repo keepkey/keepkey-vault --prerelease=false --latest --notes-file <stable-notes.md>`.
+   The notes written in step 7 describe a candidate, but stable users receive the
+   promoted release as an update. Remove the "prerelease" wording from the title
+   and summary, and replace every check still described as pending with the
+   result recorded in step 8. Do not rebuild or replace assets during promotion.
 10. Verify `/releases/latest` now resolves to the promoted `v<VERSION>`, then
-    download and hash-check the public assets once more.
+    download and hash-check the public assets once more. Confirm the published
+    notes no longer call the release a prerelease.
 
 Release notes may claim only checks that were actually performed. Use distinct
 language for “signed/notarized,” “structurally audited,” and “runtime tested.”
