@@ -2281,6 +2281,8 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
     // 'review' is guarded here so balance polling doesn't wipe the quote mid-review;
     // the explicit 60s stale-check in the Confirm handler covers freshness on confirm.
     if (phase === 'review' || phase === 'submitted' || phase === 'signing' || phase === 'broadcasting' || phase === 'approving' || phase === 'blind-signing-required') return
+    // A fresh mount resumes a swap in the same commit: `phase` is still 'input' here, and this would wipe the quote the resume just set.
+    if (resumeSwap && hasResumedRef.current === resumeSwap.txid) return
 
     if (quoteTimerRef.current) clearTimeout(quoteTimerRef.current)
     setQuote(null)

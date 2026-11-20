@@ -15,5 +15,6 @@ test('a resumed swap keeps its broadcast time, check status and settlement terms
     failedCheckShown: true,
     recheckClearsFailure: true,
     settledAboveMinimum: true,
+    freshMountKeepsExpectedOutput: true,
   })
 })
