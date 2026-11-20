@@ -19,6 +19,7 @@ import { utxoDiscoveryKey } from './btc-backend/types'
 import { getBtcBackend } from './btc-backend'
 import { createReportFonts, reportText as sanitize } from './report-fonts'
 import { buildFlowTx, withRunningBalance, flowTotals, describeOwnPath, type BtcFlowTx } from './report-btc-flow'
+import { csvCell } from './csv'
 
 const BTC_NETWORK_ID = CHAINS.find(c => c.id === 'bitcoin')!.networkId
 
@@ -668,15 +669,6 @@ export async function generateReport(opts: GenerateReportOptions): Promise<Repor
 }
 
 // ── CSV Export ────────────────────────────────────────────────────────
-
-/** Escape a cell value for CSV: quote wrapping + formula injection prevention */
-function csvCell(value: any): string {
-	let s = String(value ?? '').replace(/"/g, '""')
-	// Prevent formula injection: trim leading whitespace then prefix dangerous chars
-	const trimmed = s.trimStart()
-	if (/^[=+\-@\t\r\n]/.test(trimmed)) s = `'${s}`
-	return `"${s}"`
-}
 
 export function reportToCsv(data: ReportData): string {
 	const lines: string[] = []

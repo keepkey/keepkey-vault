@@ -528,6 +528,7 @@ test-unit:
 	cd $(PROJECT_DIR) && bun test __tests__/receive-request.test.ts
 	cd $(PROJECT_DIR) && bun test __tests__/post-tx-balance.test.ts
 	cd $(PROJECT_DIR) && bun test __tests__/swap-payouts-persist.test.ts
+	cd $(PROJECT_DIR) && bun test __tests__/ledger-csv.test.ts
 	cd $(PROJECT_DIR) && bun test __tests__/swap-native-symbol.test.ts __tests__/swap-history-native-symbol.test.ts
 	cd $(PROJECT_DIR) && bun test __tests__/swap-tracker-display.test.ts
 	cd $(PROJECT_DIR) && bun test __tests__/swap-copy-i18n.test.ts
