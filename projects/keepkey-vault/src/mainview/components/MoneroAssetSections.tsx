@@ -16,6 +16,7 @@ import { useMoneroBalanceVerification } from "../hooks/useMoneroBalanceVerificat
 import { MoneroConnectionDetails, moneroWalletOpenError } from "./MoneroConnectionInfo"
 import { ReceiveView } from "./ReceiveView"
 import { MONERO_STANDARD_WALLET_REQUIRED } from "../../shared/monero-wallet-policy"
+import { settingsChangedByBackend } from "../lib/app-settings-loader"
 
 const MONERO_PATH = [0x8000002c, 0x80000080, 0x80000000]
 const MAX_SUBADDRESS = 199
@@ -184,7 +185,9 @@ export function MoneroConnectCard({ client, monero, privateMode = false }: { cli
 		return () => clearInterval(timer)
 	}, [connecting, monero.refresh])
 	useEffect(() => {
-		const changed = () => { if (!connecting) void connect() }
+		// Only a change the user made reopens the wallet. A backend push or reconnect must not start a device prompt
+		// after the user cancelled; that waits for Retry.
+		const changed = (event: Event) => { if (!settingsChangedByBackend(event) && !connecting) void connect() }
 		window.addEventListener('keepkey-settings-changed', changed)
 		return () => window.removeEventListener('keepkey-settings-changed', changed)
 	}, [connect, connecting])

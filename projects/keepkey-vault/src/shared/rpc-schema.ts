@@ -733,6 +733,8 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
        *  `chain` is CAIP-19, `networkId` is CAIP-2 — networkId is the reliable key. */
       'tx-push-received': { chain?: string; networkId?: string; address?: string; txid?: string; type?: 'incoming' | 'outgoing' | 'confirmed' | 'activity'; balanceRefreshHandled?: boolean }
       'pioneer-server-changed': AppSettings
+      /** The backend changed a setting on its own (Zcash/Hive follow the connected firmware). The UI re-reads its settings. */
+      'settings-changed': AppSettings
       /** SSE event-stream connection status. 'connected' = watching addresses; 'disconnected' = no stream. */
       'stream-status': { connected: boolean; watching: number; sessionId?: string }
       'token-visibility-changed': { caip: string; status: 'visible' | 'hidden' | null }

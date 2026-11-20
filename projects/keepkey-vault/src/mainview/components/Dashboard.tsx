@@ -36,6 +36,7 @@ const LazySwapDialog = lazy(() => import("./SwapDialog").then(m => ({ default: m
 const LazyDefiPositionsPanel = lazy(() => import("./DefiPositionsPanel").then(m => ({ default: m.DefiPositionsPanel })))
 
 import { rpcRequest, onRpcMessage } from "../lib/rpc"
+import { useAppSettingsLoader } from "../hooks/useAppSettingsLoader"
 import { subscribeVaultCommand, publishBalances, clearBalances } from "../lib/commandBus"
 import { useIconColor } from "../lib/iconColor"
 import { preloadIcons } from "../lib/iconPreload"
@@ -1111,18 +1112,15 @@ function PersonalDashboard({ capabilities, isEmulator, onLoaded, watchOnly, watc
 		return onRpcMessage('token-visibility-changed', refetch)
 	}, [])
 
-	// Load feature flags (re-check when settings change)
-	const refreshFeatureFlags = useCallback(() => {
-		rpcRequest<AppSettings>('getAppSettings', undefined, 5000)
-			.then(s => {
-				setZcashEnabled(s.zcashPrivacyEnabled)
-				setMoneroEnabled(s.moneroEnabled)
-				setHiveEnabled(s.hiveEnabled)
-				setDisabledNetworks(s.disabledNetworks)
-				setPassphraseIntroSeen(s.passphraseIntroShown)
-			})
-			.catch(() => {})
-	}, [])
+	// Load feature flags (re-check when settings change). A failed read is retried instead of leaving Zcash, Hive and
+	// Monero hidden until something else changes (audit v6 H10).
+	const refreshFeatureFlags = useAppSettingsLoader((s: AppSettings) => {
+		setZcashEnabled(s.zcashPrivacyEnabled)
+		setMoneroEnabled(s.moneroEnabled)
+		setHiveEnabled(s.hiveEnabled)
+		setDisabledNetworks(s.disabledNetworks)
+		setPassphraseIntroSeen(s.passphraseIntroShown)
+	})
 
 	// Zcash/Hive are derived from the connected device's firmware — refetch when
 	// the reported version changes, not just on mount.
