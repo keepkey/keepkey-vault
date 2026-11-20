@@ -21,6 +21,15 @@ eq(result.changeIndex, 4, 'highest used change + 1')
 eq(result.discoveryAvailable, true, 'discovery marked available')
 eq(result.source, 'blockbook', 'source preserved')
 
+// A balance server reporting an index from 2^31 up must not push the next change address past the unhardened range.
+const outOfRange = addressIndicesFromTokens([
+  { path: "m/84'/0'/0'/1/2", transfers: 1 },
+  { path: "m/84'/0'/0'/1/4294967295", transfers: 1 },
+  { path: "m/84'/0'/0'/0/2147483648", transfers: 1 },
+], 'blockbook')
+eq(outOfRange.changeIndex, 3, 'out-of-range change index ignored')
+eq(outOfRange.receiveIndex, 0, 'out-of-range receive index ignored')
+
 const empty = addressIndicesFromTokens([], 'pioneer')
 eq(empty.receiveIndex, 0, 'empty receive starts at zero')
 eq(empty.changeIndex, 0, 'empty change starts at zero')

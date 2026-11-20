@@ -97,6 +97,11 @@ export function evmAddressPath(index: number): number[] {
   return [0x8000002C, 0x8000003C, hardenedAccount(index, 'EVM address index'), 0, 0]
 }
 
+/** Zcash transparent receive path m/44'/133'/account'/0/0. */
+export function zcashTransparentReceivePath(account: number): number[] {
+  return [0x8000002C, 0x80000085, hardenedAccount(account), 0, 0]
+}
+
 // Hive uses SLIP-0048, not BIP-44: m/48'/13'/role'/account'/0' (all 5 hardened).
 // Must match Ledger / Hive Keychain / firmware (hive.h HIVE_SLIP48_*), or derived
 // keys are non-interoperable and unrecoverable in other tools.

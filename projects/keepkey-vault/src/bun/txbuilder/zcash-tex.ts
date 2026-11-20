@@ -12,6 +12,7 @@
  */
 
 import { createHash } from "crypto"
+import { assertAccountIndex, hardenedAccount } from "../../shared/bip32-account"
 
 const H = 0x80000000
 const CHARSET = "qpzry9x8gf2tvdw0s3jn54khce6mua7l"
@@ -119,7 +120,8 @@ export function texStep2Fee(nInputs: number): number {
 }
 
 export function ephemeralPath(account: number, index: number): number[] {
-	return [H + 44, H + 133, H + account, 2, index]
+	assertAccountIndex(index, 'Ephemeral address index')
+	return [H + 44, H + 133, hardenedAccount(account), 2, index]
 }
 
 // ── Ephemeral address state ──────────────────────────────────────────

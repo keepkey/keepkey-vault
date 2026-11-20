@@ -9,6 +9,7 @@ import { useState } from "react"
 import { Box, Flex, Text, Button, Input } from "@chakra-ui/react"
 import { rpcRequest } from "../lib/rpc"
 import { BTC_SCRIPT_TYPES } from "../../shared/chains"
+import { MAX_ACCOUNT_INDEX, hardenedAccount } from "../../shared/bip32-account"
 import type { AuditDerivedAddress } from "../../shared/types"
 
 const BTC_SCRIPTS = BTC_SCRIPT_TYPES.map(s => s.scriptType)
@@ -39,7 +40,7 @@ function Stepper({ label, value, setValue }: { label: string; value: number; set
       <Flex align="center" gap="2">
         <Button size="2xs" variant="outline" borderColor="kk.border" color="kk.textSecondary" onClick={() => setValue(Math.max(0, value - 1))}>−</Button>
         <Text fontSize="sm" minW="24px" textAlign="center" fontFamily="mono">{value}</Text>
-        <Button size="2xs" variant="outline" borderColor="kk.border" color="kk.textSecondary" onClick={() => setValue(value + 1)}>+</Button>
+        <Button size="2xs" variant="outline" borderColor="kk.border" color="kk.textSecondary" disabled={value >= MAX_ACCOUNT_INDEX} onClick={() => setValue(Math.min(MAX_ACCOUNT_INDEX, value + 1))}>+</Button>
       </Flex>
     </Flex>
   )
@@ -71,14 +72,14 @@ export function AuditCustomPath({ chainId, family, defaultPath, scriptType, onRe
     const p = [...defaultPath]
     // EVM: the address index IS the hardened account element [2] (evmAddressPath),
     // which is what the scan derives and addEvmAddressIndex tracks — vary only [2].
-    if (isEvm) { if (p.length > 2) p[2] = 0x80000000 + account; return p }
+    if (isEvm) { if (p.length > 2) p[2] = hardenedAccount(account); return p }
     // UTXO: the chosen script type dictates the BIP44/49/84 purpose — remap [0]
     // so the path and scriptType agree (else the device derives a different addr).
     if (family === 'utxo') {
       const purpose = BTC_SCRIPT_TYPES.find(s => s.scriptType === script)?.purpose
       if (purpose != null && p.length > 0) p[0] = 0x80000000 + purpose
     }
-    if (p.length > 2) p[2] = 0x80000000 + account
+    if (p.length > 2) p[2] = hardenedAccount(account)
     if (hasIndexSlot) p[p.length - 1] = index
     return p
   }

@@ -9,6 +9,7 @@ import { FaPlus, FaEye, FaEyeSlash, FaShieldAlt, FaCheck, FaCopy, FaTag, FaChevr
 import { rpcRequest, onRpcMessage } from "../lib/rpc"
 import type { ChainDef } from "../../shared/chains"
 import { CHAINS, btcScriptTypeConfig, btcAccountPath, evmAddressPath, isChainSupported } from "../../shared/chains"
+import { hardenedAccount, isAccountIndex } from "../../shared/bip32-account"
 import type { ChainBalance, TokenBalance, TokenVisibilityStatus, AppSettings, SwapAsset, BtcWatchOnlyReceive } from "../../shared/types"
 import { VAULT_CHAIN_TO_THOR } from "../../shared/swap-discovery"
 import { getAssetIcon } from "../../shared/assetLookup"
@@ -375,7 +376,8 @@ function PersonalAssetPage({ chain, balance, balanceLoading = false, onBack, fir
 		if (!isBtc || !btcAccounts.selectedXpub) return null
 		const { accountIndex, scriptType } = btcAccounts.selectedXpub
 		const stConfig = btcScriptTypeConfig(scriptType)
-		if (!stConfig) return null
+		// btcAccountPath throws for an index that cannot be derived; never let that break the page while it renders.
+		if (!stConfig || !isAccountIndex(accountIndex)) return null
 		const accountPath = btcAccountPath(stConfig.purpose, accountIndex)
 		const fullPath = [...accountPath, btcChangeIndex, btcAddressIndex]
 		const account = btcAccounts.accounts.find(a => a.accountIndex === accountIndex)
@@ -601,13 +603,13 @@ function PersonalAssetPage({ chain, balance, balanceLoading = false, onBack, fir
 		const p = [...chain.defaultPath]
 		const purpose = utxoScripts?.find(s => s.scriptType === (st || utxoScriptType))?.purpose
 		if (purpose != null) p[0] = (0x80000000 + purpose) >>> 0
-		p[2] = (0x80000000 + n) >>> 0
+		p[2] = hardenedAccount(n)
 		return p
 	}, [chain.defaultPath, utxoScripts, utxoScriptType])
 	useEffect(() => {
 		if (!isAltUtxo || watchOnly) return
 		rpcRequest<{ accounts: number[] }>('getUtxoAccounts', { chainId: chain.id }, 15000)
-			.then(res => { if (res?.accounts?.length) setUtxoAccounts(res.accounts) })
+			.then(res => { const accounts = (res?.accounts || []).filter(isAccountIndex); if (accounts.length) setUtxoAccounts(accounts) })
 			.catch(e => console.warn(`[AssetPage] ${chain.coin} getUtxoAccounts failed:`, e))
 	}, [isAltUtxo, watchOnly, chain.id, chain.coin])
 	const selectUtxoAccount = useCallback((n: number) => {
