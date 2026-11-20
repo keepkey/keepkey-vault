@@ -4295,9 +4295,10 @@ function notifyVaultWalletMembership() {
 	publishedVaultWalletKeys = key
 	notifyVaultsChanged()
 }
-function vaultAddressEntries(networkId?: string) {
+/** `everyWallet`: the Address Book lists every saved vault, so a KeepKey that is not one of its signers can still send in. */
+function vaultAddressEntries(networkId?: string, everyWallet = false) {
 	const keys = activeVaultWalletKeys()
-	const rows = vaultBook().listForWallet(keys, networkId)
+	const rows = everyWallet ? vaultBook().list(networkId) : vaultBook().listForWallet(keys, networkId)
 	if (engine.isPassphraseWallet && sessionVaults?.key === safeSessionKey()) {
 		for (const v of vaultsForWallet(sessionVaults.vaults, keys)) if (!networkId || v.networkId === networkId) {
 			rows.unshift({ id: `session-vault:${v.id}`, walletId: 'session', deviceId: engine.getDeviceState().deviceId || '', kind: 'external',
@@ -9313,7 +9314,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				const external = getAddressBookList({ kind: 'external', networkId, search, savedOnly: true, chainId: bitcoinOnly ? 'bitcoin' : undefined })
 				// Vault rows only with Multisig on, and never at the cost of the contact list.
 				const vaultRows = multisigFeature.enabled && getDb()
-					? await listRegisteredVaults().then(() => vaultAddressEntries(networkId), (err) => { console.warn('[addressbook] vaults unavailable:', err?.message || err); return [] })
+					? await listRegisteredVaults().then(() => vaultAddressEntries(networkId, true), (err) => { console.warn('[addressbook] vaults unavailable:', err?.message || err); return [] })
 					: []
 				const vaults = vaultRows.filter(e => (!bitcoinOnly || e.chainId === 'bitcoin') && (!search || `${e.label} ${e.address}`.toLowerCase().includes(search.toLowerCase())))
 				const vaultIds = new Set(vaults.map(e => `${e.networkId}:${e.address.toLowerCase()}`))

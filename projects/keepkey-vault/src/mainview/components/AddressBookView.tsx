@@ -2,7 +2,6 @@ import { getNumberLocale } from "../lib/number-locale"
 import { useUiTranslation } from "../i18n/ui"
 import { addressBookLabel } from "../lib/addressbook-label"
 import { useState, useMemo, useCallback, useEffect } from "react"
-import type { ReactNode } from "react"
 import { Box, Flex, Text, Input, Button } from "@chakra-ui/react"
 import { actionToneProps } from "./ui/ActionButton"
 import { useTranslation } from "react-i18next"
@@ -33,15 +32,14 @@ const VAULT_TAB = '__vaults__'
 interface DisplayEntry extends AddressBookEntry {
   /** All underlying entry ids this row represents (own EVM collapses the same
    *  address across eip155 networks into one card). Edit/delete/history act on
-   *  every member id; chain filtering matches any member chain. */
+   *  every member id. */
   memberIds: string[]
-  memberChainIds: string[]
   networkCount?: number
 }
 
-/** Top-level Address Book destination (R1/R6). A global network filter sits above
- *  the tabs (one tab per device + a "Saved recipients" tab) and persists as you
- *  switch tabs. Device-seeded identicons (R3), copy-to-clipboard, manual add, and
+/** Top-level Address Book destination (R1/R6): one tab per device, Vaults and
+ *  "Saved recipients". Every network is always shown (no network filter).
+ *  Device-seeded identicons (R3), copy-to-clipboard, manual add, and
  *  a per-address outbound-history drilldown (R7). */
 export function AddressBookView() {
   const uiText = useUiTranslation()
@@ -49,9 +47,7 @@ export function AddressBookView() {
   const { t } = useTranslation("addressbook")
   const { entries: allEntries, loading, seeding, saveLabel, setCosigner, remove } = useAddressBook()
   const deviceState = useDeviceState()
-  // btc-only device: non-BTC entries are dead weight (can't send to them) and the
-  // chain filter offers chains the device can't use. Scope to Bitcoin at the source;
-  // this also collapses the network-filter row (allChainsPresent drops to ≤1).
+  // btc-only device: non-BTC entries are dead weight (can't send to them). Scope to Bitcoin at the source.
   const btcOnly = isBitcoinOnlyVariant(deviceState.firmwareVariant)
   const entries = useMemo(
     () => (btcOnly ? allEntries.filter(e => e.chainId === "bitcoin") : allEntries),
@@ -62,7 +58,6 @@ export function AddressBookView() {
     ? deviceState.deviceId
     : undefined
   const [search, setSearch] = useState("")
-  const [chainFilter, setChainFilter] = useState<string>("all")
   const [activeTab, setActiveTab] = useState<string | null>(null)
   const [addOpen, setAddOpen] = useState(false)
   const [clearSignEnabled, setClearSignEnabled] = useState(false)
@@ -134,14 +129,13 @@ export function AddressBookView() {
         if (ex) {
           ex.networkCount = (ex.networkCount || 1) + 1
           ex.memberIds.push(e.id)
-          if (!ex.memberChainIds.includes(e.chainId)) ex.memberChainIds.push(e.chainId)
           continue
         }
-        const d: DisplayEntry = { ...e, networkCount: 1, memberIds: [e.id], memberChainIds: [e.chainId] }
+        const d: DisplayEntry = { ...e, networkCount: 1, memberIds: [e.id] }
         ownEvmByAddr.set(key, d)
         out.push(d)
       } else {
-        out.push({ ...e, memberIds: [e.id], memberChainIds: [e.chainId] })
+        out.push({ ...e, memberIds: [e.id] })
       }
     }
     return out
@@ -183,19 +177,11 @@ export function AddressBookView() {
     return deviceTabs.find(g => g.deviceId === effectiveTab)?.rows || []
   }, [effectiveTab, deviceTabs, externalRows, vaultRows])
 
-  // Global network filter — built from EVERY entry (all tabs) and kept across tab switches.
-  const allChainsPresent = useMemo(() => {
-    const ids = new Set<string>()
-    for (const e of display) for (const c of e.memberChainIds) ids.add(c)
-    return CHAINS.filter(c => ids.has(c.id))
-  }, [display])
-
   const visibleRows = useMemo(() => {
     const q = search.trim().toLowerCase()
     return tabRows
-      .filter(e => chainFilter === "all" || e.memberChainIds.includes(chainFilter))
       .filter(e => !q || addressBookLabel(e, t)?.toLowerCase().includes(q) || e.ensName?.toLowerCase().includes(q) || e.address.toLowerCase().includes(q))
-  }, [tabRows, chainFilter, search, t])
+  }, [tabRows, search, t])
 
   const handleSave = useCallback((ids: string[], label: string) =>
     Promise.all(ids.map(id => saveLabel(id, label))).then(() => {}), [saveLabel])
@@ -290,18 +276,6 @@ export function AddressBookView() {
 
       {certificationNotice && <Text fontSize="11px" color="var(--text-2)" mb="3">{certificationNotice}</Text>}
 
-      {/* Global network filter — above the tabs, persists across tab switches. */}
-      {allChainsPresent.length > 1 && (
-        <Flex gap="1.5" mb="3" wrap="wrap">
-          <Pill active={chainFilter === "all"} onClick={() => setChainFilter("all")}>{t("allNetworks", { defaultValue: "All networks" })}</Pill>
-          {allChainsPresent.map(c => (
-            <Pill key={c.id} active={chainFilter === c.id} onClick={() => setChainFilter(c.id)}>
-              <AssetIcon caip={c.caip} size={14} alt={c.symbol} /> {c.coin}
-            </Pill>
-          ))}
-        </Flex>
-      )}
-
       {/* Tabs: one per device + Saved recipients */}
       {tabs.length > 0 && (
         <Flex gap="1" mb="3" overflowX="auto" pb="1" borderBottom="1px solid var(--line)">
@@ -336,7 +310,7 @@ export function AddressBookView() {
         <Text fontSize="sm" color="var(--text-2)" py="8" textAlign="center">
           {onExternalTab && externalRows.length === 0
             ? t("noContacts", { defaultValue: "No saved recipients yet — add one with “Add Address”." })
-            : (chainFilter !== "all" || search.trim())
+            : search.trim()
               ? t("noMatches", { defaultValue: "No addresses match your filter" })
               : t("noAddresses", { defaultValue: "No saved addresses yet" })}
         </Text>
@@ -348,17 +322,6 @@ export function AddressBookView() {
 
       {addOpen && <AddAddressDialog onClose={() => setAddOpen(false)} onAdded={() => setActiveTab(EXTERNAL_TAB)} />}
     </Box>
-  )
-}
-
-function Pill({ active, onClick, children }: { active: boolean; onClick: () => void; children: ReactNode }) {
-  return (
-    <Flex as="button" align="center" gap="1" px="2.5" py="1" borderRadius="999px" fontSize="11.5px"
-          border="1px solid var(--line)" bg={active ? "var(--ink-4)" : "transparent"}
-          color={active ? "var(--text-0)" : "var(--text-2)"} _hover={{ color: "var(--text-0)", bg: "var(--ink-3)" }}
-          onClick={onClick}>
-      {children}
-    </Flex>
   )
 }
 
