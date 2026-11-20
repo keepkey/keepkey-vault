@@ -1531,7 +1531,9 @@ function PersonalDashboard({ capabilities, isEmulator, onLoaded, watchOnly, watc
 			const reconcileCaip = swap.status === 'refunded' ? swap.fromCaip : swap.toCaip
 			const assets = reconcileCaip ? [reconcileCaip] : []
 			console.log(`[Dashboard] Swap terminal — reconciling ${reconcileCaip || swap.toChainId}`)
-			refreshBalances(true, assets, false, 'swap-reconcile')
+			// One paid read: the gateway serves 'swap-reconcile' from cache only, so every EVM chain came back
+			// degraded, and a degraded chain is never proof the funds arrived. The retries below stay cache-only.
+			refreshBalances(true, assets, false, 'manual')
 			for (const delay of [30_000, 90_000]) {
 				const timer = setTimeout(() => {
 					timers.delete(timer)
