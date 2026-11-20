@@ -6,12 +6,15 @@ import { join } from 'node:path'
 import type { SwapHistoryRecord } from '../src/shared/types'
 
 const dir = mkdtempSync(join(tmpdir(), 'vault-swap-corrupt-'))
-mock.module('electrobun/bun', () => ({ Utils: { paths: { userData: dir } } }))
+// db.ts finds its folder through electrobun/main/utils; mock that one so the test never shares a database with another suite.
+mock.module('electrobun/main', () => ({ Utils: { paths: { userData: dir } } }))
+mock.module('electrobun/main/utils', () => ({ paths: { userData: dir } }))
 const db = await import('../src/bun/db')
 beforeAll(() => db.initDb())
 afterAll(() => { db.closeDb(); rmSync(dir, { recursive: true, force: true }) })
 
-const walletId = 'fixture-wallet'
+// A wallet of its own, and every check looks only at this file's rows, in case the database is shared anyway.
+const walletId = 'corrupt-json-wallet'
 const base: SwapHistoryRecord = { id: 'x', walletId, txid: 'x',
   fromAsset: 'THOR.RUNE', toAsset: 'BASE.ETH', fromSymbol: 'RUNE', toSymbol: 'ETH', fromChainId: 'thorchain', toChainId: 'base',
   fromAmount: '1', quotedOutput: '0.0003', minimumOutput: '0.00028983', slippageBps: 300, feeBps: 0, feeOutbound: '0',
@@ -33,7 +36,8 @@ test('a corrupt row keeps the rest of the history and the pending list the track
   // Before the fix, both reads returned [] because one JSON.parse threw inside rows.map.
   const all = db.getSwapHistory({ walletId })
   expect(all.map(r => r.txid)).toEqual(['GOOD', 'BAD-PAYOUTS', 'BAD-CONTEXT'])
-  expect(db.getSwapHistory({ status: 'pending', limit: 100 }).length).toBe(3)
+  const mine = new Set(['GOOD', 'BAD-PAYOUTS', 'BAD-CONTEXT'])
+  expect(db.getSwapHistory({ status: 'pending', limit: 100 }).filter(r => mine.has(r.txid)).length).toBe(3)
 
   const byTxid = (txid: string) => all.find(r => r.txid === txid)!
   expect(byTxid('GOOD').payouts).toEqual(payouts)
