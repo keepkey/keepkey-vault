@@ -440,7 +440,7 @@ jobs:
         if: runner.os == 'macOS'
         timeout-minutes: 4
         working-directory: projects/keepkey-vault
-        run: bun scripts/smoke-packaged-pin.ts "artifacts/stable-macos-${{ matrix.expected-arch }}-keepkey-vault.app.tar.zst"
+        run: bun scripts/smoke-packaged-pin.ts "artifacts/stable-${{ matrix.artifact-suffix }}-keepkey-vault.app.tar.zst"
         shell: bash
 
       - name: Smoke-test packaged Monero tools without developer overrides
