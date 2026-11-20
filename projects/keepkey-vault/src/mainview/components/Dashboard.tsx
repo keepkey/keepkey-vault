@@ -9,8 +9,8 @@ import { useTranslation } from "react-i18next"
 import { CHAINS, customChainToChainDef, isChainSupported, type ChainDef } from "../../shared/chains"
 import { isBitcoinOnlyVariant } from "../../shared/flags"
 import { balanceDisplayState } from "../../shared/balance-display-state"
-import { confirmedDashboardBalance, dashboardBalanceUpdatedAt, dashboardCacheIsQuiet, dashboardErrorNotice, dashboardRefreshIsDue, mergeDashboardPortfolioFault, recoverDashboardPortfolioFault, usableDashboardBalance, type DashboardPortfolioFault } from '../../shared/dashboard-balance-policy'
-import { isLocalDeviceAccessError, retryWhileDeviceBusy } from "../../shared/device-access-error"
+import { confirmedDashboardBalance, dashboardBalanceUpdatedAt, dashboardCacheIsQuiet, dashboardRefreshIsDue, mergeDashboardPortfolioFault, recoverDashboardPortfolioFault, usableDashboardBalance, type DashboardPortfolioFault } from '../../shared/dashboard-balance-policy'
+import { isLocalDeviceAccessError } from "../../shared/device-access-error"
 import { versionCompare } from "../../shared/firmware-versions"
 import { formatBalance, hasNonZeroBalance } from "../lib/formatting"
 import { AnimatedUsd } from "./AnimatedUsd"
@@ -44,8 +44,6 @@ import { useFiat } from "../lib/fiat-context"
 import { ViewPickerButton } from "./ViewPickerMenu"
 import { DashboardLoading } from "./DashboardLoading"
 import { AssetIcon } from "./AssetIcon"
-import { DocsLink } from "./DocsLink"
-import { DOCS_LINKS, watch } from "../../shared/docs-links"
 import { categorizeTokens } from "../../shared/spamFilter"
 import { useBtcAccounts } from "../hooks/useBtcAccounts"
 import { useEvmAddresses } from "../hooks/useEvmAddresses"
@@ -921,7 +919,6 @@ function PersonalDashboard({ capabilities, isEmulator, onLoaded, watchOnly, watc
 	const [introDismissed, setIntroDismissed] = useState(false)
 	const [pioneerError, setPioneerError] = useState<PioneerError | null>(null)
 	const [portfolioFault, setPortfolioFault] = useState<PortfolioFault | null>(null)
-	const [dismissedBalanceErrors, setDismissedBalanceErrors] = useState<Set<string>>(() => new Set())
 	const [streamStatus, setStreamStatus] = useState<{ connected: boolean; watching: number } | null>(null)
 	const [cacheUpdatedAt, setCacheUpdatedAt] = useState<number | null>(null)
 	const [hasEverRefreshed, setHasEverRefreshed] = useState(false)
@@ -1369,10 +1366,11 @@ function PersonalDashboard({ capabilities, isEmulator, onLoaded, watchOnly, watc
 
 		try {
 			const params = { forceRefresh, refreshReason, ...(swapDestCaips.length ? { swapDestCaips } : {}), ...(userInitiated ? { userInitiated } : {}) }
-			const read = () => rpcRequest<ChainBalance[]>('getBalances', params, 200000)
 			// A pressed refresh really scans: it waits out a busy KeepKey quietly
 			// instead of returning at once with nothing new (owner rule: busy = wait).
-			const result = userInitiated ? await retryWhileDeviceBusy(read, () => gen === refreshGenRef.current) : await read()
+			// A background refresh gives up and keeps the cached balances.
+			const result = await rpcRequest<ChainBalance[]>('getBalances', params, 200000,
+				userInitiated ? () => gen === refreshGenRef.current : () => false)
 			if (result && gen === refreshGenRef.current) {
 				const tokenTotal = result.reduce((n, b) => n + (b.tokens?.length || 0), 0)
 				const balTotal = result.reduce((n, b) => n + (b.balanceUsd || 0), 0)
@@ -1663,7 +1661,6 @@ function PersonalDashboard({ capabilities, isEmulator, onLoaded, watchOnly, watc
 			chainLastUpdatedRef.current.clear()
 			balanceActivityRef.current.clear()
 			setPortfolioFault(null)
-			setDismissedBalanceErrors(new Set())
 			setCacheUpdatedAt(null)
 			setHasEverRefreshed(false)
 			clearPioneerError()
@@ -1908,15 +1905,6 @@ function PersonalDashboard({ capabilities, isEmulator, onLoaded, watchOnly, watc
 	const visibleBalances = visibleChains.map(chain => balances.get(chain.id))
 	const renderNow = Math.max(clockNow, Date.now())
 	const displayedUpdatedAt = dashboardBalanceUpdatedAt(visibleBalances, cacheUpdatedAt, renderNow)
-	const balanceErrorNotice = dashboardErrorNotice(portfolioFault, visibleChainIdsRef.current, allChains)
-	const showBalanceError = !!balanceErrorNotice?.identities.some(identity => !dismissedBalanceErrors.has(identity))
-	useEffect(() => {
-		const active = new Set(balanceErrorNotice?.identities ?? [])
-		setDismissedBalanceErrors(current => {
-			const remaining = new Set([...current].filter(identity => active.has(identity)))
-			return remaining.size === current.size ? current : remaining
-		})
-	}, [balanceErrorNotice?.key])
 
 	// XMR: a row in the chain list (setting + device capability), opening the standard asset page.
 	// Its balance comes from the local watch wallet and has no fiat price, so it stays out of
@@ -2749,33 +2737,6 @@ function PersonalDashboard({ capabilities, isEmulator, onLoaded, watchOnly, watc
 							>
 								{t("retry")}
 							</Box>
-						</Flex>
-					</Flex>
-				</Box>
-			)}
-
-			{/* Cached figures are normal. Only actual read failures need a notice;
-			    raw stale and transaction metadata remain available to Audit. */}
-			{!pioneerError && showBalanceError && balanceErrorNotice && (
-				<Box role="alert" data-balance-error-notice="" mb="3" px="4" py="3"
-					bg="rgba(233,196,106,0.08)" border="1px solid" borderColor="rgba(233,196,106,0.3)" borderRadius="lg">
-					<Flex direction="column" gap="2">
-						<Flex align="center" gap="2">
-							<Text fontSize="sm" fontWeight="600" color="kk.gold">{t("degradedTitle")}</Text>
-							<DocsLink href={DOCS_LINKS.missingCoins} ml="1" />
-							<DocsLink href={watch('course-13-not-showing')} label={uiText("Watch video")} />
-						</Flex>
-						<Flex wrap="wrap" align="center" gap="1.5" fontSize="xs" color="kk.textSecondary" lineHeight="1.4">
-							<Text>{t("degradedReach")}</Text>
-							{balanceErrorNotice.names.length ? balanceErrorNotice.names.map(name => <Text key={name} fontWeight="600">{name}</Text>) : <Text>{uiText('Balance unavailable')}</Text>}
-							<Text>{t("degradedTail")}</Text>
-						</Flex>
-						<Flex gap="2" mt="1">
-							<Button size="xs" variant="ghost" color="kk.gold" disabled={loadingBalances}
-								onClick={() => refreshBalances(true, [], true)}>{t("retry")}</Button>
-							<Button size="xs" variant="ghost" color="kk.textMuted"
-								onClick={() => setDismissedBalanceErrors(current => new Set([...current, ...balanceErrorNotice.identities]))}>{t("dismiss")}</Button>
-							<Button size="xs" variant="ghost" color="kk.gold" onClick={() => setShowAudit(true)}>{uiText("Run audit")}</Button>
 						</Flex>
 					</Flex>
 				</Box>

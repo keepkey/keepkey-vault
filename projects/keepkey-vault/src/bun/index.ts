@@ -3096,7 +3096,15 @@ async function getChainBalance(params: { chainId: string; forceRefresh?: boolean
 		}
 		const message = getPioneerPortfolioErrorMessage(e)
 		console.warn(`[getBalance] ${chain.coin} portfolio failed:`, message)
-		try { rpc.send['pioneer-error']({ message, url: getPioneerApiBase() }) } catch { /* webview not ready */ }
+		// One chain missing a read is that chain not refreshed yet, never "server
+		// unavailable": only the full portfolio read may report an outage.
+		try {
+			sendPortfolioFault({
+				message: '', url: getPioneerApiBase(), severity: 'warning', checkedChainIds: [chain.id],
+				degradedChains: [chain.symbol], staleChains: [], degradedChainIds: [chain.id], staleChainIds: [],
+				unresolvedFaultCount: 0, unresolvedErrorCount: 0,
+			})
+		} catch { /* webview not ready */ }
 		throw new Error(`Balance server error: ${message}`)
 	}
 	// If Pioneer failed or returned no address, preserve the cached address

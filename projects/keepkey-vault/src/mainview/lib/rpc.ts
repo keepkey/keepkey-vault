@@ -8,7 +8,7 @@
  * When Electrobun preload is available, it uses the encrypted WebSocket transport.
  * In dev/HMR mode without Electrobun, it falls back to a no-op stub so the UI renders.
  */
-import { withUnlockRetry } from '../../shared/device-access-error'
+import { retryWhileDeviceBusy, withUnlockRetry } from '../../shared/device-access-error'
 
 type RPCPacket =
   | { type: 'request'; id: number; method: string; params: any }
@@ -206,10 +206,14 @@ initTransport()
  * @param timeoutMs - Timeout in ms (default 30s). Pass 0 for no timeout (device-interactive ops).
  */
 /** A read refused because the KeepKey is locked opens the PIN dialog and runs again
- *  once unlocked, so "Unlock KeepKey to load this account" is never shown. */
-export function rpcRequest<T = any>(method: string, params?: any, timeoutMs = 30000): Promise<T> {
-  if (method === 'requestDeviceUnlock') return rawRpcRequest<T>(method, params, timeoutMs)
-  return withUnlockRetry(() => rawRpcRequest<T>(method, params, timeoutMs), () => rawRpcRequest<void>('requestDeviceUnlock', undefined, 0))
+ *  once unlocked, so "Unlock KeepKey to load this account" is never shown.
+ *  A request refused because the KeepKey is busy waits for it and runs again, so
+ *  "KeepKey is busy with another request" is never shown. The wait ends (and the
+ *  busy error is thrown) once isCurrent() is false: closed dialog, Cancel, stale inputs. */
+export function rpcRequest<T = any>(method: string, params?: any, timeoutMs = 30000, isCurrent: () => boolean = () => true): Promise<T> {
+  const run = () => retryWhileDeviceBusy(() => rawRpcRequest<T>(method, params, timeoutMs), isCurrent)
+  if (method === 'requestDeviceUnlock') return run()
+  return withUnlockRetry(run, () => rawRpcRequest<void>('requestDeviceUnlock', undefined, 0))
 }
 
 function rawRpcRequest<T = any>(method: string, params?: any, timeoutMs = 30000): Promise<T> {

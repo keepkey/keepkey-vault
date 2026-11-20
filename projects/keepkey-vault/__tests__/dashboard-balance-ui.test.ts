@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test'
 
-test('Dashboard quietly keeps recent cache, shows actual errors and recovers within the checked scope', () => {
+test('Dashboard quietly keeps recent cache, never banners a chain that missed a refresh', () => {
   const run = Bun.spawnSync([process.execPath, new URL('./support/dashboard-balance-ui.tsx', import.meta.url).pathname], {
     cwd: new URL('../', import.meta.url).pathname, stdout: 'pipe', stderr: 'pipe', timeout: 30_000,
   })
@@ -11,8 +11,7 @@ test('Dashboard quietly keeps recent cache, shows actual errors and recovers wit
   expect(record).toBeDefined()
   expect(JSON.parse(record!.slice(marker.length))).toEqual({
     freshCache: { refreshes: 0, notice: false, pulse: false }, ordinaryStaleQuiet: true, focusQuiet: true,
-    actualFailureVisible: true, sameErrorStaysDismissed: true, newErrorReopens: true,
-    partialRecoveryKeepsUnknownError: true, fullRecoveryClears: true, chainRecoveryClears: true,
+    failedChainQuiet: true, unmappedFailureQuiet: true,
     transactionIsQuietGlobally: true, transactionCanRefresh: true,
     purgeReset: { notice: false, retainedBalance: false, pulse: false },
     missingStructureQuiet: true, transactionAfterCacheRefreshes: true, pendingCacheRefreshes: true,
