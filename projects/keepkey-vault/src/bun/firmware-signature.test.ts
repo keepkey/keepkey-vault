@@ -49,7 +49,8 @@ describe('bundled release images', () => {
   })
   test('keys are the device-reported firmware hashes', () => {
     const byPath = new Map([...images].map(([hash, image]) => [image.relPath, hash]))
-    for (const version of ['v7.10.0', 'v7.14.0', 'v7.14.1', 'v7.16.0']) {
+    // v7.16.0 was withdrawn from the bundle (93ac87129); the beta channel is empty.
+    for (const version of ['v7.10.0', 'v7.14.0', 'v7.14.1']) {
       expect(resolveOndeviceFirmwareVersion(byPath.get(`${version}/firmware.keepkey.bin`))).toBe(version)
     }
     expect(byPath.has('bl_v2.1.4/blupdater.bin')).toBe(true)
@@ -60,7 +61,7 @@ describe('bundled release images', () => {
     expect(resolveOndeviceFirmwareVersion(byPath.get(relPath))).toBe('v7.14.3-bitcoin-only')
     const manifest = JSON.parse(readFileSync(join(import.meta.dir, '../../firmware-bundle/releases.json'), 'utf8'))
     const payload = createHash('sha256').update(new Uint8Array(readFileSync(join(import.meta.dir, '../../firmware-bundle', relPath))).subarray(256)).digest('hex')
-    for (const channel of ['latest', 'beta']) {
+    for (const channel of ['latest', 'beta'].filter(channel => channel === 'latest' || manifest[channel])) {
       expect(manifest[channel].firmwareBitcoinOnly).toEqual({ version: 'v7.14.3', url: relPath, hash: payload })
     }
     // analyzeFirmware strips the 'v' and compares versions: no variant suffix here.

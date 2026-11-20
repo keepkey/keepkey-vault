@@ -1,6 +1,7 @@
 // The actual SwapDialog review → approve → swap path with synthetic RPC replies: no wallet, device or network.
 import { JSDOM } from 'jsdom'
 import { mock } from 'bun:test'
+import { retryWhileDeviceBusy } from '../../src/shared/device-access-error'
 const dom = new JSDOM('<!doctype html><html><body></body></html>', { url: 'http://localhost/', pretendToBeVisual: true })
 for (const key of ['window', 'document', 'navigator', 'HTMLElement', 'HTMLInputElement', 'Node', 'Event', 'MouseEvent', 'getComputedStyle', 'localStorage', 'requestAnimationFrame', 'cancelAnimationFrame']) {
   ;(globalThis as any)[key] = key === 'window' ? dom.window : (dom.window as any)[key]
@@ -37,8 +38,8 @@ let previewBusy = 0
 let execute: Array<() => Promise<unknown>> = []
 let state: any = null
 const listeners: Record<string, ((message: any) => void) | undefined> = {}
-mock.module('../../src/mainview/lib/rpc', () => ({
-  rpcRequest: async (method: string, params: any) => {
+// The real rpcRequest waits out a busy KeepKey until the caller's isCurrent() is false.
+const reply = async (method: string, params: any) => {
     calls.push({ method, params, at: Date.now() })
     switch (method) {
       case 'getSwapAssets': return [usdc, eth]
@@ -50,7 +51,10 @@ mock.module('../../src/mainview/lib/rpc', () => ({
       case 'executeSwap': { const next = execute.shift(); if (!next) throw new Error('unexpected executeSwap'); return next() }
       default: return {}
     }
-  },
+}
+mock.module('../../src/mainview/lib/rpc', () => ({
+  rpcRequest: (method: string, params: any, _timeoutMs?: number, isCurrent: () => boolean = () => true) =>
+    retryWhileDeviceBusy(() => reply(method, params), isCurrent),
   rpcFire(method: string, payload: any) { if (method === 'publishSwapUiState') state = payload },
   onRpcMessage: (name: string, handler: (message: any) => void) => { listeners[name] = handler; return () => { if (listeners[name] === handler) listeners[name] = undefined } },
 }))

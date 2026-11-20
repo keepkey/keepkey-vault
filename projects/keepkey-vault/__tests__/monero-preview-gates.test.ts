@@ -147,7 +147,9 @@ describe('Monero preview gates', () => {
 	test('Pioneer, REST and audit loops never treat XMR as a Pioneer chain', () => {
 		expect(src('src/bun/rest-api.ts')).toContain("c.chainFamily !== 'monero').map(c => c.networkId)")
 		expect(src('src/bun/rest-api.ts')).toContain(".filter(c => c.chainFamily !== 'monero')")
-		expect(src('src/bun/activity-history.ts')).toContain("chain.chainFamily !== 'monero'")
+		// #700 moved the activity-history chain filter into one shared predicate.
+		expect(src('src/bun/history-scan-eligibility.ts')).toContain("chain.chainFamily !== 'monero'")
+		expect(src('src/bun/activity-history.ts')).toContain('isHistoryScanChain(chain, firmwareVersion')
 		expect(src('src/bun/index.ts')).toContain("if (c.chainFamily === 'monero') return false")
 	})
 
