@@ -1,7 +1,7 @@
 /** Signed Monero transactions whose broadcast outcome is unknown, kept across app restarts.
  *  While one is pending for a wallet, that wallet may only re-broadcast these exact bytes:
  *  building a second, different payment could pay twice if the first one did reach the network. */
-import { chmodSync, constants, copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs'
+import { chmodSync, constants, copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
 import { basename, join } from 'node:path'
 import { randomBytes } from 'node:crypto'
 import { validTransactionKeys, type MoneroTransactionKeys } from './monero-transaction-keys'
@@ -47,6 +47,11 @@ export interface MoneroPendingStore {
 }
 
 const MAX_RECORDS = 16
+/** The payment-proof archive keeps every record (dropping one would lose its keys for good), so it has no cap. A typical
+ *  record is about 3.5 KB, so past this size (about 1,500 records, far beyond normal use) the app log says so once per
+ *  store, i.e. per wallet session: the vault builds a new store when the wallet is reconnected (KEEPKEY-144). Trimming records instead is unsafe: v1.7.1 silently drops a record without `txHex` and
+ *  rewrites the file without it, which would erase those keys after a downgrade. */
+export const SENT_ARCHIVE_WARN_BYTES = 5 * 1024 * 1024
 const WALLET = /^\S{1,128}:4[1-9A-HJ-NP-Za-km-z]{94}$/
 
 /** A record is restored only if its bytes still hash to its txid (a damaged or edited file is not re-sent). */
@@ -96,6 +101,18 @@ export function createFilePendingStore(directory: string): MoneroPendingStore {
       throw error
     }
   }
+  let archiveSizeWarned = false
+  /** Logs only counts and size, never a txid or key. Never throws: it must not affect loading or saving keys. */
+  const noteArchiveSize = (bytes: number, records: MoneroSentRecord[]) => {
+    if (archiveSizeWarned || !(bytes > SENT_ARCHIVE_WARN_BYTES)) return
+    archiveSizeWarned = true
+    try {
+      const neverLanded = records.filter(record => record.outcome !== undefined).length
+      console.warn(`[monero] The payment-proof archive is large: ${records.length} records, ${(bytes / 1024 / 1024).toFixed(1)} MB, ` +
+        `${neverLanded} of them for transactions a node said never landed. Every key is kept; many never-landed records can mean a node that rejects sends`)
+    } catch {}
+  }
+  const fileSize = (target: string) => { try { return statSync(target).size } catch { return 0 } }
   return {
     loadSent() {
       if (!existsSync(sentFile)) return []
@@ -108,7 +125,7 @@ export function createFilePendingStore(directory: string): MoneroPendingStore {
       // sends the vault down its conservative path, which writes nothing over the store.
       if (version !== undefined && version !== 1) throw new Error('The Monero payment-proof records could not be read')
       const valid = (records ?? []).map(validSentRecord).filter((r: MoneroSentRecord | null): r is MoneroSentRecord => !!r)
-      if (records && valid.length === records.length) return valid
+      if (records && valid.length === records.length) { noteArchiveSize(Buffer.byteLength(raw), valid); return valid }
       // Unparseable, an unknown shape, or records that fail validation: the next save would drop those
       // keys for good. Keep a copy of the original aside (audit v6 N2), then continue with what is valid.
       // The live file never disappears (KEEPKEY-141): the original is COPIED aside, then replaced in one
@@ -122,9 +139,10 @@ export function createFilePendingStore(directory: string): MoneroPendingStore {
       // another file of keys on every retry.
       try { write(sentFile, { version: 1, records: valid }) } catch { try { unlinkSync(aside) } catch {} throw unreadable() }
       console.warn(`[monero] Unreadable payment-proof records were kept aside as ${basename(aside)}`)
+      noteArchiveSize(fileSize(sentFile), valid)
       return valid
     },
-    saveSent(records) { write(sentFile, {version:1, records}) },
+    saveSent(records) { write(sentFile, {version:1, records}); noteArchiveSize(fileSize(sentFile), records) },
     hasUnreadableCopies() {
       try { return readdirSync(directory).some(name => name.startsWith('monero-sent-transactions.unreadable-')) } catch { return false }
     },
