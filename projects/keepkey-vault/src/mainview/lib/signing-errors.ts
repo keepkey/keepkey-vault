@@ -46,7 +46,8 @@ const DEVICE_PATTERNS = [
 
 export type DeviceErrorKind = 'cancelled' | 'invalidAddress' | 'noAnswer' | 'deviceLost' | 'other'
 
-/** Which recovery a device failure needs. Shared by signing and address verification. */
+/** Which recovery a device failure needs, for address verification. Uses the same patterns as
+ *  describeSigningError below; verify-address-error.test.ts checks the two stay in step. */
 export function classifyDeviceError(e: unknown): DeviceErrorKind {
 	const raw = deviceErrorText(e)
 	if (CANCEL_PATTERNS.some(r => r.test(raw))) return 'cancelled'
@@ -66,29 +67,28 @@ export function deviceErrorText(e: unknown): string {
  * until translated).
  */
 export function describeSigningError(e: unknown, t: Translate): string {
-	const raw = deviceErrorText(e)
-	const kind = classifyDeviceError(e)
+	const raw = ((e as any)?.message ?? String(e ?? '')).toString().trim()
 
-	if (kind === 'cancelled') {
+	if (CANCEL_PATTERNS.some(r => r.test(raw))) {
 		// Shared by Send, Staking and Names: these three live in `common`, not in each caller's namespace (audit v6 U7).
 		return t('signingCancelled', { ns: 'common', defaultValue: 'Transaction cancelled on your KeepKey.' })
 	}
 
-	if (kind === 'invalidAddress') {
+	if (ADDRESS_PATTERNS.some(r => r.test(raw))) {
 		return t('signingInvalidAddress', {
 			ns: 'send',
 			defaultValue: 'Your KeepKey rejected the recipient address. Check the address and try again.',
 		})
 	}
 
-	if (kind === 'noAnswer') {
+	if (CLIENT_TIMEOUT.test(raw)) {
 		return t('signingNoAnswer', {
 			ns: 'send',
 			defaultValue: 'No answer from your KeepKey yet. Check its screen: confirm or cancel there, then try again.',
 		})
 	}
 
-	if (kind === 'deviceLost') {
+	if (DEVICE_PATTERNS.some(r => r.test(raw))) {
 		return t('signingDeviceLost', {
 			ns: 'common',
 			defaultValue:
