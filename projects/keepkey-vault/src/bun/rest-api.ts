@@ -1802,6 +1802,16 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           }
         }
 
+        // A caller-supplied Hive header that can never be signed (partial, out
+        // of range, expired, too far ahead) is refused before the approval
+        // window opens, so the user is not asked to approve a doomed request.
+        if (method === 'POST' && path === '/hive/sign-operations' && reqBody && typeof reqBody === 'object') {
+          auth.requireAuth(req)
+          const { exactHiveHeader } = await import('./txbuilder/hive-ops')
+          try { exactHiveHeader(reqBody) }
+          catch (error: any) { return json({ error: error?.message || 'Invalid Hive header' }, 400) }
+        }
+
         // ═══════════════════════════════════════════════════════════════
         // SIGNING APPROVAL GATE — auth required, then user must approve
         // ═══════════════════════════════════════════════════════════════
@@ -2634,22 +2644,37 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           if (fwBlock) return fwBlock
           const wallet = await requireWallet(engine)
           const body = await parseRequest(req, S.HiveSignOperationsRequest)
+          const { serializeHiveOpsTx, exactHiveHeader, hiveRoleOf, hiveTimeIso } = await import('./txbuilder/hive-ops')
 
-          // Header (TaPoS) from Pioneer — the exact values the device signs
-          // are returned to the caller so broadcast reuses the same tx.
-          const pioneerBase = (callbacks?.getPioneerApiBase?.() || 'https://api.keepkey.info').replace(/\/$/, '')
-          const txParams = await fetch(`${pioneerBase}/api/v1/hive/tx-params`, {
-            signal: AbortSignal.timeout(20_000),
-          }).then(r => r.json()) as any
-          if (!txParams?.success) throw new HttpError(502, `Hive tx-params failed: ${txParams?.error || 'unknown'}`)
-
-          const { serializeHiveOpsTx } = await import('./txbuilder/hive-ops')
-          let serialized
-          try {
-            serialized = serializeHiveOpsTx({
+          // A caller-supplied header is signed exactly as sent. Checked again
+          // here, after approval: the user may have taken long enough for it
+          // to expire, and an expired header is refused, never refreshed.
+          let header
+          try { header = exactHiveHeader(body) }
+          catch (e: any) { throw new HttpError(400, e?.message || 'Invalid Hive header') }
+          const headerSource = header ? 'caller' : 'pioneer'
+          if (!header) {
+            // Header (TaPoS) from Pioneer — the exact values the device signs
+            // are returned to the caller so broadcast reuses the same tx.
+            const pioneerBase = (callbacks?.getPioneerApiBase?.() || 'https://api.keepkey.info').replace(/\/$/, '')
+            const txParams = await fetch(`${pioneerBase}/api/v1/hive/tx-params`, {
+              signal: AbortSignal.timeout(20_000),
+            }).then(r => r.json()) as any
+            if (!txParams?.success) throw new HttpError(502, `Hive tx-params failed: ${txParams?.error || 'unknown'}`)
+            header = {
               refBlockNum: txParams.refBlockNum,
               refBlockPrefix: txParams.refBlockPrefix,
               expirationUnix: txParams.expirationUnix,
+              chainId: txParams.chainId,
+            }
+          }
+
+          let serialized
+          try {
+            serialized = serializeHiveOpsTx({
+              refBlockNum: header.refBlockNum,
+              refBlockPrefix: header.refBlockPrefix,
+              expirationUnix: header.expirationUnix,
               operations: body.operations as any,
             })
           } catch (e: any) {
@@ -2661,7 +2686,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           const { hiveConfirmDetails } = await import('./emulator-confirm-details')
           const result: any = await emuWrap(() => (wallet as any).hiveSignOperations({
             addressNList,
-            chainId: txParams.chainId,
+            chainId: header.chainId,
             serializedTx: new Uint8Array(serialized.serializedTx),
           }), hiveConfirmDetails('hiveSignOperations', body.operations))
           if (!result?.signature) throw new HttpError(500, 'Hive sign-operations: device returned no signature')
@@ -2670,13 +2695,19 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           // baked into the serialized header), NOT Pioneer's separate expirationIso —
           // if the two ever diverge, a caller broadcasting the ISO would reconstruct a
           // different transaction than the one the device signed (invalid signature).
-          const signedExpirationIso = new Date(txParams.expirationUnix * 1000).toISOString().replace(/\.\d{3}Z$/, '')
           return json({
             signature: sigBytes.toString('hex'),
-            ref_block_num: txParams.refBlockNum,
-            ref_block_prefix: txParams.refBlockPrefix,
-            expiration: signedExpirationIso,
+            ref_block_num: header.refBlockNum,
+            ref_block_prefix: header.refBlockPrefix,
+            expiration: hiveTimeIso(header.expirationUnix),
             operations: body.operations,
+            // The exact bytes sent to the device (without the chain id it prefixes
+            // for the digest): the caller byte-compares before broadcast.
+            serialized_tx: serialized.serializedTx.toString('hex'),
+            chain_id: header.chainId,
+            header_source: headerSource,
+            address_n: addressNList,
+            role: hiveRoleOf(addressNList),
           })
         }
 

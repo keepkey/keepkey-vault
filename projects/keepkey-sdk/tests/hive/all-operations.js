@@ -27,7 +27,8 @@
  * Nothing here is broadcast.
  *
  * Requires: firmware >= 7.15.0-rc15, vault hive_enabled=1, live Pioneer for
- * the TaPoS header (/hive/sign-operations fetches it per call).
+ * the TaPoS header (/hive/sign-operations fetches it per call unless the
+ * caller sends one; the exact-header case below sends one).
  *
  * Run: node tests/hive/all-operations.js   (Vault live on :1646)
  */
@@ -158,6 +159,33 @@ run('Hive FULL op-table sweep (all 14 clear-sign ops + transfer + message)', asy
     catch (e) { err = e }
     assertThrows(`op "${name}" stays out of the clear-sign table`, err, 'Unsupported Hive operation')
   }
+
+  // ── Exact caller header (Skate Wallet byte-compare) ─────────────────
+  // The vault signs exactly this header (no Pioneer fetch) and echoes the
+  // bytes it signed; a partial or expired header is refused, never altered.
+  const hiveTime = (unix) => new Date(unix * 1000).toISOString().replace(/\.\d{3}Z$/, '')
+  const fixed = { ref_block_num: 0x1234, ref_block_prefix: 0xdeadbeef, expiration: hiveTime(Math.floor(Date.now() / 1000) + 600) }
+  const vote = ['vote', { voter: 'alice', author: 'bob', permlink: 'p', weight: 10000 }]
+  let exactRes, exactErr
+  try { exactRes = await sdk.hive.hiveSignOperations({ operations: [vote], ...fixed }) }
+  catch (e) { exactErr = e }
+  assert('exact header signs', !exactErr && !!sig(exactRes))
+  if (exactErr) console.error(`     ↳ ${String(exactErr.message || exactErr).slice(0, 180)}`)
+  if (exactRes) {
+    const tx = Buffer.from(exactRes.serialized_tx || '', 'hex')
+    assert('exact header is signed as sent',
+      tx.length > 10 && tx.readUInt16LE(0) === fixed.ref_block_num && tx.readUInt32LE(2) === fixed.ref_block_prefix
+      && exactRes.expiration === fixed.expiration && exactRes.header_source === 'caller')
+    assert('exact header reports the posting role', exactRes.role === 'posting')
+  }
+  let partialErr
+  try { await sdk.hive.hiveSignOperations({ operations: [vote], ref_block_num: 1 }) }
+  catch (e) { partialErr = e }
+  assertThrows('partial header is refused', partialErr, 'Partial Hive header')
+  let expiredErr
+  try { await sdk.hive.hiveSignOperations({ operations: [vote], ...fixed, expiration: 1700003600 }) }
+  catch (e) { expiredErr = e }
+  assertThrows('expired header is refused', expiredErr, 'Hive header expired')
 
   // ── Dedicated path: /hive/sign-transfer ─────────────────────────────
   // Caller supplies the TaPoS header here (unlike sign-operations, which

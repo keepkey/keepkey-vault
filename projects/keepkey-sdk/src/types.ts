@@ -200,6 +200,43 @@ export interface HiveSignOperationsParams {
   addressNList?: number[]
   /** condenser-style tuples: [["limit_order_create", {...}], ...] — max 4, single tier */
   operations: [string, Record<string, any>][]
+  /**
+   * Optional exact TaPoS header: send ref_block_num, ref_block_prefix and
+   * expiration together, or none. With them the vault signs exactly this header
+   * (no Pioneer fetch) or refuses it with a 400 (partial, out of range, expired,
+   * more than 3600 s ahead); it never alters it. Without them it fetches one.
+   */
+  ref_block_num?: number
+  ref_block_prefix?: number
+  /** Hive time "YYYY-MM-DDTHH:MM:SS" (UTC) or unix seconds */
+  expiration?: string | number
+  /** 32-byte chain id hex; only with an exact header. Default: Hive mainnet */
+  chain_id?: string
+}
+
+/** POST /hive/sign-operations result. */
+export interface HiveSignedOperations extends SignedTx {
+  /** 65-byte compact signature, hex */
+  signature: string
+  /** The header that was signed */
+  ref_block_num: number
+  ref_block_prefix: number
+  /** Hive time (UTC) of the signed expiration */
+  expiration: string
+  operations: [string, Record<string, any>][]
+  /**
+   * Hex of the exact transaction bytes sent to the device (the digest is
+   * sha256(chain_id ‖ these bytes)). Byte-compare with your own serialization
+   * before broadcast.
+   */
+  serialized_tx: string
+  chain_id: string
+  /** 'caller' when the request carried the header, 'pioneer' when the vault fetched it */
+  header_source: 'caller' | 'pioneer'
+  /** The path that signed */
+  address_n: number[]
+  /** Its SLIP-0048 role, or null for a non-role path */
+  role: 'owner' | 'active' | 'memo' | 'posting' | null
 }
 
 export interface HiveSignTransferParams {
