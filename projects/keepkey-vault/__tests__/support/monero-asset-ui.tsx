@@ -426,6 +426,37 @@ for (const [name, overrides, Section] of [
   await click(q(container, '[data-monero-retry-relay]'))
   out.retryCalls = client.calls.filter(c => c[0] === 'retry').length
   out.discardWithoutCheck = !!q(container, '[data-monero-discard]')
+  out.proofNoticeWhenUnknown = !!q(container, '[data-monero-proof-not-saved]')
+  await unmount()
+}
+{
+  // KEEPKEY-143: the node has the tx, but its payment proof could not be saved.
+  const client = fakeClient(connected({ unrelayedTxid: 'cd'.repeat(32), sendBlocked: 'unrelayed', unrelayedProofNotSaved: true }))
+  const { container, unmount } = await render(React.createElement(Host, { Section: MoneroSendSection, client }))
+  const notice = text(q(container, '[data-monero-unrelayed]')?.closest('[role="alert"]') ?? null)
+  out.proofNotSaved = {
+    text: text(q(container, '[data-monero-proof-not-saved]')),
+    generic: notice.includes('still being checked'),
+    txid: text(q(container, '[data-monero-unrelayed]')),
+    form: !!q(container, '[data-monero-send-address]'),
+    discard: !!q(container, '[data-monero-discard]'),
+  }
+  out.proofNotSaved.stillBeforeRetry = !!q(container, '[data-monero-proof-still-unsaved]')
+  // Check again while saving still fails: the status stays flagged, and the click gets an answer.
+  await click(q(container, '[data-monero-retry-relay]'))
+  out.proofNotSaved.retryCalls = client.calls.filter(c => c[0] === 'retry').length
+  out.proofNotSaved.stillAfterRetry = text(q(container, '[data-monero-proof-still-unsaved]'))
+  out.proofNotSaved.noticeAfterRetry = !!q(container, '[data-monero-proof-not-saved]')
+  await unmount()
+}
+{
+  // Check again after the disk was fixed: the proof is saved, so neither notice is left behind.
+  const client = fakeClient(connected({ unrelayedTxid: 'cd'.repeat(32), sendBlocked: 'unrelayed', unrelayedProofNotSaved: true }))
+  const { container, unmount } = await render(React.createElement(Host, { Section: MoneroSendSection, client }))
+  client.set(connected())
+  await click(q(container, '[data-monero-retry-relay]'))
+  out.proofSaved = { notice: !!q(container, '[data-monero-proof-not-saved]'), still: !!q(container, '[data-monero-proof-still-unsaved]'),
+    banner: !!q(container, '[data-monero-retry-relay]'), sent: text(q(container, '[data-monero-sent]')) }
   await unmount()
 }
 {

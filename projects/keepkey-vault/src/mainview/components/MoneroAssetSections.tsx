@@ -318,6 +318,8 @@ export function MoneroSendSection({ monero, client, privateMode = false }: { mon
 	const [notice, setNotice] = useState<string | null>(null)
 	const [error, setError] = useState<string | null>(null)
 	const [sentTxid, setSentTxid] = useState<string | null>(null)
+	// The pending tx a Check again was made for while its payment proof could not be saved (KEEPKEY-143).
+	const [proofRetriedFor, setProofRetriedFor] = useState<string | null>(null)
 	const address = wallet?.address ?? ""
 	useEffect(() => { setReview(null); setError(null); setSentTxid(null) }, [address])
 	if (!wallet) return <MoneroConnectCard client={client} monero={monero} privateMode={privateMode} />
@@ -345,8 +347,12 @@ export function MoneroSendSection({ monero, client, privateMode = false }: { mon
 		} finally { setReview(null); void monero.refresh() }
 	})
 	const retry = () => run("retry", async () => {
+		const proofFailedFor = wallet.unrelayedProofNotSaved ? wallet.unrelayedTxid ?? null : null
 		try { const result = await client.retryRelay(); if (/^[0-9a-f]{64}$/.test(result?.txid ?? "")) setSentTxid(result.txid) }
-		finally { void monero.refresh() }
+		finally {
+			// Decided on the refreshed status, so a proof saved by this check never flashes "still could not be saved".
+			if (proofFailedFor) { await monero.refresh(); setProofRetriedFor(proofFailedFor) } else void monero.refresh()
+		}
 	})
 	const discard = () => run("discard", async () => {
 		try {
@@ -365,7 +371,12 @@ export function MoneroSendSection({ monero, client, privateMode = false }: { mon
 			{verification.error && <Box role="alert" mb="3"><Text fontSize="12px" color="var(--rose)">{verification.error}</Text><Button size="xs" mt="2" onClick={() => { void verification.retry() }}>{uiText("Try again")}</Button></Box>}
 			{wallet.unrelayedTxid && (
 				<Box role="alert" mb="4" {...cardProps} borderColor="var(--gold)">
-					<Text fontSize="13px" color="var(--gold)">{uiText("Your last send is still being checked. New sends are paused. Checking again resends the same transaction and cannot pay twice.")}</Text>
+					{wallet.unrelayedProofNotSaved
+						? <Text data-monero-proof-not-saved="" fontSize="13px" color="var(--gold)">{uiText("Your last transaction was sent, but its payment proof could not be saved, so new sends are paused until the proof is saved. Check free disk space and the KeepKey Vault data folder's permissions, or update the app if a newer version was used on this computer, then select Check again. Nothing can be paid twice.")}</Text>
+						: <Text fontSize="13px" color="var(--gold)">{uiText("Your last send is still being checked. New sends are paused. Checking again resends the same transaction and cannot pay twice.")}</Text>}
+					{wallet.unrelayedProofNotSaved && proofRetriedFor === wallet.unrelayedTxid && (
+						<Text data-monero-proof-still-unsaved="" mt="2" fontSize="12px" color="var(--text-2)" role="status">{uiText("Checked again: the payment proof still could not be saved.")}</Text>
+					)}
 
 					<Button data-monero-retry-relay="" mt="2" size="xs" variant="outline" onClick={() => { void retry() }} disabled={!!busy} className="electrobun-webkit-app-region-no-drag">{busy === "retry" ? <Spinner size="xs" /> : null}{uiText("Check again")}</Button>
 					<details style={{ marginTop: 12, fontSize: 12, color: "var(--text-3)" }}><summary style={{ cursor: "pointer" }}>{uiText("Recovery details")}</summary>

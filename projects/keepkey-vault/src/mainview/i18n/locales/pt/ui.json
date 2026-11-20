@@ -364,6 +364,8 @@
   "m2768ac54": "Intervalo de revisão em dias",
   "m278a7bec": "· indisponível",
   "m27a29362": "Seu último envio ainda está sendo verificado. Novos envios estão pausados. Verificar novamente reenvia a mesma transação e não pode pagar duas vezes.",
+  "m503316c": "Sua última transação foi enviada, mas a prova de pagamento não pôde ser salva, então novos envios ficam pausados até que ela seja salva. Verifique o espaço livre em disco e as permissões da pasta de dados do KeepKey Vault, ou atualize o app se uma versão mais nova já foi usada neste computador, e depois selecione Verificar novamente. Nada pode ser pago duas vezes.",
+  "m718edeb1": "Verificado novamente: a prova de pagamento ainda não pôde ser salva.",
   "m27b0bf83": "Nenhum ativo em carteira corresponde",
   "m27d0660e": "A senha atual não está em cache",
   "m27e0ab76": "Verifique cada proprietário antes de implantar. Estes endereços vão controlar esta conta.",
