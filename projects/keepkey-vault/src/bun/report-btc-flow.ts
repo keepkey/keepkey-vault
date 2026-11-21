@@ -10,7 +10,19 @@
  * output, including the sender's own change, so a 0.008 BTC payment from an
  * exchange once showed as a 1.58 BTC "receive". Only outputs to the wallet's own
  * addresses count.
+ *
+ * Shared transactions (payjoin/coinjoin: someone else added an input). Outputs to
+ * others can carry that person's own input back, so they are not the wallet's
+ * payment. What the wallet lost is -net; its fee is min(tx fee, -net) and its
+ * sent amount is the rest. Example payjoin: wallet 600000 in, receiver 200000 in,
+ * receiver 500000 out, wallet change 299000, fee 1000 -> Sent 300000, Fee 1000
+ * (not 500000 + 1000). Who paid which part of a fee is not on chain; this rule
+ * is exact for payjoin (the sender pays the fee) and for a coinjoin that pays no
+ * one (Sent 0). For a coinjoin that also pays someone it leans fee-heavy, but
+ * received - sent - fees always equals the balance.
  */
+
+import type { ReportSection } from '../shared/types'
 
 export type FlowDir = 'received' | 'sent' | 'internal'
 
@@ -25,6 +37,7 @@ export interface BtcFlowTx {
 	txid: string
 	blockHeight: number
 	timestamp: number
+	/** The wallet's part of the network fee (the whole fee unless others added inputs). */
 	fee: number
 	dir: FlowDir
 	label: string
@@ -32,6 +45,8 @@ export interface BtcFlowTx {
 	net: number
 	/** Moved to/from other people, fee excluded: received = net, sent = paid out, internal = 0. */
 	amount: number
+	/** Others added inputs (payjoin/coinjoin): outputs to others may hold their own money, so only amount is the wallet's. */
+	shared: boolean
 	balanceAfter: number
 	from: string[]
 	to: string[]
@@ -80,17 +95,24 @@ export function buildFlowTx(tx: any, own: Map<string, string>): BtcFlowTx {
 	const memo = vout.map(memoOf).find((m): m is string => m !== null) ?? null
 	const swap = memo ? parseSwapMemo(memo) : null
 	const payouts = vout.filter(r => !isOwn(r) && memoOf(r) === null)
-	const fee = parseInt(tx?.fees, 10) || 0
+	const txFee = parseInt(tx?.fees, 10) || 0
 	const net = ownOut - ownIn
+	const othersIn = ownIn > 0 && vin.some(r => addr(r) !== '(unknown)' && !isOwn(r))
+
+	// Payjoin/coinjoin: outputs to others carry their own inputs back, so what the
+	// wallet sent is what it lost (-net), and the fee is the part of that it paid.
+	// The sender of a payjoin pays the whole fee; a coinjoin input loses only fee.
+	const fee = othersIn && net < 0 ? Math.min(txFee, -net) : txFee
 
 	const dir: FlowDir = ownIn === 0 ? 'received'
-		: payouts.length === 0 ? 'internal'
+		: payouts.length === 0 && !othersIn ? 'internal'
 		: net < 0 ? 'sent' : 'received'
 
 	let label = dir === 'received' ? 'Received' : dir === 'sent' ? 'Sent' : 'Moved between your own addresses (fee only)'
 	if (swap?.kind === 'swap' && dir === 'sent') label = `Swap BTC -> ${swap.asset}${swap.dest ? ` (to ${short(swap.dest)})` : ''}`
 	if (swap?.kind === 'refund' && dir === 'received') label = `Swap refund (for tx ${short(swap.txid)})`
 	if (swap?.kind === 'payout' && dir === 'received') label = `Swap payout (for tx ${short(swap.txid)})`
+	if (othersIn) label += ' - shared transaction (payjoin/coinjoin), only your part counted'
 
 	const ownWhose = (r: any, side: 'IN' | 'OUT') => {
 		const where = describeOwnPath(own.get(addr(r))!)
@@ -98,6 +120,10 @@ export function buildFlowTx(tx: any, own: Map<string, string>): BtcFlowTx {
 		return `YOURS (${where})`
 	}
 	const otherWhose = (side: 'IN' | 'OUT') => {
+		// Shared tx: another person's input, and outputs to others that may carry it back.
+		if (othersIn) return side === 'IN' ? "NOT YOURS - another participant's input"
+			: dir === 'received' ? "NOT YOURS - another participant's output"
+			: "Paid out - may include another participant's own funds"
 		if (side === 'IN') return swap?.kind === 'refund' || swap?.kind === 'payout' ? 'Swap vault (payer)' : 'Sender'
 		if (dir === 'received') return "NOT YOURS - sender's change or another payee"
 		return swap?.kind === 'swap' ? 'Paid to swap vault' : 'Paid to'
@@ -122,7 +148,8 @@ export function buildFlowTx(tx: any, own: Map<string, string>): BtcFlowTx {
 		dir,
 		label,
 		net,
-		amount: dir === 'received' ? net : dir === 'sent' ? payouts.reduce((s, r) => s + sats(r), 0) : 0,
+		amount: dir === 'received' ? net : dir === 'sent' ? -net - fee : 0,
+		shared: othersIn,
 		balanceAfter: 0,
 		from: dir === 'received' ? vin.filter(r => !isOwn(r)).map(addr) : ownIns,
 		to: dir === 'sent' ? payouts.map(addr) : ownOuts,
@@ -148,7 +175,7 @@ export interface FlowTotals {
 	peak: { sats: number; timestamp: number }
 }
 
-/** Fees count only when the wallet paid them (it spent its own inputs). */
+/** Fees count only when the wallet paid them (it spent its own inputs), and only its part. */
 export function flowTotals(sorted: BtcFlowTx[]): FlowTotals {
 	const t: FlowTotals = { received: 0, sent: 0, fees: 0, internal: 0, computedBalance: 0, peak: { sats: 0, timestamp: 0 } }
 	for (const x of sorted) {
@@ -160,4 +187,43 @@ export function flowTotals(sorted: BtcFlowTx[]): FlowTotals {
 	}
 	t.computedBalance = sorted.at(-1)?.balanceAfter ?? 0
 	return t
+}
+
+/** Section 7: who the wallet sent to and received from. */
+export function buildAddressFlow(flows: BtcFlowTx[]): ReportSection[] {
+	const sentTo = new Map<string, { amount: number; count: number }>()
+	const recvFrom = new Map<string, { amount: number; count: number }>()
+	const add = (m: typeof sentTo, k: string, sats: number) => {
+		const e = m.get(k) || { amount: 0, count: 0 }
+		e.amount += sats; e.count++; m.set(k, e)
+	}
+	for (const f of flows) {
+		// A shared tx's outputs to others include their own inputs, so only the wallet's amount counts.
+		if (f.dir === 'sent' && f.shared) { if (f.amount > 0) add(sentTo, f.to.join(', ') || '(unknown)', f.amount) }
+		else if (f.dir === 'sent') for (const r of f.rows) if (r.side === 'OUT' && r.whose.startsWith('Paid to')) add(sentTo, r.address, r.sats)
+		if (f.dir === 'received') add(recvFrom, [...new Set(f.from)].join(', ') || '(unknown)', f.amount)
+	}
+	const rank = (m: typeof sentTo) => [...m].sort((a, b) => b[1].amount - a[1].amount)
+	const sum = (m: typeof sentTo) => [...m.values()].reduce((s, e) => s + e.amount, 0)
+	const table = (title: string, m: typeof sentTo): ReportSection => ({
+		title: `${title} (${m.size})`,
+		type: 'table',
+		data: {
+			headers: ['#', 'Address', 'Amount (BTC)', 'TX Count'],
+			widths: ['6%', '54%', '25%', '15%'],
+			rows: rank(m).slice(0, 100).map(([a, e], i) => [(i + 1).toString(), a, (e.amount / 1e8).toFixed(8), e.count.toString()]),
+		},
+	})
+
+	const sections: ReportSection[] = [{
+		title: '7. Address Flow Analysis',
+		type: 'summary',
+		data: [
+			`BTC Sent to: ${(sum(sentTo) / 1e8).toFixed(8)} BTC (${sentTo.size} unique addresses)`,
+			`BTC Received from: ${(sum(recvFrom) / 1e8).toFixed(8)} BTC (${recvFrom.size} unique senders)`,
+		],
+	}]
+	if (sentTo.size) sections.push(table('Sent To', sentTo))
+	if (recvFrom.size) sections.push(table('Received From', recvFrom))
+	return sections
 }

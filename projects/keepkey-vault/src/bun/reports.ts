@@ -19,7 +19,7 @@ import { utxoDiscoveryKey } from './btc-backend/types'
 import { getBtcBackend } from './btc-backend'
 import { createReportFonts, reportText as sanitize } from './report-fonts'
 import { embedBitcoinComLogo } from './report-branding'
-import { buildFlowTx, withRunningBalance, flowTotals, describeOwnPath, type BtcFlowTx } from './report-btc-flow'
+import { buildFlowTx, withRunningBalance, flowTotals, describeOwnPath, buildAddressFlow, type BtcFlowTx } from './report-btc-flow'
 
 const BTC_NETWORK_ID = CHAINS.find(c => c.id === 'bitcoin')!.networkId
 
@@ -504,44 +504,6 @@ async function buildBtcSections(
 	onProgress?.('Computing address flow...', 70)
 	sections.push(...buildAddressFlow(sorted))
 
-	return sections
-}
-
-// ── Address Flow Analysis ────────────────────────────────────────────
-
-function buildAddressFlow(flows: BtcFlowTx[]): ReportSection[] {
-	const sentTo = new Map<string, { amount: number; count: number }>()
-	const recvFrom = new Map<string, { amount: number; count: number }>()
-	const add = (m: typeof sentTo, k: string, sats: number) => {
-		const e = m.get(k) || { amount: 0, count: 0 }
-		e.amount += sats; e.count++; m.set(k, e)
-	}
-	for (const f of flows) {
-		if (f.dir === 'sent') for (const r of f.rows) if (r.side === 'OUT' && r.whose.startsWith('Paid to')) add(sentTo, r.address, r.sats)
-		if (f.dir === 'received') add(recvFrom, [...new Set(f.from)].join(', ') || '(unknown)', f.amount)
-	}
-	const rank = (m: typeof sentTo) => [...m].sort((a, b) => b[1].amount - a[1].amount)
-	const sum = (m: typeof sentTo) => [...m.values()].reduce((s, e) => s + e.amount, 0)
-	const table = (title: string, m: typeof sentTo): ReportSection => ({
-		title: `${title} (${m.size})`,
-		type: 'table',
-		data: {
-			headers: ['#', 'Address', 'Amount (BTC)', 'TX Count'],
-			widths: ['6%', '54%', '25%', '15%'],
-			rows: rank(m).slice(0, 100).map(([a, e], i) => [(i + 1).toString(), a, (e.amount / 1e8).toFixed(8), e.count.toString()]),
-		},
-	})
-
-	const sections: ReportSection[] = [{
-		title: '7. Address Flow Analysis',
-		type: 'summary',
-		data: [
-			`BTC Sent to: ${(sum(sentTo) / 1e8).toFixed(8)} BTC (${sentTo.size} unique addresses)`,
-			`BTC Received from: ${(sum(recvFrom) / 1e8).toFixed(8)} BTC (${recvFrom.size} unique senders)`,
-		],
-	}]
-	if (sentTo.size) sections.push(table('Sent To', sentTo))
-	if (recvFrom.size) sections.push(table('Received From', recvFrom))
 	return sections
 }
 
