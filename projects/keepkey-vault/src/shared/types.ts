@@ -1653,6 +1653,7 @@ export interface ClearSignProviderInput {
 // Application-level settings (persisted in SQLite)
 export interface AppSettings {
   passwordManagerEnabled?: boolean // experimental password bank; runtime, default OFF
+  passkeysEnabled?: boolean // Passkeys tab (status + reset of the device's FIDO2 authenticator); runtime, default OFF
   appLanguage?: string          // shared with native menus and dialogs
   restApiEnabled: boolean        // controls entire REST API server on/off
   pioneerApiBase: string         // current Pioneer API base URL
@@ -2811,3 +2812,15 @@ export interface RngAuditReport {
   /** Bytes actually requested per device call, discovered at runtime. */
   chunkBytes?: number
 }
+
+/** Firmware FIDO2 authenticator, read over CTAPHID (see src/bun/passkeys.ts). */
+export interface PasskeyStatus {
+  available: true
+  deviceVersion: string
+  ctapVersions: string[]
+  aaguid: string
+  discoverable: boolean
+  pinSet: boolean
+  pinRetries?: number
+}
+export interface PasskeyResetResult { reset: true }

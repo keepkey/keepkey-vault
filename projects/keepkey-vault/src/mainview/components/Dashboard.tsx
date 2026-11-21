@@ -3353,7 +3353,8 @@ function PersonalDashboard({ capabilities, isEmulator, onLoaded, watchOnly, watc
 			{/* One lock button for password and seed tools. */}
 			{!watchOnly && firmwareVersion && <VaultToolsButton
 				seedVaultAvailable={versionCompare(firmwareVersion, '7.16.0') >= 0}
-				passwordsAvailable={!btcOnly} />}
+				passwordsAvailable={!btcOnly}
+				passkeysAvailable={versionCompare(firmwareVersion, '7.16.0') >= 0} />}
 
 			</Flex>
 		</Flex>
