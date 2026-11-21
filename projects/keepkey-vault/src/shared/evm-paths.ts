@@ -7,6 +7,8 @@
  *
  * Pure data (shared by the bun RPC caller + the frontend grid + tests).
  */
+import { hardenedAccount } from './bip32-account'
+
 const H = 0x80000000
 
 export interface EvmKnownScheme {
@@ -18,9 +20,9 @@ export interface EvmKnownScheme {
 
 export const EVM_KNOWN_SCHEMES: EvmKnownScheme[] = [
   { key: 'bip44', label: 'BIP44 · MetaMask / Trezor', template: "m/44'/60'/0'/0/i", path: i => [H + 44, H + 60, H + 0, 0, i] },
-  { key: 'ledger-live', label: 'Ledger Live', template: "m/44'/60'/i'/0/0", path: i => [H + 44, H + 60, H + i, 0, 0] },
+  { key: 'ledger-live', label: 'Ledger Live', template: "m/44'/60'/i'/0/0", path: i => [H + 44, H + 60, hardenedAccount(i), 0, 0] },
   { key: 'ledger-legacy', label: 'Ledger Legacy · MEW', template: "m/44'/60'/0'/i", path: i => [H + 44, H + 60, H + 0, i] },
   { key: 'ledger-old', label: 'Ledger (pre-2016)', template: "m/44'/60'/160720'/0/i", path: i => [H + 44, H + 60, H + 160720, 0, i] },
-  { key: 'legacy-root', label: 'Legacy · Mist / BIP32 root', template: "m/0'/0'/i'", path: i => [H + 0, H + 0, H + i] },
+  { key: 'legacy-root', label: 'Legacy · Mist / BIP32 root', template: "m/0'/0'/i'", path: i => [H + 0, H + 0, hardenedAccount(i)] },
   { key: 'testnet', label: 'Testnet (coin type 1)', template: "m/44'/1'/0'/0/i", path: i => [H + 44, H + 1, H + 0, 0, i] },
 ]
