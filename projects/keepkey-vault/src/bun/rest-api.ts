@@ -38,7 +38,7 @@ import { isSidecarReady, getCachedFvk } from './zcash-sidecar'
 import { readFileSync } from 'fs'
 import { join } from 'path'
 import * as S from './schemas'
-import { parseRequest, validateResponse } from './validate'
+import { parseRequest, validateResponse, validationErrorMessage } from './validate'
 import { SIGNING_ROUTES, requiredSigningFields } from './signing-routes'
 import {
   bitcoinOnlyActivityList,
@@ -1823,6 +1823,20 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
               'keys seen:', Object.keys(probeCheckBody || {}),
             )
             return json({ error: `Missing signing payload — expected one of: ${requiredAny.join(', ')}` }, 400)
+          }
+
+          // A UTXO request the handler would refuse (schema: paths, multisig
+          // cosigner suffixes, shape) is refused here with the handler's own
+          // 400, before the wallet is unlocked or the approval card opens, so
+          // the user is never asked to approve a request that cannot be signed.
+          // Runs after the probe check above, so an empty body keeps that
+          // distinctive gate error (rest-sign-gating.test.ts relies on it).
+          // Multisig while the feature is off keeps its 403 and its "enable it"
+          // hint, ahead of the schema, as it had before this check existed.
+          if (path === '/utxo/sign-transaction') {
+            if (hasMultisigSigningData(probeCheckBody) && !btcMultisigEnabled(getSetting)) throw new HttpError(403, BTC_MULTISIG_DISABLED)
+            const parsed = S.UtxoSignTransactionRequest.safeParse(probeCheckBody)
+            if (!parsed.success) return json({ error: validationErrorMessage(parsed.error) }, 400)
           }
 
           await requireWallet(engine)
