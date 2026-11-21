@@ -359,6 +359,16 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 		} catch (e: any) { setPasswordsError(e?.message || 'Could not change password manager') }
 		finally { setTogglingPasswords(false) }
 	}, [])
+	const [togglingPasskeys, setTogglingPasskeys] = useState(false)
+	const [passkeysError, setPasskeysError] = useState('')
+	const togglePasskeys = useCallback(async (enabled: boolean) => {
+		setTogglingPasskeys(true); setPasskeysError('')
+		try {
+			setAppSettings(await rpcRequest<AppSettings>('setPasskeysEnabled', { enabled }))
+			window.dispatchEvent(new Event('keepkey-settings-changed'))
+		} catch (e: any) { setPasskeysError(e?.message || 'Could not change passkeys') }
+		finally { setTogglingPasskeys(false) }
+	}, [])
 	const [togglingMultisig,setTogglingMultisig]=useState(false)
     const [multisigError,setMultisigError]=useState<string|null>(null)
     const toggleMultisig=useCallback(async(enabled:boolean)=>{
@@ -1729,6 +1739,13 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 									<Toggle label={uiText('Password manager')} checked={appSettings.passwordManagerEnabled === true} onChange={togglePasswords} disabled={togglingPasswords} />
 								</Flex>
 								{passwordsError && <Text role="alert" fontSize="xs" color="kk.error">{passwordsError}</Text>}
+							</Box>
+							<Box>
+								<Flex justify="space-between" align="center" gap="4">
+									<Flex align="center" gap="3" minW="0"><FeatureIcon kind="passwords" /><Box><Text fontSize="md" color="kk.textPrimary" fontWeight="500">{uiText("Passkeys")}</Text><Text fontSize="sm" color="kk.textSecondary" mt="0.5">{uiText("Experimental. Adds a Passkeys tab to the Vault menu: device status and erasing all passkeys. Off by default.")}</Text></Box></Flex>
+									<Toggle label={uiText('Passkeys')} checked={appSettings.passkeysEnabled === true} onChange={togglePasskeys} disabled={togglingPasskeys} />
+								</Flex>
+								{passkeysError && <Text role="alert" fontSize="xs" color="kk.error">{passkeysError}</Text>}
 							</Box>
 							{/* Offline (airplane) mode toggle */}
 							<Flex justify="space-between" align="center" gap="4">

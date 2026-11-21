@@ -12,6 +12,8 @@ mock.module('../src/mainview/i18n/ui', () => ({ useUiTranslation: () => (text: s
 mock.module('../src/mainview/hooks/usePasswordManagerEnabled', () => ({ usePasswordManagerEnabled: () => true }))
 mock.module('../src/mainview/components/Bip85VaultDialog', () => ({ Bip85VaultDialog: () => null }))
 mock.module('../src/mainview/components/PasswordBankView', () => ({ PasswordBankView: () => null }))
+mock.module('../src/mainview/hooks/usePasskeysEnabled', () => ({ usePasskeysEnabled: () => false }))
+mock.module('../src/mainview/components/PasskeysView', () => ({ PasskeysView: () => null }))
 
 describe('locked KeepKey: a padlock in the header, no banner', () => {
   const render = async (unlockError: string | null) => {

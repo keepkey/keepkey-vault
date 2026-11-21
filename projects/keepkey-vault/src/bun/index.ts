@@ -38,6 +38,7 @@ import { resolveStoredEnsContact } from './db'
 import { previewCertificationEntries, selectCertificationContacts } from './addressbook-clearsign'
 import { singleFlight } from './single-flight'
 import { PasswordBank } from './password-bank'
+import { withKeepKeyFido, readStatus, runReset } from './passkeys'
 import { passwordDeviceCipher } from './password-device'
 import { savePasswordBackup } from './password-backup'
 import { PasswordBex } from './password-bex'
@@ -1838,6 +1839,7 @@ function getAppSettings() {
 		// or disabled view must not hydrate or disclose wallet monitoring records.
 		moneroPendingBroadcasts: moneroEnabled && !moneroHiddenWallet(engine) ? getMoneroWallet().pendingCount() : 0,
 		passwordManagerEnabled: passwordBank.enabled,
+		passkeysEnabled: getSetting('passkeys_enabled') === '1',
 		zcashPrivacyEnabled,
 		hiveEnabled,
 		emulatorEnabled,
@@ -8947,6 +8949,15 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				passwordBank.setEnabled(params?.enabled)
 				return getAppSettings()
 			},
+			setPasskeysEnabled: async (params) => {
+				if (typeof params?.enabled !== 'boolean') throw new Error('enabled must be a boolean')
+				setSetting('passkeys_enabled', params.enabled ? '1' : '0')
+				return getAppSettings()
+			},
+			passkeysStatus: async () => withKeepKeyFido(readStatus),
+			// Reset holds Desktop's own device traffic off: a wallet request mid-prompt would replace the
+			// device screen, and the firmware then cancels the reset (by design).
+			passkeysReset: async () => engine.withDeviceOperation(() => withKeepKeyFido(hid => runReset(hid)), { rejectIfBusy: true, origin: 'desktop' }),
 			passwordBankStatus: async () => passwordBank.view(),
 			passwordBankUnlock: async (params) => passwordBank.unlock(params?.create === true),
 			passwordBankLock: async () => { passwordAgent.cancelPending(); passwordBank.lock(); return passwordBank.view() },
