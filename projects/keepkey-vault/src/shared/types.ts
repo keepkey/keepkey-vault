@@ -2820,7 +2820,15 @@ export interface PasskeyStatus {
   ctapVersions: string[]
   aaguid: string
   discoverable: boolean
+  /** Firmware can list and delete individual passkeys (CTAP credential management). */
+  credMgmt: boolean
   pinSet: boolean
   pinRetries?: number
 }
-export interface PasskeyResetResult { reset: true }
+export interface PasskeySlotView {
+  rpHash: string; userName: string; credentialId: string
+  /** Resolved by Desktop: the device keeps only the site name's hash. */
+  label: string; labelSource: 'you' | 'known' | 'unknown'
+}
+export interface PasskeyInventoryView { used: number; remaining: number; slots: PasskeySlotView[] }
+export interface PasskeyResetResult { reset: boolean; /** The KeepKey must be unplugged and replugged first (CTAP reset window). */ replug?: boolean }

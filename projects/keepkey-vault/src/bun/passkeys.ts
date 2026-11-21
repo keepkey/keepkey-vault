@@ -25,8 +25,10 @@ export interface HidLike {
   close(): void
 }
 
+export type PasskeyErrorCode = 'no_device' | 'busy' | 'timeout' | 'denied' | 'protocol' | 'replug'
+  | 'pin_invalid' | 'pin_blocked' | 'pin_auth_blocked' | 'pin_not_set' | 'pin_policy' | 'no_credential'
 export class PasskeyError extends Error {
-  constructor(readonly code: 'no_device' | 'busy' | 'timeout' | 'denied' | 'protocol', message: string) { super(message) }
+  constructor(readonly code: PasskeyErrorCode, message: string, readonly retries?: number) { super(message) }
 }
 
 // ── CBOR (just enough for GetInfo / ClientPIN responses) ──────────────────────────────
@@ -68,7 +70,7 @@ export function frames(cid: number, cmd: number, payload: number[]): number[][] 
   return out
 }
 
-class Channel {
+export class Channel {
   cid = CID_BROADCAST
   constructor(private hid: HidLike) {}
   /** node-hid wants a leading report id byte on write. */
@@ -97,6 +99,11 @@ class Channel {
     const r = await this.recv(Date.now() + timeoutMs, onKeepalive)
     if (r.cmd === CMD.ERROR) throw new PasskeyError(r.data[0] === 0x06 ? 'busy' : 'protocol', `CTAPHID error 0x${(r.data[0] ?? 0).toString(16)}`)
     return r.data
+  }
+  /** One CBOR request: returns the CTAP status byte and the decoded-ready body. */
+  async cbor(payload: number[], timeoutMs = 5000, onKeepalive?: (status: number) => void) {
+    const data = await this.call(CMD.CBOR, payload, timeoutMs, onKeepalive)
+    return { status: data[0] ?? 0xff, body: Uint8Array.from(data.slice(1)) }
   }
   async init() {
     const nonce = Array.from({ length: 8 }, () => Math.floor(Math.random() * 256))
@@ -135,6 +142,7 @@ export async function readStatus(hid: HidLike): Promise<PasskeyStatus> {
     ctapVersions: (m.get(1) as string[]) ?? [],
     aaguid,
     discoverable: options.get('rk') === true,
+    credMgmt: options.get('credMgmt') === true,
     pinSet: options.get('clientPin') === true,
     pinRetries,
   }
@@ -143,10 +151,12 @@ export async function readStatus(hid: HidLike): Promise<PasskeyStatus> {
 export async function runReset(hid: HidLike, onWaiting?: () => void): Promise<PasskeyResetResult> {
   const ch = new Channel(hid)
   await ch.init()
-  // The device shows "Reset Passkeys" and waits for a button tap; keepalives arrive while it waits.
+  // The device shows "Reset Passkeys" and waits for the user to hold the button; keepalives arrive while it waits.
   const data = await ch.call(CMD.CBOR, [CTAP2.RESET], 40_000, st => { if (st === 2) onWaiting?.() })
   const s = ctapStatus(data)
   if (s === 0) return { reset: true }
+  // CTAP allows reset only shortly after the authenticator powers up (RC4: 10 s).
+  if (s === 0x30) throw new PasskeyError('replug', 'Reset is only allowed within 10 seconds of the KeepKey powering up')
   if (s === 0x27 || s === 0x2d) throw new PasskeyError('denied', 'Reset was declined on the KeepKey')
   if (s === 0x2f) throw new PasskeyError('timeout', 'No button press on the KeepKey in time')
   throw new PasskeyError('protocol', `Reset failed (0x${s.toString(16)})`)
@@ -163,16 +173,37 @@ export function withKeepKeyFido<T>(fn: (hid: HidLike) => Promise<T>): Promise<T>
 async function openAndRun<T>(fn: (hid: HidLike) => Promise<T>): Promise<T> {
   let hid: HidLike | undefined
   try {
-    const HID = (await import('node-hid')) as any
-    const lib = HID.default ?? HID
-    // ponytail: usagePage match works on macOS; Linux hidraw reports 0, so fall back to the
-    // second KeepKey interface. Add an interface check if a Linux machine disagrees.
-    const all = (lib.devices() as any[]).filter(d => d.vendorId === KEEPKEY_VID)
-    const fido = all.find(d => d.usagePage === FIDO_USAGE_PAGE) ?? (all.every(d => !d.usagePage) && all.length > 1 ? all[all.length - 1] : undefined)
+    const lib = await hidLib()
+    const fido = findFido(lib)
     if (!fido?.path) throw new PasskeyError('no_device', 'No KeepKey FIDO interface found. Connect the KeepKey (firmware 7.16 or newer).')
     hid = new lib.HID(fido.path) as HidLike
     return await fn(hid)
   } finally {
     try { hid?.close() } catch { /* already closed */ }
   }
+}
+async function hidLib(): Promise<any> {
+  const HID = (await import('node-hid')) as any
+  return HID.default ?? HID
+}
+function findFido(lib: any): { path?: string } | undefined {
+  // ponytail: usagePage match works on macOS; Linux hidraw reports 0, so fall back to the
+  // second KeepKey interface. Add an interface check if a Linux machine disagrees.
+  const all = (lib.devices() as any[]).filter(d => d.vendorId === KEEPKEY_VID)
+  return all.find(d => d.usagePage === FIDO_USAGE_PAGE) ?? (all.every(d => !d.usagePage) && all.length > 1 ? all[all.length - 1] : undefined)
+}
+
+/** Waits for the KeepKey's FIDO interface to disappear and come back (an unplug/replug), so the
+ * caller can use CTAP's short post-power-up window. Polls; node-hid has no hotplug events. */
+export async function waitForReplug(timeoutMs = 60_000, poll = 250): Promise<void> {
+  const lib = await hidLib()
+  const deadline = Date.now() + timeoutMs
+  let gone = !findFido(lib)
+  while (Date.now() < deadline) {
+    const present = !!findFido(lib)
+    if (!present) gone = true
+    else if (gone) return
+    await new Promise(r => setTimeout(r, poll))
+  }
+  throw new PasskeyError('timeout', 'The KeepKey was not unplugged and plugged back in in time')
 }
