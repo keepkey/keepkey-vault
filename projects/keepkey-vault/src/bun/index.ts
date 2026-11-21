@@ -3350,6 +3350,8 @@ const activeWalletWatches = createActiveWalletWatch({
 	}, isCurrent)),
 	onStatus: status => { try { rpc.send['stream-status'](status) } catch { /* renderer optional */ } },
 	onError: error => console.warn('[wallet-watch] Refresh failed:', error instanceof Error ? error.message : error),
+	onRetryScheduled: (chainId, delayMs, failures, cause) => console.warn(`[wallet-watch] ${chainId} will retry alone in ${Math.round(delayMs / 1000)}s (${cause === 'activity' ? 'new activity after a pause' : `consecutive failure ${failures}`}); other chains continue`),
+	onRetryPaused: (chainId, failures) => console.warn(`[wallet-watch] ${chainId} failed ${failures} times in a row; it now retries only on new activity, other chains continue`),
 	onOverflow: omitted => console.warn(`[wallet-watch] ${omitted} entries exceed the active lease limit`),
 })
 

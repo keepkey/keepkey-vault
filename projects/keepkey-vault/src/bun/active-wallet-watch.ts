@@ -2,6 +2,7 @@ import type { AddressEntry, StreamEvent } from './event-stream'
 import { sameBalanceRefreshScope, type BalanceRefreshScope } from './post-tx-balance'
 import type { ChainBalance, RecentActivity } from '../shared/types'
 import { usableCachedBalance } from '../shared/balance-cache-policy'
+import { CHAIN_RETRY_DELAYS_MS, createChainBackoff, type ChainBackoff } from './chain-backoff'
 
 export interface OwnedWatch extends AddressEntry {
   chainId: string
@@ -11,6 +12,24 @@ export interface OwnedWatch extends AddressEntry {
   scriptType?: string
 }
 type Hint = { chainId: string; txids: string[]; catchup: boolean; eventIds?: string[] }
+/** Bounds what one chain accumulates while it waits (a burst of events during a long provider outage). The most recently
+ *  seen entries are kept: older transactions are still found by the next history scan. An event id left out is only not
+ *  acknowledged on its own: a live event can still be replayed, and a replayed one was acknowledged with its page. */
+const MAX_HINT_TXIDS = 32, MAX_HINT_EVENT_IDS = 256
+/** Unique values, the most recently seen last (a repeated value moves to the end), keeping at most `max`. */
+const latest = <T>(values: T[], max: number) => {
+  const recent = new Set<T>()
+  for (const value of values) { recent.delete(value); recent.add(value) }
+  return [...recent].slice(-max)
+}
+/** After this many consecutive failures a chain stops retrying by itself (KEEPKEY-109): a provider broken for hours is
+ *  not polled forever. Its hints wait for real activity on it, which arms one retry after the longest delay. */
+export const MAX_AUTO_RETRIES = 5
+function mergeHint(previous: Hint | undefined, next: Hint): Hint {
+  const eventIds = latest([...(previous?.eventIds || []), ...(next.eventIds || [])], MAX_HINT_EVENT_IDS)
+  return { chainId: next.chainId, txids: latest([...(previous?.txids || []), ...next.txids], MAX_HINT_TXIDS),
+    catchup: previous ? previous.catchup && next.catchup : next.catchup, ...(eventIds.length ? { eventIds } : {}) }
+}
 /** Transaction hints require both reads. Ordinary catchup can reuse a recent
  * balance snapshot while continuing to check history. */
 export async function refreshWatchedChain(hint: Hint, deps: {
@@ -94,6 +113,12 @@ type Deps = {
   setTimer?: (run: () => void, ms: number) => unknown
   clearTimer?: (timer: unknown) => void
   now?: () => number
+  /** Per-chain retry delays after a failed refresh (KEEPKEY-109); defaults to createChainBackoff(). */
+  backoff?: ChainBackoff
+  /** `activity`: a paused chain got new activity, which armed this one retry. */
+  onRetryScheduled?: (chainId: string, delayMs: number, failures: number, cause: 'failure' | 'activity') => void
+  /** The chain failed more than MAX_AUTO_RETRIES times in a row and now retries only on new activity. */
+  onRetryPaused?: (chainId: string, failures: number) => void
 }
 export function ownedWatchKey(watch: AddressEntry): string {
   return `${watch.networkId}:${watch.networkId.startsWith('eip155:') ? watch.address.toLowerCase() : watch.address}`
@@ -127,26 +152,75 @@ export function createActiveWalletWatch(deps: Deps) {
   let generation = 0, leaseKey: string | undefined
   let batchDepth = 0, batchGeneration = 0
   const failedChains = new Set<string>()
+  // A chain whose refresh failed waits on its own (KEEPKEY-109); the other chains keep refreshing. Per chain:
+  // - waiting: a retry timer is armed and its hints collect in `deferred` until the timer moves them to `pending`;
+  // - paused: it failed more than MAX_AUTO_RETRIES times in a row, so no timer; its hints stay in `deferred` until real
+  //   activity on it arms one retry after its current (longest) delay.
+  // Neither state blocks flush(): the chain owns its hints from then on.
+  const backoff = deps.backoff || createChainBackoff()
+  const deferred = new Map<string, Hint>()
+  const retryTimers = new Map<string, unknown>()
   const waiters = new Set<{ generation: number; resolve: (ok: boolean) => void }>()
   let subscribed: OwnedWatch[] = []
   let receive: ((event: StreamEvent) => boolean) | undefined
   let subscribeTimer: unknown, refreshTimer: unknown
   const current = (expected: BalanceRefreshScope | null, gen = generation) => gen === generation && deps.canWatch() && sameBalanceRefreshScope(expected, deps.getScope())
   const currentSession = (expected: BalanceRefreshScope | null, gen: number) => gen === batchGeneration && deps.canWatch() && sameBalanceRefreshScope(expected, deps.getScope())
+  /** The same wallet session, even while it cannot be watched right now (e.g. the device auto-locked). */
+  const sameSession = (expected: BalanceRefreshScope | null, gen: number) => gen === batchGeneration && sameBalanceRefreshScope(expected, deps.getScope())
+  function cancelRetry(chainId: string) {
+    const timer = retryTimers.get(chainId)
+    if (timer !== undefined) clearTimer(timer)
+    retryTimers.delete(chainId); deferred.delete(chainId); backoff.succeed(chainId)
+  }
   function pruneInactive() {
     const chains = new Set(subscribed.filter(entry => deps.isChainEnabled(entry.chainId)).map(entry => entry.chainId))
     for (const chainId of failedChains) if (!chains.has(chainId)) failedChains.delete(chainId)
     for (const chainId of pending.keys()) if (!chains.has(chainId)) pending.delete(chainId)
+    for (const chainId of [...retryTimers.keys(), ...deferred.keys()]) if (!chains.has(chainId)) cancelRetry(chainId)
   }
+  /** Every hint was processed or belongs to a waiting or paused chain, which owns it from here on. */
   function settle() {
     if (pending.size || running.size) return
-    for (const waiter of waiters) { waiter.resolve(waiter.generation === batchGeneration && current(scope) && failedChains.size === 0); waiters.delete(waiter) }
+    for (const waiter of waiters) { waiter.resolve(waiter.generation === batchGeneration && current(scope)); waiters.delete(waiter) }
   }
+  function armRetry(chainId: string, delay: number, cause: 'failure' | 'activity') {
+    const expected = scope, gen = batchGeneration
+    deps.onRetryScheduled?.(chainId, delay, backoff.failures(chainId), cause)
+    const timer = setTimer(() => {
+      if (retryTimers.get(chainId) !== timer) return
+      retryTimers.delete(chainId)
+      const waiting = deferred.get(chainId)
+      deferred.delete(chainId)
+      if (!waiting) return
+      // A retired wallet or a disabled chain must never run a retry armed before (drain() re-checks the session).
+      // A device that is only locked keeps its hint: drain() holds `pending` until the wallet can be watched again.
+      if (!sameSession(expected, gen) || !deps.isChainEnabled(chainId)) { backoff.succeed(chainId); failedChains.delete(chainId); return }
+      pending.set(chainId, mergeHint(pending.get(chainId), waiting))
+      drain()
+    }, delay)
+    retryTimers.set(chainId, timer)
+  }
+  /** Keeps a hint for a waiting or paused chain. Activity on a paused chain arms one retry after its current delay. */
+  function park(chainId: string, hint: Hint) {
+    deferred.set(chainId, mergeHint(deferred.get(chainId), hint))
+    // Never sooner than the shortest delay, even if a future change parks a hint for a chain with no failure count.
+    if (!retryTimers.has(chainId)) armRetry(chainId, Math.max(backoff.peek(chainId), CHAIN_RETRY_DELAYS_MS[0]!), 'activity')
+  }
+  function onFailed(chainId: string, hint: Hint) {
+    deferred.set(chainId, mergeHint(deferred.get(chainId), hint))
+    const delay = backoff.fail(chainId), failures = backoff.failures(chainId)
+    if (failures > MAX_AUTO_RETRIES) { deps.onRetryPaused?.(chainId, failures); return }
+    armRetry(chainId, delay, 'failure')
+  }
+  const waitingOrPaused = (chainId: string) => retryTimers.has(chainId) || deferred.has(chainId)
 
   function drain() {
     if (!current(scope)) return
     for (const [chainId, hint] of pending) {
       if (!deps.isChainEnabled(chainId)) { pending.delete(chainId); continue }
+      // Waiting or paused: its retry picks this hint up, never an immediate call.
+      if (waitingOrPaused(chainId)) { pending.delete(chainId); park(chainId, hint); continue }
       if (running.size >= 2) break
       if (running.has(chainId)) continue
       pending.delete(chainId)
@@ -154,9 +228,11 @@ export function createActiveWalletWatch(deps: Deps) {
       const gen = batchGeneration, expected = scope
       void deps.refresh(hint, () => currentSession(expected, gen) && deps.isChainEnabled(chainId)).then(async () => {
         if (hint.eventIds?.length && expected && currentSession(expected, gen) && deps.isChainEnabled(chainId)) await deps.onProcessed?.(hint.eventIds, expected)
-        if (currentSession(expected, gen)) failedChains.delete(chainId)
+        if (currentSession(expected, gen)) { failedChains.delete(chainId); backoff.succeed(chainId) }
       }).catch(error => {
-        if (currentSession(expected, gen)) { failedChains.add(chainId); deps.onError?.(error) }
+        if (!currentSession(expected, gen)) return
+        failedChains.add(chainId); deps.onError?.(error)
+        if (deps.isChainEnabled(chainId)) onFailed(chainId, hint)
       }).finally(() => { if (running.get(chainId) === job) running.delete(chainId); drain(); settle() })
     }
     settle()
@@ -167,10 +243,10 @@ export function createActiveWalletWatch(deps: Deps) {
       if (previous !== undefined && now() - previous < 2_000) return
       lastCatchup.set(key, now())
     }
-    const previous = pending.get(chainId)
-    const eventIds = [...new Set([...(previous?.eventIds || []), ...(eventId ? [eventId] : [])])]
-    pending.set(chainId, { chainId, txids: [...new Set([...(previous?.txids || []), ...(txid ? [txid] : [])])], catchup: previous ? previous.catchup && catchup : catchup,
-      ...(eventIds.length ? { eventIds } : {}) })
+    const hint: Hint = { chainId, txids: txid ? [txid] : [], catchup, ...(eventId ? { eventIds: [eventId] } : {}) }
+    // A waiting or paused chain collects hints for its retry instead of calling the provider again.
+    if (waitingOrPaused(chainId)) { park(chainId, hint); return }
+    pending.set(chainId, mergeHint(pending.get(chainId), hint))
     if (refreshTimer !== undefined) return
     refreshTimer = setTimer(() => { refreshTimer = undefined; drain() }, 150)
   }
@@ -229,6 +305,8 @@ export function createActiveWalletWatch(deps: Deps) {
     if (subscribeTimer !== undefined) clearTimer(subscribeTimer)
     if (refreshTimer !== undefined) clearTimer(refreshTimer)
     subscribeTimer = undefined; refreshTimer = undefined
+    for (const timer of retryTimers.values()) clearTimer(timer)
+    retryTimers.clear(); deferred.clear(); backoff.clear()
     deps.stop(); owned.clear(); pending.clear(); running.clear(); seen.clear(); lastCatchup.clear(); failedChains.clear()
     for (const waiter of waiters) { waiter.resolve(false); waiters.delete(waiter) }
     scope = null; subscribed = []; leaseKey = undefined; receive = undefined
@@ -264,7 +342,7 @@ export function createActiveWalletWatch(deps: Deps) {
     flush(): Promise<boolean> {
       if (!current(scope)) return Promise.resolve(false)
       pruneInactive()
-      if (!pending.size && !running.size) return Promise.resolve(failedChains.size === 0)
+      if (!pending.size && !running.size) return Promise.resolve(true)
       return new Promise(resolve => { waiters.add({ generation: batchGeneration, resolve }); drain() })
     },
     stop,

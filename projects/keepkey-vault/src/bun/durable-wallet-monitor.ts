@@ -19,6 +19,9 @@ type Deps = {
   readCursor: (walletScope: string) => string | undefined
   writeCursor: (walletScope: string, cursor: string) => void
   deliver: (event: { type: string; data: any }) => boolean
+  /** True once every delivered event was processed, or belongs to a chain that failed and owns a scheduled retry
+   *  (KEEPKEY-109): one failing chain must not hold the replay cursor for all the others. False means the page is
+   *  neither acknowledged nor advanced (e.g. the wallet changed). */
   flush: () => Promise<boolean>
   fetch?: typeof fetch
   onError?: (error: unknown) => void
