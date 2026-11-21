@@ -35,8 +35,7 @@ import {
   ensureFvkLoaded, displayOrchardAddressOnDevice, sendShielded,
 } from './txbuilder/zcash-shielded'
 import { isSidecarReady, getCachedFvk } from './zcash-sidecar'
-import { readFileSync } from 'fs'
-import { join } from 'path'
+import { swaggerJson } from './api-docs-spec'
 import * as S from './schemas'
 import { parseRequest, validateResponse } from './validate'
 import { SIGNING_ROUTES, requiredSigningFields } from './signing-routes'
@@ -512,28 +511,28 @@ async function findEthAddressNList(
   throw new HttpError(400, `Could not find addressNList for ${fromAddress} (scanned 5 accounts)`)
 }
 
-// ── Load swagger.json once ─────────────────────────────────────────────
-let swaggerContent: string | null = null
-function getSwagger(): string {
-  if (!swaggerContent) {
-    try {
-      swaggerContent = readFileSync(join(__dirname, 'swagger.json'), 'utf-8')
-    } catch {
-      swaggerContent = JSON.stringify({ error: 'swagger.json not found' })
-    }
-  }
-  return swaggerContent
+// ── Serve swagger.json (bundled with the backend, see api-docs-spec.ts) ──
+export function getSwagger(): string {
+  return swaggerJson()
 }
 
+// Swagger UI comes from the CDN at an exact version with Subresource Integrity: the docs page runs on the wallet API's
+// own origin and holds the developer's API key, so a changed or hijacked file must not run there (audit v6 D1).
+// To upgrade, take a release at least two weeks old, check the unpkg files match the npm tarball, and update both hashes.
+export const SWAGGER_UI_VERSION = '5.34.1'
+const SWAGGER_UI_BASE = `https://unpkg.com/swagger-ui-dist@${SWAGGER_UI_VERSION}`
+export const SWAGGER_UI_CSS = { href: `${SWAGGER_UI_BASE}/swagger-ui.css`, integrity: 'sha384-4c3vsE5f+trhFyHrFrLM1fFGUn531NIaC7dcqEWIJdoRQJ5CkJbSuSCwXLpaS1KF' }
+export const SWAGGER_UI_JS = { src: `${SWAGGER_UI_BASE}/swagger-ui-bundle.js`, integrity: 'sha384-XFYN47VzPiDY6qPtxYKg0nqUeW/upo20xf1j2SUE7gT/i35FJB4cuS/71Iegzk8Z' }
+
 // ── Branded Swagger UI HTML ───────────────────────────────────────────
-function getSwaggerUiHtml(): string {
+export function getSwaggerUiHtml(): string {
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>KeepKey Vault &mdash; Developer Center</title>
-  <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css" />
+  <link rel="stylesheet" href="${SWAGGER_UI_CSS.href}" integrity="${SWAGGER_UI_CSS.integrity}" crossorigin="anonymous" referrerpolicy="no-referrer" />
   <style>
     *{box-sizing:border-box}
     body{margin:0;background:#0d1117;color:#e0e0e0;font-family:system-ui,-apple-system,sans-serif}
@@ -939,7 +938,7 @@ function getSwaggerUiHtml(): string {
     <div id="swagger-ui"></div>
   </div>
 
-  <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
+  <script src="${SWAGGER_UI_JS.src}" integrity="${SWAGGER_UI_JS.integrity}" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
   <script>
     var STORAGE_KEY='kk_dev_apikey'
     var swaggerLoaded=false
@@ -987,12 +986,18 @@ function getSwaggerUiHtml(): string {
       document.getElementById('explorer-gate').style.display='none'
       document.getElementById('swagger-ui').style.display='block'
       if(swaggerLoaded)return
+      if(typeof SwaggerUIBundle==='undefined'){
+        // The pinned Swagger UI did not load: offline, or its bytes no longer match the integrity hash (then the
+        // browser blocks it on purpose). Say so instead of leaving an empty page.
+        document.getElementById('swagger-ui').textContent='The API explorer could not load (Swagger UI ${SWAGGER_UI_VERSION} from unpkg.com). Check your connection and reload. The spec is at /spec/swagger.json.'
+        return
+      }
       swaggerLoaded=true
       SwaggerUIBundle({
         url:'/spec/swagger.json',
         dom_id:'#swagger-ui',
         deepLinking:true,
-        presets:[SwaggerUIBundle.presets.apis,SwaggerUIBundle.SwaggerUIStandalonePreset],
+        presets:[SwaggerUIBundle.presets.apis],
         layout:'BaseLayout',
         requestInterceptor:function(req){
           var live=getKey()
