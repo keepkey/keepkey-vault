@@ -13,6 +13,8 @@ const rpc=async(method,params)=> (await (await page.request.post(base+'/__test_r
 const transparent=page.getByRole('button',{name:'Transparent · public',exact:true});
 const shielded=page.getByRole('button',{name:'Shielded · private',exact:true});
 const tools=page.getByRole('button',{name:/Zcash tools and details/});
+const shieldPill=page.getByRole('button',{name:'Shield',exact:true});
+const sync=page.getByRole('button',{name:'Scan shielded balance',exact:true});
 try {
  await rpc('testReset');await page.goto(base);
  await expect(transparent).toHaveAttribute('aria-pressed','true');
@@ -26,9 +28,12 @@ try {
  await expect(page.getByLabel('Shielded receive',{exact:true})).toBeVisible();
  await expect(page.getByText('t1'+'A'.repeat(33),{exact:true})).toHaveCount(0);
  await expect(page.getByRole('button',{name:'Show address on KeepKey'})).toBeVisible();
- await expect(tools).toHaveAttribute('aria-expanded','false');
- await expect(page.getByRole('navigation',{name:'Zcash tools',exact:true})).toBeHidden();
- checks.shieldedUsesSharedReceiveAndHidesAdvancedByDefault=true;
+ await expect(tools).toHaveCount(0);
+ await expect(page.getByRole('navigation',{name:'Zcash tools',exact:true})).toHaveCount(0);
+ await expect(shieldPill).toBeVisible();
+ await expect(sync).toHaveCount(1);
+ await expect(page.getByText('Recent incoming payments',{exact:true})).toBeVisible();
+ checks.shieldedHasReceiveSendShieldPillsOneSyncAndNoToolsToggle=true;
  await page.screenshot({path:'zcash-shielded.png',fullPage:true});
  await page.getByRole('button',{name:'Send',exact:true}).first().click();
  await expect(page.getByText('Send from shielded balance',{exact:true})).toBeVisible();
@@ -40,13 +45,15 @@ try {
  await expect(page.getByText('Unshield to a transparent recipient',{exact:true})).toBeVisible();
  await expect(page.getByText('The recipient address and amount will be public. You can pay this address directly from your shielded balance.',{exact:true})).toBeVisible();
  checks.publicRecipientWarningStaysVisibleWithDetailsCollapsed=true;
- await tools.click();
- await page.getByRole('button',{name:'Shield / Unshield',exact:true}).click();
- await expect(page.getByRole('button',{name:'Sync',exact:true})).toBeVisible();
- await page.getByRole('button',{name:'History',exact:true}).click();
- await tools.click();
+ await shieldPill.click();
+ await expect(page.getByText('Shield & Unshield',{exact:true})).toBeVisible();
+ await expect(sync).toBeVisible();
+ await page.getByRole('button',{name:'Receive',exact:true}).first().click();
+ await page.getByRole('button',{name:/View full history/}).click();
+ await expect(page.getByText('Decrypted locally with your viewing key.',{exact:true})).toBeVisible();
+ await page.getByRole('button',{name:/Back to receive/}).click();
  await expect(page.getByLabel('Shielded receive',{exact:true})).toBeVisible();
- checks.advancedToolsRemainReachableAndCollapseBackToShieldedReceive=true;
+ checks.shieldPageAndFullHistoryReachableAndReturnToReceive=true;
  await page.getByTestId('toggle-privacy').click();
  await expect(shielded).toBeDisabled();
  await expect(page.getByText('Enable Zcash privacy in Settings to check shielded ZEC.',{exact:true}).last()).toBeVisible();
@@ -68,7 +75,7 @@ try {
  checks.unsupportedFirmwareNeverFallsBackToTransparentReceive=true;
  await rpc('testReset');await page.goto(base+'?shielded&send');
  await expect(page.getByText('Send from shielded balance',{exact:true})).toBeVisible();
- await expect(tools).toHaveAttribute('aria-expanded','false');
+ await expect(tools).toHaveCount(0);
  checks.shieldedSendDeepLinkUsesStandardSendAction=true;
  await page.getByTestId('toggle-privacy').click();
  await expect(page.getByText('Send from shielded balance',{exact:true})).toHaveCount(0);
@@ -77,10 +84,8 @@ try {
  await expect(page.getByText('Send from shielded balance',{exact:true})).toBeVisible();
  checks.liveDisableNeverFallsBackToTransparentSend=true;
  await rpc('testReset');await page.goto(base+'?legacyPrivacy');
- await expect(tools).toHaveAttribute('aria-expanded','true');
- await expect(page.getByRole('navigation',{name:'Zcash tools',exact:true})).toBeVisible();
- await tools.click();
- checks.legacyPrivacyDeepLinkOpensToolsInUnifiedPage=true;
+ await expect(page.getByText('Shield & Unshield',{exact:true})).toBeVisible();
+ checks.legacyPrivacyDeepLinkOpensShieldPage=true;
  await page.getByRole('button',{name:'Receive',exact:true}).click();
  await page.setViewportSize({width:390,height:844});
  await expect(page.getByLabel('Shielded receive',{exact:true})).toBeVisible();

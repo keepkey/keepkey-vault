@@ -14,12 +14,14 @@ interface Props {
   refreshNonce: number
   pool: ZcashPool
   onSelectPool: (pool: ZcashPool) => void
+  /** The shielded panel below owns scan status and the Sync button; show only real problems here. */
+  hideScanHint?: boolean
 }
 type PrivacyStatus = { ready: boolean; fvk_loaded: boolean; verified: boolean; verifying: boolean; synced_to: number | null }
 
 /** Reads the shielded wallet separately; never treats a transparent refresh as
  * a privacy scan, or a missing private balance as zero. No key initialization. */
-export function ZcashBalanceSummary({ transparent, enabled, supported, watchOnly, refreshNonce, pool, onSelectPool }: Props) {
+export function ZcashBalanceSummary({ transparent, enabled, supported, watchOnly, refreshNonce, pool, onSelectPool, hideScanHint }: Props) {
   const { t } = useTranslation('asset')
   const [status, setStatus] = useState<PrivacyStatus | null>(null)
   const [balance, setBalance] = useState<ZcashShieldedBalance | null>(null)
@@ -50,13 +52,14 @@ export function ZcashBalanceSummary({ transparent, enabled, supported, watchOnly
     return () => { cancelled = true }
   }, [canOpen, refreshNonce, revision])
   const amounts = canOpen ? zcashShieldedAmounts(balance) : null
-  const hint = watchOnly ? t('zcashConnectForPrivacy')
+  const fullHint = watchOnly ? t('zcashConnectForPrivacy')
     : !enabled ? t('zcashEnablePrivacy')
     : !supported ? t('zcashPrivacyFirmware')
     : failed ? t('zcashPrivateUnavailable')
     : scanActive || status?.verifying ? t('zcashPrivateScanning')
     : status?.synced_to != null ? t('zcashLastScanned', { height: status.synced_to.toLocaleString(getNumberLocale()) })
     : t('zcashPrivateScanNeeded')
+  const hint = hideScanHint && !failed ? '' : fullHint
   return (
     <Box mb="4" role="group" aria-label={t('zcashBalances')}>
       <Flex gap="2" wrap="wrap">
@@ -80,7 +83,7 @@ export function ZcashBalanceSummary({ transparent, enabled, supported, watchOnly
           {amounts && amounts.pending > 0 && <Text fontSize="11px" color="var(--gold)">{t('zcashPrivatePending', { amount: formatBalance(String(amounts.pending / 1e8)) })}</Text>}
         </chakra.button>
       </Flex>
-      <Text fontSize="11px" color={failed || !amounts ? 'var(--gold)' : 'var(--text-2)'} mt="2" aria-live="polite">{hint}</Text>
+      {hint && <Text fontSize="11px" color={failed || !amounts ? 'var(--gold)' : 'var(--text-2)'} mt="2" aria-live="polite">{hint}</Text>}
     </Box>
   )
 }

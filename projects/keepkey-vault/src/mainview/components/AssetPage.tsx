@@ -216,7 +216,7 @@ function PersonalAssetPage({ chain, balance, balanceLoading = false, onBack, fir
 	// Feature flags: zcash privacy
 	const [swappableChainIds, setSwappableChainIds] = useState<Set<string>>(new Set())
 	const [zcashPrivacyEnabled, setZcashPrivacyEnabled] = useState(false)
-	const [zcashPrivacyAction, setZcashPrivacyAction] = useState<ZcashPrivacyPage>(safeInitial === 'privacy' ? 'scan' : 'receive')
+	const [zcashPrivacyAction, setZcashPrivacyAction] = useState<ZcashPrivacyPage>(safeInitial === 'privacy' ? 'shield' : 'receive')
 	const [zcashPool, setZcashPool] = useState<ZcashPool>(initialToken?.type === 'shielded' || safeInitial === 'privacy' ? 'shielded' : 'transparent')
 	// EVM chains Safe supports: the Multisig pill shows only there.
 	const [safeChainIds, setSafeChainIds] = useState<number[]>([])
@@ -854,6 +854,10 @@ function PersonalAssetPage({ chain, balance, balanceLoading = false, onBack, fir
 		...(watchOnly && isBtc && !selectedToken ? [{ id: "psbt" as const, label: t("createPsbt", { defaultValue: "Create PSBT" }), icon: (
 			<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="19" x2="12" y2="5" /><polyline points="5 12 12 5 19 12" /></svg>
 		) }] : []),
+		// Zcash: Shield/Unshield is a main action, next to Receive and Send.
+		...(isZcash && !watchOnly && zcashPrivacyEnabled && zcashShieldedSupported && (!selectedToken || isShieldedToken) ? [{ id: "privacy" as const, label: t("zcashShield", { defaultValue: "Shield" }), icon: (
+			<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" /></svg>
+		) }] : []),
 		...(!watchOnly && swappableChainIds.has(chain.id) && !shieldedSelected ? [{ id: "swap" as const, label: t("swap"), icon: (
 			<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="17 1 21 5 17 9" /><path d="M3 11V9a4 4 0 0 1 4-4h14" /><polyline points="7 23 3 19 7 15" /><path d="M21 13v2a4 4 0 0 1-4 4H3" /></svg>
 		) }] : []),
@@ -1478,7 +1482,10 @@ function PersonalAssetPage({ chain, balance, balanceLoading = false, onBack, fir
 
 					<Flex gap="2px" p="3px" className="v3-glass-pill">
 						{PILLS.map((p) => {
-							const isActive = view === p.id
+							// Zcash pages share one view: Shield is active on the Shield page, Receive also covers the history page.
+							const isActive = p.id === 'privacy' ? view === 'privacy' && zcashPrivacyAction === 'shield'
+								: p.id === 'receive' && isZcash ? view === 'receive' || (view === 'privacy' && zcashPrivacyAction === 'history')
+								: view === p.id
 							return (
 								<Box
 									key={p.id}
@@ -1487,6 +1494,7 @@ function PersonalAssetPage({ chain, balance, balanceLoading = false, onBack, fir
 									onClick={() => {
 										if (p.id === 'swap') { setShowSwapDialog(true); return }
 										if (p.id === 'multisig' && isBtc) { window.dispatchEvent(new Event(MULTISIG_POLICY_EVENT)); return }
+										if (p.id === 'privacy') { setZcashPool('shielded'); setSelectedToken(null); setZcashPrivacyAction('shield') }
 										setView(p.id as AssetView); if (p.id === 'receive' && !isShieldedToken) setSelectedToken(null)
 									}}
 									display="flex"
@@ -1523,6 +1531,7 @@ function PersonalAssetPage({ chain, balance, balanceLoading = false, onBack, fir
 					transparent={activeBalance?.balance} enabled={zcashPrivacyEnabled} supported={!!zcashShieldedSupported}
 					watchOnly={watchOnly} refreshNonce={refreshNonce}
 					pool={shieldedSelected ? 'shielded' : 'transparent'}
+					hideScanHint={shieldedSelected && !watchOnly && zcashPrivacyEnabled && !!zcashShieldedSupported}
 					onSelectPool={pool => { setZcashPool(pool); setSelectedToken(null); if (view === 'privacy') setView('receive') }}
 				/>}
 

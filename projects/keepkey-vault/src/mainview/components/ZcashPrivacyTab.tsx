@@ -1,8 +1,8 @@
 import { normalizeAmountInput } from '../../shared/locale'
 import { getNumberLocale } from "../lib/number-locale"
 import { useUiTranslation } from "../i18n/ui"
-import type { ReactNode } from "react"
-import { useState, useEffect, useCallback, useRef, useMemo, useId } from "react"
+
+import { useState, useEffect, useCallback, useRef, useMemo } from "react"
 import { useTranslation } from "react-i18next"
 import { addressBookLabel } from "../lib/addressbook-label"
 import { createPortal } from "react-dom"
@@ -127,41 +127,11 @@ function partialSendMessage(requestedZat: number, unsentZat: number, txids: stri
 // Each tab gets a small SVG glyph + accent color so the nav reads at a glance.
 // Colors are pulled from the design palette: gold = primary, green = inbound,
 // copper = outbound, blue/violet/teal for navigation actions.
-const ICO_SEND = (
-	<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-		<path d="M14 2 L7 9"/><path d="M14 2 L9 14 L7 9 L2 7 Z"/>
-	</svg>
-)
 const ICO_SHIELD = (
 	<svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor">
 		<path d="M8 1.5 L13 3.5 V8 C13 11 10.5 13.5 8 14.5 C5.5 13.5 3 11 3 8 V3.5 Z"/>
 	</svg>
 )
-const ICO_RECEIVE = (
-	<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-		<path d="M8 2 V11"/><path d="M4 7 L8 11 L12 7"/><path d="M3 14 H13"/>
-	</svg>
-)
-const ICO_SYNC = (
-	<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-		<path d="M2 8 A6 6 0 0 1 13 5"/><path d="M13 2 V5 H10"/>
-		<path d="M14 8 A6 6 0 0 1 3 11"/><path d="M3 14 V11 H6"/>
-	</svg>
-)
-const ICO_HISTORY = (
-	<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-		<circle cx="8" cy="8" r="6"/><path d="M8 4 V8 L11 10"/>
-	</svg>
-)
-
-const NAV_TABS: Array<{ id: Page; label: string; icon: ReactNode; color: string }> = [
-	{ id: "send",     label: "Send",     icon: ICO_SEND,     color: "#d97757" /* copper */ },
-	{ id: "shield",   label: "Shield / Unshield",   icon: ICO_SHIELD,   color: "#6ee787" /* green */ },
-	{ id: "receive",  label: "Receive",  icon: ICO_RECEIVE,  color: "#7aa6f0" /* blue */ },
-	{ id: "scan",     label: "Sync",     icon: ICO_SYNC,     color: "#b794f4" /* violet */ },
-	{ id: "history",  label: "History",  icon: ICO_HISTORY,  color: "#56d4d4" /* teal */ },
-]
-
 let stylesInjected = false
 function ensureStylesInjected() {
 	if (stylesInjected || typeof document === "undefined") return
@@ -187,17 +157,13 @@ export function ZcashPrivacyTab({ initialPage, initialSection, embedded = false,
 	useEffect(() => { ensureStylesInjected() }, [])
 
 	const [page, setPage] = useState<Page>(initialPage ?? "send")
-	const [toolsOpen, setToolsOpen] = useState(!!initialPage && initialPage !== 'send' && initialPage !== 'receive')
-	const toolsId = useId()
 	const rootClass = embedded ? 'zcash-v2 zcash-embedded' : 'zcash-v2'
 	useEffect(() => {
 		if (!initialPage) return
 		setPage(initialPage)
-		setToolsOpen(initialPage !== 'send' && initialPage !== 'receive')
 	}, [initialPage])
 	const navigate = (next: Page) => {
 		setPage(next)
-		if (next !== 'send' && next !== 'receive') setToolsOpen(true)
 		onPageChange?.(next)
 	}
 	const shieldFormRef = useRef<HTMLDivElement>(null)
@@ -806,6 +772,7 @@ export function ZcashPrivacyTab({ initialPage, initialSection, embedded = false,
 		return Math.max(0, transparentBalanceZat - SHIELD_FEE_ZAT)
 	}, [transparentBalanceZat, maxShieldZat])
 
+	const recentIncoming = useMemo(() => [...transactions].sort((a, b) => b.block_height - a.block_height || b.id - a.id).slice(0, 5), [transactions])
 	const filteredTxs = useMemo(() => {
 		switch (historyFilter) {
 			case "received": return transactions.filter(tx => !tx.is_spent)
@@ -923,80 +890,56 @@ export function ZcashPrivacyTab({ initialPage, initialSection, embedded = false,
 
 	return (
 		<div className={rootClass}>
-			{embedded ? <Flex align="center" justify="space-between" gap="3" mb="4" wrap="wrap">
-				<Text fontSize="12px" color={!synced ? 'var(--gold)' : 'var(--text-2)'} role="status">
-					{uiText('Shielded')} · {scanInFlight || scanState === 'scanning' ? uiText('Scanning') : scanError ? uiText('Scan failed') : synced ? uiText('Last scan complete') : uiText('Scan needed')}
-				</Text>
-				<Button size="xs" variant="outline" onClick={() => handleScan(undefined, undefined, true)} disabled={scanInFlight || scanState === 'scanning'}>{t('zcashSyncShielded')}</Button>
-			</Flex> : <>
-			{/* balance card */}
-			<div className="zk-balance">
-				<div className="bal-glyph">
-					<svg width="20" height="20" viewBox="0 0 16 16" fill="currentColor">
-						<path d="M8 1.5 L13 3.5 V8 C13 11 10.5 13.5 8 14.5 C5.5 13.5 3 11 3 8 V3.5 Z"/>
-					</svg>
-				</div>
-				<div className="main">
-					<div className="lbl">{synced ? uiText("Shielded ZEC · available to send") : balanceAmounts ? uiText("Shielded ZEC · last known balance") : uiText("Shielded ZEC · scan needed")}</div>
-					<div className="amount">
-						{/* confirmed = total across all unspent notes; pending = immature
-						  slice (<10 confs, e.g. change from a fresh unshield). Show the
-						  mature number big so it matches what's actually spendable. */}
-						{balanceAmounts ? formatZec(balanceAmounts.available) : "—"}
-						<span className="ticker">ZEC</span>
-						{onTheWay > 0 && (
-							<span className="pending">+ {formatZec(onTheWay)}{" "}{uiText("pending")}</span>
-						)}
+			{/* One sync control: status, progress, Sync, and the advanced scan options. */}
+			<Box mb="4">
+				<Flex align="center" justify="space-between" gap="3" wrap="wrap">
+					<Text fontSize="12px" color={!synced || scanError ? 'var(--gold)' : 'var(--text-2)'} role="status" aria-live="polite">
+						{scanInFlight || scanState === 'scanning' ? `${uiText('Scanning')} ${Math.floor(displayPercent)}%`
+							: scanError ? uiText('Scan failed')
+							: syncedTo ? `${uiText('Last scanned: block')} ${syncedTo.toLocaleString(fiatLocale)}`
+							: uiText('Not scanned yet')}
+					</Text>
+					<Flex gap="2">
+						<Button size="xs" variant="outline" onClick={() => handleScan(undefined, undefined, true)} disabled={scanInFlight || scanState === 'scanning'}>{t('zcashSyncShielded')}</Button>
+						<Button size="xs" variant="ghost" aria-expanded={advancedScanOpen} aria-label={uiText('Sync options')} onClick={() => setAdvancedScanOpen(o => !o)}>⋯</Button>
+					</Flex>
+				</Flex>
+				{(scanState === 'scanning' || scanInFlight) && scanProgress && (
+					<div className="sync-progress">
+						<div className="pb"><div className="pb-fill" style={{ width: `${Math.max(displayPercent, 0.5)}%` }} /></div>
+						<div className="meta">
+							<span>{scanProgress.scannedHeight.toLocaleString(fiatLocale)} / {scanProgress.tipHeight.toLocaleString(fiatLocale)}</span>
+							<span>{scanProgress.blocksPerSec > 0 ? `${scanProgress.blocksPerSec} blk/s · ${formatEta(scanProgress.etaSeconds)} left` : uiText("calculating…")}</span>
+						</div>
 					</div>
-					{scanInFlight && scanProgress ? (
-						<div className="syncing">
-							<div className="pb"><div className="pb-fill" style={{ width: `${Math.max(displayPercent, 0.5)}%` }} /></div>
-							<span>{uiText("Syncing")}{" "}{Math.floor(displayPercent)}%</span>
+				)}
+				{advancedScanOpen && (
+					<div className="advanced-body" style={{ marginTop: 12 }}>
+						<div className="field-grid">
+							<div className="field">
+								<span className="lbl">{uiText("From block")}</span>
+								<input type="text" placeholder={KEEPKEY_RELEASE_BLOCK.toLocaleString(fiatLocale)} value={scanFromHeight}
+									onChange={e => setScanFromHeight(e.target.value.replace(/\D/g, ""))} />
+								<button className="max" onClick={() => setScanFromHeight(String(KEEPKEY_RELEASE_BLOCK))}>{uiText("KK release")}</button>
+							</div>
+							<div style={{ display: "flex", gap: 10 }}>
+								<button className="submit alt" style={{ flex: 1 }} disabled={!scanFromHeight || scanState === "scanning"}
+									onClick={() => handleScan(scanFromHeight ? parseInt(scanFromHeight, 10) : undefined)}>{uiText("Scan from block")}</button>
+								<button className="submit alt" style={{ flex: 1 }} disabled={scanState === "scanning"}
+									onClick={() => handleScan(undefined, true)}>{uiText("Full rescan (~30 min)")}</button>
+							</div>
 						</div>
-					) : (
-						<div className="sub">
-							{syncedTo
-								? `Last scanned: block #${syncedTo.toLocaleString(fiatLocale)}${needsScan ? ' · Scan needed' : ''}`
-								: uiText("Not synced yet")}
-						</div>
-					)}
-				</div>
-				<div className="status-pill">
-					<span className={`led ${!synced ? "amber" : ""}`} />
-					{scanInFlight || scanState === "scanning" ? uiText("Scanning") : scanError ? uiText("Scan failed") : synced ? uiText("Last scan complete") : uiText("Scan needed")}
-					<button
-						className="ghost-btn refresh-compact"
-						onClick={() => handleScan(undefined, undefined, true)}
-						disabled={scanInFlight || scanState === "scanning"}
-						title={uiText("Sync to the latest block")}
-					>↻</button>
-				</div>
-			</div>
-			<p style={{ fontSize: 12, color: 'var(--zk-fg-dim)', margin: '0 0 12px' }}>{uiText("Transparent ZEC and shielded ZEC are separate balances. Refreshing transparent ZEC does not scan private payments.")}</p>
-			</>}
+					</div>
+				)}
+				{scanResult && (
+					<div className={`result-box ${scanState === "done" ? "ok" : "err"}`} style={{ marginTop: 12 }}>
+						<div className="result-msg">{scanResult}</div>
+					</div>
+				)}
+			</Box>
 			{scanError && <div className="result-box err" role="alert" style={{ marginBottom: 12 }}>
-				<div className="result-msg">{scanError} <button className="ghost-btn" onClick={() => navigate('scan')}>{uiText("Open shielded sync →")}</button></div>
+				<div className="result-msg">{scanError}</div>
 			</div>}
-
-			{/* page nav */}
-			{embedded && <Button size="xs" variant="outline" mb="3" aria-expanded={toolsOpen} aria-controls={toolsId}
-				onClick={() => { if (toolsOpen) { setToolsOpen(false); if (page !== 'send' && page !== 'receive') navigate('receive') } else setToolsOpen(true) }}>
-				{uiText('Zcash tools and details')} {toolsOpen ? '▴' : '▾'}
-			</Button>}
-			<div id={toolsId} hidden={embedded && !toolsOpen}>
-			{embedded && <Text fontSize="12px" color="var(--text-2)" mb="3">{t('zcashSeparateSync')}</Text>}
-			<nav className="page-nav" aria-label={uiText('Zcash tools')}>
-				{NAV_TABS.filter(tab => !embedded || (tab.id !== 'send' && tab.id !== 'receive')).map(tab => (
-					<button key={tab.id}
-						data-active={page === tab.id ? "1" : undefined}
-						onClick={() => navigate(tab.id as Page)}
-					>
-						<span className="ico" style={{ color: tab.color }}>{tab.icon}</span>
-						{tab.label}
-					</button>
-				))}
-			</nav>
-			</div>
 
 			{/* ===== SEND ===== */}
 			{page === "send" && (
@@ -1364,7 +1307,7 @@ export function ZcashPrivacyTab({ initialPage, initialSection, embedded = false,
 
 			{/* ===== RECEIVE ===== */}
 			{page === "receive" && orchardAddress && (
-				embedded ? <Flex gap="6" wrap="wrap" align="flex-start" aria-label={uiText('Shielded receive')}>
+				embedded ? <><Flex gap="6" wrap="wrap" align="flex-start" aria-label={uiText('Shielded receive')}>
 					{/* Same 184px framed tile as the transparent receive QR; the SVG scales to fill it. */}
 					<Box bg="white" p="3" borderRadius="12px" flexShrink={0} w="184px" h="184px" boxShadow="var(--shadow-2)"
 						aria-label={uiText('Shielded address QR code')}
@@ -1382,7 +1325,25 @@ export function ZcashPrivacyTab({ initialPage, initialSection, embedded = false,
 						<Text fontSize="12px" color="var(--text-2)" mt="3">{uiText('Compare the full address on your KeepKey before receiving. Address verification can take over 60 seconds.')}</Text>
 						{verifyError && <Text fontSize="12px" color="var(--rose)" role="alert" mt="2">{verifyError}</Text>}
 					</Box>
-				</Flex> :
+				</Flex>
+				<Box mt="6" aria-label={uiText('Recent incoming payments')}>
+					<Flex justify="space-between" align="center" mb="2">
+						<Text fontSize="12px" fontWeight="600" color="var(--text-1)">{uiText('Recent incoming payments')}</Text>
+						<Button size="xs" variant="ghost" onClick={() => navigate('history')}>{uiText('View full history →')}</Button>
+					</Flex>
+					{recentIncoming.length === 0
+						? <Text fontSize="12px" color="var(--text-2)">{uiText('No payments found yet. Sync to look for new ones.')}</Text>
+						: recentIncoming.map(tx => (
+							<Flex key={tx.id} justify="space-between" align="center" gap="3" py="2" borderTop="1px solid var(--line)">
+								<Box minW="0">
+									<Text fontFamily="mono" fontSize="13px" color="var(--text-0)">+{formatZec(tx.value)} ZEC</Text>
+									<Text fontSize="11px" color="var(--text-2)" wordBreak="break-word">{tx.memo || `${uiText('Block')} #${tx.block_height.toLocaleString(fiatLocale)}`}</Text>
+								</Box>
+								<Text fontSize="11px" color="var(--text-2)" flexShrink={0}>{tx.is_spent ? uiText('Spent') : uiText('Available')}</Text>
+							</Flex>
+						))}
+				</Box>
+				</> :
 				<section>
 					<div className="page-head">
 						<h2>{uiText("Receive ZEC")}</h2>
@@ -1435,109 +1396,10 @@ export function ZcashPrivacyTab({ initialPage, initialSection, embedded = false,
 				</section>
 			)}
 
-			{/* ===== SCAN / SYNC ===== */}
-			{page === "scan" && (
-				<section>
-					<div className="page-head">
-						<h2>{uiText("Sync")}</h2>
-						<p>{uiText("Vault scans the Zcash chain locally to find your incoming payments. Your viewing key never leaves this machine.")}</p>
-					</div>
-
-					<div className="card">
-						<div className="sync-status">
-							<div className={`ico ${scanInFlight || scanState === "scanning" ? "syncing" : ""}`}>
-								{scanInFlight || scanState === "scanning" ? "↻" : "✓"}
-							</div>
-							<div className="text">
-								<div className="title">
-									{scanState === "scanning" ? uiText("Scanning…")
-										: scanInFlight ? uiText("Catching up…")
-										: synced ? uiText("Last synced")
-										: uiText("Not synced yet")}
-								</div>
-								<div className="sub">
-									{syncedTo
-										? `Block #${syncedTo.toLocaleString(fiatLocale)}`
-										: uiText("No blocks scanned")}
-									{transactions.length > 0 && ` · ${transactions.length} payment${transactions.length === 1 ? "" : "s"}`}
-								</div>
-							</div>
-						</div>
-
-						{(scanState === "scanning" || scanInFlight) && scanProgress && (
-							<div className="sync-progress">
-								<div className="pb"><div className="pb-fill" style={{ width: `${Math.max(displayPercent, 0.5)}%` }} /></div>
-								<div className="meta">
-									<span>{scanProgress.scannedHeight.toLocaleString(fiatLocale)} / {scanProgress.tipHeight.toLocaleString(fiatLocale)}</span>
-									<span>{scanProgress.blocksPerSec > 0 ? `${scanProgress.blocksPerSec} blk/s · ${formatEta(scanProgress.etaSeconds)} left` : uiText("calculating…")}</span>
-								</div>
-							</div>
-						)}
-
-						<div className="scan-cta">
-							<button
-								className="submit alt"
-								onClick={() => handleScan()}
-								disabled={scanState === "scanning"}
-								style={{ flex: 1 }}
-							>
-								{scanState === "scanning" ? uiText("Scanning…") : uiText("Sync now")}
-							</button>
-						</div>
-					</div>
-
-					{scanResult && (
-						<div className={`result-box ${scanState === "done" ? "ok" : "err"}`}>
-							<div className="result-msg">{scanResult}</div>
-						</div>
-					)}
-
-					<div className="advanced">
-						<button className="advanced-toggle" onClick={() => setAdvancedScanOpen(o => !o)}>
-							<span>{uiText("Advanced")}</span>
-							<span className="chev">{advancedScanOpen ? "▾" : "▸"}</span>
-						</button>
-						{advancedScanOpen && (
-							<div className="advanced-body">
-								<div className="field-grid">
-									<div className="field">
-										<span className="lbl">{uiText("From block")}</span>
-										<input
-											type="text"
-											placeholder={KEEPKEY_RELEASE_BLOCK.toLocaleString(fiatLocale)}
-											value={scanFromHeight}
-											onChange={e => setScanFromHeight(e.target.value.replace(/\D/g, ""))}
-										/>
-										<button
-											className="max"
-											onClick={() => setScanFromHeight(String(KEEPKEY_RELEASE_BLOCK))}
-										>{uiText("KK release")}</button>
-									</div>
-									<div style={{ display: "flex", gap: 10 }}>
-										<button
-											className="submit alt"
-											onClick={() => handleScan(scanFromHeight ? parseInt(scanFromHeight, 10) : undefined)}
-											disabled={!scanFromHeight || scanState === "scanning"}
-											style={{ flex: 1 }}
-										>{uiText("Scan from block")}</button>
-										<button
-											className="submit alt"
-											onClick={() => handleScan(undefined, true)}
-											disabled={scanState === "scanning"}
-											style={{ flex: 1 }}
-										>{uiText("Full rescan (~30 min)")}</button>
-									</div>
-									<p style={{ margin: 0, fontSize: 11.5, color: "var(--zk-fg-mute)", lineHeight: 1.5 }}>{uiText("KeepKey shielded support shipped at block")}{" "}{KEEPKEY_RELEASE_BLOCK.toLocaleString(fiatLocale)}{uiText(". Earlier blocks contain no notes for this account.")}</p>
-								</div>
-							</div>
-						)}
-					</div>
-				</section>
-			)}
-
 			{/* ===== HISTORY ===== */}
 			{page === "history" && (
 				<section>
+					<button className="ghost-btn" onClick={() => navigate('receive')} style={{ marginBottom: 12 }}>{uiText("← Back to receive")}</button>
 					<div className="page-head">
 						<h2>{uiText("History")}</h2>
 						<p>{uiText("Decrypted locally with your viewing key.")}</p>
