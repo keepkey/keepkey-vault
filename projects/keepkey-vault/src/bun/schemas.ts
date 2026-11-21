@@ -148,7 +148,11 @@ export const EthVerifyRequest = z.object({
 
 /** POST /utxo/sign-transaction */
 // Inputs and outputs pass through as they are, except that any path they carry must fit in 32 bits unsigned.
-const UtxoSignEntry = z.object({ addressNList: RawPath.optional(), address_n: RawPath.optional() }).passthrough()
+// A multisig cosigner suffix (multisig.pubkeys[].addressNList) is checked here with the same rule hdwallet applies before
+// signing (unhardened, at most 8 levels), so a bad request gets a clear 400 at the API instead of a signer error.
+const MultisigPubkey = z.object({ addressNList: z.array(z.number().int().min(0).max(MAX_ACCOUNT_INDEX)).max(8).optional() }).passthrough()
+const UtxoMultisig = z.object({ pubkeys: z.array(MultisigPubkey).optional() }).passthrough()
+const UtxoSignEntry = z.object({ addressNList: RawPath.optional(), address_n: RawPath.optional(), multisig: UtxoMultisig.nullish() }).passthrough()
 export const UtxoSignTransactionRequest = z.object({
   coin: z.string().optional(),
   inputs: z.array(UtxoSignEntry).min(1),
