@@ -2544,5 +2544,7 @@
   "m840775b5": "Recent incoming payments",
   "m1c5ed083": "Spent",
   "m97c32460": "Sync options",
-  "m63aecd5b": "View full history →"
+  "m63aecd5b": "View full history →",
+  "m61fefc0a": "Direction",
+  "m7d9a6f77": "Move ZEC between your transparent and private balances. Unshielding pays a public address, yours or someone else’s."
 }

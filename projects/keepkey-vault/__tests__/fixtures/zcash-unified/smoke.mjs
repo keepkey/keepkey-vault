@@ -14,7 +14,8 @@ const transparent=page.getByRole('button',{name:'Transparent · public',exact:tr
 const shielded=page.getByRole('button',{name:'Shielded · private',exact:true});
 const tools=page.getByRole('button',{name:/Zcash tools and details/});
 const shieldPill=page.getByRole('button',{name:'Shield',exact:true});
-const sync=page.getByRole('button',{name:'Scan shielded balance',exact:true});
+const scanButton=page.getByRole('button',{name:'Scan shielded balance',exact:true});
+const refresh=page.getByRole('button',{name:'Refresh',exact:true});
 try {
  await rpc('testReset');await page.goto(base);
  await expect(transparent).toHaveAttribute('aria-pressed','true');
@@ -31,9 +32,13 @@ try {
  await expect(tools).toHaveCount(0);
  await expect(page.getByRole('navigation',{name:'Zcash tools',exact:true})).toHaveCount(0);
  await expect(shieldPill).toBeVisible();
- await expect(sync).toHaveCount(1);
+ await expect(scanButton).toHaveCount(0);
+ await expect(refresh).toBeVisible();
  await expect(page.getByText('Recent incoming payments',{exact:true})).toBeVisible();
- checks.shieldedHasReceiveSendShieldPillsOneSyncAndNoToolsToggle=true;
+ checks.shieldedHasReceiveSendShieldPillsAndNoToolsToggleOrSecondSyncButton=true;
+ await refresh.click();
+ await expect.poll(async()=>(await rpc('testCalls')).includes('zcashShieldedScan')).toBe(true);
+ checks.topRefreshRunsTheShieldedScan=true;
  await page.screenshot({path:'zcash-shielded.png',fullPage:true});
  await page.getByRole('button',{name:'Send',exact:true}).first().click();
  await expect(page.getByText('Send from shielded balance',{exact:true})).toBeVisible();
@@ -47,7 +52,13 @@ try {
  checks.publicRecipientWarningStaysVisibleWithDetailsCollapsed=true;
  await shieldPill.click();
  await expect(page.getByText('Shield & Unshield',{exact:true})).toBeVisible();
- await expect(sync).toBeVisible();
+ await expect(page.getByRole('button',{name:'Shield → private',exact:true})).toHaveAttribute('aria-pressed','true');
+ await expect(page.getByText('Available to shield',{exact:true})).toBeVisible();
+ await expect(page.getByRole('button',{name:'Unshield',exact:true})).toHaveCount(0);
+ await page.getByRole('button',{name:'Unshield → public',exact:true}).click();
+ await expect(page.getByRole('button',{name:'Unshield',exact:true})).toBeVisible();
+ await expect(page.getByText('Available to shield',{exact:true})).toHaveCount(0);
+ checks.shieldAndUnshieldAreOneToggledForm=true;
  await page.getByRole('button',{name:'Receive',exact:true}).first().click();
  await page.getByRole('button',{name:/View full history/}).click();
  await expect(page.getByText('Decrypted locally with your viewing key.',{exact:true})).toBeVisible();

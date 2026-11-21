@@ -184,6 +184,9 @@ function PersonalAssetPage({ chain, balance, balanceLoading = false, onBack, fir
 	// Bumped on every manual refresh so chain-specific panels that fetch their own
 	// data (HiveAccountPanel) re-fetch too.
 	const [refreshNonce, setRefreshNonce] = useState(0)
+	// Shielded ZEC: the refresh button asks the Zcash panel for a quick scan and shows its progress.
+	const [zcashScanRequest, setZcashScanRequest] = useState(0)
+	const [zcashScanning, setZcashScanning] = useState(false)
 	const handleRefresh = useCallback(async () => {
 		if (isMonero) { setRefreshing(true); try { await monero.refresh() } finally { setRefreshing(false) } return }
 		setRefreshing(true)
@@ -1360,25 +1363,25 @@ function PersonalAssetPage({ chain, balance, balanceLoading = false, onBack, fir
 
 					{/* Refresh needs a connected device (bun getBalance derives on-device) —
 					    hide in watch-only mode like the other device-gated actions. */}
-					{!watchOnly && !shieldedSelected && <Box
+					{!watchOnly && (!shieldedSelected || (zcashPrivacyEnabled && !!zcashShieldedSupported)) && <Box
 						as="button"
-						onClick={refreshing ? undefined : handleRefresh}
-						disabled={refreshing}
+						onClick={(shieldedSelected ? zcashScanning : refreshing) ? undefined : shieldedSelected ? () => setZcashScanRequest(n => n + 1) : handleRefresh}
+						disabled={shieldedSelected ? zcashScanning : refreshing}
 						className="electrobun-webkit-app-region-no-drag"
 						w="36px"
 						h="36px"
 						borderRadius="10px"
 						bg="transparent"
-						color={refreshing ? "var(--text-3)" : "var(--text-2)"}
+						color={(shieldedSelected ? zcashScanning : refreshing) ? "var(--text-3)" : "var(--text-2)"}
 						display="grid"
 						placeItems="center"
-						cursor={refreshing ? "default" : "pointer"}
-						_hover={refreshing ? {} : { bg: "var(--ink-2)", color: "var(--text-0)" }}
+						cursor={(shieldedSelected ? zcashScanning : refreshing) ? "default" : "pointer"}
+						_hover={(shieldedSelected ? zcashScanning : refreshing) ? {} : { bg: "var(--ink-2)", color: "var(--text-0)" }}
 						transition="all 0.18s"
 						flexShrink={0}
 						aria-label={String(t("refresh"))}
 					>
-						{refreshing ? (
+						{(shieldedSelected ? zcashScanning : refreshing) ? (
 							<Spinner size="xs" color="var(--gold)" />
 						) : (
 							<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
@@ -1547,7 +1550,7 @@ function PersonalAssetPage({ chain, balance, balanceLoading = false, onBack, fir
 					) : shieldedSelected ? (
 						!watchOnly && zcashPrivacyEnabled && zcashShieldedSupported ? (
 						<Suspense fallback={<Spinner size="sm" color="kk.gold" />}>
-							<ZcashPrivacyTab embedded initialPage={view === 'send' ? 'send' : view === 'privacy' ? zcashPrivacyAction : 'receive'}
+							<ZcashPrivacyTab embedded scanRequest={zcashScanRequest} onScanningChange={setZcashScanning} initialPage={view === 'send' ? 'send' : view === 'privacy' ? zcashPrivacyAction : 'receive'}
 								onPageChange={page => { setZcashPrivacyAction(page); setView(page === 'send' || page === 'receive' ? page : 'privacy') }} />
 						</Suspense>
 						) : <Text role="status" fontSize="sm" color="var(--text-2)">{watchOnly ? t('zcashConnectForPrivacy') : !zcashPrivacyEnabled ? t('zcashEnablePrivacy') : t('zcashPrivacyFirmware')}</Text>

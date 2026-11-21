@@ -142,12 +142,16 @@ function ensureStylesInjected() {
 	document.head.appendChild(style)
 }
 
-export function ZcashPrivacyTab({ initialPage, initialSection, embedded = false, onPageChange }: {
+export function ZcashPrivacyTab({ initialPage, initialSection, embedded = false, onPageChange, scanRequest = 0, onScanningChange }: {
 	initialPage?: Page
 	initialSection?: 'shield' | 'unshield'
 	/** Use the asset page's Send/Receive navigation and shared visual tokens. */
 	embedded?: boolean
 	onPageChange?: (page: Page) => void
+	/** Bumped by the asset page's refresh button: run a quick shielded scan. */
+	scanRequest?: number
+	/** Lets the asset page show its refresh spinner while a scan runs. */
+	onScanningChange?: (scanning: boolean) => void
 } = {}) {
   const uiText = useUiTranslation()
 
@@ -166,6 +170,8 @@ export function ZcashPrivacyTab({ initialPage, initialSection, embedded = false,
 		setPage(next)
 		onPageChange?.(next)
 	}
+	const [direction, setDirection] = useState<'shield' | 'unshield'>(initialSection ?? 'shield')
+	useEffect(() => { if (initialSection) setDirection(initialSection) }, [initialSection])
 	const shieldFormRef = useRef<HTMLDivElement>(null)
 	const unshieldFormRef = useRef<HTMLDivElement>(null)
 
@@ -607,6 +613,14 @@ export function ZcashPrivacyTab({ initialPage, initialSection, embedded = false,
 		}
 		setScanInFlight(false)
 	}, [refreshBalance, loadTransactions, fiatLocale, i18n.language])
+	// The asset page's refresh button asks for a quick scan; the first value (mount) is not a request.
+	const lastScanRequest = useRef(scanRequest)
+	useEffect(() => {
+		if (scanRequest === lastScanRequest.current) return
+		lastScanRequest.current = scanRequest
+		if (!scanInFlight && scanState !== "scanning") void handleScan(undefined, undefined, true)
+	}, [scanRequest, scanInFlight, scanState, handleScan])
+	useEffect(() => { onScanningChange?.(scanInFlight || scanState === "scanning") }, [scanInFlight, scanState, onScanningChange])
 
 	const handleBackfillMemos = useCallback(async () => {
 		setBackfilling(true); setBackfillResult(null)
@@ -899,10 +913,7 @@ export function ZcashPrivacyTab({ initialPage, initialSection, embedded = false,
 							: syncedTo ? `${uiText('Last scanned: block')} ${syncedTo.toLocaleString(fiatLocale)}`
 							: uiText('Not scanned yet')}
 					</Text>
-					<Flex gap="2">
-						<Button size="xs" variant="outline" onClick={() => handleScan(undefined, undefined, true)} disabled={scanInFlight || scanState === 'scanning'}>{t('zcashSyncShielded')}</Button>
-						<Button size="xs" variant="ghost" aria-expanded={advancedScanOpen} aria-label={uiText('Sync options')} onClick={() => setAdvancedScanOpen(o => !o)}>⋯</Button>
-					</Flex>
+					<Button size="xs" variant="ghost" aria-expanded={advancedScanOpen} aria-label={uiText('Sync options')} onClick={() => setAdvancedScanOpen(o => !o)}>⋯</Button>
 				</Flex>
 				{(scanState === 'scanning' || scanInFlight) && scanProgress && (
 					<div className="sync-progress">
@@ -1157,13 +1168,18 @@ export function ZcashPrivacyTab({ initialPage, initialSection, embedded = false,
 				<section>
 					<div className="page-head">
 						<h2>{uiText("Shield & Unshield")}</h2>
-						<p>{uiText("Shield moves your transparent ZEC into the private balance. Unshield pays a transparent address—your own or someone else’s.")}</p>
+						<p>{uiText("Move ZEC between your transparent and private balances. Unshielding pays a public address, yours or someone else’s.")}</p>
 						<DocsLink href={watch('zec-04-shield-sync')} label={uiText("Watch: shield, unshield and sync")} />
 					</div>
 					{balance && onTheWay > 0 && <MaturingBanner zat={onTheWay} confirmations={balance.min_confirmations ?? 10} />}
 
+					<Flex gap="1" p="3px" mb="4" borderRadius="10px" border="1px solid var(--line)" w="fit-content" role="group" aria-label={uiText("Direction")}>
+						<Button size="sm" variant={direction === "shield" ? "solid" : "ghost"} aria-pressed={direction === "shield"} onClick={() => setDirection("shield")}>{uiText("Shield → private")}</Button>
+						<Button size="sm" variant={direction === "unshield" ? "solid" : "ghost"} aria-pressed={direction === "unshield"} onClick={() => setDirection("unshield")}>{uiText("Unshield → public")}</Button>
+					</Flex>
+
 					<div className="form-page">
-						<div className="card" ref={shieldFormRef}>
+						{direction === "shield" && <div className="card" ref={shieldFormRef}>
 							<div className="card-head">
 								<div className="title" style={{ color: "var(--zk-gold)" }}>{uiText("Shield → private")}</div>
 								<span className="meta">{uiText("From your t-addr")}</span>
@@ -1220,9 +1236,9 @@ export function ZcashPrivacyTab({ initialPage, initialSection, embedded = false,
 								{shieldResult && <ResultBox kind="ok" title={uiText("Shielded")} txid={shieldResult} />}
 								{shieldError && <ResultBox kind="err" title={uiText("Shield failed")} message={shieldError} />}
 							</div>
-						</div>
+						</div>}
 
-						<div className="card" ref={unshieldFormRef}>
+						{direction === "unshield" && <div className="card" ref={unshieldFormRef}>
 							<div className="card-head">
 								<div className="title" style={{ color: "var(--zk-copper)" }}>{uiText("Unshield → public")}</div>
 								<span className="meta">{uiText("Visible on chain")}</span>
@@ -1300,7 +1316,7 @@ export function ZcashPrivacyTab({ initialPage, initialSection, embedded = false,
 								{deshieldResult && <ResultBox kind="ok" title={uiText("Unshielded")} txid={deshieldResult} />}
 								{deshieldError && <ResultBox kind="err" title={uiText("Unshield failed")} message={deshieldError} />}
 							</div>
-						</div>
+						</div>}
 					</div>
 				</section>
 			)}
