@@ -1,4 +1,4 @@
-import {hasMultisigSigningData,btcMultisigEnabled,BTC_MULTISIG_DISABLED} from './btc-psbt/multisig-feature'
+import {hasMultisigSigningData,btcMultisigEnabled,BTC_MULTISIG_DISABLED,deviceScriptType} from './btc-psbt/multisig-feature'
 import { signUtxoTx } from './txbuilder/zcash-transparent'
 import type { EngineController } from './engine-controller'
 import { takeDeviceRefusal } from './device-refusal'
@@ -3341,10 +3341,13 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             }
           }
 
+          // Segwit multisig (p2wsh, p2sh-p2wsh) reaches the device as p2wpkh /
+          // p2sh-p2wpkh with its multisig object; the schema required one.
+          const toDevice = (entry: any) => entry.scriptType === undefined ? entry : { ...entry, scriptType: deviceScriptType(entry.scriptType) }
           const result = await emuWrap(() => signUtxoTx(wallet, {
             coin,
-            inputs: body.inputs,
-            outputs: body.outputs,
+            inputs: body.inputs.map(toDevice),
+            outputs: body.outputs.map(toDevice),
             version: body.version ?? 1,
             locktime: body.locktime ?? 0,
             ...(body.overwintered !== undefined ? { overwintered: body.overwintered } : {}),
@@ -4026,7 +4029,9 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             curve: body.ecdsa_curve_name || 'secp256k1',
             showDisplay: sd,
             coin: body.coin_name || 'Bitcoin',
-            scriptType: body.script_type,
+            // A multisig account's key is its standard xpub, as for p2sh (hdwallet
+            // sends p2sh as p2pkh here too); the device has no p2wsh key format.
+            scriptType: body.script_type === 'p2wsh' || body.script_type === 'p2sh-p2wsh' ? 'p2pkh' : body.script_type,
           }]), { operation: 'getPublicKeys', chain: 'Bitcoin' }, sd)
           const xpub = result?.[0]?.xpub
           const out = { xpub }
