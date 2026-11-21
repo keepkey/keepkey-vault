@@ -18,6 +18,7 @@ import type { BtcBackend } from '../btc-backend'
 import { utxoDiscoveryKey } from '../btc-backend/types'
 import { filterSpendableZcashUtxos, summarizeZcashMaturity, ZCASH_MIN_CONFIRMATIONS } from '../../shared/zcash-maturity'
 import { ZCASH_NU7_ACTIVATION_HEIGHT, ZCASH_NU7_BRANCH_ID, ZCASH_V6_VERSION_GROUP_ID } from '../../shared/zcash-nu7'
+import { isAccountIndex, parseBip32PathStrict } from '../../shared/bip32-account'
 
 /** BTC mainnet — the ONLY UTXO chain that routes to a self-host node; every other
  *  coin (LTC/DOGE/BCH/Dash/Zcash) stays on Pioneer. */
@@ -110,17 +111,6 @@ function parseDecimalToInt(amount: string, decimals: number): number {
 
 const TAG = '[txbuilder:utxo]'
 
-// BIP32 path segment to addressNList
-function bip32ToAddressNList(path: string): number[] {
-  return path
-    .replace('m/', '')
-    .split('/')
-    .map((seg) => {
-      const hardened = seg.endsWith("'")
-      const index = parseInt(seg.replace("'", ''), 10)
-      return hardened ? index + 0x80000000 : index
-    })
-}
 
 // Hardcoded fee overrides for chains where API is unreliable
 const HARDCODED_FEES: Record<string, { slow: number; average: number; fast: number }> = {
@@ -699,9 +689,10 @@ export async function buildUtxoTx(
           // Change address index — only from primary xpub's change paths
           if (qXpub === primaryXpub && token.path && token.transfers > 0) {
             const parts = token.path.split('/')
-            if (parts.length === 6 && parts[4] === '1') {
-              const idx = parseInt(parts[5], 10)
-              if (!isNaN(idx) && idx > maxUsed) maxUsed = idx
+            // A hardened or out-of-range segment is not a real change address; skip it (audit v6 H8).
+            if (parts.length === 6 && parts[4] === '1' && /^\d+$/.test(parts[5])) {
+              const idx = Number(parts[5])
+              if (isAccountIndex(idx) && idx > maxUsed) maxUsed = idx
             }
           }
         }
@@ -777,10 +768,13 @@ export async function buildUtxoTx(
     throw new Error(`Change index ${changeAddressIndex} is more than 10 past the highest used change address (${discoveredChangeIndex - 1}); refusing`)
   }
 
+  // The change index comes from the balance server. From 2^31 up it would become a hardened element or wrap to an
+  // earlier address, so refuse instead of guessing (audit v6 H8).
+  if (!isAccountIndex(changeAddressIndex)) throw new Error(`Change index ${changeAddressIndex} is out of range; refusing`)
   // Change address path — use correct account index (from accountPath or default 0)
   const changeAddressNList = accountPath
     ? [...accountPath, 1, changeAddressIndex]
-    : bip32ToAddressNList(`m/${purpose}'/${coinType}'/0'/1/${changeAddressIndex}`)
+    : parseBip32PathStrict(`m/${purpose}'/${coinType}'/0'/1/${changeAddressIndex}`)
 
   // 5. Prepare inputs/outputs for hdwallet
   const preparedInputs = inputs.map((input: any) => {
@@ -789,7 +783,7 @@ export async function buildUtxoTx(
     const inputAccountPath: number[] | undefined = input._sourceAccountPath || accountPath
     let addressNList: number[]
     if (input.path) {
-      const rawNList = bip32ToAddressNList(input.path)
+      const rawNList = parseBip32PathStrict(input.path)
       if (inputAccountPath && rawNList.length === 5) {
         // Blockbook returns account-0 paths — rewrite first 3 segments to the
         // UTXO's own source account path (correct for both single- and multi-xpub)

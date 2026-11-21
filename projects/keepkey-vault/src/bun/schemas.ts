@@ -1,11 +1,18 @@
 import { z } from 'zod'
+import { MAX_ACCOUNT_INDEX, MAX_PATH_ELEMENT } from '../shared/bip32-account'
 
 // ═══════════════════════════════════════════════════════════════════════
 // Shared primitives
 // ═══════════════════════════════════════════════════════════════════════
 
+/** One raw BIP32 path element: 0 to 2^32 - 1. A negative or larger value would be changed on the way to the device, so
+ *  the path shown would not be the path used. */
+const PathElement = z.number().int().min(0).max(MAX_PATH_ELEMENT)
+/** A raw BIP32 path sent by a client. */
+const RawPath = z.array(PathElement)
+
 /** BIP32 address path — array of 3-6 hardened/unhardened integers (TON uses 6) */
-export const AddressNList = z.array(z.number().int()).min(3).max(6)
+export const AddressNList = RawPath.min(3).max(6)
 
 /** 0x-prefixed Ethereum address (40 hex chars) */
 export const EthAddress = z.string().regex(/^0x[0-9a-fA-F]{40}$/)
@@ -67,8 +74,8 @@ export const EthSignTransactionRequest = z.object({
   chain_id: ChainIdInput.optional(),
   // Either from or addressNList must be provided
   from: z.string().optional(),
-  addressNList: z.array(z.number().int()).optional(),
-  address_n_list: z.array(z.number().int()).optional(),
+  addressNList: RawPath.optional(),
+  address_n_list: RawPath.optional(),
   // EVM clear-signing metadata (firmware 7.14+)
   txMetadata: z.object({
     signedPayload: z.string(),
@@ -140,10 +147,12 @@ export const EthVerifyRequest = z.object({
 }).passthrough()
 
 /** POST /utxo/sign-transaction */
+// Inputs and outputs pass through as they are, except that any path they carry must fit in 32 bits unsigned.
+const UtxoSignEntry = z.object({ addressNList: RawPath.optional(), address_n: RawPath.optional() }).passthrough()
 export const UtxoSignTransactionRequest = z.object({
   coin: z.string().optional(),
-  inputs: z.array(z.any()).min(1),
-  outputs: z.array(z.any()).min(1),
+  inputs: z.array(UtxoSignEntry).min(1),
+  outputs: z.array(UtxoSignEntry).min(1),
   version: z.number().int().optional(),
   locktime: z.number().int().optional(),
 }).strip()
@@ -158,7 +167,7 @@ export const TxBuildRequest = z.object({
   amount: z.string().optional(),
   isMax: z.boolean().optional(),
   memo: z.string().max(256).optional(),
-  accountIndex: z.number().int().min(0).optional(),
+  accountIndex: z.number().int().min(0).max(MAX_ACCOUNT_INDEX).optional(),
   scriptType: z.string().max(32).optional(),
 }).strip()
 
@@ -194,7 +203,7 @@ export const XrpSignRequest = z.object({
   sequence: z.union([z.string(), z.number()]),
   fee: z.union([z.string(), z.number()]).optional(),
   flags: z.number().optional(),
-  addressNList: z.array(z.number().int()).optional(),
+  addressNList: RawPath.optional(),
 }).strip()
 
 /** POST /solana/sign-transaction — sign a raw Solana transaction */
@@ -238,8 +247,8 @@ export const SolanaX402Requirements = z.object({
 }).strict()
 
 export const SolanaSignRequest = z.object({
-  address_n: z.array(z.number().int()).optional(),
-  addressNList: z.array(z.number().int()).optional(),
+  address_n: RawPath.optional(),
+  addressNList: RawPath.optional(),
   raw_tx: z.string().min(1),
   /** Transaction-bound LUT account proof. Omitted for self-contained messages. */
   lutProof: SolanaLutProof.optional(),
@@ -273,8 +282,8 @@ export const SolanaSignRequest = z.object({
 
 /** POST /tron/sign-transaction — sign a raw Tron transaction */
 export const TronSignRequest = z.object({
-  address_n: z.array(z.number().int()).optional(),
-  addressNList: z.array(z.number().int()).optional(),
+  address_n: RawPath.optional(),
+  addressNList: RawPath.optional(),
   raw_tx: z.string().min(1),
   to_address: z.string().optional(),  // enables clear-sign on device
   amount: z.string().optional(),      // amount in SUN — enables clear-sign on device
@@ -282,8 +291,8 @@ export const TronSignRequest = z.object({
 
 /** POST /ton/sign-transaction — sign a raw TON transaction */
 export const TonSignRequest = z.object({
-  address_n: z.array(z.number().int()).optional(),
-  addressNList: z.array(z.number().int()).optional(),
+  address_n: RawPath.optional(),
+  addressNList: RawPath.optional(),
   raw_tx: z.string().min(1),
   to_address: z.string().optional(),  // enables clear-sign on device
   amount: z.string().optional(),      // amount in nanoTON — enables clear-sign on device
@@ -292,8 +301,8 @@ export const TonSignRequest = z.object({
 /** POST /hive/sign-message — Keychain signBuffer: sign SHA256(message bytes) on-device (fw 7.15.0+) */
 export const HiveSignMessageRequest = z.object({
   /** SLIP-0048 path; defaults to posting role m/48'/13'/4'/0'/0' (dApp login) */
-  address_n: z.array(z.number().int()).optional(),
-  addressNList: z.array(z.number().int()).optional(),
+  address_n: RawPath.optional(),
+  addressNList: RawPath.optional(),
   /** Message payload. Default: UTF-8 text. If is_text=false, hex (optional 0x). */
   message: z.string().min(1),
   is_text: z.boolean().optional(),
@@ -302,8 +311,8 @@ export const HiveSignMessageRequest = z.object({
 /** POST /hive/sign-operations — generic parsed-op signing over the device clear-sign op table (fw 7.15.0+) */
 export const HiveSignOperationsRequest = z.object({
   /** SLIP-0048 path; role auto-selected from op tier when omitted */
-  address_n: z.array(z.number().int()).optional(),
-  addressNList: z.array(z.number().int()).optional(),
+  address_n: RawPath.optional(),
+  addressNList: RawPath.optional(),
   /** condenser-style tuples: [["vote", {...}], ...] — max 4, single tier */
   operations: z.array(z.tuple([z.string(), z.record(z.string(), z.any())])).min(1).max(4),
   /**
@@ -322,8 +331,8 @@ export const HiveSignOperationsRequest = z.object({
 /** POST /hive/sign-transfer — Graphene transfer op, serialized + signed on-device (fw 7.15.0+) */
 export const HiveSignTransferRequest = z.object({
   /** SLIP-0048 path; defaults to active role m/48'/13'/1'/0'/0' */
-  address_n: z.array(z.number().int()).optional(),
-  addressNList: z.array(z.number().int()).optional(),
+  address_n: RawPath.optional(),
+  addressNList: RawPath.optional(),
   ref_block_num: z.number().int().min(0).max(0xffff),
   ref_block_prefix: z.number().int().min(0).max(0xffffffff),
   /** Unix seconds (TaPoS expiration) */
@@ -348,8 +357,8 @@ const HEX_SIG_65 = /^(0x)?[0-9a-fA-F]{130}$/
 
 /** POST /tron/sign-message — TIP-191 personal_sign */
 export const TronSignMessageRequest = z.object({
-  address_n: z.array(z.number().int()).optional(),
-  addressNList: z.array(z.number().int()).optional(),
+  address_n: RawPath.optional(),
+  addressNList: RawPath.optional(),
   /** Message payload. Default: encoded as UTF-8 bytes. If is_text=false,
    *  expect hex (with or without 0x prefix). */
   message: z.string().min(1),
@@ -372,8 +381,8 @@ export const TronVerifyMessageRequest = z.object({
 
 /** POST /tron/sign-typed-hash — TIP-712 hash mode */
 export const TronSignTypedHashRequest = z.object({
-  address_n: z.array(z.number().int()).optional(),
-  addressNList: z.array(z.number().int()).optional(),
+  address_n: RawPath.optional(),
+  addressNList: RawPath.optional(),
   /** 32-byte domainSeparator hash, hex (with or without 0x) */
   domain_separator_hash: z.string().regex(/^(0x)?[0-9a-fA-F]{64}$/),
   /** 32-byte message hash, hex; omit for primaryType=EIP712Domain */
@@ -382,8 +391,8 @@ export const TronSignTypedHashRequest = z.object({
 
 /** POST /ton/sign-message — bare Ed25519 (firmware fences behind AdvancedMode) */
 export const TonSignMessageRequest = z.object({
-  address_n: z.array(z.number().int()).optional(),
-  addressNList: z.array(z.number().int()).optional(),
+  address_n: RawPath.optional(),
+  addressNList: RawPath.optional(),
   /** Message payload. Default: encoded as UTF-8 bytes. If is_text=false,
    *  expect hex (with or without 0x prefix). */
   message: z.string().min(1),
@@ -394,8 +403,8 @@ export const TonSignMessageRequest = z.object({
 
 /** POST /solana/sign-offchain-message — domain-separated envelope */
 export const SolanaSignOffchainMessageRequest = z.object({
-  address_n: z.array(z.number().int()).optional(),
-  addressNList: z.array(z.number().int()).optional(),
+  address_n: RawPath.optional(),
+  addressNList: RawPath.optional(),
   /** Message payload. Default: encoded as UTF-8 bytes (max 1212 chars).
    *  If is_text=false, expect hex (max 2424 chars = 1212 bytes; with or
    *  without 0x prefix). 1212 is the spec ceiling for formats 0 and 1;
@@ -609,8 +618,8 @@ export const ClearSignArtifactRevokeRequest = z.object({ bundleHash: Hash32, rea
 
 /** POST /solana/sign-message — sign an arbitrary message (firmware type 754) */
 export const SolanaSignMessageRequest = z.object({
-  address_n: z.array(z.number().int()).optional(),
-  addressNList: z.array(z.number().int()).optional(),
+  address_n: RawPath.optional(),
+  addressNList: RawPath.optional(),
   message: z.string().min(1),
   show_display: z.boolean().optional(),
   /** The account the dapp believes it is signing with (base58). When present
@@ -683,12 +692,12 @@ export const SendCharacterRequest = z.object({
 export const ZcashInitRequest = z.object({
   seed_hex: z.string().optional(),
   from_device: z.boolean().optional(),
-  account: z.number().int().min(0).optional(),
+  account: z.number().int().min(0).max(MAX_ACCOUNT_INDEX).optional(),
 }).passthrough()
 
 /** POST /api/zcash/shielded/display-address */
 export const ZcashDisplayAddressRequest = z.object({
-  account: z.number().int().min(0).optional(),
+  account: z.number().int().min(0).max(MAX_ACCOUNT_INDEX).optional(),
 }).passthrough()
 
 /** POST /api/zcash/shielded/scan */
@@ -703,7 +712,7 @@ export const ZcashScanRequest = z.object({
 export const ZcashBuildRequest = z.object({
   recipient: z.string().min(1),
   amount: z.number().positive().max(2_100_000_000_000_000),
-  account: z.number().int().min(0).optional(),
+  account: z.number().int().min(0).max(MAX_ACCOUNT_INDEX).optional(),
   memo: z.string().optional(),
 }).passthrough()
 
@@ -720,7 +729,7 @@ export const ZcashBroadcastRequest = z.object({
 /** POST /api/pubkeys/batch */
 export const BatchPubkeysRequest = z.object({
   paths: z.array(z.object({
-    address_n: z.array(z.number().int()),
+    address_n: RawPath,
     type: z.string().optional(),
     script_type: z.string().optional(),
     coin: z.string().optional(),
@@ -852,7 +861,7 @@ export const SwapQuoteHeadlessRequest = z.object({
   amount: SwapAmount,
   fromAddress: z.string().min(1),
   toAddress: z.string().min(1),
-  fromEvmAddressIndex: z.number().int().min(0).max(2147483647).optional(),
+  fromEvmAddressIndex: z.number().int().min(0).max(MAX_ACCOUNT_INDEX).optional(),
   slippageBps: z.number().int().min(10).max(5000).optional(),
   isMax: z.boolean().optional(),
   feeLevel: z.number().optional(),
@@ -876,7 +885,7 @@ export const SwapExecuteHeadlessRequest = z.object({
   feeLevel: z.number().optional(),
   fromAddressOverride: z.string().optional(),
   toAddressOverride: z.string().optional(),
-  fromEvmAddressIndex: z.number().int().min(0).max(2147483647).optional(),
+  fromEvmAddressIndex: z.number().int().min(0).max(MAX_ACCOUNT_INDEX).optional(),
   integration: z.string().optional(),
   swapper: z.string().optional(),
   tokenDecimals: z.number().optional(),
