@@ -38,7 +38,9 @@ import { resolveStoredEnsContact } from './db'
 import { previewCertificationEntries, selectCertificationContacts } from './addressbook-clearsign'
 import { singleFlight } from './single-flight'
 import { PasswordBank } from './password-bank'
-import { withKeepKeyFido, readStatus, runReset } from './passkeys'
+import { withKeepKeyFido, readStatus, runReset, waitForReplug } from './passkeys'
+import { setFidoPin, listPasskeys, deletePasskey } from './passkeys-manage'
+import { resolveLabels, cleanLabel } from './passkey-labels'
 import { passwordDeviceCipher } from './password-device'
 import { savePasswordBackup } from './password-backup'
 import { PasswordBex } from './password-bex'
@@ -1814,6 +1816,11 @@ function getOrCreateWcManager(): WalletConnectManager {
 		},
 	})
 	return wcManager
+}
+
+/** Names the user gave passkey sites, keyed by SHA-256(rpId) (the KeepKey stores only the hash). */
+function passkeyUserLabels(): Record<string, string> {
+	try { const v = JSON.parse(getSetting('passkey_labels') || '{}'); return v && typeof v === 'object' ? v : {} } catch { return {} }
 }
 
 function getAppSettings() {
@@ -8955,9 +8962,39 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				return getAppSettings()
 			},
 			passkeysStatus: async () => withKeepKeyFido(readStatus),
-			// Reset holds Desktop's own device traffic off: a wallet request mid-prompt would replace the
-			// device screen, and the firmware then cancels the reset (by design).
-			passkeysReset: async () => engine.withDeviceOperation(() => withKeepKeyFido(hid => runReset(hid)), { rejectIfBusy: true, origin: 'desktop' }),
+			passkeysReset: async (params) => {
+				// CTAP allows reset only within 10 s of power-up. Try now; if refused, the UI asks for a replug
+				// and calls again with waitForReplug, which sends the reset the moment the device is back.
+				// The first attempt holds Desktop's device traffic off (a wallet request mid-prompt would cancel
+				// the confirmation); the replug path cannot: the device is re-enumerating.
+				if (params?.waitForReplug) {
+					await waitForReplug()
+					for (let attempt = 0; ; attempt++) {
+						try { return await withKeepKeyFido(hid => runReset(hid)) }
+						catch (e: any) { if (attempt >= 8 || e?.code === 'denied' || e?.code === 'replug') throw e; await new Promise(r => setTimeout(r, 400)) }
+					}
+				}
+				try { return await engine.withDeviceOperation(() => withKeepKeyFido(hid => runReset(hid)), { rejectIfBusy: true, origin: 'desktop' }) }
+				catch (e: any) { if (e?.code === 'replug') return { reset: false, replug: true }; throw e }
+			},
+			// The security-key PIN travels only in these calls, is used once and is never stored or logged.
+			passkeysSetPin: async (params) => { await withKeepKeyFido(hid => setFidoPin(hid, String(params?.pin ?? ''))); return { ok: true as const } },
+			passkeysList: async (params) => {
+				const inv = await withKeepKeyFido(hid => listPasskeys(hid, String(params?.pin ?? '')))
+				const labels = resolveLabels(inv.slots.map(x => x.rpHash), passkeyUserLabels())
+				return { used: inv.used, remaining: inv.remaining, slots: inv.slots.map(x => ({ rpHash: x.rpHash, userName: x.userName, credentialId: x.credentialId, label: labels[x.rpHash].label, labelSource: labels[x.rpHash].source })) }
+			},
+			passkeysDelete: async (params) => {
+				await engine.withDeviceOperation(() => withKeepKeyFido(hid => deletePasskey(hid, String(params?.pin ?? ''), String(params?.credentialId ?? ''))), { rejectIfBusy: true, origin: 'desktop' })
+				return { ok: true as const }
+			},
+			passkeysSetLabel: async (params) => {
+				if (!/^[0-9a-f]{64}$/.test(String(params?.rpHash))) throw new Error('invalid site hash')
+				const labels = passkeyUserLabels(); const label = cleanLabel(params.label)
+				if (label) labels[params.rpHash] = label; else delete labels[params.rpHash]
+				setSetting('passkey_labels', JSON.stringify(labels))
+				return { ok: true as const }
+			},
 			passwordBankStatus: async () => passwordBank.view(),
 			passwordBankUnlock: async (params) => passwordBank.unlock(params?.create === true),
 			passwordBankLock: async () => { passwordAgent.cancelPending(); passwordBank.lock(); return passwordBank.view() },
