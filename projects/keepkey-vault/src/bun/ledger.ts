@@ -19,6 +19,7 @@
 import { getDb, getCachedBalances } from './db'
 import { CHAINS } from '../shared/chains'
 import type { ChainBalance } from '../shared/types'
+import { csvCell, csvNumber } from './csv'
 
 export type AccountType = 'asset' | 'equity' | 'income' | 'expense'
 export type EntryType = 'reconcile' | 'receive' | 'send' | 'swap' | 'fee' | 'opening' | 'manual'
@@ -894,7 +895,12 @@ export function exportLedgerCsv(deviceId: string): string {
 
   for (const r of rows) {
     const date = new Date(r.created_at).toISOString()
-    const csvRow = [date, r.id, r.txid ?? '', r.entry_type, `"${r.description.replace(/"/g, '""')}"`, r.accountId, r.accountType, r.asset, r.amount.toFixed(12)].join(',')
+    // Every text cell is quoted and formula-neutralized: an asset or txid with a comma shifted the columns, and a
+    // spam token symbol like "=HYPERLINK(...)" ran as a formula when the file was opened in Excel (audit v6 A6).
+    const csvRow = [
+      ...[date, r.id, r.txid ?? '', r.entry_type, r.description, r.accountId, r.accountType, r.asset].map(csvCell),
+      csvNumber(r.amount.toFixed(12)),
+    ].join(',')
     lines.push(csvRow)
   }
 
