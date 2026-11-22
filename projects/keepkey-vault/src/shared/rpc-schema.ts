@@ -7,7 +7,7 @@ import type { SafeAccount, SafeContext, SafeCreateParams, SafeProposal, SafeTran
 import type { VaultIdentity } from './vault-identity'
 import type { MoneroNodeStatus } from './monero-node'
 import type { VaultPortfolio } from './vault-portfolio'
-import type {ProviderRefreshReason,ProviderUsageStatus} from './provider-refresh'
+import type {ProviderRefreshReason} from './provider-refresh'
 import type { VaultAssetRequest, VaultAssetAccount } from './vault-asset-account'
 import type { ZcashShieldedBalance } from './zcash-privacy'
 import type { ClearSignReport } from './clearsign-report'
@@ -173,7 +173,6 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
 
       // ── Pioneer integration ─────────────────────────────────────────
       getBalances: { params: { forceRefresh?: boolean; swapDestCaips?: string[]; userInitiated?: boolean; refreshReason?: ProviderRefreshReason }; response: ChainBalance[] }
-      getProviderUsage: {params:void;response:ProviderUsageStatus|null}
       getSyncDiagnostics: {params:void;response:{balanceSync:SyncProgress|null;recentSyncs:SyncProgress[];connectivity:Array<{online:boolean;durationMs:number;checkedAt:number;status?:number;reason?:string}>}}
       /** forceRefresh defaults to TRUE (user-clicked refresh / tx pushes must bypass
        *  Pioneer's cache). Pass false only when Pioneer's cache is known-fresh. */
