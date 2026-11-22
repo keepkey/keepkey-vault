@@ -248,5 +248,6 @@
   "m1643fcfa": "Demasiado grande para un QR estático de Electrum; elige UR o BBQr animado",
   "m9a5ef61b": "Demasiados fotogramas BBQr",
   "m4078a8ec": "QR de la transacción firmada",
-  "m9054dd5f": "QR del PSBT firmado"
+  "m9054dd5f": "QR del PSBT firmado",
+  "m976ece5d": "Llamada a contrato"
 }

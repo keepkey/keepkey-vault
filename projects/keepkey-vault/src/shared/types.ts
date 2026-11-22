@@ -2690,7 +2690,9 @@ export type SwapUiCommand =
 
 // ── Recent Activity types ──────────────────────────────────────────────
 
-export type ActivityType = 'send' | 'receive' | 'swap' | 'sign' | 'message' | 'approve' | 'shield' | 'unshield'
+/** 'contract': an on-chain call that moved no native value (a contract call,
+ *  a token-only interaction or a 0-value transfer), seen by the history scan. */
+export type ActivityType = 'send' | 'receive' | 'swap' | 'sign' | 'message' | 'approve' | 'shield' | 'unshield' | 'contract'
 export type ActivitySource = 'app' | 'api' | 'scan'
 
 export interface RecentActivity {

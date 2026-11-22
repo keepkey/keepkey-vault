@@ -2535,5 +2535,6 @@
   "m76fc465e": "Something went wrong",
   "m49e02b47": "This KeepKey firmware cannot list or delete single passkeys. Update to firmware 7.17 RC4 or newer.",
   "m93f568f0": "Unknown site",
-  "m15f3cd9b": "Unplug your KeepKey and plug it back in, then hold the button when it asks."
+  "m15f3cd9b": "Unplug your KeepKey and plug it back in, then hold the button when it asks.",
+  "m976ece5d": "Contract call"
 }

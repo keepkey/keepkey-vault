@@ -238,5 +238,6 @@
   "m1643fcfa": "Zu groß für einen statischen Electrum-QR; wählen Sie animiertes UR oder BBQr",
   "m9a5ef61b": "Zu viele BBQr-Bilder",
   "m4078a8ec": "QR der signierten Transaktion",
-  "m9054dd5f": "QR der signierten PSBT"
+  "m9054dd5f": "QR der signierten PSBT",
+  "m976ece5d": "Vertragsaufruf"
 }

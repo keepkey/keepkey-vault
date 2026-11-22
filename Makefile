@@ -537,6 +537,7 @@ test-unit:
 	cd $(PROJECT_DIR) && bun test __tests__/swap-copy-i18n.test.ts
 	cd $(PROJECT_DIR) && bun test __tests__/activity-not-sent.test.ts __tests__/activity-not-sent-ui.test.ts
 	cd $(PROJECT_DIR) && bun test __tests__/thor-maya-history-fee.test.ts
+	cd $(PROJECT_DIR) && bun test __tests__/activity-receive-fee.test.ts
 	cd $(PROJECT_DIR) && bun test src/mainview/lib/effective-balance.test.ts
 	cd $(PROJECT_DIR) && bun test __tests__/balance-tx-mark.test.ts
 	cd $(PROJECT_DIR) && bun test __tests__/balance-cache-policy.test.ts __tests__/balance-observation.test.ts __tests__/dashboard-balance-policy.test.ts __tests__/evm-autodiscovery-policy.test.ts __tests__/wallet-watch-cache-integration.test.ts
