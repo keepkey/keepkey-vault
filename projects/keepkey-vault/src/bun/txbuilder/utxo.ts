@@ -6,6 +6,7 @@
  */
 import coinSelect from 'coinselect'
 import { selectZcashCoins } from './zcash-coinselect'
+import { changeDustLimit, foldDustChange } from './utxo-dust'
 // @ts-ignore — coinselect/split has no types
 import coinSelectSplit from 'coinselect/split'
 import { bech32, bech32m } from '@scure/base'
@@ -654,6 +655,19 @@ export async function buildUtxoTx(
         throw new Error(`Insufficient ZEC to cover ZIP-317 minimum fee (${zip317Fee} zats for ${logicalActions} actions). Try sending a slightly smaller amount.`)
       }
       console.log(`${TAG} ZEC: enforced ZIP-317 fee = ${fee} zats (${logicalActions} actions, min ${zip317Fee})`)
+    }
+  }
+
+  // Change below the node's dust limit makes the whole tx non-standard, and
+  // coinselect's own threshold (148 × rate) sits under it at low rates. Zcash
+  // selection already keeps change at 5000 zats or more.
+  if (chain.id !== 'zcash') {
+    const dustLimit = changeDustLimit(chain.id, scriptType)
+    const folded = foldDustChange(outputs, fee, dustLimit)
+    if (folded.folded > 0) {
+      console.log(`${TAG} Change of ${folded.folded} sats is under the ${dustLimit}-sat dust limit — added to the fee`)
+      outputs = folded.outputs
+      fee = folded.fee
     }
   }
 
