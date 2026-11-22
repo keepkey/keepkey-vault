@@ -2416,5 +2416,21 @@
   "m4862881e": "Parte {{current}} de {{total}} · Continue escaneando até concluir",
   "m65451a82": "O QR de transação do Electrum exige uma PSBT ou uma transação",
   "m1643fcfa": "Grande demais para um QR estático do Electrum; escolha UR ou BBQr animado",
-  "m9a5ef61b": "Partes BBQr demais"
+  "m9a5ef61b": "Partes BBQr demais",
+  "mc98c534a": "Não foi possível ler este PSBT",
+  "m163a0c4d": "O PSBT tem mais de 1 MB e foi recusado",
+  "mb1d40f1": "Falha ao assinar",
+  "m7cbcdcdb": "O valor das entradas não foi verificado: este arquivo não traz a transação anterior, então a taxa é aceita com base apenas nele.",
+  "m252087d5": "As entradas vêm de mais de uma conta. A KeepKey vai mostrar todas as saídas, inclusive o troco.",
+  "mcee8c793": "Uma saída volta para esta carteira, mas não é um troco padrão. A KeepKey mostra o endereço dela.",
+  "mbadaf97d": "Sem saída de troco: tudo o que não está nas saídas abaixo vai para a taxa.",
+  "m56d7039d": "Taxa alta: {{percent}}% do valor enviado.",
+  "mbd3ae6f8": "O locktime {{locktime}} é uma data e hora: a KeepKey não mostra isso.",
+  "mdea49fc6": "Versão de transação incomum: {{version}}.",
+  "mce10953e": "troco, oculto na KeepKey · {{path}}",
+  "m5cf03800": "sua ({{path}}) · a KeepKey mostra o endereço",
+  "md81a8650": "{{percent}}% do enviado",
+  "m91b44af1": "Assinado. Quórum atingido; devolva o PSBT ao seu coordenador ou transmita a transação completa.",
+  "m40e69708": "Assinado. Carregue o arquivo de volta na sua carteira ou transmita a transação bruta.",
+  "m9e8d3e6b": "Texto colado"
 }

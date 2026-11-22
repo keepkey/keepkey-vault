@@ -2535,5 +2535,21 @@
   "m76fc465e": "Something went wrong",
   "m49e02b47": "This KeepKey firmware cannot list or delete single passkeys. Update to firmware 7.17 RC4 or newer.",
   "m93f568f0": "Unknown site",
-  "m15f3cd9b": "Unplug your KeepKey and plug it back in, then hold the button when it asks."
+  "m15f3cd9b": "Unplug your KeepKey and plug it back in, then hold the button when it asks.",
+  "mc98c534a": "Could not read this PSBT",
+  "m163a0c4d": "PSBT is larger than 1 MB, refusing",
+  "mb1d40f1": "Signing failed",
+  "m7cbcdcdb": "The input amount is not verified: this file has no previous transaction, so the fee is taken on trust from it.",
+  "m252087d5": "Inputs come from more than one account. The KeepKey will show every output, change included.",
+  "mcee8c793": "An output pays back to this wallet but is not standard change. The KeepKey shows its address.",
+  "mbadaf97d": "No change output: everything except the outputs below goes to the fee.",
+  "m56d7039d": "High fee: {{percent}}% of the amount sent.",
+  "mbd3ae6f8": "Locktime {{locktime}} is a timestamp: the KeepKey does not show this.",
+  "mdea49fc6": "Unusual transaction version {{version}}.",
+  "mce10953e": "change, hidden on KeepKey · {{path}}",
+  "m5cf03800": "yours ({{path}}) · KeepKey shows address",
+  "md81a8650": "{{percent}}% of sent",
+  "m91b44af1": "Signed. Quorum reached; return the PSBT to your coordinator or broadcast the completed transaction.",
+  "m40e69708": "Signed. Load the file back into your wallet, or broadcast the raw transaction.",
+  "m9e8d3e6b": "Pasted text"
 }
