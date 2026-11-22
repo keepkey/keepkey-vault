@@ -491,31 +491,28 @@ export function MoneroSendSection({ monero, client, privateMode = false }: { mon
 	)
 }
 
-/** The XMR row in the Dashboard's chain list. Opens the standard asset page; fiat says "not included". */
-export function MoneroChainRow({ chain, iconSrc, privateMode, onOpen, client }: { chain: ChainDef; iconSrc: string; privateMode: boolean; onOpen: () => void; client?: MoneroClient }) {
-	const uiText = useUiTranslation()
-	const monero = useMoneroStatus(true, client)
-	const view = useMoneroView(monero)
-	const label = useMoneroStateLabel(view)
+/** The XMR row in the Dashboard's chain list: same look as every other chain row. Opens the standard asset page. */
+export function MoneroChainRow({ chain, iconSrc, privateMode, onOpen, client, view: given, usd }: { chain: ChainDef; iconSrc: string; privateMode: boolean; onOpen: () => void; client?: MoneroClient; view?: MoneroBalanceView; usd?: number }) {
+	const own = useMoneroView(useMoneroStatus(!given, client))
+	const view = given ?? own
 	const balance = view.lastKnown || view.spendVerified || view.balanceAtomic === "0" ? view.balanceAtomic : null
+	const hasBalance = balance !== null && balance !== "0"
 	return (
 		<Box data-monero-row="" as="button" onClick={onOpen} w="100%" textAlign="left" p="2.5" mb="1.5" borderRadius="lg" bg="transparent"
 			border="1px solid transparent" _hover={{ bg: "kk.cardBg", borderColor: `${chain.color}50` }} cursor="pointer" transition="all 0.15s"
-			title={uiText("XMR has no price source here, so it is not included in the portfolio total.")}>
+			opacity={hasBalance || balance === null ? 1 : 0.55}>
 			<Flex align="center" gap="3">
-				<Image src={iconSrc} alt={chain.symbol} w="32px" h="32px" borderRadius="full" flexShrink={0} />
+				<Image src={iconSrc} alt={chain.symbol} w="32px" h="32px" borderRadius="full" flexShrink={0} bg="var(--ink-2)" boxShadow="0 0 0 1px var(--line)" />
 				<Box flex="1" minW="0">
 					<Flex align="baseline" justify="space-between" gap="2">
 						<Text fontSize="14px" fontWeight="600" color="var(--text-0)" lineHeight="1.2" truncate>{chain.coin}</Text>
-						<Text data-monero-row-fiat="" fontSize="11px" color="var(--text-3)" lineHeight="1.2" flexShrink={0}>{uiText("not included")}</Text>
+						{!!usd && usd > 0 && <Text data-monero-row-fiat="" fontSize="14px" color="var(--text-0)" fontWeight="500" lineHeight="1.2" letterSpacing="-0.01em" flexShrink={0}>
+							{privateMode ? "••••" : `$${usd.toLocaleString(getNumberLocale(), { maximumFractionDigits: 2 })}`}
+						</Text>}
 					</Flex>
-					<Flex align="baseline" justify="space-between" gap="2" mt="0.5">
-						<Text data-monero-row-balance="" fontSize="12px" color="var(--text-2)" lineHeight="1.3" truncate>
-							{balance === null ? `— ${chain.symbol}` : privateMode ? "••••" : `${formatXmrShort(balance)} ${chain.symbol}`}
-						</Text>
-						{(view.lastKnown || view.state !== "ready" || (view.restoreHeight ?? 0) > 0 || balance === null) && <Text data-monero-row-state={view.state} fontSize="10px" color={view.state === "unreachable" ? "var(--gold)" : "var(--text-3)"} flexShrink={0}>{label}</Text>}
-					</Flex>
-					<MoneroFreshness view={view} />
+					<Text data-monero-row-balance="" fontSize="12px" color="var(--text-2)" lineHeight="1.3" mt="0.5" truncate>
+						{balance === null ? `— ${chain.symbol}` : privateMode ? "••••" : `${formatXmrShort(balance)} ${chain.symbol}`}
+					</Text>
 				</Box>
 			</Flex>
 		</Box>

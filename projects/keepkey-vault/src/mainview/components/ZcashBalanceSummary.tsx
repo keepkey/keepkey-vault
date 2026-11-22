@@ -1,6 +1,6 @@
 import { getNumberLocale } from "../lib/number-locale"
 import { useCallback, useEffect, useState } from 'react'
-import { Box, Flex, Text, chakra } from '@chakra-ui/react'
+import { Flex, Text, chakra } from '@chakra-ui/react'
 import { useTranslation } from 'react-i18next'
 import { rpcRequest, onRpcMessage } from '../lib/rpc'
 import { formatBalance } from '../lib/formatting'
@@ -27,6 +27,7 @@ export function ZcashBalanceSummary({ transparent, enabled, supported, watchOnly
   const [balance, setBalance] = useState<ZcashShieldedBalance | null>(null)
   const [scanActive, setScanActive] = useState(false)
   const [failed, setFailed] = useState(false)
+  const [transparentPendingZat, setTransparentPendingZat] = useState(0)
   const [revision, setRevision] = useState(0)
   const canOpen = enabled && supported && !watchOnly
   const refresh = useCallback(() => setRevision(n => n + 1), [])
@@ -37,8 +38,11 @@ export function ZcashBalanceSummary({ transparent, enabled, supported, watchOnly
   }), [refresh])
   useEffect(() => {
     let cancelled = false
-    setStatus(null); setBalance(null); setFailed(false)
+    setStatus(null); setBalance(null); setFailed(false); setTransparentPendingZat(0)
     if (!canOpen) return
+    // Public funds still maturing (e.g. a fresh unshield) are not in the confirmed balance.
+    void rpcRequest<{ pendingZat: number }>('zcashTransparentBalance', undefined, 20000)
+      .then(r => { if (!cancelled && Number.isFinite(r.pendingZat)) setTransparentPendingZat(r.pendingZat) }).catch(() => {})
     void (async () => {
       try {
         const next = await rpcRequest<PrivacyStatus>('zcashShieldedStatus', undefined, 10000)
@@ -60,30 +64,35 @@ export function ZcashBalanceSummary({ transparent, enabled, supported, watchOnly
     : status?.synced_to != null ? t('zcashLastScanned', { height: status.synced_to.toLocaleString(getNumberLocale()) })
     : t('zcashPrivateScanNeeded')
   const hint = hideScanHint && !failed ? '' : fullHint
+  // Public = orange (visible on chain), Private = teal (hidden); the selected pool gets a tinted fill.
+  const PUBLIC = '#f0883e', PRIVATE = 'var(--teal)'
+  const tile = (selected: boolean, disabled: boolean, color: string, tint: string) => ({
+    type: 'button' as const, textAlign: 'left' as const, px: '3.5', py: '2', borderRadius: '12px', minW: '150px',
+    border: '1px solid', borderColor: selected ? color : 'var(--line)', borderLeftWidth: '3px', borderLeftColor: color,
+    bg: selected ? tint : 'transparent', opacity: disabled ? 0.5 : selected ? 1 : 0.8, cursor: disabled ? 'not-allowed' : 'pointer',
+    _hover: disabled ? {} : { opacity: 1, bg: tint }, _focusVisible: { outline: `2px solid ${color}`, outlineOffset: '2px' },
+  })
+  const label = (text: string, color: string, selected: boolean) => (
+    <Text fontSize="11px" fontWeight="600" letterSpacing="0.04em" textTransform="uppercase" color={color}>{text}{selected ? ' ✓' : ''}</Text>
+  )
+  // Header: both pools side by side, each one a selector.
   return (
-    <Box mb="4" role="group" aria-label={t('zcashBalances')}>
-      <Flex gap="2" wrap="wrap">
-        <chakra.button type="button" flex="1" minW="200px" textAlign="left" p="3.5" borderRadius="12px"
-          aria-pressed={pool === 'transparent'} aria-label={t('zcashTransparentPublic')}
-          border="1px solid" borderColor={pool === 'transparent' ? 'var(--gold)' : 'var(--line)'}
-          bg={pool === 'transparent' ? 'rgba(233,196,106,0.05)' : 'transparent'} cursor="pointer"
-          _hover={{ borderColor: 'var(--line-2)' }} _focusVisible={{ outline: '2px solid var(--gold)', outlineOffset: '2px' }}
+    <Flex direction="column" align="flex-end" gap="1.5" role="group" aria-label={t('zcashBalances')} css={{ fontVariantNumeric: 'tabular-nums' }}>
+      <Flex gap="2">
+        <chakra.button {...tile(pool === 'transparent', false, PUBLIC, 'rgba(240,136,62,0.10)')} aria-pressed={pool === 'transparent'} aria-label={t('zcashTransparentPublic')}
           onClick={() => onSelectPool('transparent')}>
-          <Text fontSize="12px" fontWeight="600" color="var(--text-1)">{t('zcashTransparentPublic')}{pool === 'transparent' ? ' · ✓' : ''}</Text>
-          <Text fontFamily="mono" fontSize="18px" color="var(--text-0)">{transparent == null ? '—' : formatBalance(transparent)} ZEC</Text>
+          {label(t('zcashTransparentPublic'), PUBLIC, pool === 'transparent')}
+          <Text fontFamily="mono" fontSize="18px" fontWeight="600" color="var(--text-0)" whiteSpace="nowrap">{transparent == null ? '—' : formatBalance(transparent)} ZEC</Text>
+          {transparentPendingZat > 0 && <Text fontSize="11px" color={PUBLIC}>{t('zcashPrivatePending', { amount: formatBalance(String(transparentPendingZat / 1e8)) })}</Text>}
         </chakra.button>
-        <chakra.button type="button" flex="1" minW="200px" textAlign="left" p="3.5" borderRadius="12px"
-          aria-pressed={pool === 'shielded'} aria-label={t('zcashShieldedPrivate')} disabled={!canOpen}
-          border="1px solid" borderColor={pool === 'shielded' ? 'var(--gold)' : 'var(--line)'}
-          bg={pool === 'shielded' ? 'rgba(233,196,106,0.05)' : 'transparent'} cursor={canOpen ? 'pointer' : 'not-allowed'}
-          _hover={canOpen ? { borderColor: 'var(--line-2)' } : {}} _focusVisible={{ outline: '2px solid var(--gold)', outlineOffset: '2px' }}
+        <chakra.button {...tile(pool === 'shielded', !canOpen, PRIVATE, 'rgba(45,212,191,0.10)')} aria-pressed={pool === 'shielded'} aria-label={t('zcashShieldedPrivate')} disabled={!canOpen}
           onClick={() => onSelectPool('shielded')}>
-          <Text fontSize="12px" fontWeight="600" color="var(--text-1)">{t('zcashShieldedPrivate')}{pool === 'shielded' ? ' · ✓' : ''}</Text>
-          <Text fontFamily="mono" fontSize="18px" color="var(--text-0)">{amounts ? formatBalance(String(amounts.available / 1e8)) : '—'} ZEC</Text>
-          {amounts && amounts.pending > 0 && <Text fontSize="11px" color="var(--gold)">{t('zcashPrivatePending', { amount: formatBalance(String(amounts.pending / 1e8)) })}</Text>}
+          {label(t('zcashShieldedPrivate'), PRIVATE, pool === 'shielded')}
+          <Text fontFamily="mono" fontSize="18px" fontWeight="600" color="var(--text-0)" whiteSpace="nowrap">{amounts ? formatBalance(String(amounts.available / 1e8)) : '—'} ZEC</Text>
+          {amounts && amounts.pending > 0 && <Text fontSize="11px" color={PRIVATE}>{t('zcashPrivatePending', { amount: formatBalance(String(amounts.pending / 1e8)) })}</Text>}
         </chakra.button>
       </Flex>
-      {hint && <Text fontSize="11px" color={failed || !amounts ? 'var(--gold)' : 'var(--text-2)'} mt="2" aria-live="polite">{hint}</Text>}
-    </Box>
+      {hint && <Text fontSize="11px" color={failed || !amounts ? 'var(--gold)' : 'var(--text-2)'} aria-live="polite">{hint}</Text>}
+    </Flex>
   )
 }

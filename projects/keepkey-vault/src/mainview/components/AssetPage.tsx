@@ -1276,7 +1276,13 @@ function PersonalAssetPage({ chain, balance, balanceLoading = false, onBack, fir
 						)}
 					</Flex>
 
-					{isZcash ? null : selectedToken ? (
+					{isZcash ? ((!selectedToken || isShieldedToken) ? <Box flexShrink={0} display={{ base: "none", sm: "block" }}><ZcashBalanceSummary
+					transparent={activeBalance?.balance} enabled={zcashPrivacyEnabled} supported={!!zcashShieldedSupported}
+					watchOnly={watchOnly} refreshNonce={refreshNonce}
+					pool={shieldedSelected ? 'shielded' : 'transparent'}
+					hideScanHint={shieldedSelected && !watchOnly && zcashPrivacyEnabled && !!zcashShieldedSupported}
+					onSelectPool={pool => { setZcashPool(pool); setSelectedToken(null); if (view === 'privacy') setView('receive') }}
+				/></Box> : null) : selectedToken ? (
 						<Flex direction="column" align="flex-end" gap="1" flexShrink={0} display={{ base: "none", sm: "flex" }}>
 							<Text fontFamily="mono" fontSize={{ base: "16px", md: "20px" }} fontWeight="500" color="var(--text-0)" letterSpacing="0.01em" lineHeight="1.2">
 								{formatBalance(selectedToken.balance)}
@@ -1530,13 +1536,6 @@ function PersonalAssetPage({ chain, balance, balanceLoading = false, onBack, fir
 				{/* Account selector now lives inline with the action pills above
 				    (per the design study). Original duplicate block removed. */}
 
-				{isZcash && (!selectedToken || isShieldedToken) && <ZcashBalanceSummary
-					transparent={activeBalance?.balance} enabled={zcashPrivacyEnabled} supported={!!zcashShieldedSupported}
-					watchOnly={watchOnly} refreshNonce={refreshNonce}
-					pool={shieldedSelected ? 'shielded' : 'transparent'}
-					hideScanHint={shieldedSelected && !watchOnly && zcashPrivacyEnabled && !!zcashShieldedSupported}
-					onSelectPool={pool => { setZcashPool(pool); setSelectedToken(null); if (view === 'privacy') setView('receive') }}
-				/>}
 
 				{/* Content */}
 				{isMonero && <Box mb="3"><MoneroNodePanel compact /></Box>}

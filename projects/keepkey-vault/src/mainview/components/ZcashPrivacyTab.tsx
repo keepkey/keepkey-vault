@@ -786,7 +786,6 @@ export function ZcashPrivacyTab({ initialPage, initialSection, embedded = false,
 		return Math.max(0, transparentBalanceZat - SHIELD_FEE_ZAT)
 	}, [transparentBalanceZat, maxShieldZat])
 
-	const recentIncoming = useMemo(() => [...transactions].sort((a, b) => b.block_height - a.block_height || b.id - a.id).slice(0, 5), [transactions])
 	const filteredTxs = useMemo(() => {
 		switch (historyFilter) {
 			case "received": return transactions.filter(tx => !tx.is_spent)
@@ -1168,15 +1167,50 @@ export function ZcashPrivacyTab({ initialPage, initialSection, embedded = false,
 				<section>
 					<div className="page-head">
 						<h2>{uiText("Shield & Unshield")}</h2>
-						<p>{uiText("Move ZEC between your transparent and private balances. Unshielding pays a public address, yours or someone else’s.")}</p>
+						<p>{uiText("Move ZEC between your public and private balances.")}</p>
 						<DocsLink href={watch('zec-04-shield-sync')} label={uiText("Watch: shield, unshield and sync")} />
 					</div>
 					{balance && onTheWay > 0 && <MaturingBanner zat={onTheWay} confirmations={balance.min_confirmations ?? 10} />}
 
-					<Flex gap="1" p="3px" mb="4" borderRadius="10px" border="1px solid var(--line)" w="fit-content" role="group" aria-label={uiText("Direction")}>
-						<Button size="sm" variant={direction === "shield" ? "solid" : "ghost"} aria-pressed={direction === "shield"} onClick={() => setDirection("shield")}>{uiText("Shield → private")}</Button>
-						<Button size="sm" variant={direction === "unshield" ? "solid" : "ghost"} aria-pressed={direction === "unshield"} onClick={() => setDirection("unshield")}>{uiText("Unshield → public")}</Button>
-					</Flex>
+					{(() => {
+						const toPrivate = direction === "shield"
+						const pubAmt = transparentBalanceLoading ? "…" : transparentBalanceZat == null ? "—" : formatZec(transparentBalanceZat)
+						const privAmt = balance ? formatZec(deshieldMaxZatoshis) : "—"
+						const node = (kind: "pub" | "priv") => {
+							const isPriv = kind === "priv"
+							const active = isPriv === !toPrivate // source side is the lit one
+							const color = isPriv ? "var(--zk-gold)" : "var(--zk-copper)"
+							return (
+								<Box flex="1" p="4" borderRadius="14px" bg="var(--ink-0)" textAlign="center"
+									border={`1px solid ${active ? color : "var(--line)"}`} opacity={active ? 1 : 0.7}>
+									<Flex w="40px" h="40px" mx="auto" align="center" justify="center" borderRadius="12px" color={color}
+										bg={isPriv ? "rgba(245,197,66,0.10)" : "rgba(217,119,87,0.10)"} border={`1px solid ${isPriv ? "rgba(245,197,66,0.28)" : "rgba(217,119,87,0.28)"}`}>
+										<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+											{isPriv
+												? <><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" /><path d="M9 12l2 2 4-4" /></>
+												: <><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8S1 12 1 12z" /><circle cx="12" cy="12" r="3" /></>}
+										</svg>
+									</Flex>
+									<Text fontSize="13px" fontWeight="600" mt="1" color={color}>{isPriv ? uiText("Private") : uiText("Public")}</Text>
+									<Text fontSize="11px" color="var(--text-2)">{isPriv ? uiText("Shielded balance") : uiText("Transparent t-addr")}</Text>
+									<Text fontFamily="var(--zk-font-mono)" fontSize="15px" mt="2" color="var(--zk-fg)">{isPriv ? privAmt : pubAmt} ZEC</Text>
+									<Text fontSize="10px" color="var(--text-2)" mt="1">{isPriv ? uiText("Hidden on chain") : uiText("Visible on chain")}</Text>
+								</Box>
+							)
+						}
+						return (
+							<Flex align="center" gap="3" mb="5" role="group" aria-label={uiText("Direction")}>
+								{node("pub")}
+								<Button size="sm" variant="outline" borderRadius="full" w="44px" h="44px" p="0" flexShrink={0}
+									title={uiText("Flip direction")} aria-label={uiText("Flip direction")}
+									onClick={() => setDirection(toPrivate ? "unshield" : "shield")}
+									color={toPrivate ? "var(--zk-gold)" : "var(--zk-copper)"}>
+									{toPrivate ? "→" : "←"}
+								</Button>
+								{node("priv")}
+							</Flex>
+						)
+					})()}
 
 					<div className="form-page">
 						{direction === "shield" && <div className="card" ref={shieldFormRef}>
@@ -1260,6 +1294,16 @@ export function ZcashPrivacyTab({ initialPage, initialSection, embedded = false,
 								<div className="field-grid">
 									<div className="field">
 										<span className="lbl">{uiText("To")}</span>
+										{myTransparentAddr && (
+											<>
+												<button className="max" aria-pressed={deshieldRecipient === myTransparentAddr}
+													onClick={() => setDeshieldRecipient(myTransparentAddr)}
+													title={`Your own t-addr: ${myTransparentAddr}`}>{uiText("My public address")}</button>
+												<button className="max" aria-pressed={deshieldRecipient !== myTransparentAddr}
+													onClick={() => setDeshieldRecipient("")}>{uiText("Someone else")}</button>
+											</>
+										)}
+										{(!myTransparentAddr || deshieldRecipient !== myTransparentAddr) && (<>
 										<input
 											type="text"
 											placeholder={uiText("Transparent address (t1… or t3…)")}
@@ -1271,16 +1315,10 @@ export function ZcashPrivacyTab({ initialPage, initialSection, embedded = false,
 											onClick={() => setAddressBookFor("deshield")}
 											title={uiText("Pick a transparent address from your address book")}
 										>{uiText("Book")}</button>
-										{myTransparentAddr && deshieldRecipient !== myTransparentAddr && (
-											<button
-												className="max"
-												onClick={() => setDeshieldRecipient(myTransparentAddr)}
-												title={`Use your own t-addr: ${myTransparentAddr}`}
-											>{uiText("My t-addr")}</button>
-										)}
+										</>)}
 									</div>
 									{myTransparentAddr && deshieldRecipient === myTransparentAddr && (
-										<div className="field-hint">{uiText("Sending to your own t-addr (m/44'/133'/0'/0/0)")}</div>
+										<div className="field-hint">{myTransparentAddr}</div>
 									)}
 									{deshieldRecipientValidation && !deshieldRecipientValidation.valid && deshieldRecipientValidation.error && (
 										<div className="field-err">{t(deshieldRecipientValidation.error)}</div>
@@ -1342,23 +1380,6 @@ export function ZcashPrivacyTab({ initialPage, initialSection, embedded = false,
 						{verifyError && <Text fontSize="12px" color="var(--rose)" role="alert" mt="2">{verifyError}</Text>}
 					</Box>
 				</Flex>
-				<Box mt="6" aria-label={uiText('Recent incoming payments')}>
-					<Flex justify="space-between" align="center" mb="2">
-						<Text fontSize="12px" fontWeight="600" color="var(--text-1)">{uiText('Recent incoming payments')}</Text>
-						<Button size="xs" variant="ghost" onClick={() => navigate('history')}>{uiText('View full history →')}</Button>
-					</Flex>
-					{recentIncoming.length === 0
-						? <Text fontSize="12px" color="var(--text-2)">{uiText('No payments found yet. Sync to look for new ones.')}</Text>
-						: recentIncoming.map(tx => (
-							<Flex key={tx.id} justify="space-between" align="center" gap="3" py="2" borderTop="1px solid var(--line)">
-								<Box minW="0">
-									<Text fontFamily="mono" fontSize="13px" color="var(--text-0)">+{formatZec(tx.value)} ZEC</Text>
-									<Text fontSize="11px" color="var(--text-2)" wordBreak="break-word">{tx.memo || `${uiText('Block')} #${tx.block_height.toLocaleString(fiatLocale)}`}</Text>
-								</Box>
-								<Text fontSize="11px" color="var(--text-2)" flexShrink={0}>{tx.is_spent ? uiText('Spent') : uiText('Available')}</Text>
-							</Flex>
-						))}
-				</Box>
 				</> :
 				<section>
 					<div className="page-head">
