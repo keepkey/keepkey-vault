@@ -184,6 +184,9 @@ function PersonalAssetPage({ chain, balance, balanceLoading = false, onBack, fir
 	// Bumped on every manual refresh so chain-specific panels that fetch their own
 	// data (HiveAccountPanel) re-fetch too.
 	const [refreshNonce, setRefreshNonce] = useState(0)
+	// Shielded ZEC: the refresh button asks the Zcash panel for a quick scan and shows its progress.
+	const [zcashScanRequest, setZcashScanRequest] = useState(0)
+	const [zcashScanning, setZcashScanning] = useState(false)
 	const handleRefresh = useCallback(async () => {
 		if (isMonero) { setRefreshing(true); try { await monero.refresh() } finally { setRefreshing(false) } return }
 		setRefreshing(true)
@@ -216,7 +219,7 @@ function PersonalAssetPage({ chain, balance, balanceLoading = false, onBack, fir
 	// Feature flags: zcash privacy
 	const [swappableChainIds, setSwappableChainIds] = useState<Set<string>>(new Set())
 	const [zcashPrivacyEnabled, setZcashPrivacyEnabled] = useState(false)
-	const [zcashPrivacyAction, setZcashPrivacyAction] = useState<ZcashPrivacyPage>(safeInitial === 'privacy' ? 'scan' : 'receive')
+	const [zcashPrivacyAction, setZcashPrivacyAction] = useState<ZcashPrivacyPage>(safeInitial === 'privacy' ? 'shield' : 'receive')
 	const [zcashPool, setZcashPool] = useState<ZcashPool>(initialToken?.type === 'shielded' || safeInitial === 'privacy' ? 'shielded' : 'transparent')
 	// EVM chains Safe supports: the Multisig pill shows only there.
 	const [safeChainIds, setSafeChainIds] = useState<number[]>([])
@@ -854,6 +857,10 @@ function PersonalAssetPage({ chain, balance, balanceLoading = false, onBack, fir
 		...(watchOnly && isBtc && !selectedToken ? [{ id: "psbt" as const, label: t("createPsbt", { defaultValue: "Create PSBT" }), icon: (
 			<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="19" x2="12" y2="5" /><polyline points="5 12 12 5 19 12" /></svg>
 		) }] : []),
+		// Zcash: Shield/Unshield is a main action, next to Receive and Send.
+		...(isZcash && !watchOnly && zcashPrivacyEnabled && zcashShieldedSupported && (!selectedToken || isShieldedToken) ? [{ id: "privacy" as const, label: t("zcashShield", { defaultValue: "Shield" }), icon: (
+			<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" /></svg>
+		) }] : []),
 		...(!watchOnly && swappableChainIds.has(chain.id) && !shieldedSelected ? [{ id: "swap" as const, label: t("swap"), icon: (
 			<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="17 1 21 5 17 9" /><path d="M3 11V9a4 4 0 0 1 4-4h14" /><polyline points="7 23 3 19 7 15" /><path d="M21 13v2a4 4 0 0 1-4 4H3" /></svg>
 		) }] : []),
@@ -1269,7 +1276,13 @@ function PersonalAssetPage({ chain, balance, balanceLoading = false, onBack, fir
 						)}
 					</Flex>
 
-					{isZcash ? null : selectedToken ? (
+					{isZcash ? ((!selectedToken || isShieldedToken) ? <Box flexShrink={0} display={{ base: "none", sm: "block" }}><ZcashBalanceSummary
+					transparent={activeBalance?.balance} enabled={zcashPrivacyEnabled} supported={!!zcashShieldedSupported}
+					watchOnly={watchOnly} refreshNonce={refreshNonce}
+					pool={shieldedSelected ? 'shielded' : 'transparent'}
+					hideScanHint={shieldedSelected && !watchOnly && zcashPrivacyEnabled && !!zcashShieldedSupported}
+					onSelectPool={pool => { setZcashPool(pool); setSelectedToken(null); if (view === 'privacy') setView('receive') }}
+				/></Box> : null) : selectedToken ? (
 						<Flex direction="column" align="flex-end" gap="1" flexShrink={0} display={{ base: "none", sm: "flex" }}>
 							<Text fontFamily="mono" fontSize={{ base: "16px", md: "20px" }} fontWeight="500" color="var(--text-0)" letterSpacing="0.01em" lineHeight="1.2">
 								{formatBalance(selectedToken.balance)}
@@ -1356,25 +1369,25 @@ function PersonalAssetPage({ chain, balance, balanceLoading = false, onBack, fir
 
 					{/* Refresh needs a connected device (bun getBalance derives on-device) —
 					    hide in watch-only mode like the other device-gated actions. */}
-					{!watchOnly && !shieldedSelected && <Box
+					{!watchOnly && (!shieldedSelected || (zcashPrivacyEnabled && !!zcashShieldedSupported)) && <Box
 						as="button"
-						onClick={refreshing ? undefined : handleRefresh}
-						disabled={refreshing}
+						onClick={(shieldedSelected ? zcashScanning : refreshing) ? undefined : shieldedSelected ? () => setZcashScanRequest(n => n + 1) : handleRefresh}
+						disabled={shieldedSelected ? zcashScanning : refreshing}
 						className="electrobun-webkit-app-region-no-drag"
 						w="36px"
 						h="36px"
 						borderRadius="10px"
 						bg="transparent"
-						color={refreshing ? "var(--text-3)" : "var(--text-2)"}
+						color={(shieldedSelected ? zcashScanning : refreshing) ? "var(--text-3)" : "var(--text-2)"}
 						display="grid"
 						placeItems="center"
-						cursor={refreshing ? "default" : "pointer"}
-						_hover={refreshing ? {} : { bg: "var(--ink-2)", color: "var(--text-0)" }}
+						cursor={(shieldedSelected ? zcashScanning : refreshing) ? "default" : "pointer"}
+						_hover={(shieldedSelected ? zcashScanning : refreshing) ? {} : { bg: "var(--ink-2)", color: "var(--text-0)" }}
 						transition="all 0.18s"
 						flexShrink={0}
 						aria-label={String(t("refresh"))}
 					>
-						{refreshing ? (
+						{(shieldedSelected ? zcashScanning : refreshing) ? (
 							<Spinner size="xs" color="var(--gold)" />
 						) : (
 							<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
@@ -1478,7 +1491,10 @@ function PersonalAssetPage({ chain, balance, balanceLoading = false, onBack, fir
 
 					<Flex gap="2px" p="3px" className="v3-glass-pill">
 						{PILLS.map((p) => {
-							const isActive = view === p.id
+							// Zcash pages share one view: Shield is active on the Shield page, Receive also covers the history page.
+							const isActive = p.id === 'privacy' ? view === 'privacy' && zcashPrivacyAction === 'shield'
+								: p.id === 'receive' && isZcash ? view === 'receive' || (view === 'privacy' && zcashPrivacyAction === 'history')
+								: view === p.id
 							return (
 								<Box
 									key={p.id}
@@ -1487,6 +1503,7 @@ function PersonalAssetPage({ chain, balance, balanceLoading = false, onBack, fir
 									onClick={() => {
 										if (p.id === 'swap') { setShowSwapDialog(true); return }
 										if (p.id === 'multisig' && isBtc) { window.dispatchEvent(new Event(MULTISIG_POLICY_EVENT)); return }
+										if (p.id === 'privacy') { setZcashPool('shielded'); setSelectedToken(null); setZcashPrivacyAction('shield') }
 										setView(p.id as AssetView); if (p.id === 'receive' && !isShieldedToken) setSelectedToken(null)
 									}}
 									display="flex"
@@ -1519,12 +1536,6 @@ function PersonalAssetPage({ chain, balance, balanceLoading = false, onBack, fir
 				{/* Account selector now lives inline with the action pills above
 				    (per the design study). Original duplicate block removed. */}
 
-				{isZcash && (!selectedToken || isShieldedToken) && <ZcashBalanceSummary
-					transparent={activeBalance?.balance} enabled={zcashPrivacyEnabled} supported={!!zcashShieldedSupported}
-					watchOnly={watchOnly} refreshNonce={refreshNonce}
-					pool={shieldedSelected ? 'shielded' : 'transparent'}
-					onSelectPool={pool => { setZcashPool(pool); setSelectedToken(null); if (view === 'privacy') setView('receive') }}
-				/>}
 
 				{/* Content */}
 				{isMonero && <Box mb="3"><MoneroNodePanel compact /></Box>}
@@ -1538,7 +1549,7 @@ function PersonalAssetPage({ chain, balance, balanceLoading = false, onBack, fir
 					) : shieldedSelected ? (
 						!watchOnly && zcashPrivacyEnabled && zcashShieldedSupported ? (
 						<Suspense fallback={<Spinner size="sm" color="kk.gold" />}>
-							<ZcashPrivacyTab embedded initialPage={view === 'send' ? 'send' : view === 'privacy' ? zcashPrivacyAction : 'receive'}
+							<ZcashPrivacyTab embedded scanRequest={zcashScanRequest} onScanningChange={setZcashScanning} initialPage={view === 'send' ? 'send' : view === 'privacy' ? zcashPrivacyAction : 'receive'}
 								onPageChange={page => { setZcashPrivacyAction(page); setView(page === 'send' || page === 'receive' ? page : 'privacy') }} />
 						</Suspense>
 						) : <Text role="status" fontSize="sm" color="var(--text-2)">{watchOnly ? t('zcashConnectForPrivacy') : !zcashPrivacyEnabled ? t('zcashEnablePrivacy') : t('zcashPrivacyFirmware')}</Text>

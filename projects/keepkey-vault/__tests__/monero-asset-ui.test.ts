@@ -35,18 +35,15 @@ test('a saved XMR total is visible at startup, during scanning and offline with 
   for (const state of ['startup', 'scanning', 'offline']) {
     expect(ui[`cachedRow_${state}`].balance).toBe('0.08465305 XMR')
     expect(ui[`cachedHeader_${state}`].balance).toBe('0.08465305')
-    for (const surface of ['Row', 'Header']) {
-      expect(ui[`cached${surface}_${state}`].source).toStartWith('Last known balance · ')
-      expect(ui[`cached${surface}_${state}`].source).toContain('2026')
-    }
+    expect(ui[`cachedHeader_${state}`].source).toStartWith('Last known balance · ')
+    expect(ui[`cachedHeader_${state}`].source).toContain('2026')
+    // The Dashboard row looks like every other chain row: amount only, no state or source text.
+    expect(ui[`cachedRow_${state}`]).toMatchObject({ source: '', state: '' })
   }
-  expect(ui.cachedRow_scanning.state).toBe('Syncing 50%')
-  expect(ui.cachedRow_offline.state).toBe('Node unreachable')
 })
 
 test('saved zero is labelled as saved; a current scanned zero replaces an older nonzero total', () => {
   expect(ui.cachedRow_savedZero.balance).toBe('0.0 XMR')
-  expect(ui.cachedRow_savedZero.source).toStartWith('Last known balance · ')
   expect(ui.cachedHeader_savedZero.balance).toBe('0.0')
   expect(ui.cachedRow_currentZero).toEqual({ balance: '0.0 XMR', source: '', state: '' })
   expect(ui.cachedHeader_currentZero).toEqual({ balance: '0.0', source: '' })
@@ -77,14 +74,17 @@ test('local node syncing waits without device prompts or public fallback; a read
 })
 
 describe('C1/C2: the XMR row in the chain list', () => {
-  test('not connected and scanning show "—", never 0; fiat always says not included', () => {
-    expect(ui.rowNotConnected).toEqual({ balance: '— XMR', fiat: 'not included', state: 'Not connected' })
-    expect(ui.rowScanning).toEqual({ balance: '— XMR', fiat: 'not included', state: 'Syncing 50%' })
+  test('not connected and scanning show "—", never 0, with no extra state text', () => {
+    expect(ui.rowNotConnected).toEqual({ balance: '— XMR', fiat: '', state: '' })
+    expect(ui.rowScanning).toEqual({ balance: '— XMR', fiat: '', state: '' })
   })
-  test('synced shows the balance; node down keeps the last known balance and says so', () => {
-    expect(ui.rowUnverified).toEqual({ balance: '— XMR', fiat: 'not included', state: 'Balance needs verification' })
-    expect(ui.rowReady).toEqual({ balance: '0.08465305 XMR', fiat: 'not included', state: '' })
-    expect(ui.rowUnreachable).toEqual({ balance: '0.08465305 XMR', fiat: 'not included', state: 'Node unreachable' })
+  test('synced and node-down show the balance like any chain row', () => {
+    expect(ui.rowUnverified).toEqual({ balance: '— XMR', fiat: '', state: '' })
+    expect(ui.rowReady).toEqual({ balance: '0.08465305 XMR', fiat: '', state: '' })
+    expect(ui.rowUnreachable).toEqual({ balance: '0.08465305 XMR', fiat: '', state: '' })
+  })
+  test('a Pioneer XMR price shows USD like other chain rows', () => {
+    expect(ui.rowPriced).toEqual({ balance: '0.08465305 XMR', fiat: '$25.4' })
   })
   test('clicking the row opens the asset page', () => {
     for (const name of ['rowNotConnected', 'rowReady', 'rowScanning', 'rowUnreachable']) expect(ui[`${name}Opened`]).toBe(1)
@@ -110,7 +110,6 @@ describe('XMR opens without a setup checklist', () => {
   })
   test('a partial scan still says that older payments can be missing', () => {
     expect(ui.partial).toContain('Earlier payments may be missing')
-    expect(ui.rowPartial).toBe('Synced')
     expect(ui.staleScanning.balance).toBe('0.084653050000 XMR')
     expect(ui.staleScanning.stale).toStartWith('Last updated ')
   })

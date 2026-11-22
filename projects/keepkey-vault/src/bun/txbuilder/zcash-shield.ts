@@ -120,7 +120,7 @@ export async function getShieldableTransparentBalance(
 	pioneer: any,
 	transparentAddress: string,
 	tipHeight?: number | null,
-): Promise<{ matureZat: number; pendingZat: number; matureCount: number; pendingCount: number; nextUnlockConfirmations: number | null; maxShieldZat: number }> {
+): Promise<{ matureZat: number; pendingZat: number; matureCount: number; pendingCount: number; nextUnlockConfirmations: number | null; maxShieldZat: number; txids: string[] }> {
 	const result = await pioneer.ListUnspent({ network: "ZEC", xpub: transparentAddress })
 	const utxoArray = Array.isArray(result) ? result
 		: Array.isArray(result?.data) ? result.data
@@ -137,6 +137,7 @@ export async function getShieldableTransparentBalance(
 		matureCount: summary.spendableCount,
 		pendingCount: summary.lockedCount,
 		nextUnlockConfirmations: summary.nextUnlockConfirmations,
+		txids: utxoArray.map((u: any) => String(u?.txid ?? '').toLowerCase()),
 		// Max button: every mature UTXO, after the fee of each 8-input batch.
 		maxShieldZat: maxShieldable(
 			filterSpendableZcashUtxos(utxoArray, tipHeight).map((u: any) => ({ value: zcashUtxoValueZat(u) })),

@@ -188,6 +188,20 @@ pub struct PcztState {
     pub spent_nullifiers: Vec<[u8; 32]>,
 }
 
+/// Ironwood (v6) shielded builds are valid on NU6.3 and, unchanged, on NU7 (ZIP 259);
+/// the signature binds whichever branch the node reports. Anything else fails closed.
+pub fn validate_ironwood_branch(branch_id: u32) -> Result<()> {
+    if branch_id != crate::zip229::NU6_3_BRANCH_ID && branch_id != crate::zip229::NU7_BRANCH_ID {
+        return Err(anyhow::anyhow!(
+            "Ironwood transactions require NU6.3 (0x{:08x}) or NU7 (0x{:08x}); node reported 0x{:08x}",
+            crate::zip229::NU6_3_BRANCH_ID,
+            crate::zip229::NU7_BRANCH_ID,
+            branch_id
+        ));
+    }
+    Ok(())
+}
+
 /// Build a PCZT and extract the signing request.
 ///
 /// Returns a PcztState that can be finalized with device signatures.
@@ -205,13 +219,7 @@ pub async fn build_pczt(
     memo: Option<String>,
 ) -> Result<PcztState> {
     let mut rng = OsRng;
-    if branch_id != crate::zip229::NU6_3_BRANCH_ID {
-        return Err(anyhow::anyhow!(
-            "Ironwood transactions require NU6.3 branch 0x{:08x}; node reported 0x{:08x}",
-            crate::zip229::NU6_3_BRANCH_ID,
-            branch_id
-        ));
-    }
+    validate_ironwood_branch(branch_id)?;
     if notes
         .iter()
         .any(|note| note.pool != crate::wallet_db::ShieldedPool::Ironwood)
@@ -2395,13 +2403,7 @@ pub async fn build_deshield_pczt(
     _db: &crate::wallet_db::WalletDb,
 ) -> Result<DeshieldPcztState> {
     let mut rng = OsRng;
-    if branch_id != crate::zip229::NU6_3_BRANCH_ID {
-        return Err(anyhow::anyhow!(
-            "Ironwood transactions require NU6.3 branch 0x{:08x}; node reported 0x{:08x}",
-            crate::zip229::NU6_3_BRANCH_ID,
-            branch_id
-        ));
-    }
+    validate_ironwood_branch(branch_id)?;
     if notes
         .iter()
         .any(|note| note.pool != crate::wallet_db::ShieldedPool::Ironwood)
@@ -3422,6 +3424,13 @@ pub fn finalize_transparent_only_with_pubkeys(
 
 #[cfg(test)]
 mod transparent_only_tests {
+    #[test]
+    fn ironwood_builds_accept_nu63_and_nu7_only() {
+        assert!(validate_ironwood_branch(crate::zip229::NU6_3_BRANCH_ID).is_ok());
+        assert!(validate_ironwood_branch(crate::zip229::NU7_BRANCH_ID).is_ok());
+        assert!(validate_ironwood_branch(0x5437f330).is_err()); // NU6.2
+        assert!(validate_ironwood_branch(0).is_err());
+    }
     use super::*;
     use zcash_primitives::transaction::Transaction;
     use zcash_protocol::consensus::BranchId;

@@ -15,7 +15,8 @@ import { formatBalance, hasNonZeroBalance } from "../lib/formatting"
 import { AnimatedUsd } from "./AnimatedUsd"
 import { getAssetIcon, registerCustomAsset } from "../../shared/assetLookup"
 import { moneroChainVisible } from "../../shared/monero-asset"
-import { MoneroChainRow } from "./MoneroAssetSections"
+import { MoneroChainRow, useMoneroView } from "./MoneroAssetSections"
+import { useMoneroStatus } from "../hooks/useMoneroStatus"
 import { AssetPage } from "./AssetPage"
 import { ActivityPage } from "./ActivityPage"
 import { DonutChart, SelectedSlice, type DonutChartItem } from "./DonutChart"
@@ -1907,10 +1908,22 @@ function PersonalDashboard({ capabilities, isEmulator, onLoaded, watchOnly, watc
 	const displayedUpdatedAt = dashboardLastRefreshedAt(visibleBalances, cacheUpdatedAt, renderNow)
 
 	// XMR: a row in the chain list (setting + device capability), opening the standard asset page.
-	// Its balance comes from the local watch wallet and has no fiat price, so it stays out of
-	// visibleChains, whose fiat totals, charts and sync states all come from Pioneer.
+	// Its balance comes from the local watch wallet, not the Pioneer portfolio, so it stays out of
+	// visibleChains; its USD value is the watch balance times Pioneer's XMR price.
 	const moneroChain = useMemo(() => moneroChainVisible({ settingEnabled: moneroEnabled, capabilities, isEmulator, watchOnly, bitcoinOnly: btcOnly })
 		&& !disabledNetworks.includes('monero') ? CHAINS.find(c => c.id === 'monero') : undefined, [moneroEnabled, capabilities, isEmulator, watchOnly, btcOnly, disabledNetworks])
+	const moneroView = useMoneroView(useMoneroStatus(!!moneroChain))
+	const [xmrPrice, setXmrPrice] = useState(0)
+	useEffect(() => {
+		if (!moneroChain?.caip) return
+		let cancelled = false
+		rpcRequest<any>('getMarketData', { caips: [moneroChain.caip] }, 15000)
+			.then(resp => { const price = (Array.isArray(resp) ? resp : resp?.data || [])[0]; if (!cancelled && typeof price === 'number' && price > 0) setXmrPrice(price) })
+			.catch(() => {}) // No price: the row shows XMR only, like any unpriced asset.
+		return () => { cancelled = true }
+	}, [moneroChain?.caip])
+	const xmrBalance = moneroView.lastKnown || moneroView.spendVerified || moneroView.balanceAtomic === '0' ? moneroView.balanceAtomic : null
+	const xmrUsd = xmrBalance ? Number(BigInt(xmrBalance)) / 1e12 * xmrPrice : 0
 
 	// Built-in networks the user turned off: offered back in the Add network dialog.
 	const turnedOffChains = useMemo(() => btcOnly ? [] : allChains.filter(c =>
@@ -1928,6 +1941,18 @@ function PersonalDashboard({ capabilities, isEmulator, onLoaded, watchOnly, watc
 		if (aHas && bHas) return bUsd - aUsd
 		return 0
 	}), [visibleChains, balances, cleanBalanceUsd])
+
+	// XMR sits where its USD value ranks it among the other chains (funded first, then empty).
+	const moneroAt = useMemo(() => {
+		if (!moneroChain) return -1
+		const xmrHas = !!xmrBalance && xmrBalance !== '0'
+		const i = sortedChains.findIndex(c => {
+			const usd = cleanBalanceUsd.get(c.id)?.usd || 0
+			const has = usd > 0 || parseFloat(balances.get(c.id)?.balance || '0') > 0
+			return xmrHas ? !has || usd < xmrUsd : !has
+		})
+		return i < 0 ? sortedChains.length : i
+	}, [moneroChain, xmrBalance, xmrUsd, sortedChains, cleanBalanceUsd, balances])
 
 	// Every default chain stays in the sidebar, always. sortedChains already puts
 	// funded chains first, so empty defaults just sit lower in the list instead of
@@ -2006,6 +2031,8 @@ function PersonalDashboard({ capabilities, isEmulator, onLoaded, watchOnly, watc
 			</AssetPageErrorBoundary>
 		)
 	}
+
+	const moneroRow = moneroChain && <MoneroChainRow chain={moneroChain} iconSrc={getAssetIcon(moneroChain.caip)} privateMode={privateModeEnabled} view={moneroView} usd={xmrUsd} onOpen={() => openChainPage(moneroChain)} />
 
 	return (
 		<Flex w="100%" pt="2" align="stretch" gap={{ base: 0, md: 3 }} px={{ base: 0, md: 3 }} minH="100%">
@@ -2101,17 +2128,16 @@ function PersonalDashboard({ capabilities, isEmulator, onLoaded, watchOnly, watc
 										>
 											{privateModeEnabled
 												? "••••••"
-												: `${anyChainUnknown ? '≥ ' : ''}$${totalUsd.toLocaleString(getNumberLocale(), { maximumFractionDigits: 2 })}`}
+												: `${anyChainUnknown ? '≥ ' : ''}$${(totalUsd + xmrUsd).toLocaleString(getNumberLocale(), { maximumFractionDigits: 2 })}`}
 										</Text>
 										{loadingBalances && <Spinner size="xs" color="kk.gold" aria-label={uiText("Refreshing balance")} title={uiText("Refreshing balance")} />}
 									</Flex>
 								)}
-								{moneroChain && <Text data-monero-total-note="" fontSize="10px" color="var(--text-3)" lineHeight="1.2">{uiText("XMR not included")}</Text>}
 							</Box>
 						</Flex>
 					</Box>
 
-					{sidebarChains.map((chain) => {
+					{sidebarChains.map((chain, chainIndex) => {
 						const bal = balances.get(chain.id)
 						// Three states, not two. A spinner covers "an answer is still
 						// coming"; it does NOT cover "the fetch settled and this chain
@@ -2185,6 +2211,7 @@ function PersonalDashboard({ capabilities, isEmulator, onLoaded, watchOnly, watc
 						const showAccountRows = isActive && accountRows.length > 1
 						return (
 							<Fragment key={chain.id}>
+							{chainIndex === moneroAt && moneroRow}
 							<Box
 								as="button"
 								// Always drill in — never toggle off when re-clicking the same
@@ -2329,7 +2356,7 @@ function PersonalDashboard({ capabilities, isEmulator, onLoaded, watchOnly, watc
 						)
 					})}
 
-					{moneroChain && <MoneroChainRow chain={moneroChain} iconSrc={getAssetIcon(moneroChain.caip)} privateMode={privateModeEnabled} onOpen={() => openChainPage(moneroChain)} />}
+					{moneroAt === sidebarChains.length && moneroRow}
 
 					{/* Add network — turns a network back on that the network picker
 					    turned off, or adds a custom EVM network (by chainId / RPC, or
@@ -3146,6 +3173,11 @@ function PersonalDashboard({ capabilities, isEmulator, onLoaded, watchOnly, watc
 											{ id: 'swap' as const, label: uiText('Swap'), color: '#60a5fa', bg: 'rgba(96,165,250,0.12)', icon: (
 												<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#60a5fa" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><polyline points="17 1 21 5 17 9" /><path d="M3 11V9a4 4 0 0 1 4-4h14" /><polyline points="7 23 3 19 7 15" /><path d="M21 13v2a4 4 0 0 1-4 4H3" /></svg>
 											) },
+											...(dchain.id === 'zcash' && zcashEnabled ? [
+												{ id: 'privacy' as const, label: uiText('Shield'), color: '#f5c542', bg: 'rgba(245,197,66,0.12)', icon: (
+													<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#f5c542" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" /></svg>
+												) },
+											] : []),
 										] : []),
 									]).map((p) => (
 										<Box

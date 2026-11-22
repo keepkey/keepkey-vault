@@ -2535,5 +2535,16 @@
   "m76fc465e": "Something went wrong",
   "m49e02b47": "This KeepKey firmware cannot list or delete single passkeys. Update to firmware 7.17 RC4 or newer.",
   "m93f568f0": "Unknown site",
-  "m15f3cd9b": "Unplug your KeepKey and plug it back in, then hold the button when it asks."
+  "m15f3cd9b": "Unplug your KeepKey and plug it back in, then hold the button when it asks.",
+  "mcf3a45fe": "← Back to receive",
+  "m72402638": "Available",
+  "mfc55a090": "Last scanned: block",
+  "m90169652": "No payments found yet. Sync to look for new ones.",
+  "m2b035040": "Not scanned yet",
+  "m840775b5": "Recent incoming payments",
+  "m1c5ed083": "Spent",
+  "m97c32460": "Sync options",
+  "m63aecd5b": "View full history →",
+  "m61fefc0a": "Direction",
+  "m7d9a6f77": "Move ZEC between your transparent and private balances. Unshielding pays a public address, yours or someone else’s."
 }

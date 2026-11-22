@@ -206,6 +206,13 @@ for (const [name, status] of [['rowNotConnected', notConnected], ['rowReady', co
   await unmount()
 }
 
+{
+  const priced = await render(React.createElement(MoneroChainRow, { chain: monero, iconSrc: '', privateMode: false, onOpen() {}, usd: 25.395915,
+    view: moneroBalanceView(connected({ spendStateKnown: true, keyImagesSynced: true }) as any) }))
+  out.rowPriced = { balance: text(q(priced.container, '[data-monero-row-balance]')), fiat: text(q(priced.container, '[data-monero-row-fiat]')) }
+  await priced.unmount()
+}
+
 // ── Opening XMR connects once; technical choices are disclosed only on request ──
 {
   const client = fakeClient(notConnected)
@@ -330,9 +337,6 @@ for (const state of ['waiting', 'failed', 'checking']) {
   const { container, unmount } = await render(React.createElement(Host, { Section: MoneroReceiveSection, client: fakeClient(connected({ restoreHeight: 3_294_960, updatedAt: new Date().toISOString() })) }))
   out.partial = text(q(container, '[data-monero-note]'))
   await unmount()
-  const row = await render(React.createElement(MoneroChainRow, { chain: monero, iconSrc: '', privateMode: false, onOpen() {}, client: fakeClient(connected({ restoreHeight: 3_294_960, spendStateKnown: true, keyImagesSynced: true })) }))
-  out.rowPartial = text(q(row.container, '[data-monero-row-state]'))
-  await row.unmount()
   const old = await render(React.createElement(Host, { Section: MoneroReceiveSection, client: fakeClient(connected({ restoreHeight: 0, syncState: 'scanning', monitorReady: false, updatedAt: '2026-11-06T12:00:00.000Z' })) }))
   out.staleScanning = { balance: text(q(old.container, '[data-monero-balance]')), stale: text(q(old.container, '[data-monero-stale]')) }
   await old.unmount()

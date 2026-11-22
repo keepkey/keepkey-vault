@@ -745,6 +745,26 @@ function expectShieldedDelta(deltaZat: number): void {
 	writeZcashMemory(m)
 }
 
+// An unshield pays our own transparent address, but the indexer lists UTXOs only once mined.
+// Remember the broadcast so the public balance shows it as pending, not as 0, until it appears.
+type PendingTransparent = { txid: string; to: string; value: number; at: number }
+const PENDING_TRANSPARENT_TTL_MS = 3 * 60 * 60 * 1000 // ponytail: drop after 3h if the indexer never lists it
+function pendingTransparentKey(): string | null {
+	const scope = getWalletDbScope()
+	return scope ? `zcash_pending_transparent:${scope.walletId}` : null
+}
+function readPendingTransparent(): PendingTransparent[] {
+	const key = pendingTransparentKey()
+	try { const v = key ? JSON.parse(getSetting(key) || '[]') : []; return Array.isArray(v) ? v : [] } catch { return [] }
+}
+function writePendingTransparent(list: PendingTransparent[]): void {
+	const key = pendingTransparentKey()
+	if (key) setSetting(key, JSON.stringify(list))
+}
+function rememberPendingTransparent(txid: string, to: string, value: number): void {
+	writePendingTransparent([...readPendingTransparent(), { txid, to, value, at: Date.now() }])
+}
+
 /**
  * Shielded ZEC as a synthetic token to attach under native Zcash — the
  * dashboard renders it like an ERC20 sub-row. `balance` is the spendable
@@ -8578,7 +8598,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					}, { signWrap, onProgress }),
 					unshield: async () => (await import("./txbuilder/zcash-deshield")).deshieldZec(engine.wallet as any, {
 						recipient: params.recipient.trim(), amount: params.amount, account,
-					}, { signWrap, onProgress, onBroadcast: tx => expectShieldedDelta(-(tx.value + (tx.fee ?? 0))) }),
+					}, { signWrap, onProgress, onBroadcast: tx => { expectShieldedDelta(-(tx.value + (tx.fee ?? 0))); rememberPendingTransparent(tx.txid, params.recipient, tx.value) } }),
 					shielded: () => sendShielded(engine.wallet as any, {
 						recipient: params.recipient,
 						amount: params.amount,
@@ -8607,12 +8627,15 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				const pioneer = await getPioneer()
 				const tipHeight = getScanState().syncedTo
 				const totals = await getShieldableTransparentBalance(pioneer, address, tipHeight)
+				const unlisted = readPendingTransparent().filter(e => Date.now() - e.at < PENDING_TRANSPARENT_TTL_MS && !totals.txids.includes(e.txid))
+				writePendingTransparent(unlisted)
+				const mine = unlisted.filter(e => e.to === address)
 				return {
 					address,
 					balanceZat: totals.matureZat,
-					pendingZat: totals.pendingZat,
+					pendingZat: totals.pendingZat + mine.reduce((n, e) => n + e.value, 0),
 					matureCount: totals.matureCount,
-					pendingCount: totals.pendingCount,
+					pendingCount: totals.pendingCount + mine.length,
 					maxShieldZat: totals.maxShieldZat,
 				}
 			},
