@@ -665,7 +665,7 @@ export async function buildUtxoTx(
     const dustLimit = changeDustLimit(chain.id, scriptType)
     const folded = foldDustChange(outputs, fee, dustLimit)
     if (folded.folded > 0) {
-      console.log(`${TAG} Change of ${folded.folded} sats is under the ${dustLimit}-sat dust limit — added to the fee`)
+      console.log(`${TAG} Change of ${folded.folded / 10 ** chain.decimals} ${chain.symbol} is under the ${dustLimit / 10 ** chain.decimals} ${chain.symbol} dust limit — added to the fee`)
       outputs = folded.outputs
       fee = folded.fee
     }
