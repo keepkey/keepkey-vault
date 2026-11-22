@@ -1,11 +1,4 @@
 export type ProviderRefreshReason = 'wallet-open' | 'manual' | 'automatic' | 'focus' | 'degraded-retry' | 'swap-reconcile'
-export interface ProviderUsageStatus {
- provider: string
- state: 'normal' | 'warning' | 'limited'
- reason?: 'budget'|'upstream'
- apiBase: string
- windows: Array<{kind:string;used:number;limit:number}>
-}
 
 /** Automatic chain refreshes must not trigger a paid portfolio discovery read. */
 export function paidProviderRefreshOptions(reason: ProviderRefreshReason) {

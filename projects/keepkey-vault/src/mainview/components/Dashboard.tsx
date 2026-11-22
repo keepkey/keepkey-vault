@@ -1,5 +1,4 @@
 import { BalanceSyncProgress } from './BalanceSyncProgress'
-import {useProviderUsage} from '../hooks/useProviderUsage'
 import { paidProviderRefreshOptions, type ProviderRefreshReason } from '../../shared/provider-refresh'
 import { getNumberLocale } from "../lib/number-locale"
 import { useUiTranslation } from "../i18n/ui"
@@ -839,7 +838,6 @@ function VaultPortfolioDashboard({ vault, onLoaded, watchOnly, firmwareVersion }
 }
 
 function PersonalDashboard({ capabilities, isEmulator, onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettings, firmwareVersion, firmwareVariant, forceRefresh, onForceRefreshConsumed, isHiddenWallet, knownEmpty, onOpenVault }: DashboardProps) {
-    const providerUsage=useProviderUsage()
   const uiText = useUiTranslation()
 	const { portfolios: vaultPortfolios, loading: vaultsLoading, error: vaultsError, reload: reloadVaultPortfolios, setIncluded: setVaultIncluded } = useVaultPortfolios({ bitcoinOnly: isBitcoinOnlyVariant(firmwareVariant) })
 
@@ -2646,12 +2644,6 @@ function PersonalDashboard({ capabilities, isEmulator, onLoaded, watchOnly, watc
 				</Box>
 			))}
 
-			{providerUsage && providerUsage.state !== 'normal' && (
-                <Box role="status" mb="3" px="4" py="3" border="1px solid" borderColor="orange.500" borderRadius="md">
-                    <Text fontWeight="600">{uiText(providerUsage.reason === 'upstream' ? 'Token discovery is temporarily unavailable' : providerUsage.state === 'limited' ? 'Balance discovery refresh is temporarily limited' : 'Balance discovery refresh capacity is running low')}</Text>
-                    <Text fontSize="sm" color="kk.textMuted">{uiText('Cached balances remain available. Automatic updates will not spend additional discovery requests.')}</Text>
-                </Box>
-            )}
             {/* Pioneer connection error banner */}
 			{pioneerError && (
 				<Box

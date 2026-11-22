@@ -29,3 +29,15 @@ test('old providers cannot turn automatic retries into paid requests and manual 
   expect(prepareProviderRequestBody(automatic,{},'GetTransactionHistory')).toEqual({queries:automatic.queries})
   expect(()=>prepareProviderRequestBody({...automatic,queries:[{caip:'eip155:1/slip44:60',pubkey:'fixture'}]},{},'GetTransactionHistory')).toThrow('cached balances')
  })
+
+// OWNER rule: a server-side provider budget is not an outage. Users only see an error when the
+// backend is actually unreachable; quota state never reaches the UI (it read as "backend dead").
+test('Desktop never fetches or shows provider quota status',async()=>{
+ const {Glob}=await import('bun')
+ const hits:string[]=[]
+ for await(const file of new Glob('src/**/*.{ts,tsx}').scan('.')){
+  const text=await Bun.file(file).text()
+  if(/provider\/usage|getProviderUsage|discovery refresh is temporarily limited/.test(text))hits.push(file)
+ }
+ expect(hits).toEqual([])
+})

@@ -266,7 +266,7 @@ import { instanceSocketPath, startupInstanceGate } from "./single-instance"
 import { signSolanaWireTransaction } from "./solana-signing"
 import { AuthStore, HttpError } from "./auth"
 import { txBuildParams } from "./rest-tx-build"
-import { ensurePioneerQueryKeyRegistered, getPioneerProviderUsage, getPioneer, getPioneerApiBase, resetPioneer, setPioneerOffline, DEFAULT_API_BASE, getQueryKey as getPioneerQueryKey } from "./pioneer"
+import { ensurePioneerQueryKeyRegistered, getPioneer, getPioneerApiBase, resetPioneer, setPioneerOffline, DEFAULT_API_BASE, getQueryKey as getPioneerQueryKey } from "./pioneer"
 import { setBtcBackendOffline, setBtcNodeConfig, setBtcNodeDeviceEligible, setBtcNodeWatchOnlyEligible, isBtcNodeActive, getBtcBackend, getWatchOnlyBtcBackend, getPsbtBroadcastRoute, broadcastBtcTx } from "./btc-backend"
 import { isBitcoinOnlyVariant } from "../shared/flags"
 import { bitcoinOnlyActivityList, bitcoinOnlyAddressBookHistoryList, bitcoinOnlyBalanceList, bitcoinOnlyChainList, bitcoinOnlyLedgerJournalList, bitcoinOnlyLedgerSummaryList, bitcoinOnlyPendingSigningRejection, bitcoinOnlyReportAllowed, bitcoinOnlyWatchOnlyScope, enforceBitcoinOnlyRpcBoundary } from "./bitcoin-only-boundary"
@@ -6467,7 +6467,6 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			},
 
 			// ── Pioneer integration (batch portfolio API) ────────────────
-            getProviderUsage: async () => getPioneerProviderUsage(),
             getSyncDiagnostics: async () => ({ balanceSync: balanceSync.snapshot(), recentSyncs: balanceSync.recent(), connectivity: networkProbes.slice(-20) }),
 			getBalances: async ({ forceRefresh = false, swapDestCaips = [], refreshReason }: { forceRefresh?: boolean; swapDestCaips?: string[]; refreshReason?: ProviderRefreshReason } = {}) => {
                 return balanceSync.run(async progress => {
