@@ -80,5 +80,7 @@
 	"recipientContractNote": "Diese Adresse ist ein Smart Contract. Stelle sicher, dass er {{symbol}} empfangen kann: An einen Vertrag gesendete Mittel, die er nicht verarbeiten kann, können verloren gehen.",
 	"customGasPriceTooHigh": "Der Gaspreis ist das 10-Fache oder mehr des Netzwerkpreises ({{gwei}} gwei). Senke ihn oder nutze eine Voreinstellung.",
 	"customGasPriceTooLow": "Der Gaspreis liegt unter der Basisgebühr des Netzwerks (~{{gwei}} gwei). Die Transaktion würde nie bestätigt.",
+	"amountBelowDust": "Der Betrag liegt unter dem Minimum, das das Netzwerk akzeptiert. Sende mindestens {{minimum}} {{symbol}}.",
+	"maxBelowDust": "Nach Abzug der Gebühren liegt der Betrag unter dem Minimum, das das Netzwerk akzeptiert ({{minimum}} {{symbol}}). Füge Guthaben hinzu oder senke die Gebühr.",
 	"gasPriceUnavailable": "Der Gaspreis des Netzwerks konnte nicht geladen werden, daher schätzt Desktop keine Gebühr. Versuche es gleich noch einmal."
 }

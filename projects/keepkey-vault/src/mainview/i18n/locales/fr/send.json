@@ -80,5 +80,7 @@
 	"recipientContractNote": "Cette adresse est un contrat intelligent. Vérifiez qu'il peut recevoir des {{symbol}} : les fonds envoyés à un contrat qui ne sait pas les gérer peuvent être perdus.",
 	"customGasPriceTooHigh": "Le prix du gaz est 10 fois ou plus le prix du réseau ({{gwei}} gwei). Baissez-le ou utilisez un préréglage.",
 	"customGasPriceTooLow": "Le prix du gaz est inférieur aux frais de base du réseau (~{{gwei}} gwei). La transaction ne serait jamais confirmée.",
+	"amountBelowDust": "Le montant est inférieur au minimum accepté par le réseau. Envoyez au moins {{minimum}} {{symbol}}.",
+	"maxBelowDust": "Après les frais, le montant à envoyer est inférieur au minimum accepté par le réseau ({{minimum}} {{symbol}}). Ajoutez des fonds ou baissez les frais.",
 	"gasPriceUnavailable": "Le prix du gaz du réseau n'a pas pu être chargé, Desktop ne devinera donc pas les frais. Réessayez dans un instant."
 }

@@ -24,6 +24,8 @@ import { balanceUnverifiedReason, isBalanceUnverified } from "../../shared/balan
 import { normalizeAmountInput, usdToCryptoAmount } from '../../shared/locale'
 import { baseUnitsToDecimalString } from '../../shared/max-send'
 import { describeGasPriceError, networkGasPriceGwei } from '../../shared/gas-price-errors'
+import { describeDustError } from '../../shared/utxo-dust-errors'
+import { getNumberLocale } from '../lib/number-locale'
 import { useZcashNu7Support } from '../hooks/useZcashNu7Support'
 import { parseSendQr } from '../../shared/send-qr'
 
@@ -483,7 +485,7 @@ export function SendForm({ chain, address, balance, balanceLoading = false, toke
 			setBuildResult(result)
 			setPhase('built')
 		} catch (e: any) {
-			if (operationIsCurrent(generation)) setError(describeGasPriceError(e.message || '', t) || e.message || t("failedToBuild"))
+			if (operationIsCurrent(generation)) setError(describeGasPriceError(e.message || '', t) || describeDustError(e.message || '', t, getNumberLocale()) || e.message || t("failedToBuild"))
 		} finally {
 			if (operationIsCurrent(generation)) setLoading(false)
 		}

@@ -6,7 +6,8 @@
  */
 import coinSelect from 'coinselect'
 import { selectZcashCoins } from './zcash-coinselect'
-import { changeDustLimit, foldDustChange } from './utxo-dust'
+import { changeDustLimit, foldDustChange, outputDustLimit } from './utxo-dust'
+import { dustErrorMessage, formatBaseUnits } from '../../shared/utxo-dust-errors'
 // @ts-ignore — coinselect/split has no types
 import coinSelectSplit from 'coinselect/split'
 import { bech32, bech32m } from '@scure/base'
@@ -665,9 +666,25 @@ export async function buildUtxoTx(
     const dustLimit = changeDustLimit(chain.id, scriptType)
     const folded = foldDustChange(outputs, fee, dustLimit)
     if (folded.folded > 0) {
-      console.log(`${TAG} Change of ${folded.folded / 10 ** chain.decimals} ${chain.symbol} is under the ${dustLimit / 10 ** chain.decimals} ${chain.symbol} dust limit — added to the fee`)
+      console.log(`${TAG} Change of ${formatBaseUnits(folded.folded, chain.decimals)} ${chain.symbol} is under the ${formatBaseUnits(dustLimit, chain.decimals)} ${chain.symbol} dust limit — added to the fee`)
       outputs = folded.outputs
       fee = folded.fee
+    }
+
+    // A spend output under the limit cannot be folded away: the node would
+    // refuse the signed tx at broadcast. Coinselect never checks it for exact
+    // sends, and split (MAX) only checks 148 × rate. Refuse before signing.
+    for (const output of outputs) {
+      if (!output.address) continue
+      // Bech32 is case-insensitive and QR codes carry it in upper case; the
+      // script lookup only reads lower case. Base58 must keep its case.
+      const lookup = /^[A-Z0-9]+$/.test(output.address) && /^(?:BC1|TB1|LTC1|TLTC1)/.test(output.address)
+        ? output.address.toLowerCase()
+        : output.address
+      const limit = outputDustLimit(chain.id, addressToScriptPubKeyHex(lookup))
+      if (output.value < limit) {
+        throw new Error(dustErrorMessage(isMax ? 'maxAfterFees' : 'amount', formatBaseUnits(limit, chain.decimals), chain.symbol))
+      }
     }
   }
 
