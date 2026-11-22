@@ -23,7 +23,7 @@ import { selectDesktopUpdateRelease } from '../shared/desktop-update-release'
 // what code executed, at the cost of a per-call sync. The throughput hit is
 // negligible for our log volume (~10–100 lines/sec at peak boot).
 import { withPermit2SpenderName } from './permit2-spender-name'
-import { ownerPortfolioConfidence, portfolioBalanceSyncState, portfolioFaultChainIds } from '../shared/balance-display-state'
+import { ownerPortfolioConfidence, portfolioBalanceSyncState, portfolioFaultChainIds, quietTokenOnlyFailures, keepLastKnownTokens } from '../shared/balance-display-state'
 import { sendZcashByRoute, zcashPrivateSendRoute } from '../shared/zcash-privacy'
 import * as fs from "fs"
 import * as os from "os"
@@ -454,8 +454,10 @@ async function mapWithConcurrency<T, R>(
 interface PortfolioMeta {
 	degraded: boolean
 	degradedCount: number
-	failures: Array<{ caip: string; reason: string }>
+	failures: Array<{ caip: string; reason: string; scope?: string }>
 	staleChains: Array<{ caip: string; pubkey: string; ageMs: number; fetchedAtISO: string }>
+	/** Token-only failures off ETH/Base: not a fault; the chain keeps its last known tokens. */
+	quietTokenFailures?: Array<{ caip: string; reason: string; scope?: string }>
 }
 
 // Server-side DeFi position shape from GetPortfolioBalances (includeDefi=true).
@@ -494,7 +496,7 @@ function unwrapPortfolioResponse(resp: any): {
 } {
 	const rawData = resp?.data?.data || resp?.data || {}
 	const entries = rawData.balances || (Array.isArray(rawData) ? rawData : [])
-	const meta: PortfolioMeta | null = rawData.meta ?? null
+	const meta: PortfolioMeta | null = rawData.meta ? quietTokenOnlyFailures(rawData.meta) : null
 	const defiPositions: ServerDefiPosition[] | null = Array.isArray(rawData.defiPositions) ? rawData.defiPositions : null
 	return { entries, meta, defiPositions }
 }
@@ -585,6 +587,7 @@ function mergeMetas(metas: PortfolioMeta[]): PortfolioMeta {
 		degradedCount: metas.reduce((n, m) => n + (m.degradedCount || 0), 0),
 		failures: metas.flatMap(m => m.failures || []),
 		staleChains: metas.flatMap(m => m.staleChains || []),
+		quietTokenFailures: metas.flatMap(m => m.quietTokenFailures || []),
 	}
 }
 
@@ -3098,6 +3101,8 @@ async function getChainBalance(params: { chainId: string; forceRefresh?: boolean
 				balanceUsd += shieldedTok.balanceUsd
 			}
 		}
+		// Token discovery failed quietly (not ETH/Base): the native read is verified, the tokens are last known.
+		if (responseMeta?.quietTokenFailures?.length) ({ tokens, balanceUsd } = keepLastKnownTokens({ tokens, balanceUsd }, cachedBalance))
 	} catch (e: any) {
 		assertCurrent()
 		if (bitcoinSelfHost) {
@@ -7495,6 +7500,13 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					const unconfirmedObservationChainIds = new Set<string>()
 					const snapshotDevice = engine.getDeviceState().deviceId
 					const previousSnapshots = !engine.isPassphraseWallet && snapshotDevice ? getCachedBalances(snapshotDevice)?.balances : undefined
+					// Token discovery failed quietly (not ETH/Base): keep each chain's last known tokens.
+					for (const failure of portfolioMeta.quietTokenFailures || []) {
+						const prefix = (failure.caip.split('/')[0] || '').toLowerCase()
+						const chainId = networkToChain.get(prefix) ?? allChains.find(c => c.networkId?.toLowerCase() === prefix)?.id
+						const result = results.find(row => row.chainId === chainId)
+						if (result) Object.assign(result, keepLastKnownTokens({ tokens: result.tokens, balanceUsd: result.balanceUsd || 0 }, previousSnapshots?.find(row => row.chainId === chainId)))
+					}
 					for (const result of results) {
 						const previousAt = previousSnapshots?.find(row => row.chainId === result.chainId)?.updatedAt
 						const chain = allChains.find(chain => chain.id === result.chainId)

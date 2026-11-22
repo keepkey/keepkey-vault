@@ -26,6 +26,26 @@ export function portfolioBalanceSyncState(meta?: {
   return 'confirmed'
 }
 
+// OWNER rule: only ETH and Base token discovery is wallet-critical. Elsewhere a server that
+// could not discover tokens (its native balance still verified) is not a wallet fault: the
+// chain stays confirmed and keeps its last known tokens.
+const GLOBAL_TOKEN_NETWORKS = new Set(['eip155:1', 'eip155:8453'])
+
+type PortfolioFailure = { caip: string; reason: string; scope?: string }
+/** Moves non-global token-only failures out of `failures` into `quietTokenFailures`. */
+export function quietTokenOnlyFailures<M extends { degraded?: boolean; failures?: PortfolioFailure[]; staleChains?: unknown[] }>(meta: M): M & { quietTokenFailures: PortfolioFailure[] } {
+  const quiet = (meta.failures || []).filter(f => f.scope === 'tokens' && !GLOBAL_TOKEN_NETWORKS.has(String(f.caip).split('/')[0].toLowerCase()))
+  if (!quiet.length) return { ...meta, quietTokenFailures: [] }
+  const failures = (meta.failures || []).filter(f => !quiet.includes(f))
+  return { ...meta, failures, degraded: failures.length > 0 || !!meta.staleChains?.length, quietTokenFailures: quiet }
+}
+
+/** Quiet token failure: a response without tokens keeps the last known ones (and their USD). */
+export function keepLastKnownTokens<T extends { balanceUsd: number }>(current: { tokens?: T[]; balanceUsd: number }, previous?: { tokens?: T[] }): { tokens?: T[]; balanceUsd: number } {
+  if (current.tokens?.length || !previous?.tokens?.length) return current
+  return { tokens: previous.tokens, balanceUsd: current.balanceUsd + previous.tokens.reduce((sum, t) => sum + (t.balanceUsd || 0), 0) }
+}
+
 /** Chains a portfolio response itself reports failed or stale. Their rows are
  *  not confirmed for the cache, so they never clear a pending tx mark (H3). */
 export function portfolioFaultChainIds(
