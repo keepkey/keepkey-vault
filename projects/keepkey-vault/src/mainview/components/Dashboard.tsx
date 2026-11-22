@@ -8,7 +8,7 @@ import { useTranslation } from "react-i18next"
 import { CHAINS, customChainToChainDef, isChainSupported, type ChainDef } from "../../shared/chains"
 import { isBitcoinOnlyVariant } from "../../shared/flags"
 import { balanceDisplayState } from "../../shared/balance-display-state"
-import { confirmedDashboardBalance, dashboardBalanceUpdatedAt, dashboardCacheIsQuiet, dashboardRefreshIsDue, mergeDashboardPortfolioFault, recoverDashboardPortfolioFault, usableDashboardBalance, type DashboardPortfolioFault } from '../../shared/dashboard-balance-policy'
+import { confirmedDashboardBalance, dashboardBalanceUpdatedAt, dashboardCacheIsQuiet, dashboardLastRefreshedAt, dashboardRefreshIsDue, mergeDashboardPortfolioFault, recoverDashboardPortfolioFault, usableDashboardBalance, type DashboardPortfolioFault } from '../../shared/dashboard-balance-policy'
 import { isLocalDeviceAccessError } from "../../shared/device-access-error"
 import { versionCompare } from "../../shared/firmware-versions"
 import { formatBalance, hasNonZeroBalance } from "../lib/formatting"
@@ -1904,7 +1904,7 @@ function PersonalDashboard({ capabilities, isEmulator, onLoaded, watchOnly, watc
 	visibleChainIdsRef.current = visibleChains.map(chain => chain.id)
 	const visibleBalances = visibleChains.map(chain => balances.get(chain.id))
 	const renderNow = Math.max(clockNow, Date.now())
-	const displayedUpdatedAt = dashboardBalanceUpdatedAt(visibleBalances, cacheUpdatedAt, renderNow)
+	const displayedUpdatedAt = dashboardLastRefreshedAt(visibleBalances, cacheUpdatedAt, renderNow)
 
 	// XMR: a row in the chain list (setting + device capability), opening the standard asset page.
 	// Its balance comes from the local watch wallet and has no fiat price, so it stays out of

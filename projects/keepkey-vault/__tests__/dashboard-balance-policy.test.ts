@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { dashboardBalanceUpdatedAt, dashboardCacheIsQuiet, dashboardErrorNotice, dashboardRefreshIsDue, mergeDashboardPortfolioFault, recoverDashboardPortfolioFault } from '../src/shared/dashboard-balance-policy'
+import { dashboardBalanceUpdatedAt, dashboardCacheIsQuiet, dashboardLastRefreshedAt, dashboardErrorNotice, dashboardRefreshIsDue, mergeDashboardPortfolioFault, recoverDashboardPortfolioFault } from '../src/shared/dashboard-balance-policy'
 import type { ChainBalance } from '../src/shared/types'
 const now = 1_800_000_000_000
 const day = 86_400_000
@@ -58,4 +58,16 @@ test('dismissal keys ignore age-only updates but change for distinct errors, pre
   const anonymous = { ...unknown, degradedChains: [] }
   expect(dashboardErrorNotice(recoverDashboardPortfolioFault(anonymous, ['bitcoin'], labels), ['bitcoin'], labels)).not.toBeNull()
   expect(mergeDashboardPortfolioFault(anonymous, { severity: 'none', fullSnapshot: true, checkedChainIds: ['bitcoin'] }, labels)).toBeNull()
+})
+
+// OWNER 11-22: a Refresh that updated most chains must not read "1d ago" because one chain lagged.
+test('header shows the last refresh, not the oldest chain; background freshness still sees every row', () => {
+  const fresh = row('bitcoin', 0, { updatedAt: now - 60_000 })
+  const lagging = row('ethereum', 0, { updatedAt: now - day })
+  expect(dashboardLastRefreshedAt([fresh, lagging], null, now)).toBe(now - 60_000)
+  expect(dashboardBalanceUpdatedAt([fresh, lagging], null, now)).toBe(now - day)
+  expect(dashboardLastRefreshedAt([fresh, row('base', 0, { syncState: 'degraded', updatedAt: now })], null, now)).toBe(now - 60_000)
+  expect(dashboardLastRefreshedAt([row('bitcoin', 0, { updatedAt: now + 1 })], null, now)).toBeNull()
+  expect(dashboardLastRefreshedAt([row('bitcoin', 0, { updatedAt: undefined })], now - 5_000, now)).toBe(now - 5_000)
+  expect(dashboardLastRefreshedAt([undefined], null, now)).toBeNull()
 })
