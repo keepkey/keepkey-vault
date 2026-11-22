@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Box, Button, Flex, Input, Text } from '@chakra-ui/react'
-import { PASSWORD_ROTATION_GUIDES, type PasswordBankView as BankView } from '../../shared/password-bank'
+import { PASSWORD_CACHE_MAX_MINUTES, PASSWORD_ROTATION_GUIDES, type PasswordBankView as BankView } from '../../shared/password-bank'
 import { passwordInventory } from '../../shared/password-inventory'
 import { rpcRequest } from '../lib/rpc'
 import { useUiTranslation } from '../i18n/ui'
@@ -53,14 +53,14 @@ export function PasswordBankView() {
   }
   const ready = async () => {
     const current = await rpcRequest<BankView>('passwordBankStatus')
-    if (!current.readySlots.length) await deviceCall('passwordBankGenerate', { count: 1, ttlMinutes: 15 })
+    if (!current.readySlots.length) await deviceCall('passwordBankGenerate', { count: 1, ttlMinutes: PASSWORD_CACHE_MAX_MINUTES })
   }
   const ensureCached = async (p: Profile, pending: boolean) => {
     const status = await rpcRequest<BankView>('passwordBankStatus')
     const current = status.profiles.find(profile => profile.id === p.id)
     if (!current) throw new Error(uiText('Unlock with KeepKey'))
     if (((pending ? current.pendingCachedUntil : current.cachedUntil) || 0) <= Date.now()) {
-      await deviceCall('passwordBankRehydrate', { id: p.id, pending, ttlMinutes: 15 })
+      await deviceCall('passwordBankRehydrate', { id: p.id, pending, ttlMinutes: PASSWORD_CACHE_MAX_MINUTES })
     }
   }
   const prepare = async (p: Profile) => {

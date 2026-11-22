@@ -1,11 +1,13 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID } from 'node:crypto'
-import { PASSWORD_BANK_ALGORITHM, passwordOrigin, type PasswordBankBackup, type PasswordBankView, type PasswordProfile, type PasswordRiskKind } from '../shared/password-bank'
+import { PASSWORD_BANK_ALGORITHM, PASSWORD_CACHE_MAX_MINUTES, passwordOrigin, type PasswordBankBackup, type PasswordBankView, type PasswordProfile, type PasswordRiskKind } from '../shared/password-bank'
 
 export const PASSWORD_BANK_SETTING = 'password_bank_v1'
 export const PASSWORD_BANK_FLAG = 'password_manager_enabled'
 const MAX_SLOTS = 4096
-const MAX_CACHE_MS = 24 * 60 * 60 * 1000
-const SESSION_MS = 15 * 60 * 1000
+/** A cached password lives inside the unlock session and never outlasts it, so
+ *  the longest cache is the session itself. The session is not extended. */
+const SESSION_MS = PASSWORD_CACHE_MAX_MINUTES * 60 * 1000
+export { PASSWORD_CACHE_MAX_MINUTES }
 interface Registry {
   version: 1
   bankId: string
@@ -227,7 +229,9 @@ export class PasswordBank {
     })
   }
   private ttl(minutes: number) {
-    if (!Number.isInteger(minutes) || minutes < 1 || minutes * 60000 > MAX_CACHE_MS) throw new Error('Cache duration must be 1–1440 minutes')
+    if (!Number.isInteger(minutes) || minutes < 1 || minutes > PASSWORD_CACHE_MAX_MINUTES) {
+      throw new Error(`Cache duration must be 1–${PASSWORD_CACHE_MAX_MINUTES} minutes: the unlock session lasts ${PASSWORD_CACHE_MAX_MINUTES} minutes and a cached password ends with it`)
+    }
   }
   private put(slot: number, entropy: Buffer, ttlMinutes: number) {
     this.active()

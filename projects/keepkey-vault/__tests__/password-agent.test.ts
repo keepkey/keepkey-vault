@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import { createHmac } from 'node:crypto'
 import { PasswordBank, PASSWORD_BANK_FLAG } from '../src/bun/password-bank'
 import { PasswordBex } from '../src/bun/password-bex'
-import { PasswordAgent, passwordAgentHttp } from '../src/bun/password-agent'
+import { PasswordAgent, passwordAgentHttp, PASSWORD_AGENT_TOOLS } from '../src/bun/password-agent'
 import { passwordInventory } from '../src/shared/password-inventory'
 import { handleMcpRequest } from '../src/bun/mcp'
 
@@ -129,5 +129,34 @@ describe('separate default-off password feature and agent boundary', () => {
     f.bank.setEnabled(false)
     expect((await rpc('tools/list')).result.tools.some((t: any) => t.name.startsWith('password_'))).toBe(false)
     expect((await rpc('tools/call', { name: '__vault_password_fill_v1', arguments: {} })).error.code).toBe(-32601)
+  })
+})
+
+describe('agent cache duration (audit v6 A10)', () => {
+  test('a cache longer than the unlock session is refused with the reason, and the tools say the limit', async () => {
+    const f = await ready()
+    await expect(f.agent.invoke('password_generate', { count: 1, ttlMinutes: 60, expectedRevision: f.bank.view().revision })).rejects.toThrow('1–15 minutes')
+    await expect(f.agent.invoke('password_rehydrate', { id: f.id, ttlMinutes: 1440, expectedRevision: f.bank.view().revision })).rejects.toThrow('1–15 minutes')
+    for (const name of ['password_generate', 'password_rehydrate']) {
+      expect(PASSWORD_AGENT_TOOLS.find(t => t.name === name)!.description).toContain('ttlMinutes is 1–15')
+    }
+  })
+
+  test('a refused cache duration is checked before the device: no approval, no slot burned, no revision change', async () => {
+    const f = await ready()
+    const calls = f.deviceCalls(), revision = f.bank.view().revision, ready0 = f.bank.view().readySlots.length
+    await expect(f.agent.invoke('password_generate', { count: 2, ttlMinutes: 16, expectedRevision: revision })).rejects.toThrow('1–15 minutes')
+    await expect(f.agent.invoke('password_rehydrate', { id: f.id, ttlMinutes: 16, expectedRevision: revision })).rejects.toThrow('1–15 minutes')
+    expect(f.deviceCalls()).toBe(calls)
+    expect(f.bank.view().revision).toBe(revision)
+    expect(f.bank.view().readySlots.length).toBe(ready0)
+  })
+
+  test('over MCP, the agent gets the refusal and its reason as a tool error', async () => {
+    const f = await ready()
+    const res = await (await handleMcpRequest(new Request('http://localhost/mcp', { method: 'POST', body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call',
+      params: { name: 'password_generate', arguments: { count: 1, ttlMinutes: 60, expectedRevision: f.bank.view().revision } } }) }), {}, f.agent)).json() as any
+    expect(res.result.isError).toBe(true)
+    expect(JSON.stringify(res.result.content)).toContain('1–15 minutes')
   })
 })

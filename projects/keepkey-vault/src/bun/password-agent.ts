@@ -1,18 +1,19 @@
 import { randomUUID } from 'node:crypto'
-import type { PasswordAgentApproval, PasswordRiskKind } from '../shared/password-bank'
+import { PASSWORD_CACHE_MAX_MINUTES, type PasswordAgentApproval, type PasswordRiskKind } from '../shared/password-bank'
 import { PASSWORD_SERVICE_HELPERS, passwordServiceHelper } from '../shared/password-services'
 import { passwordInventory } from '../shared/password-inventory'
 import type { PasswordBank } from './password-bank'
 import type { PasswordBex } from './password-bex'
 
+const TTL_HELP = `ttlMinutes is 1–${PASSWORD_CACHE_MAX_MINUTES}: the unlock session lasts ${PASSWORD_CACHE_MAX_MINUTES} minutes from unlock and a cached password ends with it.`
 const string = { type: 'string' }, integer = { type: 'integer' }, boolean = { type: 'boolean' }
 const tool = (name: string, description: string, properties: Record<string, unknown>, required: string[] = []) => ({ name, description, inputSchema: { type: 'object', properties, required, additionalProperties: false } })
 export const PASSWORD_AGENT_TOOLS = [
   tool('password_profiles', 'Vault password metadata only: profiles, separate refill/review status, risk provenance and priority. Locked/disabled returns no accounts. Does not scan Chrome or return passwords.', { service: string, account: string, needsRotation: boolean, needsRefill: boolean, limit: integer, offset: integer }),
   tool('password_service_help', 'Fetch one compact, versioned migration helper (google, github, microsoft), or the helper catalog. Password values never appear.', { service: string }),
   tool('password_assign', 'Assign a ready KeepKey-generated slot to an exact login domain/account. This does not set the website password. Native bank must be unlocked.', { origin: string, account: string, reviewDays: integer, expectedRevision: integer }, ['origin', 'account', 'expectedRevision']),
-  tool('password_generate', 'Generate a bounded batch on KeepKey; each entry requires physical approval. Uses an existing unlocked bank.', { count: integer, ttlMinutes: integer, expectedRevision: integer }, ['count', 'ttlMinutes', 'expectedRevision']),
-  tool('password_rehydrate', 'Reproduce current or staged password into the session cache with device approval, without returning its value.', { id: string, pending: boolean, ttlMinutes: integer, expectedRevision: integer }, ['id', 'ttlMinutes', 'expectedRevision']),
+  tool('password_generate', 'Generate a bounded batch on KeepKey; each entry requires physical approval. Uses an existing unlocked bank. ' + TTL_HELP, { count: integer, ttlMinutes: integer, expectedRevision: integer }, ['count', 'ttlMinutes', 'expectedRevision']),
+  tool('password_rehydrate', 'Reproduce current or staged password into the session cache with device approval, without returning its value. ' + TTL_HELP, { id: string, pending: boolean, ttlMinutes: integer, expectedRevision: integer }, ['id', 'ttlMinutes', 'expectedRevision']),
   tool('password_rotation', 'Prepare, mark submitted BEFORE the website change, or cancel an unsubmitted rotation. Activation after fresh sign-in is done in Vault UI.', { id: string, action: { type: 'string', enum: ['prepare', 'submitted', 'cancel'] }, expectedRevision: integer }, ['id', 'action', 'expectedRevision']),
   tool('password_backup_export', 'Export an encrypted manifest, not password values. Prefer the skill CLI save-backup command to write this directly to a file without model output.', {}),
   tool('password_backup_saved', 'Acknowledge a revision only after its encrypted backup was saved. Does not claim the file is independently backed up.', { revision: integer }, ['revision']),

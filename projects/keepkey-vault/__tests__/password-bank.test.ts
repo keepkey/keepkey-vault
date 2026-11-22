@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import { createCipheriv, createHmac, pbkdf2Sync } from 'node:crypto'
 import { HDKey } from '@scure/bip32'
-import { PasswordBank, PASSWORD_BANK_FLAG, PASSWORD_BANK_SETTING } from '../src/bun/password-bank'
+import { PasswordBank, PASSWORD_BANK_FLAG, PASSWORD_BANK_SETTING, PASSWORD_CACHE_MAX_MINUTES } from '../src/bun/password-bank'
 import { passwordOrigin } from '../src/shared/password-bank'
 
 function fixture() {
@@ -176,6 +176,36 @@ describe('password bank release gates', () => {
     await expect(f.bank.generate(9, 5)).rejects.toThrow('1 and 8')
     await expect(f.bank.generate(1, 0)).rejects.toThrow('duration')
     expect(() => f.bank.assign('accounts.google.com', 'person@example.com', 90)).toThrow('already tracked')
+  })
+  // Audit v6 A10: the API took 1–1440 minutes but the cache never outlived the
+  // 15-minute unlock session, so anything above 15 was silently cut. It now
+  // takes only what it can honor, and says why.
+  test('cache duration is bounded by the unlock session, and a longer one is refused with the reason', async () => {
+    expect(PASSWORD_CACHE_MAX_MINUTES).toBe(15)
+    const f = fixture(); f.bank.setEnabled(true); await f.bank.unlock(true)
+    for (const minutes of [16, 60, 1440]) {
+      await expect(f.bank.generate(1, minutes)).rejects.toThrow('Cache duration must be 1–15 minutes: the unlock session lasts 15 minutes')
+    }
+    const before = f.bank.view().readySlots.length
+    await f.bank.generate(1, 15)
+    const slots = f.bank.view().readySlots
+    expect(slots.length).toBe(before + 1)
+    expect(slots.at(-1)!.cachedUntil).toBe(1_000_000 + 15 * 60000)
+  })
+  test('rehydrate refuses a cache longer than the session too', async () => {
+    const f = await assigned()
+    await expect(f.bank.rehydrate(f.id, false, 1440)).rejects.toThrow('1–15 minutes')
+    await f.bank.rehydrate(f.id, false, 15)
+  })
+  test('the session is not extended by caching: a password cached late still ends with the session', async () => {
+    const f = fixture(); f.bank.setEnabled(true); await f.bank.unlock(true)
+    f.advance(10 * 60000)
+    await f.bank.generate(1, 15)
+    // Reported expiry is the real one: session end, not 15 minutes from now.
+    expect(f.bank.view().readySlots.at(-1)!.cachedUntil).toBe(1_000_000 + 15 * 60000)
+    f.advance(5 * 60000)
+    expect(f.bank.view().unlocked).toBe(false)
+    expect(f.bank.view().readySlots).toEqual([])
   })
   test('failed persistence never acknowledges a feature change', () => {
     const f = fixture(), bank = new PasswordBank({ ...f.deps, write: () => {} })
