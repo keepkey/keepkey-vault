@@ -68,6 +68,7 @@ import {
 } from "../../shared/balance-reconciliation"
 import { ownerUsdAtAggregatePrice, selectedOwnerBalance } from "../lib/effective-balance"
 import { playChaChing } from "../lib/sounds"
+import { getDateLocale } from '../lib/date-locale'
 
 /** Error boundary wrapping AssetPage — ensures user can always go back to Dashboard */
 class AssetPageErrorBoundary extends Component<
@@ -2514,7 +2515,7 @@ function PersonalDashboard({ capabilities, isEmulator, onLoaded, watchOnly, watc
 						<circle cx="12" cy="12" r="3" />
 					</svg>
 					<Text fontSize="xs" color="kk.gold" fontWeight="500">
-						{t("watchOnlyBanner")}{displayedUpdatedAt ? ` · ${t("lastUpdated", { time: new Date(displayedUpdatedAt).toLocaleString(getNumberLocale(), { dateStyle: "medium", timeStyle: "short" }) })}` : ""}
+						{t("watchOnlyBanner")}{displayedUpdatedAt ? ` · ${t("lastUpdated", { time: new Date(displayedUpdatedAt).toLocaleString(getDateLocale(), { dateStyle: "medium", timeStyle: "short" }) })}` : ""}
 					</Text>
 				</Flex>
 			)}
