@@ -98,7 +98,7 @@ const rpc = Bun.serve({ hostname: '127.0.0.1', port: 0, idleTimeout: 0, async fe
       case 'getActivityScanState': payload = { running: false }; break
       case 'checkVaultDestination': payload = { valid: true }; break
       case 'matchAddress': payload = null; break
-      case 'buildTx': if (mode === 'build-error') throw new Error('Synthetic transaction build failed'); payload = { unsignedTx: { to: p.to, value: '0x' + BigInt(Math.round(Number(p.amount) * 1e18)).toString(16), gasLimit: '0x5208', gasPrice: '0x3b9aca00', chainId: 1, data: '0x', fixtureOnly: true }, fee: '0.000021', feeUsd: 0.0525 }; break
+      case 'buildTx': if (mode === 'build-error') throw new Error('Synthetic transaction build failed'); payload = { unsignedTx: { to: p.to, value: '0x' + BigInt(Math.round(Number(p.amount) * 1e18)).toString(16), gasLimit: '0x5208', gasPrice: '0x3b9aca00', chainId: 1, data: '0x', fixtureOnly: true }, fee: '0.000021' }; break
       case 'getSwapQuote': {
         if (mode === 'quote-stall') return never()
         if (mode === 'quote-error') throw new Error('Synthetic swap quote unavailable')

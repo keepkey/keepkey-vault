@@ -86,7 +86,7 @@ const emit = (name: string, payload: any) => { for (const receive of [...listene
 const event = async (name: string, payload: any) => { await act(async () => emit(name, payload)); await settle() }
 const build = async () => {
   await click('buildTransaction')
-  await act(async () => calls.at(-1)!.pending.resolve({ unsignedTx: { coin: 'Zcash', fixture: true }, fee: '0.00015', feeUsd: 0 }))
+  await act(async () => calls.at(-1)!.pending.resolve({ unsignedTx: { coin: 'Zcash', fixture: true }, fee: '0.00015' }))
   await settle()
   expect(button('signOnDevice').disabled).toBe(false)
 }

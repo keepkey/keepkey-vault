@@ -24,6 +24,7 @@ import { balanceUnverifiedReason, isBalanceUnverified } from "../../shared/balan
 import { normalizeAmountInput, usdToCryptoAmount } from '../../shared/locale'
 import { baseUnitsToDecimalString } from '../../shared/max-send'
 import { describeGasPriceError, networkGasPriceGwei } from '../../shared/gas-price-errors'
+import { feeFiatLabel, feeUsdFromNative } from '../../shared/fee-fiat'
 import { useZcashNu7Support } from '../hooks/useZcashNu7Support'
 import { parseSendQr } from '../../shared/send-qr'
 
@@ -641,6 +642,8 @@ export function SendForm({ chain, address, balance, balanceLoading = false, toke
 	// (only when both prices are known; never claim it without them).
 	const reviewAmount = currentSigningContext?.isMax ? maxSentAmount : currentSigningContext?.amount
 	const nativeUnitPrice = balance?.nativeBalanceUsd && parseFloat(balance.balance) > 0 ? balance.nativeBalanceUsd / parseFloat(balance.balance) : 0
+	// The fee is paid in the native asset: priced with the same native price as the warning below.
+	const feeLabelUsd = buildResult ? feeFiatLabel(feeUsdFromNative(buildResult.fee, nativeUnitPrice), fmtCompact) : ''
 	const feeOverQuarter = !!buildResult && !!currentSigningContext && !!reviewAmount && (currentSigningContext.isTokenSend
 		? nativeUnitPrice > 0 && (token?.priceUsd ?? 0) > 0 && Number(buildResult.fee) * nativeUnitPrice > Number(reviewAmount) * token!.priceUsd * 0.25
 		: Number(buildResult.fee) > Number(reviewAmount) * 0.25)
@@ -1102,8 +1105,8 @@ export function SendForm({ chain, address, balance, balanceLoading = false, toke
 							<Text fontSize="xs" color="kk.textSecondary">{t("fee")}</Text>
 							<Flex direction="column" align="flex-end">
 								<Text fontSize="xs" fontFamily="mono" color="kk.textPrimary">{formatBalance(buildResult.fee)} {chain.symbol}</Text>
-								{buildResult.feeUsd != null && buildResult.feeUsd > 0 && (
-									<Text fontSize="10px" fontFamily="mono" color="kk.textMuted">{fmtCompact(buildResult.feeUsd)}</Text>
+								{feeLabelUsd && (
+									<Text fontSize="10px" fontFamily="mono" color="kk.textMuted">{feeLabelUsd}</Text>
 								)}
 							</Flex>
 						</Flex>
