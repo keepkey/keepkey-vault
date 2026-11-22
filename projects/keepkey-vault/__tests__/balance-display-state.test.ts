@@ -127,3 +127,35 @@ describe('portfolioFaultChainIds (audit v4 H3)', () => {
     expect(portfolioFaultChainIds(undefined, chainFor).size).toBe(0)
   })
 })
+
+// OWNER rule 11-22: only ETH and Base token discovery is a wallet-wide fault. A token-only
+// failure anywhere else leaves the chain confirmed (its native was verified) and is not shown.
+test('token-only failures off ETH/Base are quiet; ETH/Base and real failures stay faults', async () => {
+  const { quietTokenOnlyFailures, portfolioBalanceSyncState } = await import('../src/shared/balance-display-state')
+  const tokensOnly = (caip: string) => ({ caip, reason: 'Token discovery unavailable', scope: 'tokens' })
+  const monad = quietTokenOnlyFailures({ degraded: true, failures: [tokensOnly('eip155:143/slip44:60')], staleChains: [] })
+  expect(monad.failures).toEqual([])
+  expect(monad.degraded).toBe(false)
+  expect(monad.quietTokenFailures.map(f => f.caip)).toEqual(['eip155:143/slip44:60'])
+  expect(portfolioBalanceSyncState(monad)).toBe('confirmed')
+
+  for (const caip of ['eip155:1/slip44:60', 'eip155:8453/slip44:60']) {
+    const global = quietTokenOnlyFailures({ degraded: true, failures: [tokensOnly(caip)], staleChains: [] })
+    expect(global.failures.map(f => f.caip)).toEqual([caip])
+    expect(global.degraded).toBe(true)
+  }
+  // A real (unscoped) failure on a quiet network is still a fault, and stale data still degrades.
+  const real = quietTokenOnlyFailures({ degraded: true, failures: [tokensOnly('eip155:137/slip44:60'), { caip: 'eip155:137/slip44:60', reason: 'node down' }], staleChains: [] })
+  expect(real.failures).toEqual([{ caip: 'eip155:137/slip44:60', reason: 'node down' }])
+  expect(real.degraded).toBe(true)
+  expect(quietTokenOnlyFailures({ degraded: true, failures: [tokensOnly('eip155:143/slip44:60')], staleChains: [{ caip: 'eip155:143/slip44:60' }] }).degraded).toBe(true)
+})
+
+test('a quiet token failure keeps the last known tokens and their value; real tokens win', async () => {
+  const { keepLastKnownTokens } = await import('../src/shared/balance-display-state')
+  const usdc = { caip: 'eip155:137/erc20:0xusdc', balanceUsd: 25 }
+  expect(keepLastKnownTokens({ tokens: undefined, balanceUsd: 10 }, { tokens: [usdc] })).toEqual({ tokens: [usdc], balanceUsd: 35 })
+  const fresh = { caip: 'eip155:137/erc20:0xdai', balanceUsd: 5 }
+  expect(keepLastKnownTokens({ tokens: [fresh], balanceUsd: 15 }, { tokens: [usdc] })).toEqual({ tokens: [fresh], balanceUsd: 15 })
+  expect(keepLastKnownTokens({ tokens: undefined, balanceUsd: 10 }, undefined)).toEqual({ tokens: undefined, balanceUsd: 10 })
+})
