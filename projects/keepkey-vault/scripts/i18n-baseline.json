@@ -1500,6 +1500,14 @@
     "components/Dashboard.tsx:mf5b37c9a"
   ],
   "missing": {
+    "ui:m7c0592c5": "es,fr,de,ja,zh,ko,pt,ru,it,pl,nl,th,tr,vi",
+    "ui:mccdfbfa0": "es,fr,de,ja,zh,ko,pt,ru,it,pl,nl,th,tr,vi",
+    "ui:mbcfd33e1": "es,fr,de,ja,zh,ko,pt,ru,it,pl,nl,th,tr,vi",
+    "ui:mb1540ccb": "es,fr,de,ja,zh,ko,pt,ru,it,pl,nl,th,tr,vi",
+    "ui:m74001adf": "es,fr,de,ja,zh,ko,pt,ru,it,pl,nl,th,tr,vi",
+    "ui:m2599ed87": "es,fr,de,ja,zh,ko,pt,ru,it,pl,nl,th,tr,vi",
+    "ui:m6163147c": "es,fr,de,ja,zh,ko,pt,ru,it,pl,nl,th,tr,vi",
+    "ui:m41ff7704": "es,fr,de,ja,zh,ko,pt,ru,it,pl,nl,th,tr,vi",
     "asset:zcashShield": "es,fr,de,ja,zh,ko,pt,ru,it,pl,nl,th,tr,vi",
     "ui:m10c0cc68": "es,fr,de,ja,zh,ko,pt,ru,it,pl,nl,th,tr,vi",
     "ui:m15f3cd9b": "es,fr,de,ja,zh,ko,pt,ru,it,pl,nl,th,tr,vi",
