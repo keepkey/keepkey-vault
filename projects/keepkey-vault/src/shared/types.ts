@@ -977,7 +977,6 @@ export interface EvmAddressSet {
 export interface BuildTxResult {
   unsignedTx: any
   fee: string
-  feeUsd?: number
 }
 
 export interface BroadcastResult {

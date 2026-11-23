@@ -58,7 +58,7 @@ const chain = CHAINS.find(c => c.id === 'ethereum')!
 const owner = '0x' + '11'.repeat(20), otherOwner = '0x' + '22'.repeat(20), recipient = '0x' + '33'.repeat(20)
 const balance = { chainId: chain.id, balance: '10', balanceUsd: 10000, address: owner, syncState: 'confirmed' }
 const token = { caip: `${chain.networkId}/erc20:0x${'44'.repeat(20)}`, symbol: 'TEST', balance: '10', balanceUsd: 10, decimals: 18 }
-const result = { unsignedTx: { fixture: 'transaction' }, fee: '1', feeUsd: 1 }
+const result = { unsignedTx: { fixture: 'transaction' }, fee: '1' }
 let props: any, container: HTMLDivElement, root: ReturnType<typeof createRoot>
 const settle = async (ms = 0) => { await act(async () => { await new Promise(resolve => setTimeout(resolve, ms)) }) }
 const render = async (patch = {}) => { props = { ...props, ...patch }; await act(async () => root.render(<SendForm {...props} />)); await settle() }
