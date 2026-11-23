@@ -90,6 +90,11 @@ export function MobilePairingDialog({ open, onClose }: MobilePairingDialogProps)
 				borderRadius="2xl"
 				p="6"
 				gap="4"
+				role="dialog"
+				aria-modal="true"
+				aria-label={t("mobilePairing.title")}
+				maxH="calc(100% - 2rem)"
+				overflowY="auto"
 				maxW="440px"
 				w="90vw"
 				onClick={(e) => e.stopPropagation()}
@@ -107,6 +112,7 @@ export function MobilePairingDialog({ open, onClose }: MobilePairingDialogProps)
 					</Flex>
 					<Box
 						as="button"
+						aria-label={t("mobile.close")}
 						color="kk.textSecondary"
 						cursor="pointer"
 						_hover={{ color: "kk.textPrimary" }}
@@ -146,7 +152,7 @@ export function MobilePairingDialog({ open, onClose }: MobilePairingDialogProps)
 							<Text fontSize="xs" color="kk.textMuted" mb="1">
 								{t("mobilePairing.codeLabel")}
 							</Text>
-							<Text fontSize="3xl" fontWeight="700" letterSpacing="wider" color="kk.gold" fontFamily="mono">
+							<Text userSelect="all" fontSize="3xl" fontWeight="700" letterSpacing="wider" color="kk.gold" fontFamily="mono">
 								{result.code}
 							</Text>
 							{timeLeft && (
@@ -157,31 +163,20 @@ export function MobilePairingDialog({ open, onClose }: MobilePairingDialogProps)
 						</Box>
 
 						{/* QR code */}
-						<Box textAlign="center">
+						<Box w="100%" textAlign="center">
 							<Text fontSize="xs" color="kk.textMuted" mb="2">
 								{t("mobilePairing.scanQr")}
 							</Text>
 							<Box
 								mx="auto"
-								w="240px"
-								h="240px"
+								w="fit-content"
+								maxW="100%"
+								css={{ "& svg": { display: "block", maxWidth: "100%", height: "auto" } }}
 								bg="white"
 								borderRadius="lg"
 								p="2"
 								dangerouslySetInnerHTML={{ __html: qrSvg }}
 							/>
-						</Box>
-
-						{/* Instructions */}
-						<Box bg="kk.bg" borderRadius="lg" border="1px solid" borderColor="kk.border" px="4" py="3" w="100%">
-							<Text fontSize="xs" fontWeight="600" color="kk.gold" mb="2">
-								{t("mobilePairing.instructions")}
-							</Text>
-							<VStack align="start" gap="1" fontSize="xs" color="kk.textSecondary">
-								<Text>1. {t("mobilePairing.step1")}</Text>
-								<Text>2. {t("mobilePairing.step2")}</Text>
-								<Text>3. {t("mobilePairing.step3")}</Text>
-							</VStack>
 						</Box>
 
 						{/* Security note */}
