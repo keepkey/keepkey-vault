@@ -68,14 +68,17 @@ export function pioneerGasQuoteWei(data: unknown): bigint | null {
 }
 
 /**
- * The least a node accepts, applied after the user's fee level (the slow level
- * signs 80%): with the floors at the network minimum, 80% of it would be
- * refused. BSC validators include from 0.05 gwei; on Avalanche the quote with
- * its headroom. Other chains keep their
- * floors above the network minimum, so the slow level stays as it was.
+ * The least we sign, applied after the user's fee level (the slow level signs
+ * 80%): with the floors at the network minimum, 80% of it would be refused or
+ * left unmined. On BSC the quote itself, never under the validators' 0.05 gwei;
+ * on Avalanche the quote with its headroom. Other chains keep their floors
+ * above the network minimum, so the slow level stays as it was.
  */
 export function swapGasMinimumWei(chainId: string, quoteWei: bigint | null | undefined): bigint {
-  if (chainId === 'bsc') return swapGasFloorWei('bsc')
+  if (chainId === 'bsc') {
+    const floor = swapGasFloorWei('bsc')
+    return quoteWei != null && quoteWei > floor ? quoteWei : floor
+  }
   if (chainId === 'avalanche' && quoteWei != null && quoteWei > 0n) return avalancheWithHeadroom(quoteWei)
   return 0n
 }
