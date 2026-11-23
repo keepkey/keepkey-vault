@@ -196,6 +196,7 @@ export function normalizeMeta(tx: any, activityType = normalizeActivityType(tx),
     // THOR/Maya history reports the auth fee ('0'); the network charges its
     // native fee at the bank layer on every send (audit v4 H10). A fee the
     // wallet did not pay (someone else sent the tx) is not ours to show.
+    walletPaidFee,
     fee: walletPaidFee ? withNativeTxFee(tx.fee != null ? String(tx.fee) : undefined, activityType, chain) : undefined,
     direction: activityType === 'send' ? 'sent' : activityType === 'contract' ? 'contract' : 'received',
     // Counterparties Pioneer already provides per tx — previously discarded, so

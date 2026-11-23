@@ -114,9 +114,13 @@ test('stored receive rows read no fee, and contract rows read as contract calls'
 		const call = { direction: 'received', value: '0', fee: '1', from: [own], to: [venice], caip: base.caip }
 		const own0 = classifyHistoryTx(call, own, base.caip)
 		scan('BASE-OWN-CALL', own0.type, { ...normalizeMeta(call, own0.type, base, own0.walletPaidFee), chainId: 'base', chainSymbol: 'ETH', networkId: base.networkId })
+		const withdrawal = { ...call, value: '1000', fee: '2' }
+		const incoming = classifyHistoryTx(withdrawal, own, base.caip)
+		scan('BASE-OWN-RECEIVE', incoming.type, { ...normalizeMeta(withdrawal, incoming.type, base, incoming.walletPaidFee), chainId: 'base', chainSymbol: 'ETH' })
 		const rows = db.getRecentActivityFromLog(undefined, undefined, wallet.deviceId, wallet.walletId)
 		const get = (txid: string) => rows.find(r => r.txid === txid)
 		expect(get('BASE-OLD-RECEIVE')?.fee).toBeUndefined()
+		expect(get('BASE-OWN-RECEIVE')?.fee).toBe('2')
 		expect(get('BASE-SEND')?.fee).toBe('3780000000000')
 		expect(get('BASE-CONTRACT')?.type).toBe('contract')
 		expect(get('BASE-CONTRACT')?.fee).toBe('17250000000000')

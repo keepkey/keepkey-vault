@@ -1298,7 +1298,7 @@ export function ZcashPrivacyTab({ initialPage, initialSection, embedded = false,
 											<>
 												<button className="max" aria-pressed={deshieldRecipient === myTransparentAddr}
 													onClick={() => setDeshieldRecipient(myTransparentAddr)}
-													title={`Your own t-addr: ${myTransparentAddr}`}>{uiText("My public address")}</button>
+													title={myTransparentAddr}>{uiText("My public address")}</button>
 												<button className="max" aria-pressed={deshieldRecipient !== myTransparentAddr}
 													onClick={() => setDeshieldRecipient("")}>{uiText("Someone else")}</button>
 											</>
