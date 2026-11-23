@@ -2055,7 +2055,7 @@ export function getPriorEvmCalls(from: string, to: string, chainId: number): { c
   }
 }
 
-const VALID_ACTIVITY_TYPES = new Set(['send', 'receive', 'swap', 'sign', 'message', 'approve', 'broadcast', 'shield', 'unshield'])
+const VALID_ACTIVITY_TYPES = new Set(['send', 'receive', 'swap', 'sign', 'message', 'approve', 'broadcast', 'shield', 'unshield', 'contract'])
 
 /** Query api_log entries that have activity_type set + swap_history, merged by timestamp */
 // Collapse two api_log rows describing the SAME on-chain txid into one record
@@ -2123,6 +2123,10 @@ export function dismissActivity(id: string, deviceId?: string, walletId?: string
  *  rule normalizeMeta writes (audit v6 R6). Rows without meta.chainId fall back
  *  to the scan route (`history/<chainId>`), as the chain filter above does. */
 function scanRowFee(meta: any, activityType: string, route: string | null): string | undefined {
+  // The sender pays the fee: a receive carries none of ours (audit v6 R5). New
+  // scans store none; this also covers rows stored before, which a rescan
+  // only rewrites while they are inside the window Pioneer returns.
+  if (activityType === 'receive') return undefined
   const chainId = meta?.chainId ?? route?.match(/^history\/(.+)$/)?.[1]
   const chain = chainId ? CHAINS.find(c => c.id === chainId) : undefined
   return withNativeTxFee(meta?.fee ?? undefined, activityType, chain)

@@ -2416,5 +2416,6 @@
   "m4862881e": "Parte {{current}} de {{total}} · Continue escaneando até concluir",
   "m65451a82": "O QR de transação do Electrum exige uma PSBT ou uma transação",
   "m1643fcfa": "Grande demais para um QR estático do Electrum; escolha UR ou BBQr animado",
-  "m9a5ef61b": "Partes BBQr demais"
+  "m9a5ef61b": "Partes BBQr demais",
+  "m976ece5d": "Chamada de contrato"
 }

@@ -48,6 +48,7 @@ const TYPE_CONFIG: Record<string, { color: string }> = {
   approve: { color: '#e08c7b' },
   shield: { color: '#6ee787' },
   unshield: { color: '#e9c46a' },
+  contract: { color: '#9aa3b2' },
 }
 
 const STATUS_CONFIG: Record<string, { color: string }> = {
@@ -71,6 +72,7 @@ function typeLabel(type: string, uiText: UiText): string {
     case 'approve': return uiText("Approve")
     case 'shield': return uiText("Shield")
     case 'unshield': return uiText("Unshield")
+    case 'contract': return uiText("Contract call")
     default: return uiText("Signed") // same fallback as TYPE_CONFIG.sign
   }
 }
