@@ -87,6 +87,7 @@ const isBitcoin = (c: ChainDef) => c.networkId === BTC_NETWORK_ID
 // addition (Solana SPL, etc.) only needs editing in one place.
 import { parseCaip } from '../shared/swap-discovery'
 import { relayFallbackTip, relaySignedFees } from './relay-fees'
+import { pioneerGasQuoteWei, swapGasFallbackWei, swapGasFloorWei, swapGasMinimumWei, swapGasPriceWei } from './swap-gas-floor'
 import {
   DEFAULT_SLIPPAGE_BPS,
   MAX_SLIPPAGE_BPS,
@@ -126,23 +127,6 @@ function formatWei(wei: bigint, decimals = 18): string {
   const frac = wei % 10n ** BigInt(decimals)
   const fracStr = frac.toString().padStart(decimals, '0').slice(0, 6).replace(/0+$/, '')
   return fracStr ? `${whole}.${fracStr}` : `${whole}`
-}
-
-/** Chain-aware minimum gas price floors (gwei) — enforced even when RPC/Pioneer report lower.
- *  L2s and less-used chains frequently report unrealistically low fees that cause mempool drops.
- *  ETH mainnet floor raised from 1 → 3: 1 gwei txs sit in mempool on busy days and time out.
- *  L2 floors raised so legacy-gas fallback path doesn't ship sub-base-fee txs. */
-const MIN_GAS_GWEI: Record<string, number> = {
-  ethereum: 3,
-  polygon: 30,
-  avalanche: 25,
-  bsc: 3,
-  base: 0.05,        // L2 base fees are sub-gwei; floor still must beat them
-  arbitrum: 0.1,
-  optimism: 0.05,
-  gnosis: 2,
-  monad: 50,
-  hyperliquid: 0.1,
 }
 
 /** Chain-aware gas limits for depositWithExpiry — L2s need more for L1 data posting */
@@ -1613,8 +1597,7 @@ async function buildRelaySwapTx(
   }
   const gasLimit = bufferedSwapGasLimit(relay.gasLimit || RELAY_GAS_LIMIT_FALLBACK[fromChain.id] || '150000', relay.data)
   console.log(`${TAG} relay gasLimit: provided=${relay.gasLimit} resolved=${gasLimit} chain=${fromChain.id}`)
-  const fallbackGwei = MIN_GAS_GWEI[fromChain.id] ?? 10
-  const fallbackGasPrice = BigInt(Math.round(fallbackGwei * 1e9))
+  const floorGasPrice = swapGasFloorWei(fromChain.id)
   // Firmware EIP-1559 signing is broken for chainId >= 256: the firmware hashes
   // only the LSB of chainId instead of the full big-endian RLP encoding, so the
   // signature recovers to a wrong address on Base (8453), Arbitrum (42161), and
@@ -1662,18 +1645,13 @@ async function buildRelaySwapTx(
     const feeData = eip1559Ok ? await getEvmFeeData(rpcUrl) : null
     if (feeData) {
       // Floor maxFeePerGas at 2x chain min (so we still beat base on quiet chains)
-      const floor1559 = fallbackGasPrice * 2n
+      const floor1559 = floorGasPrice * 2n
       maxFeePerGas = toHex(feeData.maxFeePerGas > floor1559 ? feeData.maxFeePerGas : floor1559)
       maxPriorityFeePerGas = toHex(feeData.maxPriorityFeePerGas)
       swapLog(`${TAG} Relay tx: using EIP-1559 from RPC (maxFee=${feeData.maxFeePerGas}, prio=${feeData.maxPriorityFeePerGas})`)
     } else {
       // Chain doesn't support eth_feeHistory — fall back to legacy gasPrice with floor
-      try {
-        const gp = await getEvmGasPrice(rpcUrl)
-        gasPrice = toHex(gp < fallbackGasPrice ? fallbackGasPrice : gp)
-      } catch {
-        gasPrice = toHex(fallbackGasPrice)
-      }
+      gasPrice = toHex(swapGasPriceWei(fromChain.id, await getEvmGasPrice(rpcUrl).catch(() => null)))
     }
   }
 
@@ -1682,15 +1660,10 @@ async function buildRelaySwapTx(
     try {
       const pioneer = await getPioneer()
       const gp = await pioneer.GetGasPriceByNetwork({ networkId: fromChain.networkId })
-      const gpData = gp?.data
-      const gpGwei = typeof gpData === 'object'
-        ? parseFloat(gpData.average || gpData.fast || String(fallbackGwei))
-        : parseFloat(gpData || String(fallbackGwei))
-      const gpWei = BigInt(Math.round((isNaN(gpGwei) ? fallbackGwei : gpGwei) * 1e9))
-      gasPrice = toHex(gpWei < fallbackGasPrice ? fallbackGasPrice : gpWei)
+      gasPrice = toHex(swapGasPriceWei(fromChain.id, pioneerGasQuoteWei(gp?.data)))
     } catch (e: any) {
-      console.warn(`${TAG} Pioneer gas price failed for relay tx, using ${fallbackGwei} gwei floor: ${e.message}`)
-      gasPrice = toHex(fallbackGasPrice)
+      console.warn(`${TAG} Pioneer gas price failed for relay tx, using the ${fromChain.id} fallback: ${e.message}`)
+      gasPrice = toHex(swapGasFallbackWei(fromChain.id))
     }
   }
 
@@ -2048,39 +2021,36 @@ async function buildEvmSwapTx(
   // See buildRelaySwapTx comment and ethereum.c for details.
   const eip1559Ok = chainId < 256
 
-  const fallbackGwei = MIN_GAS_GWEI[fromChain.id] ?? 10
-  const fallbackGasPrice = BigInt(Math.round(fallbackGwei * 1e9))
-  let gasPrice: bigint = fallbackGasPrice
+  // Floor over a live quote, conservative fallback without one (swap-gas-floor.ts).
+  let quoteWei: bigint | null = null
   let maxFeePerGas: bigint | undefined
   let maxPriorityFeePerGas: bigint | undefined
 
   if (rpcUrl) {
     const feeData = eip1559Ok ? await getEvmFeeData(rpcUrl) : null
     if (feeData) {
-      const floor1559 = fallbackGasPrice * 2n
+      const floor1559 = swapGasFloorWei(fromChain.id) * 2n
       maxFeePerGas = feeData.maxFeePerGas > floor1559 ? feeData.maxFeePerGas : floor1559
       maxPriorityFeePerGas = feeData.maxPriorityFeePerGas
       swapLog(`${TAG} Using EIP-1559 (maxFee=${maxFeePerGas}, prio=${maxPriorityFeePerGas}) for ${fromChain.id}`)
     } else {
-      try { gasPrice = await getEvmGasPrice(rpcUrl) } catch (e: any) {
-        console.warn(`${TAG} Failed to fetch gas price via RPC, using ${fallbackGwei} gwei fallback for ${fromChain.id}: ${e.message}`)
+      try { quoteWei = await getEvmGasPrice(rpcUrl) } catch (e: any) {
+        console.warn(`${TAG} Failed to fetch gas price via RPC, using the ${fromChain.id} fallback: ${e.message}`)
       }
     }
   } else {
     try {
       const gp = await pioneer.GetGasPriceByNetwork({ networkId: fromChain.networkId })
-      const gpData = gp?.data
-      const gpGwei = typeof gpData === 'object' ? parseFloat(gpData.average || gpData.fast || String(fallbackGwei)) : parseFloat(gpData || String(fallbackGwei))
-      gasPrice = BigInt(Math.round((isNaN(gpGwei) ? fallbackGwei : gpGwei) * 1e9))
+      quoteWei = pioneerGasQuoteWei(gp?.data)
     } catch (e: any) {
-      console.warn(`${TAG} Failed to fetch gas price via Pioneer, using ${fallbackGwei} gwei fallback for ${fromChain.id}: ${e.message}`)
+      console.warn(`${TAG} Failed to fetch gas price via Pioneer, using the ${fromChain.id} fallback: ${e.message}`)
     }
   }
 
-  // Enforce minimum floor on legacy path
-  if (!maxFeePerGas && gasPrice < fallbackGasPrice) {
-    swapLog(`${TAG} Gas price ${gasPrice} below floor ${fallbackGasPrice} (${fallbackGwei} gwei) — using floor`)
-    gasPrice = fallbackGasPrice
+  // Legacy path: the quote raised to the chain floor, or the fallback without a quote.
+  let gasPrice: bigint = swapGasPriceWei(fromChain.id, quoteWei)
+  if (!maxFeePerGas && quoteWei != null && gasPrice !== quoteWei) {
+    swapLog(`${TAG} Gas price ${quoteWei} below floor — using ${gasPrice}`)
   }
 
   // Apply user fee level (1-9: 1-2 = slow, 8-9 = fast). Scales whichever fee field is in use.
@@ -2094,6 +2064,9 @@ async function buildEvmSwapTx(
     maxPriorityFeePerGas = feeLevelMul(maxPriorityFeePerGas!)
   } else {
     gasPrice = feeLevelMul(gasPrice)
+    // The slow level must not sign under what the network accepts.
+    const minimum = swapGasMinimumWei(fromChain.id, quoteWei)
+    if (gasPrice < minimum) gasPrice = minimum
   }
 
   let nonce: number | undefined

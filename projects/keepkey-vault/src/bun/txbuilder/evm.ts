@@ -228,13 +228,19 @@ export async function buildEvmTx(
   // minimum use the quote itself as the floor: eth_gasPrice is the base fee
   // plus a small tip, so the slow discount would bid under the base fee
   // (Arbitrum rejects that transaction; OP Stack chains leave it unmined).
-  // Ethereum has no floor: it signs the live quote (often well under 1 gwei).
+  // The old 3 gwei (BSC) and 25 gwei (Avalanche) floors were 10–30× the quote
+  // (audit v6 B12). BSC keeps only its validators' minimum (0.05 gwei, bsc
+  // miner.GasPrice default). Avalanche has no fixed minimum since ACP-176: the
+  // quote (base fee + tip) is the floor, with 25% headroom, since its legacy tx
+  // stalls if the base fee rises past it while the user reviews on the device.
+  // Polygon keeps 30 gwei: its nodes refuse tips under 25 gwei (PIP-35).
   const MIN_GAS_WEI: Record<number, bigint> = {
-    56: BigInt(3e9),     // BSC
+    56: 50_000_000n,     // BSC
     137: BigInt(30e9),   // Polygon
-    43114: BigInt(25e9), // Avalanche
   }
-  const minGas = MIN_GAS_WEI[chainId] ?? quotedGasPrice
+  const minGas = chainId === 43114
+    ? quotedGasPrice * 125n / 100n // Avalanche
+    : MIN_GAS_WEI[chainId] ?? quotedGasPrice
   if (gasPrice < minGas) {
     console.log(`${TAG} Gas price ${gasPrice} below floor ${minGas} — using floor`)
     gasPrice = minGas
