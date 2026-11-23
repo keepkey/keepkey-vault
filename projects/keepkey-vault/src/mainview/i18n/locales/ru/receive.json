@@ -9,11 +9,18 @@
 	"editDerivationPath": "Редактировать путь деривации",
 	"checkDevice": "Проверка устройства...",
 	"verifyOnDevice": "Проверить на устройстве",
+	"verifyCancelled": "Проверка отменена на KeepKey. Адрес не подтверждён.",
+	"verifyNoAnswer": "KeepKey не ответил. Проверьте его экран и попробуйте снова. Адрес не подтверждён.",
+	"verifyDeviceLost": "KeepKey не отвечает. Переподключите его и попробуйте снова. Адрес не подтверждён.",
+	"verifyFailed": "Не удалось показать адрес на KeepKey. Адрес не подтверждён.",
+	"verifyFailedDetail": "Не удалось показать адрес на KeepKey ({{detail}}). Адрес не подтверждён.",
+	"verifyNotConfirmedAfter": "{{detail}} Адрес не подтверждён.",
 	"derivingAddress": "Получение адреса...",
 	"noAddressDerived": "Адрес ещё не получен",
 	"deriveAddress": "Получить адрес",
 	"account": "Аккаунт {{index}}",
 	"btcAccountType": {
-		"learnMore": "Подробнее"
+		"learnMore": "Подробнее",
+		"recommendation": "Не уверены? Используйте Native SegWit (bc1…) — у него самые низкие комиссии, и его поддерживают все современные кошельки и биржи."
 	}
 }

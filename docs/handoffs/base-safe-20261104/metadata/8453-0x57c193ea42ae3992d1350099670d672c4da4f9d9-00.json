@@ -1,0 +1,26 @@
+{
+  "display": {
+    "formats": {
+      "SafeTx(address to,uint256 value,bytes data,uint8 operation,uint256 safeTxGas,uint256 baseGas,uint256 gasPrice,address gasToken,address refundReceiver,uint256 nonce)": {
+        "intent": "Approve Safe transaction",
+        "fields": [
+          {
+            "path": "data",
+            "label": "Safe call",
+            "format": "calldata",
+            "params": {
+              "calleePath": "to",
+              "amountPath": "value",
+              "spenderPath": "@.to"
+            }
+          },
+          {
+            "path": "nonce",
+            "label": "Safe nonce",
+            "format": "raw"
+          }
+        ]
+      }
+    }
+  }
+}

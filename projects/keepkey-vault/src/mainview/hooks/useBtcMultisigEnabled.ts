@@ -14,15 +14,20 @@ export function useBtcMultisigEnabled(): boolean {
         const settings = await rpcRequest<AppSettings>("getAppSettings");
         if (active && revision === current)
           setEnabled(settings.btcMultisigEnabled === true);
-      } catch {
-        if (active && revision === current) setEnabled(false);
-      }
+      } catch { /* Keep the last confirmed preference; the backend gates every operation. */ }
+    };
+    const settingsChanged = (event: Event) => {
+      const settings = (event as CustomEvent<Partial<AppSettings>>).detail;
+      if (typeof settings?.btcMultisigEnabled === 'boolean') {
+        revision++;
+        setEnabled(settings.btcMultisigEnabled);
+      } else void refresh();
     };
     void refresh();
-    window.addEventListener("keepkey-settings-changed", refresh);
+    window.addEventListener("keepkey-settings-changed", settingsChanged);
     return () => {
       active = false;
-      window.removeEventListener("keepkey-settings-changed", refresh);
+      window.removeEventListener("keepkey-settings-changed", settingsChanged);
     };
   }, []);
   return enabled;

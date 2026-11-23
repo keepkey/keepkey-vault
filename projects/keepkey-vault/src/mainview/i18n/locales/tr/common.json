@@ -31,5 +31,8 @@
 	"numberFormat": "Sayı biçimi",
 	"usdValues": "Değerler USD olarak gösterilir. Bölgesel sayı biçimini aşağıdan değiştirebilirsiniz.",
 	"somethingWentWrong": "Bir hata oluştu",
-	"reload": "Yeniden yükle"
+	"reload": "Yeniden yükle",
+	"signingCancelled": "İşlem KeepKey'inizde iptal edildi.",
+	"signingDeviceLost": "KeepKey'iniz yanıt vermeyi bıraktı. Çıkarın, yeniden takın, ardından uygulamayı yeniden başlatıp tekrar deneyin — bu genellikle bir yazılım güncellemesinden hemen sonra gerekir.",
+	"signingReconnectHint": "Hâlâ başarısız mı? KeepKey'inizi çıkarın, yeniden bağlayın, ardından uygulamayı yeniden başlatıp tekrar deneyin."
 }

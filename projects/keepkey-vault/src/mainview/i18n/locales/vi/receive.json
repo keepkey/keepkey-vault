@@ -9,11 +9,18 @@
 	"editDerivationPath": "Chỉnh sửa đường dẫn dẫn xuất",
 	"checkDevice": "Kiểm tra thiết bị...",
 	"verifyOnDevice": "Xác minh trên thiết bị",
+	"verifyCancelled": "Đã hủy xác minh trên KeepKey. Địa chỉ chưa được xác nhận.",
+	"verifyNoAnswer": "KeepKey không phản hồi. Hãy kiểm tra màn hình rồi thử lại. Địa chỉ chưa được xác nhận.",
+	"verifyDeviceLost": "KeepKey không phản hồi. Hãy kết nối lại rồi thử lại. Địa chỉ chưa được xác nhận.",
+	"verifyFailed": "Không thể hiển thị địa chỉ trên KeepKey. Địa chỉ chưa được xác nhận.",
+	"verifyFailedDetail": "Không thể hiển thị địa chỉ trên KeepKey ({{detail}}). Địa chỉ chưa được xác nhận.",
+	"verifyNotConfirmedAfter": "{{detail}} Địa chỉ chưa được xác nhận.",
 	"derivingAddress": "Đang dẫn xuất địa chỉ...",
 	"noAddressDerived": "Chưa có địa chỉ được dẫn xuất",
 	"deriveAddress": "Dẫn xuất địa chỉ",
 	"account": "Tài khoản {{index}}",
 	"btcAccountType": {
-		"learnMore": "Tìm hiểu thêm"
+		"learnMore": "Tìm hiểu thêm",
+		"recommendation": "Không chắc? Hãy dùng Native SegWit (bc1…) — phí thấp nhất và được mọi ví và sàn giao dịch hiện đại hỗ trợ."
 	}
 }

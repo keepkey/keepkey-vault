@@ -44,6 +44,23 @@ const DEVICE_PATTERNS = [
 	/failed to (open|claim)|cannot (open|read|claim)/i,
 ]
 
+export type DeviceErrorKind = 'cancelled' | 'invalidAddress' | 'noAnswer' | 'deviceLost' | 'other'
+
+/** Which recovery a device failure needs, for address verification. Uses the same patterns as
+ *  describeSigningError below; verify-address-error.test.ts checks the two stay in step. */
+export function classifyDeviceError(e: unknown): DeviceErrorKind {
+	const raw = deviceErrorText(e)
+	if (CANCEL_PATTERNS.some(r => r.test(raw))) return 'cancelled'
+	if (ADDRESS_PATTERNS.some(r => r.test(raw))) return 'invalidAddress'
+	if (CLIENT_TIMEOUT.test(raw)) return 'noAnswer'
+	if (DEVICE_PATTERNS.some(r => r.test(raw))) return 'deviceLost'
+	return 'other'
+}
+
+export function deviceErrorText(e: unknown): string {
+	return ((e as any)?.message ?? String(e ?? '')).toString().trim()
+}
+
 /**
  * Turn a thrown signing error into a localized, actionable message.
  * Pass the component's `t` so the strings live in i18n (English defaults inline
@@ -53,7 +70,8 @@ export function describeSigningError(e: unknown, t: Translate): string {
 	const raw = ((e as any)?.message ?? String(e ?? '')).toString().trim()
 
 	if (CANCEL_PATTERNS.some(r => r.test(raw))) {
-		return t('signingCancelled', { defaultValue: 'Transaction cancelled on your KeepKey.' })
+		// Shared by Send, Staking and Names: these three live in `common`, not in each caller's namespace (audit v6 U7).
+		return t('signingCancelled', { ns: 'common', defaultValue: 'Transaction cancelled on your KeepKey.' })
 	}
 
 	if (ADDRESS_PATTERNS.some(r => r.test(raw))) {
@@ -72,6 +90,7 @@ export function describeSigningError(e: unknown, t: Translate): string {
 
 	if (DEVICE_PATTERNS.some(r => r.test(raw))) {
 		return t('signingDeviceLost', {
+			ns: 'common',
 			defaultValue:
 				'Your KeepKey stopped responding. Unplug it, plug it back in, then restart the app and try again — this is often needed right after a firmware update.',
 		})
@@ -79,6 +98,7 @@ export function describeSigningError(e: unknown, t: Translate): string {
 
 	const detail = raw || t('signingFailed', { defaultValue: 'Signing failed' })
 	const hint = t('signingReconnectHint', {
+		ns: 'common',
 		defaultValue:
 			'Still failing? Unplug your KeepKey, reconnect it, then restart the app and try again.',
 	})

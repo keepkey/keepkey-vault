@@ -1,0 +1,12 @@
+[erc7730] chain 1 0x1111111111111111111111111111111111111111 0xbb8310d4: typed-data definition 0x7a50947025182c10… checked
+(pass) Safe owner approvals with authenticated inner definitions > nested metadata returns to the batch and describes its following call [24.95ms]
+(pass) Safe owner approvals with authenticated inner definitions > delegatecalls, unknown MultiSend targets and malformed batches are refused in preflight [1.02ms]
+(pass) Safe owner approvals with authenticated inner definitions > a Safe deployment or schema substitution gets no metadata [0.21ms]
+[erc7730] chain 1 0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48 0xa9059cbb: inner definition 0xb3f68176dec73456… checked
+[erc7730] chain 1 0x1111111111111111111111111111111111111111 0xbb8310d4: typed-data definition 0x7a50947025182c10… checked
+(pass) Safe owner approvals with authenticated inner definitions > the card describes device review, and restores the raw-data explanation after refusal [14.31ms]
+
+ 135 pass
+ 0 fail
+ 602 expect() calls
+Ran 135 tests across 7 files. [2.69s]

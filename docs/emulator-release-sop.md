@@ -1,5 +1,11 @@
 # Bundled Emulator Release SOP
 
+Owner policy, 2026-11-18: **the default bundled emulator always comes from the
+latest `alpha` of `BitHighlander/keepkey-firmware`.** Resolve that branch once,
+qualify its exact commit, and record the immutable artifact and library hashes.
+An older certified emulator is not a fallback when the current alpha artifact
+is missing or failed. This policy supersedes the previous fixed-source bundle.
+
 The Vault release carries a certified KeepKey emulator library. Users must not
 need to install `libkkemu` separately. Emulator artifact provenance and package
 contents are blocking Vault release gates.
@@ -23,9 +29,10 @@ with an encrypted flash image named `build-<first 16 hash characters>`. A build
 may use only its own flash through the normal Vault wallet selector. Import a
 test seed into that build's flash if cross-version signing comparisons require
 the same addresses. If startup fails, Vault restores the previous build and
-flash when possible; record any failure before retrying. The legacy
-`~/.keepkey/emulator/libkkemu.*` override and bundled release library still
-work when no development build is selected.
+flash when possible; record any failure before retrying. With no development
+build selected, Vault uses the bundled library. The legacy
+`~/.keepkey/emulator/libkkemu.*` path is a fallback for runs without a bundle.
+To use that library in a packaged build, install and select it in **Change Version…**.
 
 Emulator QA does not satisfy a physical OLED or signed firmware update gate.
 Record the hardware firmware version and test result separately before
@@ -33,22 +40,31 @@ marking a release candidate ready.
 
 ## Release identity
 
-For the current Vault release train, the approved emulator release is
-`7.17.0`. The complete artifact set is:
+The emulator version comes from the frozen fork-alpha source (currently
+`7.17.0`). The complete artifact set is:
 
 - `libkkemu.dylib` — universal macOS `arm64` + `x86_64`
 - `libkkemu.dll` — Windows `x86_64`
-- CI handoff name: `emulator-build-input-libkkemu-7.17.0-win-x64.dll`
+- CI handoff: `certified-emulator-alpha-<full firmware SHA>`, containing both
+  libraries and `source-receipt.json` from one successful certification run.
 
-The expected emulator release must be declared by the Vault release branch and
-must agree with the CI artifact name and the runtime version reported by the
-emulator. The firmware submodule version is not a source of truth for this
-decision.
+The source must equal the live fork-alpha head at certification and intake.
+Its firmware CI must have passed on that exact head. If alpha advances during
+either operation, repeat for its new head. The firmware submodule version is
+not a source of truth for this decision.
 
 The controlling machine-readable record is
 `projects/keepkey-vault/emulator-bundle/manifest.json`. It pins the certified
 source run, artifact ID/digest, platform filenames, library hashes,
 architectures, and required ABI symbols.
+Its source record distinguishes the Vault certification commit/run from the
+firmware repository, alpha commit and qualifying firmware CI run.
+
+The `Build Certified Emulator Artifact` workflow builds a fresh independent
+fork-alpha checkout through `scripts/build-alpha-emulator.sh`. Both platform
+builders consume that one frozen checkout. It audits the universal macOS
+13 library, Windows ABI/imports, production ClearSign root and PIN flows before
+uploading the source receipt and both libraries together.
 
 ## Non-negotiable boundary
 
@@ -65,7 +81,12 @@ architectures, and required ABI symbols.
 
 Before packaging:
 
-1. Identify the successful certified emulator-artifact CI run and record its
+1. Run `make refresh-alpha-emulator`. It resolves the current fork-alpha head,
+   requires green exact-head firmware CI, finds a successful certification run
+   for that source, verifies the artifact ZIP digest and both receipt-bound
+   library hashes, then updates the bundle manifest. Missing certification
+   stops the build; run the certification workflow for current alpha first.
+   Identify the successful certified emulator-artifact CI run and record its
    run ID, commit SHA, artifact ID, and artifact digest in the manifest. The
    Vault release commit may be later; the staged bytes must match the immutable
    certified artifact recorded in the release branch.
@@ -86,9 +107,12 @@ Before packaging:
 8. Require CI's ClearSign-root/configuration audit to be green for that exact
    artifact run.
 
-Use `scripts/stage-certified-emulator.sh <downloaded-artifact-dir>` to extract,
-stage, and verify both libraries. `make preflight` reruns
-`scripts/verify-certified-emulator.mjs`; it never reads the firmware gitlink.
+Normal local and hosted packaging uses `scripts/refresh-alpha-emulator.mjs`.
+Library files are replaced by rename, preserving any already-loaded inode.
+`make preflight` reruns `scripts/verify-certified-emulator.mjs`, including the
+latest-alpha identity check; it never reads the firmware gitlink.
+The common `buildElectrobun` wrapper also requires this check on dev, canary
+and stable builds, so local packaging cannot silently keep an older default.
 
 Any failure is a hard stop for the Vault release.
 
@@ -110,12 +134,21 @@ the emulator.
 
 ## Runtime smoke gate
 
-Smoke-test the packaged app with all user-installed emulator overrides removed
-or moved aside so the bundled library is necessarily selected:
+The macOS build workflow runs (and `make build-signed SMOKE_PACKAGED_PIN=1` can run)
+`bun scripts/smoke-packaged-pin.ts <archive>` from `projects/keepkey-vault`.
+The test launches the archive's app with a legacy library path present, reads
+all nine digits from its visible emulator canvas, rejects an incorrect PIN, and
+unlocks the disposable wallet using the next rendered grid.
+
+Smoke-test the packaged app with the default firmware selected. Leave a legacy
+library at `~/.keepkey/emulator/libkkemu.*` to check that Vault loads the
+packaged library:
 
 - Add an emulator without installing a library and confirm it reports emulator
   release `7.17.0`.
 - Create or recover a wallet and confirm OLED preview updates.
+- Unlock a test wallet with a PIN and confirm all nine OLED digits appear both
+  on the initial prompt and after a wrong PIN.
 - Stop and reopen the emulator; encrypted flash must persist.
 - Run a certified ETH→SOL ClearSign swap with labelled review and no Advanced
   Mode prompt.
@@ -126,3 +159,24 @@ or moved aside so the bundled library is necessarily selected:
 User-installed libraries remain a development override only. An override makes
 the release smoke result invalid because it does not exercise the embedded
 artifact.
+
+## Paired signing review
+
+Settings → Security → Signing screen guide opens public examples for message
+signing, EIP-712, Safe, ERC-20 allowances, routed contact names and Bitcoin
+outputs without requesting signatures. Actual signing approvals use the same
+guide. Essentials, Guided and Deep audit control explanation depth; Larger text
+controls readability. Only those display preferences persist. Risk warnings,
+consent, firmware refusal and full device review remain mandatory in every mode.
+
+During emulator confirmation, Vault can enlarge captured OLED pixels in warm
+tones. The read-only frame RPC is bound to the sole active signing request,
+device ID and wallet epoch. It reads captured memory, sends no protocol
+request and cannot advance a screen. Hardware signing uses an explicitly
+labelled app reference: no physical-screen readback or exact page order is
+claimed. Confirmation counts are requests, not page numbers.
+
+This first readability pass changes the app guide, font sizing and animations;
+the physical OLED layout and firmware audit depth still need their own bounded
+firmware contracts and pixel/hardware review. The new explanatory copy uses
+the repository's explicit English-fallback catalog policy pending translation.

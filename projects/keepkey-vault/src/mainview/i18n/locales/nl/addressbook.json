@@ -30,6 +30,7 @@
 	"noMatches": "Geen adressen komen overeen met je filter",
 	"unlabeled": "Zonder label",
 	"ownWallet": "Mijn wallet",
+	"ownSymbol": "Mijn {{symbol}}",
 	"edit": "Bewerken",
 	"delete": "Verwijderen",
 	"view": "Bekijken",
@@ -45,5 +46,8 @@
 	"cosigner": "Medeondertekenaar",
 	"cosignerOption": "Safe-medeondertekenaar: als eerste aanbieden bij het maken van een multisig",
 	"markCosigner": "Markeren als Safe-medeondertekenaar",
-	"notCosigner": "Geen medeondertekenaar"
+	"notCosigner": "Geen medeondertekenaar",
+	"addressOrEns": "Adres of ENS-naam",
+	"ensResolving": "ENS-naam opzoeken…",
+	"certificationExcluded": "Deze contacten kunnen niet worden gecertificeerd:"
 }

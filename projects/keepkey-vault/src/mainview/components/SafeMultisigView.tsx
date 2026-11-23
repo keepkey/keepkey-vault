@@ -1,13 +1,15 @@
 import { useUiTranslation } from "../i18n/ui"
 import { useEffect, useRef, useState } from "react";
 import { utils } from "ethers";
-import { rpcRequest } from "../lib/rpc";
+import { rpcRequest, onRpcMessage } from "../lib/rpc";
 import type {
   SafeAccount,
   SafeContext,
   SafeProposal,
   SafeTransfer,
   SafeTxReview,
+  SafeSyncResult,
+  SafeDiscoveryResult,
 } from "../../shared/safe-multisig";
 import "./SafeMultisigView.css";
 import {
@@ -18,6 +20,7 @@ import {
 } from "../../shared/vault-identity";
 import { SAFE_USDC } from "../../shared/safe-multisig";
 import { VaultIdentityBadge, VaultIdentityDetails } from "./VaultIdentityBadge";
+import { AddressBookPicker } from "./AddressBookPicker";
 
 const short = (a: string) => `${a.slice(0, 8)}…${a.slice(-6)}`;
 const eq = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
@@ -160,6 +163,15 @@ export function SafeMultisigView({
   const [notice, setNotice] = useState("");
   const [name, setName] = useState("My Base Safe");
   const [owners, setOwners] = useState([""]);
+  const [ownerPicker, setOwnerPicker] = useState<number>();
+  const [syncResult, setSyncResult] = useState<SafeSyncResult>();
+  const [syncing, setSyncing] = useState(false);
+  const [discovering, setDiscovering] = useState(false);
+  const [discovery, setDiscovery] = useState<SafeDiscoveryResult>();
+  const discoveryWork = useRef<Promise<void>>();
+  const busyRef = useRef(false);
+  const syncWork = useRef<Promise<void>>();
+  const syncTarget = useRef("");
   const [threshold, setThreshold] = useState(2);
   const [saltNonce, setSaltNonce] = useState("");
   const [importAddress, setImportAddress] = useState("");
@@ -182,6 +194,7 @@ export function SafeMultisigView({
       (p) =>
         safe &&
         eq(p.safe, safe.address) &&
+        BigInt(p.transaction.nonce) >= BigInt(safe.nonce) &&
         (!assetOnly || transfer(p).asset === assetOnly)
     ) || [];
   const proposal = proposals.find((p) => p.hash === selectedHash);
@@ -226,6 +239,29 @@ export function SafeMultisigView({
     );
     return next;
   };
+  const findSafes = async (force = false) => {
+    if (busyRef.current || discoveryWork.current || !session.current) return;
+    const expectedSession = session.current;
+    setDiscovering(true);
+    const work = (async () => {
+      try {
+        const found = await rpcRequest<SafeDiscoveryResult>("safeDiscover", { force }, 0);
+        if (!alive.current || expectedSession !== session.current || found.session !== expectedSession) return;
+        await load();
+        if (alive.current && expectedSession === session.current) setDiscovery(found);
+      } catch (e) {
+        if (alive.current && expectedSession === session.current)
+          setDiscovery({ session: expectedSession, owner: "", discovered: 0, issues: [], serviceError: e instanceof Error ? e.message : String(e) });
+      } finally {
+        if (alive.current) setDiscovering(false);
+      }
+    })();
+    discoveryWork.current = work;
+    try { await work; } finally {
+      discoveryWork.current = undefined;
+      if (alive.current && session.current && expectedSession !== session.current) void findSafes();
+    }
+  };
   useEffect(() => {
     alive.current = true;
     void load().catch((e) => {
@@ -244,22 +280,96 @@ export function SafeMultisigView({
     };
   }, []);
   useEffect(() => {
+    setDiscovery(undefined);
+    if (context?.session) void findSafes();
+  }, [context?.session]);
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const reload = () => {
+      if (busyRef.current) return;
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        if (!busyRef.current) void load().catch(e => { if (alive.current) setError(e.message); });
+      }, 150);
+    };
+    const reset = () => {
+      session.current = "";
+      setContext(undefined); setReview(undefined); setImportReview(undefined);
+      setMode("home"); setSelected("");
+      setSelectedHash(""); setCompose(false); setOwners([""]); setSaltNonce("");
+      setRecipient(""); setAmount(""); setDiscovery(undefined);
+    };
+    const unsub = [
+      onRpcMessage("vaults-changed", reload),
+      onRpcMessage("wallet-data-purged", () => { reset(); reload(); }),
+      onRpcMessage("device-state", (state: { state: string }) => {
+        if (state.state === "ready") reload(); else reset();
+      }),
+    ];
+    const visible = () => { if (!document.hidden) { reload(); void findSafes(); } };
+    document.addEventListener("visibilitychange", visible);
+    return () => { clearTimeout(timer); unsub.forEach(stop => stop()); document.removeEventListener("visibilitychange", visible); };
+  }, []);
+  useEffect(() => {
     onBusyChange?.(!!busy);
     return () => onBusyChange?.(false);
   }, [busy, onBusyChange]);
   const run = async (message: string, work: () => Promise<void>) => {
-    if (busy) return;
+    if (busyRef.current) return;
+    busyRef.current = true;
     setBusy(message);
     setError("");
     setNotice("");
     try {
+      await syncWork.current;
+      await discoveryWork.current;
       await work();
     } catch (e) {
       if (alive.current) setError(e instanceof Error ? e.message : String(e));
     } finally {
+      busyRef.current = false;
       if (alive.current) setBusy("");
     }
   };
+  const syncQueue = async () => {
+    if (!safe || busyRef.current || syncWork.current) return;
+    const target = `${context?.session}:${safe.address}`;
+    const expectedSession = context?.session;
+    setSyncing(true);
+    const work = (async () => {
+      try {
+        const result = await rpcRequest<SafeSyncResult>("safeSync", { address: safe.address }, 0);
+        const next = await rpcRequest<SafeContext>("safeList", undefined, 0);
+        if (!alive.current || target !== syncTarget.current || next.session !== expectedSession) return;
+        setSyncResult(result);
+        setContext(next);
+        if (!next.accounts.some(a => eq(a.address, safe.address))) {
+          setSelected("");
+          setSelectedHash("");
+          setReview(undefined);
+          setError("The connected wallet is no longer a Safe owner.");
+        }
+      } catch (e) {
+        if (alive.current && target === syncTarget.current)
+          setSyncResult({ address: safe.address, checkedAt: Date.now(), pending: 0, imported: 0, issues: [],
+            serviceError: e instanceof Error ? e.message : String(e) });
+      } finally {
+        if (alive.current) setSyncing(false);
+      }
+    })();
+    syncWork.current = work;
+    try { await work; } finally { syncWork.current = undefined; }
+  };
+  useEffect(() => {
+    syncTarget.current = `${context?.session}:${safe?.address}`;
+    setSyncResult(undefined);
+    if (!safe) return;
+    const poll = () => { if (!document.hidden) void syncQueue(); };
+    poll();
+    const timer = setInterval(poll, 30_000);
+    document.addEventListener("visibilitychange", poll);
+    return () => { clearInterval(timer); document.removeEventListener("visibilitychange", poll); syncTarget.current = ""; };
+  }, [context?.session, safe?.address]);
   const verifySession = async () => {
     const current = await rpcRequest<SafeContext>("safeList", undefined, 0);
     if (!alive.current || current.session !== session.current)
@@ -321,7 +431,7 @@ export function SafeMultisigView({
       );
       await load();
       setNotice(
-        "KeepKey approval added. Export the proposal to collect the other owner’s approval."
+        "KeepKey approval added. Share with Safe to collect the web wallet’s approval, or export the proposal."
       );
     });
   const loadSetup = (file: File) =>
@@ -522,6 +632,10 @@ export function SafeMultisigView({
           {notice}
         </div>
       )}
+      {discovery?.serviceError && <div className="safe-alert safe-warning" role="status">{discovery.serviceError}</div>}
+      {!!discovery?.issues.length && <div className="safe-alert safe-warning" role="status">
+        {discovery.issues.map(issue => <p key={issue.address}><code>{issue.address}</code>{" · "}{issue.reason}</p>)}
+      </div>}
       {busy && (
         <div className="safe-busy" role="status">
           <span className="safe-spinner" />
@@ -545,6 +659,9 @@ export function SafeMultisigView({
               <span className="safe-caption">{uiText("YOUR SAFES")}</span>
               <span>{context.accounts.length.toString().padStart(2, "0")}</span>
             </div>
+            <button className="safe-link" disabled={discovering} onClick={() => void findSafes(true)}>
+              {discovering ? uiText("Finding your Safes on Base…") : uiText("Find my Safes")}
+            </button>
             {context.accounts.map((a) => (
               <button
                 key={a.address}
@@ -807,6 +924,7 @@ export function SafeMultisigView({
                         placeholder="0x…"
                         spellCheck={false}
                       />
+                      <button type="button" className="safe-link" onClick={() => setOwnerPicker(i)}>{uiText("Address book")}</button>
                       {owners.length > 1 && (
                         <button
                           type="button"
@@ -938,25 +1056,22 @@ export function SafeMultisigView({
                     </div>
                     <button
                       className="safe-button safe-secondary"
-                      onClick={() =>
-                        void run("Refreshing account from Base…", async () => {
-                          await rpcRequest(
-                            "safeRefresh",
-                            { address: safe.address },
-                            0
-                          );
-                          await load();
-                        })
-                      }
+                      disabled={syncing}
+                      onClick={() => void syncQueue()}
                     >{uiText("↻ Refresh")}</button>
                   </div>
                   <Address value={safe.address} />
                   <Explorer hash={safe.address} address />
+                  <button className="safe-link" onClick={() => void rpcRequest("openUrl", {
+                    url: `https://app.safe.global/transactions/queue?safe=base:${safe.address}`,
+                  })}>{uiText("Open in Safe ↗")}</button>
                   {safe.configurationChanged && (
-                    <div className="safe-alert safe-warning">{uiText("The Safe’s owners or threshold changed. Funding is blocked until you review and accept the new configuration.")}<button
+                    <div className="safe-alert safe-warning">{safe.reviewedAt
+                      ? uiText("The Safe’s owners or threshold changed. Funding is blocked until you review and accept the new configuration.")
+                      : uiText("Check the full vault address, each owner, and the threshold. This configuration becomes the reference for funding checks.")}<button
                         className="safe-button"
                         onClick={() => setImportReview(safe)}
-                      >{uiText("Review changed owners")}</button>
+                      >{safe.reviewedAt ? uiText("Review changed owners") : uiText("Review owners before importing")}</button>
                     </div>
                   )}
                   <div className="safe-metrics">
@@ -1154,7 +1269,9 @@ export function SafeMultisigView({
                     {!context.nestedClearSign && (
                       <div className="safe-alert safe-warning">{uiText("This KeepKey firmware does not support the new nested Safe ClearSign display. Hardware descriptions may be limited. Rich verified descriptions also require signed metadata for this exact Safe.")}</div>
                     )}
-                    {proposal.transaction.nonce !== safe.nonce ? (
+                    {BigInt(proposal.transaction.nonce) > BigInt(safe.nonce) ? (
+                      <div className="safe-alert">{uiText("Waiting for earlier nonce")}</div>
+                    ) : proposal.transaction.nonce !== safe.nonce ? (
                       <div className="safe-alert safe-warning">{uiText("This proposal uses an old Safe nonce. Create a fresh proposal.")}</div>
                     ) : proposal.executionTx ? (
                       <div className="safe-alert">{uiText("Execution submitted. Refresh the account to check its nonce.")}<Explorer hash={proposal.executionTx} />
@@ -1167,9 +1284,18 @@ export function SafeMultisigView({
                           ) && (
                             <button
                               className="safe-button safe-primary"
+                              disabled={safe.configurationChanged}
                               onClick={approve}
                             >{uiText("Approve with KeepKey")}</button>
                           )}
+                        <button
+                          className="safe-button safe-secondary"
+                          disabled={safe.configurationChanged || !Object.keys(proposal.signatures).some(o => eq(o, context.owner))}
+                          onClick={() => void run("Sharing the signed proposal with Safe…", async () => {
+                            await rpcRequest("safePublish", { hash: proposal.hash }, 0);
+                            setNotice("Signed proposal shared with Safe. Open Safe to collect the other wallet’s approval, then refresh here.");
+                          })}
+                        >{uiText("Share with Safe")}</button>
                         <button
                           className="safe-button safe-secondary"
                           onClick={() => exportProposal(proposal)}
@@ -1182,6 +1308,7 @@ export function SafeMultisigView({
                           safe.threshold && (
                           <button
                             className="safe-button safe-primary"
+                            disabled={safe.configurationChanged}
                             onClick={() =>
                               void run(
                                 "Simulating Safe execution…",
@@ -1205,11 +1332,18 @@ export function SafeMultisigView({
                 )}
                 <div className="safe-panel">
                   <div className="safe-panel-header">
-                    <h3>{uiText("Local proposals")}</h3>
+                    <h3>{uiText("Pending proposals")}</h3>
                     <span className="safe-caption">
                       {proposals.length} TOTAL
                     </span>
                   </div>
+                  <p className="safe-muted" role="status">{syncing ? uiText("Syncing Safe queue…") : syncResult?.serviceError
+                    ? uiText("Safe queue unavailable") : syncResult ? uiText("Safe queue synced") : ""}</p>
+                  {syncResult?.serviceError && <div className="safe-alert safe-warning">{syncResult.serviceError}</div>}
+                  {!!syncResult?.issues.length && <details className="safe-alert safe-warning">
+                    <summary>{uiText("Some Safe transactions need review in Safe.")}</summary>
+                    {syncResult.issues.map((issue, i) => <p key={i}><code>{issue.hash || issue.nonce || "—"}</code>{" · "}{issue.reason}</p>)}
+                  </details>}
                   {!proposals.length ? (
                     <p className="safe-muted">{uiText("No proposals yet. Start a transfer or import one from another owner.")}</p>
                   ) : (
@@ -1236,6 +1370,8 @@ export function SafeMultisigView({
                         <span className="safe-tag">
                           {p.executionTx
                             ? uiText("Submitted")
+                            : BigInt(p.transaction.nonce) > BigInt(safe.nonce)
+                            ? uiText("Waiting for earlier nonce")
                             : p.transaction.nonce !== safe.nonce
                             ? uiText("Past nonce")
                             : `${Object.keys(p.signatures).length} / ${
@@ -1263,6 +1399,13 @@ export function SafeMultisigView({
           </main>
         </fieldset>
       )}
+      {ownerPicker !== undefined && context && <AddressBookPicker
+        networkId={BASE_NETWORK} chainFamily="evm"
+        entryFilter={entry => !entry.vault && utils.isAddress(entry.address) && !eq(entry.address, context.owner)
+          && !owners.some((owner, i) => i !== ownerPicker && eq(owner, entry.address))}
+        onSelect={entry => { setOwners(v => v.map((owner, i) => i === ownerPicker ? entry.address : owner)); setOwnerPicker(undefined); }}
+        onClose={() => setOwnerPicker(undefined)}
+      />}
     </section>
   );
 }

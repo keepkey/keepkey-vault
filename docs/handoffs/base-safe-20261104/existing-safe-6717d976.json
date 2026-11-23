@@ -1,0 +1,22 @@
+{
+  "address": "0x6717d97655d8fC9d05C2DD3F28b54f574309B473",
+  "chainId": 8453,
+  "block": "0x330b758",
+  "VERSION": "1.5.0",
+  "masterCopy": "0xEdd160fEBBD92E350D4D398fb636302fccd67C7e",
+  "getOwners": [
+    "0x9D4E88f7f2CCBB005426c1ed91eB2BB7d235937F",
+    "0x909Ef6B32DfDc12CA86aA710b54c991af3C5F82E",
+    "0xc4610822044746ececF895eEDc7f1A691C5a11ea",
+    "0x73171652773bF2b8EB389eAF608125F98e90E0b7"
+  ],
+  "getThreshold": "2",
+  "0x6717d97655d8fC9d05C2DD3F28b54f574309B473": {
+    "codeHash": "0x4e381985ca68b3e5d27b4425fa581c19cf33146d3f887a3cfca96f55528ea46f"
+  },
+  "0xEdd160fEBBD92E350D4D398fb636302fccd67C7e": {
+    "codeHash": "0x180193227186ccb85316c94db1f0d156ed932b14712cfaac78901899178572dc"
+  },
+  "status": "read-only verified; not imported, signed or broadcast",
+  "deploymentSource": "safe-global/safe-deployments@685f22be940739259cfc4148db3df7048f39a4e8/src/assets/v1.5.0/safe_l2.json"
+}

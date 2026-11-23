@@ -1,21 +1,13 @@
 #!/usr/bin/env node
 /**
- * fw-716/11 — EIP-712 chunked values (capability 26) cannot be reached through
- * Desktop. 1 Desktop click; 0 device presses expected.
- *
- * 7.16 advertises CAPABILITY_EIP712_CHUNKED_VALUES (26), but hdwallet's
- * eip712Streaming.ts capLeaf() throws on any string/bytes leaf over 1024 bytes
- * ("<what> value is N bytes, over the 1024-byte wire limit") when the device
- * asks for it, before the value is sent. So this suite proves only the host
- * guard, never the device's chunked path.
+ * On 7.16 or later without capability 26, Desktop must refuse oversized
+ * EIP-712 leaves. The 7.17 alpha suite tests the advertised capability.
  *
  * Nothing can be signed: the document's domain name is 1500 bytes. If a device
  * screen does appear, use Desktop's in-app Cancel; the suite then FAILs and
  * prints what came back.
  */
-const { run, ETH_PATH, short } = require('../_helpers')
-
-const GAP = 'KNOWN GAP: CAPABILITY_EIP712_CHUNKED_VALUES=26 not exercised (hdwallet caps leaves at 1024 B)'
+const { run, ETH_PATH, short, skip } = require('../_helpers')
 
 const typedData = {
   types: {
@@ -27,11 +19,14 @@ const typedData = {
   message: { contents: 'x' },
 }
 
-run('fw-716/11 EIP-712 leaf over 1024 B stops on the host (capability 26 gap)', async (getSdk, assert) => {
-  console.log(`  ${GAP}`)
+run('fw-716/11 EIP-712 leaf over 1024 B is refused without capability 26', async (getSdk, assert) => {
   const sdk = await getSdk()
-  const caps = (await sdk.system.info.getFeatures()).capabilities
-  console.log(`  device advertises capability 26: ${Array.isArray(caps) ? caps.includes(26) : 'unknown (no capabilities in features)'}`)
+  const features = await sdk.system.info.getFeatures()
+  const { major_version: major, minor_version: minor, capabilities } = features
+  if (major < 7 || (major === 7 && minor < 16) || !Array.isArray(capabilities)) {
+    skip('Requires firmware 7.16 or later with an explicit capability list')
+  }
+  if (capabilities.includes(26)) skip('Capability 26 is advertised; use the 7.17 alpha positive-path suite on the bundled emulator')
   const { address: device } = await sdk.address.ethGetAddress({ address_n: ETH_PATH, show_display: false })
   console.log(`  device: ${device}`)
 
@@ -46,5 +41,4 @@ run('fw-716/11 EIP-712 leaf over 1024 B stops on the host (capability 26 gap)', 
   assert('no signature returned', !sig)
   assert('no device screen (no "User cancelled")', !/user cancelled/i.test(text))
   assert("error is the host guard: 'over the 1024-byte wire limit'", text.includes('over the 1024-byte wire limit'))
-  console.log(`\n  ${GAP}`)
 })

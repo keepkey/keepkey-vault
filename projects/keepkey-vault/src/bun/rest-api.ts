@@ -19,7 +19,7 @@ import { decodeEIP712 } from './eip712-decoder'
 import { addSeaportCreatorFee } from './seaport-creator-fee'
 import { addSeaportItemContracts } from './seaport-item-contracts'
 import { attachErc7730TypedDefinition, evmPriorityFee, evmQuantity, normalizeEvmChainId, recognizedTypedDataSpender, applyTypedDataSigningGate } from './evm-signing-preview'
-import { buildEvmReportForTx, buildTypedDataReport, evmSigningVerdict, prepareEvmTxSigningInfo, withoutErc7730Description } from './evm-presign-report'
+import { buildEvmReportForTx, buildTypedDataReport, evmSigningVerdict, prepareEvmTxSigningInfo, withoutErc7730Description, withoutErc7730TypedDescription } from './evm-presign-report'
 import { describeErc7730Call } from './erc7730-describe'
 import { signWithErc7730Fallback } from './erc7730-resolver'
 import { signTypedDataWithFeatures } from './typed-data-sign'
@@ -194,6 +194,9 @@ export interface RestApiCallbacks {
   /** Set Pioneer API base URL (empty string = reset to default) */
   setPioneerApiBase?: (url: string) => Promise<any>
 }
+
+/** A Host header naming this machine's loopback, with an optional port (the API listens on loopback only). */
+const LOOPBACK_HOST = /^(?:localhost|127\.0\.0\.1|\[::1\])(?::\d{1,5})?$/i
 
 function corsHeaders(_req?: Request): Record<string, string> {
   // Use '*' — bearer-token auth model (not cookie-based), so wildcard is safe
@@ -1630,7 +1633,18 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
         if ((path === '/api/health' || path === '/api/v1/health') && method === 'GET') {
           const ds = engine.getDeviceState()
           const diagnostics = callbacks?.getSyncDiagnostics?.() as {balanceSync?: {status?: string}} | undefined
-          return json({
+          // CORS is '*', so any website can read this route. The documented public fields stay public; the sync
+          // diagnostics (which chains are syncing, timings, failures, connectivity probes) go only to a paired key
+          // or to a local tool such as `curl` (audit v6 N5). A local tool is a loopback request that carries neither
+          // Origin nor Sec-Fetch-Site (page scripts cannot remove them; modern browsers send one on every fetch, as
+          // the password API relies on) and names a loopback Host, so a DNS-rebound site, whose Host is its own
+          // name, never qualifies. A missing or bad key just omits them: reachability probes send no key.
+          const token = auth.extractBearerToken(req)
+          const ip = server.requestIP(req)?.address
+          const localTool = ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(ip || '') && LOOPBACK_HOST.test(req.headers.get('host') || '') &&
+            !req.headers.has('origin') && !req.headers.has('sec-fetch-site')
+          const paired = !!token && !!auth.validate(token)
+          const response = json({
             ready: ds.state === 'ready',
             status: 'healthy',
             syncing: engine.isSyncing || diagnostics?.balanceSync?.status === 'running',
@@ -1646,8 +1660,12 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             // SDK skips batch call entirely when cached_pubkeys === 0.
             cached_pubkeys: engine.wallet ? Math.max(pubkeyCache.size, 1) : 0,
             frontload_progress: { status: 'complete', can_operate_offline: false },
-            sync_diagnostics: diagnostics,
+            ...(paired || localTool ? { sync_diagnostics: diagnostics } : {}),
           })
+          // The body depends on who asks: never let a cache hand one caller's answer to another.
+          response.headers.set('Cache-Control', 'no-store')
+          response.headers.append('Vary', 'Authorization, Host, Origin, Sec-Fetch-Site')
+          return response
         }
 
         if (path === '/api/v1/health/fast' && method === 'GET') {
@@ -1782,6 +1800,16 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           if (typeof reqBody?.coin === 'string' && reqBody.coin.trim().toLowerCase() === 'zcash') {
             return json({ error: 'Zcash signing over REST is not supported. Use KeepKey Vault Desktop with the reviewed 7.17 alpha emulator or supported physical alpha firmware.' }, 501)
           }
+        }
+
+        // A caller-supplied Hive header that can never be signed (partial, out
+        // of range, expired, too far ahead) is refused before the approval
+        // window opens, so the user is not asked to approve a doomed request.
+        if (method === 'POST' && path === '/hive/sign-operations' && reqBody && typeof reqBody === 'object') {
+          auth.requireAuth(req)
+          const { exactHiveHeader } = await import('./txbuilder/hive-ops')
+          try { exactHiveHeader(reqBody) }
+          catch (error: any) { return json({ error: error?.message || 'Invalid Hive header' }, 400) }
         }
 
         // ═══════════════════════════════════════════════════════════════
@@ -2616,22 +2644,37 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           if (fwBlock) return fwBlock
           const wallet = await requireWallet(engine)
           const body = await parseRequest(req, S.HiveSignOperationsRequest)
+          const { serializeHiveOpsTx, exactHiveHeader, hiveRoleOf, hiveTimeIso } = await import('./txbuilder/hive-ops')
 
-          // Header (TaPoS) from Pioneer — the exact values the device signs
-          // are returned to the caller so broadcast reuses the same tx.
-          const pioneerBase = (callbacks?.getPioneerApiBase?.() || 'https://api.keepkey.info').replace(/\/$/, '')
-          const txParams = await fetch(`${pioneerBase}/api/v1/hive/tx-params`, {
-            signal: AbortSignal.timeout(20_000),
-          }).then(r => r.json()) as any
-          if (!txParams?.success) throw new HttpError(502, `Hive tx-params failed: ${txParams?.error || 'unknown'}`)
-
-          const { serializeHiveOpsTx } = await import('./txbuilder/hive-ops')
-          let serialized
-          try {
-            serialized = serializeHiveOpsTx({
+          // A caller-supplied header is signed exactly as sent. Checked again
+          // here, after approval: the user may have taken long enough for it
+          // to expire, and an expired header is refused, never refreshed.
+          let header
+          try { header = exactHiveHeader(body) }
+          catch (e: any) { throw new HttpError(400, e?.message || 'Invalid Hive header') }
+          const headerSource = header ? 'caller' : 'pioneer'
+          if (!header) {
+            // Header (TaPoS) from Pioneer — the exact values the device signs
+            // are returned to the caller so broadcast reuses the same tx.
+            const pioneerBase = (callbacks?.getPioneerApiBase?.() || 'https://api.keepkey.info').replace(/\/$/, '')
+            const txParams = await fetch(`${pioneerBase}/api/v1/hive/tx-params`, {
+              signal: AbortSignal.timeout(20_000),
+            }).then(r => r.json()) as any
+            if (!txParams?.success) throw new HttpError(502, `Hive tx-params failed: ${txParams?.error || 'unknown'}`)
+            header = {
               refBlockNum: txParams.refBlockNum,
               refBlockPrefix: txParams.refBlockPrefix,
               expirationUnix: txParams.expirationUnix,
+              chainId: txParams.chainId,
+            }
+          }
+
+          let serialized
+          try {
+            serialized = serializeHiveOpsTx({
+              refBlockNum: header.refBlockNum,
+              refBlockPrefix: header.refBlockPrefix,
+              expirationUnix: header.expirationUnix,
               operations: body.operations as any,
             })
           } catch (e: any) {
@@ -2643,7 +2686,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           const { hiveConfirmDetails } = await import('./emulator-confirm-details')
           const result: any = await emuWrap(() => (wallet as any).hiveSignOperations({
             addressNList,
-            chainId: txParams.chainId,
+            chainId: header.chainId,
             serializedTx: new Uint8Array(serialized.serializedTx),
           }), hiveConfirmDetails('hiveSignOperations', body.operations))
           if (!result?.signature) throw new HttpError(500, 'Hive sign-operations: device returned no signature')
@@ -2652,13 +2695,19 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           // baked into the serialized header), NOT Pioneer's separate expirationIso —
           // if the two ever diverge, a caller broadcasting the ISO would reconstruct a
           // different transaction than the one the device signed (invalid signature).
-          const signedExpirationIso = new Date(txParams.expirationUnix * 1000).toISOString().replace(/\.\d{3}Z$/, '')
           return json({
             signature: sigBytes.toString('hex'),
-            ref_block_num: txParams.refBlockNum,
-            ref_block_prefix: txParams.refBlockPrefix,
-            expiration: signedExpirationIso,
+            ref_block_num: header.refBlockNum,
+            ref_block_prefix: header.refBlockPrefix,
+            expiration: hiveTimeIso(header.expirationUnix),
             operations: body.operations,
+            // The exact bytes sent to the device (without the chain id it prefixes
+            // for the digest): the caller byte-compares before broadcast.
+            serialized_tx: serialized.serializedTx.toString('hex'),
+            chain_id: header.chainId,
+            header_source: headerSource,
+            address_n: addressNList,
+            role: hiveRoleOf(addressNList),
           })
         }
 
@@ -3220,22 +3269,35 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             const typedChainId = normalizeEvmChainId(body.typedData?.domain?.chainId)
             const chain = typedChainId ? evmChainLabel(typedChainId)?.name ?? `EVM chain ${typedChainId}` : 'Ethereum'
             let signedParams: any = params
-            const result = await emuWrap(
-              () => signWithErc7730Fallback(params, (p: any) => { signedParams = p; return signTypedDataWithFeatures(wallet, p) }, () => {
-                // The device refused the definition: it streams the document
-                // instead (7.15+ shows every value). Report and record that.
+            const result = await signWithErc7730Fallback(params, (p: any) => {
+              assertSession()
+              signedParams = p
+              return emuWrap(() => signTypedDataWithFeatures(wallet, p), { operation: 'ethSignTypedData', chain })
+            }, async () => {
+              if (body.typedData.primaryType === 'SafeTx') {
+                const again = withoutErc7730TypedDescription(activeSigningInfo!)
+                if (activeSigningId) callbacks!.onSigningDismissed?.(activeSigningId)
+                activeSigningId = again.id
+                activeSigningInfo = again
+                if (activeClearSignObservationId) refuseClearSignObservationDefinition(activeClearSignObservationId, again.clearSignReport?.protectionLevel)
+                const decision = await callbacks!.onSigningRequest(again, req.signal)
+                if (!decision.approved) {
+                  if (activeClearSignObservationId) finalizeClearSignObservation(activeClearSignObservationId, 'rejected', 'user-rejected')
+                  throw new HttpError(403, 'User declined signing without the ClearSign description')
+                }
+              } else {
                 if (activeSigningInfo) {
                   const { erc7730: _refused, erc7730Description: _shown, ...plain } = activeSigningInfo
                   activeSigningInfo = { ...plain, clearSignReport: buildTypedDataReport(plain) }
                 }
                 if (activeClearSignObservationId) refuseClearSignObservationDefinition(activeClearSignObservationId, activeSigningInfo?.clearSignReport?.protectionLevel)
-              }, '[REST] ethSignTypedData'),
-              { operation: 'ethSignTypedData', chain },
-            )
+              }
+            }, '[REST] ethSignTypedData')
             if (activeClearSignObservationId && signedParams.erc7730) authenticateClearSignObservation(activeClearSignObservationId, 'erc7730')
             if (activeClearSignObservationId) finalizeClearSignObservation(activeClearSignObservationId, 'signed')
             return json(result)
           } catch (err: any) {
+            if (err instanceof HttpError) throw err
             // Distinguish user cancellation from actual failures
             const msg = String(err?.message || err || '').toLowerCase()
             if (msg.includes('cancel') || msg.includes('rejected') || msg.includes('denied') || msg.includes('action cancelled')) {

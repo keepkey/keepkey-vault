@@ -4,12 +4,15 @@ import { existsSync, readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { spawnSync } from 'node:child_process'
+import { alphaHead, FIRMWARE_REPOSITORY } from './alpha-emulator-source.mjs'
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
 const bundleDir = join(root, 'projects', 'keepkey-vault', 'emulator-bundle')
 const manifest = JSON.parse(readFileSync(join(bundleDir, 'manifest.json'), 'utf8'))
 
-if (manifest.version !== '7.17.0') throw new Error(`unexpected emulator release ${manifest.version}`)
+if (!/^[0-9]+\.[0-9]+\.[0-9]+$/.test(manifest.version)) throw new Error(`unexpected emulator release ${manifest.version}`)
+if (manifest.source.firmwareRepository !== FIRMWARE_REPOSITORY || manifest.source.firmwareBranch !== 'alpha' ||
+    manifest.source.firmwareSha !== alphaHead()) throw new Error('Default bundled emulator must match the latest fork alpha; run make refresh-alpha-emulator')
 
 for (const [name, record] of Object.entries(manifest.files)) {
   const path = join(bundleDir, name)

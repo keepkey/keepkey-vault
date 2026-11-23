@@ -2,6 +2,7 @@ import { SettingsLayout, useSettingsCategory, type SettingsCategory } from "./Se
 import { useUiTranslation } from "../i18n/ui"
 import { supportsMoneroSigning } from "../../shared/monero-capability"
 import { useState, useEffect, useCallback, useRef } from "react"
+import type { SetStateAction } from 'react'
 import { useFiat } from "../lib/fiat-context"
 import { Box, Flex, Text, VStack, Button, Input, IconButton, StackSeparator } from "@chakra-ui/react"
 import { useTranslation } from "react-i18next"
@@ -16,6 +17,7 @@ import { isBitcoinOnlyVariant } from "../../shared/flags"
 import { SelfHostNodePanel } from "./SelfHostNodePanel"
 import { MoneroNodePanel } from './MoneroNodePanel'
 import { EmulatorBuildOptions, useEmulatorNames } from "./EmulatorIdentity"
+import { SigningReviewOverview } from "./device/SigningReviewOverview"
 import { ClearSignStudio } from "./ClearSignStudio"
 import { ClearSignProvidersPanel } from "./ClearSignProvidersPanel"
 import { RngAuditPanel } from "./RngAuditPanel"
@@ -79,15 +81,14 @@ function Section({ title, category, color, docsHref, videoHref, children }: {
   </Box>
 }
 
-function FeatureIcon({ kind }: { kind: 'firmware' | 'monero' | 'passwords' | 'offline' | 'multisig' | 'walletconnect' | 'emulator' }) {
-  const colors = { firmware: '#EC4899', monero: '#F5841F', passwords: '#E9C46A', offline: '#E08C7B', multisig: '#4FB7A5', walletconnect: '#3B99FC', emulator: '#A855F7' }
+function FeatureIcon({ kind }: { kind: 'firmware' | 'monero' | 'passwords' | 'offline' | 'multisig' | 'emulator' }) {
+  const colors = { firmware: '#EC4899', monero: '#F5841F', passwords: '#E9C46A', offline: '#E08C7B', multisig: '#4FB7A5', emulator: '#A855F7' }
   const icons = {
     firmware: <><rect x="6" y="6" width="12" height="12" rx="2" /><path d="M9 2v4M15 2v4M9 18v4M15 18v4M2 9h4M2 15h4M18 9h4M18 15h4" /></>,
     monero: <><circle cx="12" cy="12" r="10" /><path d="M5 16V9l7 7 7-7v7" /></>,
     passwords: <><circle cx="8" cy="15" r="5" /><path d="m11.5 11.5 9-9M16 7l3 3M18 5l3 3" /></>,
     offline: <><path d="m2 2 20 20M8.5 16.5a5 5 0 0 1 7 0M2 8.82a15 15 0 0 1 4.17-2.65M10.66 5c4.01-.36 8.14.9 11.34 3.76M16.85 11.25a10 10 0 0 1 2.22 1.68M12 20h.01" /></>,
     multisig: <><circle cx="9" cy="7" r="3" /><path d="M3 21v-3a6 6 0 0 1 12 0v3M17 4a3 3 0 0 1 0 6M18 13a5 5 0 0 1 3 5v3" /></>,
-    walletconnect: <><path d="M6.5 9.5c3-3 8-3 11 0M4 7c4.5-4.5 11.5-4.5 16 0" /><circle cx="12" cy="15" r="1.5" fill="currentColor" /></>,
     emulator: <><rect x="4" y="2" width="16" height="20" rx="2" /><path d="M8 6h8M12 18h.01" /></>,
   }
   return <Flex data-feature-icon={kind} aria-hidden="true" align="center" justify="center" w="32px" h="32px" flexShrink="0" borderRadius="lg" bg={`${colors[kind]}1a`} color={colors[kind]}>
@@ -185,9 +186,13 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 	const [togglingPassphrase, setTogglingPassphrase] = useState(false)
 	const [togglingPolicy, setTogglingPolicy] = useState("")
 	const [browserPromptStatus, setBrowserPromptStatus] = useState("")
-	const [appSettings, setAppSettings] = useState<AppSettings>({ restApiEnabled: false, pioneerApiBase: '', pioneerServers: [], activePioneerServer: '', fiatCurrency: 'USD', numberLocale: 'en-US', walletConnectEnabled: false, btcMultisigEnabled: false, zcashPrivacyEnabled: false, moneroEnabled: false, moneroDaemonUrl: "http://127.0.0.1:18081", moneroNodeMode: "local", moneroRestoreHeight: 0, hiveEnabled: false, emulatorEnabled: false, offlineMode: false, btcNodeEnabled: false, btcNodeType: 'blockbook', btcNodeUrl: '', btcOnboardingShown: false, preReleaseUpdates: false, alphaFirmware: false, addressBookClearsignEnabled: false, privateModeEnabled: false, passphraseIntroShown: false, evmSimulationRpcUrls: {}, disabledNetworks: [], networksChosen: false })
+	const settingsRevision = useRef(0)
+	const [appSettings, commitAppSettings] = useState<AppSettings>({ restApiEnabled: false, pioneerApiBase: '', pioneerServers: [], activePioneerServer: '', fiatCurrency: 'USD', numberLocale: 'en-US', walletConnectEnabled: true, btcMultisigEnabled: false, zcashPrivacyEnabled: false, moneroEnabled: false, moneroDaemonUrl: "http://127.0.0.1:18081", moneroNodeMode: "local", moneroRestoreHeight: 0, hiveEnabled: false, emulatorEnabled: false, offlineMode: false, btcNodeEnabled: false, btcNodeType: 'blockbook', btcNodeUrl: '', btcOnboardingShown: false, preReleaseUpdates: false, alphaFirmware: false, addressBookClearsignEnabled: false, privateModeEnabled: false, passphraseIntroShown: false, evmSimulationRpcUrls: {}, disabledNetworks: [], networksChosen: false })
+	const setAppSettings = useCallback((settings: SetStateAction<AppSettings>) => {
+		settingsRevision.current++
+		commitAppSettings(settings)
+	}, [])
 	const [togglingRestApi, setTogglingRestApi] = useState(false)
-	const [togglingWalletConnect, setTogglingWalletConnect] = useState(false)
 	const [togglingEmulator, setTogglingEmulator] = useState(false)
 	const [moneroBusy, setMoneroBusy] = useState(false)
 	const [moneroError, setMoneroError] = useState<string | null>(null)
@@ -205,6 +210,7 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 	const [resetConfirm, setResetConfirm] = useState(false)
 	const [resetting, setResetting] = useState(false)
 	const [clearSignStudioOpen, setClearSignStudioOpen] = useState(false)
+	const [signingReviewOpen, setSigningReviewOpen] = useState(false)
 	const [rngAuditOpen, setRngAuditOpen] = useState(false)
 	const [simulationChainId, setSimulationChainId] = useState('1')
 	const [simulationRpcUrl, setSimulationRpcUrl] = useState('')
@@ -215,6 +221,8 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 	// Fetch device features + app settings when drawer opens
 	useEffect(() => {
 		if (!open) return
+		let active = true
+		const revision = settingsRevision.current
 		if (deviceState.state === "ready") {
 			setFeaturesError(false)
 			rpcRequest<DeviceFeatures>("getFeatures")
@@ -222,8 +230,9 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 				.catch(() => setFeaturesError(true))
 		}
 		rpcRequest<AppSettings>("getAppSettings")
-			.then(s => setAppSettings(s))
+			.then(s => { if (active && revision === settingsRevision.current) commitAppSettings(s) })
 			.catch(() => {})
+		return () => { active = false }
 	}, [open, deviceState.state])
 
 	useEffect(() => onRpcMessage('pioneer-server-changed', settings => {
@@ -350,26 +359,28 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 		} catch (e: any) { setPasswordsError(e?.message || 'Could not change password manager') }
 		finally { setTogglingPasswords(false) }
 	}, [])
+	const [togglingPasskeys, setTogglingPasskeys] = useState(false)
+	const [passkeysError, setPasskeysError] = useState('')
+	const togglePasskeys = useCallback(async (enabled: boolean) => {
+		setTogglingPasskeys(true); setPasskeysError('')
+		try {
+			setAppSettings(await rpcRequest<AppSettings>('setPasskeysEnabled', { enabled }))
+			window.dispatchEvent(new Event('keepkey-settings-changed'))
+		} catch (e: any) { setPasskeysError(e?.message || 'Could not change passkeys') }
+		finally { setTogglingPasskeys(false) }
+	}, [])
 	const [togglingMultisig,setTogglingMultisig]=useState(false)
     const [multisigError,setMultisigError]=useState<string|null>(null)
     const toggleMultisig=useCallback(async(enabled:boolean)=>{
+		settingsRevision.current++
         setTogglingMultisig(true);setMultisigError(null)
         try{
             const result=await rpcRequest<AppSettings>('setBtcMultisigEnabled',{enabled},10000)
             setAppSettings(result)
-            window.dispatchEvent(new Event('keepkey-settings-changed'))
+            window.dispatchEvent(new CustomEvent('keepkey-settings-changed', { detail: result }))
         }catch(e:any){setMultisigError(e?.message||'Could not change multisig co-signing')}
         finally{setTogglingMultisig(false)}
     },[])
-
-    const toggleWalletConnect = useCallback(async (enabled: boolean) => {
-		setTogglingWalletConnect(true)
-		try {
-			const result = await rpcRequest<AppSettings>("setWalletConnectEnabled", { enabled }, 10000)
-			setAppSettings(result)
-		} catch (e: any) { console.error("setWalletConnectEnabled:", e) }
-		setTogglingWalletConnect(false)
-	}, [])
 
 	const toggleEmulator = useCallback(async (enabled: boolean) => {
 		setTogglingEmulator(true)
@@ -1333,6 +1344,11 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 					{/* ── Signing Policy ─────────────────────────────── */}
 					<Section title={t("signingPolicy")} category="security" docsHref={DOCS_LINKS.settingsSigningPolicy}>
 						<VStack gap="4" align="stretch">
+              <Flex align="center" justify="space-between" gap="4" wrap="wrap" py="2">
+                <Box><Text fontSize="md" color="kk.textPrimary" fontWeight="600">{uiText("Signing screen guide")}</Text>
+                  <Text fontSize="sm" color="kk.textSecondary" mt="1">{uiText("Choose your reading detail and preview what to compare on your KeepKey.")}</Text></Box>
+                <Button variant="outline" onClick={() => setSigningReviewOpen(true)}>{uiText("Open screen guide")}</Button>
+              </Flex>
 							{/* Advanced Mode (blind signing) */}
 							<Flex
 								align="center"
@@ -1724,6 +1740,13 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 								</Flex>
 								{passwordsError && <Text role="alert" fontSize="xs" color="kk.error">{passwordsError}</Text>}
 							</Box>
+							<Box>
+								<Flex justify="space-between" align="center" gap="4">
+									<Flex align="center" gap="3" minW="0"><FeatureIcon kind="passwords" /><Box><Text fontSize="md" color="kk.textPrimary" fontWeight="500">{uiText("Passkeys")}</Text><Text fontSize="sm" color="kk.textSecondary" mt="0.5">{uiText("Experimental. Adds a Passkeys tab to the Vault menu: device status and erasing all passkeys. Off by default.")}</Text></Box></Flex>
+									<Toggle label={uiText('Passkeys')} checked={appSettings.passkeysEnabled === true} onChange={togglePasskeys} disabled={togglingPasskeys} />
+								</Flex>
+								{passkeysError && <Text role="alert" fontSize="xs" color="kk.error">{passkeysError}</Text>}
+							</Box>
 							{/* Offline (airplane) mode toggle */}
 							<Flex justify="space-between" align="center" gap="4">
 								<Flex align="center" gap="3" minW="0">
@@ -1751,25 +1774,6 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
                                 </Flex>
                                 {multisigError && <Text role="alert" fontSize="xs" color="kk.error" mt="2">{multisigError}</Text>}
                             </Box>
-
-                            {/* WalletConnect is an altcoin signing surface. A persisted global
-							    setting must not re-expose it on Bitcoin-only firmware. */}
-							{!isBitcoinOnlyVariant(deviceState.firmwareVariant) && <Flex justify="space-between" align="center" gap="4">
-								<Flex align="center" gap="3" minW="0">
-									<FeatureIcon kind="walletconnect" />
-									<Box>
-										<Text fontSize="md" color="kk.textPrimary" fontWeight="500">{t("walletConnectFeature")}</Text>
-										<Text fontSize="sm" color="kk.textSecondary" mt="0.5">
-											{t("walletConnectFeatureDescription")}
-										</Text>
-									</Box>
-								</Flex>
-								<Toggle
-									label={t("walletConnectFeature")} checked={appSettings.walletConnectEnabled}
-									onChange={toggleWalletConnect}
-									disabled={togglingWalletConnect}
-								/>
-							</Flex>}
 
 							{/* Zcash + Hive have no toggles — derived in bun/index.ts on device ready.
 							    Zcash requires firmware >= 7.17.0 and its sidecar; Hive requires >= 7.15.0.
@@ -1988,6 +1992,7 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 				</SettingsLayout>
 			</Box>
 			<RngAuditPanel open={rngAuditOpen} onClose={() => setRngAuditOpen(false)} />
+			<SigningReviewOverview open={signingReviewOpen} onClose={() => setSigningReviewOpen(false)} />
 			<ClearSignStudio
 				open={clearSignStudioOpen}
 				onClose={() => setClearSignStudioOpen(false)}

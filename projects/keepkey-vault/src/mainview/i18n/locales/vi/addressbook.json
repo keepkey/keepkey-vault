@@ -30,6 +30,7 @@
 	"noMatches": "Không có địa chỉ nào khớp với bộ lọc",
 	"unlabeled": "Chưa có nhãn",
 	"ownWallet": "Ví của tôi",
+	"ownSymbol": "{{symbol}} của tôi",
 	"edit": "Sửa",
 	"delete": "Xóa",
 	"view": "Xem",
@@ -45,5 +46,8 @@
 	"cosigner": "Người đồng ký",
 	"cosignerOption": "Người đồng ký Safe: đề xuất trước tiên khi tạo đa chữ ký",
 	"markCosigner": "Đánh dấu là người đồng ký Safe",
-	"notCosigner": "Không phải người đồng ký"
+	"notCosigner": "Không phải người đồng ký",
+	"addressOrEns": "Địa chỉ hoặc tên ENS",
+	"ensResolving": "Đang tra cứu tên ENS…",
+	"certificationExcluded": "Không thể chứng nhận các liên hệ sau:"
 }

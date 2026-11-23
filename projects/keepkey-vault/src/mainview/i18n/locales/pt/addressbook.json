@@ -30,6 +30,7 @@
 	"noMatches": "Nenhum endereço corresponde ao filtro",
 	"unlabeled": "Sem rótulo",
 	"ownWallet": "Minha carteira",
+	"ownSymbol": "Meu {{symbol}}",
 	"edit": "Editar",
 	"delete": "Excluir",
 	"view": "Ver",
@@ -53,5 +54,8 @@
 	"notNow": "Agora não",
 	"saving": "Salvando…",
 	"savedToBook": "Salvo no catálogo de endereços",
-	"addedOn": "Adicionado em {{date}}"
+	"addedOn": "Adicionado em {{date}}",
+	"addressOrEns": "Endereço ou nome ENS",
+	"ensResolving": "A procurar o nome ENS…",
+	"certificationExcluded": "Estes contactos não podem ser certificados:"
 }

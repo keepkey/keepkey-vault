@@ -1,0 +1,153 @@
+diff --git a/.github/workflows/deploy.yml b/.github/workflows/deploy.yml
+index 827b609..a7ae1ee 100644
+--- a/.github/workflows/deploy.yml
++++ b/.github/workflows/deploy.yml
+@@ -49,3 +49,8 @@ jobs:
+         run: bun container/live/provider-parity.ts https://oracles.cc
+       - name: Live Litecoin script discovery
+         run: bun container/live/ltc-script-discovery.ts https://oracles.cc
++      - name: Verify blue gateway alias
++        run: |
++          bun container/live/deploy-health.ts https://api-blue.keepkey.info "$GITHUB_SHA"
++          bun -e 'const r = await fetch("https://api-blue.keepkey.info/spec/swagger.json", { signal: AbortSignal.timeout(30000) }); if (!r.ok || (await r.json()).servers?.[0]?.url !== "https://api-blue.keepkey.info/api/v1") throw new Error("Blue OpenAPI origin mismatch")'
++          bun container/live/ltc-script-discovery.ts https://api-blue.keepkey.info
+diff --git a/README.md b/README.md
+index 80eb975..edca133 100644
+--- a/README.md
++++ b/README.md
+@@ -36,6 +36,12 @@ streaming compatibility. Migration parity is checked against the
+ [Vault contract](./docs/VAULT-PIONEER-CONTRACT.md); live provider availability
+ still depends on networks, trading pairs, amounts and configured API keys.
+ 
++The deployment configuration also assigns `https://api-blue.keepkey.info` to this
++same gateway as Pioneer's blue environment. `api.keepkey.info` remains the legacy
++green service. See [the blue cutover procedure](./docs/BLUE-CUTOVER.md) for DNS,
++live verification, legacy deployment retirement and rollback. Configuration in
++this repository alone does not establish that the live cutover has completed.
++
+ ## Plan
+ 
+ 1. Freeze the API behavior actually consumed by the current Vault.
+diff --git a/container/live/portfolio-client.mjs b/container/live/portfolio-client.mjs
+index 02a9e01..3f42b78 100644
+--- a/container/live/portfolio-client.mjs
++++ b/container/live/portfolio-client.mjs
+@@ -4,6 +4,10 @@ const baseUrl = (process.argv.find((arg) => arg.startsWith("--url="))?.slice(6)
+ const modulePath = process.env.VAULT_PIONEER_CLIENT_PATH
+ 	|| "/Users/highlander/WebstormProjects/keepkey-stack/projects/keepkey-vault-v11/projects/keepkey-vault/node_modules/@pioneer-platform/pioneer-client/lib/index.js";
+ const { default: Pioneer } = await import(pathToFileURL(modulePath).href);
++const specificationResponse = await fetch(`${baseUrl}/spec/swagger.json`, { signal: AbortSignal.timeout(30_000) });
++if (!specificationResponse.ok) throw new Error(`Specification failed (${specificationResponse.status})`);
++const specification = await specificationResponse.json();
++if (specification.servers?.[0]?.url !== `${baseUrl}/api/v1`) throw new Error("Specification advertises the wrong public API origin");
+ const queryKey = `gateway:portfolio-probe:${crypto.randomUUID()}:${crypto.randomUUID()}`;
+ const nativeFetch = globalThis.fetch;
+ const observations = [];
+diff --git a/docs/BLUE-CUTOVER.md b/docs/BLUE-CUTOVER.md
+new file mode 100644
+index 0000000..a1f3f22
+--- /dev/null
++++ b/docs/BLUE-CUTOVER.md
+@@ -0,0 +1,60 @@
++# Pioneer blue gateway cutover
++
++Target: `api-blue.keepkey.info` routes to the same Cloudflare Worker and gateway
++container as `oracles.cc`. The production hostname `api.keepkey.info` continues
++to use legacy green. This configuration does not establish a completed cutover.
++
++## Deployment order
++
++1. Merge the legacy Pioneer workflow change removing `smoke-test-blue-pre`,
++   `deploy-blue`, `smoke-test-blue-post` and `rollback-blue`. Apply it to active
++   release branches and cancel any older running blue rollout. Legacy release
++   images remain available for green; gateway checks cannot validate those images.
++2. Inspect the existing `api-blue.keepkey.info` DNS record in the `keepkey.info`
++   zone. Save its type, content, TTL and proxy state privately. The record must
++   be proxied for a Worker route to intercept requests. If DNS is managed outside
++   this Cloudflare account, stop and resolve ownership before changing anything.
++   Check for an existing overlapping Worker route and preserve its rollback state.
++3. Save the old blue Deployment and any HPA targeting it, including the current
++   running image digest. Retain the Service/Ingress/DNS records for rollback.
++   Snapshots can contain environment values and must remain private.
++4. Deploy this gateway revision through its existing CI. Both domains use the
++   same Worker; no redirect to `oracles.cc` is needed. OpenAPI must advertise
++   the hostname used by the caller so SDK POSTs and authorization stay on origin.
++5. Require the exact deployed gateway revision and healthy database on both
++   domains. The CI blue gate additionally checks the HTTPS OpenAPI origin and
++   all three Litecoin derivation families. Run the installed Vault SDK portfolio
++   probe against blue, then check receive balances/history and active SSE or
++   Socket.IO delivery. Do not execute or broadcast a transaction for these checks.
++6. Confirm green's health and routing are unchanged. Only after all replacement
++   checks pass, delete the exact legacy blue HPA and Deployment identified from
++   live inventory. Never delete by an imprecise `blue` name substring or remove
++   shared workers, databases, namespaces, Services or Ingresses.
++
++Useful probes from the gateway checkout, with Vault installed locally:
++
++```sh
++bun container/live/deploy-health.ts https://api-blue.keepkey.info FULL_GATEWAY_SHA
++bun container/live/portfolio-client.mjs --url=https://api-blue.keepkey.info
++bun container/live/ltc-script-discovery.ts https://api-blue.keepkey.info
++```
++
++The existing Cloudflare token needs access to both zones and Worker routes. A
++successful deploy to `oracles.cc` alone does not prove access to `keepkey.info`.
++
++## Rollback
++
++Restore the saved blue Deployment with its immutable running image digest and
++verify its readiness before returning traffic. Restore its HPA after the
++Deployment is healthy. Then remove only the gateway's `api-blue.keepkey.info/*`
++Worker route and restore the previous overlapping route and DNS proxy state,
++if either was changed. Keep the `oracles.cc/*` route in place. Verify legacy
++blue health and Swagger, plus green health. The retired legacy deployment jobs
++remain retired unless a separate decision restores their ownership.
++
++## Recorded preparation, 2026-11-04
++
++The changes were prepared locally. Live DNS, GitHub and Kubernetes verification
++was blocked: host resolution failed, and `doctl` could not resolve local user
++501. No Worker route, DNS record or Kubernetes resource was changed. Retirement
++must wait until the replacement is reachable and verified.
+diff --git a/src/public-openapi.test.ts b/src/public-openapi.test.ts
+index 437d7d9..715fbd9 100644
+--- a/src/public-openapi.test.ts
++++ b/src/public-openapi.test.ts
+@@ -1,18 +1,20 @@
+ import { expect, test } from "bun:test";
+ import { publicOpenApiResponse } from "./public-openapi";
+ 
+-test("advertises the public HTTPS origin despite internal HTTP forwarding", async () => {
+-	const request = new Request("https://oracles.cc/spec/swagger.json");
++for (const origin of ["https://oracles.cc", "https://api-blue.keepkey.info"]) {
++test(`advertises ${origin} despite internal HTTP forwarding`, async () => {
++	const request = new Request(`${origin}/spec/swagger.json`);
+ 	const response = await publicOpenApiResponse(request, Response.json({
+ 		servers: [{ url: "http://oracles.cc/api/v1" }],
+ 		paths: { "/portfolio/balances": { post: { operationId: "GetPortfolioBalances" } } },
+ 	}, { headers: { ETag: "internal-spec" } }));
+ 	const spec = await response.json() as any;
+-	expect(spec.servers).toEqual([{ url: "https://oracles.cc/api/v1" }]);
++	expect(spec.servers).toEqual([{ url: `${origin}/api/v1` }]);
+ 	expect(spec.paths["/portfolio/balances"].post.operationId).toBe("GetPortfolioBalances");
+ 	expect(response.headers.has("etag")).toBe(false);
+ 	expect(response.headers.get("cache-control")).toBe("no-store");
+ });
++}
+ 
+ test("preserves local development origins and non-spec responses", async () => {
+ 	const response = await publicOpenApiResponse(new Request("http://localhost:8787/spec/swagger.json"), Response.json({ servers: [] }));
+diff --git a/wrangler.jsonc b/wrangler.jsonc
+index 29de72c..8f910df 100644
+--- a/wrangler.jsonc
++++ b/wrangler.jsonc
+@@ -7,7 +7,8 @@
+   "observability": { "enabled": true },
+   "workers_dev": true,
+   "routes": [
+-    { "pattern": "oracles.cc/*", "zone_name": "oracles.cc" }
++    { "pattern": "oracles.cc/*", "zone_name": "oracles.cc" },
++    { "pattern": "api-blue.keepkey.info/*", "zone_name": "keepkey.info" }
+   ],
+   "vars": {
+     "PORT": "12000",

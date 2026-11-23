@@ -35,6 +35,20 @@ export function dashboardBalanceUpdatedAt(rows: readonly (ChainBalance | undefin
   return oldest > 0 && oldest <= now ? oldest : null
 }
 
+/** OWNER 11-22: the header says when balances last refreshed, not the age of the oldest
+ * chain. One chain the server could not refresh must not make the whole wallet read
+ * "1d ago" right after a Refresh. Background freshness (dashboardCacheIsQuiet) still
+ * requires every visible row to be recent, so that chain keeps being retried. */
+export function dashboardLastRefreshedAt(rows: readonly (ChainBalance | undefined)[], fallback: number | null = null, now = Date.now()): number | null {
+  let newest = 0
+  for (const row of rows) {
+    if (!usableDashboardBalance(row)) continue
+    const at = row.updatedAt ?? fallback ?? 0
+    if (Number.isFinite(at) && at > 0 && at <= now) newest = Math.max(newest, at)
+  }
+  return newest || null
+}
+
 export function dashboardCacheIsQuiet(rows: readonly ChainBalance[], visibleChainIds: readonly string[], fallback: number | null = null, activity: ReadonlySet<string> = new Set(), now = Date.now()): boolean {
   if (!visibleChainIds.length) return false
   const byChain = new Map(rows.map(row => [row.chainId, row]))

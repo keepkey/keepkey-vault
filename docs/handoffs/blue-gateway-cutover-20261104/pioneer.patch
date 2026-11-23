@@ -1,0 +1,285 @@
+diff --git a/.github/workflows/README.md b/.github/workflows/README.md
+index 2516b3ff7..a7ff18d38 100644
+--- a/.github/workflows/README.md
++++ b/.github/workflows/README.md
+@@ -1,3 +1,15 @@
++# Blue environment ownership
++
++`api-blue.keepkey.info` is assigned to the Cloudflare `keepkey-gateway` deployment.
++This repository no longer deploys, smoke-tests or rolls back the Kubernetes blue
++server. Release branches continue to build immutable legacy images; green
++promotion and rollback remain in this workflow. The `:blue` image tag is retained
++as a build compatibility tag and does not deploy a service.
++
++The workflow change must reach active release branches as well as `master`;
++cancel any older running blue rollout before retiring the old Deployment.
++See the gateway repository’s `docs/BLUE-CUTOVER.md` for the cutover and rollback.
++
+ # DigitalOcean Container Registry Workflow
+ 
+ ## Setup Instructions
+diff --git a/.github/workflows/digitalocean.yml b/.github/workflows/digitalocean.yml
+index bcce15c65..df4c614ba 100644
+--- a/.github/workflows/digitalocean.yml
++++ b/.github/workflows/digitalocean.yml
+@@ -5,7 +5,7 @@ on:
+     branches:
+       - master                 # Production (green)
+       - main                   # Legacy
+-      - 'release/**'           # Staging (blue)
++      - 'release/**'           # Immutable legacy-green build candidates
+     tags:
+       - 'v*.*.*'
+   pull_request:
+@@ -426,229 +426,9 @@ jobs:
+           echo "${{ steps.meta.outputs.tags }}" >> $GITHUB_STEP_SUMMARY
+           echo '```' >> $GITHUB_STEP_SUMMARY
+ 
+-  smoke-test-blue-pre:
+-    runs-on: ubuntu-latest
+-    name: Smoke test blue (pre-deploy baseline)
+-    needs: [build-pioneer-server, build-pioneer-watchtower, build-pioneer-cache-worker]
+-    if: github.event_name != 'pull_request' && startsWith(github.ref, 'refs/heads/release/')
+-    continue-on-error: true   # baseline — informs us if blue was already broken before our change
+-
+-    steps:
+-      - name: Checkout repository
+-        uses: actions/checkout@v4
+-
+-      - name: Setup Bun
+-        uses: oven-sh/setup-bun@v2
+-        with:
+-          bun-version: latest
+-
+-      - name: Run smoke tests against blue (current live)
+-        run: |
+-          echo "🔬 Pre-deploy smoke test against current blue..."
+-          API_URL=https://api-blue.keepkey.info bun run e2e/smoke/index.ts
+-        timeout-minutes: 3
+-
+-  deploy-blue:
+-    runs-on: ubuntu-latest
+-    name: Deploy to blue (staging)
+-    needs: [smoke-test-blue-pre]
+-    if: github.event_name != 'pull_request' && startsWith(github.ref, 'refs/heads/release/')
+-
+-    steps:
+-      - name: Install doctl
+-        uses: digitalocean/action-doctl@v2
+-        with:
+-          token: ${{ secrets.DIGITALOCEAN_TOKEN }}
+-
+-      - name: Configure kubectl
+-        run: doctl kubernetes cluster kubeconfig save do-cluster-2b9226d
+-
+-      - name: Snapshot current blue image (rollback target)
+-        run: |
+-          BLUE_DEPLOY=$(kubectl get deployments -o jsonpath='{range .items[?(@.spec.selector.matchLabels.app=="pioneer-server-v3-blue")]}{.metadata.name}{end}')
+-          if [ -z "$BLUE_DEPLOY" ]; then
+-            echo "⚠️  No blue deployment found yet — skipping snapshot (rollout step validates)"
+-            exit 0
+-          fi
+-          CONTAINER=$(kubectl get deployment/$BLUE_DEPLOY -o jsonpath='{.spec.template.spec.containers[0].name}')
+-          # The :blue tag is about to move; pin the DIGEST of the image running now so rollback has a real,
+-          # immutable target. (rollout undo is a no-op here — every revision points at the moving :blue tag.)
+-          PREV_DIGEST=$(kubectl get pods -l app=pioneer-server-v3-blue \
+-            -o jsonpath="{.items[0].status.containerStatuses[?(@.name=='$CONTAINER')].imageID}" \
+-            | sed 's#docker-pullable://##')
+-          if [ -n "$PREV_DIGEST" ]; then
+-            kubectl annotate deployment/$BLUE_DEPLOY keepkey.info/rollback-previous-image="$PREV_DIGEST" --overwrite
+-            echo "📌 Rollback target pinned: $PREV_DIGEST"
+-          else
+-            echo "⚠️  No running blue pods to snapshot; rollback will fall back to 'rollout undo'"
+-          fi
+-
+-      - name: Rollout blue deployment
+-        run: |
+-          echo "🔵 Rolling out blue deployment from branch ${GITHUB_REF#refs/heads/}..."
+-          BLUE_DEPLOY=$(kubectl get deployments -o jsonpath='{range .items[?(@.spec.selector.matchLabels.app=="pioneer-server-v3-blue")]}{.metadata.name}{end}')
+-          if [ -z "$BLUE_DEPLOY" ]; then
+-            echo "❌ No blue deployment found with pod selector app=pioneer-server-v3-blue"
+-            exit 1
+-          fi
+-          echo "Found server deployment: $BLUE_DEPLOY"
+-
+-          # Reset the server image to the moving :blue tag before restarting. A prior
+-          # rollback pins an immutable @sha256 digest into the spec; without this reset
+-          # 'rollout restart' keeps re-pulling that pinned (old) image and the new build
+-          # never goes live. set-image-to-:blue recovers from a pin and is a no-op when
+-          # already on :blue; the restart below then forces a fresh pull either way.
+-          CONTAINER=$(kubectl get deployment/$BLUE_DEPLOY -o jsonpath='{.spec.template.spec.containers[0].name}')
+-          CUR_IMG=$(kubectl get deployment/$BLUE_DEPLOY -o jsonpath="{.spec.template.spec.containers[?(@.name=='$CONTAINER')].image}")
+-          REPO=$(echo "$CUR_IMG" | sed -E 's/(@sha256:[a-f0-9]+|:[^@/]+)$//')
+-          echo "Resetting $CONTAINER image to $REPO:blue (was: $CUR_IMG)"
+-          kubectl set image deployment/$BLUE_DEPLOY "$CONTAINER=$REPO:blue"
+-
+-          # Issue all restarts first so every pod picks up the new image
+-          kubectl rollout restart deployment/$BLUE_DEPLOY
+-          echo "✅ Restart issued: $BLUE_DEPLOY"
+-
+-          # Restart ALL other :blue deployments immediately (don't wait for server first)
+-          kubectl get deployments -o json | \
+-            python3 -c "
+-          import sys, json
+-          d = json.load(sys.stdin)
+-          for item in d['items']:
+-            name = item['metadata']['name']
+-            images = [c.get('image','') for c in item['spec']['template']['spec']['containers']]
+-            if any(':blue' in img for img in images) and name != '$BLUE_DEPLOY':
+-              print(name)
+-          " | while read dep; do
+-            echo "Restarting $dep..."
+-            kubectl rollout restart deployment/$dep
+-            echo "✅ Restart issued: $dep"
+-          done
+-
+-          # Now wait for server to become ready (blockchain init on cold start takes 10-15 min)
+-          echo "⏳ Waiting for server rollout (up to 900s)..."
+-          kubectl rollout status deployment/$BLUE_DEPLOY --timeout=900s
+-          echo "✅ Blue deployment rolled out successfully"
+-
+-      - name: Verify blue health
+-        run: |
+-          BLUE_DEPLOY=$(kubectl get deployments -o jsonpath='{range .items[?(@.spec.selector.matchLabels.app=="pioneer-server-v3-blue")]}{.metadata.name}{end}')
+-          echo "🏥 Waiting for $BLUE_DEPLOY to be ready..."
+-          kubectl wait --for=condition=available deployment/$BLUE_DEPLOY --timeout=300s
+-          echo "✅ Blue deployment healthy"
+-
+-      - name: Verify blue swagger host
+-        run: |
+-          EXPECTED_URL="https://api-blue.keepkey.info/api/v1"
+-          for i in {1..10}; do
+-            SWAGGER_URL=$(curl -fsS https://api-blue.keepkey.info/spec/swagger.json | jq -r '.servers[0].url // empty')
+-            if [ "$SWAGGER_URL" = "$EXPECTED_URL" ]; then
+-              echo "✅ Blue swagger server URL verified: $SWAGGER_URL"
+-              exit 0
+-            fi
+-            echo "Attempt $i: blue swagger server URL is '$SWAGGER_URL', expected '$EXPECTED_URL'"
+-            sleep 3
+-          done
+-          echo "❌ Blue swagger server URL did not match expected host"
+-          exit 1
+-
+-      - name: Generate deploy report
+-        run: |
+-          echo "### Blue Deployment Complete 🔵" >> $GITHUB_STEP_SUMMARY
+-          echo "" >> $GITHUB_STEP_SUMMARY
+-          echo "**Branch:** ${GITHUB_REF#refs/heads/}" >> $GITHUB_STEP_SUMMARY
+-          echo "**Commit:** ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+-          echo "**Endpoint:** https://api-blue.keepkey.info" >> $GITHUB_STEP_SUMMARY
+-          echo "" >> $GITHUB_STEP_SUMMARY
+-          echo "Blue pods restarted and pulling \`:blue\` image tag." >> $GITHUB_STEP_SUMMARY
+-
+-  smoke-test-blue-post:
+-    runs-on: ubuntu-latest
+-    name: Smoke test blue (post-deploy verification)
+-    needs: [deploy-blue]
+-    if: github.event_name != 'pull_request' && startsWith(github.ref, 'refs/heads/release/')
+-
+-    steps:
+-      - name: Checkout repository
+-        uses: actions/checkout@v4
+-
+-      - name: Setup Bun
+-        uses: oven-sh/setup-bun@v2
+-        with:
+-          bun-version: latest
+-
+-      - name: Wait for blue to warm up
+-        run: API_URL=https://api-blue.keepkey.info bash e2e/smoke/wait-ready.sh
+-
+-      - name: Run smoke tests against blue (new image)
+-        run: |
+-          echo "🔬 Post-deploy smoke test against new blue image..."
+-          # EXPECT_VERSION makes the suite refuse to bless a pod still serving the
+-          # previous image — the failure mode that let a merged fix sit undeployed
+-          # behind a green CI run on 2026-08-05.
+-          EXPECT_VERSION=$(node -p "require('./services/pioneer-server/package.json').version") \
+-            API_URL=https://api-blue.keepkey.info bun run e2e/smoke/index.ts
+-        timeout-minutes: 3
+-
+-      - name: Report smoke test result
+-        if: always()
+-        run: |
+-          echo "### Blue Smoke Test 🔬" >> $GITHUB_STEP_SUMMARY
+-          echo "" >> $GITHUB_STEP_SUMMARY
+-          echo "**Commit:** ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+-
+-  rollback-blue:
+-    runs-on: ubuntu-latest
+-    name: Rollback blue (smoke test failed)
+-    needs: [deploy-blue, smoke-test-blue-post]
+-    if: failure() || cancelled()
+-
+-    steps:
+-      - name: Install doctl
+-        uses: digitalocean/action-doctl@v2
+-        with:
+-          token: ${{ secrets.DIGITALOCEAN_TOKEN }}
+-
+-      - name: Configure kubectl
+-        run: doctl kubernetes cluster kubeconfig save do-cluster-2b9226d
+-
+-      - name: Rollback blue deployment
+-        run: |
+-          echo "🔴 Smoke tests failed — rolling back blue deployment..."
+-          BLUE_DEPLOY=$(kubectl get deployments -o jsonpath='{range .items[?(@.spec.selector.matchLabels.app=="pioneer-server-v3-blue")]}{.metadata.name}{end}')
+-          CONTAINER=$(kubectl get deployment/$BLUE_DEPLOY -o jsonpath='{.spec.template.spec.containers[0].name}')
+-          PREV=$(kubectl get deployment/$BLUE_DEPLOY -o jsonpath='{.metadata.annotations.keepkey\.info/rollback-previous-image}')
+-          if [ -n "$PREV" ]; then
+-            echo "↩️  Restoring previous image by digest: $PREV"
+-            kubectl set image deployment/$BLUE_DEPLOY "$CONTAINER=$PREV"
+-          else
+-            echo "⚠️  No snapshot annotation — falling back to 'rollout undo' (likely a no-op with moving :blue tag)"
+-            kubectl rollout undo deployment/$BLUE_DEPLOY
+-          fi
+-          kubectl rollout status deployment/$BLUE_DEPLOY --timeout=300s
+-          echo "✅ Blue rolled back to previous image"
+-
+-      - name: Setup Bun for verify
+-        uses: oven-sh/setup-bun@v2
+-        with:
+-          bun-version: latest
+-
+-      - name: Checkout repository
+-        uses: actions/checkout@v4
+-
+-      - name: Verify rollback with smoke tests
+-        run: |
+-          API_URL=https://api-blue.keepkey.info bash e2e/smoke/wait-ready.sh
+-          echo "🔬 Verifying rollback..."
+-          API_URL=https://api-blue.keepkey.info bun run e2e/smoke/index.ts
+-        timeout-minutes: 6
+-
+-      - name: Report rollback
+-        if: always()
+-        run: |
+-          echo "### Blue Rollback Executed 🔴" >> $GITHUB_STEP_SUMMARY
+-          echo "" >> $GITHUB_STEP_SUMMARY
+-          echo "Smoke tests failed after deploy. Blue rolled back to previous image." >> $GITHUB_STEP_SUMMARY
+-          echo "**Commit reverted:** ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
++  # Blue is hosted by keepkey-gateway on Cloudflare. Release branches still
++  # build immutable images for explicit legacy-green promotion; they do not
++  # deploy, smoke-test or roll back the retired Kubernetes blue server.
+ 
+   smoke-test-green-pre:
+     runs-on: ubuntu-latest
+diff --git a/docs/deployment/RELEASE_SOP.md b/docs/deployment/RELEASE_SOP.md
+index c75f27567..b262214cd 100644
+--- a/docs/deployment/RELEASE_SOP.md
++++ b/docs/deployment/RELEASE_SOP.md
+@@ -1,4 +1,13 @@
+-# Release SOP
++# Legacy Pioneer release SOP
++
++> Blue has moved to `keepkey-gateway` on Cloudflare. The legacy workflow no
++> longer deploys or rolls back Kubernetes blue. The procedure below is retained
++> as historical context; its blue deployment and smoke-test instructions must
++> not be used to validate or promote a new legacy image. Release branches still
++> build immutable `release-vX.Y.Z` images, but any green promotion requires
++> separate verification of that legacy image. Do not infer green readiness
++> from tests against the gateway at `api-blue.keepkey.info`.
++
+ 
+ Standard operating procedure for cutting a pioneer release. Produces a `release/vX.Y.Z` branch that CI builds into `:blue` images and auto-deploys to `api-blue.keepkey.info` for staging verification before promotion to green (`master` → `api.keepkey.info`).
+ 

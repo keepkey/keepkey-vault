@@ -11,7 +11,7 @@
  *     └─ libkkemu.dylib        — firmware as shared library (loaded via bun:ffi)
  *
  * Release builds carry a verified 7.17 library at Resources/app/emulator/.
- * A library dropped into ~/.keepkey/emulator remains an explicit override.
+ * Select a development build explicitly to use it in place of the bundle.
  */
 import { dlopen, FFIType, ptr } from 'bun:ffi'
 import { join } from 'path'
@@ -30,7 +30,7 @@ import { emulatorLibFilename, libraryReadsClearSignTestRoot, resolveEmulatorLibP
 const TAG = '[emulator]'
 const FLASH_SIZE = 1048576  // 1 MB
 
-// ── Dylib resolution (selected development build, legacy override, bundle) ──
+// ── Dylib resolution (selected development build, bundle, legacy fallback) ──
 
 /** Directory for the user-installed emulator binary. */
 function getEmulatorBinDir(): string {
@@ -49,12 +49,12 @@ export function getDylibPath(): string {
   return join(getEmulatorBinDir(), getLibFilename())
 }
 
-/** True when either a user override or bundled release library is available. */
+/** True when the selected or default library is available. */
 export function isDylibInstalled(): boolean {
   return getRuntimeDylibPath() !== null
 }
 
-/** User override first, then the library shipped inside the release bundle. */
+/** Resolve the selected library or the app's default. */
 export function getRuntimeDylibPath(): string | null {
   return resolveEmulatorLibPath({ importDir: import.meta.dir })
 }
@@ -148,7 +148,7 @@ export function pairEmulator(): EmulatorPairingStatus {
 /**
  * Initialize the emulator:
  * 1. Decrypt flash into memory (or create fresh)
- * 2. Load the user-installed libkkemu.dylib at ~/.keepkey/emulator/
+ * 2. Load the selected or default emulator library
  * 3. Pass flash buffer to kkemu_init() via FFI
  * 4. Start poll timer
  *

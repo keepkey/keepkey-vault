@@ -1,4 +1,9 @@
 {
+  "multisig/safe-creation.js": {
+    "class": "real-world",
+    "reviewOptIn": "KEEPKEY_SDK_SAFE_CREATION",
+    "why": "Safe factory creation with two owners and a 2-of-2 threshold, verified by nested ERC-7730"
+  },
   "chain/assets.js": {
     "class": "no-signing",
     "why": "reads data or runs offline; nothing is shown for approval"
@@ -290,6 +295,15 @@
   "fw-716/50-advancedmode-one-click.js": {
     "class": "must-warn",
     "why": "card turns AdvancedMode on, then signs; opt-in"
+  },
+  "fw-717/00-capabilities.js": {
+    "class": "no-signing",
+    "why": "SDK REST exposes the bundled 7.17 firmware and its ClearSign capabilities"
+  },
+  "fw-717/eip712-chunked.js": {
+    "class": "edge-case",
+    "reviewOptIn": "KEEPKEY_SDK_ALPHA",
+    "why": "checks SDK REST signing and exact OLED text beyond the first EIP-712 value chunk"
   },
   "hive/all-operations.js": {
     "class": "real-world",

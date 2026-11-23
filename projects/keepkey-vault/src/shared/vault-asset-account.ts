@@ -54,16 +54,18 @@ export function assertVaultControlSnapshot(
     .map((c) => c.address?.toLowerCase())
     .sort()
     .join();
+  const currentOwners = account.owners.map(a => a.toLowerCase()).sort().join();
+  if (identity.type === 'safe' && account.address.toLowerCase() === identity.address.toLowerCase()
+    && account.deployed && (account.threshold !== identity.threshold || currentOwners !== owners)) {
+    throw new Error(`Vault configuration changed: saved ${identity.threshold} of ${identity.cosigners.length} signers; on-chain ${account.threshold} of ${account.owners.length}. Review the signer addresses and threshold before continuing.`);
+  }
   if (
     identity.type !== "safe" ||
     account.address.toLowerCase() !== identity.address.toLowerCase() ||
     !account.deployed ||
     account.configurationChanged ||
     account.threshold !== identity.threshold ||
-    account.owners
-      .map((a) => a.toLowerCase())
-      .sort()
-      .join() !== owners ||
+    currentOwners !== owners ||
     account.safeVersion !== (identity.safeVersion || "1.4.1")
   )
     throw new Error(

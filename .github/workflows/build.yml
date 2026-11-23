@@ -29,9 +29,7 @@ env:
   NODE_VERSION: '20'
   MACOS_DEPLOYMENT_TARGET: '13.0'
   EMU_RELEASE_VERSION: '7.17.0'
-  EMU_SOURCE_RUN_ID: '42312167033'
-  EMU_SOURCE_SHA: 'c19a995b4045704494959f7885fc3ade63c32a19'
-  EMU_SOURCE_ARTIFACT: 'certified-emulator-7.17.0-macos13-c19a995b4045704494959f7885fc3ade63c32a19'
+  EMU_ARTIFACT_REPOSITORY: 'BitHighlander/keepkey-vault'
   MONERO_NATIVE_RELEASE_TAG: 'monero-native-20261117'
 
 jobs:
@@ -306,18 +304,10 @@ jobs:
           hutch electrobun sync
         shell: bash
 
-      # Packaging contract tests use the certified bytes on Linux and macOS.
-      - name: Download certified emulator 7.17 artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: ${{ env.EMU_SOURCE_ARTIFACT }}
-          path: .certified-emulator-${{ env.EMU_RELEASE_VERSION }}
-          github-token: ${{ github.token }}
-          repository: keepkey/keepkey-vault
-          run-id: ${{ env.EMU_SOURCE_RUN_ID }}
-
-      - name: Stage and verify certified emulator 7.17 libraries
-        run: scripts/stage-certified-emulator.sh ".certified-emulator-${EMU_RELEASE_VERSION}"
+      - name: Refresh the default emulator from current fork alpha
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/refresh-alpha-emulator.mjs
         shell: bash
 
       - name: Prepare pinned Monero wallet tools
@@ -404,6 +394,12 @@ jobs:
         run: make test-emu-pin KK_EMU_DYLIB="$PWD/projects/keepkey-vault/emulator-bundle/libkkemu.dylib"
         shell: bash
 
+      - name: Test PIN display delivery and emulator window reopen
+        if: runner.os == 'macOS' && matrix.tests
+        working-directory: projects/keepkey-vault
+        run: bun test src/bun/emulator-window-lifecycle.test.ts
+        shell: bash
+
       - name: Test Nu7 transparent signing on the certified alpha emulator
         if: runner.os == 'macOS' && matrix.tests
         run: make test-emu-zcash-nu7 KK_EMU_DYLIB="$PWD/projects/keepkey-vault/emulator-bundle/libkkemu.dylib"
@@ -438,6 +434,13 @@ jobs:
       # pruning and the camera copy must be in it, and nothing may rewrite it.
       - name: Verify release bundle
         run: cd projects/keepkey-vault && bun scripts/verify-release-bundle.ts stable
+        shell: bash
+
+      - name: Unlock a disposable wallet in the packaged macOS app
+        if: runner.os == 'macOS'
+        timeout-minutes: 4
+        working-directory: projects/keepkey-vault
+        run: bun scripts/smoke-packaged-pin.ts "artifacts/stable-${{ matrix.artifact-suffix }}-keepkey-vault.app.tar.zst"
         shell: bash
 
       - name: Smoke-test packaged Monero tools without developer overrides
@@ -775,7 +778,7 @@ jobs:
             'KERNEL=="hidraw*", ATTRS{idVendor}=="2b24", MODE="0666", GROUP="plugdev"' \
             > "$ROOT/lib/udev/rules.d/51-keepkey.rules"
 
-          # Copyright stub (lintian wants one)
+          # Vault's license notice and the complete LGPLv3 + GPLv3 terms.
           printf '%s\n' \
             'Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/' \
             'Upstream-Name: KeepKey Vault' \
@@ -783,8 +786,13 @@ jobs:
             '' \
             'Files: *' \
             'Copyright: KEY HODLERS LLC' \
-            'License: Proprietary' \
+            'License: LGPL-3.0-only' \
+            ' See COPYING.LESSER and COPYING in this directory for the complete terms.' \
+            ' .' \
+            ' Separately licensed components retain their own licenses and copyright notices.' \
             > "$ROOT/usr/share/doc/$PKG/copyright"
+          cp "$GITHUB_WORKSPACE/LICENSE" "$ROOT/usr/share/doc/$PKG/COPYING.LESSER"
+          cp "$GITHUB_WORKSPACE/COPYING" "$ROOT/usr/share/doc/$PKG/COPYING"
 
           # Compute installed size in KB (excluding DEBIAN dir)
           SIZE_KB=$(du -sk "$ROOT" --exclude=DEBIAN | cut -f1)
@@ -932,23 +940,11 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "hutch install failed" }
           "$HOME\.hutch\bin" | Out-File -FilePath $env:GITHUB_PATH -Append
 
-      - name: Download certified emulator 7.17 artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: ${{ env.EMU_SOURCE_ARTIFACT }}
-          path: .certified-emulator-${{ env.EMU_RELEASE_VERSION }}
-          github-token: ${{ github.token }}
-          repository: keepkey/keepkey-vault
-          run-id: ${{ env.EMU_SOURCE_RUN_ID }}
-
-      - name: Stage certified emulator DLL
+      - name: Refresh the default emulator from current fork alpha
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/refresh-alpha-emulator.mjs
         shell: pwsh
-        run: |
-          $want = (Get-Content projects/keepkey-vault/emulator-bundle/manifest.json | ConvertFrom-Json).files.'libkkemu.dll'.sha256
-          $dll = Get-ChildItem -Recurse ".certified-emulator-$env:EMU_RELEASE_VERSION" -Filter *.dll |
-            Where-Object { (Get-FileHash -Algorithm SHA256 $_.FullName).Hash.ToLowerInvariant() -eq $want } | Select-Object -First 1
-          if (-not $dll) { throw "no DLL in the artifact matches manifest sha256 $want" }
-          Copy-Item $dll.FullName projects/keepkey-vault/emulator-bundle/libkkemu.dll
 
       - name: Download device-protocol lib/
         uses: actions/download-artifact@v4

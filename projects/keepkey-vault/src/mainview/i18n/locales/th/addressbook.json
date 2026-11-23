@@ -30,6 +30,7 @@
 	"noMatches": "ไม่มีที่อยู่ตรงกับตัวกรองของคุณ",
 	"unlabeled": "ไม่มีป้ายกำกับ",
 	"ownWallet": "กระเป๋าของฉัน",
+	"ownSymbol": "{{symbol}} ของฉัน",
 	"edit": "แก้ไข",
 	"delete": "ลบ",
 	"view": "ดู",
@@ -45,5 +46,8 @@
 	"cosigner": "ผู้ร่วมลงนาม",
 	"cosignerOption": "ผู้ร่วมลงนาม Safe: แสดงเป็นตัวเลือกแรกเมื่อสร้างมัลติซิก",
 	"markCosigner": "ทำเครื่องหมายเป็นผู้ร่วมลงนาม Safe",
-	"notCosigner": "ไม่ใช่ผู้ร่วมลงนาม"
+	"notCosigner": "ไม่ใช่ผู้ร่วมลงนาม",
+	"addressOrEns": "ที่อยู่หรือชื่อ ENS",
+	"ensResolving": "กำลังค้นหาชื่อ ENS…",
+	"certificationExcluded": "ไม่สามารถรับรองผู้ติดต่อเหล่านี้ได้:"
 }

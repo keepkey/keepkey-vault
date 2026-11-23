@@ -23,7 +23,7 @@ import { selectDesktopUpdateRelease } from '../shared/desktop-update-release'
 // what code executed, at the cost of a per-call sync. The throughput hit is
 // negligible for our log volume (~10–100 lines/sec at peak boot).
 import { withPermit2SpenderName } from './permit2-spender-name'
-import { ownerPortfolioConfidence, portfolioBalanceSyncState, portfolioFaultChainIds } from '../shared/balance-display-state'
+import { ownerPortfolioConfidence, portfolioBalanceSyncState, portfolioFaultChainIds, quietTokenOnlyFailures, keepLastKnownTokens } from '../shared/balance-display-state'
 import { sendZcashByRoute, zcashPrivateSendRoute } from '../shared/zcash-privacy'
 import * as fs from "fs"
 import * as os from "os"
@@ -32,8 +32,15 @@ import { createHash, randomUUID } from "crypto"
 import { createSwapQuoteLeases } from './swap-quote-lease'
 import { assessSwapRisk } from '../shared/swap-risk'
 import { validateContactOnNetwork } from '../shared/address-validation'
+import { isEnsName } from '../shared/ens'
+import { resolveEnsContact, repairLegacyEnsContacts } from './addressbook-ens'
+import { resolveStoredEnsContact } from './db'
+import { previewCertificationEntries, selectCertificationContacts } from './addressbook-clearsign'
 import { singleFlight } from './single-flight'
 import { PasswordBank } from './password-bank'
+import { withKeepKeyFido, readStatus, runReset, waitForReplug } from './passkeys'
+import { setFidoPin, listPasskeys, deletePasskey } from './passkeys-manage'
+import { resolveLabels, cleanLabel } from './passkey-labels'
 import { passwordDeviceCipher } from './password-device'
 import { savePasswordBackup } from './password-backup'
 import { PasswordBex } from './password-bex'
@@ -86,8 +93,8 @@ function requireAddressBookClearsignFirmware(): void {
 }
 
 /**
- * Certified contacts have no capability flag (firmware #951), and 7.16 test
- * builds with and without it share a version. Rule: offer certification on
+ * Legacy 7.16 test builds with and without firmware #951 share a version.
+ * Native certification separately requires capability 32. Offer EVM certification on
  * >= 7.16.0; the first attempt is the probe. If the device answers the way a
  * build without #951 does (isAddressBookCertifyUnsupported), remember it for
  * this device and this exact firmware image (its hash), so a reflash re-probes.
@@ -259,7 +266,7 @@ import { instanceSocketPath, startupInstanceGate } from "./single-instance"
 import { signSolanaWireTransaction } from "./solana-signing"
 import { AuthStore, HttpError } from "./auth"
 import { txBuildParams } from "./rest-tx-build"
-import { ensurePioneerQueryKeyRegistered, getPioneerProviderUsage, getPioneer, getPioneerApiBase, resetPioneer, setPioneerOffline, DEFAULT_API_BASE, getQueryKey as getPioneerQueryKey } from "./pioneer"
+import { ensurePioneerQueryKeyRegistered, getPioneer, getPioneerApiBase, resetPioneer, setPioneerOffline, DEFAULT_API_BASE, getQueryKey as getPioneerQueryKey } from "./pioneer"
 import { setBtcBackendOffline, setBtcNodeConfig, setBtcNodeDeviceEligible, setBtcNodeWatchOnlyEligible, isBtcNodeActive, getBtcBackend, getWatchOnlyBtcBackend, getPsbtBroadcastRoute, broadcastBtcTx } from "./btc-backend"
 import { isBitcoinOnlyVariant } from "../shared/flags"
 import { bitcoinOnlyActivityList, bitcoinOnlyAddressBookHistoryList, bitcoinOnlyBalanceList, bitcoinOnlyChainList, bitcoinOnlyLedgerJournalList, bitcoinOnlyLedgerSummaryList, bitcoinOnlyPendingSigningRejection, bitcoinOnlyReportAllowed, bitcoinOnlyWatchOnlyScope, enforceBitcoinOnlyRpcBoundary } from "./bitcoin-only-boundary"
@@ -276,6 +283,7 @@ import { createPioneerServerSwitch } from "./pioneer-server-switch"
 import { startEventStream, stopEventStream, type AddressEntry, type StreamEvent } from "./event-stream"
 import { pioneerSupportsDurableWalletMonitoring } from "../shared/pioneer-event-capabilities"
 import { rebuildActivityHistory, clearHistoryQueryCache } from "./activity-history"
+import { isHistoryScanChain } from "./history-scan-eligibility"
 import { watchOnlyPortfolioKeys, watchOnlyNativeBalances, watchOnlyNodeBalances, portfolioNativeMatch, confirmedPortfolioNativeMatches, trackedUtxoScriptPaths } from './watch-only-portfolio'
 import { cachedHistoryQueries, watchOnlyWalletScope, watchOnlyBitcoinScope } from './watch-only-history'
 import { createTxWatch, MAX_WATCH_MS, UNSEEN_GIVE_UP_MS } from "./tx-watch"
@@ -336,7 +344,9 @@ import { classifyEffectExposure, observeEvmCall, observeEvmTypedData, observeMal
 import { getClearSignProtectionCaseStudies } from "./clearsign-case-studies"
 import { getEvmSimulationEndpoint, getEvmSimulationRpcUrls } from "./evm-simulation-config"
 import { addContractFacts } from "./contract-facts"
-import { attachSafeCallPreviews } from "./evm-signing-preview"
+import { applyTypedDataSigningGate, attachSafeCallPreviews, normalizeEvmChainId } from "./evm-signing-preview"
+import { decodeEIP712 } from "./eip712-decoder"
+import { withoutErc7730TypedDescription } from "./evm-presign-report"
 import { attachSafeMessagePreimage } from "./safe-message-preimage"
 import { initDb, getDb, factoryResetDb, getCustomTokens, addCustomToken as dbAddCustomToken, removeCustomToken as dbRemoveCustomToken, setCustomTokenIcon as dbSetCustomTokenIcon, getCustomChains, addCustomChainDb, removeCustomChainDb, getSetting, setSetting, setTokenVisibility as dbSetTokenVisibility, removeTokenVisibility as dbRemoveTokenVisibility, getAllTokenVisibility, insertApiLog, getApiLogs, clearApiLogs, setCachedBalances, getCachedBalances, updateCachedBalance, markBalanceTx, clearBalances, deleteCachedChainBalance, saveCachedPubkey, getLatestDeviceSnapshot, getCachedPubkeys, saveReport, getReportsList, getReportById, deleteReport, reportExists, getSwapHistory, getSwapHistoryStats, getSwapHistoryByTxid, getBip85Seeds, saveBip85Seed, deleteBip85Seed, clearCachedPubkeys, getRecentActivityFromLog, dismissActivity, getPioneerServers, addPioneerServerDb, removePioneerServerDb, syncOwnAddressBook, recordOutbound, getAddressBookList, updateAddressBookEntry, deleteAddressBookEntry, getAddressBookHistory, getDeviceLabelMap, getBalancesForOwnSeed, addExternalEntry, matchAddressBook, insertClearSignEvent, getClearSignEvents, insertClearSignObservation, finalizeClearSignObservation, authenticateClearSignObservation, refuseClearSignObservationDefinition, getClearSignCoverageSummary, getClearSignAuditJobs, enqueueClearSignAuditDemand, getSignedTxReview, setDeviceMasterFingerprint, getDeviceSnapshotById, getAllDeviceSnapshots, saveImportedWatchOnlyWallet, setImportedWalletVerified } from "./db"
 import { lookupEvmTx, recordSignedEvmTx, txDetails, walletBook } from "./signed-tx-review"
@@ -372,13 +382,14 @@ import { buildProviderBundle, buildStudioEvmSchema, parseProviderBundle, provide
 import { ethRpc, getTokenMetadata, broadcastEvmTx, verifyEvmSigner, ethCall, ethGetCode, hasContractCode, getEvmGasPrice, getEvmNonce, getEvmBalance, waitForTxReceipt } from "./evm-rpc"
 import { evmSourceForChain, pioneerEvmRpc } from "./pioneer-evm"
 import { SafeMultisigService, inspectBaseSafe } from './safe-multisig'
+import { safeTransactionService } from './safe-transaction-service'
 import { VaultImportService } from './vault-import'
 import { VaultPortfolioService } from './vault-portfolio'
 import { requireVaultAsset, assertVaultControlSnapshot, type VaultAssetRequest, type VaultAssetAccount } from '../shared/vault-asset-account'
-import { linkedVaultIds } from '../shared/vault-wallet-links'
+import { linkedVaultIds, vaultsForWallet, type VaultWalletKey } from '../shared/vault-wallet-links'
 import { utils as evmUtils } from 'ethers'
 import { VaultAddressBook, certifiableAddressBookEntries } from './vault-addressbook'
-import { assertVaultDestination, safeVaultIdentity, bitcoinVaultIdentity, type VaultIdentity } from '../shared/vault-identity'
+import { assertVaultDestination, safeVaultIdentity, safeAccountFromVault, bitcoinVaultIdentity, type VaultIdentity } from '../shared/vault-identity'
 import { deviceErrorMessage } from "../shared/device-error"
 import type { BtcBroadcastReview, BtcPsbtReview, BtcWatchOnlyAccounts, BtcWatchOnlyImport, BtcWatchOnlyPsbt, BtcWatchOnlyReceive, ChainBalance, TokenBalance, CustomToken, SigningRequestInfo, ApiLogEntry, PioneerChainInfo, EvmAddressSet, Bip85SeedMeta, StakingPosition, SwapAsset, AuditToken, DefiPosition, RecentActivity, ClearSignEvent, ClearSignSolanaSchemaArtifact } from "../shared/types"
 import type { VaultRPCSchema } from "../shared/rpc-schema"
@@ -386,7 +397,8 @@ import type { WipeReason } from "../shared/flash-wipe"
 import { collectAndAnalyzeWithGate, MAX_CHUNK_BYTES } from "./rng-audit"
 import { withoutCallerErc7730 } from '../shared/erc7730-support'
 import { recordReviewCard, recordReviewCardText, reviewTapeRecording } from './test-review-tape'
-import { ADDRESS_BOOK_CERTIFY_UNSUPPORTED, buildCertificationRequest, contactProofAllowed, buildContactProof, contactsFromEntries, CONTACT_DESTINATION, evmRecipient, isAddressBookCertifyUnsupported, signWithContactProofAck, type AddressBookCertification } from "./addressbook-clearsign"
+import { SigningReviewSessions } from "./signing-review-session"
+import { ADDRESS_BOOK_CERTIFY_UNSUPPORTED, ALL_CHAIN_CONTACT_CAPABILITY, buildCertificationRequest, contactProofAllowed, buildContactProof, CONTACT_DESTINATION, evmRecipient, isAddressBookCertifyUnsupported, signWithContactProofAck, type AddressBookCertification } from "./addressbook-clearsign"
 
 // L3 fix: withTimeout imported from engine-controller (was duplicated here)
 const PIONEER_TIMEOUT_MS = 60_000
@@ -442,8 +454,10 @@ async function mapWithConcurrency<T, R>(
 interface PortfolioMeta {
 	degraded: boolean
 	degradedCount: number
-	failures: Array<{ caip: string; reason: string }>
+	failures: Array<{ caip: string; reason: string; scope?: string }>
 	staleChains: Array<{ caip: string; pubkey: string; ageMs: number; fetchedAtISO: string }>
+	/** Token-only failures off ETH/Base: not a fault; the chain keeps its last known tokens. */
+	quietTokenFailures?: Array<{ caip: string; reason: string; scope?: string }>
 }
 
 // Server-side DeFi position shape from GetPortfolioBalances (includeDefi=true).
@@ -482,7 +496,7 @@ function unwrapPortfolioResponse(resp: any): {
 } {
 	const rawData = resp?.data?.data || resp?.data || {}
 	const entries = rawData.balances || (Array.isArray(rawData) ? rawData : [])
-	const meta: PortfolioMeta | null = rawData.meta ?? null
+	const meta: PortfolioMeta | null = rawData.meta ? quietTokenOnlyFailures(rawData.meta) : null
 	const defiPositions: ServerDefiPosition[] | null = Array.isArray(rawData.defiPositions) ? rawData.defiPositions : null
 	return { entries, meta, defiPositions }
 }
@@ -573,6 +587,7 @@ function mergeMetas(metas: PortfolioMeta[]): PortfolioMeta {
 		degradedCount: metas.reduce((n, m) => n + (m.degradedCount || 0), 0),
 		failures: metas.flatMap(m => m.failures || []),
 		staleChains: metas.flatMap(m => m.staleChains || []),
+		quietTokenFailures: metas.flatMap(m => m.quietTokenFailures || []),
 	}
 }
 
@@ -728,6 +743,26 @@ function expectShieldedDelta(deltaZat: number): void {
 	if (!m.expected) return
 	m.expected = { total: Math.max(0, m.expected.total + deltaZat), at: Date.now() }
 	writeZcashMemory(m)
+}
+
+// An unshield pays our own transparent address, but the indexer lists UTXOs only once mined.
+// Remember the broadcast so the public balance shows it as pending, not as 0, until it appears.
+type PendingTransparent = { txid: string; to: string; value: number; at: number }
+const PENDING_TRANSPARENT_TTL_MS = 3 * 60 * 60 * 1000 // ponytail: drop after 3h if the indexer never lists it
+function pendingTransparentKey(): string | null {
+	const scope = getWalletDbScope()
+	return scope ? `zcash_pending_transparent:${scope.walletId}` : null
+}
+function readPendingTransparent(): PendingTransparent[] {
+	const key = pendingTransparentKey()
+	try { const v = key ? JSON.parse(getSetting(key) || '[]') : []; return Array.isArray(v) ? v : [] } catch { return [] }
+}
+function writePendingTransparent(list: PendingTransparent[]): void {
+	const key = pendingTransparentKey()
+	if (key) setSetting(key, JSON.stringify(list))
+}
+function rememberPendingTransparent(txid: string, to: string, value: number): void {
+	writePendingTransparent([...readPendingTransparent(), { txid, to, value, at: Date.now() }])
 }
 
 /**
@@ -1177,6 +1212,7 @@ function attachSafeKnownAddresses(info: SigningRequestInfo): void {
 }
 
 function attachSigningPolicySnapshot(info: SigningRequestInfo): SigningRequestInfo {
+	info.deviceReview = { emulator: engine.isEmulator, deviceId: engine.getDeviceState().deviceId }
 	const features = engine.getCachedFeaturesSnapshot()
 	if (features) {
 		const policies: any[] = features.policiesList || features.policies || []
@@ -1297,6 +1333,7 @@ const auth = new AuthStore()
 // the awaiting REST callback consumes and deletes it immediately.
 const blindSigningApprovalIds = new Set<string>()
 const pendingSigningApprovalInfo = new Map<string, SigningRequestInfo>()
+const signingReviewSessions = new SigningReviewSessions()
 async function requestSigningApprovalDecision(id: string, signal?: AbortSignal) {
 	const pending = auth.requestSigningApproval(id)
 	const cancel = () => auth.rejectSigningRequest(id)
@@ -1310,7 +1347,7 @@ async function requestSigningApprovalDecision(id: string, signal?: AbortSignal) 
 }
 // Settings loaded lazily after DB init — defaults used until then
 let restApiEnabled = false
-let walletConnectEnabled = false
+let walletConnectEnabled = true
 let moneroEnabled = false
 /** Own node is preferred. Existing explicit remote URLs are preserved. */
 const MONERO_DEFAULT_NODE = MONERO_LOCAL_URL
@@ -1408,6 +1445,12 @@ function storedAddressBookCertification(): AddressBookCertification | undefined 
 	try { return JSON.parse(raw) as AddressBookCertification } catch { return undefined }
 }
 
+engine.contactProofState = () => ({ enabled: addressBookClearsignEnabled, certificate: storedAddressBookCertification() })
+
+function allChainContactsSupported(): boolean {
+	return engine.getDeviceState().capabilities?.includes(ALL_CHAIN_CONTACT_CAPABILITY) === true
+}
+
 function invalidateAddressBookCertification(): void {
 	setSetting('addressbook_clearsign_certification', '')
 }
@@ -1420,7 +1463,7 @@ function loadSettings() {
 	moneroEnabled = getSetting('monero_enabled') === '1' && isMoneroSidecarAvailable()
 	setMoneroEmulatorEnabled(moneroEnabled)
 	restApiEnabled = getSetting('rest_api_enabled') === '1'
-	walletConnectEnabled = getSetting('walletconnect_enabled') === '1'
+	walletConnectEnabled = getSetting('walletconnect_enabled') !== '0'
 	const storedZcashPrivacyEnabled = getSetting('zcash_privacy_enabled') === '1'
 	const zcashSidecarAvailable = !!findZcashCliBinary()
 	zcashPrivacyEnabled = storedZcashPrivacyEnabled && zcashSidecarAvailable
@@ -1798,6 +1841,11 @@ function getOrCreateWcManager(): WalletConnectManager {
 	return wcManager
 }
 
+/** Names the user gave passkey sites, keyed by SHA-256(rpId) (the KeepKey stores only the hash). */
+function passkeyUserLabels(): Record<string, string> {
+	try { const v = JSON.parse(getSetting('passkey_labels') || '{}'); return v && typeof v === 'object' ? v : {} } catch { return {} }
+}
+
 function getAppSettings() {
 	const servers = getPioneerServers()
 	const activeBase = getPioneerApiBase()
@@ -1821,6 +1869,7 @@ function getAppSettings() {
 		// or disabled view must not hydrate or disclose wallet monitoring records.
 		moneroPendingBroadcasts: moneroEnabled && !moneroHiddenWallet(engine) ? getMoneroWallet().pendingCount() : 0,
 		passwordManagerEnabled: passwordBank.enabled,
+		passkeysEnabled: getSetting('passkeys_enabled') === '1',
 		zcashPrivacyEnabled,
 		hiveEnabled,
 		emulatorEnabled,
@@ -2077,6 +2126,7 @@ async function ensureManagersForSeed(source: string): Promise<{ truth: string | 
  *  successful (re)initialize so reconcileSeedManagers' stamp check is armed. */
 function stampManagers(truth: string | null | undefined): void {
 	if (truth) managersSeedOwner = truth.toLowerCase()
+	notifyVaultWalletMembership()
 }
 
 /** Seed own-wallet Address Book entries for EVERY known device from the persisted
@@ -2201,17 +2251,24 @@ const restCallbacks: RestApiCallbacks = {
 			console.log(`[REST] Explicit test environment approved host signing gate for ${info.method}`)
 			return { approved: true }
 		}
+		signingReviewSessions.begin(info.id, info.deviceReview?.deviceId, activitySessionEpoch, engine.isEmulator)
 		pendingSigningApprovalInfo.set(info.id, info)
 		try { rpc.send['signing-request'](info) } catch { /* webview not ready */ }
 		acquireWindowFocus()
 		try {
-			return await requestSigningApprovalDecision(info.id, signal)
+			const decision = await requestSigningApprovalDecision(info.id, signal)
+			if (!decision.approved) signingReviewSessions.end(info.id)
+			return decision
+		} catch (error) {
+			signingReviewSessions.end(info.id)
+			throw error
 		} finally {
 			pendingSigningApprovalInfo.delete(info.id)
 			releaseWindowFocus()
 		}
 	},
 	onSigningDismissed: (id: string) => {
+		signingReviewSessions.end(id)
 		try { rpc.send['signing-dismissed']({ id }) } catch { /* webview not ready */ }
 	},
 	// AdvancedMode off over REST ends the Studio provider-key session too.
@@ -2310,6 +2367,7 @@ async function applyRestApiState(when: 'startup' | 'settings') {
 // ── Wallet-session quote authorization and tracker data ──────────────
 import type { SwapQuote, SwapQuoteParams, ExecuteSwapParams, SwapResult, SwapSubStage, BuildTxParams, BuildTxResult } from '../shared/types'
 import { isThorchainBankToken, thorchainBankTokenFirmwareOK, THORCHAIN_BANK_TOKEN_MIN_FW } from '../shared/swap-support-matrix'
+import { watchOnlyAddressMismatchMessage } from '../shared/watch-only-verify'
 const swapQuoteLeases = createSwapQuoteLeases()
 
 // ── Emulator session (start, switch, build change) ───────────────────
@@ -3063,6 +3121,8 @@ async function getChainBalance(params: { chainId: string; forceRefresh?: boolean
 				balanceUsd += shieldedTok.balanceUsd
 			}
 		}
+		// Token discovery failed quietly (not ETH/Base): the native read is verified, the tokens are last known.
+		if (responseMeta?.quietTokenFailures?.length) ({ tokens, balanceUsd } = keepLastKnownTokens({ tokens, balanceUsd }, cachedBalance))
 	} catch (e: any) {
 		assertCurrent()
 		if (bitcoinSelfHost) {
@@ -3070,7 +3130,15 @@ async function getChainBalance(params: { chainId: string; forceRefresh?: boolean
 		}
 		const message = getPioneerPortfolioErrorMessage(e)
 		console.warn(`[getBalance] ${chain.coin} portfolio failed:`, message)
-		try { rpc.send['pioneer-error']({ message, url: getPioneerApiBase() }) } catch { /* webview not ready */ }
+		// One chain missing a read is that chain not refreshed yet, never "server
+		// unavailable": only the full portfolio read may report an outage.
+		try {
+			sendPortfolioFault({
+				message: '', url: getPioneerApiBase(), severity: 'warning', checkedChainIds: [chain.id],
+				degradedChains: [chain.symbol], staleChains: [], degradedChainIds: [chain.id], staleChainIds: [],
+				unresolvedFaultCount: 0, unresolvedErrorCount: 0,
+			})
+		} catch { /* webview not ready */ }
 		throw new Error(`Balance server error: ${message}`)
 	}
 	// If Pioneer failed or returned no address, preserve the cached address
@@ -4239,10 +4307,34 @@ function registeredVaults() {
 	const all = [...(engine.isPassphraseWallet && sessionVaults?.key === safeSessionKey() ? sessionVaults.vaults : []), ...(getDb() ? vaultBook().list().map(e => e.vault!) : [])]
 	return all.filter((v, i) => all.findIndex(other => other.id === v.id) === i)
 }
-function vaultAddressEntries(networkId?: string) {
-	const rows = vaultBook().list(networkId)
+function activeVaultWalletKeys(): VaultWalletKey[] {
+	const seed = engine.currentSeedEthAddress?.toLowerCase()
+	if (!engine.wallet || engine.getDeviceState().state !== 'ready' || !seed) return []
+	const keys: VaultWalletKey[] = /^0x[0-9a-f]{40}$/.test(seed) ? [{ family: 'evm', address: seed, xpub: '' }] : []
+	// Account managers can survive an asynchronous wallet transition. Only use
+	// their keys when their derivation stamp belongs to this verified live seed.
+	if (managersSeedOwner === seed) {
+		keys.push(...evmAddresses.toAddressSet().addresses.map(a => ({ family: 'evm' as const, address: a.address, xpub: '' })))
+		keys.push(...btcAccounts.toAccountSet().accounts.flatMap(a => a.xpubs.map(x => ({ family: 'bitcoin' as const, address: '', xpub: x.xpub }))))
+	}
+	return keys
+}
+function walletRegisteredVaults() {
+	return vaultsForWallet(registeredVaults(), activeVaultWalletKeys())
+}
+let publishedVaultWalletKeys = ''
+function notifyVaultWalletMembership() {
+	const key = `${safeSessionKey()}:${JSON.stringify(activeVaultWalletKeys())}`
+	if (key === publishedVaultWalletKeys) return
+	publishedVaultWalletKeys = key
+	notifyVaultsChanged()
+}
+/** `everyWallet`: the Address Book lists every saved vault, so a KeepKey that is not one of its signers can still send in. */
+function vaultAddressEntries(networkId?: string, everyWallet = false) {
+	const keys = activeVaultWalletKeys()
+	const rows = everyWallet ? vaultBook().list(networkId) : vaultBook().listForWallet(keys, networkId)
 	if (engine.isPassphraseWallet && sessionVaults?.key === safeSessionKey()) {
-		for (const v of sessionVaults.vaults) if (!networkId || v.networkId === networkId) {
+		for (const v of vaultsForWallet(sessionVaults.vaults, keys)) if (!networkId || v.networkId === networkId) {
 			rows.unshift({ id: `session-vault:${v.id}`, walletId: 'session', deviceId: engine.getDeviceState().deviceId || '', kind: 'external',
 				networkId: v.networkId, chainId: v.chainId, address: v.address, label: v.name, vault: v, savedAt: Date.now(), createdAt: Date.now(), updatedAt: Date.now() })
 		}
@@ -4275,7 +4367,24 @@ async function verifyKnownEvmVaultTransfer(params: any) {
 	}
 }
 function vaultCertificationEntries() {
-	return certifiableAddressBookEntries(vaultBook().list(), getAddressBookList({ kind: 'external', savedOnly: true }))
+	return certifiableAddressBookEntries(vaultAddressEntries(), getAddressBookList({ kind: 'external', savedOnly: true }), allChainContactsSupported())
+}
+const repairEnsContactsOnce = singleFlight<void>()
+async function repairSavedEnsContacts(): Promise<void> {
+	if (offlineMode) return
+	return repairEnsContactsOnce('addressbook-ens', async () => {
+		const changed = await repairLegacyEnsContacts(getAddressBookList({ kind: 'external', savedOnly: true }),
+			(name, network) => withTimeout(resolveEnsContact(name, network), 10000, 'ENS lookup'),
+			(entry, resolved) => {
+				const chains = getAllChains().filter(c => c.networkId === entry.networkId)
+				if (!validateContactOnNetwork(resolved.address, chains, matchAddressBook(entry.networkId, resolved.address, 'evm')).valid) return false
+				return resolveStoredEnsContact(entry, resolved)
+			})
+		if (changed) {
+			invalidateAddressBookCertification()
+			try { rpc.send['addressbook-changed']({}) } catch { /* webview not ready */ }
+		}
+	})
 }
 async function listRegisteredVaults() {
 	const epoch = activitySessionEpoch
@@ -4289,8 +4398,10 @@ async function listRegisteredVaults() {
 	}
 	if (epoch !== activitySessionEpoch) throw new Error('Wallet changed while loading vaults')
 	const saved = engine.isPassphraseWallet && sessionVaults?.key === safeSessionKey() ? sessionVaults.vaults : vaultBook().list().map(e => e.vault!)
-	const all = [...safes, ...bitcoin, ...saved].filter(v => !isBitcoinOnlyVariant(engine.getDeviceState().firmwareVariant) && !watchOnlyViewBtcOnly || v.type === 'bitcoin-multisig')
-	const vaults = all.filter((v, i) => all.findIndex(other => other.id === v.id) === i)
+	// The book has already resolved cross-wallet copies by their latest review.
+	// A session's older Safe store must not restore a removed signer.
+	const all = [...saved, ...safes, ...bitcoin].filter(v => !isBitcoinOnlyVariant(engine.getDeviceState().firmwareVariant) && !watchOnlyViewBtcOnly || v.type === 'bitcoin-multisig')
+	const vaults = vaultsForWallet(all.filter((v, i) => all.findIndex(other => other.id === v.id) === i), activeVaultWalletKeys())
 	sessionVaults = { key: safeSessionKey(), vaults }
 	return vaults
 }
@@ -4308,7 +4419,7 @@ async function readConfiguredSafeRpc(method: string, params: any[]) {
 async function readVaultAssetAccount(request: VaultAssetRequest): Promise<VaultAssetAccount> {
 	const epoch = activitySessionEpoch
 	if ((isBitcoinOnlyVariant(engine.getDeviceState().firmwareVariant) || watchOnlyViewBtcOnly) && request.networkId !== 'bip122:000000000019d6689c085ae165831e93') throw new Error('This vault network is unavailable on Bitcoin-only firmware')
-	const identity = requireVaultAsset(registeredVaults(), request)
+	const identity = requireVaultAsset(walletRegisteredVaults(), request)
 	if (identity.type === 'bitcoin-multisig') {
 		const record = savedMultisigPolicies().find(r => parseMultisigPolicy(r.descriptor).id === identity.policyId)
 		if (!record) throw new Error('Re-import and verify this Bitcoin vault policy first')
@@ -4319,13 +4430,14 @@ async function readVaultAssetAccount(request: VaultAssetRequest): Promise<VaultA
 	}
 	const account = await inspectBaseSafe(readConfiguredSafeRpc, identity.address, identity.name)
 	if (epoch !== activitySessionEpoch) throw new Error('Wallet changed. Select the vault account again.')
+	requireVaultAsset(walletRegisteredVaults(), request)
 	assertVaultControlSnapshot(identity, account)
 	account.reviewedAt = identity.reviewedAt
 	const verified = requireVaultAsset([safeVaultIdentity(account, identity.sessionOnly)], request)
 	return { identity: verified, assetCaip: request.assetCaip, safe: account }
 }
 const vaultPortfolios = new VaultPortfolioService({
-	scope: () => ({ key: safeSessionKey(), hidden: engine.isPassphraseWallet }),
+	scope: () => ({ key: `${safeSessionKey()}:${JSON.stringify(activeVaultWalletKeys())}`, hidden: engine.isPassphraseWallet }),
 	list: () => {
 		if (!engine.isPassphraseWallet) syncBitcoinVaultBook()
 		const bitcoinOnly = isBitcoinOnlyVariant(engine.getDeviceState().firmwareVariant) || watchOnlyViewBtcOnly
@@ -4341,6 +4453,9 @@ const vaultPortfolios = new VaultPortfolioService({
 	writeExcluded: ids => setSetting('vault_totals_excluded', JSON.stringify(ids)),
 })
 const safeMultisig = new SafeMultisigService({
+	registeredAccounts: () => registeredVaults().filter(v => v.type === 'safe').map(safeAccountFromVault),
+	discover: owner => { requireOnline('Discover Base Safes'); return safeTransactionService.ownedSafes(8453, owner) },
+	queue: safeTransactionService,
 	currentKey: safeSessionKey,
 	session: async () => {
 		const device = engine.getDeviceState()
@@ -5683,7 +5798,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				const shown = typeof res === 'string' ? res : (res as any)?.address
 				if (shown !== address) {
 					watchOnlyAddressMismatch.add(deviceId)
-					throw new Error(`The KeepKey showed ${shown}, not ${address}. Do not use this address.`)
+					throw new Error(watchOnlyAddressMismatchMessage(String(shown), address))
 				}
 				return { address }
 			},
@@ -5924,7 +6039,9 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				return await observedRpcSign('ethSignMessage', params, () => engine.wallet!.ethSignMessage(params))
 			},
 			ethSignTypedData: async (rawParams) => {
-				if (!engine.wallet) throw new Error('No device connected')
+				const wallet = engine.wallet
+				if (!wallet) throw new Error('No device connected')
+				const sessionEpoch = activitySessionEpoch
 				// A caller's catalog is always dropped. Desktop attaches its own
 				// typed-data definition only on 7.17+ (supportsErc7730TypedData).
 				const { firmwareVersion, capabilities } = engine.getDeviceState()
@@ -5933,9 +6050,33 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					{ firmwareVersion, capabilities },
 				)
 				let observationId: string | undefined
+				let fallbackCardId: string | undefined
 				let signedParams: any = params
-				const signTyped = () => signWithErc7730Fallback(params, (p: any) => { signedParams = p; return signTypedDataWithFeatures(engine.wallet!, p) }, () => {
+				const signTyped = () => signWithErc7730Fallback(params, (p: any) => {
+					if (engine.wallet !== wallet || activitySessionEpoch !== sessionEpoch) throw new Error('The KeepKey wallet changed. Start again.')
+					signedParams = p
+					const sign = () => signTypedDataWithFeatures(wallet, p)
+					return engine.isEmulator
+						? emuSigningOp(sign, { operation: 'ethSignTypedData', chain: 'Ethereum' })
+						: sign()
+				}, async () => {
 					if (observationId) refuseClearSignObservationDefinition(observationId)
+					if (params.typedData?.primaryType !== 'SafeTx') return
+					const info: SigningRequestInfo = {
+						id: crypto.randomUUID(),
+						method: '/eth/sign-typed-data',
+						appName: 'KeepKey Vault',
+						chain: 'eth',
+						chainId: normalizeEvmChainId(params.typedData.domain?.chainId),
+						typedDataDecoded: decodeEIP712(params.typedData),
+						firmwareVersion,
+					}
+					applyTypedDataSigningGate(info, params.typedData, firmwareVersion)
+					const again = withoutErc7730TypedDescription(info)
+					fallbackCardId = again.id
+					if (!(await restCallbacks.onSigningRequest(again)).approved) {
+						throw new Error('User rejected signing without the ClearSign description')
+					}
 				}, '[ethSignTypedData]')
 				if (!engine.isPassphraseWallet) {
 					const draft = observeEvmTypedData({ typedData: (params as any)?.typedData, hostDecoded: true, ...(params.erc7730 ? { source: 'erc7730' as const } : {}) })
@@ -5943,9 +6084,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					void auditUnknownClearSignShape(draft, { evm: getEvmSimulationEndpoint(Number(draft.shape.chainId || 1)) })
 				}
 				try {
-					const result = engine.isEmulator
-						? await emuSigningOp(signTyped, { operation: 'ethSignTypedData', chain: 'Ethereum' })
-						: await signTyped()
+					const result = await signTyped()
 					if (observationId && signedParams.erc7730) authenticateClearSignObservation(observationId, 'erc7730')
 					if (observationId) finalizeClearSignObservation(observationId, 'signed')
 					return result
@@ -5955,6 +6094,8 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						finalizeClearSignObservation(observationId, rejected ? 'rejected' : 'failed', rejected ? 'user-rejected' : 'device-or-transport')
 					}
 					throw cause
+				} finally {
+					if (fallbackCardId) restCallbacks.onSigningDismissed?.(fallbackCardId)
 				}
 			},
 			ethVerifyMessage: async (params) => {
@@ -6351,7 +6492,6 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			},
 
 			// ── Pioneer integration (batch portfolio API) ────────────────
-            getProviderUsage: async () => getPioneerProviderUsage(),
             getSyncDiagnostics: async () => ({ balanceSync: balanceSync.snapshot(), recentSyncs: balanceSync.recent(), connectivity: networkProbes.slice(-20) }),
 			getBalances: async ({ forceRefresh = false, swapDestCaips = [], refreshReason }: { forceRefresh?: boolean; swapDestCaips?: string[]; refreshReason?: ProviderRefreshReason } = {}) => {
                 return balanceSync.run(async progress => {
@@ -7380,6 +7520,13 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					const unconfirmedObservationChainIds = new Set<string>()
 					const snapshotDevice = engine.getDeviceState().deviceId
 					const previousSnapshots = !engine.isPassphraseWallet && snapshotDevice ? getCachedBalances(snapshotDevice)?.balances : undefined
+					// Token discovery failed quietly (not ETH/Base): keep each chain's last known tokens.
+					for (const failure of portfolioMeta.quietTokenFailures || []) {
+						const prefix = (failure.caip.split('/')[0] || '').toLowerCase()
+						const chainId = networkToChain.get(prefix) ?? allChains.find(c => c.networkId?.toLowerCase() === prefix)?.id
+						const result = results.find(row => row.chainId === chainId)
+						if (result) Object.assign(result, keepLastKnownTokens({ tokens: result.tokens, balanceUsd: result.balanceUsd || 0 }, previousSnapshots?.find(row => row.chainId === chainId)))
+					}
 					for (const result of results) {
 						const previousAt = previousSnapshots?.find(row => row.chainId === result.chainId)?.updatedAt
 						const chain = allChains.find(chain => chain.id === result.chainId)
@@ -7948,10 +8095,13 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				const ready = !pioneerSource || await getPioneer().then(p => typeof p.EvmReadRpc === 'function').catch(() => false)
 				return { ...context, rpcReady: ready, rpcSource: pioneerSource ? 'Pioneer' : new URL(endpoint).host }
 			},
+			safeDiscover: (params) => safeMultisig.discover(params),
 			safePrepareCreate: (params) => safeMultisig.prepareCreate(params),
 			safeSaveSetup: (params) => safeMultisig.saveSetup(params),
 			safeImport: (params) => safeMultisig.importAccount(params),
 			safeInspect: (params) => safeMultisig.inspectAccount(params),
+			safeSync: (params) => safeMultisig.sync(params),
+			safePublish: (params) => safeMultisig.publish(params),
 			safeRefresh: (params) => safeMultisig.refresh(params),
 			safePropose: (params) => safeMultisig.propose(params),
 			safeImportProposal: (params) => safeMultisig.importProposal(params),
@@ -8448,7 +8598,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					}, { signWrap, onProgress }),
 					unshield: async () => (await import("./txbuilder/zcash-deshield")).deshieldZec(engine.wallet as any, {
 						recipient: params.recipient.trim(), amount: params.amount, account,
-					}, { signWrap, onProgress, onBroadcast: tx => expectShieldedDelta(-(tx.value + (tx.fee ?? 0))) }),
+					}, { signWrap, onProgress, onBroadcast: tx => { expectShieldedDelta(-(tx.value + (tx.fee ?? 0))); rememberPendingTransparent(tx.txid, params.recipient, tx.value) } }),
 					shielded: () => sendShielded(engine.wallet as any, {
 						recipient: params.recipient,
 						amount: params.amount,
@@ -8477,12 +8627,15 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				const pioneer = await getPioneer()
 				const tipHeight = getScanState().syncedTo
 				const totals = await getShieldableTransparentBalance(pioneer, address, tipHeight)
+				const unlisted = readPendingTransparent().filter(e => Date.now() - e.at < PENDING_TRANSPARENT_TTL_MS && !totals.txids.includes(e.txid))
+				writePendingTransparent(unlisted)
+				const mine = unlisted.filter(e => e.to === address)
 				return {
 					address,
 					balanceZat: totals.matureZat,
-					pendingZat: totals.pendingZat,
+					pendingZat: totals.pendingZat + mine.reduce((n, e) => n + e.value, 0),
 					matureCount: totals.matureCount,
-					pendingCount: totals.pendingCount,
+					pendingCount: totals.pendingCount + mine.length,
 					maxShieldZat: totals.maxShieldZat,
 				}
 			},
@@ -8836,6 +8989,45 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				passwordAgent.cancelPending()
 				passwordBank.setEnabled(params?.enabled)
 				return getAppSettings()
+			},
+			setPasskeysEnabled: async (params) => {
+				if (typeof params?.enabled !== 'boolean') throw new Error('enabled must be a boolean')
+				setSetting('passkeys_enabled', params.enabled ? '1' : '0')
+				return getAppSettings()
+			},
+			passkeysStatus: async () => withKeepKeyFido(readStatus),
+			passkeysReset: async (params) => {
+				// CTAP allows reset only within 10 s of power-up. Try now; if refused, the UI asks for a replug
+				// and calls again with waitForReplug, which sends the reset the moment the device is back.
+				// The first attempt holds Desktop's device traffic off (a wallet request mid-prompt would cancel
+				// the confirmation); the replug path cannot: the device is re-enumerating.
+				if (params?.waitForReplug) {
+					await waitForReplug()
+					for (let attempt = 0; ; attempt++) {
+						try { return await withKeepKeyFido(hid => runReset(hid)) }
+						catch (e: any) { if (attempt >= 8 || e?.code === 'denied' || e?.code === 'replug') throw e; await new Promise(r => setTimeout(r, 400)) }
+					}
+				}
+				try { return await engine.withDeviceOperation(() => withKeepKeyFido(hid => runReset(hid)), { rejectIfBusy: true, origin: 'desktop' }) }
+				catch (e: any) { if (e?.code === 'replug') return { reset: false, replug: true }; throw e }
+			},
+			// The security-key PIN travels only in these calls, is used once and is never stored or logged.
+			passkeysSetPin: async (params) => { await withKeepKeyFido(hid => setFidoPin(hid, String(params?.pin ?? ''))); return { ok: true as const } },
+			passkeysList: async (params) => {
+				const inv = await withKeepKeyFido(hid => listPasskeys(hid, String(params?.pin ?? '')))
+				const labels = resolveLabels(inv.slots.map(x => x.rpHash), passkeyUserLabels())
+				return { used: inv.used, remaining: inv.remaining, slots: inv.slots.map(x => ({ rpHash: x.rpHash, userName: x.userName, credentialId: x.credentialId, label: labels[x.rpHash].label, labelSource: labels[x.rpHash].source })) }
+			},
+			passkeysDelete: async (params) => {
+				await engine.withDeviceOperation(() => withKeepKeyFido(hid => deletePasskey(hid, String(params?.pin ?? ''), String(params?.credentialId ?? ''))), { rejectIfBusy: true, origin: 'desktop' })
+				return { ok: true as const }
+			},
+			passkeysSetLabel: async (params) => {
+				if (!/^[0-9a-f]{64}$/.test(String(params?.rpHash))) throw new Error('invalid site hash')
+				const labels = passkeyUserLabels(); const label = cleanLabel(params.label)
+				if (label) labels[params.rpHash] = label; else delete labels[params.rpHash]
+				setSetting('passkey_labels', JSON.stringify(labels))
+				return { ok: true as const }
 			},
 			passwordBankStatus: async () => passwordBank.view(),
 			passwordBankUnlock: async (params) => passwordBank.unlock(params?.create === true),
@@ -9200,14 +9392,19 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						if (t) e.address = t
 					}
 				}
+				if (!bitcoinOnly) void repairSavedEnsContacts().catch(error => console.warn('[addressbook] legacy ENS repair failed:', error))
 				const external = getAddressBookList({ kind: 'external', networkId, search, savedOnly: true, chainId: bitcoinOnly ? 'bitcoin' : undefined })
 				// Vault rows only with Multisig on, and never at the cost of the contact list.
 				const vaultRows = multisigFeature.enabled && getDb()
-					? await listRegisteredVaults().then(() => vaultAddressEntries(networkId), (err) => { console.warn('[addressbook] vaults unavailable:', err?.message || err); return [] })
+					? await listRegisteredVaults().then(() => vaultAddressEntries(networkId, true), (err) => { console.warn('[addressbook] vaults unavailable:', err?.message || err); return [] })
 					: []
 				const vaults = vaultRows.filter(e => (!bitcoinOnly || e.chainId === 'bitcoin') && (!search || `${e.label} ${e.address}`.toLowerCase().includes(search.toLowerCase())))
 				const vaultIds = new Set(vaults.map(e => `${e.networkId}:${e.address.toLowerCase()}`))
 				return [...own, ...external.filter(e => !vaultIds.has(`${e.networkId}:${e.address.toLowerCase()}`)), ...vaults].map(e => ({ ...e, deviceLabel: labels[e.deviceId] || e.deviceLabel }))
+			},
+			resolveAddressBookEns: async (params) => {
+				requireOnline('ENS lookup')
+				return withTimeout(resolveEnsContact(params.name, params.networkId), 10000, 'ENS lookup')
 			},
 			addAddressBook: async (params) => {
 				// Wallet-agnostic: contacts can be saved from any session (incl. hidden).
@@ -9218,20 +9415,30 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				const sameNetwork = getAllChains().filter(c => c.networkId === params.networkId)
 				const chain = sameNetwork[0]
 				if (!chain) { console.warn('[addressbook] addAddressBook: unknown networkId', params.networkId); return null }
-				// Same refusals as the Add address dialog: bad format/checksum, .eth, zero/burn, own wallet.
+				let address = params.address.trim()
+				let ensName: string | undefined
+				if (isEnsName(address)) {
+					requireOnline('ENS lookup')
+					const resolved = await withTimeout(resolveEnsContact(address, chain.networkId), 10000, 'ENS lookup')
+					if (params.expectedAddress && params.expectedAddress.toLowerCase() !== resolved.address.toLowerCase()) throw new Error('The ENS address changed. Look up the name again before saving.')
+					address = resolved.address
+					ensName = resolved.ensName
+					if (scope.walletId !== getWalletDbScope()?.walletId) throw new Error('Wallet changed during ENS lookup. Add the contact again.')
+				}
+				// Validate the resolved destination as strictly as a pasted address.
 				// zcash and zcash-shielded share a networkId: a u1/zs1 contact is checked as shielded.
-				const contactCheck = validateContactOnNetwork(params.address, sameNetwork, matchAddressBook(chain.networkId, params.address, chain.chainFamily))
-				if (!contactCheck.valid) throw new Error(`Address not saved (${contactCheck.error}): ${params.address}`)
+				const contactCheck = validateContactOnNetwork(address, sameNetwork, matchAddressBook(chain.networkId, address, chain.chainFamily))
+				if (!contactCheck.valid) throw new Error(`Address not saved (${contactCheck.error}): ${address}`)
 				// Stored lowercase, a mistyped mixed-case address would lose its checksum and later pass as an owner.
 				if (params.cosigner && chain.chainFamily === 'evm') {
 					const { ethers } = await import('ethers')
-					if (!ethers.utils.isAddress(params.address)) throw new Error(`Not a valid address (checksum failed): ${params.address}`)
+					if (!ethers.utils.isAddress(address)) throw new Error(`Not a valid address (checksum failed): ${address}`)
 				}
-				const prior = params.cosigner ? matchAddressBook(chain.networkId, params.address, chain.chainFamily) : null
+				const prior = params.cosigner ? matchAddressBook(chain.networkId, address, chain.chainFamily) : null
 				const entry = addExternalEntry({
 					walletId: scope.walletId, deviceId: scope.deviceId,
 					networkId: chain.networkId, chainId: chain.id, chainFamily: chain.chainFamily,
-					address: params.address, label: params.label ?? null, cosigner: params.cosigner,
+					address, label: ensName || params.label || null, ensName, cosigner: params.cosigner,
 				})
 				if (entry) {
 					// Certified contacts are labeled external EVM entries: a co-signer save that keeps the label changes none.
@@ -9262,19 +9469,19 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					isBitcoinOnlyVariant(engine.getDeviceState().firmwareVariant),
 				)
 			},
-			previewAddressBookCertification: async () =>
-				contactsFromEntries(vaultCertificationEntries(), false)
-					.map(c => ({ label: c.label, network: c.network, address: `0x${c.destination}` })),
+			previewAddressBookCertification: async () => {
+				await repairSavedEnsContacts()
+				return previewCertificationEntries(vaultCertificationEntries(), allChainContactsSupported())
+			},
 			certifyAddressBook: async (params) => {
 				if (!addressBookClearsignEnabled) throw new Error('Address Book ClearSign is not enabled')
 				if (!engine.wallet) throw new Error('No device connected')
 				requireAddressBookClearsignFirmware()
 				if (engine.isPassphraseWallet) throw new Error('Address Book certification is unavailable in a passphrase session')
 				// The review dialog can drop contacts; it can never add one.
-				const only = (params as any)?.only as { network: string; address: string }[] | undefined
-				const keep = only && new Set(only.map(o => `${o.network}|${String(o.address).toLowerCase().replace(/^0x/, '')}`))
-				const contacts = contactsFromEntries(vaultCertificationEntries().filter(e => !keep || keep.has(`${e.networkId}|${e.address.toLowerCase().replace(/^0x/, '')}`)))
-				if (!contacts.length) throw new Error('Add at least one labeled EVM contact before certifying')
+				const contacts = selectCertificationContacts(vaultCertificationEntries(), allChainContactsSupported(), params ? params.only : undefined)
+				if (!contacts.length) throw new Error('Add at least one labeled contact on a supported network before certifying')
+				if (contacts.length > 16) throw new Error('Choose at most 16 certified contacts')
 				const revision = Math.max(0, Number(getSetting('addressbook_clearsign_revision') || '0')) + 1
 				if (addressBookCertifyUnsupported()) throw new Error(ADDRESS_BOOK_CERTIFY_UNSUPPORTED)
 				const built = buildCertificationRequest(contacts, revision)
@@ -9282,7 +9489,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				let result: any
 				try {
 					result = engine.isEmulator
-						? await emuSigningOp(attest, { operation: 'clearsignAttestorSign', opLabel: 'Certify address book', chain: 'EVM' })
+						? await emuSigningOp(attest, { operation: 'clearsignAttestorSign', opLabel: 'Certify address book' })
 						: await attest()
 				} catch (error: any) {
 					if (!isAddressBookCertifyUnsupported(deviceErrorMessage(error))) throw error
@@ -10015,6 +10222,8 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					const chains = bitcoinOnlyChainList(getAllChains(), bitcoinOnlyWatchOnlyScope(isBitcoinOnlyVariant(engine.getDeviceState().firmwareVariant), snapshot.featuresJson))
 					const chain = chains.find(c => c.id === params.chainId)
 					if (!chain) throw new Error(`Unsupported chain: ${params.chainId}`)
+					// Same answer as the connected path for a chain the rebuild never scans.
+					if (!isHistoryScanChain(chain, snapshot.firmwareVer, true)) return { count: 0, skipped: true }
 					const queries = cachedHistoryQueries(chain, getCachedBalances(scope.deviceId)?.balances || [], getCachedPubkeys(scope.deviceId))
 					if (!queries.length) throw new Error(`No saved public address for ${chain.symbol}`)
 					const result = await rebuildActivityHistory({
@@ -10033,8 +10242,16 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				const chain = getAllChains().find(c => c.id === params.chainId)
 				if (!chain) throw new Error(`Unknown chain: ${params.chainId}`)
 				if (!engine.wallet) throw new Error('No device connected')
-				if (chain.id === 'bitcoin' && getBtcBackend().kind !== 'pioneer') {
-					throw new Error(`Bitcoin history is unavailable with the ${getBtcBackend().kind} backend; Vault will not fall back to Pioneer.`)
+				// Decide skips only on a settled device: before features load the firmware version is
+				// unknown and every firmware-gated chain would look unsupported.
+				if (engine.getDeviceState().state !== 'ready') throw new Error('Device is not ready')
+				// Same chain set scanOneChain hands the rebuild: a chain outside it is skipped by design
+				// (shielded, Hive off, network off, firmware too old), not a failure (audit v6 U4). So is
+				// Bitcoin on a non-Pioneer backend: Vault never falls back to Pioneer for its history.
+				if ((chain.id === 'hive' && !hiveEnabled) || !networkOn(chain.id)
+					|| !isHistoryScanChain(chain, engine.getDeviceState().firmwareVersion)
+					|| (chain.id === 'bitcoin' && getBtcBackend().kind !== 'pioneer')) {
+					return { count: 0, skipped: true }
 				}
 				// PRIVACY: hidden sessions fetch live and hold rows in RAM only (scanOneChain).
 				const { added, txs, updated } = await scanOneChain(params.chainId)
@@ -10909,6 +11126,14 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				const { saveEmulatorState } = await import('./emulator')
 				await saveEmulatorState()
 			},
+			signingReviewFrame: async (params) => {
+				if (!emulatorEnabled || !engine.isEmulator || params.deviceId !== engine.getDeviceState().deviceId) return null
+				const { signingReviewFrame } = await import('./emulator-window')
+				return signingReviewSessions.read(params.signingId, params.deviceId, activitySessionEpoch, engine.isEmulator, () => {
+					const frame = signingReviewFrame()
+					return frame ? { frame, deviceId: params.deviceId } : null
+				})
+			},
 			emulatorStatus: async () => {
 				if (!emulatorEnabled) {
 					return { state: 'stopped' as const, bridgeReady: false, host: 'not loaded', paired: false, platform: process.platform, flashImages: [], storagePath: '' }
@@ -11651,6 +11876,7 @@ engine.on('state-change', (state) => {
 	if (state.state === 'ready') {
 		reconcileSeedManagers(engine.currentSeedEthAddress, 'device-ready')
 	}
+	notifyVaultWalletMembership()
 	// Replay any WC deep link that was queued while no device was connected.
 	// Without this, a deep link delivered before the device was ready would
 	// sit in pendingDeepLinkUri until the next mount of WalletConnectPanel.
@@ -11878,6 +12104,7 @@ engine.on('reset-error', (err) => {
 
 // BtcAccountManager change events → push to WebView
 btcAccounts.on('change', (set) => {
+	notifyVaultWalletMembership()
 	try { rpc.send['btc-accounts-update'](set) } catch { /* webview not ready yet */ }
 	// PRIVACY: hidden-wallet sessions persist nothing (engine-controller snapshot rule).
 	const deviceId = engine.getDeviceState().deviceId
@@ -11902,6 +12129,7 @@ btcAccounts.on('change', (set) => {
 
 // EvmAddressManager change events → push to WebView
 evmAddresses.on('change', (set: EvmAddressSet) => {
+	notifyVaultWalletMembership()
 	try { rpc.send['evm-addresses-update'](set) } catch { /* webview not ready yet */ }
 })
 
@@ -11938,7 +12166,10 @@ Updater.onStatusChange(async (entry: any) => {
 })
 
 // ── Window Setup ──────────────────────────────────────────────────────
+const pinSmoke = process.env.KEEPKEY_PACKAGED_PIN_SMOKE ? await import('./packaged-pin-smoke') : null
+const pinSmokeDirectory = pinSmoke?.packagedPinSmokeDirectory()
 async function getMainViewUrl(): Promise<string> {
+	if (pinSmokeDirectory) return "views://mainview/index.html"
 	try {
 		const channel = await Updater.localInfo.channel()
 		if (channel === "dev") {
@@ -12123,6 +12354,13 @@ if (autostartEmulatorFlash) {
 	await engine.connectEmulator()
 	selectEmulatorWallet(flashName)
 	console.log(`[emulator] Auto-started explicit flash ${flashName}`)
+	if (pinSmoke && pinSmokeDirectory) {
+		void pinSmoke.runPackagedPinSmoke(engine, pinSmokeDirectory).then(cleanupAndQuit, error => {
+			console.error('[PIN smoke]', error)
+			process.exitCode = 1
+			cleanupAndQuit()
+		})
+	}
 }
 
 // Age out pending swaps older than 24h — prevents accumulation of test/failed
@@ -12139,7 +12377,7 @@ setTimeout(() => {
 // The DMG renamed keepkey-vault.app to "KeepKey Vault.app"; offer once to
 // trash an old copy left beside the new one. Deferred so it doesn't land on
 // top of the first window paint.
-if (process.platform === 'darwin') {
+if (process.platform === 'darwin' && !pinSmokeDirectory) {
 	setTimeout(() => {
 		import('./legacy-app-cleanup').then(({ offerLegacyAppCleanup }) => offerLegacyAppCleanup({
 			platform: process.platform,
@@ -12243,7 +12481,7 @@ function findMacAppBundlePath(): string | null {
 }
 
 // ── Force keepkey:// protocol registration (override old keepkey-desktop) ──
-if (process.platform === 'darwin') {
+if (process.platform === 'darwin' && !pinSmokeDirectory) {
 	// Re-register this app as the handler for keepkey:// via Launch Services.
 	// When both keepkey-desktop (Electron) and keepkey-vault (Electrobun) are
 	// installed, the last one to register wins. We force it on every launch.

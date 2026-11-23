@@ -1,0 +1,122 @@
+{
+  "date": "2026-11-15",
+  "decision": "HOLD: do not promote Desktop 1.7.0 or publish extension 0.0.40 until release gates pass",
+  "scope": "Local review and patches. No release metadata, tag, server deployment, signing request or funds transfer changed.",
+  "release_observation": {
+    "source": "https://github.com/keepkey/keepkey-vault/releases/tag/v1.7.0",
+    "published": true,
+    "prerelease": true,
+    "target_commitish_observed": "a1862c5ff9cb9705223df6ca6496c4eb99f69595",
+    "local_release_branch_base": "9789ce757",
+    "note": "Existing release assets are not rebuilt or validated by this work."
+  },
+  "incident": {
+    "transaction": "92250D5D\u202654DC2C",
+    "block": 33895308,
+    "code": 5,
+    "evidence": "User supplied report; full transaction hash and independent chain verification unavailable.",
+    "finding": "Transport acceptance and inclusion do not establish successful transfer. A failed included transaction may consume its fee."
+  },
+  "local_patches": [
+    {
+      "repo": "Desktop",
+      "branch": "fix/170-send-safety",
+      "worktree": ".worktrees/fix-170-send-safety",
+      "changes": [
+        "Cosmos regular and MAX sends check native fee and principal against live bank spendable balances, independent of stale portfolio amounts.",
+        "Cosmos token sends check token principal and separate native fee; staking and name registration receive affordability checks.",
+        "Strict decimal parsing refuses invalid precision instead of truncating.",
+        "XRP regular payments preserve live base and owner reserves, and fail closed on missing account data.",
+        "Cosmos and XRP broadcast paths read final included execution results before returning success; bounded confirmation timeout reports unknown with txid and no rebroadcast."
+      ],
+      "state": "Uncommitted local patch; not installed or published."
+    },
+    {
+      "repo": "Browser extension",
+      "branch": "fix/bex-send-safety",
+      "worktree": ".worktrees/bex-send-safety",
+      "changes": [
+        "Gateway broadcast acceptance is followed by a chain execution check before handlers can emit transaction_complete.",
+        "Failed execution and unknown confirmation throw with transaction hash; the broadcast remains exactly one attempt."
+      ],
+      "state": "Uncommitted local patch; not installed or published."
+    }
+  ],
+  "validation": {
+    "desktop_focused": {
+      "passed": 58,
+      "failed": 0,
+      "files": 4,
+      "log": "/private/tmp/keepkey-170-desktop-safety-tests.log"
+    },
+    "desktop_cosmos_script": {
+      "passed": 11,
+      "failed": 0
+    },
+    "desktop_backend_bundle": "Passed using pre-existing generated dependencies linked from release workspace; not a fresh install or signed build.",
+    "extension_focused": {
+      "passed": 87,
+      "failed": 0,
+      "files": 4
+    },
+    "extension_changed_browser_bundle": "Passed; this is not a complete distributable extension build.",
+    "diff_whitespace": "Passed in both worktrees",
+    "live_funds_tests": "None performed",
+    "platform_install_upgrade_tests": "Not performed"
+  },
+  "gateway_findings": [
+    {
+      "source": "projects/keepkey-gateway/container/src/demand-cache.ts",
+      "finding": "Ordinary cache misses await the loader under a shared lock. Stale fallback is attempted only after loader failure; a slow provider can delay showing cached data. Forced requests bypass persistent freshness, including after acquiring the lock.",
+      "status": "Source observation, not a live latency measurement."
+    },
+    {
+      "source": "projects/keepkey-gateway/container/src/portfolio.ts; container/src/multichain.ts",
+      "finding": "Portfolio assigns response-time fetchedAt/fetchedAtISO to multichain results even when DemandCache returned a cached or stale value. DemandCache returns values without their original observation timestamp. Multichain cache policy is 8 seconds fresh and 60 seconds stale.",
+      "required": "Preserve original source observation time and stale/error provenance through gateway responses and Vault UI; do not relabel a cached balance as newly verified."
+    },
+    {
+      "source": "Desktop local release branch ancestry",
+      "finding": "29c0ace72, the earlier provider refresh policy implementation, is not an ancestor of release/1.7.0; shared/provider-refresh.ts is absent.",
+      "required": "Review and port the relevant refresh intent, background paid-provider suppression, coalescing and budget-status UI changes without importing unrelated feature work."
+    }
+  ],
+  "release_gates": [
+    {
+      "priority": 0,
+      "gate": "Money safety",
+      "pass_when": "Review the local patches, verify node endpoint compatibility, and demonstrate insufficient funds, fee-only balance, exact amount+fee, MAX, locked/vesting coins, bank tokens and XRP reserves. Verify affordable send succeeds and unaffordable send never requests a signature."
+    },
+    {
+      "priority": 0,
+      "gate": "Outcome and fee reconciliation",
+      "pass_when": "An included failed Cosmos/XRP transaction displays failure and the txid; pending/unreachable displays unknown, never success. Verify activity/history and balances refresh after failed fee-consuming sends, restart and later confirmation, and no duplicate broadcast."
+    },
+    {
+      "priority": 0,
+      "gate": "Cache correctness and refresh policy",
+      "pass_when": "Fix source timestamps/stale provenance. Verify authoritative zero replaces prior nonzero after a spend, unavailable data remains visibly stale, and wallet/account/passphrase/endpoint changes cannot merge another scope. Port and verify refresh intent policy in the actual candidate."
+    },
+    {
+      "priority": 1,
+      "gate": "Measured gateway performance",
+      "pass_when": "Record cold and warm p50/p95 latency, error/timeout rates, cache hits by layer, data age and physical upstream attempts against the deployed selected endpoint. Exercise concurrent wallet opens, manual refresh, provider outage and recovery. Establish agreed budgets before testing and attach results; service health alone is insufficient."
+    },
+    {
+      "priority": 0,
+      "gate": "New candidate artifact validation",
+      "pass_when": "Freeze the source commit and reconcile release tag, artifact and checksum provenance. Build and sign new candidate artifacts including both patches; verify notarization/signatures and fresh install plus upgrade from 1.6.7 and 1.6.12 on supported Windows, macOS ARM/Intel and Linux. Test extension paired with the candidate. Decide version/tag treatment explicitly because 1.7.0 is already published."
+    },
+    {
+      "priority": 0,
+      "gate": "Funded sends and controlled promotion",
+      "pass_when": "After local negative-path tests, run agreed small funded sends for Cosmos, XRP, UTXO and Solana and check actual chain execution, fee and balance reconciliation. Keep outstanding old approval requests rejected. Promote only after recorded results and a tested rollback/update plan."
+    }
+  ],
+  "limitations": [
+    "The new chain reads can fail closed when public endpoints are unavailable; endpoint and response-shape compatibility must be verified live.",
+    "Build-time affordability can change before signing or execution; it cannot guarantee later chain success. Native Cosmos fee templates remain existing static estimates.",
+    "Confirmation checks are bounded and can report unknown on slow inclusion/indexing; durable pending/failed UX and fee reconciliation still need end-to-end validation.",
+    "Gateway cache changes have not been implemented or deployed in this session."
+  ]
+}

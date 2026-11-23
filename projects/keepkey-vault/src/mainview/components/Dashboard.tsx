@@ -1,5 +1,4 @@
 import { BalanceSyncProgress } from './BalanceSyncProgress'
-import {useProviderUsage} from '../hooks/useProviderUsage'
 import { paidProviderRefreshOptions, type ProviderRefreshReason } from '../../shared/provider-refresh'
 import { getNumberLocale } from "../lib/number-locale"
 import { useUiTranslation } from "../i18n/ui"
@@ -9,14 +8,15 @@ import { useTranslation } from "react-i18next"
 import { CHAINS, customChainToChainDef, isChainSupported, type ChainDef } from "../../shared/chains"
 import { isBitcoinOnlyVariant } from "../../shared/flags"
 import { balanceDisplayState } from "../../shared/balance-display-state"
-import { confirmedDashboardBalance, dashboardBalanceUpdatedAt, dashboardCacheIsQuiet, dashboardErrorNotice, dashboardRefreshIsDue, mergeDashboardPortfolioFault, recoverDashboardPortfolioFault, usableDashboardBalance, type DashboardPortfolioFault } from '../../shared/dashboard-balance-policy'
-import { isLocalDeviceAccessError, retryWhileDeviceBusy } from "../../shared/device-access-error"
+import { confirmedDashboardBalance, dashboardBalanceUpdatedAt, dashboardCacheIsQuiet, dashboardLastRefreshedAt, dashboardRefreshIsDue, mergeDashboardPortfolioFault, recoverDashboardPortfolioFault, usableDashboardBalance, type DashboardPortfolioFault } from '../../shared/dashboard-balance-policy'
+import { isLocalDeviceAccessError } from "../../shared/device-access-error"
 import { versionCompare } from "../../shared/firmware-versions"
 import { formatBalance, hasNonZeroBalance } from "../lib/formatting"
 import { AnimatedUsd } from "./AnimatedUsd"
 import { getAssetIcon, registerCustomAsset } from "../../shared/assetLookup"
 import { moneroChainVisible } from "../../shared/monero-asset"
-import { MoneroChainRow } from "./MoneroAssetSections"
+import { MoneroChainRow, useMoneroView } from "./MoneroAssetSections"
+import { useMoneroStatus } from "../hooks/useMoneroStatus"
 import { AssetPage } from "./AssetPage"
 import { ActivityPage } from "./ActivityPage"
 import { DonutChart, SelectedSlice, type DonutChartItem } from "./DonutChart"
@@ -44,8 +44,6 @@ import { useFiat } from "../lib/fiat-context"
 import { ViewPickerButton } from "./ViewPickerMenu"
 import { DashboardLoading } from "./DashboardLoading"
 import { AssetIcon } from "./AssetIcon"
-import { DocsLink } from "./DocsLink"
-import { DOCS_LINKS, watch } from "../../shared/docs-links"
 import { categorizeTokens } from "../../shared/spamFilter"
 import { useBtcAccounts } from "../hooks/useBtcAccounts"
 import { useEvmAddresses } from "../hooks/useEvmAddresses"
@@ -841,7 +839,6 @@ function VaultPortfolioDashboard({ vault, onLoaded, watchOnly, firmwareVersion }
 }
 
 function PersonalDashboard({ capabilities, isEmulator, onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettings, firmwareVersion, firmwareVariant, forceRefresh, onForceRefreshConsumed, isHiddenWallet, knownEmpty, onOpenVault }: DashboardProps) {
-    const providerUsage=useProviderUsage()
   const uiText = useUiTranslation()
 	const { portfolios: vaultPortfolios, loading: vaultsLoading, error: vaultsError, reload: reloadVaultPortfolios, setIncluded: setVaultIncluded } = useVaultPortfolios({ bitcoinOnly: isBitcoinOnlyVariant(firmwareVariant) })
 
@@ -921,7 +918,6 @@ function PersonalDashboard({ capabilities, isEmulator, onLoaded, watchOnly, watc
 	const [introDismissed, setIntroDismissed] = useState(false)
 	const [pioneerError, setPioneerError] = useState<PioneerError | null>(null)
 	const [portfolioFault, setPortfolioFault] = useState<PortfolioFault | null>(null)
-	const [dismissedBalanceErrors, setDismissedBalanceErrors] = useState<Set<string>>(() => new Set())
 	const [streamStatus, setStreamStatus] = useState<{ connected: boolean; watching: number } | null>(null)
 	const [cacheUpdatedAt, setCacheUpdatedAt] = useState<number | null>(null)
 	const [hasEverRefreshed, setHasEverRefreshed] = useState(false)
@@ -1369,10 +1365,11 @@ function PersonalDashboard({ capabilities, isEmulator, onLoaded, watchOnly, watc
 
 		try {
 			const params = { forceRefresh, refreshReason, ...(swapDestCaips.length ? { swapDestCaips } : {}), ...(userInitiated ? { userInitiated } : {}) }
-			const read = () => rpcRequest<ChainBalance[]>('getBalances', params, 200000)
 			// A pressed refresh really scans: it waits out a busy KeepKey quietly
 			// instead of returning at once with nothing new (owner rule: busy = wait).
-			const result = userInitiated ? await retryWhileDeviceBusy(read, () => gen === refreshGenRef.current) : await read()
+			// A background refresh gives up and keeps the cached balances.
+			const result = await rpcRequest<ChainBalance[]>('getBalances', params, 200000,
+				userInitiated ? () => gen === refreshGenRef.current : () => false)
 			if (result && gen === refreshGenRef.current) {
 				const tokenTotal = result.reduce((n, b) => n + (b.tokens?.length || 0), 0)
 				const balTotal = result.reduce((n, b) => n + (b.balanceUsd || 0), 0)
@@ -1533,7 +1530,9 @@ function PersonalDashboard({ capabilities, isEmulator, onLoaded, watchOnly, watc
 			const reconcileCaip = swap.status === 'refunded' ? swap.fromCaip : swap.toCaip
 			const assets = reconcileCaip ? [reconcileCaip] : []
 			console.log(`[Dashboard] Swap terminal — reconciling ${reconcileCaip || swap.toChainId}`)
-			refreshBalances(true, assets, false, 'swap-reconcile')
+			// One paid read: the gateway serves 'swap-reconcile' from cache only, so every EVM chain came back
+			// degraded, and a degraded chain is never proof the funds arrived. The retries below stay cache-only.
+			refreshBalances(true, assets, false, 'manual')
 			for (const delay of [30_000, 90_000]) {
 				const timer = setTimeout(() => {
 					timers.delete(timer)
@@ -1663,7 +1662,6 @@ function PersonalDashboard({ capabilities, isEmulator, onLoaded, watchOnly, watc
 			chainLastUpdatedRef.current.clear()
 			balanceActivityRef.current.clear()
 			setPortfolioFault(null)
-			setDismissedBalanceErrors(new Set())
 			setCacheUpdatedAt(null)
 			setHasEverRefreshed(false)
 			clearPioneerError()
@@ -1907,22 +1905,25 @@ function PersonalDashboard({ capabilities, isEmulator, onLoaded, watchOnly, watc
 	visibleChainIdsRef.current = visibleChains.map(chain => chain.id)
 	const visibleBalances = visibleChains.map(chain => balances.get(chain.id))
 	const renderNow = Math.max(clockNow, Date.now())
-	const displayedUpdatedAt = dashboardBalanceUpdatedAt(visibleBalances, cacheUpdatedAt, renderNow)
-	const balanceErrorNotice = dashboardErrorNotice(portfolioFault, visibleChainIdsRef.current, allChains)
-	const showBalanceError = !!balanceErrorNotice?.identities.some(identity => !dismissedBalanceErrors.has(identity))
-	useEffect(() => {
-		const active = new Set(balanceErrorNotice?.identities ?? [])
-		setDismissedBalanceErrors(current => {
-			const remaining = new Set([...current].filter(identity => active.has(identity)))
-			return remaining.size === current.size ? current : remaining
-		})
-	}, [balanceErrorNotice?.key])
+	const displayedUpdatedAt = dashboardLastRefreshedAt(visibleBalances, cacheUpdatedAt, renderNow)
 
 	// XMR: a row in the chain list (setting + device capability), opening the standard asset page.
-	// Its balance comes from the local watch wallet and has no fiat price, so it stays out of
-	// visibleChains, whose fiat totals, charts and sync states all come from Pioneer.
+	// Its balance comes from the local watch wallet, not the Pioneer portfolio, so it stays out of
+	// visibleChains; its USD value is the watch balance times Pioneer's XMR price.
 	const moneroChain = useMemo(() => moneroChainVisible({ settingEnabled: moneroEnabled, capabilities, isEmulator, watchOnly, bitcoinOnly: btcOnly })
 		&& !disabledNetworks.includes('monero') ? CHAINS.find(c => c.id === 'monero') : undefined, [moneroEnabled, capabilities, isEmulator, watchOnly, btcOnly, disabledNetworks])
+	const moneroView = useMoneroView(useMoneroStatus(!!moneroChain))
+	const [xmrPrice, setXmrPrice] = useState(0)
+	useEffect(() => {
+		if (!moneroChain?.caip) return
+		let cancelled = false
+		rpcRequest<any>('getMarketData', { caips: [moneroChain.caip] }, 15000)
+			.then(resp => { const price = (Array.isArray(resp) ? resp : resp?.data || [])[0]; if (!cancelled && typeof price === 'number' && price > 0) setXmrPrice(price) })
+			.catch(() => {}) // No price: the row shows XMR only, like any unpriced asset.
+		return () => { cancelled = true }
+	}, [moneroChain?.caip])
+	const xmrBalance = moneroView.lastKnown || moneroView.spendVerified || moneroView.balanceAtomic === '0' ? moneroView.balanceAtomic : null
+	const xmrUsd = xmrBalance ? Number(BigInt(xmrBalance)) / 1e12 * xmrPrice : 0
 
 	// Built-in networks the user turned off: offered back in the Add network dialog.
 	const turnedOffChains = useMemo(() => btcOnly ? [] : allChains.filter(c =>
@@ -1940,6 +1941,18 @@ function PersonalDashboard({ capabilities, isEmulator, onLoaded, watchOnly, watc
 		if (aHas && bHas) return bUsd - aUsd
 		return 0
 	}), [visibleChains, balances, cleanBalanceUsd])
+
+	// XMR sits where its USD value ranks it among the other chains (funded first, then empty).
+	const moneroAt = useMemo(() => {
+		if (!moneroChain) return -1
+		const xmrHas = !!xmrBalance && xmrBalance !== '0'
+		const i = sortedChains.findIndex(c => {
+			const usd = cleanBalanceUsd.get(c.id)?.usd || 0
+			const has = usd > 0 || parseFloat(balances.get(c.id)?.balance || '0') > 0
+			return xmrHas ? !has || usd < xmrUsd : !has
+		})
+		return i < 0 ? sortedChains.length : i
+	}, [moneroChain, xmrBalance, xmrUsd, sortedChains, cleanBalanceUsd, balances])
 
 	// Every default chain stays in the sidebar, always. sortedChains already puts
 	// funded chains first, so empty defaults just sit lower in the list instead of
@@ -1977,6 +1990,7 @@ function PersonalDashboard({ capabilities, isEmulator, onLoaded, watchOnly, watc
 					watchOnlyDeviceId={watchOnlyDeviceId}
 					onBack={() => setShowActivityPage(false)}
 					onResumeSwap={watchOnly ? undefined : (swap) => setActivityResumeSwap(swap)}
+					bitcoinOnly={btcOnly}
 				/>
 				<Suspense fallback={null}>
 					<LazySwapDialog
@@ -2017,6 +2031,8 @@ function PersonalDashboard({ capabilities, isEmulator, onLoaded, watchOnly, watc
 			</AssetPageErrorBoundary>
 		)
 	}
+
+	const moneroRow = moneroChain && <MoneroChainRow chain={moneroChain} iconSrc={getAssetIcon(moneroChain.caip)} privateMode={privateModeEnabled} view={moneroView} usd={xmrUsd} onOpen={() => openChainPage(moneroChain)} />
 
 	return (
 		<Flex w="100%" pt="2" align="stretch" gap={{ base: 0, md: 3 }} px={{ base: 0, md: 3 }} minH="100%">
@@ -2112,17 +2128,16 @@ function PersonalDashboard({ capabilities, isEmulator, onLoaded, watchOnly, watc
 										>
 											{privateModeEnabled
 												? "••••••"
-												: `${anyChainUnknown ? '≥ ' : ''}$${totalUsd.toLocaleString(getNumberLocale(), { maximumFractionDigits: 2 })}`}
+												: `${anyChainUnknown ? '≥ ' : ''}$${(totalUsd + xmrUsd).toLocaleString(getNumberLocale(), { maximumFractionDigits: 2 })}`}
 										</Text>
 										{loadingBalances && <Spinner size="xs" color="kk.gold" aria-label={uiText("Refreshing balance")} title={uiText("Refreshing balance")} />}
 									</Flex>
 								)}
-								{moneroChain && <Text data-monero-total-note="" fontSize="10px" color="var(--text-3)" lineHeight="1.2">{uiText("XMR not included")}</Text>}
 							</Box>
 						</Flex>
 					</Box>
 
-					{sidebarChains.map((chain) => {
+					{sidebarChains.map((chain, chainIndex) => {
 						const bal = balances.get(chain.id)
 						// Three states, not two. A spinner covers "an answer is still
 						// coming"; it does NOT cover "the fetch settled and this chain
@@ -2196,6 +2211,7 @@ function PersonalDashboard({ capabilities, isEmulator, onLoaded, watchOnly, watc
 						const showAccountRows = isActive && accountRows.length > 1
 						return (
 							<Fragment key={chain.id}>
+							{chainIndex === moneroAt && moneroRow}
 							<Box
 								as="button"
 								// Always drill in — never toggle off when re-clicking the same
@@ -2340,7 +2356,7 @@ function PersonalDashboard({ capabilities, isEmulator, onLoaded, watchOnly, watc
 						)
 					})}
 
-					{moneroChain && <MoneroChainRow chain={moneroChain} iconSrc={getAssetIcon(moneroChain.caip)} privateMode={privateModeEnabled} onOpen={() => openChainPage(moneroChain)} />}
+					{moneroAt === sidebarChains.length && moneroRow}
 
 					{/* Add network — turns a network back on that the network picker
 					    turned off, or adds a custom EVM network (by chainId / RPC, or
@@ -2655,12 +2671,6 @@ function PersonalDashboard({ capabilities, isEmulator, onLoaded, watchOnly, watc
 				</Box>
 			))}
 
-			{providerUsage && providerUsage.state !== 'normal' && (
-                <Box role="status" mb="3" px="4" py="3" border="1px solid" borderColor="orange.500" borderRadius="md">
-                    <Text fontWeight="600">{uiText(providerUsage.reason === 'upstream' ? 'Token discovery is temporarily unavailable' : providerUsage.state === 'limited' ? 'Balance discovery refresh is temporarily limited' : 'Balance discovery refresh capacity is running low')}</Text>
-                    <Text fontSize="sm" color="kk.textMuted">{uiText('Cached balances remain available. Automatic updates will not spend additional discovery requests.')}</Text>
-                </Box>
-            )}
             {/* Pioneer connection error banner */}
 			{pioneerError && (
 				<Box
@@ -2748,33 +2758,6 @@ function PersonalDashboard({ capabilities, isEmulator, onLoaded, watchOnly, watc
 							>
 								{t("retry")}
 							</Box>
-						</Flex>
-					</Flex>
-				</Box>
-			)}
-
-			{/* Cached figures are normal. Only actual read failures need a notice;
-			    raw stale and transaction metadata remain available to Audit. */}
-			{!pioneerError && showBalanceError && balanceErrorNotice && (
-				<Box role="alert" data-balance-error-notice="" mb="3" px="4" py="3"
-					bg="rgba(233,196,106,0.08)" border="1px solid" borderColor="rgba(233,196,106,0.3)" borderRadius="lg">
-					<Flex direction="column" gap="2">
-						<Flex align="center" gap="2">
-							<Text fontSize="sm" fontWeight="600" color="kk.gold">{t("degradedTitle")}</Text>
-							<DocsLink href={DOCS_LINKS.missingCoins} ml="1" />
-							<DocsLink href={watch('course-13-not-showing')} label={uiText("Watch video")} />
-						</Flex>
-						<Flex wrap="wrap" align="center" gap="1.5" fontSize="xs" color="kk.textSecondary" lineHeight="1.4">
-							<Text>{t("degradedReach")}</Text>
-							{balanceErrorNotice.names.length ? balanceErrorNotice.names.map(name => <Text key={name} fontWeight="600">{name}</Text>) : <Text>{uiText('Balance unavailable')}</Text>}
-							<Text>{t("degradedTail")}</Text>
-						</Flex>
-						<Flex gap="2" mt="1">
-							<Button size="xs" variant="ghost" color="kk.gold" disabled={loadingBalances}
-								onClick={() => refreshBalances(true, [], true)}>{t("retry")}</Button>
-							<Button size="xs" variant="ghost" color="kk.textMuted"
-								onClick={() => setDismissedBalanceErrors(current => new Set([...current, ...balanceErrorNotice.identities]))}>{t("dismiss")}</Button>
-							<Button size="xs" variant="ghost" color="kk.gold" onClick={() => setShowAudit(true)}>{uiText("Run audit")}</Button>
 						</Flex>
 					</Flex>
 				</Box>
@@ -3180,16 +3163,21 @@ function PersonalDashboard({ capabilities, isEmulator, onLoaded, watchOnly, watc
 									borderRadius="999px"
 								>
 									{([
-										{ id: 'receive' as const, label: 'Receive', color: '#4ade80', bg: 'rgba(74,222,128,0.12)', icon: (
+										{ id: 'receive' as const, label: uiText('Receive'), color: '#4ade80', bg: 'rgba(74,222,128,0.12)', icon: (
 											<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#4ade80" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19" /><polyline points="5 12 12 19 19 12" /></svg>
 										) },
 										...(!watchOnly ? [
-											{ id: 'send' as const, label: 'Send', color: '#fb923c', bg: 'rgba(251,146,60,0.12)', icon: (
+											{ id: 'send' as const, label: uiText('Send'), color: '#fb923c', bg: 'rgba(251,146,60,0.12)', icon: (
 												<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fb923c" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="19" x2="12" y2="5" /><polyline points="5 12 12 5 19 12" /></svg>
 											) },
-											{ id: 'swap' as const, label: 'Swap', color: '#60a5fa', bg: 'rgba(96,165,250,0.12)', icon: (
+											{ id: 'swap' as const, label: uiText('Swap'), color: '#60a5fa', bg: 'rgba(96,165,250,0.12)', icon: (
 												<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#60a5fa" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><polyline points="17 1 21 5 17 9" /><path d="M3 11V9a4 4 0 0 1 4-4h14" /><polyline points="7 23 3 19 7 15" /><path d="M21 13v2a4 4 0 0 1-4 4H3" /></svg>
 											) },
+											...(dchain.id === 'zcash' && zcashEnabled ? [
+												{ id: 'privacy' as const, label: uiText('Shield'), color: '#f5c542', bg: 'rgba(245,197,66,0.12)', icon: (
+													<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#f5c542" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" /></svg>
+												) },
+											] : []),
 										] : []),
 									]).map((p) => (
 										<Box
@@ -3318,6 +3306,17 @@ function PersonalDashboard({ capabilities, isEmulator, onLoaded, watchOnly, watc
 				</Suspense>
 			)}
 
+			{/* An in-flight swap banner reopens its swap here (the Activity page mounts its own). */}
+			{activityResumeSwap && (
+				<Suspense fallback={null}>
+					<LazySwapDialog
+						open={true}
+						onClose={() => setActivityResumeSwap(null)}
+						resumeSwap={activityResumeSwap}
+					/>
+				</Suspense>
+			)}
+
 			{showAddChain && (
 				<AddChainDialog
 					onClose={() => setShowAddChain(false)}
@@ -3378,7 +3377,8 @@ function PersonalDashboard({ capabilities, isEmulator, onLoaded, watchOnly, watc
 			{/* One lock button for password and seed tools. */}
 			{!watchOnly && firmwareVersion && <VaultToolsButton
 				seedVaultAvailable={versionCompare(firmwareVersion, '7.16.0') >= 0}
-				passwordsAvailable={!btcOnly} />}
+				passwordsAvailable={!btcOnly}
+				passkeysAvailable={versionCompare(firmwareVersion, '7.16.0') >= 0} />}
 
 			</Flex>
 		</Flex>

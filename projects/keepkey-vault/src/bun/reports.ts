@@ -18,6 +18,7 @@ import { CHAINS } from '../shared/chains'
 import { utxoDiscoveryKey } from './btc-backend/types'
 import { getBtcBackend } from './btc-backend'
 import { createReportFonts, reportText as sanitize } from './report-fonts'
+import { embedBitcoinComLogo } from './report-branding'
 import { buildFlowTx, withRunningBalance, flowTotals, describeOwnPath, type BtcFlowTx } from './report-btc-flow'
 
 const BTC_NETWORK_ID = CHAINS.find(c => c.id === 'bitcoin')!.networkId
@@ -384,10 +385,16 @@ async function buildBtcSections(
 	const ids = [...txids]
 	const flows: BtcFlowTx[] = []
 	const missing: string[] = []
+	const detailSources = new Map<string, number>()
 	for (let i = 0; i < ids.length; i += 5) { // ponytail: 5 lookups at a time; raise if large wallets are slow
 		const batch = ids.slice(i, i + 5)
 		const got = await Promise.allSettled(batch.map(fetchTxDetail))
-		got.forEach((g, j) => g.status === 'fulfilled' ? flows.push(buildFlowTx(g.value, own)) : missing.push(batch[j]))
+		got.forEach((g, j) => {
+			if (g.status === 'rejected') { missing.push(batch[j]); return }
+			flows.push(buildFlowTx(g.value, own))
+			const source = g.value.explorer?.provider === 'bitcoin.com' ? 'Bitcoin.com' : getBtcBackend().kind
+			detailSources.set(source, (detailSources.get(source) || 0) + 1)
+		})
 		onProgress?.(`Loading transaction details ${Math.min(i + 5, ids.length)}/${ids.length}...`, 40 + Math.round(20 * Math.min(i + 5, ids.length) / ids.length))
 	}
 	if (missing.length) console.warn(`[Report] ${missing.length} tx details failed to load`)
@@ -433,6 +440,7 @@ async function buildBtcSections(
 			`Balance from history (received - sent - fees): ${btc(t.computedBalance)} BTC`,
 			`Balance reported by the blockchain indexer: ${btc(totalBalSats)} BTC - ${matches ? 'MATCHES' : `DOES NOT MATCH${missing.length ? ` (${missing.length} transactions could not be loaded)` : ''}`}`,
 			`Highest balance ever held: ${btc(t.peak.sats)} BTC${t.peak.timestamp ? ` (${date(t.peak.timestamp)})` : ''}`,
+			`Transaction detail sources: ${[...detailSources].map(([source, count]) => `${source} (${count})`).join(', ')}`,
 		],
 	})
 
@@ -743,6 +751,7 @@ export async function reportToPdfBuffer(data: ReportData): Promise<Buffer> {
 	const doc = await PDFDocument.create()
 	const fonts = await createReportFonts(doc, JSON.stringify(data))
 	const { regular: font, bold } = fonts
+	const bitcoinComLogo = await embedBitcoinComLogo(doc)
 
 	// Landscape Letter: 792 x 612
 	const pageW = 792
@@ -754,10 +763,6 @@ export async function reportToPdfBuffer(data: ReportData): Promise<Buffer> {
 	let y = pageH - MARGIN_TOP
 
 	function newPage() {
-		page.drawText(`Page ${pageNum}`, {
-			x: pageW / 2 - 20, y: 25,
-			font, size: 9, color: rgb(MUTED_COLOR.r, MUTED_COLOR.g, MUTED_COLOR.b),
-		})
 		page = doc.addPage([pageW, pageH])
 		pageNum++
 		y = pageH - MARGIN_TOP
@@ -975,12 +980,6 @@ export async function reportToPdfBuffer(data: ReportData): Promise<Buffer> {
 		y -= 10
 	}
 
-	// Page 1 footer
-	page.drawText(`Page ${pageNum}`, {
-		x: pageW / 2 - 20, y: 25,
-		font, size: 9, color: rgb(MUTED_COLOR.r, MUTED_COLOR.g, MUTED_COLOR.b),
-	})
-
 	// ── Page 2+: Detail Sections ─────────────────────────────────
 	newPage()
 
@@ -1094,11 +1093,15 @@ export async function reportToPdfBuffer(data: ReportData): Promise<Buffer> {
 		y -= SECTION_GAP / 2
 	}
 
-	// Footer on last page
-	page.drawText(`Page ${pageNum}`, {
-		x: pageW / 2 - 20, y: 25,
-		font, size: 9, color: rgb(MUTED_COLOR.r, MUTED_COLOR.g, MUTED_COLOR.b),
-	})
+	// Draw every footer once, after pagination is complete.
+	for (const [index, reportPage] of doc.getPages().entries()) {
+		reportPage.drawImage(bitcoinComLogo, { x: MARGIN_LEFT, y: 18, width: 96, height: 96 * bitcoinComLogo.height / bitcoinComLogo.width })
+		reportPage.drawText('Bitcoin transaction data', { x: MARGIN_LEFT + 108, y: 25, font, size: 8, color: rgb(MUTED_COLOR.r, MUTED_COLOR.g, MUTED_COLOR.b) })
+		reportPage.drawText(`Page ${index + 1}`, {
+			x: pageW / 2 - 20, y: 25,
+			font, size: 9, color: rgb(MUTED_COLOR.r, MUTED_COLOR.g, MUTED_COLOR.b),
+		})
+	}
 
 	const bytes = await doc.save()
 	console.log(`[reports] PDF generated: ${bytes.length} bytes, ${pageNum} pages`)

@@ -33,5 +33,8 @@
 	"numberFormat": "Number Format",
 	"usdValues": "Values are shown in USD. You can change the regional number format below.",
 	"somethingWentWrong": "Something went wrong",
-	"reload": "Reload"
+	"reload": "Reload",
+	"signingCancelled": "Transaction cancelled on your KeepKey.",
+	"signingDeviceLost": "Your KeepKey stopped responding. Unplug it, plug it back in, then restart the app and try again — this is often needed right after a firmware update.",
+	"signingReconnectHint": "Still failing? Unplug your KeepKey, reconnect it, then restart the app and try again."
 }

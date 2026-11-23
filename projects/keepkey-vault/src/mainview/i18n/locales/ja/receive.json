@@ -9,11 +9,18 @@
 	"editDerivationPath": "導出パスを編集",
 	"checkDevice": "デバイスを確認中...",
 	"verifyOnDevice": "デバイスで検証",
+	"verifyCancelled": "KeepKeyで確認がキャンセルされました。アドレスは確認されていません。",
+	"verifyNoAnswer": "KeepKeyから応答がありません。画面を確認して、もう一度お試しください。アドレスは確認されていません。",
+	"verifyDeviceLost": "KeepKeyが応答していません。再接続して、もう一度お試しください。アドレスは確認されていません。",
+	"verifyFailed": "KeepKeyにアドレスを表示できませんでした。アドレスは確認されていません。",
+	"verifyFailedDetail": "KeepKeyにアドレスを表示できませんでした（{{detail}}）。アドレスは確認されていません。",
+	"verifyNotConfirmedAfter": "{{detail}} アドレスは確認されていません。",
 	"derivingAddress": "アドレスを導出中...",
 	"noAddressDerived": "まだアドレスが導出されていません",
 	"deriveAddress": "アドレスを導出",
 	"account": "アカウント {{index}}",
 	"btcAccountType": {
-		"learnMore": "詳細を見る"
+		"learnMore": "詳細を見る",
+		"recommendation": "迷ったら Native SegWit（bc1…）を使ってください。手数料が最も低く、最新のウォレットや取引所すべてで対応しています。"
 	}
 }

@@ -1,30 +1,36 @@
 import { useEffect, useRef, useState } from 'react'
 import { Box, Button, Flex, Text } from '@chakra-ui/react'
 import { usePasswordManagerEnabled } from '../hooks/usePasswordManagerEnabled'
+import { usePasskeysEnabled } from '../hooks/usePasskeysEnabled'
 import { useUiTranslation } from '../i18n/ui'
 import { Z } from '../lib/z-index'
 import { Bip85VaultDialog } from './Bip85VaultDialog'
 import { PasswordBankView } from './PasswordBankView'
+import { PasskeysView } from './PasskeysView'
 
 /** One entry for password and seed tools; feature switches never add
  * another global navigation tab. */
-export function VaultToolsButton({ seedVaultAvailable, passwordsAvailable = true }: {
-  seedVaultAvailable: boolean; passwordsAvailable?: boolean
+export function VaultToolsButton({ seedVaultAvailable, passwordsAvailable = true, passkeysAvailable = false }: {
+  seedVaultAvailable: boolean; passwordsAvailable?: boolean; passkeysAvailable?: boolean
 }) {
   const uiText = useUiTranslation()
   const passwordFlag = usePasswordManagerEnabled()
   const passwords = passwordFlag && passwordsAvailable
   const [open, setOpen] = useState(false)
-  const [section, setSection] = useState<'passwords' | 'seeds'>('passwords')
+  const passkeys = usePasskeysEnabled() && passkeysAvailable
+  const [section, setSection] = useState<'passwords' | 'passkeys' | 'seeds'>('passwords')
   const trigger = useRef<HTMLButtonElement>(null)
   const panel = useRef<HTMLDivElement>(null)
   const close = () => { setOpen(false); trigger.current?.focus() }
   useEffect(() => {
-    if (!passwords && section === 'passwords') {
-      if (seedVaultAvailable) setSection('seeds')
+    const gone = (section === 'passwords' && !passwords) || (section === 'passkeys' && !passkeys)
+    if (gone) {
+      if (passwords) setSection('passwords')
+      else if (passkeys) setSection('passkeys')
+      else if (seedVaultAvailable) setSection('seeds')
       else setOpen(false)
     }
-  }, [passwords, section, seedVaultAvailable])
+  }, [passwords, passkeys, section, seedVaultAvailable])
   useEffect(() => {
     if (!open) return
     panel.current?.focus()
@@ -38,15 +44,15 @@ export function VaultToolsButton({ seedVaultAvailable, passwordsAvailable = true
     window.addEventListener('keydown', escape, true)
     return () => window.removeEventListener('keydown', escape, true)
   }, [open])
-  if (!seedVaultAvailable && !passwords) return null
+  if (!seedVaultAvailable && !passwords && !passkeys) return null
   return <>
     <Button ref={trigger} position="fixed" bottom="76px" right="28px" w="52px" h="52px" minW="52px" p="0"
       borderRadius="full" bg="rgba(233,196,106,0.22)" border="1.5px solid rgba(233,196,106,0.7)"
       boxShadow="0 0 16px rgba(233,196,106,0.25)" zIndex={10}
       _hover={{ bg: 'rgba(233,196,106,0.32)', borderColor: 'kk.gold' }}
-      aria-label={passwords ? uiText('Passwords and seed vault') : uiText('BIP-85 Seed Vault')}
-      title={passwords ? uiText('Passwords and seed vault') : uiText('BIP-85 Seed Vault')}
-      onClick={() => { setSection(passwords ? 'passwords' : 'seeds'); setOpen(true) }}>
+      aria-label={passwords || passkeys ? uiText('Passwords and seed vault') : uiText('BIP-85 Seed Vault')}
+      title={passwords || passkeys ? uiText('Passwords and seed vault') : uiText('BIP-85 Seed Vault')}
+      onClick={() => { setSection(passwords ? 'passwords' : passkeys ? 'passkeys' : 'seeds'); setOpen(true) }}>
       <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--gold)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         {/* Padlock by owner choice (11-14): it reads as "the vault". */}
         <rect x="3" y="11" width="18" height="11" rx="2" ry="2" /><path d="M7 11V7a5 5 0 0 1 10 0v4" />
@@ -56,7 +62,7 @@ export function VaultToolsButton({ seedVaultAvailable, passwordsAvailable = true
       <Box position="fixed" inset="0" bg="blackAlpha.700" zIndex={Z.dialog} onClick={close} />
       <Box ref={panel} tabIndex={-1} role="dialog" aria-modal="true" aria-label={uiText('Vault')}
         position="fixed" top="50%" left="50%" transform="translate(-50%, -50%)"
-        w={section === 'passwords' && passwords ? '760px' : '520px'} maxW="94vw" maxH="88vh"
+        w="760px" maxW="94vw" h="600px" maxH="88vh"
         bg="kk.bg" border="1px solid" borderColor="kk.border" borderRadius="xl" zIndex={Z.dialog + 1}
         display="flex" flexDirection="column" overflow="hidden"
         onKeyDown={event => {
@@ -73,10 +79,11 @@ export function VaultToolsButton({ seedVaultAvailable, passwordsAvailable = true
         </Flex>
         <Flex as="nav" aria-label={uiText('Vault tools')} gap="2" px="5" py="3" borderBottom="1px solid" borderColor="kk.border">
           {passwords && <Button size="sm" color={section === 'passwords' ? 'kk.textPrimary' : 'kk.textSecondary'} variant={section === 'passwords' ? 'solid' : 'ghost'} aria-pressed={section === 'passwords'} onClick={() => setSection('passwords')}>{uiText('Passwords')}</Button>}
+          {passkeys && <Button size="sm" color={section === 'passkeys' ? 'kk.textPrimary' : 'kk.textSecondary'} variant={section === 'passkeys' ? 'solid' : 'ghost'} aria-pressed={section === 'passkeys'} onClick={() => setSection('passkeys')}>{uiText('Passkeys')}</Button>}
           {seedVaultAvailable && <Button size="sm" color={section === 'seeds' ? 'kk.textPrimary' : 'kk.textSecondary'} variant={section === 'seeds' ? 'solid' : 'ghost'} aria-pressed={section === 'seeds'} onClick={() => setSection('seeds')}>{uiText('Seed vault (BIP-85)')}</Button>}
         </Flex>
         <Box overflow="auto" minH="0">
-          {section === 'passwords' && passwords ? <PasswordBankView /> : seedVaultAvailable ? <Bip85VaultDialog embedded onClose={close} /> : null}
+          {section === 'passwords' && passwords ? <PasswordBankView /> : section === 'passkeys' && passkeys ? <PasskeysView /> : seedVaultAvailable ? <Bip85VaultDialog embedded onClose={close} /> : null}
         </Box>
       </Box>
     </>}

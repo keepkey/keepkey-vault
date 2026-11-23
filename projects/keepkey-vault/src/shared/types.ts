@@ -641,6 +641,8 @@ export interface MoneroStatus {
   keyImagesStale?: boolean
   /** The node's last answer about the pending tx: it does not have it; discardable only if its inputs are unspent. */
   unrelayedCheck?: { state: 'unknown'; discardable: boolean; checkedAt: string; relayNode?: string; checkedNode: string }
+  /** The node has the pending tx (it was sent), but its payment proof could not be saved: new sends stay paused until it is. */
+  unrelayedProofNotSaved?: boolean
   /** A discarded tx that another node could still mine: the next send must reuse one of its inputs. */
   discardedTxid?: string
   spendStateKnown: boolean
@@ -688,7 +690,7 @@ export interface FirmwareManifest {
      *  during onboarding. Absent until a btc-only build is published. */
     firmwareBitcoinOnly?: FirmwareBinaryRef
   }
-  beta: {
+  beta?: {
     firmware: FirmwareBinaryRef
     bootloader: FirmwareBinaryRef
     firmwareBitcoinOnly?: FirmwareBinaryRef
@@ -1002,6 +1004,9 @@ export interface AddressBookEntry {
   chainId: string            // internal chain id, e.g. 'ethereum'
   address: string            // recipient/own address (normalized); xpub for own UTXO rows
   label?: string
+  /** Forward-resolved ENS name; address holds the pinned destination. */
+  ensName?: string
+  isEns?: boolean
   derivationPath?: string    // own rows — label binds to path, survives re-derive
   scriptType?: string        // own UTXO rows (p2pkh|p2sh-p2wpkh|p2wpkh|p2tr)
   addressIndex?: number      // own EVM index / BTC account index
@@ -1012,6 +1017,11 @@ export interface AddressBookEntry {
   lastUsedAt?: number        // latest send to this entry from the Send page (list reads only)
   createdAt: number
   updatedAt: number
+}
+
+export interface AddressBookCertificationPreview {
+  contacts: { label: string; network: string; address: string }[]
+  excluded: { label: string; network: string; address: string; reason: string }[]
 }
 
 export interface AddressBookTx {
@@ -1282,6 +1292,9 @@ export interface CalldataDecodedInfo {
 
 export interface SigningRequestInfo {
   id: string
+  /** Backend snapshot for pairing the current emulator's actual captured OLED.
+   * Physical hardware has no screen-readback claim. */
+  deviceReview?: { emulator: boolean; deviceId?: string }
   method: string
   appName: string
   chain?: string
@@ -1640,6 +1653,7 @@ export interface ClearSignProviderInput {
 // Application-level settings (persisted in SQLite)
 export interface AppSettings {
   passwordManagerEnabled?: boolean // experimental password bank; runtime, default OFF
+  passkeysEnabled?: boolean // Passkeys tab (status + reset of the device's FIDO2 authenticator); runtime, default OFF
   appLanguage?: string          // shared with native menus and dialogs
   restApiEnabled: boolean        // controls entire REST API server on/off
   pioneerApiBase: string         // current Pioneer API base URL
@@ -1648,7 +1662,7 @@ export interface AppSettings {
   fiatCurrency: FiatCurrency     // display currency (default 'USD')
   numberLocale: string           // number formatting locale (default 'en-US')
   btcMultisigEnabled: boolean    // runtime feature flag: Bitcoin multisig co-signing (default OFF)
-  walletConnectEnabled: boolean   // feature flag: WalletConnect dApp support (default OFF)
+  walletConnectEnabled: boolean   // WalletConnect connection preference (default ON)
   moneroAvailable?: boolean      // optional compatibility field; build contains a runnable sidecar
   moneroEnabled: boolean         // experimental XMR sidecar and wallet surface (default OFF)
   moneroDaemonUrl: string        // public HTTPS Monero daemon, or loopback local daemon
@@ -2798,3 +2812,23 @@ export interface RngAuditReport {
   /** Bytes actually requested per device call, discovered at runtime. */
   chunkBytes?: number
 }
+
+/** Firmware FIDO2 authenticator, read over CTAPHID (see src/bun/passkeys.ts). */
+export interface PasskeyStatus {
+  available: true
+  deviceVersion: string
+  ctapVersions: string[]
+  aaguid: string
+  discoverable: boolean
+  /** Firmware can list and delete individual passkeys (CTAP credential management). */
+  credMgmt: boolean
+  pinSet: boolean
+  pinRetries?: number
+}
+export interface PasskeySlotView {
+  rpHash: string; userName: string; credentialId: string
+  /** Resolved by Desktop: the device keeps only the site name's hash. */
+  label: string; labelSource: 'you' | 'known' | 'unknown'
+}
+export interface PasskeyInventoryView { used: number; remaining: number; slots: PasskeySlotView[] }
+export interface PasskeyResetResult { reset: boolean; /** The KeepKey must be unplugged and replugged first (CTAP reset window). */ replug?: boolean }

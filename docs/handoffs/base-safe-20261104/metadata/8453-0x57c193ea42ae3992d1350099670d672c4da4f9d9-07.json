@@ -1,0 +1,16 @@
+{
+  "display": {
+    "formats": {
+      "setGuard(address guard)": {
+        "intent": "Set Safe guard",
+        "fields": [
+          {
+            "path": "guard",
+            "label": "Guard",
+            "format": "addressName"
+          }
+        ]
+      }
+    }
+  }
+}

@@ -42,11 +42,12 @@ function toBaseUnits(displayAmount: string, decimals: number): bigint {
 // NativeTransactionFee is 0.2 CACAO (2000000000 base @ 10 decimals); reserving
 // 0 swept 100% of the balance and every MAX CACAO swap reverted with
 // "insufficient funds". THORChain's native_tx_fee is 0.02 RUNE.
+// Only THOR/Maya belong here: Cosmos Hub and Osmosis pay their fee through the
+// tx's own `fee.amount`, so a floor here overstated it (Osmosis showed and
+// balance-checked 0.035 OSMO while the tx paid 0.01/0.015/0.02).
 const FEES: Record<string, number> = {
   thorchain: 0.02,
   mayachain: 0.2,
-  cosmos: 0.005,
-  osmosis: 0.035,
 }
 
 // A MAX reserves FEE × this multiplier — never the bare fee. Reserving exactly
@@ -92,6 +93,23 @@ export function displayFee(chain: ChainDef, fee: { amount: { amount: string }[] 
 export function nativeTxFeeBaseUnits(chain: ChainDef): string | undefined {
   if (chain.id !== 'thorchain' && chain.id !== 'mayachain') return undefined
   return String(Math.round(FEES[chain.id] * 10 ** chain.decimals))
+}
+
+/** Fee of a history row, in base units. THOR/Maya sends record the auth fee
+ *  ('0' or nothing) while the network charges its native fee at the bank layer,
+ *  so such a send gets that fee. Anything else is returned unchanged. Shared by
+ *  the history scan (write) and the activity list (read) so the rule lives once. */
+export function withNativeTxFee(fee: string | undefined, activityType: string, chain: ChainDef | undefined): string | undefined {
+  if (activityType !== 'send' || !chain || Number(fee) > 0) return fee
+  return nativeTxFeeBaseUnits(chain) ?? fee
+}
+
+/** The same rule for a send logged by Vault itself, whose fee is in DISPLAY
+ *  units. Sends made before displayFee charged the native fee logged '0', and
+ *  mergeTxRows keeps that row's fee over the scan row's. */
+export function withNativeTxFeeDisplay(fee: string | undefined, chain: ChainDef | undefined): string | undefined {
+  if (!chain || Number(fee) > 0 || nativeTxFeeBaseUnits(chain) === undefined) return fee
+  return String(FEES[chain.id])
 }
 
 // Chain-specific msg types (MsgSend)

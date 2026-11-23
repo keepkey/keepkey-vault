@@ -17,12 +17,15 @@ import { OFFICIAL_RELEASE_TAG, assertInstallAllowed, installedFromBootloader, in
 import { flashWipeReason, type WipeReason } from '../shared/flash-wipe'
 import { EmulatorKeepKeyAdapter } from './emulator-transport'
 import { requestUnlock, isTransportTimeout, UNLOCK_TIMEOUT_MESSAGE, EMULATOR_UNLOCK_FIRST_REPLY_MS, EMULATOR_UNLOCK_TIMEOUT_MESSAGE } from './pin-unlock'
+import { createReconnectBudget, resyncKeepKey, watchTransportTimeouts, type TransportTimeoutInfo } from './device-timeout'
 import { forceReleaseWebUsb, isUnreleasable } from './webusb-recovery'
 import type { DeviceFailure } from './device-refusal'
 import { flushRingBuffers, getActiveFlashName, getEmulatorStatus } from './emulator'
 import { wipeOwningDevice, WIPE_BUSY_MESSAGE, WIPE_REPLUG_PENDING_MESSAGE, type WipeHost } from './device-wipe'
 import { awaitingInput, DEVICE_NOT_ASKING_MESSAGE, gateRestWrites, guardInputWait, restRequest } from './device-gate'
 import { DeviceOperationCoordinator, backgroundDeviceRead, deviceOperationContext, type DeviceOperationOptions } from './device-operation'
+import { installNativeContactProof } from './native-contact-proof'
+import type { AddressBookCertification } from './addressbook-clearsign'
 
 const KEEPKEY_VENDOR_ID = 0x2B24 // 11044
 // Firmware manifest lives in keepkey-vault (migrated from keepkey-desktop, which is now stale).
@@ -61,6 +64,9 @@ const FALLBACK_BOOTLOADER = '2.1.4'
 
 // Delay before trying to pair after USB attach — device needs time to enumerate
 const ATTACH_DELAY_MS = 1500
+/** Shown when a KeepKey keeps timing out after the Vault reopened it on its own. */
+export const DEVICE_UNRESPONSIVE_MESSAGE = 'Your KeepKey stopped answering. Unplug it, plug it back in and enter your PIN.'
+export const DEVICE_RECONNECTING_MESSAGE = 'Your KeepKey stopped answering. Reconnecting…'
 // Timeout for pairRawDevice — it can hang if device is in a bad state
 const PAIR_TIMEOUT_MS = 10000
 // Retry interval when device is claimed by another app
@@ -118,6 +124,7 @@ export class EngineController extends EventEmitter {
   // Typed as HDWallet with KeepKey-specific extensions (firmware, PIN, etc.)
   // Cast to `any` when calling KeepKey-only methods not in the HDWallet interface
   wallet: (core.HDWallet & Record<string, any>) | null = null
+  contactProofState?: () => { enabled: boolean; certificate?: AddressBookCertification }
   private activeTransport: ActiveTransport = null
   private updatePhase: UpdatePhase = 'idle'
   // After a firmware/bootloader flash the device must be physically unplugged and
@@ -139,6 +146,12 @@ export class EngineController extends EventEmitter {
   private lastError: string | null = null
   private retryTimer: ReturnType<typeof setTimeout> | null = null
   private retryCount = 0
+  /** Automatic reopens after a device timeout; a replug or a manual retry refills it. */
+  private reconnectBudget = createReconnectBudget()
+  /** Wait before reopening a timed-out device (tests set 0). */
+  timeoutReconnectDelayMs = 1_000
+  /** A timed-out request's late reply may still sit in the USB pipe: drain it before the next pair. */
+  private resyncBeforePair = false
   private static readonly MAX_PAIR_RETRIES = 24 // ~2 minutes at 5s intervals
   private rebootPollTimer: ReturnType<typeof setInterval> | null = null
   // Windows: WinUSB can take longer than ATTACH_DELAY_MS to bind interface 0
@@ -412,11 +425,18 @@ export class EngineController extends EventEmitter {
 
   private attachTransportListeners() {
     if (!this.wallet?.transport) return
+    installNativeContactProof(this.wallet, () => ({
+      ...(this.contactProofState?.() || { enabled: false }),
+      passphrase: this.isPassphraseWallet,
+      capabilities: this.cachedFeatures?.capabilitiesList,
+    }))
 
     // Clean up any existing listeners to prevent leaks on re-pair
     this.cleanupTransportListeners()
 
     const transport = this.wallet.transport
+    // First, so its write wrapper sits under the gate's: a refused write is never recorded as sent.
+    watchTransportTimeouts(transport, info => this.handleTransportTimeout(transport, info))
     // REST writes that would collide with a wipe or ask a locked device for its PIN are refused (device-gate.ts).
     gateRestWrites(transport, () => ({
       wipeInProgress: this.wipeInProgress,
@@ -574,6 +594,10 @@ export class EngineController extends EventEmitter {
         if (device.deviceDescriptor.idVendor !== KEEPKEY_VENDOR_ID) return
         console.log('[Engine] KeepKey USB detached')
         this.clearRetry()
+        // A replug power-cycles the KeepKey: no late reply survives it, and a
+        // device that timed out before gets its automatic reopens back.
+        this.resyncBeforePair = false
+        this.reconnectBudget.reset()
         // M1 fix: During firmware reboot, device disconnects/reconnects — don't
         // clear wallet state or emit disconnected (reboot poll handles reconnection)
         if (this.updatePhase === 'rebooting') {
@@ -834,7 +858,7 @@ export class EngineController extends EventEmitter {
    */
   private mergeManifests(bundled: FirmwareManifest | null, remote: FirmwareManifest | null): FirmwareManifest | null {
     const merged = mergeManifests(bundled, remote)
-    if (merged && bundled && remote) console.log(`[Engine] Merged manifest: latest=${merged.latest.firmware.version} beta=${merged.beta.firmware.version} btc=${merged.latest.firmwareBitcoinOnly?.version ?? '(none)'}`)
+    if (merged && bundled && remote) console.log(`[Engine] Merged manifest: latest=${merged.latest.firmware.version} beta=${merged.beta?.firmware.version ?? '(none)'} btc=${merged.latest.firmwareBitcoinOnly?.version ?? '(none)'}`)
     return merged
   }
 
@@ -1148,11 +1172,57 @@ export class EngineController extends EventEmitter {
     }
   }
 
+  /**
+   * hdwallet quarantined this transport: it will never answer again. Retire it and
+   * reopen the device, a bounded number of times, rather than keep a dead connection
+   * "ready" (device-timeout.ts). Leaving 'ready' also stops wallet watch and the seed
+   * fingerprint from asking it. Flows that own the device handle their own timeouts.
+   */
+  private handleTransportTimeout(transport: unknown, info: TransportTimeoutInfo) {
+    if (this.isEmulator) return
+    console.warn(`[Engine] KeepKey stopped answering — last request sent: ${info.request ?? 'none'} (${info.message})`)
+    // Whoever pairs next, now or after a manual retry, drains the late reply first.
+    this.resyncBeforePair = true
+    if (this.wallet?.transport !== transport) return
+    if (this.setupInProgress || this.verifyInProgress || this.wipeInProgress || this.promptPinActive || this.updatePhase !== 'idle') return
+    this.clearRetry()
+    this.clearWallet()
+    if (!this.reconnectBudget.take()) {
+      console.warn('[Engine] KeepKey keeps timing out — waiting for a replug instead of reopening it again')
+      this.lastError = DEVICE_UNRESPONSIVE_MESSAGE
+      this.updateState('error')
+      return
+    }
+    console.log(`[Engine] Reopening the KeepKey connection in ${this.timeoutReconnectDelayMs}ms`)
+    this.lastError = DEVICE_RECONNECTING_MESSAGE
+    this.retryCount = 0
+    this.updateState('connected_unpaired')
+    this.retryTimer = setTimeout(() => {
+      this.retryTimer = null
+      void this.syncState()
+    }, this.timeoutReconnectDelayMs)
+  }
+
+  /** Open the device on its own handle, drain what the timed-out connection left, close it again. */
+  private async resyncDevice(adapter: any, device: any, label: string) {
+    const delegate = await adapter.getTransportDelegate(device)
+    if (!delegate) return
+    await delegate.connect()
+    try {
+      const discarded = await resyncKeepKey(delegate)
+      console.log(`[Engine] ${label} connection back in step with the KeepKey (${discarded} late repl${discarded === 1 ? 'y' : 'ies'} discarded)`)
+      this.resyncBeforePair = false
+    } finally {
+      await delegate.disconnect()
+    }
+  }
+
   /** Force a fresh pairing attempt — clears stale state and resets retry counter. */
   async retryConnect() {
     console.log('[Engine] Manual retry requested — clearing state and reconnecting')
     this.clearRetry()
     this.retryCount = 0
+    this.reconnectBudget.reset()
     this.clearWallet()
     this.lastError = null
     this.updateState('disconnected')
@@ -1328,6 +1398,7 @@ export class EngineController extends EventEmitter {
         } else {
           console.log('[Engine] WebUSB device found, attempting pairRawDevice...')
           try {
+            if (this.resyncBeforePair) await this.resyncDevice(this.webUsbAdapter, webUsbDevice, 'WebUSB')
             const wallet = await withTimeout(
               this.webUsbAdapter.pairRawDevice(webUsbDevice),
               PAIR_TIMEOUT_MS,
@@ -1370,6 +1441,7 @@ export class EngineController extends EventEmitter {
         }
         console.log('[Engine] HID device found, attempting pairRawDevice...')
         try {
+          if (this.resyncBeforePair) await this.resyncDevice(this.hidAdapter, hidDevice, 'HID')
           const wallet = await withTimeout(
             this.hidAdapter.pairRawDevice(hidDevice),
             PAIR_TIMEOUT_MS,

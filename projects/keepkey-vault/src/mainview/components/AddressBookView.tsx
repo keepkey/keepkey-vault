@@ -1,12 +1,13 @@
 import { getNumberLocale } from "../lib/number-locale"
 import { useUiTranslation } from "../i18n/ui"
+import { addressBookLabel } from "../lib/addressbook-label"
 import { useState, useMemo, useCallback, useEffect } from "react"
-import type { ReactNode } from "react"
 import { Box, Flex, Text, Input, Button } from "@chakra-ui/react"
 import { actionToneProps } from "./ui/ActionButton"
 import { useTranslation } from "react-i18next"
 import { rpcRequest } from "../lib/rpc"
 import { CHAINS, getExplorerTxUrl, caipToNetworkId } from "../../shared/chains"
+import { chainsByNetwork } from "../lib/chain-by-network"
 import { isBitcoinOnlyVariant } from "../../shared/flags"
 import { versionCompare } from "../../shared/firmware-versions"
 import { useAddressBook } from "../hooks/useAddressBook"
@@ -18,11 +19,11 @@ import { DocsLink } from "./DocsLink"
 import { DOCS_LINKS } from "../../shared/docs-links"
 import { Z } from "../lib/z-index"
 import { evmChainLabel } from "../../shared/chains"
-import type { AddressBookEntry, AddressBookTx, AppSettings } from "../../shared/types"
+import type { AddressBookEntry, AddressBookTx, AddressBookCertificationPreview, AppSettings } from "../../shared/types"
 import { VaultIdentityBadge, VaultIdentityDetails } from './VaultIdentityBadge'
 
 const chainById = new Map(CHAINS.map(c => [c.id, c]))
-const chainByNetwork = new Map(CHAINS.map(c => [c.networkId, c]))
+const chainByNetwork = chainsByNetwork(CHAINS)
 
 const shortDevice = (id?: string) => (id && id.length > 12 ? `${id.slice(0, 6)}…${id.slice(-4)}` : (id || "Wallet"))
 const EXTERNAL_TAB = "__external__"
@@ -31,15 +32,14 @@ const VAULT_TAB = '__vaults__'
 interface DisplayEntry extends AddressBookEntry {
   /** All underlying entry ids this row represents (own EVM collapses the same
    *  address across eip155 networks into one card). Edit/delete/history act on
-   *  every member id; chain filtering matches any member chain. */
+   *  every member id. */
   memberIds: string[]
-  memberChainIds: string[]
   networkCount?: number
 }
 
-/** Top-level Address Book destination (R1/R6). A global network filter sits above
- *  the tabs (one tab per device + a "Saved recipients" tab) and persists as you
- *  switch tabs. Device-seeded identicons (R3), copy-to-clipboard, manual add, and
+/** Top-level Address Book destination (R1/R6): one tab per device, Vaults and
+ *  "Saved recipients". Every network is always shown (no network filter).
+ *  Device-seeded identicons (R3), copy-to-clipboard, manual add, and
  *  a per-address outbound-history drilldown (R7). */
 export function AddressBookView() {
   const uiText = useUiTranslation()
@@ -47,9 +47,7 @@ export function AddressBookView() {
   const { t } = useTranslation("addressbook")
   const { entries: allEntries, loading, seeding, saveLabel, setCosigner, remove } = useAddressBook()
   const deviceState = useDeviceState()
-  // btc-only device: non-BTC entries are dead weight (can't send to them) and the
-  // chain filter offers chains the device can't use. Scope to Bitcoin at the source;
-  // this also collapses the network-filter row (allChainsPresent drops to ≤1).
+  // btc-only device: non-BTC entries are dead weight (can't send to them). Scope to Bitcoin at the source.
   const btcOnly = isBitcoinOnlyVariant(deviceState.firmwareVariant)
   const entries = useMemo(
     () => (btcOnly ? allEntries.filter(e => e.chainId === "bitcoin") : allEntries),
@@ -60,7 +58,6 @@ export function AddressBookView() {
     ? deviceState.deviceId
     : undefined
   const [search, setSearch] = useState("")
-  const [chainFilter, setChainFilter] = useState<string>("all")
   const [activeTab, setActiveTab] = useState<string | null>(null)
   const [addOpen, setAddOpen] = useState(false)
   const [clearSignEnabled, setClearSignEnabled] = useState(false)
@@ -86,12 +83,16 @@ export function AddressBookView() {
 
   // One review of every contact before the device is asked to certify them all.
   const [certifyPreview, setCertifyPreview] = useState<{ label: string; network: string; address: string }[] | null>(null)
+  const [excludedContacts, setExcludedContacts] = useState<AddressBookCertificationPreview['excluded']>([])
   const reviewCertify = useCallback(async () => {
     setCertificationNotice("")
     try {
-      const contacts = await rpcRequest<{ label: string; network: string; address: string }[]>("previewAddressBookCertification", undefined, 5000)
-      if (!contacts.length) setCertificationNotice("Add at least one labeled EVM contact before certifying")
-      else setCertifyPreview(contacts)
+      const preview = await rpcRequest<AddressBookCertificationPreview>("previewAddressBookCertification", undefined, 30000)
+      setExcludedContacts(preview.excluded)
+      if (!preview.contacts.length) setCertificationNotice(preview.excluded.length
+        ? preview.excluded.map(c => `${c.label} (${c.address}): ${c.reason}`).join('; ')
+        : "Add at least one labeled contact supported by the connected firmware before certifying")
+      else setCertifyPreview(preview.contacts)
     } catch (error: any) {
       setCertificationNotice(error?.message || "Could not list the contacts to certify")
     }
@@ -128,14 +129,13 @@ export function AddressBookView() {
         if (ex) {
           ex.networkCount = (ex.networkCount || 1) + 1
           ex.memberIds.push(e.id)
-          if (!ex.memberChainIds.includes(e.chainId)) ex.memberChainIds.push(e.chainId)
           continue
         }
-        const d: DisplayEntry = { ...e, networkCount: 1, memberIds: [e.id], memberChainIds: [e.chainId] }
+        const d: DisplayEntry = { ...e, networkCount: 1, memberIds: [e.id] }
         ownEvmByAddr.set(key, d)
         out.push(d)
       } else {
-        out.push({ ...e, memberIds: [e.id], memberChainIds: [e.chainId] })
+        out.push({ ...e, memberIds: [e.id] })
       }
     }
     return out
@@ -177,19 +177,11 @@ export function AddressBookView() {
     return deviceTabs.find(g => g.deviceId === effectiveTab)?.rows || []
   }, [effectiveTab, deviceTabs, externalRows, vaultRows])
 
-  // Global network filter — built from EVERY entry (all tabs) and kept across tab switches.
-  const allChainsPresent = useMemo(() => {
-    const ids = new Set<string>()
-    for (const e of display) for (const c of e.memberChainIds) ids.add(c)
-    return CHAINS.filter(c => ids.has(c.id))
-  }, [display])
-
   const visibleRows = useMemo(() => {
     const q = search.trim().toLowerCase()
     return tabRows
-      .filter(e => chainFilter === "all" || e.memberChainIds.includes(chainFilter))
-      .filter(e => !q || e.label?.toLowerCase().includes(q) || e.address.toLowerCase().includes(q))
-  }, [tabRows, chainFilter, search])
+      .filter(e => !q || addressBookLabel(e, t)?.toLowerCase().includes(q) || e.ensName?.toLowerCase().includes(q) || e.address.toLowerCase().includes(q))
+  }, [tabRows, search, t])
 
   const handleSave = useCallback((ids: string[], label: string) =>
     Promise.all(ids.map(id => saveLabel(id, label))).then(() => {}), [saveLabel])
@@ -238,8 +230,12 @@ export function AddressBookView() {
               </Text>
             </Flex>
             <Text fontSize="xs" color="var(--text-2)" mb="3" pl="42px">{uiText("Your KeepKey signs this list. Sends to these addresses on these networks then show the name on your KeepKey.")}</Text>
-            <Text fontSize="10px" color="var(--text-2)" mb="3">{uiText("Vault certificates cover only the displayed destination label, address and network. Cosigners, thresholds and token support are separate account metadata. Bitcoin vault destinations are not supported by this EVM certificate flow.")}</Text>
+            <Text fontSize="10px" color="var(--text-2)" mb="3">{uiText("Certificates cover the displayed destination label, address and network. The device still shows the full destination for each send. Cosigners, thresholds and token support are separate account metadata.")}</Text>
             {certifyPreview.length > 16 && <Text fontSize="11px" color="var(--gold)" mb="3">{uiText("Choose at most 16 destinations by removing entries from this review.")}</Text>}
+            {excludedContacts.length > 0 && <Box mb="3">
+              <Text fontSize="11px" color="var(--gold)">{t('certificationExcluded', { defaultValue: 'These contacts cannot be certified:' })}</Text>
+              {excludedContacts.map((c, i) => <Text key={i} fontSize="11px" color="var(--text-2)">{c.label} ({c.address}): {c.reason}</Text>)}
+            </Box>}
             <Flex direction="column" gap="2">
               {certifyPreview.map((c) => {
                 const chain = CHAINS.find(ch => caipToNetworkId(ch.caip) === c.network)
@@ -280,18 +276,6 @@ export function AddressBookView() {
 
       {certificationNotice && <Text fontSize="11px" color="var(--text-2)" mb="3">{certificationNotice}</Text>}
 
-      {/* Global network filter — above the tabs, persists across tab switches. */}
-      {allChainsPresent.length > 1 && (
-        <Flex gap="1.5" mb="3" wrap="wrap">
-          <Pill active={chainFilter === "all"} onClick={() => setChainFilter("all")}>{t("allNetworks", { defaultValue: "All networks" })}</Pill>
-          {allChainsPresent.map(c => (
-            <Pill key={c.id} active={chainFilter === c.id} onClick={() => setChainFilter(c.id)}>
-              <AssetIcon caip={c.caip} size={14} alt={c.symbol} /> {c.coin}
-            </Pill>
-          ))}
-        </Flex>
-      )}
-
       {/* Tabs: one per device + Saved recipients */}
       {tabs.length > 0 && (
         <Flex gap="1" mb="3" overflowX="auto" pb="1" borderBottom="1px solid var(--line)">
@@ -326,7 +310,7 @@ export function AddressBookView() {
         <Text fontSize="sm" color="var(--text-2)" py="8" textAlign="center">
           {onExternalTab && externalRows.length === 0
             ? t("noContacts", { defaultValue: "No saved recipients yet — add one with “Add Address”." })
-            : (chainFilter !== "all" || search.trim())
+            : search.trim()
               ? t("noMatches", { defaultValue: "No addresses match your filter" })
               : t("noAddresses", { defaultValue: "No saved addresses yet" })}
         </Text>
@@ -338,17 +322,6 @@ export function AddressBookView() {
 
       {addOpen && <AddAddressDialog onClose={() => setAddOpen(false)} onAdded={() => setActiveTab(EXTERNAL_TAB)} />}
     </Box>
-  )
-}
-
-function Pill({ active, onClick, children }: { active: boolean; onClick: () => void; children: ReactNode }) {
-  return (
-    <Flex as="button" align="center" gap="1" px="2.5" py="1" borderRadius="999px" fontSize="11.5px"
-          border="1px solid var(--line)" bg={active ? "var(--ink-4)" : "transparent"}
-          color={active ? "var(--text-0)" : "var(--text-2)"} _hover={{ color: "var(--text-0)", bg: "var(--ink-3)" }}
-          onClick={onClick}>
-      {children}
-    </Flex>
   )
 }
 
@@ -391,7 +364,9 @@ function Row({ entry, connected, onSave, onRemove, onCosigner }: {
   const seed = isOwn ? (entry.deviceId || entry.address) : entry.address
   const [expanded, setExpanded] = useState(false)
   const [editing, setEditing] = useState(false)
-  const [draft, setDraft] = useState(entry.label || "")
+  // The default own label is stored in English ("My RUNE"); edit what is shown.
+  const shownLabel = addressBookLabel(entry, t) || ""
+  const [draft, setDraft] = useState(shownLabel)
   const [history, setHistory] = useState<AddressBookTx[] | null>(null)
 
   const toggle = useCallback(() => {
@@ -421,7 +396,7 @@ function Row({ entry, connected, onSave, onRemove, onCosigner }: {
         <Flex direction="column" minW="0" flex="1" gap="0.5">
           <Flex align="center" gap="1.5">
             <Text fontSize="13px" fontWeight="600" color="var(--text-0)" truncate>
-              {entry.label || t("unlabeled", { defaultValue: "Unlabeled" })}
+              {addressBookLabel(entry, t) || t("unlabeled", { defaultValue: "Unlabeled" })}
             </Text>
             {isVault && <VaultIdentityBadge vault={entry.vault!} />}
             {!isOwn && !isVault && (
@@ -434,6 +409,7 @@ function Row({ entry, connected, onSave, onRemove, onCosigner }: {
                 </Text>
               </Flex>
             )}
+            {entry.isEns && <Text fontSize="9px" color="var(--teal)" px="1" borderRadius="sm" border="1px solid var(--teal)" title={entry.ensName}>ENS</Text>}
             {entry.cosigner && (
               <Text fontSize="9px" fontWeight="700" color="var(--gold)" textTransform="uppercase" letterSpacing="0.04em" px="1" borderRadius="sm" border="1px solid var(--gold)">
                 {t("cosigner", { defaultValue: "Co-signer" })}
@@ -469,16 +445,20 @@ function Row({ entry, connected, onSave, onRemove, onCosigner }: {
                 <Input value={draft} onChange={(e) => setDraft(e.target.value)} size="xs" flex="1"
                        bg="var(--ink-0)" border="1px solid var(--line)" color="var(--text-0)" maxLength={100}
                        placeholder={t("labelPlaceholder", { defaultValue: "Label" })} />
-                <Button {...actionToneProps("primary")} size="xs" onClick={async () => { await onSave(entry.memberIds, draft.trim()); setEditing(false) }}>
+                <Button {...actionToneProps("primary")} size="xs" onClick={async () => {
+                  // Unchanged: keep the stored default so it still follows the language.
+                  if (draft.trim() !== shownLabel) await onSave(entry.memberIds, draft.trim())
+                  setEditing(false)
+                }}>
                   {t("save", { ns: "common", defaultValue: "Save" })}
                 </Button>
-                <Button size="xs" variant="ghost" color="var(--text-2)" onClick={() => { setDraft(entry.label || ""); setEditing(false) }}>
+                <Button size="xs" variant="ghost" color="var(--text-2)" onClick={() => { setDraft(shownLabel); setEditing(false) }}>
                   {t("cancel", { ns: "common", defaultValue: "Cancel" })}
                 </Button>
               </>
             ) : (
               <>
-                <Button size="xs" variant="ghost" color="var(--text-2)" _hover={{ color: "var(--teal)" }} onClick={() => setEditing(true)}>
+                <Button size="xs" variant="ghost" color="var(--text-2)" _hover={{ color: "var(--teal)" }} onClick={() => { setDraft(shownLabel); setEditing(true) }}>
                   {t("edit", { defaultValue: "Edit" })}
                 </Button>
                 {onCosigner && chain?.chainFamily === "evm" && (

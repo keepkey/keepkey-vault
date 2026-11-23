@@ -17,6 +17,7 @@ import { AssetIcon } from "./AssetIcon"
 import { formatBalance } from "../lib/formatting"
 import { useFiat } from "../lib/fiat-context"
 import { ReceiveView } from "./ReceiveView"
+import { btcAddressIndexLimit } from "../lib/btc-receive"
 import { HiveAccountPanel } from "./HiveAccountPanel"
 import { SendForm } from "./SendForm"
 import { ZcashBalanceSummary } from './ZcashBalanceSummary'
@@ -58,6 +59,7 @@ import { VaultAccountSelector } from './VaultAccountSelector'
 import { VaultAssetAccount } from './VaultAssetAccount'
 import { VaultAssetPage } from './VaultAssetPage'
 import { useBtcMultisigEnabled } from "../hooks/useBtcMultisigEnabled"
+import { showWatchOnlyAddress } from "../../shared/watch-only-verify"
 
 type AssetView = "receive" | "send" | "privacy" | "psbt" | "multisig"
 
@@ -175,7 +177,6 @@ function PersonalAssetPage({ chain, balance, balanceLoading = false, onBack, fir
 	// which Dashboard merges into the `balance` prop — a local snapshot would only
 	// shadow newer push/bulk-refresh data for the rest of the mount.
 	const [refreshing, setRefreshing] = useState(false)
-	const [refreshError, setRefreshError] = useState<string | null>(null)
 	// Last time THIS page saw fresh data for the chain (manual refresh success
 	// or a balance push). Mount-time data is of unknown age, so no stamp then —
 	// the Synced badge only shows a time it can vouch for.
@@ -183,47 +184,42 @@ function PersonalAssetPage({ chain, balance, balanceLoading = false, onBack, fir
 	// Bumped on every manual refresh so chain-specific panels that fetch their own
 	// data (HiveAccountPanel) re-fetch too.
 	const [refreshNonce, setRefreshNonce] = useState(0)
+	// Shielded ZEC: the refresh button asks the Zcash panel for a quick scan and shows its progress.
+	const [zcashScanRequest, setZcashScanRequest] = useState(0)
+	const [zcashScanning, setZcashScanning] = useState(false)
 	const handleRefresh = useCallback(async () => {
 		if (isMonero) { setRefreshing(true); try { await monero.refresh() } finally { setRefreshing(false) } return }
 		setRefreshing(true)
-		setRefreshError(null)
 		try {
 			// 90s: backend budget is 60s of Pioneer time plus device derivation —
 			// the 30s rpc default made slow forced refreshes fail invisibly.
 			const refreshed = await rpcRequest<ChainBalance>("getBalance", { chainId: chain.id }, 90000)
 			if (refreshed.txPending) return // the last tx has not landed yet: "Cached", not a failure (H3)
-			if (refreshed.syncState === 'degraded' || refreshed.syncState === 'stale') {
-				throw new Error('Balance could not be verified. Showing the last known balance when available.')
-			}
+			// Not refreshed yet is not an error: the chip shows "Cached · <time>" (or
+			// "Balance unverified") until a read lands. Never cry wolf over a missed read.
+			if (refreshed.syncState === 'degraded' || refreshed.syncState === 'stale') throw new Error(`${chain.id} not refreshed yet`)
 			setRefreshNonce(n => n + 1)
 			setLastSyncedAt(new Date())
 		} catch (e) {
 			console.warn(`[AssetPage] refresh ${chain.id} failed:`, e)
-			setRefreshError(e instanceof Error ? e.message : String(e))
 			setNativeProofEpoch(n => n + 1)
 		} finally {
 			setRefreshing(false)
 		}
 	}, [chain.id, isMonero, monero.refresh])
-	// A fresh balance for this chain (from any refresh path — incl. a backend
-	// getBalance that outlived the 90s rpc timeout above) supersedes the error:
-	// keeping the chip up next to just-updated data would be a false alarm.
+	// A fresh balance for this chain from any refresh path (incl. a backend
+	// getBalance that outlived the 90s rpc timeout above) updates "Synced · <time>".
 	useEffect(() => {
 		return onRpcMessage("balance-updated", (updated: ChainBalance) => {
-			if (updated.chainId !== chain.id) return
-			// A read that started before the last tx could land is not a failure:
-			// the row stays "Cached" until a later read includes the tx (H3).
-			if (updated.txPending) return
-			if (updated.syncState === 'degraded' || updated.syncState === 'stale') {
-				setRefreshError('Balance could not be verified. Showing the last known balance when available.')
-			} else { setRefreshError(null); setLastSyncedAt(new Date()) }
+			if (updated.chainId !== chain.id || updated.txPending) return
+			if (updated.syncState !== 'degraded' && updated.syncState !== 'stale') setLastSyncedAt(new Date())
 		})
 	}, [chain.id])
 
 	// Feature flags: zcash privacy
 	const [swappableChainIds, setSwappableChainIds] = useState<Set<string>>(new Set())
 	const [zcashPrivacyEnabled, setZcashPrivacyEnabled] = useState(false)
-	const [zcashPrivacyAction, setZcashPrivacyAction] = useState<ZcashPrivacyPage>(safeInitial === 'privacy' ? 'scan' : 'receive')
+	const [zcashPrivacyAction, setZcashPrivacyAction] = useState<ZcashPrivacyPage>(safeInitial === 'privacy' ? 'shield' : 'receive')
 	const [zcashPool, setZcashPool] = useState<ZcashPool>(initialToken?.type === 'shielded' || safeInitial === 'privacy' ? 'shielded' : 'transparent')
 	// EVM chains Safe supports: the Multisig pill shows only there.
 	const [safeChainIds, setSafeChainIds] = useState<number[]>([])
@@ -369,6 +365,12 @@ function PersonalAssetPage({ chain, balance, balanceLoading = false, onBack, fir
 	// Cache backend-reported indices so we don't re-fetch on every toggle.
 	// Core/offline return an explicit unavailable result — never a silent Pioneer fallback.
 	const [btcAddressIndices, setBtcAddressIndices] = useState<BtcAddressIndexResult | null>(null)
+	// True while the shown address is the backend's next unused one for its branch. A balance sync
+	// may then move it forward; once the user steps to another index, syncs leave it alone (audit v6 U2).
+	const btcFollowNextRef = useRef(true)
+	const btcChangeIndexRef = useRef(btcChangeIndex)
+	btcChangeIndexRef.current = btcChangeIndex
+	const btcIndicesKeyRef = useRef<string | null>(null)
 
 	// Derive active BTC script type config and path from selected xpub + change/index
 	const btcSelected = useMemo(() => {
@@ -411,7 +413,11 @@ function PersonalAssetPage({ chain, balance, balanceLoading = false, onBack, fir
 			setLoading(false)
 			return
 		}
-		const dbAddress = chain.chainFamily !== 'utxo' && balance?.address || null
+		// The saved balance address belongs to the default path only. For an edited
+		// path it is a DIFFERENT address than Verify on device checks, so it must not
+		// stand in while that path derives or when the device can't answer (audit v6 U1).
+		const atDefaultPath = usePath.length === chain.defaultPath.length && usePath.every((n, i) => n === chain.defaultPath[i])
+		const dbAddress = chain.chainFamily !== 'utxo' && atDefaultPath && balance?.address || null
 		await addressRequests.run(async () => {
 			const params: any = {
 				addressNList: usePath,
@@ -481,14 +487,22 @@ function PersonalAssetPage({ chain, balance, balanceLoading = false, onBack, fir
 		?.xpubs.find(x => x.scriptType === (selectedBtcScriptType ?? 'p2wpkh'))
 		?.xpub
 	useEffect(() => {
-		if (!isBtc || watchOnly) return
-		setBtcChangeIndex(0)
-		setBtcAddressIndices(null)
+		if (!isBtc || watchOnly) { btcIndicesKeyRef.current = null; return }
+		// A new xpub, script type or account starts over at its next unused receive address.
+		// A balance sync on the same selection only refreshes the cached indices.
+		const key = `${selectedBtcAccountIndex ?? 0}|${selectedBtcScriptType ?? 'p2wpkh'}|${selectedBtcXpub ?? ''}`
+		if (btcIndicesKeyRef.current !== key) {
+			btcIndicesKeyRef.current = key
+			btcFollowNextRef.current = true
+			setBtcChangeIndex(0)
+			setBtcAddressIndices(null)
+		}
 		if (!selectedBtcXpub) return
 		let cancelled = false
 		// Never expose a fallback/stale address while history discovery is in
 		// flight. It could be an already-used address from this or another xpub.
-		setBtcAddressDiscoveryLoading(true)
+		// An address the user picked stays visible: discovery will not replace it.
+		if (btcFollowNextRef.current) setBtcAddressDiscoveryLoading(true)
 		rpcRequest<BtcAddressIndexResult>('getBtcAddressIndices', {
 			xpub: selectedBtcXpub,
 			scriptType: selectedBtcScriptType ?? 'p2wpkh',
@@ -496,7 +510,9 @@ function PersonalAssetPage({ chain, balance, balanceLoading = false, onBack, fir
 			.then((indices) => {
 				if (cancelled) return
 				setBtcAddressIndices(indices)
-				setBtcAddressIndex(indices.receiveIndex)
+				if (btcFollowNextRef.current) {
+					setBtcAddressIndex(btcChangeIndexRef.current === 1 ? indices.changeIndex : indices.receiveIndex)
+				}
 			})
 			.catch(e => console.warn('[AssetPage] getBtcAddressIndices failed:', e.message))
 			.finally(() => { if (!cancelled) setBtcAddressDiscoveryLoading(false) })
@@ -541,6 +557,7 @@ function PersonalAssetPage({ chain, balance, balanceLoading = false, onBack, fir
 
 	// When toggling Receive/Change, set index to the active backend's cached value.
 	const handleBtcChangeIndex = useCallback((v: 0 | 1) => {
+		btcFollowNextRef.current = true
 		setBtcChangeIndex(v)
 		if (btcAddressIndices) {
 			setBtcAddressIndex(v === 0 ? btcAddressIndices.receiveIndex : btcAddressIndices.changeIndex)
@@ -548,6 +565,10 @@ function PersonalAssetPage({ chain, balance, balanceLoading = false, onBack, fir
 			setBtcAddressIndex(0)
 		}
 	}, [btcAddressIndices])
+	const handleBtcAddressIndex = useCallback((index: number) => {
+		btcFollowNextRef.current = false
+		setBtcAddressIndex(index)
+	}, [])
 
 	// When EVM selected index changes, update address from the cached value. When
 	// the cache empties — a device swap resets the backend managers and pushes an
@@ -835,6 +856,10 @@ function PersonalAssetPage({ chain, balance, balanceLoading = false, onBack, fir
 		// Watch-only Bitcoin: Send becomes Create PSBT (unsigned; a KeepKey signs it later).
 		...(watchOnly && isBtc && !selectedToken ? [{ id: "psbt" as const, label: t("createPsbt", { defaultValue: "Create PSBT" }), icon: (
 			<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="19" x2="12" y2="5" /><polyline points="5 12 12 5 19 12" /></svg>
+		) }] : []),
+		// Zcash: Shield/Unshield is a main action, next to Receive and Send.
+		...(isZcash && !watchOnly && zcashPrivacyEnabled && zcashShieldedSupported && (!selectedToken || isShieldedToken) ? [{ id: "privacy" as const, label: t("zcashShield", { defaultValue: "Shield" }), icon: (
+			<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" /></svg>
 		) }] : []),
 		...(!watchOnly && swappableChainIds.has(chain.id) && !shieldedSelected ? [{ id: "swap" as const, label: t("swap"), icon: (
 			<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="17 1 21 5 17 9" /><path d="M3 11V9a4 4 0 0 1 4-4h14" /><polyline points="7 23 3 19 7 15" /><path d="M21 13v2a4 4 0 0 1-4 4H3" /></svg>
@@ -1194,11 +1219,6 @@ function PersonalAssetPage({ chain, balance, balanceLoading = false, onBack, fir
 										    badge on the right column was removed below). */}
 										{isMonero ? (
 											<MoneroStatusChip view={moneroView} />
-										) : refreshError ? (
-											<Flex align="center" gap="1" color="var(--rose)" className="v3-glass-chip" px="2" py="0.5" title={refreshError} cursor="help">
-												<Box w="6px" h="6px" borderRadius="full" bg="var(--rose)" />
-												<Text fontSize="10px" fontFamily="mono" fontWeight="500" letterSpacing="0.02em">{t("refreshFailed")}</Text>
-											</Flex>
 									) : balanceReadPending ? (
 										<Flex align="center" gap="1.5" minH="20px" color="var(--text-2)" role="status" data-asset-balance-loading>
 											<Spinner size="xs" color="var(--gold)" aria-label={uiText("Refreshing balance")} />
@@ -1256,7 +1276,13 @@ function PersonalAssetPage({ chain, balance, balanceLoading = false, onBack, fir
 						)}
 					</Flex>
 
-					{isZcash ? null : selectedToken ? (
+					{isZcash ? ((!selectedToken || isShieldedToken) ? <Box flexShrink={0} display={{ base: "none", sm: "block" }}><ZcashBalanceSummary
+					transparent={activeBalance?.balance} enabled={zcashPrivacyEnabled} supported={!!zcashShieldedSupported}
+					watchOnly={watchOnly} refreshNonce={refreshNonce}
+					pool={shieldedSelected ? 'shielded' : 'transparent'}
+					hideScanHint={shieldedSelected && !watchOnly && zcashPrivacyEnabled && !!zcashShieldedSupported}
+					onSelectPool={pool => { setZcashPool(pool); setSelectedToken(null); if (view === 'privacy') setView('receive') }}
+				/></Box> : null) : selectedToken ? (
 						<Flex direction="column" align="flex-end" gap="1" flexShrink={0} display={{ base: "none", sm: "flex" }}>
 							<Text fontFamily="mono" fontSize={{ base: "16px", md: "20px" }} fontWeight="500" color="var(--text-0)" letterSpacing="0.01em" lineHeight="1.2">
 								{formatBalance(selectedToken.balance)}
@@ -1343,25 +1369,25 @@ function PersonalAssetPage({ chain, balance, balanceLoading = false, onBack, fir
 
 					{/* Refresh needs a connected device (bun getBalance derives on-device) —
 					    hide in watch-only mode like the other device-gated actions. */}
-					{!watchOnly && !shieldedSelected && <Box
+					{!watchOnly && (!shieldedSelected || (zcashPrivacyEnabled && !!zcashShieldedSupported)) && <Box
 						as="button"
-						onClick={refreshing ? undefined : handleRefresh}
-						disabled={refreshing}
+						onClick={(shieldedSelected ? zcashScanning : refreshing) ? undefined : shieldedSelected ? () => setZcashScanRequest(n => n + 1) : handleRefresh}
+						disabled={shieldedSelected ? zcashScanning : refreshing}
 						className="electrobun-webkit-app-region-no-drag"
 						w="36px"
 						h="36px"
 						borderRadius="10px"
 						bg="transparent"
-						color={refreshing ? "var(--text-3)" : "var(--text-2)"}
+						color={(shieldedSelected ? zcashScanning : refreshing) ? "var(--text-3)" : "var(--text-2)"}
 						display="grid"
 						placeItems="center"
-						cursor={refreshing ? "default" : "pointer"}
-						_hover={refreshing ? {} : { bg: "var(--ink-2)", color: "var(--text-0)" }}
+						cursor={(shieldedSelected ? zcashScanning : refreshing) ? "default" : "pointer"}
+						_hover={(shieldedSelected ? zcashScanning : refreshing) ? {} : { bg: "var(--ink-2)", color: "var(--text-0)" }}
 						transition="all 0.18s"
 						flexShrink={0}
 						aria-label={String(t("refresh"))}
 					>
-						{refreshing ? (
+						{(shieldedSelected ? zcashScanning : refreshing) ? (
 							<Spinner size="xs" color="var(--gold)" />
 						) : (
 							<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
@@ -1465,7 +1491,10 @@ function PersonalAssetPage({ chain, balance, balanceLoading = false, onBack, fir
 
 					<Flex gap="2px" p="3px" className="v3-glass-pill">
 						{PILLS.map((p) => {
-							const isActive = view === p.id
+							// Zcash pages share one view: Shield is active on the Shield page, Receive also covers the history page.
+							const isActive = p.id === 'privacy' ? view === 'privacy' && zcashPrivacyAction === 'shield'
+								: p.id === 'receive' && isZcash ? view === 'receive' || (view === 'privacy' && zcashPrivacyAction === 'history')
+								: view === p.id
 							return (
 								<Box
 									key={p.id}
@@ -1474,6 +1503,7 @@ function PersonalAssetPage({ chain, balance, balanceLoading = false, onBack, fir
 									onClick={() => {
 										if (p.id === 'swap') { setShowSwapDialog(true); return }
 										if (p.id === 'multisig' && isBtc) { window.dispatchEvent(new Event(MULTISIG_POLICY_EVENT)); return }
+										if (p.id === 'privacy') { setZcashPool('shielded'); setSelectedToken(null); setZcashPrivacyAction('shield') }
 										setView(p.id as AssetView); if (p.id === 'receive' && !isShieldedToken) setSelectedToken(null)
 									}}
 									display="flex"
@@ -1506,12 +1536,6 @@ function PersonalAssetPage({ chain, balance, balanceLoading = false, onBack, fir
 				{/* Account selector now lives inline with the action pills above
 				    (per the design study). Original duplicate block removed. */}
 
-				{isZcash && (!selectedToken || isShieldedToken) && <ZcashBalanceSummary
-					transparent={activeBalance?.balance} enabled={zcashPrivacyEnabled} supported={!!zcashShieldedSupported}
-					watchOnly={watchOnly} refreshNonce={refreshNonce}
-					pool={shieldedSelected ? 'shielded' : 'transparent'}
-					onSelectPool={pool => { setZcashPool(pool); setSelectedToken(null); if (view === 'privacy') setView('receive') }}
-				/>}
 
 				{/* Content */}
 				{isMonero && <Box mb="3"><MoneroNodePanel compact /></Box>}
@@ -1525,7 +1549,7 @@ function PersonalAssetPage({ chain, balance, balanceLoading = false, onBack, fir
 					) : shieldedSelected ? (
 						!watchOnly && zcashPrivacyEnabled && zcashShieldedSupported ? (
 						<Suspense fallback={<Spinner size="sm" color="kk.gold" />}>
-							<ZcashPrivacyTab embedded initialPage={view === 'send' ? 'send' : view === 'privacy' ? zcashPrivacyAction : 'receive'}
+							<ZcashPrivacyTab embedded scanRequest={zcashScanRequest} onScanningChange={setZcashScanning} initialPage={view === 'send' ? 'send' : view === 'privacy' ? zcashPrivacyAction : 'receive'}
 								onPageChange={page => { setZcashPrivacyAction(page); setView(page === 'send' || page === 'receive' ? page : 'privacy') }} />
 						</Suspense>
 						) : <Text role="status" fontSize="sm" color="var(--text-2)">{watchOnly ? t('zcashConnectForPrivacy') : !zcashPrivacyEnabled ? t('zcashEnablePrivacy') : t('zcashPrivacyFirmware')}</Text>
@@ -1587,6 +1611,8 @@ function PersonalAssetPage({ chain, balance, balanceLoading = false, onBack, fir
 							error={deriveError}
 							currentPath={isBtc && btcSelected && !watchOnly ? btcSelected.fullPath : currentPath}
 							onDerive={deriveAddress}
+							// BTC addresses come from the account/change/index controls, which the device check also uses (audit v6 U1).
+							pathEditable={!isBtc}
 							scriptType={watchOnly && isBtc ? woReceive?.scriptType : effectiveScriptType}
 							xpub={isBtc ? (watchOnly ? woReceive?.xpub : btcSelected?.xpubData?.xpub) : utxoXpub ?? undefined}
 							isBtc={isBtc}
@@ -1594,21 +1620,19 @@ function PersonalAssetPage({ chain, balance, balanceLoading = false, onBack, fir
 							btcAddressIndex={btcAddressIndex}
 							btcAddressWarning={btcAddressIndices?.discoveryAvailable === false ? btcAddressIndices.warning : undefined}
 							onBtcChangeIndex={handleBtcChangeIndex}
-							onBtcAddressIndex={setBtcAddressIndex}
+							onBtcAddressIndex={handleBtcAddressIndex}
+							btcAddressIndexLimit={btcAddressIndexLimit(btcAddressIndices, btcChangeIndex)}
 							isTon={isTon}
 							tonBounceable={tonBounceable}
 							onTonBounceableChange={(v) => { setTonBounceable(v); deriveAddress(undefined, v) }}
 							watchOnly={watchOnly}
 							onShowOnDevice={watchOnly && isBtc && woDeviceMatch && woReceive && watchOnlyDeviceId
-								? async () => {
-									try {
-										await rpcRequest('btcWatchOnlyShowAddress', { deviceId: watchOnlyDeviceId, index: woReceive.path[4] }, 120000)
-									} catch (e: any) {
-										// A device that shows another address makes the host one suspect: hide it and say why.
-										setAddress(null)
-										setDeriveError(e?.message || 'Could not show the address on the KeepKey')
-									}
-								}
+								? () => showWatchOnlyAddress(
+									() => rpcRequest('btcWatchOnlyShowAddress', { deviceId: watchOnlyDeviceId, index: woReceive.path[4] }, 120000),
+									// A device that shows another address makes the host one suspect: hide it and say why.
+									// Cancel, timeout or a busy device reach ReceiveView, which says the address was not confirmed.
+									(message) => { setAddress(null); setDeriveError(message) },
+								)
 								: undefined}
 						/>}
 						</>

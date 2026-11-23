@@ -30,6 +30,7 @@
 	"noMatches": "Aucune adresse ne correspond à votre filtre",
 	"unlabeled": "Sans libellé",
 	"ownWallet": "Mon portefeuille",
+	"ownSymbol": "Mon {{symbol}}",
 	"edit": "Modifier",
 	"delete": "Supprimer",
 	"view": "Afficher",
@@ -45,5 +46,8 @@
 	"cosigner": "Cosignataire",
 	"cosignerOption": "Cosignataire Safe : le proposer en premier lors de la création d'une multisignature",
 	"markCosigner": "Marquer comme cosignataire Safe",
-	"notCosigner": "Pas cosignataire"
+	"notCosigner": "Pas cosignataire",
+	"addressOrEns": "Adresse ou nom ENS",
+	"ensResolving": "Recherche du nom ENS…",
+	"certificationExcluded": "Ces contacts ne peuvent pas être certifiés :"
 }

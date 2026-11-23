@@ -232,7 +232,7 @@ Base URL: `http://localhost:1646`
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/api/health` | Health check with device status, supported chains, uptime |
+| GET | `/api/health` | Health check with device status, supported chains, uptime. `sync_diagnostics` is included only with a valid pairing key, or for a local non-browser client such as `curl` addressing a loopback host; a request carrying `Origin` or `Sec-Fetch-Site` (a browser) does not get it |
 | GET | `/api/v1/health` | Alias for `/api/health` |
 | GET | `/api/v1/health/fast` | Minimal health check (status + uptime only) |
 | GET | `/info/ping` | Returns `{ message: "pong" }` -- SDK detection |

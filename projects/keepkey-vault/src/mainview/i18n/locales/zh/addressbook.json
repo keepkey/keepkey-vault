@@ -30,6 +30,7 @@
 	"noMatches": "没有符合筛选条件的地址",
 	"unlabeled": "无标签",
 	"ownWallet": "我的钱包",
+	"ownSymbol": "我的 {{symbol}}",
 	"edit": "编辑",
 	"delete": "删除",
 	"view": "查看",
@@ -45,5 +46,8 @@
 	"cosigner": "联合签名人",
 	"cosignerOption": "Safe 联合签名人：创建多签时优先提供",
 	"markCosigner": "标记为 Safe 联合签名人",
-	"notCosigner": "非联合签名人"
+	"notCosigner": "非联合签名人",
+	"addressOrEns": "地址或 ENS 名称",
+	"ensResolving": "正在查询 ENS 名称…",
+	"certificationExcluded": "以下联系人无法认证："
 }

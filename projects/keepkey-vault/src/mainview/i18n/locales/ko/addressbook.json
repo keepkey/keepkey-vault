@@ -30,6 +30,7 @@
 	"noMatches": "필터와 일치하는 주소가 없습니다",
 	"unlabeled": "라벨 없음",
 	"ownWallet": "내 지갑",
+	"ownSymbol": "내 {{symbol}}",
 	"edit": "편집",
 	"delete": "삭제",
 	"view": "보기",
@@ -45,5 +46,8 @@
 	"cosigner": "공동 서명자",
 	"cosignerOption": "Safe 공동 서명자: 멀티시그를 만들 때 먼저 제안",
 	"markCosigner": "Safe 공동 서명자로 표시",
-	"notCosigner": "공동 서명자 아님"
+	"notCosigner": "공동 서명자 아님",
+	"addressOrEns": "주소 또는 ENS 이름",
+	"ensResolving": "ENS 이름 조회 중…",
+	"certificationExcluded": "다음 연락처는 인증할 수 없습니다:"
 }

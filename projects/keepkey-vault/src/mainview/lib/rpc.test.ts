@@ -61,3 +61,29 @@ describe('rpc over the Electrobun 2.x host bridge', () => {
 		expect(await reply).toBe(7)
 	})
 })
+
+describe('rpc waits out a busy KeepKey', () => {
+	const BUSY = 'KeepKey is busy with another request. Wait for it to finish, then try again.'
+	const reply = (method: string, packet: object) => {
+		const request = sent.filter(p => p.method === method).at(-1)
+		w.__electrobun.receiveMessageFromHost({ type: 'response', id: request.id, ...packet })
+	}
+
+	test('a busy refusal is retried, never shown', async () => {
+		const result = rpc.rpcRequest<string>('ethSignTx', {}, 1000)
+		await Promise.resolve()
+		reply('ethSignTx', { success: false, error: BUSY })
+		await new Promise(r => setTimeout(r, 550))
+		reply('ethSignTx', { success: true, payload: 'signed' })
+		expect(await result).toBe('signed')
+		expect(sent.filter(p => p.method === 'ethSignTx').length).toBe(2)
+	})
+
+	test('the wait ends with the busy error once the caller is gone', async () => {
+		const result = rpc.rpcRequest<string>('btcSignTx', {}, 1000, () => false)
+		await Promise.resolve()
+		reply('btcSignTx', { success: false, error: BUSY })
+		await expect(result).rejects.toThrow(BUSY)
+		expect(sent.filter(p => p.method === 'btcSignTx').length).toBe(1)
+	})
+})

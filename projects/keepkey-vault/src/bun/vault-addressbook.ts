@@ -1,17 +1,21 @@
 import type { Database } from 'bun:sqlite'
 import type { AddressBookEntry } from '../shared/types'
 import type { VaultIdentity } from '../shared/vault-identity'
+import { utils } from 'ethers'
+import { vaultHasCosigner, type VaultWalletKey } from '../shared/vault-wallet-links'
 
 /** Vault identity takes precedence over an older plain-contact alias, including
  * drafts: an undeployed vault cannot slip into certification under that alias. */
 export function certifiableAddressBookEntries(
   vaults: AddressBookEntry[],
-  contacts: AddressBookEntry[]
+  contacts: AddressBookEntry[],
+  allChains = false,
 ): AddressBookEntry[] {
   const allVaultIds = new Set(vaults.map((e) => `${e.networkId}:${e.address.toLowerCase()}`))
   const eligible = vaults
-    .filter((e) => e.vault?.type === 'safe' && e.vault.receiveEnabled)
-    .map((e) => ({ ...e, label: e.vault!.certificationLabel }))
+    .filter((e) => e.vault?.receiveEnabled && (e.vault.type === 'safe' || allChains))
+    .map((e) => ({ ...e, label: e.vault!.certificationLabel ||
+      ('Bitcoin Vault ' + e.vault!.name.replace(/[^\x20-\x7e]|%/g, '').trim().replace(/ +/g, ' ')).slice(0, 24).trim() }))
   return [
     ...eligible,
     ...contacts.filter((e) => !allVaultIds.has(`${e.networkId}:${e.address.toLowerCase()}`)),
@@ -36,6 +40,14 @@ export class VaultAddressBook {
   ): boolean {
     if (vaults.some((v) => v.sessionOnly || v.type !== type))
       throw new Error('Hidden vaults cannot be persisted')
+    for (const vault of vaults) if (vault.type === 'safe') {
+      const address = utils.getAddress(vault.address)
+      const owners = vault.cosigners.map(c => utils.getAddress(c.address || '').toLowerCase())
+      if (vault.networkId !== 'eip155:8453' || vault.accountId.toLowerCase() !== `${vault.networkId}:${address}`.toLowerCase()
+        || vault.id !== `${vault.networkId}:${address.toLowerCase()}` || !owners.length
+        || new Set(owners).size !== owners.length || !Number.isInteger(vault.threshold)
+        || vault.threshold < 1 || vault.threshold > owners.length) throw new Error('Invalid Safe contract or signer configuration')
+    }
     let changed = false
     this.db.transaction(() => {
       const before = this.db
@@ -121,5 +133,11 @@ export class VaultAddressBook {
           updatedAt: r.updated_at,
         }
       })
+  }
+
+  /** Resolve the latest shared snapshot before filtering: an older wallet row
+   * must never restore a signer removed by a newer review. */
+  listForWallet(keys: VaultWalletKey[], networkId?: string): AddressBookEntry[] {
+    return this.list(networkId).filter(entry => vaultHasCosigner(entry.vault!, keys))
   }
 }

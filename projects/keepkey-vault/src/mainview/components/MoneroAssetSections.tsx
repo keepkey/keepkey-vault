@@ -318,6 +318,8 @@ export function MoneroSendSection({ monero, client, privateMode = false }: { mon
 	const [notice, setNotice] = useState<string | null>(null)
 	const [error, setError] = useState<string | null>(null)
 	const [sentTxid, setSentTxid] = useState<string | null>(null)
+	// The pending tx a Check again was made for while its payment proof could not be saved (KEEPKEY-143).
+	const [proofRetriedFor, setProofRetriedFor] = useState<string | null>(null)
 	const address = wallet?.address ?? ""
 	useEffect(() => { setReview(null); setError(null); setSentTxid(null) }, [address])
 	if (!wallet) return <MoneroConnectCard client={client} monero={monero} privateMode={privateMode} />
@@ -345,8 +347,12 @@ export function MoneroSendSection({ monero, client, privateMode = false }: { mon
 		} finally { setReview(null); void monero.refresh() }
 	})
 	const retry = () => run("retry", async () => {
+		const proofFailedFor = wallet.unrelayedProofNotSaved ? wallet.unrelayedTxid ?? null : null
 		try { const result = await client.retryRelay(); if (/^[0-9a-f]{64}$/.test(result?.txid ?? "")) setSentTxid(result.txid) }
-		finally { void monero.refresh() }
+		finally {
+			// Decided on the refreshed status, so a proof saved by this check never flashes "still could not be saved".
+			if (proofFailedFor) { await monero.refresh(); setProofRetriedFor(proofFailedFor) } else void monero.refresh()
+		}
 	})
 	const discard = () => run("discard", async () => {
 		try {
@@ -365,7 +371,12 @@ export function MoneroSendSection({ monero, client, privateMode = false }: { mon
 			{verification.error && <Box role="alert" mb="3"><Text fontSize="12px" color="var(--rose)">{verification.error}</Text><Button size="xs" mt="2" onClick={() => { void verification.retry() }}>{uiText("Try again")}</Button></Box>}
 			{wallet.unrelayedTxid && (
 				<Box role="alert" mb="4" {...cardProps} borderColor="var(--gold)">
-					<Text fontSize="13px" color="var(--gold)">{uiText("Your last send is still being checked. New sends are paused. Checking again resends the same transaction and cannot pay twice.")}</Text>
+					{wallet.unrelayedProofNotSaved
+						? <Text data-monero-proof-not-saved="" fontSize="13px" color="var(--gold)">{uiText("Your last transaction was sent, but its payment proof could not be saved, so new sends are paused until the proof is saved. Check free disk space and the KeepKey Vault data folder's permissions, or update the app if a newer version was used on this computer, then select Check again. Nothing can be paid twice.")}</Text>
+						: <Text fontSize="13px" color="var(--gold)">{uiText("Your last send is still being checked. New sends are paused. Checking again resends the same transaction and cannot pay twice.")}</Text>}
+					{wallet.unrelayedProofNotSaved && proofRetriedFor === wallet.unrelayedTxid && (
+						<Text data-monero-proof-still-unsaved="" mt="2" fontSize="12px" color="var(--text-2)" role="status">{uiText("Checked again: the payment proof still could not be saved.")}</Text>
+					)}
 
 					<Button data-monero-retry-relay="" mt="2" size="xs" variant="outline" onClick={() => { void retry() }} disabled={!!busy} className="electrobun-webkit-app-region-no-drag">{busy === "retry" ? <Spinner size="xs" /> : null}{uiText("Check again")}</Button>
 					<details style={{ marginTop: 12, fontSize: 12, color: "var(--text-3)" }}><summary style={{ cursor: "pointer" }}>{uiText("Recovery details")}</summary>
@@ -480,31 +491,28 @@ export function MoneroSendSection({ monero, client, privateMode = false }: { mon
 	)
 }
 
-/** The XMR row in the Dashboard's chain list. Opens the standard asset page; fiat says "not included". */
-export function MoneroChainRow({ chain, iconSrc, privateMode, onOpen, client }: { chain: ChainDef; iconSrc: string; privateMode: boolean; onOpen: () => void; client?: MoneroClient }) {
-	const uiText = useUiTranslation()
-	const monero = useMoneroStatus(true, client)
-	const view = useMoneroView(monero)
-	const label = useMoneroStateLabel(view)
+/** The XMR row in the Dashboard's chain list: same look as every other chain row. Opens the standard asset page. */
+export function MoneroChainRow({ chain, iconSrc, privateMode, onOpen, client, view: given, usd }: { chain: ChainDef; iconSrc: string; privateMode: boolean; onOpen: () => void; client?: MoneroClient; view?: MoneroBalanceView; usd?: number }) {
+	const own = useMoneroView(useMoneroStatus(!given, client))
+	const view = given ?? own
 	const balance = view.lastKnown || view.spendVerified || view.balanceAtomic === "0" ? view.balanceAtomic : null
+	const hasBalance = balance !== null && balance !== "0"
 	return (
 		<Box data-monero-row="" as="button" onClick={onOpen} w="100%" textAlign="left" p="2.5" mb="1.5" borderRadius="lg" bg="transparent"
 			border="1px solid transparent" _hover={{ bg: "kk.cardBg", borderColor: `${chain.color}50` }} cursor="pointer" transition="all 0.15s"
-			title={uiText("XMR has no price source here, so it is not included in the portfolio total.")}>
+			opacity={hasBalance || balance === null ? 1 : 0.55}>
 			<Flex align="center" gap="3">
-				<Image src={iconSrc} alt={chain.symbol} w="32px" h="32px" borderRadius="full" flexShrink={0} />
+				<Image src={iconSrc} alt={chain.symbol} w="32px" h="32px" borderRadius="full" flexShrink={0} bg="var(--ink-2)" boxShadow="0 0 0 1px var(--line)" />
 				<Box flex="1" minW="0">
 					<Flex align="baseline" justify="space-between" gap="2">
 						<Text fontSize="14px" fontWeight="600" color="var(--text-0)" lineHeight="1.2" truncate>{chain.coin}</Text>
-						<Text data-monero-row-fiat="" fontSize="11px" color="var(--text-3)" lineHeight="1.2" flexShrink={0}>{uiText("not included")}</Text>
+						{!!usd && usd > 0 && <Text data-monero-row-fiat="" fontSize="14px" color="var(--text-0)" fontWeight="500" lineHeight="1.2" letterSpacing="-0.01em" flexShrink={0}>
+							{privateMode ? "••••" : `$${usd.toLocaleString(getNumberLocale(), { maximumFractionDigits: 2 })}`}
+						</Text>}
 					</Flex>
-					<Flex align="baseline" justify="space-between" gap="2" mt="0.5">
-						<Text data-monero-row-balance="" fontSize="12px" color="var(--text-2)" lineHeight="1.3" truncate>
-							{balance === null ? `— ${chain.symbol}` : privateMode ? "••••" : `${formatXmrShort(balance)} ${chain.symbol}`}
-						</Text>
-						{(view.lastKnown || view.state !== "ready" || (view.restoreHeight ?? 0) > 0 || balance === null) && <Text data-monero-row-state={view.state} fontSize="10px" color={view.state === "unreachable" ? "var(--gold)" : "var(--text-3)"} flexShrink={0}>{label}</Text>}
-					</Flex>
-					<MoneroFreshness view={view} />
+					<Text data-monero-row-balance="" fontSize="12px" color="var(--text-2)" lineHeight="1.3" mt="0.5" truncate>
+						{balance === null ? `— ${chain.symbol}` : privateMode ? "••••" : `${formatXmrShort(balance)} ${chain.symbol}`}
+					</Text>
 				</Box>
 			</Flex>
 		</Box>

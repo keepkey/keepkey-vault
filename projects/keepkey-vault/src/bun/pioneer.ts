@@ -10,7 +10,6 @@ import { instrumentPortfolio } from './perf-telemetry'
 import { registerSwapServerCapabilities } from '../shared/swap-server-capabilities'
 import { registerPioneerEventCapabilities } from '../shared/pioneer-event-capabilities'
 import { DEFAULT_PIONEER_API_BASE, resolvePioneerApiBase } from '../shared/pioneer-server'
-import type {ProviderUsageStatus} from '../shared/provider-refresh'
 import {prepareProviderRequestBody} from '../shared/provider-refresh'
 
 export const DEFAULT_API_BASE = DEFAULT_PIONEER_API_BASE
@@ -47,22 +46,6 @@ export function setPioneerOffline(value: boolean): void {
 /** Resolve the Pioneer API base URL (no trailing slash). */
 export function getPioneerApiBase(): string {
   return resolvePioneerApiBase(getSetting('pioneer_api_base'))
-}
-
-/** This status read never calls a paid provider and stays on the selected server. */
-export async function getPioneerProviderUsage(): Promise<ProviderUsageStatus | null> {
- if(offline)return null
- const base=getPioneerApiBase(), generation=configurationGeneration
- await ensurePioneerQueryKeyRegistered()
- if(generation!==configurationGeneration||base!==getPioneerApiBase())return null
- const response=await fetch(`${base}/api/v1/provider/usage`,{headers:{Authorization:getQueryKey()},signal:AbortSignal.timeout(10000)})
- if(generation!==configurationGeneration||base!==getPioneerApiBase())return null
- if(response.status===404)return null // Older/custom servers may not expose usage.
- if(!response.ok)throw new Error('Provider usage status unavailable')
- const value=await response.json() as any
- if(generation!==configurationGeneration||base!==getPioneerApiBase())return null
- if(!['normal','warning','limited'].includes(value?.state)||typeof value?.provider!=='string')return null
- return {provider:value.provider,state:value.state,reason:value.reason==='upstream'?'upstream':'budget',apiBase:base,windows:Array.isArray(value.windows)?value.windows.filter((row:any)=>typeof row.kind==='string'&&Number.isFinite(row.used)&&Number.isFinite(row.limit)):[]}
 }
 
 /** Force re-initialization on next getPioneer() call. */

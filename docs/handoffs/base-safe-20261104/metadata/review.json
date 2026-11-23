@@ -1,0 +1,134 @@
+{
+  "status": "unsigned; operator review required",
+  "requiredFirmwareCapability": 28,
+  "supported": [
+    "canonical SafeTx CALL",
+    "pinned MultiSend with at most 64 CALL entries"
+  ],
+  "refused": [
+    "arbitrary delegatecall",
+    "inner delegatecall",
+    "missing inner definition",
+    "malformed or changed bytes"
+  ],
+  "deploymentChecks": "Verify each Safe address, chain and implementation before signing; no wildcard deployment authorization.",
+  "scope": "The listed Safes and their settings calls; Base includes a USDC transfer definition. Other token and protocol calls require their own authenticated definitions.",
+  "baseUsdc": {
+    "address": "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+    "decimals": 6,
+    "source": "https://developers.circle.com/stablecoins/usdc-contract-addresses",
+    "display": "unit set by signer; scaled USDC amount and raw integer"
+  },
+  "entries": [
+    {
+      "name": "Safe owner approval",
+      "chainId": 8453,
+      "safe": "0x57c193ea42ae3992d1350099670d672c4da4f9d9",
+      "kind": 2,
+      "selectorOrTypeHash": "0xbb8310d486368db6bd6f849402fdd73ad53d316b5a4b2644ad6efe0f941286d8",
+      "programFile": "8453-0x57c193ea42ae3992d1350099670d672c4da4f9d9-00.c773",
+      "sha256": "7092a81196c5a1294ef6a3f42eeaad33d493d075c294e777170f9b0a1ac80fdd",
+      "bytes": 574,
+      "contractAddress": "0x57c193ea42ae3992d1350099670d672c4da4f9d9"
+    },
+    {
+      "name": "Add Safe owner",
+      "chainId": 8453,
+      "safe": "0x57c193ea42ae3992d1350099670d672c4da4f9d9",
+      "kind": 1,
+      "selectorOrTypeHash": "0x0d582f13",
+      "programFile": "8453-0x57c193ea42ae3992d1350099670d672c4da4f9d9-01.c773",
+      "sha256": "8a38701e40a4502880d136aa97a04c8acec45b5a34f4f21606176cae9853a056",
+      "bytes": 418,
+      "contractAddress": "0x57c193ea42ae3992d1350099670d672c4da4f9d9"
+    },
+    {
+      "name": "Remove Safe owner",
+      "chainId": 8453,
+      "safe": "0x57c193ea42ae3992d1350099670d672c4da4f9d9",
+      "kind": 1,
+      "selectorOrTypeHash": "0xf8dc5dd9",
+      "programFile": "8453-0x57c193ea42ae3992d1350099670d672c4da4f9d9-02.c773",
+      "sha256": "3c848bb4aff5a0ff1abd2264d1d3bb9083f9384bf6e59f1be4f49f5cbce8790a",
+      "bytes": 473,
+      "contractAddress": "0x57c193ea42ae3992d1350099670d672c4da4f9d9"
+    },
+    {
+      "name": "Replace Safe owner",
+      "chainId": 8453,
+      "safe": "0x57c193ea42ae3992d1350099670d672c4da4f9d9",
+      "kind": 1,
+      "selectorOrTypeHash": "0xe318b52b",
+      "programFile": "8453-0x57c193ea42ae3992d1350099670d672c4da4f9d9-03.c773",
+      "sha256": "8f3e5eca984780bf2df8c80c9ab1d8e4e806da2e52dcc4ffde74b4b44e6395c6",
+      "bytes": 461,
+      "contractAddress": "0x57c193ea42ae3992d1350099670d672c4da4f9d9"
+    },
+    {
+      "name": "Change Safe threshold",
+      "chainId": 8453,
+      "safe": "0x57c193ea42ae3992d1350099670d672c4da4f9d9",
+      "kind": 1,
+      "selectorOrTypeHash": "0x694e80c3",
+      "programFile": "8453-0x57c193ea42ae3992d1350099670d672c4da4f9d9-04.c773",
+      "sha256": "8cf0e57a4a7981d4dc529c7c5dfbb7961ba0090bf16f14a4b3c72e8612218aab",
+      "bytes": 381,
+      "contractAddress": "0x57c193ea42ae3992d1350099670d672c4da4f9d9"
+    },
+    {
+      "name": "Enable Safe module",
+      "chainId": 8453,
+      "safe": "0x57c193ea42ae3992d1350099670d672c4da4f9d9",
+      "kind": 1,
+      "selectorOrTypeHash": "0x610b5925",
+      "programFile": "8453-0x57c193ea42ae3992d1350099670d672c4da4f9d9-05.c773",
+      "sha256": "7d8dc97e9a2059a8274c9ded4854060c63e72e8d06d10564aed8a6b9ae11a511",
+      "bytes": 365,
+      "contractAddress": "0x57c193ea42ae3992d1350099670d672c4da4f9d9"
+    },
+    {
+      "name": "Disable Safe module",
+      "chainId": 8453,
+      "safe": "0x57c193ea42ae3992d1350099670d672c4da4f9d9",
+      "kind": 1,
+      "selectorOrTypeHash": "0xe009cfde",
+      "programFile": "8453-0x57c193ea42ae3992d1350099670d672c4da4f9d9-06.c773",
+      "sha256": "01de05a404f7d1af41c023c4c36591767bb53010c12f49457117eaf2e965d230",
+      "bytes": 416,
+      "contractAddress": "0x57c193ea42ae3992d1350099670d672c4da4f9d9"
+    },
+    {
+      "name": "Set Safe guard",
+      "chainId": 8453,
+      "safe": "0x57c193ea42ae3992d1350099670d672c4da4f9d9",
+      "kind": 1,
+      "selectorOrTypeHash": "0xe19a9dd9",
+      "programFile": "8453-0x57c193ea42ae3992d1350099670d672c4da4f9d9-07.c773",
+      "sha256": "ab3049a2e2250d79a6ca0059ecec6f5b9aae9111f3c6f42820c1f09b7958b430",
+      "bytes": 360,
+      "contractAddress": "0x57c193ea42ae3992d1350099670d672c4da4f9d9"
+    },
+    {
+      "name": "Set Safe fallback handler",
+      "chainId": 8453,
+      "safe": "0x57c193ea42ae3992d1350099670d672c4da4f9d9",
+      "kind": 1,
+      "selectorOrTypeHash": "0xf08a0323",
+      "programFile": "8453-0x57c193ea42ae3992d1350099670d672c4da4f9d9-08.c773",
+      "sha256": "f2488ebf3ae8615b125b92b950dc4e8956dae6f14d1bc1d498c895367b68968d",
+      "bytes": 373,
+      "contractAddress": "0x57c193ea42ae3992d1350099670d672c4da4f9d9"
+    },
+    {
+      "name": "Transfer Base USDC",
+      "chainId": 8453,
+      "safe": "0x57c193ea42ae3992d1350099670d672c4da4f9d9",
+      "kind": 1,
+      "selectorOrTypeHash": "0xa9059cbb",
+      "programFile": "8453-0x57c193ea42ae3992d1350099670d672c4da4f9d9-09.c773",
+      "sha256": "d4935d3bdf54d0bf4b4e427455b6a5e7be3bba2769dc2bfae392c698a8db4ad9",
+      "bytes": 442,
+      "contractAddress": "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913"
+    }
+  ]
+}

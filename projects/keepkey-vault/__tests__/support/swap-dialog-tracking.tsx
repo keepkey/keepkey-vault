@@ -68,6 +68,20 @@ try {
   await act(async () => { render(settled) })
   await settle()
   result.settledAboveMinimum = text().includes('Settlement payouts') && !text().includes('Partial payout')
+
+  // The dashboard banner mounts the dialog already open with the swap: the quote must survive that first commit.
+  await act(async () => { render(null) })
+  await settle()
+  refreshReply = async () => { throw new Error('HTTP 503') }
+  const freshContainer = document.createElement('div'); document.body.appendChild(freshContainer)
+  const freshRoot = createRoot(freshContainer)
+  try {
+    await act(async () => { freshRoot.render(<ChakraProvider value={defaultSystem}><SwapDialog open={true} onClose={() => {}} resumeSwap={{ ...resumeSwap, txid: '0x' + 'a'.repeat(64) }} /></ChakraProvider>) })
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 1600)) }) // the output counts up for 1.2 s
+    result.freshMountKeepsExpectedOutput = (freshContainer.textContent || '').includes('0.00400000')
+  } finally {
+    await act(async () => freshRoot.unmount())
+  }
 } finally {
   await act(async () => root.unmount())
 }

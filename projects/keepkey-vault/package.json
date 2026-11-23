@@ -1,7 +1,8 @@
 {
   "name": "keepkey-vault",
-  "version": "1.7.1",
+  "version": "1.7.2",
   "description": "KeepKey Vault - Desktop hardware wallet management powered by Electrobun",
+  "license": "LGPL-3.0-only",
   "scripts": {
     "i18n:check": "bun scripts/check-i18n.ts",
     "i18n:extract": "bun scripts/extract-ui-strings.ts",
@@ -68,6 +69,7 @@
     "react-i18next": "^16.5.4",
     "react-icons": "^5.5.0",
     "usb": "^2.17.0",
+    "viem": "2.58.0",
     "zod": "^4.3.6"
   },
   "devDependencies": {
@@ -79,6 +81,7 @@
     "@vitejs/plugin-react": "^4.3.4",
     "concurrently": "^9.1.0",
     "jsdom": "16.7.0",
+    "pngjs": "5.0.0",
     "typescript": "5.9.3",
     "vite": "^6.0.3",
     "yaml": "1.10.2"

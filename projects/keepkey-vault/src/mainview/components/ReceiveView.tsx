@@ -1,5 +1,7 @@
 import { useUiTranslation } from "../i18n/ui"
-import { useState, useCallback } from "react"
+import { useState, useCallback, useEffect, useRef } from "react"
+import { MAX_NEW_BTC_ADDRESSES } from "../lib/btc-receive"
+import { describeVerifyAddressError } from "../lib/verify-address-error"
 import { useTranslation } from "react-i18next"
 import { Box, Text, Flex } from "@chakra-ui/react"
 import { FaCopy, FaCheck, FaEye, FaSpinner, FaPlus, FaMinus } from "react-icons/fa"
@@ -11,8 +13,6 @@ import { DocsLink } from "./DocsLink"
 import { DOCS_LINKS, watch } from "../../shared/docs-links"
 import type { ChainDef } from "../../shared/chains"
 import { receivePaymentUri } from '../../shared/receive-payment-uri'
-
-const MAX_NEW_ADDRESSES_PER_SESSION = 10
 
 interface ReceiveViewProps {
 	chain: ChainDef
@@ -29,6 +29,8 @@ interface ReceiveViewProps {
 	btcChangeIndex?: 0 | 1
 	btcAddressIndex?: number
 	btcAddressWarning?: string
+	/** Highest index "+" may reach (see btcAddressIndexLimit). Defaults to MAX_NEW_BTC_ADDRESSES past index 0. */
+	btcAddressIndexLimit?: number
 	onBtcChangeIndex?: (v: 0 | 1) => void
 	onBtcAddressIndex?: (v: number) => void
 	// TON bounceable toggle
@@ -157,7 +159,7 @@ function PillToggle<T extends string | number>({
 
 export function ReceiveView({
 	chain, address, assetCaip, loading, error, currentPath, onDerive, scriptType, xpub,
-	isBtc, btcChangeIndex = 0, btcAddressIndex = 0, btcAddressWarning, onBtcChangeIndex, onBtcAddressIndex,
+	isBtc, btcChangeIndex = 0, btcAddressIndex = 0, btcAddressWarning, btcAddressIndexLimit = MAX_NEW_BTC_ADDRESSES, onBtcChangeIndex, onBtcAddressIndex,
 	isTon, tonBounceable = false, onTonBounceableChange, watchOnly = false, onShowOnDevice, pathEditable = true, showDetails = true,
 }: ReceiveViewProps) {
   const uiText = useUiTranslation()
@@ -165,28 +167,47 @@ export function ReceiveView({
 	const { t } = useTranslation("receive")
 	const [showing, setShowing] = useState(false)
 	const [pathDialogOpen, setPathDialogOpen] = useState(false)
-	const [newAddressCount, setNewAddressCount] = useState(0)
+
+	// A failed check must say so: an unconfirmed address that looks verified is the risk (audit v6 U3).
+	// The error belongs to the address it was for and is only shown while that address is.
+	const verifyKey = [address, currentPath?.join('/'), chain.id, scriptType, isTon, tonBounceable].join('|')
+	const verifyKeyRef = useRef(verifyKey)
+	verifyKeyRef.current = verifyKey
+	const [verifyError, setVerifyError] = useState<{ key: string; message: string } | null>(null)
+	const shownVerifyError = verifyError?.key === verifyKey ? verifyError.message : null
+	// Moving to another address drops the old failure (it is never shown against the new one, see
+	// shownVerifyError); so does a new derive, e.g. after reconnecting, which re-reads the address.
+	useEffect(() => { setVerifyError(null) }, [verifyKey])
+	useEffect(() => { if (loading) setVerifyError(null) }, [loading])
 
 	const showOnDevice = useCallback(async () => {
+		const key = verifyKeyRef.current
 		setShowing(true)
-		if (onShowOnDevice) {
-			await onShowOnDevice().catch((e: any) => console.error("showOnDevice:", e))
-			setShowing(false)
-			return
-		}
+		setVerifyError(null)
 		try {
-			const params: any = {
-				addressNList: currentPath,
-				showDisplay: true,
-				coin: chain.chainFamily === 'evm' ? 'Ethereum' : chain.coin,
+			if (onShowOnDevice) {
+				await onShowOnDevice()
+			} else {
+				const params: any = {
+					addressNList: currentPath,
+					showDisplay: true,
+					coin: chain.chainFamily === 'evm' ? 'Ethereum' : chain.coin,
+				}
+				const st = scriptType || chain.scriptType
+				if (st) params.scriptType = st
+				if (isTon) params.bounceable = tonBounceable
+				// The user compares the address on the device before confirming; give it the same
+				// time as the watch-only check rather than calling a slow read "no answer".
+				await rpcRequest(chain.rpcMethod, params, 120000)
 			}
-			const st = scriptType || chain.scriptType
-			if (st) params.scriptType = st
-			if (isTon) params.bounceable = tonBounceable
-			await rpcRequest(chain.rpcMethod, params, 60000)
-		} catch (e: any) { console.error("showOnDevice:", e) }
+		} catch (e) {
+			console.error("showOnDevice:", e)
+			// A reply for an address no longer shown is dropped.
+			if (verifyKeyRef.current === key) setVerifyError({ key, message: describeVerifyAddressError(e, t) })
+		}
+		// The device is free again either way.
 		setShowing(false)
-	}, [chain, currentPath, scriptType, isTon, tonBounceable, onShowOnDevice])
+	}, [chain, currentPath, scriptType, isTon, tonBounceable, onShowOnDevice, t])
 
 	const handlePathApply = useCallback((newPath: number[]) => {
 		setPathDialogOpen(false)
@@ -194,10 +215,9 @@ export function ReceiveView({
 	}, [onDerive])
 
 	const handleNextAddress = useCallback(() => {
-		if (!onBtcAddressIndex || newAddressCount >= MAX_NEW_ADDRESSES_PER_SESSION) return
+		if (!onBtcAddressIndex || btcAddressIndex >= btcAddressIndexLimit) return
 		onBtcAddressIndex(btcAddressIndex + 1)
-		setNewAddressCount(c => c + 1)
-	}, [onBtcAddressIndex, btcAddressIndex, newAddressCount])
+	}, [onBtcAddressIndex, btcAddressIndex, btcAddressIndexLimit])
 
 	const handlePrevAddress = useCallback(() => {
 		if (!onBtcAddressIndex || btcAddressIndex <= 0) return
@@ -276,7 +296,7 @@ export function ReceiveView({
 	try { qrContent = receivePaymentUri(chain, address!, assetCaip || chain.caip) }
 	catch { return <Text role="alert" color="red.300">{uiText("The receive asset and account network do not match. Select the asset again.")}</Text> }
 	const qrSvg = generateQRSvg(qrContent, 4, 2)
-	const remaining = MAX_NEW_ADDRESSES_PER_SESSION - newAddressCount
+	const remaining = Math.max(0, btcAddressIndexLimit - btcAddressIndex)
 
 	return (
 		<>
@@ -327,6 +347,11 @@ export function ReceiveView({
 						<Box as={showing ? FaSpinner : FaEye} fontSize="11px" style={showing ? { animation: "v3-spin 1s linear infinite" } : undefined} />
 						{showing ? t("checkDevice") : t("verifyOnDevice")}
 					</Box>
+					)}
+					{shownVerifyError && (
+						<Text role="alert" data-verify-error fontSize="11px" color="var(--rose)" maxW="240px" textAlign="center" lineHeight="1.45" letterSpacing="-0.005em">
+							{shownVerifyError}
+						</Text>
 					)}
 				</Flex>
 
@@ -432,8 +457,8 @@ export function ReceiveView({
 							<Text fontSize="10px" color="var(--text-3)" textTransform="uppercase" letterSpacing="0.18em" fontWeight="500" mb="2">{uiText("Address Type")}</Text>
 							<PillToggle
 								options={[
-									{ value: 0, label: "UQ (Safe)" },
-									{ value: 1, label: "EQ (Bounceable)" },
+									{ value: 0, label: uiText("UQ (Safe)") },
+									{ value: 1, label: uiText("EQ (Bounceable)") },
 								]}
 								value={tonBounceable ? 1 : 0}
 								onChange={(v) => onTonBounceableChange(v === 1)}

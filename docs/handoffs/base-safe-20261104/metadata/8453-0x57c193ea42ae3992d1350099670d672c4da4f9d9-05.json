@@ -1,0 +1,16 @@
+{
+  "display": {
+    "formats": {
+      "enableModule(address module)": {
+        "intent": "Enable Safe module",
+        "fields": [
+          {
+            "path": "module",
+            "label": "Module",
+            "format": "addressName"
+          }
+        ]
+      }
+    }
+  }
+}

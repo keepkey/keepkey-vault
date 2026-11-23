@@ -16,6 +16,7 @@ import { PSBT_PASTE_EVENT } from "./PsbtSignDialog";
 import { VaultIdentityBadge, VaultIdentityDetails } from "./VaultIdentityBadge";
 import { SafeMultisigView } from "./SafeMultisigView";
 import { AssetIcon } from './AssetIcon';
+import { AddVaultDialog } from './AddVaultDialog';
 import "./VaultAssetAccount.css";
 import './VaultWallet.css';
 
@@ -45,7 +46,10 @@ export function VaultAssetAccount({
   const uiText = useUiTranslation()
   const { privateModeEnabled } = useFiat()
 
-  const key = JSON.stringify([vault.id, networkId, assetCaip]);
+  const [reviewedVault, setReviewedVault] = useState<VaultIdentity>();
+  const [reviewOpen, setReviewOpen] = useState(false);
+  const selectedVault = reviewedVault?.id === vault.id && (reviewedVault.reviewedAt || 0) >= (vault.reviewedAt || 0) ? reviewedVault : vault;
+  const key = JSON.stringify([selectedVault, networkId, assetCaip]);
   const [loaded, setLoaded] = useState<{ key: string; value: AccountState }>();
   const [opened, setOpened] = useState("");
   const [busy, setBusy] = useState("");
@@ -58,7 +62,7 @@ export function VaultAssetAccount({
   const generation = useRef(0);
   const request = { vaultId: vault.id, networkId, assetCaip };
   const value = loaded?.key === key ? loaded.value : undefined;
-  const identity = value?.identity || vault;
+  const identity = value?.identity || selectedVault;
   const asset = identity.supportedAssets.find(
     (a) => a.caip.toLowerCase() === assetCaip.toLowerCase()
   );
@@ -76,7 +80,7 @@ export function VaultAssetAccount({
     setBusy("Verifying vault account…");
     void rpcRequest<AccountState>("vaultAccountGet", request, 0)
       .then((result) => {
-        assertVaultAssetResponse(request, vault, result);
+        assertVaultAssetResponse(request, selectedVault, result);
         if (active && gen === generation.current) {
           setLoaded({ key, value: result });
           setError("");
@@ -198,6 +202,7 @@ export function VaultAssetAccount({
         <div role="alert" className="vault-asset-error">
           {error}
           <button onClick={() => setRetry((n) => n + 1)} disabled={locked}>{uiText("Retry verification")}</button>
+          {identity.type === 'safe' && !watchOnly && <button onClick={() => setReviewOpen(true)} disabled={locked}>{uiText("Verify & review vault →")}</button>}
         </div>
       )}
       {error && identity.type === "safe" && (
@@ -303,6 +308,12 @@ export function VaultAssetAccount({
         <summary>{uiText("Vault identity & cosigners")}</summary>
         <VaultIdentityDetails vault={identity} />
       </details>
+      {reviewOpen && <AddVaultDialog bitcoinOnly={false} initialVault={identity}
+        onClose={() => setReviewOpen(false)} onAdded={reviewed => {
+          setReviewedVault(reviewed);
+          setReviewOpen(false);
+          setRetry(n => n + 1);
+        }} />}
     </section>
   );
 }

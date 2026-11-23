@@ -4,6 +4,7 @@ import { evmAddressPath } from '../shared/chains'
 import { SAFE_CREATE, SAFE_PROXY_CODE_HASHES, SAFE_SINGLETONS } from '../shared/safe-deployments'
 import { safeContract } from '../shared/safe-tx'
 import { safeTxHash, safeTypedData } from './safe-core'
+import type { SafeTransactionQueue } from './safe-transaction-service'
 import {
   SAFE_CHAIN_ID,
   SAFE_USDC,
@@ -14,6 +15,8 @@ import {
   type SafeTransaction,
   type SafeTransfer,
   type SafeTxReview,
+  type SafeSyncResult,
+  type SafeDiscoveryResult,
 } from '../shared/safe-multisig'
 
 const ZERO = '0x0000000000000000000000000000000000000000'
@@ -150,13 +153,16 @@ export function validateSafeProposal(input: unknown): SafeProposal {
     const signer = address(owner)
     if (typeof sig !== 'string' || !/^0x[0-9a-fA-F]{130}$/.test(sig))
       throw new Error('Expected a 65-byte EIP-712 signature')
-    const parsed = utils.splitSignature(sig)
+    const v = parseInt(sig.slice(-2), 16)
+    const ecdsa = v === 31 || v === 32 ? sig.slice(0, -2) + (v - 4).toString(16) : sig
+    const parsed = utils.splitSignature(ecdsa)
     if (
-      ![27, 28].includes(parseInt(sig.slice(-2), 16)) ||
+      ![27, 28, 31, 32].includes(v) ||
       BigInt(parsed.s) > 0x7fffffffffffffffffffffffffffffff5d576e7357a4501ddfe92f46681b20a0n
     )
       throw new Error('Noncanonical signature')
-    if (!same(utils.recoverAddress(hash, sig), signer) || signatures[signer])
+    const digest = v === 31 || v === 32 ? utils.hashMessage(utils.arrayify(hash)) : hash
+    if (!same(utils.recoverAddress(digest, ecdsa), signer) || signatures[signer])
       throw new Error('Invalid or duplicate owner signature')
     signatures[signer] = sig
   }
@@ -185,6 +191,9 @@ interface SafeDeps {
   now?: () => number
   changed?: (session: SafeSession, accounts: SafeAccount[]) => void
   assertDestination?: (networkId: string, address: string, assetCaip: string) => void | Promise<void>
+  queue?: SafeTransactionQueue
+  registeredAccounts?: () => SafeAccount[]
+  discover?: (owner: string) => Promise<string[]>
 }
 export async function inspectBaseSafe(
   rpc: (method: string, params: any[]) => Promise<any>,
@@ -247,6 +256,7 @@ export async function inspectBaseSafe(
 }
 export class SafeMultisigService {
   private state?: { session: SafeSession; store: SafeStore }
+  private discovery?: { key: string; at: number; pending: boolean; task: Promise<SafeDiscoveryResult> }
   private reviews = new Map<
     string,
     { session: string; review: SafeTxReview; busy?: boolean; txid?: string }
@@ -258,6 +268,7 @@ export class SafeMultisigService {
   clear() {
     this.state = undefined
     this.reviews.clear()
+    this.discovery = undefined
   }
   private assert(s: SafeSession) {
     if (this.deps.currentKey() !== s.key) throw new Error('Wallet changed. Reopen Multisig and review again.')
@@ -279,7 +290,21 @@ export class SafeMultisigService {
       }
       this.state = { session: s, store }
     }
-    return { s, store: this.state!.store }
+    const store = this.state!.store
+    let restored = false
+    for (const saved of this.deps.registeredAccounts?.() || []) {
+      const old = store.accounts.find(a => same(a.address, saved.address))
+      if (!old && !saved.owners.some(o => same(o, s.owner))) continue
+      const next: SafeAccount = old ? {
+        ...old, ...saved, nonce: old.nonce, balanceEth: old.balanceEth, balanceUsdc: old.balanceUsdc,
+        configurationChanged: saved.configurationChanged || (old.reviewedAt === saved.reviewedAt && old.configurationChanged) || undefined,
+        reviewedConfiguration: old.reviewedAt === saved.reviewedAt
+          ? old.reviewedConfiguration || saved.reviewedConfiguration : saved.reviewedConfiguration,
+      } : clone(saved)
+      if (JSON.stringify(old) !== JSON.stringify(next)) { this.upsert(store, next); restored = true }
+    }
+    if (restored) this.save(s, store)
+    return { s, store }
   }
   private save(s: SafeSession, store: SafeStore) {
     this.assert(s)
@@ -325,13 +350,64 @@ export class SafeMultisigService {
   }
   async list(): Promise<SafeContext> {
     const { s, store } = await this.open()
+    const accounts = store.accounts.filter(account => account.owners.some(owner => same(owner, s.owner)))
+    const owned = new Set(accounts.map(account => account.address.toLowerCase()))
     return clone({
       owner: s.owner,
       session: s.key,
       sessionOnly: s.sessionOnly,
       nestedClearSign: s.nestedClearSign,
       ...store,
+      accounts,
+      proposals: store.proposals.filter(proposal => owned.has(proposal.safe.toLowerCase())),
     })
+  }
+  /** Owner-index discovery is a hint; pinned on-chain code and current ownership are authoritative. */
+  async discover(params: { force?: boolean } = {}): Promise<SafeDiscoveryResult> {
+    const { s, store } = await this.open()
+    const cached = this.discovery
+    if (cached?.key === s.key && (cached.pending || !params.force && this.now() - cached.at < 60_000)) {
+      const result = await cached.task
+      this.assert(s)
+      return clone(result)
+    }
+    const entry = { key: s.key, at: this.now(), pending: true, task: undefined as unknown as Promise<SafeDiscoveryResult> }
+    entry.task = (async () => {
+      const result: SafeDiscoveryResult = { session: s.key, owner: s.owner, discovered: 0, issues: [] }
+      try {
+        if (!this.deps.discover) throw new Error('Safe discovery is unavailable')
+        const found = [...new Set((await this.deps.discover(s.owner)).map(address))]
+        this.assert(s)
+        if (found.length > 50) result.serviceError = 'More than 50 Safes found. Import additional addresses explicitly.'
+        for (const candidate of found.slice(0, 50)) {
+          try {
+            const old = store.accounts.find(a => same(a.address, candidate))
+            const fresh = await this.inspect(s, candidate, old?.name || 'Base Safe')
+            if (old) this.preserveReview(fresh, old)
+            else fresh.configurationChanged = true
+            if (!fresh.owners.some(o => same(o, s.owner))) {
+              if (old) { this.upsert(store, fresh); this.save(s, store) }
+              throw new Error('Connected wallet is not a current Safe owner')
+            }
+            this.upsert(store, fresh)
+            this.save(s, store)
+            result.discovered++
+          } catch (e) {
+            this.assert(s)
+            result.issues.push({ address: candidate, reason: e instanceof Error ? e.message : 'Safe verification failed' })
+          }
+        }
+      } catch (e) {
+        this.assert(s)
+        result.serviceError = e instanceof Error ? e.message : 'Safe discovery is unavailable'
+      }
+      this.assert(s)
+      return result
+    })().finally(() => { entry.pending = false })
+    this.discovery = entry
+    const result = await entry.task
+    this.assert(s)
+    return clone(result)
   }
   async inspectAccount(params: { address: string; name: string }) {
     const { s } = await this.open()
@@ -372,6 +448,7 @@ export class SafeMultisigService {
     this.assertConfiguration(account, params.expectedOwners, params.expectedThreshold)
     const previous = store.accounts.find((a) => same(a.address, account.address))
     account.reviewedAt = Math.max(this.now(), (previous?.reviewedAt || 0) + 1)
+    account.reviewedConfiguration = { owners: [...account.owners], threshold: account.threshold }
     this.upsert(store, account)
     this.save(s, store)
     return clone(account)
@@ -383,17 +460,89 @@ export class SafeMultisigService {
     if (!old.deployed && (await this.rpc(s, 'eth_getCode', [old.address, 'latest'])) === '0x')
       return clone(old)
     const fresh = await this.inspect(s, old.address, old.name)
+    this.preserveReview(fresh, old)
+    this.upsert(store, fresh)
+    this.save(s, store)
+    return clone(fresh)
+  }
+  private preserveReview(fresh: SafeAccount, old: SafeAccount) {
     fresh.deploymentTx = old.deploymentTx
     fresh.reviewedAt = old.reviewedAt
+    fresh.reviewedConfiguration = old.reviewedConfiguration || { owners: [...old.owners], threshold: old.threshold }
     try {
-      this.assertConfiguration(fresh, old.owners, old.threshold)
+      this.assertConfiguration(fresh, fresh.reviewedConfiguration.owners, fresh.reviewedConfiguration.threshold)
     } catch {
       fresh.configurationChanged = true
     }
     if (old.configurationChanged) fresh.configurationChanged = true
-    this.upsert(store, fresh)
-    this.save(s, store)
-    return clone(fresh)
+  }
+  /** Observe chain state automatically; accepting a changed configuration stays explicit. */
+  async sync(params: { address: string }): Promise<SafeSyncResult> {
+    const { s, store } = await this.open()
+    const old = store.accounts.find(a => same(a.address, params.address))
+    if (!old) throw new Error('Safe is not saved in this wallet')
+    // A removed owner may refresh their saved record once, so membership is retired locally.
+    const a = await this.refresh(params)
+    this.assert(s)
+    const result: SafeSyncResult = { address: a.address, checkedAt: this.now(), pending: 0, imported: 0, issues: [] }
+    if (!a.deployed || !a.owners.some(o => same(o, s.owner))) return result
+    try {
+      if (!this.deps.queue) throw new Error('Safe Transaction Service is unavailable')
+      const rows = await this.deps.queue.pending(SAFE_CHAIN_ID, a.address, a.nonce)
+      this.assert(s)
+      result.pending = rows.length
+      for (const raw of rows) {
+        const row = raw as any
+        const hash = typeof row?.safeTxHash === 'string' ? row.safeTxHash : undefined
+        const nonce = row?.nonce == null ? undefined : String(row.nonce)
+        try {
+          if (!row || !same(address(row.safe), a.address) || row.isExecuted !== false)
+            throw new Error('Queue entry belongs to another Safe or is already executed')
+          const transaction: SafeTransaction = {
+            to: row.to, value: String(row.value), data: row.data ?? '0x', operation: row.operation,
+            safeTxGas: String(row.safeTxGas), baseGas: String(row.baseGas), gasPrice: String(row.gasPrice),
+            gasToken: row.gasToken, refundReceiver: row.refundReceiver, nonce: String(row.nonce),
+          }
+          const input = validateSafeProposal({ format: 'keepkey-safe-v1', chainId: SAFE_CHAIN_ID,
+            safe: a.address, hash, transaction, signatures: {} })
+          if (!Array.isArray(row.confirmations)) throw new Error('Invalid confirmation list')
+          for (const confirmation of row.confirmations) {
+            try {
+              const validated = validateSafeProposal({ ...input, signatures: { [confirmation.owner]: confirmation.signature } })
+              const signer = Object.keys(validated.signatures)[0]!
+              if (!a.owners.some(o => same(o, signer))) throw new Error('Confirmation is not from a current owner')
+              Object.assign(input.signatures, validated.signatures)
+            } catch {
+              result.issues.push({ hash, nonce, reason: 'An unsupported or invalid owner confirmation was excluded' })
+            }
+          }
+          const { p } = await this.checkProposal(s, store, input, true)
+          this.storeProposal(s, store, p)
+          result.imported++
+        } catch (e) {
+          this.assert(s)
+          result.issues.push({ hash, nonce, reason: e instanceof Error ? e.message : 'Unsupported queue entry' })
+        }
+      }
+    } catch (e) {
+      this.assert(s)
+      result.serviceError = e instanceof Error ? e.message : 'Safe Transaction Service is unavailable'
+    }
+    this.assert(s)
+    return result
+  }
+  async publish(params: { hash: string }) {
+    const { s, store } = await this.open()
+    const old = store.proposals.find(p => p.hash === params.hash)
+    if (!old) throw new Error('Proposal not found')
+    const { p, a } = await this.checkProposal(s, store, old)
+    if (!a.owners.some(o => same(o, s.owner)) || !p.signatures[address(s.owner)])
+      throw new Error('Approve this proposal with the connected KeepKey before sharing it')
+    if (!this.deps.queue) throw new Error('Safe Transaction Service is unavailable')
+    this.assert(s)
+    await this.deps.queue.publish(p, s.owner)
+    this.assert(s)
+    return { hash: p.hash }
   }
   private async review(
     s: SafeSession,
@@ -519,7 +668,7 @@ export class SafeMultisigService {
     if (!safe?.deployed) throw new Error('Import or refresh the deployed Safe first')
     return safe
   }
-  private async checkProposal(s: SafeSession, store: SafeStore, input: SafeProposal) {
+  private async checkProposal(s: SafeSession, store: SafeStore, input: SafeProposal, queued = false) {
     const existing = store.proposals.find((v) => v.hash === input.hash)
     const p = validateSafeProposal({ ...input, signatures: { ...existing?.signatures, ...input.signatures } })
     const destination = describeSafeTransfer(p.transaction)
@@ -530,7 +679,7 @@ export class SafeMultisigService {
     )
     const old = this.account(store, p.safe)
     const a = await this.inspect(s, p.safe, old.name)
-    a.reviewedAt = old.reviewedAt
+    this.preserveReview(a, old)
     try {
       this.assertConfiguration(a, old.owners, old.threshold)
       if (old.configurationChanged) throw new Error('Configuration needs review')
@@ -542,7 +691,7 @@ export class SafeMultisigService {
         'Vault owners or threshold changed. Review and confirm its configuration again before signing.'
       )
     }
-    if (p.transaction.nonce !== a.nonce)
+    if (queued ? BigInt(p.transaction.nonce) < BigInt(a.nonce) : p.transaction.nonce !== a.nonce)
       throw new Error(`Safe nonce changed (current ${a.nonce}). Create a fresh proposal.`)
     for (const owner of Object.keys(p.signatures))
       if (!a.owners.some((v) => same(v, owner))) throw new Error('Signature is not from a current Safe owner')

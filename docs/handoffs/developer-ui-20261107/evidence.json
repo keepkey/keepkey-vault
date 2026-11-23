@@ -1,0 +1,271 @@
+{
+  "title": "KeepKey Desktop UI release handoff",
+  "requestedOn": "2026-11-07",
+  "state": "proposal; application code unchanged",
+  "targetCheckout": "/Users/highlander/WebstormProjects/keepkey-stack/projects/keepkey-vault-v11",
+  "capturedCommit": "8af216b604542852d93e2d6d0ae5aedf5a9b0d65",
+  "currentCommit": "8af216b604542852d93e2d6d0ae5aedf5a9b0d65",
+  "currentDirtyState": " M projects/keepkey-vault/src/bun/index.ts\n M projects/keepkey-vault/src/bun/mcp.ts\n M projects/keepkey-vault/src/mainview/App.tsx\n M projects/keepkey-vault/src/mainview/components/DeviceSettingsDrawer.tsx\n M projects/keepkey-vault/src/mainview/components/TopNav.tsx\n M projects/keepkey-vault/src/shared/rpc-schema.ts\n M projects/keepkey-vault/src/shared/types.ts\n?? docs/handoffs/base-safe-20261104/\n?? docs/handoffs/blue-gateway-cutover-20261104/\n?? docs/handoffs/i18n-audit-20261104/\n?? docs/handoffs/passwords-passkeys-mobile-20261107/\n?? docs/handoffs/swap-api-audit-20261104/\n?? projects/keepkey-vault/__tests__/password-bank.test.ts\n?? projects/keepkey-vault/src/bun/password-bank.ts\n?? projects/keepkey-vault/src/mainview/components/PasswordBankView.tsx\n?? projects/keepkey-vault/src/mainview/hooks/usePasswordManagerEnabled.ts\n?? projects/keepkey-vault/src/shared/password-bank.ts\n",
+  "captureScope": "Desktop source frontend with synthetic public-test RPC responses at 1440×900 or 1440×1000 CSS pixels; screenshots captured at deviceScaleFactor 2 except seed screens. Native preview uses unmodified host HTML replaying real standalone UDP firmware frames. No physical-device or supported-release replay. Web fonts and remote resources were blocked by capture.",
+  "evidencePolicy": "JPEG review derivatives preserve the entire screenshot at its CSS viewport scale. Original PNG hashes are retained; contrast observations are checked against source tokens, not JPEG pixels. No application UI is edited in the evidence images.",
+  "cases": [
+    {
+      "id": "UI-01",
+      "title": "Busy background and uneven visual balance",
+      "priority": "P1",
+      "image": "images/home-balance.jpg",
+      "originalCapture": "/Users/highlander/WebstormProjects/keepkey-stack/projects/keepkey-backend-v3/projects/content/video-series/vault/emulator-production/captures/app-01-fixture-home.png",
+      "originalSha256": "1e306fbe08f2a8a30bbb647dbe889d63c755288af14e7acf40a3f7821d7fda56",
+      "observed": "The lattice, glass surfaces, large unused center and long network rail compete with a small central task. The problem is allocation of attention, not a requirement that every region be mirror-symmetric.",
+      "proposal": "Use an opaque reading surface and one content grid. Give the selected wallet and next action a stable location. Reserve decorative brand art for an empty-state illustration, never behind form text.",
+      "sourceAnchors": [
+        "main.tsx",
+        "components/Dashboard.tsx",
+        "components/AssetPage.tsx",
+        "styles/tokens.css"
+      ],
+      "acceptance": "At 1280×800 and 1440×900, the active wallet, primary action and readable content occupy the same aligned content frame; no animated or patterned background sits beneath text.",
+      "derivativeSha256": "c602886bad0c39fe1ec3d963bdae023475527d6c9541eb378f651f1e3cb0d355",
+      "derivativeSize": [
+        1440,
+        900
+      ]
+    },
+    {
+      "id": "UI-02",
+      "title": "Tiny monospace prose obscures hierarchy",
+      "priority": "P1",
+      "image": "images/type-hierarchy.jpg",
+      "originalCapture": "/Users/highlander/WebstormProjects/keepkey-stack/projects/keepkey-backend-v3/projects/content/video-series/vault/emulator-production/captures/app-03-emulator-on.png",
+      "originalSha256": "2f36252d07a746380566dc155b4986b374a8d528732f87771a25577a8486587b",
+      "observed": "theme.ts deliberately aliases sans and serif to the mono stack. Chooser labels/actions use 10–12px text; metadata and supporting prose compete at nearly the same weight. The capture blocked remote fonts, but the all-mono policy and declared sizes are source facts.",
+      "proposal": "Use a bundled system/sans face for UI prose; keep mono for addresses, paths, hashes and numeric columns. Define and migrate a small type scale and spacing scale together.",
+      "sourceAnchors": [
+        "theme.ts",
+        "index.css",
+        "styles/tokens.css",
+        "components/EmulatorWalletChooser.tsx"
+      ],
+      "acceptance": "Main instructions read at 15–16 CSS px, labels at 13–14; these are product targets, not WCAG font-size rules. No essential action or instruction uses the low-contrast text-3 token.",
+      "derivativeSha256": "f892e9d999af4d6002b8d0f5216f403ee1cce7a22b5d1e9f0a48d693da2eb286",
+      "derivativeSize": [
+        1440,
+        900
+      ]
+    },
+    {
+      "id": "UI-03",
+      "title": "Setup, wallet and emulator look like separate products",
+      "priority": "P1",
+      "image": "images/component-consistency.jpg",
+      "originalCapture": "/Users/highlander/WebstormProjects/keepkey-stack/projects/keepkey-backend-v3/projects/content/video-series/vault/emulator-production/captures/seed-06-label.png",
+      "originalSha256": "22988bc4df029ab3418f67020eaeaaef2de86e8c07f0eccab8e52584f0c643f2",
+      "observed": "The green setup heading, purple emulator affordance, gold wallet surfaces, orange native preview, different radii and different dialog proportions make related steps feel disconnected. PIN privacy is a valid reason for a specialized layout, not a different design language.",
+      "proposal": "Share surface, type, radius, spacing, field, notice and task-dialog primitives across setup, settings, signing and emulator views. Keep task-specific structure and real device pixels.",
+      "sourceAnchors": [
+        "components/OobSetupWizard.tsx",
+        "components/device/PinEntry.tsx",
+        "components/device/SigningApproval.tsx",
+        "../bun/emulator-window.ts"
+      ],
+      "acceptance": "Setup, PIN, seed load and signing share header/body/footer rhythm and button roles. The PIN matrix preserves its original spatial mapping; actual OLED pixels remain unaltered.",
+      "derivativeSha256": "36dfc838ab931f446867db1c4cfc75a29fddae5b624889be6da796984a3c5a8c",
+      "derivativeSize": [
+        1440,
+        1000
+      ]
+    },
+    {
+      "id": "UI-04",
+      "title": "Settings is a long inventory rather than a navigable place",
+      "priority": "P1",
+      "image": "images/settings-structure.jpg",
+      "originalCapture": "/Users/highlander/WebstormProjects/keepkey-stack/projects/keepkey-backend-v3/projects/content/video-series/vault/emulator-production/captures/app-23-api-bridge.png",
+      "originalSha256": "ec25a254f65153e881aaae22299f704b4c81ece991ffa565bf74126d9c577e05",
+      "observed": "Device, Emulator, Security, Signing Policy, Application, Browser use, Networks, Feature Flags, API Services and Danger Zone share one narrow scrolling drawer. Users must know which accordion hides a task; native scrollbars are hidden globally.",
+      "proposal": "Move settings into a full content view with categories: General, Wallet & device, Connections, Developer, Advanced & reset. Give every category a stable heading and a visible scroll affordance.",
+      "sourceAnchors": [
+        "components/DeviceSettingsDrawer.tsx",
+        "App.tsx",
+        "index.css"
+      ],
+      "acceptance": "A category can be reached directly and restored after closing. Its heading, selected category and active target remain visible while its content scrolls. No nested accordion search is required for common tasks.",
+      "derivativeSha256": "1c73137fc6a831fa935c94e4821883bf5993a929d0c260ea1bef75d98fd16155",
+      "derivativeSize": [
+        1440,
+        900
+      ]
+    },
+    {
+      "id": "UI-05",
+      "title": "Starting an emulator spans too many disconnected surfaces",
+      "priority": "P1",
+      "image": "images/emulator-entry.jpg",
+      "originalCapture": "/Users/highlander/WebstormProjects/keepkey-stack/projects/keepkey-backend-v3/projects/content/video-series/vault/emulator-production/captures/app-05-device-grid.png",
+      "originalSha256": "b446dffb2d7f7d15a6f2445797573a40a9d8881fe3cc42b2d2e08ce1e868ff81",
+      "observed": "Enablement is in Settings → Feature Flags; launching is in the device grid; choosing a profile is another modal; setup and seed loading use the wizard; runtime controls return to Settings; the preview is a separate window. This is a fragmented task model.",
+      "proposal": "Create a Developer workspace with an Emulator page for profiles, selected build, Start/Stop, setup, preview and diagnostics. Retain a simple launcher shortcut from wallet selection. Make first use reachable with no connected device and no cached wallet.",
+      "sourceAnchors": [
+        "App.tsx",
+        "components/DeviceGrid.tsx",
+        "components/DeviceSettingsDrawer.tsx",
+        "components/EmulatorWalletChooser.tsx"
+      ],
+      "acceptance": "From a clean app state with no hardware and no cached wallets, the developer can enable tools, create a blank named profile, select a build, start it and identify the target without changing unrelated settings. Fresh-start reachability still needs an actual native-app reproduction.",
+      "derivativeSha256": "2779c3305de1e9ca6578fc45db81753b7d42507bb20371a032b418f312e3a11f",
+      "derivativeSize": [
+        1440,
+        900
+      ]
+    },
+    {
+      "id": "UI-06",
+      "title": "The profile chooser has an inconsistent modal shell",
+      "priority": "P1",
+      "image": "images/profile-dialog.jpg",
+      "originalCapture": "/Users/highlander/WebstormProjects/keepkey-stack/projects/keepkey-backend-v3/projects/content/video-series/vault/emulator-production/captures/app-07-seed-named.png",
+      "originalSha256": "2dd501347dc1645bea459199459e79fd5e800e942a3a79345458b8a7920424d2",
+      "observed": "The long title wraps, the close control literally renders &times;, the name field uses placeholder-only guidance, and a small Create action floats inside a different panel style. “Seed” names a profile file, a wallet and recovery words in different contexts.",
+      "proposal": "Use the shared dialog shell: “Choose emulator profile”, a labelled name field, a real close icon/button, selectable profile rows and aligned Cancel / Create profile actions. Reserve “recovery phrase” for the words themselves.",
+      "sourceAnchors": [
+        "components/EmulatorWalletChooser.tsx",
+        "shared/emulatorWallets.ts"
+      ],
+      "acceptance": "No HTML entity text is visible; the close control has an accessible name and at least the agreed icon target size. Keyboard focus is contained and restored. Long names/errors wrap without pushing actions out of view.",
+      "derivativeSha256": "7d495877cc2aa43a638b746f4cf6ea01f899eb2667657a8deda0aeb32c9b51eb",
+      "derivativeSize": [
+        1440,
+        900
+      ]
+    },
+    {
+      "id": "UI-07",
+      "title": "Destructive and routine emulator actions have equal weight",
+      "priority": "P1",
+      "image": "images/emulator-actions.jpg",
+      "originalCapture": "/Users/highlander/WebstormProjects/keepkey-stack/projects/keepkey-backend-v3/projects/content/video-series/vault/emulator-production/captures/app-12-emulator-controls.png",
+      "originalSha256": "c056fc82c7e1ba8462fca1b0fe0693c186a298103e61e635b9c31d54cc05459b",
+      "observed": "Wipe Emulator, Stop Emulator, Delete Flash and Change Version wrap into a similarly styled button cluster beneath transport internals. “Change Version…” opens a file picker; its label suggests a version chooser.",
+      "proposal": "Put Start/Stop next to the selected profile. Expose build selection as “Load build…” or a labelled build selector with identity details. Move Wipe/Delete into a separate reset section, bound to the exact named profile.",
+      "sourceAnchors": [
+        "components/DeviceSettingsDrawer.tsx",
+        "../bun/emulator-window.ts"
+      ],
+      "acceptance": "Routine actions never share a row with Wipe/Delete. Destructive confirmation names the profile and consequence; cancelling does nothing. Build source, loaded version and hash are shown from actual backend state, not inferred from a filename.",
+      "derivativeSha256": "d3f1b43bb891f3ea9c4977de1b034884585775887a50e7a2f1efdd3fcaf65a9b",
+      "derivativeSize": [
+        1440,
+        900
+      ]
+    },
+    {
+      "id": "UI-08",
+      "title": "Seed loading is almost invisible, then overwhelms with warnings",
+      "priority": "P1",
+      "image": "images/seed-load.jpg",
+      "originalCapture": "/Users/highlander/WebstormProjects/keepkey-stack/projects/keepkey-backend-v3/projects/content/video-series/vault/emulator-production/captures/seed-01-hidden-link.png",
+      "originalSha256": "a73e5d5d851979adb12674ab09edae22ec103acca9e2f9b368db719e96521707",
+      "observed": "Developer: load seed is faint clickable Text rather than a normal accessible action. Its dialog then presents several warning paragraphs, acknowledgement and a textarea, but the active target is not the strongest visual anchor.",
+      "proposal": "Offer an explicit advanced action in the Developer workspace. Start the dialog with target/profile and replacement consequence, then a concise warning, acknowledgement, labelled phrase field and Review load action. Expand background explanation on demand.",
+      "sourceAnchors": [
+        "components/OobSetupWizard.tsx",
+        "../bun/index.ts"
+      ],
+      "acceptance": "The action is keyboard reachable and readable. The selected target and replacement consequence are visible before submission. Keep the existing acknowledgement, firmware/checksum errors, PIN setup and retry behavior. Preserve the owner-authorized physical-device route as a separate explicit advanced flow; do not silently remove it or pretend emulator loading uses USB.",
+      "derivativeSha256": "e50f828de53c1615dab0131bb9afb884e15b1d4b009ef6116908d9387a48d6ba",
+      "derivativeSize": [
+        1440,
+        1000
+      ]
+    },
+    {
+      "id": "UI-09",
+      "title": "Receive gives raw metadata the same prominence as the address",
+      "priority": "P1",
+      "image": "images/receive-layout.jpg",
+      "originalCapture": "/Users/highlander/WebstormProjects/keepkey-stack/projects/keepkey-backend-v3/projects/content/video-series/vault/emulator-production/captures/app-13-bitcoin-receive.png",
+      "originalSha256": "41a19c7d225540687360e7d290b39b620345a68a6c32c23947918e749c0cbe56",
+      "observed": "A QR column and a wide field stack leave different visual weights. Address, XPUB and path look like peer blocks; account/type selectors and small uppercase Copy controls add competing alignments.",
+      "proposal": "Use one Receive card: network/account context, full address and Verify on device as primary content, QR aligned to it. Put XPUB, derivation path, change branch and index in an Advanced inspector; developer mode can open that inspector by default.",
+      "sourceAnchors": [
+        "components/ReceiveView.tsx",
+        "components/AssetPage.tsx"
+      ],
+      "acceptance": "The complete address is readable and copyable without ellipsis at all supported sizes. Verification refers to the currently displayed address. QR encodes that address. Changing account/type/path cannot leave stale verified state; advanced public-key export retains its privacy explanation.",
+      "derivativeSha256": "2c03ebd87e5d69a6ff4970913084c5a226d401988267587a02bead32b48c9413",
+      "derivativeSize": [
+        1440,
+        900
+      ]
+    },
+    {
+      "id": "UI-10",
+      "title": "Signing mixes capability, progress and reassurance",
+      "priority": "P1",
+      "image": "images/signing-hierarchy.jpg",
+      "originalCapture": "/Users/highlander/WebstormProjects/keepkey-stack/projects/keepkey-backend-v3/projects/content/video-series/vault/emulator-production/captures/app-17-signing-review.png",
+      "originalSha256": "fa5c2757cc7799f9453e2de8646ee5b594970b762baceaa359f7d997f3ac5a4e",
+      "observed": "The pending approval view combines Action Required, app badge, timer, docs links, a green “Shown on your KeepKey” tier bar, explanation, signer, message and raw-data disclosures. The green segmented bar can read like completed progress before the app has sent the payload. This is a design/state-label concern, not a reproduced unauthorized-signing defect.",
+      "proposal": "Use one request header, one visible action summary and a distinct stage indicator: Review in app → Waiting for target → Signed / Cancelled / Failed. Label review capability separately. Keep the message/decoded effects visible and raw request expandable.",
+      "sourceAnchors": [
+        "components/device/SigningApproval.tsx",
+        "App.tsx",
+        "shared/clearsign-risk.ts"
+      ],
+      "acceptance": "The approve phase does not claim that a device has already displayed data. Hardware and emulator prompts name the actual target. Cancellation, disconnected targets, unknown/blind requests and stale request IDs remain explicit; no visual simplification weakens confirmation gates.",
+      "derivativeSha256": "cc89303dcf6c66a08a42dc9b11af495d727bb5b328d0ee02b6b2217c3b3f2a35",
+      "derivativeSize": [
+        1440,
+        900
+      ]
+    }
+  ],
+  "supplementaryCaptures": [
+    {
+      "image": "images/seed-load-dialog.jpg",
+      "originalCapture": "/Users/highlander/WebstormProjects/keepkey-stack/projects/keepkey-backend-v3/projects/content/video-series/vault/emulator-production/captures/seed-03-public-fixture.png",
+      "originalSha256": "2703b4576adef6c85260b854af5e0845284d25fe76897576ad451653a086f4d1",
+      "derivativeSha256": "132ff6a493b34a11a96a3adae12b5e4547e199cf3aa50ce2931ad90490b2f5ee",
+      "derivativeSize": [
+        1440,
+        1000
+      ]
+    },
+    {
+      "image": "images/pin-dialog.jpg",
+      "originalCapture": "/Users/highlander/WebstormProjects/keepkey-stack/projects/keepkey-backend-v3/projects/content/video-series/vault/emulator-production/captures/app-30-pin-first.png",
+      "originalSha256": "21109beb882451488145626234424239249007ea24d3437c2d42ce870a04e028",
+      "derivativeSha256": "67e910c1e50136ea6093748257c3ebe91ecc4891b3ac12f81daf13683946565c",
+      "derivativeSize": [
+        1440,
+        900
+      ]
+    },
+    {
+      "image": "images/native-preview.jpg",
+      "originalCapture": "/Users/highlander/WebstormProjects/keepkey-stack/projects/keepkey-backend-v3/projects/content/video-series/vault/emulator-production/captures/app-26-preview-approve.png",
+      "originalSha256": "39cfa6a6b8075698e15e2e3b5972caab550d73aec501208dcec3cfeab124fc46",
+      "derivativeSha256": "331c235e39d893bace840f7c5a0b8f49e8a073f32d100207982b285b2449b75d",
+      "derivativeSize": [
+        700,
+        440
+      ]
+    }
+  ],
+  "prototype": "proposal.html",
+  "handoff": "HANDOFF.md",
+  "standards": [
+    {
+      "title": "W3C contrast minimum",
+      "url": "https://www.w3.org/WAI/WCAG22/Understanding/contrast-minimum.html"
+    },
+    {
+      "title": "W3C target size minimum",
+      "url": "https://www.w3.org/WAI/WCAG22/Understanding/target-size-minimum.html"
+    },
+    {
+      "title": "WAI modal dialog pattern",
+      "url": "https://www.w3.org/WAI/ARIA/apg/patterns/dialog-modal/"
+    }
+  ]
+}

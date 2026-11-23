@@ -4720,6 +4720,7 @@
       "get": {
         "operationId": "V1Health",
         "summary": "V1 Health check (alias for /api/health)",
+        "description": "Public. Device status, supported chains, version and uptime are returned to any caller; sync_diagnostics is included only when a valid pairing key is sent as a Bearer token, or for a local non-browser client such as curl addressing a loopback Host; a request carrying Origin or Sec-Fetch-Site (a browser) does not get it.",
         "responses": {
           "200": {
             "description": "Health status",

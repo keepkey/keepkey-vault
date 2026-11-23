@@ -30,6 +30,7 @@
 	"noMatches": "No addresses match your filter",
 	"unlabeled": "Unlabeled",
 	"ownWallet": "My wallet",
+	"ownSymbol": "My {{symbol}}",
 	"edit": "Edit",
 	"delete": "Delete",
 	"view": "View",
@@ -53,5 +54,8 @@
 	"cosignerOption": "Safe co-signer: offer it first when creating a multisig",
 	"cosigner": "Co-signer",
 	"notCosigner": "Not a co-signer",
-	"markCosigner": "Mark as Safe co-signer"
+	"markCosigner": "Mark as Safe co-signer",
+	"addressOrEns": "Address or ENS name",
+	"ensResolving": "Looking up ENS name…",
+	"certificationExcluded": "These contacts cannot be certified:"
 }

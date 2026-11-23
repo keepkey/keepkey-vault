@@ -184,6 +184,15 @@ export function withoutErc7730Description(info: SigningRequestInfo): SigningRequ
   return next
 }
 
+export function withoutErc7730TypedDescription(info: SigningRequestInfo): SigningRequestInfo {
+  const { erc7730: _refused, erc7730Description: _shown, ...plain } = info
+  return {
+    ...plain,
+    id: `${info.id}:without-erc7730`,
+    clearSignReport: buildTypedDataReport(plain, true),
+  }
+}
+
 /**
  * The ClearSign report for an EIP-712 request, so typed data gets a level the
  * way a transaction does. Nothing is simulated: a signature moves nothing by
@@ -193,7 +202,7 @@ export function withoutErc7730Description(info: SigningRequestInfo): SigningRequ
  * descriptor this computer reviewed read it in full, else P1.
  * The fingerprint is the EIP-712 digest the device signs.
  */
-export function buildTypedDataReport(info: SigningRequestInfo): ClearSignReport | undefined {
+export function buildTypedDataReport(info: SigningRequestInfo, definitionRefused = false): ClearSignReport | undefined {
   const d = info.typedDataDecoded
   if (!d) return undefined
   // The risk module's own reading, so the card and the verdict cannot disagree.
@@ -231,6 +240,11 @@ export function buildTypedDataReport(info: SigningRequestInfo): ClearSignReport 
       ...(known && !shows ? { resolution: 'reviewed-decoder' as const } : {}),
     },
     simulation,
+    ...(definitionRefused ? { hostLimitations: [{
+      code: 'ERC7730_DEFINITION_REFUSED',
+      message: 'Your KeepKey refused the ClearSign description. It will show the Safe call data as raw hex.',
+      severity: 'danger',
+    }] } : {}),
   })
 }
 

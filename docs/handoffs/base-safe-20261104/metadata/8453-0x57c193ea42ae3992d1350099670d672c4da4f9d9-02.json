@@ -1,0 +1,26 @@
+{
+  "display": {
+    "formats": {
+      "removeOwner(address prevOwner,address owner,uint256 threshold)": {
+        "intent": "Remove Safe owner",
+        "fields": [
+          {
+            "path": "prevOwner",
+            "label": "Previous owner",
+            "format": "addressName"
+          },
+          {
+            "path": "owner",
+            "label": "Remove owner",
+            "format": "addressName"
+          },
+          {
+            "path": "threshold",
+            "label": "Required signatures",
+            "format": "raw"
+          }
+        ]
+      }
+    }
+  }
+}

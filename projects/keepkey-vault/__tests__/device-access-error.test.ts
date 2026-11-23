@@ -104,6 +104,15 @@ describe('a locked KeepKey opens the PIN dialog instead of an error', () => {
     expect(await both).toEqual(['ok', 'ok'])
     expect(unlocks).toBe(1)
   })
+  test.each([
+    'Device access is required; unlock KeepKey to load this account',
+    'KeepKey is locked. Unlock it before requesting new device data.',
+  ])('every "unlock first" refusal opens the dialog instead: %s', async message => {
+    let unlocks = 0, calls = 0
+    const run = () => (++calls === 1 ? Promise.reject(new Error(message)) : Promise.resolve('ok'))
+    expect(await withUnlockRetry(run, async () => { unlocks++ })).toBe('ok')
+    expect([unlocks, calls]).toEqual([1, 2])
+  })
   test('other errors pass through without a dialog', async () => {
     let unlocks = 0
     await expect(withUnlockRetry(() => Promise.reject(new Error('No device connected')), async () => { unlocks++ })).rejects.toThrow('No device connected')

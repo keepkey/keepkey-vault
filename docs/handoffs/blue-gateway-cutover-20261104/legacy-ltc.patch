@@ -1,0 +1,120 @@
+--- a/modules/intergrations/blockbook/src/index.ts
++++ b/modules/intergrations/blockbook/src/index.ts
+@@ -98,19 +98,18 @@
+     }
+ }
+ 
+-// Blockbook only understands xpub/ypub/zpub version bytes.
+-// Coins that emit their own version bytes must be remapped before the API call.
++// Normalize legacy coin-specific versions supported through ordinary xpubs.
++// Litecoin Blockbook recognizes Mtub directly as wrapped SegWit; preserve it.
+ const XPUB_VERSION_REMAP: Record<string, string> = {
+     dgub: '0488b21e', // DGB  p2pkh        → xpub
+     Ltub: '0488b21e', // LTC  p2pkh        → xpub
+-    Mtub: '049d7cb2', // LTC  p2sh-p2wpkh  → ypub (must be ypub or blockbook derives wrong address type)
+     drkp: '0488b21e', // DASH p2pkh        → xpub
+ };
+ const normalizeExtendedKeyVersion = (pubkey: string): string => {
+     // Output descriptors wrap the key, so a naive slice(0,4) sees "tr(L" and skips the
+-    // remap entirely. Normalize the key INSIDE the wrapper instead: the Mtub→ypub
+-    // mapping above is load-bearing, and skipping it would make Blockbook derive the
+-    // WRONG address type rather than fail loudly — a silent wrong balance.
++    // remap entirely. Normalize the key INSIDE the wrapper instead, preserving
++    // the same address-type identity as a bare key. Mtub must remain Mtub;
++    // converting it to Bitcoin ypub makes Litecoin Blockbook scan legacy addresses.
+     const descriptor = /^tr\((.+)\)$/.exec(pubkey);
+     if (descriptor) return `tr(${normalizeExtendedKeyVersion(descriptor[1])})`;
+ 
+--- a/modules/intergrations/blockbook/lib/index.js
++++ b/modules/intergrations/blockbook/lib/index.js
+@@ -137,19 +137,18 @@
+         return '';
+     }
+ };
+-// Blockbook only understands xpub/ypub/zpub version bytes.
+-// Coins that emit their own version bytes must be remapped before the API call.
++// Normalize legacy coin-specific versions supported through ordinary xpubs.
++// Litecoin Blockbook recognizes Mtub directly as wrapped SegWit; preserve it.
+ var XPUB_VERSION_REMAP = {
+     dgub: '0488b21e', // DGB  p2pkh        → xpub
+     Ltub: '0488b21e', // LTC  p2pkh        → xpub
+-    Mtub: '049d7cb2', // LTC  p2sh-p2wpkh  → ypub (must be ypub or blockbook derives wrong address type)
+     drkp: '0488b21e', // DASH p2pkh        → xpub
+ };
+ var normalizeExtendedKeyVersion = function (pubkey) {
+     // Output descriptors wrap the key, so a naive slice(0,4) sees "tr(L" and skips the
+-    // remap entirely. Normalize the key INSIDE the wrapper instead: the Mtub→ypub
+-    // mapping above is load-bearing, and skipping it would make Blockbook derive the
+-    // WRONG address type rather than fail loudly — a silent wrong balance.
++    // remap entirely. Normalize the key INSIDE the wrapper instead, preserving
++    // the same address-type identity as a bare key. Mtub must remain Mtub;
++    // converting it to Bitcoin ypub makes Litecoin Blockbook scan legacy addresses.
+     var descriptor = /^tr\((.+)\)$/.exec(pubkey);
+     if (descriptor)
+         return "tr(".concat(normalizeExtendedKeyVersion(descriptor[1]), ")");
+--- a/modules/intergrations/blockbook/__tests__/test-descriptor-routing.js
++++ b/modules/intergrations/blockbook/__tests__/test-descriptor-routing.js
+@@ -42,21 +42,33 @@
+   assert.ok(!isExtendedKeyQuery(addr), `${addr.slice(0, 16)}… must route to /api/v2/address/`)
+ }
+ 
+-// A descriptor must still get its inner SLIP-132 key remapped. Mtub→ypub is load-bearing:
+-// hand Blockbook an un-remapped Mtub and it derives the wrong address type *silently*.
++// Litecoin Blockbook recognizes Mtub as wrapped SegWit. Rewriting it to
++// Bitcoin ypub silently selects the wrong address family and can report zero.
+ const { normalizeExtendedKeyVersion } = blockbook
+-// Valid SLIP-132 Mtub (version 0x01b26ef6, real checksum), re-encoded from XPUB above so
+-// it is public test-vector material. normalizeExtendedKeyVersion uses plain bs58 and does
+-// not validate checksums, so a hand-typed vector would pass on garbage — this one is real.
++// Public fixture re-encoded from the XPUB above, with a real Base58Check checksum.
+ const MTUB = 'Mtub2rwZTBXprdmiWuWPiFgiGk3NBRhwam83mwap3Ub4nuXKES2tdhExzDkvGjGtA52HCtzhYz8XHYLkqn2AppiGBDczq6o7XrnR7aZ8KwAvyUc'
+-const normalizedBare = normalizeExtendedKeyVersion(MTUB)
+-const normalizedDesc = normalizeExtendedKeyVersion(`tr(${MTUB})`)
+-assert.ok(normalizedBare.startsWith('ypub'), `bare Mtub must remap to ypub, got ${normalizedBare.slice(0, 4)}`)
+-assert.strictEqual(normalizedDesc, `tr(${normalizedBare})`, 'descriptor must remap the key INSIDE the wrapper')
++assert.strictEqual(normalizeExtendedKeyVersion(MTUB), MTUB, 'wrapped Litecoin must preserve Mtub')
++assert.strictEqual(normalizeExtendedKeyVersion(`tr(${MTUB})`), `tr(${MTUB})`, 'descriptor normalization must preserve Mtub')
+ 
+-// Plain BTC keys are already standard — remapping must leave them alone, wrapped or not.
+-assert.strictEqual(normalizeExtendedKeyVersion(XPUB), XPUB, 'xpub must pass through unchanged')
+-assert.strictEqual(normalizeExtendedKeyVersion(`tr(${XPUB})`), `tr(${XPUB})`, 'tr(xpub) must pass through unchanged')
++const b58 = require('bs58')
++const crypto = require('crypto')
++function withVersion(key, version) {
++  const decoded = Buffer.from(b58.decode(key))
++  const payload = Buffer.concat([Buffer.from(version, 'hex'), decoded.subarray(4, -4)])
++  const checksum = crypto.createHash('sha256').update(crypto.createHash('sha256').update(payload).digest()).digest().subarray(0, 4)
++  return b58.encode(Buffer.concat([payload, checksum]))
++}
++const ZPUB = withVersion(XPUB, '04b24746')
++for (const key of [XPUB, ZPUB]) {
++  assert.strictEqual(normalizeExtendedKeyVersion(key), key, 'standard/native key must pass through unchanged')
++  assert.strictEqual(normalizeExtendedKeyVersion(`tr(${key})`), `tr(${key})`, 'descriptor must preserve standard/native key')
++}
++for (const [prefix, version] of [['Ltub', '019da462'], ['dgub', '02facafd'], ['drkp', '02fe52cc']]) {
++  const key = withVersion(XPUB, version)
++  assert.ok(key.startsWith(prefix), 'fixture must use the intended coin version')
++  assert.strictEqual(normalizeExtendedKeyVersion(key), XPUB, `${prefix} must retain legacy xpub normalization`)
++  assert.strictEqual(normalizeExtendedKeyVersion(`tr(${key})`), `tr(${XPUB})`, `${prefix} must normalize inside descriptors`)
++}
+ 
+ // The assertions above lock the FUNCTION. They do not stop a caller from routing around
+ // it, which is exactly what happened: a later branch added
+@@ -64,7 +76,7 @@
+ //     if (!isDescriptor) pubkey = normalizeExtendedKeyVersion(pubkey)
+ // on the theory that descriptors must be "passed through untouched". Every assertion above
+ // still passed, because the function was never the problem — the call site skipped it. For
+-// BTC that is invisible (xpub has no remap entry); for tr(Ltub…)/tr(Mtub…)/tr(dgub…) it
++// BTC that is invisible (xpub has no remap entry); for tr(Ltub…)/tr(dgub…)/tr(drkp…) it
+ // silently hands Blockbook an un-remapped key and yields a confident wrong balance.
+ //
+ // So: guard the call sites too. Normalization is already descriptor-aware — wrapping it in
+@@ -80,7 +92,7 @@
+   assert.ok(!pattern.test(lib),
+     `${why} was re-added around normalizeExtendedKeyVersion. Remove it: the function already ` +
+     'unwraps tr(...) and remaps the key inside. Skipping it breaks LTC/DGB/DASH taproot with ' +
+-    'a silent wrong balance — see the Mtub→ypub assertions above.')
++    'a silent wrong balance — see the legacy-key descriptor assertions above.')
+ }
+ 
+ console.log('✅ descriptor routing: tr() → /api/v2/xpub/, extended keys unchanged, addresses unchanged')

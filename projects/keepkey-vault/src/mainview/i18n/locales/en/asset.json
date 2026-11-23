@@ -126,6 +126,7 @@
   "zcashPrivateScanNeeded": "Not scanned yet. Your shielded balance may be missing.",
   "zcashPrivatePending": "+ {{amount}} ZEC pending / awaiting confirmations",
   "zcashSeparateSync": "Transparent refresh does not scan shielded payments.",
+  "zcashShield": "Shield",
   "zcashShieldGuide": "How to shield, unshield and sync",
   "zcashPrivacySettings": "Privacy settings",
   "zcashTransparentOnly": "Transparent balance only",

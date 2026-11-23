@@ -10,10 +10,11 @@
 import {afterAll, beforeAll, describe, expect, mock, test} from 'bun:test'
 import {dlopen, FFIType, ptr} from 'bun:ffi'
 import {EventEmitter} from 'node:events'
-import {existsSync} from 'node:fs'
+import {existsSync, writeFileSync} from 'node:fs'
 import * as core from '@keepkey/hdwallet-core'
 import {Transport, create, type TransportDelegate} from '@keepkey/hdwallet-keepkey'
 import * as Messages from '@keepkey/device-protocol/lib/messages_pb'
+import { assertPinDisplay, pinDisplaySymbols } from './pin-display'
 
 const library = process.env.KK_EMU_DYLIB
 if (!library || !existsSync(library)) throw new Error('Set KK_EMU_DYLIB to the firmware library under test')
@@ -27,6 +28,9 @@ mock.module('@keepkey/hdwallet-keepkey-nodehid', () => ({HIDKeepKeyAdapter: {use
 mock.module('@keepkey/hdwallet-keepkey-nodewebusb', () => ({NodeWebUSBKeepKeyAdapter: {useKeyring: () => ({})}}))
 mock.module('usb', () => ({usb: new EventEmitter()}))
 mock.module('electrobun/bun', () => ({Utils: {paths: {userData: '/tmp/kk-pin-test-unused'}}}))
+// db.ts imports the side-effect-free entry directly. A clean certification
+// runner has no native app devkit, and this fixture must never open storage.
+mock.module('electrobun/main/utils', () => ({ paths: { get userData() { throw new Error('PIN fixture must not open wallet storage') } } }))
 // This fixture owns its anonymous FFI flash directly. A fallback through the
 // saved-emulator adapter must fail here instead of consulting the user's home.
 mock.module('../../src/bun/emulator', () => ({
@@ -62,9 +66,7 @@ function openLibrary() {
     kkemu_stop: {args: [], returns: FFIType.void},
     kkemu_write: {args: [FFIType.ptr, FFIType.u64, FFIType.i32], returns: FFIType.i32},
     kkemu_read: {args: [FFIType.ptr, FFIType.u64, FFIType.i32], returns: FFIType.i32},
-    kkemu_pop_frame: {args: [FFIType.ptr], returns: FFIType.i32},
-    get_pin_font: {args: [], returns: FFIType.ptr},
-    draw_char: {args: [FFIType.ptr, FFIType.ptr, FFIType.i8, FFIType.ptr], returns: FFIType.void},
+    ...pinDisplaySymbols,
   })
 }
 
@@ -136,52 +138,7 @@ async function assertPinDigitsVisible() {
   // wallet or copy the matrix into Desktop's UI. It stays an OLED-only input.
   const matrix = state.message.matrix as string
   expect(matrix.split('').sort().join('')).toBe('123456789')
-  const expected = Buffer.alloc(256 * 64, 0x11)
-  // C Canvas: buffer pointer, uint16 height/width, bool dirty. Draw into an
-  // independent canvas using the firmware's actual PIN font, not its live
-  // canvas. Both macOS arm64/x64 layouts have an eight-byte pointer.
-  const canvas = Buffer.alloc(16)
-  canvas.writeBigUInt64LE(BigInt(ptr(expected)), 0)
-  canvas.writeUInt16LE(64, 8)
-  canvas.writeUInt16LE(256, 10)
-  const regions: Array<{x: number; y: number; width: number}> = []
-  for (let row = 0; row < 3; row++) {
-    for (let col = 0; col < 3; col++) {
-      const digit = matrix[col + (2 - row) * 3]
-      const x = 200 + col * 19 + (digit === '1' ? 1 : 0)
-      const y = 8 + row * 19
-      const params = Buffer.alloc(6)
-      params[0] = 255
-      params.writeUInt16LE(x, 2)
-      params.writeUInt16LE(y, 4)
-      ffi.symbols.draw_char(ptr(canvas), ffi.symbols.get_pin_font(), digit.charCodeAt(0), ptr(params))
-      regions.push({x, y, width: digit === '1' ? 4 : 8})
-    }
-  }
-  const threshold = [[0,128,32,160],[192,64,224,96],[48,176,16,144],[240,112,208,80]]
-  const frame = new Uint8Array(2048)
-  let matches = false
-  let best = 0
-  const deadline = performance.now() + 2500
-  while (!matches && performance.now() < deadline) {
-    for (let drained = 0; drained < 64 && ffi.symbols.kkemu_pop_frame(ptr(frame)); drained++) {
-      const matching = regions.filter(({x,y,width}) => {
-        for (let yy = y; yy < y + 12; yy++) {
-          for (let xx = x; xx < x + width; xx++) {
-            const lit = expected[yy * 256 + xx] > threshold[yy & 3][xx & 3]
-            if (!!(frame[(yy >> 3) * 256 + xx] & (1 << (yy & 7))) !== lit) return false
-          }
-        }
-        return true
-      }).length
-      best = Math.max(best, matching)
-      matches = matching === 9
-      if (matches) break
-    }
-    if (!matches) await sleep(20)
-  }
-  console.log('  OLED regression: visible matching digit cells', best)
-  expect(matches).toBe(true)
+  await assertPinDisplay(ffi, matrix)
 }
 
 function run(operation: () => Promise<unknown>) {
@@ -216,7 +173,11 @@ beforeAll(async () => {
   await wallet.loadDevice({mnemonic: seed, pin: false, passphrase: false, skipChecksum: false})
   delegate.onButtonRequest = null
   engine = new EngineController()
-  Object.assign(engine, {wallet, activeTransport: 'emulator', cachedFeatures: await wallet.getFeatures()})
+  const features = await wallet.getFeatures()
+  const version = [features.majorVersion, features.minorVersion, features.patchVersion].join('.')
+  if (process.env.KK_EMU_EXPECTED_FIRMWARE_VERSION) expect(version).toBe(process.env.KK_EMU_EXPECTED_FIRMWARE_VERSION)
+  if (process.env.KK_EMU_RUNTIME_RECEIPT) writeFileSync(process.env.KK_EMU_RUNTIME_RECEIPT, JSON.stringify({ version }) + '\n')
+  Object.assign(engine, {wallet, activeTransport: 'emulator', cachedFeatures: features})
   ;(engine as any).attachTransportListeners()
   engine.on('pin-request', ({type}) => pins.push(type))
 })

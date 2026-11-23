@@ -175,4 +175,36 @@ describe('Vault identities and address book projection', () => {
     expect(Object.keys(contacts[0]).sort()).toEqual(['destination', 'destinationType', 'label', 'network'])
     db.close()
   })
+
+  test('persists the contract and every signer, and exposes it only to a cosigner wallet', () => {
+    const db = new Database(':memory:'), book = new VaultAddressBook(db)
+    const vault = safeVaultIdentity(safe, false)
+    book.sync(scope, 'safe', [vault])
+    const stored = db.query('SELECT address, metadata FROM vault_addressbook').get() as { address: string; metadata: string }
+    expect(stored.address).toBe(safe.address.toLowerCase())
+    expect(JSON.parse(stored.metadata).cosigners.map((c: { address: string }) => c.address)).toEqual(safe.owners)
+    const key = (address: string) => [{ family: 'evm' as const, address, xpub: '' }]
+    expect(book.listForWallet(key(safe.owners[0]))).toHaveLength(1)
+    expect(book.listForWallet(key(safe.address))).toHaveLength(0)
+    expect(book.listForWallet(key('0x' + '9'.repeat(40)))).toHaveLength(0)
+    expect(book.listForWallet([])).toHaveLength(0)
+    // A newer reviewed owner list wins over copies still saved by an old owner.
+    book.sync({ walletId: 'directory', deviceId: '' }, 'safe', [{ ...vault, cosigners: [{ address: safe.owners[1] }], threshold: 1 }])
+    expect(book.listForWallet(key(safe.owners[0]))).toHaveLength(0)
+    expect(book.listForWallet(key(safe.owners[1]))).toHaveLength(1)
+    db.close()
+  })
+
+  test('refuses incomplete or ambiguous Safe signer records before writing', () => {
+    const db = new Database(':memory:'), book = new VaultAddressBook(db)
+    const vault = safeVaultIdentity(safe, false)
+    for (const invalid of [
+      { ...vault, cosigners: [] },
+      { ...vault, cosigners: [{ address: safe.owners[0] }, { address: safe.owners[0] }] },
+      { ...vault, threshold: 3 },
+      { ...vault, accountId: 'eip155:1:' + safe.address },
+    ]) expect(() => book.sync(scope, 'safe', [invalid])).toThrow()
+    expect(book.list()).toHaveLength(0)
+    db.close()
+  })
 })

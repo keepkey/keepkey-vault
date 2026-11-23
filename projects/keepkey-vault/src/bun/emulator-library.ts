@@ -164,7 +164,7 @@ export interface SelectedEmulatorLibrary {
   problem: string | null
 }
 
-/** User-installed libraries remain an explicit override; releases need no install.
+/** The bundled library is the default. Legacy installs support runs without a bundle.
  *  A selected build that is not available is reported, never replaced by another. */
 export function selectedEmulatorLibrary(options: {
   importDir: string
@@ -180,11 +180,12 @@ export function selectedEmulatorLibrary(options: {
   const home = options.home ?? homedir()
   const selected = selectedEmulatorBuild(home)
   if (!selected) {
+    const bundled = bundledEmulatorCandidates(options.importDir, options.cwd ?? process.cwd(), platform).find(exists)
+    if (bundled) return { id: null, path: bundled, problem: null }
     const override = userEmulatorLibPath(platform, home)
     if (exists(override)) return { id: null, path: override, problem: null }
-    const bundled = bundledEmulatorCandidates(options.importDir, options.cwd ?? process.cwd(), platform).find(exists) ?? null
     const how = platform === 'win32' ? 'make build-emulator-windows' : 'make build-emulator'
-    return { id: null, path: bundled, problem: bundled ? null : `Bundled emulator missing. Drop a ${emulatorLibFilename(platform)} onto the window or run: ${how}` }
+    return { id: null, path: null, problem: `Bundled emulator missing. Drop a ${emulatorLibFilename(platform)} onto the window or run: ${how}` }
   }
   const research = bundledMoneroEmulatorBuilds({ importDir: options.importDir,
     cwd: options.cwd, platform, arch: options.arch, enabled: options.moneroEnabled, selectedId: selected }).find(build => build.id === selected)

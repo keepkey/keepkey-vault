@@ -1,0 +1,51 @@
+7.16 verifier /tmp/kk-safe-clearsign-build/bin/erc7730-validate sha256 66a899af762c023ce3bf4737c6a48326a5ac25a7cfcbbd16bd9c00a6803eea3a: accepts all 10 leaves
+[Sign Catalog]
+1 entries
+ERC-7730 roots 1
+[Scopes]
+8453
+[Fingerprint 1/2]
+7ee1e87b 5389b93e b3e5f24b ff5f082e
+[Fingerprint 2/2]
+d34e933a 993acf5c f104b1e7 9fa9eba1
+  0 erc7730-catalog-root scope 8453 digest fbefa4a84f31743eb0ee16db8937005c00240614a3992135a610279b30b767d4
+      leaf chain 8453 calldata contract 0x57c193ea42ae3992d1350099670d672c4da4f9d9 0d582f13
+        label "Add Safe owner"
+        label "New owner"
+        label "Required signatures"
+      leaf chain 8453 calldata contract 0x57c193ea42ae3992d1350099670d672c4da4f9d9 610b5925
+        label "Enable Safe module"
+        label "Module"
+      leaf chain 8453 calldata contract 0x57c193ea42ae3992d1350099670d672c4da4f9d9 694e80c3
+        label "Change Safe threshold"
+        label "Required signatures"
+      leaf chain 8453 calldata contract 0x57c193ea42ae3992d1350099670d672c4da4f9d9 e009cfde
+        label "Disable Safe module"
+        label "Module"
+        label "Previous module"
+      leaf chain 8453 calldata contract 0x57c193ea42ae3992d1350099670d672c4da4f9d9 e19a9dd9
+        label "Guard"
+        label "Set Safe guard"
+      leaf chain 8453 calldata contract 0x57c193ea42ae3992d1350099670d672c4da4f9d9 e318b52b
+        label "New owner"
+        label "Old owner"
+        label "Previous owner"
+        label "Replace Safe owner"
+      leaf chain 8453 calldata contract 0x57c193ea42ae3992d1350099670d672c4da4f9d9 f08a0323
+        label "Handler"
+        label "Set Safe fallback handler"
+      leaf chain 8453 calldata contract 0x57c193ea42ae3992d1350099670d672c4da4f9d9 f8dc5dd9
+        label "Previous owner"
+        label "Remove Safe owner"
+        label "Remove owner"
+        label "Required signatures"
+      leaf chain 8453 calldata contract 0x833589fcd6edb6e08f4c7c32d4f71b54bda02913 a9059cbb
+        label "Amount"
+        label "Recipient"
+        label "Transfer Base USDC"
+        label "USDC"
+      leaf chain 8453 eip712 contract 0x57c193ea42ae3992d1350099670d672c4da4f9d9 bb8310d486368db6bd6f849402fdd73ad53d316b5a4b2644ad6efe0f941286d8
+        deployment chain 8453 0x57c193ea42ae3992d1350099670d672c4da4f9d9
+        label "Approve Safe transaction"
+        label "Safe call"
+        label "Safe nonce"

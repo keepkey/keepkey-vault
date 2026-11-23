@@ -2,11 +2,12 @@ import {paidProviderRefreshOptions,type ProviderRefreshReason} from '../shared/p
 import { withTimeout } from './engine-controller'
 import { getPioneer } from './pioneer'
 import { apiLogScanTxidExists, insertApiLog, updateApiLogTxMeta } from './db'
-import { btcTaprootSupported, isChainSupported, type ChainDef } from '../shared/chains'
+import { btcTaprootSupported, type ChainDef } from '../shared/chains'
+import { isHistoryScanChain } from './history-scan-eligibility'
 import { utxoAccountScriptPaths } from './chain-scan'
 import { utxoDiscoveryKey } from './btc-backend/types'
 import { getBtcBackend } from './btc-backend'
-import { nativeTxFeeBaseUnits } from './txbuilder/cosmos'
+import { withNativeTxFee } from './txbuilder/cosmos'
 import type { ActivityType, RecentActivity } from '../shared/types'
 
 const PIONEER_TIMEOUT_MS = 60_000
@@ -121,9 +122,6 @@ function normalizeAddressField(field: any): string | undefined {
 }
 
 export function normalizeMeta(tx: any, activityType = normalizeActivityType(tx), chain?: ChainDef) {
-  // THOR/Maya history reports the auth fee ('0'); the network charges its
-  // native fee at the bank layer on every send (audit v4 H10).
-  const nativeFee = activityType === 'send' && chain ? nativeTxFeeBaseUnits(chain) : undefined
   return {
     // Absent ≠ zero: a tx returned by the HISTORY endpoint is already on-chain.
     // Defaulting a missing field to 0 falsely renders "Unconfirmed" (red) forever
@@ -133,7 +131,9 @@ export function normalizeMeta(tx: any, activityType = normalizeActivityType(tx),
     confirmations: typeof tx.confirmations === 'number' ? tx.confirmations : undefined,
     blockHeight: tx.blockHeight || tx.block_height || tx.height || 0,
     value: tx.value != null ? String(tx.value) : undefined,
-    fee: nativeFee && !(Number(tx.fee) > 0) ? nativeFee : tx.fee != null ? String(tx.fee) : undefined,
+    // THOR/Maya history reports the auth fee ('0'); the network charges its
+    // native fee at the bank layer on every send (audit v4 H10).
+    fee: withNativeTxFee(tx.fee != null ? String(tx.fee) : undefined, activityType, chain),
     direction: activityType === 'send' ? 'sent' : 'received',
     // Counterparties Pioneer already provides per tx — previously discarded, so
     // historical/received txs showed no addresses in the detail panel.
@@ -242,9 +242,7 @@ function selectChains(
   const requested = new Set([...(options.chainIds || []), ...(options.chainId ? [options.chainId] : [])])
   return chains
     .filter(chain => requested.size === 0 || requested.has(chain.id) || requested.has(chain.symbol))
-    .filter(chain => options.includeHidden || !chain.hidden)
-    .filter(chain => chain.chainFamily !== 'zcash-shielded' && chain.chainFamily !== 'monero')
-    .filter(chain => isChainSupported(chain, firmwareVersion))
+    .filter(chain => isHistoryScanChain(chain, firmwareVersion, options.includeHidden))
 }
 
 export async function rebuildActivityHistory(params: {

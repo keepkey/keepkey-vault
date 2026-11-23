@@ -17,7 +17,7 @@ import { verifyEvmSigner } from './evm-rpc'
 import { assertEvmFeeCapCoversBaseFee } from '../shared/evmFeePreview'
 import { applyEvmTxPreview, attachErc7730Definition, attachErc7730TypedDefinition, applyTypedDataSigningGate, evmPriorityFee, recognizedTypedDataSpender } from './evm-signing-preview'
 import { signWithErc7730Fallback } from './erc7730-resolver'
-import { buildTypedDataReport, evmSigningVerdict, withoutErc7730Description } from './evm-presign-report'
+import { buildTypedDataReport, evmSigningVerdict, withoutErc7730Description, withoutErc7730TypedDescription } from './evm-presign-report'
 import { addSeaportCreatorFee } from './seaport-creator-fee'
 import { addSeaportItemContracts } from './seaport-item-contracts'
 import { buildSolanaMessageDecodedInfo } from './solana-message-preview'
@@ -1113,23 +1113,34 @@ export class WalletConnectManager {
       throw new Error('User rejected signing')
     }
 
+    let cardId: string = signingId
+    let fallbackRejected = false
     try {
       let sentErc7730: Erc7730Catalog | undefined
       const result = await signWithErc7730Fallback(
         { addressNList, typedData, ...(signingInfo.erc7730 ? { erc7730: signingInfo.erc7730 } : {}) },
         ({ erc7730, ...params }: any) => { sentErc7730 = erc7730; return this.callbacks.ethSignTypedData(params, erc7730) },
-        // Refused: the device streams the document instead (7.15+ shows every value).
-        () => { if (observationId) this.callbacks.refuseClearSignObservationDefinition?.(observationId) },
+        async () => {
+          if (observationId) this.callbacks.refuseClearSignObservationDefinition?.(observationId)
+          if (typedData.primaryType !== 'SafeTx') return
+          const again = withoutErc7730TypedDescription(signingInfo)
+          this.callbacks.dismissSigning(cardId)
+          cardId = again.id
+          if (!await this.requestSigningApproval(again)) {
+            fallbackRejected = true
+            throw new Error('User declined signing without the ClearSign description')
+          }
+        },
         '[WC]',
       )
       if (observationId && sentErc7730) this.callbacks.authenticateClearSignObservation(observationId, 'erc7730')
       if (observationId) this.callbacks.finalizeClearSignObservation(observationId, 'signed')
       return result?.signature ?? result
     } catch (error: any) {
-      if (observationId) this.callbacks.finalizeClearSignObservation(observationId, 'failed', 'device-or-transport')
+      if (observationId) this.callbacks.finalizeClearSignObservation(observationId, fallbackRejected ? 'rejected' : 'failed', fallbackRejected ? 'user-rejected' : 'device-or-transport')
       throw error
     } finally {
-      this.callbacks.dismissSigning(signingId)
+      this.callbacks.dismissSigning(cardId)
     }
   }
 

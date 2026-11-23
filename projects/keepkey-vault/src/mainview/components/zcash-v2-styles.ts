@@ -341,10 +341,13 @@ export const ZCASH_V2_CSS = `
 	box-shadow: 0 0 0 1px var(--zk-line) inset;
 }
 .zcash-v2 .submit.alt:hover:not(:disabled) { background: var(--zk-bg-2); box-shadow: 0 0 0 1px var(--zk-fg-faint) inset; }
-.zcash-v2 .submit.warn {
-	background: var(--zk-copper); color: #2a1308;
+.zcash-v2 button.submit.warn {
+	background: linear-gradient(180deg, #e8896a, var(--zk-copper)); color: #2a1308;
+	padding: 12px 26px; min-width: 150px; border-radius: 10px; font-size: 14px; letter-spacing: 0.01em;
+	box-shadow: 0 6px 18px rgba(217,119,87,0.28), 0 1px 0 rgba(255,255,255,0.25) inset;
 }
-.zcash-v2 .submit.warn:hover:not(:disabled) { background: #ea8a6e; }
+.zcash-v2 button.submit.warn:hover:not(:disabled) { background: linear-gradient(180deg, #f09b7e, #e07f5f); transform: translateY(-1px); }
+.zcash-v2 button.submit.warn:disabled { opacity: 0.45; box-shadow: none; cursor: not-allowed; }
 .zcash-v2 .submit.lg { padding: 14px 24px; font-size: 14px; width: 100%; }
 
 .zcash-v2 .ghost-btn {

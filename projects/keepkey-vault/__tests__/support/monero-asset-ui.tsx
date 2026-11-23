@@ -206,6 +206,13 @@ for (const [name, status] of [['rowNotConnected', notConnected], ['rowReady', co
   await unmount()
 }
 
+{
+  const priced = await render(React.createElement(MoneroChainRow, { chain: monero, iconSrc: '', privateMode: false, onOpen() {}, usd: 25.395915,
+    view: moneroBalanceView(connected({ spendStateKnown: true, keyImagesSynced: true }) as any) }))
+  out.rowPriced = { balance: text(q(priced.container, '[data-monero-row-balance]')), fiat: text(q(priced.container, '[data-monero-row-fiat]')) }
+  await priced.unmount()
+}
+
 // ── Opening XMR connects once; technical choices are disclosed only on request ──
 {
   const client = fakeClient(notConnected)
@@ -330,9 +337,6 @@ for (const state of ['waiting', 'failed', 'checking']) {
   const { container, unmount } = await render(React.createElement(Host, { Section: MoneroReceiveSection, client: fakeClient(connected({ restoreHeight: 3_294_960, updatedAt: new Date().toISOString() })) }))
   out.partial = text(q(container, '[data-monero-note]'))
   await unmount()
-  const row = await render(React.createElement(MoneroChainRow, { chain: monero, iconSrc: '', privateMode: false, onOpen() {}, client: fakeClient(connected({ restoreHeight: 3_294_960, spendStateKnown: true, keyImagesSynced: true })) }))
-  out.rowPartial = text(q(row.container, '[data-monero-row-state]'))
-  await row.unmount()
   const old = await render(React.createElement(Host, { Section: MoneroReceiveSection, client: fakeClient(connected({ restoreHeight: 0, syncState: 'scanning', monitorReady: false, updatedAt: '2026-11-06T12:00:00.000Z' })) }))
   out.staleScanning = { balance: text(q(old.container, '[data-monero-balance]')), stale: text(q(old.container, '[data-monero-stale]')) }
   await old.unmount()
@@ -426,6 +430,37 @@ for (const [name, overrides, Section] of [
   await click(q(container, '[data-monero-retry-relay]'))
   out.retryCalls = client.calls.filter(c => c[0] === 'retry').length
   out.discardWithoutCheck = !!q(container, '[data-monero-discard]')
+  out.proofNoticeWhenUnknown = !!q(container, '[data-monero-proof-not-saved]')
+  await unmount()
+}
+{
+  // KEEPKEY-143: the node has the tx, but its payment proof could not be saved.
+  const client = fakeClient(connected({ unrelayedTxid: 'cd'.repeat(32), sendBlocked: 'unrelayed', unrelayedProofNotSaved: true }))
+  const { container, unmount } = await render(React.createElement(Host, { Section: MoneroSendSection, client }))
+  const notice = text(q(container, '[data-monero-unrelayed]')?.closest('[role="alert"]') ?? null)
+  out.proofNotSaved = {
+    text: text(q(container, '[data-monero-proof-not-saved]')),
+    generic: notice.includes('still being checked'),
+    txid: text(q(container, '[data-monero-unrelayed]')),
+    form: !!q(container, '[data-monero-send-address]'),
+    discard: !!q(container, '[data-monero-discard]'),
+  }
+  out.proofNotSaved.stillBeforeRetry = !!q(container, '[data-monero-proof-still-unsaved]')
+  // Check again while saving still fails: the status stays flagged, and the click gets an answer.
+  await click(q(container, '[data-monero-retry-relay]'))
+  out.proofNotSaved.retryCalls = client.calls.filter(c => c[0] === 'retry').length
+  out.proofNotSaved.stillAfterRetry = text(q(container, '[data-monero-proof-still-unsaved]'))
+  out.proofNotSaved.noticeAfterRetry = !!q(container, '[data-monero-proof-not-saved]')
+  await unmount()
+}
+{
+  // Check again after the disk was fixed: the proof is saved, so neither notice is left behind.
+  const client = fakeClient(connected({ unrelayedTxid: 'cd'.repeat(32), sendBlocked: 'unrelayed', unrelayedProofNotSaved: true }))
+  const { container, unmount } = await render(React.createElement(Host, { Section: MoneroSendSection, client }))
+  client.set(connected())
+  await click(q(container, '[data-monero-retry-relay]'))
+  out.proofSaved = { notice: !!q(container, '[data-monero-proof-not-saved]'), still: !!q(container, '[data-monero-proof-still-unsaved]'),
+    banner: !!q(container, '[data-monero-retry-relay]'), sent: text(q(container, '[data-monero-sent]')) }
   await unmount()
 }
 {

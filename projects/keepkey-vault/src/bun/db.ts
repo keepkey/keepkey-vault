@@ -8,6 +8,7 @@ import { Database } from 'bun:sqlite'
 import { migratePublicKeyCache } from './public-key-cache-migration'
 import { DEFAULT_PIONEER_API_BASE, resolvePioneerApiBase } from '../shared/pioneer-server'
 import { CHAINS } from '../shared/chains'
+import { withNativeTxFee, withNativeTxFeeDisplay } from './txbuilder/cosmos'
 // The utils entry, not the package index: the index creates native windows on import,
 // which throws anywhere outside a running app (unit tests import this module).
 import * as Utils from 'electrobun/main/utils'
@@ -23,6 +24,7 @@ import type { VerifiedClearSignArtifact } from './clearsign-artifact-import'
 import { configureClearSignArtifactSnapshots } from './clearsign-artifact-resolver'
 import { configureClearSignProviders, ensureClearSignProviderTable, listClearSignProviders } from './clearsign-providers'
 import { oldestBalanceUpdatedAt } from '../shared/balance-cache-policy'
+import { isEnsName, type ResolvedEnsContact } from '../shared/ens'
 
 const SCHEMA_VERSION = '10'
 
@@ -431,6 +433,7 @@ export function initDb() {
     try { db.exec(`ALTER TABLE addressbook ADD COLUMN saved_at INTEGER`) } catch { /* already exists */ }
     // `cosigner`: the user marked this address as a Safe co-owner candidate. A note, not a verification.
     try { db.exec(`ALTER TABLE addressbook ADD COLUMN cosigner INTEGER NOT NULL DEFAULT 0`) } catch { /* already exists */ }
+    try { db.exec(`ALTER TABLE addressbook ADD COLUMN ens_name TEXT`) } catch { /* already exists */ }
     try {
       db.exec(`UPDATE addressbook SET saved_at = COALESCE(saved_at, updated_at)
                WHERE kind = 'external' AND saved_at IS NULL
@@ -2114,6 +2117,26 @@ export function dismissActivity(id: string, deviceId?: string, walletId?: string
   }
 }
 
+/** Fee for a SCAN row (base units). THOR/Maya rows stored before the history
+ *  fix (audit v4 H10) kept the auth fee '0' until a rescan rewrote them, and a
+ *  send outside the window Pioneer returns is never rescanned. Apply the same
+ *  rule normalizeMeta writes (audit v6 R6). Rows without meta.chainId fall back
+ *  to the scan route (`history/<chainId>`), as the chain filter above does. */
+function scanRowFee(meta: any, activityType: string, route: string | null): string | undefined {
+  const chainId = meta?.chainId ?? route?.match(/^history\/(.+)$/)?.[1]
+  const chain = chainId ? CHAINS.find(c => c.id === chainId) : undefined
+  return withNativeTxFee(meta?.fee ?? undefined, activityType, chain)
+}
+
+/** Fee for a send Vault logged itself (RPC broadcastTx, display units). Its
+ *  fee wins over the scan row's in mergeTxRows, so a THOR/Maya send made before
+ *  the native fee was charged in displayFee still read "fee: 0 RUNE". */
+function appRowFee(meta: any, activityType: string): string | undefined {
+  const fee = meta?.fee ?? undefined
+  if (activityType !== 'broadcast' || !meta?.chainId) return fee
+  return withNativeTxFeeDisplay(fee, CHAINS.find(c => c.id === meta.chainId))
+}
+
 export function getRecentActivityFromLog(limit?: number, chainFilter?: string, deviceId?: string, walletId?: string): RecentActivity[] {
   try {
     if (!db) return []
@@ -2171,7 +2194,7 @@ export function getRecentActivityFromLog(limit?: number, chainFilter?: string, d
         confirmations: meta?.confirmations ?? undefined,
         blockHeight: meta?.blockHeight ?? undefined,
         amount: meta?.value ?? undefined,
-        fee: meta?.fee ?? undefined,
+        fee: isScan ? scanRowFee(meta, r.activity_type, r.route) : appRowFee(meta, r.activity_type),
         to: meta?.to ?? undefined,
         from: meta?.from ?? undefined,
         asset: meta?.asset ?? undefined,
@@ -2934,7 +2957,7 @@ export function setSwapRelayRequestId(txid: string, relayRequestId: string, devi
 /** Normalize an address for storage/dedupe. EVM is case-insensitive and must be
  *  lowercased; every other family is case-sensitive and stored verbatim. */
 export function normalizeAddress(address: string, chainFamily: string): string {
-  return chainFamily === 'evm' ? address.toLowerCase() : address
+  return chainFamily === 'evm' ? address.trim().toLowerCase() : address
 }
 
 function mapAddressBookRow(r: any): AddressBookEntry {
@@ -2947,6 +2970,8 @@ function mapAddressBookRow(r: any): AddressBookEntry {
     chainId: r.chain_id,
     address: r.address,
     label: r.label || undefined,
+    ensName: r.ens_name || undefined,
+    isEns: r.ens_name ? true : undefined,
     derivationPath: r.derivation_path || undefined,
     scriptType: r.script_type || undefined,
     addressIndex: r.address_index ?? undefined,
@@ -3090,9 +3115,9 @@ export function getAddressBookList(filter: AddressBookFilter): AddressBookEntry[
     if (filter.kind)      { sql += ' AND kind = ?';       params.push(filter.kind) }
     if (filter.savedOnly) { sql += ' AND saved_at IS NOT NULL' }
     if (filter.search) {
-      sql += ` AND (label LIKE ? ESCAPE '\\' OR address LIKE ? ESCAPE '\\')`
+      sql += ` AND (label LIKE ? ESCAPE '\\' OR address LIKE ? ESCAPE '\\' OR ens_name LIKE ? ESCAPE '\\')`
       const q = `%${filter.search.replace(/[\\%_]/g, c => '\\' + c)}%`
-      params.push(q, q)
+      params.push(q, q, q)
     }
     sql += ' ORDER BY updated_at DESC LIMIT ? OFFSET ?'
     params.push(filter.limit ?? 1000, filter.offset ?? 0)
@@ -3220,29 +3245,33 @@ function evmCosigner(address: string, networkId: string, walletId: string): numb
 export function addExternalEntry(args: {
   walletId: string; deviceId: string; networkId: string; chainId: string; chainFamily: string; address: string; label?: string | null
   cosigner?: boolean
+  ensName?: string
 }): AddressBookEntry | null {
   try {
     if (!db) return null
+    if (args.chainFamily === 'evm' && isEnsName(args.address)) throw new Error('Resolve ENS before saving an address')
     const addr = normalizeAddress(args.address, args.chainFamily)
     const now = Date.now()
     const cosigner = args.cosigner === undefined ? null : args.cosigner ? 1 : 0
-    const existing = db.query('SELECT id, label FROM addressbook WHERE wallet_id = ? AND network_id = ? AND address = ?')
-      .get(args.walletId, args.networkId, addr) as { id: string; label: string | null } | null
+    const existing = db.query('SELECT id, label, ens_name FROM addressbook WHERE wallet_id = ? AND network_id = ? AND address = ?')
+      .get(args.walletId, args.networkId, addr) as { id: string; label: string | null; ens_name: string | null } | null
     let id: string
     if (existing) {
       id = existing.id
       // Explicit save — confirm the contact (preserve the original save date if any).
       // A plain re-save (no cosigner given) keeps an existing co-signer flag; marking a
       // co-signer without a name keeps the name already saved.
-      const label = cosigner !== null && !args.label ? existing.label : (args.label ?? null)
-      db.run('UPDATE addressbook SET label = ?, saved_at = COALESCE(saved_at, ?), cosigner = COALESCE(?, cosigner), updated_at = ? WHERE id = ?', [label, now, cosigner, now, id])
+      const label = args.ensName || (existing.ens_name && args.label === undefined
+        ? existing.label || existing.ens_name
+        : cosigner !== null && !args.label ? existing.label : (args.label ?? null))
+      db.run('UPDATE addressbook SET label = ?, ens_name = COALESCE(?, ens_name), saved_at = COALESCE(saved_at, ?), cosigner = COALESCE(?, cosigner), updated_at = ? WHERE id = ?', [label, args.ensName ?? null, now, cosigner, now, id])
     } else {
       id = crypto.randomUUID()
       db.run(
         `INSERT INTO addressbook
-           (id, wallet_id, device_id, kind, network_id, chain_id, address, label, saved_at, cosigner, created_at, updated_at)
-         VALUES (?, ?, ?, 'external', ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [id, args.walletId, args.deviceId, args.networkId, args.chainId, addr, args.label ?? null, now, cosigner ?? evmCosigner(addr, args.networkId, args.walletId), now, now],
+           (id, wallet_id, device_id, kind, network_id, chain_id, address, label, ens_name, saved_at, cosigner, created_at, updated_at)
+         VALUES (?, ?, ?, 'external', ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [id, args.walletId, args.deviceId, args.networkId, args.chainId, addr, args.ensName || args.label || null, args.ensName ?? null, now, cosigner ?? evmCosigner(addr, args.networkId, args.walletId), now, now],
       )
     }
     if (cosigner !== null) setEvmCosigner(id, cosigner === 1)
@@ -3252,6 +3281,36 @@ export function addExternalEntry(args: {
     console.warn('[db] addExternalEntry failed:', e.message)
     return null
   }
+}
+
+/** Resolve an old name-as-address row without losing its outbound history.
+ * If its canonical address already exists in the same wallet, merge into it. */
+export function resolveStoredEnsContact(entry: AddressBookEntry, resolved: ResolvedEnsContact): boolean {
+  const database = db
+  if (!database || !isEnsName(entry.address) || !entry.networkId.startsWith('eip155:')) return false
+  const address = normalizeAddress(resolved.address, 'evm')
+  if (!isEnsName(resolved.ensName) || !/^0x[0-9a-f]{40}$/.test(address) || /^0x0{40}$/.test(address)) throw new Error('Invalid resolved ENS address')
+  return database.transaction(() => {
+    const old = database.query("SELECT * FROM addressbook WHERE id = ? AND kind = 'external' AND address = ?")
+      .get(entry.id, entry.address) as any
+    if (!old) return false
+    const target = database.query('SELECT * FROM addressbook WHERE wallet_id = ? AND network_id = ? AND address = ? AND id != ?')
+      .get(old.wallet_id, old.network_id, address, old.id) as any
+    if (target?.kind === 'own') throw new Error('ENS resolves to an own-wallet address')
+    if (target) {
+      const note = target.note && old.note && target.note !== old.note ? `${target.note}\n${old.note}` : target.note || old.note
+      database.run('UPDATE addressbook_tx SET entry_id = ? WHERE entry_id = ?', [target.id, old.id])
+      database.run(`UPDATE addressbook SET label = ?, ens_name = ?, cosigner = MAX(cosigner, ?),
+        saved_at = COALESCE(saved_at, ?), created_at = MIN(created_at, ?),
+        first_seen_txid = COALESCE(first_seen_txid, ?), note = ?, updated_at = ? WHERE id = ?`,
+        [resolved.ensName, resolved.ensName, old.cosigner, old.saved_at, old.created_at, old.first_seen_txid, note ?? null, Date.now(), target.id])
+      database.run('DELETE FROM addressbook WHERE id = ?', [old.id])
+    } else {
+      database.run('UPDATE addressbook SET address = ?, label = ?, ens_name = ?, updated_at = ? WHERE id = ?',
+        [address, resolved.ensName, resolved.ensName, Date.now(), old.id])
+    }
+    return true
+  })()
 }
 
 /** device_id -> label, from device_snapshot (the registered/watch-only device list).

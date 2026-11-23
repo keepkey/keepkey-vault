@@ -20,6 +20,7 @@ globalThis.fetch = (() => { throw new Error('Network requests are forbidden in t
 const db = await import('../../src/bun/db')
 const { AuthStore } = await import('../../src/bun/auth')
 const { startRestApi } = await import('../../src/bun/rest-api')
+const { SigningReviewSessions } = await import('../../src/bun/signing-review-session')
 db.initDb()
 
 const source = ts.createSourceFile('index.ts', readFileSync(process.env.WINDOW_APPROVAL_FOCUS_SOURCE || new URL('../../src/bun/index.ts', import.meta.url), 'utf8'), ts.ScriptTarget.Latest, true, ts.ScriptKind.TS)
@@ -92,7 +93,8 @@ const unlockCallback = expression(required(rpcProperty('requestDeviceUnlock')?.i
 const restCallbackNames = ['onDeviceRequest', 'onSigningRequest', 'onSigningDismissed', 'onPairRequest', 'onPairDismissed']
 const code = transpiler.transformSync(`
   const {mainWindow, rpc, auth, engine, BrowserWindow, pkg, url, attachSigningPolicySnapshot,
-    attachSafeKnownAddresses, attachSafeCallPreviews, attachSafeMessagePreimage, reviewTapeRecording, recordReviewCard, deviceOperationContext} = dependencies;
+    attachSafeKnownAddresses, attachSafeCallPreviews, attachSafeMessagePreimage, reviewTapeRecording, recordReviewCard, deviceOperationContext,
+    signingReviewSessions, activitySessionEpoch} = dependencies;
   let _alwaysOnTopRefs = 0;
   const blindSigningApprovalIds = new Set();
   const pendingSigningApprovalInfo = new Map();
@@ -129,6 +131,7 @@ function harness() {
     attachSigningPolicySnapshot() {}, attachSafeKnownAddresses() {}, attachSafeCallPreviews: async () => {}, attachSafeMessagePreimage: async () => {},
     reviewTapeRecording: () => false, recordReviewCard() { throw new Error('A real-device callback cannot record a tape') },
     deviceOperationContext: { getStore: () => undefined },
+    signingReviewSessions: new SigningReviewSessions(), activitySessionEpoch: 0,
   }
   const callbacks = createCallbacks(dependencies)
   let server: ReturnType<typeof startRestApi> | undefined

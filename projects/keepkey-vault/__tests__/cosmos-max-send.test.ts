@@ -117,3 +117,32 @@ describe('Cosmos MAX send/deposit fee reserve', () => {
     expect(amount + adjustedFee).toBeLessThan(1000000n)
   })
 })
+
+describe('Osmosis fee is the tx fee, not a bank-layer floor', () => {
+  const osmo = CHAINS.find(c => c.id === 'osmosis')!
+  const osmoAddress = 'osmo1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq'
+  function mockOsmosis(uosmo: string) {
+    globalThis.fetch = (async () => Response.json({ balances: [{ denom: 'uosmo', amount: uosmo }] })) as unknown as typeof fetch
+    return { GetAccountInfo: async () => ({ data: { account: { account_number: '1', sequence: '0' } } }) }
+  }
+
+  // The tx pays 10000/15000/20000 uosmo by fee level; the displayed fee and the
+  // balance check used to apply a 0.035 OSMO floor meant only for THOR/Maya.
+  for (const [feeLevel, paid] of [[1, '0.01'], [3, '0.015'], [5, '0.02']] as const) {
+    test(`feeLevel ${feeLevel} shows the ${paid} OSMO the tx pays`, async () => {
+      const result = await buildCosmosTx(mockOsmosis('1000000'), osmo, {
+        to: osmoAddress, amount: '0.1', feeLevel, fromAddress: osmoAddress,
+      })
+      expect(result.fee).toBe(paid)
+      expect(Number(result.tx.fee.amount[0].amount) / 1e6).toBe(Number(paid))
+    })
+  }
+
+  test('a send that fits amount + the real fee is not refused', async () => {
+    // 0.1 OSMO + 0.02 fee = 0.12 OSMO available: the old 0.035 floor refused it.
+    const result = await buildCosmosTx(mockOsmosis('120000'), osmo, {
+      to: osmoAddress, amount: '0.1', feeLevel: 5, fromAddress: osmoAddress,
+    })
+    expect((result.tx.msg[0] as any).value.amount[0].amount).toBe('100000')
+  })
+})

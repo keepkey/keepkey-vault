@@ -9,11 +9,18 @@
 	"editDerivationPath": "Afleidingspad bewerken",
 	"checkDevice": "Apparaat controleren...",
 	"verifyOnDevice": "Verifiëren op apparaat",
+	"verifyCancelled": "Verificatie geannuleerd op je KeepKey. Het adres is niet bevestigd.",
+	"verifyNoAnswer": "Geen antwoord van je KeepKey. Controleer het scherm en probeer het opnieuw. Het adres is niet bevestigd.",
+	"verifyDeviceLost": "Je KeepKey reageert niet. Sluit hem opnieuw aan en probeer het opnieuw. Het adres is niet bevestigd.",
+	"verifyFailed": "Kan het adres niet op je KeepKey tonen. Het adres is niet bevestigd.",
+	"verifyFailedDetail": "Kan het adres niet op je KeepKey tonen ({{detail}}). Het adres is niet bevestigd.",
+	"verifyNotConfirmedAfter": "{{detail}} Het adres is niet bevestigd.",
 	"derivingAddress": "Adres afleiden...",
 	"noAddressDerived": "Nog geen adres afgeleid",
 	"deriveAddress": "Adres afleiden",
 	"account": "Account {{index}}",
 	"btcAccountType": {
-		"learnMore": "Meer informatie"
+		"learnMore": "Meer informatie",
+		"recommendation": "Twijfel je? Gebruik Native SegWit (bc1…) — het heeft de laagste kosten en wordt ondersteund door elke moderne wallet en exchange."
 	}
 }

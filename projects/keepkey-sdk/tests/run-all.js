@@ -65,7 +65,7 @@ let passed = 0, failed = 0, skipped = 0
 
 // What each suite made Desktop and the device show (see _review.js). Without
 // the emulator's test tape, suites still run but nothing shown is checked.
-const { takeTape, judge } = require('./_review')
+const { takeTape, judge, SUITES } = require('./_review')
 const shown = []
 
 async function main() {
@@ -76,11 +76,20 @@ async function main() {
   }
   for (const test of tests) {
     console.log(`  ── ${test.name} ──`)
+    const reviewOptIn = SUITES[test.name]?.reviewOptIn
+    if (reviewOptIn && process.env[reviewOptIn] === '1' && !taping) {
+      failed++
+      console.error(`  FAILED: ${test.name} requires the emulator review tape`)
+      continue
+    }
     if (taping) await takeTape(true)
     let ok = true
     let wasSkipped = false
     try {
-      execSync(`node "${test.path}"`, { stdio: 'inherit', timeout: SUITE_TIMEOUT_MS })
+      execSync(`node "${test.path}"`, {
+        stdio: 'inherit', timeout: SUITE_TIMEOUT_MS,
+        env: { ...process.env, KEEPKEY_SUITE_RECORDING: taping ? '1' : '0' },
+      })
       passed++
     } catch (e) {
       if (e.status === SKIP_EXIT) {

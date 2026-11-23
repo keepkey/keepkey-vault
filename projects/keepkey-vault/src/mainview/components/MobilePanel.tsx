@@ -1,6 +1,5 @@
 import { Box, Flex, Text, VStack, IconButton } from "@chakra-ui/react"
 import { useTranslation } from "react-i18next"
-import { generateQRSvg } from "../lib/qr"
 import { Z } from "../lib/z-index"
 import { rpcRequest } from "../lib/rpc"
 
@@ -15,7 +14,6 @@ interface MobilePanelProps {
 
 export function MobilePanel({ open, onClose, deviceReady, onOpenPairing }: MobilePanelProps) {
 	const { t } = useTranslation("settings")
-	const appStoreQr = generateQRSvg(APP_STORE_URL, 4, 3)
 
 	if (!open) return null
 
@@ -75,59 +73,6 @@ export function MobilePanel({ open, onClose, deviceReady, onOpenPairing }: Mobil
 
 			<VStack gap="0" align="stretch" p="4">
 
-				{/* ── Get the App ───────────────────────────────── */}
-				<Box bg="kk.cardBg" border="1px solid" borderColor="kk.border" borderRadius="xl" p="5" mb="4">
-					<Flex align="center" gap="2" mb="3">
-						<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--gold)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-							<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-							<polyline points="7 10 12 15 17 10" />
-							<line x1="12" y1="15" x2="12" y2="3" />
-						</svg>
-						<Text fontSize="md" fontWeight="600" color="kk.gold">
-							{t("mobile.getTheApp")}
-						</Text>
-					</Flex>
-
-					<Text fontSize="sm" color="kk.textSecondary" mb="4">
-						{t("mobile.getTheAppDescription")}
-					</Text>
-
-					{/* QR Code */}
-					<Box
-						mx="auto"
-						w="200px"
-						h="200px"
-						bg="white"
-						borderRadius="lg"
-						p="2"
-						mb="3"
-						dangerouslySetInnerHTML={{ __html: appStoreQr }}
-					/>
-
-					<Text fontSize="xs" color="kk.textMuted" textAlign="center" mb="3">
-						{t("mobile.scanToDownload")}
-					</Text>
-
-					{/* Open in browser button */}
-					<Box
-						as="button"
-						w="100%"
-						py="2.5"
-						borderRadius="lg"
-						bg="rgba(233,196,106,0.12)"
-						color="kk.gold"
-						fontSize="sm"
-						fontWeight="500"
-						cursor="pointer"
-						textAlign="center"
-						_hover={{ bg: "rgba(233,196,106,0.22)" }}
-						transition="all 0.15s"
-						onClick={() => rpcRequest("openUrl", { url: APP_STORE_URL })}
-					>
-						{t("mobile.openAppStore")}
-					</Box>
-				</Box>
-
 				{/* ── Pair Device ───────────────────────────────── */}
 				<Box bg="kk.cardBg" border="1px solid" borderColor="kk.border" borderRadius="xl" p="5" mb="4">
 					<Flex align="center" gap="2" mb="3">
@@ -161,6 +106,43 @@ export function MobilePanel({ open, onClose, deviceReady, onOpenPairing }: Mobil
 						onClick={() => { if (deviceReady && onOpenPairing) onOpenPairing() }}
 					>
 						{deviceReady ? t("mobile.pairNow") : t("mobile.connectDevice")}
+					</Box>
+				</Box>
+
+				{/* ── Get the App ───────────────────────────────── */}
+				<Box bg="kk.cardBg" border="1px solid" borderColor="kk.border" borderRadius="xl" p="5" mb="4">
+					<Flex align="center" gap="2" mb="3">
+						<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--gold)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+							<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+							<polyline points="7 10 12 15 17 10" />
+							<line x1="12" y1="15" x2="12" y2="3" />
+						</svg>
+						<Text fontSize="md" fontWeight="600" color="kk.gold">
+							{t("mobile.getTheApp")}
+						</Text>
+					</Flex>
+
+					<Text fontSize="sm" color="kk.textSecondary" mb="4">
+						{t("mobile.getTheAppDescription")}
+					</Text>
+
+					{/* Open in browser button */}
+					<Box
+						as="button"
+						w="100%"
+						py="2.5"
+						borderRadius="lg"
+						bg="rgba(233,196,106,0.12)"
+						color="kk.gold"
+						fontSize="sm"
+						fontWeight="500"
+						cursor="pointer"
+						textAlign="center"
+						_hover={{ bg: "rgba(233,196,106,0.22)" }}
+						transition="all 0.15s"
+						onClick={() => rpcRequest("openUrl", { url: APP_STORE_URL })}
+					>
+						{t("mobile.openAppStore")}
 					</Box>
 				</Box>
 

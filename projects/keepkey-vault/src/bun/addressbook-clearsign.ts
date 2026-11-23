@@ -1,5 +1,6 @@
 import { createHash } from 'crypto'
-import type { AddressBookEntry } from '../shared/types'
+import type { AddressBookEntry, AddressBookCertificationPreview } from '../shared/types'
+import { isEnsName } from '../shared/ens'
 import { firmwareClearSigns } from './calldata-decoder'
 
 const REQUEST_MAGIC = Buffer.from('KKABREQ1', 'ascii')
@@ -9,7 +10,8 @@ const LEAF_MAGIC = Buffer.from('KKABLEAF', 'ascii')
 export const ADDRESS_BOOK_CLEARSIGN_VERSION = 1
 export const ADDRESS_BOOK_CLEARSIGN_MAX_ENTRIES = 16
 export const ADDRESS_BOOK_CLEARSIGN_LABEL_MAX = 24
-export const CONTACT_DESTINATION = { EVM_ADDRESS: 1, UTXO_SCRIPT: 2, ACCOUNT_BYTES: 3 } as const
+export const CONTACT_DESTINATION = { EVM_ADDRESS: 1, UTXO_SCRIPT: 2, ACCOUNT_BYTES: 3, ADDRESS_TEXT: 4 } as const
+export const ALL_CHAIN_CONTACT_CAPABILITY = 32
 
 export interface CertifiedContact {
   network: string
@@ -39,13 +41,15 @@ function normalizeContact(contact: CertifiedContact): CertifiedContact {
   if (!/^[A-Za-z0-9-]+:[A-Za-z0-9-]+$/.test(network) || Buffer.byteLength(network) > 63) throw new Error(`Invalid CAIP-2 network: ${contact.network}`)
   if (!Number.isInteger(contact.destinationType) || contact.destinationType <= 0 || contact.destinationType > 255) throw new Error('Invalid destination type')
   const destination = contact.destination.toLowerCase().replace(/^0x/, '')
-  if (!/^[0-9a-f]+$/.test(destination) || destination.length % 2 || destination.length > 128) throw new Error('Invalid canonical destination bytes')
+  if (!/^[0-9a-f]+$/.test(destination) || destination.length % 2 || destination.length > 510) throw new Error('Invalid canonical destination bytes')
   if (contact.destinationType === CONTACT_DESTINATION.EVM_ADDRESS && (!network.startsWith('eip155:') || destination.length !== 40)) throw new Error('Invalid EVM destination')
+  if (contact.destinationType === CONTACT_DESTINATION.ADDRESS_TEXT &&
+      !/^[\x21-\x7e]+$/.test(Buffer.from(destination, 'hex').toString('latin1'))) throw new Error('Invalid canonical address text')
   const label = contact.label.trim()
   const encoded = Buffer.from(label, 'ascii')
   if (!label || encoded.length > ADDRESS_BOOK_CLEARSIGN_LABEL_MAX || encoded.toString('ascii') !== label ||
-      /[%\x00-\x1f\x7f-\xff]/.test(label)) {
-    throw new Error(`Contact label must be 1-${ADDRESS_BOOK_CLEARSIGN_LABEL_MAX} printable ASCII characters without %`)
+      /[%\x00-\x1f\x7f-\xff]| {2}/.test(label)) {
+    throw new Error(`Contact label must be 1-${ADDRESS_BOOK_CLEARSIGN_LABEL_MAX} printable ASCII characters without % or consecutive spaces`)
   }
   return { network, destinationType: contact.destinationType, destination, label }
 }
@@ -84,15 +88,86 @@ function tree(contacts: CertifiedContact[]): Buffer[][] {
   return levels
 }
 
-export function contactsFromEntries(entries: AddressBookEntry[], enforceLimit = true): CertifiedContact[] {
+function contactCandidate(entry: AddressBookEntry, allChains: boolean): entry is AddressBookEntry & { label: string } {
+  return entry.kind === 'external' && !!entry.label && (allChains || entry.networkId.startsWith('eip155:'))
+}
+
+function contactFromEntry(entry: AddressBookEntry & { label: string }): CertifiedContact {
+  const isEvm = entry.networkId.startsWith('eip155:')
+  return normalizeContact({
+    network: entry.networkId,
+    destinationType: isEvm ? CONTACT_DESTINATION.EVM_ADDRESS : CONTACT_DESTINATION.ADDRESS_TEXT,
+    destination: isEvm ? entry.address : Buffer.from(canonicalContactAddress(entry.networkId, entry.address), 'ascii').toString('hex'),
+    label: entry.label,
+  })
+}
+
+function compareContacts(a: CertifiedContact, b: CertifiedContact): number {
+  return a.network.localeCompare(b.network) || a.destinationType - b.destinationType
+    || a.destination.localeCompare(b.destination) || a.label.localeCompare(b.label)
+}
+
+export function contactsFromEntries(entries: AddressBookEntry[], enforceLimit = true, allChains = false): CertifiedContact[] {
   const contacts = entries
-    .filter(entry => entry.kind === 'external' && !!entry.label && entry.networkId.startsWith('eip155:'))
-    .map(entry => normalizeContact({ network: entry.networkId, destinationType: CONTACT_DESTINATION.EVM_ADDRESS, destination: entry.address, label: entry.label! }))
-    .sort((a, b) => a.network.localeCompare(b.network) || a.destinationType - b.destinationType || a.destination.localeCompare(b.destination) || a.label.localeCompare(b.label))
+    .filter((entry): entry is AddressBookEntry & { label: string } => contactCandidate(entry, allChains))
+    .map(contactFromEntry)
+    .sort(compareContacts)
   if (enforceLimit && contacts.length > ADDRESS_BOOK_CLEARSIGN_MAX_ENTRIES) {
     throw new Error(`Alpha firmware supports at most ${ADDRESS_BOOK_CLEARSIGN_MAX_ENTRIES} certified contacts`)
   }
   return contacts
+}
+
+function reviewCertificationEntries(entries: AddressBookEntry[], allChains: boolean) {
+  const contacts: CertifiedContact[] = []
+  const excluded: AddressBookCertificationPreview['excluded'] = []
+  for (const entry of entries) {
+    if (!contactCandidate(entry, allChains)) continue
+    try {
+      if (entry.networkId.startsWith('eip155:') && isEnsName(entry.address)) throw new Error('ENS name has not resolved to an address')
+      contacts.push(contactFromEntry(entry))
+    } catch (error) {
+      excluded.push({ label: entry.label, network: entry.networkId, address: entry.address,
+        reason: error instanceof Error ? error.message : String(error) })
+    }
+  }
+  return { contacts: contacts.sort(compareContacts), excluded }
+}
+
+export function previewCertificationEntries(entries: AddressBookEntry[], allChains = false): AddressBookCertificationPreview {
+  const { contacts, excluded } = reviewCertificationEntries(entries, allChains)
+  return { contacts: contacts.map(c => ({ label: c.label, network: c.network, address: contactAddress(c) })), excluded }
+}
+
+export function selectCertificationContacts(
+  entries: AddressBookEntry[],
+  allChains: boolean,
+  only?: { network: string; address: string }[],
+): CertifiedContact[] {
+  const { contacts } = reviewCertificationEntries(entries, allChains)
+  if (!only) return contacts
+  const selected = new Set(only.map(({ network, address }) => `${network}|${address}`))
+  return contacts.filter(c => selected.has(`${c.network}|${contactAddress(c)}`))
+}
+
+/** A TON friendly address contains presentation flags; the signed destination
+ * is workchain:hash. Validate its checksum before removing those flags. */
+export function canonicalContactAddress(network: string, address: string): string {
+  if (!network.startsWith('ton:')) return address
+  if (/^(0|-1):[0-9a-fA-F]{64}$/.test(address)) return address.toLowerCase()
+  if (!/^[A-Za-z0-9+/_-]{48}$/.test(address)) throw new Error('Invalid TON contact address')
+  const raw = Buffer.from(address, 'base64url')
+  let crc = 0
+  for (const byte of raw.subarray(0, 34)) {
+    crc ^= byte << 8
+    for (let i = 0; i < 8; i++) crc = ((crc << 1) ^ (crc & 0x8000 ? 0x1021 : 0)) & 0xffff
+  }
+  if (raw.length !== 36 || ![0x11, 0x51].includes(raw[0]) || ![0, 255].includes(raw[1]) || crc !== raw.readUInt16BE(34)) throw new Error('Invalid mainnet TON contact address')
+  return `${raw[1] === 255 ? -1 : 0}:${raw.subarray(2, 34).toString('hex')}`
+}
+
+export function contactAddress(contact: CertifiedContact): string {
+  return contact.destinationType === CONTACT_DESTINATION.EVM_ADDRESS ? `0x${contact.destination}` : Buffer.from(contact.destination, 'hex').toString('ascii')
 }
 
 export function buildCertificationRequest(contacts: CertifiedContact[], revision: number): { payload: Buffer; root: Buffer } {
@@ -148,9 +223,9 @@ export function evmRecipient(params: any): { chainId: number; address: string } 
 }
 
 // ── Device answers (firmware #951) ───────────────────────────────────────────
-// There is no capability flag for certified contacts: a 7.16 build without
-// #951 accepts the same messages and answers them differently. These read
-// those answers; nothing here guesses from the version number.
+// Legacy 7.16 builds with and without #951 share messages and version numbers.
+// EVM acknowledgement still comes from the device answer. Native contact
+// delivery additionally requires the explicit all-chain capability above.
 
 const MESSAGETYPE_ETHEREUMMETADATAACK = 116
 /** EthereumMetadataAck.display_summary for an accepted contact proof. */

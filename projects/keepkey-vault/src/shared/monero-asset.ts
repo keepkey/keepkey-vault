@@ -80,6 +80,24 @@ export function moneroBalanceView(status: MoneroStatus | null, refreshError?: st
   // Only a fresh, authoritative ready result may replace it (including zero).
   const cached = status.cachedBalance
   const useCached = cached && !(state === 'ready' && showBalance && (status.spendStateKnown || status.balanceAtomic === '0'))
+  // Fresh but not spend-verified: the saved balance plus payments received after it was saved.
+  // The watch total can't see spends without key images, so it only caps the sum, never replaces it.
+  if (useCached && state === 'ready' && showBalance) {
+    const seen = new Set<string>()
+    let incoming = 0n, incomingUnlocked = 0n
+    for (const tx of status.transactions) {
+      if (seen.has(tx.txid) || !(tx.type === 'pool' || (tx.type === 'in' && (tx.height ?? 0) >= cached.walletHeight))) continue
+      seen.add(tx.txid); incoming += BigInt(tx.amountAtomic); if (!tx.locked && tx.type === 'in') incomingUnlocked += BigInt(tx.amountAtomic)
+    }
+    const min = (a: bigint, b: bigint) => a < b ? a : b
+    const balance = min(BigInt(cached.balanceAtomic) + incoming, BigInt(status.balanceAtomic))
+    const unlocked = min(BigInt(cached.unlockedBalanceAtomic) + incomingUnlocked, min(balance, BigInt(status.unlockedBalanceAtomic)))
+    return {
+      state, ...heights, ...(status.updatedAt ? { updatedAt: status.updatedAt } : {}),
+      balanceAtomic: balance.toString(), unlockedAtomic: unlocked.toString(), lockedAtomic: (balance - unlocked).toString(),
+      spendVerified: true, stale: false,
+    }
+  }
   if (useCached) return {
     state, ...heights, ...(progress === undefined ? {} : { progress }), updatedAt: cached.updatedAt,
     balanceAtomic: cached.balanceAtomic, unlockedAtomic: null, lockedAtomic: null,

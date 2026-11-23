@@ -233,9 +233,17 @@ export function mergeManifests(bundled: FirmwareManifest | null, remote: Firmwar
     const firmwareBitcoinOnly = newerRef(b.firmwareBitcoinOnly, r.firmwareBitcoinOnly)
     return firmwareBitcoinOnly ? { ...multi, firmwareBitcoinOnly } : multi
   }
+  const latest = pick(bundled.latest, remote.latest)
+  const beta = bundled.beta && remote.beta ? pick(bundled.beta, remote.beta) : bundled.beta ?? remote.beta
+  // An absent alpha channel stays absent. An older remote beta must not turn a
+  // withdrawn bundled preview into an alpha offering of stable firmware.
+  const preview = beta && (
+    older(latest.firmware, beta.firmware) || older(latest.bootloader, beta.bootloader)
+    || (beta.firmwareBitcoinOnly && (!latest.firmwareBitcoinOnly || older(latest.firmwareBitcoinOnly, beta.firmwareBitcoinOnly)))
+  ) ? beta : undefined
   return {
-    latest: pick(bundled.latest, remote.latest),
-    beta: pick(bundled.beta ?? bundled.latest, remote.beta ?? remote.latest),
+    latest,
+    ...(preview ? { beta: preview } : {}),
     hashes: {
       bootloader: { ...(bundled.hashes?.bootloader ?? {}), ...(remote.hashes?.bootloader ?? {}) },
       firmware: { ...(bundled.hashes?.firmware ?? {}), ...(remote.hashes?.firmware ?? {}) },

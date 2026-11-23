@@ -1,0 +1,157 @@
+{
+  "date": "2026-11-10",
+  "scope": "Whether devices already running v7.16.0 need firmware changes for NU7; Zcash only, not an audit of every 7.16 feature.",
+  "verdict": {
+    "transparent_sends": "No new firmware is technically required for supported transparent P2PKH inputs and t-address/TEX outputs. Route through the existing ZcashSignPCZT v5/v6 endpoint; host builder, serializer and admission gates need changes.",
+    "ironwood_sends_shield_unshield": "Firmware changes required. The released handler accepts only NU6.3 for Ironwood and refuses NU7 before confirmation.",
+    "orchard_to_ironwood_migration": "Firmware changes required. A separate pool-crossing branch check rejects NU7 before confirmation.",
+    "minimal_firmware_scope": "Admit reviewed NU7 branch 0x77190AD9 alongside NU6.3 at Ironwood and migration guards; extend the Orchard net-inflow prohibition to NU7. No new transaction format or cryptographic primitive is introduced by NU7."
+  },
+  "release": {
+    "tag": "v7.16.0",
+    "commit": "4f94a63b6632be48379c95465b3a9f4ae6e561bb",
+    "tag_date_utc": "2026-10-16",
+    "bundled_binary_bytes": 652476,
+    "bundled_payload_sha256": "95f5c15218b28dbbcf748127685d52f625e06bb79cd8caf6d553b55f38470dc1",
+    "matches_bundled_beta_manifest": true,
+    "binary_mapping_limit": "Hash identifies bundled payload and manifest consistency; no reproducible ARM rebuild or physical execution of that signed payload was performed.",
+    "submodules": [
+      {
+        "path": "deps/crypto/trezor-firmware",
+        "sha": "f3fbfc7f14f79bbfc672f5df3121e7d5c1823990",
+        "tracked_tree_clean": true
+      },
+      {
+        "path": "deps/device-protocol",
+        "sha": "bd3409106554e04eedc7b525d547a211a987ff3c",
+        "tracked_tree_clean": true
+      },
+      {
+        "path": "deps/googletest",
+        "sha": "7888184f28509dba839e3683409443e0b5bb8948",
+        "tracked_tree_clean": true
+      },
+      {
+        "path": "deps/python-keepkey",
+        "sha": "7c1c4c903af3a7f999bedca1465644e100c17f40",
+        "tracked_tree_clean": true
+      },
+      {
+        "path": "deps/qrenc/QR-Code-generator",
+        "sha": "6dfbfdad5d9303ed190d1c3cb7bec34b565b6ce8",
+        "tracked_tree_clean": true
+      },
+      {
+        "path": "deps/sca-hardening/SecAESSTM32",
+        "sha": "71d356a1141624994cf613bd2d2583892e8e6d5a",
+        "tracked_tree_clean": true
+      }
+    ]
+  },
+  "tests": {
+    "total": 21,
+    "failures": 0,
+    "disabled": 0,
+    "new_audit_tests": 3,
+    "existing_zcash_handler_tests": 18,
+    "new_cases": {
+      "transparent_signatures": 12,
+      "versions": [
+        5,
+        6
+      ],
+      "branch_id": "0x77190AD9",
+      "input_scopes": [
+        "receive /0/0",
+        "change /1/0",
+        "one-time /2/0"
+      ],
+      "destinations": [
+        "t-address",
+        "TEX"
+      ],
+      "expiry_height": 3560120,
+      "tamper_negative_cases": 3,
+      "branch_admission_cases": 4
+    },
+    "signature_reference": "Standalone Python hashlib BLAKE2b and cryptography BIP32/secp256k1 derivation. First checked against the release fixture canonical librustzcash v5 and v6 hashes; resulting NU7 hashes verify all 12 firmware ECDSA signatures. Altered hash verification also fails.",
+    "signing_source_integrity": {
+      "release_implementation_files_checked": 168,
+      "changed": []
+    },
+    "runtime": "Native unit-test emulator with public all-x12 mnemonic and RAM flash; dedicated UDP loopback ports 24164/24165. No real wallet, device, chain broadcast, or funded UTXO used.",
+    "test_log": "audit-tests.log"
+  },
+  "findings": [
+    {
+      "priority": "high",
+      "finding": "A branch-ID update alone cannot repair Vault legacy transparent sends.",
+      "evidence": "utxo.ts emits transaction v4 with version group 0x892F2085; NU7 prohibits v4. signing.c supports only v3/v4 on the overwintered legacy SignTx endpoint.",
+      "action": "Build valid v5/v6 transactions and use the existing PCZT endpoint on 7.16; retain amount, recipient, digest and fee checks."
+    },
+    {
+      "priority": "high",
+      "finding": "Native Ironwood and migration are incompatible with NU7 on 7.16.",
+      "evidence": "Release fsm_msg_zcash.h lines 1035-1042 and 1048-1055 compare branch_id with 0x37A5165B. Tests admit old branch and reject 0x77190AD9 without review or signatures.",
+      "action": "Ship a narrowly scoped firmware update for those operations and update sidecar branch guards."
+    },
+    {
+      "priority": "medium",
+      "finding": "A blanket newer-firmware requirement for transparent-only NU7 sends is unnecessary for 7.16.",
+      "evidence": "12 NU7 ECDSA signatures verified under both v5 and v6, across input scopes 0/1/2 and t/TEX recipients, with all 168 release implementation files and headers unchanged.",
+      "action": "Gate capabilities by operation. Qualify the real signed device and host pipeline before enabling the 7.16 transparent route for users."
+    },
+    {
+      "priority": "medium",
+      "finding": "The Orchard net-inflow restriction is tied only to the old branch.",
+      "evidence": "Release fsm_msg_zcash.h line 1172 checks branch_id == 0x37A5165B; a NU7 firmware patch should preserve this restriction.",
+      "action": "Apply the existing restriction under both reviewed branches when adding NU7 support."
+    }
+  ],
+  "host_changes_needed": [
+    "Stop creating outgoing v4 transactions.",
+    "Select the branch for the intended inclusion height; reject stale or inconsistent node/builder information.",
+    "Remove the sidecar transparent-only old-branch guard while using NU7-compatible transaction serialization and hashing.",
+    "Supply the NU7 branch explicitly through the SDK; do not use its fallback constant.",
+    "Test host/device capability gates separately for transparent-only, Ironwood, and migration."
+  ],
+  "build_only_adaptations": [
+    "Native C/C++ PB_NO_PACKED_STRUCTS=1, Release emulator with debug link.",
+    "Use installed nanopb 0.3.9.4 package entrypoint explicitly; correct protoc plugin name and remove option filename leading space for local tool compatibility.",
+    "Use dedicated loopback transport ports in emulator and confirmation helper to avoid the running emulator.",
+    "Append three audit tests; firmware lib/firmware and include/keepkey/firmware files remain byte-identical to the release tag."
+  ],
+  "references": [
+    {
+      "title": "NU7 deployment: unchanged v5/v6 formats, branch ID, v4 prohibition",
+      "url": "https://github.com/zcash/zips/blob/main/zips/zip-0259.md"
+    },
+    {
+      "title": "ZIP 244 v5 digest rules",
+      "url": "https://zips.z.cash/zip-0244"
+    },
+    {
+      "title": "ZIP 229 v6 digest rules",
+      "url": "https://zips.z.cash/zip-0229"
+    }
+  ],
+  "limitations": [
+    "No physical 7.16 device qualification.",
+    "No broadcast or full-node acceptance test of a funded transaction.",
+    "No new NU7 Ironwood proof validation; audit demonstrates release admission rejection, not a tested patched firmware release.",
+    "The signed bundled artifact was hashed, not executed or rebuilt reproducibly.",
+    "Transparent P2SH inputs, multisig and other unsupported script forms are not newly qualified by this audit."
+  ],
+  "artifacts": {
+    "patch": "audit-harness.patch",
+    "generator": "add_audit_tests.py",
+    "reference_vectors": "reference-vectors.json",
+    "test_log": "audit-tests.log",
+    "native_scratch_directory": "/private/tmp/keepkey-nu7-716-audit-20261110"
+  },
+  "reproduction": {
+    "patch": "Apply audit-harness.patch once to a clean v7.16.0 source export with the recorded submodules. It contains the test additions, transport isolation and local generator adjustment.",
+    "generator_alternative": "add_audit_tests.py <source-directory> independently regenerates the reference vectors and appends only the three audit tests; do not combine with the test additions from the patch.",
+    "test_command": "firmware-unit '--gtest_filter=ReviewHandlers.Nu7Audit*:ReviewHandlers.Zcash*'"
+  }
+}

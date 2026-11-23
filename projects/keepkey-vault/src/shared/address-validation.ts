@@ -200,7 +200,7 @@ export function isEvmAddress(addr: string): boolean {
 
 function validateEvmAddress(addr: string): ValidationResult {
   if (HEX40.test(addr)) return isEvmAddress(addr) ? OK : fail('invalidEvmChecksum')
-  // No ENS resolver exists yet: a name must not pass as a recipient.
+  // Contact lookup resolves ENS before saving. Signing still requires an address.
   if (/\.eth$/i.test(addr)) return fail('ensNotSupported')
   return fail('invalidEvmAddress')
 }

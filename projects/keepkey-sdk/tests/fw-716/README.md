@@ -80,7 +80,7 @@ operation may first ask for the PIN if the device is locked.
 | 05 | `make test-sdk filter=fw-716/05-` | 0 | Binance routes are gone (404); the SDK no longer exposes 4 dead methods; a CAIP swap quote works (SKIP if offline). |
 | 06 | `make test-sdk filter=fw-716/06-` | 0 (PIN pad maybe) | Runtime signers need AdvancedMode; `persist:true` is refused by Desktop; nothing is loaded. |
 | 10 | `make test-sdk filter=fw-716/10-` | 1 click (**Reject**) | An unknown contract is red in Desktop's report (source `none`, raw data) and nothing is signed. That the card blocks Approve is owner-observed. |
-| 11 | `make test-sdk filter=fw-716/11-` | 1 click | hdwallet refuses a >1024-byte EIP-712 leaf on the host. Known gap: cap 26 not exercised. |
+| 11 | `make test-sdk filter=fw-716/11-` | 1 click | On firmware without cap 26, hdwallet refuses a >1024-byte EIP-712 leaf. With cap 26 the test skips before signing. |
 | 12 | `make test-sdk filter=fw-716/12-` | 1 click (Approve; grant consent if asked) | No signature when the device key is not a signer. **SKIPs today**: Desktop refuses first, so the firmware check is not reached. |
 | 13 | `make test-sdk filter=fw-716/13-` | 1 click (**Approve**) | The FIRMWARE refuses an untrusted TRC-20 with AdvancedMode off ("Enable AdvancedMode to blind-sign"). A card 403 is INCONCLUSIVE (FAIL). |
 | 14 | `KK716_ZCASH_DISPLAY=1 make test-sdk filter=fw-716/14-` | 1 press (+1 if Desktop has no remembered view key) | Zcash service ready, and the address the device derives equals Desktop's cached address. Without `KK716_ZCASH_DISPLAY=1` it SKIPs (ownership not proven). Never sends. |
@@ -188,7 +188,7 @@ for 04, 12, 13, 36 and 39.
 | Gap | Why | Check by hand |
 |---|---|---|
 | ERC-7730 device review | production serves no definitions yet (404/422) | rerun 02 and 40 once it does; emulator: `make test-emu-erc7730` |
-| EIP-712 chunked values >1024 B (cap 26) | hdwallet caps leaves on the host | 11 proves only the host guard |
+| EIP-712 chunked values >1024 B (cap 26) | 11 tests the host guard when cap 26 is absent | `fw-717/eip712-chunked` tests signing and OLED review on the 7.17 emulator |
 | Solana "not a signer" firmware check (F-715-1) | Desktop's signer check refuses first (12) | python-keepkey or the emulator, bypassing Desktop |
 | Solana strict parse (trailing bytes: "Malformed Solana transaction"; a padded instruction: OPAQUE) | Desktop's parser refuses trailing bytes before the device (solana-signing.ts); a padded instruction is predicted OPAQUE, so the card asks for AdvancedMode up front | python-keepkey or the emulator, bypassing Desktop |
 | TRON TIP-712 hash refusal with AdvancedMode off | Desktop's card disables Approve until AdvancedMode is on (`/tron/sign-typed-hash` is blind) | python-keepkey or the emulator |

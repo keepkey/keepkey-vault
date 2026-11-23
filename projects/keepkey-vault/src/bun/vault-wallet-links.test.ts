@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { linkedVaultIds } from "../shared/vault-wallet-links";
+import { linkedVaultIds, vaultsForWallet } from "../shared/vault-wallet-links";
 import {
   safeVaultIdentity,
   BITCOIN_NETWORK,
@@ -71,3 +71,14 @@ test("hidden session vaults never attach metadata to saved wallet tiles", () => 
     )
   ).toEqual([]);
 });
+
+test('only actual cosigner keys make a vault visible in the active wallet', () => {
+  const key = { family: 'evm' as const, address: owner.toLowerCase(), xpub: '' }
+  expect(vaultsForWallet([safe], [key])).toEqual([safe])
+  expect(vaultsForWallet([safe], [])).toEqual([])
+  expect(vaultsForWallet([safe], [{ ...key, address: safe.address }])).toEqual([])
+  expect(vaultsForWallet([safe], [{ ...key, address: '0x' + '1'.repeat(40) }])).toEqual([])
+  expect(vaultsForWallet([safe, btc], [{ family: 'bitcoin', address: '', xpub: 'xpubExactAccountKey' }])).toEqual([btc])
+  const hidden = { ...safe, sessionOnly: true }
+  expect(vaultsForWallet([hidden], [key])).toEqual([hidden])
+})

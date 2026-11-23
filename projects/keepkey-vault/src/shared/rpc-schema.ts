@@ -7,13 +7,13 @@ import type { SafeAccount, SafeContext, SafeCreateParams, SafeProposal, SafeTran
 import type { VaultIdentity } from './vault-identity'
 import type { MoneroNodeStatus } from './monero-node'
 import type { VaultPortfolio } from './vault-portfolio'
-import type {ProviderRefreshReason,ProviderUsageStatus} from './provider-refresh'
+import type {ProviderRefreshReason} from './provider-refresh'
 import type { VaultAssetRequest, VaultAssetAccount } from './vault-asset-account'
 import type { ZcashShieldedBalance } from './zcash-privacy'
 import type { ClearSignReport } from './clearsign-report'
 import type { TxDetailLine } from './tx-clearsign'
 import type { ClearSignCentralAssetAuditHistory, ClearSignCentralAssetReview, ClearSignCentralAssetReviewResult, ClearSignCentralContractAudit, ClearSignCentralContractReview, ClearSignCentralStatus, ClearSignProtectionCaseStudy, RuntimeProviderNamed } from './types'
-import type { DeviceStateInfo, FirmwareProgress, FirmwareAnalysis, FatalEvent, PinRequest, CharacterRequest, ChainBalance, BuildTxParams, BuildTxResult, BroadcastResult, BtcAccountSet, BtcScriptType, EvmAddressSet, CustomToken, CustomChain, AppSettings, PioneerServer, BtcGetAddressParams, EthGetAddressParams, EthSignTxParams, BtcSignTxParams, GetPublicKeysParams, UpdateInfo, UpdateStatus, TokenVisibilityStatus, PairingRequestInfo, PairedAppInfo, SigningRequestInfo, ApiLogEntry, PioneerChainInfo, ReportMeta, ReportData, AuditReport, AuditPortfolioSnapshot, AuditMode, AuditDerivedAddress, AuditInspectResult, SwapAsset, SwapQuote, SwapQuoteParams, ExecuteSwapParams, SwapResult, SwapHealth, PendingSwap, SwapStatusUpdate, SwapHistoryRecord, SwapHistoryFilter, SwapHistoryStats, SwapUiState, SwapUiCommand, RecentActivity, BuildStakingTxParams, StakingPosition, DefiPosition, NameInfo, NameQuote, BuildNameRegTxParams, ZcashTransaction, ZcashTxBatch, ZcashTexPayment, EmulatorStatus, EmulatorWalletInfo, RegisteredDevice, WcSessionInfo, AddressBookEntry, AddressBookFilter, AddressBookTx, UsbDiagnosticReport, ClearSignEvent, ClearSignCoverageSummary, ClearSignAuditJob, ClearSignSolanaSchemaArtifact, ClearSignSolanaSchemaDraft, ClearSignEvmSchemaDraft, ClearSignEvmSchemaArtifact, ClearSignEvmSignedEntry, ClearSignProviderBundle, RngAuditReport, ClearSignProvider, ClearSignProviderInput, BtcPsbtReview, BtcWatchOnlyAccounts, BtcWatchOnlyPsbt, BtcBroadcastReview, BtcWatchOnlyImport, BtcWatchOnlyReceive, SafeInfo, PendingSafeTx } from './types'
+import type { DeviceStateInfo, FirmwareProgress, FirmwareAnalysis, FatalEvent, PinRequest, CharacterRequest, ChainBalance, BuildTxParams, BuildTxResult, BroadcastResult, BtcAccountSet, BtcScriptType, EvmAddressSet, CustomToken, CustomChain, AppSettings, PasskeyStatus, PasskeyResetResult, PasskeyInventoryView, PioneerServer, BtcGetAddressParams, EthGetAddressParams, EthSignTxParams, BtcSignTxParams, GetPublicKeysParams, UpdateInfo, UpdateStatus, TokenVisibilityStatus, PairingRequestInfo, PairedAppInfo, SigningRequestInfo, ApiLogEntry, PioneerChainInfo, ReportMeta, ReportData, AuditReport, AuditPortfolioSnapshot, AuditMode, AuditDerivedAddress, AuditInspectResult, SwapAsset, SwapQuote, SwapQuoteParams, ExecuteSwapParams, SwapResult, SwapHealth, PendingSwap, SwapStatusUpdate, SwapHistoryRecord, SwapHistoryFilter, SwapHistoryStats, SwapUiState, SwapUiCommand, RecentActivity, BuildStakingTxParams, StakingPosition, DefiPosition, NameInfo, NameQuote, BuildNameRegTxParams, ZcashTransaction, ZcashTxBatch, ZcashTexPayment, EmulatorStatus, EmulatorWalletInfo, RegisteredDevice, WcSessionInfo, AddressBookEntry, AddressBookFilter, AddressBookTx, UsbDiagnosticReport, ClearSignEvent, ClearSignCoverageSummary, ClearSignAuditJob, ClearSignSolanaSchemaArtifact, ClearSignSolanaSchemaDraft, ClearSignEvmSchemaDraft, ClearSignEvmSchemaArtifact, ClearSignEvmSignedEntry, ClearSignProviderBundle, RngAuditReport, ClearSignProvider, ClearSignProviderInput, BtcPsbtReview, BtcWatchOnlyAccounts, BtcWatchOnlyPsbt, BtcBroadcastReview, BtcWatchOnlyImport, BtcWatchOnlyReceive, SafeInfo, PendingSafeTx } from './types'
 
 /**
  * RPC Schema for Bun ↔ WebView communication.
@@ -173,7 +173,6 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
 
       // ── Pioneer integration ─────────────────────────────────────────
       getBalances: { params: { forceRefresh?: boolean; swapDestCaips?: string[]; userInitiated?: boolean; refreshReason?: ProviderRefreshReason }; response: ChainBalance[] }
-      getProviderUsage: {params:void;response:ProviderUsageStatus|null}
       getSyncDiagnostics: {params:void;response:{balanceSync:SyncProgress|null;recentSyncs:SyncProgress[];connectivity:Array<{online:boolean;durationMs:number;checkedAt:number;status?:number;reason?:string}>}}
       /** forceRefresh defaults to TRUE (user-clicked refresh / tx pushes must bypass
        *  Pioneer's cache). Pass false only when Pioneer's cache is known-fresh. */
@@ -226,6 +225,7 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
 
       // ── EVM multi-address ──────────────────────────────────────────────
       safeList: { params: void; response: SafeContext }
+      safeDiscover: { params: { force?: boolean }; response: import('./safe-multisig').SafeDiscoveryResult }
       listVaults: { params: void; response: VaultIdentity[] }
       listSavedVaults: { params: void; response: VaultIdentity[] }
       getVaultPortfolios: { params: { refresh?: boolean } | void; response: VaultPortfolio[] }
@@ -239,6 +239,8 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       safeSaveSetup: { params: { reviewId: string }; response: SafeAccount }
       safeInspect: { params: { address: string; name: string }; response: SafeAccount }
       safeImport: { params: { address: string; name: string; expectedOwners: string[]; expectedThreshold: number }; response: SafeAccount }
+      safeSync: { params: { address: string }; response: import('./safe-multisig').SafeSyncResult }
+      safePublish: { params: { hash: string }; response: { hash: string } }
       safeRefresh: { params: { address: string }; response: SafeAccount }
       safePropose: { params: { safe: string } & SafeTransfer; response: SafeProposal }
       safeImportProposal: { params: { json: string; expectedSafe?: string; expectedAsset?: 'ETH' | 'USDC' }; response: SafeProposal }
@@ -341,6 +343,13 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       // ── App Settings ──────────────────────────────────────────────────
       getAppSettings: { params: void; response: AppSettings }
       setPasswordManagerEnabled: { params: { enabled: boolean }; response: AppSettings }
+      setPasskeysEnabled: { params: { enabled: boolean }; response: AppSettings }
+      passkeysStatus: { params: void; response: PasskeyStatus }
+      passkeysReset: { params: { waitForReplug?: boolean } | void; response: PasskeyResetResult }
+      passkeysSetPin: { params: { pin: string }; response: { ok: true } }
+      passkeysList: { params: { pin: string }; response: PasskeyInventoryView }
+      passkeysDelete: { params: { pin: string; credentialId: string }; response: { ok: true } }
+      passkeysSetLabel: { params: { rpHash: string; label: string }; response: { ok: true } }
       passwordBankStatus: { params: void; response: PasswordBankView }
       passwordBankUnlock: { params: { create?: boolean }; response: PasswordBankView }
       passwordBankLock: { params: void; response: PasswordBankView }
@@ -466,18 +475,19 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       matchAddress: { params: { networkId: string; address: string }; response: AddressBookEntry | null }
       // Manually add (or relabel) an external contact. networkId picks the chain;
       // the address is normalized + the row scoped to the current wallet.
-      addAddressBook: { params: { networkId: string; address: string; label?: string; cosigner?: boolean }; response: AddressBookEntry | null }
+      resolveAddressBookEns: { params: { networkId: string; name: string }; response: import('./ens').ResolvedEnsContact }
+      addAddressBook: { params: { networkId: string; address: string; label?: string; cosigner?: boolean; expectedAddress?: string }; response: AddressBookEntry | null }
       updateAddressBook: { params: { id: string; label?: string; note?: string; cosigner?: boolean }; response: boolean }
       deleteAddressBook: { params: { id: string }; response: void }
       getAddressBookHistory: { params: { entryId: string }; response: AddressBookTx[] }
       certifyAddressBook: { params: { only?: { network: string; address: string }[] } | void; response: { revision: number; count: number; root: string; fingerprint: string } }
-      previewAddressBookCertification: { params: void; response: { label: string; network: string; address: string }[] }
+      previewAddressBookCertification: { params: void; response: import('./types').AddressBookCertificationPreview }
 
       // ── Recent Activity ──────────────────────────────────────────────────
       // limit omitted = every row for the wallet (the activity list shows full history)
       getRecentActivity: { params: { limit?: number; chainId?: string; watchOnly?: boolean; deviceId?: string } | void; response: RecentActivity[] }
       getWatchOnlyHistoryChains: { params: { deviceId?: string }; response: string[] }
-      scanChainHistory: { params: { chainId: string; watchOnly?: boolean; deviceId?: string }; response: { count: number } }
+      scanChainHistory: { params: { chainId: string; watchOnly?: boolean; deviceId?: string }; response: { count: number; /** Not scanned by design: no history for this chain here. */ skipped?: boolean } }
       // True while the engine's startup/background bulk history scan is in flight,
       // so the activity UI can show "Syncing…" instead of a false "no activity".
       getActivityScanState: { params: void; response: { running: boolean } }
@@ -544,6 +554,8 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       emulatorStop: { params: void; response: EmulatorStatus }
       emulatorSave: { params: void; response: void }
       emulatorStatus: { params: void; response: EmulatorStatus }
+      /** Read-only current frame, only for this sole active emulator signing session. */
+      signingReviewFrame: { params: { signingId: string; deviceId: string }; response: { frame: string; deviceId: string } | null }
       emulatorListBuilds: { params: void; response: { builds: EmulatorBuildInfo[]; selected: string | null; next: EmulatorNextBuild } }
       emulatorSelectBuild: { params: { id: string }; response: { builds: EmulatorBuildInfo[]; selected: string } }
       /** id null: the bundled (or user-installed) library. */

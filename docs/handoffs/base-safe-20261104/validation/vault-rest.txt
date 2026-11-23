@@ -1,0 +1,12 @@
+[WC] EIP-712 clear-sign: ERC-7730 definition 0xa63c7fdabfe85a90… attached
+(pass) WalletConnect eth_signTypedData and ERC-7730 > 7.17.0: the card describes the definition and exactly that one is sent [296.20ms]
+[erc7730] chain 8453 0x000000000022d473030f116ddee9f6b43ac78ba3 0x939c21a4: typed-data definition 0xa63c7fdabfe85a90… checked
+[WC] EIP-712 clear-sign: ERC-7730 definition 0xa63c7fdabfe85a90… attached
+[WC] the device refused the ERC-7730 definition (ERC-7730 domain constraint does not match); signing without it on the normal path
+(pass) WalletConnect eth_signTypedData and ERC-7730 > 7.17.0, refused: signed again without it, and not recorded as ERC-7730 [10.45ms]
+(pass) WalletConnect eth_signTypedData and ERC-7730 > 7.16.0: nothing is looked up, shown or sent [0.51ms]
+
+ 30 pass
+ 0 fail
+ 106 expect() calls
+Ran 30 tests across 3 files. [2.37s]

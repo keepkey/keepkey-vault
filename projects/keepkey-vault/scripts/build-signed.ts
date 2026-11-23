@@ -43,13 +43,14 @@ if (existsSync(zcashInput)) {
 }
 
 // Stable/canary packages for supported emulator hosts must never silently ship
-// without the pinned library. Developer `bun run build` remains optional.
+// without the qualified alpha library. Every build verifies the current alpha
+// identity in buildElectrobun, including developer builds.
 if (process.platform === 'darwin' || process.platform === 'win32') {
   const lib = process.platform === 'win32' ? 'libkkemu.dll' : 'libkkemu.dylib'
   const staged = join(import.meta.dir, '..', 'emulator-bundle', lib)
   if (!existsSync(staged)) {
     console.error(`[release] Missing bundled emulator: ${staged}`)
-    console.error('[release] Stage the certified emulator artifact with scripts/stage-certified-emulator.sh <artifact-dir>.')
+    console.error('[release] Run make refresh-alpha-emulator to stage the current qualified alpha artifact.')
     process.exit(1)
   }
 

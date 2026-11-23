@@ -35,6 +35,7 @@ export const TEST_MNEMONIC = 'alcohol woman abuse must during monitor noble actu
 interface EmuFFI {
   kkemu_init: (flash: any, size: number) => number
   kkemu_shutdown: () => void
+  kkemu_start: () => number
   kkemu_write: (data: any, len: number, iface: number) => number
   kkemu_read: (buf: any, len: number, iface: number) => number
   kkemu_poll: () => number
@@ -48,6 +49,7 @@ function loadDylib(): { symbols: EmuFFI; close: () => void } {
   return dlopen(DYLIB_PATH, {
     kkemu_init:       { args: [FFIType.ptr, FFIType.u64], returns: FFIType.i32 },
     kkemu_shutdown:   { args: [], returns: FFIType.void },
+    kkemu_start:      { args: [], returns: FFIType.i32 },
     kkemu_write:      { args: [FFIType.ptr, FFIType.u64, FFIType.i32], returns: FFIType.i32 },
     kkemu_read:       { args: [FFIType.ptr, FFIType.u64, FFIType.i32], returns: FFIType.i32 },
     kkemu_poll:       { args: [], returns: FFIType.i32 },
@@ -80,6 +82,7 @@ const DEBUG_LINK_DECISION_YES = buildHidFrame(100, new Uint8Array([0x08, 0x01]))
 class TestTransportDelegate implements TransportDelegate {
   /** Count of chunks written since last reset — used by confirmOp. */
   chunkCount = 0
+  onButtonRequest: (() => void) | null = null
 
   constructor(
     private ffi: { symbols: EmuFFI },
@@ -105,7 +108,10 @@ class TestTransportDelegate implements TransportDelegate {
     while (Date.now() < deadline) {
       const buf = new Uint8Array(64)
       const n = this.ffi.symbols.kkemu_read(ptr(buf), 64, iface)
-      if (n > 0) return buf
+      if (n > 0) {
+        if (!debugLink && buf[1] === 0x23 && buf[2] === 0x23 && buf[3] === 0 && buf[4] === 26) this.onButtonRequest?.()
+        return buf
+      }
       await new Promise(r => setTimeout(r, POLL_MS))
     }
     throw new Error(`readChunk timeout (iface=${iface})`)
@@ -122,16 +128,11 @@ export class EmuHarness {
   private transportDelegate: TestTransportDelegate | null = null
   wallet: (core.HDWallet & Record<string, any>) | null = null
 
+  constructor(private readonly threaded = false) {}
+
   /** Boot the emulator with a fresh (blank) flash. */
   async boot(): Promise<void> {
-    this.ffi = loadDylib()
-    this.flash = Buffer.alloc(FLASH_SIZE, 0xFF)
-    const rc = this.ffi.symbols.kkemu_init(ptr(this.flash), FLASH_SIZE)
-    if (rc !== 0) throw new Error(`kkemu_init failed: ${rc}`)
-
-    this.pollTimer = setInterval(() => {
-      try { this.ffi?.symbols.kkemu_poll() } catch {}
-    }, 16)
+    await this.bootFromFlash(Buffer.alloc(FLASH_SIZE, 0xFF))
   }
 
   /** Boot the emulator from an existing flash buffer (for persistence tests). */
@@ -142,6 +143,11 @@ export class EmuHarness {
     const rc = this.ffi.symbols.kkemu_init(ptr(this.flash), FLASH_SIZE)
     if (rc !== 0) throw new Error(`kkemu_init failed: ${rc}`)
 
+    if (this.threaded) {
+      const start = this.ffi.symbols.kkemu_start()
+      if (start !== 0) throw new Error(`kkemu_start failed: ${start}`)
+      return
+    }
     this.pollTimer = setInterval(() => {
       try { this.ffi?.symbols.kkemu_poll() } catch {}
     }, 16)
@@ -254,15 +260,25 @@ export class EmuHarness {
    * Uses confirmOp to wait for ButtonRequest before injecting BA+DLD,
    * avoiding the multi-chunk corruption issue.
    */
-  async loadSeed(mnemonic: string = TEST_MNEMONIC): Promise<void> {
+  async loadSeed(mnemonic: string = TEST_MNEMONIC, pin: string | false = false, label?: string): Promise<void> {
     if (!this.wallet) throw new Error('Not connected')
 
-    await this.confirmOp(() => this.wallet!.loadDevice({
+    const load = () => this.wallet!.loadDevice({
       mnemonic,
-      pin: false,
+      pin,
+      label,
       passphrase: false,
       skipChecksum: false,
-    }))
+    })
+    if (!this.threaded) {
+      await this.confirmOp(load)
+      return
+    }
+    const delegate = this.transportDelegate!
+    delegate.onButtonRequest = () => {
+      if (!this.rawWrite(DEBUG_LINK_DECISION_YES, 1)) throw new Error('Fixture confirmation failed')
+    }
+    try { await load() } finally { delegate.onButtonRequest = null }
   }
 
   /** Raw emuWrite for test inspection. */

@@ -1,0 +1,12 @@
+      2,648 B  static         fsm_msg_clearsign_attestor.h:183:6:fsm_msgClearsignAttestorSign
+      2,624 B  static         u2f.c:927:6:u2f_register
+      2,416 B  static         ctap2.c:645:13:make_credential
+      2,288 B  static         fsm_msg_ethereum.h:1465:6:fsm_msgEthereumClearSignDefinitionChunk
+      2,160 B  static         ed25519-donna-impl-base.c:275:6:ge25519_double_scalarmult_vartime
+      2,080 B  static         memcmp_s.c:36:5:memcmp_s
+      2,024 B  static         ctap2.c:810:13:get_assertion
+      2,016 B  static         ed25519-donna-impl-base.c:471:6:ge25519_scalarmult
+      1,912 B  static         aes128_cbc.c:7:12:aes128_cbc_sca_encrypt
+      1,912 B  static         aes128_cbc.c:50:12:aes128_cbc_sca_decrypt
+      1,888 B  static         eip712.c:708:5:parseVals
+SRAM budget gate: PASS

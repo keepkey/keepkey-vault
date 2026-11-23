@@ -25,7 +25,7 @@ import { decimalToBaseUnits, nativeMaxSpendableAmount, normalizeDecimals, tokenM
 import { getAssetIcon } from "../../shared/assetLookup"
 import { isBurnAddress, sameAddress, validateAddress } from "../../shared/address-validation"
 import { balanceUnverifiedReason, isBalanceUnverified } from "../../shared/balance-display-state"
-import { isDeviceBusyError, isLocalDeviceAccessError, retryWhileDeviceBusy } from "../../shared/device-access-error"
+import { isDeviceBusyError, isLocalDeviceAccessError } from "../../shared/device-access-error"
 import { mergeTrustedBalanceSnapshot } from "../../shared/balance-reconciliation"
 import type { SwapAsset, SwapQuote, ChainBalance, CustomToken, SwapStatusUpdate, SwapTrackingStatus, PendingSwap, SwapUiState, SwapUiCommand, SwapHealth } from "../../shared/types"
 import { SOLANA_BLIND_SIGNING_REQUIRED } from "../../shared/types"
@@ -2071,7 +2071,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
           coin: toChain.coin,
         }
         if (toChain.scriptType) params.scriptType = toChain.scriptType
-        const result = await retryWhileDeviceBusy(() => rpcRequest<any>(toChain.rpcMethod, params, 60000), () => !cancelled)
+        const result = await rpcRequest<any>(toChain.rpcMethod, params, 60000, () => !cancelled)
         if (cancelled) return
         const addr = typeof result === 'string' ? result : (result?.address || '')
         if (addr) setResolvedToAddress(addr)
@@ -2162,7 +2162,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
         if (toChain && toChain.chainFamily !== 'evm') {
           const params: any = { addressNList: toChain.defaultPath, showDisplay: false, coin: toChain.coin }
           if (toChain.scriptType) params.scriptType = toChain.scriptType
-          const result = await retryWhileDeviceBusy(() => rpcRequest<any>(toChain.rpcMethod, params, 60000),
+          const result = await rpcRequest<any>(toChain.rpcMethod, params, 60000,
             () => generation === executionUiGeneration.current && toAssetChainIdRef.current === requestedChainId)
           // Output asset switched mid-RPC → this address is for the wrong chain.
           if (generation !== executionUiGeneration.current || toAssetChainIdRef.current !== requestedChainId) return
@@ -2197,7 +2197,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
     setPreviewLoading(true); setPreviewError(null); setPreviewBuild(null)
     // A busy KeepKey (often this effect's previous build, still running after a
     // balance tick re-fired it) is waited out behind the loading state, not shown.
-    retryWhileDeviceBusy(() => rpcRequest<SwapPreviewBuild>('previewSwapBuild', {
+    rpcRequest<SwapPreviewBuild>('previewSwapBuild', {
       fromChainId: fromAsset.chainId,
       toChainId: toAsset.chainId,
       fromCaip: fromAsset.caip!,
@@ -2218,7 +2218,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
       // Token sources Pioneer's available-assets doesn't pre-list (e.g. SPL
       // USDT) have no decimals lookup backend-side — carry the picker's value.
       tokenDecimals: isTokenCaip(fromAsset.caip!) ? normalizeDecimals(fromAsset.decimals) ?? undefined : undefined,
-    }), () => !cancelled).then((res) => { if (!cancelled) { setPreviewBuild(res); setPreviewLoading(false) } })
+    }, undefined, () => !cancelled).then((res) => { if (!cancelled) { setPreviewBuild(res); setPreviewLoading(false) } })
       .catch((e: any) => { if (!cancelled) { setPreviewError(e?.message || 'Preview failed'); setPreviewLoading(false) } })
     return () => { cancelled = true }
   }, [phase, quote, fromAsset, toAsset, sendAmount, sendIsMax, fromBalance, fromAddress, toAddress, effectiveEvmIndex, refreshingQuote])
@@ -2281,6 +2281,8 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
     // 'review' is guarded here so balance polling doesn't wipe the quote mid-review;
     // the explicit 60s stale-check in the Confirm handler covers freshness on confirm.
     if (phase === 'review' || phase === 'submitted' || phase === 'signing' || phase === 'broadcasting' || phase === 'approving' || phase === 'blind-signing-required') return
+    // A fresh mount resumes a swap in the same commit: `phase` is still 'input' here, and this would wipe the quote the resume just set.
+    if (resumeSwap && hasResumedRef.current === resumeSwap.txid) return
 
     if (quoteTimerRef.current) clearTimeout(quoteTimerRef.current)
     setQuote(null)
@@ -2311,7 +2313,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
           throw new Error('Selected assets are missing CAIP — pick again from the asset picker')
         }
         // MAX quotes read the device; wait out another request holding it.
-        const result = await retryWhileDeviceBusy(() => rpcRequest<SwapQuote>('getSwapQuote', {
+        const result = await rpcRequest<SwapQuote>('getSwapQuote', {
           fromCaip: fromAsset!.caip,
           toCaip: toAsset!.caip,
           amount: sendAmount,
@@ -2320,7 +2322,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
           slippageBps,
           isMax: sendIsMax,
           fromEvmAddressIndex: fromAsset!.chainFamily === 'evm' ? effectiveEvmIndex : undefined,
-        }, 60000), () => generation === executionUiGeneration.current && version === quoteVersionRef.current)
+        }, 60000, () => generation === executionUiGeneration.current && version === quoteVersionRef.current)
         if (generation !== executionUiGeneration.current || version !== quoteVersionRef.current) return
         setQuote(result)
         setQuoteFetchedAt(Date.now())
@@ -2422,14 +2424,14 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
     const refreshForReview = async () => {
       setRefreshingQuote(true)
       try {
-        const refreshed = await retryWhileDeviceBusy(() => rpcRequest<SwapQuote>('getSwapQuote', {
+        const refreshed = await rpcRequest<SwapQuote>('getSwapQuote', {
           fromCaip: fromAsset.caip!,
           toCaip: toAsset.caip!,
           amount: sendAmount,
           fromAddress, toAddress, slippageBps,
           isMax: sendIsMax,
           fromEvmAddressIndex: fromAsset.chainFamily === 'evm' ? effectiveEvmIndex : undefined,
-        }, 60000), () => generation === executionUiGeneration.current)
+        }, 60000, () => generation === executionUiGeneration.current)
         if (generation !== executionUiGeneration.current) return
         // Call out a >1% output drop — quote degraded, user should re-review the numbers
         const oldOut = parseFloat(quote.expectedOutput || '0')
@@ -2482,7 +2484,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
     // wait for the KeepKey. Cancel (handleCancelSigning) ends the wait.
     const attempt = ++executeAttempt.current
     try {
-      const result = await retryWhileDeviceBusy(() => rpcRequest<{ txid: string; approvalTxid?: string }>('executeSwap', {
+      const result = await rpcRequest<{ txid: string; approvalTxid?: string }>('executeSwap', {
         quoteId: liveQuote.quoteId,
         riskAcknowledged,
         slippageAcknowledged: slippageNeedsConfirm && !slippageLocked,
@@ -2509,7 +2511,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
         tokenDecimals: isTokenCaip(fromAsset.caip!) ? normalizeDecimals(fromAsset.decimals) ?? undefined : undefined,
         // A provider description only from the one this preview card named.
         runtimeProvider: previewBuild?.runtimeProvider ?? null,
-      }, 600000), () => generation === executionUiGeneration.current && attempt === executeAttempt.current)
+      }, 600000, () => generation === executionUiGeneration.current && attempt === executeAttempt.current)
 
       if (generation === executionUiGeneration.current) {
         setTxid(result.txid)
@@ -4380,7 +4382,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                         {previewBuild?.unsignedTx && (
                           <Box>
                             <Text fontSize="10px" color="kk.textMuted" mb="1">
-                              {previewBuild.approveTx ? uiText("Swap tx (sent after approval)") : uiText("Hdwallet payload")}
+                              {previewBuild.approveTx ? uiText("Swap tx (sent after approval)") : uiText("Technical details")}
                             </Text>
                             <Box bg="rgba(0,0,0,0.5)" borderRadius="sm" p="2" maxH="240px" overflow="auto" border="1px solid" borderColor="kk.border">
                               <Text fontSize="10px" fontFamily="mono" color="kk.textSecondary" whiteSpace="pre-wrap" wordBreak="break-all">

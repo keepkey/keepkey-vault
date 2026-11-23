@@ -1,0 +1,25 @@
+{
+  "display": {
+    "formats": {
+      "transfer(address to,uint256 amount)": {
+        "intent": "Transfer Base USDC",
+        "fields": [
+          {
+            "path": "to",
+            "label": "Recipient",
+            "format": "addressName"
+          },
+          {
+            "path": "amount",
+            "label": "Amount",
+            "format": "unit",
+            "params": {
+              "decimals": 6,
+              "base": "USDC"
+            }
+          }
+        ]
+      }
+    }
+  }
+}

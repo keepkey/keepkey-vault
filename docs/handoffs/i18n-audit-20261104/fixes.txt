@@ -1,0 +1,113 @@
+Translation audit implementation follow-up — 2026-11-05
+
+Implemented in the working tree; no commit, release, or deployment was made.
+Existing concurrent application changes were preserved.
+
+Financial behavior
+
+- USD values stay labeled USD unless a caller supplies a valid conversion rate.
+  The currency settings UI now states USD explicitly and retains regional number
+  preferences. Stored non-USD preferences cannot relabel amounts in the provider,
+  animated counters or shared fiat formatters. Backend settings also expose USD.
+- Send, swap, staking, Zcash USD entry and PSBT creation use strict, complete
+  decimal validation. Supported comma decimals are normalized to canonical dot
+  notation. Grouped, mixed-separator, exponential and partial numeric prefixes
+  are rejected, rather than silently changing the amount.
+- Staking no longer strips commas (which previously turned 1,5 into 15).
+- Generated tiny amounts remain plain decimal strings; large values retain the
+  prior fractional precision instead of being rounded to eight total digits.
+- Crypto balances honor the regional preference at every magnitude. Number/date
+  display calls formerly pinned to en-US now use the selected regional locale;
+  relative activity times and date headings use the UI language.
+
+Language system and strings
+
+- Centralized all 15 supported languages, normalized saved regional tags, checked
+  the browser preference list, handled blocked storage independently, and avoided
+  presenting Simplified Chinese as Traditional Chinese. Explicit Hans wins over
+  regional defaults. Document language/direction and picker state follow selection.
+- Registered namespace loading and English fallback explicitly; English resources
+  are excluded from lazy imports. Language changes also update native menu labels
+  and persist the locale to backend settings.
+- Extracted 2,140 literal text occurrences across 89 TSX files into a UI namespace.
+  Components subscribe to language and number-format changes, including memoized
+  children. Technical identifiers, third-party descriptions, addresses and signed
+  payload data were not globally rewritten as translated prose.
+- All 141 distinct missing English keys identified by the original audit now
+  exist in English catalogs. Additional static defaults in helper functions were
+  also extracted. Dynamic toast/dice defaults now use named interpolation values.
+- Reused existing translations only for exact English matches with an unambiguous
+  target value. No English copies were inserted into other languages to simulate
+  completed translations.
+- Added translations across every language for currency/language settings, numeric
+  input errors, crash recovery, global blind-signing scope, wallet-draining swaps,
+  simulator limitations, wipe/lock titles and acknowledgments, detailed firmware
+  wipe/lock explanations, minimum-output risk and the auditor-rating caveat.
+- Completed required plural categories, including Russian/Polish few/many forms.
+- Removed the duplicate English exceedsSafeMax property and four unused signing
+  display keys with contradictory historical one-time/global-mode descriptions.
+- Firmware progress events now carry stable stage codes. UI progress descriptions
+  resolve through existing translated setup messages; diagnostic messages remain
+  available for older senders and troubleshooting.
+
+Unicode PDF export
+
+- Bundled licensed, pinned Noto fonts for Latin, Cyrillic, CJK and Thai; included
+  licenses and source/hash manifest in src/bun/fonts. Fonts ship with the app.
+- Preserved user text rather than replacing non-Latin characters with question
+  marks. Fallback runs are measured and rendered with the same embedded fonts;
+  wrapping/truncation does not split UTF-16 surrogate pairs.
+- Corrected the pdf-lib/fontkit CFF declaration and whole-OpenType stream subtype.
+  Included additional Thai shaping glyphs in PDF widths and Unicode maps.
+- Used whole fonts because this fontkit version's subsets failed visual CJK tests.
+  This increases export size: the mixed-script sample PDF is approximately 14 MB.
+  Unsupported glyphs produce an explicit error instead of silently corrupting text.
+
+Maintenance and verification
+
+- Added i18n:extract and i18n:sync maintenance commands, previewing by default.
+  Safety translation seed data lives beside the synchronization script; update
+  those data files when changing those messages, then run sync with --write.
+- Added i18n:check and i18n:test to CI. Checks cover JSON structure/duplicates,
+  placeholders, required plural forms, content hashes, unextracted English
+  defaults, new literal JSX/attribute text and untranslated-key regressions.
+  Semantic English-source hashes also flag changes needing translation review.
+- Verified the regression gate rejects a newly introduced hardcoded JSX string;
+  the temporary test file was removed.
+- 108 tests across six files passed, covering locale safety, Unicode PDF export,
+  MAX amounts, swap parsing, risk and execution preflight. Catalog checks passed.
+- Production Vite frontend and Bun backend bundles passed. git diff --check passed.
+- Generated and visually inspected /private/tmp/keepkey-i18n-unicode.pdf with
+  Portuguese/Polish/Turkish, Cyrillic, Chinese, Japanese, Korean and Thai text.
+  PDF rendering/extraction completed without font warnings after the fixes.
+- The repository-wide TypeScript check still fails in the broader working tree.
+  Remaining diagnostics include existing Buffer/Chakra/RPC typing issues and
+  concurrent swap-account changes. The new localization/font modules have no
+  reported TypeScript diagnostics; a clean whole-repository typecheck is not claimed.
+
+Remaining work — translation coverage is still partial
+
+There are now 3,175 English keys across 17 namespaces. Exposing previously
+hardcoded prose reveals 26,401 missing locale/key pairs, roughly 1,900 strings
+per non-English language. These are recorded explicitly in scripts/i18n-baseline.json
+and continue to use English fallback. The increase from the audit's original
+missing-key count represents newly cataloged existing English prose, not removal
+of existing translations. The CI budget allows this documented backlog while
+rejecting new regressions; it is not a claim of complete translation coverage.
+
+Remaining content includes feature-specific prose, dynamic status/configuration
+labels, backend-generated ClearSign findings, native error-dialog text and report
+prose. These need further extraction/translation and linguistic review. This pass
+does not claim every safety sentence or every screen is completely translated.
+Desktop language-switching, layout/clipping, native menu/dialog behavior and all
+scripts still need interactive app QA; no hardware signing or firmware flashing
+was performed for this work.
+
+Useful commands, from projects/keepkey-vault:
+  bun run i18n:check
+  bun run i18n:test
+  bun run i18n:extract --write
+  bun run i18n:sync --write
+
+Use check-i18n.ts --write-baseline only when deliberately reviewing the remaining
+translation debt/source changes. CI never updates that baseline automatically.

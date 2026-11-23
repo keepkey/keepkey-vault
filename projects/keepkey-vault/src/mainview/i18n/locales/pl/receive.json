@@ -9,11 +9,18 @@
 	"editDerivationPath": "Edytuj ścieżkę derywacji",
 	"checkDevice": "Sprawdź urządzenie...",
 	"verifyOnDevice": "Weryfikuj na urządzeniu",
+	"verifyCancelled": "Weryfikacja anulowana na KeepKey. Adres nie został potwierdzony.",
+	"verifyNoAnswer": "Brak odpowiedzi z KeepKey. Sprawdź jego ekran i spróbuj ponownie. Adres nie został potwierdzony.",
+	"verifyDeviceLost": "KeepKey nie odpowiada. Podłącz go ponownie i spróbuj jeszcze raz. Adres nie został potwierdzony.",
+	"verifyFailed": "Nie udało się wyświetlić adresu na KeepKey. Adres nie został potwierdzony.",
+	"verifyFailedDetail": "Nie udało się wyświetlić adresu na KeepKey ({{detail}}). Adres nie został potwierdzony.",
+	"verifyNotConfirmedAfter": "{{detail}} Adres nie został potwierdzony.",
 	"derivingAddress": "Derywacja adresu...",
 	"noAddressDerived": "Nie wyderywowano jeszcze adresu",
 	"deriveAddress": "Derywuj adres",
 	"account": "Konto {{index}}",
 	"btcAccountType": {
-		"learnMore": "Dowiedz się więcej"
+		"learnMore": "Dowiedz się więcej",
+		"recommendation": "Nie masz pewności? Użyj Native SegWit (bc1…) — ma najniższe opłaty i obsługuje go każdy nowoczesny portfel i giełda."
 	}
 }

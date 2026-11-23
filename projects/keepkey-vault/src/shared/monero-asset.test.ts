@@ -84,8 +84,19 @@ describe('wallet-scoped saved XMR balance', () => {
   test('a new view-only received total cannot inflate a prior spend-verified saved balance', () => {
     const verified = { ...cachedBalance, balanceAtomic: '500000000000', unlockedBalanceAtomic: '500000000000' }
     expect(moneroBalanceView(status({ balanceAtomic: '1000000000000', unlockedBalanceAtomic: '1000000000000', spendStateKnown: false, cachedBalance: verified })))
-      .toMatchObject({ state: 'ready', balanceAtomic: '500000000000', unlockedAtomic: null, lockedAtomic: null,
-        updatedAt: verified.updatedAt, lastKnown: true, spendVerified: false })
+      .toMatchObject({ state: 'ready', balanceAtomic: '500000000000', unlockedAtomic: '500000000000', lockedAtomic: '0', spendVerified: true })
+  })
+  test('payments received after the saved balance are added to it, capped by the watch total', () => {
+    const saved = { ...cachedBalance, balanceAtomic: '0', unlockedBalanceAtomic: '0', walletHeight: 3_299_000 }
+    const tx = (txid: string, amountAtomic: string, height: number, type: 'in' | 'pool', locked = true) =>
+      ({ txid: txid.repeat(64), amountAtomic, confirmations: 1, locked, height, type })
+    const view = moneroBalanceView(status({ balanceAtomic: '908040000', unlockedBalanceAtomic: '0', spendStateKnown: false, cachedBalance: saved,
+      transactions: [tx('a', '908040000', 3_299_500, 'in'), tx('b', '5', 3_298_000, 'in', false)] }))
+    expect(view).toMatchObject({ state: 'ready', balanceAtomic: '908040000', unlockedAtomic: '0', lockedAtomic: '908040000', spendVerified: true })
+    expect(view.lastKnown).not.toBe(true)
+    // A mempool payment counts once; the sum never exceeds what the watch wallet reports.
+    expect(moneroBalanceView(status({ balanceAtomic: '7', unlockedBalanceAtomic: '0', spendStateKnown: false, cachedBalance: saved,
+      transactions: [tx('c', '9', 0, 'pool'), tx('c', '9', 0, 'pool')] })).balanceAtomic).toBe('7')
   })
   test('a saved zero remains a dated snapshot; a wallet without a snapshot inherits no amount', () => {
     expect(moneroBalanceView(status({ available: false, cachedBalance: { ...cachedBalance, balanceAtomic: '0', unlockedBalanceAtomic: '0' } })))

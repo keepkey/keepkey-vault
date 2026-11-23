@@ -101,13 +101,13 @@ const typecheckSection = makefile.slice(makefile.indexOf('\techo "7. VAULT TYPEC
   .split('\n').map(line => line.replace(/\\$/, '')).join('\n').replaceAll('$$', '$')
 
 test.each([
-  ['clean compiler run', '', 0, 0],
-  ['existing file diagnostics', 'src/old.ts(1,1): error TS2322: Existing error', 2, 0],
-  ['global missing minimatch types', "error TS2688: Cannot find type definition file for 'minimatch'.", 2, 1],
-  ['missing compiler', 'tsc: command not found', 127, 1],
-  ['compiler crash', 'internal compiler error', 1, 1],
-  ['new diagnostics above baseline', 'src/a.ts(1,1): error TS2322: One\nsrc/b.ts(1,1): error TS2322: Two', 2, 1],
-])('preflight typecheck handles %s', (_, output, status, expectedFail) => {
+  ['clean compiler run', '', 0, 0, null],
+  ['existing file diagnostics', 'src/old.ts(1,1): error TS2322: Existing error', 2, 0, null],
+  ['global missing minimatch types', "error TS2688: Cannot find type definition file for 'minimatch'.", 2, 1, null],
+  ['missing compiler', 'tsc: command not found', 127, 1, null],
+  ['compiler crash', 'internal compiler error', 1, 1, null],
+  ['diagnostics above the recorded count', 'src/a.ts(1,1): error TS2322: One\nsrc/b.ts(1,1): error TS2322: Two', 2, 0, '⚠️  2 type errors; recorded baseline is 1.'],
+])('preflight typecheck handles %s', (_, output, status, expectedFail, expectedWarning) => {
   const bin = mkdtempSync(join(tmpdir(), 'preflight-tsc-'))
   try {
     writeFileSync(join(bin, '.typecheck-baseline'), '1')
@@ -123,6 +123,7 @@ test.each([
     const out = run.stdout.toString()
     expect(run.exitCode).toBe(0)
     expect(out).toContain(`FAIL=${expectedFail}`)
+    if (expectedWarning) expect(out).toContain(expectedWarning)
     if (status !== 0) expect(out).not.toContain('✅ clean')
   } finally { rmSync(bin, { recursive: true, force: true }) }
 })
