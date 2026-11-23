@@ -19,7 +19,7 @@ Do not sign or publish a macOS artifact when any of these is true:
 - the architecture's `node-hid` native prebuild is absent;
 - the Electrobun core provenance, version, or SHA-256 is unknown;
 - the packaged backend has not been launched on the target architecture;
-- a KeepKey has not connected successfully on the target architecture;
+- Apple Silicon has not passed a physical KeepKey connection test;
 - the source commit, submodule pins, release version, and draft tag disagree;
 - notarization, stapling, Gatekeeper assessment, or post-upload hashes fail.
 - the configured Developer ID identity is not present in the active keychains.
@@ -32,7 +32,7 @@ binary merely because the other architecture is ready.
 | Artifact | Required architecture | Deployment ceiling | Runtime test |
 | --- | --- | --- | --- |
 | `*-arm64.dmg` | every required Mach-O contains `arm64` | 13.0 | Apple Silicon Mac + device |
-| `*-x86_64.dmg` | every required Mach-O contains `x86_64` | 13.0 | Intel Mac + device |
+| `*-x86_64.dmg` | every required Mach-O contains `x86_64` | 13.0 | Native Intel CI |
 
 Universal native libraries are acceptable when they contain the required
 slice. Thin binaries for the other architecture are not.
@@ -92,8 +92,8 @@ failure, not a warning.
 The required `intel-smoke` job runs on GitHub's native `macos-15-intel`
 runner. It imports the packaged node-hid module using the packaged Bun runtime
 and launches the packaged application. This catches architecture, dyld, native
-module, and immediate-startup failures. It does not replace the physical
-KeepKey connection test because hosted runners have no device attached.
+module, and immediate-startup failures. The physical KeepKey connection test
+runs on Apple Silicon.
 
 ## 4. Sign locally
 
@@ -122,31 +122,31 @@ retain `com.apple.security.cs.allow-jit`. Camera authorization comes from
 
 ## 5. Verify the signed artifacts
 
-For each architecture:
+On Apple Silicon:
 
-1. Mount the final DMG on a matching physical Mac.
+1. Mount the final arm64 DMG on the physical Mac.
 2. Copy Vault to `/Applications` and launch that exact copy.
 3. Confirm the backend reaches ready state with no native-module error.
 4. Connect a real KeepKey and confirm enumeration plus a non-signing public-key
    or address operation.
 5. Quit and relaunch once with the device already attached.
-6. Verify signatures, notarization, stapling, and Gatekeeper:
 
-   ```bash
-   codesign --verify --deep --strict --verbose=2 /Applications/keepkey-vault.app
-   spctl --assess --type execute --verbose=4 /Applications/keepkey-vault.app
-   codesign --verify --verbose=2 KeepKey-Vault-<version>-<arch>.dmg
-   xcrun stapler validate KeepKey-Vault-<version>-<arch>.dmg
-   spctl --assess --type open --context context:primary-signature --verbose=4 KeepKey-Vault-<version>-<arch>.dmg
-   make verify-entitlements
-   ```
+For both architectures, mount the final DMG and verify signatures, notarization,
+stapling, and Gatekeeper against its packaged app and disk image:
 
-For Intel, capture the backend log and confirm there is no
-`No native build was found for platform=darwin arch=x64`. Runtime validation on
-Apple Silicon under Rosetta is supplementary and does not replace an Intel Mac.
+```bash
+codesign --verify --deep --strict --verbose=2 /path/to/mounted/keepkey-vault.app
+spctl --assess --type execute --verbose=4 /path/to/mounted/keepkey-vault.app
+codesign --verify --verbose=2 KeepKey-Vault-<version>-<arch>.dmg
+xcrun stapler validate KeepKey-Vault-<version>-<arch>.dmg
+spctl --assess --type open --context context:primary-signature --verbose=4 KeepKey-Vault-<version>-<arch>.dmg
+make verify-entitlements
+```
 
-Record the tester, hardware model, macOS version, device firmware, artifact
-SHA-256, and result. Signing and testing must refer to the same hash.
+For Intel, record the native CI run, the audited input archive SHA-256, and
+the signed output SHA-256. Use the CI-tested archive as the input to signing.
+For Apple Silicon, record the tester, hardware model, macOS version, device
+firmware, artifact SHA-256, and result.
 
 ## 6. Publish safely
 
