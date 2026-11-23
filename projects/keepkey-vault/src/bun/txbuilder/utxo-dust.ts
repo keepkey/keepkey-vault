@@ -25,7 +25,9 @@ const DUST_RELAY_SAT_PER_BYTE: Record<string, number> = {
   digibyte: 30,
 }
 
-// Dogecoin Core sets a flat limit; outputs under 0.01 DOGE need extra fee to relay.
+// Dogecoin Core: outputs under 0.01 DOGE (DEFAULT_DUST_LIMIT) need 0.01 DOGE of
+// extra fee each, and under 0.001 DOGE they are refused outright. We keep every
+// output at 0.01 DOGE or more, the same line the DOGE minimum-fee rule uses.
 const DOGE_DUST_LIMIT = 1_000_000
 
 /** Smallest change output a node of this chain relays, for the change script type. */
@@ -33,9 +35,27 @@ export function changeDustLimit(chainId: string, scriptType: string): number {
   if (chainId === 'dogecoin') return DOGE_DUST_LIMIT
   // An unknown script type gets the legacy size, the largest of the four.
   const bytes = DUST_SPEND_BYTES[scriptType] ?? DUST_SPEND_BYTES.p2pkh
-  // An unknown chain gets the higher relay fee, so we never emit dust there.
-  const rate = DUST_RELAY_SAT_PER_BYTE[chainId] ?? 30
-  return bytes * rate
+  return bytes * dustRelayRate(chainId)
+}
+
+// An unknown chain gets the higher relay fee, so we never emit dust there.
+const dustRelayRate = (chainId: string) => DUST_RELAY_SAT_PER_BYTE[chainId] ?? 30
+
+/**
+ * Smallest output a node of this chain relays to the given scriptPubKey, by the
+ * node's own formula: rate × (8-byte value + length byte + script + spend size).
+ * An unreadable script (undefined) gets the P2PKH size, the largest standard one
+ * after bare P2SH.
+ */
+export function outputDustLimit(chainId: string, scriptPubKeyHex: string | undefined): number {
+  if (chainId === 'dogecoin') return DOGE_DUST_LIMIT
+  if (!scriptPubKeyHex || !/^(?:[0-9a-f]{2})+$/i.test(scriptPubKeyHex)) return DUST_SPEND_BYTES.p2pkh * dustRelayRate(chainId)
+  const length = scriptPubKeyHex.length / 2
+  const opcode = parseInt(scriptPubKeyHex.slice(0, 2), 16)
+  const push = parseInt(scriptPubKeyHex.slice(2, 4), 16)
+  // A witness program: OP_0 or OP_1..OP_16, then one push of 2–40 bytes.
+  const witness = length >= 4 && length <= 42 && (opcode === 0 || (opcode >= 0x51 && opcode <= 0x60)) && push === length - 2
+  return (8 + 1 + length + (witness ? 67 : 148)) * dustRelayRate(chainId)
 }
 
 /**

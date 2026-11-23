@@ -80,5 +80,7 @@
 	"recipientContractNote": "Questo indirizzo è uno smart contract. Assicurati che possa ricevere {{symbol}}: i fondi inviati a un contratto che non li gestisce possono andare persi.",
 	"customGasPriceTooHigh": "Il prezzo del gas è 10 volte o più il prezzo della rete ({{gwei}} gwei). Abbassalo o usa un'impostazione predefinita.",
 	"customGasPriceTooLow": "Il prezzo del gas è inferiore alla commissione base della rete (~{{gwei}} gwei). La transazione non verrebbe mai confermata.",
+	"amountBelowDust": "L'importo è inferiore al minimo accettato dalla rete. Invia almeno {{minimum}} {{symbol}}.",
+	"maxBelowDust": "Dopo le commissioni, l'importo da inviare è inferiore al minimo accettato dalla rete ({{minimum}} {{symbol}}). Aggiungi fondi o riduci la commissione.",
 	"gasPriceUnavailable": "Impossibile caricare il prezzo del gas della rete, quindi Desktop non indovinerà una commissione. Riprova tra un momento."
 }

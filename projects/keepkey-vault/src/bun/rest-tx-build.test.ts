@@ -67,7 +67,8 @@ async function buildBtc(isMax = false) {
 async function buildAccount(id: string, to: string, scriptType: string, accountIndex: number, utxoPath: string, isMax = false) {
   const c = chain(id)
   return { c, built: await buildTx(utxoPioneer(utxo(utxoPath, '5000000000')), c, {
-    chainId: id, to, amount: isMax ? '0' : '0.001', isMax, feeLevel: 3,
+    // 0.001 DOGE is under Dogecoin's 0.01 DOGE dust limit, which the builder refuses.
+    chainId: id, to, amount: isMax ? '0' : id === 'dogecoin' ? '1' : '0.001', isMax, feeLevel: 3,
     xpub: 'xpub-fixture', scriptTypeOverride: scriptType, accountPath: txBuildAccountPath(c, scriptType, accountIndex),
   }) }
 }

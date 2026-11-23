@@ -80,5 +80,7 @@
 	"recipientContractNote": "Ten adres to inteligentny kontrakt. Upewnij się, że może odbierać {{symbol}}: środki wysłane do kontraktu, który ich nie obsługuje, mogą przepaść.",
 	"customGasPriceTooHigh": "Cena gazu jest co najmniej 10 razy wyższa od ceny sieci ({{gwei}} gwei). Obniż ją lub użyj ustawienia wstępnego.",
 	"customGasPriceTooLow": "Cena gazu jest niższa od opłaty bazowej sieci (~{{gwei}} gwei). Transakcja nigdy nie zostałaby potwierdzona.",
+	"amountBelowDust": "Kwota jest niższa niż minimum akceptowane przez sieć. Wyślij co najmniej {{minimum}} {{symbol}}.",
+	"maxBelowDust": "Po odjęciu opłat kwota do wysłania jest niższa niż minimum akceptowane przez sieć ({{minimum}} {{symbol}}). Dodaj środki lub obniż opłatę.",
 	"gasPriceUnavailable": "Nie udało się wczytać ceny gazu w sieci, więc Desktop nie będzie zgadywać opłaty. Spróbuj ponownie za chwilę."
 }

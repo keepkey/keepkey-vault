@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'bun:test'
 import { buildUtxoTx } from './utxo'
-import { changeDustLimit, foldDustChange } from './utxo-dust'
+import { changeDustLimit, foldDustChange, outputDustLimit } from './utxo-dust'
+import { describeDustError, dustErrorMessage, formatBaseUnits } from '../../shared/utxo-dust-errors'
 
 // Audit v6 B4: coinselect adds change above 148 × rate (444 sat at 3 sat/vB),
 // below the 546-sat limit nodes apply to P2PKH, so a 445–545 sat change made
@@ -149,5 +150,110 @@ describe('foldDustChange', () => {
 	it('leaves change at or above the limit alone', () => {
 		const outputs = [{ address: TO, value: 1000 }, { value: 546 }]
 		expect(foldDustChange(outputs, 678, 546)).toEqual({ outputs, fee: 678, folded: 0 })
+	})
+})
+
+// KEEPKEY-158: a spend output under the limit cannot be folded away; the node
+// refuses the signed tx at broadcast. The builder must refuse before signing.
+const LEGACY_TO = '1BvBMSEYstWetqTFn5Au4m4GFg7xJaNVN2'
+
+const send = (to: string, amount: number, utxoValue = 1_000_000) =>
+	buildUtxoTx(pioneerWith([legacyUtxo(utxoValue)]), BITCOIN, {
+		to,
+		amount: String(amount / 1e8),
+		xpub: LEGACY_XPUB,
+		accountPath: LEGACY_ACCOUNT_PATH,
+		scriptTypeOverride: 'p2pkh',
+	})
+
+describe('spend output below the dust limit', () => {
+	it('refuses 500 sat to a legacy address, naming the 546-sat minimum', async () => {
+		await expect(send(LEGACY_TO, 500)).rejects.toThrow('Amount is below the network dust limit (minimum 0.00000546 BTC)')
+	})
+
+	it('accepts exactly 546 sat to a legacy address', async () => {
+		const tx = await send(LEGACY_TO, 546)
+		expect(tx.outputs.find((o: any) => o.address === LEGACY_TO)?.amount).toBe('546')
+	})
+
+	it('uses the recipient’s script: 300 sat to P2WPKH is fine, 293 is not', async () => {
+		const tx = await send(TO, 300)
+		expect(tx.outputs.find((o: any) => o.address === TO)?.amount).toBe('300')
+		await expect(send(TO, 293)).rejects.toThrow('(minimum 0.00000294 BTC)')
+	})
+
+	it('reads an upper-case bech32 address (as QR codes carry it) as P2WPKH, not P2PKH', async () => {
+		const upper = TO.toUpperCase()
+		const tx = await send(upper, 300)
+		expect(tx.outputs.find((o: any) => o.address === upper)?.amount).toBe('300')
+	})
+
+	it('uses the P2SH limit (540) for a 3… address', async () => {
+		const P2SH_TO = '3J98t1WpEZ73CNmQviecrnyiWrnqRhWNLy'
+		await expect(send(P2SH_TO, 539)).rejects.toThrow('(minimum 0.0000054 BTC)')
+		const tx = await send(P2SH_TO, 540)
+		expect(tx.outputs.find((o: any) => o.address === P2SH_TO)?.amount).toBe('540')
+	})
+
+	it('refuses a MAX send whose amount after fees is dust', async () => {
+		// 1 in / 1 out P2PKH at 3 sat/vB = 192 vB = 576 sat; split keeps anything above 444.
+		const build = buildUtxoTx(pioneerWith([legacyUtxo(576 + 502)]), BITCOIN, {
+			to: LEGACY_TO,
+			amount: '0',
+			isMax: true,
+			xpub: LEGACY_XPUB,
+			accountPath: LEGACY_ACCOUNT_PATH,
+			scriptTypeOverride: 'p2pkh',
+		})
+		await expect(build).rejects.toThrow('After fees, the amount to send is below the network dust limit (minimum 0.00000546 BTC)')
+	})
+
+	it('refuses a DOGE send under 0.01 DOGE', async () => {
+		const DOGE = { id: 'dogecoin', coin: 'Dogecoin', symbol: 'DOGE', networkId: 'bip122:00000000001a91e3dace36e2be3bf030', decimals: 8, scriptType: 'p2pkh' } as any
+		const build = buildUtxoTx(pioneerWith([{ ...legacyUtxo(500_000_000), path: "m/44'/3'/0'/0/0" }]), DOGE, {
+			to: 'DH5yaieqoZN36fDVciNyRueRGvGLR3mr7L',
+			amount: '0.005',
+			xpub: LEGACY_XPUB,
+			accountPath: [0x80000000 + 44, 0x80000000 + 3, 0x80000000],
+			scriptTypeOverride: 'p2pkh',
+		})
+		await expect(build).rejects.toThrow('(minimum 0.01 DOGE)')
+	})
+})
+
+describe('outputDustLimit', () => {
+	it('follows the node formula for each script', () => {
+		expect(outputDustLimit('bitcoin', '76a914' + '00'.repeat(20) + '88ac')).toBe(546) // P2PKH
+		expect(outputDustLimit('bitcoin', 'a914' + '00'.repeat(20) + '87')).toBe(540) // P2SH
+		expect(outputDustLimit('bitcoin', '0014' + '00'.repeat(20))).toBe(294) // P2WPKH
+		expect(outputDustLimit('bitcoin', '0020' + '00'.repeat(32))).toBe(330) // P2WSH
+		expect(outputDustLimit('bitcoin', '5120' + '00'.repeat(32))).toBe(330) // P2TR
+		expect(outputDustLimit('litecoin', '0014' + '00'.repeat(20))).toBe(2940)
+	})
+
+	it('takes the P2PKH size for an unreadable script, and 0.01 DOGE on Dogecoin', () => {
+		expect(outputDustLimit('bitcoincash', undefined)).toBe(546)
+		expect(outputDustLimit('bitcoin', 'zz')).toBe(546)
+		expect(outputDustLimit('dogecoin', '0014' + '00'.repeat(20))).toBe(1_000_000)
+	})
+})
+
+describe('describeDustError', () => {
+	const t = (key: string, options: any) => `${key}|${options.minimum}|${options.symbol}`
+
+	it('translates the builder message with a localized, unrounded minimum', () => {
+		expect(describeDustError(dustErrorMessage('amount', '0.00000546', 'BTC'), t, 'pt-BR')).toBe('amountBelowDust|0,00000546|BTC')
+		expect(describeDustError(dustErrorMessage('maxAfterFees', '0.01', 'DOGE'), t, 'en-US')).toBe('maxBelowDust|0.01|DOGE')
+	})
+
+	it('leaves any other error to the caller', () => {
+		expect(describeDustError('Insufficient funds: have 0.1, need 1 BTC', t)).toBeNull()
+		expect(describeDustError('Amount is below the network dust limit', t)).toBeNull()
+	})
+
+	it('prints the minimum without exponent notation', () => {
+		expect(formatBaseUnits(294, 8)).toBe('0.00000294')
+		expect(formatBaseUnits(1_000_000, 8)).toBe('0.01')
+		expect(formatBaseUnits(100_000_000, 8)).toBe('1')
 	})
 })
