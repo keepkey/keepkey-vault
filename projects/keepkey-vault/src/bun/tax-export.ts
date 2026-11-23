@@ -11,6 +11,7 @@
 
 import type { ReportData, ReportSection } from '../shared/types'
 import { SECTION_TITLES } from './reports'
+import { csvCell } from './csv'
 
 // ── Internal canonical transaction model ────────────────────────────
 
@@ -149,13 +150,7 @@ function normalizeTimestamp(date: string): string {
 
 // ── CSV safety ──────────────────────────────────────────────────────
 
-/** Escape a cell value for CSV: quote wrapping + formula injection prevention */
-function csvCell(value: any): string {
-	let s = String(value ?? '').replace(/"/g, '""')
-	const trimmed = s.trimStart()
-	if (/^[=+\-@\t\r\n]/.test(trimmed)) s = `'${s}`
-	return `"${s}"`
-}
+// csvCell (quotes + formula neutralizing) is shared with the report and ledger exports.
 
 // ── CoinTracker CSV ─────────────────────────────────────────────────
 
