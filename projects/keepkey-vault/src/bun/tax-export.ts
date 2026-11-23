@@ -10,7 +10,7 @@
  */
 
 import type { ReportData, ReportSection } from '../shared/types'
-import { SECTION_TITLES } from './reports'
+import { SECTION_TITLES, UNKNOWN_BTC_FEE } from './reports'
 import { csvCell } from './csv'
 
 // ── Internal canonical transaction model ────────────────────────────
@@ -72,7 +72,10 @@ export function extractTransactionsFromReport(data: ReportData): TaxTransaction[
 	}
 
 	const rows = txSection.data.rows || []
-	const headers = txSection.data.headers || []
+	const feeColumn = useDetailed ? 5 : 6
+	if (rows.some(row => row[feeColumn] === UNKNOWN_BTC_FEE)) {
+		throw new Error('This report contains shared Bitcoin transactions with unknown fee shares. Use the local PDF or full CSV to review the exact net amounts.')
+	}
 
 	if (rows.length === 0) {
 		console.warn('[TaxExport] Transaction table found but has 0 rows')
