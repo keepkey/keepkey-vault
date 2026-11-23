@@ -535,6 +535,8 @@ test-unit:
 	cd $(PROJECT_DIR) && bun test __tests__/swap-history-corrupt-json.test.ts
 	cd $(PROJECT_DIR) && bun test __tests__/api-docs.test.ts
 	cd $(PROJECT_DIR) && bun test __tests__/ledger-csv.test.ts
+	cd $(PROJECT_DIR) && bun test __tests__/swap-csv.test.ts
+	cd $(PROJECT_DIR) && bun test __tests__/swap-duration.test.ts
 	cd $(PROJECT_DIR) && bun test __tests__/swap-native-symbol.test.ts __tests__/swap-history-native-symbol.test.ts
 	cd $(PROJECT_DIR) && bun test __tests__/swap-tracker-display.test.ts
 	cd $(PROJECT_DIR) && bun test __tests__/swap-copy-i18n.test.ts

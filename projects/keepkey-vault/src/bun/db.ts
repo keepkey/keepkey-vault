@@ -2736,7 +2736,7 @@ export function updateSwapHistoryStatus(
     const isFinal = status === 'completed' || status === 'failed' || status === 'refunded'
 
     // Build SET clauses and params together to prevent misalignment
-    const setClauses: Array<{ col: string; value: any }> = [
+    const setClauses: Array<{ col: string; value: any; sql?: string }> = [
       { col: 'status', value: status },
       { col: 'updated_at', value: now },
     ]
@@ -2765,9 +2765,18 @@ export function updateSwapHistoryStatus(
     if (extra?.errorActionable) setClauses.push({ col: 'error_actionable', value: extra.errorActionable })
     if (extra?.errorElapsedMinutes !== undefined) setClauses.push({ col: 'error_elapsed_minutes', value: extra.errorElapsedMinutes })
     if (isFinal) {
-      setClauses.push({ col: 'completed_at', value: extra?.completedAt || now })
+      const completedAt = extra?.completedAt || now
+      setClauses.push({ col: 'completed_at', value: completedAt })
       if (extra?.actualTimeSeconds !== undefined) {
         setClauses.push({ col: 'actual_time_secs', value: extra.actualTimeSeconds })
+      } else if (status === 'completed' || status === 'refunded') {
+        // Settlement paths (NEAR, Midgard, THORNode) finish a swap without a
+        // duration; derive it from the row's own start, keeping one already
+        // stored. A row that already has completed_at (stored before every path
+        // kept a duration) uses it, not this later refresh: SET expressions read
+        // the row as it was. Not for 'failed': a stale-pending timeout is not a duration.
+        setClauses.push({ col: 'actual_time_secs', value: completedAt,
+          sql: 'actual_time_secs = COALESCE(actual_time_secs, MAX(0, CAST(ROUND((COALESCE(completed_at, ?) - created_at) / 1000.0) AS INTEGER)))' })
       }
     }
 
@@ -2777,7 +2786,7 @@ export function updateSwapHistoryStatus(
       : extra?.deviceId
         ? [...setClauses.map(c => c.value), txid, extra.deviceId]
         : [...setClauses.map(c => c.value), txid]
-    const sql = `UPDATE swap_history SET ${setClauses.map(c => `${c.col} = ?`).join(', ')} WHERE ${where}`
+    const sql = `UPDATE swap_history SET ${setClauses.map(c => c.sql ?? `${c.col} = ?`).join(', ')} WHERE ${where}`
 
     db.run(sql, params)
   } catch (e: any) {
@@ -2946,6 +2955,16 @@ function storedTrackingContext(row: any): SwapHistoryRecord['trackingContext'] {
   return context
 }
 
+/** Stored duration, or for completed/refunded rows written before every settlement
+ *  path stored one, the same value derived from the row's own timestamps. */
+function swapDurationSeconds(r: any): number | undefined {
+  if (r.actual_time_secs !== null && r.actual_time_secs !== undefined) return r.actual_time_secs
+  if ((r.status === 'completed' || r.status === 'refunded') && r.completed_at && r.created_at) {
+    return Math.max(0, Math.round((r.completed_at - r.created_at) / 1000))
+  }
+  return undefined
+}
+
 function mapSwapRow(r: any): SwapHistoryRecord {
   return {
     id: r.id,
@@ -2979,7 +2998,7 @@ function mapSwapRow(r: any): SwapHistoryRecord {
     updatedAt: r.updated_at,
     completedAt: r.completed_at || undefined,
     estimatedTimeSeconds: r.estimated_time_secs,
-    actualTimeSeconds: r.actual_time_secs || undefined,
+    actualTimeSeconds: swapDurationSeconds(r),
     approvalTxid: r.approval_txid || undefined,
     relayRequestId: r.relay_request_id || undefined,
     trackingContext: storedTrackingContext(r),

@@ -6,6 +6,7 @@
  */
 import type { SwapHistoryRecord } from '../shared/types'
 import { getSetting } from './db'
+import { csvCell, csvNumber } from './csv'
 
 // ── CSV Export ────────────────────────────────────────────────────────
 
@@ -16,36 +17,32 @@ const CSV_HEADERS = [
   'Duration (s)', 'Error',
 ]
 
-function csvEscape(val: string): string {
-  if (val.includes(',') || val.includes('"') || val.includes('\n')) {
-    return `"${val.replace(/"/g, '""')}"`
-  }
-  return val
-}
-
 export function generateSwapCsv(records: SwapHistoryRecord[]): string {
   const lines = [CSV_HEADERS.join(',')]
 
   for (const r of records) {
+    // Text cells are quoted and formula-neutralized: a provider error or token symbol starting with = + - @ ran as a
+    // formula when the file was opened in a spreadsheet (audit v6 A7). Numeric columns use csvNumber so a negative value
+    // stays a number instead of getting the ' prefix; anything that is not a plain number is escaped like text.
     const row = [
-      new Date(r.createdAt).toISOString(),
-      r.status,
-      `${r.fromSymbol} (${r.fromAsset})`,
-      `${r.toSymbol} (${r.toAsset})`,
-      r.fromAmount,
-      r.quotedOutput,
-      r.minimumOutput,
-      r.receivedOutput || '',
-      String(r.slippageBps),
-      String(r.feeBps),
-      r.feeOutbound,
-      r.integration,
-      r.txid,
-      r.outboundTxid || '',
-      r.actualTimeSeconds !== undefined ? String(r.actualTimeSeconds) : '',
-      r.error || '',
+      csvCell(new Date(r.createdAt).toISOString()),
+      csvCell(r.status),
+      csvCell(`${r.fromSymbol} (${r.fromAsset})`),
+      csvCell(`${r.toSymbol} (${r.toAsset})`),
+      csvNumber(r.fromAmount),
+      csvNumber(r.quotedOutput),
+      csvNumber(r.minimumOutput),
+      csvNumber(r.receivedOutput || ''),
+      csvNumber(r.slippageBps),
+      csvNumber(r.feeBps),
+      csvNumber(r.feeOutbound),
+      csvCell(r.integration),
+      csvCell(r.txid),
+      csvCell(r.outboundTxid || ''),
+      csvNumber(r.actualTimeSeconds ?? ''),
+      csvCell(r.error || ''),
     ]
-    lines.push(row.map(csvEscape).join(','))
+    lines.push(row.join(','))
   }
 
   return lines.join('\n')

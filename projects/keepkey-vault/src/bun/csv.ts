@@ -4,8 +4,7 @@
  *  gets a leading ' so a spreadsheet shows it as text instead of running it. */
 export function csvCell(value: unknown): string {
 	let s = String(value ?? '').replace(/"/g, '""')
-	const trimmed = s.trimStart()
-	if (/^[=+\-@\t\r\n]/.test(trimmed)) s = `'${s}`
+	if (/^\s*[=+\-@\t\r\n]/.test(s)) s = `'${s}`
 	return `"${s}"`
 }
 

@@ -41,7 +41,7 @@ describe('csv cells', () => {
     expect(csvCell(null)).toBe('""')
   })
   test('neutralize anything a spreadsheet would run', () => {
-    for (const value of ['=HYPERLINK("http://x","claim")', '+1+1', '-1+cmd', '@SUM(A1)', '\t=1', '\r=1', '\n=1', '  =1'])
+    for (const value of ['=HYPERLINK("http://x","claim")', '+1+1', '-1+cmd', '@SUM(A1)', '\t=1', '\r=1', '\n=1', '  =1', '\tplain text', '\rplain text', '\nplain text', '  \tplain text'])
       expect(csvCell(value)).toBe(`"'${value.replace(/"/g, '""')}"`)
   })
   test('plain numbers stay numbers, negative ones included; anything else is escaped', () => {
