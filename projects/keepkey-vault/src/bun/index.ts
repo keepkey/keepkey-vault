@@ -320,7 +320,7 @@ import { CHAINS, customChainToChainDef, isChainSupported, hiveRolePath, btcTapro
 import { versionCompare } from "../shared/firmware-versions"
 import { supportsZcashPrivacyBuild } from "./zcash-capability"
 import type { ChainDef } from "../shared/chains"
-import { isPathElement } from "../shared/bip32-account"
+import { assertAccountIndex, isPathElement } from "../shared/bip32-account"
 import { BtcAccountManager } from "./btc-accounts"
 import { alreadySigned, analyze as analyzePsbt, deriveAddress as deriveBtcAddress, feeFromPrevTxs, finalizeSigned, parseForBroadcast, toSignTx, type BtcPsbtScriptType, type PsbtAnalysis } from "./btc-psbt/psbt"
 import { accountPathFromXpub, formatPath, masterFingerprintFromDepth1Xpub, toSlip132, toStandardXpub, writeElectrumWallet } from "./btc-psbt/codec"
@@ -5798,6 +5798,8 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			btcWatchOnlyShowAddress: async (params) => {
 				const deviceId = String(params?.deviceId || '')
 				const index = Number(params?.index)
+				// deriveBtcAddress below already refuses this; checking first gives a clear error before the device is asked anything.
+				assertAccountIndex(index, 'Address index')
 				if (!(await watchOnlyDeviceMatch(deviceId))) throw new Error('The connected KeepKey does not hold this wallet')
 				const { account } = watchOnlyReceiveAccount(deviceId)
 				const address = deriveBtcAddress(account, 0, index)

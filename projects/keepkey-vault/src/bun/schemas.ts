@@ -148,14 +148,48 @@ export const EthVerifyRequest = z.object({
 
 /** POST /utxo/sign-transaction */
 // Inputs and outputs pass through as they are, except that any path they carry must fit in 32 bits unsigned.
-const UtxoSignEntry = z.object({ addressNList: RawPath.optional(), address_n: RawPath.optional() }).passthrough()
+// A multisig cosigner suffix (multisig.pubkeys[].addressNList) is checked here with the same rule hdwallet applies before
+// signing (unhardened, at most 8 levels), so a bad request gets a clear 400 at the API instead of a signer error.
+const MultisigPubkey = z.object({ addressNList: z.array(z.number().int().min(0).max(MAX_ACCOUNT_INDEX)).max(8).optional() }).passthrough()
+const UtxoMultisig = z.object({ pubkeys: z.array(MultisigPubkey).optional() }).passthrough()
+const UtxoSignEntry = z.object({ addressNList: RawPath.optional(), address_n: RawPath.optional(), multisig: UtxoMultisig.nullish() }).passthrough()
+// Script types the device accepts, as hdwallet names them, plus the segwit
+// multisig names p2wsh / p2sh-p2wsh, which the handler sends as p2wpkh /
+// p2sh-p2wpkh with the multisig object (deviceScriptType). Anything else would
+// fail inside hdwallet with a 500, so it is a 400 here. Spend outputs to an
+// address carry no script type to the device, so theirs is not checked.
+export const UTXO_SCRIPT_TYPES = ['p2pkh', 'cashaddr', 'p2sh', 'p2sh-p2wpkh', 'p2wpkh', 'p2tr', 'p2wsh', 'p2sh-p2wsh'] as const
+/** Change/transfer outputs: hdwallet's output translator has no cashaddr. */
+const UTXO_OUTPUT_SCRIPT_TYPES: readonly string[] = UTXO_SCRIPT_TYPES.filter(t => t !== 'cashaddr')
+const SEGWIT_MULTISIG = new Set(['p2wsh', 'p2sh-p2wsh'])
+/** An output the device derives itself (change or transfer), with hdwallet's own test (truthy isChange). */
+const ownedOutput = (o: any) => !!o?.isChange || o?.addressType === 'transfer'
 export const UtxoSignTransactionRequest = z.object({
   coin: z.string().optional(),
   inputs: z.array(UtxoSignEntry).min(1),
   outputs: z.array(UtxoSignEntry).min(1),
   version: z.number().int().optional(),
   locktime: z.number().int().optional(),
-}).strip()
+}).strip().superRefine((tx, ctx) => {
+  const check = (entry: any, path: (string | number)[], allowed: readonly string[]) => {
+    // hdwallet's toProtoMultisig asserts these; a request that fails them is a 400, not a 500.
+    const ms = entry?.multisig
+    if (ms) {
+      const n = Array.isArray(ms.pubkeys) ? ms.pubkeys.length : 0
+      if (n < 2 || n > 15) ctx.addIssue({ code: 'custom', path: [...path, 'multisig', 'pubkeys'], message: 'multisig needs 2 to 15 public keys' })
+      else if (!Number.isInteger(ms.m) || ms.m < 1 || ms.m > n) ctx.addIssue({ code: 'custom', path: [...path, 'multisig', 'm'], message: `multisig m must be an integer from 1 to ${n}` })
+    }
+    const type = entry?.scriptType
+    if (type === undefined) return
+    if (!allowed.includes(type)) {
+      ctx.addIssue({ code: 'custom', path: [...path, 'scriptType'], message: `unsupported script type; use one of ${allowed.join(', ')}` })
+    } else if (SEGWIT_MULTISIG.has(type) && !ms) {
+      ctx.addIssue({ code: 'custom', path: [...path, 'scriptType'], message: `${type} is a multisig script type and needs a multisig object` })
+    }
+  }
+  tx.inputs.forEach((input, i) => check(input, ['inputs', i], UTXO_SCRIPT_TYPES))
+  tx.outputs.forEach((output, i) => { if (ownedOutput(output)) check(output, ['outputs', i], UTXO_OUTPUT_SCRIPT_TYPES) })
+})
 
 /** POST /api/v2/tx/build — browser extension asks Desktop to build a native send.
  *  Only these fields reach the builder; xpubs, fee levels and swap flags a
@@ -635,7 +669,10 @@ export const GetPublicKeyRequest = z.object({
   ecdsa_curve_name: z.string().optional(),
   show_display: z.boolean().optional(),
   coin_name: z.string().optional(),
-  script_type: z.string().optional(),
+  // p2wsh / p2sh-p2wsh export the account's standard xpub (as p2sh already
+  // does), the key the app's multisig cosigner export uses.
+  // An empty string meant "default" to hdwallet (p2pkh), so it still does.
+  script_type: z.preprocess(v => v === '' ? undefined : v, z.enum(UTXO_SCRIPT_TYPES).optional()),
 }).passthrough()
 
 /** POST /system/apply-settings */

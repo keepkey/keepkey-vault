@@ -1,6 +1,6 @@
 /** Audit v6 H8: an account index from 2^31 up overflows the hardened path element and wraps to another account. */
 import { describe, expect, mock, test } from 'bun:test'
-import { mkdtempSync } from 'node:fs'
+import { mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 // zcash-shielded reaches the app database, which needs the desktop runtime's paths.
@@ -136,12 +136,37 @@ describe('raw paths sent by a client must fit in 32 bits unsigned', () => {
       expect(sign({ txid: 'a', [key]: [0x80000054, -1] }).success).toBe(false)
       expect(signChange({ isChange: true, [key]: [0x80000054, 0x80000000, 2 ** 32, 1, 0] }).success).toBe(false)
     }
+    // Multisig cosigner suffixes are checked at the API with hdwallet's own rule: unhardened, at most 8 levels (KEEPKEY-151).
+    const multisig = (path: number[]) => ({ m: 2, pubkeys: [{ xpub: 'xpub-a', addressNList: [0, 0] }, { xpub: 'xpub-b', addressNList: path }], signatures: ['', ''] })
+    for (const good of [[0, MAX_ACCOUNT_INDEX], [1, 7], [], [0, 0, 0, 0, 0, 0, 0, 0]])
+      expect(sign({ txid: 'a', scriptType: 'p2wsh', multisig: multisig(good) }).success).toBe(true)
+    for (const bad of [[0, 2 ** 31], [0, 2 ** 32], [0, -1], [0, 1.5], [0, 0, 0, 0, 0, 0, 0, 0, 0]]) {
+      expect(sign({ txid: 'a', scriptType: 'p2wsh', multisig: multisig(bad) }).success).toBe(false)
+      expect(signChange({ isChange: true, scriptType: 'p2wsh', multisig: multisig(bad) }).success).toBe(false)
+    }
+    // A null multisig is still accepted, as before (hdwallet ignores it).
+    expect(sign({ txid: 'a', multisig: null }).success).toBe(true)
+    // The rest of the multisig object (m, xpubs, signatures) still reaches the signer unchanged.
+    const parsedMultisig = sign({ txid: 'a', scriptType: 'p2wsh', multisig: multisig([1, 7]) })
+    expect(parsedMultisig.success && parsedMultisig.data.inputs[0].multisig).toEqual(multisig([1, 7]))
     // Other input fields still reach the signer unchanged.
     const parsed = sign({ txid: 'a', vout: 1, amount: '100', scriptType: 'p2wpkh', hex: '00' })
     expect(parsed.success && parsed.data.inputs[0]).toEqual({ txid: 'a', vout: 1, amount: '100', scriptType: 'p2wpkh', hex: '00' })
     const batch = (address_n: number[]) => S.BatchPubkeysRequest.safeParse({ paths: [{ address_n }] })
     expect(batch([0x8000002C, 0x80000000, 2 ** 32]).success).toBe(false)
     expect(batch([0x8000002C, 0x80000000, -1]).success).toBe(false)
+  })
+})
+
+describe('the watch-only receive address index (KEEPKEY-151)', () => {
+  test('is checked first, so a bad index gets a clear error before anything else runs', () => {
+    const index = readFileSync(join(import.meta.dir, '../src/bun/index.ts'), 'utf8')
+    const handler = index.slice(index.indexOf('btcWatchOnlyShowAddress: async'), index.indexOf('btcWatchOnlyBuildPsbt: async'))
+    const check = handler.indexOf("assertAccountIndex(index, 'Address index')")
+    expect(check).toBeGreaterThan(0)
+    expect(check).toBeLessThan(handler.indexOf('deriveBtcAddress('))
+    expect(check).toBeLessThan(handler.indexOf('btcGetAddress('))
+    for (const bad of [2 ** 31, 2 ** 32, -1, 1.5, Number.NaN]) expect(() => assertAccountIndex(bad, 'Address index')).toThrow('Address index must be an integer')
   })
 })
 

@@ -2575,9 +2575,13 @@
                     "type": "string",
                     "enum": [
                       "p2pkh",
-                      "p2wpkh",
+                      "cashaddr",
+                      "p2sh",
                       "p2sh-p2wpkh",
-                      "p2tr"
+                      "p2wpkh",
+                      "p2tr",
+                      "p2wsh",
+                      "p2sh-p2wsh"
                     ]
                   },
                   "coin_name": {

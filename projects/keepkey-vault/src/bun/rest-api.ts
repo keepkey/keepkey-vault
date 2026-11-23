@@ -1,4 +1,4 @@
-import {hasMultisigSigningData,btcMultisigEnabled,BTC_MULTISIG_DISABLED} from './btc-psbt/multisig-feature'
+import {hasMultisigSigningData,btcMultisigEnabled,BTC_MULTISIG_DISABLED,deviceScriptType} from './btc-psbt/multisig-feature'
 import { signUtxoTx } from './txbuilder/zcash-transparent'
 import type { EngineController } from './engine-controller'
 import { takeDeviceRefusal } from './device-refusal'
@@ -37,7 +37,7 @@ import {
 import { isSidecarReady, getCachedFvk } from './zcash-sidecar'
 import { swaggerJson } from './api-docs-spec'
 import * as S from './schemas'
-import { parseRequest, validateResponse } from './validate'
+import { parseRequest, validateResponse, validationErrorMessage } from './validate'
 import { SIGNING_ROUTES, requiredSigningFields } from './signing-routes'
 import {
   bitcoinOnlyActivityList,
@@ -1858,6 +1858,35 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             return json({ error: `Missing signing payload — expected one of: ${requiredAny.join(', ')}` }, 400)
           }
 
+          // A UTXO request the handler would refuse (schema: paths, multisig
+          // cosigner suffixes, shape) is refused here with the handler's own
+          // 400, before the wallet is unlocked or the approval card opens, so
+          // the user is never asked to approve a request that cannot be signed.
+          // Runs after the probe check above, so an empty body keeps that
+          // distinctive gate error (rest-sign-gating.test.ts relies on it).
+          // Multisig while the feature is off keeps its 403 and its "enable it"
+          // hint, ahead of the schema, as it had before this check existed.
+          if (path === '/utxo/sign-transaction') {
+            if (hasMultisigSigningData(probeCheckBody) && !btcMultisigEnabled(getSetting)) {
+              // This gate runs before device access. Keep the policy refusal
+              // in the audit log while preserving passphrase-wallet privacy.
+              if (!engine.isPassphraseWallet) {
+                const { deviceId, firmwareVersion } = engine.getDeviceState()
+                const draft = observeSigningInfo({
+                  id: crypto.randomUUID(), method: path, appName: resolveAppInfo().appName,
+                  rawRequestBody: probeCheckBody, firmwareVersion,
+                })
+                if (draft) {
+                  const observation = insertClearSignObservation(draft, { deviceId, source: 'rest-api' })
+                  finalizeClearSignObservation(observation.id, 'policy-blocked', 'btc-multisig-disabled')
+                }
+              }
+              throw new HttpError(403, BTC_MULTISIG_DISABLED)
+            }
+            const parsed = S.UtxoSignTransactionRequest.safeParse(probeCheckBody)
+            if (!parsed.success) return json({ error: validationErrorMessage(parsed.error) }, 400)
+          }
+
           await requireWallet(engine)
 
           const { appName } = resolveAppInfo()
@@ -3394,10 +3423,13 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             }
           }
 
+          // Segwit multisig (p2wsh, p2sh-p2wsh) reaches the device as p2wpkh /
+          // p2sh-p2wpkh with its multisig object; the schema required one.
+          const toDevice = (entry: any) => entry.scriptType === undefined ? entry : { ...entry, scriptType: deviceScriptType(entry.scriptType) }
           const result = await emuWrap(() => signUtxoTx(wallet, {
             coin,
-            inputs: body.inputs,
-            outputs: body.outputs,
+            inputs: body.inputs.map(toDevice),
+            outputs: body.outputs.map(toDevice),
             version: body.version ?? 1,
             locktime: body.locktime ?? 0,
             ...(body.overwintered !== undefined ? { overwintered: body.overwintered } : {}),
@@ -4079,7 +4111,9 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             curve: body.ecdsa_curve_name || 'secp256k1',
             showDisplay: sd,
             coin: body.coin_name || 'Bitcoin',
-            scriptType: body.script_type,
+            // A multisig account's key is its standard xpub, as for p2sh (hdwallet
+            // sends p2sh as p2pkh here too); the device has no p2wsh key format.
+            scriptType: body.script_type === 'p2wsh' || body.script_type === 'p2sh-p2wsh' ? 'p2pkh' : body.script_type,
           }]), { operation: 'getPublicKeys', chain: 'Bitcoin' }, sd)
           const xpub = result?.[0]?.xpub
           const out = { xpub }
