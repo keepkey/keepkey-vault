@@ -2885,6 +2885,67 @@ export function getSwapHistoryStats(deviceId?: string, walletId?: string): SwapH
 const nativeSymbol = (caip: string | null) => caip && /\/slip44:/.test(caip)
   ? CHAINS.find(c => c.caip.toLowerCase() === caip.toLowerCase())?.symbol : undefined
 
+// A stored JSON column that cannot be read is dropped for that row only. Throwing here would make getSwapHistory return
+// nothing, which empties the whole swap history and stops the tracker from resuming pending swaps (audit v6 H9).
+// The history is polled, so each bad column is reported once per run, with a shortened txid like the tracker's logs.
+const reportedSwapColumns = new Set<string>()
+function warnSwapColumn(row: any, column: string, problem: string) {
+  const key = `${row.txid}:${column}`
+  if (reportedSwapColumns.has(key)) return
+  reportedSwapColumns.add(key)
+  console.warn(`[db] swap_history ${String(row.txid).slice(0, 10)}: ${problem} ${column}, ignored`)
+}
+
+function storedJson(row: any, column: string): unknown {
+  const raw = row[column]
+  if (!raw) return undefined
+  try {
+    return JSON.parse(raw)
+  } catch {
+    warnSwapColumn(row, column, 'unreadable')
+    return undefined
+  }
+}
+
+const isText = (value: unknown): value is string => typeof value === 'string'
+
+/** Payouts as the UI and settlement check use them; entries without a txid, amount and asset are dropped. */
+function storedPayouts(row: any): SwapHistoryRecord['payouts'] {
+  const value = storedJson(row, 'payouts_json')
+  if (value === undefined) return undefined
+  const payouts = Array.isArray(value)
+    ? value.filter(p => p && typeof p === 'object' && isText(p.txid) && isText(p.amount) && isText(p.asset) && (p.address === undefined || isText(p.address)))
+    : []
+  if (!Array.isArray(value) || payouts.length !== value.length) warnSwapColumn(row, 'payouts_json', 'malformed entries in')
+  return payouts.length ? payouts : undefined
+}
+
+const isPlainObject = (value: unknown): value is Record<string, any> => !!value && typeof value === 'object' && !Array.isArray(value)
+
+/** Tracking context needs its two addresses, or it is treated as absent, like a legacy row. Optional fields of the wrong
+ *  type are dropped, so a string "false" can never read as a Relay solver deposit. */
+function storedTrackingContext(row: any): SwapHistoryRecord['trackingContext'] {
+  const value = storedJson(row, 'tracking_context')
+  if (value === undefined) return undefined
+  if (!isPlainObject(value) || !isText(value.fromAddress) || !isText(value.toAddress)) {
+    warnSwapColumn(row, 'tracking_context', 'malformed')
+    return undefined
+  }
+  const context: NonNullable<SwapHistoryRecord['trackingContext']> = { fromAddress: value.fromAddress, toAddress: value.toAddress }
+  let dropped = false
+  for (const [key, valid] of [
+    ['fromAmountBaseUnits', isText],
+    ['relaySolverDeposit', (v: unknown) => typeof v === 'boolean'],
+    ['nearIntents', isPlainObject],
+  ] as const) {
+    if (value[key] === undefined) continue
+    if (valid(value[key])) (context as any)[key] = value[key]
+    else dropped = true
+  }
+  if (dropped) warnSwapColumn(row, 'tracking_context', 'malformed fields in')
+  return context
+}
+
 function mapSwapRow(r: any): SwapHistoryRecord {
   return {
     id: r.id,
@@ -2921,7 +2982,7 @@ function mapSwapRow(r: any): SwapHistoryRecord {
     actualTimeSeconds: r.actual_time_secs || undefined,
     approvalTxid: r.approval_txid || undefined,
     relayRequestId: r.relay_request_id || undefined,
-    trackingContext: r.tracking_context ? JSON.parse(r.tracking_context) : undefined,
+    trackingContext: storedTrackingContext(r),
     outboundChainId: r.outbound_chain_id || undefined,
     refundReason: r.refund_reason || undefined,
     nearTxHash: r.near_tx_hash || undefined,
@@ -2932,7 +2993,7 @@ function mapSwapRow(r: any): SwapHistoryRecord {
     inboundConfirmedAt: r.inbound_confirmed_at ?? undefined,
     errorActionable: r.error_actionable || undefined,
     errorElapsedMinutes: r.error_elapsed_minutes ?? undefined,
-    payouts: r.payouts_json ? JSON.parse(r.payouts_json) : undefined,
+    payouts: storedPayouts(r),
   }
 }
 
