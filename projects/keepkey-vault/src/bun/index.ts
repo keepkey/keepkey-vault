@@ -1847,6 +1847,12 @@ function passkeyUserLabels(): Record<string, string> {
 	try { const v = JSON.parse(getSetting('passkey_labels') || '{}'); return v && typeof v === 'object' ? v : {} } catch { return {} }
 }
 
+/** Tell the UI about a setting the backend changed on its own, so a view that read its settings earlier (or whose read
+ *  failed) does not keep showing the old flags (audit v6 H10). */
+function notifySettingsChanged() {
+	try { rpc.send['settings-changed'](getAppSettings()) } catch { /* webview not ready: it reads settings when it mounts */ }
+}
+
 function getAppSettings() {
 	const servers = getPioneerServers()
 	const activeBase = getPioneerApiBase()
@@ -11898,6 +11904,7 @@ engine.on('state-change', (state) => {
 		const hasZcashFirmware = !bitcoinOnly && !!fw && versionCompare(fw, ZCASH_NU7_MIN_FIRMWARE) >= 0
 		const zcashSidecarBinary = findZcashCliBinary()
 		const hasZcashPrivacy = hasZcashFirmware && supportsZcashPrivacyBuild(fw, zcashSidecarBinary)
+		const flagsChanged = zcashPrivacyEnabled !== hasZcashPrivacy || hiveEnabled !== has715
 		if (zcashPrivacyEnabled !== hasZcashPrivacy) {
 			zcashPrivacyEnabled = hasZcashPrivacy
 			setSetting('zcash_privacy_enabled', hasZcashPrivacy ? '1' : '0')
@@ -11916,6 +11923,7 @@ engine.on('state-change', (state) => {
 			setSetting('hive_enabled', has715 ? '1' : '0')
 			console.log(`[settings] Hive auto-${has715 ? 'enabled' : 'disabled'} — firmware ${fw || 'unknown'}`)
 		}
+		if (flagsChanged) notifySettingsChanged()
 	}
 	if (state.state === 'ready') { startPioneerSocketIfAllowed(); bootstrapActiveWalletWatches() }
 	const btcBackendForHistory = getBtcBackend()

@@ -7,6 +7,7 @@ import { useTranslation } from "react-i18next"
 import { Box, Flex, Text, Button, Image, VStack, HStack, IconButton, Spinner } from "@chakra-ui/react"
 import { FaPlus, FaEye, FaEyeSlash, FaShieldAlt, FaCheck, FaCopy, FaTag, FaChevronDown, FaChevronUp } from "react-icons/fa"
 import { rpcRequest, onRpcMessage } from "../lib/rpc"
+import { useAppSettingsLoader } from "../hooks/useAppSettingsLoader"
 import type { ChainDef } from "../../shared/chains"
 import { CHAINS, btcScriptTypeConfig, btcAccountPath, evmAddressPath, isChainSupported } from "../../shared/chains"
 import { hardenedAccount, isAccountIndex } from "../../shared/bip32-account"
@@ -232,17 +233,17 @@ function PersonalAssetPage({ chain, balance, balanceLoading = false, onBack, fir
 	}, [chain.chainFamily, multisigEnabled])
 	const evmMultisig = multisigEnabled && chain.chainFamily === 'evm' && safeChainIds.includes(Number(chain.chainId))
 	const settingsLoaded = useRef(false)
+	// A failed settings read is retried so the Zcash privacy sections are not left hidden (audit v6 H10).
+	const loadSettings = useAppSettingsLoader((s: AppSettings) => {
+		settingsLoaded.current = true
+		setZcashPrivacyEnabled(s.zcashPrivacyEnabled)
+	}, 30000)
 	const refreshFeatureFlags = useCallback(() => {
-		rpcRequest<AppSettings>("getAppSettings")
-			.then(s => {
-				settingsLoaded.current = true
-				setZcashPrivacyEnabled(s.zcashPrivacyEnabled)
-			})
-			.catch(() => {})
+		loadSettings()
 		rpcRequest<string[]>("getSwappableChainIds", undefined, 20000)
 			.then(ids => setSwappableChainIds(new Set(ids)))
 			.catch(() => {})
-	}, [])
+	}, [loadSettings])
 	useEffect(() => { refreshFeatureFlags() }, [refreshFeatureFlags])
 	useEffect(() => {
 		window.addEventListener('keepkey-settings-changed', refreshFeatureFlags)

@@ -9,6 +9,7 @@
  * In dev/HMR mode without Electrobun, it falls back to a no-op stub so the UI renders.
  */
 import { retryWhileDeviceBusy, withUnlockRetry } from '../../shared/device-access-error'
+import { dispatchBackendSettingsChanged } from './app-settings-loader'
 
 type RPCPacket =
   | { type: 'request'; id: number; method: string; params: any }
@@ -24,6 +25,8 @@ const messageListeners = new Map<string, Set<MessageListener>>()
 
 let sendPacket: ((packet: RPCPacket) => void) | null = null
 let reconnectAttempts = 0
+// After a reconnect the settings readers re-read: a push sent while the socket was down was lost (audit v6 H10).
+let connectedOnce = false
 const MAX_RECONNECT_DELAY = 10000
 const MAX_RECONNECT_ATTEMPTS = 50
 
@@ -148,6 +151,8 @@ function connectWebSocket(w: any) {
   socket.addEventListener('open', () => {
     console.log('[rpc] Connected to Bun via WebSocket')
     reconnectAttempts = 0
+    if (connectedOnce) dispatchBackendSettingsChanged('reconnect')
+    connectedOnce = true
   })
 
   socket.addEventListener('close', () => {
