@@ -65,11 +65,26 @@ const rawUi = new Set<string>()
 const sourceRoot=path.resolve(root,'../..')
 for(const file of walk(sourceRoot).filter(f=>f.endsWith('.tsx')&&!/(__|\.test\.|\/logo\/)/.test(f))) {
   const source=fs.readFileSync(file,'utf8'),ast=ts.createSourceFile(file,source,ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX)
+  // JS strings shown as UI text, which the JSX-text check misses: a literal that
+  // is JSX content (also inside `cond ? "…" : …` or `a && "…"`), or the message
+  // passed to setError(…) / warnings.push(…). Prose only, never CSS.
+  function jsUiText(node:ts.Node):string|undefined {
+    const text=ts.isStringLiteral(node)||ts.isNoSubstitutionTemplateLiteral(node)?node.text
+      :ts.isTemplateExpression(node)?node.head.text+node.templateSpans.map(s=>'{{value}}'+s.literal.text).join(''):undefined
+    if(!text||!/[A-Za-z]{3,}\s+[A-Za-z]{2,}/.test(text)||/@keyframes|\{[^}]*:[^}]*;/.test(text))return undefined
+    let p=node.parent
+    while(p&&(ts.isConditionalExpression(p)||ts.isParenthesizedExpression(p)||(ts.isBinaryExpression(p)&&[ts.SyntaxKind.AmpersandAmpersandToken,ts.SyntaxKind.BarBarToken,ts.SyntaxKind.QuestionQuestionToken].includes(p.operatorToken.kind))))p=p.parent
+    if(p&&ts.isJsxExpression(p)&&p.parent&&(ts.isJsxElement(p.parent)||ts.isJsxFragment(p.parent)||(ts.isJsxAttribute(p.parent)&&/^(title|placeholder|aria-label|alt|label|helperText)$/.test(p.parent.name.getText(ast)))))return text
+    if(p&&ts.isCallExpression(p)&&/^(?:setError|warnings\.push)$/.test(p.expression.getText(ast)))return text
+    return undefined
+  }
   function visit(node:ts.Node) {
     let text:string|undefined
     if(ts.isJsxText(node))text=node.text.replace(/\s+/g,' ').trim()
     if(ts.isJsxAttribute(node)&&/^(title|placeholder|aria-label|alt|label|helperText)$/.test(node.name.getText(ast))&&node.initializer&&ts.isStringLiteral(node.initializer))text=node.initializer.text
     if(text&&/[A-Za-z]{2}/.test(text)&&!/^(?:https?:|\/|[A-Z0-9_./:#-]{1,14}$)/.test(text))rawUi.add(`${path.relative(sourceRoot,file)}:${messageKey(text)}`)
+    const js=jsUiText(node)
+    if(js)rawUi.add(`${path.relative(sourceRoot,file)}:${messageKey(js)}`)
     if(ts.isCallExpression(node)&&ts.isIdentifier(node.expression)&&node.expression.text==='uiText'&&node.arguments[0]&&ts.isStringLiteral(node.arguments[0])) {
       if(catalogs.en.ui?.[messageKey(node.arguments[0].text)]!==node.arguments[0].text)errors.push(`UI source missing from English catalog: ${path.relative(sourceRoot,file)}:${node.arguments[0].text}`)
       // A JS string is not JSX text: React prints '&times;' literally. Use the character itself.
