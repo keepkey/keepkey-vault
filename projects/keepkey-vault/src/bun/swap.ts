@@ -86,6 +86,7 @@ const isBitcoin = (c: ChainDef) => c.networkId === BTC_NETWORK_ID
 // CAIP namespace parser is shared with the picker so a future namespace
 // addition (Solana SPL, etc.) only needs editing in one place.
 import { parseCaip } from '../shared/swap-discovery'
+import { relayFallbackTip, relaySignedFees } from './relay-fees'
 import {
   DEFAULT_SLIPPAGE_BPS,
   MAX_SLIPPAGE_BPS,
@@ -1635,7 +1636,7 @@ async function buildRelaySwapTx(
     const relayMaxFee = BigInt(relay.maxFeePerGas)
     const relayPrio = relay.maxPriorityFeePerGas
       ? BigInt(relay.maxPriorityFeePerGas)
-      : BigInt(1_500_000_000) // 1.5 gwei — typical ETH-mainnet inclusion tip
+      : relayFallbackTip(fromChain.id) // 1.5 gwei; 30 gwei on Polygon, which refuses lower tips
     let chosenMaxFee = relayMaxFee
     let chosenPrio = relayPrio
     if (rpcUrl) {
@@ -1709,12 +1710,14 @@ async function buildRelaySwapTx(
   // estimated caps that block valid swaps on tight balances. If the relay's cap proves
   // insufficient for inclusion, the tx will be mined anyway at priority-fee level once
   // the base fee drops — or the user can refresh the quote to get a fresh cap.
-  const signedFeePerGas: bigint = (relay.maxFeePerGas && eip1559Ok)
-    ? BigInt(relay.maxFeePerGas)
-    : BigInt(relayFeePerGas)  // no quoted fee → fall back to live (gasPrice path)
-  const signedPrioFeePerGas: bigint = relay.maxPriorityFeePerGas
-    ? BigInt(relay.maxPriorityFeePerGas)
-    : signedFeePerGas  // no quoted prio → cap at max
+  // No quoted fee → fall back to live (gasPrice path). No quoted tip → the tip
+  // chosen above (chosenPrio, or the RPC's), capped at the signed maxFeePerGas.
+  const { signedFeePerGas, signedPrioFeePerGas } = relaySignedFees({
+    quotedMaxFeePerGas: eip1559Ok ? relay.maxFeePerGas : undefined,
+    quotedPriorityFeePerGas: relay.maxPriorityFeePerGas,
+    liveFeePerGas: BigInt(relayFeePerGas),
+    chosenPriorityFeePerGas: maxPriorityFeePerGas ? BigInt(maxPriorityFeePerGas) : undefined,
+  })
   const relayGasReserve = relayGasLimit * signedFeePerGas
   // ERC-20 relay swaps run an approve tx before the swap. Reserve gas for both.
   const approveGasReserve = isErc20Source ? 80000n * signedFeePerGas : 0n
