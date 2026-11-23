@@ -9,6 +9,7 @@
 import { EventEmitter } from 'events'
 import { getSetting, setSetting } from './db'
 import { evmAddressPath } from '../shared/chains'
+import { isAccountIndex } from '../shared/bip32-account'
 import { OwnerBalanceWatermarks, resetOwnerChainBalances } from '../shared/evm-owner-balance'
 import { paidProviderRefreshOptions, type ProviderRefreshReason } from '../shared/provider-refresh'
 import type { EvmTrackedAddress, EvmAddressSet, EvmAddressChainBalance } from '../shared/types'
@@ -72,6 +73,13 @@ export class EvmAddressManager extends EventEmitter {
         if (!Array.isArray(indices) || indices.length === 0) indices = [0]
       } catch {
         indices = [0]
+      }
+      // An index from 2^31 up cannot be derived (audit v6 H8): drop it instead of failing every EVM address.
+      const valid = indices.filter(isAccountIndex)
+      if (valid.length !== indices.length) {
+        console.warn(`[evm-addresses] Dropped ${indices.length - valid.length} saved address index(es) outside 0 to 2^31 - 1`)
+        indices = valid.length ? valid : [0]
+        setSetting(SETTINGS_KEY, JSON.stringify(indices))
       }
     }
 

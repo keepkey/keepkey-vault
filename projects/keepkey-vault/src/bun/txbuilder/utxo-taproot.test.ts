@@ -16,11 +16,11 @@ const TAPROOT_ACCOUNT_PATH = [0x80000000 + 86, 0x80000000, 0x80000000]
 const TAPROOT_XPUB = 'xpub6BosfCnifzxcFwrSzQiqu2DBVTshkCXacvNsWGYJVVhhawA7d4R5WSWGFNbi8Aw6ZRc1brxMyWMzG3DSSSSoekkudhUd9yLb6qx39T9nMdj'
 const TO = 'bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4'
 
-function pioneerWith(utxos: any[]) {
+function pioneerWith(utxos: any[], tokens?: any[]) {
 	return {
 		ListUnspent: async () => ({ data: utxos }),
 		GetFeeRateByNetwork: async () => ({ data: { slow: 1, average: 2, fast: 5 } }),
-		GetPubkeyInfo: async () => ({ data: [] }),
+		GetPubkeyInfo: async () => ({ data: tokens ? { tokens } : [] }),
 	}
 }
 
@@ -125,5 +125,34 @@ describe('Litecoin extended-key script types', () => {
 		expect(change.scriptType).toBe('p2wpkh')
 		expect(change.addressNList.slice(0, 3)).toEqual(accountPath)
 		expect(tx.inputs[0].addressNList.slice(0, 3)).toEqual(accountPath)
+	})
+})
+
+// Audit v6 H8: paths and change indexes from the balance server must not overflow or wrap a BIP-32 element.
+describe('balance-server paths out of range', () => {
+	const build = (pioneer: any) => buildUtxoTx(pioneer, BITCOIN, {
+		to: TO, amount: '0.001', xpub: TAPROOT_XPUB, scriptTypeOverride: 'p2tr',
+	})
+
+	it('refuses an input path that would wrap, instead of signing for another key', async () => {
+		for (const path of ["m/86'/0'/0'/0/4294967296", "m/86'/0'/0'/0/2147483648", "m/86'/0'/0'/0/x"]) {
+			await expect(build(pioneerWith([{ ...taprootUtxo(), path }]))).rejects.toThrow('Unreadable derivation path')
+		}
+	})
+
+	it('refuses a change index of 2^31, which would be a hardened element', async () => {
+		const tokens = [{ name: 'a', path: "m/86'/0'/0'/1/2147483647", transfers: 1 }]
+		await expect(build(pioneerWith([taprootUtxo()], tokens))).rejects.toThrow('Change index 2147483648 is out of range')
+	})
+
+	it('ignores a reported change index that is not a real address and keeps a valid change path', async () => {
+		const tokens = [
+			{ name: 'a', path: "m/86'/0'/0'/1/4", transfers: 1 },
+			{ name: 'b', path: "m/86'/0'/0'/1/4294967295", transfers: 1 },
+			{ name: 'c', path: "m/86'/0'/0'/1/7'", transfers: 1 },
+		]
+		const tx = await build(pioneerWith([taprootUtxo()], tokens))
+		const change = tx.outputs.find((o: any) => o.isChange)
+		expect(change.addressNList).toEqual([0x80000000 + 86, 0x80000000, 0x80000000, 1, 5])
 	})
 })

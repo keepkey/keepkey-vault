@@ -2,6 +2,7 @@ import type { ChainDef } from '../shared/chains'
 import type { ChainBalance } from '../shared/types'
 import { utxoDiscoveryKey } from './btc-backend/types'
 import { pathToBip32, utxoAccountScriptPaths } from './chain-scan'
+import { isAccountIndex } from '../shared/bip32-account'
 import type { BtcBackend } from './btc-backend/types'
 
 export interface SavedPublicKey {
@@ -62,7 +63,8 @@ export function watchOnlyPortfolioKeys(chains: ChainDef[], balances: ChainBalanc
       // Legacy installs only saved extra accounts. Do not overwrite the old
       // aggregate until reconnect has filled every account-0 script/path.
       if (chain.id !== 'bitcoin' && (balance || rows.length)) {
-        const accounts = new Set([0, ...rows.map(p => Number(/\/(\d+)'$/.exec(p.path)?.[1] || 0))])
+        // Skip an account that cannot be derived (2^31 and up) instead of failing every chain (audit v6 H8).
+        const accounts = new Set([0, ...rows.map(p => Number(/\/(\d+)'$/.exec(p.path)?.[1] || 0)).filter(isAccountIndex)])
         for (const account of accounts) {
           if (utxoAccountScriptPaths(chain, account).some(sp => !rows.some(p => p.xpub && p.path === pathToBip32(sp.path) && p.scriptType === sp.scriptType))) incomplete.add(chain.id)
         }
@@ -137,7 +139,7 @@ export function trackedUtxoScriptPaths(chain: ChainDef, saved: SavedPublicKey[],
   const accounts = new Set([0])
   for (const p of saved.filter(p => p.chainId === chain.id)) {
     const match = /^m\/\d+'\/\d+'\/(\d+)'$/.exec(p.path)
-    if (match && Number(match[1]) < 0x80000000) accounts.add(Number(match[1]))
+    if (match && isAccountIndex(Number(match[1]))) accounts.add(Number(match[1]))
   }
   return [...accounts].sort((a, b) => a - b).flatMap(account => utxoAccountScriptPaths(chain, account, false, includeDgbTaproot))
 }

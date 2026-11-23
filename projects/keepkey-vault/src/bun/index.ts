@@ -316,10 +316,11 @@ import { MONERO_LOCAL_URL, moneroNodeMode } from '../shared/monero-node'
 import { checkMoneroNode, storedRestoreHeight, suggestRestoreHeight, validateMoneroNode } from "./monero-settings"
 import { createFilePendingStore } from "./monero-pending"
 import { findZcashCliBinary, isSidecarReady, startSidecar, stopSidecar, wipeSidecarWalletDb, hasFvkLoaded, getCachedFvk, onScanProgress, getScanState, updateSyncedTo, beginZcashSend, endZcashSend, isZcashSendInFlight } from "./zcash-sidecar"
-import { CHAINS, customChainToChainDef, isChainSupported, hiveRolePath, btcTaprootSupported, findChainByNetwork, isStaleHyperliquidMetadata } from "../shared/chains"
+import { CHAINS, customChainToChainDef, isChainSupported, hiveRolePath, btcTaprootSupported, findChainByNetwork, isStaleHyperliquidMetadata, btcAccountPath, zcashTransparentReceivePath } from "../shared/chains"
 import { versionCompare } from "../shared/firmware-versions"
 import { supportsZcashPrivacyBuild } from "./zcash-capability"
 import type { ChainDef } from "../shared/chains"
+import { isPathElement } from "../shared/bip32-account"
 import { BtcAccountManager } from "./btc-accounts"
 import { alreadySigned, analyze as analyzePsbt, deriveAddress as deriveBtcAddress, feeFromPrevTxs, finalizeSigned, parseForBroadcast, toSignTx, type BtcPsbtScriptType, type PsbtAnalysis } from "./btc-psbt/psbt"
 import { accountPathFromXpub, formatPath, masterFingerprintFromDepth1Xpub, toSlip132, toStandardXpub, writeElectrumWallet } from "./btc-psbt/codec"
@@ -8617,7 +8618,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				if (!engine.wallet) throw new Error('No device connected')
 				const account = params?.account ?? 0
 				const wallet = engine.wallet
-				const path = [0x80000000 + 44, 0x80000000 + 133, 0x80000000 + account, 0, 0]
+				const path = zcashTransparentReceivePath(account)
 				const addressResult = await wallet.btcGetAddress({
 					addressNList: path, coin: "Zcash", scriptType: "p2pkh", showDisplay: false,
 				})
@@ -9583,7 +9584,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					if (btcXpubs.some(x => x.xpub === p.xpub && x.scriptType === p.scriptType)) continue
 					let account = 0
 					try { const b = bs58.decode(p.xpub); account = new DataView(b.buffer, b.byteOffset).getUint32(9) & 0x7FFFFFFF } catch {}
-					btcXpubs.push({ xpub: p.xpub, scriptType: p.scriptType, path: [PURPOSE[p.scriptType] | 0x80000000, 0x80000000, account | 0x80000000] })
+					btcXpubs.push({ xpub: p.xpub, scriptType: p.scriptType, path: btcAccountPath(PURPOSE[p.scriptType], account) })
 				}
 				console.log(`[generateReport] btcXpubs total (loaded + cached): ${btcXpubs.length}`)
 				if (btcXpubs.length === 0) console.warn('[generateReport] No BTC xpubs found anywhere — BTC sections will be skipped')
@@ -10892,7 +10893,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				if (!chain) throw new Error(`Unknown chain: ${params.chainId}`)
 				if (!chainSupportsDeepScan(chain)) throw new Error(`${chain.symbol} doesn't support custom-path search`)
 				const path = params.addressNList
-				if (!Array.isArray(path) || path.length < 2 || path.length > 10 || path.some(n => !Number.isInteger(n) || n < 0)) {
+				if (!Array.isArray(path) || path.length < 2 || path.length > 10 || path.some(n => !isPathElement(n))) {
 					throw new Error('Invalid derivation path')
 				}
 				const { method, params: dp } = deriveAddressParams(chain, path)
@@ -10915,7 +10916,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				const results: any[] = []
 				for (const path of paths) {
 					if (engine.wallet !== captured) break
-					if (!Array.isArray(path) || path.length < 2 || path.length > 10 || path.some(n => !Number.isInteger(n) || n < 0)) continue
+					if (!Array.isArray(path) || path.length < 2 || path.length > 10 || path.some(n => !isPathElement(n))) continue
 					const { method, params: dp } = deriveAddressParams(chain, path)
 					if (params.scriptType) dp.scriptType = params.scriptType
 					let address = ''
@@ -10939,7 +10940,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				if (!chain) throw new Error(`Unknown chain: ${params.chainId}`)
 				if (chain.chainFamily !== 'utxo') throw new Error(`${chain.symbol} can't be swept this way`)
 				const path = params.addressNList
-				if (!Array.isArray(path) || path.length < 2 || path.length > 10 || path.some(n => !Number.isInteger(n) || n < 0)) {
+				if (!Array.isArray(path) || path.length < 2 || path.length > 10 || path.some(n => !isPathElement(n))) {
 					throw new Error('Invalid derivation path')
 				}
 				const captured = engine.wallet
@@ -10992,7 +10993,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				if (!chain) throw new Error(`Unknown chain: ${params.chainId}`)
 				if (!chainSupportsDeepScan(chain)) throw new Error(`${chain.symbol} doesn't support path inspection`)
 				const path = params.addressNList
-				if (!Array.isArray(path) || path.length < 2 || path.length > 10 || path.some(n => !Number.isInteger(n) || n < 0)) {
+				if (!Array.isArray(path) || path.length < 2 || path.length > 10 || path.some(n => !isPathElement(n))) {
 					throw new Error('Invalid derivation path')
 				}
 				const { method, params: dp } = deriveAddressParams(chain, path)

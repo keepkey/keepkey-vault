@@ -13,6 +13,7 @@
 
 import { sendCommand, isSidecarReady, startSidecar, setCachedFvk, hasFvkLoaded, beginZcashSend, endZcashSend } from "../zcash-sidecar"
 import { ZCASH_NU7_MIN_FIRMWARE } from '../../shared/zcash-nu7'
+import { assertAccountIndex, hardenedAccount } from '../../shared/bip32-account'
 import { partialSend, type SplitSendResult } from "./zcash-batching"
 import { getSetting, setSetting } from "../db"
 
@@ -45,7 +46,7 @@ export async function displayOrchardAddressOnDevice(wallet: any, account: number
 
 	const H = 0x80000000
 	const result = await wallet.zcashDisplayAddress({
-		addressNList: [H + 32, H + 133, H + account],
+		addressNList: [H + 32, H + 133, hardenedAccount(account)],
 		account,
 	})
 	if (!result?.address) throw new Error("Device did not return a Zcash address")
@@ -160,6 +161,8 @@ function savedFvk(key: string): any | null {
  * the device. Every export goes through here.
  */
 export async function exportOrchardFvk(wallet: any, account: number = 0): Promise<any> {
+	// The device derives m/32'/133'/account': an index from 2^31 up would wrap to another account (audit v6 H8).
+	assertAccountIndex(account)
 	const id = await walletIdentity(wallet)
 	const key = id ? `zcash_fvk_${id}_${account}` : null
 	if (key) {

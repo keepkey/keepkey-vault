@@ -88,9 +88,9 @@ export function AuditKnownPaths({ chainId, defaultAddress, onFound, onOpenUrl }:
   const lowerDefault = defaultAddress?.toLowerCase()
 
   async function scanRange(fromIdx: number, toIdx: number) {
-    const specs = buildPaths(chainId, fromIdx, toIdx)
     setScanning(true); setErr(null); setOpened(true)
     try {
+      const specs = buildPaths(chainId, fromIdx, toIdx)
       // auditScanPaths takes ONE scriptType per call — group the specs (UTXO
       // combos differ per scheme; EVM is a single undefined group).
       const groups = new Map<string, typeof specs>()

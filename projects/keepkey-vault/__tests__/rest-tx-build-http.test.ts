@@ -229,6 +229,22 @@ describe('POST /api/v2/tx/build', () => {
     expect(r.body.code).toBe('ACCOUNT_NOT_FOUND')
   })
 
+  test('an account index that would overflow the hardened path (2^31 and up) is 400 and never reaches the builder', async () => {
+    // 2^32 used to wrap to account 0', so a client naming "another" account could build from the main one (audit v6 H8).
+    for (const accountIndex of [2 ** 31, 2 ** 32, 2 ** 32 + 7]) {
+      const r = await call({ caip: chain('bitcoin').caip, to: BTC_TO, amount: '0.001', scriptType: 'p2wpkh', accountIndex })
+      expect(r.status).toBe(400)
+      expect(r.body.code).toBe('INVALID_REQUEST')
+      expect(r.received).toEqual([])
+    }
+    // The largest valid index is accepted and reaches the builder unchanged.
+    const { HttpError } = await import('../src/bun/auth')
+    const max = await call({ caip: chain('bitcoin').caip, to: BTC_TO, amount: '0.001', scriptType: 'p2wpkh', accountIndex: 2 ** 31 - 1 },
+      { hook: async () => { throw new HttpError(400, 'KeepKey Desktop has no Bitcoin account 2147483647', { code: 'ACCOUNT_NOT_FOUND' }) } })
+    expect(max.received.map((request: any) => request.accountIndex)).toEqual([2 ** 31 - 1])
+    expect(max.body.code).toBe('ACCOUNT_NOT_FOUND')
+  })
+
   test('xrp: 200 with a body /xrp/sign-transaction accepts unchanged, tag in the summary', async () => {
     const r = await call({ caip: chain('ripple').caip, to: XRP_TO, amount: '1', memo: '104857' })
     expect(r.status).toBe(200)

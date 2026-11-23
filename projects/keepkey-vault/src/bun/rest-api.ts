@@ -3388,7 +3388,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           // BCH: prepend bitcoincash: prefix to output addresses
           if (coin === 'BitcoinCash' && body.outputs) {
             for (const out of body.outputs) {
-              if (out.address && !out.address.startsWith('bitcoincash:')) {
+              if (typeof out.address === 'string' && out.address && !out.address.startsWith('bitcoincash:')) {
                 out.address = 'bitcoincash:' + out.address
               }
             }
