@@ -19,6 +19,8 @@ type Deps = {
   readCursor: (walletScope: string) => string | undefined
   writeCursor: (walletScope: string, cursor: string) => void
   deliver: (event: { type: string; data: any }) => boolean
+  /** True when delivered events have been processed and can be checkpointed.
+   *  A deferred event stays replayable across a restart. */
   flush: () => Promise<boolean>
   fetch?: typeof fetch
   onError?: (error: unknown) => void
@@ -59,6 +61,7 @@ export function createDurableWalletMonitor(deps: Deps) {
     registration.replaying = (async () => {
       const cursorContext = monitorCursorContext(registration.session)
       let cursor = deps.readCursor(cursorContext)
+      let checkpointSafe = true
       for (let page = 0; page < 10 && current(registration); page++) {
         const path = `replay?walletScope=${encodeURIComponent(registration.session.walletScope)}&limit=100${cursor ? `&after=${encodeURIComponent(cursor)}` : ''}`
         const result = await request(registration, path)
@@ -71,16 +74,23 @@ export function createDurableWalletMonitor(deps: Deps) {
           if (typeof event.eventName !== 'string' || !event.payload || typeof event.payload !== 'object'
             || !deps.deliver({ type: event.eventName, data: event.payload })) accepted = false
         }
-        if (!await deps.flush() || !current(registration) || !accepted) return
+        const processed = await deps.flush()
+        if (!current(registration) || !accepted) return
         const next = result.cursor == null ? undefined : String(result.cursor)
         if (!next || next === cursor) return
-        await request(registration, 'ack', { walletScope: registration.session.walletScope, cursor: next,
-          eventIds: events.map((event: any) => event.eventId || event.id).filter((id: unknown) => typeof id === 'string') })
-        if (!current(registration)) return
-        deps.writeCursor(cursorContext, next)
+
+        // Look past a failed page for other chains, but keep the persisted
+        // cursor before the gap. Successful refreshes acknowledge their own IDs.
+        checkpointSafe = checkpointSafe && processed
+        if (checkpointSafe) {
+          await request(registration, 'ack', { walletScope: registration.session.walletScope, cursor: next,
+            eventIds: events.map((event: any) => event.eventId || event.id).filter((id: unknown) => typeof id === 'string') })
+          if (!current(registration)) return
+          deps.writeCursor(cursorContext, next)
+        }
         cursor = next
         if (events.length < 100) return
-        if (page === 9) continuation = true
+        if (page === 9 && checkpointSafe) continuation = true
       }
     })().catch(error => { if (current(registration)) deps.onError?.(error) }).finally(() => {
       registration.replaying = undefined
