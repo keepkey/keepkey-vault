@@ -1,4 +1,7 @@
 export const PASSWORD_BANK_ALGORITHM = 'keepkey-ckv-base64url-v1' as const
+/** The unlock session lasts this long and is never extended; a cached password
+ *  ends with it, so it is also the longest cache duration the bank accepts. */
+export const PASSWORD_CACHE_MAX_MINUTES = 15
 export type PasswordRiskKind = 'compromised' | 'reused' | 'weak'
 export interface PasswordRiskFinding {
   kind: PasswordRiskKind
