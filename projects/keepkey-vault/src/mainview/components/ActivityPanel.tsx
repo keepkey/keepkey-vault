@@ -1,5 +1,4 @@
 import i18n from '../i18n'
-import { getNumberLocale } from "../lib/number-locale"
 import { formatBalance } from "../lib/formatting"
 import { useUiTranslation } from "../i18n/ui"
 /**
@@ -22,6 +21,7 @@ import type { RecentActivity, PendingSwap, ChainBalance, SwapTrackingStatus } fr
 import { isSwapFullySettled } from "../../shared/swap-settlement"
 import { scanOutcome, summarizeRescan, type RescanSummary } from "../lib/rescan-summary"
 import type { TxDetailLine } from "../../shared/tx-clearsign"
+import { getDateLocale } from '../lib/date-locale'
 
 interface ActivityPanelProps {
   open: boolean
@@ -261,8 +261,8 @@ export type ActivityTimelineItem =
 
 export function formatFullDate(ts: number): string {
   const d = new Date(ts)
-  return d.toLocaleDateString(getNumberLocale(), { month: 'short', day: 'numeric', year: 'numeric' }) +
-    ' ' + d.toLocaleTimeString(getNumberLocale(), { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })
+  return d.toLocaleDateString(getDateLocale(), { month: 'short', day: 'numeric', year: 'numeric' }) +
+    ' ' + d.toLocaleTimeString(getDateLocale(), { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })
 }
 
 function TxDetailRow({ label, value, mono, color: c, prose }: { label: string; value: string; mono?: boolean; color?: string; prose?: boolean }) {

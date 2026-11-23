@@ -16,6 +16,7 @@ import { useMoneroBalanceVerification } from "../hooks/useMoneroBalanceVerificat
 import { MoneroConnectionDetails, moneroWalletOpenError } from "./MoneroConnectionInfo"
 import { ReceiveView } from "./ReceiveView"
 import { MONERO_STANDARD_WALLET_REQUIRED } from "../../shared/monero-wallet-policy"
+import { getDateLocale } from '../lib/date-locale'
 
 const MONERO_PATH = [0x8000002c, 0x80000080, 0x80000000]
 const MAX_SUBADDRESS = 199
@@ -52,9 +53,9 @@ export function MoneroStatusChip({ view }: { view: MoneroBalanceView }) {
 /** Saved snapshots always identify their source time; other stale figures retain the refresh label. */
 function MoneroFreshness({ view }: { view: MoneroBalanceView }) {
 	const uiText = useUiTranslation()
-	if (view.lastKnown) return <Text data-monero-stale="" data-monero-last-known="" fontSize="11px" color="var(--gold)">{uiText("Last known balance · {{time}}", { time: view.updatedAt ? new Date(view.updatedAt).toLocaleString(getNumberLocale()) : "—" })}</Text>
+	if (view.lastKnown) return <Text data-monero-stale="" data-monero-last-known="" fontSize="11px" color="var(--gold)">{uiText("Last known balance · {{time}}", { time: view.updatedAt ? new Date(view.updatedAt).toLocaleString(getDateLocale()) : "—" })}</Text>
 	if (!view.stale || view.state === "unreachable") return null
-	return <Text data-monero-stale="" fontSize="11px" color="var(--gold)">{uiText("Last updated {{time}}", { time: view.updatedAt ? new Date(view.updatedAt).toLocaleString(getNumberLocale()) : "—" })}</Text>
+	return <Text data-monero-stale="" fontSize="11px" color="var(--gold)">{uiText("Last updated {{time}}", { time: view.updatedAt ? new Date(view.updatedAt).toLocaleString(getDateLocale()) : "—" })}</Text>
 }
 
 /** Header amount: "—" when unknown; fiat is never shown (no price source), it says "not included". */
@@ -106,7 +107,7 @@ function MoneroBalanceNote({ view }: { view: MoneroBalanceView }) {
 	if (view.state === "unreachable") {
 		return <Text data-monero-note="unreachable" role="alert" fontSize="12px" color="var(--gold)">{view.balanceAtomic === null
 			? uiText("The Monero node can't be reached, and no balance has been read yet.")
-			: uiText("The Monero node can't be reached. Showing the last known balance, from {{time}}.", { time: view.updatedAt ? new Date(view.updatedAt).toLocaleString(getNumberLocale()) : "—" })}</Text>
+			: uiText("The Monero node can't be reached. Showing the last known balance, from {{time}}.", { time: view.updatedAt ? new Date(view.updatedAt).toLocaleString(getDateLocale()) : "—" })}</Text>
 	}
 	if (view.state === "ready" && (view.restoreHeight ?? 0) > 0) {
 		return <Text data-monero-note="partial" fontSize="12px" color="var(--text-2)">{uiText("Earlier payments may be missing. Check the wallet history start in Settings → Networks if this wallet is older.")}</Text>
@@ -383,7 +384,7 @@ export function MoneroSendSection({ monero, client, privateMode = false }: { mon
 					<Text data-monero-unrelayed="" fontSize="11px" fontFamily="mono" color="var(--text-2)" wordBreak="break-all" userSelect="all" mt="1">{wallet.unrelayedTxid}</Text>
 					{wallet.unrelayedCheck?.state === "unknown" && (
 						<Text data-monero-unrelayed-check="" mt="2" fontSize="11px" color="var(--text-2)">{wallet.unrelayedCheck.discardable
-							? uiText("The node checked at {{time}}: it does not have this transaction, and its inputs are still unspent.", { time: new Date(wallet.unrelayedCheck.checkedAt).toLocaleTimeString(getNumberLocale()) })
+							? uiText("The node checked at {{time}}: it does not have this transaction, and its inputs are still unspent.", { time: new Date(wallet.unrelayedCheck.checkedAt).toLocaleTimeString(getDateLocale()) })
 							: uiText("The node does not have this transaction, but its inputs are spent in the node's pool by another one. Wait for that to settle.")}</Text>
 					)}
 					{wallet.unrelayedCheck?.state === "unknown" && wallet.unrelayedCheck.relayNode !== wallet.unrelayedCheck.checkedNode && (

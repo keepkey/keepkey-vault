@@ -9,6 +9,7 @@ import { DOCS_LINKS } from "../../shared/docs-links"
 import type { ReportMeta } from "../../shared/types"
 
 import keepkeyLogo from "../assets/icon.png"
+import { getDateLocale } from '../lib/date-locale'
 // TODO: CoinTracker and ZenLedger exports hidden until report data is populated
 // import coinTrackerLogo from "../assets/logo/cointracker.png"
 // import zenLedgerLogo from "../assets/logo/zenledger.png"
@@ -30,7 +31,7 @@ interface ReportDialogProps {
 export function ReportDialog({ onClose }: ReportDialogProps) {
   const uiText = useUiTranslation()
 
-	const { locale: fiatLocale, fmtCompact } = useFiat()
+	const { fmtCompact } = useFiat()
 	const [generating, setGenerating] = useState(false)
 	const [progress, setProgress] = useState<{ message: string; percent: number } | null>(null)
 	const [reports, setReports] = useState<ReportMeta[]>([])
@@ -253,7 +254,7 @@ export function ReportDialog({ onClose }: ReportDialogProps) {
 											</Text>
 										</Flex>
 										<Text fontSize="10px" color="kk.textMuted" mb="3">
-											{new Date(r.createdAt).toLocaleString(fiatLocale)}
+											{new Date(r.createdAt).toLocaleString(getDateLocale())}
 										</Text>
 										{r.error && (
 											<Text fontSize="10px" color="var(--rose)" mb="3">{r.error}</Text>

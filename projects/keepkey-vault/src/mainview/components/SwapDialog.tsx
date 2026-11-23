@@ -71,6 +71,7 @@ import calculatingGif from "../assets/swap/calculating.gif"
 import shiftingGif from "../assets/swap/shifting.gif"
 import completedGif from "../assets/swap/completed.gif"
 import shapeshiftLogo from "../assets/providers/shapeshift.svg"
+import { getDateLocale } from '../lib/date-locale'
 
 // ── Phase state machine ─────────────────────────────────────────────
 type SwapPhase = 'input' | 'quoting' | 'review' | 'approving' | 'signing' | 'broadcasting' | 'submitted' | 'blind-signing-required'
@@ -3678,7 +3679,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                     {t("estimatedTime")} {Math.floor(countdown / 60)}:{(countdown % 60).toString().padStart(2, '0')}
                   </Text>}
                   {statusCheck && <Text fontSize="11px" color="kk.textMuted">
-                    {t("lastChecked")} {new Date(statusCheck.checkedAt).toLocaleTimeString()}
+                    {t("lastChecked")} {new Date(statusCheck.checkedAt).toLocaleTimeString(getDateLocale())}
                   </Text>}
                   {statusCheck?.error && <Text role="status" fontSize="11px" color="kk.textSecondary">
                     {t(statusCheck.error === 'not_found' ? "swapStatusNotFound" : "swapStatusCheckFailed")}
@@ -5397,7 +5398,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                     </Flex>
                     <Text fontSize="11px" color="kk.textMuted" lineHeight="1.5">{statusDesc}</Text>
                     {intg.checkScope === 'quote' && Number.isFinite(intg.checkedAt) && (
-                      <Text fontSize="10px" color="kk.textMuted" mt="1">{uiText("Last quote check")}{" "}{new Date(intg.checkedAt!).toLocaleTimeString(getNumberLocale())}</Text>
+                      <Text fontSize="10px" color="kk.textMuted" mt="1">{uiText("Last quote check")}{" "}{new Date(intg.checkedAt!).toLocaleTimeString(getDateLocale())}</Text>
                     )}
                     {intg.haltedPools && intg.haltedPools.length > 0 && (
                       <Box mt="2" p="2" bg="rgba(245,158,11,0.08)" borderRadius="8px"
@@ -5427,7 +5428,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
             {/* Footer */}
             <Flex px="5" py="2.5" borderTop="1px solid" borderColor="kk.border" align="center" justify="space-between">
               <Text fontSize="10px" color="kk.textMuted">
-                {swapHealth?.error ? uiText("Status feed unavailable") : swapHealth ? `Updated ${new Date(swapHealth.fetchedAt).toLocaleTimeString(getNumberLocale())}` : uiText("Fetching…")}
+                {swapHealth?.error ? uiText("Status feed unavailable") : swapHealth ? `Updated ${new Date(swapHealth.fetchedAt).toLocaleTimeString(getDateLocale())}` : uiText("Fetching…")}
               </Text>
               <Text fontSize="10px" color="kk.textMuted">{uiText("via Pioneer")}</Text>
             </Flex>

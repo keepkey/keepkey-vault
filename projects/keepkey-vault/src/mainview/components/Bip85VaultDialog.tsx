@@ -1,4 +1,3 @@
-import { getNumberLocale } from "../lib/number-locale"
 import { useUiTranslation } from "../i18n/ui"
 import { useState, useEffect, useCallback, useRef } from "react"
 import { Box, Flex, Text, Button, Input, Spinner } from "@chakra-ui/react"
@@ -8,6 +7,7 @@ import { Z } from "../lib/z-index"
 import { DocsLink } from "./DocsLink"
 import { DOCS_LINKS } from "../../shared/docs-links"
 import type { Bip85SeedMeta } from "../../shared/types"
+import { getDateLocale } from '../lib/date-locale'
 
 interface Bip85VaultDialogProps {
 	onClose: () => void
@@ -376,7 +376,7 @@ export function Bip85VaultDialog({ onClose, embedded = false }: Bip85VaultDialog
 													<Text fontSize="10px" color="kk.textMuted" fontFamily="mono">{uiText("idx:")}{seed.index}
 													</Text>
 													<Text fontSize="10px" color="kk.textMuted">
-														{new Date(seed.createdAt).toLocaleDateString(getNumberLocale())}
+														{new Date(seed.createdAt).toLocaleDateString(getDateLocale())}
 													</Text>
 												</Flex>
 											</Box>

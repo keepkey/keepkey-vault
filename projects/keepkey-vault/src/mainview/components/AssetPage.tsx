@@ -60,6 +60,7 @@ import { VaultAssetAccount } from './VaultAssetAccount'
 import { VaultAssetPage } from './VaultAssetPage'
 import { useBtcMultisigEnabled } from "../hooks/useBtcMultisigEnabled"
 import { showWatchOnlyAddress } from "../../shared/watch-only-verify"
+import { getDateLocale } from '../lib/date-locale'
 
 type AssetView = "receive" | "send" | "privacy" | "psbt" | "multisig"
 
@@ -1228,10 +1229,10 @@ function PersonalAssetPage({ chain, balance, balanceLoading = false, onBack, fir
 											// Cache (watch-only, or older than this chain's last tx): never "Synced".
 											// Say it is cached and how old it is (audit v4 H3).
 											<Flex align="center" gap="1" color="var(--gold)" className="v3-glass-chip" px="2" py="0.5"
-												title={activeBalance.updatedAt ? `Cached ${new Date(activeBalance.updatedAt).toLocaleString(getNumberLocale())}` : undefined}>
+												title={activeBalance.updatedAt ? `${t("cached", { defaultValue: "Cached" })} · ${new Date(activeBalance.updatedAt).toLocaleString(getDateLocale())}` : undefined}>
 												<Box w="6px" h="6px" borderRadius="full" bg="var(--gold)" />
 												<Text fontSize="10px" fontFamily="mono" fontWeight="500" letterSpacing="0.02em">
-													{t("cached", { defaultValue: "Cached" })}{activeBalance.updatedAt ? ` · ${new Date(activeBalance.updatedAt).toLocaleString(getNumberLocale(), { dateStyle: "medium", timeStyle: "short" })}` : ""}
+													{t("cached", { defaultValue: "Cached" })}{activeBalance.updatedAt ? ` · ${new Date(activeBalance.updatedAt).toLocaleString(getDateLocale(), { dateStyle: "medium", timeStyle: "short" })}` : ""}
 												</Text>
 											</Flex>
 										) : chain.id === 'zcash' ? (
@@ -1240,10 +1241,10 @@ function PersonalAssetPage({ chain, balance, balanceLoading = false, onBack, fir
 											</Text>
 									) : headerBalanceKnown ? (
 											<Flex align="center" gap="1" color="var(--teal)" className="v3-glass-chip" px="2" py="0.5"
-												title={lastSyncedAt ? `Last updated ${lastSyncedAt.toLocaleString(getNumberLocale())}` : undefined}>
+												title={lastSyncedAt ? uiText("Last updated {{time}}", { time: lastSyncedAt.toLocaleString(getDateLocale()) }) : undefined}>
 												<Box as={FaCheck} fontSize="9px" />
 												<Text fontSize="10px" fontFamily="mono" fontWeight="500" letterSpacing="0.02em">
-													{t("synced")}{lastSyncedAt ? ` · ${lastSyncedAt.toLocaleTimeString(getNumberLocale(), { hour: '2-digit', minute: '2-digit' })}` : ''}
+													{t("synced")}{lastSyncedAt ? ` · ${lastSyncedAt.toLocaleTimeString(getDateLocale(), { timeStyle: 'short' })}` : ''}
 												</Text>
 											</Flex>
 										) : (

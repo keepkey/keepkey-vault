@@ -1,5 +1,4 @@
 import i18n from '../i18n'
-import { getNumberLocale } from "../lib/number-locale"
 import { useUiTranslation } from "../i18n/ui"
 import { useState, useEffect, useCallback, useMemo, useRef } from "react"
 import { Box, Flex, Text, VStack, HStack, Image, Spinner } from "@chakra-ui/react"
@@ -15,6 +14,7 @@ import {
   type TxDetail, type ActivityTimelineItem,
 } from "./ActivityPanel"
 import { ReportDialog } from "./ReportDialog"
+import { getDateLocale } from '../lib/date-locale'
 
 interface ActivityPageProps {
   defaultChainId?: string
@@ -47,7 +47,7 @@ function bucketByDate(items: ActivityTimelineItem[], language: string): Array<{ 
     if (d.toDateString() === today.toDateString()) label = new Intl.RelativeTimeFormat(language, { numeric: 'auto' }).format(0, 'day')
     else if (d.toDateString() === yesterday.toDateString()) label = new Intl.RelativeTimeFormat(language, { numeric: 'auto' }).format(-1, 'day')
     else {
-      label = d.toLocaleDateString(getNumberLocale(), { month: 'short', day: 'numeric', year: 'numeric' })
+      label = d.toLocaleDateString(getDateLocale(), { month: 'short', day: 'numeric', year: 'numeric' })
     }
     if (!groups.has(label)) groups.set(label, [])
     groups.get(label)!.push(item)
