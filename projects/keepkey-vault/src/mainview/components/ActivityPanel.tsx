@@ -78,7 +78,7 @@ function typeLabel(type: string, uiText: UiText): string {
 }
 function statusLabel(status: string, uiText: UiText): string {
   switch (status) {
-    case 'broadcast': return uiText("Broadcast")
+    case 'broadcast': return uiText("Broadcasted") // status, not the "Broadcast" button verb
     case 'not_sent': return uiText("Not sent")
     case 'completed': return uiText("Completed")
     case 'refunded': return uiText("Refunded")
@@ -513,9 +513,9 @@ export function TxDetailDialog({ detail, onClose, nativePrices }: { detail: TxDe
         <VStack px="5" py="4" gap="0" align="stretch">
           <TxDetailRow label={uiText("From")} value={`${s.fromAmount} ${s.fromSymbol}`} />
           <TxDetailRow label={uiText("Originally quoted")} value={`${s.expectedOutput} ${s.toSymbol}`} />
-          {showReceived && <TxDetailRow label={settlementVerified ? 'Reported received' : 'Partial payout'} value={`${s.receivedOutput} ${s.toSymbol}`} color="var(--teal)" />}
+          {showReceived && <TxDetailRow label={settlementVerified ? uiText("Reported received") : uiText("Partial payout")} value={`${s.receivedOutput} ${s.toSymbol}`} color="var(--teal)" />}
           {s.status === 'completed' && !settlementVerified && <Text fontSize="xs" color="var(--gold)">{uiText("Verifying all settlement payments before marking this swap done.")}</Text>}
-          {s.payouts?.map((payout, index) => <CopyableRow key={`${payout.txid}-${index}`} label={`Payment ${index + 1}: ${payout.amount} ${s.toSymbol}`} value={payout.txid} explorerUrl={getExplorerTxUrl(s.outboundChainId || s.toChainId, payout.txid)} />)}
+          {s.payouts?.map((payout, index) => <CopyableRow key={`${payout.txid}-${index}`} label={uiText("Payment {{number}}: {{amount}}", { number: index + 1, amount: `${payout.amount} ${s.toSymbol}` })} value={payout.txid} explorerUrl={getExplorerTxUrl(s.outboundChainId || s.toChainId, payout.txid)} />)}
           {s.integration && <TxDetailRow label={uiText("Integration")} value={s.integration} />}
 
           <Box h="1px" bg="kk.border" my="2" />
@@ -594,7 +594,7 @@ export function ActivityRow({ activity, onSelect, nativePrices }: { activity: Re
   const amountLine = activity.type === 'swap' && (activity.amount || activity.outAmount)
     ? `${activity.amount ? `${activity.amount} ${activity.asset || activity.chain}` : ''}${activity.amount || activity.outAmount ? ' \u2192 ' : ''}${activity.outAmount ? `${activity.swapStatus === 'completed' ? '' : '~'}${activity.outAmount} ${activity.outAsset || ''}` : activity.outAsset || '?'}`
     : nativeAmount || nativeFee
-      ? `${nativeAmount ? `${nativeAmount.amount} ${activity.asset || chainSymbol}${nativeAmount.usd ? ` (${nativeAmount.usd})` : ''}` : ''}${nativeAmount && nativeFee ? '  ' : ''}${nativeFee ? `fee: ${nativeFee.amount} ${chainSymbol}${nativeFee.usd ? ` (${nativeFee.usd})` : ''}` : ''}`
+      ? `${nativeAmount ? `${nativeAmount.amount} ${activity.asset || chainSymbol}${nativeAmount.usd ? ` (${nativeAmount.usd})` : ''}` : ''}${nativeAmount && nativeFee ? '  ' : ''}${nativeFee ? uiText("fee: {{amount}}", { amount: `${nativeFee.amount} ${chainSymbol}${nativeFee.usd ? ` (${nativeFee.usd})` : ''}` }) : ''}`
       : null
 
   return (
@@ -667,7 +667,7 @@ export function ActivityTableRow({ activity, onSelect, nativePrices }: { activit
   const amountLine = activity.type === 'swap' && (activity.amount || activity.outAmount)
     ? `${activity.amount ? `${activity.amount} ${activity.asset || activity.chain}` : ''}${activity.amount || activity.outAmount ? ' → ' : ''}${activity.outAmount ? `${activity.swapStatus === 'completed' ? '' : '~'}${activity.outAmount} ${activity.outAsset || ''}` : activity.outAsset || '?'}`
     : nativeAmount || nativeFee
-      ? `${nativeAmount ? `${nativeAmount.amount} ${activity.asset || chainSymbol}${nativeAmount.usd ? ` (${nativeAmount.usd})` : ''}` : ''}${nativeAmount && nativeFee ? '  ' : ''}${nativeFee ? `fee: ${nativeFee.amount} ${chainSymbol}${nativeFee.usd ? ` (${nativeFee.usd})` : ''}` : ''}`
+      ? `${nativeAmount ? `${nativeAmount.amount} ${activity.asset || chainSymbol}${nativeAmount.usd ? ` (${nativeAmount.usd})` : ''}` : ''}${nativeAmount && nativeFee ? '  ' : ''}${nativeFee ? uiText("fee: {{amount}}", { amount: `${nativeFee.amount} ${chainSymbol}${nativeFee.usd ? ` (${nativeFee.usd})` : ''}` }) : ''}`
       : (activity.txid ? truncateTxid(activity.txid) : null)
 
   return (
@@ -844,7 +844,7 @@ function NetworkSelector({ chainOptions, selectedChain, selectedDef, scanning, s
         _hover={scanning || !selectedChain ? {} : { bg: 'rgba(35,220,200,0.2)' }}
         transition="all 0.15s"
         onClick={onScan}
-        title={!selectedChain ? 'Select a chain to scan' : scanning ? 'Scanning...' : `Scan ${selectedDef?.symbol || ''} history`}
+        title={!selectedChain ? uiText("Select a chain to scan") : scanning ? uiText("Scanning…") : uiText("Scan {{symbol}} history", { symbol: selectedDef?.symbol || '' })}
       >
         <RefreshIcon spinning={scanning} />
       </Box>
@@ -1061,7 +1061,7 @@ export function ActivityPanel({ open, onClose, activities, pendingSwaps, onRefre
               color={tab === 'swaps' ? '#F7931A' : 'whiteAlpha.500'}
               borderBottom={tab === 'swaps' ? '2px solid #F7931A' : '2px solid transparent'}
               pb="1" onClick={() => setTab('swaps')}
-            >{uiText("Swaps (")}{pendingSwaps.length})
+            >{uiText("Swaps ({{count}})", { count: pendingSwaps.length })}
             </Text>
           )}
         </Flex>
