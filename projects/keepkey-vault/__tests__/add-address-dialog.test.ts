@@ -15,6 +15,10 @@ test('Add address resolves ENS before saving and refuses invalid, unresolved, bu
     own: blocked('contactIsOwnAddress'),
     valid: { canAdd: true, cosigner: true, error: null },
     saved: ['0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed'],
-    ensSaved: { networkId: 'eip155:8453', address: 'Alice.ETH', label: 'alice.eth', expectedAddress: '0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed' },
+    // KEEPKEY-176: a blank name sends no label, so the backend keeps the contact's own
+    // name; the field stays editable, suggests the ENS name, and a typed name is sent.
+    ensSaved: { networkId: 'eip155:8453', address: 'Alice.ETH', expectedAddress: '0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed' },
+    ensLabel: { disabled: false, placeholder: 'alice.eth' },
+    ensNamed: { networkId: 'eip155:8453', address: 'Alice.ETH', label: 'Alice work', expectedAddress: '0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed' },
   })
 }, 35000)

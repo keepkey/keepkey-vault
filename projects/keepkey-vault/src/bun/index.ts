@@ -9495,7 +9495,9 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				const entry = addExternalEntry({
 					walletId: scope.walletId, deviceId: scope.deviceId,
 					networkId: chain.networkId, chainId: chain.id, chainFamily: chain.chainFamily,
-					address, label: ensName || params.label || null, ensName, cosigner: params.cosigner,
+					// No typed name is undefined, not null: db then keeps the contact's
+					// current name (and falls back to the ENS name for a new one).
+					address, label: params.label?.trim() || undefined, ensName, cosigner: params.cosigner,
 				})
 				if (entry) {
 					// Certified contacts are labeled external EVM entries: a co-signer save that keeps the label changes none.
