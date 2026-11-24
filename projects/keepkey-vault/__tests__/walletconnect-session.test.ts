@@ -155,6 +155,26 @@ async function fixture() {
     responses, listeners, sessions, start, startTopic, retire, setPairTransport, setSessionTransport }
 }
 
+test('a cold Solana-only proposal reaches approval without resolving an EVM account', async () => {
+  const f = await fixture()
+  f.setPairTransport()
+  const chain = 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp'
+  const address = '11111111111111111111111111111111'
+  const manager = f.manager as any
+  const evmReads = mock(async () => null)
+  manager.callbacks.ensureEvmAddressInfo = evmReads
+  manager.callbacks.getSolanaAccountInfo = async () => ({ address })
+  const pending = manager.onSessionProposal({ id: 121, params: {
+    requiredNamespaces: { solana: { chains: [chain], methods: ['solana_signTransaction'], events: [] } },
+    optionalNamespaces: {}, proposer: { metadata: { name: 'Solana fixture', url: 'https://example.invalid', icons: [] } },
+  } })
+  f.manager.approvePair(await f.pairShown.promise)
+  await pending
+  expect(evmReads).not.toHaveBeenCalled()
+  expect(f.rejected).toEqual([])
+  expect(f.paired[0]?.namespaces.solana.accounts).toContain(`${chain}:${address}`)
+})
+
 describe('WalletConnect request/session ownership', () => {
   test.each(['wallet', 'deviceId', 'seed', 'locked'])('unverified initial %s cannot use a cached account to open an approval', async missing => {
     const f = await fixture()
@@ -360,24 +380,4 @@ describe('WalletConnect request/session ownership', () => {
     expect(f.cards).toHaveLength(1)
     expect(f.responses[1].response.error).toBeDefined()
   })
-})
-
-test('a cold Solana-only proposal reaches approval without resolving an EVM account', async () => {
-  const f = await fixture()
-  f.setPairTransport()
-  const chain = 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp'
-  const address = '11111111111111111111111111111111'
-  const manager = f.manager as any
-  const evmReads = mock(async () => null)
-  manager.callbacks.ensureEvmAddressInfo = evmReads
-  manager.callbacks.getSolanaAccountInfo = async () => ({ address })
-  const pending = manager.onSessionProposal({ id: 121, params: {
-    requiredNamespaces: { solana: { chains: [chain], methods: ['solana_signTransaction'], events: [] } },
-    optionalNamespaces: {}, proposer: { metadata: { name: 'Solana fixture', url: 'https://example.invalid', icons: [] } },
-  } })
-  f.manager.approvePair(await f.pairShown.promise)
-  await pending
-  expect(evmReads).not.toHaveBeenCalled()
-  expect(f.rejected).toEqual([])
-  expect(f.paired[0]?.namespaces.solana.accounts).toContain(`${chain}:${address}`)
 })

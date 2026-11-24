@@ -36,7 +36,8 @@ if (process.env.PAIRING_LAYOUT_HTML) {
       const bottom = dialog.lastElementChild
       dialog.scrollTop = dialog.scrollHeight
       const bounds = bottom.getBoundingClientRect()
-      if (dialog.scrollTop > 0 && bounds.bottom <= innerHeight && bounds.top >= 0)
+      const userScrollable = ['auto', 'scroll'].includes(getComputedStyle(dialog).overflowY)
+      if (userScrollable && dialog.scrollTop > 0 && bounds.bottom <= innerHeight && bounds.top >= 0)
         document.documentElement.dataset.pairingScroll = 'passed'
     </script>`)
 }
