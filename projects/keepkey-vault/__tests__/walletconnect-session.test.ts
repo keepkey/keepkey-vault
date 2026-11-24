@@ -372,5 +372,9 @@ test('Ethereum RPC retries a plain-text rate limit on the fallback provider', as
   try {
     expect(await (WalletConnectManager.prototype as any).rpcCall(1, 'eth_gasPrice', [])).toBe('0x7')
     expect(urls).toEqual(['https://eth.llamarpc.com', 'https://ethereum-rpc.publicnode.com'])
+    urls.length = 0
+    await expect((WalletConnectManager.prototype as any).rpcCall(1, 'eth_sendRawTransaction', ['0x01']))
+      .rejects.toThrow('non-JSON')
+    expect(urls).toEqual(['https://eth.llamarpc.com'])
   } finally { globalThis.fetch = saved }
 })

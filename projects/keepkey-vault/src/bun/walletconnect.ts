@@ -1005,7 +1005,8 @@ export class WalletConnectManager {
   private async rpcCall(chainId: number, method: string, params: any[]): Promise<any> {
     const rpcUrl = CHAIN_RPC[chainId]
     if (!rpcUrl) throw new Error(`No RPC for chain ${chainId}`)
-    const fallback = chainId === 1 ? 'https://ethereum-rpc.publicnode.com' : undefined
+    // A lost broadcast response may already represent an accepted transaction.
+    const fallback = chainId === 1 && method !== 'eth_sendRawTransaction' ? 'https://ethereum-rpc.publicnode.com' : undefined
     const request = (url: string) => fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
