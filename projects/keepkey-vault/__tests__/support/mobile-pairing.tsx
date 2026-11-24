@@ -27,6 +27,19 @@ await act(async () => {
 const dialog = container.querySelector('[role="dialog"]')!
 const displayedCode = [...dialog.querySelectorAll('p')].find(p => p.textContent === code)?.textContent
 const svg = dialog.querySelector('svg[shape-rendering="crispEdges"]')!
+if (process.env.PAIRING_LAYOUT_HTML) {
+  const css = Array.from(document.styleSheets, sheet =>
+    Array.from(sheet.cssRules, rule => rule.cssText).join('\n')).join('\n')
+  await Bun.write(process.env.PAIRING_LAYOUT_HTML, `<!doctype html><style>${css}</style>${container.innerHTML}
+    <script>
+      const dialog = document.querySelector('[role="dialog"]')
+      const bottom = dialog.lastElementChild
+      dialog.scrollTop = dialog.scrollHeight
+      const bounds = bottom.getBoundingClientRect()
+      if (dialog.scrollTop > 0 && bounds.bottom <= innerHeight && bounds.top >= 0)
+        document.documentElement.dataset.pairingScroll = 'passed'
+    </script>`)
+}
 console.log(JSON.stringify({ displayedCode, svg: svg.outerHTML, size: Number(svg.getAttribute('width')) }))
 await act(async () => root.unmount())
 dom.window.close()

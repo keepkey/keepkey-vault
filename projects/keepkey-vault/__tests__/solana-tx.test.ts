@@ -12,7 +12,7 @@
  * Run: bun test __tests__/solana-tx.test.ts
  */
 import { describe, test, expect } from 'bun:test'
-import { parseSolanaTx, SolanaTxParseError, MAX_SIGNATURES, solanaMessageSlice } from '../src/bun/solana-tx'
+import { parseSolanaTx, SolanaTxParseError, MAX_SIGNATURES, parseSolanaMessage, solanaMessageSlice } from '../src/bun/solana-tx'
 
 // ── Fixture builders ──────────────────────────────────────────────────
 
@@ -214,4 +214,16 @@ describe('signing reassembly — sigStart contract', () => {
     expect(out[parsed.messageStart]).toBe(0x80)
     expect(out[parsed.sigStart]).toBe(0xcd)
   })
+})
+
+test('v0 lookup table survives extraction from a base64 signing request', () => {
+  const tableKey = Buffer.alloc(32, 42)
+  const tx = Buffer.concat([
+    versionedV0Tx(1).subarray(0, -1),
+    Buffer.from([1]), tableKey, Buffer.from([1, 3, 1, 7]),
+  ])
+  const wire = Buffer.from(tx.toString('base64'), 'base64')
+  const message = parseSolanaMessage(solanaMessageSlice(wire, parseSolanaTx(wire)))
+  expect(message.version).toBe('v0')
+  expect(message.altEntries).toEqual([{ accountKey: tableKey, writableIndices: [3], readonlyIndices: [7] }])
 })

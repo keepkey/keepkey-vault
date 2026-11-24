@@ -54,7 +54,7 @@ describe('verifyEvmSigner', () => {
 })
 
 describe('WalletConnect fee expiry during device confirmation (#508)', () => {
-  async function runSign(baseFees: Array<string | undefined>, opts: { broadcast?: boolean; priority?: string; suggested?: string; legacy?: boolean } = {}) {
+  async function runSign(baseFees: Array<string | undefined>, opts: { broadcast?: boolean; cap?: string; priority?: string; suggested?: string; legacy?: boolean } = {}) {
     // No real service, account, device or broadcast is used by this test.
     globalThis.fetch = (async () => Response.json({ error: { message: 'test service unavailable' } })) as unknown as typeof fetch
     const { WalletConnectManager } = await import('../src/bun/walletconnect')
@@ -90,7 +90,7 @@ describe('WalletConnect fee expiry during device confirmation (#508)', () => {
     const run = manager.signTransaction({
       from: wallet.address, to: '0x1111111111111111111111111111111111111111',
       value: '0x0', data: '0x', nonce: '0x0', gas: '0x5208', chainId: 42161,
-      ...(opts.legacy ? { gasPrice: '0x131AA00' } : { maxFeePerGas: '20032000', ...(opts.priority === undefined ? {} : { maxPriorityFeePerGas: opts.priority }) }),
+      ...(opts.legacy ? { gasPrice: '0x131AA00' } : { maxFeePerGas: opts.cap ?? '20032000', ...(opts.priority === undefined ? {} : { maxPriorityFeePerGas: opts.priority }) }),
     }, [0x8000002c, 0x8000003c, 0x80000000, 0, 0], 'test dApp', 42161, opts.broadcast ?? true)
     return { run, sent, rpc, dismissed }
   }
@@ -110,6 +110,17 @@ describe('WalletConnect fee expiry during device confirmation (#508)', () => {
     expect(cap.sent[0].maxFeePerGas).toBe('20032000')
     expect(cap.rpc).not.toContain('eth_sendRawTransaction')
     expect(cap.dismissed).toHaveLength(1)
+  })
+
+  test('a refreshed dApp request can sign and broadcast after the first cap expires', async () => {
+    const expired = await runSign(['20000000', '20186000'])
+    await expect(expired.run).rejects.toThrow('Refresh the transaction')
+    expect(expired.rpc).not.toContain('eth_sendRawTransaction')
+    const refreshed = await runSign(['20186000', '20186000'], { cap: '20300000' })
+    await expect(refreshed.run).resolves.toBe('0xtesthash')
+    expect(refreshed.sent).toHaveLength(1)
+    expect(refreshed.sent[0].maxFeePerGas).toBe('20300000')
+    expect(refreshed.rpc.filter(method => method === 'eth_sendRawTransaction')).toHaveLength(1)
   })
 
   test('missing tip suggestion uses zero rather than an invalid fixed 1.5 gwei', async () => {
