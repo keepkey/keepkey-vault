@@ -12251,7 +12251,7 @@ const url = await getMainViewUrl()
 // ── Application Menu (required for Cmd+C/V clipboard in WKWebView on macOS) ──
 // On Windows, Electrobun renders a menu bar but macOS roles are no-ops — hide it.
 function updateApplicationMenu() {
-if (process.platform === 'win32') return
+if (process.platform !== 'darwin') return
 const text = (source: string) => backendText(getSetting('app_language'), source)
 ApplicationMenu.setApplicationMenu([
 	{

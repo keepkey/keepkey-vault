@@ -361,3 +361,16 @@ describe('WalletConnect request/session ownership', () => {
     expect(f.responses[1].response.error).toBeDefined()
   })
 })
+
+test('Ethereum RPC retries a plain-text rate limit on the fallback provider', async () => {
+  const urls: string[] = []
+  const saved = globalThis.fetch
+  globalThis.fetch = (async (url: string) => {
+    urls.push(url)
+    return urls.length === 1 ? new Response('Too many connections') : Response.json({ result: '0x7' })
+  }) as typeof fetch
+  try {
+    expect(await (WalletConnectManager.prototype as any).rpcCall(1, 'eth_gasPrice', [])).toBe('0x7')
+    expect(urls).toEqual(['https://eth.llamarpc.com', 'https://ethereum-rpc.publicnode.com'])
+  } finally { globalThis.fetch = saved }
+})
