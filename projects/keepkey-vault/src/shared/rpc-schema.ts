@@ -361,7 +361,7 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       lockVolumeImage: { params: VolumeImageTarget; response: void }
       deleteVolumeImage: { params: VolumeDeleteTarget; response: void }
       openExternalVolume: { params: { id: string; uuid: string | null }; response: void }
-      openVolumeFileVaultSettings: { params: void; response: void }
+      openVolumeEncryptionSettings: { params: void; response: void }
       passwordBankUnlock: { params: { create?: boolean }; response: PasswordBankView }
       passwordBankLock: { params: void; response: PasswordBankView }
       passwordBankGenerate: { params: { count: number; ttlMinutes: number }; response: PasswordBankView }

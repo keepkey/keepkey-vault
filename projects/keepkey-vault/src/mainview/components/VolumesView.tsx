@@ -431,7 +431,7 @@ export function VolumesView() {
           <Text {...heading}>{uiText('Startup disk')}</Text>
           <Text {...secondary}>{local.fileVault === 'on' ? uiText('FileVault is on') : local.fileVault === 'off' ? uiText('FileVault is off') : uiText('FileVault status unknown')}</Text>
         </Box>
-        <Button size="xs" variant="outline" disabled={blocked} onClick={() => void run(() => rpcRequest('openVolumeFileVaultSettings'))}>{uiText('Open System Settings')}</Button>
+        <Button size="xs" variant="outline" disabled={blocked} onClick={() => void run(() => rpcRequest('openVolumeEncryptionSettings'))}>{uiText('Open System Settings')}</Button>
       </Flex>}
       {managementAvailable && <Box borderTop="1px solid" borderColor="kk.borderAlt" pt="3">
         <Text as="h3" fontSize="sm" fontWeight="600">{uiText('Recovery details')}</Text>

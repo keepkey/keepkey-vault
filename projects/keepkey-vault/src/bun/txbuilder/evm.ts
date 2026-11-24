@@ -12,6 +12,7 @@ import { isEvmAddress } from '../../shared/address-validation'
 import { GAS_PRICE_ERROR } from '../../shared/gas-price-errors'
 import { decimalAmount } from '../../shared/locale'
 import { ARBITRUM_ONE_RPC, estimateGas, getEvmGasPrice, getEvmNonce, getEvmBalance } from '../evm-rpc'
+import { swapGasMinimumWei } from '../swap-gas-floor'
 
 const TAG = '[txbuilder:evm]'
 
@@ -229,18 +230,20 @@ export async function buildEvmTx(
   // plus a small tip, so the slow discount would bid under the base fee
   // (Arbitrum rejects that transaction; OP Stack chains leave it unmined).
   // The old 3 gwei (BSC) and 25 gwei (Avalanche) floors were 10–30× the quote
-  // (audit v6 B12). BSC keeps only its validators' minimum (0.05 gwei, bsc
-  // miner.GasPrice default). Avalanche has no fixed minimum since ACP-176: the
-  // quote (base fee + tip) is the floor, with 25% headroom, since its legacy tx
-  // stalls if the base fee rises past it while the user reviews on the device.
-  // Polygon keeps 30 gwei: its nodes refuse tips under 25 gwei (PIP-35).
-  const MIN_GAS_WEI: Record<number, bigint> = {
-    56: 50_000_000n,     // BSC
-    137: BigInt(30e9),   // Polygon
-  }
-  const minGas = chainId === 43114
-    ? quotedGasPrice * 125n / 100n // Avalanche
-    : MIN_GAS_WEI[chainId] ?? quotedGasPrice
+  // (audit v6 B12). BSC: the quote is the floor, never under its validators'
+  // minimum (0.05 gwei, bsc miner.GasPrice default), so the slow level cannot
+  // sign under the quote and leave the tx stuck (KEEPKEY-164); the same rule
+  // as swaps, from swap-gas-floor.ts, so the two cannot drift. Avalanche has
+  // no fixed minimum since ACP-176: the quote (base fee + tip) is the floor,
+  // with 25% headroom, since its legacy tx stalls if the base fee rises past
+  // it while the user reviews on the device. Polygon keeps 30 gwei: its nodes
+  // refuse tips under 25 gwei (PIP-35).
+  const POLYGON_MIN_GAS_WEI = BigInt(30e9)
+  const minGas =
+    chainId === 43114 ? quotedGasPrice * 125n / 100n // Avalanche
+    : chainId === 56 ? swapGasMinimumWei('bsc', quotedGasPrice)
+    : chainId === 137 ? POLYGON_MIN_GAS_WEI
+    : quotedGasPrice
   if (gasPrice < minGas) {
     console.log(`${TAG} Gas price ${gasPrice} below floor ${minGas} — using floor`)
     gasPrice = minGas

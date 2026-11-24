@@ -39,7 +39,7 @@ import { previewCertificationEntries, selectCertificationContacts } from './addr
 import { singleFlight } from './single-flight'
 import { PasswordBank } from './password-bank'
 import { createDesktopVolumeStore, openExternalVolume, scanVolumeInventory } from './volumes'
-import { openVolumeFileVaultSettings } from './volume-finder'
+import { openVolumeEncryptionSettings } from './volume-finder'
 import { deriveVolumePassword } from './volume-key'
 import { volumeCipherKey } from '../shared/volume-key'
 import type { VolumeInventory, VolumeDeviceStatus, VolumeProgress, VolumeProgressEvent } from '../shared/volumes'
@@ -9086,7 +9086,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			lockVolumeImage: params => volumes.lockVolumeImage(params),
 			deleteVolumeImage: params => volumes.deleteVolumeImage(params),
 			openExternalVolume: params => openExternalVolume(params),
-			openVolumeFileVaultSettings: () => openVolumeFileVaultSettings(),
+			openVolumeEncryptionSettings: () => openVolumeEncryptionSettings(),
 			passwordBankUnlock: async (params) => passwordBank.unlock(params?.create === true),
 			passwordBankLock: async () => { passwordAgent.cancelPending(); passwordBank.lock(); return passwordBank.view() },
 			passwordBankGenerate: async (params) => passwordBank.generate(params.count, params.ttlMinutes),

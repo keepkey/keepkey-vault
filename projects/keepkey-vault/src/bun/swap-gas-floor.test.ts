@@ -35,6 +35,10 @@ describe('swap gas floor', () => {
 
 	it('never lets the slow level sign under what BSC or Avalanche accept', () => {
 		expect(swapGasMinimumWei('bsc', gwei(0.05))).toBe(gwei(0.05))
+		// KEEPKEY-164: on BSC the quote is the floor, so slow never signs under it.
+		expect(swapGasMinimumWei('bsc', gwei(0.1))).toBe(gwei(0.1))
+		expect(swapGasMinimumWei('bsc', gwei(0.01))).toBe(gwei(0.05))
+		expect(swapGasMinimumWei('bsc', null)).toBe(gwei(0.05))
 		expect(swapGasMinimumWei('avalanche', gwei(0.8))).toBe(gwei(1))
 		expect(swapGasMinimumWei('ethereum', gwei(1))).toBe(0n)
 	})
@@ -82,9 +86,11 @@ describe('EVM send gas price', () => {
 		expect(BigInt(tx.gasPrice)).toBe(gwei(0.05))
 	})
 
-	it('the slow level discounts the BSC quote but never under 0.05 gwei', async () => {
-		const discounted = await buildEvmTx(pioneer('0.1'), chain('bsc'), { to, amount: '0.01', fromAddress: from, feeLevel: 1 })
-		expect(BigInt(discounted.gasPrice)).toBe(gwei(0.08))
+	// KEEPKEY-164: 80% of the quote (0.08 gwei) is under what the network is
+	// pricing, so the slow tx could sit unmined.
+	it('the slow level never signs a BSC send under its quote or 0.05 gwei', async () => {
+		const slow = await buildEvmTx(pioneer('0.1'), chain('bsc'), { to, amount: '0.01', fromAddress: from, feeLevel: 1 })
+		expect(BigInt(slow.gasPrice)).toBe(gwei(0.1))
 		const atMinimum = await buildEvmTx(pioneer('0.05'), chain('bsc'), { to, amount: '0.01', fromAddress: from, feeLevel: 1 })
 		expect(BigInt(atMinimum.gasPrice)).toBe(gwei(0.05))
 	})

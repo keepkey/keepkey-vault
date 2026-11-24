@@ -17,6 +17,6 @@ export async function openExternalVolume(target: { id: string; uuid: string | nu
   await openMacItem(['-a', 'Finder', volume.mountPoint])
 }
 
-export function openVolumeFileVaultSettings() {
+export function openVolumeEncryptionSettings() {
   return openMacItem(['x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?FileVault'])
 }
