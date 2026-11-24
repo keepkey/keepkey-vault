@@ -2,6 +2,7 @@ import type { SyncProgress } from './sync-progress'
 import type { MoneroSendReview, MoneroStatus, EmulatorBuildInfo, EmulatorNextBuild } from './types'
 import type { MultisigPolicyPreview,MultisigCosignerExport,BtcPsbtSigned } from "./multisig-policy"
 import type { PasswordBankView, PasswordBrowserTarget, PasswordRiskKind, PasswordAgentApproval } from './password-bank'
+import type { VolumeDeleteTarget, VolumeDestination, VolumeDeviceStatus, VolumeImage, VolumeImageTarget, VolumeInventory, VolumeProgress } from './volumes'
 import type { ElectrobunRPCSchema } from 'electrobun/main'
 import type { SafeAccount, SafeContext, SafeCreateParams, SafeProposal, SafeTransfer, SafeTxReview, VaultAddParams, VaultAddReview } from './safe-multisig'
 import type { VaultIdentity } from './vault-identity'
@@ -351,6 +352,16 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       passkeysDelete: { params: { pin: string; credentialId: string }; response: { ok: true } }
       passkeysSetLabel: { params: { rpHash: string; label: string }; response: { ok: true } }
       passwordBankStatus: { params: void; response: PasswordBankView }
+      getVolumeInventory: { params: void; response: VolumeInventory }
+      volumeDeviceStatus: { params: void; response: VolumeDeviceStatus }
+      listVolumeImages: { params: void; response: VolumeImage[] }
+      createVolumeImage: { params: { name: string; sizeMiB: number; destination?: VolumeDestination; operationId?: string }; response: void }
+      unlockVolumeImage: { params: VolumeImageTarget & { operationId?: string }; response: void }
+      openVolumeImage: { params: VolumeImageTarget; response: void }
+      lockVolumeImage: { params: VolumeImageTarget; response: void }
+      deleteVolumeImage: { params: VolumeDeleteTarget; response: void }
+      openExternalVolume: { params: { id: string; uuid: string | null }; response: void }
+      openVolumeEncryptionSettings: { params: void; response: void }
       passwordBankUnlock: { params: { create?: boolean }; response: PasswordBankView }
       passwordBankLock: { params: void; response: PasswordBankView }
       passwordBankGenerate: { params: { count: number; ttlMinutes: number }; response: PasswordBankView }
@@ -668,6 +679,7 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       'signing-dismissed': { id: string }
       'api-log': ApiLogEntry
       'report-progress': { id: string; message: string; percent: number }
+      'volume-progress': VolumeProgress
       // Live per-path progress for the audit "unusual paths" (sweep) scan, so the
       // panel can stream what it's checking. scanId scopes it to one scan.
       'audit-sweep-progress': {

@@ -7,30 +7,30 @@ import { Z } from '../lib/z-index'
 import { Bip85VaultDialog } from './Bip85VaultDialog'
 import { PasswordBankView } from './PasswordBankView'
 import { PasskeysView } from './PasskeysView'
+import { VolumesView } from './VolumesView'
 
 /** One entry for password and seed tools; feature switches never add
  * another global navigation tab. */
-export function VaultToolsButton({ seedVaultAvailable, passwordsAvailable = true, passkeysAvailable = false }: {
-  seedVaultAvailable: boolean; passwordsAvailable?: boolean; passkeysAvailable?: boolean
+export function VaultToolsButton({ seedVaultAvailable, passwordsAvailable = true, passkeysAvailable = false, volumesAvailable = false }: {
+  seedVaultAvailable: boolean; passwordsAvailable?: boolean; passkeysAvailable?: boolean; volumesAvailable?: boolean
 }) {
   const uiText = useUiTranslation()
   const passwordFlag = usePasswordManagerEnabled()
   const passwords = passwordFlag && passwordsAvailable
   const [open, setOpen] = useState(false)
   const passkeys = usePasskeysEnabled() && passkeysAvailable
-  const [section, setSection] = useState<'passwords' | 'passkeys' | 'seeds'>('passwords')
+  const firstSection = passwords ? 'passwords' : passkeys ? 'passkeys' : seedVaultAvailable ? 'seeds' : 'volumes'
+  const [section, setSection] = useState<'passwords' | 'passkeys' | 'seeds' | 'volumes'>(firstSection)
   const trigger = useRef<HTMLButtonElement>(null)
   const panel = useRef<HTMLDivElement>(null)
   const close = () => { setOpen(false); trigger.current?.focus() }
   useEffect(() => {
-    const gone = (section === 'passwords' && !passwords) || (section === 'passkeys' && !passkeys)
-    if (gone) {
-      if (passwords) setSection('passwords')
-      else if (passkeys) setSection('passkeys')
-      else if (seedVaultAvailable) setSection('seeds')
+    const available = { passwords, passkeys, seeds: seedVaultAvailable, volumes: volumesAvailable }
+    if (!available[section]) {
+      if (available[firstSection]) setSection(firstSection)
       else setOpen(false)
     }
-  }, [passwords, passkeys, section, seedVaultAvailable])
+  }, [firstSection, passwords, passkeys, section, seedVaultAvailable, volumesAvailable])
   useEffect(() => {
     if (!open) return
     panel.current?.focus()
@@ -44,15 +44,15 @@ export function VaultToolsButton({ seedVaultAvailable, passwordsAvailable = true
     window.addEventListener('keydown', escape, true)
     return () => window.removeEventListener('keydown', escape, true)
   }, [open])
-  if (!seedVaultAvailable && !passwords && !passkeys) return null
+  if (!seedVaultAvailable && !passwords && !passkeys && !volumesAvailable) return null
+  const label = volumesAvailable ? uiText('Vault tools') : passwords || passkeys ? uiText('Passwords and seed vault') : uiText('BIP-85 Seed Vault')
   return <>
     <Button ref={trigger} position="fixed" bottom="76px" right="28px" w="52px" h="52px" minW="52px" p="0"
       borderRadius="full" bg="rgba(233,196,106,0.22)" border="1.5px solid rgba(233,196,106,0.7)"
       boxShadow="0 0 16px rgba(233,196,106,0.25)" zIndex={10}
       _hover={{ bg: 'rgba(233,196,106,0.32)', borderColor: 'kk.gold' }}
-      aria-label={passwords || passkeys ? uiText('Passwords and seed vault') : uiText('BIP-85 Seed Vault')}
-      title={passwords || passkeys ? uiText('Passwords and seed vault') : uiText('BIP-85 Seed Vault')}
-      onClick={() => { setSection(passwords ? 'passwords' : passkeys ? 'passkeys' : 'seeds'); setOpen(true) }}>
+      aria-label={label} title={label}
+      onClick={() => { setSection(firstSection); setOpen(true) }}>
       <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--gold)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         {/* Padlock by owner choice (11-14): it reads as "the vault". */}
         <rect x="3" y="11" width="18" height="11" rx="2" ry="2" /><path d="M7 11V7a5 5 0 0 1 10 0v4" />
@@ -77,13 +77,17 @@ export function VaultToolsButton({ seedVaultAvailable, passwordsAvailable = true
           <Text fontSize="lg" fontWeight="600">{uiText('Vault')}</Text>
           <Button size="xs" variant="ghost" color="kk.textSecondary" aria-label={uiText('Close vault')} onClick={close}>×</Button>
         </Flex>
-        <Flex as="nav" aria-label={uiText('Vault tools')} gap="2" px="5" py="3" borderBottom="1px solid" borderColor="kk.border">
+        <Flex as="nav" aria-label={uiText('Vault tools')} overflowX="auto" flexShrink={0} gap="2" px="5" py="3" borderBottom="1px solid" borderColor="kk.border">
           {passwords && <Button size="sm" color={section === 'passwords' ? 'kk.textPrimary' : 'kk.textSecondary'} variant={section === 'passwords' ? 'solid' : 'ghost'} aria-pressed={section === 'passwords'} onClick={() => setSection('passwords')}>{uiText('Passwords')}</Button>}
           {passkeys && <Button size="sm" color={section === 'passkeys' ? 'kk.textPrimary' : 'kk.textSecondary'} variant={section === 'passkeys' ? 'solid' : 'ghost'} aria-pressed={section === 'passkeys'} onClick={() => setSection('passkeys')}>{uiText('Passkeys')}</Button>}
           {seedVaultAvailable && <Button size="sm" color={section === 'seeds' ? 'kk.textPrimary' : 'kk.textSecondary'} variant={section === 'seeds' ? 'solid' : 'ghost'} aria-pressed={section === 'seeds'} onClick={() => setSection('seeds')}>{uiText('Seed vault (BIP-85)')}</Button>}
+          {volumesAvailable && <Button size="sm" color={section === 'volumes' ? 'kk.textPrimary' : 'kk.textSecondary'} variant={section === 'volumes' ? 'solid' : 'ghost'} aria-pressed={section === 'volumes'} onClick={() => setSection('volumes')}>{uiText('Volumes')}</Button>}
         </Flex>
         <Box overflow="auto" minH="0">
-          {section === 'passwords' && passwords ? <PasswordBankView /> : section === 'passkeys' && passkeys ? <PasskeysView /> : seedVaultAvailable ? <Bip85VaultDialog embedded onClose={close} /> : null}
+          {section === 'passwords' && passwords && <PasswordBankView />}
+          {section === 'passkeys' && passkeys && <PasskeysView />}
+          {section === 'seeds' && seedVaultAvailable && <Bip85VaultDialog embedded onClose={close} />}
+          {section === 'volumes' && volumesAvailable && <VolumesView />}
         </Box>
       </Box>
     </>}

@@ -9,6 +9,38 @@ only** (`LGPL-3.0-only`). See [LICENSE](../../LICENSE) for the LGPLv3 terms and
 [COPYING](../../COPYING) for the GPLv3 terms incorporated by LGPLv3. Separately
 licensed components retain their own licenses and copyright notices.
 
+## KeepKey volumes
+
+The Volumes tab is off by default. To enable it in a development build, set `VITE_ENABLE_VOLUMES=true` when building the Vault frontend.
+
+Open **Vault → Volumes** and click **Create volume** beside the storage location you want to use. Enter a name and size, then approve on a compatible physical KeepKey. Vault creates an encrypted disk image in the `KeepKey Volumes` folder on that computer or drive. Existing files elsewhere on the drive remain outside the encrypted image.
+
+Creation leaves the protected volume locked. Choose **Unlock with KeepKey** on that volume to mount it and open its protected files in the system file manager. Save private files in this mounted volume. **Open protected volume** takes you back there. **Open drive** opens the outer storage device, where the encrypted image and public recovery file live.
+
+During creation and unlock, the KeepKey displays **Encrypt Key Value** and `KeepKey Volume v1 <ID>`. Compare that ID with the device prompt shown in Vault. Both actions ask the device to reproduce a credential for that ID. The operating system uses the credential to create or mount the image. Renaming the volume folder leaves its ID and recovery credential intact.
+
+Once mounted, applications can work with the protected files and you can disconnect the KeepKey. Choose **Lock** before ejecting the SSD. A busy volume can require closing files first. After reconnecting, unlocking requires another device approval.
+
+To discard a practice volume, choose **Delete volume** on its row and confirm the name and storage location. This permanently removes that volume and its protected files. The drive stays available for other files or a new volume with the same name. Deletion works without the KeepKey, including after an unsuccessful unlock, once Vault can confirm the image is detached.
+
+On macOS, Vault prepares external volumes locally, copies the encrypted image to the drive, and verifies the copy with the approved credential before it reports success. An image created directly on exFAT by an earlier development build can report an authentication error even with the correct KeepKey. Keep the original package if that happens. Use a new name for a fresh practice volume, and verify a file survives locking and unlocking before entrusting data to it.
+
+| Desktop | Encrypted volume | Requirements |
+| --- | --- | --- |
+| macOS | AES-256 encrypted sparse disk image containing APFS | Open the mounted volume in Finder. |
+| Windows 10/11 | BitLocker-encrypted NTFS in a VHDX | Use a BitLocker-capable edition with the Storage and BitLocker PowerShell modules. Approve the Windows prompt from the same administrator account that opened Vault. Windows Home supports drive browsing. |
+| Linux | LUKS2 image containing ext4 | The desktop requires UDisks2, Python D-Bus bindings, and ext4 formatting support. The system may prompt for storage authorization. |
+
+### Recover on a replacement computer
+
+Keep the entire `.kkvolume` folder together. It contains the native encrypted image and a small public `recovery.json` file. Vault can read that file from the SSD while the image is locked. The version and random ID in this file are required to reproduce the image credential.
+
+On another computer with the same supported operating system, install Vault and connect the SSD. For a copied backup, place the whole package in `KeepKey Volumes` in your home folder or at the root of a mounted external data volume. Restore a compatible multi-chain KeepKey using the same recovery words and the exact wallet passphrase used at creation, if any. Open **Volumes** and approve the unlock on that device. The original device ID, PIN, and computer are independent of the volume credential.
+
+For a practice run, put a recognizable file in a small test volume, lock it, and reconnect the SSD. Cancel the first unlock to verify the volume stays locked. Then open the file on a fresh Vault installation with a different KeepKey restored from the same **test** words. Keep your original copy of the data until this succeeds on the equipment you plan to use.
+
+Developers can run `KEEPKEY_TEST_NATIVE_VOLUMES=1 bun test __tests__/volume-macos-native.test.ts` from this directory on macOS. The test creates a temporary exFAT disk image and checks the protected volume's native write, lock, and readback flow with a synthetic credential.
+
 ## Linux support
 
 Vault ships three Linux x86_64 formats with each release: `.AppImage`, `.deb`, and a self-contained `.tar.zst`. ARM64 Linux is not built.
