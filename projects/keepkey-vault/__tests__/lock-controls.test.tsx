@@ -14,6 +14,7 @@ mock.module('../src/mainview/components/Bip85VaultDialog', () => ({ Bip85VaultDi
 mock.module('../src/mainview/components/PasswordBankView', () => ({ PasswordBankView: () => null }))
 mock.module('../src/mainview/hooks/usePasskeysEnabled', () => ({ usePasskeysEnabled: () => false }))
 mock.module('../src/mainview/components/PasskeysView', () => ({ PasskeysView: () => null }))
+mock.module('../src/mainview/components/VolumesView', () => ({ VolumesView: () => null }))
 
 describe('locked KeepKey: a padlock in the header, no banner', () => {
   const render = async (unlockError: string | null) => {
@@ -39,5 +40,10 @@ describe('vault tools button', () => {
     expect(icon).toBeDefined()
     expect(icon).toContain('M7 11V7a5 5 0 0 1 10 0v4') // padlock shackle
     expect(html).toContain('aria-label="Passwords and seed vault"')
+  })
+  test('local volume tools are accessible with the device features unavailable', async () => {
+    const { VaultToolsButton } = await import('../src/mainview/components/VaultToolsButton')
+    const html = renderToStaticMarkup(<VaultToolsButton seedVaultAvailable={false} passwordsAvailable={false} volumesAvailable />)
+    expect(html).toContain('aria-label="Vault tools"')
   })
 })

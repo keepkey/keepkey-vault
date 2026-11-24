@@ -38,10 +38,15 @@ import { resolveStoredEnsContact } from './db'
 import { previewCertificationEntries, selectCertificationContacts } from './addressbook-clearsign'
 import { singleFlight } from './single-flight'
 import { PasswordBank } from './password-bank'
+import { createDesktopVolumeStore, openExternalVolume, scanVolumeInventory } from './volumes'
+import { openVolumeFileVaultSettings } from './volume-finder'
+import { deriveVolumePassword } from './volume-key'
+import { volumeCipherKey } from '../shared/volume-key'
+import type { VolumeInventory, VolumeDeviceStatus, VolumeProgress, VolumeProgressEvent } from '../shared/volumes'
 import { withKeepKeyFido, readStatus, runReset, waitForReplug } from './passkeys'
 import { setFidoPin, listPasskeys, deletePasskey } from './passkeys-manage'
 import { resolveLabels, cleanLabel } from './passkey-labels'
-import { passwordDeviceCipher } from './password-device'
+import { passwordDeviceCipher, supportsDeviceCipher } from './password-device'
 import { savePasswordBackup } from './password-backup'
 import { PasswordBex } from './password-bex'
 import { PasswordAgent } from './password-agent'
@@ -111,6 +116,8 @@ function addressBookCertifyUnsupported(): boolean {
 
 const AUTHENTICATOR_SLOT_COUNT = 10
 const broadcastOnce = singleFlight<{ txid: string; addressBookEntryId?: string; recipientUnsaved?: boolean }>()
+const scanVolumesOnce = singleFlight<VolumeInventory>()
+const scanVolumes = () => scanVolumesOnce('mounted-volumes', scanVolumeInventory)
 
 function normalizeAuthenticatorLabel(value: unknown, field: string): string {
 	const normalized = String(value || '').trim()
@@ -1105,6 +1112,31 @@ let watchOnlyViewRevision = 0
 let pendingPsbt: { id: string; stem: string; analysis: PsbtAnalysis | MultisigAnalysis; deviceId: string; hidden: boolean; epoch: number; wallet: unknown; signing: boolean } | null = null
 let lastSignedPsbtPath: string | null = null
 const multisigFeature = new MultisigFeature(getSetting,setSetting)
+function volumeDeviceStatus(): VolumeDeviceStatus {
+	const state = engine.getDeviceState()
+	if (!engine.wallet || state.state !== 'ready') return { available: false, reason: 'disconnected' }
+	if (engine.isEmulator) return { available: false, reason: 'emulator' }
+	if (isBitcoinOnlyVariant(state.firmwareVariant) || !supportsDeviceCipher(engine.wallet)) {
+		return { available: false, reason: 'unsupported' }
+	}
+	return { available: true, reason: 'ready' }
+}
+const volumes = createDesktopVolumeStore(async record => {
+	const wallet = engine.wallet
+	const state = engine.getDeviceState()
+	const epoch = activitySessionEpoch
+	const hidden = engine.isPassphraseWallet
+	return deriveVolumePassword(record, supportsDeviceCipher(wallet) ? wallet : null, {
+		state: state.state, firmwareVariant: state.firmwareVariant, isEmulator: engine.isEmulator,
+		isCurrent: () => wallet === engine.wallet && activitySessionEpoch === epoch && hidden === engine.isPassphraseWallet
+			&& state.deviceId === engine.getDeviceState().deviceId && volumeDeviceStatus().available,
+	})
+})
+function volumeProgress(operationId: string | undefined, event: VolumeProgressEvent): void {
+	if (typeof operationId !== 'string' || !operationId.length || operationId.length > 128) return
+	const send = rpc.send['volume-progress'] as (progress: VolumeProgress) => void
+	try { send({ operationId, ...event }) } catch { /* Webview closed during storage operation. */ }
+}
 const passwordBank = new PasswordBank({
 	read: getSetting,
 	write: setSetting,
@@ -9041,6 +9073,20 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				return { ok: true as const }
 			},
 			passwordBankStatus: async () => passwordBank.view(),
+			getVolumeInventory: scanVolumes,
+			volumeDeviceStatus,
+			listVolumeImages: async () => volumes.listVolumeImages(await scanVolumes()),
+			createVolumeImage: params => volumes.createVolumeImage(params,
+				() => volumeProgress(params.operationId, { phase: 'creating' }),
+				record => volumeProgress(params.operationId, { phase: 'approval', keyLabel: volumeCipherKey(record) })),
+			unlockVolumeImage: params => volumes.unlockVolumeImage(params,
+				() => volumeProgress(params.operationId, { phase: 'unlocking' }),
+				record => volumeProgress(params.operationId, { phase: 'approval', keyLabel: volumeCipherKey(record) })),
+			openVolumeImage: params => volumes.openVolumeImage(params),
+			lockVolumeImage: params => volumes.lockVolumeImage(params),
+			deleteVolumeImage: params => volumes.deleteVolumeImage(params),
+			openExternalVolume: params => openExternalVolume(params),
+			openVolumeFileVaultSettings: () => openVolumeFileVaultSettings(),
 			passwordBankUnlock: async (params) => passwordBank.unlock(params?.create === true),
 			passwordBankLock: async () => { passwordAgent.cancelPending(); passwordBank.lock(); return passwordBank.view() },
 			passwordBankGenerate: async (params) => passwordBank.generate(params.count, params.ttlMinutes),

@@ -1891,6 +1891,8 @@ function PersonalDashboard({ capabilities, isEmulator, onLoaded, watchOnly, watc
 	}, [cleanBalanceUsd])
 
 	const btcOnly = isBitcoinOnlyVariant(firmwareVariant)
+	const deviceToolsAvailable = !watchOnly && !!firmwareVersion
+	const supportsSeedAndPasskeys = deviceToolsAvailable && versionCompare(firmwareVersion!, '7.16.0') >= 0
 	const visibleChains = useMemo(() => allChains.filter(c => {
 		// Bitcoin-only firmware physically can't touch other chains — show only BTC.
 		if (btcOnly) return c.id === 'bitcoin'
@@ -3373,11 +3375,11 @@ function PersonalDashboard({ capabilities, isEmulator, onLoaded, watchOnly, watc
 				/>
 			)}
 
-			{/* One lock button for password and seed tools. */}
-			{!watchOnly && firmwareVersion && <VaultToolsButton
-				seedVaultAvailable={versionCompare(firmwareVersion, '7.16.0') >= 0}
-				passwordsAvailable={!btcOnly}
-				passkeysAvailable={versionCompare(firmwareVersion, '7.16.0') >= 0} />}
+			<VaultToolsButton
+				seedVaultAvailable={supportsSeedAndPasskeys}
+				passwordsAvailable={deviceToolsAvailable && !btcOnly}
+				passkeysAvailable={supportsSeedAndPasskeys}
+				volumesAvailable={import.meta.env.VITE_ENABLE_VOLUMES === 'true'} />
 
 			</Flex>
 		</Flex>
