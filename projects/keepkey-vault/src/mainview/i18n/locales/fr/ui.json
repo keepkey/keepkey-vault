@@ -440,5 +440,6 @@
   "md8100383": "Supprimer définitivement",
   "mde0a7865": "Suppression du volume…",
   "m61c22bc5": "{{name}} a été supprimé de {{location}}.",
-  "m5813534": "Verrouillez ce volume avant de le supprimer."
+  "m5813534": "Verrouillez ce volume avant de le supprimer.",
+  "me9e6ebc1": "Aucune activité {{symbol}} indexée. Actualisez pour analyser."
 }

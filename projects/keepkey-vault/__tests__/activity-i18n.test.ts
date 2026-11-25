@@ -41,6 +41,8 @@ describe('Activity copy (KEEPKEY-159)', () => {
     expect(panel).not.toContain('`fee: ')
     expect(panel).not.toMatch(/label=\{`Payment /)
     expect(panel).not.toContain("'Select a chain to scan'")
+    expect(panel).not.toContain('`No indexed ')
+    expect(panel).toContain('uiText("No indexed {{symbol}} activity. Refresh to scan.", { symbol: selectedDef.symbol })')
     expect(panel).not.toContain('uiText("Swaps (")')
     expect(page).not.toMatch(/label: '(Sent|Received|Swaps|Signs)'/)
     expect(page).not.toContain(": 'None'")
@@ -48,6 +50,14 @@ describe('Activity copy (KEEPKEY-159)', () => {
     // The history error is raw backend text; it must not be rendered as-is.
     expect(page).not.toContain('historyError ||')
     expect(page).toContain('uiText("Could not load activity history. Try Rescan.")')
+  })
+
+  // KEEPKEY-178: the i18n check only fails on new hardcoded text, so a stale
+  // exception would let a regression back in on these screens unnoticed.
+  test('the Activity screens have no hardcoded-text exceptions left', () => {
+    const baseline = JSON.parse(readFileSync(join(import.meta.dir, '../scripts/i18n-baseline.json'), 'utf8'))
+    const exceptions = (baseline.rawUi as string[]).filter(id => /^components\/Activity(Page|Panel)\.tsx:/.test(id))
+    expect(exceptions).toEqual([])
   })
 
   test('the broadcast status is a state, not the "Broadcast" button verb', () => {

@@ -2647,5 +2647,6 @@
   "md8100383": "Delete permanently",
   "mde0a7865": "Deleting volume…",
   "m61c22bc5": "{{name}} was deleted from {{location}}.",
-  "m5813534": "Lock this volume before deleting it."
+  "m5813534": "Lock this volume before deleting it.",
+  "me9e6ebc1": "No indexed {{symbol}} activity. Refresh to scan."
 }

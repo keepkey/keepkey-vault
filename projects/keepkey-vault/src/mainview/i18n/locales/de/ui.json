@@ -438,5 +438,6 @@
   "md8100383": "Endgültig löschen",
   "mde0a7865": "Volume wird gelöscht…",
   "m61c22bc5": "{{name}} wurde von {{location}} gelöscht.",
-  "m5813534": "Sperre dieses Volume, bevor du es löschst."
+  "m5813534": "Sperre dieses Volume, bevor du es löschst.",
+  "me9e6ebc1": "Keine indizierte {{symbol}}-Aktivität. Aktualisiere zum Scannen."
 }

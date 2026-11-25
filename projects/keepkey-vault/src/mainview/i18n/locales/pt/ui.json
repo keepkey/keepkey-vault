@@ -2511,5 +2511,6 @@
   "md8100383": "Excluir permanentemente",
   "mde0a7865": "Excluindo volume…",
   "m61c22bc5": "{{name}} foi excluído de {{location}}.",
-  "m5813534": "Bloqueie este volume antes de excluí-lo."
+  "m5813534": "Bloqueie este volume antes de excluí-lo.",
+  "me9e6ebc1": "Nenhuma atividade de {{symbol}} indexada. Atualize para escanear."
 }

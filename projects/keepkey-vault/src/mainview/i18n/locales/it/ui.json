@@ -444,5 +444,6 @@
   "md8100383": "Elimina definitivamente",
   "mde0a7865": "Eliminazione del volume…",
   "m61c22bc5": "{{name}} è stato eliminato da {{location}}.",
-  "m5813534": "Blocca questo volume prima di eliminarlo."
+  "m5813534": "Blocca questo volume prima di eliminarlo.",
+  "me9e6ebc1": "Nessuna attività {{symbol}} indicizzata. Aggiorna per scansionare."
 }

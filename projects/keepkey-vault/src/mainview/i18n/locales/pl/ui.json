@@ -446,5 +446,6 @@
   "md8100383": "Usuń trwale",
   "mde0a7865": "Usuwanie woluminu…",
   "m61c22bc5": "Usunięto {{name}} z {{location}}.",
-  "m5813534": "Zablokuj ten wolumin przed jego usunięciem."
+  "m5813534": "Zablokuj ten wolumin przed jego usunięciem.",
+  "me9e6ebc1": "Brak zindeksowanej aktywności {{symbol}}. Odśwież, aby przeskanować."
 }
