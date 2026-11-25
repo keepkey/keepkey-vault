@@ -1102,7 +1102,7 @@ export function ActivityPanel({ open, onClose, activities, pendingSwaps, onRefre
                 ))}
                 {activityTimeline.length === 0 && (
                   <Text fontSize="xs" color="whiteAlpha.400" textAlign="center" py="8">
-                    {selectedDef ? `No indexed ${selectedDef.symbol} activity. Refresh to scan.` : uiText("No indexed activity loaded. Choose a network to scan.")}
+                    {selectedDef ? uiText("No indexed {{symbol}} activity. Refresh to scan.", { symbol: selectedDef.symbol }) : uiText("No indexed activity loaded. Choose a network to scan.")}
                   </Text>
                 )}
               </>

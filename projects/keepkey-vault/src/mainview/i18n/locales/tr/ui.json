@@ -449,5 +449,6 @@
   "md8100383": "Kalıcı olarak sil",
   "mde0a7865": "Birim siliniyor…",
   "m61c22bc5": "{{name}} birimi {{location}} konumundan silindi.",
-  "m5813534": "Silmeden önce bu birimi kilitleyin."
+  "m5813534": "Silmeden önce bu birimi kilitleyin.",
+  "me9e6ebc1": "Dizinlenmiş {{symbol}} etkinliği yok. Taramak için yenileyin."
 }

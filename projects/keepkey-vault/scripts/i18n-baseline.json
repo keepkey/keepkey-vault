@@ -1493,10 +1493,6 @@
     "send:contactIsOwnAddress": "18c1e161bac2c64120a91b979083bfe3760c17f3fa7e7626993ff3065348a38c"
   },
   "rawUi": [
-    "components/ActivityPanel.tsx:m16ca6251",
-    "components/ActivityPanel.tsx:m1b5dea1d",
-    "components/ActivityPanel.tsx:m41155fec",
-    "components/ActivityPanel.tsx:ma3e3de18",
     "components/AddChainDialog.tsx:m72cefb6",
     "components/AddChainDialog.tsx:me05105ab",
     "components/AddressBookView.tsx:m8e4a33ef",

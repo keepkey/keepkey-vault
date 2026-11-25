@@ -2193,6 +2193,23 @@
       "Dizinlenmiş etkinlik yüklenmedi. Taranacak bir ağ seçin.",
       "Chưa tải hoạt động đã lập chỉ mục. Hãy chọn mạng để quét."
     ],
+    "No indexed {{symbol}} activity. Refresh to scan.": [
+      "No indexed {{symbol}} activity. Refresh to scan.",
+      "No hay actividad indexada de {{symbol}}. Actualiza para escanear.",
+      "Aucune activité {{symbol}} indexée. Actualisez pour analyser.",
+      "Keine indizierte {{symbol}}-Aktivität. Aktualisiere zum Scannen.",
+      "インデックス済みの {{symbol}} アクティビティはありません。更新してスキャンしてください。",
+      "没有已索引的 {{symbol}} 活动。刷新以扫描。",
+      "색인된 {{symbol}} 활동이 없습니다. 새로 고쳐 스캔하세요.",
+      "Nenhuma atividade de {{symbol}} indexada. Atualize para escanear.",
+      "Нет индексированной активности {{symbol}}. Обновите, чтобы сканировать.",
+      "Nessuna attività {{symbol}} indicizzata. Aggiorna per scansionare.",
+      "Brak zindeksowanej aktywności {{symbol}}. Odśwież, aby przeskanować.",
+      "Geen geïndexeerde {{symbol}}-activiteit. Vernieuw om te scannen.",
+      "ไม่มีกิจกรรม {{symbol}} ที่จัดทำดัชนี รีเฟรชเพื่อสแกน",
+      "Dizinlenmiş {{symbol}} etkinliği yok. Taramak için yenileyin.",
+      "Không có hoạt động {{symbol}} đã lập chỉ mục. Làm mới để quét."
+    ],
     "No swaps": [
       "No swaps",
       "Sin intercambios",

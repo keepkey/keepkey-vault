@@ -449,5 +449,6 @@
   "md8100383": "Xóa vĩnh viễn",
   "mde0a7865": "Đang xóa ổ đĩa…",
   "m61c22bc5": "Đã xóa {{name}} khỏi {{location}}.",
-  "m5813534": "Hãy khóa ổ đĩa này trước khi xóa."
+  "m5813534": "Hãy khóa ổ đĩa này trước khi xóa.",
+  "me9e6ebc1": "Không có hoạt động {{symbol}} đã lập chỉ mục. Làm mới để quét."
 }

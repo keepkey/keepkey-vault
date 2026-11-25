@@ -445,5 +445,6 @@
   "md8100383": "Eliminar definitivamente",
   "mde0a7865": "Eliminando volumen…",
   "m61c22bc5": "Se eliminó {{name}} de {{location}}.",
-  "m5813534": "Bloquea este volumen antes de eliminarlo."
+  "m5813534": "Bloquea este volumen antes de eliminarlo.",
+  "me9e6ebc1": "No hay actividad indexada de {{symbol}}. Actualiza para escanear."
 }
