@@ -2897,7 +2897,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
   if (unsupported) {
     return (
       <Box position="fixed" inset="0" zIndex={Z.dialog} display="flex" alignItems="flex-start" justifyContent="center" pt="5vh" onKeyDown={dialogKeys}>
-        <Box position="absolute" inset="0" bg="rgba(11,11,14,0.72)" backdropFilter="blur(20px) saturate(140%)" onClick={handleClose} data-testid="swap-backdrop" />
+        <Box position="absolute" inset="0" bg="rgba(11,11,14,0.72)" backdropFilter="blur(20px) saturate(140%)" onClick={busy || phase === 'submitted' ? undefined : handleClose} data-testid="swap-backdrop" />
         <Box ref={dialogPanel} role="dialog" aria-modal="true" aria-label={t('title')} tabIndex={-1}
           position="relative"
           borderRadius="22px"
@@ -2934,7 +2934,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
   return (
     <Box position="fixed" inset="0" zIndex={Z.dialog} display="flex" alignItems="flex-start" justifyContent="center" pt="5vh" onKeyDown={dialogKeys}>
       <style>{DIALOG_CSS}</style>
-      <Box position="absolute" inset="0" bg="rgba(11,11,14,0.72)" backdropFilter="blur(20px) saturate(140%)" onClick={handleClose} data-testid="swap-backdrop" />
+      <Box position="absolute" inset="0" bg="rgba(11,11,14,0.72)" backdropFilter="blur(20px) saturate(140%)" onClick={busy || phase === 'submitted' ? undefined : handleClose} data-testid="swap-backdrop" />
       <Box ref={dialogPanel} role="dialog" aria-modal="true" aria-label={t('title')} tabIndex={-1} data-swap-panel
         position="relative"
         borderRadius="22px"
