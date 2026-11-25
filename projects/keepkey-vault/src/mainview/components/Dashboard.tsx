@@ -12,7 +12,8 @@ import { balanceDisplayState } from "../../shared/balance-display-state"
 import { confirmedDashboardBalance, dashboardBalanceUpdatedAt, dashboardCacheIsQuiet, dashboardLastRefreshedAt, dashboardRefreshIsDue, mergeDashboardPortfolioFault, recoverDashboardPortfolioFault, usableDashboardBalance, type DashboardPortfolioFault } from '../../shared/dashboard-balance-policy'
 import { isLocalDeviceAccessError } from "../../shared/device-access-error"
 import { versionCompare } from "../../shared/firmware-versions"
-import { formatBalance, hasNonZeroBalance } from "../lib/formatting"
+import { formatBalance, formatCompactBalance, hasNonZeroBalance } from "../lib/formatting"
+import { splitDustTokens } from "../lib/token-dust"
 import { AnimatedUsd } from "./AnimatedUsd"
 import { getAssetIcon, registerCustomAsset } from "../../shared/assetLookup"
 import { moneroChainVisible } from "../../shared/monero-asset"
@@ -559,6 +560,111 @@ function HeatmapHost({ tiles, drilled }: { tiles: Parameters<typeof HeatmapView>
 	)
 }
 
+/** USD with two decimals in the sidebar's style ($ + locale grouping). */
+const formatUsd = (usd: number) => `$${usd.toLocaleString(getNumberLocale(), { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+
+/** One token row on the chain page: name/label in sans on the left, USD
+ *  value leading on the right with the (abbreviated) quantity under it. */
+function ChainTokenRow({ tok, chain, privateMode, onOpen }: {
+	tok: TokenBalance
+	chain: ChainDef
+	privateMode: boolean
+	onOpen: (tok: TokenBalance) => void
+}) {
+	return (
+		<Flex
+			as="button"
+			onClick={() => onOpen(tok)}
+			align="center"
+			gap="2.5"
+			px="2"
+			py="1.5"
+			borderRadius="md"
+			bg="transparent"
+			_hover={{ bg: "rgba(255,255,255,0.05)" }}
+			cursor="pointer"
+			transition="background 0.15s"
+			border="0"
+			title={tok.name || tok.symbol}
+		>
+			{/* No chain badge: every token here belongs to the page's own chain. */}
+			<AssetIcon caip={tok.caip} iconUrl={tok.icon} alt={tok.symbol} size={26} />
+			<Box flex="1" minW="0" textAlign="left" fontFamily="var(--font-ui-sans)">
+				<Text fontSize="13px" fontWeight="600" color="var(--text-0)" lineHeight="1.25" truncate>
+					{tok.symbol}
+				</Text>
+				<Text fontSize="11px" color="var(--text-2)" lineHeight="1.3" truncate>
+					{tok.name || chain.coin}
+				</Text>
+			</Box>
+			<Box textAlign="right" flexShrink={0} fontFamily="var(--font-mono)" style={{ fontVariantNumeric: 'tabular-nums' }}>
+				<Text fontSize="13px" fontWeight="500" color="var(--text-0)" lineHeight="1.25">
+					{privateMode ? '••••' : formatUsd(tok.balanceUsd ?? 0)}
+				</Text>
+				<Text fontSize="11px" color="var(--text-2)" lineHeight="1.3">
+					{privateMode ? '••••' : `${formatCompactBalance(tok.balance)} ${tok.symbol}`}
+				</Text>
+			</Box>
+		</Flex>
+	)
+}
+
+/** Chain-page token list: "TOKENS · N · $total" header, rows sorted by USD,
+ *  and dust (< $0.01, priced) folded into a collapsible "Small balances". */
+function ChainTokenList({ tokens, chain, privateMode, onOpen }: {
+	tokens: TokenBalance[]
+	chain: ChainDef
+	privateMode: boolean
+	onOpen: (tok: TokenBalance) => void
+}) {
+	const { t } = useTranslation("dashboard")
+	const [dustOpen, setDustOpen] = useState(false)
+	const byUsd = (a: TokenBalance, b: TokenBalance) => (b.balanceUsd ?? 0) - (a.balanceUsd ?? 0)
+	const { main, dust } = useMemo(() => {
+		const split = splitDustTokens(tokens)
+		return { main: split.main.slice().sort(byUsd), dust: split.dust.slice().sort(byUsd) }
+	}, [tokens])
+	const sumUsd = tokens.reduce((s, tok) => s + (tok.balanceUsd ?? 0), 0)
+	return (
+		<Box w="100%" mt="1" id={CHAIN_TOKEN_LIST_ID}>
+			<Text fontSize="11px" fontFamily="var(--font-ui-sans)" color="var(--text-2)" letterSpacing="0.14em" textTransform="uppercase" fontWeight="500" mb="1.5" px="2">
+				{t("tokensHeader", { n: tokens.length, usd: privateMode ? '••••' : formatUsd(sumUsd) })}
+			</Text>
+			<Flex direction="column" gap="0.5" maxH="38vh" overflowY="auto" pr="1" className="kk-tokens-scroll">
+				{main.map(tok => <ChainTokenRow key={tok.caip} tok={tok} chain={chain} privateMode={privateMode} onOpen={onOpen} />)}
+				{dust.length > 0 && (
+					<>
+						<Box
+							as="button"
+							onClick={() => setDustOpen(o => !o)}
+							aria-expanded={dustOpen}
+							display="flex"
+							alignItems="center"
+							gap="2"
+							mt="1"
+							px="2"
+							py="2"
+							borderTop="1px dashed var(--line-2)"
+							bg="transparent"
+							color="var(--text-2)"
+							fontFamily="var(--font-ui-sans)"
+							fontSize="12px"
+							textAlign="left"
+							cursor="pointer"
+							_hover={{ color: "var(--text-1)" }}
+						>
+							<Box as="span" display="inline-block" transition="transform 0.15s" transform={dustOpen ? 'rotate(90deg)' : 'none'}>▸</Box>
+							<span>{t("smallBalances", { n: dust.length })}</span>
+							<span>· {t("smallBalancesHint", { usd: '$0.01' })}</span>
+						</Box>
+						{dustOpen && dust.map(tok => <ChainTokenRow key={tok.caip} tok={tok} chain={chain} privateMode={privateMode} onOpen={onOpen} />)}
+					</>
+				)}
+			</Flex>
+		</Box>
+	)
+}
+
 /** Chain-detail crown — chain icon as the anchor, tokens on an arc above it,
  *  balance as the hero below. Shown when the user picks a chain. */
 function ChainDetailOrbital({
@@ -569,6 +675,7 @@ function ChainDetailOrbital({
 	onSelectChain,
 	onSelectToken,
 	onShowAllTokens,
+	chainTotalUsd,
 }: {
 	chain: ChainDef
 	balance?: ChainBalance
@@ -578,6 +685,9 @@ function ChainDetailOrbital({
 	onSelectToken: (tok: import("../../shared/types").TokenBalance) => void
 	/** "+N" chip handler; defaults to scrolling to the token list. */
 	onShowAllTokens?: () => void
+	/** Chain total (native + clean tokens) as the sidebar shows it. When
+	 *  omitted it is summed from the native and token values passed in. */
+	chainTotalUsd?: number
 }) {
 	const uiText = useUiTranslation()
 	const { t } = useTranslation("dashboard")
@@ -596,7 +706,9 @@ function ChainDetailOrbital({
 		return () => ro.disconnect()
 	}, [])
 
-	const tokenSats = useMemo(() => cleanTokens
+	const { privateModeEnabled } = useFiat()
+	// Dust stays out of the crown; the list groups it under "Small balances".
+	const tokenSats = useMemo(() => splitDustTokens(cleanTokens).main
 		.slice()
 		.sort((a, b) => (b.balanceUsd ?? 0) - (a.balanceUsd ?? 0)), [cleanTokens])
 
@@ -607,9 +719,19 @@ function ChainDetailOrbital({
 	const nativeBal = balance?.balance || '0'
 	const shielded = shieldedPortion(balance)
 	const combinedBal = parseFloat(nativeBal) + shielded.amount + shielded.pending
-	const balanceText = `${!balance || balance.syncState === 'degraded' ? '—' : formatBalance(String(combinedBal))} ${chain.symbol}`
+	const unknown = !balance || balance.syncState === 'degraded'
+	const amountText = `${unknown ? '—' : formatBalance(String(combinedBal))} ${chain.symbol}`
+	const nativeUsd = nativeBalanceUsd + shielded.usd
+	const totalUsd = chainTotalUsd ?? nativeUsd + cleanTokens.reduce((s, tok) => s + (tok.balanceUsd ?? 0), 0)
+	// Hero = chain total in USD, the same figure as the sidebar. Without a
+	// price (feed down, or held funds valued at $0) fall back to the native
+	// amount: "$0.00" next to a real holding reads as lost money.
+	const fiatKnown = balance?.fiatValueState !== 'unavailable' && (totalUsd > 0 || !hasNonZeroBalance(combinedBal))
+	const heroText = privateModeEnabled ? '••••' : unknown ? '—' : fiatKnown ? formatUsd(totalUsd) : amountText
+	const subText = privateModeEnabled || unknown || !fiatKnown ? null
+		: t('chainNativeLine', { amount: amountText, usd: formatUsd(nativeUsd) })
 	// Hero auto-shrink: mono glyphs are ~0.62em wide, so size the line to fit.
-	const heroPx = Math.max(22, Math.min(44, Math.floor((avail - 32) / (balanceText.length * 0.62))))
+	const heroPx = Math.max(22, Math.min(44, Math.floor((avail - 32) / (heroText.length * 0.62))))
 
 	const showAll = onShowAllTokens ?? (() => {
 		const list = document.getElementById(CHAIN_TOKEN_LIST_ID)
@@ -725,10 +847,10 @@ function ChainDetailOrbital({
 				})()}
 			</Box>
 
-			{/* Label + hero balance + fiat — normal flow, always below the crown. */}
+			{/* Label + hero total + native line — normal flow, always below the crown. */}
 			<Flex direction="column" align="center" gap="1.5" mt="3" w="100%" px="4" textAlign="center">
-				<Text fontSize="10px" color="var(--text-3)" letterSpacing="0.20em" textTransform="uppercase" fontWeight="500">
-					{chain.coin}
+				<Text fontSize="12px" fontFamily="var(--font-ui-sans)" color="var(--text-1)" letterSpacing="0.16em" textTransform="uppercase" fontWeight="500">
+					{fiatKnown ? t('chainTotalLabel', { chain: chain.coin }) : chain.coin}
 				</Text>
 				<Text
 					fontSize={`${heroPx}px`}
@@ -741,16 +863,17 @@ function ChainDetailOrbital({
 					maxW="100%"
 					overflow="hidden"
 					textOverflow="ellipsis"
-					title={balanceText}
+					style={{ fontVariantNumeric: 'tabular-nums' }}
+					title={heroText}
 				>
-					{balanceText}
+					{heroText}
 				</Text>
-				{(nativeBalanceUsd + shielded.usd) > 0 && (
-					<Text fontSize="14px" color="var(--text-2)" fontWeight="400">
-						≈ ${(nativeBalanceUsd + shielded.usd).toLocaleString(getNumberLocale(), { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+				{subText && (
+					<Text fontSize="13px" fontFamily="var(--font-mono)" color="var(--text-2)" fontWeight="400" style={{ fontVariantNumeric: 'tabular-nums' }}>
+						{subText}
 					</Text>
 				)}
-				{(shielded.amount > 0 || shielded.pending > 0) && (
+				{!privateModeEnabled && (shielded.amount > 0 || shielded.pending > 0) && (
 					<Flex align="center" justify="center" gap="1" mt="0.5">
 						<ShieldGlyph size={11} />
 						<Text fontSize="12px" color="var(--gold)" fontWeight="500">
@@ -908,7 +1031,7 @@ function VaultPortfolioDashboard({ vault, onLoaded, watchOnly, firmwareVersion }
 				return <Flex key={asset.caip} asChild align="center" gap="3" w="100%" textAlign="left" p="3" mb="1" borderRadius="lg"
 					bg="transparent" border="0" _hover={{ bg: 'kk.cardBg' }} cursor={native || token ? 'pointer' : 'default'}>
 					<button type="button" disabled={!native && !token} onClick={() => openAsset(token)}>
-					<AssetIcon caip={asset.caip} iconUrl={token?.icon} chainCaip={chain.caip} alt={asset.symbol} size={32} />
+					<AssetIcon caip={asset.caip} iconUrl={token?.icon} alt={asset.symbol} size={32} />
 					<Box flex="1" minW="0"><Text fontSize="14px" fontWeight="600">{asset.symbol}</Text><Text fontSize="11px" color="var(--text-2)">{chain.coin}</Text></Box>
 					<Box textAlign="right"><Text fontSize="14px">{privateModeEnabled ? '••••' : amount === undefined ? '—' : formatBalance(amount)}</Text>
 						<Text fontSize="11px" color="var(--text-2)">{privateModeEnabled ? '••••' : usd === undefined || balance?.fiatValueState === 'unavailable' ? '—' : fmt(usd)}</Text></Box>
@@ -2848,9 +2971,24 @@ function PersonalDashboard({ capabilities, isEmulator, onLoaded, watchOnly, watc
 				</Box>
 			)}
 
-			<Flex direction="column" w="100%" minH={viewMode === 'heatmap' ? "0" : "auto"}>
+			<Flex direction="column" w="100%" minH={viewMode === 'heatmap' ? "0" : "auto"} position="relative">
+				{/* Chain page: the background mesh is drawn by the native window
+				    behind this transparent webview, so it can't be masked here.
+				    Instead a soft ink scrim fades it out behind the content column
+				    (crown, hero, token list) and leaves it visible at the edges. */}
+				{drilledChainId && (
+					<Box
+						position="absolute"
+						inset="0"
+						pointerEvents="none"
+						zIndex={0}
+						aria-hidden="true"
+						style={{ background: 'radial-gradient(ellipse 460px 80% at 50% 45%, rgba(11,11,14,0.86) 0%, rgba(11,11,14,0.7) 50%, rgba(11,11,14,0) 100%)' }}
+					/>
+				)}
 				{/* View picker — top center of the hero area */}
-				<Flex justify="center" pt="2" pb="1">
+				{/* position+zIndex: above the scrim, and its menu above the hero slot (z 1). */}
+				<Flex justify="center" pt="2" pb="1" position="relative" zIndex={3}>
 					<ViewPickerButton assetCount={(() => {
 						if (drilledChainId) {
 							const dchain = visibleChains.find(c => c.id === drilledChainId)
@@ -2988,6 +3126,7 @@ function PersonalDashboard({ capabilities, isEmulator, onLoaded, watchOnly, watc
 									nativeBalanceUsd={nativeUsd}
 									cleanTokens={cleanTokens}
 									onSelectChain={() => openChainPage(dchain)}
+									chainTotalUsd={cleanBalanceUsd.get(dchain.id)?.usd}
 									onSelectToken={(tok) => openChainPage(dchain, undefined, tok)}
 								/>
 							)
@@ -3040,6 +3179,7 @@ function PersonalDashboard({ capabilities, isEmulator, onLoaded, watchOnly, watc
 												nativeBalanceUsd={nativeUsd}
 												cleanTokens={cleanTokens}
 												onSelectChain={() => openChainPage(dchain)}
+												chainTotalUsd={cleanBalanceUsd.get(dchain.id)?.usd}
 												onSelectToken={(tok) => openChainPage(dchain, undefined, tok)}
 											/>
 										)
@@ -3288,6 +3428,7 @@ function PersonalDashboard({ capabilities, isEmulator, onLoaded, watchOnly, watc
 											cursor="pointer"
 											minW="100px"
 											justifyContent="center"
+											fontFamily="var(--font-ui-sans)"
 										>
 											{p.icon}
 											{p.label}
@@ -3299,58 +3440,8 @@ function PersonalDashboard({ capabilities, isEmulator, onLoaded, watchOnly, watc
 								    maxH + overflowY="auto" keep the chart+actions pinned while
 								    the user scrolls through a long token list independently. */}
 								{cleanTokens.length > 0 && (
-									<Box w="100%" mt="-1" id={CHAIN_TOKEN_LIST_ID}>
-										<Text fontSize="10px" color="var(--text-3)" letterSpacing="0.20em" textTransform="uppercase" mb="1" px="1">
-											{t("tokensCount", { count: cleanTokens.length })}
-										</Text>
-										<Flex direction="column" gap="0.5" maxH="38vh" overflowY="auto" pr="1" className="kk-tokens-scroll">
-											{cleanTokens
-												.slice()
-												.sort((a, b) => (b.balanceUsd ?? 0) - (a.balanceUsd ?? 0))
-												.map((tok) => (
-													<Flex
-														key={tok.caip}
-														as="button"
-														onClick={() => openChainPage(dchain, undefined, tok)}
-														align="center"
-														gap="2.5"
-														px="2"
-														py="1.5"
-														borderRadius="md"
-														bg="transparent"
-														_hover={{ bg: "kk.cardBg" }}
-														cursor="pointer"
-														transition="all 0.15s"
-														border="0"
-														title={tok.name || tok.symbol}
-													>
-														<AssetIcon
-															caip={tok.caip}
-															iconUrl={tok.icon}
-															chainCaip={dchain.caip}
-															alt={tok.symbol}
-															size={26}
-														/>
-														<Box flex="1" minW="0" textAlign="left">
-															<Text fontSize="13px" fontWeight="600" color="var(--text-0)" lineHeight="1.2" truncate>
-																{tok.symbol}
-															</Text>
-															<Text fontSize="10px" color="var(--text-3)" lineHeight="1.3" truncate>
-																{tok.name || dchain.coin}
-															</Text>
-														</Box>
-														<Box textAlign="right" flexShrink={0}>
-															<Text fontSize="12px" fontWeight="500" color="var(--text-0)" lineHeight="1.2">
-																{formatBalance(tok.balance)}
-															</Text>
-															<Text fontSize="10px" color="var(--text-2)" lineHeight="1.3">
-																${(tok.balanceUsd ?? 0).toLocaleString(getNumberLocale(), { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-															</Text>
-														</Box>
-													</Flex>
-												))}
-										</Flex>
-									</Box>
+									<ChainTokenList tokens={cleanTokens} chain={dchain} privateMode={privateModeEnabled}
+										onOpen={(tok) => openChainPage(dchain, undefined, tok)} />
 								)}
 
 								<VaultPortfolioRows portfolios={vaultPortfolios.filter(p => p.identity.networkId === dchain.networkId && p.identity.chainId === dchain.id)}

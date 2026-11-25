@@ -56,5 +56,10 @@
 	"rescanUnavailable": "Lịch sử không khả dụng cho mạng này",
 	"rescanUnavailableAll": "Không có lịch sử để quét trên các mạng này",
 	"rescanFailed": "Quét thất bại",
-	"rescanFailedDetail": "Quét thất bại: {{detail}}"
+	"rescanFailedDetail": "Quét thất bại: {{detail}}",
+	"chainTotalLabel": "{{chain}} · Tổng",
+	"chainNativeLine": "{{amount}} gốc · {{usd}}",
+	"tokensHeader": "Token · {{n}} · {{usd}}",
+	"smallBalances": "Số dư nhỏ ({{n}})",
+	"smallBalancesHint": "dưới {{usd}}"
 }

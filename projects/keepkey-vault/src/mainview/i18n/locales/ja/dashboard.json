@@ -56,5 +56,10 @@
 	"rescanUnavailable": "このネットワークの履歴は利用できません",
 	"rescanUnavailableAll": "これらのネットワークにスキャンできる履歴はありません",
 	"rescanFailed": "スキャンに失敗しました",
-	"rescanFailedDetail": "スキャンに失敗しました: {{detail}}"
+	"rescanFailedDetail": "スキャンに失敗しました: {{detail}}",
+	"chainTotalLabel": "{{chain}} · 合計",
+	"chainNativeLine": "ネイティブ {{amount}} · {{usd}}",
+	"tokensHeader": "トークン · {{n}} · {{usd}}",
+	"smallBalances": "少額残高（{{n}}）",
+	"smallBalancesHint": "{{usd}} 未満"
 }

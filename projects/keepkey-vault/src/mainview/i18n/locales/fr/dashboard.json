@@ -59,5 +59,10 @@
 	"rescanUnavailable": "L'historique n'est pas disponible pour ce réseau",
 	"rescanUnavailableAll": "Aucun historique à analyser sur ces réseaux",
 	"rescanFailed": "Échec de l'analyse",
-	"rescanFailedDetail": "Échec de l'analyse : {{detail}}"
+	"rescanFailedDetail": "Échec de l'analyse : {{detail}}",
+	"chainTotalLabel": "{{chain}} · Total",
+	"chainNativeLine": "{{amount}} natif · {{usd}}",
+	"tokensHeader": "Jetons · {{n}} · {{usd}}",
+	"smallBalances": "Petits soldes ({{n}})",
+	"smallBalancesHint": "moins de {{usd}}"
 }

@@ -61,5 +61,10 @@
 	"rescanUnavailable": "История для этой сети недоступна",
 	"rescanUnavailableAll": "Нет истории для сканирования в этих сетях",
 	"rescanFailed": "Ошибка сканирования",
-	"rescanFailedDetail": "Ошибка сканирования: {{detail}}"
+	"rescanFailedDetail": "Ошибка сканирования: {{detail}}",
+	"chainTotalLabel": "{{chain}} · Всего",
+	"chainNativeLine": "{{amount}} нативных · {{usd}}",
+	"tokensHeader": "Токены · {{n}} · {{usd}}",
+	"smallBalances": "Мелкие остатки ({{n}})",
+	"smallBalancesHint": "менее {{usd}}"
 }

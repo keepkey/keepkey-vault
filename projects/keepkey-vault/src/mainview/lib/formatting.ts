@@ -26,3 +26,13 @@ export function formatBalance(val: string, locale = getNumberLocale()): string {
 	const decimals = abs < 1 ? 6 : abs < 1000 ? 4 : 2
 	return num.toLocaleString(resolvedLocale, { minimumFractionDigits: abs < 1000 ? decimals : 0, maximumFractionDigits: decimals })
 }
+
+/** Token quantity for dense lists: like formatBalance, but quantities of a
+ *  million or more are abbreviated ("20.95M") so they don't crowd the row. */
+export function formatCompactBalance(val: string, locale = getNumberLocale()): string {
+	const num = parseFloat(val)
+	if (Number.isFinite(num) && Math.abs(num) >= 1_000_000) {
+		return num.toLocaleString(validNumberLocale(locale), { notation: 'compact', maximumFractionDigits: 2 })
+	}
+	return formatBalance(val, locale)
+}
