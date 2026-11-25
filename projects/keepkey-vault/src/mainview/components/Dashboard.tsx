@@ -2,8 +2,9 @@ import { BalanceSyncProgress } from './BalanceSyncProgress'
 import { paidProviderRefreshOptions, type ProviderRefreshReason } from '../../shared/provider-refresh'
 import { getNumberLocale } from "../lib/number-locale"
 import { useUiTranslation } from "../i18n/ui"
-import { Component, Fragment, lazy, Suspense, useState, useEffect, useCallback, useMemo, useRef, type ReactNode, type ErrorInfo } from "react"
+import { Component, Fragment, lazy, Suspense, useState, useEffect, useLayoutEffect, useCallback, useMemo, useRef, type ReactNode, type ErrorInfo } from "react"
 import { Box, Flex, Text, Spinner, Image, Button } from "@chakra-ui/react"
+import { CHAIN_TOKEN_LIST_ID, chainCrownLayout } from "../lib/chain-crown-layout"
 import { useTranslation } from "react-i18next"
 import { CHAINS, customChainToChainDef, isChainSupported, type ChainDef } from "../../shared/chains"
 import { isBitcoinOnlyVariant } from "../../shared/flags"
@@ -427,8 +428,8 @@ function TokenSatellite({
 	x,
 	y,
 	sat,
+	angle,
 	isHover,
-	tipBelow,
 	fallbackColor,
 	onEnter,
 	onLeave,
@@ -438,8 +439,9 @@ function TokenSatellite({
 	x: number
 	y: number
 	sat: number
+	/** Satellite's angle around the chain icon; the tooltip opens radially outward along it. */
+	angle: number
 	isHover: boolean
-	tipBelow: boolean
 	fallbackColor: string
 	onEnter: () => void
 	onLeave: () => void
@@ -448,11 +450,33 @@ function TokenSatellite({
 	const iconUrl = tok.icon || getAssetIcon(tok.caip)
 	const glow = useIconColor(iconUrl, fallbackColor)
 	const usd = tok.balanceUsd ?? 0
+	const tipRef = useRef<HTMLDivElement>(null)
+	const [flip, setFlip] = useState({ x: 1, y: 1 })
+
+	// Outward unit vector; snap near-axis components to 0 so the top satellite's
+	// tooltip sits centred above it rather than drifting sideways.
+	const snap = (v: number) => (Math.abs(v) < 0.2 ? 0 : v)
+	const ux = snap(Math.cos(angle)) * flip.x
+	const uy = snap(Math.sin(angle)) * flip.y
+	const reach = sat / 2 + 10
+
+	// Flip an axis when the tooltip would leave the window.
+	useLayoutEffect(() => {
+		if (!isHover) { setFlip({ x: 1, y: 1 }); return }
+		const r = tipRef.current?.getBoundingClientRect()
+		if (!r) return
+		const fx = r.left < 0 || r.right > window.innerWidth ? -1 : 1
+		const fy = r.top < 0 || r.bottom > window.innerHeight ? -1 : 1
+		if (fx !== 1 || fy !== 1) setFlip(f => ({ x: f.x * fx, y: f.y * fy }))
+	}, [isHover])
+
 	return (
 		<Box
 			as="button"
 			onMouseEnter={onEnter}
 			onMouseLeave={onLeave}
+			onFocus={onEnter}
+			onBlur={onLeave}
 			onClick={onClick}
 			position="absolute"
 			left={`${x - sat / 2}px`}
@@ -463,29 +487,44 @@ function TokenSatellite({
 			bg="transparent"
 			border="0"
 			p={0}
-			display="grid"
-			placeItems="center"
-			transition="all 0.3s cubic-bezier(0.2,0.8,0.2,1)"
-			transform={isHover ? 'scale(1.15)' : 'scale(1)'}
-			filter={isHover
-				? `drop-shadow(0 0 24px ${glow})`
-				: `drop-shadow(0 0 12px ${glow}66) drop-shadow(0 4px 14px rgba(0,0,0,0.55))`}
 			zIndex={isHover ? 10 : 1}
 			cursor="pointer"
 			aria-label={tok.symbol}
 		>
-			<AssetIcon
-				caip={tok.caip}
-				iconUrl={tok.icon}
-				alt={tok.symbol}
-				size={sat}
+			{/* Round halo in the token's colour. A real element instead of a CSS
+			    filter on this button: drop-shadow() on an ancestor of the tooltip
+			    also shadows the tooltip box, which rendered as a hard-edged block. */}
+			<Box
+				position="absolute"
+				inset={`${-sat * 0.5}px`}
+				borderRadius="full"
+				pointerEvents="none"
+				bg={`radial-gradient(circle, ${glow}66 0%, ${glow}26 38%, ${glow}00 70%)`}
+				opacity={isHover ? 1 : 0.6}
+				transition="opacity 0.3s ease"
 			/>
+			<Box
+				position="relative"
+				w="100%"
+				h="100%"
+				borderRadius="full"
+				display="grid"
+				placeItems="center"
+				boxShadow="0 4px 14px rgba(0,0,0,0.55)"
+				transition="transform 0.3s cubic-bezier(0.2,0.8,0.2,1)"
+				transform={isHover ? 'scale(1.08)' : 'scale(1)'}
+			>
+				<AssetIcon caip={tok.caip} iconUrl={tok.icon} alt={tok.symbol} size={sat} />
+			</Box>
 			{isHover && (
 				<Box
+					ref={tipRef}
 					position="absolute"
-					{...(tipBelow ? { bottom: "-66px" } : { top: "-66px" })}
-					left="50%"
-					transform="translateX(-50%)"
+					left={`calc(50% + ${ux * reach}px)`}
+					top={`calc(50% + ${uy * reach}px)`}
+					// Pin the tooltip edge nearest the satellite to the anchor point,
+					// so it grows away from the crown instead of over its neighbours.
+					transform={`translate(calc(-50% + ${ux * 50}%), calc(-50% + ${uy * 50}%))`}
 					bg="var(--ink-3)"
 					border={`1px solid ${glow}`}
 					px="3"
@@ -520,8 +559,8 @@ function HeatmapHost({ tiles, drilled }: { tiles: Parameters<typeof HeatmapView>
 	)
 }
 
-/** Chain-detail orbital — chain icon as the sun, tokens orbiting as satellites.
- *  Shown when the user picks a chain from the sidebar list. */
+/** Chain-detail crown — chain icon as the anchor, tokens on an arc above it,
+ *  balance as the hero below. Shown when the user picks a chain. */
 function ChainDetailOrbital({
 	chain,
 	balance,
@@ -529,6 +568,7 @@ function ChainDetailOrbital({
 	cleanTokens,
 	onSelectChain,
 	onSelectToken,
+	onShowAllTokens,
 }: {
 	chain: ChainDef
 	balance?: ChainBalance
@@ -536,69 +576,83 @@ function ChainDetailOrbital({
 	cleanTokens: import("../../shared/types").TokenBalance[]
 	onSelectChain: () => void
 	onSelectToken: (tok: import("../../shared/types").TokenBalance) => void
+	/** "+N" chip handler; defaults to scrolling to the token list. */
+	onShowAllTokens?: () => void
 }) {
-  const uiText = useUiTranslation()
+	const uiText = useUiTranslation()
+	const { t } = useTranslation("dashboard")
 
 	const [hover, setHover] = useState<string | null>(null)
-	const [size, setSize] = useState(380)
+	const [avail, setAvail] = useState(380)
+	const rootRef = useRef<HTMLDivElement>(null)
 
 	useEffect(() => {
-		const compute = () => setSize(Math.min(380, Math.max(280, window.innerWidth - 420)))
-		compute()
-		window.addEventListener('resize', compute)
-		return () => window.removeEventListener('resize', compute)
+		const el = rootRef.current
+		if (!el) return
+		const measure = () => setAvail(el.clientWidth || 380)
+		measure()
+		const ro = new ResizeObserver(measure)
+		ro.observe(el)
+		return () => ro.disconnect()
 	}, [])
 
-	const cx = size / 2
-	const cy = size / 2
-	const orbitR = size * 0.294 // ~30% smaller orbit diameter
-	const ringR  = size * 0.322 // scaled with orbitR to keep satellites on the ring
-
-	const tokenSats = cleanTokens
+	const tokenSats = useMemo(() => cleanTokens
 		.slice()
-		.sort((a, b) => (b.balanceUsd ?? 0) - (a.balanceUsd ?? 0))
-		.slice(0, 8)
+		.sort((a, b) => (b.balanceUsd ?? 0) - (a.balanceUsd ?? 0)), [cleanTokens])
+
+	const full = chainCrownLayout(tokenSats.length)
+	const scale = Math.max(0.7, Math.min(1, avail / full.width))
+	const g = scale === 1 ? full : chainCrownLayout(tokenSats.length, scale)
 
 	const nativeBal = balance?.balance || '0'
 	const shielded = shieldedPortion(balance)
 	const combinedBal = parseFloat(nativeBal) + shielded.amount + shielded.pending
+	const balanceText = `${!balance || balance.syncState === 'degraded' ? '—' : formatBalance(String(combinedBal))} ${chain.symbol}`
+	// Hero auto-shrink: mono glyphs are ~0.62em wide, so size the line to fit.
+	const heroPx = Math.max(22, Math.min(44, Math.floor((avail - 32) / (balanceText.length * 0.62))))
+
+	const showAll = onShowAllTokens ?? (() => {
+		const list = document.getElementById(CHAIN_TOKEN_LIST_ID)
+		if (!list) return
+		list.scrollIntoView({ behavior: 'smooth', block: 'start' })
+		list.querySelector<HTMLElement>('button:not([disabled])')?.focus({ preventScroll: true })
+	})
+
+	const first = g.points[0]
+	const last = g.points[g.points.length - 1]
+	const arcPath = g.points.length > 1 && first && last
+		? `M ${first.x} ${first.y} A ${g.r} ${g.r} 0 ${g.span > Math.PI ? 1 : 0} 1 ${last.x} ${last.y}`
+		: null
 
 	return (
-		<Box position="relative" w={`${size}px`} h={`${size}px`} mx="auto" my="2">
-			<svg width={size} height={size} style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}>
-				<circle
-					cx={cx}
-					cy={cy}
-					r={ringR}
-					fill="none"
-					stroke="rgba(255,255,255,0.10)"
-					strokeWidth="1"
-					strokeDasharray="2 6"
-					style={{
-						transformOrigin: `${cx}px ${cy}px`,
-						animation: 'v3-spin 90s linear infinite',
-					}}
-				/>
-			</svg>
+		<Flex ref={rootRef} direction="column" align="center" w="100%" my="2">
+			<Box position="relative" w={`${g.width}px`} h={`${g.height}px`} flexShrink={0}>
+				{arcPath && (
+					<svg width={g.width} height={g.height} style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }} aria-hidden="true">
+						<path d={arcPath} fill="none" stroke="rgba(255,255,255,0.10)" strokeWidth="1" strokeDasharray="2 6" />
+					</svg>
+				)}
 
-			{/* Center sun — chain icon + native balance */}
-			<Box
-				position="absolute"
-				top="50%"
-				left="50%"
-				transform="translate(-50%, -50%)"
-				w="70%"
-				textAlign="center"
-				display="flex"
-				flexDirection="column"
-				alignItems="center"
-				gap="2"
-			>
+				{/* Radial halo behind the chain icon — the crown no longer has the full
+				    ring of tinted satellites around the icon that used to add to its glow. */}
+				<Box
+					position="absolute"
+					left={`${g.cx - g.core * 1.1}px`}
+					top={`${g.cy - g.core * 1.1}px`}
+					w={`${g.core * 2.2}px`}
+					h={`${g.core * 2.2}px`}
+					borderRadius="full"
+					pointerEvents="none"
+					bg={`radial-gradient(circle, ${chain.color}59 0%, ${chain.color}24 42%, ${chain.color}00 70%)`}
+				/>
 				<Box
 					as="button"
 					onClick={onSelectChain}
-					w="96px"
-					h="96px"
+					position="absolute"
+					left={`${g.cx - g.core / 2}px`}
+					top={`${g.cy - g.core / 2}px`}
+					w={`${g.core}px`}
+					h={`${g.core}px`}
 					borderRadius="full"
 					bg="transparent"
 					border="0"
@@ -618,27 +672,81 @@ function ChainDetailOrbital({
 						boxShadow={`0 0 0 1px var(--line), 0 0 70px -10px ${chain.color}, 0 8px 24px -8px rgba(0,0,0,0.6)`}
 					/>
 				</Box>
-				<Text
-					fontSize={{ base: "10px" }}
-					color="var(--text-3)"
-					letterSpacing="0.20em"
-					textTransform="uppercase"
-					fontWeight="500"
-					mt="1"
-				>
+
+				{/* Token satellites — each pulls its glow color from its own icon. */}
+				{tokenSats.slice(0, g.visible).map((tok, i) => {
+					const p = g.points[i]!
+					return (
+						<TokenSatellite
+							key={tok.caip}
+							tok={tok}
+							x={p.x}
+							y={p.y}
+							sat={g.sat}
+							angle={p.angle}
+							isHover={hover === tok.caip}
+							fallbackColor={chain.color}
+							onEnter={() => setHover(tok.caip)}
+							onLeave={() => setHover(null)}
+							onClick={() => onSelectToken(tok)}
+						/>
+					)
+				})}
+
+				{g.extra > 0 && (() => {
+					const p = g.points[g.visible]!
+					return (
+						<Box
+							as="button"
+							onClick={showAll}
+							position="absolute"
+							left={`${p.x - g.sat / 2}px`}
+							top={`${p.y - g.sat / 2}px`}
+							w={`${g.sat}px`}
+							h={`${g.sat}px`}
+							borderRadius="full"
+							bg="var(--ink-2)"
+							border="1px solid var(--line)"
+							color="var(--text-1)"
+							fontSize={`${Math.round(13 * scale)}px`}
+							fontWeight="600"
+							fontFamily="var(--font-mono)"
+							display="grid"
+							placeItems="center"
+							cursor="pointer"
+							transition="all 0.2s"
+							_hover={{ borderColor: chain.color, color: 'var(--text-0)', transform: 'scale(1.08)' }}
+							aria-label={t("tokensCount", { count: tokenSats.length })}
+							title={t("tokensCount", { count: tokenSats.length })}
+						>
+							+{g.extra}
+						</Box>
+					)
+				})()}
+			</Box>
+
+			{/* Label + hero balance + fiat — normal flow, always below the crown. */}
+			<Flex direction="column" align="center" gap="1.5" mt="3" w="100%" px="4" textAlign="center">
+				<Text fontSize="10px" color="var(--text-3)" letterSpacing="0.20em" textTransform="uppercase" fontWeight="500">
 					{chain.coin}
 				</Text>
 				<Text
-					fontSize={{ base: "26px", md: "32px" }}
+					fontSize={`${heroPx}px`}
+					fontFamily="var(--font-mono)"
 					fontWeight="500"
 					color="var(--text-0)"
 					letterSpacing="-0.02em"
-					lineHeight="1"
+					lineHeight="1.05"
+					whiteSpace="nowrap"
+					maxW="100%"
+					overflow="hidden"
+					textOverflow="ellipsis"
+					title={balanceText}
 				>
-					{!balance || balance.syncState === 'degraded' ? '—' : formatBalance(String(combinedBal))} {chain.symbol}
+					{balanceText}
 				</Text>
 				{(nativeBalanceUsd + shielded.usd) > 0 && (
-					<Text fontSize="13px" color="var(--text-2)" fontWeight="400">
+					<Text fontSize="14px" color="var(--text-2)" fontWeight="400">
 						≈ ${(nativeBalanceUsd + shielded.usd).toLocaleString(getNumberLocale(), { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
 					</Text>
 				)}
@@ -650,34 +758,8 @@ function ChainDetailOrbital({
 						</Text>
 					</Flex>
 				)}
-			</Box>
-
-			{/* Token satellites — each pulls its glow color from its own icon. */}
-			{tokenSats.map((tok, i) => {
-				const angle = (Math.PI * 2 * i) / tokenSats.length - Math.PI / 2
-				const x = cx + Math.cos(angle) * orbitR
-				const y = cy + Math.sin(angle) * orbitR
-				const usd = tok.balanceUsd ?? 0
-				const sat = Math.max(40, Math.min(64, 32 + Math.sqrt(usd) * 1.2))
-				const isHover = hover === tok.caip
-				const tipBelow = y < cy
-				return (
-					<TokenSatellite
-						key={tok.caip}
-						tok={tok}
-						x={x}
-						y={y}
-						sat={sat}
-						isHover={isHover}
-						tipBelow={tipBelow}
-						fallbackColor={chain.color}
-						onEnter={() => setHover(tok.caip)}
-						onLeave={() => setHover(null)}
-						onClick={() => onSelectToken(tok)}
-					/>
-				)
-			})}
-		</Box>
+			</Flex>
+		</Flex>
 	)
 }
 
@@ -816,6 +898,7 @@ function VaultPortfolioDashboard({ vault, onLoaded, watchOnly, firmwareVersion }
 				{!watchOnly && <Button borderRadius="full" bg="rgba(251,146,60,0.12)" color="#fb923c" disabled={!balance || !!validationError}
 					onClick={() => openAsset(undefined, 'send')}>↑ {uiText('Send')}</Button>}
 			</Flex>
+			<Box id={CHAIN_TOKEN_LIST_ID}>
 			<Text fontSize="10px" color="var(--text-3)" letterSpacing="0.2em" textTransform="uppercase" mb="2">{uiText('Assets')}</Text>
 			{identity.supportedAssets.map(asset => {
 				const native = asset.caip.toLowerCase() === chain.caip.toLowerCase()
@@ -832,6 +915,7 @@ function VaultPortfolioDashboard({ vault, onLoaded, watchOnly, firmwareVersion }
 					</button>
 				</Flex>
 			})}
+			</Box>
 			<details style={{ borderTop: '1px solid var(--line)', marginTop: 20, paddingTop: 16, color: 'var(--text-2)', fontSize: 12 }}>
 				<summary style={{ cursor: 'pointer' }}>{identity.threshold} {uiText('of')} {identity.cosigners.length} · {uiText('Cosigners & account details')}</summary>
 				<Box mt="4"><VaultIdentityDetails vault={identity} compact showCertification={false} /></Box>
@@ -2780,16 +2864,18 @@ function PersonalDashboard({ capabilities, isEmulator, onLoaded, watchOnly, watc
 					})()} />
 				</Flex>
 				{/* Top: orbital widget / donut / welcome — vertically centered.
-				    overflow:hidden prevents the orbital box from visually and
-				    pointer-event-wise spilling into the action button row below. */}
+				    Drilled into a chain, the slot sizes to its content (the crown
+				    computes its own height) so logos are never clipped; only the
+				    heatmap, which fills its parent, keeps a fixed clipped slot. */}
 				<Flex
-					h={drilledChainId ? "380px" : "62vh"}
+					h={drilledChainId ? (viewMode === 'heatmap' ? "380px" : "auto") : "62vh"}
+					minH={drilledChainId && viewMode !== 'heatmap' && viewMode !== 'orbital' ? "380px" : undefined}
 					align="center"
 					justify="center"
 					w="100%"
 					px="3"
 					pt="6"
-					overflow="hidden"
+					overflow={drilledChainId && viewMode !== 'heatmap' ? "visible" : "hidden"}
 					position="relative"
 					zIndex={1}
 				>
@@ -3213,7 +3299,7 @@ function PersonalDashboard({ capabilities, isEmulator, onLoaded, watchOnly, watc
 								    maxH + overflowY="auto" keep the chart+actions pinned while
 								    the user scrolls through a long token list independently. */}
 								{cleanTokens.length > 0 && (
-									<Box w="100%" mt="-1">
+									<Box w="100%" mt="-1" id={CHAIN_TOKEN_LIST_ID}>
 										<Text fontSize="10px" color="var(--text-3)" letterSpacing="0.20em" textTransform="uppercase" mb="1" px="1">
 											{t("tokensCount", { count: cleanTokens.length })}
 										</Text>
