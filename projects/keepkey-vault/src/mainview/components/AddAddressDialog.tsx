@@ -82,7 +82,9 @@ export function AddAddressDialog({ onClose, onAdded }: { onClose: () => void; on
       const entry = await rpcRequest<AddressBookEntry | null>("addAddressBook", {
         networkId: chain.networkId,
         address: address.trim(),
-        label: resolvedEns?.ensName || label.trim() || undefined,
+        // Only the name the user typed is sent. A blank one is undefined, so the
+        // backend keeps the contact's current name and falls back to the ENS name.
+        label: label.trim() || undefined,
         ...(resolvedEns ? { expectedAddress: resolvedEns.address } : {}),
         ...(cosigner && chain.chainFamily === "evm" && validation?.valid ? { cosigner: true } : {}),
       }, 15000)
@@ -162,8 +164,9 @@ export function AddAddressDialog({ onClose, onAdded }: { onClose: () => void; on
         {/* Label */}
         <Box>
           <Text fontSize="11px" color="var(--text-2)" mb="1">{t("labelOptional", { defaultValue: "Label (optional)" })}</Text>
-          <Input value={ensInput ? resolvedEns?.ensName || address.trim() : label} disabled={!!ensInput} onChange={(e) => setLabel(e.target.value)} maxLength={100}
-                 placeholder={t("labelPlaceholder", { defaultValue: "Label (e.g. Alice)" })}
+          {/* The name stays editable for an ENS contact: the ENS name is only a suggestion (KEEPKEY-176). */}
+          <Input value={label} onChange={(e) => setLabel(e.target.value)} maxLength={100}
+                 placeholder={resolvedEns?.ensName || t("labelPlaceholder", { defaultValue: "Label (e.g. Alice)" })}
                  size="sm" bg="var(--ink-0)" border="1px solid var(--line)" color="var(--text-0)"
                  onKeyDown={(e) => { if (e.key === "Enter" && canSave) handleAdd() }} />
           {chain?.chainFamily === "evm" && !isHiddenWallet && validation?.valid && (

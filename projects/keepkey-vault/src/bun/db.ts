@@ -3344,9 +3344,15 @@ export function addExternalEntry(args: {
       // Explicit save — confirm the contact (preserve the original save date if any).
       // A plain re-save (no cosigner given) keeps an existing co-signer flag; marking a
       // co-signer without a name keeps the name already saved.
-      const label = args.ensName || (existing.ens_name && args.label === undefined
-        ? existing.label || existing.ens_name
-        : cosigner !== null && !args.label ? existing.label : (args.label ?? null))
+      // An ENS save never replaces a name the user gave the contact: the ENS
+      // name is only the fallback label. A label equal to the stored ENS name
+      // was that fallback, so a newer ENS name may replace it.
+      const ownLabel = existing.label && existing.label !== existing.ens_name ? existing.label : null
+      const label = args.ensName
+        ? args.label || ownLabel || args.ensName
+        : existing.ens_name && args.label === undefined
+          ? existing.label || existing.ens_name
+          : cosigner !== null && !args.label ? existing.label : (args.label ?? null)
       db.run('UPDATE addressbook SET label = ?, ens_name = COALESCE(?, ens_name), saved_at = COALESCE(saved_at, ?), cosigner = COALESCE(?, cosigner), updated_at = ? WHERE id = ?', [label, args.ensName ?? null, now, cosigner, now, id])
     } else {
       id = crypto.randomUUID()
@@ -3354,7 +3360,7 @@ export function addExternalEntry(args: {
         `INSERT INTO addressbook
            (id, wallet_id, device_id, kind, network_id, chain_id, address, label, ens_name, saved_at, cosigner, created_at, updated_at)
          VALUES (?, ?, ?, 'external', ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [id, args.walletId, args.deviceId, args.networkId, args.chainId, addr, args.ensName || args.label || null, args.ensName ?? null, now, cosigner ?? evmCosigner(addr, args.networkId, args.walletId), now, now],
+        [id, args.walletId, args.deviceId, args.networkId, args.chainId, addr, args.label || args.ensName || null, args.ensName ?? null, now, cosigner ?? evmCosigner(addr, args.networkId, args.walletId), now, now],
       )
     }
     if (cosigner !== null) setEvmCosigner(id, cosigner === 1)
