@@ -82,5 +82,20 @@
 	"customGasPriceTooLow": "Der Gaspreis liegt unter der Basisgebühr des Netzwerks (~{{gwei}} gwei). Die Transaktion würde nie bestätigt.",
 	"amountBelowDust": "Der Betrag liegt unter dem Minimum, das das Netzwerk akzeptiert. Sende mindestens {{minimum}} {{symbol}}.",
 	"maxBelowDust": "Nach Abzug der Gebühren liegt der Betrag unter dem Minimum, das das Netzwerk akzeptiert ({{minimum}} {{symbol}}). Füge Guthaben hinzu oder senke die Gebühr.",
-	"gasPriceUnavailable": "Der Gaspreis des Netzwerks konnte nicht geladen werden, daher schätzt Desktop keine Gebühr. Versuche es gleich noch einmal."
+	"gasPriceUnavailable": "Der Gaspreis des Netzwerks konnte nicht geladen werden, daher schätzt Desktop keine Gebühr. Versuche es gleich noch einmal.",
+	"insufficientAmountAndFee": "Nicht genug {{symbol}} für Betrag und Netzwerkgebühr.",
+	"insufficientAfterFees": "Nach der Netzwerkgebühr bleibt nichts zum Senden übrig.",
+	"insufficientToken": "Token-Guthaben reicht für diesen Betrag nicht aus.",
+	"insufficientTokenAmount": "Guthaben reicht nicht aus: {{available}} verfügbar, {{requested}} angefordert.",
+	"insufficientGas": "Nicht genug {{symbol}} für die Netzwerkgebühr: Du hast {{have}} {{symbol}} und brauchst etwa {{need}} {{symbol}}.",
+	"insufficientGasForMax": "Das Guthaben deckt die Netzwerkgebühr nicht.",
+	"insufficientAmountAndGas": "Nicht genug {{symbol}}: Du hast {{have}} {{symbol}} und brauchst {{need}} {{symbol}}, einschließlich Netzwerkgebühr.",
+	"insufficientAmount": "Nicht genug {{symbol}}: Du hast {{have}} {{symbol}} und brauchst {{need}} {{symbol}}.",
+	"insufficientAmountAndFeeNoSymbol": "Das Guthaben deckt Betrag und Netzwerkgebühr nicht. Sende einen kleineren Betrag oder senke die Gebühr.",
+	"insufficientDogeMinimumFee": "Nicht genug DOGE für die Mindest-Netzwerkgebühr von 1 DOGE.",
+	"insufficientZcashMinimumFee": "Nicht genug ZEC für die Mindest-Netzwerkgebühr von {{fee}} ZEC.",
+	"insufficientZcashMinimumFeeExact": "Nicht genug ZEC für die Mindest-Netzwerkgebühr von {{fee}} ZEC. Sende einen etwas kleineren Betrag.",
+	"insufficientXrpReserve": "Nicht genug XRP nach Kontoreserve und Netzwerkgebühr.",
+	"insufficientTronMaxReserve": "Nicht genug TRX, um das Maximum zu senden, nachdem {{reserve}} TRX für Netzwerkgebühren zurückgehalten werden.",
+	"exceedsBalanceWithFee": "Betrag plus Netzwerkgebühr ({{fee}} {{symbol}}) übersteigt das verfügbare Guthaben ({{balance}} {{symbol}})."
 }

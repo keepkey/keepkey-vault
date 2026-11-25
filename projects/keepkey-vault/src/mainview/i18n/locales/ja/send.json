@@ -82,5 +82,20 @@
 	"customGasPriceTooLow": "ガス価格がネットワークの基本手数料（約{{gwei}} gwei）を下回っています。このトランザクションは承認されません。",
 	"amountBelowDust": "金額がネットワークで受け付けられる最小額を下回っています。{{minimum}} {{symbol}} 以上を送金してください。",
 	"maxBelowDust": "手数料を差し引くと、送金額がネットワークで受け付けられる最小額 ({{minimum}} {{symbol}}) を下回ります。残高を追加するか手数料を下げてください。",
-	"gasPriceUnavailable": "ネットワークのガス価格を読み込めなかったため、Desktop は手数料を推測しません。しばらくしてからもう一度お試しください。"
+	"gasPriceUnavailable": "ネットワークのガス価格を読み込めなかったため、Desktop は手数料を推測しません。しばらくしてからもう一度お試しください。",
+	"insufficientAmountAndFee": "金額とネットワーク手数料に対して {{symbol}} が不足しています。",
+	"insufficientAfterFees": "ネットワーク手数料を差し引くと送金できる金額が残りません。",
+	"insufficientToken": "この金額に対してトークン残高が不足しています。",
+	"insufficientTokenAmount": "残高不足です。利用可能: {{available}}、要求: {{requested}}。",
+	"insufficientGas": "ネットワーク手数料に対して {{symbol}} が不足しています。残高は {{have}} {{symbol}}、必要額は約 {{need}} {{symbol}} です。",
+	"insufficientGasForMax": "残高でネットワーク手数料をまかなえません。",
+	"insufficientAmountAndGas": "{{symbol}} が不足しています。残高は {{have}} {{symbol}}、ネットワーク手数料込みで {{need}} {{symbol}} 必要です。",
+	"insufficientAmount": "{{symbol}} が不足しています。残高は {{have}} {{symbol}}、必要額は {{need}} {{symbol}} です。",
+	"insufficientAmountAndFeeNoSymbol": "残高で金額とネットワーク手数料をまかなえません。金額を減らすか手数料を下げてください。",
+	"insufficientDogeMinimumFee": "最低ネットワーク手数料 1 DOGE に対して DOGE が不足しています。",
+	"insufficientZcashMinimumFee": "最低ネットワーク手数料 {{fee}} ZEC に対して ZEC が不足しています。",
+	"insufficientZcashMinimumFeeExact": "最低ネットワーク手数料 {{fee}} ZEC に対して ZEC が不足しています。少し少ない金額で送金してみてください。",
+	"insufficientXrpReserve": "アカウントのリザーブとネットワーク手数料を差し引くと XRP が不足しています。",
+	"insufficientTronMaxReserve": "ネットワーク手数料用に {{reserve}} TRX を確保すると、最大額を送金するための TRX が不足しています。",
+	"exceedsBalanceWithFee": "金額とネットワーク手数料 ({{fee}} {{symbol}}) の合計が利用可能な残高 ({{balance}} {{symbol}}) を超えています。"
 }

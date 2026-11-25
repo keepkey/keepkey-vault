@@ -82,5 +82,20 @@
 	"customGasPriceTooLow": "Цена газа ниже базовой комиссии сети (~{{gwei}} gwei). Транзакция никогда не будет подтверждена.",
 	"amountBelowDust": "Сумма ниже минимума, который принимает сеть. Отправьте не менее {{minimum}} {{symbol}}.",
 	"maxBelowDust": "После вычета комиссии сумма к отправке ниже минимума, который принимает сеть ({{minimum}} {{symbol}}). Пополните баланс или снизьте комиссию.",
-	"gasPriceUnavailable": "Не удалось загрузить цену газа в сети, поэтому Desktop не будет угадывать комиссию. Повторите попытку чуть позже."
+	"gasPriceUnavailable": "Не удалось загрузить цену газа в сети, поэтому Desktop не будет угадывать комиссию. Повторите попытку чуть позже.",
+	"insufficientAmountAndFee": "Недостаточно {{symbol}} для суммы и сетевой комиссии.",
+	"insufficientAfterFees": "После сетевой комиссии отправлять нечего.",
+	"insufficientToken": "Недостаточно токенов для этой суммы.",
+	"insufficientTokenAmount": "Недостаточно средств: доступно {{available}}, запрошено {{requested}}.",
+	"insufficientGas": "Недостаточно {{symbol}} для сетевой комиссии: у вас {{have}} {{symbol}}, нужно около {{need}} {{symbol}}.",
+	"insufficientGasForMax": "Баланса не хватает на сетевую комиссию.",
+	"insufficientAmountAndGas": "Недостаточно {{symbol}}: у вас {{have}} {{symbol}}, нужно {{need}} {{symbol}} с учётом сетевой комиссии.",
+	"insufficientAmount": "Недостаточно {{symbol}}: у вас {{have}} {{symbol}}, нужно {{need}} {{symbol}}.",
+	"insufficientAmountAndFeeNoSymbol": "Баланса не хватает на сумму вместе с сетевой комиссией. Отправьте меньшую сумму или снизьте комиссию.",
+	"insufficientDogeMinimumFee": "Недостаточно DOGE для минимальной сетевой комиссии 1 DOGE.",
+	"insufficientZcashMinimumFee": "Недостаточно ZEC для минимальной сетевой комиссии {{fee}} ZEC.",
+	"insufficientZcashMinimumFeeExact": "Недостаточно ZEC для минимальной сетевой комиссии {{fee}} ZEC. Попробуйте отправить немного меньшую сумму.",
+	"insufficientXrpReserve": "Недостаточно XRP с учётом резерва аккаунта и сетевой комиссии.",
+	"insufficientTronMaxReserve": "Недостаточно TRX, чтобы отправить максимум после резервирования {{reserve}} TRX на сетевые комиссии.",
+	"exceedsBalanceWithFee": "Сумма вместе с сетевой комиссией ({{fee}} {{symbol}}) превышает доступный баланс ({{balance}} {{symbol}})."
 }

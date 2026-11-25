@@ -21,6 +21,7 @@ import { utxoDiscoveryKey } from '../btc-backend/types'
 import { filterSpendableZcashUtxos, summarizeZcashMaturity, ZCASH_MIN_CONFIRMATIONS } from '../../shared/zcash-maturity'
 import { ZCASH_NU7_ACTIVATION_HEIGHT, ZCASH_NU7_BRANCH_ID, ZCASH_V6_VERSION_GROUP_ID } from '../../shared/zcash-nu7'
 import { isAccountIndex, parseBip32PathStrict } from '../../shared/bip32-account'
+import { balanceErrorMessage } from '../../shared/send-balance-errors'
 
 /** BTC mainnet — the ONLY UTXO chain that routes to a self-host node; every other
  *  coin (LTC/DOGE/BCH/Dash/Zcash) stays on Pioneer. */
@@ -572,8 +573,8 @@ export async function buildUtxoTx(
         `so the ${total / 1e8} ${chain.symbol} found so far may not be all of it. Try again in a moment.`,
       )
     }
-    if (total < satoshis) throw new Error(`Insufficient funds: have ${total / 1e8}, need ${satoshis / 1e8} ${chain.symbol}`)
-    throw new Error('Coin selection failed (possibly high fees)')
+    if (total < satoshis) throw new Error(balanceErrorMessage('amount', { have: total / 1e8, need: satoshis / 1e8, symbol: chain.symbol }))
+    throw new Error(balanceErrorMessage('amountAndUtxoFee'))
   }
 
   let { inputs, outputs, fee } = result
@@ -602,7 +603,7 @@ export async function buildUtxoTx(
         outputs[spendIdx].value -= increase
         fee = 100000000
       } else {
-        throw new Error(`Insufficient DOGE to cover minimum 1 DOGE network fee`)
+        throw new Error(balanceErrorMessage('dogeMinimumFee'))
       }
     }
     console.log(`${TAG} DOGE: enforced minimum fee = ${fee} sats (${fee / 1e8} DOGE)`)
@@ -640,10 +641,10 @@ export async function buildUtxoTx(
           outputs[spendIdx].value -= increase
           fee = zip317Fee
         } else {
-          throw new Error(`Insufficient ZEC to cover ZIP-317 minimum fee (${zip317Fee} zats for ${logicalActions} actions)`)
+          throw new Error(balanceErrorMessage('zcashMinimumFee', { zats: zip317Fee, actions: logicalActions }))
         }
       } else {
-        throw new Error(`Insufficient ZEC to cover ZIP-317 minimum fee (${zip317Fee} zats for ${logicalActions} actions). Try sending a slightly smaller amount.`)
+        throw new Error(balanceErrorMessage('zcashMinimumFeeExact', { zats: zip317Fee, actions: logicalActions }))
       }
       console.log(`${TAG} ZEC: enforced ZIP-317 fee = ${fee} zats (${logicalActions} actions, min ${zip317Fee})`)
     }

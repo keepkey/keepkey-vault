@@ -82,5 +82,20 @@
 	"customGasPriceTooLow": "El precio del gas está por debajo de la tarifa base de la red (~{{gwei}} gwei). La transacción nunca se confirmaría.",
 	"amountBelowDust": "El importe está por debajo del mínimo que acepta la red. Envía al menos {{minimum}} {{symbol}}.",
 	"maxBelowDust": "Tras las comisiones, el importe a enviar queda por debajo del mínimo que acepta la red ({{minimum}} {{symbol}}). Añade fondos o reduce la comisión.",
-	"gasPriceUnavailable": "No se pudo cargar el precio del gas de la red, así que Desktop no adivinará una comisión. Vuelve a intentarlo en un momento."
+	"gasPriceUnavailable": "No se pudo cargar el precio del gas de la red, así que Desktop no adivinará una comisión. Vuelve a intentarlo en un momento.",
+	"insufficientAmountAndFee": "Saldo de {{symbol}} insuficiente para el importe y la comisión de red.",
+	"insufficientAfterFees": "No queda nada para enviar después de la comisión de red.",
+	"insufficientToken": "Saldo del token insuficiente para este importe.",
+	"insufficientTokenAmount": "Saldo insuficiente: {{available}} disponible, {{requested}} solicitado.",
+	"insufficientGas": "{{symbol}} insuficiente para la comisión de red: tienes {{have}} {{symbol}} y necesitas unos {{need}} {{symbol}}.",
+	"insufficientGasForMax": "El saldo no cubre la comisión de red.",
+	"insufficientAmountAndGas": "{{symbol}} insuficiente: tienes {{have}} {{symbol}} y necesitas {{need}} {{symbol}}, incluida la comisión de red.",
+	"insufficientAmount": "{{symbol}} insuficiente: tienes {{have}} {{symbol}} y necesitas {{need}} {{symbol}}.",
+	"insufficientAmountAndFeeNoSymbol": "El saldo no cubre el importe más la comisión de red. Envía un importe menor o reduce la comisión.",
+	"insufficientDogeMinimumFee": "DOGE insuficiente para la comisión de red mínima de 1 DOGE.",
+	"insufficientZcashMinimumFee": "ZEC insuficiente para la comisión de red mínima de {{fee}} ZEC.",
+	"insufficientZcashMinimumFeeExact": "ZEC insuficiente para la comisión de red mínima de {{fee}} ZEC. Prueba a enviar un importe un poco menor.",
+	"insufficientXrpReserve": "XRP insuficiente después de la reserva de la cuenta y la comisión de red.",
+	"insufficientTronMaxReserve": "TRX insuficiente para enviar el máximo después de reservar {{reserve}} TRX para las comisiones de red.",
+	"exceedsBalanceWithFee": "El importe más la comisión de red ({{fee}} {{symbol}}) supera el saldo disponible ({{balance}} {{symbol}})."
 }

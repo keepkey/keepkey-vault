@@ -82,5 +82,20 @@
 	"customGasPriceTooLow": "De gasprijs ligt onder de basisvergoeding van het netwerk (~{{gwei}} gwei). De transactie zou nooit worden bevestigd.",
 	"amountBelowDust": "Het bedrag ligt onder het minimum dat het netwerk accepteert. Verstuur minstens {{minimum}} {{symbol}}.",
 	"maxBelowDust": "Na aftrek van de kosten ligt het te verzenden bedrag onder het minimum dat het netwerk accepteert ({{minimum}} {{symbol}}). Voeg saldo toe of verlaag de kosten.",
-	"gasPriceUnavailable": "De gasprijs van het netwerk kon niet worden geladen, dus Desktop gaat geen kosten gokken. Probeer het zo opnieuw."
+	"gasPriceUnavailable": "De gasprijs van het netwerk kon niet worden geladen, dus Desktop gaat geen kosten gokken. Probeer het zo opnieuw.",
+	"insufficientAmountAndFee": "Niet genoeg {{symbol}} voor het bedrag en de netwerkkosten.",
+	"insufficientAfterFees": "Na de netwerkkosten blijft er niets over om te verzenden.",
+	"insufficientToken": "Onvoldoende tokensaldo voor dit bedrag.",
+	"insufficientTokenAmount": "Onvoldoende saldo: {{available}} beschikbaar, {{requested}} gevraagd.",
+	"insufficientGas": "Niet genoeg {{symbol}} voor de netwerkkosten: je hebt {{have}} {{symbol}} en hebt ongeveer {{need}} {{symbol}} nodig.",
+	"insufficientGasForMax": "Het saldo dekt de netwerkkosten niet.",
+	"insufficientAmountAndGas": "Niet genoeg {{symbol}}: je hebt {{have}} {{symbol}} en hebt {{need}} {{symbol}} nodig, inclusief netwerkkosten.",
+	"insufficientAmount": "Niet genoeg {{symbol}}: je hebt {{have}} {{symbol}} en hebt {{need}} {{symbol}} nodig.",
+	"insufficientAmountAndFeeNoSymbol": "Het saldo dekt het bedrag plus de netwerkkosten niet. Verzend een kleiner bedrag of verlaag de kosten.",
+	"insufficientDogeMinimumFee": "Niet genoeg DOGE voor de minimale netwerkkosten van 1 DOGE.",
+	"insufficientZcashMinimumFee": "Niet genoeg ZEC voor de minimale netwerkkosten van {{fee}} ZEC.",
+	"insufficientZcashMinimumFeeExact": "Niet genoeg ZEC voor de minimale netwerkkosten van {{fee}} ZEC. Probeer een iets kleiner bedrag te verzenden.",
+	"insufficientXrpReserve": "Niet genoeg XRP na de accountreserve en de netwerkkosten.",
+	"insufficientTronMaxReserve": "Niet genoeg TRX om het maximum te verzenden na het reserveren van {{reserve}} TRX voor netwerkkosten.",
+	"exceedsBalanceWithFee": "Het bedrag plus de netwerkkosten ({{fee}} {{symbol}}) is meer dan het beschikbare saldo ({{balance}} {{symbol}})."
 }

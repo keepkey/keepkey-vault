@@ -82,5 +82,20 @@
 	"customGasPriceTooLow": "Gas 价格低于网络基础费用（约 {{gwei}} gwei）。该交易永远不会被确认。",
 	"amountBelowDust": "金额低于网络接受的最低金额。请至少发送 {{minimum}} {{symbol}}。",
 	"maxBelowDust": "扣除手续费后，发送金额低于网络接受的最低金额（{{minimum}} {{symbol}}）。请增加余额或降低手续费。",
-	"gasPriceUnavailable": "无法加载网络 Gas 价格，因此 Desktop 不会猜测手续费。请稍后重试。"
+	"gasPriceUnavailable": "无法加载网络 Gas 价格，因此 Desktop 不会猜测手续费。请稍后重试。",
+	"insufficientAmountAndFee": "{{symbol}} 不足以支付金额和网络手续费。",
+	"insufficientAfterFees": "扣除网络手续费后没有可发送的金额。",
+	"insufficientToken": "代币余额不足以支付此金额。",
+	"insufficientTokenAmount": "余额不足：可用 {{available}}，需要 {{requested}}。",
+	"insufficientGas": "{{symbol}} 不足以支付网络手续费：你有 {{have}} {{symbol}}，大约需要 {{need}} {{symbol}}。",
+	"insufficientGasForMax": "余额不足以支付网络手续费。",
+	"insufficientAmountAndGas": "{{symbol}} 不足：你有 {{have}} {{symbol}}，含网络手续费需要 {{need}} {{symbol}}。",
+	"insufficientAmount": "{{symbol}} 不足：你有 {{have}} {{symbol}}，需要 {{need}} {{symbol}}。",
+	"insufficientAmountAndFeeNoSymbol": "余额不足以支付金额加网络手续费。请减少金额或降低手续费。",
+	"insufficientDogeMinimumFee": "DOGE 不足以支付 1 DOGE 的最低网络手续费。",
+	"insufficientZcashMinimumFee": "ZEC 不足以支付 {{fee}} ZEC 的最低网络手续费。",
+	"insufficientZcashMinimumFeeExact": "ZEC 不足以支付 {{fee}} ZEC 的最低网络手续费。请尝试发送稍少的金额。",
+	"insufficientXrpReserve": "扣除账户保留金和网络手续费后 XRP 不足。",
+	"insufficientTronMaxReserve": "为网络手续费保留 {{reserve}} TRX 后，TRX 不足以发送最大金额。",
+	"exceedsBalanceWithFee": "金额加网络手续费（{{fee}} {{symbol}}）超过了可用余额（{{balance}} {{symbol}}）。"
 }

@@ -96,5 +96,20 @@
 	"invalidGasLimit": "O limite de gas deve ser um número inteiro de no mínimo 21000",
 	"invalidSatPerVByte": "Informe uma taxa em sat/vByte maior que 0",
 	"balance": "Saldo",
-	"switchAmountUnit": "Toque para alternar entre USD e o valor nativo"
+	"switchAmountUnit": "Toque para alternar entre USD e o valor nativo",
+	"insufficientAmountAndFee": "Saldo de {{symbol}} insuficiente para o valor e a taxa de rede.",
+	"insufficientAfterFees": "Não sobra nada para enviar depois da taxa de rede.",
+	"insufficientToken": "Saldo do token insuficiente para este valor.",
+	"insufficientTokenAmount": "Saldo insuficiente: {{available}} disponível, {{requested}} solicitado.",
+	"insufficientGas": "{{symbol}} insuficiente para a taxa de rede: você tem {{have}} {{symbol}} e precisa de cerca de {{need}} {{symbol}}.",
+	"insufficientGasForMax": "O saldo não cobre a taxa de rede.",
+	"insufficientAmountAndGas": "{{symbol}} insuficiente: você tem {{have}} {{symbol}} e precisa de {{need}} {{symbol}}, já contando a taxa de rede.",
+	"insufficientAmount": "{{symbol}} insuficiente: você tem {{have}} {{symbol}} e precisa de {{need}} {{symbol}}.",
+	"insufficientAmountAndFeeNoSymbol": "O saldo não cobre o valor mais a taxa de rede. Envie um valor menor ou reduza a taxa.",
+	"insufficientDogeMinimumFee": "DOGE insuficiente para a taxa de rede mínima de 1 DOGE.",
+	"insufficientZcashMinimumFee": "ZEC insuficiente para a taxa de rede mínima de {{fee}} ZEC.",
+	"insufficientZcashMinimumFeeExact": "ZEC insuficiente para a taxa de rede mínima de {{fee}} ZEC. Tente enviar um valor um pouco menor.",
+	"insufficientXrpReserve": "XRP insuficiente depois da reserva da conta e da taxa de rede.",
+	"insufficientTronMaxReserve": "TRX insuficiente para enviar o máximo depois de reservar {{reserve}} TRX para as taxas de rede.",
+	"exceedsBalanceWithFee": "O valor mais a taxa de rede ({{fee}} {{symbol}}) passa do saldo disponível ({{balance}} {{symbol}})."
 }
