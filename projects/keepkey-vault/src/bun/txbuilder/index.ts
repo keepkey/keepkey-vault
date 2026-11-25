@@ -22,6 +22,7 @@ import { canonicalTronAddress, decodeTronTransfer } from '../tron-preview'
 import { getPioneerApiBase } from '../pioneer'
 import { ARBITRUM_ONE_RPC } from '../evm-rpc'
 import { broadcastHttpRejectionReason, broadcastRejectionReason } from './broadcast-error'
+import { balanceErrorMessage } from '../../shared/send-balance-errors'
 
 /** BTC mainnet — the only UTXO chain that broadcasts via a self-host node. */
 const BTC_NETWORK_ID = 'bip122:000000000019d6689c085ae165831e93'
@@ -569,7 +570,7 @@ export async function buildTx(
             const balanceSun = await fetchTronNativeBalanceSun(params.fromAddress!)
             const spendableSun = balanceSun - TRON_NATIVE_MAX_RESERVE_SUN
             if (spendableSun <= 0n) {
-              throw new Error(`Insufficient TRX for max send after reserving ${Number(TRON_NATIVE_MAX_RESERVE_SUN) / 1_000_000} TRX for network fees`)
+              throw new Error(balanceErrorMessage('tronMaxReserve', { reserve: Number(TRON_NATIVE_MAX_RESERVE_SUN) / 1_000_000 }))
             }
             return spendableSun
           })()

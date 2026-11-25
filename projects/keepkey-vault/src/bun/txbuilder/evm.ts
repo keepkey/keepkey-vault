@@ -13,6 +13,7 @@ import { GAS_PRICE_ERROR } from '../../shared/gas-price-errors'
 import { decimalAmount } from '../../shared/locale'
 import { ARBITRUM_ONE_RPC, estimateGas, getEvmGasPrice, getEvmNonce, getEvmBalance } from '../evm-rpc'
 import { swapGasMinimumWei } from '../swap-gas-floor'
+import { balanceErrorMessage } from '../../shared/send-balance-errors'
 
 const TAG = '[txbuilder:evm]'
 
@@ -352,7 +353,7 @@ export async function buildEvmTx(
     } else {
       if (isNaN(amountNum) || amountNum <= 0) throw new Error('Invalid token amount')
       amountBaseUnits = parseUnits(String(params.amount), tokenDecimals)
-      if (amountBaseUnits > available) throw new Error(`Insufficient balance: ${tokBalStr} available, ${params.amount} requested`)
+      if (amountBaseUnits > available) throw new Error(balanceErrorMessage('tokenAmount', { available: tokBalStr, requested: params.amount }))
     }
 
     console.log(`${TAG} ERC-20 transfer: ${amountBaseUnits} base units → ${contractAddress}`)
@@ -372,10 +373,9 @@ export async function buildEvmTx(
 
     // Validate native balance covers gas
     if (nativeBalance < gasFee) {
-      throw new Error(
-        `Insufficient ${chain.symbol} for gas: have ${Number(nativeBalance) / 1e18}, ` +
-        `need ~${Number(gasFee) / 1e18} ${chain.symbol}`,
-      )
+      throw new Error(balanceErrorMessage('gas', {
+        symbol: chain.symbol, have: Number(nativeBalance) / 1e18, need: Number(gasFee) / 1e18,
+      }))
     }
 
     return {
@@ -417,9 +417,9 @@ export async function buildEvmTx(
   let amountWei: bigint
   if (isMax) {
     const gasReserve = (gasFee * 110n + 99n) / 100n // 10% gas buffer, rounded up
-    if (nativeBalance <= gasReserve) throw new Error('Insufficient funds to cover gas fees')
+    if (nativeBalance <= gasReserve) throw new Error(balanceErrorMessage('gasForMax'))
     amountWei = nativeBalance - gasReserve
-    if (amountWei <= 0n) throw new Error('Insufficient funds to cover gas fees')
+    if (amountWei <= 0n) throw new Error(balanceErrorMessage('gasForMax'))
   } else {
     amountWei = parseUnits(String(params.amount), 18)
     // No `&& nativeBalance > 0n` escape hatch. That guard existed to keep a
@@ -427,10 +427,9 @@ export async function buildEvmTx(
     // an unverifiable balance now throws above, so the only way to reach here
     // with 0n is a genuinely empty account, which must fail this check.
     if (amountWei + gasFee > nativeBalance) {
-      throw new Error(
-        `Insufficient funds: balance ${Number(nativeBalance) / 1e18} ${chain.symbol}, ` +
-        `need ${Number(amountWei + gasFee) / 1e18} ${chain.symbol} (incl gas)`,
-      )
+      throw new Error(balanceErrorMessage('amountAndGas', {
+        symbol: chain.symbol, have: Number(nativeBalance) / 1e18, need: Number(amountWei + gasFee) / 1e18,
+      }))
     }
   }
 

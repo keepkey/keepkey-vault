@@ -26,6 +26,8 @@ import { baseUnitsToDecimalString } from '../../shared/max-send'
 import { describeGasPriceError, networkGasPriceGwei } from '../../shared/gas-price-errors'
 import { feeFiatLabel, feeUsdFromNative } from '../../shared/fee-fiat'
 import { describeDustError } from '../../shared/utxo-dust-errors'
+import { describeBalanceError } from '../../shared/send-balance-errors'
+import { amountPlusFeeExceedsBalance, cosmosDisplayFee, cosmosSendFee } from '../../shared/cosmos-fee'
 import { getNumberLocale } from '../lib/number-locale'
 import { useZcashNu7Support } from '../hooks/useZcashNu7Support'
 import { parseSendQr } from '../../shared/send-qr'
@@ -254,6 +256,12 @@ export function SendForm({ chain, address, balance, balanceLoading = false, toke
 	// EVM: the builder re-reads the balance at send and refuses only if the amount
 	// is more than that fresh figure; the cached figure on screen never blocks.
 	const exceedsBalance = chain.chainFamily !== 'evm' && !isMax && !isNaN(amountNum) && amountNum > 0 && balanceNum > 0 && amountNum > balanceNum
+	// A Cosmos fee is fixed per chain and fee level, so the form can already say that
+	// amount + fee is over the balance while it is typed (KEEPKEY-177). A warning only:
+	// the builder decides on the live spendable balance. Elsewhere the fee comes from the build.
+	const cosmosFee = chain.chainFamily === 'cosmos' && !isTokenSend ? cosmosDisplayFee(chain.id, chain.decimals, cosmosSendFee(chain.id, feeLevel)) : null
+	const exceedsBalanceWithFee = !exceedsBalance && cosmosFee !== null && !isMax && canonicalAmount !== null && amountNum > 0 && balanceNum > 0
+		&& amountPlusFeeExceedsBalance(canonicalAmount, cosmosFee, displayBalance, chain.decimals)
 
 	// Derive per-unit USD price from available balance data
 	// NOTE: balance.balanceUsd includes token USD — use nativeBalanceUsd for native price
@@ -486,7 +494,7 @@ export function SendForm({ chain, address, balance, balanceLoading = false, toke
 			setBuildResult(result)
 			setPhase('built')
 		} catch (e: any) {
-			if (operationIsCurrent(generation)) setError(describeGasPriceError(e.message || '', t) || describeDustError(e.message || '', t, getNumberLocale()) || e.message || t("failedToBuild"))
+			if (operationIsCurrent(generation)) setError(describeGasPriceError(e.message || '', t) || describeDustError(e.message || '', t, getNumberLocale()) || describeBalanceError(e.message || '', t, getNumberLocale()) || e.message || t("failedToBuild"))
 		} finally {
 			if (operationIsCurrent(generation)) setLoading(false)
 		}
@@ -1058,6 +1066,9 @@ export function SendForm({ chain, address, balance, balanceLoading = false, toke
 
 					{exceedsBalance && (
 						<Text fontSize="xs" color="kk.error">{t("exceedsBalance", { balance: formatBalance(displayBalance), symbol: displaySymbol })}</Text>
+					)}
+					{exceedsBalanceWithFee && (
+						<Text fontSize="xs" color="kk.error">{t("exceedsBalanceWithFee", { fee: formatBalance(cosmosFee!), balance: formatBalance(displayBalance), symbol: displaySymbol })}</Text>
 					)}
 
 					{/* Self-send and burn/contract recipients: Build waits for the explicit confirmation above. */}

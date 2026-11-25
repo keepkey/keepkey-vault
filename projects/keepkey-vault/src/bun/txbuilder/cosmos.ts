@@ -8,6 +8,8 @@
 import type { ChainDef } from '../../shared/chains'
 import { decimalToBaseUnitsStrict } from '../../shared/max-send'
 import { getCosmosSpendable } from './cosmos-spendable'
+import { balanceErrorMessage } from '../../shared/send-balance-errors'
+import { COSMOS_FEE_TEMPLATES, COSMOS_NATIVE_FEES, cosmosDisplayFee, cosmosSendFee } from '../../shared/cosmos-fee'
 
 const TAG = '[txbuilder:cosmos]'
 
@@ -35,20 +37,7 @@ function toBaseUnits(displayAmount: string, decimals: number): bigint {
   return decimalToBaseUnitsStrict(displayAmount, decimals)
 }
 
-// Native transaction fee reserved on a MAX send/deposit (in display units).
-// THORChain/Maya charge this fee on top of the deposited/sent amount at the
-// bank layer (the tx `fee.amount` is '0' — the network deducts it from the
-// account), so a MAX must leave headroom: account needs amount + fee. Maya's
-// NativeTransactionFee is 0.2 CACAO (2000000000 base @ 10 decimals); reserving
-// 0 swept 100% of the balance and every MAX CACAO swap reverted with
-// "insufficient funds". THORChain's native_tx_fee is 0.02 RUNE.
-// Only THOR/Maya belong here: Cosmos Hub and Osmosis pay their fee through the
-// tx's own `fee.amount`, so a floor here overstated it (Osmosis showed and
-// balance-checked 0.035 OSMO while the tx paid 0.01/0.015/0.02).
-const FEES: Record<string, number> = {
-  thorchain: 0.02,
-  mayachain: 0.2,
-}
+const FEES = COSMOS_NATIVE_FEES
 
 // A MAX reserves FEE × this multiplier — never the bare fee. Reserving exactly
 // the fee leaves zero headroom, and a MAX CACAO swap STILL reverted on-chain
@@ -84,8 +73,7 @@ function maxFeeReserveBase(chain: ChainDef, adjustedTxFeeBase: bigint): bigint {
  *  `fee.amount` and charge FEES[chain] at the bank layer — showing fee.amount
  *  there reported "Taxa 0 RUNE" while 0.02 RUNE left the account. */
 export function displayFee(chain: ChainDef, fee: { amount: { amount: string }[] }): string {
-  const txFee = Number(fee.amount[0]?.amount || 0) / 10 ** chain.decimals
-  return String(Math.max(txFee, FEES[chain.id] || 0))
+  return cosmosDisplayFee(chain.id, chain.decimals, fee)
 }
 
 /** THOR/Maya native fee in base units, for history rows whose fee is the tx's
@@ -133,12 +121,7 @@ const DEPOSIT_ASSETS: Record<string, string> = {
 }
 
 // Fee templates
-const FEE_TEMPLATES: Record<string, { gas: string; amount: { denom: string; amount: string }[] }> = {
-  thorchain: { gas: '500000000', amount: [{ denom: 'rune', amount: '0' }] },
-  mayachain: { gas: '500000000', amount: [{ denom: 'cacao', amount: '0' }] },
-  cosmos: { gas: '1000000', amount: [{ denom: 'uatom', amount: '5000' }] },
-  osmosis: { gas: '1000000', amount: [{ denom: 'uosmo', amount: '10000' }] },
-}
+const FEE_TEMPLATES = COSMOS_FEE_TEMPLATES
 
 export interface BuildCosmosParams {
   to: string
@@ -199,14 +182,7 @@ export async function buildCosmosTx(
 
   // 2. Build the fee FIRST (it's independent of amount) so a MAX can reserve
   //    against the actual feeLevel-adjusted fee, not a stale guess.
-  const baseFee = FEE_TEMPLATES[chain.id] || FEE_TEMPLATES.cosmos
-  const gasMultiplier = feeLevel <= 2 ? 1 : feeLevel <= 4 ? 1.5 : 2
-  const adjustedGas = String(Math.ceil(Number(baseFee.gas) * gasMultiplier))
-  const adjustedFeeAmount = baseFee.amount.map(a => ({
-    ...a,
-    amount: String(Math.ceil(Number(a.amount) * gasMultiplier)),
-  }))
-  const fee = { gas: adjustedGas, amount: adjustedFeeAmount }
+  const fee = cosmosSendFee(chain.id, feeLevel)
   if (!chain.chainId) throw new Error(`Missing chainId for Cosmos chain: ${chain.id}`)
   const chain_id = chain.chainId
 
@@ -228,11 +204,11 @@ export async function buildCosmosTx(
   } else {
     baseAmount = toBaseUnits(params.amount, amountDecimals)
   }
-  if (baseAmount <= 0n) throw new Error('Insufficient spendable balance: amount must be greater than zero after fees')
-  if (isToken && baseAmount > tokenBalance) throw new Error('Insufficient spendable token balance')
+  if (baseAmount <= 0n) throw new Error(balanceErrorMessage('nothingAfterFees'))
+  if (isToken && baseAmount > tokenBalance) throw new Error(balanceErrorMessage('token'))
   const nativeRequired = feeBase + (denom === nativeDenom ? baseAmount : 0n)
   if (nativeRequired > nativeBalance) {
-    throw new Error(`Insufficient ${chain.symbol} spendable balance for amount and transaction fee`)
+    throw new Error(balanceErrorMessage('amountAndFee', { symbol: chain.symbol }))
   }
 
   // Determine message type: MsgDeposit for THORChain/Maya swaps (explicit flag), MsgSend otherwise

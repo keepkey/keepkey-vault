@@ -82,5 +82,20 @@
 	"customGasPriceTooLow": "Le prix du gaz est inférieur aux frais de base du réseau (~{{gwei}} gwei). La transaction ne serait jamais confirmée.",
 	"amountBelowDust": "Le montant est inférieur au minimum accepté par le réseau. Envoyez au moins {{minimum}} {{symbol}}.",
 	"maxBelowDust": "Après les frais, le montant à envoyer est inférieur au minimum accepté par le réseau ({{minimum}} {{symbol}}). Ajoutez des fonds ou baissez les frais.",
-	"gasPriceUnavailable": "Le prix du gaz du réseau n'a pas pu être chargé, Desktop ne devinera donc pas les frais. Réessayez dans un instant."
+	"gasPriceUnavailable": "Le prix du gaz du réseau n'a pas pu être chargé, Desktop ne devinera donc pas les frais. Réessayez dans un instant.",
+	"insufficientAmountAndFee": "Solde {{symbol}} insuffisant pour le montant et les frais de réseau.",
+	"insufficientAfterFees": "Il ne reste rien à envoyer après les frais de réseau.",
+	"insufficientToken": "Solde du jeton insuffisant pour ce montant.",
+	"insufficientTokenAmount": "Solde insuffisant : {{available}} disponible, {{requested}} demandé.",
+	"insufficientGas": "{{symbol}} insuffisant pour les frais de réseau : vous avez {{have}} {{symbol}} et il faut environ {{need}} {{symbol}}.",
+	"insufficientGasForMax": "Le solde ne couvre pas les frais de réseau.",
+	"insufficientAmountAndGas": "{{symbol}} insuffisant : vous avez {{have}} {{symbol}} et il faut {{need}} {{symbol}}, frais de réseau compris.",
+	"insufficientAmount": "{{symbol}} insuffisant : vous avez {{have}} {{symbol}} et il faut {{need}} {{symbol}}.",
+	"insufficientAmountAndFeeNoSymbol": "Le solde ne couvre pas le montant plus les frais de réseau. Envoyez un montant plus petit ou réduisez les frais.",
+	"insufficientDogeMinimumFee": "DOGE insuffisant pour les frais de réseau minimum de 1 DOGE.",
+	"insufficientZcashMinimumFee": "ZEC insuffisant pour les frais de réseau minimum de {{fee}} ZEC.",
+	"insufficientZcashMinimumFeeExact": "ZEC insuffisant pour les frais de réseau minimum de {{fee}} ZEC. Essayez d'envoyer un montant un peu plus petit.",
+	"insufficientXrpReserve": "XRP insuffisant après la réserve du compte et les frais de réseau.",
+	"insufficientTronMaxReserve": "TRX insuffisant pour envoyer le maximum après avoir réservé {{reserve}} TRX pour les frais de réseau.",
+	"exceedsBalanceWithFee": "Le montant plus les frais de réseau ({{fee}} {{symbol}}) dépasse le solde disponible ({{balance}} {{symbol}})."
 }
