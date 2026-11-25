@@ -145,31 +145,42 @@ const PURPOSE_TO_SCRIPT: Record<number, string> = {
   44: 'p2pkh', 49: 'p2sh-p2wpkh', 84: 'p2wpkh', 86: 'p2tr',
 }
 
+// Convert a segwit address of any chain (bc1, ltc1, dgb1…) to its witness
+// scriptPubKey hex. Bech32 is case-insensitive: an all-upper-case address, as QR
+// codes carry it, decodes the same; a mixed-case one is invalid.
+export function witnessScriptPubKeyHex(address: string): string | undefined {
+  try {
+    // BIP173 v0 uses Bech32; BIP350 v1+ (including P2TR) uses Bech32m.
+    // Decode with both, then enforce the checksum variant required by the
+    // witness version so a v1 address with an old Bech32 checksum is rejected.
+    let decoded: { prefix: string; words: number[] }
+    let isBech32m = false
+    try {
+      decoded = bech32.decode(address)
+    } catch {
+      decoded = bech32m.decode(address)
+      isBech32m = true
+    }
+    const version = decoded.words[0]
+    if (version == null || version < 0 || version > 16) return undefined
+    if ((version === 0 && isBech32m) || (version > 0 && !isBech32m)) return undefined
+    const program = (isBech32m ? bech32m : bech32).fromWords(decoded.words.slice(1))
+    if (program.length < 2 || program.length > 40) return undefined
+    if (version === 0 && program.length !== 20 && program.length !== 32) return undefined
+    const hex = Buffer.from(Uint8Array.from(program)).toString('hex')
+    const versionOpcode = version === 0 ? '00' : (0x50 + version).toString(16).padStart(2, '0')
+    return `${versionOpcode}${program.length.toString(16).padStart(2, '0')}${hex}`
+  } catch {
+    return undefined
+  }
+}
+
 // Convert a Bitcoin address to its scriptPubKey hex (for matching UTXOs by script)
 export function addressToScriptPubKeyHex(address: string): string | undefined {
   try {
     if (address.startsWith('bc1') || address.startsWith('tb1') ||
         address.startsWith('ltc1') || address.startsWith('tltc1')) {
-      // BIP173 v0 uses Bech32; BIP350 v1+ (including P2TR) uses Bech32m.
-      // Decode with both, then enforce the checksum variant required by the
-      // witness version so a v1 address with an old Bech32 checksum is rejected.
-      let decoded: { prefix: string; words: number[] }
-      let isBech32m = false
-      try {
-        decoded = bech32.decode(address)
-      } catch {
-        decoded = bech32m.decode(address)
-        isBech32m = true
-      }
-      const version = decoded.words[0]
-      if (version == null || version < 0 || version > 16) return undefined
-      if ((version === 0 && isBech32m) || (version > 0 && !isBech32m)) return undefined
-      const program = (isBech32m ? bech32m : bech32).fromWords(decoded.words.slice(1))
-      if (program.length < 2 || program.length > 40) return undefined
-      if (version === 0 && program.length !== 20 && program.length !== 32) return undefined
-      const hex = Buffer.from(Uint8Array.from(program)).toString('hex')
-      const versionOpcode = version === 0 ? '00' : (0x50 + version).toString(16).padStart(2, '0')
-      return `${versionOpcode}${program.length.toString(16).padStart(2, '0')}${hex}`
+      return witnessScriptPubKeyHex(address)
     }
     // Zcash t1... (P2PKH) and t3... (P2SH) — 2-byte version prefix
     if (address.startsWith('t1') || address.startsWith('t3')) {
@@ -666,12 +677,11 @@ export async function buildUtxoTx(
     // sends, and split (MAX) only checks 148 × rate. Refuse before signing.
     for (const output of outputs) {
       if (!output.address) continue
-      // Bech32 is case-insensitive and QR codes carry it in upper case; the
-      // script lookup only reads lower case. Base58 must keep its case.
-      const lookup = /^[A-Z0-9]+$/.test(output.address) && /^(?:BC1|TB1|LTC1|TLTC1)/.test(output.address)
-        ? output.address.toLowerCase()
-        : output.address
-      const limit = outputDustLimit(chain.id, addressToScriptPubKeyHex(lookup))
+      // addressToScriptPubKeyHex reads segwit only for lower-case bc1/tb1/ltc1/tltc1;
+      // a DigiByte dgb1… or an upper-case address from a QR code would get the
+      // larger P2PKH limit and a valid send would be refused (KEEPKEY-162).
+      const script = addressToScriptPubKeyHex(output.address) ?? witnessScriptPubKeyHex(output.address)
+      const limit = outputDustLimit(chain.id, script)
       if (output.value < limit) {
         throw new Error(dustErrorMessage(isMax ? 'maxAfterFees' : 'amount', formatBaseUnits(limit, chain.decimals), chain.symbol))
       }

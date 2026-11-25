@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test'
-import { buildUtxoTx } from './utxo'
+import { addressToScriptPubKeyHex, buildUtxoTx, witnessScriptPubKeyHex } from './utxo'
 import { changeDustLimit, foldDustChange, outputDustLimit } from './utxo-dust'
 import { describeDustError, dustErrorMessage, formatBaseUnits } from '../../shared/utxo-dust-errors'
 
@@ -218,6 +218,51 @@ describe('spend output below the dust limit', () => {
 			scriptTypeOverride: 'p2pkh',
 		})
 		await expect(build).rejects.toThrow('(minimum 0.01 DOGE)')
+	})
+})
+
+// KEEPKEY-162: the limit read segwit only from lower-case bc1/tb1/ltc1/tltc1, so a
+// DigiByte dgb1… (any case) got the P2PKH limit (5460) and valid sends were refused.
+describe('spend output below the dust limit on other segwit prefixes', () => {
+	const DIGIBYTE = { id: 'digibyte', coin: 'DigiByte', symbol: 'DGB', networkId: 'bip122:4da631f2ac1bed857bd968c67c913978', decimals: 8, scriptType: 'p2pkh' } as any
+	const DGB_P2WPKH = 'dgb1qqypqxpq9qcrsszg2pvxq6rs0zqg3yyc57rkd6l'
+	const DGB_P2TR = 'dgb1pquyqjzstpsxsurcszyfpx9q4zct3sxg6rvwp68slyqsjygeyy5nq3v2qtd'
+	const sendDgb = (to: string, amount: number) =>
+		buildUtxoTx(pioneerWith([{ ...legacyUtxo(100_000_000), path: "m/44'/20'/0'/0/0" }]), DIGIBYTE, {
+			to,
+			amount: String(amount / 1e8),
+			xpub: LEGACY_XPUB,
+			accountPath: [0x80000000 + 44, 0x80000000 + 20, 0x80000000],
+			scriptTypeOverride: 'p2pkh',
+		})
+	const sent = async (to: string, amount: number) =>
+		(await sendDgb(to, amount)).outputs.find((o: any) => o.address === to)?.amount
+
+	it('uses the P2WPKH limit (2940) for dgb1q…, in lower and upper case', async () => {
+		expect(await sent(DGB_P2WPKH, 2940)).toBe('2940')
+		expect(await sent(DGB_P2WPKH.toUpperCase(), 2940)).toBe('2940')
+		await expect(sendDgb(DGB_P2WPKH.toUpperCase(), 2939)).rejects.toThrow('(minimum 0.0000294 DGB)')
+	})
+
+	it('uses the P2TR limit (3300) for an upper-case dgb1p…', async () => {
+		expect(await sent(DGB_P2TR.toUpperCase(), 3300)).toBe('3300')
+		await expect(sendDgb(DGB_P2TR.toUpperCase(), 3299)).rejects.toThrow('(minimum 0.000033 DGB)')
+	})
+
+	it('keeps the P2PKH limit for a mixed-case address, which is not valid bech32', async () => {
+		const mixed = 'DGB1' + DGB_P2WPKH.slice(4)
+		await expect(sendDgb(mixed, 5459)).rejects.toThrow('(minimum 0.0000546 DGB)')
+	})
+})
+
+describe('witnessScriptPubKeyHex', () => {
+	it('reads a segwit address of any prefix and case, and nothing else', () => {
+		const p2wpkh = '0014' + '0102030405060708090a0b0c0d0e0f1011121314'
+		expect(witnessScriptPubKeyHex('dgb1qqypqxpq9qcrsszg2pvxq6rs0zqg3yyc57rkd6l')).toBe(p2wpkh)
+		expect(witnessScriptPubKeyHex('DGB1QQYPQXPQ9QCRSSZG2PVXQ6RS0ZQG3YYC57RKD6L')).toBe(p2wpkh)
+		expect(witnessScriptPubKeyHex(TO.toUpperCase())).toBe(addressToScriptPubKeyHex(TO))
+		expect(witnessScriptPubKeyHex('DGB1qqypqxpq9qcrsszg2pvxq6rs0zqg3yyc57rkd6l')).toBeUndefined()
+		expect(witnessScriptPubKeyHex(LEGACY_TO)).toBeUndefined()
 	})
 })
 
