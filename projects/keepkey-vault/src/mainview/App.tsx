@@ -122,6 +122,16 @@ function App() {
 			setWizardComplete(false)
 		}
 	}, [wizardComplete, deviceState.state])
+	// A seed restore (needs_init → ready) can finish without the wizard's
+	// onComplete reaching Dashboard (the effect above clears it while the state
+	// is still needs_init). Treat the transition itself as a new seed so the
+	// Dashboard runs its one-shot full sync instead of showing "—" until refresh.
+	const [seedInitialized, setSeedInitialized] = useState(false)
+	const prevDeviceStateRef = useRef(deviceState.state)
+	useEffect(() => {
+		if (prevDeviceStateRef.current === 'needs_init' && deviceState.state === 'ready') setSeedInitialized(true)
+		prevDeviceStateRef.current = deviceState.state
+	}, [deviceState.state])
 	const [portfolioLoaded, setPortfolioLoaded] = useState(false)
 	const [gridReady, setGridReady] = useState(false)
 	// Hold the bitcoin-only branded splash for a beat on startup so it's actually
@@ -1355,7 +1365,7 @@ function App() {
 					    time (always for passphrase wallets, which keep no cache). Only
 					    the refresh button fetches. */}
 					<Flex flex="1" direction="column" display={activeTab === "vault" ? "flex" : "none"}>
-						<Dashboard capabilities={deviceState.capabilities} isEmulator={deviceState.isEmulator} onLoaded={handlePortfolioLoaded} onOpenVault={handleOpenVault} onOpenSettings={() => setSettingsOpen(true)} firmwareVersion={deviceState.firmwareVersion} firmwareVariant={deviceState.firmwareVariant} forceRefresh={wizardComplete} onForceRefreshConsumed={() => setWizardComplete(false)} isHiddenWallet={deviceState.isHiddenWallet} knownEmpty={freshWallet} />
+						<Dashboard capabilities={deviceState.capabilities} isEmulator={deviceState.isEmulator} onLoaded={handlePortfolioLoaded} onOpenVault={handleOpenVault} onOpenSettings={() => setSettingsOpen(true)} firmwareVersion={deviceState.firmwareVersion} firmwareVariant={deviceState.firmwareVariant} forceRefresh={wizardComplete || seedInitialized} onForceRefreshConsumed={() => { setWizardComplete(false); setSeedInitialized(false) }} isHiddenWallet={deviceState.isHiddenWallet} knownEmpty={freshWallet} />
 					</Flex>
 					{activeTab === "explore" && <AppStore onOpenApp={handleOpenApp} onOpenKeepKey={handleOpenKeepKey} />}
 					{activeTab === "addresses" && <AddressBookView />}
