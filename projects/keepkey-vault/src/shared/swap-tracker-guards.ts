@@ -49,19 +49,25 @@ export function shouldRetryCompletedSwapMetadata(
   return status === 'completed' && metadataPending === true && attempts < maxAttempts
 }
 
-export interface ThornodeSettlement { completed: boolean; outboundTxid?: string; outboundAmount?: string }
+export interface ThornodeSettlement { completed: boolean; refunded?: boolean; outboundTxid?: string; outboundAmount?: string }
 
 /** Read THORNode /thorchain/tx/status/{hash}. Its out_txs often lead with the
  * RUNE affiliate leg, whose id is always all-zero (THOR-native sends have no
- * hash) — so match the leg paid to the swap destination instead of taking [0]. */
-export function settlementFromThornodeStatus(status: any, destination: string): ThornodeSettlement {
+ * hash) — so match the leg paid to the swap destination instead of taking [0].
+ * Only an OUT: leg on the destination chain is the payout; a REFUND: leg (back
+ * to the sender, who may be the destination too) means refunded. */
+export function settlementFromThornodeStatus(status: any, destination: string, destinationChain?: string): ThornodeSettlement {
   const legs: any[] = Array.isArray(status?.out_txs) ? status.out_txs : []
   const dest = destination.trim().toLowerCase()
-  const toDest = legs.filter(o => typeof o?.to_address === 'string' && o.to_address.toLowerCase() === dest)
+  const chain = destinationChain?.trim().toUpperCase()
+  const memo = (o: any) => typeof o?.memo === 'string' ? o.memo.trim().toUpperCase() : ''
+  const toDest = legs.filter(o => typeof o?.to_address === 'string' && o.to_address.toLowerCase() === dest
+    && memo(o).startsWith('OUT:') && (!chain || String(o.chain).toUpperCase() === chain))
   const real = toDest.find(o => !isPlaceholderOutboundTxHash(o.id))
   // THOR-native payouts never get a hash; the settled leg itself is the evidence.
   const leg = real || toDest.find(o => o.chain === 'THOR')
-  const completed = !!leg && status?.stages?.swap_finalised?.completed === true
+  if (!leg) return legs.some(o => memo(o).startsWith('REFUND:')) ? { completed: false, refunded: true } : { completed: false }
+  const completed = status?.stages?.swap_finalised?.completed === true
     && status?.stages?.outbound_signed?.completed !== false
   if (!completed) return { completed: false }
   const amount = leg.coins?.[0]?.amount

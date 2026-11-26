@@ -16,9 +16,10 @@ describe('token max send precision reserve', () => {
     expect(tokenMaxSpendableBaseUnits('27.49591932', 18)).toBe(27_495_919_310_000_000_000n)
   })
 
-  test('reserves one base unit for low-decimal tokens', () => {
-    expect(tokenMaxPrecisionReserveUnits(6)).toBe(1n)
-    expect(tokenMaxSpendableAmount('27.495919', 6)).toBe('27.495918')
+  test('low-decimal tokens send the whole balance (audit v8 B9)', () => {
+    expect(tokenMaxPrecisionReserveUnits(6)).toBe(0n)
+    expect(tokenMaxPrecisionReserveUnits(8)).toBe(0n)
+    expect(tokenMaxSpendableAmount('27.495919', 6)).toBe('27.495919')
   })
 
   test('does not reserve a whole zero-decimal token', () => {

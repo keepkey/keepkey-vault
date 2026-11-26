@@ -1082,8 +1082,19 @@ async function applyThornodeSettlement(swap: PendingSwap): Promise<void> {
   } catch (e: any) {
     console.warn(`${TAG} THORNode status failed for ${swap.txid.slice(0, 10)}...: ${e?.message || e}`)
   }
-  const settled = settlementFromThornodeStatus(status, destination)
-  if (!settled.completed || isTerminalSwapStatus(swap.status)) return
+  const asset = (swap.memo || '').split(':')[1] || ''
+  const settled = settlementFromThornodeStatus(status, destination, asset.includes('.') ? asset.split('.')[0] : undefined)
+  if (isTerminalSwapStatus(swap.status)) return
+  if (settled.refunded) {
+    swap.status = 'refunded'
+    swap.updatedAt = Date.now()
+    swapLog(`${TAG} THORNode refunded ${swap.txid.slice(0, 10)}...`)
+    if (!noPersistSwaps.has(swap.txid)) updateSwapHistoryStatus(swap.txid, 'refunded', { deviceId: swap.deviceId, walletId: swap.walletId })
+    pushUpdate(swap)
+    pushComplete(swap)
+    return
+  }
+  if (!settled.completed) return
   if (settled.outboundAmount && payoutBelowMinimum(settled.outboundAmount, swap.minimumOutput || '0')) return
   swap.status = 'completed'
   swap.trackingMetadataPending = false

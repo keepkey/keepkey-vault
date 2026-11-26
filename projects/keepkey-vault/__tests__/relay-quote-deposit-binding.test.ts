@@ -87,3 +87,18 @@ describe('Relay tracking id and deposit id are separate', () => {
     }
   })
 })
+
+describe('Relay from non-EVM sources (audit v8 N3)', () => {
+  test('a Solana-source order has no calldata to bind and is checked by recipient only', () => {
+    const r: any = response()
+    r.quote.txs = [{ type: 'SOLANA', chain: 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp', txParams: { serializedTx: 'AQID', recipientAddress: 'SoLRelayDeposit1111111111111111111111111111' } }]
+    r.quote.raw.steps = [{ id: 'deposit', requestId, items: [{ data: { instructions: [] } }] }]
+    const quote = parseQuoteResponse([r], { ...params, fromCaip: 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp/slip44:501' })
+    expect(assertRelayOrderRecipient(quote, recipient)).toBe(recipient)
+  })
+  test('a string chainId from the provider still binds an EVM deposit', () => {
+    const r: any = response()
+    r.quote.raw.steps[0].items[0].data.chainId = '8453'
+    expect(assertRelayOrderRecipient(parse(r), recipient)).toBe(recipient)
+  })
+})

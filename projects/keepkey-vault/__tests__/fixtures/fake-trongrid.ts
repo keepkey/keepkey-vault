@@ -22,6 +22,8 @@ export interface FakeTronGridOpts {
   decimals?: number
   balanceSun?: number
   tokenBalance?: bigint
+  /** Staked energy; default covers any fixture transfer so the TRX burn check passes. */
+  energyLimit?: number
   tamper?: (req: any, path: string) => any
 }
 
@@ -34,6 +36,7 @@ export function fakeTronGrid(opts: FakeTronGridOpts = {}) {
     const req = opts.tamper ? opts.tamper({ ...req0 }, path) : req0
     switch (path) {
       case 'getaccount': return json({ balance: opts.balanceSun ?? 0 })
+      case 'getaccountresource': return json({ EnergyLimit: opts.energyLimit ?? 1_000_000, EnergyUsed: 0 })
       case 'getchainparameters': return json({ chainParameter: [{ key: 'getEnergyFee', value: 100 }] })
       case 'triggerconstantcontract':
         if (req.function_selector === 'decimals()') return json({ constant_result: [(opts.decimals ?? 6).toString(16).padStart(64, '0')] })

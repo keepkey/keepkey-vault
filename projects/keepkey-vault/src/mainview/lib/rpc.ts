@@ -168,6 +168,15 @@ function connectWebSocket(w: any) {
   })
 
   sendPacket = async (packet: RPCPacket) => {
+    // A reconnecting socket holds the packet until it opens: a dropped sign
+    // request (no timeout) or Cancel would vanish. If it closes instead, the
+    // close handler rejects the pending request.
+    if (socket.readyState === WebSocket.CONNECTING) {
+      await new Promise(resolve => {
+        socket.addEventListener('open', resolve, { once: true })
+        socket.addEventListener('close', resolve, { once: true })
+      })
+    }
     if (socket.readyState !== WebSocket.OPEN) {
       console.warn('[rpc] Socket not open, dropping packet')
       return
@@ -215,8 +224,8 @@ initTransport()
  *  A request refused because the KeepKey is busy waits for it and runs again, so
  *  "KeepKey is busy with another request" is never shown. The wait ends (and the
  *  busy error is thrown) once isCurrent() is false: closed dialog, Cancel, stale inputs. */
-export function rpcRequest<T = any>(method: string, params?: any, timeoutMs = 30000, isCurrent: () => boolean = () => true): Promise<T> {
-  const run = () => retryWhileDeviceBusy(() => rawRpcRequest<T>(method, params, timeoutMs), isCurrent)
+export function rpcRequest<T = any>(method: string, params?: any, timeoutMs = 30000, isCurrent: () => boolean = () => true, onBusy?: () => void): Promise<T> {
+  const run = () => retryWhileDeviceBusy(() => rawRpcRequest<T>(method, params, timeoutMs), isCurrent, 500, onBusy)
   if (method === 'requestDeviceUnlock') return run()
   return withUnlockRetry(run, () => rawRpcRequest<void>('requestDeviceUnlock', undefined, 0))
 }
