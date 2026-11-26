@@ -97,5 +97,16 @@
 	"insufficientZcashMinimumFeeExact": "Недостаточно ZEC для минимальной сетевой комиссии {{fee}} ZEC. Попробуйте отправить немного меньшую сумму.",
 	"insufficientXrpReserve": "Недостаточно XRP с учётом резерва аккаунта и сетевой комиссии.",
 	"insufficientTronMaxReserve": "Недостаточно TRX, чтобы отправить максимум после резервирования {{reserve}} TRX на сетевые комиссии.",
-	"exceedsBalanceWithFee": "Сумма вместе с сетевой комиссией ({{fee}} {{symbol}}) превышает доступный баланс ({{balance}} {{symbol}})."
+	"exceedsBalanceWithFee": "Сумма вместе с сетевой комиссией ({{fee}} {{symbol}}) превышает доступный баланс ({{balance}} {{symbol}}).",
+	"qrUnsupported": "Этот QR-код — платёжный запрос, который KeepKey Desktop не может выполнить. Ничего не заполнено.",
+	"qrBadAmount": "Сумма в этом QR-коде недопустима для этого актива.",
+	"qrWrongNetwork": "Этот QR-код для другой сети.",
+	"feeOverQuarterFixed": "Комиссия превышает 25% отправляемой суммы. Комиссия этой сети фиксирована, поэтому лучше отправить бо́льшую сумму.",
+	"buildNeedsRecipient": "Введите адрес получателя.",
+	"buildNeedsSelfSendConfirm": "Чтобы продолжить, подтвердите выше отправку на свой адрес.",
+	"buildNeedsRiskConfirm": "Чтобы продолжить, подтвердите выше предупреждение о получателе.",
+	"buildNeedsAmount": "Введите сумму.",
+	"insufficientStakingFee": "Недостаточно {{symbol}} для суммы стейкинга и комиссии сети.",
+	"insufficientRegistrationFee": "Недостаточно {{symbol}} для регистрации и комиссии сети.",
+	"insufficientSolanaMaxSwap": "Недостаточно SOL для оплаты комиссии сети Solana."
 }

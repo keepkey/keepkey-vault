@@ -111,5 +111,16 @@
 	"insufficientZcashMinimumFeeExact": "ZEC insuficiente para a taxa de rede mínima de {{fee}} ZEC. Tente enviar um valor um pouco menor.",
 	"insufficientXrpReserve": "XRP insuficiente depois da reserva da conta e da taxa de rede.",
 	"insufficientTronMaxReserve": "TRX insuficiente para enviar o máximo depois de reservar {{reserve}} TRX para as taxas de rede.",
-	"exceedsBalanceWithFee": "O valor mais a taxa de rede ({{fee}} {{symbol}}) passa do saldo disponível ({{balance}} {{symbol}})."
+	"exceedsBalanceWithFee": "O valor mais a taxa de rede ({{fee}} {{symbol}}) passa do saldo disponível ({{balance}} {{symbol}}).",
+	"qrUnsupported": "Este código QR é um pedido de pagamento que o KeepKey Desktop não consegue concluir. Nada foi preenchido.",
+	"qrBadAmount": "O valor neste código QR não é válido para este ativo.",
+	"qrWrongNetwork": "Este código QR é de outra rede.",
+	"feeOverQuarterFixed": "A taxa é maior que 25% do valor enviado. A taxa desta rede é fixa, então considere enviar um valor maior.",
+	"buildNeedsRecipient": "Informe um endereço de destino.",
+	"buildNeedsSelfSendConfirm": "Confirme acima o envio para o seu próprio endereço para continuar.",
+	"buildNeedsRiskConfirm": "Confirme acima o aviso sobre o destinatário para continuar.",
+	"buildNeedsAmount": "Informe um valor.",
+	"insufficientStakingFee": "{{symbol}} insuficiente para o valor em staking e a taxa de rede.",
+	"insufficientRegistrationFee": "{{symbol}} insuficiente para o registro e a taxa de rede.",
+	"insufficientSolanaMaxSwap": "SOL insuficiente para cobrir a taxa de rede da Solana."
 }

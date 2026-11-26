@@ -97,5 +97,16 @@
 	"insufficientZcashMinimumFeeExact": "Nicht genug ZEC für die Mindest-Netzwerkgebühr von {{fee}} ZEC. Sende einen etwas kleineren Betrag.",
 	"insufficientXrpReserve": "Nicht genug XRP nach Kontoreserve und Netzwerkgebühr.",
 	"insufficientTronMaxReserve": "Nicht genug TRX, um das Maximum zu senden, nachdem {{reserve}} TRX für Netzwerkgebühren zurückgehalten werden.",
-	"exceedsBalanceWithFee": "Betrag plus Netzwerkgebühr ({{fee}} {{symbol}}) übersteigt das verfügbare Guthaben ({{balance}} {{symbol}})."
+	"exceedsBalanceWithFee": "Betrag plus Netzwerkgebühr ({{fee}} {{symbol}}) übersteigt das verfügbare Guthaben ({{balance}} {{symbol}}).",
+	"qrUnsupported": "Dieser QR-Code ist eine Zahlungsanforderung, die KeepKey Desktop nicht ausführen kann. Es wurde nichts ausgefüllt.",
+	"qrBadAmount": "Der Betrag in diesem QR-Code ist für dieses Asset ungültig.",
+	"qrWrongNetwork": "Dieser QR-Code gehört zu einem anderen Netzwerk.",
+	"feeOverQuarterFixed": "Die Gebühr beträgt mehr als 25 % des gesendeten Betrags. Die Gebühr dieses Netzwerks ist fest, sende daher besser einen größeren Betrag.",
+	"buildNeedsRecipient": "Gib eine Empfängeradresse ein.",
+	"buildNeedsSelfSendConfirm": "Bestätige oben das Senden an deine eigene Adresse, um fortzufahren.",
+	"buildNeedsRiskConfirm": "Bestätige oben die Empfängerwarnung, um fortzufahren.",
+	"buildNeedsAmount": "Gib einen Betrag ein.",
+	"insufficientStakingFee": "Nicht genug {{symbol}} für den Staking-Betrag und die Netzwerkgebühr.",
+	"insufficientRegistrationFee": "Nicht genug {{symbol}} für die Registrierung und die Netzwerkgebühr.",
+	"insufficientSolanaMaxSwap": "Nicht genug SOL für die Solana-Netzwerkgebühr."
 }

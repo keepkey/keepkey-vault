@@ -97,5 +97,16 @@
 	"insufficientZcashMinimumFeeExact": "ZEC insufficiente per la commissione di rete minima di {{fee}} ZEC. Prova a inviare un importo leggermente minore.",
 	"insufficientXrpReserve": "XRP insufficiente dopo la riserva del conto e la commissione di rete.",
 	"insufficientTronMaxReserve": "TRX insufficiente per inviare il massimo dopo aver riservato {{reserve}} TRX per le commissioni di rete.",
-	"exceedsBalanceWithFee": "L'importo più la commissione di rete ({{fee}} {{symbol}}) supera il saldo disponibile ({{balance}} {{symbol}})."
+	"exceedsBalanceWithFee": "L'importo più la commissione di rete ({{fee}} {{symbol}}) supera il saldo disponibile ({{balance}} {{symbol}}).",
+	"qrUnsupported": "Questo codice QR è una richiesta di pagamento che KeepKey Desktop non può completare. Non è stato compilato nulla.",
+	"qrBadAmount": "L'importo in questo codice QR non è valido per questo asset.",
+	"qrWrongNetwork": "Questo codice QR è per un'altra rete.",
+	"feeOverQuarterFixed": "La commissione supera il 25% dell'importo inviato. La commissione di questa rete è fissa: valuta di inviare un importo maggiore.",
+	"buildNeedsRecipient": "Inserisci un indirizzo del destinatario.",
+	"buildNeedsSelfSendConfirm": "Conferma sopra l'invio al tuo indirizzo per continuare.",
+	"buildNeedsRiskConfirm": "Conferma sopra l'avviso sul destinatario per continuare.",
+	"buildNeedsAmount": "Inserisci un importo.",
+	"insufficientStakingFee": "{{symbol}} insufficiente per l'importo in staking e la commissione di rete.",
+	"insufficientRegistrationFee": "{{symbol}} insufficiente per la registrazione e la commissione di rete.",
+	"insufficientSolanaMaxSwap": "SOL insufficiente per coprire la commissione di rete Solana."
 }
