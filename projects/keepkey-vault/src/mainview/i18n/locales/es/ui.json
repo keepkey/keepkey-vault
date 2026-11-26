@@ -503,5 +503,9 @@
   "m3249fc9f": "Redes ocultas ({{count}})",
   "mdc800411": "Mostrar {{chain}}",
   "m29742e5c": "Mostrar",
-  "macd079af": "Vault guarda el almacén de contraseñas cifrado en su base de datos local. Para recuperarlo se necesitan los datos del almacén y la misma semilla y frase de contraseña de la cartera."
+  "macd079af": "Vault guarda el almacén de contraseñas cifrado en su base de datos local. Para recuperarlo se necesitan los datos del almacén y la misma semilla y frase de contraseña de la cartera.",
+  "m9f631ebd": "Saldo no disponible",
+  "m2b6e385e": "Tu KeepKey necesita el firmware 7.17 o posterior para enviar Zcash.",
+  "ma0e696fa": "Actualiza KeepKey Desktop para enviar Zcash.",
+  "mbe314908": "No se pudo comprobar la compatibilidad para enviar Zcash. Inténtalo de nuevo."
 }

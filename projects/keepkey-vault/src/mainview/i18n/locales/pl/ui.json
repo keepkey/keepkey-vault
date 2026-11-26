@@ -504,5 +504,9 @@
   "m3249fc9f": "Ukryte sieci ({{count}})",
   "mdc800411": "Pokaż {{chain}}",
   "m29742e5c": "Pokaż",
-  "macd079af": "Vault przechowuje zaszyfrowany sejf haseł w lokalnej bazie danych. Odzyskanie wymaga danych sejfu, tego samego ziarna i tego samego hasła portfela."
+  "macd079af": "Vault przechowuje zaszyfrowany sejf haseł w lokalnej bazie danych. Odzyskanie wymaga danych sejfu, tego samego ziarna i tego samego hasła portfela.",
+  "m9f631ebd": "Saldo niedostępne",
+  "m2b6e385e": "Aby wysłać Zcash, KeepKey wymaga oprogramowania 7.17 lub nowszego.",
+  "ma0e696fa": "Zaktualizuj KeepKey Desktop, aby wysłać Zcash.",
+  "mbe314908": "Nie udało się sprawdzić obsługi wysyłania Zcash. Spróbuj ponownie."
 }

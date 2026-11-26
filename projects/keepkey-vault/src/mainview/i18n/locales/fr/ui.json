@@ -498,5 +498,9 @@
   "m3249fc9f": "Réseaux masqués ({{count}})",
   "mdc800411": "Afficher {{chain}}",
   "m29742e5c": "Afficher",
-  "macd079af": "Vault stocke le coffre de mots de passe chiffré dans sa base de données locale. La récupération nécessite les données du coffre, la même phrase de récupération et la même phrase secrète du portefeuille."
+  "macd079af": "Vault stocke le coffre de mots de passe chiffré dans sa base de données locale. La récupération nécessite les données du coffre, la même phrase de récupération et la même phrase secrète du portefeuille.",
+  "m9f631ebd": "Solde indisponible",
+  "m2b6e385e": "Votre KeepKey a besoin du firmware 7.17 ou ultérieur pour envoyer des Zcash.",
+  "ma0e696fa": "Mettez à jour KeepKey Desktop pour envoyer des Zcash.",
+  "mbe314908": "Impossible de vérifier la prise en charge de l'envoi de Zcash. Réessayez."
 }

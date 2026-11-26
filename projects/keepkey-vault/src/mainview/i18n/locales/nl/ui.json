@@ -497,5 +497,9 @@
   "m3249fc9f": "Verborgen netwerken ({{count}})",
   "mdc800411": "{{chain}} tonen",
   "m29742e5c": "Tonen",
-  "macd079af": "Vault bewaart de versleutelde wachtwoordkluis in de lokale database. Voor herstel zijn de kluisgegevens, dezelfde seed en dezelfde wachtwoordzin van de wallet nodig."
+  "macd079af": "Vault bewaart de versleutelde wachtwoordkluis in de lokale database. Voor herstel zijn de kluisgegevens, dezelfde seed en dezelfde wachtwoordzin van de wallet nodig.",
+  "m9f631ebd": "Saldo niet beschikbaar",
+  "m2b6e385e": "Je KeepKey heeft firmware 7.17 of nieuwer nodig om Zcash te verzenden.",
+  "ma0e696fa": "Werk KeepKey Desktop bij om Zcash te verzenden.",
+  "mbe314908": "Kon ondersteuning voor het verzenden van Zcash niet controleren. Probeer het opnieuw."
 }

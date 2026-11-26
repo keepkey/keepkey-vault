@@ -2562,5 +2562,8 @@
   "mbac398ff": "Sua carteira",
   "mc824d131": "Vamos configurar sua carteira de hardware. Leva cerca de 5 minutos.",
   "m69dbec3c": "Encontre cada letra na sua KeepKey e clique aqui na mesma posição.",
-  "m80be4c74": "Posição {{n}}"
+  "m80be4c74": "Posição {{n}}",
+  "m2b6e385e": "Sua KeepKey precisa do firmware 7.17 ou posterior para enviar Zcash.",
+  "ma0e696fa": "Atualize o KeepKey Desktop para enviar Zcash.",
+  "mbe314908": "Não foi possível verificar o suporte ao envio de Zcash. Tente novamente."
 }

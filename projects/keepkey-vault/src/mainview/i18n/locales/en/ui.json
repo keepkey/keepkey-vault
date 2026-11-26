@@ -2698,5 +2698,8 @@
   "mbac398ff": "Your wallet",
   "mc824d131": "Let's set up your hardware wallet. It takes about 5 minutes.",
   "m69dbec3c": "Find each letter on your KeepKey, then click the same position here.",
-  "m80be4c74": "Position {{n}}"
+  "m80be4c74": "Position {{n}}",
+  "m2b6e385e": "Your KeepKey needs firmware 7.17 or later to send Zcash.",
+  "ma0e696fa": "Update KeepKey Desktop to send Zcash.",
+  "mbe314908": "Couldn't check Zcash sending support. Try again."
 }
