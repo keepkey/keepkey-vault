@@ -11,6 +11,14 @@ const db=await import('../db')
 const {startRestApi}=await import('../rest-api')
 db.initDb()
 afterAll(()=>{db.closeDb();rmSync(dir,{recursive:true,force:true})})
+const multisigPolicy = {
+ m: 2,
+ pubkeys: [
+  { xpub: 'xpub-a', addressNList: [0, 0] },
+  { xpub: 'xpub-b', addressNList: [0, 0] },
+ ],
+ signatures: ['', ''],
+}
 async function sign(enabled:boolean,disableAtApproval=false,multisig=true){
  db.setSetting('btc_multisig_enabled',enabled?'1':'0')
  let approvals=0,signatures=0
@@ -19,7 +27,7 @@ async function sign(enabled:boolean,disableAtApproval=false,multisig=true){
  const auth:any={requireAuth:()=>({name:'test',url:'https://test.example'}),extractBearerToken:()=> 'test',validate:()=>true,getAccount:()=>undefined}
  const server=startRestApi(engine,auth,0,{onApiLog:()=>{},onPairRequest:()=>{},getVersion:()=> 'test',onSigningRequest:async()=>{approvals++;if(disableAtApproval)db.setSetting('btc_multisig_enabled','0');return{approved:true}},onSigningDismissed:()=>{}} as any, '127.0.0.1')
  try{
-  const response=await fetch(`http://127.0.0.1:${server.port}/utxo/sign-transaction`,{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer test'},body:JSON.stringify({coin:'Bitcoin',inputs:[{scriptType:'p2wpkh',amount:'1000',...(multisig?{multisig:{m:2,pubkeys:[]}}:{})}],outputs:[{address:'bc1qtest',amount:'900'}]})})
+  const response=await fetch(`http://127.0.0.1:${server.port}/utxo/sign-transaction`,{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer test'},body:JSON.stringify({coin:'Bitcoin',inputs:[{scriptType:'p2wpkh',amount:'1000',...(multisig?{multisig:multisigPolicy}:{})}],outputs:[{address:'bc1qtest',amount:'900'}]})})
   return{status:response.status,body:await response.json(),approvals,signatures}
  }finally{server.stop(true)}
 }
