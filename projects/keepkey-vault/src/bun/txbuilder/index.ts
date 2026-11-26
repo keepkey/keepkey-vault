@@ -996,7 +996,9 @@ export async function broadcastTx(
 
   const txid = data?.txid || data?.tx_hash || data?.hash || (typeof data === 'string' && data.length >= 32 ? data : undefined)
   if (txid) {
-    await confirmAccountTx(chain, txid)
+    // Accepted is recorded now; execution is checked in the background (the
+    // tx watcher follows the recorded row). A failed check must never erase it.
+    confirmAccountTx(chain, txid).catch(error => console.error(`[broadcast] ${error?.message || error}`))
     return { txid }
   }
 

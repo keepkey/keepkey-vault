@@ -74,3 +74,11 @@ test('unrecognized bodies are not dumped into the message, and recognized messag
   expect(broadcastHttpRejectionReason({ response: { text: '<html>do not display</html>' } })).toBeNull()
   expect(broadcastRejectionReason({ error: { message: 'x'.repeat(2_500) } })).toHaveLength(2_000)
 })
+
+test('an accepted Cosmos broadcast returns its txid even when confirmation is unknown', async () => {
+  const txid = 'C'.repeat(64)
+  const pending = { ...bindings, confirmAccountTx: async () => { throw new Error(`Transaction ${txid} was submitted; confirmation is unknown.`) } }
+  const run = new Function(...Object.keys(pending), `${js}; return broadcastTx`)(...Object.values(pending))
+  const cosmos = CHAINS.find(c => c.id === 'cosmos')!
+  expect(await run({ Broadcast: async () => ({ data: { txid } }) }, cosmos, { serialized: 'AA==' })).toEqual({ txid })
+})
