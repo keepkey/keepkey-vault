@@ -60,6 +60,7 @@ describe('N5: /api/health shows sync diagnostics only to a paired key or a local
    expect(Object.keys(health.data).sort()).toEqual(PUBLIC_FIELDS)
    expect(health.data).toMatchObject({ status: 'healthy', apiVersion: 2, ready: true, connected: true, device_connected: true, device_locked: false, version: '1.7.1' })
    expect(health.data.supportedChains).toContain('eip155:1')
+   expect(new Set(health.data.supportedChains).size).toBe(health.data.supportedChains.length)
   })
 
   test(`${route}: a paired app gets the sync diagnostics, even from a browser`, async () => {

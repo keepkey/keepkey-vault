@@ -1645,7 +1645,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             status: 'healthy',
             syncing: engine.isSyncing || diagnostics?.balanceSync?.status === 'running',
             apiVersion: 2,
-            supportedChains: CHAINS.filter(c => isChainSupported(c, ds.firmwareVersion) && (c.id !== 'hive' || getSetting('hive_enabled') === '1') && c.chainFamily !== 'monero').map(c => c.networkId),
+            supportedChains: [...new Set(CHAINS.filter(c => isChainSupported(c, ds.firmwareVersion) && (c.id !== 'hive' || getSetting('hive_enabled') === '1') && c.chainFamily !== 'monero').map(c => c.networkId))],
             device_connected: engine.wallet !== null,
             device_locked: engine.isLocked,
             version: callbacks?.getVersion?.() || 'unknown',
