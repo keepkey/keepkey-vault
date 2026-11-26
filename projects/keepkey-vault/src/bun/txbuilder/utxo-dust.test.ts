@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test'
-import { addressToScriptPubKeyHex, buildUtxoTx, witnessScriptPubKeyHex } from './utxo'
+import { addressToScriptPubKeyHex, buildUtxoTx, enforceDogeMinFee, witnessScriptPubKeyHex } from './utxo'
 import { changeDustLimit, foldDustChange, outputDustLimit } from './utxo-dust'
 import { describeDustError, dustErrorMessage, formatBaseUnits } from '../../shared/utxo-dust-errors'
 
@@ -300,5 +300,22 @@ describe('describeDustError', () => {
 		expect(formatBaseUnits(294, 8)).toBe('0.00000294')
 		expect(formatBaseUnits(1_000_000, 8)).toBe('0.01')
 		expect(formatBaseUnits(100_000_000, 8)).toBe('1')
+	})
+})
+
+describe('DOGE 1-DOGE minimum fee (audit v8 B1/B2)', () => {
+	const spend = (value: number) => ({ address: 'DRecipient', value })
+	it('an exact amount is never cut to pay the fee', () => {
+		const outputs = [spend(500_000_000)]
+		expect(() => enforceDogeMinFee(outputs, 20_000, false)).toThrow(/minimum 1 DOGE/)
+		expect(outputs[0].value).toBe(500_000_000)
+	})
+	it('change pays first; MAX and swap deposits may shrink the spend', () => {
+		const withChange = [spend(500_000_000), { value: 300_000_000 }]
+		expect(enforceDogeMinFee(withChange, 20_000, false)).toBe(100_000_000)
+		expect(withChange).toEqual([spend(500_000_000), { value: 200_020_000 }])
+		const max = [spend(500_000_000)]
+		expect(enforceDogeMinFee(max, 20_000, true)).toBe(100_000_000)
+		expect(max[0].value).toBe(400_020_000)
 	})
 })

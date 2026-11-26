@@ -373,6 +373,32 @@ async function fetchUtxosForXpub(
   return utxos
 }
 
+// DOGE consensus: 1 DOGE minimum fee; change under 0.01 DOGE is dust.
+const DOGE_MIN_FEE = 100000000
+const DOGE_DUST = 1000000
+
+/** Raise a DOGE fee to the 1-DOGE minimum (mutates outputs, returns the fee).
+ * Change pays first. The spend output pays only when canReduceSpend (MAX or a
+ * swap deposit); an exact amount is never cut. Shared by build and estimate. */
+export function enforceDogeMinFee(outputs: any[], fee: number, canReduceSpend: boolean): number {
+  if (fee >= DOGE_MIN_FEE) return fee
+  const increase = DOGE_MIN_FEE - fee
+  const changeIdx = outputs.findIndex((o: any) => !o.address)
+  if (changeIdx >= 0 && outputs[changeIdx].value >= increase) {
+    outputs[changeIdx].value -= increase
+    if (outputs[changeIdx].value >= DOGE_DUST) return DOGE_MIN_FEE
+    const dust = outputs[changeIdx].value
+    outputs.splice(changeIdx, 1)
+    return DOGE_MIN_FEE + dust
+  }
+  const spendIdx = outputs.findIndex((o: any) => o.address)
+  if (canReduceSpend && spendIdx >= 0 && outputs[spendIdx].value > increase + DOGE_DUST) {
+    outputs[spendIdx].value -= increase
+    return DOGE_MIN_FEE
+  }
+  throw new Error(balanceErrorMessage('dogeMinimumFee'))
+}
+
 /** Estimate the miner fee for a UTXO send without building the full tx.
  *  Runs steps 1-3 of buildUtxoTx (fetch UTXOs + fee rate + coin selection) and
  *  returns the fee in satoshis and the net spendable amount. Returns null on any
@@ -421,6 +447,7 @@ export async function estimateUtxoFee(
     if (!result?.inputs || result.fee == null) return null
     const totalIn = result.inputs.reduce((s: number, i: any) => s + i.value, 0)
     let feeSat: number = result.fee
+    if (chain.id === 'dogecoin') feeSat = enforceDogeMinFee(result.outputs ?? [], feeSat, isMax)
     // ZIP-317: coinSelectSplit uses sat/byte which produces fees far below the
     // ZIP-317 floor. Apply the same enforcement here so netSat matches what
     // buildUtxoTx will actually produce — otherwise the re-quote under-estimates
@@ -592,31 +619,9 @@ export async function buildUtxoTx(
 
   // DOGE: enforce minimum 1 DOGE fee (network consensus rule)
   // Pioneer SDK: DOGE_MIN_FEE = 100000000 (1 DOGE), dust = 1000000 (0.01 DOGE)
-  if (chain.id === 'dogecoin' && fee < 100000000) {
-    const increase = 100000000 - fee
-    const changeIdx = outputs.findIndex((o: any) => !o.address)
-    if (changeIdx >= 0 && outputs[changeIdx].value >= increase) {
-      // Absorb fee deficit from change output
-      outputs[changeIdx].value -= increase
-      if (outputs[changeIdx].value < 1000000) {
-        // Change is dust — consolidate into fee
-        fee = 100000000 + outputs[changeIdx].value
-        outputs.splice(changeIdx, 1)
-      } else {
-        fee = 100000000
-      }
-    } else {
-      // No change output (or change too small) — reduce spend output to cover fee.
-      // For swaps this is fine: THORChain swaps whatever it receives.
-      const spendIdx = outputs.findIndex((o: any) => o.address)
-      if (spendIdx >= 0 && outputs[spendIdx].value > increase + 1000000) {
-        console.log(`${TAG} DOGE: no change output — reducing spend by ${increase} sats to enforce 1 DOGE min fee`)
-        outputs[spendIdx].value -= increase
-        fee = 100000000
-      } else {
-        throw new Error(balanceErrorMessage('dogeMinimumFee'))
-      }
-    }
+  if (chain.id === 'dogecoin') {
+    // An exact amount is what the review shows: only MAX / swap deposits may shrink the spend.
+    fee = enforceDogeMinFee(outputs, fee, isMax || isSwapDeposit)
     console.log(`${TAG} DOGE: enforced minimum fee = ${fee} sats (${fee / 1e8} DOGE)`)
   }
 
