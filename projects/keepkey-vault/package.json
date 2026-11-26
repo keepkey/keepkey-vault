@@ -45,6 +45,8 @@
     "@scure/bip32": "1.7.0",
     "@scure/btc-signer": "1.8.1",
     "@ton/core": "^0.63.1",
+    "@vsc.eco/crosschain-core": "0.0.3",
+    "@vsc.eco/crosschain-sdk": "0.0.3",
     "@walletconnect/core": "^2.23.9",
     "@walletconnect/jsonrpc-utils": "^1.0.8",
     "@walletconnect/types": "^2.23.9",

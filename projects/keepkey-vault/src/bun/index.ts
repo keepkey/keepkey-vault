@@ -2546,6 +2546,20 @@ async function resumeLocalMoneroNode() {
 // Wraps signing/address-display operations that need user confirmation
 // on the emulator window. Setup ops (loadDevice, wipe) keep using
 // emuConfirmOp for auto-confirm.
+/** Context for the Magi swap runtime: the open wallet, device state, Pioneer
+ *  base, the emulator confirm gate, and storage (none for passphrase wallets). */
+function magiContext(opts: { allowNoWallet?: boolean } = {}): import('./swap/magi-runtime').MagiRuntimeContext {
+	if (!engine.wallet && !opts.allowNoWallet) throw new Error('No device connected')
+	if (getSetting('hive_enabled') !== '1') throw new Error('Hive is disabled')
+	return {
+		wallet: engine.wallet,
+		deviceState: engine.getDeviceState(),
+		pioneerBase: getPioneerApiBase().replace(/\/$/, ''),
+		signOp: (fn, details) => engine.isEmulator ? emuSigningOp(fn, details) : fn(),
+		store: engine.isPassphraseWallet ? null : { get: getSetting, set: setSetting },
+	}
+}
+
 async function emuSigningOp(
 	fn: () => Promise<any>,
 	details: { operation: string; opLabel?: string; chain?: string; to?: string; toLabel?: string; value?: string; fee?: string; memo?: string },
@@ -6585,6 +6599,39 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					}))
 				}
 				return { status: resp.status, ...body }
+			},
+			// ── Magi (VSC) swaps ───────────────────────────────────────────
+			magiCapability: async () => {
+				const { magiCapability } = await import('./swap/magi-runtime')
+				return { capability: await magiCapability(magiContext()) }
+			},
+			magiQuote: async (params) => {
+				const { getMagiQuote } = await import('./swap/magi-runtime')
+				return getMagiQuote(magiContext(), params)
+			},
+			magiExecute: async (params) => {
+				const { executeMagiQuote } = await import('./swap/magi-runtime')
+				return executeMagiQuote(magiContext(), params.quoteId)
+			},
+			magiRecords: async () => {
+				const { listMagiRecords } = await import('./swap/magi-runtime')
+				return listMagiRecords(magiContext({ allowNoWallet: true }))
+			},
+			magiRetry: async (params) => {
+				const { retryMagiRecord } = await import('./swap/magi-runtime')
+				return retryMagiRecord(magiContext(), params.id)
+			},
+			magiBalance: async () => {
+				const { getMagiBalance } = await import('./swap/magi-runtime')
+				return getMagiBalance(magiContext())
+			},
+			magiWithdraw: async (params) => {
+				const { withdrawMagi } = await import('./swap/magi-runtime')
+				return withdrawMagi(magiContext(), params)
+			},
+			magiBtcDepositAddress: async (params) => {
+				const { getMagiBtcDepositAddress } = await import('./swap/magi-runtime')
+				return getMagiBtcDepositAddress(magiContext(), params.assetOut)
 			},
 			hiveSignTx: async (params) => {
 				if (!engine.wallet) throw new Error('No device connected')

@@ -175,6 +175,17 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       hiveAccountCreationFee: { params: undefined; response: { fee: string } }
       hiveCreateAccount: { params: { username: string; accountIndex?: number }; response: { status: number; success?: boolean; txid?: string; username?: string; error?: string; retryAfter?: number } }
       hiveSignTx: { params: any; response: any }
+      // ── Magi (VSC) swaps: HIVE / HBD / BTC ─────────────────────────────
+      // Quotes stay in Bun; the webview executes a quoteId, never operations.
+      magiCapability: { params: void; response: { capability: import('./magi-config').HiveOpsCapability } }
+      magiQuote: { params: { from: 'HIVE' | 'HBD'; to: import('./magi-config').MagiAsset; amount: string; btcAddress?: string }; response: import('./magi-config').MagiQuoteView }
+      magiExecute: { params: { quoteId: string }; response: import('./magi-config').MagiSwapRecord }
+      magiRecords: { params: void; response: import('./magi-config').MagiSwapRecord[] }
+      magiRetry: { params: { id: string }; response: import('./magi-config').MagiSwapRecord }
+      magiBalance: { params: void; response: { username: string; hive: string; hbd: string } }
+      magiWithdraw: { params: { asset: 'HIVE' | 'HBD'; amount?: string }; response: { txid: string; amount: string; asset: 'HIVE' | 'HBD' } }
+      /** BTC → HIVE/HBD. Creates a mapping at Magi: call only when the user continues. */
+      magiBtcDepositAddress: { params: { assetOut: 'HIVE' | 'HBD' }; response: { address: string; username: string; assetOut: 'HIVE' | 'HBD' } }
 
       // ── Pioneer integration ─────────────────────────────────────────
       getBalances: { params: { forceRefresh?: boolean; swapDestCaips?: string[]; userInitiated?: boolean; refreshReason?: ProviderRefreshReason }; response: ChainBalance[] }

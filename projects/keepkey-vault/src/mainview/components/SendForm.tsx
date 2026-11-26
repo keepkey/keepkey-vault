@@ -90,21 +90,24 @@ interface SendFormProps {
 	xpubOverride?: string         // BTC multi-account: use this xpub for buildTx
 	scriptTypeOverride?: string   // BTC multi-account: use this scriptType for buildTx
 	evmAddressIndex?: number      // EVM multi-address: derivation index for buildTx
+	/** Prefill (e.g. a Magi BTC deposit address). Resets return to these, not to empty. */
+	initialRecipient?: string
+	initialAmount?: string
 }
 
-export function SendForm({ chain, address, balance, balanceLoading = false, token, onClearToken, xpubOverride, scriptTypeOverride, evmAddressIndex }: SendFormProps) {
+export function SendForm({ chain, address, balance, balanceLoading = false, token, onClearToken, xpubOverride, scriptTypeOverride, evmAddressIndex, initialRecipient = '', initialAmount = '' }: SendFormProps) {
   const uiText = useUiTranslation()
 
 	const { t, i18n } = useTranslation("send")
 	const { fmt, fmtCompact, locale } = useFiat()
-	const [recipientState, setRecipientState] = useState({ value: '', revision: 0 })
+	const [recipientState, setRecipientState] = useState({ value: initialRecipient, revision: 0 })
 	const recipient = recipientState.value
 	// A fresh edit or scan retires old confirmations, even when it returns to an
 	// earlier recipient or fills the same address again.
 	const setRecipient = useCallback((value: string) => {
 		setRecipientState(previous => ({ value, revision: previous.revision + 1 }))
 	}, [])
-	const [amount, setAmount] = useState("")
+	const [amount, setAmount] = useState(initialAmount)
 	const [usdAmount, setUsdAmount] = useState("")
 	const [inputMode, setInputMode] = useState<'crypto' | 'usd'>('crypto')
 	const [memo, setMemo] = useState("")
@@ -184,8 +187,8 @@ export function SendForm({ chain, address, balance, balanceLoading = false, toke
 		setSignedTx(null)
 		setTxid(null)
 		setError(null)
-		setRecipient("")
-		setAmount("")
+		setRecipient(initialRecipient)
+		setAmount(initialAmount)
 		setUsdAmount("")
 		setMemo("")
 		setIsMax(false)
@@ -585,8 +588,8 @@ export function SendForm({ chain, address, balance, balanceLoading = false, toke
 		setSignedTx(null)
 		setTxid(null)
 		setError(null)
-		setRecipient("")
-		setAmount("")
+		setRecipient(initialRecipient)
+		setAmount(initialAmount)
 		setUsdAmount("")
 		setMemo("")
 		setIsMax(false)
@@ -595,7 +598,7 @@ export function SendForm({ chain, address, balance, balanceLoading = false, toke
 		setShowSaveDialog(false)
 		promptedAddressRef.current = null
 		setShowAddressBook(false)
-	}, [])
+	}, [initialRecipient, initialAmount])
 
 	const copyTxid = useCallback(() => {
 		if (!txid) return

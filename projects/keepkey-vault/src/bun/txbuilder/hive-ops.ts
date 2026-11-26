@@ -447,6 +447,36 @@ function serializeOp([name, p]: HiveOpTuple): { bytes: Buffer; tier: 'posting' |
   }
 }
 
+/**
+ * The bytes a HiveSignTx TRANSFER must serialize to, for VERIFYING the
+ * device's own HiveSignTx output before a direct broadcast (Magi deposits,
+ * HBD transfers). This does not open a signing path for op 2: serializeOp
+ * still refuses "transfer", so HiveSignOperations can never sign one. It is
+ * a byte-compare only — a mismatch means the node would re-serialize a
+ * different transaction than the device signed, so nothing is broadcast.
+ */
+export function expectedHiveSignTxTransferBytes(params: {
+  refBlockNum: number
+  refBlockPrefix: number
+  expirationUnix: number
+  from: string
+  to: string
+  amount: string
+  memo?: string
+}): Buffer {
+  return Buffer.concat([
+    u16(params.refBlockNum, 'refBlockNum'),
+    u32(params.refBlockPrefix, 'refBlockPrefix'),
+    u32(params.expirationUnix, 'expirationUnix'),
+    varint(1),
+    varint(2), // transfer
+    str(params.from), str(params.to),
+    positiveAsset(params.amount, ['HIVE', 'HBD'], 'transfer amount'),
+    memoStr(params.memo ?? '', 'transfer memo'),
+    varint(0), // extensions
+  ] as Uint8Array[])
+}
+
 export function serializeHiveOpsTx(params: {
   refBlockNum: number
   refBlockPrefix: number

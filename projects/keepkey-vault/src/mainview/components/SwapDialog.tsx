@@ -711,10 +711,12 @@ interface SwapDialogProps {
   /** Pre-built SwapAsset to use as the FROM side — bypasses Pioneer's GetAvailableAssets list.
    *  Passed by AssetPage when the token may not appear in the ~19-asset Pioneer list. */
   initialFromAsset?: SwapAsset
+  /** BTC → HIVE/HBD runs through Magi, not this dialog: shown when paying with BTC. */
+  onMagiBtc?: () => void
 }
 
 // ── Main SwapDialog ─────────────────────────────────────────────────
-export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap, onOutputAssetChange, initialFromCaip, initialFromAsset }: SwapDialogProps) {
+export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap, onOutputAssetChange, initialFromCaip, initialFromAsset, onMagiBtc }: SwapDialogProps) {
   const uiText = useUiTranslation()
 
   const { t, i18n } = useTranslation("swap")
@@ -4326,6 +4328,11 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                 {/* ── FROM ── */}
                 <div className="kk-pf-left kk-pf-scroll" ref={leftScroll}>
                   <AssetSelector label={t("youPay", "You pay")} selected={fromAsset} onOpenPicker={() => setPickerSide('from')} disabled={busy} />
+                  {onMagiBtc && fromAsset?.caip === 'bip122:000000000019d6689c085ae165831e93/slip44:0' && (
+                    <button type="button" className="kk-pf-link" data-magi-shortcut style={{ justifySelf: 'start' }} onClick={onMagiBtc}>
+                      {uiText("BTC to HIVE or HBD? Swap with Magi")}
+                    </button>
+                  )}
                   {isZcashSource && <p className="kk-pf-detail" role="note" title={t("zcashUnshieldBeforeSwap")} style={{ margin: 0, color: 'var(--gold)' }}>{t("zcashTransparentOnlyTitle")}</p>}
                   {fromAsset && <div style={{ display: 'grid', gap: 8 }}>
                     <div className="kk-pf-top">

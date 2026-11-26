@@ -31,6 +31,7 @@ import { rpcMoneroClient } from "../lib/monero-client"
 
 // Lazy-load optional feature components — defers module evaluation to avoid
 // bundler TDZ issues when these heavy modules are statically imported.
+const MagiSwapDialog = lazy(() => import("./MagiSwapDialog").then(m => ({ default: m.MagiSwapDialog })))
 const SwapDialog = lazy(() => import("./SwapDialog").then(m => ({ default: m.SwapDialog })).catch(err => { console.error("[SwapDialog lazy] TDZ or load error:", err, err?.stack); throw err }))
 const MultisigPanel = lazy(() => import("./MultisigPanel").then(m => ({ default: m.MultisigPanel })))
 const ZcashPrivacyTab = lazy(() => import("./ZcashPrivacyTab").then(m => ({ default: m.ZcashPrivacyTab })))
@@ -742,6 +743,11 @@ function PersonalAssetPage({ chain, balance, balanceLoading = false, onBack, fir
 	// triggered (initialAction prop, action-row button, hotkey, dApp request).
 	const [showSwapDialog, setShowSwapDialogRaw] = useState(initialAction === "swap" && !watchOnly)
 	const setShowSwapDialog = (open: boolean) => { if (open && watchOnly) return; setShowSwapDialogRaw(open) }
+	// Magi (VSC) swaps: HIVE/HBD from the Hive page, BTC in from the Bitcoin swap dialog.
+	const [magiFrom, setMagiFromRaw] = useState<null | "HIVE" | "BTC">(null)
+	const setMagiFrom = (from: null | "HIVE" | "BTC") => { if (from && watchOnly) return; setMagiFromRaw(from) }
+	// BTC send prefilled with a Magi deposit address.
+	const [sendPrefill, setSendPrefill] = useState("")
 	const [showSweep, setShowSweepRaw] = useState(false)
 	const setShowSweep = (open: boolean) => { if (open && watchOnly) return; setShowSweepRaw(open) }
 	const [showNameReg, setShowNameRegRaw] = useState(false)
@@ -865,7 +871,7 @@ function PersonalAssetPage({ chain, balance, balanceLoading = false, onBack, fir
 		...(isZcash && !watchOnly && zcashPrivacyEnabled && zcashShieldedSupported && (!selectedToken || isShieldedToken) ? [{ id: "privacy" as const, label: t("zcashShield", { defaultValue: "Shield" }), icon: (
 			<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" /></svg>
 		) }] : []),
-		...(!watchOnly && swappableChainIds.has(chain.id) && !shieldedSelected ? [{ id: "swap" as const, label: t("swap"), icon: (
+		...(!watchOnly && (swappableChainIds.has(chain.id) || isHive) && !shieldedSelected ? [{ id: "swap" as const, label: t("swap"), icon: (
 			<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="17 1 21 5 17 9" /><path d="M3 11V9a4 4 0 0 1 4-4h14" /><polyline points="7 23 3 19 7 15" /><path d="M21 13v2a4 4 0 0 1-4 4H3" /></svg>
 		) }] : []),
 		// Multisig: Safe on supported EVM chains; Bitcoin co-signing when enabled.
@@ -1505,7 +1511,7 @@ function PersonalAssetPage({ chain, balance, balanceLoading = false, onBack, fir
 									as="button"
 									className="electrobun-webkit-app-region-no-drag"
 									onClick={() => {
-										if (p.id === 'swap') { setShowSwapDialog(true); return }
+										if (p.id === 'swap') { if (isHive) setMagiFrom('HIVE'); else setShowSwapDialog(true); return }
 										if (p.id === 'multisig' && isBtc) { window.dispatchEvent(new Event(MULTISIG_POLICY_EVENT)); return }
 										if (p.id === 'privacy') { setZcashPool('shielded'); setSelectedToken(null); setZcashPrivacyAction('shield') }
 										setView(p.id as AssetView); if (p.id === 'receive' && !isShieldedToken) setSelectedToken(null)
@@ -1571,6 +1577,8 @@ function PersonalAssetPage({ chain, balance, balanceLoading = false, onBack, fir
 							</Flex>
 						) : (
 						<SendForm
+							key={sendPrefill || "send"}
+							initialRecipient={sendPrefill}
 							chain={chain}
 							address={isEvm ? selectedEvmAddress?.address ?? null : address}
 							balanceLoading={balanceReadPending}
@@ -1890,6 +1898,7 @@ function PersonalAssetPage({ chain, balance, balanceLoading = false, onBack, fir
 						<SwapDialog
 							open={showSwapDialog}
 							onClose={() => setShowSwapDialog(false)}
+							onMagiBtc={isBtc ? () => { setShowSwapDialog(false); setMagiFrom('BTC') } : undefined}
 							chain={chain}
 							balance={isBtc && btcSelected?.xpubData ? {
 								...activeBalance!,
@@ -1904,6 +1913,18 @@ function PersonalAssetPage({ chain, balance, balanceLoading = false, onBack, fir
 									? selectedToken.caip
 									: chain.caip
 							}
+						/>
+					</Suspense>
+				</SwapErrorBoundary>
+			)}
+			{magiFrom && (
+				<SwapErrorBoundary>
+					<Suspense fallback={null}>
+						<MagiSwapDialog
+							open
+							initialFrom={magiFrom}
+							onClose={() => setMagiFrom(null)}
+							onSendBtc={isBtc ? (address) => { setSendPrefill(address); setSelectedToken(null); setMagiFrom(null); setView('send') } : undefined}
 						/>
 					</Suspense>
 				</SwapErrorBoundary>
