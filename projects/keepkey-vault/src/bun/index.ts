@@ -48,7 +48,6 @@ import { setFidoPin, listPasskeys, deletePasskey } from './passkeys-manage'
 import { resolveLabels, cleanLabel } from './passkey-labels'
 import { passwordDeviceCipher, passwordPrivateWalletSelector, supportsDeviceCipher } from './password-device'
 import { savePasswordBackup } from './password-backup'
-import { callBex, listBrowsers } from './bex-bridge'
 
 /**
  * hdwallet returns signature/pubkey fields as `Uint8Array | string`
