@@ -5450,6 +5450,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				await engine.wipeDevice(engine.isEmulator ? emuConfirmOp : undefined)
 				return { success: true }
 			},
+			cancelDeferredWipe: async () => { engine.cancelDeferredWipe() },
 			getPublicKeys: async (params) => {
 				if (!engine.wallet) throw new Error('No device connected')
 				const scope = currentBalanceRefreshScope()

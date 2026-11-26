@@ -682,7 +682,36 @@ describe.each(['7.17', '7.16'] as const)('EngineController on a USB/HID-like tra
     ])
     expect(outcome).toBe(WIPE_AFTER_REPLUG_MESSAGE)
     expect(device.received.map(r => r.type)).toEqual([T.MESSAGETYPE_GETPUBLICKEY]) // no Cancel into the countdown
-    void unlock
+    expect(engine.getDeviceState()).toMatchObject({ pinUnlockWaiting: true, pinPromptOpen: false, wipePending: 'replug' })
+    engine.cancelDeferredWipe()
+    expect(engine.getDeviceState().wipePending).toBeUndefined()
+    device.countdown = false
+    device.wait = 'pin'
+    device.out.push(frame(T.MESSAGETYPE_PINMATRIXREQUEST))
+    await until(() => engine.getDeviceState().pinPromptOpen === true, 'device matrix')
+    await engine.sendPin('1')
+    await unlock
+    expect(engine.getDeviceState()).toMatchObject({ state: 'ready', pinUnlockWaiting: false })
+  })
+
+  test.each(['same', 'different', 'cancelled'] as const)('deferred wipe reconnect is safe when %s', async outcome => {
+    const old = new ScriptedKeepKey(fw)
+    const { engine } = await engineWith(old)
+    Object.assign(engine, { cachedFeatures: { initialized: true, pinProtection: true, deviceId: 'test-original' } })
+    const sendWipe = mock(async () => {})
+    engine.wipeDevice = sendWipe
+    expect(engine.deferWipeUntilReplug()).toBe(true)
+    ;(engine as any).applyState('needs_pin')
+    await sleep(5)
+    expect(sendWipe).not.toHaveBeenCalled()
+    await swap(engine, new ScriptedKeepKey(fw))
+    Object.assign(engine, { cachedFeatures: { initialized: true, pinProtection: true, deviceId: outcome === 'different' ? 'test-other' : 'test-original' } })
+    ;(engine as any).applyState('needs_pin')
+    if (outcome === 'cancelled') engine.cancelDeferredWipe()
+    ;(engine as any).applyState('needs_pin')
+    await sleep(5)
+    expect(sendWipe).toHaveBeenCalledTimes(outcome === 'same' ? 1 : 0)
+    expect(engine.getDeviceState().wipePending).toBeUndefined()
   })
 
   test('a wipe during the passphrase wait cancels it even after userActionRequired was cleared', async () => {

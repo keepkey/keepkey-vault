@@ -15,13 +15,13 @@ import * as path from 'path'
 import * as core from '@keepkey/hdwallet-core'
 import * as Messages from '@keepkey/device-protocol/lib/messages_pb'
 import { TransportTimeoutError } from '@keepkey/hdwallet-keepkey/dist/transport'
-import { requestUnlock, isTransportTimeout, UNLOCK_ADDRESS_N } from '../src/bun/pin-unlock'
+import { requestUnlock, isTransportTimeout, UNLOCK_ADDRESS_N, HARDWARE_UNLOCK_FIRST_REPLY_MS } from '../src/bun/pin-unlock'
 
 // Firmware lockout wait (seconds) before PinMatrixRequest, per pin_sm.c.
 const lockoutWaitMs = (fails: number) => (fails > 2 ? 2 ** fails * 1000 : 0)
 
 describe('requestUnlock', () => {
-  test('sends GetPublicKey with LONG_TIMEOUT, not DEFAULT_TIMEOUT', async () => {
+  test('sends GetPublicKey with the hardware backoff deadline', async () => {
     const calls: any[] = []
     await requestUnlock({ call: async (type, msg, opts) => { calls.push({ type, msg, opts }) } })
 
@@ -31,17 +31,20 @@ describe('requestUnlock', () => {
     expect(msg.getShowDisplay()).toBe(false)
     expect(msg.getAddressNList()).toEqual(UNLOCK_ADDRESS_N)
     expect(msg.getCoinName()).toBe('Bitcoin')
-    expect(opts.msgTimeout).toBe(core.LONG_TIMEOUT)
+    expect(opts.msgTimeout).toBe(HARDWARE_UNLOCK_FIRST_REPLY_MS)
     expect(opts.msgTimeout).toBeGreaterThan(core.DEFAULT_TIMEOUT)
   })
 
-  test('timeout outlasts the lockout wait for 3..8 prior failures', () => {
-    // DEFAULT_TIMEOUT (the old behaviour) already loses at 3 failures (8 s).
-    expect(core.DEFAULT_TIMEOUT).toBeLessThan(lockoutWaitMs(3))
-    for (let fails = 3; fails <= 8; fails++) {
-      expect(core.LONG_TIMEOUT).toBeGreaterThan(lockoutWaitMs(fails))
-    }
-  })
+  test.each([lockoutWaitMs(3), core.LONG_TIMEOUT + 1000, lockoutWaitMs(14), lockoutWaitMs(16)])(
+    'one hardware request stays open through a simulated %i ms backoff', async backoff => {
+      let calls = 0
+      await requestUnlock({ call: async (_type, _message, options) => {
+        calls++
+        if ((options?.msgTimeout ?? 0) <= backoff) throw new TransportTimeoutError('device response', options?.msgTimeout ?? 0)
+      } })
+      expect(calls).toBe(1)
+    },
+  )
 
   // A cancelled PIN entry is the user's choice (audit v4 V8): a 499 cancel with
   // words, not hdwallet's raw Failure object that rendered as "[object Object]".

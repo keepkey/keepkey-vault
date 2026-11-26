@@ -473,10 +473,7 @@ export class EngineController extends EventEmitter {
       // prompt owns the unlock, and other REST requests are refused (device-gate.ts).
       if (this.lastState === 'ready' && !this.setupInProgress && !this.verifyInProgress) this.updateState('needs_pin')
       // The countdown ended without a replug: the device hears Desktop again, so a wipe needs a new click.
-      if (this.wipeOnReconnect) {
-        this.wipeOnReconnect = null
-        this.emit('state-change', this.getDeviceState())
-      }
+      this.cancelDeferredWipe()
       this.setPinPromptOpen(true)
       this.lastPinRequestType = type
       this.emit('pin-request', { type })
@@ -674,7 +671,10 @@ export class EngineController extends EventEmitter {
     if (state === 'needs_passphrase' && previousState !== state) this.deviceOperations.invalidateQueued()
     if (!['ready', 'needs_pin', 'needs_passphrase'].includes(state)) this.deviceOperations.invalidate()
     if (state !== 'needs_pin') this.pinAwaitingResult = false
-    if (state === 'ready') this.wipeOnReconnect = null // unlocked with the PIN after all
+    if (state === 'ready') {
+      this.wipeOnReconnect = null
+      this.wipeDeferredWallet = null
+    }
     console.log(`[Engine] State → ${state}`)
 
     // Reconnect detection: if the device reaches ready with a cached passphrase
@@ -764,9 +764,16 @@ export class EngineController extends EventEmitter {
     const connection = this.wallet
     if (state === 'needs_pin' && !this.wipeInProgress && this.wipeOnReconnect && connection !== this.wipeDeferredWallet && !this.unlockRequest) {
       const sameDevice = this.wipeOnReconnect === this.cachedFeatures?.deviceId
-      this.wipeOnReconnect = null
-      if (sameDevice) setTimeout(() => {
-        if (this.wallet === connection && !this.wipeInProgress) this.wipeDevice().catch(err => console.warn('[Engine] Wipe after replug failed:', err?.message))
+      if (!sameDevice) this.cancelDeferredWipe()
+      else setTimeout(() => {
+        if (this.wallet !== connection || !this.wipeOnReconnect || this.wipeInProgress || this.lastState !== 'needs_pin') return
+        if (this.wipeOnReconnect !== this.cachedFeatures?.deviceId) return
+        this.wipeOnReconnect = null
+        this.wipeDeferredWallet = null
+        const wipe = this.wipeDevice()
+        this.emit('state-change', this.getDeviceState())
+        void wipe.catch(err => console.warn('[Engine] Wipe after replug failed:', err?.message))
+          .finally(() => { if (this.wallet === connection) this.emit('state-change', this.getDeviceState()) })
       }, 0)
     }
     if (state === 'needs_pin' && this.updatePhase === 'rebooting') {
@@ -1931,6 +1938,7 @@ export class EngineController extends EventEmitter {
       updatePhase: this.updatePhase,
       wipePending: this.wipeInProgress ? 'confirm' : this.wipeOnReconnect ? 'replug' : undefined,
       pinPromptOpen: this.pinPromptOpen,
+      pinUnlockWaiting: !!this.pinUnlock && this.pinUnlock.wallet === this.wallet && !this.pinUnlock.abort.signal.aborted,
       deviceId: features?.deviceId || undefined,
       label: features?.label || undefined,
       firmwareVersion: fwVersion,
@@ -2495,8 +2503,12 @@ export class EngineController extends EventEmitter {
     const abort = new AbortController()
     const promise = Promise.resolve().then(() => this.performPinUnlock(wallet, abort.signal))
     this.pinUnlock = { wallet, promise, abort }
+    this.emit('state-change', this.getDeviceState())
     try { return await promise } finally {
-      if (this.pinUnlock?.promise === promise) this.pinUnlock = null
+      if (this.pinUnlock?.promise === promise) {
+        this.pinUnlock = null
+        this.emit('state-change', this.getDeviceState())
+      }
     }
   }
 
@@ -2565,7 +2577,13 @@ export class EngineController extends EventEmitter {
     const wallet = this.wallet as any
     if (!wallet) return
     const unlock = this.pinUnlock
-    if (unlock && unlock.wallet === wallet) unlock.abort.abort()
+    if (unlock && unlock.wallet === wallet) {
+      unlock.abort.abort()
+      this.emit('state-change', this.getDeviceState())
+      // A backoff read is still owned by this unlock. Cancel it when the
+      // firmware asks, without sending anything into the countdown.
+      if (!awaitingInput(wallet.transport)) return
+    }
     if (!awaitingInput(wallet.transport)) return wallet.cancel()
     this.setPinPromptOpen(false)
     await wallet.transport.call(Messages.MessageType.MESSAGETYPE_CANCEL, new Messages.Cancel(), {
@@ -2589,6 +2607,13 @@ export class EngineController extends EventEmitter {
     this.wipeDeferredWallet = this.wallet
     this.emit('state-change', this.getDeviceState())
     return true
+  }
+
+  cancelDeferredWipe(): void {
+    if (!this.wipeOnReconnect) return
+    this.wipeOnReconnect = null
+    this.wipeDeferredWallet = null
+    this.emit('state-change', this.getDeviceState())
   }
 
   /** Re-issue the PIN prompt after something else (a failed wipe) cancelled it. */

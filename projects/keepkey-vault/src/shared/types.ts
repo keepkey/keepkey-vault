@@ -76,6 +76,7 @@ export interface DeviceStateInfo {
   wipePending?: 'replug' | 'confirm'
   /** The device is showing its PIN grid and waiting for the PIN; false while it counts down after wrong PINs. */
   pinPromptOpen?: boolean
+  pinUnlockWaiting?: boolean
   /** Why installing each official build may wipe or lock this device's wallet
    *  (see flashWipeReason); undefined = it does not. The install must carry an
    *  explicit acknowledgement when set. */

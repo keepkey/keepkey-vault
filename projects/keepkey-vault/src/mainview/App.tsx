@@ -1006,8 +1006,12 @@ function App() {
 		<PassphraseEntry onSubmit={handlePassphraseSubmit} onCancel={handlePassphraseCancel} />
 	) : null
 
-	const pinOverlay = pinRequestType && !passphraseRequested ? (
-		<PinEntry type={pinRequestType} failed={pinFailed} errorDetail={pinErrorDetail} requestSeq={pinRequestSeq} onSubmit={handlePinSubmit} onCancel={handlePinCancel} onWipe={handlePinWipe} deviceAsking={deviceState.pinPromptOpen ?? true} />
+	const waitingForPin = deviceState.state === "needs_pin" && deviceState.pinUnlockWaiting
+	const wipeDeferred = deviceState.wipePending === "replug"
+	const pinOverlay = (pinRequestType || waitingForPin || wipeDeferred) && !passphraseRequested ? (
+		<PinEntry type={pinRequestType ?? "current"} failed={pinFailed} errorDetail={pinErrorDetail} requestSeq={pinRequestSeq} onSubmit={handlePinSubmit} onCancel={handlePinCancel} onWipe={handlePinWipe}
+			deviceAsking={!!pinRequestType && (deviceState.pinPromptOpen ?? true)} wipeDeferred={wipeDeferred}
+			onCancelDeferredWipe={() => rpcRequest("cancelDeferredWipe")} />
 	) : null
 
 	const charOverlay = (charRequest || recoveryError) ? (
