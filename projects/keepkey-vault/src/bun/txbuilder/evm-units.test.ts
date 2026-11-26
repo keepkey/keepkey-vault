@@ -114,3 +114,21 @@ describe('token Max is verified at send, never from the page cache', () => {
     await expect(send('50.1234567')).rejects.toThrow(/decimal/)
   })
 })
+
+describe('native Max on OP-stack chains reserves the L1 data fee (audit v8 B5)', () => {
+  const owner = '0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed'
+  const pioneer = {
+    GetGasPriceByNetwork: async () => ({ data: { average: '1' } }),
+    GetNonceByNetwork: async () => ({ data: { nonce: 1 } }),
+    GetBalanceAddressByNetwork: async () => ({ data: { balance: '0.01' } }),
+  }
+  const max = (id: string) => buildEvmTx(pioneer as any, CHAINS.find(c => c.id === id)!, {
+    to: '0x0000000000000000000000000000000000001234', amount: '0', isMax: true, fromAddress: owner, feeLevel: 5,
+  } as any).then((tx: any) => BigInt(tx.value))
+  test('Base and Optimism keep 0.00005 ETH more than the L2 gas reserve', async () => {
+    const reserve = 10n ** 16n - await max('base')
+    expect(reserve - (10n ** 16n - await max('optimism'))).toBe(0n)
+    expect(reserve).toBeGreaterThan(50_000_000_000_000n)
+    expect(reserve - 50_000_000_000_000n).toBe(10n ** 16n - await max('ethereum'))
+  })
+})

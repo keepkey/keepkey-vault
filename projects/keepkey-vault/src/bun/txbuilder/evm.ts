@@ -417,7 +417,10 @@ export async function buildEvmTx(
 
   let amountWei: bigint
   if (isMax) {
-    const gasReserve = (gasFee * 110n + 99n) / 100n // 10% gas buffer, rounded up
+    // OP-stack chains also charge an L1 data fee outside gasPrice × gasLimit;
+    // reserve the same 0.00005 ETH buffer the swap path uses.
+    const l1DataFeeBuffer = chain.id === 'base' || chain.id === 'optimism' ? 50_000_000_000_000n : 0n
+    const gasReserve = (gasFee * 110n + 99n) / 100n + l1DataFeeBuffer // 10% gas buffer, rounded up
     if (nativeBalance <= gasReserve) throw new Error(balanceErrorMessage('gasForMax'))
     amountWei = nativeBalance - gasReserve
     if (amountWei <= 0n) throw new Error(balanceErrorMessage('gasForMax'))
