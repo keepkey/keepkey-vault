@@ -699,9 +699,9 @@ export function ActivityTableRow({ activity, onSelect, nativePrices }: { activit
           <ConfBadge confirmations={activity.confirmations} chain={chainSymbol} />
         )}
       </Box>
-      <Text fontSize="2xs" color="whiteAlpha.300" flexShrink={0} w="50px" textAlign="right">{timeAgo(activity.createdAt)}</Text>
+      <Text fontSize="2xs" color="whiteAlpha.300" flexShrink={0} minW="50px" whiteSpace="nowrap" textAlign="right">{timeAgo(activity.createdAt)}</Text>
       {explorerUrl ? (
-        <Text as="button" fontSize="2xs" color="whiteAlpha.400" _hover={{ color: 'var(--teal)' }} flexShrink={0} w="50px" textAlign="right"
+        <Text as="button" fontSize="2xs" color="whiteAlpha.400" _hover={{ color: 'var(--teal)' }} flexShrink={0} minW="50px" whiteSpace="nowrap" textAlign="right"
           onClick={e => { e.stopPropagation(); rpcRequest('openUrl', { url: explorerUrl }).catch(() => {}) }}>{uiText("Explorer")}</Text>
       ) : (
         <Box w="50px" flexShrink={0} />

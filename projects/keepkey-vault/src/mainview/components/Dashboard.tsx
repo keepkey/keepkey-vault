@@ -2262,7 +2262,7 @@ function PersonalDashboard({ capabilities, isEmulator, onLoaded, watchOnly, watc
 		if (btc) {
 			return (
 				<AssetPageErrorBoundary onBack={() => {}} chainName={btc.coin}>
-                    <BalanceSyncProgress loading={loadingBalances} />
+                    <BalanceSyncProgress loading={loadingBalances} overlay />
 					<AssetPage chain={btc} balance={balances.get('bitcoin')} balanceLoading={loadingBalances || !initialLoaded} onBack={() => {}} hideBack firmwareVersion={firmwareVersion} onViewActivity={handleViewActivity} watchOnly={watchOnly} watchOnlyDeviceId={watchOnlyDeviceId} isHiddenWallet={isHiddenWallet} />
 				</AssetPageErrorBoundary>
 			)
@@ -2273,7 +2273,7 @@ function PersonalDashboard({ capabilities, isEmulator, onLoaded, watchOnly, watc
 		const bal = balances.get(selectedChain.id)
 		return (
 			<AssetPageErrorBoundary onBack={() => setSelectedChain(null)} chainName={selectedChain.coin}>
-                <BalanceSyncProgress loading={loadingBalances} />
+                <BalanceSyncProgress loading={loadingBalances} overlay />
 				{/* key: remount on chain switch — AssetPage's mount-only effects (address
 				    derive, initial view) must not leak chain A state into chain B */}
 				<AssetPage key={selectedChain.id} chain={selectedChain} balance={bal} balanceLoading={loadingBalances || !initialLoaded} onBack={() => { setSelectedChain(null); setSelectedChainAction(undefined); setSelectedChainInitialToken(undefined) }} firmwareVersion={firmwareVersion} initialAction={selectedChainAction} initialToken={selectedChainInitialToken} onViewActivity={handleViewActivity} watchOnly={watchOnly} watchOnlyDeviceId={watchOnlyDeviceId} isHiddenWallet={isHiddenWallet} />

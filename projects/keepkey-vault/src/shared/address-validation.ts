@@ -187,6 +187,20 @@ function cashaddrCheck(addr: string): boolean | 'checksum' {
   return cashaddrPolymod([...prefix, 0, ...data]) === 0n ? true : 'checksum'
 }
 
+/** Legacy Base58 P2PKH/P2SH (1… / 3…) to bare cashaddr, or null. The builder
+ *  signs to the cashaddr form, so identity checks must see both as one. */
+function legacyToCashaddr(addr: string): string | null {
+  let payload: Uint8Array
+  try { payload = b58check.decode(addr) } catch { return null }
+  if (payload.length !== 21 || (payload[0] !== 0x00 && payload[0] !== 0x05)) return null
+  const data = bech32.toWords(Uint8Array.from([payload[0] === 0x05 ? 0x08 : 0x00, ...payload.slice(1)]))
+  const prefix = [...'bitcoincash'].map(ch => ch.charCodeAt(0) & 0x1f)
+  const mod = cashaddrPolymod([...prefix, 0, ...data, 0, 0, 0, 0, 0, 0, 0, 0])
+  const checksum: number[] = []
+  for (let i = 0; i < 8; i++) checksum.push(Number((mod >> BigInt(5 * (7 - i))) & 31n))
+  return [...data, ...checksum].map(v => CASHADDR_CHARSET[v]).join('')
+}
+
 // ── EVM ─────────────────────────────────────────────────────────────────
 
 /** A 0x address whose letters, when mixed-case, match their EIP-55 checksum.
@@ -421,6 +435,10 @@ export function sameAddress(a: string | null | undefined, b: string | null | und
     if ((!chain || chain.chainFamily === 'evm') && HEX40.test(value)) return 'hex:' + value.toLowerCase()
     if ((chain?.id === 'bitcoincash' || explicitBch) && cashaddrCheck(value) === true) {
       return 'cashaddr:' + value.toLowerCase().replace(/^bitcoincash:/, '')
+    }
+    if (chain?.id === 'bitcoincash') {
+      const converted = legacyToCashaddr(value)
+      if (converted) return 'cashaddr:' + converted
     }
     const hrp = chain?.chainFamily === 'utxo'
       ? ({ bitcoin: 'bc', litecoin: 'ltc', digibyte: 'dgb' } as Record<string, string>)[chain.id] : undefined

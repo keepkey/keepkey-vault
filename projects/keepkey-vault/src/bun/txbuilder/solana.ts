@@ -1,3 +1,5 @@
+import { balanceErrorMessage } from '../../shared/send-balance-errors'
+
 export const SOLANA_LAMPORTS_PER_SIGNATURE = 5000n
 const SOLANA_DECIMALS = 9
 
@@ -16,7 +18,7 @@ export function solanaTransferLamportsForAmount(amount: string, isMax = false): 
   const lamports = decimalAmountToBaseUnits(amount, SOLANA_DECIMALS)
   if (!isMax) return lamports
   if (lamports <= SOLANA_LAMPORTS_PER_SIGNATURE) {
-    throw new Error('Insufficient SOL for max swap: balance does not cover the Solana network fee')
+    throw new Error(balanceErrorMessage('solanaMaxSwap'))
   }
   return lamports - SOLANA_LAMPORTS_PER_SIGNATURE
 }

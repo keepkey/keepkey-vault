@@ -97,5 +97,16 @@
 	"insufficientZcashMinimumFeeExact": "최소 네트워크 수수료 {{fee}} ZEC를 내기에 ZEC가 부족합니다. 조금 더 적은 금액을 보내 보세요.",
 	"insufficientXrpReserve": "계정 준비금과 네트워크 수수료를 빼면 XRP가 부족합니다.",
 	"insufficientTronMaxReserve": "네트워크 수수료로 {{reserve}} TRX를 남겨 두면 최대 금액을 보내기에 TRX가 부족합니다.",
-	"exceedsBalanceWithFee": "금액과 네트워크 수수료({{fee}} {{symbol}})의 합이 사용 가능한 잔액({{balance}} {{symbol}})을 넘습니다."
+	"exceedsBalanceWithFee": "금액과 네트워크 수수료({{fee}} {{symbol}})의 합이 사용 가능한 잔액({{balance}} {{symbol}})을 넘습니다.",
+	"qrUnsupported": "이 QR 코드는 KeepKey Desktop이 처리할 수 없는 결제 요청입니다. 아무것도 입력되지 않았습니다.",
+	"qrBadAmount": "이 QR 코드의 금액은 이 자산에 유효하지 않습니다.",
+	"qrWrongNetwork": "이 QR 코드는 다른 네트워크용입니다.",
+	"feeOverQuarterFixed": "수수료가 보내는 금액의 25%를 넘습니다. 이 네트워크의 수수료는 고정이므로 더 큰 금액을 보내는 것을 고려하세요.",
+	"buildNeedsRecipient": "받는 주소를 입력하세요.",
+	"buildNeedsSelfSendConfirm": "계속하려면 위에서 내 주소로 보내기를 확인하세요.",
+	"buildNeedsRiskConfirm": "계속하려면 위에서 받는 사람 경고를 확인하세요.",
+	"buildNeedsAmount": "금액을 입력하세요.",
+	"insufficientStakingFee": "스테이킹 금액과 네트워크 수수료에 필요한 {{symbol}}이(가) 부족합니다.",
+	"insufficientRegistrationFee": "등록과 네트워크 수수료에 필요한 {{symbol}}이(가) 부족합니다.",
+	"insufficientSolanaMaxSwap": "Solana 네트워크 수수료에 필요한 SOL이 부족합니다."
 }

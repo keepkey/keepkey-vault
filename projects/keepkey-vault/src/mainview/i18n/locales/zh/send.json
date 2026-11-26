@@ -97,5 +97,16 @@
 	"insufficientZcashMinimumFeeExact": "ZEC 不足以支付 {{fee}} ZEC 的最低网络手续费。请尝试发送稍少的金额。",
 	"insufficientXrpReserve": "扣除账户保留金和网络手续费后 XRP 不足。",
 	"insufficientTronMaxReserve": "为网络手续费保留 {{reserve}} TRX 后，TRX 不足以发送最大金额。",
-	"exceedsBalanceWithFee": "金额加网络手续费（{{fee}} {{symbol}}）超过了可用余额（{{balance}} {{symbol}}）。"
+	"exceedsBalanceWithFee": "金额加网络手续费（{{fee}} {{symbol}}）超过了可用余额（{{balance}} {{symbol}}）。",
+	"qrUnsupported": "此二维码是 KeepKey Desktop 无法完成的付款请求。未填写任何内容。",
+	"qrBadAmount": "此二维码中的金额对该资产无效。",
+	"qrWrongNetwork": "此二维码属于其他网络。",
+	"feeOverQuarterFixed": "手续费超过发送金额的 25%。该网络的手续费是固定的，建议发送更大的金额。",
+	"buildNeedsRecipient": "请输入收款地址。",
+	"buildNeedsSelfSendConfirm": "请先在上方确认发送到你自己的地址。",
+	"buildNeedsRiskConfirm": "请先在上方确认收款人警告。",
+	"buildNeedsAmount": "请输入金额。",
+	"insufficientStakingFee": "{{symbol}} 不足以支付质押金额和网络手续费。",
+	"insufficientRegistrationFee": "{{symbol}} 不足以支付注册费用和网络手续费。",
+	"insufficientSolanaMaxSwap": "SOL 不足以支付 Solana 网络手续费。"
 }

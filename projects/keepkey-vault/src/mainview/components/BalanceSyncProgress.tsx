@@ -6,7 +6,9 @@ import { onRpcMessage, rpcRequest } from '../lib/rpc'
 
 /** Percentages count settled work within the named stage, not estimated time
  * or a claim that all provider balances have been verified. */
-export function BalanceSyncProgress({ loading }: { loading: boolean }) {
+/** overlay: float bottom-right instead of taking layout space, so a drilled
+ * asset page's Receive/Send/Swap do not jump when the sync starts or ends. */
+export function BalanceSyncProgress({ loading, overlay = false }: { loading: boolean; overlay?: boolean }) {
   const { t } = useTranslation('dashboard')
   const [progress, setProgress] = useState<SyncProgress | null>(null)
   useEffect(() => {
@@ -24,7 +26,10 @@ export function BalanceSyncProgress({ loading }: { loading: boolean }) {
   if (!loading || !progress || progress.status !== 'running') return null
   const stage = t(`syncStage_${progress.stage}`)
   const seconds = Math.floor(progress.elapsedMs / 1000)
-  return <Box mb="3" px="3" py="2" border="1px solid" borderColor="kk.border" borderRadius="md" role="status" aria-live="polite">
+  const placement = overlay
+    ? { position: 'fixed' as const, bottom: '4', right: '4', w: '280px', zIndex: 10, bg: 'var(--ink-3)', boxShadow: 'lg' }
+    : { mb: '3' }
+  return <Box {...placement} px="3" py="2" border="1px solid" borderColor="kk.border" borderRadius="md" role="status" aria-live="polite">
     <Flex justify="space-between" gap="3" wrap="wrap">
       <Text fontSize="xs" color="kk.textSecondary">{stage}</Text>
       <Text fontSize="xs" fontFamily="mono" color="kk.gold">{progress.total > 0

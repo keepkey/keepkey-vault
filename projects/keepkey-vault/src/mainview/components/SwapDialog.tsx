@@ -72,6 +72,7 @@ import shiftingGif from "../assets/swap/shifting.gif"
 import completedGif from "../assets/swap/completed.gif"
 import shapeshiftLogo from "../assets/providers/shapeshift.svg"
 import { getDateLocale } from '../lib/date-locale'
+import { describeBalanceError } from '../../shared/send-balance-errors'
 
 // ── Phase state machine ─────────────────────────────────────────────
 type SwapPhase = 'input' | 'quoting' | 'review' | 'approving' | 'signing' | 'broadcasting' | 'submitted' | 'blind-signing-required'
@@ -2406,7 +2407,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
         return
       }
       if (previewError) {
-        setError(t("payloadBuildFailed", "Transaction payload is not available: {{error}}", { error: previewError }))
+        setError(t("payloadBuildFailed", "Transaction payload is not available: {{error}}", { error: describeBalanceError(previewError, t, getNumberLocale()) || previewError }))
         return
       }
       if (!previewBuild?.unsignedTx) {

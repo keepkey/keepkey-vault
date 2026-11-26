@@ -62,4 +62,11 @@ describe('sameAddress compares encoding identities without weakening validation'
     expect(sameAddress('', '')).toBe(false)
     expect(sameAddress('bitcoincash:not-an-address', 'not-an-address')).toBe(false)
   })
+
+  test('BCH legacy Base58 equals its cashaddr (builder signs to cashaddr)', () => {
+    expect(sameAddress('1BpEi6DfDAUFd7GtittLSdBeYJvcoaVggu', 'bitcoincash:' + bch, chain('bitcoincash'))).toBe(true)
+    expect(sameAddress('1BpEi6DfDAUFd7GtittLSdBeYJvcoaVggu', bch, chain('bitcoincash'))).toBe(true)
+    expect(sameAddress('1BpEi6DfDAUFd7GtittLSdBeYJvcoaVggu', bch, chain('bitcoin'))).toBe(false)
+    expect(sameAddress('1BpEi6DfDAUFd7GtittLSdBeYJvcoaVggv', bch, chain('bitcoincash'))).toBe(false)
+  })
 })

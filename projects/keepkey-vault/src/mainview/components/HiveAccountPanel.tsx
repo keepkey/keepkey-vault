@@ -38,6 +38,9 @@ function Confetti() {
 	)
 }
 type Avail = { success: boolean; available: boolean; reason?: string }
+/** Pioneer's 409 text when the ETH address already claimed its account. */
+const HIVE_ETH_ALREADY_SPONSORED = 'This ETH address already has a sponsored Hive account'
+
 type CreateResp = { status: number; success?: boolean; txid?: string; username?: string; error?: string; retryAfter?: number }
 
 // Chakra's bare `variant="outline"` resolves to the gray palette's light-mode
@@ -59,7 +62,7 @@ function KeyRow({ label, value }: { label: string; value: string }) {
 	const [copied, setCopied] = useState(false)
 	return (
 		<Flex justify="space-between" align="center" py="1.5">
-			<Text fontSize="11px" color="var(--text-3)" textTransform="uppercase" w="62px" flexShrink="0">{label}</Text>
+			<Text fontSize="11px" color="var(--text-3)" textTransform="uppercase" minW="62px" whiteSpace="nowrap" flexShrink="0">{label}</Text>
 			<Text fontSize="11px" fontFamily="mono" color="var(--text-2)" flex="1" mx="2" truncate>{value}</Text>
 			<IconButton aria-label={`copy ${label} key`} size="xs" variant="ghost" flexShrink="0"
 				onClick={() => { navigator.clipboard.writeText(value); setCopied(true); setTimeout(() => setCopied(false), 1200) }}>
@@ -248,10 +251,11 @@ function HiveOnboardWizard({ color, activeKey, onCreated }: { color: string; act
 					.catch(() => setNeedsFunding(""))
 			}
 			// 409 is overloaded: either the username was just taken, or this ETH
-			// address already claimed its one sponsored account. Server error text
-			// disambiguates; reformat-fail back to name-taken.
+			// address already claimed its one sponsored account. Pioneer sends no
+			// code, so match its exact ETH-gate sentence (hive.controller.ts); a loose
+			// /eth/ test read a taken name like "seth" as the ETH gate.
 			else if (r.status === 409) {
-				if (/eth|address/i.test(r.error ?? "")) setError("This device already has a sponsored Hive account.")
+				if (r.error === HIVE_ETH_ALREADY_SPONSORED) setError("This device already has a sponsored Hive account.")
 				else { setError("That name was just taken — pick another."); setAvail({ success: true, available: false, reason: "taken", name }) }
 			}
 			else if (r.status === 401) setError("Device confirmation didn't verify. Try again.")

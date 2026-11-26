@@ -11,6 +11,8 @@ import { rpcRequest } from "../lib/rpc"
 import { useFiat } from "../lib/fiat-context"
 import { Z } from "../lib/z-index"
 import { describeSigningError } from "../lib/signing-errors"
+import { describeBalanceError } from "../../shared/send-balance-errors"
+import { getNumberLocale } from '../lib/number-locale'
 import { cancelDeviceSigning, signOnDevice } from "../lib/device-signing"
 
 interface StakingPanelProps {
@@ -120,7 +122,7 @@ function DelegateDialog({ isOpen, onClose, chain, availableBalance, rewardAmount
 			setBuildResult(result)
 			setPhase("built")
 		} catch (e: any) {
-			setError(e.message || t('failedToBuildDelegation'))
+			setError(describeBalanceError(e.message || '', t, getNumberLocale()) || e.message || t('failedToBuildDelegation'))
 		}
 		setLoading(false)
 	}, [canBuild, watchOnly, chain.id, validatorAddress, canonicalAmount, isMax, memo, t])
@@ -532,7 +534,7 @@ function UndelegateDialog({ isOpen, onClose, chain, delegations, onSuccess, watc
 			setBuildResult(result)
 			setPhase("built")
 		} catch (e: any) {
-			setError(e.message || t('failedToBuildUndelegation'))
+			setError(describeBalanceError(e.message || '', t, getNumberLocale()) || e.message || t('failedToBuildUndelegation'))
 		}
 		setLoading(false)
 	}, [canBuild, watchOnly, chain.id, selectedPosition, selected, canonicalAmount, memo, t])

@@ -8,6 +8,8 @@ import type { BuildTxResult, BroadcastResult, NameInfo, NameQuote } from "../../
 import { rpcRequest } from "../lib/rpc"
 import { Z } from "../lib/z-index"
 import { describeSigningError } from "../lib/signing-errors"
+import { describeBalanceError } from "../../shared/send-balance-errors"
+import { getNumberLocale } from '../lib/number-locale'
 import { cancelDeviceSigning, signOnDevice } from "../lib/device-signing"
 
 interface NameRegistrationPanelProps {
@@ -137,7 +139,7 @@ export function NameRegistrationPanel({ chain, address, availableBalance, watchO
 			setBuildResult(result)
 			setPhase("built")
 		} catch (e: any) {
-			setError(e?.message || t("failedToBuild"))
+			setError(describeBalanceError(e?.message || '', t, getNumberLocale()) || e?.message || t("failedToBuild"))
 		}
 		setLoading(false)
 	}, [canBuild, chain.id, name, years, t])

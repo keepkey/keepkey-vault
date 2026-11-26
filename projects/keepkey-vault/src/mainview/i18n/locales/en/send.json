@@ -111,5 +111,16 @@
 	"insufficientZcashMinimumFeeExact": "Not enough ZEC to cover the minimum network fee of {{fee}} ZEC. Try sending a slightly smaller amount.",
 	"insufficientXrpReserve": "Not enough XRP after the account reserve and the network fee.",
 	"insufficientTronMaxReserve": "Not enough TRX to send the maximum after keeping {{reserve}} TRX for network fees.",
-	"exceedsBalanceWithFee": "The amount plus the network fee ({{fee}} {{symbol}}) is more than the available balance ({{balance}} {{symbol}})."
+	"exceedsBalanceWithFee": "The amount plus the network fee ({{fee}} {{symbol}}) is more than the available balance ({{balance}} {{symbol}}).",
+	"qrUnsupported": "This QR code is a payment request KeepKey Desktop cannot complete. Nothing was filled in.",
+	"qrBadAmount": "The amount in this QR code is not valid for this asset.",
+	"qrWrongNetwork": "This QR code is for a different network.",
+	"feeOverQuarterFixed": "Fee is more than 25% of the amount you are sending. This network's fee is fixed, so consider sending a larger amount.",
+	"buildNeedsRecipient": "Enter a recipient address.",
+	"buildNeedsSelfSendConfirm": "Confirm the send to your own address above to continue.",
+	"buildNeedsRiskConfirm": "Confirm the recipient warning above to continue.",
+	"buildNeedsAmount": "Enter an amount.",
+	"insufficientStakingFee": "Not enough {{symbol}} for the staking amount and the network fee.",
+	"insufficientRegistrationFee": "Not enough {{symbol}} for the registration and the network fee.",
+	"insufficientSolanaMaxSwap": "Not enough SOL to cover the Solana network fee."
 }
