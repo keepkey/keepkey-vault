@@ -507,5 +507,9 @@
   "m3249fc9f": "Mạng đã ẩn ({{count}})",
   "mdc800411": "Hiện {{chain}}",
   "m29742e5c": "Hiện",
-  "macd079af": "Vault lưu kho mật khẩu đã mã hóa trong cơ sở dữ liệu cục bộ. Để khôi phục, cần có dữ liệu kho, cùng cụm từ khôi phục và mật khẩu bổ sung của ví."
+  "macd079af": "Vault lưu kho mật khẩu đã mã hóa trong cơ sở dữ liệu cục bộ. Để khôi phục, cần có dữ liệu kho, cùng cụm từ khôi phục và mật khẩu bổ sung của ví.",
+  "m9f631ebd": "Không có số dư",
+  "m2b6e385e": "KeepKey của bạn cần firmware 7.17 trở lên để gửi Zcash.",
+  "ma0e696fa": "Hãy cập nhật KeepKey Desktop để gửi Zcash.",
+  "mbe314908": "Không thể kiểm tra hỗ trợ gửi Zcash. Vui lòng thử lại."
 }

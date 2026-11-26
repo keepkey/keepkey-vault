@@ -7,7 +7,7 @@ import { HDKey } from '@scure/bip32'
 import bs58check from 'bs58check'
 import { configureZcashNu7WalletAuthorizer, signUtxoTx, signZcashTransparentTx, validateZcashTransparentPlan } from '../src/bun/txbuilder/zcash-transparent'
 import { ZCASH_NU7_BRANCH_ID, ZCASH_NU7_UNSUPPORTED_MESSAGE, ZCASH_V6_VERSION_GROUP_ID, zcashNu7SupportError } from '../src/shared/zcash-nu7'
-import { isAdmittedNu7PhysicalAlpha, ZCASH_NU7_PHYSICAL_ALPHA_SHA256, type Nu7PhysicalSnapshot } from '../src/bun/zcash-nu7-physical'
+import { isAdmittedNu7PhysicalAlpha, type Nu7PhysicalSnapshot } from '../src/bun/zcash-nu7-physical'
 import { deviceOperationContext } from '../src/bun/device-operation'
 import { buildUtxoTx } from '../src/bun/txbuilder/utxo'
 import rustRequest from '../zcash-cli/tests/fixtures/transparent-nu7-request.json'
@@ -127,7 +127,7 @@ test('actual mature coin selection preserves a two-input send, unused change pat
 
 test('unadmitted wallets remain blocked at 7.17 and caller flags cannot authorize them', async () => {
   const f = fixture()
-  await expect(signUtxoTx(f.wallet, { ...plan(), isAlphaEmulator: true, firmwareHash: ZCASH_NU7_PHYSICAL_ALPHA_SHA256 })).rejects.toThrow(ZCASH_NU7_UNSUPPORTED_MESSAGE)
+  await expect(signUtxoTx(f.wallet, { ...plan(), isAlphaEmulator: true, firmwareHash: 'f'.repeat(64) })).rejects.toThrow(ZCASH_NU7_UNSUPPORTED_MESSAGE)
   expect(f.calls).toEqual([])
   expect(zcashNu7SupportError('7.17.0', true)).toBe(ZCASH_NU7_UNSUPPORTED_MESSAGE)
   expect(zcashNu7SupportError('7.17.0', true, true)).toBeUndefined()
@@ -135,7 +135,7 @@ test('unadmitted wallets remain blocked at 7.17 and caller flags cannot authoriz
 
 test('older alpha firmware and missing sidecar fail before public-key or signing calls', async () => {
   const f = fixture()
-  await expect(signZcashTransparentTx(f.wallet, plan(), { ...f.dependencies, firmwareVersion: '7.16.0' })).rejects.toThrow('7.17.0')
+  await expect(signZcashTransparentTx(f.wallet, plan(), { ...f.dependencies, firmwareVersion: '7.16.0' })).rejects.toThrow('firmware 7.17')
   await expect(signZcashTransparentTx(f.wallet, plan(), { ...f.dependencies, available: () => false })).rejects.toThrow('transaction builder')
   expect(f.calls).toEqual(['firmware'])
 })
@@ -192,7 +192,7 @@ test('the admitted physical wallet uses the modern path and retains a legitimate
   const f = fixture()
   const state: Nu7PhysicalSnapshot = {
     wallet: f.wallet, isEmulator: false, activeTransport: 'hid', state: 'ready',
-    initialized: true, bootloaderMode: false, firmwareVersion: '7.17.0', firmwareHash: ZCASH_NU7_PHYSICAL_ALPHA_SHA256,
+    initialized: true, bootloaderMode: false, firmwareVersion: '7.17.0', firmwareHash: 'b'.repeat(64),
   }
   f.alter(() => { state.state = 'needs_pin' })
   const signed = await signZcashTransparentTx(f.wallet, plan(), {
@@ -204,14 +204,14 @@ test('the admitted physical wallet uses the modern path and retains a legitimate
 })
 
 for (const [name, change] of Object.entries({
-  hash: (state: Nu7PhysicalSnapshot) => { state.firmwareHash = 'f'.repeat(64) },
+  firmware: (state: Nu7PhysicalSnapshot) => { state.firmwareVersion = '7.16.0' },
   transport: (state: Nu7PhysicalSnapshot) => { state.activeTransport = 'emulator' },
   wallet: (state: Nu7PhysicalSnapshot) => { state.wallet = {} },
 })) test(`physical ${name} change during preparation cannot reach approval`, async () => {
   const f = fixture()
   const state: Nu7PhysicalSnapshot = {
     wallet: f.wallet, isEmulator: false, activeTransport: 'webusb', state: 'ready',
-    initialized: true, bootloaderMode: false, firmwareVersion: '7.17.0', firmwareHash: ZCASH_NU7_PHYSICAL_ALPHA_SHA256,
+    initialized: true, bootloaderMode: false, firmwareVersion: '7.17.0', firmwareHash: 'b'.repeat(64),
   }
   f.alter(() => change(state))
   await expect(signZcashTransparentTx(f.wallet, plan(), {

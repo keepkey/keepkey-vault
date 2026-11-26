@@ -16,5 +16,6 @@ test('Dashboard quietly keeps recent cache, never banners a chain that missed a 
     purgeReset: { notice: false, retainedBalance: false, pulse: false },
     missingStructureQuiet: true, transactionAfterCacheRefreshes: true, pendingCacheRefreshes: true,
     oldCache: { pulse: true, notice: false, duplicateCta: false }, oldCacheAutomatic: true, manualRefreshWorks: true, manualRefreshShowsAge: true,
+    drilledZcashDegraded: { zero: false, unknown: true },
   })
 }, 30_000)

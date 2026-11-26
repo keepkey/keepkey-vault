@@ -30,6 +30,7 @@ import { describeBalanceError } from '../../shared/send-balance-errors'
 import { amountPlusFeeExceedsBalance, cosmosDisplayFee, cosmosSendFee } from '../../shared/cosmos-fee'
 import { getNumberLocale } from '../lib/number-locale'
 import { useZcashNu7Support } from '../hooks/useZcashNu7Support'
+import { ZCASH_NU7_UNSUPPORTED_MESSAGE } from '../../shared/zcash-nu7'
 import { parseSendQr } from '../../shared/send-qr'
 
 type SendPhase = 'input' | 'built' | 'signed' | 'broadcast'
@@ -714,7 +715,10 @@ export function SendForm({ chain, address, balance, balanceLoading = false, toke
 			{chain.id === 'zcash' && !zcashSupport.available && (zcashSupport.pending || zcashSupport.reason) && (
 				<Flex role="status" align="center" gap="2" px="3" py="2" borderRadius="10px" bg="var(--ink-2)">
 					{zcashSupport.pending && <Spinner size="xs" flexShrink={0} aria-label={uiText("Checking Zcash sending support…")} />}
-					<Text fontSize="xs" color="kk.textMuted">{zcashSupport.pending ? uiText("Checking Zcash sending support…") : zcashSupport.reason}</Text>
+					<Text fontSize="xs" color="kk.textMuted">{zcashSupport.pending ? uiText("Checking Zcash sending support…")
+						: zcashSupport.reason === ZCASH_NU7_UNSUPPORTED_MESSAGE ? uiText("Your KeepKey needs firmware 7.17 or later to send Zcash.")
+						: zcashSupport.reason?.includes('transaction builder') ? uiText("Update KeepKey Desktop to send Zcash.")
+						: uiText("Couldn't check Zcash sending support. Try again.")}</Text>
 				</Flex>
 			)}
 			{/* Gas balance hint for token sends */}

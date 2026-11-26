@@ -502,5 +502,9 @@
   "m3249fc9f": "Reti nascoste ({{count}})",
   "mdc800411": "Mostra {{chain}}",
   "m29742e5c": "Mostra",
-  "macd079af": "Vault salva l’archivio cifrato delle password nel proprio database locale. Per recuperarlo servono i dati dell’archivio, lo stesso seed e la stessa passphrase del portafoglio."
+  "macd079af": "Vault salva l’archivio cifrato delle password nel proprio database locale. Per recuperarlo servono i dati dell’archivio, lo stesso seed e la stessa passphrase del portafoglio.",
+  "m9f631ebd": "Saldo non disponibile",
+  "m2b6e385e": "Il tuo KeepKey richiede il firmware 7.17 o successivo per inviare Zcash.",
+  "ma0e696fa": "Aggiorna KeepKey Desktop per inviare Zcash.",
+  "mbe314908": "Impossibile verificare il supporto all'invio di Zcash. Riprova."
 }

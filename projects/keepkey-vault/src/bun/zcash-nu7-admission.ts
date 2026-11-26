@@ -10,7 +10,7 @@ export function requiresNu7DeviceRpc(method: string, params: unknown): boolean {
 
 /** The audit sweep builder only supports the legacy Bitcoin-style format. */
 export function rejectUnsupportedZcashSweep(chainId: unknown): void {
-  if (chainId === 'zcash') throw new Error('Zcash audit sweeps are unavailable. Use the Nu7 Send flow with the reviewed 7.17 alpha emulator or supported physical alpha firmware.')
+  if (chainId === 'zcash') throw new Error('Zcash audit sweeps are unavailable. Use the Send flow; sending Zcash needs KeepKey firmware 7.17 or later.')
 }
 
 /** Check before acquiring a device lease or asking for a PIN. */

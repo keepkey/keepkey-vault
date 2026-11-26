@@ -507,5 +507,9 @@
   "m3249fc9f": "Gizli ağlar ({{count}})",
   "mdc800411": "{{chain}} ağını göster",
   "m29742e5c": "Göster",
-  "macd079af": "Vault, şifreli parola kasasını yerel veritabanında saklar. Kurtarma için kasa verileri, aynı kurtarma sözcükleri ve aynı cüzdan parola ifadesi gerekir."
+  "macd079af": "Vault, şifreli parola kasasını yerel veritabanında saklar. Kurtarma için kasa verileri, aynı kurtarma sözcükleri ve aynı cüzdan parola ifadesi gerekir.",
+  "m9f631ebd": "Bakiye kullanılamıyor",
+  "m2b6e385e": "Zcash göndermek için KeepKey cihazınızda 7.17 veya daha yeni bir yazılım gerekir.",
+  "ma0e696fa": "Zcash göndermek için KeepKey Desktop uygulamasını güncelleyin.",
+  "mbe314908": "Zcash gönderme desteği kontrol edilemedi. Tekrar deneyin."
 }

@@ -496,5 +496,9 @@
   "m3249fc9f": "Ausgeblendete Netzwerke ({{count}})",
   "mdc800411": "{{chain}} einblenden",
   "m29742e5c": "Einblenden",
-  "macd079af": "Vault speichert den verschlüsselten Passwortspeicher in seiner lokalen Datenbank. Für die Wiederherstellung sind die gespeicherten Daten, dieselben Wiederherstellungswörter und dieselbe Wallet-Passphrase erforderlich."
+  "macd079af": "Vault speichert den verschlüsselten Passwortspeicher in seiner lokalen Datenbank. Für die Wiederherstellung sind die gespeicherten Daten, dieselben Wiederherstellungswörter und dieselbe Wallet-Passphrase erforderlich.",
+  "m9f631ebd": "Kontostand nicht verfügbar",
+  "m2b6e385e": "Ihr KeepKey benötigt Firmware 7.17 oder neuer, um Zcash zu senden.",
+  "ma0e696fa": "Aktualisieren Sie KeepKey Desktop, um Zcash zu senden.",
+  "mbe314908": "Zcash-Sendeunterstützung konnte nicht geprüft werden. Bitte erneut versuchen."
 }
