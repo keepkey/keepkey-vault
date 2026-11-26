@@ -47,36 +47,41 @@ afterEach(() => { for (const directory of packagingDirectories.splice(0)) rmSync
 
 /** Run the actual config and adapter verifier against public synthetic bytes.
  * Only the compiled review manifest is substituted; neither guard is mocked. */
-async function moneroPackagingFixture(arch: 'arm64' | 'x64' = 'arm64') {
+async function moneroPackagingFixture(arch: 'arm64' | 'x64' = 'arm64', os: 'darwin' | 'win32' = 'darwin') {
   const directory = mkdtempSync(join(tmpdir(), 'monero-preview-package-'))
   packagingDirectories.push(directory)
-  const vendor = 'monero-cli/vendor/darwin-arm64'
+  const windows = os === 'win32', exe = windows ? '.exe' : ''
+  const platform = windows ? 'win32-x64' : 'darwin-arm64'
+  const adapterName = `monero-host-adapter${exe}`, verifierName = windows ? 'monero_core_verify.dll' : 'libmonero_core_verify.dylib'
+  const vendor = `monero-cli/vendor/${platform}`
   const adapter = Buffer.from('PUBLIC SYNTHETIC READ-ONLY DECODER')
   const sha256 = createHash('sha256').update(new Uint8Array(adapter)).digest('hex')
   const core = Buffer.from('PUBLIC SYNTHETIC CORE VERIFIER')
-  const coreManifest = { files: { 'darwin-arm64': { filename: 'libmonero_core_verify.dylib', sha256: createHash('sha256').update(core).digest('hex'), size: core.length, minimumMacosVersion: '13.0', minimumDarwinMajor: 22 } } }
+  const coreSha256 = createHash('sha256').update(core).digest('hex')
+  const coreManifest = { files: { [platform]: windows ? { filename: verifierName, sha256: coreSha256, size: core.length }
+    : { filename: verifierName, sha256: coreSha256, size: core.length, minimumMacosVersion: '13.0', minimumDarwinMajor: 22 } } }
   const manifest = { schemaVersion: 1, protocol: 'keepkey-monero-wallet-export-v1', moneroVersion: '0.18.5.4',
-    files: { 'darwin-arm64': { filename: 'monero-host-adapter', sha256, size: adapter.length } } }
+    files: { [platform]: { filename: adapterName, sha256, size: adapter.length } } }
   const write = (path: string, bytes: string | Buffer) => {
     mkdirSync(join(directory, path, '..'), { recursive: true })
     writeFileSync(join(directory, path), bytes, { mode: 0o755 })
   }
-  write('monero-cli/dist/monero-cli', 'synthetic worker')
-  write(`${vendor}/monero-wallet-rpc`, 'synthetic wallet RPC')
+  write(`monero-cli/dist/monero-cli${exe}`, 'synthetic worker')
+  write(`${vendor}/monero-wallet-rpc${exe}`, 'synthetic wallet RPC')
   write(`${vendor}/LICENSE`, 'synthetic license')
-  write(`${vendor}/monero-host-adapter`, adapter)
+  write(`${vendor}/${adapterName}`, adapter)
   const metadata = (hash = sha256) => write(`${vendor}/monero-tools.json`, JSON.stringify({
-    version: '0.18.5.4', platform: 'darwin-arm64', hostAdapterSha256: hash,
+    version: '0.18.5.4', platform, hostAdapterSha256: hash,
   }))
   metadata()
   for (const path of ['monero-device-bundle/libmonero_device_proof.dylib', 'monero-device-bundle/libmonero_core_verify.dylib',
     'monero-emulator-bundle/libkkemu-monero.dylib', 'monero-emulator-bundle/libkkemu-monero-signing.dylib',
     'monero-emulator-bundle/manifest.json', 'monero-emulator-bundle/signing-manifest.json']) write(path, 'synthetic research fixture')
-  write('monero-device-bundle/libmonero_core_verify.dylib', core)
+  write(`monero-device-bundle/${verifierName}`, core)
   const entry = join(directory, 'entry.ts')
   writeFileSync(entry, `import config from ${JSON.stringify(join(import.meta.dir, '../electrobun.config.ts'))}; console.log(JSON.stringify(config.build.copy))`)
   const built = await Bun.build({ entrypoints: [entry], target: 'bun', outdir: directory, naming: 'config.mjs',
-    define: { 'process.platform': '"darwin"', 'process.arch': JSON.stringify(arch) },
+    define: { 'process.platform': JSON.stringify(os), 'process.arch': JSON.stringify(arch) },
     plugins: [{ name: 'public-adapter-review-pin', setup(build) {
       build.onResolve({ filter: /core-verifier-manifest\.json$/ }, () => ({ path: 'reviewed-core-pin', namespace: 'public-core-review-pin' }))
       build.onLoad({ filter: /.*/, namespace: 'public-core-review-pin' }, () => ({ loader: 'json', contents: JSON.stringify(coreManifest) }))
@@ -181,6 +186,14 @@ describe('Monero preview gates', () => {
 			expect(result.code).not.toBe(0)
 			expect(result.error).toContain('The Monero host adapter does not match its reviewed metadata')
 		}
+	})
+
+	test('Windows packages the manifest-named .exe adapter and .dll verifier', async () => {
+		const result = (await moneroPackagingFixture('x64', 'win32')).run(false)
+		if (result.code) throw new Error(result.error)
+		expect(result.copy['monero-cli/vendor/win32-x64/monero-host-adapter.exe']).toBe('monero-tools/monero-host-adapter.exe')
+		expect(result.copy['monero-device-bundle/monero_core_verify.dll']).toBe('monero-device/monero_core_verify.dll')
+		expect(result.copy['monero-device-bundle/libmonero_core_verify.dylib']).toBeUndefined()
 	})
 
 	test('an unqualified architecture excludes a staged ARM verifier', async () => {

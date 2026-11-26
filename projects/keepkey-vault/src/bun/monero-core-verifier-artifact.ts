@@ -7,19 +7,23 @@ import { execFileSync } from 'node:child_process'
 import manifest from '../../monero-cli/core-verifier-manifest.json'
 
 export const MONERO_CORE_VERIFIER_RECEIPT = 'core-verifier-receipt.json'
-export type MoneroCoreVerifierArtifact = { filename: string; sha256: string; size: number; minimumMacosVersion: string; minimumDarwinMajor: number }
+export type MoneroCoreVerifierArtifact = { filename: string; sha256: string; size: number; minimumMacosVersion?: string; minimumDarwinMajor?: number }
 export function moneroCoreVerifierArtifact(platform = `${process.platform}-${process.arch}`): MoneroCoreVerifierArtifact | null {
   return (manifest.files as Record<string, MoneroCoreVerifierArtifact>)[platform] ?? null
 }
 export function moneroCoreVerifierHostSupported(platform = `${process.platform}-${process.arch}`, kernelRelease = release()): boolean {
   const artifact = moneroCoreVerifierArtifact(platform)
-  return !!artifact && /^\d+\./.test(kernelRelease) && Number(kernelRelease.split('.')[0]) >= artifact.minimumDarwinMajor
+  if (!artifact) return false
+  // The kernel floor is a macOS rule; Windows and Linux entries carry none.
+  if (!platform.startsWith('darwin-')) return artifact.minimumDarwinMajor === undefined
+  return typeof artifact.minimumDarwinMajor === 'number' && /^\d+\./.test(kernelRelease) && Number(kernelRelease.split('.')[0]) >= artifact.minimumDarwinMajor
 }
 export function moneroCoreVerifierSha256(path: string): string {
   return createHash('sha256').update(new Uint8Array(readFileSync(path))).digest('hex')
 }
-function regular(path: string, maxSize: number): boolean {
-  try { const s = lstatSync(path); return s.isFile() && !s.isSymbolicLink() && !(s.mode & 0o022) && s.size > 0 && s.size <= maxSize } catch { return false }
+// Windows has no POSIX group/other write bits to check.
+function regular(path: string, maxSize: number, hostPlatform: string = process.platform): boolean {
+  try { const s = lstatSync(path); return s.isFile() && !s.isSymbolicLink() && (hostPlatform === 'win32' || !(s.mode & 0o022)) && s.size > 0 && s.size <= maxSize } catch { return false }
 }
 export function checkRawMoneroCoreVerifier(path: string, platform = `${process.platform}-${process.arch}`): boolean {
   const artifact = moneroCoreVerifierArtifact(platform)
@@ -59,6 +63,8 @@ export function verifiedMoneroCoreVerifierFile(directory: string): string | null
   if (!moneroCoreVerifierHostSupported()) return null
   const raw = checkMoneroCoreVerifierDirectory(directory)
   if (raw) return raw
+  // Only macOS ships re-signed bytes; elsewhere the raw manifest hash is the policy.
+  if (process.platform !== 'darwin') return null
   try {
     const bundled = resolve(import.meta.dir, '../monero-device')
     if (resolve(directory) !== bundled || realpathSync(directory) !== bundled) return null

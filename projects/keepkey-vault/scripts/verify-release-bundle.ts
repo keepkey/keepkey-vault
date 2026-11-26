@@ -131,6 +131,10 @@ try {
       }
       entitlements(app).includes('com.apple.security.device.camera') ? ok('app camera entitlement') : fail('app lacks com.apple.security.device.camera (QR scanning blocked)')
     }
+  } else if (backend) {
+    // Windows and Linux ship raw manifest bytes (no re-signed native helpers).
+    const moneroProblems = moneroReleaseAssetProblems(join(work, backend, '..', '..'), `${process.platform}-${arch}`)
+    moneroProblems.length === 0 ? ok('Monero signing artifacts and packaged Bun verifier ABI on qualified platforms') : moneroProblems.forEach(fail)
   }
 } catch (error) {
   fail(error instanceof Error ? error.message : String(error))

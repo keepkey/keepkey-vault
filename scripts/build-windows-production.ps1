@@ -227,6 +227,13 @@ function Sign-File {
         return $true
     }
 
+    # Monero helpers ship as their raw reviewed bytes: Desktop checks each
+    # against the full manifest sha256, which a signature would change.
+    if ($FilePath -like '*\monero-tools\*' -or $FilePath -like '*\monero-device\*') {
+        Write-Host "    [SKIP] Monero hash-pinned helper (raw bytes): $fileName" -ForegroundColor Gray
+        return $true
+    }
+
     if (-not $Force) {
         # Check if already signed
         try {
@@ -673,6 +680,15 @@ Write-Success "Verified bundled Windows emulator: $BundledEmulatorDll"
 # a fresh reviewed DLL instead of trusting an unauthenticated re-sign receipt.
 $EmulatorReviewedSourceSha = bun (Join-Path $ProjectDir "scripts\write-emulator-signing-receipt.ts") --verify $BundledEmulatorDll
 if ($LASTEXITCODE -ne 0) { throw "Emulator pre-sign source verification failed" }
+
+# A Monero build must carry the complete signing path (KEEPKEY_REQUIRE_MONERO_SIDECAR=1).
+if ($env:KEEPKEY_REQUIRE_MONERO_SIDECAR -eq "1") {
+    foreach ($required in @("Resources\app\monero-cli.exe", "Resources\app\monero-tools\monero-wallet-rpc.exe",
+        "Resources\app\monero-tools\monero-host-adapter.exe", "Resources\app\monero-device\monero_core_verify.dll")) {
+        if (-not (Test-Path (Join-Path $BuildDir $required))) { throw "Release gate failed: Monero input missing: $required" }
+    }
+    Write-Success "Monero sidecar, wallet RPC, host adapter and Core verifier are packaged"
+}
 
 # Hutch supplies bin\bun.exe. Only the pinned baseline build may ship: an AVX
 # build crashes at launch on CPUs without AVX. Hutch embeds the app icon into

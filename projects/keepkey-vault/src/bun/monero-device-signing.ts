@@ -129,7 +129,6 @@ export interface MoneroCoreVerifier {
 export function createMoneroCoreVerifier(options:{directory?:string;text?:MoneroText}={}):MoneroCoreVerifier {
  const text=options.text??(s=>s)
  const library=()=>{
-  if(process.platform!=='darwin'||process.arch!=='arm64')return null
   const roots=options.directory?[options.directory]:[resolve(import.meta.dir,'../monero-device'),join(dirname(process.execPath),'monero-device'),resolve(process.cwd(),'monero-device-bundle')]
   for(const root of roots){const file=verifiedMoneroCoreVerifierFile(root);if(file)return file}
   return null
