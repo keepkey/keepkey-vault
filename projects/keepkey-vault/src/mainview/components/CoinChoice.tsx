@@ -4,14 +4,13 @@
  * the offline icon pack bundled with the app: Bitcoin-only users may set up
  * with no network at all.
  */
-import { Box, Button, Flex, HStack, SimpleGrid, Text, VStack } from '@chakra-ui/react'
+import { Box, Flex, Text } from '@chakra-ui/react'
 import { useTranslation } from 'react-i18next'
-import { FaCheck, FaChevronRight, FaExclamationTriangle } from 'react-icons/fa'
-import { caipToIcon } from '../../shared/assetLookup'
+import { AssetIcon } from './AssetIcon'
+import { PreflightList, PreflightStyles } from './preflight/PreflightConsole'
 import { CARD_CSS } from './TutorialCards'
 import type { CoinVariant } from '../../shared/firmware-install'
 
-const GOLD = '#E9C46A'
 const BTC = 'bip122:000000000019d6689c085ae165831e93/slip44:0'
 const MULTI_LOGOS = [
   BTC,
@@ -37,10 +36,9 @@ export function CoinChoice({ coinMode, multiVersion, btcVersion, variantUnknown,
   const options = [
     {
       id: 'bitcoin-only' as const,
-      accent: '#F7931A',
       title: t('coinMode.btcTitle', { defaultValue: 'Bitcoin-only' }),
       version: btcVersion,
-      logo: <img src={caipToIcon(BTC)} alt="" width={64} height={64} />,
+      logo: <AssetIcon caip={BTC} alt="BTC" size={52} />,
       lines: [
         t('coinMode.btcLine1', { defaultValue: 'Bitcoin only' }),
         t('coinMode.btcLine2', { defaultValue: 'Smaller code, smaller attack surface' }),
@@ -49,14 +47,14 @@ export function CoinChoice({ coinMode, multiVersion, btcVersion, variantUnknown,
     },
     {
       id: 'multi' as const,
-      accent: '#8BE3C4',
       title: t('coinMode.multiTitle', { defaultValue: 'Multi-chain' }),
       version: multiVersion,
       logo: (
         <Flex>
           {MULTI_LOGOS.map((caip, i) => (
-            <img key={caip} src={caipToIcon(caip)} alt="" width={40} height={40}
-              style={{ marginLeft: i ? -10 : 0, borderRadius: '50%', border: '2px solid var(--ink-1)', background: 'var(--ink-1)' }} />
+            <Box key={caip} ml={i ? '-10px' : 0} borderRadius="full" boxShadow="0 0 0 2px var(--ink-0)" bg="var(--ink-0)">
+              <AssetIcon caip={caip} alt="" size={36} />
+            </Box>
           ))}
         </Flex>
       ),
@@ -67,97 +65,88 @@ export function CoinChoice({ coinMode, multiVersion, btcVersion, variantUnknown,
     },
   ]
 
+  const variantLabel = coinMode === 'bitcoin-only' ? t('coinMode.btcTitle', { defaultValue: 'Bitcoin-only' }) : t('coinMode.multiTitle', { defaultValue: 'Multi-chain' })
+
   return (
-    <VStack gap={5} w="100%" css={{ animation: 'tutorialFadeIn 0.3s ease-out' }}>
+    <Flex direction="column" gap={6} w="100%" fontFamily="var(--font-ui-sans)" css={{ animation: 'tutorialFadeIn 0.3s ease-out' }}>
       <style>{CARD_CSS}</style>
-      <VStack gap={1.5} textAlign="center">
-        <Text fontSize="2xl" fontWeight="800" color="white" letterSpacing="-0.02em">
-          {t('coinMode.pageTitle', { defaultValue: 'Choose your KeepKey firmware' })}
-        </Text>
-        <Text fontSize="sm" color="gray.400">
-          {t('coinMode.pageSubtitle', { defaultValue: 'It decides which coins this KeepKey can use.' })}
-        </Text>
-      </VStack>
+      <PreflightStyles />
+      <Box>
+        <h2 className="kk-pf-title">{t('coinMode.pageTitle', { defaultValue: 'Choose your KeepKey firmware' })}</h2>
+        <p className="kk-pf-sub">{t('coinMode.pageSubtitle', { defaultValue: 'It decides which coins this KeepKey can use.' })}</p>
+      </Box>
 
-      {variantUnknown && !coinMode && (
-        <Text fontSize="sm" color="yellow.300" textAlign="center">
-          {t('coinMode.unknownInstalled', { defaultValue: 'KeepKey Desktop cannot tell which firmware is on this KeepKey. Choose the one you want installed.' })}
-        </Text>
-      )}
-
-      <SimpleGrid columns={{ base: 1, md: 2 }} gap={4} w="100%">
-        {options.map((opt) => {
+      {/* Two options on one surface, split by a hairline — no bordered cards.
+          Selection: a radio mark plus a gold underline and glow, in the app accent. */}
+      <Box display="grid" gridTemplateColumns={{ base: '1fr', md: '1fr 1px 1fr' }} gap={{ base: 4, md: 8 }} role="radiogroup"
+        aria-label={t('coinMode.pageTitle', { defaultValue: 'Choose your KeepKey firmware' })}>
+        {options.map((opt, idx) => {
           const selected = coinMode === opt.id
-          return (
+          return [
+            idx > 0 && <Box key="rule" display={{ base: 'none', md: 'block' }} bg="linear-gradient(transparent, rgba(255,255,255,.09) 15%, rgba(255,255,255,.09) 85%, transparent)" />,
             <Box
               key={opt.id}
               as="button"
-              aria-pressed={selected}
+              role="radio"
+              aria-checked={selected}
               onClick={() => onChoose(opt.id)}
-              position="relative"
               textAlign="left"
               cursor="pointer"
-              p={6}
-              borderRadius="2xl"
-              borderWidth="2px"
-              borderColor={selected ? opt.accent : 'rgba(255,255,255,0.08)'}
-              bg={selected ? `${opt.accent}14` : 'rgba(255,255,255,0.03)'}
-              boxShadow={selected ? `0 0 0 4px ${opt.accent}22, 0 8px 32px ${opt.accent}26` : 'none'}
-              transition="all 0.15s ease"
-              _hover={{ borderColor: selected ? opt.accent : `${opt.accent}66` }}
-              _focusVisible={{ outline: `2px solid ${opt.accent}`, outlineOffset: '3px' }}
+              bg="transparent"
+              border="0"
+              p={3}
+              borderRadius="14px"
+              transition="background 0.15s ease"
+              _hover={{ bg: 'rgba(255,255,255,0.025)' }}
+              _focusVisible={{ outline: '2px solid var(--gold)', outlineOffset: '3px' }}
             >
-              {selected && (
-                <Flex position="absolute" top={4} right={4} w="26px" h="26px" borderRadius="full"
-                  bg={opt.accent} color="black" align="center" justify="center">
-                  <FaCheck size={12} />
+              <Flex direction="column" gap={4} align="start">
+                <Flex align="center" gap={4}>
+                  {/* Radio mark */}
+                  <Box w="18px" h="18px" borderRadius="full" flexShrink={0} display="grid" placeItems="center"
+                    boxShadow={selected ? 'inset 0 0 0 2px var(--gold)' : 'inset 0 0 0 1.5px rgba(255,255,255,0.28)'}>
+                    {selected && <Box w="8px" h="8px" borderRadius="full" bg="var(--gold)" />}
+                  </Box>
+                  <Box h="52px" display="flex" alignItems="center" filter={selected ? 'drop-shadow(0 0 18px rgba(233,196,106,0.35))' : 'none'} transition="filter 0.2s">
+                    {opt.logo}
+                  </Box>
                 </Flex>
-              )}
-              <VStack gap={4} align="start">
-                <Flex h="64px" align="center">{opt.logo}</Flex>
-                <HStack gap={2} align="baseline">
-                  <Text fontSize="xl" fontWeight="800" color="white" letterSpacing="-0.02em">{opt.title}</Text>
-                  {opt.version && <Text fontSize="sm" fontWeight="600" color={opt.accent}>v{opt.version}</Text>}
-                </HStack>
-                <VStack gap={1.5} align="start">
+                <Flex gap={2} align="baseline" pb={1} borderBottom="2px solid" borderColor={selected ? 'var(--gold)' : 'transparent'} transition="border-color 0.2s">
+                  <Text fontSize="20px" fontWeight="600" color="kk.textPrimary" letterSpacing="-0.02em">{opt.title}</Text>
+                  {opt.version && <Text fontSize="12px" fontFamily="var(--font-mono)" color="kk.textMuted">v{opt.version}</Text>}
+                </Flex>
+                <Box as="ul" listStyleType="none" m={0} p={0} display="grid" gap={1.5}>
                   {opt.lines.map((line) => (
-                    <HStack key={line} gap={2}>
-                      <Box color={opt.accent} flexShrink={0}><FaCheck size={11} /></Box>
-                      <Text fontSize="sm" color="gray.300">{line}</Text>
-                    </HStack>
+                    <Flex as="li" key={line} gap={2} align="baseline">
+                      <Box w="4px" h="4px" borderRadius="full" bg="var(--text-2)" flexShrink={0} transform="translateY(-2px)" />
+                      <Text fontSize="14px" color="kk.textSecondary">{line}</Text>
+                    </Flex>
                   ))}
-                </VStack>
-              </VStack>
-            </Box>
-          )
+                </Box>
+              </Flex>
+            </Box>,
+          ]
         })}
-      </SimpleGrid>
+      </Box>
 
-      {coinMode === 'bitcoin-only' && (
-        <HStack w="100%" p={3} gap={2} borderRadius="lg" bg="rgba(237,137,54,0.12)" align="start">
-          <FaExclamationTriangle color="var(--chakra-colors-yellow-400)" size={14} style={{ flexShrink: 0, marginTop: 3 }} />
-          <Text fontSize="xs" color="yellow.300" lineHeight="1.5">
-            {t('coinMode.pageWarning', { defaultValue: 'One-way: this KeepKey will only hold Bitcoin. Going back to Multi-chain means wiping it and restoring from your recovery phrase.' })}
-            {!factoryDevice && ' ' + t('coinMode.pageExistingWallet', { defaultValue: 'Your other coins stay safe on your recovery phrase.' })}
-          </Text>
-        </HStack>
+      {/* Risk stays explicit, as one preflight row each. */}
+      {((variantUnknown && !coinMode) || coinMode === 'bitcoin-only') && (
+        <PreflightList rows={[
+          ...(variantUnknown && !coinMode ? [{ key: 'unknown', status: 'warn' as const,
+            title: t('coinMode.unknownInstalled', { defaultValue: 'KeepKey Desktop cannot tell which firmware is on this KeepKey. Choose the one you want installed.' }) }] : []),
+          ...(coinMode === 'bitcoin-only' ? [{ key: 'one-way', status: 'warn' as const,
+            title: t('coinMode.pageWarning', { defaultValue: 'One-way: this KeepKey will only hold Bitcoin. Going back to Multi-chain means wiping it and restoring from your recovery phrase.' }),
+            detail: !factoryDevice ? t('coinMode.pageExistingWallet', { defaultValue: 'Your other coins stay safe on your recovery phrase.' }) : undefined }] : []),
+        ]} />
       )}
 
-      <Button w="100%" maxW="360px" size="md" bg={GOLD} color="black" fontWeight="700"
-        _hover={{ opacity: 0.9, transform: 'translateY(-1px)' }} _active={{ transform: 'scale(0.98)' }}
-        transition="all 0.15s ease" disabled={!coinMode} onClick={onContinue}>
-        <Flex gap={2} align="center" justify="center">
-          <Text>
-            {!coinMode
-              ? t('coinMode.chooseFirst', { defaultValue: 'Choose Bitcoin-only or Multi-chain' })
-              : t('coinMode.continueWith', {
-                defaultValue: 'Continue with {{variant}}',
-                variant: coinMode === 'bitcoin-only' ? t('coinMode.btcTitle', { defaultValue: 'Bitcoin-only' }) : t('coinMode.multiTitle', { defaultValue: 'Multi-chain' }),
-              })}
-          </Text>
-          {coinMode && <FaChevronRight size={10} />}
-        </Flex>
-      </Button>
-    </VStack>
+      <div className="kk-pf-actions kk-pf-wrap">
+        <button type="button" className="kk-pf-go" disabled={!coinMode} onClick={onContinue} style={{ flex: '0 1 auto' }}>
+          {!coinMode
+            ? t('coinMode.chooseFirst', { defaultValue: 'Choose Bitcoin-only or Multi-chain' })
+            : t('coinMode.continueWith', { defaultValue: 'Continue with {{variant}}', variant: variantLabel })}
+        </button>
+      </div>
+    </Flex>
   )
 }
