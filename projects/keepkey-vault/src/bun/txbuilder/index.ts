@@ -11,7 +11,7 @@ import { confirmAccountTx } from './confirm-account-tx'
 import { buildCosmosTx, type BuildCosmosParams } from './cosmos'
 import { buildXrpTx, type BuildXrpParams } from './xrp'
 import { sendShielded, type ShieldedSendParams } from './zcash-shielded'
-import { buildTonTransfer, assembleTonSignedBoc, getTonSeqno, getTonWalletState, broadcastTonBoc, type TonBuildResult } from './ton'
+import { buildTonTransfer, tonSendAmountNano, assembleTonSignedBoc, getTonSeqno, getTonWalletState, broadcastTonBoc, type TonBuildResult } from './ton'
 import { buildHiveTransfer, broadcastHiveTx } from './hive'
 import { SOLANA_LAMPORTS_PER_SIGNATURE, solanaTransferLamportsForAmount } from './solana'
 import { signSolanaWireTransaction } from '../solana-signing'
@@ -629,13 +629,6 @@ export async function buildTx(
       // TON — build v4r2 wallet transfer, device signs cell hash
       if (!params.fromAddress) throw new Error('fromAddress required for TON')
 
-      // Convert TON amount to nanoTON (9 decimals)
-      const nanoTon = (() => {
-        const parts = params.amount.split('.')
-        const whole = parts[0] || '0'
-        const frac = (parts[1] || '').slice(0, 9).padEnd(9, '0')
-        return String(BigInt(whole) * 1000000000n + BigInt(frac))
-      })()
 
       // Check wallet state — uninitialized wallets need StateInit in first tx
       let walletState: { initialized: boolean; balance: string }
@@ -652,6 +645,7 @@ export async function buildTx(
       }
 
       const needsDeploy = !walletState.initialized
+      const nanoTon = tonSendAmountNano(params.amount, !!params.isMax, walletState.balance, needsDeploy)
       console.debug(`[buildTx] TON wallet state: initialized=${walletState.initialized}, seqno=${seqno}, needsDeploy=${needsDeploy}`)
       if (needsDeploy && !params.publicKeyHex) {
         throw new Error('TON wallet not initialized — public key required for deployment')
