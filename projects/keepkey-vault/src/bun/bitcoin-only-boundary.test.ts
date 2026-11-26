@@ -235,9 +235,7 @@ describe('Bitcoin-only REST boundary', () => {
     }
   })
 
-  test('blocks enabling WalletConnect but permits teardown', () => {
-    expect(bitcoinOnlyRpcRejection('setWalletConnectEnabled', { enabled: true })).not.toBeNull()
-    expect(bitcoinOnlyRpcRejection('setWalletConnectEnabled', { enabled: false })).toBeNull()
+  test('permits WalletConnect teardown', () => {
     expect(bitcoinOnlyRpcRejection('wcDisconnectSession', { topic: 'old' })).toBeNull()
   })
 

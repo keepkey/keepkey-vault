@@ -31,6 +31,7 @@
 	"unlabeled": "Etiketsiz",
 	"ownWallet": "Cüzdanım",
 	"ownSymbol": "{{symbol}} hesabım",
+	"ownTransparent": "{{symbol}} şeffaf adresim",
 	"edit": "Düzenle",
 	"delete": "Sil",
 	"view": "Görüntüle",

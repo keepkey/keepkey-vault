@@ -3091,6 +3091,8 @@ export interface OwnAddressSeed {
   derivationPath?: string
   scriptType?: string
   addressIndex?: number
+  /** An older seeded default; an entry still carrying it gets the new label. */
+  replacesLabel?: string
 }
 
 /** Idempotently mirror connected-wallet addresses as kind='own' entries (R2).
@@ -3109,6 +3111,10 @@ export function syncOwnAddressBook(
           derivation_path, script_type, address_index, created_at, updated_at)
        VALUES (?, ?, ?, 'own', ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
+    const relabel = db.query(
+      `UPDATE addressbook SET label = ?, script_type = COALESCE(script_type, ?)
+       WHERE kind = 'own' AND wallet_id = ? AND network_id = ? AND address = ? AND label = ?`,
+    )
     let inserted = 0
     const tx = db.transaction(() => {
       for (const s of seeds) {
@@ -3118,6 +3124,7 @@ export function syncOwnAddressBook(
           s.label, s.derivationPath ?? null, s.scriptType ?? null, s.addressIndex ?? null, now, now,
         )
         if ((res as any)?.changes) inserted++
+        else if (s.replacesLabel) relabel.run(s.label, s.scriptType ?? null, scope.walletId, s.networkId, addr, s.replacesLabel)
       }
     })
     tx()

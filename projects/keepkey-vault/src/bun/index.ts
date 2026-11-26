@@ -320,7 +320,7 @@ import { MONERO_LOCAL_URL, moneroNodeMode } from '../shared/monero-node'
 import { checkMoneroNode, storedRestoreHeight, suggestRestoreHeight, validateMoneroNode } from "./monero-settings"
 import { createFilePendingStore } from "./monero-pending"
 import { findZcashCliBinary, isSidecarReady, startSidecar, stopSidecar, wipeSidecarWalletDb, hasFvkLoaded, getCachedFvk, onScanProgress, getScanState, updateSyncedTo, beginZcashSend, endZcashSend, isZcashSendInFlight } from "./zcash-sidecar"
-import { CHAINS, customChainToChainDef, isChainSupported, hiveRolePath, btcTaprootSupported, findChainByNetwork, isStaleHyperliquidMetadata, btcAccountPath, zcashTransparentReceivePath } from "../shared/chains"
+import { CHAINS, customChainToChainDef, isChainSupported, hiveRolePath, btcTaprootSupported, findChainByNetwork, isStaleHyperliquidMetadata, btcAccountPath, zcashTransparentReceivePath, ownUtxoLabel } from "../shared/chains"
 import { versionCompare } from "../shared/firmware-versions"
 import { supportsZcashPrivacyBuild } from "./zcash-capability"
 import type { ChainDef } from "../shared/chains"
@@ -1426,7 +1426,8 @@ async function requestSigningApprovalDecision(id: string, signal?: AbortSignal) 
 }
 // Settings loaded lazily after DB init — defaults used until then
 let restApiEnabled = false
-let walletConnectEnabled = true
+// WalletConnect is always on (old DBs may still hold walletconnect_enabled='0'; ignored)
+const walletConnectEnabled = true
 let moneroEnabled = false
 /** Own node is preferred. Existing explicit remote URLs are preserved. */
 const MONERO_DEFAULT_NODE = MONERO_LOCAL_URL
@@ -1542,7 +1543,6 @@ function loadSettings() {
 	moneroEnabled = getSetting('monero_enabled') === '1' && isMoneroSidecarAvailable()
 	setMoneroEmulatorEnabled(moneroEnabled)
 	restApiEnabled = getSetting('rest_api_enabled') === '1'
-	walletConnectEnabled = getSetting('walletconnect_enabled') !== '0'
 	const storedZcashPrivacyEnabled = getSetting('zcash_privacy_enabled') === '1'
 	const zcashSidecarAvailable = !!findZcashCliBinary()
 	zcashPrivacyEnabled = storedZcashPrivacyEnabled && zcashSidecarAvailable
@@ -1954,7 +1954,8 @@ function getAppSettings() {
 		// or disabled view must not hydrate or disclose wallet monitoring records.
 		moneroPendingBroadcasts: moneroEnabled && !moneroHiddenWallet(engine) ? getMoneroWallet().pendingCount() : 0,
 		passwordManagerEnabled: passwordBank.enabled,
-		passkeysEnabled: getSetting('passkeys_enabled') === '1',
+		// Windows hides FIDO HID devices from apps, so the tab could never find the KeepKey
+		passkeysEnabled: process.platform !== 'win32' && getSetting('passkeys_enabled') === '1',
 		zcashPrivacyEnabled,
 		hiveEnabled,
 		emulatorEnabled,
@@ -6846,7 +6847,8 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 							const isXpub = ch.chainFamily === 'utxo'
 							own.push({
 								address: p.pubkey, networkId: p.networkId, chainId: p.chainId, chainFamily: ch.chainFamily,
-								symbol: p.symbol, label: isXpub ? `${p.symbol} (xpub)` : `My ${p.symbol}`,
+								symbol: p.symbol, label: isXpub ? ownUtxoLabel(p.symbol, p.chainId, p.scriptType) : `My ${p.symbol}`,
+								...(isXpub ? { scriptType: p.scriptType, replacesLabel: `${p.symbol} (xpub)` } : {}),
 							})
 						}
 						const insertedOwn = syncOwnAddressBook(abScope, own)
@@ -9080,6 +9082,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			},
 			setPasskeysEnabled: async (params) => {
 				if (typeof params?.enabled !== 'boolean') throw new Error('enabled must be a boolean')
+				if (params.enabled && process.platform === 'win32') throw new Error('Passkeys are not available on Windows')
 				setSetting('passkeys_enabled', params.enabled ? '1' : '0')
 				return getAppSettings()
 			},
@@ -9316,15 +9319,6 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
                 notifyVaultsChanged() // Safe/Vault lists show or hide with the toggle
                 return getAppSettings()
             },
-            setWalletConnectEnabled: async (params) => {
-				if (params.enabled && isBitcoinOnlyVariant(engine.getDeviceState().firmwareVariant)) {
-					throw new Error('WalletConnect is not available on bitcoin-only firmware')
-				}
-				walletConnectEnabled = params.enabled
-				setSetting('walletconnect_enabled', params.enabled ? '1' : '0')
-				console.log('[settings] WalletConnect enabled:', params.enabled)
-				return getAppSettings()
-			},
 			setEmulatorEnabled: async (params) => {
 				// Refuse to enable on platforms with no emulator support. The
 				// emulator runs on macOS (Keychain) and Windows (DPAPI); Linux

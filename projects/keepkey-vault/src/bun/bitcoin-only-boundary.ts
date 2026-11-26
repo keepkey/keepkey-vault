@@ -187,10 +187,6 @@ export function bitcoinOnlyRpcRejection(method: string, params?: any): string | 
     }
   }
 
-  if (method === 'setWalletConnectEnabled' && params?.enabled === true) {
-    return 'WalletConnect is not available on bitcoin-only firmware'
-  }
-
   if ((method === 'matchAddress' || method === 'addAddressBook')
     && typeof params?.networkId === 'string'
     && !BITCOIN_NETWORK_IDS.has(params.networkId)) {

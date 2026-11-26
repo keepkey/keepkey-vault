@@ -48,6 +48,17 @@ export const BTC_TAPROOT_SCRIPT_TYPE = {
 
 export type BtcScriptTypeConfig = (typeof BTC_SCRIPT_TYPES)[number]
 
+const UTXO_SCRIPT_NAMES: Record<string, string> = { p2pkh: 'Legacy', 'p2sh-p2wpkh': 'SegWit', p2wpkh: 'Native SegWit', p2tr: 'Taproot' }
+
+/** Address-book label for an own UTXO account key, named by script type like the
+ *  BTC page. Zcash keys here are transparent (t1) addresses, not xpubs; the
+ *  "My ... transparent address" default is translated at render time. */
+export function ownUtxoLabel(symbol: string, chainId: string, scriptType?: string): string {
+  if (chainId === 'zcash') return `My ${symbol} transparent address`
+  const name = scriptType ? UTXO_SCRIPT_NAMES[scriptType] : undefined
+  return name ? `${symbol} ${name}` : `${symbol} (xpub)`
+}
+
 export function btcScriptTypes(includeTaproot = false): BtcScriptTypeConfig[] {
   return includeTaproot ? [...BTC_SCRIPT_TYPES, BTC_TAPROOT_SCRIPT_TYPE] : [...BTC_SCRIPT_TYPES]
 }

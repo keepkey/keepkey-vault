@@ -1217,7 +1217,7 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 										{Math.round((features?.autoLockDelayMs ?? 0) / 60000)}{" "}{uiText("min")}</option>
 								)}
 								{AUTO_LOCK_CHOICES.map(c => (
-									<option key={c.ms} value={String(c.ms)}>{c.labelKey}</option>
+									<option key={c.ms} value={String(c.ms)}>{uiText(c.labelKey)}</option>
 								))}
 							</select>
 						</Flex>
@@ -1742,8 +1742,8 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 							</Box>
 							<Box>
 								<Flex justify="space-between" align="center" gap="4">
-									<Flex align="center" gap="3" minW="0"><FeatureIcon kind="passwords" /><Box><Text fontSize="md" color="kk.textPrimary" fontWeight="500">{uiText("Passkeys")}</Text><Text fontSize="sm" color="kk.textSecondary" mt="0.5">{uiText("Experimental. Adds a Passkeys tab to the Vault menu: device status and erasing all passkeys. Off by default.")}</Text></Box></Flex>
-									<Toggle label={uiText('Passkeys')} checked={appSettings.passkeysEnabled === true} onChange={togglePasskeys} disabled={togglingPasskeys} />
+									<Flex align="center" gap="3" minW="0"><FeatureIcon kind="passwords" /><Box><Text fontSize="md" color="kk.textPrimary" fontWeight="500">{uiText("Passkeys")}</Text><Text fontSize="sm" color="kk.textSecondary" mt="0.5">{IS_WINDOWS ? uiText("Not available on Windows: Windows blocks apps from talking to the KeepKey's passkey (FIDO) interface directly.") : uiText("Experimental. Adds a Passkeys tab to the Vault menu: device status, and listing, renaming and deleting single passkeys. Off by default.")}</Text></Box></Flex>
+									{!IS_WINDOWS && <Toggle label={uiText('Passkeys')} checked={appSettings.passkeysEnabled === true} onChange={togglePasskeys} disabled={togglingPasskeys} />}
 								</Flex>
 								{passkeysError && <Text role="alert" fontSize="xs" color="kk.error">{passkeysError}</Text>}
 							</Box>
