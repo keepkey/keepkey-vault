@@ -2463,6 +2463,7 @@ async function applyRestApiState(when: 'startup' | 'settings') {
 
 // ── Wallet-session quote authorization and tracker data ──────────────
 import type { SwapQuote, SwapQuoteParams, ExecuteSwapParams, SwapResult, SwapSubStage, BuildTxParams, BuildTxResult } from '../shared/types'
+import type { SwapSigningTx } from './swap'
 import { isThorchainBankToken, thorchainBankTokenFirmwareOK, THORCHAIN_BANK_TOKEN_MIN_FW } from '../shared/swap-support-matrix'
 import { watchOnlyAddressMismatchMessage } from '../shared/watch-only-verify'
 const swapQuoteLeases = createSwapQuoteLeases()
@@ -4179,7 +4180,7 @@ async function headlessSwapQuote(params: SwapQuoteParams): Promise<SwapQuote> {
 	return swapQuoteLeases.issue(params, quote, fromAsset, toAsset, sessionEpoch, risk)
 }
 
-async function headlessExecuteSwap(params: ExecuteSwapParams, pushSubStage: (stage: SwapSubStage) => void): Promise<SwapResult> {
+async function headlessExecuteSwap(params: ExecuteSwapParams, pushSubStage: (stage: SwapSubStage, tx?: SwapSigningTx) => void): Promise<SwapResult> {
 	const sessionEpoch = activitySessionEpoch // the wallet session this swap belongs to
 	requireOnline('swap execution')
 	if (!engine.wallet) throw new Error('No device connected')
@@ -9969,8 +9970,8 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			getSwapQuote: (params) => params.isMax
 				? engine.withDeviceOperation(() => headlessSwapQuote(params), { unlock: true, rejectIfBusy: true, origin: 'desktop' })
 				: restRequest.run({ whileLocked: false, cachedOnly: true }, () => headlessSwapQuote(params)),
-			executeSwap: (params) => headlessExecuteSwap(params, (stage) => {
-				try { rpc.send["swap-substage"]({ stage }) } catch { /* webview not ready */ }
+			executeSwap: (params) => headlessExecuteSwap(params, (stage, tx) => {
+				try { rpc.send["swap-substage"]({ stage, ...(tx ? { tx } : {}) }) } catch { /* webview not ready */ }
 			}),
 			getPendingSwaps: async () => {
 				// Hidden sessions DO get pending swaps: the tracker holds them in RAM

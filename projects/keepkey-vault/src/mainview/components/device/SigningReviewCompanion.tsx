@@ -4,7 +4,8 @@ import type { SigningRequestInfo } from '../../../shared/types'
 import { emulatorReviewPixels, signingReviewGuide, type SigningRequestKind, type SigningReviewDepth } from '../../../shared/signing-review-guide'
 import { NumberNode, PreflightList, PreflightStyles, TimelineItem, TimelineMark, usePreflightShort } from '../preflight/PreflightConsole'
 import { OledConfirm, OledText, SpinningDevice } from '../v3'
-import { hiveDeviceMirror, mirrorPosition } from '../../../shared/hive-device-screens'
+import { hiveDeviceMirror, mirrorPosition, type DeviceMirror } from '../../../shared/hive-device-screens'
+import { ethSignTxMirror, ethTxFromBody } from '../../../shared/eth-device-screens'
 import { useUiTranslation } from '../../i18n/ui'
 import { useSigningReviewPreferences } from '../../lib/signing-review-preferences'
 import { rpcRequest } from '../../lib/rpc'
@@ -58,17 +59,34 @@ export function PairedEmulatorDisplay({ request }: { request: SigningRequestInfo
  *  ButtonRequest, following the device as the requests arrive. Null when the
  *  request type has no mirror; the caller then shows its sketch. */
 export function useDeviceMirror(request: SigningRequestInfo) {
-  return useMemo(() => hiveDeviceMirror(request.method, request.rawRequestBody), [request.method, request.rawRequestBody])
+  return useMemo(() => deviceMirrorFor(request), [request])
 }
 
-export function DeviceMirrorPanel({ request, devicePrompts = 0, following = false, scale = 1 }: {
-  request: SigningRequestInfo; devicePrompts?: number
+/** Hive requests, and EthereumSignTx (shared/eth-device-screens) unless a
+ *  ClearSign description goes to the device: then its own screens show. */
+export function deviceMirrorFor(request: SigningRequestInfo): DeviceMirror | null {
+  if (request.method === '/eth/sign-transaction') {
+    const descriptor = request.clearSignReport?.descriptor
+    const clearSign = !!request.certifiedEvmSchema || !!request.erc7730
+      || (!!descriptor?.authenticated && (descriptor.format === 'ERC7730' || descriptor.format === 'EVM_METADATA'))
+    const tx = ethTxFromBody(request.rawRequestBody, { chainId: request.chainId, advancedMode: request.advancedModeEnabled, clearSign })
+    return tx && ethSignTxMirror(tx)
+  }
+  return hiveDeviceMirror(request.method, request.rawRequestBody)
+}
+
+export function DeviceMirrorPanel({ request, mirror: given, devicePrompts = 0, following = false, scale = 1 }: {
+  request?: SigningRequestInfo
+  /** A mirror computed by the caller (the swap's own transaction), instead of the request's. */
+  mirror?: DeviceMirror | null
+  devicePrompts?: number
   /** True while the device is reviewing: the shown screen tracks its ButtonRequests. */
   following?: boolean
   scale?: number
 }) {
   const uiText = useUiTranslation()
-  const mirror = useDeviceMirror(request)
+  const fromRequest = useMemo(() => request ? deviceMirrorFor(request) : null, [request])
+  const mirror = given !== undefined ? given : fromRequest
   const [pinned, setPinned] = useState<number | null>(null)
   // Each ButtonRequest means the device moved on: stop peeking and follow it.
   useEffect(() => { setPinned(null) }, [devicePrompts])
@@ -80,7 +98,12 @@ export function DeviceMirrorPanel({ request, devicePrompts = 0, following = fals
   const at = Math.min(pinned ?? live, total - 1)
   const onDevice = (i: number) => !!position && !position.beyond && i >= position.from && i <= position.to
   const screen = mirror.screens[at]!
-  const recipient = typeof request.rawRequestBody?.to === 'string' ? request.rawRequestBody.to : undefined
+  const recipient = typeof request?.rawRequestBody?.to === 'string' ? request.rawRequestBody.to : undefined
+  const contactNote = mirror.mayPrepend === 'contact-address'
+    ? uiText('If the recipient is a certified contact on your KeepKey, its name replaces the address and a “Contact Address” screen follows.')
+    : recipient
+      ? uiText('If @{{account}} is a certified contact on your KeepKey, it shows a “Certified contact” screen first.', { account: recipient })
+      : uiText('If a recipient is a certified contact on your KeepKey, it shows a “Certified contact” screen first.')
   return <div data-device-mirror={mirror.exact ? 'exact' : 'approximate'} style={{ display: 'grid', gap: 12, justifyItems: 'start' }}>
     <SpinningDevice motion="still" scale={scale} label={`${screen.title}. ${screen.rows.join(' ')}`} screen={<OledConfirm title={screen.title} rows={screen.rows} />} />
     {total > 1 && <div className="kk-pf-modes" role="group" aria-label={uiText('KeepKey screens')} style={{ flexWrap: 'wrap' }}>
@@ -98,11 +121,7 @@ export function DeviceMirrorPanel({ request, devicePrompts = 0, following = fals
           : uiText('Screen {{n}} of {{total}}, exactly as your KeepKey firmware draws it.', { n: at + 1, total })
         : <>{mirror.reason} {uiText('Screens after this point are approximate. Trust your KeepKey’s own screen.')}</>}
     </p>
-    {mirror.mayPrepend === 'certified-contact' && <p className="kk-pf-detail" style={{ margin: 0 }}>
-      {recipient
-        ? uiText('If @{{account}} is a certified contact on your KeepKey, it shows a “Certified contact” screen first.', { account: recipient })
-        : uiText('If a recipient is a certified contact on your KeepKey, it shows a “Certified contact” screen first.')}
-    </p>}
+    {mirror.mayPrepend && <p className="kk-pf-detail" style={{ margin: 0 }}>{contactNote}</p>}
   </div>
 }
 

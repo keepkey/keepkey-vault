@@ -597,6 +597,24 @@ export type SwapSubStage =
   | 'swap-signing'            // device prompting for the swap itself
   | 'swap-broadcasting'       // swap tx going to mempool
 
+/** The EVM transaction the device is about to sign, as the UI needs it to
+ *  draw the KeepKey's own screens (shared/eth-device-screens). No key
+ *  material; clearSign says a ClearSign description goes with it (the device
+ *  then shows that description's screens instead). */
+export interface SwapSigningTx {
+  chainId: number; to?: string; value?: string; data?: string
+  gasLimit?: string; gasPrice?: string; maxFeePerGas?: string; clearSign: boolean
+}
+export function swapSigningTx(tx: any): SwapSigningTx | undefined {
+  if (!tx || typeof tx !== 'object' || tx.gasLimit == null || tx.chainId == null) return undefined
+  const str = (v: unknown) => v == null ? undefined : String(v)
+  return {
+    chainId: Number(tx.chainId), to: str(tx.to), value: str(tx.value), data: str(tx.data),
+    gasLimit: str(tx.gasLimit), gasPrice: str(tx.gasPrice), maxFeePerGas: str(tx.maxFeePerGas),
+    clearSign: !!tx.txMetadata || !!tx.erc7730,
+  }
+}
+
 export interface SwapContext {
   wallet: SwapWallet
   getAllChains: () => ChainDef[]
@@ -608,7 +626,7 @@ export interface SwapContext {
   /** Push a finer-grained substage label to the UI. Required (use NOOP_PUSH_SUBSTAGE
    *  for REST/headless callers) so a future entry point can't silently regress
    *  the UI to a coarse phase by forgetting to wire it up. */
-  pushSubStage: (stage: SwapSubStage) => void
+  pushSubStage: (stage: SwapSubStage, tx?: SwapSigningTx) => void
   /** Whether the device's AdvancedMode (blind-signing) policy is enabled.
    *  Returns undefined when unknown (no cached features / policy not reported).
    *  Used to gate Solana swaps, which can only blind-sign. */
@@ -646,7 +664,7 @@ export const NOOP_PUSH_SUBSTAGE = (_stage: SwapSubStage): void => { /* intention
 /** Execute a swap: build tx, sign on device, broadcast */
 export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): Promise<SwapResult> {
   const { wallet, getAllChains, getEvmRpcSource, getBtcXpub, getAllBtcXpubs, wrapSign, pushSubStage, onClearSignEvent } = ctx
-  const stage = (s: SwapSubStage) => { try { pushSubStage(s) } catch { /* never block on push */ } }
+  const stage = (s: SwapSubStage, tx?: SwapSigningTx) => { try { pushSubStage(s, tx) } catch { /* never block on push */ } }
 
   // Resolve source chain
   const allChains = getAllChains()
@@ -828,7 +846,7 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
       if (result.approveTx) {
         swapLog(`${TAG} Relay ERC-20 approval required: prompting device for approveTx`)
         assertEvmSignable(result.approveTx)
-        stage('approve-signing')
+        stage('approve-signing', swapSigningTx(result.approveTx))
         const signedApprove = await wrapSign(
           () => protectSign(result.approveTx, 'approval', () => wallet.ethSignTx(result.approveTx)),
           { operation: 'erc20Approve', chain: fromChain.coin, to: result.approveTx.to, value: params.amount },
@@ -1157,7 +1175,7 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
 
   // 4. Sign on device (user confirms tx details on hardware wallet)
   console.info(`${TAG} policy passed; signing ${fromChain.chainFamily} via ${fromChain.signMethod} (advancedMode=${ctx.isAdvancedModeEnabled?.() ?? 'unknown'}, metadataKey=${unsignedTx?.txMetadata?.keyId ?? 'none'})`)
-  stage('swap-signing')
+  stage('swap-signing', fromChain.chainFamily === 'evm' ? swapSigningTx(unsignedTx) : undefined)
   let signedTx: any
   const clearSignMaterial = unsignedTx?.schema?.payload
     ? {
@@ -1988,7 +2006,7 @@ async function buildEvmSwapTx(
   isErc20Source: boolean,
   wallet: any,
   previewMode = false,
-  stage: (s: SwapSubStage) => void = () => {},
+  stage: (s: SwapSubStage, tx?: SwapSigningTx) => void = () => {},
   wrapSign: SwapContext['wrapSign'] = (fn) => fn(),
   protect?: SwapContext['protectSign'],
   certifiedMetadataSupported = false,
@@ -2251,7 +2269,7 @@ async function buildEvmSwapTx(
       } else {
       swapLog(`${TAG} Signing ERC-20 approve tx: token=${tokenContract}, spender=${routerAddress}, amount=${amountBaseUnits}`)
       assertSignable(approveTx)
-      stage('approve-signing')
+      stage('approve-signing', swapSigningTx(approveTx))
       const signedApprove = await wrapSign(
         () => {
           const signApproval = () => wallet.ethSignTx(approveTx)

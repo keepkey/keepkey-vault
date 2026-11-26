@@ -144,6 +144,52 @@ const CSS = `
   .kk-pf-split > .kk-pf-body { overflow: visible; }
   .kk-pf-split > .kk-pf-foot { position: sticky; bottom: 0; z-index: 1; background: var(--ink-0); }
 }
+/* Inside a dialog panel that already draws the console's surface. */
+.kk-pf.kk-pf-inset { background: transparent; box-shadow: none; border-radius: 0; max-height: none; flex: 1 1 auto; min-height: 0; }
+/* A decision row across both columns (forms). */
+.kk-pf.kk-pf-rows:not(.kk-pf-flat) { grid-template-rows: minmax(0, 1fr) auto; }
+.kk-pf > .kk-pf-foot.kk-pf-span { grid-column: 1 / -1; display: grid; gap: 10px; padding: 12px 26px 20px; box-shadow: 0 -1px 0 rgba(255,255,255,.06); }
+.kk-pf-right.kk-pf-split { padding: 0; gap: 0; overflow: hidden; }
+/* Amounts: official logo, figure, then a quiet line under it. */
+.kk-pf-amt { display: flex; align-items: center; gap: 14px; min-width: 0; }
+.kk-pf-amt.kk-pf-ends { justify-content: space-between; }
+.kk-pf-amt > div { display: grid; grid-template-columns: auto minmax(0, auto); column-gap: 10px; align-items: center; min-width: 0; }
+.kk-pf-amt > div > :first-child:not(b) { grid-row: span 2; }
+.kk-pf-amt b { font-family: var(--font-mono); font-size: 20px; font-weight: 600; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.kk-pf-amt small { color: var(--text-2); font-size: 11.5px; }
+.kk-pf-amt.kk-pf-ends > div { grid-template-columns: minmax(0, auto); }
+.kk-pf-amt.kk-pf-ends > div:last-child { text-align: right; justify-items: end; }
+/* A value typed on the surface: no box, one hairline. (Not .kk-pf-num: that is NumberNode.) */
+.kk-pf-field { width: 100%; min-width: 0; background: transparent; border: 0; border-bottom: 1px solid rgba(255,255,255,.14); border-radius: 0; color: var(--text-0);
+  font-family: var(--font-mono); font-size: 26px; font-weight: 600; font-variant-numeric: tabular-nums; padding: 4px 0 6px; outline: none; }
+.kk-pf-field:focus { border-bottom-color: var(--gold); }
+.kk-pf-field[aria-invalid="true"] { border-bottom-color: var(--rose); }
+.kk-pf-field.kk-pf-sm { font-size: 12px; font-weight: 500; padding: 6px 0; }
+.kk-pf-field:disabled { opacity: .6; }
+/* A chosen item that opens a picker: logo, name, quiet sub-line. */
+.kk-pf-pick { display: flex; align-items: center; gap: 12px; background: none; border: 0; padding: 0; color: inherit; font: inherit; text-align: left; cursor: pointer; min-width: 0; }
+.kk-pf-pick:disabled { cursor: default; opacity: .7; }
+.kk-pf-pick b { font-size: 22px; font-weight: 600; letter-spacing: -.01em; }
+.kk-pf-pick .kk-pf-dim { font-size: 15px; }
+.kk-pf-pick small { display: block; font-size: 11.5px; color: var(--text-2); margin-top: 2px; }
+.kk-pf-pick:focus-visible { outline: 2px solid var(--gold); outline-offset: 4px; border-radius: 6px; }
+/* Busy state of a pill. */
+.kk-pf-spin { width: 11px; height: 11px; border-radius: 50%; border: 1.5px solid currentColor; border-right-color: transparent; display: inline-block; vertical-align: -1px; margin-right: 8px; animation: kk-pf-rot .8s linear infinite; }
+@keyframes kk-pf-rot { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .kk-pf-spin { animation-duration: 2.4s; } }
+/* Round icon button sitting on the column divider. */
+.kk-pf-pivot { position: absolute; left: 50%; z-index: 2; width: 38px; height: 38px; margin-left: -19px; border-radius: 50%; border: 0; cursor: pointer; display: grid; place-items: center;
+  background: var(--ink-0); color: var(--gold); box-shadow: inset 0 0 0 1px rgba(233,196,106,.45), 0 0 0 5px var(--ink-0); transition: transform .3s; }
+.kk-pf-pivot:hover:not(:disabled) { transform: rotate(180deg); }
+.kk-pf-pivot:disabled { opacity: .4; cursor: default; }
+.kk-pf-pivot:focus-visible { outline: 2px solid var(--gold); outline-offset: 3px; }
+@media (max-width: 760px) { .kk-pf-pivot { display: none; } }
+/* Columns split by a pivot: each side keeps the same clear space from it
+   (19px half-button + 25px air), and the pivot sits on the logos' centre line. */
+.kk-pf.kk-pf-pivoted > .kk-pf-left { padding-right: 44px; }
+.kk-pf.kk-pf-pivoted > .kk-pf-right { padding-left: 44px; }
+.kk-pf.kk-pf-pivoted > .kk-pf-pivot { top: 57px; }
+@media (max-height: 820px) { .kk-pf.kk-pf-pivoted > .kk-pf-pivot { top: 49px; } }
 /* Short windows (the vault opens at 1200×800): tighter rhythm, smaller print. */
 @media (max-height: 820px) {
   .kk-pf-left:not(.kk-pf-split) { padding: 18px 22px 16px; gap: 12px; }
@@ -158,6 +204,9 @@ const CSS = `
   .kk-pf-actions button { padding: 10px 16px; }
   .kk-pf-hint { font-size: 9.5px; }
   .kk-pf-note { font-size: 10px; }
+  .kk-pf > .kk-pf-foot.kk-pf-span { padding: 10px 22px 14px; gap: 8px; }
+  .kk-pf-amt b { font-size: 18px; }
+  .kk-pf-field { font-size: 22px; }
 }
 `
 

@@ -7,9 +7,9 @@ import { swapFeeLabel } from "../lib/swap-copy"
  * Phases: input → review → approving/signing/broadcasting → success
  * Replaces the old inline SwapView with a proper modal experience.
  */
-import React, { useState, useEffect, useCallback, useMemo, useRef, type ReactNode } from "react"
+import React, { useState, useEffect, useLayoutEffect, useCallback, useMemo, useRef, type ReactNode } from "react"
 import { useTranslation } from "react-i18next"
-import { Box, Flex, Text, VStack, Button, Input, Image, HStack, Spinner } from "@chakra-ui/react"
+import { Box, Flex, Text, VStack, Button, Image, HStack, Spinner } from "@chakra-ui/react"
 import CountUp from "react-countup"
 import { rpcRequest, rpcFire, onRpcMessage } from "../lib/rpc"
 import { formatBalance } from "../lib/formatting"
@@ -36,7 +36,8 @@ import { assessSwapRisk } from "../../shared/swap-risk"
 import { swapHealthSummary, swapProviderPresentation, swapHealthQuoteExplanation } from "../../shared/swap-health"
 import { knownSpenderName } from "../../shared/evm-known-spenders"
 import { isSwapFullySettled, payoutReachesMinimum } from "../../shared/swap-settlement"
-import { SwapRiskReview } from "./SwapRiskReview"
+import { useSwapRiskRows } from "./SwapRiskReview"
+import { NumberNode, PreflightList, PreflightStyles, TimelineItem, usePreflightScroll, usePreflightShort, type PreflightRow } from "./preflight/PreflightConsole"
 import { shouldWarnHighSlippage, computeEffectiveSlippageBps, isSmallSwapQuoteWarning } from "../../shared/swap-warnings"
 import { useEvmAddresses } from "../hooks/useEvmAddresses"
 import { useDeviceState } from "../hooks/useDeviceState"
@@ -49,7 +50,7 @@ import { sameSwapAsset, swapNetworkIdentity } from "../../shared/swap-network-id
 import { AssetPickerDialog } from "./AssetPickerDialog"
 import { DocsLink } from "./DocsLink"
 import { DOCS_LINKS, watch } from "../../shared/docs-links"
-import { networkDisplayName, ellipsizeCaip, parseCaip } from "../../shared/swap-discovery"
+import { networkDisplayName, parseCaip } from "../../shared/swap-discovery"
 import { isSymbolSquatter } from "../../shared/symbolSquatter"
 import { retainSwapProgress, shouldRetryCompletedSwapMetadata } from "../../shared/swap-tracker-guards"
 import { advanceSwapStatus } from "../../shared/relay-status"
@@ -65,8 +66,10 @@ import {
   parseCustomSlippagePercent,
   slippageAfterSwap,
 } from "../../shared/slippage"
-import { KeepKeyDevice, RouteMap, SpinningDevice } from "./v3"
-import { getSwapperAnimation } from "../lib/swapper-animations"
+import { KeepKeyDevice, OledText, RouteMap, SpinningDevice } from "./v3"
+import { DeviceMirrorPanel } from "./device/SigningReviewCompanion"
+import { ethSignTxMirror, ethTxFromBody } from "../../shared/eth-device-screens"
+import { getSwapperAnimation, getSwapperStill } from "../lib/swapper-animations"
 import calculatingGif from "../assets/swap/calculating.gif"
 import shiftingGif from "../assets/swap/shifting.gif"
 import completedGif from "../assets/swap/completed.gif"
@@ -318,7 +321,7 @@ function ReviewRow({ label, children, accent = false }: { label: ReactNode; chil
         fontSize="11px"
         fontFamily="mono"
         fontWeight={accent ? "700" : "500"}
-        color={accent ? "var(--teal)" : "kk.textSecondary"}
+        color={accent ? "var(--text-0)" : "kk.textSecondary"}
         textAlign="right"
         wordBreak="break-word"
       >
@@ -454,11 +457,6 @@ const SwapArrowIcon = () => (
   </svg>
 )
 
-const ChevronDownIcon = () => (
-  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-    <polyline points="6 9 12 15 18 9" />
-  </svg>
-)
 
 const ThorchainIcon = ({ size = 14 }: { size?: number }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none">
@@ -473,11 +471,6 @@ const CheckIcon = () => (
   </svg>
 )
 
-const ShieldIcon = () => (
-  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--teal)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
-  </svg>
-)
 
 const SwapInputIcon = () => (
   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -631,6 +624,18 @@ const DIALOG_CSS = `
     0%, 100% { transform: scale(1);    opacity: 0.9; }
     50%      { transform: scale(1.04); opacity: 0.55; }
   }
+  /* Sub-dialogs (provider status, route details) on the preflight surface. */
+  .kk-sd-overlay { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; padding: 16px; background: rgba(11,11,14,.72); backdrop-filter: blur(20px) saturate(140%); }
+  .kk-sd-panel { display: flex; flex-direction: column; width: min(640px, 100%); max-height: calc(100vh - 32px); border-radius: 18px; overflow: hidden; color: var(--text-0); font-family: var(--font-ui-sans);
+    background-color: #0b0b0e; background-image: radial-gradient(120% 80% at 0% 0%, rgba(233,196,106,.10), transparent 55%), radial-gradient(90% 70% at 100% 100%, rgba(98,126,234,.07), transparent 60%);
+    box-shadow: inset 0 0 0 1px rgba(255,255,255,.06), 0 30px 80px -30px rgba(0,0,0,.8); }
+  .kk-sd-panel.kk-sd-narrow { width: min(420px, 100%); }
+  .kk-sd-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 20px 24px 12px; flex: none; }
+  .kk-sd-head h2 { margin: 6px 0 0; font-size: 18px; font-weight: 600; }
+  .kk-sd-x { width: 32px; height: 32px; border: 0; border-radius: 8px; background: transparent; color: var(--text-2); cursor: pointer; font-size: 18px; line-height: 1; }
+  .kk-sd-x:hover { color: var(--text-0); background: rgba(255,255,255,.05); }
+  .kk-sd-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 0 24px 18px; }
+  .kk-sd-foot { flex: none; padding: 10px 24px 16px; box-shadow: 0 -1px 0 rgba(255,255,255,.06); font-size: 11px; color: var(--text-2); }
   /* Native <details> open/close — fade the body in. */
   .kk-acc[open] > .kk-acc-body { animation: kkSwapFadeIn 0.22s ease-out; }
   .kk-acc summary { list-style: none; cursor: pointer; user-select: none; }
@@ -655,120 +660,40 @@ function AssetSelector({ label, selected, onOpenPicker, disabled }: AssetSelecto
   const uiText = useUiTranslation()
 
   const { t } = useTranslation("swap")
-
-  /* ── Selected asset → big prominent display ── */
-  if (selected) {
-    // Symbol squatter: an unverified token wearing a major chain's ticker/name
-    // (e.g. an ERC-20 that calls itself "SOLANA"). Strip its server icon so it
-    // can't wear the native logo, and warn — see shared/symbolSquatter.
-    const squatter = isSymbolSquatter(selected.caip, selected.symbol, selected.name)
-    return (
-      <Box>
-        <Flex justify="space-between" align="center" mb="3">
-          <Text fontSize="xs" color="kk.textMuted" fontWeight="600" textTransform="uppercase" letterSpacing="0.05em">{label}</Text>
-          {!disabled && (
-            <Box as="button" display="flex" alignItems="center" gap="1" color="kk.textMuted" fontSize="11px" fontWeight="500"
-              _hover={{ color: "kk.gold" }} transition="color 0.15s"
-              onClick={onOpenPicker}>
-              {t("change") || uiText("Change")} <ChevronDownIcon />
-            </Box>
-          )}
-        </Flex>
-        <Flex
-          direction="column"
-          align="center"
-          gap="2"
-          cursor={disabled ? "default" : "pointer"}
-          opacity={disabled ? 0.7 : 1}
-          onClick={() => { if (!disabled) onOpenPicker() }}
-          _hover={disabled ? {} : { opacity: 0.85 }}
-          transition="opacity 0.15s"
-        >
-          <Box position="relative" flexShrink={0}
-            style={{ animation: 'kkLogoFloat 3s ease-in-out infinite, kkLogoGlow 3s ease-in-out infinite' }}>
-            <AssetIcon
-              caip={selected.caip}
-              iconUrl={squatter ? undefined : selected.icon}
-              chainCaip={chainBadgeCaip(selected)}
-              size={80}
-              alt={selected.symbol}
-              ring={squatter ? "rgba(255,107,107,0.5)" : "rgba(139,227,196,0.28)"}
-            />
-          </Box>
-          {(() => {
-            // GAS vs TOKEN — prefer the CAIP namespace (authoritative: `/slip44:`
-            // is native, `/erc20:` `/token:` are tokens). A SwapAsset can carry a
-            // token CAIP yet a missing contractAddress, which would mislabel it as
-            // GAS — only fall back to contractAddress when there's no CAIP.
-            const isToken = selected.caip ? parseCaip(selected.caip).isToken : !!selected.contractAddress
-            return (
-              <VStack gap="0.5" align="center" minW="0" maxW="100%">
-                <Flex align="center" justify="center" gap="2">
-                  <Text fontSize="lg" fontWeight="800" color="kk.textPrimary" lineHeight="1.1">{selected.symbol}</Text>
-                  {/* NATIVE vs TOKEN — never let a token masquerade as the chain coin.
-                      "GAS" was wrong for UTXO coins (BTC has no gas) and read as a fee. */}
-                  <Box
-                    bg={isToken ? "rgba(255,255,255,0.06)" : "rgba(233,196,106,0.14)"}
-                    color={isToken ? "kk.textMuted" : "kk.gold"}
-                    px="1.5" py="0.5" borderRadius="4px" fontSize="9px" fontWeight="700" letterSpacing="0.06em">
-                    {isToken ? "TOKEN" : "NATIVE"}
-                  </Box>
-                </Flex>
-                {/* Network — distinguishes USDC-on-Ethereum from USDC-on-Optimism */}
-                <Text fontSize="xs" color="kk.textSecondary" textAlign="center">
-                  {selected.name}
-                  {selected.caip && <> · <Text as="span" fontWeight="600" color="kk.textPrimary">{networkDisplayName(selected.caip.split("/")[0])}</Text></>}
-                </Text>
-                {/* Exact CAIP-19 (hex parts middle-ellipsized) so it stays unambiguous without overflowing */}
-                {selected.caip && (
-                  <Text fontSize="9px" fontFamily="mono" color="kk.textMuted" opacity={0.6} whiteSpace="nowrap" textAlign="center">
-                    {ellipsizeCaip(selected.caip)}
-                  </Text>
-                )}
-                {/* Symbol-squatter warning — a token impersonating a native coin's name */}
-                {squatter && (
-                  <Text fontSize="10px" fontWeight="700" color="#ff6b6b" textAlign="center" maxW="220px" lineHeight="1.3" mt="0.5">
-                    {t("symbolSquatterWarning", {
-                      defaultValue: "⚠ Unverified token using the “{{symbol}}” name — this is NOT the native coin. Verify the contract above.",
-                      symbol: selected.symbol,
-                    })}
-                  </Text>
-                )}
-              </VStack>
-            )
-          })()}
-        </Flex>
-      </Box>
-    )
-  }
-
-  /* ── No asset selected → dashed prompt ── */
+  // Symbol squatter: an unverified token wearing a major chain's ticker/name
+  // (e.g. an ERC-20 that calls itself "SOLANA"). Strip its server icon so it
+  // can't wear the native logo, and warn — see shared/symbolSquatter.
+  const squatter = !!selected && isSymbolSquatter(selected.caip, selected.symbol, selected.name)
+  // Native vs token from the CAIP namespace: a token never reads as the chain coin.
+  const isToken = !!selected && (selected.caip ? parseCaip(selected.caip).isToken : !!selected.contractAddress)
+  const network = selected?.caip ? networkDisplayName(selected.caip.split("/")[0]) : ''
   return (
-    <Box>
-      <Text fontSize="xs" color="kk.textMuted" mb="1" fontWeight="600" textTransform="uppercase" letterSpacing="0.05em">{label}</Text>
-      <Flex
-        as="button"
-        align="center"
-        gap="3"
-        w="full"
-        bg="rgba(255,255,255,0.03)"
-        border="2px dashed"
-        borderColor="rgba(255,255,255,0.1)"
-        borderRadius="xl"
-        px="4" py="5"
-        cursor={disabled ? "default" : "pointer"}
-        opacity={disabled ? 0.6 : 1}
-        _hover={disabled ? {} : { borderColor: "kk.gold", bg: "rgba(233,196,106,0.04)" }}
-        transition="all 0.2s"
-        onClick={() => { if (!disabled) onOpenPicker() }}
-      >
-        <Box w="64px" h="64px" borderRadius="full" bg="rgba(255,255,255,0.06)" display="flex" alignItems="center" justifyContent="center">
-          <Text fontSize="xl" color="kk.textMuted">?</Text>
-        </Box>
-        <Text fontSize="md" color="kk.textMuted" flex="1" textAlign="left" fontWeight="500">{t("selectAsset")}</Text>
-        {!disabled && <ChevronDownIcon />}
-      </Flex>
-    </Box>
+    <div style={{ display: 'grid', gap: 12 }} data-swap-asset>
+      <div className="kk-pf-top">
+        <span className="kk-pf-kicker">{label}</span>
+        {!disabled && selected && <button type="button" className="kk-pf-link" onClick={onOpenPicker}>{t("change") || uiText("Change")}</button>}
+      </div>
+      <button type="button" className="kk-pf-pick" onClick={() => { if (!disabled) onOpenPicker() }} disabled={disabled}>
+        {selected ? <>
+          <AssetIcon caip={selected.caip} iconUrl={squatter ? undefined : selected.icon} chainCaip={chainBadgeCaip(selected)} size={40} alt={selected.symbol} bare />
+          <span style={{ minWidth: 0 }}>
+            <b>{selected.symbol}</b>{network && <span className="kk-pf-dim">{' · '}{network}</span>}
+            {isToken && selected.name && selected.name !== selected.symbol && <small>{selected.name}</small>}
+          </span>
+        </> : <>
+          <span className="kk-pf-node kk-pf-num" aria-hidden="true">?</span>
+          <span><b style={{ fontSize: 16, fontWeight: 500, color: 'var(--text-1)' }}>{t("selectAsset")}</b></span>
+        </>}
+      </button>
+      {squatter && selected && (
+        <p className="kk-pf-detail" style={{ margin: 0, color: 'var(--rose)', fontWeight: 600 }}>
+          {t("symbolSquatterWarning", {
+            defaultValue: "⚠ Unverified token using the “{{symbol}}” name — this is NOT the native coin. Verify the contract above.",
+            symbol: selected.symbol,
+          })}
+        </p>
+      )}
+    </div>
   )
 }
 
@@ -932,17 +857,29 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
   // substages via `swap-substage` so the label can reflect the truth.
   type SwapSubStage = 'approve-signing' | 'approve-broadcasting' | 'approve-waiting-receipt' | 'swap-signing' | 'swap-broadcasting'
   const [subStage, setSubStage] = useState<SwapSubStage | null>(null)
+  // At approve-signing / swap-signing Bun also sends the EVM transaction the
+  // device signs now, so the KeepKey's own screens can be drawn for it.
+  type SigningTx = { chainId: number; to?: string; value?: string; data?: string; gasLimit?: string; gasPrice?: string; maxFeePerGas?: string; clearSign: boolean }
+  const [signingTx, setSigningTx] = useState<SigningTx | null>(null)
   useEffect(() => {
-    return onRpcMessage('swap-substage', (msg: { stage: SwapSubStage }) => {
+    return onRpcMessage('swap-substage', (msg: { stage: SwapSubStage; tx?: SigningTx }) => {
       setSubStage(msg.stage)
+      if (msg.stage.endsWith('-signing')) setSigningTx(msg.tx ?? null)
     })
   }, [])
   // Reset substage whenever we leave the busy phases
   useEffect(() => {
     if (phase !== 'approving' && phase !== 'signing' && phase !== 'broadcasting') {
       setSubStage(null)
+      setSigningTx(null)
     }
   }, [phase])
+  // The KeepKey's ButtonRequests for the transaction being signed now: the
+  // approval and the swap each start their own count.
+  const [devicePrompts, setDevicePrompts] = useState(0)
+  useEffect(() => onRpcMessage('device-button-request', () => setDevicePrompts(n => n + 1)), [])
+  const signingTxKind = subStage?.startsWith('swap-') ? 'swap' : subStage?.startsWith('approve-') || phase === 'approving' ? 'approve' : phase
+  useEffect(() => { setDevicePrompts(0) }, [signingTxKind])
 
   // ── Live swap tracking state ────────────────────────────────────
   const [liveStatus, setLiveStatus] = useState<SwapTrackingStatus>('pending')
@@ -993,7 +930,6 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
   // ── Frozen amount sent (captured at execution time so balance changes don't affect display) ──
   const [sentAmount, setSentAmount] = useState<string | null>(null)
 
-  const [showDetails, setShowDetails] = useState(false)
 
   // ── Pre-confirm payload preview ──
   // Built silently when the user enters the Confirm Quote screen so the full
@@ -2242,9 +2178,31 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
   const slippageKey = JSON.stringify({ open, quoteId: quote?.quoteId, quoteFetchedAt, slippageBps })
   const [slippageAcceptedKey, setSlippageAcceptedKey] = useState('')
   const slippageLocked = slippageNeedsConfirm && slippageAcceptedKey !== slippageKey
-  const riskPanel = quote && toAsset ? <SwapRiskReview risk={swapRisk}
-    acknowledged={riskAcknowledged}
-    onAcknowledge={accepted => setRiskAcceptedKey(accepted ? riskKey : '')} /> : null
+  const riskRows = useSwapRiskRows(swapRisk, riskAcknowledged, accepted => setRiskAcceptedKey(accepted ? riskKey : ''))
+  const riskPanel = quote && toAsset && riskRows.length ? <PreflightList rows={riskRows} /> : null
+  // What the KeepKey shows for the EVM transaction it signs now, screen by
+  // screen (shared/eth-device-screens), from the exact transaction Bun hands
+  // the device. Null when a ClearSign description goes with it, or for other chains.
+  const signingMirror = useMemo(() => {
+    const tx = signingTx && ethTxFromBody(signingTx as unknown as Record<string, unknown>, { clearSign: signingTx.clearSign })
+    return tx ? ethSignTxMirror(tx) : null
+  }, [signingTx])
+  // The console fits the window: columns scroll, the decision row stays put.
+  const shortWindow = usePreflightShort()
+  const leftScroll = usePreflightScroll<HTMLDivElement>()
+  const rightScroll = usePreflightScroll<HTMLDivElement>()
+  // The panel is as tall as its content; while a quote or a payload is on its
+  // way (the placeholder, then the figures) it holds its last settled height.
+  const settling = phase === 'quoting' || previewLoading || refreshingQuote
+  const settledHeight = useRef<number | null>(null)
+  const [heldHeight, setHeldHeight] = useState<number | null>(null)
+  useLayoutEffect(() => {
+    if (settling) setHeldHeight(h => h ?? settledHeight.current)
+    else setHeldHeight(null)
+  }, [settling])
+  useLayoutEffect(() => {
+    if (!settling && heldHeight === null) settledHeight.current = dialogPanel.current?.offsetHeight ?? settledHeight.current
+  })
 
   const auditPayloadReady = !!previewBuild?.unsignedTx
   const previewBalanceBlocked = !!previewBuild?.balance && !previewBuild.balance.sufficient
@@ -2930,42 +2888,50 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
   // Top-anchored, not vertically centred: the panel grows as the quote,
   // warnings and fees arrive, and a centred panel moved up by that much
   // (Jasper, 1.6.11: 49 px over three steps), so a click aimed at a control
-  // could land on another one. Anchored at 5vh, it only grows downward.
+  // could land on another one. Anchored near the top, it only grows downward,
+  // and never past the window: the console's columns scroll inside it while
+  // its decision row stays on screen.
+  const consoleView = !loadingAssets && (
+    ((phase === 'input' || phase === 'quoting') && !assetLoadError) ||
+    (phase === 'review' && !!quote && !!fromAsset && !!toAsset && !busy) ||
+    (busy && !!fromAsset && !!toAsset))
   return (
-    <Box position="fixed" inset="0" zIndex={Z.dialog} display="flex" alignItems="flex-start" justifyContent="center" pt="5vh" onKeyDown={dialogKeys}>
+    <Box position="fixed" inset="0" zIndex={Z.dialog} display="flex" alignItems="center" justifyContent="center" p="16px" onKeyDown={dialogKeys}>
       <style>{DIALOG_CSS}</style>
+      <PreflightStyles />
       <Box position="absolute" inset="0" bg="rgba(11,11,14,0.72)" backdropFilter="blur(20px) saturate(140%)" onClick={busy || phase === 'submitted' ? undefined : handleClose} data-testid="swap-backdrop" />
       <Box ref={dialogPanel} role="dialog" aria-modal="true" aria-label={t('title')} tabIndex={-1} data-swap-panel
         position="relative"
-        borderRadius="22px"
-        border="1px solid rgba(255,255,255,0.10)"
-        w={isSwapComplete && phase === 'submitted' ? "1040px" : "760px"}
+        borderRadius="18px"
+        w={consoleView ? "min(980px, 94vw)" : isSwapComplete && phase === 'submitted' ? "1040px" : "760px"}
         maxW="94vw"
-        maxH="90vh"
-        overflow="auto"
+        // Centred like every preflight dialog, as tall as its content. While a
+        // quote or a payload is arriving it keeps the height it had, so the
+        // panel (and the control under the pointer) does not jump; only the
+        // columns scroll past the cap.
+        minH={heldHeight ? `${heldHeight}px` : undefined}
+        maxH="calc(100vh - 32px)"
+        display="flex"
+        flexDirection="column"
+        overflow="hidden"
         onClick={(e) => e.stopPropagation()}
         style={{
           animation: 'kkSwapFadeIn 0.2s ease-out',
-          backgroundColor: "rgba(16,16,21,0.97)",
-          backgroundImage: "linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.015))",
-          backdropFilter: "blur(32px) saturate(160%)",
-          WebkitBackdropFilter: "blur(32px) saturate(160%)",
-          boxShadow:
-            "0 0 0 1px rgba(255,255,255,0.06), 0 24px 60px -16px rgba(0,0,0,0.8), 0 4px 12px -4px rgba(0,0,0,0.5)",
+          // The preflight console's own surface (one surface, no nested cards).
+          backgroundColor: "#0b0b0e",
+          backgroundImage: "radial-gradient(120% 80% at 0% 0%, rgba(233,196,106,.10), transparent 55%), radial-gradient(90% 70% at 100% 100%, rgba(98,126,234,.07), transparent 60%)",
+          boxShadow: "inset 0 0 0 1px rgba(255,255,255,.06), 0 30px 80px -30px rgba(0,0,0,.8)",
         }}
       >
         {/* ── Header ──────────────────────────────────────────────── */}
-        <Flex px="5" py="2.5" borderBottom="1px solid" borderColor="kk.border" align="center" justify="space-between"
-          position="sticky" top="0" zIndex="2" bg="kk.cardBg">
-          <HStack gap="2.5" align="center">
-            <ProviderBadge swapper={quote?.swapper || liveSwapper || quote?.integration} size={22} variant="compact" />
-            <Text fontSize="sm" fontWeight="700" color="kk.textPrimary" letterSpacing="-0.01em">
-              {phase === 'review' ? t("review") : phase === 'submitted' ? t("swapSubmitted") : phase === 'blind-signing-required' ? t("blindSignHeader", "Blind Signing") : t("title")}
-            </Text>
-            {/* Provider health — rendered as ascending wifi-style bars so
-                the overall integration status reads at a glance (the worst
-                status determines the colour). Click to open the detail
-                dialog with per-provider rows. */}
+        <Flex px="22px" pt="14px" pb={consoleView ? "0" : "10px"} align="center" justify="space-between" gap="3" flexShrink={0}>
+          <HStack gap="2.5" align="center" minW="0">
+            {!consoleView && <ProviderBadge swapper={quote?.swapper || liveSwapper || quote?.integration} size={22} variant="compact" />}
+            <span className="kk-pf-kicker">
+              {phase === 'review' ? uiText("Review swap") : phase === 'submitted' ? t("swapSubmitted") : phase === 'blind-signing-required' ? t("blindSignHeader", "Blind Signing") : t("title")}
+            </span>
+            {/* Provider health — ascending wifi-style bars (the worst status
+                sets the colour). Click for the per-provider detail dialog. */}
             {swapHealth && (() => {
               const { color, bars: activeBars, label } = swapHealthSummary(swapHealth)
               const heights   = [4, 7, 10, 13]
@@ -2975,13 +2941,13 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                   display="inline-flex"
                   alignItems="flex-end"
                   gap="2px"
-                  px="2"
-                  py="1.5"
+                  px="1.5"
+                  py="1"
                   borderRadius="md"
                   cursor="pointer"
-                  bg="rgba(255,255,255,0.03)"
-                  _hover={{ bg: 'rgba(255,255,255,0.08)' }}
-                  border="1px solid rgba(255,255,255,0.08)"
+                  bg="transparent"
+                  _hover={{ bg: 'rgba(255,255,255,0.06)' }}
+                  border="0"
                   title={label}
                   onClick={() => setHealthDialogOpen(true)}
                   className="electrobun-webkit-app-region-no-drag"
@@ -2989,16 +2955,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                 >
                   {heights.map((h, i) => {
                     const active = i < activeBars
-                    return (
-                      <Box
-                        key={i}
-                        w="3px"
-                        h={`${h}px`}
-                        borderRadius="1px"
-                        bg={active ? color : 'rgba(255,255,255,0.10)'}
-                        style={active && activeBars === 4 ? { boxShadow: `0 0 4px ${color}66` } : undefined}
-                      />
-                    )
+                    return <Box key={i} w="3px" h={`${h}px`} borderRadius="1px" bg={active ? color : 'rgba(255,255,255,0.10)'} />
                   })}
                 </Box>
               )
@@ -3016,11 +2973,18 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
         </Flex>
 
         {/* ── Body ────────────────────────────────────────────────── */}
-        {/* Padding zeroed on the complete-swap view so the 2-column hero/details
-            layout reaches the modal edges and the footer can span full width. */}
+        {/* The console phases (form, review, signing) are a preflight console
+            that fits the panel; the other phases scroll in a padded body.
+            Padding is zeroed on the complete-swap view so the 2-column
+            hero/details layout reaches the modal edges. */}
         <Box
-          px={isSwapComplete && phase === 'submitted' ? "0" : "5"}
-          py={isSwapComplete && phase === 'submitted' ? "0" : "3"}
+          flex="1 1 auto"
+          minH="0"
+          display={consoleView ? "flex" : "block"}
+          flexDirection="column"
+          overflowY={consoleView ? "hidden" : "auto"}
+          px={consoleView || (isSwapComplete && phase === 'submitted') ? "0" : "5"}
+          py={consoleView || (isSwapComplete && phase === 'submitted') ? "0" : "3"}
         >
           {/* Loading state */}
           {loadingAssets && (
@@ -3936,142 +3900,76 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
           )}
 
           {/* ── SIGNING / APPROVING / BROADCASTING ───────────────── */}
-          {/* ── AWAITING DEVICE — dedicated full-screen confirm
-              Per handoff design: 220px KeepKey gif, prominent headline,
-              concise instruction, then a single summary chip. The
-              substage detail moves into the chip area as small mono text
-              instead of competing with the device illustration. */}
-          {busy && fromAsset && toAsset && (
-            <VStack gap="6" py="6" align="center" position="relative" style={{ animation: 'kkSwapFadeIn 0.3s ease-out' }}>
-              <Text fontSize="xs" color="kk.textSecondary">{uiText('Closing this view does not cancel the swap. Track it in Activity.')}</Text>
-              {/* Cancel/X — only meaningful while the device is awaiting a
-                  button press (signing/approving). Once the user has confirmed
-                  on device and we're broadcasting, the tx is already going
-                  to the network and there's no unwind. */}
-              {(phase === 'signing' || phase === 'approving') && (
-                <Box position="absolute" top="0" right="0">
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    color="kk.textMuted"
-                    px="2"
-                    minW="auto"
-                    aria-label={t('cancel', 'Cancel')}
-                    title={t('cancelSwapDevice', 'Cancel - release device prompt')}
-                    onClick={handleCancelSigning}
-                    _hover={{ color: 'kk.textPrimary' }}
-                  >
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                      <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
-                    </svg>
-                  </Button>
-                </Box>
-              )}
-
-              {/* Big device illustration — 6-face CSS-3D KeepKey rotating
-                  around its Y axis. The OLED face mirrors the swap pair the
-                  user is being asked to confirm so the device shown matches
-                  the action requested. */}
-              <Box flexShrink={0} w="380px" maxW="100%">
-                <SpinningDevice
-                  durationSeconds={subStage?.endsWith('-broadcasting') || phase === 'broadcasting' ? 8 : 14}
-                  screen={
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 14, width: '100%' }}>
-                      <div style={{ flex: 1 }}>
-                        <div style={{ fontSize: 11, opacity: 0.55, letterSpacing: 2, marginBottom: 4 }}>
-                          {(subStage === 'approve-signing' || phase === 'approving') ? 'APPROVE' : uiText("CONFIRM SWAP")}
-                        </div>
-                        <div style={{ fontSize: 22, fontWeight: 700, letterSpacing: 0.5, lineHeight: 1 }}>
-                          {displayAmount} {fromAsset.symbol}
-                        </div>
-                        <div style={{ fontSize: 11, opacity: 0.7, letterSpacing: 0.5, marginTop: 6 }}>
-                          → ~{quote?.expectedOutput ? formatBalance(quote.expectedOutput) : '—'} {toAsset.symbol}
-                        </div>
-                        <div style={{ fontSize: 9, opacity: 0.4, letterSpacing: 1, marginTop: 4 }}>
-                          {(quote?.swapper || quote?.integration || '').toString().toUpperCase()}
-                        </div>
+          {/* The KeepKey on the left as in every signing screen; the step,
+              its instruction and Cancel on the right. */}
+          {busy && fromAsset && toAsset && (() => {
+            const approvingStep = subStage?.startsWith('approve-') || (!subStage && phase === 'approving')
+            const headline = subStage === 'approve-signing'         ? t("approveOnDevice", "Approve on device")
+              : subStage === 'approve-broadcasting'  ? t("approvalBroadcasting", "Broadcasting approval…")
+              : subStage === 'approve-waiting-receipt' ? t("approvalWaiting", "Waiting for approval to confirm…")
+              : subStage === 'swap-signing'          ? t("confirmOnDevice")
+              : subStage === 'swap-broadcasting'     ? t("broadcasting")
+              : phase === 'approving'                ? t("approvingToken")
+              : phase === 'signing'                  ? t("confirmOnDevice")
+                                                     : t("broadcasting")
+            const expected = quote?.expectedOutput ? formatBalance(quote.expectedOutput) : '—'
+            return (
+              <div className="kk-pf kk-pf-sg kk-pf-inset" data-swap-signing style={{ animation: 'kkSwapFadeIn 0.3s ease-out' }}>
+                {/* Left: the KeepKey, still, with what it asks for. */}
+                <div className="kk-pf-left kk-pf-scroll" ref={leftScroll}>
+                  {/* The firmware's own screens for this transaction when Desktop can
+                      compute them, following each ButtonRequest; a sketch otherwise. */}
+                  {signingMirror && phase !== 'broadcasting' && !subStage?.endsWith('-broadcasting') && subStage !== 'approve-waiting-receipt'
+                    ? <DeviceMirrorPanel key={`${signingTxKind}:${signingTx?.data ?? ''}`} mirror={signingMirror} devicePrompts={devicePrompts} following scale={shortWindow ? 0.8 : 1} />
+                    : <>
+                      <SpinningDevice motion="still" scale={shortWindow ? 0.8 : 1}
+                        label={`${approvingStep ? 'APPROVE' : uiText("CONFIRM SWAP")}: ${displayAmount} ${fromAsset.symbol}`}
+                        screen={<OledText kicker={approvingStep ? 'APPROVE' : uiText("CONFIRM SWAP")} headline={`${displayAmount} ${fromAsset.symbol}`} sub={`→ ~${expected} ${toAsset.symbol}`} />} />
+                      <p className="kk-pf-cap" style={{ maxWidth: 'none' }}>{uiText('A sketch, not a readback. Trust your KeepKey’s own screen.')}</p>
+                    </>}
+                </div>
+                {/* Right: what is happening now; Cancel pinned while the device waits. */}
+                <div className="kk-pf-right kk-pf-split">
+                  <div className="kk-pf-body kk-pf-scroll" ref={rightScroll}>
+                    <div className="kk-pf-top">
+                      <h3 className="kk-pf-h" style={{ fontSize: 20 }}>{headline}</h3>
+                      {fromAsset.contractAddress && <em className="kk-pf-tag" style={{ color: 'var(--gold)' }}>{approvingStep ? '1/2' : '2/2'}</em>}
+                    </div>
+                    <div className="kk-pf-amt kk-pf-ends">
+                      <div><b>{displayAmount} {fromAsset.symbol}</b>{hasFromPrice && <small>{fmtCompact(parseFloat(displayAmount) * fromPriceUsd)}</small>}</div>
+                      <div><b>~{expected} {toAsset.symbol}</b>{hasToPrice && quote?.expectedOutput && <small>{fmtCompact(parseFloat(quote.expectedOutput) * toPriceUsd)}</small>}</div>
+                    </div>
+                    {/* Every step of this swap; the gold one is where it is now. */}
+                    {(() => {
+                      const steps = [
+                        ...(fromAsset.contractAddress ? [{ key: 'approve', title: t("approveOnDevice", "Approve on device"), text: t("approvalRequired"), on: approvingStep && !subStage?.endsWith('-broadcasting') && subStage !== 'approve-waiting-receipt' }] : []),
+                        { key: 'sign', title: t("confirmOnDevice"), text: t("confirmOnDeviceDesc"), on: !approvingStep && phase === 'signing' && subStage !== 'swap-broadcasting' },
+                        { key: 'send', title: t("broadcasting"), text: t("broadcastingDesc"), on: phase === 'broadcasting' || !!subStage?.endsWith('-broadcasting') || subStage === 'approve-waiting-receipt' },
+                      ]
+                      return <div className="kk-pf-tl" data-swap-steps>
+                        {steps.map((step, i) => <TimelineItem key={step.key} node={<NumberNode n={i + 1} gold={step.on} />} title={step.title}>{step.text}</TimelineItem>)}
                       </div>
-                      <div style={{ width: 38, height: 38, borderRadius: '50%',
-                                    border: '1.5px solid rgba(232,230,220,0.85)',
-                                    display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14 }}>
-                        ▶
+                    })()}
+                    <p className="kk-pf-note">{uiText('Closing this view does not cancel the swap. Track it in Activity.')}</p>
+                  </div>
+                  {(phase === 'signing' || phase === 'approving') && (
+                    <div className="kk-pf-foot">
+                      {/* Only while the device waits for a press: once confirmed and
+                          broadcasting, the transaction is on its way and cannot unwind. */}
+                      <div className="kk-pf-actions" style={{ gridTemplateColumns: '1fr' }}>
+                        <button type="button" className="kk-pf-go kk-pf-go-danger"
+                          aria-label={t('cancel', 'Cancel')}
+                          title={t('cancelSwapDevice', 'Cancel - release device prompt')}
+                          onClick={handleCancelSigning}>
+                          {t('cancel', 'Cancel')}
+                        </button>
                       </div>
                     </div>
-                  }
-                />
-              </Box>
-
-              {/* Headline + secondary instruction */}
-              <VStack gap="1.5" align="center" textAlign="center" maxW="380px">
-                <HStack gap="2" align="center">
-                  <Text
-                    fontSize="20px"
-                    fontWeight="600"
-                    color="kk.textPrimary"
-                    letterSpacing="-0.01em"
-                  >
-                    {subStage === 'approve-signing'         ? t("approveOnDevice", "Approve on device")
-                     : subStage === 'approve-broadcasting'  ? t("approvalBroadcasting", "Broadcasting approval…")
-                     : subStage === 'approve-waiting-receipt' ? t("approvalWaiting", "Waiting for approval to confirm…")
-                     : subStage === 'swap-signing'          ? t("confirmOnDevice")
-                     : subStage === 'swap-broadcasting'     ? t("broadcasting")
-                     : phase === 'approving'                ? t("approvingToken")
-                     : phase === 'signing'                  ? t("confirmOnDevice")
-                                                            : t("broadcasting")}
-                  </Text>
-                  {fromAsset?.contractAddress && (
-                    <Box bg="rgba(233,196,106,0.12)" border="1px solid" borderColor="rgba(233,196,106,0.3)" px="1.5" py="0.5" borderRadius="md">
-                      <Text fontSize="10px" fontWeight="700" color="var(--gold)" fontFamily="mono">
-                        {subStage?.startsWith('approve-') ? '1/2'
-                         : subStage?.startsWith('swap-')  ? '2/2'
-                         : phase === 'approving'          ? '1/2'
-                                                          : '2/2'}
-                      </Text>
-                    </Box>
                   )}
-                </HStack>
-                <Text fontSize="13px" color="kk.textSecondary" lineHeight="1.5">
-                  {subStage === 'approve-signing'         ? t("approvalRequired")
-                   : subStage === 'approve-broadcasting'  ? t("approvalBroadcastingDesc", "Submitting the approval to the network…")
-                   : subStage === 'approve-waiting-receipt' ? t("approvalWaitingDesc", "Waiting for the approval to mine before we can sign the swap.")
-                   : subStage === 'swap-signing'          ? t("confirmOnDeviceDesc")
-                   : subStage === 'swap-broadcasting'     ? t("broadcastingDesc")
-                   : phase === 'signing'                  ? t("confirmOnDeviceDesc")
-                   : phase === 'approving'                ? t("approvalRequired")
-                                                          : t("broadcastingDesc")}
-                </Text>
-              </VStack>
-
-              {/* Summary chip — single inline pill, mono numbers */}
-              <Flex
-                align="center"
-                gap="3.5"
-                px="5"
-                py="3"
-                bg="var(--ink-1)"
-                border="1px solid var(--ink-3)"
-                borderRadius="14px"
-              >
-                <Text fontSize="14px" fontWeight="600" color="kk.textPrimary" fontFamily="mono">
-                  {displayAmount} {fromAsset.symbol}
-                </Text>
-                <Box color="var(--gold)" flexShrink={0}>
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                    <line x1="5" y1="12" x2="19" y2="12" /><polyline points="12 5 19 12 12 19" />
-                  </svg>
-                </Box>
-                <Text fontSize="14px" fontWeight="600" color="var(--teal-2)" fontFamily="mono">
-                  ~<GreenCountUp value={quote?.expectedOutput || '0'} color="var(--teal-2)" suffix={` ${toAsset.symbol}`} />
-                </Text>
-              </Flex>
-              {hasFromPrice && (
-                <Text fontSize="11px" color="kk.textMuted" fontFamily="mono" mt="-3">
-                  {fmtCompact(parseFloat(displayAmount) * fromPriceUsd)}
-                  {hasToPrice && quote?.expectedOutput ? ` → ${fmtCompact(parseFloat(quote.expectedOutput) * toPriceUsd)}` : ''}
-                </Text>
-              )}
-            </VStack>
-          )}
+                </div>
+              </div>
+            )
+          })()}
 
           {/* ── BLIND SIGNING REQUIRED (Solana) ─────────────────── */}
           {phase === 'blind-signing-required' && (
@@ -4196,602 +4094,289 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
           )}
 
           {/* ── REVIEW (confirm quote) ──────────────────────────── */}
-          {phase === 'review' && quote && fromAsset && toAsset && !busy && (
-            <VStack gap="2" style={{ animation: 'kkSwapFadeIn 0.2s ease-out' }}>
-              {/* One quote-bound summary: fiat and costs share the risk snapshot. */}
-              <Box w="full" bg="rgba(255,255,255,0.03)" border="1px solid" borderColor="kk.border" borderRadius="xl" p="4" data-trade-summary>
-                <Flex align="center" justify="space-between" gap="2" mb="4">
-                  <Text fontSize="10px" color="kk.textMuted">{t("route", "Route")}</Text>
-                  <Box maxW="70%">
-                    <ProviderBadge swapper={quote.swapper} integration={quote.integration} size={16} variant="row" />
-                  </Box>
-                </Flex>
-                <Box data-trade-route-map>
-                  <RouteMap
-                    from={{ iconUrl: fromAsset.icon, caip: fromAsset.caip, chainCaip: fromNetwork?.chainCaip, color: fromNetwork?.color, glyph: fromAsset.symbol.slice(0, 1) }}
-                    to={{ iconUrl: toAsset.icon, caip: toAsset.caip, chainCaip: toNetwork?.chainCaip, color: toNetwork?.color, glyph: toAsset.symbol.slice(0, 1) }}
-                    integration={quote.swapper || quote.integration || resolveProvider(quote.swapper || quote.integration).label}
-                    showIntegrationLabel={false}
-                    centerImageUrl={getSwapperAnimation(quote.swapper, quote.integration)}
-                  />
-                </Box>
-                <Flex align="center" gap="2">
-                  <AssetIcon caip={fromAsset.caip} iconUrl={fromAsset.icon} chainCaip={chainBadgeCaip(fromAsset)} size={32} alt={fromAsset.symbol} />
-                  <Box flex="1" minW="0">
-                    <Text fontSize="10px" color="kk.textMuted">{uiText("You send")}</Text>
-                    <Text fontSize="sm" fontWeight="700" color="kk.textPrimary" wordBreak="break-word">{displayAmount} {fromAsset.symbol}</Text>
-                    <Text fontSize="11px" color="kk.textSecondary" data-trade-from-network>{fromNetwork?.name}</Text>
-                    <Text fontSize="10px" fontFamily="mono" color="kk.textMuted" wordBreak="break-all">{fromNetwork?.networkId}</Text>
-                    {swapRisk.inputUsd !== undefined && (
-                      <Text fontSize="11px" fontFamily="mono" color="kk.textMuted" data-trade-input-fiat>{fmt(swapRisk.inputUsd)}</Text>
-                    )}
-                  </Box>
-                  <Box color="var(--gold)" flexShrink={0} aria-hidden="true">→</Box>
-                  <Box flex="1" minW="0" textAlign="right">
-                    <Text fontSize="10px" color="kk.textMuted">{uiText("Expected receive")}</Text>
-                    <Text fontSize="sm" fontWeight="700" color="var(--teal)" wordBreak="break-word">{formatBalance(quote.expectedOutput)} {toAsset.symbol}</Text>
-                    <Text fontSize="11px" color="kk.textSecondary" data-trade-to-network>{toNetwork?.name}</Text>
-                    <Text fontSize="10px" fontFamily="mono" color="kk.textMuted" wordBreak="break-all">{toNetwork?.networkId}</Text>
-                    {swapRisk.expectedUsd !== undefined && (
-                      <Text fontSize="11px" fontFamily="mono" color="kk.textMuted" data-trade-output-fiat>{fmt(swapRisk.expectedUsd)}</Text>
-                    )}
-                  </Box>
-                  <AssetIcon caip={toAsset.caip} iconUrl={toAsset.icon} chainCaip={chainBadgeCaip(toAsset)} size={32} alt={toAsset.symbol} />
-                </Flex>
-                {/* Where the output goes, in full, for every route (audit v4 H1). */}
-                <Box mt="3" px="3" py="2" borderRadius="lg" border="1px solid"
-                  borderColor={externalRecipient ? "kk.error" : "kk.border"}
-                  bg={externalRecipient ? "rgba(224,140,123,0.10)" : "transparent"}
-                  data-trade-recipient data-custom-recipient={externalRecipient ? 'true' : 'false'}>
-                  <Text fontSize="10px" color={externalRecipient ? "kk.error" : "kk.textMuted"}>{t("reviewRecipient", "Recipient")}</Text>
-                  <Text fontSize="11px" fontFamily="mono" color={externalRecipient ? "kk.error" : "kk.textPrimary"} wordBreak="break-all">{toAddress}</Text>
-                  {externalRecipient && (
-                    <Text fontSize="10px" fontWeight="700" color="kk.error" mt="0.5">{t("customRecipientNotKeepKey", "Custom recipient — not your KeepKey")}</Text>
-                  )}
-                </Box>
-                {isFeeReservedNativeMax && fromAsset && nativeMaxReserveDisplay && (
-                  <Text fontSize="10px" color="var(--gold)" mt="1.5">
-                    {t("sendMaxGasReserveNote", {
-                      defaultValue: "Keeping ~{{reserve}} {{symbol}} for network fees{{usd}}.",
-                      reserve: formatBalance(String(nativeMaxReserveDisplay.reserveAmount)),
-                      symbol: fromAsset.symbol,
-                      usd: nativeMaxReserveDisplay.reserveUsd > 0 ? ` (${fmtCompact(nativeMaxReserveDisplay.reserveUsd)})` : '',
-                    })}
-                  </Text>
-                )}
-                <VStack gap="2" align="stretch" mt="4" pt="3" borderTop="1px solid" borderColor="kk.border">
-                  <ReviewRow label={quote.minimumOutputSource === 'estimate' ? uiText("Estimated minimum") : uiText("Minimum receive")} accent>
-                    {formatBalance(quote.minimumOutput)} {toAsset.symbol}{swapRisk.minimumUsd !== undefined ? ` (${fmt(swapRisk.minimumUsd)})` : ''}
-                  </ReviewRow>
-                  <ReviewRow label={uiText("Estimated swap cost")}>
-                    <span data-trade-cost>{swapRisk.expectedLossPct !== undefined
-                      ? `${swapRisk.expectedLossUsd !== undefined ? `${fmt(swapRisk.expectedLossUsd)} · ` : ''}${swapRisk.expectedLossPct.toFixed(2)}%`
-                      : uiText("Price data unavailable")}</span>
-                  </ReviewRow>
-                  <ReviewRow label={uiText("Source network fee")}>{uiText("Paid separately")}</ReviewRow>
-                  <ReviewRow label={uiText("Estimated time")}>{formatTime(quote.estimatedTime)}</ReviewRow>
-                </VStack>
-              </Box>
+          {phase === 'review' && quote && fromAsset && toAsset && !busy && (() => {
+            const allowance = previewBuild?.allowance
+            const tokenDecimals = normalizeDecimals(fromAsset.decimals)
+            const tokenAmount = (raw: string, cap = false) => {
+              if (tokenDecimals === null) return raw
+              try {
+                const n = Number(BigInt(raw)) / Math.pow(10, tokenDecimals)
+                if (cap && n > 1e15) return '∞ (max)'
+                return n.toLocaleString(undefined, { maximumFractionDigits: 8 })
+              } catch { return raw }
+            }
+            const approvedAmount = previewBuild?.approveTx ? parseApproveCalldata((previewBuild.approveTx as any).data)?.amount : undefined
+            const effectiveSlippagePct = (computeEffectiveSlippageBps(quote.slippageBps, slippageBps) / 100).toFixed(1)
+            // One status mark per row, most severe first (PreflightList sorts).
+            const rows: PreflightRow[] = []
+            if (networkMismatch) rows.push({ key: 'network', status: 'block', tag: uiText("blocks"), title: uiText("The asset and network do not match. Select the asset again.") })
+            if (previewBuild?.balance && !previewBuild.balance.sufficient) rows.push({ key: 'balance', status: 'block', tag: uiText("blocks"),
+              title: t("insufficientBalance", "Insufficient {{symbol}} balance", { symbol: fromAsset.symbol }),
+              detail: <>{t("insufficientBalanceDetail", "You have {{have}} {{symbol}} but the swap needs {{need}} {{symbol}}. The transferFrom would revert on-chain.", { have: tokenAmount(previewBuild.balance.current), need: tokenAmount(previewBuild.balance.required), symbol: fromAsset.symbol })}{' '}
+                {t("insufficientBalanceFix", "Lower the amount to ≤{{have}} or top up the source wallet before swapping.", { have: tokenAmount(previewBuild.balance.current) })}</> })
+            if (previewError) rows.push({ key: 'preview', status: 'block', tag: uiText("blocks"), title: `${t("previewFailed", "Build preview failed")}: ${previewError}` })
+            rows.push(...riskRows)
+            if (relayRecipientMismatch) rows.push({ key: 'relay-mismatch', status: 'block', tag: uiText("blocks"), title: t("relayRecipientMismatchButton", "Relay order pays another address") })
+            if (shouldWarnHighSlippage(quote.slippageBps, slippageBps)) rows.push({ key: 'slippage', status: 'warn',
+              title: t("highSlippageWarning", "Slippage tolerance is high ({{pct}}%). You may receive less than expected. Consider lowering tolerance for small spreads.", { pct: effectiveSlippagePct }),
+              detail: slippageNeedsConfirm ? <label className="kk-pf-check" data-high-slippage-ack>
+                <input type="checkbox" checked={!slippageLocked} onChange={event => setSlippageAcceptedKey(event.target.checked ? slippageKey : '')} />
+                <span>{t("highSlippageConfirm", "I accept a slippage tolerance of {{pct}}%: I may receive up to {{pct}}% less than quoted.", { pct: effectiveSlippagePct })}</span>
+              </label> : undefined })
+            // Firmware 7.15+ parses native TRX and TRC-20 transfers; older firmware shows a generic prompt.
+            if (fromAsset.chainFamily === 'tron' && (!firmwareVersion || versionCompare(firmwareVersion, '7.15.0') < 0)) rows.push({ key: 'tron', status: 'warn',
+              title: t("tronLegacySigningWarning", "Firmware before 7.15 may show a generic Tron prompt. Update firmware for native TRX and TRC-20 ClearSign details, or verify the complete payload above before approving.") })
+            if (error) rows.push({ key: 'error', status: errorIsWarning ? 'warn' : 'danger', title: error,
+              detail: <button type="button" className="kk-pf-link" onClick={() => setError(null)}>{t("dismiss")}</button> })
+            // Where the output goes (audit v4 H1).
+            rows.push(externalRecipient
+              ? { key: 'recipient', status: 'danger', title: t("customRecipientNotKeepKey", "Custom recipient — not your KeepKey"), detail: <span style={{ fontFamily: 'var(--font-mono)', overflowWrap: 'anywhere' }}>{toAddress}</span> }
+              : { key: 'recipient', status: 'ok', title: uiText("Received on your own account"), detail: uiText("Paid out to this KeepKey.") })
+            // How many transactions the KeepKey will sign, and how far an approval reaches.
+            if (allowance && !allowance.sufficient) {
+              rows.push({ key: 'confirms', status: 'warn', title: uiText("Two confirmations on the device"),
+                detail: uiText("First the approval, then the swap. The approval uses gas even if you cancel the swap.") })
+              const exact = approvedAmount !== undefined && approvedAmount === toBigIntValue(allowance.required)
+              rows.push(exact
+                ? { key: 'limit', status: 'ok', title: uiText("Spending limit is exact"), detail: uiText("The approval covers {{amount}} {{symbol}}, not unlimited.", { amount: tokenAmount(allowance.required), symbol: fromAsset.symbol }) }
+                : { key: 'limit', status: 'warn', title: uiText("Spending limit above this swap"), detail: uiText("The approval allows {{amount}} {{symbol}} to {{spender}}.", { amount: approvedAmount !== undefined ? tokenAmount(approvedAmount.toString(), true) : tokenAmount(allowance.required), symbol: fromAsset.symbol, spender: `${allowance.spender.slice(0, 10)}…${allowance.spender.slice(-6)}` }) })
+            } else {
+              rows.push({ key: 'confirms', status: 'ok', title: uiText("One confirmation on the device"),
+                detail: allowance ? uiText("Already approved: {{amount}} {{symbol}} for the router.", { amount: tokenAmount(allowance.current, true), symbol: fromAsset.symbol }) : uiText("Your KeepKey signs the swap once.") })
+            }
+            if (quote.executionMode === 'relay-solver-deposit' && quote.relayOrderRecipient) rows.push({ key: 'relay', status: 'ok', title: uiText("Relay pays out after your deposit"),
+              detail: t('relayDepositRecipient', 'The Relay order pays out to {{address}}. Your KeepKey signs only the deposit; Relay pays out afterwards.', { address: quote.relayOrderRecipient }) })
+            if (isFeeReservedNativeMax && nativeMaxReserveDisplay) rows.push({ key: 'reserve', status: 'ok', title: uiText("Network fee kept aside"),
+              detail: t("sendMaxGasReserveNote", { defaultValue: "Keeping ~{{reserve}} {{symbol}} for network fees{{usd}}.", reserve: formatBalance(String(nativeMaxReserveDisplay.reserveAmount)), symbol: fromAsset.symbol, usd: nativeMaxReserveDisplay.reserveUsd > 0 ? ` (${fmtCompact(nativeMaxReserveDisplay.reserveUsd)})` : '' }) })
+            const pillBusy = previewLoading || refreshingQuote
+            return (
+              <div className="kk-pf kk-pf-sg kk-pf-inset" data-swap-review style={{ animation: 'kkSwapFadeIn 0.2s ease-out' }}>
+                {/* ── Left: the route, the two amounts, the terms ── */}
+                <div className="kk-pf-left kk-pf-scroll" ref={leftScroll}>
+                  {/* One quote-bound summary: fiat and costs share the risk snapshot. */}
+                  <div data-trade-summary style={{ display: 'grid', gap: 14 }}>
+                    <div data-trade-route-map>
+                      {/* The route's art (BitHighlander's) is the centrepiece; the official logos sit at the ends. */}
+                      <RouteMap
+                        from={{ iconUrl: fromAsset.icon, caip: fromAsset.caip, chainCaip: fromNetwork?.chainCaip, color: fromNetwork?.color, glyph: fromAsset.symbol.slice(0, 1) }}
+                        to={{ iconUrl: toAsset.icon, caip: toAsset.caip, chainCaip: toNetwork?.chainCaip, color: toNetwork?.color, glyph: toAsset.symbol.slice(0, 1) }}
+                        integration={quote.swapper || quote.integration || resolveProvider(quote.swapper || quote.integration).label}
+                        showIntegrationLabel={false}
+                        centerImageUrl={getSwapperAnimation(quote.swapper, quote.integration)}
+                        centerStillUrl={getSwapperStill(quote.swapper, quote.integration)}
+                      />
+                    </div>
+                    <div className="kk-pf-amt kk-pf-ends">
+                      <div>
+                        <b>{displayAmount} {fromAsset.symbol}</b>
+                        <small><span data-trade-from-network>{fromNetwork?.name}</span>{swapRisk.inputUsd !== undefined && fmt(swapRisk.inputUsd) && <>{' · '}<span data-trade-input-fiat>{fmt(swapRisk.inputUsd)}</span></>}</small>
+                      </div>
+                      <div>
+                        <b>{formatBalance(quote.expectedOutput)} {toAsset.symbol}</b>
+                        <small><span data-trade-to-network>{toNetwork?.name}</span>{swapRisk.expectedUsd !== undefined && fmt(swapRisk.expectedUsd) && <>{' · '}<span data-trade-output-fiat>{fmt(swapRisk.expectedUsd)}</span></>}</small>
+                      </div>
+                    </div>
+                  </div>
+                </div>
 
-              {/* Our own swap is assumed clear: the report shows only when it is
-                  not what was quoted (swapReportNeedsAttention). */}
-              {previewBuild?.clearSignReports?.approval && swapReportNeedsAttention(previewBuild.clearSignReports.approval) && <ClearSignReportCard report={previewBuild.clearSignReports.approval} title={uiText("Approval ClearSign Report")} />}
-              {previewBuild?.clearSignReports?.transaction && swapReportNeedsAttention(previewBuild.clearSignReports.transaction) && <ClearSignReportCard report={previewBuild.clearSignReports.transaction} title={uiText("Swap ClearSign Report")} />}
-              {/* The provider the swap will ask is always named: execute pins it. */}
-              {(() => {
-                const report = previewBuild?.clearSignReports?.transaction
-                const line = namedProviderLine(previewBuild?.runtimeProvider, report && swapReportNeedsAttention(report) ? report : undefined)
-                return line ? <Text fontSize="2xs" color="kk.textSecondary" data-clearsign-provider>{line}</Text> : null
-              })()}
-
-              {quote.executionMode === 'relay-solver-deposit' && quote.relayOrderRecipient && (
-                <Text fontSize="11px" color="kk.textSecondary" role="note">
-                  {t('relayDepositRecipient', 'The Relay order pays out to {{address}}. Your KeepKey signs only the deposit; Relay pays out afterwards.', { address: quote.relayOrderRecipient })}
-                </Text>
-              )}
-
-              <Box w="full">
-                <Button size="xs" variant="ghost" color="kk.textMuted" w="full"
-                  aria-expanded={showDetails} aria-controls="swap-fees-details"
-                  onClick={() => setShowDetails(!showDetails)}
-                  _hover={{ color: "kk.textSecondary" }}>
-                  {uiText("Fees & details")}{" "}{showDetails ? '⌃' : '⌄'}
-                </Button>
-                {showDetails && (
-                  <Box id="swap-fees-details" bg="rgba(0,0,0,0.3)" borderRadius="md" p="3" mt="1">
-                    <VStack gap="2" align="stretch">
-                      <ReviewRow label={`${t("from")} · CAIP-19`}><span data-trade-from-caip>{fromNetwork?.assetCaip || '—'}</span></ReviewRow>
-                      <ReviewRow label={`${t("to")} · CAIP-19`}><span data-trade-to-caip>{toNetwork?.assetCaip || '—'}</span></ReviewRow>
-                      <ReviewRow label={t("rate")}>
-                        1 {fromAsset.symbol} = {formatBalance((parseFloat(quote.expectedOutput) / parseFloat(displayAmount || '1')).toString())} {toAsset.symbol}
-                      </ReviewRow>
-                      <QuoteFeeRows fees={quote.fees} />
-                      <ReviewRow label={t("slippageTolerance", "Slippage tolerance")}>
-                        {(slippageBps / 100).toFixed(2)}{uiText("% max")}
-                      </ReviewRow>
-                      {quote.quotedSlippageBps != null && (
-                        <ReviewRow label={t("quoteSlippage", "Quote slippage")}>{(quote.quotedSlippageBps / 100).toFixed(2)}%</ReviewRow>
-                      )}
-                      <ReviewRow label={uiText("Minimum source")}>
-                        {quote.minimumOutputSource === 'memo' ? uiText("Transaction memo") : quote.minimumOutputSource === 'estimate' ? uiText("Estimate") : uiText("Provider quote")}
-                      </ReviewRow>
-                      {swapRisk.minimumLossPct !== undefined && (
-                        <ReviewRow label={uiText("Value difference at minimum")}>
-                          {swapRisk.minimumLossUsd !== undefined ? `${fmt(swapRisk.minimumLossUsd)} · ` : ''}{swapRisk.minimumLossPct.toFixed(2)}%
+                {/* ── Right: the checklist right above the decision, ids under Technical details ── */}
+                <div className="kk-pf-right kk-pf-split">
+                  <div className="kk-pf-body kk-pf-scroll" ref={rightScroll}>
+                    <PreflightList rows={rows} />
+                    {/* The terms, read with the checks before the decision. */}
+                    <dl className="kk-pf-facts" data-trade-terms>
+                      <div><dt>{quote.minimumOutputSource === 'estimate' ? uiText("Estimated minimum") : uiText("Minimum receive")}</dt>
+                        <dd>{formatBalance(quote.minimumOutput)} {toAsset.symbol}{swapRisk.minimumUsd !== undefined && fmt(swapRisk.minimumUsd) ? ` (${fmt(swapRisk.minimumUsd)})` : ''}</dd></div>
+                      <div><dt>{uiText("Estimated swap cost")}</dt>
+                        <dd><span data-trade-cost>{swapRisk.expectedLossPct !== undefined
+                          ? `${swapRisk.expectedLossUsd !== undefined && fmt(swapRisk.expectedLossUsd) ? `${fmt(swapRisk.expectedLossUsd)} · ` : ''}${swapRisk.expectedLossPct.toFixed(2)}%`
+                          : uiText("Price data unavailable")}</span></dd></div>
+                      <div><dt>{uiText("Source network fee")}</dt><dd>{uiText("Paid separately")}</dd></div>
+                      <div><dt>{uiText("Estimated time")}</dt><dd>{formatTime(quote.estimatedTime)}</dd></div>
+                      <div><dt>{t("route", "Route")}</dt><dd><ProviderBadge swapper={quote.swapper} integration={quote.integration} size={16} variant="row" /></dd></div>
+                      {/* Where the output goes, in full, for every route (audit v4 H1). */}
+                      <div data-trade-recipient data-custom-recipient={externalRecipient ? 'true' : 'false'}>
+                        <dt style={externalRecipient ? { color: 'var(--rose)' } : undefined}>{t("reviewRecipient", "Recipient")}</dt>
+                        <dd style={externalRecipient ? { color: 'var(--rose)' } : undefined}>{toAddress}
+                          {externalRecipient && <><br />{t("customRecipientNotKeepKey", "Custom recipient — not your KeepKey")}</>}</dd>
+                      </div>
+                    </dl>
+                    {/* Our own swap is assumed clear: the report shows only when it is
+                        not what was quoted (swapReportNeedsAttention). */}
+                    {previewBuild?.clearSignReports?.approval && swapReportNeedsAttention(previewBuild.clearSignReports.approval) && <ClearSignReportCard report={previewBuild.clearSignReports.approval} title={uiText("Approval ClearSign Report")} />}
+                    {previewBuild?.clearSignReports?.transaction && swapReportNeedsAttention(previewBuild.clearSignReports.transaction) && <ClearSignReportCard report={previewBuild.clearSignReports.transaction} title={uiText("Swap ClearSign Report")} />}
+                    {/* The provider the swap will ask is always named: execute pins it. */}
+                    {(() => {
+                      const report = previewBuild?.clearSignReports?.transaction
+                      const line = namedProviderLine(previewBuild?.runtimeProvider, report && swapReportNeedsAttention(report) ? report : undefined)
+                      return line ? <p className="kk-pf-note" data-clearsign-provider>{line}</p> : null
+                    })()}
+                    {/* quote.warning is not shown: it is THORNode's note to API
+                        integrators ("Do not cache this response…"). The dialog
+                        enforces it: a quote older than swapRisk.quoteMaxAgeMs is
+                        re-fetched and re-reviewed before signing. */}
+                    <details className="kk-pf-tech" id="swap-fees-details">
+                      <summary>{uiText("Technical details")}</summary>
+                      <VStack gap="2" align="stretch" mt="3">
+                        <ReviewRow label={`${t("from")} · CAIP-19`}><span data-trade-from-caip>{fromNetwork?.assetCaip || '—'}</span></ReviewRow>
+                        <ReviewRow label={`${t("to")} · CAIP-19`}><span data-trade-to-caip>{toNetwork?.assetCaip || '—'}</span></ReviewRow>
+                        <ReviewRow label={t("rate")}>
+                          1 {fromAsset.symbol} = {formatBalance((parseFloat(quote.expectedOutput) / parseFloat(displayAmount || '1')).toString())} {toAsset.symbol}
                         </ReviewRow>
-                      )}
-                      <Text fontSize="10px" color="kk.textMuted">
-                        {uiText("Swap cost compares the quoted input and output values, including the rate and route fees. The source network fee is separate. Minimum receive is an execution limit, not a guaranteed refund.")}
-                      </Text>
-                      {fromAsset.chainFamily === 'evm' && (
-                        <VStack gap="2" align="stretch">
-                          {previewBuild?.approveTx && (
-                            <EvmTxSummaryCard
-                              title={t("approvalTx", "Approval transaction")}
-                              tx={previewBuild.approveTx}
-                              chain={fromChainDef}
-                              asset={fromAsset}
-                              isApproval
-                            />
-                          )}
-                          {previewBuild?.unsignedTx && (
-                            <EvmTxSummaryCard
-                              title={previewBuild.approveTx ? t("swapTxAfterApproval", "Swap transaction after approval") : t("swapTx", "Swap transaction")}
-                              tx={previewBuild.unsignedTx}
-                              chain={fromChainDef}
-                              asset={fromAsset}
-                            />
-                          )}
-                        </VStack>
-                      )}
-                      {quote.router && fromAsset.chainFamily === 'evm' && (
-                        <Flex justify="space-between" align="flex-start" gap="2">
-                          <Text fontSize="10px" color="kk.textMuted" flexShrink={0}>{t("routerContract")}</Text>
-                          <Text fontSize="10px" fontFamily="mono" color="kk.textSecondary" wordBreak="break-all" textAlign="right">{quote.router}</Text>
-                        </Flex>
-                      )}
-                      <Flex justify="space-between" align="flex-start" gap="2">
-                        <Text fontSize="10px" color="kk.textMuted" flexShrink={0}>{t("vault")}</Text>
-                        <Text fontSize="10px" fontFamily="mono" color="kk.textSecondary" wordBreak="break-all" textAlign="right">{quote.inboundAddress}</Text>
-                      </Flex>
-                      {quote.memo && (
-                        <Flex justify="space-between" align="flex-start" gap="2">
-                          <Text fontSize="10px" color="kk.textMuted" flexShrink={0}>{uiText("memo")}</Text>
-                          <Text fontSize="10px" fontFamily="mono" color="kk.textSecondary" wordBreak="break-all" textAlign="right">{quote.memo}</Text>
-                        </Flex>
-                      )}
-
-                      {/* Hdwallet payload — built ahead of time via previewSwapBuild
-                          so the user can audit the exact tx going to the device. */}
-                      <Box pt="1.5" borderTop="1px solid" borderColor="kk.border">
-                        {previewLoading && (
-                          <Text fontSize="10px" color="kk.textMuted">{uiText("Building transaction preview…")}</Text>
+                        <QuoteFeeRows fees={quote.fees} />
+                        <ReviewRow label={t("slippageTolerance", "Slippage tolerance")}>{(slippageBps / 100).toFixed(2)}{uiText("% max")}</ReviewRow>
+                        {quote.quotedSlippageBps != null && (
+                          <ReviewRow label={t("quoteSlippage", "Quote slippage")}>{(quote.quotedSlippageBps / 100).toFixed(2)}%</ReviewRow>
                         )}
-                        {/* previewError is shown once, in the banner below this card;
-                            repeating it here showed the same error twice when
-                            "Fees & details" was open. */}
-                        {previewBuild?.approveTx && (
-                          <Box mb="2">
-                            <Text fontSize="10px" color="kk.textMuted" mb="1">{uiText("Approve tx (ERC-20 allowance)")}</Text>
-                            <Box bg="rgba(0,0,0,0.5)" borderRadius="sm" p="2" maxH="200px" overflow="auto" border="1px solid" borderColor="kk.border">
-                              <Text fontSize="10px" fontFamily="mono" color="kk.textSecondary" whiteSpace="pre-wrap" wordBreak="break-all">
-                                {JSON.stringify(previewBuild.approveTx, null, 2)}
-                              </Text>
-                            </Box>
+                        <ReviewRow label={uiText("Minimum source")}>
+                          {quote.minimumOutputSource === 'memo' ? uiText("Transaction memo") : quote.minimumOutputSource === 'estimate' ? uiText("Estimate") : uiText("Provider quote")}
+                        </ReviewRow>
+                        {swapRisk.minimumLossPct !== undefined && (
+                          <ReviewRow label={uiText("Value difference at minimum")}>
+                            {swapRisk.minimumLossUsd !== undefined ? `${fmt(swapRisk.minimumLossUsd)} · ` : ''}{swapRisk.minimumLossPct.toFixed(2)}%
+                          </ReviewRow>
+                        )}
+                        <p className="kk-pf-note">{uiText("Swap cost compares the quoted input and output values, including the rate and route fees. The source network fee is separate. Minimum receive is an execution limit, not a guaranteed refund.")}</p>
+                        {allowance && <ReviewRow label={uiText("Spender")}><span style={{ fontFamily: 'var(--font-mono)', overflowWrap: 'anywhere' }}>{allowance.spender}</span></ReviewRow>}
+                        {fromAsset.chainFamily === 'evm' && previewBuild?.approveTx && (
+                          <EvmTxSummaryCard title={t("approvalTx", "Approval transaction")} tx={previewBuild.approveTx} chain={fromChainDef} asset={fromAsset} isApproval />
+                        )}
+                        {fromAsset.chainFamily === 'evm' && previewBuild?.unsignedTx && (
+                          <EvmTxSummaryCard title={previewBuild.approveTx ? t("swapTxAfterApproval", "Swap transaction after approval") : t("swapTx", "Swap transaction")}
+                            tx={previewBuild.unsignedTx} chain={fromChainDef} asset={fromAsset} />
+                        )}
+                        {quote.router && fromAsset.chainFamily === 'evm' && <ReviewRow label={t("routerContract")}><span style={{ fontFamily: 'var(--font-mono)', overflowWrap: 'anywhere' }}>{quote.router}</span></ReviewRow>}
+                        <ReviewRow label={t("vault")}><span style={{ fontFamily: 'var(--font-mono)', overflowWrap: 'anywhere' }}>{quote.inboundAddress}</span></ReviewRow>
+                        {quote.memo && <ReviewRow label={uiText("memo")}><span style={{ fontFamily: 'var(--font-mono)', overflowWrap: 'anywhere' }}>{quote.memo}</span></ReviewRow>}
+                        {/* The hdwallet payload, built ahead of time by previewSwapBuild,
+                            so the exact transaction going to the device can be audited. */}
+                        {previewLoading && <p className="kk-pf-note">{uiText("Building transaction preview…")}</p>}
+                        {previewBuild?.approveTx && <>
+                          <p className="kk-pf-note">{uiText("Approve tx (ERC-20 allowance)")}</p>
+                          <Box as="pre" fontFamily="var(--font-mono)" fontSize="10px" lineHeight="1.5" whiteSpace="pre-wrap" overflowWrap="anywhere" bg="rgba(0,0,0,0.28)" p="2" borderRadius="md" maxH="200px" overflowY="auto" color="var(--text-1)" m="0">
+                            {JSON.stringify(previewBuild.approveTx, null, 2)}
                           </Box>
-                        )}
-                        {previewBuild?.unsignedTx && (
-                          <Box>
-                            <Text fontSize="10px" color="kk.textMuted" mb="1">
-                              {previewBuild.approveTx ? uiText("Swap tx (sent after approval)") : uiText("Technical details")}
-                            </Text>
-                            <Box bg="rgba(0,0,0,0.5)" borderRadius="sm" p="2" maxH="240px" overflow="auto" border="1px solid" borderColor="kk.border">
-                              <Text fontSize="10px" fontFamily="mono" color="kk.textSecondary" whiteSpace="pre-wrap" wordBreak="break-all">
-                                {JSON.stringify(previewBuild.unsignedTx, null, 2)}
-                              </Text>
-                            </Box>
+                        </>}
+                        {previewBuild?.unsignedTx && <>
+                          <p className="kk-pf-note">{previewBuild.approveTx ? uiText("Swap tx (sent after approval)") : uiText("Technical details")}</p>
+                          <Box as="pre" fontFamily="var(--font-mono)" fontSize="10px" lineHeight="1.5" whiteSpace="pre-wrap" overflowWrap="anywhere" bg="rgba(0,0,0,0.28)" p="2" borderRadius="md" maxH="240px" overflowY="auto" color="var(--text-1)" m="0">
+                            {JSON.stringify(previewBuild.unsignedTx, null, 2)}
                           </Box>
-                        )}
-                      </Box>
-                    </VStack>
-                  </Box>
-                )}
-              </Box>
+                        </>}
+                      </VStack>
+                    </details>
+                  </div>
+                  {/* ── Decision: pinned under the checklist, outside the scroll ── */}
+                  <div className="kk-pf-foot">
+                    <div className="kk-pf-actions">
+                      <button type="button" className="kk-pf-cancel" onClick={handleBackToInput}>{t("back")}</button>
+                      <button type="button" className="kk-pf-go"
+                        onClick={() => { if (!reviewConfirmLocked) handleExecuteSwap() }}
+                        disabled={reviewConfirmLocked}
+                        aria-disabled={reviewConfirmLocked}
+                        aria-busy={pillBusy || undefined}>
+                        {pillBusy && <span className="kk-pf-spin" aria-hidden="true" />}
+                        {reviewConfirmLockLabel || uiText("Swap on KeepKey")}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )
+          })()}
 
-              {/* Preview build error — most likely insufficient gas/balance, surface upfront */}
-              {previewError && (
-                <Flex align="center" gap="2" bg="rgba(255,23,68,0.06)" border="1px solid" borderColor="rgba(224,140,123,0.32)" px="3" py="1.5" borderRadius="lg" w="full">
-                  <Text fontSize="10px" color="kk.error">
-                    {t("previewFailed", "Build preview failed")}: {previewError}
-                  </Text>
-                </Flex>
-              )}
-
-              {/* On-chain balance check — hard block. USDT (and most ERC-20s)
-                  revert with INVALID opcode when transferFrom > balance, so we
-                  refuse to sign rather than waste gas on a guaranteed revert. */}
-              {previewBuild?.balance && !previewBuild.balance.sufficient && (() => {
-                const b = previewBuild.balance!
-                const tokenDecimals = normalizeDecimals(fromAsset.decimals)
-                const fmt = (raw: string) => {
-                  if (tokenDecimals === null) return raw
-                  try {
-                    const n = Number(BigInt(raw)) / Math.pow(10, tokenDecimals)
-                    return n.toLocaleString(undefined, { maximumFractionDigits: 8 })
-                  } catch { return raw }
-                }
-                return (
-                  <Flex align="flex-start" gap="2" bg="rgba(224,140,123,0.10)" border="1px solid" borderColor="kk.error" px="3" py="2" borderRadius="lg" w="full">
-                    <Box color="kk.error" flexShrink={0} mt="0.5">
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><line x1="15" y1="9" x2="9" y2="15" /><line x1="9" y1="9" x2="15" y2="15" /></svg>
-                    </Box>
-                    <Box flex="1">
-                      <Text fontSize="11px" fontWeight="700" color="kk.error">
-                        {t("insufficientBalance", "Insufficient {{symbol}} balance", { symbol: fromAsset.symbol })}
-                      </Text>
-                      <Text fontSize="10px" color="kk.textSecondary">
-                        {t("insufficientBalanceDetail", "You have {{have}} {{symbol}} but the swap needs {{need}} {{symbol}}. The transferFrom would revert on-chain.", { have: fmt(b.current), need: fmt(b.required), symbol: fromAsset.symbol })}
-                      </Text>
-                      <Text fontSize="10px" color="kk.textMuted" mt="0.5">
-                        {t("insufficientBalanceFix", "Lower the amount to ≤{{have}} or top up the source wallet before swapping.", { have: fmt(b.current) })}
-                      </Text>
-                    </Box>
-                  </Flex>
-                )
-              })()}
-
-              {/* ERC-20 approval status — only render when source is a token.
-                  Distinguishes "approval will be added (2 device prompts)" from
-                  "already approved" so the user knows what to expect. */}
-              {previewBuild?.allowance && (() => {
-                const a = previewBuild.allowance
-                const tokenDecimals = normalizeDecimals(fromAsset.decimals)
-                const fmt = (raw: string) => {
-                  if (tokenDecimals === null) return raw
-                  try {
-                    const n = Number(BigInt(raw)) / Math.pow(10, tokenDecimals)
-                    if (n > 1e15) return '∞ (max)'
-                    return n.toLocaleString(undefined, { maximumFractionDigits: 6 })
-                  } catch { return raw }
-                }
-                if (a.sufficient) {
-                  return (
-                    <Flex align="center" gap="2" bg="rgba(74,222,128,0.06)" border="1px solid" borderColor="rgba(74,222,128,0.25)" px="3" py="2" borderRadius="lg" w="full">
-                      <Box color="var(--teal)" flexShrink={0}>
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
-                      </Box>
-                      <Box flex="1">
-                        <Text fontSize="11px" fontWeight="600" color="var(--teal)">{uiText("Already approved ·")}{" "}{fmt(a.current)} {fromAsset.symbol}{" "}{uiText("allowance to router")}</Text>
-                        <Text fontSize="10px" color="kk.textMuted" fontFamily="mono" wordBreak="break-all">{a.spender}</Text>
-                        <Text fontSize="10px" color="kk.textMuted">{uiText("1 device confirmation needed: swap")}</Text>
-                      </Box>
-                    </Flex>
-                  )
-                }
-                return (
-                  <Flex align="flex-start" gap="2" bg="rgba(251,146,60,0.08)" border="1px solid" borderColor="rgba(251,146,60,0.35)" px="3" py="2" borderRadius="lg" w="full">
-                    <Box color="var(--gold)" flexShrink={0} mt="0.5">
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" /></svg>
-                    </Box>
-                    <Box flex="1">
-                      <Text fontSize="11px" fontWeight="700" color="var(--gold)">{uiText("Approval needed:")}{" "}{fmt(a.required)} {fromAsset.symbol}
-                      </Text>
-                      <Text fontSize="10px" color="kk.textSecondary">{uiText("Current allowance:")}{" "}{fmt(a.current)} {fromAsset.symbol}{" "}{uiText("· spender")}{" "}<Text as="span" fontFamily="mono">{a.spender.slice(0, 10)}…{a.spender.slice(-6)}</Text>
-                      </Text>
-                      <Text fontSize="10px" color="kk.textMuted" mt="0.5">{uiText("2 device confirmations needed: 1) approve")}{" "}{fromAsset.symbol}{uiText(", 2) swap. The approval consumes gas even if you cancel step 2.")}</Text>
-                    </Box>
-                  </Flex>
-                )
-              })()}
-
-              {/* High-slippage warning — flagged at >HIGH_SLIPPAGE_PCT.
-                  Use max(quote, user) so a tight market quote doesn't hide a loose
-                  user tolerance — the user's setting is the one that bounds risk. */}
-              {shouldWarnHighSlippage(quote.slippageBps, slippageBps) && (
-                <Box bg="rgba(251,146,60,0.08)" border="1px solid" borderColor="rgba(251,146,60,0.3)" px="3" py="1.5" borderRadius="lg" w="full">
-                  <Text fontSize="10px" color="var(--gold)">
-                    {t("highSlippageWarning", "Slippage tolerance is high ({{pct}}%). You may receive less than expected. Consider lowering tolerance for small spreads.", { pct: (computeEffectiveSlippageBps(quote.slippageBps, slippageBps) / 100).toFixed(1) })}
-                  </Text>
-                  {slippageNeedsConfirm && (
-                    <label data-high-slippage-ack style={{ display: 'flex', alignItems: 'flex-start', gap: 8, marginTop: 6, fontSize: 11, cursor: 'pointer', color: 'var(--gold)' }}>
-                      <input type="checkbox" checked={!slippageLocked} onChange={event => setSlippageAcceptedKey(event.target.checked ? slippageKey : '')} />
-                      <span>{t("highSlippageConfirm", "I accept a slippage tolerance of {{pct}}%: I may receive up to {{pct}}% less than quoted.", { pct: (computeEffectiveSlippageBps(quote.slippageBps, slippageBps) / 100).toFixed(1) })}</span>
-                    </label>
-                  )}
-                </Box>
-              )}
-
-              {/* quote.warning is not shown: it is THORNode's note to API
-                  integrators ("Do not cache this response. Do not send funds
-                  after the expiry…"). The dialog enforces it: a quote older
-                  than swapRisk.quoteMaxAgeMs (30–60 s, far inside the expiry)
-                  is re-fetched and re-reviewed before signing. */}
-
-              {riskPanel}
-
-              {/* Firmware 7.15+ parses native TRX and TRC-20 transfers from the
-                  signed raw_data. Only older firmware gets the legacy generic
-                  warning; TRON as the destination never affects source signing. */}
-              {fromAsset.chainFamily === 'tron' &&
-              (!firmwareVersion || versionCompare(firmwareVersion, '7.15.0') < 0) ? (
-                <Flex align="center" gap="2" bg="rgba(251,146,60,0.08)" border="1px solid" borderColor="rgba(251,146,60,0.3)" px="3" py="1.5" borderRadius="lg" w="full">
-                  <Text fontSize="10px" color="var(--gold)">
-                    {t("tronLegacySigningWarning", "Firmware before 7.15 may show a generic Tron prompt. Update firmware for native TRX and TRC-20 ClearSign details, or verify the complete payload above before approving.")}
-                  </Text>
-                </Flex>
-              ) : null}
-
-              {error && (
-                <Box bg={errorIsWarning ? "rgba(251,146,60,0.08)" : "rgba(224,140,123,0.10)"} border="1px solid" borderColor={errorIsWarning ? "rgba(251,146,60,0.3)" : "kk.error"} borderRadius="lg" px="3" py="2" w="full">
-                  <Flex justify="space-between" align="center" gap="2">
-                    <Text fontSize="xs" color={errorIsWarning ? "var(--gold)" : "kk.error"} flex="1">{error}</Text>
-                    <Button size="xs" variant="ghost" color={errorIsWarning ? "var(--gold)" : "kk.error"} px="1.5" onClick={() => setError(null)}>
-                      {t("dismiss")}
-                    </Button>
-                  </Flex>
-                </Box>
-              )}
-
-              {/* A single device prompt; route-specific warnings remain above. */}
-              <Flex
-                w="full"
-                align="center"
-                gap="2"
-                px="3.5"
-                py="2.5"
-                bg="rgba(139,227,196,0.06)"
-                border="1px solid rgba(139,227,196,0.20)"
-                borderRadius="12px"
-              >
-                <Box flexShrink={0}>
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--teal)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
-                  </svg>
-                </Box>
-                <Text fontSize="11px" color="var(--text-1)" letterSpacing="-0.005em">
-                  {uiText("Review and approve on KeepKey")}
-                </Text>
-              </Flex>
-
-              <Flex gap="2" w="full">
-                <Box
-                  as="button"
-                  flex="1"
-                  py="3"
-                  borderRadius="14px"
-                  fontSize="14px"
-                  fontWeight="500"
-                  color="var(--text-1)"
-                  bg="var(--ink-2)"
-                  border="1px solid var(--ink-3)"
-                  cursor="pointer"
-                  _hover={{ bg: "var(--ink-3)" }}
-                  transition="background 0.15s"
-                  onClick={handleBackToInput}
-                >
-                  {t("back")}
-                </Box>
-                <Box
-                  as="button"
-                  flex="2"
-                  py="3"
-                  borderRadius="14px"
-                  fontSize="14px"
-                  fontWeight="600"
-                  color="var(--ink-0)"
-                  border="0"
-                  cursor={reviewConfirmLocked ? "default" : "pointer"}
-                  opacity={reviewConfirmLocked ? 0.5 : 1}
-                  style={{
-                    background: 'linear-gradient(180deg, var(--teal-2), var(--teal))',
-                    boxShadow: '0 8px 24px -8px rgba(139,227,196,0.5)',
-                    transition: 'transform 0.15s, box-shadow 0.15s',
-                  }}
-                  _hover={reviewConfirmLocked
-                    ? {}
-                    : { transform: "translateY(-1px)" }}
-                  onClick={() => { if (!reviewConfirmLocked) handleExecuteSwap() }}
-                  disabled={reviewConfirmLocked}
-                  aria-disabled={reviewConfirmLocked}
-                >
-                  {reviewConfirmLockLabel ||
-                    ((previewBuild?.allowance && !previewBuild.allowance.sufficient)
-                      ? t("approveAndSwap", "Approve & Swap")
-                      : t("confirmSwap"))}
-                </Box>
-              </Flex>
-            </VStack>
-          )}
-
-          {/* ── INPUT — side-by-side You pay / You receive ─────────── */}
-          {!loadingAssets && !assetLoadError && (phase === 'input' || phase === 'quoting') && (
-            <VStack gap="2" align="stretch">
-              {/* Side-by-side: FROM | center pivot | TO. Pivot is absolutely
-                  positioned over the gap so the two columns stay equal-width.
-                  Hover rotates 180° + glows gold to read as "swap direction". */}
-              <Box position="relative">
-              <Flex gap="3" align="stretch">
-                {/* FROM column */}
-                <Box
-                  flex="1"
-                  bg="linear-gradient(135deg, rgba(255,255,255,0.04) 0%, rgba(139,227,196,0.04) 100%)"
-                  border="1px solid" borderColor="kk.border" borderRadius="xl" p="3"
-                  transition="border-color 0.2s"
-                  _hover={{ borderColor: "rgba(139,227,196,0.22)" }}
-                >
-                  <AssetSelector
-                    label={t("youPay", "You pay")}
-                    selected={fromAsset}
-                    onOpenPicker={() => setPickerSide('from')}
-                    disabled={busy}
-                  />
-
-                  {isZcashSource && (
-                    <Text mt="2" fontSize="11px" color="kk.gold" role="note" title={t("zcashUnshieldBeforeSwap")}>
-                      {t("zcashTransparentOnlyTitle")}
-                    </Text>
-                  )}
-
-                  {fromAsset && (
-                    <Box mt="3" p="2.5" bg="rgba(0,0,0,0.2)" borderRadius="lg" border="1px solid" borderColor="rgba(255,255,255,0.06)">
-                      <Flex justify="space-between" align="center" mb="2">
-                        <VStack gap="0" align="flex-start">
-                          <Text fontSize="9px" color="kk.textMuted" fontWeight="600" textTransform="uppercase" letterSpacing="0.05em">{isZcashSource ? t("zcashTransparentAvailable") : t("available")}</Text>
-                          <Flex align="center" gap="1.5" minH="20px" aria-busy={fromBalancePending}>
-                            <Text fontSize="xs" fontFamily="mono" color="kk.textSecondary" fontWeight="600">
-                              {fromBalance !== null ? `${formatBalance(fromBalance)} ${fromAsset.symbol}` : '\u2014'}
-                            </Text>
-                            {(fromBalancePending || loadingBalances) && <Spinner size="xs" color="kk.gold" aria-label={t('loadingBalances')} />}
-                          </Flex>
-                          {fromBalance && hasFromPrice && (
-                            <Text fontSize="11px" color="kk.textSecondary" fontWeight="500">{fmtCompact(parseFloat(fromBalance) * fromPriceUsd)}</Text>
-                          )}
-                        </VStack>
-                        <Flex gap="1" align="center">
-                          {hasFromPrice && (
-                            // Segmented chip — visible toggle, replaces the
-                            // 9px icon-only button which users couldn't find.
-                            <Flex border="1px solid" borderColor="rgba(255,255,255,0.1)" borderRadius="md" overflow="hidden">
-                              <Box as="button" px="1.5" py="0.5" fontSize="10px" fontWeight="700"
-                                bg={inputMode === 'crypto' ? "kk.gold" : "transparent"}
-                                color={inputMode === 'crypto' ? "black" : "kk.textSecondary"}
-                                cursor="pointer"
-                                _hover={{ bg: inputMode === 'crypto' ? "kk.goldHover" : "rgba(255,255,255,0.05)" }}
-                                onClick={() => inputMode !== 'crypto' && toggleInputMode()}
-                                title={t("switchToCrypto") || `Use ${fromAsset.symbol}`}>
-                                {fromAsset.symbol}
-                              </Box>
-                              <Box as="button" px="1.5" py="0.5" fontSize="10px" fontWeight="700"
-                                bg={inputMode === 'fiat' ? "kk.gold" : "transparent"}
-                                color={inputMode === 'fiat' ? "black" : "kk.textSecondary"}
-                                cursor="pointer"
-                                _hover={{ bg: inputMode === 'fiat' ? "kk.goldHover" : "rgba(255,255,255,0.05)" }}
-                                onClick={() => inputMode !== 'fiat' && toggleInputMode()}
-                                title={t("switchToFiat") || `Use ${fiatSymbol}`}>
-                                {fiatSymbol}
-                              </Box>
-                            </Flex>
-                          )}
-                          {/* MAX is a set-action, not a toggle. The auto-default
-                              useEffect can pre-enable MAX (small-balance case),
-                              and a toggle here would silently flip that off when
-                              the user clicked MAX expecting it to "do something".
-                              To exit MAX mode, the user types — the input's
-                              onChange already calls setIsMax(false). */}
-                          <Button
-                            size="xs"
-                            h="22px"
-                            minH="22px"
-                            px="2"
-                            py="0.5"
-                            variant={isMax ? "solid" : "outline"}
-                            bg={isMax ? "kk.gold" : "transparent"}
-                            color={isMax ? "black" : "kk.gold"}
-                            borderColor={isMax ? "kk.gold" : "rgba(233,196,106,0.3)"}
-                            border="1px solid"
-                            fontWeight="700"
-                            fontSize="10px"
-                            lineHeight="1"
-                            borderRadius="md"
-                            _hover={{ bg: isMax ? "kk.goldHover" : "rgba(233,196,106,0.1)" }}
-                            onClick={() => { setIsMax(true); setMaxReserveMode('safe'); setAmount(""); setFiatAmount("") }}
-                            disabled={busy || fromBalance === null}
-                          >
-                            {t("max")}
-                          </Button>
-                        </Flex>
-                      </Flex>
-
-                      {fromAsset.chainFamily === 'evm' && (
-                        <Box mt="2" mb="3" aria-label={uiText('Swap source account')}>
-                          <Text fontSize="10px" color="kk.textMuted" mb="1">{uiText('Signing account')}</Text>
-                          {evmAddresses.addresses.length > 1 ? <label>
-                            <select aria-label={uiText('Swap signing account')} value={effectiveEvmIndex} disabled={busy} onChange={e => setEvmAddressIndexOverride(Number(e.target.value))}
-                              style={{width:'100%',padding:'8px',borderRadius:6,border:'1px solid var(--line-2)',background:'var(--ink-1)',color:'var(--text-0)',fontSize:11}}>
-                              {evmAddresses.addresses.map(a => {
-                                const own = accountBalances.find(b => b.chainId === fromAsset.chainId && b.address.toLowerCase() === a.address.toLowerCase())
-                                  || withNativeProof(scopeSwapBalances([], undefined, evmAddresses, a.addressIndex).find(b => b.chainId === fromAsset.chainId))
-                                const amount = swapAccountAmount(own, fromAsset)
-                                return <option key={a.addressIndex} value={a.addressIndex}>{uiText('Account')} #{a.addressIndex} · {amount === null ? uiText('Balance unverified') : `${formatBalance(amount)} ${fromAsset.symbol}`}</option>
-                              })}
-                            </select>
-                          </label> : <Text fontSize="11px" color="kk.textSecondary">{signingAccount ? `${uiText('Account')} #${signingAccount.addressIndex}` : uiText('Account unavailable')}</Text>}
-                          <Text as="code" display="block" fontSize="10px" mt="1" color="kk.textSecondary" overflowWrap="anywhere" title={signingAccount?.address}>{signingAccount?.address || uiText('Connect and verify the signing account')}</Text>
-                        </Box>
-                      )}
-
-                      {/* Amount + USD-equivalent side by side: the input takes
-                          the available width, the converted figure sits right
-                          on the same baseline. Click the converted value to
-                          flip input modes (was a separate row below). */}
-                      <Flex align="center" gap="2">
-                        <Box position="relative" flex="1">
-                          {inputMode === 'fiat' && (
-                            <Text position="absolute" left="8px" top="50%" transform="translateY(-50%)" fontSize="xs" fontWeight="600" color="kk.textSecondary" pointerEvents="none" zIndex={1}>$</Text>
-                          )}
-                          <Input
-                            inputMode="decimal"
-                            aria-invalid={invalidAmountInput || amountTooPrecise || undefined}
-                            value={isMax ? (quotedSendAmount ? formatBalance(quotedSendAmount) : 'MAX') : (inputMode === 'crypto' ? amount : fiatAmount)}
-                            onChange={(e) => { if (isMax) { setIsMax(false); setMaxReserveMode('safe') } inputMode === 'crypto' ? handleCryptoChange(e.target.value) : handleFiatChange(e.target.value) }}
-                            placeholder={inputMode === 'fiat' ? '0.00' : t("amountPlaceholder")}
-                            bg="rgba(0,0,0,0.4)" border="1px solid"
-                            borderColor={exceedsBalance ? "kk.error" : exceedsSafeMax ? "kk.gold" : "rgba(255,255,255,0.08)"}
-                            borderRadius="lg" color="kk.textPrimary" size="sm" fontFamily="mono" fontSize="sm" fontWeight="700"
-                            disabled={busy} px={inputMode === 'fiat' ? "6" : "3"}
-                            _focus={{ borderColor: exceedsBalance ? "kk.error" : "kk.gold", boxShadow: exceedsBalance ? "none" : "0 0 0 1px rgba(233,196,106,0.3)" }}
-                          />
-                        </Box>
-                        {hasFromPrice && (
-                          // Under MAX the input is pinned to the native figure,
-                          // so the counterpart is always the USD value — show it
-                          // rather than dropping the row and hiding the worth.
-                          isMax ? (
-                            amountUsdPreview !== null ? (
-                              <Box px="1">
-                                <Text fontSize="xs" color="kk.textSecondary" fontFamily="mono" whiteSpace="nowrap">
-                                  ≈ {fmtCompact(amountUsdPreview)}
-                                </Text>
-                              </Box>
-                            ) : null
-                          ) : inputMode === 'crypto' && amountUsdPreview !== null ? (
-                            <Box as="button" onClick={toggleInputMode} cursor="pointer"
-                              title={t("switchToFiat") || "Switch to fiat input"}
-                              px="1"
-                              _hover={{ color: "kk.gold" }}>
-                              <Text fontSize="xs" color="kk.textSecondary" fontFamily="mono" whiteSpace="nowrap">
-                                ≈ {fmtCompact(amountUsdPreview)}
-                              </Text>
-                            </Box>
-                          ) : inputMode === 'fiat' && amount ? (
-                            <Box as="button" onClick={toggleInputMode} cursor="pointer"
-                              title={t("switchToCrypto") || `Switch to ${fromAsset.symbol} input`}
-                              px="1"
-                              _hover={{ color: "kk.gold" }}>
-                              <Text fontSize="xs" color="kk.textSecondary" fontFamily="mono" whiteSpace="nowrap">
-                                ≈ {formatBalance(amount)} {fromAsset.symbol}
-                              </Text>
-                            </Box>
-                          ) : null
-                        )}
-                      </Flex>
-                      {invalidAmountInput && <Text fontSize="10px" color="kk.error" mt="1">{t('invalidAmount', { ns: 'send', defaultValue: 'Enter an ungrouped decimal amount, for example 1.5. Thousands separators are not accepted.' })}</Text>}
-                      {amountTooPrecise && fromAsset && <Text fontSize="10px" color="kk.error" mt="1">{t('tooManyDecimals', { ns: 'send', symbol: fromAsset.symbol, decimals: fromAmountDecimals })}</Text>}
-                      {exceedsBalance && (
-                        <Text fontSize="10px" color="kk.error" mt="1" fontWeight="600">{t("insufficientBalance")}</Text>
-                      )}
-                      <Box minH="30px" mt="1" role="status" aria-live="polite">
-                      {fromBalanceUnverified && fromAsset && (fromBalancePending ? (
-                        <Text fontSize="10px" color="kk.textMuted" fontWeight="600">
-                          {t("balanceLoading", {
-                            defaultValue: "Loading {{symbol}} balance… MAX is available once it arrives.",
-                            symbol: fromAsset.symbol,
-                          })}
-                        </Text>
+          {/* ── INPUT — one surface: You pay | You receive, a pivot on the divider,
+              and a decision row across both columns. ─────────────────── */}
+          {!loadingAssets && !assetLoadError && (phase === 'input' || phase === 'quoting') && (() => {
+            const presetSlippage = SLIPPAGE_PRESETS_BPS.includes(slippageBps as typeof SLIPPAGE_PRESETS_BPS[number])
+            // Notices about the amount, one status mark each.
+            const fromRows: PreflightRow[] = []
+            if (fromAsset && fromChainLowGas) fromRows.push({ key: 'gas', status: 'block', title: t("lowGasTitle", { defaultValue: "Low {{symbol}} for network fees", symbol: fromChainLowGas.symbol }),
+              detail: t("lowGasSwapBody", {
+                defaultValue: "Sending {{token}} costs {{symbol}} in network fees — this swap will likely fail to broadcast. Deposit {{symbol}} to your {{coin}} address first. You have {{balance}} {{symbol}}.",
+                token: fromAsset.symbol, symbol: fromChainLowGas.symbol, coin: fromChainLowGas.coin, balance: formatBalance(fromChainLowGas.balance),
+              }) })
+            if (nativeMaxInsufficient && fromAsset) fromRows.push({ key: 'max-gas', status: 'block',
+              title: t("maxInsufficientForGas", { defaultValue: "Balance is below the fee reserve (~{{reserve}} {{symbol}}). Top up to swap.", reserve: nativeMaxFeeReserve(fromAsset, maxReserveMode).toString(), symbol: fromAsset.symbol }) })
+            if (exceedsSafeMax && fromAsset) fromRows.push({ key: 'safe-max', status: 'warn',
+              title: t("exceedsSafeMax", { defaultValue: "Leave ~{{reserve}} {{symbol}} for network fees — reduce the amount or tap MAX.", reserve: formatBalance(String(nativeMaxFeeReserve(fromAsset, 'safe'))), symbol: fromAsset.symbol }) })
+            if (isFeeReservedNativeMax && !nativeMaxInsufficient && fromAsset && nativeMaxReserveDisplay) fromRows.push({ key: 'reserve', status: 'ok',
+              title: t("maxReserveDisclosure", {
+                defaultValue: "MAX swaps {{amount}} {{symbol}} and keeps ~{{reserve}} {{symbol}} for network fees{{usd}}.",
+                amount: formatBalance(sendAmount), reserve: formatBalance(String(nativeMaxReserveDisplay.reserveAmount)), symbol: fromAsset.symbol,
+                usd: nativeMaxReserveDisplay.reserveUsd > 0 ? ` (${fmtCompact(nativeMaxReserveDisplay.reserveUsd)})` : '',
+              }),
+              detail: nativeMaxReserveDisplay.canUseCloser ? <>
+                <div className="kk-pf-modes" role="group" aria-label={uiText("Fee reserve")} style={{ marginTop: 6 }}>
+                  {(['safe', 'closer'] as NativeMaxReserveMode[]).map(mode => <button key={mode} type="button" aria-pressed={maxReserveMode === mode} disabled={busy} onClick={() => setMaxReserveMode(mode)}>
+                    {mode === 'safe' ? t("maxReserveSafe", "Safe") : t("maxReserveCloser", "Closer MAX")}
+                  </button>)}
+                </div>
+                {maxReserveMode === 'closer' && <p style={{ color: 'var(--gold)' }}>{t("maxReserveCloserWarning", "Tighter gas reserve; swap may fail if gas moves before signing.")}</p>}
+              </> : undefined })
+            const reviewReady = phase === 'input' && !!quote && !!fromAsset && !!toAsset && !sameAsset
+            const reviewLabel = reviewReady ? uiText("Review swap")
+              : phase === 'quoting' ? t("gettingQuote")
+              : sameAsset ? t("sameAsset")
+              : !fromAsset || !toAsset ? t("selectAsset")
+              : t("enterAmount")
+            const short = (a: string) => `${a.slice(0, 10)}…${a.slice(-6)}`
+            return (
+              <div className="kk-pf kk-pf-sg kk-pf-inset kk-pf-rows kk-pf-pivoted" data-swap-form>
+                {/* ── FROM ── */}
+                <div className="kk-pf-left kk-pf-scroll" ref={leftScroll}>
+                  <AssetSelector label={t("youPay", "You pay")} selected={fromAsset} onOpenPicker={() => setPickerSide('from')} disabled={busy} />
+                  {isZcashSource && <p className="kk-pf-detail" role="note" title={t("zcashUnshieldBeforeSwap")} style={{ margin: 0, color: 'var(--gold)' }}>{t("zcashTransparentOnlyTitle")}</p>}
+                  {fromAsset && <div style={{ display: 'grid', gap: 8 }}>
+                    <div className="kk-pf-top">
+                      <span className="kk-pf-detail" style={{ margin: 0 }} aria-busy={fromBalancePending}>
+                        <span className="kk-pf-dim">{isZcashSource ? t("zcashTransparentAvailable") : t("available")}</span>{' '}
+                        <span style={{ fontFamily: 'var(--font-mono)' }}>{fromBalance !== null ? `${formatBalance(fromBalance)} ${fromAsset.symbol}` : '—'}</span>
+                        {fromBalance && hasFromPrice && <span className="kk-pf-dim">{' · '}{fmtCompact(parseFloat(fromBalance) * fromPriceUsd)}</span>}
+                        {(fromBalancePending || loadingBalances) && <>{' '}<Spinner size="xs" color="kk.gold" aria-label={t('loadingBalances')} /></>}
+                      </span>
+                      <div className="kk-pf-modes" role="group" aria-label={uiText("Amount")}>
+                        {hasFromPrice && <>
+                          <button type="button" aria-pressed={inputMode === 'crypto'} title={t("switchToCrypto") || `Use ${fromAsset.symbol}`} onClick={() => inputMode !== 'crypto' && toggleInputMode()}>{fromAsset.symbol}</button>
+                          <button type="button" aria-pressed={inputMode === 'fiat'} title={t("switchToFiat") || `Use ${fiatSymbol}`} onClick={() => inputMode !== 'fiat' && toggleInputMode()}>{fiatSymbol}</button>
+                        </>}
+                        {/* MAX is a set-action, not a toggle: the auto-default effect can
+                            pre-enable it, and a toggle would silently turn that off. To
+                            leave MAX, the user types (onChange clears it). */}
+                        <button type="button" aria-pressed={isMax} disabled={busy || fromBalance === null}
+                          onClick={() => { setIsMax(true); setMaxReserveMode('safe'); setAmount(""); setFiatAmount("") }}>{t("max")}</button>
+                      </div>
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, minWidth: 0 }}>
+                      {inputMode === 'fiat' && <span className="kk-pf-dim" style={{ fontFamily: 'var(--font-mono)', fontSize: 22 }}>$</span>}
+                      <input className="kk-pf-field"
+                        inputMode="decimal"
+                        aria-label={uiText("Amount")}
+                        aria-invalid={invalidAmountInput || amountTooPrecise || exceedsBalance || undefined}
+                        value={isMax ? (quotedSendAmount ? formatBalance(quotedSendAmount) : 'MAX') : (inputMode === 'crypto' ? amount : fiatAmount)}
+                        onChange={(e) => { if (isMax) { setIsMax(false); setMaxReserveMode('safe') } inputMode === 'crypto' ? handleCryptoChange(e.target.value) : handleFiatChange(e.target.value) }}
+                        placeholder={inputMode === 'fiat' ? '0.00' : t("amountPlaceholder")}
+                        disabled={busy} />
+                      {/* The counterpart figure; click it to type in the other unit. Under
+                          MAX the input is pinned to the native figure, so it shows USD. */}
+                      {hasFromPrice && (isMax
+                        ? amountUsdPreview !== null && <span className="kk-pf-detail" style={{ margin: 0, fontFamily: 'var(--font-mono)', whiteSpace: 'nowrap' }}>≈ {fmtCompact(amountUsdPreview)}</span>
+                        : inputMode === 'crypto' && amountUsdPreview !== null
+                          ? <button type="button" className="kk-pf-link" style={{ fontFamily: 'var(--font-mono)', textDecoration: 'none', color: 'var(--text-1)', whiteSpace: 'nowrap' }} title={t("switchToFiat") || "Switch to fiat input"} onClick={toggleInputMode}>≈ {fmtCompact(amountUsdPreview)}</button>
+                          : inputMode === 'fiat' && amount
+                            ? <button type="button" className="kk-pf-link" style={{ fontFamily: 'var(--font-mono)', textDecoration: 'none', color: 'var(--text-1)', whiteSpace: 'nowrap' }} title={t("switchToCrypto") || `Switch to ${fromAsset.symbol} input`} onClick={toggleInputMode}>≈ {formatBalance(amount)} {fromAsset.symbol}</button>
+                            : null)}
+                    </div>
+                    {invalidAmountInput && <p className="kk-pf-detail" style={{ margin: 0, color: 'var(--rose)' }}>{t('invalidAmount', { ns: 'send', defaultValue: 'Enter an ungrouped decimal amount, for example 1.5. Thousands separators are not accepted.' })}</p>}
+                    {amountTooPrecise && <p className="kk-pf-detail" style={{ margin: 0, color: 'var(--rose)' }}>{t('tooManyDecimals', { ns: 'send', symbol: fromAsset.symbol, decimals: fromAmountDecimals })}</p>}
+                    {exceedsBalance && <p className="kk-pf-detail" style={{ margin: 0, color: 'var(--rose)', fontWeight: 600 }}>{t("insufficientBalance")}</p>}
+                    <div role="status" aria-live="polite">
+                      {fromBalanceUnverified && (fromBalancePending ? (
+                        <p className="kk-pf-detail" style={{ margin: 0 }}>{t("balanceLoading", { defaultValue: "Loading {{symbol}} balance… MAX is available once it arrives.", symbol: fromAsset.symbol })}</p>
                       ) : sourceBalanceRead === 'blocked' ? (
-                        <Text fontSize="10px" color="kk.textMuted">{uiText('Balance unverified')}</Text>
+                        <p className="kk-pf-detail" style={{ margin: 0 }}>{uiText('Balance unverified')}</p>
                       ) : (
-                        <Text fontSize="10px" color="kk.gold" fontWeight="600">
+                        <p className="kk-pf-detail" style={{ margin: 0, color: 'var(--gold)' }}>
                           {fromBalanceReason === 'missing' ? t("balanceMissing", {
                             defaultValue: "{{symbol}} balance was not returned by the last refresh, so MAX is unavailable. Enter an amount, or refresh and try again.",
                             symbol: fromAsset.symbol,
@@ -4799,502 +4384,176 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                             defaultValue: "{{symbol}} balance unavailable — the last refresh could not reach this chain, so MAX is unavailable. Enter an amount, or refresh and try again.",
                             symbol: fromAsset.symbol,
                           })}
-                        </Text>
+                        </p>
                       ))}
-                      </Box>
-                      {exceedsSafeMax && fromAsset && (
-                        <Text fontSize="10px" color="kk.gold" mt="1" fontWeight="600">
-                          {t("exceedsSafeMax", {
-                            defaultValue: "Leave ~{{reserve}} {{symbol}} for network fees — reduce the amount or tap MAX.",
-                            reserve: formatBalance(String(nativeMaxFeeReserve(fromAsset, 'safe'))),
-                            symbol: fromAsset.symbol,
+                    </div>
+                  </div>}
+                  {fromAsset?.chainFamily === 'evm' && (
+                    <div aria-label={uiText('Swap source account')} style={{ display: 'grid', gap: 6 }}>
+                      <span className="kk-pf-dim" style={{ fontSize: 12 }}>{uiText('Signing account')}</span>
+                      {evmAddresses.addresses.length > 1 ? <label>
+                        <select className="kk-pf-field kk-pf-sm" aria-label={uiText('Swap signing account')} value={effectiveEvmIndex} disabled={busy} onChange={e => setEvmAddressIndexOverride(Number(e.target.value))}
+                          style={{ fontFamily: 'var(--font-ui-sans)', background: 'var(--ink-0)' }}>
+                          {evmAddresses.addresses.map(a => {
+                            const own = accountBalances.find(b => b.chainId === fromAsset.chainId && b.address.toLowerCase() === a.address.toLowerCase())
+                              || withNativeProof(scopeSwapBalances([], undefined, evmAddresses, a.addressIndex).find(b => b.chainId === fromAsset.chainId))
+                            const amount = swapAccountAmount(own, fromAsset)
+                            return <option key={a.addressIndex} value={a.addressIndex}>{uiText('Account')} #{a.addressIndex} · {amount === null ? uiText('Balance unverified') : `${formatBalance(amount)} ${fromAsset.symbol}`}</option>
                           })}
-                        </Text>
-                      )}
-                      {isFeeReservedNativeMax && !nativeMaxInsufficient && fromAsset && nativeMaxReserveDisplay && (
-                        <Box mt="2" p="2" borderRadius="md" bg="rgba(233,196,106,0.06)" border="1px solid rgba(233,196,106,0.18)">
-                          <Text fontSize="10px" color="kk.textSecondary" fontFamily="mono" lineHeight="1.45">
-                            {t("maxReserveDisclosure", {
-                              defaultValue: "MAX swaps {{amount}} {{symbol}} and keeps ~{{reserve}} {{symbol}} for network fees{{usd}}.",
-                              amount: formatBalance(sendAmount),
-                              reserve: formatBalance(String(nativeMaxReserveDisplay.reserveAmount)),
-                              symbol: fromAsset.symbol,
-                              usd: nativeMaxReserveDisplay.reserveUsd > 0 ? ` (${fmtCompact(nativeMaxReserveDisplay.reserveUsd)})` : '',
-                            })}
-                          </Text>
-                          {nativeMaxReserveDisplay.canUseCloser && (
-                            <Flex mt="2" align="center" justify="space-between" gap="2" wrap="wrap">
-                              <Flex p="0.5" bg="rgba(0,0,0,0.28)" border="1px solid rgba(255,255,255,0.08)" borderRadius="md" gap="0.5">
-                                {(['safe', 'closer'] as NativeMaxReserveMode[]).map((mode) => {
-                                  const active = maxReserveMode === mode
-                                  return (
-                                    <Button
-                                      key={mode}
-                                      type="button"
-                                      px="2"
-                                      py="0.5"
-                                      h="20px"
-                                      minW="auto"
-                                      borderRadius="sm"
-                                      fontSize="9px"
-                                      fontWeight="700"
-                                      color={active ? "black" : "kk.textSecondary"}
-                                      bg={active ? "kk.gold" : "transparent"}
-                                      border="0"
-                                      _hover={{ bg: active ? "kk.goldHover" : "rgba(255,255,255,0.06)" }}
-                                      onClick={() => setMaxReserveMode(mode)}
-                                      disabled={busy}
-                                    >
-                                      {mode === 'safe'
-                                        ? t("maxReserveSafe", "Safe")
-                                        : t("maxReserveCloser", "Closer MAX")}
-                                    </Button>
-                                  )
-                                })}
-                              </Flex>
-                              {maxReserveMode === 'closer' && (
-                                <Text fontSize="9px" color="var(--gold)" fontFamily="mono" flex="1" minW="150px">
-                                  {t("maxReserveCloserWarning", "Tighter gas reserve; swap may fail if gas moves before signing.")}
-                                </Text>
-                              )}
-                            </Flex>
-                          )}
-                        </Box>
-                      )}
-                      {nativeMaxInsufficient && fromAsset && (
-                        <Text fontSize="10px" color="kk.error" mt="1" fontWeight="600">
-                          {t("maxInsufficientForGas", { defaultValue: "Balance is below the fee reserve (~{{reserve}} {{symbol}}). Top up to swap.", reserve: nativeMaxFeeReserve(fromAsset, maxReserveMode).toString(), symbol: fromAsset.symbol })}
-                        </Text>
-                      )}
-                    </Box>
+                        </select>
+                      </label> : <span className="kk-pf-detail" style={{ margin: 0 }} title={signingAccount?.address}>{signingAccount ? `${uiText('Account')} #${signingAccount.addressIndex} · ${short(signingAccount.address)}` : uiText('Account unavailable')}</span>}
+                      {!signingAccount && <span className="kk-pf-detail" style={{ margin: 0 }}>{uiText('Connect and verify the signing account')}</span>}
+                    </div>
                   )}
+                  {fromRows.length > 0 && <PreflightList rows={fromRows} />}
+                </div>
 
-                  {fromAsset && fromChainLowGas && (
-                    <Box mt="2" p="2.5" borderRadius="md" bg="rgba(229,62,62,0.08)" border="1px solid rgba(229,62,62,0.3)">
-                      <Flex align="center" gap="1.5" mb="1">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="#E53E3E" xmlns="http://www.w3.org/2000/svg">
-                          <path d="M3 22V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v9h1a3 3 0 0 1 3 3v3a1 1 0 0 0 2 0v-7.5l-2.4-2.4a1 1 0 0 1 1.4-1.4l3.3 3.3c.2.2.3.4.3.7V19a3 3 0 0 1-6 0v-3a1 1 0 0 0-1-1h-1v7H3zM7 6h4v5H7V6z"/>
-                        </svg>
-                        <Text fontSize="11px" fontWeight="700" color="kk.error">
-                          {t("lowGasTitle", { defaultValue: "Low {{symbol}} for network fees", symbol: fromChainLowGas.symbol })}
-                        </Text>
-                      </Flex>
-                      <Text fontSize="10px" color="kk.error" lineHeight="1.45">
-                        {t("lowGasSwapBody", {
-                          defaultValue: "Sending {{token}} costs {{symbol}} in network fees — this swap will likely fail to broadcast. Deposit {{symbol}} to your {{coin}} address first. You have {{balance}} {{symbol}}.",
-                          token: fromAsset.symbol,
-                          symbol: fromChainLowGas.symbol,
-                          coin: fromChainLowGas.coin,
-                          balance: formatBalance(fromChainLowGas.balance),
-                        })}
-                      </Text>
-                    </Box>
-                  )}
+                {/* Pivot on the divider: flips the two sides. */}
+                <button type="button" className="kk-pf-pivot"
+                  disabled={busy || !fromAsset || !toAsset}
+                  onClick={() => { if (!busy && fromAsset && toAsset) handleFlip() }}
+                  aria-label={uiText("Swap direction")}>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <path d="M8 3L4 7l4 4" /><path d="M4 7h16" /><path d="M16 21l4-4-4-4" /><path d="M20 17H4" />
+                  </svg>
+                </button>
 
-                  {fromAsset && fromAddress && (
-                    <Flex mt="2" px="1" align="center" gap="1">
-                      <Box w="4px" h="4px" borderRadius="full" bg="var(--teal)" flexShrink={0} />
-                      <Text fontSize="9px" fontFamily="mono" color="kk.textMuted" truncate title={fromAddress}>
-                        {fromAddress.slice(0, 10)}...{fromAddress.slice(-6)}
-                      </Text>
-                    </Flex>
-                  )}
-                </Box>
-
-                {/* Flip button — centered vertically */}
-                <Flex align="center" justify="center" flexShrink={0}>
-                  <Box
-                    as="button" w="36px" h="36px" display="flex" alignItems="center" justifyContent="center"
-                    borderRadius="full" border="2px solid" borderColor="rgba(233,196,106,0.4)"
-                    bg="linear-gradient(135deg, rgba(233,196,106,0.15) 0%, rgba(233,196,106,0.05) 100%)"
-                    color="var(--gold)" cursor="pointer"
-                    _hover={{ borderColor: "var(--gold)", bg: "rgba(233,196,106,0.2)", transform: "rotate(180deg) scale(1.1)" }}
-                    transition="all 0.35s cubic-bezier(0.34, 1.56, 0.64, 1)"
-                    onClick={handleFlip}
-                  >
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--gold)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M7 16V4m0 0L3 8m4-4l4 4M17 8v12m0 0l4-4m-4 4l-4-4" />
-                    </svg>
-                  </Box>
-                </Flex>
-
-                {/* TO column */}
-                <Box
-                  flex="1"
-                  bg="linear-gradient(135deg, rgba(255,255,255,0.04) 0%, rgba(139,227,196,0.04) 100%)"
-                  border="1px solid" borderColor="kk.border" borderRadius="xl" p="3"
-                  transition="border-color 0.2s"
-                  _hover={{ borderColor: "rgba(139,227,196,0.22)" }}
-                >
-                  <AssetSelector
-                    label={t("youReceive", "You receive")}
-                    selected={toAsset}
-                    onOpenPicker={() => setPickerSide('to')}
-                    disabled={busy}
-                  />
-
+                {/* ── TO ── */}
+                <div className="kk-pf-right kk-pf-scroll" ref={rightScroll}>
+                  <AssetSelector label={t("youReceive", "You receive")} selected={toAsset} onOpenPicker={() => setPickerSide('to')} disabled={busy} />
                   {toAsset && quote && (
-                    <Box mt="3" p="2.5" bg="rgba(139,227,196,0.08)" borderRadius="lg" border="1px solid" borderColor="rgba(139,227,196,0.18)">
-                      <Text fontSize="9px" color="kk.textMuted" fontWeight="600" textTransform="uppercase" letterSpacing="0.05em" mb="1">{t("expectedOutput")}</Text>
-                      <Text fontSize="sm" fontFamily="mono" fontWeight="800" color="var(--teal)">
-                        <GreenCountUp value={quote.expectedOutput} color="var(--teal)" suffix={` ${toAsset.symbol}`} fontSize="sm" />
-                      </Text>
-                      {hasToPrice && (
-                        <Text fontSize="xs" fontFamily="mono" color="kk.textSecondary" fontWeight="500" mt="0.5">
-                          ≈ {fmtCompact(parseFloat(quote.expectedOutput) * toPriceUsd)}
-                        </Text>
-                      )}
-                      {isFeeReservedNativeMax && fromAsset && nativeMaxReserveDisplay && (
-                        <Text fontSize="9px" color="var(--gold)" mt="1">
-                          {t("sendMaxGasReserveNote", {
-                            defaultValue: "Keeping ~{{reserve}} {{symbol}} for network fees{{usd}}.",
-                            reserve: formatBalance(String(nativeMaxReserveDisplay.reserveAmount)),
-                            symbol: fromAsset.symbol,
-                            usd: nativeMaxReserveDisplay.reserveUsd > 0 ? ` (${fmtCompact(nativeMaxReserveDisplay.reserveUsd)})` : '',
-                          })}
-                        </Text>
-                      )}
-                    </Box>
+                    <div style={{ display: 'grid', gap: 4 }} data-expected-output>
+                      <span className="kk-pf-dim" style={{ fontSize: 12 }}>{t("expectedOutput")}</span>
+                      <div className="kk-pf-amt"><div>
+                        {/* The quoted figure itself: a count-up from 0 read as "0.00000000" for a second on every quote. */}
+                        <b>{formatBalance(quote.expectedOutput)} {toAsset.symbol}</b>
+                        {hasToPrice && <small>≈ {fmtCompact(parseFloat(quote.expectedOutput) * toPriceUsd)}</small>}
+                      </div></div>
+                    </div>
                   )}
-
-                  {/* Quoting placeholder — sits in the same slot the price will
-                      occupy. Reads as "your number is computing here", not as
-                      a separate loading screen tacked on below the form. */}
+                  {/* The quote computes in the slot its figure will take. */}
                   {toAsset && !quote && phase === 'quoting' && (
-                    <Box mt="3" p="2.5" bg="rgba(233,196,106,0.06)" borderRadius="lg" border="1px solid" borderColor="rgba(233,196,106,0.20)"
-                      style={{ animation: 'kkSwapFadeIn 0.25s ease-out' }}>
-                      <Text fontSize="9px" color="kk.textMuted" fontWeight="600" textTransform="uppercase" letterSpacing="0.05em" mb="1.5">
-                        {t("expectedOutput")}
-                      </Text>
-                      <Flex align="center" gap="3">
-                        <Box
-                          w="68px"
-                          h="68px"
-                          borderRadius="full"
-                          flexShrink={0}
-                          overflow="hidden"
-                          display="flex"
-                          alignItems="center"
-                          justifyContent="center"
-                          style={{
-                            background: 'radial-gradient(circle at 50% 45%, rgba(233,196,106,0.22), rgba(233,196,106,0.06) 70%)',
-                            boxShadow: '0 0 0 1px rgba(233,196,106,0.25), 0 4px 14px -6px rgba(233,196,106,0.35)',
-                          }}
-                        >
-                          <Image
-                            src={calculatingGif}
-                            alt=""
-                            w="60px"
-                            h="60px"
-                            style={{ objectFit: 'contain' }}
-                          />
-                        </Box>
-                        <VStack gap="0" align="flex-start" minW="0">
-                          <Text fontSize="xs" color="var(--gold)" fontWeight="700" letterSpacing="-0.005em">
-                            {t("findingBestRoute") || uiText("Finding best route…")}
-                          </Text>
-                          <Text fontSize="10px" color="kk.textMuted" fontWeight="500">
-                            {t("gettingQuote")}
-                          </Text>
-                        </VStack>
-                      </Flex>
-                    </Box>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 12, animation: 'kkSwapFadeIn 0.25s ease-out' }}>
+                      <img src={calculatingGif} alt="" width={48} height={48} style={{ objectFit: 'contain', borderRadius: '50%' }} />
+                      <div>
+                        <b style={{ fontSize: 13, color: 'var(--gold)' }}>{t("findingBestRoute") || uiText("Finding best route…")}</b>
+                        <p className="kk-pf-detail" style={{ margin: 0 }}>{t("gettingQuote")}</p>
+                      </div>
+                    </div>
                   )}
-
-                  {/* Fallback fetch — the amount is valid and nothing is blocking
-                      it with its own visible message, yet a send/receive address
-                      hasn't resolved (the silent dead-end: empty balance cache /
-                      balance server down, no resolver for non-UTXO chains). When
-                      canQuote is otherwise true the quote effect flips phase to
-                      'quoting', so this only renders in the genuinely-stuck case.
-                      Fill the otherwise-blank slot with the reason + a Get Quote
-                      button that re-derives the address and re-fires the quote. */}
-                  {phase === 'input' && !quote && !error && quoteBlockReason && (
-                    <Box mt="3" p="2.5" bg="rgba(233,196,106,0.06)" borderRadius="lg" border="1px solid" borderColor="rgba(233,196,106,0.20)"
-                      style={{ animation: 'kkSwapFadeIn 0.25s ease-out' }}>
-                      <Text fontSize="10px" color="kk.textSecondary" fontWeight="500" mb={needsDestAddress ? "2" : "0"} lineHeight="1.45">
-                        {quoteBlockReason}
-                      </Text>
-                      {needsDestAddress && (
-                        <Button
-                          w="full" size="sm" fontWeight="700" fontSize="12px"
-                          bg="kk.gold" color="black" borderRadius="lg" border="0"
-                          _hover={{ bg: "kk.goldHover" }}
-                          loading={manualQuoting}
-                          loadingText={t("gettingQuote")}
-                          onClick={handleManualQuote}
-                        >
-                          {t("getQuote", "Get Quote")}
-                        </Button>
-                      )}
-                    </Box>
+                  {/* Stuck without a quote (an address did not resolve): the reason,
+                      and a Get Quote that re-derives it and asks again. */}
+                  {phase === 'input' && !quote && !error && (quoteBlockReason || canQuote) && (
+                    <div style={{ display: 'grid', gap: 8 }}>
+                      <p className="kk-pf-detail" style={{ margin: 0 }}>{quoteBlockReason || t("readyForQuote", "Ready to fetch a fresh quote.")}</p>
+                      {(!quoteBlockReason || needsDestAddress) && <div className="kk-pf-actions kk-pf-wrap" style={{ marginTop: 0 }}>
+                        <button type="button" className="kk-pf-outline" disabled={manualQuoting} onClick={handleManualQuote}>
+                          {manualQuoting && <span className="kk-pf-spin" aria-hidden="true" />}{manualQuoting ? t("gettingQuote") : t("getQuote", "Get Quote")}
+                        </button>
+                      </div>}
+                    </div>
                   )}
-
-                  {phase === 'input' && !quote && !error && !quoteBlockReason && canQuote && (
-                    <Box mt="3" p="2.5" bg="rgba(233,196,106,0.06)" borderRadius="lg" border="1px solid" borderColor="rgba(233,196,106,0.20)"
-                      style={{ animation: 'kkSwapFadeIn 0.25s ease-out' }}>
-                      <Text fontSize="10px" color="kk.textSecondary" fontWeight="500" mb="2" lineHeight="1.45">
-                        {t("readyForQuote", "Ready to fetch a fresh quote.")}
-                      </Text>
-                      <Button
-                        w="full" size="sm" fontWeight="700" fontSize="12px"
-                        bg="kk.gold" color="black" borderRadius="lg" border="0"
-                        _hover={{ bg: "kk.goldHover" }}
-                        loading={manualQuoting}
-                        loadingText={t("gettingQuote")}
-                        onClick={handleManualQuote}
-                      >
-                        {t("getQuote", "Get Quote")}
-                      </Button>
-                    </Box>
-                  )}
-
                   {toAsset && (
-                    <Box mt="2">
-                      <Flex justify="space-between" align="center" mb="1">
-                        <HStack gap="1">
-                          {!useCustomAddress && (
-                            <>
-                              <ShieldIcon />
-                              <Text fontSize="9px" color="var(--teal)" fontWeight="600">{t("keepKeyAddress")}</Text>
-                            </>
-                          )}
-                          {useCustomAddress && customIsOwn && (
-                            <>
-                              <ShieldIcon />
-                              <Text fontSize="9px" color="var(--teal)" fontWeight="600">{t("customAddressOwn", "This is your own KeepKey address")}</Text>
-                            </>
-                          )}
-                          {useCustomAddress && !customIsOwn && (
-                            <Text fontSize="9px" color="var(--gold)" fontWeight="600">{t("customAddressWarning")}</Text>
-                          )}
-                        </HStack>
-                        <Box as="button" fontSize="9px" color={useCustomAddress ? "var(--teal)" : "kk.textMuted"}
-                          fontWeight="500" _hover={{ color: "kk.gold" }} transition="color 0.15s"
-                          onClick={() => { setUseCustomAddress(!useCustomAddress); if (useCustomAddress) setCustomToAddress("") }}>
-                          {useCustomAddress ? t("useKeepKeyAddress") : t("useCustomAddress")}
-                        </Box>
-                      </Flex>
-                      {useCustomAddress ? (
-                        <>
-                          <Input value={customToAddress} onChange={(e) => setCustomToAddress(e.target.value)}
-                            placeholder={t("customAddressPlaceholder")} bg="rgba(0,0,0,0.3)" border="1px solid"
-                            borderColor={customAddressError ? "rgba(239,68,68,0.6)" : "rgba(251,163,36,0.2)"}
-                            borderRadius="lg" color="kk.textPrimary" size="xs" fontFamily="mono" fontSize="10px" px="2"
-                            _focus={{ borderColor: customAddressError ? "var(--rose)" : "var(--gold)" }} />
-                          {customAddressError && (
-                            <Text fontSize="9px" color="var(--rose)" mt="1">{customAddressError}</Text>
-                          )}
-                        </>
-                      ) : keepKeyToAddress ? (
-                        <Flex align="center" gap="1" px="1">
-                          <Box w="4px" h="4px" borderRadius="full" bg="var(--teal)" flexShrink={0} />
-                          <Text fontSize="9px" fontFamily="mono" color="kk.textSecondary" truncate title={keepKeyToAddress}>
-                            {keepKeyToAddress.slice(0, 10)}...{keepKeyToAddress.slice(-6)}
-                          </Text>
-                        </Flex>
-                      ) : null}
-                    </Box>
+                    <div style={{ display: 'grid', gap: 8 }} data-swap-recipient>
+                      <PreflightList rows={[!useCustomAddress
+                        ? { key: 'to', status: 'ok', title: t("keepKeyAddress"), detail: keepKeyToAddress ? <span style={{ fontFamily: 'var(--font-mono)' }} title={keepKeyToAddress}>{short(keepKeyToAddress)}</span> : undefined }
+                        : customIsOwn
+                          ? { key: 'to', status: 'ok', title: t("customAddressOwn", "This is your own KeepKey address") }
+                          : { key: 'to', status: 'warn', title: t("customAddressWarning") }]} />
+                      {useCustomAddress && <>
+                        <input className="kk-pf-field kk-pf-sm" value={customToAddress} onChange={(e) => setCustomToAddress(e.target.value)}
+                          placeholder={t("customAddressPlaceholder")} aria-invalid={!!customAddressError || undefined} aria-label={t("customAddressPlaceholder")} />
+                        {customAddressError && <p className="kk-pf-detail" style={{ margin: 0, color: 'var(--rose)' }}>{customAddressError}</p>}
+                      </>}
+                      <button type="button" className="kk-pf-link" style={{ justifySelf: 'start' }}
+                        onClick={() => { setUseCustomAddress(!useCustomAddress); if (useCustomAddress) setCustomToAddress("") }}>
+                        {useCustomAddress ? t("useKeepKeyAddress") : t("useCustomAddress")}
+                      </button>
+                    </div>
                   )}
-
-                  {sameAsset && (
-                    <Text fontSize="10px" color="kk.error" mt="1" fontWeight="600">{t("sameAsset")}</Text>
+                  {sameAsset && <p className="kk-pf-detail" style={{ margin: 0, color: 'var(--rose)', fontWeight: 600 }}>{t("sameAsset")}</p>}
+                  {/* Ids and full addresses: there when wanted, out of the way otherwise. */}
+                  {(fromAsset || toAsset) && (
+                    <details className="kk-pf-tech" style={{ marginTop: 'auto' }}>
+                      <summary>{uiText("Technical details")}</summary>
+                      <dl className="kk-pf-facts" style={{ marginTop: 8 }}>
+                        {fromAsset?.caip && <div><dt>{`${t("from")} · CAIP-19`}</dt><dd>{fromAsset.caip}</dd></div>}
+                        {fromAddress && <div><dt>{uiText("From address")}</dt><dd>{fromAddress}</dd></div>}
+                        {toAsset?.caip && <div><dt>{`${t("to")} · CAIP-19`}</dt><dd>{toAsset.caip}</dd></div>}
+                        {(useCustomAddress ? customToAddress : keepKeyToAddress) && <div><dt>{uiText("To address")}</dt><dd>{useCustomAddress ? customToAddress : keepKeyToAddress}</dd></div>}
+                      </dl>
+                    </details>
                   )}
-                </Box>
-              </Flex>
+                </div>
 
-              {/* Center pivot — flips fromAsset / toAsset, rotates 180° on
-                  hover. Absolutely positioned so the column widths stay
-                  equal. Disabled while a swap is in flight. */}
-              <Box
-                as="button"
-                position="absolute"
-                left="50%"
-                top="50%"
-                transform="translate(-50%, -50%)"
-                w="40px"
-                h="40px"
-                borderRadius="full"
-                bg="var(--ink-3)"
-                border="1px solid var(--ink-4)"
-                display="flex"
-                alignItems="center"
-                justifyContent="center"
-                color="var(--gold)"
-                style={{
-                  boxShadow: '0 0 0 4px var(--ink-0), 0 6px 18px -6px rgba(0,0,0,0.6)',
-                  transition: 'transform 0.3s, color 0.2s',
-                }}
-                _hover={{
-                  color: "var(--gold-2)",
-                }}
-                onMouseEnter={(e: any) => { (e.currentTarget as HTMLElement).style.transform = 'translate(-50%, -50%) rotate(180deg)' }}
-                onMouseLeave={(e: any) => { (e.currentTarget as HTMLElement).style.transform = 'translate(-50%, -50%) rotate(0)' }}
-                disabled={busy || !fromAsset || !toAsset}
-                cursor={busy || !fromAsset || !toAsset ? "default" : "pointer"}
-                opacity={busy || !fromAsset || !toAsset ? 0.4 : 1}
-                onClick={() => { if (!busy && fromAsset && toAsset) handleFlip() }}
-                aria-label={uiText("Swap direction")}
-                zIndex={2}
-              >
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M8 3L4 7l4 4" />
-                  <path d="M4 7h16" />
-                  <path d="M16 21l4-4-4-4" />
-                  <path d="M20 17H4" />
-                </svg>
-              </Box>
-              </Box>
-
-              {/* Slippage tolerance — visible whenever a swap target is selected.
-                  Bps math: 50 = 0.5%, 100 = 1%, 300 = 3%. Custom uses an inline
-                  controlled input because native window.prompt is unavailable in
-                  some Electron/WebView builds. */}
-              {fromAsset && toAsset && (
-                <VStack align="stretch" gap="1" px="1" py="1">
-                  <Flex align="center" justify="space-between" gap="2">
-                    <Text fontSize="10px" color="kk.textMuted" fontWeight="600" textTransform="uppercase" letterSpacing="0.05em">
-                      {t("slippage") || uiText("Slippage")}
-                    </Text>
-                    <HStack gap="1">
-                    {SLIPPAGE_PRESETS_BPS.map(bps => {
-                      const active = slippageBps === bps
-                      return (
-                        <Box key={bps} as="button" px="2" py="0.5" borderRadius="md"
-                          bg={active ? "kk.gold" : "rgba(255,255,255,0.03)"}
-                          color={active ? "black" : "kk.textSecondary"}
-                          border="1px solid" borderColor={active ? "kk.gold" : "rgba(255,255,255,0.08)"}
-                          fontSize="10px" fontWeight="700" cursor="pointer"
-                          _hover={{ borderColor: active ? "kk.gold" : "rgba(233,196,106,0.4)" }}
-                          onClick={() => {
-                            setCustomSlippageOpen(false)
-                            setCustomSlippageError(null)
-                            setSlippageBps(bps)
-                          }}>
-                          {(bps / 100).toFixed(bps < 100 ? 1 : 0)}%
-                        </Box>
-                      )
-                    })}
-                    {customSlippageOpen ? (
-                      <Flex
-                        align="center"
-                        h="24px"
-                        w="82px"
-                        px="1.5"
-                        borderRadius="md"
-                        bg="rgba(0,0,0,0.28)"
-                        border="1px solid"
-                        borderColor={customSlippageError ? "kk.error" : "kk.gold"}
-                      >
-                        <Input
-                          autoFocus
-                          aria-label={t("customSlippage", "Custom slippage percentage")}
-                          value={customSlippageInput}
-                          onChange={(e) => updateCustomSlippage(e.target.value)}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter' && updateCustomSlippage(customSlippageInput)) {
-                              setCustomSlippageOpen(false)
-                            } else if (e.key === 'Escape') {
-                              setCustomSlippageOpen(false)
-                              setCustomSlippageError(null)
-                            }
-                          }}
-                          inputMode="decimal"
-                          fontSize="10px"
-                          fontWeight="700"
-                          color="kk.textPrimary"
-                          p="0"
-                          h="20px"
-                          minW="0"
-                          border="0"
-                          outline="none"
-                          _focus={{ boxShadow: "none", border: "0" }}
-                        />
-                        <Text fontSize="10px" color="kk.textMuted">%</Text>
-                      </Flex>
-                    ) : (
-                      <Box as="button" px="2" py="0.5" borderRadius="md"
-                        bg={!SLIPPAGE_PRESETS_BPS.includes(slippageBps as typeof SLIPPAGE_PRESETS_BPS[number]) ? "kk.gold" : "rgba(255,255,255,0.03)"}
-                        color={!SLIPPAGE_PRESETS_BPS.includes(slippageBps as typeof SLIPPAGE_PRESETS_BPS[number]) ? "black" : "kk.textSecondary"}
-                        border="1px solid"
-                        borderColor={!SLIPPAGE_PRESETS_BPS.includes(slippageBps as typeof SLIPPAGE_PRESETS_BPS[number]) ? "kk.gold" : "rgba(255,255,255,0.08)"}
-                        fontSize="10px" fontWeight="700" cursor="pointer"
-                        _hover={{ borderColor: "rgba(233,196,106,0.4)" }}
-                        onClick={openCustomSlippage}>
-                        {!SLIPPAGE_PRESETS_BPS.includes(slippageBps as typeof SLIPPAGE_PRESETS_BPS[number])
-                          ? `${(slippageBps / 100).toFixed(2)}%`
-                          : (t("custom") || "Custom")}
-                      </Box>
-                    )}
-                    </HStack>
-                  </Flex>
-                  {customSlippageError && (
-                    <Text fontSize="9px" color="kk.error" textAlign="right">{customSlippageError}</Text>
+                {/* ── Decision row, across both columns, never scrolled away ── */}
+                <div className="kk-pf-foot kk-pf-span">
+                  {fromAsset && toAsset && (
+                    <div className="kk-pf-top">
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
+                        {/* Bps: 50 = 0.5%, 100 = 1%, 300 = 3%. Custom is an inline input:
+                            window.prompt is unavailable in some WebView builds. */}
+                        <span className="kk-pf-dim" style={{ fontSize: 12 }}>{t("slippage") || uiText("Slippage")}</span>
+                        <div className="kk-pf-modes" role="group" aria-label={t("slippage") || uiText("Slippage")}>
+                          {SLIPPAGE_PRESETS_BPS.map(bps => <button key={bps} type="button" aria-pressed={slippageBps === bps}
+                            onClick={() => { setCustomSlippageOpen(false); setCustomSlippageError(null); setSlippageBps(bps) }}>
+                            {(bps / 100).toFixed(bps < 100 ? 1 : 0)}%
+                          </button>)}
+                          {customSlippageOpen ? (
+                            <span style={{ display: 'inline-flex', alignItems: 'baseline', gap: 2 }}>
+                              <input className="kk-pf-field kk-pf-sm" style={{ width: 48, padding: '0 0 2px' }} autoFocus
+                                aria-label={t("customSlippage", "Custom slippage percentage")}
+                                aria-invalid={!!customSlippageError || undefined}
+                                value={customSlippageInput}
+                                onChange={(e) => updateCustomSlippage(e.target.value)}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter' && updateCustomSlippage(customSlippageInput)) setCustomSlippageOpen(false)
+                                  else if (e.key === 'Escape') { setCustomSlippageOpen(false); setCustomSlippageError(null) }
+                                }}
+                                inputMode="decimal" />
+                              <span className="kk-pf-dim" style={{ fontSize: 11 }}>%</span>
+                            </span>
+                          ) : (
+                            <button type="button" aria-pressed={!presetSlippage} onClick={openCustomSlippage}>
+                              {!presetSlippage ? `${(slippageBps / 100).toFixed(2)}%` : (t("custom") || "Custom")}
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                      {quote && <ProverChip swapper={quote.swapper} integration={quote.integration} onClick={() => setQuoteDetailsOpen(true)} />}
+                    </div>
                   )}
-                </VStack>
-              )}
-
-              {phase === 'input' && quote && riskPanel}
-
-              {/* Review Swap button — only when quote is ready. Gradient
-                  matches the handoff CTA style: teal-2 → teal with a soft
-                  teal glow shadow. Bigger touch target than the prior xs button. */}
-              {phase === 'input' && quote && fromAsset && toAsset && !sameAsset && (
-                <Box
-                  as="button"
-                  w="full"
-                  py="3"
-                  borderRadius="14px"
-                  fontWeight="600"
-                  fontSize="14px"
-                  letterSpacing="-0.005em"
-                  color="var(--ink-0)"
-                  border="0"
-                  cursor="pointer"
-                  style={{
-                    background: 'linear-gradient(180deg, var(--teal-2), var(--teal))',
-                    boxShadow: '0 8px 24px -8px rgba(139,227,196,0.5)',
-                    transition: 'transform 0.15s, box-shadow 0.15s',
-                  }}
-                  _hover={{
-                    transform: "translateY(-1px)",
-                  }}
-                  onClick={() => setPhase('review')}
-                >
-                  {t("reviewSwap") || uiText("Review Swap")}
-                </Box>
-              )}
-
-              {/* Hint */}
-              {phase === 'input' && fromAsset && toAsset && !sameAsset && !isMax && !manualAmountReady && !quote && (
-                <Text fontSize="10px" color="kk.textMuted" textAlign="center">{t("enterAmount")}</Text>
-              )}
-
-              {/* Quote feedback — expected small-swap constraints use warning
-                  styling; operational failures remain red. Show Retry ONLY for a retryable cause (quote timeout)
-                  and while params are still valid, since clicking it re-fires
-                  getSwapQuote via the requoteTick effect. Deterministic errors
-                  (pool unavailable, amount below minimum) get no Retry. */}
-              {error && (
-                <Box bg={errorIsWarning ? "rgba(251,146,60,0.08)" : "rgba(224,140,123,0.10)"} border="1px solid" borderColor={errorIsWarning ? "rgba(251,146,60,0.3)" : "kk.error"} borderRadius="lg" p="2">
-                  <Flex justify="space-between" align="center" gap="2">
-                    <Text fontSize="10px" color={errorIsWarning ? "var(--gold)" : "kk.error"} flex="1">{error}</Text>
-                    {quoteRetryable && canQuote && (
-                      <Button size="xs" variant="ghost" color="kk.error" px="1.5" minW="auto"
-                        _hover={{ bg: "rgba(224,140,123,0.18)" }}
-                        onClick={() => { setError(null); setRequoteTick(t => t + 1) }}>
-                        {t("retry", "Retry")}
-                      </Button>
-                    )}
-                  </Flex>
-                </Box>
-              )}
-            </VStack>
-          )}
+                  {customSlippageError && <p className="kk-pf-detail" style={{ margin: 0, color: 'var(--rose)' }}>{customSlippageError}</p>}
+                  {phase === 'input' && quote && riskPanel}
+                  {/* Expected small-swap limits read as warnings, failures in rose.
+                      Retry only for a retryable cause while the inputs still hold. */}
+                  {error && (
+                    <p className="kk-pf-detail" role="alert" style={{ margin: 0, color: errorIsWarning ? 'var(--gold)' : 'var(--rose)' }}>
+                      {error}{' '}
+                      {quoteRetryable && canQuote && <button type="button" className="kk-pf-link" onClick={() => { setError(null); setRequoteTick(t => t + 1) }}>{t("retry", "Retry")}</button>}
+                    </p>
+                  )}
+                  <div className="kk-pf-actions">
+                    {/^shapeshift(?:swap)?$/i.test(quote?.integration || '')
+                      ? <a href="https://api.shapeshift.com/docs#description/introduction" className="kk-pf-dim"
+                          onClick={(e) => { e.preventDefault(); rpcRequest("openUrl", { url: "https://api.shapeshift.com/docs#description/introduction" }).catch(() => {}) }}
+                          style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 10, textDecoration: 'none' }}>
+                          <img src={shapeshiftLogo} alt="" width={11} height={11} />{uiText("Powered by ShapeShift API")}
+                        </a>
+                      : <span />}
+                    <button type="button" className="kk-pf-go" disabled={!reviewReady} aria-disabled={!reviewReady} aria-busy={phase === 'quoting' || undefined}
+                      onClick={() => { if (reviewReady) setPhase('review') }}>
+                      {phase === 'quoting' && <span className="kk-pf-spin" aria-hidden="true" />}{reviewLabel}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )
+          })()}
         </Box>
 
         {/* ── Footer ──────────────────────────────────────────────── */}
-        {!loadingAssets && phase !== 'submitted' && !busy && phase !== 'review' && phase !== 'blind-signing-required' && (
+        {!loadingAssets && !consoleView && phase !== 'submitted' && !busy && phase !== 'review' && phase !== 'blind-signing-required' && (
           <Flex px="5" py="2.5" borderTop="1px solid" borderColor="kk.border" justify="space-between" align="center" gap="3"
             bg="linear-gradient(90deg, transparent 0%, rgba(35,220,200,0.02) 50%, transparent 100%)">
             <Box minW="0" flex="1">
@@ -5326,176 +4585,78 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
       </Box>
 
       {/* ── Asset picker (modal-over-modal) ──────────────────────── */}
-      {/* ── Swap Provider Health Dialog ──────────────────────────── */}
+      {/* ── Swap provider status, on the preflight surface ───────── */}
       {healthDialogOpen && (
-        <Box
-          position="fixed" inset="0" zIndex={Z.assetPicker}
-          display="flex" alignItems="center" justifyContent="center"
-          bg="rgba(11,11,14,0.72)"
-          backdropFilter="blur(20px) saturate(140%)"
-          onClick={() => setHealthDialogOpen(false)}
-        >
-          <Box
-            borderRadius="22px"
-            border="1px solid rgba(255,255,255,0.10)"
-            w="min(680px, 92vw)"
-            maxH="min(80vh, 720px)"
-            overflow="auto"
-            onClick={e => e.stopPropagation()}
-            style={{
-              animation: 'kkSwapFadeIn 0.15s ease-out',
-              backgroundColor: "rgba(16,16,21,0.97)",
-              backgroundImage: "linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.015))",
-              backdropFilter: "blur(32px) saturate(160%)",
-              WebkitBackdropFilter: "blur(32px) saturate(160%)",
-              boxShadow:
-                "0 0 0 1px rgba(255,255,255,0.06), 0 24px 60px -16px rgba(0,0,0,0.8), 0 4px 12px -4px rgba(0,0,0,0.5)",
-            }}
-          >
-            {/* Dialog header */}
-            <Flex px="5" py="3" borderBottom="1px solid" borderColor="kk.border" align="center" justify="space-between">
-              <Text fontSize="sm" fontWeight="700" color="kk.textPrimary">{uiText("Swap Provider Status")}</Text>
-              <HStack gap="2">
-                <Button size="xs" variant="ghost" color="kk.textMuted" px="2" minW="auto"
-                  _hover={{ color: 'kk.textPrimary' }} onClick={refreshSwapHealth}
-                  disabled={healthRefreshing}>
-                  {healthRefreshing ? '↻' : '↺'}
-                </Button>
-                <Button size="xs" variant="ghost" color="kk.textMuted" px="1" minW="auto"
-                  _hover={{ color: 'kk.textPrimary' }} onClick={() => setHealthDialogOpen(false)}>{uiText("×")}</Button>
-              </HStack>
-            </Flex>
-
-            {swapHealth && swapHealthQuoteExplanation(swapHealth) && (
-              <Box px="5" pt="3">
-                <Text fontSize="11px" color="kk.textMuted" lineHeight="1.5">{swapHealthQuoteExplanation(swapHealth)}</Text>
-              </Box>
-            )}
-
-            {/* Integration rows */}
-            <VStack gap="0" align="stretch" px="4" py="3">
-              {swapHealth?.integrations.map(intg => {
-                const info = resolveProvider(intg.key)
-                const { color: dotColor, label: statusLabel, description: statusDesc } = swapProviderPresentation(intg)
-                return (
-                  <Box key={intg.key} py="3" borderBottom="1px solid" borderColor="kk.border"
-                    _last={{ borderBottom: 'none' }}>
-                    <Flex align="center" justify="space-between" mb={intg.haltedPools?.length ? '2' : '1'}>
-                      <HStack gap="2">
-                        <Box w="28px" h="28px" borderRadius="full" overflow="hidden" flexShrink={0}
-                          bg="rgba(255,255,255,0.05)" display="flex" alignItems="center" justifyContent="center">
-                          <img src={info.icon} alt={intg.label} width="22" height="22"
-                            style={{ borderRadius: '50%', objectFit: 'cover' }} />
-                        </Box>
-                        <Text fontSize="sm" fontWeight="600" color="kk.textPrimary">{intg.label}</Text>
-                      </HStack>
-                      <HStack gap="1.5" align="center">
-                        <Box w="7px" h="7px" borderRadius="full" flexShrink={0}
-                          style={{ background: dotColor,
-                            boxShadow: intg.status === 'ok' ? `0 0 5px ${dotColor}99` : 'none' }} />
-                        <Text fontSize="11px" fontWeight="600" style={{ color: dotColor }}>{statusLabel}</Text>
-                      </HStack>
-                    </Flex>
-                    <Text fontSize="11px" color="kk.textMuted" lineHeight="1.5">{statusDesc}</Text>
-                    {intg.checkScope === 'quote' && Number.isFinite(intg.checkedAt) && (
-                      <Text fontSize="10px" color="kk.textMuted" mt="1">{uiText("Last quote check")}{" "}{new Date(intg.checkedAt!).toLocaleTimeString(getDateLocale())}</Text>
-                    )}
-                    {intg.haltedPools && intg.haltedPools.length > 0 && (
-                      <Box mt="2" p="2" bg="rgba(245,158,11,0.08)" borderRadius="8px"
-                        border="1px solid rgba(245,158,11,0.2)">
-                        <Text fontSize="10px" fontWeight="600" color="#f59e0b" mb="1">{uiText("Halted pools (")}{intg.haltedPools.length})
-                        </Text>
-                        <VStack gap="0.5" align="start">
-                          {intg.haltedPools.map(caip => (
-                            <Text key={caip} fontSize="10px" color="kk.textMuted" fontFamily="mono"
-                              style={{ wordBreak: 'break-all' }}>
-                              {caip}
-                            </Text>
-                          ))}
-                        </VStack>
-                      </Box>
-                    )}
-                  </Box>
-                )
-              })}
-              {!swapHealth && (
-                <Box py="6" textAlign="center">
-                  <Text fontSize="sm" color="kk.textMuted">{uiText("Loading provider status…")}</Text>
-                </Box>
-              )}
-            </VStack>
-
-            {/* Footer */}
-            <Flex px="5" py="2.5" borderTop="1px solid" borderColor="kk.border" align="center" justify="space-between">
-              <Text fontSize="10px" color="kk.textMuted">
-                {swapHealth?.error ? uiText("Status feed unavailable") : swapHealth ? `Updated ${new Date(swapHealth.fetchedAt).toLocaleTimeString(getDateLocale())}` : uiText("Fetching…")}
-              </Text>
-              <Text fontSize="10px" color="kk.textMuted">{uiText("via Pioneer")}</Text>
-            </Flex>
-          </Box>
-        </Box>
+        <div className="kk-sd-overlay" style={{ zIndex: Z.assetPicker }} onClick={() => setHealthDialogOpen(false)}>
+          <div className="kk-sd-panel" role="dialog" aria-modal="true" aria-label={uiText("Swap Provider Status")} onClick={e => e.stopPropagation()} data-swap-health>
+            <div className="kk-sd-head">
+              <div><div className="kk-pf-kicker">{uiText("via Pioneer")}</div><h2>{uiText("Swap Provider Status")}</h2></div>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button type="button" className="kk-sd-x" aria-label={uiText("Refresh")} onClick={refreshSwapHealth} disabled={healthRefreshing}>{healthRefreshing ? '↻' : '↺'}</button>
+                <button type="button" className="kk-sd-x" aria-label={uiText("Close")} onClick={() => setHealthDialogOpen(false)}>×</button>
+              </div>
+            </div>
+            <div className="kk-sd-body">
+              {swapHealth && swapHealthQuoteExplanation(swapHealth) && <p className="kk-pf-detail" style={{ marginTop: 0 }}>{swapHealthQuoteExplanation(swapHealth)}</p>}
+              {swapHealth ? <ol className="kk-pf-list">
+                {swapHealth.integrations.map(intg => {
+                  const info = resolveProvider(intg.key)
+                  const { color: dotColor, label: statusLabel, description: statusDesc } = swapProviderPresentation(intg)
+                  return <li key={intg.key} style={{ gridTemplateColumns: '22px minmax(0,1fr) auto', alignItems: 'start' }}>
+                    <img src={info.icon} alt="" width={22} height={22} style={{ borderRadius: '50%' }} />
+                    <div>
+                      <b>{intg.label}</b>
+                      <div className="kk-pf-detail">{statusDesc}</div>
+                      {intg.checkScope === 'quote' && Number.isFinite(intg.checkedAt) && <div className="kk-pf-detail">{uiText("Last quote check")}{" "}{new Date(intg.checkedAt!).toLocaleTimeString(getDateLocale())}</div>}
+                      {intg.haltedPools && intg.haltedPools.length > 0 && <div className="kk-pf-detail">
+                        {uiText("Halted pools (")}{intg.haltedPools.length})
+                        {intg.haltedPools.map(caip => <div key={caip} style={{ fontFamily: 'var(--font-mono)', fontSize: 11, overflowWrap: 'anywhere' }}>{caip}</div>)}
+                      </div>}
+                    </div>
+                    <em className="kk-pf-tag" style={{ color: dotColor }}>{statusLabel}</em>
+                  </li>
+                })}
+              </ol> : <p className="kk-pf-detail">{uiText("Loading provider status…")}</p>}
+            </div>
+            <div className="kk-sd-foot">
+              <span>{swapHealth?.error ? uiText("Status feed unavailable") : swapHealth ? `Updated ${new Date(swapHealth.fetchedAt).toLocaleTimeString(getDateLocale())}` : uiText("Fetching…")}</span>
+            </div>
+          </div>
+        </div>
       )}
 
-      {/* ── Quote details modal (ProverChip click) ─────────────────── */}
-      {quoteDetailsOpen && quote && fromAsset && toAsset && (
-        <Box position="fixed" inset="0" zIndex={Z.assetPicker}
-          display="flex" alignItems="center" justifyContent="center"
-          bg="rgba(0,0,0,0.65)" onClick={() => setQuoteDetailsOpen(false)}>
-          <Box
-            bg="kk.bg" borderRadius="16px" border="1px solid" borderColor="kk.border"
-            w="340px"
-            boxShadow="0 24px 64px rgba(0,0,0,0.7)"
-            onClick={(e: React.MouseEvent) => e.stopPropagation()}
-            style={{ animation: 'kkSwapFadeIn 0.15s ease-out' }}
-          >
-            {(() => {
-              const info = resolveProvider(quote.swapper || quote.integration)
-              return (
-                <>
-                  <Flex px="5" py="4" borderBottom="1px solid" borderColor="kk.border" align="center" gap="3">
-                    <Box w="40px" h="40px" borderRadius="full" overflow="hidden" flexShrink={0}
-                      style={{ boxShadow: `0 0 14px ${info.color}55` }}>
-                      <img src={info.icon} alt={info.label} width="40" height="40"
-                        style={{ borderRadius: '50%', objectFit: 'cover', display: 'block' }} />
-                    </Box>
-                    <Box flex="1">
-                      <Text fontSize="15px" fontWeight="700" color="kk.textPrimary">{info.label}</Text>
-                      <Text fontSize="11px" color="kk.textMuted">{uiText("Route details")}</Text>
-                    </Box>
-                    <Box as="button" fontSize="20px" lineHeight="1" color="kk.textMuted" px="1"
-                      cursor="pointer"
-                      onClick={() => setQuoteDetailsOpen(false)}
-                      style={{ background: 'none', border: 'none' }}>×</Box>
-                  </Flex>
-                  <VStack gap="0" align="stretch" px="4" py="3">
-                    {quote.executionMode === 'relay-solver-deposit' && quote.relayOrderRecipient && (
-                      <Text fontSize="11px" color="kk.textSecondary" mb="2" role="note">
-                        {t('relayDepositRecipient', 'The Relay order pays out to {{address}}. Your KeepKey signs only the deposit; Relay pays out afterwards.', { address: quote.relayOrderRecipient })}
-                      </Text>
-                    )}
-                    <ReviewRow label={t("rate")}>
-                      1 {fromAsset.symbol} = {formatBalance((parseFloat(quote.expectedOutput) / parseFloat(quotedSendAmount || '1')).toString())} {toAsset.symbol}
-                    </ReviewRow>
-                    <ReviewRow label={t("expectedAfterFees", "Expected")}>
-                      {formatBalance(quote.expectedOutput)} {toAsset.symbol}
-                      {hasToPrice ? ` (${fmtCompact(parseFloat(quote.expectedOutput) * toPriceUsd)})` : ''}
-                    </ReviewRow>
-                    <ReviewRow label={t("minimumAfterFeesSlippage", "Min. receive")} accent>
-                      {formatBalance(quote.minimumOutput)} {toAsset.symbol}
-                    </ReviewRow>
-                    <QuoteFeeRows fees={quote.fees} />
-                    <ReviewRow label={t("slippageTolerance", "Slippage")}>
-                      {(slippageBps / 100).toFixed(2)}{uiText("% max")}</ReviewRow>
-                    <ReviewRow label={t("estimatedTime")}>
-                      {formatTime(quote.estimatedTime)}
-                    </ReviewRow>
-                  </VStack>
-                </>
-              )
-            })()}
-          </Box>
-        </Box>
-      )}
+      {/* ── Route details (provider name click), on the preflight surface ── */}
+      {quoteDetailsOpen && quote && fromAsset && toAsset && (() => {
+        const info = resolveProvider(quote.swapper || quote.integration)
+        return (
+          <div className="kk-sd-overlay" style={{ zIndex: Z.assetPicker }} onClick={() => setQuoteDetailsOpen(false)}>
+            <div className="kk-sd-panel kk-sd-narrow" role="dialog" aria-modal="true" aria-label={uiText("Route details")} onClick={e => e.stopPropagation()} data-route-details>
+              <div className="kk-sd-head">
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                  <img src={info.icon} alt="" width={32} height={32} style={{ borderRadius: '50%' }} />
+                  <div><div className="kk-pf-kicker">{uiText("Route details")}</div><h2>{info.label}</h2></div>
+                </div>
+                <button type="button" className="kk-sd-x" aria-label={uiText("Close")} onClick={() => setQuoteDetailsOpen(false)}>×</button>
+              </div>
+              <div className="kk-sd-body">
+                {quote.executionMode === 'relay-solver-deposit' && quote.relayOrderRecipient && (
+                  <p className="kk-pf-detail" role="note" style={{ marginTop: 0 }}>
+                    {t('relayDepositRecipient', 'The Relay order pays out to {{address}}. Your KeepKey signs only the deposit; Relay pays out afterwards.', { address: quote.relayOrderRecipient })}
+                  </p>
+                )}
+                <VStack gap="2" align="stretch">
+                  <ReviewRow label={t("rate")}>1 {fromAsset.symbol} = {formatBalance((parseFloat(quote.expectedOutput) / parseFloat(quotedSendAmount || '1')).toString())} {toAsset.symbol}</ReviewRow>
+                  <ReviewRow label={t("expectedAfterFees", "Expected")}>{formatBalance(quote.expectedOutput)} {toAsset.symbol}{hasToPrice ? ` (${fmtCompact(parseFloat(quote.expectedOutput) * toPriceUsd)})` : ''}</ReviewRow>
+                  <ReviewRow label={t("minimumAfterFeesSlippage", "Min. receive")} accent>{formatBalance(quote.minimumOutput)} {toAsset.symbol}</ReviewRow>
+                  <QuoteFeeRows fees={quote.fees} />
+                  <ReviewRow label={t("slippageTolerance", "Slippage")}>{(slippageBps / 100).toFixed(2)}{uiText("% max")}</ReviewRow>
+                  <ReviewRow label={t("estimatedTime")}>{formatTime(quote.estimatedTime)}</ReviewRow>
+                </VStack>
+              </div>
+            </div>
+          </div>
+        )
+      })()}
 
       <AssetPickerDialog
         open={pickerSide !== null}

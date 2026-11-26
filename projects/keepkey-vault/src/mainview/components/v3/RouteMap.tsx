@@ -13,6 +13,7 @@
  */
 import { useEffect, useId, useState, type ReactNode } from "react";
 import { AssetIcon } from "../AssetIcon";
+import { getAssetIcon } from "../../../shared/assetLookup";
 
 interface TokenSlot {
 	iconUrl?: string;
@@ -34,6 +35,9 @@ interface RouteMapProps {
 	/** Branded animation for the center node — see swapper-animations.ts.
 	 *  When omitted, a small glyph-ring fallback renders in its place. */
 	centerImageUrl?: string;
+	/** A still of the same art, shown instead of the animation when the user
+	 *  asks for reduced motion (the animation never enters the DOM then). */
+	centerStillUrl?: string;
 	/** Disable the traveling dot animation (useful for static screenshots
 	 *  / when the user reduces motion). Defaults to enabled. */
 	animate?: boolean;
@@ -53,15 +57,17 @@ function integrationGlyph(name?: string): string {
 
 function RouteToken({ slot, x }: { slot: TokenSlot; x: number }) {
 	const [failedImages, setFailedImages] = useState<Set<string>>(() => new Set());
-	const image = slot.iconUrl && !failedImages.has(slot.iconUrl) ? slot.iconUrl : undefined;
+	// The official logo: the asset's own URL, else the one its CAIP resolves to.
+	const source = slot.iconUrl || (slot.caip ? getAssetIcon(slot.caip) : undefined);
+	const image = source && !failedImages.has(source) ? source : undefined;
+	// The official logo alone, no disc behind it.
 	return <>
-		<circle cx={x} cy="90" r="22" fill="var(--ink-2)" stroke="var(--ink-4)" strokeWidth="1" />
 		{image ? (
 			// SVG <image> bypasses WKWebView's views:// handler. HTML images
 			// inside foreignObject use the same loader as the rest of the app.
 			<foreignObject x={x - 20} y="70" width="40" height="40">
 				<img src={image} alt="" onError={() => setFailedImages(previous => new Set(previous).add(image))}
-					style={{ width: "100%", height: "100%", display: "block", objectFit: "cover", borderRadius: "50%" }} />
+					style={{ width: "100%", height: "100%", display: "block", objectFit: "contain" }} />
 			</foreignObject>
 		) : <>
 			<circle cx={x} cy="90" r="20" fill={slot.color || "var(--ink-3)"} />
@@ -93,7 +99,7 @@ function useReducedMotion() {
 	return reduced;
 }
 
-export function RouteMap({ from, to, integration, showIntegrationLabel = true, centerImageUrl, animate = true, caption }: RouteMapProps) {
+export function RouteMap({ from, to, integration, showIntegrationLabel = true, centerImageUrl, centerStillUrl, animate = true, caption }: RouteMapProps) {
 	const [failedCenterImages, setFailedCenterImages] = useState<Set<string>>(() => new Set());
 	const reducedMotion = useReducedMotion();
 	const gradientId = `routeMapLine-${useId().replace(/[^a-zA-Z0-9_-]/g, "")}`;
@@ -128,25 +134,30 @@ export function RouteMap({ from, to, integration, showIntegrationLabel = true, c
 				{/* Animated traveling dot — drawn before the centerpiece so it visually
 				    "enters" the swapper as it passes through the middle of the curve. */}
 				{animate && !reducedMotion && (
-					<circle r="5" fill="var(--gold)">
+					// Hidden until the motion starts: a renderer that does not run SMIL
+					// would otherwise leave it at the SVG origin, off the route.
+					<circle r="5" fill="var(--gold)" visibility="hidden">
+						<set attributeName="visibility" to="visible" begin="0s" />
 						<animateMotion dur="2.4s" repeatCount="indefinite" path={path} />
 					</circle>
 				)}
 
 				{/* Centerpiece — branded swap animation when available, glyph ring otherwise.
 				    Sized 128px so it reads as the hero of the route. */}
-				{centerImageUrl && !reducedMotion && !failedCenterImages.has(centerImageUrl) ? (
+				{/* The art is the screen's signature: animated normally, its still
+				    under reduced motion, a glyph only when neither loads. No heavy ring. */}
+				{(() => {
+					const art = !reducedMotion ? centerImageUrl : centerStillUrl;
+					return art && !failedCenterImages.has(art) ? (
 					<>
-						{/* Soft halo behind the centerpiece — picks up brand accent */}
-						<circle cx={cx} cy={cy} r={half + 2} fill="var(--ink-2)" stroke="var(--gold)" strokeWidth="1" opacity="0.7" />
 						{/* foreignObject <img>, not SVG <image>: WKWebView's SVG image
 						    loader bypasses the custom views:// scheme handler, so local
 						    bundle assets (the gif) render as a broken-image glyph. */}
 						<foreignObject x={cx - half} y={cy - half} width={centerSize} height={centerSize}>
 							<img
-								src={centerImageUrl}
+								src={art}
 								alt=""
-								onError={() => setFailedCenterImages(previous => new Set(previous).add(centerImageUrl))}
+								onError={() => setFailedCenterImages(previous => new Set(previous).add(art))}
 								style={{ width: "100%", height: "100%", display: "block", objectFit: "cover", borderRadius: "50%" }}
 							/>
 						</foreignObject>
@@ -166,7 +177,8 @@ export function RouteMap({ from, to, integration, showIntegrationLabel = true, c
 							{glyph}
 						</text>
 					</>
-				)}
+				);
+				})()}
 
 				{/* Integration label below the centerpiece */}
 				{showIntegrationLabel && integration && (

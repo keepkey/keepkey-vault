@@ -26,6 +26,8 @@ interface AssetIconProps {
   alt?: string
   /** Optional ring color override (default: subtle white) */
   ring?: string
+  /** The official logo alone: no disc, no ring, never cropped. */
+  bare?: boolean
 }
 
 const FALLBACK_BG = "rgba(255,255,255,0.06)"
@@ -36,7 +38,7 @@ const FALLBACK_BG = "rgba(255,255,255,0.06)"
  *  bubble clips ugly (e.g. "USDT" → "JSDT" with the U cut off). Using a
  *  positioned <Text> with overflow:hidden + the symbol initial gives a
  *  predictable shape at every size. */
-export function AssetIcon({ caip, iconUrl, chainCaip, size, alt, ring }: AssetIconProps) {
+export function AssetIcon({ caip, iconUrl, chainCaip, size, alt, ring, bare = false }: AssetIconProps) {
   const lookupSrc = caip ? getAssetIcon(caip) : undefined
   const mainSources = useMemo(() => {
     // Packaged assets win over remote metadata. For uncatalogued assets, try
@@ -63,9 +65,9 @@ export function AssetIcon({ caip, iconUrl, chainCaip, size, alt, ring }: AssetIc
         w={`${size}px`}
         h={`${size}px`}
         borderRadius="full"
-        bg={FALLBACK_BG}
-        border={ring ? `2px solid ${ring}` : "2px solid rgba(255,255,255,0.08)"}
-        overflow="hidden"
+        bg={bare && mainSrc ? "transparent" : FALLBACK_BG}
+        border={bare ? "0" : ring ? `2px solid ${ring}` : "2px solid rgba(255,255,255,0.08)"}
+        overflow={bare ? "visible" : "hidden"}
         display="flex"
         alignItems="center"
         justifyContent="center"
@@ -77,7 +79,7 @@ export function AssetIcon({ caip, iconUrl, chainCaip, size, alt, ring }: AssetIc
             alt=""
             w="100%"
             h="100%"
-            objectFit="cover"
+            objectFit={bare ? "contain" : "cover"}
             onError={() => setMainAttempt(attempt => attempt + 1)}
           />
         ) : (

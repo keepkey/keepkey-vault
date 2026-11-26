@@ -248,7 +248,7 @@ export interface DeviceMirror {
   exact: boolean
   screens: OledScreen[]
   /** Screens the device may add that the host cannot predict. */
-  mayPrepend?: 'certified-contact'
+  mayPrepend?: 'certified-contact' | 'contact-address'
   /** Screen indices a "Certified contact" screen may precede (one ButtonRequest
    *  each, only when that recipient is in the device's contact book). */
   contactBefore?: number[]

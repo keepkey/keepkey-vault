@@ -107,6 +107,13 @@ test('bundled picker metadata exposes one correct native HYPE and preserves unre
   expect(entries.find(e => e.caip === 'eip155:8453/slip44:60')?.symbol).toBe('ETH')
 })
 
+test('HyperEVM 999 is routable through Relay without dynamic coverage (verified 2026-11-26); 2868 stays unsupported', () => {
+  _resetDynamicChains()
+  expect(assessAvailability(chain.caip)).toMatchObject({ status: 'swappable' })
+  expect(assessAvailability(chain.caip).providers).toContain('relay')
+  expect(assessAvailability('eip155:2868/slip44:60').status).toBe('unsupported_chain')
+})
+
 test('correct mainnet can use explicit provider coverage without treating 2868 as an alias', () => {
   _setDynamicChains({ thorchain: [], mayachain: [], relay: ['eip155:999'], zeroex: [], chainflip: [], shapeshift: [] })
   expect(assessAvailability(chain.caip)).toMatchObject({ status: 'swappable', providers: ['relay'] })

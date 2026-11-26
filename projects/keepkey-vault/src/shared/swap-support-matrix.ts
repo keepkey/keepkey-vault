@@ -150,7 +150,14 @@ const RELAY_CHAINS = new Set<string>([
   'eip155:80094',      // Berachain
   'eip155:81457',      // Blast
   'eip155:534352',     // Scroll
-  // HyperEVM (eip155:999) awaits verified provider coverage, not an ID alias.
+  // HyperEVM mainnet, verified 2026-11-26 against pioneer-server live (/api/v1/quote,
+  // read-only): Relay quotes native ETH -> HYPE (origin 1 -> destination 999) and
+  // HYPE -> ETH (999 -> 1), and /swappers/supported-chains lists eip155:999 for
+  // relay. The May probe that found no quotes still used the catalog's wrong
+  // chain id 2868, which stays unsupported: it is not an alias for 999.
+  // Listed here too because the webview's picker uses this static set (the
+  // dynamic coverage is loaded in Bun).
+  'eip155:999',        // HyperEVM (Hyperliquid)
 ])
 
 /** 0x — single-chain EVM aggregator. */

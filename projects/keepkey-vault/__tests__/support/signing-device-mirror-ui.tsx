@@ -88,6 +88,17 @@ expect(container.querySelectorAll('[data-device-sketch]')).toHaveLength(1)
 expect(container.querySelector('.kk-pf-left [data-device-sketch]')).not.toBeNull()
 result.fallback = true
 
+// 4b. The same contract call as the KeepKey Client sends it (gas and fee
+//     fields, AdvancedMode on): the firmware's own three screens, exact, on
+//     the third ButtonRequest the calldata's Keccak-256.
+await render({ ...contract, id: 'e2', advancedModeEnabled: true, rawRequestBody: { from: contract.from, to: contract.to, value: '0x0', data: contract.data, chainId: 1, gas: '0x30d40', maxFeePerGas: '0x77359400' } }, 3)
+expect(container.querySelectorAll('[data-device-sketch]')).toHaveLength(0)
+expect(left().querySelector('[data-device-mirror="exact"]')).not.toBeNull()
+expect([...mirror()!.querySelectorAll('button')].map(p => p.title)).toEqual(['Send', 'Transaction', 'Ethereum Data Hash'])
+expect(screen()[0]!.startsWith('Ethereum Data Hash|')).toBe(true)
+expect(container.textContent).toContain('Screen 3 of 3, as your KeepKey shows it now.')
+result.ethExact = true
+
 // 5. skatehive.app profile edit, replayed ButtonRequest by ButtonRequest while
 //    the dialog is still in its "sending payload" minimum time: the mirror
 //    follows every request, and a peek is dropped when the device moves on.

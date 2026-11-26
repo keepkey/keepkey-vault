@@ -5,6 +5,7 @@
 // the SwapDialog directly. Per-provider art can branch here later.
 
 import calculatingGif from "../assets/swap/calculating.gif"
+import calculatingStill from "../assets/swap/calculating-still.png"
 import relayLogo from "../assets/providers/relay.svg"
 
 function normalize(raw: string | undefined | null): string {
@@ -21,4 +22,14 @@ export function getSwapperAnimation(
   // the packaged views:// scheme and must not leave a broken-image glyph.
   if (key === "relay" || key === "relaylink" || key === "relayexchange") return relayLogo
   return calculatingGif
+}
+
+/** The same art without motion, for reduced-motion users (first frame of the GIF). */
+export function getSwapperStill(
+  swapper?: string | null,
+  integration?: string | null,
+): string {
+  const key = normalize(swapper) || normalize(integration)
+  if (key === "relay" || key === "relaylink" || key === "relayexchange") return relayLogo
+  return calculatingStill
 }

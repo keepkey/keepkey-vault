@@ -706,7 +706,9 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
        *  swap-broadcast. Without this signal the UI shows "Approving token…
        *  1/2 Waiting on KeepKey" for the entire flow including the swap step.
        *  Stages match the SwapSubStage type in src/bun/swap.ts. */
-      'swap-substage': { stage: 'approve-signing' | 'approve-broadcasting' | 'approve-waiting-receipt' | 'swap-signing' | 'swap-broadcasting' }
+      'swap-substage': { stage: 'approve-signing' | 'approve-broadcasting' | 'approve-waiting-receipt' | 'swap-signing' | 'swap-broadcasting'
+        /** At approve-signing / swap-signing: the EVM transaction the device signs now. */
+        tx?: { chainId: number; to?: string; value?: string; data?: string; gasLimit?: string; gasPrice?: string; maxFeePerGas?: string; clearSign: boolean } }
       /** REST → SwapDialog command. Lets external clients drive the dialog
        *  the same way a user click would: open it, set a field, request a
        *  re-quote, or close it. Signing/broadcast are NEVER triggered this

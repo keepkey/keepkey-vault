@@ -10,7 +10,6 @@ import { useUiTranslation } from "../i18n/ui"
 // When both are present and differ, callers can opt in to a "via {integration}"
 // suffix so the user sees both the executor and the aggregator that surfaced it.
 
-import React from "react"
 import { Box, Flex, HStack, Image, Text } from "@chakra-ui/react"
 
 import logoThorchain from "../assets/providers/thorchain.png"
@@ -192,36 +191,23 @@ export type ProverChipProps = {
  */
 export function ProverChip({ swapper, integration, onClick }: ProverChipProps) {
   const provider = resolveProvider(swapper || integration)
-  const c = provider.color
+  // On the preflight console: the provider's own logo and name, no chip box.
   return (
     <Flex
       as={onClick ? "button" : "div"}
       align="center"
       gap="1.5"
-      px="2.5"
-      py="1.5"
-      borderRadius="full"
+      px="0"
+      py="1"
+      bg="transparent"
+      border="0"
       cursor={onClick ? "pointer" : "default"}
       onClick={onClick}
       flexShrink={0}
-      style={{
-        border: `1px solid ${c}2a`,
-        background: `${c}0d`,
-        transition: 'border-color 0.15s, background 0.15s',
-      } as React.CSSProperties}
-      onMouseEnter={onClick ? (e: React.MouseEvent<HTMLElement>) => {
-        e.currentTarget.style.borderColor = `${c}55`
-        e.currentTarget.style.background = `${c}1a`
-      } : undefined}
-      onMouseLeave={onClick ? (e: React.MouseEvent<HTMLElement>) => {
-        e.currentTarget.style.borderColor = `${c}2a`
-        e.currentTarget.style.background = `${c}0d`
-      } : undefined}
+      _hover={onClick ? { opacity: 0.85 } : undefined}
+      _focusVisible={{ outline: "2px solid var(--gold)", outlineOffset: "3px", borderRadius: "4px" }}
     >
-      <Box w="18px" h="18px" borderRadius="full" overflow="hidden" flexShrink={0}
-        style={{ boxShadow: `0 0 7px ${c}55` } as React.CSSProperties}>
-        <Image src={provider.icon} alt={provider.label} w="18px" h="18px" />
-      </Box>
+      <Image src={provider.icon} alt={provider.label} w="18px" h="18px" borderRadius="full" flexShrink={0} />
       <Text fontSize="11px" fontWeight="700" color="kk.textPrimary" lineHeight="1">
         {provider.label}
       </Text>
