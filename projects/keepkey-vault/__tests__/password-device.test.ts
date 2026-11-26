@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { passwordDeviceCipher, passwordPrivateWalletSelector } from '../src/bun/password-device'
+import { passwordDeviceCipher, passwordWalletSelector } from '../src/bun/password-device'
 import { PasswordBank, PASSWORD_BANK_SETTING } from '../src/bun/password-bank'
 
 function fixture() {
@@ -64,20 +64,20 @@ test('physical device cipher uses firmware approval without opening an emulator 
   expect(f.prompts).toEqual([])
 })
 
-test('private bank lookup binds a separate device derivation and clears the response', async () => {
+test('bank lookup binds a separate device derivation and clears the response', async () => {
   const f = fixture()
   let raw: Uint8Array | undefined
-  const selector = passwordPrivateWalletSelector(async (path, label) => {
+  const selector = passwordWalletSelector(async (path, label) => {
     expect(path).toEqual([0x80002720, 0x8000000b, 0x80000002])
     expect(label).toBe('KeepKey Password Bank locate private bank')
     raw = await passwordDeviceCipher(f.wallet, path, label, true, f.confirm)
     return raw
   })
   await tick()
-  expect(f.prompts.map(prompt => prompt.label)).toEqual(['Find private password bank'])
+  expect(f.prompts.map(prompt => prompt.label)).toEqual(['Find password bank'])
   f.prompts[0].decide(true)
   expect(await selector).toMatch(/^[a-f0-9]{64}$/)
   expect(raw).toEqual(new Uint8Array(32))
-  const otherWallet = await passwordPrivateWalletSelector(async () => new Uint8Array(32).fill(43))
+  const otherWallet = await passwordWalletSelector(async () => new Uint8Array(32).fill(43))
   expect(otherWallet).not.toBe(await selector)
 })

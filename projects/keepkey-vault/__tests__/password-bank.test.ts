@@ -105,6 +105,51 @@ describe('password bank release gates', () => {
     expect((await bank.unlock()).bankId).toBe(hiddenBankId)
   })
 
+  test('explicit recovery prefers the matching preview bank to the previous global bank', async () => {
+    const f = await assigned()
+    const previousScope = 'device-a:preview-public-address'
+    const currentScope = 'device-a:wallet-selector'
+    const preview = new PasswordBank({ ...f.deps, walletScope: () => previousScope })
+    await preview.unlock(true)
+    await preview.generate(1, 5)
+    const profile = preview.assign('example.org', 'preview account', 90).profiles[0]
+    const password = preview.reveal(profile.id).password
+    let lookups = 0
+    const scoped = new PasswordBank({
+      ...f.deps,
+      walletScope: () => currentScope,
+      legacyWalletScope: async () => { lookups++; return previousScope },
+    })
+    expect((await scoped.unlock()).exists).toBe(false)
+    expect(lookups).toBe(0)
+    const restored = await scoped.unlock(false, undefined, true)
+    expect(lookups).toBe(1)
+    expect(restored.bankId).toBe(preview.view().bankId)
+    expect(restored.profiles.map(p => p.id)).toEqual([profile.id])
+    await scoped.rehydrate(profile.id, false, 5)
+    expect(scoped.reveal(profile.id).password).toBe(password)
+    expect([...f.db.keys()].every(key => !key.includes(previousScope))).toBe(true)
+  })
+
+  test('explicit recovery refuses a wallet change while it locates an older bank', async () => {
+    const f = await assigned()
+    const before = [...f.db]
+    let scope = 'device-a:wallet-one'
+    let finishLookup!: (value: string | null) => void
+    const scoped = new PasswordBank({
+      ...f.deps,
+      walletScope: () => scope,
+      legacyWalletScope: () => new Promise(resolve => { finishLookup = resolve }),
+    })
+    const recovering = scoped.unlock(false, undefined, true)
+    scope = 'device-a:wallet-two'
+    f.session('session2')
+    finishLookup(null)
+    await expect(recovering).rejects.toThrow('wallet changed')
+    expect(scoped.view()).toMatchObject({ exists: false, unlocked: false })
+    expect([...f.db]).toEqual(before)
+  })
+
   test('a foreground bank unlock prompts for the PIN before asking the device to derive a key', async () => {
     const f = fixture()
     const snapshot: DeviceOperationSnapshot = { wallet: {}, deviceId: 'device', seedAddress: null, state: 'needs_pin' }

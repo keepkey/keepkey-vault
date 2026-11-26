@@ -4,6 +4,10 @@ import { PASSWORD_BANK_ALGORITHM, PASSWORD_CACHE_MAX_MINUTES, passwordOrigin, ty
 export const PASSWORD_BANK_SETTING = 'password_bank_v1'
 export const PASSWORD_BANK_FLAG = 'password_manager_enabled'
 const MAX_SLOTS = 4096
+
+function scopedBankSetting(scope: string): string {
+  return `${PASSWORD_BANK_SETTING}:${createHash('sha256').update(scope).digest('hex')}`
+}
 /** A cached password lives inside the unlock session and never outlasts it, so
  *  the longest cache is the session itself. The session is not extended. */
 const SESSION_MS = PASSWORD_CACHE_MAX_MINUTES * 60 * 1000
@@ -30,6 +34,7 @@ interface Dependencies {
   replace?: (key: string, value: string, expected: string | null) => boolean
   device: () => Device
   walletScope?: () => string | null
+  legacyWalletScope?: () => Promise<string | null>
   withDeviceUnlock?: <T>(action: () => Promise<T>) => Promise<T>
   now?: () => number
 }
@@ -106,7 +111,7 @@ export class PasswordBank {
   private bankSetting() {
     if (!this.deps.walletScope) return PASSWORD_BANK_SETTING
     const scope = this.deps.walletScope()
-    return scope ? `${PASSWORD_BANK_SETTING}:${createHash('sha256').update(scope).digest('hex')}` : null
+    return scope ? scopedBankSetting(scope) : null
   }
   private saveRegistry(setting: string, value: string, expected = this.persisted) {
     const saved = this.deps.replace
@@ -262,7 +267,16 @@ export class PasswordBank {
         if (!setting) throw new Error('Wait for Vault to verify the connected KeepKey wallet, then try again.')
         const stored = this.deps.read(setting)
         if ((create || imported || recoverLegacy) && stored) throw new Error('A password bank already exists for this KeepKey wallet')
-        const legacy = recoverLegacy && this.deps.walletScope ? this.deps.read(PASSWORD_BANK_SETTING) : null
+        let legacy: string | null = null
+        if (recoverLegacy && this.deps.walletScope) {
+          const device = this.deps.device()
+          const previousScope = await this.deps.legacyWalletScope?.()
+          this.guard()
+          if (this.epoch !== epoch || this.bankSetting() !== setting || this.deps.device().session !== device.session) {
+            throw new Error('KeepKey wallet changed during password bank recovery. Try again.')
+          }
+          legacy = (previousScope ? this.deps.read(scopedBankSetting(previousScope)) : null) ?? this.deps.read(PASSWORD_BANK_SETTING)
+        }
         if (!create && !stored && !imported && !legacy) {
           if (recoverLegacy) throw new Error('No previous password bank is available to restore.')
           return this.view()

@@ -3091,11 +3091,11 @@ export class EngineController extends EventEmitter {
     }
   }
 
-  async deriveSeedIdentity({ remember = true } = {}): Promise<string | null> {
+  async deriveSeedIdentity(): Promise<string | null> {
     const wallet = this.wallet
     const addr = await this.deriveSeedFingerprint()
     if (this.wallet !== wallet) return null
-    if (addr && remember) this.seedEthAddress = addr
+    if (addr) this.seedEthAddress = addr
     return addr
   }
 

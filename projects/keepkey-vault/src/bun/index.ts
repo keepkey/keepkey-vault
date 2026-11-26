@@ -46,7 +46,7 @@ import type { VolumeInventory, VolumeDeviceStatus, VolumeProgress, VolumeProgres
 import { withKeepKeyFido, readStatus, runReset, waitForReplug } from './passkeys'
 import { setFidoPin, listPasskeys, deletePasskey } from './passkeys-manage'
 import { resolveLabels, cleanLabel } from './passkey-labels'
-import { passwordDeviceCipher, passwordPrivateWalletSelector, supportsDeviceCipher } from './password-device'
+import { passwordDeviceCipher, passwordWalletSelector, supportsDeviceCipher } from './password-device'
 import { savePasswordBackup } from './password-backup'
 
 /**
@@ -1134,48 +1134,73 @@ function volumeProgress(operationId: string | undefined, event: VolumeProgressEv
 	const send = rpc.send['volume-progress'] as (progress: VolumeProgress) => void
 	try { send({ operationId, ...event }) } catch { /* Webview closed during storage operation. */ }
 }
+function passwordBankDeviceSession(state: ReturnType<EngineController['getDeviceState']>) {
+	return `${activitySessionEpoch}:${state.deviceId}:${state.activeTransport}`
+}
+
 function getPasswordBankDevice() {
 	const wallet = engine.wallet
 	const state = engine.getDeviceState()
 	if (state.state !== 'ready' || !supportsDeviceCipher(wallet)) throw new Error('Connect and unlock a KeepKey to use the password bank')
 	if (isBitcoinOnlyVariant(state.firmwareVariant)) throw new Error('Password-bank derivation requires multi-chain firmware')
 	const isEmulator = engine.isEmulator
+	const session = passwordBankDeviceSession(state)
 	return {
-		session: `${activitySessionEpoch}:${state.deviceId}:${state.activeTransport}:${engine.isPassphraseWallet}`,
-		cipher: (addressNList: number[], key: string) => passwordDeviceCipher(wallet, addressNList, key, isEmulator, emuSigningOp),
+		session,
+		async cipher(addressNList: number[], key: string) {
+			const bytes = await passwordDeviceCipher(wallet, addressNList, key, isEmulator, emuSigningOp)
+			try {
+				deviceOperationContext.getStore()?.assertCurrent()
+				const current = engine.getDeviceState()
+				if (wallet !== engine.wallet || current.state !== 'ready' || session !== passwordBankDeviceSession(current)) {
+					throw new Error('The KeepKey wallet changed. Start the request again with the current wallet.')
+				}
+				return bytes
+			} catch (error) {
+				bytes.fill(0)
+				throw error
+			}
+		},
 	}
 }
 
 let passwordScope: { wallet: typeof engine.wallet; session: string; value: string } | undefined
 function getPasswordBankScope() {
-	const state = engine.getDeviceState()
-	if (!state.deviceId || state.state !== 'ready' || isBitcoinOnlyVariant(state.firmwareVariant) || !supportsDeviceCipher(engine.wallet)) return null
-	if (!engine.isPassphraseWallet) {
-		const scope = getWalletDbScope()?.walletId
-		if (scope) return scope
-	}
 	const scope = passwordScope
-	return scope && scope.wallet === engine.wallet && scope.session === getPasswordBankDevice().session
-		? scope.value : null
+	if (!scope || scope.wallet !== engine.wallet) return null
+	const state = engine.getDeviceState()
+	return state.state === 'ready' && scope.session === passwordBankDeviceSession(state) ? scope.value : null
+}
+
+async function getLegacyPasswordBankScope() {
+	const cachedScope = getWalletDbScope()?.walletId
+	if (cachedScope) return cachedScope
+	const wallet = engine.wallet
+	const { deviceId } = engine.getDeviceState()
+	if (!deviceId || typeof wallet?.ethGetAddress !== 'function') return null
+	// The earlier preview keyed its bank by the primary ETH address. Read it
+	// only during explicit recovery and leave the app's wallet identity alone.
+	const result = await wallet.ethGetAddress({
+		addressNList: [0x8000002c, 0x8000003c, 0x80000000, 0, 0],
+		showDisplay: false,
+	}).catch(() => null)
+	deviceOperationContext.getStore()?.assertCurrent()
+	const address = typeof result === 'string' ? result : result?.address
+	return typeof address === 'string' && address ? `${deviceId}:${address.toLowerCase()}` : null
 }
 
 const passwordBank = new PasswordBank({
 	read: getSetting,
 	write: setSetting,
 	walletScope: getPasswordBankScope,
+	legacyWalletScope: getLegacyPasswordBankScope,
 	withDeviceUnlock: action => engine.withDeviceOperation(async () => {
 		if (!getPasswordBankScope()) {
 			const wallet = engine.wallet
 			const { deviceId } = engine.getDeviceState()
 			const { session, cipher } = getPasswordBankDevice()
 			if (!deviceId) throw new Error('Wait for Vault to verify the connected KeepKey wallet, then try again.')
-			const selector = engine.isPassphraseWallet
-				? await passwordPrivateWalletSelector(cipher)
-				: await engine.deriveSeedIdentity({ remember: false })
-			deviceOperationContext.getStore()?.assertCurrent()
-			if (!selector || wallet !== engine.wallet || session !== getPasswordBankDevice().session) {
-				throw new Error('Wait for Vault to verify the connected KeepKey wallet, then try again.')
-			}
+			const selector = await passwordWalletSelector(cipher)
 			passwordScope = { wallet, session, value: `${deviceId}:${selector}` }
 		}
 		return action()
