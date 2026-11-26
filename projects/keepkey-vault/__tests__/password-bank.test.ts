@@ -188,7 +188,7 @@ describe('password bank release gates', () => {
     finishPin(true)
     expect((await unlocking).unlocked).toBe(true)
     // A new bank asks the device for its id, then for the unlock key.
-    expect(f.calls()).toBe(2)
+    expect(f.calls()).toBe(1)
   })
 
   test('frozen v1 public-seed vector matches firmware-compatible CKV and host formatting', async () => {
@@ -317,19 +317,26 @@ describe('password bank release gates', () => {
     await replacement.bank.rehydrate(f.id, 5)
     expect(replacement.bank.reveal(f.id).password).toBe(password)
   })
-  test('a new bank on the same seed gets the same id, so the seed alone rebuilds its passwords', async () => {
-    const first = await assigned()
-    const password = first.bank.reveal(first.id).password
-    const second = fixture()
-    second.bank.setEnabled(true)
-    const rebuilt = await second.bank.unlock(true)
-    expect(rebuilt.bankId).toBe(first.bank.view().bankId)
+  test('a new bank on the same seed gets the same id on any KeepKey, so the seed alone rebuilds its passwords', async () => {
+    const scoped = (deviceId: string, seedName: string) => {
+      const f = fixture(); f.seed(seedName)
+      const selector = createHmac('sha256', seedName).update('selector').digest('hex')
+      const bank = new PasswordBank({ ...f.deps, walletScope: () => `${deviceId}:${selector}` })
+      bank.setEnabled(true)
+      return bank
+    }
+    const first = scoped('device-a', 'test seed')
+    await first.unlock(true); await first.generate(1, 5)
+    const id = first.assign('accounts.google.com', 'person@example.com', 90).profiles[0].id
+    const password = first.reveal(id).password
+    const second = scoped('device-b', 'test seed')
+    const rebuilt = await second.unlock(true)
+    expect(rebuilt.bankId).toBe(first.view().bankId)
     expect(rebuilt.bankId).toMatch(/^[a-f0-9]{32}$/)
-    await second.bank.generate(1, 5)
-    expect(second.bank.assign('accounts.google.com', 'person@example.com', 90).profiles[0].slot).toBe(0)
-    expect(second.bank.reveal(second.bank.view().profiles[0].id).password).toBe(password)
-    const other = fixture(); other.seed('other seed'); other.bank.setEnabled(true)
-    expect((await other.bank.unlock(true)).bankId).not.toBe(rebuilt.bankId)
+    await second.generate(1, 5)
+    const again = second.assign('accounts.google.com', 'person@example.com', 90).profiles[0]
+    expect(second.reveal(again.id).password).toBe(password)
+    expect((await scoped('device-a', 'other seed').unlock(true)).bankId).not.toBe(rebuilt.bankId)
   })
   test('a saved encrypted backup restores the bank on a fresh database', async () => {
     const f = await assigned()

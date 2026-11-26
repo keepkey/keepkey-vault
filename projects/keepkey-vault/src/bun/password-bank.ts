@@ -171,15 +171,14 @@ export class PasswordBank {
       return createHash('sha256').update(`keepkey-password-bank/v1/${slot === undefined ? 'metadata' : 'password'}`).update(raw).digest()
     } finally { raw.fill(0) }
   }
-  private async deviceBankId(): Promise<string> {
-    const device = this.deps.device(), epoch = this.epoch
-    const raw = await device.cipher([0x80002720, 0x8000000b, 0x80000002], 'KeepKey Password Bank v1 bank id')
-    try {
-      this.guard()
-      if (epoch !== this.epoch || device.session !== this.deps.device().session) throw new Error('Wallet or feature changed during device approval')
-      if (raw.length !== 32) throw new Error('Unexpected device response')
-      return createHash('sha256').update('keepkey-password-bank/v1/bank-id').update(raw).digest().subarray(0, 16).toString('hex')
-    } finally { raw.fill(0) }
+  /** New banks take their id from the device-derived wallet selector (the
+   * part after the device id), so the seed alone rebuilds them on any KeepKey
+   * without another device request. Unscoped banks keep a random id. */
+  private newBankId(): string {
+    const scope = this.deps.walletScope?.()
+    const selector = scope?.slice(scope.lastIndexOf(':') + 1)
+    return selector ? createHash('sha256').update('keepkey-password-bank/v1/bank-id').update(selector).digest().subarray(0, 16).toString('hex')
+      : randomBytes(16).toString('hex')
   }
   /** The encrypted bank as a restorable file. Same format as the database copy. */
   backup(): string {
@@ -305,7 +304,7 @@ export class PasswordBank {
         const backup = imported ?? (saved ? this.parseBackup(saved) : null)
         const device = this.deps.device()
         // New banks take their id from the device so the seed alone rebuilds them.
-        const bankId = backup?.bankId || await this.deviceBankId()
+        const bankId = backup?.bankId || this.newBankId()
         const key = await this.derive(bankId)
         try {
           const registry = backup ? this.open(backup, key) : { version: 1 as const, bankId, algorithm: PASSWORD_BANK_ALGORITHM, revision: 0, nextSlot: 0, ready: [], profiles: [] }
