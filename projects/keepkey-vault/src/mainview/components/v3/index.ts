@@ -7,7 +7,7 @@ export { PillTabs } from './PillTabs';
 export { SidePanel } from './SidePanel';
 export { RouteMap } from './RouteMap';
 export { SpinningDevice } from './SpinningDevice';
-export { OledText, OledPin, OledCipher, CIPHER_COLS, CIPHER_ROWS } from './DeviceScreens';
+export { OledText, OledPin, OledCipher, OledConfirm, CIPHER_COLS, CIPHER_ROWS } from './DeviceScreens';
 export type { TokenLike, NetworkLike, DeviceState, IconName } from './types';
 export type { PillTabItem } from './PillTabs';
 export type { SpinningDeviceProps } from './SpinningDevice';

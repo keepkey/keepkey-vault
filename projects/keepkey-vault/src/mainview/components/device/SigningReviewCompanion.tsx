@@ -1,9 +1,10 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Box, Button, Flex, Text, VStack } from '@chakra-ui/react'
 import type { SigningRequestInfo } from '../../../shared/types'
 import { emulatorReviewPixels, signingReviewGuide, type SigningRequestKind, type SigningReviewDepth } from '../../../shared/signing-review-guide'
-import { NumberNode, PreflightList, PreflightStyles, TimelineItem, TimelineMark } from '../preflight/PreflightConsole'
-import { OledText, SpinningDevice } from '../v3'
+import { NumberNode, PreflightList, PreflightStyles, TimelineItem, TimelineMark, usePreflightShort } from '../preflight/PreflightConsole'
+import { OledConfirm, OledText, SpinningDevice } from '../v3'
+import { hiveDeviceMirror, mirrorPosition } from '../../../shared/hive-device-screens'
 import { useUiTranslation } from '../../i18n/ui'
 import { useSigningReviewPreferences } from '../../lib/signing-review-preferences'
 import { rpcRequest } from '../../lib/rpc'
@@ -52,8 +53,95 @@ export function PairedEmulatorDisplay({ request }: { request: SigningRequestInfo
   </VStack>
 }
 
+/** The KeepKey's own screens for this request, when Desktop can compute them
+ *  from the firmware (shared/hive-device-screens): one screen per device
+ *  ButtonRequest, following the device as the requests arrive. Null when the
+ *  request type has no mirror; the caller then shows its sketch. */
+export function useDeviceMirror(request: SigningRequestInfo) {
+  return useMemo(() => hiveDeviceMirror(request.method, request.rawRequestBody), [request.method, request.rawRequestBody])
+}
+
+export function DeviceMirrorPanel({ request, devicePrompts = 0, following = false, scale = 1 }: {
+  request: SigningRequestInfo; devicePrompts?: number
+  /** True while the device is reviewing: the shown screen tracks its ButtonRequests. */
+  following?: boolean
+  scale?: number
+}) {
+  const uiText = useUiTranslation()
+  const mirror = useDeviceMirror(request)
+  const [pinned, setPinned] = useState<number | null>(null)
+  // Each ButtonRequest means the device moved on: stop peeking and follow it.
+  useEffect(() => { setPinned(null) }, [devicePrompts])
+  if (!mirror) return null
+  const total = mirror.screens.length
+  if (!total) return <p className="kk-pf-detail" data-device-mirror="refused">{mirror.reason}</p>
+  const position = following && devicePrompts > 0 ? mirrorPosition(mirror, devicePrompts) : null
+  const live = position?.to ?? 0
+  const at = Math.min(pinned ?? live, total - 1)
+  const onDevice = (i: number) => !!position && !position.beyond && i >= position.from && i <= position.to
+  const screen = mirror.screens[at]!
+  const recipient = typeof request.rawRequestBody?.to === 'string' ? request.rawRequestBody.to : undefined
+  return <div data-device-mirror={mirror.exact ? 'exact' : 'approximate'} style={{ display: 'grid', gap: 12, justifyItems: 'start' }}>
+    <SpinningDevice motion="still" scale={scale} label={`${screen.title}. ${screen.rows.join(' ')}`} screen={<OledConfirm title={screen.title} rows={screen.rows} />} />
+    {total > 1 && <div className="kk-pf-modes" role="group" aria-label={uiText('KeepKey screens')} style={{ flexWrap: 'wrap' }}>
+      {mirror.screens.map((s, i) => <button key={i} type="button" aria-pressed={i === at} aria-current={onDevice(i) ? 'step' : undefined}
+        title={s.title} onClick={() => setPinned(position && i === live ? null : i)}>{i + 1}</button>)}
+    </div>}
+    <p className="kk-pf-detail" style={{ margin: 0 }}>
+      {mirror.exact
+        ? position && pinned === null
+          ? position.beyond
+            ? uiText('Your KeepKey asked for more confirmations than these {{total}} screens. Trust its own screen.', { total })
+            : position.from < position.to
+              ? uiText('Screen {{from}}–{{to}} of {{total}}: your KeepKey is on one of these now.', { from: position.from + 1, to: position.to + 1, total })
+              : uiText('Screen {{n}} of {{total}}, as your KeepKey shows it now.', { n: at + 1, total })
+          : uiText('Screen {{n}} of {{total}}, exactly as your KeepKey firmware draws it.', { n: at + 1, total })
+        : <>{mirror.reason} {uiText('Screens after this point are approximate. Trust your KeepKey’s own screen.')}</>}
+    </p>
+    {mirror.mayPrepend === 'certified-contact' && <p className="kk-pf-detail" style={{ margin: 0 }}>
+      {recipient
+        ? uiText('If @{{account}} is a certified contact on your KeepKey, it shows a “Certified contact” screen first.', { account: recipient })
+        : uiText('If a recipient is a certified contact on your KeepKey, it shows a “Certified contact” screen first.')}
+    </p>}
+  </div>
+}
+
 const KIND_OLED: Record<SigningRequestKind, string> = {
   message: 'SIGN MESSAGE', typed: 'SIGN TYPED DATA', contract: 'CONTRACT CALL', transaction: 'SIGN TRANSACTION',
+}
+
+/** The KeepKey for requests Desktop cannot draw screen by screen: the large
+ *  still device with a sketch of the request, and one mark per confirmation
+ *  the device has asked for so far (its ButtonRequests). */
+export function DeviceSketchPanel({ request, devicePrompts = 0, following = false, scale = 1 }: {
+  request: SigningRequestInfo; devicePrompts?: number; following?: boolean; scale?: number
+}) {
+  const uiText = useUiTranslation()
+  const guide = signingReviewGuide(request)
+  const account = guide.fields.find(f => f.label === 'Account')?.value
+  const network = guide.fields.find(f => f.label === 'Network')?.value
+  const short = (v?: string) => v && v.length > 18 ? `${v.slice(0, 8)}…${v.slice(-6)}` : v
+  const seen = following ? devicePrompts : 0
+  return <div data-device-sketch style={{ display: 'grid', gap: 12, justifyItems: 'start' }}>
+    <SpinningDevice motion="still" scale={scale} label={`${KIND_OLED[guide.kind]} ${account ?? ''}`.trim()}
+      screen={<OledText kicker={KIND_OLED[guide.kind]} headline={short(account)} sub={network} />} />
+    {seen > 0 && <div className="kk-pf-modes" role="list" aria-label={uiText('Confirmations so far')} style={{ flexWrap: 'wrap' }}>
+      {Array.from({ length: seen }, (_, i) => <span key={i} role="listitem" aria-current={i === seen - 1 ? 'step' : undefined}
+        style={{ fontFamily: 'var(--font-mono)', fontSize: 11, padding: '2px 0', color: i === seen - 1 ? 'var(--text-0)' : 'var(--text-2)',
+          borderBottom: `1px solid ${i === seen - 1 ? 'var(--gold)' : 'transparent'}` }}>{i + 1}</span>)}
+    </div>}
+    <p className="kk-pf-note">
+      {seen > 0 && <>{uiText('Confirmation {{n}} on your KeepKey.', { n: seen })}{' '}</>}
+      {uiText('A sketch, not a readback. Trust your KeepKey’s own screen.')}
+    </p>
+  </div>
+}
+
+/** The KeepKey for the signing console's left column: the firmware-exact
+ *  screens when Desktop can compute them, the sketch otherwise. */
+export function SigningDevicePanel(props: { request: SigningRequestInfo; devicePrompts?: number; following?: boolean; scale?: number }) {
+  const mirror = useDeviceMirror(props.request)
+  return mirror ? <DeviceMirrorPanel key={props.request.id} {...props} /> : <DeviceSketchPanel {...props} />
 }
 
 /** Simple / Guided / Audit as text tabs, plus the larger-text toggle. */
@@ -70,8 +158,10 @@ export function SigningReviewModes() {
 /** Right column of the signing console: a sketch of the device, the steps to
  *  take on it, the request's fields and its technical reference. Advice for
  *  reading the request only — the KeepKey's own screen is what counts. */
-export function SigningReviewCompanion({ request, phase = 'preview', devicePrompts = 0, showModes = true, showWarnings = true, technical }: {
+export function SigningReviewCompanion({ request, phase = 'preview', devicePrompts = 0, showModes = true, showWarnings = true, showDevice = true, technical }: {
   request: SigningRequestInfo; phase?: 'preview' | 'approve' | 'sending-payload' | 'device-confirm'; devicePrompts?: number
+  /** False when the device is drawn elsewhere (the confirm phase's left column). */
+  showDevice?: boolean
   /** Approve phase shows the modes in its own header. */
   showModes?: boolean
   /** Approve phase lists the warnings as preflight rows instead. */
@@ -90,29 +180,43 @@ export function SigningReviewCompanion({ request, phase = 'preview', devicePromp
     ? [guide.steps[0]!, guide.steps[1]!, guide.steps[guide.steps.length - 1]!]
     : guide.steps
   const liveEmulator = phase === 'device-confirm' && !!request.deviceReview?.emulator
+  const mirror = useDeviceMirror(request)
+  // In a short window the step guide folds to one line; the user opens it.
+  const fold = usePreflightShort()
+  const stepItems = steps.map((step, i) => <TimelineItem key={step.title} node={<NumberNode n={i + 1} gold={i === steps.length - 1} />} title={uiText(step.title)}>
+    {preferences.depth === 'audit' && <>{uiText(step.why)}{' '}</>}{uiText(step.compare)}
+  </TimelineItem>)
+  const guideAttrs = preferences.depth === 'essentials' ? { 'data-screen-steps': '' } : { 'data-screen-guide': '' }
   return <VStack align="stretch" gap="5" w="100%" textAlign="left" data-signing-review-depth={preferences.depth}>
     <PreflightStyles />
     {showModes && <SigningReviewModes />}
     {liveEmulator
       ? <PairedEmulatorDisplay key={`${request.id}:${request.deviceReview!.deviceId}`} request={request} />
+      : !showDevice ? null
+      // Firmware-exact screens when Desktop can compute them; a sketch otherwise.
+      : mirror ? <DeviceMirrorPanel key={request.id} request={request} scale={0.66} />
       // What to confirm must be readable: the device never turns here.
       : <div className="kk-pf-device">
         <SpinningDevice motion="still" scale={0.66} screen={<OledText kicker={KIND_OLED[guide.kind]} headline={short(account)} sub={network} />} />
         <div className="kk-pf-cap">{uiText('A sketch, not a readback. Trust your KeepKey’s own screen.')}</div>
       </div>}
-    {phase === 'device-confirm' && !request.deviceReview?.emulator && <Box>
+    {phase === 'device-confirm' && !request.deviceReview?.emulator && !mirror?.exact && <Box>
       <Text fontSize={font} color="var(--text-0)" fontWeight="600">{uiText('Compare with your KeepKey')}</Text>
       <Text fontSize={font} color="var(--text-1)" lineHeight="1.6">{uiText('Use the physical screen to make your final decision. The app’s guide is a reference, not a readback of that screen.')}</Text>
     </Box>}
     {showWarnings && guide.warnings.length > 0 && <PreflightList rows={guide.warnings.map(w => ({ key: w, status: 'warn' as const, title: uiText(w), attrs: { 'data-review-warning': '' } }))} />}
-    {devicePrompts > 0 && <Text fontSize="12px" color="var(--text-2)">{uiText('Device confirmation requests: {{count}}', { count: devicePrompts })}</Text>}
+    {/* With the KeepKey in the left column, its marks already count these. */}
+    {devicePrompts > 0 && showDevice && <Text fontSize="12px" color="var(--text-2)">{uiText('Device confirmation requests: {{count}}', { count: devicePrompts })}</Text>}
     {/* Simple shows the three essential steps; Guided/Audit the full screen guide. */}
-    <div className="kk-pf-tl" {...(preferences.depth === 'essentials' ? { 'data-screen-steps': '' } : { 'data-screen-guide': '' })}>
-      <TimelineMark big={uiText('On your KeepKey')} />
-      {steps.map((step, i) => <TimelineItem key={step.title} node={<NumberNode n={i + 1} gold={i === steps.length - 1} />} title={uiText(step.title)}>
-        {preferences.depth === 'audit' && <>{uiText(step.why)}{' '}</>}{uiText(step.compare)}
-      </TimelineItem>)}
-    </div>
+    {fold
+      ? <details className="kk-pf-tech kk-pf-fold" data-guide-fold>
+        <summary>{uiText('On your KeepKey')}<small className="kk-pf-dim">{steps.length}</small></summary>
+        <div className="kk-pf-tl" {...guideAttrs}>{stepItems}</div>
+      </details>
+      : <div className="kk-pf-tl" {...guideAttrs}>
+        <TimelineMark big={uiText('On your KeepKey')} />
+        {stepItems}
+      </div>}
     {guide.fields.length > 0 && <dl className="kk-pf-facts" style={{ fontSize: font }}>
       {guide.fields.map((field, i) => <div key={`${field.label}:${i}`}>
         <dt>{uiText(field.label)}</dt>
@@ -131,6 +235,6 @@ export function SigningReviewCompanion({ request, phase = 'preview', devicePromp
         {technical}
       </VStack>
     </details>
-    <Text fontSize="11px" color="var(--text-2)" lineHeight="1.5">{uiText('These choices change the app’s explanations and text size. Your KeepKey still requires its full device review.')}</Text>
+    <p className="kk-pf-note">{uiText('These choices change the app’s explanations and text size. Your KeepKey still requires its full device review.')}</p>
   </VStack>
 }

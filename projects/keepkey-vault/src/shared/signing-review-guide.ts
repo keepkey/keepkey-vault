@@ -3,6 +3,7 @@ import { utxoPreview } from './utxoPreview'
 import { cosmosTxPreview } from './cosmosTxPreview'
 import { evmMaxFee, evmNativeValue } from './evmFeePreview'
 import { evmChainLabel } from './chains'
+import { hiveMessageText } from './hive-device-screens'
 
 export type SigningReviewDepth = 'essentials' | 'guided' | 'audit'
 export interface SigningReviewPreferences { depth: SigningReviewDepth; largeText: boolean }
@@ -29,7 +30,9 @@ export interface SigningReviewGuide {
 export function signingReviewGuide(request: SigningRequestInfo): SigningReviewGuide {
   const fields: SigningReviewField[] = []
   const add = (label: string, value: unknown) => { if (typeof value === 'string' && value) fields.push({ label, value }) }
-  const message = request.ethMessageDecoded || request.solanaMessageDecoded
+  // Hive signBuffer messages arrive as plain text (or hex) in the REST body.
+  const hiveText = request.method === '/hive/sign-message' ? hiveMessageText(request.rawRequestBody) : null
+  const message = request.ethMessageDecoded || request.solanaMessageDecoded || (hiveText !== null ? { messageText: hiveText } : undefined)
   const typed = request.typedDataDecoded
   const messageMethod = !!message || /sign-message|sign-offchain-message|sign-typed-hash/.test(request.method) || request.method === '/eth/sign'
   const data = typeof request.data === 'string' ? request.data : typeof request.rawRequestBody?.data === 'string' ? request.rawRequestBody.data : ''
@@ -40,7 +43,7 @@ export function signingReviewGuide(request: SigningRequestInfo): SigningReviewGu
   if (messageMethod || typed) warnings.push('A signature can authorize actions now or later. Confirm the requesting app and the complete message or permissions.')
   add('Requesting app', request.appName)
   add('Account', request.from || request.ethMessageDecoded?.address || request.solanaMessageDecoded?.signer)
-  add('Network', request.method.startsWith('/eth/') && request.chainId !== undefined ? evmChainLabel(request.chainId)?.name || `Chain ${request.chainId}` : request.chain || (request.chainId ? `Chain ${request.chainId}` : undefined))
+  add('Network', request.method.startsWith('/eth/') && request.chainId !== undefined ? evmChainLabel(request.chainId)?.name || `Chain ${request.chainId}` : request.chain || (request.method.startsWith('/hive/') ? 'Hive' : undefined) || (request.chainId ? `Chain ${request.chainId}` : undefined))
   if (typed) {
     add('Request type', typed.primaryType)
     add('Domain name', typed.domain.name)
@@ -121,7 +124,7 @@ export function signingReviewGuide(request: SigningRequestInfo): SigningReviewGu
   // Audit only public signing references. Never traverse arbitrary request
   // objects containing wallet witnesses, secrets or authentication material.
   if (typed) raw = JSON.stringify({ domain: typed.domain, type: typed.primaryType, fields: typed.fields, hashes: typed.hashes }, null, 2)
-  else raw = request.solanaMessageDecoded?.messageHex || request.ethMessageDecoded?.messageRaw || data || undefined
+  else raw = request.solanaMessageDecoded?.messageHex || request.ethMessageDecoded?.messageRaw || hiveText || data || undefined
   const kind: SigningRequestKind = typed ? 'typed' : messageMethod ? 'message' : contract ? 'contract' : 'transaction'
   const noFundsMove = kind === 'message'
     && !/sign-typed-hash/.test(request.method)

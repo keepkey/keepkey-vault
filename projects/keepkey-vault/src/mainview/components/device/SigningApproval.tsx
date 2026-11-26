@@ -21,8 +21,8 @@ import { ClearSignReportCard } from "../ClearSignReportCard"
 import { KeepKeyUILogo } from "../logo/keepkey-ui"
 import { DocsLink } from "../DocsLink"
 import { DOCS_LINKS, watch } from "../../../shared/docs-links"
-import { SigningReviewCompanion, SigningReviewModes } from "./SigningReviewCompanion"
-import { Beam, ChainNode, PreflightList, PreflightStyles, type PreflightRow } from "../preflight/PreflightConsole"
+import { SigningDevicePanel, SigningReviewCompanion, SigningReviewModes } from "./SigningReviewCompanion"
+import { Beam, ChainNode, PreflightList, PreflightStyles, usePreflightScroll, usePreflightShort, type PreflightRow } from "../preflight/PreflightConsole"
 import { signingReviewGuide } from "../../../shared/signing-review-guide"
 import { useSigningReviewPreferences } from "../../lib/signing-review-preferences"
 import { namedProviderLine } from "../../../shared/clearsign-report"
@@ -1040,7 +1040,17 @@ function SelfTransferNote({ from, to }: { from?: string; to?: string }) {
 export function SigningApproval({ request, phase, devicePrompts = 0, onApprove, onReject, onCancel }: SigningApprovalProps) {
   const uiText = useUiTranslation()
   const [reviewPreferences] = useSigningReviewPreferences()
-  const readableDetails = { "& p, & span, & pre": { fontSize: reviewPreferences.largeText ? "16px" : "14px", lineHeight: "1.65" } }
+  // The KeepKey sits large in the left column in both phases, for every
+  // request: its firmware-exact screens when Desktop can compute them (Hive
+  // today), a sketch otherwise. The emulator keeps its live capture instead.
+  const deviceOnLeft = !request.deviceReview?.emulator
+  // The console fits the window: each column scrolls, the decision row stays put.
+  const short = usePreflightShort()
+  const mirrorScale = short ? 0.8 : 1
+  const leftScroll = usePreflightScroll<HTMLDivElement>()
+  const rightScroll = usePreflightScroll<HTMLDivElement>()
+  // Body copy only: the console's own small print (.kk-pf-note) keeps its size.
+  const readableDetails = { "& p:not(.kk-pf-note), & span, & pre": { fontSize: reviewPreferences.largeText ? "16px" : short ? "13px" : "14px", lineHeight: short ? "1.5" : "1.65" } }
 
 	const { t } = useTranslation("device")
 	const [elapsed, setElapsed] = useState(0)
@@ -1248,7 +1258,9 @@ export function SigningApproval({ request, phase, devicePrompts = 0, onApprove, 
 
 	// ── Sending-payload / device-confirm phases ────────────────────────
 	if (phase === 'sending-payload' || phase === 'device-confirm') {
-		const sending = phase === 'sending-payload'
+		// The device's first ButtonRequest means it is already showing screens,
+		// even while the payload animation's minimum time is still running.
+		const sending = phase === 'sending-payload' && devicePrompts === 0
 		return (
 			<Box
 				data-signing-overlay position="fixed" inset="0" zIndex={Z.overlay + 1}
@@ -1258,7 +1270,8 @@ export function SigningApproval({ request, phase, devicePrompts = 0, onApprove, 
 				<style>{SIGNING_ANIMATIONS}</style>
 				<PreflightStyles />
 				<div className="kk-pf kk-pf-sg" role="group" aria-label={String(methodLabel)} style={consoleBox}>
-					<div className="kk-pf-left kk-pf-scroll">
+					<div className="kk-pf-left kk-pf-split">
+						<div className="kk-pf-body kk-pf-scroll" ref={leftScroll}>
 						<div className="kk-pf-kicker">{methodLabel}</div>
 						{whoLine}
 						<Box>
@@ -1271,15 +1284,20 @@ export function SigningApproval({ request, phase, devicePrompts = 0, onApprove, 
 									: t("signing.confirmOnDeviceDescription", "Check your KeepKey screen and press the button to approve the transaction.")}
 							</p>
 						</Box>
-						<Flex gap="2" align="center" aria-hidden="true">
-							{[0, 1, 2].map((i) => <Box key={i} w="6px" h="6px" borderRadius="full" bg="var(--gold)" opacity={0.4 + i * 0.25} />)}
-						</Flex>
-						<div className="kk-pf-actions" style={{ gridTemplateColumns: '1fr' }}>
-							<button type="button" className="kk-pf-go kk-pf-go-danger" onClick={onCancel}>{t("signing.cancel", "Cancel")}</button>
+						{deviceOnLeft
+							? <SigningDevicePanel request={request} devicePrompts={devicePrompts} following={!sending} scale={mirrorScale} />
+							: <Flex gap="2" align="center" aria-hidden="true">
+								{[0, 1, 2].map((i) => <Box key={i} w="6px" h="6px" borderRadius="full" bg="var(--gold)" opacity={0.4 + i * 0.25} />)}
+							</Flex>}
+						</div>
+						<div className="kk-pf-foot">
+							<div className="kk-pf-actions" style={{ gridTemplateColumns: '1fr' }}>
+								<button type="button" className="kk-pf-go kk-pf-go-danger" onClick={onCancel}>{t("signing.cancel", "Cancel")}</button>
+							</div>
 						</div>
 					</div>
-					<Box className="kk-pf-right kk-pf-scroll" css={readableDetails}>
-						<SigningReviewCompanion request={request} phase={phase} devicePrompts={devicePrompts} technical={technical} />
+					<Box ref={rightScroll} className="kk-pf-right kk-pf-scroll" css={readableDetails}>
+						<SigningReviewCompanion request={request} phase={phase} devicePrompts={devicePrompts} showDevice={!deviceOnLeft} technical={technical} />
 					</Box>
 				</div>
 			</Box>
@@ -1310,7 +1328,8 @@ export function SigningApproval({ request, phase, devicePrompts = 0, onApprove, 
 			<PreflightStyles />
 			<div className="kk-pf kk-pf-sg" role="group" aria-label={uiText("Signature request")} style={consoleBox}>
 				{/* ── Left: who, what, preflight, decision ── */}
-				<div className="kk-pf-left kk-pf-scroll">
+				<div className="kk-pf-left kk-pf-split">
+					<div className="kk-pf-body kk-pf-scroll" ref={leftScroll}>
 					<div className="kk-pf-top">
 						<div className="kk-pf-kicker">{uiText("Signature request")}</div>
 						<SigningReviewModes />
@@ -1338,6 +1357,8 @@ export function SigningApproval({ request, phase, devicePrompts = 0, onApprove, 
 					</Flex>
 					{whoLine}
 					<p className="kk-pf-lede">{uiText(guide.purpose)}</p>
+					{/* The KeepKey, large, as in the confirm phase: its first screen when exact. */}
+					{deviceOnLeft && <SigningDevicePanel request={request} scale={mirrorScale} />}
 					<PreflightList rows={preflight} />
 
 					{/* Report and risk first, so they are read before blind-sign consent. */}
@@ -1399,7 +1420,10 @@ export function SigningApproval({ request, phase, devicePrompts = 0, onApprove, 
 						)}
 					</VStack>
 
-					{/* ── Decision (pinned at the bottom of the column) ── */}
+					</div>
+
+					{/* ── Decision (pinned at the bottom of the column, outside the scroll) ── */}
+					<div className="kk-pf-foot">
 					<div className="kk-pf-actions">
 						<button type="button" className="kk-pf-cancel" onClick={onReject}>{t("signing.reject")}</button>
 						<button
@@ -1422,13 +1446,14 @@ export function SigningApproval({ request, phase, devicePrompts = 0, onApprove, 
 					<div className="kk-pf-hint">
 						{advancedModeBlocked ? t("signing.advancedModeScopeHint", "Advanced Mode stays on until your KeepKey locks or is unplugged, for every app that uses it.") : t("signing.keyboardHint")}
 					</div>
+					</div>
 				</div>
 
 				{/* ── Right: device sketch, steps, every decoded detail ── */}
-				<Box className="kk-pf-right kk-pf-scroll" css={readableDetails}>
+				<Box ref={rightScroll} className="kk-pf-right kk-pf-scroll" css={readableDetails}>
 					{/* What the call does, as the KeepKey will show it. */}
 					{request.erc7730 && request.erc7730Description && <Erc7730Section d={request.erc7730Description} />}
-					<SigningReviewCompanion request={request} phase="approve" showModes={false} showWarnings={false} technical={technical} />
+					<SigningReviewCompanion request={request} phase="approve" showModes={false} showWarnings={false} showDevice={!deviceOnLeft} technical={technical} />
 					<VStack align="stretch" gap="4">
 					{request.typedDataDecoded && <Row label={uiText("Account")} value={request.from} />}
 					{swapDecision && decoded && <SwapDecisionCard decoded={decoded} />}

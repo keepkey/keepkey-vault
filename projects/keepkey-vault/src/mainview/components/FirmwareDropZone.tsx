@@ -10,7 +10,7 @@ import { BTC_ONLY_FEATURE } from "./FirmwareUpgradePreview"
 import { getUpgradeVersions, type FirmwareFeature, type FirmwareVersionInfo } from "../../shared/firmware-versions"
 import { useTranslation } from "react-i18next"
 import { bootloaderTooOldForFirmware } from "../../shared/bootloader-compat"
-import { Beam, ChainNode, PreflightActions, PreflightCheck, PreflightList, PreflightStyles, TimelineItem, TimelineMark, type PreflightRow } from "./preflight/PreflightConsole"
+import { Beam, ChainNode, PreflightActions, PreflightCheck, PreflightList, PreflightStyles, TimelineItem, TimelineMark, usePreflightScroll, type PreflightRow } from "./preflight/PreflightConsole"
 import { useDeviceState } from "../hooks/useDeviceState"
 import { OledText, SpinningDevice } from "./v3"
 import { requiresBackupConfirmation } from "../lib/update-safety"
@@ -81,6 +81,8 @@ export function FirmwareDropZone() {
 	// bootloader flag (not the analysis snapshot) so the flash button unlocks the
 	// moment the user finishes entering bootloader mode.
 	const deviceState = useDeviceState()
+	const leftScroll = usePreflightScroll<HTMLDivElement>()
+	const rightScroll = usePreflightScroll<HTMLDivElement>()
 	const inBootloader = deviceState.bootloaderMode === true
 	// An interrupted upload wipes the seed. Flashing happens in bootloader mode,
 	// which can't report whether a wallet exists, so this fails closed (only a
@@ -663,7 +665,8 @@ export function FirmwareDropZone() {
 					return (
 						<div className="kk-pf" role="group" aria-label={uiText("Firmware Flash")}>
 							<PreflightStyles />
-							<div className="kk-pf-left kk-pf-scroll">
+							<div className="kk-pf-left kk-pf-split">
+								<div className="kk-pf-body kk-pf-scroll" ref={leftScroll}>
 								<div className="kk-pf-kicker">
 									{isUpdater ? uiText("Update Bootloader") : isFirmware ? uiText("Flash Firmware") : uiText("Not Flashable")}
 								</div>
@@ -682,6 +685,8 @@ export function FirmwareDropZone() {
 									</div>
 								)}
 								<PreflightList rows={rows} />
+								</div>
+								<div className="kk-pf-foot">
 								<PreflightActions
 									cancelLabel={uiText("Cancel")}
 									onCancel={handleDismiss}
@@ -690,8 +695,9 @@ export function FirmwareDropZone() {
 									goDisabled={blAction ? blDisabled : goDisabled}
 									danger={!blAction && analysis.willWipeDevice && !goDisabled}
 								/>
+								</div>
 							</div>
-							<div className="kk-pf-right kk-pf-scroll">
+							<div className="kk-pf-right kk-pf-scroll" ref={rightScroll}>
 								{(versions.length > 0 || (isFirmware && analysis.isBitcoinOnly)) && (
 									<div className="kk-pf-tl">
 										{analysis.isBitcoinOnly ? (

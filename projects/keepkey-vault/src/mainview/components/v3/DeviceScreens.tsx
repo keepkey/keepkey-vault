@@ -56,3 +56,26 @@ export function OledCipher({ letters = SAMPLE_CIPHER }: { letters?: readonly str
 		</div>
 	);
 }
+
+/** One firmware confirm screen (layout_standard_notification), placed at the
+ *  OLED's own coordinates: the 256×64 canvas spans the face, the title sits at
+ *  y = 7 / 13 / 20 for 3+ / 2 / 1 body rows, body rows 14 px apart starting
+ *  17 px lower, left margin 4. Rows arrive already wrapped (shared/
+ *  hive-device-screens), so nothing here re-wraps or clips them. */
+export function OledConfirm({ title, rows }: { title: string; rows: readonly string[] }) {
+	const top = rows.length === 1 ? 20 : rows.length === 2 ? 13 : 7;
+	const pct = (v: number, of: number) => `${(v / of) * 100}%`;
+	const line = (text: string, y: number, bold: boolean, key: string) => (
+		<div key={key} style={{
+			position: "absolute", left: pct(4, 256), top: pct(y, 64), right: 0,
+			fontFamily: '"Helvetica Neue", Arial, system-ui, sans-serif', fontSize: 14, lineHeight: 1,
+			fontWeight: bold ? 700 : 400, whiteSpace: "pre", overflow: "hidden",
+		}}>{text}</div>
+	);
+	return (
+		<div data-oled-screen style={{ position: "relative", width: "100%", aspectRatio: "256 / 64" }}>
+			{line(title, top, true, "t")}
+			{rows.slice(0, 3).map((r, i) => line(r, top + 17 + i * 14, false, `r${i}`))}
+		</div>
+	);
+}

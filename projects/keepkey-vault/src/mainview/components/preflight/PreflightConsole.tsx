@@ -4,7 +4,7 @@
  * type, alignment and hairlines. Risks are a checklist with one status mark
  * per row; a blocking row disables the main action, and the action says why.
  */
-import type { ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { CHAINS } from '../../../shared/chains'
 import { AssetIcon } from '../AssetIcon'
 
@@ -121,7 +121,85 @@ const CSS = `
 .kk-pf-facts dt { color: var(--text-2); } .kk-pf-facts dd { margin: 0; font-family: var(--font-mono); color: var(--text-0); text-align: right; overflow-wrap: anywhere; }
 .kk-pf-tech summary { cursor: pointer; font-family: var(--font-mono); font-size: 11px; letter-spacing: .06em; color: var(--text-2); }
 .kk-pf-steps { list-style: decimal; padding-left: 18px; margin: 6px 0 0; }
+/* As a dialog: never taller than the window. The row is clamped so the
+   columns scroll inside it; a split column keeps its decision row pinned. */
+.kk-pf:not(.kk-pf-flat) { max-height: calc(100vh - 32px); grid-template-rows: minmax(0, 1fr); }
+.kk-pf-left.kk-pf-split { padding: 0; gap: 0; overflow: hidden; }
+.kk-pf-split > .kk-pf-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 26px 26px 14px; display: flex; flex-direction: column; gap: 18px; }
+.kk-pf-split > .kk-pf-foot { flex: none; display: grid; gap: 8px; padding: 12px 26px 22px; }
+.kk-pf-foot > .kk-pf-actions { margin-top: 0; }
+.kk-pf-body[data-more] + .kk-pf-foot { box-shadow: 0 -1px 0 rgba(255,255,255,.06); }
+/* More below: the last lines fade out instead of being cut. */
+.kk-pf-scroll[data-more] { -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 40px), transparent);
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 40px), transparent); }
+.kk-pf-note { margin: 0; font-size: 11px; line-height: 1.5; color: var(--text-2); }
+.kk-pf-fold > summary { list-style: none; display: flex; align-items: baseline; gap: 10px; }
+.kk-pf-fold > summary::-webkit-details-marker { display: none; }
+.kk-pf-fold > summary::after { content: "+"; font-family: var(--font-mono); color: var(--gold); }
+.kk-pf-fold[open] > summary::after { content: "–"; }
+.kk-pf-fold[open] > summary { margin-bottom: 12px; }
+@media (max-width: 760px) {
+  .kk-pf:not(.kk-pf-flat) { grid-template-rows: none; overflow-y: auto; }
+  .kk-pf-left.kk-pf-split { overflow: visible; }
+  .kk-pf-split > .kk-pf-body { overflow: visible; }
+  .kk-pf-split > .kk-pf-foot { position: sticky; bottom: 0; z-index: 1; background: var(--ink-0); }
+}
+/* Short windows (the vault opens at 1200×800): tighter rhythm, smaller print. */
+@media (max-height: 820px) {
+  .kk-pf-left:not(.kk-pf-split) { padding: 18px 22px 16px; gap: 12px; }
+  .kk-pf-split > .kk-pf-body { padding: 18px 22px 10px; gap: 12px; }
+  .kk-pf-split > .kk-pf-foot { padding: 10px 22px 16px; gap: 6px; }
+  .kk-pf-right { padding: 18px 22px 16px 20px; gap: 14px; }
+  .kk-pf-right::before { top: 18px; bottom: 18px; }
+  .kk-pf-lede { font-size: 13.5px; line-height: 1.5; }
+  .kk-pf-list > li { padding: 7px 0; }
+  .kk-pf-acct { font-size: clamp(18px, 2.2vw, 24px); }
+  .kk-pf-tl { gap: 10px; }
+  .kk-pf-actions button { padding: 10px 16px; }
+  .kk-pf-hint { font-size: 9.5px; }
+  .kk-pf-note { font-size: 10px; }
+}
 `
+
+/** The height below which the console compacts (matches the CSS above). */
+export const PREFLIGHT_SHORT_QUERY = '(max-height: 820px)'
+
+/** True while the window is short enough for the compact console. */
+export function usePreflightShort() {
+	const query = () => typeof window !== 'undefined' && typeof window.matchMedia === 'function' ? window.matchMedia(PREFLIGHT_SHORT_QUERY) : null
+	const [short, setShort] = useState(() => !!query()?.matches)
+	useEffect(() => {
+		const mq = query()
+		if (!mq) return
+		const on = () => setShort(mq.matches)
+		on()
+		mq.addEventListener?.('change', on)
+		return () => mq.removeEventListener?.('change', on)
+	}, [])
+	return short
+}
+
+/** Ref for a .kk-pf-scroll area: marks it data-more while content is hidden
+ *  below, so the CSS fades its last lines instead of cutting them. */
+export function usePreflightScroll<T extends HTMLElement = HTMLElement>() {
+	const [el, setEl] = useState<T | null>(null)
+	useEffect(() => {
+		if (!el) return
+		const update = () => {
+			const more = el.scrollHeight - el.scrollTop - el.clientHeight > 2
+			if (more) el.setAttribute('data-more', '')
+			else el.removeAttribute('data-more')
+		}
+		update()
+		el.addEventListener('scroll', update, { passive: true })
+		const resize = typeof ResizeObserver === 'function' ? new ResizeObserver(update) : null
+		resize?.observe(el)
+		const mutate = typeof MutationObserver === 'function' ? new MutationObserver(update) : null
+		mutate?.observe(el, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ['open'] })
+		return () => { el.removeEventListener('scroll', update); resize?.disconnect(); mutate?.disconnect() }
+	}, [el])
+	return setEl
+}
 
 /** Injects the console stylesheet once per render tree. */
 export function PreflightStyles() {
