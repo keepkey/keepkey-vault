@@ -2698,5 +2698,11 @@
   "mbac398ff": "Your wallet",
   "mc824d131": "Let's set up your hardware wallet. It takes about 5 minutes.",
   "m69dbec3c": "Find each letter on your KeepKey, then click the same position here.",
-  "m80be4c74": "Position {{n}}"
+  "m80be4c74": "Position {{n}}",
+  "mcfaa6c7b": "Name and link are what the app says about itself.",
+  "m8053629c": "Request from {{origin}}",
+  "mc67333b5": "Request from a local app (no web origin)",
+  "mfdb4a150": "Calls itself {{app}}, origin unknown.",
+  "m6635bf19": "Calls itself {{app}}, paired from {{origin}}.",
+  "m3c0406dc": "Calls itself {{app}}, paired from a local app (no web origin)."
 }

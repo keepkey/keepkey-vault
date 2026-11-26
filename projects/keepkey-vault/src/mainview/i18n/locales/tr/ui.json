@@ -507,5 +507,11 @@
   "m3249fc9f": "Gizli ağlar ({{count}})",
   "mdc800411": "{{chain}} ağını göster",
   "m29742e5c": "Göster",
-  "macd079af": "Vault, şifreli parola kasasını yerel veritabanında saklar. Kurtarma için kasa verileri, aynı kurtarma sözcükleri ve aynı cüzdan parola ifadesi gerekir."
+  "macd079af": "Vault, şifreli parola kasasını yerel veritabanında saklar. Kurtarma için kasa verileri, aynı kurtarma sözcükleri ve aynı cüzdan parola ifadesi gerekir.",
+  "mcfaa6c7b": "Ad ve bağlantıyı uygulamanın kendisi bildirir.",
+  "m8053629c": "{{origin}} kaynaklı istek",
+  "mc67333b5": "Yerel bir uygulamadan istek (web kaynağı yok)",
+  "mfdb4a150": "Kendini {{app}} olarak tanıtıyor, kaynak bilinmiyor.",
+  "m6635bf19": "Kendini {{app}} olarak tanıtıyor, {{origin}} üzerinden eşlendi.",
+  "m3c0406dc": "Kendini {{app}} olarak tanıtıyor, yerel bir uygulamadan eşlendi (web kaynağı yok)."
 }

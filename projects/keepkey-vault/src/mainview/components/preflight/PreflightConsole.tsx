@@ -57,6 +57,7 @@ const CSS = `
 .kk-pf-danger .kk-pf-dot { box-shadow: inset 0 0 0 2px var(--rose); }
 .kk-pf-warn .kk-pf-dot { box-shadow: inset 0 0 0 2px var(--gold); }
 .kk-pf-ok .kk-pf-dot { background: var(--teal); } .kk-pf-ok b { color: var(--text-1); font-weight: 500; }
+.kk-pf-info .kk-pf-dot { box-shadow: inset 0 0 0 2px var(--text-2); } .kk-pf-info b { color: var(--text-1); font-weight: 500; }
 .kk-pf-check { display: flex; align-items: flex-start; gap: 8px; margin-top: 8px; cursor: pointer; user-select: none; font-size: 12px; font-weight: 600; color: var(--text-0); }
 .kk-pf-check input { margin-top: 2px; accent-color: var(--gold); width: 14px; height: 14px; flex: none; }
 .kk-pf-danger .kk-pf-check input { accent-color: var(--rose); }
@@ -132,7 +133,7 @@ export function Beam() {
 	return <span className="kk-pf-beam" aria-hidden="true"><i /><i /><i /></span>
 }
 
-export type PreflightStatus = 'block' | 'danger' | 'warn' | 'ok'
+export type PreflightStatus = 'block' | 'danger' | 'warn' | 'ok' | 'info'
 export interface PreflightRow {
 	key: string
 	status: PreflightStatus
@@ -143,7 +144,7 @@ export interface PreflightRow {
 	/** Extra data-* attributes for the row (test and automation hooks). */
 	attrs?: Record<string, string>
 }
-const ORDER: Record<PreflightStatus, number> = { block: 0, danger: 1, warn: 2, ok: 3 }
+const ORDER: Record<PreflightStatus, number> = { block: 0, danger: 1, warn: 2, ok: 3, info: 4 }
 
 /** Checklist, most severe first; each row carries exactly one status mark. */
 export function PreflightList({ rows, label }: { rows: PreflightRow[]; label?: string }) {

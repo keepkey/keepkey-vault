@@ -503,5 +503,11 @@
   "m3249fc9f": "Redes ocultas ({{count}})",
   "mdc800411": "Mostrar {{chain}}",
   "m29742e5c": "Mostrar",
-  "macd079af": "Vault guarda el almacén de contraseñas cifrado en su base de datos local. Para recuperarlo se necesitan los datos del almacén y la misma semilla y frase de contraseña de la cartera."
+  "macd079af": "Vault guarda el almacén de contraseñas cifrado en su base de datos local. Para recuperarlo se necesitan los datos del almacén y la misma semilla y frase de contraseña de la cartera.",
+  "mcfaa6c7b": "El nombre y el enlace los declara la propia app.",
+  "m8053629c": "Solicitud desde {{origin}}",
+  "mc67333b5": "Solicitud de una app local (sin origen web)",
+  "mfdb4a150": "Se llama a sí misma {{app}}, origen desconocido.",
+  "m6635bf19": "Se llama a sí misma {{app}}, vinculada desde {{origin}}.",
+  "m3c0406dc": "Se llama a sí misma {{app}}, vinculada desde una app local (sin origen web)."
 }

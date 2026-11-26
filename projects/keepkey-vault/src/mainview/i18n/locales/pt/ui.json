@@ -2562,5 +2562,11 @@
   "mbac398ff": "Sua carteira",
   "mc824d131": "Vamos configurar sua carteira de hardware. Leva cerca de 5 minutos.",
   "m69dbec3c": "Encontre cada letra na sua KeepKey e clique aqui na mesma posição.",
-  "m80be4c74": "Posição {{n}}"
+  "m80be4c74": "Posição {{n}}",
+  "mcfaa6c7b": "O nome e o link são declarados pela própria app.",
+  "m8053629c": "Pedido de {{origin}}",
+  "mc67333b5": "Pedido de uma app local (sem origem web)",
+  "mfdb4a150": "Apresenta-se como {{app}}, origem desconhecida.",
+  "m6635bf19": "Apresenta-se como {{app}}, emparelhada a partir de {{origin}}.",
+  "m3c0406dc": "Apresenta-se como {{app}}, emparelhada a partir de uma app local (sem origem web)."
 }

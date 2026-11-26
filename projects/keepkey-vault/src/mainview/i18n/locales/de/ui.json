@@ -496,5 +496,11 @@
   "m3249fc9f": "Ausgeblendete Netzwerke ({{count}})",
   "mdc800411": "{{chain}} einblenden",
   "m29742e5c": "Einblenden",
-  "macd079af": "Vault speichert den verschlüsselten Passwortspeicher in seiner lokalen Datenbank. Für die Wiederherstellung sind die gespeicherten Daten, dieselben Wiederherstellungswörter und dieselbe Wallet-Passphrase erforderlich."
+  "macd079af": "Vault speichert den verschlüsselten Passwortspeicher in seiner lokalen Datenbank. Für die Wiederherstellung sind die gespeicherten Daten, dieselben Wiederherstellungswörter und dieselbe Wallet-Passphrase erforderlich.",
+  "mcfaa6c7b": "Name und Link gibt die App selbst an.",
+  "m8053629c": "Anfrage von {{origin}}",
+  "mc67333b5": "Anfrage von einer lokalen App (kein Web-Ursprung)",
+  "mfdb4a150": "Nennt sich {{app}}, Ursprung unbekannt.",
+  "m6635bf19": "Nennt sich {{app}}, gekoppelt von {{origin}}.",
+  "m3c0406dc": "Nennt sich {{app}}, gekoppelt von einer lokalen App (kein Web-Ursprung)."
 }

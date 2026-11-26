@@ -139,11 +139,19 @@ export function PairingApproval({ request, onApprove, onReject }: PairingApprova
 					<Text fontSize="xl" fontWeight="700" color="white">
 						{request.name}
 					</Text>
+					<Text fontSize="xs" color="kk.textMuted">
+						{uiText("Name and link are what the app says about itself.")}
+					</Text>
 					{request.url && (
 						<Text fontSize="xs" color="kk.textMuted" fontFamily="mono" wordBreak="break-all">
 							{request.url}
 						</Text>
 					)}
+					<Text fontSize="sm" color="white" wordBreak="break-all" data-pairing-origin>
+						{request.origin
+							? uiText("Request from {{origin}}", { origin: request.origin })
+							: uiText("Request from a local app (no web origin)")}
+					</Text>
 					<Flex gap="3" justify="center">
 						<DocsLink href={DOCS_LINKS.settingsPairing} />
 						<DocsLink href={watch('course-11-app-connections')} label={uiText("Watch video")} />

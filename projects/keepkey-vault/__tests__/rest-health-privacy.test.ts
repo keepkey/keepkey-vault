@@ -56,7 +56,7 @@ describe('N5: /api/health shows sync diagnostics only to a paired key or a local
   test(`${route}: a website gets the documented public fields and nothing more`, async () => {
    const health = await vault()(route, WEBSITE)
    expect(health.status).toBe(200)
-   expect(health.cors).toBe('*')
+   expect(health.cors).toBe('https://evil.example')
    expect(Object.keys(health.data).sort()).toEqual(PUBLIC_FIELDS)
    expect(health.data).toMatchObject({ status: 'healthy', apiVersion: 2, ready: true, connected: true, device_connected: true, device_locked: false, version: '1.7.1' })
    expect(health.data.supportedChains).toContain('eip155:1')
@@ -94,12 +94,12 @@ describe('N5: /api/health shows sync diagnostics only to a paired key or a local
   }
  })
 
- test('a DNS-rebound website (same-origin, so no Origin or Sec-Fetch-Site, but its own Host) gets no diagnostics', async () => {
+ test('a DNS-rebound website (same-origin, so no Origin or Sec-Fetch-Site, but its own Host) is refused', async () => {
   const request = vault()
   for (const host of ['rebind.attacker.example:1646', 'rebind.attacker.example', '127.0.0.1.attacker.example:1646', 'localhost.attacker.example', '127.0.0.1.nip.example:1646']) {
    const health = await request('/api/health', { Host: host })
-   expect(health.status).toBe(200)
-   expect(Object.keys(health.data).sort()).toEqual(PUBLIC_FIELDS)
+   expect(health.status).toBe(403)
+   expect(health.data).not.toHaveProperty('sync_diagnostics')
   }
   // curl names the loopback however the team types it.
   for (const host of ['127.0.0.1:1646', 'localhost:1646', 'LOCALHOST', '[::1]:1646']) expect((await request('/api/health', { Host: host })).data.sync_diagnostics).toEqual(DIAGNOSTICS)

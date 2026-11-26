@@ -502,5 +502,11 @@
   "m3249fc9f": "Reti nascoste ({{count}})",
   "mdc800411": "Mostra {{chain}}",
   "m29742e5c": "Mostra",
-  "macd079af": "Vault salva l’archivio cifrato delle password nel proprio database locale. Per recuperarlo servono i dati dell’archivio, lo stesso seed e la stessa passphrase del portafoglio."
+  "macd079af": "Vault salva l’archivio cifrato delle password nel proprio database locale. Per recuperarlo servono i dati dell’archivio, lo stesso seed e la stessa passphrase del portafoglio.",
+  "mcfaa6c7b": "Nome e link sono dichiarati dall'app stessa.",
+  "m8053629c": "Richiesta da {{origin}}",
+  "mc67333b5": "Richiesta da un'app locale (nessuna origine web)",
+  "mfdb4a150": "Si presenta come {{app}}, origine sconosciuta.",
+  "m6635bf19": "Si presenta come {{app}}, associata da {{origin}}.",
+  "m3c0406dc": "Si presenta come {{app}}, associata da un'app locale (nessuna origine web)."
 }
