@@ -43,8 +43,9 @@ export function baseUnitsToDecimalString(units: bigint, decimals: unknown): stri
 export function tokenMaxPrecisionReserveUnits(decimals: unknown): bigint {
   const precision = normalizeDecimals(decimals)
   if (precision === null) return 1n
-  if (precision === 0) return 0n
-  return 10n ** BigInt(Math.max(0, precision - TOKEN_MAX_DISPLAY_DECIMALS))
+  // Up to 8 decimals the display shows every unit: nothing to hide, reserve none.
+  if (precision <= TOKEN_MAX_DISPLAY_DECIMALS) return 0n
+  return 10n ** BigInt(precision - TOKEN_MAX_DISPLAY_DECIMALS)
 }
 
 export function tokenMaxSpendableBaseUnits(balance: string, decimals: unknown): bigint | null {

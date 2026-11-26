@@ -93,7 +93,7 @@ describe('token Max is verified at send, never from the page cache', () => {
       caip: usdc, tokenDecimals: 6, tokenBalance: '280.923336',
     } as any)
     // transfer(to, amount): the last 32 bytes are the amount in base units.
-    expect(BigInt('0x' + tx.data.slice(-64))).toBe(80923335n) // 80.923336 on chain, less the 1-unit Max reserve
+    expect(BigInt('0x' + tx.data.slice(-64))).toBe(80923336n) // 80.923336 on chain; 6 decimals keep no Max reserve
   })
   const send = (amount: string) => buildEvmTx(pioneer as any, base, {
     to: '0x0000000000000000000000000000000000001234', amount, fromAddress: owner, feeLevel: 5, caip: usdc, tokenDecimals: 6,
@@ -104,5 +104,13 @@ describe('token Max is verified at send, never from the page cache', () => {
   test('a send within it builds', async () => {
     const tx: any = await send('50')
     expect(BigInt('0x' + tx.data.slice(-64))).toBe(50000000n)
+  })
+  test('a fetched balance with more decimals than the token is truncated, not a build failure (audit v8 H7)', async () => {
+    const p = { ...pioneer, GetTokenBalance: async () => ({ data: '80.92333612345' }) }
+    const tx: any = await buildEvmTx(p as any, base, {
+      to: '0x0000000000000000000000000000000000001234', amount: '50', fromAddress: owner, feeLevel: 5, caip: usdc, tokenDecimals: 6,
+    } as any)
+    expect(BigInt('0x' + tx.data.slice(-64))).toBe(50000000n)
+    await expect(send('50.1234567')).rejects.toThrow(/decimal/)
   })
 })

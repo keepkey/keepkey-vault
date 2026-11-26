@@ -7,7 +7,7 @@
  */
 import type { ChainDef } from '../../shared/chains'
 import { evmAddressPath } from '../../shared/chains'
-import { tokenMaxSpendableBaseUnits } from '../../shared/max-send'
+import { decimalToBaseUnitsStrict, tokenMaxSpendableBaseUnits } from '../../shared/max-send'
 import { isEvmAddress } from '../../shared/address-validation'
 import { GAS_PRICE_ERROR } from '../../shared/gas-price-errors'
 import { decimalAmount } from '../../shared/locale'
@@ -292,7 +292,8 @@ export async function buildEvmTx(
   if (nativeBalance === undefined) {
     try {
       const balData = await pioneer.GetBalanceAddressByNetwork({ networkId: chain.networkId, address: fromAddress })
-      nativeBalance = parseUnits(readPioneerBalance(balData, fromAddress), 18)
+      // A fetched balance may carry more decimals than the chain: truncate, never throw.
+      nativeBalance = decimalToBaseUnitsStrict(readPioneerBalance(balData, fromAddress), 18)
     } catch {
       console.warn(`${TAG} Balance API failed`)
     }
@@ -346,7 +347,7 @@ export async function buildEvmTx(
     } catch (e: any) {
       throw new Error(`Cannot verify token balance before sending: ${e.message}`)
     }
-    const available = parseUnits(tokBalStr, tokenDecimals)
+    const available = decimalToBaseUnitsStrict(tokBalStr, tokenDecimals) // fetched: truncate extra decimals
     if (isMax) {
       amountBaseUnits = tokenMaxSpendableBaseUnits(tokBalStr, tokenDecimals) ?? 0n
       if (amountBaseUnits <= 0n) throw new Error('Token balance is zero')
