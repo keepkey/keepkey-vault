@@ -19,6 +19,14 @@
     "bridgeSha256": {
       "verify.cpp": "f9e00aec59c9375326e0f9ad04f8f7f0d086ee40859dee7bf539198933c06c52",
       "core-plan.h": "075c9ac0d65159954358a4dd38f3f880f0b82b6974fe066fa2b368de6cae9694"
+    },
+    "archiveSources": {
+      "monero-core-v0.18.5.4.tar.gz": "https://github.com/monero-project/monero/archive/refs/tags/v0.18.5.4.tar.gz",
+      "monero-randomx.tar.gz": "https://github.com/tevador/RandomX/archive/12f2c2ffe2108d6cf54c391fee33c8bc3646cdab.tar.gz",
+      "monero-rapidjson.tar.gz": "https://github.com/Tencent/rapidjson/archive/129d19ba7f496df5e33658527a7158c79b99c21c.tar.gz",
+      "monero-supercop.tar.gz": "https://github.com/monero-project/supercop/archive/633500ad8c8759995049ccd022107d1fa8a1bbc9.tar.gz",
+      "boost-1.90.0.tar.xz": "https://github.com/boostorg/boost/releases/download/boost-1.90.0/boost-1.90.0-b2-nodocs.tar.xz",
+      "libsodium-1.0.22.tar.gz": "https://download.libsodium.org/libsodium/releases/libsodium-1.0.22.tar.gz"
     }
   },
   "files": {

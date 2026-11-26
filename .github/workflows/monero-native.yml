@@ -1,0 +1,121 @@
+# Builds the Monero native helpers (host adapter + Core verifier) from the
+# pinned source archives. Bytes are handed on only as workflow artifacts; this
+# workflow never creates a release or a tag.
+name: Monero native helpers
+
+on:
+  workflow_call:
+  workflow_dispatch:
+  push:
+    branches: [feat/monero-all-platforms]
+    paths:
+      - scripts/build-monero-*.py
+      - projects/keepkey-vault/monero-cli/*-manifest.json
+      - projects/keepkey-vault/native/monero-*/**
+      - .github/workflows/monero-native.yml
+
+permissions:
+  contents: read
+
+jobs:
+  win32-x64:
+    name: Monero ${{ matrix.helper }} (win32-x64)
+    runs-on: windows-2022
+    timeout-minutes: 150
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - helper: host-adapter
+            output: monero-host-adapter.exe
+          - helper: core-verifier
+            output: monero_core_verify.dll
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      # Source pins hash raw bytes: never let Git rewrite line endings.
+      - name: Disable CRLF conversion
+        shell: pwsh
+        run: git config --global core.autocrlf false
+
+      - uses: actions/checkout@v4
+
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: false
+          install: >-
+            make
+            perl
+            python
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-cmake
+            mingw-w64-ucrt-x86_64-pkgconf
+            mingw-w64-ucrt-x86_64-unbound
+            mingw-w64-ucrt-x86_64-zeromq
+            mingw-w64-ucrt-x86_64-libsodium
+            mingw-w64-ucrt-x86_64-openssl
+            mingw-w64-ucrt-x86_64-icu
+            mingw-w64-ucrt-x86_64-libiconv
+
+      - name: Toolchain
+        run: |
+          which python3 gcc cmake make perl objdump
+          gcc --version | head -1
+          pacman -Q
+
+      - uses: actions/cache@v4
+        with:
+          path: .monero-archives
+          key: monero-archives-${{ hashFiles('projects/keepkey-vault/monero-cli/host-adapter-manifest.json', 'projects/keepkey-vault/monero-cli/core-verifier-manifest.json') }}
+
+      - name: Fetch pinned source archives
+        run: |
+          python3 -I - <<'EOF'
+          import hashlib, json, pathlib, subprocess
+          out = pathlib.Path(".monero-archives"); out.mkdir(exist_ok=True)
+          manifest = json.loads(pathlib.Path("projects/keepkey-vault/monero-cli/${{ matrix.helper }}-manifest.json").read_text())["source"]
+          for name, expected in manifest["archivesSha256"].items():
+              path = out / name
+              if not path.is_file() or hashlib.sha256(path.read_bytes()).hexdigest() != expected:
+                  subprocess.run(["curl", "-sSfL", "--retry", "3", "-o", str(path), manifest["archiveSources"][name]], check=True)
+              actual = hashlib.sha256(path.read_bytes()).hexdigest()
+              if actual != expected:
+                  raise SystemExit(name + " sha256 " + actual + " != pinned " + expected)
+              print(name, actual)
+          EOF
+
+      - name: Build ${{ matrix.helper }}
+        run: |
+          python3 scripts/build-monero-${{ matrix.helper }}.py --target win32-x64 --jobs 4 \
+            --archive-dir .monero-archives --work-dir /d/mw --output "$PWD/out/${{ matrix.output }}"
+          cp /d/mw/result.json out/${{ matrix.helper }}-result.json
+
+      - name: Report hashes and imports
+        run: |
+          sha256sum out/${{ matrix.output }}
+          stat -c '%s bytes' out/${{ matrix.output }}
+          objdump -p out/${{ matrix.output }} | grep 'DLL Name:'
+          objdump -p out/${{ matrix.output }} | sed -n '/\[Ordinal\/Name Pointer\] Table/,/^$/p'
+          if objdump -p out/${{ matrix.output }} | grep -iE 'DLL Name: *(libstdc\+\+|libgcc_s|libwinpthread|vcruntime|msvcp)'; then
+            echo "::error::MinGW or MSVC runtime import found"; exit 1
+          fi
+
+      - name: Logs on failure
+        if: failure()
+        run: |
+          for f in /d/mw/*.log; do echo "=== $f"; tail -n 60 "$f"; done
+
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: monero-native-win32-x64-${{ matrix.helper }}-logs
+          path: D:/mw/*.log
+          if-no-files-found: ignore
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: monero-native-win32-x64-${{ matrix.helper }}
+          path: out/
+          if-no-files-found: error
