@@ -63,6 +63,7 @@ import { VaultAssetPage } from './VaultAssetPage'
 import { useBtcMultisigEnabled } from "../hooks/useBtcMultisigEnabled"
 import { showWatchOnlyAddress } from "../../shared/watch-only-verify"
 import { getDateLocale } from '../lib/date-locale'
+import { addressFromDeriveResult } from '../lib/derived-address'
 
 type AssetView = "receive" | "send" | "privacy" | "psbt" | "multisig"
 
@@ -432,7 +433,9 @@ function PersonalAssetPage({ chain, balance, balanceLoading = false, onBack, fir
 			if (st) params.scriptType = st
 			if (isTon) params.bounceable = overrideBounceable ?? tonBounceable
 			const result = await rpcRequest(chain.rpcMethod, params, 60000)
-			return typeof result === "string" ? result : result?.address || String(result)
+			const addr = addressFromDeriveResult(result)
+			if (!addr) throw new Error(`Unexpected address result from ${chain.rpcMethod}`)
+			return addr
 		}, {
 			// The DB address stays on screen while the device answers or can't
 			// (locked). UTXO rows can hold an xpub, never shown as an address.
@@ -463,7 +466,8 @@ function PersonalAssetPage({ chain, balance, balanceLoading = false, onBack, fir
 				if (btcSelected.scriptType) params.scriptType = btcSelected.scriptType
 				const result = await rpcRequest(chain.rpcMethod, params, 60000)
 				if (cancelled) return
-				const addr = typeof result === 'string' ? result : result?.address || String(result)
+				const addr = addressFromDeriveResult(result)
+				if (!addr) throw new Error(`Unexpected address result from ${chain.rpcMethod}`)
 				setAddress(addr)
 				setCurrentPath(path)
 			} catch (e: any) {

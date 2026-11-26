@@ -97,6 +97,10 @@ export function HiveAccountPanel({ activeKey, color, loading, deriveError, onRet
 	// On a refreshNonce refetch over a displayed account, a transient failure or
 	// flaky noAccount must not tear down good data (error card / onboarding
 	// wizard replacing real balances) — only downgrade when nothing is shown yet.
+	// A different key (device swap, new seed, passphrase) is a different wallet:
+	// drop the previous account so its name and balance never show for this key.
+	// The refresh effect below keeps "has" sticky only across refreshes of the same key.
+	useEffect(() => { setAccount(null); setState("loading") }, [activeKey])
 	useEffect(() => { let c = false; if (activeKey) { rpcRequest<AccountResp>("hiveGetAccount", { pubkey: activeKey }, 15000).then(r => { if (c) return; if (r.account) { setAccount(r.account); setState("has") } else setState(s => s === "has" ? s : "none") }).catch(() => { if (!c) setState(s => s === "has" ? s : "error") }) } return () => { c = true } }, [activeKey, refreshNonce])
 
 	// No active key yet: distinguish a failed/absent derivation (actionable) from
