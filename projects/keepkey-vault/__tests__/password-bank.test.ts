@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test'
-import { createCipheriv, createHmac, pbkdf2Sync } from 'node:crypto'
+import { createCipheriv, createHash, createHmac, pbkdf2Sync } from 'node:crypto'
 import { HDKey } from '@scure/bip32'
+import { DeviceOperationCoordinator, type DeviceOperationSnapshot } from '../src/bun/device-operation'
 import { PasswordBank, PASSWORD_BANK_FLAG, PASSWORD_BANK_SETTING, PASSWORD_CACHE_MAX_MINUTES } from '../src/bun/password-bank'
 import { passwordOrigin } from '../src/shared/password-bank'
 
@@ -28,6 +29,104 @@ async function assigned(f = fixture()) {
 }
 
 describe('password bank release gates', () => {
+  test('43 staged and verified profiles recover from an encrypted backup using 86 lifetime slots', async () => {
+    const { bank } = fixture()
+    bank.setEnabled(true)
+    await bank.unlock(true)
+    const profileIds: string[] = []
+    for (let i = 0; i < 43; i++) {
+      await bank.generate(2, 5)
+      const account = `pilot-${i}@example.com`
+      const profile = bank.assign('https://login.example.com', account, 90).profiles.find(entry => entry.account === account)!
+      profileIds.push(profile.id)
+      bank.rotate(profile.id, 'prepare', false)
+      bank.acknowledgeBackup(bank.exportBackup().revision)
+      bank.rotate(profile.id, 'submitted', false)
+      bank.acknowledgeBackup(bank.exportBackup().revision)
+      bank.rotate(profile.id, 'verify', true)
+    }
+    const backup = bank.exportBackup()
+    const replacement = fixture()
+    replacement.bank.setEnabled(true)
+    const restored = await replacement.bank.unlock(false, backup.json)
+    expect(restored.profiles.map(profile => profile.id)).toEqual(profileIds)
+    expect(restored.profiles.every(profile => profile.changedAt && profile.pendingSlot === undefined)).toBe(true)
+    expect(restored.capacity).toMatchObject({ allocated: 86, remaining: 4010 })
+    expect(backup.json).not.toContain('@example.com')
+  })
+
+  test('banks follow the device and effective wallet; only explicit recovery can open the previous global bank', async () => {
+    const f = await assigned()
+    const legacy = f.db.get(PASSWORD_BANK_SETTING)
+    let scope: string | null = null
+    const bank = new PasswordBank({ ...f.deps, walletScope: () => scope })
+    expect(bank.view()).toMatchObject({ exists: false, walletPending: true })
+
+    scope = 'device-a:hidden-wallet'
+    f.seed('different passphrase')
+    expect((await bank.unlock()).exists).toBe(false)
+    await expect(bank.unlock(false, undefined, true)).rejects.toThrow('could not be verified')
+    expect(bank.view().exists).toBe(false)
+    await bank.unlock(true)
+    const hiddenBankId = bank.view().bankId
+
+    scope = 'device-a:standard-wallet'
+    f.seed('test seed')
+    expect(bank.view()).toMatchObject({ exists: false, unlocked: false, profiles: [] })
+    expect((await bank.unlock(false, undefined, true)).profiles[0]?.id).toBe(f.id)
+    expect(f.db.get(PASSWORD_BANK_SETTING)).toBe(legacy)
+
+    scope = 'device-b:standard-wallet'
+    expect((await bank.unlock()).exists).toBe(false)
+    scope = 'device-a:hidden-wallet'
+    f.seed('different passphrase')
+    expect((await bank.unlock()).bankId).toBe(hiddenBankId)
+  })
+
+  test('a foreground bank unlock prompts for the PIN before asking the device to derive a key', async () => {
+    const f = fixture()
+    const snapshot: DeviceOperationSnapshot = { wallet: {}, deviceId: 'device', seedAddress: null, state: 'needs_pin' }
+    let finishPin!: (accepted: boolean) => void
+    let prompts = 0
+    const coordinator = new DeviceOperationCoordinator({
+      snapshot: () => snapshot,
+      unlock: async () => {
+        prompts++
+        const accepted = await new Promise<boolean>(resolve => { finishPin = resolve })
+        if (!accepted) throw new Error('PIN cancelled')
+        snapshot.state = 'ready'
+      },
+    })
+    const bank = new PasswordBank({
+      ...f.deps,
+      async withDeviceUnlock(action) {
+        const release = await coordinator.acquire({ unlock: true, rejectIfBusy: true })
+        try { return await action() } finally { release() }
+      },
+      device: () => {
+        if (snapshot.state !== 'ready') throw new Error('KeepKey is locked')
+        return f.deps.device()
+      },
+    })
+    await expect(bank.unlock(true)).rejects.toThrow('disabled')
+    expect(prompts).toBe(0)
+    bank.setEnabled(true)
+
+    const cancelled = bank.unlock(true)
+    expect(prompts).toBe(1)
+    expect(f.calls()).toBe(0)
+    finishPin(false)
+    await expect(cancelled).rejects.toThrow('PIN cancelled')
+    expect(f.db.has(PASSWORD_BANK_SETTING)).toBe(false)
+
+    const unlocking = bank.unlock(true)
+    expect(prompts).toBe(2)
+    expect(f.calls()).toBe(0)
+    finishPin(true)
+    expect((await unlocking).unlocked).toBe(true)
+    expect(f.calls()).toBe(1)
+  })
+
   test('frozen v1 public-seed vector matches firmware-compatible CKV and host formatting', async () => {
     const f = fixture()
     const mnemonic = 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about'
@@ -45,6 +144,65 @@ describe('password bank release gates', () => {
     bank.setEnabled(true)
     const digest = await (bank as any).derive('00000000000000000000000000000001', 7)
     expect(digest.toString('base64url').slice(0, 24)).toBe('mtzY2TVqtboJQbQv9lwjlIrT')
+  })
+  test('a v1 backup keeps allocated passwords and reserves the new format for subsequent slots', async () => {
+    const bankId = '0123456789abcdef0123456789abcdef'
+    const id = 'legacy-profile'
+    const raw = createHmac('sha256', 'test seed')
+      .update(JSON.stringify([0x80002720, 0x8000000b, 0x80000000]))
+      .update(`KeepKey Password Bank v1 ${bankId} unlock`)
+      .digest()
+    const key = createHash('sha256').update('keepkey-password-bank/v1/metadata').update(raw).digest()
+    const iv = Buffer.alloc(12)
+    const cipher = createCipheriv('aes-256-gcm', new Uint8Array(key), new Uint8Array(iv))
+    cipher.setAAD(new TextEncoder().encode(`keepkey-password-bank/1/${bankId}`))
+    const plaintext = JSON.stringify({
+      version: 1, bankId, algorithm: 'keepkey-ckv-base64url-v1',
+      revision: 12, backedUpRevision: 12, nextSlot: 3, ready: [2],
+      profiles: [{ id, origin: 'https://example.org', account: 'legacy', slot: 0, pendingSlot: 1, rotationState: 'prepared', reviewDays: 90, createdAt: 1_000_000 }],
+    })
+    const ciphertext = Buffer.concat([new Uint8Array(cipher.update(plaintext)), new Uint8Array(cipher.final())])
+    const v1Backup = JSON.stringify({ format: 'keepkey-password-bank', version: 1, bankId, iv: iv.toString('base64'), ciphertext: ciphertext.toString('base64'), tag: cipher.getAuthTag().toString('base64') })
+    const { bank } = fixture()
+    bank.setEnabled(true)
+    await bank.unlock(false, v1Backup)
+    expect(JSON.parse(bank.exportBackup().json).version).toBe(1)
+
+    await bank.rehydrate(id, false, 5)
+    await bank.rehydrate(id, true, 5)
+    await bank.generate(1, 5)
+    const legacyReady = bank.assign('https://example.org', 'legacy ready', 90).profiles[1]
+    const generated = bank.assign('https://example.org', 'new', 90).profiles[2]
+    expect(legacyReady.slot).toBe(2)
+    expect(generated.slot).toBe(3)
+    await bank.rehydrate(legacyReady.id, false, 5)
+    expect(bank.reveal(id).password).toBe('bvAL4r1L1LIeH5ng_5yzu6GZ')
+    expect(bank.reveal(id, true).password).toBe('raPeMGFpZtHfOu-dJxTKR1B0')
+    expect(bank.reveal(legacyReady.id).password).toBe('2RhYI69aOsTHPKsSnpqUcBC7')
+    const password = bank.reveal(generated.id).password
+    expect(password).toBe('IwYRPTifAKKsZj&nTtmb3oPt')
+    expect(password).toMatch(/^[A-Za-z0-9!@#$%^&*]{24}$/)
+    expect(password.match(/[!@#$%^&*]/g)).toHaveLength(1)
+    expect(password).toMatch(/[A-Z]/)
+    expect(password).toMatch(/[a-z]/)
+    expect(password).toMatch(/[0-9]/)
+
+    const backup = bank.exportBackup()
+    const envelope = JSON.parse(backup.json)
+    expect(envelope.version).toBe(2)
+    expect(envelope.symbolFromSlot).toBeUndefined()
+    const { bank: restored } = fixture()
+    restored.setEnabled(true)
+    await expect(restored.unlock(false, JSON.stringify({ ...envelope, version: 1 }))).rejects.toThrow('could not be verified')
+    await restored.unlock(false, backup.json)
+    await restored.rehydrate(id, false, 5)
+    await restored.rehydrate(id, true, 5)
+    await restored.rehydrate(legacyReady.id, false, 5)
+    await restored.rehydrate(generated.id, false, 5)
+    expect(restored.reveal(id).password).toBe('bvAL4r1L1LIeH5ng_5yzu6GZ')
+    expect(restored.reveal(id, true).password).toBe('raPeMGFpZtHfOu-dJxTKR1B0')
+    expect(restored.reveal(legacyReady.id).password).toBe('2RhYI69aOsTHPKsSnpqUcBC7')
+    expect(restored.reveal(generated.id).password).toBe(password)
   })
   test('defaults off and every secret operation fails without contacting hardware', async () => {
     const f = fixture()
@@ -90,7 +248,7 @@ describe('password bank release gates', () => {
   test('wrong seed cannot open a backup and does not replace local data', async () => {
     const f = await assigned()
     const other = fixture(); other.bank.setEnabled(true); other.seed('wrong seed')
-    await expect(other.bank.unlock(false, f.bank.exportBackup().json)).rejects.toThrow('same seed')
+    await expect(other.bank.unlock(false, f.bank.exportBackup().json)).rejects.toThrow('could not be verified')
     expect(other.db.has(PASSWORD_BANK_SETTING)).toBe(false)
     expect(other.bank.view().unlocked).toBe(false)
   })
@@ -98,7 +256,7 @@ describe('password bank release gates', () => {
     const f = await assigned(), b = JSON.parse(f.bank.exportBackup().json)
     const bytes = Buffer.from(b.ciphertext, 'base64'); bytes[0] ^= 1; b.ciphertext = bytes.toString('base64')
     const other = fixture(); other.bank.setEnabled(true)
-    await expect(other.bank.unlock(false, JSON.stringify(b))).rejects.toThrow('damage')
+    await expect(other.bank.unlock(false, JSON.stringify(b))).rejects.toThrow('could not be verified')
     expect(other.bank.view().exists).toBe(false)
   })
   test('TTL evicts cached secrets; rehydration preserves the website password and slot', async () => {

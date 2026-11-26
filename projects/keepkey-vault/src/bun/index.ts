@@ -48,8 +48,6 @@ import { setFidoPin, listPasskeys, deletePasskey } from './passkeys-manage'
 import { resolveLabels, cleanLabel } from './passkey-labels'
 import { passwordDeviceCipher, supportsDeviceCipher } from './password-device'
 import { savePasswordBackup } from './password-backup'
-import { PasswordBex } from './password-bex'
-import { PasswordAgent } from './password-agent'
 import { callBex, listBrowsers } from './bex-bridge'
 
 /**
@@ -1140,6 +1138,9 @@ function volumeProgress(operationId: string | undefined, event: VolumeProgressEv
 const passwordBank = new PasswordBank({
 	read: getSetting,
 	write: setSetting,
+	// Password banks store authenticated ciphertext under a hash of this scope.
+	walletScope: () => engine.getDeviceState().state === 'ready' ? getWalletDbScope()?.walletId ?? null : null,
+	withDeviceUnlock: action => engine.withDeviceOperation(action, { unlock: true, rejectIfBusy: true, origin: 'desktop' }),
 	replace: (key, value, expected) => {
 		const db = getDb()
 		if (!db) throw new Error('Password-bank storage is unavailable')
@@ -1160,14 +1161,16 @@ const passwordBank = new PasswordBank({
 	},
 })
 // Clean expired session secrets even when the password tab is not visible.
-const passwordBex = new PasswordBex(passwordBank, { browsers: listBrowsers, call: (tool, args, browser) => callBex(tool, args, browser, 10000) })
-const passwordAgent = new PasswordAgent(passwordBank, passwordBex, approval => {
-	// The legacy schema declares outgoing events under bun.messages; constrain
-	// this event to that payload despite Electrobun inferring remote messages.
-	const send = rpc.send['password-agent-approval'] as (value: VaultRPCSchema['bun']['messages']['password-agent-approval']) => void
-	try { send({ approval }) } catch { /* native UI not ready; request will expire */ }
-})
-setInterval(() => { if (!passwordBank.view().unlocked) passwordAgent.cancelPending() }, 1000).unref()
+const saveLocalPasswordBackup = () => {
+	const bankId = passwordBank.view().bankId
+	const receipt = savePasswordBackup(passwordBank, path.join(os.homedir(), "Documents", "KeepKey Password Backups"))
+	if (bankId) {
+		const send = rpc.send['password-backup-saved'] as (value: VaultRPCSchema['bun']['messages']['password-backup-saved']) => void
+		try { send({ bankId, filePath: receipt.filePath }) } catch { /* The backup is already durable. */ }
+	}
+	return receipt
+}
+setInterval(() => { passwordBank.view() }, 1000).unref()
 const multisigRegistry = new MultisigRegistry(getSetting, setSetting, () => ({
 	hidden: engine.isPassphraseWallet,
 	epoch: activitySessionEpoch,
@@ -2248,7 +2251,6 @@ async function resolveDeviceSwapAsset(key: string) {
 
 // Callbacks bridge REST → RPC UI
 const restCallbacks: RestApiCallbacks = {
-	passwordAgent,
 	onApiLog: (entry: ApiLogEntry) => {
 		if (entryIsStale(entry)) {
 			console.warn(`[api-log] dropped ${entry.method} ${entry.route}: wallet session changed mid-request`)
@@ -9030,7 +9032,6 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				return getAppSettings()
 			},
 			setPasswordManagerEnabled: async (params) => {
-				passwordAgent.cancelPending()
 				passwordBank.setEnabled(params?.enabled)
 				return getAppSettings()
 			},
@@ -9088,23 +9089,18 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			deleteVolumeImage: params => volumes.deleteVolumeImage(params),
 			openExternalVolume: params => openExternalVolume(params),
 			openVolumeEncryptionSettings: () => openVolumeEncryptionSettings(),
-			passwordBankUnlock: async (params) => passwordBank.unlock(params?.create === true),
-			passwordBankLock: async () => { passwordAgent.cancelPending(); passwordBank.lock(); return passwordBank.view() },
+			passwordBankUnlock: async (params) => passwordBank.unlock(params?.create === true, undefined, params?.recoverLegacy === true),
+			passwordBankLock: async () => { passwordBank.lock(); return passwordBank.view() },
 			passwordBankGenerate: async (params) => passwordBank.generate(params.count, params.ttlMinutes),
 			passwordBankAssign: async (params) => passwordBank.assign(params.origin, params.account, params.reviewDays),
 			passwordBankRehydrate: async (params) => passwordBank.rehydrate(params.id, params.pending === true, params.ttlMinutes),
 			passwordBankReveal: async (params) => passwordBank.reveal(params.id, params.pending === true),
+			passwordBankCopy: async (params) => {
+				Utils.clipboardWriteText(passwordBank.reveal(params.id, params.pending === true).password)
+			},
 			passwordBankRotate: async (params) => passwordBank.rotate(params.id, params.action, params.confirmed === true),
-			passwordBankExport: async () => passwordBank.exportBackup(),
-			passwordBankSaveBackup: async () => savePasswordBackup(passwordBank, path.join(os.homedir(), "Documents", "KeepKey Password Backups")),
-			passwordBankBackupSaved: async (params) => passwordBank.acknowledgeBackup(params.revision),
+			passwordBankSaveBackup: async () => saveLocalPasswordBackup(),
 			passwordBankImport: async (params) => passwordBank.unlock(false, params.json),
-			passwordBankBrowserTargets: async (params) => passwordBex.discover(params.id),
-			passwordBankBrowserGrant: async (params) => passwordBex.grant(params),
-			passwordBankBrowserFill: async (params) => passwordBex.fill(params.grant),
-			passwordBankReportRisk: async (params) => passwordBank.reportRisk(params.id, params.kind, params.source),
-			passwordAgentApproveFill: async (params) => passwordAgent.approve(params.id),
-			passwordAgentRejectFill: async (params) => { passwordAgent.reject(params.id) },
 			// One-time: mark the passphrase/hidden-wallet intro dialog as seen so it
 			// never shows again (also set when the OOB passphrase card is completed).
 			markPassphraseIntroShown: async () => {

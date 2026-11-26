@@ -30,7 +30,6 @@
  */
 
 import { callBex, bridgeStatus, listBrowsers, type BridgeError } from './bex-bridge'
-import { PASSWORD_AGENT_TOOLS, type PasswordAgent } from './password-agent'
 
 // Default to 2025-06-18, which REMOVED JSON-RPC batching — so advertising it
 // while this (deliberately single-request) server rejects batches is honest.
@@ -177,7 +176,11 @@ function promoteBrowser(): void {
 }
 
 /** Handle POST /mcp. Caller has already enforced loopback-only. */
-export async function handleMcpRequest(req: Request, cors: Record<string, string>, passwords?: PasswordAgent): Promise<Response> {
+function isPasswordTool(name: string): boolean {
+  return name.startsWith('password_') || name.startsWith('__vault_password_')
+}
+
+export async function handleMcpRequest(req: Request, cors: Record<string, string>): Promise<Response> {
   // Validate the negotiated protocol version header when present (the spec says
   // to reject an unsupported one, not ignore it). Absent is fine — the version
   // is negotiated in the initialize body.
@@ -236,14 +239,14 @@ export async function handleMcpRequest(req: Request, cors: Record<string, string
       for (const { browser } of listBrowsers()) {
         try {
           const { tools } = (await callBex('bex_list_tools', {}, browser, PROBE_TIMEOUT_MS)) as { tools: unknown[] }
-          return rpcResult(id, { tools: [...withBrowserArg(tools.filter((t: any) => !String(t?.name).startsWith('password_'))), ...(passwords?.enabled ? PASSWORD_AGENT_TOOLS : [])] }, cors)
+          return rpcResult(id, { tools: withBrowserArg(tools.filter((tool: any) => !isPasswordTool(String(tool?.name)))) }, cors)
         } catch {
           // silent or broken — try the next browser
         }
       }
       // Bridge down (BEX closed, or Agent mode off) or no browser answered —
       // serve the static fallback so tools/list still succeeds.
-      return rpcResult(id, { tools: [...withBrowserArg(FALLBACK_TOOLS), ...(passwords?.enabled ? PASSWORD_AGENT_TOOLS : [])] }, cors)
+      return rpcResult(id, { tools: withBrowserArg(FALLBACK_TOOLS) }, cors)
     }
 
     case 'tools/call': {
@@ -257,16 +260,7 @@ export async function handleMcpRequest(req: Request, cors: Record<string, string
       if (typeof name !== 'string' || name === '') {
         return rpcError(id, -32602, 'Invalid params: name must be a non-empty string', undefined, cors)
       }
-      if (name.startsWith('__vault_password_')) return rpcError(id, -32601, 'Password fill is available only through the Vault password manager UI', undefined, cors)
-      if (name.startsWith('password_')) {
-        if (!passwords) return rpcError(id, -32601, 'This Vault build has no password agent API', undefined, cors)
-        try {
-          const result = await passwords.invoke(name, params?.arguments ?? {})
-          return rpcResult(id, { content: [{ type: 'text', text: JSON.stringify(result) }] }, cors)
-        } catch (error) {
-          return rpcResult(id, { isError: true, content: [{ type: 'text', text: JSON.stringify({ error: error instanceof Error ? error.message : 'Password operation failed' }) }] }, cors)
-        }
-      }
+      if (isPasswordTool(name)) return rpcError(id, -32601, 'Password operations are only available in Vault Desktop', undefined, cors)
       if (name === 'bex_browsers') {
         const browsers = await Promise.all(listBrowsers().map(async b => {
           try {

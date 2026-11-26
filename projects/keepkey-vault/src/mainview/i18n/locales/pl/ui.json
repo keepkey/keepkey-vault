@@ -447,5 +447,10 @@
   "mde0a7865": "Usuwanie woluminu…",
   "m61c22bc5": "Usunięto {{name}} z {{location}}.",
   "m5813534": "Zablokuj ten wolumin przed jego usunięciem.",
-  "me9e6ebc1": "Brak zindeksowanej aktywności {{symbol}}. Odśwież, aby przeskanować."
+  "me9e6ebc1": "Brak zindeksowanej aktywności {{symbol}}. Odśwież, aby przeskanować.",
+  "m4c0aff9f": "Przywróć poprzedni sejf haseł",
+  "mf56f735e": "Operacja na haśle nie powiodła się",
+  "m16970f4f": "Nazwa konta",
+  "m66c8115a": "Otwórz stronę, aby zmienić hasło.",
+  "m8272c222": "Skopiuj i wklej nowe hasło na stronie, a następnie sprawdź, czy możesz zalogować się ponownie."
 }

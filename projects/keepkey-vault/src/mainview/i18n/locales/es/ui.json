@@ -446,5 +446,10 @@
   "mde0a7865": "Eliminando volumen…",
   "m61c22bc5": "Se eliminó {{name}} de {{location}}.",
   "m5813534": "Bloquea este volumen antes de eliminarlo.",
-  "me9e6ebc1": "No hay actividad indexada de {{symbol}}. Actualiza para escanear."
+  "me9e6ebc1": "No hay actividad indexada de {{symbol}}. Actualiza para escanear.",
+  "m4c0aff9f": "Restaurar el banco de contraseñas anterior",
+  "mf56f735e": "No se pudo completar la operación de contraseña",
+  "m16970f4f": "Nombre de la cuenta",
+  "m66c8115a": "Abre el sitio web para cambiar la contraseña.",
+  "m8272c222": "Copia y pega la nueva contraseña en el sitio web y vuelve a iniciar sesión para probarla."
 }

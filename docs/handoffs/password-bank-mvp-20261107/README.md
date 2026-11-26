@@ -2,9 +2,9 @@
 
 The MVP adds a default-off **Password manager** switch in **Settings → Feature Flags**. Switching it on adds **Passwords** inside the existing lock button’s **Vault** panel immediately, alongside **Seed vault (BIP-85)**. Switching it off removes that section and clears the unlocked bank and password cache immediately. No restart or reload is required for either operation.
 
-This flag is independent of Monero: `password_manager_enabled` is never inferred from `monero_enabled`. Integrating the MVP into the Monero development build does not enable passwords or change Monero settings. Password tools disappear from MCP discovery when disabled; calling them cannot unlock a bank or contact hardware. The metadata status endpoint can still report `disabled` with no account list.
+This flag is independent of Monero. Turning it off clears the unlocked Password Bank and cache. Use the current manual rotation workflow in Desktop. [Manual rotation handoff](../password-bank-manual-rotation-20261125.md)
 
-The simplified password UI and automatic backups build on the integrated Desktop implementation. The compatible BEX is now included in the reviewed local `keepkey-client` **develop** candidate `8322d6f`. It is built into that repository's existing `dist` folder, so the existing unpacked Chrome extension entry can be reloaded. Its `docs/develop-candidate-20261108.json` records all 16 open PR dispositions: 14 integrated, two dependency upgrades held. The initial isolated password branch/package remains available for historical reproduction. No release tag, signed app, store upload or production deployment was made.
+The simplified password UI and automatic backups build on the integrated Desktop implementation. The initial isolated password branch and package remain available for historical reproduction.
 
 ## Simple list, recovery and native reveal
 
@@ -12,7 +12,7 @@ The default view contains **Add password** and the saved account list. Adding an
 
 Backups are written to **Documents/KeepKey Password Backups**: directory mode 0700, exclusive random-named files mode 0600, file and directory fsync before revision acknowledgment. Earlier exports remain available. Recovery instructions, manual save, restore and lock controls are under **Options**. A local backup still needs to be copied to separate storage alongside the recovery plan.
 
-Each staged or verified password has a masked field, eye control and copy control. Masking fetches no secret. Only an explicit native eye action fetches its temporary value; copy becomes available after revealing. The value is hidden on window blur, page hiding, or expiry (at most 30 seconds). Native agent APIs still cannot reveal passwords or activate rotations.
+Each staged or verified password has a masked field, eye control and copy control. **Copy** works while the password is masked. Reveal lasts at most 30 seconds and ends on window blur, page hiding or expiry. Copy and reveal require an unlocked bank. When the cache expires, Vault requests KeepKey approval to fetch the password again.
 
 All 61 affected password/emulator tests pass (39 focused password checks plus emulator session, PIN and startup-recovery checks). Synthetic UI checks cover the simple list, automatic backup, failed-backup blocking, eye masking, explicit clipboard copy, blur/expiry hiding, narrow layout, both lock-panel tools, focus restoration and live feature flags. No new TypeScript file/code diagnostics were introduced against the 803-diagnostic existing baseline. Native eye/reveal and clipboard behavior was also confirmed by the owner in the preview.
 
@@ -31,20 +31,16 @@ Local evidence is under `/private/tmp/vault-develop-evidence-20261108/`; encrypt
 ## Included functionality
 
 - Create/unlock a hardware-derived password bank using existing multi-chain KeepKey firmware's `CipherKeyValue` command. Each derivation requires device confirmation. Bitcoin-only firmware is refused.
-- Generate 1–8 ready entries per request. Passwords contain 24 Base64URL characters. Assign each slot to one exact HTTPS domain and account; retired/cancelled slots are never reused.
+- Generate 1–8 ready entries per request. Newly allocated passwords have 24 characters, including uppercase and lowercase letters, digits, and exactly one symbol from `!@#$%^&*`. Previously allocated slots reproduce their original passwords. Assign each slot to one exact HTTPS domain and account. Retired or cancelled slots are never reused.
 - Persist the account registry and rotation journal only as authenticated AES-256-GCM ciphertext. No metadata-unwrapping key or password is persisted. SQLite compare-and-swap prevents another Vault instance from overwriting a stale bank or reusing its allocation range.
 - Keep generated passwords in a session cache, with selectable 1/5/15-minute lifetime and a fifteen-minute absolute unlock limit. Lock, disconnect, wallet-session change, feature disable or app exit evicts that session. Rehydrate an assigned entry through another device confirmation.
-- Export and restore an encrypted recovery manifest. Recovery needs the same seed, wallet passphrase and manifest. Imports cannot overwrite an existing local bank.
+- Export and restore an encrypted recovery manifest. Recovery needs the same seed, wallet passphrase and manifest. Updated Vault opens both backup versions. A version 2 backup requires a Vault version that supports it. Imports cannot overwrite an existing local bank.
 - Track account review intervals and guide changes through stage → save backup → begin website change → manually verify fresh sign-in → activate. An uncertain submitted change retains both locations and cannot be casually cancelled.
 - Open bundled Google, GitHub and Microsoft security-page guides. These are guided workflows, not automated password-changing scripts.
-- Discover compatible BEX password fields, choose a browser/document/field, and explicitly fill the current or staged password through a one-use, thirty-second UI grant. Fill does not explicitly submit the form. Exact trusted login/settings origins are checked in Vault, extension background and content script; cross-origin forms and stale documents are refused.
-- Reserve the private BEX fill namespace from MCP. Generic agent tools do not receive the password. The companion extension redacts password/OTP fields and known secret echoes, suppresses diagnostic reads on protected documents, and blocks screenshots of protected password documents, including after background-worker restart.
-- Expose paired, loopback-only password agent operations through MCP and `/api/v1/passwords`: bounded metadata inventory, separate cache/refill and account rotation status, versioned Google/GitHub/Microsoft helpers, generation/assignment/rehydration, backup and rotation staging. Password values and final activation are not agent operations. A requested fill must be approved in native Vault for each exact browser/document/field.
-- Record explicitly user-reported compromised/reused/weak findings with provenance and prioritize them. Findings resolve when the affected password is replaced and verified; unknown remains not assessed. Chrome's private compromise API is not exposed to ordinary BEX, and the MVP does not scan Chrome's saved credentials.
 
-The repository-distributed [migration skill](../../../skills/keepkey-password-migration/SKILL.md) uses `projects/keepkey-vault/scripts/password-agent-cli.ts`. `save-backup NEW_FILE` writes the encrypted manifest with exclusive creation, owner-only permissions and fsync before acknowledging the saved revision. Tokens and backups must not be committed or printed. Service recipes were checked against official [Google](https://support.google.com/accounts/answer/41078), [GitHub](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/updating-your-github-access-credentials), and [Microsoft](https://support.microsoft.com/en-us/accounts-billing/manage/change-your-microsoft-account-password) instructions; exact forms still require live testing.
+Use Desktop to save the encrypted recovery backup. Service recipes were checked against official account settings. [Google](https://support.google.com/accounts/answer/41078) · [GitHub](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/updating-your-github-access-credentials) · [Microsoft](https://support.microsoft.com/en-us/accounts-billing/manage/change-your-microsoft-account-password)
 
-New account assignment does not import an existing website password or change it. The generated candidate must be installed and verified through guided setup. Existing password entry/reauthentication and MFA remain the user's responsibility. Current-password BEX login fill stays unavailable in the UI until the user confirms setup.
+After adding an account, set and verify the generated password on the website. Complete the website’s existing-password authentication and MFA yourself.
 
 ## Try the actual app
 
@@ -52,33 +48,21 @@ New account assignment does not import an existing website password or change it
 2. Open **Settings → Feature Flags → Password manager**. The switch is initially off. Enable it and observe the lock button update before closing settings.
 3. Open the lock button → **Passwords** → **Add password**, enter the login domain/account, and select **Create password**. Approve the requested device operations.
 4. Vault saves encrypted recovery backups automatically. Copy the backup folder to separate storage; recovery needs this manifest as well as the wallet seed/passphrase.
-5. Choose **Open website** to begin the backed-up change. Complete current-password authentication/MFA yourself. Use **Fill in browser** for the new and confirmation fields, review the account, and submit the website change.
+5. Choose **Open website** to begin the backed-up change. Complete current-password authentication and MFA. Copy the staged password and paste it into the website’s new and confirmation fields before submitting the change.
 6. Test a fresh sign-in using the generated password. In Vault, check the successful-sign-in acknowledgment and select **Finish** only when that password works. Vault saves the updated backup automatically. Until then both locations remain recorded.
-7. Use the eye to reveal the staged/verified password and the copy icon to copy it. Values hide on blur or timeout. Disabling the feature immediately removes Passwords and locks the bank; BIP-85 remains available.
+7. Use the eye when you want to see the staged or verified password. **Copy** is available while it is masked. Values hide on blur or timeout. Disabling the feature immediately removes Passwords and locks the bank.
 
 Use test accounts and a test wallet for initial acceptance. Physical KeepKey behavior and replacement-device recovery have not been exercised in this implementation session.
-
-## Try BEX fill
-
-Reload the existing unpacked entry pointing to the sibling `keepkey-client/dist` candidate and enable its existing **Agent mode**. The version remains 0.0.38; `dist/keepkey-develop-candidate.json` records the source commit and artifact hashes. This adds no page-provider password API or generic password-reveal REST endpoint.
-
-Open the matching HTTPS login/security page. In Vault choose **Fill in browser**. A single matching field is filled directly from that explicit action; multiple fields require selection. Native generation/rehydration runs before field discovery so approval time does not consume a discovered field's short lifetime. Agent-initiated fills still require individual approval in native Vault. Fields expire after thirty seconds or navigation; discover again when necessary.
-
-The compatible extension is required: an older BEX has neither private field discovery/fill nor the new redaction behavior. Keep Agent mode's existing authorization separate from permission to change an account password. Agent requests can queue a fill but cannot approve themselves; only native Vault approval permits the exact document-bound fill.
 
 ## Chrome saved credential inventory boundary
 
 Ordinary webpages and extensions cannot enumerate Chrome's saved-password vault, including a metadata-only list of every saved account matching the current page. Chromium restricts its `passwordsPrivate` permission to browser components; it is not a permission BEX can acquire through its manifest. Chrome's autofill chooser is browser UI, separate from the webpage DOM. [Chromium permission definitions](https://raw.githubusercontent.com/chromium/chromium/main/chrome/common/extensions/api/_permission_features.json), [extension security boundaries](https://chromium.googlesource.com/chromium/src/+/main/extensions/docs/security_faq.md).
 
-An extension with host access can inspect the page's login fields and values after fill; masking an input visually does not make its value secret from the destination page. BEX redacts password values from agent observations and does not turn an observed username into an assertion that it knows every saved account for that site.
-
-For a rotation inventory, a separate native Vault importer could read only site/account metadata from a user-selected, supported Chrome profile database, subject to operating-system file access and schema compatibility. This is an inference from Chromium's separate URL/username/encrypted-password columns; it is not a supported extension API and is not implemented by this build. [Chromium login database](https://raw.githubusercontent.com/chromium/chromium/main/components/password_manager/core/browser/password_store/login_database.cc).
-
-The user can also view saved entries in Chrome Password Manager. Chrome's CSV export contains actual password values, so it must not be described as a metadata-only export. [Chrome import/export documentation](https://support.google.com/chrome/answer/13068232?hl=en).
+View saved entries in Chrome Password Manager. Chrome’s CSV export contains actual password values. [Chrome import/export documentation](https://support.google.com/chrome/answer/13068232?hl=en)
 
 ## Recovery and expiry contract
 
-The implemented scheme is **`keepkey-ckv-base64url-v1`**, not BIP85. It intentionally works with existing firmware and does not export a seed or a bank-wide password derivation root.
+The bank retains the **`keepkey-ckv-base64url-v1`** identifier and uses KeepKey's `CipherKeyValue` command on existing firmware. Derivation does not export a seed or a bank-wide password derivation root.
 
 For bank ID `b` and slot `i`:
 
@@ -92,16 +76,19 @@ CipherKeyValue: encrypt=true, ask_on_encrypt=true, ask_on_decrypt=true
                value=32 zero bytes, explicit IV=16 zero bytes
 
 Metadata AEAD key: SHA256(UTF8("keepkey-password-bank/v1/metadata") || device_output)
-Password: Base64URL(SHA256(UTF8("keepkey-password-bank/v1/password") || device_output))[0:24]
+Password entropy: SHA256(UTF8("keepkey-password-bank/v1/password") || device_output)
+Legacy password: Base64URL(password_entropy)[0:24]
 ```
 
-The device cipher's E1/D1 flags participate in its key derivation; they are part of the immutable recipe. The random 128-bit bank ID is retained in the encrypted backup envelope. AES-GCM uses a fresh 96-bit IV and binds `keepkey-password-bank/1/<bankId>` as associated data. The envelope contains format/version, bank ID, IV, ciphertext and tag; account labels and locations are encrypted.
+The device cipher's E1/D1 flags participate in its key derivation. The random 128-bit bank ID is retained in the backup envelope. AES-GCM uses a fresh 96-bit IV and binds `keepkey-password-bank/<version>/<bankId>` as associated data. The envelope contains format/version, bank ID, IV, ciphertext and tag. Account labels, locations and the format boundary are encrypted.
+
+Vault saves the first slot allocated with the symbol format in the version 2 manifest before asking the device for that slot. Slots below that boundary retain the legacy format, including previously staged and ready passwords. For slots at or above the boundary, Vault uses a byte stream of HMAC-SHA256 blocks keyed by the password entropy. Each block's UTF-8 input is `keepkey-password-bank/v2/symbol-password/<counter>` with a decimal counter starting at 0. Rejection sampling chooses the symbol position and a character from `!@#$%^&*`, then chooses the other characters from `ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789`. Vault redraws the nonsymbol characters until all three alphanumeric classes are present.
 
 A frozen software vector uses the public BIP39 `abandon` × 11 + `about` mnemonic with an empty passphrase, bank ID `00000000000000000000000000000001`, and slot 7. Firmware-compatible CKV output is `f175ad6c34511e75dda60261f56eb57a6bf72384d793e014c62f880530692175`; the password is `mtzY2TVqtboJQbQv9lwjlIrT`. This is a public test fixture, never a wallet for funds. Preserve this recipe and vector in future releases.
 
-Expiry evicts Vault's cache; it does not change the website password. Rehydration reproduces the same active slot. A copied clipboard value or a value filled into a website is outside that cache's lifetime. The browser keeps redaction context for a protected document until navigation; no password bank is stored in browser localStorage or extension sync storage.
+Expiry evicts Vault’s cache. Rehydration reproduces the password for the same active slot. A copied clipboard value has its own lifetime outside Vault’s cache.
 
-## Automated validation
+## Historical automated validation
 
 - The password-bank and fill tests are included in `make test-unit`: default-off/no-device-access, live disable, frozen derivation vector, encrypted metadata, replacement-session recovery, wrong seed, tamper rejection, expiry/rehydration, stale wallet and in-flight feature changes, backup/rotation journaling, concurrent bank access, exact-origin matching, document/browser binding, one-use/expired grants, stale-slot grants and the private MCP boundary.
 - The full `make test-unit` suite passed: **3,036 Bun tests, zero failures**, plus the standalone flag checks. Tests that bind local REST ports required execution outside the filesystem/network sandbox.
@@ -140,12 +127,12 @@ Remaining hardware recovery, native supported-platform and real-service migratio
 
 1. On physical test hardware, check device labels/confirmations, PIN/passphrase handling, cancel, unplug, firmware compatibility and repeated derivation. Match the frozen vector where possible.
 2. Restore a backup on a second/recovered test device and confirm active and staged passwords match exactly. Verify wrong passphrase and tampered backup failure. Check interrupted/cancelled generation preserves or burns the correct slots.
-3. On dedicated test accounts, verify actual login and guided rotation with the compatible extension, including browser navigation, form rejection, ambiguous submission and MFA. Confirm the actual Google/GitHub/Microsoft account settings match their guide.
+3. On dedicated test accounts, verify actual login and manual rotation, including form rejection, ambiguous submission and MFA. Confirm the Google, GitHub and Microsoft settings links open the expected pages.
 4. Check the live toggle and lock cleanup in native Electrobun on supported release platforms, plus clipboard and secret-field behavior. The automated UI test used Chrome with a synthetic native-RPC bridge.
-5. Merge and version the coordinated Vault/BEX changes, attach exact-candidate hashes and test evidence, then follow the normal signing/release process. Keep the flag off by default.
+5. Record the release candidate hashes and test evidence before following the normal signing and release process. Keep the flag off by default.
 
 ## Deliberate MVP limits
 
-One bank per Vault installation; multi-chain firmware only; fixed 24-character Base64URL format; top-level light-DOM password fields only; user-confirmed guided website changes; no automatic username filling, unattended site submission or scheduled rotation. A website may require another password policy.
+Banks are scoped to the connected KeepKey and its verified wallet. Passwords have a fixed length and character policy. A website may require another password policy.
 
 There is no persistent OS-keychain cache, mobile refill, iOS/Android credential provider, automatic rotation script library, imported-password storage or passkey recovery implementation in this MVP. Current mobile watch-only pairing is unchanged and does not carry secrets. Current firmware passkeys retain their separate recovery limitations. These are follow-up work, not functionality unlocked by the new switch.

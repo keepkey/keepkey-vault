@@ -450,5 +450,10 @@
   "mde0a7865": "Đang xóa ổ đĩa…",
   "m61c22bc5": "Đã xóa {{name}} khỏi {{location}}.",
   "m5813534": "Hãy khóa ổ đĩa này trước khi xóa.",
-  "me9e6ebc1": "Không có hoạt động {{symbol}} đã lập chỉ mục. Làm mới để quét."
+  "me9e6ebc1": "Không có hoạt động {{symbol}} đã lập chỉ mục. Làm mới để quét.",
+  "m4c0aff9f": "Khôi phục kho mật khẩu trước đó",
+  "mf56f735e": "Thao tác với mật khẩu không thành công",
+  "m16970f4f": "Tên tài khoản",
+  "m66c8115a": "Mở trang web để đổi mật khẩu.",
+  "m8272c222": "Sao chép và dán mật khẩu mới trên trang web, sau đó thử đăng nhập lại."
 }
