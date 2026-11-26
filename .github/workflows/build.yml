@@ -926,7 +926,9 @@ jobs:
           path: D:\xmr\out
           key: monero-native-win32-x64-${{ hashFiles('scripts/build-monero-host-adapter.py', 'scripts/build-monero-core-verifier.py', 'projects/keepkey-vault/native/monero-host-adapter/**', 'projects/keepkey-vault/native/monero-core-verifier/**', 'projects/keepkey-vault/monero-cli/host-adapter-manifest.json', 'projects/keepkey-vault/monero-cli/core-verifier-manifest.json') }}
 
-      # zeromq, libsodium and unbound only satisfy Core's CMake configure. The final
+      # zeromq, libsodium, unbound, icu and libiconv only satisfy Core's CMake configure
+      # (its MinGW branch requires ICU for MSYS2's ICU-linked Boost; the pinned Boost is
+      # built with icu=off and iconv=off). The final
       # links drop every MSYS2 library except Windows system import libraries (the
       # build reports what it dropped), and the import check fails on any non-system DLL.
       # msys perl and make build OpenSSL; no git, so Core's version string cannot pick up
@@ -941,6 +943,7 @@ jobs:
             mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-cmake mingw-w64-ucrt-x86_64-pkgconf
             mingw-w64-ucrt-x86_64-python
             mingw-w64-ucrt-x86_64-zeromq mingw-w64-ucrt-x86_64-libsodium mingw-w64-ucrt-x86_64-unbound
+            mingw-w64-ucrt-x86_64-icu mingw-w64-ucrt-x86_64-libiconv
 
       - name: Cache pinned source archives
         if: steps.native-cache.outputs.cache-hit != 'true'
