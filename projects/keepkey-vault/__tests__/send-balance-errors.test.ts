@@ -26,6 +26,9 @@ const SAMPLES: Record<BalanceErrorKind, Record<string, string | number>> = {
   zcashMinimumFeeExact: { zats: 15000, actions: 3 },
   xrpReserve: {},
   tronMaxReserve: { reserve: 30 },
+  staking: { symbol: 'ATOM' },
+  registration: { symbol: 'RUNE' },
+  solanaMaxSwap: {},
 }
 
 describe('send balance errors', () => {
@@ -59,8 +62,8 @@ describe('send balance errors', () => {
     expect(parseBalanceError('Insufficient ETH for gas: have 1, need ~2 BNB')).toBeNull()
   })
 
-  // Staking, name registration, swaps and Zcash shielding have their own screens, not the send form.
-  const OTHER_FLOWS = /for staking and|for registration and|for max swap|Insufficient transparent balance/
+  // Zcash shielding has its own screen and messages.
+  const OTHER_FLOWS = /Insufficient transparent balance/
 
   test('no send builder throws a balance error text of its own', () => {
     const dir = join(import.meta.dir, '../src/bun/txbuilder')
