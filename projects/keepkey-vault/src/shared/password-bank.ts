@@ -22,7 +22,6 @@ export interface PasswordBankView {
   algorithm: typeof PASSWORD_BANK_ALGORITHM
   profiles: (PasswordProfile & { cachedUntil?: number; pendingCachedUntil?: number; due: boolean })[]
   readySlots: { slot: number; symbolFormat: boolean; cachedUntil?: number }[]
-  backupRequired: boolean
   revision: number
 }
 export interface PasswordBankBackup {

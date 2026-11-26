@@ -445,5 +445,6 @@
   "mf56f735e": "Wachtwoordbewerking mislukt",
   "m16970f4f": "Accountnaam",
   "m66c8115a": "Open de website om je wachtwoord te wijzigen.",
-  "m8272c222": "Kopieer en plak het nieuwe wachtwoord op de website en test daarna een nieuwe aanmelding."
+  "m8272c222": "Kopieer en plak het nieuwe wachtwoord op de website en test daarna een nieuwe aanmelding.",
+  "macd079af": "Vault bewaart de versleutelde wachtwoordkluis in de lokale database. Voor herstel zijn de kluisgegevens, dezelfde seed en dezelfde wachtwoordzin van de wallet nodig."
 }

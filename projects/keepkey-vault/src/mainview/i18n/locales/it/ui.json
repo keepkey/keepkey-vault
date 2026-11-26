@@ -450,5 +450,6 @@
   "mf56f735e": "Operazione sulla password non riuscita",
   "m16970f4f": "Nome dell’account",
   "m66c8115a": "Apri il sito web per cambiare la password.",
-  "m8272c222": "Copia e incolla la nuova password sul sito, quindi prova ad accedere di nuovo."
+  "m8272c222": "Copia e incolla la nuova password sul sito, quindi prova ad accedere di nuovo.",
+  "macd079af": "Vault salva l’archivio cifrato delle password nel proprio database locale. Per recuperarlo servono i dati dell’archivio, lo stesso seed e la stessa passphrase del portafoglio."
 }

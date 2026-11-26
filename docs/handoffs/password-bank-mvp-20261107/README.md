@@ -4,17 +4,17 @@ The MVP adds a default-off **Password manager** switch in **Settings → Feature
 
 This flag is independent of Monero. Turning it off clears the unlocked Password Bank and cache. Use the current manual rotation workflow in Desktop. [Manual rotation handoff](../password-bank-manual-rotation-20261125.md)
 
-The simplified password UI and automatic backups build on the integrated Desktop implementation. The initial isolated password branch and package remain available for historical reproduction.
+The initial isolated password branch and package remain available for historical reproduction.
 
 ## Simple list, recovery and native reveal
 
-The default view contains **Add password** and the saved account list. Adding an account automatically unlocks/creates the bank, generates the required entries with KeepKey approval, assigns the login domain and account, and saves encrypted backups. Changing a password prepares its new location automatically; opening its website saves the backup before recording submission. A disk failure blocks the website step. Final activation still requires an explicitly verified password sign-in. Passkey/Touch ID login does not verify the generated password.
+The default view contains **Add password** and the saved account list. With KeepKey approval, Vault derives the required slots and encrypts the assigned accounts and rotation state before saving them to its database. **Open website** records submission before opening the site or making the new password available. If the database write fails, the website stays closed. Final activation requires a verified sign-in with the generated password.
 
-Backups are written to **Documents/KeepKey Password Backups**: directory mode 0700, exclusive random-named files mode 0600, file and directory fsync before revision acknowledgment. Earlier exports remain available. Recovery instructions, manual save, restore and lock controls are under **Options**. A local backup still needs to be copied to separate storage alongside the recovery plan.
+**Options** includes lock and restore. Earlier encrypted recovery files remain readable. Recovery after loss of the database requires a copy of the database or an existing recovery file along with the same seed and wallet passphrase.
 
 Each staged or verified password has a masked field, eye control and copy control. **Copy** works while the password is masked. Reveal lasts at most 30 seconds and ends on window blur, page hiding or expiry. Copy and reveal require an unlocked bank. When the cache expires, Vault requests KeepKey approval to fetch the password again.
 
-All 61 affected password/emulator tests pass (39 focused password checks plus emulator session, PIN and startup-recovery checks). Synthetic UI checks cover the simple list, automatic backup, failed-backup blocking, eye masking, explicit clipboard copy, blur/expiry hiding, narrow layout, both lock-panel tools, focus restoration and live feature flags. No new TypeScript file/code diagnostics were introduced against the 803-diagnostic existing baseline. Native eye/reveal and clipboard behavior was also confirmed by the owner in the preview.
+The original preview passed 61 password/emulator tests (39 focused password checks plus emulator session, PIN and startup-recovery checks). Synthetic UI checks cover the simple list, automatic backup, failed-backup blocking, eye masking, explicit clipboard copy, blur/expiry hiding, narrow layout, both lock-panel tools, focus restoration and live feature flags. No new TypeScript file/code diagnostics were introduced against the 803-diagnostic existing baseline. Native eye/reveal and clipboard behavior was also confirmed by the owner in the preview.
 
 The native test exposed an intermittent blank emulator window: the firmware process remained running, but its WebView never posted readiness. Reopening only its display recovered the session without replacing the wallet. Startup now retries unready HTML loads within the existing deadline, stops on readiness/close/replacement, and uses a per-load identifier so a stale readiness response cannot enable JavaScript delivery into a newer load. The bridge uses its bound IPv4 loopback address directly.
 
@@ -34,11 +34,11 @@ Local evidence is under `/private/tmp/vault-develop-evidence-20261108/`; encrypt
 - Generate 1–8 ready entries per request. Newly allocated passwords have 24 characters, including uppercase and lowercase letters, digits, and exactly one symbol from `!@#$%^&*`. Previously allocated slots reproduce their original passwords. Assign each slot to one exact HTTPS domain and account. Retired or cancelled slots are never reused.
 - Persist the account registry and rotation journal only as authenticated AES-256-GCM ciphertext. No metadata-unwrapping key or password is persisted. SQLite compare-and-swap prevents another Vault instance from overwriting a stale bank or reusing its allocation range.
 - Keep generated passwords in a session cache, with selectable 1/5/15-minute lifetime and a fifteen-minute absolute unlock limit. Lock, disconnect, wallet-session change, feature disable or app exit evicts that session. Rehydrate an assigned entry through another device confirmation.
-- Export and restore an encrypted recovery manifest. Recovery needs the same seed, wallet passphrase and manifest. Updated Vault opens both backup versions. A version 2 backup requires a Vault version that supports it. Imports cannot overwrite an existing local bank.
-- Track account review intervals and guide changes through stage → save backup → begin website change → manually verify fresh sign-in → activate. An uncertain submitted change retains both locations and cannot be casually cancelled.
+- Restore an existing encrypted recovery manifest when the local bank is missing. Updated Vault opens both backup versions. Import preserves any existing local bank.
+- Track account review intervals and guide changes through stage → record submission in the database → begin website change → verify fresh sign-in → activate. An uncertain submitted change retains both locations and cannot be casually cancelled.
 - Open bundled Google, GitHub and Microsoft security-page guides. These are guided workflows, not automated password-changing scripts.
 
-Use Desktop to save the encrypted recovery backup. Service recipes were checked against official account settings. [Google](https://support.google.com/accounts/answer/41078) · [GitHub](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/updating-your-github-access-credentials) · [Microsoft](https://support.microsoft.com/en-us/accounts-billing/manage/change-your-microsoft-account-password)
+Service recipes were checked against official account settings. [Google](https://support.google.com/accounts/answer/41078) · [GitHub](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/updating-your-github-access-credentials) · [Microsoft](https://support.microsoft.com/en-us/accounts-billing/manage/change-your-microsoft-account-password)
 
 After adding an account, set and verify the generated password on the website. Complete the website’s existing-password authentication and MFA yourself.
 
@@ -47,9 +47,9 @@ After adding an account, set and verify the generated password on the website. C
 1. Build/run the feature branch with `make dev` using the normal Vault workflow.
 2. Open **Settings → Feature Flags → Password manager**. The switch is initially off. Enable it and observe the lock button update before closing settings.
 3. Open the lock button → **Passwords** → **Add password**, enter the login domain/account, and select **Create password**. Approve the requested device operations.
-4. Vault saves encrypted recovery backups automatically. Copy the backup folder to separate storage; recovery needs this manifest as well as the wallet seed/passphrase.
-5. Choose **Open website** to begin the backed-up change. Complete current-password authentication and MFA. Copy the staged password and paste it into the website’s new and confirmation fields before submitting the change.
-6. Test a fresh sign-in using the generated password. In Vault, check the successful-sign-in acknowledgment and select **Finish** only when that password works. Vault saves the updated backup automatically. Until then both locations remain recorded.
+4. Vault saves the encrypted bank to its database automatically.
+5. Choose **Open website** to record submission and begin the change. Complete current-password authentication and MFA. Copy the staged password and paste it into the website’s new and confirmation fields before submitting the change.
+6. Test a fresh sign-in using the generated password. In Vault, check the successful-sign-in acknowledgment and select **Finish** only when that password works. Vault saves the verified rotation in the database. Until then both locations remain recorded.
 7. Use the eye when you want to see the staged or verified password. **Copy** is available while it is masked. Values hide on blur or timeout. Disabling the feature immediately removes Passwords and locks the bank.
 
 Use test accounts and a test wallet for initial acceptance. Physical KeepKey behavior and replacement-device recovery have not been exercised in this implementation session.
@@ -92,7 +92,7 @@ Expiry evicts Vault’s cache. Rehydration reproduces the password for the same 
 
 The Password Bank tests in `make test-unit` cover device confirmation, wallet isolation, encrypted backup recovery, legacy and current password generation, rotation journaling, cache expiry and newest-first ordering. The MCP tests verify that retired password operations are rejected.
 
-Run `bun __tests__/fixtures/password-mvp/server.ts` from the Vault package to start the in-memory UI fixture. Then run `smoke.mjs` in the same directory to check masked Copy, backups and manual rotation. The smoke runner accepts `PLAYWRIGHT_MODULE`, `PLAYWRIGHT_TEST_MODULE` and `CHROME_EXECUTABLE` overrides.
+Run `bun __tests__/fixtures/password-mvp/server.ts` from the Vault package to start the in-memory UI fixture. Then run `smoke.mjs` in the same directory to check masked Copy, database failure handling and manual rotation. The smoke runner accepts `PLAYWRIGHT_MODULE`, `PLAYWRIGHT_TEST_MODULE` and `CHROME_EXECUTABLE` overrides.
 
 ## Historical automated validation (November 2026)
 

@@ -451,5 +451,6 @@
   "mf56f735e": "No se pudo completar la operación de contraseña",
   "m16970f4f": "Nombre de la cuenta",
   "m66c8115a": "Abre el sitio web para cambiar la contraseña.",
-  "m8272c222": "Copia y pega la nueva contraseña en el sitio web y vuelve a iniciar sesión para probarla."
+  "m8272c222": "Copia y pega la nueva contraseña en el sitio web y vuelve a iniciar sesión para probarla.",
+  "macd079af": "Vault guarda el almacén de contraseñas cifrado en su base de datos local. Para recuperarlo se necesitan los datos del almacén y la misma semilla y frase de contraseña de la cartera."
 }

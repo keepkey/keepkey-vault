@@ -446,5 +446,6 @@
   "mf56f735e": "Échec de l’opération sur le mot de passe",
   "m16970f4f": "Nom du compte",
   "m66c8115a": "Ouvrez le site web pour modifier votre mot de passe.",
-  "m8272c222": "Copiez et collez le nouveau mot de passe sur le site, puis testez une nouvelle connexion."
+  "m8272c222": "Copiez et collez le nouveau mot de passe sur le site, puis testez une nouvelle connexion.",
+  "macd079af": "Vault stocke le coffre de mots de passe chiffré dans sa base de données locale. La récupération nécessite les données du coffre, la même phrase de récupération et la même phrase secrète du portefeuille."
 }

@@ -18,11 +18,9 @@ export function PasswordBankView() {
   const [expanded, setExpanded] = useState<string | null>(null)
   const [origin, setOrigin] = useState('')
   const [account, setAccount] = useState('')
-  const [backup, setBackup] = useState<{ bankId: string | undefined; path: string } | null>(null)
   const [verified, setVerified] = useState<Record<string, boolean>>({})
   const mounted = useRef(true)
   const revision = useRef(0)
-  const autoBackupAttempt = useRef('')
   const refresh = useCallback(async () => {
     const current = ++revision.current
     const next = await rpcRequest<BankView>('passwordBankStatus')
@@ -39,19 +37,14 @@ export function PasswordBankView() {
       setAccount('')
       setVerified({})
       setError('')
-      setBackup(null)
       void refresh().catch(() => {})
     }
     const removeDeviceListener = onRpcMessage('device-state', state => {
       if (state.state !== 'ready') invalidate()
     })
     const removeWalletListener = onRpcMessage('wallet-data-purged', invalidate)
-    const removeBackupListener = onRpcMessage('password-backup-saved', receipt => {
-      setBackup({ bankId: receipt.bankId, path: receipt.filePath })
-      void refresh().catch(() => {})
-    })
     const timer = setInterval(() => { void refresh().catch(() => {}) }, 2000)
-    return () => { mounted.current = false; revision.current++; clearInterval(timer); removeDeviceListener(); removeWalletListener(); removeBackupListener() }
+    return () => { mounted.current = false; revision.current++; clearInterval(timer); removeDeviceListener(); removeWalletListener() }
   }, [refresh, uiText])
   const run = async (work: () => Promise<unknown>) => {
     if (busy) return
@@ -63,11 +56,6 @@ export function PasswordBankView() {
   const deviceCall = async <T,>(method: string, params?: unknown) => {
     setProgress(uiText('Confirm on KeepKey'))
     return rpcRequest<T>(method, params, 600000)
-  }
-  const saveBackup = async () => {
-    setProgress(uiText('Saving encrypted backup…'))
-    const receipt = await rpcRequest<{ filePath: string }>('passwordBankSaveBackup')
-    if (mounted.current) setBackup({ bankId: bank?.bankId, path: receipt.filePath })
   }
   const ready = async (forReplacement = false) => {
     const current = await rpcRequest<BankView>('passwordBankStatus')
@@ -88,7 +76,6 @@ export function PasswordBankView() {
       await ready(true)
       await rpcRequest('passwordBankRotate', { id: p.id, action: 'prepare' })
     }
-    await saveBackup()
     setExpanded(p.id)
   }
   const add = () => run(async () => {
@@ -97,24 +84,17 @@ export function PasswordBankView() {
     const assigned = await rpcRequest<BankView>('passwordBankAssign', { origin, account, reviewDays: 90 })
     const profile = assigned.profiles.find(p => !bank?.profiles.some(old => old.id === p.id))
     setAdding(false); setOrigin(''); setAccount('')
-    // Save the assignment even if a later device approval is cancelled.
-    await saveBackup()
     if (profile) await prepare(profile)
   })
   const begin = (p: Profile) => run(async () => {
     await ensureCached(p, true)
-    await saveBackup()
-    if (p.rotationState === 'prepared') {
-      await rpcRequest('passwordBankRotate', { id: p.id, action: 'submitted' })
-      await saveBackup()
-    }
+    await rpcRequest('passwordBankRotate', { id: p.id, action: 'submitted' })
     const guide = PASSWORD_ROTATION_GUIDES.find(g => g.loginOrigin === p.origin)
     await rpcRequest('openExternal', { url: guide?.settingsUrl || p.origin })
   })
   const finish = (p: Profile) => run(async () => {
     await rpcRequest('passwordBankRotate', { id: p.id, action: 'verify', confirmed: verified[p.id] === true })
     setVerified(v => ({ ...v, [p.id]: false }))
-    await saveBackup()
     setExpanded(null)
   })
   const importBackup = (file?: File) => {
@@ -122,17 +102,8 @@ export function PasswordBankView() {
     void run(async () => {
       if (file.size > 2_000_000) throw new Error(uiText('Backup file is too large'))
       await deviceCall('passwordBankImport', { json: await file.text() })
-      await saveBackup()
     })
   }
-  useEffect(() => {
-    if (!bank?.unlocked || !bank.backupRequired || busy) return
-    const attempt = `${bank.bankId}:${bank.revision}`
-    if (autoBackupAttempt.current === attempt) return
-    autoBackupAttempt.current = attempt
-    void run(saveBackup)
-    // Retry once per revision; a storage failure offers an explicit retry.
-  }, [bank?.bankId, bank?.revision, bank?.unlocked, bank?.backupRequired, busy])
   const card = { bg: 'kk.cardBg', border: '1px solid', borderColor: 'kk.border', borderRadius: 'xl', p: '4' } as const
   return <Box w="100%" mx="auto" p={{ base: '4', md: '6' }} data-testid="password-bank">
     <Flex justify="space-between" align="center" gap="3" mb="5" wrap="wrap">
@@ -161,12 +132,11 @@ export function PasswordBankView() {
       {(bank.exists || bank.walletPending) && <Button disabled={busy} onClick={() => void run(() => deviceCall('passwordBankUnlock', { create: false }))}>{uiText('Unlock with KeepKey')}</Button>}
     </Box>}
     {bank?.unlocked && <>
-      {bank.backupRequired && <Flex {...card} mb="4" gap="3" align="center" wrap="wrap"><Text>{uiText('Encrypted backup needs saving.')}</Text><Button size="sm" disabled={busy} onClick={() => void run(saveBackup)}>{uiText('Save backup')}</Button></Flex>}
       {!bank.profiles.length && !adding && <Box {...card}><Text color="kk.textSecondary">{uiText('No saved passwords yet.')}</Text></Box>}
       <Flex direction="column" gap="3">
         {orderedPasswordProfiles(bank.profiles).map(p => {
           const pending = p.pendingSlot !== undefined
-          const pendingAccess = p.rotationState === 'submitted' && !bank.backupRequired
+          const pendingAccess = p.rotationState === 'submitted'
           const open = expanded === p.id
           return <Box {...card} key={p.id}>
             <Flex justify="space-between" align="center" gap="3" wrap="wrap">
@@ -180,7 +150,7 @@ export function PasswordBankView() {
               {p.rotationState === 'prepared' ? <>
                 <Text fontSize="sm" color="kk.textSecondary" mb="3">{uiText('Open the website to change your password.')}</Text>
                 <Button size="sm" disabled={busy} onClick={() => void begin(p)}>{uiText('Open website')}</Button>
-                <Button ml="2" size="sm" variant="ghost" color="kk.textSecondary" disabled={busy} onClick={() => void run(async () => { await rpcRequest('passwordBankRotate', { id: p.id, action: 'cancel' }); await saveBackup(); setExpanded(null) })}>{uiText('Cancel change')}</Button>
+                <Button ml="2" size="sm" variant="ghost" color="kk.textSecondary" disabled={busy} onClick={() => void run(async () => { await rpcRequest('passwordBankRotate', { id: p.id, action: 'cancel' }); setExpanded(null) })}>{uiText('Cancel change')}</Button>
               </> : <>
                 <Text fontSize="sm" color="kk.textSecondary" mb="3">{uiText('Copy and paste the new password on the website, then test a fresh sign-in.')}</Text>
                 <Box mt="4"><label><input type="checkbox" disabled={!pendingAccess} checked={verified[p.id] || false} onChange={e => setVerified(v => ({ ...v, [p.id]: e.target.checked }))} /> {uiText('I successfully signed in with the new password')}</label></Box>
@@ -194,10 +164,9 @@ export function PasswordBankView() {
     </>}
     {details && <Box {...card} mt="5">
       <Text fontWeight="600" mb="2">{uiText('Recovery and privacy')}</Text>
-      <Text fontSize="sm" color="kk.textSecondary" mb="3">{uiText('Keep your seed, wallet passphrase and encrypted backup to recover passwords. Backups are saved in Documents/KeepKey Password Backups. Copy that folder somewhere safe.')}</Text>
-      {backup && bank?.unlocked && backup.bankId === bank.bankId && <Text fontSize="xs" overflowWrap="anywhere" mb="3">{backup.path}</Text>}
+      <Text fontSize="sm" color="kk.textSecondary" mb="3">{uiText('Vault stores the encrypted password bank in its local database. Recovery requires the bank data and the same seed and wallet passphrase.')}</Text>
       <Flex gap="2" wrap="wrap">
-        {bank?.unlocked && <><Button size="sm" disabled={busy} onClick={() => void run(saveBackup)}>{uiText('Save encrypted backup')}</Button><Button size="sm" disabled={busy} onClick={() => void run(() => rpcRequest('passwordBankLock'))}>{uiText('Lock now')}</Button></>}
+        {bank?.unlocked && <Button size="sm" disabled={busy} onClick={() => void run(() => rpcRequest('passwordBankLock'))}>{uiText('Lock now')}</Button>}
         {bank?.enabled && !bank.exists && !bank.walletPending && <>
           <Box as="label" p="2" cursor="pointer">{uiText('Restore encrypted backup')}<input aria-label={uiText('Restore encrypted backup')} type="file" accept="application/json,.json" disabled={busy} style={{ display: 'none' }} onChange={e => { importBackup(e.target.files?.[0]); e.target.value = '' }} /></Box>
           <Button size="sm" disabled={busy} onClick={() => void run(() => deviceCall('passwordBankUnlock', { recoverLegacy: true }))}>{uiText('Restore previous password bank')}</Button>

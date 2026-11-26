@@ -371,7 +371,6 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       passwordBankReveal: { params: { id: string; pending?: boolean }; response: { password: string; expiresAt: number } }
       passwordBankCopy: { params: { id: string; pending?: boolean }; response: void }
       passwordBankRotate: { params: { id: string; action: 'prepare' | 'submitted' | 'verify' | 'cancel'; confirmed?: boolean }; response: PasswordBankView }
-      passwordBankSaveBackup: { params: void; response: { filePath: string; revision: number } }
       passwordBankImport: { params: { json: string }; response: PasswordBankView }
       markPassphraseIntroShown: { params: void; response: AppSettings }
       markBtcOnboardingShown: { params: void; response: AppSettings }
@@ -667,7 +666,6 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
         unresolvedErrorCount?: number
       }
       'pair-request': PairingRequestInfo
-      'password-backup-saved': { bankId: string; filePath: string }
       'pair-dismissed': Record<string, never>
       'signing-request': SigningRequestInfo
       'signing-dismissed': { id: string }
