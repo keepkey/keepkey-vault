@@ -2701,5 +2701,11 @@
   "m80be4c74": "Position {{n}}",
   "m2b6e385e": "Your KeepKey needs firmware 7.17 or later to send Zcash.",
   "ma0e696fa": "Update KeepKey Desktop to send Zcash.",
-  "mbe314908": "Couldn't check Zcash sending support. Try again."
+  "mbe314908": "Couldn't check Zcash sending support. Try again.",
+  "mcfaa6c7b": "Name and link are what the app says about itself.",
+  "m8053629c": "Request from {{origin}}",
+  "mc67333b5": "Request from a local app (no web origin)",
+  "mfdb4a150": "Calls itself {{app}}, origin unknown.",
+  "m6635bf19": "Calls itself {{app}}, paired from {{origin}}.",
+  "m3c0406dc": "Calls itself {{app}}, paired from a local app (no web origin)."
 }

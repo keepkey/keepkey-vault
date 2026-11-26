@@ -501,5 +501,11 @@
   "m9f631ebd": "Saldo niet beschikbaar",
   "m2b6e385e": "Je KeepKey heeft firmware 7.17 of nieuwer nodig om Zcash te verzenden.",
   "ma0e696fa": "Werk KeepKey Desktop bij om Zcash te verzenden.",
-  "mbe314908": "Kon ondersteuning voor het verzenden van Zcash niet controleren. Probeer het opnieuw."
+  "mbe314908": "Kon ondersteuning voor het verzenden van Zcash niet controleren. Probeer het opnieuw.",
+  "mcfaa6c7b": "Naam en link geeft de app zelf op.",
+  "m8053629c": "Verzoek van {{origin}}",
+  "mc67333b5": "Verzoek van een lokale app (geen web-origin)",
+  "mfdb4a150": "Noemt zich {{app}}, origin onbekend.",
+  "m6635bf19": "Noemt zich {{app}}, gekoppeld vanaf {{origin}}.",
+  "m3c0406dc": "Noemt zich {{app}}, gekoppeld vanaf een lokale app (geen web-origin)."
 }

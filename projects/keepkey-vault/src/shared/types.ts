@@ -1098,6 +1098,8 @@ export interface PairingRequestInfo {
   name: string
   url: string
   imageUrl: string
+  /** Request Origin seen by the server ('' = none sent, a local app). */
+  origin: string
 }
 
 export interface PairedAppInfo {
@@ -1110,6 +1112,8 @@ export interface PairedAppInfo {
   clientId?: string
   /** Last successful auth — drives LRU eviction + sliding TTL. */
   lastUsedOn?: number
+  /** Request Origin at pair time ('' = none, a local app); undefined = paired before origins were stored. */
+  origin?: string
 }
 
 export interface EIP712DecodedField {
@@ -1301,6 +1305,8 @@ export interface SigningRequestInfo {
   appName: string
   /** True when the request came with a valid pairing token (REST). Unset when the source can't vouch for it. */
   appPaired?: boolean
+  /** Origin stored when the app paired ('' = local app, undefined = unknown). appName is self-declared. */
+  appOrigin?: string
   chain?: string
   from?: string
   to?: string

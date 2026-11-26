@@ -500,5 +500,11 @@
   "m9f631ebd": "Kontostand nicht verfügbar",
   "m2b6e385e": "Ihr KeepKey benötigt Firmware 7.17 oder neuer, um Zcash zu senden.",
   "ma0e696fa": "Aktualisieren Sie KeepKey Desktop, um Zcash zu senden.",
-  "mbe314908": "Zcash-Sendeunterstützung konnte nicht geprüft werden. Bitte erneut versuchen."
+  "mbe314908": "Zcash-Sendeunterstützung konnte nicht geprüft werden. Bitte erneut versuchen.",
+  "mcfaa6c7b": "Name und Link gibt die App selbst an.",
+  "m8053629c": "Anfrage von {{origin}}",
+  "mc67333b5": "Anfrage von einer lokalen App (kein Web-Ursprung)",
+  "mfdb4a150": "Nennt sich {{app}}, Ursprung unbekannt.",
+  "m6635bf19": "Nennt sich {{app}}, gekoppelt von {{origin}}.",
+  "m3c0406dc": "Nennt sich {{app}}, gekoppelt von einer lokalen App (kein Web-Ursprung)."
 }

@@ -511,5 +511,11 @@
   "m9f631ebd": "Bakiye kullanılamıyor",
   "m2b6e385e": "Zcash göndermek için KeepKey cihazınızda 7.17 veya daha yeni bir yazılım gerekir.",
   "ma0e696fa": "Zcash göndermek için KeepKey Desktop uygulamasını güncelleyin.",
-  "mbe314908": "Zcash gönderme desteği kontrol edilemedi. Tekrar deneyin."
+  "mbe314908": "Zcash gönderme desteği kontrol edilemedi. Tekrar deneyin.",
+  "mcfaa6c7b": "Ad ve bağlantıyı uygulamanın kendisi bildirir.",
+  "m8053629c": "{{origin}} kaynaklı istek",
+  "mc67333b5": "Yerel bir uygulamadan istek (web kaynağı yok)",
+  "mfdb4a150": "Kendini {{app}} olarak tanıtıyor, kaynak bilinmiyor.",
+  "m6635bf19": "Kendini {{app}} olarak tanıtıyor, {{origin}} üzerinden eşlendi.",
+  "m3c0406dc": "Kendini {{app}} olarak tanıtıyor, yerel bir uygulamadan eşlendi (web kaynağı yok)."
 }

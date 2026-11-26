@@ -507,5 +507,11 @@
   "m9f631ebd": "Saldo no disponible",
   "m2b6e385e": "Tu KeepKey necesita el firmware 7.17 o posterior para enviar Zcash.",
   "ma0e696fa": "Actualiza KeepKey Desktop para enviar Zcash.",
-  "mbe314908": "No se pudo comprobar la compatibilidad para enviar Zcash. Inténtalo de nuevo."
+  "mbe314908": "No se pudo comprobar la compatibilidad para enviar Zcash. Inténtalo de nuevo.",
+  "mcfaa6c7b": "El nombre y el enlace los declara la propia app.",
+  "m8053629c": "Solicitud desde {{origin}}",
+  "mc67333b5": "Solicitud de una app local (sin origen web)",
+  "mfdb4a150": "Se llama a sí misma {{app}}, origen desconocido.",
+  "m6635bf19": "Se llama a sí misma {{app}}, vinculada desde {{origin}}.",
+  "m3c0406dc": "Se llama a sí misma {{app}}, vinculada desde una app local (sin origen web)."
 }

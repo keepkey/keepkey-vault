@@ -511,5 +511,11 @@
   "m9f631ebd": "Không có số dư",
   "m2b6e385e": "KeepKey của bạn cần firmware 7.17 trở lên để gửi Zcash.",
   "ma0e696fa": "Hãy cập nhật KeepKey Desktop để gửi Zcash.",
-  "mbe314908": "Không thể kiểm tra hỗ trợ gửi Zcash. Vui lòng thử lại."
+  "mbe314908": "Không thể kiểm tra hỗ trợ gửi Zcash. Vui lòng thử lại.",
+  "mcfaa6c7b": "Tên và liên kết do chính ứng dụng tự khai.",
+  "m8053629c": "Yêu cầu từ {{origin}}",
+  "mc67333b5": "Yêu cầu từ ứng dụng cục bộ (không có nguồn web)",
+  "mfdb4a150": "Tự xưng là {{app}}, không rõ nguồn.",
+  "m6635bf19": "Tự xưng là {{app}}, ghép nối từ {{origin}}.",
+  "m3c0406dc": "Tự xưng là {{app}}, ghép nối từ ứng dụng cục bộ (không có nguồn web)."
 }

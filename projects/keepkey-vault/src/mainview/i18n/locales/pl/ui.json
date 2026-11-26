@@ -508,5 +508,11 @@
   "m9f631ebd": "Saldo niedostępne",
   "m2b6e385e": "Aby wysłać Zcash, KeepKey wymaga oprogramowania 7.17 lub nowszego.",
   "ma0e696fa": "Zaktualizuj KeepKey Desktop, aby wysłać Zcash.",
-  "mbe314908": "Nie udało się sprawdzić obsługi wysyłania Zcash. Spróbuj ponownie."
+  "mbe314908": "Nie udało się sprawdzić obsługi wysyłania Zcash. Spróbuj ponownie.",
+  "mcfaa6c7b": "Nazwę i link podaje sama aplikacja.",
+  "m8053629c": "Żądanie z {{origin}}",
+  "mc67333b5": "Żądanie z lokalnej aplikacji (bez źródła web)",
+  "mfdb4a150": "Przedstawia się jako {{app}}, źródło nieznane.",
+  "m6635bf19": "Przedstawia się jako {{app}}, sparowana z {{origin}}.",
+  "m3c0406dc": "Przedstawia się jako {{app}}, sparowana z lokalnej aplikacji (bez źródła web)."
 }
