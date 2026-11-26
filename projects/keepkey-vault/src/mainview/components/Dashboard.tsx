@@ -45,6 +45,8 @@ import { preloadIcons } from "../lib/iconPreload"
 import { useDashboardView } from "../lib/dashboardViewContext"
 import { useFiat } from "../lib/fiat-context"
 import { ViewPickerButton } from "./ViewPickerMenu"
+import { ChainContextMenu, isContextMenuKey, type ChainMenuItem } from "./ChainContextMenu"
+import { canHideNetwork, setNetworkHidden } from "../lib/network-visibility"
 import { DashboardLoading } from "./DashboardLoading"
 import { AssetIcon } from "./AssetIcon"
 import { categorizeTokens } from "../../shared/spamFilter"
@@ -2139,6 +2141,45 @@ function PersonalDashboard({ capabilities, isEmulator, onLoaded, watchOnly, watc
 		&& (c.id !== 'zcash' || zcashEnabled) && (c.id !== 'hive' || hiveEnabled)
 	), [allChains, btcOnly, disabledNetworks, firmwareVersion, zcashEnabled, hiveEnabled])
 
+	// ── Sidebar chain menu (right-click / Shift+F10 / Menu key) ─────────
+	// Hiding a chain turns its network off through the same setting the
+	// network picker uses, so Bun stops fetching it too (lib/network-visibility).
+	const [chainMenu, setChainMenu] = useState<{ chainId: string; x: number; y: number; trigger: HTMLElement | null } | null>(null)
+	const [refreshingChainIds, setRefreshingChainIds] = useState<ReadonlySet<string>>(() => new Set())
+	const [showHiddenChains, setShowHiddenChains] = useState(false)
+	const setChainHidden = useCallback(async (chainId: string, hidden: boolean) => {
+		// Never leave the detail pane on a chain that just disappeared from the list.
+		if (hidden && drilledChainId === chainId) setDrilledChainId(null)
+		const s = await setNetworkHidden(disabledNetworks, chainId, hidden)
+		setDisabledNetworks(s.disabledNetworks) // turning one back on: the reload effect fetches it
+		window.dispatchEvent(new Event('keepkey-settings-changed'))
+	}, [disabledNetworks, drilledChainId])
+	const refreshChain = useCallback(async (chainId: string) => {
+		setRefreshingChainIds(prev => new Set(prev).add(chainId))
+		try {
+			// Bun pushes 'balance-updated', which the live-sync handler merges.
+			await rpcRequest<ChainBalance>("getBalance", { chainId, forceRefresh: true }, 90000)
+		} catch (e: any) {
+			console.warn(`[Dashboard] refresh ${chainId} failed:`, e?.message || e)
+		} finally {
+			setRefreshingChainIds(prev => { const next = new Set(prev); next.delete(chainId); return next })
+		}
+	}, [])
+	const chainMenuItems = (chain: ChainDef): ChainMenuItem[] => {
+		const bal = balances.get(chain.id)
+		// UTXO rows can hold an xpub, which is not an address to share.
+		const address = chain.chainFamily !== 'utxo' ? bal?.address : undefined
+		const items: ChainMenuItem[] = [
+			{ key: 'refresh', label: uiText("Refresh balance"), onSelect: () => { refreshChain(chain.id) }, disabled: refreshingChainIds.has(chain.id) },
+		]
+		if (address) items.push({ key: 'copy', label: uiText("Copy address"), onSelect: () => { navigator.clipboard?.writeText(address).catch(() => {}) } })
+		items.push(canHideNetwork(chain.id)
+			? { key: 'hide', label: uiText("Hide chain"), onSelect: () => { setChainHidden(chain.id, true).catch(e => console.warn('[Dashboard] hide chain failed:', e?.message || e)) } }
+			: { key: 'hide', label: uiText("Hide chain"), onSelect: () => {}, disabled: true, hint: uiText("Always on") })
+		return items
+	}
+	const openChainMenu = (chainId: string, x: number, y: number, trigger: HTMLElement | null) => setChainMenu({ chainId, x, y, trigger })
+
 	const sortedChains = useMemo(() => [...visibleChains].sort((a, b) => {
 		const aUsd = cleanBalanceUsd.get(a.id)?.usd || 0
 		const bUsd = cleanBalanceUsd.get(b.id)?.usd || 0
@@ -2361,7 +2402,7 @@ function PersonalDashboard({ capabilities, isEmulator, onLoaded, watchOnly, watc
 						const unknown = displayState === 'unknown'
 						// Cached figures remain visible while the bulk request checks
 						// them again. Confidence and refresh activity are separate.
-						const refreshing = loadingBalances && displayState === 'known'
+						const refreshing = (loadingBalances || refreshingChainIds.has(chain.id)) && displayState === 'known'
 						const clean = cleanBalanceUsd.get(chain.id)
 						const balNum = parseFloat(bal?.balance || '0')
 						const usdNum = clean?.usd || 0
@@ -2425,6 +2466,16 @@ function PersonalDashboard({ capabilities, isEmulator, onLoaded, watchOnly, watc
 								// Always drill in — never toggle off when re-clicking the same
 								// chain. Use the explicit "All Chains" row above to deselect.
 								onClick={() => setDrilledChainId(chain.id)}
+								onContextMenu={(e: React.MouseEvent<HTMLElement>) => { e.preventDefault(); openChainMenu(chain.id, e.clientX, e.clientY, e.currentTarget) }}
+								onKeyDown={(e: React.KeyboardEvent<HTMLElement>) => {
+									if (!isContextMenuKey(e)) return
+									e.preventDefault()
+									const r = e.currentTarget.getBoundingClientRect()
+									openChainMenu(chain.id, r.left + 24, r.bottom - 6, e.currentTarget)
+								}}
+								aria-haspopup="menu"
+								aria-expanded={chainMenu?.chainId === chain.id}
+								data-chain-row={chain.id}
 								w="100%"
 								textAlign="left"
 								p="2.5"
@@ -2565,6 +2616,48 @@ function PersonalDashboard({ capabilities, isEmulator, onLoaded, watchOnly, watc
 					})}
 
 					{moneroAt === sidebarChains.length && moneroRow}
+
+					{/* Chains hidden from this list (networks turned off). Showing one
+					    turns its network back on, same as AddChainDialog's "turn on". */}
+					{turnedOffChains.length > 0 && (
+						<Box mt="2" data-hidden-chains>
+							<Box
+								as="button"
+								onClick={() => setShowHiddenChains(v => !v)}
+								aria-expanded={showHiddenChains}
+								w="100%"
+								textAlign="left"
+								px="2.5"
+								py="1.5"
+								fontSize="11px"
+								fontWeight="500"
+								letterSpacing="0.02em"
+								color="var(--text-2)"
+								_hover={{ color: "var(--text-0)" }}
+								cursor="pointer"
+							>
+								{showHiddenChains ? "▾ " : "▸ "}{uiText("Hidden chains ({{count}})", { count: turnedOffChains.length })}
+							</Box>
+							{showHiddenChains && turnedOffChains.map(c => (
+								<Flex key={c.id} align="center" gap="3" px="2.5" py="1.5" borderTop="1px solid var(--line)">
+									<Image src={getAssetIcon(c.caip)} alt="" w="22px" h="22px" borderRadius="full" flexShrink={0} bg="var(--ink-2)" opacity={0.7} />
+									<Text flex="1" minW="0" fontSize="13px" color="var(--text-1)" truncate>{c.coin}</Text>
+									<Box
+										as="button"
+										onClick={() => { setChainHidden(c.id, false).catch(e => console.warn('[Dashboard] show chain failed:', e?.message || e)) }}
+										aria-label={uiText("Show {{chain}}", { chain: c.coin })}
+										fontSize="12px"
+										fontWeight="600"
+										color="var(--gold)"
+										cursor="pointer"
+										_hover={{ textDecoration: "underline" }}
+									>
+										{uiText("Show")}
+									</Box>
+								</Flex>
+							))}
+						</Box>
+					)}
 
 					{/* Add network — turns a network back on that the network picker
 					    turned off, or adds a custom EVM network (by chainId / RPC, or
@@ -3495,6 +3588,21 @@ function PersonalDashboard({ capabilities, isEmulator, onLoaded, watchOnly, watc
 				</Suspense>
 			)}
 
+			{chainMenu && (() => {
+				const chain = allChains.find(c => c.id === chainMenu.chainId)
+				if (!chain) return null
+				return (
+					<ChainContextMenu
+						x={chainMenu.x}
+						y={chainMenu.y}
+						label={chain.coin}
+						items={chainMenuItems(chain)}
+						onClose={() => setChainMenu(null)}
+						returnFocusTo={chainMenu.trigger}
+					/>
+				)
+			})()}
+
 			{showAddChain && (
 				<AddChainDialog
 					onClose={() => setShowAddChain(false)}
@@ -3511,11 +3619,7 @@ function PersonalDashboard({ capabilities, isEmulator, onLoaded, watchOnly, watc
 					}}
 					existingChainIds={existingChainIds}
 					turnedOff={turnedOffChains}
-					onTurnOn={async (id) => {
-						const s = await rpcRequest<AppSettings>('setDisabledNetworks', { chainIds: disabledNetworks.filter(d => d !== id) })
-						setDisabledNetworks(s.disabledNetworks) // reload effect fetches its balances
-						window.dispatchEvent(new Event('keepkey-settings-changed'))
-					}}
+					onTurnOn={(id) => setChainHidden(id, false)}
 				/>
 			)}
 
