@@ -28,6 +28,27 @@ async function assigned(f = fixture()) {
   return { ...f, id: state.profiles[0].id }
 }
 
+function legacyPasswordBackup() {
+  const bankId = '0123456789abcdef0123456789abcdef'
+  const id = 'legacy-profile'
+  const raw = createHmac('sha256', 'test seed')
+    .update(JSON.stringify([0x80002720, 0x8000000b, 0x80000000]))
+    .update(`KeepKey Password Bank v1 ${bankId} unlock`)
+    .digest()
+  const key = createHash('sha256').update('keepkey-password-bank/v1/metadata').update(raw).digest()
+  const iv = Buffer.alloc(12)
+  const cipher = createCipheriv('aes-256-gcm', new Uint8Array(key), new Uint8Array(iv))
+  cipher.setAAD(new TextEncoder().encode(`keepkey-password-bank/1/${bankId}`))
+  const plaintext = JSON.stringify({
+    version: 1, bankId, algorithm: 'keepkey-ckv-base64url-v1',
+    revision: 12, backedUpRevision: 12, nextSlot: 3, ready: [2],
+    profiles: [{ id, origin: 'https://example.org', account: 'legacy', slot: 0, pendingSlot: 1, rotationState: 'prepared', reviewDays: 90, createdAt: 1_000_000 }],
+  })
+  const ciphertext = Buffer.concat([new Uint8Array(cipher.update(plaintext)), new Uint8Array(cipher.final())])
+  const v1Backup = JSON.stringify({ format: 'keepkey-password-bank', version: 1, bankId, iv: iv.toString('base64'), ciphertext: ciphertext.toString('base64'), tag: cipher.getAuthTag().toString('base64') })
+  return { id, json: v1Backup }
+}
+
 describe('password bank release gates', () => {
   test('43 staged and verified profiles recover from an encrypted backup using 86 lifetime slots', async () => {
     const { bank } = fixture()
@@ -51,7 +72,8 @@ describe('password bank release gates', () => {
     const restored = await replacement.bank.unlock(false, backup.json)
     expect(restored.profiles.map(profile => profile.id)).toEqual(profileIds)
     expect(restored.profiles.every(profile => profile.changedAt && profile.pendingSlot === undefined)).toBe(true)
-    expect(restored.capacity).toMatchObject({ allocated: 86, remaining: 4010 })
+    expect(restored.profiles.map(profile => profile.slot)).toEqual(profileIds.map((_, index) => 2 * index + 1))
+    expect((await replacement.bank.generate(1, 5)).readySlots.map(({ slot }) => slot)).toEqual([86])
     expect(backup.json).not.toContain('@example.com')
   })
 
@@ -146,23 +168,7 @@ describe('password bank release gates', () => {
     expect(digest.toString('base64url').slice(0, 24)).toBe('mtzY2TVqtboJQbQv9lwjlIrT')
   })
   test('a v1 backup keeps allocated passwords and reserves the new format for subsequent slots', async () => {
-    const bankId = '0123456789abcdef0123456789abcdef'
-    const id = 'legacy-profile'
-    const raw = createHmac('sha256', 'test seed')
-      .update(JSON.stringify([0x80002720, 0x8000000b, 0x80000000]))
-      .update(`KeepKey Password Bank v1 ${bankId} unlock`)
-      .digest()
-    const key = createHash('sha256').update('keepkey-password-bank/v1/metadata').update(raw).digest()
-    const iv = Buffer.alloc(12)
-    const cipher = createCipheriv('aes-256-gcm', new Uint8Array(key), new Uint8Array(iv))
-    cipher.setAAD(new TextEncoder().encode(`keepkey-password-bank/1/${bankId}`))
-    const plaintext = JSON.stringify({
-      version: 1, bankId, algorithm: 'keepkey-ckv-base64url-v1',
-      revision: 12, backedUpRevision: 12, nextSlot: 3, ready: [2],
-      profiles: [{ id, origin: 'https://example.org', account: 'legacy', slot: 0, pendingSlot: 1, rotationState: 'prepared', reviewDays: 90, createdAt: 1_000_000 }],
-    })
-    const ciphertext = Buffer.concat([new Uint8Array(cipher.update(plaintext)), new Uint8Array(cipher.final())])
-    const v1Backup = JSON.stringify({ format: 'keepkey-password-bank', version: 1, bankId, iv: iv.toString('base64'), ciphertext: ciphertext.toString('base64'), tag: cipher.getAuthTag().toString('base64') })
+    const { id, json: v1Backup } = legacyPasswordBackup()
     const { bank } = fixture()
     bank.setEnabled(true)
     await bank.unlock(false, v1Backup)
@@ -177,6 +183,9 @@ describe('password bank release gates', () => {
     expect(generated.slot).toBe(3)
     await bank.rehydrate(legacyReady.id, false, 5)
     expect(bank.reveal(id).password).toBe('bvAL4r1L1LIeH5ng_5yzu6GZ')
+    bank.acknowledgeBackup(bank.exportBackup().revision)
+    bank.rotate(id, 'submitted', false)
+    bank.acknowledgeBackup(bank.exportBackup().revision)
     expect(bank.reveal(id, true).password).toBe('raPeMGFpZtHfOu-dJxTKR1B0')
     expect(bank.reveal(legacyReady.id).password).toBe('2RhYI69aOsTHPKsSnpqUcBC7')
     const password = bank.reveal(generated.id).password
@@ -203,6 +212,28 @@ describe('password bank release gates', () => {
     expect(restored.reveal(id, true).password).toBe('raPeMGFpZtHfOu-dJxTKR1B0')
     expect(restored.reveal(legacyReady.id).password).toBe('2RhYI69aOsTHPKsSnpqUcBC7')
     expect(restored.reveal(generated.id).password).toBe(password)
+  })
+  test('new replacements skip unassigned slots from the previous format', async () => {
+    const { bank } = fixture()
+    const { id, json } = legacyPasswordBackup()
+    bank.setEnabled(true)
+    await bank.unlock(false, json)
+    const previous = bank.rotate(id, 'cancel', false)
+
+    expect(previous.readySlots).toEqual([{ slot: 2, symbolFormat: false, cachedUntil: undefined }])
+    expect(() => bank.rotate(id, 'prepare', false)).toThrow('Generate a new ready password first')
+    expect(bank.view().revision).toBe(previous.revision)
+
+    const generated = await bank.generate(1, 5)
+    expect(generated.readySlots.map(({ slot, symbolFormat }) => [slot, symbolFormat])).toEqual([[2, false], [3, true]])
+    const prepared = bank.rotate(id, 'prepare', false)
+    expect(prepared.profiles[0].pendingSlot).toBe(3)
+    expect(prepared.readySlots).toEqual(previous.readySlots)
+
+    bank.acknowledgeBackup(bank.exportBackup().revision)
+    bank.rotate(id, 'submitted', false)
+    bank.acknowledgeBackup(bank.exportBackup().revision)
+    expect(bank.reveal(id, true).password).toBe('IwYRPTifAKKsZj&nTtmb3oPt')
   })
   test('defaults off and every secret operation fails without contacting hardware', async () => {
     const f = fixture()
@@ -278,14 +309,19 @@ describe('password bank release gates', () => {
   test('rotation requires saved pending locations and explicit verification', async () => {
     const f = await assigned(), old = f.bank.reveal(f.id).password
     f.bank.rotate(f.id, 'prepare', false)
-    const staged = f.bank.reveal(f.id, true).password
-    expect(staged).not.toBe(old)
+    expect(() => f.bank.reveal(f.id, true)).toThrow('encrypted backup')
     expect(() => f.bank.rotate(f.id, 'submitted', false)).toThrow('backup')
     const b = f.bank.exportBackup(); f.bank.acknowledgeBackup(b.revision)
+    expect(() => f.bank.reveal(f.id, true)).toThrow('encrypted backup')
     f.bank.rotate(f.id, 'submitted', false)
+    expect(() => f.bank.reveal(f.id, true)).toThrow('encrypted backup')
+    expect(() => f.bank.rotate(f.id, 'verify', true)).toThrow('encrypted backup')
     expect(() => f.bank.rotate(f.id, 'cancel', false)).toThrow('reconciled')
     expect(() => f.bank.rotate(f.id, 'verify', false)).toThrow('Confirm')
     expect(f.bank.reveal(f.id).password).toBe(old)
+    f.bank.acknowledgeBackup(f.bank.exportBackup().revision)
+    const staged = f.bank.reveal(f.id, true).password
+    expect(staged).not.toBe(old)
     f.bank.rotate(f.id, 'verify', true)
     expect(f.bank.reveal(f.id).password).toBe(staged)
     expect(f.bank.view().profiles[0].rotationState).toBe('active')
@@ -294,11 +330,18 @@ describe('password bank release gates', () => {
   test('a backup made before submission preserves both locations after total app loss', async () => {
     const f = await assigned()
     f.bank.rotate(f.id, 'prepare', false)
-    const old = f.bank.reveal(f.id).password, pending = f.bank.reveal(f.id, true).password
+    const old = f.bank.reveal(f.id).password
     const backup = f.bank.exportBackup()
+    f.bank.acknowledgeBackup(backup.revision)
+    f.bank.rotate(f.id, 'submitted', false)
+    f.bank.acknowledgeBackup(f.bank.exportBackup().revision)
+    const pending = f.bank.reveal(f.id, true).password
     const other = fixture(); other.bank.setEnabled(true); await other.bank.unlock(false, backup.json)
     await other.bank.rehydrate(f.id, false, 5); await other.bank.rehydrate(f.id, true, 5)
     expect(other.bank.reveal(f.id).password).toBe(old)
+    expect(() => other.bank.reveal(f.id, true)).toThrow('encrypted backup')
+    other.bank.rotate(f.id, 'submitted', false)
+    other.bank.acknowledgeBackup(other.bank.exportBackup().revision)
     expect(other.bank.reveal(f.id, true).password).toBe(pending)
   })
   test('new assignment invalidates acknowledgment and retired slots are not reused', async () => {

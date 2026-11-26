@@ -2,15 +2,6 @@ export const PASSWORD_BANK_ALGORITHM = 'keepkey-ckv-base64url-v1' as const
 /** The unlock session lasts this long and is never extended; a cached password
  *  ends with it, so it is also the longest cache duration the bank accepts. */
 export const PASSWORD_CACHE_MAX_MINUTES = 15
-export type PasswordRiskKind = 'compromised' | 'reused' | 'weak'
-export interface PasswordRiskFinding {
-  kind: PasswordRiskKind
-  source: 'user' | 'chrome-password-checkup'
-  mode: 'user-reported'
-  observedAt: number
-  slot: number | null // null: the pre-migration website password is not in KeepKey
-  resolvedAt?: number
-}
 export interface PasswordProfile {
   id: string
   origin: string
@@ -21,18 +12,16 @@ export interface PasswordProfile {
   changedAt?: number
   reviewDays: number
   createdAt: number
-  riskFindings?: PasswordRiskFinding[]
 }
 export interface PasswordBankView {
   enabled: boolean
   exists: boolean
   walletPending?: boolean
-  capacity?: { allocated: number; remaining: number; sessionExpiresAt: number }
   unlocked: boolean
   bankId?: string
   algorithm: typeof PASSWORD_BANK_ALGORITHM
   profiles: (PasswordProfile & { cachedUntil?: number; pendingCachedUntil?: number; due: boolean })[]
-  readySlots: { slot: number; cachedUntil?: number }[]
+  readySlots: { slot: number; symbolFormat: boolean; cachedUntil?: number }[]
   backupRequired: boolean
   revision: number
 }

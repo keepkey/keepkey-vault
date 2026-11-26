@@ -36,16 +36,21 @@ try {
  await expect(page.getByText('person@example.com',{exact:true})).toBeVisible();
  await expect(page.getByRole('button',{name:'Open website',exact:true})).toBeVisible();
  const status = async () => (await (await page.request.post('http://127.0.0.1:5198/__test_rpc',{data:{method:'passwordBankStatus'}})).json()).payload;
+ const copy = page.getByRole('button',{name:'Copy password',exact:true});
+ const show = page.getByRole('button',{name:'Show password',exact:true});
  assert.equal((await status()).backupRequired,false);
+ await expect(copy).toHaveCount(0);
+ await expect(show).toHaveCount(0);
  await page.request.post('http://127.0.0.1:5198/__test_rpc',{data:{method:'testBackupFailure',params:{enabled:true}}});
  await page.getByRole('button',{name:'Open website',exact:true}).click();
  await expect(page.getByRole('alert')).toContainText('Backup disk unavailable');
  assert.equal((await status()).profiles[0].rotationState,'prepared');
+ await expect(copy).toHaveCount(0);
+ await expect(show).toHaveCount(0);
  const opened = await (await page.request.post('http://127.0.0.1:5198/__test_rpc',{data:{method:'testOpenedWebsites'}})).json();
  assert.equal(opened.payload,0);
  await page.request.post('http://127.0.0.1:5198/__test_rpc',{data:{method:'testBackupFailure',params:{enabled:false}}});
  await page.getByRole('button',{name:'Open website',exact:true}).click();
- const copy = page.getByRole('button',{name:'Copy password',exact:true});
  const copied = async (pending, writes, revealReads) => {
   await expect(page.getByText('Copied',{exact:true})).toBeVisible();
   const { id } = (await status()).profiles[0];

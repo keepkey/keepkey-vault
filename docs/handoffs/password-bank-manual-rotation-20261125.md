@@ -2,7 +2,7 @@
 
 Chrome keeps the compromised-password list in its own interface. Open `chrome://password-manager/checkup/compromised` in the Chrome profile with your saved passwords and choose one account at a time.
 
-1. In **Vault → Passwords**, unlock the bank for the current KeepKey wallet. Create or select the entry for the login domain and account label.
+1. In **Vault → Passwords**, unlock the bank for the current KeepKey wallet. Create or select the entry for the login domain and account label. Passphrase wallets ask the device to locate their bank after a new wallet session.
 2. Stage the replacement and approve generation on your KeepKey. Save the encrypted recovery backup and use **Open website** to begin the change.
 3. Use **Copy** on the staged password in Vault and paste it into the website’s new-password fields. Copy works while the password is masked. Rehydrate it with KeepKey if the local cache has expired.
 4. Complete the website’s authentication and MFA, submit the change, and accept Chrome’s **Save** or **Update** prompt. If the prompt is missed, update that exact password record in Chrome.

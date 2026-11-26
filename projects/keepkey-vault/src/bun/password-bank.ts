@@ -8,6 +8,8 @@ const MAX_SLOTS = 4096
  *  the longest cache is the session itself. The session is not extended. */
 const SESSION_MS = PASSWORD_CACHE_MAX_MINUTES * 60 * 1000
 export { PASSWORD_CACHE_MAX_MINUTES }
+// Preserve older backups' risk metadata inside the encrypted registry.
+type StoredPasswordProfile = PasswordProfile & { riskFindings?: unknown }
 type Registry = {
   bankId: string
   algorithm: typeof PASSWORD_BANK_ALGORITHM
@@ -15,7 +17,7 @@ type Registry = {
   backedUpRevision: number
   nextSlot: number
   ready: number[]
-  profiles: PasswordProfile[]
+  profiles: StoredPasswordProfile[]
 } & ({ version: 1; symbolFromSlot?: never } | { version: 2; symbolFromSlot: number })
 interface Device {
   /** Stable for this wallet/passphrase SESSION, invalidated on seed/session changes. */
@@ -36,6 +38,10 @@ type Cache = { bytes: Buffer; expiresAt: number }
 const PASSWORD_LENGTH = 24
 const ALPHANUMERIC = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789'
 const SYMBOLS = '!@#$%^&*'
+
+function usesSymbolFormat(registry: Registry, slot: number): boolean {
+  return registry.version === 2 && slot >= registry.symbolFromSlot
+}
 
 function formatSymbolPassword(entropy: Buffer): Buffer {
   const key = new Uint8Array(entropy.buffer, entropy.byteOffset, entropy.byteLength)
@@ -202,17 +208,6 @@ export class PasswordBank {
       for (const p of r.profiles) {
         if (typeof p.id !== 'string' || ids.has(p.id) || typeof p.account !== 'string' || !p.account.trim() || p.account.length > 200 || passwordOrigin(p.origin) !== p.origin || !['active', 'prepared', 'submitted'].includes(p.rotationState) || !Number.isSafeInteger(p.reviewDays) || p.reviewDays < 1 || p.reviewDays > 3650 || !Number.isFinite(p.createdAt) || (p.changedAt !== undefined && !Number.isFinite(p.changedAt))) throw new Error('Invalid password profile')
         ids.add(p.id); use(p.slot)
-        if (p.riskFindings !== undefined) {
-          if (!Array.isArray(p.riskFindings) || p.riskFindings.length > 100) throw new Error('Invalid risk history')
-          for (const finding of p.riskFindings) {
-            if (!finding || !['compromised', 'reused', 'weak'].includes(finding.kind)
-              || !['user', 'chrome-password-checkup'].includes(finding.source) || finding.mode !== 'user-reported'
-              || !Number.isFinite(finding.observedAt) || (finding.resolvedAt !== undefined && !Number.isFinite(finding.resolvedAt))
-              || (finding.slot !== null && (!Number.isSafeInteger(finding.slot) || finding.slot < 0 || finding.slot >= r.nextSlot))) {
-              throw new Error('Invalid risk finding')
-            }
-          }
-        }
         if (p.pendingSlot !== undefined) use(p.pendingSlot)
         if ((p.rotationState === 'active') !== (p.pendingSlot === undefined)) throw new Error('Invalid rotation journal')
       }
@@ -239,10 +234,16 @@ export class PasswordBank {
     const r = this.registry
     return {
       enabled: true, exists: true, unlocked: true, bankId: r.bankId, algorithm: PASSWORD_BANK_ALGORITHM,
-      profiles: r.profiles.map(p => ({ ...p, cachedUntil: this.cache.get(p.slot)?.expiresAt, pendingCachedUntil: p.pendingSlot === undefined ? undefined : this.cache.get(p.pendingSlot)?.expiresAt, due: !p.changedAt || this.now() >= p.changedAt + p.reviewDays * 86400000 })),
-      readySlots: r.ready.map(slot => ({ slot, cachedUntil: this.cache.get(slot)?.expiresAt })),
+      profiles: r.profiles.map(({ riskFindings: _riskFindings, ...profile }) => ({
+        ...profile,
+        cachedUntil: this.cache.get(profile.slot)?.expiresAt,
+        pendingCachedUntil: profile.pendingSlot === undefined ? undefined : this.cache.get(profile.pendingSlot)?.expiresAt,
+        due: !profile.changedAt || this.now() >= profile.changedAt + profile.reviewDays * 86400000,
+      })),
+      readySlots: r.ready.map(slot => ({
+        slot, symbolFormat: usesSymbolFormat(r, slot), cachedUntil: this.cache.get(slot)?.expiresAt,
+      })),
       backupRequired: r.backedUpRevision !== r.revision, revision: r.revision,
-      capacity: { allocated: r.nextSlot, remaining: MAX_SLOTS - r.nextSlot, sessionExpiresAt: this.deadline },
     }
   }
   private empty(enabled: boolean): PasswordBankView {
@@ -308,7 +309,7 @@ export class PasswordBank {
   }
   private put(slot: number, entropy: Buffer, ttlMinutes: number) {
     const registry = this.active()
-    const bytes = registry.version === 2 && slot >= registry.symbolFromSlot
+    const bytes = usesSymbolFormat(registry, slot)
       ? formatSymbolPassword(entropy)
       : Buffer.from(entropy.toString('base64url').slice(0, PASSWORD_LENGTH))
     this.cache.get(slot)?.bytes.fill(0)
@@ -338,6 +339,9 @@ export class PasswordBank {
   }
   reveal(id: string, pending = false) {
     const r = this.active(), p = this.profile(r, id), slot = pending ? p.pendingSlot : p.slot
+    if (pending && (p.rotationState !== 'submitted' || r.backedUpRevision !== r.revision)) {
+      throw new Error('Begin the website change and save the encrypted backup before accessing the new password')
+    }
     const c = slot === undefined ? undefined : this.cache.get(slot)
     if (!c) throw new Error('Password cache expired. Rehydrate this entry with KeepKey.')
     return { password: c.bytes.toString('utf8'), expiresAt: Math.min(c.expiresAt, this.now() + 30000) }
@@ -346,8 +350,9 @@ export class PasswordBank {
     const r = this.copy(), p = this.profile(r, id)
     if (action === 'prepare') {
       if (p.pendingSlot !== undefined) throw new Error('Resolve the current rotation first')
-      const slot = r.ready.shift()
-      if (slot === undefined) throw new Error('Generate a ready password first')
+      const readyIndex = r.ready.findIndex(slot => usesSymbolFormat(r, slot))
+      if (readyIndex < 0) throw new Error('Generate a new ready password first')
+      const [slot] = r.ready.splice(readyIndex, 1)
       p.pendingSlot = slot; p.rotationState = 'prepared'
     } else if (action === 'submitted') {
       if (p.rotationState !== 'prepared') throw new Error('Prepare a new password first')
@@ -355,8 +360,8 @@ export class PasswordBank {
       p.rotationState = 'submitted'
     } else if (action === 'verify') {
       if (p.rotationState !== 'submitted' || !confirmed || p.pendingSlot === undefined) throw new Error('Confirm a successful sign-in with the new password first')
+      if (r.backedUpRevision !== r.revision) throw new Error('Save the encrypted backup before finishing the password change')
       this.cache.get(p.slot)?.bytes.fill(0); this.cache.delete(p.slot)
-      for (const finding of p.riskFindings || []) if (!finding.resolvedAt && (finding.slot === p.slot || finding.slot === null)) finding.resolvedAt = this.now()
       p.slot = p.pendingSlot; delete p.pendingSlot; p.rotationState = 'active'; p.changedAt = this.now()
     } else if (action === 'cancel') {
       if (p.rotationState !== 'prepared' || p.pendingSlot === undefined) throw new Error('A submitted change must be reconciled; it cannot be discarded')

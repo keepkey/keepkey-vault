@@ -69,9 +69,11 @@ export function PasswordBankView() {
     const receipt = await rpcRequest<{ filePath: string }>('passwordBankSaveBackup')
     if (mounted.current) setBackup({ bankId: bank?.bankId, path: receipt.filePath })
   }
-  const ready = async () => {
+  const ready = async (forReplacement = false) => {
     const current = await rpcRequest<BankView>('passwordBankStatus')
-    if (!current.readySlots.length) await deviceCall('passwordBankGenerate', { count: 1, ttlMinutes: PASSWORD_CACHE_MAX_MINUTES })
+    if (!current.readySlots.some(slot => !forReplacement || slot.symbolFormat)) {
+      await deviceCall('passwordBankGenerate', { count: 1, ttlMinutes: PASSWORD_CACHE_MAX_MINUTES })
+    }
   }
   const ensureCached = async (p: Profile, pending: boolean) => {
     const status = await rpcRequest<BankView>('passwordBankStatus')
@@ -83,7 +85,7 @@ export function PasswordBankView() {
   }
   const prepare = async (p: Profile) => {
     if (p.pendingSlot === undefined) {
-      await ready()
+      await ready(true)
       await rpcRequest('passwordBankRotate', { id: p.id, action: 'prepare' })
     }
     await saveBackup()
@@ -164,6 +166,7 @@ export function PasswordBankView() {
       <Flex direction="column" gap="3">
         {orderedPasswordProfiles(bank.profiles).map(p => {
           const pending = p.pendingSlot !== undefined
+          const pendingAccess = p.rotationState === 'submitted' && !bank.backupRequired
           const open = expanded === p.id
           return <Box {...card} key={p.id}>
             <Flex justify="space-between" align="center" gap="3" wrap="wrap">
@@ -172,7 +175,7 @@ export function PasswordBankView() {
                 <Button size="sm" variant="ghost" color="kk.textSecondary" disabled={busy} aria-expanded={open} onClick={() => pending ? setExpanded(open ? null : p.id) : void run(() => prepare(p))}>{pending ? uiText('Continue') : p.changedAt ? uiText('Change password') : uiText('Set up')}</Button>
               </Flex>
             </Flex>
-            {(pending || p.changedAt) && <PasswordValue key={`${p.id}:${pending ? p.pendingSlot : p.slot}`} id={p.id} pending={pending} disabled={busy} beforeReveal={() => ensureCached(p, pending)} />}
+            {(pending ? pendingAccess : !!p.changedAt) && <PasswordValue key={`${p.id}:${pending ? p.pendingSlot : p.slot}`} id={p.id} pending={pending} disabled={busy} beforeReveal={() => ensureCached(p, pending)} />}
             {open && pending && <Box mt="4" pt="4" borderTop="1px solid" borderColor="kk.border">
               {p.rotationState === 'prepared' ? <>
                 <Text fontSize="sm" color="kk.textSecondary" mb="3">{uiText('Open the website to change your password.')}</Text>
@@ -180,8 +183,8 @@ export function PasswordBankView() {
                 <Button ml="2" size="sm" variant="ghost" color="kk.textSecondary" disabled={busy} onClick={() => void run(async () => { await rpcRequest('passwordBankRotate', { id: p.id, action: 'cancel' }); await saveBackup(); setExpanded(null) })}>{uiText('Cancel change')}</Button>
               </> : <>
                 <Text fontSize="sm" color="kk.textSecondary" mb="3">{uiText('Copy and paste the new password on the website, then test a fresh sign-in.')}</Text>
-                <Box mt="4"><label><input type="checkbox" checked={verified[p.id] || false} onChange={e => setVerified(v => ({ ...v, [p.id]: e.target.checked }))} /> {uiText('I successfully signed in with the new password')}</label></Box>
-                <Button mt="3" size="sm" disabled={busy || !verified[p.id]} onClick={() => void finish(p)}>{uiText('Finish')}</Button>
+                <Box mt="4"><label><input type="checkbox" disabled={!pendingAccess} checked={verified[p.id] || false} onChange={e => setVerified(v => ({ ...v, [p.id]: e.target.checked }))} /> {uiText('I successfully signed in with the new password')}</label></Box>
+                <Button mt="3" size="sm" disabled={busy || !pendingAccess || !verified[p.id]} onClick={() => void finish(p)}>{uiText('Finish')}</Button>
                 <Text fontSize="xs" mt="3" color="kk.textMuted">{uiText('Not sure it worked? Leave this open. Both passwords are kept until you verify.')}</Text>
               </>}
             </Box>}

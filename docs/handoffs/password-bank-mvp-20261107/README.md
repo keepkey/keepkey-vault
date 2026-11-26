@@ -88,9 +88,15 @@ A frozen software vector uses the public BIP39 `abandon` × 11 + `about` mnemoni
 
 Expiry evicts Vault’s cache. Rehydration reproduces the password for the same active slot. A copied clipboard value has its own lifetime outside Vault’s cache.
 
-## Historical automated validation
+## Reproduce the current manual workflow
 
-- The password-bank and fill tests are included in `make test-unit`: default-off/no-device-access, live disable, frozen derivation vector, encrypted metadata, replacement-session recovery, wrong seed, tamper rejection, expiry/rehydration, stale wallet and in-flight feature changes, backup/rotation journaling, concurrent bank access, exact-origin matching, document/browser binding, one-use/expired grants, stale-slot grants and the private MCP boundary.
+The Password Bank tests in `make test-unit` cover device confirmation, wallet isolation, encrypted backup recovery, legacy and current password generation, rotation journaling, cache expiry and newest-first ordering. The MCP tests verify that retired password operations are rejected.
+
+Run `bun __tests__/fixtures/password-mvp/server.ts` from the Vault package to start the in-memory UI fixture. Then run `smoke.mjs` in the same directory to check masked Copy, backups and manual rotation. The smoke runner accepts `PLAYWRIGHT_MODULE`, `PLAYWRIGHT_TEST_MODULE` and `CHROME_EXECUTABLE` overrides.
+
+## Historical automated validation (November 2026)
+
+- The November MVP included tests for browser fill and agent operations.
 - The full `make test-unit` suite passed: **3,036 Bun tests, zero failures**, plus the standalone flag checks. Tests that bind local REST ports required execution outside the filesystem/network sandbox.
 - Vault frontend production build and backend bundle passed.
 - BEX content/background TypeScript checks passed, and the complete nine-task production build passed.
@@ -99,16 +105,14 @@ Expiry evicts Vault’s cache. Rehydration reproduces the password for the same 
 - The i18n integrity/safety checks passed. New experimental text uses English fallback in other languages, recorded explicitly in the existing translation-debt baseline.
 - Repository-wide TypeScript is not clean on the starting commit: the isolated baseline and MVP each reported 809 diagnostics. The newly added modules had no diagnostics. This is not represented as a passing repository typecheck.
 
-The repeatable synthetic UI fixture is `projects/keepkey-vault/__tests__/fixtures/password-mvp/server.ts`; it runs a separate in-memory bank and never opens the app database. Run it with Bun from the Vault package. `smoke.mjs` in the same directory accepts `PLAYWRIGHT_MODULE`, `PLAYWRIGHT_TEST_MODULE` and `CHROME_EXECUTABLE` overrides. The BEX branch includes `scripts/test-password-bank-browser.mjs` and its test-only bundling entry; it accepts `PLAYWRIGHT_MODULE` and `CHROME_EXECUTABLE`.
-
-## Before the next signed release
+## November 7 integration history
 
 ### Monero development integration (2026-11-07)
 
 Integrated onto `feat/xmr-own-node` in `/Users/highlander/keepkey-toolchain/vault-xmr`, preserving its `20c6a339b` Monero baseline. Code candidate: `02e93e130`. Built and launched `_build/dev-macos-arm64/keepkey-vault-dev.app` from that checkout; the previously running node-development copy was closed gracefully. Both use the same existing application identifier and profile. No flag value or Monero configuration was migrated or auto-enabled. The paired live API confirmed Password Manager disabled, no bank and no profiles. No real website credential was changed.
 
-- Final combined password, provider lifecycle, and Monero settings/node checks: **74 passed, zero failures**. The nine new agent tests include independent default-off flags, live MCP catalog visibility, metadata filtering, no secret output, revision checks, native approval, rejection/expiry and disabled fill rejection.
-- Integrated backend/native package build and frontend production build passed; combined i18n integrity passed. The synthetic browser UI test again passed live enable/disable without reload and guided backup/verification gates, with zero page errors. The migration skill passed its format validator.
+- The combined password, provider lifecycle, and Monero settings and node checks passed **74 tests**. The November 7 branch included nine tests for the retired agent operations.
+- The native package and frontend builds passed along with the localization audit. The synthetic browser UI test passed live enable and disable, backup gating and verification, with zero page errors.
 - Eight [live API boundary checks](live-api-results.json) passed, including unauthenticated/browser-origin rejection, no CORS, no-store, hidden password tools while off and refusal to generate while off. The live flag was never enabled during these checks.
 - The root full unit suite passed 3,036 tests before integration; the added agent group was also tested separately. Root TypeScript remains at the same 809 pre-existing diagnostics; no new password-module diagnostics remain.
 - The full Monero checkout suite is **not green**: seven failing assertions were reproduced on unchanged `20c6a339b` with identical dependencies (three device-wipe transport cases, three typed-data/hdwallet cases and a static loopback-test check on the existing Monero node fixture). The isolated device-wipe process stalled after the failures and was terminated. Two Linux launcher timeouts in the concurrent build run passed when rerun alone. One provider lifecycle source-order assertion affected by integration was fixed and its whole group passed. Do not treat this as a clean signed-release candidate.

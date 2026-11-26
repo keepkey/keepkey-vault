@@ -78,14 +78,10 @@ Remaining UI verification is native Electrobun inspection on supported platforms
 
 ## Password work to preserve
 
-The earlier password implementation and audit are described in [password MVP release handoff](../password-bank-mvp-20261107/README.md) and the existing `docs/handoffs/passwords-passkeys-mobile-20261107/` audit/design directory in the source workspace. The latter directory remains untracked; do not discard it.
+The November implementation and audit are recorded in the [Password Bank MVP handoff](../password-bank-mvp-20261107/README.md) and [passwords and passkeys design notes](../passwords-passkeys-mobile-20261107/README.md).
 
-- User explicitly required **Password Manager to have its own default-OFF, live feature flag**, independent of Monero. `password_manager_enabled` must never be inferred from `monero_enabled`. Turning it on/off updates the UI without restarting; off locks the bank/cache and hides agent tools.
-- The user confirmed `coinmastersguild@gmail.com` as the Google practice account, but **no actual password was changed**. Leave this work inactive while the user moves on.
-- Password inventory separates cache expiry/rehydration from website rotation. Device-derived entries and an encrypted recovery manifest are required for recovery; seed alone does not identify the random bank/assigned locations. Native approval protects opaque BEX fills; the agent does not receive password values. Rotation requires backup, submission journaling and fresh-login verification before activation.
-- The current Password Bank uses [manual rotation in Vault](../password-bank-manual-rotation-20261125.md).
-- Chrome's ordinary extension APIs do not expose the entire saved-password or private compromise inventory. Findings in this MVP are explicitly user-reported with provenance, not an automatic Chrome scan.
-- Compatible load-unpacked BEX package: source workspace `artifacts/password-bank-mvp/bex`; ZIP and build metadata sit beside it. Companion source checkout: `/private/tmp/keepkey-password-bank-bex`, commit `b3bc0258813fa34b0eb6060ba3b5d03206fd5da6` (protected fill implementation `ece6fff`).
-- The previously completed password live check showed disabled with no bank/profiles; the final interrupted restart did not re-establish that live result. Preserve the default-off requirement in future builds.
+- Password Manager has a default-off feature flag independent of Monero. Turning it off locks the bank and clears the password cache immediately.
+- Recovery uses the device-derived passwords and the encrypted manifest. Rotation requires a saved backup, submission journaling and fresh-login verification before activation. [Manual rotation in Vault](../password-bank-manual-rotation-20261125.md)
+- The November 8 preview verified the disabled state with an empty bank. The pilot ended before any website password change.
 
 Historical release qualification: the password handoff records pre-existing Monero suite failures, physical recovery and real-service test gates. Those observations predate the other task's latest Monero changes; reassess current state rather than assuming they still fail or have been fixed.

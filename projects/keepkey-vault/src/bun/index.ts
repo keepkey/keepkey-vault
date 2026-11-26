@@ -46,7 +46,7 @@ import type { VolumeInventory, VolumeDeviceStatus, VolumeProgress, VolumeProgres
 import { withKeepKeyFido, readStatus, runReset, waitForReplug } from './passkeys'
 import { setFidoPin, listPasskeys, deletePasskey } from './passkeys-manage'
 import { resolveLabels, cleanLabel } from './passkey-labels'
-import { passwordDeviceCipher, supportsDeviceCipher } from './password-device'
+import { passwordDeviceCipher, passwordPrivateWalletSelector, supportsDeviceCipher } from './password-device'
 import { savePasswordBackup } from './password-backup'
 import { callBex, listBrowsers } from './bex-bridge'
 
@@ -1135,12 +1135,52 @@ function volumeProgress(operationId: string | undefined, event: VolumeProgressEv
 	const send = rpc.send['volume-progress'] as (progress: VolumeProgress) => void
 	try { send({ operationId, ...event }) } catch { /* Webview closed during storage operation. */ }
 }
+function getPasswordBankDevice() {
+	const wallet = engine.wallet
+	const state = engine.getDeviceState()
+	if (state.state !== 'ready' || !supportsDeviceCipher(wallet)) throw new Error('Connect and unlock a KeepKey to use the password bank')
+	if (isBitcoinOnlyVariant(state.firmwareVariant)) throw new Error('Password-bank derivation requires multi-chain firmware')
+	const isEmulator = engine.isEmulator
+	return {
+		session: `${activitySessionEpoch}:${state.deviceId}:${state.activeTransport}:${engine.isPassphraseWallet}`,
+		cipher: (addressNList: number[], key: string) => passwordDeviceCipher(wallet, addressNList, key, isEmulator, emuSigningOp),
+	}
+}
+
+let passwordScope: { wallet: typeof engine.wallet; session: string; value: string } | undefined
+function getPasswordBankScope() {
+	const state = engine.getDeviceState()
+	if (!state.deviceId || state.state !== 'ready' || isBitcoinOnlyVariant(state.firmwareVariant) || !supportsDeviceCipher(engine.wallet)) return null
+	if (!engine.isPassphraseWallet) {
+		const scope = getWalletDbScope()?.walletId
+		if (scope) return scope
+	}
+	const scope = passwordScope
+	return scope && scope.wallet === engine.wallet && scope.session === getPasswordBankDevice().session
+		? scope.value : null
+}
+
 const passwordBank = new PasswordBank({
 	read: getSetting,
 	write: setSetting,
-	// Password banks store authenticated ciphertext under a hash of this scope.
-	walletScope: () => engine.getDeviceState().state === 'ready' ? getWalletDbScope()?.walletId ?? null : null,
-	withDeviceUnlock: action => engine.withDeviceOperation(action, { unlock: true, rejectIfBusy: true, origin: 'desktop' }),
+	walletScope: getPasswordBankScope,
+	withDeviceUnlock: action => engine.withDeviceOperation(async () => {
+		if (!getPasswordBankScope()) {
+			const wallet = engine.wallet
+			const { deviceId } = engine.getDeviceState()
+			const { session, cipher } = getPasswordBankDevice()
+			if (!deviceId) throw new Error('Wait for Vault to verify the connected KeepKey wallet, then try again.')
+			const selector = engine.isPassphraseWallet
+				? await passwordPrivateWalletSelector(cipher)
+				: await engine.deriveSeedIdentity({ remember: false })
+			deviceOperationContext.getStore()?.assertCurrent()
+			if (!selector || wallet !== engine.wallet || session !== getPasswordBankDevice().session) {
+				throw new Error('Wait for Vault to verify the connected KeepKey wallet, then try again.')
+			}
+			passwordScope = { wallet, session, value: `${deviceId}:${selector}` }
+		}
+		return action()
+	}, { unlock: true, rejectIfBusy: true, origin: 'desktop' }),
 	replace: (key, value, expected) => {
 		const db = getDb()
 		if (!db) throw new Error('Password-bank storage is unavailable')
@@ -1149,16 +1189,7 @@ const passwordBank = new PasswordBank({
 			: db.run('UPDATE settings SET value = ? WHERE key = ? AND value = ?', [value, key, expected])
 		return result.changes === 1
 	},
-	device: () => {
-		const wallet = engine.wallet as any
-		const state = engine.getDeviceState()
-		if (!wallet || state.state !== 'ready' || typeof wallet.cipherKeyValue !== 'function') throw new Error('Connect and unlock a KeepKey to use the password bank')
-		if (isBitcoinOnlyVariant(state.firmwareVariant)) throw new Error('Password-bank derivation requires multi-chain firmware')
-		return {
-			session: `${activitySessionEpoch}:${state.deviceId}:${engine.isPassphraseWallet}`,
-			cipher: (addressNList, key) => passwordDeviceCipher(wallet, addressNList, key, engine.isEmulator, emuSigningOp),
-		}
-	},
+	device: getPasswordBankDevice,
 })
 // Clean expired session secrets even when the password tab is not visible.
 const saveLocalPasswordBackup = () => {
@@ -9096,7 +9127,9 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			passwordBankRehydrate: async (params) => passwordBank.rehydrate(params.id, params.pending === true, params.ttlMinutes),
 			passwordBankReveal: async (params) => passwordBank.reveal(params.id, params.pending === true),
 			passwordBankCopy: async (params) => {
-				Utils.clipboardWriteText(passwordBank.reveal(params.id, params.pending === true).password)
+				const { password } = passwordBank.reveal(params.id, params.pending === true)
+				Utils.clipboardWriteText(password)
+				if (Utils.clipboardReadText() !== password) throw new Error('Clipboard unavailable')
 			},
 			passwordBankRotate: async (params) => passwordBank.rotate(params.id, params.action, params.confirmed === true),
 			passwordBankSaveBackup: async () => saveLocalPasswordBackup(),
@@ -11868,6 +11901,7 @@ engine.on('state-change', (state) => {
 	try { rpc.send['device-state'](state) } catch { /* webview not ready yet */ }
 	// The Studio provider key belongs to the device it was derived with.
 	providerKeySession.onDeviceState(state)
+	if (state.state !== 'ready') passwordScope = undefined
 	if (state.state === 'disconnected' || state.state === 'bootloader' || state.state === 'error') passwordBank.lock()
 	const bitcoinOnly = isBitcoinOnlyVariant(state.firmwareVariant)
 	// Scope the self-host node to the connected device: only a btc-only device may
