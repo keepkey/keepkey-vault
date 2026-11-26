@@ -39,10 +39,11 @@ export function isDeviceBusyError(error: unknown): boolean {
 
 /** Desktop device actions are refused, not queued, while the KeepKey is held
  * (device-operation.ts). Wait for it instead of reporting that contention. */
-export async function retryWhileDeviceBusy<T>(run: () => Promise<T>, isCurrent: () => boolean, delayMs = 500): Promise<T> {
+export async function retryWhileDeviceBusy<T>(run: () => Promise<T>, isCurrent: () => boolean, delayMs = 500, onBusy?: () => void): Promise<T> {
   for (;;) {
     try { return await run() } catch (error) {
       if (!isDeviceBusyError(error)) throw error
+      onBusy?.()
       await new Promise(resolve => setTimeout(resolve, delayMs))
       // ponytail: no attempt cap; the caller's isCurrent() (closed, inputs changed, Cancel) ends the wait.
       if (!isCurrent()) throw error

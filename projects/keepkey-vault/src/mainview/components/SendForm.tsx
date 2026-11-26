@@ -508,7 +508,7 @@ export function SendForm({ chain, address, balance, balanceLoading = false, toke
 		setError(null)
 
 		try {
-			const result = await signOnDevice(context.signMethod, buildResult.unsignedTx)
+			const result = await signOnDevice(context.signMethod, buildResult.unsignedTx, () => operationIsCurrent(generation))
 			if (!operationIsCurrent(generation)) return
 			setSignedTx(result)
 			setPhase('signed')
