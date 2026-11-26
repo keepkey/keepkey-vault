@@ -31,6 +31,7 @@
 	"unlabeled": "Unlabeled",
 	"ownWallet": "My wallet",
 	"ownSymbol": "My {{symbol}}",
+	"ownTransparent": "My {{symbol}} transparent address",
 	"edit": "Edit",
 	"delete": "Delete",
 	"view": "View",

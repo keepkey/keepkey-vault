@@ -31,6 +31,7 @@
 	"unlabeled": "无标签",
 	"ownWallet": "我的钱包",
 	"ownSymbol": "我的 {{symbol}}",
+	"ownTransparent": "我的 {{symbol}} 透明地址",
 	"edit": "编辑",
 	"delete": "删除",
 	"view": "查看",

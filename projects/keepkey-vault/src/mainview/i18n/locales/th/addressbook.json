@@ -31,6 +31,7 @@
 	"unlabeled": "ไม่มีป้ายกำกับ",
 	"ownWallet": "กระเป๋าของฉัน",
 	"ownSymbol": "{{symbol}} ของฉัน",
+	"ownTransparent": "ที่อยู่โปร่งใส {{symbol}} ของฉัน",
 	"edit": "แก้ไข",
 	"delete": "ลบ",
 	"view": "ดู",

@@ -14,3 +14,8 @@ test("keeps labels the user typed and labels of other entries", () => {
 	expect(addressBookLabel({ kind: "external", label: "My RUNE" }, t)).toBe("My RUNE")
 	expect(addressBookLabel({ kind: "own", label: undefined }, t)).toBeUndefined()
 })
+
+test("translates the seeded Zcash transparent-address default", () => {
+	expect(addressBookLabel({ kind: "own", label: "My ZEC transparent address" }, t)).toBe("addressbook:ownTransparent:ZEC")
+	expect(addressBookLabel({ kind: "external", label: "My ZEC transparent address" }, t)).toBe("My ZEC transparent address")
+})

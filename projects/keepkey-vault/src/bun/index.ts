@@ -320,7 +320,7 @@ import { MONERO_LOCAL_URL, moneroNodeMode } from '../shared/monero-node'
 import { checkMoneroNode, storedRestoreHeight, suggestRestoreHeight, validateMoneroNode } from "./monero-settings"
 import { createFilePendingStore } from "./monero-pending"
 import { findZcashCliBinary, isSidecarReady, startSidecar, stopSidecar, wipeSidecarWalletDb, hasFvkLoaded, getCachedFvk, onScanProgress, getScanState, updateSyncedTo, beginZcashSend, endZcashSend, isZcashSendInFlight } from "./zcash-sidecar"
-import { CHAINS, customChainToChainDef, isChainSupported, hiveRolePath, btcTaprootSupported, findChainByNetwork, isStaleHyperliquidMetadata, btcAccountPath, zcashTransparentReceivePath } from "../shared/chains"
+import { CHAINS, customChainToChainDef, isChainSupported, hiveRolePath, btcTaprootSupported, findChainByNetwork, isStaleHyperliquidMetadata, btcAccountPath, zcashTransparentReceivePath, ownUtxoLabel } from "../shared/chains"
 import { versionCompare } from "../shared/firmware-versions"
 import { supportsZcashPrivacyBuild } from "./zcash-capability"
 import type { ChainDef } from "../shared/chains"
@@ -6847,7 +6847,8 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 							const isXpub = ch.chainFamily === 'utxo'
 							own.push({
 								address: p.pubkey, networkId: p.networkId, chainId: p.chainId, chainFamily: ch.chainFamily,
-								symbol: p.symbol, label: isXpub ? `${p.symbol} (xpub)` : `My ${p.symbol}`,
+								symbol: p.symbol, label: isXpub ? ownUtxoLabel(p.symbol, p.chainId, p.scriptType) : `My ${p.symbol}`,
+								...(isXpub ? { scriptType: p.scriptType, replacesLabel: `${p.symbol} (xpub)` } : {}),
 							})
 						}
 						const insertedOwn = syncOwnAddressBook(abScope, own)

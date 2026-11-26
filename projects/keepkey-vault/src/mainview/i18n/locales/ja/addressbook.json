@@ -31,6 +31,7 @@
 	"unlabeled": "ラベルなし",
 	"ownWallet": "マイウォレット",
 	"ownSymbol": "自分の{{symbol}}",
+	"ownTransparent": "自分の{{symbol}}透明アドレス",
 	"edit": "編集",
 	"delete": "削除",
 	"view": "表示",

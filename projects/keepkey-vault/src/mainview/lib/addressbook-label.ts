@@ -8,8 +8,12 @@ type Translate = (...args: any[]) => unknown
  *  shown; any label the user typed is returned as is. */
 const DEFAULT_OWN_LABEL = /^My ([A-Z0-9]+)$/
 
+const DEFAULT_TRANSPARENT_LABEL = /^My ([A-Z0-9]+) transparent address$/
+
 export function addressBookLabel(entry: Pick<AddressBookEntry, "kind" | "label">, t: Translate): string | undefined {
 	const label = entry.label || undefined
+	const transparent = entry.kind === "own" && label ? DEFAULT_TRANSPARENT_LABEL.exec(label) : null
+	if (transparent) return String(t("ownTransparent", { ns: "addressbook", symbol: transparent[1] }))
 	const match = entry.kind === "own" && label ? DEFAULT_OWN_LABEL.exec(label) : null
 	return match ? String(t("ownSymbol", { ns: "addressbook", symbol: match[1] })) : label
 }

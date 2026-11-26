@@ -31,6 +31,7 @@
 	"unlabeled": "라벨 없음",
 	"ownWallet": "내 지갑",
 	"ownSymbol": "내 {{symbol}}",
+	"ownTransparent": "내 {{symbol}} 투명 주소",
 	"edit": "편집",
 	"delete": "삭제",
 	"view": "보기",
