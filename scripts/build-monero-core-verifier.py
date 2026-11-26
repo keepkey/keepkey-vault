@@ -180,10 +180,14 @@ def build_win32(work, output, jobs, run, artifact, pins, core, boost, sodium):
     n = native_path
     prefix = "-ffile-prefix-map=" + n(work) + "=/monero-verifier-build"
     libraries = ["thread", "chrono", "atomic", "date_time"]
-    run(["sh", "./bootstrap.sh", "--with-libraries=" + ",".join(libraries), "--with-toolset=gcc"], "boost-bootstrap.log", boost)
-    run(["./b2"] + ["--with-" + name for name in libraries] + [
+    # Core's configure step requires every Boost component it knows; only the
+    # four above reach the final link.
+    configured = libraries + ["filesystem", "serialization", "program_options", "locale"]
+    run(["sh", "./bootstrap.sh", "--with-libraries=" + ",".join(configured), "--with-toolset=gcc"], "boost-bootstrap.log", boost)
+    run(["./b2"] + ["--with-" + name for name in configured] + [
         "--layout=system", "toolset=gcc", "variant=release", "link=static", "runtime-link=static", "threading=multi",
         "threadapi=win32", "target-os=windows", "architecture=x86", "address-model=64",
+        "boost.locale.icu=off", "boost.locale.iconv=off",
         "cxxflags=" + prefix + " -ffunction-sections -fdata-sections", "stage", "-j" + str(jobs)], "boost-build.log", boost)
     sodium_object = work / "sodium-verify.o"
     run(["gcc", "-c", "-O2", "-ffunction-sections", "-fdata-sections", prefix,
@@ -194,8 +198,12 @@ def build_win32(work, output, jobs, run, artifact, pins, core, boost, sodium):
     hook = work / "core-verify.cmake"
     hook.write_text("\n".join([
         "function(keepkey_verify_bridge)",
-        ' add_library(monero_core_verify SHARED "' + n(NATIVE / "verify.cpp") + '")',
-        ' target_include_directories(monero_core_verify PRIVATE "' + n(NATIVE) + '")',
+        # Object library: never link the intermediate DLL against MSYS2 archives.
+        ' add_library(monero_core_verify_object OBJECT "' + n(NATIVE / "verify.cpp") + '")',
+        ' target_include_directories(monero_core_verify_object PRIVATE "' + n(NATIVE) + '")',
+        " target_link_libraries(monero_core_verify_object PRIVATE ringct cryptonote_basic)",
+        " set_target_properties(monero_core_verify_object PROPERTIES CXX_STANDARD 14)",
+        " add_library(monero_core_verify SHARED $<TARGET_OBJECTS:monero_core_verify_object>)",
         " target_link_libraries(monero_core_verify PRIVATE ringct cryptonote_basic)",
         ' set_target_properties(monero_core_verify PROPERTIES CXX_STANDARD 14 PREFIX "" LIBRARY_OUTPUT_DIRECTORY "' + n(work / "intermediate") + '" RUNTIME_OUTPUT_DIRECTORY "' + n(work / "intermediate") + '")',
         " target_link_options(monero_core_verify PRIVATE -Wl,--gc-sections)",
@@ -206,12 +214,17 @@ def build_win32(work, output, jobs, run, artifact, pins, core, boost, sodium):
     # no MSYS2 library reaches the final link below.
     run(["cmake", "-G", "MSYS Makefiles", "-S", n(core), "-B", n(cache), "-DMANUAL_SUBMODULES=ON", "-DBUILD_TESTS=OFF",
          "-DBUILD_DOCUMENTATION=OFF", "-DBUILD_GUI_DEPS=OFF", "-DUSE_DEVICE_TREZOR=OFF", "-DCMAKE_DISABLE_FIND_PACKAGE_HIDAPI=TRUE",
-         "-DMONERO_WALLET_CRYPTO_LIBRARY=cn", "-DCMAKE_BUILD_TYPE=Release", "-DSTATIC=ON",
+         "-DMONERO_WALLET_CRYPTO_LIBRARY=cn", "-DCMAKE_BUILD_TYPE=Release", "-DSTATIC=ON", "-DARCH=x86-64",
+         "-DBOOST_IGNORE_SYSTEM_PATHS=ON", "-DBOOST_ROOT=" + n(boost), "-DBoost_INCLUDE_DIR=" + n(boost),
+         "-DBoost_USE_STATIC_LIBS=ON", "-DBoost_LIBRARY_DIR_RELEASE=" + n(boost / "stage/lib"),
+         "-DBoost_LIBRARY_DIR_DEBUG=" + n(boost / "stage/lib"),
          "-DCMAKE_POLICY_VERSION_MINIMUM=3.5", "-DCMAKE_C_FLAGS=" + mappings, "-DCMAKE_CXX_FLAGS=" + mappings + " -Wa,-mbig-obj",
          "-DCMAKE_C_USE_RESPONSE_FILE_FOR_OBJECTS=OFF", "-DCMAKE_CXX_USE_RESPONSE_FILE_FOR_OBJECTS=OFF",
          "-DCMAKE_C_USE_RESPONSE_FILE_FOR_LIBRARIES=OFF", "-DCMAKE_CXX_USE_RESPONSE_FILE_FOR_LIBRARIES=OFF",
-         "-DCMAKE_PROJECT_monero_INCLUDE=" + n(hook)], "core-configure.log")
-    run(["cmake", "--build", n(cache), "--target", "monero_core_verify", "-j" + str(jobs)], "core-build.log")
+         "-DCMAKE_PROJECT_monero_INCLUDE=" + n(hook)] + [
+             "-DBoost_" + name.upper() + "_LIBRARY_" + variant + "=" + n(boost / "stage/lib" / ("libboost_" + name + ".a"))
+             for name in configured for variant in ["RELEASE", "DEBUG"]], "core-configure.log")
+    run(["cmake", "--build", n(cache), "--target", "monero_core_verify_object", "ringct", "cryptonote_basic", "-j" + str(jobs)], "core-build.log")
     lines = [line for line in (cache / "CMakeFiles/monero_core_verify.dir/link.txt").read_text().splitlines() if " -o " in line]
     if len(lines) != 1:
         raise ValueError("Expected exactly one verifier link command")

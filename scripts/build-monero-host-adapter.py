@@ -265,7 +265,12 @@ def build_win32(work, output, jobs, run, artifact, pins, adapter, core, boost, s
     hook = work / "host-adapter.cmake"
     hook.write_text("\n".join([
         "function(keepkey_host_adapter)",
-        ' add_executable(monero_host_adapter "' + n(adapter) + '")',
+        # Compile through an object library so the build never links the
+        # intermediate executable against unpinned MSYS2 static archives.
+        ' add_library(monero_host_adapter_object OBJECT "' + n(adapter) + '")',
+        " target_link_libraries(monero_host_adapter_object PRIVATE wallet version)",
+        " set_target_properties(monero_host_adapter_object PROPERTIES CXX_STANDARD 14)",
+        " add_executable(monero_host_adapter $<TARGET_OBJECTS:monero_host_adapter_object>)",
         " target_link_libraries(monero_host_adapter PRIVATE wallet version)",
         ' set_target_properties(monero_host_adapter PROPERTIES CXX_STANDARD 14 OUTPUT_NAME monero-host-adapter RUNTIME_OUTPUT_DIRECTORY "' + n(work / "intermediate") + '")',
         " target_link_options(monero_host_adapter PRIVATE -Wl,--gc-sections)",
@@ -275,7 +280,7 @@ def build_win32(work, output, jobs, run, artifact, pins, adapter, core, boost, s
     stage = boost / "stage/lib"
     run(["cmake", "-G", "MSYS Makefiles", "-S", n(core), "-B", n(cache), "-DMANUAL_SUBMODULES=ON", "-DBUILD_TESTS=OFF",
          "-DBUILD_DOCUMENTATION=OFF", "-DBUILD_GUI_DEPS=OFF", "-DUSE_DEVICE_TREZOR=OFF", "-DCMAKE_DISABLE_FIND_PACKAGE_HIDAPI=TRUE",
-         "-DMONERO_WALLET_CRYPTO_LIBRARY=cn", "-DCMAKE_BUILD_TYPE=Release", "-DSTATIC=ON",
+         "-DMONERO_WALLET_CRYPTO_LIBRARY=cn", "-DCMAKE_BUILD_TYPE=Release", "-DSTATIC=ON", "-DARCH=x86-64",
          "-DCMAKE_POLICY_VERSION_MINIMUM=3.5", "-DCMAKE_C_FLAGS=" + mappings, "-DCMAKE_CXX_FLAGS=" + mappings + " -Wa,-mbig-obj",
          "-DCMAKE_C_USE_RESPONSE_FILE_FOR_OBJECTS=OFF", "-DCMAKE_CXX_USE_RESPONSE_FILE_FOR_OBJECTS=OFF",
          "-DCMAKE_C_USE_RESPONSE_FILE_FOR_LIBRARIES=OFF", "-DCMAKE_CXX_USE_RESPONSE_FILE_FOR_LIBRARIES=OFF",
@@ -286,7 +291,7 @@ def build_win32(work, output, jobs, run, artifact, pins, adapter, core, boost, s
          "-DCMAKE_PROJECT_monero_INCLUDE=" + n(hook)] + [
              "-DBoost_" + name.upper() + "_LIBRARY_" + variant + "=" + n(stage / ("libboost_" + name + ".a"))
              for name in BOOST_LIBRARIES for variant in ["RELEASE", "DEBUG"]], "core-configure.log")
-    run(["cmake", "--build", n(cache), "--target", "monero_host_adapter", "-j" + str(jobs)], "core-build.log")
+    run(["cmake", "--build", n(cache), "--target", "monero_host_adapter_object", "wallet", "version", "-j" + str(jobs)], "core-build.log")
     used_boost_headers = validate_used_boost_headers(cache, boost, posix_path)
     directory = cache / "CMakeFiles/monero_host_adapter.dir"
     command = expand_response_files(link_command(directory / "link.txt"), cache)
