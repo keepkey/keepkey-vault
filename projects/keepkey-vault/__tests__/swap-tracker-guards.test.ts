@@ -83,4 +83,13 @@ describe('THORNode status settles a swap whose first out_tx is the zero-id affil
   test('null on garbage', () => {
     expect(settlementFromThornodeStatus(null, dest).completed).toBe(false)
   })
+  test('a REFUND leg to the destination is a refund, never the payout (audit v8 H6)', () => {
+    const refundLeg = { ...thornodeStatus.out_txs[1], memo: 'REFUND:947E343CF5284A1F79BF3A6367C8FCE313C6E888867253EB020264BBE6086CAA' }
+    const refunded = { ...thornodeStatus, out_txs: [thornodeStatus.out_txs[0], refundLeg] }
+    expect(settlementFromThornodeStatus(refunded, dest, 'BASE')).toEqual({ completed: false, refunded: true })
+  })
+  test('an OUT leg on another chain is not this payout', () => {
+    expect(settlementFromThornodeStatus(thornodeStatus, dest, 'ETH').completed).toBe(false)
+    expect(settlementFromThornodeStatus(thornodeStatus, dest, 'BASE').outboundTxid).toBe('7EFAF203DB9B91926B194116C2B1F0B91689D9AA8C9AFB5A700E5EDC7E1A963A')
+  })
 })
