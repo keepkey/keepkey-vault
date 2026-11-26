@@ -46,10 +46,6 @@ WINDOWS_SYSTEM_DLLS = {"kernel32.dll", "advapi32.dll", "user32.dll", "ws2_32.dll
                        "dnsapi.dll", "ucrtbase.dll"}
 WINDOWS_LINK_LIBRARIES = {name[:-4] for name in WINDOWS_SYSTEM_DLLS} | {
     "uuid", "ntdll", "psapi", "userenv", "pthread", "m", "stdc++", "gcc", "gcc_eh", "mingwex", "mingw32", "moldname"}
-# Core's own intermediate link of this target pulls in MSYS2 static libraries (unbound
-# built against a newer OpenSSL). That binary is discarded; only the rewritten final
-# link ships, and it never carries this flag, so a real missing symbol still fails it.
-INTERMEDIATE_ONLY = "-Wl,--unresolved-symbols=ignore-all"
 WINDOWS_TOOLCHAIN_PACKAGES = ("mingw-w64-ucrt-x86_64-", "make ", "perl ")
 
 
@@ -84,8 +80,6 @@ def windows_link_command(cache, target_name, work):
         expanded += shlex.split((cache / arg[1:]).read_text()) if arg.startswith("@") else [arg]
     command, dropped, inside = [], [], Path(work).resolve()
     for arg in expanded:
-        if arg == INTERMEDIATE_ONLY:
-            continue
         library = None
         if arg.startswith("-l"):
             library = arg[2:]
@@ -97,6 +91,12 @@ def windows_link_command(cache, target_name, work):
             continue
         command.append(arg)
     return command, sorted(set(dropped))
+
+
+def windows_missing_link_inputs(cache, command):
+    """Files the final link reads that the Core build did not produce."""
+    output = command[command.index("-o") + 1]
+    return [arg for arg in command[1:] if not arg.startswith("-") and arg != output and not (cache / arg).is_file()]
 
 
 def windows_toolchain():
@@ -132,7 +132,7 @@ def build_windows(work, output, jobs, run, artifact, core, boost, sodium, openss
         " target_link_libraries(monero_core_verify PRIVATE ringct cryptonote_basic)",
         ' set_target_properties(monero_core_verify PROPERTIES CXX_STANDARD 14 POSITION_INDEPENDENT_CODE ON PREFIX "" '
         'LIBRARY_OUTPUT_DIRECTORY "' + posix(work / "intermediate") + '" RUNTIME_OUTPUT_DIRECTORY "' + posix(work / "intermediate") + '")',
-        " target_link_options(monero_core_verify PRIVATE -static -static-libgcc -static-libstdc++ -Wl,--gc-sections -Wl,--no-insert-timestamp " + INTERMEDIATE_ONLY + ")",
+        " target_link_options(monero_core_verify PRIVATE -static -static-libgcc -static-libstdc++ -Wl,--gc-sections -Wl,--no-insert-timestamp)",
         "endfunction()", "cmake_language(DEFER CALL keepkey_verify_bridge)", ""]))
     cache = work / "core-build"
     mappings = " ".join(sections + [prefix, "-ffile-prefix-map=" + posix(NATIVE) + "=/monero-verifier-source"])
@@ -150,8 +150,14 @@ def build_windows(work, output, jobs, run, artifact, core, boost, sodium, openss
          "-DOPENSSL_USE_STATIC_LIBS=TRUE", "-DCMAKE_PROJECT_monero_INCLUDE=" + posix(hook)] + [
              "-DBoost_" + name.upper() + "_LIBRARY_" + variant + "=" + posix(stage / ("libboost_" + name + ".a"))
              for name in BOOST_LIBRARIES for variant in ["RELEASE", "DEBUG"]], "core-configure.log")
-    run(["cmake", "--build", posix(cache), "--target", "monero_core_verify", "-j" + str(jobs)], "core-build.log")
+    # Core's own link of this target pulls in MSYS2's static libunbound (built against a
+    # newer OpenSSL) and fails; that binary is discarded anyway. make -k still builds every
+    # object and library, and the final link below, which drops unbound, is the real check.
+    run(["cmake", "--build", posix(cache), "--target", "monero_core_verify", "-j" + str(jobs), "--", "-k"], "core-build.log", check=False)
     command, dropped = windows_link_command(cache, "monero_core_verify", work)
+    missing = windows_missing_link_inputs(cache, command)
+    if missing:
+        raise RuntimeError("Core build did not produce " + ", ".join(missing[:5]) + "; inspect " + str(work / "core-build.log"))
     command[command.index("-o") + 1] = posix(output)
     command += [posix(stage / name) for name in ["libboost_thread.a", "libboost_chrono.a", "libboost_atomic.a", "libboost_date_time.a"]]
     command += [posix(sodium_object), posix(exports)]
@@ -219,11 +225,11 @@ def build(archives, work, output, jobs, target="darwin-arm64"):
     environment = None if target == "darwin-arm64" else {
         **os.environ, "SOURCE_DATE_EPOCH": str(adapter_source["sourceDateEpoch"]), "ZERO_AR_DATE": "1"}
 
-    def run(command, logfile, cwd=None):
+    def run(command, logfile, cwd=None, check=True):
         with (work / logfile).open("w") as log:
             log.write(json.dumps(list(map(str, command))) + "\n"); log.flush()
             result = subprocess.run(command, cwd=cwd, env=environment, stdout=log, stderr=subprocess.STDOUT)
-        if result.returncode:
+        if check and result.returncode:
             raise RuntimeError("Native build failed; inspect " + str(work / logfile))
 
     if target == "win32-x64":
