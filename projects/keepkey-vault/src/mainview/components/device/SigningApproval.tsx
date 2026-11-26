@@ -9,7 +9,7 @@ import { evmContractIdentity } from "../../../shared/evm-contract-identity"
 import { versionCompare } from "../../../shared/firmware-versions"
 import { erc20Preview } from "../../../shared/erc20Preview"
 import { evmMaxFee, evmNativeValue } from "../../../shared/evmFeePreview"
-import { evmChainLabel } from "../../../shared/chains"
+import { CHAINS, evmChainLabel } from "../../../shared/chains"
 import { isRelayBridgeDeposit } from "../../../shared/relayBridgePreview"
 import { decodeAcrossDepositV3 } from "../../../shared/acrossDeposit"
 import { utxoPreview } from "../../../shared/utxoPreview"
@@ -21,7 +21,9 @@ import { ClearSignReportCard } from "../ClearSignReportCard"
 import { KeepKeyUILogo } from "../logo/keepkey-ui"
 import { DocsLink } from "../DocsLink"
 import { DOCS_LINKS, watch } from "../../../shared/docs-links"
-import { SigningReviewCompanion } from "./SigningReviewCompanion"
+import { SigningReviewCompanion, SigningReviewModes } from "./SigningReviewCompanion"
+import { Beam, ChainNode, PreflightList, PreflightStyles, type PreflightRow } from "../preflight/PreflightConsole"
+import { signingReviewGuide } from "../../../shared/signing-review-guide"
 import { useSigningReviewPreferences } from "../../lib/signing-review-preferences"
 import { namedProviderLine } from "../../../shared/clearsign-report"
 
@@ -1218,64 +1220,35 @@ export function SigningApproval({ request, phase, devicePrompts = 0, onApprove, 
 	const remaining = Math.max(0, 120 - elapsed)
 	const timeStr = `${Math.floor(remaining / 60)}:${(remaining % 60).toString().padStart(2, "0")}`
 
-	// ── Sending-payload phase ─────────────────────────────────────────
-	if (phase === 'sending-payload') {
-		return (
-			<Box
-				data-signing-overlay position="fixed" inset="0" zIndex={Z.overlay + 1}
-				bg="rgba(0,0,0,0.85)" backdropFilter="blur(8px)"
-				display="flex" alignItems="center" justifyContent="center"
-			>
-				<style>{SIGNING_ANIMATIONS}</style>
-				<VStack
-					bg="kk.cardBg" border="1px solid" borderColor="rgba(233,196,106,0.45)" borderRadius="2xl"
-					p="6" gap="3" maxW="900px" w="90vw" maxH="95vh" overflowY="auto" textAlign="center"
-					css={{ animation: "signingCardIn 0.18s ease-out" }}
-				>
-					<Flex justify="center">
-						<Box
-							w="64px" h="64px" borderRadius="2xl"
-							bg="rgba(233,196,106,0.15)" border="2px solid" borderColor="kk.gold"
-							display="flex" alignItems="center" justifyContent="center"
-							css={{ animation: "none" }}
-						>
-							<svg width="32" height="32" viewBox="0 0 24 24" fill="none">
-								<rect x="6" y="2" width="12" height="20" rx="2" stroke="var(--gold)" strokeWidth="2" />
-								<path d="M12 16V8" stroke="var(--gold)" strokeWidth="2" strokeLinecap="round" />
-								<path d="M8.5 11.5 12 8l3.5 3.5" stroke="var(--gold)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-							</svg>
-						</Box>
-					</Flex>
-					<VStack gap="2">
-						<Text fontSize="lg" fontWeight="700" color="white">
-							{t("signing.sendingPayload", "Sending payload to device")}
-						</Text>
-						<Text fontSize="sm" color="kk.textSecondary" lineHeight="tall">
-							{t("signing.sendingPayloadDescription", "Keep your KeepKey connected. The confirmation prompt will appear when the device is ready.")}
-						</Text>
-					</VStack>
-					<Text fontSize="xs" fontWeight="600" px="3" py="1" borderRadius="full" bg="rgba(233,196,106,0.12)" color="kk.gold">
-						{methodLabel}
-					</Text>
-					<Flex gap="2" justify="center" align="center">
-						{[0, 1, 2].map((i) => (
-							<Box key={i} w="8px" h="8px" borderRadius="full" bg="kk.gold"
-								css={{ animation: "none" }}
-							/>
-						))}
-					</Flex>
-					<Button variant="solid" colorScheme="red" size="lg" width="100%" minH="52px" onClick={onCancel}>
-						{t("signing.cancel", "Cancel")}
-					</Button>
-					<Box w="100%" css={readableDetails}><SigningReviewCompanion request={request} phase={phase} devicePrompts={devicePrompts} /></Box>
-					<Box w="100%" css={readableDetails}><SigningReference request={request} /></Box>
-				</VStack>
-			</Box>
-		)
-	}
+	const guide = signingReviewGuide(request)
+	const account = guide.fields.find(f => f.label === 'Account')?.value
+	const networkName = guide.fields.find(f => f.label === 'Network')?.value
+	// The network's own logo for the account node (never a lowercase id).
+	const chainKey = (request.chain || '').toLowerCase()
+	const chainDef = request.method.startsWith('/eth/') && request.chainId !== undefined
+		? CHAINS.find(c => c.chainFamily === 'evm' && c.chainId !== undefined && Number(c.chainId) === Number(request.chainId))
+		: CHAINS.find(c => c.id === chainKey || c.symbol.toLowerCase() === chainKey || c.coin.toLowerCase() === chainKey)
+			?? (utxo ? CHAINS.find(c => c.symbol.toUpperCase() === utxo.coin.toUpperCase() || c.coin === utxo.coin) : undefined)
+	const shortAccount = account && account.length > 22 ? `${account.slice(0, 8)}…${account.slice(-6)}` : account
+	const consoleBox = { width: 'min(1080px, 95vw)', maxHeight: '92vh', animation: 'signingCardIn 0.18s ease-out' }
+	const whoLine = (
+		<div className="kk-pf-vers kk-pf-who" aria-label={uiText("From {{from}} to {{to}}", { from: safeAppName, to: account || networkName || '' })}>
+			<span className="kk-pf-app"><span className="kk-pf-appic">{safeAppName.slice(0, 2).toUpperCase()}</span>{safeAppName}</span>
+			<Beam />
+			<span className="kk-pf-acct" title={account}>
+				<ChainNode chainId={chainDef?.id} glyph="network" />
+				<span>{shortAccount || chainDef?.coin || networkName}</span>
+			</span>
+		</div>
+	)
+	const technical = <>
+		<SigningReference request={request} />
+		<RawPayload data={request.rawRequestBody} label={uiText("Full Request Payload")} />
+	</>
 
-	// ── Device-confirm phase ──────────────────────────────────────────
-	if (phase === 'device-confirm') {
+	// ── Sending-payload / device-confirm phases ────────────────────────
+	if (phase === 'sending-payload' || phase === 'device-confirm') {
+		const sending = phase === 'sending-payload'
 		return (
 			<Box
 				data-signing-overlay position="fixed" inset="0" zIndex={Z.overlay + 1}
@@ -1283,54 +1256,48 @@ export function SigningApproval({ request, phase, devicePrompts = 0, onApprove, 
 				display="flex" alignItems="center" justifyContent="center"
 			>
 				<style>{SIGNING_ANIMATIONS}</style>
-				<VStack
-					bg="kk.cardBg" border="1px solid" borderColor="rgba(233,196,106,0.45)" borderRadius="2xl"
-					p="6" gap="3" maxW="900px" w="90vw" maxH="95vh" overflowY="auto" textAlign="center"
-					css={{ animation: "signingCardIn 0.18s ease-out" }}
-				>
-					<Flex justify="center">
-						<Box
-							w="64px" h="64px" borderRadius="2xl"
-							bg="rgba(233,196,106,0.15)" border="2px solid" borderColor="kk.gold"
-							display="flex" alignItems="center" justifyContent="center"
-							css={{ animation: "none" }}
-						>
-							<svg width="32" height="32" viewBox="0 0 24 24" fill="none">
-								<rect x="6" y="2" width="12" height="20" rx="2" stroke="var(--gold)" strokeWidth="2" />
-								<circle cx="12" cy="16" r="2" fill="var(--gold)" />
-								<rect x="9" y="5" width="6" height="6" rx="1" fill="rgba(233,196,106,0.3)" />
-							</svg>
+				<PreflightStyles />
+				<div className="kk-pf kk-pf-sg" role="group" aria-label={String(methodLabel)} style={consoleBox}>
+					<div className="kk-pf-left kk-pf-scroll">
+						<div className="kk-pf-kicker">{methodLabel}</div>
+						{whoLine}
+						<Box>
+							<Text fontSize="20px" fontWeight="600" color="var(--text-0)">
+								{sending ? t("signing.sendingPayload", "Sending payload to device") : t("signing.confirmOnDevice", "Confirm on your KeepKey")}
+							</Text>
+							<p className="kk-pf-lede" style={{ marginTop: 6 }}>
+								{sending
+									? t("signing.sendingPayloadDescription", "Keep your KeepKey connected. The confirmation prompt will appear when the device is ready.")
+									: t("signing.confirmOnDeviceDescription", "Check your KeepKey screen and press the button to approve the transaction.")}
+							</p>
 						</Box>
-					</Flex>
-					<VStack gap="2">
-						<Text fontSize="lg" fontWeight="700" color="white">
-							{t("signing.confirmOnDevice", "Confirm on your KeepKey")}
-						</Text>
-						<Text fontSize="sm" color="kk.textSecondary" lineHeight="tall">
-							{t("signing.confirmOnDeviceDescription", "Check your KeepKey screen and press the button to approve the transaction.")}
-						</Text>
-					</VStack>
-					<Text fontSize="xs" fontWeight="600" px="3" py="1" borderRadius="full" bg="rgba(233,196,106,0.12)" color="kk.gold">
-						{methodLabel}
-					</Text>
-					<Flex gap="2" justify="center" align="center">
-						{[0, 1, 2].map((i) => (
-							<Box key={i} w="8px" h="8px" borderRadius="full" bg="kk.gold"
-								css={{ animation: "none" }}
-							/>
-						))}
-					</Flex>
-					<Button variant="solid" colorScheme="red" size="lg" width="100%" minH="52px" onClick={onCancel}>
-						{t("signing.cancel", "Cancel")}
-					</Button>
-					<Box w="100%" css={readableDetails}><SigningReviewCompanion request={request} phase={phase} devicePrompts={devicePrompts} /></Box>
-					<Box w="100%" css={readableDetails}><SigningReference request={request} /></Box>
-				</VStack>
+						<Flex gap="2" align="center" aria-hidden="true">
+							{[0, 1, 2].map((i) => <Box key={i} w="6px" h="6px" borderRadius="full" bg="var(--gold)" opacity={0.4 + i * 0.25} />)}
+						</Flex>
+						<div className="kk-pf-actions" style={{ gridTemplateColumns: '1fr' }}>
+							<button type="button" className="kk-pf-go kk-pf-go-danger" onClick={onCancel}>{t("signing.cancel", "Cancel")}</button>
+						</div>
+					</div>
+					<Box className="kk-pf-right kk-pf-scroll" css={readableDetails}>
+						<SigningReviewCompanion request={request} phase={phase} devicePrompts={devicePrompts} technical={technical} />
+					</Box>
+				</div>
 			</Box>
 		)
 	}
 
 	// ── Approve phase ─────────────────────────────────────────────────
+	// One status mark per row. "No funds move" comes only from the request
+	// type (signing-review-guide), never from the requesting app; "Paired app"
+	// only when the backend vouched for the pairing token.
+	const preflight: PreflightRow[] = []
+	if (firmwareCannotSign) preflight.push({ key: 'fw', status: 'block', tag: uiText("blocks"), title: t("signing.firmwareCannotSign", "This KeepKey firmware cannot sign this") })
+	if (advancedModeBlocked) preflight.push({ key: 'adv', status: 'block', tag: uiText("blocks"), title: t("signing.turnOnAdvancedMode", "Turn on Advanced Mode"), detail: t("signing.advancedModeScopeHint", "Advanced Mode stays on until your KeepKey locks or is unplugged, for every app that uses it.") })
+	if (blindSigningConsentBlocked) preflight.push({ key: 'consent', status: 'block', tag: uiText("blocks"), title: t("signing.allowBlindSigningOnceFirst", "Choose Allow once to approve") })
+	guide.warnings.forEach((w, i) => preflight.push({ key: `w${i}`, status: 'warn', title: uiText(w), attrs: { 'data-review-warning': '' } }))
+	if (guide.noFundsMove) preflight.push({ key: 'funds', status: 'ok', title: uiText("No funds move now"), detail: uiText("A message signature, not a transaction.") })
+	if (request.appPaired) preflight.push({ key: 'paired', status: 'ok', title: uiText("Paired app"), detail: uiText("{{app}}, approved on this computer.", { app: safeAppName }) })
+
 	return (
 		<Box
 			ref={cardRef}
@@ -1340,29 +1307,16 @@ export function SigningApproval({ request, phase, devicePrompts = 0, onApprove, 
 			css={{ animation: "signingOverlayIn 0.25s ease-out" }}
 		>
 			<style>{SIGNING_ANIMATIONS}</style>
-			<VStack
-				bg="kk.cardBg" border="1px solid"
-				borderColor={advancedModeBlocked ? "rgba(245,163,59,0.45)" : "rgba(233,196,106,0.45)"}
-				borderRadius="2xl" p="6" gap="3"
-				maxW="900px" w="95vw" maxH="90vh"
-				css={{ animation: "signingCardIn 0.18s ease-out" }}
-			>
-				{/* ── Header row: badge + app + method + timer + trust ── */}
-				<Flex w="100%" justify="space-between" align="center" flexWrap="wrap" gap="2" flexShrink="0">
-					<Flex align="center" gap="2">
-						<Text fontSize="xs" fontWeight="700" color="kk.gold" textTransform="uppercase" letterSpacing="wider"
-							css={{ animation: "none" }}
-						>
-							{t("signing.actionRequired", "Action Required")}
-						</Text>
-						<Flex bg="rgba(233,196,106,0.12)" px="2" py="0.5" borderRadius="full" align="center" gap="1.5">
-							<Box w="5px" h="5px" borderRadius="full" bg="kk.gold" />
-							<Text fontSize="2xs" fontWeight="500" color="kk.gold">{safeAppName}</Text>
-						</Flex>
-						<DocsLink href={DOCS_LINKS.verifyOnDevice} />
-						<DocsLink href={watch('course-06-verify')} label={uiText("Watch video")} />
-					</Flex>
-					<Flex align="center" gap="2">
+			<PreflightStyles />
+			<div className="kk-pf kk-pf-sg" role="group" aria-label={uiText("Signature request")} style={consoleBox}>
+				{/* ── Left: who, what, preflight, decision ── */}
+				<div className="kk-pf-left kk-pf-scroll">
+					<div className="kk-pf-top">
+						<div className="kk-pf-kicker">{uiText("Signature request")}</div>
+						<SigningReviewModes />
+					</div>
+					<Flex align="center" gap="2" flexWrap="wrap" fontSize="11px" color="var(--text-2)" mt="-2">
+						<Text as="span" fontFamily="var(--font-mono)" color="var(--text-1)">{methodLabel}</Text>
 						{/*
 						  The TrustBadge communicates contract-level trust (verified
 						  source, known selector, etc.). EIP-191 personal_sign has
@@ -1378,227 +1332,212 @@ export function SigningApproval({ request, phase, devicePrompts = 0, onApprove, 
 							<TrustBadge level={trustLevel} hasSigned={hasSignedBlob} schemaOnly={relayBridgeDeposit}
 								label={acrossDeposit ? t("signing.acrossKnownContract", "Across SpokePool · known contract") : undefined} t={t} />
 						)}
-						<Text fontSize="2xs" color={remaining <= 30 ? "red.400" : "kk.textMuted"} fontWeight={remaining <= 30 ? "600" : "400"}>
-							{timeStr}
-						</Text>
+						<Text as="span" fontFamily="var(--font-mono)" color={remaining <= 30 ? "var(--rose)" : "var(--text-2)"} fontWeight={remaining <= 30 ? "600" : "400"}>{timeStr}</Text>
+						<DocsLink href={DOCS_LINKS.verifyOnDevice} />
+						<DocsLink href={watch('course-06-verify')} label={uiText("Watch video")} />
 					</Flex>
-				</Flex>
+					{whoLine}
+					<p className="kk-pf-lede">{uiText(guide.purpose)}</p>
+					<PreflightList rows={preflight} />
 
-				{/* Scroll region. Only the reviewable content scrolls — the header
-				    above and the action buttons below stay pinned, so a large
-				    calldata blob can never push Approve/Reject out of reach.
-				    minH=0 is required for a flex child to shrink below its
-				    content height and actually scroll. */}
-				<VStack flex="1" minH="0" overflowY="auto" w="100%" gap="4" css={readableDetails}>
-				<SigningReviewCompanion request={request} phase="approve" />
-				{/* ── Method ── */}
-				<Text fontSize="sm" fontWeight="600" color="white" alignSelf="flex-start">{methodLabel}</Text>
-				{request.typedDataDecoded && <Row label={uiText("Account")} value={request.from} />}
-				{swapDecision && decoded && <SwapDecisionCard decoded={decoded} />}
-				{cosmosDeposit && (
-					<VStack w="100%" align="stretch" gap="1.5" bg="rgba(0,0,0,0.25)" borderRadius="xl" p="3">
-						<Text fontSize="xs" fontWeight="700" color="white">{cosmosDeposit.chain}{" "}{uiText("deposit")}</Text>
-						<Row label={uiText("Input")} value={`${cosmosDeposit.inputAmount} ${cosmosDeposit.inputAsset}`} />
-						<Row label={uiText("Signer")} value={cosmosDeposit.signer} />
-						<Row label={uiText("Memo output asset")} value={cosmosDeposit.outputAsset} />
-						<Row label={uiText("Memo destination")} value={cosmosDeposit.destination} />
-						<Row label={uiText("Memo minimum")} value={cosmosDeposit.minimum} />
-						<Row label={uiText("Memo affiliate fee")} value={cosmosDeposit.affiliateFee} />
-						<Row label={uiText("Exact memo")} value={cosmosDeposit.memo} />
-						<Text fontSize="2xs" color="var(--rose)">{cosmosDeposit.warning}</Text>
+					{/* Report and risk first, so they are read before blind-sign consent. */}
+					<VStack align="stretch" gap="3" css={readableDetails}>
+						<ClearSignReportCard report={request.clearSignReport} verdictBelow={Boolean(assessSigningRisk(request))} />
+						{/* No report (an addressNList caller): the provider the sign step pins is still named. */}
+						{(() => {
+							const line = namedProviderLine(request.runtimeProvider, request.clearSignReport)
+							return line ? <Text fontSize="2xs" color="kk.textSecondary" data-clearsign-provider>{line}</Text> : null
+						})()}
+						<RiskBar request={request} t={t} />
+						<RequestClearSignReview request={request} />
+						{/* What the certified description is, and what it is not. Below
+						    the risk bar on purpose: the verdict is read first, and this
+						    explains the name the verdict used. */}
+						{request.solanaCertified && (
+							<CertifiedVouch certified={request.solanaCertified} appName={safeAppName} />
+						)}
+
+						{/* ── AdvancedMode gate ── */}
+						{advancedModeRequired && (
+							<BlindSigningBanner
+								enabled={advancedModeEnabled}
+								confirming={showAdvancedConfirm}
+								onEnable={handleEnableAdvancedMode}
+								onCancel={() => setShowAdvancedConfirm(false)}
+								t={t}
+								title={isSolanaSignMessage ? t("signing.solanaAdvancedModeRequired", "Advanced Mode Required")
+									: knownProtocol ? t("signing.knownNotOnFirmwareTitle", "Known, not shown on this KeepKey yet") : undefined}
+								description={isSolanaSignMessage
+									? t("signing.solanaAdvancedModeDescription", "Advanced Mode is off, so your KeepKey will reject this raw Solana message. Enable Advanced Mode here before approving.")
+									: knownProtocol
+										// ponytail: English-only, like the risk reasons; t() here has no interpolation.
+										? `KeepKey knows this contract (${knownProtocol}). ${request.firmwareVersion ? `Firmware ${request.firmwareVersion}` : 'This firmware'} cannot show it on the device yet, so signing it needs Advanced Mode. Later firmware may add it.`
+										: undefined}
+								enableLabel={isSolanaSignMessage ? t("signing.enableAdvancedMode", "Enable Advanced Mode") : undefined}
+								error={advancedModeError}
+								explainOnly
+							/>
+						)}
+
+						{isSolanaSignMessage && !solanaPlainText && (
+							<SolanaUnsafeMessageBanner classification={request.solanaMessageDecoded?.classification} t={t} />
+						)}
+
+						{/* ── Solana clear-sign failure / blind-sign warning ── */}
+						{isSolanaSignTx && !request.solanaDecoded && (
+							(request.method === '/solana/sign-transaction-blind' || request.method === '/solana/sign-and-send-blind')
+								? <SolanaBlindSignBanner t={t} />
+								: <SolanaDecodeFailureBanner error={request.solanaDecodeError} t={t} />
+						)}
+
+						{blindSigningConsentRequired && (
+							<SolanaBlindSigningConsent
+								granted={blindSigningConsentGranted}
+								onGrant={() => setBlindSigningConsentRequestId(request.id)}
+								t={t}
+							/>
+						)}
 					</VStack>
-				)}
-				{cosmosTx && (
-					<VStack w="100%" align="stretch" gap="1.5" bg="rgba(0,0,0,0.25)" borderRadius="xl" p="3">
-						{cosmosTx.messages.map((message, i) => (
-							<VStack key={i} w="100%" align="stretch" gap="1.5">
-								<Text fontSize="xs" fontWeight="700" color="white">{message.type}</Text>
-								{message.rows.map((row, j) => <Row key={j} label={row.label} value={row.value} />)}
-							</VStack>
-						))}
-						<Row label={uiText("Fee")} value={cosmosTx.fee} />
-						<Row label={uiText("Memo")} value={cosmosTx.memo} />
-					</VStack>
-				)}
-				{request.method === '/tron/sign-transaction' && request.tronDecoded && (
-					<VStack w="100%" align="stretch" gap="1.5" bg="rgba(0,0,0,0.25)" borderRadius="xl" p="3">
-						<Text fontSize="xs" fontWeight="700" color="white">{uiText("TRON signed transaction")}</Text>
-						<Row label={uiText("Action")} value={`Send ${request.tronDecoded.amount} to ${request.tronDecoded.to}`} />
-						<Row label={uiText("Owner")} value={request.tronDecoded.owner} />
-						<Row label={uiText("Token contract")} value={request.tronDecoded.tokenContract} />
-						<Row label={uiText("Max network fee")} value={request.tronDecoded.feeLimit} />
-						<Row label={uiText("Memo output asset")} value={request.tronDecoded.outputAsset} />
-						<Row label={uiText("Memo destination")} value={request.tronDecoded.outputDestination} />
-						<Row label={uiText("Memo minimum")} value={request.tronDecoded.minimumOutput} />
-						<Row label={uiText("Memo affiliate fee")} value={request.tronDecoded.affiliateFee} />
-						<Row label={uiText("Exact signed memo")} value={request.tronDecoded.memo} />
-						<Text fontSize="2xs" color="var(--rose)">{request.tronDecoded.warning}</Text>
-					</VStack>
-				)}
-				{request.method === '/tron/sign-transaction' && !request.tronDecoded && !request.tronCallShown && (
-					<Box w="100%" bg="rgba(239,68,68,0.15)" border="1px solid rgba(239,68,68,0.6)" borderRadius="lg" px="3" py="2">
-						<Text fontSize="xs" fontWeight="700" color="var(--rose)">{uiText("TRON transaction cannot be verified from signed bytes")}</Text>
-						<Text fontSize="2xs" color="kk.textSecondary">{uiText("Amount and destination in the request are untrusted. The device requires Advanced Mode for unsupported TRON payloads.")}</Text>
-					</Box>
-				)}
-				{utxo && (
-					<VStack w="100%" align="stretch" gap="1.5" bg="rgba(0,0,0,0.25)" borderRadius="xl" p="3">
-						<Text fontSize="xs" fontWeight="700" color="white">{utxo.coin}{" "}{uiText("transaction")}</Text>
-						{utxo.sends.map((send, index) => <Box key={index}><Row label={`Send ${index + 1}`} value={send.amount} /><Row label={uiText("To")} value={send.address} /></Box>)}
-						{utxo.change.map((amount, index) => <Row key={index} label={`Change ${index + 1}`} value={amount} />)}
-						<Row label={uiText("Network fee")} value={utxo.fee} />
-						{utxo.swap && <><Row label={uiText("Memo output asset")} value={utxo.swap.asset} /><Row label={uiText("Memo destination")} value={utxo.swap.destination} /><Row label={uiText("Memo minimum")} value={utxo.swap.minimum} /><Row label={uiText("Memo affiliate fee")} value={utxo.swap.affiliate} /></>}
-						<Row label={uiText("OP_RETURN memo")} value={utxo.memo} />
-						{utxo.warning && <Text fontSize="2xs" color="var(--rose)">{utxo.warning}</Text>}
-					</VStack>
-				)}
-				{relayBridgeDeposit && (
-					<Box w="100%" bg="rgba(239,68,68,0.15)" border="1px solid rgba(239,68,68,0.6)" borderRadius="lg" px="3" py="2">
-						<Text fontSize="xs" fontWeight="700" color="var(--rose)">{uiText("Relay output cannot be verified from this signature")}</Text>
-						<Text fontSize="2xs" color="kk.textSecondary">{uiText("The verified schema covers bridgeDeposit, the ETH amount, depositor, and opaque order ID. This signed call does not contain the output chain, asset, recipient, or minimum. Do not treat schema verification as approval of the swap outcome.")}</Text>
-					</Box>
-				)}
 
-				{/* What the call does, as the KeepKey will show it. */}
-				{request.erc7730 && request.erc7730Description && <Erc7730Section d={request.erc7730Description} />}
-				{/* Report and risk first, so they are read before blind-sign consent. */}
-				<ClearSignReportCard report={request.clearSignReport} verdictBelow={Boolean(assessSigningRisk(request))} />
-				{/* No report (an addressNList caller): the provider the sign step pins is still named. */}
-				{(() => {
-					const line = namedProviderLine(request.runtimeProvider, request.clearSignReport)
-					return line ? <Text fontSize="2xs" color="kk.textSecondary" data-clearsign-provider>{line}</Text> : null
-				})()}
-				<RiskBar request={request} t={t} />
-				<RequestClearSignReview request={request} />
+					{/* ── Decision (pinned at the bottom of the column) ── */}
+					<div className="kk-pf-actions">
+						<button type="button" className="kk-pf-cancel" onClick={onReject}>{t("signing.reject")}</button>
+						<button
+							type="button"
+							className="kk-pf-go"
+							onClick={advancedModeBlocked ? handleEnableAdvancedMode : submitApproval}
+							disabled={enablingPolicy || (!advancedModeBlocked && approveDisabled)}
+						>
+							{enablingPolicy
+								? t("signing.advancedModeConfirmOnDevice", "Confirm on your KeepKey, then re-enter your PIN")
+								: firmwareCannotSign
+								? t("signing.firmwareCannotSign", "This KeepKey firmware cannot sign this")
+								: advancedModeBlocked
+								? t("signing.turnOnAdvancedMode", "Turn on Advanced Mode")
+								: blindSigningConsentBlocked
+									? t("signing.allowBlindSigningOnceFirst", "Choose Allow once to approve")
+									: uiText("Continue on KeepKey")}
+						</button>
+					</div>
+					<div className="kk-pf-hint">
+						{advancedModeBlocked ? t("signing.advancedModeScopeHint", "Advanced Mode stays on until your KeepKey locks or is unplugged, for every app that uses it.") : t("signing.keyboardHint")}
+					</div>
+				</div>
 
-				{/* What the certified description is, and what it is not. Below
-				    the risk bar on purpose: the verdict is read first, and this
-				    explains the name the verdict used. */}
-				{request.solanaCertified && (
-					<CertifiedVouch certified={request.solanaCertified} appName={safeAppName} />
-				)}
-
-				{/* ── AdvancedMode gate ── */}
-				{advancedModeRequired && (
-					<BlindSigningBanner
-						enabled={advancedModeEnabled}
-						confirming={showAdvancedConfirm}
-						onEnable={handleEnableAdvancedMode}
-						onCancel={() => setShowAdvancedConfirm(false)}
-						t={t}
-						title={isSolanaSignMessage ? t("signing.solanaAdvancedModeRequired", "Advanced Mode Required")
-							: knownProtocol ? t("signing.knownNotOnFirmwareTitle", "Known, not shown on this KeepKey yet") : undefined}
-						description={isSolanaSignMessage
-							? t("signing.solanaAdvancedModeDescription", "Advanced Mode is off, so your KeepKey will reject this raw Solana message. Enable Advanced Mode here before approving.")
-							: knownProtocol
-								// ponytail: English-only, like the risk reasons; t() here has no interpolation.
-								? `KeepKey knows this contract (${knownProtocol}). ${request.firmwareVersion ? `Firmware ${request.firmwareVersion}` : 'This firmware'} cannot show it on the device yet, so signing it needs Advanced Mode. Later firmware may add it.`
-								: undefined}
-						enableLabel={isSolanaSignMessage ? t("signing.enableAdvancedMode", "Enable Advanced Mode") : undefined}
-						error={advancedModeError}
-						explainOnly
-					/>
-				)}
-
-				{isSolanaSignMessage && !solanaPlainText && (
-					<SolanaUnsafeMessageBanner classification={request.solanaMessageDecoded?.classification} t={t} />
-				)}
-
-				{/* ── Solana clear-sign failure / blind-sign warning ── */}
-				{isSolanaSignTx && !request.solanaDecoded && (
-					(request.method === '/solana/sign-transaction-blind' || request.method === '/solana/sign-and-send-blind')
-						? <SolanaBlindSignBanner t={t} />
-						: <SolanaDecodeFailureBanner error={request.solanaDecodeError} t={t} />
-				)}
-
-				{blindSigningConsentRequired && (
-					<SolanaBlindSigningConsent
-						granted={blindSigningConsentGranted}
-						onGrant={() => setBlindSigningConsentRequestId(request.id)}
-						t={t}
-					/>
-				)}
-
-				{/* ── Two-column: decoded info (left) + tx details (right) ── */}
-				<Box as={swapDecision ? 'details' : 'div'} w="100%">
-					{swapDecision && <Box as="summary" cursor="pointer" px="3" py="2" mb="2" borderRadius="lg" bg="rgba(0,0,0,0.2)" color="kk.textSecondary" fontSize="xs">{uiText("Verify contract, addresses and exact memo")}</Box>}
-				<Flex w="100%" gap="3" direction={{ base: "column", sm: "row" }}>
-					{/* Left: decoded calldata, typed data, Solana tx, or message payload */}
-					{(request.solanaDecoded || request.solanaMessageDecoded || request.typedDataDecoded || request.ethMessageDecoded || (decoded && decoded.source !== 'none')) && (
-						<Box flex="1" minW="0">
-							{request.solanaDecoded
-								? <SolanaDecodedSection decoded={request.solanaDecoded} t={t} certified={request.solanaCertified} />
-								: request.solanaMessageDecoded
-									? <SolanaMessageSection decoded={request.solanaMessageDecoded} t={t} />
-									: request.typedDataDecoded
-										? <TypedDataSection decoded={request.typedDataDecoded} t={t} />
-										: request.ethMessageDecoded
-											? <EthMessageSection decoded={request.ethMessageDecoded} t={t} />
-											: decoded && decoded.source !== 'none' && <CalldataSection decoded={decoded} request={request} t={t} />
-							}
+				{/* ── Right: device sketch, steps, every decoded detail ── */}
+				<Box className="kk-pf-right kk-pf-scroll" css={readableDetails}>
+					{/* What the call does, as the KeepKey will show it. */}
+					{request.erc7730 && request.erc7730Description && <Erc7730Section d={request.erc7730Description} />}
+					<SigningReviewCompanion request={request} phase="approve" showModes={false} showWarnings={false} technical={technical} />
+					<VStack align="stretch" gap="4">
+					{request.typedDataDecoded && <Row label={uiText("Account")} value={request.from} />}
+					{swapDecision && decoded && <SwapDecisionCard decoded={decoded} />}
+					{cosmosDeposit && (
+						<VStack w="100%" align="stretch" gap="1.5" bg="rgba(0,0,0,0.25)" borderRadius="xl" p="3">
+							<Text fontSize="xs" fontWeight="700" color="white">{cosmosDeposit.chain}{" "}{uiText("deposit")}</Text>
+							<Row label={uiText("Input")} value={`${cosmosDeposit.inputAmount} ${cosmosDeposit.inputAsset}`} />
+							<Row label={uiText("Signer")} value={cosmosDeposit.signer} />
+							<Row label={uiText("Memo output asset")} value={cosmosDeposit.outputAsset} />
+							<Row label={uiText("Memo destination")} value={cosmosDeposit.destination} />
+							<Row label={uiText("Memo minimum")} value={cosmosDeposit.minimum} />
+							<Row label={uiText("Memo affiliate fee")} value={cosmosDeposit.affiliateFee} />
+							<Row label={uiText("Exact memo")} value={cosmosDeposit.memo} />
+							<Text fontSize="2xs" color="var(--rose)">{cosmosDeposit.warning}</Text>
+						</VStack>
+					)}
+					{cosmosTx && (
+						<VStack w="100%" align="stretch" gap="1.5" bg="rgba(0,0,0,0.25)" borderRadius="xl" p="3">
+							{cosmosTx.messages.map((message, i) => (
+								<VStack key={i} w="100%" align="stretch" gap="1.5">
+									<Text fontSize="xs" fontWeight="700" color="white">{message.type}</Text>
+									{message.rows.map((row, j) => <Row key={j} label={row.label} value={row.value} />)}
+								</VStack>
+							))}
+							<Row label={uiText("Fee")} value={cosmosTx.fee} />
+							<Row label={uiText("Memo")} value={cosmosTx.memo} />
+						</VStack>
+					)}
+					{request.method === '/tron/sign-transaction' && request.tronDecoded && (
+						<VStack w="100%" align="stretch" gap="1.5" bg="rgba(0,0,0,0.25)" borderRadius="xl" p="3">
+							<Text fontSize="xs" fontWeight="700" color="white">{uiText("TRON signed transaction")}</Text>
+							<Row label={uiText("Action")} value={`Send ${request.tronDecoded.amount} to ${request.tronDecoded.to}`} />
+							<Row label={uiText("Owner")} value={request.tronDecoded.owner} />
+							<Row label={uiText("Token contract")} value={request.tronDecoded.tokenContract} />
+							<Row label={uiText("Max network fee")} value={request.tronDecoded.feeLimit} />
+							<Row label={uiText("Memo output asset")} value={request.tronDecoded.outputAsset} />
+							<Row label={uiText("Memo destination")} value={request.tronDecoded.outputDestination} />
+							<Row label={uiText("Memo minimum")} value={request.tronDecoded.minimumOutput} />
+							<Row label={uiText("Memo affiliate fee")} value={request.tronDecoded.affiliateFee} />
+							<Row label={uiText("Exact signed memo")} value={request.tronDecoded.memo} />
+							<Text fontSize="2xs" color="var(--rose)">{request.tronDecoded.warning}</Text>
+						</VStack>
+					)}
+					{request.method === '/tron/sign-transaction' && !request.tronDecoded && !request.tronCallShown && (
+						<Box w="100%" bg="rgba(239,68,68,0.15)" border="1px solid rgba(239,68,68,0.6)" borderRadius="lg" px="3" py="2">
+							<Text fontSize="xs" fontWeight="700" color="var(--rose)">{uiText("TRON transaction cannot be verified from signed bytes")}</Text>
+							<Text fontSize="2xs" color="kk.textSecondary">{uiText("Amount and destination in the request are untrusted. The device requires Advanced Mode for unsupported TRON payloads.")}</Text>
+						</Box>
+					)}
+					{utxo && (
+						<VStack w="100%" align="stretch" gap="1.5" bg="rgba(0,0,0,0.25)" borderRadius="xl" p="3">
+							<Text fontSize="xs" fontWeight="700" color="white">{utxo.coin}{" "}{uiText("transaction")}</Text>
+							{utxo.sends.map((send, index) => <Box key={index}><Row label={`Send ${index + 1}`} value={send.amount} /><Row label={uiText("To")} value={send.address} /></Box>)}
+							{utxo.change.map((amount, index) => <Row key={index} label={`Change ${index + 1}`} value={amount} />)}
+							<Row label={uiText("Network fee")} value={utxo.fee} />
+							{utxo.swap && <><Row label={uiText("Memo output asset")} value={utxo.swap.asset} /><Row label={uiText("Memo destination")} value={utxo.swap.destination} /><Row label={uiText("Memo minimum")} value={utxo.swap.minimum} /><Row label={uiText("Memo affiliate fee")} value={utxo.swap.affiliate} /></>}
+							<Row label={uiText("OP_RETURN memo")} value={utxo.memo} />
+							{utxo.warning && <Text fontSize="2xs" color="var(--rose)">{utxo.warning}</Text>}
+						</VStack>
+					)}
+					{relayBridgeDeposit && (
+						<Box w="100%" bg="rgba(239,68,68,0.15)" border="1px solid rgba(239,68,68,0.6)" borderRadius="lg" px="3" py="2">
+							<Text fontSize="xs" fontWeight="700" color="var(--rose)">{uiText("Relay output cannot be verified from this signature")}</Text>
+							<Text fontSize="2xs" color="kk.textSecondary">{uiText("The verified schema covers bridgeDeposit, the ETH amount, depositor, and opaque order ID. This signed call does not contain the output chain, asset, recipient, or minimum. Do not treat schema verification as approval of the swap outcome.")}</Text>
 						</Box>
 					)}
 
-					{/* Right: transaction fields */}
-					{!request.typedDataDecoded && !request.solanaDecoded && !request.solanaMessageDecoded && !request.ethMessageDecoded && (
-						<Box flex="1" minW="0">
-							<VStack gap="1.5" w="100%" bg="rgba(0,0,0,0.25)" borderRadius="xl" p="3">
-								<Text fontSize="2xs" fontWeight="600" color="kk.textSecondary" alignSelf="flex-start">{uiText("Transaction")}</Text>
-								<Row label={uiText("Chain")} value={evmChainName ?? request.chain?.toUpperCase()} />
-								<Row label={uiText("From")} value={request.from} />
-								<Row label={uiText("To")} value={request.to} />
-								<SelfTransferNote from={request.from} to={request.to} />
-								<Row label={uiText("Value")} value={request.method === '/eth/sign-transaction'
-									? (evmNativeValue(request.value, request.chainId) ?? request.value) : request.value} />
-								{request.method === '/eth/sign-transaction' && <Row label={uiText("Max network fee")} value={evmMaxFee(request.rawRequestBody, request.chainId) ?? undefined} />}
-								{request.chainId !== undefined && <Row label={uiText("ChainID")} value={String(request.chainId)} />}
-								{request.data && (!decoded || decoded.source === 'none') && (
-									<CalldataInspector data={request.data} t={t} />
-								)}
-							</VStack>
-						</Box>
-					)}
-				</Flex>
+					{/* ── Decoded payload and transaction fields ── */}
+					<Box as={swapDecision ? 'details' : 'div'} w="100%">
+						{swapDecision && <Box as="summary" cursor="pointer" px="3" py="2" mb="2" borderRadius="lg" bg="rgba(0,0,0,0.2)" color="kk.textSecondary" fontSize="xs">{uiText("Verify contract, addresses and exact memo")}</Box>}
+					<VStack w="100%" gap="3" align="stretch">
+						{(request.solanaDecoded || request.solanaMessageDecoded || request.typedDataDecoded || request.ethMessageDecoded || (decoded && decoded.source !== 'none')) && (
+							<Box minW="0">
+								{request.solanaDecoded
+									? <SolanaDecodedSection decoded={request.solanaDecoded} t={t} certified={request.solanaCertified} />
+									: request.solanaMessageDecoded
+										? <SolanaMessageSection decoded={request.solanaMessageDecoded} t={t} />
+										: request.typedDataDecoded
+											? <TypedDataSection decoded={request.typedDataDecoded} t={t} />
+											: request.ethMessageDecoded
+												? <EthMessageSection decoded={request.ethMessageDecoded} t={t} />
+												: decoded && decoded.source !== 'none' && <CalldataSection decoded={decoded} request={request} t={t} />
+								}
+							</Box>
+						)}
+
+						{!request.typedDataDecoded && !request.solanaDecoded && !request.solanaMessageDecoded && !request.ethMessageDecoded && (
+							<Box minW="0">
+								<VStack gap="1.5" w="100%" bg="rgba(0,0,0,0.25)" borderRadius="xl" p="3">
+									<Text fontSize="2xs" fontWeight="600" color="kk.textSecondary" alignSelf="flex-start">{uiText("Transaction")}</Text>
+									<Row label={uiText("Chain")} value={evmChainName ?? request.chain?.toUpperCase()} />
+									<Row label={uiText("From")} value={request.from} />
+									<Row label={uiText("To")} value={request.to} />
+									<SelfTransferNote from={request.from} to={request.to} />
+									<Row label={uiText("Value")} value={request.method === '/eth/sign-transaction'
+										? (evmNativeValue(request.value, request.chainId) ?? request.value) : request.value} />
+									{request.method === '/eth/sign-transaction' && <Row label={uiText("Max network fee")} value={evmMaxFee(request.rawRequestBody, request.chainId) ?? undefined} />}
+									{request.chainId !== undefined && <Row label={uiText("ChainID")} value={String(request.chainId)} />}
+									{request.data && (!decoded || decoded.source === 'none') && (
+										<CalldataInspector data={request.data} t={t} />
+									)}
+								</VStack>
+							</Box>
+						)}
+					</VStack>
+					</Box>
+					</VStack>
 				</Box>
-
-				{/* ── Full raw payload (collapsible) ── */}
-				<RawPayload data={request.rawRequestBody} label={uiText("Full Request Payload")} />
-				</VStack>
-
-				{/* ── Action buttons (pinned below the scroll region) ── */}
-				<Flex gap="3" w="100%" flexShrink="0">
-					<Button
-						flex="1" bg="kk.gold"
-						color="black" fontWeight="600" size="md"
-						_hover={{ bg: "kk.goldHover" }}
-						onClick={advancedModeBlocked ? handleEnableAdvancedMode : submitApproval}
-						disabled={enablingPolicy || (!advancedModeBlocked && approveDisabled)}
-						cursor={enablingPolicy || (!advancedModeBlocked && approveDisabled) ? "not-allowed" : "pointer"}
-					>
-						{enablingPolicy
-							? t("signing.advancedModeConfirmOnDevice", "Confirm on your KeepKey, then re-enter your PIN")
-							: firmwareCannotSign
-							? t("signing.firmwareCannotSign", "This KeepKey firmware cannot sign this")
-							: advancedModeBlocked
-							? t("signing.turnOnAdvancedMode", "Turn on Advanced Mode")
-							: blindSigningConsentBlocked
-								? t("signing.allowBlindSigningOnceFirst", "Choose Allow once to approve")
-								: t("signing.approve")}
-					</Button>
-					<Button
-						flex="1" variant="ghost" color="kk.textSecondary"
-						border="1px solid" borderColor="kk.border" size="md"
-						_hover={{ color: "white", borderColor: "kk.textSecondary" }}
-						onClick={onReject}
-					>
-						{t("signing.reject")}
-					</Button>
-				</Flex>
-
-				<Text fontSize="2xs" color="kk.textMuted">
-					{advancedModeBlocked ? t("signing.advancedModeScopeHint", "Advanced Mode stays on until your KeepKey locks or is unplugged, for every app that uses it.") : t("signing.keyboardHint")}
-				</Text>
-			</VStack>
+			</div>
 		</Box>
 	)
 }

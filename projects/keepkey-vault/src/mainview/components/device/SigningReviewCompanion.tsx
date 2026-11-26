@@ -1,7 +1,9 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { Box, Button, Flex, Text, VStack } from '@chakra-ui/react'
 import type { SigningRequestInfo } from '../../../shared/types'
-import { emulatorReviewPixels, signingReviewGuide, type SigningReviewDepth } from '../../../shared/signing-review-guide'
+import { emulatorReviewPixels, signingReviewGuide, type SigningRequestKind, type SigningReviewDepth } from '../../../shared/signing-review-guide'
+import { NumberNode, PreflightList, PreflightStyles, TimelineItem, TimelineMark } from '../preflight/PreflightConsole'
+import { OledText, SpinningDevice } from '../v3'
 import { useUiTranslation } from '../../i18n/ui'
 import { useSigningReviewPreferences } from '../../lib/signing-review-preferences'
 import { rpcRequest } from '../../lib/rpc'
@@ -50,57 +52,85 @@ export function PairedEmulatorDisplay({ request }: { request: SigningRequestInfo
   </VStack>
 }
 
-export function SigningReviewCompanion({ request, phase = 'preview', devicePrompts = 0 }: {
-  request: SigningRequestInfo; phase?: 'preview' | 'approve' | 'sending-payload' | 'device-confirm'; devicePrompts?: number
-}) {
+const KIND_OLED: Record<SigningRequestKind, string> = {
+  message: 'SIGN MESSAGE', typed: 'SIGN TYPED DATA', contract: 'CONTRACT CALL', transaction: 'SIGN TRANSACTION',
+}
+
+/** Simple / Guided / Audit as text tabs, plus the larger-text toggle. */
+export function SigningReviewModes() {
   const uiText = useUiTranslation()
   const [preferences, update] = useSigningReviewPreferences()
+  const labels: Record<SigningReviewDepth, string> = { essentials: uiText('Simple'), guided: uiText('Guided'), audit: uiText('Audit') }
+  return <div className="kk-pf-modes" role="group" aria-label={uiText('Review detail')}>
+    {(['essentials', 'guided', 'audit'] as const).map(depth => <button key={depth} type="button" aria-pressed={preferences.depth === depth} onClick={() => update({ depth })}>{labels[depth]}</button>)}
+    <button type="button" aria-pressed={preferences.largeText} onClick={() => update({ largeText: !preferences.largeText })}>{uiText('Larger text')}</button>
+  </div>
+}
+
+/** Right column of the signing console: a sketch of the device, the steps to
+ *  take on it, the request's fields and its technical reference. Advice for
+ *  reading the request only — the KeepKey's own screen is what counts. */
+export function SigningReviewCompanion({ request, phase = 'preview', devicePrompts = 0, showModes = true, showWarnings = true, technical }: {
+  request: SigningRequestInfo; phase?: 'preview' | 'approve' | 'sending-payload' | 'device-confirm'; devicePrompts?: number
+  /** Approve phase shows the modes in its own header. */
+  showModes?: boolean
+  /** Approve phase lists the warnings as preflight rows instead. */
+  showWarnings?: boolean
+  /** Extra reference material placed under "Technical details". */
+  technical?: ReactNode
+}) {
+  const uiText = useUiTranslation()
+  const [preferences] = useSigningReviewPreferences()
   const guide = signingReviewGuide(request)
-  const [openStep, setOpenStep] = useState(0)
-  const font = preferences.largeText ? '17px' : '15px'
-  const labels: Record<SigningReviewDepth, string> = { essentials: uiText('Essentials'), guided: uiText('Guided'), audit: uiText('Deep audit') }
-  return <VStack align="stretch" gap="4" w="100%" textAlign="left" fontFamily="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" css={{ '& button': { fontFamily: 'inherit' } }} data-signing-review-depth={preferences.depth}>
-    <Flex justify="space-between" align="center" wrap="wrap" gap="2">
-      <Flex gap="1" role="group" aria-label={uiText('Review detail')}>
-        {(['essentials', 'guided', 'audit'] as const).map(depth => <Button key={depth} size="sm" variant={preferences.depth === depth ? 'solid' : 'outline'} aria-pressed={preferences.depth === depth} onClick={() => update({ depth })}>{labels[depth]}</Button>)}
-      </Flex>
-      <Button size="sm" variant="ghost" aria-pressed={preferences.largeText} onClick={() => update({ largeText: !preferences.largeText })}>{uiText('Larger text')}</Button>
-    </Flex>
-    <Box>
-      <Text fontSize="lg" fontWeight="700" color="kk.textPrimary">{uiText(guide.title)}</Text>
-      <Text fontSize={font} lineHeight="1.65" color="kk.textSecondary" mt="1">{uiText(guide.purpose)}</Text>
-    </Box>
-    {guide.warnings.map(warning => <Box key={warning} borderLeft="3px solid" borderColor="orange.300" pl="3" role="note" data-review-warning>
-      <Text fontSize={font} lineHeight="1.65" color="kk.textPrimary">{uiText(warning)}</Text>
-    </Box>)}
-    {phase === 'device-confirm' && request.deviceReview?.emulator && <PairedEmulatorDisplay key={`${request.id}:${request.deviceReview.deviceId}`} request={request} />}
-    {phase === 'device-confirm' && !request.deviceReview?.emulator && <Box bg="rgba(233,196,106,0.06)" borderRadius="lg" p="3">
-      <Text fontSize={font} color="kk.textPrimary" fontWeight="600">{uiText('Compare with your KeepKey')}</Text>
-      <Text fontSize={font} color="kk.textSecondary" lineHeight="1.65">{uiText('Use the physical screen to make your final decision. The app’s guide is a reference, not a readback of that screen.')}</Text>
+  const font = preferences.largeText ? '17px' : '14px'
+  const account = guide.fields.find(f => f.label === 'Account')?.value
+  const network = guide.fields.find(f => f.label === 'Network')?.value
+  const short = (v?: string) => v && v.length > 18 ? `${v.slice(0, 8)}…${v.slice(-6)}` : v
+  const steps = preferences.depth === 'essentials' && guide.steps.length > 3
+    ? [guide.steps[0]!, guide.steps[1]!, guide.steps[guide.steps.length - 1]!]
+    : guide.steps
+  const liveEmulator = phase === 'device-confirm' && !!request.deviceReview?.emulator
+  return <VStack align="stretch" gap="5" w="100%" textAlign="left" data-signing-review-depth={preferences.depth}>
+    <PreflightStyles />
+    {showModes && <SigningReviewModes />}
+    {liveEmulator
+      ? <PairedEmulatorDisplay key={`${request.id}:${request.deviceReview!.deviceId}`} request={request} />
+      // What to confirm must be readable: the device never turns here.
+      : <div className="kk-pf-device">
+        <SpinningDevice motion="still" scale={0.66} screen={<OledText kicker={KIND_OLED[guide.kind]} headline={short(account)} sub={network} />} />
+        <div className="kk-pf-cap">{uiText('A sketch, not a readback. Trust your KeepKey’s own screen.')}</div>
+      </div>}
+    {phase === 'device-confirm' && !request.deviceReview?.emulator && <Box>
+      <Text fontSize={font} color="var(--text-0)" fontWeight="600">{uiText('Compare with your KeepKey')}</Text>
+      <Text fontSize={font} color="var(--text-1)" lineHeight="1.6">{uiText('Use the physical screen to make your final decision. The app’s guide is a reference, not a readback of that screen.')}</Text>
     </Box>}
-    {devicePrompts > 0 && <Text fontSize="sm" color="kk.textSecondary">{uiText('Device confirmation requests: {{count}}', { count: devicePrompts })}</Text>}
-    <VStack gap="3" align="stretch">
-      {guide.fields.map((field, i) => <Box key={`${field.label}:${i}`}>
-        <Text fontSize="sm" fontWeight="600" color="kk.textSecondary">{uiText(field.label)}</Text>
-        <Text fontSize={font} lineHeight="1.65" color="kk.textPrimary" whiteSpace="pre-wrap" overflowWrap="anywhere" css={{ unicodeBidi: 'plaintext' }}>{field.value}</Text>
-      </Box>)}
-    </VStack>
-    {preferences.depth !== 'essentials' && <VStack align="stretch" gap="2" data-screen-guide>
-      <Text fontSize="md" fontWeight="700" color="kk.textPrimary">{uiText('Screen guide')}</Text>
-      <Text fontSize="sm" lineHeight="1.6" color="kk.textSecondary">{uiText('Choose the part you are reviewing. Device screens and their order can vary with the request and firmware.')}</Text>
-      {guide.steps.map((step, i) => <Box key={step.title} border="1px solid" borderColor="kk.border" borderRadius="lg" overflow="hidden">
-        <Button variant="ghost" w="100%" justifyContent="flex-start" whiteSpace="normal" height="auto" py="3" textAlign="left" aria-expanded={openStep === i} onClick={() => setOpenStep(openStep === i ? -1 : i)}>{i + 1}. {uiText(step.title)}</Button>
-        {openStep === i && <VStack p="3" pt="0" align="stretch" gap="2">
-          <Text fontSize={font} lineHeight="1.65" color="kk.textSecondary">{uiText(step.why)}</Text>
-          <Text fontSize={font} lineHeight="1.65" color="kk.textPrimary">{uiText(step.compare)}</Text>
-        </VStack>}
-      </Box>)}
-    </VStack>}
-    {preferences.depth === 'audit' && <Box>
-      <Text fontSize="md" fontWeight="700" mb="2" color="kk.textPrimary">{uiText('Raw signing reference')}</Text>
-      {guide.raw ? <Box as="pre" fontFamily="mono" fontSize={preferences.largeText ? '15px' : '13px'} lineHeight="1.65" whiteSpace="pre-wrap" overflowWrap="anywhere" bg="rgba(0,0,0,0.22)" p="3" borderRadius="lg" maxH="320px" overflowY="auto" color="kk.textPrimary">{guide.raw}</Box>
-        : <Text fontSize={font} lineHeight="1.65" color="kk.textSecondary">{uiText('A public byte reference is not supplied for this request. Compare the signed fields and the device review.')}</Text>}
-    </Box>}
-    <Text fontSize="sm" color="kk.textSecondary" lineHeight="1.6">{uiText('These choices change the app’s explanations and text size. Your KeepKey still requires its full device review.')}</Text>
+    {showWarnings && guide.warnings.length > 0 && <PreflightList rows={guide.warnings.map(w => ({ key: w, status: 'warn' as const, title: uiText(w), attrs: { 'data-review-warning': '' } }))} />}
+    {devicePrompts > 0 && <Text fontSize="12px" color="var(--text-2)">{uiText('Device confirmation requests: {{count}}', { count: devicePrompts })}</Text>}
+    {/* Simple shows the three essential steps; Guided/Audit the full screen guide. */}
+    <div className="kk-pf-tl" {...(preferences.depth === 'essentials' ? { 'data-screen-steps': '' } : { 'data-screen-guide': '' })}>
+      <TimelineMark big={uiText('On your KeepKey')} />
+      {steps.map((step, i) => <TimelineItem key={step.title} node={<NumberNode n={i + 1} gold={i === steps.length - 1} />} title={uiText(step.title)}>
+        {preferences.depth === 'audit' && <>{uiText(step.why)}{' '}</>}{uiText(step.compare)}
+      </TimelineItem>)}
+    </div>
+    {guide.fields.length > 0 && <dl className="kk-pf-facts" style={{ fontSize: font }}>
+      {guide.fields.map((field, i) => <div key={`${field.label}:${i}`}>
+        <dt>{uiText(field.label)}</dt>
+        <dd style={{ whiteSpace: 'pre-wrap', unicodeBidi: 'plaintext' }}>{field.value}</dd>
+      </div>)}
+    </dl>}
+    <details className="kk-pf-tech" open={preferences.depth === 'audit'}>
+      <summary>{uiText('Technical details')}</summary>
+      <VStack align="stretch" gap="3" mt="3">
+        <Text fontSize="12px" fontFamily="var(--font-mono)" color="var(--text-1)">{request.method}</Text>
+        <Box>
+          <Text fontSize="12px" fontWeight="600" mb="1" color="var(--text-1)">{uiText('Raw signing reference')}</Text>
+          {guide.raw ? <Box as="pre" fontFamily="var(--font-mono)" fontSize={preferences.largeText ? '15px' : '12px'} lineHeight="1.6" whiteSpace="pre-wrap" overflowWrap="anywhere" bg="rgba(0,0,0,0.28)" p="3" borderRadius="md" maxH="320px" overflowY="auto" color="var(--text-0)">{guide.raw}</Box>
+            : <Text fontSize="12px" lineHeight="1.6" color="var(--text-1)">{uiText('A public byte reference is not supplied for this request. Compare the signed fields and the device review.')}</Text>}
+        </Box>
+        {technical}
+      </VStack>
+    </details>
+    <Text fontSize="11px" color="var(--text-2)" lineHeight="1.5">{uiText('These choices change the app’s explanations and text size. Your KeepKey still requires its full device review.')}</Text>
   </VStack>
 }

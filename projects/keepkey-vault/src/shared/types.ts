@@ -1299,6 +1299,8 @@ export interface SigningRequestInfo {
   deviceReview?: { emulator: boolean; deviceId?: string }
   method: string
   appName: string
+  /** True when the request came with a valid pairing token (REST). Unset when the source can't vouch for it. */
+  appPaired?: boolean
   chain?: string
   from?: string
   to?: string

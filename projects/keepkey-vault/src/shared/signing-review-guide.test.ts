@@ -76,3 +76,22 @@ test('OLED enlargement preserves the exact SSD1306 bit positions', () => {
   expect(Array.from(rgba.slice(4, 8))).toEqual([15, 19, 25, 255])
   expect(() => emulatorReviewPixels(new Uint8Array(2047))).toThrow()
 })
+
+describe('noFundsMove comes from the request type only', () => {
+  test('a plain message signature moves no funds', () => {
+    expect(signingReviewGuide(request({ method: '/eth/sign', ethMessageDecoded: { address: 'a', messageRaw: '0x00', messageText: 'Sign in', isUtf8Text: true } }))).toMatchObject({ kind: 'message', noFundsMove: true })
+    expect(signingReviewGuide(request({ method: '/hive/sign-message', chain: 'hive' }))).toMatchObject({ kind: 'message', noFundsMove: true })
+  })
+  test('transactions, contract calls, typed data and typed hashes never claim it', () => {
+    expect(signingReviewGuide(request({ to: `0x${'11'.repeat(20)}`, value: '1' })).noFundsMove).toBe(false)
+    expect(signingReviewGuide(request({ to: `0x${'33'.repeat(20)}`, data: '0xa9059cbb' })).noFundsMove).toBe(false)
+    expect(signingReviewGuide(request({ method: '/tron/sign-typed-hash' })).noFundsMove).toBe(false)
+    expect(signingReviewGuide(request({ method: '/eth/sign-typed-data', typedDataDecoded: { primaryType: 'Permit', domain: { name: 'USDC' }, fields: [], isKnownType: true } as any })).noFundsMove).toBe(false)
+  })
+  test('a transaction-shaped Solana message never claims it', () => {
+    expect(signingReviewGuide(request({ method: '/solana/sign-message', solanaMessageDecoded: { messageRaw: 'raw', messageHex: '0102', encoding: 'hex', byteLength: 2, classification: 'solana-transaction' } })).noFundsMove).toBe(false)
+  })
+  test('an app name claiming safety changes nothing', () => {
+    expect(signingReviewGuide(request({ appName: 'No funds move — safe login', to: `0x${'11'.repeat(20)}`, value: '1' })).noFundsMove).toBe(false)
+  })
+})
