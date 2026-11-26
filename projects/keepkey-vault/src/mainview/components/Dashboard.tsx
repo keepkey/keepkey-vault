@@ -2107,11 +2107,11 @@ function PersonalDashboard({ capabilities, isEmulator, onLoaded, watchOnly, watc
 		if (btcOnly) return c.id === 'bitcoin'
 		if (!isChainSupported(c, firmwareVersion)) return false
 		if (disabledNetworks.includes(c.id)) return false
-		// Zcash transparent is hidden by default — show when feature flag is on
-		if (c.id === 'zcash') return zcashEnabled
+		// Zcash transparent balance shows on any firmware; send is gated in SendForm.
+		if (c.id === 'zcash') return true
 		if (c.id === 'hive') return hiveEnabled
 		return !c.hidden
-	}), [allChains, btcOnly, firmwareVersion, zcashEnabled, hiveEnabled, disabledNetworks])
+	}), [allChains, btcOnly, firmwareVersion, hiveEnabled, disabledNetworks])
 	visibleChainIdsRef.current = visibleChains.map(chain => chain.id)
 	const visibleBalances = visibleChains.map(chain => balances.get(chain.id))
 	const renderNow = Math.max(clockNow, Date.now())
@@ -2138,8 +2138,8 @@ function PersonalDashboard({ capabilities, isEmulator, onLoaded, watchOnly, watc
 	// Built-in networks the user turned off: offered back in the Add network dialog.
 	const turnedOffChains = useMemo(() => btcOnly ? [] : allChains.filter(c =>
 		disabledNetworks.includes(c.id) && !c.hidden && isChainSupported(c, firmwareVersion)
-		&& (c.id !== 'zcash' || zcashEnabled) && (c.id !== 'hive' || hiveEnabled)
-	), [allChains, btcOnly, disabledNetworks, firmwareVersion, zcashEnabled, hiveEnabled])
+		&& (c.id !== 'hive' || hiveEnabled)
+	), [allChains, btcOnly, disabledNetworks, firmwareVersion, hiveEnabled])
 
 	// ── Sidebar chain menu (right-click / Shift+F10 / Menu key) ─────────
 	// Hiding a chain turns its network off through the same setting the
@@ -3139,6 +3139,9 @@ function PersonalDashboard({ capabilities, isEmulator, onLoaded, watchOnly, watc
 								// report balanceUsd 0 while still holding funds. Gate on the
 								// token amount so held funds never render as "no balance".
 								const hasAggregate = (agg?.balanceUsd ?? 0) > 0 || hasNonZeroBalance(agg?.balance)
+								// Same rule as the chain header: a missing or degraded row is
+								// unknown, never "$0.00 / no balance" (Zcash never shows zero).
+								const unknownBalance = !agg || agg.syncState === 'degraded'
 								return (
 									<Flex direction="column" align="center" justify="center" gap="4" maxW="360px" textAlign="center">
 										<Image
@@ -3189,6 +3192,13 @@ function PersonalDashboard({ capabilities, isEmulator, onLoaded, watchOnly, watc
 															))}
 														</Flex>
 													)}
+												</>
+											) : unknownBalance ? (
+												<>
+													<Text fontSize="28px" fontWeight="600" fontFamily="mono" color="var(--text-1)" lineHeight="1.1">
+														{privateModeEnabled ? "••••" : "—"}
+													</Text>
+													<Text fontSize="13px" color="var(--text-3)" mt="1">{uiText("Balance unavailable")}</Text>
 												</>
 											) : (
 												<>

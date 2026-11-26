@@ -294,7 +294,8 @@ const CONFIGS: ChainConfig[] = [
     defaultPath: [0x8000002C, 0x80000085, 0x80000000, 0, 0], scriptType: 'p2pkh',
     explorerTxUrl: 'https://blockchair.com/zcash/transaction/{{txid}}',
     explorerAddressUrl: 'https://blockchair.com/zcash/address/{{address}}',
-    minFirmware: '7.17.0',
+    // No minFirmware: the transparent balance shows on any firmware; sending is
+    // gated separately (zcash-nu7: firmware >= 7.17.0).
   },
   {
     id: 'zcash-shielded', chain: Chain.Zcash, coin: 'Zcash', symbol: 'ZEC',

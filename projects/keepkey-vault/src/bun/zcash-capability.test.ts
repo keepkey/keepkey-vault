@@ -14,7 +14,9 @@ describe('Zcash release capability', () => {
 		expect(supportsZcashPrivacyBuild('7.17.0', undefined)).toBe(false)
 	})
 	test('the 7.17 upgrade advertises alpha transparent signing without claiming private-pool support', () => {
-		for (const id of ['zcash', 'zcash-shielded']) expect(CHAINS.find(chain => chain.id === id)?.minFirmware).toBe('7.17.0')
+		expect(CHAINS.find(chain => chain.id === 'zcash-shielded')?.minFirmware).toBe('7.17.0')
+		// Transparent balance shows on any firmware (audit v8 H4); sending is gated by zcash-nu7.
+		expect(CHAINS.find(chain => chain.id === 'zcash')?.minFirmware).toBeUndefined()
 		const zcash = getUpgradeFeatures('7.16.0', '7.17.0').find(feature => feature.chains?.includes('zcash'))
 		expect(zcash?.description).toContain('reviewed 7.17 alpha emulator')
 		expect(zcash?.description).toContain('supported physical alpha firmware')

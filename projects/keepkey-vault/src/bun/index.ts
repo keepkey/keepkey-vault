@@ -2723,7 +2723,7 @@ async function getChainBalance(params: { chainId: string; forceRefresh?: boolean
 	// throwing here would bounce flows that merely render the page (#310).
 	const fwVersion = engine.getDeviceState().firmwareVersion
 	if (!isChainSupported(chain, fwVersion)
-		|| ((chain.id === 'zcash' || chain.id === 'zcash-shielded') && !zcashPrivacyEnabled)
+		|| (chain.id === 'zcash-shielded' && !zcashPrivacyEnabled)
 		|| (chain.id === 'hive' && !hiveEnabled)
 		|| !networkOn(chain.id)) {
 		console.warn(`[getBalance] ${chain.id}: unsupported on firmware ${fwVersion || '?'}, feature-flagged off or turned off — returning empty balance`)
@@ -3355,7 +3355,7 @@ function isWalletWatchChainEnabled(chainId: string): boolean {
 	return !!chain && !chain.hidden && chain.chainFamily !== 'zcash-shielded'
 		&& networkOn(chainId) && isChainSupported(chain, state.firmwareVersion)
 		&& (!isBitcoinOnlyVariant(state.firmwareVariant) || chainId === 'bitcoin')
-		&& (!(chainId === 'zcash') || zcashPrivacyEnabled) && (chainId !== 'hive' || hiveEnabled)
+		&& (chainId !== 'hive' || hiveEnabled)
 		&& !(chainId === 'bitcoin' && getBtcBackend().kind !== 'pioneer')
 }
 
@@ -6649,14 +6649,14 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				}
 
 				// Filter chains by firmware version — don't derive addresses for unsupported chains
-				// Zcash (transparent + shielded) gated behind feature flag
+				// Zcash shielded gated behind the privacy capability; transparent on any firmware
 				const fwVersion = engine.getDeviceState().firmwareVersion
 				const dgbTaprootEnabled = supportsDgbTaproot(process.env.FEATURE_TAPROOT_DGB === 'true', fwVersion)
 				const bitcoinOnly = isBitcoinOnlyVariant(engine.getDeviceState().firmwareVariant)
 				if (bitcoinOnly) swapDestCaips = []
 				const allChains = bitcoinOnlyChainList(getAllChains(), bitcoinOnly).filter(c => {
 					if (!isChainSupported(c, fwVersion)) return false
-					if ((c.id === 'zcash' || c.id === 'zcash-shielded') && !zcashPrivacyEnabled) return false
+					if (c.id === 'zcash-shielded' && !zcashPrivacyEnabled) return false
 					if (c.id === 'hive' && !hiveEnabled) return false
 					if (!networkOn(c.id)) return false
 					return true
@@ -10806,7 +10806,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					if (!isChainSupported(c, fwVersion)) return false
 					// Monero balances come from the watch-only sidecar, not an address audit.
 					if (c.chainFamily === 'monero') return false
-					if ((c.id === 'zcash' || c.id === 'zcash-shielded') && !zcashPrivacyEnabled) return false
+					if (c.id === 'zcash-shielded' && !zcashPrivacyEnabled) return false
 					if (c.id === 'hive' && !hiveEnabled) return false
 					return true
 				})
