@@ -66,5 +66,10 @@
 	"rescanUnavailable": "History is not available for this network",
 	"rescanUnavailableAll": "No history to scan on these networks",
 	"rescanFailed": "Scan failed",
-	"rescanFailedDetail": "Scan failed: {{detail}}"
+	"rescanFailedDetail": "Scan failed: {{detail}}",
+	"chainTotalLabel": "{{chain}} · Total",
+	"chainNativeLine": "{{amount}} native · {{usd}}",
+	"tokensHeader": "Tokens · {{n}} · {{usd}}",
+	"smallBalances": "Small balances ({{n}})",
+	"smallBalancesHint": "under {{usd}}"
 }

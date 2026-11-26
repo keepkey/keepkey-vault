@@ -2,8 +2,9 @@ import { BalanceSyncProgress } from './BalanceSyncProgress'
 import { paidProviderRefreshOptions, type ProviderRefreshReason } from '../../shared/provider-refresh'
 import { getNumberLocale } from "../lib/number-locale"
 import { useUiTranslation } from "../i18n/ui"
-import { Component, Fragment, lazy, Suspense, useState, useEffect, useCallback, useMemo, useRef, type ReactNode, type ErrorInfo } from "react"
+import { Component, Fragment, lazy, Suspense, useState, useEffect, useLayoutEffect, useCallback, useMemo, useRef, type ReactNode, type ErrorInfo } from "react"
 import { Box, Flex, Text, Spinner, Image, Button } from "@chakra-ui/react"
+import { CHAIN_TOKEN_LIST_ID, chainCrownLayout } from "../lib/chain-crown-layout"
 import { useTranslation } from "react-i18next"
 import { CHAINS, customChainToChainDef, isChainSupported, type ChainDef } from "../../shared/chains"
 import { isBitcoinOnlyVariant } from "../../shared/flags"
@@ -11,7 +12,8 @@ import { balanceDisplayState } from "../../shared/balance-display-state"
 import { confirmedDashboardBalance, dashboardBalanceUpdatedAt, dashboardCacheIsQuiet, dashboardLastRefreshedAt, dashboardRefreshIsDue, mergeDashboardPortfolioFault, recoverDashboardPortfolioFault, usableDashboardBalance, type DashboardPortfolioFault } from '../../shared/dashboard-balance-policy'
 import { isLocalDeviceAccessError } from "../../shared/device-access-error"
 import { versionCompare } from "../../shared/firmware-versions"
-import { formatBalance, hasNonZeroBalance } from "../lib/formatting"
+import { formatBalance, formatCompactBalance, hasNonZeroBalance } from "../lib/formatting"
+import { splitDustTokens } from "../lib/token-dust"
 import { AnimatedUsd } from "./AnimatedUsd"
 import { getAssetIcon, registerCustomAsset } from "../../shared/assetLookup"
 import { moneroChainVisible } from "../../shared/monero-asset"
@@ -429,8 +431,8 @@ function TokenSatellite({
 	x,
 	y,
 	sat,
+	angle,
 	isHover,
-	tipBelow,
 	fallbackColor,
 	onEnter,
 	onLeave,
@@ -440,8 +442,9 @@ function TokenSatellite({
 	x: number
 	y: number
 	sat: number
+	/** Satellite's angle around the chain icon; the tooltip opens radially outward along it. */
+	angle: number
 	isHover: boolean
-	tipBelow: boolean
 	fallbackColor: string
 	onEnter: () => void
 	onLeave: () => void
@@ -450,11 +453,33 @@ function TokenSatellite({
 	const iconUrl = tok.icon || getAssetIcon(tok.caip)
 	const glow = useIconColor(iconUrl, fallbackColor)
 	const usd = tok.balanceUsd ?? 0
+	const tipRef = useRef<HTMLDivElement>(null)
+	const [flip, setFlip] = useState({ x: 1, y: 1 })
+
+	// Outward unit vector; snap near-axis components to 0 so the top satellite's
+	// tooltip sits centred above it rather than drifting sideways.
+	const snap = (v: number) => (Math.abs(v) < 0.2 ? 0 : v)
+	const ux = snap(Math.cos(angle)) * flip.x
+	const uy = snap(Math.sin(angle)) * flip.y
+	const reach = sat / 2 + 10
+
+	// Flip an axis when the tooltip would leave the window.
+	useLayoutEffect(() => {
+		if (!isHover) { setFlip({ x: 1, y: 1 }); return }
+		const r = tipRef.current?.getBoundingClientRect()
+		if (!r) return
+		const fx = r.left < 0 || r.right > window.innerWidth ? -1 : 1
+		const fy = r.top < 0 || r.bottom > window.innerHeight ? -1 : 1
+		if (fx !== 1 || fy !== 1) setFlip(f => ({ x: f.x * fx, y: f.y * fy }))
+	}, [isHover])
+
 	return (
 		<Box
 			as="button"
 			onMouseEnter={onEnter}
 			onMouseLeave={onLeave}
+			onFocus={onEnter}
+			onBlur={onLeave}
 			onClick={onClick}
 			position="absolute"
 			left={`${x - sat / 2}px`}
@@ -465,29 +490,44 @@ function TokenSatellite({
 			bg="transparent"
 			border="0"
 			p={0}
-			display="grid"
-			placeItems="center"
-			transition="all 0.3s cubic-bezier(0.2,0.8,0.2,1)"
-			transform={isHover ? 'scale(1.15)' : 'scale(1)'}
-			filter={isHover
-				? `drop-shadow(0 0 24px ${glow})`
-				: `drop-shadow(0 0 12px ${glow}66) drop-shadow(0 4px 14px rgba(0,0,0,0.55))`}
 			zIndex={isHover ? 10 : 1}
 			cursor="pointer"
 			aria-label={tok.symbol}
 		>
-			<AssetIcon
-				caip={tok.caip}
-				iconUrl={tok.icon}
-				alt={tok.symbol}
-				size={sat}
+			{/* Round halo in the token's colour. A real element instead of a CSS
+			    filter on this button: drop-shadow() on an ancestor of the tooltip
+			    also shadows the tooltip box, which rendered as a hard-edged block. */}
+			<Box
+				position="absolute"
+				inset={`${-sat * 0.5}px`}
+				borderRadius="full"
+				pointerEvents="none"
+				bg={`radial-gradient(circle, ${glow}66 0%, ${glow}26 38%, ${glow}00 70%)`}
+				opacity={isHover ? 1 : 0.6}
+				transition="opacity 0.3s ease"
 			/>
+			<Box
+				position="relative"
+				w="100%"
+				h="100%"
+				borderRadius="full"
+				display="grid"
+				placeItems="center"
+				boxShadow="0 4px 14px rgba(0,0,0,0.55)"
+				transition="transform 0.3s cubic-bezier(0.2,0.8,0.2,1)"
+				transform={isHover ? 'scale(1.08)' : 'scale(1)'}
+			>
+				<AssetIcon caip={tok.caip} iconUrl={tok.icon} alt={tok.symbol} size={sat} />
+			</Box>
 			{isHover && (
 				<Box
+					ref={tipRef}
 					position="absolute"
-					{...(tipBelow ? { bottom: "-66px" } : { top: "-66px" })}
-					left="50%"
-					transform="translateX(-50%)"
+					left={`calc(50% + ${ux * reach}px)`}
+					top={`calc(50% + ${uy * reach}px)`}
+					// Pin the tooltip edge nearest the satellite to the anchor point,
+					// so it grows away from the crown instead of over its neighbours.
+					transform={`translate(calc(-50% + ${ux * 50}%), calc(-50% + ${uy * 50}%))`}
 					bg="var(--ink-3)"
 					border={`1px solid ${glow}`}
 					px="3"
@@ -522,8 +562,113 @@ function HeatmapHost({ tiles, drilled }: { tiles: Parameters<typeof HeatmapView>
 	)
 }
 
-/** Chain-detail orbital — chain icon as the sun, tokens orbiting as satellites.
- *  Shown when the user picks a chain from the sidebar list. */
+/** USD with two decimals in the sidebar's style ($ + locale grouping). */
+const formatUsd = (usd: number) => `$${usd.toLocaleString(getNumberLocale(), { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+
+/** One token row on the chain page: name/label in sans on the left, USD
+ *  value leading on the right with the (abbreviated) quantity under it. */
+function ChainTokenRow({ tok, chain, privateMode, onOpen }: {
+	tok: TokenBalance
+	chain: ChainDef
+	privateMode: boolean
+	onOpen: (tok: TokenBalance) => void
+}) {
+	return (
+		<Flex
+			as="button"
+			onClick={() => onOpen(tok)}
+			align="center"
+			gap="2.5"
+			px="2"
+			py="1.5"
+			borderRadius="md"
+			bg="transparent"
+			_hover={{ bg: "rgba(255,255,255,0.05)" }}
+			cursor="pointer"
+			transition="background 0.15s"
+			border="0"
+			title={tok.name || tok.symbol}
+		>
+			{/* No chain badge: every token here belongs to the page's own chain. */}
+			<AssetIcon caip={tok.caip} iconUrl={tok.icon} alt={tok.symbol} size={26} />
+			<Box flex="1" minW="0" textAlign="left" fontFamily="var(--font-ui-sans)">
+				<Text fontSize="13px" fontWeight="600" color="var(--text-0)" lineHeight="1.25" truncate>
+					{tok.symbol}
+				</Text>
+				<Text fontSize="11px" color="var(--text-2)" lineHeight="1.3" truncate>
+					{tok.name || chain.coin}
+				</Text>
+			</Box>
+			<Box textAlign="right" flexShrink={0} fontFamily="var(--font-mono)" style={{ fontVariantNumeric: 'tabular-nums' }}>
+				<Text fontSize="13px" fontWeight="500" color="var(--text-0)" lineHeight="1.25">
+					{privateMode ? '••••' : formatUsd(tok.balanceUsd ?? 0)}
+				</Text>
+				<Text fontSize="11px" color="var(--text-2)" lineHeight="1.3">
+					{privateMode ? '••••' : `${formatCompactBalance(tok.balance)} ${tok.symbol}`}
+				</Text>
+			</Box>
+		</Flex>
+	)
+}
+
+/** Chain-page token list: "TOKENS · N · $total" header, rows sorted by USD,
+ *  and dust (< $0.01, priced) folded into a collapsible "Small balances". */
+function ChainTokenList({ tokens, chain, privateMode, onOpen }: {
+	tokens: TokenBalance[]
+	chain: ChainDef
+	privateMode: boolean
+	onOpen: (tok: TokenBalance) => void
+}) {
+	const { t } = useTranslation("dashboard")
+	const [dustOpen, setDustOpen] = useState(false)
+	const byUsd = (a: TokenBalance, b: TokenBalance) => (b.balanceUsd ?? 0) - (a.balanceUsd ?? 0)
+	const { main, dust } = useMemo(() => {
+		const split = splitDustTokens(tokens)
+		return { main: split.main.slice().sort(byUsd), dust: split.dust.slice().sort(byUsd) }
+	}, [tokens])
+	const sumUsd = tokens.reduce((s, tok) => s + (tok.balanceUsd ?? 0), 0)
+	return (
+		<Box w="100%" mt="1" id={CHAIN_TOKEN_LIST_ID}>
+			<Text fontSize="11px" fontFamily="var(--font-ui-sans)" color="var(--text-2)" letterSpacing="0.14em" textTransform="uppercase" fontWeight="500" mb="1.5" px="2">
+				{t("tokensHeader", { n: tokens.length, usd: privateMode ? '••••' : formatUsd(sumUsd) })}
+			</Text>
+			<Flex direction="column" gap="0.5" maxH="38vh" overflowY="auto" pr="1" className="kk-tokens-scroll">
+				{main.map(tok => <ChainTokenRow key={tok.caip} tok={tok} chain={chain} privateMode={privateMode} onOpen={onOpen} />)}
+				{dust.length > 0 && (
+					<>
+						<Box
+							as="button"
+							onClick={() => setDustOpen(o => !o)}
+							aria-expanded={dustOpen}
+							display="flex"
+							alignItems="center"
+							gap="2"
+							mt="1"
+							px="2"
+							py="2"
+							borderTop="1px dashed var(--line-2)"
+							bg="transparent"
+							color="var(--text-2)"
+							fontFamily="var(--font-ui-sans)"
+							fontSize="12px"
+							textAlign="left"
+							cursor="pointer"
+							_hover={{ color: "var(--text-1)" }}
+						>
+							<Box as="span" display="inline-block" transition="transform 0.15s" transform={dustOpen ? 'rotate(90deg)' : 'none'}>▸</Box>
+							<span>{t("smallBalances", { n: dust.length })}</span>
+							<span>· {t("smallBalancesHint", { usd: '$0.01' })}</span>
+						</Box>
+						{dustOpen && dust.map(tok => <ChainTokenRow key={tok.caip} tok={tok} chain={chain} privateMode={privateMode} onOpen={onOpen} />)}
+					</>
+				)}
+			</Flex>
+		</Box>
+	)
+}
+
+/** Chain-detail crown — chain icon as the anchor, tokens on an arc above it,
+ *  balance as the hero below. Shown when the user picks a chain. */
 function ChainDetailOrbital({
 	chain,
 	balance,
@@ -531,6 +676,8 @@ function ChainDetailOrbital({
 	cleanTokens,
 	onSelectChain,
 	onSelectToken,
+	onShowAllTokens,
+	chainTotalUsd,
 }: {
 	chain: ChainDef
 	balance?: ChainBalance
@@ -538,69 +685,98 @@ function ChainDetailOrbital({
 	cleanTokens: import("../../shared/types").TokenBalance[]
 	onSelectChain: () => void
 	onSelectToken: (tok: import("../../shared/types").TokenBalance) => void
+	/** "+N" chip handler; defaults to scrolling to the token list. */
+	onShowAllTokens?: () => void
+	/** Chain total (native + clean tokens) as the sidebar shows it. When
+	 *  omitted it is summed from the native and token values passed in. */
+	chainTotalUsd?: number
 }) {
-  const uiText = useUiTranslation()
+	const uiText = useUiTranslation()
+	const { t } = useTranslation("dashboard")
 
 	const [hover, setHover] = useState<string | null>(null)
-	const [size, setSize] = useState(380)
+	const [avail, setAvail] = useState(380)
+	const rootRef = useRef<HTMLDivElement>(null)
 
 	useEffect(() => {
-		const compute = () => setSize(Math.min(380, Math.max(280, window.innerWidth - 420)))
-		compute()
-		window.addEventListener('resize', compute)
-		return () => window.removeEventListener('resize', compute)
+		const el = rootRef.current
+		if (!el) return
+		const measure = () => setAvail(el.clientWidth || 380)
+		measure()
+		const ro = new ResizeObserver(measure)
+		ro.observe(el)
+		return () => ro.disconnect()
 	}, [])
 
-	const cx = size / 2
-	const cy = size / 2
-	const orbitR = size * 0.294 // ~30% smaller orbit diameter
-	const ringR  = size * 0.322 // scaled with orbitR to keep satellites on the ring
-
-	const tokenSats = cleanTokens
+	const { privateModeEnabled } = useFiat()
+	// Dust stays out of the crown; the list groups it under "Small balances".
+	const tokenSats = useMemo(() => splitDustTokens(cleanTokens).main
 		.slice()
-		.sort((a, b) => (b.balanceUsd ?? 0) - (a.balanceUsd ?? 0))
-		.slice(0, 8)
+		.sort((a, b) => (b.balanceUsd ?? 0) - (a.balanceUsd ?? 0)), [cleanTokens])
+
+	const full = chainCrownLayout(tokenSats.length)
+	const scale = Math.max(0.7, Math.min(1, avail / full.width))
+	const g = scale === 1 ? full : chainCrownLayout(tokenSats.length, scale)
 
 	const nativeBal = balance?.balance || '0'
 	const shielded = shieldedPortion(balance)
 	const combinedBal = parseFloat(nativeBal) + shielded.amount + shielded.pending
+	const unknown = !balance || balance.syncState === 'degraded'
+	const amountText = `${unknown ? '—' : formatBalance(String(combinedBal))} ${chain.symbol}`
+	const nativeUsd = nativeBalanceUsd + shielded.usd
+	const totalUsd = chainTotalUsd ?? nativeUsd + cleanTokens.reduce((s, tok) => s + (tok.balanceUsd ?? 0), 0)
+	// Hero = chain total in USD, the same figure as the sidebar. Without a
+	// price (feed down, or held funds valued at $0) fall back to the native
+	// amount: "$0.00" next to a real holding reads as lost money.
+	const fiatKnown = balance?.fiatValueState !== 'unavailable' && (totalUsd > 0 || !hasNonZeroBalance(combinedBal))
+	const heroText = privateModeEnabled ? '••••' : unknown ? '—' : fiatKnown ? formatUsd(totalUsd) : amountText
+	const subText = privateModeEnabled || unknown || !fiatKnown ? null
+		: t('chainNativeLine', { amount: amountText, usd: formatUsd(nativeUsd) })
+	// Hero auto-shrink: mono glyphs are ~0.62em wide, so size the line to fit.
+	const heroPx = Math.max(22, Math.min(44, Math.floor((avail - 32) / (heroText.length * 0.62))))
+
+	const showAll = onShowAllTokens ?? (() => {
+		const list = document.getElementById(CHAIN_TOKEN_LIST_ID)
+		if (!list) return
+		list.scrollIntoView({ behavior: 'smooth', block: 'start' })
+		list.querySelector<HTMLElement>('button:not([disabled])')?.focus({ preventScroll: true })
+	})
+
+	const first = g.points[0]
+	const last = g.points[g.points.length - 1]
+	const arcPath = g.points.length > 1 && first && last
+		? `M ${first.x} ${first.y} A ${g.r} ${g.r} 0 ${g.span > Math.PI ? 1 : 0} 1 ${last.x} ${last.y}`
+		: null
 
 	return (
-		<Box position="relative" w={`${size}px`} h={`${size}px`} mx="auto" my="2">
-			<svg width={size} height={size} style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}>
-				<circle
-					cx={cx}
-					cy={cy}
-					r={ringR}
-					fill="none"
-					stroke="rgba(255,255,255,0.10)"
-					strokeWidth="1"
-					strokeDasharray="2 6"
-					style={{
-						transformOrigin: `${cx}px ${cy}px`,
-						animation: 'v3-spin 90s linear infinite',
-					}}
-				/>
-			</svg>
+		<Flex ref={rootRef} direction="column" align="center" w="100%" my="2">
+			<Box position="relative" w={`${g.width}px`} h={`${g.height}px`} flexShrink={0}>
+				{arcPath && (
+					<svg width={g.width} height={g.height} style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }} aria-hidden="true">
+						<path d={arcPath} fill="none" stroke="rgba(255,255,255,0.10)" strokeWidth="1" strokeDasharray="2 6" />
+					</svg>
+				)}
 
-			{/* Center sun — chain icon + native balance */}
-			<Box
-				position="absolute"
-				top="50%"
-				left="50%"
-				transform="translate(-50%, -50%)"
-				w="70%"
-				textAlign="center"
-				display="flex"
-				flexDirection="column"
-				alignItems="center"
-				gap="2"
-			>
+				{/* Radial halo behind the chain icon — the crown no longer has the full
+				    ring of tinted satellites around the icon that used to add to its glow. */}
+				<Box
+					position="absolute"
+					left={`${g.cx - g.core * 1.1}px`}
+					top={`${g.cy - g.core * 1.1}px`}
+					w={`${g.core * 2.2}px`}
+					h={`${g.core * 2.2}px`}
+					borderRadius="full"
+					pointerEvents="none"
+					bg={`radial-gradient(circle, ${chain.color}59 0%, ${chain.color}24 42%, ${chain.color}00 70%)`}
+				/>
 				<Box
 					as="button"
 					onClick={onSelectChain}
-					w="96px"
-					h="96px"
+					position="absolute"
+					left={`${g.cx - g.core / 2}px`}
+					top={`${g.cy - g.core / 2}px`}
+					w={`${g.core}px`}
+					h={`${g.core}px`}
 					borderRadius="full"
 					bg="transparent"
 					border="0"
@@ -620,31 +796,86 @@ function ChainDetailOrbital({
 						boxShadow={`0 0 0 1px var(--line), 0 0 70px -10px ${chain.color}, 0 8px 24px -8px rgba(0,0,0,0.6)`}
 					/>
 				</Box>
-				<Text
-					fontSize={{ base: "10px" }}
-					color="var(--text-3)"
-					letterSpacing="0.20em"
-					textTransform="uppercase"
-					fontWeight="500"
-					mt="1"
-				>
-					{chain.coin}
+
+				{/* Token satellites — each pulls its glow color from its own icon. */}
+				{tokenSats.slice(0, g.visible).map((tok, i) => {
+					const p = g.points[i]!
+					return (
+						<TokenSatellite
+							key={tok.caip}
+							tok={tok}
+							x={p.x}
+							y={p.y}
+							sat={g.sat}
+							angle={p.angle}
+							isHover={hover === tok.caip}
+							fallbackColor={chain.color}
+							onEnter={() => setHover(tok.caip)}
+							onLeave={() => setHover(null)}
+							onClick={() => onSelectToken(tok)}
+						/>
+					)
+				})}
+
+				{g.extra > 0 && (() => {
+					const p = g.points[g.visible]!
+					return (
+						<Box
+							as="button"
+							onClick={showAll}
+							position="absolute"
+							left={`${p.x - g.sat / 2}px`}
+							top={`${p.y - g.sat / 2}px`}
+							w={`${g.sat}px`}
+							h={`${g.sat}px`}
+							borderRadius="full"
+							bg="var(--ink-2)"
+							border="1px solid var(--line)"
+							color="var(--text-1)"
+							fontSize={`${Math.round(13 * scale)}px`}
+							fontWeight="600"
+							fontFamily="var(--font-mono)"
+							display="grid"
+							placeItems="center"
+							cursor="pointer"
+							transition="all 0.2s"
+							_hover={{ borderColor: chain.color, color: 'var(--text-0)', transform: 'scale(1.08)' }}
+							aria-label={t("tokensCount", { count: tokenSats.length })}
+							title={t("tokensCount", { count: tokenSats.length })}
+						>
+							+{g.extra}
+						</Box>
+					)
+				})()}
+			</Box>
+
+			{/* Label + hero total + native line — normal flow, always below the crown. */}
+			<Flex direction="column" align="center" gap="1.5" mt="3" w="100%" px="4" textAlign="center">
+				<Text fontSize="12px" fontFamily="var(--font-ui-sans)" color="var(--text-1)" letterSpacing="0.16em" textTransform="uppercase" fontWeight="500">
+					{fiatKnown ? t('chainTotalLabel', { chain: chain.coin }) : chain.coin}
 				</Text>
 				<Text
-					fontSize={{ base: "26px", md: "32px" }}
+					fontSize={`${heroPx}px`}
+					fontFamily="var(--font-mono)"
 					fontWeight="500"
 					color="var(--text-0)"
 					letterSpacing="-0.02em"
-					lineHeight="1"
+					lineHeight="1.05"
+					whiteSpace="nowrap"
+					maxW="100%"
+					overflow="hidden"
+					textOverflow="ellipsis"
+					style={{ fontVariantNumeric: 'tabular-nums' }}
+					title={heroText}
 				>
-					{!balance || balance.syncState === 'degraded' ? '—' : formatBalance(String(combinedBal))} {chain.symbol}
+					{heroText}
 				</Text>
-				{(nativeBalanceUsd + shielded.usd) > 0 && (
-					<Text fontSize="13px" color="var(--text-2)" fontWeight="400">
-						≈ ${(nativeBalanceUsd + shielded.usd).toLocaleString(getNumberLocale(), { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+				{subText && (
+					<Text fontSize="13px" fontFamily="var(--font-mono)" color="var(--text-2)" fontWeight="400" style={{ fontVariantNumeric: 'tabular-nums' }}>
+						{subText}
 					</Text>
 				)}
-				{(shielded.amount > 0 || shielded.pending > 0) && (
+				{!privateModeEnabled && (shielded.amount > 0 || shielded.pending > 0) && (
 					<Flex align="center" justify="center" gap="1" mt="0.5">
 						<ShieldGlyph size={11} />
 						<Text fontSize="12px" color="var(--gold)" fontWeight="500">
@@ -652,34 +883,8 @@ function ChainDetailOrbital({
 						</Text>
 					</Flex>
 				)}
-			</Box>
-
-			{/* Token satellites — each pulls its glow color from its own icon. */}
-			{tokenSats.map((tok, i) => {
-				const angle = (Math.PI * 2 * i) / tokenSats.length - Math.PI / 2
-				const x = cx + Math.cos(angle) * orbitR
-				const y = cy + Math.sin(angle) * orbitR
-				const usd = tok.balanceUsd ?? 0
-				const sat = Math.max(40, Math.min(64, 32 + Math.sqrt(usd) * 1.2))
-				const isHover = hover === tok.caip
-				const tipBelow = y < cy
-				return (
-					<TokenSatellite
-						key={tok.caip}
-						tok={tok}
-						x={x}
-						y={y}
-						sat={sat}
-						isHover={isHover}
-						tipBelow={tipBelow}
-						fallbackColor={chain.color}
-						onEnter={() => setHover(tok.caip)}
-						onLeave={() => setHover(null)}
-						onClick={() => onSelectToken(tok)}
-					/>
-				)
-			})}
-		</Box>
+			</Flex>
+		</Flex>
 	)
 }
 
@@ -818,6 +1023,7 @@ function VaultPortfolioDashboard({ vault, onLoaded, watchOnly, firmwareVersion }
 				{!watchOnly && <Button borderRadius="full" bg="rgba(251,146,60,0.12)" color="#fb923c" disabled={!balance || !!validationError}
 					onClick={() => openAsset(undefined, 'send')}>↑ {uiText('Send')}</Button>}
 			</Flex>
+			<Box id={CHAIN_TOKEN_LIST_ID}>
 			<Text fontSize="10px" color="var(--text-3)" letterSpacing="0.2em" textTransform="uppercase" mb="2">{uiText('Assets')}</Text>
 			{identity.supportedAssets.map(asset => {
 				const native = asset.caip.toLowerCase() === chain.caip.toLowerCase()
@@ -827,13 +1033,14 @@ function VaultPortfolioDashboard({ vault, onLoaded, watchOnly, firmwareVersion }
 				return <Flex key={asset.caip} asChild align="center" gap="3" w="100%" textAlign="left" p="3" mb="1" borderRadius="lg"
 					bg="transparent" border="0" _hover={{ bg: 'kk.cardBg' }} cursor={native || token ? 'pointer' : 'default'}>
 					<button type="button" disabled={!native && !token} onClick={() => openAsset(token)}>
-					<AssetIcon caip={asset.caip} iconUrl={token?.icon} chainCaip={chain.caip} alt={asset.symbol} size={32} />
+					<AssetIcon caip={asset.caip} iconUrl={token?.icon} alt={asset.symbol} size={32} />
 					<Box flex="1" minW="0"><Text fontSize="14px" fontWeight="600">{asset.symbol}</Text><Text fontSize="11px" color="var(--text-2)">{chain.coin}</Text></Box>
 					<Box textAlign="right"><Text fontSize="14px">{privateModeEnabled ? '••••' : amount === undefined ? '—' : formatBalance(amount)}</Text>
 						<Text fontSize="11px" color="var(--text-2)">{privateModeEnabled ? '••••' : usd === undefined || balance?.fiatValueState === 'unavailable' ? '—' : fmt(usd)}</Text></Box>
 					</button>
 				</Flex>
 			})}
+			</Box>
 			<details style={{ borderTop: '1px solid var(--line)', marginTop: 20, paddingTop: 16, color: 'var(--text-2)', fontSize: 12 }}>
 				<summary style={{ cursor: 'pointer' }}>{identity.threshold} {uiText('of')} {identity.cosigners.length} · {uiText('Cosigners & account details')}</summary>
 				<Box mt="4"><VaultIdentityDetails vault={identity} compact showCertification={false} /></Box>
@@ -2857,9 +3064,24 @@ function PersonalDashboard({ capabilities, isEmulator, onLoaded, watchOnly, watc
 				</Box>
 			)}
 
-			<Flex direction="column" w="100%" minH={viewMode === 'heatmap' ? "0" : "auto"}>
+			<Flex direction="column" w="100%" minH={viewMode === 'heatmap' ? "0" : "auto"} position="relative">
+				{/* Chain page: the background mesh is drawn by the native window
+				    behind this transparent webview, so it can't be masked here.
+				    Instead a soft ink scrim fades it out behind the content column
+				    (crown, hero, token list) and leaves it visible at the edges. */}
+				{drilledChainId && (
+					<Box
+						position="absolute"
+						inset="0"
+						pointerEvents="none"
+						zIndex={0}
+						aria-hidden="true"
+						style={{ background: 'radial-gradient(ellipse 420px 44% at 50% 40%, rgba(11,11,14,0.6) 0%, rgba(11,11,14,0.32) 55%, rgba(11,11,14,0) 100%)' }}
+					/>
+				)}
 				{/* View picker — top center of the hero area */}
-				<Flex justify="center" pt="2" pb="1">
+				{/* position+zIndex: above the scrim, and its menu above the hero slot (z 1). */}
+				<Flex justify="center" pt="2" pb="1" position="relative" zIndex={3}>
 					<ViewPickerButton assetCount={(() => {
 						if (drilledChainId) {
 							const dchain = visibleChains.find(c => c.id === drilledChainId)
@@ -2873,16 +3095,18 @@ function PersonalDashboard({ capabilities, isEmulator, onLoaded, watchOnly, watc
 					})()} />
 				</Flex>
 				{/* Top: orbital widget / donut / welcome — vertically centered.
-				    overflow:hidden prevents the orbital box from visually and
-				    pointer-event-wise spilling into the action button row below. */}
+				    Drilled into a chain, the slot sizes to its content (the crown
+				    computes its own height) so logos are never clipped; only the
+				    heatmap, which fills its parent, keeps a fixed clipped slot. */}
 				<Flex
-					h={drilledChainId ? "380px" : "62vh"}
+					h={drilledChainId ? (viewMode === 'heatmap' ? "380px" : "auto") : "62vh"}
+					minH={drilledChainId && viewMode !== 'heatmap' && viewMode !== 'orbital' ? "380px" : undefined}
 					align="center"
 					justify="center"
 					w="100%"
 					px="3"
 					pt="6"
-					overflow="hidden"
+					overflow={drilledChainId && viewMode !== 'heatmap' ? "visible" : "hidden"}
 					position="relative"
 					zIndex={1}
 				>
@@ -2995,6 +3219,7 @@ function PersonalDashboard({ capabilities, isEmulator, onLoaded, watchOnly, watc
 									nativeBalanceUsd={nativeUsd}
 									cleanTokens={cleanTokens}
 									onSelectChain={() => openChainPage(dchain)}
+									chainTotalUsd={cleanBalanceUsd.get(dchain.id)?.usd}
 									onSelectToken={(tok) => openChainPage(dchain, undefined, tok)}
 								/>
 							)
@@ -3047,6 +3272,7 @@ function PersonalDashboard({ capabilities, isEmulator, onLoaded, watchOnly, watc
 												nativeBalanceUsd={nativeUsd}
 												cleanTokens={cleanTokens}
 												onSelectChain={() => openChainPage(dchain)}
+												chainTotalUsd={cleanBalanceUsd.get(dchain.id)?.usd}
 												onSelectToken={(tok) => openChainPage(dchain, undefined, tok)}
 											/>
 										)
@@ -3295,6 +3521,7 @@ function PersonalDashboard({ capabilities, isEmulator, onLoaded, watchOnly, watc
 											cursor="pointer"
 											minW="100px"
 											justifyContent="center"
+											fontFamily="var(--font-ui-sans)"
 										>
 											{p.icon}
 											{p.label}
@@ -3306,58 +3533,8 @@ function PersonalDashboard({ capabilities, isEmulator, onLoaded, watchOnly, watc
 								    maxH + overflowY="auto" keep the chart+actions pinned while
 								    the user scrolls through a long token list independently. */}
 								{cleanTokens.length > 0 && (
-									<Box w="100%" mt="-1">
-										<Text fontSize="10px" color="var(--text-3)" letterSpacing="0.20em" textTransform="uppercase" mb="1" px="1">
-											{t("tokensCount", { count: cleanTokens.length })}
-										</Text>
-										<Flex direction="column" gap="0.5" maxH="38vh" overflowY="auto" pr="1" className="kk-tokens-scroll">
-											{cleanTokens
-												.slice()
-												.sort((a, b) => (b.balanceUsd ?? 0) - (a.balanceUsd ?? 0))
-												.map((tok) => (
-													<Flex
-														key={tok.caip}
-														as="button"
-														onClick={() => openChainPage(dchain, undefined, tok)}
-														align="center"
-														gap="2.5"
-														px="2"
-														py="1.5"
-														borderRadius="md"
-														bg="transparent"
-														_hover={{ bg: "kk.cardBg" }}
-														cursor="pointer"
-														transition="all 0.15s"
-														border="0"
-														title={tok.name || tok.symbol}
-													>
-														<AssetIcon
-															caip={tok.caip}
-															iconUrl={tok.icon}
-															chainCaip={dchain.caip}
-															alt={tok.symbol}
-															size={26}
-														/>
-														<Box flex="1" minW="0" textAlign="left">
-															<Text fontSize="13px" fontWeight="600" color="var(--text-0)" lineHeight="1.2" truncate>
-																{tok.symbol}
-															</Text>
-															<Text fontSize="10px" color="var(--text-3)" lineHeight="1.3" truncate>
-																{tok.name || dchain.coin}
-															</Text>
-														</Box>
-														<Box textAlign="right" flexShrink={0}>
-															<Text fontSize="12px" fontWeight="500" color="var(--text-0)" lineHeight="1.2">
-																{formatBalance(tok.balance)}
-															</Text>
-															<Text fontSize="10px" color="var(--text-2)" lineHeight="1.3">
-																${(tok.balanceUsd ?? 0).toLocaleString(getNumberLocale(), { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-															</Text>
-														</Box>
-													</Flex>
-												))}
-										</Flex>
-									</Box>
+									<ChainTokenList tokens={cleanTokens} chain={dchain} privateMode={privateModeEnabled}
+										onOpen={(tok) => openChainPage(dchain, undefined, tok)} />
 								)}
 
 								<VaultPortfolioRows portfolios={vaultPortfolios.filter(p => p.identity.networkId === dchain.networkId && p.identity.chainId === dchain.id)}

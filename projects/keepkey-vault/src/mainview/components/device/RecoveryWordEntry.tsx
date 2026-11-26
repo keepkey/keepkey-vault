@@ -1,8 +1,11 @@
 import { useUiTranslation } from "../../i18n/ui"
 import { useState, useEffect, useCallback, useRef } from "react"
 import { useTranslation } from "react-i18next"
-import { Box, Text, VStack, Flex, Button, HStack } from "@chakra-ui/react"
+import type { ReactNode } from "react"
+import { Box, Text, VStack, Flex } from "@chakra-ui/react"
 import { FaCheckCircle, FaExclamationTriangle } from "react-icons/fa"
+import { PreflightStyles } from "../preflight/PreflightConsole"
+import { CIPHER_COLS, OledCipher, SpinningDevice } from "../v3"
 import { DocsLink } from "../DocsLink"
 import { DOCS_LINKS, watch } from "../../../shared/docs-links"
 
@@ -28,6 +31,26 @@ const ALPHABET_ROWS = [
 ]
 
 const MAX_CHARS = 4
+const POSITIONS = ALPHABET_ROWS.flat()
+
+/** The same landscape surface as the setup wizard, replacing it while the
+ *  cipher entry runs (no modal floating over another frame). */
+function Surface({ children, label }: { children: ReactNode; label?: string }) {
+  return (
+    <Flex position="fixed" inset={0} bg="rgba(11,11,14,0.94)" align="center" justify="center" zIndex={2000}>
+      <PreflightStyles />
+      <Box role="dialog" aria-modal="true" aria-label={label}
+        w={{ base: '100vw', md: 'min(1080px, 94vw)' }} maxH={{ base: '100vh', md: '92vh' }} overflowY="auto"
+        bg="var(--ink-0)"
+        backgroundImage="radial-gradient(120% 80% at 0% 0%, rgba(233,196,106,.08), transparent 55%), radial-gradient(90% 70% at 100% 100%, rgba(98,126,234,.06), transparent 60%)"
+        borderRadius={{ base: 'none', md: '18px' }}
+        boxShadow={{ base: 'none', md: 'inset 0 0 0 1px rgba(255,255,255,.06), 0 30px 80px -30px rgba(0,0,0,.8)' }}
+        px={{ base: 4, md: 8 }} py={{ base: 5, md: 7 }} fontFamily="var(--font-ui-sans)">
+        {children}
+      </Box>
+    </Flex>
+  )
+}
 
 const ANIMATIONS_CSS = `
   @keyframes kkWordAccepted {
@@ -159,41 +182,14 @@ export function RecoveryWordEntry({
     // Word-not-found: auto-retrying — show a brief warning that will auto-clear
     if (isWordNotFound) {
       return (
-        <Flex
-          position="fixed"
-          top={0}
-          left={0}
-          w="100vw"
-          h="100vh"
-          bg="blackAlpha.800"
-          align="center"
-          justify="center"
-          zIndex={2000}
-        >
-          <Box
-            bg="kk.cardBg"
-            borderRadius="xl"
-            border="1px solid"
-            borderColor="kk.warning"
-            p="8"
-            maxW="460px"
-            w="90%"
-            boxShadow="0 8px 32px rgba(0,0,0,0.6)"
-          >
-            <VStack gap={4} textAlign="center">
-              <FaExclamationTriangle color="var(--gold)" size={48} />
-              <Text fontSize="xl" fontWeight="bold" color="kk.warning">
-                {t('recovery.wordNotFoundTitle')}
-              </Text>
-              <Text color="kk.textSecondary" fontSize="sm">
-                {t('recovery.wordNotFoundMessage')}
-              </Text>
-              <Text color="kk.textMuted" fontSize="xs">
-                {t('recovery.wordNotFoundRestarting')}
-              </Text>
-            </VStack>
-          </Box>
-        </Flex>
+        <Surface label={t('recovery.wordNotFoundTitle')}>
+          <VStack gap={4} textAlign="center" py={6} maxW="480px" mx="auto">
+            <FaExclamationTriangle color="var(--gold)" size={40} />
+            <Text fontSize="xl" fontWeight="600" color="kk.warning">{t('recovery.wordNotFoundTitle')}</Text>
+            <Text color="kk.textSecondary" fontSize="sm">{t('recovery.wordNotFoundMessage')}</Text>
+            <Text color="kk.textMuted" fontSize="xs">{t('recovery.wordNotFoundRestarting')}</Text>
+          </VStack>
+        </Surface>
       )
     }
 
@@ -204,29 +200,8 @@ export function RecoveryWordEntry({
     const iconColor = isPinMismatch ? 'var(--gold)' : 'var(--rose)'
 
     return (
-      <Flex
-        position="fixed"
-        top={0}
-        left={0}
-        w="100vw"
-        h="100vh"
-        bg="blackAlpha.800"
-        align="center"
-        justify="center"
-        zIndex={2000}
-      >
-        <Box
-          bg="kk.cardBg"
-          borderRadius="xl"
-          border="1px solid"
-          borderColor={errBorderColor}
-          p="8"
-          maxW="460px"
-          w="90%"
-          boxShadow="0 8px 32px rgba(0,0,0,0.6)"
-          maxH="90vh"
-          overflowY="auto"
-        >
+      <Surface label={title}>
+        <Box maxW="560px" mx="auto" borderTop="2px solid" borderColor={errBorderColor} pt={5}>
           <VStack gap={4} textAlign="center">
             <FaExclamationTriangle color={iconColor} size={48} />
             <Text fontSize="xl" fontWeight="bold" color={isPinMismatch ? 'kk.warning' : 'kk.error'}>
@@ -283,252 +258,122 @@ export function RecoveryWordEntry({
               </Text>
             )}
 
-            <Button
-              w="100%"
-              size="lg"
-              bg="kk.gold"
-              color="black"
-              _hover={{ bg: "kk.goldHover" }}
-              onClick={onRetry || onCancel}
-            >
+            <button type="button" className="kk-pf-go"
+              style={{ borderRadius: 999, padding: '12px 24px', border: 0, fontFamily: 'var(--font-mono)', fontSize: 12.5, cursor: 'pointer' }}
+              onClick={onRetry || onCancel}>
               {t('recovery.tryAgain')}
-            </Button>
+            </button>
           </VStack>
         </Box>
-      </Flex>
+      </Surface>
     )
   }
 
   // Word accepted flash overlay
   if (wordAccepted) {
     return (
-      <Flex
-        position="fixed"
-        top={0}
-        left={0}
-        w="100vw"
-        h="100vh"
-        bg="blackAlpha.800"
-        align="center"
-        justify="center"
-        zIndex={2000}
-      >
-        <VStack
-          gap={4}
-          style={{ animation: "kkWordAccepted 0.6s ease-out forwards" }}
-        >
-          <FaCheckCircle color="var(--teal)" size={64} />
-          <Text fontSize="2xl" fontWeight="bold" color="kk.success">
+      <Surface label={t('recovery.wordAccepted', { number: acceptedWord })}>
+        <style>{ANIMATIONS_CSS}</style>
+        <VStack gap={4} py={10} style={{ animation: "kkWordAccepted 0.6s ease-out forwards" }}>
+          <FaCheckCircle color="var(--gold)" size={56} />
+          <Text fontSize="2xl" fontWeight="600" color="kk.textPrimary">
             {t('recovery.wordAccepted', { number: acceptedWord })}
           </Text>
         </VStack>
-      </Flex>
+      </Surface>
     )
   }
 
+  const pill = { borderRadius: 999, padding: '12px 20px', border: 0, fontFamily: 'var(--font-mono)', fontSize: 12.5, whiteSpace: 'nowrap' as const }
   return (
-    <Flex
-      position="fixed"
-      top={0}
-      left={0}
-      w="100vw"
-      h="100vh"
-      bg="blackAlpha.800"
-      align="center"
-      justify="center"
-      zIndex={2000}
-    >
+    <Surface label={t('recovery.title')}>
       <style>{ANIMATIONS_CSS}</style>
-
-      <Box
-        bg="kk.cardBg"
-        borderRadius="xl"
-        border="1px solid"
-        borderColor="kk.border"
-        p="6"
-        maxW="760px"
-        w="95%"
-        boxShadow="0 8px 32px rgba(0,0,0,0.6)"
-      >
-        {/* Header */}
-        <Text
-          fontSize="xl"
-          fontWeight="bold"
-          mb="1"
-          textAlign="center"
-          color="kk.textPrimary"
-        >
-          {t('recovery.title')}
-        </Text>
-        <Text color="kk.textSecondary" fontSize="sm" mb="3" textAlign="center">
-          {t('recovery.description')}
-        </Text>
-
-        {/* Help toggle */}
-        <Flex justify="center" align="center" gap="3" mb="3">
-          <Button
-            size="xs"
-            variant="ghost"
-            color="kk.gold"
-            _hover={{ color: "kk.goldHover", bg: "kk.bg" }}
-            onClick={() => setShowHelp((v) => !v)}
-          >
-            {showHelp ? t('recovery.hideHelp') : t('recovery.howCipherWorks')}
-          </Button>
-          <DocsLink href={DOCS_LINKS.cipherRecovery} />
-          <DocsLink href={watch('intro-more-cipher')} label={uiText("Watch video")} />
-        </Flex>
-
-        {showHelp && (
-          <Box p={3} mb="3" bg="kk.bg" borderRadius="lg" border="1px solid" borderColor="kk.border">
-            <VStack align="start" gap={2}>
-              <Text fontSize="xs" fontWeight="bold" color="kk.gold">
-                {t('recovery.cipherRecovery')}
-              </Text>
-              <Text fontSize="xs" color="kk.textSecondary">
-                {t('recovery.helpParagraph1')}
-              </Text>
-              <Text fontSize="xs" color="kk.textSecondary">
-                {t('recovery.helpParagraph2')}
-              </Text>
-              <Text fontSize="xs" color="kk.textSecondary">
-                {t('recovery.helpParagraph3')}
-              </Text>
-              <Text fontSize="xs" color="kk.textMuted" fontStyle="italic">
-                {t('recovery.helpParagraph4')}
-              </Text>
-            </VStack>
+      <div className="kk-pf-kicker" style={{ marginBottom: 6 }}>{t('recovery.title')}</div>
+      <Box display="grid" gridTemplateColumns={{ base: '1fr', md: 'minmax(0,0.9fr) minmax(0,1.1fr)' }} gap={{ base: 6, md: 10 }} alignItems="start">
+        {/* ── Left: the device is what the user reads from ── */}
+        <Flex direction="column" gap={4}>
+          {/* The user reads letters off this screen: it never turns. */}
+          <SpinningDevice motion="still" scale={0.9} screen={<OledCipher />} />
+          <Text fontSize="14px" color="kk.textSecondary" lineHeight="1.55" maxW="34ch">
+            {uiText("Find each letter on your KeepKey, then click the same position here.")}
+          </Text>
+          <Text fontSize="13px" color="kk.textMuted">{t('recovery.description')}</Text>
+          <Box>
+            <button type="button" className="kk-pf-link" style={{ color: 'var(--text-2)' }} onClick={() => setShowHelp((v) => !v)}>
+              {showHelp ? t('recovery.hideHelp') : t('recovery.howCipherWorks')}
+            </button>
+            {showHelp && (
+              <VStack align="start" gap={2} mt={3} fontSize="12px" color="kk.textSecondary">
+                <Text fontWeight="600" color="kk.textPrimary">{t('recovery.cipherRecovery')}</Text>
+                <Text>{t('recovery.helpParagraph1')}</Text>
+                <Text>{t('recovery.helpParagraph2')}</Text>
+                <Text>{t('recovery.helpParagraph3')}</Text>
+                <Text color="kk.textMuted" fontStyle="italic">{t('recovery.helpParagraph4')}</Text>
+                <Flex gap={4}>
+                  <DocsLink href={DOCS_LINKS.cipherRecovery} color="kk.textMuted" fontSize="12px" />
+                  <DocsLink href={watch('intro-more-cipher')} label={uiText("Watch video")} color="kk.textMuted" fontSize="12px" />
+                </Flex>
+              </VStack>
+            )}
           </Box>
-        )}
-
-        {/* Word counter */}
-        <HStack justify="space-between" mb="2">
-          <Text fontSize="sm" fontWeight="semibold" color="kk.gold">
-            {t('recovery.wordOf', { current: wordPos + 1, total: totalWords })}
-          </Text>
-          <Text fontSize="xs" color="kk.textMuted">
-            {t('recovery.percentComplete', { percent: Math.round(progressPercent) })}
-          </Text>
-        </HStack>
-
-        {/* Progress bar */}
-        <Box h="4px" bg="kk.border" borderRadius="full" overflow="hidden" mb="5">
-          <Box
-            h="100%"
-            bg="kk.gold"
-            borderRadius="full"
-            transition="width 0.3s"
-            w={`${progressPercent}%`}
-          />
-        </Box>
-
-        {/* Character slots */}
-        <Flex justify="center" gap="3" mb="5">
-          {Array.from({ length: MAX_CHARS }, (_, i) => {
-            const filled = i < currentChars.length
-            const active = i === currentChars.length
-            return (
-              <Box
-                key={i}
-                w="48px"
-                h="48px"
-                borderRadius="lg"
-                border="2px solid"
-                borderColor={
-                  active ? "kk.gold" : filled ? "kk.success" : "kk.border"
-                }
-                bg={filled ? "kk.cardBgHover" : "kk.bg"}
-                display="flex"
-                alignItems="center"
-                justifyContent="center"
-                transition="all 0.15s"
-                boxShadow={active ? "0 0 0 3px rgba(233,196,106,0.2)" : "none"}
-              >
-                {filled && (
-                  <Text
-                    fontSize="xl"
-                    fontWeight="bold"
-                    color="kk.gold"
-                    style={{ animation: "kkCharPop 0.2s ease-out" }}
-                  >
-                    {"\u2022"}
-                  </Text>
-                )}
-              </Box>
-            )
-          })}
         </Flex>
 
-        {/* Letter keyboard */}
-        <VStack gap="2" mb="4">
-          {ALPHABET_ROWS.map((row, i) => (
-            <Flex key={i} gap="1.5" justifyContent="center" w="100%">
-              {row.map((letter) => (
-                <Button
-                  key={letter}
-                  onClick={() => handleChar(letter)}
-                  flex="1"
-                  minW="0"
-                  maxW="48px"
-                  h="48px"
-                  px="0"
-                  bg="kk.cardBg"
-                  border="1px solid"
-                  borderColor="kk.border"
-                  color="kk.textPrimary"
-                  fontSize="md"
-                  fontWeight="bold"
-                  borderRadius="lg"
-                  _hover={{ borderColor: "kk.gold", bg: "kk.cardBgHover" }}
-                  _active={{ bg: "kk.gold", borderColor: "kk.gold", color: "black" }}
-                  disabled={currentChars.length >= MAX_CHARS}
-                >
-                  {letter}
-                </Button>
+        {/* ── Right: progress, the word being entered, the positions ── */}
+        <Flex direction="column" gap={5}>
+          <Box>
+            <Flex justify="space-between" align="baseline">
+              <Text fontSize="15px" fontWeight="600" color="kk.textPrimary">{t('recovery.wordOf', { current: wordPos + 1, total: totalWords })}</Text>
+              <Text fontSize="12px" fontFamily="var(--font-mono)" color="kk.textMuted">{t('recovery.percentComplete', { percent: Math.round(progressPercent) })}</Text>
+            </Flex>
+            {/* One tick per word, on a hairline */}
+            <Flex mt={2} gap="3px" align="center" aria-hidden="true">
+              {Array.from({ length: totalWords }, (_, i) => (
+                <Box key={i} flex="1" h={i === wordPos ? '3px' : '1px'}
+                  bg={i < wordPos ? 'var(--gold)' : i === wordPos ? 'var(--gold-2)' : 'rgba(255,255,255,0.12)'} borderRadius="full" />
               ))}
             </Flex>
-          ))}
-        </VStack>
+          </Box>
 
-        {/* Action row */}
-        <Flex gap="3" justifyContent="center" mb="3">
-          <Button
-            onClick={handleBackspace}
-            size="md"
-            variant="outline"
-            borderColor="kk.border"
-            color="kk.textSecondary"
-            _hover={{ borderColor: "kk.gold", color: "kk.textPrimary" }}
-            disabled={wordAccepted || (currentChars.length === 0 && wordPos === 0)}
-            flex={1}
-          >
-            {canGoBackAWord ? t('recovery.previousWord', { n: wordPos }) : t('recovery.backspace')}
-          </Button>
-          <Button
-            onClick={handleSubmitWord}
-            size="md"
-            bg={isFinalWord ? "kk.success" : "kk.gold"}
-            color={isFinalWord ? "white" : "black"}
-            fontWeight="semibold"
-            _hover={{ bg: isFinalWord ? "#00E676" : "kk.goldHover" }}
-            flex={1}
-          >
-            {isFinalWord ? t('recovery.completeRecovery') : t('recovery.nextWord')}
-          </Button>
+          {/* Letters entered: underlined slots, never boxes */}
+          <Flex gap={4} aria-live="polite">
+            {Array.from({ length: MAX_CHARS }, (_, i) => {
+              const filled = i < currentChars.length
+              const active = i === currentChars.length
+              return (
+                <Flex key={i} w="40px" h="40px" align="flex-end" justify="center" pb="6px"
+                  borderBottom="2px solid" borderColor={active ? 'var(--gold)' : filled ? 'var(--text-1)' : 'rgba(255,255,255,0.14)'} transition="border-color 0.15s">
+                  {filled && <Text fontSize="22px" lineHeight="1" color="kk.textPrimary" style={{ animation: "kkCharPop 0.2s ease-out" }}>{"\u2022"}</Text>}
+                </Flex>
+              )
+            })}
+          </Flex>
+
+          {/* Positions, mirroring the device's 2 x 13 cipher grid: no letters,
+              no per-key borders — hairlines like the PIN pad. */}
+          <Box display="grid" gridTemplateColumns={`repeat(${CIPHER_COLS}, 1fr)`} borderTop="1px solid rgba(255,255,255,0.1)" borderLeft="1px solid rgba(255,255,255,0.1)">
+            {POSITIONS.map((letter, i) => (
+              <button key={letter} type="button" className="kk-pf-pos" onClick={() => handleChar(letter)}
+                aria-label={uiText("Position {{n}}", { n: i + 1 })}
+                disabled={currentChars.length >= MAX_CHARS}>
+                <span />
+              </button>
+            ))}
+          </Box>
+
+          <Flex gap={3} align="center" flexWrap="wrap">
+            <button type="button" className="kk-pf-outline" style={{ ...pill, cursor: 'pointer' }} onClick={handleBackspace}
+              disabled={wordAccepted || (currentChars.length === 0 && wordPos === 0)}>
+              {canGoBackAWord ? t('recovery.previousWord', { n: wordPos }) : t('recovery.backspace')}
+            </button>
+            <button type="button" className="kk-pf-go" style={{ ...pill, cursor: 'pointer' }} onClick={handleSubmitWord}>
+              {isFinalWord ? t('recovery.completeRecovery') : t('recovery.nextWord')}
+            </button>
+            <button type="button" className="kk-pf-cancel" style={{ ...pill, padding: '12px 8px', cursor: 'pointer' }} onClick={onCancel}>
+              {t('cancel', { ns: 'common' })}
+            </button>
+          </Flex>
         </Flex>
-
-        {/* Cancel */}
-        <Button
-          onClick={onCancel}
-          size="sm"
-          variant="ghost"
-          color="kk.textMuted"
-          _hover={{ color: "kk.error" }}
-          w="100%"
-        >
-          {t('cancel', { ns: 'common' })}
-        </Button>
       </Box>
-    </Flex>
+    </Surface>
   )
 }

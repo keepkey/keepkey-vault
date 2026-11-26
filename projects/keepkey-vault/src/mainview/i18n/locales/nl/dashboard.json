@@ -56,5 +56,10 @@
 	"rescanUnavailable": "Geschiedenis is niet beschikbaar voor dit netwerk",
 	"rescanUnavailableAll": "Geen geschiedenis om te scannen op deze netwerken",
 	"rescanFailed": "Scannen mislukt",
-	"rescanFailedDetail": "Scannen mislukt: {{detail}}"
+	"rescanFailedDetail": "Scannen mislukt: {{detail}}",
+	"chainTotalLabel": "{{chain}} · Totaal",
+	"chainNativeLine": "{{amount}} native · {{usd}}",
+	"tokensHeader": "Tokens · {{n}} · {{usd}}",
+	"smallBalances": "Kleine saldi ({{n}})",
+	"smallBalancesHint": "onder {{usd}}"
 }

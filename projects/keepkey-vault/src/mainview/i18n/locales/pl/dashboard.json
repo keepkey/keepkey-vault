@@ -62,5 +62,10 @@
 	"rescanUnavailable": "Historia nie jest dostępna dla tej sieci",
 	"rescanUnavailableAll": "Brak historii do skanowania w tych sieciach",
 	"rescanFailed": "Skanowanie nie powiodło się",
-	"rescanFailedDetail": "Skanowanie nie powiodło się: {{detail}}"
+	"rescanFailedDetail": "Skanowanie nie powiodło się: {{detail}}",
+	"chainTotalLabel": "{{chain}} · Razem",
+	"chainNativeLine": "{{amount}} natywne · {{usd}}",
+	"tokensHeader": "Tokeny · {{n}} · {{usd}}",
+	"smallBalances": "Małe salda ({{n}})",
+	"smallBalancesHint": "poniżej {{usd}}"
 }

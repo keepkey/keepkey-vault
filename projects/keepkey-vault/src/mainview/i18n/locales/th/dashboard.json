@@ -56,5 +56,10 @@
 	"rescanUnavailable": "ไม่มีประวัติสำหรับเครือข่ายนี้",
 	"rescanUnavailableAll": "ไม่มีประวัติให้สแกนในเครือข่ายเหล่านี้",
 	"rescanFailed": "สแกนไม่สำเร็จ",
-	"rescanFailedDetail": "สแกนไม่สำเร็จ: {{detail}}"
+	"rescanFailedDetail": "สแกนไม่สำเร็จ: {{detail}}",
+	"chainTotalLabel": "{{chain}} · รวม",
+	"chainNativeLine": "เนทีฟ {{amount}} · {{usd}}",
+	"tokensHeader": "โทเคน · {{n}} · {{usd}}",
+	"smallBalances": "ยอดคงเหลือเล็กน้อย ({{n}})",
+	"smallBalancesHint": "ต่ำกว่า {{usd}}"
 }

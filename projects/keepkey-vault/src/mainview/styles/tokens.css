@@ -50,6 +50,9 @@
   --font-mono:  'Geist Mono', ui-monospace, monospace;
   --font-sans:  var(--font-mono);
   --font-serif: var(--font-mono);
+  /* Real sans for names/labels where mono hurts reading (chain page). System
+     stack: the app is offline-first, so no web font is fetched. */
+  --font-ui-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
 }
 
 /* Class-scoped helpers — do NOT bind to body so existing Chakra screens are

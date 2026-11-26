@@ -1,13 +1,18 @@
 import { useUiTranslation, firmwareProgressText } from "../i18n/ui"
 import { looksLikeMultisigPolicy, MULTISIG_POLICY_EVENT } from "../../shared/multisig-policy"
-import { useState, useEffect, useCallback, useRef } from "react"
+import { Fragment, useState, useEffect, useCallback, useRef } from "react"
 import { Box, Flex, Text, Button, Spinner } from "@chakra-ui/react"
 import { rpcRequest, onRpcMessage } from "../lib/rpc"
 import { Z } from "../lib/z-index"
 import { IS_MAC, IS_WINDOWS } from "../lib/platform"
 import type { FirmwareAnalysis, FirmwareProgress } from "../../shared/types"
-import { FirmwareUpgradePreview } from "./FirmwareUpgradePreview"
+import { BTC_ONLY_FEATURE } from "./FirmwareUpgradePreview"
+import { getUpgradeVersions, type FirmwareFeature, type FirmwareVersionInfo } from "../../shared/firmware-versions"
+import { useTranslation } from "react-i18next"
+import { bootloaderTooOldForFirmware } from "../../shared/bootloader-compat"
+import { Beam, ChainNode, PreflightActions, PreflightCheck, PreflightList, PreflightStyles, TimelineItem, TimelineMark, type PreflightRow } from "./preflight/PreflightConsole"
 import { useDeviceState } from "../hooks/useDeviceState"
+import { OledText, SpinningDevice } from "./v3"
 import { requiresBackupConfirmation } from "../lib/update-safety"
 import holdAndConnectRaw from "../assets/svg/hold-and-connect.svg?raw"
 import { looksLikePsbt, looksLikeRawTxHex, looksLikeWatchOnlyImport, PSBT_SNIFF_BYTES } from "../../shared/psbt-sniff"
@@ -38,8 +43,23 @@ type FlashPhase = "idle" | "analyzing" | "confirm" | "flashing" | "complete" | "
 // Platforms where the emulator (FFI library) can be installed + run.
 const IS_EMU_PLATFORM = IS_MAC || IS_WINDOWS
 
+/** Release notes grouped per minor version (7.14.0 and 7.14.1 under one
+ *  "7.14" mark); the group holding the target version is the "new" one. */
+function groupByMinor(versions: FirmwareVersionInfo[], target: string | null) {
+	const minorOf = (v: string | null) => (v || "").split(".").slice(0, 2).join(".")
+	const groups: Array<{ minor: string; isTarget: boolean; features: FirmwareFeature[] }> = []
+	for (const v of versions) {
+		const minor = minorOf(v.version)
+		const last = groups[groups.length - 1]
+		if (last && last.minor === minor) last.features.push(...v.features)
+		else groups.push({ minor, isTarget: minor === minorOf(target), features: [...v.features] })
+	}
+	return groups
+}
+
 export function FirmwareDropZone() {
   const uiText = useUiTranslation()
+  const { t: tSetup } = useTranslation("setup")
 
 	const [isDragging, setIsDragging] = useState(false)
 	const [phase, setPhase] = useState<FlashPhase>("idle")
@@ -66,6 +86,96 @@ export function FirmwareDropZone() {
 	// which can't report whether a wallet exists, so this fails closed (only a
 	// device with no firmware on flash skips it).
 	const needsBackupConfirm = requiresBackupConfirmation(deviceState, null)
+	// Firmware 7.x on a 1.x bootloader. Judged from the LIVE bootloader version
+	// (the analysis is a snapshot taken at drop time) so the check turns ok as
+	// soon as an update lands; flashCustomFirmware refuses it again server-side.
+	const liveBootloaderVersion = deviceState.bootloaderVersion || analysis?.deviceBootloaderVersion || null
+	const bootloaderTooOld = !!analysis && bootloaderTooOldForFirmware({
+		imageKind: analysis.imageKind,
+		firmwareVersion: analysis.detectedVersion,
+		bootloaderVersion: liveBootloaderVersion,
+	})
+
+	// The OFFICIAL bootloader update (same RPC as onboarding's bootloader step:
+	// manifest blupdater, hash-checked) run from this dialog when the dropped
+	// firmware needs a newer bootloader. The .bin stays loaded meanwhile.
+	const [blUpdate, setBlUpdate] = useState<"idle" | "running" | "done" | "error">("idle")
+	const [blProgress, setBlProgress] = useState<FirmwareProgress | null>(null)
+	const [blError, setBlError] = useState<string | null>(null)
+	const blUpdateRef = useRef(blUpdate)
+	blUpdateRef.current = blUpdate
+	// Did the upload stage actually run? A flow that "completes" without it
+	// changed nothing on the device and must not read as success.
+	const blUploadSeen = useRef(false)
+	const blStartVersion = useRef<string | null>(null)
+	const failBootloaderUpdate = useCallback((reason?: string | null) => {
+		console.warn("[FlashDialog] bootloader update did not finish", reason || "")
+		setBlError(reason || null)
+		setBlUpdate("error")
+	}, [])
+	// Progress events drive the state as well as the RPC result: the RPC reply
+	// can be lost across a webview reload while the device keeps going.
+	useEffect(() => onRpcMessage("firmware-progress", (payload: FirmwareProgress) => {
+		if (blUpdateRef.current !== "running" && blUpdateRef.current !== "done") return
+		console.log(`[FlashDialog] bootloader update stage=${payload.stage ?? "?"} ${payload.percent}%${payload.error ? ` error=${payload.error}` : ""}`)
+		setBlProgress(payload)
+		if (payload.stage === "uploadBootloader" || payload.stage === "bootloaderUploaded") blUploadSeen.current = true
+		if (payload.stage === "failed") failBootloaderUpdate(payload.error)
+		else if (payload.percent >= 100 && blUpdateRef.current === "running") {
+			if (blUploadSeen.current) setBlUpdate("done")
+			else failBootloaderUpdate(null)
+		}
+	}), [failBootloaderUpdate])
+	const handleBootloaderUpdate = useCallback(async () => {
+		if (blUpdateRef.current === "running") return
+		blUploadSeen.current = false
+		blStartVersion.current = deviceState.bootloaderVersion || null
+		console.log(`[FlashDialog] bootloader update start from v${blStartVersion.current ?? "?"}`)
+		setBlUpdate("running"); setBlError(null)
+		setBlProgress({ percent: 0, stage: "startingBootloader", message: "Starting bootloader update..." })
+		try {
+			await rpcRequest("startBootloaderUpdate", undefined, 0)
+			// The ref may have moved on while awaiting (progress events).
+			if ((blUpdateRef.current as string) === "running") {
+				if (blUploadSeen.current) setBlUpdate("done")
+				else failBootloaderUpdate(null)
+			}
+		} catch (err: any) {
+			failBootloaderUpdate(err?.message || null)
+		}
+	}, [deviceState.bootloaderVersion, failBootloaderUpdate])
+	// The updater is staged by the upload and installs the new bootloader on
+	// the next normal boot, so coming back once on the SAME version is a normal
+	// step (it asks to be reconnected). Only if it is still the same version a
+	// while after that is the update treated as not finished.
+	useEffect(() => {
+		if (blUpdate !== "done" || !inBootloader) return
+		if (deviceState.bootloaderVersion && deviceState.bootloaderVersion !== blStartVersion.current) return
+		const timer = setTimeout(() => failBootloaderUpdate(null), 180_000)
+		return () => clearTimeout(timer)
+	}, [blUpdate, inBootloader, deviceState.bootloaderVersion, failBootloaderUpdate])
+	// Whenever the update ends — new bootloader seen (even if the RPC reply was
+	// lost), or not finished — re-read the same file in bootloader mode so every
+	// row reflects the device as it is now, and drop acknowledgements given for
+	// the old risk picture.
+	const blFixed = !!analysis && !!deviceState.bootloaderVersion && !bootloaderTooOldForFirmware({ imageKind: analysis.imageKind, firmwareVersion: analysis.detectedVersion, bootloaderVersion: deviceState.bootloaderVersion })
+	useEffect(() => {
+		const settled = blUpdate === "error" || ((blUpdate === "running" || blUpdate === "done") && blFixed)
+		if (!settled || !inBootloader || !fileDataB64) return
+		let cancelled = false
+		rpcRequest<FirmwareAnalysis>("analyzeFirmware", { data: fileDataB64 })
+			.then(result => {
+				if (cancelled) return
+				console.log(`[FlashDialog] re-analyzed after bootloader update: device BL v${result.deviceBootloaderVersion ?? "?"}`)
+				setAnalysis(result)
+				setWarningAcknowledged(false)
+				setWipeAcknowledged(false)
+				if (blUpdateRef.current !== "error") { setBlUpdate("idle"); setBlProgress(null) }
+			})
+			.catch(() => { /* keep the dialog; the user can drop the file again */ })
+		return () => { cancelled = true }
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [blUpdate, blFixed, inBootloader, fileDataB64])
 
 	// Listen for firmware progress — only react when THIS component initiated the flash (C1 fix)
 	useEffect(() => {
@@ -239,6 +349,7 @@ export function FirmwareDropZone() {
 		// Never start a flash unless the device is actually in bootloader mode —
 		// otherwise firmwareErase hangs the HID read and looks like a freeze.
 		if (!inBootloader) return
+		if (bootloaderTooOld) return
 		if (needsBackupConfirm && !analysis?.willWipeDevice && !backupConfirmed) return
 		setPhase("flashing")
 		setProgress({ percent: 0, message: "Starting firmware flash..." })
@@ -250,7 +361,7 @@ export function FirmwareDropZone() {
 			setError(err?.message || "Firmware flash failed")
 			setPhase("error")
 		}
-	}, [fileDataB64, inBootloader, needsBackupConfirm, analysis, backupConfirmed])
+	}, [fileDataB64, inBootloader, bootloaderTooOld, needsBackupConfirm, analysis, backupConfirmed])
 
 	const handleDismiss = useCallback(() => {
 		setPhase("idle")
@@ -262,6 +373,7 @@ export function FirmwareDropZone() {
 		setWarningAcknowledged(false)
 		setWipeAcknowledged(false)
 		setBackupConfirmed(false)
+		setBlUpdate("idle"); setBlProgress(null); setBlError(null)
 	}, [])
 
 	// Don't render anything when idle and not dragging
@@ -321,14 +433,17 @@ export function FirmwareDropZone() {
 				top="50%"
 				left="50%"
 				transform="translate(-50%, -50%)"
-				w="480px"
-				maxW="90vw"
-				maxH="85vh"
+				w={phase === "confirm" ? "min(980px, 94vw)" : "480px"}
+				maxW="94vw"
+				maxH={phase === "confirm" ? "92vh" : "85vh"}
 				overflowY="auto"
-				bg="kk.bg"
-				border="1px solid"
+				display={phase === "confirm" ? "flex" : undefined}
+				flexDirection="column"
+				css={phase === "confirm" ? { "& > .kk-pf": { maxHeight: "92vh", minHeight: 0 } } : undefined}
+				bg={phase === "confirm" ? "transparent" : "kk.bg"}
+				border={phase === "confirm" ? "0" : "1px solid"}
 				borderColor="kk.border"
-				borderRadius="xl"
+				borderRadius={phase === "confirm" ? "18px" : "xl"}
 				zIndex={Z.overlay + 101}
 				role="dialog"
 				aria-modal="true"
@@ -375,471 +490,264 @@ export function FirmwareDropZone() {
 					</Box>
 				)}
 
-				{/* ── Confirmation ──────────────────────────── */}
-				{phase === "confirm" && analysis && (
-					<Box>
-						{/* Header */}
-						<Box px="6" pt="5" pb="4" borderBottom="1px solid" borderColor="kk.border">
-							<Flex align="center" gap="2" mb="1">
-								<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={analysis.isSigned ? "var(--teal)" : "var(--gold)"} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-									<rect x="2" y="7" width="20" height="14" rx="2" ry="2" />
-									<path d="M16 7V5a4 4 0 0 0-8 0v2" />
-								</svg>
-								<Text fontSize="md" fontWeight="700" color="kk.textPrimary">
-									{analysis.imageKind === "bootloader-updater" ? uiText("Update Bootloader")
-										: analysis.imageKind === "firmware" ? uiText("Flash Firmware") : uiText("Not Flashable")}
-								</Text>
+				{/* ── Confirmation: preflight console ──────────
+				    One surface, two columns. Left: what changes, what the device
+				    will show, every risk as one preflight row (acknowledgements
+				    live in their row), and the action. Right: release notes as a
+				    timeline and the file/device facts. */}
+				{phase === "confirm" && analysis && (() => {
+					const isFirmware = analysis.imageKind === "firmware"
+					const isUpdater = analysis.imageKind === "bootloader-updater"
+					const notFlashable = !isFirmware && !isUpdater
+					const fromVersion = isUpdater ? analysis.deviceBootloaderVersion : analysis.currentFirmwareVersion
+					const toVersion = analysis.detectedVersion || "?.?.?"
+					const rows: PreflightRow[] = []
+					if (!inBootloader) rows.push({
+						key: "bootloader-mode", status: "block", tag: uiText("blocks"),
+						title: uiText("Put your KeepKey in bootloader mode"),
+						detail: <>
+							{uiText("Firmware can only be flashed from bootloader mode. Your device isn't in bootloader mode yet — follow these steps:")}
+							<Box maxW="72px" my="2" opacity={0.85} dangerouslySetInnerHTML={{ __html: holdAndConnectRaw }} css={{ '& svg': { width: '100%', height: '100%' } }} />
+							<ol className="kk-pf-steps">
+								<li>{uiText("Unplug your KeepKey")}</li>
+								<li>{uiText("Hold down the button on the device")}</li>
+								<li>{uiText("While holding, plug in the USB cable")}</li>
+								<li>{uiText("Release when the bootloader screen appears")}</li>
+							</ol>
+							<Flex align="center" gap="2" mt="2">
+								<Spinner size="xs" color="var(--teal)" />
+								<Text as="span" fontSize="12px" color="var(--teal)">{uiText("Waiting for your device to enter bootloader mode…")}</Text>
 							</Flex>
-							<Text fontSize="xs" color="kk.textSecondary" fontFamily="mono">
-								{fileName}
-							</Text>
-						</Box>
+						</>,
+					})
+					if (bootloaderTooOld) rows.push({
+						key: "bootloader-old", status: "block", tag: uiText("blocks"),
+						title: uiText("Bootloader {{version}} is too old", { version: liveBootloaderVersion || "" }),
+						// After the upload the updater is only staged: it installs the new
+						// bootloader on the next normal boot. Say so with onboarding's copy,
+						// or a reconnect while holding the button just shows 1.x again.
+						detail: blUpdate === "done" ? <>
+							<Text as="span" display="block" fontWeight="600" color="var(--text-0)">{tSetup("bootloader.followDeviceTitle")}</Text>
+							<Text as="span" display="block" mt="1">{tSetup("bootloader.followDeviceBody")}</Text>
+							<Text as="span" display="block" mt="1" fontWeight="600" color="var(--gold)">{tSetup("bootloader.reconnectNoButton")}</Text>
+						</> : blUpdate === "running" ? <>
+							<Text as="span" display="block" fontWeight="600" color="var(--text-0)">{tSetup("bootloader.updatingBootloader")}</Text>
+							<Box h="4px" my="2" bg="rgba(255,255,255,0.08)" borderRadius="full" overflow="hidden">
+								<Box h="100%" w={`${blProgress?.percent ?? 0}%`} bg="var(--gold)" transition="width 0.3s" />
+							</Box>
+							<Text as="span" display="block">{firmwareProgressText(blProgress) || uiText("Please wait...")}</Text>
+							{blUpdate === "running" && <Text as="span" display="block" color="var(--rose)" mt="1">{tSetup("bootloader.doNotUnplugBrick")}</Text>}
+						</> : <>
+							{uiText("Update it first. Firmware 7 needs bootloader 2.0 or newer.")}
+							{blUpdate === "error" && <Text as="span" display="block" color="var(--rose)" mt="1">{uiText("Bootloader update didn't finish — your bootloader is unchanged.")}{blError ? ` ${blError}` : ""}</Text>}
+						</>,
+					})
+					else if (isFirmware && liveBootloaderVersion && analysis.detectedVersion && /^7\./.test(analysis.detectedVersion)) rows.push({
+						key: "bootloader-ok", status: "ok", title: uiText("Bootloader {{version}} is ready", { version: liveBootloaderVersion }),
+					})
+					if (notFlashable) rows.push({
+						key: "not-flashable", status: "block", tag: uiText("blocks"),
+						title: analysis.imageKind === "raw-bootloader" ? uiText("Raw bootloader image") : uiText("Unrecognized image"),
+						detail: analysis.imageKind === "raw-bootloader"
+							? uiText("The firmware updater would write this into the firmware area, not the bootloader. Bootloaders are installed with their bootloader updater (blupdater.bin).")
+							: uiText("This is not a KeepKey firmware image or bootloader updater, so it cannot be flashed."),
+					})
+					if (analysis.willWipeDevice) rows.push({
+						key: "wipe", status: "danger",
+						title: analysis.wipeReason === "downgrade" ? uiText("This downgrade will wipe the device")
+							: analysis.wipeReason === "bitcoin-only-lock" ? uiText("This will lock your Bitcoin-only wallet")
+							: analysis.wipeReason === "unknown-installed" ? uiText("This may wipe the device")
+							: analysis.wipeReason === "no-firmware" ? uiText("Any wallet on this KeepKey will be erased")
+							: uiText("THIS WILL WIPE THE DEVICE"),
+						detail: <>
+							{analysis.wipeReason === "bitcoin-only-lock" ? (
+								<p>{uiText("This KeepKey runs")}{" "}<b style={{ display: "inline" }}>{uiText("Bitcoin-only")}</b>{" "}{uiText("firmware")}{analysis.currentFirmwareVersion ? <> (v{analysis.currentFirmwareVersion})</> : null}. {analysis.isBitcoinOnly
+									? <>{uiText("An older Bitcoin-only version")}</>
+									: <>{uiText("Multi-coin firmware")}</>}{" "}{uiText("will")}{" "}<b style={{ display: "inline" }}>{uiText("refuse to open this wallet")}</b>{uiText(". It stays on the device, but you cannot use it until you reinstall the Bitcoin-only firmware")}{analysis.currentFirmwareVersion ? <> v{analysis.currentFirmwareVersion}{" "}{uiText("or newer")}</> : null}{uiText(", or wipe the device and restore it from your recovery phrase.")}</p>
+							) : analysis.wipeReason === "unknown-installed" ? (
+								<p>{uiText("KeepKey Desktop cannot tell which firmware is installed on this KeepKey, so it cannot rule out that this image")}{" "}<b style={{ display: "inline" }}>{uiText("erases all keys and settings")}</b>{" "}{uiText("or locks the wallet (for example, an older version, or switching between Bitcoin-only and multi-coin firmware). To let it check, start the KeepKey normally once (plug it in without holding the button) so KeepKey Desktop can read it, then return to bootloader mode and open this file again.")}</p>
+							) : analysis.wipeReason === "no-firmware" ? (
+								<p>{uiText("This KeepKey has no firmware installed (for example, after an interrupted update). If it held a wallet, flashing firmware")}{" "}<b style={{ display: "inline" }}>{uiText("erases all keys and settings")}</b>{uiText(", and you will restore it from your recovery phrase.")}</p>
+							) : analysis.wipeReason === "downgrade" ? (
+								<p>{uiText("You are installing")}{" "}<b style={{ display: "inline" }}>v{analysis.detectedVersion}</b>{" "}{uiText("over")}{" "}<b style={{ display: "inline" }}>v{analysis.currentFirmwareVersion}</b>{uiText(". Older firmware cannot read the newer wallet storage, so when it starts, your KeepKey")}{" "}<b style={{ display: "inline" }}>{uiText("erases all keys and settings")}</b>{uiText(". To use this wallet again you will restore it from your recovery phrase.")}</p>
+							) : (
+								<p>{uiText("You are crossing the")}{" "}<b style={{ display: "inline" }}>{uiText("signed/unsigned firmware boundary")}</b>.
+									{analysis.isSigned
+										? <>{" "}{uiText("Flashing")}{" "}<b style={{ display: "inline" }}>{uiText("signed (official) firmware")}</b>{" "}{uiText("onto a device running")}{" "}<b style={{ display: "inline" }}>{uiText("unsigned (developer) firmware")}</b>.</>
+										: <>{" "}{uiText("Flashing")}{" "}<b style={{ display: "inline" }}>{uiText("unsigned firmware")}</b>{" "}{uiText("onto a device running")}{" "}<b style={{ display: "inline" }}>{uiText("signed (official) firmware")}</b>.</>}
+									{" "}{uiText("This transition requires a full device wipe —")}{" "}<b style={{ display: "inline" }}>{uiText("all keys and settings will be permanently erased")}</b>.
+								</p>
+							)}
+							<p>{uiText("Make sure you have your recovery seed backed up before proceeding.")}</p>
+							<PreflightCheck checked={wipeAcknowledged} onChange={setWipeAcknowledged}>
+								{analysis.wipeReason === "bitcoin-only-lock"
+									? uiText("I understand my wallet will be locked and I have my seed backed up")
+									: analysis.wipeReason === "unknown-installed" || analysis.wipeReason === "no-firmware"
+										? uiText("I understand this may wipe my device and I have my seed backed up")
+										: uiText("I understand this will wipe my device and I have my seed backed up")}
+							</PreflightCheck>
+						</>,
+					})
+					if (isUpdater) rows.push({
+						key: "updater", status: analysis.embeddedBootloader?.official ? "warn" : "danger",
+						title: analysis.embeddedBootloader?.official ? uiText("Bootloader update") : uiText("Unofficial bootloader"),
+						detail: <>
+							<p>{uiText("This is not firmware. It runs once and replaces the device's bootloader")}{analysis.embeddedBootloader?.version ? ` with v${analysis.embeddedBootloader.version}` : ""}{uiText(", then asks you to reconnect so you can install firmware.")}{analysis.embeddedBootloader?.official
+								? uiText(" The bootloader is an official KeepKey release.")
+								: uiText(" This bootloader is not an official KeepKey release: afterwards the device trusts only its signing keys, so official firmware will show as unofficial. Vault cannot restore the official bootloader. Use only on a test device.")}</p>
+							<PreflightCheck checked={warningAcknowledged} onChange={setWarningAcknowledged}>
+								{uiText("I understand this permanently replaces the bootloader")}
+							</PreflightCheck>
+						</>,
+					})
+					if (isFirmware && !analysis.isSigned && !analysis.willWipeDevice) rows.push({
+						key: "unsigned", status: "warn", title: uiText("Developer Firmware"),
+						detail: <>
+							<p>{uiText("This is unsigned firmware intended for developers only. It may result in device state loss or unexpected behavior.")}</p>
+							<PreflightCheck checked={warningAcknowledged} onChange={setWarningAcknowledged}>
+								{uiText("I understand this is developer firmware")}
+							</PreflightCheck>
+						</>,
+					})
+					if (analysis.isDowngrade && analysis.wipeReason !== "downgrade") rows.push({
+						key: "downgrade", status: "warn", title: uiText("Downgrade — older than current version"),
+					})
+					// The bootloader update interrupts the device too, so it needs the
+					// same recovery-phrase confirmation the onboarding step asks for.
+					if (needsBackupConfirm && (!analysis.willWipeDevice || bootloaderTooOld)) rows.push({
+						key: "backup", status: "warn", title: uiText("Have your recovery phrase at hand"),
+						detail: <PreflightCheck checked={backupConfirmed} onChange={setBackupConfirmed}>
+							{uiText("I have my recovery phrase written down. If the flash is interrupted, the wallet on this KeepKey is erased and can only be restored from it.")}
+						</PreflightCheck>,
+					})
+					if (isFirmware && analysis.isSigned) rows.push({ key: "signed", status: "ok", title: uiText("Signed by KeepKey") })
+					if (analysis.isSameVersion) rows.push({ key: "same", status: "ok", title: uiText("Same version as currently installed") })
+					if (analysis.isBitcoinOnly) rows.push({ key: "btc-only", status: "ok", title: uiText("Bitcoin-only") })
+					if (analysis.hasKpkyHeader) rows.push({ key: "kpky", status: "ok", title: uiText("KPKY header detected") })
 
-						{/* Analysis details */}
-						<Box px="6" py="4">
-							<Flex direction="column" gap="3">
-								{/* Signed/Unsigned badge */}
-								<Flex align="center" gap="2">
-									<Box
-										px="2" py="0.5"
-										borderRadius="md"
-										fontSize="xs"
-										fontWeight="700"
-										letterSpacing="0.05em"
-										bg={analysis.isSigned ? "rgba(72,187,120,0.15)" : "rgba(237,137,54,0.15)"}
-										color={analysis.isSigned ? "var(--teal)" : "var(--gold)"}
-									>
-										{analysis.isSigned ? "SIGNED" : "UNSIGNED"}
-									</Box>
-									{analysis.isBitcoinOnly && (
-										<Box
-											px="2" py="0.5"
-											borderRadius="md"
-											fontSize="xs"
-											fontWeight="700"
-											letterSpacing="0.05em"
-											bg="rgba(247,147,26,0.15)"
-											color="#F7931A"
-										>
-											BITCOIN-ONLY
-										</Box>
-									)}
-									{analysis.imageKind !== "firmware" && (
-										<Box
-											px="2" py="0.5"
-											borderRadius="md"
-											fontSize="xs"
-											fontWeight="700"
-											letterSpacing="0.05em"
-											bg="rgba(168,239,210,0.12)"
-											color="var(--teal-2)"
-										>
-											{analysis.imageKind === "bootloader-updater" ? uiText("BOOTLOADER UPDATER")
-												: analysis.imageKind === "raw-bootloader" ? uiText("RAW BOOTLOADER") : uiText("UNKNOWN IMAGE")}
-										</Box>
-									)}
-									{analysis.hasKpkyHeader && (
-										<Text fontSize="xs" color="kk.textSecondary">{uiText("KPKY header detected")}</Text>
-									)}
-								</Flex>
+					// A too-old bootloader turns the main action into the official
+					// bootloader update instead of a dead button.
+					const blAction = bootloaderTooOld
+					const blDisabled = !inBootloader || blUpdate === "running" || blUpdate === "done" || (needsBackupConfirm && !backupConfirmed)
+					const goDisabled = !inBootloader
+						|| bootloaderTooOld
+						|| notFlashable
+						|| (isUpdater && !warningAcknowledged)
+						|| (analysis.willWipeDevice && !wipeAcknowledged)
+						|| (!analysis.isSigned && !analysis.willWipeDevice && !warningAcknowledged)
+						|| (needsBackupConfirm && !analysis.willWipeDevice && !backupConfirmed)
+					const goLabel = !inBootloader
+						? uiText("Enter bootloader mode first")
+						: bootloaderTooOld
+							? (blUpdate === "done" ? tSetup("bootloader.followDeviceTitle")
+								: blUpdate === "running" ? tSetup("bootloader.updatingBootloader")
+								: blUpdate === "error" ? tSetup("bootloader.tryAgain")
+								: tSetup("bootloader.updateBootloaderTo", { version: deviceState.latestBootloader || "?" }))
+							: analysis.imageKind === "bootloader-updater"
+								? `Install Bootloader ${analysis.detectedVersion || ""}`.trim()
+								: analysis.imageKind !== "firmware"
+									? uiText("Cannot flash")
+									: analysis.willWipeDevice
+										? (analysis.wipeReason === "bitcoin-only-lock" || analysis.wipeReason === "unknown-installed" ? "Flash Anyway" : "Wipe & Flash")
+										: `Flash ${analysis.detectedVersion || "Firmware"}`
 
-								{/* Version info */}
-								<Box
-									bg="rgba(255,255,255,0.03)"
-									borderRadius="lg"
-									border="1px solid"
-									borderColor="kk.border"
-									p="3"
-								>
-									{/* Device status — bootloader mode vs. firmware */}
+					const versions = isFirmware && analysis.detectedVersion
+						? (analysis.isBitcoinOnly ? [] : getUpgradeVersions(analysis.currentFirmwareVersion, analysis.detectedVersion))
+						: []
+					const oled = isUpdater
+						? { line1: "BOOTLOADER UPDATE", line2: `v${toVersion}` }
+						: isFirmware
+							? (analysis.isSigned ? { line1: "KEEPKEY", line2: `v${toVersion}` } : { line1: "UNOFFICIAL FIRMWARE", line2: toVersion })
+							: null
+
+					return (
+						<div className="kk-pf" role="group" aria-label={uiText("Firmware Flash")}>
+							<PreflightStyles />
+							<div className="kk-pf-left kk-pf-scroll">
+								<div className="kk-pf-kicker">
+									{isUpdater ? uiText("Update Bootloader") : isFirmware ? uiText("Flash Firmware") : uiText("Not Flashable")}
+								</div>
+								<div className="kk-pf-vers" aria-label={uiText("From {{from}} to {{to}}", { from: fromVersion || "—", to: toVersion })}>
+									{fromVersion && <span className="kk-pf-from">{fromVersion}</span>}
+									<Beam />
+									<span className="kk-pf-to">{toVersion}</span>
+								</div>
+								<div className="kk-pf-file">
+									{fileName}{" · "}{(analysis.fileSize / 1024).toFixed(1)} KB{" · "}<span className="kk-pf-dim">{analysis.payloadHash.slice(0, 8)}…</span>
+								</div>
+								{oled && (
+									<div className="kk-pf-device">
+										<SpinningDevice motion="still" scale={0.66} screen={<OledText kicker={oled.line1} headline={oled.line2} />} />
+										<div className="kk-pf-cap">{isFirmware && !analysis.isSigned ? uiText("What your KeepKey will show at every start") : uiText("What your KeepKey will show")}</div>
+									</div>
+								)}
+								<PreflightList rows={rows} />
+								<PreflightActions
+									cancelLabel={uiText("Cancel")}
+									onCancel={handleDismiss}
+									goLabel={goLabel}
+									onGo={blAction ? handleBootloaderUpdate : handleFlash}
+									goDisabled={blAction ? blDisabled : goDisabled}
+									danger={!blAction && analysis.willWipeDevice && !goDisabled}
+								/>
+							</div>
+							<div className="kk-pf-right kk-pf-scroll">
+								{(versions.length > 0 || (isFirmware && analysis.isBitcoinOnly)) && (
+									<div className="kk-pf-tl">
+										{analysis.isBitcoinOnly ? (
+											<>
+												<TimelineMark big={toVersion} small={uiText("new")} />
+												<TimelineItem node={<ChainNode chainId={BTC_ONLY_FEATURE.chains?.[0]} color={BTC_ONLY_FEATURE.color} />} title={BTC_ONLY_FEATURE.title}>
+													{BTC_ONLY_FEATURE.description}
+												</TimelineItem>
+											</>
+										) : groupByMinor(versions, analysis.detectedVersion).map(g => (
+											<Fragment key={g.minor}>
+												<TimelineMark big={g.minor} small={g.isTarget ? uiText("new") : uiText("included")} />
+												{g.features.map(f => (
+													<TimelineItem key={f.title}
+														node={<ChainNode chainId={f.chains?.[0]} color={f.color} glyph={f.icon === "security" ? "security" : f.icon === "performance" ? "performance" : "feature"} />}
+														title={f.short?.title ?? f.title}
+														soonLabel={f.comingSoon ? uiText("soon") : undefined}>
+														{f.short?.description ?? f.description}
+													</TimelineItem>
+												))}
+											</Fragment>
+										))}
+									</div>
+								)}
+								<dl className="kk-pf-facts" style={{ marginTop: "auto" }}>
 									{analysis.isBootloaderMode ? (
 										<>
-											<Flex justify="space-between" mb="2">
-												<Text fontSize="xs" color="kk.textSecondary">{uiText("Device status")}</Text>
-												<Flex align="center" gap="1.5">
-													<Box px="1.5" py="0.5" borderRadius="sm" bg="rgba(168,239,210,0.12)" fontSize="xs" fontWeight="700" color="var(--teal-2)">
-														BOOTLOADER
-													</Box>
-													{analysis.deviceBootloaderVersion && (
-														<Text fontSize="sm" fontWeight="600" color="kk.textPrimary" fontFamily="mono">
-															v{analysis.deviceBootloaderVersion}
-														</Text>
-													)}
-												</Flex>
-											</Flex>
-											{/* The bootloader reports the installed firmware's hash; the
-											    release table names it when it's a known build. */}
+											<div><dt>{uiText("Device status")}</dt><dd>BOOTLOADER{analysis.deviceBootloaderVersion ? ` v${analysis.deviceBootloaderVersion}` : ""}</dd></div>
 											{analysis.currentFirmwareVersion && (
-												<Flex justify="space-between" mb="2">
-													<Text fontSize="xs" color="kk.textSecondary">{uiText("Installed firmware")}</Text>
-													<Flex align="center" gap="1.5">
-														<Text fontSize="sm" fontWeight="600" color="kk.textPrimary" fontFamily="mono">
-															v{analysis.currentFirmwareVersion}
-														</Text>
-														{analysis.currentFirmwareVerified === true && (
-															<Box as="span" color="var(--teal)" fontSize="xs">{uiText("(official)")}</Box>
-														)}
-														{analysis.currentFirmwareVerified === false && (
-															<Box as="span" color="var(--gold)" fontSize="xs">{uiText("(unofficial)")}</Box>
-														)}
-													</Flex>
-												</Flex>
+												<div><dt>{uiText("Installed firmware")}</dt><dd>
+													v{analysis.currentFirmwareVersion}
+													{analysis.currentFirmwareVerified === true && <> {uiText("(official)")}</>}
+													{analysis.currentFirmwareVerified === false && <> {uiText("(unofficial)")}</>}
+												</dd></div>
 											)}
 										</>
 									) : (
-										<Flex justify="space-between" mb="2">
-											<Text fontSize="xs" color="kk.textSecondary">{uiText("Device firmware")}</Text>
-											<Flex align="center" gap="1.5">
-												<Text fontSize="sm" fontWeight="600" color="kk.textPrimary" fontFamily="mono">
-													v{analysis.currentFirmwareVersion || uiText("Unknown")}
-												</Text>
-												{analysis.currentFirmwareVerified === true && (
-													<Box as="span" color="var(--teal)" fontSize="xs">{uiText("(verified)")}</Box>
-												)}
-												{analysis.currentFirmwareVerified === false && (
-													<Box as="span" color="var(--gold)" fontSize="xs">{uiText("(unverified)")}</Box>
-												)}
-											</Flex>
-										</Flex>
+										<div><dt>{uiText("Device firmware")}</dt><dd>
+											v{analysis.currentFirmwareVersion || uiText("Unknown")}
+											{analysis.currentFirmwareVerified === true && <> {uiText("(verified)")}</>}
+											{analysis.currentFirmwareVerified === false && <> {uiText("(unverified)")}</>}
+										</dd></div>
 									)}
-									<Flex justify="space-between" align="center">
-										<Text fontSize="xs" color="kk.textSecondary">
-											{analysis.imageKind === "firmware" ? uiText("Flashing to") : uiText("Bootloader in image")}
-										</Text>
-										<Text fontSize="sm" fontWeight="600" color="kk.gold" fontFamily="mono">
-											v{analysis.detectedVersion || "?.?.?"}
-										</Text>
-									</Flex>
+									<div><dt>{isFirmware ? uiText("Flashing to") : uiText("Bootloader in image")}</dt><dd>v{toVersion}</dd></div>
 									{analysis.embeddedBootloader && (
-										<Flex justify="space-between" align="center" mt="2">
-											<Text fontSize="xs" color="kk.textSecondary">{uiText("Bootloader hash")}</Text>
-											<Flex align="center" gap="1.5">
-												<Text fontSize="xs" color="kk.textSecondary" fontFamily="mono">
-													{analysis.embeddedBootloader.hash.slice(0, 16)}...
-												</Text>
-												<Box as="span" fontSize="xs" fontWeight="700"
-													color={analysis.embeddedBootloader.official ? "var(--teal)" : "var(--rose)"}>
-													{analysis.embeddedBootloader.official ? uiText("official release") : uiText("NOT an official release")}
-												</Box>
-											</Flex>
-										</Flex>
+										<div><dt>{uiText("Bootloader hash")}</dt><dd>
+											{analysis.embeddedBootloader.hash.slice(0, 16)}… {analysis.embeddedBootloader.official ? uiText("official release") : uiText("NOT an official release")}
+										</dd></div>
 									)}
-									{analysis.isSameVersion && (
-										<Text fontSize="xs" color="kk.textSecondary" mt="1">{uiText("Same version as currently installed")}</Text>
-									)}
-									{analysis.isDowngrade && (
-										<Text fontSize="xs" color="var(--gold)" mt="1">{uiText("Downgrade — older than current version")}</Text>
-									)}
-								</Box>
-
-								{/* File info */}
-								<Flex justify="space-between" px="1">
-									<Text fontSize="xs" color="kk.textSecondary">{uiText("Size")}</Text>
-									<Text fontSize="xs" color="kk.textSecondary" fontFamily="mono">
-										{(analysis.fileSize / 1024).toFixed(1)} KB
-									</Text>
-								</Flex>
-								<Flex justify="space-between" px="1">
-									<Text fontSize="xs" color="kk.textSecondary">{uiText("Payload hash")}</Text>
-									<Text fontSize="xs" color="kk.textSecondary" fontFamily="mono" maxW="200px" overflow="hidden" textOverflow="ellipsis">
-										{analysis.payloadHash.slice(0, 16)}...
-									</Text>
-								</Flex>
-							</Flex>
-						</Box>
-
-						{/* ── Release notes for this firmware version ── */}
-						{analysis.imageKind === "firmware" && analysis.detectedVersion && (
-							<Box mx="6" mb="3">
-								<FirmwareUpgradePreview
-									currentVersion={analysis.currentFirmwareVersion}
-									targetVersion={analysis.detectedVersion}
-									isBitcoinOnly={analysis.isBitcoinOnly}
-								/>
-							</Box>
-						)}
-
-						{/* ── DOUBLE WARNING: wipe, Bitcoin-only lock, or unknown installed firmware ── */}
-						{analysis.willWipeDevice && (
-							<Box
-								mx="6" mb="3" p="4"
-								bg="rgba(229,62,62,0.1)"
-								border="2px solid"
-								borderColor="var(--rose)"
-								borderRadius="lg"
-							>
-								<Flex align="center" gap="2" mb="2">
-									<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--rose)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-										<path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
-										<line x1="12" y1="9" x2="12" y2="13" />
-										<line x1="12" y1="17" x2="12.01" y2="17" />
-									</svg>
-									<Text fontSize="sm" fontWeight="800" color="var(--rose)" textTransform="uppercase" letterSpacing="0.05em">
-										{analysis.wipeReason === "downgrade" ? uiText("This downgrade will wipe the device")
-											: analysis.wipeReason === "bitcoin-only-lock" ? uiText("This will lock your Bitcoin-only wallet")
-											: analysis.wipeReason === "unknown-installed" ? uiText("This may wipe the device")
-											: analysis.wipeReason === "no-firmware" ? uiText("Any wallet on this KeepKey will be erased")
-											: uiText("THIS WILL WIPE THE DEVICE")}
-									</Text>
-								</Flex>
-								{analysis.wipeReason === "bitcoin-only-lock" ? (
-								<Text fontSize="sm" color="var(--rose)" lineHeight="1.6" mb="3">{uiText("This KeepKey runs")}{" "}<Text as="span" fontWeight="700">{uiText("Bitcoin-only")}</Text>{" "}{uiText("firmware")}{analysis.currentFirmwareVersion ? <> (v{analysis.currentFirmwareVersion})</> : null}. {analysis.isBitcoinOnly
-										? <>{uiText("An older Bitcoin-only version")}</>
-										: <>{uiText("Multi-coin firmware")}</>}{" "}{uiText("will")}{" "}<Text as="span" fontWeight="700">{uiText("refuse to open this wallet")}</Text>{uiText(". It stays on the device, but you cannot use it until you reinstall the Bitcoin-only firmware")}{analysis.currentFirmwareVersion ? <> v{analysis.currentFirmwareVersion}{" "}{uiText("or newer")}</> : null}{uiText(", or wipe the device and restore it from your recovery phrase.")}</Text>
-								) : analysis.wipeReason === "unknown-installed" ? (
-								<Text fontSize="sm" color="var(--rose)" lineHeight="1.6" mb="3">{uiText("KeepKey Desktop cannot tell which firmware is installed on this KeepKey, so it cannot rule out that this image")}{" "}<Text as="span" fontWeight="700">{uiText("erases all keys and settings")}</Text>{" "}{uiText("or locks the wallet (for example, an older version, or switching between Bitcoin-only and multi-coin firmware). To let it check, start the KeepKey normally once (plug it in without holding the button) so KeepKey Desktop can read it, then return to bootloader mode and open this file again.")}</Text>
-								) : analysis.wipeReason === "no-firmware" ? (
-								<Text fontSize="sm" color="var(--rose)" lineHeight="1.6" mb="3">{uiText("This KeepKey has no firmware installed (for example, after an interrupted update). If it held a wallet, flashing firmware")}{" "}<Text as="span" fontWeight="700">{uiText("erases all keys and settings")}</Text>{uiText(", and you will restore it from your recovery phrase.")}</Text>
-								) : analysis.wipeReason === "downgrade" ? (
-								<Text fontSize="sm" color="var(--rose)" lineHeight="1.6" mb="3">{uiText("You are installing")}{" "}<Text as="span" fontWeight="700">v{analysis.detectedVersion}</Text>{" "}{uiText("over")}{" "}
-									<Text as="span" fontWeight="700">v{analysis.currentFirmwareVersion}</Text>{uiText(". Older firmware cannot read the newer wallet storage, so when it starts, your KeepKey")}{" "}<Text as="span" fontWeight="700">{uiText("erases all keys and settings")}</Text>{uiText(". To use this wallet again you will restore it from your recovery phrase.")}</Text>
-								) : (
-								<Text fontSize="sm" color="var(--rose)" lineHeight="1.6" mb="3">{uiText("You are crossing the")}{" "}<Text as="span" fontWeight="700">{uiText("signed/unsigned firmware boundary")}</Text>.
-									{analysis.isSigned
-										? <>{" "}{uiText("Flashing")}{" "}<Text as="span" fontWeight="700">{uiText("signed (official) firmware")}</Text>{" "}{uiText("onto a device running")}{" "}<Text as="span" fontWeight="700">{uiText("unsigned (developer) firmware")}</Text>.</>
-										: <>{" "}{uiText("Flashing")}{" "}<Text as="span" fontWeight="700">{uiText("unsigned firmware")}</Text>{" "}{uiText("onto a device running")}{" "}<Text as="span" fontWeight="700">{uiText("signed (official) firmware")}</Text>.</>
-									}
-									{' '}{uiText("This transition requires a full device wipe —")}{" "}<Text as="span" fontWeight="700">{uiText("all keys and settings will be permanently erased")}</Text>.
-								</Text>
-								)}
-								<Text fontSize="sm" color="var(--rose)" lineHeight="1.6" mb="3">{uiText("Make sure you have your recovery seed backed up before proceeding.")}</Text>
-								<Flex
-									as="label"
-									align="center"
-									gap="2"
-									cursor="pointer"
-									userSelect="none"
-									onClick={() => setWipeAcknowledged(!wipeAcknowledged)}
-								>
-									<Box
-										w="18px" h="18px"
-										borderRadius="sm"
-										border="2px solid"
-										borderColor={wipeAcknowledged ? "var(--rose)" : "var(--rose)"}
-										bg={wipeAcknowledged ? "var(--rose)" : "transparent"}
-										display="flex"
-										alignItems="center"
-										justifyContent="center"
-										flexShrink={0}
-									>
-										{wipeAcknowledged && (
-											<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-												<polyline points="20 6 9 17 4 12" />
-											</svg>
-										)}
-									</Box>
-									<Text fontSize="xs" fontWeight="600" color="var(--rose)">
-										{analysis.wipeReason === "bitcoin-only-lock"
-											? uiText("I understand my wallet will be locked and I have my seed backed up")
-											: analysis.wipeReason === "unknown-installed" || analysis.wipeReason === "no-firmware"
-												? uiText("I understand this may wipe my device and I have my seed backed up")
-												: uiText("I understand this will wipe my device and I have my seed backed up")}
-									</Text>
-								</Flex>
-							</Box>
-						)}
-
-						{/* ── Not flashable here: a raw bootloader would be written where firmware lives ── */}
-						{(analysis.imageKind === "raw-bootloader" || analysis.imageKind === "unknown") && (
-							<Box mx="6" mb="3" p="4" bg="rgba(229,62,62,0.1)" border="1px solid" borderColor="var(--rose)" borderRadius="lg">
-								<Text fontSize="sm" fontWeight="700" color="var(--rose)" mb="2">
-									{analysis.imageKind === "raw-bootloader" ? uiText("Raw bootloader image") : uiText("Unrecognized image")}
-								</Text>
-								<Text fontSize="sm" color="kk.textSecondary" lineHeight="1.6">
-									{analysis.imageKind === "raw-bootloader"
-										? uiText("The firmware updater would write this into the firmware area, not the bootloader. Bootloaders are installed with their bootloader updater (blupdater.bin).")
-										: uiText("This is not a KeepKey firmware image or bootloader updater, so it cannot be flashed.")}
-								</Text>
-							</Box>
-						)}
-
-						{/* ── Bootloader updater: replaces the bootloader, permanently ── */}
-						{analysis.imageKind === "bootloader-updater" && (
-							<Box
-								mx="6" mb="3" p="4"
-								bg={analysis.embeddedBootloader?.official ? "rgba(237,137,54,0.1)" : "rgba(229,62,62,0.1)"}
-								border="1px solid"
-								borderColor={analysis.embeddedBootloader?.official ? "var(--gold)" : "var(--rose)"}
-								borderRadius="lg"
-							>
-								<Text fontSize="sm" fontWeight="700" mb="2"
-									color={analysis.embeddedBootloader?.official ? "var(--gold)" : "var(--rose)"}>
-									{analysis.embeddedBootloader?.official ? uiText("Bootloader update") : uiText("Unofficial bootloader")}
-								</Text>
-								<Text fontSize="sm" color="kk.textSecondary" lineHeight="1.6" mb="3">{uiText("This is not firmware. It runs once and replaces the device's bootloader")}{analysis.embeddedBootloader?.version ? ` with v${analysis.embeddedBootloader.version}` : ""}{uiText(", then asks you to reconnect so you can install firmware.")}{analysis.embeddedBootloader?.official
-										? uiText(" The bootloader is an official KeepKey release.")
-										: uiText(" This bootloader is not an official KeepKey release: afterwards the device trusts only its signing keys, so official firmware will show as unofficial. Vault cannot restore the official bootloader. Use only on a test device.")}
-								</Text>
-								<Flex as="label" align="center" gap="2" cursor="pointer" userSelect="none"
-									onClick={() => setWarningAcknowledged(!warningAcknowledged)}>
-									<Box w="18px" h="18px" borderRadius="sm" border="2px solid"
-										borderColor={warningAcknowledged ? "var(--rose)" : "kk.textSecondary"}
-										bg={warningAcknowledged ? "var(--rose)" : "transparent"}
-										display="flex" alignItems="center" justifyContent="center" flexShrink={0}>
-										{warningAcknowledged && (
-											<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-												<polyline points="20 6 9 17 4 12" />
-											</svg>
-										)}
-									</Box>
-									<Text fontSize="xs" fontWeight="600" color="kk.textSecondary">{uiText("I understand this permanently replaces the bootloader")}</Text>
-								</Flex>
-							</Box>
-						)}
-
-						{/* ── SINGLE WARNING: Unsigned firmware (developer only) ── */}
-						{analysis.imageKind === "firmware" && !analysis.isSigned && !analysis.willWipeDevice && (
-							<Box
-								mx="6" mb="3" p="4"
-								bg="rgba(237,137,54,0.1)"
-								border="1px solid"
-								borderColor="var(--gold)"
-								borderRadius="lg"
-							>
-								<Flex align="center" gap="2" mb="2">
-									<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--gold)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-										<path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
-										<line x1="12" y1="9" x2="12" y2="13" />
-										<line x1="12" y1="17" x2="12.01" y2="17" />
-									</svg>
-									<Text fontSize="sm" fontWeight="700" color="var(--gold)">{uiText("Developer Firmware")}</Text>
-								</Flex>
-								<Text fontSize="sm" color="var(--gold-2)" lineHeight="1.6" mb="3">{uiText("This is unsigned firmware intended for developers only. It may result in device state loss or unexpected behavior.")}</Text>
-								<Flex
-									as="label"
-									align="center"
-									gap="2"
-									cursor="pointer"
-									userSelect="none"
-									onClick={() => setWarningAcknowledged(!warningAcknowledged)}
-								>
-									<Box
-										w="18px" h="18px"
-										borderRadius="sm"
-										border="2px solid"
-										borderColor={warningAcknowledged ? "var(--gold)" : "var(--gold-2)"}
-										bg={warningAcknowledged ? "var(--gold)" : "transparent"}
-										display="flex"
-										alignItems="center"
-										justifyContent="center"
-										flexShrink={0}
-									>
-										{warningAcknowledged && (
-											<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-												<polyline points="20 6 9 17 4 12" />
-											</svg>
-										)}
-									</Box>
-									<Text fontSize="xs" fontWeight="600" color="var(--gold-2)">{uiText("I understand this is developer firmware")}</Text>
-								</Flex>
-							</Box>
-						)}
-
-						{/* ── Recovery phrase confirmation (the wipe acknowledgement above already covers it) ── */}
-						{needsBackupConfirm && !analysis.willWipeDevice && (
-							<Flex
-								as="label"
-								mx="6" mb="3"
-								align="center"
-								gap="2"
-								cursor="pointer"
-								userSelect="none"
-								onClick={() => setBackupConfirmed(!backupConfirmed)}
-							>
-								<Box
-									w="18px" h="18px"
-									borderRadius="sm"
-									border="2px solid"
-									borderColor="kk.gold"
-									bg={backupConfirmed ? "kk.gold" : "transparent"}
-									display="flex"
-									alignItems="center"
-									justifyContent="center"
-									flexShrink={0}
-								>
-									{backupConfirmed && (
-										<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="black" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-											<polyline points="20 6 9 17 4 12" />
-										</svg>
-									)}
-								</Box>
-								<Text fontSize="xs" fontWeight="600" color="kk.textPrimary">{uiText("I have my recovery phrase written down. If the flash is interrupted, the wallet on this KeepKey is erased and can only be restored from it.")}</Text>
-							</Flex>
-						)}
-
-						{/* ── GATE: device must be in bootloader mode to flash ── */}
-						{!inBootloader && (
-							<Box
-								mx="6" mb="3" p="4"
-								bg="rgba(139,227,196,0.08)"
-								border="1px solid"
-								borderColor="kk.border"
-								borderRadius="lg"
-							>
-								<Text fontSize="sm" fontWeight="700" color="kk.textPrimary" mb="1">{uiText("Put your KeepKey in bootloader mode")}</Text>
-								<Text fontSize="xs" color="kk.textSecondary" mb="3">{uiText("Firmware can only be flashed from bootloader mode. Your device isn't in bootloader mode yet — follow these steps:")}</Text>
-								<Box maxW="90px" mx="auto" mb="3" opacity={0.85} dangerouslySetInnerHTML={{ __html: holdAndConnectRaw }} sx={{ '& svg': { width: '100%', height: '100%' } }} />
-								<Box as="ol" pl="4" style={{ listStyle: "decimal" }}>
-									<Text as="li" fontSize="xs" color="kk.textSecondary">{uiText("Unplug your KeepKey")}</Text>
-									<Text as="li" fontSize="xs" color="kk.textSecondary">{uiText("Hold down the button on the device")}</Text>
-									<Text as="li" fontSize="xs" color="kk.textSecondary">{uiText("While holding, plug in the USB cable")}</Text>
-									<Text as="li" fontSize="xs" color="kk.textSecondary">{uiText("Release when the bootloader screen appears")}</Text>
-								</Box>
-								<Flex align="center" gap="2" mt="3">
-									<Spinner size="xs" color="var(--teal)" />
-									<Text fontSize="xs" color="var(--teal)">{uiText("Waiting for your device to enter bootloader mode…")}</Text>
-								</Flex>
-							</Box>
-						)}
-
-						{/* Actions */}
-						<Flex
-							px="6" py="4" gap="3"
-							justify="flex-end"
-							borderTop="1px solid"
-							borderColor="kk.border"
-							bg="rgba(255,255,255,0.02)"
-						>
-							<Button
-								size="sm"
-								variant="ghost"
-								color="kk.textSecondary"
-								px="4" py="2"
-								_hover={{ color: "kk.textPrimary" }}
-								onClick={handleDismiss}
-							>{uiText("Cancel")}</Button>
-							<Button
-								size="sm"
-								bg={analysis.willWipeDevice ? "var(--rose)" : analysis.isSigned ? "kk.gold" : "var(--gold)"}
-								color={analysis.willWipeDevice ? "white" : "black"}
-								fontWeight="700"
-								px="4" py="2"
-								_hover={{
-									bg: analysis.willWipeDevice ? "#C53030" : analysis.isSigned ? "kk.goldHover" : "#DD6B20",
-								}}
-								onClick={handleFlash}
-								disabled={
-									!inBootloader
-									|| (analysis.imageKind !== "firmware" && analysis.imageKind !== "bootloader-updater")
-									|| (analysis.imageKind === "bootloader-updater" && !warningAcknowledged)
-									|| (analysis.willWipeDevice && !wipeAcknowledged)
-									|| (!analysis.isSigned && !analysis.willWipeDevice && !warningAcknowledged)
-									|| (needsBackupConfirm && !analysis.willWipeDevice && !backupConfirmed)
-								}
-							>
-								{!inBootloader
-									? uiText("Enter bootloader mode first")
-									: analysis.imageKind === "bootloader-updater"
-										? `Install Bootloader ${analysis.detectedVersion || ""}`.trim()
-										: analysis.imageKind !== "firmware"
-											? uiText("Cannot flash")
-											: analysis.willWipeDevice
-												? (analysis.wipeReason === "bitcoin-only-lock" || analysis.wipeReason === "unknown-installed" ? "Flash Anyway" : "Wipe & Flash")
-												: `Flash ${analysis.detectedVersion || "Firmware"}`}
-							</Button>
-						</Flex>
-					</Box>
-				)}
+									<div><dt>{uiText("Size")}</dt><dd>{(analysis.fileSize / 1024).toFixed(1)} KB</dd></div>
+									<div><dt>{uiText("Payload hash")}</dt><dd>{analysis.payloadHash.slice(0, 16)}…</dd></div>
+								</dl>
+							</div>
+						</div>
+					)
+				})()}
 
 				{/* ── Flashing progress ─────────────────────── */}
 				{phase === "flashing" && (

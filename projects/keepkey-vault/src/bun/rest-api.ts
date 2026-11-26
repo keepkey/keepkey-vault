@@ -1319,11 +1319,11 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
       }
 
       // Resolve app info from bearer token (or 'public')
-      const resolveAppInfo = (): { appName: string; imageUrl: string } => {
+      const resolveAppInfo = (): { appName: string; imageUrl: string; paired: boolean } => {
         const token = auth.extractBearerToken(req)
-        if (!token) return { appName: 'public', imageUrl: '' }
+        if (!token) return { appName: 'public', imageUrl: '', paired: false }
         const entry = auth.validate(token)
-        return { appName: entry?.info?.name || 'paired', imageUrl: entry?.info?.imageUrl || '' }
+        return { appName: entry?.info?.name || 'paired', imageUrl: entry?.info?.imageUrl || '', paired: !!entry }
       }
 
       // Request-scoped body capture (set by POST handlers before json() is called)
@@ -1880,9 +1880,9 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
 
           await requireWallet(engine)
 
-          const { appName } = resolveAppInfo()
+          const { appName, paired: appPaired } = resolveAppInfo()
           const id = crypto.randomUUID()
-          const signingInfo: SigningRequestInfo = { id, method: path, appName }
+          const signingInfo: SigningRequestInfo = { id, method: path, appName, appPaired }
           // Device state is already cached by the engine and does not initiate
           // USB traffic. Certified metadata must be resolved before approval,
           // so establish firmware capability before building the preview.

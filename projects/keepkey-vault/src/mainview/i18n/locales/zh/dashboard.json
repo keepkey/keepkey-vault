@@ -55,5 +55,10 @@
 	"rescanUnavailable": "此网络的历史记录不可用",
 	"rescanUnavailableAll": "这些网络没有可扫描的历史记录",
 	"rescanFailed": "扫描失败",
-	"rescanFailedDetail": "扫描失败：{{detail}}"
+	"rescanFailedDetail": "扫描失败：{{detail}}",
+	"chainTotalLabel": "{{chain}} · 总计",
+	"chainNativeLine": "原生 {{amount}} · {{usd}}",
+	"tokensHeader": "代币 · {{n}} · {{usd}}",
+	"smallBalances": "小额余额（{{n}}）",
+	"smallBalancesHint": "低于 {{usd}}"
 }

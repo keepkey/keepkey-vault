@@ -13,7 +13,16 @@ export function signingReviewPreferences(value: unknown): SigningReviewPreferenc
 }
 export interface SigningReviewField { label: string; value: string }
 export interface SigningReviewStep { title: string; why: string; compare: string }
-export interface SigningReviewGuide { title: string; purpose: string; warnings: string[]; fields: SigningReviewField[]; steps: SigningReviewStep[]; raw?: string }
+export type SigningRequestKind = 'message' | 'typed' | 'contract' | 'transaction'
+export interface SigningReviewGuide {
+  title: string; purpose: string; warnings: string[]; fields: SigningReviewField[]; steps: SigningReviewStep[]; raw?: string
+  kind: SigningRequestKind
+  /** True only when the request TYPE guarantees the signature itself moves no
+   *  funds: a plain message signature (never typed data, a typed hash, or a
+   *  transaction-shaped Solana payload). Derived from the method and decoded
+   *  shape, never from anything the requesting app claims. */
+  noFundsMove: boolean
+}
 
 /** Advice for reading a request, never an assertion that a device page was
  * observed or that a host-decoded claim has been authenticated by firmware. */
@@ -113,7 +122,11 @@ export function signingReviewGuide(request: SigningRequestInfo): SigningReviewGu
   // objects containing wallet witnesses, secrets or authentication material.
   if (typed) raw = JSON.stringify({ domain: typed.domain, type: typed.primaryType, fields: typed.fields, hashes: typed.hashes }, null, 2)
   else raw = request.solanaMessageDecoded?.messageHex || request.ethMessageDecoded?.messageRaw || data || undefined
-  return { title, purpose, warnings, fields, steps, raw }
+  const kind: SigningRequestKind = typed ? 'typed' : messageMethod ? 'message' : contract ? 'contract' : 'transaction'
+  const noFundsMove = kind === 'message'
+    && !/sign-typed-hash/.test(request.method)
+    && !request.solanaMessageDecoded?.classification.startsWith('solana-transaction')
+  return { title, purpose, warnings, fields, steps, raw, kind, noFundsMove }
 }
 
 /** Decode the actual SSD1306 page-layout buffer, preserving every source bit. */

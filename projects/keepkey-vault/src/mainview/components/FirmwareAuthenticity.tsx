@@ -19,78 +19,35 @@ import { useUiTranslation } from "../i18n/ui"
  * bootloader still reports one, so a known bootloader is enough to say
  * "genuine" — the factory firmware is replaced in the next step anyway.
  */
-import type { ComponentProps, ReactNode } from "react"
-import { Box, Button, Flex, HStack, SimpleGrid, Text, VStack } from "@chakra-ui/react"
-import { FaCheck, FaChevronRight, FaDownload, FaKey, FaShieldAlt } from "react-icons/fa"
+import { useState } from "react"
+import { Box } from "@chakra-ui/react"
 import { rpcRequest } from "../lib/rpc"
 import { authenticityVerdict } from "../../shared/firmware-authenticity"
-
-const GOLD = "#E9C46A"
-const GREEN = "#48BB78"
-const AMBER = "#ED8936"
-
+import { PreflightList, PreflightStyles, type PreflightRow } from "./preflight/PreflightConsole"
+import { OledText, SpinningDevice } from "./v3"
 
 function openUrl(url: string) {
 	// target="_blank" is a dead click in Electrobun.
 	rpcRequest("openUrl", { url }).catch(() => {})
 }
 
-/** Seal that draws itself once: ring, then tick. Static under reduced motion. */
-function Seal() {
-	return (
-		<Box position="relative" w="60px" h="60px" flexShrink={0} className="kkAuthSeal">
-			<svg width="60" height="60" viewBox="0 0 92 92" aria-hidden="true">
-				<circle cx="46" cy="46" r="40" fill="none" stroke="rgba(72,187,120,0.15)" strokeWidth="6" />
-				<circle className="kkAuthRing" cx="46" cy="46" r="40" fill="none" stroke={GREEN} strokeWidth="6"
-					strokeLinecap="round" transform="rotate(-90 46 46)" />
-				<path className="kkAuthTick" d="M30 47 L41 58 L63 35" fill="none" stroke={GREEN} strokeWidth="7"
-					strokeLinecap="round" strokeLinejoin="round" />
-			</svg>
-		</Box>
-	)
-}
-
-type RowTone = "pass" | "info" | "warn"
-
-function CheckRow({ icon, tone, title, detail, who, index }: {
-	icon: ReactNode
-	tone: RowTone
-	title: string
-	detail: string
-	who: string
-	index: number
-}) {
-	const color = tone === "pass" ? GREEN : tone === "warn" ? AMBER : GOLD
-	return (
-		<HStack gap="2.5" align="start" w="100%" className="kkAuthRow" style={{ animationDelay: `${450 + index * 120}ms` }}>
-			<Flex flexShrink={0} w="24px" h="24px" borderRadius="full" align="center" justify="center"
-				bg={`${color}1F`} color={color} border="1px solid" borderColor={`${color}55`}>
-				{icon}
-			</Flex>
-			<VStack gap="0" align="start" flex="1" minW={0}>
-				<HStack gap="2" flexWrap="wrap">
-					<Text fontSize="sm" fontWeight="600" color="gray.100">{title}</Text>
-					<Text fontSize="2xs" color="gray.500" letterSpacing="0.04em" textTransform="uppercase">{who}</Text>
-				</HStack>
-				<Text fontSize="xs" color="gray.400" lineHeight="1.4">{detail}</Text>
-			</VStack>
-		</HStack>
-	)
-}
-
+/** Hash as a hairline key/value row: truncated, with a Copy button. */
 function HashRow({ label, value }: { label: string; value: string }) {
+	const uiText = useUiTranslation()
+	const [copied, setCopied] = useState(false)
+	const copy = () => {
+		navigator.clipboard?.writeText(value).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1500) }).catch(() => {})
+	}
 	return (
-		<VStack gap="0.5" align="stretch" w="100%">
-			<Text fontSize="2xs" color="gray.500">{label}</Text>
-			<Text fontSize="2xs" fontFamily="mono" color="gray.300" wordBreak="break-all" lineHeight="1.4">
-				{value}
-			</Text>
-		</VStack>
+		<div>
+			<dt>{label}</dt>
+			<dd title={value}>{value.slice(0, 12)}…{value.slice(-8)}</dd>
+			<button type="button" className="kk-pf-copy" onClick={copy}>{copied ? uiText("Copied") : uiText("Copy")}</button>
+		</div>
 	)
 }
 
-export function FirmwareAuthenticity({
-	firmwareHash,
+export function FirmwareAuthenticity({	firmwareHash,
 	firmwareRelease,
 	firmwareVerified,
 	bootloaderHash,
@@ -141,16 +98,21 @@ export function FirmwareAuthenticity({
 				// "my wallet is about to be wiped" and stopped. Say what is and isn't changed.
 				: "Older firmware can't report its fingerprint. Your wallet on the device is not changed by this screen. Next, Desktop updates the firmware (you'll confirm on the device), and then it can be checked."
 
-	const rows: Array<Omit<ComponentProps<typeof CheckRow>, "index">> = []
+	const unlisted = verdict === "unrecognized"
+	const release = firmwareRelease?.replace(/^v/, "")
+	const title = verdict === "verified" ? uiText("Official firmware {{version}}", { version: release || "" }).trim()
+		: unlisted ? uiText("Unlisted firmware") : headline
+
+	// Every check the old screen made is still a row; one status mark each.
+	const rows: PreflightRow[] = []
 	if (bootloaderVerified === true) {
-		rows.push({ icon: <FaCheck size={11} />, tone: "pass", title: "Bootloader", who: "Desktop checked",
-			detail: `Official KeepKey release${bootloaderRelease ? ` ${bootloaderRelease}` : ""}.` })
+		rows.push({ key: "bl", status: "ok", title: uiText("Official bootloader {{version}} · checked by Desktop", { version: bootloaderRelease || "" }) })
 	} else if (bootloaderVerified === false) {
-		rows.push({ icon: <FaShieldAlt size={11} />, tone: "warn", title: "Bootloader", who: "Desktop checked",
+		rows.push({ key: "bl", status: "warn", title: uiText("Bootloader not in the release list"),
 			detail: "Not in the release list. Compare its hash with the bootloader you expected." })
 	}
 	if (verdict === "verified") {
-		rows.push({ icon: <FaCheck size={11} />, tone: "pass", title: firmwareSignaturesVerified ? "Firmware signed by KeepKey" : "Firmware", who: "Desktop checked",
+		rows.push({ key: "fw", status: "ok", title: firmwareSignaturesVerified ? "Firmware signed by KeepKey" : "Firmware",
 			detail: firmwareSignaturesVerified
 				? `${firmwareRelease ? `Release ${firmwareRelease} carries` : "Carries"} three valid KeepKey release signatures.`
 				: `Official KeepKey release${firmwareRelease ? ` ${firmwareRelease}` : ""}.` })
@@ -162,126 +124,91 @@ export function FirmwareAuthenticity({
 			installBootloader?.signed && `bootloader ${installBootloader.version}`,
 		].filter(Boolean) as string[]
 		rows.push(signedInstalls.length
-			? { icon: <FaCheck size={11} />, tone: "pass", title: "Update signed by KeepKey", who: "Desktop checked",
+			? { key: "fw", status: "ok", title: "Update signed by KeepKey",
 				detail: `Next, Desktop installs ${signedInstalls.join(" and ")}. Their KeepKey release signatures verified.` }
-			: { icon: <FaChevronRight size={10} />, tone: "info", title: "Firmware", who: "Next step",
+			: { key: "fw", status: "ok", title: "Firmware",
 				detail: "Your KeepKey ships with factory firmware. Desktop installs the latest official firmware next." })
+	} else if (unlisted) {
+		rows.push({ key: "fw", status: "warn", title: uiText("Not in KeepKey's release list"), detail: uiText("Compare its hash with the build you expected.") })
 	}
-	rows.push({ icon: <FaShieldAlt size={11} />, tone: passed ? "pass" : "info", title: "Signature check", who: "On the device",
-		detail: "Before it runs any firmware, your KeepKey checks it for KeepKey's release signatures and warns you if they are missing." })
+	rows.push({ key: "sig", status: passed ? "ok" : "warn", title: uiText("Signature check runs on the device"),
+		detail: uiText("Your KeepKey warns at startup if the firmware isn't signed by KeepKey.") })
 	if (passed && !holdsWallet) {
-		rows.push({ icon: <FaKey size={10} />, tone: "pass", title: "Recovery phrase", who: "On the device",
+		rows.push({ key: "phrase", status: "ok", title: "Recovery phrase",
 			detail: "Created on your KeepKey and shown only on its screen. It never leaves the device." })
 	}
 
-	const accent = passed ? GREEN : verdict === "unrecognized" ? AMBER : "gray.500"
+	const continueLabel = unlisted ? uiText("Continue with this build") : verdict === "unreported" ? uiText("Continue to update") : passed && !holdsWallet ? uiText("Set up my KeepKey") : uiText("Continue")
+	const bootloaderLabel = `Bootloader${bootloaderVerified === true ? ` · official${bootloaderRelease ? ` ${bootloaderRelease}` : ""}` : bootloaderVerified === false ? " · unrecognized" : ""}`
 
 	return (
-		<VStack gap={3} w="100%" maxW="760px" mx="auto">
-			<style>{`
-				.kkAuthRing { stroke-dasharray: 252; stroke-dashoffset: 252; animation: kkAuthDraw 700ms ease-out 100ms forwards; }
-				.kkAuthTick { stroke-dasharray: 50; stroke-dashoffset: 50; animation: kkAuthDraw 350ms ease-out 650ms forwards; }
-				.kkAuthSeal { animation: kkAuthGlow 1600ms ease-out 900ms 1; border-radius: 9999px; }
-				.kkAuthRow { animation: kkAuthRise 380ms ease-out both; }
-				@keyframes kkAuthDraw { to { stroke-dashoffset: 0; } }
-				@keyframes kkAuthGlow { 0% { box-shadow: 0 0 0 0 rgba(72,187,120,0.45); } 100% { box-shadow: 0 0 0 26px rgba(72,187,120,0); } }
-				@keyframes kkAuthRise { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
-				@media (prefers-reduced-motion: reduce) {
-					.kkAuthRing, .kkAuthTick { animation: none; stroke-dashoffset: 0; }
-					.kkAuthSeal, .kkAuthRow { animation: none; }
-				}
-			`}</style>
-
-			<Box w="100%" bg="rgba(255,255,255,0.03)" border="1px solid" borderColor={passed ? `${GREEN}40` : `${GOLD}33`}
-				borderRadius="2xl" p={{ base: 4, md: 5 }}>
-				<VStack gap={4} align="stretch">
-					{passed ? (
-						<HStack gap={4} align="center">
-							<Seal />
-							<VStack gap="0.5" align="start" minW={0}>
-								<Text fontSize="2xl" fontWeight="800" color="white" letterSpacing="-0.02em" lineHeight="1.15">
-									{headline}
-								</Text>
-								<Text fontSize="sm" color="gray.400">{subline}</Text>
-							</VStack>
-						</HStack>
-					) : (
-						<VStack gap={2} align="stretch">
-							<HStack gap={3} align="center">
-								<Box color={accent}><FaShieldAlt size={22} /></Box>
-								<Text fontSize="lg" fontWeight="800" color="white" letterSpacing="-0.02em">{headline}</Text>
-								{verdict === "unrecognized" && (
-									<Box flexShrink={0} px="2" py="0.5" borderRadius="full" border="1px solid" borderColor={AMBER}
-										color={AMBER} fontSize="2xs" fontWeight="700" letterSpacing="0.08em">
-										UNLISTED
-									</Box>
-								)}
-							</HStack>
-							<Text fontSize="sm" color="gray.400" lineHeight="1.5">{subline}</Text>
-						</VStack>
-					)}
-
-					<SimpleGrid columns={{ base: 1, md: 2 }} gapX={5} gapY={3}>
-						{rows.map((r, i) => <CheckRow key={r.title} index={i} {...r} />)}
-					</SimpleGrid>
-
-					{/* The limits and the do-it-yourself path stay one click away.
-					    ponytail: native <details> — no state, no animation lib. */}
-					<Box bg="rgba(0,0,0,0.25)" borderRadius="md" px={3} py={2} as="details">
-						<Text as="summary" fontSize="xs" color="gray.500" cursor="pointer" _marker={{ color: "gray.600" }}>{uiText("How this is checked")}</Text>
-						<VStack gap={3} align="stretch" mt={3}>
-							<Text fontSize="2xs" color="gray.500" lineHeight="1.6">{uiText("Your KeepKey reports the hashes of its bootloader and firmware. Desktop compares them with KeepKey's published releases, using a list shipped with the app. This is a cross-check, not independent proof. The signature check that actually guards your device runs on the device itself.")}</Text>
-							{firmwareHash && <HashRow label={uiText("Firmware · reported by device")} value={firmwareHash} />}
-							{bootloaderHash && (
-								<HashRow
-									label={`Bootloader${bootloaderVerified === true ? ` · official${bootloaderRelease ? ` ${bootloaderRelease}` : ""}` : bootloaderVerified === false ? " · unrecognized" : ""}`}
-									value={bootloaderHash}
-								/>
-							)}
-							<HStack gap={4} flexWrap="wrap">
-								{verdict === "verified" && firmwareRelease && (
-									<Box as="button" type="button" fontSize="2xs" color={GOLD} textDecoration="underline"
-										onClick={() => openUrl(`https://github.com/keepkey/keepkey-firmware/releases/tag/${firmwareRelease.replace(/-bitcoin-only$/, "")}`)}>{uiText("Open the")}{" "}{firmwareRelease}{" "}{uiText("release")}</Box>
-								)}
-								<Box as="button" type="button" fontSize="2xs" color={GOLD} textDecoration="underline"
-								onClick={() => openUrl("https://github.com/keepkey/keepkey-firmware#verifying-published-binaries")}>{uiText("How to reproduce the build")}</Box>
-							</HStack>
-							{/* Two commands, two links in the chain. Shipping only one of them is
-							    how people end up comparing a payload hash to a device hash and
-							    concluding their wallet is compromised. */}
-							<Box>
-								<Text fontSize="2xs" fontFamily="mono" color="gray.300">{uiText("sha256sum firmware.keepkey.bin")}</Text>
-								<Text fontSize="2xs" color="gray.600" mb="2" lineHeight="1.5">{uiText("Run on the release binary. It must match the firmware hash shown here.")}</Text>
-								<Text fontSize="2xs" fontFamily="mono" color="gray.300">{uiText("tail -c +257 firmware.keepkey.bin | sha256sum")}</Text>
-								<Text fontSize="2xs" color="gray.600" lineHeight="1.5">{uiText("Run on the release and your own build to compare unsigned app code. This is")}{" "}<Text as="span" color="gray.400">{uiText("not")}</Text>{" "}{uiText("the device-reported hash.")}</Text>
-							</Box>
-						</VStack>
-					</Box>
-				</VStack>
-			</Box>
-
-			<Flex w="100%" gap={3} justify="center" align="stretch" direction={{ base: "column", md: "row" }}>
-				{showOfficialInstall && (
-					<Button px={4} size="md" bg={GOLD} color="black" fontWeight="700"
-						_hover={{ opacity: 0.9 }} _active={{ transform: "scale(0.98)" }}
-						disabled={continueDisabled} onClick={onInstallOfficialFirmware}>
-						<FaDownload size={14} aria-hidden="true" />
-						{uiText("Install official firmware")}
-					</Button>
+		<div className="kk-pf kk-pf-flat" role="group" aria-label={title} style={{ width: "100%" }}>
+			<PreflightStyles />
+			{/* ── Left: verdict, what the device shows, checklist, decision ── */}
+			<div className="kk-pf-left">
+				<div className="kk-pf-kicker">{uiText("Check your firmware")}</div>
+				<div>
+					<h2 className="kk-pf-title">{title}</h2>
+					<p className="kk-pf-sub">{unlisted ? uiText("A custom, Bitcoin-only or test build") : subline}</p>
+				</div>
+				{/* The user compares this with what the device showed: it stays still. */}
+				{unlisted ? (
+					<div className="kk-pf-device">
+						<SpinningDevice motion="still" scale={0.66} screen={<OledText kicker="UNOFFICIAL FIRMWARE" headline={firmwareHash ? firmwareHash.slice(0, 8) : undefined} />} />
+						<div className="kk-pf-cap">{uiText("Did your KeepKey show this at startup?")}</div>
+					</div>
+				) : verdict !== "unreported" && (
+					<div className="kk-pf-device">
+						<SpinningDevice motion="still" scale={0.66} screen={<OledText kicker="KEEPKEY" headline={firmwareRelease || (bootloaderRelease ? `bootloader ${bootloaderRelease}` : undefined)} />} />
+						<div className="kk-pf-cap">{uiText("No warning at startup")}</div>
+					</div>
 				)}
-				<Button w={{ base: "100%", md: showOfficialInstall ? "auto" : "100%" }}
-					maxW={showOfficialInstall ? { md: "360px" } : "360px"} px={4} size="md"
-					bg={showOfficialInstall ? "transparent" : GOLD}
-					color={showOfficialInstall ? GOLD : "black"}
-					borderWidth={showOfficialInstall ? "1px" : "0"}
-					borderColor={GOLD} fontWeight="700"
-					_hover={{ opacity: 0.9 }} _active={{ transform: "scale(0.98)" }} disabled={continueDisabled} onClick={onContinue}>
-					<Flex gap={2} align="center" justify="center">
-						<Text>{verdict === "unrecognized" ? uiText("Continue with this build") : verdict === "unreported" ? uiText("Continue to update") : passed && !holdsWallet ? uiText("Set up my KeepKey") : uiText("Continue")}</Text>
-						<FaChevronRight size={10} />
-					</Flex>
-				</Button>
-			</Flex>
-		</VStack>
+				<PreflightList rows={rows} />
+				<div className="kk-pf-actions kk-pf-wrap">
+					{showOfficialInstall && (
+						<button type="button" className="kk-pf-go" disabled={continueDisabled} onClick={onInstallOfficialFirmware}>{uiText("Install official firmware")}</button>
+					)}
+					<button type="button" className={showOfficialInstall ? "kk-pf-outline" : "kk-pf-go"} disabled={continueDisabled} onClick={onContinue}>{continueLabel}</button>
+				</div>
+			</div>
+
+			{/* ── Right: how it is checked, hashes, the do-it-yourself path ── */}
+			<div className="kk-pf-right">
+				<h3 className="kk-pf-h">{uiText("How this is checked")}</h3>
+				{/* Said once, here; the full limits sentence is kept word for word. */}
+				<p className="kk-pf-lede" style={{ fontSize: 13.5 }}>
+					{uiText("Your KeepKey reports the hashes of its bootloader and firmware. Desktop compares them with KeepKey's published releases, using a list shipped with the app. This is a cross-check, not independent proof. The signature check that actually guards your device runs on the device itself.")}
+				</p>
+				{(firmwareHash || bootloaderHash) && (
+					<dl className="kk-pf-kv">
+						{firmwareHash && <HashRow label={uiText("Firmware · reported by device")} value={firmwareHash} />}
+						{bootloaderHash && <HashRow label={bootloaderLabel} value={bootloaderHash} />}
+					</dl>
+				)}
+				{verdict === "verified" && firmwareRelease && (
+					<button type="button" className="kk-pf-link"
+						onClick={() => openUrl(`https://github.com/keepkey/keepkey-firmware/releases/tag/${firmwareRelease.replace(/-bitcoin-only$/, "")}`)}>{uiText("Open the")}{" "}{firmwareRelease}{" "}{uiText("release")}</button>
+				)}
+				{/* The limits and the do-it-yourself path stay one click away. */}
+				<details className="kk-pf-tech">
+					<summary>{uiText("Technical details")}</summary>
+					<Box display="flex" flexDirection="column" gap="3" mt="3" fontSize="12px" color="var(--text-1)" lineHeight="1.55">
+						<Box display="flex" gap="4" flexWrap="wrap">
+							<button type="button" className="kk-pf-link"
+								onClick={() => openUrl("https://github.com/keepkey/keepkey-firmware#verifying-published-binaries")}>{uiText("How to reproduce the build")}</button>
+						</Box>
+						{/* Two commands, two links in the chain. Shipping only one of them is
+						    how people end up comparing a payload hash to a device hash and
+						    concluding their wallet is compromised. */}
+						<Box>
+							<Box fontFamily="var(--font-mono)" color="var(--text-0)">{uiText("sha256sum firmware.keepkey.bin")}</Box>
+							<Box color="var(--text-2)" mb="2">{uiText("Run on the release binary. It must match the firmware hash shown here.")}</Box>
+							<Box fontFamily="var(--font-mono)" color="var(--text-0)">{uiText("tail -c +257 firmware.keepkey.bin | sha256sum")}</Box>
+							<Box color="var(--text-2)">{uiText("Run on the release and your own build to compare unsigned app code. This is")}{" "}<b>{uiText("not")}</b>{" "}{uiText("the device-reported hash.")}</Box>
+						</Box>
+					</Box>
+				</details>
+			</div>
+		</div>
 	)
 }

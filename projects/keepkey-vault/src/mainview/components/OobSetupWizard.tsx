@@ -1,5 +1,5 @@
 import { useUiTranslation, firmwareProgressText } from "../i18n/ui"
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { Fragment, useState, useEffect, useCallback, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Box, Text, VStack, HStack, Flex, Button, Spinner, Input } from '@chakra-ui/react'
 import {
@@ -8,7 +8,6 @@ import {
   FaKey,
   FaCheckCircle,
   FaExclamationTriangle,
-  FaPlus,
   FaChevronDown,
   FaChevronUp,
   FaFolderOpen,
@@ -29,6 +28,8 @@ import { FirmwareAuthenticity } from './FirmwareAuthenticity'
 import { DocsLink } from './DocsLink'
 import { DOCS_LINKS } from '../../shared/docs-links'
 import { TutorialPage } from './TutorialCards'
+import { NumberNode, PreflightStyles, TimelineItem } from './preflight/PreflightConsole'
+import { OledCipher, OledText, SpinningDevice } from './v3'
 import { CoinChoice } from './CoinChoice'
 import { LanguagePicker } from '../i18n/LanguageSelector'
 import { BITCOIN_ONLY_ONBOARDING } from '../../shared/flags'
@@ -48,12 +49,8 @@ function forgetCoinChoice() {
 // Primary accent for the wizard: the app-wide gold. Green stays reserved for
 // "done" (STEP_DONE) and verified states.
 const HIGHLIGHT = 'var(--gold)'
-// Step indicator: green means done, so the step in progress uses the gold
-// action accent. Otherwise a finished step and the current one look the same
-// (two green indicators during a firmware update).
-const STEP_DONE = 'green.500'
-const STEP_CURRENT = 'var(--gold)'
-const STEP_TODO = 'gray.600'
+// Done steps carry a gold ✓ in the text progress line (no green, no circles).
+const STEP_DONE = 'var(--gold)'
 
 // ── Animations ──────────────────────────────────────────────────────────────
 const ANIMATIONS_CSS = `
@@ -71,9 +68,9 @@ const ANIMATIONS_CSS = `
     100% { background-position: 40px 0; }
   }
   @keyframes kkGlow {
-    0%   { box-shadow: 0 0 8px rgba(72, 187, 120, 0.4); }
-    50%  { box-shadow: 0 0 20px rgba(72, 187, 120, 0.7); }
-    100% { box-shadow: 0 0 8px rgba(72, 187, 120, 0.4); }
+    0%   { box-shadow: 0 0 8px rgba(139,227,196,0.4); }
+    50%  { box-shadow: 0 0 20px rgba(139,227,196,0.7); }
+    100% { box-shadow: 0 0 8px rgba(139,227,196,0.4); }
   }
 `
 
@@ -243,8 +240,6 @@ export function OobSetupWizard({ onComplete: onCompleteProp, onWalletCreated, on
 
   // Read-more toggle on welcome/bootloader
   const [showReadMore, setShowReadMore] = useState(false)
-  // Advanced seed length toggle for create wallet
-  const [showCreateAdvanced, setShowCreateAdvanced] = useState(false)
   const [rngAuditOpen, setRngAuditOpen] = useState(false)
   // Last completed audit outcome. 'failed' hard-blocks wallet creation until a
   // re-run comes back healthy — a failed generator means predictable keys.
@@ -460,7 +455,7 @@ export function OobSetupWizard({ onComplete: onCompleteProp, onWalletCreated, on
             : t('firmware.installWipe.wipeTitle', { defaultValue: 'This will wipe the device' })}
         </Text>
       </HStack>
-      <Text fontSize="xs" color="red.200" mb={2} lineHeight="1.5">
+      <Text fontSize="xs" color="kk.error" mb={2} lineHeight="1.5">
         {installWipeReason === 'downgrade'
           ? deviceStatus.installedBitcoinOnly !== undefined && deviceStatus.installedBitcoinOnly !== (coinMode === 'bitcoin-only')
             ? t('firmware.installWipe.crossBody', { defaultValue: 'This KeepKey runs {{from}} firmware v{{current}}. {{to}} firmware v{{target}} cannot read its wallet, so when it starts, your KeepKey erases all keys and settings. To use this wallet again you will restore it from your recovery phrase.', from: deviceStatus.installedBitcoinOnly ? 'Bitcoin-only' : 'multi-chain', to: coinMode === 'bitcoin-only' ? 'Bitcoin-only' : 'Multi-chain', current: installedVersionLabel || '?', target: installVersion || '?' })
@@ -476,8 +471,8 @@ export function OobSetupWizard({ onComplete: onCompleteProp, onWalletCreated, on
       <Flex as="label" align="center" gap={2} cursor="pointer" userSelect="none" onClick={() => setInstallWipeAcknowledged(!installWipeAcknowledged)}>
         <Box
           w="16px" h="16px" borderRadius="sm" border="2px solid"
-          borderColor={installWipeAcknowledged ? 'red.400' : 'red.300'}
-          bg={installWipeAcknowledged ? 'red.500' : 'transparent'}
+          borderColor={installWipeAcknowledged ? 'kk.error' : 'kk.error'}
+          bg={installWipeAcknowledged ? 'kk.error' : 'transparent'}
           display="flex" alignItems="center" justifyContent="center" flexShrink={0}
         >
           {installWipeAcknowledged && <Text fontSize="2xs" color="white" lineHeight="1">&#10003;</Text>}
@@ -1220,7 +1215,12 @@ export function OobSetupWizard({ onComplete: onCompleteProp, onWalletCreated, on
   // bypass them (and from sec-dice would land on init-progress with no RPC in
   // flight — a spinner that never resolves).
   const showNext =
-    !['authenticity', 'coin-choice', 'intro', 'bootloader', 'firmware', 'init-choose', 'create-briefing', 'sec-randomness', 'sec-dice', 'init-progress', 'init-label', 'verify-seed', 'security-tips', 'complete'].includes(step)
+    // Welcome has its own single primary ('Get started'); no duplicate Next.
+    !['authenticity', 'coin-choice', 'intro', 'welcome', 'bootloader', 'firmware', 'init-choose', 'create-briefing', 'sec-randomness', 'sec-dice', 'init-progress', 'init-label', 'verify-seed', 'security-tips', 'complete'].includes(step)
+  // Mirrors what the footer would print, so an empty footer is skipped entirely.
+  const footerHasLabel = visibleIndex >= 0 || !['authenticity', 'intro', 'welcome'].includes(step)
+  const footerHasContent = showPrevious || showNext || !!stepDocsUrl[step]
+    || (step === 'init-choose' && offerBitcoinOnly) || footerHasLabel
 
   // ── Render ─────────────────────────────────────────────────────────────
 
@@ -1239,104 +1239,53 @@ export function OobSetupWizard({ onComplete: onCompleteProp, onWalletCreated, on
     >
       <style>{ANIMATIONS_CSS}</style>
 
+      {/* One landscape surface (preflight console): no gold frame, no nested
+          cards. Structure comes from type, alignment and hairlines. */}
       <Box
-        w={{ base: '100vw', md: '90vw', lg: '80vw' }}
-        maxW="900px"
-        maxH="90vh"
-        bg="var(--ink-1)"
-        borderRadius={{ base: 'none', md: 'xl' }}
-        boxShadow={{ base: 'none', md: '0 8px 32px rgba(0,0,0,0.5)' }}
-        borderWidth={{ base: '0', md: '2px' }}
-        borderColor="var(--gold)"
+        w={{ base: '100vw', md: 'min(1080px, 94vw)' }}
+        maxH={{ base: '100vh', md: '92vh' }}
+        bg="var(--ink-0)"
+        backgroundImage="radial-gradient(120% 80% at 0% 0%, rgba(233,196,106,.08), transparent 55%), radial-gradient(90% 70% at 100% 100%, rgba(98,126,234,.06), transparent 60%)"
+        borderRadius={{ base: 'none', md: '18px' }}
+        boxShadow={{ base: 'none', md: 'inset 0 0 0 1px rgba(255,255,255,.06), 0 30px 80px -30px rgba(0,0,0,.8)' }}
         overflow="auto"
         display="flex"
         flexDirection="column"
         pointerEvents="auto"
       >
-        {/* ── Header ─────────────────────────────────────────────────── */}
-        <Box px={4} py={3} borderBottomWidth="1px" borderColor="kk.cardBg">
-          <Flex align="center" justify="space-between">
-            <Box flex={1} />
-            <VStack gap={1} flex={2} textAlign="center">
-              <Text fontSize="lg" fontWeight="700" color={HIGHLIGHT} letterSpacing="tight">
-                {t('title')}
-              </Text>
-              <Text fontSize="sm" color="kk.textSecondary">
-                {STEP_DESCRIPTIONS[step]}
-              </Text>
-            </VStack>
-            <Flex flex={1} justify="flex-end">
-              <LanguagePicker />
-            </Flex>
-          </Flex>
-        </Box>
+        {/* ── Header: kicker left, language right ───────────────────── */}
+        <Flex px={{ base: 4, md: 6 }} pt={5} pb={2} align="center" justify="space-between" gap={3}>
+          <Text fontFamily="var(--font-mono)" fontSize="10.5px" letterSpacing="0.32em" textTransform="uppercase" color="kk.gold">
+            {t('title')}
+          </Text>
+          <LanguagePicker />
+        </Flex>
 
-        {/* ── Progress bar ───────────────────────────────────────────── */}
-        <Box px={4} py={1.5}>
-          <Box h="4px" bg="kk.cardBg" borderRadius="full" overflow="hidden">
-            <Box
-              h="100%"
-              bg={HIGHLIGHT}
-              borderRadius="full"
-              transition="width 0.3s, background-color 0.3s"
-              w={`${progressPercent}%`}
-            />
-          </Box>
-        </Box>
-
-        {/* ── Step indicators ────────────────────────────────────────── */}
-        <Box px={4} py={3} overflow="visible">
-          <HStack gap={2} justify="center">
+        {/* ── Progress as text over a hairline; done steps carry a gold ✓ ── */}
+        <Box px={{ base: 4, md: 6 }} pb={3}>
+          <Flex gap={2} align="baseline" flexWrap="wrap" fontFamily="var(--font-ui-sans)" fontSize="13px">
             {VISIBLE_STEPS.map((vs, idx) => {
               const completed = isVisibleStepCompleted(vs.id)
               const current = isVisibleStepCurrent(vs.id)
-
               return (
-                <Flex key={vs.id} align="center" flexShrink={1} minW={0}>
-                  <Box
-                    w={7}
-                    h={7}
-                    borderRadius="full"
-                    bg={completed ? STEP_DONE : current ? STEP_CURRENT : STEP_TODO}
-                    display="flex"
-                    alignItems="center"
-                    justifyContent="center"
-                    transition="all 0.3s"
-                    flexShrink={0}
-                    boxShadow={current ? '0 0 0 3px rgba(233, 196, 106, 0.25)' : 'none'}
-                  >
-                    {completed ? (
-                      <FaCheckCircle color="white" size={12} />
-                    ) : (
-                      <Text color={current ? 'var(--ink-0)' : 'white'} fontSize="xs" fontWeight="bold">
-                        {vs.number}
-                      </Text>
-                    )}
-                  </Box>
-                  <Text
-                    ml={1.5}
-                    fontSize="xs"
-                    fontWeight={current ? '700' : '500'}
-                    color={completed ? STEP_DONE : current ? STEP_CURRENT : 'gray.400'}
-                    whiteSpace="nowrap"
-                    overflow="hidden"
-                    textOverflow="ellipsis"
-                  >
-                    {vs.label}
+                <Fragment key={vs.id}>
+                  {idx > 0 && <Text as="span" color="var(--text-3)" aria-hidden="true">·</Text>}
+                  <Text as="span" fontWeight={current ? '600' : '400'}
+                    color={current ? 'kk.textPrimary' : completed ? 'kk.textSecondary' : 'kk.textMuted'}
+                    aria-current={current ? 'step' : undefined}>
+                    {vs.label}{completed && <Text as="span" color={STEP_DONE} ml={1} aria-hidden="true">✓</Text>}
                   </Text>
-                  {idx < VISIBLE_STEPS.length - 1 && (
-                    <Box
-                      w={6}
-                      h="2px"
-                      bg={completed ? STEP_DONE : STEP_TODO}
-                      ml={1.5}
-                      flexShrink={0}
-                    />
-                  )}
-                </Flex>
+                </Fragment>
               )
             })}
-          </HStack>
+          </Flex>
+          <Box mt={2} h="1px" bg="rgba(255,255,255,0.08)" position="relative">
+            <Box position="absolute" left={0} top={0} h="1px" bg={HIGHLIGHT} transition="width 0.3s" w={`${progressPercent}%`} />
+          </Box>
+          {/* Step context, except where the step's own title already says it. */}
+          {STEP_DESCRIPTIONS[step] && step !== 'welcome' && step !== 'init-choose' && (
+            <Text mt={2} fontSize="12px" color="kk.textMuted">{STEP_DESCRIPTIONS[step]}</Text>
+          )}
         </Box>
 
         {/* ── Content ────────────────────────────────────────────────── */}
@@ -1412,93 +1361,57 @@ export function OobSetupWizard({ onComplete: onCompleteProp, onWalletCreated, on
             )}
 
             {/* ═══════════════ WELCOME ═══════════════════════════════ */}
-            {step === 'welcome' && (
-              <VStack gap={4} textAlign="center" w="100%">
-                {isOobDevice ? (
-                  <>
-                    <Box
-                      p={3}
-                      borderRadius="full"
-                      bg="rgba(72, 187, 120, 0.15)"
-                      border="2px solid"
-                      borderColor="var(--teal)"
-                    >
-                      <FaWallet
-                        color="var(--teal)"
-                        size={40}
-                        style={{ animation: 'kkPulse 2s ease-in-out infinite' }}
-                      />
+            {step === 'welcome' && (() => {
+              // Mini route: what is already in place is marked done.
+              const blOk = !needsBootloader && !!deviceStatus.bootloaderVersion
+              const fwOk = !needsFirmware && !!deviceStatus.firmwareVersion && !deviceStatus.bootloaderMode
+              const route = [
+                { key: 'bl', label: t('visibleSteps.bootloader'), ok: blOk, detail: blOk ? `v${deviceStatus.bootloaderVersion}` : undefined },
+                { key: 'fw', label: t('visibleSteps.firmware'), ok: fwOk, detail: fwOk ? `v${deviceStatus.firmwareVersion}` : undefined },
+                { key: 'wallet', label: uiText('Your wallet'), ok: false, detail: undefined },
+              ]
+              return (
+                <Box display="grid" gridTemplateColumns={{ base: '1fr', md: 'minmax(0,1fr) minmax(0,1fr)' }} gap={{ base: 6, md: 10 }} alignItems="center" w="100%" fontFamily="var(--font-ui-sans)">
+                  <PreflightStyles />
+                  {/* The device is the hero: its screen and the firmware detected. */}
+                  <Flex justify={{ base: 'center', md: 'flex-start' }}>
+                    {/* Decorative hero: turns slowly, like the dashboard loader. */}
+                    <SpinningDevice durationSeconds={18} scale={1.1}
+                      screen={<OledText kicker="KEEPKEY" headline={deviceStatus.firmwareVersion ? `v${deviceStatus.firmwareVersion}` : undefined} />} />
+                  </Flex>
+                  <Flex direction="column" gap={5}>
+                    <Box>
+                      <h2 className="kk-pf-title">{t('welcome.title')}</h2>
+                      <p className="kk-pf-sub">{uiText("Let's set up your hardware wallet. It takes about 5 minutes.")}</p>
                     </Box>
-                    <VStack gap={2}>
-                      <Text fontSize="xl" fontWeight="700" color="var(--teal)">
-                        {t('welcome.oobTitle')}
-                      </Text>
-                      <Text fontSize="2xl" fontWeight="700" color="white">
-                        {t('welcome.oobWelcome')}
-                      </Text>
-                      <Text fontSize="md" color="kk.textSecondary" maxW="420px" lineHeight="tall">
-                        {t('welcome.oobWizardDesc')}
-                      </Text>
-                    </VStack>
-
-                    {/* Read More link → opens dialog */}
-                    <Text
-                      as="button"
-                      fontSize="xs"
-                      color="var(--teal)"
-                      fontWeight="500"
-                      cursor="pointer"
-                      textDecoration="underline"
-                      _hover={{ color: 'green.300' }}
-                      onClick={() => setShowReadMore(true)}
-                    >
-                      {t('welcome.readMore')}
-                    </Text>
-                  </>
-                ) : (
-                  <>
-                    <FaWallet
-                      color="var(--teal)"
-                      size={48}
-                      style={{ animation: 'kkPulse 2s ease-in-out infinite' }}
-                    />
-                    <VStack gap={1.5}>
-                      <Text fontSize="2xl" fontWeight="700" color="white">
-                        {t('welcome.title')}
-                      </Text>
-                      <Text fontSize="md" fontWeight="500" color={HIGHLIGHT}>
-                        {t('subtitle')}
-                      </Text>
-                      <Text fontSize="md" color="kk.textSecondary" maxW="380px">
-                        {t('welcome.intro')}
-                      </Text>
-                    </VStack>
-                  </>
-                )}
-                {welcomeReady ? (
-                  <Button
-                    size="lg"
-                    bg="var(--gold)"
-                    color="black"
-                    fontWeight="700"
-                    _hover={{ bg: '#D4BC6A', transform: 'translateY(-1px)', boxShadow: '0 4px 12px rgba(233,196,106, 0.3)' }}
-                    _active={{ transform: 'scale(0.98)' }}
-                    transition="all 0.2s"
-                    px={10}
-                    onClick={handleWelcomeNext}
-                  >
-                    {t('welcome.getStarted')}
-                  </Button>
-                ) : (
-                  <HStack gap={2}>
-                    <Spinner size="sm" color="var(--teal)" />
-                    <Text fontSize="sm" color="kk.textSecondary">
-                      {t('welcome.detectingDevice')}
-                    </Text>
-                  </HStack>
-                )}
-              </VStack>
-            )}
+                    <div className="kk-pf-tl">
+                      {route.map((r, i) => (
+                        <TimelineItem key={r.key} node={<NumberNode n={i + 1} gold={r.ok} />}
+                          title={<>{r.label}{r.ok && <Text as="span" color={STEP_DONE} ml={1.5} aria-hidden="true">✓</Text>}</>}>
+                          {r.detail}
+                        </TimelineItem>
+                      ))}
+                    </div>
+                    {welcomeReady ? (
+                      <Flex align="center" gap={5} flexWrap="wrap">
+                        <button type="button" className="kk-pf-go" onClick={handleWelcomeNext}
+                          style={{ borderRadius: 999, padding: '12px 24px', border: 0, fontFamily: 'var(--font-mono)', fontSize: 12.5, cursor: 'pointer', whiteSpace: 'nowrap' }}>
+                          {t('welcome.getStarted')}
+                        </button>
+                        {isOobDevice && (
+                          <button type="button" className="kk-pf-link" onClick={() => setShowReadMore(true)}>{t('welcome.readMore')}</button>
+                        )}
+                      </Flex>
+                    ) : (
+                      <HStack gap={2}>
+                        <Spinner size="sm" color="var(--gold)" />
+                        <Text fontSize="sm" color="kk.textSecondary">{t('welcome.detectingDevice')}</Text>
+                      </HStack>
+                    )}
+                  </Flex>
+                </Box>
+              )
+            })()}
 
             {/* ═══════════════ BOOTLOADER ════════════════════════════ */}
             {step === 'bootloader' && (
@@ -1556,7 +1469,7 @@ export function OobSetupWizard({ onComplete: onCompleteProp, onWalletCreated, on
                         bg="var(--gold)"
                         color="black"
                         fontWeight="600"
-                        _hover={{ bg: '#D4BC6A', transform: 'translateY(-1px)', boxShadow: '0 4px 12px rgba(233,196,106, 0.3)' }}
+                        _hover={{ bg: 'kk.goldHover', transform: 'translateY(-1px)', boxShadow: '0 4px 12px rgba(233,196,106, 0.3)' }}
                         _active={{ transform: 'scale(0.98)' }}
                         transition="all 0.15s ease"
                         onClick={() => startBootloaderUpdate()}
@@ -1572,7 +1485,7 @@ export function OobSetupWizard({ onComplete: onCompleteProp, onWalletCreated, on
                         variant="ghost"
                         color="kk.textMuted"
                         fontWeight="500"
-                        _hover={{ color: 'gray.200', bg: 'rgba(255,255,255,0.04)' }}
+                        _hover={{ color: 'kk.textPrimary', bg: 'rgba(255,255,255,0.04)' }}
                         transition="all 0.15s ease"
                         onClick={() => {
                           if (needsFirmware) setStep('firmware')
@@ -1639,34 +1552,34 @@ export function OobSetupWizard({ onComplete: onCompleteProp, onWalletCreated, on
                             <Box w={7} h={7} borderRadius="full" bg="var(--teal)" flexShrink={0} display="flex" alignItems="center" justifyContent="center">
                               <Text fontSize="sm" fontWeight="bold" color="white">1</Text>
                             </Box>
-                            <Text fontSize="md" color="gray.200" pt="2px">{t('bootloader.step1Unplug')}</Text>
+                            <Text fontSize="md" color="kk.textPrimary" pt="2px">{t('bootloader.step1Unplug')}</Text>
                           </HStack>
                           <HStack gap={3} align="start">
                             <Box w={7} h={7} borderRadius="full" bg="var(--teal)" flexShrink={0} display="flex" alignItems="center" justifyContent="center">
                               <Text fontSize="sm" fontWeight="bold" color="white">2</Text>
                             </Box>
-                            <Text fontSize="md" color="gray.200" pt="2px">{t('bootloader.step2Hold')}</Text>
+                            <Text fontSize="md" color="kk.textPrimary" pt="2px">{t('bootloader.step2Hold')}</Text>
                           </HStack>
                           <HStack gap={3} align="start">
                             <Box w={7} h={7} borderRadius="full" bg="var(--teal)" flexShrink={0} display="flex" alignItems="center" justifyContent="center">
                               <Text fontSize="sm" fontWeight="bold" color="white">3</Text>
                             </Box>
-                            <Text fontSize="md" color="gray.200" pt="2px">{t('bootloader.step3Plugin')}</Text>
+                            <Text fontSize="md" color="kk.textPrimary" pt="2px">{t('bootloader.step3Plugin')}</Text>
                           </HStack>
                           <HStack gap={3} align="start">
                             <Box w={7} h={7} borderRadius="full" bg="var(--teal)" flexShrink={0} display="flex" alignItems="center" justifyContent="center">
                               <Text fontSize="sm" fontWeight="bold" color="white">4</Text>
                             </Box>
-                            <Text fontSize="md" color="gray.200" pt="2px">{t('bootloader.step4Release')}</Text>
+                            <Text fontSize="md" color="kk.textPrimary" pt="2px">{t('bootloader.step4Release')}</Text>
                           </HStack>
                         </VStack>
                       </VStack>
                     </Box>
 
-                    <Box w="100%" p={3} bg="rgba(139,227,196,0.10)" borderRadius="lg" borderWidth="1px" borderColor="green.600">
+                    <Box w="100%" p={3} bg="rgba(139,227,196,0.10)" borderRadius="lg" borderWidth="1px" borderColor="kk.success">
                       <HStack gap={2} justify="center">
-                        <Spinner size="sm" color="green.300" />
-                        <Text fontSize="md" color="green.200" fontWeight="600">
+                        <Spinner size="sm" color="kk.success" />
+                        <Text fontSize="md" color="kk.success" fontWeight="600">
                           {t('bootloader.waitingForBootloader')}
                         </Text>
                       </HStack>
@@ -1679,7 +1592,7 @@ export function OobSetupWizard({ onComplete: onCompleteProp, onWalletCreated, on
                         variant="ghost"
                         color="kk.textMuted"
                         fontWeight="500"
-                        _hover={{ color: 'gray.200', bg: 'rgba(255,255,255,0.04)' }}
+                        _hover={{ color: 'kk.textPrimary', bg: 'rgba(255,255,255,0.04)' }}
                         transition="all 0.15s ease"
                         onClick={() => {
                           if (needsFirmware) setStep('firmware')
@@ -1717,20 +1630,20 @@ export function OobSetupWizard({ onComplete: onCompleteProp, onWalletCreated, on
                     </Box>
 
                     {rebootElapsedMs >= 90000 && (
-                      <Box w="100%" p={3} bg="blue.900" borderRadius="md" borderWidth="2px" borderColor="blue.600">
+                      <Box w="100%" p={3} bg="rgba(233,196,106,0.12)" borderRadius="md" borderWidth="2px" borderColor="kk.gold">
                         <VStack gap={1.5} align="start">
                           <HStack gap={2}>
                             <FaExclamationTriangle color="var(--teal-2)" size={14} />
-                            <Text fontSize="sm" fontWeight="bold" color="blue.300">
+                            <Text fontSize="sm" fontWeight="bold" color="kk.gold">
                               {t('firmware.manualReconnectTitle', { defaultValue: 'Device not reconnecting?' })}
                             </Text>
                           </HStack>
                           <VStack align="start" gap={0.5} pl={5}>
-                            <Text fontSize="xs" color="blue.200">{t('bootloader.manualReconnectIfAsked', { defaultValue: '1. If your KeepKey is asking to be reconnected, unplug it' })}</Text>
-                            <Text fontSize="xs" color="blue.200">{t('firmware.manualReconnectStep2', { defaultValue: '2. Wait 5 seconds' })}</Text>
-                            <Text fontSize="xs" color="blue.200">{t('firmware.manualReconnectStep3', { defaultValue: '3. Plug it back in' })}</Text>
+                            <Text fontSize="xs" color="kk.gold">{t('bootloader.manualReconnectIfAsked', { defaultValue: '1. If your KeepKey is asking to be reconnected, unplug it' })}</Text>
+                            <Text fontSize="xs" color="kk.gold">{t('firmware.manualReconnectStep2', { defaultValue: '2. Wait 5 seconds' })}</Text>
+                            <Text fontSize="xs" color="kk.gold">{t('firmware.manualReconnectStep3', { defaultValue: '3. Plug it back in' })}</Text>
                           </VStack>
-                          <Text fontSize="2xs" color="blue.300" pl={5}>
+                          <Text fontSize="2xs" color="kk.gold" pl={5}>
                             {t('firmware.manualReconnectNote', { defaultValue: 'Setup will continue automatically when the device is detected.' })}
                           </Text>
                         </VStack>
@@ -1745,7 +1658,7 @@ export function OobSetupWizard({ onComplete: onCompleteProp, onWalletCreated, on
                     <Text fontSize="lg" fontWeight="bold" color="white" textAlign="center">
                       {t('bootloader.title')}
                     </Text>
-                    <Spinner size="md" color="blue.400" />
+                    <Spinner size="md" color="kk.gold" />
                     <Text fontSize="xs" color="kk.textSecondary">
                       {firmwareProgressText(updateProgress) || t('bootloader.updatingBootloader')}
                     </Text>
@@ -1770,20 +1683,20 @@ export function OobSetupWizard({ onComplete: onCompleteProp, onWalletCreated, on
                       </Box>
                     )}
 
-                    <Box w="100%" p={2} bg="blue.900" borderRadius="md" borderWidth="1px" borderColor="blue.500">
+                    <Box w="100%" p={2} bg="rgba(233,196,106,0.12)" borderRadius="md" borderWidth="1px" borderColor="kk.gold">
                       <HStack gap={2} align="flex-start">
                         <Box mt="2px" flexShrink={0}>
                           <FaExclamationTriangle color="var(--teal-2)" size={12} />
                         </Box>
-                        <Text fontSize="2xs" color="blue.200">
+                        <Text fontSize="2xs" color="kk.gold">
                           {t('bootloader.verifyBackupHint')}
                         </Text>
                       </HStack>
                     </Box>
-                    <Box w="100%" p={2} bg="blue.900" borderRadius="md" borderWidth="1px" borderColor="blue.600">
+                    <Box w="100%" p={2} bg="rgba(233,196,106,0.12)" borderRadius="md" borderWidth="1px" borderColor="kk.gold">
                       <HStack gap={2}>
                         <FaExclamationTriangle color="var(--teal-2)" size={12} />
-                        <Text fontSize="2xs" color="blue.200">
+                        <Text fontSize="2xs" color="kk.gold">
                           {t('bootloader.keepPluggedUntilAsked', { defaultValue: 'Keep your KeepKey plugged in until its screen asks you to unplug it. Unplugging before then can leave it unusable.' })}
                         </Text>
                       </HStack>
@@ -1796,7 +1709,7 @@ export function OobSetupWizard({ onComplete: onCompleteProp, onWalletCreated, on
                   <Box w="100%" p={3} bg="rgba(224,140,123,0.10)" borderRadius="md" borderWidth="1px" borderColor="var(--rose)">
                     <VStack gap={1} align="start">
                       <Text fontSize="sm" color="var(--rose)" fontWeight="bold">{t('bootloader.updateFailed')}</Text>
-                      <Text fontSize="xs" color="red.200">{updateError}</Text>
+                      <Text fontSize="xs" color="kk.error">{updateError}</Text>
                     </VStack>
                     <Button
                       mt={2}
@@ -1805,7 +1718,7 @@ export function OobSetupWizard({ onComplete: onCompleteProp, onWalletCreated, on
                       borderColor="var(--rose)"
                       color="var(--rose)"
                       fontWeight="500"
-                      _hover={{ bg: 'rgba(252, 129, 129, 0.1)', borderColor: 'red.300' }}
+                      _hover={{ bg: 'rgba(224,140,123,0.1)', borderColor: 'kk.error' }}
                       transition="all 0.15s ease"
                       onClick={() => { resetUpdate(); setWaitingForBootloader(false) }}
                     >
@@ -1838,7 +1751,7 @@ export function OobSetupWizard({ onComplete: onCompleteProp, onWalletCreated, on
                           <Text fontSize="xs" color="kk.textSecondary" textTransform="uppercase" fontWeight="600">
                             {inBootloader ? t('firmware.firmwareLabel') : t('bootloader.current')}
                           </Text>
-                          <Text fontSize="md" color={isOobDevice ? 'red.400' : 'white'} fontWeight="bold">
+                          <Text fontSize="md" color={isOobDevice ? 'kk.error' : 'white'} fontWeight="bold">
                             {inBootloader
                               ? deviceStatus.resolvedFwVersion
                                 ? deviceStatus.resolvedFwVersion
@@ -1852,8 +1765,8 @@ export function OobSetupWizard({ onComplete: onCompleteProp, onWalletCreated, on
                           {!inBootloader && deviceStatus.firmwareVerified !== undefined && (
                             <Box
                               px={2} py={0.5} borderRadius="md" fontSize="2xs" fontWeight="bold"
-                              bg={deviceStatus.firmwareVerified ? 'rgba(72,187,120,0.15)' : 'rgba(237,137,54,0.15)'}
-                              color={deviceStatus.firmwareVerified ? 'green.400' : 'yellow.400'}
+                              bg={deviceStatus.firmwareVerified ? 'rgba(139,227,196,0.15)' : 'rgba(233,196,106,0.15)'}
+                              color={deviceStatus.firmwareVerified ? 'kk.success' : 'yellow.400'}
                             >
                               {deviceStatus.firmwareVerified ? t('firmware.signed') : t('firmware.unsigned')}
                             </Box>
@@ -1922,10 +1835,10 @@ export function OobSetupWizard({ onComplete: onCompleteProp, onWalletCreated, on
                     <Button
                       w="100%"
                       size="md"
-                      bg={installWipeReason ? 'red.600' : 'var(--gold)'}
+                      bg={installWipeReason ? 'kk.error' : 'var(--gold)'}
                       color={installWipeReason ? 'white' : 'black'}
                       fontWeight="600"
-                      _hover={{ bg: installWipeReason ? 'red.500' : '#D4BC6A', transform: 'translateY(-1px)', boxShadow: '0 4px 12px rgba(233,196,106, 0.3)' }}
+                      _hover={{ bg: installWipeReason ? 'kk.error' : 'kk.goldHover', transform: 'translateY(-1px)', boxShadow: '0 4px 12px rgba(233,196,106, 0.3)' }}
                       _active={{ transform: 'scale(0.98)' }}
                       transition="all 0.15s ease"
                       onClick={() => {
@@ -1974,8 +1887,8 @@ export function OobSetupWizard({ onComplete: onCompleteProp, onWalletCreated, on
                           mt={2}
                           borderRadius="lg"
                           border="2px dashed"
-                          borderColor={fwDragOver ? 'green.400' : 'gray.600'}
-                          bg={fwDragOver ? 'rgba(72, 187, 120, 0.05)' : 'transparent'}
+                          borderColor={fwDragOver ? 'kk.success' : 'var(--text-3)'}
+                          bg={fwDragOver ? 'rgba(139,227,196,0.05)' : 'transparent'}
                           transition="all 0.2s"
                           textAlign="center"
                           cursor="pointer"
@@ -2039,7 +1952,7 @@ export function OobSetupWizard({ onComplete: onCompleteProp, onWalletCreated, on
                       {t('firmware.customFirmwareReady')}
                     </Text>
                     {customFwAnalysis.imageKind !== 'firmware' && (
-                      <Text fontSize="xs" color="red.300" w="100%">
+                      <Text fontSize="xs" color="kk.error" w="100%">
                         {customFwAnalysis.imageKind === 'bootloader-updater'
                           ? uiText("This is a bootloader updater, not firmware. Drop it on the Vault window to review and install it there.")
                           : uiText("This is not a KeepKey firmware image, so it cannot be flashed.")}
@@ -2067,8 +1980,8 @@ export function OobSetupWizard({ onComplete: onCompleteProp, onWalletCreated, on
                         <HStack>
                           <Box
                             px={2} py={0.5} borderRadius="md" fontSize="2xs" fontWeight="bold"
-                            bg={customFwAnalysis.isSigned ? 'rgba(72,187,120,0.15)' : 'rgba(237,137,54,0.15)'}
-                            color={customFwAnalysis.isSigned ? 'green.400' : 'yellow.400'}
+                            bg={customFwAnalysis.isSigned ? 'rgba(139,227,196,0.15)' : 'rgba(233,196,106,0.15)'}
+                            color={customFwAnalysis.isSigned ? 'kk.success' : 'yellow.400'}
                           >
                             {customFwAnalysis.isSigned ? t('firmware.signed') : t('firmware.unsigned')}
                           </Box>
@@ -2091,7 +2004,7 @@ export function OobSetupWizard({ onComplete: onCompleteProp, onWalletCreated, on
                           <FaExclamationTriangle color="var(--rose)" size={16} />
                           <Text fontSize="sm" fontWeight="bold" color="var(--rose)" textTransform="uppercase" letterSpacing="0.03em">{uiText("THIS WILL WIPE THE DEVICE")}</Text>
                         </HStack>
-                        <Text fontSize="xs" color="red.200" mb={2} lineHeight="1.5">
+                        <Text fontSize="xs" color="kk.error" mb={2} lineHeight="1.5">
                           {t('firmware.willWipeWarning')}
                         </Text>
                         <Flex
@@ -2104,8 +2017,8 @@ export function OobSetupWizard({ onComplete: onCompleteProp, onWalletCreated, on
                         >
                           <Box
                             w="16px" h="16px" borderRadius="sm" border="2px solid"
-                            borderColor={customFwAcknowledged ? 'red.400' : 'red.300'}
-                            bg={customFwAcknowledged ? 'red.500' : 'transparent'}
+                            borderColor={customFwAcknowledged ? 'kk.error' : 'kk.error'}
+                            bg={customFwAcknowledged ? 'kk.error' : 'transparent'}
                             display="flex" alignItems="center" justifyContent="center" flexShrink={0}
                           >
                             {customFwAcknowledged && (
@@ -2121,12 +2034,12 @@ export function OobSetupWizard({ onComplete: onCompleteProp, onWalletCreated, on
 
                     {/* Bootloader mode + unsigned firmware: warn about potential wipe */}
                     {!customFwAnalysis.isSigned && !customFwAnalysis.willWipeDevice && customFwAnalysis.isBootloaderMode && (
-                      <Box w="100%" p={3} bg="rgba(224,140,123,0.10)" borderRadius="md" borderWidth="2px" borderColor="orange.500">
+                      <Box w="100%" p={3} bg="rgba(224,140,123,0.10)" borderRadius="md" borderWidth="2px" borderColor="kk.warning">
                         <HStack gap={2} mb={2}>
                           <FaExclamationTriangle color="var(--gold)" size={14} />
-                          <Text fontSize="xs" fontWeight="bold" color="orange.300">{uiText("Developer Firmware — Potential Device Wipe")}</Text>
+                          <Text fontSize="xs" fontWeight="bold" color="kk.warning">{uiText("Developer Firmware — Potential Device Wipe")}</Text>
                         </HStack>
-                        <Text fontSize="2xs" color="orange.200" mb={2} lineHeight="1.5">
+                        <Text fontSize="2xs" color="kk.warning" mb={2} lineHeight="1.5">
                           {t('firmware.unsignedBootloaderWarning')}
                         </Text>
                         <Flex
@@ -2139,15 +2052,15 @@ export function OobSetupWizard({ onComplete: onCompleteProp, onWalletCreated, on
                         >
                           <Box
                             w="16px" h="16px" borderRadius="sm" border="2px solid"
-                            borderColor={customFwAcknowledged ? 'orange.400' : 'orange.300'}
-                            bg={customFwAcknowledged ? 'orange.500' : 'transparent'}
+                            borderColor={customFwAcknowledged ? 'kk.warning' : 'kk.warning'}
+                            bg={customFwAcknowledged ? 'kk.warning' : 'transparent'}
                             display="flex" alignItems="center" justifyContent="center" flexShrink={0}
                           >
                             {customFwAcknowledged && (
                               <Text fontSize="2xs" color="white" lineHeight="1">&#10003;</Text>
                             )}
                           </Box>
-                          <Text fontSize="2xs" fontWeight="600" color="orange.300">
+                          <Text fontSize="2xs" fontWeight="600" color="kk.warning">
                             {t('firmware.unsignedBootloaderAcknowledge')}
                           </Text>
                         </Flex>
@@ -2159,7 +2072,7 @@ export function OobSetupWizard({ onComplete: onCompleteProp, onWalletCreated, on
                       <Box w="100%" p={3} bg="rgba(224,140,123,0.10)" borderRadius="md" borderWidth="1px" borderColor="var(--rose)">
                         <HStack gap={2}>
                           <FaExclamationTriangle color="var(--rose)" size={12} />
-                          <Text fontSize="xs" color="red.200">
+                          <Text fontSize="xs" color="kk.error">
                             {t('firmware.unsignedWarning')}
                           </Text>
                         </HStack>
@@ -2185,16 +2098,16 @@ export function OobSetupWizard({ onComplete: onCompleteProp, onWalletCreated, on
                         flex={1}
                         size="sm"
                         bg={
-                          customFwAnalysis.willWipeDevice ? 'red.600'
-                          : (!customFwAnalysis.isSigned && customFwAnalysis.isBootloaderMode) ? 'orange.600'
+                          customFwAnalysis.willWipeDevice ? 'kk.error'
+                          : (!customFwAnalysis.isSigned && customFwAnalysis.isBootloaderMode) ? 'kk.warning'
                           : 'var(--gold)'
                         }
                         color={customFwAnalysis.willWipeDevice || (!customFwAnalysis.isSigned && customFwAnalysis.isBootloaderMode) ? 'white' : 'black'}
                         fontWeight="600"
                         _hover={{
-                          bg: customFwAnalysis.willWipeDevice ? 'red.500'
-                            : (!customFwAnalysis.isSigned && customFwAnalysis.isBootloaderMode) ? 'orange.500'
-                            : '#D4BC6A'
+                          bg: customFwAnalysis.willWipeDevice ? 'kk.error'
+                            : (!customFwAnalysis.isSigned && customFwAnalysis.isBootloaderMode) ? 'kk.warning'
+                            : 'kk.goldHover'
                         }}
                         _active={{ transform: 'scale(0.98)' }}
                         transition="all 0.15s ease"
@@ -2238,7 +2151,7 @@ export function OobSetupWizard({ onComplete: onCompleteProp, onWalletCreated, on
                   <Box w="100%" p={3} bg="rgba(224,140,123,0.10)" borderRadius="md" borderWidth="1px" borderColor="var(--rose)">
                     <VStack gap={1} align="start">
                       <Text fontSize="sm" color="var(--rose)" fontWeight="bold">{t('firmware.customFlashFailed')}</Text>
-                      <Text fontSize="xs" color="red.200">{customFwError}</Text>
+                      <Text fontSize="xs" color="kk.error">{customFwError}</Text>
                     </VStack>
                     <Button
                       mt={2}
@@ -2247,7 +2160,7 @@ export function OobSetupWizard({ onComplete: onCompleteProp, onWalletCreated, on
                       borderColor="var(--rose)"
                       color="var(--rose)"
                       fontWeight="500"
-                      _hover={{ bg: 'rgba(252, 129, 129, 0.1)', borderColor: 'red.300' }}
+                      _hover={{ bg: 'rgba(224,140,123,0.1)', borderColor: 'kk.error' }}
                       transition="all 0.15s ease"
                       onClick={handleCustomFwReset}
                     >
@@ -2258,10 +2171,10 @@ export function OobSetupWizard({ onComplete: onCompleteProp, onWalletCreated, on
 
                 {/* Post-flash: just show "Waiting for your device..." — no bootloader instructions */}
                 {updateState === 'idle' && !inBootloader && !isRebooting && customFwPhase === 'idle' && firmwareJustFlashed && (
-                  <Box w="100%" p={3} bg="rgba(139,227,196,0.10)" borderRadius="md" borderWidth="1px" borderColor="green.600">
+                  <Box w="100%" p={3} bg="rgba(139,227,196,0.10)" borderRadius="md" borderWidth="1px" borderColor="kk.success">
                     <HStack gap={2} justify="center">
-                      <Spinner size="sm" color="green.300" />
-                      <Text fontSize="xs" color="green.200">
+                      <Spinner size="sm" color="kk.success" />
+                      <Text fontSize="xs" color="kk.success">
                         {t('firmware.waitingForDevice', { defaultValue: 'Waiting for your device...' })}
                       </Text>
                     </HStack>
@@ -2279,17 +2192,17 @@ export function OobSetupWizard({ onComplete: onCompleteProp, onWalletCreated, on
                           {t('bootloader.stepsTitle')}
                         </Text>
                         <VStack align="start" gap={0} pl={1}>
-                          <Text fontSize="2xs" color="gray.200">1. {t('bootloader.step1Unplug')}</Text>
-                          <Text fontSize="2xs" color="gray.200">2. {t('bootloader.step2Hold')}</Text>
-                          <Text fontSize="2xs" color="gray.200">3. {t('bootloader.step3Plugin')}</Text>
-                          <Text fontSize="2xs" color="gray.200">4. {t('bootloader.step4Release')}</Text>
+                          <Text fontSize="2xs" color="kk.textPrimary">1. {t('bootloader.step1Unplug')}</Text>
+                          <Text fontSize="2xs" color="kk.textPrimary">2. {t('bootloader.step2Hold')}</Text>
+                          <Text fontSize="2xs" color="kk.textPrimary">3. {t('bootloader.step3Plugin')}</Text>
+                          <Text fontSize="2xs" color="kk.textPrimary">4. {t('bootloader.step4Release')}</Text>
                         </VStack>
                       </VStack>
                     </Box>
-                    <Box w="100%" p={2} bg="rgba(139,227,196,0.10)" borderRadius="md" borderWidth="1px" borderColor="green.600">
+                    <Box w="100%" p={2} bg="rgba(139,227,196,0.10)" borderRadius="md" borderWidth="1px" borderColor="kk.success">
                       <HStack gap={2} justify="center">
-                        <Spinner size="sm" color="green.300" />
-                        <Text fontSize="xs" color="green.200">
+                        <Spinner size="sm" color="kk.success" />
+                        <Text fontSize="xs" color="kk.success">
                           {t('bootloader.waitingForBootloader')}
                         </Text>
                       </HStack>
@@ -2309,13 +2222,13 @@ export function OobSetupWizard({ onComplete: onCompleteProp, onWalletCreated, on
                       style={{ animation: 'kkGlow 2s ease-in-out infinite' }}
                     >
                       <VStack gap={1}>
-                        <Text fontSize="sm" fontWeight="bold" color="green.200">
+                        <Text fontSize="sm" fontWeight="bold" color="kk.success">
                           {t('firmware.confirmOnDevice')}
                         </Text>
-                        <Text fontSize="xs" color="green.100">
+                        <Text fontSize="xs" color="kk.success">
                           {t('firmware.lookAtDeviceAndPress')}
                         </Text>
-                        <Text fontSize="2xs" color="green.200" opacity={0.7}>
+                        <Text fontSize="2xs" color="kk.success" opacity={0.7}>
                           {t('firmware.verifyBackupNote')}
                         </Text>
                       </VStack>
@@ -2348,13 +2261,13 @@ export function OobSetupWizard({ onComplete: onCompleteProp, onWalletCreated, on
                 {/* Firmware reboot: NEW bootloader calls board_reset() — device auto-reboots */}
                 {rebootPhase === 'firmware-rebooting' && (
                   <VStack gap={2} w="100%">
-                    <Box w="100%" p={3} bg="blue.900" borderRadius="md" borderWidth="2px" borderColor="blue.500">
+                    <Box w="100%" p={3} bg="rgba(233,196,106,0.12)" borderRadius="md" borderWidth="2px" borderColor="kk.gold">
                       <VStack gap={2} align="center">
-                        <Spinner size="md" color="blue.300" />
-                        <Text fontSize="sm" color="blue.200" fontWeight="bold">
+                        <Spinner size="md" color="kk.gold" />
+                        <Text fontSize="sm" color="kk.gold" fontWeight="bold">
                           {t('firmware.autoRebooting', { defaultValue: 'Your device is restarting...' })}
                         </Text>
-                        <Text fontSize="xs" color="blue.300">
+                        <Text fontSize="xs" color="kk.gold">
                           {t('firmware.autoRebootingDetail', { defaultValue: 'Your KeepKey will restart automatically with the new firmware. This usually takes a few seconds.' })}
                         </Text>
                       </VStack>
@@ -2384,9 +2297,9 @@ export function OobSetupWizard({ onComplete: onCompleteProp, onWalletCreated, on
                   <Box w="100%" p={3} bg="rgba(224,140,123,0.10)" borderRadius="md" borderWidth="1px" borderColor="var(--rose)">
                     <VStack gap={1} align="start">
                       <Text fontSize="sm" color="var(--rose)" fontWeight="bold">{t('bootloader.updateFailed')}</Text>
-                      <Text fontSize="xs" color="red.200">{updateError}</Text>
+                      <Text fontSize="xs" color="kk.error">{updateError}</Text>
                     </VStack>
-                    <Button mt={2} size="sm" variant="outline" borderColor="var(--rose)" color="var(--rose)" fontWeight="500" _hover={{ bg: 'rgba(252, 129, 129, 0.1)', borderColor: 'red.300' }} transition="all 0.15s ease" onClick={resetUpdate}>
+                    <Button mt={2} size="sm" variant="outline" borderColor="var(--rose)" color="var(--rose)" fontWeight="500" _hover={{ bg: 'rgba(224,140,123,0.1)', borderColor: 'kk.error' }} transition="all 0.15s ease" onClick={resetUpdate}>
                       {t('bootloader.tryAgain')}
                     </Button>
                   </Box>
@@ -2409,7 +2322,7 @@ export function OobSetupWizard({ onComplete: onCompleteProp, onWalletCreated, on
                       color="kk.textMuted"
                       size="sm"
                       fontWeight="500"
-                      _hover={{ color: 'gray.200', bg: 'rgba(255,255,255,0.04)' }}
+                      _hover={{ color: 'kk.textPrimary', bg: 'rgba(255,255,255,0.04)' }}
                       transition="all 0.15s ease"
                       onClick={handleSkipFirmware}
                     >
@@ -2453,17 +2366,17 @@ export function OobSetupWizard({ onComplete: onCompleteProp, onWalletCreated, on
               <VStack gap={4} w="100%" maxW="400px" mx="auto">
                 <Box
                   w="100%"
-                  bg="rgba(230,100,100,0.06)"
+                  bg="rgba(224,140,123,0.06)"
                   border="1px solid"
-                  borderColor="rgba(230,100,100,0.4)"
+                  borderColor="rgba(224,140,123,0.4)"
                   borderRadius="2xl"
                   p={6}
                 >
                   <VStack gap={3}>
-                    <Text fontSize="xl" fontWeight="800" color="#e66464" textAlign="center" letterSpacing="-0.02em">
+                    <Text fontSize="xl" fontWeight="800" color="var(--rose)" textAlign="center" letterSpacing="-0.02em">
                       {t('security.randomness.failedTitle', { defaultValue: 'Do not use this device' })}
                     </Text>
-                    <Text fontSize="sm" color="gray.400" textAlign="center" lineHeight="1.6">
+                    <Text fontSize="sm" color="kk.textMuted" textAlign="center" lineHeight="1.6">
                       {t('security.randomness.failedLead', {
                         defaultValue:
                           'The randomness audit found output this device should never produce. Every key it generates could be predictable, so wallet creation is blocked. Re-run the audit to confirm, and contact support@keepkey.com if it fails again.',
@@ -2474,7 +2387,7 @@ export function OobSetupWizard({ onComplete: onCompleteProp, onWalletCreated, on
                 <Button
                   w="100%"
                   size="md"
-                  bg="#e66464"
+                  bg="var(--rose)"
                   color="black"
                   fontWeight="700"
                   _hover={{ opacity: 0.9 }}
@@ -2514,14 +2427,11 @@ export function OobSetupWizard({ onComplete: onCompleteProp, onWalletCreated, on
             )}
             {step === 'init-choose' && confirmedNoWallet && (
               <VStack gap={3} w="100%">
-                <VStack gap={0.5}>
-                  <Text fontSize="lg" fontWeight="bold" color="white" textAlign="center">
-                    {t('initChoose.title')}
-                  </Text>
-                  <Text fontSize="xs" color="kk.textSecondary" textAlign="center">
-                    {t('initChoose.description')}
-                  </Text>
-                </VStack>
+                <PreflightStyles />
+                <Box w="100%">
+                  <h2 className="kk-pf-title">{t('initChoose.title')}</h2>
+                  <p className="kk-pf-sub">{t('initChoose.description')}</p>
+                </Box>
 
                 {setupError && !btcOnlyLocked && (
                   <Box w="100%" p={2} bg="rgba(224,140,123,0.10)" borderRadius="md" borderWidth="1px" borderColor="var(--rose)">
@@ -2570,225 +2480,81 @@ export function OobSetupWizard({ onComplete: onCompleteProp, onWalletCreated, on
                   </Box>
                 )}
 
-                <HStack
-                  gap={3}
-                  w="100%"
-                  flexDirection={{ base: 'column', md: 'row' }}
-                  align="stretch"
-                >
-                  {/* Create New Wallet */}
-                  <Box
-                    flex={{ base: 'none', md: 1 }}
-                    w={{ base: '100%', md: 'auto' }}
-                    p={4}
-                    borderRadius="lg"
-                    borderWidth="2px"
-                    borderColor="transparent"
-                    bg="kk.cardBg"
-                    transition="all 0.2s"
-                    _hover={{
-                      borderColor: HIGHLIGHT,
-                      transform: 'translateY(-1px)',
-                    }}
-                  >
-                    <VStack gap={3}>
-                      <Box p={2} borderRadius="full" bg="var(--teal)" color="white">
-                        <FaPlus size={20} />
-                      </Box>
-                      <VStack gap={1}>
-                        <Text fontSize="md" fontWeight="bold" color="white">
-                          {t('initChoose.createNewWallet')}
-                        </Text>
-                        <Text fontSize="xs" color="kk.textSecondary" textAlign="center">
-                          {t('initChoose.createDescription')}
-                        </Text>
-                      </VStack>
+                {/* ONE seed-length selector for both paths: text tabs, gold underline. */}
+                <Flex w="100%" align="center" gap={4} flexWrap="wrap" fontFamily="var(--font-ui-sans)">
+                  <Text fontSize="13px" color="kk.textMuted">{t('initChoose.seedLength', { defaultValue: 'Seed length' })}</Text>
+                  <div className="kk-pf-modes" role="tablist" aria-label={t('initChoose.seedLength', { defaultValue: 'Seed length' })}>
+                    {([12, 18, 24] as const).map((wc) => (
+                      <button key={wc} type="button" role="tab" aria-selected={wordCount === wc} onClick={() => setWordCount(wc)}>
+                        {wc} {t('initChoose.words', { defaultValue: 'words' })}
+                      </button>
+                    ))}
+                  </div>
+                </Flex>
+                {/* ponytail: only nag when they leave the 128-bit default */}
+                {wordCount !== 12 && (
+                  <Text w="100%" fontSize="12px" color="kk.textMuted" lineHeight="tall" mt={-1}>
+                    {t('initChoose.entropyNote', { defaultValue: "Bitcoin's core standard is 128-bit (12 words). 256-bit seeds are supported but not recommended." })}{' '}
+                    <Text
+                      as="a"
+                      href={DOCS_LINKS.seedLengthEntropy}
+                      color={HIGHLIGHT}
+                      textDecoration="underline"
+                      onClick={(e: React.MouseEvent) => { e.preventDefault(); e.stopPropagation(); rpcRequest('openUrl', { url: DOCS_LINKS.seedLengthEntropy }).catch(() => {}) }}
+                    >
+                      {t('initChoose.learnMore', { defaultValue: 'Learn more' })}
+                    </Text>
+                  </Text>
+                )}
 
-                      <Box w="100%">
-                        <Flex
-                          as="button"
-                          align="center"
-                          justify="center"
-                          gap="1"
-                          w="100%"
-                          cursor="pointer"
-                          onClick={(e: React.MouseEvent) => {
-                            e.stopPropagation()
-                            setShowCreateAdvanced(!showCreateAdvanced)
-                          }}
-                          _hover={{ opacity: 0.8 }}
-                        >
-                          <Text fontSize="2xs" color="kk.textMuted">
-                            {t('initChoose.seedLength', { defaultValue: 'Seed length' })}: {wordCount} {t('initChoose.words', { defaultValue: 'words' })}
-                          </Text>
-                          {showCreateAdvanced
-                            ? <FaChevronUp color="var(--text-2)" size={8} />
-                            : <FaChevronDown color="var(--text-2)" size={8} />
-                          }
-                        </Flex>
-                        {showCreateAdvanced && (
-                          <VStack gap="1.5" mt="1.5">
-                            <Flex gap="2" justify="center" w="100%">
-                              {([12, 18, 24] as const).map((wc) => (
-                                <Box
-                                  key={wc}
-                                  as="button"
-                                  px="3"
-                                  py="1"
-                                  borderRadius="md"
-                                  fontSize="xs"
-                                  fontWeight="600"
-                                  cursor="pointer"
-                                  bg={wordCount === wc ? HIGHLIGHT : 'gray.600'}
-                                  color={wordCount === wc ? 'var(--ink-0)' : 'gray.400'}
-                                  borderWidth="1px"
-                                  borderColor={wordCount === wc ? HIGHLIGHT : 'transparent'}
-                                  _hover={{ bg: wordCount === wc ? 'var(--gold-2)' : 'gray.500' }}
-                                  transition="all 0.15s"
-                                  onClick={(e: React.MouseEvent) => {
-                                    e.stopPropagation()
-                                    setWordCount(wc)
-                                  }}
-                                >
-                                  {wc}
-                                </Box>
-                              ))}
-                            </Flex>
-                            {/* ponytail: only nag when they leave the 128-bit default */}
-                            {wordCount !== 12 && (
-                            <Text fontSize="2xs" color="kk.textMuted" textAlign="center" lineHeight="tall" px="1">
-                              {t('initChoose.entropyNote', { defaultValue: "Bitcoin's core standard is 128-bit (12 words). 256-bit seeds are supported but not recommended." })}{' '}
-                              <Text
-                                as="a"
-                                href={DOCS_LINKS.seedLengthEntropy}
-                                color={HIGHLIGHT}
-                                textDecoration="underline"
-                                _hover={{ color: 'green.300' }}
-                                onClick={(e: React.MouseEvent) => { e.preventDefault(); e.stopPropagation(); rpcRequest('openUrl', { url: DOCS_LINKS.seedLengthEntropy }).catch(() => {}) }}
-                              >
-                                {t('initChoose.learnMore', { defaultValue: 'Learn more' })}
-                              </Text>
-                            </Text>
-                            )}
-                          </VStack>
-                        )}
-                      </Box>
+                {/* Two paths on one surface, split by a hairline — no cards.
+                    Each shows what happens on the device. */}
+                <Box w="100%" display="grid" gridTemplateColumns={{ base: '1fr', md: '1fr 1px 1fr' }} gap={{ base: 6, md: 8 }} fontFamily="var(--font-ui-sans)">
+                  <Flex direction="column" gap={4} align="flex-start">
+                    <SpinningDevice motion="still" scale={0.72} screen={<OledText kicker="WRITE DOWN" headline="WORD 1" sub={`of ${wordCount}`} />} />
+                    <Box>
+                      <Text fontSize="18px" fontWeight="600" color="kk.textPrimary">{t('initChoose.createNewWallet')}</Text>
+                      <Text fontSize="13px" color="kk.textSecondary" mt={1}>{t('initChoose.createDescription')}</Text>
+                    </Box>
+                    <button type="button" className="kk-pf-go"
+                      style={{ borderRadius: 999, padding: '12px 22px', border: 0, fontFamily: 'var(--font-mono)', fontSize: 12.5, cursor: 'pointer', whiteSpace: 'nowrap' }}
+                      onClick={() => {
+                        // A device we've seen initialized is one click from a wipe
+                        // here. Make that click deliberate.
+                        if (everSeenInitializedRef.current) {
+                          setShowCreateWipeConfirm(true)
+                          return
+                        }
+                        setStep('create-briefing')
+                      }}
+                    >
+                      {t('initChoose.createWallet')}
+                    </button>
+                  </Flex>
+                  <Box display={{ base: 'none', md: 'block' }} bg="linear-gradient(transparent, rgba(255,255,255,.09) 15%, rgba(255,255,255,.09) 85%, transparent)" />
+                  <Flex direction="column" gap={4} align="flex-start">
+                    <SpinningDevice motion="still" scale={0.72} screen={<OledCipher />} />
+                    <Box>
+                      <Text fontSize="18px" fontWeight="600" color="kk.textPrimary">{t('initChoose.recoverExistingWallet')}</Text>
+                      <Text fontSize="13px" color="kk.textSecondary" mt={1}>{t('initChoose.recoverDescription')}</Text>
+                    </Box>
+                    <button type="button" className="kk-pf-outline"
+                      style={{ borderRadius: 999, padding: '12px 22px', border: 0, fontFamily: 'var(--font-mono)', fontSize: 12.5, cursor: 'pointer', whiteSpace: 'nowrap' }}
+                      onClick={() => handleRecoverWallet()}
+                    >
+                      {t('initChoose.recoverWallet')}
+                    </button>
+                  </Flex>
+                </Box>
 
-                      <Button
-                        w="100%"
-                        size="md"
-                        bg="var(--gold)"
-                        color="black"
-                        fontWeight="600"
-                        _hover={{ bg: '#D4BC6A', transform: 'translateY(-1px)', boxShadow: '0 4px 12px rgba(233,196,106, 0.3)' }}
-                        _active={{ transform: 'scale(0.98)' }}
-                        transition="all 0.15s ease"
-                        onClick={(e: React.MouseEvent) => {
-                          e.stopPropagation()
-                          // A device we've seen initialized is one click from a wipe
-                          // here. Make that click deliberate.
-                          if (everSeenInitializedRef.current) {
-                            setShowCreateWipeConfirm(true)
-                            return
-                          }
-                          setStep('create-briefing')
-                        }}
-                      >
-                        {t('initChoose.createWallet')}
-                      </Button>
-                    </VStack>
-                  </Box>
-
-                  {/* Recover Existing Wallet */}
-                  <Box
-                    flex={{ base: 'none', md: 1 }}
-                    w={{ base: '100%', md: 'auto' }}
-                    p={4}
-                    borderRadius="lg"
-                    borderWidth="2px"
-                    borderColor="transparent"
-                    bg="kk.cardBg"
-                    transition="all 0.2s"
-                    _hover={{
-                      borderColor: 'blue.500',
-                      transform: 'translateY(-1px)',
-                    }}
-                  >
-                    <VStack gap={3}>
-                      <Box p={2} borderRadius="full" bg="blue.500" color="white">
-                        <FaKey size={20} />
-                      </Box>
-                      <VStack gap={1}>
-                        <Text fontSize="md" fontWeight="bold" color="white">
-                          {t('initChoose.recoverExistingWallet')}
-                        </Text>
-                        <Text fontSize="xs" color="kk.textSecondary" textAlign="center">
-                          {t('initChoose.recoverDescription')}
-                        </Text>
-                      </VStack>
-
-                      <Box w="100%">
-                        <Text fontSize="xs" color="kk.textSecondary" textAlign="center" mb="1.5" fontWeight="500">
-                          {t('initChoose.howManyWords', { defaultValue: 'How many words in your seed?' })}
-                        </Text>
-                        <Flex gap="2" justify="center" w="100%">
-                          {([12, 18, 24] as const).map((wc) => (
-                            <Box
-                              key={wc}
-                              as="button"
-                              px="4"
-                              py="1.5"
-                              borderRadius="md"
-                              fontSize="xs"
-                              fontWeight="600"
-                              cursor="pointer"
-                              bg={wordCount === wc ? 'blue.500' : 'gray.600'}
-                              color={wordCount === wc ? 'white' : 'gray.400'}
-                              borderWidth="2px"
-                              borderColor={wordCount === wc ? 'blue.500' : 'transparent'}
-                              _hover={{ bg: wordCount === wc ? 'blue.600' : 'gray.500' }}
-                              transition="all 0.15s"
-                              onClick={(e: React.MouseEvent) => {
-                                e.stopPropagation()
-                                setWordCount(wc)
-                              }}
-                            >
-                              {wc} {t('initChoose.words', { defaultValue: 'words' })}
-                            </Box>
-                          ))}
-                        </Flex>
-                      </Box>
-
-                      <Button
-                        w="100%"
-                        size="md"
-                        bg="var(--gold)"
-                        color="black"
-                        fontWeight="600"
-                        _hover={{ bg: '#D4BC6A', transform: 'translateY(-1px)', boxShadow: '0 4px 12px rgba(233,196,106, 0.3)' }}
-                        _active={{ transform: 'scale(0.98)' }}
-                        transition="all 0.15s ease"
-                        onClick={(e: React.MouseEvent) => {
-                          e.stopPropagation()
-                          handleRecoverWallet()
-                        }}
-                      >
-                        {t('initChoose.recoverWallet')}
-                      </Button>
-                    </VStack>
-                  </Box>
-                </HStack>
-
-                {/* Deliberately faint, but available on every device: some users
-                    load an existing seed this way (owner decision 2026-10-06). */}
-                <Text
-                  fontSize="2xs"
-                  color="kk.cardBgHover"
-                  cursor="pointer"
-                  textAlign="center"
-                  _hover={{ color: 'gray.500' }}
-                  onClick={() => setDevLoadOpen(true)}
-                >{uiText("Developer: load seed")}</Text>
+                {/* Developer path: available on every device by owner decision
+                    (2026-10-06, some users load an existing seed this way) — kept
+                    legible and labelled as a developer tool, on its own line. */}
+                <Flex w="100%" pt={3} mt={1} borderTop="1px solid rgba(255,255,255,0.06)" justify="flex-start">
+                  <button type="button" className="kk-pf-link" style={{ color: 'var(--text-2)', fontSize: 12 }} onClick={() => setDevLoadOpen(true)}>
+                    {uiText("Developer: load seed")}
+                  </button>
+                </Flex>
               </VStack>
             )}
 
@@ -2813,7 +2579,7 @@ export function OobSetupWizard({ onComplete: onCompleteProp, onWalletCreated, on
                             ? t('initProgress.pinMismatchTitle', { defaultValue: "The two PINs didn't match" })
                             : t('initProgress.createCancelledTitle', { defaultValue: 'Setup stopped on the device' })}
                         </Text>
-                        <Text fontSize="sm" color="gray.400" textAlign="center" lineHeight="1.6">
+                        <Text fontSize="sm" color="kk.textMuted" textAlign="center" lineHeight="1.6">
                           {createError.errorType === 'pin-mismatch'
                             ? t('initProgress.pinMismatchDetail', {
                                 defaultValue:
@@ -2842,7 +2608,7 @@ export function OobSetupWizard({ onComplete: onCompleteProp, onWalletCreated, on
                         w="100%"
                         size="sm"
                         variant="ghost"
-                        color="gray.500"
+                        color="kk.textMuted"
                         fontWeight="500"
                         onClick={() => { setCreateError(null); setStep('init-choose') }}
                       >
@@ -2858,7 +2624,7 @@ export function OobSetupWizard({ onComplete: onCompleteProp, onWalletCreated, on
                       <VStack gap={3}>
                         <FaExclamationTriangle color="var(--gold)" size={26} />
                         <Text fontSize="xl" fontWeight="800" color="white" textAlign="center">{uiText("Set a PIN to finish setup")}</Text>
-                        <Text fontSize="sm" color="gray.400" textAlign="center" lineHeight="1.6">{uiText("The seed is loaded, but the device has no PIN yet (")}{devPinError}{uiText("). Anyone holding it could use the wallet, so setup does not finish until a PIN is set.")}</Text>
+                        <Text fontSize="sm" color="kk.textMuted" textAlign="center" lineHeight="1.6">{uiText("The seed is loaded, but the device has no PIN yet (")}{devPinError}{uiText("). Anyone holding it could use the wallet, so setup does not finish until a PIN is set.")}</Text>
                       </VStack>
                     </Box>
                     <Button w="100%" size="md" bg="var(--gold)" color="black" fontWeight="700" _hover={{ opacity: 0.9 }}
@@ -2885,11 +2651,11 @@ export function OobSetupWizard({ onComplete: onCompleteProp, onWalletCreated, on
 
                     {setupType === 'create' && (
                       <Box w="100%" p={4} bg="rgba(224,140,123,0.10)" borderRadius="lg" borderWidth="2px" borderColor="var(--rose)"
-                        css={{ animation: 'kkGlow 2s ease-in-out infinite', boxShadow: '0 0 12px rgba(245,101,101,0.4)' }}>
+                        css={{ animation: 'kkGlow 2s ease-in-out infinite', boxShadow: '0 0 12px rgba(224,140,123,0.4)' }}>
                         <VStack gap={2}>
                           <HStack gap={2} justify="center">
                             <FaExclamationTriangle color="var(--rose)" size={20} />
-                            <Text fontSize="md" color="red.200" fontWeight="900" textTransform="uppercase" letterSpacing="wider">
+                            <Text fontSize="md" color="kk.error" fontWeight="900" textTransform="uppercase" letterSpacing="wider">
                               {t('initProgress.writeDownWarning', { defaultValue: 'Write down every word!' })}
                             </Text>
                             <FaExclamationTriangle color="var(--rose)" size={20} />
@@ -2902,10 +2668,10 @@ export function OobSetupWizard({ onComplete: onCompleteProp, onWalletCreated, on
                     )}
 
                     {isEmulator && (
-                      <Box w="100%" p={3} bg="orange.900" borderRadius="lg" borderWidth="2px" borderColor="orange.400">
+                      <Box w="100%" p={3} bg="rgba(233,196,106,0.12)" borderRadius="lg" borderWidth="2px" borderColor="kk.warning">
                         <HStack gap={2} justify="center">
-                          <Spinner size="xs" color="orange.300" />
-                          <Text fontSize="xs" color="orange.200" fontWeight="bold">{uiText("Check the Emulator window for prompts")}</Text>
+                          <Spinner size="xs" color="kk.warning" />
+                          <Text fontSize="xs" color="kk.warning" fontWeight="bold">{uiText("Check the Emulator window for prompts")}</Text>
                         </HStack>
                       </Box>
                     )}
@@ -2914,7 +2680,7 @@ export function OobSetupWizard({ onComplete: onCompleteProp, onWalletCreated, on
                       <Box w="100%" p={3} bg="rgba(139,227,196,0.10)" borderRadius="lg" borderWidth="2px" borderColor="rgba(139,227,196,0.45)">
                         <HStack gap={2} justify="center">
                           <FaExclamationTriangle color="var(--teal)" size={14} />
-                          <Text fontSize="xs" color="green.200" fontWeight="bold">
+                          <Text fontSize="xs" color="kk.success" fontWeight="bold">
                             {t('initProgress.lookAtDevice')}
                           </Text>
                         </HStack>
@@ -2924,7 +2690,7 @@ export function OobSetupWizard({ onComplete: onCompleteProp, onWalletCreated, on
                 )}
 
                 {setupError && (
-                  <Box w="100%" p={3} bg="rgba(224,140,123,0.10)" borderRadius="lg" borderWidth="1px" borderColor="red.500">
+                  <Box w="100%" p={3} bg="rgba(224,140,123,0.10)" borderRadius="lg" borderWidth="1px" borderColor="kk.error">
                     <Text fontSize="xs" color="var(--rose)" textAlign="center">{setupError}</Text>
                   </Box>
                 )}
@@ -2987,7 +2753,7 @@ export function OobSetupWizard({ onComplete: onCompleteProp, onWalletCreated, on
                   px="3"
                   disabled={applyingLabel}
                   _disabled={{ opacity: 0.6, cursor: 'not-allowed' }}
-                  _hover={{ borderColor: 'gray.500' }}
+                  _hover={{ borderColor: 'kk.textMuted' }}
                   _focus={{ borderColor: HIGHLIGHT, boxShadow: '0 0 0 1px var(--gold)' }}
                   onKeyDown={(e: React.KeyboardEvent) => {
                     if (e.key === 'Enter' && deviceLabel.trim() && !applyingLabel) {
@@ -3003,7 +2769,7 @@ export function OobSetupWizard({ onComplete: onCompleteProp, onWalletCreated, on
                     bg="var(--gold)"
                     color="black"
                     fontWeight="600"
-                    _hover={{ bg: '#D4BC6A', transform: 'translateY(-1px)', boxShadow: '0 4px 12px rgba(233,196,106, 0.3)' }}
+                    _hover={{ bg: 'kk.goldHover', transform: 'translateY(-1px)', boxShadow: '0 4px 12px rgba(233,196,106, 0.3)' }}
                     _active={{ transform: 'scale(0.98)' }}
                     transition="all 0.15s ease"
                     onClick={handleApplyLabel}
@@ -3024,7 +2790,7 @@ export function OobSetupWizard({ onComplete: onCompleteProp, onWalletCreated, on
                     variant="ghost"
                     color="kk.textMuted"
                     fontWeight="500"
-                    _hover={{ color: 'gray.200', bg: 'rgba(255,255,255,0.04)' }}
+                    _hover={{ color: 'kk.textPrimary', bg: 'rgba(255,255,255,0.04)' }}
                     transition="all 0.15s ease"
                     onClick={handleApplyLabel}
                     disabled={applyingLabel}
@@ -3053,7 +2819,7 @@ export function OobSetupWizard({ onComplete: onCompleteProp, onWalletCreated, on
                     </VStack>
                     <Button
                       w="100%" size="md" bg="var(--gold)" color="black" fontWeight="600"
-                      _hover={{ bg: '#D4BC6A', transform: 'translateY(-1px)', boxShadow: '0 4px 12px rgba(233,196,106, 0.3)' }}
+                      _hover={{ bg: 'kk.goldHover', transform: 'translateY(-1px)', boxShadow: '0 4px 12px rgba(233,196,106, 0.3)' }}
                       _active={{ transform: 'scale(0.98)' }}
                       transition="all 0.15s ease"
                       onClick={async () => {
@@ -3086,7 +2852,7 @@ export function OobSetupWizard({ onComplete: onCompleteProp, onWalletCreated, on
                     </Button>
                     <Button
                       w="100%" size="sm" variant="ghost" color="kk.textMuted" fontWeight="500"
-                      _hover={{ color: 'gray.200', bg: 'rgba(255,255,255,0.04)' }}
+                      _hover={{ color: 'kk.textPrimary', bg: 'rgba(255,255,255,0.04)' }}
                       transition="all 0.15s ease"
                       onClick={() => setStep('security-tips')}
                     >
@@ -3143,7 +2909,7 @@ export function OobSetupWizard({ onComplete: onCompleteProp, onWalletCreated, on
                     </VStack>
                     <Button
                       w="100%" size="md" bg="var(--gold)" color="black" fontWeight="600"
-                      _hover={{ bg: '#D4BC6A' }} transition="all 0.15s ease"
+                      _hover={{ bg: 'kk.goldHover' }} transition="all 0.15s ease"
                       disabled={quizPositions.some(p => !quizAnswers[p]?.trim())}
                       onClick={async () => {
                         setVerifyingPhase('verifying')
@@ -3162,7 +2928,7 @@ export function OobSetupWizard({ onComplete: onCompleteProp, onWalletCreated, on
                     </Button>
                     <Button
                       w="100%" size="sm" variant="ghost" color="kk.textMuted" fontWeight="500"
-                      _hover={{ color: 'gray.200', bg: 'rgba(255,255,255,0.04)' }}
+                      _hover={{ color: 'kk.textPrimary', bg: 'rgba(255,255,255,0.04)' }}
                       transition="all 0.15s ease"
                       onClick={() => setVerifyingPhase('idle')}
                     >
@@ -3198,7 +2964,7 @@ export function OobSetupWizard({ onComplete: onCompleteProp, onWalletCreated, on
                     </VStack>
                     <Button
                       w="100%" size="md" bg="var(--gold)" color="black" fontWeight="600"
-                      _hover={{ bg: '#D4BC6A' }} transition="all 0.15s ease"
+                      _hover={{ bg: 'kk.goldHover' }} transition="all 0.15s ease"
                       onClick={() => setStep('security-tips')}
                     >
                       {t('verifySeed.continue', { defaultValue: 'Continue' })}
@@ -3218,14 +2984,14 @@ export function OobSetupWizard({ onComplete: onCompleteProp, onWalletCreated, on
                     </VStack>
                     <Button
                       w="100%" size="md" bg="var(--gold)" color="black" fontWeight="600"
-                      _hover={{ bg: '#D4BC6A' }} transition="all 0.15s ease"
+                      _hover={{ bg: 'kk.goldHover' }} transition="all 0.15s ease"
                       onClick={() => setVerifyingPhase('idle')}
                     >
                       {t('verifySeed.tryAgain', { defaultValue: 'Try Again' })}
                     </Button>
                     <Button
                       w="100%" size="sm" variant="ghost" color="kk.textMuted" fontWeight="500"
-                      _hover={{ color: 'gray.200', bg: 'rgba(255,255,255,0.04)' }}
+                      _hover={{ color: 'kk.textPrimary', bg: 'rgba(255,255,255,0.04)' }}
                       transition="all 0.15s ease"
                       onClick={() => setStep('security-tips')}
                     >
@@ -3284,8 +3050,8 @@ export function OobSetupWizard({ onComplete: onCompleteProp, onWalletCreated, on
             {step === 'update-done' && (
               <VStack gap={5} w="100%" py={4}>
                 <Box
-                  bg="rgba(16,185,129,0.08)"
-                  border="1px solid rgba(16,185,129,0.28)"
+                  bg="rgba(139,227,196,0.08)"
+                  border="1px solid rgba(139,227,196,0.28)"
                   borderRadius="16px"
                   px={5}
                   py={5}
@@ -3300,7 +3066,7 @@ export function OobSetupWizard({ onComplete: onCompleteProp, onWalletCreated, on
                         survived when the device says so — an interrupted upload
                         wipes it, and then this card must not reassure. */}
                     {updateDoneWalletMessage(deviceStatus) === 'kept' && (
-                      <Text fontSize="sm" color="gray.300" textAlign="center" lineHeight="1.6">
+                      <Text fontSize="sm" color="kk.textSecondary" textAlign="center" lineHeight="1.6">
                         {t('updateDone.reassure', {
                           defaultValue:
                             'Your update finished and your wallet is still on your KeepKey — you do not need to restore anything. An update only keeps your recovery phrase when it completes, so always have your recovery phrase written down before updating and never unplug your KeepKey during an update.',
@@ -3308,7 +3074,7 @@ export function OobSetupWizard({ onComplete: onCompleteProp, onWalletCreated, on
                       </Text>
                     )}
                     {updateDoneWalletMessage(deviceStatus) === 'empty' && (
-                      <Text fontSize="sm" color="gray.300" textAlign="center" lineHeight="1.6">
+                      <Text fontSize="sm" color="kk.textSecondary" textAlign="center" lineHeight="1.6">
                         {t('updateDone.empty', {
                           defaultValue:
                             'Your KeepKey has no wallet on it. If it held one before this update, restore it with your recovery phrase.',
@@ -3376,7 +3142,7 @@ export function OobSetupWizard({ onComplete: onCompleteProp, onWalletCreated, on
                     color="black"
                     fontWeight="700"
                     px={10}
-                    _hover={{ bg: '#D4BC6A', transform: 'translateY(-1px)', boxShadow: '0 4px 16px rgba(233,196,106, 0.35)' }}
+                    _hover={{ bg: 'kk.goldHover', transform: 'translateY(-1px)', boxShadow: '0 4px 16px rgba(233,196,106, 0.35)' }}
                     _active={{ transform: 'scale(0.98)' }}
                     transition="all 0.2s"
                     onClick={onComplete}
@@ -3390,15 +3156,17 @@ export function OobSetupWizard({ onComplete: onCompleteProp, onWalletCreated, on
         </Box>
 
         {/* ── Footer ─────────────────────────────────────────────────── */}
-        <Box display={step === 'authenticity' || step === 'coin-choice' ? 'none' : undefined} px={5} py={3} borderTopWidth="1px" borderColor="rgba(233,196,106, 0.2)">
+        {/* No divider: screens carry their own actions. An empty footer (intro
+            cards, welcome) is not rendered at all, so no blank band remains. */}
+        <Box display={step === 'authenticity' || step === 'coin-choice' || !footerHasContent ? 'none' : undefined} px={{ base: 4, md: 6 }} py={3}>
           <HStack justify="space-between">
             {step === 'init-choose' && offerBitcoinOnly ? (
               <HStack
                 as="button"
-                gap={2}
-                color="#F7931A"
+                gap={1.5}
+                color="kk.textMuted"
                 cursor="pointer"
-                _hover={{ color: '#FFB347' }}
+                _hover={{ color: 'kk.textPrimary' }}
                 transition="color 0.15s ease"
                 onClick={() => {
                   chooseCoin('bitcoin-only')
@@ -3406,8 +3174,8 @@ export function OobSetupWizard({ onComplete: onCompleteProp, onWalletCreated, on
                   setStep('coin-choice')
                 }}
               >
-                <FaBitcoin size={28} />
-                <Text fontSize="lg" fontWeight="800" letterSpacing="tight">
+                <FaBitcoin size={14} color="#F7931A" />
+                <Text fontSize="12px" fontWeight="500">
                   {t('coinMode.goBitcoinOnly', { defaultValue: 'Go Bitcoin-only' })}
                 </Text>
               </HStack>
@@ -3431,6 +3199,7 @@ export function OobSetupWizard({ onComplete: onCompleteProp, onWalletCreated, on
                   size="sm"
                   variant="outline"
                   onClick={handlePrevious}
+                  borderRadius="full"
                   borderColor="rgba(233,196,106, 0.3)"
                   color="kk.textSecondary"
                   px={5}
@@ -3447,8 +3216,9 @@ export function OobSetupWizard({ onComplete: onCompleteProp, onWalletCreated, on
                   bg="var(--gold)"
                   color="black"
                   px={6}
+                  borderRadius="full"
                   fontWeight="600"
-                  _hover={{ bg: '#D4BC6A', transform: 'translateY(-1px)' }}
+                  _hover={{ bg: 'kk.goldHover', transform: 'translateY(-1px)' }}
                   _active={{ transform: 'scale(0.98)' }}
                   transition="all 0.15s ease"
                   onClick={handleNext}
@@ -3572,7 +3342,7 @@ export function OobSetupWizard({ onComplete: onCompleteProp, onWalletCreated, on
             <Box px={4} py={3}>
               <Box p={4} bg="rgba(224,140,123,0.10)" borderRadius="md" borderWidth="1px" borderColor="var(--rose)" mb={4}>
                 <VStack gap={3} align="start">
-                  <Text fontSize="sm" color="red.200" fontWeight="bold">{uiText("This defeats the purpose of a hardware wallet.")}</Text>
+                  <Text fontSize="sm" color="kk.error" fontWeight="bold">{uiText("This defeats the purpose of a hardware wallet.")}</Text>
                   <Text fontSize="xs" color="var(--rose)" lineHeight="tall">{uiText("Loading a seed phrase via software transmits it over USB in plaintext. Any malware on this computer can intercept it. The entire security model of your KeepKey relies on the seed never leaving the device — this bypasses that protection entirely.")}</Text>
                   <Text fontSize="xs" color="var(--rose)" lineHeight="tall">{uiText("For development purposes only. Never load a seed that controls real funds.")}</Text>
                 </VStack>
@@ -3597,7 +3367,7 @@ export function OobSetupWizard({ onComplete: onCompleteProp, onWalletCreated, on
                   checked={devAcknowledged}
                   onChange={(e: React.ChangeEvent<HTMLInputElement>) => setDevAcknowledged(e.target.checked)}
                   mt="2px"
-                  style={{ accentColor: '#E53E3E', width: '16px', height: '16px', flexShrink: 0 }}
+                  style={{ accentColor: 'var(--rose)', width: '16px', height: '16px', flexShrink: 0 }}
                 />
                 <Text fontSize="xs" color="kk.textSecondary" lineHeight="tall">{uiText("I understand this is for development only and that loading a seed over USB compromises device security. I will not use a seed that holds real funds.")}</Text>
               </Box>
@@ -3616,15 +3386,15 @@ export function OobSetupWizard({ onComplete: onCompleteProp, onWalletCreated, on
                   bg="var(--ink-1)"
                   color="white"
                   borderWidth="1px"
-                  borderColor={devAcknowledged ? 'gray.600' : 'gray.700'}
+                  borderColor={devAcknowledged ? 'var(--text-3)' : 'kk.borderAlt'}
                   borderRadius="md"
                   fontSize="sm"
                   fontFamily="mono"
                   resize="none"
                   disabled={!devAcknowledged}
                   opacity={devAcknowledged ? 1 : 0.4}
-                  _hover={devAcknowledged ? { borderColor: 'gray.500' } : {}}
-                  _focus={devAcknowledged ? { borderColor: 'red.500', outline: 'none' } : {}}
+                  _hover={devAcknowledged ? { borderColor: 'kk.textMuted' } : {}}
+                  _focus={devAcknowledged ? { borderColor: 'kk.error', outline: 'none' } : {}}
                 />
                 {devSeed.trim() && (
                   <Text fontSize="xs" color="kk.textMuted" mt={1}>
@@ -3637,13 +3407,13 @@ export function OobSetupWizard({ onComplete: onCompleteProp, onWalletCreated, on
                 <Button
                   variant="ghost"
                   color="kk.textSecondary"
-                  _hover={{ color: 'white', bg: 'gray.700' }}
+                  _hover={{ color: 'white', bg: 'kk.borderAlt' }}
                   onClick={handleDevLoadCancel}
                 >{uiText("Cancel")}</Button>
                 <Button
                   bg="var(--rose)"
                   color="white"
-                  _hover={{ bg: 'red.500' }}
+                  _hover={{ bg: 'kk.error' }}
                   disabled={!devAcknowledged || !devSeed.trim() || devSeed.trim().split(/\s+/).length < 12}
                   onClick={handleDevLoadDevice}
                 >{uiText("Load Device")}</Button>
@@ -3692,7 +3462,7 @@ export function OobSetupWizard({ onComplete: onCompleteProp, onWalletCreated, on
                 _hover={{ bg: 'whiteAlpha.100' }}
                 onClick={() => setShowReadMore(false)}
               >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: '#A0AEC0' }}>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: 'var(--text-2)' }}>
                   <line x1="18" y1="6" x2="6" y2="18" />
                   <line x1="6" y1="6" x2="18" y2="18" />
                 </svg>

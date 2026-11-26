@@ -26,6 +26,20 @@ export interface SpinningDeviceProps {
 	showWordmark?: boolean;
 	/** Container style passthrough — width / margin / etc. */
 	style?: CSSProperties;
+	/** How the device moves. `spin` (default) is the full 360° turn used by
+	 *  Swap and the dashboard loader. `sway` rocks a few degrees and always
+	 *  comes back to the front — for decorative screens whose text should
+	 *  still be legible. `still` faces the viewer with a slight static tilt:
+	 *  use it whenever the user must READ the screen (scrambled PIN, recovery
+	 *  cipher, what to confirm). */
+	motion?: "spin" | "sway" | "still";
+	/** Uniform size factor for the whole device (1 = 380px wide). With a
+	 *  scale or a non-spinning motion the container hugs the device instead
+	 *  of reserving the room a full turn needs. */
+	scale?: number;
+	/** Accessible description of what the screen shows. When omitted, a
+	 *  compact (scaled / non-spinning) device is hidden from assistive tech. */
+	label?: string;
 }
 
 const FONT_OLED =
@@ -50,6 +64,9 @@ const GLOSS_BLACK =
 	"linear-gradient(180deg, #16161a 0%, #0a0a0c 40%, #050507 100%)";
 const GLOSS_HIGHLIGHT =
 	"linear-gradient(120deg, rgba(255,255,255,0.10) 0%, rgba(255,255,255,0) 28%, rgba(255,255,255,0) 72%, rgba(255,255,255,0.06) 100%)";
+
+// Facing the viewer, turned just enough to read as a 3D object.
+const STILL_POSE = "rotateX(6deg) rotateY(-14deg)";
 
 // Shell split: thicker glossy half (~55%) + thinner aluminum half on side faces
 const SHELL_BLACK = 0.56;
@@ -155,14 +172,27 @@ export function SpinningDevice({
 	screen,
 	showWordmark = true,
 	style,
+	motion = "spin",
+	scale = 1,
+	label,
 }: SpinningDeviceProps) {
   const uiText = useUiTranslation()
+	// The original spinner layout stays byte-for-byte the default, so Swap and
+	// DashboardLoading render exactly as before.
+	const compact = motion !== "spin" || scale !== 1
+	const stageAnimation = motion === "spin"
+		? `kkSpin360 ${durationSeconds}s linear infinite`
+		: motion === "sway" ? `kkSway ${durationSeconds}s ease-in-out infinite` : undefined
 
 	return (
 		<div
+			role={label ? "img" : undefined}
+			aria-label={label}
+			aria-hidden={compact && !label ? true : undefined}
 			style={{
-				width: "100%",
-				aspectRatio: "800 / 420",
+				...(compact
+					? { width: Math.round(L * scale * 1.1), maxWidth: "100%", height: Math.round(W * scale * 1.45), flex: "none" }
+					: { width: "100%", aspectRatio: "800 / 420" }),
 				perspective: 2400,
 				perspectiveOrigin: "50% 42%",
 				position: "relative",
@@ -176,11 +206,11 @@ export function SpinningDevice({
 			<div
 				style={{
 					position: "absolute",
-					bottom: "14%",
+					bottom: compact ? "2%" : "14%",
 					left: "50%",
-					width: L * 0.88,
-					height: 30,
-					marginLeft: -(L * 0.88) / 2,
+					width: L * 0.88 * scale,
+					height: 30 * scale,
+					marginLeft: -(L * 0.88 * scale) / 2,
 					background:
 						"radial-gradient(ellipse at center, rgba(0,0,0,0.42) 0%, rgba(0,0,0,0) 65%)",
 					filter: "blur(7px)",
@@ -188,16 +218,29 @@ export function SpinningDevice({
 				}}
 			/>
 
-			{/* 3D box stage */}
+			{/* Size wrapper: scales the whole box without touching its geometry. */}
 			<div
 				style={{
 					position: "relative",
 					width: L,
 					height: W,
+					flex: "none",
 					transformStyle: "preserve-3d",
-					animation: `kkSpin360 ${durationSeconds}s linear infinite`,
+					transform: scale !== 1 ? `scale(${scale})` : undefined,
+				}}
+			>
+			{/* 3D box stage */}
+			<div
+				className={motion === "spin" ? undefined : "kk-sd-stage"}
+				style={{
+					position: "relative",
+					width: L,
+					height: W,
+					transformStyle: "preserve-3d",
+					transform: motion === "spin" ? undefined : STILL_POSE,
+					animation: stageAnimation,
 					animationPlayState: paused ? "paused" : "running",
-					willChange: "transform",
+					willChange: stageAnimation ? "transform" : undefined,
 				}}
 			>
 				{/* FRONT — glossy black OLED with caller-provided screen content */}
@@ -298,24 +341,34 @@ export function SpinningDevice({
 								pointerEvents: "none",
 							}}
 						/>
-						{showWordmark && (
-							<div
-								style={{
-									position: "absolute",
-									inset: 0,
-									display: "flex",
-									alignItems: "center",
-									justifyContent: "center",
-									fontFamily:
-										"-apple-system, BlinkMacSystemFont, system-ui, sans-serif",
-									fontWeight: 600,
-									fontSize: 38,
-									letterSpacing: -1.5,
-									color: "rgba(0,0,0,0.42)",
-									textShadow: "0 1px 0 rgba(255,255,255,0.18)",
-								}}
-							>{uiText("keepkey")}</div>
-						)}
+						{showWordmark && (() => {
+							// Real device: "keep" over "key", left-aligned, sitting in the
+							// left third of the back and centered vertically.
+							const mark = uiText("keepkey")
+							const lines = /^keepkey$/i.test(mark) ? [mark.slice(0, 4), mark.slice(4)] : [mark]
+							return (
+								<div
+									style={{
+										position: "absolute",
+										top: 0,
+										bottom: 0,
+										left: Math.round(L * 0.14),
+										display: "flex",
+										flexDirection: "column",
+										justifyContent: "center",
+										alignItems: "flex-start",
+										fontFamily:
+											"-apple-system, BlinkMacSystemFont, system-ui, sans-serif",
+										fontWeight: 500,
+										fontSize: 40,
+										lineHeight: 0.86,
+										letterSpacing: -0.5,
+										color: "rgba(0,0,0,0.42)",
+										textShadow: "0 1px 0 rgba(255,255,255,0.18)",
+									}}
+								>{lines.map((l, i) => <span key={i}>{l}</span>)}</div>
+							)
+						})()}
 					</div>
 				</Face>
 
@@ -573,8 +626,11 @@ export function SpinningDevice({
 					</div>
 				</Face>
 			</div>
+			</div>
 
-			<style>{`@keyframes kkSpin360 { from { transform: rotateY(0deg); } to { transform: rotateY(360deg); } }`}</style>
+			<style>{`@keyframes kkSpin360 { from { transform: rotateY(0deg); } to { transform: rotateY(360deg); } }
+@keyframes kkSway { 0%, 100% { transform: ${STILL_POSE}; } 50% { transform: rotateX(6deg) rotateY(14deg); } }
+@media (prefers-reduced-motion: reduce) { .kk-sd-stage { animation: none !important; } }`}</style>
 		</div>
 	);
 }

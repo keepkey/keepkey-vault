@@ -55,5 +55,10 @@
 	"rescanUnavailable": "Für dieses Netzwerk ist kein Verlauf verfügbar",
 	"rescanUnavailableAll": "Kein Verlauf zum Scannen in diesen Netzwerken",
 	"rescanFailed": "Scan fehlgeschlagen",
-	"rescanFailedDetail": "Scan fehlgeschlagen: {{detail}}"
+	"rescanFailedDetail": "Scan fehlgeschlagen: {{detail}}",
+	"chainTotalLabel": "{{chain}} · Gesamt",
+	"chainNativeLine": "{{amount}} nativ · {{usd}}",
+	"tokensHeader": "Tokens · {{n}} · {{usd}}",
+	"smallBalances": "Kleine Guthaben ({{n}})",
+	"smallBalancesHint": "unter {{usd}}"
 }

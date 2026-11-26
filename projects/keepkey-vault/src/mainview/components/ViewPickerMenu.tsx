@@ -111,8 +111,12 @@ export function ViewPickerButton({ assetCount }: { assetCount?: number } = {}) {
 				as="button"
 				onClick={() => setOpen(o => !o)}
 				position="relative"
-				w="36px"
-				h="36px"
+				display="flex"
+				alignItems="center"
+				gap="1.5"
+				h="32px"
+				pl="1.5"
+				pr="3"
 				borderRadius="999px"
 				bg={open ? "var(--ink-4)" : "var(--ink-2)"}
 				color={open ? "var(--gold)" : "var(--text-2)"}
@@ -121,17 +125,24 @@ export function ViewPickerButton({ assetCount }: { assetCount?: number } = {}) {
 				transition="all 0.18s"
 				cursor="pointer"
 				title={uiText("Switch view")}
+				aria-label={uiText("Switch view")}
 				aria-haspopup="menu"
 				aria-expanded={open}
-				overflow="hidden"
 			>
-				<Box
-					position="absolute"
-					style={{ transform: "translate(-50%, -50%) scale(0.55)", top: "50%", left: "50%" }}
-					display="flex"
-				>
-					{activeView.preview}
+				{/* Labelled pill: a bare icon floating above the hero read as decoration. */}
+				<Box w="22px" h="22px" position="relative" overflow="hidden" flexShrink={0}>
+					<Box
+						position="absolute"
+						style={{ transform: "translate(-50%, -50%) scale(0.55)", top: "50%", left: "50%" }}
+						display="flex"
+					>
+						{activeView.preview}
+					</Box>
 				</Box>
+				<Text as="span" fontSize="12px" fontFamily="var(--font-ui-sans)" fontWeight="500" lineHeight="1">
+					{activeView.label}
+				</Text>
+				<Box as="span" fontSize="9px" opacity={0.7} aria-hidden="true">▾</Box>
 			</Box>
 
 			{open && (

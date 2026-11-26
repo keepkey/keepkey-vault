@@ -56,5 +56,10 @@
 	"rescanUnavailable": "이 네트워크의 기록을 사용할 수 없습니다",
 	"rescanUnavailableAll": "이 네트워크에는 스캔할 기록이 없습니다",
 	"rescanFailed": "스캔 실패",
-	"rescanFailedDetail": "스캔 실패: {{detail}}"
+	"rescanFailedDetail": "스캔 실패: {{detail}}",
+	"chainTotalLabel": "{{chain}} · 합계",
+	"chainNativeLine": "네이티브 {{amount}} · {{usd}}",
+	"tokensHeader": "토큰 · {{n}} · {{usd}}",
+	"smallBalances": "소액 잔고 ({{n}})",
+	"smallBalancesHint": "{{usd}} 미만"
 }

@@ -58,5 +58,10 @@
 	"rescanUnavailable": "Cronologia non disponibile per questa rete",
 	"rescanUnavailableAll": "Nessuna cronologia da scansionare su queste reti",
 	"rescanFailed": "Scansione non riuscita",
-	"rescanFailedDetail": "Scansione non riuscita: {{detail}}"
+	"rescanFailedDetail": "Scansione non riuscita: {{detail}}",
+	"chainTotalLabel": "{{chain}} · Totale",
+	"chainNativeLine": "{{amount}} nativo · {{usd}}",
+	"tokensHeader": "Token · {{n}} · {{usd}}",
+	"smallBalances": "Saldi minimi ({{n}})",
+	"smallBalancesHint": "sotto {{usd}}"
 }

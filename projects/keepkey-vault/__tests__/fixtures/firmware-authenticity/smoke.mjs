@@ -26,7 +26,7 @@ const proceed = () => page.getByRole('button', { name: 'Continue with this build
 const load = async (scenario = 'normal') => {
   await rpc('testReset', { scenario })
   await page.goto(base + '?scenario=' + scenario)
-  await expect(page.getByText(scenario === 'verified' ? 'Genuine KeepKey' : 'Firmware not in the release list', { exact: true })).toBeVisible()
+  await expect(page.getByText(scenario === 'verified' ? /^Official firmware/ : 'Unlisted firmware', scenario === 'verified' ? undefined : { exact: true })).toBeVisible()
 }
 const steps = async () => (await rpc('testCalls')).filter(c => c.method === 'logOnboarding').map(c => c.params?.event)
 const expectStep = async step => expect.poll(steps).toContain('wizard step=' + step)

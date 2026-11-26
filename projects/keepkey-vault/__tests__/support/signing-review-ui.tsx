@@ -14,7 +14,7 @@ const element = (tag: string) => React.forwardRef<any, any>((props, ref) => {
   return React.createElement(typeof props.as === 'string' ? props.as : tag, { ...attrs, ref }, props.children)
 })
 mock.module('@chakra-ui/react', () => ({ Box: element('div'), Flex: element('div'), Text: element('span'), VStack: element('div'),
-  HStack: element('div'), Button: element('button'), Badge: element('span'), Link: element('a') }))
+  HStack: element('div'), Button: element('button'), Badge: element('span'), Link: element('a'), Image: element('img') }))
 mock.module('react-i18next', () => ({ useTranslation: () => ({ t: translate, i18n: { language: 'en' } }) }))
 mock.module('../../src/mainview/i18n/ui', () => ({ useUiTranslation: () => translate }))
 const calls: Array<{ method: string; params: any }> = []
@@ -41,23 +41,25 @@ let approved = 0, rejected = 0, cancelled = 0
 const callbacks = { onApprove: () => { approved++ }, onReject: () => { rejected++ }, onCancel: () => { cancelled++ } }
 // Simplifying explanations cannot grant consent or dismiss a device warning.
 await render(<SigningApproval key="consent" request={{ ...base, requiresBlindSigningConsent: true }} phase="approve" {...callbacks} />)
-await click('Essentials'); await click('Larger text')
+await click('Simple'); await click('Larger text')
 expect(container.querySelector('[data-review-warning]')).not.toBeNull()
 expect(container.querySelector('[data-screen-guide]')).toBeNull()
 expect(approved).toBe(0)
 const approvalButtons = [...container.querySelectorAll('button')].filter(node => /approve|continue|understand/i.test(node.textContent || ''))
 expect(approvalButtons.some(node => node.disabled)).toBe(true)
 expect(JSON.parse(window.localStorage.getItem('keepkey.signing-review.v1')!)).toEqual({ depth: 'essentials', largeText: true })
-await click('Deep audit'); expect(approved).toBe(0)
+await click('Audit'); expect(approved).toBe(0)
 // A firmware refusal remains a refusal in all display modes.
 await render(<SigningApproval key="refusal" request={{ ...base, firmwareCannotSign: true }} phase="approve" {...callbacks} />)
-await click('Essentials')
+await click('Simple')
 expect(container.textContent).toContain('cannot sign this request')
 expect([...container.querySelectorAll('button')].some(node => /Update firmware|Cannot sign|Firmware update/i.test(node.textContent || '') && node.disabled)).toBe(true)
 expect(approved).toBe(0)
 // Physical signing never polls a display RPC; Cancel still reaches the owner.
 calls.length = 0
 await render(<SigningApproval key="physical" request={{ ...base, deviceReview: { emulator: false, deviceId: 'physical' } }} phase="device-confirm" {...callbacks} />)
+// Owner rule: an address is never shortened while the user compares with the device.
+expect(container.textContent).not.toMatch(/[0-9A-Za-z]{4,}…[0-9A-Za-z]{4,}/)
 await settle(220); expect(calls).toHaveLength(0)
 expect(container.textContent).toContain('Compare with your KeepKey')
 await click('Cancel'); expect(cancelled).toBe(1)
@@ -69,7 +71,7 @@ await render(<div />); const after = calls.length; await settle(250); expect(cal
 // The overview has no signing callback and never requests frames or policy changes.
 calls.length = 0
 await render(<SigningReviewOverview open onClose={() => { rejected++ }} />)
-await click('Token allowances'); await click('Essentials')
+await click('Token allowances'); await click('Simple')
 expect(container.textContent).toContain('unlimited allowance')
 await click('Close'); expect(rejected).toBe(1); expect(approved).toBe(0); expect(calls).toHaveLength(0)
 await React.act(async () => root.unmount())

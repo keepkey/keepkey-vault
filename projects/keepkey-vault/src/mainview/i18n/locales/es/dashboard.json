@@ -59,5 +59,10 @@
 	"rescanUnavailable": "El historial no está disponible para esta red",
 	"rescanUnavailableAll": "No hay historial para escanear en estas redes",
 	"rescanFailed": "Error al escanear",
-	"rescanFailedDetail": "Error al escanear: {{detail}}"
+	"rescanFailedDetail": "Error al escanear: {{detail}}",
+	"chainTotalLabel": "{{chain}} · Total",
+	"chainNativeLine": "{{amount}} nativo · {{usd}}",
+	"tokensHeader": "Tokens · {{n}} · {{usd}}",
+	"smallBalances": "Saldos pequeños ({{n}})",
+	"smallBalancesHint": "menos de {{usd}}"
 }

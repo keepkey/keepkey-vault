@@ -56,5 +56,10 @@
 	"rescanUnavailable": "Bu ağ için geçmiş kullanılamıyor",
 	"rescanUnavailableAll": "Bu ağlarda taranacak geçmiş yok",
 	"rescanFailed": "Tarama başarısız",
-	"rescanFailedDetail": "Tarama başarısız: {{detail}}"
+	"rescanFailedDetail": "Tarama başarısız: {{detail}}",
+	"chainTotalLabel": "{{chain}} · Toplam",
+	"chainNativeLine": "{{amount}} yerel · {{usd}}",
+	"tokensHeader": "Tokenler · {{n}} · {{usd}}",
+	"smallBalances": "Küçük bakiyeler ({{n}})",
+	"smallBalancesHint": "{{usd}} altı"
 }
