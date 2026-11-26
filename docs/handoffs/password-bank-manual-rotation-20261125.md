@@ -1,4 +1,6 @@
-# Manual password rotation from Chrome Checkup
+# Manual password rotation from Chrome Checkup (retired)
+
+**Retired 2026-11-26.** Desktop no longer walks users through a website change. Change password replaces an entry's password in one step; entries left mid-change by this flow are settled on unlock (a submitted replacement is kept, a prepared one is discarded). The steps below are history only.
 
 Chrome keeps the compromised-password list in its own interface. Open `chrome://password-manager/checkup/compromised` in the Chrome profile with your saved passwords and choose one account at a time.
 

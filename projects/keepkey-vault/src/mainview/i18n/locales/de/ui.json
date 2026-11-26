@@ -543,5 +543,14 @@
   "m80e4b47f": "30 Minuten",
   "mc43fb4a": "1 Stunde",
   "m687c0250": "4 Stunden",
-  "m42929680": "24 Stunden"
+  "m42929680": "24 Stunden",
+  "m8baeeead": "Erstellt am {{date}}",
+  "m1a580d8d": "Geändert am {{date}}",
+  "m7ff0af6c": "KeepKey erstellt das Passwort. Verwende es bei der Registrierung oder beim Ändern auf der Website.",
+  "mb1ed86b7": "KeepKey erstellt ein neues Passwort für diesen Eintrag. Das aktuelle wird hier nicht mehr angezeigt – kopiere es vorher, falls die Website danach fragt.",
+  "mafc03e38": "Neues Passwort erstellen",
+  "m9c28f946": "Verschlüsseltes Backup speichern",
+  "m3fef1128": "Verschlüsseltes Backup gespeichert unter {{path}}",
+  "ma168501d": "Nicht aufgelöster Name",
+  "m3ed3af1c": "Füge diesen Namen erneut hinzu, um die Adresse zu bestätigen, auf die er verweist"
 }

@@ -7,6 +7,7 @@ export interface PasswordProfile {
   origin: string
   account: string
   slot: number
+  /** Stored for older Vault versions; always settled to 'active' on unlock. */
   pendingSlot?: number
   rotationState: 'active' | 'prepared' | 'submitted'
   changedAt?: number
@@ -20,7 +21,7 @@ export interface PasswordBankView {
   unlocked: boolean
   bankId?: string
   algorithm: typeof PASSWORD_BANK_ALGORITHM
-  profiles: (PasswordProfile & { cachedUntil?: number; pendingCachedUntil?: number; due: boolean })[]
+  profiles: (PasswordProfile & { cachedUntil?: number; due: boolean })[]
   readySlots: { slot: number; symbolFormat: boolean; cachedUntil?: number }[]
   revision: number
 }
@@ -41,8 +42,3 @@ export function passwordOrigin(value: string): string {
   return url.origin
 }
 
-export const PASSWORD_ROTATION_GUIDES = [
-  { id: 'google', name: 'Google', loginOrigin: 'https://accounts.google.com', settingsUrl: 'https://myaccount.google.com/security', note: 'Open Password under Security and sign-in. Complete reauthentication or MFA yourself. Changing it can sign out other sessions.' },
-  { id: 'github', name: 'GitHub', loginOrigin: 'https://github.com', settingsUrl: 'https://github.com/settings/security', note: 'Open Change password. Complete any account verification yourself.' },
-  { id: 'microsoft', name: 'Microsoft', loginOrigin: 'https://login.live.com', settingsUrl: 'https://account.microsoft.com/security', note: 'Open password security. Complete account verification yourself.' },
-] as const

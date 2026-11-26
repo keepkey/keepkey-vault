@@ -554,5 +554,14 @@
   "m80e4b47f": "30 dakika",
   "mc43fb4a": "1 saat",
   "m687c0250": "4 saat",
-  "m42929680": "24 saat"
+  "m42929680": "24 saat",
+  "m8baeeead": "Oluşturulma: {{date}}",
+  "m1a580d8d": "Değiştirilme: {{date}}",
+  "m7ff0af6c": "Parolayı KeepKey oluşturur. Web sitesinde kaydolurken veya parolayı değiştirirken kullanın.",
+  "mb1ed86b7": "KeepKey bu kayıt için yeni bir parola oluşturur. Mevcut parola artık burada gösterilmez; web sitesi isterse önce kopyalayın.",
+  "mafc03e38": "Yeni parola oluştur",
+  "m9c28f946": "Şifreli yedeği kaydet",
+  "m3fef1128": "Şifreli yedek {{path}} konumuna kaydedildi",
+  "ma168501d": "Çözümlenmemiş ad",
+  "m3ed3af1c": "İşaret ettiği adresi onaylamak için bu adı yeniden ekleyin"
 }

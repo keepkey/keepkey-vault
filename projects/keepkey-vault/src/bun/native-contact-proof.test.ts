@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import * as Messages from '@keepkey/device-protocol/lib/messages_pb'
-import { buildCertificationRequest, contactAddress, contactsFromEntries, CONTACT_DESTINATION, type AddressBookCertification } from './addressbook-clearsign'
+import { buildCertificationRequest, certificateForDevice, contactAddress, contactsFromEntries, CONTACT_DESTINATION, type AddressBookCertification } from './addressbook-clearsign'
 import { installNativeContactProof, nativeContactProof } from './native-contact-proof'
 import bs58 from 'bs58'
 import { decodeTexAddress, p2pkhScript } from './txbuilder/zcash-tex'
@@ -195,6 +195,18 @@ describe('proof delivery shares the signer lock', () => {
     installNativeContactProof(wallet, () => ({ enabled: true, passphrase: false, capabilities: [32], certificate: certificate() }))
     await expect(wallet.cosmosSignTx({ to_address: 'cosmos1CaseSensitive' })).rejects.toThrow('Device rejected')
     expect(calls).not.toContain(Messages.MessageType.MESSAGETYPE_COSMOSSIGNTX)
+  })
+  test('a certificate from another KeepKey is skipped and the send goes through uncertified', async () => {
+    const cert = { ...certificate(), deviceId: 'device-a' }
+    for (const [deviceId, proofs] of [['device-a', 1], ['device-b', 0]] as const) {
+      const { wallet, calls } = walletFixture(2)
+      installNativeContactProof(wallet, () => ({ enabled: true, passphrase: false, capabilities: [32], certificate: certificateForDevice(cert, deviceId) }))
+      const signing = wallet.cosmosSignTx({ to_address: 'cosmos1CaseSensitive' })
+      if (proofs) await expect(signing).rejects.toThrow('Device rejected')
+      else expect(await signing).toEqual({ signature: 'unchanged' })
+      expect(calls.filter(n => n === Messages.MessageType.MESSAGETYPE_ETHEREUMTXMETADATA)).toHaveLength(proofs)
+    }
+    expect(certificateForDevice(certificate(), 'any-device')).toBeDefined()
   })
   test('hidden sessions do not preload saved contacts', async () => {
     const { wallet, calls } = walletFixture()

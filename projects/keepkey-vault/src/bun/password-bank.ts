@@ -171,6 +171,20 @@ export class PasswordBank {
       return createHash('sha256').update(`keepkey-password-bank/v1/${slot === undefined ? 'metadata' : 'password'}`).update(raw).digest()
     } finally { raw.fill(0) }
   }
+  private async deviceBankId(): Promise<string> {
+    const device = this.deps.device(), epoch = this.epoch
+    const raw = await device.cipher([0x80002720, 0x8000000b, 0x80000002], 'KeepKey Password Bank v1 bank id')
+    try {
+      this.guard()
+      if (epoch !== this.epoch || device.session !== this.deps.device().session) throw new Error('Wallet or feature changed during device approval')
+      if (raw.length !== 32) throw new Error('Unexpected device response')
+      return createHash('sha256').update('keepkey-password-bank/v1/bank-id').update(raw).digest().subarray(0, 16).toString('hex')
+    } finally { raw.fill(0) }
+  }
+  /** The encrypted bank as a restorable file. Same format as the database copy. */
+  backup(): string {
+    return JSON.stringify(this.seal(this.active()))
+  }
   private seal(registry: Registry, key = this.key!): PasswordBankBackup {
     const iv = randomBytes(12)
     const cipher = createCipheriv('aes-256-gcm', new Uint8Array(key), new Uint8Array(iv))
@@ -215,6 +229,13 @@ export class PasswordBank {
         ids.add(p.id); use(p.slot)
         if (p.pendingSlot !== undefined) use(p.pendingSlot)
         if ((p.rotationState === 'active') !== (p.pendingSlot === undefined)) throw new Error('Invalid rotation journal')
+        // Entries left mid-change by the retired step-by-step flow: a submitted
+        // password may already be on the website, so it becomes the saved one;
+        // a prepared one was never used and goes back to unused.
+        if (p.pendingSlot !== undefined) {
+          if (p.rotationState === 'submitted') { p.slot = p.pendingSlot; p.changedAt ??= p.createdAt }
+          delete p.pendingSlot; p.rotationState = 'active'
+        }
       }
       return r
     } finally { plain.fill(0) }
@@ -242,8 +263,7 @@ export class PasswordBank {
       profiles: r.profiles.map(({ riskFindings: _riskFindings, ...profile }) => ({
         ...profile,
         cachedUntil: this.cache.get(profile.slot)?.expiresAt,
-        pendingCachedUntil: profile.pendingSlot === undefined ? undefined : this.cache.get(profile.pendingSlot)?.expiresAt,
-        due: !profile.changedAt || this.now() >= profile.changedAt + profile.reviewDays * 86400000,
+        due: this.now() >= (profile.changedAt ?? profile.createdAt) + profile.reviewDays * 86400000,
       })),
       readySlots: r.ready.map(slot => ({
         slot, symbolFormat: usesSymbolFormat(r, slot), cachedUntil: this.cache.get(slot)?.expiresAt,
@@ -283,8 +303,9 @@ export class PasswordBank {
         }
         const saved = stored ?? legacy
         const backup = imported ?? (saved ? this.parseBackup(saved) : null)
-        const bankId = backup?.bankId || randomBytes(16).toString('hex')
         const device = this.deps.device()
+        // New banks take their id from the device so the seed alone rebuilds them.
+        const bankId = backup?.bankId || await this.deviceBankId()
         const key = await this.derive(bankId)
         try {
           const registry = backup ? this.open(backup, key) : { version: 1 as const, bankId, algorithm: PASSWORD_BANK_ALGORITHM, revision: 0, nextSlot: 0, ready: [], profiles: [] }
@@ -341,52 +362,31 @@ export class PasswordBank {
     this.commit(r)
     return this.view()
   }
-  async rehydrate(id: string, pending: boolean, ttlMinutes: number) {
+  async rehydrate(id: string, ttlMinutes: number) {
     return this.exclusive(async () => {
       this.ttl(ttlMinutes)
-      const r = this.active(), p = this.profile(r, id), slot = pending ? p.pendingSlot : p.slot
-      if (slot === undefined) throw new Error('No pending password')
+      const r = this.active(), slot = this.profile(r, id).slot
       const bytes = await this.derive(r.bankId, slot)
       try { this.put(slot, bytes, ttlMinutes) } finally { bytes.fill(0) }
       return this.view()
     })
   }
-  reveal(id: string, pending = false) {
-    const r = this.active(), p = this.profile(r, id), slot = pending ? p.pendingSlot : p.slot
-    if (pending && p.rotationState !== 'submitted') {
-      throw new Error('Begin the website change before accessing the new password')
-    }
-    const c = slot === undefined ? undefined : this.cache.get(slot)
+  reveal(id: string) {
+    const c = this.cache.get(this.profile(this.active(), id).slot)
     if (!c) throw new Error('Password cache expired. Rehydrate this entry with KeepKey.')
     return { password: c.bytes.toString('utf8'), expiresAt: Math.min(c.expiresAt, this.now() + 30000) }
   }
-  rotate(id: string, action: 'prepare' | 'submitted' | 'verify' | 'cancel', confirmed: boolean) {
+  /** Replace an entry's password with a ready one. The user sets it on the website. */
+  change(id: string) {
     const r = this.copy(), p = this.profile(r, id)
-    let retiredSlot: number | undefined
-    if (action === 'prepare') {
-      if (p.pendingSlot !== undefined) throw new Error('Resolve the current rotation first')
-      const readyIndex = r.ready.findIndex(slot => usesSymbolFormat(r, slot))
-      if (readyIndex < 0) throw new Error('Generate a new ready password first')
-      const [slot] = r.ready.splice(readyIndex, 1)
-      p.pendingSlot = slot; p.rotationState = 'prepared'
-    } else if (action === 'submitted') {
-      if (p.rotationState !== 'prepared') throw new Error('Prepare a new password first')
-      p.rotationState = 'submitted'
-    } else if (action === 'verify') {
-      if (p.rotationState !== 'submitted' || !confirmed || p.pendingSlot === undefined) throw new Error('Confirm a successful sign-in with the new password first')
-      retiredSlot = p.slot
-      p.slot = p.pendingSlot; delete p.pendingSlot; p.rotationState = 'active'; p.changedAt = this.now()
-    } else if (action === 'cancel') {
-      if (p.rotationState !== 'prepared' || p.pendingSlot === undefined) throw new Error('A submitted change must be reconciled; it cannot be discarded')
-      retiredSlot = p.pendingSlot
-      delete p.pendingSlot; p.rotationState = 'active'
-    } else throw new Error('Invalid rotation action')
-    // Keep both locations available until the updated journal has committed.
+    const readyIndex = r.ready.findIndex(slot => usesSymbolFormat(r, slot))
+    if (readyIndex < 0) throw new Error('Generate a new ready password first')
+    const retiredSlot = p.slot
+    ;[p.slot] = r.ready.splice(readyIndex, 1)
+    p.changedAt = this.now()
     this.commit(r)
-    if (retiredSlot !== undefined) {
-      this.cache.get(retiredSlot)?.bytes.fill(0)
-      this.cache.delete(retiredSlot)
-    }
+    this.cache.get(retiredSlot)?.bytes.fill(0)
+    this.cache.delete(retiredSlot)
     return this.view()
   }
 }

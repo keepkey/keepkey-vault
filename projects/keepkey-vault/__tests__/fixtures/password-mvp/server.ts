@@ -33,7 +33,7 @@ const rpc = Bun.serve({ hostname: '127.0.0.1', port: 0, async fetch(req) {
       case 'testMoneroPending': moneroPendingBroadcasts = p.count; payload = settings(); break
       case 'testDatabaseWriteFailure': databaseWriteFailure = p.enabled; break
       case 'testOpenedWebsites': payload = openedWebsites; break
-      case 'testPasswordClipboard': payload = { writes: clipboardWrites, revealReads, matches: clipboardValue === bank.reveal(p.id, p.pending).password }; break
+      case 'testPasswordClipboard': payload = { writes: clipboardWrites, revealReads, matches: clipboardValue === bank.reveal(p.id).password }; break
       case 'openExternal': openedWebsites++; break
       case 'getAppSettings': payload = settings(); break
       case 'setPasswordManagerEnabled': bank.setEnabled(p.enabled); payload = settings(); break
@@ -45,10 +45,10 @@ const rpc = Bun.serve({ hostname: '127.0.0.1', port: 0, async fetch(req) {
       case 'passwordBankLock': bank.lock(); payload = bank.view(); break
       case 'passwordBankGenerate': payload = await bank.generate(p.count, p.ttlMinutes); break
       case 'passwordBankAssign': payload = bank.assign(p.origin, p.account, p.reviewDays); break
-      case 'passwordBankReveal': revealReads++; payload = bank.reveal(p.id, p.pending); break
-      case 'passwordBankCopy': clipboardValue = bank.reveal(p.id, p.pending).password; clipboardWrites++; break
-      case 'passwordBankRehydrate': payload = await bank.rehydrate(p.id, p.pending, p.ttlMinutes); break
-      case 'passwordBankRotate': payload = bank.rotate(p.id, p.action, p.confirmed); break
+      case 'passwordBankReveal': revealReads++; payload = bank.reveal(p.id); break
+      case 'passwordBankCopy': clipboardValue = bank.reveal(p.id).password; clipboardWrites++; break
+      case 'passwordBankRehydrate': payload = await bank.rehydrate(p.id, p.ttlMinutes); break
+      case 'passwordBankChange': payload = bank.change(p.id); break
       case 'passwordBankImport': payload = await bank.unlock(false, p.json); break
       case 'listBip85Seeds': payload = []; break
       case 'getFeatures': payload = { label: 'Synthetic test KeepKey', policiesList: [] }; break

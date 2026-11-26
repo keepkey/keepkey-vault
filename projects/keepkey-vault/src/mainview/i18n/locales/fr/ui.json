@@ -545,5 +545,14 @@
   "m80e4b47f": "30 minutes",
   "mc43fb4a": "1 heure",
   "m687c0250": "4 heures",
-  "m42929680": "24 heures"
+  "m42929680": "24 heures",
+  "m8baeeead": "Créé le {{date}}",
+  "m1a580d8d": "Modifié le {{date}}",
+  "m7ff0af6c": "KeepKey crée le mot de passe. Utilisez-le lors de votre inscription ou pour le modifier sur le site.",
+  "mb1ed86b7": "KeepKey crée un nouveau mot de passe pour cette entrée. L’actuel ne sera plus affiché ici : copiez-le d’abord si le site le demande.",
+  "mafc03e38": "Créer un nouveau mot de passe",
+  "m9c28f946": "Enregistrer la sauvegarde chiffrée",
+  "m3fef1128": "Sauvegarde chiffrée enregistrée dans {{path}}",
+  "ma168501d": "Nom non résolu",
+  "m3ed3af1c": "Ajoutez ce nom à nouveau pour confirmer l’adresse vers laquelle il pointe"
 }

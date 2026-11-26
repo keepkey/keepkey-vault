@@ -550,5 +550,14 @@
   "m80e4b47f": "30 minutos",
   "mc43fb4a": "1 hora",
   "m687c0250": "4 horas",
-  "m42929680": "24 horas"
+  "m42929680": "24 horas",
+  "m8baeeead": "Creada el {{date}}",
+  "m1a580d8d": "Cambiada el {{date}}",
+  "m7ff0af6c": "KeepKey crea la contraseña. Úsala al registrarte o al cambiarla en el sitio web.",
+  "mb1ed86b7": "KeepKey crea una contraseña nueva para esta entrada. La actual dejará de mostrarse aquí, así que cópiala antes si el sitio web la pide.",
+  "mafc03e38": "Crear contraseña nueva",
+  "m9c28f946": "Guardar copia cifrada",
+  "m3fef1128": "Copia cifrada guardada en {{path}}",
+  "ma168501d": "Nombre sin resolver",
+  "m3ed3af1c": "Añade este nombre de nuevo para confirmar la dirección a la que apunta"
 }

@@ -544,5 +544,14 @@
   "m80e4b47f": "30 minuten",
   "mc43fb4a": "1 uur",
   "m687c0250": "4 uur",
-  "m42929680": "24 uur"
+  "m42929680": "24 uur",
+  "m8baeeead": "Aangemaakt op {{date}}",
+  "m1a580d8d": "Gewijzigd op {{date}}",
+  "m7ff0af6c": "KeepKey maakt het wachtwoord. Gebruik het bij het aanmelden of wijzigen op de website.",
+  "mb1ed86b7": "KeepKey maakt een nieuw wachtwoord voor dit item. Het huidige wordt hier niet meer getoond, dus kopieer het eerst als de website erom vraagt.",
+  "mafc03e38": "Nieuw wachtwoord maken",
+  "m9c28f946": "Versleutelde back-up opslaan",
+  "m3fef1128": "Versleutelde back-up opgeslagen in {{path}}",
+  "ma168501d": "Onopgeloste naam",
+  "m3ed3af1c": "Voeg deze naam opnieuw toe om het adres te bevestigen waarnaar hij verwijst"
 }

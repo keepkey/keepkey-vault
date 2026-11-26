@@ -554,5 +554,14 @@
   "m80e4b47f": "30 phút",
   "mc43fb4a": "1 giờ",
   "m687c0250": "4 giờ",
-  "m42929680": "24 giờ"
+  "m42929680": "24 giờ",
+  "m8baeeead": "Tạo ngày {{date}}",
+  "m1a580d8d": "Đổi ngày {{date}}",
+  "m7ff0af6c": "KeepKey tạo mật khẩu. Hãy dùng nó khi đăng ký hoặc đổi mật khẩu trên trang web.",
+  "mb1ed86b7": "KeepKey sẽ tạo mật khẩu mới cho mục này. Mật khẩu hiện tại sẽ không còn hiển thị ở đây, vì vậy hãy sao chép trước nếu trang web yêu cầu.",
+  "mafc03e38": "Tạo mật khẩu mới",
+  "m9c28f946": "Lưu bản sao lưu đã mã hóa",
+  "m3fef1128": "Đã lưu bản sao lưu mã hóa vào {{path}}",
+  "ma168501d": "Tên chưa được phân giải",
+  "m3ed3af1c": "Thêm lại tên này để xác nhận địa chỉ mà nó trỏ tới"
 }
