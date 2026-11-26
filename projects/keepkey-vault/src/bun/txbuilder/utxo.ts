@@ -373,6 +373,31 @@ async function fetchUtxosForXpub(
   return utxos
 }
 
+// coinselect sizes every input as P2PKH and every output as 25 bytes unless
+// told otherwise. Script bytes beyond its 41-byte input base, in vbytes.
+const INPUT_SCRIPT_VBYTES: Record<string, number> = { p2pkh: 107, 'p2sh-p2wpkh': 50, p2wpkh: 27, p2tr: 17 }
+
+/** coinselect / coinselect-split with real input and output sizes, counting the
+ * OP_RETURN memo output (removed again from the result: it is added at build). */
+export function selectUtxoCoins(utxos: any[], to: string, satoshis: number, feeRate: number, isMax: boolean, memo?: string) {
+  const original = new Map<any, any>()
+  const inputs = utxos.map(u => {
+    const sized = { ...u, script: { length: INPUT_SCRIPT_VBYTES[u.scriptType] ?? 107 } }
+    original.set(sized, u)
+    return sized
+  })
+  const spk = addressToScriptPubKeyHex(to)
+  const spend: any = isMax ? { address: to } : { address: to, value: satoshis }
+  if (spk) spend.script = { length: spk.length / 2 }
+  const outputs: any[] = [spend]
+  const memoBytes = memo?.trim() ? Buffer.byteLength(memo.trim(), 'utf8') : 0
+  if (memoBytes) outputs.push({ value: 0, opReturn: true, script: { length: 1 + (memoBytes <= 75 ? 1 : memoBytes <= 255 ? 2 : 3) + memoBytes } })
+  const result: any = isMax ? coinSelectSplit(inputs, outputs, feeRate) : coinSelect(inputs, outputs, feeRate)
+  if (result?.outputs) result.outputs = result.outputs.filter((o: any) => !o.opReturn).map(({ script: _script, ...o }: any) => o)
+  if (result?.inputs) result.inputs = result.inputs.map((i: any) => original.get(i) ?? i)
+  return result
+}
+
 // DOGE consensus: 1 DOGE minimum fee; change under 0.01 DOGE is dust.
 const DOGE_MIN_FEE = 100000000
 const DOGE_DUST = 1000000
@@ -440,9 +465,7 @@ export async function estimateUtxoFee(
     const satoshis = parseDecimalToInt(params.amount, chain.decimals)
     const result = chain.id === 'zcash'
       ? selectZcashCoins(utxos, to, satoshis, effectiveFeeRate, isMax, memo)
-      : isMax
-      ? coinSelectSplit(utxos, [{ address: to }], effectiveFeeRate)
-      : coinSelect(utxos, [{ address: to, value: satoshis }], effectiveFeeRate)
+      : selectUtxoCoins(utxos, to, satoshis, effectiveFeeRate, isMax, memo)
 
     if (!result?.inputs || result.fee == null) return null
     const totalIn = result.inputs.reduce((s: number, i: any) => s + i.value, 0)
@@ -595,9 +618,7 @@ export async function buildUtxoTx(
   const satoshis = parseDecimalToInt(params.amount, chain.decimals)
   const result = chain.id === 'zcash'
       ? selectZcashCoins(utxos, to, satoshis, effectiveFeeRate, isMax, memo, isSwapDeposit)
-      : isMax
-    ? coinSelectSplit(utxos, [{ address: to }], effectiveFeeRate)
-    : coinSelect(utxos, [{ address: to, value: satoshis }], effectiveFeeRate)
+      : selectUtxoCoins(utxos, to, satoshis, effectiveFeeRate, isMax, memo)
 
   if (!result?.inputs) {
     const total = utxos.reduce((s: number, u: any) => s + u.value, 0)

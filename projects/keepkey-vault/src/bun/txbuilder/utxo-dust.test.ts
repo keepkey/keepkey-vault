@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test'
-import { addressToScriptPubKeyHex, buildUtxoTx, enforceDogeMinFee, witnessScriptPubKeyHex } from './utxo'
+import { addressToScriptPubKeyHex, buildUtxoTx, enforceDogeMinFee, selectUtxoCoins, witnessScriptPubKeyHex } from './utxo'
 import { changeDustLimit, foldDustChange, outputDustLimit } from './utxo-dust'
 import { describeDustError, dustErrorMessage, formatBaseUnits } from '../../shared/utxo-dust-errors'
 
@@ -39,9 +39,9 @@ const legacyUtxo = (value: number) => ({
 	hex: '00',
 })
 
-// At 3 sat/vB a 1-in/2-out P2PKH tx is 226 vB = 678 sat; without change 192 vB.
+// At 3 sat/vB a P2PKH input paying a P2WPKH recipient plus change is 223 vB = 669 sat.
 const AMOUNT = 100_000
-const FEE_WITH_CHANGE = 226 * 3
+const FEE_WITH_CHANGE = 223 * 3
 
 const build = (change: number) => buildUtxoTx(pioneerWith([legacyUtxo(AMOUNT + FEE_WITH_CHANGE + change)]), BITCOIN, {
 	to: TO,
@@ -83,10 +83,11 @@ const segwitUtxo = (value: number, coinType: number) => ({
 	path: `m/84'/${coinType}'/0'/0/0`,
 })
 
-// coinselect sizes every input and output as P2PKH, whatever the script.
+// 1 P2WPKH input, P2WPKH recipient, change: 143 vB.
+const SEGWIT_VB = 143
 const buildSegwit = (chain: any, coinType: number, change: number, satPerVByte?: number) => {
 	const rate = satPerVByte ?? 3
-	return buildUtxoTx(pioneerWith([segwitUtxo(AMOUNT + 226 * rate + change, coinType)]), chain, {
+	return buildUtxoTx(pioneerWith([segwitUtxo(AMOUNT + SEGWIT_VB * rate + change, coinType)]), chain, {
 		to: TO,
 		amount: String(AMOUNT / 1e8),
 		xpub: LEGACY_XPUB,
@@ -101,7 +102,7 @@ describe('change below the dust limit on SegWit accounts', () => {
 	it('adds a 200-sat P2WPKH change at 1 sat/vB to the fee', async () => {
 		const tx = await buildSegwit(BITCOIN, 0, 200, 1)
 		expect(tx.outputs.some((o: any) => o.isChange)).toBe(false)
-		expect(tx.fee).toBe(String((226 + 200) / 1e8))
+		expect(tx.fee).toBe(String((SEGWIT_VB + 200) / 1e8))
 	})
 
 	it('keeps a P2WPKH change at exactly the 294-sat limit', async () => {
@@ -109,10 +110,15 @@ describe('change below the dust limit on SegWit accounts', () => {
 		expect(tx.outputs.find((o: any) => o.isChange)?.amount).toBe('294')
 	})
 
+	it('sizes a native SegWit 1-in/2-out by its real vbytes, not as P2PKH (audit v8 B3)', async () => {
+		const tx = await buildSegwit(BITCOIN, 0, 50_000, 10)
+		expect(tx.fee).toBe(String(1430 / 1e8))
+	})
+
 	it('uses the Litecoin limit (2940 litoshi for P2WPKH), not Bitcoin’s', async () => {
 		const tx = await buildSegwit(LITECOIN, 2, 2000)
 		expect(tx.outputs.some((o: any) => o.isChange)).toBe(false)
-		expect(tx.fee).toBe(String((226 * 3 + 2000) / 1e8))
+		expect(tx.fee).toBe(String((SEGWIT_VB * 3 + 2000) / 1e8))
 	})
 })
 
@@ -317,5 +323,16 @@ describe('DOGE 1-DOGE minimum fee (audit v8 B1/B2)', () => {
 		const max = [spend(500_000_000)]
 		expect(enforceDogeMinFee(max, 20_000, true)).toBe(100_000_000)
 		expect(max[0].value).toBe(400_020_000)
+	})
+})
+
+describe('coin selection counts the OP_RETURN memo (audit v8 B3)', () => {
+	it('a 40-byte memo adds its output to the fee and is not returned as change', () => {
+		const utxos = [{ txid: 'a'.repeat(64), vout: 0, value: 200_000, scriptType: 'p2wpkh' }]
+		const plain = selectUtxoCoins(utxos, TO, AMOUNT, 10, false)
+		const memo = selectUtxoCoins(utxos, TO, AMOUNT, 10, false, '=:ETH.ETH:0x0000000000000000000000000000')
+		expect(memo.fee - plain.fee).toBe((9 + 1 + 1 + 40) * 10)
+		expect(memo.outputs).toHaveLength(2)
+		expect(memo.inputs[0]).toBe(utxos[0])
 	})
 })
