@@ -545,7 +545,8 @@ function parseSingleQuote(
     recipient: typeof raw.details?.recipient === 'string' ? raw.details.recipient : undefined,
     // undefined is the legacy shape with no transaction body. A present but
     // ambiguous body must fail closed, even if its tracking id happens to match.
-    ...(raw.steps === undefined ? {} : { deposit: relayDeposits.length === 1 ? {
+    // Only an EVM source signs Relay's calldata; a Solana / BTC deposit has none to bind.
+    ...(raw.steps === undefined || !params.fromCaip.startsWith('eip155:') ? {} : { deposit: relayDeposits.length === 1 ? {
       to: relayDeposits[0].to, data: relayDeposits[0].data,
       value: relayDeposits[0].value, chainId: relayDeposits[0].chainId,
     } : null }),
@@ -818,7 +819,7 @@ export function assertRelayOrderRecipient(quote: SwapQuote, recipient: string, d
     try {
       matches = !!deposit && !!tx && sameAddress(deposit.to, tx.to, { id: 'evm', chainFamily: 'evm' })
         && typeof deposit.data === 'string' && deposit.data.toLowerCase() === tx.data.toLowerCase()
-        && Number.isSafeInteger(deposit.chainId) && deposit.chainId === tx.chainId
+        && Number.isSafeInteger(Number(deposit.chainId)) && Number(deposit.chainId) === Number(tx.chainId)
         && typeof deposit.value === 'string' && /^(?:\d+|0x[0-9a-f]+)$/i.test(deposit.value)
         && BigInt(deposit.value) === BigInt(tx.value)
     } catch { matches = false }
