@@ -2,30 +2,30 @@
   "version": "7.17.0",
   "source": {
     "repository": "BitHighlander/keepkey-vault",
-    "runId": 44396165501,
-    "headSha": "d4c2fa3e45b7de6300deaa0f9a0c1e46e78be707",
-    "artifactId": 14470451810,
-    "artifactName": "certified-emulator-alpha-e729dd98b4d7a32e36dc6bfe8b7eb301a97f1efe",
-    "artifactDigest": "sha256:6d06bc6da91115258ae7d5559368ba29e8975b19bcce42ee0a06077cb3027d01",
+    "runId": 45746737836,
+    "headSha": "f15dc1605e1d2bc7736e13ec026f9881611db79d",
+    "artifactId": 15083961800,
+    "artifactName": "certified-emulator-alpha-378cf30ce824b84f57d3c9093a12cb39a5c1ca1c",
+    "artifactDigest": "sha256:92ad78f5b42b112c419b37b82a864ffe161a9a4fe990f03382780d7cc8421f50",
     "firmwareRepository": "BitHighlander/keepkey-firmware",
     "firmwareBranch": "alpha",
-    "firmwareSha": "e729dd98b4d7a32e36dc6bfe8b7eb301a97f1efe",
-    "firmwareRunId": 44382800110,
-    "firmwareRunUrl": "https://github.com/BitHighlander/keepkey-firmware/actions/runs/44382800110",
+    "firmwareSha": "378cf30ce824b84f57d3c9093a12cb39a5c1ca1c",
+    "firmwareRunId": 45494164738,
+    "firmwareRunUrl": "https://github.com/BitHighlander/keepkey-firmware/actions/runs/45494164738",
     "macArchive": "",
     "macLibraryPath": "libkkemu.dylib",
     "windowsLibrary": "libkkemu.dll"
   },
   "files": {
     "libkkemu.dylib": {
-      "sha256": "d3640fe14fbadb7cd020661e145a3f231ad6b9ad30ef1eadc369364e5744c0db",
+      "sha256": "0311d2d3ddf9a19f85324b0c9981b21459ca288bc7c4ae9aa831258ab19cef4a",
       "architectures": [
         "arm64",
         "x86_64"
       ]
     },
     "libkkemu.dll": {
-      "sha256": "831956baa6e0ec2d94281932b759fd58677be333f37af82550457fe53022a2c7",
+      "sha256": "b82f1486900ec96705d4e52e9f7a936dd884a5f54dc9aedb49d82625d34566fe",
       "architecture": "x86_64"
     }
   },
