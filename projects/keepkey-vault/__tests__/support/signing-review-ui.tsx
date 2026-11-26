@@ -58,6 +58,8 @@ expect(approved).toBe(0)
 // Physical signing never polls a display RPC; Cancel still reaches the owner.
 calls.length = 0
 await render(<SigningApproval key="physical" request={{ ...base, deviceReview: { emulator: false, deviceId: 'physical' } }} phase="device-confirm" {...callbacks} />)
+// Owner rule: an address is never shortened while the user compares with the device.
+expect(container.textContent).not.toMatch(/[0-9A-Za-z]{4,}…[0-9A-Za-z]{4,}/)
 await settle(220); expect(calls).toHaveLength(0)
 expect(container.textContent).toContain('Compare with your KeepKey')
 await click('Cancel'); expect(cancelled).toBe(1)

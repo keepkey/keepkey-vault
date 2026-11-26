@@ -1229,7 +1229,6 @@ export function SigningApproval({ request, phase, devicePrompts = 0, onApprove, 
 		? CHAINS.find(c => c.chainFamily === 'evm' && c.chainId !== undefined && Number(c.chainId) === Number(request.chainId))
 		: CHAINS.find(c => c.id === chainKey || c.symbol.toLowerCase() === chainKey || c.coin.toLowerCase() === chainKey)
 			?? (utxo ? CHAINS.find(c => c.symbol.toUpperCase() === utxo.coin.toUpperCase() || c.coin === utxo.coin) : undefined)
-	const shortAccount = account && account.length > 22 ? `${account.slice(0, 8)}…${account.slice(-6)}` : account
 	const consoleBox = { width: 'min(1080px, 95vw)', maxHeight: '92vh', animation: 'signingCardIn 0.18s ease-out' }
 	const whoLine = (
 		<div className="kk-pf-vers kk-pf-who" aria-label={uiText("From {{from}} to {{to}}", { from: safeAppName, to: account || networkName || '' })}>
@@ -1237,7 +1236,7 @@ export function SigningApproval({ request, phase, devicePrompts = 0, onApprove, 
 			<Beam />
 			<span className="kk-pf-acct" title={account}>
 				<ChainNode chainId={chainDef?.id} glyph="network" />
-				<span>{shortAccount || chainDef?.coin || networkName}</span>
+				<span>{account || chainDef?.coin || networkName}</span>
 			</span>
 		</div>
 	)

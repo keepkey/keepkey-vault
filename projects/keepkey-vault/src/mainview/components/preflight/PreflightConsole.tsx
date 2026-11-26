@@ -113,7 +113,7 @@ const CSS = `
 .kk-pf-app { display: inline-flex; align-items: center; gap: 8px; font-size: 14px; color: var(--text-1); min-width: 0; }
 .kk-pf-appic { width: 26px; height: 26px; border-radius: 8px; background: var(--ink-3); display: grid; place-items: center; font-family: var(--font-mono); font-size: 10px; color: var(--text-1); box-shadow: inset 0 0 0 1px rgba(255,255,255,.08); flex: none; }
 .kk-pf-acct { display: inline-flex; align-items: center; gap: 10px; font-size: clamp(20px, 2.6vw, 28px); font-weight: 600; letter-spacing: -.02em; min-width: 0; }
-.kk-pf-acct > span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kk-pf-acct > span:last-child { overflow-wrap: anywhere; word-break: break-all; } /* full address, wrapped: never ellipsized */
 .kk-pf-lede { margin: 0; font-size: 14.5px; line-height: 1.55; color: var(--text-1); max-width: 46ch; }
 .kk-pf-facts { display: grid; gap: 0; font-size: 12px; }
 .kk-pf-facts > div { display: flex; justify-content: space-between; gap: 12px; padding: 6px 0; border-top: 1px solid rgba(255,255,255,.06); }

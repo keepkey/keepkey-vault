@@ -83,9 +83,7 @@ export function SigningReviewCompanion({ request, phase = 'preview', devicePromp
   const [preferences] = useSigningReviewPreferences()
   const guide = signingReviewGuide(request)
   const font = preferences.largeText ? '17px' : '14px'
-  const account = guide.fields.find(f => f.label === 'Account')?.value
   const network = guide.fields.find(f => f.label === 'Network')?.value
-  const short = (v?: string) => v && v.length > 18 ? `${v.slice(0, 8)}…${v.slice(-6)}` : v
   const steps = preferences.depth === 'essentials' && guide.steps.length > 3
     ? [guide.steps[0]!, guide.steps[1]!, guide.steps[guide.steps.length - 1]!]
     : guide.steps
@@ -96,8 +94,10 @@ export function SigningReviewCompanion({ request, phase = 'preview', devicePromp
     {liveEmulator
       ? <PairedEmulatorDisplay key={`${request.id}:${request.deviceReview!.deviceId}`} request={request} />
       // What to confirm must be readable: the device never turns here.
+      // No account in the sketch: a single-line OLED headline can't hold a full
+      // address, and a shortened one must never be what the user compares.
       : <div className="kk-pf-device">
-        <SpinningDevice motion="still" scale={0.66} screen={<OledText kicker={KIND_OLED[guide.kind]} headline={short(account)} sub={network} />} />
+        <SpinningDevice motion="still" scale={0.66} screen={<OledText kicker={KIND_OLED[guide.kind]} headline={network} />} />
         <div className="kk-pf-cap">{uiText('A sketch, not a readback. Trust your KeepKey’s own screen.')}</div>
       </div>}
     {phase === 'device-confirm' && !request.deviceReview?.emulator && <Box>
