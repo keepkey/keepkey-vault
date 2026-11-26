@@ -2498,7 +2498,6 @@
   "mca8bb329": "Erase all passkeys on this KeepKey?",
   "ma3802b9e": "Erase passkeys",
   "m83409531": "Every passkey and the security key PIN are deleted, and sites that use this KeepKey as a security key stop recognising it. Funds are not touched. You confirm on the KeepKey.",
-  "maf194108": "Experimental. Adds a Passkeys tab to the Vault menu: device status and erasing all passkeys. Off by default.",
   "mffa35e26": "not set",
   "m4b28217c": "Passkeys",
   "ma78ff55e": "Passkeys erased. The KeepKey is ready for new ones.",
@@ -2698,5 +2697,13 @@
   "mbac398ff": "Your wallet",
   "mc824d131": "Let's set up your hardware wallet. It takes about 5 minutes.",
   "m69dbec3c": "Find each letter on your KeepKey, then click the same position here.",
-  "m80be4c74": "Position {{n}}"
+  "m80be4c74": "Position {{n}}",
+  "mdcd532aa": "Not available on Windows: Windows blocks apps from talking to the KeepKey's passkey (FIDO) interface directly.",
+  "me3f75500": "Experimental. Adds a Passkeys tab to the Vault menu: device status, and listing, renaming and deleting single passkeys. Off by default.",
+  "m983277c4": "1 minute",
+  "m5da9f7ad": "10 minutes",
+  "m80e4b47f": "30 minutes",
+  "mc43fb4a": "1 hour",
+  "m687c0250": "4 hours",
+  "m42929680": "24 hours"
 }

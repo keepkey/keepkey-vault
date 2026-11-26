@@ -1244,7 +1244,7 @@ function PersonalAssetPage({ chain, balance, balanceLoading = false, onBack, fir
 											</Flex>
 										) : chain.id === 'zcash' ? (
 											<Text fontSize="10px" fontFamily="mono" color="var(--text-2)" title={t('zcashSeparateSync')}>
-												{shieldedSelected ? t('zcashShieldedPrivate') : lastSyncedAt ? t('zcashTransparentUpdated') : t('zcashTransparentOnly')}
+												{shieldedSelected ? t('zcashShieldedPrivate') : lastSyncedAt ? t('zcashTransparentUpdated') : zcashPrivacyEnabled && zcashShieldedSupported ? null : t('zcashTransparentOnly')}
 											</Text>
 									) : headerBalanceKnown ? (
 											<Flex align="center" gap="1" color="var(--teal)" className="v3-glass-chip" px="2" py="0.5"
