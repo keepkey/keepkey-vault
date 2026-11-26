@@ -6,7 +6,7 @@ import { resolve } from 'node:path'
 import { CHAINS } from '../../../src/shared/chains'
 
 const settings = {
-  passwordManagerEnabled: false, moneroEnabled: false, moneroAvailable: false,
+  passwordManagerEnabled: false, moneroEnabled: false,
   zcashPrivacyEnabled: false, btcMultisigEnabled: false, walletConnectEnabled: false,
   emulatorEnabled: false, hiveEnabled: false, offlineMode: false, restApiEnabled: false,
   btcNodeEnabled: false, alphaFirmware: false, preReleaseUpdates: false,

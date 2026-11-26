@@ -314,7 +314,7 @@ import { assertMoneroStandardWallet, moneroHiddenWallet } from "../shared/monero
 import { createMoneroWatchStore } from "./monero-watch-store"
 import { createMoneroCoreVerifier } from "./monero-device-signing"
 import { REVIEWED_MONERO_SIGNING_SHA256 } from "./monero-emulator"
-import { startMoneroSidecar, stopMoneroSidecar, isMoneroSidecarAvailable, hasMoneroSigningTools } from "./monero-sidecar"
+import { startMoneroSidecar, stopMoneroSidecar } from "./monero-sidecar"
 import { createMoneroNodeManager } from './monero-node'
 import { MONERO_LOCAL_URL, moneroNodeMode } from '../shared/monero-node'
 import { checkMoneroNode, storedRestoreHeight, suggestRestoreHeight, validateMoneroNode } from "./monero-settings"
@@ -1539,7 +1539,7 @@ function requireOnline(operation: string): void {
 }
 
 function loadSettings() {
-	moneroEnabled = getSetting('monero_enabled') === '1' && isMoneroSidecarAvailable()
+	moneroEnabled = getSetting('monero_enabled') === '1'
 	setMoneroEmulatorEnabled(moneroEnabled)
 	restApiEnabled = getSetting('rest_api_enabled') === '1'
 	walletConnectEnabled = getSetting('walletconnect_enabled') !== '0'
@@ -1946,7 +1946,6 @@ function getAppSettings() {
 		walletConnectEnabled,
 		btcMultisigEnabled:multisigFeature.enabled,
 		moneroEnabled,
-		moneroAvailable: isMoneroSidecarAvailable() && hasMoneroSigningTools() && createMoneroCoreVerifier().available(),
 		moneroDaemonUrl: getSetting('monero_daemon_url') || MONERO_DEFAULT_NODE,
 		moneroNodeMode: moneroNodeMode(getSetting('monero_node_mode'), getSetting('monero_daemon_url')),
 		moneroRestoreHeight: storedRestoreHeight(getSetting('monero_restore_height')),
@@ -11141,7 +11140,6 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
             moneroDiscardPending: async (params) => getMoneroWallet().discardPending(params),
             setMoneroEnabled: async ({ enabled }) => {
                 if (typeof enabled !== 'boolean') throw new Error('Monero requires an enabled boolean')
-                if (enabled && !isMoneroSidecarAvailable()) throw new Error('Monero is unavailable in this build')
                 if (enabled && offlineMode) throw new Error('Turn off offline mode before enabling Monero')
                 if (enabled) { if (!moneroHiddenWallet(engine)) await startMoneroSidecar() }
                 else {

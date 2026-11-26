@@ -23,7 +23,7 @@ const bank = new PasswordBank({
     cipher: async (path, label) => new Uint8Array(createHmac('sha256', 'PUBLIC UI TEST FIXTURE ONLY').update(JSON.stringify(path)).update(label).digest()),
   }),
 })
-const settings = () => ({ passwordManagerEnabled: bank.enabled, moneroEnabled, alphaFirmware, moneroPendingBroadcasts, moneroAvailable: true, moneroNodeMode: 'local', moneroDaemonUrl: 'http://127.0.0.1:18081', moneroRestoreHeight: 0, restApiEnabled: false, btcMultisigEnabled: false, walletConnectEnabled: false, zcashPrivacyEnabled: false, hiveEnabled: false, emulatorEnabled: false, offlineMode: false, pioneerApiBase: '', pioneerServers: [], activePioneerServer: '', fiatCurrency: 'USD', numberLocale: 'en-US', disabledNetworks: [], evmSimulationRpcUrls: {}, appLanguage: 'en' })
+const settings = () => ({ passwordManagerEnabled: bank.enabled, moneroEnabled, alphaFirmware, moneroPendingBroadcasts, moneroNodeMode: 'local', moneroDaemonUrl: 'http://127.0.0.1:18081', moneroRestoreHeight: 0, restApiEnabled: false, btcMultisigEnabled: false, walletConnectEnabled: false, zcashPrivacyEnabled: false, hiveEnabled: false, emulatorEnabled: false, offlineMode: false, pioneerApiBase: '', pioneerServers: [], activePioneerServer: '', fiatCurrency: 'USD', numberLocale: 'en-US', disabledNetworks: [], evmSimulationRpcUrls: {}, appLanguage: 'en' })
 const rpc = Bun.serve({ hostname: '127.0.0.1', port: 0, async fetch(req) {
   const { method, params: p } = await req.json()
   try {

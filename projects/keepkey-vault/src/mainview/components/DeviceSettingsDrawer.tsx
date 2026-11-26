@@ -1625,7 +1625,7 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
                     {(appSettings.moneroEnabled || (appSettings.moneroPendingBroadcasts ?? 0) > 0) && <Section title={uiText("Monero (XMR)")} category="networks"><VStack gap="4" align="stretch">
                             <Box>
                                 {!appSettings.moneroEnabled && <Box>
-                                  <Text fontSize="sm" color="kk.textSecondary">{appSettings.moneroAvailable === false ? uiText("Monero is unavailable in this build.") : uiText("Enable Monero in Feature Flags to connect your wallet and manage its node.")}</Text>
+                                  <Text fontSize="sm" color="kk.textSecondary">{uiText("Enable Monero in Feature Flags to connect your wallet and manage its node.")}</Text>
                                   <Button mt="3" size="sm" variant="outline" onClick={() => setSettingsCategory('features')}>{uiText("Open Feature Flags")}</Button>
                                 </Box>}
                                 {(appSettings.moneroPendingBroadcasts ?? 0) > 0 && <Text data-monero-pending-kept="" fontSize="xs" color="orange.300" mt="2">{uiText("{{count}} Monero send(s) have an unknown broadcast result. They stay recorded even with Monero off or the device wiped, so no second payment is built from the same funds; open XMR to resolve them.", { count: appSettings.moneroPendingBroadcasts ?? 0 })}</Text>}
@@ -1727,8 +1727,8 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
               <Box>
               <Flex justify="space-between" align="center" gap="4">
                 <Flex align="center" gap="3" minW="0"><FeatureIcon kind="monero" /><Box><Text fontSize="md" fontWeight="500" color="kk.textPrimary">{uiText('Monero (XMR)')}</Text>
-                  <Text fontSize="sm" color="kk.textSecondary" mt="0.5">{appSettings.moneroAvailable === false ? uiText('Monero is unavailable in this build.') : !supportsMoneroSigning(deviceState.capabilities) && !deviceState.isEmulator ? uiText("Monero signing requires the monero-signing capability on KeepKey.") : uiText('Add Monero to your wallet. Manage its node and scan history in Settings → Networks.')}</Text></Box></Flex>
-                <Toggle label={uiText('Monero (XMR)')} checked={appSettings.moneroEnabled} disabled={moneroBusy || (!appSettings.moneroEnabled && (appSettings.moneroAvailable === false || (!supportsMoneroSigning(deviceState.capabilities) && !deviceState.isEmulator)))} onChange={toggleMonero} />
+                  <Text fontSize="sm" color="kk.textSecondary" mt="0.5">{!supportsMoneroSigning(deviceState.capabilities) && !deviceState.isEmulator ? uiText("Monero signing requires the monero-signing capability on KeepKey.") : uiText('Add Monero to your wallet. Manage its node and scan history in Settings → Networks.')}</Text></Box></Flex>
+                <Toggle label={uiText('Monero (XMR)')} checked={appSettings.moneroEnabled} disabled={moneroBusy || (!appSettings.moneroEnabled && (!supportsMoneroSigning(deviceState.capabilities) && !deviceState.isEmulator))} onChange={toggleMonero} />
               </Flex>
               {moneroError && <Text role="alert" fontSize="xs" color="kk.error" mt="2">{moneroError}</Text>}
               </Box>
