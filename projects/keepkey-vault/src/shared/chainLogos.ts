@@ -7,7 +7,7 @@
 /** Ethereum diamond (ethereum.org brand assets, transparent so it sits on the neutral backdrop like before).
  *  Source: https://github.com/ethereum/ethereum-org-website/blob/dev/public/images/assets/svgs/eth-diamond-purple.svg */
 export const ETHEREUM_SVG =
-  `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><g transform="translate(32 32) scale(0.0262) translate(-960 -960)"><path d="m959.8 80.7-539.7 895.6 539.7-245.3z" fill="#8a92b2"/><path d="m959.8 731-539.7 245.3 539.7 319.1z" fill="#62688f"/><path d="m1499.6 976.3-539.8-895.6v650.3z" fill="#62688f"/><path d="m959.8 1295.4 539.8-319.1-539.8-245.3z" fill="#454a75"/><path d="m420.1 1078.7 539.7 760.6v-441.7z" fill="#8a92b2"/><path d="m959.8 1397.6v441.7l540.1-760.6z" fill="#62688f"/></g></svg>`
+  `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><g transform="translate(32 32) scale(0.0335) translate(-960 -960)"><path d="m959.8 80.7-539.7 895.6 539.7-245.3z" fill="#8a92b2"/><path d="m959.8 731-539.7 245.3 539.7 319.1z" fill="#62688f"/><path d="m1499.6 976.3-539.8-895.6v650.3z" fill="#62688f"/><path d="m959.8 1295.4 539.8-319.1-539.8-245.3z" fill="#454a75"/><path d="m420.1 1078.7 539.7 760.6v-441.7z" fill="#8a92b2"/><path d="m959.8 1397.6v441.7l540.1-760.6z" fill="#62688f"/></g></svg>`
 
 /** Arbitrum hexagon logo (Offchain Labs), scaled onto its navy disc so the round mask no longer crops the hexagon.
  *  Source: https://github.com/OffchainLabs/arbitrum-docs/blob/master/public/img/logo.svg */
@@ -27,7 +27,7 @@ export const POLYGON_SVG =
 /** Base "The Square" (Base brand kit), inset on a white disc so it stays visible on Base's blue chain-color backdrop.
  *  Source: https://github.com/base/brand-kit/blob/main/logo/TheSquare/Digital/Base_square_blue.svg */
 export const BASE_SVG =
-  `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><circle cx="32" cy="32" r="32" fill="#fff"/><g transform="translate(14 14) scale(0.028125)"><path fill="#0000ff" d="M0,101.12c0-34.64,0-51.95,6.53-65.28,6.25-12.76,16.56-23.07,29.32-29.32C49.17,0,66.48,0,101.12,0h1077.76c34.63,0,51.96,0,65.28,6.53,12.75,6.25,23.06,16.56,29.32,29.32,6.52,13.32,6.52,30.64,6.52,65.28v1077.76c0,34.63,0,51.96-6.52,65.28-6.26,12.75-16.57,23.06-29.32,29.32-13.32,6.52-30.65,6.52-65.28,6.52H101.12c-34.64,0-51.95,0-65.28-6.52-12.76-6.26-23.07-16.57-29.32-29.32-6.53-13.32-6.53-30.65-6.53-65.28V101.12Z"/></g></svg>`
+  `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><g transform="translate(6 6) scale(0.040625)"><path fill="#0000ff" d="M0,101.12c0-34.64,0-51.95,6.53-65.28,6.25-12.76,16.56-23.07,29.32-29.32C49.17,0,66.48,0,101.12,0h1077.76c34.63,0,51.96,0,65.28,6.53,12.75,6.25,23.06,16.56,29.32,29.32,6.52,13.32,6.52,30.64,6.52,65.28v1077.76c0,34.63,0,51.96-6.52,65.28-6.26,12.75-16.57,23.06-29.32,29.32-13.32,6.52-30.65,6.52-65.28,6.52H101.12c-34.64,0-51.95,0-65.28-6.52-12.76-6.26-23.07-16.57-29.32-29.32-6.53-13.32-6.53-30.65-6.53-65.28V101.12Z"/></g></svg>`
 
 /** THORChain lightning mark (THORChain resources) on the dark disc of the official RUNE token icon.
  *  Source: https://github.com/thorchain/Resources/blob/master/logos/svg/Thorchain_icon.svg */

@@ -357,9 +357,7 @@ function OrbitalView({
 						placeItems="center"
 						transition="all 0.3s cubic-bezier(0.2,0.8,0.2,1)"
 						transform={isHover ? 'scale(1.12)' : 'scale(1)'}
-						filter={isHover
-							? `drop-shadow(0 0 24px ${chain.color})`
-							: 'drop-shadow(0 4px 14px rgba(0,0,0,0.55))'}
+						filter="drop-shadow(0 4px 14px rgba(0,0,0,0.55))"
 						zIndex={isHover ? 10 : 1}
 						cursor="pointer"
 						aria-label={chain.coin}
@@ -369,9 +367,7 @@ function OrbitalView({
 							alt={chain.symbol}
 							w="100%"
 							h="100%"
-							borderRadius="full"
-							bg="var(--ink-2)"
-							boxShadow={`0 0 0 1px var(--line), 0 6px 18px -8px ${chain.color}`}
+							objectFit="contain"
 						/>
 						{(bal?.tokens?.length ?? 0) > 0 && (
 							<Box
@@ -757,18 +753,6 @@ function ChainDetailOrbital({
 					</svg>
 				)}
 
-				{/* Radial halo behind the chain icon — the crown no longer has the full
-				    ring of tinted satellites around the icon that used to add to its glow. */}
-				<Box
-					position="absolute"
-					left={`${g.cx - g.core * 1.1}px`}
-					top={`${g.cy - g.core * 1.1}px`}
-					w={`${g.core * 2.2}px`}
-					h={`${g.core * 2.2}px`}
-					borderRadius="full"
-					pointerEvents="none"
-					bg={`radial-gradient(circle, ${chain.color}59 0%, ${chain.color}24 42%, ${chain.color}00 70%)`}
-				/>
 				<Box
 					as="button"
 					onClick={onSelectChain}
@@ -791,9 +775,10 @@ function ChainDetailOrbital({
 						alt={chain.symbol}
 						w="100%"
 						h="100%"
-						borderRadius="full"
-						bg="var(--ink-2)"
-						boxShadow={`0 0 0 1px var(--line), 0 0 70px -10px ${chain.color}, 0 8px 24px -8px rgba(0,0,0,0.6)`}
+						objectFit="contain"
+						// No disc behind the mark: the official logo stands on the
+						// page with only a soft neutral shadow, no colour glow.
+						filter="drop-shadow(0 8px 18px rgba(0,0,0,0.55))"
 					/>
 				</Box>
 
@@ -2490,10 +2475,8 @@ function PersonalDashboard({ capabilities, isEmulator, onLoaded, watchOnly, watc
 								opacity={hasBalance || pending || unknown || refreshing ? 1 : 0.55}
 							>
 								<Flex align="center" gap="3">
-									{/* Neutral backdrop, like the orbit and centre icons. Several logos cut their mark out as
-									    transparency (Optimism's "OP", Hive) or draw it in the brand colour (BNB), so a
-									    chain.color backdrop filled the mark in and left a plain coloured disc. */}
-									<Image src={getAssetIcon(chain.caip)} alt={chain.symbol} w="32px" h="32px" borderRadius="full" flexShrink={0} bg="var(--ink-2)" boxShadow="0 0 0 1px var(--line)" />
+									{/* Official logo on the page, no disc behind it (same as the orbit and the chain hero). */}
+									<Image src={getAssetIcon(chain.caip)} alt={chain.symbol} w="32px" h="32px" objectFit="contain" flexShrink={0} />
 									<Box flex="1" minW="0">
 										<Flex align="baseline" justify="space-between" gap="2">
 											<Text fontSize="14px" fontWeight="600" color="var(--text-0)" lineHeight="1.2" truncate>
@@ -2640,7 +2623,7 @@ function PersonalDashboard({ capabilities, isEmulator, onLoaded, watchOnly, watc
 							</Box>
 							{showHiddenChains && turnedOffChains.map(c => (
 								<Flex key={c.id} align="center" gap="3" px="2.5" py="1.5" borderTop="1px solid var(--line)">
-									<Image src={getAssetIcon(c.caip)} alt="" w="22px" h="22px" borderRadius="full" flexShrink={0} bg="var(--ink-2)" opacity={0.7} />
+									<Image src={getAssetIcon(c.caip)} alt="" w="22px" h="22px" objectFit="contain" flexShrink={0} opacity={0.7} />
 									<Text flex="1" minW="0" fontSize="13px" color="var(--text-1)" truncate>{c.coin}</Text>
 									<Box
 										as="button"
