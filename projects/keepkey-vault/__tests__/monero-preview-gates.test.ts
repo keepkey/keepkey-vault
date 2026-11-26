@@ -24,7 +24,7 @@ function moneroSettingsFixture(enabled: boolean, hidden: boolean, readiness: { w
   }
   let walletReads = 0, constructions = 0
   const context = {
-    restApiEnabled: true, walletConnectEnabled: false, multisigFeature: { enabled: false }, moneroEnabled: enabled,
+    process: { platform: 'darwin' }, restApiEnabled: true, walletConnectEnabled: false, multisigFeature: { enabled: false }, moneroEnabled: enabled,
     passwordBank: { enabled: true }, zcashPrivacyEnabled: false, hiveEnabled: false, emulatorEnabled: false, offlineMode: false,
     disabledNetworks: [], preReleaseUpdates: false, alphaFirmware: false, addressBookClearsignEnabled: false, privateModeEnabled: false,
     getPioneerServers: () => [], getPioneerApiBase: () => 'https://synthetic.example', getSetting: () => null,
