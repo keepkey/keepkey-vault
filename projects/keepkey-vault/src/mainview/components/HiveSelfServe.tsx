@@ -18,7 +18,7 @@ import { ChainNode, PreflightCheck, PreflightList, PreflightStyles, type Preflig
 import { SpinningDevice } from "./v3/SpinningDevice"
 import {
 	DEFAULT_ACCOUNT_CREATION_FEE, buildAccountCreateOp, buildCreateClaimedAccountOp, buildKeyRotationOp, buildOwnerRotationOp,
-	hiveSignUri, hiveSignerUrl, isValidHiveAccountName, normalizeHiveAccountName, operationJson, planKeyRotation,
+	hiveSignUri, hiveSignerUrl, isValidHiveAccountName, isValidHivePublicKey, normalizeHiveAccountName, operationJson, planKeyRotation,
 	type HiveAccountAuthorities, type HiveOperation, type HiveRoleKeys,
 } from "../../shared/hive-onboarding"
 
@@ -99,10 +99,32 @@ function DeviceHeader({ title, sub }: { title: string; sub: string }) {
 
 const fieldStyle = { bg: "var(--surface-1)", border: "1px solid", borderColor: "var(--border)", fontSize: "14px" } as const
 
+/** Optional KeepKey Client posting key: authorized next to the KeepKey's own
+ *  posting key (either can post), so the browser can publish long posts the
+ *  device cannot fit. Never owner or active. */
+function useBrowserPostingKey() {
+	const [value, setValue] = useState("")
+	const key = value.trim()
+	const valid = !key || isValidHivePublicKey(key)
+	return { value, setValue, key: key && valid ? key : undefined, invalid: !valid }
+}
+
+function BrowserPostingKeyField({ field }: { field: ReturnType<typeof useBrowserPostingKey> }) {
+	const uiText = useUiTranslation()
+	return (
+		<label className="kk-pf-facts" style={{ gap: 6 }}>
+			<span className="kk-pf-dim" style={{ fontSize: 12 }}>{uiText("KeepKey Client posting key (optional)")}</span>
+			<Input {...fieldStyle} value={field.value} onChange={e => field.setValue(e.target.value)} placeholder="STM" autoCapitalize="none" autoCorrect="off" spellCheck={false} data-hive-field="browser-posting" />
+			<span className="kk-pf-dim" style={{ fontSize: 11 }}>{field.invalid ? uiText("Not a valid Hive public key.") : uiText("Lets the KeepKey Client publish long posts. It can post and vote, never move funds.")}</span>
+		</label>
+	)
+}
+
 function PayPath({ keys, fee, initialName, activeKey, onResolved }: { keys: HiveRoleKeys | null; fee: string; initialName?: string; activeKey: string; onResolved: () => void }) {
 	const uiText = useUiTranslation()
 	const [nameInput, setNameInput] = useState(initialName ?? "")
 	const [payerInput, setPayerInput] = useState("")
+	const browser = useBrowserPostingKey()
 	const [useToken, setUseToken] = useState(true)
 	const name = normalizeHiveAccountName(nameInput)
 	const [avail, setAvail] = useState<{ name: string; available: boolean } | null>(null)
@@ -124,13 +146,13 @@ function PayPath({ keys, fee, initialName, activeKey, onResolved }: { keys: Hive
 	const shortOnHive = !claimed && payer.state === "found" && balanceHive(payer.account?.balance) < feeNumber
 
 	const nameOk = avail?.name === name && avail.available
-	const ready = !!keys && nameOk && payer.state === "found"
+	const ready = !!keys && nameOk && payer.state === "found" && !browser.invalid
 	const op = useMemo<HiveOperation | null>(() => {
 		if (!ready || !keys) return null
 		return claimed
-			? buildCreateClaimedAccountOp({ creator: payer.name, newAccountName: name, keys })
-			: buildAccountCreateOp({ creator: payer.name, newAccountName: name, keys, fee })
-	}, [ready, keys, claimed, payer.name, name, fee])
+			? buildCreateClaimedAccountOp({ creator: payer.name, newAccountName: name, keys, browserPostingKey: browser.key })
+			: buildAccountCreateOp({ creator: payer.name, newAccountName: name, keys, fee, browserPostingKey: browser.key })
+	}, [ready, keys, claimed, payer.name, name, fee, browser.key])
 
 	const rows: PreflightRow[] = []
 	if (name) rows.push(nameOk
@@ -157,6 +179,7 @@ function PayPath({ keys, fee, initialName, activeKey, onResolved }: { keys: Hive
 			<span className="kk-pf-dim" style={{ fontSize: 12 }}>{uiText("The Hive account that pays (yours or a friend's)")}</span>
 			<Input {...fieldStyle} value={payerInput} onChange={e => setPayerInput(e.target.value)} placeholder="@" autoCapitalize="none" autoCorrect="off" spellCheck={false} data-hive-field="payer" />
 		</label>
+		<BrowserPostingKeyField field={browser} />
 		{tokens > 0 && (
 			<PreflightCheck checked={useToken} onChange={setUseToken}>{uiText("Use an account creation token (no HIVE spent)")}</PreflightCheck>
 		)}
@@ -168,6 +191,7 @@ function PayPath({ keys, fee, initialName, activeKey, onResolved }: { keys: Hive
 function BringPath({ keys, activeKey, onResolved }: { keys: HiveRoleKeys | null; activeKey: string; onResolved: () => void }) {
 	const uiText = useUiTranslation()
 	const [input, setInput] = useState("")
+	const browser = useBrowserPostingKey()
 	const [keepApps, setKeepApps] = useState(true)
 	const [keepActiveAccounts, setKeepActiveAccounts] = useState(true)
 	const [showOwner, setShowOwner] = useState(false)
@@ -175,7 +199,8 @@ function BringPath({ keys, activeKey, onResolved }: { keys: HiveRoleKeys | null;
 	const account = lookup.state === "found" ? lookup.account! : null
 	const plan = account && keys ? planKeyRotation(account, keys) : null
 	const op = account && keys && plan && !plan.alreadyOnKeepKey
-		? buildKeyRotationOp(account, keys, { keepPostingAccountAuths: keepApps, keepActiveAccountAuths: keepActiveAccounts })
+		&& !browser.invalid
+		? buildKeyRotationOp(account, keys, { keepPostingAccountAuths: keepApps, keepActiveAccountAuths: keepActiveAccounts, browserPostingKey: browser.key })
 		: null
 	const ownerOp = account && keys && plan && !plan.ownerOnKeepKey ? buildOwnerRotationOp(account, keys) : null
 
@@ -212,6 +237,7 @@ function BringPath({ keys, activeKey, onResolved }: { keys: HiveRoleKeys | null;
 			<span className="kk-pf-dim" style={{ fontSize: 12 }}>{uiText("Your Hive account")}</span>
 			<Input {...fieldStyle} value={input} onChange={e => setInput(e.target.value)} placeholder="@" autoCapitalize="none" autoCorrect="off" spellCheck={false} data-hive-field="account" />
 		</label>
+		<BrowserPostingKeyField field={browser} />
 		{lookup.state === "loading" && <Spinner size="sm" />}
 		{rows.length > 0 && <PreflightList rows={rows} />}
 		{op && account && (<>

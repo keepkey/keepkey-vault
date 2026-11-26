@@ -3297,6 +3297,57 @@
       "จะนำ {{accounts}} ออก เพื่อไม่ให้บัญชีใดได้สิทธิ์ควบคุมเพียงลำพัง",
       "Hiçbir hesap tek başına kontrol kazanmasın diye {{accounts}} kaldırılacak.",
       "{{accounts}} sẽ bị gỡ để không tài khoản nào tự nắm quyền một mình."
+    ],
+    "KeepKey Client posting key (optional)": [
+      "KeepKey Client posting key (optional)",
+      "Clave posting de KeepKey Client (opcional)",
+      "Clé posting de KeepKey Client (facultatif)",
+      "Posting-Schlüssel des KeepKey Client (optional)",
+      "KeepKey Client の posting キー（任意）",
+      "KeepKey Client 的 posting 密钥（可选）",
+      "KeepKey Client posting 키 (선택)",
+      "Chave posting do KeepKey Client (opcional)",
+      "Ключ posting KeepKey Client (необязательно)",
+      "Chiave posting di KeepKey Client (facoltativa)",
+      "Klucz posting KeepKey Client (opcjonalnie)",
+      "Postingsleutel van KeepKey Client (optioneel)",
+      "คีย์ posting ของ KeepKey Client (ไม่บังคับ)",
+      "KeepKey Client posting anahtarı (isteğe bağlı)",
+      "Khóa posting của KeepKey Client (tùy chọn)"
+    ],
+    "Not a valid Hive public key.": [
+      "Not a valid Hive public key.",
+      "No es una clave pública de Hive válida.",
+      "Ce n'est pas une clé publique Hive valide.",
+      "Kein gültiger öffentlicher Hive-Schlüssel.",
+      "有効なHive公開鍵ではありません。",
+      "不是有效的 Hive 公钥。",
+      "유효한 Hive 공개 키가 아닙니다.",
+      "Não é uma chave pública Hive válida.",
+      "Это не действительный публичный ключ Hive.",
+      "Non è una chiave pubblica Hive valida.",
+      "To nie jest prawidłowy klucz publiczny Hive.",
+      "Geen geldige openbare Hive-sleutel.",
+      "ไม่ใช่คีย์สาธารณะ Hive ที่ถูกต้อง",
+      "Geçerli bir Hive açık anahtarı değil.",
+      "Không phải khóa công khai Hive hợp lệ."
+    ],
+    "Lets the KeepKey Client publish long posts. It can post and vote, never move funds.": [
+      "Lets the KeepKey Client publish long posts. It can post and vote, never move funds.",
+      "Permite que KeepKey Client publique posts largos. Puede publicar y votar, nunca mover fondos.",
+      "Permet à KeepKey Client de publier des posts longs. Elle peut publier et voter, jamais déplacer des fonds.",
+      "Damit kann der KeepKey Client lange Beiträge veröffentlichen. Er kann posten und voten, aber nie Geld bewegen.",
+      "KeepKey Client が長い投稿を公開できるようにします。投稿と投票はできますが、資金は動かせません。",
+      "让 KeepKey Client 能发布长帖。它可以发帖和投票，但永远不能转移资金。",
+      "KeepKey Client가 긴 글을 게시할 수 있게 합니다. 게시와 투표만 가능하고 자금은 옮길 수 없습니다.",
+      "Permite que o KeepKey Client publique posts longos. Ela pode postar e votar, nunca mover fundos.",
+      "Позволяет KeepKey Client публиковать длинные посты. Ключ может постить и голосовать, но не переводить средства.",
+      "Permette a KeepKey Client di pubblicare post lunghi. Può pubblicare e votare, mai spostare fondi.",
+      "Pozwala KeepKey Client publikować długie posty. Może publikować i głosować, nigdy nie przenosi środków.",
+      "Laat de KeepKey Client lange posts publiceren. Hij kan posten en stemmen, nooit geld verplaatsen.",
+      "ให้ KeepKey Client โพสต์ยาวได้ คีย์นี้โพสต์และโหวตได้ แต่ย้ายเงินไม่ได้",
+      "KeepKey Client'ın uzun gönderiler yayınlamasını sağlar. Gönderi ve oy verebilir, asla fon taşıyamaz.",
+      "Cho phép KeepKey Client đăng bài dài. Khóa này đăng bài và bình chọn được, không bao giờ chuyển tiền."
     ]
   }
 }

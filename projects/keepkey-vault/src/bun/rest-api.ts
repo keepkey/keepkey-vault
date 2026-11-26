@@ -1354,7 +1354,9 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
         // The audit-log read endpoints don't get logged — otherwise each read
         // would persist the full prior history into a new row, recursively
         // ballooning response_body across repeated reads.
-        const skipAuditLog = path.startsWith('/api/v1/activity') || path.startsWith('/api/v1/ledger') || path === '/docs' || path === '/admin/info' || path === '/auth/pair'
+        // The client cipher route carries a wrapping key in its body (encrypt)
+        // and response (decrypt): never persist either.
+        const skipAuditLog = path.startsWith('/api/v1/activity') || path.startsWith('/api/v1/ledger') || path === '/docs' || path === '/admin/info' || path === '/auth/pair' || path === '/system/cipher-key-value'
         if (callbacks?.onApiLog && !skipAuditLog) {
           const { appName, imageUrl } = resolveAppInfo()
           // Audit logs are stored locally (SQLite) on the user's own machine,
@@ -2611,6 +2613,133 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           addressCache.set(cacheKey, address)
           auth.saveAccount(String(address), body.address_n)
           return json({ address })
+        }
+
+        // ── Browser posting key (KeepKey Client) ─────────────────────────
+        // Read-only authorities by name, for the client to validate an imported
+        // posting key and to show the authority diff before a change.
+        if (path === '/hive/account-authorities' && method === 'GET') {
+          auth.requireAuth(req)
+          if (getSetting('hive_enabled') !== '1') return json({ error: 'Hive is disabled' }, 403)
+          const name = String(url.searchParams.get('name') || '').trim().toLowerCase()
+          const { lookupHiveAccount } = await import('./hive-chain')
+          try {
+            const account = await lookupHiveAccount(name)
+            const { FIRMWARE_ACCOUNT_UPDATE_ACCEPTS_EXTERNAL_POSTING } = await import('./hive-posting-authority')
+            // What this KeepKey can do with posting: give it back (revoke) always;
+            // authorize an external browser key (dedicate) only on capable firmware.
+            const capabilities = { dedicatePosting: FIRMWARE_ACCOUNT_UPDATE_ACCEPTS_EXTERNAL_POSTING, revokePosting: true }
+            return json(account ? { found: true, account, capabilities } : { found: false, capabilities })
+          } catch (e: any) {
+            return json({ error: e?.message || 'Hive lookup failed' }, /Invalid Hive account name/.test(String(e?.message)) ? 400 : 502)
+          }
+        }
+
+        // Restricted CipherKeyValue: only the client's posting-key wrapping key,
+        // at a fixed path. Flags are fixed by the vault, never the caller:
+        // encrypting reveals nothing (no button), decrypting always asks. The
+        // device mixes both flags into the derivation, so they must be the same
+        // pair in both directions — which fixing them here guarantees.
+        if (path === '/system/cipher-key-value' && method === 'POST') {
+          auth.requireAuth(req)
+          if (getSetting('hive_enabled') !== '1') return json({ error: 'Hive is disabled' }, 403)
+          const { parseClientCipherRequest, CLIENT_CIPHER_PATH, CLIENT_CIPHER_FLAGS, PostingAuthorityError } = await import('./hive-posting-authority')
+          let cipher
+          try { cipher = parseClientCipherRequest(await req.json().catch(() => null)) }
+          catch (e: any) { return json({ error: e?.message || 'Invalid request' }, e instanceof PostingAuthorityError ? e.status : 400) }
+          const wallet = await requireWallet(engine)
+          if (typeof (wallet as any).cipherKeyValue !== 'function') return json({ error: 'This KeepKey cannot encrypt key-value data' }, 501)
+          const result: any = await emuWrap(() => (wallet as any).cipherKeyValue({
+            addressNList: CLIENT_CIPHER_PATH,
+            key: cipher.key,
+            value: cipher.value,
+            iv: cipher.iv,
+            encrypt: !cipher.decrypt,
+            ...CLIENT_CIPHER_FLAGS,
+          }), { operation: 'cipherKeyValue', opLabel: cipher.decrypt ? 'Unlock browser posting key' : 'Protect browser posting key', chain: 'Hive', memo: cipher.key })
+          const out = typeof result === 'string' ? Buffer.from(result, 'base64') : Buffer.from(result as Uint8Array)
+          return json({ value: out.toString('hex') })
+        }
+
+        // Dedicate posting to the client key (or give it back) with
+        // HiveSignAccountUpdate. Owner-signed and rewrites all four
+        // authorities, so: locks before, byte check after, chain check last.
+        if (path === '/hive/posting-authority' && method === 'POST') {
+          auth.requireAuth(req)
+          if (getSetting('hive_enabled') !== '1') return json({ error: 'Hive is disabled' }, 403)
+          const fwBlock = requireChainSupport('hive')
+          if (fwBlock) return fwBlock
+          const body: any = await req.json().catch(() => null)
+          const pa = await import('./hive-posting-authority')
+          const { lookupHiveAccount } = await import('./hive-chain')
+          const wallet = await requireWallet(engine)
+          if (typeof (wallet as any).hiveSignAccountUpdate !== 'function') return json({ error: 'This firmware cannot sign Hive account updates' }, 501)
+          try {
+            const account = String(body?.account || '').trim().toLowerCase()
+            const change: 'dedicate' | 'revoke' = body?.change === 'revoke' ? 'revoke' : 'dedicate'
+            const roles = ['owner', 'active', 'posting', 'memo'] as const
+            const device = {} as Record<(typeof roles)[number], string>
+            for (const role of roles) {
+              const r = await (wallet as any).hiveGetPublicKey({ addressNList: hiveRolePath(role, 0), showDisplay: false })
+              if (!r?.publicKey) throw new pa.PostingAuthorityError(502, `Could not read the KeepKey ${role} key`)
+              device[role] = r.publicKey
+            }
+            const plan = pa.planPostingAuthority({
+              chain: await lookupHiveAccount(account),
+              device,
+              postingKey: change === 'revoke' ? device.posting : String(body?.posting_key || ''),
+              change,
+              allowDropApps: body?.allow_drop_apps === true,
+            })
+            const pioneerBase = (callbacks?.getPioneerApiBase?.() || 'https://api.keepkey.info').replace(/\/$/, '')
+            const txParams = await fetch(`${pioneerBase}/api/v1/hive/tx-params`, { signal: AbortSignal.timeout(20_000) }).then(r => r.json()) as any
+            if (!txParams?.success) throw new pa.PostingAuthorityError(502, `Hive tx-params failed: ${txParams?.error || 'unknown'}`)
+            const signedRaw: any = await emuWrap(() => (wallet as any).hiveSignAccountUpdate({
+              addressNList: hiveRolePath('owner', 0),
+              chainId: txParams.chainId,
+              refBlockNum: txParams.refBlockNum,
+              refBlockPrefix: txParams.refBlockPrefix,
+              expiration: txParams.expirationUnix,
+              account: plan.account,
+              newOwnerKey: device.owner,
+              newActiveKey: device.active,
+              newPostingKey: plan.after.key_auths[0][0],
+              newMemoKey: device.memo,
+            }), { operation: 'hiveSignAccountUpdate', opLabel: change === 'revoke' ? 'Return posting to KeepKey' : 'Dedicate posting to browser key', chain: 'Hive', to: `@${plan.account}` })
+            if (!signedRaw?.signature || !signedRaw?.serializedTx) throw new pa.PostingAuthorityError(502, 'Device returned no signed account update')
+            const signedTx = pa.parseSignedAccountUpdate(Uint8Array.from(signedRaw.serializedTx))
+            pa.assertSignedMatchesPlan(signedTx, plan, device)
+            const sigHex = Buffer.from(signedRaw.signature).toString('hex')
+            const bResp = await fetch(`${pioneerBase}/api/v1/hive/broadcast-ops`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                ref_block_num: signedTx.refBlockNum,
+                ref_block_prefix: signedTx.refBlockPrefix,
+                expiration: pa.hiveTimeIso(signedTx.expirationUnix),
+                operations: [pa.signedAccountUpdateJson(signedTx)],
+                signature: sigHex,
+              }),
+              signal: AbortSignal.timeout(30_000),
+            })
+            const bData: any = await bResp.json().catch(() => ({}))
+            if (!bData?.success || !bData?.txid) throw new pa.PostingAuthorityError(502, `Hive broadcast failed: ${bData?.error?.message || bData?.error || bResp.status}`)
+            // Confirm on chain: posting must now be exactly the new key.
+            let confirmed = false
+            for (let i = 0; i < 6 && !confirmed; i++) {
+              if (i) await new Promise(r => setTimeout(r, 2000))
+              const now = await lookupHiveAccount(plan.account).catch(() => null)
+              confirmed = !!now && now.posting.key_auths.length === 1 && now.posting.key_auths[0][0] === plan.after.key_auths[0][0]
+            }
+            return json({ txid: bData.txid, account: plan.account, change, before: plan.before, after: plan.after, droppedApps: plan.droppedApps, confirmed })
+          } catch (e: any) {
+            if (e instanceof pa.PostingAuthorityError) {
+              // Public keys / authorities only — logged so a mismatch is diagnosable.
+              if (e.details) console.warn('[REST] /hive/posting-authority refused:', e.message, JSON.stringify(e.details))
+              return json({ error: e.message, ...(e.details || {}) }, e.status)
+            }
+            throw e
+          }
         }
 
         if (path === '/hive/sign-message' && method === 'POST') {

@@ -28,6 +28,8 @@
  *   b64u = base64 with "+"→"-", "/"→"_" and "=" padding → "." (padding kept)
  */
 
+import bs58 from 'bs58'
+
 export type HiveRoleKeys = { owner: string; active: string; posting: string; memo: string }
 export type HiveAuthority = {
 	weight_threshold: number
@@ -73,6 +75,34 @@ export const singleKeyAuthority = (pubkey: string, accountAuths: [string, number
 	key_auths: [[pubkey, 1]],
 })
 
+/**
+ * Posting authority for this KeepKey plus, optionally, the KeepKey Client's
+ * browser posting key (threshold 1: either key can post). hived orders
+ * key_auths by the compressed key bytes — not the STM string — and rejects or
+ * mis-verifies an unsorted authority, so the two are ordered by bytes here.
+ */
+export function postingAuthority(keepkeyPosting: string, browserPosting?: string, accountAuths: [string, number][] = []): HiveAuthority {
+	const base = singleKeyAuthority(keepkeyPosting, accountAuths)
+	if (!browserPosting || browserPosting === keepkeyPosting) return base
+	const bytes = (k: string) => bs58.decode(k.slice(3)).slice(0, 33)
+	const cmp = (a: string, b: string) => {
+		const x = bytes(a), y = bytes(b)
+		for (let i = 0; i < 33; i++) if (x[i] !== y[i]) return x[i] - y[i]
+		return 0
+	}
+	return { ...base, key_auths: [[keepkeyPosting, 1] as [string, number], [browserPosting, 1] as [string, number]].sort((a, b) => cmp(a[0], b[0])) }
+}
+
+/** STM key with a valid ripemd160 checksum (the KeepKey Client shows its key in this form). */
+export function isValidHivePublicKey(stm: string): boolean {
+	if (typeof stm !== 'string' || !/^STM[1-9A-HJ-NP-Za-km-z]{48,52}$/.test(stm)) return false
+	try {
+		return bs58.decode(stm.slice(3)).length === 37
+	} catch {
+		return false
+	}
+}
+
 // account_auths must be sorted by name or the node rejects the authority
 // ("authority must be sorted"). key_auths sort by compressed-key bytes, not the
 // STM string — irrelevant here because every authority built has one key.
@@ -106,8 +136,8 @@ export function parseAccountAuthorities(raw: any): HiveAccountAuthorities {
 }
 
 /** Path A: the payer spends the creation fee in HIVE. */
-export function buildAccountCreateOp({ creator, newAccountName, keys, fee = DEFAULT_ACCOUNT_CREATION_FEE }: {
-	creator: string; newAccountName: string; keys: HiveRoleKeys; fee?: string
+export function buildAccountCreateOp({ creator, newAccountName, keys, fee = DEFAULT_ACCOUNT_CREATION_FEE, browserPostingKey }: {
+	creator: string; newAccountName: string; keys: HiveRoleKeys; fee?: string; browserPostingKey?: string
 }): HiveOperation {
 	return ['account_create', {
 		fee,
@@ -115,22 +145,22 @@ export function buildAccountCreateOp({ creator, newAccountName, keys, fee = DEFA
 		new_account_name: newAccountName,
 		owner: singleKeyAuthority(keys.owner),
 		active: singleKeyAuthority(keys.active),
-		posting: singleKeyAuthority(keys.posting),
+		posting: postingAuthority(keys.posting, browserPostingKey),
 		memo_key: keys.memo,
 		json_metadata: '',
 	}]
 }
 
 /** Path A, alternative: the payer spends one account-creation token (ACT), no HIVE. */
-export function buildCreateClaimedAccountOp({ creator, newAccountName, keys }: {
-	creator: string; newAccountName: string; keys: HiveRoleKeys
+export function buildCreateClaimedAccountOp({ creator, newAccountName, keys, browserPostingKey }: {
+	creator: string; newAccountName: string; keys: HiveRoleKeys; browserPostingKey?: string
 }): HiveOperation {
 	return ['create_claimed_account', {
 		creator,
 		new_account_name: newAccountName,
 		owner: singleKeyAuthority(keys.owner),
 		active: singleKeyAuthority(keys.active),
-		posting: singleKeyAuthority(keys.posting),
+		posting: postingAuthority(keys.posting, browserPostingKey),
 		memo_key: keys.memo,
 		json_metadata: '',
 		extensions: [],
@@ -142,6 +172,8 @@ export type KeyRotationOptions = {
 	keepPostingAccountAuths: boolean
 	/** Keep accounts authorized on active (rare: multisig / services). */
 	keepActiveAccountAuths: boolean
+	/** KeepKey Client browser posting key to authorize alongside the KeepKey's. */
+	browserPostingKey?: string
 }
 
 /**
@@ -163,7 +195,7 @@ export function buildKeyRotationOp(account: HiveAccountAuthorities, keys: HiveRo
 	return ['account_update', {
 		account: account.name,
 		active: singleKeyAuthority(keys.active, carriedAccountAuths(account.active, opts.keepActiveAccountAuths)),
-		posting: singleKeyAuthority(keys.posting, carriedAccountAuths(account.posting, opts.keepPostingAccountAuths)),
+		posting: postingAuthority(keys.posting, opts.browserPostingKey, carriedAccountAuths(account.posting, opts.keepPostingAccountAuths)),
 		memo_key: keys.memo,
 		json_metadata: account.json_metadata ?? '',
 	}]

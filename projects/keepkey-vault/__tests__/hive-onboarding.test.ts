@@ -4,7 +4,7 @@
 import { describe, expect, test } from 'bun:test'
 import {
 	b64u, buildAccountCreateOp, buildCreateClaimedAccountOp, buildKeyRotationOp, buildOwnerRotationOp,
-	hiveSignUri, hiveSignerUrl, isValidHiveAccountName, normalizeAuthority, normalizeHiveAccountName,
+	hiveSignUri, hiveSignerUrl, isValidHiveAccountName, isValidHivePublicKey, normalizeAuthority, normalizeHiveAccountName,
 	operationJson, parseAccountAuthorities, planKeyRotation, type HiveRoleKeys,
 } from '../src/shared/hive-onboarding'
 import { hiveAccountCreationFee, hiveRpc, lookupHiveAccount, HIVE_API_NODES } from '../src/bun/hive-chain'
@@ -159,5 +159,52 @@ describe('hive-chain (read-only node queries)', () => {
 	test('creation fee: live value, default on a malformed answer', async () => {
 		expect(await hiveAccountCreationFee((async () => respond({ result: { account_creation_fee: '3.000 HIVE' } })) as any)).toBe('3.000 HIVE')
 		expect(await hiveAccountCreationFee((async () => respond({ result: { account_creation_fee: '3.000 TESTS' } })) as any)).toBe('3.000 HIVE')
+	})
+})
+
+describe('browser posting key (KeepKey Client) in the self-serve ops', () => {
+	// Real STM keys: the order check needs genuine compressed points.
+	const { secp256k1 } = require('@noble/curves/secp256k1')
+	const { pubToStm, stmToPub } = require('../src/bun/hive-posting-authority')
+	const stm = (n: number) => pubToStm(secp256k1.getPublicKey(new Uint8Array(32).fill(n), true))
+	const REAL = { owner: stm(1), active: stm(2), posting: stm(3), memo: stm(4) }
+	const BROWSER = stm(9)
+	const byBytes = (a: string, b: string) => {
+		const x = stmToPub(a), y = stmToPub(b)
+		for (let i = 0; i < 33; i++) if (x[i] !== y[i]) return x[i] - y[i]
+		return 0
+	}
+	const expectedKeyAuths = [[REAL.posting, 1], [BROWSER, 1]].sort((a: any, b: any) => byBytes(a[0], b[0]))
+
+	test('account_create: posting = KeepKey + browser key, threshold 1, sorted by key bytes; owner/active untouched', () => {
+		const op = buildAccountCreateOp({ creator: 'payer', newAccountName: 'newbie', keys: REAL, browserPostingKey: BROWSER })
+		expect(op[1].posting).toEqual({ weight_threshold: 1, account_auths: [], key_auths: expectedKeyAuths })
+		expect(op[1].owner).toEqual({ weight_threshold: 1, account_auths: [], key_auths: [[REAL.owner, 1]] })
+		expect(op[1].active).toEqual({ weight_threshold: 1, account_auths: [], key_auths: [[REAL.active, 1]] })
+		expect(op[1].memo_key).toBe(REAL.memo)
+	})
+
+	test('create_claimed_account carries the same posting authority', () => {
+		const op = buildCreateClaimedAccountOp({ creator: 'payer', newAccountName: 'newbie', keys: REAL, browserPostingKey: BROWSER })
+		expect((op[1].posting as any).key_auths).toEqual(expectedKeyAuths)
+	})
+
+	test('without a browser key nothing changes', () => {
+		const op = buildAccountCreateOp({ creator: 'payer', newAccountName: 'newbie', keys: REAL })
+		expect((op[1].posting as any).key_auths).toEqual([[REAL.posting, 1]])
+	})
+
+	test('bring-your-account rotation keeps apps and adds the browser key', () => {
+		const account = parseAccountAuthorities({ ...RAW_ACCOUNT })
+		const op = buildKeyRotationOp(account, REAL, { keepPostingAccountAuths: true, keepActiveAccountAuths: true, browserPostingKey: BROWSER })
+		expect(op[1].posting).toEqual({ weight_threshold: 1, account_auths: [['ecency.app', 1], ['peakd.app', 1]], key_auths: expectedKeyAuths })
+		expect((op[1].active as any).key_auths).toEqual([[REAL.active, 1]])
+		expect('owner' in op[1]).toBe(false)
+	})
+
+	test('isValidHivePublicKey checks the shape and length', () => {
+		expect(isValidHivePublicKey(BROWSER)).toBe(true)
+		expect(isValidHivePublicKey('STMnope')).toBe(false)
+		expect(isValidHivePublicKey('')).toBe(false)
 	})
 })
