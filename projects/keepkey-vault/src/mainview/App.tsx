@@ -25,7 +25,6 @@ import { isBitcoinOnlyVariant } from "../shared/flags"
 import { useOnline } from "./hooks/useOnline"
 import { useBtcNodeStatus } from "./hooks/useBtcNodeStatus"
 import { useBtcMultisigEnabled } from "./hooks/useBtcMultisigEnabled"
-import { PasswordAgentApprovalDialog } from './components/PasswordAgentApprovalDialog'
 import { OfflineBanner } from "./components/OfflineBanner"
 import { NodeStatusBar } from "./components/NodeStatusBar"
 import { NodeConnectedDialog } from "./components/NodeConnectedDialog"
@@ -998,7 +997,6 @@ function App() {
 	) : null
 
 	const pairingOverlay = <>
-		<PasswordAgentApprovalDialog />
 		{pairRequest && <PairingApproval request={pairRequest} onApprove={handleApprovePairing} onReject={handleRejectPairing} />}
 	</>
 

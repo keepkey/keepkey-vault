@@ -1,7 +1,7 @@
 import type { SyncProgress } from './sync-progress'
 import type { MoneroSendReview, MoneroStatus, EmulatorBuildInfo, EmulatorNextBuild } from './types'
 import type { MultisigPolicyPreview,MultisigCosignerExport,BtcPsbtSigned } from "./multisig-policy"
-import type { PasswordBankView, PasswordBrowserTarget, PasswordRiskKind, PasswordAgentApproval } from './password-bank'
+import type { PasswordBankView } from './password-bank'
 import type { VolumeDeleteTarget, VolumeDestination, VolumeDeviceStatus, VolumeImage, VolumeImageTarget, VolumeInventory, VolumeProgress } from './volumes'
 import type { ElectrobunRPCSchema } from 'electrobun/main'
 import type { SafeAccount, SafeContext, SafeCreateParams, SafeProposal, SafeTransfer, SafeTxReview, VaultAddParams, VaultAddReview } from './safe-multisig'
@@ -363,23 +363,16 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       deleteVolumeImage: { params: VolumeDeleteTarget; response: void }
       openExternalVolume: { params: { id: string; uuid: string | null }; response: void }
       openVolumeEncryptionSettings: { params: void; response: void }
-      passwordBankUnlock: { params: { create?: boolean }; response: PasswordBankView }
+      passwordBankUnlock: { params: { create?: boolean; recoverLegacy?: boolean }; response: PasswordBankView }
       passwordBankLock: { params: void; response: PasswordBankView }
       passwordBankGenerate: { params: { count: number; ttlMinutes: number }; response: PasswordBankView }
       passwordBankAssign: { params: { origin: string; account: string; reviewDays: number }; response: PasswordBankView }
       passwordBankRehydrate: { params: { id: string; pending?: boolean; ttlMinutes: number }; response: PasswordBankView }
       passwordBankReveal: { params: { id: string; pending?: boolean }; response: { password: string; expiresAt: number } }
+      passwordBankCopy: { params: { id: string; pending?: boolean }; response: void }
       passwordBankRotate: { params: { id: string; action: 'prepare' | 'submitted' | 'verify' | 'cancel'; confirmed?: boolean }; response: PasswordBankView }
       passwordBankSaveBackup: { params: void; response: { filePath: string; revision: number } }
-      passwordBankExport: { params: void; response: { json: string; revision: number } }
-      passwordBankBackupSaved: { params: { revision: number }; response: PasswordBankView }
       passwordBankImport: { params: { json: string }; response: PasswordBankView }
-      passwordBankBrowserTargets: { params: { id: string }; response: PasswordBrowserTarget[] }
-      passwordBankBrowserFill: { params: { grant: string }; response: { filled: true; submitted: false } }
-      passwordBankBrowserGrant: { params: { id: string; pending?: boolean; browser: string; tabId: number; documentToken: string; ref: string }; response: { grant: string } }
-      passwordBankReportRisk: { params: { id: string; kind: PasswordRiskKind; source: 'user' | 'chrome-password-checkup' }; response: PasswordBankView }
-      passwordAgentApproveFill: { params: { id: string }; response: { id: string; state: string; expiresAt: number; error?: string } }
-      passwordAgentRejectFill: { params: { id: string }; response: void }
       markPassphraseIntroShown: { params: void; response: AppSettings }
       markBtcOnboardingShown: { params: void; response: AppSettings }
       setDisabledNetworks: { params: { chainIds: string[] }; response: AppSettings }
@@ -674,7 +667,7 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
         unresolvedErrorCount?: number
       }
       'pair-request': PairingRequestInfo
-      'password-agent-approval': { approval: PasswordAgentApproval | null }
+      'password-backup-saved': { bankId: string; filePath: string }
       'pair-dismissed': Record<string, never>
       'signing-request': SigningRequestInfo
       'signing-dismissed': { id: string }

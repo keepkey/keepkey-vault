@@ -439,5 +439,10 @@
   "mde0a7865": "Volume wird gelöscht…",
   "m61c22bc5": "{{name}} wurde von {{location}} gelöscht.",
   "m5813534": "Sperre dieses Volume, bevor du es löschst.",
-  "me9e6ebc1": "Keine indizierte {{symbol}}-Aktivität. Aktualisiere zum Scannen."
+  "me9e6ebc1": "Keine indizierte {{symbol}}-Aktivität. Aktualisiere zum Scannen.",
+  "m4c0aff9f": "Vorherigen Passwortspeicher wiederherstellen",
+  "mf56f735e": "Passwortvorgang fehlgeschlagen",
+  "m16970f4f": "Kontoname",
+  "m66c8115a": "Öffne die Website, um dein Passwort zu ändern.",
+  "m8272c222": "Kopiere das neue Passwort, füge es auf der Website ein und teste dann eine erneute Anmeldung."
 }

@@ -9,6 +9,9 @@ let alphaFirmware = false
 let moneroPendingBroadcasts = 0
 let backupFailure = false
 let openedWebsites = 0
+let clipboardValue = ''
+let clipboardWrites = 0
+let revealReads = 0
 const bank = new PasswordBank({ read: k => db.get(k) || null, write: (k, v) => { db.set(k, v) }, device: () => ({ session: 'synthetic-device', cipher: async (p, l) => new Uint8Array(createHmac('sha256', 'PUBLIC UI TEST FIXTURE ONLY').update(JSON.stringify(p)).update(l).digest()) }) })
 const settings = () => ({ passwordManagerEnabled: bank.enabled, moneroEnabled, alphaFirmware, moneroPendingBroadcasts, moneroAvailable: true, moneroNodeMode: 'local', moneroDaemonUrl: 'http://127.0.0.1:18081', moneroRestoreHeight: 0, restApiEnabled: false, btcMultisigEnabled: false, walletConnectEnabled: false, zcashPrivacyEnabled: false, hiveEnabled: false, emulatorEnabled: false, offlineMode: false, pioneerApiBase: '', pioneerServers: [], activePioneerServer: '', fiatCurrency: 'USD', numberLocale: 'en-US', disabledNetworks: [], evmSimulationRpcUrls: {}, appLanguage: 'en' })
 const rpc = Bun.serve({ hostname: '127.0.0.1', port: 0, async fetch(req) {
@@ -16,10 +19,11 @@ const rpc = Bun.serve({ hostname: '127.0.0.1', port: 0, async fetch(req) {
   try {
     let payload: unknown = {}
     switch (method) {
-      case 'testReset': bank.lock(); db.clear(); moneroEnabled = false; alphaFirmware = false; moneroPendingBroadcasts = 0; backupFailure = false; openedWebsites = 0; payload = settings(); break
+      case 'testReset': bank.lock(); db.clear(); moneroEnabled = false; alphaFirmware = false; moneroPendingBroadcasts = 0; backupFailure = false; openedWebsites = 0; clipboardValue = ''; clipboardWrites = 0; revealReads = 0; payload = settings(); break
       case 'testMoneroPending': moneroPendingBroadcasts = p.count; payload = settings(); break
       case 'testBackupFailure': backupFailure = p.enabled; break
       case 'testOpenedWebsites': payload = openedWebsites; break
+      case 'testPasswordClipboard': payload = { writes: clipboardWrites, revealReads, matches: clipboardValue === bank.reveal(p.id, p.pending).password }; break
       case 'openExternal': openedWebsites++; break
       case 'getAppSettings': payload = settings(); break
       case 'setPasswordManagerEnabled': bank.setEnabled(p.enabled); payload = settings(); break
@@ -31,14 +35,12 @@ const rpc = Bun.serve({ hostname: '127.0.0.1', port: 0, async fetch(req) {
       case 'passwordBankLock': bank.lock(); payload = bank.view(); break
       case 'passwordBankGenerate': payload = await bank.generate(p.count, p.ttlMinutes); break
       case 'passwordBankAssign': payload = bank.assign(p.origin, p.account, p.reviewDays); break
-      case 'passwordBankReveal': payload = bank.reveal(p.id, p.pending); break
+      case 'passwordBankReveal': revealReads++; payload = bank.reveal(p.id, p.pending); break
+      case 'passwordBankCopy': clipboardValue = bank.reveal(p.id, p.pending).password; clipboardWrites++; break
       case 'passwordBankRehydrate': payload = await bank.rehydrate(p.id, p.pending, p.ttlMinutes); break
       case 'passwordBankRotate': payload = bank.rotate(p.id, p.action, p.confirmed); break
       case 'passwordBankSaveBackup': { if (backupFailure) throw new Error('Backup disk unavailable'); const backup = bank.exportBackup(); bank.acknowledgeBackup(backup.revision); payload = { filePath: '/synthetic/keepkey-passwords.json', revision: backup.revision }; break }
-      case 'passwordBankExport': payload = bank.exportBackup(); break
-      case 'passwordBankBackupSaved': payload = bank.acknowledgeBackup(p.revision); break
       case 'passwordBankImport': payload = await bank.unlock(false, p.json); break
-      case 'passwordBankBrowserTargets': payload = []; break
       case 'listBip85Seeds': payload = []; break
       case 'getFeatures': payload = { label: 'Synthetic test KeepKey', policiesList: [] }; break
       case 'listRegisteredDevices': case 'listEmulatorWallets': case 'getPairedApps': case 'getPioneerServers': payload = []; break

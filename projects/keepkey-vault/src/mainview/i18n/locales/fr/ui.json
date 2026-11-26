@@ -441,5 +441,10 @@
   "mde0a7865": "Suppression du volume…",
   "m61c22bc5": "{{name}} a été supprimé de {{location}}.",
   "m5813534": "Verrouillez ce volume avant de le supprimer.",
-  "me9e6ebc1": "Aucune activité {{symbol}} indexée. Actualisez pour analyser."
+  "me9e6ebc1": "Aucune activité {{symbol}} indexée. Actualisez pour analyser.",
+  "m4c0aff9f": "Restaurer le coffre de mots de passe précédent",
+  "mf56f735e": "Échec de l’opération sur le mot de passe",
+  "m16970f4f": "Nom du compte",
+  "m66c8115a": "Ouvrez le site web pour modifier votre mot de passe.",
+  "m8272c222": "Copiez et collez le nouveau mot de passe sur le site, puis testez une nouvelle connexion."
 }

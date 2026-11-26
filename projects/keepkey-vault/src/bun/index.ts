@@ -46,11 +46,8 @@ import type { VolumeInventory, VolumeDeviceStatus, VolumeProgress, VolumeProgres
 import { withKeepKeyFido, readStatus, runReset, waitForReplug } from './passkeys'
 import { setFidoPin, listPasskeys, deletePasskey } from './passkeys-manage'
 import { resolveLabels, cleanLabel } from './passkey-labels'
-import { passwordDeviceCipher, supportsDeviceCipher } from './password-device'
+import { passwordDeviceCipher, passwordWalletSelector, supportsDeviceCipher } from './password-device'
 import { savePasswordBackup } from './password-backup'
-import { PasswordBex } from './password-bex'
-import { PasswordAgent } from './password-agent'
-import { callBex, listBrowsers } from './bex-bridge'
 
 /**
  * hdwallet returns signature/pubkey fields as `Uint8Array | string`
@@ -1137,9 +1134,77 @@ function volumeProgress(operationId: string | undefined, event: VolumeProgressEv
 	const send = rpc.send['volume-progress'] as (progress: VolumeProgress) => void
 	try { send({ operationId, ...event }) } catch { /* Webview closed during storage operation. */ }
 }
+function passwordBankDeviceSession(state: ReturnType<EngineController['getDeviceState']>) {
+	return `${activitySessionEpoch}:${state.deviceId}:${state.activeTransport}`
+}
+
+function getPasswordBankDevice() {
+	const wallet = engine.wallet
+	const state = engine.getDeviceState()
+	if (state.state !== 'ready' || !supportsDeviceCipher(wallet)) throw new Error('Connect and unlock a KeepKey to use the password bank')
+	if (isBitcoinOnlyVariant(state.firmwareVariant)) throw new Error('Password-bank derivation requires multi-chain firmware')
+	const isEmulator = engine.isEmulator
+	const session = passwordBankDeviceSession(state)
+	return {
+		session,
+		async cipher(addressNList: number[], key: string) {
+			const bytes = await passwordDeviceCipher(wallet, addressNList, key, isEmulator, emuSigningOp)
+			try {
+				deviceOperationContext.getStore()?.assertCurrent()
+				const current = engine.getDeviceState()
+				if (wallet !== engine.wallet || current.state !== 'ready' || session !== passwordBankDeviceSession(current)) {
+					throw new Error('The KeepKey wallet changed. Start the request again with the current wallet.')
+				}
+				return bytes
+			} catch (error) {
+				bytes.fill(0)
+				throw error
+			}
+		},
+	}
+}
+
+let passwordScope: { wallet: typeof engine.wallet; session: string; value: string } | undefined
+function getPasswordBankScope() {
+	const scope = passwordScope
+	if (!scope || scope.wallet !== engine.wallet) return null
+	const state = engine.getDeviceState()
+	return state.state === 'ready' && scope.session === passwordBankDeviceSession(state) ? scope.value : null
+}
+
+async function getLegacyPasswordBankScope() {
+	const cachedScope = getWalletDbScope()?.walletId
+	if (cachedScope) return cachedScope
+	const wallet = engine.wallet
+	const { deviceId } = engine.getDeviceState()
+	if (!deviceId || typeof wallet?.ethGetAddress !== 'function') return null
+	// The earlier preview keyed its bank by the primary ETH address. Read it
+	// only during explicit recovery and leave the app's wallet identity alone.
+	const result = await wallet.ethGetAddress({
+		addressNList: [0x8000002c, 0x8000003c, 0x80000000, 0, 0],
+		showDisplay: false,
+	}).catch(() => null)
+	deviceOperationContext.getStore()?.assertCurrent()
+	const address = typeof result === 'string' ? result : result?.address
+	return typeof address === 'string' && address ? `${deviceId}:${address.toLowerCase()}` : null
+}
+
 const passwordBank = new PasswordBank({
 	read: getSetting,
 	write: setSetting,
+	walletScope: getPasswordBankScope,
+	legacyWalletScope: getLegacyPasswordBankScope,
+	withDeviceUnlock: action => engine.withDeviceOperation(async () => {
+		if (!getPasswordBankScope()) {
+			const wallet = engine.wallet
+			const { deviceId } = engine.getDeviceState()
+			const { session, cipher } = getPasswordBankDevice()
+			if (!deviceId) throw new Error('Wait for Vault to verify the connected KeepKey wallet, then try again.')
+			const selector = await passwordWalletSelector(cipher)
+			passwordScope = { wallet, session, value: `${deviceId}:${selector}` }
+		}
+		return action()
+	}, { unlock: true, rejectIfBusy: true, origin: 'desktop' }),
 	replace: (key, value, expected) => {
 		const db = getDb()
 		if (!db) throw new Error('Password-bank storage is unavailable')
@@ -1148,26 +1213,19 @@ const passwordBank = new PasswordBank({
 			: db.run('UPDATE settings SET value = ? WHERE key = ? AND value = ?', [value, key, expected])
 		return result.changes === 1
 	},
-	device: () => {
-		const wallet = engine.wallet as any
-		const state = engine.getDeviceState()
-		if (!wallet || state.state !== 'ready' || typeof wallet.cipherKeyValue !== 'function') throw new Error('Connect and unlock a KeepKey to use the password bank')
-		if (isBitcoinOnlyVariant(state.firmwareVariant)) throw new Error('Password-bank derivation requires multi-chain firmware')
-		return {
-			session: `${activitySessionEpoch}:${state.deviceId}:${engine.isPassphraseWallet}`,
-			cipher: (addressNList, key) => passwordDeviceCipher(wallet, addressNList, key, engine.isEmulator, emuSigningOp),
-		}
-	},
+	device: getPasswordBankDevice,
 })
 // Clean expired session secrets even when the password tab is not visible.
-const passwordBex = new PasswordBex(passwordBank, { browsers: listBrowsers, call: (tool, args, browser) => callBex(tool, args, browser, 10000) })
-const passwordAgent = new PasswordAgent(passwordBank, passwordBex, approval => {
-	// The legacy schema declares outgoing events under bun.messages; constrain
-	// this event to that payload despite Electrobun inferring remote messages.
-	const send = rpc.send['password-agent-approval'] as (value: VaultRPCSchema['bun']['messages']['password-agent-approval']) => void
-	try { send({ approval }) } catch { /* native UI not ready; request will expire */ }
-})
-setInterval(() => { if (!passwordBank.view().unlocked) passwordAgent.cancelPending() }, 1000).unref()
+const saveLocalPasswordBackup = () => {
+	const bankId = passwordBank.view().bankId
+	const receipt = savePasswordBackup(passwordBank, path.join(os.homedir(), "Documents", "KeepKey Password Backups"))
+	if (bankId) {
+		const send = rpc.send['password-backup-saved'] as (value: VaultRPCSchema['bun']['messages']['password-backup-saved']) => void
+		try { send({ bankId, filePath: receipt.filePath }) } catch { /* The backup is already durable. */ }
+	}
+	return receipt
+}
+setInterval(() => { passwordBank.view() }, 1000).unref()
 const multisigRegistry = new MultisigRegistry(getSetting, setSetting, () => ({
 	hidden: engine.isPassphraseWallet,
 	epoch: activitySessionEpoch,
@@ -2248,7 +2306,6 @@ async function resolveDeviceSwapAsset(key: string) {
 
 // Callbacks bridge REST → RPC UI
 const restCallbacks: RestApiCallbacks = {
-	passwordAgent,
 	onApiLog: (entry: ApiLogEntry) => {
 		if (entryIsStale(entry)) {
 			console.warn(`[api-log] dropped ${entry.method} ${entry.route}: wallet session changed mid-request`)
@@ -9030,7 +9087,6 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				return getAppSettings()
 			},
 			setPasswordManagerEnabled: async (params) => {
-				passwordAgent.cancelPending()
 				passwordBank.setEnabled(params?.enabled)
 				return getAppSettings()
 			},
@@ -9088,23 +9144,20 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			deleteVolumeImage: params => volumes.deleteVolumeImage(params),
 			openExternalVolume: params => openExternalVolume(params),
 			openVolumeEncryptionSettings: () => openVolumeEncryptionSettings(),
-			passwordBankUnlock: async (params) => passwordBank.unlock(params?.create === true),
-			passwordBankLock: async () => { passwordAgent.cancelPending(); passwordBank.lock(); return passwordBank.view() },
+			passwordBankUnlock: async (params) => passwordBank.unlock(params?.create === true, undefined, params?.recoverLegacy === true),
+			passwordBankLock: async () => { passwordBank.lock(); return passwordBank.view() },
 			passwordBankGenerate: async (params) => passwordBank.generate(params.count, params.ttlMinutes),
 			passwordBankAssign: async (params) => passwordBank.assign(params.origin, params.account, params.reviewDays),
 			passwordBankRehydrate: async (params) => passwordBank.rehydrate(params.id, params.pending === true, params.ttlMinutes),
 			passwordBankReveal: async (params) => passwordBank.reveal(params.id, params.pending === true),
+			passwordBankCopy: async (params) => {
+				const { password } = passwordBank.reveal(params.id, params.pending === true)
+				Utils.clipboardWriteText(password)
+				if (Utils.clipboardReadText() !== password) throw new Error('Clipboard unavailable')
+			},
 			passwordBankRotate: async (params) => passwordBank.rotate(params.id, params.action, params.confirmed === true),
-			passwordBankExport: async () => passwordBank.exportBackup(),
-			passwordBankSaveBackup: async () => savePasswordBackup(passwordBank, path.join(os.homedir(), "Documents", "KeepKey Password Backups")),
-			passwordBankBackupSaved: async (params) => passwordBank.acknowledgeBackup(params.revision),
+			passwordBankSaveBackup: async () => saveLocalPasswordBackup(),
 			passwordBankImport: async (params) => passwordBank.unlock(false, params.json),
-			passwordBankBrowserTargets: async (params) => passwordBex.discover(params.id),
-			passwordBankBrowserGrant: async (params) => passwordBex.grant(params),
-			passwordBankBrowserFill: async (params) => passwordBex.fill(params.grant),
-			passwordBankReportRisk: async (params) => passwordBank.reportRisk(params.id, params.kind, params.source),
-			passwordAgentApproveFill: async (params) => passwordAgent.approve(params.id),
-			passwordAgentRejectFill: async (params) => { passwordAgent.reject(params.id) },
 			// One-time: mark the passphrase/hidden-wallet intro dialog as seen so it
 			// never shows again (also set when the OOB passphrase card is completed).
 			markPassphraseIntroShown: async () => {
@@ -11872,6 +11925,7 @@ engine.on('state-change', (state) => {
 	try { rpc.send['device-state'](state) } catch { /* webview not ready yet */ }
 	// The Studio provider key belongs to the device it was derived with.
 	providerKeySession.onDeviceState(state)
+	if (state.state !== 'ready') passwordScope = undefined
 	if (state.state === 'disconnected' || state.state === 'bootloader' || state.state === 'error') passwordBank.lock()
 	const bitcoinOnly = isBitcoinOnlyVariant(state.firmwareVariant)
 	// Scope the self-host node to the connected device: only a btc-only device may
