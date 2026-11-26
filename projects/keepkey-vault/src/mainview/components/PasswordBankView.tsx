@@ -5,6 +5,7 @@ import { orderedPasswordProfiles } from '../../shared/password-inventory'
 import { onRpcMessage, rpcRequest } from '../lib/rpc'
 import { useUiTranslation } from '../i18n/ui'
 import { PasswordValue } from './PasswordValue'
+import { getDateLocale } from '../lib/date-locale'
 
 type Profile = BankView['profiles'][number]
 export function PasswordBankView() {
@@ -81,7 +82,7 @@ export function PasswordBankView() {
     await rpcRequest('passwordBankChange', { id: p.id })
     setConfirming(null)
   })
-  const day = (ms: number) => new Date(ms).toLocaleDateString()
+  const day = (ms: number) => new Date(ms).toLocaleDateString(getDateLocale())
   const importBackup = (file?: File) => {
     if (!file) return
     void run(async () => {

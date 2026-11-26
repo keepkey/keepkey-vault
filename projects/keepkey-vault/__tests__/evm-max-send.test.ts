@@ -55,7 +55,8 @@ describe('EVM max send', () => {
     expect(BigInt(result.gasPrice)).toBe(6_000_000n)
     const gasFee = BigInt(result.gasLimit) * 6_000_000n
     const gasReserve = (gasFee * 110n + 99n) / 100n
-    expect(BigInt(result.value)).toBe(1_000_000_000_000_000_000n - gasReserve)
+    const l1DataFeeBuffer = id === 'arbitrum' ? 0n : 50_000_000_000_000n // OP-stack L1 data fee (B5)
+    expect(BigInt(result.value)).toBe(1_000_000_000_000_000_000n - gasReserve - l1DataFeeBuffer)
   })
 
   test.each(['base', 'optimism', 'arbitrum'])('%s slow preset never bids below the quoted price', async (id) => {
