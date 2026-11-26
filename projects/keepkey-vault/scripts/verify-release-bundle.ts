@@ -78,6 +78,13 @@ try {
   else {
     const fixProblems = electrobunFixProblems(join(work, backend, '..', '..', '..'))
     fixProblems.length === 0 ? ok('Electrobun fork fixes (RPC non-Error reply, preload crypto.subtle wait)') : fixProblems.forEach(fail)
+    // macOS checks Monero below, after the outer seal. Elsewhere the raw reviewed bytes ship
+    // unsigned, so no seal is involved; a platform without reviewed pins reports nothing.
+    if (os !== 'macos') {
+      const moneroPlatform = `${os === 'win' ? 'win32' : os}-${arch}`
+      const moneroProblems = moneroReleaseAssetProblems(join(work, backend, '..', '..'), moneroPlatform)
+      moneroProblems.length === 0 ? ok(`Monero signing artifacts and packaged Bun verifier ABI (${moneroPlatform})`) : moneroProblems.forEach(fail)
+    }
   }
 
   if (os === 'macos') {

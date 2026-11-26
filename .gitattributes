@@ -9,3 +9,14 @@
 
 # These are interpreted macOS QA helpers, not a standalone Swift product.
 *.swift-source text eol=lf linguist-language=Text
+
+# Monero native inputs are pinned by sha256 (manifests, prepare.py and the build
+# scripts hash these exact bytes). A CRLF checkout on Windows (core.autocrlf=true,
+# the GitHub windows runner default) changes those bytes and fails every pin.
+projects/keepkey-vault/native/monero-host-adapter/** -text
+projects/keepkey-vault/native/monero-core-verifier/** -text
+projects/keepkey-vault/monero-cli/vendor-source/** -text
+projects/keepkey-vault/monero-cli/*-LICENSES.txt -text
+projects/keepkey-vault/monero-cli/*-manifest.json -text
+scripts/build-monero-host-adapter.py -text
+scripts/build-monero-core-verifier.py -text

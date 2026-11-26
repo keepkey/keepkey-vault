@@ -727,6 +727,21 @@ if (Test-Path $wrapperFile) {
     $filesToSign += Get-Item $wrapperFile
 }
 
+# Monero raw-hash policy: these PE files ship byte-for-byte as reviewed, because Desktop
+# checks each one against a pinned sha256 before running or loading it (monero-tools.json pins
+# the official wallet RPC and node; the manifests pin the host adapter and Core verifier).
+# A signature changes those bytes, and Windows has no sealed receipt like the macOS app seal.
+$MoneroRawPinned = @{
+    "monero-tools" = @("monero-wallet-rpc.exe", "monerod.exe", "monero-host-adapter.exe")
+    "monero-device" = @("monero_core_verify.dll")
+}
+$filesToSign = @($filesToSign | Where-Object {
+    $parent = Split-Path (Split-Path $_.FullName -Parent) -Leaf
+    $keep = -not ($MoneroRawPinned.ContainsKey($parent) -and $MoneroRawPinned[$parent] -contains $_.Name)
+    if (-not $keep) { Write-Host "    [SKIP] Monero raw-hash pinned (must stay unsigned): $($_.Name)" -ForegroundColor Gray }
+    $keep
+})
+
 Write-Host "    Found $($filesToSign.Count) files to sign" -ForegroundColor Gray
 
 $signedCount = 0
@@ -757,6 +772,25 @@ Write-Host "    Signed: $signedCount, Failed: $failedCount" -ForegroundColor $(i
 # (e.g. when iterating on a build machine without the USB token plugged in).
 if ($failedCount -gt 0 -and -not $AllowSignFailures -and -not $SkipSign) {
     throw "Aborting: $failedCount file(s) failed to sign. Re-run with -AllowSignFailures if this is intentional."
+}
+
+# Monero gate, after signing: the reviewed helpers must still match their pins, and the
+# packaged bin\bun.exe must load monero_core_verify.dll with the 7544-byte plan ABI.
+# KEEPKEY_REQUIRE_MONERO_SIDECAR=1 also fails a build that has no Monero files at all.
+Write-Step "Checking Monero signing files"
+$MoneroAppDir = Join-Path $BuildDir "Resources\app"
+$requireMonero = $env:KEEPKEY_REQUIRE_MONERO_SIDECAR -eq "1"
+$moneroWorker = Join-Path $MoneroAppDir "monero-cli.exe"
+if ($requireMonero -and -not (Test-Path $moneroWorker)) {
+    throw "Release gate failed: KEEPKEY_REQUIRE_MONERO_SIDECAR=1 but $moneroWorker is missing. Run python monero-cli/prepare.py, stage the reviewed helpers and bun run monero:build first."
+}
+if (Test-Path $moneroWorker) {
+    $moneroArgs = @((Join-Path $ProjectDir "scripts\check-monero-bundle.ts"), $MoneroAppDir)
+    if ($requireMonero) { $moneroArgs += "--require" }
+    bun @moneroArgs
+    if ($LASTEXITCODE -ne 0) { throw "Release gate failed: Monero signing files are missing, altered or do not load" }
+} else {
+    Write-Host "    [SKIP] No Monero sidecar in this build; Desktop shows Monero as unavailable" -ForegroundColor Yellow
 }
 
 # ============================================================================

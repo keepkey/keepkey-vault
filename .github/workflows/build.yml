@@ -898,6 +898,144 @@ jobs:
           path: modules/device-protocol/lib
           retention-days: 3
 
+  monero-native-win32-x64:
+    # Builds the Windows Monero helpers from the seven pinned archives with MSYS2
+    # UCRT64 (MinGW-w64 GCC), fully static: monero-host-adapter.exe (plan decoder)
+    # and monero_core_verify.dll (independent Core verifier). It prints each file's
+    # full sha256, size, PE imports and exports. The first run's values get pinned in
+    # a reviewed commit as the manifests' win32-x64 entries; every later build must
+    # reproduce those bytes exactly. Outputs are cached on the exact build inputs, so
+    # only a change to a script, native source or manifest rebuilds (~1-2 h).
+    # The artifact name must never match the release job's keepkey-vault-* pattern.
+    name: Monero native helpers (win32-x64)
+    runs-on: windows-2022
+    timeout-minutes: 180
+    permissions:
+      contents: read
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Cache built helpers
+        id: native-cache
+        uses: actions/cache@v4
+        with:
+          path: D:\xmr\out
+          key: monero-native-win32-x64-${{ hashFiles('scripts/build-monero-host-adapter.py', 'scripts/build-monero-core-verifier.py', 'projects/keepkey-vault/native/monero-host-adapter/**', 'projects/keepkey-vault/native/monero-core-verifier/**', 'projects/keepkey-vault/monero-cli/host-adapter-manifest.json', 'projects/keepkey-vault/monero-cli/core-verifier-manifest.json') }}
+
+      # zeromq, libsodium and unbound only satisfy Core's CMake configure. The final
+      # links drop every MSYS2 library except Windows system import libraries (the
+      # build reports what it dropped), and the import check fails on any non-system DLL.
+      # msys perl and make build OpenSSL; no git, so Core's version string cannot pick up
+      # this repository's commit.
+      - name: Install MSYS2 UCRT64 toolchain
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: false
+          install: >-
+            make perl
+            mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-cmake mingw-w64-ucrt-x86_64-pkgconf
+            mingw-w64-ucrt-x86_64-python
+            mingw-w64-ucrt-x86_64-zeromq mingw-w64-ucrt-x86_64-libsodium mingw-w64-ucrt-x86_64-unbound
+
+      - name: Cache pinned source archives
+        if: steps.native-cache.outputs.cache-hit != 'true'
+        uses: actions/cache@v4
+        with:
+          path: D:\xmr\archives
+          key: monero-archives-${{ hashFiles('projects/keepkey-vault/monero-cli/host-adapter-manifest.json', 'projects/keepkey-vault/monero-cli/core-verifier-manifest.json') }}
+
+      - name: Fetch and verify the pinned source archives
+        if: steps.native-cache.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          python - <<'EOF'
+          import hashlib, json, pathlib, urllib.request
+          root = pathlib.Path("projects/keepkey-vault/monero-cli")
+          pins, sources = {}, {}
+          for name in ["host-adapter-manifest.json", "core-verifier-manifest.json"]:
+              source = json.loads((root / name).read_text())["source"]
+              pins.update(source["archivesSha256"]); sources.update(source.get("archiveSources", {}))
+          out = pathlib.Path("D:/xmr/archives"); out.mkdir(parents=True, exist_ok=True)
+          for name, expected in sorted(pins.items()):
+              path = out / name
+              if not path.is_file() or hashlib.sha256(path.read_bytes()).hexdigest() != expected:
+                  urllib.request.urlretrieve(sources[name], path)
+              actual = hashlib.sha256(path.read_bytes()).hexdigest()
+              if actual != expected:
+                  raise SystemExit(f"{name}: sha256 {actual} is not the pinned {expected}")
+              print("ok", expected, name)
+          EOF
+
+      - name: Build host adapter and Core verifier
+        if: steps.native-cache.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          mkdir -p /d/xmr/out
+          python scripts/build-monero-host-adapter.py --target win32-x64 --jobs 4 \
+            --archive-dir /d/xmr/archives --work-dir /d/xmr/ha --output /d/xmr/out/monero-host-adapter.exe
+          cp /d/xmr/ha/result.json /d/xmr/out/host-adapter-result.json
+          python scripts/build-monero-core-verifier.py --target win32-x64 --jobs 4 \
+            --archive-dir /d/xmr/archives --work-dir /d/xmr/vf --output /d/xmr/out/monero_core_verify.dll
+          cp /d/xmr/vf/result.json /d/xmr/out/core-verifier-result.json
+
+      - name: Upload build logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: monero-native-win32-x64-logs
+          path: |
+            D:\xmr\ha\*.log
+            D:\xmr\ha\result.json
+            D:\xmr\vf\*.log
+            D:\xmr\vf\result.json
+            D:\xmr\ha\core-build\CMakeFiles\monero_host_adapter.dir\link.txt
+            D:\xmr\vf\core-build\CMakeFiles\monero_core_verify.dir\link.txt
+          if-no-files-found: ignore
+          retention-days: 7
+
+      # Prints what a reviewer pins. Once the manifests carry win32-x64 entries,
+      # any byte difference fails here (reproducibility gate).
+      - name: Report hashes and check them against the reviewed pins
+        run: |
+          set -euo pipefail
+          objdump -p /d/xmr/out/monero-host-adapter.exe | grep -E 'file format|DLL Name'
+          objdump -p /d/xmr/out/monero_core_verify.dll | grep -E 'file format|DLL Name|\] '
+          python - <<'EOF'
+          import hashlib, json, pathlib
+          out, root, failed = pathlib.Path("D:/xmr/out"), pathlib.Path("projects/keepkey-vault/monero-cli"), False
+          for manifest, result in [("host-adapter-manifest.json", "host-adapter-result.json"), ("core-verifier-manifest.json", "core-verifier-result.json")]:
+              built = json.loads((out / result).read_text())
+              path = out / pathlib.Path(built["path"]).name
+              sha, size = hashlib.sha256(path.read_bytes()).hexdigest(), path.stat().st_size
+              print(json.dumps({"file": path.name, "sha256": sha, "size": size, "dependencies": built["dependencies"],
+                                "exports": built.get("exports"), "droppedLinkInputs": built["droppedLinkInputs"],
+                                "compiler": built["compiler"], "msys2Packages": built["msys2Packages"]}, indent=2))
+              pin = json.loads((root / manifest).read_text())["files"].get("win32-x64")
+              if not pin:
+                  print(f"::warning::{manifest} has no win32-x64 entry yet. Review, then pin {path.name}: sha256 {sha}, size {size}")
+              elif pin["filename"] != path.name or pin["sha256"] != sha or pin["size"] != size:
+                  print(f"::error::{path.name} is {sha} ({size} bytes), not the reviewed pin {pin['sha256']} ({pin['size']} bytes)")
+                  failed = True
+          raise SystemExit(1 if failed else 0)
+          EOF
+
+      - name: Upload Monero native helpers
+        uses: actions/upload-artifact@v4
+        with:
+          name: monero-native-win32-x64
+          path: |
+            D:\xmr\out\monero-host-adapter.exe
+            D:\xmr\out\monero_core_verify.dll
+            D:\xmr\out\host-adapter-result.json
+            D:\xmr\out\core-verifier-result.json
+          if-no-files-found: error
+          retention-days: 14
+
   windows-unsigned:
     # Runs scripts/build-windows-production.ps1 -SkipSign, as the Windows box
     # does minus signing, so a broken Windows build shows up before the box.
@@ -905,7 +1043,7 @@ jobs:
     # still built and signed separately on the Windows box. Its CI artifact
     # must not match the release job's keepkey-vault-* download pattern.
     name: Windows x64 (unsigned build check)
-    needs: device-protocol-lib
+    needs: [device-protocol-lib, monero-native-win32-x64]
     runs-on: windows-2022
     timeout-minutes: 150
     permissions:
@@ -969,11 +1107,42 @@ jobs:
           tar -xf "$dir\zig.zip" -C $dir
           & "$dir\zig-x86_64-windows-0.15.1\zig.exe" version
 
+      - name: Download Monero native helpers
+        uses: actions/download-artifact@v4
+        with:
+          name: monero-native-win32-x64
+          path: .reviewed-monero
+
+      # Official wallet RPC and node (signature- and hash-checked), the Monero worker,
+      # and the reviewed native helpers once their win32-x64 pins exist. Until then the
+      # build ships the wallet tools and Desktop keeps Monero unavailable.
+      - name: Prepare Monero tools and stage the reviewed helpers
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd projects/keepkey-vault
+          python monero-cli/prepare.py
+          if bun -e "const a=require('./monero-cli/host-adapter-manifest.json'),v=require('./monero-cli/core-verifier-manifest.json');process.exit(a.files['win32-x64']&&v.files['win32-x64']?0:1)"; then
+            bun scripts/stage-monero-adapter.ts --require --source "$GITHUB_WORKSPACE/.reviewed-monero/monero-host-adapter.exe"
+            bun scripts/stage-monero-core-verifier.ts --source "$GITHUB_WORKSPACE/.reviewed-monero/monero_core_verify.dll"
+            echo "MONERO_CORE_VERIFY_DIR=$PWD/monero-device-bundle" >> "$GITHUB_ENV"
+            echo "KEEPKEY_REQUIRE_MONERO_SIDECAR=1" >> "$GITHUB_ENV"
+          else
+            echo "::warning::The manifests have no win32-x64 Monero helper pins yet; this build keeps Monero unavailable"
+          fi
+          bun run monero:build
+
       - name: Build (unsigned)
         shell: pwsh
         run: |
           ./scripts/build-windows-production.ps1 -SkipSign
           if ($LASTEXITCODE -ne 0) { throw "build-windows-production.ps1 failed ($LASTEXITCODE)" }
+
+      - name: Smoke-test packaged Monero tools without developer overrides
+        shell: bash
+        run: |
+          cd projects/keepkey-vault
+          bun monero-cli/package-smoke.ts --app-dir="$PWD/_build/dev-win-x64/keepkey-vault-dev/Resources/app"
 
       - name: Upload Windows build
         if: always()

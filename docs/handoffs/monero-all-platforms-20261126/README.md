@@ -1,7 +1,8 @@
 # Monero signing on every Desktop platform: implementation plan
 
-Repo root: `/Users/highlander/WebstormProjects/keepkey-stack/projects/keepkey-vault-v11-a8-int`
-App: `/Users/highlander/WebstormProjects/keepkey-stack/projects/keepkey-vault-v11-a8-int/projects/keepkey-vault`
+Paths below are relative to the repository root (`keepkey/keepkey-vault`). The app is `projects/keepkey-vault`.
+
+> **Status (feat/monero-windows):** win32-x64 is implemented: build-script targets, runtime gates, packaging, the raw-hash signing exclusion, CI jobs `monero-native-win32-x64` and windows-unsigned staging, and tests. The manifests have no `win32-x64` entries yet; they get pinned from the first green `monero-native-win32-x64` run in a reviewed commit, and only then does Windows show Monero as available. linux-x64 and darwin-x64 are not started. Publishing a `monero-native-<date>` release is the owner's decision; CI produces only workflow artifacts.
 
 ## 1. Why
 
@@ -39,8 +40,8 @@ Pin the MSYS2 package versions (or use a snapshot) and record them in the manife
 ### (a) Build scripts take a target
 
 Files:
-- `/Users/highlander/WebstormProjects/keepkey-stack/projects/keepkey-vault-v11-a8-int/scripts/build-monero-host-adapter.py`
-- `/Users/highlander/WebstormProjects/keepkey-stack/projects/keepkey-vault-v11-a8-int/scripts/build-monero-core-verifier.py`
+- `scripts/build-monero-host-adapter.py`
+- `scripts/build-monero-core-verifier.py`
 
 **Platform selection**
 - Replace the `sys.platform != "darwin"` checks (host-adapter `:61`, verifier `:30`) and the hard-coded `manifest['files']['darwin-arm64']` lookups (host-adapter `:59`, verifier `:29`) with a target key: `win32-x64`, `linux-x64`, `darwin-x64` or `darwin-arm64`.
@@ -75,8 +76,8 @@ On win32 the sources have only `extern "C"` and no dllexport (`native/monero-cor
 ### (b) Manifests: one `files` entry per platform
 
 Files:
-- `/Users/highlander/WebstormProjects/keepkey-stack/projects/keepkey-vault-v11-a8-int/projects/keepkey-vault/monero-cli/host-adapter-manifest.json`
-- `/Users/highlander/WebstormProjects/keepkey-stack/projects/keepkey-vault-v11-a8-int/projects/keepkey-vault/monero-cli/core-verifier-manifest.json`
+- `projects/keepkey-vault/monero-cli/host-adapter-manifest.json`
+- `projects/keepkey-vault/monero-cli/core-verifier-manifest.json`
 
 Add entries for `win32-x64`, `linux-x64` and `darwin-x64`:
 
@@ -95,18 +96,18 @@ Also add `archiveSources` URLs for all seven pinned archives. Today only openssl
 
 ### (c) Runtime gates and file names
 
-`/Users/highlander/WebstormProjects/keepkey-stack/projects/keepkey-vault-v11-a8-int/projects/keepkey-vault/src/bun/monero-device-signing.ts`
+`projects/keepkey-vault/src/bun/monero-device-signing.ts`
 - `:132`: remove the `process.platform!=='darwin'||process.arch!=='arm64'` early return and let the manifest decide. The lookup roots at `:133` already work on any platform.
 - `:119-120` `checkedLibrary`: skip the `0o022` mode check on win32, as `monero-sidecar.ts:38` and `monero-node.ts:32` already do.
 - `:162-164` research prover path: per the comment at `:128`, capability firmware needs only the core verifier, so `libmonero_device_proof.dylib` is out of scope for production. Leave this path gated to darwin-arm64.
 - Note: `VERIFY_SHA` at `:17` is a different build from the manifest verifier. If that path is ever ported, it needs a second pin per platform; it cannot reuse the manifest entry.
 
-`/Users/highlander/WebstormProjects/keepkey-stack/projects/keepkey-vault-v11-a8-int/projects/keepkey-vault/src/bun/monero-core-verifier-artifact.ts`
+`projects/keepkey-vault/src/bun/monero-core-verifier-artifact.ts`
 - `:10,14-17` `moneroCoreVerifierHostSupported`: make `minimumMacosVersion`/`minimumDarwinMajor` optional and apply them only to darwin keys. Today `os.release()` on Windows (`10.0.x`) and on Linux (kernel major) fails the check.
 - `:20-21` `regular()`: add the win32 mode exemption.
 - `:58-69` signed fallback: this path is macOS-only (it uses codesign). Use the raw-hash policy on win32 and linux (see (d)).
 
-`/Users/highlander/WebstormProjects/keepkey-stack/projects/keepkey-vault-v11-a8-int/projects/keepkey-vault/src/bun/monero-node.ts`
+`projects/keepkey-vault/src/bun/monero-node.ts`
 - `:59` (`/Volumes` check) and `:92`/`:103` (non-linux process-command lookup): confirm what they do on win32 (UNCONFIRMED).
 
 No change needed:
@@ -116,7 +117,7 @@ No change needed:
 
 ### (d) Staging, verification and packaging
 
-**`electrobun.config.ts`** (`/Users/highlander/WebstormProjects/keepkey-stack/projects/keepkey-vault-v11-a8-int/projects/keepkey-vault/electrobun.config.ts`)
+**`electrobun.config.ts`** (`projects/keepkey-vault/electrobun.config.ts`)
 - `:44,54` (adapter) and `:63,69` (verifier) hard-code `monero-host-adapter` and `libmonero_core_verify.dylib`. Derive them from `hostAdapterArtifact().filename` / `moneroCoreVerifierArtifact().filename`. Otherwise the `.exe` and `.dll` are silently left out of the package.
 - The wallet tools already use `.exe` via `isWindows` (`:35-38,48`).
 
@@ -147,7 +148,7 @@ No change needed: `scripts/stage-monero-adapter.ts` and `scripts/stage-monero-co
 
 ### (e) CI job that builds and uploads
 
-File: `/Users/highlander/WebstormProjects/keepkey-stack/projects/keepkey-vault-v11-a8-int/.github/workflows/build.yml`
+File: `.github/workflows/build.yml`
 
 New job `monero-native-win32-x64`:
 - `runs-on: windows-2022`, `timeout-minutes: 120`, no `needs`.
@@ -158,7 +159,7 @@ New job `monero-native-win32-x64`:
 - Upload the artifact `monero-native-win32-x64`.
 - First run reports the hashes, which are pinned in a reviewed commit. Later runs must match the pins (reproducibility gate).
 
-After review, publish the bytes to a new `monero-native-<date>` tag:
+After review, the owner may choose to publish the bytes to a new `monero-native-<date>` tag (the port work stops at CI artifacts and never publishes):
 - pre-release, never Latest
 - per-platform asset names such as `monero-host-adapter-win32-x64.exe` and `monero_core_verify-win32-x64.dll`, which never collide with app asset names
 - bump `MONERO_NATIVE_RELEASE_TAG` at `:33`
@@ -201,7 +202,7 @@ App-relative paths:
 - the OpenSSL pinning fix
 - the darwin-x64 build (Intel runner)
 - the linux-x64 build (container)
-- running the Windows build on the windows-2022 runner, reading its hashes and imports, pinning them, and publishing the pre-release tag
+- running the Windows build on the windows-2022 runner, reading its hashes and imports, pinning them, and (owner's decision) publishing the pre-release tag
 - the CI package smoke test on Windows
 
 **Needs the Windows 11 PC:**
@@ -217,7 +218,7 @@ App-relative paths:
 - The owner must approve any real-money send before step 8.
 
 **Steps**
-1. Download the `ci-windows-unsigned` artifact from the green `build.yml` run on the branch. Its URL is UNCONFIRMED until the run exists; open `https://github.com/keepkey/keepkey-vault/actions/workflows/build.yml` and choose that run. The repo slug is UNCONFIRMED.
+1. Download the `ci-windows-unsigned` artifact from the green `build.yml` run on the branch. Its URL is UNCONFIRMED until the run exists; open `https://github.com/keepkey/keepkey-vault/actions/workflows/build.yml` and choose that run. The repo is `keepkey/keepkey-vault`.
 2. Record the artifact's full sha256 (`Get-FileHash -Algorithm SHA256 <file>` in PowerShell). Install the unsigned build. SmartScreen will warn because the build is unsigned.
 3. Check the install folder for `monero-tools\monero-host-adapter.exe` and `monero-device\monero_core_verify.dll`. Run `Get-FileHash` on both and compare each against the full sha256 in its `win32-x64` manifest entry. The exact install root is UNCONFIRMED.
 4. Start KeepKey Desktop, connect the KeepKey and unlock it with the PIN.

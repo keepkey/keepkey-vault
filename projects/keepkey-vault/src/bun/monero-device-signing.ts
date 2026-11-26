@@ -117,7 +117,7 @@ export function deviceOutputBindings(plan:MoneroPlan,txKey:Uint8Array,options:{v
 }
 
 function checkedLibrary(file:string,hash:string) {
- try {const stat=lstatSync(file);return stat.isFile()&&!stat.isSymbolicLink()&&!(stat.mode&0o022)&&createHash('sha256').update(readFileSync(file).toString('hex'),'hex').digest('hex')===hash}catch{return false}
+ try {const stat=lstatSync(file);return stat.isFile()&&!stat.isSymbolicLink()&&(process.platform==='win32'||!(stat.mode&0o022))&&createHash('sha256').update(readFileSync(file).toString('hex'),'hex').digest('hex')===hash}catch{return false}
 }
 const loadProver=(file:string)=>dlopen(file,{monero_device_proof:{args:[FFIType.ptr,FFIType.ptr,FFIType.ptr],returns:FFIType.i32},monero_device_output_bindings_v2:{args:[FFIType.ptr,FFIType.ptr,FFIType.ptr,FFIType.u32,FFIType.ptr,FFIType.ptr],returns:FFIType.i32}})
 const loadVerifier=(file:string)=>dlopen(file,{monero_core_verify:{args:[FFIType.ptr,FFIType.ptr,FFIType.u64,FFIType.ptr],returns:FFIType.i32},monero_core_plan_size:{args:[],returns:FFIType.u64}})
@@ -128,8 +128,8 @@ export interface MoneroCoreVerifier {
 /** Capability firmware needs only the hash-pinned Core verifier. It never loads the research host prover. */
 export function createMoneroCoreVerifier(options:{directory?:string;text?:MoneroText}={}):MoneroCoreVerifier {
  const text=options.text??(s=>s)
+ // The manifest decides which platforms have a reviewed verifier; no platform is assumed here.
  const library=()=>{
-  if(process.platform!=='darwin'||process.arch!=='arm64')return null
   const roots=options.directory?[options.directory]:[resolve(import.meta.dir,'../monero-device'),join(dirname(process.execPath),'monero-device'),resolve(process.cwd(),'monero-device-bundle')]
   for(const root of roots){const file=verifiedMoneroCoreVerifierFile(root);if(file)return file}
   return null
