@@ -2983,7 +2983,7 @@ function PersonalDashboard({ capabilities, isEmulator, onLoaded, watchOnly, watc
 						pointerEvents="none"
 						zIndex={0}
 						aria-hidden="true"
-						style={{ background: 'radial-gradient(ellipse 460px 80% at 50% 45%, rgba(11,11,14,0.86) 0%, rgba(11,11,14,0.7) 50%, rgba(11,11,14,0) 100%)' }}
+						style={{ background: 'radial-gradient(ellipse 420px 44% at 50% 40%, rgba(11,11,14,0.6) 0%, rgba(11,11,14,0.32) 55%, rgba(11,11,14,0) 100%)' }}
 					/>
 				)}
 				{/* View picker — top center of the hero area */}
