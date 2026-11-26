@@ -2698,5 +2698,10 @@
   "mbac398ff": "Your wallet",
   "mc824d131": "Let's set up your hardware wallet. It takes about 5 minutes.",
   "m69dbec3c": "Find each letter on your KeepKey, then click the same position here.",
-  "m80be4c74": "Position {{n}}"
+  "m80be4c74": "Position {{n}}",
+  "m8baeeead": "Created {{date}}",
+  "m1a580d8d": "Changed {{date}}",
+  "m7ff0af6c": "KeepKey creates the password. Use it when you sign up or change it on the website.",
+  "mb1ed86b7": "KeepKey creates a new password for this entry. The current one is no longer shown here, so copy it first if the website asks for it.",
+  "mafc03e38": "Create new password"
 }

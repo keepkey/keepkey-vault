@@ -502,5 +502,10 @@
   "m3249fc9f": "Reti nascoste ({{count}})",
   "mdc800411": "Mostra {{chain}}",
   "m29742e5c": "Mostra",
-  "macd079af": "Vault salva l’archivio cifrato delle password nel proprio database locale. Per recuperarlo servono i dati dell’archivio, lo stesso seed e la stessa passphrase del portafoglio."
+  "macd079af": "Vault salva l’archivio cifrato delle password nel proprio database locale. Per recuperarlo servono i dati dell’archivio, lo stesso seed e la stessa passphrase del portafoglio.",
+  "m8baeeead": "Creata il {{date}}",
+  "m1a580d8d": "Modificata il {{date}}",
+  "m7ff0af6c": "KeepKey crea la password. Usala quando ti registri o quando la cambi sul sito.",
+  "mb1ed86b7": "KeepKey crea una nuova password per questa voce. Quella attuale non verrà più mostrata qui, quindi copiala prima se il sito la richiede.",
+  "mafc03e38": "Crea nuova password"
 }

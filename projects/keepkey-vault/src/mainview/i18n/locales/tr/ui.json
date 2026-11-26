@@ -507,5 +507,10 @@
   "m3249fc9f": "Gizli ağlar ({{count}})",
   "mdc800411": "{{chain}} ağını göster",
   "m29742e5c": "Göster",
-  "macd079af": "Vault, şifreli parola kasasını yerel veritabanında saklar. Kurtarma için kasa verileri, aynı kurtarma sözcükleri ve aynı cüzdan parola ifadesi gerekir."
+  "macd079af": "Vault, şifreli parola kasasını yerel veritabanında saklar. Kurtarma için kasa verileri, aynı kurtarma sözcükleri ve aynı cüzdan parola ifadesi gerekir.",
+  "m8baeeead": "Oluşturulma: {{date}}",
+  "m1a580d8d": "Değiştirilme: {{date}}",
+  "m7ff0af6c": "Parolayı KeepKey oluşturur. Web sitesinde kaydolurken veya parolayı değiştirirken kullanın.",
+  "mb1ed86b7": "KeepKey bu kayıt için yeni bir parola oluşturur. Mevcut parola artık burada gösterilmez; web sitesi isterse önce kopyalayın.",
+  "mafc03e38": "Yeni parola oluştur"
 }

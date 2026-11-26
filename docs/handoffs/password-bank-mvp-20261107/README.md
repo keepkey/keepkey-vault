@@ -2,7 +2,7 @@
 
 The MVP adds a default-off **Password manager** switch in **Settings → Feature Flags**. Switching it on adds **Passwords** inside the existing lock button’s **Vault** panel immediately, alongside **Seed vault (BIP-85)**. Switching it off removes that section and clears the unlocked bank and password cache immediately. No restart or reload is required for either operation.
 
-This flag is independent of Monero. Turning it off clears the unlocked Password Bank and cache. Use the current manual rotation workflow in Desktop. [Manual rotation handoff](../password-bank-manual-rotation-20261125.md)
+This flag is independent of Monero. Turning it off clears the unlocked Password Bank and cache. Desktop is a plain password manager: Add creates a password on the KeepKey, each entry shows when it was created and last changed, and Change password replaces it in one step. Users set passwords on websites themselves.
 
 The initial isolated password branch and package remain available for historical reproduction.
 
@@ -92,7 +92,7 @@ Expiry evicts Vault’s cache. Rehydration reproduces the password for the same 
 
 The Password Bank tests in `make test-unit` cover device confirmation, wallet isolation, encrypted backup recovery, legacy and current password generation, rotation journaling, cache expiry and newest-first ordering. The MCP tests verify that retired password operations are rejected.
 
-Run `bun __tests__/fixtures/password-mvp/server.ts` from the Vault package to start the in-memory UI fixture. Then run `smoke.mjs` in the same directory to check masked Copy, database failure handling and manual rotation. The smoke runner accepts `PLAYWRIGHT_MODULE`, `PLAYWRIGHT_TEST_MODULE` and `CHROME_EXECUTABLE` overrides.
+Run `bun __tests__/fixtures/password-mvp/server.ts` from the Vault package to start the in-memory UI fixture. Then run `smoke.mjs` in the same directory to check masked Copy, database failure handling and the one-step password change. The smoke runner accepts `PLAYWRIGHT_MODULE`, `PLAYWRIGHT_TEST_MODULE` and `CHROME_EXECUTABLE` overrides.
 
 ## Historical automated validation (November 2026)
 

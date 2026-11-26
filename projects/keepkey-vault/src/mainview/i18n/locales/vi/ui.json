@@ -507,5 +507,10 @@
   "m3249fc9f": "Mạng đã ẩn ({{count}})",
   "mdc800411": "Hiện {{chain}}",
   "m29742e5c": "Hiện",
-  "macd079af": "Vault lưu kho mật khẩu đã mã hóa trong cơ sở dữ liệu cục bộ. Để khôi phục, cần có dữ liệu kho, cùng cụm từ khôi phục và mật khẩu bổ sung của ví."
+  "macd079af": "Vault lưu kho mật khẩu đã mã hóa trong cơ sở dữ liệu cục bộ. Để khôi phục, cần có dữ liệu kho, cùng cụm từ khôi phục và mật khẩu bổ sung của ví.",
+  "m8baeeead": "Tạo ngày {{date}}",
+  "m1a580d8d": "Đổi ngày {{date}}",
+  "m7ff0af6c": "KeepKey tạo mật khẩu. Hãy dùng nó khi đăng ký hoặc đổi mật khẩu trên trang web.",
+  "mb1ed86b7": "KeepKey sẽ tạo mật khẩu mới cho mục này. Mật khẩu hiện tại sẽ không còn hiển thị ở đây, vì vậy hãy sao chép trước nếu trang web yêu cầu.",
+  "mafc03e38": "Tạo mật khẩu mới"
 }

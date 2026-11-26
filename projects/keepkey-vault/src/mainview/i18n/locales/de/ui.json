@@ -496,5 +496,10 @@
   "m3249fc9f": "Ausgeblendete Netzwerke ({{count}})",
   "mdc800411": "{{chain}} einblenden",
   "m29742e5c": "Einblenden",
-  "macd079af": "Vault speichert den verschlüsselten Passwortspeicher in seiner lokalen Datenbank. Für die Wiederherstellung sind die gespeicherten Daten, dieselben Wiederherstellungswörter und dieselbe Wallet-Passphrase erforderlich."
+  "macd079af": "Vault speichert den verschlüsselten Passwortspeicher in seiner lokalen Datenbank. Für die Wiederherstellung sind die gespeicherten Daten, dieselben Wiederherstellungswörter und dieselbe Wallet-Passphrase erforderlich.",
+  "m8baeeead": "Erstellt am {{date}}",
+  "m1a580d8d": "Geändert am {{date}}",
+  "m7ff0af6c": "KeepKey erstellt das Passwort. Verwende es bei der Registrierung oder beim Ändern auf der Website.",
+  "mb1ed86b7": "KeepKey erstellt ein neues Passwort für diesen Eintrag. Das aktuelle wird hier nicht mehr angezeigt – kopiere es vorher, falls die Website danach fragt.",
+  "mafc03e38": "Neues Passwort erstellen"
 }

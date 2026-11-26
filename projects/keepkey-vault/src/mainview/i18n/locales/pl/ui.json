@@ -504,5 +504,10 @@
   "m3249fc9f": "Ukryte sieci ({{count}})",
   "mdc800411": "Pokaż {{chain}}",
   "m29742e5c": "Pokaż",
-  "macd079af": "Vault przechowuje zaszyfrowany sejf haseł w lokalnej bazie danych. Odzyskanie wymaga danych sejfu, tego samego ziarna i tego samego hasła portfela."
+  "macd079af": "Vault przechowuje zaszyfrowany sejf haseł w lokalnej bazie danych. Odzyskanie wymaga danych sejfu, tego samego ziarna i tego samego hasła portfela.",
+  "m8baeeead": "Utworzono {{date}}",
+  "m1a580d8d": "Zmieniono {{date}}",
+  "m7ff0af6c": "KeepKey tworzy hasło. Użyj go przy rejestracji lub zmianie hasła na stronie.",
+  "mb1ed86b7": "KeepKey utworzy nowe hasło dla tego wpisu. Obecne nie będzie już tu widoczne, więc najpierw je skopiuj, jeśli strona o nie poprosi.",
+  "mafc03e38": "Utwórz nowe hasło"
 }

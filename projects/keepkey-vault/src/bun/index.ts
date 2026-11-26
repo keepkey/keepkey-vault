@@ -9136,14 +9136,14 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			passwordBankLock: async () => { passwordBank.lock(); return passwordBank.view() },
 			passwordBankGenerate: async (params) => passwordBank.generate(params.count, params.ttlMinutes),
 			passwordBankAssign: async (params) => passwordBank.assign(params.origin, params.account, params.reviewDays),
-			passwordBankRehydrate: async (params) => passwordBank.rehydrate(params.id, params.pending === true, params.ttlMinutes),
-			passwordBankReveal: async (params) => passwordBank.reveal(params.id, params.pending === true),
+			passwordBankRehydrate: async (params) => passwordBank.rehydrate(params.id, params.ttlMinutes),
+			passwordBankReveal: async (params) => passwordBank.reveal(params.id),
 			passwordBankCopy: async (params) => {
-				const { password } = passwordBank.reveal(params.id, params.pending === true)
+				const { password } = passwordBank.reveal(params.id)
 				Utils.clipboardWriteText(password)
 				if (Utils.clipboardReadText() !== password) throw new Error('Clipboard unavailable')
 			},
-			passwordBankRotate: async (params) => passwordBank.rotate(params.id, params.action, params.confirmed === true),
+			passwordBankChange: async (params) => passwordBank.change(params.id),
 			passwordBankImport: async (params) => passwordBank.unlock(false, params.json),
 			// One-time: mark the passphrase/hidden-wallet intro dialog as seen so it
 			// never shows again (also set when the OOB passphrase card is completed).

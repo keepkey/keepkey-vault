@@ -2562,5 +2562,10 @@
   "mbac398ff": "Sua carteira",
   "mc824d131": "Vamos configurar sua carteira de hardware. Leva cerca de 5 minutos.",
   "m69dbec3c": "Encontre cada letra na sua KeepKey e clique aqui na mesma posição.",
-  "m80be4c74": "Posição {{n}}"
+  "m80be4c74": "Posição {{n}}",
+  "m8baeeead": "Criada em {{date}}",
+  "m1a580d8d": "Alterada em {{date}}",
+  "m7ff0af6c": "O KeepKey cria a senha. Use-a ao se cadastrar ou ao alterá-la no site.",
+  "mb1ed86b7": "O KeepKey cria uma nova senha para esta entrada. A atual deixará de aparecer aqui, então copie-a antes se o site pedir.",
+  "mafc03e38": "Criar nova senha"
 }

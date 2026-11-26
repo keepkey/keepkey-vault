@@ -367,10 +367,10 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       passwordBankLock: { params: void; response: PasswordBankView }
       passwordBankGenerate: { params: { count: number; ttlMinutes: number }; response: PasswordBankView }
       passwordBankAssign: { params: { origin: string; account: string; reviewDays: number }; response: PasswordBankView }
-      passwordBankRehydrate: { params: { id: string; pending?: boolean; ttlMinutes: number }; response: PasswordBankView }
-      passwordBankReveal: { params: { id: string; pending?: boolean }; response: { password: string; expiresAt: number } }
-      passwordBankCopy: { params: { id: string; pending?: boolean }; response: void }
-      passwordBankRotate: { params: { id: string; action: 'prepare' | 'submitted' | 'verify' | 'cancel'; confirmed?: boolean }; response: PasswordBankView }
+      passwordBankRehydrate: { params: { id: string; ttlMinutes: number }; response: PasswordBankView }
+      passwordBankReveal: { params: { id: string }; response: { password: string; expiresAt: number } }
+      passwordBankCopy: { params: { id: string }; response: void }
+      passwordBankChange: { params: { id: string }; response: PasswordBankView }
       passwordBankImport: { params: { json: string }; response: PasswordBankView }
       markPassphraseIntroShown: { params: void; response: AppSettings }
       markBtcOnboardingShown: { params: void; response: AppSettings }

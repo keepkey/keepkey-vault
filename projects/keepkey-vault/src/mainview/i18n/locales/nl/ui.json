@@ -497,5 +497,10 @@
   "m3249fc9f": "Verborgen netwerken ({{count}})",
   "mdc800411": "{{chain}} tonen",
   "m29742e5c": "Tonen",
-  "macd079af": "Vault bewaart de versleutelde wachtwoordkluis in de lokale database. Voor herstel zijn de kluisgegevens, dezelfde seed en dezelfde wachtwoordzin van de wallet nodig."
+  "macd079af": "Vault bewaart de versleutelde wachtwoordkluis in de lokale database. Voor herstel zijn de kluisgegevens, dezelfde seed en dezelfde wachtwoordzin van de wallet nodig.",
+  "m8baeeead": "Aangemaakt op {{date}}",
+  "m1a580d8d": "Gewijzigd op {{date}}",
+  "m7ff0af6c": "KeepKey maakt het wachtwoord. Gebruik het bij het aanmelden of wijzigen op de website.",
+  "mb1ed86b7": "KeepKey maakt een nieuw wachtwoord voor dit item. Het huidige wordt hier niet meer getoond, dus kopieer het eerst als de website erom vraagt.",
+  "mafc03e38": "Nieuw wachtwoord maken"
 }
