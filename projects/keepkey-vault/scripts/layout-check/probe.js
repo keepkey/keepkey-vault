@@ -2,7 +2,7 @@
   const w = window
   if (!w.__ready) return JSON.stringify({ notReady: true })
   const W = innerWidth, H = innerHeight
-  const dlg = document.querySelector('.kk-sd-panel') || document.querySelector('.kk-ap') || document.querySelector('[data-magi-swap] .kk-pf') || document.querySelector('[data-swap-panel]')
+  const dlg = document.querySelector('[data-pairing-overlay] .kk-pf') || document.querySelector('.kk-sd-panel') || document.querySelector('.kk-ap') || document.querySelector('[data-magi-swap] .kk-pf') || document.querySelector('[data-swap-panel]')
   if (!dlg) return JSON.stringify({ noDialog: true })
   const R = e => e.getBoundingClientRect()
   const box = r => ({ x: Math.round(r.left), y: Math.round(r.top), w: Math.round(r.width), h: Math.round(r.height) })

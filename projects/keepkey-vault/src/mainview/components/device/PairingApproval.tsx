@@ -1,11 +1,15 @@
 import { useUiTranslation } from "../../i18n/ui"
 import { useEffect, useState } from "react"
-import { Box, Text, VStack, Flex, Button, Image } from "@chakra-ui/react"
-import { useTranslation } from "react-i18next"
 import { Z } from "../../lib/z-index"
 import { DocsLink } from "../DocsLink"
 import { DOCS_LINKS, watch } from "../../../shared/docs-links"
 import type { PairingRequestInfo } from "../../../shared/types"
+import { Beam, PreflightList, PreflightStyles, usePreflightScroll, usePreflightShort, type PreflightRow } from "../preflight/PreflightConsole"
+import { OledText, SpinningDevice } from "../v3"
+import { pairingOrigin } from "../../../shared/pairing-origin"
+
+/** The product name: not translated. */
+const KEEPKEY = "KeepKey"
 
 interface PairingApprovalProps {
 	request: PairingRequestInfo
@@ -13,76 +17,27 @@ interface PairingApprovalProps {
 	onReject: () => void
 }
 
-const PAIRING_ANIMATIONS = `
-	@keyframes pairingOverlayIn {
-		0% { opacity: 0; }
-		100% { opacity: 1; }
-	}
-	@keyframes pairingCardIn {
-		0% { opacity: 0; transform: scale(0.92) translateY(12px); }
-		100% { opacity: 1; transform: scale(1) translateY(0); }
-	}
-	@keyframes pairingGlow {
-		0%, 100% { box-shadow: 0 0 12px 3px rgba(34,197,94,0.35); }
-		50% { box-shadow: 0 0 28px 10px rgba(34,197,94,0.6), 0 0 56px 20px rgba(34,197,94,0.12); }
-	}
-	@keyframes pairingBorderFlash {
-		0%, 100% { border-color: rgba(34,197,94,0.5); }
-		50% { border-color: rgba(34,197,94,1); }
-	}
-	@keyframes pairingIconPulse {
-		0%, 100% { transform: scale(1); filter: drop-shadow(0 0 8px rgba(34,197,94,0.4)); }
-		50% { transform: scale(1.06); filter: drop-shadow(0 0 20px rgba(34,197,94,0.7)); }
-	}
-	@keyframes pairingIconSpin {
-		0% { transform: rotate(0deg); }
-		100% { transform: rotate(360deg); }
-	}
-	@keyframes pairingRingPulse {
-		0% { transform: scale(0.8); opacity: 0.6; }
-		50% { transform: scale(1.15); opacity: 0; }
-		100% { transform: scale(0.8); opacity: 0; }
-	}
-`
-
-function PairingFallbackIcon() {
+/** A neutral app glyph: no disc, no letter. */
+function AppGlyph() {
 	return (
-		<Box position="relative" w="96px" h="96px" css={{ animation: "pairingIconPulse 2s ease-in-out infinite" }}>
-			{/* Animated ring behind icon */}
-			<Box
-				position="absolute"
-				inset="-12px"
-				borderRadius="full"
-				border="2px solid rgba(34,197,94,0.3)"
-				css={{ animation: "pairingRingPulse 2s ease-in-out infinite" }}
-			/>
-			<Flex
-				w="96px"
-				h="96px"
-				borderRadius="full"
-				bg="rgba(34,197,94,0.12)"
-				border="2px solid rgba(34,197,94,0.4)"
-				align="center"
-				justify="center"
-			>
-				<svg width="48" height="48" viewBox="0 0 24 24" fill="none">
-					{/* Chain link icon */}
-					<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" stroke="var(--teal)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-					<path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" stroke="var(--teal)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-				</svg>
-			</Flex>
-		</Box>
+		<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+			<rect x="3.5" y="4.5" width="17" height="15" rx="2.5" /><path d="M3.5 8.5h17" /><path d="M7 6.5h.01M9.5 6.5h.01" />
+		</svg>
 	)
 }
 
+/** P1 "Pairing": connect an app, on the preflight console. */
 export function PairingApproval({ request, onApprove, onReject }: PairingApprovalProps) {
-  const uiText = useUiTranslation()
-
-	const { t } = useTranslation("device")
+	const uiText = useUiTranslation()
+	const short = usePreflightShort()
+	const leftScroll = usePreflightScroll<HTMLDivElement>()
+	const rightScroll = usePreflightScroll<HTMLDivElement>()
 	const [imgError, setImgError] = useState(false)
-	const hasImage = !!request.imageUrl && !imgError
+	const icon = !!request.imageUrl && !imgError && /^(https?:|data:image\/)/i.test(request.imageUrl) ? request.imageUrl : null
+	const origin = pairingOrigin(request.url)
+	const name = (request.name || '').trim() || uiText("An app")
 
-	// Keyboard: Enter=approve, Escape=reject
+	// Keyboard: Enter connects, Escape declines.
 	useEffect(() => {
 		const handler = (e: KeyboardEvent) => {
 			if (e.key === "Enter") { e.preventDefault(); onApprove() }
@@ -92,115 +47,75 @@ export function PairingApproval({ request, onApprove, onReject }: PairingApprova
 		return () => document.removeEventListener("keydown", handler)
 	}, [onApprove, onReject])
 
-	return (
-		<Box
-			position="fixed"
-			inset="0"
-			zIndex={Z.overlay}
-			bg="rgba(0,0,0,0.85)"
-			backdropFilter="blur(8px)"
-			display="flex"
-			alignItems="center"
-			justifyContent="center"
-			css={{ animation: "pairingOverlayIn 0.25s ease-out" }}
-		>
-			<style>{PAIRING_ANIMATIONS}</style>
-			<VStack
-				bg="kk.cardBg"
-				border="2px solid"
-				borderColor="rgba(34,197,94,0.6)"
-				borderRadius="2xl"
-				p="8"
-				gap="5"
-				maxW="420px"
-				w="90vw"
-				textAlign="center"
-				css={{ animation: "pairingCardIn 0.3s ease-out, pairingGlow 2s ease-in-out infinite 0.3s, pairingBorderFlash 2s ease-in-out infinite 0.3s" }}
-			>
-				{/* App icon */}
-				<Flex justify="center" py="2">
-					{hasImage ? (
-						<Image
-							src={request.imageUrl!}
-							alt={request.name}
-							w="80px"
-							h="80px"
-							borderRadius="xl"
-							border="2px solid rgba(34,197,94,0.3)"
-							onError={() => setImgError(true)}
-						/>
-					) : (
-						<PairingFallbackIcon />
-					)}
-				</Flex>
+	// One status mark per row, most severe first (PreflightList sorts).
+	const rows: PreflightRow[] = [
+		{ key: 'keys', status: 'ok', title: uiText("No keys are shared"), detail: uiText("Your recovery phrase never leaves the KeepKey.") },
+		{ key: 'see', status: 'warn', title: uiText("Can see your addresses and balances"), detail: uiText("On the networks you enabled, without asking again.") },
+		{ key: 'sign', status: 'ok', title: uiText("Every signature still goes through your KeepKey"), detail: uiText("You review each one here and confirm it on the device.") },
+		{ key: 'off', status: 'ok', title: uiText("You can disconnect it"), detail: uiText("Settings → Paired Apps.") },
+	]
+	if (origin.kind === 'extension') rows.push({ key: 'origin', status: 'warn', attrs: { 'data-pairing-origin': 'extension' },
+		title: uiText("KeepKey Vault can’t verify this extension"),
+		detail: uiText("The name and icon come from the extension itself. Connect only if you just asked {{app}} to connect.", { app: name }) })
+	else if (origin.kind === 'none') rows.push({ key: 'origin', status: 'warn', attrs: { 'data-pairing-origin': 'none' },
+		title: uiText("No address given"),
+		detail: uiText("The app did not say where it runs. Connect only if you just asked {{app}} to connect.", { app: name }) })
 
-				{/* App name + URL */}
-				<VStack gap="1">
-					<Text fontSize="xl" fontWeight="700" color="white">
-						{request.name}
-					</Text>
-					{request.url && (
-						<Text fontSize="xs" color="kk.textMuted" fontFamily="mono" wordBreak="break-all">
-							{request.url}
-						</Text>
-					)}
-					<Flex gap="3" justify="center">
+	return (
+		<div data-pairing-overlay style={{ position: 'fixed', inset: 0, zIndex: Z.overlay, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16,
+			background: 'rgba(0,0,0,0.85)', backdropFilter: 'blur(8px)' }}>
+			<PreflightStyles />
+			<div className="kk-pf kk-pf-sg" role="dialog" aria-modal="true" aria-label={uiText("Connect an app")} style={{ width: 'min(900px, 94vw)' }}>
+				{/* ── Left: who asks, what it means, the KeepKey it reaches ── */}
+				<div className="kk-pf-left kk-pf-scroll" ref={leftScroll}>
+					<div className="kk-pf-kicker">{uiText("Connect an app")}</div>
+					<div className="kk-pf-vers kk-pf-who" aria-label={uiText("From {{from}} to {{to}}", { from: name, to: KEEPKEY })}>
+						<span className="kk-pf-app" style={{ fontSize: 15, color: 'var(--text-0)', fontWeight: 600 }}>
+							{icon
+								? <img src={icon} alt="" width={28} height={28} style={{ width: 28, height: 28, borderRadius: 6, objectFit: 'contain', flex: 'none' }} onError={() => setImgError(true)} />
+								: <span style={{ color: 'var(--text-1)', display: 'inline-grid', flex: 'none' }}><AppGlyph /></span>}
+							<span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} data-pairing-name>{name}</span>
+						</span>
+						<Beam />
+						<span className="kk-pf-acct" style={{ fontSize: 22 }}><span>{KEEPKEY}</span></span>
+					</div>
+					<p className="kk-pf-lede">
+						{uiText("{{app}} wants to see your addresses and ask you to sign. Every signature still needs your KeepKey.", { app: name })}
+					</p>
+					<div style={{ display: 'grid', gap: 10, justifyItems: 'start' }}>
+						<SpinningDevice motion="still" scale={short ? 0.66 : 0.8} label={KEEPKEY} screen={<OledText kicker="KEEPKEY" headline={uiText("Ready")} />} />
+						<span className="kk-pf-cap" style={{ maxWidth: 'none' }}>{uiText("Nothing to confirm on the device to connect. Its signatures still need it.")}</span>
+					</div>
+					<div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
 						<DocsLink href={DOCS_LINKS.settingsPairing} />
 						<DocsLink href={watch('course-11-app-connections')} label={uiText("Watch video")} />
-					</Flex>
-				</VStack>
+					</div>
+				</div>
 
-				<Flex
-					bg="rgba(34,197,94,0.1)"
-					border="1px solid rgba(34,197,94,0.25)"
-					borderRadius="lg"
-					px="4"
-					py="2"
-					w="100%"
-					justify="center"
-				>
-					<Text fontSize="sm" color="var(--teal)" fontWeight="500">
-						{t("pairing.wantsToConnect")}
-					</Text>
-				</Flex>
-
-				{/* Action buttons */}
-				<Flex gap="3" w="100%">
-					<Button
-						flex="1"
-						bg="var(--teal)"
-						color="black"
-						fontWeight="700"
-						fontSize="md"
-						size="lg"
-						h="52px"
-						borderRadius="xl"
-						_hover={{ bg: "var(--teal)" }}
-						onClick={onApprove}
-					>
-						{t("pairing.approve")}
-					</Button>
-					<Button
-						flex="1"
-						bg="rgba(239,68,68,0.12)"
-						color="var(--rose)"
-						fontWeight="600"
-						fontSize="md"
-						size="lg"
-						h="52px"
-						borderRadius="xl"
-						border="1px solid rgba(239,68,68,0.3)"
-						_hover={{ bg: "rgba(239,68,68,0.25)", borderColor: "rgba(239,68,68,0.5)" }}
-						onClick={onReject}
-					>
-						{t("pairing.reject")}
-					</Button>
-				</Flex>
-
-				<Text fontSize="xs" color="kk.textMuted">
-					{t("pairing.keyboardHint")}
-				</Text>
-			</VStack>
-		</Box>
+				{/* ── Right: what it can and cannot do, right above the decision ── */}
+				<div className="kk-pf-right kk-pf-split">
+					<div className="kk-pf-body kk-pf-scroll" ref={rightScroll}>
+						<PreflightList rows={rows} />
+						<details className="kk-pf-tech" data-pairing-tech>
+							<summary>{uiText("Technical details")}</summary>
+							<dl className="kk-pf-facts" style={{ marginTop: 8 }}>
+								<div><dt>{uiText("Name sent by the app")}</dt><dd>{request.name || '—'}</dd></div>
+								<div><dt>{uiText("Address sent by the app")}</dt><dd data-pairing-url>{request.url || '—'}</dd></div>
+								{origin.extensionId && <div><dt>{uiText("Extension ID")}</dt><dd>{origin.extensionId}</dd></div>}
+								{request.imageUrl && <div><dt>{uiText("Icon")}</dt><dd>{request.imageUrl}</dd></div>}
+							</dl>
+							<p className="kk-pf-note" style={{ marginTop: 8 }}>{uiText("These come from the app's request. KeepKey Vault doesn’t verify these.")}</p>
+						</details>
+					</div>
+					<div className="kk-pf-foot">
+						<div className="kk-pf-actions">
+							<button type="button" className="kk-pf-cancel" onClick={onReject}>{uiText("Decline")}</button>
+							<button type="button" className="kk-pf-go" onClick={onApprove}>{uiText("Connect app")}</button>
+						</div>
+						<div className="kk-pf-hint">{uiText("Enter to connect · Esc to decline")}</div>
+					</div>
+				</div>
+			</div>
+		</div>
 	)
 }

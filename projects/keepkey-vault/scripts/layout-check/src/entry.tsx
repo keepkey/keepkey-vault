@@ -8,9 +8,12 @@ import '../../../src/mainview/i18n'
 import { SwapDialog } from '../../../src/mainview/components/SwapDialog'
 import { MagiSwapDialog } from '../../../src/mainview/components/MagiSwapDialog'
 import { AssetPickerDialog } from '../../../src/mainview/components/AssetPickerDialog'
+import { PairingApproval } from '../../../src/mainview/components/device/PairingApproval'
 import { rpcRequest, ASSETS, ethEth, baseEth } from './fake-rpc'
 
 const w = window as any
+/** Any bundled square icon stands in for an app's own. */
+const PAIRING_ICON = '0520f602bb269107e002d011.png'
 const mode = new URLSearchParams(location.search).get('mode') || 'form'
 document.body.style.background = '#000'
 const wait = (ms: number) => new Promise(r => setTimeout(r, ms))
@@ -31,6 +34,9 @@ function App() {
   if (mode.startsWith('picker-from')) return <Picker side="from" />
   if (mode.startsWith('picker-to')) return <Picker side="to" />
   if (mode === 'magi') return <MagiSwapDialog open onClose={() => {}} initialFrom="HIVE" onSendBtc={() => {}} />
+  // An extension with no icon (the Skate Wallet case) and a site that sends one.
+  if (mode === 'pairing-ext') return <PairingApproval request={{ name: 'Skate Wallet', url: 'chrome-extension://iilbclbaojnjbeokklgbakballmfppnm/', imageUrl: '' }} onApprove={() => {}} onReject={() => {}} />
+  if (mode === 'pairing-web') return <PairingApproval request={{ name: 'swaps.pro', url: 'https://swaps.pro/app', imageUrl: 'assets/token-icons/' + PAIRING_ICON }} onApprove={() => {}} onReject={() => {}} />
   return <SwapDialog open onClose={() => {}} />
 }
 createRoot(document.getElementById('root')!).render(<ChakraProvider value={system}><App /></ChakraProvider>)
@@ -75,6 +81,7 @@ createRoot(document.getElementById('root')!).render(<ChakraProvider value={syste
     document.addEventListener('load', e => { if ((e.target as Element).tagName === 'IMG') w.__imgLoads++ }, true)
     await wait(2000) // 8 poll ticks
   }
+  if (mode.startsWith('pairing')) await wait(800)
   if (mode === 'magi') { await until(() => !!document.querySelector('[data-magi-swap] .kk-pf')); const i = document.querySelector('[data-magi-swap] input') as HTMLInputElement; const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!; set.call(i, '10'); i.dispatchEvent(new Event('input', { bubbles: true })); await wait(1500) }
   w.__ready = true
 })()
