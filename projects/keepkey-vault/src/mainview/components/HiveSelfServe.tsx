@@ -1,23 +1,24 @@
 /**
  * Self-serve Hive onboarding (KEEPKEY-187 / KEEPKEY-188): shown whenever the
- * sponsor refuses, so the user is never stuck. Path A here: pay for your own
- * account (account_create / create_claimed_account), signed OUTSIDE the vault
- * — the vault only builds the operation (see shared/hive-onboarding). Path B
- * (bring an existing account, KEEPKEY-188) follows.
+ * sponsor refuses, so the user is never stuck. Two paths, both signed OUTSIDE
+ * the vault — the vault only builds the operation (see shared/hive-onboarding):
+ *
+ *   A) Pay for your own account  — account_create / create_claimed_account
+ *   B) Bring your Hive account   — account_update moving active/posting/memo
  *
  * Preflight-console vocabulary (PreflightConsole) and the still SpinningDevice;
- * no new visual language.
+ * no new visual language. Hive's mark comes from ChainNode (official logo).
  */
 import { useEffect, useMemo, useRef, useState } from "react"
 import { Input, Spinner } from "@chakra-ui/react"
 import { useUiTranslation } from "../i18n/ui"
 import { rpcRequest } from "../lib/rpc"
 import { generateQRSvg } from "../lib/qr"
-import { PreflightCheck, PreflightList, PreflightStyles, type PreflightRow } from "./preflight/PreflightConsole"
+import { ChainNode, PreflightCheck, PreflightList, PreflightStyles, type PreflightRow } from "./preflight/PreflightConsole"
 import { SpinningDevice } from "./v3/SpinningDevice"
 import {
-	DEFAULT_ACCOUNT_CREATION_FEE, buildAccountCreateOp, buildCreateClaimedAccountOp,
-	hiveSignUri, hiveSignerUrl, isValidHiveAccountName, normalizeHiveAccountName, operationJson,
+	DEFAULT_ACCOUNT_CREATION_FEE, buildAccountCreateOp, buildCreateClaimedAccountOp, buildKeyRotationOp, buildOwnerRotationOp,
+	hiveSignUri, hiveSignerUrl, isValidHiveAccountName, normalizeHiveAccountName, operationJson, planKeyRotation,
 	type HiveAccountAuthorities, type HiveOperation, type HiveRoleKeys,
 } from "../../shared/hive-onboarding"
 
@@ -46,18 +47,39 @@ const balanceHive = (balance?: string): number => {
 	return m ? Number(m[1]) : NaN
 }
 
-export function HiveSelfServe({ keys, activeKey, initialName, onResolved }: {
+export type HiveSelfServeMode = "choose" | "pay" | "bring"
+
+export function HiveSelfServe({ keys, activeKey, initialName, onResolved, initialMode = "choose" }: {
 	keys: HiveRoleKeys | null; activeKey: string; initialName?: string; onResolved: () => void
+	/** "bring" when the user already said they have an account (409 copy). */
+	initialMode?: HiveSelfServeMode
 }) {
 	const uiText = useUiTranslation()
+	const [mode, setMode] = useState<HiveSelfServeMode>(initialMode)
 	const [fee, setFee] = useState(DEFAULT_ACCOUNT_CREATION_FEE)
 	useEffect(() => { rpcRequest<{ fee: string }>("hiveAccountCreationFee", undefined, 15000).then(r => r?.fee && setFee(r.fee)).catch(() => {}) }, [])
-	// Path B (bring an existing account, KEEPKEY-188) lands in a follow-up.
+
 	return (
-		<div data-hive-selfserve="pay" style={{ display: "grid", gap: 14, marginTop: 14 }}>
+		<div className="kk-pf-selfserve" data-hive-selfserve={mode} style={{ display: "grid", gap: 14, marginTop: 14 }}>
 			<PreflightStyles />
-			<p className="kk-pf-sub" style={{ margin: 0 }}>{uiText("KeepKey couldn't sponsor this account. You can still get on Hive:")}</p>
-			<PayPath keys={keys} fee={fee} initialName={initialName} activeKey={activeKey} onResolved={onResolved} />
+			{mode === "choose" && (<>
+				<p className="kk-pf-sub" style={{ margin: 0 }}>{uiText("KeepKey couldn't sponsor this account. You can still get on Hive:")}</p>
+				<div className="kk-pf-tl">
+					<button type="button" className="kk-pf-item kk-pf-link" style={{ textDecoration: "none", color: "inherit" }} data-hive-path="pay" onClick={() => setMode("pay")}>
+						<ChainNode chainId="hive" />
+						<div><b>{uiText("Pay for your own account")}</b><p>{uiText("You or a friend with a Hive account pays the {{fee}} creation fee. The new account uses this KeepKey's keys.", { fee })}</p></div>
+					</button>
+					<button type="button" className="kk-pf-item kk-pf-link" style={{ textDecoration: "none", color: "inherit" }} data-hive-path="bring" onClick={() => setMode("bring")}>
+						<ChainNode chainId="hive" />
+						<div><b>{uiText("Bring your Hive account")}</b><p>{uiText("Already have a Hive account? Move its active and posting keys to this KeepKey.")}</p></div>
+					</button>
+				</div>
+			</>)}
+			{mode !== "choose" && (
+				<button type="button" className="kk-pf-link" style={{ justifySelf: "start" }} onClick={() => setMode("choose")}>{uiText("Back")}</button>
+			)}
+			{mode === "pay" && <PayPath keys={keys} fee={fee} initialName={initialName} activeKey={activeKey} onResolved={onResolved} />}
+			{mode === "bring" && <BringPath keys={keys} activeKey={activeKey} onResolved={onResolved} />}
 		</div>
 	)
 }
@@ -140,6 +162,73 @@ function PayPath({ keys, fee, initialName, activeKey, onResolved }: { keys: Hive
 		)}
 		<PreflightList rows={rows} />
 		{op && <SignPanel op={op} signer={payer.name} activeKey={activeKey} onResolved={onResolved} />}
+	</>)
+}
+
+function BringPath({ keys, activeKey, onResolved }: { keys: HiveRoleKeys | null; activeKey: string; onResolved: () => void }) {
+	const uiText = useUiTranslation()
+	const [input, setInput] = useState("")
+	const [keepApps, setKeepApps] = useState(true)
+	const [keepActiveAccounts, setKeepActiveAccounts] = useState(true)
+	const [showOwner, setShowOwner] = useState(false)
+	const lookup = useAccountLookup(input)
+	const account = lookup.state === "found" ? lookup.account! : null
+	const plan = account && keys ? planKeyRotation(account, keys) : null
+	const op = account && keys && plan && !plan.alreadyOnKeepKey
+		? buildKeyRotationOp(account, keys, { keepPostingAccountAuths: keepApps, keepActiveAccountAuths: keepActiveAccounts })
+		: null
+	const ownerOp = account && keys && plan && !plan.ownerOnKeepKey ? buildOwnerRotationOp(account, keys) : null
+
+	const rows: PreflightRow[] = []
+	if (lookup.state === "missing") rows.push({ key: "acct", status: "block", title: uiText("Account not found.") })
+	if (lookup.state === "error") rows.push({ key: "acct", status: "block", title: uiText("Couldn't reach the Hive network. Try again shortly.") })
+	if (plan?.alreadyOnKeepKey) rows.push({ key: "done", status: "ok", title: uiText("This account already uses this KeepKey's keys.") })
+	if (plan && !plan.alreadyOnKeepKey) {
+		const apps = plan.postingApps.map(([n]) => n).join(", ")
+		const accounts = plan.activeAccounts.map(([n]) => n).join(", ")
+		rows.push(
+			{ key: "active", status: "warn", title: uiText("Active key → this KeepKey"), detail: uiText("Replaces the current active keys. Transfers and wallet actions will need your KeepKey.") },
+			{ key: "posting", status: "warn", title: uiText("Posting key → this KeepKey"), detail: uiText("Replaces the current posting keys. Posts, votes and comments will need your KeepKey.") },
+		)
+		if (plan.memoChanges) rows.push({ key: "memo", status: "ok", title: uiText("Memo key → this KeepKey") })
+		rows.push({ key: "owner", status: "ok", title: uiText("Owner key stays as it is"), detail: uiText("Your master password or owner key remains the recovery path. Keep it offline.") })
+		if (plan.postingApps.length) rows.push({
+			key: "apps", status: keepApps ? "ok" : "warn", title: uiText("Apps with posting access"),
+			detail: <PreflightCheck checked={keepApps} onChange={setKeepApps}>{uiText("Keep {{apps}}", { apps })}</PreflightCheck>,
+		})
+		if (plan.activeAccounts.length) rows.push({
+			key: "activeAccounts", status: "warn", title: uiText("Accounts with active access"),
+			detail: <PreflightCheck checked={keepActiveAccounts} onChange={setKeepActiveAccounts}>{uiText("Keep {{accounts}}", { accounts })}</PreflightCheck>,
+		})
+		if (plan.droppedForMultisig.length) rows.push({
+			key: "multisig", status: "danger", title: uiText("Multisig authority"),
+			detail: uiText("{{accounts}} will be removed so no account gains control alone.", { accounts: plan.droppedForMultisig.join(", ") }),
+		})
+	}
+
+	return (<>
+		<DeviceHeader title={uiText("Bring your Hive account")} sub={uiText("Today your keys live in a browser wallet. After this, only your KeepKey signs with the active and posting keys.")} />
+		<label className="kk-pf-facts" style={{ gap: 6 }}>
+			<span className="kk-pf-dim" style={{ fontSize: 12 }}>{uiText("Your Hive account")}</span>
+			<Input {...fieldStyle} value={input} onChange={e => setInput(e.target.value)} placeholder="@" autoCapitalize="none" autoCorrect="off" spellCheck={false} data-hive-field="account" />
+		</label>
+		{lookup.state === "loading" && <Spinner size="sm" />}
+		{rows.length > 0 && <PreflightList rows={rows} />}
+		{op && account && (<>
+			<p className="kk-pf-sub" style={{ margin: 0 }}>{uiText("Sign it with the account's current active key.")}</p>
+			<SignPanel op={op} signer={account.name} activeKey={activeKey} onResolved={onResolved} />
+		</>)}
+		{plan?.alreadyOnKeepKey && <ResolveWatcher activeKey={activeKey} onResolved={onResolved} />}
+		{ownerOp && account && (
+			<details className="kk-pf-tech" open={showOwner} onToggle={e => setShowOwner((e.target as HTMLDetailsElement).open)}>
+				<summary>{uiText("Also move the owner key (optional)")}</summary>
+				<div style={{ display: "grid", gap: 12, marginTop: 10 }}>
+					<PreflightList rows={[{ key: "ownerWarn", status: "danger", title: uiText("Owner key → this KeepKey"),
+						detail: uiText("Signs with your master password or owner key on HiveSigner. Afterwards the old master password no longer recovers this account, and only this KeepKey can. Back up your KeepKey recovery sentence first.") }]} />
+					{showOwner && <SignPanel op={ownerOp} signer={account.name} activeKey={activeKey} onResolved={() => {}} watch={false} />}
+				</div>
+			</details>
+		)}
 	</>)
 }
 

@@ -30,12 +30,19 @@ const PAYERS: Record<string, any> = {
   skatehive: { name: 'skatehive', balance: '10.000 HIVE', pending_claimed_accounts: 0 },
   tokenrich: { name: 'tokenrich', balance: '0.000 HIVE', pending_claimed_accounts: 3 },
 }
+// Path B: an existing account whose keys live in a browser wallet; weights arrive as strings.
+const EXISTING = { name: 'sopadev', balance: '1.000 HIVE', pending_claimed_accounts: 0, memo_key: 'STM8old', json_metadata: '{"profile":{"name":"Sopa"}}',
+  owner: { weight_threshold: 1, account_auths: [], key_auths: [['STM5old', 1]] },
+  active: { weight_threshold: '1', account_auths: [], key_auths: [['STM6old', '1']] },
+  posting: { weight_threshold: 1, account_auths: [['peakd.app', '1'], ['ecency.app', 1]], key_auths: [['STM7old', 1]] } }
+
 const authority = (k: string) => ({ weight_threshold: 1, account_auths: [], key_auths: [[k, 1]] })
 mock.module('../../src/mainview/lib/rpc', () => ({ rpcRequest: async (method: string, params: any) => {
   if (method === 'hiveGetAccount') return accountExists ? { account: { name: 'sopatest', hive: '0.000', hbd: '0.000' } } : { noAccount: true }
   if (method === 'hiveAccountCreationFee') return { fee: '3.000 HIVE' }
   if (method === 'openUrl') { opened.push(params.url); return }
   if (method === 'hiveLookupAccount') {
+    if (params.name === 'sopadev') return { found: true, account: (await import('../../src/shared/hive-onboarding')).parseAccountAuthorities(EXISTING) }
     const p = PAYERS[params.name]
     return p ? { found: true, account: { ...p, owner: authority('STMo'), active: authority('STMa'), posting: authority('STMp'), memo_key: 'STMm', json_metadata: '' } } : { found: false }
   }
@@ -72,9 +79,10 @@ async function run(response: any) {
     nameTaken: (container.textContent || '').includes('That name was just taken'),
     blamesDevice: /this device/i.test(container.textContent || ''),
     offersExisting: !!useExisting,
-    comingSoon: false,
+    opensBring: false,
+    choiceShown: !!container.querySelector('[data-hive-selfserve="choose"]'),
   }
-  if (useExisting) { await click(useExisting); result.comingSoon = (container.textContent || '').includes('Coming soon') }
+  if (useExisting) { await click(useExisting); result.opensBring = !!container.querySelector('[data-hive-selfserve="bring"]') }
   await act(async () => root.unmount())
   container.remove()
   return result
@@ -92,7 +100,9 @@ async function selfServe(payer: string) {
   await type(container.querySelector('input') as HTMLInputElement, 'sopatest')
   await click([...container.querySelectorAll('button')].find(b => b.textContent === 'Create account')!)
   await settle()
-  const panelShown = !!container.querySelector('[data-hive-selfserve="pay"]')
+  const choiceShown = !!container.querySelector('[data-hive-selfserve="choose"]')
+  await click(container.querySelector('[data-hive-path="pay"]')!)
+  const panelShown = choiceShown && !!container.querySelector('[data-hive-selfserve="pay"]')
   const nameField = container.querySelector('[data-hive-field="name"]') as HTMLInputElement
   await type(container.querySelector('[data-hive-field="payer"]') as HTMLInputElement, '@' + payer)
   await settle(450) // name availability + payer lookup debounces
@@ -109,6 +119,39 @@ async function selfServe(payer: string) {
   return { panelShown, prefilledName: nameField?.value ?? null, op: sign?.getAttribute('data-hive-sign') ?? null, qr, opened: [...opened], waiting, resolved }
 }
 
+async function bring(keepApps: boolean) {
+  createResponse = { status: 409, success: false, error: 'This client has already claimed a sponsored Hive account' }
+  accountExists = false; opened.length = 0
+  const container = document.createElement('div'); document.body.appendChild(container)
+  const root = createRoot(container)
+  await act(async () => root.render(<HiveAccountPanel activeKey="STM2" color="#E31337" />))
+  await settle()
+  const setter = Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype, 'value')!.set!
+  const type = async (el: HTMLInputElement, v: string) => { await act(async () => { setter.call(el, v); el.dispatchEvent(new Event('input', { bubbles: true })) }); await settle(450) }
+  await type(container.querySelector('input') as HTMLInputElement, 'sopatest')
+  await click([...container.querySelectorAll('button')].find(b => b.textContent === 'Create account')!)
+  await settle()
+  await click(container.querySelector('[data-hive-use-existing]')!)
+  const bringShown = !!container.querySelector('[data-hive-selfserve="bring"]')
+  await type(container.querySelector('[data-hive-field="account"]') as HTMLInputElement, '@SopaDev')
+  await settle(50)
+  const rows = [...container.querySelectorAll('[data-preflight]')].map(li => li.querySelector('b')?.textContent)
+  const text = container.textContent || ''
+  if (!keepApps) {
+    const appsBox = [...container.querySelectorAll('input[type="checkbox"]')].find(i => i.closest('li')?.textContent?.includes('Apps with posting access')) as HTMLInputElement
+    await click(appsBox)
+  }
+  const sign = container.querySelector('[data-hive-sign]')
+  const ownerOffered = !!container.querySelector('details summary')
+  await click(container.querySelector('[data-hive-open-hivesigner]')!)
+  accountExists = true
+  await settle(3300)
+  const resolved = (container.textContent || '').includes('HBD')
+  await act(async () => root.unmount())
+  container.remove()
+  return { bringShown, rows, appsListed: text.includes('Keep ecency.app, peakd.app'), op: sign?.getAttribute('data-hive-sign') ?? null, ownerOffered, opened: [...opened], resolved }
+}
+
 const out = {
   name: await run({ status: 409, success: false, error: 'Username already registered' }),
   eth: await run({ status: 409, success: false, error: 'This ETH address already has a sponsored Hive account' }),
@@ -116,6 +159,8 @@ const out = {
   production: await run({ status: 409, success: false, error: 'This ETH address or client has already claimed a sponsored Hive account' }),
   payWithHive: await selfServe('skatehive'),
   payWithToken: await selfServe('tokenrich'),
+  bringKeepApps: await bring(true),
+  bringDropApps: await bring(false),
 }
 console.log(JSON.stringify(out))
 process.exit(0)

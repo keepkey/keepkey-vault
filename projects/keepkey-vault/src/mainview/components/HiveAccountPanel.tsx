@@ -4,7 +4,7 @@ import { Box, Flex, Text, Button, Spinner, IconButton, Input } from "@chakra-ui/
 import { FaCopy, FaCheck, FaTimes, FaChevronDown, FaChevronUp, FaExternalLinkAlt } from "react-icons/fa"
 import { rpcRequest } from "../lib/rpc"
 import { CHAINS } from "../../shared/chains"
-import { HiveSelfServe } from "./HiveSelfServe"
+import { HiveSelfServe, type HiveSelfServeMode } from "./HiveSelfServe"
 import { classifyHiveSponsorConflict, offersExistingAccount, type HiveSponsorConflict } from "../lib/hive-sponsor-conflict"
 
 // One explorer for Hive, from the chain config (no hard-coded host).
@@ -171,7 +171,8 @@ function HiveOnboardWizard({ color, activeKey, onCreated }: { color: string; act
 	// A sponsor limit (409) other than a taken name. Kept apart from `error` so
 	// the copy is translated and can carry the "use an existing account" exit.
 	const [conflict, setConflict] = useState<Exclude<HiveSponsorConflict, "name-taken"> | null>(null)
-	const [existingSoon, setExistingSoon] = useState(false)
+	// "Use it with your KeepKey" in the conflict copy jumps straight to path B.
+	const [selfServeMode, setSelfServeMode] = useState<HiveSelfServeMode>("choose")
 	// Any sponsor refusal (409 of any kind, 401/403/503/400, or an error) offers
 	// the self-serve path (KEEPKEY-187) so the user is never stuck. Sticky for
 	// the session: renaming the input must not hide a path already opened.
@@ -189,7 +190,7 @@ function HiveOnboardWizard({ color, activeKey, onCreated }: { color: string; act
 
 	// Debounced availability check as the user types.
 	useEffect(() => {
-		setAvail(null); setError(null); setConflict(null); setExistingSoon(false)
+		setAvail(null); setError(null); setConflict(null)
 		if (debounce.current) clearTimeout(debounce.current)
 		const name = username.trim().toLowerCase()
 		latestName.current = name
@@ -228,7 +229,7 @@ function HiveOnboardWizard({ color, activeKey, onCreated }: { color: string; act
 	const create = async () => {
 		const name = username.trim().toLowerCase()
 		if (!name || avail?.available !== true || avail.name !== name || creating) return
-		setCreating(true); setError(null); setConflict(null); setExistingSoon(false); setNeedsFunding(null)
+		setCreating(true); setError(null); setConflict(null); setNeedsFunding(null)
 		try {
 			const r = await rpcRequest<CreateResp>("hiveCreateAccount", { username: name }, 120000)
 			if (r.status === 200 && (r.success || r.txid)) {
@@ -354,16 +355,14 @@ function HiveOnboardWizard({ color, activeKey, onCreated }: { color: string; act
 					</Text>
 					{offersExistingAccount(conflict) && (<>
 						<Text fontSize="12px" fontWeight="600" color="var(--text-0)" mt="3">{uiText("Already have a Hive account?")}</Text>
-						{/* Placeholder: importing an existing Hive account comes in a later change. */}
-						<Button mt="2" w="100%" size="sm" variant="outline" data-hive-use-existing onClick={() => setExistingSoon(true)}>
+						<Button mt="2" w="100%" size="sm" variant="outline" data-hive-use-existing onClick={() => { setSelfServe(true); setSelfServeMode("bring") }}>
 							{uiText("Use it with your KeepKey")}
 						</Button>
-						{existingSoon && <Text fontSize="11px" color="var(--text-3)" mt="2" textAlign="center">{uiText("Coming soon: bring an existing Hive account to your KeepKey.")}</Text>}
 					</>)}
 				</Box>
 			)}
 
-			{selfServe && <HiveSelfServe keys={keys} activeKey={activeKey} initialName={name} onResolved={onCreated} />}
+			{selfServe && <HiveSelfServe key={selfServeMode} initialMode={selfServeMode} keys={keys} activeKey={activeKey} initialName={name} onResolved={onCreated} />}
 
 			<Flex mt="3" align="center" gap="1.5" cursor="pointer" onClick={() => setShowKeys(s => !s)}>
 				<Box as={showKeys ? FaChevronUp : FaChevronDown} fontSize="9px" color="var(--text-3)" />

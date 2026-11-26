@@ -7,7 +7,7 @@ import { join } from 'node:path'
 import i18next from 'i18next'
 import { messageKey } from '../src/shared/message-key'
 import { classifyHiveSponsorConflict, offersExistingAccount } from '../src/mainview/lib/hive-sponsor-conflict'
-import { buildAccountCreateOp, buildCreateClaimedAccountOp, hiveSignerUrl } from '../src/shared/hive-onboarding'
+import { buildAccountCreateOp, buildCreateClaimedAccountOp, buildKeyRotationOp, hiveSignerUrl, parseAccountAuthorities } from '../src/shared/hive-onboarding'
 
 describe('classifyHiveSponsorConflict', () => {
   test('maps every server text Pioneer sends today', () => {
@@ -56,12 +56,12 @@ describe('HiveAccountPanel 409 copy', () => {
   test('the real wizard shows the right message per conflict and never blames the device', () => {
     const out = harness()
 
-    expect(out.name).toEqual({ conflict: null, message: null, nameTaken: true, blamesDevice: false, offersExisting: false, comingSoon: false })
+    expect(out.name).toEqual({ conflict: null, message: null, nameTaken: true, blamesDevice: false, offersExisting: false, opensBring: false, choiceShown: true })
     expect(out.eth).toMatchObject({ conflict: 'eth-address', nameTaken: false, blamesDevice: false, offersExisting: false })
     expect(out.eth.message).toContain("This KeepKey's Ethereum address already claimed")
-    expect(out.client).toMatchObject({ conflict: 'client', nameTaken: false, blamesDevice: false, offersExisting: true, comingSoon: true })
+    expect(out.client).toMatchObject({ conflict: 'client', nameTaken: false, blamesDevice: false, offersExisting: true, opensBring: true })
     expect(out.client.message).toContain('This copy of KeepKey Vault already created')
-    expect(out.production).toMatchObject({ conflict: 'eth-or-client', nameTaken: false, blamesDevice: false, offersExisting: true, comingSoon: true })
+    expect(out.production).toMatchObject({ conflict: 'eth-or-client', nameTaken: false, blamesDevice: false, offersExisting: true, opensBring: true })
     expect(out.production.message).toContain('either by this KeepKey')
   }, 60000)
 
@@ -77,6 +77,22 @@ describe('HiveAccountPanel 409 copy', () => {
     expect(out.payWithToken).toMatchObject({ panelShown: true, op: 'create_claimed_account', resolved: true })
     expect(out.payWithToken.opened).toEqual([hiveSignerUrl(buildCreateClaimedAccountOp({ creator: 'tokenrich', newAccountName: 'sopatest', keys }))])
   }, 60000)
+
+  test('path B: "Use it with your KeepKey" reviews the rotation and opens the exact account_update', () => {
+    const out = harness()
+    const keys = { owner: 'STM1', active: 'STM2', posting: 'STM3', memo: 'STM4' }
+    const account = parseAccountAuthorities({ name: 'sopadev', memo_key: 'STM8old', json_metadata: '{"profile":{"name":"Sopa"}}',
+      owner: { weight_threshold: 1, account_auths: [], key_auths: [['STM5old', 1]] },
+      active: { weight_threshold: '1', account_auths: [], key_auths: [['STM6old', '1']] },
+      posting: { weight_threshold: 1, account_auths: [['peakd.app', '1'], ['ecency.app', 1]], key_auths: [['STM7old', 1]] } })
+
+    expect(out.bringKeepApps).toMatchObject({ bringShown: true, appsListed: true, op: 'account_update', ownerOffered: true, resolved: true })
+    expect(out.bringKeepApps.rows).toEqual(expect.arrayContaining(['Active key → this KeepKey', 'Posting key → this KeepKey', 'Memo key → this KeepKey', 'Owner key stays as it is', 'Apps with posting access']))
+    expect(out.bringKeepApps.opened).toEqual([hiveSignerUrl(buildKeyRotationOp(account, keys, { keepPostingAccountAuths: true, keepActiveAccountAuths: true }))])
+    // Unticking "Keep ecency.app, peakd.app" drops them from posting.
+    expect(out.bringDropApps.opened).toEqual([hiveSignerUrl(buildKeyRotationOp(account, keys, { keepPostingAccountAuths: false, keepActiveAccountAuths: true }))])
+    expect(out.bringDropApps.opened).not.toEqual(out.bringKeepApps.opened)
+  }, 60000)
 })
 
 describe('HiveAccountPanel 409 translations', () => {
@@ -84,10 +100,11 @@ describe('HiveAccountPanel 409 translations', () => {
   const ui = (locale: string) => JSON.parse(readFileSync(join(dir, locale, 'ui.json'), 'utf8')) as Record<string, string>
   const panel = readFileSync(join(import.meta.dir, '../src/mainview/components/HiveAccountPanel.tsx'), 'utf8')
   const SOURCES = [...panel.matchAll(/uiText\("((?:[^"\\]|\\.)*)"\)/g)].map(m => m[1])
-    .filter(s => /Ethereum address already|copy of KeepKey Vault|free Hive account was already|Already have a Hive|Use it with your KeepKey|bring an existing Hive/.test(s))
+    .filter(s => /Ethereum address already|copy of KeepKey Vault|free Hive account was already|Already have a Hive|Use it with your KeepKey/.test(s))
 
-  test('all six new strings are wired through uiText', () => {
-    expect(SOURCES.length).toBe(6)
+  test('the conflict strings are wired through uiText; the "coming soon" placeholder is gone', () => {
+    expect(SOURCES.length).toBe(5)
+    expect(panel).not.toContain('Coming soon')
     expect(panel).not.toContain('This device already has a sponsored Hive account')
   })
 
