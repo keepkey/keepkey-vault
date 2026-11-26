@@ -2567,5 +2567,9 @@
   "m1a580d8d": "Alterada em {{date}}",
   "m7ff0af6c": "O KeepKey cria a senha. Use-a ao se cadastrar ou ao alterá-la no site.",
   "mb1ed86b7": "O KeepKey cria uma nova senha para esta entrada. A atual deixará de aparecer aqui, então copie-a antes se o site pedir.",
-  "mafc03e38": "Criar nova senha"
+  "mafc03e38": "Criar nova senha",
+  "m9c28f946": "Salvar backup criptografado",
+  "m3fef1128": "Backup criptografado salvo em {{path}}",
+  "ma168501d": "Nome não resolvido",
+  "m3ed3af1c": "Adicione este nome novamente para confirmar o endereço para o qual aponta"
 }

@@ -187,7 +187,8 @@ describe('password bank release gates', () => {
     expect(f.calls()).toBe(0)
     finishPin(true)
     expect((await unlocking).unlocked).toBe(true)
-    expect(f.calls()).toBe(1)
+    // A new bank asks the device for its id, then for the unlock key.
+    expect(f.calls()).toBe(2)
   })
 
   test('frozen v1 public-seed vector matches firmware-compatible CKV and host formatting', async () => {
@@ -315,6 +316,34 @@ describe('password bank release gates', () => {
     expect(restored.profiles[0].cachedUntil).toBeUndefined()
     await replacement.bank.rehydrate(f.id, 5)
     expect(replacement.bank.reveal(f.id).password).toBe(password)
+  })
+  test('a new bank on the same seed gets the same id, so the seed alone rebuilds its passwords', async () => {
+    const first = await assigned()
+    const password = first.bank.reveal(first.id).password
+    const second = fixture()
+    second.bank.setEnabled(true)
+    const rebuilt = await second.bank.unlock(true)
+    expect(rebuilt.bankId).toBe(first.bank.view().bankId)
+    expect(rebuilt.bankId).toMatch(/^[a-f0-9]{32}$/)
+    await second.bank.generate(1, 5)
+    expect(second.bank.assign('accounts.google.com', 'person@example.com', 90).profiles[0].slot).toBe(0)
+    expect(second.bank.reveal(second.bank.view().profiles[0].id).password).toBe(password)
+    const other = fixture(); other.seed('other seed'); other.bank.setEnabled(true)
+    expect((await other.bank.unlock(true)).bankId).not.toBe(rebuilt.bankId)
+  })
+  test('a saved encrypted backup restores the bank on a fresh database', async () => {
+    const f = await assigned()
+    const password = f.bank.reveal(f.id).password
+    const file = f.bank.backup()
+    expect(file).not.toContain('person@example.com')
+    expect(JSON.parse(file).format).toBe('keepkey-password-bank')
+    const fresh = fixture(); fresh.bank.setEnabled(true)
+    const restored = await fresh.bank.unlock(false, file)
+    expect(restored.profiles.map(p => p.id)).toEqual([f.id])
+    await fresh.bank.rehydrate(f.id, 5)
+    expect(fresh.bank.reveal(f.id).password).toBe(password)
+    f.bank.lock()
+    expect(() => f.bank.backup()).toThrow()
   })
   test('wrong seed cannot open a backup and does not replace local data', async () => {
     const f = await assigned()

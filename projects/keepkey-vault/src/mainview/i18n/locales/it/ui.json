@@ -507,5 +507,9 @@
   "m1a580d8d": "Modificata il {{date}}",
   "m7ff0af6c": "KeepKey crea la password. Usala quando ti registri o quando la cambi sul sito.",
   "mb1ed86b7": "KeepKey crea una nuova password per questa voce. Quella attuale non verrà più mostrata qui, quindi copiala prima se il sito la richiede.",
-  "mafc03e38": "Crea nuova password"
+  "mafc03e38": "Crea nuova password",
+  "m9c28f946": "Salva backup crittografato",
+  "m3fef1128": "Backup crittografato salvato in {{path}}",
+  "ma168501d": "Nome non risolto",
+  "m3ed3af1c": "Aggiungi di nuovo questo nome per confermare l’indirizzo a cui punta"
 }

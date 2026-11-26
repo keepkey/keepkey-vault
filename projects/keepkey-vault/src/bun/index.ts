@@ -33,8 +33,7 @@ import { createSwapQuoteLeases } from './swap-quote-lease'
 import { assessSwapRisk } from '../shared/swap-risk'
 import { validateContactOnNetwork } from '../shared/address-validation'
 import { isEnsName } from '../shared/ens'
-import { resolveEnsContact, repairLegacyEnsContacts } from './addressbook-ens'
-import { resolveStoredEnsContact } from './db'
+import { resolveEnsContact } from './addressbook-ens'
 import { previewCertificationEntries, selectCertificationContacts } from './addressbook-clearsign'
 import { singleFlight } from './single-flight'
 import { PasswordBank } from './password-bank'
@@ -403,7 +402,7 @@ import { collectAndAnalyzeWithGate, MAX_CHUNK_BYTES } from "./rng-audit"
 import { withoutCallerErc7730 } from '../shared/erc7730-support'
 import { recordReviewCard, recordReviewCardText, reviewTapeRecording } from './test-review-tape'
 import { SigningReviewSessions } from "./signing-review-session"
-import { ADDRESS_BOOK_CERTIFY_UNSUPPORTED, ALL_CHAIN_CONTACT_CAPABILITY, buildCertificationRequest, contactProofAllowed, buildContactProof, CONTACT_DESTINATION, evmRecipient, isAddressBookCertifyUnsupported, signWithContactProofAck, type AddressBookCertification } from "./addressbook-clearsign"
+import { ADDRESS_BOOK_CERTIFY_UNSUPPORTED, ALL_CHAIN_CONTACT_CAPABILITY, buildCertificationRequest, certificateForDevice, contactProofAllowed, buildContactProof, CONTACT_DESTINATION, evmRecipient, isAddressBookCertifyUnsupported, signWithContactProofAck, type AddressBookCertification } from "./addressbook-clearsign"
 
 // L3 fix: withTimeout imported from engine-controller (was duplicated here)
 const PIONEER_TIMEOUT_MS = 60_000
@@ -1521,7 +1520,7 @@ let privateModeEnabled = false
 function storedAddressBookCertification(): AddressBookCertification | undefined {
 	const raw = getSetting('addressbook_clearsign_certification')
 	if (!raw) return undefined
-	try { return JSON.parse(raw) as AddressBookCertification } catch { return undefined }
+	try { return certificateForDevice(JSON.parse(raw) as AddressBookCertification, engine.getDeviceState().deviceId) } catch { return undefined }
 }
 
 engine.contactProofState = () => ({ enabled: addressBookClearsignEnabled, certificate: storedAddressBookCertification() })
@@ -4454,23 +4453,6 @@ async function verifyKnownEvmVaultTransfer(params: any) {
 }
 function vaultCertificationEntries() {
 	return certifiableAddressBookEntries(vaultAddressEntries(), getAddressBookList({ kind: 'external', savedOnly: true }), allChainContactsSupported())
-}
-const repairEnsContactsOnce = singleFlight<void>()
-async function repairSavedEnsContacts(): Promise<void> {
-	if (offlineMode) return
-	return repairEnsContactsOnce('addressbook-ens', async () => {
-		const changed = await repairLegacyEnsContacts(getAddressBookList({ kind: 'external', savedOnly: true }),
-			(name, network) => withTimeout(resolveEnsContact(name, network), 10000, 'ENS lookup'),
-			(entry, resolved) => {
-				const chains = getAllChains().filter(c => c.networkId === entry.networkId)
-				if (!validateContactOnNetwork(resolved.address, chains, matchAddressBook(entry.networkId, resolved.address, 'evm')).valid) return false
-				return resolveStoredEnsContact(entry, resolved)
-			})
-		if (changed) {
-			invalidateAddressBookCertification()
-			try { rpc.send['addressbook-changed']({}) } catch { /* webview not ready */ }
-		}
-	})
 }
 async function listRegisteredVaults() {
 	const epoch = activitySessionEpoch
@@ -9145,6 +9127,13 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			},
 			passwordBankChange: async (params) => passwordBank.change(params.id),
 			passwordBankImport: async (params) => passwordBank.unlock(false, params.json),
+			passwordBankSaveBackup: async () => {
+				const json = passwordBank.backup()
+				const stamp = new Date().toISOString().replace(/[:.]/g, '-')
+				const filePath = path.join(os.homedir(), 'Downloads', `keepkey-password-bank-${stamp}.json`)
+				fs.writeFileSync(filePath, json, { mode: 0o600, flag: 'wx' })
+				return { filePath }
+			},
 			// One-time: mark the passphrase/hidden-wallet intro dialog as seen so it
 			// never shows again (also set when the OOB passphrase card is completed).
 			markPassphraseIntroShown: async () => {
@@ -9490,7 +9479,6 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						if (t) e.address = t
 					}
 				}
-				if (!bitcoinOnly) void repairSavedEnsContacts().catch(error => console.warn('[addressbook] legacy ENS repair failed:', error))
 				const external = getAddressBookList({ kind: 'external', networkId, search, savedOnly: true, chainId: bitcoinOnly ? 'bitcoin' : undefined })
 				// Vault rows only with Multisig on, and never at the cost of the contact list.
 				const vaultRows = multisigFeature.enabled && getDb()
@@ -9570,7 +9558,6 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				)
 			},
 			previewAddressBookCertification: async () => {
-				await repairSavedEnsContacts()
 				return previewCertificationEntries(vaultCertificationEntries(), allChainContactsSupported())
 			},
 			certifyAddressBook: async (params) => {
@@ -9603,7 +9590,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				if (publicKey.length !== 66 || signature.length !== 128) throw new Error('Device returned an invalid address-book attestation')
 				const certification: AddressBookCertification = {
 					version: 1, revision, contacts, root: built.root.toString('hex'),
-					publicKey, signature, certifiedAt: Date.now(),
+					publicKey, signature, certifiedAt: Date.now(), deviceId: engine.getDeviceState().deviceId || undefined,
 				}
 				setSetting('addressbook_clearsign_certification', JSON.stringify(certification))
 				setSetting('addressbook_clearsign_revision', String(revision))

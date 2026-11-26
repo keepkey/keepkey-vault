@@ -171,6 +171,20 @@ export class PasswordBank {
       return createHash('sha256').update(`keepkey-password-bank/v1/${slot === undefined ? 'metadata' : 'password'}`).update(raw).digest()
     } finally { raw.fill(0) }
   }
+  private async deviceBankId(): Promise<string> {
+    const device = this.deps.device(), epoch = this.epoch
+    const raw = await device.cipher([0x80002720, 0x8000000b, 0x80000002], 'KeepKey Password Bank v1 bank id')
+    try {
+      this.guard()
+      if (epoch !== this.epoch || device.session !== this.deps.device().session) throw new Error('Wallet or feature changed during device approval')
+      if (raw.length !== 32) throw new Error('Unexpected device response')
+      return createHash('sha256').update('keepkey-password-bank/v1/bank-id').update(raw).digest().subarray(0, 16).toString('hex')
+    } finally { raw.fill(0) }
+  }
+  /** The encrypted bank as a restorable file. Same format as the database copy. */
+  backup(): string {
+    return JSON.stringify(this.seal(this.active()))
+  }
   private seal(registry: Registry, key = this.key!): PasswordBankBackup {
     const iv = randomBytes(12)
     const cipher = createCipheriv('aes-256-gcm', new Uint8Array(key), new Uint8Array(iv))
@@ -289,8 +303,9 @@ export class PasswordBank {
         }
         const saved = stored ?? legacy
         const backup = imported ?? (saved ? this.parseBackup(saved) : null)
-        const bankId = backup?.bankId || randomBytes(16).toString('hex')
         const device = this.deps.device()
+        // New banks take their id from the device so the seed alone rebuilds them.
+        const bankId = backup?.bankId || await this.deviceBankId()
         const key = await this.derive(bankId)
         try {
           const registry = backup ? this.open(backup, key) : { version: 1 as const, bankId, algorithm: PASSWORD_BANK_ALGORITHM, revision: 0, nextSlot: 0, ready: [], profiles: [] }

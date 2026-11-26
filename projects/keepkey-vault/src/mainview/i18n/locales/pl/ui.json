@@ -509,5 +509,9 @@
   "m1a580d8d": "Zmieniono {{date}}",
   "m7ff0af6c": "KeepKey tworzy hasło. Użyj go przy rejestracji lub zmianie hasła na stronie.",
   "mb1ed86b7": "KeepKey utworzy nowe hasło dla tego wpisu. Obecne nie będzie już tu widoczne, więc najpierw je skopiuj, jeśli strona o nie poprosi.",
-  "mafc03e38": "Utwórz nowe hasło"
+  "mafc03e38": "Utwórz nowe hasło",
+  "m9c28f946": "Zapisz zaszyfrowaną kopię",
+  "m3fef1128": "Zaszyfrowana kopia zapisana w {{path}}",
+  "ma168501d": "Nierozwiązana nazwa",
+  "m3ed3af1c": "Dodaj tę nazwę ponownie, aby potwierdzić adres, na który wskazuje"
 }

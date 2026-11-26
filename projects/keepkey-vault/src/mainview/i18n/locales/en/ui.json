@@ -2703,5 +2703,9 @@
   "m1a580d8d": "Changed {{date}}",
   "m7ff0af6c": "KeepKey creates the password. Use it when you sign up or change it on the website.",
   "mb1ed86b7": "KeepKey creates a new password for this entry. The current one is no longer shown here, so copy it first if the website asks for it.",
-  "mafc03e38": "Create new password"
+  "mafc03e38": "Create new password",
+  "m9c28f946": "Save encrypted backup",
+  "m3fef1128": "Encrypted backup saved to {{path}}",
+  "ma168501d": "Unresolved name",
+  "m3ed3af1c": "Add this name again to confirm the address it points to"
 }

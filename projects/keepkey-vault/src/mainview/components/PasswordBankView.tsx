@@ -13,6 +13,7 @@ export function PasswordBankView() {
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   const [progress, setProgress] = useState('')
+  const [savedTo, setSavedTo] = useState('')
   const [adding, setAdding] = useState(false)
   const [details, setDetails] = useState(false)
   const [confirming, setConfirming] = useState<string | null>(null)
@@ -141,11 +142,13 @@ export function PasswordBankView() {
       <Text fontSize="sm" color="kk.textSecondary" mb="3">{uiText('Vault stores the encrypted password bank in its local database. Recovery requires the bank data and the same seed and wallet passphrase.')}</Text>
       <Flex gap="2" wrap="wrap">
         {bank?.unlocked && <Button size="sm" disabled={busy} onClick={() => void run(() => rpcRequest('passwordBankLock'))}>{uiText('Lock now')}</Button>}
+        {bank?.unlocked && <Button size="sm" disabled={busy} onClick={() => void run(async () => { setSavedTo((await rpcRequest<{ filePath: string }>('passwordBankSaveBackup')).filePath) })}>{uiText('Save encrypted backup')}</Button>}
         {bank?.enabled && !bank.exists && !bank.walletPending && <>
           <Box as="label" p="2" cursor="pointer">{uiText('Restore encrypted backup')}<input aria-label={uiText('Restore encrypted backup')} type="file" accept="application/json,.json" disabled={busy} style={{ display: 'none' }} onChange={e => { importBackup(e.target.files?.[0]); e.target.value = '' }} /></Box>
           <Button size="sm" disabled={busy} onClick={() => void run(() => deviceCall('passwordBankUnlock', { recoverLegacy: true }))}>{uiText('Restore previous password bank')}</Button>
         </>}
       </Flex>
+      {savedTo && <Text fontSize="sm" color="kk.textSecondary" mt="3" wordBreak="break-all">{uiText('Encrypted backup saved to {{path}}', { path: savedTo })}</Text>}
     </Box>}
   </Box>
 }

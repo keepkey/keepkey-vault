@@ -372,6 +372,7 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       passwordBankCopy: { params: { id: string }; response: void }
       passwordBankChange: { params: { id: string }; response: PasswordBankView }
       passwordBankImport: { params: { json: string }; response: PasswordBankView }
+      passwordBankSaveBackup: { params: void; response: { filePath: string } }
       markPassphraseIntroShown: { params: void; response: AppSettings }
       markBtcOnboardingShown: { params: void; response: AppSettings }
       setDisabledNetworks: { params: { chainIds: string[] }; response: AppSettings }

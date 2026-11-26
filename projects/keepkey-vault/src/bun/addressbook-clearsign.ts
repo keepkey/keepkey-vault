@@ -28,6 +28,14 @@ export interface AddressBookCertification {
   signature: string
   publicKey: string
   certifiedAt: number
+  /** The KeepKey that signed it. Older certificates lack it. */
+  deviceId?: string
+}
+
+/** A certificate only works on the KeepKey that signed it. On another device
+ *  the contact is sent as an ordinary, uncertified one until re-certified. */
+export function certificateForDevice(cert: AddressBookCertification | undefined, deviceId: string | null | undefined): AddressBookCertification | undefined {
+  return cert && (!cert.deviceId || cert.deviceId === deviceId) ? cert : undefined
 }
 
 const u32 = (value: number) => {
