@@ -1,4 +1,5 @@
 import { EventEmitter } from 'events'
+import { bootloaderTooOldForFirmware } from '../shared/bootloader-compat'
 import { existsSync, readFileSync } from 'fs'
 import { classifyFirmwareImage, type EmbeddedBootloader, type FirmwareImageKind } from './firmware-image-kind'
 import { scanBundledImages, verifyFirmwareSignatures, type BundledImage } from './firmware-signature'
@@ -2021,14 +2022,19 @@ export class EngineController extends EventEmitter {
   // ── Firmware Update Operations ─────────────────────────────────────────
 
   async startBootloaderUpdate() {
+    // Each stage is logged so a field report shows where an update stopped.
+    const progress = (p: { percent: number; stage: string; message: string; error?: string }) => {
+      console.log(`[Engine] Bootloader update: ${p.stage} ${p.percent}%${p.error ? ` — ${p.error}` : ''}`)
+      this.emit('firmware-progress', p)
+    }
     if (!this.wallet) throw new Error('No device connected')
     this.updatePhase = 'flashing'
     this.emit('state-change', this.getDeviceState())
-    this.emit('firmware-progress', { percent: 0, stage: 'startingBootloader', message: 'Starting bootloader update...' })
+    progress({ percent: 0, stage: 'startingBootloader', message: 'Starting bootloader update...' })
 
     try {
       const channel = this.getChannelEntry()
-      this.emit('firmware-progress', { percent: 10, stage: 'loadingBootloader', message: 'Loading bootloader...' })
+      progress({ percent: 10, stage: 'loadingBootloader', message: 'Loading bootloader...' })
       const firmware = channel
         ? await this.loadBinary(channel.bootloader.url)
         : Buffer.from(await (await fetch(`https://github.com/keepkey/keepkey-firmware/releases/download/v${this.latestBootloader}/blupdater.bin`)).arrayBuffer())
@@ -2049,23 +2055,23 @@ export class EngineController extends EventEmitter {
       // Real hang protection requires swapping readSync() for the async read
       // API in hdwallet-keepkey-nodehid — tracked as follow-up. Until then,
       // unrecoverable hangs are handled via user-initiated reconnect/retry.
-      this.emit('firmware-progress', { percent: 30, stage: 'confirmErase', message: 'Confirm on device, then erasing current firmware...' })
+      progress({ percent: 30, stage: 'confirmErase', message: 'Confirm on device, then erasing current firmware...' })
       await this.wallet.firmwareErase()
 
-      this.emit('firmware-progress', { percent: 50, stage: 'uploadBootloader', message: 'Look at your KeepKey — confirm to upload the bootloader…' })
+      progress({ percent: 50, stage: 'uploadBootloader', message: 'Look at your KeepKey — confirm to upload the bootloader…' })
       await this.wallet.firmwareUpload(firmware)
 
-      this.emit('firmware-progress', { percent: 90, stage: 'bootloaderUploaded', message: 'Bootloader uploaded. Follow the instructions on your KeepKey.' })
+      progress({ percent: 90, stage: 'bootloaderUploaded', message: 'Bootloader uploaded. Follow the instructions on your KeepKey.' })
       this.updatePhase = 'rebooting'
       this.sawDetachSinceFlash = false
       this.clearWallet()
       this.emit('state-change', this.getDeviceState())
-      this.emit('firmware-progress', { percent: 100, stage: 'complete', message: 'Bootloader update complete' })
+      progress({ percent: 100, stage: 'complete', message: 'Bootloader update complete' })
       this.startRebootPoll()
     } catch (err: any) {
       this.updatePhase = 'idle'
       this.emit('state-change', this.getDeviceState())
-      this.emit('firmware-progress', {
+      progress({
         percent: 0,
         stage: 'failed', message: 'Bootloader update failed',
         error: extractErrorMessage(err),
@@ -2861,6 +2867,7 @@ export class EngineController extends EventEmitter {
     willWipeDevice: boolean
     wipeReason?: WipeReason
     isBitcoinOnly: boolean
+    bootloaderTooOld: boolean
     imageKind: FirmwareImageKind
     embeddedBootloader?: EmbeddedBootloader
   } {
@@ -2964,6 +2971,7 @@ export class EngineController extends EventEmitter {
       willWipeDevice,
       wipeReason,
       isBitcoinOnly,
+      bootloaderTooOld: bootloaderTooOldForFirmware({ imageKind, firmwareVersion: detectedVersion, bootloaderVersion: deviceBootloaderVersion }),
       imageKind,
       // An official bootloader inside an updater that does not itself verify
       // could be a decoy copy; only a signed updater vouches for it.
@@ -3263,6 +3271,11 @@ export class EngineController extends EventEmitter {
     // guard here so any RPC caller can't brick the flow.
     if (this.cachedFeatures?.bootloaderMode !== true) {
       throw new Error('Device is not in bootloader mode. Unplug your KeepKey, hold the button, and plug it back in while holding to enter bootloader mode, then try again.')
+    }
+    // Firmware 7.x does not run on a 1.x bootloader. The dialog disables the
+    // button; refuse here too so no RPC caller can flash past it.
+    if (this.analyzeFirmware(data).bootloaderTooOld) {
+      throw new Error(`Bootloader ${this.getDeviceState().bootloaderVersion} is too old for this firmware. Update the bootloader first.`)
     }
     this.updatePhase = 'flashing'
     this.emit('state-change', this.getDeviceState())

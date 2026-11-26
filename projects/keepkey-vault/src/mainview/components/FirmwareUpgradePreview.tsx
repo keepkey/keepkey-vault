@@ -7,12 +7,13 @@ import { useUiTranslation } from "../i18n/ui"
 import { useState, useEffect, useMemo } from 'react'
 import { Box, Text, VStack, HStack, Flex } from '@chakra-ui/react'
 import { CHAINS } from '../../shared/chains'
+import { getAssetIcon } from '../../shared/assetLookup'
 import { getUpgradeFeatures, getVersionInfo, type FirmwareFeature } from '../../shared/firmware-versions'
 
 // Bitcoin-only firmware has no per-version multi-chain notes — it holds only BTC.
 // Show a single honest card instead of the full v-release feature list (which
 // would tout ETH/Solana/etc. the device physically can't touch).
-const BTC_ONLY_FEATURE: FirmwareFeature = {
+export const BTC_ONLY_FEATURE: FirmwareFeature = {
   title: 'Bitcoin-only',
   description: 'Holds and signs Bitcoin exclusively — reduced attack surface.',
   chains: ['bitcoin'],
@@ -20,9 +21,12 @@ const BTC_ONLY_FEATURE: FirmwareFeature = {
   icon: 'chain',
 }
 
-// ── Icon URL helper (same convention as assetLookup.ts) ──────────────
+// ── Icon URL helper ──────────────────────────────────────────────────
+// getAssetIcon checks the bundled/local icons first. Building the remote URL
+// directly skipped them, so chains without a remote coin image (Monero)
+// rendered an empty logo slot.
 function chainIconUrl(caip: string): string {
-  return `https://api.keepkey.info/coins/${btoa(caip).replace(/=+$/, '')}.png`
+  return getAssetIcon(caip)
 }
 
 // ── CSS keyframe animations (injected once) ──────────────────────────

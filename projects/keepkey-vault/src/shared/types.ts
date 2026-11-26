@@ -719,6 +719,8 @@ export interface FirmwareAnalysis {
   /** Why the flash erases the wallet, when willWipeDevice. */
   wipeReason?: import('./flash-wipe').WipeReason
   isBitcoinOnly: boolean   // btc-only firmware variant, detected from the embedded KeepKeyBTC/EmulatorBTC string
+  /** Firmware 7.x on a bootloader older than 2.0: blocked until the bootloader is updated (shared/bootloader-compat). */
+  bootloaderTooOld?: boolean
   /** firmware | bootloader-updater (rewrites the bootloader) | raw-bootloader / unknown (never flashable here) */
   imageKind: 'firmware' | 'bootloader-updater' | 'raw-bootloader' | 'unknown'
   /** The bootloader a bootloader-updater installs, or a raw bootloader image. */

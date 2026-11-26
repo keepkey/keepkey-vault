@@ -18,6 +18,9 @@ export interface FirmwareFeature {
   icon?: 'chain' | 'security' | 'performance' | 'feature'
   /** Feature is announced but not yet available */
   comingSoon?: boolean
+  /** One plain line for compact release timelines (flash dialog). The long
+   *  title/description stay for the full notes. */
+  short?: { title: string; description: string }
 }
 
 export interface FirmwareVersionInfo {
@@ -45,6 +48,7 @@ export const FIRMWARE_VERSION_MAP: FirmwareVersionInfo[] = [
     features: [
       {
         title: 'Monero Support',
+        short: { title: 'Monero', description: 'XMR addresses and a view-only balance. Turn it on in Settings.' },
         description: 'Adds Monero (XMR) address generation and wallet monitoring with device-approved view-key access. Enable Monero in Settings to get started.',
         chains: ['monero'],
         color: '#FF6600',
@@ -52,6 +56,7 @@ export const FIRMWARE_VERSION_MAP: FirmwareVersionInfo[] = [
       },
       {
         title: 'Zcash Support',
+        short: { title: 'Zcash NU7', description: 'Send and receive transparent ZEC. Shielded sends come later.' },
         description: 'Zcash Nu7 transparent signing on the reviewed 7.17 alpha emulator and supported physical alpha firmware. Private-pool sends remain unqualified in Vault.',
         chains: ['zcash'],
         color: '#ECB244',
@@ -59,6 +64,7 @@ export const FIRMWARE_VERSION_MAP: FirmwareVersionInfo[] = [
       },
       {
         title: 'DigiDollar Support',
+        short: { title: 'DigiDollar', description: 'DigiByte Taproot signing, the base for DigiDollar.' },
         description: 'Adds the DigiByte Taproot signing foundation required for DigiDollar. DigiDollar accounts remain gated until transaction construction, indexing, and script-path redemption pass release acceptance.',
         chains: ['digibyte'],
         color: '#315BCA',
@@ -78,12 +84,14 @@ export const FIRMWARE_VERSION_MAP: FirmwareVersionInfo[] = [
         // and the transaction is rejected. Base/Arbitrum/Avalanche are all
         // affected. This is the concrete answer to "why should I update?".
         title: 'EVM signing fix (Base, Arbitrum, Avalanche)',
+        short: { title: 'EVM on large chain IDs', description: 'Base, Arbitrum and Avalanche sign correctly.' },
         description: 'Fixes transaction signing on networks with large chain IDs. On earlier firmware these transactions were rejected by the network.',
         color: '#627EEA',
         icon: 'feature',
       },
       {
         title: 'Transaction Insight',
+        short: { title: 'Transaction Insight', description: 'Contract calls described on the device, not hex.' },
         // Phase 1 ships with NO built-in verification keys: signers are loaded
         // at runtime and the device labels them "NOT verified by KeepKey"
         // (firmware signed_metadata.c). So this is a readability feature, not
@@ -96,6 +104,7 @@ export const FIRMWARE_VERSION_MAP: FirmwareVersionInfo[] = [
       },
       {
         title: 'Hive Support',
+        short: { title: 'Hive', description: 'Accounts, transfers and account creation.' },
         // Landed: v7.15.0-rc28 (f31a7437e) carries lib/firmware/hive.c and
         // registers all 7 Hive handlers in messagemap.def (HiveGetPublicKey(s),
         // HiveSignTx, HiveSignAccountCreate/Update, HiveSignMessage,
