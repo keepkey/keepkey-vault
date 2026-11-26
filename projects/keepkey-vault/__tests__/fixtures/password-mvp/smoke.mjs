@@ -4,7 +4,13 @@ import assert from 'node:assert/strict';
 const browser = await chromium.launch({ executablePath: process.env.CHROME_EXECUTABLE, headless: true });
 const page = await browser.newPage({ viewport: { width: 1440, height: 1100 }, acceptDownloads: true });
 const errors=[];
+const fileExportRequests = [];
 page.on('pageerror', e=>errors.push(e.message));
+page.on('request', request => {
+ if (new URL(request.url()).pathname !== '/__test_rpc' || request.method() !== 'POST') return;
+ const { method } = request.postDataJSON();
+ if (method === 'passwordBankSaveBackup') fileExportRequests.push(method);
+});
 const { expect } = await import(process.env.PLAYWRIGHT_TEST_MODULE || '@playwright/test');
 try {
  await page.request.post('http://127.0.0.1:5198/__test_rpc',{data:{method:'testReset'}});
@@ -38,18 +44,18 @@ try {
  const status = async () => (await (await page.request.post('http://127.0.0.1:5198/__test_rpc',{data:{method:'passwordBankStatus'}})).json()).payload;
  const copy = page.getByRole('button',{name:'Copy password',exact:true});
  const show = page.getByRole('button',{name:'Show password',exact:true});
- assert.equal((await status()).backupRequired,false);
- await expect(copy).toHaveCount(0);
- await expect(show).toHaveCount(0);
- await page.request.post('http://127.0.0.1:5198/__test_rpc',{data:{method:'testBackupFailure',params:{enabled:true}}});
- await page.getByRole('button',{name:'Open website',exact:true}).click();
- await expect(page.getByRole('alert')).toContainText('Backup disk unavailable');
  assert.equal((await status()).profiles[0].rotationState,'prepared');
  await expect(copy).toHaveCount(0);
  await expect(show).toHaveCount(0);
- const opened = await (await page.request.post('http://127.0.0.1:5198/__test_rpc',{data:{method:'testOpenedWebsites'}})).json();
- assert.equal(opened.payload,0);
- await page.request.post('http://127.0.0.1:5198/__test_rpc',{data:{method:'testBackupFailure',params:{enabled:false}}});
+ await page.request.post('http://127.0.0.1:5198/__test_rpc',{data:{method:'testDatabaseWriteFailure',params:{enabled:true}}});
+ await page.getByRole('button',{name:'Open website',exact:true}).click();
+ await expect(page.getByRole('alert')).toContainText('Password bank database unavailable');
+ assert.equal((await status()).profiles[0].rotationState,'prepared');
+ await expect(copy).toHaveCount(0);
+ await expect(show).toHaveCount(0);
+ const openedCount = async () => (await (await page.request.post('http://127.0.0.1:5198/__test_rpc',{data:{method:'testOpenedWebsites'}})).json()).payload;
+ assert.equal(await openedCount(),0);
+ await page.request.post('http://127.0.0.1:5198/__test_rpc',{data:{method:'testDatabaseWriteFailure',params:{enabled:false}}});
  await page.getByRole('button',{name:'Open website',exact:true}).click();
  const copied = async (pending, writes, revealReads) => {
   await expect(page.getByText('Copied',{exact:true})).toBeVisible();
@@ -59,6 +65,8 @@ try {
  };
  const staged = page.getByLabel('New password',{exact:true});
  await expect(staged).toHaveAttribute('type','password');
+ assert.equal((await status()).profiles[0].rotationState,'submitted');
+ assert.equal(await openedCount(),1);
  await copy.click();
  await copied(true,1,0);
  await expect(staged).toHaveAttribute('type','password');
@@ -66,7 +74,7 @@ try {
  await page.getByLabel('I successfully signed in with the new password').check();
  await page.getByRole('button',{name:'Finish',exact:true}).click();
  await expect(page.getByText('Ready',{exact:true})).toBeVisible();
- assert.equal((await status()).backupRequired,false);
+ assert.equal((await status()).profiles[0].rotationState,'active');
  const secret = page.getByLabel('Saved password',{exact:true});
  await expect(secret).toHaveAttribute('type','password');
  await expect(copy).toBeEnabled();
@@ -90,10 +98,11 @@ try {
  await page.clock.fastForward(30001);
  await expect(secret).toHaveAttribute('type','password');
  await page.clock.resume();
- await page.request.post('http://127.0.0.1:5198/__test_rpc',{data:{method:'passwordBankGenerate',params:{count:1,ttlMinutes:15}}});
- await expect.poll(async () => (await status()).backupRequired).toBe(false);
+ const additionalSlot = await (await page.request.post('http://127.0.0.1:5198/__test_rpc',{data:{method:'passwordBankGenerate',params:{count:1,ttlMinutes:15}}})).json();
+ assert.equal(additionalSlot.success,true);
  await page.getByRole('button',{name:'Options',exact:true}).click();
  await expect(page.getByText('Recovery and privacy',{exact:true})).toBeVisible();
+ await expect(page.getByRole('button',{name:'Save encrypted backup',exact:true})).toHaveCount(0);
  await page.getByRole('button',{name:'Options',exact:true}).click();
  await page.setViewportSize({width:390,height:844});
  await expect(page.getByRole('dialog',{name:'Vault',exact:true})).toBeVisible();
@@ -113,6 +122,7 @@ try {
  await expect(page.getByRole('button',{name:'BIP-85 Seed Vault',exact:true})).toBeVisible();
  await expect(page.getByTestId('fixture-home')).toBeVisible();
  assert.deepEqual(errors,[]);
- console.log(JSON.stringify({lockButtonHostsBothTools:true,narrowVaultFits:true,escapeRestoresLockFocus:true,noPasswordTopBarTab:true,liveEnableWithoutReload:true,simpleAddAndList:true,maskedUntilEye:true,explicitClipboardCopy:true,hidesOnBlurAndExpiry:true,automaticRecoveryBackup:true,additionalAllocationsBackedUpAutomatically:true,failedBackupBlocksWebsiteChange:true,guidedRotationRequiresBackupAndVerification:true,liveDisableWithoutReload:true,pageErrors:errors,screenshot:'./password-mvp-ui.png'},null,2));
+ assert.deepEqual(fileExportRequests,[]);
+ console.log(JSON.stringify({lockButtonHostsBothTools:true,narrowVaultFits:true,escapeRestoresLockFocus:true,noPasswordTopBarTab:true,liveEnableWithoutReload:true,simpleAddAndList:true,maskedUntilEye:true,explicitClipboardCopy:true,hidesOnBlurAndExpiry:true,noBackupFileRequests:true,failedDatabaseWriteBlocksWebsiteChange:true,guidedRotationRequiresDatabaseCommitAndVerification:true,liveDisableWithoutReload:true,pageErrors:errors,screenshot:'./password-mvp-ui.png'},null,2));
 } catch(error) { console.error(await page.locator('body').innerText()); throw error; }
 finally { await browser.close(); }

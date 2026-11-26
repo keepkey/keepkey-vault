@@ -455,5 +455,6 @@
   "mf56f735e": "Thao tác với mật khẩu không thành công",
   "m16970f4f": "Tên tài khoản",
   "m66c8115a": "Mở trang web để đổi mật khẩu.",
-  "m8272c222": "Sao chép và dán mật khẩu mới trên trang web, sau đó thử đăng nhập lại."
+  "m8272c222": "Sao chép và dán mật khẩu mới trên trang web, sau đó thử đăng nhập lại.",
+  "macd079af": "Vault lưu kho mật khẩu đã mã hóa trong cơ sở dữ liệu cục bộ. Để khôi phục, cần có dữ liệu kho, cùng cụm từ khôi phục và mật khẩu bổ sung của ví."
 }

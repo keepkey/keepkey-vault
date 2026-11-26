@@ -444,5 +444,6 @@
   "mf56f735e": "Passwortvorgang fehlgeschlagen",
   "m16970f4f": "Kontoname",
   "m66c8115a": "Öffne die Website, um dein Passwort zu ändern.",
-  "m8272c222": "Kopiere das neue Passwort, füge es auf der Website ein und teste dann eine erneute Anmeldung."
+  "m8272c222": "Kopiere das neue Passwort, füge es auf der Website ein und teste dann eine erneute Anmeldung.",
+  "macd079af": "Vault speichert den verschlüsselten Passwortspeicher in seiner lokalen Datenbank. Für die Wiederherstellung sind die gespeicherten Daten, dieselben Wiederherstellungswörter und dieselbe Wallet-Passphrase erforderlich."
 }

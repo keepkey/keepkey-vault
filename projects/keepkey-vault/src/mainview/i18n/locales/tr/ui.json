@@ -455,5 +455,6 @@
   "mf56f735e": "Parola işlemi başarısız oldu",
   "m16970f4f": "Hesap adı",
   "m66c8115a": "Parolanızı değiştirmek için web sitesini açın.",
-  "m8272c222": "Yeni parolayı kopyalayıp web sitesine yapıştırın, ardından yeniden giriş yapmayı deneyin."
+  "m8272c222": "Yeni parolayı kopyalayıp web sitesine yapıştırın, ardından yeniden giriş yapmayı deneyin.",
+  "macd079af": "Vault, şifreli parola kasasını yerel veritabanında saklar. Kurtarma için kasa verileri, aynı kurtarma sözcükleri ve aynı cüzdan parola ifadesi gerekir."
 }

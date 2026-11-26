@@ -47,7 +47,7 @@ import { withKeepKeyFido, readStatus, runReset, waitForReplug } from './passkeys
 import { setFidoPin, listPasskeys, deletePasskey } from './passkeys-manage'
 import { resolveLabels, cleanLabel } from './passkey-labels'
 import { passwordDeviceCipher, passwordWalletSelector, supportsDeviceCipher } from './password-device'
-import { savePasswordBackup } from './password-backup'
+import { replaceEncryptedPasswordBank } from './password-bank-storage'
 
 /**
  * hdwallet returns signature/pubkey fields as `Uint8Array | string`
@@ -1208,23 +1208,11 @@ const passwordBank = new PasswordBank({
 	replace: (key, value, expected) => {
 		const db = getDb()
 		if (!db) throw new Error('Password-bank storage is unavailable')
-		const result = expected === null
-			? db.run('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO NOTHING', [key, value])
-			: db.run('UPDATE settings SET value = ? WHERE key = ? AND value = ?', [value, key, expected])
-		return result.changes === 1
+		return replaceEncryptedPasswordBank(db, key, value, expected)
 	},
 	device: getPasswordBankDevice,
 })
 // Clean expired session secrets even when the password tab is not visible.
-const saveLocalPasswordBackup = () => {
-	const bankId = passwordBank.view().bankId
-	const receipt = savePasswordBackup(passwordBank, path.join(os.homedir(), "Documents", "KeepKey Password Backups"))
-	if (bankId) {
-		const send = rpc.send['password-backup-saved'] as (value: VaultRPCSchema['bun']['messages']['password-backup-saved']) => void
-		try { send({ bankId, filePath: receipt.filePath }) } catch { /* The backup is already durable. */ }
-	}
-	return receipt
-}
 setInterval(() => { passwordBank.view() }, 1000).unref()
 const multisigRegistry = new MultisigRegistry(getSetting, setSetting, () => ({
 	hidden: engine.isPassphraseWallet,
@@ -9156,7 +9144,6 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				if (Utils.clipboardReadText() !== password) throw new Error('Clipboard unavailable')
 			},
 			passwordBankRotate: async (params) => passwordBank.rotate(params.id, params.action, params.confirmed === true),
-			passwordBankSaveBackup: async () => saveLocalPasswordBackup(),
 			passwordBankImport: async (params) => passwordBank.unlock(false, params.json),
 			// One-time: mark the passphrase/hidden-wallet intro dialog as seen so it
 			// never shows again (also set when the OOB passphrase card is completed).
