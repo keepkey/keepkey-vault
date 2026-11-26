@@ -22,6 +22,7 @@ import { canonicalTronAddress, decodeTronTransfer } from '../tron-preview'
 import { getPioneerApiBase } from '../pioneer'
 import { ARBITRUM_ONE_RPC } from '../evm-rpc'
 import { broadcastHttpRejectionReason, broadcastRejectionReason } from './broadcast-error'
+import { assertTronEnergyAffordable } from './tron-energy'
 import { balanceErrorMessage } from '../../shared/send-balance-errors'
 
 /** BTC mainnet — the only UTXO chain that broadcasts via a self-host node. */
@@ -520,6 +521,7 @@ export async function buildTx(
         // Estimate the REAL fee for display — showing the 100 TRX ceiling as
         // "the fee" would 4-10x overstate a typical transfer. Simulate the
         // call for its energy cost and price it at the chain's getEnergyFee.
+        let energyEstimate: { used: number; priceSun: number } | undefined
         let displayFeeTrx = String(FEE_LIMIT_SUN / 1_000_000) // ponytail: fallback = ceiling (upper bound, honest as "max fee")
         try {
           const [simResp, chainParamsResp] = await Promise.all([
@@ -542,9 +544,19 @@ export async function buildTx(
           const energyPriceSun = Number(chainParams?.chainParameter?.find((p: any) => p.key === 'getEnergyFee')?.value)
           if (energyUsed > 0 && energyPriceSun > 0) {
             displayFeeTrx = String(Math.min(energyUsed * energyPriceSun, FEE_LIMIT_SUN) / 1_000_000)
+            energyEstimate = { used: energyUsed, priceSun: energyPriceSun }
           }
         } catch (e: any) {
           console.warn(`[buildTx] TRON fee estimate failed, displaying fee_limit: ${e.message}`)
+        }
+        // Refuse before signing when the energy burn would exceed the TRX balance.
+        if (energyEstimate) {
+          const [balanceSun, resources] = await Promise.all([
+            fetchTronNativeBalanceSun(params.fromAddress),
+            tronWalletFetch('getaccountresource', { address: params.fromAddress, visible: true }).then(r => r.json() as any),
+          ]).catch((e: any) => { throw new Error(`Cannot verify TRX balance for the energy fee: ${e.message}`) })
+          const energyAvailable = (Number(resources?.EnergyLimit) || 0) - (Number(resources?.EnergyUsed) || 0)
+          assertTronEnergyAffordable(energyEstimate.used, energyEstimate.priceSun, energyAvailable, balanceSun)
         }
 
         // Firmware 7.15+ parses TriggerSmartContract directly from raw_data,
